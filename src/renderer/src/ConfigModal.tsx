@@ -374,6 +374,18 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	/** scope=project 时实际使用的项目 id；资源管理器模式直接使用入口项目（Chat 项目无项目资源目录）。 */
 	const effectiveProjectId = resourceOnly && projectKind !== "chat" ? projectId : undefined;
 	const hasProject = Boolean(effectiveProjectId);
+	// UI 计时器（Saved 徽章复位、退场动画）：Radix Dialog 关闭即卸载内容，
+	// 未清理的计时器会在卸载后 setState。统一登记，卸载时批量满 timeout。
+	const uiTimerIdsRef = useRef<number[]>([]);
+	useEffect(
+		() => () => {
+			for (const id of uiTimerIdsRef.current) window.clearTimeout(id);
+		},
+		[],
+	);
+	const scheduleUiTimer = useCallback((fn: () => void, ms: number) => {
+		uiTimerIdsRef.current.push(window.setTimeout(fn, ms));
+	}, []);
 	// 弹窗每次打开都会重新挂载（Radix Dialog 关闭即卸载内容），
 	// 用 lazy initializer 在挂载时读一次 localStorage，恢复到上次所在 tab。
 	const [lastTab] = useState(loadLastConfigTab);
@@ -1833,7 +1845,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		setEditPromptLoading(true);
 		setError(null);
 		try {
-			const content = isProjectPrompt(template) && effectiveProjectId ? await window.piDesktop.files.readContent(template.path, undefined, { projectId: effectiveProjectId }) : await api.prompts.edit(template.path);
+			const content = isProjectPrompt(template) && effectiveProjectId ? await api.files.readContent(template.path, undefined, { projectId: effectiveProjectId }) : await api.prompts.edit(template.path);
 			setEditPromptContent(content as string);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -1864,7 +1876,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 				});
 				await api.prompts.edit(created.path, editPromptContent);
 			} else if (isProjectPrompt(editingPrompt) && effectiveProjectId) {
-				await window.piDesktop.files.writeContent(editingPrompt.path, editPromptContent, { projectId: effectiveProjectId });
+				await api.files.writeContent(editingPrompt.path, editPromptContent, { projectId: effectiveProjectId });
 			} else {
 				await api.prompts.edit(editingPrompt.path, editPromptContent);
 			}
@@ -1945,7 +1957,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 				});
 				await api.prompts.edit(created.path, editPromptContent);
 			} else if (isProjectPrompt(editingPrompt) && effectiveProjectId) {
-				await window.piDesktop.files.writeContent(editingPrompt.path, editPromptContent, { projectId: effectiveProjectId });
+				await api.files.writeContent(editingPrompt.path, editPromptContent, { projectId: effectiveProjectId });
 			} else {
 				await api.prompts.edit(editingPrompt.path, editPromptContent);
 			}
@@ -2093,7 +2105,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		setError(null);
 		try {
 			const accessScope = isProjectSkill(skill) && effectiveProjectId ? { projectId: effectiveProjectId } : undefined;
-			const content = await window.piDesktop.files.readContent(skill.path, undefined, accessScope);
+			const content = await api.files.readContent(skill.path, undefined, accessScope);
 			setEditGlobalContent(content);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -2123,10 +2135,10 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		setError(null);
 		try {
 			const accessScope = isProjectSkill(editingGlobalSkill) && effectiveProjectId ? { projectId: effectiveProjectId } : undefined;
-			await window.piDesktop.files.writeContent(editingGlobalSkill.path, editGlobalContent, accessScope);
+			await api.files.writeContent(editingGlobalSkill.path, editGlobalContent, accessScope);
 			clearDirty("skills");
 			setEditGlobalSaved(true);
-			window.setTimeout(() => setEditGlobalSaved(false), 2000);
+			scheduleUiTimer(() => setEditGlobalSaved(false), 2000);
 			bumpResourceGeneration();
 			await refreshSkills();
 			return true;
@@ -2202,7 +2214,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const handleOpenExtensionLocation = async (extension: PiExtensionSummary) => {
 		if (!extension.path) return;
 		try {
-			await window.piDesktop.files.showInFolder(extension.path, extension.scope === "project" && effectiveProjectId ? { projectId: effectiveProjectId } : undefined);
+			await api.files.showInFolder(extension.path, extension.scope === "project" && effectiveProjectId ? { projectId: effectiveProjectId } : undefined);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
 		}
@@ -2215,7 +2227,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		// 立刻进入卸载态以触发卡片退场动画，同时发起真实卸载；两者并行，避免"删完才闪一下"。
 		setUninstallingExtensionSource(target.source);
 		const exitAnimation = new Promise<void>((resolve) => {
-			window.setTimeout(resolve, 280);
+			scheduleUiTimer(resolve, 280);
 		});
 		try {
 			await Promise.all([

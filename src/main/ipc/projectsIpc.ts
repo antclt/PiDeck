@@ -1,10 +1,11 @@
 import { dialog, ipcMain, type BrowserWindow } from "electron";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { ipcChannels } from "../../shared/ipc";
 import type { FeedbackProjectContext } from "../../shared/types";
 import type { ProjectStore } from "../projects/ProjectStore";
 import type { SettingsStore } from "../settings/SettingsStore";
+import { readTextBounded } from "../fs/boundedTextRead";
 import type { GitService } from "../git/GitService";
 import type { WorktreeService } from "../git/WorktreeService";
 import type { AgentManager } from "../pi/AgentManager";
@@ -208,6 +209,8 @@ export function registerProjectsIpc({ projectStore, settingsStore, gitService, w
 	// 只读文件内容，不写任何数据；路径来自 projectStore（用户已信任的项目），无需再次弹信任。
 
 	const FEEDBACK_AGENTS_MD_MAX_CHARS = 14_000;
+	// 头部有界读：UTF-8 最坏 4B/字符，64KB 覆盖字符预算；超大 AGENTS.md 不再整读进内存
+	const FEEDBACK_AGENTS_MD_MAX_BYTES = 64 * 1024;
 	ipcMain.handle(ipcChannels.appFeedbackProjectContext, async (_event, projectId: unknown): Promise<FeedbackProjectContext> => {
 		if (typeof projectId !== "string" || !projectId) {
 			throw new Error("invalid projectId");
@@ -218,7 +221,8 @@ export function registerProjectsIpc({ projectStore, settingsStore, gitService, w
 		// AGENTS.md 缺失时返回空串而非报错：不是所有项目都写了规范文件
 		let agentsMd = "";
 		try {
-			agentsMd = await readFile(join(hostPath, "AGENTS.md"), "utf8");
+			// head 模式自带行对齐：不会把半截代码行带给提示词
+			agentsMd = await readTextBounded(join(hostPath, "AGENTS.md"), FEEDBACK_AGENTS_MD_MAX_BYTES, "head");
 		} catch {
 			agentsMd = "";
 		}

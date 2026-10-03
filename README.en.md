@@ -239,7 +239,7 @@ Prebuilt packages for **Windows**, **macOS**, and **Linux** are published on Git
 
 Besides the stable edition (PiDeck), the project also publishes **dev edition (PiDeck Dev)** packages for trying out pre-release features:
 
-- **Where to get it**: versions marked as *Pre-release* on [GitHub Releases](https://github.com/ayuayue/PiDeck/releases) (version numbers carry a `-beta.N` suffix, e.g. `v0.8.0-beta.1`).
+- **Where to get it**: versions marked as *Pre-release* on [GitHub Releases](https://github.com/ayuayue/PiDeck/releases) (version numbers carry a `-beta` or `-beta.N` suffix, e.g. `v0.7.8-beta` or `v0.8.0-beta.1`).
 - **Side-by-side install**: PiDeck Dev uses its own app identity (appId), install directory and shortcuts, so it can be installed alongside the stable edition without interference.
 - **Data mode (choose one)**: on first launch PiDeck Dev asks whether to share data with the stable edition or use a separate data directory; you can switch later in-app and follow the guided migration.
 - **Protocol difference**: the dev edition registers the `pideck-dev://` deep-link protocol, which does not collide with the stable edition's `pideck://`.

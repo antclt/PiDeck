@@ -14,9 +14,10 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ModelTraceInput, ModelTraceRecord } from "../../shared/types/bridge";
+import { readTextBounded } from "../fs/boundedTextRead";
 import type { ModelTraceLogData, RpcLogEntry } from "../../shared/types/rpcLog";
 
 /** 文件保留天数（与 RpcLogger 的 RETENTION_DAYS 对齐）。 */
@@ -30,6 +31,9 @@ const MAX_TOTAL_BYTES = 256 * 1024 * 1024;
 /** 每写多少次触发一次清理（保留期 + 预算）。 */
 const PRUNE_EVERY_WRITES = 25;
 /** traceId 合法形态（扩展生成：时间戳 36 进制 + 随机后缀）。读写两侧都校验，防路径穿越。 */
+/** 单快照回读字节上限：含图片上下文的快照可达几十 MB，超限按损坏处理返回 null
+ * （时间线摘要不受影响），保护面板展开时的内存。 */
+const MAX_TRACE_READ_BYTES = 64 * 1024 * 1024;
 const TRACE_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 /** 文件名里的 id 净化：与 RpcLogger.sanitizeAgentId 同规则。 */
@@ -79,7 +83,7 @@ export class ModelTraceStore {
 	/** 读回一条完整请求快照；不存在/损坏/非法 id 返回 null（面板展开时按需拉取）。 */
 	async read(agentId: string, traceId: string): Promise<ModelTraceRecord | null> {
 		if (!TRACE_ID_PATTERN.test(traceId) || !agentId) return null;
-		const raw = await readFile(join(this.rootDir, this.fileName(agentId, traceId)), "utf8").catch(() => null);
+		const raw = await readTextBounded(join(this.rootDir, this.fileName(agentId, traceId)), MAX_TRACE_READ_BYTES, "tail").catch(() => null);
 		if (!raw) return null;
 		try {
 			const parsed = JSON.parse(raw) as ModelTraceRecord;

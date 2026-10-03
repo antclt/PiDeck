@@ -6,7 +6,7 @@ import { load } from "js-yaml";
 import type { PatchOptions } from "@deepseek-ai/cordis-plugin-include";
 import type * as AppBoot from "@deepseek-ai/dsh-app-boot";
 import { pideckDshHome } from "./pideckDshHome";
-import { shippedPresetPatchPaths } from "./dshPresetComposition";
+import { agentTeamPresetPatchPath, shippedPresetPatchPaths } from "./dshPresetComposition";
 import { dshProfileDir, dumpProfilePatches, initializeDshProfileSettings, isRecord } from "./dshProfileSettings";
 
 const BUNDLE_NAME = "@pideck/dsh-host-composition";
@@ -45,14 +45,27 @@ function legacyPresetRows(home: string): PatchOptions[] {
 		});
 }
 
+/** agent-team 实验预设（默认关）：整份官方 profile patch 追加。包缺失时 fail-safe
+ *  跳过（日志留痕）而不是拒绝启动——设置开关指向的依赖不存在只应损失实验功能。 */
+function agentTeamPresetRows(runtimeRequire: ReturnType<typeof createRequire>, appBoot: typeof AppBoot): PatchOptions[] {
+	const patchPath = agentTeamPresetPatchPath((specifier) => runtimeRequire.resolve(specifier));
+	if (!patchPath) {
+		console.error("[dsh-host-profile] agent-team preset enabled but profile package missing; skipping");
+		return [];
+	}
+	return appBoot.loadOverlayPatches("pideck-dsh", patchPath);
+}
+
 /** 生成部署 bundle；用户 patch 与共享 HOME 覆盖层不写进生成物。 */
-export async function prepareDshHostProfile(home: string, runtimeRequire: ReturnType<typeof createRequire>, appBoot: typeof AppBoot, deployment: PatchOptions[]) {
+export async function prepareDshHostProfile(home: string, runtimeRequire: ReturnType<typeof createRequire>, appBoot: typeof AppBoot, deployment: PatchOptions[], agentTeamPreset = false) {
 	const webManifestPath = runtimeRequire.resolve("@deepseek-ai/dsh-web-app/package.json");
 	const manifest: unknown = JSON.parse(readFileSync(webManifestPath, "utf8"));
 	const files = isRecord(manifest) && isRecord(manifest.dsh) && isRecord(manifest.dsh.bundle) ? manifest.dsh.bundle.patch : undefined;
 	if (!Array.isArray(files) || !files.every((file: unknown): file is string => typeof file === "string")) throw new Error("Invalid DSH preset bundle manifest");
 	const presets = shippedPresetPatchPaths(dirname(webManifestPath), files).flatMap((path) => appBoot.loadOverlayPatches("pideck-dsh", path));
-	const composition = [...deployment, ...presets, ...legacyPresetRows(home)];
+	// agent-team 预设排在最后：官方 patch 自述「Apply after dsh-base」——cordis 后行覆盖先行，
+	// 其 tool-subagent* 禁用行必须晚于 preset/legacy 行才能压住 standard 等预设对这些工具的再启用。
+	const composition = [...deployment, ...presets, ...legacyPresetRows(home), ...(agentTeamPreset ? agentTeamPresetRows(runtimeRequire, appBoot) : [])];
 	const dir = dshProfileDir(home);
 	const bundleDir = join(dir, "node_modules", "@pideck", "dsh-host-composition");
 	mkdirSync(bundleDir, { recursive: true });

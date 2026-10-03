@@ -6,6 +6,7 @@ import { createWriteStream, existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { is } from "@electron-toolkit/utils";
 import { PetSystem, type PetSystemDeps } from "./pet";
+import { downgradeRunningStartedBefore, downgradeStaleRunning } from "./pi/derivedSubagents";
 import { SoundAlertService } from "./sounds/SoundAlertService";
 import { registerSoundIpc } from "./ipc/soundIpc";
 import { registerSoundProtocol } from "./sounds/soundProtocol";
@@ -16,6 +17,7 @@ import { AutomationStore } from "./automation/AutomationStore";
 import { AutomationScheduler } from "./automation/AutomationScheduler";
 import { AutomationRunCoordinator } from "./automation/AutomationRunCoordinator";
 import { registerAutomationIpc } from "./ipc/automationIpc";
+import { registerFeishuIpc } from "./ipc/feishuIpc";
 import { applyLinuxDisplayBackendWorkaround, isUsingLinuxXWaylandWorkaround } from "./linuxDisplayBackend";
 import { readElectronChromiumSandboxPreference, readPetEnabledPreference, readSingleInstancePreference } from "./settings/SettingsStore";
 import { acquireVersionSingleInstance, type FocusPayload } from "./singleInstance";
@@ -230,6 +232,7 @@ import { PiModelCapabilityCache, watchPiConfigDirectory } from "./pi/PiModelCapa
 import { isDefaultAgentTitle } from "./pi/agentUtils";
 import { CompositeAgentGateway } from "./agents/CompositeAgentGateway";
 import { DshHost, resolveDshHomeDir } from "./dsh/DshHost";
+import { DshPluginInstallService } from "./dsh/DshPluginInstallService";
 import { DshRuntimeStatusService } from "./dsh/runtime/DshRuntimeStatus";
 import { DshRuntimeManager, DSH_BUNDLED_RUNTIME_DIRNAME, readBundledRuntime, readDeclaredDshVersion } from "./dsh/runtime/DshRuntimeManager";
 import { DshRuntimeInstaller, DSH_RUNTIME_VERSION_UNAVAILABLE_PREFIX } from "./dsh/runtime/DshRuntimeInstaller";
@@ -343,10 +346,12 @@ import { QuickTaskWindowChrome } from "./quickTask/quickTaskWindowChrome";
 import { registerQuickTaskIpc } from "./ipc/quickTaskIpc";
 import { BROWSER_PANEL_PARTITION as BROWSER_PANEL_PARTITION_SHARED, isAllowedBrowserPanelUrl as isAllowedBrowserPanelUrlShared } from "./browser/browserSecurity";
 import { WebServiceManager } from "./web/WebServiceManager";
+import { WebWorkspaceRoutes } from "./web/WebWorkspaceRoutes";
 import { preparePreloadPath } from "./preloadPath";
 import { AppLogger } from "./logging/AppLogger";
 import { setAppLogger } from "./logging/sharedLogger";
 import { RpcLogger } from "./logging/RpcLogger";
+import { RpcLogLiveBroadcaster } from "./logging/RpcLogLiveBroadcaster";
 import { registerEditorsIpc } from "./ipc/editorsIpc";
 import { registerPiAuthIpc } from "./ipc/piAuthIpc";
 import { detectExternalEditors, listConfiguredExternalEditors, mergeDetectedExternalEditors, openProjectInEditor, validateExternalEditorCommand } from "./editors/EditorDetector";
@@ -409,6 +414,8 @@ let agentManager: AgentManager;
 let piModelCapabilityCache: PiModelCapabilityCache | undefined;
 /** DSH 深融合宿主与后端网关；窗口创建后后台预热，发送链路仍可按需兜底。 */
 let dshHost: DshHost;
+/** DSH 用户插件安装服务（npm pack → 受管目录 → 用户补丁层行；随 DshHost 装配）。 */
+let dshPluginInstallService: DshPluginInstallService | undefined;
 /** DSH runtime 安装态服务（AgentRuntimeProvider 阶段 1）：installed 门控 UI/新建会话。 */
 let dshRuntimeStatus: DshRuntimeStatusService;
 /** DSH runtime 生命周期管理（阶段 2）：外部 runtime 的扫描/下载/安装/回收。 */
@@ -451,7 +458,10 @@ let diagnosticsMonitor: DiagnosticsMonitor | null = null;
 let environmentDoctor: EnvironmentDoctor | null = null;
 /** 诊断产物导出器（Markdown / zip 日志包） */
 let logBundleExporter: LogBundleExporter | null = null;
-let feishuBridge: FeishuBridge | null = null;
+// feishuBridge 是跨域共享可变单例：飞书 IPC（连接/重连/删除）、退出清理、setLocale、
+// 会话绑定查询都读写它；用 ref 对象而非裸 let，便于把飞书 IPC 域迁出本文件后共享同一槽位。
+const feishuBridgeRef: { current: FeishuBridge | null } = { current: null };
+// 退出清理路径与 IPC 域共用同一槽位（见 ipc/feishuIpc.ts）。
 let usageStatsService: UsageStatsService | null = null;
 /**
  * 供应商认证服务（`/login` 弹框的后端）：pi 的登录只在它的 CLI 交互层存在，
@@ -463,6 +473,12 @@ let cleanupPasteFiles: (() => Promise<number>) | undefined;
 
 /** 退出清理登记表（C12）：常驻资源创建处登记，before-quit 统一顺序执行。 */
 const quitCleanup = new QuitCleanupRegistry();
+// feishuBridge 在多个 IPC 处理器里重建/置空（临时连接/正式连接/重连），此前没登记
+// 退出清理——quit 时若 bridge 在线，其长轮询/WS 不会被停。闭包延迟读当前实例。
+quitCleanup.register("feishu-bridge", () => {
+	feishuBridgeRef.current?.stop();
+	feishuBridgeRef.current = null;
+});
 
 // 窗口整体缩放快捷键（Ctrl/Cmd+= 放大、Ctrl/Cmd+- 缩小）：按 shared/zoom 档位应用并持久化。
 // 主窗口与内置浏览器 webview guest 的 before-input-event 共用同一判定函数。
@@ -1723,14 +1739,8 @@ async function createWindow() {
 			}
 		}
 	});
-	// 子进程（含 GPU/utility）异常退出：Mac 上偶发“整窗闪一下”，需要留下 reason/exitCode。
-	app.on("child-process-gone", (_event, details) => {
-		void appLogger.error("process", "Child process gone", {
-			...details,
-			platform: process.platform,
-			arch: process.arch,
-		});
-	});
+	// 子进程（含 GPU/utility）异常退出监听已提到模块级 app.on（见 before-quit 附近）：
+	// 注册在 createWindow 内会随窗口重建（macOS activate）重复叠监听器。
 	mainWindow.webContents.on("preload-error", (_event, preloadPath, error) => {
 		void appLogger.error("app", "Main window preload failed", {
 			preloadPath,
@@ -2060,340 +2070,6 @@ function currentFeishuLocale(): FeishuLocale {
 	return normalizeFeishuLocale(currentMainProcessLocale());
 }
 
-function registerFeishuIpc() {
-	/** Bot 配置变更后主动推送给 renderer，保证多个页面/弹窗中的 Bot 列表实时同步。 */
-	function broadcastBotsChanged() {
-		if (!mainWindow || mainWindow.isDestroyed()) return;
-		mainWindow.webContents.send(ipcChannels.feishuBotsChanged, listBots());
-	}
-
-	// 临时连接（不保存 bot 配置），用于添加 Bot 时先验证凭证可用性
-	ipcMain.handle(ipcChannels.feishuConnectTemp, async (_event, input: FeishuConnectInput) => {
-		const appId = input.appId?.trim() ?? "";
-		const appSecret = input.appSecret?.trim() ?? "";
-		console.log("[Feishu] 收到临时连接请求", JSON.stringify({ appId: appId ? appId.slice(0, 8) + "..." : "", name: input.name, hasSecret: Boolean(appSecret) }));
-		try {
-			if (!appId || !appSecret) {
-				return { success: false, message: feishuT(currentFeishuLocale(), "bridge.configRequired") };
-			}
-			if (feishuBridge) {
-				feishuBridge.stop();
-			}
-			// 临时构造 botConfig，不做持久化；明文 secret 只传给当前 bridge，不写入磁盘。
-			const botConfig: FeishuBotConfig = {
-				id: "temp-" + randomUUID(),
-				name: input.name?.trim() || feishuT(currentFeishuLocale(), "bridge.tempBotName"),
-				enabled: true,
-				appId,
-				appSecret,
-				defaultUserOpenId: input.defaultUserOpenId,
-			};
-			feishuBridge = new FeishuBridge(
-				botConfig,
-				agentManager,
-				() => mainWindow,
-				() => projectStore.list(),
-				feishuSessionRuntimeBindings,
-				appSecret,
-				currentFeishuLocale(),
-			);
-			await feishuBridge.start();
-			const status = feishuBridge.getStatus();
-			console.log("[Feishu] 临时连接成功，状态:", JSON.stringify(status));
-			return {
-				success: true,
-				message: feishuT(currentFeishuLocale(), "connection.success"),
-				botInfo: { id: botConfig.id, name: botConfig.name },
-			};
-		} catch (error) {
-			const detail = error instanceof Error ? ((error as Error & { cause?: unknown }).cause ?? error.message) : String(error);
-			const message = error instanceof Error ? error.message : String(error);
-			console.error("[Feishu] 临时连接失败:", detail);
-			return { success: false, message, detail: String(detail) };
-		}
-	});
-
-	// 连接飞书（保存 bot）
-	ipcMain.handle(ipcChannels.feishuConnect, async (_event, input: FeishuConnectInput) => {
-		console.log("[Feishu] 收到连接请求", JSON.stringify({ appId: input.appId?.slice(0, 8) + "...", name: input.name }));
-		try {
-			if (feishuBridge) {
-				console.log("[Feishu] 停止旧 bridge 状态:", JSON.stringify(feishuBridge.getStatus()));
-				feishuBridge.stop();
-			}
-
-			// 先建立临时配置，不持久化；连接成功后再存盘
-			const plainAppSecret = input.appSecret;
-			const tempId = "pending-" + randomUUID();
-
-			feishuBridge = new FeishuBridge(
-				{
-					id: tempId,
-					name: input.name || feishuT(currentFeishuLocale(), "bridge.defaultBotName"),
-					enabled: true,
-					appId: input.appId,
-					appSecret: "",
-					defaultUserOpenId: input.defaultUserOpenId,
-				},
-				agentManager,
-				() => mainWindow,
-				() => projectStore.list(),
-				feishuSessionRuntimeBindings,
-				plainAppSecret,
-				currentFeishuLocale(),
-			);
-			await feishuBridge.start();
-
-			// 连接成功后再持久化
-			const botConfig = addFeishuBot({
-				name: input.name || feishuT(currentFeishuLocale(), "bridge.defaultBotName"),
-				appId: input.appId,
-				appSecret: input.appSecret,
-				defaultUserOpenId: input.defaultUserOpenId,
-			});
-			feishuBridge.updateBotConfig({ id: botConfig.id });
-
-			console.log("[Feishu] 连接成功，状态:", JSON.stringify(feishuBridge.getStatus()));
-			void appLogger.info("feishu", "Feishu connected", { botId: botConfig.id, name: botConfig.name });
-			broadcastBotsChanged();
-			return { success: true, message: feishuT(currentFeishuLocale(), "connection.success") };
-		} catch (error) {
-			const detail = error instanceof Error ? ((error as Error & { cause?: unknown }).cause ?? error.message) : String(error);
-			const message = error instanceof Error ? error.message : String(error);
-			console.error("[Feishu] 连接失败:", detail);
-			void appLogger.error("feishu", "Feishu connect failed", error);
-			// 返回详细错误信息（包含原始错误说明），供前端展示
-			return { success: false, message, detail: String(detail) };
-		}
-	});
-
-	// 断开连接
-	ipcMain.handle(ipcChannels.feishuDisconnect, async () => {
-		console.log("[Feishu] 收到断开请求");
-		if (feishuBridge) {
-			console.log("[Feishu] 停止 bridge，此前状态:", JSON.stringify(feishuBridge.getStatus()));
-			feishuBridge.stop();
-			feishuBridge = null;
-			console.log("[Feishu] bridge 已置 null");
-		}
-		void appLogger.info("feishu", "Feishu disconnected");
-		return { success: true };
-	});
-
-	// 查询状态
-	ipcMain.handle(ipcChannels.feishuStatusRequest, async () => {
-		if (feishuBridge) {
-			const s = feishuBridge.getStatus();
-			console.log("[Feishu] 状态查询:", JSON.stringify(s));
-			return s;
-		}
-		console.log("[Feishu] 状态查询: bridge 为 null，返回 disconnected");
-		return { status: "disconnected", activeBindings: 0 } as FeishuBridgeStatus;
-	});
-
-	// Bot 列表
-	ipcMain.handle(ipcChannels.feishuBotsList, async () => {
-		return listBots();
-	});
-
-	// 添加 Bot
-	ipcMain.handle(ipcChannels.feishuBotAdd, async (_event, input: FeishuConnectInput) => {
-		// 同 feishuConnect，但可以添加多个 Bot
-		try {
-			const botConfig = addFeishuBot({
-				name: input.name || feishuT(currentFeishuLocale(), "bridge.defaultBotName"),
-				appId: input.appId,
-				appSecret: input.appSecret,
-				defaultUserOpenId: input.defaultUserOpenId,
-			});
-			void appLogger.info("feishu", "Feishu bot added", { botId: botConfig.id, name: botConfig.name });
-			broadcastBotsChanged();
-			return { success: true, bot: { ...botConfig, appSecret: "" } };
-		} catch (error) {
-			void appLogger.warn("feishu", "Failed to add Feishu bot", {
-				error: error instanceof Error ? error.message : String(error),
-			});
-			return { success: false, error: feishuT(currentFeishuLocale(), "bridge.botAddFailed") };
-		}
-	});
-
-	// 删除 Bot
-	ipcMain.handle(ipcChannels.feishuBotRemove, async (_event, botId: string) => {
-		if (feishuBridge) {
-			feishuBridge.stop();
-			feishuBridge = null;
-		}
-		const result = removeFeishuBot(botId);
-		if (result) {
-			broadcastBotsChanged();
-		}
-		void appLogger.info("feishu", "Feishu bot removed", { botId });
-		return result;
-	});
-
-	// 更新 Bot 配置
-	ipcMain.handle(ipcChannels.feishuBotConfig, async (_event, botId: string, patch: Partial<FeishuBotConfig>) => {
-		const updated = updateFeishuBot(botId, patch);
-		void appLogger.info("feishu", "Feishu bot config updated", { botId, keys: Object.keys(patch) });
-		// 只热更新当前在线 Bot；修改其它 Bot 配置不应污染正在运行的 bridge。
-		if (feishuBridge && feishuBridge.getStatus().status === "connected" && feishuBridge.getStatus().botId === botId) {
-			feishuBridge.updateBotConfig(patch);
-			console.log("[飞书] 配置已热更新:", Object.keys(patch).join(", "));
-		}
-		if (updated) {
-			broadcastBotsChanged();
-		}
-		return updated ? { ...updated, appSecret: "" } : undefined;
-	});
-
-	// 返回解密后的 Secret，仅用于用户主动复制/查看凭证。
-	ipcMain.handle(ipcChannels.feishuBotSecret, async (_event, botId: string) => {
-		return getDecryptedBotAppSecret(botId);
-	});
-
-	// 测试连接
-	ipcMain.handle(ipcChannels.feishuTestConnection, async (_event, appId: string, appSecret: string) => {
-		// 创建临时 bridge 实例来测试连接
-		const testBridge = new FeishuBridge(
-			{
-				id: "test",
-				name: "测试",
-				enabled: true,
-				appId,
-				appSecret: "", // 将在 testConnection 中传入
-			},
-			agentManager,
-			() => mainWindow,
-			() => projectStore.list(),
-			feishuSessionRuntimeBindings,
-			undefined,
-			currentFeishuLocale(),
-		);
-		return testBridge.testConnection(appId, appSecret);
-	});
-
-	// 绑定列表
-	ipcMain.handle(ipcChannels.feishuBindingsList, async () => {
-		if (feishuBridge) {
-			return feishuBridge.listBindings();
-		}
-		return [];
-	});
-
-	// 移除绑定
-	ipcMain.handle(ipcChannels.feishuBindingRemove, async (_event, chatId: string) => {
-		if (feishuBridge) {
-			// 先查 binding 拿到 sessionId，移除后清理 session-bot 映射，
-			// 使 FeishuLinkIndicator 等 UI 同步更新断开状态。
-			const bindings = feishuBridge.listBindings();
-			const binding = bindings.find((b) => b.chatId === chatId);
-			const result = feishuBridge.removeBinding(chatId);
-			if (result && binding) {
-				setSessionBotId(binding.sessionId, undefined);
-			}
-			return result;
-		}
-		return false;
-	});
-
-	// 更新绑定
-	ipcMain.handle(ipcChannels.feishuBindingUpdate, async (_event, chatId: string, patch: Partial<FeishuChatBinding>) => {
-		if (feishuBridge) {
-			return feishuBridge.updateBinding(chatId, patch);
-		}
-		return undefined;
-	});
-
-	// 通过已保存的 Bot ID 连接（自动解密 Secret）
-	ipcMain.handle(ipcChannels.feishuConnectByBot, async (_event, botId: string) => {
-		try {
-			if (feishuBridge) {
-				feishuBridge.stop();
-			}
-			const botConfig = getBot(botId);
-			if (!botConfig) {
-				return { success: false, message: feishuT(currentFeishuLocale(), "bridge.botMissing") };
-			}
-			feishuBridge = new FeishuBridge(
-				botConfig,
-				agentManager,
-				() => mainWindow,
-				() => projectStore.list(),
-				feishuSessionRuntimeBindings,
-				undefined,
-				currentFeishuLocale(),
-			);
-			await feishuBridge.start();
-			void appLogger.info("feishu", "Feishu connected by saved bot", { botId, name: botConfig.name });
-			return { success: true, message: feishuT(currentFeishuLocale(), "connection.success") };
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			return { success: false, message };
-		}
-	});
-
-	// 获取稳定 Session 绑定的飞书 Bot ID，并一次性迁移旧 runtime agentId 键。
-	ipcMain.handle(ipcChannels.feishuSessionBotGet, async (_event, sessionId: string) => {
-		const current = getSessionBotId(sessionId);
-		if (current) return current;
-		const target = sessionRuntimeCoordinator.getTarget(sessionId);
-		if (!target || target.agentId === sessionId) return null;
-		const legacy = getSessionBotId(target.agentId);
-		if (!legacy) return null;
-		setSessionBotId(sessionId, legacy);
-		setSessionBotId(target.agentId, undefined);
-		return legacy;
-	});
-
-	// 设置稳定 Session 使用的飞书 Bot ID。主进程始终重新解析当前 runtime，避免旧 agentId 操作替换后的会话。
-	ipcMain.handle(ipcChannels.feishuSessionBotSet, async (_event, sessionId: string, botId: string | null) => {
-		let target = sessionRuntimeCoordinator.getTarget(sessionId);
-		if (!botId) {
-			setSessionBotId(sessionId, undefined);
-			if (target && target.agentId !== sessionId) setSessionBotId(target.agentId, undefined);
-			// 取消当前会话的飞书关联：移除绑定但不停止 Agent 进程
-			if (feishuBridge && feishuBridge.getStatus().status === "connected") {
-				feishuBridge.removeBindingBySessionId(sessionId);
-			}
-			return { success: true };
-		}
-		const status = feishuBridge?.getStatus();
-		if (!feishuBridge || status?.status !== "connected") {
-			return { success: false, message: feishuT(currentFeishuLocale(), "session.bridgeUnavailable") };
-		}
-		if (status.botId !== botId) {
-			return { success: false, message: feishuT(currentFeishuLocale(), "session.botMismatch") };
-		}
-		// 会话尚未启动 runtime（仅浏览过历史会话）：先启动 Agent 再建立飞书镜像，
-		// 让「点会话连接飞书」在未启动 Agent 时也能成功；与桌面端启动走同一 activateRuntime 链路。
-		if (!target) {
-			try {
-				await feishuSessionRuntimeBindings.activateRuntime(sessionId);
-				target = sessionRuntimeCoordinator.getTarget(sessionId);
-			} catch (error) {
-				void appLogger.warn("feishu", "auto-start runtime for Feishu bind failed", {
-					sessionId,
-					error: error instanceof Error ? error.message : String(error),
-				});
-			}
-		}
-		if (!target) {
-			return { success: false, message: feishuT(currentFeishuLocale(), "session.runtimeUnavailable") };
-		}
-		const tab = agentManager.list().find((item) => item.id === target.agentId);
-		if (!tab) {
-			return { success: false, message: feishuT(currentFeishuLocale(), "session.runtimeUnavailable") };
-		}
-		const chatId = await feishuBridge.ensureSessionMirrorForSession(sessionId, target.agentId, tab.title, tab.sessionPath);
-		if (!chatId) {
-			return { success: false, message: feishuT(currentFeishuLocale(), "session.bindFailed") };
-		}
-		setSessionBotId(sessionId, botId);
-		if (target.agentId !== sessionId) setSessionBotId(target.agentId, undefined);
-		return { success: true, chatId };
-	});
-}
-
 async function sendAgentPromptWithIntegrations(input: SendPromptInput): Promise<SendPromptResult> {
 	// 多后端路由：非 pi 后端（dsh/未来新增后端）不经过 pi 专属的飞书/扩展链路，
 	// 按 agentId 交给合成网关路由到所属后端网关（pi 后端继续走下方集成链路）。
@@ -2402,7 +2078,7 @@ async function sendAgentPromptWithIntegrations(input: SendPromptInput): Promise<
 	if (gateway && agentTab && agentTab.backend !== "pi") {
 		return gateway.sendPrompt(input);
 	}
-	const bridge = feishuBridge;
+	const bridge = feishuBridgeRef.current;
 	const bridgeConnected = bridge?.getStatus().status === "connected";
 	const hasFeishuBinding = bridgeConnected && bridge.hasSessionBinding(input.agentId);
 	const docTitle = bridgeConnected ? wantsFeishuDoc(input.message) : undefined;
@@ -2515,7 +2191,15 @@ function registerIpc() {
 		spawnInstaller: (filePath) => {
 			// win：NSIS 安装器 detached 脱离父进程运行，PiDeck 退出后安装流程继续；mac/linux 由系统接管。
 			if (process.platform === "win32") {
-				spawn(filePath, [], { detached: true, stdio: "ignore" }).unref();
+				const installer = spawn(filePath, [], { detached: true, stdio: "ignore" });
+				// 安装器启动失败（路径失效/杀软拦截）也要有 error 兜底，否则未处理 error 事件炸主进程。
+				installer.once("error", (error) => {
+					void appLogger.warn("update", "Installer spawn failed", {
+						filePath,
+						error: error instanceof Error ? error.message : String(error),
+					});
+				});
+				installer.unref();
 				return;
 			}
 			void shell.openPath(filePath);
@@ -2915,6 +2599,7 @@ function registerIpc() {
 			searchDshSessions: (query) => dshHost.searchSessions(query),
 			createDshGoal: (agentId, objective, maxGoalRounds) => dshAgentManager.createGoal(agentId, objective, maxGoalRounds),
 			runDshGoalAction: (agentId, action) => dshAgentManager.goalAction(agentId, action),
+			cancelDshQueuedMessage: (agentId, itemId) => dshAgentManager.cancelQueuedMessage(agentId, itemId),
 			listDshSubagents: (agentId) => dshAgentManager.listSubagents(agentId),
 			listDshSkills: (agentId) => dshAgentManager.listSkills(agentId),
 			readDshSubagentHistory: (agentId, childSessionId, beforeSeq, maxMessages) => dshAgentManager.readSubagentHistory(agentId, childSessionId, beforeSeq, maxMessages),
@@ -2957,6 +2642,19 @@ function registerIpc() {
 			listDshDynamicPlugins: () => dshHost.listDynamicPlugins(),
 			listDshStaticPlugins: () => dshHost.listStaticPlugins(),
 			uninstallDshUserPlugin: (input) => dshHost.uninstallUserPlugin(input),
+			// 用户插件市场搜索/安装/清单（安装服务视角；host 侧无此能力，主进程直连 npm 与市场 API）
+			searchDshPluginMarket: (keyword) => {
+				if (!dshPluginInstallService) throw new Error("DSH plugin install service is not available");
+				return dshPluginInstallService.searchPlugins(keyword);
+			},
+			installDshUserPlugin: (spec) => {
+				if (!dshPluginInstallService) throw new Error("DSH plugin install service is not available");
+				return dshPluginInstallService.installUserPlugin(spec);
+			},
+			listDshUserPlugins: () => {
+				if (!dshPluginInstallService) return Promise.resolve([]);
+				return dshPluginInstallService.listUserPlugins();
+			},
 			installDshPlugin: (input) => dshHost.installDynamicPlugin(input),
 			runDshPlugin: (input) => dshHost.runDynamicPlugin(input),
 			stopDshPlugin: (input) => dshHost.stopDynamicPlugin(input),
@@ -3165,6 +2863,8 @@ function registerIpc() {
 		isDshAgent: (agentId) => dshAgentManager?.list().some((tab) => tab.id === agentId) === true,
 		setDshRpcLogging: (agentId, enabled) => dshAgentManager.setRpcLogging(agentId, enabled),
 		isDshRpcLogging: (agentId) => dshAgentManager.isRpcLogging(agentId),
+		// 实时观看登记同样分流到 DSH 的广播器
+		setDshRpcLogWatching: (agentId, watching) => dshAgentManager.setRpcLogWatching(agentId, watching),
 		diagnosticsMonitor: diagnosticsMonitor ?? undefined,
 		environmentDoctor: environmentDoctor ?? undefined,
 		logBundleExporter: logBundleExporter ?? undefined,
@@ -3239,7 +2939,7 @@ function registerIpc() {
 		refreshTrayContextMenu,
 		// 语言变更时按当前主进程 locale 重算，忽略 systemIpc 传入的占位参数
 		setFeishuLocale: () => {
-			feishuBridge?.setLocale(currentFeishuLocale());
+			feishuBridgeRef.current?.setLocale(currentFeishuLocale());
 		},
 		setFeishuConfigDefaultBotName: (_name: string) => {
 			// systemIpc 传入空串只是触发点；实际默认名必须按当前主进程 locale 重算。
@@ -3698,7 +3398,7 @@ app
 			(filePath) => sessionScanner.repairCorruptSessionHeader(filePath),
 			// 飞书绑定会话：spawn 时注入 PIDECK_FEISHU_LINKED，ask_question 切换为禁用提示版。
 			// 闭包延迟读 feishuBridge（连接成功后才创建），spawn 时 binding 已先于 runtime 建立。
-			(key) => Boolean(key && feishuBridge?.hasSessionBinding(key)),
+			(key) => Boolean(key && feishuBridgeRef.current?.hasSessionBinding(key)),
 			// 通知点击跳转需要 record.id（renderer 按它索引会话）；agentId → record.id 由 coordinator 维护。
 			(agentId) => sessionRuntimeCoordinator.getSessionId(agentId),
 			// 会话级代理覆盖（含按模型/供应商两级白名单过滤）：
@@ -3877,7 +3577,33 @@ app
 			() => settingsStore.get().dshRunnerNodePath ?? "",
 			// 手动停止标记（持久化）：为真时 ensureStarted 拒绝自动拉起，只有用户显式启动才 boot。
 			() => settingsStore.get().dshManualStopped === true,
+			// agent-team 实验预设（默认关）：fork 时读快照传入 hostEntry；变更需重启 host。
+			() => settingsStore.get().dshAgentTeamPreset === true,
 		);
+		// 用户插件安装服务（搜索/安装/清单；npm 走 PiLocator 的跨平台启动规格，市场 API 走 fetch）。
+		// 依赖闭包优先取 runtime node_modules（与 host 同版本）；runtime 未安装时也能装（registry 补齐）。
+		dshPluginInstallService = new DshPluginInstallService({
+			getDshHomeDir: () => dshHost.getHomeDir(),
+			getUserDataDir: () => app.getPath("userData"),
+			resolveRuntimeNodeModules: () => {
+				const appRoot = dshRuntimeStatus.resolveAppRoot();
+				return appRoot === undefined ? undefined : join(appRoot, "node_modules");
+			},
+			launcher: {
+				createInvocation: (command, args) => piLocator.createInvocation(command, args),
+				// 参数顺序陷阱：createProcessEnv 首个参数是代理设置，pathPrefix 在第二位。
+				createProcessEnv: (pathPrefix) => piLocator.createProcessEnv(undefined, pathPrefix),
+			},
+			fetchImpl: (url, init) => fetch(url, init),
+			log: (scope, message, detail) => void appLogger.info(scope, message, detail),
+		});
+		// 实时 RPC 日志广播器（DSH 后端用）：镜像 pi AgentManager 的 80ms 节流批量推送语义，
+		// 窗口销毁后静默丢弃；观看登记由 rpcLogsSetWatching IPC 按面板挂载/卸载成对驱动。
+		const rpcLogLiveBroadcaster = new RpcLogLiveBroadcaster({
+			send: (channel, payload) => {
+				if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+			},
+		});
 		dshAgentManager = new DshAgentManager(
 			dshHost,
 			(projectId) => projectStore.get(projectId),
@@ -3912,11 +3638,14 @@ app
 			() => join(app.getPath("userData"), "exports"),
 			// 新会话无标题时的兜底标题（i18n；与外部会话导入兜底一致）
 			() => mainCopy("session.dshUntitled"),
+			rpcLogLiveBroadcaster,
 		);
 		// C12/E15：DSH 退出清理——先停全部活跃会话（清 mux/订阅/pending）再 dispose host，
 		// 顺序保证避免 host 先被杀导致会话清理路径访问已死 transport。
 		quitCleanup.register("dsh", async () => {
 			await dshAgentManager?.stopAll();
+			// 退出前清空实时广播的观看登记与聚合缓冲（含在途节流定时器，配对清理）
+			rpcLogLiveBroadcaster.clear();
 			await dshHost?.dispose();
 		});
 		// DSH 外部会话自动导入改到 projectStore.load 之后（见下方 scheduleDshForeignAutoImport）：
@@ -3949,7 +3678,6 @@ app
 				const project = projectStore.get(projectId);
 				return sessionScanner.list(project?.path);
 			},
-			getSessionRuntimeMessages: (sessionId) => sessionRuntimeCoordinator.getRuntimeMessages(sessionId),
 			listCatalogSessions: async (projectId) => {
 				if (!projectId) {
 					return sessionCatalog
@@ -4119,6 +3847,68 @@ app
 						},
 					};
 				}
+			},
+			getForkMessages: (target) => sessionRuntimeCoordinator.getRuntimeForkMessages(target),
+			forkRuntimeSession: (target, entryId) => sessionRuntimeCoordinator.forkRuntimeSession(target, entryId),
+			// 会话活动监控（第二批 strips）：与桌面 sessionIpc.ts 同源同闸门
+			listSessionFileChanges: (sessionId) => {
+				const entry = sessionCatalog.get(sessionId);
+				// DSH/生图会话无 pi 会话文件，文件汇总无意义
+				if (!entry?.filePath || entry.backend === "dsh" || entry.backend === "imagegen") return Promise.resolve([]);
+				return agentManager.readSessionFileChanges(entry.filePath);
+			},
+			listSessionSubagents: async (sessionId) => {
+				const entry = sessionCatalog.get(sessionId);
+				if (!entry?.filePath) return [];
+				let records = await agentManager.readSessionSubagentRecords(entry.filePath);
+				// 与桌面同款对账：无活 runtime 时把残留 running 降级（终态通知未落盘）；
+				// 活 runtime 按本代启动时间降级上一代派发的 running。
+				const liveTarget = sessionRuntimeCoordinator.getTarget(sessionId);
+				if (!liveTarget) {
+					if (!sessionRuntimeCoordinator.isActivating(sessionId)) {
+						records = downgradeStaleRunning(records);
+					}
+				} else {
+					const liveTab = agentManager.list().find((tab) => tab.id === liveTarget.agentId);
+					if (liveTab?.createdAt) {
+						records = downgradeRunningStartedBefore(records, liveTab.createdAt);
+					}
+				}
+				return records;
+			},
+			listSessionTodo: (sessionId) => {
+				const entry = sessionCatalog.get(sessionId);
+				// DSH/生图会话无 pi 会话文件，无 todo 快照
+				if (!entry?.filePath || entry.backend === "dsh" || entry.backend === "imagegen") return Promise.resolve(undefined);
+				return agentManager.readSessionTodo(entry.filePath);
+			},
+		});
+		// P1-P3 工作区路由（git/files/prompts）：只读能力注入，未装配的服务自动 503
+		webServiceManager.workspaceRoutes = new WebWorkspaceRoutes({
+			listProjects: () => projectStore.list(),
+			git: {
+				isGitRepo: (cwd) => gitService.isGitRepo(cwd),
+				getBranches: (cwd) => gitService.getBranches(cwd),
+				getStatus: (cwd) => gitService.getStatus(cwd),
+				getWorkspaceFileDiff: (cwd, group, filePath, maxBytes) => gitService.getWorkspaceFileDiff(cwd, group, filePath, maxBytes),
+				getCommitLog: (cwd, options) => gitService.getCommitLog(cwd, options),
+			},
+			files: {
+				listTree: (root, maxDepth, directory) => fileSystemService.listTree(root, maxDepth, directory),
+			},
+			// 提示词库只在 SQLite 库可用时注入（缺库时路由返回 503，前端隐藏入口）
+			prompts: xuePromptManager
+				? {
+						list: (opts) => xuePromptManager.list(opts),
+						detail: (slug, category) => xuePromptManager.detail(slug, category),
+					}
+				: undefined,
+			// 技能/扩展资产面板（第二批）：与桌面设置页同源；列表脱敏在路由层做
+			assets: {
+				listSkills: () => skillManager.list(),
+				toggleSkill: (skillPath, enabled) => skillManager.toggle(skillPath, enabled),
+				listExtensions: () => extensionManager.list(),
+				setExtensionEnabled: (source, enabled, scope) => extensionManager.setEnabled(source, enabled, scope),
 			},
 		});
 		// C12：退出清理登记（before-quit 统一 runAll）
@@ -4373,7 +4163,15 @@ app
 				void appLogger?.warn("app", "GUI bridge endpoint startup failed", error);
 			});
 		registerIpc();
-		registerFeishuIpc();
+		registerFeishuIpc({
+			getMainWindow: () => mainWindow,
+			feishuBridgeRef,
+			agentManager,
+			projectStore,
+			sessionRuntimeCoordinator,
+			feishuSessionRuntimeBindings,
+			getCurrentLocale: currentFeishuLocale,
+		});
 		// 配置备份（手动模式）：仅在备份目录为空（首次使用）时自动建一份 first-run，
 		// 之后不再自动备份。同步快，不挡首帧；失败仅记录，不阻断启动。
 		configBackupManager?.ensureInitialBackups();
@@ -4636,7 +4434,9 @@ app
 
 		// macOS dock 点击或任务栏点击时恢复窗口
 		app.on("activate", () => {
-			if (mainWindow) {
+			// 窗口销毁后 mainWindow 不会置 null（closed 只满空一次），销毁实例上调
+			// show() 会抛 "Object has been destroyed"——降级到重建窗口。
+			if (mainWindow && !mainWindow.isDestroyed()) {
 				mainWindow.show();
 				mainWindow.focus();
 			} else {
@@ -4750,11 +4550,37 @@ async function ensureAllPiSettingsDefaults(): Promise<void> {
 	}
 }
 
-app.on("before-quit", () => {
+// 子进程（含 GPU/utility）异常退出：Mac 上偶发“整窗闪一下”，需要留下 reason/exitCode。
+// 注册在 app 级而不是 createWindow 内：窗口重建（macOS activate）会重复叠监听器。
+app.on("child-process-gone", (_event, details) => {
+	void appLogger.error("process", "Child process gone", {
+		...details,
+		platform: process.platform,
+		arch: process.arch,
+	});
+});
+
+let quitCleanupStarted = false;
+app.on("before-quit", (event) => {
 	isQuitting = true;
 	// 退出清理统一走登记表（C12）：各常驻资源在创建处 register，这里只负责顺序执行。
 	// 新增资源不再改 before-quit；单项失败由 registry 记日志不阻塞其余清理。
-	void quitCleanup.runAll();
+	// Electron 不等异步 promise：preventDefault 挡住本次退出，等 runAll 收尾后再
+	// app.quit()（重入时放行），否则 whisper/DSH dispose 等异步清理会被进程终止截断。
+	// 总预算 5s：任一清理任务挂死不能让应用永远退不出去。
+	if (quitCleanupStarted) return;
+	quitCleanupStarted = true;
+	event.preventDefault();
+	const cleanupBudget = new Promise<void>((resolve) => {
+		setTimeout(resolve, 5000).unref();
+	});
+	void Promise.race([quitCleanup.runAll(), cleanupBudget])
+		.catch((error) => {
+			void appLogger.error("quit", "Quit cleanup crashed", { error: error instanceof Error ? error.message : String(error) });
+		})
+		.finally(() => {
+			app.quit();
+		});
 });
 
 app.on("window-all-closed", () => {

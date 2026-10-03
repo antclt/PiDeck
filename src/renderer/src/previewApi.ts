@@ -193,6 +193,7 @@ let previewSettings: AppSettings = {
 
 	fontSize: "medium",
 	uiFontSize: null,
+	tabBarFontSize: null,
 	chatFontSize: null,
 	inputFontSize: null,
 	zoomFactor: 1,
@@ -217,7 +218,8 @@ let previewSettings: AppSettings = {
 };
 
 export function createPreviewApi(): PiDesktopApi {
-	const noop = (() => () => undefined) as any;
+	// noop 是「订阅类槽位」的通用占位：调用它返回退订函数；never[] 入参使其可赋给任意回调签名
+	const noop = (() => () => undefined) as unknown as (...args: unknown[]) => () => void;
 	const previewImportKinds = new Map<string, ResourceImportKind>();
 	const clipboardStub: PiDesktopApi["clipboard"] = {
 		// preview 模式无真实剪贴板；浏览器下 navigator.clipboard 为异步 API，
@@ -528,6 +530,7 @@ export function createPreviewApi(): PiDesktopApi {
 			searchDshSessions: async () => [],
 			createDshGoal: async () => undefined,
 			runDshGoalAction: async () => undefined,
+			cancelDshQueuedMessage: async () => undefined,
 			listDshSubagents: async () => [],
 			readDshSubagentHistory: async () => ({ messages: [], hasMore: false }),
 			listSessionSubagents: async () => [],
@@ -546,6 +549,12 @@ export function createPreviewApi(): PiDesktopApi {
 			listDshDynamicPlugins: async () => [],
 			listDshStaticPlugins: async () => [],
 			uninstallDshUserPlugin: async () => ({ rowRemoved: false, reason: "preview mode" }),
+			// 预览模式无主进程 npm/市场链路：搜索与安装拒绝、已装列表为空，满足接口契约
+			searchDshPluginMarket: async () => ({ entries: [], warnings: ["preview mode"] }),
+			installDshUserPlugin: async () => {
+				throw new Error("preview mode: DSH plugin install is not available");
+			},
+			listDshUserPlugins: async () => [],
 			installDshPlugin: async () => undefined,
 			runDshPlugin: async () => undefined,
 			stopDshPlugin: async () => undefined,

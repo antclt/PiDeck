@@ -26,10 +26,12 @@ export type PiEvent = {
 	// message_start / message_end / message_update 顶层字段
 	message?: Record<string, unknown>;
 	assistantMessageEvent?: Record<string, unknown>;
-	// tool_execution_*
+	// tool_execution_*（result/partialResult：工具执行结果，供 Web 端展开详情）
 	toolName?: string;
 	toolCallId?: string;
 	args?: unknown;
+	result?: unknown;
+	partialResult?: unknown;
 	isError?: boolean;
 	// agent_end
 	stopReason?: string;
@@ -221,11 +223,21 @@ export class PiEventToUiMessageStream {
 				{
 					type: "tool-output-error",
 					toolCallId,
-					errorText: "Tool failed",
+					errorText: typeof event.error === "string" ? event.error : "Tool failed",
 				},
 			];
 		}
-		return [{ type: "tool-output-available", toolCallId, output: {} }];
+		// 工具真实结果（P2 工具卡展开）：优先 result，退 partialResult，都没有时空对象。
+		// 超大输出截断到 64KB 预览（SSE 帧必须有界，与桌面 timeline 截断同源考量）。
+		const rawOutput = event.result ?? event.partialResult ?? {};
+		let output: unknown = {};
+		try {
+			const serialized = JSON.stringify(rawOutput) ?? "{}";
+			output = serialized.length > 64 * 1024 ? { truncated: true, preview: `${serialized.slice(0, 32 * 1024)}…` } : rawOutput;
+		} catch {
+			output = {};
+		}
+		return [{ type: "tool-output-available", toolCallId, output }];
 	}
 
 	/** 只关当前 text/reasoning 块，不结束整条 SSE。 */

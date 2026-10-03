@@ -6,6 +6,8 @@ import vm from "node:vm";
 
 const bridgeSource = readFileSync("src/main/feishu/FeishuBridge.ts", "utf8");
 const mainSource = readFileSync("src/main/index.ts", "utf8");
+// 飞书 IPC 处理器已随主进程拆分迁入 ipc/feishuIpc.ts（2027-02），契约同步改读新模块。
+const feishuIpcSource = readFileSync("src/main/ipc/feishuIpc.ts", "utf8");
 const i18nSource = readFileSync("src/main/feishu/FeishuI18n.ts", "utf8");
 
 function compileFeishuI18n() {
@@ -52,18 +54,18 @@ test("Feishu commands resolve a fresh Session target instead of persisting a gen
 // 回归（用户点会话连接飞书时未启动 Agent）：feishuSessionBotSet 必须先自动启动 runtime，
 // 再建飞书镜像；否则无 runtime 的会话（仅浏览过历史）永远报 runtimeUnavailable。
 test("session bot bind auto-starts a missing runtime before mirroring", () => {
-	const bindBlock = mainSource.match(/feishuSessionBotSet, async[\s\S]*?session\.bindFailed"/)?.[0] ?? "";
+	const bindBlock = feishuIpcSource.match(/feishuSessionBotSet, async[\s\S]*?session\.bindFailed"/)?.[0] ?? "";
 	assert.ok(bindBlock, "feishuSessionBotSet handler must exist");
 	// target 必须可重新赋值（const 无法在启动后更新）
-	assert.match(bindBlock, /let target = sessionRuntimeCoordinator\.getTarget\(sessionId\);/);
+	assert.match(bindBlock, /let target = deps\.sessionRuntimeCoordinator\.getTarget\(sessionId\);/);
 	// 未启动时走与桌面端相同的 activateRuntime 链路
-	assert.match(bindBlock, /feishuSessionRuntimeBindings\.activateRuntime\(sessionId\)/);
-	assert.match(bindBlock, /target = sessionRuntimeCoordinator\.getTarget\(sessionId\);/);
+	assert.match(bindBlock, /deps\.feishuSessionRuntimeBindings\.activateRuntime\(sessionId\)/);
+	assert.match(bindBlock, /target = deps\.sessionRuntimeCoordinator\.getTarget\(sessionId\);/);
 	// 启动失败仍要给出 runtimeUnavailable，不能静默继续
 	assert.match(bindBlock, /session\.runtimeUnavailable"/);
-	const activateIndex = bindBlock.indexOf("feishuSessionRuntimeBindings.activateRuntime(sessionId)");
+	const activateIndex = bindBlock.indexOf("deps.feishuSessionRuntimeBindings.activateRuntime(sessionId)");
 	// 激活后重新解析 target 的位置必须晚于激活调用（取最后一次出现，避开 let 声明行）
-	const targetRefreshIndex = bindBlock.lastIndexOf("target = sessionRuntimeCoordinator.getTarget(sessionId)");
+	const targetRefreshIndex = bindBlock.lastIndexOf("target = deps.sessionRuntimeCoordinator.getTarget(sessionId)");
 	assert.ok(activateIndex >= 0 && targetRefreshIndex > activateIndex, "target must be re-resolved after activation");
 });
 
@@ -85,8 +87,11 @@ test("main injects an origin-safe catalog gateway into every Feishu bridge", () 
 	const guardIndex = mainSource.indexOf("input.agent.sessionPath && !canAttachRuntimeMetadata(existing, input.agent)");
 	const attachIndex = mainSource.indexOf("await sessionCatalog.attachRuntime(", guardIndex);
 	assert.ok(guardIndex >= 0 && attachIndex > guardIndex, "origin guard must precede runtime metadata attachment");
-	const constructors = [...mainSource.matchAll(/new FeishuBridge\(/g)].length;
-	const injections = [...mainSource.matchAll(/feishuSessionRuntimeBindings/g)].length - 1;
+	// FeishuBridge 构造点已随 IPC 域拆分分布在 index.ts 与 ipc/feishuIpc.ts，
+	// 注入面统计需跨两文件合计，防止新增构造点漏接 gateway。
+	const combined = `${mainSource}\n${feishuIpcSource}`;
+	const constructors = [...combined.matchAll(/new FeishuBridge\(/g)].length;
+	const injections = [...combined.matchAll(/feishuSessionRuntimeBindings/g)].length - 1;
 	assert.ok(constructors >= 4);
 	assert.ok(injections >= constructors);
 });

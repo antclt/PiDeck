@@ -30,11 +30,13 @@ test("运行中 agent 的 RPC 日志能力判断按 agentId 反查 runtime，不
 	assert.doesNotMatch(sidebarContent, /getBoundSidebarRuntimeAgent\(controller\.catalog, menuAgent\.sessionId\)/);
 });
 
-test("开启记录只给非阻塞 toast，不自动打开日志面板", () => {
+test("开启记录成功后自动打开日志面板（开记录的意图就是「现在要看」）", () => {
 	// 两个右键入口（agent 菜单 / 会话菜单）的成功分支统一走同一条 toast 文案
 	assert.equal(sidebarContent.match(/showNotice\(enabled \? t\("rpc\.loggingEnabled"\) : t\("rpc\.loggingEnableFailed"\), 2500\)/g)?.length, 2);
-	// 开启成功不自动打开日志查看器（用户可能只想留痕，不想被改布局）
-	assert.doesNotMatch(sidebarContent, /setLogging\(menuAgent\.id, true\)[\s\S]{0,220}openRpcLogs\(menuAgent\.id\)/);
+	// 开启成功自动打开日志查看器：agent 菜单与会话菜单两个入口都要自动打开
+	assert.equal(sidebarContent.match(/if \(enabled\) controller\.openRpcLogs\(/g)?.length, 2);
+	// 关闭记录分支不得自动开面板（关就是关）
+	assert.doesNotMatch(sidebarContent, /setLogging\([^)]*, false\)[\s\S]{0,220}openRpcLogs\(/);
 });
 
 test("已开启时菜单项点击为关闭记录，日志面板提供「停止记录」按钮", () => {

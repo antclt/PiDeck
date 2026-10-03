@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MAX_REPLY_ACTION_RULES } from "../../../shared/replyActions";
 import type { ReplyActionRule } from "../../../shared/types/replyActions";
 import { t } from "../i18n";
+import { mergeReplyActionRules } from "../utils/replyActionRules";
 import { showNotice } from "../utils/notice";
 import { useReplyActions } from "./useReplyActions";
 
@@ -93,21 +94,20 @@ export function useReplyActionEditor() {
 		[commit],
 	);
 
-	/** 重新读取内置清单，只追加个人规则缺少文案的条目，保留已有顺序（受上限约束）。 */
+	/** 同步内置清单：同文案条目更新触发条件（内置为准），缺项追加；保留个人顺序与自定义条目。 */
 	const mergeDefaults = useCallback(async () => {
 		setMerging(true);
 		try {
 			const snapshot = await refresh();
-			const current = itemsRef.current;
 			if (!snapshot) return;
-			const known = new Set(current.map((rule) => rule.text));
-			const additions = defaultsRef.current.items.filter((rule) => !known.has(rule.text));
-			if (additions.length === 0) {
+			// 快照 items 是磁盘最新内容，以此为基线与内置清单合并（受上限约束）
+			const merged = mergeReplyActionRules(snapshot.items, defaultsRef.current.items).slice(0, MAX_REPLY_ACTION_RULES);
+			const changed = merged.length !== snapshot.items.length || merged.some((rule, i) => rule !== snapshot.items[i]);
+			if (!changed) {
 				showNotice(t("settings.replyActionsNothingToAdd"));
 				return;
 			}
-			// 快照 items 是磁盘最新内容，additions 是缺项：直接以快照为基线追加
-			await commit([...snapshot.items, ...additions].slice(0, MAX_REPLY_ACTION_RULES));
+			await commit(merged);
 		} finally {
 			setMerging(false);
 		}

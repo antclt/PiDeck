@@ -579,6 +579,8 @@ const api = {
 		createDshGoal: (agentId: string, objective: string, maxGoalRounds?: number) => ipcRenderer.invoke(ipcChannels.dshCreateGoal, agentId, objective, maxGoalRounds) as Promise<void>,
 		/** DSH 目标操作（pause/resume/complete/clear）。 */
 		runDshGoalAction: (agentId: string, action: "pause" | "resume" | "complete" | "clear") => ipcRenderer.invoke(ipcChannels.dshGoalAction, agentId, action) as Promise<void>,
+		/** DSH 取消 host 侧排队消息（session/updateQueue remove；幂等：已消费也成功）。 */
+		cancelDshQueuedMessage: (agentId: string, itemId: string) => ipcRenderer.invoke(ipcChannels.dshCancelQueuedMessage, agentId, itemId) as Promise<void>,
 		/** DSH 子代理列表（subagent.list）。 */
 		listDshSubagents: (agentId: string) =>
 			ipcRenderer.invoke(ipcChannels.dshListSubagents, agentId) as Promise<
@@ -633,6 +635,12 @@ const api = {
 		listDshStaticPlugins: () => ipcRenderer.invoke(ipcChannels.dshPluginStaticList) as Promise<import("../shared/types").DshStaticPluginView[]>,
 		/** DSH 用户自装静态插件卸载（移除用户补丁层行 + 可选回收插件目录；host 重启后生效）。 */
 		uninstallDshUserPlugin: (input: import("../shared/types").DshUserPluginUninstallInput) => ipcRenderer.invoke(ipcChannels.dshPluginUserUninstall, input) as Promise<import("../shared/types").DshUserPluginUninstallResult>,
+		/** DSH 插件市场搜索（官方目录 + npm 双源；单源失败降级 warnings）。 */
+		searchDshPluginMarket: (keyword: string) => ipcRenderer.invoke(ipcChannels.dshPluginMarketSearch, keyword) as Promise<import("../shared/types").DshPluginMarketSearchResult>,
+		/** DSH 用户自装静态插件安装（npm pack → 受管目录 → 用户补丁层行；幂等）。 */
+		installDshUserPlugin: (spec: string) => ipcRenderer.invoke(ipcChannels.dshPluginUserInstall, { spec }) as Promise<import("../shared/types").DshUserPluginInstallResult>,
+		/** DSH 用户补丁层清单（安装服务视角：受管目录内的行补全包名/版本/uiOnly）。 */
+		listDshUserPlugins: () => ipcRenderer.invoke(ipcChannels.dshPluginUserList) as Promise<import("../shared/types").DshUserPluginListEntry[]>,
 		/** DSH 动态插件安装（define：定义源码包，不运行）。 */
 		installDshPlugin: (input: import("../shared/types").DshPluginInstallInput) => ipcRenderer.invoke(ipcChannels.dshPluginInstall, input) as Promise<unknown>,
 		/** DSH 动态插件运行（面板手势，无需审批）。 */

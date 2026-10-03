@@ -5,7 +5,10 @@ import test from "node:test";
 const webCss = readFileSync("src/renderer/src/web/web.css", "utf8");
 const webSidebar = readFileSync("src/renderer/src/web/WebSidebar.tsx", "utf8");
 const webHeader = readFileSync("src/renderer/src/web/WebHeader.tsx", "utf8");
+const webModelSheet = readFileSync("src/renderer/src/web/WebModelSheet.tsx", "utf8");
 const webChatApp = readFileSync("src/renderer/src/web/WebChatApp.tsx", "utf8");
+const webSessionStrips = readFileSync("src/renderer/src/web/WebSessionStrips.tsx", "utf8");
+const webTimeline = readFileSync("src/renderer/src/web/WebTimeline.tsx", "utf8");
 
 test("Web shell keeps sidebar and chat pane in a horizontal split", () => {
 	assert.match(webCss, /\.app\.wechat-shell\s*\{[\s\S]*?flex-direction:\s*row;/, "the desktop shell defaults to a vertical layout, so Web must explicitly restore the horizontal split");
@@ -19,10 +22,15 @@ test("Web project rows can collapse after the active session is revealed", () =>
 	assert.match(webSidebar, /const expanded = searching \|\| expandedProjects\.has\(project\.id\)/);
 });
 
-test("Web model picker supports search and mobile header wrapping", () => {
-	assert.match(webHeader, /<CommandInput placeholder=\{t\("web\.modelSearch"\)\}/);
-	assert.match(webHeader, /CommandEmpty>\{t\("web\.modelEmpty"\)\}/);
-	assert.match(webHeader, /chat-header flex min-w-0 flex-wrap/);
+test("Web model picker lives in a searchable bottom sheet, header stays one row", () => {
+	// 模型选择器已从头部的 Command 弹层迁到 composer 的 WebBottomSheet（第三批瘦身）：
+	// 搜索输入在 sheet 内，header 不再携带 CommandInput。
+	assert.match(webModelSheet, /placeholder=\{t\("web\.modelSearch"\)\}/);
+	assert.match(webModelSheet, /t\("web\.modelEmpty"\)/);
+	assert.doesNotMatch(webHeader, /CommandInput/);
+	// 头部固定单行（全局入口收敛进溢出菜单），不再 flex-wrap 换行。
+	assert.match(webHeader, /web-header flex min-w-0 items-center/);
+	assert.doesNotMatch(webHeader, /flex-wrap/);
 });
 
 test("Mobile Web keeps chat full-screen and opens the project tree as a drawer", () => {
@@ -55,4 +63,65 @@ test("Web sidebar groups orphan sessions under an ungrouped fallback", () => {
 	assert.match(webSidebar, /onSelect=\{props\.onSelectSession\}/);
 	// 未分组分组不会在无孤儿记录时显示，避免空标题占位。
 	assert.match(webSidebar, /ungroupedSessions\.length > 0/);
+});
+
+// 回归（第四批视觉打磨）：过程行无框化 + 身份色。web.css 曾经给 .tool-card/.thinking-block
+// 加边框+面板底做成「卡片」，与桌面 timeline.css 的无框过程行哲学冲突，此处锁定回收后的形态。
+test("Web timeline keeps tool cards and thinking rows frameless with identity colors", () => {
+	// 工具卡/思考块不画外框、不铺面板底（视觉对齐桌面过程行）。
+	assert.match(webCss, /\.web-app \.tool-card\s*\{[\s\S]*?border:\s*0;[\s\S]*?background:\s*transparent;\s*\}/);
+	assert.doesNotMatch(webCss, /\.web-app \.tool-card,\s*[\s\S]*?\.thinking-block\s*\{[\s\S]*?background:\s*var\(--color-bg-panel\)/);
+	// 身份色变量必须在 web.css 的两套 :root 覆盖里显式声明（亮/暗各一份），
+	// 否则图标掉回灰字（timeline.css 的 .tool-card-icon 引用这些变量）。
+	const rootBlocks = webCss.match(/:root[^{]*\{[\s\S]*?\}/g) ?? [];
+	assert.ok(rootBlocks.length >= 2, `expected >=2 :root blocks in web.css, got ${rootBlocks.length}`);
+	for (const block of rootBlocks) {
+		assert.match(block, /--color-tool:\s*var\(--color-info\)/, "every web :root override must redeclare --color-tool");
+		assert.match(block, /--color-thinking:/, "every web :root override must redeclare --color-thinking");
+	}
+	// running 呼吸 + 错误染色走 tone-/data- 状态类（与桌面 timeline 同构）。
+	assert.match(webCss, /tone-running \.tool-card-icon[\s\S]*?animation:\s*tool-icon-breathe/);
+	assert.match(webCss, /tone-error \.tool-card-icon[\s\S]*?color:\s*var\(--color-danger\)/);
+});
+
+// 回归（第五批：回合聚合/过程组）：连续 assistant 消息聚合成单回合，过程内容折叠进
+// 「执行过程」容器，操作行只挂回合尾；chevron 方向修正为折叠 ChevronRight / 展开 ChevronDown。
+test("Web timeline groups assistant messages into collapsible execution folds", () => {
+	// 回合聚合纯函数存在且被主循环使用（不再逐条消息渲染）。
+	assert.match(webTimeline, /export function groupTimelineEntries[\s\S]*?messages: UIMessage\[\]/);
+	assert.match(webTimeline, /timelineEntries = useMemo\(\(\) => groupTimelineEntries\(messages\)/);
+	assert.doesNotMatch(webTimeline, /<WebAssistantMessage /, "per-message rendering must be replaced by the turn component");
+	assert.match(webTimeline, /<WebAssistantTurn turn=\{entry\.turn\}/);
+	// chevron 方向：折叠态指向右（ChevronRight），展开态向下（ChevronDown），不再用 rotate-180 翻转 ChevronDown。
+	assert.doesNotMatch(webTimeline, /rotate-180/, "rotate-180 on ChevronDown renders the collapsed state pointing the wrong way");
+	assert.match(webTimeline, /processOpen \? [\s\S]*?<ChevronDown[\s\S]*?: [\s\S]*?<ChevronRight/, "collapsed state must point right, expanded must point down");
+	// 思考块合并：回合内多段 reasoning 合成一个 thinking 段（texts.join），不再被拆成多块。
+	assert.match(webTimeline, /kind: "thinking"[\s\S]*?texts\.push\(/, "adjacent reasoning parts must merge into one thinking segment");
+	assert.match(webTimeline, /segment\.texts\.join\("\\n\\n"\)/);
+	// 操作行只挂回合尾：助手侧 web.msgCopy 只允许出现在 WebAssistantTurn 内（用户气泡另有自己的复制）。
+	const turnStart = webTimeline.indexOf("WebAssistantTurn = memo");
+	const turnEnd = webTimeline.indexOf("function WebAskCard", turnStart);
+	const turnSource = webTimeline.slice(turnStart, turnEnd);
+	assert.ok(turnStart >= 0 && turnEnd > turnStart, "WebAssistantTurn component must be found");
+	const turnCopyUses = turnSource.match(/web\.msgCopy/g) ?? [];
+	assert.equal(turnCopyUses.length, 1, "copy/share actions belong to the final reply of a turn only");
+	assert.match(turnSource, /!props\.isStreaming && turn\.finalText/, "actions render only after the final reply settles");
+	// 流式时过程组默认展开、结束回落折叠；手动开合优先。
+	assert.match(webTimeline, /manualOpen \?\? props\.isStreaming/);
+	// 过程组样式：左导轨缩进明细存在（css）。
+	assert.match(webCss, /\.web-app \.execution-fold-details\s*\{[\s\S]*?border-left:/);
+});
+
+// 回归：状态 pill 在 flex-col 标题块里必须 self-start，否则被 stretch 拉成整行横条。
+test("Web header status pill stays compact inside the flex-col title block", () => {
+	assert.match(webHeader, /agent-status-indicator self-start/);
+});
+
+// 回归：三条 strip 默认折叠、无框化，且不使用不存在的 Tailwind token
+// （bg-bg-surface/text-text-muted/bg-bg-inset 曾是静默 no-op，样式从未生效）。
+test("Web session strips stay collapsed by default and use real tokens only", () => {
+	assert.match(webSessionStrips, /useState\(false\)/, "StripShell must default to collapsed on mobile");
+	assert.doesNotMatch(webSessionStrips, /bg-bg-surface|text-text-muted|bg-bg-inset/, "these tokens do not exist in the theme bridge — they silently no-op");
+	// 折叠条只占一行：标题行可点（aria-expanded），明细展开后才渲染。
+	assert.match(webSessionStrips, /aria-expanded=\{open\}/);
 });

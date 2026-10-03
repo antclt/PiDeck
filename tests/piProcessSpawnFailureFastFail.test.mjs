@@ -86,7 +86,7 @@ function loadPiProcess(child) {
 				return { appendBuiltInExtensionArgs: (args) => [...args] };
 			}
 			if (id === "../extensions/extensionVersionGate") {
-				return require("../src/main/extensions/extensionVersionGate.ts");
+				return loadTsCommonJs("src/main/extensions/extensionVersionGate.ts");
 			}
 			if (id === "../logging/sharedLogger") return { getAppLogger: () => null };
 			if (id === "../sessions/sessionProxyPolicy") return { applyPiProxyMode: (env) => env };

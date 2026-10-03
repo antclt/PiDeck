@@ -9,8 +9,9 @@
  * 点击会话行 = 打开会话（切 activeSessionId）。
  */
 import { useEffect, useMemo, useState } from "react";
-import { Check, FolderPlus, Play, Plus, Search, Trash2, X } from "lucide-react";
+import { Check, FolderPlus, GitFork, MoreVertical, Play, Plus, Search, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui-shadcn/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui-shadcn/dropdown-menu";
 import { Input } from "@/components/ui-shadcn/input";
 import { t } from "@/i18n";
 import { WebBrandLockup } from "./WebBrandLockup";
@@ -42,9 +43,12 @@ function matchesSearch(value: string, search: string): boolean {
 
 const UNGROUPED_GROUP_KEY = "__web_ungrouped__";
 
-/** 未分组会话列表的会话行 + 「更多会话」折叠按钮。 */
-function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: string) => WebRuntime | undefined; activeSessionId: string; showAll: boolean; onToggleShowAll: () => void; onSelect: (sessionId: string) => void }) {
-	const { sessions, runtimeFor, activeSessionId, showAll, onToggleShowAll, onSelect } = props;
+/** 会话行可执行的操作（P1；由 WebChatApp 提供实现）。 */
+export type WebSessionRowAction = "rename" | "duplicate" | "export" | "delete";
+
+/** 项目会话列表的会话行 + 「更多会话」折叠按钮。 */
+function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: string) => WebRuntime | undefined; activeSessionId: string; showAll: boolean; onToggleShowAll: () => void; onSelect: (sessionId: string) => void; onSessionAction?: (action: WebSessionRowAction, sessionId: string) => void }) {
+	const { sessions, runtimeFor, activeSessionId, showAll, onToggleShowAll, onSelect, onSessionAction } = props;
 	const visible = showAll ? sessions : sessions.slice(0, 5);
 	const hiddenCount = sessions.length - visible.length;
 	return (
@@ -52,16 +56,38 @@ function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: st
 			{visible.map((session) => {
 				const runtime = runtimeFor(session.id);
 				return (
-					<button type="button" key={session.id} className={cn(sessionRowClass, "session-row", session.id === activeSessionId && selectedRowClass)} title={session.title} onClick={() => onSelect(session.id)}>
-						{renderRuntimeStatusDot(runtime?.status)}
-						<div className="conversation-body min-w-0 flex-1">
-							<div className="conversation-title flex min-w-0 items-center gap-1.5">
-								<strong className={cn("min-w-0 flex-1 truncate", runtime ? "font-medium" : "font-normal text-muted-foreground/90")}>{session.title || t("common.untitled")}</strong>
-								{/* 后端徽标（C18 同源）：dsh 会话显示鲸鱼 logo，pi 会话显示 pi logo */}
-								<SessionBackendMark backend={session.backend} className="size-4 shrink-0 rounded" />
+					<div key={session.id} className={cn(sessionRowClass, "session-row group/session", session.id === activeSessionId && selectedRowClass)} title={session.title}>
+						<button type="button" className="flex min-w-0 flex-1 items-center gap-1.5" onClick={() => onSelect(session.id)}>
+							{renderRuntimeStatusDot(runtime?.status)}
+							<div className="conversation-body min-w-0 flex-1">
+								<div className="conversation-title flex min-w-0 items-center gap-1.5">
+									<strong className={cn("min-w-0 flex-1 truncate", runtime ? "font-medium" : "font-normal text-muted-foreground/90")}>{session.title || t("common.untitled")}</strong>
+									{/* P3：fork 徽标（克隆/回退产生的分支会话） */}
+									{session.forked ? <GitFork className="size-3 shrink-0 text-muted-foreground" aria-label={t("web.forkedBadge")} /> : null}
+									{/* 后端徽标（C18 同源）：dsh 会话显示鲸鱼 logo，pi 会话显示 pi logo */}
+									<SessionBackendMark backend={session.backend} className="size-4 shrink-0 rounded" />
+								</div>
 							</div>
-						</div>
-					</button>
+						</button>
+						{onSessionAction ? (
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<button type="button" className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted focus-visible:opacity-100 group-hover/session:opacity-100" aria-label={t("web.sessionMenu")} title={t("web.sessionMenu")}>
+										<MoreVertical className="size-3.5" aria-hidden="true" />
+									</button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="start" className="w-44">
+									<DropdownMenuItem onClick={() => onSessionAction("rename", session.id)}>{t("web.rename")}</DropdownMenuItem>
+									<DropdownMenuItem onClick={() => onSessionAction("duplicate", session.id)}>{t("web.duplicate")}</DropdownMenuItem>
+									<DropdownMenuItem onClick={() => onSessionAction("export", session.id)}>{t("web.exportHtml")}</DropdownMenuItem>
+									<DropdownMenuSeparator />
+									<DropdownMenuItem className="text-danger focus:text-danger" onClick={() => onSessionAction("delete", session.id)}>
+										{t("web.deleteSession")}
+									</DropdownMenuItem>
+								</DropdownMenuContent>
+							</DropdownMenu>
+						) : null}
+					</div>
 				);
 			})}
 			{hiddenCount > 0 && (
@@ -89,6 +115,8 @@ export function WebSidebar(props: {
 	mobileOpen: boolean;
 	onCloseMobile: () => void;
 	onSelectSession: (sessionId: string) => void;
+	/** P1：会话行操作菜单（重命名/复制/导出/删除）。 */
+	onSessionAction?: (action: WebSessionRowAction, sessionId: string) => void;
 	onCreateSession: (projectId: string) => void;
 	onCreateProject: (path: string) => Promise<WebProject>;
 	onDeleteProject: (projectId: string) => Promise<void>;
@@ -247,7 +275,7 @@ export function WebSidebar(props: {
 									</div>
 									{expanded && (
 										<div className="project-children mt-2 flex flex-col gap-2 px-1 pb-1">
-											<SessionRows sessions={projectSessions} runtimeFor={runtimeFor} activeSessionId={activeSessionId} showAll={showAllSessions} onToggleShowAll={() => toggleSessionExpand(project.id)} onSelect={props.onSelectSession} />
+											<SessionRows sessions={projectSessions} runtimeFor={runtimeFor} activeSessionId={activeSessionId} showAll={showAllSessions} onToggleShowAll={() => toggleSessionExpand(project.id)} onSelect={props.onSelectSession} onSessionAction={props.onSessionAction} />
 											{projectSessions.length === 0 && <div className="px-6 py-1 text-caption text-muted-foreground">{t("web.noSessions")}</div>}
 										</div>
 									)}
@@ -269,7 +297,7 @@ export function WebSidebar(props: {
 									</div>
 								</div>
 								<div className="project-children mt-2 flex flex-col gap-2 px-1 pb-1">
-									<SessionRows sessions={ungroupedSessions} runtimeFor={runtimeFor} activeSessionId={activeSessionId} showAll={showAllUngrouped} onToggleShowAll={() => toggleUngroupedExpand()} onSelect={props.onSelectSession} />
+									<SessionRows sessions={ungroupedSessions} runtimeFor={runtimeFor} activeSessionId={activeSessionId} showAll={showAllUngrouped} onToggleShowAll={() => toggleUngroupedExpand()} onSelect={props.onSelectSession} onSessionAction={props.onSessionAction} />
 								</div>
 							</div>
 						)}

@@ -402,7 +402,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 		setDraftSettings(deepClone(baseSnapshotRef.current));
 		restoreAppearanceFromSnapshot();
 		visionDraft.reset();
-		setPerAreaFontSize(baseSnapshotRef.current.uiFontSize !== null || baseSnapshotRef.current.chatFontSize !== null || baseSnapshotRef.current.inputFontSize !== null);
+		setPerAreaFontSize(baseSnapshotRef.current.uiFontSize !== null || baseSnapshotRef.current.tabBarFontSize !== null || baseSnapshotRef.current.chatFontSize !== null || baseSnapshotRef.current.inputFontSize !== null);
 		// tab 局部编辑态（WSL 输入、Web 端口、宠物预览）由各自 tab 监听信号重置
 		setDevTabResetKey((k) => k + 1);
 		setWebTabResetKey((k) => k + 1);
@@ -487,7 +487,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 		props.onInstallUpdate();
 	};
 
-	const [perAreaFontSize, setPerAreaFontSize] = useState(draftSettings.uiFontSize !== null || draftSettings.chatFontSize !== null || draftSettings.inputFontSize !== null);
+	const [perAreaFontSize, setPerAreaFontSize] = useState(draftSettings.uiFontSize !== null || draftSettings.tabBarFontSize !== null || draftSettings.chatFontSize !== null || draftSettings.inputFontSize !== null);
 
 	// Git 摘要模型列表与会话 Command 选择器共用 pi --list-models 数据源。
 	const { gitModels, report: gitModelsReport, refreshing: gitModelsRefreshing, reload: reloadGitModels, gitModelPickerOpen, openPicker: openGitModelPicker, closePicker: closeGitModelPicker } = useGitModels();

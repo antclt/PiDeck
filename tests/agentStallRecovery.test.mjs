@@ -14,18 +14,23 @@ import test from "node:test";
  * 因此按仓库既有惯例用空白容忍的源码契约锁定关键修复点。
  */
 const agentManager = readFileSync("src/main/pi/AgentManager.ts", "utf8");
+// 扩展 UI 请求闸已迁入 extensionUiGate.ts（AgentManager 拆分 Wave 4B）
+const uiGateModule = readFileSync("src/main/pi/extensionUiGate.ts", "utf8");
 
 test("扩展 UI 请求没有显式 timeout 时必须有兜底上限，否则 pi 永久阻塞", () => {
 	// pi 侧没有任何默认超时：createDialogPromise 只把 opts.timeout 原样透传（扩展不传即 undefined），
 	// editor 更是从不带 timeout 字段，而 pending 请求只在收到 extension_ui_response 时才 settle。
 	// PiDeck 自有的 ask-question / security-gate / plan-mode / request-size-recovery 四个扩展都没传 timeout。
-	assert.match(agentManager, /DEFAULT_UI_REQUEST_TIMEOUT_MS\s*=\s*30\s*\*\s*60\s*\*\s*1000/);
+	assert.match(uiGateModule, /DEFAULT_UI_REQUEST_TIMEOUT_MS\s*=\s*30\s*\*\s*60\s*\*\s*1000/);
 	// 扩展显式指定的 timeout 仍然优先，缺失时退回兜底值
-	assert.match(agentManager, /effectiveTimeout\s*=\s*explicitTimeout\s*\?\?\s*AgentManager\.DEFAULT_UI_REQUEST_TIMEOUT_MS/);
+	assert.match(uiGateModule, /effectiveTimeout\s*=\s*explicitTimeout\s*\?\?\s*ExtensionUiGate\.DEFAULT_UI_REQUEST_TIMEOUT_MS/);
 	// 旧实现「timeout 非法就直接 return」= 没有 timeout 就永不武装定时器，必须已移除
-	assert.doesNotMatch(agentManager, /typeof timeout !== "number"/);
+	assert.doesNotMatch(uiGateModule, /typeof timeout !== "number"/);
 	// 超时取消必须留痕，便于下次复现定位（此前只有「用户点停止」这一条出口，静默不可观测）
-	assert.match(agentManager, /Extension UI request timed out; cancelling to unblock pi/);
+	assert.match(uiGateModule, /Extension UI request timed out; cancelling to unblock pi/);
+	// AgentManager 负责接线：提问分发与 pending 判定都走闸
+	assert.match(agentManager, /this\.uiGate\.handleUIRequest\(agentId, typed\)/);
+	assert.match(agentManager, /this\.uiGate\.hasPendingUIRequests\(agentId\)/);
 });
 
 test("兜底判空闲不得被本地 toolExecutingByAgent 否决", () => {

@@ -70,6 +70,10 @@ import { buildDraftResourceCommands, draftResourceCommandsForProject, selectComp
 import { isSessionRuntimeBusy, isUserFacingSessionStart } from "./useSessionTimelineController";
 import { truncateQuoteLabel } from "../components/session/composer/quoteChip";
 import { useSessionSend, type EnqueuePromptSnapshot } from "./useSessionSend";
+
+/** 粘贴文件折叠进草稿时的单文件读取上限：主进程 stat 预检拦截超大文件，
+ * 避免全量读入主进程再经 IPC 传输压垮两侧内存（超限/读失败走既有 catch → 内容不并入）。 */
+const PASTE_FILE_CONTENT_MAX_BYTES = 2 * 1024 * 1024;
 import { useVoiceTranscription } from "./useVoiceTranscription";
 import { resolveVoiceTranscriptionInsertion, type VoiceTranscriptionTarget } from "../utils/voiceTranscriptionInsert";
 
@@ -1194,7 +1198,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 					if (file.inProject) {
 						refs.push(formatFilePathRef(file.path));
 					} else {
-						const content = await desktopApi.files.readContent(file.path).catch(() => "");
+						const content = await desktopApi.files.readContent(file.path, PASTE_FILE_CONTENT_MAX_BYTES).catch(() => "");
 						if (content) refs.push(content);
 					}
 				}

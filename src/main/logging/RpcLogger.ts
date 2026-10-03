@@ -1,5 +1,6 @@
 import type { RpcLogEntry } from "../../shared/types/rpcLog";
 import type { ModelTraceRecord, ModelTraceRequestInput } from "../../shared/types/bridge";
+import { readTextBounded } from "../fs/boundedTextRead";
 import { ModelTraceStore } from "./ModelTrace";
 import { app } from "electron";
 import { appendFile, mkdir, readFile, readdir, rename, stat, unlink } from "node:fs/promises";
@@ -24,6 +25,8 @@ const MAX_DATA_BYTES = 2_048;
 const MAX_LIVE_DATA_BYTES = 4_096;
 /** 日志文件保留天数，超过自动删除 */
 const RETENTION_DAYS = 30;
+/** 单文件读取字节上限：rpc 单日 jsonl 可达上百 MB，去重/查询都只关心尾部最近条目 */
+const RPC_TAIL_READ_BYTES = 8 * 1024 * 1024;
 
 function formatDate(value: Date) {
 	const year = value.getFullYear();
@@ -242,9 +245,10 @@ export class RpcLogger {
 		return join(this.dir, `rpc-${safeAgentId}-${dateStr}.jsonl`);
 	}
 
-	/** 读取文件已有条目 id 集合；文件不存在时返回空集（视为首次写入） */
+	/** 读取文件已有条目 id 集合；文件不存在时返回空集（视为首次写入）。
+	 * 大文件只读尾部窗口：待去重的总是最近写入的条目，老条目 id 不在碰撞面内。 */
 	private async readEntryIds(filePath: string): Promise<Set<string>> {
-		const raw = await readFile(filePath, "utf8").catch(() => "");
+		const raw = await readTextBounded(filePath, RPC_TAIL_READ_BYTES, "tail").catch(() => "");
 		if (!raw) return new Set();
 		const ids = new Set<string>();
 		for (const line of raw.split(/\r?\n/)) {
@@ -272,7 +276,8 @@ export class RpcLogger {
 
 		const lines: string[] = [];
 		for (const file of files) {
-			const raw = await readFile(join(this.dir, file), "utf8").catch(() => "");
+			// 只关心最近 limit 条：大文件读尾部窗口即可，避免整读上百 MB 再截断
+			const raw = await readTextBounded(join(this.dir, file), RPC_TAIL_READ_BYTES, "tail").catch(() => "");
 			const fileLines = raw.split(/\r?\n/).filter(Boolean);
 			lines.push(...fileLines.reverse());
 			if (lines.length >= limit) break;

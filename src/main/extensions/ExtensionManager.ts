@@ -6,10 +6,11 @@ import { trashPath } from "../fs/trash";
 import { getAppLogger } from "../logging/sharedLogger";
 import type { AppSettings, DisabledExtensionEntry, PiCliUpdateResult, PiExtensionListResult, PiExtensionSummary, PiUpdateCheckResult } from "../../shared/types";
 import type { PiLocator } from "../pi/PiLocator";
+import { PiProcess } from "../pi/PiProcess";
 import { toWslLinuxPath, toWindowsHostPath, type WslEnvironment } from "../wsl/WslPaths";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 import { BUILT_IN_EXTENSIONS, INTERNAL_BUILT_IN_EXTENSIONS, readEffectiveBuiltInExtensionsVersion, resolveBuiltInExtensionPath, type BuiltInExtensionPathRoots } from "./builtInExtensions";
-import { MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST, parsePiMinorVersion } from "./extensionVersionGate";
+import { MIN_PI_VERSION_FOR_EXTENSION_WHITELIST, piVersionAtLeast } from "./extensionVersionGate";
 // 版本比较与应用更新检查共用同一实现（含预发布语义：beta < 同号正式版）。
 import { compareVersions } from "../utils/versionCompare";
 import { discoverExtensionEntries } from "./extensionDiscovery";
@@ -426,7 +427,7 @@ export class ExtensionManager {
 		const check = await this.checkPiUpdate();
 		if (!check.hasUpdate) {
 			return {
-				command: "pi update pi",
+				command: "pi update --self",
 				output:
 					check.error ??
 					this.translate("mainExtension.noUpdate", {
@@ -436,8 +437,22 @@ export class ExtensionManager {
 				updated: false,
 			};
 		}
-		const output = await this.runPi(["update", "pi"], 120_000, { offline: false });
-		return this.toUpdateResult("pi update pi", output, true);
+		// pi 0.84.3 起 `pi update --self` 是官方自更新入口；旧版的子命令是 `pi update pi`。
+		// 版本未知（未安装/探测失败）时保守走旧写法，与新 pi 的报错一起暴露给用户。
+		const version = await this.getPiVersion();
+		const selfUpdateSupported = piVersionAtLeast(version, "0.84.3");
+		const updateArgs = selfUpdateSupported ? ["update", "--self"] : ["update", "pi"];
+		const command = updateArgs.join(" ");
+		const output = await this.runPi(updateArgs, 120_000, { offline: false });
+		const result = this.toUpdateResult(command, output, true);
+		// 自更新成功后版本必然变化：失效本地与跨进程的版本缓存，
+		// 否则新 agent 还会拿旧版本做门槛判断（白名单/信任标志）。
+		if (result.updated) {
+			this.piVersion = null;
+			this.piVersionPromise = null;
+			PiProcess.invalidateVersionCache();
+		}
+		return result;
 	}
 
 	async updateExtensions(): Promise<PiCliUpdateResult> {
@@ -522,8 +537,7 @@ export class ExtensionManager {
 		// null，如 pi 未安装/探测失败）时放行，避免拦截其他流程。
 		if (!enabled) {
 			const version = await this.getPiVersion();
-			const minor = parsePiMinorVersion(version);
-			if (minor !== null && minor < MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST) {
+			if (version !== null && !piVersionAtLeast(version, MIN_PI_VERSION_FOR_EXTENSION_WHITELIST)) {
 				throw new Error(this.translate("mainExtension.piVersionTooOldForDisable", { version: version ?? "?" }));
 			}
 		}
@@ -567,13 +581,8 @@ export class ExtensionManager {
 	 */
 	private async noApproveSupported(): Promise<boolean> {
 		const version = await this.getPiVersion();
-		if (!version) return false;
-		const match = version.match(/^(\d+)\.(\d+)/);
-		if (!match) return false;
-		const major = parseInt(match[1], 10);
-		const minor = parseInt(match[2], 10);
-		// pi >= 0.79.0 或 1.x+ 都支持 --no-approve
-		return major > 0 || minor >= 79;
+		// 完整 semver 比较：0.79+ 与 1.x+ 均支持；版本未知时不支持。
+		return piVersionAtLeast(version, "0.79.0");
 	}
 
 	private async getPiVersion(): Promise<string | null> {

@@ -8,11 +8,12 @@
  * - tool-invocation part → 工具卡片（复用桌面 tool-card 视觉）
  * - 流式期间底部显示响应指示器；出错显示诊断卡
  */
-import { Fragment, memo, useEffect, useRef, useState } from "react";
-import { ArrowDown, Brain, ChevronDown, ChevronRight, ChevronUp, Wrench } from "lucide-react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, Brain, Check, ChevronDown, ChevronRight, ChevronUp, Copy, ListTree, MessagesSquare, Pencil, RefreshCw, Share2, Trash2, Wrench, X } from "lucide-react";
 import type { UIMessage } from "ai";
 import { Button } from "@/components/ui-shadcn/button";
 import { t } from "@/i18n";
+import { shareWebText } from "./webShare";
 import { cn } from "@/lib/utils";
 import { splitAskOption, formatAskTitle, serializeBatchAnswers } from "../utils/askUi";
 import { WebAssistantText } from "./WebAssistantText";
@@ -22,22 +23,265 @@ import { MarkdownStream } from "@/components/session/MarkdownStream";
 import { SingleLinePreview } from "@/components/session/SingleLinePreview";
 import { TimelineMarker } from "../components/session/TimelineMarker";
 import { LogoMark } from "../components/app/LogoMark";
+import { copyTextToClipboard } from "./webClipboard";
 
-/** 用户消息右对齐气泡（结构与桌面 UserBubble 一致，去掉操作栏/附件能力）。 */
-export const WebUserBubble = memo(function WebUserBubble(props: { message: UIMessage }) {
-	const text = props.message.parts
+/** 工具参数/结果格式化：字符串原样，对象 pretty JSON，超长截断。 */
+function prettyToolValue(value: unknown, maxChars = 4000): string {
+	if (value == null) return "";
+	let text = typeof value === "string" ? value : "";
+	if (!text) {
+		try {
+			text = JSON.stringify(value, null, 2);
+		} catch {
+			text = String(value);
+		}
+	}
+	return text.length > maxChars ? `${text.slice(0, maxChars)}\n… (${text.length} chars)` : text;
+}
+
+/** 从 UIMessage 提取纯文本（复制/重发用）。 */
+export function uiMessageText(message: UIMessage): string {
+	return message.parts
 		.filter((part) => part.type === "text")
 		.map((part) => (part.type === "text" ? part.text : ""))
-		.join("");
-	if (!text.trim()) return null;
+		.join("")
+		.trim();
+}
+
+/** 提取消息中的图片 data URL（用户气泡缩略图 / 重发附件）。 */
+export function uiMessageImages(message: UIMessage): string[] {
+	const urls: string[] = [];
+	for (const part of message.parts) {
+		if (part.type !== "file") continue;
+		const filePart = part as { mediaType?: string; data?: string; url?: string };
+		const src = typeof filePart.data === "string" ? filePart.data : typeof filePart.url === "string" ? filePart.url : "";
+		if (src && (!filePart.mediaType || filePart.mediaType.startsWith("image/"))) urls.push(src);
+	}
+	return urls;
+}
+
+type WebToolPart = {
+	type: string;
+	toolName?: string;
+	toolCallId?: string;
+	state?: string;
+	input?: unknown;
+	output?: unknown;
+	errorText?: string;
+};
+
+/** 回合内一段过程内容：合并后的思考块 / 工具调用 / 中间回复。 */
+export type TurnSegment =
+	| { kind: "thinking"; id: string; texts: string[] }
+	| { kind: "tool"; id: string; part: WebToolPart }
+	| { kind: "interim"; id: string; text: string };
+
+/** 一轮助手回合：用户消息之后的连续 assistant 消息聚合（对齐桌面 run 语义）。 */
+export interface AssistantTurn {
+	/** 回合内首条消息 id（容器 key/锚点） */
+	id: string;
+	/** 回合内全部消息 id（含首条；锚点补偿用） */
+	messageIds: string[];
+	/** 过程内容（不含常驻正文），按原始顺序 */
+	segments: TurnSegment[];
+	/** 最后一段非空正文：常驻折叠容器外；流式中即正在生成的文本 */
+	finalText: string;
+	toolCount: number;
+	/** 思考段数（合并后块内 texts 总数，对齐桌面「N 次思考」） */
+	thinkingCount: number;
+	/** 中间回复段数（不含 final） */
+	interimCount: number;
+}
+
+export type TimelineEntry = { kind: "user"; id: string; message: UIMessage } | { kind: "turn"; id: string; turn: AssistantTurn };
+
+/** 把扁平 messages 聚合成「用户气泡 / 助手回合」交替序列（桌面 groupAgentRuns 的 Web 版）。
+ *
+ * - 连续 assistant 消息归为一个回合，跨消息的连续 reasoning part 合并成同一思考块
+ *   （修复：一轮里被拆成多个思考卡片）；
+ * - 回合内最后一段非空 text 剔出过程组作为常驻正文（对齐桌面「最终回答永不折叠」）；
+ * - 纯函数，行为由 tests/webLayout.test.mjs 锁定。 */
+export function groupTimelineEntries(messages: UIMessage[]): TimelineEntry[] {
+	const entries: TimelineEntry[] = [];
+	let messageIds: string[] = [];
+	let segments: TurnSegment[] = [];
+	let finalText = "";
+	let finalId = "";
+	let turnId = "";
+	const flush = () => {
+		if (!turnId) return;
+		// 把 final 对应的最后一个 interim 从过程组剔除（只剔除一次，同 id 不会重复）
+		const processSegments = finalId ? segments.filter((segment) => !(segment.kind === "interim" && segment.id === finalId)) : segments;
+		entries.push({
+			kind: "turn",
+			id: turnId,
+			turn: {
+				id: turnId,
+				messageIds,
+				segments: processSegments,
+				finalText,
+				toolCount: processSegments.filter((segment) => segment.kind === "tool").length,
+				thinkingCount: processSegments.reduce((sum, segment) => sum + (segment.kind === "thinking" ? segment.texts.length : 0), 0),
+				interimCount: processSegments.filter((segment) => segment.kind === "interim").length,
+			},
+		});
+		messageIds = [];
+		segments = [];
+		finalText = "";
+		finalId = "";
+		turnId = "";
+	};
+	for (const message of messages) {
+		if (message.role !== "assistant") {
+			flush();
+			entries.push({ kind: "user", id: message.id, message });
+			continue;
+		}
+		if (!turnId) turnId = message.id;
+		messageIds.push(message.id);
+		for (let index = 0; index < message.parts.length; index += 1) {
+			const part = message.parts[index];
+			if (part.type === "reasoning") {
+				const text = part.text ?? "";
+				if (!text.trim()) continue;
+				const last = segments.at(-1);
+				if (last && last.kind === "thinking") last.texts.push(text);
+				else segments.push({ kind: "thinking", id: `${message.id}:p${index}`, texts: [text] });
+			} else if (part.type === "dynamic-tool" || (typeof part.type === "string" && part.type.startsWith("tool-"))) {
+				const toolPart = part as unknown as WebToolPart;
+				segments.push({ kind: "tool", id: toolPart.toolCallId ?? `${message.id}:p${index}`, part: toolPart });
+			} else if (part.type === "text") {
+				const text = part.text ?? "";
+				if (!text.trim()) continue;
+				const id = `${message.id}:p${index}`;
+				segments.push({ kind: "interim", id, text });
+				finalText = text;
+				finalId = id;
+			}
+		}
+	}
+	flush();
+	return entries;
+}
+
+/** 用户消息右对齐气泡（结构与桌面 UserBubble 一致；P1/P2 增加图片与 hover 操作）。 */
+export const WebUserBubble = memo(function WebUserBubble(props: {
+	message: UIMessage;
+	/** runtime 存活且非流式时才允许编辑/删除/重发（历史静态会话不提供） */
+	canManage?: boolean;
+	onEdit?: (messageId: string, newText: string) => void;
+	onDelete?: (messageId: string) => void;
+	onResend?: (messageId: string) => void;
+}) {
+	const text = uiMessageText(props.message);
+	const images = uiMessageImages(props.message);
+	const [editing, setEditing] = useState(false);
+	const [editDraft, setEditDraft] = useState("");
+	if (!text.trim() && images.length === 0) return null;
+	const manage = Boolean(props.canManage && props.onEdit && props.onDelete && props.onResend);
 	return (
 		<article className="user-turn group/user mb-4 flex w-full min-w-0 max-w-full flex-col items-end">
-			<div className="w-fit min-w-0 max-w-[min(82%,64ch)] rounded-[14px] border border-border bg-muted/60 px-3 py-2 text-sm text-foreground [overflow-wrap:anywhere] break-words">
-				<div className="text-chat text-text-primary whitespace-pre-wrap break-words">{text}</div>
-			</div>
+			{images.length > 0 ? (
+				<div className="mb-1.5 flex w-fit max-w-full flex-wrap justify-end gap-1.5">
+					{images.map((src, index) => (
+						// eslint-disable-next-line @next/next/no-img-element
+						<img key={index} src={src} alt={t("web.messageImage")} className="h-24 w-24 rounded-lg border border-border object-cover" loading="lazy" />
+					))}
+				</div>
+			) : null}
+			{editing ? (
+				<div className="w-fit min-w-0 max-w-[min(82%,64ch)] rounded-2xl border border-primary/40 bg-muted/60 px-3.5 py-2.5">
+					<textarea
+						className="min-h-16 w-full resize-y rounded-md bg-transparent text-sm text-text-primary outline-none"
+						value={editDraft}
+						autoFocus
+						onChange={(event) => setEditDraft(event.target.value)}
+						onKeyDown={(event) => {
+							if (event.key === "Escape") setEditing(false);
+							if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+								event.preventDefault();
+								if (editDraft.trim()) {
+									props.onEdit?.(props.message.id, editDraft.trim());
+									setEditing(false);
+								}
+							}
+						}}
+					/>
+					<div className="mt-1.5 flex justify-end gap-1.5">
+						<Button type="button" variant="ghost" size="sm" className="h-7 px-2" onClick={() => setEditing(false)}>
+							<X className="size-3.5" aria-hidden="true" />
+						</Button>
+						<Button
+							type="button"
+							size="sm"
+							className="h-7 px-2"
+							disabled={!editDraft.trim()}
+							onClick={() => {
+								if (editDraft.trim()) {
+									props.onEdit?.(props.message.id, editDraft.trim());
+									setEditing(false);
+								}
+							}}
+						>
+							<Check className="size-3.5" aria-hidden="true" />
+						</Button>
+					</div>
+				</div>
+			) : (
+				<>
+					{text.trim() ? (
+						<div className="w-fit min-w-0 max-w-[min(82%,64ch)] rounded-2xl border border-border bg-muted/60 px-3.5 py-2.5 text-sm text-foreground [overflow-wrap:anywhere] break-words">
+							<div className="text-chat text-text-primary whitespace-pre-wrap break-words">{text}</div>
+						</div>
+					) : null}
+					{/* hover 操作行：复制恒有；编辑/删除/重发需 runtime 存活；触屏无 hover，常驻显示 */}
+					<div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/user:opacity-100 focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100">
+						<ActionButton label={t("web.msgCopy")} onClick={() => void copyTextToClipboard(text)}>
+							<Copy className="size-3.5" aria-hidden="true" />
+						</ActionButton>
+						{manage ? (
+							<>
+								<ActionButton
+									label={t("web.msgEdit")}
+									onClick={() => {
+										setEditDraft(text);
+										setEditing(true);
+									}}
+								>
+									<Pencil className="size-3.5" aria-hidden="true" />
+								</ActionButton>
+								<ActionButton label={t("web.msgResend")} onClick={() => props.onResend?.(props.message.id)}>
+									<RefreshCw className="size-3.5" aria-hidden="true" />
+								</ActionButton>
+								<ActionButton label={t("web.msgDelete")} danger onClick={() => props.onDelete?.(props.message.id)}>
+									<Trash2 className="size-3.5" aria-hidden="true" />
+								</ActionButton>
+							</>
+						) : null}
+					</div>
+				</>
+			)}
 		</article>
 	);
 });
+
+/** hover 工具按钮（消息操作行用）。 */
+function ActionButton(props: { label: string; onClick: () => void; danger?: boolean; children: React.ReactNode }) {
+	return (
+		<button
+			type="button"
+			className={cn(
+				"inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_60%,transparent)] hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]",
+				props.danger && "hover:text-danger",
+			)}
+			title={props.label}
+			aria-label={props.label}
+			onClick={props.onClick}
+		>
+			{props.children}
+		</button>
+	);
+}
 
 /** 思考折叠卡片（复用桌面 ThinkingBlock 视觉：Brain + 耗时/标题 + 同行预览）。
  * 默认永远单行；流式时预览尾部跟随，不自动撑开正文（对齐 dsh-web ReasoningRow）。 */
@@ -93,15 +337,6 @@ export const WebThinkingBlock = memo(function WebThinkingBlock(props: {
 	);
 });
 
-type WebToolPart = {
-	type: string;
-	toolName?: string;
-	toolCallId?: string;
-	state?: string;
-	output?: unknown;
-	errorText?: string;
-};
-
 /** 工具卡片（复用桌面 tool-card 视觉：图标 + 工具名 + 状态）。 */
 export const WebToolCard = memo(function WebToolCard(props: { part: WebToolPart }) {
 	const { part } = props;
@@ -110,10 +345,16 @@ export const WebToolCard = memo(function WebToolCard(props: { part: WebToolPart 
 	const state = part.state ?? "input-streaming";
 	const running = state === "input-streaming" || state === "input-available";
 	const error = state === "output-error" || state === "error" || Boolean(part.errorText);
+	const [expanded, setExpanded] = useState(false);
+	const inputText = prettyToolValue(part.input);
+	const outputText = prettyToolValue(part.output);
+	const errorText = typeof part.errorText === "string" ? prettyToolValue(part.errorText) : "";
+	// 运行中（输出未到）也可先展开看已流式到的输入
+	const hasBody = Boolean(inputText || outputText || errorText);
 	return (
-		<TimelineMarker kind="tool" tone={error ? "error" : running ? "active" : "success"}>
+		<TimelineMarker kind="tool" tone={error ? "error" : running ? "active" : "success"} contentClassName="pb-1">
 			<section className={cn("tool-card w-full min-w-0 overflow-hidden", running && "tone-running", error && "tone-error")} data-status={error ? "error" : running ? "running" : "done"} data-tool-name={toolName}>
-				<div className="relative flex min-h-7 items-center rounded-md px-1 py-1">
+				<button type="button" className="relative flex min-h-7 w-full cursor-pointer items-center rounded-md px-1 py-1 text-left" onClick={() => hasBody && setExpanded((value) => !value)} aria-expanded={expanded}>
 					<span className="tool-card-trigger flex min-w-0 items-center gap-2 text-control leading-5 text-text-secondary">
 						<span className="tool-card-icon">
 							<Wrench size={14} aria-hidden="true" />
@@ -129,40 +370,127 @@ export const WebToolCard = memo(function WebToolCard(props: { part: WebToolPart 
 								<span className="inline-flex items-center gap-1.5">{t("tool.statusError")}</span>
 							) : null}
 						</span>
+						{hasBody ? (
+							expanded ? (
+								<ChevronDown size={14} className="ml-auto shrink-0 text-text-tertiary" aria-hidden="true" />
+							) : (
+								<ChevronRight size={14} className="ml-auto shrink-0 text-text-tertiary" aria-hidden="true" />
+							)
+						) : null}
 					</span>
-				</div>
+				</button>
+				{expanded ? (
+					<div className="mx-1 mb-1 space-y-1.5 rounded-md border border-border-subtle bg-[color:color-mix(in_srgb,var(--color-bg-app)_60%,transparent)] p-2">
+						{errorText ? <ToolValueBlock label={t("web.toolError")} text={errorText} tone="error" /> : null}
+						{inputText ? <ToolValueBlock label={t("web.toolInput")} text={inputText} /> : null}
+						{outputText ? <ToolValueBlock label={t("web.toolOutput")} text={outputText} /> : null}
+					</div>
+				) : null}
 			</section>
 		</TimelineMarker>
 	);
 });
 
-/** 助手消息：思考 + 工具 + 正文 的扁平容器（不套气泡，左对齐全宽）。 */
-export const WebAssistantMessage = memo(function WebAssistantMessage(props: { message: UIMessage; isStreaming: boolean }) {
-	const { message, isStreaming } = props;
+/** 工具输入/输出展示块（等宽 + 限高滚动）。 */
+function ToolValueBlock(props: { label: string; text: string; tone?: "error" }) {
 	return (
-		<div className="w-full min-w-0">
-			{message.parts.map((part, index) => {
-				if (part.type === "reasoning") {
-					return <WebThinkingBlock key={index} text={part.text} running={isStreaming} />;
-				}
-				if (part.type === "dynamic-tool" || (typeof part.type === "string" && part.type.startsWith("tool-"))) {
-					// v7：静态工具 part.type 为 `tool-${toolName}`（tool-input-start 无 dynamic 标志），
-					// 动态工具为 "dynamic-tool"；toolName/toolCallId/state 都直接挂在 part 上
-					return <WebToolCard key={index} part={part as unknown as WebToolPart} />;
-				}
-				if (part.type === "text") {
-					return (
-						<Fragment key={index}>
-							{part.text ? (
-								<div className="timeline-inline-text">
-									<WebAssistantText text={part.text} isStreaming={isStreaming} />
-								</div>
+		<div className="min-w-0">
+			<div className={cn("mb-0.5 font-mono text-micro uppercase tracking-wide text-text-tertiary", props.tone === "error" && "text-danger")}>{props.label}</div>
+			<pre className={cn("max-h-56 overflow-auto rounded border border-border-subtle bg-black/[0.03] p-1.5 font-mono text-micro leading-relaxed whitespace-pre-wrap break-all text-text-secondary", props.tone === "error" && "text-danger")}>{props.text}</pre>
+		</div>
+	);
+}
+
+/** 助手回合：连续 assistant 消息聚合成一轮（对齐桌面 TurnRow 语义）。
+ *
+ * - 过程内容（合并后的思考块/工具卡/中间回复）收进「执行过程」折叠容器，
+ *   摘要条对齐桌面 ProcessSummaryToggle（ListTree + 计数）；
+ * - 最后一段非空正文常驻容器外，流式中即正在生成的文本（不被折叠卸载）；
+ * - 操作行（复制/分享）只挂回合尾，中间回复不再各自携带；
+ * - 流式中过程组自动展开（实时看过程），结束回落折叠（历史紧凑），手动开合优先。
+ */
+export const WebAssistantTurn = memo(function WebAssistantTurn(props: { turn: AssistantTurn; isStreaming: boolean }) {
+	const { turn } = props;
+	const [manualOpen, setManualOpen] = useState<boolean | null>(null);
+	const processOpen = manualOpen ?? props.isStreaming;
+	const hasProcess = turn.segments.length > 0;
+	return (
+		<div className="group/assistant flex w-full min-w-0 flex-col gap-2">
+			{hasProcess ? (
+				<div className="execution-fold" data-open={processOpen}>
+					<button
+						type="button"
+						className="inline-flex h-7 min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-control text-text-secondary transition-colors hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)] focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
+						onClick={() => setManualOpen(!processOpen)}
+						aria-expanded={processOpen}
+						title={processOpen ? t("common.collapse") : t("common.expand")}
+					>
+						{processOpen ? <ChevronDown size={13} className="shrink-0 text-text-tertiary" aria-hidden="true" /> : <ChevronRight size={13} className="shrink-0 text-text-tertiary" aria-hidden="true" />}
+						<ListTree size={13} className="shrink-0 text-text-tertiary" aria-hidden="true" />
+						<span className="shrink-0 font-medium">{t("activity.executionTitle")}</span>
+						<span className="inline-flex min-w-0 items-center gap-2 text-text-tertiary">
+							{turn.toolCount > 0 ? (
+								<span className="inline-flex items-center gap-0.5" title={t("activity.executionToolCount", { count: turn.toolCount })}>
+									<Wrench size={12} aria-hidden="true" />
+									<span className="tabular-nums">{turn.toolCount}</span>
+								</span>
 							) : null}
-						</Fragment>
-					);
-				}
-				return null;
-			})}
+							{turn.thinkingCount > 0 ? (
+								<span className="inline-flex items-center gap-0.5" title={t("activity.executionThinkingCount", { count: turn.thinkingCount })}>
+									<Brain size={12} aria-hidden="true" />
+									<span className="tabular-nums">{turn.thinkingCount}</span>
+								</span>
+							) : null}
+							{turn.interimCount > 0 ? (
+								<span className="inline-flex items-center gap-0.5" title={t("activity.executionInterimCount", { count: turn.interimCount })}>
+									<MessagesSquare size={12} aria-hidden="true" />
+									<span className="tabular-nums">{turn.interimCount}</span>
+								</span>
+							) : null}
+						</span>
+					</button>
+					{processOpen ? (
+						<div className="execution-fold-details mt-0.5 flex flex-col">
+							{turn.segments.map((segment) => {
+								if (segment.kind === "thinking") {
+									return <WebThinkingBlock key={segment.id} text={segment.texts.join("\n\n")} running={props.isStreaming} />;
+								}
+								if (segment.kind === "tool") {
+									return <WebToolCard key={segment.id} part={segment.part} />;
+								}
+								return (
+									<div key={segment.id} className="timeline-inline-text">
+										<WebAssistantText text={segment.text} />
+									</div>
+								);
+							})}
+							<button
+								type="button"
+								className="mt-1 inline-flex items-center gap-1 self-start rounded-md px-1.5 py-0.5 text-micro text-text-tertiary transition-colors hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_45%,transparent)] hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
+								onClick={() => setManualOpen(false)}
+							>
+								<ChevronUp size={12} aria-hidden="true" />
+								{t("common.collapse")}
+							</button>
+						</div>
+					) : null}
+				</div>
+			) : null}
+			{turn.finalText ? (
+				<div className="timeline-inline-text">
+					<WebAssistantText text={turn.finalText} isStreaming={props.isStreaming} />
+				</div>
+			) : null}
+			{!props.isStreaming && turn.finalText ? (
+				<div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/assistant:opacity-100 focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100">
+					<ActionButton label={t("web.msgCopy")} onClick={() => void copyTextToClipboard(turn.finalText)}>
+						<Copy className="size-3.5" aria-hidden="true" />
+					</ActionButton>
+					<ActionButton label={t("web.shareReply")} onClick={() => void shareWebText(t("web.shareReply"), turn.finalText)}>
+						<Share2 className="size-3.5" aria-hidden="true" />
+					</ActionButton>
+				</div>
+			) : null}
 		</div>
 	);
 });
@@ -362,6 +690,11 @@ export function WebTimeline(props: {
 	uiResponding?: boolean;
 	onRespondUi?: (response: AgentUiResponse) => void;
 	onLoadMore: () => void;
+	/** P1：消息操作（runtime 存活时可用） */
+	canManageMessages?: boolean;
+	onEditMessage?: (messageId: string, newText: string) => void;
+	onDeleteMessage?: (messageId: string) => void;
+	onResendMessage?: (messageId: string) => void;
 }) {
 	const { messages, hasActiveSession, hasMoreHistory, moreCount, loadingMore, streaming, error, onLoadMore } = props;
 	const timelineRef = useRef<HTMLDivElement | null>(null);
@@ -397,9 +730,13 @@ export function WebTimeline(props: {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [messages, streaming]);
 
+	// 回合聚合：连续 assistant 消息合并成「过程组 + 常驻正文」（桌面 TurnRow 语义）。
+	const timelineEntries = useMemo(() => groupTimelineEntries(messages), [messages]);
+	const lastEntryId = timelineEntries.length > 0 ? timelineEntries[timelineEntries.length - 1].id : "";
+
 	return (
 		<section className="message-timeline relative h-full min-h-0 flex-1 overflow-y-auto" ref={timelineRef} onScroll={updateScrollState}>
-			<div className="message-list flex flex-col gap-4 p-4">
+			<div className="message-list flex flex-col gap-4 p-4 pb-2 sm:px-6">
 				{!hasActiveSession && messages.length === 0 ? (
 					<div className="empty-state">
 						<div className="empty-logo">
@@ -416,8 +753,22 @@ export function WebTimeline(props: {
 					</div>
 				) : (
 					<>
-						{messages.map((message) => (
-							<div key={message.id}>{message.role === "user" ? <WebUserBubble message={message} /> : <WebAssistantMessage message={message} isStreaming={streaming && message === messages[messages.length - 1]} />}</div>
+						{timelineEntries.map((entry) => (
+							<div key={entry.id} id={`web-msg-${entry.id}`} className="scroll-mt-24">
+								{entry.kind === "user" ? (
+									<WebUserBubble message={entry.message} canManage={props.canManageMessages} onEdit={props.onEditMessage} onDelete={props.onDeleteMessage} onResend={props.onResendMessage} />
+								) : (
+									<>
+										{/* 回合聚合后锚点补偿：回合内非首条消息保留 web-msg-{id} 定位（跳转/分支定位用） */}
+										{entry.turn.messageIds
+											.filter((messageId) => messageId !== entry.id)
+											.map((messageId) => (
+												<span key={messageId} id={`web-msg-${messageId}`} className="sr-only" />
+											))}
+										<WebAssistantTurn turn={entry.turn} isStreaming={streaming && entry.id === lastEntryId} />
+									</>
+								)}
+							</div>
 						))}
 					</>
 				)}

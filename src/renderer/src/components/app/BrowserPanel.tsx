@@ -7,8 +7,8 @@ import { Input } from "../ui-shadcn/input";
 // Button 收口状态（P0）：工具栏/导航/UA 菜单按钮已换 shadcn Button（ghost/outline + 原尺寸 class 保留）。
 // 保留原生：.browser-tab-close（16px 微型关闭钮，Button 最小档 icon-xs 24px 无法替代）。
 
-/** 浏览器面板默认首页：官网自定义域名（与站点 CNAME 一致，不随仓库 owner 变化）。 */
-const DEFAULT_HOME = "https://pideck.caoayu.top/";
+/** 浏览器面板默认首页：空白页，避免打开浏览器时自动访问官网。 */
+const DEFAULT_HOME = "about:blank";
 
 type DeviceType = "pc" | "mobile" | "tablet";
 
@@ -466,7 +466,7 @@ export function BrowserPanel(props: {
 						title={t("browser.deviceLabel")}
 					>
 						{deviceIcon}
-						<span>{t(activeDevicePreset.label as any)}</span>
+						<span>{t(activeDevicePreset.label as Parameters<typeof t>[0])}</span>
 					</Button>
 					{deviceMenuOpen && (
 						<div className="absolute top-[calc(100%+6px)] right-0 z-30 min-w-[112px] rounded-md border border-border-subtle bg-bg-panel p-1 shadow-[var(--shadow-popover)]">
@@ -480,7 +480,7 @@ export function BrowserPanel(props: {
 									onClick={() => selectDevice(preset.id)}
 								>
 									{preset.id === "mobile" ? <Smartphone size={13} /> : preset.id === "tablet" ? <Tablet size={13} /> : <span className="size-[13px] rounded-[3px] border border-current" />}
-									<span>{t(preset.label as any)}</span>
+									<span>{t(preset.label as Parameters<typeof t>[0])}</span>
 								</Button>
 							))}
 						</div>

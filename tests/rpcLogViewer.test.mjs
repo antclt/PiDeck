@@ -4,13 +4,16 @@
 // 2) 主进程批量节流广播（~80ms 聚合）与退出清理；
 // 3) 环形缓冲扩容（初始历史）与 data 截断、保存合并去重；
 // 4) IPC 边界：get-live / save（输入校验与条数上限，保存直写自动文件）/ preload 订阅；
-// 5) 抽屉承载语义：不参与项目持久化、关闭还原打开前的面板。
+// 5) 抽屉承载语义：不参与项目持久化、关闭还原打开前的面板；
+// 6) 开启自动打开 + 活动栏 rpcLog 专属 Tab（镜像 atom 门控显隐）；
+// 7) DSH 实时广播：RpcLogLiveBroadcaster 镜像 pi 语义，IPC 观看登记按 backend 分流。
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
 const viewer = readFileSync("src/renderer/src/components/workspace/RpcLogPanel.tsx", "utf8");
 const agentManager = readFileSync("src/main/pi/AgentManager.ts", "utf8");
+const rpcLiveLogTap = readFileSync("src/main/pi/rpcLiveLogTap.ts", "utf8");
 const rpcLogger = readFileSync("src/main/logging/RpcLogger.ts", "utf8");
 const systemIpc = readFileSync("src/main/ipc/systemIpc.ts", "utf8");
 const preload = readFileSync("src/preload/index.ts", "utf8");
@@ -173,29 +176,31 @@ test("panel loads are keyed on agentId only and survive a dead agent", () => {
 
 test("AgentManager batches live log broadcast and cleans up on exit", () => {
 	// 广播只发生在开启记录的 agent 上：落盘与实时推送同一闸门
-	assert.match(agentManager, /if \(this\.rpcLoggingAgents\.has\(agentId\)\) \{[\s\S]{0,120}this\.enqueueLiveRpcLog\(this\.rpcLogger\?\.push\(logEntry\) \?\? logEntry\);/);
+	// （实时广播域 2026-03 收口到 RpcLiveLogTap，AgentManager 只保留调用点）
+	assert.match(agentManager, /if \(this\.rpcLiveTap\.isLogging\(agentId\)\) \{[\s\S]{0,120}this\.rpcLiveTap\.enqueue\(this\.rpcLogger\?\.push\(logEntry\) \?\? logEntry\);/);
 	// 广播用环形缓冲里那份截断副本（与 getLive 初始历史同形），原始大 payload 不跨进程克隆
-	assert.match(agentManager, /enqueueLiveRpcLog\(this\.rpcLogger\?\.push\(/);
+	assert.match(agentManager, /rpcLiveTap\.enqueue\(this\.rpcLogger\?\.push\(/);
 	// 节流常量：~80ms 聚合一批，单批与缓冲都有上限（防止 IPC/内存失控）
-	assert.match(agentManager, /LIVE_RPC_LOG_FLUSH_MS = 80/);
-	assert.match(agentManager, /LIVE_RPC_LOG_MAX_BATCH = 100/);
-	assert.match(agentManager, /LIVE_RPC_LOG_MAX_PENDING = 1000/);
+	assert.match(rpcLiveLogTap, /FLUSH_MS = 80/);
+	assert.match(rpcLiveLogTap, /MAX_BATCH = 100/);
+	assert.match(rpcLiveLogTap, /MAX_PENDING = 1000/);
 	// 单批超限的条目留到下一轮，不丢日志
-	assert.match(agentManager, /if \(rest\.length > 0\) \{\n\t+this\.pendingLiveRpcLogs\.set\(agentId, rest\);/);
-	// 生命周期配对：stopAll 清定时器与聚合缓冲，agent 关闭丢弃该 agent 的待发缓冲
-	assert.match(agentManager, /clearTimeout\(this\.liveRpcLogFlushTimer\)/);
-	assert.match(agentManager, /dropPendingLiveRpcLogs\(agentId\)/);
+	assert.match(rpcLiveLogTap, /if \(rest\.length > 0\) \{\n\t+this\.pendingByAgent\.set\(agentId, rest\);/);
+	// 生命周期配对：stopAll dispose 定时器与聚合缓冲，agent 关闭丢弃该 agent 的待发缓冲
+	assert.match(agentManager, /this\.rpcLiveTap\.dispose\(\);/);
+	assert.match(agentManager, /this\.rpcLiveTap\.clearAgent\(agentId\);/);
+	assert.match(rpcLiveLogTap, /clearTimeout\(this\.flushTimer\)/);
 });
 
 test("broadcast is gated on a renderer viewer, not just on logging being enabled", () => {
 	// 面板没打开时，每 80ms 一批无人认领的日志照样要在主进程做结构化克隆再发 IPC，
 	// 表现为整个应用（输入、流式）掉帧。观看状态由面板挂载/卸载成对登记。
-	assert.match(agentManager, /private readonly rpcLogWatchingAgents = new Set<string>\(\);/);
-	assert.match(agentManager, /private enqueueLiveRpcLog\(entry: RpcLogEntry\) \{[\s\S]{0,240}?if \(!this\.rpcLogWatchingAgents\.has\(entry\.agentId\)\) return;/);
-	assert.match(agentManager, /setRpcLogWatching\(agentId: string, watching: boolean\) \{/);
-	// 生命周期配对：agent 关闭 + stopAll 都要清观看登记
-	assert.match(agentManager, /this\.rpcLogWatchingAgents\.delete\(agentId\);/);
-	assert.match(agentManager, /this\.rpcLogWatchingAgents\.clear\(\);/);
+	assert.match(rpcLiveLogTap, /private readonly watchingAgents = new Set<string>\(\);/);
+	assert.match(rpcLiveLogTap, /enqueue\(entry: RpcLogEntry\): void \{[\s\S]{0,240}?if \(!this\.watchingAgents\.has\(entry\.agentId\)\) return;/);
+	assert.match(rpcLiveLogTap, /setWatching\(agentId: string, watching: boolean\): void \{/);
+	// 生命周期配对：agent 关闭（clearAgent）+ stopAll（dispose）都要清观看登记
+	assert.match(rpcLiveLogTap, /this\.watchingAgents\.delete\(agentId\);/);
+	assert.match(rpcLiveLogTap, /this\.watchingAgents\.clear\(\);/);
 	// 面板侧：挂载登记 true，卸载登记 false（与退订同一清理路径）
 	assert.match(viewer, /window\.piDesktop\.rpcLogs\.setWatching\(agentId, true\)\.catch\(\(\) => undefined\)/);
 	assert.match(viewer, /return \(\) => \{[\s\S]{0,160}window\.piDesktop\.rpcLogs\.setWatching\(agentId, false\)/);
@@ -299,11 +304,11 @@ test("viewer exposes a model filter and lazily loads full request bodies", () =>
 
 test("AgentManager gates model traces behind the same rpc-logging toggle", () => {
 	// 与 stdio 日志同一闸门：未开启记录的 agent 直接丢弃（不落盘、不广播）
-	assert.match(agentManager, /private handleModelTrace\(agentId: string, trace: ModelTraceInput\): void \{[\s\S]{0,200}if \(!this\.rpcLoggingAgents\.has\(agentId\)\) return;/);
+	assert.match(agentManager, /private handleModelTrace\(agentId: string, trace: ModelTraceInput\): void \{[\s\S]{0,200}if \(!this\.rpcLiveTap\.isLogging\(agentId\)\) return;/);
 	// 完整请求体落盘（request 才有）+ 紧凑条目走常规链路（落盘/实时广播）
 	assert.match(agentManager, /if \(trace\.kind === "request"\) \{[\s\S]{0,200}this\.rpcLogger\?\.writeModelTrace\(agentId, trace\)/);
 	assert.match(agentManager, /buildModelTraceLogEntry\(agentId, trace\)/);
-	assert.match(agentManager, /this\.enqueueLiveRpcLog\(this\.rpcLogger\?\.push\(entry\) \?\? entry\);/);
+	assert.match(agentManager, /this\.rpcLiveTap\.enqueue\(this\.rpcLogger\?\.push\(entry\) \?\? entry\);/);
 	// 桥注册第三参把快照路由到 handler（token 与 UI 桥同生共死）
 	assert.match(agentManager, /\(trace\) => this\.handleModelTrace\(agentId, trace\)/);
 });
@@ -343,4 +348,77 @@ test("model trace IPC: on-demand read + save path accepts the model direction", 
 	assert.match(systemIpc, /entry\.direction === "recv" \|\| entry\.direction === "model"/);
 	assert.match(preload, /getModelTrace: \(options: \{ agentId: string; traceId: string \}\)/);
 	assert.match(preload, /ipcChannels\.rpcLogsGetModelTrace/);
+});
+
+// ── 开启自动打开 + 抽屉活动栏 rpcLog 专属 Tab（默认隐藏，开启记录才显示）──
+const appTsx = readFileSync("src/renderer/src/App.tsx", "utf8");
+const rpcLogAtoms = readFileSync("src/renderer/src/atoms/rpc-log-atoms.ts", "utf8");
+const zhCopy = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
+const enCopy = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
+
+test("logging mirror atom: setLogging 回执落地才写，无变化返回原引用", () => {
+	// 镜像 atom：主进程 per-agent 开关的渲染层镜像，唯一写入方跟随 IPC 回执
+	assert.match(rpcLogAtoms, /export const rpcLoggingAgentIdsAtom = atom<ReadonlySet<string>>\(new Set<string>\(\)\);/);
+	assert.match(rpcLogAtoms, /export function toggleRpcLoggingAgent\(/);
+	// 无变化返回原引用（jotai Object.is 比较，避免无谓重渲）
+	assert.match(rpcLogAtoms, /if \(enabled \? ids\.has\(agentId\) : !ids\.has\(agentId\)\) return ids;/);
+	// App 层 rpc.setLogging 包装：回执落地才写镜像（写早了会把开关失败误显示为已开启）
+	assert.match(appTsx, /api\.rpcLogs\.setLogging\(target, enabled\)\.then\(\(receipt\) => \{/);
+	assert.match(appTsx, /patchRpcLoggingAgentIds\(agentId, receipt\);/);
+});
+
+test("drawer rail gains a gated rpcLog tab: 默认隐藏，开启记录且 agent 存活才显示", () => {
+	// 门控：镜像集合非空 + 目标 agent 仍有活跃 runtime（rpcLogTabTargetAgentId 计算）
+	assert.match(appTsx, /const rpcLogTabTargetAgentId = useMemo\(\(\) => \{/);
+	assert.match(appTsx, /rpcLogTabTargetAgentId[\s\S]{0,120}id: "rpcLog",/);
+	assert.match(appTsx, /label: t\("drawer\.rpcLog"\)/);
+	assert.match(appTsx, /icon: <ScrollText size=\{16\} \/>/);
+	assert.match(appTsx, /active: drawer === "rpcLog"/);
+	// 展开态点击是关闭还原（回到日志打开前的面板），不是清空 drawer
+	assert.match(appTsx, /workspace\.drawer === "rpcLog" && !workspace\.drawerCollapsed[\s\S]{0,80}workspace\.closeRpcLogPanel\(\);/);
+	// 文案双语同步（TranslationKey 由 zh-CN 推导，en-US 必须同步）
+	assert.match(zhCopy, /"drawer\.rpcLog": "RPC 日志"/);
+	assert.match(enCopy, /"drawer\.rpcLog": "RPC Log"/);
+});
+
+// ── DSH 实时 RPC 日志广播（与 pi 同面板同语义；主进程装配与分流）──
+const dshManager = readFileSync("src/main/dsh/DshAgentManager.ts", "utf8");
+const liveBroadcaster = readFileSync("src/main/logging/RpcLogLiveBroadcaster.ts", "utf8");
+const mainIndex = readFileSync("src/main/index.ts", "utf8");
+
+test("DSH 记录与实时广播共用同一次 push 截断结果，观看登记成对清理", () => {
+	// 落盘与广播共用 RpcLogger.push 返回的截断副本（与 getLive 初始历史同形态）
+	assert.match(dshManager, /const liveEntry = this\.rpcLogger\?\.push\(\{/);
+	assert.match(dshManager, /if \(liveEntry\) this\.rpcLogLive\?\.enqueue\(liveEntry\);/);
+	// 面板挂载/卸载成对登记；未注入广播器时静默（记录/落盘不受影响）
+	assert.match(dshManager, /setRpcLogWatching\(agentId: string, watching: boolean\): void \{[\s\S]{0,80}this\.rpcLogLive\?\.setWatching\(agentId, watching\);/);
+	// stop 丢该 agent 的待发缓冲；观看登记刻意保留（DSH agentId 跨 stop/attach 稳定）
+	assert.match(dshManager, /this\.rpcLogLive\?\.dropPending\(agentId\);/);
+});
+
+test("RpcLogLiveBroadcaster 镜像 pi 的批量节流语义，边界有界", () => {
+	// 常量与 pi AgentManager 一致：~80ms 聚合、单批 100、待发缓冲 1000
+	assert.match(liveBroadcaster, /DEFAULT_FLUSH_MS = 80/);
+	assert.match(liveBroadcaster, /MAX_BATCH = 100/);
+	assert.match(liveBroadcaster, /MAX_PENDING = 1000/);
+	// 观看闸门：面板没打开直接丢弃（落盘/环形缓冲不受影响）
+	assert.match(liveBroadcaster, /if \(!this\.watchingAgents\.has\(entry\.agentId\)\) return;/);
+	// 单批超限的余量留到下一轮，不丢日志
+	assert.match(liveBroadcaster, /const rest = entries\.slice\(RpcLogLiveBroadcaster\.MAX_BATCH\);/);
+	// clear 清登记/缓冲/在途定时器（配对清理，防泄漏）
+	assert.match(liveBroadcaster, /clearTimeout\(this\.flushTimer\)/);
+});
+
+test("rpcLogsSetWatching 按 backend 分流；装配层给 DSH 注入广播器并配对清理", () => {
+	// IPC 分流：DSH agent 走注入的广播器，pi 走 AgentManager 自带实时广播
+	assert.match(systemIpc, /setDshRpcLogWatching\?\.\(agentId, watching\);/);
+	assert.match(systemIpc, /agentManager\.setRpcLogWatching\(agentId, watching\);/);
+	// 装配：广播器直发主窗口（agentsRpcLog 在 DIRECT_EMIT_CHANNELS 白名单内）；
+	// 窗口销毁后静默丢弃
+	assert.match(mainIndex, /new RpcLogLiveBroadcaster\(\{/);
+	assert.match(mainIndex, /mainWindow && !mainWindow\.isDestroyed\(\)\) mainWindow\.webContents\.send\(channel, payload\);/);
+	// 作为 DshAgentManager 末位可选依赖注入
+	assert.match(mainIndex, /\(\) => mainCopy\("session\.dshUntitled"\),\s*rpcLogLiveBroadcaster,/);
+	// 退出路径：stopAll 之后全量清空（观看登记 + 聚合缓冲 + 在途定时器）
+	assert.match(mainIndex, /quitCleanup\.register\("dsh", async \(\) => \{[\s\S]{0,160}rpcLogLiveBroadcaster\.clear\(\);/);
 });

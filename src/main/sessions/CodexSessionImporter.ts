@@ -1012,7 +1012,7 @@ export class CodexSessionImporter {
 
 	private extractPiText(content: unknown[]) {
 		return content
-			.map((item: any) => item?.text ?? item?.thinking ?? item?.name ?? "")
+			.map((item) => (typeof item === "string" ? item : item && typeof item === "object" ? String((item as Record<string, unknown>).text ?? (item as Record<string, unknown>).thinking ?? (item as Record<string, unknown>).name ?? "") : ""))
 			.filter(Boolean)
 			.join(" ");
 	}

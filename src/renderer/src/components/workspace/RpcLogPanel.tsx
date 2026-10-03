@@ -7,6 +7,7 @@ import { cn } from "../../lib/utils";
 import { showNotice } from "../../utils/notice";
 import { MessageScroller, type MessageScrollerScrollApi } from "../agents/message-scroller";
 import { isModelTraceLogData, type RpcLogBatch, type RpcLogEntry } from "../../../../shared/types/rpcLog";
+import { ModelTraceDetail } from "./ModelTraceDetail";
 
 /**
  * 实时 RPC 日志面板（右侧工作区抽屉的 rpcLog 面板，替代旧的模态弹窗）。
@@ -116,7 +117,9 @@ const RpcLogRow = memo(function RpcLogRow(props: { log: RpcLogEntry; expanded: b
 	let detail: ReactNode = null;
 	if (expanded) {
 		if (trace?.kind === "request") {
-			if (tracePayload !== undefined) detail = <pre className="rpc-log-detail">{tracePayload}</pre>;
+			// 结构化轨迹视图（dsh-web Trajectory 式：指标行 + 系统提示词 + 完整消息流 + 工具定义）；
+			// 解析失败（截断/畸形）时组件内部自动退回原始 JSON 兑底。
+			if (tracePayload !== undefined) detail = <ModelTraceDetail payloadJson={tracePayload} summary={trace} />;
 			else if (traceView?.status === "missing") detail = <div className="rpc-log-detail-note">{t("rpc.modelTraceMissing")}</div>;
 			else detail = <div className="rpc-log-detail-note">{t("rpc.modelLoading")}</div>;
 		} else if (log.data !== undefined) {

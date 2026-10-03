@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import type { AddressInfo } from "node:net";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import type {
 	AgentRuntimeState,
@@ -23,6 +23,7 @@ import type {
 	SendSessionPromptInput,
 	SendSessionPromptResult,
 	SessionCommandResult,
+	SessionFileChange,
 	SessionMessagePage,
 	SessionRecord,
 	SessionRuntimeInfo,
@@ -31,7 +32,9 @@ import type {
 	SessionRuntimeTarget,
 	SessionSummary,
 	SessionTargetedValue,
+	SessionTodoSnapshot,
 	SessionUiResponseInput,
+	PiSubagentEntry,
 	UpdateSessionRecordInput,
 	WebServiceStatusInfo,
 } from "../../shared/types";
@@ -64,6 +67,45 @@ class WebBodyTooLargeError extends Error {
 	}
 }
 
+/** /api/chat 图片 parts 上限：最多 4 张，单张 base64 ≤2MB（客户端已预压缩）。 */
+const CHAT_IMAGE_MAX_COUNT = 4;
+const CHAT_IMAGE_MAX_BASE64_BYTES = 2 * 1024 * 1024;
+
+/**
+ * 从 useChat 提交的 user 消息 parts 里提取图片（type=file）转 ImageContent。
+ * data 兼容三种形态：data URL（data:<mime>;base64,<payload>，AI SDK v5+
+ * 的 file part 把它放在 url 字段）、裸 base64；非 image/* 媒体、超限图片
+ * 直接丢弃，不影响文本轮次。
+ */
+export function extractChatImages(parts: Array<{ type?: string; mediaType?: string; data?: string; url?: string }>): ImageContent[] {
+	const images: ImageContent[] = [];
+	for (const part of parts) {
+		const raw = typeof part.data === "string" && part.data ? part.data : typeof part.url === "string" ? part.url : "";
+		if (part.type !== "file" || !raw) continue;
+		if (images.length >= CHAT_IMAGE_MAX_COUNT) break;
+		let mimeType = typeof part.mediaType === "string" ? part.mediaType : "";
+		let payload = raw;
+		const dataUrlMatch = raw.match(/^data:([^;]+);base64,(.*)$/s);
+		if (dataUrlMatch) {
+			mimeType = mimeType || dataUrlMatch[1];
+			payload = dataUrlMatch[2];
+		}
+		if (!mimeType.startsWith("image/")) continue;
+		if (payload.length > CHAT_IMAGE_MAX_BASE64_BYTES) continue;
+		images.push({ type: "image", mimeType, data: payload });
+	}
+	return images;
+}
+
+/** 有界读文件：先 stat 校验大小再读，超过 maxBytes 抛错（避免把超大文件拉进内存）。 */
+async function readBoundedFile(path: string, maxBytes: number): Promise<Buffer> {
+	const info = await stat(path);
+	if (!info.isFile() || info.size > maxBytes) {
+		throw new Error(`WEB_SERVICE_FILE_TOO_LARGE_OR_MISSING: ${info.size} > ${maxBytes}`);
+	}
+	return readFile(path);
+}
+
 type WebServiceDependencies = {
 	/**
 	 * dev 模式渲染层 dev server 基址（如 http://localhost:5181）。
@@ -82,7 +124,6 @@ type WebServiceDependencies = {
 	// force=true 时绕过缓存重新 fork pi --list-models（Web 端模型选择器刷新按钮）。
 	listModels: (force?: boolean) => Promise<AvailableModel[]>;
 	listSessions: (projectId: string) => Promise<SessionSummary[]>;
-	getSessionRuntimeMessages: (sessionId: string) => SessionTargetedValue<ChatMessage[]> | undefined;
 	listCatalogSessions: (projectId?: string) => Promise<SessionRecord[]>;
 	createSessionDraft: (input: CreateSessionDraftInput) => Promise<SessionRecord>;
 	createAnonymousSession: (input: CreateAnonymousSessionInput) => Promise<CreateAnonymousSessionResult>;
@@ -129,6 +170,13 @@ type WebServiceDependencies = {
 			[key: string]: unknown;
 		}>
 	>;
+	/** 从历史轮次分叉新会话（P3 分支条；BrowserApi 已映射，服务端此前缺席）。 */
+	getForkMessages: (target: SessionRuntimeTarget) => Promise<SessionCommandResult<SessionTargetedValue<Array<{ entryId: string; text: string }>>>>;
+	forkRuntimeSession: (target: SessionRuntimeTarget, entryId: string) => Promise<SessionCommandResult<SessionTargetedValue<unknown>>>;
+	/** 会话活动监控（第二批 strips）：文件变更/子代理/todo 快照，装配侧对齐桌面 IPC 语义（含 running 降级对账）。缺省时路由返回 503。 */
+	listSessionFileChanges?: (sessionId: string) => Promise<SessionFileChange[]>;
+	listSessionSubagents?: (sessionId: string) => Promise<PiSubagentEntry[]>;
+	listSessionTodo?: (sessionId: string) => Promise<SessionTodoSnapshot | undefined>;
 	listPendingUiRequests: () => PendingUiRequestSnapshot[];
 	respondToUi: (input: SessionUiResponseInput) => Promise<void>;
 	/** DSH 子代理列表（S6.3：web 端工具面板；未装配 DSH 时缺省）。 */
@@ -181,6 +229,8 @@ export class WebServiceManager {
 	} | null = null;
 	/** 访问令牌：每次启动随机重生成，泄露的旧令牌在服务重启后即失效。 */
 	private authToken = "";
+	/** P1-P3 工作区路由（git/files/prompts）；未装配时这些路由 404。由 main/index.ts 在构造后注入。 */
+	workspaceRoutes: { handle(url: URL, request: IncomingMessage, response: ServerResponse): Promise<boolean> } | null = null;
 	/** 设置页「需要 token 鉴权」开关；true 时所有 /api/*（/api/health 除外）强制令牌。 */
 	private requiresAuth = false;
 	/** dev 模式渲染层 dev server 基址（无尾斜杠）；空串表示走构建产物。 */
@@ -391,6 +441,34 @@ export class WebServiceManager {
 			this.sendJson(response, { sessions });
 			return;
 		}
+		// ── 会话活动监控（第二批 strips）：文件变更/子代理/todo，与桌面 IPC 同源数据 ──
+		const fileChangesMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/file-changes$/);
+		if (fileChangesMatch && request.method === "GET") {
+			if (!this.deps.listSessionFileChanges) {
+				this.sendError(response, 503, "webError.stripsUnavailable", "session file changes are not available");
+				return;
+			}
+			this.sendJson(response, { changes: await this.deps.listSessionFileChanges(decodeURIComponent(fileChangesMatch[1])) });
+			return;
+		}
+		const subagentsMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/subagents$/);
+		if (subagentsMatch && request.method === "GET") {
+			if (!this.deps.listSessionSubagents) {
+				this.sendError(response, 503, "webError.stripsUnavailable", "session subagents are not available");
+				return;
+			}
+			this.sendJson(response, { subagents: await this.deps.listSessionSubagents(decodeURIComponent(subagentsMatch[1])) });
+			return;
+		}
+		const todoMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/todo$/);
+		if (todoMatch && request.method === "GET") {
+			if (!this.deps.listSessionTodo) {
+				this.sendError(response, 503, "webError.stripsUnavailable", "session todo is not available");
+				return;
+			}
+			this.sendJson(response, { todo: (await this.deps.listSessionTodo(decodeURIComponent(todoMatch[1]))) ?? null });
+			return;
+		}
 		// ── DSH 工具面板路由（S6.3：goals/subagents/skills；无活跃 runtime 返回空）──
 		const dshSubagentsMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/dsh\/subagents$/);
 		if (dshSubagentsMatch && request.method === "GET") {
@@ -536,6 +614,26 @@ export class WebServiceManager {
 			this.sendJson(response, { messages });
 			return;
 		}
+		// GET 导出：生成 HTML 后作为附件直接下载（浏览器端无法访问服务端磁盘路径）
+		const sessionExportHtmlDownloadMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/export-html$/);
+		if (sessionExportHtmlDownloadMatch && request.method === "GET") {
+			const sessionId = decodeURIComponent(sessionExportHtmlDownloadMatch[1]);
+			try {
+				const { path } = await this.deps.exportSessionRecordHtml(sessionId);
+				// 有界读取：导出 HTML 理论上可很大，上限 16MB，超出直接报错
+				const html = await readBoundedFile(path, 16 * 1024 * 1024);
+				const safeTitle = sessionId.replace(/[^\w.-]+/g, "_");
+				response.writeHead(200, {
+					"content-type": "text/html; charset=utf-8",
+					"content-disposition": `attachment; filename="pideck-session-${safeTitle}.html"`,
+					"cache-control": "no-store",
+				});
+				response.end(html);
+			} catch (error) {
+				this.sendError(response, 500, "webError.internal", error instanceof Error ? error.message : "export failed");
+			}
+			return;
+		}
 		const sessionMessagePageMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/messages\/page$/);
 		if (sessionMessagePageMatch && request.method === "GET") {
 			const beforeValue = url.searchParams.get("before");
@@ -595,12 +693,14 @@ export class WebServiceManager {
 		// 先建立该 session 的流式连接，再发 prompt；pi 事件到达后经翻译器流式返回，
 		// 前端 useChat 通过 x-vercel-ai-ui-message-stream: v1 头识别协议。
 		if (url.pathname === "/api/chat" && request.method === "POST") {
+			// 带图片的轮次 body 会明显变大（客户端已压缩到单图 ≤1.2MB，最多 4 张）
+			const CHAT_MAX_BODY_BYTES = 8 * 1024 * 1024;
 			const body = await this.readJson<{
 				id?: string;
-				messages?: Array<{ role?: string; content?: unknown; parts?: Array<{ type?: string; text?: string }> }>;
+				messages?: Array<{ role?: string; content?: unknown; parts?: Array<{ type?: string; text?: string; mediaType?: string; data?: string }> }>;
 				/** 本轮提交的 user 消息 id（AI SDK submit-message 必然携带）。 */
 				messageId?: string;
-			}>(request);
+			}>(request, CHAT_MAX_BODY_BYTES);
 			const sessionId = body.id?.trim();
 			if (!sessionId) {
 				this.sendError(response, 400, "webError.requestIdRequired", "session id is required");
@@ -614,7 +714,9 @@ export class WebServiceManager {
 				.join("");
 			const contentText = typeof lastUser?.content === "string" ? lastUser.content : "";
 			const message = (partsText || contentText).trim();
-			if (!message) {
+			// 图片 parts（type=file）→ ImageContent（最多 4 张，单图 base64 ≤2MB）
+			const images = extractChatImages(lastUser?.parts ?? []);
+			if (!message && images.length === 0) {
 				this.sendError(response, 400, "webError.messageRequired", "message is required");
 				return;
 			}
@@ -633,7 +735,8 @@ export class WebServiceManager {
 				.sendSessionPrompt({
 					sessionId,
 					requestId,
-					message,
+					message: message || " ",
+					...(images.length > 0 ? { images } : {}),
 				})
 				.catch((error: unknown) => ({
 					accepted: false as const,
@@ -649,7 +752,7 @@ export class WebServiceManager {
 			}
 			return;
 		}
-		const sessionRuntimeMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/runtime\/(stop|abort|restart|compact|state|commands|export-html|edit-message|delete-message|prepare-resend|models|model|thinking|permission|clone|rewind-list|rewind-diff|rewind-restore)$/);
+		const sessionRuntimeMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/runtime\/(stop|abort|restart|compact|state|commands|export-html|edit-message|delete-message|prepare-resend|models|model|thinking|permission|clone|fork|get-fork-messages|rewind-list|rewind-diff|rewind-restore)$/);
 		if (sessionRuntimeMatch && request.method === "POST") {
 			const sessionId = decodeURIComponent(sessionRuntimeMatch[1]);
 			const action = sessionRuntimeMatch[2];
@@ -668,6 +771,8 @@ export class WebServiceManager {
 				/** 检查点列表分页：每页条数 / 游标（rewind-list 用）。 */
 				limit?: number;
 				beforeTimestamp?: number;
+				/** fork：从哪个历史轮次分叉（entryId 来自 get-fork-messages）。 */
+				entryId?: string;
 			}>(request);
 			const target = body.target;
 			if (!target || target.sessionId !== sessionId) {
@@ -721,6 +826,12 @@ export class WebServiceManager {
 				case "clone":
 					result = await this.deps.cloneSessionRuntime(target);
 					break;
+				case "fork":
+					result = await this.deps.forkRuntimeSession(target, typeof body.entryId === "string" ? body.entryId : "");
+					break;
+				case "get-fork-messages":
+					result = await this.deps.getForkMessages(target);
+					break;
 				case "rewind-list":
 					result = await this.deps.listRewindCheckpoints(target, {
 						limit: typeof body.limit === "number" && Number.isFinite(body.limit) ? body.limit : undefined,
@@ -738,6 +849,8 @@ export class WebServiceManager {
 			return;
 		}
 		if (url.pathname.startsWith("/api/")) {
+			// P1-P3 工作区路由（git/files/prompts）：独立模块承载，返回 false 表示未命中
+			if (this.workspaceRoutes && (await this.workspaceRoutes.handle(url, request, response))) return;
 			this.sendError(response, 404, "webError.apiNotFound", "API not found");
 			return;
 		}
@@ -770,21 +883,15 @@ export class WebServiceManager {
 	}
 
 	private async getState() {
+		// messagesBySession 已移除（P0：轮询全量消息是纯浪费，React A2 从不消费；
+		// LAN Web 全量 UI 改为按 runtime 拉 GET /api/sessions/:id/messages，A1 兜底页
+		// 切会话/流结束时拉 /messages/page）。
 		const sessions = await this.deps.listCatalogSessions();
 		const runtimes = this.deps.listSessionRuntimes();
-		const messagesBySession: Record<string, ChatMessage[]> = {};
-		for (const runtime of runtimes) {
-			const snapshot = this.deps.getSessionRuntimeMessages(runtime.sessionId);
-			if (!snapshot) continue;
-			const { target } = snapshot;
-			if (target.sessionId !== runtime.sessionId || target.agentId !== runtime.agentId || target.runtimeGeneration !== runtime.runtimeGeneration) continue;
-			messagesBySession[runtime.sessionId] = snapshot.value;
-		}
 		return {
 			projects: this.deps.listProjects(),
 			sessions,
 			runtimes,
-			messagesBySession,
 			pendingUiRequests: this.deps.listPendingUiRequests(),
 		};
 	}
@@ -794,7 +901,10 @@ export class WebServiceManager {
 <html lang="en-US">
 <head>
 	<meta charset="utf-8" />
-	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+	<link rel="manifest" href="/manifest.webmanifest" />
+	<meta name="theme-color" content="#18181b" />
+	<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
 	<title>PiDeck Web Service</title>
 	<style>
 		:root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
@@ -879,6 +989,8 @@ export class WebServiceManager {
 		const dictionaries = ${serializeWebClientDictionaries()};
 		const locale = /^zh(?:-|$)/i.test(navigator.languages?.[0] || navigator.language || "") ? "zh-CN" : "en-US";
 		const copy = dictionaries[locale] || dictionaries["en-US"];
+		// messagesBySession 现在是纯客户端缓存：/api/state 不再携带全量消息（P0 轮询瘦身），
+		// 切会话/轮询时按需拉 /messages/page。
 		let state = { projects: [], sessions: [], runtimes: [], messagesBySession: {} };
 		let activeSessionId = "";
 		let creatingProjectId = "";
@@ -950,7 +1062,13 @@ export class WebServiceManager {
 			if (refreshing) return;
 			refreshing = true;
 			try {
-				state = await api("/api/state");
+				const next = await api("/api/state");
+				// 保留客户端已加载的消息，清理已删除会话的残留项
+				const liveSessionIds = new Set(next.sessions.map(session => session.id));
+				for (const key of Object.keys(state.messagesBySession)) {
+					if (!liveSessionIds.has(key)) delete state.messagesBySession[key];
+				}
+				state = { ...next, messagesBySession: state.messagesBySession };
 				if (!state.sessions.some(session => session.id === activeSessionId)) {
 					activeSessionId = state.sessions[0]?.id || "";
 				}
@@ -960,6 +1078,8 @@ export class WebServiceManager {
 				if (streamingSessionId) {
 					render();
 				} else {
+					// 非流式时刷新活跃会话消息（与旧的 /api/state 内嵌行为对齐）
+					if (activeSessionId) await loadSessionMessages(activeSessionId);
 					render();
 					renderMessages();
 				}
@@ -1040,13 +1160,15 @@ export class WebServiceManager {
 			}
 			const sessionButton = event.target.closest("[data-session]");
 			if (sessionButton) {
-				// 切换会话：终止上一个 SSE 流，避免流式块串到别的会话
+				// 切换会话：终止上一个 SSE 流，避免流式块串到别的会话；
+				// 每次切换都重拉消息（客户端缓存可能已过期）
 				stopStream();
 				activeSessionId = sessionButton.dataset.session;
-				if (!Object.hasOwn(state.messagesBySession, activeSessionId)) {
+				try {
 					await loadSessionMessages(activeSessionId);
-				}
+				} catch {}
 				render();
+				renderMessages();
 				return;
 			}
 		});
@@ -1434,7 +1556,9 @@ export class WebServiceManager {
 		const body = await readFile(filePath);
 		response.writeHead(200, {
 			"content-type": this.contentType(filePath),
-			"cache-control": filePath.endsWith("index.html") ? "no-store" : "public, max-age=31536000, immutable",
+			// HTML 入口（index.html / web.html）必须 no-store：PWA/SW 发新版后不能拿到旧壳引用旧 bundle；
+			// sw.js 主脚本浏览器按规范绕过 HTTP 缓存检查更新，不受 immutable 影响
+			"cache-control": filePath.endsWith(".html") ? "no-store" : "public, max-age=31536000, immutable",
 		});
 		response.end(body);
 	}
@@ -1461,6 +1585,8 @@ export class WebServiceManager {
 				return "image/png";
 			case ".ico":
 				return "image/x-icon";
+			case ".webmanifest":
+				return "application/manifest+json; charset=utf-8";
 			default:
 				return "application/octet-stream";
 		}
@@ -1597,7 +1723,8 @@ export class WebServiceManager {
 		response.end();
 	}
 
-	private async readJson<T>(request: IncomingMessage) {
+	/** 读取 JSON body。maxBytes：单请求逻辑上限（默认 2MB；/api/chat 带图片时放宽到 8MB）。 */
+	private async readJson<T>(request: IncomingMessage, maxBytes: number = MAX_JSON_BODY_BYTES) {
 		const chunks: Buffer[] = [];
 		let totalBytes = 0;
 		let oversized = false;
@@ -1608,7 +1735,7 @@ export class WebServiceManager {
 				request.destroy();
 				throw new WebBodyTooLargeError();
 			}
-			if (totalBytes > MAX_JSON_BODY_BYTES) {
+			if (totalBytes > maxBytes) {
 				// 逻辑上限：丢弃超限 chunk 但继续排空连接，保证 413 响应能送达客户端
 				oversized = true;
 				continue;

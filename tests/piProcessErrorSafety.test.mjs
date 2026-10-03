@@ -1,3 +1,4 @@
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
@@ -71,7 +72,7 @@ function loadPiProcess(spawnImpl) {
 				return { appendBuiltInExtensionArgs: (args) => [...args] };
 			}
 			if (id === "../extensions/extensionVersionGate") {
-				return require("../src/main/extensions/extensionVersionGate.ts");
+				return loadTsCommonJs("src/main/extensions/extensionVersionGate.ts");
 			}
 			// 日志共享实例未注册时返回 null，PiProcess 埋点静默跳过；
 			// 这里 mock 掉 sharedLogger，避免沙箱 require 按 tests/ 相对路径误解析。
@@ -153,7 +154,7 @@ test("AgentManager attaches lifecycle listeners before process.start", () => {
 	assert.match(source, /attachPiProcessLifecycle\(/);
 	assert.match(source, /buildStartupFailureMessage\(/);
 	// spawnAndGetState：先 attach，再 await process.start（create/reattach 共用握手）
-	const spawnBlock = source.slice(source.indexOf("private async spawnAndGetState"), source.indexOf("private notifyExtensionsDisabled"));
+	const spawnBlock = source.slice(source.indexOf("private async spawnAndGetState"), source.indexOf("private toSessionHostPath"));
 	const attachAt = spawnBlock.indexOf("this.attachPiProcessLifecycle");
 	const startAt = spawnBlock.indexOf("await process.start");
 	assert.ok(attachAt >= 0 && startAt > attachAt, "lifecycle must be attached before start()");

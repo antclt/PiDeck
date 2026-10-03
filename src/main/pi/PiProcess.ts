@@ -11,7 +11,7 @@ import type { AppSettings } from "../../shared/types";
 import type { SessionProxyMode } from "../../shared/types/session";
 import { toWindowsHostPath, toWslLinuxPath } from "../wsl/WslPaths";
 import { appendBuiltInExtensionArgs } from "../extensions/builtInExtensions";
-import { MIN_PI_MINOR_VERSION_FOR_BUILTIN_EXTENSION_SPECIFIER, MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST, MIN_PI_MINOR_VERSION_FOR_PROMPT_WHITELIST, MIN_PI_MINOR_VERSION_FOR_SKILL_WHITELIST } from "../extensions/extensionVersionGate";
+import { MIN_PI_VERSION_FOR_BUILTIN_EXTENSION_SPECIFIER, MIN_PI_VERSION_FOR_EXTENSION_WHITELIST, MIN_PI_VERSION_FOR_PROMPT_WHITELIST, MIN_PI_VERSION_FOR_SKILL_WHITELIST, parsePiVersion, piVersionAtLeast } from "../extensions/extensionVersionGate";
 import { getAppLogger } from "../logging/sharedLogger";
 import { applyPiProxyMode } from "../sessions/sessionProxyPolicy";
 import { killProcessTree } from "../git/gitProcess";
@@ -156,16 +156,15 @@ function estimateWhitelistInjectionChars(kind: WhitelistKind, paths: readonly st
  * （dist/core/package-manager.js 的 resolveExtensionSources 过滤
  * `source.startsWith("builtin:")`），更低版本的 `-e` 只接受 path / npm / git 源，
  * 传 `builtin:mcp` 会当成未知源——轻则忽略、重则启动失败，故 <0.99 一律不注入。
- * 版本未知（探测失败，minorVersion 为 null）同样不注入：未知时保守退回
+ * 版本未知（探测失败，版本为 null）同样不注入：未知时保守退回
  * 「不注入」最坏只是 MCP 不加载，而误注入可能直接让会话起不来。
  *
  * 只带 mcp 与 llama.cpp：codemode / tool-search 是 0.99 全新能力、用户尚无依赖，
  * 未配置 exposure 时它们只是「工具未激活」，不影响既有行为。两者都是 replaceable——
  * 用户若另装了注册 /mcp 的第三方扩展，会优先取代内置 mcp，注入不会与之冲突。
  */
-function appendBuiltInExtensionSpecifierArgs(args: string[], minorVersion: number | null | undefined): void {
-	if (minorVersion === null || minorVersion === undefined) return;
-	if (minorVersion < MIN_PI_MINOR_VERSION_FOR_BUILTIN_EXTENSION_SPECIFIER) return;
+function appendBuiltInExtensionSpecifierArgs(args: string[], piVersion: string | null | undefined): void {
+	if (!piVersionAtLeast(piVersion, MIN_PI_VERSION_FOR_BUILTIN_EXTENSION_SPECIFIER)) return;
 	// 值不是文件路径：WSL 下 finalPiArgs.map 的路径转换只认盘符 / UNC 前缀，
 	// `builtin:mcp` 两个条件都不匹配，会原样进 distro；不要给它加转换分支。
 	args.push("--extension", "builtin:mcp", "--extension", "builtin:llama.cpp");
@@ -185,13 +184,13 @@ function readCwdState(cwd: string): { exists: boolean; isDirectory: boolean } {
 	}
 }
 
-type VersionCacheEntry = { status: "pending"; promise: Promise<boolean> } | { status: "done"; ok: boolean; minorVersion: number | null };
+type VersionCacheEntry = { status: "pending"; promise: Promise<boolean> } | { status: "done"; ok: boolean; version: string | null };
 
 export class PiProcess extends EventEmitter {
 	private proc?: ChildProcessWithoutNullStreams;
 	private rpc?: PiRpcClient;
-	/** 从 --version 解析出的次版本号（第二段），用于启动诊断和信任标志兼容性判断。 */
-	private piMinorVersion: number | null = null;
+	/** 从 --version 归一化出的完整版本串（如 "0.85.0" / "1.0.0"），用于启动诊断与各版本门槛比较。 */
+	private piVersion: string | null = null;
 	/**
 	 * pi --version 只用于启动失败后的诊断，不应阻塞真正的 RPC 进程启动。
 	 * 按 command 路径缓存结果，避免连续打开多个 Agent 时重复启动 Node shim。
@@ -199,13 +198,19 @@ export class PiProcess extends EventEmitter {
 	private static readonly versionCache = new Map<string, VersionCacheEntry>();
 
 	/**
-	 * --approve/--no-approve 信任标志在 pi 0.79.0 引入。
-	 * 检查次版本号是否 >= 79（当前 pi 版本为 0.x.y，次版本号对应第二段）。
-	 * 未来 pi 升级到 1.x+ 后需要同步更新此检查。
+	 * 失效跨进程版本缓存（`pi update` 自更新后调用）：旧版本的门槛判断
+	 * （信任标志、白名单门等）对新版本毫无意义，必须重新探测。
 	 */
-	private static versionSupportsTrustFlags(minorVersion: number | null): boolean {
-		if (minorVersion === null) return false;
-		return minorVersion >= 79;
+	static invalidateVersionCache(): void {
+		PiProcess.versionCache.clear();
+	}
+
+	/**
+	 * --approve/--no-approve 信任标志在 pi 0.79.0 引入。
+	 * 完整 semver 比较：0.79+ 与 1.x+ 均支持；版本未知/探测失败时保守判不支持。
+	 */
+	private static versionSupportsTrustFlags(piVersion: string | null): boolean {
+		return piVersionAtLeast(piVersion, "0.79.0");
 	}
 
 	/**
@@ -433,12 +438,12 @@ export class PiProcess extends EventEmitter {
 			if (trustOverride) {
 				await this.ensureVersionCheck(command);
 				const cached = PiProcess.versionCache.get(command);
-				const supportsTrustFlags = cached?.status === "done" && cached.ok && PiProcess.versionSupportsTrustFlags(cached.minorVersion);
+				const supportsTrustFlags = cached?.status === "done" && cached.ok && PiProcess.versionSupportsTrustFlags(cached.version);
 				if (trustOverride === "no-approve" && !supportsTrustFlags) {
 					this.restoreParkedExtensions();
 					void getAppLogger()?.error("pi-process", "Cannot enforce denied project trust", {
 						command,
-						minorVersion: cached?.status === "done" ? cached.minorVersion : null,
+						piVersion: cached?.status === "done" ? cached.version : null,
 						versionCheck: cached?.status === "done" ? cached.ok : false,
 					});
 					throw new Error("Cannot start an untrusted project safely: pi 0.79.0 or newer is required and its version must be verifiable.");
@@ -493,8 +498,8 @@ export class PiProcess extends EventEmitter {
 			if (useWhitelist) {
 				if (!trustOverride) await this.ensureVersionCheck(command);
 				const cachedVersionGate = PiProcess.versionCache.get(command);
-				const minorForGate = cachedVersionGate?.status === "done" ? cachedVersionGate.minorVersion : this.piMinorVersion;
-				const versionTooOld = minorForGate !== null && minorForGate !== undefined && minorForGate < MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST;
+				const versionForGate = cachedVersionGate?.status === "done" ? cachedVersionGate.version : this.piVersion;
+				const versionTooOld = !piVersionAtLeast(versionForGate, MIN_PI_VERSION_FOR_EXTENSION_WHITELIST);
 				// 注入预算兜底：逐条 --extension 使命令行长度 O(扩展数)，与技能/提示词同一套判断。
 				const extensionBudget = evaluateWhitelistBudget("extensions", whitelistPaths);
 				if (versionTooOld || extensionBudget.overBudget) {
@@ -503,10 +508,10 @@ export class PiProcess extends EventEmitter {
 					appendBuiltInExtensionArgs(finalPiArgs, builtInPaths, { noExtensions: false });
 					if (versionTooOld) {
 						void getAppLogger()?.warn("pi-process", "pi version too old for extension whitelist; falling back to default discovery", {
-							minorVersion: minorForGate,
-							required: MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST,
+							piVersion: versionForGate,
+							required: MIN_PI_VERSION_FOR_EXTENSION_WHITELIST,
 						});
-						console.warn(`[PiProcess] pi ${minorForGate}.x too old for extension disable whitelist (need >= ${MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST}); disabled extensions will still load`);
+						console.warn(`[PiProcess] pi ${versionForGate ?? "?"} too old for extension disable whitelist (need >= ${MIN_PI_VERSION_FOR_EXTENSION_WHITELIST}); disabled extensions will still load`);
 					} else {
 						recordWhitelistSkip("extensions", whitelistPaths.length, extensionBudget);
 					}
@@ -523,7 +528,7 @@ export class PiProcess extends EventEmitter {
 					// 不显式带回来会让用户 MCP 面板里配好的服务器（含 CUA 注册项）与 llama.cpp provider
 					// 被静默禁用——现象是「升级 pi 后 MCP 工具消失」。--extension 走私有 specifier 分支，
 					// 不参与白名单预算（两条共 ~40 字符，可忽略）。
-					appendBuiltInExtensionSpecifierArgs(finalPiArgs, minorForGate);
+					appendBuiltInExtensionSpecifierArgs(finalPiArgs, versionForGate);
 					void getAppLogger()?.info("pi-process", "Extension whitelist mode enabled", {
 						extensions: whitelistPaths.length,
 						cwd: this.cwd,
@@ -553,14 +558,14 @@ export class PiProcess extends EventEmitter {
 			if (useSkillWhitelist) {
 				if (!trustOverride) await this.ensureVersionCheck(command);
 				const cachedSkillGate = PiProcess.versionCache.get(command);
-				const minorForSkillGate = cachedSkillGate?.status === "done" ? cachedSkillGate.minorVersion : this.piMinorVersion;
-				if (minorForSkillGate !== null && minorForSkillGate !== undefined && minorForSkillGate < MIN_PI_MINOR_VERSION_FOR_SKILL_WHITELIST) {
+				const versionForSkillGate = cachedSkillGate?.status === "done" ? cachedSkillGate.version : this.piVersion;
+				if (!piVersionAtLeast(versionForSkillGate, MIN_PI_VERSION_FOR_SKILL_WHITELIST)) {
 					// 版本过低：白名单不可用，恢复 pi 默认技能发现（禁用不生效，行为与未启用一致）。
 					void getAppLogger()?.warn("pi-process", "pi version too old for skill whitelist; falling back to default discovery", {
-						minorVersion: minorForSkillGate,
-						required: MIN_PI_MINOR_VERSION_FOR_SKILL_WHITELIST,
+						piVersion: versionForSkillGate,
+						required: MIN_PI_VERSION_FOR_SKILL_WHITELIST,
 					});
-					console.warn(`[PiProcess] pi ${minorForSkillGate}.x too old for skill disable whitelist (need >= ${MIN_PI_MINOR_VERSION_FOR_SKILL_WHITELIST}); disabled skills will still load`);
+					console.warn(`[PiProcess] pi ${versionForSkillGate ?? "?"} too old for skill disable whitelist (need >= ${MIN_PI_VERSION_FOR_SKILL_WHITELIST}); disabled skills will still load`);
 				} else {
 					// 白名单模式即使列表为空也要加 --no-skills：空列表表示「全部禁用」，不是「不启用」。
 					// requestedSkillPaths 已排除 piRpcNoSkills，此处不会与诊断开关重复加参数。
@@ -589,14 +594,14 @@ export class PiProcess extends EventEmitter {
 			if (usePromptWhitelist) {
 				if (!trustOverride) await this.ensureVersionCheck(command);
 				const cachedPromptGate = PiProcess.versionCache.get(command);
-				const minorForPromptGate = cachedPromptGate?.status === "done" ? cachedPromptGate.minorVersion : this.piMinorVersion;
-				if (minorForPromptGate !== null && minorForPromptGate !== undefined && minorForPromptGate < MIN_PI_MINOR_VERSION_FOR_PROMPT_WHITELIST) {
+				const versionForPromptGate = cachedPromptGate?.status === "done" ? cachedPromptGate.version : this.piVersion;
+				if (!piVersionAtLeast(versionForPromptGate, MIN_PI_VERSION_FOR_PROMPT_WHITELIST)) {
 					// 版本过低：白名单不可用，恢复 pi 默认模板发现（禁用不生效，行为与未启用一致）。
 					void getAppLogger()?.warn("pi-process", "pi version too old for prompt whitelist; falling back to default discovery", {
-						minorVersion: minorForPromptGate,
-						required: MIN_PI_MINOR_VERSION_FOR_PROMPT_WHITELIST,
+						piVersion: versionForPromptGate,
+						required: MIN_PI_VERSION_FOR_PROMPT_WHITELIST,
 					});
-					console.warn(`[PiProcess] pi ${minorForPromptGate}.x too old for prompt disable whitelist (need >= ${MIN_PI_MINOR_VERSION_FOR_PROMPT_WHITELIST}); disabled prompts will still load`);
+					console.warn(`[PiProcess] pi ${versionForPromptGate ?? "?"} too old for prompt disable whitelist (need >= ${MIN_PI_VERSION_FOR_PROMPT_WHITELIST}); disabled prompts will still load`);
 				} else if (promptBudget && promptBudget.overBudget && promptWhitelistPaths) {
 					recordWhitelistSkip("prompts", promptWhitelistPaths.length, promptBudget);
 				} else {
@@ -646,7 +651,7 @@ export class PiProcess extends EventEmitter {
 			// 初始化诊断信息。信任场景的版本检测已在上方同步完成。
 			// 非信任场景仍异步触发，不阻塞 RPC 启动。
 			const cachedVersion = PiProcess.versionCache.get(command);
-			this.piMinorVersion = cachedVersion?.status === "done" ? cachedVersion.minorVersion : this.piMinorVersion;
+			this.piVersion = cachedVersion?.status === "done" ? cachedVersion.version : this.piVersion;
 			this.diagnostics = {
 				command: command,
 				args: finalArgs,
@@ -924,7 +929,7 @@ export class PiProcess extends EventEmitter {
 	private ensureVersionCheck(command: string): Promise<boolean> {
 		const cached = PiProcess.versionCache.get(command);
 		if (cached?.status === "done") {
-			this.piMinorVersion = cached.minorVersion;
+			this.piVersion = cached.version;
 			if (this.diagnostics?.command === command) {
 				this.diagnostics.versionCheck = cached.ok;
 				this.diagnostics.versionCheckProbed = true;
@@ -949,31 +954,19 @@ export class PiProcess extends EventEmitter {
 				},
 				(error, stdout) => {
 					const ok = !error;
-					const minorVersion = ok ? this.parseMinorVersion(stdout.trim()) : 0;
-					PiProcess.versionCache.set(command, { status: "done", ok, minorVersion });
-					this.piMinorVersion = minorVersion;
+					const version = ok ? parsePiVersion(stdout.trim()) : null;
+					PiProcess.versionCache.set(command, { status: "done", ok, version });
+					this.piVersion = version;
 					if (this.diagnostics?.command === command) {
 						this.diagnostics.versionCheck = ok;
 						this.diagnostics.versionCheckProbed = true;
 					}
-					this.emit("version-check", { ok, minorVersion });
+					this.emit("version-check", { ok, version });
 					resolve(ok);
 				},
 			);
 		});
 		PiProcess.versionCache.set(command, { status: "pending", promise });
 		return promise;
-	}
-
-	/**
-	 * 从 pi 的版本号字符串提取次版本号（第二段），用于信任标志兼容性判断。
-	 * 格式通常为 "0.79.4"，返回 79。
-	 */
-	private parseMinorVersion(version: string): number {
-		const match = version.match(/^(\d+)\.(\d+)/);
-		if (match) return parseInt(match[2], 10);
-		// fallback：如果只有主版本号或裸数字
-		const major = parseInt(version, 10);
-		return Number.isFinite(major) ? major : 0;
 	}
 }

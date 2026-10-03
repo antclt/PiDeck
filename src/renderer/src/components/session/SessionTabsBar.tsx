@@ -193,19 +193,29 @@ export type SessionTabsBarProps = {
 	 * 可见性判定与侧栏会话右键菜单同一套（DSH 历史会话无宿主文件 → 隐藏复制/导出/路径组）。
 	 * undefined = 无当前会话（引导页等），整组不渲染。
 	 */
-	sessionActions?: {
-		/** 复制会话：live 走 clone 分流（DSH 亦可），历史走 copyRecord；草稿会话隐藏 */
-		canCopySession: boolean;
-		/** 导出 HTML：DSH 无实现，隐藏 */
-		canExportHtml: boolean;
-		/** 有会话文件：无（草稿/DSH）则隐藏「复制路径 / 打开文件」 */
-		hasFilePath: boolean;
-		onCopySession: () => void;
-		onCopySessionFilePath: () => void;
-		onOpenSessionFile?: () => void;
-		onExportSessionHtml?: () => void;
-		onRenameSession?: () => void;
-	};
+	sessionActions?: SessionTabActions;
+	/**
+	 * Tab 右键菜单的「会话操作」组：按被右键 Tab 的 sessionId 参数化（后台 Tab 同样可操作）。
+	 * 装配层与 sessionActions 同一工厂（能力闸门一致）；返回 undefined = 无该会话记录，整组不渲染。
+	 */
+	contextSessionActions?: (sessionId: string) => SessionTabActions | undefined;
+};
+
+/** 会话操作组（⋯ 菜单与 Tab 右键菜单共用）：能力闸门由装配层按目标会话算好
+ *  （草稿/DSH/无文件路径），渲染层只按 flags 与回调存在性出菜单项。 */
+export type SessionTabActions = {
+	/** 复制会话：live 走 clone 分流（DSH 亦可），历史走 copyRecord；草稿会话隐藏 */
+	canCopySession: boolean;
+	/** 导出 HTML：DSH 无实现，隐藏 */
+	canExportHtml: boolean;
+	/** 有会话文件：无（草稿/DSH）则隐藏「复制路径 / 打开文件」 */
+	hasFilePath: boolean;
+	onCopySession: () => void;
+	onCopySessionFilePath: () => void;
+	onOpenSessionFile?: () => void;
+	onExportSessionHtml?: () => void;
+	/** 重命名回调；undefined（草稿期）时隐藏入口——草稿自动命名前先钉名字会进 manual 终态 */
+	onRename?: () => void;
 };
 
 export function SessionTabsBar(props: SessionTabsBarProps) {
@@ -413,6 +423,9 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 								onCloseOthers={props.onCloseOthers}
 								onCloseAll={props.onCloseAll}
 								onTogglePin={props.onTogglePin}
+								// 右键菜单的「会话操作」组（重命名/复制/导出/路径/打开）：按本 Tab 的 sessionId 现取，
+								// 后台 Tab 也能操作；工厂与 ⋯ 菜单 sessionActions 同源（App 同一装配）。
+								sessionActions={props.contextSessionActions?.(sessionId)}
 								onDragStart={(event) => {
 									dragSourceRef.current = sessionId;
 									dragTargetRef.current = null;
@@ -440,12 +453,14 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 								</>
 							);
 						// —— 收集顶层 Tab 节点：普通会话 Tab；分屏组「胶囊 + 组内 Tab」整体算一个节点。
-						// 分隔线策略改为显式 emitDivider：默认只在「进入新组 / 离开分组 / 普通 Tab 之间」插淡坚线，
+						// 分隔线策略改为显式 emitDivider：默认只在「进入新组 / 离开分组 / 普通 Tab 之间」插分隔线，
 						// 同一项目分组内相邻 Tab 不插线（保持组内连续），避免浏览器式分隔线把分组切散。
+						// 强度：border-default（#dfdfdf）再打五折后与白底几乎无差（用户报「看不清」），
+						// 必须用不透明的 border-strong（浅 #d7d7d7 / 暗 #3a3a3a），高度也从 h-4 提到 h-5。
 						const nodes: ReactNode[] = [];
 						const emitDivider = () => {
 							if (nodes.length > 0) {
-								nodes.push(<span key={`tab-sep:${nodes.length}`} className="mx-0.5 h-4 w-px shrink-0 bg-border/50" aria-hidden="true" />);
+								nodes.push(<span key={`tab-sep:${nodes.length}`} className="mx-0.5 h-5 w-px shrink-0 bg-border-strong" aria-hidden="true" />);
 							}
 						};
 						// groupKey 记录当前节点是否处于某项目分组内；null 表示自由/分屏，切换回组时均需分隔线。
@@ -591,11 +606,11 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 					{/* 文件/Diff 与会话共用本栏：同一套 session-tab 皮，不另开绿条栏 */}
 					{props.editorTabs && props.editorTabs.length > 0 ? (
 						<>
-							<span className="mx-0.5 h-4 w-px shrink-0 bg-border/50" aria-hidden="true" />
+							<span className="mx-0.5 h-5 w-px shrink-0 bg-border-strong" aria-hidden="true" />
 							{props.editorTabs.flatMap((tab, index) => {
 								const node = <EditorWorkbenchTab key={tab.id} tab={tab} indicatorId={activeIndicatorId} indicatorTransition={indicatorTransition} onSelect={props.onSelectEditorTab} onClose={props.onCloseEditorTab} onPromotePreview={props.onPromoteEditorPreview} />;
 								if (index === 0) return [node];
-								return [<span key={`editor-tab-sep:${tab.id}`} className="mx-0.5 h-4 w-px shrink-0 bg-border/50" aria-hidden="true" />, node];
+								return [<span key={`editor-tab-sep:${tab.id}`} className="mx-0.5 h-5 w-px shrink-0 bg-border-strong" aria-hidden="true" />, node];
 							})}
 						</>
 					) : null}
@@ -633,8 +648,8 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 							{props.sessionActions && (
 								<>
 									{!props.runControl?.capabilities && <DropdownMenuLabel>{t("tabs.currentSessionGroup")}</DropdownMenuLabel>}
-									{props.sessionActions.onRenameSession && (
-										<DropdownMenuItem onSelect={props.sessionActions.onRenameSession}>
+									{props.sessionActions.onRename && (
+										<DropdownMenuItem onSelect={props.sessionActions.onRename}>
 											<span className="inline-flex items-center gap-2">
 												<Pencil className="size-3.5" aria-hidden="true" />
 												{t("common.rename")}
@@ -740,7 +755,7 @@ function EditorWorkbenchTab(props: {
 					aria-selected={Boolean(tab.active)}
 					aria-label={tab.title ?? tab.label}
 					className={cn(
-						"session-tab group relative flex h-7 shrink-0 cursor-pointer select-none items-center rounded-md border px-2 text-micro transition-[color,background-color,border-color,box-shadow,transform] duration-200",
+						"session-tab group relative flex h-7 shrink-0 cursor-pointer select-none items-center rounded-md border px-2 text-tab transition-[color,background-color,border-color,box-shadow,transform] duration-200",
 						// 工作台文件/Diff Tab 宽度上限跟随外观设置（--session-tab-max-w 由 SessionTabsBar 根注入），
 						// 与会话 Tab 统一宽度来源，不再保留旧固定值。
 						"w-fit max-w-(--session-tab-max-w)",
@@ -884,6 +899,8 @@ function SessionTab(props: {
 	indicatorId: string;
 	/** 指示器 transition：spring（默认）/ 减少动态时瞬时 */
 	indicatorTransition: Transition;
+	/** 右键菜单的「会话操作」组（App 按 sessionId 参数化装配）；undefined = 整组不渲染 */
+	sessionActions?: SessionTabActions;
 }) {
 	const { sessionId, active, pinned, preview, dragging } = props;
 	const record = useAtomValue(sessionRecordByIdAtomFamily(sessionId));
@@ -946,13 +963,17 @@ function SessionTab(props: {
 		);
 
 	return (
+		/* 嵌套顺序契约：TooltipTrigger(asChild) > ContextMenuTrigger(asChild) > Tab div。
+		   Radix asChild 只把 props 合并到「直接子元素」：中间隔 Root（ContextMenu.Root /
+		   Tooltip.Provider 等非 DOM、非 Slot 组件）事件会被静默丢弃（2026-10-01 右键菜单
+		   失效的根因）；但 Trigger 都是 Slot 合并透传组件——外层 Trigger 的 hover/focus
+		   props 会随链路逐层合并到 div，两层 Trigger 可以叠。2026-10-02 重排时误删
+		   TooltipTrigger（Tooltip.Root 失去 trigger）→ hover 富提示（标题+工作区）失效
+		   （用户报「移入的效果没了」）；TooltipTrigger 必须保留在链上（单测/e2e 双契约）。 */
 		<ContextMenu>
-			<ContextMenuTrigger asChild>
-				{/* 富 hover 提示替代原生 title：第一行会话标题，第二行工作区（项目目录名 + 完整路径）。
-				    无工作区（草稿/项目缺失）时退化为单行标题，行为与旧 title 一致。
-				    delayDuration=500 与 TitleScrollText 的 hoverDelayMs 同拍：快速扫过不弹。 */}
-				<Tooltip delayDuration={500}>
-					<TooltipTrigger asChild>
+			<Tooltip delayDuration={500}>
+				<TooltipTrigger asChild>
+					<ContextMenuTrigger asChild>
 						<div
 							role="tab"
 							aria-selected={active}
@@ -972,7 +993,7 @@ function SessionTab(props: {
 								if (event.button === 1 && !pinned) close();
 							}}
 							className={cn(
-								"session-tab group relative flex h-7 shrink-0 cursor-pointer select-none items-center rounded-md border px-2 text-micro transition-[color,background-color,border-color,box-shadow,transform] duration-200",
+								"session-tab group relative flex h-7 shrink-0 cursor-pointer select-none items-center rounded-md border px-2 text-tab transition-[color,background-color,border-color,box-shadow,transform] duration-200",
 								// 固定 Tab 与普通 Tab 同宽策略（按内容收缩）：固定 Tab 无关闭按钮，
 								// hover 不会因按钮出现而跳动，无需 w-20 占位；固定宽度反而让 Pin 图标挤占标题空间。
 								// 有 DSH/生图徽标或模式 chip 时放宽上限：基础上限 + 徽标预留 28px
@@ -1049,23 +1070,26 @@ function SessionTab(props: {
             随主题实时切换，与 SessionTree 选中态同色。 */}
 							{active && <motion.span aria-hidden="true" layoutId={props.indicatorId} layout="position" transition={props.indicatorTransition} className="pointer-events-none absolute inset-0 rounded-md bg-accent" />}
 						</div>
-					</TooltipTrigger>
-					<TooltipContent side="bottom" align="start" className="max-w-80">
-						<div className="flex min-w-0 flex-col gap-0.5">
-							<span className="truncate font-medium">{title}</span>
-							{/* 第二行是「工作区 · 目录」：反色面（浅色近黑底 / 暗色近白底）上不能用页面次要文字色
-							    text-muted-foreground，否则浅色 #4b5563 on #202124 ≈ 2.0:1、暗色 #b8b8b2 on #ecece7
-							    ≈ 1.6:1 都看不清（用户反馈「目录、路径黑色的看不清」）；改用同族降透明度保留层级。 */}
-							{workspaceName ? (
-								<span className="truncate text-[11px] text-background/75" title={tabProject?.path}>
-									{workspaceName}
-									{tabProject?.path && tabProject.path !== workspaceName ? ` · ${tabProject.path}` : ""}
-								</span>
-							) : null}
-						</div>
-					</TooltipContent>
-				</Tooltip>
-			</ContextMenuTrigger>
+					</ContextMenuTrigger>
+				</TooltipTrigger>
+				{/* 富 hover 提示替代原生 title：第一行会话标题，第二行工作区（项目目录名 + 完整路径）。
+			    无工作区（草稿/项目缺失）时退化为单行标题，行为与旧 title 一致。
+			    delayDuration=500 与 TitleScrollText 的 hoverDelayMs 同拍：快速扫过不弹。 */}
+				<TooltipContent side="bottom" align="start" className="max-w-80">
+					<div className="flex min-w-0 flex-col gap-0.5">
+						<span className="truncate font-medium">{title}</span>
+						{/* 第二行是「工作区 · 目录」：反色面（浅色近黑底 / 暗色近白底）上不能用页面次要文字色
+					    text-muted-foreground，否则浅色 #4b5563 on #202124 ≈ 2.0:1、暗色 #b8b8b2 on #ecece7
+					    ≈ 1.6:1 都看不清（用户反馈「目录、路径黑色的看不清」）；改用同族降透明度保留层级。 */}
+						{workspaceName ? (
+							<span className="truncate text-[11px] text-background/75" title={tabProject?.path}>
+								{workspaceName}
+								{tabProject?.path && tabProject.path !== workspaceName ? ` · ${tabProject.path}` : ""}
+							</span>
+						) : null}
+					</div>
+				</TooltipContent>
+			</Tooltip>
 			<ContextMenuContent className="min-w-40">
 				{/* 固定/关闭等 Tab 级操作；运行控制在右上角 ⋯ 菜单 */}
 				<ContextMenuItem onSelect={() => props.onTogglePin(sessionId)}>
@@ -1096,6 +1120,55 @@ function SessionTab(props: {
 						{t("tabs.closeAll")}
 					</span>
 				</ContextMenuItem>
+				{/* 会话操作组：与右上角 ⋯ 菜单「当前会话操作」同一工厂装配，作用目标是被右键的 Tab；
+				    能力闸门（草稿/DSH/无文件路径）在装配层算好，这里只按 flags 与回调存在性出项。 */}
+				{props.sessionActions && (
+					<>
+						<ContextMenuSeparator />
+						{props.sessionActions.onRename && (
+							<ContextMenuItem onSelect={props.sessionActions.onRename}>
+								<span className="inline-flex items-center gap-2">
+									<Pencil className="size-3.5" aria-hidden="true" />
+									{t("common.rename")}
+								</span>
+							</ContextMenuItem>
+						)}
+						{props.sessionActions.canCopySession && (
+							<ContextMenuItem onSelect={props.sessionActions.onCopySession}>
+								<span className="inline-flex items-center gap-2">
+									<Copy className="size-3.5" aria-hidden="true" />
+									{t("menu.copySession")}
+								</span>
+							</ContextMenuItem>
+						)}
+						{props.sessionActions.canExportHtml && props.sessionActions.onExportSessionHtml && (
+							<ContextMenuItem onSelect={props.sessionActions.onExportSessionHtml}>
+								<span className="inline-flex items-center gap-2">
+									<FileDown className="size-3.5" aria-hidden="true" />
+									{t("menu.exportHtml")}
+								</span>
+							</ContextMenuItem>
+						)}
+						{props.sessionActions.hasFilePath && (
+							<>
+								<ContextMenuItem onSelect={props.sessionActions.onCopySessionFilePath}>
+									<span className="inline-flex items-center gap-2">
+										<Link2 className="size-3.5" aria-hidden="true" />
+										{t("menu.copySessionFilePath")}
+									</span>
+								</ContextMenuItem>
+								{props.sessionActions.onOpenSessionFile && (
+									<ContextMenuItem onSelect={props.sessionActions.onOpenSessionFile}>
+										<span className="inline-flex items-center gap-2">
+											<FileText className="size-3.5" aria-hidden="true" />
+											{t("menu.openSessionFile")}
+										</span>
+									</ContextMenuItem>
+								)}
+							</>
+						)}
+					</>
+				)}
 			</ContextMenuContent>
 		</ContextMenu>
 	);

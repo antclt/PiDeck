@@ -176,6 +176,23 @@ function loadAgentManager(existsPredicate = () => false) {
 		require: (id) => {
 			// 停止身份缓存（72fe93da 起 AgentManager 依赖）：真实加载保持身份核对行为
 			if (id === "./stoppedMessageIdentity") return loadTsCommonJs("src/main/pi/stoppedMessageIdentity.ts");
+			// 项目信任闸（Wave 4C 迁出）：真实加载，但注入被断言的 fs/path/os 替身与 WslPaths 沙箱实例
+			if (id === "./projectTrustGate") {
+				return loadTsCommonJs("src/main/pi/projectTrustGate.ts", {
+					stubs: {
+						"node:fs": {
+							existsSync: (filePath) => {
+								calls.existsSync.push(filePath);
+								return existsPredicate(filePath);
+							},
+						},
+						"node:path": path.win32,
+						"node:os": { homedir: () => "C:\\Users\\tester" },
+						"../../shared/ipc": { ipcChannels: {} },
+						"../wsl/WslPaths": wslPaths,
+					},
+				});
+			}
 			if (id === "electron") return { app: {}, Notification: class {} };
 			if (id === "node:fs/promises") return fsPromises;
 			if (id === "node:fs") {
@@ -374,7 +391,7 @@ test("project MCP files require an explicit trust decision", () => {
 	for (const suffix of [".mcp.json", ".pi\\mcp.json"]) {
 		const { AgentManager } = loadAgentManager((filePath) => filePath.endsWith(suffix));
 		const manager = createManager(AgentManager);
-		assert.equal(manager.hasTrustRequiringResources("C:\\project"), true, suffix);
+		assert.equal(manager.projectTrust.hasTrustRequiringResources("C:\\project"), true, suffix);
 	}
 });
 
@@ -388,7 +405,7 @@ test("uses host paths for trust resource checks and Linux paths for trust keys",
 	});
 	manager.configureWsl(wslPaths.createWslEnvironment("Ubuntu-24.04", "root", "/root"));
 
-	await manager.ensureProjectTrust({
+	await manager.projectTrust.ensureProjectTrust({
 		id: "project",
 		name: "ba_cli",
 		path: "//wsl.localhost/Ubuntu-24.04/root/ba_cli",

@@ -107,6 +107,12 @@ export class DshHost {
 		 * 缺省 false = 保持按需自动启动的历史语义。
 		 */
 		private readonly isManualStopped: () => boolean = () => false,
+		/**
+		 * agent-team 实验预设开关（设置项 dshAgentTeamPreset，默认关）。仅在 fork 时
+		 * 读取并经 --dsh-agent-team=1 传给 hostEntry：组合层变更无 per-session 通道，
+		 * 切换后需重启 DSH host 才对新旧会话生效（崩溃自动重启复用同 argv，开关快照不变）。
+		 */
+		private readonly isAgentTeamPresetEnabled: () => boolean = () => false,
 	) {}
 
 	/** 订阅 host-ready（首次启动与崩溃自动重启；E4：崩溃后恢复运行时状态）。 */
@@ -212,14 +218,14 @@ export class DshHost {
 		return {
 			writable: described.result.value.writable,
 			hasDocument: described.result.value.hasDocument,
-			namespaces: (described.result.value.namespaces ?? []).map((ns: any) => ({
+			namespaces: (described.result.value.namespaces ?? []).map((ns) => ({
 				ns: ns.ns,
 				applies: ns.applies,
 				revision: ns.revision,
 				value: ns.value,
 				base: ns.base,
 				user: ns.user,
-				secrets: (ns.secrets ?? []).map((secret: any) => ({ path: secret.path, set: secret.set })),
+				secrets: (ns.secrets ?? []).map((secret) => ({ path: secret.path, set: secret.set })),
 				schema: ns.schema,
 			})),
 		};
@@ -291,7 +297,7 @@ export class DshHost {
 		try {
 			const described = await client.settingsDescribe();
 			if (!described.result.ok) return undefined;
-			const found = (described.result.value.namespaces ?? []).find((item: any) => item.ns === ns);
+			const found = (described.result.value.namespaces ?? []).find((item) => item.ns === ns);
 			return typeof found?.revision === "number" ? found.revision : undefined;
 		} catch {
 			return undefined;
@@ -819,9 +825,9 @@ export class DshHost {
 		if (!client) return [];
 		const searched = await client.sessionsSearch({ query: trimmed }, new AbortController().signal);
 		if (!searched.result.ok) return [];
-		return (searched.result.value.items ?? []).map((item: any) => ({
+		return (searched.result.value.items ?? []).map((item) => ({
 			sessionId: String(item.sessionId),
-			snippet: item.snippet,
+			snippet: item.snippet ?? "",
 		}));
 	}
 
@@ -888,7 +894,7 @@ export class DshHost {
 		if (!client) return [];
 		const listed = await client.llmProviders();
 		if (!listed.result.ok) return [];
-		return (listed.result.value.providers ?? []).map((entry: any) => ({
+		return (listed.result.value.providers ?? []).map((entry) => ({
 			provider: entry.provider,
 			displayName: entry.displayName,
 			active: entry.active,
@@ -1058,7 +1064,7 @@ export class DshHost {
 
 		const hostProcess = new DshHostProcess(
 			hostEntryPath,
-			[`--dsh-home=${this.dshHome}`, `--dsh-config=${this.configDir}`, `--dsh-node-modules=${pathToFileURL(appRoot + "/").href}`],
+			[`--dsh-home=${this.dshHome}`, `--dsh-config=${this.configDir}`, `--dsh-node-modules=${pathToFileURL(appRoot + "/").href}`, ...(this.isAgentTeamPresetEnabled() ? ["--dsh-agent-team=1"] : [])],
 			// E5：utilityProcess.fork 的 env 显式传入即整体替换——传 {} 会让 host 以
 			// 近空环境运行（无 PATH/SystemRoot 等），host 内 spawn 的 bash/pwsh 子进程
 			// 依赖这些变量。改为继承主进程环境并剔除 Electron/Node 宿主注入类变量

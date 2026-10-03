@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { projectDshEvent } = loadTsCommonJs("src/main/dsh/dshEventProjector.ts");
+const { projectDshEvent, parseDshInboxProjection } = loadTsCommonJs("src/main/dsh/dshEventProjector.ts");
 
 const AGENT = "dsh:session-test";
 
@@ -1275,4 +1275,44 @@ test("assistant/live-chunk：非 delta 块（工具调用等）不产生骨架",
 	);
 	assert.equal(p.pendingAssistantId, undefined);
 	assert.equal(p.isStreaming, false);
+});
+
+test("parseDshInboxProjection：合法投影归一化为排队项（next-turn 在前，文本拼接）", () => {
+	const parsed = parseDshInboxProjection({
+		"next-turn": [
+			{ id: "q1", content: [{ type: "text", text: "接着做" }] },
+			{
+				id: "q2",
+				content: [
+					{ type: "text", text: "带图" },
+					{ type: "image", mediaType: "image/png", data: "x" },
+				],
+			},
+		],
+		"next-step": [{ id: "q3", content: [{ type: "text", text: "中途插入" }] }],
+	});
+	// vm 跨 realm 数组不做 deepEqual（对象原型不同 realm），逐字段断言。
+	assert.equal(parsed.length, 3);
+	assert.deepEqual({ ...parsed[0] }, { id: "q1", target: "next-turn", text: "接着做" });
+	assert.deepEqual({ ...parsed[1] }, { id: "q2", target: "next-turn", text: "带图 [+1]" });
+	assert.deepEqual({ ...parsed[2] }, { id: "q3", target: "next-step", text: "中途插入" });
+});
+
+test("parseDshInboxProjection：空数组是合法值（排队被消费/清空）", () => {
+	assert.equal(parseDshInboxProjection({ "next-turn": [], "next-step": [] }).length, 0);
+});
+
+test("parseDshInboxProjection：缺任一必填键返回 undefined（脏帧不得清空已有排队）", () => {
+	assert.equal(parseDshInboxProjection({ "next-turn": [] }), undefined);
+	assert.equal(parseDshInboxProjection(null), undefined);
+	assert.equal(parseDshInboxProjection("x"), undefined);
+});
+
+test("parseDshInboxProjection：单项非法只跳过该项（id 非字符串无法操作）", () => {
+	const parsed = parseDshInboxProjection({
+		"next-turn": [{ id: "q1", content: [{ type: "text", text: "ok" }] }, { content: [] }, null, { id: "", content: [] }],
+		"next-step": [],
+	});
+	assert.equal(parsed.length, 1);
+	assert.deepEqual({ ...parsed[0] }, { id: "q1", target: "next-turn", text: "ok" });
 });

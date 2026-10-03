@@ -13,8 +13,8 @@ test("builtinPresetKeys: 4 个官方预设的稳定 ID 返回 i18n key", () => {
 	assert.equal(standard?.description, "config.dsh.presetStandardDesc");
 
 	const code = builtinPresetKeys({ id: "ptc" });
-	assert.equal(code?.name, "config.dsh.presetCodeName");
-	assert.equal(code?.description, "config.dsh.presetCodeDesc");
+	assert.equal(code?.name, "config.dsh.presetPtcName");
+	assert.equal(code?.description, "config.dsh.presetPtcDesc");
 
 	const minimal = builtinPresetKeys({ id: "minimal", trust: "system" });
 	assert.equal(minimal?.name, "config.dsh.presetMinimalName");

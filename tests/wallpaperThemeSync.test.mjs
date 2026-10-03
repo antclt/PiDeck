@@ -14,7 +14,8 @@ import test from "node:test";
  * 明暗翻转即重算壁纸 token。
  */
 
-const app = readFileSync("src/renderer/src/App.tsx", "utf8");
+// 外观域已从 App.tsx 迁到 hooks/appearance/useAppAppearance.ts（useAppAppearance）
+const app = readFileSync("src/renderer/src/hooks/appearance/useAppAppearance.ts", "utf8");
 
 test("system color-scheme change feeds a state, not a direct attribute write", () => {
 	// matchMedia change 监听必须经 setState 驱动派生明暗，才能让壁纸 effect 感知翻转
