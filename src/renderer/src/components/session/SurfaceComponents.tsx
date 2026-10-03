@@ -174,7 +174,7 @@ type SessionModifiedFile = {
  */
 export const USD_TO_CNY_RATE = 7.2;
 
-export type SessionDetailRow = { label: string; value: string; emphasis?: boolean; /** 悬停说明：解释这行指标怎么算的（用户可自行核对口径） */ hint?: string };
+export type SessionDetailRow = { label: string; value: string; emphasis?: boolean /** 悬停说明：解释这行指标怎么算的（用户可自行核对口径） */; hint?: string };
 
 export type SessionStatusDetail = {
 	detailRows: SessionDetailRow[];

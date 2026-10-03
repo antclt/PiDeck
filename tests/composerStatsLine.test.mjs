@@ -115,10 +115,7 @@ test("segments carry per-metric hints without changing the visible text", () => 
 		outputTokens: 340,
 		cacheHitPercent: 88.2,
 	});
-	assert.deepEqual(
-		JSON.parse(JSON.stringify(dsh.map((parts) => parts.map((part) => part.text)))),
-		[["3 轮 · 7 步"], ["LLM 2500ms", "工具调用 800ms"], ["首 token 平均 120ms", "42 tok/s"], ["缓存命中 88%"], ["输入 1200 tok · 输出 340 tok"]],
-	);
+	assert.deepEqual(JSON.parse(JSON.stringify(dsh.map((parts) => parts.map((part) => part.text)))), [["3 轮 · 7 步"], ["LLM 2500ms", "工具调用 800ms"], ["首 token 平均 120ms", "42 tok/s"], ["缓存命中 88%"], ["输入 1200 tok · 输出 340 tok"]]);
 	assert.equal(dsh[0][0].hint, "ctx.detail.turnsStepsHint");
 	assert.equal(dsh[1][0].hint, "ctx.detail.llmDurationHint");
 	assert.equal(dsh[1][1].hint, "ctx.detail.toolDurationHint");
