@@ -15,6 +15,9 @@ import { MIN_PI_VERSION_FOR_EXTENSION_WHITELIST, piVersionAtLeast } from "./exte
 import { compareVersions } from "../utils/versionCompare";
 import { discoverExtensionEntries } from "./extensionDiscovery";
 
+const PI_LATEST_VERSION_URL = "https://pi.dev/api/latest-version";
+const PI_LATEST_VERSION_TIMEOUT_MS = 10_000;
+
 export { BUILT_IN_EXTENSIONS } from "./builtInExtensions";
 
 /**
@@ -438,7 +441,9 @@ export class ExtensionManager {
 			const settings = this.getSettings();
 			const status = await this.locator.check(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
 			if (!status.installed) return { hasUpdate: false, error: this.translate("mainExtension.piNotInstalled") };
-			const latestVersion = await this.npmViewVersion("@earendil-works/pi-coding-agent");
+			// 与 `pi update --self` 使用同一个 pi.dev 版本接口，避免 npm latest 与 Pi 官方
+			// 发布门槛短暂不同步时，PiDeck 显示的版本和 CLI 提示不一致。
+			const latestVersion = await this.fetchPiLatestVersion(status.version ?? "0.0.0");
 			return {
 				currentVersion: status.version,
 				latestVersion,
@@ -520,6 +525,25 @@ export class ExtensionManager {
 		const raw = await readFile(join(hostPath, "package.json"), "utf8");
 		const parsed = JSON.parse(raw) as { version?: string };
 		return parsed.version;
+	}
+
+	private async fetchPiLatestVersion(currentVersion: string): Promise<string> {
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), PI_LATEST_VERSION_TIMEOUT_MS);
+		try {
+			const response = await fetch(PI_LATEST_VERSION_URL, {
+				headers: { accept: "application/json", "user-agent": `pi-deck/${currentVersion}` },
+				signal: controller.signal,
+			});
+			if (!response.ok) throw new Error(`pi version check returned HTTP ${response.status}`);
+			const payload: unknown = await response.json();
+			if (typeof payload !== "object" || payload === null || !("version" in payload) || typeof payload.version !== "string" || !payload.version.trim()) {
+				throw new Error("pi version check returned an invalid version");
+			}
+			return payload.version.trim();
+		} finally {
+			clearTimeout(timeout);
+		}
 	}
 
 	private npmViewVersion(packageName: string) {

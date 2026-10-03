@@ -1596,7 +1596,7 @@ export class SessionHistoryReader {
 				// 例外（#300）：本代活 runtime 派发的锚点是「运行中、record 未落」，
 				// 合成 running，否则面板在子代理运行期间误显「已停止」。
 				const isStartAnchor = recordEntries[i].customType === SessionHistoryReader.SUBAGENT_START_ENTRY;
-			let status: string;
+				let status: string;
 				if (!isStartAnchor) {
 					status = String(data.status ?? "");
 				} else {
