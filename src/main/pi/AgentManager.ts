@@ -1,4 +1,4 @@
-import { app, type BrowserWindow, Notification } from "electron";
+import { app, dialog, shell, type BrowserWindow, Notification } from "electron";
 import { randomUUID } from "node:crypto";
 import { stat, unlink, writeFile } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
@@ -35,6 +35,8 @@ import { collectSessionFileChanges } from "../../shared/fileChanges";
 import { extractPiToolTruncation } from "../../shared/formatToolDetail";
 import { COMPACT_CANCELLED_BY_OWNER, COMPACT_CANCELLED_BY_USER_ABORT, COMPACT_HOOK_REJECT_MAX_MS, COMPACT_OBSERVATION_MAX_AGE_MS, COMPACT_ROUTED_TO_OWNER, COMPACT_USER_ABORT_WINDOW_MS, COMPACT_WAIT_TIMEOUT } from "../../shared/compactFeedback";
 import { PiProcess, type WhitelistSkip } from "./PiProcess";
+import { createBridgeServiceHandler } from "./bridge/bridgeServices";
+import { getBridgeServer } from "./bridge/BridgeServer";
 import { APP_DEEP_LINK_SCHEME } from "../utils/deepLinkScheme";
 import { createCompactRpcRequest } from "./compactRpc";
 import { resolveWhitelistSkipCopy, WHITELIST_SKIP_KIND_COPY } from "./whitelistSkipNotice";
@@ -45,7 +47,6 @@ import { listActiveBuiltInExtensionPaths } from "../extensions/builtInExtensions
 import { createPiProcessExtensionResolvers } from "../extensions/piProcessExtensionResolvers";
 import { createPiProcessSkillResolvers } from "../skills/piProcessSkillResolvers";
 import { createPiProcessPromptResolvers } from "../prompts/piProcessPromptResolvers";
-import { getBridgeServer } from "./bridge/BridgeServer";
 import type { BridgeEvent, BridgeUpdate, ModelTraceInput } from "../../shared/types/bridge";
 import { describeExtensionFallbackSkip, formatExtensionFallbackDebug, resolveDisabledExtensionsCopy, resolveDisabledExtensionsReason, shouldRetryWithoutExtensions } from "./extensionStartupFallback";
 import type { DisabledExtensionsReason } from "./extensionStartupFallback";
@@ -149,6 +150,8 @@ export class AgentManager {
 	/** pi 后端支持全部可选能力。 */
 	readonly capabilities: ReadonlySet<AgentGatewayCapability> = new Set(["compact", "fork", "getForkMessages", "editMessage", "deleteMessage", "getCommands", "exportHtml"]);
 	private readonly agents = new Map<string, AgentRuntime>();
+	/** 桥原生服务是否已注入（幂等标记，见 registerBridgeSession）。 */
+	private bridgeServicesInstalled = false;
 	private readonly messages = new Map<string, ChatMessage[]>();
 	/** 工具完整结果 LRU 缓存：截断下发后完整文本仅存于此（运行期「查看完整输出」走内存，
 	 *  历史会话回退读会话文件）。键为 pi message id，agent 停止时随 clearAgentState 释放。 */
@@ -596,6 +599,17 @@ export class AgentManager {
 		try {
 			const server = getBridgeServer();
 			if (!server.ready) return undefined;
+			// 宿主原生服务（gui.filePicker/gui.openPath）注入一次：BridgeServer 不 import electron，
+			// 这里组装真实实现（幂等，重复注入无害）。
+			if (!this.bridgeServicesInstalled) {
+				server.setServiceHandler(
+					createBridgeServiceHandler({
+						showOpenDialog: (options) => dialog.showOpenDialog(options),
+						openPath: (path) => shell.openPath(path),
+					}),
+				);
+				this.bridgeServicesInstalled = true;
+			}
 			const { url, token } = server.registerAgent(
 				agentId,
 				(update) => this.handleBridgeUpdate(agentId, update),

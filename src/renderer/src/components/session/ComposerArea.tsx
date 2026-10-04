@@ -22,7 +22,7 @@ import type { ReplyActionRule } from "../../../../shared/types/replyActions";
 import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
 import { VoiceTranscriptionControls } from "./VoiceTranscriptionControls";
 import { SessionReplyActions } from "./SessionReplyActions";
-import { BridgeWidgetSlot } from "../bridge/BridgeSlot";
+import { BridgeGuiSlot, BridgeWidgetSlot } from "../bridge/BridgeSlot";
 import { SessionContextMeter } from "./SessionContextMeter";
 
 /** 无规则时的稳定空数组（避免每渲染新引用让下游 memo 失效）。 */
@@ -318,11 +318,14 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 											/>
 										}
 									/>
-									{/* GUI 扩展桥：输入框工具栏落点已禁用（扩展在此区域渲染文本会造成 UI 干扰） */}
+									{/* GUI 扩展桥：输入框工具栏不挂输入行内（扩展文本会干扰输入 UI，
+									    原位置曾被禁用），改挂输入区下方的独立条；无贡献不占位。 */}
 								</div>
 							}
 						/>
 					</footer>
+					{/* GUI 扩展桥：输入区工具栏落点（ctx.gui.setComposerToolbar）。 */}
+					<BridgeGuiSlot sessionId={props.sessionId} slot="composer.toolbar" className="flex shrink-0 flex-wrap items-center gap-1 px-3 pb-1" />
 					<ComposerPickerHost
 						sessionId={props.sessionId}
 						picker={composer.picker}

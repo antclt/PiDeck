@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, ne
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
+import { homedir } from "node:os";
 import { createWriteStream, existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { is } from "@electron-toolkit/utils";
@@ -313,6 +314,8 @@ import { constrainWindowBoundsToWorkArea, type LastWindowBounds, MIN_WINDOW_HEIG
 import { createRendererCrashRecoveryGuard } from "./window/rendererCrashRecovery";
 import { registerBackgroundImageProtocol, registerBackgroundsIpc } from "./ipc/backgroundsIpc";
 import { registerThemesIpc } from "./ipc/themesIpc";
+import { registerPluginDevIpc } from "./ipc/pluginDevIpc";
+import { PluginDevService } from "./extensions/PluginDevService";
 import { registerGitIpc } from "./ipc/gitIpc";
 import { registerStoreIpc } from "./ipc/storeIpc";
 import { registerTerminalIpc } from "./ipc/terminalIpc";
@@ -2271,6 +2274,9 @@ function registerIpc() {
 	registerBackgroundImageProtocol();
 	registerBackgroundsIpc();
 	registerThemesIpc();
+	// 插件开发支持：demo/指南落 ~/.pi/agent/extensions（与扩展列表同一 home 来源）
+	const pluginDevService = new PluginDevService(resolveBuiltInExtensionRoots(), () => extensionManager?.userHomeDir ?? homedir());
+	registerPluginDevIpc(pluginDevService);
 	registerProjectsIpc({
 		projectStore,
 		settingsStore,

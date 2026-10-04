@@ -71,6 +71,13 @@
 - 设置快照 `settings.customTheme`（无前缀键，亮暗双档）在 `SettingsStore.update` 里过 `sanitizeCustomThemeSnapshot`；**快照仅 `themeSkin === "custom"` 时生效**（`applyCustomThemeTokens` 守卫），切回内置皮肤的路径（AppearanceThemePicker onPick）必须同步 `customTheme: undefined`，否则残留快照压过内置皮肤。注入函数是 App 持久化应用（useAppAppearance）与设置弹窗预览/回滚（SettingsModal）共用入口，别复制第二份注入逻辑。
 - 内置示例 `DEMO_CUSTOM_THEME` 是常量不上磁盘：列表由它推导（校验不过就不上架，防常量与校验器漂移）、不可删除不可覆盖；「复制为新主题」靠字符串改写 id 生成副本。删除用户主题走 `trashPath` 回收站；主题文件被删后已应用主题不失效（快照内嵌设置文件）。
 
+## 插件开发支持（pluginDev 目录 + demo + AI 指南）
+
+- 能力目录单一事实源 `src/shared/pluginDevCatalog.ts`（19 落点/42 节点 kind/事件节选/硬约束），镜像自桥实现：`GUI_SLOT_METHODS`（`pi-deck-gui-bridge-gui-spec.ts`）与 `UINode` 联合（`pi-deck-gui-bridge-types.ts`）。**桥新增落点/kind 必须同步目录，否则契约测试红**（`tests/pluginDevGuide.test.mjs` 双向校验 kind、逐项校验 slot；`tests/guiExtensionPointsDoc.test.mjs` 保证 `docs/gui-extension-points.md` 含全部 id）。
+- 指南 `AI-PLUGIN-GUIDE.md` 由 `pluginDevGuide.ts` 双语生成、写入用户扩展目录并覆盖旧版（生成物不备份）；demo 插件 `resources/plugin-dev/pi-deck-demo-plugin.ts` 复制到同目录，**已存在不覆盖**（用户改过的模板）。落盘路径固定 `~/.pi/agent/extensions/`，home 与 `ExtensionManager.userHomeDir` 同源（WSL 跟随扩展列表解析），保证复制进去的文件一定被扩展页本地扫描发现。
+- `resources/plugin-dev` 必须在 `extraResources`（filter `*.ts`）里，漏了打包版「复制 demo」直接报错（源缺失显式抛错，不静默）；demo **不在** `BUILT_IN_EXTENSIONS` 白名单（不是 `-e` 注入的内置扩展，是拷给用户的起步文件）。
+- 架构/文件地图/更新步骤详见 `docs/plugin-dev-guide.md`；无热重载（改插件重启会话），这是文档化的有意取舍。
+
 ## dev 态渲染层缓存（Vite 预构建 chunk 的 immutable 陷阱）
 
 - 现象：`npm run dev` 启动或打开资源弹层/编辑器时报 `Failed to fetch dynamically imported module: http://127.0.0.1:<port>/@fs/.../node_modules/.vite/deps/<chunk>.js?v=<hash>`。不是代码 bug，是渲染进程命中了上一轮预构建的旧模块。

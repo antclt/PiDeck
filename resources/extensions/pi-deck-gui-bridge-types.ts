@@ -166,7 +166,9 @@ export type UIBridgeEvent =
 	| { type: "key"; nodeId: string; key: string }
 	| { type: "filter"; nodeId: string; filter: string }
 	/** ctx.gui.custom 的交互节点：只回传 actionId，回调留在 pi 进程内（§14.14）。 */
-	| { type: "action"; actionId: string; payload?: unknown };
+	| { type: "action"; actionId: string; payload?: unknown }
+	/** service-call 的响应（PiDeck → 桥）：result 形状由 service 决定，与宿主侧 bridge.ts 逐字段对齐。 */
+	| { type: "service-result"; serviceId: string; ok: boolean; result?: unknown; error?: string };
 
 // ── 更新载荷（桥 → PiDeck，§9.3）───────────────────────────────
 
@@ -193,7 +195,9 @@ export type UIBridgeUpdate =
 	/** 覆盖层（ctx.gui.custom 的 overlay/modal）开关。 */
 	| { type: "overlay"; elementId: string; node: UINode | null; options?: OverlayOptions }
 	/** 覆盖层局部重画（handle.update）。 */
-	| { type: "overlay-update"; elementId: string; node: UINode };
+	| { type: "overlay-update"; elementId: string; node: UINode }
+	/** 服务调用（桥 → PiDeck）：宿主原生能力（文件选择/打开），响应经 service-result 事件回缩。 */
+	| { type: "service-call"; serviceId: string; service: "filePicker" | "openPath"; args?: unknown };
 
 export type OverlayOptions = {
 	modal?: boolean;

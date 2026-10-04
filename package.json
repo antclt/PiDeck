@@ -193,6 +193,13 @@
         ]
       },
       {
+        "from": "resources/plugin-dev",
+        "to": "plugin-dev",
+        "filter": [
+          "*.ts"
+        ]
+      },
+      {
         "from": "node_modules/undici",
         "to": "extensions/node_modules/undici"
       },

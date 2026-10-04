@@ -838,6 +838,14 @@ export const ipcChannels = {
 	/** 把 AI 主题开发指南写入主题目录并在资源管理器定位 */
 	writeCustomThemeGuide: "themes:write-guide",
 
+	// ===== 插件开发（~/.pi/agent/extensions/ 目录） =====
+	/** 插件开发支持状态：目录路径 + demo/指南是否已就位 */
+	pluginDevStatus: "plugin-dev:status",
+	/** 把 AI 插件开发指南写入用户扩展目录并在资源管理器定位 */
+	pluginDevWriteGuide: "plugin-dev:write-guide",
+	/** 复制内置 demo 插件到用户扩展目录（已存在不覆盖） */
+	pluginDevCopyDemo: "plugin-dev:copy-demo",
+
 	// ===== 内置浏览器 =====
 	browserOpenExternal: "browser:open-external",
 

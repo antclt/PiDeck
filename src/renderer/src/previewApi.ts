@@ -529,6 +529,12 @@ export function createPreviewApi(): PiDesktopApi {
 			remove: async () => undefined,
 			writeGuide: async () => "",
 		},
+		pluginDev: {
+			// 预览模式：无扩展目录可写，状态固定“未安装”
+			status: async () => ({ userExtensionsDir: "", demoInstalled: false, guideInstalled: false }),
+			writeGuide: async () => "",
+			copyDemo: async () => ({ status: "copied" as const, path: "" }),
+		},
 		sessions: {
 			list: async () => getSessions(),
 			// 预览模式无 DSH host：空预设目录满足接口契约

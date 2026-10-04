@@ -19,7 +19,7 @@
 
 import type { UIBridgeUpdate } from "./pi-deck-gui-bridge-types";
 import type { UIBridgeTransport } from "./pi-deck-gui-bridge-transport";
-import { repushGuiState, findContributionNode } from "./pi-deck-gui-bridge-gui";
+import { repushGuiState, findContributionNode, resolveServiceResult } from "./pi-deck-gui-bridge-gui";
 import { hashUINode, serialize, componentOf, invokeAction } from "./pi-deck-gui-bridge-serialize";
 import { createBridgeTheme, sanitizeBridgeUpdate, type BridgeTheme } from "./pi-deck-gui-bridge-theme";
 import { loadPiTui, type PiTuiComponent, type PiTuiModule } from "./pi-deck-gui-bridge-tui";
@@ -553,8 +553,13 @@ export function createBridgeRuntime(rawTransport: UIBridgeTransport): BridgeRunt
 	}
 
 	/** 处理 PiDeck 回灌的交互事件（§8.3）。 */
-	function handleEvent(event: { type: string; nodeId?: string; targetId?: string; actionId?: string; index?: number; value?: string; key?: string; filter?: string; payload?: unknown }): void {
+	function handleEvent(event: { type: string; nodeId?: string; targetId?: string; actionId?: string; serviceId?: string; index?: number; value?: string; key?: string; filter?: string; payload?: unknown; ok?: boolean; result?: unknown; error?: string }): void {
 		try {
+			// 宿主服务响应（gui.filePicker/openPath）：优先于其它分支 —— 它没有 nodeId
+			if (event.type === "service-result" && typeof event.serviceId === "string") {
+				resolveServiceResult(runtime, event.serviceId, event.ok !== false, event.result, event.error);
+				return;
+			}
 			if (event.type === "action" && event.actionId) {
 				// ① 桥自己的回调（toast / confirm / 自定义对话框，由 registerAction 注册）
 				if (invokeAction(event.actionId, event.payload)) return;

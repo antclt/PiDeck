@@ -400,6 +400,14 @@ const api = {
 		/** 把 AI 主题开发指南写入主题目录并在资源管理器定位，返回文件路径 */
 		writeGuide: (locale: "zh-CN" | "en-US") => ipcRenderer.invoke(ipcChannels.writeCustomThemeGuide, locale) as Promise<string>,
 	},
+	pluginDev: {
+		/** 插件开发支持状态：用户扩展目录 + demo/指南是否已就位 */
+		status: () => ipcRenderer.invoke(ipcChannels.pluginDevStatus) as Promise<{ userExtensionsDir: string; demoInstalled: boolean; guideInstalled: boolean }>,
+		/** 把 AI 插件开发指南写入用户扩展目录并定位，返回文件路径 */
+		writeGuide: (locale: "zh-CN" | "en-US") => ipcRenderer.invoke(ipcChannels.pluginDevWriteGuide, locale) as Promise<string>,
+		/** 复制内置 demo 插件（已存在不覆盖，返回 exists 让 UI 提示） */
+		copyDemo: () => ipcRenderer.invoke(ipcChannels.pluginDevCopyDemo) as Promise<{ status: "copied" | "exists"; path: string }>,
+	},
 	sessions: {
 		list: (projectId?: string) => ipcRenderer.invoke(ipcChannels.sessionsList, projectId) as Promise<SessionSummary[]>,
 		listCatalog: (projectId: string, options?: { scan?: boolean }) => ipcRenderer.invoke(ipcChannels.sessionsCatalogList, projectId, options) as Promise<SessionRecord[]>,

@@ -79,6 +79,11 @@ export class ExtensionManager {
 		return this.wslEnvironment?.windowsHome ?? homedir();
 	}
 
+	/** 当前生效的用户 home（供插件开发等需要与扩展目录同源的调用方读取）。 */
+	get userHomeDir(): string {
+		return this.homeDir;
+	}
+
 	/** 缓存的 pi 版本号，用于条件性传递 --no-approve。 */
 	private piVersion: string | null = null;
 	private piVersionPromise: Promise<string | null> | null = null;

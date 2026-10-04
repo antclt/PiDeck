@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useAtom, useSetAtom } from "jotai";
 import { ArrowDownToLine, ArrowUpFromLine, Check, ChevronDown, ChevronsDownUp, ChevronsUpDown, ClipboardPaste, FileCode2, FolderGit2, GitBranch, Loader2, Plus, RefreshCw, RotateCcw, Sparkles } from "lucide-react";
 import { Button } from "../ui-shadcn/button";
+import { BridgeGuiSlot, useBridgeSessionId } from "../bridge/BridgeSlot";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "../ui-shadcn/context-menu";
 import { ConfirmDialog } from "./AppParts";
 import { dismissNotice, showNotice, type NoticeId } from "../../utils/notice";
@@ -412,6 +413,8 @@ function PaneSash(props: { before: PaneId; after: PaneId; beforeHeight: number; 
 
 export function GitPanel(props: GitPanelProps) {
 	const panelRef = useRef<HTMLDivElement>(null);
+	// 桥落点跟随聚焦会话（共享 chrome 策略，见 git.panel.section 挂载处注释）
+	const bridgeSessionId = useBridgeSessionId();
 	// Missing-model guidance opens Common settings directly at the Git summary section.
 	const openSettings = useSetAtom(openSettingsAtom);
 	const repoScopeKey = props.repoScopeKey ?? props.projectId;
@@ -1560,6 +1563,9 @@ export function GitPanel(props: GitPanelProps) {
 								</div>
 							</div>
 						)}
+						{/* GUI 扩展桥：Git 面板底部附加区块落点（ctx.gui.setGitPanelSection）。
+					    跟随聚焦会话的贡献（共享 chrome，与 AppHeader titlebar.action 同策略）；无贡献不占位。 */}
+						<BridgeGuiSlot sessionId={bridgeSessionId} slot="git.panel.section" className="flex max-h-[30%] shrink-0 flex-col gap-1 overflow-y-auto border-t px-2 py-1" />
 					</section>
 				</>
 			)}
