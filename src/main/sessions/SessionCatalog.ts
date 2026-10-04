@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { copyFile, mkdir, open, readFile, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { AgentBackend, AgentTab, SessionEnvironment, SessionModelPreference, SessionRecord, SessionSource, SessionSummary } from "../../shared/types";
@@ -987,8 +988,39 @@ export class SessionCatalog {
 		// 只更新文件身份、预览和结构元数据，不能用 pi/TUI 的标题覆盖 PiDeck 名称。
 		// 同一次读取仍校验会话头：invalidOrigins 收集非有效会话文件，下面据此清洗与拒绝。
 		const { titles: fetchedTitles, legacyProbes: fetchedLegacyProbes, invalid: invalidOrigins, parents: fetchedParents, forked: fetchedForked } = await this.collectScannedTitles(summaries, context);
+
+		// 外部删除清理（在入锁前完成磁盘探测）：mergeScanned 历史上只增改不删，
+		// pi 会话文件被外部删除（pi 回收站、用户手工 rm、脚本清理）后条目会永远
+		// 残留在侧栏。安全闸（缺一不可）：
+		// - 仅本项目 + source=pi + backend≠dsh：dsh 会话文件由 $DSH_HOME 托管；
+		// - environment=native：WSL 条目跳过——发行版未运行时 UNC existsSync 恒
+		//   false，会把正常会话误删；
+		// - 必须真实 existsSync 缺失（而非「不在本轮 summaries 里」），部分扫描/
+		//   手动导入调用不会误判；
+		// - 父目录必须还在：目录也不在 = 磁盘/网络盘整体离线（或路径临时不可达），
+		//   不能当成「文件被删」误清；目录在而文件不在才是确定的外部删除。
+		const externallyMissingIds = new Set<string>();
+		for (const entry of this.entries) {
+			if (entry.projectId !== projectId) continue;
+			if (entry.source !== "pi" || entry.backend === "dsh") continue;
+			if (entry.environment !== "native") continue;
+			if (!entry.filePath) continue;
+			if (existsSync(entry.filePath)) continue;
+			if (!existsSync(dirname(entry.filePath))) continue;
+			externallyMissingIds.add(entry.id);
+		}
+
 		return this.enqueueMutation((entries) => {
 			let changed = false;
+
+			// 剔除磁盘已消失的 pi 原生条目（探测结果在入锁前算好）。
+			if (externallyMissingIds.size > 0) {
+				for (let index = entries.length - 1; index >= 0; index -= 1) {
+					if (!externallyMissingIds.has(entries[index]!.id)) continue;
+					entries.splice(index, 1);
+					changed = true;
+				}
+			}
 
 			// 清洗存量脏数据：pi-subagents artifactDir="session"（默认）的产物转储
 			// 曾被旧版扫描误注册成 active 条目，导致每个子代理在侧栏「嵌套 + 顶层平铺」
