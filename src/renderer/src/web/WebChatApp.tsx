@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { UIMessage } from "ai";
-import type { AvailableModel } from "../../../shared/types";
+import type { AgentBackend, AvailableModel } from "../../../shared/types";
 import { createSessionModelPreference } from "../../../shared/modelDisplayName";
 import { t } from "@/i18n";
 import { WebSidebar, type WebSessionRowAction } from "./WebSidebar";
@@ -76,6 +76,8 @@ export function WebChatApp() {
 	// 首页（无会话）时选择的模型/思考级别：暂存为待用偏好，随下一次新建会话生效
 	const [pendingModel, setPendingModel] = useState<{ provider: string; modelId: string; modelName: string } | null>(null);
 	const [pendingThinkingLevel, setPendingThinkingLevel] = useState<string | null>(null);
+	// 首页（无会话）时选择的后端：随下一次新建会话生效（对齐桌面 welcome 页语义）
+	const [pendingBackend, setPendingBackend] = useState<AgentBackend | null>(null);
 	// 手机端默认把聊天作为主画面，项目树通过抽屉按需打开，避免列表占满首屏。
 	const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 	const [uiResponding, setUiResponding] = useState(false);
@@ -337,6 +339,25 @@ export function WebChatApp() {
 		void sendMessage({ text }, { body: { images } });
 	};
 
+	// 草稿期后端切换：无会话 → 暂存随下次新建生效；未激活会话 → 写 catalog。
+	// 切后端同时清空模型/思考偏好（pi 与 dsh/生图的模型目录不同，跨后端偏好无效）。
+	const handleBackendChange = async (backend: AgentBackend) => {
+		if (activeSession && activeRuntime) return;
+		if (!activeSession) {
+			setPendingBackend(backend);
+			setPendingModel(null);
+			setPendingThinkingLevel(null);
+			return;
+		}
+		setCommandError(null);
+		try {
+			await updateSessionRecord(activeSession.id, { backend, model: null, thinkingLevel: null });
+			await refreshNow();
+		} catch (error) {
+			setCommandError(error instanceof Error ? error.message : String(error));
+		}
+	};
+
 	// 首页直发流程：优先内置 chat 项目（未配置项目时的兜底），否则取第一个项目；
 	// 创建期间复用 creatingProjectId 短暂禁用输入，防止重复提交。
 	const sendFromHome = async (text: string, images: string[]) => {
@@ -349,6 +370,7 @@ export function WebChatApp() {
 		setCommandError(null);
 		try {
 			const id = await createSession(project.id, {
+				...(pendingBackend ? { backend: pendingBackend } : {}),
 				...(pendingModel ? { model: pendingModel } : {}),
 				...(pendingThinkingLevel ? { thinkingLevel: pendingThinkingLevel } : {}),
 			});
@@ -378,6 +400,7 @@ export function WebChatApp() {
 		setCommandError(null);
 		try {
 			const id = await createSession(projectId, {
+				...(pendingBackend ? { backend: pendingBackend } : {}),
 				...(pendingModel ? { model: pendingModel } : {}),
 				...(pendingThinkingLevel ? { thinkingLevel: pendingThinkingLevel } : {}),
 			});
@@ -819,6 +842,9 @@ export function WebChatApp() {
 					prefill={prefill ?? undefined}
 					onSend={handleSend}
 					onStop={handleStop}
+					backend={activeSession?.backend ?? pendingBackend ?? "pi"}
+					backendLocked={Boolean(activeSession && activeRuntime)}
+					onBackendChange={(backend) => void handleBackendChange(backend)}
 					model={activeSession?.model ?? pendingModel ?? undefined}
 					models={models}
 					refreshingModels={modelsRefreshing}

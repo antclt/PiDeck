@@ -8,7 +8,7 @@
  * - 发送消息走 useChat（/api/chat 流式），不在此处重复实现
  */
 import type { UIMessage } from "ai";
-import type { AvailableModel, ChatMessage, SessionCommandResult, SessionFileChange, SessionLaunchPreferences, SessionMessagePage, SessionRuntimeTarget, SessionTargetedValue, SessionTodoSnapshot, UpdateSessionRecordInput } from "../../../shared/types";
+import type { AvailableModel, AgentBackend, ChatMessage, SessionCommandResult, SessionFileChange, SessionLaunchPreferences, SessionMessagePage, SessionRuntimeTarget, SessionTargetedValue, SessionTodoSnapshot, UpdateSessionRecordInput } from "../../../shared/types";
 import type { CommitEntry, GitBranchInfo, GitResourceGroups, ImageContent, PiExtensionSummary, PiSkillLocation, PiSkillSummary, PiSubagentEntry, YaoPromptCategory } from "../../../shared/types";
 import type { RewindCheckpointPage, RewindRestoreResult, RewindRestoreScope } from "../../../shared/types";
 import type { AgentUiResponse } from "../../../shared/types";
@@ -75,10 +75,10 @@ export async function fetchModels(force = false): Promise<AvailableModel[]> {
 
 /** 按项目新建会话（对应桌面端「新建 Agent」入口）。返回新会话 id。 */
 /**
- * 新建会话草稿；preferences 携带启动前选择的模型/思考级别（首页直发场景），
- * 无偏好时保持后端默认（pi 配置默认值）。
+ * 新建会话草稿；preferences 携带启动前选择的模型/思考级别/后端（首页直发场景），
+ * 无偏好时保持后端默认（pi 配置默认值）。backend 对应 CreateSessionDraftInput.backend。
  */
-export async function createSession(projectId: string, preferences?: SessionLaunchPreferences): Promise<string> {
+export async function createSession(projectId: string, preferences?: SessionLaunchPreferences & { backend?: AgentBackend }): Promise<string> {
 	const res = await apiFetch("/api/sessions", {
 		method: "POST",
 		headers: { "content-type": "application/json" },

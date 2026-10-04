@@ -17,6 +17,7 @@ import { t } from "@/i18n";
 import type { AvailableModel, SessionModelPreference } from "../../../shared/types";
 import { compressImageToDataUrl, imagesFromPasteEvent } from "./webImageCompress";
 import { WebModelSelector } from "./WebModelSheet";
+import { WebBackendSelector } from "./WebBackendSelector";
 import { WebThinkingSelector } from "./WebThinkingSelector";
 import { WebPromptPicker } from "./WebPromptPicker";
 
@@ -26,6 +27,10 @@ const MAX_ATTACHED_IMAGES = 4;
 export function WebComposer(props: {
 	disabled: boolean;
 	streaming: boolean;
+	/** 第四批：后端选择驻留 composer（对齐桌面端后端切换，仅草稿期可切）。 */
+	backend?: import("../../../shared/types").AgentBackend;
+	backendLocked?: boolean;
+	onBackendChange?: (backend: import("../../../shared/types").AgentBackend) => void;
 	/** 第三批：模型/思考选择驻留 composer（从 WebHeader 迁入）。 */
 	model?: SessionModelPreference;
 	models: AvailableModel[];
@@ -140,6 +145,7 @@ export function WebComposer(props: {
 								event.target.value = "";
 							}}
 						/>
+						{props.onBackendChange ? <WebBackendSelector backend={props.backend ?? "pi"} locked={Boolean(props.backendLocked)} onChange={props.onBackendChange} /> : null}
 						<WebModelSelector model={props.model} models={props.models} refreshing={props.refreshingModels} onRefresh={props.onRefreshModels} onChange={props.onModelChange} />
 						<WebThinkingSelector level={props.thinkingLevel} onChange={props.onThinkingChange} />
 						{/* 移动端相机直拍：capture 调起后置相机，单张；仅触屏设备显示（桌面无相机语义） */}
