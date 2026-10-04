@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -47,6 +48,22 @@ test("resolveLogoStyle treats classic as explicit opt-in, everything else falls 
 	assert.equal(resolveLogoStyle(undefined), "pi-tui");
 	assert.equal(resolveLogoStyle("Pi-TUI"), "pi-tui");
 	assert.equal(resolveLogoStyle("garbage"), "pi-tui");
+});
+
+test("logo 风格缓存键带版本后缀（翻默认值时必须升版本，否则开屏沿用旧默认）", () => {
+	assert.match(LOGO_STYLE_STORAGE_KEY, /:v\d+$/u, "LOGO_STYLE_STORAGE_KEY 必须形如 pideck:logo-style:vN");
+});
+
+test("开屏内联脚本按内容哈希进 CSP 白名单（否则被 script-src 静默拦截，开屏永远回落经典标）", () => {
+	const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+	const html = readFileSync(`${repoRoot}src/renderer/index.html`, "utf8");
+	const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+	assert.ok(script, "index.html 必须保留开屏内联脚本");
+	const hash = `sha256-${createHash("sha256").update(script, "utf8").digest("base64")}`;
+	const csp = html.match(/Content-Security-Policy"\s*content="([^"]+)"/)?.[1] ?? "";
+	assert.ok(csp.includes(`'${hash}'`), `CSP script-src 必须含脚本内容哈希 ${hash}（改脚本文本后需同步更新 CSP）`);
+	assert.match(csp, /script-src [^;]*'self'/, "script-src 必须保留 'self'");
+	assert.doesNotMatch(csp, /script-src[^;]*'unsafe-inline'/, "禁止用 'unsafe-inline' 绕过内联限制（应改用内容哈希）");
 });
 
 test("boot splash reads the same localStorage key and embeds the same pi-tui bitmap", () => {
