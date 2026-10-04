@@ -127,8 +127,69 @@ test("module import binds koffi LibraryHandle methods to the handle", () => {
 	assert.ok(koffi.state.dlls.includes("user32.dll"));
 	assert.ok(koffi.state.dlls.includes("kernel32.dll"));
 	assert.ok(koffi.state.signatures.some((signature) => signature.includes("GetSystemMetrics")));
+	assert.ok(koffi.state.signatures.some((signature) => signature.includes("SendInput")));
+	// INPUT 不再走 koffi struct（union 不可表达，见 packInputs），没有 sizeof 调用。
+	assert.strictEqual(koffi.state.sizeofSpecs.length, 0);
 
-	// 运行期经同一代理的调用同样要能以句柄为 receiver
-	assert.strictEqual(mod.sendInputs([mod.buildMouseInput(1, 1, 0)]), 0);
-	assert.strictEqual(koffi.state.sizeofSpecs.length, 1);
+	// 运行期经同一代理的调用同样要能以句柄为 receiver。替身 SendInput 返回 0，
+	// sendInputs 不足额即抛——抛的是我们的 Error 而非 Illegal invocation 才证明绑定正常。
+	assert.throws(() => mod.sendInputs([mod.buildMouseInput(1, 1, 0)]), /SendInput injected 0\/1/);
+});
+
+function createSendInputCapturingKoffi() {
+	const state = { sendInputCalls: [] };
+	const load = (dllName) => {
+		const lib = {
+			func(signature) {
+				if (this !== lib) throw new TypeError("Illegal invocation");
+				if (signature.includes("SendInput")) {
+					return (count, buffer, size) => {
+						state.sendInputCalls.push({ count, buffer: Buffer.from(buffer), size });
+						return count;
+					};
+				}
+				return () => 0;
+			},
+		};
+		return lib;
+	};
+	return { state, load, struct: (name) => ({ kind: "struct", name }), proto: (name) => ({ kind: "proto", name }), sizeof: () => 40, address: () => 0 };
+}
+
+test("sendInputs packs INPUT records as 40-byte buffers (SendInput layout regression)", () => {
+	// 修复前 INPUT 用 koffi struct 堆叠 mi/ki/hi 字段，sizeof ≈ 64 ≠ 40，
+	// SendInput 恒 ERROR_INVALID_PARAMETER 返回 0（实机注入全静默失效）。
+	const koffi = createSendInputCapturingKoffi();
+	const mod = loadTsCommonJs("src/main/cua/CuaWin32.ts", {
+		stubs: { koffi },
+		globals: { process: { platform: "win32" } },
+	});
+
+	// 鼠标记录
+	mod.sendInputs([mod.buildMouseInput(1000, 2000, 0x8001)]);
+	const mouseCall = koffi.state.sendInputCalls.at(-1);
+	assert.strictEqual(mouseCall.count, 1);
+	assert.strictEqual(mouseCall.size, 40, "cbSize must be sizeof(INPUT)=40");
+	assert.strictEqual(mouseCall.buffer.length, 40);
+	assert.strictEqual(mouseCall.buffer.readUInt32LE(0), 0, "INPUT_MOUSE");
+	assert.strictEqual(mouseCall.buffer.readInt32LE(8), 1000, "mi.dx @8");
+	assert.strictEqual(mouseCall.buffer.readInt32LE(12), 2000, "mi.dy @12");
+	assert.strictEqual(mouseCall.buffer.readUInt32LE(20), 0x8001, "mi.dwFlags @20");
+
+	// 键盘记录
+	mod.sendInputs([mod.buildKeyboardInput(0x0d, 0x1c, 0x0004)]);
+	const keyCall = koffi.state.sendInputCalls.at(-1);
+	assert.strictEqual(keyCall.buffer.length, 40);
+	assert.strictEqual(keyCall.buffer.readUInt32LE(0), 1, "INPUT_KEYBOARD");
+	assert.strictEqual(keyCall.buffer.readUInt16LE(8), 0x0d, "ki.wVk @8");
+	assert.strictEqual(keyCall.buffer.readUInt16LE(10), 0x1c, "ki.wScan @10");
+	assert.strictEqual(keyCall.buffer.readUInt32LE(12), 0x0004, "ki.dwFlags @12");
+
+	// 多条记录拼接 + 负滚轮 delta 按 DWORD 写入
+	mod.scrollAt(100, 100, -120, 0, 1920, 1080);
+	const scrollCall = koffi.state.sendInputCalls.at(-1);
+	assert.strictEqual(scrollCall.count, 2, "move + wheel");
+	assert.strictEqual(scrollCall.buffer.length, 80);
+	assert.strictEqual(scrollCall.buffer.readUInt32LE(40 + 16), 0xffffff88, "wheel delta -120 as DWORD");
+	assert.strictEqual(scrollCall.buffer.readUInt32LE(40 + 20) & 0x800, 0x800, "MOUSEEVENTF_WHEEL on second record");
 });

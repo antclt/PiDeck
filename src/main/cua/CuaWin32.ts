@@ -1,3 +1,5 @@
+import { Buffer } from "node:buffer";
+
 import koffi from "koffi";
 
 /**
@@ -9,7 +11,12 @@ import koffi from "koffi";
  *
  * koffi caveats observed during probe1-probe5:
  * - Use `void *` for HWND, `uint32_t` for DWORD, and explicitly declared
- *   structs for RECT/POINT/INPUT.
+ *   structs for RECT/POINT.
+ * - INPUT（SendInput）不能用 koffi struct 表达：koffi 不支持 union，顺序堆叠
+ *   mi/ki/hi 字段会让 sizeof(INPUT) 变成 ~64 字节而非 Windows 要求的 40 字节，
+ *   SendInput 直接 ERROR_INVALID_PARAMETER 返回 0——2026-10-04 实机确认注入
+ *   全链路因此静默失效（scroll 恒 sent:0）。修复：INPUT 改为手工打包 Buffer
+ *   （40 字节/条，x64/ARM64 布局一致），SendInput 以 `void*` 接收。
  * - `_Out_` annotations are required on pointer output parameters, otherwise
  *   koffi does not write results back into the JS object.
  * - Struct declarations must precede function declarations that reference them.
@@ -103,32 +110,26 @@ export const RECT = koffiLazy.struct("RECT", {
 });
 
 /**
- * INPUT struct layout used by SendInput.
- * Union of mouse/keyboard/hardware. We only use the keyboard branch for
- * virtual-key input and the mouse branch for absolute coordinate injection.
- * Total size must be 40 bytes on 64-bit Windows.
+ * INPUT struct layout used by SendInput (x64/ARM64: 40 bytes).
+ *
+ * Windows INPUT = { DWORD type; union { MOUSEINPUT mi; KEYBDINPUT ki; } }。
+ * koffi 不支持 union，堆叠声明会让 cbSize 不等于 40 而被 SendInput 全部拒绝
+ * （静默返回 0）。因此 INPUT 不走 koffi struct：buildMouseInput /
+ * buildKeyboardInput 仍返回命名字段记录（便于单测断言），sendInputs 在边界处
+ * 手工打包成 40 字节记录再交给 `void*` 的 SendInput。
+ *
+ * 布局（偏移相对记录起点）：
+ *   type        @0  (4)   INPUT_MOUSE=0 / INPUT_KEYBOARD=1
+ *   pad         @4  (4)   对齐 union 到 8 字节
+ *   mi.dx       @8  (4)   ki.wVk     @8  (2)
+ *   mi.dy       @12 (4)   ki.wScan   @10 (2)
+ *   mi.mouseData@16 (4)   ki.dwFlags @12 (4)
+ *   mi.dwFlags  @20 (4)   ki.time    @16 (4)
+ *   mi.time     @24 (4)   pad        @20 (4)
+ *   pad         @28 (4)   ki.dwExtraInfo@24 (8，恒 0)
+ *   mi.dwExtraInfo@32 (8，恒 0)
  */
-export const INPUT = koffiLazy.struct("INPUT", {
-	type: "uint32_t",
-	// Anonymous union represented as padding + overlapping fields.
-	// Layout matches Windows' INPUT (after 4-byte type):
-	//   mi: MOUSEINPUT (28 bytes) | ki: KEYBDINPUT (16 bytes) | hi: HARDWAREINPUT (8 bytes)
-	// We include all fields sequentially because koffi does not support unions.
-	mi_dx: "long",
-	mi_dy: "long",
-	mi_mouseData: "uint32_t",
-	mi_dwFlags: "uint32_t",
-	mi_time: "uint32_t",
-	mi_dwExtraInfo: "uintptr_t",
-	ki_wVk: "uint16_t",
-	ki_wScan: "uint16_t",
-	ki_dwFlags: "uint32_t",
-	ki_time: "uint32_t",
-	ki_dwExtraInfo: "uintptr_t",
-	hi_uMsg: "uint32_t",
-	hi_wParamL: "uint16_t",
-	hi_wParamH: "uint16_t",
-});
+export const INPUT_SIZE = 40;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -174,7 +175,7 @@ export const GetSystemMetrics = user32.func("int GetSystemMetrics(int nIndex)");
 export const GetCursorPos = user32.func("bool GetCursorPos(_Out_ POINT *p)");
 export const SetCursorPos = user32.func("bool SetCursorPos(int x, int y)");
 
-export const SendInput = user32.func("uint32_t SendInput(uint32_t cInputs, INPUT *pInputs, int cbSize)");
+export const SendInput = user32.func("uint32_t SendInput(uint32_t cInputs, void *pInputs, int32_t cbSize)");
 
 export const GetForegroundWindow = user32.func("void *GetForegroundWindow()");
 export const SetForegroundWindow = user32.func("bool SetForegroundWindow(void *hWnd)");
@@ -340,14 +341,41 @@ export function buildKeyboardInput(vk: number, scan: number, flags: number): Rec
 }
 
 /**
- * Send a sequence of INPUT structs via SendInput.
+ * 把命名字段记录打包成 SendInput 要求的 40 字节 INPUT 记录串。
+ * 负数滚轮 delta 以 DWORD 写入（Windows 按有符号解释）。
+ */
+function packInputs(inputs: Record<string, number>[]): Buffer {
+	const buffer = Buffer.alloc(inputs.length * INPUT_SIZE);
+	inputs.forEach((input, index) => {
+		const off = index * INPUT_SIZE;
+		buffer.writeUInt32LE(input.type >>> 0, off);
+		if (input.type === INPUT_MOUSE) {
+			buffer.writeInt32LE(input.mi_dx | 0, off + 8);
+			buffer.writeInt32LE(input.mi_dy | 0, off + 12);
+			buffer.writeUInt32LE((input.mi_mouseData ?? 0) >>> 0, off + 16);
+			buffer.writeUInt32LE((input.mi_dwFlags ?? 0) >>> 0, off + 20);
+			// time @24、dwExtraInfo @32 恒 0
+		} else if (input.type === INPUT_KEYBOARD) {
+			buffer.writeUInt16LE((input.ki_wVk ?? 0) & 0xffff, off + 8);
+			buffer.writeUInt16LE((input.ki_wScan ?? 0) & 0xffff, off + 10);
+			buffer.writeUInt32LE((input.ki_dwFlags ?? 0) >>> 0, off + 12);
+			// time @16、dwExtraInfo @24 恒 0
+		}
+	});
+	return buffer;
+}
+
+/**
+ * Send a sequence of INPUT records via SendInput.
+ * 静默部分注入（此前永远返回 0）会伪装成成功——不足额即抛出，让失败显式化。
  */
 export function sendInputs(inputs: Record<string, number>[]): number {
 	if (inputs.length === 0) return 0;
-	// koffi 3.x: pass the JS array directly for call-by-reference arrays.
-	// koffi 的 call-by-value 数组参数在类型层是 opaque 指针（第三方 FFI 边界），
-	// 类型系统无法表达，这里收窄为该签名要求的入参形态而非 any 透传。
-	return SendInput(inputs.length, inputs as unknown as Parameters<typeof SendInput>[1], koffiLazy.sizeof(INPUT));
+	const sent = SendInput(inputs.length, packInputs(inputs), INPUT_SIZE);
+	if (sent !== inputs.length) {
+		throw new Error(`SendInput injected ${sent}/${inputs.length} events`);
+	}
+	return sent;
 }
 
 /**
