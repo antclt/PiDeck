@@ -248,7 +248,7 @@ export const ProcessGroupStep = memo(function ProcessGroupStep(props: ProcessGro
 				// 组体内层限高交给 ProcessGroupBodyScrollContext：组内工具卡展开后不再自带滚轮，
 				// 整组只有这一条滚轮（否则是双层滚动条，内层到边就滚不动了）。
 				<ProcessGroupBodyScrollContext.Provider value={true}>
-					<div id={bodyId} data-process-group-body="" className="ml-5 mt-1 border-l-2 border-border-subtle pl-3">
+					<div id={bodyId} data-process-group-body="" className="ml-5 mt-1 border-l-2 border-border-subtle pl-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
 						<div
 							ref={stickScrollRef}
 							data-process-group-scroller=""

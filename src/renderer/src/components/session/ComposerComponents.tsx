@@ -588,12 +588,24 @@ function ModelThinkingChip(props: {
 			</PopoverTrigger>
 			<PopoverContent align="center" side="top" className="w-56 p-1">
 				<div className="flex flex-col">
-					<button type="button" className="flex h-9 items-center gap-2 rounded-md px-2 text-left text-control hover:bg-muted/60 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent" onClick={() => drillIn(props.onPickModel)} disabled={props.disabled} title={t("app.modelPickerTitle")}>
+					<button
+						type="button"
+						className="flex h-9 items-center gap-2 rounded-md px-2 text-left text-control transition-colors hover:bg-muted/60 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent"
+						onClick={() => drillIn(props.onPickModel)}
+						disabled={props.disabled}
+						title={t("app.modelPickerTitle")}
+					>
 						<span className="text-muted-foreground">{t("app.model")}</span>
 						<span className="min-w-0 flex-1 truncate text-foreground">{modelValue}</span>
 						<ChevronRight size={14} aria-hidden="true" className="flex-none text-muted-foreground" />
 					</button>
-					<button type="button" className="flex h-9 items-center gap-2 rounded-md px-2 text-left text-control hover:bg-muted/60 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent" onClick={() => drillIn(props.onPickThinking)} disabled={props.thinkingDisabled} title={t("app.thinkingPickerTitle")}>
+					<button
+						type="button"
+						className="flex h-9 items-center gap-2 rounded-md px-2 text-left text-control transition-colors hover:bg-muted/60 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent"
+						onClick={() => drillIn(props.onPickThinking)}
+						disabled={props.thinkingDisabled}
+						title={t("app.thinkingPickerTitle")}
+					>
 						<span className="text-muted-foreground">{t("app.think")}</span>
 						<span className="min-w-0 flex-1 truncate text-foreground">{props.thinkingText}</span>
 						<ChevronRight size={14} aria-hidden="true" className="flex-none text-muted-foreground" />

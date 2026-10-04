@@ -3,7 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui-shadcn
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "./components/ui-shadcn/dialog";
 import { ConfirmDialog } from "./components/ui-shadcn/ConfirmDialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "./components/ui-shadcn/alert-dialog";
-import { X, Blocks, Cpu, FileCode2, FileText, KeyRound, Puzzle, Settings2, Shield, ShieldCheck, Sparkles, PlugZap, FolderOpen } from "lucide-react";
+import { X, Blocks, Cpu, FileCode2, FileText, KeyRound, Loader2, Puzzle, Settings2, Shield, ShieldCheck, Sparkles, PlugZap, FolderOpen } from "lucide-react";
 import { cn } from "./lib/utils";
 import { deepClone } from "./utils/deepEqual";
 import { showNotice } from "./utils/notice";
@@ -2515,7 +2515,12 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	// 同一 JSX element 可在多处渲染，不会造成重复副作用。
 	const statusBlock = (
 		<>
-			{loading && <div className="py-12 text-center text-control text-muted-foreground">{t("common.loading")}</div>}
+			{loading && (
+				<div className="flex items-center justify-center gap-2 py-12 text-control text-muted-foreground">
+					<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+					{t("common.loading")}
+				</div>
+			)}
 			{error && <div className="mb-3.5 rounded-sm border border-danger/20 bg-danger-soft px-3.5 py-2.5 text-control leading-relaxed text-danger whitespace-pre-line">{error}</div>}
 		</>
 	);
@@ -2839,7 +2844,10 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 													</div>
 												</div>
 												{editGlobalLoading ? (
-													<div className="py-12 text-center text-control text-text-tertiary">{t("common.loading")}</div>
+													<div className="flex items-center justify-center gap-2 py-12 text-control text-text-tertiary">
+														<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+														{t("common.loading")}
+													</div>
 												) : (
 													<div className="prompts-monaco-wrap">
 														<CodeMirrorEditor

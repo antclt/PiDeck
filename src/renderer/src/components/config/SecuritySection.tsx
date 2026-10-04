@@ -17,7 +17,7 @@
  */
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Loader2, Trash2 } from "lucide-react";
 import { createDefaultSecurityConfig, type SecurityAction, type SecurityConfig, type SecurityLevelConfig, type SecurityPathPolicy, type SecurityToolName } from "../../../../shared/types";
 import { Button } from "../ui-shadcn/button";
 import { Input } from "../ui-shadcn/input";
@@ -176,7 +176,12 @@ export const SecuritySection = forwardRef<SecuritySectionHandle, SecuritySection
 	const builtinCount = useMemo(() => config.levels.filter((level) => level.builtin).length, [config.levels]);
 
 	if (loading) {
-		return <div className="py-12 text-center text-control text-muted-foreground">{t("common.loading")}</div>;
+		return (
+			<div className="flex items-center justify-center gap-2 py-12 text-control text-muted-foreground">
+				<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+				{t("common.loading")}
+			</div>
+		);
 	}
 
 	return (
@@ -285,7 +290,7 @@ function SecurityLevelCard(props: {
 			</div>
 
 			{expanded && (
-				<div className="flex flex-col gap-3 border-t border-border/40 px-3 py-3">
+				<div className="flex flex-col gap-3 border-t border-border/40 px-3 py-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
 					<div className="grid grid-cols-2 gap-3">
 						<div className="flex flex-col gap-1">
 							<label className="text-micro text-muted-foreground">{t("security.levelName")}</label>

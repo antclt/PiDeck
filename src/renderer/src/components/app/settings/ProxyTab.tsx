@@ -348,7 +348,7 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
 																const checked = selectedModels.has(key);
 																return (
 																	// 整行可点击切换；勾选列拦截冒泡避免 checkbox 触发两次（onChange + row onClick）。
-																	<TableRow key={key} className="cursor-pointer" onClick={() => toggleModelKey(key, !checked)}>
+																	<TableRow key={key} className="cursor-pointer motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast" onClick={() => toggleModelKey(key, !checked)}>
 																		<TableCell className="w-10 p-2 pl-3" onClick={(event) => event.stopPropagation()}>
 																			<Checkbox checked={checked} onCheckedChange={(next) => toggleModelKey(key, next === true)} aria-label={key} />
 																		</TableCell>

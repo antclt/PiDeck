@@ -83,7 +83,7 @@ export const RetryStep = memo(function RetryStep(props: { group: RetryGroupItem;
 					</div>
 					{/* 展开的错误详情：具体原因原文（如 "429 Too Many Requests …"） */}
 					{expanded && (
-						<div className="px-1 pb-1">
+						<div className="px-1 pb-1 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
 							<StepTraceDetails message={props.group.message} />
 						</div>
 					)}

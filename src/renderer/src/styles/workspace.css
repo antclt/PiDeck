@@ -824,6 +824,13 @@ html[data-theme="dark"] .scratch-pad-md mark {
   font-weight: 400;
   line-height: var(--line-height-body);
 }
+
+/* 分区（changes/graph/compare）开合动画：高度是 h-[32px] ↔ h-[calc(var(--git-pane-height)+32px)]
+   的 class 切换，过渡只挂在 togglePane 后的 180ms 窗口（data-pane-animating）内——
+   sash 拖拽经 --git-pane-height 改高时窗口不在，避免拖拽橡皮筋。 */
+.git-panel[data-pane-animating="true"] section[id^="git-pane-"] {
+  transition: height 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
 .git-drawer-stack {
   position: relative;
   display: flex;

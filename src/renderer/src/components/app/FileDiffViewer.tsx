@@ -523,8 +523,9 @@ export function FileDiffViewer(props: {
 												display: "grid",
 												placeItems: "center",
 											}}
-											className="text-caption text-foreground/50"
+											className="flex items-center justify-center gap-2 text-caption text-foreground/50"
 										>
+											<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
 											{t("common.loading")}
 										</div>
 									}
@@ -546,8 +547,9 @@ export function FileDiffViewer(props: {
 												display: "grid",
 												placeItems: "center",
 											}}
-											className="text-caption text-foreground/50"
+											className="flex items-center justify-center gap-2 text-caption text-foreground/50"
 										>
+											<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
 											{t("common.loading")}
 										</div>
 									}

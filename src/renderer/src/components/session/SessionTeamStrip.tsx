@@ -95,7 +95,7 @@ export function SessionTeamStrip(props: { sessionId: string }) {
 					{tasks.length === 0 && members.length === 0 && <p className="shrink-0 text-control leading-5 text-text-tertiary">{t("sessionTeam.noTasks")}</p>}
 					{tasks.map((task) => (
 						<div key={task.id} className="flex min-w-0 shrink-0 items-center gap-2.5 overflow-hidden text-control leading-5">
-							<span className={`size-1.5 shrink-0 rounded-full ${taskStatusDotClass(task)}`} aria-hidden="true" />
+							<span className={`size-1.5 shrink-0 rounded-full transition-colors ${taskStatusDotClass(task)}`} aria-hidden="true" />
 							<span className="min-w-0 flex-1 truncate text-text-secondary">{task.subject}</span>
 							<span className="shrink-0 truncate text-xs text-text-tertiary">{task.ownerName ?? t("sessionTeam.unassigned")}</span>
 						</div>

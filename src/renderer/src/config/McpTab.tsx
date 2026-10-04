@@ -7,7 +7,7 @@
  */
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { Plus, Trash2, PlugZap, RefreshCw, Radio, LogIn, LogOut, TriangleAlert } from "lucide-react";
+import { Loader2, Plus, Trash2, PlugZap, RefreshCw, Radio, LogIn, LogOut, TriangleAlert } from "lucide-react";
 import { t } from "../i18n";
 import { showNotice } from "../utils/notice";
 import { Button } from "../components/ui-shadcn/button";
@@ -519,7 +519,12 @@ export const McpTab = forwardRef<
 	);
 
 	if (loading && !snapshot) {
-		return <div className="py-12 text-center text-control text-muted-foreground">{t("common.loading")}</div>;
+		return (
+			<div className="flex items-center justify-center gap-2 py-12 text-control text-muted-foreground">
+				<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+				{t("common.loading")}
+			</div>
+		);
 	}
 	return (
 		<div className="flex min-h-0 flex-1 flex-col gap-3">

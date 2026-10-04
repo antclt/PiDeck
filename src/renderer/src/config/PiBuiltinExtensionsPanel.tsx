@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, RefreshCw } from "lucide-react";
+import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
 import { t } from "../i18n";
 import { showNotice } from "../utils/notice";
 import { Button } from "../components/ui-shadcn/button";
@@ -106,7 +106,12 @@ export function PiBuiltinExtensionsPanel(props: {
 				</div>
 			) : null}
 
-			{loading && !summary ? <div className="py-3 text-center text-micro text-muted-foreground">{t("common.loading")}</div> : null}
+			{loading && !summary ? (
+				<div className="flex items-center justify-center gap-1.5 py-3 text-micro text-muted-foreground">
+					<Loader2 size={12} className="animate-pideck-spin" aria-hidden="true" />
+					{t("common.loading")}
+				</div>
+			) : null}
 
 			{summary ? (
 				<div className="mt-2 grid gap-1.5">

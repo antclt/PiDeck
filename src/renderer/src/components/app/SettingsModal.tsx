@@ -3,7 +3,7 @@ import { getDefaultStore, useAtom, useAtomValue } from "jotai";
 import { settingsFocusAtom, type SettingsPaneId, type SettingsTabId } from "../../atoms";
 import { hasPendingUpdateAtom } from "../../atoms/update-atoms";
 import { useSettingsFocus } from "./settings/useSettingsFocus.ts";
-import { Settings2, Network, Wrench, PawPrint, Bell, Trash2, Brush, Eye, ChartColumnBig, Activity, MessageSquare, ImageIcon, DatabaseBackup, Globe, FileCode2, GitBranch, SlidersHorizontal, MonitorCog, Keyboard, X } from "lucide-react";
+import { Settings2, Network, Wrench, PawPrint, Bell, Trash2, Brush, Eye, ChartColumnBig, Activity, MessageSquare, ImageIcon, DatabaseBackup, Globe, FileCode2, GitBranch, Loader2, SlidersHorizontal, MonitorCog, Keyboard, X } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
 import { applyAppearanceAttributes, type AppearanceSettings } from "../../themeAppearance";
 import { applyCustomThemeTokens, applyFontSizeAttributes } from "../../hooks/appearance/useAppAppearance";
@@ -210,7 +210,14 @@ class SettingsModalErrorBoundary extends Component<{ onClose: () => void; childr
 
 /** tab chunk 加载占位：轻量居中提示，避免首次切到某 tab 时空白闪烁 */
 function SettingsTabLoading() {
-	return <div className="settings-panel grid min-w-0 min-h-40 place-items-center text-caption text-text-tertiary">{t("common.loading")}</div>;
+	return (
+		<div className="settings-panel grid min-w-0 min-h-40 place-items-center text-caption text-text-tertiary">
+			<span className="flex items-center gap-2">
+				<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+				{t("common.loading")}
+			</span>
+		</div>
+	);
 }
 
 /**

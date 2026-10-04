@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAtomValue } from "jotai";
-import { ArchiveRestore, ChevronDown, Cpu, FileCode2, FolderOpen, LayoutDashboard, LoaderCircle, Power, PowerOff, Puzzle, RefreshCw, ShieldCheck } from "lucide-react";
+import { Loader2, ArchiveRestore, ChevronDown, Cpu, FileCode2, FolderOpen, LayoutDashboard, LoaderCircle, Power, PowerOff, Puzzle, RefreshCw, ShieldCheck } from "lucide-react";
 import { desktopApi } from "../desktopApi";
 import { t, type TranslationKey } from "../i18n";
 import { showNotice } from "../utils/notice";
@@ -1347,7 +1347,10 @@ function RawTab(props: { homeDir: string; sectionApi?: DshSectionApi; instanceKe
 					}}
 				/>
 			) : (
-				<div className="flex h-72 items-center justify-center text-control text-muted-foreground">{t("common.loading")}</div>
+				<div className="flex h-72 items-center justify-center gap-2 text-control text-muted-foreground">
+					<LoaderCircle size={14} className="animate-pideck-spin" aria-hidden="true" />
+					{t("common.loading")}
+				</div>
 			)}
 			{/* 编辑位置说明：展示当前正在编辑的具体文件（随下拉切换），保存后由 DSH host 读取 */}
 			<div className="flex shrink-0 flex-col gap-1 rounded-md border border-border-subtle bg-bg-panel px-3 py-2">

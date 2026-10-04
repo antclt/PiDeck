@@ -9,7 +9,7 @@ import { getI18nLocale, t } from "../i18n";
 import { desktopApi } from "../desktopApi";
 import { Button } from "../components/ui-shadcn/button";
 import { Badge } from "../components/ui-shadcn/badge";
-import { BookOpenText, Copy, Hammer } from "lucide-react";
+import { BookOpenText, Copy, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 type PluginDevStatus = { userExtensionsDir: string; demoInstalled: boolean; guideInstalled: boolean };
@@ -77,11 +77,11 @@ export function PluginDevSection() {
 			)}
 			<div className="flex flex-wrap items-center gap-1.5">
 				<Button variant="outline" size="sm" onClick={() => void handleWriteGuide()} disabled={busy !== null}>
-					<BookOpenText size={14} strokeWidth={1.8} className="mr-1.5" aria-hidden="true" />
+					{busy === "guide" ? <Loader2 size={14} strokeWidth={1.8} className="mr-1.5 animate-pideck-spin" aria-hidden="true" /> : <BookOpenText size={14} strokeWidth={1.8} className="mr-1.5" aria-hidden="true" />}
 					{busy === "guide" ? t("common.loading") : t("config.pluginDevWriteGuide")}
 				</Button>
 				<Button variant="outline" size="sm" onClick={() => void handleCopyDemo()} disabled={busy !== null}>
-					{busy === "demo" ? <Hammer size={14} strokeWidth={1.8} className="mr-1.5 animate-spin" aria-hidden="true" /> : <Copy size={14} strokeWidth={1.8} className="mr-1.5" aria-hidden="true" />}
+					{busy === "demo" ? <Loader2 size={14} strokeWidth={1.8} className="mr-1.5 animate-pideck-spin" aria-hidden="true" /> : <Copy size={14} strokeWidth={1.8} className="mr-1.5" aria-hidden="true" />}
 					{t("config.pluginDevCopyDemo")}
 				</Button>
 			</div>

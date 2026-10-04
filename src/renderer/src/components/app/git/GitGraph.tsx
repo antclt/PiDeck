@@ -739,7 +739,7 @@ export function SourceControlGraph(props: GitGraphProps) {
 											{ref && <span className={`max-w-[108px] truncate rounded-full border border-current px-[7px] text-xs font-medium leading-[18px]${ref.kind === "branch" ? " text-[var(--git-modified)]" : " text-[var(--git-conflict)]"}`}>{ref.label}</span>}
 										</button>
 										{expanded && (
-											<div className="min-w-0">
+											<div className="min-w-0 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
 												{detailState?.loading && (
 													<div className="grid min-h-[26px] grid-cols-[auto_minmax(0,1fr)_16px] items-center gap-2 px-2.5 pl-0.5 text-control leading-[26px] text-[var(--git-desc-fg)]">
 														<GraphContinuation row={row} />

@@ -399,7 +399,7 @@ export function TokenDancePanel(props: TokenDancePanelProps) {
 			{expanded && (
 				<>
 					{/* 平台优势（聚合 + 特价 + 新用户体验额度）；详情给官网链接，由用户自行核对 */}
-					<ul className="mt-2 grid gap-1 text-xs text-text-secondary">
+					<ul className="mt-2 grid gap-1 text-xs text-text-secondary motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
 						<li className="flex items-start gap-1.5">
 							<span className="mt-0.5 shrink-0 text-[var(--color-accent)]">●</span>
 							{t("config.tokendance.advantageOne")}

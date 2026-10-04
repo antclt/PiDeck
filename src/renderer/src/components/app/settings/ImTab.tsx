@@ -8,7 +8,7 @@ import { Input } from "../../ui-shadcn/input";
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 import { ConfirmDialog } from "../../app/AppParts";
 import { writeClipboard } from "../../../utils/clipboard";
 import type { FeishuBotConfig, FeishuBridgeStatus, FeishuChatBinding, FeishuTestResult } from "../../../../../shared/types";
@@ -306,7 +306,12 @@ export function ImTab(_props: Props) {
 	const statusLabel = t(`config.im.status.${status.status}` as Parameters<typeof t>[0]) || status.status;
 
 	if (loading) {
-		return <div className="py-12 text-center text-control text-text-tertiary">{t("common.loading")}</div>;
+		return (
+			<div className="flex items-center justify-center gap-2 py-12 text-control text-text-tertiary">
+				<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+				{t("common.loading")}
+			</div>
+		);
 	}
 
 	return (
@@ -533,7 +538,7 @@ export function ImTab(_props: Props) {
 								</div>
 							</div>
 							{isExpanded && (
-								<div className="border-t border-border-subtle px-3.5 py-2.5 text-xs config-im-bot-details" onClick={(e) => e.stopPropagation()}>
+								<div className="border-t border-border-subtle px-3.5 py-2.5 text-xs config-im-bot-details motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast" onClick={(e) => e.stopPropagation()}>
 									<div className="config-im-bot-detail-section">
 										<div className="config-im-section-title">{t("config.im.appCredentials")}</div>
 										<div className="config-im-credential-grid">

@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui-shadcn/button";
-import { X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 import { Check, FolderOpen, RefreshCw, UploadCloud } from "lucide-react";
 import { t } from "../../i18n";
 import type { TranslationKey } from "../../i18n";
@@ -205,7 +205,7 @@ export function CodexImportModal(props: {
 							{allSelected ? t("codex.selectNone") : t("common.selectAll")}
 						</Button>
 						<Button variant="default" size="sm" className="primary-action h-7 px-2.5 text-xs shadow-none rounded-lg gap-1.5" onClick={props.onImport} disabled={props.importing || props.selectedPaths.length === 0}>
-							<UploadCloud size={14} />
+							{props.importing ? <Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" /> : <UploadCloud size={14} />}
 							{props.importing
 								? t("codex.importing")
 								: t("codex.importSelected", {
@@ -448,7 +448,7 @@ function SessionImportModal<T extends ImportSessionLike>(props: {
 									{allSelected ? copy("selectNone") : t("common.selectAll")}
 								</Button>
 								<Button variant="default" size="sm" className="primary-action h-7 px-2.5 text-xs shadow-none rounded-lg gap-1.5" onClick={props.onImport} disabled={props.importing || props.selectedPaths.length === 0}>
-									<UploadCloud size={14} />
+									{props.importing ? <Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" /> : <UploadCloud size={14} />}
 									{props.importing ? copy("importing") : copy("importSelected", { count: props.selectedPaths.length })}
 								</Button>
 							</>
