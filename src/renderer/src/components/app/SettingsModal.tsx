@@ -157,8 +157,20 @@ class SettingsModalErrorBoundary extends Component<{ onClose: () => void; childr
 		return { error };
 	}
 
+	/** 重试：清掉错误重新渲染子树。懒加载 chunk 的失败结果被 React 缓存在模块级，重试无效时需走「刷新应用」。 */
+	private readonly handleRetry = () => {
+		this.setState({ error: null });
+	};
+
+	/** 刷新应用：懒加载 chunk 拉取失败只有整页刷新能可靠恢复（更新后旧 chunk 已被替换）。 */
+	private readonly handleReload = () => {
+		window.location.reload();
+	};
+
 	override render() {
 		if (!this.state.error) return this.props.children;
+		// 三大浏览器懒加载 chunk 拉取失败的报错文案（常见于应用更新 / dev 热更新后），给出针对性提示。
+		const isChunkLoadError = /failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed/i.test(this.state.error.message);
 		// #115：错误兜底直接走 shadcn Dialog 外壳
 		return (
 			<Dialog open onOpenChange={(next) => !next && this.props.onClose()}>
@@ -171,16 +183,23 @@ class SettingsModalErrorBoundary extends Component<{ onClose: () => void; childr
 							</Button>
 						</DialogClose>
 					</DialogHeader>
-					<div className="settings-layout">
-						<div className="settings-content" style={{ padding: "var(--space-5)" }}>
-							<div className="config-diagnostic-card">
-								<div>
-									<strong>{t("settings.renderCrashed")}</strong>
-									<span>{this.state.error.message}</span>
-									<small>{t("settings.renderCrashedHelp")}</small>
-								</div>
-								<pre>{this.state.error.stack ?? this.state.error.message}</pre>
+					{/* 不能套 .settings-layout：那是 196px 侧栏 + 内容的双列栅格，唯一子项会被挤进侧栏列（布局错位的根因） */}
+					<div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-5" role="alert">
+						<div className="config-diagnostic-card">
+							<div>
+								<strong>{t("settings.renderCrashed")}</strong>
+								<span>{this.state.error.message}</span>
+								<small>{isChunkLoadError ? t("settings.renderCrashedChunkHint") : t("settings.renderCrashedHelp")}</small>
 							</div>
+							<pre>{this.state.error.stack ?? this.state.error.message}</pre>
+						</div>
+						<div className="flex items-center justify-end gap-2">
+							<Button type="button" variant="outline" onClick={this.handleRetry}>
+								{t("app.renderErrorRetry")}
+							</Button>
+							<Button type="button" variant="default" onClick={this.handleReload}>
+								{t("app.renderErrorReload")}
+							</Button>
 						</div>
 					</div>
 				</DialogContent>

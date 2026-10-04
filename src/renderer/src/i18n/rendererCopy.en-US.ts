@@ -4420,6 +4420,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.dirtyTooltip": "This field has been modified, not saved yet",
 	"settings.loadFailed": "Settings failed to load",
 	"settings.renderCrashed": "Settings page render error",
+	"settings.renderCrashedChunkHint": 'App resources failed to load (common after an app update or hot reload). Click "Reload" to recover, or close this dialog and keep using the app.',
 	"settings.renderCrashedHelp": "You can close this dialog and continue. Please share the console error so we can fix it.",
 	"settings.sendShortcut.ctrl": "Ctrl/⌘ + Enter sends, Enter inserts a newline",
 	"settings.inputShortcut": "Send shortcut",

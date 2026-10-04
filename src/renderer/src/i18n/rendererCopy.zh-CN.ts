@@ -4405,6 +4405,7 @@ export const zhCN = {
 	"settings.dirtyTooltip": "此项已修改，尚未保存",
 	"settings.loadFailed": "设置加载失败",
 	"settings.renderCrashed": "设置页面渲染异常",
+	"settings.renderCrashedChunkHint": "界面资源加载失败（常见于应用更新或热更新后），点击「刷新应用」即可恢复；也可以先关闭弹框继续使用。",
 	"settings.renderCrashedHelp": "可以先关闭设置弹框继续使用。请把控制台错误反馈给我们，便于定位。",
 	"settings.sendShortcut.ctrl": "Ctrl/⌘ + Enter 发送，Enter 换行",
 	"settings.inputShortcut": "发送快捷键",
