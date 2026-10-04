@@ -1665,6 +1665,9 @@ async function createWindow() {
 		},
 	});
 	const createdWindow = mainWindow;
+	// Windows 建窗时可能裁掉工作区外的不可见 resize border；构造参数不足以精确还原贴边外框。
+	// 显示/最大化前显式设置已解析的几何，避免重启后高度再次被原生建窗流程缩短。
+	createdWindow.setBounds(startupWindowBounds);
 	configureBrowserPanelWebviewHost(createdWindow);
 	let hasShownMainWindow = false;
 	function showMainWindowOnce() {
