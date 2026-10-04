@@ -2299,7 +2299,11 @@ function registerIpc() {
 	registerThemesIpc();
 	// 插件开发支持：demo/指南落 ~/.pi/agent/extensions（与扩展列表同一 home 来源）
 	const pluginDevService = new PluginDevService(resolveBuiltInExtensionRoots(), () => extensionManager?.userHomeDir ?? homedir());
-	registerPluginDevIpc(pluginDevService);
+	registerPluginDevIpc(pluginDevService, {
+		// demo 是落进用户扩展目录的普通扩展：落盘后同步失效扩展列表缓存，
+		// 避免已打开的扩展页/缓存读看不到新行（与安装包后失效缓存同一语义）。
+		onExtensionFilesChanged: () => extensionManager?.invalidateListCache(),
+	});
 	registerProjectsIpc({
 		projectStore,
 		settingsStore,

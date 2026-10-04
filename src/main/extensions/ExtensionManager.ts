@@ -9,7 +9,7 @@ import type { PiLocator } from "../pi/PiLocator";
 import { PiProcess } from "../pi/PiProcess";
 import { toWslLinuxPath, toWindowsHostPath, type WslEnvironment } from "../wsl/WslPaths";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
-import { BUILT_IN_EXTENSIONS, INTERNAL_BUILT_IN_EXTENSIONS, isDefaultDisabledBuiltInExtension, readEffectiveBuiltInExtensionsVersion, resolveBuiltInExtensionPath, type BuiltInExtensionPathRoots } from "./builtInExtensions";
+import { BUILT_IN_EXTENSIONS, INTERNAL_BUILT_IN_EXTENSIONS, isBuiltInExtensionName, isDefaultDisabledBuiltInExtension, readEffectiveBuiltInExtensionsVersion, resolveBuiltInExtensionPath, type BuiltInExtensionPathRoots } from "./builtInExtensions";
 import { MIN_PI_VERSION_FOR_EXTENSION_WHITELIST, piVersionAtLeast } from "./extensionVersionGate";
 // 版本比较与应用更新检查共用同一实现（含预发布语义：beta < 同号正式版）。
 import { compareVersions } from "../utils/versionCompare";
@@ -261,7 +261,10 @@ export class ExtensionManager {
 			source,
 			path,
 			scope: "user",
-			builtIn: source.startsWith("pi-deck-"),
+			// 内置身份只认白名单成员（-e 注入清单）：用户目录里的 pi-deck-* 不再因前缀被判
+			// 成内置——插件开发复制的 demo（pi-deck-demo-plugin.ts）是用户可编辑的普通扩展，
+			// 启停/卸载走普通路径；真正的内置副本（历史部署残留）仍按内置处理，由启动迁移清理。
+			builtIn: isBuiltInExtensionName(source),
 		}));
 	}
 
@@ -328,7 +331,7 @@ export class ExtensionManager {
 		const extensionsDir = join(this.homeDir, ".pi", "agent", "extensions");
 		const trimmed = source.trim();
 		const name = basename(trimmed);
-		if (!name || name !== trimmed || !name.startsWith("pi-deck-") || name === "." || name === "..") {
+		if (!name || name !== trimmed || !isBuiltInExtensionName(name)) {
 			throw new Error("非法内置扩展路径");
 		}
 		await rm(join(extensionsDir, name), { force: true });
@@ -346,7 +349,8 @@ export class ExtensionManager {
 	 */
 	async disableBuiltIn(source: string): Promise<void> {
 		const normalized = source.trim();
-		if (!normalized.startsWith("pi-deck-")) {
+		// 白名单成员才可操作：pi-deck-* 前缀不足以证明内置身份（demo 等用户文件同前缀）。
+		if (!isBuiltInExtensionName(normalized)) {
 			throw new Error("只能操作内置扩展");
 		}
 		if ((INTERNAL_BUILT_IN_EXTENSIONS as readonly string[]).includes(normalized)) {
