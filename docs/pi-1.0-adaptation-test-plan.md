@@ -1,7 +1,41 @@
 # pi 1.0 适配 + 原生资源管理 手工测试方案
 
-> 状态：**待执行**。适用提交范围：`f9a1c070..HEAD`（22 个功能提交 + origin/dev 合并）。
+> 状态：**已执行（2026-10-04）**。适用提交范围：`f9a1c070..HEAD`（22 个功能提交 + origin/dev 合并）。
 > 目的：推送/发版前的最终人工验收。自动化已覆盖的部分（见附录 A）不必重复手测。
+> 本轮结论见下方「执行记录」；未执行的项与理由已逐条登记，下次发版按需补做即可。
+
+---
+
+## 执行记录（2026-10-04）
+
+环境：Debian 13 native（非 WSL）；pi 1.0.2（PATH `~/.nvm/.../bin/pi`）+ 0.99.2（managed）；被测对象 = `/opt/PiDeck` **打包版**（20:34 构建，对应 `d1105dd9`，比当时 HEAD 少一个 `ece46f40` 图标资源路径修复，与本次适配无关）。仓库 `dev` @ `ece46f40` 工作区干净。
+
+### 已通过（机器判据，不是肉眼判定）
+
+| 项 | 判据 | 证据 |
+|---|---|---|
+| T1 迁移 | `Global resource migration completed {applied:0, unresolved:2}`，状态入库 | `~/.config/PiDeck/logs/app-2026-10-04.log` 20:36:59 / 20:38:38；`~/.config/PiDeck/pi-native-resources.json` 的 `global:settings` + `project:b8b3720b…`。2 条 unresolved = 本机未安装的 `npm:@adrianapan/pikit`、`npm:pi-mcp-adapter`，旧记录按设计保留（没静默丢弃） |
+| T2 启动形态 | 20:36 之后 spawn args 无白名单注入 | 同日志：`--mode rpc --no-themes --offline` + 14 个 PiDeck `-e`；对照 19:00:14 旧构建 args 里仍有 `--no-extensions …` |
+| T3/T4 技能开关 | 关 → `skills:["-<SKILL.md 绝对路径>"]` 且 `skill:image-gen` 离开命令列表；开 → `+` 规则且命令恢复 | 探针输出 + 新会话 `/` 菜单实测一致 |
+| T5 包停用/启用（附带做了） | 关 → `packages` 四类空过滤；开 → 恢复 `{"source":"npm:pi-tracker"}`（不是全部强开） | 日志 `Extension toggled` 20:51:23/26/30；探针里 `analytics`/`budget` 命令随状态同步出现 |
+| T6 pi 内置扩展 | 关 mcp → `-builtin:mcp` 且 `mcp` 命令消失；开 → `+builtin:mcp` 且命令恢复；llama.cpp 同法 | 日志 `pi built-in extension toggled` 20:51:44/46、20:53:11 |
+| T11 quietStartup 三态 | 「仅保留横幅」→ `"quietStartup": "header"`（string）；重开配置页仍显示「仅保留横幅」（不被静默覆盖成布尔）；切回完整输出写 `false` | 20:54:39 落盘 + 重开读回 |
+| T9-1 检测连接 | 界面「已连接 · 4 个工具」= CLI 真值 | `pi mcp list --json` → `{name:"beui",state:"connected",tools:4}`，exit 0 |
+
+### 未执行（含理由）
+
+- **T7 项目作用域、T10 defaultTools**：单测已覆盖（`piResource*` 51 项 / `defaultTools` 22 项），本轮未走 UI
+- **T8 MCP 校验、T9-2/4/5**：单测 + UI 门控，收益低
+- **T9-3 真实 OAuth**：无可用供应商账号（同附录 B）
+- **T12 第三方接管**：本机未安装 `pi-mcp-adapter`
+- **T13 WSL**：本机 native，`wslEnabled=false`
+- **T14 迁移失败路径**：迁移态已入库，重放需先重置状态；runner 失败分支有单测
+- **T15 合并回归**：web 服务关闭、飞书未配置
+- **T16 打包冒烟**：被测对象本身就是打包版，T1–T6/T9-1/T11 均在打包版里完成
+
+### 本轮新增工具
+
+`scripts/probe-pi-native-commands.mjs`：用**真实 HOME** 跑 `pi --mode rpc --no-session --offline --no-themes` 取 `get_commands`，支持 `--has/--missing` 断言。界面上的「已停用」只证明写盘成功，本脚本才证明 pi 真的没加载。注意：**只断言指定命令在不在，不要断言总数**（扩展注册有时序噪声，首跑可能少 `pi-tracker` 的命令）。
 
 ## 0. 环境准备（必做，5 分钟）
 
@@ -9,6 +43,8 @@
 # 1) 备份真实配置——首次启动会触发真实迁移（旧禁用记录 → 原生规则）
 cp ~/.pi/agent/settings.json ~/.pi/agent/settings.json.bak-pre-migration
 cp ~/AppData/Roaming/PiDeck-dev/settings.json ~/AppData/Roaming/PiDeck-dev/settings.json.bak 2>/dev/null # Windows dev；正式版路径为 ~/AppData/Roaming/PiDeck/
+# Linux 对照：userData 为 ~/.config/pi-desktop-dev（dev）与 ~/.config/PiDeck（打包版）；日志在 <userData>/logs/app-<日期>.log
+# 迁移状态另有 <userData>/pi-native-resources.json（重放迁移需删掉其中 migrations.<key> 条目）
 
 # 2) 记录迁移前的旧禁用记录（用于 T1 验证迁移结果）
 node -e "const s=require(process.env.HOME+'/.pi/agent/settings.json');console.log('disabledExtensions:',JSON.stringify(s.disabledExtensions??[]));console.log('disabledSkills:',JSON.stringify(s.disabledSkills??[]));console.log('disabledPrompts:',JSON.stringify(s.disabledPrompts??[]))"
