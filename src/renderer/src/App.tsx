@@ -59,6 +59,8 @@ import { useAnnouncementNotifier } from "./hooks/useAnnouncementNotifier";
 import { useModelsVerifyNotifier } from "./hooks/useModelsVerifyNotifier";
 import { useBackgroundAskPatrol } from "./hooks/useBackgroundAskPatrol";
 import { announcementCenterOpenAtom, announcementNotificationEnabledAtom } from "./atoms/announcement-atoms";
+import { logoStyleAtom } from "./atoms/app-ui-atoms";
+import { LOGO_STYLE_STORAGE_KEY, resolveLogoStyle } from "./components/app/piTuiLogoData";
 import { openProviderLoginAtom } from "./atoms/providerLoginAtoms";
 import { useSessionLayout } from "./hooks/useSessionLayout";
 import { useFileEditor } from "./hooks/useFileEditor";
@@ -782,6 +784,19 @@ export function App() {
 	});
 	// 激活 Agent 数量告警：受设置 agentCountReminderEnabled 控制（默认开启），每个启动周期提示一次
 	useAgentLoadNotice(settings.agentCountReminderEnabled);
+
+	// logo 风格 → 渲染层镜像 atom + localStorage 缓存：LogoMark/侧栏/关于弹层订阅 atom 即时切换；
+	// localStorage 让下次启动的启动画面（React 挂载前）就能用新风格，避免开屏闪回 classic。
+	const setLogoStyle = useSetAtom(logoStyleAtom);
+	useEffect(() => {
+		const logoStyle = resolveLogoStyle(settings.logoStyle);
+		setLogoStyle(logoStyle);
+		try {
+			window.localStorage.setItem(LOGO_STYLE_STORAGE_KEY, logoStyle);
+		} catch {
+			// localStorage 不可用（隐私模式等）只影响启动画面回退 classic，不致命
+		}
+	}, [settings.logoStyle, setLogoStyle]);
 
 	// 公告通知开关 → 渲染层镜像 atom：通知调度与侧栏入口显隐共用同一数据源，
 	// 设置保存后即时生效（settings.get 首拉与 onSettingsApplied 都经此处同步）

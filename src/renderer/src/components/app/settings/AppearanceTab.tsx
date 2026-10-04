@@ -15,6 +15,8 @@ import { DirtyMarker, SettingRow, SettingSwitchRow } from "./SettingRows";
 import { ModuleVisibilitySection } from "./ModuleVisibilitySection";
 import { CustomThemeSection } from "./CustomThemeSection";
 import { Check, Minus, Plus } from "lucide-react";
+import { PiTuiLogoMark } from "../PiTuiLogo";
+import { resolveLogoStyle } from "../piTuiLogoData";
 import { cn } from "@/lib/utils";
 
 type AppearanceTabProps = {
@@ -109,6 +111,39 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 									{option.label}
 								</SelectItem>
 							))}
+						</SelectContent>
+					</Select>
+				</SettingRow>
+				{/* Logo 风格：classic = PiDeck 现状四块拼图；pi-tui = pi 官方 TUI 三色像素标。保存后所有 logo 落点即时切换（含下次启动的开屏画面）。 */}
+				<SettingRow
+					title={
+						<>
+							<span>{t("settings.logoStyle")}</span>
+							<DirtyMarker dirty={isDirty("logoStyle")} label={t("settings.logoStyle")} />
+						</>
+					}
+					description={t("settings.logoStyleDesc")}
+				>
+					<Select value={resolveLogoStyle(draft.logoStyle)} onValueChange={(value) => updateDraft({ logoStyle: value as AppSettings["logoStyle"] })}>
+						<SelectTrigger className="w-44">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="classic">
+								<span className="flex items-center gap-2">
+									<svg viewBox="140 140 520 520" width="14" height="14" aria-hidden="true" shapeRendering="crispEdges">
+										<rect x="165" y="165" width="352" height="235" fill="#f4f4f5" />
+										<rect x="517" y="400" width="117" height="235" fill="#a7a8ab" />
+									</svg>
+									<span>{t("settings.logoStyleClassic")}</span>
+								</span>
+							</SelectItem>
+							<SelectItem value="pi-tui">
+								<span className="flex items-center gap-2">
+									<PiTuiLogoMark size={16} />
+									<span>{t("settings.logoStylePiTui")}</span>
+								</span>
+							</SelectItem>
 						</SelectContent>
 					</Select>
 				</SettingRow>

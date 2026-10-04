@@ -116,6 +116,7 @@ const defaultSettings: AppSettings = {
 	themeScheduleDarkStart: "19:00",
 	accent: "default",
 	themeSkin: "classic-green",
+	logoStyle: "classic",
 	customThemeOverrides: {},
 	backgroundImage: "",
 	backgroundImageOpacity: 0.8,
@@ -581,6 +582,10 @@ export class SettingsStore {
 		}
 		if ("navigationMode" in safePatch && safePatch.navigationMode !== "tabs" && safePatch.navigationMode !== "simple") {
 			delete safePatch.navigationMode;
+		}
+		// Logo 风格只接受已知枚举，非法值保持原设置（缺省 classic 由默认值完成）。
+		if ("logoStyle" in safePatch && safePatch.logoStyle !== "classic" && safePatch.logoStyle !== "pi-tui") {
+			delete safePatch.logoStyle;
 		}
 		// 会话 Tab 最大宽度：非有限数值直接丢弃（保持原设置），合法值钳到 80–400。
 		if ("sessionTabMaxWidth" in safePatch) {
