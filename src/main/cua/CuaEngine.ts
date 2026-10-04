@@ -1,5 +1,4 @@
-import koffi from "koffi";
-import { clickAt, GetForegroundWindow, HWND_NOTOPMOST, HWND_TOPMOST, IsWindow, moveMouseAbsolute, pressKeyCombo, scrollAt, SetWindowPos, ShowWindow, SW_RESTORE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE, SWP_SHOWWINDOW, typeUnicode, VK_MAP, type WindowInfo } from "./CuaWin32";
+import { clickAt, GetForegroundWindow, HWND_NOTOPMOST, HWND_TOPMOST, IsWindow, koffiAddress, moveMouseAbsolute, pressKeyCombo, scrollAt, SetWindowPos, ShowWindow, SW_RESTORE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE, SWP_SHOWWINDOW, typeUnicode, VK_MAP, type WindowInfo } from "./CuaWin32";
 import { analyzeWindows, findWindowByTitle, getPrimaryDisplay, getVirtualDisplay, type OcclusionInfo } from "./CuaWindowAnalyzer";
 import { CuaGate, type CuaActionMeta, type CuaActionType } from "./CuaGate";
 
@@ -241,7 +240,7 @@ export class CuaEngine {
 	// -------------------------------------------------------------------------
 
 	private hwndValue(hwnd: object): number {
-		return Number(koffi.address(hwnd));
+		return Number(koffiAddress(hwnd));
 	}
 
 	private sleep(ms: number): Promise<void> {
