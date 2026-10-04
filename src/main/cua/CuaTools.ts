@@ -244,6 +244,8 @@ export function registerCuaTools(server: McpServer, engine: CuaEngine, gate: Cua
 							display,
 							gateEnabled,
 							sessionEnabled,
+							// 免审批状态一并上报：Agent/用户可据此判断是否还会弹审批框。
+							autoApprove: gate.isAutoApprove(),
 							foregroundWindow: fg
 								? {
 										hwnd: fg.window.hwnd,

@@ -358,6 +358,12 @@ export type AppSettings = {
 	 * 真实输入注入另有每次操作审批门 + 全局/会话杀开关双重兜底。
 	 */
 	cuaEnabled: boolean;
+	/**
+	 * CUA 免审批（自动放行），默认 false。
+	 * 开启后写操作（点击/输入/滚动）跳过逐次审批对话框直接执行；
+	 * 全局/会话杀开关仍然生效（关掉 CUA 仍一律拒绝）。风险自担型开关。
+	 */
+	cuaAutoApprove: boolean;
 
 	// ── 模型收藏：ModelPicker 中用 ☆ 标记，收藏的模型在列表中置顶 ──
 	/** 收藏的模型 ID 列表 */
@@ -838,6 +844,7 @@ export function createDefaultAppSettings(): AppSettings {
 		idleAgentKeepCount: 5,
 		idleAgentTimeoutMin: 60,
 		cuaEnabled: false,
+		cuaAutoApprove: false,
 		favoriteModels: [],
 
 		// 字体配置：与 main SettingsStore 默认值保持一致，避免启动时闪烁

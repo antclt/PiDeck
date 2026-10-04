@@ -4309,6 +4309,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.cuaSectionDesc": "Let the agent observe the screen and inject mouse/keyboard input to operate native desktop apps. Off by default; when on, every write action still needs per-action approval.",
 	"settings.cuaEnabled": "Enable CUA desktop control",
 	"settings.cuaEnabledDesc": "When on, starts a loopback-only MCP endpoint and registers it with pi; when off, nothing is listening and pi config is untouched. Real input is further guarded by global/session kill switches and per-action approval.",
+	"settings.cuaAutoApprove": "CUA auto-approve",
+	"settings.cuaAutoApproveDesc": "Skip the per-action approval dialog for CUA write actions (click/type/scroll); global and session kill switches still apply. The agent can inject real mouse/keyboard input without confirmation — use at your own risk.",
 	"settings.workspaceContentOpenModeDesc": "When opening from the file tree or Git, default to a middle-pane split or fill the middle pane.",
 	"settings.workspaceContentOpenMode.split": "Split by default",
 	"settings.workspaceContentOpenMode.maximize": "Fill middle pane by default",

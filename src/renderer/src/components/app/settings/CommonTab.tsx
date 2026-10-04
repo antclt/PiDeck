@@ -367,6 +367,8 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 			{/* CUA 桌面操作（实验性）：开启后才监听回环 MCP 端点并注册给 pi；真实输入另有杀开关与逐次审批兜底。 */}
 			<SettingsSection title={t("settings.cuaSection")} description={t("settings.cuaSectionDesc")}>
 				<SettingSwitchRow anchor="common-cua-enabled" title={t("settings.cuaEnabled")} description={t("settings.cuaEnabledDesc")} checked={draft.cuaEnabled ?? false} dirty={isDirty("cuaEnabled")} onChange={(checked) => updateDraft({ cuaEnabled: checked })} />
+				{/* 免审批：依赖 CUA 主开关，主开关关闭时置灰；只绕过审批对话框，杀开关仍生效 */}
+				<SettingSwitchRow anchor="common-cua-auto-approve" title={t("settings.cuaAutoApprove")} description={t("settings.cuaAutoApproveDesc")} checked={draft.cuaAutoApprove ?? false} disabled={!draft.cuaEnabled} dirty={isDirty("cuaAutoApprove")} onChange={(checked) => updateDraft({ cuaAutoApprove: checked })} />
 			</SettingsSection>
 
 			{/* 文件资源管理器集成：注册「用 PiDeck 打开」右键菜单（目录与空白处），

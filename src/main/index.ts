@@ -4736,6 +4736,8 @@ app
 		cuaService = new CuaService({
 			getMainWindow: () => mainWindow,
 			log: (domain, message, details) => void appLogger.info(domain, message, details),
+			// 免审批设置实时读取：改设置即时生效，无需重启 CUA 服务。
+			getAutoApprove: () => settingsStore.get().cuaAutoApprove,
 		});
 		if (settingsStore.get().cuaEnabled) {
 			void cuaService.start().catch((error) => {

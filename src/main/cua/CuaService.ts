@@ -29,6 +29,11 @@ export type CuaServiceDeps = {
 	getMainWindow: () => BrowserWindow | null;
 	/** Structured logger. */
 	log: (domain: string, message: string, details?: Record<string, unknown>) => void;
+	/**
+	 * 免审批设置的实时读取（cuaAutoApprove）：每次写操作 check 时解析，
+	 * 改设置无需重启/重接线。缺省视为关闭。
+	 */
+	getAutoApprove?: () => boolean;
 };
 
 export class CuaService {
@@ -45,7 +50,10 @@ export class CuaService {
 		// listening (start()) — previously it was hard-coded on at construction,
 		// so cua:get-state reported enabled=true even when cuaEnabled=false and
 		// no endpoint existed (state misreport).
-		this.gate = new CuaGate({ enabled: false });
+		this.gate = new CuaGate({
+			enabled: false,
+			autoApprove: () => this.deps.getAutoApprove?.() ?? false,
+		});
 		this.engine = new CuaEngine({ defaultDelayMs: 80 }, this.gate);
 
 		const ipcDeps: CuaIpcDeps = {

@@ -4294,6 +4294,8 @@ export const zhCN = {
 	"settings.cuaSectionDesc": "允许 Agent 观察屏幕并注入鼠标/键盘输入，从而操作桌面原生应用。默认关闭；开启后每次写操作仍需逐次审批。",
 	"settings.cuaEnabled": "启用 CUA 桌面操作",
 	"settings.cuaEnabledDesc": "开启后在本地起一个仅回环可达的 MCP 端点并注册给 pi；关闭时不监听、不改动 pi 配置。真实输入另有全局/会话杀开关与逐次审批门双重兜底。",
+	"settings.cuaAutoApprove": "CUA 免审批（自动放行）",
+	"settings.cuaAutoApproveDesc": "开启后写操作（点击、输入、滚动）不再弹逐次审批框，直接执行；全局与会话杀开关仍然生效。Agent 将可在无人确认的情况下注入真实键鼠输入，请自行评估风险。",
 	"settings.workspaceContentOpenModeDesc": "从文件树或 Git 打开内容时，默认在中间栏分屏，或占满中间栏。",
 	"settings.workspaceContentOpenMode.split": "默认分屏",
 	"settings.workspaceContentOpenMode.maximize": "默认占满中间栏",
