@@ -127,7 +127,7 @@ export function WebComposer(props: {
 				/>
 				{attachError ? <div className="px-3 text-micro text-danger">{t("web.imageAttachFailed")}</div> : null}
 				<div className="flex shrink-0 items-center justify-between gap-2 px-3 pb-2.5">
-					<span className="flex min-w-0 items-center gap-1.5">
+					<span className="flex min-w-0 items-center gap-0.5">
 						<input
 							ref={fileInputRef}
 							type="file"
@@ -179,7 +179,7 @@ export function WebComposer(props: {
 							{t("app.stop")}
 						</Button>
 					) : (
-						<Button type="submit" size="sm" className="h-8 shrink-0" disabled={props.disabled || busy || (!draft.trim() && images.length === 0)}>
+						<Button type="submit" size="sm" className="h-8 shrink-0 whitespace-nowrap" disabled={props.disabled || busy || (!draft.trim() && images.length === 0)}>
 							{t("app.send")}
 						</Button>
 					)}
