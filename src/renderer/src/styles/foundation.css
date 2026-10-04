@@ -213,10 +213,14 @@
   --shadow-composer-lifted: 0 2px 12px rgba(9, 9, 11, 0.06), 0 1px 3px rgba(9, 9, 11, 0.04);
   --shadow-drawer: -4px 0 12px rgba(9, 9, 11, 0.06);
   --focus-ring: 0 0 0 3px rgba(24, 24, 27, 0.16);
+  /* outline 版焦点环颜色：供需要负 offset / 不能占用 box-shadow 的场景；
+     注意 --focus-ring 是完整 box-shadow 值，不能直接塞进 outline 的颜色位（历史上有 16 处这么写导致整条声明作废） */
+  --focus-ring-color: rgba(24, 24, 27, 0.22);
   /* 换肤背景图：none=不启用；mask 由 JS 注入（rgba 遮罩） */
   --app-bg-image: none;
   --app-bg-mask: none;
-  --overlay-backdrop: rgba(9, 9, 11, 0.4);
+  /* 模态遮罩统一档：shadcn DialogOverlay 与旧轨 modal-backdrop/prompts-editor-backdrop 共用（2026-03 全局遮罩收敛） */
+  --overlay-backdrop: rgba(9, 9, 11, 0.45);
   --overlay-backdrop-soft: rgba(15, 23, 42, 0.14);
   --overlay-backdrop-subtle: rgba(15, 23, 42, 0.08);
   --image-preview-backdrop: rgba(0, 0, 0, 0.78);
@@ -548,7 +552,8 @@
   --shadow-composer-lifted: 0 2px 16px rgba(0, 0, 0, 0.38), 0 1px 3px rgba(0, 0, 0, 0.3);
   --shadow-drawer: -4px 0 12px rgba(0, 0, 0, 0.35);
   --focus-ring: 0 0 0 3px rgba(250, 250, 250, 0.2);
-  --overlay-backdrop: rgba(0, 0, 0, 0.7);
+  --focus-ring-color: rgba(250, 250, 250, 0.26);
+  --overlay-backdrop: rgba(0, 0, 0, 0.65);
   --overlay-backdrop-soft: rgba(0, 0, 0, 0.55);
   --overlay-backdrop-subtle: rgba(0, 0, 0, 0.35);
 }
@@ -779,6 +784,10 @@
 body {
   margin: 0;
   overflow: hidden;
+  /* 全局灰阶抗锯齿（Windows 下无视觉影响，macOS/Webkit 渲染下消除彩色边缘）；
+     编辑器/代码等正文密集区在 surfaces.css 里局部回退 subpixel-antialiased 保文字锐度 */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   /* 换肤背景图：--app-bg-image 由 App.tsx 按设置注入（pideck-bg:// 协议），
      --app-bg-mask 为同色遮罩渐变（浅色白/暗色黑，透明度=1-opacity）。
      背景移到独立 fixed 层，避免 body 背景传播规则被 Electron/Chromium 的全屏根容器覆盖。 */
@@ -836,7 +845,7 @@ input[type="range"]::-webkit-slider-thumb {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
 }
 input[type="range"]:focus-visible {
-  outline: var(--focus-ring);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
 }
 button:disabled {
@@ -1790,7 +1799,7 @@ select:focus-visible {
 }
 
 .pi-logo-canvas-stage:focus-visible {
-  outline: var(--focus-ring);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
 }
 
@@ -2321,7 +2330,7 @@ select:focus-visible {
 }
 .worktree-create-input:focus {
   border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--focus-ring);
+  box-shadow: var(--focus-ring);
 }
 /* 分支名预览：提示用户输入经 slugify 后的实际分支名 */
 .worktree-create-preview {

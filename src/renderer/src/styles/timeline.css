@@ -196,7 +196,7 @@
   transform: scale(0.99);
 }
 .execution-summary-toggle:focus-visible {
-  outline: 2px solid var(--focus-ring);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
 }
 .execution-summary-leading {
@@ -305,14 +305,14 @@
   opacity: 0.9;
 }
 .execution-summary-collapse:focus-visible {
-  outline: 2px solid var(--focus-ring);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
 }
 /* 操作栏锚点：默认皮由 TurnRow/CopyMenu 的 ghost Button utility 承担；
    此处只保留 copied 动效与 focus 兜底，避免与 hover:bg-muted 双源抢属性。 */
 .turn-row-action-btn:focus-visible,
 .copy-menu-trigger:focus-visible {
-  outline: 2px solid var(--focus-ring);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 1px;
 }
 .copy-menu-trigger.copied {
@@ -827,7 +827,7 @@
 }
 /* 用户消息操作钮：默认皮由 SurfaceComponents ghost Button utility 承担 */
 .user-turn-action-btn:focus-visible {
-  outline: 2px solid var(--focus-ring);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 1px;
 }
 
@@ -1105,7 +1105,7 @@ body.ask-dialog-open .ask-card-preview {
   background: var(--color-bg-active);
 }
 .ask-inline-bar-option:focus-visible {
-  outline: var(--focus-ring);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
 }
 .ask-inline-bar-option-yes {
@@ -1355,7 +1355,7 @@ body.ask-dialog-open .ask-card-preview {
   background: var(--color-bg-hover);
 }
 .code-copy:focus-visible {
-  outline: 2px solid var(--focus-ring);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 1px;
 }
 /* 表格样式由 Streamdown 自带的 [data-streamdown="table"] 体系接管（见 surfaces.css
@@ -1417,11 +1417,16 @@ body.ask-dialog-open .ask-card-preview {
 }
 
 .markdown-body a {
+  /* 默认主题 accent 是中性灰（“面”色），单靠颜色分不出链接；
+     用低调实下划线保证可发现性，hover 时下划线加深到全色 */
   color: var(--color-accent);
-  text-decoration: none;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
 }
 .markdown-body a:hover {
-  text-decoration: underline;
+  text-decoration-color: currentColor;
 }
 /* 链接焦点环走全局 a:focus-visible 统一样式，不在此处覆盖 */
 
@@ -1482,6 +1487,12 @@ body.ask-dialog-open .ask-card-preview {
   min-height: 112px;
   min-width: 0;
   overflow: visible;
+  /* 外壳视觉（边框/底色/阴影）唯一 owner 在本层：TSX 只保留布局类，
+     否则 utilities 层（border-border/bg-card/shadow-*）会无条件压死
+     下方 shell/plan/goal 模式态与 :focus-within 状态（2026-03 双轨层序事故） */
+  border: 1px solid var(--color-border-default);
+  background: var(--color-card);
+  box-shadow: var(--shadow-composer-lifted);
 }
 /* 特殊模式身份条：画在圆角盒内侧，2px 胶囊，避免贴外沿的 3px 实心条
    在 20px 圆角 + 默认近黑 accent 下看起来像一根粗棍。 */
@@ -1896,7 +1907,7 @@ body.ask-dialog-open .ask-card-preview {
   border-radius: var(--radius-sm);
 }
 .extension-widget-card-trigger:focus-visible {
-  outline: 2px solid var(--focus-ring);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: -2px;
 }
 .extension-widget-card-chevron {
@@ -1938,7 +1949,7 @@ body.ask-dialog-open .ask-card-preview {
   background: var(--color-bg-hover);
 }
 .extension-widget-card-close:focus-visible {
-  outline: 2px solid var(--focus-ring);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 1px;
 }
 .extension-widget-card-content {

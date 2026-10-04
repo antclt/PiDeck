@@ -171,12 +171,12 @@ export function EnvironmentDialog(props: {
 									</div>
 								</div>
 								<div className="custom-path-input-row">
-									<Input type="text" placeholder="D:\\mise-data\\installs\\node\\24 13 0\\pi.cmd" value={props.customPath} onChange={(e) => props.onCustomPathChange(e.target.value)} disabled={props.customPathValidating} />
+									<Input type="text" placeholder="D:\mise-data\installs\node\24.13.0\pi.cmd" value={props.customPath} onChange={(e) => props.onCustomPathChange(e.target.value)} disabled={props.customPathValidating} />
 									<Button variant="outline" size="sm" className="env-card-btn h-auto gap-1.5 rounded-[6px] px-4 py-[7px] text-xs shadow-none" onClick={props.onBrowsePiPath} disabled={props.browsingPiPath || props.customPathValidating}>
 										<FolderOpen size={13} strokeWidth={2} aria-hidden="true" />
 										{t("environment.installsBrowse")}
 									</Button>
-									<Button variant="default" size="sm" className="env-card-btn primary env-card-btn h-auto rounded-[6px] px-4 py-[7px] text-xs shadow-none" onClick={props.onValidateCustomPath} disabled={!props.customPath.trim() || props.customPathValidating}>
+									<Button variant="default" size="sm" className="env-card-btn primary h-auto rounded-[6px] px-4 py-[7px] text-xs shadow-none" onClick={props.onValidateCustomPath} disabled={!props.customPath.trim() || props.customPathValidating}>
 										{props.customPathValidating ? t("environment.validatingPath") : t("environment.validatePath")}
 									</Button>
 								</div>
@@ -212,7 +212,7 @@ export function EnvironmentDialog(props: {
 
 									{/* npm 可用性检测 */}
 									{props.npmAvailable === null && !props.npmChecking && (
-										<Button variant="outline" size="sm" className="env-card-btn env-card-btn h-auto rounded-[6px] px-4 py-[7px] text-xs shadow-none" onClick={props.onCheckNpm}>
+										<Button variant="outline" size="sm" className="env-card-btn h-auto rounded-[6px] px-4 py-[7px] text-xs shadow-none" onClick={props.onCheckNpm}>
 											{t("environment.stepInstall")}
 										</Button>
 									)}
@@ -243,7 +243,7 @@ export function EnvironmentDialog(props: {
 												>
 													{props.installUseMirror ? t("environment.installRemoveMirror") : t("environment.installUseMirror")}
 												</Button>
-												<Button variant="default" size="sm" className="env-card-btn primary env-card-btn h-auto rounded-[6px] px-4 py-[7px] text-xs shadow-none" onClick={props.onExecInstall} disabled={props.installExecuting || !props.installCommand.trim()}>
+												<Button variant="default" size="sm" className="env-card-btn primary h-auto rounded-[6px] px-4 py-[7px] text-xs shadow-none" onClick={props.onExecInstall} disabled={props.installExecuting || !props.installCommand.trim()}>
 													{props.installExecuting ? t("environment.installExecuting") : t("environment.installExec")}
 												</Button>
 											</div>
@@ -264,7 +264,7 @@ export function EnvironmentDialog(props: {
 														<strong>{t("environment.installSuccess")}</strong>
 														<small>{t("environment.installRestartHint")}</small>
 													</div>
-													<Button variant="default" size="sm" className="env-card-btn primary env-card-btn h-auto rounded-[6px] px-4 py-[7px] text-xs shadow-none" onClick={props.onRestartApp}>
+													<Button variant="default" size="sm" className="env-card-btn primary h-auto rounded-[6px] px-4 py-[7px] text-xs shadow-none" onClick={props.onRestartApp}>
 														{t("environment.restartApp")}
 													</Button>
 												</div>
@@ -297,7 +297,7 @@ export function EnvironmentDialog(props: {
 											<Button
 												variant="outline"
 												size="sm"
-												className="env-card-btn env-card-btn h-auto rounded-[6px] px-4 py-[7px] text-xs shadow-none"
+												className="env-card-btn h-auto rounded-[6px] px-4 py-[7px] text-xs shadow-none"
 												onClick={() =>
 													// 环境引导是弹框（Dialog），链接强制系统浏览器：内置浏览器面板在 Dialog 下层不可见
 													window.piDesktop.app.openExternal("https://nodejs.org/zh-cn/download/", true)

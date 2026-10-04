@@ -196,8 +196,9 @@
   color: var(--color-info);
 }
 .codex-status.subagent {
-  background: color-mix(in srgb, #6366f1 14%, var(--color-bg-panel));
-  color: #6366f1;
+  /* 子代理身份色与 --color-thinking 同源（#6366f1 靛蓝），不再裸写色值 */
+  background: color-mix(in srgb, var(--color-thinking) 14%, var(--color-bg-panel));
+  color: var(--color-thinking);
 }
 .codex-subagent-toggle {
   justify-self: start;
@@ -444,6 +445,18 @@
 .scratch-pad-entry.active {
   color: var(--color-accent);
   border-color: var(--color-accent);
+}
+/* 任务清单勾选框：跟随主题 accent 色（不用浏览器默认蓝），尺寸对齐 13px 正文行高，焦点环与全局一致 */
+.scratch-pad-checkbox {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+.scratch-pad-checkbox:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
 }
 .terminal-entry {
   position: static;
@@ -2799,7 +2812,7 @@
 }
 
 .session-file-summary-header:focus-visible {
-  outline: var(--focus-ring);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: -2px;
 }
 

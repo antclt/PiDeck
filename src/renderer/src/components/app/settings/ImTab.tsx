@@ -380,7 +380,6 @@ export function ImTab(_props: Props) {
 									if (addStep !== "input") setAddStep("input");
 								}}
 								placeholder="cli_xxxxxxxxxxxx"
-								className="config-input"
 								disabled={addStep !== "input"}
 							/>
 						</div>
@@ -395,7 +394,6 @@ export function ImTab(_props: Props) {
 									if (addStep !== "input") setAddStep("input");
 								}}
 								placeholder="••••••••••••••••"
-								className="config-input"
 								disabled={addStep !== "input"}
 							/>
 						</div>
@@ -403,7 +401,7 @@ export function ImTab(_props: Props) {
 							<Label>
 								{t("config.im.botName")} <span className="config-field-optional">({t("common.optional")})</span>
 							</Label>
-							<Input type="text" value={botName} onChange={(e) => setBotName(e.target.value)} placeholder={t("config.im.botNamePlaceholder")} className="config-input" disabled={addStep !== "input"} />
+							<Input type="text" value={botName} onChange={(e) => setBotName(e.target.value)} placeholder={t("config.im.botNamePlaceholder")} disabled={addStep !== "input"} />
 						</div>
 
 						{/* 连接成功后才显示 Open ID 输入框 */}
@@ -413,7 +411,7 @@ export function ImTab(_props: Props) {
 									<Label>
 										{t("config.im.openId")} <span className="config-field-required">*</span>
 									</Label>
-									<Input type="text" value={addFormOpenId} onChange={(e) => setAddFormOpenId(e.target.value)} placeholder="ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxx" className="config-input" />
+									<Input type="text" value={addFormOpenId} onChange={(e) => setAddFormOpenId(e.target.value)} placeholder="ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
 								</div>
 								<div className="config-im-openid-hint">💡 {t("config.im.openIdHint")}</div>
 							</div>

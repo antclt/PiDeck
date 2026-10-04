@@ -578,7 +578,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 							   黄点/禁用态由配置页内部脏集合与保存状态上报 */
 							<>
 								<Button variant="default" size="sm" onClick={() => void configPaneRef.current?.saveCurrent()} disabled={configPaneState.saving} title={configPaneState.hasDirty ? t("config.dirtyTooltip") : undefined}>
-									{configPaneState.hasDirty && <span className="size-2 rounded-full bg-amber-400" aria-hidden="true" />}
+									{configPaneState.hasDirty && <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" />}
 									{configPaneState.saving ? t("common.saving") : t("common.save")}
 								</Button>
 								<Button variant="outline" size="sm" onClick={() => configPaneRef.current?.exportConfig()}>
@@ -638,13 +638,13 @@ function SettingsModalContent(props: SettingsModalProps) {
 							<MonitorCog className="size-4" aria-hidden="true" />
 							{t("settings.panes.system")}
 							{/* 系统设置分区黄点：全局设置/视觉桥/生图草稿任一有未保存 */}
-							{hasAnyDirtyChanges ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+							{hasAnyDirtyChanges ? <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" /> : null}
 						</TabsTrigger>
 						<TabsTrigger value="config" className="h-8 gap-1.5 px-3 text-[13px]">
 							<SlidersHorizontal className="size-4" aria-hidden="true" />
 							{t("settings.panes.config")}
 							{/* 配置管理分区黄点：由 ConfigPane 内部脏集合上报 */}
-							{configPaneState.hasDirty ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+							{configPaneState.hasDirty ? <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" /> : null}
 						</TabsTrigger>
 					</TabsList>
 					<TabsContent value="config" forceMount hidden={pane !== "config"} className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -691,7 +691,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 										两者可并存；均为装饰（aria-hidden），语义由 tab 内卡片文案承担。 */}
 											<div className="ml-auto flex items-center gap-1">
 												{tab.id === "dev" && hasPendingUpdate ? <span className="size-1.5 rounded-full bg-[var(--color-accent)]" aria-hidden="true" /> : null}
-												{dirtyTabIds.has(tab.id as SettingsUnsavedTabId) ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+												{dirtyTabIds.has(tab.id as SettingsUnsavedTabId) ? <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" /> : null}
 											</div>
 										</TabsTrigger>
 									</Fragment>

@@ -284,13 +284,15 @@ export function FileIcon({ name }: { name: string }) {
 
 /** Mirrors VS Code's monaco-tl-twistie without importing structural icons. */
 export function Twistie({ open }: { open: boolean }) {
-	return <span className={`inline-flex size-3.5 shrink-0 items-center justify-center text-[9px] text-[var(--git-desc-fg)] before:block before:content-['▶'] before:transition-transform before:duration-150${open ? " before:rotate-0" : " before:-rotate-90"}`} aria-hidden="true" />;
+	return <ChevronDown aria-hidden="true" size={14} strokeWidth={2} className={`inline-block size-3.5 shrink-0 text-[var(--git-desc-fg)] transition-transform duration-150${open ? "" : " -rotate-90"}`} />;
 }
 
 function GitStageGlyph({ unstage = false }: { unstage?: boolean }) {
+	/* 与行内 stage/unstage 按钮同用 lucide 图标；弃用超大字号 ＋/− 字符（字形基线靠 translateY 补丁对齐，观感发虚） */
+	const Glyph = unstage ? Minus : Plus;
 	return (
-		<span className="flex size-5 items-center justify-center font-sans text-xl font-medium leading-5 -translate-y-px" aria-hidden="true">
-			{unstage ? "\u2212" : "+"}
+		<span className="flex size-5 items-center justify-center" aria-hidden="true">
+			<Glyph size={13} strokeWidth={2} />
 		</span>
 	);
 }
@@ -367,7 +369,7 @@ export function ResourceRow(props: {
 					))}
 				</div>
 			)}
-			<span className="ml-[5px] flex w-4 shrink-0 justify-end text-xs font-semibold text-right text-[var(--git-desc-fg)]" aria-hidden="true">
+			<span className="git-decoration flex items-center justify-end" aria-hidden="true">
 				{opening ? <Loader2 size={13} className="animate-pideck-spin" /> : letter}
 			</span>
 		</div>

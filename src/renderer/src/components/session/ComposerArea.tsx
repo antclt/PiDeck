@@ -186,8 +186,10 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 							composerBox={
 								<div
 									// overflow-visible：保留命令面板/建议浮层；面板 minSize 已保证底栏不被裁切
+									// 外壳视觉（border/bg/shadow）由 legacy .composer-box 统一持有（含 mode/focus 状态），
+									// 这里只留布局/圆角/过渡，避免 utilities 层压死状态样式
 									className={[
-										"composer-box relative flex w-full min-w-0 shrink-0 flex-col overflow-visible rounded-[20px] border border-border bg-card text-card-foreground shadow-[var(--shadow-composer-lifted)] transition-[border-color,box-shadow,background-color]",
+										"composer-box relative flex w-full min-w-0 shrink-0 flex-col overflow-visible rounded-[20px] text-card-foreground transition-[border-color,box-shadow,background-color]",
 										composer.bangMode === "bang-bang" ? "shell-silent-mode" : composer.bangMode === "bang" ? "shell-mode" : composer.mode === "plan" ? "plan-mode" : composer.mode === "goal" ? "goal-mode" : "",
 									]
 										.filter(Boolean)

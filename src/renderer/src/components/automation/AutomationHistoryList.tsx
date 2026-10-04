@@ -139,10 +139,10 @@ export function AutomationHistoryList({ projectId, onViewSession }: AutomationHi
 			case "queued":
 			case "starting":
 			case "running":
-				return <Badge className="h-5 animate-pulse border-sky-500/30 bg-sky-500/15 px-1.5 text-[11px] font-normal text-sky-500">{status === "queued" ? t("automation.status.queued") : status === "starting" ? t("automation.status.starting") : t("automation.status.running")}</Badge>;
+				return <Badge className="h-5 animate-pulse border-info/30 bg-info/15 px-1.5 text-[11px] font-normal text-info">{status === "queued" ? t("automation.status.queued") : status === "starting" ? t("automation.status.starting") : t("automation.status.running")}</Badge>;
 			case "succeeded":
 				return (
-					<Badge className="h-5 border-emerald-500/30 bg-emerald-500/15 px-1.5 text-[11px] font-normal text-emerald-500">
+					<Badge className="h-5 border-success/30 bg-success/15 px-1.5 text-[11px] font-normal text-success">
 						<CheckCircle2 className="mr-1 size-3" />
 						{t("automation.status.succeeded")}
 					</Badge>
@@ -159,7 +159,7 @@ export function AutomationHistoryList({ projectId, onViewSession }: AutomationHi
 				);
 			case "aborted":
 				return (
-					<Badge className="h-5 border-amber-500/30 bg-amber-500/15 px-1.5 text-[11px] font-normal text-amber-500">
+					<Badge className="h-5 border-warning/30 bg-warning/15 px-1.5 text-[11px] font-normal text-warning">
 						<AlertCircle className="mr-1 size-3" />
 						{t("automation.status.aborted")}
 					</Badge>

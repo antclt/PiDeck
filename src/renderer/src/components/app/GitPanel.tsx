@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useAtom, useSetAtom } from "jotai";
-import { ArrowDownToLine, ArrowUpFromLine, Check, ChevronDown, ChevronsDownUp, ChevronsUpDown, ClipboardPaste, FileCode2, FolderGit2, GitBranch, Loader2, Plus, RefreshCw, RotateCcw, Sparkles } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Check, ChevronDown, ChevronsDownUp, ChevronsUpDown, ClipboardPaste, FileCode2, FolderGit2, GitBranch, Loader2, Plus, RefreshCw, RotateCcw, Sparkles, TriangleAlert } from "lucide-react";
 import { Button } from "../ui-shadcn/button";
 import { BridgeGuiSlot, useBridgeSessionId } from "../bridge/BridgeSlot";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "../ui-shadcn/context-menu";
@@ -1425,7 +1425,8 @@ export function GitPanel(props: GitPanelProps) {
 							<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
 								{gitNotInstalled ? (
 									<div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
-										<div className="text-[32px] leading-none opacity-60">⚡</div>
+										{/* 未装 git 的空状态用统一的 lucide 矢量图标（三角警示 + 弱化色），弃用 emoji ⚡（跨平台字形不稳、显糙） */}
+										<TriangleAlert aria-hidden size={32} strokeWidth={1.5} className="text-text-tertiary" />
 										<div className="text-sm font-semibold text-text-primary">{t("git.gitNotInstalled")}</div>
 										<div className="max-w-[360px] text-xs leading-[22px] text-text-tertiary">{t("git.gitNotInstalledDesc")}</div>
 									</div>
@@ -1467,9 +1468,9 @@ export function GitPanel(props: GitPanelProps) {
 										<div className="flex items-stretch gap-2">
 											<Button
 												type="button"
-												variant="ghost"
+												variant="outline"
 												size="icon-sm"
-												className="min-w-8 border border-border-subtle bg-bg-panel text-text-secondary hover:bg-bg-hover hover:text-text-primary"
+												className="min-w-8 text-text-secondary hover:text-text-primary"
 												title={commitGenLoading ? t("git.generateCommitMessageProgress") : t("git.generateCommitMessage")}
 												aria-label={t("git.generateCommitMessage")}
 												disabled={commitGenLoading || mutating}

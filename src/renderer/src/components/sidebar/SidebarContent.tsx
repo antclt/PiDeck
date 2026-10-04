@@ -406,7 +406,7 @@ export function SidebarContent(props: SidebarContentProps) {
 									</TooltipContent>
 								</Tooltip>
 								{/* 更新角标：PiDeck / Pi CLI / 模型目录任一有可提示更新时显示圆点 */}
-								{hasPendingUpdate && <span className="pointer-events-none absolute right-1 top-1 size-2 rounded-full bg-[var(--color-accent)]" aria-hidden="true" />}
+								{hasPendingUpdate && <span className="pointer-events-none absolute right-1 top-1 size-2 rounded-full bg-[var(--color-accent)] ring-2 ring-[var(--color-bg-sidebar)]" aria-hidden="true" />}
 							</div>
 						</DockItem>
 						{/* 公告中心入口：未读红点在组件内部按 atom 派生（单一 owner） */}

@@ -286,7 +286,7 @@ export function AnnouncementCenter() {
 								<Megaphone className="size-4" />
 							</Button>
 							{/* 未读圆点：与设置按钮更新角标同款式；仅 notice 计入（guide 常驻不打扰） */}
-							{unreadCount > 0 && <span className="pointer-events-none absolute right-1 top-1 size-2 rounded-full bg-[var(--color-accent)]" aria-hidden="true" />}
+							{unreadCount > 0 && <span className="pointer-events-none absolute right-1 top-1 size-2 rounded-full bg-[var(--color-accent)] ring-2 ring-[var(--color-bg-sidebar)]" aria-hidden="true" />}
 						</div>
 					</DialogTrigger>
 				</TooltipTrigger>

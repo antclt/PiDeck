@@ -962,7 +962,7 @@ export const UserBubble = memo(function UserBubble(props: {
 				</div>
 			)}
 			{cleanText && !editing && (
-				<div className="user-turn-bubble w-fit min-w-0 max-w-[min(82%,64ch)] rounded-[14px] border border-border bg-muted/60 px-3 py-2 text-sm text-foreground [overflow-wrap:anywhere] break-words">
+				<div className="user-turn-bubble w-fit min-w-0 max-w-[min(82%,64ch)] rounded-[14px] border px-3 py-2 text-sm text-foreground [overflow-wrap:anywhere] break-words">
 					<div
 						ref={userTextRef}
 						// user-turn-text 是气泡 chip 样式的唯一作用域锚点：timeline.css 的
