@@ -13,7 +13,7 @@ import type { FetchedModel, ConfigProxyMode } from "../../../shared/types/fetche
 import type { ModelItem, ProviderCompat } from "./configTypes";
 import { ModelsTable } from "./ModelsTable";
 import { ProviderConnectionForm, type ProviderTestResult } from "./ProviderConnectionForm";
-import { buildProviderConfigFromDraft, resolveFetchedBaseUrl, resolveInitialReasoningContentReplay, type AddProviderDraft } from "./addProviderDraft";
+import { buildProviderConfigFromDraft, providerDialogResetKey, resolveFetchedBaseUrl, resolveInitialReasoningContentReplay, type AddProviderDraft } from "./addProviderDraft";
 import { applyModelPatches, applyAdaptiveTemplateReset, computeModelSpecPatches, mergeAdaptiveModelTemplate } from "../utils/modelSpecAutoFill";
 import { countSelectedModelIndexes, removeSelectedModelIndexes, toggleAllModelIndexes, toggleModelIndex } from "./modelBatchSelection";
 
@@ -82,7 +82,12 @@ export function AddProviderDialog(props: {
 	const [fetchedModels, setFetchedModels] = useState<FetchedModel[] | null>(null);
 	const [selectedFetchedIds, setSelectedFetchedIds] = useState<string[]>([]);
 
-	// 每次进入页面重置草稿：add=空表单；edit=预填现有配置（含模型列表）
+	// 每次进入页面重置草稿：add=空表单；edit=预填现有配置（含模型列表）。
+	// 重置只按 resetKey（模式 + 编辑对象身份）触发：ModelsTab 在 JSX 内联构造预填对象，
+	// 父组件刷新会传内容相同、引用不同的 initial，按引用做依赖会把未保存的
+	// API 类型 / User-Agent 草稿和测试结果整体冲回旧配置（issue #311）；切换供应商、
+	// add/edit 模式切换或重新进入页面（重新挂载）时 resetKey 变化，照常初始化。
+	const resetKey = providerDialogResetKey(props.mode, props.initial);
 	useEffect(() => {
 		const initial = props.initial;
 		setName(initial?.name ?? "");
@@ -110,7 +115,7 @@ export function AddProviderDialog(props: {
 		setResettingModelKey(null);
 		setTestModelId("");
 		setTestResult(null);
-	}, [props.initial, props.mode]);
+	}, [resetKey]);
 
 	const trimmedName = name.trim();
 	const nameValid = isValidProviderName(trimmedName);
