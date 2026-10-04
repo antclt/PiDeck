@@ -91,7 +91,7 @@ function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: st
 				);
 			})}
 			{hiddenCount > 0 && (
-				<button type="button" className="conversation session-row relative flex min-h-7 w-full items-center justify-center gap-1.5 rounded-md border border-transparent px-2 py-0 text-center text-caption text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground" onClick={onToggleShowAll}>
+				<button type="button" className="conversation session-row relative flex min-h-7 w-full items-center justify-start gap-1.5 rounded-md border border-transparent px-2 py-0 text-left text-caption text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground" onClick={onToggleShowAll}>
 					{showAll ? t("common.collapse") : t("web.moreSessions", { count: hiddenCount })}
 				</button>
 			)}

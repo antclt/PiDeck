@@ -2363,6 +2363,9 @@ select:focus-visible {
   font-size: var(--font-size-caption);
   font-weight: 400;
   line-height: var(--line-height-caption);
+  /* web 端 Tailwind preflight 未重置 button 的 text-align:center（UA 默认值），
+     strong 是 display:block 撑满行宽，不重置会让标题文字在块内居中漂浮。 */
+  text-align: left;
   white-space: nowrap;
   text-overflow: clip;
   -webkit-mask-image: linear-gradient(
@@ -2707,6 +2710,12 @@ select:focus-visible {
 .session-v-group {
   flex: 1;
   min-height: 0;
+}
+/* 终端折叠/展开动画：仅 collapsed 翻转后的 200ms 窗口内挂 flex-grow 过渡
+   （react-resizable-panels 用内联 flexGrow 控尺寸，程序化 setLayout 因而可过渡）；
+   拖拽时属性不存在，直接操作不带阻尼。窗口由 SessionView 的 terminalCollapseAnimating 驱动。 */
+.session-v-group[data-terminal-collapse-anim="true"] > [data-panel] {
+  transition: flex-grow 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .session-v-timeline,
 .session-v-terminal {
