@@ -849,7 +849,7 @@ export const UserBubble = memo(function UserBubble(props: {
 						// 参考图在历史里同样是 ref 引用（新图是内联 base64），统一走解析器
 						const src = imageContentSrc(img);
 						if (!src) return null;
-						return <MessageImage key={index} src={src} alt={t("app.imageAlt", { index: index + 1 })} className="size-16 max-h-40 cursor-pointer rounded-md border border-border object-cover transition-colors duration-150 hover:border-border-strong" onClick={() => props.onPreviewImage(img)} />;
+						return <MessageImage key={index} src={src} alt={t("app.imageAlt", { index: index + 1 })} className="size-16 max-h-40 cursor-pointer rounded-md border border-border object-cover transition-colors duration-fast hover:border-border-strong" onClick={() => props.onPreviewImage(img)} />;
 					})}
 				</div>
 			)}
@@ -978,7 +978,7 @@ export const UserBubble = memo(function UserBubble(props: {
 							{!messageExpanded && <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-gradient-to-t from-muted/70 to-transparent" aria-hidden="true" />}
 							<button
 								type="button"
-								className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-micro text-text-tertiary transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
+								className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-micro text-text-tertiary transition-colors duration-fast hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
 								onClick={() => setMessageExpanded((v) => !v)}
 								aria-expanded={messageExpanded}
 							>

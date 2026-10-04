@@ -293,7 +293,7 @@ export const ToolCard = memo(function ToolCard(props: {
 				data-tool-kind={isSkillRead ? "skill" : getToolKind(toolName)}
 				data-message-id={props.message.id}
 			>
-				<div className="relative flex min-h-7 items-center rounded-md transition-colors duration-150 hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)]">
+				<div className="relative flex min-h-7 items-center rounded-md transition-colors duration-fast hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)]">
 					{/* 工具运行中整行扫光（dsh-web command-row-sweep 同款，与思考扫光同 keyframes）。
 				    status === "running" 才挂载：stopped/error/done 立即消失（stopped 由 props.stopped 短路）；
 				    pointer-events-none 不挡 trigger 点击展开 */}

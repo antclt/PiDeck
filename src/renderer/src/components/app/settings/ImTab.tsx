@@ -451,7 +451,7 @@ export function ImTab(_props: Props) {
 					const visibleBotBindings = botBindings.slice(0, visibleBindingCount);
 					const secretValue = revealedSecrets[bot.id];
 					return (
-						<div key={bot.id} className={`mb-2 overflow-hidden rounded-lg border border-border-subtle bg-bg-panel transition-[border-color,box-shadow,background-color] duration-150 config-im-bot-card${isThisConnected ? " border-[var(--color-accent)]/30" : ""}`}>
+						<div key={bot.id} className={`mb-2 overflow-hidden rounded-lg border border-border-subtle bg-bg-panel transition-[border-color,box-shadow,background-color] duration-fast config-im-bot-card${isThisConnected ? " border-[var(--color-accent)]/30" : ""}`}>
 							<div
 								className="flex cursor-pointer items-center gap-3 px-3.5 py-2.5 hover:bg-bg-hover config-im-bot-header"
 								onClick={() =>

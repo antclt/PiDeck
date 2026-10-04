@@ -2188,11 +2188,11 @@ body.ask-dialog-open .ask-card-preview {
   box-shadow: var(--focus-ring);
 }
 .file-node-row.file {
-  cursor: default;
+  cursor: pointer;
 }
 .file-node-row.directory {
   font-weight: 600;
-  cursor: default;
+  cursor: pointer;
 }
 .file-node-icon {
   width: 24px;

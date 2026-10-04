@@ -48,7 +48,7 @@ export function GitCompactFilter(props: { value: string; options: { value: strin
 				className={cn(
 					// 触发器可随剩余宽度变宽以多显示分支名；max-w-full + 标题 shrink-0，避免盖住「源代码管理图」。
 					// 不用 font-mono：「全部」等中文标签走面板 --git-ui-font / 项目 base 栈。
-					"h-6 w-auto max-w-full min-w-0 gap-1 overflow-hidden rounded-sm border border-transparent px-2 text-[13px] whitespace-nowrap text-text-primary transition-[border-color,background-color] duration-150 hover:border-border-subtle hover:bg-bg-hover focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none [&>svg]:size-3",
+					"h-6 w-auto max-w-full min-w-0 gap-1 overflow-hidden rounded-sm border border-transparent px-2 text-[13px] whitespace-nowrap text-text-primary transition-[border-color,background-color] duration-fast hover:border-border-subtle hover:bg-bg-hover focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none [&>svg]:size-3",
 					props.className,
 				)}
 			>

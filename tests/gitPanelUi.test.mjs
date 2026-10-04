@@ -43,7 +43,7 @@ describe("Git panel VS Code Source Control contract", () => {
 		// 折叠箭头与 ＋/− 暂存符号统一走 lucide 矢量图标：字符字形（▶ / text-xl ＋/－）跨平台笔画不稳、基线靠 translateY 补丁，与全局图标体系不一致
 		const twistie = sourceBetween("function Twistie(", "function GitStageGlyph(");
 		assert.match(twistie, /<ChevronDown\s/);
-		assert.match(twistie, /transition-transform\s+duration-150\$\{open\s\?\s*""\s*:\s*"\s*-rotate-90"\}/);
+		assert.match(twistie, /transition-transform\s+duration-fast\$\{open\s\?\s*""\s*:\s*"\s*-rotate-90"\}/);
 		assert.doesNotMatch(twistie, /before:content-\['▶'\]/);
 		assert.doesNotMatch(twistie, /\.git-twistie/);
 		const glyph = sourceBetween("function GitStageGlyph(", "\n}");

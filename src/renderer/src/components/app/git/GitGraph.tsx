@@ -774,7 +774,7 @@ export function SourceControlGraph(props: GitGraphProps) {
 									type="button"
 									variant="ghost"
 									size="sm"
-									className="w-full border border-dashed border-border-subtle py-2 text-xs text-text-secondary transition-colors duration-150 hover:bg-bg-hover hover:text-text-primary"
+									className="w-full border border-dashed border-border-subtle py-2 text-xs text-text-secondary transition-colors duration-fast hover:bg-bg-hover hover:text-text-primary"
 									onClick={() => {
 										setLoadCount((prev) => prev + 30);
 									}}

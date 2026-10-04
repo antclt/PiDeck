@@ -64,7 +64,7 @@ export function SelectionToolbar(props: { quote: TimelineSelectionQuote | null; 
 			// 避免先收起导致随后的 click 拿不到 quote。改名前先同步两处。
 			data-quote-toolbar="true"
 			// 紧凑工具条（Codex 同款形态）：悬浮卡片 + 毛玻璃，hover 微亮、按下微缩
-			className="fixed z-[80] inline-flex h-7 cursor-pointer items-center gap-1 rounded-lg border border-border-subtle bg-bg-panel/90 px-2 text-caption font-medium text-text-primary shadow-[var(--shadow-popover)] backdrop-blur-md transition-[background-color,border-color] duration-150 hover:border-border hover:bg-bg-hover"
+			className="fixed z-[80] inline-flex h-7 cursor-pointer items-center gap-1 rounded-lg border border-border-subtle bg-bg-panel/90 px-2 text-caption font-medium text-text-primary shadow-[var(--shadow-popover)] backdrop-blur-md transition-[background-color,border-color] duration-fast hover:border-border hover:bg-bg-hover"
 			style={{ top: position.top, left: position.left }}
 			onClick={handleInsert}
 		>

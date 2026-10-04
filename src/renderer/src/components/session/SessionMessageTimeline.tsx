@@ -835,7 +835,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
           - 学 Proma：总折叠压缩单行 DOM；另在贴底时只挂尾部 N 个 agent-run
             （见 turnRenderWindow），上滚放开。分页仍做数据窗口治理。 */}
 			{hasActiveConversation && !isConversationLoading && activeMessages.length > 0 && (
-				<div className="message-list min-w-0 w-full mx-auto transition-opacity duration-150">
+				<div className="message-list min-w-0 w-full mx-auto transition-opacity duration-fast">
 					{displayRuns.map((item, index) => {
 						if (item.kind === "agent-run") {
 							// Only an active model turn keeps its latest run live. Context

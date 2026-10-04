@@ -395,7 +395,7 @@ function PaneSash(props: { before: PaneId; after: PaneId; beforeHeight: number; 
 
 	return (
 		<div
-			className="git-pane-sash relative z-[1] box-border h-1.5 shrink-0 basis-1.5 -my-[3px] cursor-row-resize touch-none before:absolute before:top-0.5 before:right-0 before:left-0 before:h-px before:bg-[var(--git-panel-border)] before:transition-[background-color,height] before:duration-150 hover:before:h-0.5 hover:before:bg-[var(--color-accent)] focus-visible:before:h-0.5 focus-visible:before:bg-[var(--color-accent)]"
+			className="git-pane-sash relative z-[1] box-border h-1.5 shrink-0 basis-1.5 -my-[3px] cursor-row-resize touch-none before:absolute before:top-0.5 before:right-0 before:left-0 before:h-px before:bg-[var(--git-panel-border)] before:transition-[background-color,height] before:duration-fast hover:before:h-0.5 hover:before:bg-[var(--color-accent)] focus-visible:before:h-0.5 focus-visible:before:bg-[var(--color-accent)]"
 			role="separator"
 			tabIndex={0}
 			aria-orientation="horizontal"
@@ -1335,7 +1335,7 @@ export function GitPanel(props: GitPanelProps) {
 							<span className="git-branch-label min-w-0 flex-1 truncate">{props.currentBranch || t("app.branchNone")}</span>
 							{/* 多仓变更行已经很挤，数字角标会把按钮撑回宽胶囊；单仓仍显示分支数。 */}
 							{layout !== "changesOnly" && props.branches.length > 0 && <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-muted px-1 text-[10px] font-medium tabular-nums text-muted-foreground">{props.branches.length}</span>}
-							<ChevronDown size={12} className={`shrink-0 text-muted-foreground transition-transform duration-150${branchOpen ? " rotate-180" : ""}`} />
+							<ChevronDown size={12} className={`shrink-0 text-muted-foreground transition-transform duration-fast${branchOpen ? " rotate-180" : ""}`} />
 						</Button>
 						{notAGitRepo && (
 							<Button type="button" variant="ghost" size="icon-sm" className="size-7 inline-grid size-7 place-items-center rounded-md border border-border text-muted-foreground hover:bg-accent hover:text-accent-foreground" title={t("git.initInBranchBar")} disabled={initializing} onClick={() => void doInitRepo()}>

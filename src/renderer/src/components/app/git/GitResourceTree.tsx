@@ -101,7 +101,7 @@ export function FileTree(props: {
 					<Fragment key={dir || "root"}>
 						{!hideDirHeader && (
 							<div className="group/dir flex cursor-pointer items-center gap-1 rounded-[4px] px-2 py-[3px] select-none hover:bg-[var(--git-panel-hover)]" onClick={() => props.onToggleDir(dir)}>
-								<ChevronDown size={12} className={`shrink-0 text-text-tertiary transition-transform duration-150${props.collapsedDirs.has(dir) ? " -rotate-90" : " rotate-0"}`} />
+								<ChevronDown size={12} className={`shrink-0 text-text-tertiary transition-transform duration-fast${props.collapsedDirs.has(dir) ? " -rotate-90" : " rotate-0"}`} />
 								<span className="min-w-0 flex-1 truncate text-xs text-text-secondary" title={dir || "/"}>
 									{shortenDir(dir) || "/"}
 								</span>
@@ -278,13 +278,19 @@ export function FileIcon({ name }: { name: string }) {
 		const { svg, colorName } = getFileIconSeti(name);
 		return <span aria-hidden="true" className="mr-1.5 inline-flex size-5 shrink-0 items-center justify-center [&_svg]:size-full [&_svg]:fill-current" style={{ color: getFileIconColor(colorName) }} dangerouslySetInnerHTML={{ __html: svg }} />;
 	} catch {
-		return <span aria-hidden="true" className="mr-1.5 box-border inline-flex size-3 shrink-0 items-center justify-center rounded-[4px] border border-[var(--git-desc-fg)] [&_svg]:size-full [&_svg]:fill-current" />;
+		// 未知类型兜底：FileText 线性图标（16px，与 Seti 图标同槽位）而非空透明方块——
+		// 空方块在非代码文件密集的目录里像图标加载失败。
+		return (
+			<span aria-hidden="true" className="mr-1.5 inline-flex size-5 shrink-0 items-center justify-center text-[var(--git-desc-fg)] [&_svg]:size-4">
+				<FileText />
+			</span>
+		);
 	}
 }
 
 /** Mirrors VS Code's monaco-tl-twistie without importing structural icons. */
 export function Twistie({ open }: { open: boolean }) {
-	return <ChevronDown aria-hidden="true" size={14} strokeWidth={2} className={`inline-block size-3.5 shrink-0 text-[var(--git-desc-fg)] transition-transform duration-150${open ? "" : " -rotate-90"}`} />;
+	return <ChevronDown aria-hidden="true" size={14} strokeWidth={2} className={`inline-block size-3.5 shrink-0 text-[var(--git-desc-fg)] transition-transform duration-fast${open ? "" : " -rotate-90"}`} />;
 }
 
 function GitStageGlyph({ unstage = false }: { unstage?: boolean }) {

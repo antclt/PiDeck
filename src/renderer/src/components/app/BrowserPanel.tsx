@@ -517,7 +517,7 @@ export function BrowserPanel(props: {
 
 			{isLoading && (
 				<div className="h-0.5 shrink-0 overflow-hidden bg-bg-subtle">
-					<div className="h-full bg-[var(--color-accent)] transition-[width] duration-150" style={{ width: `${Math.max(5, loadProgress * 100)}%` }} />
+					<div className="h-full bg-[var(--color-accent)] transition-[width] duration-fast" style={{ width: `${Math.max(5, loadProgress * 100)}%` }} />
 				</div>
 			)}
 

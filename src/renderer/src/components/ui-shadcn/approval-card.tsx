@@ -96,7 +96,7 @@ export function ApprovalCard(props: {
 			<div className="flex min-w-0 items-start gap-2 border-b border-border/70 bg-muted/25 px-3 py-1">
 				<CollapsibleTrigger asChild>
 					<Button variant="ghost" size="icon-sm" className="size-7 shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground" aria-label={optionsLabel} title={optionsLabel}>
-						<ChevronDown className={cn("size-3.5 shrink-0 transition-transform duration-200", !props.open && "-rotate-90")} aria-hidden="true" />
+						<ChevronDown className={cn("size-3.5 shrink-0 transition-transform duration-base", !props.open && "-rotate-90")} aria-hidden="true" />
 					</Button>
 				</CollapsibleTrigger>
 				<CircleHelp className="mt-1.5 size-3.5 shrink-0 text-primary" aria-hidden="true" />

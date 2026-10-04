@@ -2748,6 +2748,14 @@ select:focus-visible {
 :root[data-bg-image="on"] .copy-menu-popover {
   --color-bg-popover: color-mix(in srgb, var(--wallpaper-base, var(--color-bg-app)) var(--wallpaper-panel-alpha, 30%), transparent);
 }
+/* 上述降档浮层的「毛玻璃」承诺兑现：半透明底色必须叠加 backdrop-filter 才是真磨砂，
+   否则透出的是下层正文锐利边缘，观感像浮层没渲染完。blur 只挂在小体积浮层，
+   侧栏/抽屉等大面板不加（GPU 成本与取色兜底已够）。 */
+:root[data-bg-image="on"] .widget-popover,
+:root[data-bg-image="on"] .ctx-detail-tooltip,
+:root[data-bg-image="on"] .copy-menu-popover {
+  backdrop-filter: blur(18px) saturate(1.3);
+}
 /* 工作台大弹框（Pi 配置管理 / 设置 / 项目资源 / 环境管理）：只做内部透明化，
    透明度走通用弹窗基线，不再单独降档。此前它们跟随面板档（背景图可见度 80%
    → 仅 30% 不透明），弹窗下方的正文会透进设置内容、文字与下层互相穿透，
@@ -3429,8 +3437,10 @@ select:focus-visible {
   color: var(--terminal-fg);
 }
 .terminal-tab-close:hover {
-  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
-  color: var(--color-danger);
+  /* 中性 hover：与全局其余关闭钮一致；红色 hover 只保留给真正危险操作，
+     终端 tab 关闭是常规动作，红色在这里显得像报错（2027-10 精致度审查）。 */
+  background: var(--terminal-hover);
+  color: var(--terminal-fg);
   opacity: 1;
 }
 
