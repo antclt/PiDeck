@@ -9,7 +9,7 @@ import { turnFlowSettingsAtom } from "../../../atoms/app-ui-atoms";
 import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
 import { Collapsible, CollapsibleContent } from "../../ui-shadcn/collapsible";
-import { formatDuration, stripAnsi, stripThinkingTags } from "../TimelineFormat";
+import { formatDuration } from "../TimelineFormat";
 import { LiveDuration } from "../LiveDuration";
 import { CopyMenu, stripMarkdown } from "../SurfaceComponents";
 import { buildTurnDisplay, hasFoldableContent } from "../timeline/buildTurnDisplay";
@@ -17,6 +17,7 @@ import { groupTurnProcess, lastProcessGroup } from "../timeline/groupTurnProcess
 import { boundMountedSteps, TIMELINE_MOUNTED_STEP_LIMIT } from "../timeline/turnMountBudget";
 import { resolveLiveInterimId } from "../timeline/liveMount";
 import { buildProcessSummary } from "../timeline/segmentSummary";
+import { pickEditableAssistantMessage, visibleAssistantText } from "../timeline/editableAnswerTarget";
 import type { AgentRunItem, MessageItem } from "../timeline/types";
 import { sameAgentRunForRender } from "../../app/AppUtils";
 import { FinalAnswer } from "./FinalAnswer";
@@ -257,25 +258,28 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 	for (const item of assistantMessages) {
 		if (item.message.images) allImages.push(...item.message.images);
 	}
-	// 合并后的完整文本仅用于编辑/复制/删除等操作栏，不用于展示
+	// 合并后的完整文本仅用于复制等操作栏（复制整轮输出），不得作为编辑初值（issue #310）
 	const mergedText = assistantMessages
-		.map((item) => stripThinkingTags(stripAnsi(item.message.text)).trim())
+		.map((item) => visibleAssistantText(item.message.text))
 		.filter(Boolean)
 		.join("\n\n");
 	const containsImageGen = assistantMessages.some((item) => Boolean(item.message.meta?.imageGen));
+	// 编辑目标与编辑初值同源：最后一条有可见正文的 assistant 消息，加载/保存/按钮显隐都指向它
+	const editableMessage = pickEditableAssistantMessage(assistantMessages);
 
 	// 本轮没有任何可渲染内容时不输出空容器
 	if (displayItems.length === 0 && allImages.length === 0) return null;
 
 	const startEditing = () => {
-		setEditText(mergedText);
+		// 只加载编辑目标自身的正文；mergedText 聚合了中间回复，当初值会在原样保存时把
+		// 中间回复重复写进末条 entry（issue #310），禁止回退到聚合初值
+		setEditText(visibleAssistantText(editableMessage?.message.text ?? ""));
 		setEditing(true);
 	};
 	const saveEdit = () => {
-		const targetId = assistantMessages.at(-1)?.message.id;
 		// entryId：流式期间消息 id 是 live randomUUID，文件定位必须用投影携带的 entryId
-		if (targetId && props.onEditMessage) {
-			props.onEditMessage(targetId, editText, messageEntryId(assistantMessages.at(-1)?.message));
+		if (editableMessage && props.onEditMessage) {
+			props.onEditMessage(editableMessage.message.id, editText, messageEntryId(editableMessage.message));
 			setEditing(false);
 		}
 	};
@@ -436,7 +440,7 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 								<Button type="button" variant="ghost" size="icon-sm" className="turn-row-action-btn size-7 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground" onClick={props.onEnterMultiSelect} title={t("app.multiSelectEnter")}>
 									<Share size={14} />
 								</Button>
-								{!props.isStreaming && !props.isRuntimeBusy && assistantMessages.at(-1)?.message.id && (
+								{!props.isStreaming && !props.isRuntimeBusy && editableMessage?.message.id && (
 									<>
 										{props.onEditMessage && (
 											<Button type="button" variant="ghost" size="icon-sm" className="turn-row-action-btn size-7 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground" onClick={startEditing} title={t("common.edit")}>
