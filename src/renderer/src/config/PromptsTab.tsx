@@ -12,7 +12,7 @@ import { ContentTabs } from "./ContentTabs";
 import { Input } from "../components/ui-shadcn/input";
 import { Textarea } from "../components/ui-shadcn/textarea";
 import { CreateResourceCard, CreateResourceField } from "./ConfigShared";
-import { globalPromptOverrideKey } from "../../../shared/resourceIdentity";
+import { isGlobalSkillSourceId } from "../../../shared/resourceIdentity";
 import { isProjectDiscoverySource, type ResourceScope } from "./resourceScopeModel";
 
 /**
@@ -186,7 +186,7 @@ export function PromptsTab(props: {
 			}
 		};
 		const inherited = props.scope === "project" && template.scope !== "project";
-		const disabledHere = inherited && disabledGlobalKeys.has(globalPromptOverrideKey(template.name));
+		const disabledHere = inherited && disabledGlobalKeys.has(template.path.toLowerCase());
 		const effectiveEnabled = template.enabled !== false && !disabledHere;
 		return (
 			<Fragment key={template.path}>

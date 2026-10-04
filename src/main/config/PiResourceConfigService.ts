@@ -139,7 +139,10 @@ export class PiResourceConfigService {
 		const value = input.value.trim();
 		if (!value) return { ok: false, error: "Resource path is required." };
 		return this.writeScope({ scope: "project", projectId: input.projectId }, options.expectedRevision, (current) => {
-			const entries = readStringArraySetting(current, input.kind);
+			// 历史缺陷曾把 PiDeck 身份键（pi-global:<名>/agents-global:<名>）当路径写入；pi 不认这种值，
+			// 趁写入本类规则时一并清掉，用户重新开关一次即可自愈。
+			const withoutStaleIdentityKeys = readStringArraySetting(current, input.kind).filter((entry) => !/^(?:\+|-)?(?:pi-global|agents-global):/.test(entry));
+			const entries = withoutStaleIdentityKeys;
 			const withoutOurRules = entries.filter((entry) => !isExactEntryFor(entry, value));
 			if (input.state === "inherit") {
 				// 恢复继承：只移除我们写的精确规则；plain 路径若为用户原有引用则保留。

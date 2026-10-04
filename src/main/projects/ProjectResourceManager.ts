@@ -485,19 +485,19 @@ export class ProjectResourceManager {
 	async toggleInheritedResource(input: ProjectInheritedResourceToggleInput): Promise<ProjectResourceOverrides> {
 		const project = this.requireProject(input.projectId);
 		const rawKey = input.key.trim();
-		const validSkillKey = /^(?:pi-global|agents-global):[^\u0000\r\n]+$/.test(rawKey);
-		const validPlainKey = rawKey.length > 0 && !/[\u0000\r\n]/.test(rawKey);
-		const valid = rawKey.length <= 1024 && (input.kind === "skill" ? validSkillKey : validPlainKey);
+		// key 必须是 pi 能匹配的路径（原生规则）；历史版本曾传身份键（pi-global:<名>），pi 不认，已废弃。
+		const valid = rawKey.length > 0 && rawKey.length <= 1024 && !/[\u0000\r\n]/.test(rawKey);
 		if (!valid) throw new Error(this.translate("mainProjectResource.invalidInheritedKey"));
-		const key = input.kind === "extension" ? rawKey : rawKey.toLowerCase();
-		// 原生覆盖优先：项目层写「绝对路径 plain + 精确 +/-」，恢复继承时移除本次覆盖。
+		// 原生分支必须保留原始大小写：pi 在 Linux 上按大小写匹配路径，写小写路径会静默失配。
+		// 旧私有字段分支沿用历史惯例（非扩展键统一小写，配合读回的同样小写化）。
 		if (this.depsNativeProjectRules) {
 			const kind = input.kind === "extension" ? "extensions" : input.kind === "skill" ? "skills" : "prompts";
-			const result = await this.depsNativeProjectRules.setInheritedOverride(input.projectId, kind, key, input.enabled ? "enabled" : "disabled");
+			const result = await this.depsNativeProjectRules.setInheritedOverride(input.projectId, kind, rawKey, input.enabled ? "enabled" : "disabled");
 			if (!result.ok) throw new Error(result.error ?? this.translate("mainConfig.invalidJson"));
 			const settings = await this.readProjectSettings(project);
 			return projectResourceOverridesFromRecord(settings);
 		}
+		const key = input.kind === "extension" ? rawKey : rawKey.toLowerCase();
 		const settingsFile = await this.resolveProjectWritePath(project, join(this.projectRoot(project), ".pi", "settings.json"));
 		return setProjectInheritedResourceEnabled(settingsFile, input.kind, key, input.enabled, this.translate("mainConfig.invalidJson"));
 	}

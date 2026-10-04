@@ -19,6 +19,7 @@ import { ConfigSelect, openDocsInSystemBrowser, SecretInput } from "./ConfigShar
 import { ConfirmDialog } from "../components/ui-shadcn/ConfirmDialog";
 import { detectThirdPartyMcpExtensions, hasLegacyDisabledField, inferMcpTransport, isMcpServerDisabled, McpServerListPane, usesMcpOAuth, usesProviderAuth, type ThirdPartyMcpExtension } from "./McpResourceViews";
 import { argsToText, buildMcpDisplayServers, isMcpServerName, recordToText, textToArgs, textToRecord } from "./mcpForm";
+import { resolveExposureAliases } from "../../../shared/mcpExposure";
 import type { McpCliListResult, McpConfigFile, McpConfigScope, McpConfigSnapshot, McpExposure, McpOAuth, McpProbeResult, McpServerDefinition, McpServerListItem, McpServerTransport } from "../../../shared/types/mcp";
 import { ResourceImportDialog } from "./ResourceImportDialog";
 
@@ -116,8 +117,20 @@ export const McpTab = forwardRef<
 	}
 >(function McpTab(props, ref) {
 	const { projectId, projectName, activeProjectId, onDirtyChange } = props;
-	/** 作用域对象：主进程按注册 projectId 解析，渲染层不传路径。 */
-	const scope: McpConfigScope | undefined = projectId ? { scope: "project", projectId } : undefined;
+	/**
+	 * 作用域对象：主进程按注册 projectId 解析，渲染层不传路径。
+	 * 必须 memo —— 它进 load 的依赖，每次渲染新建对象会让 load 身份变化、effect 重跑，
+	 * 用磁盘内容覆盖正在编辑的草稿（表现为“输入的内容自己消失”）。
+	 */
+	const scope: McpConfigScope | undefined = useMemo(() => (projectId ? { scope: "project", projectId } : undefined), [projectId]);
+	/**
+	 * 脏回调同样不能进 load 依赖：调用方传内联箭头时身份每次都变，同样会触发重载覆盖草稿。
+	 * 用 ref 取最新值，load 不再依赖调用方是否把回调 memo 化。
+	 */
+	const onDirtyChangeRef = useRef(onDirtyChange);
+	useEffect(() => {
+		onDirtyChangeRef.current = onDirtyChange;
+	}, [onDirtyChange]);
 	const isProjectScope = Boolean(projectId);
 	const [loading, setLoading] = useState(true);
 	const [saving, setSaving] = useState(false);
@@ -147,7 +160,7 @@ export const McpTab = forwardRef<
 	const loginOperationRef = useRef<{ operationId: string; server: string } | null>(null);
 
 	/** 脏状态上报父层（标题栏保存按钮与关闭确认依赖它）。 */
-	const markDirty = useCallback(() => onDirtyChange(true), [onDirtyChange]);
+	const markDirty = useCallback(() => onDirtyChangeRef.current(true), []);
 
 	/**
 	 * 识别接管型第三方 MCP 扩展（pi-mcp-adapter 等）；失败返回 null 由调用方降级。
@@ -176,7 +189,7 @@ export const McpTab = forwardRef<
 			setThirdPartyMcp(thirdPartyState);
 			setSnapshot(next);
 			setWritable(next.writableFile.mcpServers ? next.writableFile : { ...next.writableFile, mcpServers: {} });
-			onDirtyChange(false);
+			onDirtyChangeRef.current(false);
 			setCreating(null);
 			const names = next.servers.map((item) => item.name);
 			setSelected((current) => (current && names.includes(current) ? current : (names[0] ?? null)));
@@ -187,7 +200,7 @@ export const McpTab = forwardRef<
 		} finally {
 			if (generation === loadGenerationRef.current) setLoading(false);
 		}
-	}, [onDirtyChange, probeThirdParty, scope]);
+	}, [probeThirdParty, scope]);
 
 	useEffect(() => {
 		void load();
@@ -209,6 +222,12 @@ export const McpTab = forwardRef<
 	const selectedItem = displayServers.find((item) => item.name === selected) ?? null;
 	const editingDef: McpServerDefinition = creating ? creating.definition : (selectedItem?.definition ?? blankDefinition("stdio"));
 	const transport = inferMcpTransport(editingDef);
+	/**
+	 * 表单的**展示与预选值**用归一后的定义：兼容别名 `codemode-deferred` 不归一就会落到
+	 * ConfigSelect 的「自定义」兜底里、把原字符串当档位显示。
+	 * 只用于显示/预选：草稿与落盘仍保留原文，不主动改写用户文件。
+	 */
+	const editingDisplayDef = useMemo(() => resolveExposureAliases(editingDef), [editingDef]);
 
 	const applyWritable = useCallback(
 		(next: McpConfigFile) => {
@@ -240,7 +259,7 @@ export const McpTab = forwardRef<
 		setProbe(null);
 		// 新建草稿不在 writable 里；取消后若可写层未改，清掉黄点。
 		if (snapshot && JSON.stringify(writable) === JSON.stringify(snapshot.writableFile)) {
-			onDirtyChange(false);
+			onDirtyChangeRef.current(false);
 		}
 	};
 
@@ -268,9 +287,9 @@ export const McpTab = forwardRef<
 	 * 也不能每键入一次就删除重建原 map，对象顺序是 pi 的匹配顺序（首个命中优先）。
 	 */
 	const toolExposureRows = useMemo<ToolExposureRow[]>(() => {
-		const base = editingDef.toolExposure ?? {};
+		const base = editingDisplayDef.toolExposure ?? {};
 		return Object.entries(base).map(([pattern, exposure]) => ({ rowId: `row-${pattern}`, pattern, exposure }));
-	}, [editingDef.toolExposure]);
+	}, [editingDisplayDef.toolExposure]);
 	const [toolExposureOverride, setToolExposureOverride] = useState<ToolExposureRow[] | null>(null);
 	const rows = toolExposureOverride ?? toolExposureRows;
 	const commitToolExposureRows = (next: ToolExposureRow[]) => {
@@ -785,7 +804,7 @@ export const McpTab = forwardRef<
 							) : null}
 							<div className="grid gap-2">
 								<Label>{t("config.mcp.field.exposure")}</Label>
-								<ConfigSelect value={editingDef.exposure ?? "codemode"} options={EXPOSURE_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))} onChange={(value) => patchEditing({ exposure: value as McpExposure })} />
+								<ConfigSelect value={editingDisplayDef.exposure ?? "codemode"} options={EXPOSURE_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))} onChange={(value) => patchEditing({ exposure: value as McpExposure })} />
 								<p className="text-micro text-muted-foreground">{t("config.mcp.exposureHint")}</p>
 							</div>
 							<div className="rounded-sm border border-border-subtle p-2.5">

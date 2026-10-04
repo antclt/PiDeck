@@ -14,6 +14,42 @@ test("ConfigModal wires an MCP tab without bloating loadConfig into MCP CRUD", (
 	assert.match(modal, /rawFileName === "mcp\.json"/);
 });
 
+test("McpTab 的 load 依赖必须稳定，且同名 MCP 入口只保留一个", () => {
+	const tab = readFileSync("src/renderer/src/config/McpTab.tsx", "utf8");
+	const modal = readFileSync("src/renderer/src/ConfigModal.tsx", "utf8");
+	// 回归：作用域对象未 memo / 调用方传内联脏回调 → load 身份每次渲染都变 → effect 重跑，
+	// 用磁盘内容覆盖正在编辑的表单（用户实测：输入的内容自己消失）。
+	assert.match(tab, /const scope: McpConfigScope \| undefined = useMemo\(\(\) => \(projectId \? \{ scope: "project", projectId \} : undefined\), \[projectId\]\)/);
+	assert.match(tab, /const onDirtyChangeRef = useRef\(onDirtyChange\)/);
+	assert.doesNotMatch(tab, /\[onDirtyChange, probeThirdParty, scope\]/);
+	assert.doesNotMatch(tab, /\bonDirtyChange\(false\)/);
+	// 同源脏回调在父层 memo 化（两道防线：McpTab 用 ref 兼底，调用方不再传内联箭头）
+	assert.match(modal, /const handleResourceMcpDirtyChange = useCallback\(/);
+	assert.match(modal, /onDirtyChange=\{handleResourceMcpDirtyChange\}/);
+	assert.doesNotMatch(modal, /onDirtyChange=\{\(dirty\) => \{/);
+	// 双入口收敛：配置管理弹窗里 MCP 归「配置文件」组的 config:mcp；
+	// 同名入口只在项目资源管理器（resourceOnly）出现，且保住自管草稿的 forceMount。
+	assert.equal(modal.match(/<TabsTrigger value="mcp"/g)?.length, 1);
+	assert.match(modal, /\{resourceOnly && \(\s*<TabsTrigger value="mcp"/);
+	assert.match(modal, /\{resourceOnly \? \(\s*<TabsContent value="mcp" forceMount/);
+});
+
+test("exposure 别名归一必须落到表单展示：别名住 shared，渲染层不能引 main", () => {
+	const tab = readFileSync("src/renderer/src/config/McpTab.tsx", "utf8");
+	const mcpConfig = readFileSync("src/main/config/mcpConfig.ts", "utf8");
+	const shared = readFileSync("src/shared/mcpExposure.ts", "utf8");
+	// 单一来源：纯函数放 shared（渲染层不得 import main），main 只 re-export
+	assert.match(shared, /export function resolveExposureAlias\(value: unknown\): unknown/);
+	assert.match(shared, /export function resolveExposureAliases\(def: McpServerDefinition\): McpServerDefinition/);
+	assert.doesNotMatch(mcpConfig, /export function resolveExposureAlias/);
+	assert.match(mcpConfig, /export \{ resolveExposureAlias, resolveExposureAliases \};/);
+	// 回归：别名没归一就会落到 ConfigSelect 的「自定义」兜底，把原字符串当档位显示
+	assert.match(tab, /import \{ resolveExposureAliases \} from "\.\.\/\.\.\/\.\.\/shared\/mcpExposure";/);
+	assert.match(tab, /const editingDisplayDef = useMemo\(\(\) => resolveExposureAliases\(editingDef\), \[editingDef\]\);/);
+	assert.match(tab, /value=\{editingDisplayDef\.exposure \?\? "codemode"\}/);
+	assert.match(tab, /const base = editingDisplayDef\.toolExposure \?\? \{\};/);
+});
+
 test("dirty-mark helpers include config:mcp", () => {
 	const { dirtyKeysClearedByReload, ALL_CONFIG_DIRTY_KEYS } = loadTsCommonJs("src/renderer/src/config/configDirtyMarks.ts");
 	assert.deepEqual(new Set(dirtyKeysClearedByReload("mcp")), new Set(["config:mcp", "config:raw"]));

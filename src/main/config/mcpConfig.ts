@@ -11,6 +11,7 @@ import { readFile } from "node:fs/promises";
 import { delimiter, isAbsolute, join } from "node:path";
 import { homedir } from "node:os";
 import type { McpConfigFile, McpConfigLayer, McpConfigLayerKind, McpConfigSnapshot, McpProbeResult, McpServerDefinition, McpServerListItem, McpServerTransport } from "../../shared/types/mcp";
+import { resolveExposureAlias, resolveExposureAliases } from "../../shared/mcpExposure";
 import { createProjectFileReadBoundary, resolveProjectFileReadPath, type ProjectFileReadBoundary } from "../files/projectFileAccess";
 
 const MCP_DOCS_URL = "https://earendil-works.github.io/pi/docs/mcp";
@@ -156,20 +157,11 @@ export function normalizeMcpServerDefinition(value: unknown): McpServerDefinitio
 	return definition;
 }
 
-/** 解析 exposure 兼容别名：`codemode-deferred` → `codemode`（pi 0.99.2 起归一）。 */
-export function resolveExposureAlias(value: unknown): unknown {
-	return value === "codemode-deferred" ? "codemode" : value;
-}
-
-/** 一个 server 的 exposure 及其 toolExposure 的兼容别名归一结果（展示/有效态用，不回写文件）。 */
-export function resolveExposureAliases(def: McpServerDefinition): McpServerDefinition {
-	const resolved: McpServerDefinition = { ...def };
-	if (def.exposure !== undefined) resolved.exposure = resolveExposureAlias(def.exposure) as McpServerDefinition["exposure"];
-	if (def.toolExposure && isPlainObject(def.toolExposure)) {
-		resolved.toolExposure = Object.fromEntries(Object.entries(def.toolExposure).map(([tool, exposure]) => [tool, resolveExposureAlias(exposure)])) as McpServerDefinition["toolExposure"];
-	}
-	return resolved;
-}
+/**
+ * MCP exposure 别名归一（纯函数）：主进程与渲染层共用 `shared/mcpExposure.ts`，避免两份定义。
+ * 此处 re-export 兼容既有调用点与测试。
+ */
+export { resolveExposureAlias, resolveExposureAliases };
 
 /** 服务名归一后的命名空间是否与另一个名字冲突（pi 据此拒绝同名冲突的 server）。 */
 export function mcpNamespacesClash(left: string, right: string): boolean {

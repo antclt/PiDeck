@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { inferMcpTransport, isMcpServerName, mergeMcpServers, mergeMcpServersWithErrors, mcpNamespacesClash, mcpLayerPaths, parseMcpConfigFile, probeHttpUrl, probeStdioCommand, resolveExposureAlias, validateMcpServer, validateMcpServerValue, validateMcpConfigFile, loadMcpConfigSnapshot } =
+const { inferMcpTransport, isMcpServerName, mergeMcpServers, mergeMcpServersWithErrors, mcpNamespacesClash, mcpLayerPaths, parseMcpConfigFile, probeHttpUrl, probeStdioCommand, resolveExposureAlias, resolveExposureAliases, validateMcpServer, validateMcpServerValue, validateMcpConfigFile, loadMcpConfigSnapshot } =
 	loadTsCommonJs("src/main/config/mcpConfig.ts");
 
 /** 跨 VM 数组/对象先复制再比较（见 tests/helpers/loadTsCommonJs.mjs）。 */
@@ -109,6 +109,10 @@ test("exposure alias resolves codemode-deferred to codemode but the raw value ro
 	assert.equal(resolveExposureAlias("codemode-deferred"), "codemode");
 	assert.equal(resolveExposureAlias("deferred"), "deferred");
 	assert.equal(resolveExposureAlias(undefined), undefined);
+	// 整个定义归一（渲染层表单的展示/预选值依赖它），toolExposure 的别名一并归位。
+	// 注意：模块经 vm 加载，跨 context 对象直接 deepEqual 会因原型不同失败，先展开放回本 context。
+	const resolvedAliases = resolveExposureAliases({ url: "https://x/mcp", exposure: "codemode-deferred", toolExposure: { a: "codemode-deferred", b: "direct" } });
+	assert.deepEqual({ ...resolvedAliases, toolExposure: { ...resolvedAliases.toolExposure } }, { url: "https://x/mcp", exposure: "codemode", toolExposure: { a: "codemode", b: "direct" } });
 	// 旧文件仍可读，校验通过
 	assert.equal(validateMcpServer("docs", { url: "https://x/mcp", exposure: "codemode-deferred" }), null);
 	assert.equal(validateMcpServer("docs", { url: "https://x/mcp", toolExposure: { a: "codemode-deferred" } }), null);

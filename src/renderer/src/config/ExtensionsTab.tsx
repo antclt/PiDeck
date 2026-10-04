@@ -170,7 +170,7 @@ export function ExtensionsTab(props: {
 	const uniqueDiscoveryExtensions = props.discoveryExtensions.filter((item) => !installedSources.has(item.source));
 	const renderExtensionRows = (extensions: PiExtensionSummary[], inherited: boolean) =>
 		extensions.map((extension) => {
-			const disabledHere = inherited && disabledGlobalSources.has(extension.source);
+			const disabledHere = inherited && disabledGlobalSources.has((extension.path ?? extension.source).toLowerCase());
 			return (
 				<ExtensionTableRow
 					key={`${extension.scope}:${extension.id}`}

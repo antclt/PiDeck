@@ -286,6 +286,19 @@ test("setProjectInheritedOverride writes plain path + exact rule and can restore
 	}
 });
 
+test("setProjectInheritedOverride 写入时清掉历史缺陷的身份键条目（自愈）", async () => {
+	const { service, projectRoot, cleanup } = setupProject();
+	try {
+		// 历史缺陷（2026-10-04 实测）曾把 PiDeck 身份键当路径写入；pi 不认这种值。
+		writeFileSync(join(projectRoot, ".pi", "settings.json"), JSON.stringify({ skills: ["pi-global:image-gen", "-pi-global:image-gen"] }));
+		const applied = await service.setProjectInheritedOverride({ projectId: "p1", kind: "skills", value: "/home/me/.pi/agent/skills/image-gen/SKILL.md", state: "disabled" });
+		assert.equal(applied.ok, true);
+		assert.deepEqual(readJson(join(projectRoot, ".pi", "settings.json")).skills, ["/home/me/.pi/agent/skills/image-gen/SKILL.md", "-/home/me/.pi/agent/skills/image-gen/SKILL.md"]);
+	} finally {
+		cleanup();
+	}
+});
+
 test("isPackageSource / isExactEntryFor pure helpers", () => {
 	assert.equal(isPackageSource("npm:foo"), true);
 	assert.equal(isPackageSource("git:github.com/a/b"), true);

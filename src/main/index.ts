@@ -2900,6 +2900,16 @@ function registerIpc() {
 		appLogger,
 		rpcLogger,
 		sessionRuntimeCoordinator,
+		// 项目目录信任判定（trust.json 最近父目录语义，与 storeIpc 同源）。
+		// 漏装配会让项目作用域全部按「未信任」处理：项目 MCP 读写、项目 MCP 的 pi mcp CLI、
+		// 以及 piResources 的项目级内置扩展开关都会被拒，而与 trust.json 里实际写了什么无关。
+		// WSL 项目例外：信任判定用发行版内的 Linux 路径（trust.json 键也是 Linux 路径）。
+		isProjectTrusted: async (projectId, projectRoot) => {
+			const project = projectStore.get(projectId);
+			const settings = settingsStore.get();
+			const trustPath = project?.environment === "wsl" && process.platform === "win32" && settings.wslEnabled && settings.wslDistro ? toWslLinuxPath(projectRoot, { distro: settings.wslDistro }) : projectRoot;
+			return (await configManager.getProjectTrustDecision(trustPath)) === true;
+		},
 		// pi 环境引导：便携 Node 安装器的真实 IO（下载/解压与 DSH runtime 同源，
 		// 测试里注入替身；未装配时引导安装入口降级不可用）。
 		piRuntimeNodeInstaller: {
