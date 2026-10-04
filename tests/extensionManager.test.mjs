@@ -264,3 +264,30 @@ test("uninstall removes a local extension and clears its stale disable entry", a
 		await rm(home, { recursive: true, force: true });
 	}
 });
+
+test("uninstall allows pi-deck-* local files outside the built-in whitelist (plugin-dev demo)", async () => {
+	// demo（pi-deck-demo-plugin.ts）不在内置白名单：普通本地扩展，卸载必须走
+	// 删文件路径；旧代码按 pi-deck- 前缀一律拦成「内置扩展不可卸载」，demo 行
+	// 的卸载按钮直接报错。白名单成员（真内置）仍拒绝——内置行的卸载语义由
+	// removeBuiltIn（标记 removed + 删文件）承担，不能混用普通卸载路径。
+	const { ExtensionManager } = loadExtensionManagerModule();
+	const home = await mkdtemp(join(tmpdir(), "pideck-extension-manager-demo-uninstall-"));
+	try {
+		const extensionsDir = join(home, ".pi", "agent", "extensions");
+		await mkdir(extensionsDir, { recursive: true });
+		await writeFile(join(extensionsDir, "pi-deck-demo-plugin.ts"), "export default {};", "utf8");
+		const manager = new ExtensionManager(
+			{},
+			() => ({}),
+			() => ({}),
+			async () => ({}),
+			(key) => key,
+		);
+		manager.wslEnvironment = { windowsHome: home };
+		await manager.uninstall("pi-deck-demo-plugin.ts");
+		await assert.rejects(readFile(join(extensionsDir, "pi-deck-demo-plugin.ts"), "utf8"), { code: "ENOENT" });
+		await assert.rejects(manager.uninstall("pi-deck-todo.ts"), /builtInCannotUninstall/);
+	} finally {
+		await rm(home, { recursive: true, force: true });
+	}
+});

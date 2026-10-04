@@ -416,8 +416,10 @@ export class ExtensionManager {
 	async uninstall(source: string, scope: PiExtensionSummary["scope"] = "user"): Promise<void> {
 		const normalized = source.trim();
 		if (!normalized) throw new Error(this.translate("mainExtension.sourceRequired"));
-		// 阻止卸载 PiDeck 内置扩展（如 pi-deck-file-capture）
-		if (normalized.startsWith("pi-deck-")) {
+		// 只挡白名单内置成员：pi-deck- 前缀不足以证明内置身份——插件开发 demo
+		// （pi-deck-demo-plugin.ts）是普通本地扩展，卸载走删文件路径；真内置行的
+		// 「卸载」由 removeBuiltIn（标记 removed + 删文件）承担，不能混用普通卸载。
+		if (isBuiltInExtensionName(normalized)) {
 			throw new Error(this.translate("mainExtension.builtInCannotUninstall"));
 		}
 		// 本地 .ts/目录扩展不在 pi package 列表里，pi remove 会报 No matching package；
