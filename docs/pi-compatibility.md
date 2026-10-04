@@ -6,7 +6,7 @@
 
 ## 当前基线
 
-- 最近核对版本：`pi 1.0.0`（2026-10-01 发布；依据：本机安装包 CHANGELOG + docs + dist 源码核对，见下方 1.0.0 矩阵；未运行真实供应商 OAuth）
+- 最近核对版本：`pi 1.0.2`（1.0.1/1.0.2 于 2026-10-03/04 发布；依据：npm 包 CHANGELOG + dist 与 1.0.0 逐文件 diff；未运行真实供应商 OAuth）
 - PiDeck 通信方式：`pi --mode rpc`，stdio JSON-RPC
 - 本记录范围：Pi 后端（`src/main/pi/`）以及 PiDeck 对 Pi 配置/事件的适配
 - 不包含：DSH 的 `pwsh_persistent`、Electron 自带终端、PiDeck 自己的应用更新器
@@ -32,6 +32,19 @@
 真实冒烟证据（`scripts/smoke-pi-native-resources.mjs`，对 pi 0.99.2 与 1.0.0 各 19/19）：
 无白名单启动下，原生 `+/-` 规则真实控制技能/扩展加载、`-builtin:mcp` 生效、项目层覆盖生效、
 未信任项目不读项目配置、旧禁用记录迁移后 pi 真的不加载该资源。
+
+## 1.0.1 / 1.0.2 审计矩阵（npm 包 dist 源码逐条核对）
+
+核对方式：npm pack 拉取 1.0.2 完整包，与本机 1.0.0 逐文件 diff；`package-manager.js`/`settings-manager.js` **逐字节一致**（资源过滤与 defaultTools 合并零变化，A 系列/T1 直接适用）。
+
+| 上游变化 | PiDeck 处理 | 状态 | 代码/验证 | 移除条件 |
+|---|---|---|---|---|
+| **MCP 项目覆盖条目**：项目 `.pi/mcp.json` 无 `command/url/type` 的条目合法，只覆盖全局同名 server 的 `enabled/exposure/toolExposure`（#10277） | 校验 + 合并均已适配：项目层无传输条目按覆盖形态处理（只允许三键、需全局基座），部分覆盖保留全局传输/凭据；全局层仍要求完整传输。PiDeck 自己的「在本项目停用」继续写 `{url,enabled:false}` 整体替换（两种形态都合法） | 已适配 | `mcpConfig.validateMcpServerValue`/`mergeMcpServersWithErrors`、`tests/mcpConfig.test.mjs` | 无 |
+| `oauth.clientRegistration: "dcr"/"cimd"`（Client ID Metadata Document 代替动态注册，#10302） | 类型 + 校验（cimd 禁 clientId/clientName、回调须 localhost/127.0.0.1 的 /callback）+ 表单字段 + 中英文案 | 已适配 | `types/mcp.ts`、`mcpConfig.validateOAuth`、`McpTab.tsx`、`tests/mcpConfig.test.mjs` | 无 |
+| `samplingParamsByThinkingLevel`（models.json 按思考档位配采样参数，#9776） | 已验证 `normalizeModelsForPi` 用 `...data` 展开，未知顶层字段（含本字段）原样保留；可视化编辑不感知也不丢 | 无需改动 | `ConfigManager.normalizeModelsForPi` 的 spread 语义 | 无 |
+| 资源过滤 / defaultTools 合并（`package-manager.js`/`settings-manager.js`） | 与 1.0.0 逐字节一致 | **已核对无变化** | diff 验证 | — |
+| Nix flake、`pi.registerToolRenderer()`、Clef 分类器、TUI/供应商/内存泄漏修复、`--models` 尾逗号修复 | 运行时行为，PiDeck 不经手；`--provider` 缺 `--model` 报错不影响 PiDeck（探测始终成对传） | 无需改动 | — | — |
+| 移除 `npm-shrinkwrap.json`（npm 安装不再锁传递依赖） | PiDeck 不打包 pi；用户侧安装行为变化与 PiDeck 无关，`pi update` 推荐托管安装的提示由 pi 自己展示 | 无需改动 | — | — |
 
 ## 1.0.0 审计矩阵（本机 dist 源码逐条核对）
 

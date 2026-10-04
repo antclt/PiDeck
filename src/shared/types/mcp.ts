@@ -41,6 +41,12 @@ export type McpOAuth = {
 	 * 用它替代自动发现。必须是 https（或环回 http）。
 	 */
 	authServerMetadataUrl?: string;
+	/**
+	 * 客户端注册方式（pi 1.0.1）：`dcr` 动态注册（默认）/ `cimd` 用 pi.dev 的
+	 * Client ID Metadata Document 标识客户端。cimd 不能与 clientId/clientName 组合，
+	 * 且回调地址必须是 localhost/127.0.0.1 上的 /callback。
+	 */
+	clientRegistration?: "dcr" | "cimd";
 	[key: string]: unknown;
 };
 

@@ -18,6 +18,9 @@ const HTTP_PROBE_TIMEOUT_MS = 8_000;
 /** pi 原生：`^[A-Za-z0-9_-]+$`（下划线/短横线开头也合法），无长度上限。 */
 const SERVER_NAME_RE = /^[A-Za-z0-9_-]+$/;
 
+/** pi 1.0.1 项目覆盖条目允许的字段（无传输，只覆盖全局同名 server 的这几项）。 */
+export const MCP_PROJECT_OVERRIDE_KEYS = ["enabled", "exposure", "toolExposure"] as const;
+
 const LAYER_KIND_ORDER: McpConfigLayerKind[] = ["pi-agent", "project-pi"];
 
 export function mcpDocsUrl(): string {
@@ -202,6 +205,22 @@ export function mergeMcpServersWithErrors(layers: Array<{ path: string; kind: Mc
 				invalidServers.push({ name, path: layer.path, error, raw: rawDef });
 				continue;
 			}
+			// pi 1.0.1 项目覆盖形态：无传输条目部分覆盖已生效的全局定义（enabled/exposure/toolExposure），
+			// 传输与凭据继承全局；全局层不存在同名 server 时按 pi 行为报错跳过。
+			if (layer.kind === "project-pi" && isPlainObject(rawDef) && rawDef.command === undefined && rawDef.url === undefined && rawDef.type === undefined) {
+				const base = merged.get(name);
+				if (!base) {
+					invalidServers.push({ name, path: layer.path, error: `server "${name}" needs "command" or "url", or a global server to override`, raw: rawDef });
+					continue;
+				}
+				const combined = normalizeMcpServerDefinition({ ...base.definition, ...def });
+				if (!combined) {
+					invalidServers.push({ name, path: layer.path, error: `server "${name}" must be an object`, raw: rawDef });
+					continue;
+				}
+				merged.set(name, { ...base, definition: combined, originPath: layer.path, originScope: layer.kind, ownedByWritable: layer.path === writablePath });
+				continue;
+			}
 			const clash = [...merged.keys()].find((other) => mcpNamespacesClash(other, name));
 			if (clash) {
 				invalidServers.push({ name, path: layer.path, error: `server "${name}" conflicts with "${clash}" (names that differ only in "-" and "_" share a namespace)`, raw: rawDef });
@@ -263,6 +282,28 @@ function validateOAuth(oauth: unknown): string | null {
 	if (oauth.scope !== undefined && typeof oauth.scope !== "string") return "oauth.scope must be a string";
 	if (oauth.clientName !== undefined && (typeof oauth.clientName !== "string" || !oauth.clientName.trim())) {
 		return "oauth.clientName must be a non-empty string";
+	}
+	// pi 1.0.1：clientRegistration 选 dcr（动态注册，默认）或 cimd（Client ID Metadata Document）。
+	// cimd 用 pi.dev 的元数据文档标识客户端，不能与预注册的 clientId/clientName 组合，
+	// 且回调地址必须是 localhost/127.0.0.1 上的 /callback（[::1] 不行）。
+	if (oauth.clientRegistration !== undefined && oauth.clientRegistration !== "dcr" && oauth.clientRegistration !== "cimd") {
+		return 'oauth.clientRegistration must be "dcr" or "cimd"';
+	}
+	if (oauth.clientRegistration === "cimd") {
+		if (oauth.clientId !== undefined || oauth.clientName !== undefined) {
+			return 'oauth.clientRegistration "cimd" cannot be combined with oauth.clientId or oauth.clientName';
+		}
+		if (typeof oauth.callbackUrl === "string") {
+			let callbackUrl: URL;
+			try {
+				callbackUrl = new URL(oauth.callbackUrl);
+			} catch {
+				return "oauth.callbackUrl must be an http URI on localhost, 127.0.0.1, or [::1] without query or fragment";
+			}
+			if (callbackUrl.hostname === "[::1]" || callbackUrl.pathname !== "/callback") {
+				return 'oauth.clientRegistration "cimd" requires oauth.callbackUrl on localhost or 127.0.0.1 with path /callback';
+			}
+		}
 	}
 	if (oauth.authServerMetadataUrl !== undefined) {
 		if (typeof oauth.authServerMetadataUrl !== "string") return "oauth.authServerMetadataUrl must be a string";
@@ -348,6 +389,15 @@ export function validateMcpServerValue(name: string, value: unknown, options: { 
 		}
 		if (value.env !== undefined && !allStrings(value.env)) return `server "${name}": env must map names to strings`;
 		if (value.cwd !== undefined && typeof value.cwd !== "string") return `server "${name}": cwd must be a string`;
+		return null;
+	}
+
+	// pi 1.0.1 项目覆盖形态：无 command/url/type 的条目只覆盖全局同名 server 的
+	// enabled/exposure/toolExposure（传输与凭据继承全局）。仅项目层合法；
+	// 全局层仍必须给出完整传输定义。
+	if (options.scope === "project-pi" && value.command === undefined && value.url === undefined && type === undefined) {
+		const extra = Object.keys(value).filter((key) => !(MCP_PROJECT_OVERRIDE_KEYS as readonly string[]).includes(key));
+		if (extra.length > 0) return `server "${name}": a project override can only set ${MCP_PROJECT_OVERRIDE_KEYS.join(", ")}`;
 		return null;
 	}
 

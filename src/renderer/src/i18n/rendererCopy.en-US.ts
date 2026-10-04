@@ -1912,6 +1912,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.mcp.oauth.callbackUrlHint": "Optional. Must be an http URL on localhost, 127.0.0.1, or [::1] without query or fragment; leave empty to let pi listen on a free port.",
 	"config.mcp.oauth.authServerMetadataUrl": "Authorization server metadata URL",
 	"config.mcp.oauth.authServerMetadataUrlHint": "Optional (pi 1.0). Used instead of automatic OAuth discovery when the server advertises wrong or no metadata; must be https (or loopback http).",
+	"config.mcp.oauth.clientRegistration": "Client registration",
+	"config.mcp.oauth.clientRegistrationHint": "Optional (pi 1.0.1). dcr = dynamic registration (default); cimd identifies pi by its Client ID Metadata Document on pi.dev, for servers that only allow known clients. cimd cannot be combined with clientId/clientName.",
 	"config.mcp.providerAuth.section": "Provider sign-in",
 	"config.mcp.providerAuth.hint": "This server sends the current login token of provider {{provider}} as its bearer token (read on every request, so refreshes apply). MCP OAuth is not used; sign in to that provider under Models/Auth.",
 	"config.mcp.oauth.clientId": "Client ID",

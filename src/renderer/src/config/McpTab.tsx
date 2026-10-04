@@ -768,6 +768,16 @@ export const McpTab = forwardRef<
 													<Input value={editingDef.oauth?.scope ?? ""} onChange={(event) => patchOauth({ scope: event.target.value || undefined })} className="h-8 font-mono" placeholder="read:project write:project" />
 													<p className="text-micro text-muted-foreground">{t("config.mcp.oauth.scopeHint")}</p>
 												</div>
+												<div className="grid gap-1">
+													<Label>{t("config.mcp.oauth.authServerMetadataUrl")}</Label>
+													<Input value={editingDef.oauth?.authServerMetadataUrl ?? ""} onChange={(event) => patchOauth({ authServerMetadataUrl: event.target.value || undefined })} className="h-8 font-mono" placeholder="https://auth.example.com/.well-known/oauth-authorization-server" />
+													<p className="text-micro text-muted-foreground">{t("config.mcp.oauth.authServerMetadataUrlHint")}</p>
+												</div>
+												<div className="grid gap-1">
+													<Label>{t("config.mcp.oauth.clientRegistration")}</Label>
+													<Input value={editingDef.oauth?.clientRegistration ?? ""} onChange={(event) => patchOauth({ clientRegistration: event.target.value === "dcr" || event.target.value === "cimd" ? event.target.value : undefined })} className="h-8 font-mono" placeholder="dcr" />
+													<p className="text-micro text-muted-foreground">{t("config.mcp.oauth.clientRegistrationHint")}</p>
+												</div>
 											</div>
 										</div>
 									)}

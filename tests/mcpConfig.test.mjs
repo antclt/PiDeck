@@ -74,20 +74,21 @@ test("native merge: a project entry replaces the whole global entry (no shallow 
 	assert.equal(merged[0].ownedByWritable, false);
 });
 
-test("native merge: invalid project entry is skipped and the global entry stays effective", () => {
+test("native merge: project entry with no global base is reported, global stays effective", () => {
+	// pi 1.0.1 起无传输条目是合法的项目覆盖形态；只有项目层且没有全局基座时才报错
 	const result = mergeMcpServersWithErrors(
 		[
 			{ path: "/global/mcp.json", kind: "pi-agent", file: { mcpServers: { docs: { command: "npx" } } } },
-			// enabled 覆盖但无传输：pi 会报错并跳过，不会把全局定义冲掉
-			{ path: "/project/mcp.json", kind: "project-pi", file: { mcpServers: { docs: { enabled: false } } } },
+			{ path: "/project/mcp.json", kind: "project-pi", file: { mcpServers: { ghost: { enabled: false } } } },
 		],
 		"/global/mcp.json",
 	);
 	assert.equal(result.servers.length, 1);
+	assert.equal(result.servers[0].name, "docs");
 	assert.equal(result.servers[0].definition.command, "npx");
 	assert.equal(result.servers[0].originPath, "/global/mcp.json");
 	assert.equal(result.invalidServers.length, 1);
-	assert.match(result.invalidServers[0].error, /needs either/);
+	assert.match(result.invalidServers[0].error, /or a global server to override/);
 });
 
 test("native merge: namespace clash is skipped and reported", () => {
@@ -145,6 +146,42 @@ test("HTTP probe treats 4xx as reachable config and 5xx as failure", async () =>
 	assert.equal(down.ok, false);
 	const invalid = await probeHttpUrl("not-a-url");
 	assert.equal(invalid.ok, false);
+});
+
+test("pi 1.0.1 项目覆盖条目：无传输形态只允许 enabled/exposure/toolExposure 且仅项目层", () => {
+	assert.equal(validateMcpServerValue("docs", { enabled: false }, { scope: "project-pi" }), null);
+	assert.equal(validateMcpServerValue("docs", { exposure: "direct" }, { scope: "project-pi" }), null);
+	assert.equal(validateMcpServerValue("docs", { enabled: false, toolExposure: { a: "direct" } }, { scope: "project-pi" }), null);
+	assert.match(validateMcpServerValue("docs", { enabled: false, headers: { A: "1" } }, { scope: "project-pi" }), /can only set/);
+	assert.match(validateMcpServerValue("docs", { enabled: false }, { scope: "pi-agent" }), /needs either/);
+});
+
+test("pi 1.0.1 项目覆盖条目参与合并：部分覆盖全局，传输/凭据继承；无基座报错", () => {
+	const merged = mergeMcpServersWithErrors(
+		[
+			{ path: "/g/mcp.json", kind: "pi-agent", file: { mcpServers: { docs: { url: "https://x/mcp", headers: { A: "1" }, enabled: false } } } },
+			{ path: "/p/mcp.json", kind: "project-pi", file: { mcpServers: { docs: { enabled: true } } } },
+		],
+		"/g/mcp.json",
+	);
+	const docs = merged.servers.find((s) => s.name === "docs");
+	assert.equal(docs.definition.enabled, true, "覆盖条目改写 enabled");
+	assert.equal(docs.definition.headers.A, "1", "全局传输/头继承");
+	assert.equal(docs.originScope, "project-pi");
+	assert.deepEqual(plain(merged.invalidServers), []);
+	const noBase = mergeMcpServersWithErrors([{ path: "/p/mcp.json", kind: "project-pi", file: { mcpServers: { ghost: { enabled: false } } } }], "/p/mcp.json");
+	assert.match(noBase.invalidServers[0].error, /or a global server to override/);
+});
+
+test("pi 1.0.1 oauth.clientRegistration：dcr/cimd 值与 cimd 约束", () => {
+	assert.equal(validateMcpServerValue("docs", { url: "https://x/mcp", oauth: { clientRegistration: "dcr" } }), null);
+	assert.equal(validateMcpServerValue("docs", { url: "https://x/mcp", oauth: { clientRegistration: "cimd" } }), null);
+	assert.match(validateMcpServerValue("docs", { url: "https://x/mcp", oauth: { clientRegistration: "bogus" } }), /clientRegistration must be/);
+	assert.match(validateMcpServerValue("docs", { url: "https://x/mcp", oauth: { clientRegistration: "cimd", clientId: "a" } }), /cannot be combined/);
+	assert.match(validateMcpServerValue("docs", { url: "https://x/mcp", oauth: { clientRegistration: "cimd", clientName: "pi" } }), /cannot be combined/);
+	assert.match(validateMcpServerValue("docs", { url: "https://x/mcp", oauth: { clientRegistration: "cimd", callbackUrl: "http://[::1]:1/callback" } }), /requires oauth.callbackUrl/);
+	assert.match(validateMcpServerValue("docs", { url: "https://x/mcp", oauth: { clientRegistration: "cimd", callbackUrl: "http://127.0.0.1:1/api" } }), /path \/callback/);
+	assert.equal(validateMcpServerValue("docs", { url: "https://x/mcp", oauth: { clientRegistration: "cimd", callbackUrl: "http://localhost:1/callback" } }), null);
 });
 
 test("pi 1.0 schema validation accepts oauth.authServerMetadataUrl (https or loopback http)", () => {

@@ -1907,6 +1907,8 @@ export const zhCN = {
 	"config.mcp.oauth.callbackUrlHint": "可选。必须是 localhost/127.0.0.1/[::1] 上的 http 地址，不能带 query 或 fragment；留空由 pi 监听空闲端口。",
 	"config.mcp.oauth.authServerMetadataUrl": "授权服务器元数据地址",
 	"config.mcp.oauth.authServerMetadataUrlHint": "可选（pi 1.0）。服务器的 OAuth 发现宣告错误或缺失时，用它替代自动发现；必须是 https（或环回 http）。",
+	"config.mcp.oauth.clientRegistration": "客户端注册方式",
+	"config.mcp.oauth.clientRegistrationHint": "可选（pi 1.0.1）。dcr=动态注册（默认）；cimd=用 pi.dev 的元数据文档标识客户端，适合只允许已知客户端的服务器。cimd 不能与 clientId/clientName 组合。",
 	"config.mcp.providerAuth.section": "供应商登录认证",
 	"config.mcp.providerAuth.hint": "此服务器使用供应商 {{provider}} 的当前登录 token 作为 bearer（逐请求读取，登录续期自动生效），不使用 MCP OAuth。请在模型认证页登录该供应商。",
 	"config.mcp.oauth.clientId": "Client ID",
