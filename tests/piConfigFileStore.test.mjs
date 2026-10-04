@@ -123,3 +123,20 @@ test("serialized concurrent writes keep both changes (lock + re-read)", async ()
 		cleanup();
 	}
 });
+
+test("expectedRevision missing 哨兵：允许从无到有写入；文件出现后同哨兵拒绝", async () => {
+	const { dir, cleanup } = tempDir();
+	try {
+		const path = join(dir, "settings.json");
+		const created = await writePiConfigFile(path, () => ({ extensions: ["-builtin:mcp"] }), { expectedRevision: revisionOf("", false) });
+		assert.equal(created.ok, true);
+		assert.deepEqual(JSON.parse(readFileSync(path, "utf8")).extensions, ["-builtin:mcp"]);
+
+		const staleMissing = await writePiConfigFile(path, () => ({ extensions: [] }), { expectedRevision: revisionOf("", false) });
+		assert.equal(staleMissing.ok, false);
+		assert.equal(staleMissing.conflict, true);
+		assert.deepEqual(JSON.parse(readFileSync(path, "utf8")).extensions, ["-builtin:mcp"]);
+	} finally {
+		cleanup();
+	}
+});

@@ -28,7 +28,7 @@ const api = (
 		piDesktop: {
 			config: {
 				getMcp: (scope?: McpConfigScope) => Promise<McpConfigSnapshot>;
-				saveMcp: (data: McpConfigFile, scope?: McpConfigScope) => Promise<{ valid: boolean; error?: string }>;
+				saveMcp: (data: McpConfigFile, scope?: McpConfigScope, expectedRevision?: string) => Promise<{ valid: boolean; error?: string; conflict?: boolean }>;
 				probeMcp: (definition: McpServerDefinition) => Promise<McpProbeResult>;
 				/** pi mcp CLI：真实连接检测 + OAuth 登录/登出（仅命令路线，见计划 M2）。 */
 				mcpListStatus: (scope?: McpConfigScope) => Promise<McpCliListResult>;
@@ -492,8 +492,14 @@ export const McpTab = forwardRef<
 		setSaving(true);
 		setError(null);
 		try {
-			const result = await api.config.saveMcp(toSave, scope);
+			const result = await api.config.saveMcp(toSave, scope, snapshot?.revision);
 			if (!result.valid) {
+				if (result.conflict) {
+					// 乐观锁：磁盘上的 mcp.json 被外部改过（pi/手改/其它窗口），必须以磁盘为准。
+					setError(t("config.mcp.conflict"));
+					await load();
+					return false;
+				}
 				setError(result.error ?? t("config.saveFailed"));
 				return false;
 			}

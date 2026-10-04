@@ -97,15 +97,19 @@ export async function writePiConfigFile(path: string, mutate: PiConfigMutation, 
 		if (current.error) {
 			return { ok: false, error: current.error, revision: current.revision };
 		}
-		if (options.expectedRevision !== undefined && options.expectedRevision !== current.revision) {
-			return { ok: false, error: "settings.json changed on disk; reload before saving.", revision: current.revision, conflict: true };
+		// 占位文件是本函数刚创建的，对调用方等价于「文件仍不存在」：比对用 missing 哨兵，
+		// 让 expectedRevision="missing"（页面在文件缺失时取的快照）能完成从无到有的写入；
+		// 若快照后文件已被外部创建（real content），revision 不再是 missing → 照常冲突。
+		const currentRevision = existed ? current.revision : revisionOf("", false);
+		if (options.expectedRevision !== undefined && options.expectedRevision !== currentRevision) {
+			return { ok: false, error: "settings.json changed on disk; reload before saving.", revision: currentRevision, conflict: true };
 		}
 		const next = mutate(current.data);
 		if ("abort" in next && typeof next.abort === "string") {
-			return { ok: false, error: next.abort, revision: current.revision };
+			return { ok: false, error: next.abort, revision: currentRevision };
 		}
 		const raw = `${JSON.stringify(next, null, 2)}\n`;
-		if (raw === current.raw) return { ok: true, revision: current.revision, data: next };
+		if (raw === current.raw) return { ok: true, revision: currentRevision, data: next };
 		// 原子替换：临时文件放在同目录，避免跨设备 rename。
 		const temporary = join(directory, `.${path.slice(path.lastIndexOf("/") + 1)}.${process.pid}.${Date.now()}.tmp`);
 		await writeFile(temporary, raw, "utf8");

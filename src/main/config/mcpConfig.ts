@@ -13,6 +13,7 @@ import { homedir } from "node:os";
 import type { McpConfigFile, McpConfigLayer, McpConfigLayerKind, McpConfigSnapshot, McpProbeResult, McpServerDefinition, McpServerListItem, McpServerTransport } from "../../shared/types/mcp";
 import { resolveExposureAlias, resolveExposureAliases } from "../../shared/mcpExposure";
 import { createProjectFileReadBoundary, resolveProjectFileReadPath, type ProjectFileReadBoundary } from "../files/projectFileAccess";
+import { revisionOf, writePiConfigFile } from "./piConfigFileStore";
 
 const MCP_DOCS_URL = "https://earendil-works.github.io/pi/docs/mcp";
 const HTTP_PROBE_TIMEOUT_MS = 8_000;
@@ -527,6 +528,7 @@ export async function loadMcpConfigSnapshot(piAgentDir: string, projectPath?: st
 	let writableFile: McpConfigFile = { mcpServers: {} };
 	let writableRaw = `${JSON.stringify({ mcpServers: {} }, null, 2)}
 `;
+	let writableExists = false;
 	let writablePath = join(piAgentDir, "mcp.json");
 	let writableError: string | undefined;
 	let projectBoundary: ProjectFileReadBoundary | undefined;
@@ -547,6 +549,7 @@ export async function loadMcpConfigSnapshot(piAgentDir: string, projectPath?: st
 		if (isWritable) {
 			writablePath = layer.path;
 			writableError = result.error;
+			writableExists = result.exists;
 			writableRaw =
 				result.exists && result.raw
 					? result.raw
@@ -569,10 +572,25 @@ export async function loadMcpConfigSnapshot(piAgentDir: string, projectPath?: st
 		writableFile,
 		writableRaw,
 		writableError,
+		revision: revisionOf(writableRaw, writableExists),
 		layers,
 		servers: merged.servers,
 		invalidServers: merged.invalidServers,
 	};
+}
+
+/**
+ * 把可视化表单的可写层写回 mcp.json（乐观锁）。
+ *
+ * 锁内重读 + revision 比对：不匹配 = 文件被外部（pi/手改/其它实例）改过，拒绝覆盖并
+ * 返回 conflict，让页面重新加载。mutate 只替换 mcpServers 键，顶层未知字段保留。
+ */
+export async function saveMcpConfigFile(path: string, file: McpConfigFile, options: { expectedRevision?: string } = {}): Promise<{ ok: boolean; error?: string; conflict?: boolean; revision?: string }> {
+	const validationError = validateMcpConfigFile(file);
+	if (validationError) return { ok: false, error: validationError };
+	const result = await writePiConfigFile(path, (current) => ({ ...current, mcpServers: file.mcpServers }), { expectedRevision: options.expectedRevision });
+	if (!result.ok) return { ok: false, error: result.error, conflict: result.conflict, revision: result.revision };
+	return { ok: true, revision: result.revision };
 }
 
 export function upsertWritableServer(writable: McpConfigFile, name: string, definition: McpServerDefinition): McpConfigFile {

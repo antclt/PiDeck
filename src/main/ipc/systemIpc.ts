@@ -1840,25 +1840,32 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		await assertTrustedMcpProject(parsed.projectId, root);
 		return configManager.getMcpConfig(root, { writableScope: "project-pi", projectTrusted: true });
 	});
-	ipcMain.handle(ipcChannels.configSaveMcp, async (_event, data: unknown, scope: unknown) => {
+	ipcMain.handle(ipcChannels.configSaveMcp, async (_event, data: unknown, scope: unknown, expectedRevision: unknown) => {
 		const parsed = parseMcpScopeRequest(scope);
 		if (!isMcpConfigFile(data)) {
 			return { valid: false, error: "mcp.json must contain an object of server definitions" };
 		}
-		let result: { valid: boolean; error?: string };
+		if (expectedRevision !== undefined && typeof expectedRevision !== "string") {
+			return { valid: false, error: "Invalid expectedRevision." };
+		}
+		let result: { valid: boolean; error?: string; conflict?: boolean; revision?: string };
 		if (parsed.kind === "global") {
-			result = await configManager.saveMcpConfig(data);
+			result = await configManager.saveMcpConfig(data, { expectedRevision });
 		} else {
 			const root = projectResourceManager.getProjectRoot(parsed.projectId);
 			await assertTrustedMcpProject(parsed.projectId, root);
 			// 项目写入走 ProjectResourceManager：canonical 边界 + 临时文件 rename，拒绝 junction 逃逸。
 			const validationError = validateMcpConfigFile(data, { scope: "project-pi" });
 			result = validationError ? { valid: false, error: validationError } : { valid: true };
-			if (result.valid) await projectResourceManager.saveProjectMcpConfig(parsed.projectId, data);
+			if (result.valid) {
+				const write = await projectResourceManager.saveProjectMcpConfig(parsed.projectId, data, { expectedRevision });
+				result = write.ok ? { valid: true } : { valid: false, error: write.error, conflict: write.conflict };
+			}
 		}
 		void appLogger.info("config", "MCP config saved", {
 			scope: parsed.kind,
 			serverCount: Object.keys(data.mcpServers ?? {}).length,
+			...(result.conflict ? { conflict: true } : {}),
 		});
 		return result;
 	});

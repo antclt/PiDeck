@@ -126,6 +126,8 @@ export type McpConfigSnapshot = {
 	writableRaw: string;
 	/** 可写层 JSON 损坏时给出诊断；此时禁止可视化保存，避免空对象覆盖原文件。 */
 	writableError?: string;
+	/** 可写层内容哈希（revisionOf）：保存时回传作乐观锁，不匹配 = 文件被外部改过，拒绝覆盖。 */
+	revision: string;
 	layers: McpConfigLayer[];
 	servers: McpServerListItem[];
 	/** 未通过校验的条目（不参与有效列表，但必须展示给用户修复）。 */

@@ -17,7 +17,7 @@ test("configuration resources share one global/project scope owner", () => {
 	// MCP 页接显式作用域对象（渲染层只传注册 projectId，不传路径）；没有作用域下拉
 	assert.match(mcp, /McpConfigScope/);
 	assert.match(mcp, /api\.config\.getMcp\(scope\)/);
-	assert.match(mcp, /api\.config\.saveMcp\(toSave, scope\)/);
+	assert.match(mcp, /api\.config\.saveMcp\(toSave, scope, snapshot\?\.revision\)/);
 	assert.doesNotMatch(mcp, /useState<ResourceScope>|effectiveScope|ResourceScopeSelector/);
 	// 作用域类型迁到 resourceScopeModel；只被 MCP 页使用的共享下拉组件已随之下线
 	assert.match(scopeModel, /export type ResourceScope = "global" \| "project"/);

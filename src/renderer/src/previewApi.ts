@@ -1488,6 +1488,7 @@ export function createPreviewApi(): PiDesktopApi {
 				writablePath: "",
 				writableFile: { mcpServers: {} },
 				writableRaw: '{\n  "mcpServers": {}\n}\n',
+				revision: "missing",
 				layers: [],
 				servers: [],
 				invalidServers: [],

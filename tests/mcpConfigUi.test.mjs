@@ -50,6 +50,16 @@ test("exposure 别名归一必须落到表单展示：别名住 shared，渲染�
 	assert.match(tab, /const base = editingDisplayDef\.toolExposure \?\? \{\};/);
 });
 
+test("McpTab 保存必须带乐观锁 revision，冲突时提示并重载", () => {
+	const tab = readFileSync("src/renderer/src/config/McpTab.tsx", "utf8");
+	const sharedTypes = readFileSync("src/shared/types/mcp.ts", "utf8");
+	// 快照带可写层内容哈希，保存时回传比对（P1-1：外部手改不被草稿静默覆盖）
+	assert.match(sharedTypes, /\/\*\*[\s\S]*?\*\/\n\trevision: string;/);
+	assert.match(tab, /api\.config\.saveMcp\(toSave, scope, snapshot\?\.revision\)/);
+	// 冲突分支：提示用户并以磁盘为准重新加载
+	assert.match(tab, /if \(result\.conflict\) \{[\s\S]{0,240}?t\("config\.mcp\.conflict"\)[\s\S]{0,80}?await load\(\);/);
+});
+
 test("dirty-mark helpers include config:mcp", () => {
 	const { dirtyKeysClearedByReload, ALL_CONFIG_DIRTY_KEYS } = loadTsCommonJs("src/renderer/src/config/configDirtyMarks.ts");
 	assert.deepEqual(new Set(dirtyKeysClearedByReload("mcp")), new Set(["config:mcp", "config:raw"]));
