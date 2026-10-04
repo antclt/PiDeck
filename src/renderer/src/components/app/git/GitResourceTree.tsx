@@ -100,7 +100,7 @@ export function FileTree(props: {
 				return (
 					<Fragment key={dir || "root"}>
 						{!hideDirHeader && (
-							<div className="group/dir flex cursor-pointer items-center gap-1 rounded-[4px] px-2 py-[3px] select-none hover:bg-[var(--git-panel-hover)]" onClick={() => props.onToggleDir(dir)}>
+							<div className="group/dir flex cursor-pointer items-center gap-1 rounded-xs px-2 py-[3px] select-none hover:bg-[var(--git-panel-hover)]" onClick={() => props.onToggleDir(dir)}>
 								<ChevronDown size={12} className={`shrink-0 text-text-tertiary transition-transform duration-fast${props.collapsedDirs.has(dir) ? " -rotate-90" : " rotate-0"}`} />
 								<span className="min-w-0 flex-1 truncate text-xs text-text-secondary" title={dir || "/"}>
 									{shortenDir(dir) || "/"}
@@ -120,7 +120,7 @@ export function FileTree(props: {
 													type="button"
 													variant="ghost"
 													size="icon-sm"
-													className="invisible size-6 rounded-[4px] text-text-tertiary group-hover/dir:visible hover:bg-[var(--git-panel-hover)] hover:text-text-primary"
+													className="invisible size-6 rounded-xs text-text-tertiary group-hover/dir:visible hover:bg-[var(--git-panel-hover)] hover:text-text-primary"
 													aria-label={t("git.stageDirectory")}
 													title={t("git.stageDirectory")}
 													disabled={props.mutating}
@@ -137,7 +137,7 @@ export function FileTree(props: {
 													type="button"
 													variant="ghost"
 													size="icon-sm"
-													className="invisible size-6 rounded-[4px] text-text-tertiary group-hover/dir:visible hover:bg-[var(--git-panel-hover)] hover:text-[var(--color-danger)]"
+													className="invisible size-6 rounded-xs text-text-tertiary group-hover/dir:visible hover:bg-[var(--git-panel-hover)] hover:text-[var(--color-danger)]"
 													aria-label={t("git.discardDirectory")}
 													title={t("git.discardDirectory")}
 													disabled={props.mutating}
@@ -149,7 +149,7 @@ export function FileTree(props: {
 													<RotateCcw size={13} aria-hidden="true" />
 												</Button>
 											)}
-											<span className="px-1 text-[11px] tabular-nums text-text-tertiary">{resources.length}</span>
+											<span className="px-1 text-micro tabular-nums text-text-tertiary">{resources.length}</span>
 										</span>
 									);
 								})()}
@@ -356,7 +356,7 @@ export function ResourceRow(props: {
 							variant="ghost"
 							size="icon-sm"
 							key={action.kind}
-							className={`size-6 rounded-[4px] text-text-tertiary hover:bg-[var(--git-panel-hover)] hover:text-text-primary${action.kind === "discard" ? " hover:text-[var(--color-danger)]" : ""}`}
+							className={`size-6 rounded-xs text-text-tertiary hover:bg-[var(--git-panel-hover)] hover:text-text-primary${action.kind === "discard" ? " hover:text-[var(--color-danger)]" : ""}`}
 							aria-label={action.label}
 							title={action.label}
 							disabled={action.disabled}
@@ -388,7 +388,7 @@ export function ResourceRow(props: {
 			<ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
 			<ContextMenuContent alignOffset={-4}>
 				{props.deleteFile && (
-					<ContextMenuItem variant="destructive" className="gap-2 text-[13px]" onSelect={() => props.deleteFile?.(props.path)}>
+					<ContextMenuItem variant="destructive" className="gap-2 text-control" onSelect={() => props.deleteFile?.(props.path)}>
 						<Trash2 size={14} aria-hidden="true" />
 						{t("git.deleteFile")}
 					</ContextMenuItem>
@@ -404,7 +404,7 @@ export function ResourceGroup(props: { title: string; count: number; open: boole
 			<div className="flex h-[22px] items-center bg-transparent px-[7px] pl-[3px] hover:bg-[var(--git-panel-hover)]">
 				<button type="button" className="inline-flex h-[22px] min-w-0 flex-1 cursor-pointer items-center border-0 bg-transparent p-0 text-left text-inherit focus-visible:shadow-[inset_var(--focus-ring)] focus-visible:outline-none" aria-expanded={props.open} onClick={props.onToggle}>
 					<Twistie open={props.open} />
-					<span className="ml-px min-w-0 flex-1 truncate text-[13px] font-semibold tracking-normal text-[var(--git-panel-fg)]">{props.title}</span>
+					<span className="ml-px min-w-0 flex-1 truncate text-control font-semibold tracking-normal text-[var(--git-panel-fg)]">{props.title}</span>
 				</button>
 				{props.allAction && (
 					<div className="hidden items-center gap-px group-hover:flex group-focus-within:flex group-[.open]:flex">

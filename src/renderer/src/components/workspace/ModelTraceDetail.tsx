@@ -50,7 +50,7 @@ function TraceBlockView({ block }: { block: TraceBlock }) {
 						<Wrench className="size-3 text-muted-foreground" aria-hidden="true" />
 						{block.name}
 					</div>
-					{block.args ? <pre className={`overflow-auto rounded bg-background/60 p-1.5 font-mono text-[11px] leading-snug ${BLOCK_MAX_H}`}>{block.args}</pre> : null}
+					{block.args ? <pre className={`overflow-auto rounded bg-background/60 p-1.5 font-mono text-micro leading-snug ${BLOCK_MAX_H}`}>{block.args}</pre> : null}
 				</div>
 			);
 		case "tool_result":
@@ -60,7 +60,7 @@ function TraceBlockView({ block }: { block: TraceBlock }) {
 						{t("rpc.traceToolResult")}
 						{block.isError ? <span className="rounded bg-destructive/15 px-1 text-destructive">{t("rpc.traceToolError")}</span> : null}
 					</div>
-					<pre className={`overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-snug ${block.isError ? "text-destructive" : ""} ${BLOCK_MAX_H}`}>{block.text}</pre>
+					<pre className={`overflow-auto whitespace-pre-wrap break-words font-mono text-micro leading-snug ${block.isError ? "text-destructive" : ""} ${BLOCK_MAX_H}`}>{block.text}</pre>
 				</div>
 			);
 	}
@@ -156,7 +156,7 @@ export function ModelTraceDetail({ payloadJson, summary }: { payloadJson: string
 									))}
 								</div>
 								<div className="flex justify-end border-t border-border/40 px-2 py-1">
-									<Button type="button" variant="ghost" size="sm" className="h-6 gap-1 px-2 text-[11px]" onClick={() => void copyTextWithCopiedNotice(view.system!.text)}>
+									<Button type="button" variant="ghost" size="sm" className="h-6 gap-1 px-2 text-micro" onClick={() => void copyTextWithCopiedNotice(view.system!.text)}>
 										<Copy className="size-3" aria-hidden="true" />
 										{t("common.copy")}
 									</Button>

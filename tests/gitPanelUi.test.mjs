@@ -192,7 +192,7 @@ describe("Git panel VS Code Source Control contract", () => {
 		assert.match(panelControls, /SelectValue/);
 		assert.match(panelControls, /position="popper"/);
 		// 面板标题不截断，避免被右侧筛选挤成「源…」；且不用 mono，与 --git-ui-font / 项目中文栈对齐
-		assert.match(panelControls, /whitespace-nowrap text-\[13px\] font-semibold/);
+		assert.match(panelControls, /whitespace-nowrap text-control font-semibold/);
 		assert.doesNotMatch(panelControls, /font-mono text-\[13px\] font-semibold/);
 		assert.doesNotMatch(panelControls, /min-w-0 flex-1 truncate font-mono text-\[13px\] font-semibold/);
 		// 路径 / 提交说明 / 作者 / 分支徽标走面板 UI 字体；仅 commit hash 保留 mono

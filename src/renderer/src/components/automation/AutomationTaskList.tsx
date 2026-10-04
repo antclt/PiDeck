@@ -144,7 +144,7 @@ export function AutomationTaskList({ projectId, onEditTask, onCreateTask }: Auto
 				<span className="text-xs text-muted-foreground">
 					{t("automation.tasksTab")} ({tasks.length})
 				</span>
-				<span className="text-[11px] text-muted-foreground">{t("automation.freshSessionHint")}</span>
+				<span className="text-micro text-muted-foreground">{t("automation.freshSessionHint")}</span>
 			</div>
 
 			<div className="overflow-hidden rounded-lg border border-border/60 bg-bg-panel/30">
@@ -180,7 +180,7 @@ export function AutomationTaskList({ projectId, onEditTask, onCreateTask }: Auto
 												)}
 												{task.mode === "goal" && <Badge className="h-5 border-warning/30 bg-warning/15 px-1.5 text-[10px] font-normal text-warning">{t("app.composerModeGoal")}</Badge>}
 											</div>
-											<p className="max-w-80 truncate font-mono text-[11px] text-muted-foreground" title={task.prompt}>
+											<p className="max-w-80 truncate font-mono text-micro text-muted-foreground" title={task.prompt}>
 												{task.prompt}
 											</p>
 										</div>
@@ -191,7 +191,7 @@ export function AutomationTaskList({ projectId, onEditTask, onCreateTask }: Auto
 										</TableCell>
 									)}
 									<TableCell>
-										<span className="font-mono text-[11px] text-muted-foreground" title={schedule}>
+										<span className="font-mono text-micro text-muted-foreground" title={schedule}>
 											{schedule}
 										</span>
 									</TableCell>
@@ -200,15 +200,15 @@ export function AutomationTaskList({ projectId, onEditTask, onCreateTask }: Auto
 											{isRunning ? t("automation.running") : task.enabled ? t("automation.enabled") : t("automation.disabled")}
 										</Badge>
 									</TableCell>
-									<TableCell className="text-[11px] text-muted-foreground">{task.nextRunAt ? formatTime(task.nextRunAt) : t("automation.manualTrigger")}</TableCell>
+									<TableCell className="text-micro text-muted-foreground">{task.nextRunAt ? formatTime(task.nextRunAt) : t("automation.manualTrigger")}</TableCell>
 									<TableCell>
 										{latestRun ? (
 											<div className="flex flex-col gap-1">
 												<Badge className={`h-5 w-fit border px-1.5 text-[10px] font-normal ${runStatusTone(latestRun.status)}`}>{runStatusLabel(latestRun.status)}</Badge>
-												<span className="text-[11px] text-muted-foreground">{formatTime(latestRun.updatedAt)}</span>
+												<span className="text-micro text-muted-foreground">{formatTime(latestRun.updatedAt)}</span>
 											</div>
 										) : (
-											<span className="text-[11px] text-muted-foreground">{t("automation.neverRun")}</span>
+											<span className="text-micro text-muted-foreground">{t("automation.neverRun")}</span>
 										)}
 									</TableCell>
 									<TableCell>

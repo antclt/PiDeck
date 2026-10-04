@@ -115,7 +115,7 @@ export const ComposerStatsLine = memo(function ComposerStatsLine(props: { state?
 	// 有轮次、性能或 token 数据后，再把圆环作为同一条统计栏的交互入口挂入。
 	if (segments.length === 0) return null;
 	return (
-		<div ref={rootRef} className="flex w-full min-w-0 items-center justify-center gap-2 px-1 pb-0 pt-1 text-[12px] leading-5 text-text-tertiary" title={truncated ? line : undefined} data-testid="composer-stats-line">
+		<div ref={rootRef} className="flex w-full min-w-0 items-center justify-center gap-2 px-1 pb-0 pt-1 text-caption leading-5 text-text-tertiary" title={truncated ? line : undefined} data-testid="composer-stats-line">
 			<div className="min-w-0 truncate text-center">
 				{segments.map((parts, i) => (
 					<Fragment key={parts.map((part) => part.text).join("|") + i}>

@@ -327,8 +327,8 @@ export function AddProviderDialog(props: {
 									if (e.key === "Enter") submit();
 								}}
 							/>
-							{trimmedName !== "" && !nameValid && <span className="text-[11px] leading-relaxed text-destructive">{t("config.providerNameRule")}</span>}
-							{duplicate && <span className="text-[11px] leading-relaxed text-destructive">{t("config.providerNameDuplicate")}</span>}
+							{trimmedName !== "" && !nameValid && <span className="text-micro leading-relaxed text-destructive">{t("config.providerNameRule")}</span>}
+							{duplicate && <span className="text-micro leading-relaxed text-destructive">{t("config.providerNameDuplicate")}</span>}
 						</div>
 					</div>
 					{/* 连接字段 + 测试连接 + 兼容性：与模型页展开卡片同一套组件（ProviderConnectionForm） */}
@@ -362,7 +362,7 @@ export function AddProviderDialog(props: {
 						<div className="flex min-w-0 flex-wrap items-center gap-2">
 							<span className="text-xs font-semibold text-text-primary">{t("config.modelList")}</span>
 							{modelBatchMode && (
-								<span className="rounded-full bg-[color:var(--color-accent-soft)] px-2 py-0.5 text-[11px] font-medium tabular-nums text-[color:var(--color-accent)]">
+								<span className="rounded-full bg-[color:var(--color-accent-soft)] px-2 py-0.5 text-micro font-medium tabular-nums text-[color:var(--color-accent)]">
 									{t("config.modelBatchSelected", {
 										selected: countSelectedModelIndexes(selectedModelIndexes, models.length),
 										total: models.length,
@@ -413,7 +413,7 @@ export function AddProviderDialog(props: {
 							</div>
 						</div>
 					)}
-					{fetchError && <div className="mb-2 rounded-sm border border-danger/20 bg-danger-soft px-3 py-2 text-[11px] leading-relaxed text-danger whitespace-pre-line">{fetchError}</div>}
+					{fetchError && <div className="mb-2 rounded-sm border border-danger/20 bg-danger-soft px-3 py-2 text-micro leading-relaxed text-danger whitespace-pre-line">{fetchError}</div>}
 					{/* 已配置模型列表：与展开卡片同款模型表格（页内草稿管理，确认时随 provider 一起提交） */}
 					<ModelsTable
 						models={models}
@@ -451,7 +451,7 @@ export function AddProviderDialog(props: {
 						focusModelKey={pendingModelFocusKey}
 						onFocusHandled={() => setPendingModelFocusKey(null)}
 					/>
-					<p className="mt-1.5 text-[11px] leading-relaxed text-text-tertiary">{t("config.providerDialogModelsHint")}</p>
+					<p className="mt-1.5 text-micro leading-relaxed text-text-tertiary">{t("config.providerDialogModelsHint")}</p>
 				</div>
 			</div>
 

@@ -634,13 +634,13 @@ function SettingsModalContent(props: SettingsModalProps) {
 					{/* 顶层分区 tab：直接用 shadcn Tabs 默认观感（bg-muted p-1 圆角条），与全局组件统一；
 				    不再套自定义 tab 条样式，只做外边距/自定宽定位。 */}
 					<TabsList className="mx-3 mt-2.5 w-auto justify-start gap-0.5 self-start" aria-label={t("settings.title")}>
-						<TabsTrigger value="settings" className="h-8 gap-1.5 px-3 text-[13px]">
+						<TabsTrigger value="settings" className="h-8 gap-1.5 px-3 text-control">
 							<MonitorCog className="size-4" aria-hidden="true" />
 							{t("settings.panes.system")}
 							{/* 系统设置分区黄点：全局设置/视觉桥/生图草稿任一有未保存 */}
 							{hasAnyDirtyChanges ? <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" /> : null}
 						</TabsTrigger>
-						<TabsTrigger value="config" className="h-8 gap-1.5 px-3 text-[13px]">
+						<TabsTrigger value="config" className="h-8 gap-1.5 px-3 text-control">
 							<SlidersHorizontal className="size-4" aria-hidden="true" />
 							{t("settings.panes.config")}
 							{/* 配置管理分区黄点：由 ConfigPane 内部脏集合上报 */}

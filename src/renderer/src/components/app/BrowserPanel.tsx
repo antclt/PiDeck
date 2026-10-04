@@ -422,7 +422,7 @@ export function BrowserPanel(props: {
 				{tabs.map((tab) => (
 					<div
 						key={tab.id}
-						className={`flex max-w-[180px] shrink-0 cursor-pointer items-center gap-1 border-r border-border/30 px-2.5 py-1 text-xs whitespace-nowrap select-none text-text-tertiary${tab.id === activeTabId ? " border-b-2 border-[var(--color-accent)] -mb-px bg-bg-panel text-text-primary" : ""}`}
+						className={`flex max-w-[180px] shrink-0 cursor-pointer items-center gap-1 border-r border-border/30 px-2.5 py-1 text-xs whitespace-nowrap select-none text-text-tertiary${tab.id === activeTabId ? " border-b-2 border-primary -mb-px bg-bg-panel text-text-primary" : ""}`}
 						onClick={() => switchTab(tab.id)}
 					>
 						<span className="min-w-0 truncate">{tab.title || tab.url}</span>

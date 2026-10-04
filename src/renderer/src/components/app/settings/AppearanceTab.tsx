@@ -179,7 +179,7 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 						{draft.backgroundImage ? (
 							<img src={`pideck-bg://local/${encodeURIComponent(draft.backgroundImage)}`} alt="" className="h-12 w-20 shrink-0 rounded-sm border border-border object-cover" />
 						) : (
-							<div className="flex h-12 w-20 shrink-0 items-center justify-center rounded-sm border border-dashed border-border text-[11px] text-muted-foreground">—</div>
+							<div className="flex h-12 w-20 shrink-0 items-center justify-center rounded-sm border border-dashed border-border text-micro text-muted-foreground">—</div>
 						)}
 						<Button
 							variant="outline"
@@ -240,7 +240,7 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 						<Button
 							variant="ghost"
 							size="icon"
-							className="size-8 rounded-[6px] border border-border-subtle bg-bg-panel text-text-secondary hover:border-[var(--color-accent)] hover:bg-bg-active hover:text-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-40"
+							className="size-8 rounded-sm border border-border-subtle bg-bg-panel text-text-secondary hover:border-[var(--color-accent)] hover:bg-bg-active hover:text-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-40"
 							disabled={draft.zoomFactor <= ZOOM_FACTOR_MIN}
 							onClick={() => changeZoomFactor(-ZOOM_FACTOR_STEP)}
 							aria-label={t("settings.zoomOut")}
@@ -254,7 +254,7 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 						<Button
 							variant="ghost"
 							size="icon"
-							className="size-8 rounded-[6px] border border-border-subtle bg-bg-panel text-text-secondary hover:border-[var(--color-accent)] hover:bg-bg-active hover:text-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-40"
+							className="size-8 rounded-sm border border-border-subtle bg-bg-panel text-text-secondary hover:border-[var(--color-accent)] hover:bg-bg-active hover:text-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-40"
 							disabled={draft.zoomFactor >= ZOOM_FACTOR_MAX}
 							aria-label={t("settings.zoomIn")}
 							title={t("settings.zoomIn")}
@@ -510,7 +510,7 @@ const AppearanceThemePicker = memo(function AppearanceThemePicker(props: { value
 						className={cn("group relative flex flex-col gap-1.5 rounded-lg border p-2 text-left transition-colors duration-fast", selected ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)]" : "border-border-subtle bg-bg-panel hover:border-border-default")}
 					>
 						{/* 色板迷你预览：左=侧栏，右=应用区（边框线/主色/面板块） */}
-						<span className="flex h-12 w-full overflow-hidden rounded-[6px] border border-border-subtle" style={{ background: surface.background }} aria-hidden="true">
+						<span className="flex h-12 w-full overflow-hidden rounded-sm border border-border-subtle" style={{ background: surface.background }} aria-hidden="true">
 							<span className="h-full w-[32%] border-r border-border-subtle" style={{ background: surface.sidebar }} />
 							<span className="flex-1 p-1.5">
 								<span className="mb-1 block h-1.5 w-3/4 rounded-sm" style={{ background: surface.border }} />

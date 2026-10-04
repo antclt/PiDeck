@@ -455,7 +455,7 @@ export function TerminalDock(props: {
 						</PopoverTrigger>
 						<PopoverContent side="top" align="start" className="w-44 gap-0.5 p-1.5">
 							<strong className="px-1 py-0.5 text-xs">{t("terminal.selectShell")}</strong>
-							{shells.length === 0 && <span className="block px-1 py-1 text-[11px] text-muted-foreground">{t("terminal.shellEmpty")}</span>}
+							{shells.length === 0 && <span className="block px-1 py-1 text-micro text-muted-foreground">{t("terminal.shellEmpty")}</span>}
 							{shells.map((s) => (
 								<Button
 									key={s.shell}
@@ -484,7 +484,7 @@ export function TerminalDock(props: {
 						</PopoverTrigger>
 						<PopoverContent side="top" align="end" className="w-48 gap-1 p-2">
 							<strong className="px-1 text-xs">{t("terminal.theme")}</strong>
-							<span className="px-1 text-[11px] text-muted-foreground">
+							<span className="px-1 text-micro text-muted-foreground">
 								{t("terminal.themeCurrent")}: {theme.label}
 							</span>
 							{Object.entries(TERMINAL_THEMES).map(([id, item]) => (

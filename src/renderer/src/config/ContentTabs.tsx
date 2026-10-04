@@ -39,7 +39,7 @@ export function ContentTabs(props: {
 						value={item.value}
 						// 覆盖 beui 默认尺寸（min-h-[44px] text-sm）到应用控件节奏；
 						// 指示器 2px（h-0.5）与旧 line variant 的 border-b-2 视觉一致。
-						className={cn("min-h-0 gap-1.5 px-3 py-2 text-[13px] font-medium", compact && "px-3 py-1.5 text-xs")}
+						className={cn("min-h-0 gap-1.5 px-3 py-2 text-control font-medium", compact && "px-3 py-1.5 text-xs")}
 						indicatorClassName="h-0.5"
 					>
 						{item.icon}

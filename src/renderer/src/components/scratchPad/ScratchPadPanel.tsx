@@ -172,7 +172,7 @@ export const ScratchPadPanel = memo(function ScratchPadPanel(props: ScratchPadPa
 				<div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
 					<Pencil size={13} className="text-muted-foreground" aria-hidden="true" />
 					<span>{t("scratchPad.title")}</span>
-					<kbd className="ml-1 font-mono text-[11px] font-normal text-muted-foreground">⌘⇧S</kbd>
+					<kbd className="ml-1 font-mono text-micro font-normal text-muted-foreground">⌘⇧S</kbd>
 				</div>
 				{/* 编辑/预览分段切换：高频操作独立展示 */}
 				<div className="ml-auto flex items-center gap-0.5 rounded-md bg-muted p-0.5" role="tablist" aria-label={t("scratchPad.title")}>

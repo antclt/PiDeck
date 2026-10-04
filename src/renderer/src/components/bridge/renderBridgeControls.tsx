@@ -140,7 +140,7 @@ export function renderBridgeControl(node: BridgeUINode, onEvent: BridgeEventSink
 							type="button"
 							size="sm"
 							variant={option.value === selected ? "default" : "outline"}
-							className="h-6 px-2 text-[11px]"
+							className="h-6 px-2 text-micro"
 							onClick={() => {
 								setSelected(option.value);
 								onEvent(node.id, { type: "select", index });
@@ -283,7 +283,7 @@ export function renderBridgeControl(node: BridgeUINode, onEvent: BridgeEventSink
 							<button
 								key={`${key}-t-${index}`}
 								type="button"
-								className={`px-2 py-1 text-[11px] ${index === active ? "border-b-2 border-primary font-medium" : "text-muted-foreground"}`}
+								className={`px-2 py-1 text-micro ${index === active ? "border-b-2 border-primary font-medium" : "text-muted-foreground"}`}
 								onClick={() => {
 									setActive(index);
 									if (node.actionId) onEvent(node.id, { type: "action", actionId: node.actionId, payload: index });
@@ -311,7 +311,7 @@ export function renderBridgeControl(node: BridgeUINode, onEvent: BridgeEventSink
 			const value = typeof node.value === "number" ? Math.max(0, Math.min(node.value, max)) : undefined;
 			return (
 				<div key={key} className="flex flex-col gap-1">
-					{node.label ? <span className="text-[11px] text-muted-foreground">{node.label}</span> : null}
+					{node.label ? <span className="text-micro text-muted-foreground">{node.label}</span> : null}
 					<Progress value={value === undefined ? undefined : (value / max) * 100} className="h-1.5" />
 				</div>
 			);
@@ -366,7 +366,7 @@ export function renderBridgeControl(node: BridgeUINode, onEvent: BridgeEventSink
 				<div key={key} className="flex items-center gap-2 rounded-md border bg-card px-2 py-1 text-xs shadow-sm">
 					<span className="flex-1">{node.message ?? ""}</span>
 					{(node.actions ?? []).map((action, index) => (
-						<Button key={`${key}-a-${index}`} type="button" size="sm" variant="ghost" className="h-6 px-2 text-[11px]" onClick={() => onEvent(node.id, { type: "action", actionId: action.actionId })}>
+						<Button key={`${key}-a-${index}`} type="button" size="sm" variant="ghost" className="h-6 px-2 text-micro" onClick={() => onEvent(node.id, { type: "action", actionId: action.actionId })}>
 							{action.label}
 						</Button>
 					))}

@@ -142,7 +142,7 @@ const PiSubagentEntryRow = (props: {
 
 	return (
 		<li className={`rounded ${isActive ? "bg-muted/40" : ""}`}>
-			<button type="button" className="flex min-w-0 w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] leading-5 hover:bg-muted/60" aria-expanded={!collapsed} onClick={toggleCollapsed}>
+			<button type="button" className="flex min-w-0 w-full items-center gap-2 rounded px-2 py-1.5 text-left text-control leading-5 hover:bg-muted/60" aria-expanded={!collapsed} onClick={toggleCollapsed}>
 				<span className="grid size-5 shrink-0 place-items-center">
 					<SubagentStatusIcon status={effectiveStatus} />
 				</span>
@@ -156,7 +156,7 @@ const PiSubagentEntryRow = (props: {
 				<div className="flex flex-col gap-1.5 px-2 pb-2 pl-9 text-xs leading-5 text-text-secondary">
 					{/* 元信息行：本地化状态徽标 + 起止时间与量化指标 */}
 					<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-text-tertiary">
-						<span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${subagentStatusBadgeClass(effectiveStatus)}`}>{t(lost ? "sessionSubagents.status.lost" : `sessionSubagents.status.${subagentStatusLabelSuffix(effectiveStatus)}`)}</span>
+						<span className={`rounded px-1.5 py-0.5 text-micro font-medium ${subagentStatusBadgeClass(effectiveStatus)}`}>{t(lost ? "sessionSubagents.status.lost" : `sessionSubagents.status.${subagentStatusLabelSuffix(effectiveStatus)}`)}</span>
 						{entry.toolUses != null && entry.toolUses > 0 && <span>{t("sessionSubagents.detailToolUses", { count: entry.toolUses })}</span>}
 						{entry.tokens != null && entry.tokens > 0 && <span>{t("sessionSubagents.detailTokens", { count: entry.tokens.toLocaleString() })}</span>}
 						{entry.startedAt != null && <span>{t("sessionSubagents.detailStartedAt", { time: new Date(entry.startedAt).toLocaleTimeString() })}</span>}
@@ -193,7 +193,7 @@ const PiSubagentEntryRow = (props: {
 						</DialogHeader>
 						<div className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto overscroll-contain">
 							<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-tertiary">
-								<span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${subagentStatusBadgeClass(entry.status)}`}>{t(`sessionSubagents.status.${subagentStatusLabelSuffix(entry.status)}`)}</span>
+								<span className={`rounded px-1.5 py-0.5 text-micro font-medium ${subagentStatusBadgeClass(entry.status)}`}>{t(`sessionSubagents.status.${subagentStatusLabelSuffix(entry.status)}`)}</span>
 								{entry.toolUses != null && entry.toolUses > 0 && <span>{t("sessionSubagents.detailToolUses", { count: entry.toolUses })}</span>}
 								{entry.tokens != null && entry.tokens > 0 && <span>{t("sessionSubagents.detailTokens", { count: entry.tokens.toLocaleString() })}</span>}
 								{entry.startedAt != null && <span>{t("sessionSubagents.detailStartedAt", { time: new Date(entry.startedAt).toLocaleTimeString() })}</span>}
@@ -209,7 +209,7 @@ const PiSubagentEntryRow = (props: {
 									<MarkdownStream text={displayResult} onOpenExternal={() => undefined} />
 								</div>
 							)}
-							{!fullResult && entry.source === "bridge" && entry.result && entry.result.length >= 2000 && <p className="text-[11px] text-text-tertiary">{t("sessionSubagents.fullResultPending")}</p>}
+							{!fullResult && entry.source === "bridge" && entry.result && entry.result.length >= 2000 && <p className="text-micro text-text-tertiary">{t("sessionSubagents.fullResultPending")}</p>}
 						</div>
 					</DialogContent>
 				</Dialog>
@@ -299,17 +299,17 @@ const DshSubagentEntryRow = (props: { agentId: string; entry: DshSubagentEntry }
 
 	return (
 		<li className="rounded hover:bg-muted/40">
-			<button type="button" className="flex min-w-0 w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] leading-5 hover:bg-muted/60" aria-expanded={!collapsed} onClick={() => void toggle()}>
+			<button type="button" className="flex min-w-0 w-full items-center gap-2 rounded px-2 py-1.5 text-left text-control leading-5 hover:bg-muted/60" aria-expanded={!collapsed} onClick={() => void toggle()}>
 				<span className="grid size-5 shrink-0 place-items-center">{entry.activity === "running" ? <Loader2 size={14} className="animate-pideck-spin text-[var(--color-accent)]" /> : <span className="size-2 rounded-full bg-muted-foreground/60" aria-hidden="true" />}</span>
 				<span className="min-w-0 flex-1 truncate font-medium text-foreground">{entry.label ?? entry.id}</span>
 				{entry.activity === "running" && (
-					<span className="inline-flex shrink-0 items-center gap-1 rounded bg-primary/15 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+					<span className="inline-flex shrink-0 items-center gap-1 rounded bg-primary/15 px-1.5 py-0.5 text-micro font-medium text-primary">
 						<Loader2 size={11} className="animate-pideck-spin" aria-hidden="true" />
 						{t("dshTools.subagentRunning")}
 					</span>
 				)}
-				{entry.kind === "diagnostic" && <span className="shrink-0 inline-flex items-center rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">{t("dshTools.subagentDiagnostic")}</span>}
-				<span className="shrink-0 text-[11px] text-text-tertiary">{entry.mode === "continuable" ? t("dshTools.subagentContinuable") : t("dshTools.subagentOneShot")}</span>
+				{entry.kind === "diagnostic" && <span className="shrink-0 inline-flex items-center rounded bg-amber-500/15 px-1.5 py-0.5 text-micro font-medium text-amber-600 dark:text-amber-400">{t("dshTools.subagentDiagnostic")}</span>}
+				<span className="shrink-0 text-micro text-text-tertiary">{entry.mode === "continuable" ? t("dshTools.subagentContinuable") : t("dshTools.subagentOneShot")}</span>
 				<ChevronDown size={13} className={`shrink-0 text-text-tertiary transition-transform ${collapsed ? "" : "rotate-180"}`} aria-hidden="true" />
 			</button>
 			{!collapsed && (
@@ -325,7 +325,7 @@ const DshSubagentEntryRow = (props: { agentId: string; entry: DshSubagentEntry }
 					{!transcriptLoading &&
 						transcript?.map((message, index) => (
 							<div key={index} className={`flex flex-col gap-0.5 rounded-md px-2 py-1 ${message.role === "user" ? "bg-accent/30" : "bg-bg-panel"}`}>
-								<span className="text-[11px] text-text-tertiary">{message.role === "user" ? t("dshTools.roleUser") : t("dshTools.roleAssistant")}</span>
+								<span className="text-micro text-text-tertiary">{message.role === "user" ? t("dshTools.roleUser") : t("dshTools.roleAssistant")}</span>
 								<span className="whitespace-pre-wrap break-words text-xs text-foreground">{message.text || "…"}</span>
 							</div>
 						))}
@@ -367,10 +367,10 @@ export function SessionSubagentsStrip(props: {
 			<div className="flex h-9 w-full items-center gap-2.5 px-3">
 				<button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left" aria-expanded={!collapsed} onClick={toggleCollapsed}>
 					<Bot size={14} aria-hidden="true" className="shrink-0 text-text-tertiary" />
-					<span className="shrink-0 text-[13px] font-medium leading-6 text-foreground">{t("sessionSubagents.title")}</span>
+					<span className="shrink-0 text-control font-medium leading-6 text-foreground">{t("sessionSubagents.title")}</span>
 					{/* 运行中计数徽标 + 状态灯：dsh-web 的 agent 状态灯语义 */}
 					{running > 0 && (
-						<span className="inline-flex shrink-0 items-center gap-1.5 rounded bg-warning/15 px-1.5 py-0.5 text-[11px] leading-none font-medium text-warning">
+						<span className="inline-flex shrink-0 items-center gap-1.5 rounded bg-warning/15 px-1.5 py-0.5 text-micro leading-none font-medium text-warning">
 							<span className="size-1.5 rounded-full bg-current animate-pulse" aria-hidden="true" />
 							{running}
 						</span>
@@ -386,7 +386,7 @@ export function SessionSubagentsStrip(props: {
 					<ul className="mb-2 flex max-h-[240px] flex-col gap-1 overflow-y-auto overscroll-contain [contain:layout_paint] [scrollbar-gutter:stable] px-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-100 motion-reduce:animate-none">
 						{isDsh ? (entries as DshSubagentEntry[]).map((entry) => <DshSubagentEntryRow key={entry.id} agentId={agentId ?? ""} entry={entry} />) : entries.map((entry) => <PiSubagentEntryRow key={entry.id} entry={entry as PiSubagentEntry} sessionId={props.sessionId} onOpenChildSession={props.onOpenChildSession} />)}
 					</ul>
-					{hasAcpEntries && <p className="-mt-1 px-3 pb-2 text-[11px] leading-4 text-text-tertiary">{t("sessionSubagents.acpDelegateHint")}</p>}
+					{hasAcpEntries && <p className="-mt-1 px-3 pb-2 text-micro leading-4 text-text-tertiary">{t("sessionSubagents.acpDelegateHint")}</p>}
 				</>
 			)}
 		</ComposerWidgetFrame>

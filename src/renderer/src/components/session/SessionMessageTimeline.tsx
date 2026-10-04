@@ -756,7 +756,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 			{controller.loadMoreError && (
 				<div className="flex flex-col items-center gap-1 px-6 pb-3 text-center">
 					<p className="text-xs font-medium text-destructive">{t("timeline.loadMoreFailed")}</p>
-					<p className="max-w-[560px] text-[11px] text-muted-foreground" title={controller.loadMoreError}>
+					<p className="max-w-[560px] text-micro text-muted-foreground" title={controller.loadMoreError}>
 						{t("timeline.loadMoreFailedHint")}
 					</p>
 				</div>

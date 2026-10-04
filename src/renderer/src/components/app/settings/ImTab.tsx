@@ -469,7 +469,7 @@ export function ImTab(_props: Props) {
 										{bot.name}
 										{isThisConnected && <span className="config-im-connected-badge">{t("config.im.connected")}</span>}
 									</div>
-									<div className="text-[11px] text-text-tertiary">
+									<div className="text-micro text-text-tertiary">
 										{t("config.im.expandHint")} · {t("config.im.appId")}: {bot.appId.slice(0, 14)}… · {t("config.im.linkedAgentsCount", { count: botBindings.length })}
 									</div>
 								</div>

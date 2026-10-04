@@ -1317,7 +1317,7 @@ export function GitPanel(props: GitPanelProps) {
 							type="button"
 							variant="ghost"
 							size="xs"
-							className={`inline-flex h-6 items-center gap-0.5 rounded-sm border-0 bg-transparent px-1 text-left text-[11px] text-[var(--git-panel-fg)] shadow-none hover:bg-[var(--git-panel-hover)]${layout === "changesOnly" ? " max-w-[26%] shrink min-w-0" : " max-w-[9rem] min-w-0"}`}
+							className={`inline-flex h-6 items-center gap-0.5 rounded-sm border-0 bg-transparent px-1 text-left text-micro text-[var(--git-panel-fg)] shadow-none hover:bg-[var(--git-panel-hover)]${layout === "changesOnly" ? " max-w-[26%] shrink min-w-0" : " max-w-[9rem] min-w-0"}`}
 							onClick={() => {
 								if (!branchOpen) updateBranchDropdownPosition();
 								setBranchOpen((v) => !v);
@@ -1432,8 +1432,8 @@ export function GitPanel(props: GitPanelProps) {
 									</div>
 								) : notAGitRepo ? (
 									<div className="flex flex-col items-center gap-4 px-4 py-8 text-center">
-										<div className="text-[13px] leading-[22px] text-[var(--git-desc-fg)]">{t("git.notAGitRepo")}</div>
-										<Button type="button" variant="ghost" size="sm" className=" h-auto px-2.5 text-[13px]" disabled={initializing} onClick={() => void doInitRepo()}>
+										<div className="text-control leading-[22px] text-[var(--git-desc-fg)]">{t("git.notAGitRepo")}</div>
+										<Button type="button" variant="ghost" size="sm" className=" h-auto px-2.5 text-control" disabled={initializing} onClick={() => void doInitRepo()}>
 											{initializing ? <Loader2 size={14} className="animate-pideck-spin" /> : t("git.initRepo")}
 										</Button>
 									</div>
@@ -1443,7 +1443,7 @@ export function GitPanel(props: GitPanelProps) {
 											<ContextMenuTrigger asChild>
 												<Textarea
 													ref={commitInputRef}
-													className="git-scm-input min-h-14 max-h-[100px] w-full resize-y rounded-sm border border-[var(--git-input-border)] bg-[var(--git-input-bg)] px-2 py-1 text-[13px] leading-[20px] text-[var(--git-panel-fg)] outline-none placeholder:text-[var(--git-desc-fg)]"
+													className="git-scm-input min-h-14 max-h-[100px] w-full resize-y rounded-sm border border-[var(--git-input-border)] bg-[var(--git-input-bg)] px-2 py-1 text-control leading-[20px] text-[var(--git-panel-fg)] outline-none placeholder:text-[var(--git-desc-fg)]"
 													placeholder={t("git.commitPlaceholder", {
 														branch: props.currentBranch ?? "HEAD",
 													})}
@@ -1486,10 +1486,10 @@ export function GitPanel(props: GitPanelProps) {
 									</div>
 								)}
 
-								{error && <div className="flex min-h-[22px] shrink-0 items-center gap-1 px-[9px] text-[13px] text-[var(--git-conflict)]">{error}</div>}
+								{error && <div className="flex min-h-[22px] shrink-0 items-center gap-1 px-[9px] text-control text-[var(--git-conflict)]">{error}</div>}
 								{!loading && total === 0 && !error && (
 									/* 工作区干净的完成态：勾图标 + 文案，替代裸一行灰字（用户需要一眼确认「没有待处理」而不是「加载失败」） */
-									<div className="git-status-msg flex min-h-[22px] shrink-0 items-center gap-1.5 px-[9px] text-[13px] text-[var(--git-desc-fg)]">
+									<div className="git-status-msg flex min-h-[22px] shrink-0 items-center gap-1.5 px-[9px] text-control text-[var(--git-desc-fg)]">
 										<CheckCircle2 size={13} aria-hidden="true" className="shrink-0" />
 										{t("git.noPendingChanges")}
 									</div>
@@ -1802,13 +1802,13 @@ function CompareChanges(props: {
 								onChange={(value) => setTarget(value)}
 							/>
 						</Label>
-						<Button type="button" variant="ghost" size="sm" className=" h-auto px-2.5 text-[13px]" disabled={!base || !target || base === target || loading} onClick={() => void run()}>
+						<Button type="button" variant="ghost" size="sm" className=" h-auto px-2.5 text-control" disabled={!base || !target || base === target || loading} onClick={() => void run()}>
 							{loading ? <Loader2 size={14} className="animate-pideck-spin" /> : t("git.compare")}
 						</Button>
 					</div>
 					{result && (
 						<>
-							<div className="flex-[0_0_auto] border-t border-[var(--git-panel-border)] px-2.5 py-1 text-[11px] text-[var(--git-desc-fg)]">
+							<div className="flex-[0_0_auto] border-t border-[var(--git-panel-border)] px-2.5 py-1 text-micro text-[var(--git-desc-fg)]">
 								{t("git.compareSummary", {
 									ahead: result.ahead,
 									behind: result.behind,
@@ -1822,7 +1822,7 @@ function CompareChanges(props: {
 							</div>
 						</>
 					)}
-					{!result && <div className="flex min-h-[22px] shrink-0 items-center gap-1 px-[9px] text-[13px] text-[var(--git-desc-fg)]">{t("git.compareHint")}</div>}
+					{!result && <div className="flex min-h-[22px] shrink-0 items-center gap-1 px-[9px] text-control text-[var(--git-desc-fg)]">{t("git.compareHint")}</div>}
 				</div>
 			)}
 		</section>

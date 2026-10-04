@@ -133,7 +133,7 @@ export function EnvironmentGuidePanel(props: { guide: PiEnvironmentGuide }) {
 			{/* 全部完成：给一个明确的重启出口（提示「要重启，记得提醒用户」的落地）。
 			    platform 仅用于未来按平台差异化提示；当前三平台行为一致。 */}
 			{piStepDone && platform && (
-				<Button variant="default" size="sm" className="h-auto rounded-md px-4 py-2.5 text-[13px] shadow-none" onClick={() => window.piDesktop.app.restart()}>
+				<Button variant="default" size="sm" className="h-auto rounded-md px-4 py-2.5 text-control shadow-none" onClick={() => window.piDesktop.app.restart()}>
 					{t("environment.guideRestartNow")}
 				</Button>
 			)}

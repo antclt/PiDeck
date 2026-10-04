@@ -328,9 +328,9 @@ export function AutomationTaskEditor({ task, defaultProjectId, lockProject = fal
 					{isDsh && dshBlockReason ? (
 						// DSH runtime 缺失/损坏/过旧：触发时 host 无法 fork，发送会被拦截。
 						// 只提示不动手（安装入口在设置），与 App 发送链路的拦截口径一致。
-						<p className="text-[11px] leading-snug text-destructive">{t("automation.backendDshUnavailable")}</p>
+						<p className="text-micro leading-snug text-destructive">{t("automation.backendDshUnavailable")}</p>
 					) : (
-						<p className="text-[11px] leading-snug text-muted-foreground">{t("automation.backendHint")}</p>
+						<p className="text-micro leading-snug text-muted-foreground">{t("automation.backendHint")}</p>
 					)}
 				</div>
 
@@ -359,7 +359,7 @@ export function AutomationTaskEditor({ task, defaultProjectId, lockProject = fal
 							))}
 						</SelectContent>
 					</Select>
-					<p className="text-[11px] leading-snug text-muted-foreground">{isDsh ? t("automation.dshModeHint") : t("automation.modeHint")}</p>
+					<p className="text-micro leading-snug text-muted-foreground">{isDsh ? t("automation.dshModeHint") : t("automation.modeHint")}</p>
 				</div>
 			</div>
 
@@ -421,19 +421,19 @@ export function AutomationTaskEditor({ task, defaultProjectId, lockProject = fal
 				</Label>
 				<div className="grid grid-cols-2 gap-3 md:grid-cols-4">
 					<div className="flex flex-col gap-1">
-						<span className="text-[11px] text-muted-foreground">{t("automation.timeoutMinutes")}</span>
+						<span className="text-micro text-muted-foreground">{t("automation.timeoutMinutes")}</span>
 						<Input type="number" min="1" value={timeoutMinutes} onChange={(e) => setTimeoutMinutes(e.target.value)} placeholder="30" className="h-7 font-mono text-xs" />
 					</div>
 					<div className="flex flex-col gap-1">
-						<span className="text-[11px] text-muted-foreground">{t("automation.maxTokens")}</span>
+						<span className="text-micro text-muted-foreground">{t("automation.maxTokens")}</span>
 						<Input type="number" min="1000" value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} placeholder="e.g. 500000" className="h-7 font-mono text-xs" />
 					</div>
 					<div className="flex flex-col gap-1">
-						<span className="text-[11px] text-muted-foreground">{t("automation.maxCostUsd")}</span>
+						<span className="text-micro text-muted-foreground">{t("automation.maxCostUsd")}</span>
 						<Input type="number" step="0.01" min="0.01" value={maxCostUsd} onChange={(e) => setMaxCostUsd(e.target.value)} placeholder="e.g. 1.00" className="h-7 font-mono text-xs" />
 					</div>
 					<div className="flex flex-col gap-1">
-						<span className="text-[11px] text-muted-foreground">{t("automation.maxSteps")}</span>
+						<span className="text-micro text-muted-foreground">{t("automation.maxSteps")}</span>
 						<Input type="number" min="1" value={maxSteps} onChange={(e) => setMaxSteps(e.target.value)} placeholder="e.g. 50" className="h-7 font-mono text-xs" />
 					</div>
 				</div>

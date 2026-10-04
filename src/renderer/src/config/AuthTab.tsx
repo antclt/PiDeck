@@ -179,11 +179,11 @@ export function AuthTab(props: {
 
 			{/* 排序说明：与模型页共用同一份顺序，写明白用户才知道拖完为什么另一页也跟着变 */}
 			{visibleProviders.length > 1 && (
-				<div className="mb-2.5 flex items-start gap-2 text-[11px] leading-relaxed text-text-tertiary">
+				<div className="mb-2.5 flex items-start gap-2 text-micro leading-relaxed text-text-tertiary">
 					<ArrowUpDown size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
 					<span className="min-w-0 flex-1">{t("config.providerOrderHint")}</span>
 					{(props.providerOrder?.length ?? 0) > 0 && props.onResetProviders && (
-						<Button variant="ghost" size="sm" className="h-5 shrink-0 px-1.5 text-[11px] font-normal text-text-tertiary hover:text-text-primary" onClick={props.onResetProviders} disabled={saving}>
+						<Button variant="ghost" size="sm" className="h-5 shrink-0 px-1.5 text-micro font-normal text-text-tertiary hover:text-text-primary" onClick={props.onResetProviders} disabled={saving}>
 							{t("config.providerOrderReset")}
 						</Button>
 					)}
@@ -251,8 +251,8 @@ export function AuthTab(props: {
 											</span>
 										)}
 									</div>
-									<span className="mt-0.5 font-mono text-[11px] text-text-tertiary">{provider.value}</span>
-									{alreadyConfigured && <span className="mt-1.5 rounded-[4px] bg-[color:color-mix(in_srgb,var(--color-accent)_10%,transparent)] px-1.5 py-px text-[11px] text-[color:var(--color-accent)]">{t("config.configured")}</span>}
+									<span className="mt-0.5 font-mono text-micro text-text-tertiary">{provider.value}</span>
+									{alreadyConfigured && <span className="mt-1.5 rounded-xs bg-[color:color-mix(in_srgb,var(--color-accent)_10%,transparent)] px-1.5 py-px text-micro text-[color:var(--color-accent)]">{t("config.configured")}</span>}
 								</button>
 							);
 						})}
@@ -289,8 +289,8 @@ export function AuthTab(props: {
 													</span>
 												)}
 											</div>
-											<span className="mt-0.5 font-mono text-[11px] text-text-tertiary">{t("config.fromModels")}</span>
-											{alreadyConfigured && <span className="mt-1.5 rounded-[4px] bg-[color:color-mix(in_srgb,var(--color-accent)_10%,transparent)] px-1.5 py-px text-[11px] text-[color:var(--color-accent)]">{t("config.configured")}</span>}
+											<span className="mt-0.5 font-mono text-micro text-text-tertiary">{t("config.fromModels")}</span>
+											{alreadyConfigured && <span className="mt-1.5 rounded-xs bg-[color:color-mix(in_srgb,var(--color-accent)_10%,transparent)] px-1.5 py-px text-micro text-[color:var(--color-accent)]">{t("config.configured")}</span>}
 										</button>
 									);
 								})}
@@ -320,9 +320,9 @@ export function AuthTab(props: {
 					<div className="mt-3 flex items-center gap-2 border-t border-border-subtle pt-2.5">
 						{selectedProvider && presetProvider && (
 							<div className="flex flex-1 items-center gap-1.5 text-xs text-text-tertiary">
-								{t("config.authEnvVar")}: <code className="rounded-[4px] bg-bg-hover px-1.5 py-px font-mono text-[11px]">{presetProvider.env}</code>
+								{t("config.authEnvVar")}: <code className="rounded-xs bg-bg-hover px-1.5 py-px font-mono text-micro">{presetProvider.env}</code>
 								{presetProvider.url && (
-									<a href={presetProvider.url} onClick={openDocsInSystemBrowser(presetProvider.url)} className="inline-flex items-center gap-0.5 text-[11px] text-[color:var(--color-accent)] no-underline">
+									<a href={presetProvider.url} onClick={openDocsInSystemBrowser(presetProvider.url)} className="inline-flex items-center gap-0.5 text-micro text-[color:var(--color-accent)] no-underline">
 										{t("config.authGetKey")} <ExternalLink size={10} />
 									</a>
 								)}
@@ -477,7 +477,7 @@ export function AuthTab(props: {
 						</button>
 						{hiddenSectionOpen && (
 							<div className="border-t border-border-subtle px-3.5 py-2">
-								<p className="mb-2 text-[11px] leading-relaxed text-text-tertiary">{t("config.hiddenAuthsHint")}</p>
+								<p className="mb-2 text-micro leading-relaxed text-text-tertiary">{t("config.hiddenAuthsHint")}</p>
 								<div className="flex flex-col gap-1">
 									{hiddenProviderNames.map((hiddenName) => (
 										<div key={hiddenName} className="flex items-center justify-between gap-2 rounded-sm bg-bg-muted px-2.5 py-1.5">

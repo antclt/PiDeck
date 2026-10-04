@@ -807,7 +807,7 @@ function EditorWorkbenchTab(props: {
 						{/* 第二行是文件路径：TooltipContent 是反色面（bg-foreground + text-background），
 						    次行必须用 text-background 派生色。用 text-muted-foreground(#4b5563) 画在近黑底
 						    上只有 ≈2.0:1，用户报过「路径黑色的看不清」。 */}
-						<span className="truncate font-mono text-[11px] text-background/75">{tab.title}</span>
+						<span className="truncate font-mono text-micro text-background/75">{tab.title}</span>
 					</div>
 				</TooltipContent>
 			) : null}
@@ -953,7 +953,7 @@ function SessionTab(props: {
 					<div className="flex min-w-0 flex-col gap-0.5">
 						<span className="truncate font-medium">{title}</span>
 						{workspaceName ? (
-							<span className="truncate text-[11px] text-background/75" title={tabProject?.path}>
+							<span className="truncate text-micro text-background/75" title={tabProject?.path}>
 								{workspaceName}
 								{tabProject?.path && tabProject.path !== workspaceName ? ` · ${tabProject.path}` : ""}
 							</span>
@@ -1084,7 +1084,7 @@ function SessionTab(props: {
 					    text-muted-foreground，否则浅色 #4b5563 on #202124 ≈ 2.0:1、暗色 #b8b8b2 on #ecece7
 					    ≈ 1.6:1 都看不清（用户反馈「目录、路径黑色的看不清」）；改用同族降透明度保留层级。 */}
 						{workspaceName ? (
-							<span className="truncate text-[11px] text-background/75" title={tabProject?.path}>
+							<span className="truncate text-micro text-background/75" title={tabProject?.path}>
 								{workspaceName}
 								{tabProject?.path && tabProject.path !== workspaceName ? ` · ${tabProject.path}` : ""}
 							</span>

@@ -2513,12 +2513,12 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						variant={embedded ? "line" : "default"}
 						className={cn("shrink-0", embedded ? "justify-start gap-1 px-3" : "config-backend-switch h-9 justify-start gap-1 border-b border-border/60 px-3")}
 					>
-						<TabsTrigger variant={embedded ? "line" : "default"} value="pi" className={cn("h-8 gap-1.5 px-3 text-[13px] font-medium", !embedded && "config-backend-tab")}>
+						<TabsTrigger variant={embedded ? "line" : "default"} value="pi" className={cn("h-8 gap-1.5 px-3 text-control font-medium", !embedded && "config-backend-tab")}>
 							<PiLogo className="size-3.5 shrink-0" />
 							{t("config.backend.pi")}
 							{hasPiDirty ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
 						</TabsTrigger>
-						<TabsTrigger variant={embedded ? "line" : "default"} value="dsh" className={cn("h-8 gap-1.5 px-3 text-[13px] font-medium", !embedded && "config-backend-tab")}>
+						<TabsTrigger variant={embedded ? "line" : "default"} value="dsh" className={cn("h-8 gap-1.5 px-3 text-control font-medium", !embedded && "config-backend-tab")}>
 							<DshLogo className="size-3.5 shrink-0" />
 							{t("config.backend.dsh")}
 							{/* 后端分页黄点：该后端任意分区有草稿时提醒 */}

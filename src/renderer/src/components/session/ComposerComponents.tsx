@@ -699,7 +699,7 @@ function ModelListStatusGuide(props: { report: ModelListReport | null; refreshin
 				{hardFailure ? t("app.modelListLoadFailed") : t("app.modelListEmptyTitle")}
 			</div>
 			<p className="text-caption leading-relaxed text-muted-foreground">{t(textKey)}</p>
-			{report.detail && <pre className="max-h-28 w-full overflow-auto whitespace-pre-wrap break-all rounded-md border border-border/60 bg-muted/40 p-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground">{report.detail}</pre>}
+			{report.detail && <pre className="max-h-28 w-full overflow-auto whitespace-pre-wrap break-all rounded-md border border-border/60 bg-muted/40 p-2.5 font-mono text-micro leading-relaxed text-muted-foreground">{report.detail}</pre>}
 			{props.onRefresh && (
 				<Button variant="outline" size="sm" className="mt-1" onClick={props.onRefresh} disabled={props.refreshing}>
 					<RefreshCw size={13} className={props.refreshing ? "animate-pideck-spin" : ""} aria-hidden="true" />
@@ -1050,7 +1050,7 @@ export function PromptTemplatePicker(props: {
 									<span className="font-mono text-control font-semibold text-foreground" title={`/${template.name}`}>
 										/{template.name}
 									</span>
-									{template.argumentHint && <code className="rounded bg-accent/10 px-1.5 py-0.5 font-mono text-[11px] text-accent-foreground">{template.argumentHint}</code>}
+									{template.argumentHint && <code className="rounded bg-accent/10 px-1.5 py-0.5 font-mono text-micro text-accent-foreground">{template.argumentHint}</code>}
 								</span>
 								{template.description && (
 									<span className="mt-0.5 block truncate text-caption text-muted-foreground" title={template.description}>

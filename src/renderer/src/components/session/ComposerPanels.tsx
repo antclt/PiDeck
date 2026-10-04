@@ -145,7 +145,7 @@ function QueuedPromptRow(props: {
 	return (
 		<li className={`queued-row flex h-9 min-h-9 shrink-0 items-center gap-2.5 border-transparent px-3 transition-[border-color,background-color] duration-100 ${status} queued-behavior-${props.prompt.behavior}`} title={rowTitle}>
 			{props.showQueueGlyph ? <ListOrdered size={14} aria-hidden="true" className="shrink-0 text-text-tertiary" /> : <QueueStatusGlyph status={status} />}
-			<span className="min-w-0 flex-1 truncate text-[13px] leading-5 text-text-secondary">{previewText}</span>
+			<span className="min-w-0 flex-1 truncate text-control leading-5 text-text-secondary">{previewText}</span>
 			{props.prompt.images?.length ? <span className="shrink-0 font-mono text-micro leading-none text-text-tertiary">{t("app.queuedImageCount", { count: String(props.prompt.images.length) })}</span> : null}
 			{status === "sending" ? (
 				<span className="shrink-0 font-mono text-micro leading-none text-text-tertiary">{t("app.queuedSending")}</span>
@@ -252,7 +252,7 @@ export function QueuedPromptPanel(props: {
 			{multiple ? (
 				<button type="button" className="flex h-9 w-full items-center gap-2.5 px-3 text-left" aria-controls={listId} aria-expanded={listVisible} onClick={toggleCollapsed}>
 					<ListOrdered size={14} aria-hidden="true" className="shrink-0 text-text-tertiary" />
-					<span className="min-w-0 flex-1 truncate text-[13px] font-medium leading-6 text-foreground">{t("sessionQueue.count", { n: props.prompts.length })}</span>
+					<span className="min-w-0 flex-1 truncate text-control font-medium leading-6 text-foreground">{t("sessionQueue.count", { n: props.prompts.length })}</span>
 					<span className="shrink-0 text-text-tertiary" aria-hidden="true">
 						{listVisible ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
 					</span>

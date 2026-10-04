@@ -52,16 +52,16 @@ export function SessionQueuedMessagesStrip(props: { sessionId: string }) {
 		<ComposerWidgetFrame data-testid="session-queued-messages-strip" aria-label={t("sessionQueue.aria")}>
 			<div className="flex h-9 w-full shrink-0 items-center gap-2.5 px-3">
 				<Clock size={14} aria-hidden="true" className="shrink-0 text-text-tertiary" />
-				<span className="shrink-0 text-[13px] font-medium leading-6 text-foreground">{t("sessionQueue.title")}</span>
-				<span className="shrink-0 rounded-full bg-bg-active px-2 text-[11px] leading-5 text-text-tertiary">{items.length}</span>
+				<span className="shrink-0 text-control font-medium leading-6 text-foreground">{t("sessionQueue.title")}</span>
+				<span className="shrink-0 rounded-full bg-bg-active px-2 text-micro leading-5 text-text-tertiary">{items.length}</span>
 			</div>
 			{/* 限高滚动列表：行必须 shrink-0——overflow-hidden 行在 flex 列里 min-height
 			    被清零会触发整体压扁（见 AGENTS.md 待办条排版事故），先例 SessionTodoStrip。 */}
 			<ul className="max-h-44 overflow-y-auto">
 				{items.map((item) => (
 					<li key={item.id} className="flex shrink-0 items-center gap-2.5 px-3 py-1.5">
-						<span className="shrink-0 rounded bg-bg-active px-1.5 text-[11px] leading-5 text-text-tertiary">{item.target === "next-turn" ? t("sessionQueue.targetNextTurn") : t("sessionQueue.targetNextStep")}</span>
-						<span className="min-w-0 flex-1 truncate text-[13px] leading-5 text-text-secondary" title={item.text}>
+						<span className="shrink-0 rounded bg-bg-active px-1.5 text-micro leading-5 text-text-tertiary">{item.target === "next-turn" ? t("sessionQueue.targetNextTurn") : t("sessionQueue.targetNextStep")}</span>
+						<span className="min-w-0 flex-1 truncate text-control leading-5 text-text-secondary" title={item.text}>
 							{item.text || t("sessionQueue.emptyText")}
 						</span>
 						<Button

@@ -85,3 +85,11 @@
 - 收口：`src/main/devRendererCache.ts` + `src/main/index.ts` 的 `createWindow`，仅在 dev（`shouldUseDevRendererUrl()`）加载 renderer 前 `await` 清一次默认 session 的 HTTP 缓存与 JS 编译缓存；清理失败只记日志，不挡窗口创建。打包态零影响。
 - 逃生开关：`PIDECK_DEV_KEEP_HTTP_CACHE=1` 跳过清理（需要保留 dev 态登录态时）。手工排查用 `grep -rl <chunk后缀> node_modules/.vite/deps/_metadata.json` 与 `%APPDATA%/pi-desktop-dev[-<branch>]/Cache/Cache_Data`：URL 里的 `?v=` 若与当前 metadata 的 browserHash 相同却找不到对应文件，即为陈旧缓存。
 - 时序是契约：清理必须 `await` 在 `loadURL` 之前，写在之后等于没清。守卫见 `tests/devRendererCache.test.mjs`。
+
+## Tab 激活态语言（两种声明约定，2027-10 统一）
+
+改任何 tab/导航激活态前先对号，不要发明第三种：
+
+- **横向 tab 条（内容区切换）**＝下划线：`border-b-2 border-primary` + `text-primary`，shadcn `TabsTrigger variant="line"`（tabs.tsx）是唯一实现；集成浏览器 tab 条手写实现但对齐同一 token。分段条（`variant="default"`，bg-muted 容器+白底高亮）保留给页面/分组级切换，不与 line 混用。
+- **纵向选择列表（侧栏/导航）**＝软填充：`bg-bg-active text-foreground`（SessionTree selectedRowClass 是参照实现），不用下划线、不用 raised card。
+- **豁免**：终端 dock tab 走 `--terminal-*` 主题变量族（foundation.css 有声明注释），不套应用 chrome 语言。

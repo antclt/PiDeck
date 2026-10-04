@@ -320,11 +320,11 @@ export function EnvironmentDialog(props: {
 				</div>
 
 				<div className="environment-footer">
-					<Button variant="default" size="sm" className="h-auto rounded-[6px] px-4 py-2.5 text-[13px]" onClick={props.onRecheck} disabled={props.checking || props.customPathValidating}>
+					<Button variant="default" size="sm" className="h-auto rounded-sm px-4 py-2.5 text-control" onClick={props.onRecheck} disabled={props.checking || props.customPathValidating}>
 						{t("environment.recheck")}
 					</Button>
 					{props.onClearCheckFlag && (
-						<Button variant="ghost" size="sm" className="env-clear-flag-btn h-auto rounded-[6px] px-4 py-2.5 text-[13px]" onClick={props.onClearCheckFlag} title={t("environment.clearCheckFlagHint")}>
+						<Button variant="ghost" size="sm" className="env-clear-flag-btn h-auto rounded-sm px-4 py-2.5 text-control" onClick={props.onClearCheckFlag} title={t("environment.clearCheckFlagHint")}>
 							{t("environment.clearCheckFlag")}
 						</Button>
 					)}
