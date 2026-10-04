@@ -125,3 +125,16 @@ test("Web session strips stay collapsed by default and use real tokens only", ()
 	// 折叠条只占一行：标题行可点（aria-expanded），明细展开后才渲染。
 	assert.match(webSessionStrips, /aria-expanded=\{open\}/);
 });
+
+// 回归：后端切换仅对「本页新建零消息草稿」开放。历史会话（含复制/克隆/fork 出的）自带
+// 消息记录，后端不可切——否则 pi/DSH/生图的历史消息会被错挂到另一个后端上。
+test("Web backend switcher stays draft-only; historical sessions are locked", () => {
+	assert.match(webChatApp, /webDraftSessionsRef = useRef<Set<string>>\(new Set\(\)\)/);
+	assert.match(webChatApp, /markSessionLoaded = \(id: string, freshDraft = false\)/);
+	// 仅两处 createSession 新建流程标记 freshDraft；复制/克隆/fork 的 markSessionLoaded(id) 不标记。
+	assert.equal((webChatApp.match(/markSessionLoaded\(id, true\)/g) ?? []).length, 2);
+	// 锁定判定贯通渲染与点击守卫（防弹层已开后的状态竞态）。
+	assert.match(webChatApp, /const backendSwitchLocked = \(sessionId: string\) =>/);
+	assert.match(webChatApp, /backendLocked=\{activeSession \? Boolean\(activeRuntime\) \|\| backendSwitchLocked\(activeSession\.id\) : false\}/);
+	assert.match(webChatApp, /if \(activeSession && \(activeRuntime \|\| backendSwitchLocked\(activeSession\.id\)\)\) return;/);
+});

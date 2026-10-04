@@ -98,6 +98,9 @@ export function WebChatApp() {
 	const messagesBySessionRef = useRef<Record<string, UIMessage[]>>({});
 	const loadedSessionsRef = useRef<Set<string>>(new Set());
 	const historyMetaRef = useRef<Record<string, HistoryMeta>>({});
+	// 本页「新建」的零消息草稿：后端切换仅对这类会话开放（复制/克隆/fork 与历史会话自带
+	// 消息记录，后端不可切——消息归属创建时的后端，切了会让历史错位）。
+	const webDraftSessionsRef = useRef<Set<string>>(new Set());
 	const activeSessionIdRef = useRef<string>("");
 	// 首页直发暂存：新建会话后等 useChat 实例切换完成，再投递首条消息（含图片）
 	const pendingSendRef = useRef<{ sessionId: string; text: string; images?: string[] } | null>(null);
@@ -339,10 +342,11 @@ export function WebChatApp() {
 		void sendMessage({ text }, { body: { images } });
 	};
 
-	// 草稿期后端切换：无会话 → 暂存随下次新建生效；未激活会话 → 写 catalog。
+	// 草稿期后端切换：无会话 → 暂存随下次新建生效；有会话 → 仅「本页新建零消息草稿」可写
+	// catalog（历史/复制/克隆/fork 会话自带消息记录，切后端会让历史错位，一律拒绝）。
 	// 切后端同时清空模型/思考偏好（pi 与 dsh/生图的模型目录不同，跨后端偏好无效）。
 	const handleBackendChange = async (backend: AgentBackend) => {
-		if (activeSession && activeRuntime) return;
+		if (activeSession && (activeRuntime || backendSwitchLocked(activeSession.id))) return;
 		if (!activeSession) {
 			setPendingBackend(backend);
 			setPendingModel(null);
@@ -374,7 +378,7 @@ export function WebChatApp() {
 				...(pendingModel ? { model: pendingModel } : {}),
 				...(pendingThinkingLevel ? { thinkingLevel: pendingThinkingLevel } : {}),
 			});
-			markSessionLoaded(id);
+			markSessionLoaded(id, true);
 			setActiveSessionId(id);
 			setMobileSidebarOpen(false);
 			// 会话 id 变化后 useChat 重建实例；等新实例就绪再投递（见上方 effect）
@@ -388,12 +392,19 @@ export function WebChatApp() {
 		}
 	};
 
-	// 新会话无历史：预标记为已加载（空缓存），避免切过去时多余拉取
-	const markSessionLoaded = (id: string) => {
+	// 新会话无历史：预标记为已加载（空缓存），避免切过去时多余拉取。
+	// freshDraft = 本页 createSession 新建的零消息草稿（复制/克隆/fork 不算，它们自带历史；
+	// 标记只用于后端切换的开放判定，见 backendSwitchLocked）。
+	const markSessionLoaded = (id: string, freshDraft = false) => {
+		if (freshDraft) webDraftSessionsRef.current.add(id);
 		loadedSessionsRef.current.add(id);
 		messagesBySessionRef.current[id] = [];
 		historyMetaRef.current[id] = { total: 0, nextBefore: null };
 	};
+
+	// 后端切换锁定：仅「本页新建且尚无任何消息」的草稿可切。已激活 runtime 的会话由调用方
+	// 叠加锁定；历史会话（pi/DSH/生图）与复制/克隆/fork 出的会话一律锁死。
+	const backendSwitchLocked = (sessionId: string) => !webDraftSessionsRef.current.has(sessionId) || (messagesBySessionRef.current[sessionId]?.length ?? 0) > 0 || (historyMetaRef.current[sessionId]?.total ?? 0) > 0;
 
 	const handleCreateSession = async (projectId: string) => {
 		setCreatingProjectId(projectId);
@@ -404,7 +415,7 @@ export function WebChatApp() {
 				...(pendingModel ? { model: pendingModel } : {}),
 				...(pendingThinkingLevel ? { thinkingLevel: pendingThinkingLevel } : {}),
 			});
-			markSessionLoaded(id);
+			markSessionLoaded(id, true);
 			setActiveSessionId(id);
 			setMobileSidebarOpen(false);
 			await refreshNow();
@@ -843,7 +854,7 @@ export function WebChatApp() {
 					onSend={handleSend}
 					onStop={handleStop}
 					backend={activeSession?.backend ?? pendingBackend ?? "pi"}
-					backendLocked={Boolean(activeSession && activeRuntime)}
+					backendLocked={activeSession ? Boolean(activeRuntime) || backendSwitchLocked(activeSession.id) : false}
 					onBackendChange={(backend) => void handleBackendChange(backend)}
 					model={activeSession?.model ?? pendingModel ?? undefined}
 					models={models}
