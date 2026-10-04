@@ -1872,6 +1872,7 @@ export const zhCN = {
 	"config.mcp.nameDuplicate": "已存在同名 MCP 服务",
 	"config.mcp.nameInvalid": "名称只能用字母、数字、下划线和短横线",
 	"config.mcp.writableBroken": "~/.pi/agent/mcp.json 不是合法 JSON，请先到源文件页修好再保存，避免覆盖原文件。",
+	"config.projectUntrusted.notice": "该项目尚未信任，项目级资源开关与读写暂不可用。先在该项目启动一次会话（PiDeck 会自动信任未被你拒绝过的项目），或在「配置管理 → 信任」中添加项目目录，然后回到这里刷新。",
 	"config.mcp.conflict": "mcp.json 在保存前被外部修改过（pi / 手改 / 其它窗口）。已为你重新加载磁盘上的最新内容，请确认后再保存，避免覆盖别人的修改。",
 	"config.mcp.field.name": "名称",
 	"config.mcp.field.transport": "传输",

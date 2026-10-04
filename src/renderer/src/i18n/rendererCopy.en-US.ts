@@ -1877,6 +1877,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.mcp.nameDuplicate": "An MCP server with this name already exists",
 	"config.mcp.nameInvalid": "Use letters, numbers, underscores, and hyphens only",
 	"config.mcp.writableBroken": "~/.pi/agent/mcp.json is not valid JSON. Fix it in Raw Files before saving so the original file is not overwritten.",
+	"config.projectUntrusted.notice": "This project is not trusted yet, so project-level resource toggles and reads are unavailable. Start a session in this project once (PiDeck auto-trusts projects you have not denied), or add the project folder under Config → Trust, then refresh here.",
 	"config.mcp.conflict": "mcp.json changed on disk before this save (pi / manual edit / another window). The latest file has been reloaded; review it and save again so external changes are not overwritten.",
 	"config.mcp.field.name": "Name",
 	"config.mcp.field.transport": "Transport",

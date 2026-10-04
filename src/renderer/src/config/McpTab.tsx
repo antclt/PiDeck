@@ -20,6 +20,7 @@ import { ConfirmDialog } from "../components/ui-shadcn/ConfirmDialog";
 import { detectThirdPartyMcpExtensions, hasLegacyDisabledField, inferMcpTransport, isMcpServerDisabled, McpServerListPane, usesMcpOAuth, usesProviderAuth, type ThirdPartyMcpExtension } from "./McpResourceViews";
 import { argsToText, buildMcpDisplayServers, isMcpServerName, recordToText, textToArgs, textToRecord } from "./mcpForm";
 import { resolveExposureAliases } from "../../../shared/mcpExposure";
+import { isProjectUntrustedError } from "./projectResourceErrors";
 import type { McpCliListResult, McpConfigFile, McpConfigScope, McpConfigSnapshot, McpExposure, McpOAuth, McpProbeResult, McpServerDefinition, McpServerListItem, McpServerTransport } from "../../../shared/types/mcp";
 import { ResourceImportDialog } from "./ResourceImportDialog";
 
@@ -195,7 +196,8 @@ export const McpTab = forwardRef<
 			setSelected((current) => (current && names.includes(current) ? current : (names[0] ?? null)));
 		} catch (caught) {
 			if (generation === loadGenerationRef.current) {
-				setError(caught instanceof Error ? caught.message : String(caught));
+				// 未信任项目：configGetMcp 项目分支会拒读（正确门禁），裸异常换成引导文案
+				setError(isProjectUntrustedError(caught) ? t("config.projectUntrusted.notice") : caught instanceof Error ? caught.message : String(caught));
 			}
 		} finally {
 			if (generation === loadGenerationRef.current) setLoading(false);
@@ -416,7 +418,7 @@ export const McpTab = forwardRef<
 			setStatus(await api.config.mcpListStatus(scope));
 		} catch (caught) {
 			setStatus(null);
-			setStatusError(caught instanceof Error ? caught.message : String(caught));
+			setStatusError(isProjectUntrustedError(caught) ? t("config.projectUntrusted.notice") : caught instanceof Error ? caught.message : String(caught));
 		} finally {
 			setStatusLoading(false);
 		}
@@ -507,7 +509,7 @@ export const McpTab = forwardRef<
 			if (creating?.name.trim()) setSelected(creating.name.trim());
 			return true;
 		} catch (caught) {
-			setError(caught instanceof Error ? caught.message : String(caught));
+			setError(isProjectUntrustedError(caught) ? t("config.projectUntrusted.notice") : caught instanceof Error ? caught.message : String(caught));
 			return false;
 		} finally {
 			setSaving(false);

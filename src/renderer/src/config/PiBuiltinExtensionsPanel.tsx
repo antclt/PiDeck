@@ -16,6 +16,7 @@ import { Button } from "../components/ui-shadcn/button";
 import { Switch } from "../components/ui-shadcn/switch";
 import type { PiBuiltinExtension, PiResourceConfigSummary, PiResourceScope } from "../../../shared/types/piResources";
 import type { ResourceScope } from "./resourceScopeModel";
+import { isProjectUntrustedError } from "./projectResourceErrors";
 
 type PiResourcesApi = {
 	piResourcesSummary: (scope?: PiResourceScope) => Promise<PiResourceConfigSummary>;
@@ -55,7 +56,8 @@ export function PiBuiltinExtensionsPanel(props: {
 			setSummary(await api().piResourcesSummary(scope));
 		} catch (caught) {
 			setSummary(null);
-			setError(caught instanceof Error ? caught.message : String(caught));
+			// 未信任项目：主进程拒读是正确门禁，但要把裸 IPC 异常换成引导文案（先信任再刷新）
+			setError(isProjectUntrustedError(caught) ? t("config.projectUntrusted.notice") : caught instanceof Error ? caught.message : String(caught));
 		} finally {
 			setLoading(false);
 		}
@@ -71,7 +73,7 @@ export function PiBuiltinExtensionsPanel(props: {
 		try {
 			const result = await api().piResourcesSetBuiltin({ scope, name, enabled, expectedRevision: summary?.revision });
 			if (!result.ok) {
-				setError(result.error ?? t("config.piResources.saveFailed"));
+				setError(isProjectUntrustedError(result.error) ? t("config.projectUntrusted.notice") : (result.error ?? t("config.piResources.saveFailed")));
 				// revision 冲突：重新读取，避免用户在旧草稿上继续切
 				if (result.error?.includes("changed on disk")) await load();
 				return;
@@ -80,7 +82,7 @@ export function PiBuiltinExtensionsPanel(props: {
 			props.onChanged?.();
 			showNotice(t("config.piResources.saved"), 2500);
 		} catch (caught) {
-			setError(caught instanceof Error ? caught.message : String(caught));
+			setError(isProjectUntrustedError(caught) ? t("config.projectUntrusted.notice") : caught instanceof Error ? caught.message : String(caught));
 		} finally {
 			setToggling(null);
 		}
