@@ -3342,6 +3342,7 @@ export const zhCN = {
 	"drawer.rpcLog": "RPC 日志",
 	"drawer.expandPanel": "展开右侧面板",
 	"drawer.addPanel": "添加常驻面板",
+	"drawer.removePanel": "移除 {label}",
 	"drawer.fileItems": "{count} 个文件和目录",
 	"drawer.fileSort": "文件排序",
 	"drawer.fileSort.name": "按名称",

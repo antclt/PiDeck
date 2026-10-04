@@ -3340,6 +3340,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"feedback.share.exportZipDesc": "Contains sanitized logs + report + environment JSON for deeper triage.",
 	"feedback.share.exportZipAction": "Export bundle",
 	"drawer.addPanel": "Add panel",
+	"drawer.removePanel": "Remove {label}",
 	"drawer.changed": "Changed",
 	"drawer.changedLines": "{count} lines",
 	"drawer.changedLinesEstimate": "Line count is an estimate: edit uses the larger oldText/newText line count and multiple edits accumulate; write/create uses written content lines. It is not based on an exact git diff, so trailing newlines or repeated edits may make the number high.",
