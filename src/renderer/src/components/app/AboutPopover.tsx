@@ -50,7 +50,7 @@ export function AboutPopover(props: AboutPopoverProps) {
 							<div className="font-[PiDeckDepartureMono] text-lg font-normal uppercase leading-tight tracking-wide text-foreground">PiDeck</div>
 							{/* 版本号用等宽小字：此前是带 ⓘ 图标的胶囊徽标，图标语义与「查看版本信息」
                   重复，胶囊边框在 40px logo 旁显得笨重；改为纯文本与弹框内版本行同源观感 */}
-							<div className="font-mono text-[11px] leading-tight tabular-nums text-muted-foreground">v{info.version}</div>
+							<div className="font-mono text-micro leading-tight tabular-nums text-muted-foreground">v{info.version}</div>
 						</div>
 						{info.devBranch && (
 							<AnimatedBadge status="warning" size="sm" bare>

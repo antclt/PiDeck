@@ -473,6 +473,55 @@ test("readSubagentRecords synthesizes stopped from residual start anchors and pr
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+// #300：record 由插件在完成时写，运行中的子代理只剩 start 锚点。
+// 无对账信息时锚点只能保守合成 stopped——但子代理实际运行中，面板会误显
+// 「已停止」。传入本代 runtime 启动时间后按 startedAt 对账：本代派发的锚点
+// 合成 running（与 downgradeRunningStartedBefore 同一时间阈值、同方向）。
+test("readSubagentRecords anchors spawned by the live runtime generation synthesize running (#300)", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pid-subagent-live-"));
+	const sessionPath = join(dir, "session.jsonl");
+	try {
+		writeSession(sessionPath, startAnchorSession);
+		const reader = createReader();
+
+		// 本代 runtime 启动于锚点之前：锚点是本代派发、record 未落 → 运行中
+		const live = await reader.readSubagentRecords(sessionPath, { liveRuntimeStartedAt: 1700000250000 });
+		const running = live.find((e) => e.id === "agent-killed77");
+		assert.equal(running.status, "running");
+		assert.equal(running.completedAt, undefined);
+		// 有 record 的子代理不受对账影响：record 终态优先
+		assert.equal(live.find((e) => e.id === "agent-finished8").status, "completed");
+
+		// 本代 runtime 启动于锚点之后：锚点属上一代，随进程消亡 → stopped
+		const prevGen = await reader.readSubagentRecords(sessionPath, { liveRuntimeStartedAt: 1700000350000 });
+		assert.equal(prevGen.find((e) => e.id === "agent-killed77").status, "stopped");
+
+		// 锚点缺 startedAt 时无法对账：保守 stopped（不复活为 running）
+		const noStartSession =
+			JSON.stringify({
+				type: "session",
+				id: "ss2",
+				cwd: "/tmp",
+				timestamp: new Date().toISOString(),
+			}) +
+			"\n" +
+			JSON.stringify({
+				type: "custom",
+				customType: "pi-deck-subagent-start",
+				id: "srec-x",
+				parentId: "ss2",
+				data: { id: "agent-nostart99", type: "Explore", description: "no startedAt" },
+			}) +
+			"\n";
+		writeSession(sessionPath, noStartSession);
+		const noStart = await reader.readSubagentRecords(sessionPath, { liveRuntimeStartedAt: 1700000250000 });
+		const nostart = noStart.find((e) => e.id === "agent-nostart99");
+		assert.equal(nostart.status, "stopped");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
 /* ------------------------------------------------------------------ */
 /* readDerivedSubagentEntries：acp_delegate / subagent 工具推导          */
 /* ------------------------------------------------------------------ */

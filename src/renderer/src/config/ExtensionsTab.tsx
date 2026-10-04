@@ -1,12 +1,13 @@
 import { Button } from "../components/ui-shadcn/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui-shadcn/table";
 import { useEffect, useState, type ReactNode } from "react";
-import { ShoppingBag, ToggleLeft, ToggleRight } from "lucide-react";
+import { ShoppingBag, ToggleLeft, ToggleRight, Hammer } from "lucide-react";
 import type { PiCliUpdateResult, PiExtensionListResult, PiExtensionSummary, ProjectResourceOverrides } from "../../../shared/types";
 import { t } from "../i18n";
 import { showNotice } from "../utils/notice";
 import { writeClipboard } from "../utils/clipboard";
 import { ExtensionStoreTab } from "./ExtensionStoreTab";
+import { PluginDevSection } from "./PluginDevSection";
 import { ContentTabs } from "./ContentTabs";
 import { isProjectDiscoverySource, type ResourceScope } from "./resourceScopeModel";
 import { DiscoveredExtensionRow, ExtensionTableRow } from "./extensionsTableRows";
@@ -68,7 +69,7 @@ export function ExtensionsTab(props: {
 	onShowInFolder: (extension: PiExtensionSummary) => void;
 }) {
 	// 一级 tab：已安装 / 扩展商店（与 SkillsTab 的「本地/商店」结构对齐）
-	const [extTab, setExtTab] = useState<"local" | "store">("local");
+	const [extTab, setExtTab] = useState<"local" | "store" | "dev">("local");
 	const [removingBuiltIn, setRemovingBuiltIn] = useState<string | null>(null);
 	const [togglingSource, setTogglingSource] = useState<string | null>(null);
 	// 首次加载或列表刷新时展示扩展冲突通知
@@ -199,20 +200,19 @@ export function ExtensionsTab(props: {
 				<ContentTabs
 					value={extTab}
 					onValueChange={(v) => {
-						if (v !== "local" && v !== "store") return;
+						if (v !== "local" && v !== "store" && v !== "dev") return;
 						setExtTab(v);
 						// 切回本地时刷新列表（原 TabsTrigger onClick 行为迁到 onValueChange 统一处理）
 						if (v === "local") props.onRefresh();
 					}}
-					items={[
-						{ value: "local", label: t("config.nav.extensions") },
-						{ value: "store", label: t("config.extensionStoreTab"), icon: <ShoppingBag size={14} strokeWidth={1.8} /> },
-					]}
+					items={[{ value: "local", label: t("config.nav.extensions") }, { value: "store", label: t("config.extensionStoreTab"), icon: <ShoppingBag size={14} strokeWidth={1.8} /> }, ...(props.scope === "global" ? [{ value: "dev", label: t("config.pluginDevTab"), icon: <Hammer size={14} strokeWidth={1.8} /> }] : [])]}
 				/>
 				{/* 全局下拉：商店 tab 右侧、Tabs 行内（不进 Table） */}
 				<div className="shrink-0">{props.scopeSelector}</div>
 			</div>
-			{extTab === "store" ? (
+			{extTab === "dev" ? (
+				<PluginDevSection />
+			) : extTab === "store" ? (
 				<ExtensionStoreTab installedExtensions={props.scope === "project" ? props.data.extensions.filter((extension) => extension.scope === "project") : props.data.extensions} projectId={props.scope === "project" ? props.projectId : undefined} onInstalled={() => props.onRefresh()} />
 			) : (
 				<>

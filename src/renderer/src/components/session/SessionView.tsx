@@ -270,6 +270,9 @@ export function SessionView({
 					isStarting={isAgentStarting}
 				/>
 			)}
+			{/* GUI 扩展桥：会话头部状态区落点（ctx.gui.setStatusbarItem）。
+			    紧贴会话头之下的小条目行；无贡献时返回 null，不占位。 */}
+			<BridgeGuiSlot sessionId={sessionId} slot="statusbar.item" className="flex shrink-0 flex-wrap items-center gap-2 px-2 text-xs text-muted-foreground" />
 			{/* GUI 扩展桥：顶部区落点（ctx.ui.setHeader）。无贡献时返回 null，不占位。 */}
 			<BridgeSlot sessionId={sessionId} targetId={BRIDGE_TARGET.header} className="flex flex-col gap-1 px-1" />
 			{/* GUI 扩展桥：顶部横幅通知区落点（ctx.gui.setBanner）。
@@ -368,6 +371,9 @@ export function SessionView({
 							/>
 						</div>
 					)}
+					{/* GUI 扩展桥：时间线底部事件条落点（ctx.gui.setTimelineEvent）。 shrink-0：
+					    限高 flex 列的子项必须 shrink-0，否则压缩时会被挤成横条（AGENTS CSS 红线 6）。 */}
+					<BridgeGuiSlot sessionId={sessionId} slot="timeline.event" className="flex shrink-0 flex-col gap-1 px-2 pb-1" />
 				</ResizablePanel>
 
 				{terminalPanelVisible && (

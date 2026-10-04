@@ -1,20 +1,59 @@
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { applyAppearanceAttributes } from "../../themeAppearance";
 import { msUntilNextThemeBoundary, resolveAppColorScheme } from "../../../../shared/themeSchedule";
 import { resolveLocale, setI18nLocale } from "../../i18n";
 import type { AppSettings } from "../../../../shared/types";
+import { applyAppearanceWithTransition } from "./appearanceTransition";
 
 // 壁纸模式已注入的 token 键（effect 重跑/清除设置时需要跨运行保留，避免漏清）
 let injectedWallpaperTokens = new Set<string>();
-// 自定义外观主题（customThemeOverrides）已注入的 token 键：切换主题时先清后注，防残留
+// 自定义外观主题（customThemeOverrides / customTheme 快照）已注入的 token 键：切换主题时先清后注，防残留
 let injectedCustomTokens = new Set<string>();
+
+/**
+ * 自定义 token 注入（主题包快照 + 手写 overrides）：App 持久化应用与设置弹窗实时预览共用。
+ * 先清后注、幂等；快照仅 themeSkin=custom 时生效（切回内置皮肤不残留），
+ * overrides 沿袭历史行为始终叠加（inline 样式压过 [data-appearance] 样式表）。
+ */
+export function applyCustomThemeTokens(root: HTMLElement, settings: Pick<AppSettings, "themeSkin" | "customTheme" | "customThemeOverrides">, isDark: boolean): void {
+	for (const k of injectedCustomTokens) root.style.removeProperty(`--color-${k}`);
+	injectedCustomTokens.clear();
+	if (settings.themeSkin === "custom" && settings.customTheme) {
+		const schemeTokens = isDark ? settings.customTheme.dark : settings.customTheme.light;
+		for (const [k, v] of Object.entries(schemeTokens)) {
+			root.style.setProperty(`--color-${k}`, v);
+			injectedCustomTokens.add(k);
+		}
+	}
+	for (const [k, v] of Object.entries(settings.customThemeOverrides ?? {})) {
+		root.style.setProperty(`--color-${k}`, v);
+		injectedCustomTokens.add(k);
+	}
+}
+
+/**
+ * 字号档位 dataset 写入：ui/tab/chat/input 四区域 + 旧 fontSize 属性。
+ * 回落链：ui ← uiFontSize ?? fontSize；tab ← tabBarFontSize ?? ui（Tab 跟界面不跟全局）；
+ * chat/input ← 各自字段 ?? fontSize。设置弹窗实时预览与持久化应用共用本函数，防两处漂移。
+ */
+export function applyFontSizeAttributes(root: HTMLElement, settings: AppSettings): void {
+	const uiFontSize = settings.uiFontSize ?? settings.fontSize;
+	root.dataset.uiFontSize = uiFontSize;
+	root.dataset.tabFontSize = settings.tabBarFontSize ?? uiFontSize;
+	root.dataset.chatFontSize = settings.chatFontSize ?? settings.fontSize;
+	root.dataset.inputFontSize = settings.inputFontSize ?? settings.fontSize;
+	// 旧属性保留，兼容外部依赖或测试仍读取 dataset.fontSize 的场景
+	root.dataset.fontSize = settings.fontSize;
+}
 
 /**
  * 应用外观域：明暗/时间表主题解析、data 属性应用、壁纸与自定义皮肤 token 注入、
  * 字号/字体 data 属性与自定义字体注入、i18n locale 与 document.lang 同步。
  * 全部副作用自包含，无返回值；settings 变化即重算（纯函数 of props）。
  */
-export function useAppAppearance({ settings, systemLanguage }: { settings: AppSettings; systemLanguage: string | null }): void {
+export function useAppAppearance({ settings, systemLanguage, settingsLoaded }: { settings: AppSettings; systemLanguage: string | null; settingsLoaded: boolean }): void {
+	// 启动默认值和首次权威 settings 都直接应用；只有此后用户/系统触发的切换才播放动画。
+	const hasAppliedAuthoritativeAppearanceRef = useRef(false);
 	// 系统明暗（prefers-color-scheme）与跟随时间当前时刻提为 state：驱动 resolvedTheme 重算。
 	const [systemPrefersDark, setSystemPrefersDark] = useState(() => Boolean(window.matchMedia?.("(prefers-color-scheme: dark)").matches));
 	const [scheduleNow, setScheduleNow] = useState<Date | null>(null);
@@ -66,17 +105,34 @@ export function useAppAppearance({ settings, systemLanguage }: { settings: AppSe
 	useEffect(() => {
 		// 明暗 / 外观主题 / 主色统一经 themeAppearance 应用（与设置弹窗实时预览共用实现）：
 		// data-theme(浅暗) + data-appearance(表面色板) + data-accent(主题自带主色)。
-		applyAppearanceAttributes(document.documentElement, settings, systemPrefersDark);
+		// 保持直调字面 applyAppearanceAttributes(document.documentElement, …)：wallpaperThemeSync
+		// 契约扫描锚定该语句定位本 effect，改形状会误报「effect not found」。
+		const apply = () => applyAppearanceAttributes(document.documentElement, settings, systemPrefersDark);
+		// 启动默认值 → 权威 settings 的两次应用都不做页面快照；否则窗口尚未激活时
+		// Chromium 会跳过动画，并把 ready rejection 泄漏成全局「未处理异常」。
+		applyAppearanceWithTransition({
+			host: document,
+			apply,
+			settingsLoaded,
+			hasAppliedAuthoritativeAppearance: hasAppliedAuthoritativeAppearanceRef.current,
+			prefersReducedMotion: Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches),
+		});
+		if (settingsLoaded) hasAppliedAuthoritativeAppearanceRef.current = true;
 		// 依赖 theme 与 accent：只改主题色时也必须重新应用 data-accent（否则界面不变）
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- settings 是整对象入参，列全字段反而脆弱；与既有行为一致（见 App.tsx 迁出前同注释）
-	}, [resolvedTheme, settings.theme, settings.themeScheduleLightStart, settings.themeScheduleDarkStart, settings.accent, settings.themeSkin, systemPrefersDark]);
+	}, [resolvedTheme, settings.theme, settings.themeScheduleLightStart, settings.themeScheduleDarkStart, settings.accent, settings.themeSkin, settingsLoaded, systemPrefersDark]);
 
 	// 外观主题自定义覆盖 + 换肤背景图统一管理（原两个 effect 互相清除：
 	// 皮肤 effect 清 token 时误清壁纸注入、背景 effect 的 else 分支又误清皮肤 bg 键——
 	// 合并后顺序固定：先自定义覆盖，后壁纸覆盖。内置外观主题色板由 CSS data-appearance 承担。）
 	useEffect(() => {
 		const root = document.documentElement;
-		const isDark = root.dataset.theme === "dark";
+		// isDark 不能读 root.dataset.theme：外观应用 effect 经 applyAppearanceWithTransition
+		// 走 View Transition（startViewTransition 回调异步执行），同一轮 commit 里
+		// dataset.theme 仍是旧明暗——按它选档会把自定义主题（含内置示例莓果夜色）的
+		// 错档 token 注入 inline 样式并压过样式表，亮暗切换后界面停留在上一档。
+		// resolvedTheme 与 applyAppearanceAttributes 写入 data-theme 用同一输入派生，等价且即时。
+		const isDark = resolvedTheme === "dark";
 		const BG_TOKENS = [
 			"--color-bg-app",
 			"--color-bg-sidebar",
@@ -98,13 +154,8 @@ export function useAppAppearance({ settings, systemLanguage }: { settings: AppSe
 		//    （inline 样式优先于 stylesheet 的 [data-appearance] 块，语义=「自定义压过内置」）。
 		//    内置主题（classic-green/graphite/sea-blue/warm-beige）的表面色板由 CSS
 		//    [data-appearance] 块承担，这里不再注入内置皮肤变量，避免 inline 与样式表互相覆盖。
-		//    先清掉上次注入的 custom token，保证切换主题后无残留。
-		for (const k of injectedCustomTokens) root.style.removeProperty(`--color-${k}`);
-		injectedCustomTokens.clear();
-		for (const [k, v] of Object.entries(settings.customThemeOverrides ?? {})) {
-			root.style.setProperty(`--color-${k}`, v);
-			injectedCustomTokens.add(k);
-		}
+		//    注入逻辑与设置弹窗预览共用 applyCustomThemeTokens（见上）。
+		applyCustomThemeTokens(root, settings, isDark);
 
 		// 2. 换肤背景图：遮罩同色渐变（浅白/暗黑）+ 壁纸模式 token 半透明注入。
 		//    存储语义=图片可见度（0=全遮，1=图全显）；滑块 80% → 遮罩 0.2 → 图 80% 透出。
@@ -156,21 +207,12 @@ export function useAppAppearance({ settings, systemLanguage }: { settings: AppSe
 		}
 		// resolvedTheme 必须进依赖：系统明暗翻转/时间边界到达时壁纸 inline token 要按新明暗重算，
 		// 否则上一主题烤进的 color-mix 基色焊死在 root.style 上压过样式表（issue #297）
-	}, [resolvedTheme, settings.themeSkin, settings.theme, settings.customThemeOverrides, settings.backgroundImage, settings.backgroundImageOpacity]);
+	}, [resolvedTheme, settings.themeSkin, settings.theme, settings.customTheme, settings.customThemeOverrides, settings.backgroundImage, settings.backgroundImageOpacity]);
 
 	// 字号与命名字体预设由 data 属性选择 CSS token；只有 custom 字体需要注入用户输入。
 	useEffect(() => {
 		const root = document.documentElement;
-		const uiFontSize = settings.uiFontSize ?? settings.fontSize;
-		const chatFontSize = settings.chatFontSize ?? settings.fontSize;
-		const inputFontSize = settings.inputFontSize ?? settings.fontSize;
-		root.dataset.uiFontSize = uiFontSize;
-		// Tab 栏未单独设置时跟随界面字号（历史上 Tab 标题吃的是界面轨的 --font-size-micro）
-		root.dataset.tabFontSize = settings.tabBarFontSize ?? uiFontSize;
-		root.dataset.chatFontSize = chatFontSize;
-		root.dataset.inputFontSize = inputFontSize;
-		// 旧属性保留，兼容外部依赖或测试仍读取 dataset.fontSize 的场景
-		root.dataset.fontSize = settings.fontSize;
+		applyFontSizeAttributes(root, settings);
 		root.dataset.fontBase = settings.fontFamilyBase;
 		root.dataset.fontMono = settings.fontFamilyMono;
 

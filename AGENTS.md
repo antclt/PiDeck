@@ -184,6 +184,7 @@ src/
 | 生图存储 | **base64 不进 JSONL**（只存 ref）；读取永远有字节上界；`<img src>` 只走 `imageContentSrc()` | 生图会话存储 |
 | 会话消息编辑/删除/重发 | 墓碑是自造格式但与 pi 跨版本契约已验证（别误迁）；pi 活着禁改会话文件，三道闸不许放宽；unmerged 降级不弃快照 | 会话消息编辑/删除/重发 |
 | Markdown 渲染 | 唯一引擎 MarkdownStream，禁止再引 marked/react-markdown；流式与 settle 是两条路径，**复现要看最终态** | 会话 Markdown 渲染管线 |
+| 插件开发支持 | 能力目录 `pluginDevCatalog.ts` 镜像桥实现（19 落点/42 kind），新增落点/kind 必须同步目录+契约测试；`resources/plugin-dev` 要在 extraResources；demo 已存在不覆盖 | 插件开发支持 |
 | 发版 | CHANGELOG 中英一致 → sync-release-notes → sync-workflow-choices → 打包人工 smoke | docs/release-process.md |
 
 ## 协作流程

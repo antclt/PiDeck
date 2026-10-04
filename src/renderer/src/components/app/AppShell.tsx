@@ -292,7 +292,19 @@ export function AppShell(props: AppShellProps) {
 	function handleLayoutChanged(_layout: Layout, meta: LayoutChangedMeta) {
 		// 无论交互还是程序化变更，布局落定后都通知悬浮层重算一次。
 		notifyLayoutResized();
-		if (!meta.isUserInteraction) return;
+
+		// 自愈：boot 恢复钉住抽屉时，drawer 面板约束从「可折叠 minSize=240」变为
+		//「不可折叠 minSize=260」，库会重解布局把抽屉从 0 撑到 260，供体优先选
+		// 唯一可折叠的 list 面板 → 侧栏被挤到 0。listWidth/listCollapsed 均未变化，
+		// 既有 heal effect 不会重跑；非交互布局落定后若 list 实宽归零而状态未折叠，
+		// 立即恢复保存宽度（resize 走 list|chat 枢轴，从 chat 拿空间，不影响抽屉）。
+		if (!meta.isUserInteraction) {
+			const listPanel = listPanelRef.current;
+			if (listPanel && !listCollapsed && listPanel.isCollapsed()) {
+				listPanel.resize(listWidthRef.current);
+			}
+			return;
+		}
 
 		const drawerPanel = drawerPanelRef.current;
 		if (drawerPanel && drawer && !drawerCollapsed) {

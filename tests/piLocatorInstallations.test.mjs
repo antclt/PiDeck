@@ -42,13 +42,22 @@ function createHarness(options) {
 	const spawns = [];
 	const execFile = (command, args, _opts, callback) => {
 		spawns.push({ command, args });
-		const script = args[args.length - 1] ?? "";
-		if (script.includes("command -v pi")) {
+		const last = String(args[args.length - 1] ?? "");
+		if (last.includes("command -v pi")) {
 			callback(null, options.shellPi ?? "", "");
 			return;
 		}
-		const version = options.versions?.[command] ?? "1.0.0";
-		if (options.failing?.includes(command)) {
+		// createInvocation 会把探测改写成启动形态：Windows 上是 cmd.exe /d /s /c "<入口> --version"
+		// （或垫片还原后的 node.exe <入口> --version）；posix 直跑时 command 就是入口。
+		// 从 invocation 形态还原出探测入口，versions/failing 才能继续以入口路径为键。
+		let probeEntry = command;
+		if (/cmd\.exe$/i.test(String(command)) && args.includes("/c")) {
+			probeEntry = last.replace(/\s*--version\s*$/, "").replace(/^"|"$/g, "");
+		} else if (/node(\.exe)?$/i.test(String(command)) && args[args.length - 1] === "--version") {
+			probeEntry = args[0];
+		}
+		const version = options.versions?.[probeEntry] ?? "1.0.0";
+		if (options.failing?.includes(probeEntry)) {
 			callback(Object.assign(new Error("boom"), { code: "ENOENT" }), "", "no such file");
 			return;
 		}
@@ -74,6 +83,22 @@ function writeEntry(path) {
 	mkdirSync(join(path, ".."), { recursive: true });
 	writeFileSync(path, "#!/bin/sh\n", "utf8");
 	return path;
+}
+
+/**
+ * 登录 shell 反查用例在 Windows 宿主上也要能跑：probeLoginShellPi 只接受以 / 开头
+ * 且 existsSync 的路径（posix 假设）。把宿主路径转成无盘符正斜杠形式
+ * （C:\a\b → /a/b，Node 在 Windows 上解析回当前盘同路径），两者都满足。
+ */
+function toPosixProbePath(path) {
+	return path.replace(/\\/g, "/").replace(/^[A-Za-z]:/, "");
+}
+
+// 探测文件所在目录必须与 process.cwd() 同盘：/x/y 形式在 Windows 上解析回「当前盘」的同路径，
+// CI runner 的 cwd（D:\a\...）与 %TEMP%（C:\...）不同盘时，落在 C: 的临时文件永远「不存在」。
+// node_modules 在 .gitignore 内且必然存在，适合放这种同盘探针。
+function posixProbeTempDir(tag) {
+	return join(process.cwd(), "node_modules", `.tmp-pi-probe-${tag}-${process.pid}-${Date.now()}`);
 }
 
 function writeManagedInstall(home, version = "1.2.3") {
@@ -117,14 +142,24 @@ test("官方安装被标为 managed，包管理器全局那份被标为 package-
 	}
 });
 
-test("入口是 ~/.local/bin 里指向官方启动器的软链时，只列一条且归为 managed", async () => {
+test("入口是 ~/.local/bin 里指向官方启动器的软链时，只列一条且归为 managed", async (t) => {
 	const harness = createHarness({});
 	try {
 		const managed = writeManagedInstall(harness.home);
 		const linkDir = join(harness.home, ".local", "bin");
 		mkdirSync(linkDir, { recursive: true });
 		const link = join(linkDir, "pi");
-		symlinkSync(managed, link);
+		try {
+			symlinkSync(managed, link);
+		} catch (error) {
+			// Windows 未开开发者模式/非管理员时创建符号链接被系统拒绝（EPERM）——
+			// 环境限制而非行为回归，跳过；有权限的环境上仍然锁住软链去重语义。
+			if (process.platform === "win32" && error.code === "EPERM") {
+				t.skip("Windows 符号链接权限不足（EPERM）");
+				return;
+			}
+			throw error;
+		}
 
 		const { PiLocator } = harness.locatorModule;
 		const installations = await new PiLocator().listInstallations("", false, "", "");
@@ -205,7 +240,9 @@ test("版本更高的那份被标 isNewest；同版本时都不标", async () =>
 });
 
 test("目录扫描已命中时不启动交互式 shell；一份都没扫到才跑一次兜底反查", async () => {
-	const withScan = createHarness({ shellPi: "/tmp/should-not-be-asked\n" });
+	// 登录 shell 探测是 posix 语义（读 rc 文件；Windows 合并环境不走 rc，生产代码直接短路），
+	// 且候选 shell 要真实存在（existsSync 过滤）——用宿主 node 可执行文件充当 $SHELL。
+	const withScan = createHarness({ platform: "linux", env: { SHELL: process.execPath }, shellPi: "/tmp/should-not-be-asked\n" });
 	try {
 		writeEntry(join(withScan.home, ".npm-global", "bin", "pi"));
 		const { PiLocator } = withScan.locatorModule;
@@ -216,7 +253,7 @@ test("目录扫描已命中时不启动交互式 shell；一份都没扫到才�
 		withScan.cleanup();
 	}
 
-	const empty = createHarness({ shellPi: "" });
+	const empty = createHarness({ platform: "linux", env: { SHELL: process.execPath }, shellPi: "" });
 	try {
 		const { PiLocator } = empty.locatorModule;
 		const installations = await new PiLocator().listInstallations("", false, "", "");
@@ -230,9 +267,9 @@ test("目录扫描已命中时不启动交互式 shell；一份都没扫到才�
 	}
 
 	// 第一个 shell 就能报出路径时必须立即停下（不把每个 shell 都跑一遍）
-	const shellDir = join(tmpdir(), `pideck-pi-shell-${process.pid}-${Date.now()}`);
-	const shellPi = writeEntry(join(shellDir, "pi"));
-	const fallback = createHarness({ shellPi: `${shellPi}\n` });
+	const shellDir = posixProbeTempDir("shell");
+	const shellPi = toPosixProbePath(writeEntry(join(shellDir, "pi")));
+	const fallback = createHarness({ platform: "linux", env: { SHELL: process.execPath }, shellPi: `${shellPi}\n` });
 	try {
 		const { PiLocator } = fallback.locatorModule;
 		const installations = await new PiLocator().listInstallations("", false, "", "");
@@ -246,9 +283,12 @@ test("目录扫描已命中时不启动交互式 shell；一份都没扫到才�
 });
 
 test("交互式登录 shell 解析出的 pi 会补进列表并标 shellDefault（即使在扫描目录之外）", async () => {
-	const customDir = join(tmpdir(), `pideck-pi-custom-${process.pid}-${Date.now()}`);
-	const customPi = writeEntry(join(customDir, "pi"));
-	const harness = createHarness({ shellPi: `${customPi}\n` });
+	const customDir = posixProbeTempDir("custom");
+	// 同上：登录 shell 反查只在 posix 语义下发生，测试需显式指定平台与可用的 $SHELL；
+	// 路径用 posix 探测形式（probeLoginShellPi 只认 / 开头且存在的路径），
+	// 列表断言按同一形式比较。
+	const customPi = toPosixProbePath(writeEntry(join(customDir, "pi")));
+	const harness = createHarness({ platform: "linux", env: { SHELL: process.execPath }, shellPi: `${customPi}\n` });
 	try {
 		const { PiLocator } = harness.locatorModule;
 		const installations = await new PiLocator().listInstallations("", false, "", "", { forceShellProbe: true });

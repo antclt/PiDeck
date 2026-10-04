@@ -165,7 +165,7 @@ export function BrandLockup() {
 				<TextShimmer as="span" enabled={shimmerOn} className="brand-wordmark truncate text-[18px] font-[PiDeckDepartureMono] font-bold uppercase leading-none">
 					PiDeck
 				</TextShimmer>
-				{branch && <span className="truncate text-[13px] font-medium leading-none text-muted-foreground">{branch}</span>}
+				{branch && <span className="truncate text-control font-medium leading-none text-muted-foreground">{branch}</span>}
 			</span>
 		</div>
 	);

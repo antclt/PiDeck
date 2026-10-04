@@ -188,7 +188,7 @@ export function FeedbackDialog({ open, project, appInfo, onClose, onToast, onOpe
 									<div className="space-y-2">
 										{feedback.report!.checks.map((check) => (
 											<div key={check.id} className="flex items-start gap-2 rounded-lg border px-3 py-2">
-												<span className={cn("mt-0.5 rounded px-1.5 py-0.5 text-[11px] font-medium", STATUS_TONE[check.status])}>{check.status.toUpperCase()}</span>
+												<span className={cn("mt-0.5 rounded px-1.5 py-0.5 text-micro font-medium", STATUS_TONE[check.status])}>{check.status.toUpperCase()}</span>
 												<div className="min-w-0 flex-1">
 													<div className="text-sm font-medium">{t(`health.check.${check.id}` as never)}</div>
 													{check.detail ? (

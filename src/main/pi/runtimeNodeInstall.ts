@@ -76,13 +76,22 @@ export function repairPortableNodeLinks(userDataPath: string, platform: NodeJS.P
 		const tail = marker ? target.slice(marker.index + marker[0].length) : "";
 		const localTarget = tail ? join(nodeRoot, tail) : "";
 		if (!localTarget || !existsSync(localTarget)) continue;
-		try {
-			rmSync(linkPath, { force: true });
-			symlinkSync(relative(binDir, localTarget), linkPath);
-			repaired.push(name);
-		} catch {
-			// 修复失败（权限等）不影响检测结果，保持原样。
+		// Windows 杀毒/索引器会短暂锁住新建的软链，紧接着的 rmSync/symlinkSync 报 EPERM/EBUSY
+		//（2026-10 GitHub runner 复现：输入全部合法但修复静默失败，25-50ms 退避仍不够扫描窗口）。
+		// 阶梯退避最多 ~1.5s，仅修复失败路径触发；Atomics.wait 是主进程同步睡眠的标准做法。
+		const retryBackoffMs = [0, 50, 150, 400, 900];
+		let linked = false;
+		for (let attempt = 0; attempt < retryBackoffMs.length && !linked; attempt += 1) {
+			if (retryBackoffMs[attempt] > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, retryBackoffMs[attempt]);
+			try {
+				rmSync(linkPath, { force: true });
+				symlinkSync(relative(binDir, localTarget), linkPath);
+				linked = true;
+			} catch {
+				// 重试后仍失败（权限等）不影响检测结果，保持原样。
+			}
 		}
+		if (linked) repaired.push(name);
 	}
 	return repaired;
 }

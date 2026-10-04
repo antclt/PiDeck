@@ -38,6 +38,10 @@ export function useReplyActionEditor() {
 		(index: number, text: string) => {
 			const current = itemsRef.current;
 			if (index < 0 || index >= current.length) return;
+			// 空/纯空白文案不落盘：主进程清洗会把空 text 规则整条丢掉，落盘即「行消失」
+			// （用户全选删除准备重输时行凭空没）。行保留文件旧文案，UI 侧 RuleRow 用
+			// 本地 textDraft 显示空输入；非空输入照旧立即落盘。
+			if (text.trim().length === 0) return;
 			// 文案只影响这一条；triggers 原样保留（主进程清洗仍会校验 triggers 非空）
 			void commit(current.map((rule, i) => (i === index ? { ...rule, text } : rule)));
 		},
@@ -54,12 +58,18 @@ export function useReplyActionEditor() {
 		[commit],
 	);
 
-	const addRule = useCallback(() => {
-		const current = itemsRef.current;
-		if (current.length >= MAX_REPLY_ACTION_RULES) return;
-		// 新规则默认 onStop：最常见的「回复结束后出现」，用户改文案即可用
-		void commit([...current, { text: "", triggers: [{ kind: "onStop" }] }]);
-	}, [commit]);
+	const addRule = useCallback(
+		(rule: ReplyActionRule) => {
+			const current = itemsRef.current;
+			if (current.length >= MAX_REPLY_ACTION_RULES) return;
+			// 空文案规则不落盘：主进程清洗会丢弃空 text 条目，落盘即「点了添加没反应」
+			// （回包里新行被吞掉）。新增行由弹框作为本地 pending 行展示，文案首次
+			// 非空时才调这里真正落盘（与 QuickMessages 新增空行不落盘的语义一致）。
+			if (rule.text.trim().length === 0) return;
+			void commit([...current, rule]);
+		},
+		[commit],
+	);
 
 	const removeRule = useCallback(
 		(index: number) => {

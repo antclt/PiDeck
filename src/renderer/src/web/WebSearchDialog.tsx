@@ -66,7 +66,7 @@ export function WebSearchDialog({ open, onOpenChange, messages, onJump }: { open
 						</ul>
 					)}
 				</div>
-				{deferredQuery ? <p className="text-[11px] text-text-muted">{t("web.searchScopeHint")}</p> : null}
+				{deferredQuery ? <p className="text-micro text-text-muted">{t("web.searchScopeHint")}</p> : null}
 			</DialogContent>
 		</Dialog>
 	);

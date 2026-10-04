@@ -106,6 +106,30 @@ test("pi last-reply metrics fill the strip when sessionStats is absent", () => {
 	assert.equal(groups[1], "输入 800 tok · 输出 90 tok");
 });
 
+test("segments carry per-metric hints without changing the visible text", () => {
+	// 每个指标带悬停说明：字符串拼接结果与旧版一致，hint 指向对应计算口径文案。
+	const { buildComposerStatsSegments } = loadStats();
+	const dsh = buildComposerStatsSegments({
+		dshSessionStats: { turns: 3, steps: 7, llmMs: 2500, toolMs: 800, ttftAvgMs: 120, tokensPerSecond: 42.4 },
+		inputTokens: 1200,
+		outputTokens: 340,
+		cacheHitPercent: 88.2,
+	});
+	assert.deepEqual(JSON.parse(JSON.stringify(dsh.map((parts) => parts.map((part) => part.text)))), [["3 轮 · 7 步"], ["LLM 2500ms", "工具调用 800ms"], ["首 token 平均 120ms", "42 tok/s"], ["缓存命中 88%"], ["输入 1200 tok · 输出 340 tok"]]);
+	assert.equal(dsh[0][0].hint, "ctx.detail.turnsStepsHint");
+	assert.equal(dsh[1][0].hint, "ctx.detail.llmDurationHint");
+	assert.equal(dsh[1][1].hint, "ctx.detail.toolDurationHint");
+	assert.equal(dsh[2][1].hint, "ctx.detail.tpsAverageHint");
+	const pi = buildComposerStatsSegments({ ttftMs: 210, totalMs: 4300, tps: 31, inputTokens: 800, outputTokens: 90, cacheHitPercent: 91 }, 4);
+	assert.equal(pi[0][0].hint, "composerStats.turnsHint");
+	assert.equal(pi[1][0].hint, "ctx.detail.ttftHint");
+	assert.equal(pi[1][2].hint, "ctx.detail.tpsHint");
+	assert.equal(pi[2][0].hint, "ctx.detail.hitLatestHint");
+	// 组件渲染：每个数字 span 都挂 title={part.hint}，不影响布局
+	const stats = readFileSync("src/renderer/src/components/session/ComposerStatsLine.tsx", "utf-8");
+	assert.match(stats, /<span title=\{part\.hint\}>\{part\.text\}<\/span>/);
+});
+
 test("empty runtime produces no stats groups", () => {
 	const { buildComposerStatsGroups } = loadStats();
 	assert.equal(buildComposerStatsGroups(undefined).length, 0);
@@ -117,19 +141,20 @@ test("composer area mounts the stats strip under the input card", () => {
 	const area = readFileSync("src/renderer/src/components/session/ComposerArea.tsx", "utf8");
 	const stats = readFileSync("src/renderer/src/components/session/ComposerStatsLine.tsx", "utf8");
 	assert.match(area, /import \{ ComposerStatsLine \} from "\.\/ComposerStatsLine"/);
-	assert.match(area, /statsLine=\{\s*<ComposerStatsLine state=\{composer\.runtime\?\.state\}(?: turnCount=\{props\.turnCount\})? \/>/);
+	assert.match(area, /statsLine=\{\s*<ComposerStatsLine\s+state=\{composer\.runtime\?\.state\}\s+turnCount=\{props\.turnCount\}\s+contextMeter=/);
 	assert.match(area, /\{props\.statsLine\}/);
 	// footer 固定保留 8px 底部留白；ComposerMeasuredExtras 会把它计入总高度，
 	// StatsLine 自身仍只在有数字时渲染。
 	assert.match(area, /className="composer[^\"]*px-0 pb-2"/);
-	assert.match(stats, /if \(groups\.length === 0\) return null/);
-	assert.match(stats, /truncate px-1 pb-0 pt-1/);
+	assert.match(stats, /if \(segments\.length === 0\) return null/);
+	assert.match(stats, /px-1 pb-0 pt-1/);
+	assert.match(stats, /min-w-0 truncate text-center/);
 });
 
 test("stats copy exists in both locales", () => {
 	const zh = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
 	const en = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
-	for (const key of ["composerStats.counts", "composerStats.llm", "composerStats.toolCall", "composerStats.ttftAverage", "composerStats.tps", "composerStats.cacheHit", "composerStats.tokens", "composerStats.ttft", "composerStats.reply"]) {
+	for (const key of ["composerStats.counts", "composerStats.llm", "composerStats.toolCall", "composerStats.ttftAverage", "composerStats.tps", "composerStats.cacheHit", "composerStats.tokens", "composerStats.ttft", "composerStats.reply", "composerStats.turnsHint"]) {
 		assert.match(zh, new RegExp(`"${key.replace(".", "\\.")}"`));
 		assert.match(en, new RegExp(`"${key.replace(".", "\\.")}"`));
 	}

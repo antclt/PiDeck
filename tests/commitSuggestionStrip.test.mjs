@@ -77,3 +77,12 @@ test("空 run / 无 run 时不渲染建议", () => {
 	deepEqual(commitSuggestionsForRun(undefined), []);
 	deepEqual(commitSuggestionsForRun(run()), []);
 });
+
+test("commit 与 push 同现（含复数）算提交意图，无需 origin/远程语境词", () => {
+	// 曾经的缺口："commits" 复数不命中单数模式，push 后也没跟 origin/remote/main，
+	// 整句漏判 → 快捷建议不出现
+	assert.equal(hasCommitIntent("All changes staged, ready to push the commits."), true);
+	assert.equal(hasCommitIntent("You can commit and push when CI passes."), true);
+	// 组合但跨句不算（"push notifications" 与后半句无关，中间句号隔断）
+	assert.equal(hasCommitIntent("We push notifications to users. The delivery pipeline is stable."), false);
+});

@@ -448,6 +448,17 @@ export class DshAgentManager implements SessionAgentGateway {
 		});
 		if (!sent.result.ok) {
 			this.logRpc(input.agentId, "recv", "sessions.prompt rejected", sent.result.error);
+			// session/writer-held：DSH 每会话跨进程独占写锁（无超时，持有进程退出才释放）。
+			// ~/.dsh 与 DeepSeek 桌面版/dsh CLI 共享，那边开着同一会话时 prompt 会被拒——
+			// 原始 JSON 对用户不可操作，必须映射为「去那边关闭后重试」的文案。
+			if (sent.result.error.code === "session/writer-held") {
+				return {
+					accepted: false,
+					error: JSON.stringify(sent.result.error),
+					delivery: "rejected",
+					i18nKey: "session.sendDshWriterHeld",
+				};
+			}
 			return { accepted: false, error: JSON.stringify(sent.result.error), delivery: "rejected" };
 		}
 		this.logRpc(input.agentId, "recv", "sessions.prompt accepted");
@@ -868,7 +879,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		const pressure = runtime.contextPressure;
 		const breakdown = runtime.contextBreakdown;
 		const contextWindow = pressure?.contextWindow ?? runtime.contextWindow;
-		// 对话消息估算（字符数 ÷ 4，与 pi 的 contextMessageTokens 同规则）；空会话不兜底
+		// 对话消息估算（CJK 加权，与 pi 的 contextMessageTokens 同规则）；空会话不兜底
 		const estimatedTokens = estimateContextTokens(runtime.messages);
 		const fallbackTokens = estimatedTokens > 0 ? estimatedTokens : undefined;
 		const contextTokens = pressure?.projectedTokens ?? pressure?.pressureTokens ?? fallbackTokens;
@@ -1797,7 +1808,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		const pressureValues = [runtime.contextPressure?.pressureTokens, runtime.contextPressure?.projectedTokens];
 		if (pressureValues.some((value) => typeof value === "number" && value > 0)) return true;
 		const breakdown = runtime.contextBreakdown;
-		if (breakdown && breakdown.systemTokens + breakdown.toolsTokens + breakdown.messageTokens > 0) return true;
+		if (breakdown && (breakdown.systemTokens ?? 0) + (breakdown.toolsTokens ?? 0) + (breakdown.messageTokens ?? 0) > 0) return true;
 		const usage = runtime.usageTotals;
 		if (usage && usage.inputTokens + usage.outputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0) > 0) return true;
 		return estimateContextTokens(runtime.messages) > 0;
@@ -2509,8 +2520,8 @@ type DshAgentRuntime = {
 	 * 供上下文圆环（ContextMeter）展示 DSH 会话占用。
 	 */
 	contextPressure?: { pressureTokens?: number; projectedTokens?: number; contextWindow?: number };
-	/** 上下文构成投影（host contextBreakdown 单元）：系统提示/工具 schema/对话的启发式估算。 */
-	contextBreakdown?: { systemTokens: number; toolsTokens: number; messageTokens: number };
+	/** 上下文构成投影（host contextBreakdown 单元）：系统提示/工具 schema/对话的启发式估算；字段缺失 = host 未上报，保持 undefined 而非 0。 */
+	contextBreakdown?: { systemTokens?: number; toolsTokens?: number; messageTokens?: number };
 	/** 路由上下文容量（request/context 事件的 contextWindow；无 pressure 投影时的兜底窗口）。 */
 	contextWindow?: number;
 	/** 轨迹过程事件（modelChange/permission/plan/goal/compaction；pi 会话文件过程事件的 DSH 等价物）。 */

@@ -1,5 +1,7 @@
 import { t as i18nT } from "../i18n";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSetAtom } from "jotai";
+import { activeEditorFileAtom } from "../atoms/app-ui-atoms";
 import type { AgentTab, CommitEntry, GitChangedFile, GitResourceGroupType, Project, ProjectFileAccessScope } from "../../../shared/types";
 import type { WorkspaceContentOpenMode } from "../../../shared/types/settings";
 import type { DrawerPanel, SessionModifiedFile } from "../components/app/AppParts";
@@ -165,6 +167,12 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
 	const previewEditorTabIdRef = useRef<string | null>(null);
 	previewEditorTabIdRef.current = previewEditorTabId;
 	const activeTab = useMemo(() => editorTabs.find((t) => t.id === activeTabId) ?? null, [editorTabs, activeTabId]);
+	// 活跃文件路径同步到 atom：文件抽屉树行高亮「当前预览/编辑中的文件」（含预览 tab），
+	// tab 全关时回写 null 让高亮消失。见 activeEditorFileAtom 注释。
+	const setActiveEditorFile = useSetAtom(activeEditorFileAtom);
+	useEffect(() => {
+		setActiveEditorFile(activeTab?.filePath ?? null);
+	}, [activeTab, setActiveEditorFile]);
 
 	/** 仅关掉 Git Diff，保留文件 tab（打开文件时不应毁掉已有预览/常驻栏） */
 	const dismissGitDiffOnly = useCallback(() => {

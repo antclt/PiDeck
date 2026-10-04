@@ -514,7 +514,7 @@ function BatchQuestion(props: {
 						{question.allowOther !== false ? (
 							<div className="mt-1 flex w-full min-w-0 items-center gap-1.5">
 								<Input
-									className="h-8 min-w-0 flex-1 rounded-sm border border-border-subtle bg-bg-panel px-2 text-caption text-text-primary outline-none transition-[border-color,box-shadow] duration-150 focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
+									className="h-8 min-w-0 flex-1 rounded-sm border border-border-subtle bg-bg-panel px-2 text-caption text-text-primary outline-none transition-[border-color,box-shadow] duration-fast focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
 									value={props.inputValue}
 									placeholder={question.placeholder || t("ask.customPlaceholder")}
 									disabled={props.responding}
@@ -572,7 +572,7 @@ function BatchQuestion(props: {
 					</>
 				) : question.type === "editor" ? (
 					<Textarea
-						className="h-auto min-h-[60px] w-full flex-1 resize-y rounded-sm border border-border-subtle bg-bg-panel p-2 text-caption leading-[1.5] text-text-primary outline-none transition-[border-color,box-shadow] duration-150 focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
+						className="h-auto min-h-[60px] w-full flex-1 resize-y rounded-sm border border-border-subtle bg-bg-panel p-2 text-caption leading-[1.5] text-text-primary outline-none transition-[border-color,box-shadow] duration-fast focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
 						value={props.inputValue}
 						placeholder={question.placeholder || t("ask.editorPlaceholder")}
 						disabled={props.responding}
@@ -593,7 +593,7 @@ function BatchQuestion(props: {
 				) : (
 					<div className="flex w-full items-center gap-2">
 						<Input
-							className="h-9 flex-1 rounded-sm border border-border-subtle bg-bg-panel px-2.5 text-control text-text-primary outline-none transition-[border-color,box-shadow] duration-150 focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
+							className="h-9 flex-1 rounded-sm border border-border-subtle bg-bg-panel px-2.5 text-control text-text-primary outline-none transition-[border-color,box-shadow] duration-fast focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
 							value={props.inputValue}
 							placeholder={question.placeholder || t("ask.inputPlaceholder")}
 							disabled={props.responding}
@@ -775,7 +775,7 @@ export function SessionRuntimeUiOverlay({ sessionId, runtime, ui, responder, onE
 						{request.allowOther ? (
 							<div className="mt-1 flex w-full min-w-0 items-center gap-1.5">
 								<Input
-									className="h-8 min-w-0 flex-1 rounded-sm border border-border-subtle bg-bg-panel px-2 text-caption text-text-primary outline-none transition-[border-color,box-shadow] duration-150 focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
+									className="h-8 min-w-0 flex-1 rounded-sm border border-border-subtle bg-bg-panel px-2 text-caption text-text-primary outline-none transition-[border-color,box-shadow] duration-fast focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
 									value={value}
 									placeholder={t("ask.customPlaceholder")}
 									disabled={responding}
@@ -826,7 +826,7 @@ export function SessionRuntimeUiOverlay({ sessionId, runtime, ui, responder, onE
 				{request.method === "input" ? (
 					<div className="flex w-full items-center gap-2">
 						<Input
-							className="h-9 flex-1 rounded-sm border border-border-subtle bg-bg-panel px-2.5 text-control text-text-primary outline-none transition-[border-color,box-shadow] duration-150 focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
+							className="h-9 flex-1 rounded-sm border border-border-subtle bg-bg-panel px-2.5 text-control text-text-primary outline-none transition-[border-color,box-shadow] duration-fast focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
 							autoFocus
 							value={value}
 							placeholder={request.placeholder || t("ask.inputPlaceholder")}
@@ -847,7 +847,7 @@ export function SessionRuntimeUiOverlay({ sessionId, runtime, ui, responder, onE
 				{request.method === "editor" ? (
 					<div className="flex w-full items-center gap-2">
 						<Textarea
-							className="h-auto min-h-[60px] w-full flex-1 resize-y rounded-sm border border-border-subtle bg-bg-panel p-2 text-caption leading-[1.5] text-text-primary outline-none transition-[border-color,box-shadow] duration-150 focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
+							className="h-auto min-h-[60px] w-full flex-1 resize-y rounded-sm border border-border-subtle bg-bg-panel p-2 text-caption leading-[1.5] text-text-primary outline-none transition-[border-color,box-shadow] duration-fast focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
 							autoFocus
 							value={value}
 							placeholder={request.placeholder || t("ask.editorPlaceholder")}

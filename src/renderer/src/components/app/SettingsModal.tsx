@@ -6,6 +6,7 @@ import { useSettingsFocus } from "./settings/useSettingsFocus.ts";
 import { Settings2, Network, Wrench, PawPrint, Bell, Trash2, Brush, Eye, ChartColumnBig, Activity, MessageSquare, ImageIcon, DatabaseBackup, Globe, FileCode2, GitBranch, SlidersHorizontal, MonitorCog, Keyboard, X } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
 import { applyAppearanceAttributes, type AppearanceSettings } from "../../themeAppearance";
+import { applyCustomThemeTokens, applyFontSizeAttributes } from "../../hooks/appearance/useAppAppearance";
 import { Button } from "../ui-shadcn/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui-shadcn/tabs";
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
@@ -348,8 +349,20 @@ function SettingsModalContent(props: SettingsModalProps) {
 	// 保存后由 App 的 settings effect 接管；取消时在 cancelAll 里回滚回 baseSnapshot。
 	useEffect(() => {
 		const media = window.matchMedia?.("(prefers-color-scheme: dark)");
-		applyAppearanceAttributes(document.documentElement, draftSettings as AppearanceSettings, Boolean(media?.matches));
-	}, [draftSettings.theme, draftSettings.themeScheduleLightStart, draftSettings.themeScheduleDarkStart, draftSettings.themeSkin, draftSettings.accent]);
+		const root = document.documentElement;
+		applyAppearanceAttributes(root, draftSettings as AppearanceSettings, Boolean(media?.matches));
+		// 自定义主题包快照同样实时预览：与 App 的 useAppAppearance 共用注入实现
+		// （data-theme 先由 applyAppearanceAttributes 写好，再按当前亮暗选档注入）。
+		applyCustomThemeTokens(root, draftSettings, root.dataset.theme === "dark");
+	}, [draftSettings.theme, draftSettings.themeScheduleLightStart, draftSettings.themeScheduleDarkStart, draftSettings.themeSkin, draftSettings.accent, draftSettings.customTheme, draftSettings.customThemeOverrides]);
+
+	// 字号档位实时预览：与上方主题色预览同理，草稿变化立即写入 <html> dataset（含 Tab 栏字号）。
+	// 此前字号不预览，弹窗内选档位界面毫无反应，用户以为设置无效（v0.7.8 发布前用户反馈）；
+	// 保存后由 App 的 useAppAppearance 接管（两处共用 applyFontSizeAttributes，回落链一致）；
+	// 取消/放弃时在 restoreAppearanceFromSnapshot 里回滚回快照。
+	useEffect(() => {
+		applyFontSizeAttributes(document.documentElement, draftSettings);
+	}, [draftSettings.fontSize, draftSettings.uiFontSize, draftSettings.tabBarFontSize, draftSettings.chatFontSize, draftSettings.inputFontSize]);
 
 	/** 检查指定字段在草稿中是否已被修改（与基准快照真实差异比较）。 */
 	const isDirty = useCallback(
@@ -363,7 +376,12 @@ function SettingsModalContent(props: SettingsModalProps) {
 	 *  只在 settings 实际变化时重跑，取消/放弃不触发，必须在这里显式恢复预览）。 */
 	const restoreAppearanceFromSnapshot = useCallback(() => {
 		const media = window.matchMedia?.("(prefers-color-scheme: dark)");
-		applyAppearanceAttributes(document.documentElement, baseSnapshotRef.current as AppearanceSettings, Boolean(media?.matches));
+		const root = document.documentElement;
+		applyAppearanceAttributes(root, baseSnapshotRef.current as AppearanceSettings, Boolean(media?.matches));
+		// 字号档位同样回滚：字号预览直接写 dataset，不恢复会残留草稿档位
+		applyFontSizeAttributes(root, baseSnapshotRef.current);
+		// 自定义主题 token 同步回滚到快照（否则草稿预览的 inline 变量残留）
+		applyCustomThemeTokens(root, baseSnapshotRef.current, root.dataset.theme === "dark");
 	}, []);
 
 	/** 保存全部内容：全局设置差异提交（无差异也提交空 patch，触发「已保存」反馈）+ 视觉桥/生图草稿（若有改动）；返回是否全部成功 */
@@ -560,7 +578,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 							   黄点/禁用态由配置页内部脏集合与保存状态上报 */
 							<>
 								<Button variant="default" size="sm" onClick={() => void configPaneRef.current?.saveCurrent()} disabled={configPaneState.saving} title={configPaneState.hasDirty ? t("config.dirtyTooltip") : undefined}>
-									{configPaneState.hasDirty && <span className="size-2 rounded-full bg-amber-400" aria-hidden="true" />}
+									{configPaneState.hasDirty && <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" />}
 									{configPaneState.saving ? t("common.saving") : t("common.save")}
 								</Button>
 								<Button variant="outline" size="sm" onClick={() => configPaneRef.current?.exportConfig()}>
@@ -616,17 +634,17 @@ function SettingsModalContent(props: SettingsModalProps) {
 					{/* 顶层分区 tab：直接用 shadcn Tabs 默认观感（bg-muted p-1 圆角条），与全局组件统一；
 				    不再套自定义 tab 条样式，只做外边距/自定宽定位。 */}
 					<TabsList className="mx-3 mt-2.5 w-auto justify-start gap-0.5 self-start" aria-label={t("settings.title")}>
-						<TabsTrigger value="settings" className="h-8 gap-1.5 px-3 text-[13px]">
+						<TabsTrigger value="settings" className="h-8 gap-1.5 px-3 text-control">
 							<MonitorCog className="size-4" aria-hidden="true" />
 							{t("settings.panes.system")}
 							{/* 系统设置分区黄点：全局设置/视觉桥/生图草稿任一有未保存 */}
-							{hasAnyDirtyChanges ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+							{hasAnyDirtyChanges ? <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" /> : null}
 						</TabsTrigger>
-						<TabsTrigger value="config" className="h-8 gap-1.5 px-3 text-[13px]">
+						<TabsTrigger value="config" className="h-8 gap-1.5 px-3 text-control">
 							<SlidersHorizontal className="size-4" aria-hidden="true" />
 							{t("settings.panes.config")}
 							{/* 配置管理分区黄点：由 ConfigPane 内部脏集合上报 */}
-							{configPaneState.hasDirty ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+							{configPaneState.hasDirty ? <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" /> : null}
 						</TabsTrigger>
 					</TabsList>
 					<TabsContent value="config" forceMount hidden={pane !== "config"} className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -673,7 +691,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 										两者可并存；均为装饰（aria-hidden），语义由 tab 内卡片文案承担。 */}
 											<div className="ml-auto flex items-center gap-1">
 												{tab.id === "dev" && hasPendingUpdate ? <span className="size-1.5 rounded-full bg-[var(--color-accent)]" aria-hidden="true" /> : null}
-												{dirtyTabIds.has(tab.id as SettingsUnsavedTabId) ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+												{dirtyTabIds.has(tab.id as SettingsUnsavedTabId) ? <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" /> : null}
 											</div>
 										</TabsTrigger>
 									</Fragment>

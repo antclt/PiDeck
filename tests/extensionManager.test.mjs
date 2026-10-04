@@ -84,6 +84,10 @@ function loadExtensionManagerModule() {
 			Map,
 			JSON,
 			Error,
+			AbortController: globalThis.AbortController,
+			setTimeout: globalThis.setTimeout,
+			clearTimeout: globalThis.clearTimeout,
+			fetch: (...args) => globalThis.fetch(...args),
 		},
 		{ filename: "ExtensionManager.ts" },
 	);
@@ -99,6 +103,48 @@ function deferred() {
 	});
 	return { promise, resolve, reject };
 }
+
+test("checkPiUpdate uses the pi.dev release version for the self-update check", async () => {
+	const { ExtensionManager } = loadExtensionManagerModule();
+	const manager = new ExtensionManager(
+		{
+			check: async () => ({ installed: true, version: "1.0.0" }),
+			createInvocation: () => ({ command: "npm", args: [], shell: false }),
+			createProcessEnv: () => ({}),
+			warmWslCommand: async () => undefined,
+		},
+		() => ({}),
+		undefined,
+		undefined,
+		() => "test error",
+	);
+	const originalFetch = globalThis.fetch;
+	const originalResponse = globalThis.Response;
+	globalThis.Response = class TestResponse {
+		constructor(body, init) {
+			this.body = body;
+			this.status = init.status;
+			this.ok = this.status >= 200 && this.status < 300;
+		}
+		async json() {
+			return JSON.parse(this.body);
+		}
+	};
+	globalThis.fetch = async (url) => {
+		assert.equal(url, "https://pi.dev/api/latest-version");
+		return new globalThis.Response(JSON.stringify({ version: "1.0.1" }), { status: 200 });
+	};
+	try {
+		const result = await manager.checkPiUpdate();
+		assert.equal(result.currentVersion, "1.0.0");
+		assert.equal(result.latestVersion, "1.0.1");
+		assert.equal(result.hasUpdate, true);
+		assert.equal(result.error, undefined);
+	} finally {
+		globalThis.fetch = originalFetch;
+		globalThis.Response = originalResponse;
+	}
+});
 
 test("a stale lightweight extension scan cannot overwrite a newer force refresh", async () => {
 	const { ExtensionManager } = loadExtensionManagerModule();

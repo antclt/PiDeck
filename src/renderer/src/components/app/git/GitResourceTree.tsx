@@ -100,8 +100,8 @@ export function FileTree(props: {
 				return (
 					<Fragment key={dir || "root"}>
 						{!hideDirHeader && (
-							<div className="group/dir flex cursor-pointer items-center gap-1 rounded-[4px] px-2 py-[3px] select-none hover:bg-[var(--git-panel-hover)]" onClick={() => props.onToggleDir(dir)}>
-								<ChevronDown size={12} className={`shrink-0 text-text-tertiary transition-transform duration-150${props.collapsedDirs.has(dir) ? " -rotate-90" : " rotate-0"}`} />
+							<div className="group/dir flex cursor-pointer items-center gap-1 rounded-xs px-2 py-[3px] select-none hover:bg-[var(--git-panel-hover)]" onClick={() => props.onToggleDir(dir)}>
+								<ChevronDown size={12} className={`shrink-0 text-text-tertiary transition-transform duration-fast${props.collapsedDirs.has(dir) ? " -rotate-90" : " rotate-0"}`} />
 								<span className="min-w-0 flex-1 truncate text-xs text-text-secondary" title={dir || "/"}>
 									{shortenDir(dir) || "/"}
 								</span>
@@ -120,7 +120,7 @@ export function FileTree(props: {
 													type="button"
 													variant="ghost"
 													size="icon-sm"
-													className="invisible size-6 rounded-[4px] text-text-tertiary group-hover/dir:visible hover:bg-[var(--git-panel-hover)] hover:text-text-primary"
+													className="invisible size-6 rounded-xs text-text-tertiary group-hover/dir:visible hover:bg-[var(--git-panel-hover)] hover:text-text-primary"
 													aria-label={t("git.stageDirectory")}
 													title={t("git.stageDirectory")}
 													disabled={props.mutating}
@@ -137,7 +137,7 @@ export function FileTree(props: {
 													type="button"
 													variant="ghost"
 													size="icon-sm"
-													className="invisible size-6 rounded-[4px] text-text-tertiary group-hover/dir:visible hover:bg-[var(--git-panel-hover)] hover:text-[var(--color-danger)]"
+													className="invisible size-6 rounded-xs text-text-tertiary group-hover/dir:visible hover:bg-[var(--git-panel-hover)] hover:text-[var(--color-danger)]"
 													aria-label={t("git.discardDirectory")}
 													title={t("git.discardDirectory")}
 													disabled={props.mutating}
@@ -149,7 +149,7 @@ export function FileTree(props: {
 													<RotateCcw size={13} aria-hidden="true" />
 												</Button>
 											)}
-											<span className="px-1 text-[11px] tabular-nums text-text-tertiary">{resources.length}</span>
+											<span className="px-1 text-micro tabular-nums text-text-tertiary">{resources.length}</span>
 										</span>
 									);
 								})()}
@@ -278,19 +278,27 @@ export function FileIcon({ name }: { name: string }) {
 		const { svg, colorName } = getFileIconSeti(name);
 		return <span aria-hidden="true" className="mr-1.5 inline-flex size-5 shrink-0 items-center justify-center [&_svg]:size-full [&_svg]:fill-current" style={{ color: getFileIconColor(colorName) }} dangerouslySetInnerHTML={{ __html: svg }} />;
 	} catch {
-		return <span aria-hidden="true" className="mr-1.5 box-border inline-flex size-3 shrink-0 items-center justify-center rounded-[4px] border border-[var(--git-desc-fg)] [&_svg]:size-full [&_svg]:fill-current" />;
+		// 未知类型兜底：FileText 线性图标（16px，与 Seti 图标同槽位）而非空透明方块——
+		// 空方块在非代码文件密集的目录里像图标加载失败。
+		return (
+			<span aria-hidden="true" className="mr-1.5 inline-flex size-5 shrink-0 items-center justify-center text-[var(--git-desc-fg)] [&_svg]:size-4">
+				<FileText />
+			</span>
+		);
 	}
 }
 
 /** Mirrors VS Code's monaco-tl-twistie without importing structural icons. */
 export function Twistie({ open }: { open: boolean }) {
-	return <span className={`inline-flex size-3.5 shrink-0 items-center justify-center text-[9px] text-[var(--git-desc-fg)] before:block before:content-['▶'] before:transition-transform before:duration-150${open ? " before:rotate-0" : " before:-rotate-90"}`} aria-hidden="true" />;
+	return <ChevronDown aria-hidden="true" size={14} strokeWidth={2} className={`inline-block size-3.5 shrink-0 text-[var(--git-desc-fg)] transition-transform duration-fast${open ? "" : " -rotate-90"}`} />;
 }
 
 function GitStageGlyph({ unstage = false }: { unstage?: boolean }) {
+	/* 与行内 stage/unstage 按钮同用 lucide 图标；弃用超大字号 ＋/− 字符（字形基线靠 translateY 补丁对齐，观感发虚） */
+	const Glyph = unstage ? Minus : Plus;
 	return (
-		<span className="flex size-5 items-center justify-center font-sans text-xl font-medium leading-5 -translate-y-px" aria-hidden="true">
-			{unstage ? "\u2212" : "+"}
+		<span className="flex size-5 items-center justify-center" aria-hidden="true">
+			<Glyph size={13} strokeWidth={2} />
 		</span>
 	);
 }
@@ -348,7 +356,7 @@ export function ResourceRow(props: {
 							variant="ghost"
 							size="icon-sm"
 							key={action.kind}
-							className={`size-6 rounded-[4px] text-text-tertiary hover:bg-[var(--git-panel-hover)] hover:text-text-primary${action.kind === "discard" ? " hover:text-[var(--color-danger)]" : ""}`}
+							className={`size-6 rounded-xs text-text-tertiary hover:bg-[var(--git-panel-hover)] hover:text-text-primary${action.kind === "discard" ? " hover:text-[var(--color-danger)]" : ""}`}
 							aria-label={action.label}
 							title={action.label}
 							disabled={action.disabled}
@@ -367,7 +375,7 @@ export function ResourceRow(props: {
 					))}
 				</div>
 			)}
-			<span className="ml-[5px] flex w-4 shrink-0 justify-end text-xs font-semibold text-right text-[var(--git-desc-fg)]" aria-hidden="true">
+			<span className="git-decoration flex items-center justify-end" aria-hidden="true">
 				{opening ? <Loader2 size={13} className="animate-pideck-spin" /> : letter}
 			</span>
 		</div>
@@ -380,7 +388,7 @@ export function ResourceRow(props: {
 			<ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
 			<ContextMenuContent alignOffset={-4}>
 				{props.deleteFile && (
-					<ContextMenuItem variant="destructive" className="gap-2 text-[13px]" onSelect={() => props.deleteFile?.(props.path)}>
+					<ContextMenuItem variant="destructive" className="gap-2 text-control" onSelect={() => props.deleteFile?.(props.path)}>
 						<Trash2 size={14} aria-hidden="true" />
 						{t("git.deleteFile")}
 					</ContextMenuItem>
@@ -396,7 +404,7 @@ export function ResourceGroup(props: { title: string; count: number; open: boole
 			<div className="flex h-[22px] items-center bg-transparent px-[7px] pl-[3px] hover:bg-[var(--git-panel-hover)]">
 				<button type="button" className="inline-flex h-[22px] min-w-0 flex-1 cursor-pointer items-center border-0 bg-transparent p-0 text-left text-inherit focus-visible:shadow-[inset_var(--focus-ring)] focus-visible:outline-none" aria-expanded={props.open} onClick={props.onToggle}>
 					<Twistie open={props.open} />
-					<span className="ml-px min-w-0 flex-1 truncate text-[13px] font-semibold tracking-normal text-[var(--git-panel-fg)]">{props.title}</span>
+					<span className="ml-px min-w-0 flex-1 truncate text-control font-semibold tracking-normal text-[var(--git-panel-fg)]">{props.title}</span>
 				</button>
 				{props.allAction && (
 					<div className="hidden items-center gap-px group-hover:flex group-focus-within:flex group-[.open]:flex">

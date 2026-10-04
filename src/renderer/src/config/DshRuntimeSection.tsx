@@ -133,7 +133,7 @@ export function DshRuntimeSection({ status, onOpenFolder }: { status: DshRuntime
 					</div>
 					{busy ? (
 						<div className="mt-1 flex w-full flex-col items-center gap-2">
-							<div className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
+							<div className="flex items-center gap-1.5 text-control text-muted-foreground">
 								<LoaderCircle className="size-3.5 animate-pideck-spin" />
 								{uninstalling ? t("dsh.runtime.phase.uninstalling") : phaseLabel}
 							</div>
@@ -144,7 +144,7 @@ export function DshRuntimeSection({ status, onOpenFolder }: { status: DshRuntime
 						</div>
 					) : null}
 					{error ? (
-						<div className="mt-1 flex items-start gap-1.5 text-left text-[12px] text-destructive">
+						<div className="mt-1 flex items-start gap-1.5 text-left text-caption text-destructive">
 							<AlertCircle className="mt-0.5 size-3.5 shrink-0" />
 							<span>{t("dsh.runtime.installFailed", { error })}</span>
 						</div>
@@ -174,7 +174,7 @@ export function DshRuntimeSection({ status, onOpenFolder }: { status: DshRuntime
 				</p>
 				{busy ? (
 					<div className="flex w-full flex-col items-center gap-2">
-						<div className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
+						<div className="flex items-center gap-1.5 text-control text-muted-foreground">
 							<LoaderCircle className="size-3.5 animate-pideck-spin" />
 							{uninstalling ? t("dsh.runtime.phase.uninstalling") : phaseLabel}
 						</div>
@@ -207,12 +207,12 @@ export function DshRuntimeSection({ status, onOpenFolder }: { status: DshRuntime
 					</div>
 				)}
 				{error ? (
-					<div className="flex items-start gap-1.5 text-left text-[12px] text-destructive">
+					<div className="flex items-start gap-1.5 text-left text-caption text-destructive">
 						<AlertCircle className="mt-0.5 size-3.5 shrink-0" />
 						<span>{t("dsh.runtime.installFailed", { error })}</span>
 					</div>
 				) : (
-					<p className="text-[12px] text-muted-foreground/80">{status.installEnabled === false ? t("dsh.runtime.devNoDownload") : t("dsh.runtime.installHint")}</p>
+					<p className="text-caption text-muted-foreground/80">{status.installEnabled === false ? t("dsh.runtime.devNoDownload") : t("dsh.runtime.installHint")}</p>
 				)}
 			</div>
 		</section>

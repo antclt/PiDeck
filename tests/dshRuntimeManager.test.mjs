@@ -251,7 +251,9 @@ test("同版本重装：落位 rename 失败时旧目录让位后回滚（不出
 	const result = await manager.installFromArchive(archive);
 	assert.equal(result.ok, false, "落位失败必须报告安装失败");
 	assert.match(result.error ?? "", /EPERM/);
-	assert.equal(renames, 3, "让位 rename + 失败的落位 rename + 失败的回滚 rename");
+	// renameWithRetry(EPERM 重试 5 次×300ms)：实际调用为让位 1 + 落位重试 5 + 回滚重试 5 = 11 次；
+	// 次数是重试策略的实现细节，这里只断言三段都真正尝试过（≥3）且终态不出现半空目录。
+	assert.ok(renames >= 3, `让位/落位/回滚三段 rename 都应被调用（实际 ${renames} 次）`);
 	// 回滚 rename（第 3 次）也被 mock 拦截失败：旧目录安全留在 tempRoot，
 	// target 不存在——任意时刻都没有半空目录；旧内容也没有丢。
 	assert.equal(existsSync(join(layout.runtimesRoot, "0.1.1-rc.2")), false, "target 不出现半空");

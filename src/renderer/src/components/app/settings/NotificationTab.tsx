@@ -228,7 +228,7 @@ export const NotificationTab = memo(function NotificationTab(props: Notification
 					</div>
 				</SettingRow>
 				{customSounds.map((sound) => (
-					<SettingRow key={sound.name} title={<span className="font-mono text-[13px]">{sound.name}</span>} description={`${(sound.size / 1024).toFixed(0)} KB`}>
+					<SettingRow key={sound.name} title={<span className="font-mono text-control">{sound.name}</span>} description={`${(sound.size / 1024).toFixed(0)} KB`}>
 						<Button variant="ghost" size="icon-sm" title={t("settings.sound.remove")} aria-label={t("settings.sound.remove")} onClick={() => void onRemove(sound.name)}>
 							<Trash2 className="size-4" />
 						</Button>

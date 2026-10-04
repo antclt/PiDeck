@@ -14,6 +14,11 @@ import { DEFAULT_SIDEBAR_NAV_TAB, readSidebarNavTab, type SidebarNavTab } from "
 /** Settings overlay visibility is shared by Sidebar, Pi environment flow, and Session surface. */
 export const settingsOpenAtom = atom(false);
 
+/** 当前活跃编辑器 tab 的文件路径（无 tab 时为 null）：文件抽屉树行高亮用。
+ *  由 useFileEditor 在 activeTab 变化时写入；抽屉树跨六个组件层级订阅，
+ *  走 atom 避免 App→drawerPorts→DrawerSurface→DrawerContent→FilesPanel→FileNode 的 props 透传链。 */
+export const activeEditorFileAtom = atom<string | null>(null);
+
 /** 与 SettingsModal 侧栏 tab 对齐；深链/焦点目标用同一套 id，避免 Git 去设置落到上次记住的非「常用」页。 */
 export type SettingsTabId = "common" | "shortcuts" | "appearance" | "proxy" | "web" | "editors" | "git" | "dev" | "im" | "pet" | "notification" | "storage" | "backup" | "usage" | "process" | "vision" | "imagegen";
 

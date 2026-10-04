@@ -651,9 +651,9 @@ function EnabledModelsInput(props: {
 								onSelect={() => toggleModel(filter)}
 								className={`border border-dashed border-[var(--color-accent)] bg-[color:color-mix(in_srgb,var(--color-accent)_6%,var(--color-bg-popover))] text-control text-text-primary hover:bg-[color:color-mix(in_srgb,var(--color-accent)_12%,transparent)]${selected.has(filter) ? " border-[var(--color-danger)] bg-[color:color-mix(in_srgb,var(--color-danger)_6%,var(--color-bg-popover))]" : ""}`}
 							>
-								<span className="flex size-[18px] shrink-0 items-center justify-center rounded-[4px] border-[1.5px] border-border-strong text-[color:var(--color-accent)]">{selected.has(filter) && <Check size={12} />}</span>
+								<span className="flex size-[18px] shrink-0 items-center justify-center rounded-xs border-[1.5px] border-border-strong text-[color:var(--color-accent)]">{selected.has(filter) && <Check size={12} />}</span>
 								<span className="font-mono text-xs">{filter}</span>
-								<span className="ml-auto font-mono text-[11px] text-text-tertiary">{t("config.settings.enabledModelsGlobHint")}</span>
+								<span className="ml-auto font-mono text-micro text-text-tertiary">{t("config.settings.enabledModelsGlobHint")}</span>
 							</CommandItem>
 						)}
 						{hasResults &&
@@ -674,7 +674,7 @@ function EnabledModelsInput(props: {
 											}}
 										>
 											<span className="flex-1">{provider}</span>
-											<span className="font-mono text-[11px] text-text-tertiary">{grouped[provider].length}</span>
+											<span className="font-mono text-micro text-text-tertiary">{grouped[provider].length}</span>
 										</button>
 									}
 								>
@@ -682,7 +682,7 @@ function EnabledModelsInput(props: {
 										grouped[provider].map((m) => (
 											<CommandItem key={m.fullKey} value={m.fullKey} onSelect={() => toggleModel(m.fullKey)} className={`cursor-pointer gap-2 py-[7px] pr-3 pl-7 text-control text-text-primary ${selected.has(m.fullKey) ? "bg-[color:color-mix(in_srgb,var(--color-accent)_6%,var(--color-bg-panel))]" : ""}`}>
 												<span
-													className={`flex size-[18px] shrink-0 items-center justify-center rounded-[4px] border-[1.5px] border-border-strong text-[color:var(--color-accent)] transition-[border-color,background-color] duration-100${selected.has(m.fullKey) ? " border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-text-inverse)]" : ""}`}
+													className={`flex size-[18px] shrink-0 items-center justify-center rounded-xs border-[1.5px] border-border-strong text-[color:var(--color-accent)] transition-[border-color,background-color] duration-100${selected.has(m.fullKey) ? " border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-text-inverse)]" : ""}`}
 												>
 													{selected.has(m.fullKey) && <Check size={12} />}
 												</span>

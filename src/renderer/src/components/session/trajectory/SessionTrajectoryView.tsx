@@ -419,7 +419,7 @@ function CopyableBlock(props: { label?: string; text: string }) {
 					{copied ? t("common.copied") : t("common.copy")}
 				</button>
 			</div>
-			<pre className="max-h-72 overflow-auto rounded-md bg-muted/50 p-2 text-[11px] leading-relaxed wrap-break-word whitespace-pre-wrap">{props.text}</pre>
+			<pre className="max-h-72 overflow-auto rounded-md bg-muted/50 p-2 text-micro leading-relaxed wrap-break-word whitespace-pre-wrap">{props.text}</pre>
 		</div>
 	);
 }
@@ -508,13 +508,13 @@ function TrajectoryInspector(props: {
 				{record.toolCallId ? (
 					<>
 						<dt className="text-muted-foreground">{t("session.trajectory.field.callId")}</dt>
-						<dd className="truncate font-mono text-[11px]">{record.toolCallId}</dd>
+						<dd className="truncate font-mono text-micro">{record.toolCallId}</dd>
 					</>
 				) : null}
 				{record.cwd ? (
 					<>
 						<dt className="text-muted-foreground">{t("session.trajectory.field.cwd")}</dt>
-						<dd className="truncate font-mono text-[11px]">{record.cwd}</dd>
+						<dd className="truncate font-mono text-micro">{record.cwd}</dd>
 					</>
 				) : null}
 				{record.provider || record.modelId ? (
@@ -580,7 +580,7 @@ function TrajectoryInspector(props: {
 				{record.customType ? (
 					<>
 						<dt className="text-muted-foreground">{t("session.trajectory.field.customType")}</dt>
-						<dd className="truncate font-mono text-[11px]">{record.customType}</dd>
+						<dd className="truncate font-mono text-micro">{record.customType}</dd>
 					</>
 				) : null}
 				{record.retry !== undefined ? (

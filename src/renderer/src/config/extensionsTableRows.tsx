@@ -1,6 +1,7 @@
 import { Button } from "../components/ui-shadcn/button";
+import { Switch } from "../components/ui-shadcn/switch";
 import { TableCell, TableRow } from "../components/ui-shadcn/table";
-import { Copy, FolderOpen, ToggleLeft, ToggleRight, Trash2 } from "lucide-react";
+import { Copy, FolderOpen, Trash2 } from "lucide-react";
 import type { PiExtensionSummary } from "../../../shared/types";
 import { t, type TranslationKey } from "../i18n";
 
@@ -117,19 +118,16 @@ export function ExtensionTableRow(props: {
 					<Button variant="ghost" size="icon-sm" className="size-7" disabled={!extension.path} onClick={() => props.onShowInFolder(extension)} title={t("config.openExtensionLocation")}>
 						<FolderOpen size={14} strokeWidth={1.8} />
 					</Button>
-					{/* 启停开关：内置扩展也复用 extensions:toggle；项目作用域下继承的全局行只写项目覆盖，
+					{/* 启停开关：Switch 轨道着色（启用 = 主题色填充），避免 Toggle 图标几乎无视觉差;
+					    内置扩展也复用 extensions:toggle；项目作用域下继承的全局行只写项目覆盖，
 					    全局已禁用的项不可在项目视图重新启用 */}
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						className={`size-7${effectiveEnabled ? " text-primary" : ""}`}
+					<Switch
+						checked={effectiveEnabled}
+						onCheckedChange={(checked) => props.onToggle(extension, checked)}
 						disabled={props.toggling || props.uninstalling || (inherited && extension.enabled === false)}
-						onClick={() => props.onToggle(extension, !effectiveEnabled)}
 						title={props.toggling ? t("config.extensionToggling") : effectiveEnabled ? t("config.extensionDisable") : t("config.extensionEnable")}
 						aria-busy={props.toggling}
-					>
-						{effectiveEnabled ? <ToggleRight size={18} strokeWidth={1.8} /> : <ToggleLeft size={18} strokeWidth={1.8} />}
-					</Button>
+					/>
 					{extension.builtIn && extension.enabled !== false && !inherited && (
 						<Button variant="ghost" size="icon-sm" className="size-7" disabled={props.removingBuiltIn} onClick={() => props.onRemoveBuiltIn(extension)} title={props.removingBuiltIn ? t("config.uninstalling") : t("config.uninstall")}>
 							<Trash2 size={14} strokeWidth={1.8} />

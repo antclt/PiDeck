@@ -74,7 +74,7 @@ export function NoticeDetailsDialog({ payload, onOpenChange }: { payload: Notice
 							<Icon className="h-3.5 w-3.5" />
 						</span>
 						<div className="min-w-0 flex-1 select-text">
-							<p className="text-[13px] font-medium leading-5 break-words whitespace-pre-wrap text-text-primary">{payload.title}</p>
+							<p className="text-control font-medium leading-5 break-words whitespace-pre-wrap text-text-primary">{payload.title}</p>
 							{payload.description ? (
 								/* 外层必须显式挂 `markdown-body`：MarkdownStream 自身不挂这个类，而 streamdown 默认
 								   根节点是 space-y-4 + text-3xl 标题（见 styles/streamdownChrome.css 头注释），不挂就是

@@ -133,7 +133,7 @@ function ImageGenSizeCombobox(props: { value: string; disabled?: boolean; onChan
 			<PopoverTrigger asChild>
 				<Button type="button" variant="ghost" size="sm" disabled={props.disabled} className="composer-bar-btn h-7 max-w-[9.5rem] gap-1 rounded-md px-1.5 text-control font-medium text-foreground hover:bg-muted/60" title={t("imagegen.sizeHint")} aria-label={t("imagegen.size")}>
 					<span className="min-w-0 truncate">{sizeTriggerLabel(props.value)}</span>
-					<ChevronDown size={12} aria-hidden="true" className={`flex-none text-muted-foreground transition-transform duration-150${open ? " rotate-180" : ""}`} />
+					<ChevronDown size={12} aria-hidden="true" className={`flex-none text-muted-foreground transition-transform duration-fast${open ? " rotate-180" : ""}`} />
 				</Button>
 			</PopoverTrigger>
 			<PopoverContent align="start" side="top" className="w-52 p-0">

@@ -117,7 +117,19 @@ function loadPiProcess(versionResult = { output: "0.82.1\n" }, options = { parke
 			// gitProcess，但本文件没跟上登记 → 整个文件报 MODULE_NOT_FOUND（既有缺口，与本次改动无关）。
 			if (id === "../git/gitProcess") return require("../src/main/git/gitProcess.ts");
 			if (id === "../extensions/builtInExtensions") {
-				return { appendBuiltInExtensionArgs: (args) => args };
+				// 真实语义（非 no-op）：noExtensions 或空列表原样返回，否则追加 --extension <path>。
+				// 曾是 (args) => args 的 no-op，掩盖了内置扩展注入；A5 契约测试要求真实行为。
+				return {
+					appendBuiltInExtensionArgs: (args, extensionPaths, options = {}) => {
+						if (options.noExtensions || !extensionPaths || extensionPaths.length === 0) return [...args];
+						const next = [...args];
+						for (const extensionPath of extensionPaths) {
+							const trimmed = extensionPath?.trim();
+							if (trimmed) next.push("--extension", trimmed);
+						}
+						return next;
+					},
+				};
 			}
 			if (id === "../extensions/extensionVersionGate") {
 				return loadTsCommonJs("src/main/extensions/extensionVersionGate.ts");
@@ -217,6 +229,43 @@ test("拒绝 trust 时旧版 pi 会阻止 spawn", async () => {
 // ---------------------------------------------------------------------------
 
 const BUILT_IN_SPECIFIER_ARGS = ["--extension", "builtin:mcp", "--extension", "builtin:llama.cpp", "--extension", "builtin:codemode", "--extension", "builtin:tool-search"];
+
+// ---------------------------------------------------------------------------
+// 白名单机制移除后的启动形态契约（计划 A5；替代已删除的白名单降级测试）
+// ---------------------------------------------------------------------------
+
+test("正常启动不注入 --no-extensions/--no-skills：启停由 pi 原生过滤规则决定", async () => {
+	const { PiProcess, mockLocator, getCaptured } = loadPiProcess({ output: "1.0.0\n" });
+	const proc = new PiProcess("C:\\proj", { wslEnabled: true, wslDistro: "Ubuntu-24.04", wslUser: "root" }, mockLocator, {
+		resolveBuiltInExtensionPaths: () => ["C:\\app\\resources\\extensions\\pi-deck-session-title.ts"],
+		securitySnapshotPath: "C:\\Users\\tester\\AppData\\Roaming\\PiDeck-dev\\security-policy.json",
+	});
+	await proc.start();
+	const captured = getCaptured();
+	assert.ok(captured?.args, "spawn 应被调用");
+	assert.ok(!captured.args.includes("--no-extensions"), `不应有 --no-extensions，实际: ${JSON.stringify(captured.args)}`);
+	assert.ok(!captured.args.includes("--no-skills"), `不应有 --no-skills，实际: ${JSON.stringify(captured.args)}`);
+	assert.ok(!captured.args.includes("--no-prompt-templates"), `不应有 --no-prompt-templates，实际: ${JSON.stringify(captured.args)}`);
+	// PiDeck 自带扩展仍以 -e 附加（与白名单机制无关）。WSL 模式下 C:\ 路径会被
+	// 转成 /mnt/c/... 形式，断言 basename 即可。
+	assert.ok(
+		captured.args.some((arg) => arg.includes("pi-deck-session-title.ts")),
+		`自带扩展应随 -e 附加，实际: ${JSON.stringify(captured.args)}`,
+	);
+	assert.ok(captured.args.includes("--extension"), "-e 注入应存在");
+});
+
+test("piRpcNoExtensions 诊断开关开启时不注入任何扩展（含自带）", async () => {
+	const { PiProcess, mockLocator, getCaptured } = loadPiProcess({ output: "1.0.0\n" });
+	const proc = new PiProcess("C:\\proj", { wslEnabled: true, wslDistro: "Ubuntu-24.04", wslUser: "root", piRpcNoExtensions: true }, mockLocator, {
+		resolveBuiltInExtensionPaths: () => ["C:\\app\\resources\\extensions\\pi-deck-session-title.ts"],
+		securitySnapshotPath: "C:\\Users\\tester\\AppData\\Roaming\\PiDeck-dev\\security-policy.json",
+	});
+	await proc.start();
+	const captured = getCaptured();
+	assert.ok(captured?.args?.includes("--no-extensions"), "诊断开关应注入 --no-extensions");
+	assert.ok(!captured.args.includes("pi-deck-session-title.ts"), "诊断模式下自带扩展不应注入");
+});
 
 test("piRpcNoExtensions 诊断开关开启时不注入 builtin: specifier（诊断路径必须干净）", async () => {
 	const { PiProcess, mockLocator, getCaptured } = loadPiProcess({ output: "0.99.1\n" });

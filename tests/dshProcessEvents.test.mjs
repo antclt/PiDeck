@@ -1,27 +1,16 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import ts from "typescript";
-import vm from "node:vm";
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 /**
  * DSH 轨迹过程事件收集器单测：mux 事件流 → SessionProcessEvent
  * （modelChange/permission/plan/goal/compaction），与 pi 会话文件过程事件同语义。
  */
 
-function transpile(filePath) {
-	return ts.transpileModule(readFileSync(filePath, "utf8"), {
-		compilerOptions: {
-			module: ts.ModuleKind.CommonJS,
-			target: ts.ScriptTarget.ES2022,
-		},
-	}).outputText;
-}
-
+// dshProcessEvents.ts 依赖同目录外的 ../tokenEstimate，必须用 loadTsCommonJs
+// 按源文件目录解析相对 import（手写 vm 沙箱会以 tests/ 为基准报 require is not defined）
 function loadModule() {
-	const sandbox = { exports: {} };
-	vm.runInNewContext(transpile("src/main/dsh/dshProcessEvents.ts"), sandbox, { filename: "dshProcessEvents.ts" });
-	return sandbox.exports;
+	return loadTsCommonJs("src/main/dsh/dshProcessEvents.ts");
 }
 
 const { collectDshProcessEvent, collectDshProcessEvents, pushDshProcessEvent, estimateContextTokens, parseContextPressureProjection, parseContextBreakdownProjection, parseTokenUsageProjection, parseSessionStatsProjection, deriveDshSessionStats, deriveSessionStatsFallback, cacheHitPercentOf, DSH_PROCESS_EVENTS_LIMIT } =
@@ -235,15 +224,18 @@ test("parseContextBreakdownProjection reads heuristic composition", () => {
 	assert.equal(parsed.messageTokens, 4200);
 });
 
-test("parseContextBreakdownProjection tolerates partial fields", () => {
+// 田分字段缺失语义见下一条「keeps absent fields undefined」回归（不再补 0）
+
+test("parseContextBreakdownProjection keeps absent fields undefined instead of fabricating zeros", () => {
+	// 回归：只有 messageTokens 的投影曾被补成 system/tools = 0，圆环渲染成「系统 0 / 工具 0」的假数据
 	const parsed = parseContextBreakdownProjection({ contextBreakdown: { messageTokens: 10 } });
-	assert.equal(parsed.systemTokens, 0);
-	assert.equal(parsed.toolsTokens, 0);
+	assert.equal(parsed.systemTokens, undefined);
+	assert.equal(parsed.toolsTokens, undefined);
 	assert.equal(parsed.messageTokens, 10);
 });
 
-test("estimateContextTokens counts text chars / 4 across messages", () => {
-	// 与 pi 的 contextMessageTokens 同规则（字符数 ÷ 4）
+test("estimateContextTokens uses CJK-weighted estimation (same rule as pi)", () => {
+	// 与 pi 的 contextMessageTokens 同规则：非中文 4 字符/token，中文 1.5 字/token
 	assert.equal(
 		estimateContextTokens([
 			{ role: "user", text: "abcd" },
@@ -256,15 +248,15 @@ test("estimateContextTokens counts text chars / 4 across messages", () => {
 			{ role: "user", text: "你好世界" },
 			{ role: "tool", text: "abcd" },
 		]),
-		2,
+		Math.ceil(4 / 1.5 + 1),
 	);
 });
 
 test("estimateContextTokens skips empty and missing text", () => {
 	assert.equal(estimateContextTokens([{ role: "user", text: "" }, { role: "assistant" }, { role: "user", text: "abcdefgh" }]), 2);
 	assert.equal(estimateContextTokens([]), 0);
-	// 不足 4 字符按 0 处理（floor）
-	assert.equal(estimateContextTokens([{ role: "user", text: "abc" }]), 0);
+	// 估算向上取整：即使不足 4 字符也至少计 1 token，不再像 ÷4+floor 那样归零
+	assert.equal(estimateContextTokens([{ role: "user", text: "abc" }]), 1);
 });
 
 test("parseTokenUsageProjection maps uncachedInput to input totals", () => {

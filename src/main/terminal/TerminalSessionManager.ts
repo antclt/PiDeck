@@ -5,6 +5,7 @@ import { ipcChannels } from "../../shared/ipc";
 import type { TerminalShell, TerminalTab, TerminalTarget } from "../../shared/types";
 import { toWindowsHostPath, toWslLinuxPath } from "../wsl/WslPaths";
 import { getWslExe } from "../wsl/wslExe";
+import { createTerminalDataBatcher, type TerminalDataBatcher } from "./terminalDataBatching";
 
 // 简单日志，不依赖 appLogger 以避免循环引用
 const log = (msg: string) => {
@@ -14,7 +15,10 @@ const log = (msg: string) => {
 type TerminalRuntime = {
 	tab: TerminalTab;
 	pty: pty.IPty;
+	/** 主进程回放缓冲（切回时重建 xterm 用），有 200K 字符上限 */
 	buffer: string;
+	/** PTY 输出合批器：16ms 内的小 chunk 合成一次 IPC emit，exit/close 前必须 flush 保序 */
+	batcher: TerminalDataBatcher;
 };
 
 type Emit = (channel: string, payload: unknown) => void;
@@ -170,14 +174,25 @@ export class TerminalSessionManager {
 			shell: spawned.shell,
 			createdAt: Date.now(),
 		};
-		const runtime: TerminalRuntime = { tab, pty: spawned.pty, buffer: "" };
+		// 16ms（一帧）合批：node-pty 高吞吐时逐 chunk emit 会让主进程与渲染层
+		// 双双被 IPC 调用频率打满；合批后打字回显延迟人眼不可感知。
+		const runtime: TerminalRuntime = {
+			tab,
+			pty: spawned.pty,
+			buffer: "",
+			batcher: createTerminalDataBatcher((data) => {
+				this.emit(ipcChannels.terminalData, { tabId: id, data });
+			}),
+		};
 		runtimes.set(id, runtime);
 
 		spawned.pty.onData((data) => {
 			this.appendBuffer(runtime, data);
-			this.emit(ipcChannels.terminalData, { tabId: id, data });
+			runtime.batcher.push(data);
 		});
 		spawned.pty.onExit((event) => {
+			// 保序：退出事件发出前，把已收到的输出全部送达渲染层
+			runtime.batcher.flush();
 			tab.exited = true;
 			tab.exitCode = event.exitCode;
 			const exitText = `\r\n[process exited${event.exitCode != null ? ` with code ${event.exitCode}` : ""}]\r\n`;
@@ -207,6 +222,10 @@ export class TerminalSessionManager {
 	close(tabId: string) {
 		const found = this.findRuntime(tabId);
 		if (!found) return;
+		// 关闭前冲刷并停用合批器：kill 触发的 onExit 仍会 flush，但 dispose 后为 no-op，
+		// 避免已删 runtime 的尾巴数据在 close 之后迟到
+		found.runtime.batcher.flush();
+		found.runtime.batcher.dispose();
 		found.runtime.pty.kill();
 		found.tabs.delete(tabId);
 		if (found.tabs.size === 0) this.runtimes.delete(found.runtime.tab.ownerKey);
@@ -217,6 +236,8 @@ export class TerminalSessionManager {
 		const tabs = this.runtimes.get(`agent:${agentId}`);
 		if (!tabs) return;
 		for (const runtime of tabs.values()) {
+			runtime.batcher.flush();
+			runtime.batcher.dispose();
 			runtime.pty.kill();
 		}
 		this.runtimes.delete(`agent:${agentId}`);
@@ -232,6 +253,8 @@ export class TerminalSessionManager {
 		const tabs = this.runtimes.get(ownerKey);
 		if (!tabs) return;
 		for (const runtime of tabs.values()) {
+			runtime.batcher.flush();
+			runtime.batcher.dispose();
 			runtime.pty.kill();
 		}
 		this.runtimes.delete(ownerKey);

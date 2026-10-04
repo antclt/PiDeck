@@ -111,7 +111,7 @@ export function ConfigSelect(props: {
 							<span className="text-control font-semibold">
 								{t("config.apiTypeCustom")}: {props.value}
 							</span>
-							<small className="text-[11px] leading-[1.4] text-text-tertiary">{props.value}</small>
+							<small className="text-micro leading-[1.4] text-text-tertiary">{props.value}</small>
 						</span>
 					</SelectItem>
 				)}
@@ -199,7 +199,7 @@ export function ConfigComboboxInput(props: { value: string; options: Array<{ val
 							<Fragment key={section.group ?? `__ungrouped_${sectionIndex}`}>
 								{section.group && (
 									// 分组标题不可选中：cmdk 会把 CommandItem 当选项，标题用 div 避免干扰键盘导航。
-									<div className="px-2 pt-2 pb-1 text-[11px] font-medium text-text-tertiary">{section.group}</div>
+									<div className="px-2 pt-2 pb-1 text-micro font-medium text-text-tertiary">{section.group}</div>
 								)}
 								{section.items.map((option) => (
 									<CommandItem key={option.value} value={option.value} onSelect={() => commit(option.value)}>
@@ -238,7 +238,7 @@ export function ApiTypeInput(props: { value: string; onChange: (value: string) =
 							<span className="text-control font-semibold">
 								{t("config.apiTypeCustom")}: {props.value}
 							</span>
-							<small className="text-[11px] leading-[1.4] text-text-tertiary">{props.value}</small>
+							<small className="text-micro leading-[1.4] text-text-tertiary">{props.value}</small>
 						</span>
 					</SelectItem>
 				)}
@@ -246,7 +246,7 @@ export function ApiTypeInput(props: { value: string; onChange: (value: string) =
 					<SelectItem key={option} value={option}>
 						<span className="flex flex-col items-start gap-0.5">
 							<span className="text-control font-semibold">{API_TYPE_LABELS[option] || option}</span>
-							<small className="text-[11px] leading-[1.4] text-text-tertiary">{getApiTypeDescription(option)}</small>
+							<small className="text-micro leading-[1.4] text-text-tertiary">{getApiTypeDescription(option)}</small>
 						</span>
 					</SelectItem>
 				))}

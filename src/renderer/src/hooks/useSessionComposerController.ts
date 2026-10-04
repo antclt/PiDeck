@@ -99,6 +99,10 @@ function compactNotice(kind: CompactNoticeKind, detail?: string): string | null 
 		}
 		case "interrupted":
 			return t("app.compactInterrupted");
+		case "timeout":
+			// 等待超时≠失败：pi 仍在后台压，最终结果由 compaction_end 补发系统消息（#303）。
+			// 长停留：用户需要看清「现在没失败，稍后有结局」这件事本身。
+			return t("app.compactWaitTimeout");
 		case "cancelled":
 			return t("app.compactCancelled");
 		case "failed":
@@ -125,8 +129,8 @@ function friendlyCompactError(error: unknown): { text: string; durationMs: numbe
 	const kind = classifyCompactError(detail);
 	const text = compactNotice(kind, detail);
 	if (!text) return null;
-	// 取消 / 改写类提示要用户看见「压缩为什么换了个方式」，停留时间长于普通完成提示。
-	const durationMs = kind === "done" ? 4000 : kind === "cancelledByOwner" || kind === "routedToOwner" ? 10000 : 7000;
+	// 取消 / 改写 / 超时类提示要用户看清「压缩现在是什么状态、为什么换了个方式」，停留时间长于普通完成提示。
+	const durationMs = kind === "done" ? 4000 : kind === "cancelledByOwner" || kind === "routedToOwner" || kind === "timeout" ? 10000 : 7000;
 	return { text, durationMs };
 }
 

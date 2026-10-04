@@ -81,8 +81,10 @@ function getInitialActiveTab(): TabEntry {
  * 供外部（App.tsx）调用：在浏览器侧栏/弹框中导航到指定 URL。
  * 每次都新建 tab，避免多个外部链接复用同一个 tab。
  */
-/** 待消费的外部导航 URL，BrowserPanel 通过轮询检测。 */
+/** 待消费的外部导航 URL，由 navigateTo 写入、BrowserPanel 挂载时消费。 */
 let pendingNavigateUrl: string | null = null;
+/** 外部导航监听：navigateTo 直接触发一次消费尝试，替代旧 50ms 常驻轮询的空转。 */
+let pendingNavigateListener: (() => void) | null = null;
 
 export function navigateTo(url: string) {
 	// 每次外部导航创建新 tab，避免多个链接复用同一个 tab
@@ -91,8 +93,9 @@ export function navigateTo(url: string) {
 	moduleState.tabs.push({ id, title: "", url });
 	moduleState.activeTabId = id;
 	moduleState.navigateKey += 1;
-	// 直接设 pendingUrl，轮询会立即检测到，无需等 re-render
+	// 直接设 pendingUrl，面板挂载时会消费（监听器未注册时 URL 留存，挂载后立即补消费）
 	pendingNavigateUrl = url;
+	pendingNavigateListener?.();
 }
 
 type WebviewEvent<T extends string> = T extends "did-fail-load"
@@ -310,17 +313,24 @@ export function BrowserPanel(props: {
 	// webview 是否已触发 dom-ready，用于延迟外部导航直到 webview 就绪。
 	const webviewReadyRef = useRef(false);
 
-	// 轮询检测 navigateTo 设置的 pendingNavigateUrl（module 变量不触发 React 重渲染）
+	// 外部导航消费：navigateTo 经监听器触发（module 变量不触发 React 重渲染）；
+	// webview 未挂载/加载中时 50ms 自重试，替代旧 50ms 常驻轮询——空转时钟归零。
 	useEffect(() => {
-		const interval = window.setInterval(() => {
-			if (!pendingNavigateUrl) return;
+		let alive = true;
+		let retryTimer = 0;
+		const consumePendingNavigate = () => {
+			if (!alive || !pendingNavigateUrl) return;
 			const url = pendingNavigateUrl;
 			moduleState.navigateKey = 0;
 			const wv = webviewRef.current;
-			if (!wv) return;
-			// 如果 webview 正在加载中，跳过本次轮询保留 pendingNavigateUrl，
-			// 下次轮询会重试，避免 URL 被静默丢弃
-			if (wv.isLoading && wv.isLoading()) return;
+			// webview 未挂载（面板刚开）或正在加载中：保留 pendingNavigateUrl 稍后重试，
+			// 避免 URL 被静默丢弃（与旧轮询的等待语义一致）
+			if (!wv || (wv.isLoading && wv.isLoading())) {
+				retryTimer = window.setTimeout(() => {
+					if (alive) consumePendingNavigate();
+				}, 50);
+				return;
+			}
 			// 通过加载检查后才消费 URL，防止加载中时丢请求
 			pendingNavigateUrl = null;
 			const activeTab = moduleState.tabs.find((t) => t.id === moduleState.activeTabId);
@@ -330,9 +340,16 @@ export function BrowserPanel(props: {
 				setActiveTabId(moduleState.activeTabId);
 				wv.loadURL(url).catch(() => {});
 			}
-		}, 50);
-		return () => window.clearInterval(interval);
-	}, [applyDeviceUserAgent, isLoading, loadUrl]);
+		};
+		pendingNavigateListener = consumePendingNavigate;
+		// 面板刚挂载时可能已有待消费 URL（navigateTo 在面板未挂载时到达过）
+		consumePendingNavigate();
+		return () => {
+			alive = false;
+			pendingNavigateListener = null;
+			window.clearTimeout(retryTimer);
+		};
+	}, [applyDeviceUserAgent]);
 
 	const closeTab = useCallback(
 		(tabId: string, event: React.MouseEvent) => {
@@ -405,26 +422,26 @@ export function BrowserPanel(props: {
 				{tabs.map((tab) => (
 					<div
 						key={tab.id}
-						className={`flex max-w-[180px] shrink-0 cursor-pointer items-center gap-1 border-r border-border/30 px-2.5 py-1 text-xs whitespace-nowrap select-none text-text-tertiary${tab.id === activeTabId ? " border-b-2 border-[var(--color-accent)] -mb-px bg-bg-panel text-text-primary" : ""}`}
+						className={`flex max-w-[180px] shrink-0 cursor-pointer items-center gap-1 border-r border-border/30 px-2.5 py-1 text-xs whitespace-nowrap select-none text-text-tertiary${tab.id === activeTabId ? " border-b-2 border-primary -mb-px bg-bg-panel text-text-primary" : ""}`}
 						onClick={() => switchTab(tab.id)}
 					>
 						<span className="min-w-0 truncate">{tab.title || tab.url}</span>
 						<Button variant="ghost" size="icon-sm" className="browser-tab-close" onClick={(event) => closeTab(tab.id, event)} title={t("browser.closeTab")}>
-							<X size={11} />
+							<X size={12} />
 						</Button>
 					</div>
 				))}
-				<Button variant="ghost" size="icon-sm" className="size-[30px] text-text-tertiary hover:text-[color:var(--color-accent)]" onClick={addTab} title={t("browser.newTab")}>
+				<Button variant="ghost" size="icon-sm" className="size-7 text-text-tertiary hover:text-text-primary" onClick={addTab} title={t("browser.newTab")}>
 					<Plus size={14} />
 				</Button>
 				{!props.isFullscreen && (
 					<div className="ml-auto flex shrink-0 items-center gap-0.5 pr-1">
-						<Button variant="ghost" size="icon-sm" className="size-[26px] rounded-sm text-text-tertiary hover:bg-bg-hover hover:text-text-primary" onClick={onToggleFullscreen} title={t("browser.fullscreen")}>
+						<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-tertiary hover:bg-bg-hover hover:text-text-primary" onClick={onToggleFullscreen} title={t("browser.fullscreen")}>
 							<Maximize2 size={13} />
 						</Button>
 						{/* 统一 drawer chrome 已提供关闭；此处仅在独立/旧布局时保留 */}
 						{!props.hideChromeClose && (
-							<Button variant="ghost" size="icon-sm" className="size-[26px] rounded-sm text-text-tertiary hover:bg-bg-hover hover:text-text-primary" onClick={onClose} title={t("common.close")}>
+							<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-tertiary hover:bg-bg-hover hover:text-text-primary" onClick={onClose} title={t("common.close")}>
 								<X size={14} />
 							</Button>
 						)}
@@ -433,22 +450,22 @@ export function BrowserPanel(props: {
 			</div>
 
 			<div className="flex shrink-0 items-center gap-1 border-b border-border/40 px-2 py-1.5">
-				<Button variant="ghost" size="icon-sm" className="size-[30px] rounded-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" disabled={!canGoBack} onClick={() => webviewRef.current?.goBack()} title={t("browser.back")}>
-					<ArrowLeft size={15} />
+				<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" disabled={!canGoBack} onClick={() => webviewRef.current?.goBack()} title={t("browser.back")}>
+					<ArrowLeft size={14} />
 				</Button>
-				<Button variant="ghost" size="icon-sm" className="size-[30px] rounded-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" disabled={!canGoForward} onClick={() => webviewRef.current?.goForward()} title={t("browser.forward")}>
-					<ArrowRight size={15} />
+				<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" disabled={!canGoForward} onClick={() => webviewRef.current?.goForward()} title={t("browser.forward")}>
+					<ArrowRight size={14} />
 				</Button>
-				<Button variant="ghost" size="icon-sm" className="size-[30px] rounded-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" onClick={() => webviewRef.current?.reload()} title={t("browser.reload")}>
-					<RefreshCw size={15} />
+				<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" onClick={() => webviewRef.current?.reload()} title={t("browser.reload")}>
+					<RefreshCw size={14} />
 				</Button>
-				<Button variant="ghost" size="icon-sm" className="size-[30px] rounded-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" onClick={() => loadUrl(DEFAULT_HOME)} title={t("browser.home")}>
-					<Home size={15} />
+				<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" onClick={() => loadUrl(DEFAULT_HOME)} title={t("browser.home")}>
+					<Home size={14} />
 				</Button>
 				<div className="min-w-0 flex-1">
 					<Input
 						type="text"
-						className="h-[30px] w-full rounded-md border border-border-subtle bg-bg-input px-2.5 text-[13px] text-text-primary outline-none focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
+						className="h-[30px] w-full rounded-md border border-border-subtle bg-bg-input px-2.5 text-sm text-text-primary outline-none focus-visible:border-[var(--color-accent)] focus-visible:ring-[3px] focus-visible:ring-ring/50"
 						value={inputValue}
 						onChange={(event) => setInputValue(event.target.value)}
 						onKeyDown={handleKeyDown}
@@ -488,10 +505,10 @@ export function BrowserPanel(props: {
 				</div>
 				{props.isFullscreen ? (
 					<>
-						<Button variant="ghost" size="icon-sm" className="size-[30px] rounded-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" onClick={onMinimize} title={t("browser.minimize")}>
+						<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" onClick={onMinimize} title={t("browser.minimize")}>
 							<Minus size={15} />
 						</Button>
-						<Button variant="ghost" size="icon-sm" className="size-[30px] rounded-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" onClick={onClose} title={t("browser.close")}>
+						<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" onClick={onClose} title={t("browser.close")}>
 							<X size={15} />
 						</Button>
 					</>
@@ -500,7 +517,7 @@ export function BrowserPanel(props: {
 
 			{isLoading && (
 				<div className="h-0.5 shrink-0 overflow-hidden bg-bg-subtle">
-					<div className="h-full bg-[var(--color-accent)] transition-[width] duration-150" style={{ width: `${Math.max(5, loadProgress * 100)}%` }} />
+					<div className="h-full bg-[var(--color-accent)] transition-[width] duration-fast" style={{ width: `${Math.max(5, loadProgress * 100)}%` }} />
 				</div>
 			)}
 

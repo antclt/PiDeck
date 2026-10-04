@@ -1,4 +1,4 @@
-import { app, type BrowserWindow, Notification } from "electron";
+import { app, dialog, shell, type BrowserWindow, Notification } from "electron";
 import { randomUUID } from "node:crypto";
 import { stat, unlink, writeFile } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
@@ -33,8 +33,9 @@ import { ipcChannels } from "../../shared/ipc";
 import { sanitizeBridgeUpdate, stripBridgeAnsi } from "../../shared/bridgeText";
 import { collectSessionFileChanges } from "../../shared/fileChanges";
 import { extractPiToolTruncation } from "../../shared/formatToolDetail";
-import { COMPACT_CANCELLED_BY_OWNER, COMPACT_CANCELLED_BY_USER_ABORT, COMPACT_HOOK_REJECT_MAX_MS, COMPACT_OBSERVATION_MAX_AGE_MS, COMPACT_ROUTED_TO_OWNER, COMPACT_USER_ABORT_WINDOW_MS } from "../../shared/compactFeedback";
+import { COMPACT_CANCELLED_BY_OWNER, COMPACT_CANCELLED_BY_USER_ABORT, COMPACT_HOOK_REJECT_MAX_MS, COMPACT_OBSERVATION_MAX_AGE_MS, COMPACT_ROUTED_TO_OWNER, COMPACT_USER_ABORT_WINDOW_MS, COMPACT_WAIT_TIMEOUT } from "../../shared/compactFeedback";
 import { PiProcess } from "./PiProcess";
+import { createBridgeServiceHandler } from "./bridge/bridgeServices";
 import { APP_DEEP_LINK_SCHEME } from "../utils/deepLinkScheme";
 import { createCompactRpcRequest } from "./compactRpc";
 import { readPiCompactionOwnership, type PiCompactionOwnership } from "./compactionOwner";
@@ -149,6 +150,8 @@ export class AgentManager {
 	/** pi 后端支持全部可选能力。 */
 	readonly capabilities: ReadonlySet<AgentGatewayCapability> = new Set(["compact", "fork", "getForkMessages", "editMessage", "deleteMessage", "getCommands", "exportHtml"]);
 	private readonly agents = new Map<string, AgentRuntime>();
+	/** 桥原生服务是否已注入（幂等标记，见 registerBridgeSession）。 */
+	private bridgeServicesInstalled = false;
 	private readonly messages = new Map<string, ChatMessage[]>();
 	/** 工具完整结果 LRU 缓存：截断下发后完整文本仅存于此（运行期「查看完整输出」走内存，
 	 *  历史会话回退读会话文件）。键为 pi message id，agent 停止时随 clearAgentState 释放。 */
@@ -277,6 +280,11 @@ export class AgentManager {
 	private readonly rpcLiveTap = new RpcLiveLogTap((channel, payload) => this.emit(channel, payload));
 	/** 正在执行手动压缩操作的 agent，用于区分手动压缩重启和异常崩溃 */
 	private readonly compactingAgents = new Set<string>();
+
+	/** 手动压缩等待超时过、后台结果尚未反馈的 agent：compaction_end 成功时补发
+	 * 「压缩完成」系统消息（超时路径 RPC 已 reject，正常 toast 链不会再走，#303）。
+	 * 失败/中止的 compaction_end 只清标记不补发（失败已有既有提示路径）。 */
+	private readonly compactTimedOutAgents = new Set<string>();
 	/**
 	 * Pi 通过事件报告正在自动/手动压缩的 agent。
 	 * 自动压缩发生在 agent_end 之后，桌面端若不单独追踪，会过早把会话置为 idle，
@@ -592,6 +600,17 @@ export class AgentManager {
 		try {
 			const server = getBridgeServer();
 			if (!server.ready) return undefined;
+			// 宿主原生服务（gui.filePicker/gui.openPath）注入一次：BridgeServer 不 import electron，
+			// 这里组装真实实现（幂等，重复注入无害）。
+			if (!this.bridgeServicesInstalled) {
+				server.setServiceHandler(
+					createBridgeServiceHandler({
+						showOpenDialog: (options) => dialog.showOpenDialog(options),
+						openPath: (path) => shell.openPath(path),
+					}),
+				);
+				this.bridgeServicesInstalled = true;
+			}
 			const { url, token } = server.registerAgent(
 				agentId,
 				(update) => this.handleBridgeUpdate(agentId, update),
@@ -1047,9 +1066,11 @@ export class AgentManager {
 	 * 读取会话文件中的子代理记录（subagents:record custom 条目），并合并
 	 * 工具调用推导条目（acp_delegate：billion-context；subagent 工具：nicobailon
 	 * pi-subagents）；同 id 时 record 优先（见 mergeSubagentSources 的例外规则）。
+	 * options.liveRuntimeStartedAt 透传给读取侧做 start 锚点对账（#300：本代
+	 * runtime 派发的锚点合成 running，否则运行中子代理误显「已停止」）。
 	 */
-	async readSessionSubagentRecords(sessionPath: string) {
-		const records = await this.sessionHistoryReader.readSubagentRecords(sessionPath);
+	async readSessionSubagentRecords(sessionPath: string, options?: { liveRuntimeStartedAt?: number }) {
+		const records = await this.sessionHistoryReader.readSubagentRecords(sessionPath, options);
 		const derived = await this.sessionHistoryReader.readDerivedSubagentEntries(sessionPath);
 		if (derived.length === 0) return records;
 		return mergeSubagentSources(records, derived);
@@ -2120,7 +2141,11 @@ export class AgentManager {
 		void this.emitRuntimeState(agentId);
 
 		try {
-			const response = await runtime.process.client.request(createCompactRpcRequest(trimmedPrompt), 120_000);
+			// 等待上限吃 rpcTimeout 设置（默认 600s）：压缩要过一遍 LLM 摘要，大上下文
+			// （真实案例 tokensBefore≈209k）轻松超过两分钟——写死 120s 时后台 149.4s 完成
+			// 却被提前报「压缩失败」，而 rpcTimeout 调大也无效（#303）。超时≠失败：进程
+			// 仍活着时压缩大概率还在后台跑，见下方超时分支。
+			const response = await runtime.process.client.request(createCompactRpcRequest(trimmedPrompt), this.rpcTimeoutMs);
 			void this.appLogger?.info("agent", "Compact RPC response received", {
 				agentId,
 				elapsedMs: Date.now() - startTime,
@@ -2153,20 +2178,32 @@ export class AgentManager {
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : String(error);
 			const processAlive = runtime.process.isRunning();
+			// 等待超时≠压缩失败：进程仍活着时 pi 大概率还在后台压（#303 真实案例：
+			// 120s 超时报错，149.4s 后台实际成功并写入会话文件）。超时单独分支处理。
+			const waitTimedOut = processAlive && /RPC command timed out [^:]*: compact/.test(errorMsg);
 			// 取消来源判定必须在这里做（compact 完成后观测就会被下一次压缩覆盖）：
 			// 只有它能让「点了压缩没反应」变成可解释的提示 + 可排查的日志。
-			const cancelSource = processAlive ? this.resolveCompactCancelMessage(agentId, errorMsg) : undefined;
-			void this.appLogger?.error("agent", "Compact failed", {
-				agentId,
-				elapsedMs: Date.now() - startTime,
-				error: errorMsg,
-				processAlive,
-				hasSessionPath: !!runtime.tab.sessionPath,
-				...(cancelSource ? { cancelSource } : {}),
-				...this.compactionCancelEvidence(agentId),
-			});
-
-			this.compactingAgents.delete(agentId);
+			const cancelSource = processAlive && !waitTimedOut ? this.resolveCompactCancelMessage(agentId, errorMsg) : undefined;
+			if (waitTimedOut) {
+				// 超时是「没等到响应」不是「压缩失败」，日志用 warn 避免告警噪音误导排查
+				void this.appLogger?.warn("agent", "Compact wait timed out; still running in background", {
+					agentId,
+					elapsedMs: Date.now() - startTime,
+					error: errorMsg,
+					hasSessionPath: !!runtime.tab.sessionPath,
+				});
+			} else {
+				void this.appLogger?.error("agent", "Compact failed", {
+					agentId,
+					elapsedMs: Date.now() - startTime,
+					error: errorMsg,
+					processAlive,
+					hasSessionPath: !!runtime.tab.sessionPath,
+					...(cancelSource ? { cancelSource } : {}),
+					...this.compactionCancelEvidence(agentId),
+				});
+				this.compactingAgents.delete(agentId);
+			}
 
 			// 如果进程在压缩期间退出（pi 压缩后自动重启进程的行为），
 			// RPC 请求会因连接断开而失败，但压缩实际已完成。
@@ -2184,6 +2221,14 @@ export class AgentManager {
 					agentId,
 					totalElapsedMs: Date.now() - startTime,
 				});
+			} else if (waitTimedOut) {
+				// 不清 compactingAgents：isCompacting 保持 true，圆环按钮继续禁用，
+				// 防止用户在后台压缩期间重复触发；状态由 compaction_end 事件负责收尾
+				// （compaction_end 处理器里同步 delete）。标记本 agent 超时过，
+				// 后台最终成功时补发「压缩完成」系统消息（RPC 已 reject，正常 toast 链
+				// 不会再走）。
+				this.compactTimedOutAgents.add(agentId);
+				throw new Error(COMPACT_WAIT_TIMEOUT);
 			} else if (cancelSource) {
 				// 抛带来源的稳定文案：渲染层据此给出「扩展接管 / 被自己打断」的可操作
 				// 提示，而不是原来那条被归成静默的 pi 原文（用户只看到「没反应」）。
@@ -2489,7 +2534,7 @@ export class AgentManager {
 						latest: undefined as number | undefined,
 						average: undefined as number | undefined,
 						sampleCount: 0,
-						messageChars: undefined as number | undefined,
+						conversationTokens: undefined as number | undefined,
 					}),
 		]);
 		const state = asRecord(stateResponse.data);
@@ -2530,8 +2575,8 @@ export class AgentManager {
 			contextWindow: pickNumber(contextUsage?.contextWindow) ?? pickNumber(model?.contextWindow),
 			contextPercent: pickNumber(contextUsage?.percent),
 			contextOverflow: this.contextOverflowByAgent.get(agentId) === true,
-			/** 对话消息估算 token：消息字符 ÷ 4（1 token ≈ 4 chars），缺文件数据时不报 */
-			contextMessageTokens: fileHitStats.messageChars != null ? Math.round(fileHitStats.messageChars / 4) : undefined,
+			/** 对话消息估算 token：CJK 加权估算（中文 1.5 字/token、其余 4 字符/token），含工具调用/结果文本，遇压缩重置 */
+			contextMessageTokens: fileHitStats.conversationTokens,
 			inputTokens,
 			outputTokens,
 			cacheRead,
@@ -3216,7 +3261,7 @@ export class AgentManager {
 			projectId: runtime.tab.projectId,
 			sessionPath: runtime.tab.sessionPath,
 		});
-		const { projectId, title, sessionEnvironment: environment, sessionSource: source, wslDistro, wslUser, importedSourceId, noSession } = runtime.tab;
+		const { projectId, title, sessionEnvironment: environment, sessionSource: source, wslDistro, wslUser, importedSourceId, noSession, deckSessionId } = runtime.tab;
 
 		// 优先从 pi 获取最新 sessionFile，兜底用 tab 上缓存的值；
 		// 避免首次创建时未指定 session 路径、restart 后丢失历史的情况。
@@ -3255,6 +3300,8 @@ export class AgentManager {
 		this.emitState();
 
 		// 用相同的 session 重新创建 agent，新进程会重新加载所有配置
+		// deckSessionId 必须随 restart 带入：安全门扩展靠它（PIDECK_SESSION_ID）解析
+		// 以 catalog 会话 ID 存储的 sessionOverrides，丢了会回退全局默认等级（issue #302）。
 		return this.create({
 			projectId,
 			sessionPath: noSession ? undefined : sessionPath,
@@ -3265,6 +3312,7 @@ export class AgentManager {
 			wslUser,
 			importedSourceId,
 			noSession,
+			deckSessionId,
 		});
 	}
 
@@ -4266,6 +4314,16 @@ export class AgentManager {
 		}
 		if (typed.type === "compaction_end") {
 			this.rpcCompactingAgents.delete(agentId);
+			// compact() 等待超时分支故意不删 compactingAgents（保持 isCompacting 让按钮
+			// 禁用直到后台压缩结束），在这里统一收尾；正常路径 RPC 成功时已删过，重复 delete 无害。
+			this.compactingAgents.delete(agentId);
+			// 手动压缩超时后的后台结果：成功则补发完成消息让「仍在后台进行」有确定结局；
+			// 失败/中止只清标记不补发（失败已有下方既有提示路径，残留标记会让后续
+			// 自动压缩成功误报「后台压缩完成」）。自动压缩从未入集合，不受影响。
+			const compactTimedOut = this.compactTimedOutAgents.delete(agentId);
+			if (typed.result === true && compactTimedOut && runtime) {
+				this.addLocalizedMessage(agentId, "system", "diagnostic.compactDoneAfterTimeout", "后台压缩完成，上下文已更新");
+			}
 			// 观测留给 compact() 的失败分支做来源判定：同一个 "Compaction cancelled"
 			// 到底是「扩展钩子拒绝」还是「abort 打断」，唯一客观线索就是这段耗时。
 			const startedAt = this.compactionStartedAt.get(agentId);

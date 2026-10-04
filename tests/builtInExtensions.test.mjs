@@ -68,6 +68,35 @@ test("listActiveBuiltInExtensionPaths respects removedBuiltIn and missing files"
 	}
 });
 
+test("default-disabled built-ins (gui-bridge/ext-points) require explicit opt-in", () => {
+	const { listActiveBuiltInExtensionPaths, DEFAULT_DISABLED_BUILT_IN_EXTENSIONS, isDefaultDisabledBuiltInExtension } = loadBuiltInExtensionsModule();
+	const root = mkdtempSync(join(tmpdir(), "pideck-optin-ext-"));
+	const extDir = join(root, "resources", "extensions");
+	mkdirSync(extDir, { recursive: true });
+	writeFileSync(join(extDir, "pi-deck-gui-bridge.ts"), "// bridge\n", "utf8");
+	writeFileSync(join(extDir, "pi-deck-ext-points.ts"), "// panel\n", "utf8");
+	writeFileSync(join(extDir, "pi-deck-ask-question.ts"), "// ask\n", "utf8");
+	try {
+		// 默认：仅 ask 注入，桥/面板不注入（opt-in 机制，见 DEFAULT_DISABLED_BUILT_IN_EXTENSIONS）
+		let paths = listActiveBuiltInExtensionPaths({ appPath: root, resourcesPath: root, isDev: true }, []);
+		assert.equal(paths.length, 1);
+		assert.ok(String(paths[0]).endsWith("pi-deck-ask-question.ts"));
+		// opt-in 面板：面板注入；桥仍默认关
+		paths = listActiveBuiltInExtensionPaths({ appPath: root, resourcesPath: root, isDev: true }, [], ["pi-deck-ext-points.ts"]);
+		assert.equal(paths.length, 2);
+		// opt-in 两个 + removed 无干扰（removed 是另一套机制，不冲突）
+		paths = listActiveBuiltInExtensionPaths({ appPath: root, resourcesPath: root, isDev: true }, ["pi-deck-ask-question.ts"], ["pi-deck-ext-points.ts", "pi-deck-gui-bridge.ts"]);
+		assert.equal(paths.length, 2);
+		assert.ok(String(paths[0]).endsWith("pi-deck-gui-bridge.ts"));
+		// 默认关集合固定为桥+面板
+		assert.equal(JSON.stringify([...DEFAULT_DISABLED_BUILT_IN_EXTENSIONS]), JSON.stringify(["pi-deck-gui-bridge.ts", "pi-deck-ext-points.ts"]));
+		assert.equal(isDefaultDisabledBuiltInExtension("pi-deck-gui-bridge.ts"), true);
+		assert.equal(isDefaultDisabledBuiltInExtension("pi-deck-ask-question.ts"), false);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("internal shell proxy adapter is always injected even if user-facing built-ins are removed", () => {
 	const { listActiveBuiltInExtensionPaths, INTERNAL_BUILT_IN_EXTENSIONS } = loadBuiltInExtensionsModule();
 	const root = mkdtempSync(join(tmpdir(), "pideck-internal-ext-"));

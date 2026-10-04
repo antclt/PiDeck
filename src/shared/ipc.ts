@@ -837,6 +837,26 @@ export const ipcChannels = {
 	/** 删除背景图文件 */
 	removeBackgroundImage: "backgrounds:remove",
 
+	// ===== 自定义主题（userData/custom-themes/ 目录） =====
+	/** 列出主题：内置示例 + 用户目录（含解析失败条目的 parseError） */
+	listCustomThemes: "themes:list",
+	/** 读取主题原始 JSON（内置示例返回序列化 demo；不存在返回 null） */
+	readCustomTheme: "themes:read",
+	/** 校验并保存主题包（id 即文件名 <id>.json），失败返回错误清单 */
+	saveCustomTheme: "themes:save",
+	/** 删除用户主题文件（回收站，内置示例不可删） */
+	deleteCustomTheme: "themes:delete",
+	/** 把 AI 主题开发指南写入主题目录并在资源管理器定位 */
+	writeCustomThemeGuide: "themes:write-guide",
+
+	// ===== 插件开发（~/.pi/agent/extensions/ 目录） =====
+	/** 插件开发支持状态：目录路径 + demo/指南是否已就位 */
+	pluginDevStatus: "plugin-dev:status",
+	/** 把 AI 插件开发指南写入用户扩展目录并在资源管理器定位 */
+	pluginDevWriteGuide: "plugin-dev:write-guide",
+	/** 复制内置 demo 插件到用户扩展目录（已存在不覆盖） */
+	pluginDevCopyDemo: "plugin-dev:copy-demo",
+
 	// ===== 内置浏览器 =====
 	browserOpenExternal: "browser:open-external",
 

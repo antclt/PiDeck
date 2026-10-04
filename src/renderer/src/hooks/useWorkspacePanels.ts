@@ -85,20 +85,23 @@ function readDrawerState(storage: WorkspacePanelOptions["storage"], key: string)
 	try {
 		const parsed: unknown = JSON.parse(storage.getItem(key) ?? "null");
 		if (!parsed || typeof parsed !== "object") return null;
-		const value = parsed as { panel?: unknown; pinned?: unknown; pinnedPanels?: unknown };
+		const value = parsed as { panel?: unknown; pinned?: unknown; pinnedPanels?: unknown; drawerPinned?: unknown };
 		const panel = value.panel === "editor" ? "files" : value.panel;
 		const validPanels = ["files", "sessions", "browser", "git", "trajectory", "rewind"];
 		const validPanel = panel === null || validPanels.includes(String(panel));
 		const pinnedPanels = Array.isArray(value.pinnedPanels) ? value.pinnedPanels.filter((item): item is WorkspaceDrawerPanel => typeof item === "string" && validPanels.includes(item)) : typeof value.pinned === "boolean" && value.pinned && validPanel && panel ? [panel as WorkspaceDrawerPanel] : undefined;
-		return validPanel && Array.isArray(pinnedPanels) ? { panel: panel as WorkspaceDrawerPanel | null, pinnedPanels } : null;
+		// drawerPinned（工作区钉住）只能来自显式持久化；旧存档无此字段 → false（见下方水合注释）。
+		const drawerPinned = value.drawerPinned === true;
+		return validPanel && Array.isArray(pinnedPanels) ? { panel: panel as WorkspaceDrawerPanel | null, pinnedPanels, drawerPinned } : null;
 	} catch {
 		return null;
 	}
 }
 
-function writeDrawerState(storage: WorkspacePanelOptions["storage"], key: string, panel: WorkspaceDrawerPanel | null, pinnedPanels: readonly WorkspaceDrawerPanel[]) {
+function writeDrawerState(storage: WorkspacePanelOptions["storage"], key: string, panel: WorkspaceDrawerPanel | null, pinnedPanels: readonly WorkspaceDrawerPanel[], drawerPinned: boolean) {
 	try {
-		storage?.setItem(key, JSON.stringify({ panel, pinnedPanels }));
+		// drawerPinned 仅在 true 时落盘：旧版本读到无此字段的存档会得到 false，天然向后兼容。
+		storage?.setItem(key, JSON.stringify(drawerPinned ? { panel, pinnedPanels, drawerPinned: true } : { panel, pinnedPanels }));
 	} catch {
 		// Storage is a convenience; panel commands must continue working when it is unavailable.
 	}
@@ -205,7 +208,7 @@ export function useWorkspacePanels(options: WorkspacePanelOptions = {}) {
 	pinnedPanelsByProjectRef.current = pinnedPanelsByProject;
 
 	const loadDrawerState = useCallback((id: string) => readDrawerState(storageRef.current, `${drawerPrefixRef.current}${id}`), []);
-	const saveDrawerState = useCallback((id: string, panel: WorkspaceDrawerPanel | null, pinnedPanels: readonly WorkspaceDrawerPanel[]) => writeDrawerState(storageRef.current, `${drawerPrefixRef.current}${id}`, panel, pinnedPanels), []);
+	const saveDrawerState = useCallback((id: string, panel: WorkspaceDrawerPanel | null, pinnedPanels: readonly WorkspaceDrawerPanel[], drawerPinned: boolean) => writeDrawerState(storageRef.current, `${drawerPrefixRef.current}${id}`, panel, pinnedPanels, drawerPinned), []);
 	const pinnedPanels = projectId ? (pinnedPanelsByProject[projectId] ?? DEFAULT_PINNED_DRAWER_PANELS) : DEFAULT_PINNED_DRAWER_PANELS;
 
 	// 项目上下文水合（null → 首个 projectId）不得视为「切换项目」：
@@ -233,7 +236,12 @@ export function useWorkspacePanels(options: WorkspacePanelOptions = {}) {
 		setPinnedPanelsByProject((current) => ({ ...current, [projectId]: nextPinnedPanels }));
 		setDrawerPinnedByProject((current) => {
 			const next = { ...current };
-			const restoredPinned = saved?.panel && nextPinnedPanels.includes(saved.panel) ? saved.panel : undefined;
+			// 工作区钉住只能恢复显式持久化的 drawerPinned 标志（toggleDrawerPinned 写入）。
+			// 绝不能从「保存的面板 ∈ pinnedPanels」推断：files/git 恒在默认 pinnedPanels 里，
+			// 推断会让每个曾打开过文件/Git 抽屉的项目在启动/切换时自动钉死抽屉——
+			// closeDrawer/collapseDrawer/openDrawer(其他面板) 全部静默 no-op，表现为
+			// 「抽屉开关按钮点击无反应、文件/Git tab 切换无反应」（2026-10 用户反馈）。
+			const restoredPinned = saved?.drawerPinned === true && saved.panel && nextPinnedPanels.includes(saved.panel) ? saved.panel : undefined;
 			if (restoredPinned) next[projectId] = restoredPinned;
 			else delete next[projectId];
 			return next;
@@ -246,7 +254,7 @@ export function useWorkspacePanels(options: WorkspacePanelOptions = {}) {
 			if (pinnedPanel && pinnedPanel !== panel) return;
 			const next = drawerRef.current === panel && !drawerPinnedRef.current ? null : panel;
 			if (next !== "git") invalidateGitDiff();
-			if (projectIdRef.current) saveDrawerState(projectIdRef.current, next, pinnedPanelsByProjectRef.current[projectIdRef.current] ?? DEFAULT_PINNED_DRAWER_PANELS);
+			if (projectIdRef.current) saveDrawerState(projectIdRef.current, next, pinnedPanelsByProjectRef.current[projectIdRef.current] ?? DEFAULT_PINNED_DRAWER_PANELS, drawerPinnedRef.current);
 			setDrawer(next);
 			setDrawerCollapsed(false);
 		},
@@ -263,7 +271,7 @@ export function useWorkspacePanels(options: WorkspacePanelOptions = {}) {
 			const pinnedPanel = projectIdRef.current ? drawerPinnedByProjectRef.current[projectIdRef.current] : undefined;
 			if (pinnedPanel && pinnedPanel !== panel) return;
 			if (panel !== "git") invalidateGitDiff();
-			if (projectIdRef.current) saveDrawerState(projectIdRef.current, panel, pinnedPanelsByProjectRef.current[projectIdRef.current] ?? DEFAULT_PINNED_DRAWER_PANELS);
+			if (projectIdRef.current) saveDrawerState(projectIdRef.current, panel, pinnedPanelsByProjectRef.current[projectIdRef.current] ?? DEFAULT_PINNED_DRAWER_PANELS, drawerPinnedRef.current);
 			setDrawer(panel);
 			setDrawerCollapsed(false);
 		},
@@ -311,7 +319,7 @@ export function useWorkspacePanels(options: WorkspacePanelOptions = {}) {
 			return;
 		}
 		invalidateGitDiff();
-		if (projectIdRef.current) saveDrawerState(projectIdRef.current, null, pinnedPanelsByProjectRef.current[projectIdRef.current] ?? DEFAULT_PINNED_DRAWER_PANELS);
+		if (projectIdRef.current) saveDrawerState(projectIdRef.current, null, pinnedPanelsByProjectRef.current[projectIdRef.current] ?? DEFAULT_PINNED_DRAWER_PANELS, false);
 		setDrawer(null);
 	}, [closeRpcLogPanel, invalidateGitDiff, saveDrawerState]);
 
@@ -330,7 +338,7 @@ export function useWorkspacePanels(options: WorkspacePanelOptions = {}) {
 			if (next.length === 0) return;
 			pinnedPanelsByProjectRef.current = { ...pinnedPanelsByProjectRef.current, [id]: next };
 			setPinnedPanelsByProject((all) => ({ ...all, [id]: next }));
-			saveDrawerState(id, drawerRef.current, next);
+			saveDrawerState(id, drawerRef.current, next, drawerPinnedRef.current);
 		},
 		[saveDrawerState],
 	);
@@ -350,7 +358,8 @@ export function useWorkspacePanels(options: WorkspacePanelOptions = {}) {
 		const nextPanels = willPin ? (currentPanels.includes(currentDrawer) ? currentPanels : [...currentPanels, currentDrawer]) : currentPanels.filter((panel) => panel !== currentDrawer);
 		if (nextPanels.length === 0) return;
 		setPinnedPanelsByProject((all) => ({ ...all, [id]: nextPanels }));
-		saveDrawerState(id, currentDrawer, nextPanels);
+		// 钉住标志显式落盘：水合只认这个字段，不再从面板∈pinnedPanels 推断。
+		saveDrawerState(id, currentDrawer, nextPanels, willPin);
 	}, [saveDrawerState]);
 
 	const closeGitDiff = useCallback(() => {

@@ -14,6 +14,7 @@ import type { ExtensionManager } from "../extensions/ExtensionManager";
 import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
 import type { ConfigManager } from "../config/ConfigManager";
 import { getPiPackageCatalog } from "../extensions/piPackageCatalog";
+import { isDefaultDisabledBuiltInExtension } from "../extensions/builtInExtensions";
 
 export type StoreIpcDeps = {
 	promptManager: PromptManager;
@@ -590,8 +591,15 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 	ipcMain.handle(ipcChannels.extensionsToggle, async (_event, source: string, enabled: boolean, scope?: "user" | "project" | "unknown", path?: unknown, projectId?: unknown) => {
 		// 内置扩展走 removedBuiltInExtensions + RPC -e，不再写用户扩展目录 / pi 过滤规则。
 		if (source.startsWith("pi-deck-") && source.endsWith(".ts")) {
-			if (enabled) await extensionManager.restoreBuiltIn(source);
-			else await extensionManager.disableBuiltIn(source);
+			if (isDefaultDisabledBuiltInExtension(source)) {
+				// 默认关闭的内置扩展（GUI 桥/扩展点面板）：开关写 enabledBuiltInExtensions（opt-in）。
+				// 注意不碰 removedBuiltInExtensions——那是「默认启用扩展的用户禁用」机制，语义互斥。
+				await extensionManager.toggleBuiltIn(source, enabled);
+			} else if (enabled) {
+				await extensionManager.restoreBuiltIn(source);
+			} else {
+				await extensionManager.disableBuiltIn(source);
+			}
 		} else {
 			// 原生过滤规则：本地文件扩展要精确路径，项目作用域要 projectId（来自渲染层，主进程校验）。
 			const extensionPath = typeof path === "string" && path.length <= 32_768 ? path : undefined;

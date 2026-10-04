@@ -94,28 +94,27 @@ export function BridgeSlot({ sessionId, targetId, className }: { sessionId: stri
 }
 
 /**
- * 输入框挂件落点：同时渲染 `aboveEditor` 与 `belowEditor` 两个 placement。
+ * 输入框上方挂件落点。
  *
+ * 输入框下方是 PiDeck 原生区域，不挂 GUI 扩展桥；这里只保留上方 placement。
  * 桥的落点 id 带 placement 后缀（`widget:<key>:<placement>`），
- * 这里按前缀过滤 —— 同一 key 改 placement 时旧落点会被桥推 null 清掉，
- * 因此不会两处同时出现（§8.4 B）。
+ * 无 placement 后缀的旧扩展仍按上方处理（兼容既有桥数据）。
  */
-export function BridgeWidgetSlot({ sessionId, placement }: { sessionId: string | undefined; placement: "aboveEditor" | "belowEditor" }): ReactNode {
+export function BridgeWidgetSlot({ sessionId, placement }: { sessionId: string | undefined; placement: "aboveEditor" }): ReactNode {
 	const targets = useSessionBridgeTargets(sessionId);
 	const onEvent = useBridgeEventSink(sessionId);
 
-	// 只挑该 placement 的 widget 落点；无 placement 后缀的按 aboveEditor 处理（与现状一致）
+	// 只挑输入框上方 widget；输入框下方不渲染桥节点，避免与 PiDeck 原生区域冲突。
 	const entries = useMemo(() => {
 		if (!targets) return [];
 		const prefix = BRIDGE_TARGET.widgetPrefix;
-		const suffix = `:${placement}`;
 		return Object.entries(targets).filter(([key, value]) => {
 			if (!value || !key.startsWith(prefix)) return false;
 			const hasPlacement = key.endsWith(":aboveEditor") || key.endsWith(":belowEditor");
-			if (!hasPlacement) return placement === "aboveEditor";
-			return key.endsWith(suffix);
+			if (!hasPlacement) return true;
+			return key.endsWith(":aboveEditor");
 		});
-	}, [placement, targets]);
+	}, [targets]);
 
 	if (entries.length === 0) return null;
 	return (
@@ -158,7 +157,7 @@ export function BridgeWidgetSlot({ sessionId, placement }: { sessionId: string |
  *        <BridgeSlotBoundary>
  *          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
  *            {entries.map(([key, text]) => (
- *              <span key={key} className={`text-[11px] ${bridgeToneClass(ui?.bridgeStatusTone?.[key]) || "text-muted-foreground"}`} data-bridge-status={key}>
+ *              <span key={key} className={`text-micro ${bridgeToneClass(ui?.bridgeStatusTone?.[key]) || "text-muted-foreground"}`} data-bridge-status={key}>
  *                {text}
  *              </span>
  *            ))}
@@ -285,7 +284,7 @@ export function BridgeGuiSlot({ sessionId, slot, matchKey, className, titleClass
 					// key 用完整落点 id：同 key 不同 owner 的两份贡献必须能共存
 					<div key={targetId} data-bridge-slot={targetId} data-bridge-slot-key={`${slot}:${key}`} data-bridge-slot-owner={owner}>
 						{/* 分组标题：桥把 opts.title 挂在节点 slot 元信息上（§7.1-B） */}
-						{node.slot?.title ? <div className={titleClassName ?? "mb-1 text-[11px] font-medium text-muted-foreground"}>{node.slot.title}</div> : null}
+						{node.slot?.title ? <div className={titleClassName ?? "mb-1 text-micro font-medium text-muted-foreground"}>{node.slot.title}</div> : null}
 						{renderBridgeNode(node, withTarget(onEvent, targetId), targetId)}
 					</div>
 				))}

@@ -200,10 +200,11 @@ test("panel reuses the SessionStatus detail builder and keeps compact action", (
 	assert.match(source, /const detail = buildSessionStatusDetail\(\s*props\.state,/);
 	assert.match(source, /props\.state\?\.cacheHitAveragePercent \?\? undefined,/);
 	// 明细行与「最近一次回复」性能组分开渲染（不混读为会话均值）；
-	// 输入/输出 token 与最新缓存命中率已常驻输入框下方（ComposerStatsLine），
-	// 圆环面板消费前过滤这两行，避免重复展示
+	// 2027-02 重构后圆环迁入输入框底栏，面板改为保留完整明细
+	// （tokens/hitLatest 不再过滤——源码注释：避免用户从一行截断文本里猜数值）
 	assert.match(source, /panelDetailRows\.map\(/);
-	assert.match(source, /row\.label !== t\("ctx\.detail\.tokens"\) && row\.label !== t\("ctx\.detail\.hitLatest"\)/);
+	assert.match(source, /const panelDetailRows = detail\.detailRows;/);
+	assert.doesNotMatch(source, /row\.label !== t\("ctx\.detail\.tokens"\)/);
 	assert.match(source, /detail\.replyPerfRows\.map\(/);
 	assert.match(source, /t\("ctx\.detail\.lastReply"\)/);
 	// DSH 会话统计组（host sessionStats 投影；回合/墙钟/平均首字/生成速度）
@@ -247,9 +248,12 @@ test("panel re-anchors on scroll instead of closing during streaming", () => {
 
 test("bottom bar wires the meter next to send controls and merges model + thinking into one chip", () => {
 	const source = bottomBarSource();
-	// ContextMeter 挂在右侧组（git 分支之前、发送控件同组）
-	assert.match(source, /import \{ SessionContextMeter \} from "\.\/SessionContextMeter"/);
-	assert.match(source, /<SessionContextMeter\s*state=\{props\.state\}\s*onCompact=\{props\.onCompact\}[\s\S]{0,180}?backend=\{usageBackend\}/);
+	// 2027-02 重构（07b7e164c keep context ring beside composer stats）：ContextMeter
+	// 装配点从 composer-bottom-right 容器内迁到 ComposerArea，以 contextMeter prop
+	// 注入 ComposerStatsLine（与统计行并排）；chip 容器仍在 ComposerComponents。
+	const areaSource = readFileSync("src/renderer/src/components/session/ComposerArea.tsx", "utf8");
+	assert.match(areaSource, /import \{ SessionContextMeter \} from "\.\/SessionContextMeter"/);
+	assert.match(areaSource, /contextMeter=\{[\s\S]{0,240}?<SessionContextMeter[\s\S]{0,360}?backend=\{composer\.backend === "dsh" \? "dsh" : "pi"\}/);
 	assert.match(source, /composer-bottom-right ml-auto flex shrink-0 items-center gap-2/);
 	// 模型/思考合并 chip：模型名 · 思考档位 + chevron（dsh ModelSelect trigger 形态）
 	assert.match(source, /composer-bar-btn model-thinking/);
@@ -438,7 +442,7 @@ test("meter stays visible without capacity: placeholder ring + unavailable panel
 	assert.match(source, /const percent = context\?\.percent \?\? 0;/);
 	assert.doesNotMatch(source, /if \(context === null\) return null/);
 	// 面板标题走 reading（占位时显示 unavailable 文案），figures 仅在可用时渲染
-	assert.match(source, /<span className="text-text-tertiary">\{reading\}<\/span>/);
+	assert.match(source, /<span className="text-text-tertiary" title=\{t\("sessionContext\.usageHint"\)\}>[\s\S]*?\{reading\}[\s\S]*?<\/span>/);
 	assert.match(source, /\{available && figures !== undefined && /);
 	// 不再因 capacity 消失自动关闭面板
 	assert.doesNotMatch(source, /if \(!available && open\) setOpen\(false\)/);

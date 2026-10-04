@@ -63,7 +63,7 @@ import { archivedDshWorkspaceLabel, archivedPiWorkspaceLabel, filterArchivedDshB
  */
 function WorkspaceTag(props: { label: string }) {
 	return (
-		<span className="inline-flex shrink-0 items-center gap-0.5 rounded-[4px] border border-border-subtle bg-bg-muted px-1 py-px text-micro text-muted-foreground" title={t("sessionManager.workspaceTag", { name: props.label })}>
+		<span className="inline-flex shrink-0 items-center gap-0.5 rounded-xs border border-border-subtle bg-bg-muted px-1 py-px text-micro text-muted-foreground" title={t("sessionManager.workspaceTag", { name: props.label })}>
 			<GitBranch size={10} strokeWidth={2} aria-hidden="true" />
 			<span className="max-w-24 truncate">{props.label}</span>
 		</span>
@@ -229,7 +229,7 @@ export function SessionManagerModal(props: {
 												key={pill}
 												variant="outline"
 												size="sm"
-												className={`h-auto rounded-full border border-border-subtle bg-transparent px-3 py-1 text-caption font-medium text-text-tertiary transition-all duration-150 hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]${activePills.has(pill) ? " border-[var(--color-accent)] bg-bg-active font-semibold text-[var(--color-accent)]" : ""}`}
+												className={`h-auto rounded-full border border-border-subtle bg-transparent px-3 py-1 text-caption font-medium text-text-tertiary transition-all duration-fast hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]${activePills.has(pill) ? " border-[var(--color-accent)] bg-bg-active font-semibold text-[var(--color-accent)]" : ""}`}
 												onClick={() => togglePill(pill)}
 											>
 												{t(pill === "dsh" ? "sessionBackend.dsh" : pill === "imagegen" ? "sessionBackend.imagegen" : `sessionSource.${pill}`)}
@@ -250,7 +250,7 @@ export function SessionManagerModal(props: {
 								<Button
 									variant="outline"
 									size="sm"
-									className="h-auto gap-1 border border-border-subtle px-3 py-1 text-caption font-medium text-text-tertiary transition-all duration-150 hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+									className="h-auto gap-1 border border-border-subtle px-3 py-1 text-caption font-medium text-text-tertiary transition-all duration-fast hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
 									onClick={() => {
 										// 批量归档选中行（与删除同粒度）；运行中会话由主进程拒绝并提示
 										const toArchive = props.sessions.filter((s) => selected.has(s.id));
@@ -264,7 +264,7 @@ export function SessionManagerModal(props: {
 								<Button
 									variant="outline"
 									size="sm"
-									className="h-auto gap-1 border border-[color-mix(in_srgb,var(--color-danger)_28%,transparent)] px-3 py-1 text-caption font-medium text-[var(--color-danger)] shadow-none transition-all duration-150 hover:border-[var(--color-danger)] hover:bg-[var(--color-danger-soft)]"
+									className="h-auto gap-1 border border-[color-mix(in_srgb,var(--color-danger)_28%,transparent)] px-3 py-1 text-caption font-medium text-[var(--color-danger)] shadow-none transition-all duration-fast hover:border-[var(--color-danger)] hover:bg-[var(--color-danger-soft)]"
 									onClick={handleDeleteSelected}
 								>
 									{t("common.deleteSelected", { count: selected.size })}
@@ -274,7 +274,7 @@ export function SessionManagerModal(props: {
 								<Button
 									variant="outline"
 									size="sm"
-									className="h-auto gap-1 border border-[color-mix(in_srgb,var(--color-danger)_28%,transparent)] px-3 py-1 text-caption font-medium text-[var(--color-danger)] shadow-none transition-all duration-150 hover:border-[var(--color-danger)] hover:bg-[var(--color-danger-soft)]"
+									className="h-auto gap-1 border border-[color-mix(in_srgb,var(--color-danger)_28%,transparent)] px-3 py-1 text-caption font-medium text-[var(--color-danger)] shadow-none transition-all duration-fast hover:border-[var(--color-danger)] hover:bg-[var(--color-danger-soft)]"
 									onClick={handleDeleteArchivedSelected}
 								>
 									{t("common.deleteSelected", { count: archivedSelected.size })}
@@ -283,7 +283,7 @@ export function SessionManagerModal(props: {
 							<Button
 								variant="outline"
 								size="sm"
-								className={`h-auto gap-1 rounded-full border border-border-subtle bg-transparent px-3 py-1 text-caption font-medium transition-all duration-150 hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]${showArchived ? " border-[var(--color-accent)] bg-bg-active font-semibold text-[var(--color-accent)]" : " text-text-tertiary"}`}
+								className={`h-auto gap-1 rounded-full border border-border-subtle bg-transparent px-3 py-1 text-caption font-medium transition-all duration-fast hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]${showArchived ? " border-[var(--color-accent)] bg-bg-active font-semibold text-[var(--color-accent)]" : " text-text-tertiary"}`}
 								onClick={() => {
 									if (showArchived) {
 										setShowArchived(false);
@@ -363,7 +363,7 @@ export function SessionManagerModal(props: {
 															<Button
 																variant="ghost"
 																size="sm"
-																className="h-auto gap-[3px] rounded-[4px] px-2 text-caption text-text-tertiary transition-all duration-150 hover:bg-bg-hover hover:text-[var(--color-accent)]"
+																className="h-auto gap-[3px] rounded-xs px-2 text-caption text-text-tertiary transition-all duration-fast hover:bg-bg-hover hover:text-[var(--color-accent)]"
 																onClick={() => {
 																	// 恢复后重新拉取归档列表（主列表由 catalog refresh 自动更新）
 																	const restored = row.kind === "pi" ? props.onUnarchive(row.item.summary) : props.onUnarchiveDsh(row.item.dshSessionId);
@@ -373,7 +373,7 @@ export function SessionManagerModal(props: {
 															>
 																{t("sessionManager.restore")}
 															</Button>
-															<Button variant="ghost" size="sm" className="h-auto gap-[3px] rounded-[4px] px-2 text-caption text-text-tertiary transition-all duration-150 hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]" onClick={() => setPendingDeleteArchived([row])} title={t("common.delete")}>
+															<Button variant="ghost" size="sm" className="h-auto gap-[3px] rounded-xs px-2 text-caption text-text-tertiary transition-all duration-fast hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]" onClick={() => setPendingDeleteArchived([row])} title={t("common.delete")}>
 																<Trash2 size={12} aria-hidden="true" />
 																{t("common.delete")}
 															</Button>
@@ -419,17 +419,17 @@ export function SessionManagerModal(props: {
 												</TableCell>
 												<TableCell className="w-40 text-right">
 													<div className="flex items-center justify-end gap-0.5">
-														<Button variant="ghost" size="sm" className="h-auto gap-[3px] rounded-[4px] px-2 text-caption text-text-tertiary transition-all duration-150 hover:bg-bg-hover hover:text-[var(--color-accent)]" onClick={() => props.onRename(session)} title={t("common.rename")}>
+														<Button variant="ghost" size="sm" className="h-auto gap-[3px] rounded-xs px-2 text-caption text-text-tertiary transition-all duration-fast hover:bg-bg-hover hover:text-[var(--color-accent)]" onClick={() => props.onRename(session)} title={t("common.rename")}>
 															{t("common.rename")}
 														</Button>
-														<Button variant="ghost" size="sm" className="h-auto gap-[3px] rounded-[4px] px-2 text-caption text-text-tertiary transition-all duration-150 hover:bg-bg-hover hover:text-[var(--color-accent)]" onClick={() => props.onExport(session)} title={t("menu.exportHtml")}>
+														<Button variant="ghost" size="sm" className="h-auto gap-[3px] rounded-xs px-2 text-caption text-text-tertiary transition-all duration-fast hover:bg-bg-hover hover:text-[var(--color-accent)]" onClick={() => props.onExport(session)} title={t("menu.exportHtml")}>
 															{t("menu.exportHtml")}
 														</Button>
-														<Button variant="ghost" size="sm" className="h-auto gap-[3px] rounded-[4px] px-2 text-caption text-text-tertiary transition-all duration-150 hover:bg-bg-hover hover:text-[var(--color-accent)]" onClick={() => props.onArchive([session])} title={t("sessionManager.archiveAction")}>
+														<Button variant="ghost" size="sm" className="h-auto gap-[3px] rounded-xs px-2 text-caption text-text-tertiary transition-all duration-fast hover:bg-bg-hover hover:text-[var(--color-accent)]" onClick={() => props.onArchive([session])} title={t("sessionManager.archiveAction")}>
 															<Archive size={12} aria-hidden="true" />
 															{t("sessionManager.archiveAction")}
 														</Button>
-														<Button variant="ghost" size="sm" className="h-auto gap-[3px] rounded-[4px] px-2 text-caption text-text-tertiary transition-all duration-150 hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]" onClick={() => props.onDelete([session])} title={t("common.delete")}>
+														<Button variant="ghost" size="sm" className="h-auto gap-[3px] rounded-xs px-2 text-caption text-text-tertiary transition-all duration-fast hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]" onClick={() => props.onDelete([session])} title={t("common.delete")}>
 															{t("common.delete")}
 														</Button>
 													</div>

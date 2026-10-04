@@ -80,11 +80,12 @@ function makeScanHarness(text, { withContext = true } = {}) {
 
 test("computeCacheHitStats: 空文件/无样本返回 undefined", () => {
 	const { computeCacheHitStats } = loadCacheHitStats();
-	assert.equal(json(computeCacheHitStats("")), json({ latest: undefined, average: undefined, sampleCount: 0, messageChars: 0 }));
-	// 只有 user 消息与无 usage 的 assistant 消息：无样本（字符数仍统计）
+	assert.equal(json(computeCacheHitStats("")), json({ latest: undefined, average: undefined, sampleCount: 0, conversationTokens: 0 }));
+	// 只有 user 消息与无 usage 的 assistant 消息：无样本（估算仍统计）
 	const noUsage = `${userLine()}\n${assistantLine({ usage: null })}\n`;
 	const stats = computeCacheHitStats(noUsage);
-	assert.equal(json(stats), json({ latest: undefined, average: undefined, sampleCount: 0, messageChars: 4 }));
+	// "hi"、"ok" 各自向上取整 1 token（逐条取整累加），合计 2
+	assert.equal(json(stats), json({ latest: undefined, average: undefined, sampleCount: 0, conversationTokens: 2 }));
 });
 
 test("computeCacheHitStats: 单条消息 latest === average", () => {
@@ -128,7 +129,7 @@ test("hitRateFromUsage: 口径为 cacheRead / (input + cacheRead + cacheWrite)",
 	assert.equal(hitRateFromUsage({ input: 100, cacheRead: 50, cacheWrite: 50 }), 25);
 });
 
-test("computeCacheHitStats: messageChars 统计全部消息文本（含裸 text 字段与坏行容忍）", () => {
+test("computeCacheHitStats: conversationTokens 统计消息文本（CJK 加权，含裸 text 字段与坏行容忍）", () => {
 	const { computeCacheHitStats } = loadCacheHitStats();
 	// assistantLine 的 content 是 [{type:"text",text:"ok"}]（2 字符），userLine 是 "hi"（2 字符）
 	const raw = [
@@ -139,9 +140,57 @@ test("computeCacheHitStats: messageChars 统计全部消息文本（含裸 text 
 		"not-json{{{",
 	].join("\n");
 	const stats = computeCacheHitStats(raw);
-	// ok(2) + hi(2) + "hello 世界"(8，含空格) = 12；坏行不计数不中断
-	assert.equal(stats.messageChars, 12);
+	// 非中文字符 12 个（ok+hi+"hello "）÷4 = 3，中文 2 字 ÷1.5 ≈ 1.33，向上取整 = 5；坏行不计数不中断
+	assert.equal(stats.conversationTokens, 5);
 	assert.equal(stats.sampleCount, 1);
+});
+
+test("computeCacheHitStats: compaction 行重置纪元（对话估算与命中率样本归零重计）", () => {
+	const { computeCacheHitStats } = loadCacheHitStats();
+	const compaction = JSON.stringify({
+		type: "compaction",
+		id: "c1",
+		timestamp: "2026-10-01T00:00:00.000Z",
+		firstKeptEntryId: "m2",
+		tokensBefore: 50_000,
+		summary: "前情摘要：修复了圆环指标",
+	});
+	const raw = [
+		assistantLine({ id: 1, usage: { input: 100, cacheRead: 100, cacheWrite: 0 } }), // 50%，归档
+		userLine(),
+		compaction,
+		// 压缩后的新纪元：只有这条 assistant 计入样本
+		assistantLine({ id: 3, usage: { input: 100, cacheRead: 0, cacheWrite: 100 } }), // 0%
+	].join("\n");
+	const stats = computeCacheHitStats(raw);
+	assert.equal(stats.sampleCount, 1);
+	assert.equal(stats.latest, 0);
+	assert.equal(stats.average, 0);
+	// 压缩摘要「前情摘要：修复了圆环指标」= 12 个 CJK 字符 → 12/1.5 = 8；新纪元 "ok"（2 字符）→ 1；合计 9；归档的 userLine("hi") 不再计入
+	assert.equal(stats.conversationTokens, 9);
+});
+
+test("computeCacheHitStats: 工具调用参数与工具结果计入对话估算", () => {
+	const { computeCacheHitStats } = loadCacheHitStats();
+	const toolCallLine = JSON.stringify({
+		type: "message",
+		id: "a1",
+		parentId: null,
+		message: {
+			role: "assistant",
+			content: [{ type: "toolCall", id: "t1", name: "read", arguments: { path: "/some/path" } }],
+			usage: { input: 100, cacheRead: 0, cacheWrite: 100 },
+		},
+	});
+	const toolResultLine = JSON.stringify({
+		type: "message",
+		id: "r1",
+		parentId: "a1",
+		message: { role: "toolResult", content: "command output here", details: { exitCode: 0 } },
+	});
+	const stats = computeCacheHitStats(`${toolCallLine}\n${toolResultLine}`);
+	// 无 text 时估算完全来自工具参数/结果文本，必须 > 0
+	assert.ok(stats.conversationTokens > 0);
 });
 
 // ── 流式读取器（大会话闪退修复的核心）──
@@ -320,7 +369,7 @@ test("createCacheHitStatsReader: 末尾残行不计入已消费，下次重扫�
 		await writeFile(file, `${completeLine}\n${truncated}`);
 		const first = await reader(file);
 		assert.equal(first.sampleCount, 1);
-		assert.equal(first.messageChars, 2); // 只有完整行的 "ok"，残行不算
+		assert.equal(first.conversationTokens, 1); // 只有完整行的 "ok"（2 字符→1 token），残行不算
 
 		// 那一行写完了：补上剩余部分 + 换行，成为一个完整合法的 assistant 行
 		await appendFile(file, `${secondLine.slice(truncated.length)}\n`);

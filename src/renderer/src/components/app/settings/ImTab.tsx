@@ -380,7 +380,6 @@ export function ImTab(_props: Props) {
 									if (addStep !== "input") setAddStep("input");
 								}}
 								placeholder="cli_xxxxxxxxxxxx"
-								className="config-input"
 								disabled={addStep !== "input"}
 							/>
 						</div>
@@ -395,7 +394,6 @@ export function ImTab(_props: Props) {
 									if (addStep !== "input") setAddStep("input");
 								}}
 								placeholder="••••••••••••••••"
-								className="config-input"
 								disabled={addStep !== "input"}
 							/>
 						</div>
@@ -403,7 +401,7 @@ export function ImTab(_props: Props) {
 							<Label>
 								{t("config.im.botName")} <span className="config-field-optional">({t("common.optional")})</span>
 							</Label>
-							<Input type="text" value={botName} onChange={(e) => setBotName(e.target.value)} placeholder={t("config.im.botNamePlaceholder")} className="config-input" disabled={addStep !== "input"} />
+							<Input type="text" value={botName} onChange={(e) => setBotName(e.target.value)} placeholder={t("config.im.botNamePlaceholder")} disabled={addStep !== "input"} />
 						</div>
 
 						{/* 连接成功后才显示 Open ID 输入框 */}
@@ -413,7 +411,7 @@ export function ImTab(_props: Props) {
 									<Label>
 										{t("config.im.openId")} <span className="config-field-required">*</span>
 									</Label>
-									<Input type="text" value={addFormOpenId} onChange={(e) => setAddFormOpenId(e.target.value)} placeholder="ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxx" className="config-input" />
+									<Input type="text" value={addFormOpenId} onChange={(e) => setAddFormOpenId(e.target.value)} placeholder="ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
 								</div>
 								<div className="config-im-openid-hint">💡 {t("config.im.openIdHint")}</div>
 							</div>
@@ -453,7 +451,7 @@ export function ImTab(_props: Props) {
 					const visibleBotBindings = botBindings.slice(0, visibleBindingCount);
 					const secretValue = revealedSecrets[bot.id];
 					return (
-						<div key={bot.id} className={`mb-2 overflow-hidden rounded-lg border border-border-subtle bg-bg-panel transition-[border-color,box-shadow,background-color] duration-150 config-im-bot-card${isThisConnected ? " border-[var(--color-accent)]/30" : ""}`}>
+						<div key={bot.id} className={`mb-2 overflow-hidden rounded-lg border border-border-subtle bg-bg-panel transition-[border-color,box-shadow,background-color] duration-fast config-im-bot-card${isThisConnected ? " border-[var(--color-accent)]/30" : ""}`}>
 							<div
 								className="flex cursor-pointer items-center gap-3 px-3.5 py-2.5 hover:bg-bg-hover config-im-bot-header"
 								onClick={() =>
@@ -471,7 +469,7 @@ export function ImTab(_props: Props) {
 										{bot.name}
 										{isThisConnected && <span className="config-im-connected-badge">{t("config.im.connected")}</span>}
 									</div>
-									<div className="text-[11px] text-text-tertiary">
+									<div className="text-micro text-text-tertiary">
 										{t("config.im.expandHint")} · {t("config.im.appId")}: {bot.appId.slice(0, 14)}… · {t("config.im.linkedAgentsCount", { count: botBindings.length })}
 									</div>
 								</div>

@@ -174,7 +174,7 @@ type SessionModifiedFile = {
  */
 export const USD_TO_CNY_RATE = 7.2;
 
-export type SessionDetailRow = { label: string; value: string; emphasis?: boolean };
+export type SessionDetailRow = { label: string; value: string; emphasis?: boolean /** 悬停说明：解释这行指标怎么算的（用户可自行核对口径） */; hint?: string };
 
 export type SessionStatusDetail = {
 	detailRows: SessionDetailRow[];
@@ -206,6 +206,7 @@ export function buildSessionStatusDetail(
 		detailRows.push({
 			label: t("ctx.detail.context"),
 			value: `${state.contextPercent != null ? `${formatPercent(state.contextPercent)}%` : "-"} / ${formatCompact(state.contextTokens)} / ${formatCompact(state.contextWindow)}`,
+			hint: t("ctx.detail.contextHint"),
 		});
 	}
 	if (state.inputTokens != null || state.outputTokens != null) {
@@ -213,46 +214,51 @@ export function buildSessionStatusDetail(
 		detailRows.push({
 			label: t("ctx.detail.tokens"),
 			value: `${formatCompact(state.inputTokens)} / ${formatCompact(state.outputTokens)}`,
+			hint: t("ctx.detail.tokensHint"),
 		});
 	}
 	if (state.cacheRead != null || state.cacheWrite != null) {
 		detailRows.push({
 			label: t("ctx.detail.cacheIO"),
 			value: `${t("ctx.detail.cacheRead")} ${formatCompact(state.cacheRead)} / ${t("ctx.detail.cacheWrite")} ${formatCompact(state.cacheWrite)}`,
+			hint: t("ctx.detail.cacheIOHint"),
 		});
 	}
 	if (state.cacheTotal != null) {
 		detailRows.push({
 			label: t("ctx.detail.cacheTotal"),
 			value: formatCompact(state.cacheTotal),
+			hint: t("ctx.detail.cacheTotalHint"),
 		});
 	}
 	if (state.cacheHitPercent != null) {
 		detailRows.push({
 			label: t("ctx.detail.hitLatest"),
 			value: `${state.cacheHitPercent.toFixed(1)}%`,
+			hint: t("ctx.detail.hitLatestHint"),
 		});
 	}
 	if (averageCacheHit != null) {
 		detailRows.push({
 			label: t("ctx.detail.hitAverage"),
 			value: `${averageCacheHit.toFixed(1)}% (${averageCacheHitSampleCount} ${t("ctx.detail.snapshots")})`,
+			hint: t("ctx.detail.hitAverageHint"),
 		});
 	}
 	// 这些值来自 AgentManager 的 lastPerfByAgent，只代表最近一条 assistant 回复，
 	// 不能和上下文累计量混在同一组，否则用户会误以为是整段会话的平均性能。
 	if (state.ttftMs != null) {
-		replyPerfRows.push({ label: t("ctx.detail.ttft"), value: formatDuration(state.ttftMs) });
+		replyPerfRows.push({ label: t("ctx.detail.ttft"), value: formatDuration(state.ttftMs), hint: t("ctx.detail.ttftHint") });
 	}
 	if (state.totalMs != null) {
-		replyPerfRows.push({ label: t("ctx.detail.total"), value: formatDuration(state.totalMs) });
+		replyPerfRows.push({ label: t("ctx.detail.total"), value: formatDuration(state.totalMs), hint: t("ctx.detail.totalHint") });
 	}
 	if (state.tps != null) {
-		replyPerfRows.push({ label: t("ctx.detail.tps"), value: `${state.tps.toFixed(0)} tok/s` });
+		replyPerfRows.push({ label: t("ctx.detail.tps"), value: `${state.tps.toFixed(0)} tok/s`, hint: t("ctx.detail.tpsHint") });
 	}
 	if (state.cost != null) {
-		detailRows.push({ label: t("ctx.detail.cost"), value: `$${state.cost.toFixed(3)}`, emphasis: true });
-		detailRows.push({ label: t("ctx.detail.costCny"), value: cnyAmount ?? "-", emphasis: true });
+		detailRows.push({ label: t("ctx.detail.cost"), value: `$${state.cost.toFixed(3)}`, emphasis: true, hint: t("ctx.detail.costHint") });
+		detailRows.push({ label: t("ctx.detail.costCny"), value: cnyAmount ?? "-", emphasis: true, hint: t("ctx.detail.costCnyHint") });
 	}
 	// DSH 会话统计（host sessionStats 投影，dsh-web StatsLine 同源）：整段日志的
 	// 回合/步骤计数与墙钟汇总。与 pi 的「上次回复」性能组语义不同，独立成组展示。
@@ -261,18 +267,19 @@ export function buildSessionStatusDetail(
 		sessionStatRows.push({
 			label: t("ctx.detail.turnsSteps"),
 			value: `${sessionStats.turns} / ${sessionStats.steps}`,
+			hint: t("ctx.detail.turnsStepsHint"),
 		});
 		if (sessionStats.llmMs > 0) {
-			sessionStatRows.push({ label: t("ctx.detail.llmDuration"), value: formatDuration(sessionStats.llmMs) });
+			sessionStatRows.push({ label: t("ctx.detail.llmDuration"), value: formatDuration(sessionStats.llmMs), hint: t("ctx.detail.llmDurationHint") });
 		}
 		if (sessionStats.toolMs > 0) {
-			sessionStatRows.push({ label: t("ctx.detail.toolDuration"), value: formatDuration(sessionStats.toolMs) });
+			sessionStatRows.push({ label: t("ctx.detail.toolDuration"), value: formatDuration(sessionStats.toolMs), hint: t("ctx.detail.toolDurationHint") });
 		}
 		if (sessionStats.ttftAvgMs != null) {
-			sessionStatRows.push({ label: t("ctx.detail.ttftAverage"), value: formatDuration(sessionStats.ttftAvgMs) });
+			sessionStatRows.push({ label: t("ctx.detail.ttftAverage"), value: formatDuration(sessionStats.ttftAvgMs), hint: t("ctx.detail.ttftAverageHint") });
 		}
 		if (sessionStats.tokensPerSecond != null) {
-			sessionStatRows.push({ label: t("ctx.detail.tps"), value: `${sessionStats.tokensPerSecond.toFixed(0)} tok/s` });
+			sessionStatRows.push({ label: t("ctx.detail.tps"), value: `${sessionStats.tokensPerSecond.toFixed(0)} tok/s`, hint: t("ctx.detail.tpsAverageHint") });
 		}
 	}
 	return {
@@ -340,7 +347,7 @@ export function SessionStatus(props: {
 					</div>
 					<div className="grid gap-1">
 						{detailRows.map((row) => (
-							<div key={row.label} className={`flex items-baseline justify-between gap-4 px-1 py-0.5 text-caption leading-5${row.emphasis ? " mt-1 border-t border-border/70 pt-1.5" : ""}`}>
+							<div key={row.label} title={row.hint} className={`flex items-baseline justify-between gap-4 px-1 py-0.5 text-caption leading-5${row.emphasis ? " mt-1 border-t border-border/70 pt-1.5" : ""}`}>
 								<span className="shrink-0 text-muted-foreground">{row.label}</span>
 								<span className="min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-popover-foreground">{row.value}</span>
 							</div>
@@ -350,7 +357,7 @@ export function SessionStatus(props: {
 						<div className="mt-2.5 grid gap-1 border-t border-border/70 pt-2">
 							<div className="px-1 text-micro font-semibold uppercase tracking-wide text-muted-foreground">{t("ctx.detail.lastReply")}</div>
 							{replyPerfRows.map((row) => (
-								<div key={row.label} className="flex items-baseline justify-between gap-4 px-1 py-0.5 text-caption leading-5">
+								<div key={row.label} title={row.hint} className="flex items-baseline justify-between gap-4 px-1 py-0.5 text-caption leading-5">
 									<span className="shrink-0 text-muted-foreground">{row.label}</span>
 									<span className="min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-popover-foreground">{row.value}</span>
 								</div>
@@ -361,7 +368,7 @@ export function SessionStatus(props: {
 						<div className="mt-2.5 grid gap-1 border-t border-border/70 pt-2">
 							<div className="px-1 text-micro font-semibold uppercase tracking-wide text-muted-foreground">{t("ctx.detail.sessionStats")}</div>
 							{sessionStatRows.map((row) => (
-								<div key={row.label} className="flex items-baseline justify-between gap-4 px-1 py-0.5 text-caption leading-5">
+								<div key={row.label} title={row.hint} className="flex items-baseline justify-between gap-4 px-1 py-0.5 text-caption leading-5">
 									<span className="shrink-0 text-muted-foreground">{row.label}</span>
 									<span className="min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-popover-foreground">{row.value}</span>
 								</div>
@@ -420,7 +427,7 @@ export function EmptyState(props: {
 		<div className="empty-state relative h-full min-h-0 overflow-hidden bg-transparent px-6 text-left" data-empty-state={props.hasProject ? "project" : "no-project"}>
 			<div className="mx-auto flex h-full w-full max-w-2xl animate-in flex-col justify-center pt-[10vh] duration-500 fade-in">
 				{/* 章节页眉：发丝线 + 项目上下文，建立编辑排版的节奏起点 */}
-				<div className="flex items-center gap-4 text-[13px] text-text-secondary">
+				<div className="flex items-center gap-4 text-control text-text-secondary">
 					<span className="h-px flex-1 bg-border-subtle" aria-hidden="true"></span>
 					{props.eyebrow}
 				</div>
@@ -437,7 +444,7 @@ export function EmptyState(props: {
 						t("app.emptyNoProjectTitle")
 					)}
 				</h2>
-				<p className="mt-6 max-w-md animate-in text-[15px] leading-7 delay-100 duration-500 fade-in fill-mode-backwards text-text-secondary">{description}</p>
+				<p className="mt-6 max-w-md animate-in text-title leading-7 delay-100 duration-500 fade-in fill-mode-backwards text-text-secondary">{description}</p>
 				{/* actions 是左对齐的主从按钮区，跟随阅读动线而不是居中悬浮 */}
 				<div className="mt-10 animate-in delay-200 duration-500 fade-in fill-mode-backwards slide-in-from-bottom-2">
 					{props.actions ??
@@ -596,14 +603,14 @@ export const AssistantText = memo(
  * 事件数据来自扩展写的 pi-deck-vision-events.jsonl（经 IPC 拉取），与消息文本里的图片 #N 序号同源。 */
 function VisionBridgeDetail(props: { events: VisionEventsInfo | null; loading: boolean }) {
 	if (props.loading) {
-		return <p className="mt-2 text-[11px] text-muted-foreground">…</p>;
+		return <p className="mt-2 text-micro text-muted-foreground">…</p>;
 	}
 	const batch = props.events?.events.filter((e) => e.kind === "input").at(-1);
 	if (!batch) {
-		return <p className="mt-2 text-[11px] text-muted-foreground">{t("app.visionNoEvents")}</p>;
+		return <p className="mt-2 text-micro text-muted-foreground">{t("app.visionNoEvents")}</p>;
 	}
 	return (
-		<div className="mt-2 max-h-56 overflow-y-auto border-t border-border/60 pt-2 text-[11px] leading-relaxed text-muted-foreground">
+		<div className="mt-2 max-h-56 overflow-y-auto border-t border-border/60 pt-2 text-micro leading-relaxed text-muted-foreground">
 			<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
 				<span className="font-mono text-foreground/80">{batch.model}</span>
 				<span>{formatDuration(batch.totalDurationMs)}</span>
@@ -842,7 +849,7 @@ export const UserBubble = memo(function UserBubble(props: {
 						// 参考图在历史里同样是 ref 引用（新图是内联 base64），统一走解析器
 						const src = imageContentSrc(img);
 						if (!src) return null;
-						return <MessageImage key={index} src={src} alt={t("app.imageAlt", { index: index + 1 })} className="size-16 max-h-40 cursor-pointer rounded-md border border-border object-cover transition-colors duration-150 hover:border-border-strong" onClick={() => props.onPreviewImage(img)} />;
+						return <MessageImage key={index} src={src} alt={t("app.imageAlt", { index: index + 1 })} className="size-16 max-h-40 cursor-pointer rounded-md border border-border object-cover transition-colors duration-fast hover:border-border-strong" onClick={() => props.onPreviewImage(img)} />;
 					})}
 				</div>
 			)}
@@ -853,7 +860,7 @@ export const UserBubble = memo(function UserBubble(props: {
 							// 成功：徽章行（图标 + 视觉桥已查看 + 图片序号）+ 描述正文
 							<div key={bi} className="vision-bridge-card w-full min-w-0 rounded-lg border border-border bg-background/70 p-2.5" title={t("app.visionBridgeSeenDesc")}>
 								<div className="flex items-center justify-between gap-2">
-									<div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+									<div className="flex items-center gap-1.5 text-micro font-medium text-muted-foreground">
 										<Eye size={12} className="shrink-0 text-[var(--color-accent)]" />
 										<span>{t("app.visionBridgeSeen")}</span>
 										<span className="text-muted-foreground/60">·</span>
@@ -861,7 +868,7 @@ export const UserBubble = memo(function UserBubble(props: {
 									</div>
 									<button
 										type="button"
-										className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+										className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-0.5 text-micro text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 										onClick={() => {
 											setVisionDetailOpen((open) => !open);
 											if (!visionDetailOpen) void loadVisionEvents();
@@ -871,7 +878,7 @@ export const UserBubble = memo(function UserBubble(props: {
 										{t("app.visionDetail")}
 									</button>
 								</div>
-								{block.description && <p className="mt-1.5 text-[13px] leading-[1.6] break-words whitespace-pre-wrap text-text-primary">{block.description}</p>}
+								{block.description && <p className="mt-1.5 text-control leading-[1.6] break-words whitespace-pre-wrap text-text-primary">{block.description}</p>}
 								{visionDetailOpen && <VisionBridgeDetail events={visionEvents} loading={visionLoading} />}
 							</div>
 						) : block.kind === "skipped" ? (
@@ -879,24 +886,24 @@ export const UserBubble = memo(function UserBubble(props: {
 							// 用 warning 而非 danger：红色意味着「出错了」，会把用户引去检查 Key/接口地址，
 							// 而真正要做的只是开视觉桥或给模型勾上图片输入（2026-09 反馈）。
 							<div key={bi} className="w-full min-w-0 rounded-lg border border-warning/40 bg-warning/10 p-2.5" title={t("app.visionBridgeNotSentDesc")}>
-								<div className="flex items-center gap-1.5 text-[11px] font-medium text-warning">
+								<div className="flex items-center gap-1.5 text-micro font-medium text-warning">
 									<EyeOff size={12} className="shrink-0" />
 									<span>{t("app.visionBridgeNotSent")}</span>
 									<span className="text-warning/60">·</span>
 									<span>{t("app.visionBridgeImageLabel", { index: block.index })}</span>
 								</div>
-								{block.reason && <p className="mt-1.5 text-[13px] leading-[1.6] break-words whitespace-pre-wrap text-text-primary">{block.reason}</p>}
+								{block.reason && <p className="mt-1.5 text-control leading-[1.6] break-words whitespace-pre-wrap text-text-primary">{block.reason}</p>}
 							</div>
 						) : (
 							// 失败：红色卡片，原因直出，用户不用去设置页翻日志
 							<div key={bi} className="w-full min-w-0 rounded-lg border border-danger/40 bg-danger-soft/40 p-2.5" title={t("app.visionBridgeFailedDesc")}>
-								<div className="flex items-center gap-1.5 text-[11px] font-medium text-danger">
+								<div className="flex items-center gap-1.5 text-micro font-medium text-danger">
 									<AlertTriangle size={12} className="shrink-0" />
 									<span>{t("app.visionBridgeFailed")}</span>
 									<span className="text-danger/60">·</span>
 									<span>{t("app.visionBridgeImageLabel", { index: block.index })}</span>
 								</div>
-								{block.reason && <p className="mt-1.5 text-[13px] leading-[1.6] break-words text-danger/90">{block.reason}</p>}
+								{block.reason && <p className="mt-1.5 text-control leading-[1.6] break-words text-danger/90">{block.reason}</p>}
 							</div>
 						),
 					)}
@@ -905,7 +912,7 @@ export const UserBubble = memo(function UserBubble(props: {
 			{/* 实时消息：文本里没有标记块（转换结果只写会话文件），用事件文件匹配渲染卡片 */}
 			{visionBlocks.length === 0 && visionPolling && !visionMatch && (
 				<div className="mb-2 flex w-full max-w-[min(82%,64ch)] flex-col items-end">
-					<div className="flex items-center gap-1.5 rounded-lg border border-border bg-background/70 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+					<div className="flex items-center gap-1.5 rounded-lg border border-border bg-background/70 px-2.5 py-1.5 text-micro text-muted-foreground">
 						<Loader2 size={11} className="animate-pideck-spin" />
 						<span>{t("app.visionConverting")}</span>
 					</div>
@@ -918,7 +925,7 @@ export const UserBubble = memo(function UserBubble(props: {
 							// 成功：徽章行（图标 + 视觉桥已查看 + 图片序号）+ 描述正文（与历史标记卡片同款）
 							<div key={item.index} className="vision-bridge-card w-full min-w-0 rounded-lg border border-border bg-background/70 p-2.5" title={t("app.visionBridgeSeenDesc")}>
 								<div className="flex items-center justify-between gap-2">
-									<div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+									<div className="flex items-center gap-1.5 text-micro font-medium text-muted-foreground">
 										<Eye size={12} className="shrink-0 text-[var(--color-accent)]" />
 										<span>{t("app.visionBridgeSeen")}</span>
 										<span className="text-muted-foreground/60">·</span>
@@ -926,7 +933,7 @@ export const UserBubble = memo(function UserBubble(props: {
 									</div>
 									<button
 										type="button"
-										className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+										className="inline-flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-0.5 text-micro text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 										onClick={() => {
 											setVisionDetailOpen((open) => !open);
 											if (!visionDetailOpen) void loadVisionEvents();
@@ -936,26 +943,26 @@ export const UserBubble = memo(function UserBubble(props: {
 										{t("app.visionDetail")}
 									</button>
 								</div>
-								{item.description && <p className="mt-1.5 text-[13px] leading-[1.6] break-words whitespace-pre-wrap text-text-primary">{item.description}</p>}
+								{item.description && <p className="mt-1.5 text-control leading-[1.6] break-words whitespace-pre-wrap text-text-primary">{item.description}</p>}
 								{visionDetailOpen && <VisionBridgeDetail events={visionEvents} loading={visionLoading} />}
 							</div>
 						) : (
 							// 失败：红色卡片，原因直出（与历史标记卡片同款）
 							<div key={item.index} className="w-full min-w-0 rounded-lg border border-danger/40 bg-danger-soft/40 p-2.5" title={t("app.visionBridgeFailedDesc")}>
-								<div className="flex items-center gap-1.5 text-[11px] font-medium text-danger">
+								<div className="flex items-center gap-1.5 text-micro font-medium text-danger">
 									<AlertTriangle size={12} className="shrink-0" />
 									<span>{t("app.visionBridgeFailed")}</span>
 									<span className="text-danger/60">·</span>
 									<span>{t("app.visionBridgeImageLabel", { index: item.index })}</span>
 								</div>
-								{item.error && <p className="mt-1.5 text-[13px] leading-[1.6] break-words text-danger/90">{item.error}</p>}
+								{item.error && <p className="mt-1.5 text-control leading-[1.6] break-words text-danger/90">{item.error}</p>}
 							</div>
 						),
 					)}
 				</div>
 			)}
 			{cleanText && !editing && (
-				<div className="user-turn-bubble w-fit min-w-0 max-w-[min(82%,64ch)] rounded-[14px] border border-border bg-muted/60 px-3 py-2 text-sm text-foreground [overflow-wrap:anywhere] break-words">
+				<div className="user-turn-bubble w-fit min-w-0 max-w-[min(82%,64ch)] rounded-[14px] border px-3 py-2 text-sm text-foreground [overflow-wrap:anywhere] break-words">
 					<div
 						ref={userTextRef}
 						// user-turn-text 是气泡 chip 样式的唯一作用域锚点：timeline.css 的
@@ -971,7 +978,7 @@ export const UserBubble = memo(function UserBubble(props: {
 							{!messageExpanded && <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-gradient-to-t from-muted/70 to-transparent" aria-hidden="true" />}
 							<button
 								type="button"
-								className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-micro text-text-tertiary transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
+								className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-micro text-text-tertiary transition-colors duration-fast hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
 								onClick={() => setMessageExpanded((v) => !v)}
 								aria-expanded={messageExpanded}
 							>
@@ -1008,7 +1015,7 @@ export const UserBubble = memo(function UserBubble(props: {
 					</div>
 				</div>
 			)}
-			<div className="mt-1 inline-flex items-center gap-2 text-[11px] tabular-nums text-text-tertiary">
+			<div className="mt-1 inline-flex items-center gap-2 text-micro tabular-nums text-text-tertiary">
 				<time>{formatTime(message.timestamp)}</time>
 			</div>
 			<div className="user-turn-actions flex min-h-6 items-center gap-0.5 opacity-0 transition-opacity group-hover/user:opacity-100 focus-within:opacity-100">

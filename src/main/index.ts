@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, ne
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
+import { homedir } from "node:os";
 import { createWriteStream, existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { is } from "@electron-toolkit/utils";
@@ -19,7 +20,7 @@ import { AutomationRunCoordinator } from "./automation/AutomationRunCoordinator"
 import { registerAutomationIpc } from "./ipc/automationIpc";
 import { registerFeishuIpc } from "./ipc/feishuIpc";
 import { applyLinuxDisplayBackendWorkaround, isUsingLinuxXWaylandWorkaround } from "./linuxDisplayBackend";
-import { readElectronChromiumSandboxPreference, readPetEnabledPreference, readSingleInstancePreference } from "./settings/SettingsStore";
+import { readBootPreferences } from "./settings/SettingsStore";
 import { acquireVersionSingleInstance, type FocusPayload } from "./singleInstance";
 import { mainProcessJsFlags, rendererHeapAdditionalArguments } from "./v8HeapLimits";
 import { isDevToolsShortcut, toggleMainWindowDevTools } from "./devTools";
@@ -36,6 +37,7 @@ import type { ResolvedMigrationResource } from "./config/piResourceMigration";
 import type { PiResourceScope } from "../shared/types/piResources";
 import { createWindowZoomShortcutHandler } from "./windowZoom";
 import { DEFAULT_DEV_USER_DATA_NAME, isSharedDevBranch, readDevGitBranch, resolveDevUserDataDirName, sanitizeDevBranchSegment } from "./devIsolation";
+import { KEEP_DEV_HTTP_CACHE_ENV, clearDevRendererCache } from "./devRendererCache";
 import { isPortablePackagedEnv, resolveAppUserDataDir, resolveChannelDevDataDir, resolvePackagedUserDataDir } from "./portableUserData";
 import { readDataEnvDecision, validateStartupDataEnv, writeDataEnvDecision } from "./dataEnv/dataEnvMarker";
 import { registerDataEnvIpc } from "./ipc/dataEnvIpc";
@@ -62,6 +64,10 @@ const isDevBuild = !app.isPackaged || __PIDECK_DEV_BUILD__;
 // E2E（Playwright 驱动）静默运行：窗口显示但不抢焦点、不最大化铺满屏，
 // 避免打断用户在其他软件的输入。fixture 通过 env PIDECK_E2E=1 标识。
 const isE2E = process.env.PIDECK_E2E === "1";
+
+// 冷启动计时锚点（2026-10 流畅度审计）：里程碑在 whenReady 与 showMainWindowOnce 记录，
+// 日志对比 sinceModuleLoadMs / processUptimeMs 两个口径即可观测启动回归。
+const bootAnchorMs = Date.now();
 
 // userData 决策（三分支判定在 portableUserData.resolveAppUserDataDir，单测覆盖）：
 // - 未打包 npm run dev：功能分支再按 git 分支名拆目录（pi-desktop-dev-<branch>），
@@ -116,13 +122,16 @@ app.setPath(
 // 强制 XWayland 在部分 GNOME/Wayland 环境会导致主窗口不可见）。
 // ozone 平台一经启动不可更改，整个生命周期统一使用启动时快照。
 // 注意必须放在 dev userData 覆盖之后，否则 dev 模式会误读正式版的 petEnabled。
-const petEnabledAtLaunch = readPetEnabledPreference();
+// 启动偏好共享一次读取（沙箱/单实例/宠物开关同源 settings.json）：三个快照值在
+// dev userData 覆盖之后一次读齐，替代原来三次独立的 readFileSync+JSON.parse。
+const bootPreferences = readBootPreferences();
+const petEnabledAtLaunch = bootPreferences.petEnabled;
 applyLinuxDisplayBackendWorkaround(petEnabledAtLaunch);
 
 // Chromium 沙箱开关必须在 app.ready 前生效。
 // 默认关闭：Windows 上部分安全软件/旧 GPU 驱动会在沙箱初始化时触发原生断点（0x80000003）。
 // 用户可在「开发设置」中开启 electronChromiumSandbox，重启后走 Chromium 默认沙箱。
-const electronChromiumSandboxEnabled = readElectronChromiumSandboxPreference();
+const electronChromiumSandboxEnabled = bootPreferences.electronChromiumSandbox;
 if (!electronChromiumSandboxEnabled) {
 	// 关闭沙箱时显式附带 no-sandbox，避免部分环境仍按默认策略启用。
 	app.commandLine.appendSwitch("no-sandbox");
@@ -161,7 +170,7 @@ if (app.isPackaged) {
 // focus 回调稍后挂到 focusMainWindow（定义在文件后部），避免顶层 TDZ。
 // payload 携带次实例的 argv，可解析「点击系统通知」激活时携带的跳转目标。
 let focusExistingWindow: ((payload?: FocusPayload) => void) | null = null;
-const singleInstanceEnabled = readSingleInstancePreference();
+const singleInstanceEnabled = bootPreferences.singleInstance;
 const versionSingleInstance = acquireVersionSingleInstance(singleInstanceEnabled, app.getVersion(), (payload) => {
 	focusExistingWindow?.(payload);
 });
@@ -312,6 +321,9 @@ import { UsageStatsService } from "./usageStats/UsageStatsService";
 import { constrainWindowBoundsToWorkArea, type LastWindowBounds, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, readLastWindowBounds, saveLastWindowBounds } from "./windowState";
 import { createRendererCrashRecoveryGuard } from "./window/rendererCrashRecovery";
 import { registerBackgroundImageProtocol, registerBackgroundsIpc } from "./ipc/backgroundsIpc";
+import { registerThemesIpc } from "./ipc/themesIpc";
+import { registerPluginDevIpc } from "./ipc/pluginDevIpc";
+import { PluginDevService } from "./extensions/PluginDevService";
 import { registerGitIpc } from "./ipc/gitIpc";
 import { registerStoreIpc } from "./ipc/storeIpc";
 import { registerTerminalIpc } from "./ipc/terminalIpc";
@@ -1672,6 +1684,9 @@ async function createWindow() {
 		},
 	});
 	const createdWindow = mainWindow;
+	// Windows 建窗时可能裁掉工作区外的不可见 resize border；构造参数不足以精确还原贴边外框。
+	// 显示/最大化前显式设置已解析的几何，避免重启后高度再次被原生建窗流程缩短。
+	createdWindow.setBounds(startupWindowBounds);
 	configureBrowserPanelWebviewHost(createdWindow);
 	let hasShownMainWindow = false;
 	function showMainWindowOnce() {
@@ -1684,6 +1699,11 @@ async function createWindow() {
 			createdWindow.show();
 			createdWindow.focus();
 		}
+		// 冷启动里程碑（2/2）：首窗可见（ready-to-show / did-finish-load / 3s 兜底三路共用此口）。
+		void appLogger?.info("app", "Cold start milestone: first window shown", {
+			sinceModuleLoadMs: Date.now() - bootAnchorMs,
+			processUptimeMs: Math.round(process.uptime() * 1000),
+		});
 		// 向开发者工具输出启动信息
 		printStartupInfo();
 	}
@@ -1884,6 +1904,13 @@ async function createWindow() {
 
 	const devRendererUrl = shouldUseDevRendererUrl() ? process.env.ELECTRON_RENDERER_URL : undefined;
 	if (devRendererUrl) {
+		// Vite 预构建 chunk 是 immutable 强缓存，重新预构建后同一 URL 内容会变但缓存键不变，
+		// 渲染层会拿到旧模块去 import 已被删除的 chunk（504）→ 动态 import 失败；dev 加载前先清一次。
+		await clearDevRendererCache({
+			session: session.defaultSession,
+			keepHttpCacheFlag: process.env[KEEP_DEV_HTTP_CACHE_ENV],
+			onLog: (outcome, detail) => void appLogger.info("app", `dev renderer http cache ${outcome}`, detail),
+		});
 		mainWindow.loadURL(devRendererUrl);
 	} else {
 		mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
@@ -2268,6 +2295,10 @@ function registerIpc() {
 	// 换肤背景图：协议服务 userData/backgrounds/，IPC 负责选图复制与删除
 	registerBackgroundImageProtocol();
 	registerBackgroundsIpc();
+	registerThemesIpc();
+	// 插件开发支持：demo/指南落 ~/.pi/agent/extensions（与扩展列表同一 home 来源）
+	const pluginDevService = new PluginDevService(resolveBuiltInExtensionRoots(), () => extensionManager?.userHomeDir ?? homedir());
+	registerPluginDevIpc(pluginDevService);
 	registerProjectsIpc({
 		projectStore,
 		settingsStore,
@@ -3191,6 +3222,12 @@ app
 		});
 		appLogger = new AppLogger();
 		setAppLogger(appLogger);
+		// 冷启动里程碑（1/2）：主进程 ready。sinceModuleLoadMs 从 index.ts 模块加载起算；
+		// processUptimeMs 从 Electron 进程创建起算（含二进制启动），差值即 ready 前主进程耗时。
+		void appLogger.info("app", "Cold start milestone: app ready", {
+			sinceModuleLoadMs: Date.now() - bootAnchorMs,
+			processUptimeMs: Math.round(process.uptime() * 1000),
+		});
 		// userData 更名迁移（pi-desktop → PiDeck）在 setPath 前同步执行，当时还没有日志器；
 		// 结果在此补记，失败/回退路径必须可从日志诊断。
 		if (userDataNameMigrationResult?.kind === "migrated") {
@@ -3998,16 +4035,19 @@ app
 			listSessionSubagents: async (sessionId) => {
 				const entry = sessionCatalog.get(sessionId);
 				if (!entry?.filePath) return [];
-				let records = await agentManager.readSessionSubagentRecords(entry.filePath);
+				// 锚点对账要在读取侧做（liveRuntimeStartedAt，同桌面 sessionIpc）：
+				// 运行中子代理只剩 start 锚点（record 完成时才写），不传对账时间会一律
+				// 合成 stopped，面板误显「已停止」（issue #300）。
+				const liveTarget = sessionRuntimeCoordinator.getTarget(sessionId);
+				const liveTab = liveTarget ? agentManager.list().find((tab) => tab.id === liveTarget.agentId) : undefined;
+				let records = await agentManager.readSessionSubagentRecords(entry.filePath, { liveRuntimeStartedAt: liveTab?.createdAt });
 				// 与桌面同款对账：无活 runtime 时把残留 running 降级（终态通知未落盘）；
 				// 活 runtime 按本代启动时间降级上一代派发的 running。
-				const liveTarget = sessionRuntimeCoordinator.getTarget(sessionId);
 				if (!liveTarget) {
 					if (!sessionRuntimeCoordinator.isActivating(sessionId)) {
 						records = downgradeStaleRunning(records);
 					}
 				} else {
-					const liveTab = agentManager.list().find((tab) => tab.id === liveTarget.agentId);
 					if (liveTab?.createdAt) {
 						records = downgradeRunningStartedBefore(records, liveTab.createdAt);
 					}
@@ -4123,7 +4163,9 @@ app
 			// 把 pi-subagents transcript 等无 type 头的产物挡在 catalog 之外（#168）。
 			(filePath, options) => sessionScanner.inferSessionNameAndValidity(filePath, options),
 		);
-		await sessionCatalog.load();
+		automationStore = new AutomationStore(join(app.getPath("userData"), "automation.json"));
+		const automationStorePreload = automationStore.load();
+		await Promise.all([sessionCatalog.load(), automationStorePreload]);
 
 		// ── 旧禁用记录 → pi 原生配置迁移（计划 A3/A5）──
 		// 启动期一次性执行：旧列表一旦被清理，原生过滤就是唯一生效来源。
@@ -4263,8 +4305,6 @@ app
 		sessionRuntimeCoordinator = new SessionRuntimeCoordinator(sessionCatalog, compositeAgentGateway, sendAgentPromptWithIntegrations, appLogger);
 
 		// 定时任务调度器与执行编排器装配
-		automationStore = new AutomationStore(join(app.getPath("userData"), "automation.json"));
-		await automationStore.load();
 		automationRunCoordinator = new AutomationRunCoordinator({
 			store: automationStore,
 			catalog: sessionCatalog,

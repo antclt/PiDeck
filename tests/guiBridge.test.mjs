@@ -689,9 +689,9 @@ describe("bridge gui: ctx.gui 落点与校验", () => {
 		return { runtime, pushed };
 	}
 
-	it("白名单含 §7.1-B 全部 15 个方法", () => {
+	it("白名单含 §7.1-B 全部 19 个方法", () => {
 		const methods = Object.keys(guiMod.GUI_SLOT_METHODS);
-		assert.equal(methods.length, 15, `应有 15 个 GUI 专属位置，实际 ${methods.length}`);
+		assert.equal(methods.length, 19, `应有 19 个 GUI 专属位置，实际 ${methods.length}`);
 		for (const expected of ["setSidebarPanel", "setSidebarSection", "setContentView", "setComposerToolbar", "setTitlebarAction", "setBanner", "setToolExtra", "setMessageExtra", "setThinkingExtra", "setDialogAction", "setDialogBody", "setSettingsSection", "setConfigPage", "setSessionItemExtra", "setContextMenuItem"]) {
 			assert.ok(methods.includes(expected), `白名单缺 ${expected}`);
 		}

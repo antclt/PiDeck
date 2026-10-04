@@ -75,7 +75,7 @@ test("EditorWorkbenchTab 用富 Tooltip 显示 标题 + 完整路径", () => {
 	assert.doesNotMatch(body, /\btitle=\{tab\.title \?\? tab\.label\}/);
 	assert.match(body, /<Tooltip delayDuration=\{500\}>/);
 	// 第二行是文件完整路径（tab.title 由装配层传 filePath），mono 字体区分路径与标题。
-	assert.match(body, /font-mono text-\[11px\][^"]*"\>\{tab\.title\}/);
+	assert.match(body, /font-mono text-micro[^"]*"\>\{tab\.title\}/);
 	// title 缺省时不渲染 TooltipContent（退化为无提示，与旧行为一致）。
 	assert.match(body, /\{tab\.title \? \(/);
 });

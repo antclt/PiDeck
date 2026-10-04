@@ -225,8 +225,8 @@ export function SessionTodoStrip(props: { sessionId: string }) {
 			<div className="flex h-9 w-full items-center gap-2.5 px-3">
 				<button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left" aria-expanded={!collapsed} onClick={toggleCollapsed}>
 					<ListChecks size={14} aria-hidden="true" className="shrink-0 text-text-tertiary" />
-					<span className="shrink-0 text-[13px] font-medium leading-6 text-foreground">{t("sessionTodo.title")}</span>
-					<span className="min-w-0 flex-1 truncate text-[13px] leading-5 text-text-tertiary">{progressLabel(items)}</span>
+					<span className="shrink-0 text-control font-medium leading-6 text-foreground">{t("sessionTodo.title")}</span>
+					<span className="min-w-0 flex-1 truncate text-control leading-5 text-text-tertiary">{progressLabel(items)}</span>
 					<span className="shrink-0 text-text-tertiary" aria-hidden="true">
 						{collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
 					</span>
@@ -250,7 +250,7 @@ export function SessionTodoStrip(props: { sessionId: string }) {
 					    clientHeight 相等 → 滚动条根本不出现，用户滚不动（2027-01 排版事故）。
 					    shrink-0 让行保持固有高度，超出部分交还给 overflow-y-auto 滚动。 */}
 					{items.map((item) => (
-						<li key={item.id} className="flex min-w-0 items-center gap-2.5 overflow-hidden shrink-0 text-[13px] leading-5 text-text-secondary">
+						<li key={item.id} className="flex min-w-0 items-center gap-2.5 overflow-hidden shrink-0 text-control leading-5 text-text-secondary">
 							<span className="grid size-4 shrink-0 place-items-center" aria-hidden="true">
 								<StatusGlyph status={item.status} />
 							</span>

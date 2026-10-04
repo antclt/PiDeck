@@ -1,8 +1,9 @@
 import { Button } from "../components/ui-shadcn/button";
+import { Switch } from "../components/ui-shadcn/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui-shadcn/table";
 import { showNotice } from "../utils/notice";
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Check, FileEdit, FileText, Pencil, ShoppingBag, ToggleLeft, ToggleRight, Trash2, X } from "lucide-react";
+import { Check, FileEdit, FileText, Pencil, ShoppingBag, Trash2, X } from "lucide-react";
 import type { PiPromptTemplateListResult, PiPromptTemplateSummary, ProjectResourceOverrides } from "../../../shared/types";
 import { t } from "../i18n";
 import { CodeMirrorEditor } from "../components/app/CodeMirrorEditor";
@@ -225,9 +226,8 @@ export function PromptsTab(props: {
 					</TableCell>
 					<TableCell className="w-44 text-right">
 						<div className="flex min-w-max justify-end gap-1">
-							<Button variant="ghost" size="icon-sm" className={`size-7${effectiveEnabled ? " text-primary" : ""}`} disabled={inherited && template.enabled === false} onClick={() => props.onToggle(template, !effectiveEnabled)} title={effectiveEnabled ? t("common.disable") : t("common.enabled")}>
-								{effectiveEnabled ? <ToggleRight size={18} strokeWidth={1.8} /> : <ToggleLeft size={18} strokeWidth={1.8} />}
-							</Button>
+							{/* 启停开关：Switch 轨道着色区分启用/禁用，与扩展/技能页一致 */}
+							<Switch checked={effectiveEnabled} onCheckedChange={(checked) => props.onToggle(template, checked)} disabled={inherited && template.enabled === false} title={effectiveEnabled ? t("common.disable") : t("common.enabled")} />
 							{!inherited ? (
 								<>
 									<Button variant="ghost" size="icon-sm" className="size-7" onClick={() => props.onEdit(template)} title={t("common.edit")}>
