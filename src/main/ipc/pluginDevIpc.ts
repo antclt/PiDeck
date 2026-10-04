@@ -11,7 +11,7 @@ function toGuideLocale(value: unknown): GuideLocale {
 	return value === "en-US" ? "en-US" : "zh-CN";
 }
 
-export function registerPluginDevIpc(service: PluginDevService): void {
+export function registerPluginDevIpc(service: PluginDevService, hooks: { onExtensionFilesChanged?: () => void } = {}): void {
 	ipcMain.handle(ipcChannels.pluginDevStatus, () => service.status());
 	ipcMain.handle(ipcChannels.pluginDevWriteGuide, async (_event, locale: unknown) => {
 		const file = await service.writeGuide(toGuideLocale(locale));
@@ -21,6 +21,8 @@ export function registerPluginDevIpc(service: PluginDevService): void {
 	ipcMain.handle(ipcChannels.pluginDevCopyDemo, async () => {
 		const result = await service.copyDemoPlugin();
 		if (result.status === "copied") shell.showItemInFolder(result.path);
+		// demo 落盘后失效扩展列表缓存：已打开的扩展页（或缓存读）才能立刻看到新行。
+		hooks.onExtensionFilesChanged?.();
 		return result;
 	});
 }
