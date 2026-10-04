@@ -19,6 +19,11 @@ export type AppAccentMode = "default" | "green" | "blue" | "purple" | "amber" | 
 export type AppSkinId = "classic-green" | "fresh-green" | "graphite" | "sea-blue" | "warm-beige" | "custom";
 /** Logo 风格：classic = PiDeck 四块拼图 π（默认）；pi-tui = pi 官方 TUI 三色像素标（coral/blue/yellow） */
 export type LogoStyle = "classic" | "pi-tui";
+
+/** 解析 logo 风格：仅 "pi-tui" 视为新风格，其余（null/undefined/未知旧值）一律 classic。主进程窗口图标与渲染层 UI 共用。 */
+export function resolveLogoStyle(value: string | null | undefined): LogoStyle {
+	return value === "pi-tui" ? "pi-tui" : "classic";
+}
 export type AppLanguageMode = "system" | "zh-CN" | "en-US" | "pseudo";
 export type LinkOpenMode = "external" | "internal";
 

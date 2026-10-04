@@ -83,13 +83,8 @@ export const PI_TUI_PIECES: PiTuiPiece[] = [
 
 export type LogoStyleValue = "classic" | "pi-tui";
 
-/**
- * 解析 logo 风格：仅 "pi-tui" 视为新风格，其余（null/未知/旧值）一律 classic。
- * 启动画面（React 挂载前）与渲染层组件共用同一判定。
- */
-export function resolveLogoStyle(value: string | null | undefined): LogoStyleValue {
-	return value === "pi-tui" ? "pi-tui" : "classic";
-}
+// resolveLogoStyle 单一实现提升到 shared/types/settings.ts（主进程窗口图标也要用，main 不得依赖 renderer）；此处仅 re-export 保持渲染层消费点不变。
+export { resolveLogoStyle } from "../../../../shared/types/settings";
 
 /**
  * logo 风格的 localStorage 缓存键：App.tsx 在 settings 权威值就绪/变化时写入，
