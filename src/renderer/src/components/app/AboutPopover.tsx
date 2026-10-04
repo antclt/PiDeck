@@ -6,6 +6,7 @@ import { formatI18nDateTime, t } from "../../i18n";
 import { MorphPopover, MorphPopoverContent, MorphPopoverTrigger } from "../motion/popover-morph";
 import { AnimatedBadge } from "../motion/animated-badge";
 import { PiLogoCanvas } from "./PiLogoCanvas";
+import { PiTuiLogoCanvas, useLogoStyle } from "./PiTuiLogo";
 import { Button } from "../ui-shadcn/button";
 import { ChangelogDialog } from "./settings/ChangelogDialog";
 
@@ -38,6 +39,7 @@ export function AboutPopover(props: AboutPopoverProps) {
 	// releasesUrl 形如 https://github.com/ayuayue/PiDeck/releases，去掉 /releases 即仓库主页
 	const githubUrl = props.appInfo.releasesUrl.replace(/\/releases\/?$/, "") || WEBSITE_URL;
 	const info = props.appInfo;
+	const logoStyle = useLogoStyle();
 
 	return (
 		<MorphPopover open={aboutOpen} onOpenChange={setAboutOpen}>
@@ -45,7 +47,7 @@ export function AboutPopover(props: AboutPopoverProps) {
 			<MorphPopoverContent side="bottom" align="start" sideOffset={10} radius={16} className="w-72 overflow-hidden">
 				<div className="flex flex-col gap-3 p-4">
 					<div className="flex items-center gap-3">
-						<PiLogoCanvas size={40} playOnClick />
+						{logoStyle === "pi-tui" ? <PiTuiLogoCanvas size={40} playOnClick /> : <PiLogoCanvas size={40} playOnClick />}
 						<div className="min-w-0 flex-1">
 							<div className="font-[PiDeckDepartureMono] text-lg font-normal uppercase leading-tight tracking-wide text-foreground">PiDeck</div>
 							{/* 版本号用等宽小字：此前是带 ⓘ 图标的胶囊徽标，图标语义与「查看版本信息」

@@ -17,6 +17,13 @@ export type AppAccentMode = "default" | "green" | "blue" | "purple" | "amber" | 
  * classic-green 为出厂默认（中性黑白灰）；fresh-green 为全屏绿色主题（表面带绿色调）。
  */
 export type AppSkinId = "classic-green" | "fresh-green" | "graphite" | "sea-blue" | "warm-beige" | "custom";
+/** Logo 风格：classic = PiDeck 四块拼图 π（默认）；pi-tui = pi 官方 TUI 三色像素标（coral/blue/yellow） */
+export type LogoStyle = "classic" | "pi-tui";
+
+/** 解析 logo 风格：仅 "pi-tui" 视为新风格，其余（null/undefined/未知旧值）一律 classic。主进程窗口图标与渲染层 UI 共用。 */
+export function resolveLogoStyle(value: string | null | undefined): LogoStyle {
+	return value === "pi-tui" ? "pi-tui" : "classic";
+}
 export type AppLanguageMode = "system" | "zh-CN" | "en-US" | "pseudo";
 export type LinkOpenMode = "external" | "internal";
 
@@ -99,6 +106,8 @@ export type AppSettings = {
 	accent: AppAccentMode;
 	/** 皮肤（换肤）：内置预设见 themePresets.ts SKIN_PRESETS；custom 走 customThemeOverrides/customTheme */
 	themeSkin: AppSkinId;
+	/** Logo 风格：可选以兼容旧 settings.json，缺省按 classic 处理；启动画面经 localStorage 提前生效 */
+	logoStyle?: LogoStyle;
 	/** 自定义主题：CSS 变量名 → 值（键不含 -- 前缀），叠加在内置皮肤之上 */
 	customThemeOverrides: Record<string, string>;
 	/**
@@ -740,6 +749,7 @@ export function createDefaultAppSettings(): AppSettings {
 		themeScheduleDarkStart: "19:00",
 		accent: "default",
 		themeSkin: "classic-green",
+		logoStyle: "classic",
 		customThemeOverrides: {},
 		backgroundImage: "",
 		backgroundImageOpacity: 0.8,

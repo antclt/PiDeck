@@ -92,7 +92,26 @@ async function main() {
 	const rendererMark = path.join(__dirname, "..", "src", "renderer", "src", "assets", "brand-mark.png");
 	await sharp(Buffer.from(svg)).resize(256, 256).png().toFile(rendererMark);
 
-	console.log("wrote build/icon.svg, build/icon.png, build/icon.ico, build/icon.icns, build/icons/*.png and src/renderer/src/assets/brand-mark.png");
+	// pi-tui 风格的窗口/任务栏图标（设置「Logo 风格」切换用）：同一套留白规则导出 256 PNG。
+	// 安装包/ exe 静态图标仍用 classic（安装身份不随设置变）；这里只服务运行时 setIcon。
+	// renderPng 闭包读的是模块级 classic svg，pi-tui 版独立内联同款逻辑（留白 6.25% 一致）。
+	const piTuiSvg = fs.readFileSync(path.join(__dirname, "..", "build", "icon-pi-tui.svg"), "utf8");
+	if (piTuiSvg.includes("data:image/png")) {
+		throw new Error("build/icon-pi-tui.svg must stay a vector mark; do not embed a PNG");
+	}
+	{
+		const size = 256;
+		const innerSize = Math.max(1, Math.round(size * iconContentRatio) - (Math.round(size * iconContentRatio) % 2));
+		const iconBuffer = await sharp(Buffer.from(piTuiSvg)).resize(innerSize, innerSize).png().toBuffer();
+		await sharp({
+			create: { width: size, height: size, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+		})
+			.composite([{ input: iconBuffer, left: Math.floor((size - innerSize) / 2), top: Math.floor((size - innerSize) / 2) }])
+			.png()
+			.toFile(path.join(out, "icon-pi-tui.png"));
+	}
+
+	console.log("wrote build/icon.svg, build/icon.png, build/icon.ico, build/icon.icns, build/icons/*.png, build/icon-pi-tui.png and src/renderer/src/assets/brand-mark.png");
 }
 
 main().catch((error) => {

@@ -15,6 +15,7 @@ export type { WorkspaceDrawerPanel as DrawerPanel } from "../../hooks/useWorkspa
 
 // Re-exports from leaf modules (A12 migration in progress)
 import { PiLogoCanvas } from "./PiLogoCanvas";
+import { PiTuiLogoCanvas, useLogoStyle } from "./PiTuiLogo";
 import { TextShimmer } from "../motion/text-shimmer";
 import { detectRendererPlatform } from "../../lib/detectRendererPlatform";
 export { WorktreeCreateDialog } from "../sidebar/SidebarComponents";
@@ -154,13 +155,14 @@ export function BrandLockup() {
 		};
 	}, []);
 	const brandTitle = branch ? `PiDeck · ${branch}` : "PiDeck";
+	const logoStyle = useLogoStyle();
 	// macOS 窗口左上角已有原生交通灯，π logo + 字标挤在同一行视觉过重；
 	// darwin 平台只保留字标（品牌语义仍由 aria-label 承载），其余平台维持原样。
 	const showLogo = detectRendererPlatform() !== "darwin";
 	return (
 		<div className="brand-lockup flex h-full min-w-0 items-center gap-2" aria-label={brandTitle} title={branch ? brandTitle : undefined}>
-			{/* 默认静态定格；点击 logo 才播官方 tetromino 拼装动画，不随会话启动自动播。 */}
-			{showLogo && <PiLogoCanvas size={18} playOnClick />}
+			{/* 默认静态定格；点击 logo 才播落位动画（classic=四块拼图 / pi-tui=三块落位），不随会话启动自动播。 */}
+			{showLogo && (logoStyle === "pi-tui" ? <PiTuiLogoCanvas size={18} playOnClick /> : <PiLogoCanvas size={18} playOnClick />)}
 			<span className="flex min-w-0 flex-col justify-center gap-1">
 				<TextShimmer as="span" enabled={shimmerOn} className="brand-wordmark truncate text-[18px] font-[PiDeckDepartureMono] font-bold uppercase leading-none">
 					PiDeck

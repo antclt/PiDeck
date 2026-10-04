@@ -51,6 +51,7 @@ import type { DataEnvMode } from "../shared/types/dataEnv";
 // 使用 ?asset 后缀导入图标，electron-vite 会在构建时将其复制到输出目录并提供正确的运行时路径
 // 这解决了打包后 build/ 目录不在 asar 中导致托盘图标丢失的问题
 import iconPath from "../../build/icon.png?asset";
+import { applyWindowLogoStyle } from "./appWindowLogo";
 
 // 构建标记：npm run dist:*:dev 打包时由 vite define 注入 true（构建期替换，非运行时环境变量）。
 declare const __PIDECK_DEV_BUILD__: boolean;
@@ -3078,6 +3079,8 @@ function registerIpc() {
 			await settingsStore.load();
 			// 快捷键覆盖可能随备份一起被恢复：同步刷新主进程生效绑定，无需重启
 			refreshShortcutBindings(settingsStore.get());
+			// Logo 风格也可能随备份恢复：同步刷新窗口/Dock 图标
+			applyWindowLogoStyle(settingsStore.get().logoStyle, () => mainWindow);
 			void piModelCapabilityCache?.refresh().catch(() => undefined);
 		},
 	});
@@ -4113,6 +4116,8 @@ app
 		await settingsStore.load();
 		// 快捷键覆盖从磁盘载入后立即刷新主进程生效绑定（此后 settings:update 路径实时刷新）
 		refreshShortcutBindings(settingsStore.get());
+		// Logo 风格：启动时按已加载设置刷新窗口/Dock 图标（此后 settings:update 路径实时刷新）
+		applyWindowLogoStyle(settingsStore.get().logoStyle, () => mainWindow);
 		piModelCapabilityCache = new PiModelCapabilityCache({
 			// 模型能力水合分两档（详见 docs/pi-model-capability-plan.md）：
 			// - 快速档（默认，loadExtensions=false）：--no-extensions。实测 418 模型下

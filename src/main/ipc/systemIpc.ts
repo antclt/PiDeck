@@ -39,6 +39,7 @@ import type { RpcLogger } from "../logging/RpcLogger";
 import type { SessionRuntimeCoordinator } from "../sessions/SessionRuntimeCoordinator";
 import { resolveConfigProxyTarget } from "../sessions/sessionProxyPolicy";
 import { setConfiguredGitPath } from "../git/gitExecutable";
+import { applyWindowLogoStyle } from "../appWindowLogo";
 import { detectDshRunnerNode } from "../dsh/dshRunnerNode";
 import { DSH_RUNNER_NODE_ENV } from "../dsh/dshRunnerNodeSidecar";
 import { installDshRunnerNodeSidecar } from "../dsh/dshRunnerNodeInstall";
@@ -1631,6 +1632,10 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		// 自动下载更新开关：立即下发到 electron-updater（含检查期间的 autoDownload 切换）。
 		if ("autoDownloadUpdates" in patch) {
 			updateService?.applyAutoDownloadPreference();
+		}
+		// Logo 风格：立即切换窗口/任务栏/Dock 图标（安装包静态图标恒为 classic，见 appWindowLogo.ts）。
+		if ("logoStyle" in patch && prevSettings.logoStyle !== settings.logoStyle) {
+			applyWindowLogoStyle(settings.logoStyle, getMainWindow);
 		}
 		// 更新源切换（预设镜像 / 自定义镜像前缀）：立即重建 feed URL，无需重启生效。
 		if ("updateSource" in patch || "customUpdateSourceUrl" in patch) {
