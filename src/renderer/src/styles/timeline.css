@@ -1497,11 +1497,9 @@
   background: color-mix(in srgb, var(--color-accent) 20%, transparent);
 }
 
-.composer-box:focus-within {
-  /* 中性 focus：ring 走 foreground，不再品牌绿 */
-  border-color: var(--color-text-primary);
-  box-shadow: var(--shadow-composer-lifted), var(--focus-ring);
-}
+/* 默认态刻意不做 :focus-within 外观：曾经的「近黑边框 + 3px 前景色环」在 20px 圆角 + 外层
+   footer 的 overflow-hidden 下左右被裁，只剩上下两条黑杠，看起来像脏阴影而不是焦点提示；
+   聚焦反馈由光标与编辑器自身承担。模式态（shell/plan/goal）的 :focus-within 仍保留。 */
 .composer-box.shell-mode {
   border-color: color-mix(
     in srgb,
