@@ -17,12 +17,12 @@ export type AppAccentMode = "default" | "green" | "blue" | "purple" | "amber" | 
  * classic-green 为出厂默认（中性黑白灰）；fresh-green 为全屏绿色主题（表面带绿色调）。
  */
 export type AppSkinId = "classic-green" | "fresh-green" | "graphite" | "sea-blue" | "warm-beige" | "custom";
-/** Logo 风格：classic = PiDeck 四块拼图 π（默认）；pi-tui = pi 官方 TUI 三色像素标（coral/blue/yellow） */
+/** Logo 风格：pi-tui = pi 官方 TUI 三色像素标（coral/blue/yellow，默认）；classic = PiDeck 四块拼图 π（显式选择） */
 export type LogoStyle = "classic" | "pi-tui";
 
-/** 解析 logo 风格：仅 "pi-tui" 视为新风格，其余（null/undefined/未知旧值）一律 classic。主进程窗口图标与渲染层 UI 共用。 */
+/** 解析 logo 风格：仅 "classic" 视为显式选择经典；其余（null/undefined/未知旧值）一律回落默认 pi-tui。主进程窗口图标与渲染层 UI 共用。 */
 export function resolveLogoStyle(value: string | null | undefined): LogoStyle {
-	return value === "pi-tui" ? "pi-tui" : "classic";
+	return value === "classic" ? "classic" : "pi-tui";
 }
 export type AppLanguageMode = "system" | "zh-CN" | "en-US" | "pseudo";
 export type LinkOpenMode = "external" | "internal";
@@ -755,7 +755,7 @@ export function createDefaultAppSettings(): AppSettings {
 		themeScheduleDarkStart: "19:00",
 		accent: "default",
 		themeSkin: "classic-green",
-		logoStyle: "classic",
+		logoStyle: "pi-tui",
 		customThemeOverrides: {},
 		backgroundImage: "",
 		backgroundImageOpacity: 0.8,

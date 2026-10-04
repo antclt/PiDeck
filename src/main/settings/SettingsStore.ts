@@ -116,7 +116,7 @@ const defaultSettings: AppSettings = {
 	themeScheduleDarkStart: "19:00",
 	accent: "default",
 	themeSkin: "classic-green",
-	logoStyle: "classic",
+	logoStyle: "pi-tui",
 	customThemeOverrides: {},
 	backgroundImage: "",
 	backgroundImageOpacity: 0.8,

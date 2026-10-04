@@ -40,13 +40,13 @@ test("three animation pieces reassemble the settled bitmap exactly", () => {
 	}
 });
 
-test("resolveLogoStyle only accepts pi-tui, everything else falls back to classic", () => {
+test("resolveLogoStyle treats classic as explicit opt-in, everything else falls back to pi-tui", () => {
 	assert.equal(resolveLogoStyle("pi-tui"), "pi-tui");
 	assert.equal(resolveLogoStyle("classic"), "classic");
-	assert.equal(resolveLogoStyle(null), "classic");
-	assert.equal(resolveLogoStyle(undefined), "classic");
-	assert.equal(resolveLogoStyle("Pi-TUI"), "classic");
-	assert.equal(resolveLogoStyle("garbage"), "classic");
+	assert.equal(resolveLogoStyle(null), "pi-tui");
+	assert.equal(resolveLogoStyle(undefined), "pi-tui");
+	assert.equal(resolveLogoStyle("Pi-TUI"), "pi-tui");
+	assert.equal(resolveLogoStyle("garbage"), "pi-tui");
 });
 
 test("boot splash reads the same localStorage key and embeds the same pi-tui bitmap", () => {
@@ -54,6 +54,8 @@ test("boot splash reads the same localStorage key and embeds the same pi-tui bit
 	const html = readFileSync(`${repoRoot}src/renderer/index.html`, "utf8");
 	// 启动画面内联脚本（无法 import 共享常量）必须与 LOGO_STYLE_STORAGE_KEY 同步；空白容忍防格式化断言
 	assert.match(html, new RegExp(`localStorage\\.getItem\\(\\s*["']${LOGO_STYLE_STORAGE_KEY.replace(":", "\\:")}["']\\s*\\)`), "boot splash must read LOGO_STYLE_STORAGE_KEY");
+	// 新默认 pi-tui：仅显式选 classic 才不挂 class（与 shared/settings 默认同源）
+	assert.match(html, new RegExp(`localStorage\\.getItem\\(\\s*["']${LOGO_STYLE_STORAGE_KEY.replace(":", "\\:")}["']\\s*\\)\\s*!==\\s*["']classic["']`), "boot splash 默认 pi-tui（非 classic 即挂 class）");
 	// 开屏 pi-tui SVG 与数据模块逐格一致（颜色 + 位置抽样锚定）
 	assert.match(html, /class="boot-logo-pi-tui"[\s\S]*?fill="#E48A7A"[\s\S]*?fill="#4F8EB3"[\s\S]*?fill="#EAB65D"/);
 	assert.match(html, /<rect x="3" y="3" width="1" height="1" fill="#EAB65D"\/>/);
@@ -112,18 +114,18 @@ const seedSettings = (userData, extra) => {
 	writeFileSync(join(userData, "settings.json"), JSON.stringify({ installationType: "installed", chatContentWidthPct: 80, ...extra }));
 };
 
-test("SettingsStore: logoStyle 默认 classic、旧配置缺字段零迁移、非法值被清洗", async () => {
+test("SettingsStore: logoStyle 默认 pi-tui、旧配置缺字段回落新默认、非法值被清洗", async () => {
 	const { SettingsStore, userData } = makeSettingsStore();
 	seedSettings(userData, {});
 	const store = new SettingsStore();
 	await store.load();
-	assert.equal(store.get().logoStyle, "classic", "旧 settings.json 缺 logoStyle 时回落 classic");
+	assert.equal(store.get().logoStyle, "pi-tui", "旧 settings.json 缺 logoStyle 时回落新默认 pi-tui");
 
-	await store.update({ logoStyle: "pi-tui" });
-	assert.equal(store.get().logoStyle, "pi-tui");
+	await store.update({ logoStyle: "classic" });
+	assert.equal(store.get().logoStyle, "classic", "显式选 classic 生效");
 
 	await store.update({ logoStyle: "neon" });
-	assert.equal(store.get().logoStyle, "pi-tui", "非法枚举被丢弃，保持原设置");
+	assert.equal(store.get().logoStyle, "classic", "非法枚举被丢弃，保持原设置");
 });
 
 test("logoStyle 默认值三处同源（shared 默认 / SettingsStore 默认 / atom 初值）", () => {
@@ -135,7 +137,7 @@ test("logoStyle 默认值三处同源（shared 默认 / SettingsStore 默认 / a
 		["src/shared/types/settings.ts", sharedDefaults],
 		["src/main/settings/SettingsStore.ts", storeDefaults],
 	]) {
-		assert.match(source, /logoStyle\s*:\s*"classic"/, `${path} 默认 classic`);
+		assert.match(source, /logoStyle\s*:\s*"pi-tui"/, `${path} 默认 pi-tui`);
 	}
-	assert.match(atoms, /logoStyleAtom\s*=\s*atom<"classic"\s*\|\s*"pi-tui">\("classic"\)/, "atom 初值 classic");
+	assert.match(atoms, /logoStyleAtom\s*=\s*atom<"classic"\s*\|\s*"pi-tui">\("pi-tui"\)/, "atom 初值 pi-tui");
 });

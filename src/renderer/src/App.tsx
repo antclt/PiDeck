@@ -786,7 +786,7 @@ export function App() {
 	useAgentLoadNotice(settings.agentCountReminderEnabled);
 
 	// logo 风格 → 渲染层镜像 atom + localStorage 缓存：LogoMark/侧栏/关于弹层订阅 atom 即时切换；
-	// localStorage 让下次启动的启动画面（React 挂载前）就能用新风格，避免开屏闪回 classic。
+	// localStorage 让下次启动的启动画面（React 挂载前）就能用同一风格，避免开屏闪回默认 pi-tui。
 	const setLogoStyle = useSetAtom(logoStyleAtom);
 	useEffect(() => {
 		const logoStyle = resolveLogoStyle(settings.logoStyle);
