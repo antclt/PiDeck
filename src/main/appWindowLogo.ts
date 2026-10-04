@@ -2,8 +2,8 @@ import { app, nativeImage, type BrowserWindow } from "electron";
 import { getAppLogger } from "./logging/sharedLogger";
 import { resolveLogoStyle, type LogoStyle } from "../shared/types/settings";
 // electron-vite ?asset：构建时复制到输出目录并返回运行时路径（与 index.ts 的 iconPath 同模式）
-import classicIconPath from "../build/icon.png?asset";
-import piTuiIconPath from "../build/icon-pi-tui.png?asset";
+import classicIconPath from "../../build/icon.png?asset";
+import piTuiIconPath from "../../build/icon-pi-tui.png?asset";
 
 /**
  * 应用窗口/任务栏/Dock 图标的 logo 风格切换。
