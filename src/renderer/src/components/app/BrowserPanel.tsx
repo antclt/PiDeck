@@ -427,21 +427,21 @@ export function BrowserPanel(props: {
 					>
 						<span className="min-w-0 truncate">{tab.title || tab.url}</span>
 						<Button variant="ghost" size="icon-sm" className="browser-tab-close" onClick={(event) => closeTab(tab.id, event)} title={t("browser.closeTab")}>
-							<X size={11} />
+							<X size={12} />
 						</Button>
 					</div>
 				))}
-				<Button variant="ghost" size="icon-sm" className="size-[30px] text-text-tertiary hover:text-[color:var(--color-accent)]" onClick={addTab} title={t("browser.newTab")}>
+				<Button variant="ghost" size="icon-sm" className="size-7 text-text-tertiary hover:text-text-primary" onClick={addTab} title={t("browser.newTab")}>
 					<Plus size={14} />
 				</Button>
 				{!props.isFullscreen && (
 					<div className="ml-auto flex shrink-0 items-center gap-0.5 pr-1">
-						<Button variant="ghost" size="icon-sm" className="size-[26px] rounded-sm text-text-tertiary hover:bg-bg-hover hover:text-text-primary" onClick={onToggleFullscreen} title={t("browser.fullscreen")}>
+						<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-tertiary hover:bg-bg-hover hover:text-text-primary" onClick={onToggleFullscreen} title={t("browser.fullscreen")}>
 							<Maximize2 size={13} />
 						</Button>
 						{/* 统一 drawer chrome 已提供关闭；此处仅在独立/旧布局时保留 */}
 						{!props.hideChromeClose && (
-							<Button variant="ghost" size="icon-sm" className="size-[26px] rounded-sm text-text-tertiary hover:bg-bg-hover hover:text-text-primary" onClick={onClose} title={t("common.close")}>
+							<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-tertiary hover:bg-bg-hover hover:text-text-primary" onClick={onClose} title={t("common.close")}>
 								<X size={14} />
 							</Button>
 						)}
@@ -450,22 +450,22 @@ export function BrowserPanel(props: {
 			</div>
 
 			<div className="flex shrink-0 items-center gap-1 border-b border-border/40 px-2 py-1.5">
-				<Button variant="ghost" size="icon-sm" className="size-[30px] rounded-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" disabled={!canGoBack} onClick={() => webviewRef.current?.goBack()} title={t("browser.back")}>
-					<ArrowLeft size={15} />
+				<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" disabled={!canGoBack} onClick={() => webviewRef.current?.goBack()} title={t("browser.back")}>
+					<ArrowLeft size={14} />
 				</Button>
-				<Button variant="ghost" size="icon-sm" className="size-[30px] rounded-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" disabled={!canGoForward} onClick={() => webviewRef.current?.goForward()} title={t("browser.forward")}>
-					<ArrowRight size={15} />
+				<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" disabled={!canGoForward} onClick={() => webviewRef.current?.goForward()} title={t("browser.forward")}>
+					<ArrowRight size={14} />
 				</Button>
-				<Button variant="ghost" size="icon-sm" className="size-[30px] rounded-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" onClick={() => webviewRef.current?.reload()} title={t("browser.reload")}>
-					<RefreshCw size={15} />
+				<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" onClick={() => webviewRef.current?.reload()} title={t("browser.reload")}>
+					<RefreshCw size={14} />
 				</Button>
-				<Button variant="ghost" size="icon-sm" className="size-[30px] rounded-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" onClick={() => loadUrl(DEFAULT_HOME)} title={t("browser.home")}>
-					<Home size={15} />
+				<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" onClick={() => loadUrl(DEFAULT_HOME)} title={t("browser.home")}>
+					<Home size={14} />
 				</Button>
 				<div className="min-w-0 flex-1">
 					<Input
 						type="text"
-						className="h-[30px] w-full rounded-md border border-border-subtle bg-bg-input px-2.5 text-[13px] text-text-primary outline-none focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
+						className="h-[30px] w-full rounded-md border border-border-subtle bg-bg-input px-2.5 text-sm text-text-primary outline-none focus-visible:border-[var(--color-accent)] focus-visible:ring-[3px] focus-visible:ring-ring/50"
 						value={inputValue}
 						onChange={(event) => setInputValue(event.target.value)}
 						onKeyDown={handleKeyDown}
@@ -505,10 +505,10 @@ export function BrowserPanel(props: {
 				</div>
 				{props.isFullscreen ? (
 					<>
-						<Button variant="ghost" size="icon-sm" className="size-[30px] rounded-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" onClick={onMinimize} title={t("browser.minimize")}>
+						<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" onClick={onMinimize} title={t("browser.minimize")}>
 							<Minus size={15} />
 						</Button>
-						<Button variant="ghost" size="icon-sm" className="size-[30px] rounded-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" onClick={onClose} title={t("browser.close")}>
+						<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" onClick={onClose} title={t("browser.close")}>
 							<X size={15} />
 						</Button>
 					</>

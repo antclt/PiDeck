@@ -25,10 +25,9 @@
   height: min(850px, calc(100vh - 48px));
   display: flex;
   flex-direction: column;
-  border-radius: var(--radius-lg);
-  background: var(--color-bg-panel);
-  box-shadow: var(--shadow-xl);
-  overflow: hidden;
+  /* 外壳属性(border-radius/background/box-shadow/overflow)已删：这些由 DialogContent 的
+     rounded-lg / bg-background / shadow-lg / overflow-hidden utility 提供，双源时
+     胜者取决于层序注入顺序，属定时炸弹（2027-03 收口）。 */
 }
 .codex-import-modal .modal-header small {
   display: block;

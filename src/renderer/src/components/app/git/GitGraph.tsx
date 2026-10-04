@@ -689,7 +689,13 @@ export function SourceControlGraph(props: GitGraphProps) {
 						</div>
 					)}
 					{error && <div className="git-status-msg error">{error}</div>}
-					{!loading && !error && !commits.length && <div className="git-status-msg">{t("git.noCommits")}</div>}
+					{!loading && !error && !commits.length && (
+						/* 空仓库/无匹配提交：居中图标 + 文案的完成态，替代顶部一行小灰字（面板主体留白时缺少视觉锚点） */
+						<div className="flex min-h-[120px] flex-1 flex-col items-center justify-center gap-2 px-4 py-8 text-center">
+							<GitBranch aria-hidden="true" size={26} strokeWidth={1.5} className="text-text-tertiary" />
+							<div className="text-[13px] font-medium text-[var(--git-desc-fg)]">{t("git.noCommits")}</div>
+						</div>
+					)}
 					{commits.length > 0 && (
 						<div className="min-h-0 flex-1 overflow-auto overscroll-contain [scrollbar-gutter:stable]" role="list" onScroll={dismissHover}>
 							{graphRows.map((row) => {

@@ -5,7 +5,7 @@ import { cn } from "../../../lib/utils";
 
 export function PaneHeader(props: { id: string; title: string; count?: number; open: boolean; onToggle: () => void; children?: ReactNode }) {
 	return (
-		<div className="flex h-8 shrink-0 items-center gap-1 border-b border-border/40 bg-background px-2">
+		<div className="flex h-8 shrink-0 items-center gap-1 border-b border-[var(--git-panel-border)] bg-[var(--git-panel-bg)] px-2">
 			{/* 标题不参与压缩：「源代码管理图」等固定文案必须完整可见，不能被右侧筛选挤成「源…」。 */}
 			<button type="button" className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-xs font-medium text-foreground hover:bg-accent" aria-expanded={props.open} aria-controls={`git-pane-${props.id}`} onClick={props.onToggle}>
 				<Twistie open={props.open} />

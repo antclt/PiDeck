@@ -1076,28 +1076,6 @@ select:focus-visible {
   line-height: 1.6;
 }
 
-/* ── 通用卡片内按钮 ────────────────────────────── */
-.env-card-btn {
-  align-self: flex-start;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-sm);
-  padding: 7px 16px;
-  background: var(--color-bg-panel);
-  color: var(--color-text-primary);
-  font-size: var(--font-size-caption);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.env-card-btn.primary {
-  border-color: var(--color-accent);
-  background: var(--color-accent);
-  color: var(--color-text-inverse);
-}
-.env-card-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 /* ── 已搜索目录卡片 ────────────────────────────── */
 .env-dirs-list {
   max-height: 150px;
@@ -3369,6 +3347,19 @@ select:focus-visible {
   --terminal-active-bg: #e6f2d7;
   --terminal-active-fg: #586e00;
   --terminal-hover: #e8dfc3;
+}
+.terminal-dock[data-theme="pi-soft"] {
+  /* pi-soft 浅色侧：柔绿灰纸感，与暗色 pi-soft 同族。缺这份映射时浅色回落到纯白 #ffffff，
+     在暖灰面板环境里像一块刺眼白板（2027-03 补齐）。 */
+  --terminal-bg: #f8faf8;
+  --terminal-fg: #33413a;
+  --terminal-panel: #eef2ef;
+  --terminal-header: #f4f7f5;
+  --terminal-border: color-mix(in srgb, #ccd6d0 55%, transparent);
+  --terminal-muted: #75817b;
+  --terminal-active-bg: transparent;
+  --terminal-active-fg: #1a7f37;
+  --terminal-hover: #e3eae6;
 }
 :root[data-theme="dark"] .terminal-dock[data-theme="pi-soft"] {
   --terminal-bg: #15191d;

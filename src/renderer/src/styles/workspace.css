@@ -265,6 +265,13 @@
   background: var(--overlay-backdrop);
   backdrop-filter: blur(3px);
   transform: translateZ(0);
+  /* 与 shadcn Dialog 遮罩同节奏的淡入；退场仍是卸载硬切，但遮罩消失不显突兀 */
+  animation: prompts-editor-backdrop-in 150ms ease-out;
+}
+@keyframes prompts-editor-backdrop-in {
+  from {
+    opacity: 0;
+  }
 }
 .prompts-editor-modal {
   width: min(800px, calc(100vw - 80px));
@@ -272,9 +279,30 @@
   display: grid;
   grid-template-rows: auto 1fr auto;
   background: var(--color-bg-panel);
+  /* 边框对齐 DialogContent（rounded-lg border）：此前只有阴影无边框，亮色下像悬浮的裸块 */
+  border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-xl);
   overflow: hidden;
+  /* 进场对齐全局 Dialog 的 scale+fade 节奏（180ms cubic-bezier(0.22,1,0.36,1)），此前零动画硬切 */
+  animation: prompts-editor-modal-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes prompts-editor-modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98) translateY(6px);
+  }
+  to {
+    /* transform: none 收尾避免 fill-mode 保留非 none transform 创建 stacking context */
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .prompts-editor-backdrop,
+  .prompts-editor-modal {
+    animation: none;
+  }
 }
 /* 壁纸模式下编辑弹框是「弹框内嵌弹框」，需要独立稳定实底：
    config-modal 等把 --color-bg-panel/--color-bg-muted 覆盖为 transparent（避免内容
