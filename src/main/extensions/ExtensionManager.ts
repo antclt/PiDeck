@@ -367,7 +367,8 @@ export class ExtensionManager {
 
 	async removeBuiltIn(source: string): Promise<void> {
 		const normalized = source.trim();
-		if (!normalized.startsWith("pi-deck-")) {
+		// 白名单判定（与 disableBuiltIn 一致）：防 IPC 直接传非内置名（如 demo）走内置删除路径。
+		if (!isBuiltInExtensionName(normalized)) {
 			throw new Error("只能操作内置扩展");
 		}
 		await this.disableBuiltIn(normalized);
