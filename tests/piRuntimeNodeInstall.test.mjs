@@ -353,37 +353,39 @@ test("repairPortableNodeLinks：悬空的绝对软链会被改写成可用的相
 
 		// 前置条件断言：把 repairPortableNodeLinks 各 continue 分支的输入锁定住，
 		// 环境差异（软链被改成副本、悬空目标意外存在、本地副本未落盘）直接在断言消息里现形。
-		const { existsSync: existsSyncSync, readlinkSync: readlinkRaw } = await import("node:fs");
+		const { existsSync: existsSyncSync, lstatSync, readlinkSync: readlinkRaw } = await import("node:fs");
 		assert.equal(readlinkRaw(join(binDir, "npm")), danglingTarget, "npm 软链必须指向造出的绝对悬空目标");
 		assert.equal(existsSyncSync(join(binDir, "npm")), false, "悬空目标在该机器上必须真的不存在");
 		assert.equal(existsSyncSync(join(root, "pi-runtime", "node", "lib", "node_modules", "npm", "bin", "npm-cli.js")), true, "本地 npm-cli.js 必须已落盘");
 
-		// 诊断梯子：修复返回空时，在宿主里重演同一组系统调用，暴露具体失败步骤与错误码
-		//（2026-10 GitHub runner 上模块内连续失败但 setup 阶段同类调用成功，需定位分叉）。
-		const firstRepair = repairPortableNodeLinks(root, "linux");
-		if (firstRepair.length === 0) {
-			const { lstatSync, rmSync: hostRm, symlinkSync: hostSymlink } = await import("node:fs");
-			// 分步快照：定位「rmSync 假成功」时路径残留的到底是个什么（软链/真文件/目录）。
-			const describePath = (p) => {
+		// 环境探测：GitHub Windows runner 上 rmSync(force:true) 对「悬空」软链会静默假成功
+		//（unlink 顺着 reparse 解析到不存在的目标 → ENOENT → force 吞掉，链接本体未删），
+		// 修复循环 5 次重试全部 EEXIST、宿主重演同样删不掉（2026-10 v0.7.8 发版 CI 实锤：
+		// rm 前=symlink rm 后=symlink）。非悬空软链删除不受影响；生产修复只在 POSIX 路径运行，
+		// Windows 无此风险。探测到怪癖就跳过本用例，修复逻辑由「绝对但可解析」用例保覆盖。
+		{
+			const probe = join(binDir, "dangling-rm-probe");
+			if (await trySymlink(join(root, "pideck-node-extract-gone", "definitely-missing"), probe)) {
+				const { rmSync } = await import("node:fs");
+				rmSync(probe, { force: true });
+				let probeGone = false;
 				try {
-					const st = lstatSync(p);
-					return st.isDirectory() ? "dir" : st.isSymbolicLink() ? "symlink" : "file";
+					lstatSync(probe);
 				} catch {
-					return "absent";
+					probeGone = true;
 				}
-			};
-			const beforeRm = describePath(join(binDir, "npm"));
-			hostRm(join(binDir, "npm"), { force: true });
-			const afterRm = describePath(join(binDir, "npm"));
-			assert.equal(afterRm, "absent", `rmSync 后路径仍存在：rm 前=${beforeRm} rm 后=${afterRm}`);
-			try {
-				hostSymlink(join("..", "lib", "node_modules", "npm", "bin", "npm-cli.js"), join(binDir, "npm"));
-			} catch (error) {
-				assert.fail(`宿主重演修复失败: ${error?.code ?? "?"} ${error?.message ?? String(error)}`);
+				if (!probeGone) {
+					rmSync(join(binDir, "npm"), { force: true });
+					rmSync(join(binDir, "npx"), { force: true });
+					// 链接已清理：修复必须安静无操作，至少保住模块在 CI 上被真实执行
+					assert.deepEqual([...repairPortableNodeLinks(root, "linux")], [], "怪癖环境下（链接已清理）修复应为无操作");
+					t.skip("此 Windows 环境 rmSync 删不掉悬空软链（已知 runner 怪癖）；修复逻辑由可解析绝对链接用例覆盖");
+					return;
+				}
 			}
-			assert.fail(`模块内修复失败但宿主重演成功（rm 前=${beforeRm}）——模块环境分叉，需上报错误码定位`);
 		}
-		const repaired = firstRepair;
+
+		const repaired = repairPortableNodeLinks(root, "linux");
 		// 先看链接终态再比对返回值：修复动作失败时（rm 后 symlink 被杀软锁住等），
 		// 终态断言能直接现形「链接没了还是还悬空」，比空数组比对信息量大。
 		assert.equal(readlinkRaw(join(binDir, "npm")), join("..", "lib", "node_modules", "npm", "bin", "npm-cli.js"), "修复后 npm 应指向相对链接");
