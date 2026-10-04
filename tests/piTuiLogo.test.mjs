@@ -59,6 +59,22 @@ test("boot splash reads the same localStorage key and embeds the same pi-tui bit
 	assert.match(html, /<rect x="3" y="3" width="1" height="1" fill="#EAB65D"\/>/);
 	// classic / pi-tui 显隐互斥（html.logo-pi-tui class 切换）
 	assert.match(html, /html\.logo-pi-tui \.boot-logo \.boot-logo-classic\s*\{\s*display:\s*none/);
+	// 官方位图为 1:1 正方形（半块字符每格上下两个正方形像素），不得再按 4:3 压成 48×36
+	const bootRule = html.match(/\.boot-logo \.boot-logo-pi-tui\s*\{[^}]*\}/u);
+	assert.ok(bootRule, "boot splash 应有 pi-tui logo 尺寸规则");
+	assert.match(bootRule[0], /height:\s*48px/, "开屏 pi-tui 高度须与宽度一致（48px，1:1）");
+});
+
+test("PiTuiLogo component renders the 4x4 bitmap as a square (SVG and Canvas)", () => {
+	const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+	const source = readFileSync(`${repoRoot}src/renderer/src/components/app/PiTuiLogo.tsx`, "utf8");
+	// 官方 TUI 半块字符：每字符格上下叠两个正方形像素 → 4×4 位图整体 1:1。
+	// 2026-12 曾误按「2 行字符」把高度算成 3/4：SVG 被挤出侧向留白、canvas 方形缓冲被 CSS 纵向压扁，
+	// 品牌区 logo 明显偏扁——本测试锁住「正方形」契约（空白容忍，AGENTS.md 格式化要求）。
+	assert.match(source, /width=\{size\}\s*height=\{size\}/, "svg 宽高必须相等（位图 1:1）");
+	assert.doesNotMatch(source, /\(size \* 3\) \/ 4|\(cssSize \* 3\) \/ 4/, "不得再按 4:3 计算高度");
+	const paintSection = source.slice(source.indexOf("function paintCells"));
+	assert.match(paintSection, /const cssW = cssSize;\s*const cssH = cssSize;/, "canvas CSS 尺寸必须为 1:1");
 });
 
 test("LogoMark sidebar and about logo branch on logoStyle (source scan, whitespace tolerant)", () => {

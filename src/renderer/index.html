@@ -78,9 +78,9 @@
       /* logo 风格切换（与渲染层 piTuiLogo.ts 同源）：默认 classic，html.logo-pi-tui 时显示 pi 官方 TUI 三色像素标 */
       .boot-logo .boot-logo-pi-tui {
         display: none;
-        /* 4×4 位图是 4:3（宽×高），不能套用 classic 的 48×48 正方形尺寸 */
+        /* 4×4 位图为 1:1 正方形（官方半块字符每格上下两个正方形像素），与 classic 同尺寸 */
         width: 48px;
-        height: 36px;
+        height: 48px;
       }
       html.logo-pi-tui .boot-logo .boot-logo-classic {
         display: none;

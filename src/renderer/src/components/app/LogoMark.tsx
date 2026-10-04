@@ -8,11 +8,11 @@ import { PiTuiLogoMark, useLogoStyle } from "./PiTuiLogo";
  */
 export function LogoMark({ size = 32 }: { size?: number } = {}) {
 	const logoStyle = useLogoStyle();
-	const glyph = Math.round(size * 0.5625);
+	const glyph = Math.round(size * 0.5625); // 位图为 1:1 正方形，宽度与 classic glyph 对齐
 	return (
 		<div className="logo-mark relative grid place-items-center overflow-hidden rounded-md bg-black text-white shadow-sm ring-1 ring-white/15" style={{ width: size, height: size }} aria-label={t("app.logoLabel")}>
 			{logoStyle === "pi-tui" ? (
-				/* pi 官方 TUI logo：4×4 像素位图，宽度与 classic glyph 一致（高度自动 3/4），品牌色固定不随主题变 */
+				/* pi 官方 TUI logo：4×4 像素位图（1:1 正方形），宽度与 classic glyph 一致，品牌色固定不随主题变 */
 				<PiTuiLogoMark size={glyph} />
 			) : (
 				<svg viewBox="140 140 520 520" width={glyph} height={glyph} aria-hidden="true">
