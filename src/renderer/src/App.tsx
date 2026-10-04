@@ -3123,7 +3123,7 @@ export function App() {
 				<DataEnvMismatchDialog />
 
 				{/* CUA 操作审批弹框：pi Agent 注入鼠标/键盘前的用户确认（事件驱动，根级渲染） */}
-				<CuaApprovalDialog request={cuaApproval.request} responding={cuaApproval.responding} open={cuaApproval.open} onOpenChange={cuaApproval.setOpen} onRespond={(allowed) => void cuaApproval.respond(allowed)} onCancel={cuaApproval.cancel} />
+				<CuaApprovalDialog request={cuaApproval.request} pendingCount={cuaApproval.pendingCount} responding={cuaApproval.responding} open={cuaApproval.open} onOpenChange={cuaApproval.setOpen} onRespond={(allowed) => void cuaApproval.respond(allowed)} onCancel={cuaApproval.cancel} />
 			</>
 		</FileLinkBaseProvider>
 	);

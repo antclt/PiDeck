@@ -1,6 +1,6 @@
 import koffi from "koffi";
 import { clickAt, GetForegroundWindow, HWND_NOTOPMOST, HWND_TOPMOST, IsWindow, moveMouseAbsolute, pressKeyCombo, scrollAt, SetWindowPos, ShowWindow, SW_RESTORE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE, SWP_SHOWWINDOW, typeUnicode, VK_MAP, type WindowInfo } from "./CuaWin32";
-import { analyzeWindows, findWindowByTitle, getPrimaryDisplay, type OcclusionInfo } from "./CuaWindowAnalyzer";
+import { analyzeWindows, findWindowByTitle, getPrimaryDisplay, getVirtualDisplay, type OcclusionInfo } from "./CuaWindowAnalyzer";
 import { CuaGate, type CuaActionMeta, type CuaActionType } from "./CuaGate";
 
 /**
@@ -49,8 +49,8 @@ export class CuaEngine {
 	// Read-only operations (no gate check needed)
 	// -------------------------------------------------------------------------
 
-	listWindows(): OcclusionInfo[] {
-		return analyzeWindows();
+	listWindows(includeInvisible = false): OcclusionInfo[] {
+		return analyzeWindows({ includeInvisible });
 	}
 
 	getDisplay(): { width: number; height: number } {
@@ -69,19 +69,23 @@ export class CuaEngine {
 	isPointVisible(x: number, y: number): boolean {
 		const analyzed = analyzeWindows();
 		for (const info of analyzed) {
+			if (!info.window.isVisible) continue;
 			const r = info.window.rect;
 			if (x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height) {
-				return true;
+				// Topmost window containing the point: visible only if the point
+				// survives inside one of its un-occluded fragments.
+				return info.visibleRects.some((piece) => x >= piece.x && x < piece.x + piece.width && y >= piece.y && y < piece.y + piece.height);
 			}
 		}
-		return false;
+		// Not inside any window → bare desktop, which is visible.
+		return true;
 	}
 
 	// -------------------------------------------------------------------------
 	// Window activation
 	// -------------------------------------------------------------------------
 
-	activateWindow(titleSubstring: string): { success: boolean; window?: WindowInfo; method: string; error?: string } {
+	async activateWindow(titleSubstring: string): Promise<{ success: boolean; window?: WindowInfo; method: string; error?: string }> {
 		const info = findWindowByTitle(titleSubstring);
 		if (!info) {
 			return { success: false, method: "none", error: `Window not found: ${titleSubstring}` };
@@ -96,19 +100,24 @@ export class CuaEngine {
 			return { success: true, window: info.window, method: "already-foreground" };
 		}
 
-		ShowWindow(hwnd, SW_RESTORE);
-		SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
-
 		const titleBarPoint = info.titleBarPoint;
 		if (!titleBarPoint) {
-			SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
 			return { success: false, method: "none", error: "Target window is fully occluded; no safe title-bar point" };
 		}
 
-		const display = getPrimaryDisplay();
-		clickAt(titleBarPoint.x, titleBarPoint.y, "left", display.width, display.height);
-		this.sleep(this.config.defaultDelayMs);
-		SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+		// Temporarily raise above other windows so the title bar click lands;
+		// try/finally guarantees the TOPMOST flag is always reverted, even when
+		// the click injection throws mid-sequence (previously the flag leaked
+		// and the user's window stayed stuck above everything else).
+		ShowWindow(hwnd, SW_RESTORE);
+		SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+		try {
+			const display = getVirtualDisplay();
+			clickAt(titleBarPoint.x, titleBarPoint.y, "left", display.width, display.height, display.x, display.y);
+			await this.sleep(this.config.defaultDelayMs);
+		} finally {
+			SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+		}
 
 		const nowForeground = this.hwndValue(GetForegroundWindow()) === info.window.hwnd;
 
@@ -131,13 +140,13 @@ export class CuaEngine {
 		}
 
 		if (options.activateTarget) {
-			const activation = this.activateWindow(options.activateTarget);
+			const activation = await this.activateWindow(options.activateTarget);
 			if (!activation.success) {
 				return { sent: 0, error: activation.error };
 			}
 		}
 
-		const display = getPrimaryDisplay();
+		const display = getVirtualDisplay();
 
 		if (options.requireVisible) {
 			const visible = this.isPointVisible(x, y);
@@ -146,7 +155,32 @@ export class CuaEngine {
 			}
 		}
 
-		return { sent: clickAt(x, y, button, display.width, display.height), gateDecision: "allowed" };
+		return { sent: clickAt(x, y, button, display.width, display.height, display.x, display.y), gateDecision: "allowed" };
+	}
+
+	/**
+	 * Double click with a SINGLE approval: previously CuaTools called click()
+	 * twice, which forced the user through two sequential approval dialogs for
+	 * one logical action (and the second could still time out while the first
+	 * physical click had already landed). One gate check, then both clicks.
+	 */
+	async doubleClick(sessionId: string, x: number, y: number, button: "left" | "right" | "middle" = "left", options: CuaActionOptions = {}): Promise<CuaActionResult> {
+		const decision = await this.gate.check("click" as CuaActionType, sessionId, { x, y, button, double: true }, options.meta);
+		if (!decision.allowed) {
+			return { sent: 0, error: decision.reason ?? "denied", gateDecision: "denied" };
+		}
+
+		if (options.activateTarget) {
+			const activation = await this.activateWindow(options.activateTarget);
+			if (!activation.success) {
+				return { sent: 0, error: activation.error };
+			}
+		}
+
+		const display = getVirtualDisplay();
+		const first = clickAt(x, y, button, display.width, display.height, display.x, display.y);
+		const second = clickAt(x, y, button, display.width, display.height, display.x, display.y);
+		return { sent: first + second, gateDecision: "allowed" };
 	}
 
 	async type(sessionId: string, params: { text?: string; key?: string; modifiers?: string[] }, options: CuaActionOptions = {}): Promise<CuaActionResult> {
@@ -181,8 +215,8 @@ export class CuaEngine {
 			return { sent: 0, error: decision.reason ?? "denied", gateDecision: "denied" };
 		}
 
-		const display = getPrimaryDisplay();
-		return { sent: scrollAt(x, y, deltaY, deltaX, display.width, display.height), gateDecision: "allowed" };
+		const display = getVirtualDisplay();
+		return { sent: scrollAt(x, y, deltaY, deltaX, display.width, display.height, display.x, display.y), gateDecision: "allowed" };
 	}
 
 	// -------------------------------------------------------------------------
@@ -190,8 +224,8 @@ export class CuaEngine {
 	// -------------------------------------------------------------------------
 
 	moveMouse(x: number, y: number): number {
-		const display = getPrimaryDisplay();
-		return moveMouseAbsolute(x, y, display.width, display.height);
+		const display = getVirtualDisplay();
+		return moveMouseAbsolute(x, y, display.width, display.height, display.x, display.y);
 	}
 
 	// -------------------------------------------------------------------------
@@ -210,10 +244,10 @@ export class CuaEngine {
 		return Number(koffi.address(hwnd));
 	}
 
-	private sleep(ms: number): void {
-		const start = Date.now();
-		while (Date.now() - start < ms) {
-			// busy wait
-		}
+	private sleep(ms: number): Promise<void> {
+		// Was a busy-wait loop that burned the Electron main-process event loop
+		// for the full delay (80ms per activation). A timer promise keeps the
+		// process responsive while the OS settles the foreground switch.
+		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
 }

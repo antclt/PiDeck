@@ -4,12 +4,9 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { loadTsCommonJs } from "../helpers/loadTsCommonJs.mjs";
 
-// The MCP SDK is resolved via Node's real module cache inside loadTsCommonJs,
-// so the McpServer classes created there are the SAME instances this test
-// imports. No cross-realm instanceof problems.
 const { CuaMcpHttpHost } = loadTsCommonJs("src/main/cua/CuaMcpHttpHost.ts");
-const { CuaEngine } = loadTsCommonJs("src/main/cua/CuaEngine.ts");
 const { CuaGate } = loadTsCommonJs("src/main/cua/CuaGate.ts");
+const { CuaEngine } = loadTsCommonJs("src/main/cua/CuaEngine.ts");
 
 async function connectClient(url, token) {
 	const transport = new StreamableHTTPClientTransport(new URL(url), {
@@ -124,6 +121,111 @@ test("CUA MCP HTTP host returns 404 for unknown paths", async () => {
 		const res = await fetch(`http://127.0.0.1:${port}/nope`, { method: "GET" });
 		assert.strictEqual(res.status, 404);
 	} finally {
+		await host.stop();
+	}
+});
+
+test("capture schema rejects out-of-bounds quality/maxLongEdge", async () => {
+	const gate = new CuaGate({ enabled: true });
+	const engine = new CuaEngine({ defaultDelayMs: 10 }, gate);
+	const host = new CuaMcpHttpHost({ port: 0, authToken: "tok" }, { engine, gate });
+	await host.start();
+
+	const { client, transport } = await connectClient(host.getUrl(), "tok");
+	try {
+		const badCalls = [{ quality: 0 }, { quality: 101 }, { maxLongEdge: 1 }, { maxLongEdge: 1e9 }];
+		for (const args of badCalls) {
+			const res = await client.callTool({ name: "cua_capture", arguments: args });
+			assert.strictEqual(res.isError, true, `args ${JSON.stringify(args)} must be rejected: ${JSON.stringify(res)}`);
+		}
+	} finally {
+		await transport.close();
+		await host.stop();
+	}
+});
+
+test("scroll schema clamps out-of-range wheel deltas", async () => {
+	const gate = new CuaGate({ enabled: true });
+	const engine = new CuaEngine({ defaultDelayMs: 10 }, gate);
+	const host = new CuaMcpHttpHost({ port: 0, authToken: "tok" }, { engine, gate });
+	await host.start();
+
+	const { client, transport } = await connectClient(host.getUrl(), "tok");
+	try {
+		const res = await client.callTool({ name: "cua_scroll", arguments: { x: 1, y: 1, deltaY: 99999 } });
+		assert.strictEqual(res.isError, true, "out-of-range deltaY must be rejected");
+	} finally {
+		await transport.close();
+		await host.stop();
+	}
+});
+
+test("type schema rejects text exceeding the length cap", async () => {
+	const gate = new CuaGate({ enabled: true });
+	const engine = new CuaEngine({ defaultDelayMs: 10 }, gate);
+	const host = new CuaMcpHttpHost({ port: 0, authToken: "tok" }, { engine, gate });
+	await host.start();
+
+	const { client, transport } = await connectClient(host.getUrl(), "tok");
+	try {
+		const res = await client.callTool({ name: "cua_type", arguments: { text: "x".repeat(5001) } });
+		assert.strictEqual(res.isError, true, "over-long text must be rejected");
+	} finally {
+		await transport.close();
+		await host.stop();
+	}
+});
+
+test("list_windows includeInvisible superset covers visible-only listing", async () => {
+	const gate = new CuaGate({ enabled: true });
+	const engine = new CuaEngine({ defaultDelayMs: 10 }, gate);
+	const host = new CuaMcpHttpHost({ port: 0, authToken: "tok" }, { engine, gate });
+	await host.start();
+
+	const { client, transport } = await connectClient(host.getUrl(), "tok");
+	try {
+		const visibleOnly = await client.callTool({ name: "cua_list_windows", arguments: {} });
+		const all = await client.callTool({ name: "cua_list_windows", arguments: { includeInvisible: true } });
+		assert.ok(!visibleOnly.isError);
+		assert.ok(!all.isError);
+		const visibleWindows = JSON.parse(visibleOnly.content[0].text);
+		const allWindows = JSON.parse(all.content[0].text);
+		assert.ok(allWindows.length >= visibleWindows.length, "includeInvisible must be a superset");
+		assert.ok(
+			visibleWindows.every((w) => w.isVisible === true),
+			"default listing only carries visible windows",
+		);
+	} finally {
+		await transport.close();
+		await host.stop();
+	}
+});
+
+test("cua_click double=true hits the engine doubleClick path (single approval)", async () => {
+	// 用允许一切的 handler；断言 approval handler 只被调用一次且 detail.double=true。
+	let approvals = 0;
+	let sawDouble = false;
+	const gate = new CuaGate({ enabled: true });
+	gate.setApprovalHandler(async (request) => {
+		approvals += 1;
+		if (request.detail?.double === true) sawDouble = true;
+		return { allowed: false, reason: "user_denied" }; // deny to avoid real input
+	});
+
+	const engine = new CuaEngine({ defaultDelayMs: 10 }, gate);
+	const host = new CuaMcpHttpHost({ port: 0, authToken: "tok" }, { engine, gate });
+	await host.start();
+
+	const { client, transport } = await connectClient(host.getUrl(), "tok");
+	try {
+		const res = await client.callTool({ name: "cua_click", arguments: { x: 10, y: 10, double: true, sessionId: "s" } });
+		// denied 结果也以 isError=true 返回（error 字段非空），直接断言负载。
+		const payload = JSON.parse(res.content[0].text);
+		assert.strictEqual(payload.gate, "denied"); // handler denied, but only once
+		assert.strictEqual(approvals, 1, "double click must fan out to exactly one approval");
+		assert.ok(sawDouble, "approval detail marks double=true");
+	} finally {
+		await transport.close();
 		await host.stop();
 	}
 });

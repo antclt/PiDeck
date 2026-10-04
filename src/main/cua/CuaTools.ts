@@ -29,8 +29,8 @@ export function registerCuaTools(server: McpServer, engine: CuaEngine, gate: Cua
 			description: "Capture the full screen and return a JPEG image.",
 			inputSchema: {
 				displayId: z.string().optional().describe("Optional display identifier; omit for primary."),
-				maxLongEdge: z.number().int().default(1280).describe("Resize so the longer edge <= this."),
-				quality: z.number().int().default(75).describe("JPEG quality 1-100."),
+				maxLongEdge: z.number().int().min(16).max(8192).default(1280).describe("Resize so the longer edge <= this (16-8192)."),
+				quality: z.number().int().min(1).max(100).default(75).describe("JPEG quality 1-100."),
 			},
 		},
 		async (args) => {
@@ -74,14 +74,17 @@ export function registerCuaTools(server: McpServer, engine: CuaEngine, gate: Cua
 				includeInvisible: z.boolean().default(false),
 			},
 		},
-		async (_args) => {
-			const windows = engine.listWindows();
+		async (args) => {
+			const windows = engine.listWindows(args.includeInvisible);
+			// isVisible 必须进契约：includeInvisible=true 时调用方要能区分隐藏窗口，
+			// 否则开关形同虚设（历史漏字段回归，由 MCP 层测试兜底）。
 			const summary = windows.map((info) => ({
 				hwnd: info.window.hwnd,
 				title: info.window.title,
 				pid: info.window.pid,
 				zIndex: info.window.zIndex,
 				rect: info.window.rect,
+				isVisible: info.window.isVisible,
 				isForeground: info.window.isForeground,
 				isTopmost: info.window.isTopmost,
 				occludedArea: info.occludedArea,
@@ -119,15 +122,14 @@ export function registerCuaTools(server: McpServer, engine: CuaEngine, gate: Cua
 		},
 		async (args) => {
 			const meta = { agentId: args.agentId, runtimeGeneration: args.runtimeGeneration };
-			const result = await engine.click(args.sessionId, args.x, args.y, args.button, {
-				activateTarget: args.activateTarget,
-				meta,
-			});
-
-			if (args.double && result.sent > 0) {
-				const second = await engine.click(args.sessionId, args.x, args.y, args.button, { meta });
-				result.sent += second.sent;
-			}
+			// Double click routes to a dedicated engine method so the whole gesture
+			// is covered by ONE approval (see CuaEngine.doubleClick).
+			const result = args.double
+				? await engine.doubleClick(args.sessionId, args.x, args.y, args.button, { activateTarget: args.activateTarget, meta })
+				: await engine.click(args.sessionId, args.x, args.y, args.button, {
+						activateTarget: args.activateTarget,
+						meta,
+					});
 
 			return {
 				content: [
@@ -149,7 +151,7 @@ export function registerCuaTools(server: McpServer, engine: CuaEngine, gate: Cua
 		{
 			description: "Type a text string or press key combinations.",
 			inputSchema: {
-				text: z.string().optional().describe("Text to type (Unicode supported)."),
+				text: z.string().max(4000).optional().describe("Text to type (Unicode supported, max 4000 chars)."),
 				key: z.string().optional().describe("Key name: enter, tab, escape, backspace, delete, space, arrows, home, end, pageup, pagedown."),
 				modifiers: z
 					.array(z.enum(["ctrl", "alt", "shift", "win"]))
@@ -193,8 +195,8 @@ export function registerCuaTools(server: McpServer, engine: CuaEngine, gate: Cua
 			inputSchema: {
 				x: z.number().int().describe("Absolute screen X coordinate."),
 				y: z.number().int().describe("Absolute screen Y coordinate."),
-				deltaY: z.number().int().default(-120).describe("Positive=scroll down, negative=scroll up."),
-				deltaX: z.number().int().default(0).describe("Horizontal scroll."),
+				deltaY: z.number().int().min(-2400).max(2400).default(-120).describe("Windows wheel convention: positive=scroll up, negative=scroll down (default: one notch down)."),
+				deltaX: z.number().int().min(-2400).max(2400).default(0).describe("Horizontal wheel: positive=right, negative=left."),
 				sessionId: z.string().describe("PiDeck session ID for approval gate."),
 				agentId: z.string().optional().describe("PiDeck agent id (approval attribution)."),
 				runtimeGeneration: z.number().int().optional().describe("Session runtime generation (approval attribution)."),

@@ -210,9 +210,11 @@ export type WindowInfo = {
 };
 
 /**
- * Enumerate visible top-level windows in Z-order (front to back).
+ * Enumerate top-level windows in Z-order (front to back).
+ * By default only visible windows are returned; pass includeInvisible=true to
+ * also list hidden ones (the isVisible field then tells them apart).
  */
-export function enumerateWindows(): WindowInfo[] {
+export function enumerateWindows(includeInvisible = false): WindowInfo[] {
 	const windows: WindowInfo[] = [];
 	const fg = GetForegroundWindow();
 
@@ -220,7 +222,11 @@ export function enumerateWindows(): WindowInfo[] {
 		if (!hwndPtr) return true;
 		const hwnd = Number(koffiLazy.address(hwndPtr));
 
-		if (!IsWindowVisible(hwndPtr)) return true;
+		// koffi 返回 int32（Win32 BOOL），必须归一化成真正的 boolean——
+		// isVisible 字段要出 MCP JSON 契约，`1 === true` 为假曾让
+		// includeInvisible=false 的默认列表也带着 isVisible:1 的窗口。
+		const visible = IsWindowVisible(hwndPtr) !== 0;
+		if (!includeInvisible && !visible) return true;
 
 		const rect: { left: number; top: number; right: number; bottom: number } = { left: 0, top: 0, right: 0, bottom: 0 };
 		if (!GetWindowRect(hwndPtr, rect)) return true;
@@ -250,7 +256,7 @@ export function enumerateWindows(): WindowInfo[] {
 			title,
 			pid,
 			rect: { x: rect.left, y: rect.top, width, height },
-			isVisible: true,
+			isVisible: visible,
 			isForeground: hwnd === Number(koffiLazy.address(fg)),
 			isTopmost,
 			zIndex: windows.length,
@@ -272,13 +278,14 @@ export const GetWindowLongPtrW = user32.func("intptr_t GetWindowLongPtrW(void *h
  * Convert a screen pixel coordinate to the normalized 0..65535 range required
  * by SendInput with MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK.
  */
-export function normalizeAbsoluteCoordinate(x: number, y: number, screenWidth: number, screenHeight: number): { x: number; y: number } {
+export function normalizeAbsoluteCoordinate(x: number, y: number, screenWidth: number, screenHeight: number, originX = 0, originY = 0): { x: number; y: number } {
 	if (screenWidth <= 0 || screenHeight <= 0) {
 		throw new Error("Invalid screen dimensions");
 	}
-	// Windows maps 0..65535 across the virtual desktop.
-	const nx = Math.round((x * 65535) / (screenWidth - 1));
-	const ny = Math.round((y * 65535) / (screenHeight - 1));
+	// Windows maps 0..65535 across the whole virtual desktop (origin included),
+	// not just the primary monitor — see MOUSEEVENTF_VIRTUALDESK.
+	const nx = Math.round(((x - originX) * 65535) / (screenWidth - 1));
+	const ny = Math.round(((y - originY) * 65535) / (screenHeight - 1));
 	return { x: clamp(nx, 0, 65535), y: clamp(ny, 0, 65535) };
 }
 
@@ -346,16 +353,16 @@ export function sendInputs(inputs: Record<string, number>[]): number {
 /**
  * Convenience: move the cursor to an absolute screen pixel coordinate.
  */
-export function moveMouseAbsolute(x: number, y: number, screenWidth: number, screenHeight: number): number {
-	const norm = normalizeAbsoluteCoordinate(x, y, screenWidth, screenHeight);
+export function moveMouseAbsolute(x: number, y: number, screenWidth: number, screenHeight: number, originX = 0, originY = 0): number {
+	const norm = normalizeAbsoluteCoordinate(x, y, screenWidth, screenHeight, originX, originY);
 	return sendInputs([buildMouseInput(norm.x, norm.y, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK)]);
 }
 
 /**
  * Convenience: click at an absolute screen pixel coordinate.
  */
-export function clickAt(x: number, y: number, button: "left" | "right" | "middle", screenWidth: number, screenHeight: number): number {
-	const norm = normalizeAbsoluteCoordinate(x, y, screenWidth, screenHeight);
+export function clickAt(x: number, y: number, button: "left" | "right" | "middle", screenWidth: number, screenHeight: number, originX = 0, originY = 0): number {
+	const norm = normalizeAbsoluteCoordinate(x, y, screenWidth, screenHeight, originX, originY);
 	const flagsDown = button === "left" ? MOUSEEVENTF_LEFTDOWN : button === "right" ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_MIDDLEDOWN;
 	const flagsUp = button === "left" ? MOUSEEVENTF_LEFTUP : button === "right" ? MOUSEEVENTF_RIGHTUP : MOUSEEVENTF_MIDDLEUP;
 	return sendInputs([buildMouseInput(norm.x, norm.y, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK), buildMouseInput(0, 0, flagsDown), buildMouseInput(0, 0, flagsUp)]);
@@ -412,20 +419,42 @@ export function pressKeyCombo(vk: number, modifiers: number[] = []): number {
 }
 
 /**
- * Type a Unicode string character by character using SendInput.
- * Uses KEYEVENTF_UNICODE for full Unicode support.
+ * Build the SendInput sequence for a Unicode string.
+ *
+ * KEYEVENTF_UNICODE accepts one UTF-16 code unit per INPUT — astral-plane
+ * characters (emoji, CJK ext-B, code points > U+FFFF) must be split into a
+ * high/low surrogate pair. Passing the raw code point truncates `wScan` to
+ * 16 bits and injects the wrong character (koffi/Win32 narrow silently).
  */
-export function typeUnicode(text: string): number {
+export function buildUnicodeInputs(text: string): Record<string, number>[] {
 	const inputs: Record<string, number>[] = [];
 	for (const char of text) {
 		const code = char.codePointAt(0);
 		if (code === undefined) continue;
-		// down
-		inputs.push(buildKeyboardInput(0, code, KEYEVENTF_UNICODE));
-		// up
-		inputs.push(buildKeyboardInput(0, code, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+		if (code > 0xffff) {
+			const shifted = code - 0x10000;
+			const high = 0xd800 + (shifted >> 10);
+			const low = 0xdc00 + (shifted & 0x3ff);
+			inputs.push(buildKeyboardInput(0, high, KEYEVENTF_UNICODE));
+			inputs.push(buildKeyboardInput(0, high, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+			inputs.push(buildKeyboardInput(0, low, KEYEVENTF_UNICODE));
+			inputs.push(buildKeyboardInput(0, low, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+		} else {
+			// down
+			inputs.push(buildKeyboardInput(0, code, KEYEVENTF_UNICODE));
+			// up
+			inputs.push(buildKeyboardInput(0, code, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+		}
 	}
-	return sendInputs(inputs);
+	return inputs;
+}
+
+/**
+ * Type a Unicode string character by character using SendInput.
+ * Uses KEYEVENTF_UNICODE for full Unicode support.
+ */
+export function typeUnicode(text: string): number {
+	return sendInputs(buildUnicodeInputs(text));
 }
 
 // ---------------------------------------------------------------------------
@@ -439,8 +468,8 @@ export const MOUSEEVENTF_HWHEEL = 0x1000;
  * Scroll the mouse wheel at an absolute screen coordinate.
  * @param deltaY Positive = scroll down, negative = scroll up (Windows convention).
  */
-export function scrollAt(x: number, y: number, deltaY: number, deltaX: number, screenWidth: number, screenHeight: number): number {
-	const norm = normalizeAbsoluteCoordinate(x, y, screenWidth, screenHeight);
+export function scrollAt(x: number, y: number, deltaY: number, deltaX: number, screenWidth: number, screenHeight: number, originX = 0, originY = 0): number {
+	const norm = normalizeAbsoluteCoordinate(x, y, screenWidth, screenHeight, originX, originY);
 	const inputs: Record<string, number>[] = [buildMouseInput(norm.x, norm.y, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK)];
 	if (deltaY !== 0) {
 		const wheelInput = buildMouseInput(0, 0, MOUSEEVENTF_WHEEL);

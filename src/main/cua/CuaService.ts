@@ -41,7 +41,11 @@ export class CuaService {
 
 	constructor(deps: CuaServiceDeps) {
 		this.deps = deps;
-		this.gate = new CuaGate({ enabled: true });
+		// Gate starts CLOSED and only opens while the MCP host is actually
+		// listening (start()) — previously it was hard-coded on at construction,
+		// so cua:get-state reported enabled=true even when cuaEnabled=false and
+		// no endpoint existed (state misreport).
+		this.gate = new CuaGate({ enabled: false });
 		this.engine = new CuaEngine({ defaultDelayMs: 80 }, this.gate);
 
 		const ipcDeps: CuaIpcDeps = {
@@ -82,8 +86,10 @@ export class CuaService {
 				const result = ensureCuaMcpRegistered({ url, bearerToken: authToken });
 				this.deps.log("cua", `CUA MCP registered at ${url}`, { written: result.written });
 			}
+			this.gate.setEnabled(true);
 		} catch (error) {
 			this.running = false;
+			this.gate.setEnabled(false);
 			const message = error instanceof Error ? error.message : String(error);
 			this.deps.log("cua", `CUA service start failed: ${message}`);
 			throw error;
@@ -94,6 +100,8 @@ export class CuaService {
 	async stop(): Promise<void> {
 		if (!this.running) return;
 		this.running = false;
+		// Close the kill switch first so nothing squeezes through mid-shutdown.
+		this.gate.setEnabled(false);
 
 		try {
 			unregisterCuaMcp();

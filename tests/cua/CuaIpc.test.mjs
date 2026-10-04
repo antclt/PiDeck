@@ -2,6 +2,100 @@ import assert from "node:assert";
 import test from "node:test";
 import { loadTsCommonJs } from "../helpers/loadTsCommonJs.mjs";
 
+// ---- handler-level boundary validation (fail closed) -----------------
+
+function loadManagerWithCapturingIpc() {
+	const handlers = new Map();
+	const mod = loadTsCommonJs("src/main/ipc/cuaIpc.ts", {
+		stubs: {
+			electron: {
+				ipcMain: {
+					handle: (channel, fn) => {
+						handlers.set(channel, fn);
+					},
+					removeHandler: (channel) => {
+						handlers.delete(channel);
+					},
+				},
+				BrowserWindow: class {},
+			},
+		},
+		globals: {
+			setTimeout: globalThis.setTimeout.bind(globalThis),
+			clearTimeout: globalThis.clearTimeout.bind(globalThis),
+		},
+	});
+	return { mod, handlers };
+}
+
+function makeRecordingGate() {
+	const overrides = [];
+	let enabled = false;
+	return {
+		overrides,
+		isEnabled: () => enabled,
+		setEnabled: (value) => {
+			enabled = value;
+		},
+		setSessionOverride: (sessionId, value) => {
+			overrides.push([sessionId, value]);
+		},
+		setApprovalHandler: () => {},
+		getSessionOverrides: () => ({}),
+	};
+}
+
+test("cuaApprovalResponse with truthy non-boolean allowed resolves as invalid_response (fail closed)", async () => {
+	const { mod, handlers } = loadManagerWithCapturingIpc();
+	const gate = makeRecordingGate();
+	const manager = new mod.CuaIpcManager({
+		gate,
+		mainWindow: () => ({ isDestroyed: () => false, webContents: { send: () => {} } }),
+		log: () => {},
+	});
+	manager.register();
+
+	const handler = manager.createApprovalHandler();
+	const pending = handler({ action: "click", sessionId: "s", detail: {}, timestampMs: 1 });
+	const requestId = manager.pendingApprovals.keys().next().value;
+
+	// truthy 但非 boolean——以前会绕过审批直接放行。
+	await handlers.get("cua:approval-response")({}, requestId, { allowed: "yes" });
+	const result = await pending;
+	// vm realm 里的对象与宿主 realm 原型不同，逐字段断言。
+	assert.strictEqual(result.allowed, false);
+	assert.strictEqual(result.reason, "invalid_response");
+});
+
+test("cuaSetState ignores non-boolean enabled and malformed sessionOverride", async () => {
+	const { mod, handlers } = loadManagerWithCapturingIpc();
+	const gate = makeRecordingGate();
+	const logs = [];
+	const manager = new mod.CuaIpcManager({
+		gate,
+		mainWindow: () => null,
+		log: (_m, msg, extra) => logs.push({ msg, extra }),
+	});
+	manager.register();
+
+	const response = await handlers.get("cua:set-state")(
+		{},
+		{
+			enabled: 1, // truthy number — must NOT set
+			sessionOverride: { sessionId: "", enabled: "no" },
+		},
+	);
+	assert.strictEqual(gate.isEnabled(), false, "non-boolean enabled must not toggle");
+	assert.strictEqual(gate.overrides.length, 0, "malformed override must not be applied");
+	assert.ok(logs.some((entry) => entry.msg.includes("invalid sessionOverride")));
+	assert.deepStrictEqual(JSON.parse(JSON.stringify(response.sessionOverrides)), {});
+
+	// Valid shapes still work.
+	await handlers.get("cua:set-state")({}, { enabled: true, sessionOverride: { sessionId: "s1", enabled: false } });
+	assert.strictEqual(gate.isEnabled(), true);
+	assert.deepStrictEqual(gate.overrides, [["s1", false]]);
+});
+
 // CuaIpcManager imports from electron (ipcMain, BrowserWindow) which is not
 // available in the test VM. We stub electron before loading.
 const electronStub = {

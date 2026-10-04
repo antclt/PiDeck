@@ -21,6 +21,44 @@ test("normalizeAbsoluteCoordinate clamps out-of-bounds coordinates", () => {
 	assert.deepStrictEqual(JSON.parse(JSON.stringify(CuaWin32.normalizeAbsoluteCoordinate(9999, 9999, 1920, 1080))), { x: 65535, y: 65535 });
 });
 
+test("normalizeAbsoluteCoordinate maps virtual desktop origin (multi-monitor)", () => {
+	// Virtual desktop spanning two monitors: origin (-2560, 0), size 5120x1440.
+	// Primary-only normalization (the pre-fix behavior) would clamp the left
+	// monitor to the left edge; with origin it must land on the far left = 0.
+	const originX = -2560;
+	const originY = 0;
+	const w = 5120;
+	const h = 1440;
+	assert.deepStrictEqual(JSON.parse(JSON.stringify(CuaWin32.normalizeAbsoluteCoordinate(-2560, 0, w, h, originX, originY))), { x: 0, y: 0 });
+	assert.deepStrictEqual(JSON.parse(JSON.stringify(CuaWin32.normalizeAbsoluteCoordinate(2559, 1439, w, h, originX, originY))), { x: 65535, y: 65535 });
+	// Point on the left monitor center: quarter across the virtual desktop.
+	const quarter = CuaWin32.normalizeAbsoluteCoordinate(-1280, 720, w, h, originX, originY);
+	assert.strictEqual(quarter.x, Math.round((1280 * 65535) / (w - 1)));
+});
+
+test("buildUnicodeInputs splits astral-plane characters into surrogate pairs", () => {
+	const bmp = CuaWin32.buildUnicodeInputs("A");
+	assert.strictEqual(bmp.length, 2, "BMP char = down + up");
+	assert.strictEqual(bmp[0].ki_wScan, 65);
+	assert.strictEqual(bmp[0].ki_dwFlags, 0x0004);
+	assert.strictEqual(bmp[1].ki_dwFlags, 0x0004 | 0x0002);
+
+	// U+1F600 (😀): high 0xD83D, low 0xDE00 — raw code point would truncate wScan.
+	const astral = CuaWin32.buildUnicodeInputs("\u{1F600}");
+	assert.strictEqual(astral.length, 4, "astral char = surrogate pair * (down + up)");
+	assert.strictEqual(astral[0].ki_wScan, 0xd83d);
+	assert.strictEqual(astral[1].ki_wScan, 0xd83d);
+	assert.strictEqual(astral[2].ki_wScan, 0xde00);
+	assert.strictEqual(astral[3].ki_wScan, 0xde00);
+	assert.strictEqual(astral[0].ki_dwFlags, 0x0004);
+	assert.strictEqual(astral[1].ki_dwFlags, 0x0004 | 0x0002);
+	assert.strictEqual(astral[2].ki_dwFlags, 0x0004);
+	assert.strictEqual(astral[3].ki_dwFlags, 0x0004 | 0x0002);
+
+	const mixed = CuaWin32.buildUnicodeInputs("A\u{1F600}中");
+	assert.strictEqual(mixed.length, 2 + 4 + 2);
+});
+
 test("normalizeAbsoluteCoordinate rejects invalid dimensions", () => {
 	assert.throws(() => CuaWin32.normalizeAbsoluteCoordinate(0, 0, 0, 1080), /Invalid screen dimensions/);
 	assert.throws(() => CuaWin32.normalizeAbsoluteCoordinate(0, 0, 1920, 0), /Invalid screen dimensions/);

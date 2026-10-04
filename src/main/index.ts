@@ -4728,8 +4728,9 @@ app
 				void appLogger.warn("cua", "CUA service start failed", error);
 			});
 		}
-		quitCleanup.register("cua", () => {
-			void cuaService?.dispose();
+		quitCleanup.register("cua", async () => {
+			// runAll 会逐项 await：返回 dispose 的 Promise 保证退出前 host 关闭 + mcp.json 反注册完成（早前 `void` 掉 Promise，退出竞态）。
+			await cuaService?.dispose();
 			cuaService = null;
 		});
 
