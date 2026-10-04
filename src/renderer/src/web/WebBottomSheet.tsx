@@ -11,6 +11,7 @@
  * - 未来 UWP(WebView2)/Capacitor 手机壳直接复用：同一组件两形态
  */
 import { useEffect, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
@@ -35,7 +36,10 @@ export function WebBottomSheet(props: { open: boolean; onOpenChange: (open: bool
 
 	if (!open) return null;
 
-	return (
+	// 挂 body：弹层若渲染在带 transform/overflow 裁剪的祖先内（如移动端侧栏 drawer
+	// 的滑入 transform 会把 fixed 的包含块限到 drawer），fixed inset-0 将铺不满视口
+	// 且被裁剪；portal 到 body 保证两形态都相对视口定位。
+	return createPortal(
 		<div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label={props.title}>
 			{/* 遮罩：点击关闭；进场 fade */}
 			<button type="button" aria-label={t("common.close")} className="absolute inset-0 h-full w-full cursor-default bg-black/50 animate-in fade-in duration-150" onClick={() => onOpenChange(false)} />
@@ -64,6 +68,7 @@ export function WebBottomSheet(props: { open: boolean; onOpenChange: (open: bool
 				{/* 内容区可滚动；大触控目标由内容行自带（h-12 行） */}
 				<div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{props.children}</div>
 			</div>
-		</div>
+		</div>,
+		document.body,
 	);
 }

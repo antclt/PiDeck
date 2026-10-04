@@ -9,12 +9,12 @@
  * 点击会话行 = 打开会话（切 activeSessionId）。
  */
 import { useEffect, useMemo, useState } from "react";
-import { Check, FolderPlus, GitFork, MoreVertical, Play, Plus, Search, Trash2, X } from "lucide-react";
+import { Check, Copy, Download, FolderPlus, GitFork, MoreVertical, Pencil, Play, Plus, Search, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui-shadcn/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui-shadcn/dropdown-menu";
 import { Input } from "@/components/ui-shadcn/input";
 import { t } from "@/i18n";
 import { WebBrandLockup } from "./WebBrandLockup";
+import { WebBottomSheet } from "./WebBottomSheet";
 import { cn } from "@/lib/utils";
 import { sessionStatusDotClass } from "@/agentListDisplay";
 import { SessionBackendMark } from "@/components/session/SessionSourceBadge";
@@ -51,6 +51,14 @@ function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: st
 	const { sessions, runtimeFor, activeSessionId, showAll, onToggleShowAll, onSelect, onSessionAction } = props;
 	const visible = showAll ? sessions : sessions.slice(0, 5);
 	const hiddenCount = sessions.length - visible.length;
+	// 会话操作面板：移动端底部滑出、桌面居中卡片（WebBottomSheet 两形态），
+	// 替代 DropdownMenu——触屏无 hover 看不见触发钮，且菜单会从侧栏右缘弹出遮挡聊天区。
+	const [menuSessionId, setMenuSessionId] = useState<string | null>(null);
+	const menuSession = menuSessionId ? sessions.find((s) => s.id === menuSessionId) : undefined;
+	const runAction = (action: WebSessionRowAction) => {
+		if (menuSessionId) onSessionAction?.(action, menuSessionId);
+		setMenuSessionId(null);
+	};
 	return (
 		<>
 			{visible.map((session) => {
@@ -70,22 +78,15 @@ function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: st
 							</div>
 						</button>
 						{onSessionAction ? (
-							<DropdownMenu>
-								<DropdownMenuTrigger asChild>
-									<button type="button" className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted focus-visible:opacity-100 group-hover/session:opacity-100" aria-label={t("web.sessionMenu")} title={t("web.sessionMenu")}>
-										<MoreVertical className="size-3.5" aria-hidden="true" />
-									</button>
-								</DropdownMenuTrigger>
-								<DropdownMenuContent align="start" className="w-44">
-									<DropdownMenuItem onClick={() => onSessionAction("rename", session.id)}>{t("web.rename")}</DropdownMenuItem>
-									<DropdownMenuItem onClick={() => onSessionAction("duplicate", session.id)}>{t("web.duplicate")}</DropdownMenuItem>
-									<DropdownMenuItem onClick={() => onSessionAction("export", session.id)}>{t("web.exportHtml")}</DropdownMenuItem>
-									<DropdownMenuSeparator />
-									<DropdownMenuItem className="text-danger focus:text-danger" onClick={() => onSessionAction("delete", session.id)}>
-										{t("web.deleteSession")}
-									</DropdownMenuItem>
-								</DropdownMenuContent>
-							</DropdownMenu>
+							<button
+								type="button"
+								className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted focus-visible:opacity-100 group-hover/session:opacity-100 [@media(hover:none)]:opacity-100"
+								aria-label={t("web.sessionMenu")}
+								title={t("web.sessionMenu")}
+								onClick={() => setMenuSessionId(session.id)}
+							>
+								<MoreVertical className="size-3.5" aria-hidden="true" />
+							</button>
 						) : null}
 					</div>
 				);
@@ -95,6 +96,35 @@ function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: st
 					{showAll ? t("common.collapse") : t("web.moreSessions", { count: hiddenCount })}
 				</button>
 			)}
+			{/* 会话操作面板：跨端 BottomSheet，大触控行，不被侧栏右缘裁剪 */}
+			<WebBottomSheet open={Boolean(menuSession)} onOpenChange={(open) => !open && setMenuSessionId(null)} title={menuSession?.title || t("web.sessionMenu")}>
+				<ul className="pb-[max(env(safe-area-inset-bottom),0.5rem)]">
+					<li>
+						<button type="button" className="flex h-12 w-full items-center gap-3 px-4 text-left text-sm text-foreground transition-colors hover:bg-muted/60 active:bg-muted" onClick={() => runAction("rename")}>
+							<Pencil className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+							{t("web.rename")}
+						</button>
+					</li>
+					<li>
+						<button type="button" className="flex h-12 w-full items-center gap-3 px-4 text-left text-sm text-foreground transition-colors hover:bg-muted/60 active:bg-muted" onClick={() => runAction("duplicate")}>
+							<Copy className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+							{t("web.duplicate")}
+						</button>
+					</li>
+					<li>
+						<button type="button" className="flex h-12 w-full items-center gap-3 px-4 text-left text-sm text-foreground transition-colors hover:bg-muted/60 active:bg-muted" onClick={() => runAction("export")}>
+							<Download className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+							{t("web.exportHtml")}
+						</button>
+					</li>
+					<li className="mt-1 border-t border-border pt-1">
+						<button type="button" className="flex h-12 w-full items-center gap-3 px-4 text-left text-sm text-danger transition-colors hover:bg-danger/10 active:bg-danger/15" onClick={() => runAction("delete")}>
+							<Trash2 className="size-4 shrink-0" aria-hidden="true" />
+							{t("web.deleteSession")}
+						</button>
+					</li>
+				</ul>
+			</WebBottomSheet>
 		</>
 	);
 }
