@@ -1556,7 +1556,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.dsh.pluginNoSession": "No DSH session available (create a DSH session before installing a plugin).",
 	"config.dsh.staticPlugins": "Static Loader entries (read-only)",
 	"config.dsh.staticPluginsHint":
-		'Loader entries in the current deployment cordis composition (multiple Loader entries of the same module are merged into one row). The origin badge distinguishes "Built-in" (dsh base / shipped presets / PiDeck composition) from "User installed" (the $DSH_HOME/cordis.patch.yml user patch layer). User-installed entries can be uninstalled in place (the patch file is backed up before the row is removed; plugin folders inside PiDeck\'s managed directory are moved to the recycle bin as well) and take effect after a DSH host restart.',
+		'Loader entries in the current deployment cordis composition (multiple Loader entries of the same module are merged into one row). The origin badge distinguishes "Built-in" (DSH base / shipped presets / PiDeck composition) from "User installed" (the $DSH_HOME/cordis.patch.yml user patch layer). User-installed entries can be uninstalled in place (the patch file is backed up before the row is removed; plugin folders inside PiDeck\'s managed directory are moved to the recycle bin as well) and take effect after a DSH host restart.',
 	"config.dsh.staticPluginsEmpty": "No static entries.",
 	"config.dsh.staticPluginsCount": "{count} modules",
 	"config.dsh.staticPluginsColumnModule": "Module",
@@ -1714,7 +1714,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.dsh.homeHint": "Defaults to your local ~/.dsh (shared config/credentials/sessions with the DSH CLI); you can switch to another directory — the host restarts immediately.",
 	"config.dsh.homeSharedTitle": "Sharing the config directory with the DSH CLI",
 	"config.dsh.homeSharedHint":
-		"You are using the default ~/.dsh, so the dsh CLI and PiDeck may read and write the same config and plugin state — the last writer wins (theme, workspace selection, and so on). The session format also evolves with versions (PiDeck's bundled 0.2 runtime writes V4): sessions written after the upgrade cannot be read by older dsh CLI versions. Isolate the CLI with its own DSH_HOME:",
+		"You are using the default ~/.dsh, so the DSH CLI and PiDeck may read and write the same config and plugin state — the last writer wins (theme, workspace selection, and so on). The session format also evolves with versions (PiDeck's bundled 0.2 runtime writes V4): sessions written after the upgrade cannot be read by older DSH CLI versions. Isolate the CLI with its own DSH_HOME:",
 	"config.dsh.homeConflictTitle": "Another DSH host is using this directory",
 	"config.dsh.homeConflictHint": "The lock file shows DSH host (pid={pid}) still using the current DSH_HOME. DSH allows only one host per directory; concurrent hosts overwrite each other's sessions and config. Close the other instance, or move it to its own DSH_HOME:",
 	"config.dsh.approvals": "Approvals",
@@ -2647,7 +2647,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.strictToolSamplingOn": "On",
 	"config.strictToolSamplingOff": "Off",
 	"config.strictToolSamplingDesc":
-		"Since pi 0.86, read/bash/edit/write are sent as strict JSON-schema tools (on by default under openai-completions). A relay that does not honor strict may let tool calls leak into plain text (DeepSeek-family models emit DSML marker blocks); choose Off to fall back to pi 0.85 behavior.",
+		"Since Pi 0.86, read/bash/edit/write are sent as strict JSON-schema tools (on by default under openai-completions). A relay that does not honor strict may let tool calls leak into plain text (DeepSeek-family models emit DSML marker blocks); choose Off to fall back to Pi 0.85 behavior.",
 	"config.docsCustomProvider": "custom provider docs",
 	"config.docsModels": "models docs",
 	"config.docsSettings": "settings docs",
@@ -2841,15 +2841,15 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.builtInExtDesc.pi-deck-ask-question": "Registers the ask_question tool: the model asks you questions through one unified card UI (select/multi-select/confirm/input, tabbed for multiple questions; selects always include a custom input) and receives your answers.",
 	"config.builtInExtDesc.pi-deck-goal-mode": "Goal mode: keeps working toward one objective round after round until it is complete, blocked, paused, or the round limit is hit; state survives restarts.",
 	"config.builtInExtDesc.pi-deck-model-trace":
-		"Model request snapshot: records the exact request body pi sends to the provider (system prompt, context messages, tool schemas) into the RPC log's Model view, so you can see what the model actually received; snapshots stay on this machine and are truncated past the size cap.",
+		"Model request snapshot: records the exact request body Pi sends to the provider (system prompt, context messages, tool schemas) into the RPC log's Model view, so you can see what the model actually received; snapshots stay on this machine and are truncated past the size cap.",
 	"config.builtInExtDesc.pi-deck-nul-redirect-fix": "NUL redirect fix: rewrites Windows-style redirects like `> nul` to /dev/null before bash runs, preventing Git Bash from creating undeletable nul files.",
 	"config.builtInExtDesc.pi-deck-plan-mode": "Plan mode: produces a numbered plan with a read-only toolset first; after you choose execute/stay/revise, write tools are restored and [DONE:n] markers drive the progress widget.",
 	"config.builtInExtDesc.pi-deck-retry-no-body": 'Transient-error retry enhancement: recognizes gateway empty responses, Chinese "service unavailable" notices, stream_read_error and other transient faults outside pi\'s retry list, rewriting them so pi retries automatically.',
 	"config.builtInExtDesc.pi-deck-security-gate": "Security gate: enforces the per-session security policy on tool calls — dangerous bash commands prompt for confirmation or are rejected; policy snapshots hot-reload without restart.",
 	"config.builtInExtDesc.pi-deck-gui-bridge":
-		"GUI extension bridge (off by default; enable here when needed): routes the declarative UI extension points that pi drops in RPC mode (header, footer, status bar, composer widgets, working line, hidden-thinking label, session title, editor body) back into the desktop app, and adds a same-shaped set of GUI-only slots plus a GUI painting factory. Takes effect after restarting the session.",
+		"GUI extension bridge (off by default; enable here when needed): routes the declarative UI extension points that Pi drops in RPC mode (header, footer, status bar, composer widgets, working line, hidden-thinking label, session title, editor body) back into the desktop app, and adds a same-shaped set of GUI-only slots plus a GUI painting factory. Takes effect after restarting the session.",
 	"config.builtInExtDesc.pi-deck-ext-points":
-		"Extension Points panel (off by default; enable here when needed — also turn on the GUI extension bridge): lists every mountable point of pi + PiDeck in Settings, marks whether each one actually takes effect on the desktop side, and turns your picks plus a one-line purpose into a development draft you can hand to an agent. The list is read from pi's type definitions at runtime, so there is no build-time snapshot to keep in sync. Takes effect after restarting the session.",
+		"Extension Points panel (off by default; enable here when needed — also turn on the GUI extension bridge): lists every mountable point of Pi + PiDeck in Settings, marks whether each one actually takes effect on the desktop side, and turns your picks plus a one-line purpose into a development draft you can hand to an agent. The list is read from Pi's type definitions at runtime, so there is no build-time snapshot to keep in sync. Takes effect after restarting the session.",
 	"bridge.control.cancellable": "Cancellable",
 	"bridge.node.copy": "Copy",
 	"bridge.node.copied": "Copied",
@@ -3672,7 +3672,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"imagegen.notConfiguredHint": "Add a provider under Settings → Image Gen",
 	"settings.vision.section": "Vision Bridge",
 	"settings.vision.sectionDesc":
-		'When a non-vision model (e.g. DeepSeek) receives an image, pi only warns "the image will be omitted". When enabled, images are sent to the vision model below before each request and replaced in place with "[Image #1 (described via vision bridge)] + description"; on failure they become "[Image #N conversion failed, content not visible]". Vision requests reuse pi\'s configured provider credentials — no duplicate keys.',
+		'When a non-vision model (e.g. DeepSeek) receives an image, Pi only warns "the image will be omitted". When enabled, images are sent to the vision model below before each request and replaced in place with "[Image #1 (described via vision bridge)] + description"; on failure they become "[Image #N conversion failed, content not visible]". Vision requests reuse Pi\'s configured provider credentials — no duplicate keys.',
 	"settings.vision.enabled": "Enable Vision Bridge",
 	"settings.vision.enabledDesc": "When off, images pass through unchanged (non-vision models only see a placeholder note)",
 	"settings.vision.provider": "Vision provider",
@@ -3847,7 +3847,7 @@ export const enUS: Record<TranslationKey, string> = {
 	// ===== Usage stats (usage-stats) =====
 	"usageStats.notInstalled.title": "Usage stats plugin not installed",
 	"usageStats.notInstalled.desc":
-		"Pi usage stats rely on the pi-tracker extension to record token consumption of every conversation inside the pi process. After installing, restart the agent session so the extension loads, then start a conversation — data is only written to disk once conversations happen.\nDSH sessions already ship dsh-bill: start a DSH conversation and spend is recorded automatically, no extra plugin to install.",
+		"Pi usage stats rely on the pi-tracker extension to record token consumption of every conversation inside the Pi process. After installing, restart the agent session so the extension loads, then start a conversation — data is only written to disk once conversations happen.\nDSH sessions already ship dsh-bill: start a DSH conversation and spend is recorded automatically, no extra plugin to install.",
 	"usageStats.notInstalled.install": "Install pi-tracker",
 	"usageStats.notInstalled.installing": "Installing…",
 	"usageStats.notInstalled.installDone": "Installed! Restart the agent session (or the app), then start a conversation — data will be recorded automatically.",
@@ -4331,7 +4331,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.idleAgentTimeoutMinDesc": "An agent is releasable only after being continuously idle for longer than this. The session you are currently viewing is never released even when idle (1-1440 min)",
 	"settings.idleAgentTimeoutUnit": "min",
 	"settings.standbyRuntimeEnabled": "Warm up new sessions (standby process pool)",
-	"settings.standbyRuntimeEnabledDesc": "Pre-starts a ready pi process while idle (~300MB RAM, auto-recycled after 10 min unused) so new sessions activate almost instantly; disable to save memory at the cost of a few seconds' startup",
+	"settings.standbyRuntimeEnabledDesc": "Pre-starts a ready Pi process while idle (~300MB RAM, auto-recycled after 10 min unused) so new sessions activate almost instantly; disable to save memory at the cost of a few seconds' startup",
 	"cua.approval.title": "CUA action approval",
 	"cua.approval.waiting": "Waiting for approval",
 	"cua.approval.action": "Action",

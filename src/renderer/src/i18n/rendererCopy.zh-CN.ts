@@ -1552,7 +1552,7 @@ export const zhCN = {
 	"config.dsh.pluginNoSession": "没有可用的 DSH 会话（先创建一个 DSH 会话再安装插件）。",
 	"config.dsh.staticPlugins": "静态 Loader 条目（只读）",
 	"config.dsh.staticPluginsHint":
-		"当前部署 cordis 组合中的 Loader 条目（同一模块的多条 Loader 条目已合并成一行，仅展示一次）。来源栏区分「自带」（dsh base / 随包预设 / PiDeck 组合）与「用户安装」（$DSH_HOME/cordis.patch.yml 用户补丁层）；用户安装的条目可就地卸载（先备份补丁文件再移除行，PiDeck 管理目录内的插件文件一并移入回收站），host 重启后生效。",
+		"当前部署 cordis 组合中的 Loader 条目（同一模块的多条 Loader 条目已合并成一行，仅展示一次）。来源栏区分「自带」（DSH base / 随包预设 / PiDeck 组合）与「用户安装」（$DSH_HOME/cordis.patch.yml 用户补丁层）；用户安装的条目可就地卸载（先备份补丁文件再移除行，PiDeck 管理目录内的插件文件一并移入回收站），host 重启后生效。",
 	"config.dsh.staticPluginsEmpty": "暂无静态条目。",
 	"config.dsh.staticPluginsCount": "{count} 个模块",
 	"config.dsh.staticPluginsColumnModule": "模块",
@@ -4315,7 +4315,7 @@ export const zhCN = {
 	"settings.idleAgentTimeoutMinDesc": "Agent 连续闲置超过该时长才可被释放；当前正在查看的会话即使闲置超时也不会释放（范围 1-1440 分钟）",
 	"settings.idleAgentTimeoutUnit": "分钟",
 	"settings.standbyRuntimeEnabled": "新会话预热（standby 进程池）",
-	"settings.standbyRuntimeEnabledDesc": "空闲时预先启动一个已就绪的 pi 进程（约 300MB 内存，10 分钟未使用自动回收），新建会话激活近即时；关闭可省内存，但新建会话需等待数秒启动",
+	"settings.standbyRuntimeEnabledDesc": "空闲时预先启动一个已就绪的 Pi 进程（约 300MB 内存，10 分钟未使用自动回收），新建会话激活近即时；关闭可省内存，但新建会话需等待数秒启动",
 	"cua.approval.title": "CUA 操作审批",
 	"cua.approval.waiting": "等待审批",
 	"cua.approval.action": "操作",
