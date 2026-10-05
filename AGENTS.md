@@ -23,7 +23,7 @@ PiDeck 是 Electron 桌面应用，在多个项目目录间管理和运行 pi RP
 
 - pi 的 `ctx.ui` 声明式方法在 RPC 模式下被降级成空实现（见 pi `docs/rpc-extension-ui.md`），要接回只能在 pi 进程内拦截。主进程起只绑 `127.0.0.1` 的端点（`src/main/pi/bridge/BridgeServer.ts`，每 agent 一份 token，spawn 时注入 `PIDECK_BRIDGE_URL`/`PIDECK_BRIDGE_TOKEN`）；pi 侧由随包分发、`-e` 注入的桥扩展（`resources/extensions/pi-deck-gui-bridge*.ts`）推拉数据。`/bridge/<token>/model-trace` 子路由承载模型请求快照（`resources/extensions/pi-deck-model-trace.ts`，完整请求体落 `userData/logs/model-traces/`，时间线只留摘要 + traceId）。
 - 线格式唯一来源：宿主侧 `src/shared/types/bridge.ts`，桥侧 `resources/extensions/pi-deck-gui-bridge-types.ts` 逐字段对齐，由 `tests/guiBridge*.test.mjs` 与 `tests/modelTraceExtension.test.mjs` 兜底。
-- 已知耦合（唯一一处）：`pi-deck-gui-bridge-tui.ts` 用注入的 `PIDECK_BRIDGE_PI_PATH` + `createRequire` 解析 **pi 内部的 pi-tui**（要与 pi 同一份模块实例）；pi 升级挪动位置时必须降级为「组件渲染不出」而非报错。
+- 与 pi 内部的耦合已收敛到**路径定位**：`pi-deck-gui-bridge-tui.ts` 只解析 pi-tui 的安装路径（给 ext-points 做 types.d.ts 种子 + 诊断日志），不再加载模块；组件识别走实例原型链上的构造器名（serialize 的逐级匹配），不依赖 pi 安装布局。pi 升级挪动位置时定位失败只影响扩展点目录的一种子来源，必须静默降级而非报错。
 - fail-safe：端点起不来 → 不注入 env → 桥静默不工作；桥抛错 → 最多某落点缺席；两种都不得影响 pi 会话与其余功能。生命周期配对：`registerAgent` ↔ `unregisterAgent`（统一走 `AgentManager.unregisterBridgeSession`），stop/restart/删会话/退出都要注销。用户可在扩展设置页整体关掉桥（`removedBuiltInExtensions` → 不再注入），行为回到「没有桥」。
 
 ## 目录结构与跨层契约

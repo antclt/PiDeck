@@ -47,7 +47,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { createHttpTransport, type UIBridgeTransport } from "./pi-deck-gui-bridge-transport";
 import { getBridgeRuntime, shutdownBridgeRuntime, type BridgeRuntime } from "./pi-deck-gui-bridge-runtime";
 import { installGuiNamespace, installGuiOnUiSingleton } from "./pi-deck-gui-bridge-gui";
-import { loadPiTui } from "./pi-deck-gui-bridge-tui";
+import { locatePiTui } from "./pi-deck-gui-bridge-tui";
 
 const log = (message: string): void => {
 	process.stderr.write(`[pi-deck-gui-bridge] ${message}\n`);
@@ -120,12 +120,12 @@ function attachBridge(ctx: ExtensionContext, where: string): void {
 		bridge.wrapUI(ui);
 		if (!alreadyWrapped) {
 			bridge.startTicker();
-			// pi-tui 加载结果只在首次报告一次（诊断用）
-			const tuiResult = loadPiTui();
-			if (tuiResult.module) {
-				log(`pi-tui 已加载: ${tuiResult.via}`);
+			// pi-tui 定位结果只在首次报告一次（诊断用；序列化走原型链识别，不依赖此定位）
+			const located = locatePiTui();
+			if (located.path) {
+				log(`pi-tui 已定位: ${located.via}`);
 			} else {
-				log(`pi-tui 加载失败，适配器退化为形状判定: ${tuiResult.error}`);
+				log(`pi-tui 定位失败（不影响序列化，仅少一路 types.d.ts 种子）: ${located.error}`);
 			}
 		}
 
