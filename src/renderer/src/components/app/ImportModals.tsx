@@ -1,7 +1,7 @@
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui-shadcn/button";
-import { Loader2, X } from "lucide-react";
+import { Info, Loader2, X } from "lucide-react";
 import { Check, FolderOpen, RefreshCw, UploadCloud } from "lucide-react";
 import { t } from "../../i18n";
 import type { TranslationKey } from "../../i18n";
@@ -194,9 +194,7 @@ export function CodexImportModal(props: {
 						</Button>
 					</DialogClose>
 				</DialogHeader>
-				<div className="modal-header-sub">
-					<small>{props.project.name}</small>
-				</div>
+				<div className="px-4 pb-2 text-xs text-muted-foreground">{props.project.name}</div>
 				<div className="codex-import-toolbar">
 					<div>
 						<strong>{t("codex.importCount", { count: props.sessions.length })}</strong>
@@ -434,9 +432,7 @@ function SessionImportModal<T extends ImportSessionLike>(props: {
 						</Button>
 					</DialogClose>
 				</DialogHeader>
-				<div className="modal-header-sub">
-					<small>{props.headerSubtitle ?? props.project.name}</small>
-				</div>
+				<div className="px-4 pb-2 text-xs text-muted-foreground">{props.headerSubtitle ?? props.project.name}</div>
 				{props.headerExtra}
 				<div className="codex-import-toolbar">
 					<div>
@@ -750,9 +746,9 @@ function kimiWorkOriginCopy(origin: KimiWorkShareRootOrigin) {
 /**
  * Kimi Work（kimi-desktop 桌面版）会话导入弹窗。
  *
- * 与 CLI 版（KimiImportModal）的差异：数据目录位置不固定——头部展示主进程的探测结果
- * （位置 + 来源），探测失败时提供手动指定输入（写入 settings.kimiWorkShareRoot，优先级最高）。
- * 头部固定一行「导入影响说明」（只读源/建议关闭 Kimi Work/覆盖语义），满足导入前知情。
+ * 与 CLI 版（KimiImportModal）的差异：数据目录位置不固定——头部卡片展示主进程的探测结果
+ * （位置 + 来源徽标），「更改…」展开手动指定输入（写入 settings.kimiWorkShareRoot，优先级最高）；
+ * 探测明确失败时输入行自动展开。卡片下方固定一行「导入影响说明」（只读源/建议关闭 Kimi Work/覆盖语义），满足导入前知情。
  */
 export function KimiWorkImportModal(props: {
 	project: Project;
@@ -777,6 +773,12 @@ export function KimiWorkImportModal(props: {
 	onImport: () => void;
 }) {
 	const found = props.shareRoot?.root ?? null;
+	// 手动指定输入默认收起（探测成功是主流路径，不需要看到输入框）；
+	// 探测明确失败（root 为空）时自动展开，引导用户手动填写。
+	const [customRootOpen, setCustomRootOpen] = useState(false);
+	useEffect(() => {
+		if (props.shareRoot && !props.shareRoot.root) setCustomRootOpen(true);
+	}, [props.shareRoot]);
 	return (
 		<SessionImportModal
 			copyPrefix="kimiwork"
@@ -792,35 +794,54 @@ export function KimiWorkImportModal(props: {
 			onToggle={props.onToggle}
 			onToggleAll={props.onToggleAll}
 			onImport={props.onImport}
+			headerSubtitle={
+				<span className="inline-flex min-w-0 items-baseline gap-1.5">
+					<strong className="shrink-0 font-medium text-foreground">{props.project.name}</strong>
+					<span className="min-w-0 truncate">{displayPath(props.project.path)}</span>
+				</span>
+			}
+			// 项目路径已并入副标题，工具栏左侧只留计数，不再重复路径。
+			toolbarCopy={{ title: t("kimiwork.importCount", { count: props.sessions.length }), hint: "" }}
 			headerExtra={
-				<div className="flex flex-col gap-2 px-4 pb-3 text-xs text-muted-foreground">
-					<div className="flex flex-wrap items-center gap-2">
-						<span className="shrink-0">{t("kimiwork.sourceLabel")}</span>
-						<code className="min-w-0 flex-1 truncate" title={found ?? undefined}>
-							{found ?? t("kimiwork.notFound")}
-						</code>
-						{found && props.shareRoot?.origin && <span className="shrink-0 rounded bg-surface-hover px-1.5 py-0.5">{kimiWorkOriginCopy(props.shareRoot.origin)}</span>}
-						{found && props.shareRoot?.sessionsFound === false && (
-							<span className="shrink-0 text-warning" title={t("kimiwork.sessionsMissingHint")}>
-								{t("kimiwork.sessionsMissing")}
-							</span>
-						)}
-						{props.customRoot && (
-							<Button variant="ghost" size="sm" className="h-6 shrink-0 px-1.5 text-xs" onClick={props.onClearCustomRoot} disabled={props.importing}>
-								{t("kimiwork.clearCustomRoot")}
+				<div className="flex flex-col gap-1.5 px-4 pb-3">
+					{/* 数据目录卡片：探测结果 + 来源徽标 +「更改…」展开的手动指定（写入 settings.kimiWorkShareRoot，优先级最高） */}
+					<div className="rounded-lg border border-border bg-bg-muted/30 px-3 py-2 text-xs">
+						<div className="flex items-center gap-2">
+							<FolderOpen size={13} className="shrink-0 text-muted-foreground" aria-hidden="true" />
+							<span className="shrink-0 text-muted-foreground">{t("kimiwork.sourceLabel")}</span>
+							<code className="min-w-0 flex-1 truncate" title={found ?? undefined}>
+								{found ?? t("kimiwork.notFound")}
+							</code>
+							{found && props.shareRoot?.origin && <span className="shrink-0 rounded bg-surface-hover px-1.5 py-0.5 text-muted-foreground">{kimiWorkOriginCopy(props.shareRoot.origin)}</span>}
+							{found && props.shareRoot?.sessionsFound === false && (
+								<span className="shrink-0 text-warning" title={t("kimiwork.sessionsMissingHint")}>
+									{t("kimiwork.sessionsMissing")}
+								</span>
+							)}
+							<Button variant="ghost" size="sm" className="h-6 shrink-0 px-1.5 text-xs" onClick={() => setCustomRootOpen((open) => !open)} disabled={props.importing}>
+								{t("kimiwork.changeRoot")}
 							</Button>
+						</div>
+						{customRootOpen && (
+							<div className="mt-2 flex items-center gap-2">
+								<span className="shrink-0 text-muted-foreground">{t("kimiwork.customRootLabel")}</span>
+								<Input value={props.customRootDraft} onChange={(event) => props.onSetCustomRootDraft(event.target.value)} placeholder={t("kimiwork.customRootPlaceholder")} className="h-7 min-w-0 flex-1 text-xs" />
+								<Button variant="outline" size="sm" className="h-7 shrink-0 px-2.5 text-xs shadow-none rounded-lg" onClick={props.onApplyCustomRoot} disabled={props.importing || !props.customRootDraft.trim()}>
+									{t("kimiwork.applyCustomRoot")}
+								</Button>
+								{props.customRoot && (
+									<Button variant="ghost" size="sm" className="h-7 shrink-0 px-1.5 text-xs" onClick={props.onClearCustomRoot} disabled={props.importing}>
+										{t("kimiwork.clearCustomRoot")}
+									</Button>
+								)}
+							</div>
 						)}
-					</div>
-					{/* 手动指定入口始终可见：自动探测成功时也可覆盖（优先级最高），不用等探测失败 */}
-					<div className="flex flex-wrap items-center gap-2">
-						<span className="shrink-0">{t("kimiwork.customRootLabel")}</span>
-						<Input value={props.customRootDraft} onChange={(event) => props.onSetCustomRootDraft(event.target.value)} placeholder={t("kimiwork.customRootPlaceholder")} className="h-7 min-w-0 flex-1 text-xs" />
-						<Button variant="outline" size="sm" className="h-7 shrink-0 px-2.5 text-xs shadow-none rounded-lg" onClick={props.onApplyCustomRoot} disabled={props.importing || !props.customRootDraft.trim()}>
-							{t("kimiwork.applyCustomRoot")}
-						</Button>
 					</div>
 					{/* 导入前知情：只读源不修改 Kimi Work 原文件；运行中导入可能缺最新条目；重复导入覆盖旧副本。 */}
-					<span className="text-muted-foreground/80">{t("kimiwork.impactNote")}</span>
+					<p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-muted-foreground/80">
+						<Info size={12} className="mt-px shrink-0" aria-hidden="true" />
+						<span>{t("kimiwork.impactNote")}</span>
+					</p>
 				</div>
 			}
 			emptyOverride={

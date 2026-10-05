@@ -1454,6 +1454,7 @@ export const zhCN = {
 	"kimiwork.sessionsMissing": "暂无会话",
 	"kimiwork.sessionsMissingHint": "数据目录存在但还没有会话记录，先用 Kimi Work 聊几轮再来导入",
 	"kimiwork.customRootLabel": "指定目录：",
+	"kimiwork.changeRoot": "更改…",
 	"kimiwork.customRootPlaceholder": "例如 D:\\KimiData\\daimon-share",
 	"kimiwork.applyCustomRoot": "应用",
 	"kimiwork.clearCustomRoot": "清除",

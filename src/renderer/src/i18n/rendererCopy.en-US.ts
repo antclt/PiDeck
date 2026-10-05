@@ -1458,6 +1458,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"kimiwork.sessionsMissing": "No sessions yet",
 	"kimiwork.sessionsMissingHint": "Data directory exists but contains no sessions; chat in Kimi Work first, then import",
 	"kimiwork.customRootLabel": "Set directory:",
+	"kimiwork.changeRoot": "Change…",
 	"kimiwork.customRootPlaceholder": "e.g. D:\\KimiData\\daimon-share",
 	"kimiwork.applyCustomRoot": "Apply",
 	"kimiwork.clearCustomRoot": "Clear",
