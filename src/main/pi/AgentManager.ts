@@ -47,6 +47,8 @@ import { piVersionAtLeast } from "../extensions/extensionVersionGate";
 import { resolveLoadableExtensionPaths } from "../extensions/enabledExtensionResolver";
 import { resolveBuiltInExtensionsOverlayDir } from "../extensions/builtInExtensions";
 import { getBridgeServer } from "./bridge/BridgeServer";
+import { StandbyAgentPool, STANDBY_TTL_MS } from "./StandbyAgentPool";
+import { computeStandbyFingerprint } from "./standbyFingerprint";
 import type { BridgeEvent, BridgeUpdate, ModelTraceInput } from "../../shared/types/bridge";
 import { describeExtensionFallbackSkip, formatExtensionFallbackDebug, resolveDisabledExtensionsCopy, resolveDisabledExtensionsReason, shouldRetryWithoutExtensions } from "./extensionStartupFallback";
 import type { DisabledExtensionsReason } from "./extensionStartupFallback";
@@ -394,6 +396,15 @@ export class AgentManager {
 	private onAutomaticTitleChanged?: (agentId: string, title: string, source: AutomaticTitleSource) => void;
 	/** 已发送 ask 系统通知的 agent；新一轮 run（agent_start）时清除，避免同一轮多次提问刷屏。 */
 	private readonly notifiedAskAgents = new Set<string>();
+	/** standby 池（单实例）：put 顶替/TTL 到期统一走 onExpire → stop 回收进程。 */
+	private readonly standbyPool = new StandbyAgentPool({
+		ttlMs: STANDBY_TTL_MS,
+		onExpire: (agentId) => {
+			void this.stop(agentId);
+		},
+	});
+	/** standby 创建去重：池只在握手成功后登记，创建期间靠本标记挡住并发 ensure。 */
+	private standbySpawnPending = false;
 	private wslEnvironment: WslEnvironment | null = null;
 
 	/**
@@ -945,7 +956,96 @@ export class AgentManager {
 	}
 
 	list() {
-		return [...this.agents.values()].map((runtime) => runtime.tab).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+		// standby 池化进程对一切 list 消费者不可见（UI 状态、IdleAgentReleaser 等），
+		// 否则闲置释放器会把预热进程当普通闲置 agent 释放掉；claim 转正后清标记即可见。
+		return [...this.agents.values()].map((runtime) => runtime.tab).filter((tab) => !tab.standby).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+	}
+
+	/**
+	 * standby 池入口（会话链路在「用户可能马上要新建会话」的时机调用：草稿创建/激活完成等）。
+	 * 幂等：池里已有同项目条目或创建进行中时直接返回；真正的 spawn 在后台完成。
+	 */
+	ensureStandbyAgent(projectId: string): void {
+		if (!this.settingsStore.get().standbyRuntimeEnabled) return;
+		if (this.standbyPool.has(projectId) || this.standbySpawnPending) return;
+		this.standbySpawnPending = true;
+		void this.createStandbyAgent(projectId).finally(() => {
+			this.standbySpawnPending = false;
+		});
+	}
+
+	/**
+	 * 认领 standby：命中（项目一致 + spawn 指纹一致 + 进程仍 idle）则转正返回已握手 tab，
+	 * 调用方跳过 createAgent 直接绑定会话；任何不满足都返回 null 回退正常创建。
+	 * 会话级代理覆盖（on/off）与飞书绑定是 spawn 时注入的 env，池化进程按全局/未绑定 spawn，
+	 * 服务不了这类会话，直接拒绝认领。
+	 */
+	async claimStandbyAgent(input: { projectId: string; sessionId?: string; noSession?: boolean }): Promise<AgentTab | null> {
+		if (!this.settingsStore.get().standbyRuntimeEnabled || input.noSession) return null;
+		const project = this.getProject(input.projectId);
+		if (!project) return null;
+		const proxyMode = this.resolveSessionProxy?.(input.sessionId);
+		if (proxyMode === "on" || proxyMode === "off") return null;
+		if (this.isFeishuSession?.(input.sessionId) === true) return null;
+		if ((await this.projectTrust.resolveTrustWithoutPrompt(project)) === null) return null;
+		const entry = this.standbyPool.take(input.projectId, this.computeStandbyFingerprintFor(project));
+		if (!entry) return null;
+		const runtime = this.agents.get(entry.agentId);
+		if (!runtime || runtime.tab.status !== "idle") {
+			// 池条目与 agents map 不一致（已崩/被并发停掉）：回收残留，回退正常创建。
+			if (runtime) void this.stop(entry.agentId);
+			return null;
+		}
+		runtime.tab.standby = undefined;
+		void this.appLogger?.info("agent", "Standby agent claimed", { agentId: entry.agentId, projectId: input.projectId, sessionId: input.sessionId });
+		this.emitState();
+		return runtime.tab;
+	}
+
+	/** 后台 spawn 一个 standby：完整走 createUnlocked（信任/扩展回退/握手），成功后登记进池。 */
+	private async createStandbyAgent(projectId: string): Promise<void> {
+		try {
+			const project = this.getProject(projectId);
+			if (!project) return;
+			// 需要用户交互决策信任的项目不做后台池化（绝不后台弹窗）。
+			if ((await this.projectTrust.resolveTrustWithoutPrompt(project)) === null) return;
+			const fingerprint = this.computeStandbyFingerprintFor(project);
+			const tab = await this.createUnlocked({ projectId, standby: true });
+			this.standbyPool.put({ projectId, fingerprint, agentId: tab.id });
+			void this.appLogger?.info("agent", "Standby agent ready", { agentId: tab.id, projectId });
+		} catch (error) {
+			// 预热失败静默降级：下次 ensure 再试，绝不影响正常创建链路。
+			void this.appLogger?.warn("agent", "Standby agent spawn failed", { projectId, error: error instanceof Error ? error.message : String(error) });
+		}
+	}
+
+	/**
+	 * spawn 指纹：快照所有「只能 spawn 时注入」的输入（PiProcessSettings/扩展列表/桥/WSL/cwd）。
+	 * claim 时不一致即废弃池化进程回退正常创建——这就是「改设置/扩展后何时生效」的答案：
+	 * 已在跑的会话照旧（本来就是），下一个 spawn（含新预热）自动用新值。
+	 */
+	private computeStandbyFingerprintFor(project: Project): string {
+		const settings = this.settingsStore.get();
+		const bridge = getBridgeServer();
+		return computeStandbyFingerprint({
+			projectPath: project.path,
+			trustMarker: "prompt-free",
+			piCliPath: settings.customPiPath,
+			offline: Boolean(settings.piRpcOffline),
+			noExtensions: Boolean(settings.piRpcNoExtensions),
+			noSkills: Boolean(settings.piRpcNoSkills),
+			piProxyEnabled: Boolean(settings.piProxyEnabled),
+			piProxyUrl: settings.piProxyUrl ?? "",
+			piProxyBypass: settings.piProxyBypass ?? "",
+			disabledExtensions: (settings.disabledExtensions ?? []).map((entry) => `${entry.scope}:${entry.source}`),
+			disabledSkills: settings.disabledSkills ?? [],
+			disabledPrompts: settings.disabledPrompts ?? [],
+			extensionRoots: createPiProcessExtensionResolvers(project.path, settings).resolveBuiltInExtensionPaths(),
+			wsl: this.wslEnvironment ? { distro: this.wslEnvironment.distro, user: this.wslEnvironment.user, projectPath: this.toSessionProtocolPath(project.path) } : undefined,
+			bridgeAvailable: bridge.ready,
+			bridgeUrl: bridge.ready ? String(bridge.listeningPort) : "",
+			autoSessionTitle: Boolean(settings.autoSessionTitle),
+		});
 	}
 
 	/**
@@ -1534,6 +1634,7 @@ export class AgentManager {
 			wslUser: input.wslUser ?? (sessionEnvironment === "wsl" ? sessionIdentityDefaults.wslUser : undefined),
 			importedSourceId: input.importedSourceId,
 			noSession: input.noSession,
+			standby: input.standby ? true : undefined,
 			createdAt: Date.now(),
 		};
 
@@ -1619,7 +1720,8 @@ export class AgentManager {
 			});
 			// 第三方接管型 MCP 扩展提醒（M5b）：异步、不 await，绝不阻塞 Agent 就绪。
 			void this.notifyMcpThirdPartyTakeover(id, diag?.piVersion ?? null);
-			if (tab.sessionPath) {
+			// standby 的 sessionPath 是 pi 预分配的新文件（尚未落盘），当历史加载只会报假错误。
+			if (tab.sessionPath && !tab.standby) {
 				void this.loadMessages(id, true, this.readRecentMessagesFromSessionFile(tab.sessionPath, AgentManager.MAX_HISTORY_LOAD_TURNS), { preserveMessagesAfter })
 					.then(() => {
 						void this.appLogger?.info("agent", "Agent recent history loaded from file", {
@@ -3699,6 +3801,8 @@ export class AgentManager {
 
 	stopAll() {
 		// 应用退出时统一清理所有 pi 子进程，避免后台 agent 残留占用模型或文件句柄。
+		// standby 也在 agents map 里会被下面循环停掉；清池只为防 TTL 到期后再重复 stop。
+		this.standbyPool.clear();
 		for (const runtime of this.agents.values()) {
 			this.userInitiatedStop.add(runtime.tab.id);
 			this.clearAgentState(runtime.tab.id);
@@ -3877,6 +3981,8 @@ export class AgentManager {
 	/** createUnlocked 路径的进程 exit：支持压缩后自动重连，其余标 closed。 */
 	private handleCreateProcessExit(agentId: string, tab: AgentTab, payload: { code: number | null; signal: string | null }) {
 		if (this.startupHandshakeAgents.has(agentId)) return;
+		// standby 进程在绑定前退出：立即从池剔除，避免 claim 到死进程（TTL 会兜其他泄漏路径）。
+		if (this.standbyPool.status()?.agentId === agentId) this.standbyPool.clear();
 		// 用户主动停止 → 不自动重连
 		if (this.userInitiatedStop.has(agentId)) {
 			this.userInitiatedStop.delete(agentId);

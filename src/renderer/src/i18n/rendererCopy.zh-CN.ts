@@ -4316,6 +4316,8 @@ export const zhCN = {
 	"settings.idleAgentTimeoutMin": "闲置判定时长",
 	"settings.idleAgentTimeoutMinDesc": "Agent 连续闲置超过该时长才可被释放；当前正在查看的会话即使闲置超时也不会释放（范围 1-1440 分钟）",
 	"settings.idleAgentTimeoutUnit": "分钟",
+	"settings.standbyRuntimeEnabled": "新会话预热（standby 进程池）",
+	"settings.standbyRuntimeEnabledDesc": "空闲时预先启动一个已就绪的 pi 进程（约 300MB 内存，10 分钟未使用自动回收），新建会话激活近即时；关闭可省内存，但新建会话需等待数秒启动",
 	"cua.approval.title": "CUA 操作审批",
 	"cua.approval.waiting": "等待审批",
 	"cua.approval.action": "操作",

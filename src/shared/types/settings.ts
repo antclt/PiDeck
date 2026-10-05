@@ -350,6 +350,11 @@ export type AppSettings = {
 	/** 闲置判定时长（分钟），默认 60：agent 连续闲置超过该时长才可被释放 */
 	idleAgentTimeoutMin: number;
 
+	// ── standby 预热池：空闲时预先启动一个已握手的 pi 进程，新建/草稿会话激活近即时 ──
+	/** 是否启用 standby 预热（默认 true）：每项目最多一个，约 300MB 内存，10 分钟未使用自动回收。
+	 *  修改后只影响下一次预热/认领（进程 spawn 参数无法热更，指纹不匹配自动回退正常创建）。 */
+	standbyRuntimeEnabled?: boolean;
+
 	// ── CUA（Computer Use Agent）：让 Agent 观察屏幕并注入鼠标/键盘输入 ──
 	/**
 	 * 是否启用 CUA 能力，默认 false。
@@ -843,6 +848,7 @@ export function createDefaultAppSettings(): AppSettings {
 		idleAgentAutoRelease: true,
 		idleAgentKeepCount: 5,
 		idleAgentTimeoutMin: 60,
+		standbyRuntimeEnabled: true,
 		cuaEnabled: false,
 		cuaAutoApprove: false,
 		favoriteModels: [],

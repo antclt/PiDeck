@@ -4332,6 +4332,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.idleAgentTimeoutMin": "Idle threshold",
 	"settings.idleAgentTimeoutMinDesc": "An agent is releasable only after being continuously idle for longer than this. The session you are currently viewing is never released even when idle (1-1440 min)",
 	"settings.idleAgentTimeoutUnit": "min",
+	"settings.standbyRuntimeEnabled": "Warm up new sessions (standby process pool)",
+	"settings.standbyRuntimeEnabledDesc": "Pre-starts a ready pi process while idle (~300MB RAM, auto-recycled after 10 min unused) so new sessions activate almost instantly; disable to save memory at the cost of a few seconds' startup",
 	"cua.approval.title": "CUA action approval",
 	"cua.approval.waiting": "Waiting for approval",
 	"cua.approval.action": "Action",

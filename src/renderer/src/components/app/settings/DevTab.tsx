@@ -497,6 +497,7 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
 				<SettingSwitchRow anchor="dev-pi-rpc-offline" title={t("settings.piRpcOffline")} description={t("settings.piRpcOfflineDesc")} checked={draft.piRpcOffline} onChange={(checked) => updateDraft({ piRpcOffline: checked })} />
 				<SettingSwitchRow anchor="dev-pi-rpc-no-extensions" title={t("settings.piRpcNoExtensions")} description={t("settings.piRpcNoExtensionsDesc")} checked={draft.piRpcNoExtensions} onChange={(checked) => updateDraft({ piRpcNoExtensions: checked })} />
 				<SettingSwitchRow anchor="dev-pi-rpc-no-skills" title={t("settings.piRpcNoSkills")} description={t("settings.piRpcNoSkillsDesc")} checked={draft.piRpcNoSkills} onChange={(checked) => updateDraft({ piRpcNoSkills: checked })} />
+				<SettingSwitchRow anchor="dev-standby-runtime" title={t("settings.standbyRuntimeEnabled")} description={t("settings.standbyRuntimeEnabledDesc")} checked={draft.standbyRuntimeEnabled !== false} onChange={(checked) => updateDraft({ standbyRuntimeEnabled: checked })} />
 			</SettingsSection>
 
 			{/* 调试 */}

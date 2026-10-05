@@ -115,6 +115,24 @@ export class ProjectTrustGate {
 	}
 
 	/**
+	 * 非交互信任判定（standby 池化等后台路径用，绝不弹窗）。
+	 * 干净项目自动记入信任（与 ensureProjectTrust 同语义）返回 undefined；
+	 * 含资源且已持久化信任返回 undefined；含资源但未决策（需要用户选择）返回 null——
+	 * 调用方应放弃后台池化，等用户走正常创建流程完成信任决策。
+	 */
+	async resolveTrustWithoutPrompt(project: Project): Promise<undefined | null> {
+		const wslEnvironment = this.host.getWslEnvironment();
+		const cwd = wslEnvironment ? toWslLinuxPath(project.path, wslEnvironment) : project.path;
+		const hostCwd = wslEnvironment ? toWindowsHostPath(project.path, wslEnvironment) : project.path;
+		const configStore = this.host.getConfigStore();
+		if (!this.hasTrustRequiringResources(hostCwd)) {
+			await configStore.ensureTrustedDirectory(cwd);
+			return undefined;
+		}
+		return (await configStore.getProjectTrustDecision(cwd)) === true ? undefined : null;
+	}
+
+	/**
 	 * 通过 IPC 请求渲染进程弹出项目信任确认窗，等待用户选择。
 	 * 无窗口可用（如 headless）或 60 秒未响应时默认拒绝（安全优先）。
 	 */

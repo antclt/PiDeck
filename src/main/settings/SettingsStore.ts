@@ -232,6 +232,9 @@ Gitmoji 对应关系：
 	idleAgentKeepCount: 5,
 	idleAgentTimeoutMin: 60,
 
+	// standby 预热池默认开启：新建会话近即时；10 分钟未使用自动回收，与闲置释放互补
+	standbyRuntimeEnabled: true,
+
 	// CUA 默认关闭：关闭时不监听本地端点、不改动 pi 的 mcp.json，与现状完全一致
 	cuaEnabled: false,
 	cuaAutoApprove: false,

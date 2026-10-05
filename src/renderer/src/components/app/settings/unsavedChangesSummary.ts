@@ -136,6 +136,7 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "piRpcOffline", tab: "dev", itemKey: "settings.piRpcOffline" },
 	{ field: "piRpcNoExtensions", tab: "dev", itemKey: "settings.piRpcNoExtensions" },
 	{ field: "piRpcNoSkills", tab: "dev", itemKey: "settings.piRpcNoSkills" },
+	{ field: "standbyRuntimeEnabled", tab: "dev", itemKey: "settings.standbyRuntimeEnabled" },
 	{ field: "webServiceEnabled", tab: "web", itemKey: "settings.enableWebService" },
 	{ field: "webServiceHost", tab: "web", itemKey: "settings.webServiceHost" },
 	{ field: "webServicePort", tab: "web", itemKey: "settings.webServicePort" },

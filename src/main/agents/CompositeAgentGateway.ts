@@ -107,6 +107,20 @@ export class CompositeAgentGateway implements SessionAgentGateway {
 		return tab;
 	}
 
+	/** standby 认领只路由 pi 网关（dsh 无进程池概念）；命中后登记归属供后续 owner() 定位。 */
+	async claimStandbyAgent(input: { projectId: string; sessionId: string; noSession?: boolean }): Promise<AgentTab | null> {
+		const gateway = this.byBackend.get("pi");
+		if (typeof gateway?.claimStandbyAgent !== "function") return null;
+		const tab = await gateway.claimStandbyAgent(input);
+		if (tab) this.ownerByAgent.set(tab.id, gateway);
+		return tab;
+	}
+
+	/** standby 补热只路由 pi 网关；dsh-only 部署不会因此多 spawn pi 进程。 */
+	ensureStandbyAgent(projectId: string): void {
+		this.byBackend.get("pi")?.ensureStandbyAgent?.(projectId);
+	}
+
 	async restart(agentId: string): Promise<AgentTab> {
 		const gateway = this.owner(agentId);
 		const tab = await gateway.restart(agentId);
