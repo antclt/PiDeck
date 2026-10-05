@@ -80,6 +80,7 @@ import { isLiveRuntimeStatus, sessionCommandFailureToast, type SessionRunCapabil
 import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeBackendPreference, readWelcomeDshModelPreference, readWelcomeModelPreference, readWelcomeThinkingPreference, resolveChatSessionBootstrap, resolveGuidePageBackend } from "./utils/chatSessionBootstrap";
 import { useAppAppearance } from "./hooks/appearance/useAppAppearance";
 import { useAppBootstrapInfo } from "./hooks/app/useAppBootstrapInfo";
+import { useBootOverlayReady } from "./hooks/app/useBootOverlayReady";
 import { useCommandPalette } from "./hooks/app/useCommandPalette";
 import { useSidebarArchiveActions } from "./hooks/sidebar/useSidebarArchiveActions";
 import { useSettingsUpdater } from "./hooks/settings/useSettingsUpdater";
@@ -203,6 +204,9 @@ export function App() {
 	const store = useStore();
 	// Composer input state is owned by ComposerArea; the root does not subscribe to each key.
 	const currentSessionId = useAtomValue(currentSessionIdAtom);
+	// 开屏交接：已聚焦会话（工作区知道自己该显示什么）才撤启动遮罩，
+	// 否则会先闪一帧「无会话空态 = 引导页」再变正常。
+	useBootOverlayReady(currentSessionId !== undefined);
 	const currentSession = useAtomValue(currentSessionAtom);
 	// currentSessionRuntime / currentSessionRuntimeUi / currentSessionSendState: sync store.get() only.
 	// Streaming subscriptions are in SessionRuntimeInjector.
