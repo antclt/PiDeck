@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from "react";
-import { Play, Upload, Trash2 } from "lucide-react";
+import { Loader2, Play, Upload, Trash2 } from "lucide-react";
 import { createDefaultSoundAlertSettings, DEFAULT_SOUND_BY_KIND, SOUND_ALERT_PRESETS, TOAST_DURATION_STICKY_MS, parseSoundAlertRef, type AppSettings, type CustomSoundInfo, type SoundAlertKind, type SoundAlertSettings } from "../../../../../shared/types";
 import { t } from "../../../i18n";
 import { desktopApi } from "../../../desktopApi";
@@ -222,13 +222,13 @@ export const NotificationTab = memo(function NotificationTab(props: Notification
 					<div className="flex items-center gap-2">
 						{importError && <span className="text-xs text-destructive">{importError}</span>}
 						<Button variant="outline" size="sm" disabled={importing} onClick={() => void onImport()}>
-							<Upload className="size-4" />
+							{importing ? <Loader2 className="size-4 animate-pideck-spin" aria-hidden="true" /> : <Upload className="size-4" />}
 							{importing ? t("settings.sound.importing") : t("settings.sound.import")}
 						</Button>
 					</div>
 				</SettingRow>
 				{customSounds.map((sound) => (
-					<SettingRow key={sound.name} title={<span className="font-mono text-[13px]">{sound.name}</span>} description={`${(sound.size / 1024).toFixed(0)} KB`}>
+					<SettingRow key={sound.name} title={<span className="font-mono text-control">{sound.name}</span>} description={`${(sound.size / 1024).toFixed(0)} KB`}>
 						<Button variant="ghost" size="icon-sm" title={t("settings.sound.remove")} aria-label={t("settings.sound.remove")} onClick={() => void onRemove(sound.name)}>
 							<Trash2 className="size-4" />
 						</Button>

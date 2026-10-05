@@ -60,7 +60,7 @@ export function SessionSurfaceStage(props: { sessionId: string; sessionTimeline:
 				</div>
 			)}
 			{/* 重启 / 历史改写遮罩：opacity 过渡 + loader 旋转走合成器，始终挂载以便淡出。 */}
-			<div className={`absolute inset-0 z-30 flex flex-col items-center justify-center gap-2.5 bg-bg-panel/70 transition-opacity duration-200 ${overlayVisible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`} role={overlayVisible ? "status" : undefined} aria-hidden={!overlayVisible}>
+			<div className={`absolute inset-0 z-30 flex flex-col items-center justify-center gap-2.5 bg-bg-panel/70 transition-opacity duration-base ${overlayVisible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`} role={overlayVisible ? "status" : undefined} aria-hidden={!overlayVisible}>
 				<div className="loader animate-pideck-spin" />
 				<span className="text-body text-text-secondary">{overlayLabel}</span>
 			</div>

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "version": "1.0.1",
-  "bundleSha256": "147c988df1a99b0814ebb34e26c62d96a5680698d69efed5ac1e2a9795b16a15",
+  "bundleSha256": "3a14ab1d657cf8d2fe1effffb31ca19833cd91a8f27d3a7fa1d39dbf479c8a90",
   "fileCount": 26,
   "files": [
     {
@@ -21,8 +21,8 @@
     },
     {
       "name": "pi-deck-gui-bridge-gui-spec.ts",
-      "sha256": "7ec0ea1d44913055d521cecf5756a44e64e2741c08875e5f453d1c43f8ccce76",
-      "bytes": 11296
+      "sha256": "77808f5045dc279e69952f8752922c599179ff0b5565df63c868e2aa162df40d",
+      "bytes": 11762
     },
     {
       "name": "pi-deck-gui-bridge-gui-types.ts",
@@ -31,18 +31,18 @@
     },
     {
       "name": "pi-deck-gui-bridge-gui.ts",
-      "sha256": "709e09f7ebba908f45ba4001837ae36f505db028ee31f22e4351dd30d514f217",
-      "bytes": 30095
+      "sha256": "f98918fcbfd0eabfa0d616f328695b69851441a50de32743cf702d5e6aca693b",
+      "bytes": 32861
     },
     {
       "name": "pi-deck-gui-bridge-runtime.ts",
-      "sha256": "9e61f4b07f1be3eed20a9f471853b9b0365cc4c768ba9a8cdb25b9a853a9a9d9",
-      "bytes": 29950
+      "sha256": "477732343012cd7e643b34a042f8374226747f19e79c303a371a45f9742a4142",
+      "bytes": 30339
     },
     {
       "name": "pi-deck-gui-bridge-serialize.ts",
-      "sha256": "439bb1207e594d214ba70a0add7b1becbb0da72e295c04aae261729ec988aa23",
-      "bytes": 15748
+      "sha256": "7f634884004ff84aa289c50e2cf6a9da98b4eb06b0d446a856282d8863e74fa0",
+      "bytes": 16053
     },
     {
       "name": "pi-deck-gui-bridge-theme.ts",
@@ -56,13 +56,13 @@
     },
     {
       "name": "pi-deck-gui-bridge-tui.ts",
-      "sha256": "33e1f7dc9c9ef12afc44c6eb0564f9b238555a81a63c838385112de638f234bf",
-      "bytes": 10394
+      "sha256": "189602c1f6538a77231a0855b280aa7867f9bb1d2ae68f7b32f75c4f007b44f8",
+      "bytes": 8953
     },
     {
       "name": "pi-deck-gui-bridge-types.ts",
-      "sha256": "5dc661ce1b4f1413912860bea2958968689743a58cd50d5bf37ee2f7602398dd",
-      "bytes": 12257
+      "sha256": "f96eac6916c50e1ff81da97725a6fb33095d16af0c86409995c2cde5f7cd5b7d",
+      "bytes": 12711
     },
     {
       "name": "pi-deck-gui-bridge.ts",

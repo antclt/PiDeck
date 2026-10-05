@@ -5,7 +5,7 @@
  * 点击条目拉取正文并回填 composer。独立组件避免 WebComposer 膨胀。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Search, Sparkles } from "lucide-react";
+import { Loader2, Search, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui-shadcn/button";
 import { Input } from "@/components/ui-shadcn/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui-shadcn/popover";
@@ -70,8 +70,9 @@ export function WebPromptPicker(props: { disabled?: boolean; onPick: (content: s
 	return (
 		<Popover open={open} onOpenChange={setOpen}>
 			<PopoverTrigger asChild>
-				<Button type="button" variant="ghost" size="sm" className="h-8 w-8 shrink-0 p-0 text-muted-foreground" disabled={props.disabled} title={t("web.promptLibrary")} aria-label={t("web.promptLibrary")}>
-					{/* 纯图标触发器（与相邻 ImagePlus/Camera 同规格）：带文字时在窄屏把右侧发送按钮挤出视口/遮住。 */}
+				<Button type="button" variant="ghost" size="sm" className="hidden h-8 w-8 shrink-0 p-0 text-muted-foreground sm:inline-flex" disabled={props.disabled} title={t("web.promptLibrary")} aria-label={t("web.promptLibrary")}>
+					{/* 纯图标触发器（与相邻 ImagePlus/Camera 同规格）。移动窄屏（<sm）隐藏：模型/思考/相机/图片是核心，
+					   提示词库是增强，5 个元素在窄屏装不下会溢出把发送按钮挤折叠；宽屏再显示。 */}
 					<Sparkles className="size-4" aria-hidden="true" />
 				</Button>
 			</PopoverTrigger>
@@ -96,7 +97,10 @@ export function WebPromptPicker(props: { disabled?: boolean; onPick: (content: s
 					{loadError ? (
 						<div className="px-2 py-3 text-center text-caption text-danger">{t("web.promptLoadFailed")}</div>
 					) : loading && prompts.length === 0 ? (
-						<div className="px-2 py-3 text-center text-caption text-muted-foreground">{t("web.promptLibraryLoading")}</div>
+						<div className="flex items-center justify-center gap-2 px-2 py-3 text-caption text-muted-foreground">
+							<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+							{t("web.promptLibraryLoading")}
+						</div>
 					) : prompts.length === 0 ? (
 						<div className="px-2 py-3 text-center text-caption text-muted-foreground">{t("web.promptEmpty")}</div>
 					) : null}

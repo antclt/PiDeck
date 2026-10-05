@@ -211,7 +211,7 @@ export const ProcessGroupStep = memo(function ProcessGroupStep(props: ProcessGro
 			<button
 				type="button"
 				data-process-group-head=""
-				className="flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md pl-0.5 pr-[7px] text-left text-chat-row font-medium text-text-tertiary transition-colors duration-150 hover:bg-[color:color-mix(in_srgb,var(--color-text-primary)_4%,transparent)] hover:text-text-secondary focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
+				className="flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md pl-0.5 pr-[7px] text-left text-chat-row font-medium text-text-tertiary transition-colors duration-fast hover:bg-[color:color-mix(in_srgb,var(--color-text-primary)_4%,transparent)] hover:text-text-secondary focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
 				aria-expanded={props.open}
 				aria-controls={bodyId}
 				onClick={() => props.onToggle(!props.open)}
@@ -248,7 +248,7 @@ export const ProcessGroupStep = memo(function ProcessGroupStep(props: ProcessGro
 				// 组体内层限高交给 ProcessGroupBodyScrollContext：组内工具卡展开后不再自带滚轮，
 				// 整组只有这一条滚轮（否则是双层滚动条，内层到边就滚不动了）。
 				<ProcessGroupBodyScrollContext.Provider value={true}>
-					<div id={bodyId} data-process-group-body="" className="ml-5 mt-1 border-l-2 border-border-subtle pl-3">
+					<div id={bodyId} data-process-group-body="" className="ml-5 mt-1 border-l-2 border-border-subtle pl-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
 						<div
 							ref={stickScrollRef}
 							data-process-group-scroller=""

@@ -38,6 +38,10 @@ export const GUI_SLOT_METHODS = {
 	setConfigPage: "config.page",
 	setSessionItemExtra: "session.item",
 	setContextMenuItem: "context.menu",
+	setTimelineEvent: "timeline.event",
+	setStatusbarItem: "statusbar.item",
+	setTerminalToolbar: "terminal.toolbar",
+	setGitPanelSection: "git.panel.section",
 } as const;
 
 export type GuiSlotMethod = keyof typeof GUI_SLOT_METHODS;
@@ -134,6 +138,10 @@ export type GuiNamespaceState = {
 	ctx: ExtensionContext | null;
 	/** 覆盖层 id 计数。 */
 	overlaySeq: number;
+	/** 宿主服务调用的待响应表（serviceId → resolve/reject；filePicker/openPath 等）。 */
+	pendingServices: Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>;
+	/** service-call 的 id 计数。 */
+	serviceSeq: number;
 };
 
 /** 状态按 runtime 存（随 runtime 生命周期一起回收，不新开持久化）。 */
@@ -143,7 +151,7 @@ const guiStateByRuntime = new WeakMap<BridgeRuntime, GuiNamespaceState>();
 export function guiState(runtime: BridgeRuntime): GuiNamespaceState {
 	let state = guiStateByRuntime.get(runtime);
 	if (!state) {
-		state = { contributions: new Map(), overlays: new Map(), icons: new Map(), commands: new Map(), ctx: null, overlaySeq: 1 };
+		state = { contributions: new Map(), overlays: new Map(), icons: new Map(), commands: new Map(), ctx: null, overlaySeq: 1, pendingServices: new Map(), serviceSeq: 1 };
 		guiStateByRuntime.set(runtime, state);
 	}
 	return state;

@@ -11,7 +11,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.7.8-blue)
+![Version](https://img.shields.io/badge/version-0.7.9-blue)
 
 国内 AtomGit 托管：https://atomgit.com/ayuayue/PiDeck
 <!-- 预留 AtomGit G-Star 徽章位（替换占位链接后启用）
@@ -100,25 +100,24 @@
 
 ## 📋 更新日志
 
-> **最新版本 v0.7.8**（2026-10-03）
+> **最新版本 v0.7.9**（2026-10-05）
 
-### v0.7.8 更新亮点
-- 🚀 **数据目录更名为 PiDeck 并自动迁移历史数据**
-- 🚀 **自定义主题（JSON 主题包 + AI 开发指南）**
-- 🚀 **用量查询新增「火山方舟 AK/SK」模板**
-- 🚀 **供应商 / 提供方名称支持中文**
-- 🚀 **DSH「添加 provider」补齐必要字段**
-- 🚀 **模型预选可一键清空**
-- 🚀 **输入框语音听写**
-- 🚀 **过程组时间线（默认开启）**
-- 🚀 **自动生成会话标题改为默认开启**
-- 🚀 **支持导入 Qoder 会话**
-- 🚀 **模型配置导出 / 导入面板（#261）**
-- 🚀 **发送钮自带投递菜单**
-- ✨ **修复一键安装 pi 在 Windows 上必然失败**
-- ✨ **修复路径链接化吞掉后续正文**
-- ✨ **修复中文句子里的斜杠被误判为路径**
-- ✨ **会话标题不再被首句锁死（#266）**
+### v0.7.9 更新亮点
+- 🚀 **TokenDance 充值（Agent 支付）**
+- 🚀 **standby 运行时池——新会话秒级激活**
+- 🚀 **插件开发接口（能力目录 + AI 开发指南 + demo）**
+- 🚀 **会话导入：Kimi Code / Kimi Work / MinimaxCode**
+- 🚀 **适配 pi 1.0.x——资源管理改走 pi 原生配置**
+- 🚀 **应用内 pi 更新详情与更可靠的更新器**
+- 🚀 **CUA：全链路修复 + 免审批开关**
+- 🚀 **Logo 与应用图标换 pi 官方 TUI 三色像素标**
+- 🚀 **Web：新建会话可选后端**
+- 🚀 **会话治理：外部删除清理与垃圾进程回收**
+- 🚀 **UI 精致度四波 + 全局动效补齐**
+- ✨ **启动不再闪现引导页**
+- ✨ **Win11 贴边窗口精确恢复**
+- ✨ **会话时间戳不再无故刷新（#314）**
+- ✨ **同轮多条 AI 回复编辑保存不再重复写入（#310）**
 
 [查看完整更新日志 →](CHANGELOG.zh-CN.md)
 

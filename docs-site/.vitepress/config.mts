@@ -32,13 +32,23 @@ export default defineConfig({
       themeConfig: {
         nav: [
           { text: "首页", link: "/" },
-          { text: "全景指南", link: "/guide/ultimate-guide" },
-          { text: "原理解析", link: "/guide/architecture-deep-dive" },
-          { text: "使用指南", link: "/guide/usage-guide" },
-          { text: "功能手册", link: "/guide/feature-reference" },
-          { text: "FAQ", link: "/guide/faq" },
-          { text: "问题排查", link: "/guide/troubleshooting" },
-          { text: "产品对比", link: "/guide/comparison" },
+          {
+            text: "指南",
+            items: [
+              { text: "全景指南", link: "/guide/ultimate-guide" },
+              { text: "快速开始", link: "/guide/getting-started" },
+              { text: "功能手册", link: "/guide/feature-reference" },
+              { text: "原理解析", link: "/guide/architecture-deep-dive" },
+            ],
+          },
+          {
+            text: "帮助",
+            items: [
+              { text: "FAQ", link: "/guide/faq" },
+              { text: "问题排查", link: "/guide/troubleshooting" },
+              { text: "产品对比", link: "/guide/comparison" },
+            ],
+          },
           { text: "更新日志", link: "/changelog" },
           { text: "下载", link: "https://github.com/ayuayue/PiDeck/releases" },
           {
@@ -96,13 +106,23 @@ export default defineConfig({
       themeConfig: {
         nav: [
           { text: "Home", link: "/en/" },
-          { text: "Ultimate Guide", link: "/guide/ultimate-guide" },
-          { text: "Deep Dive", link: "/guide/architecture-deep-dive" },
-          { text: "Guide", link: "/en/guide/usage-guide" },
-          { text: "Feature Reference", link: "/en/guide/feature-reference" },
-          { text: "FAQ", link: "/en/guide/faq" },
-          { text: "Troubleshooting", link: "/en/guide/troubleshooting" },
-          { text: "Comparison", link: "/en/guide/comparison" },
+          {
+            text: "Guide",
+            items: [
+              { text: "Ultimate Guide", link: "/guide/ultimate-guide" },
+              { text: "Quick Start", link: "/en/guide/getting-started" },
+              { text: "Feature Reference", link: "/en/guide/feature-reference" },
+              { text: "Deep Dive", link: "/guide/architecture-deep-dive" },
+            ],
+          },
+          {
+            text: "Help",
+            items: [
+              { text: "FAQ", link: "/en/guide/faq" },
+              { text: "Troubleshooting", link: "/en/guide/troubleshooting" },
+              { text: "Comparison", link: "/en/guide/comparison" },
+            ],
+          },
           { text: "Changelog", link: "/en/changelog" },
           { text: "Download", link: "https://github.com/ayuayue/PiDeck/releases" },
           {

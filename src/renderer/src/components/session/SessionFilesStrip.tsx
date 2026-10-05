@@ -100,8 +100,8 @@ export function SessionFilesStrip(props: {
 			<div className="flex h-9 w-full items-center gap-2.5 px-3">
 				<button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left" aria-expanded={!collapsed} onClick={toggleCollapsed}>
 					<FileEdit size={14} aria-hidden="true" className="shrink-0 text-text-tertiary" />
-					<span className="shrink-0 text-[13px] font-medium leading-6 text-foreground">{t("sessionFiles.title")}</span>
-					<span className="shrink-0 text-[13px] leading-5 text-text-tertiary">{t("sessionFiles.count", { count: visibleFileEntries.length })}</span>
+					<span className="shrink-0 text-control font-medium leading-6 text-foreground">{t("sessionFiles.title")}</span>
+					<span className="shrink-0 text-control leading-5 text-text-tertiary">{t("sessionFiles.count", { count: visibleFileEntries.length })}</span>
 					<span className="min-w-0 flex-1" />
 					<span className="shrink-0 text-text-tertiary" aria-hidden="true">
 						{collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -111,7 +111,7 @@ export function SessionFilesStrip(props: {
 			{!collapsed && (
 				<>
 					<div className="flex items-center justify-between px-3 pt-1">
-						<span className="text-[13px] text-text-tertiary">{t("sessionFiles.count", { count: visibleFileEntries.length })}</span>
+						<span className="text-control text-text-tertiary">{t("sessionFiles.count", { count: visibleFileEntries.length })}</span>
 						<Button
 							variant="ghost"
 							size="sm"

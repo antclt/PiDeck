@@ -532,11 +532,11 @@ export function PiAiProvidersCard(props: {
 
 				{/* 排序说明：顺序是 PiDeck 本地偏好（AppSettings.dshProviderOrder），不写回 DSH 配置文件 */}
 				{orderedKeys.length > 1 && (
-					<div className="mt-2 mb-2.5 flex items-start gap-2 text-[11px] leading-relaxed text-text-tertiary">
+					<div className="mt-2 mb-2.5 flex items-start gap-2 text-micro leading-relaxed text-text-tertiary">
 						<ArrowUpDown className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
 						<span className="min-w-0 flex-1">{t("config.dsh.providerOrderHint")}</span>
 						{(props.providerOrder?.length ?? 0) > 0 && props.onResetProviders && (
-							<Button type="button" variant="ghost" size="sm" className="h-5 shrink-0 px-1.5 text-[11px] font-normal text-text-tertiary hover:text-text-primary" onClick={props.onResetProviders}>
+							<Button type="button" variant="ghost" size="sm" className="h-5 shrink-0 px-1.5 text-micro font-normal text-text-tertiary hover:text-text-primary" onClick={props.onResetProviders}>
 								{t("config.providerOrderReset")}
 							</Button>
 						)}
@@ -624,7 +624,7 @@ export function PiAiProvidersCard(props: {
 							/>
 
 							{isOpen && (
-								<div className="grid gap-3 border-t border-border/40 px-3 py-3">
+								<div className="grid gap-3 border-t border-border/40 px-3 py-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
 									<ApiKeyField ref={keyRef} value={keyDrafts[entry.key] ?? ""} onChange={(next) => setKeyDrafts((prev) => ({ ...prev, [entry.key]: next }))} ops={ops} />
 									<CustomSettings label={t("config.dsh.customSettings")}>
 										<p className="text-micro text-muted-foreground">{t("config.dsh.customSettingsHint")}</p>
@@ -858,7 +858,7 @@ export function DeepseekRouteCard(props: {
 					/>
 
 					{open && (
-						<div className="grid gap-3 border-t border-border/40 px-3 py-3">
+						<div className="grid gap-3 border-t border-border/40 px-3 py-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
 							<ApiKeyField ref={keyRef} value={keyDraft} onChange={setKeyDraft} ops={ops} />
 							<CustomSettings label={t("config.dsh.customSettings")}>
 								<p className="text-micro text-muted-foreground">{t("config.dsh.customSettingsHint")}</p>

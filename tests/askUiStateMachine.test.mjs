@@ -371,3 +371,22 @@ test("渲染层不再用 find 取第一个 pending 请求", () => {
 	// 布局层（SessionRuntimeInjector）必须用同一份判据决定底栏 ask 是否占位。
 	assert.match(source, /resolveActiveAskRequest\(runtime, ui\)/);
 });
+
+test("单问题卡初始草稿注入 request.prefill（issue #285：首帧输入框不再空白）", () => {
+	const askUi = loadAskUi();
+	// 有预填：value 落位，选择态保持空
+	// 工厂对象来自 vm 沙箱（跨 realm prototype），先展开成宿主对象再比较
+	assert.deepEqual({ ...askUi.initialAskSingleDraft("默认答案") }, { selectedOption: "", value: "默认答案", expanded: true });
+	// 无预填 / 空串 / 非字符串：与空草稿一致，不抛错
+	assert.deepEqual({ ...askUi.initialAskSingleDraft() }, { ...askUi.emptyAskSingleDraft() });
+	assert.deepEqual({ ...askUi.initialAskSingleDraft("") }, { ...askUi.emptyAskSingleDraft() });
+	assert.deepEqual({ ...askUi.initialAskSingleDraft(undefined) }, { ...askUi.emptyAskSingleDraft() });
+});
+
+test("Overlay 的单问题草稿两处初始化都走 initialAskSingleDraft(prefill)", () => {
+	const overlay = readFileSync("src/renderer/src/components/overlays/SessionRuntimeUiOverlay.tsx", "utf8");
+	// 首帧渲染与后续 patch 共用同一入口，两处都注入 request.prefill，避免只修一处再漂移
+	assert.match(overlay, /draft\?\.single \?\? initialAskSingleDraft\(request\?\.prefill\)/);
+	assert.match(overlay, /current\?\.single \?\? initialAskSingleDraft\(request\?\.prefill\)/);
+	assert.doesNotMatch(overlay, /emptyAskSingleDraft\(\)/, "Overlay 不再直接用空草稿工厂（prefill 只能从 initial 工厂进入）");
+});

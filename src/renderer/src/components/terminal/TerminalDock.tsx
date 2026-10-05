@@ -9,6 +9,7 @@ import { writeClipboard } from "../../utils/clipboard";
 import { ChevronDown, ChevronUp, MoreHorizontal, Plus, X } from "lucide-react";
 import { ConfirmDialog } from "../ui-shadcn/ConfirmDialog";
 import { Button } from "../ui-shadcn/button";
+import { BridgeGuiSlot, useBridgeSessionId } from "../bridge/BridgeSlot";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui-shadcn/popover";
 import type { PiDesktopApi } from "../../../../preload";
 import type { TerminalShell, TerminalTab, TerminalTarget } from "../../../../shared/types";
@@ -92,6 +93,8 @@ export function TerminalDock(props: {
 	sessionKey?: string;
 }) {
 	const containerRef = useRef<HTMLDivElement>(null);
+	// 桥落点跟随聚焦会话（共享 chrome 策略，见 terminal.toolbar 挂载处注释）
+	const bridgeSessionId = useBridgeSessionId();
 	const xtermRef = useRef<Terminal | null>(null);
 	const fitRef = useRef<FitAddon | null>(null);
 	const activeTabIdRef = useRef("");
@@ -452,7 +455,7 @@ export function TerminalDock(props: {
 						</PopoverTrigger>
 						<PopoverContent side="top" align="start" className="w-44 gap-0.5 p-1.5">
 							<strong className="px-1 py-0.5 text-xs">{t("terminal.selectShell")}</strong>
-							{shells.length === 0 && <span className="block px-1 py-1 text-[11px] text-muted-foreground">{t("terminal.shellEmpty")}</span>}
+							{shells.length === 0 && <span className="block px-1 py-1 text-micro text-muted-foreground">{t("terminal.shellEmpty")}</span>}
 							{shells.map((s) => (
 								<Button
 									key={s.shell}
@@ -481,7 +484,7 @@ export function TerminalDock(props: {
 						</PopoverTrigger>
 						<PopoverContent side="top" align="end" className="w-48 gap-1 p-2">
 							<strong className="px-1 text-xs">{t("terminal.theme")}</strong>
-							<span className="px-1 text-[11px] text-muted-foreground">
+							<span className="px-1 text-micro text-muted-foreground">
 								{t("terminal.themeCurrent")}: {theme.label}
 							</span>
 							{Object.entries(TERMINAL_THEMES).map(([id, item]) => (
@@ -519,6 +522,9 @@ export function TerminalDock(props: {
 					</Button>
 				</div>
 			</header>
+			{/* GUI 扩展桥：终端面板头部工具区落点（ctx.gui.setTerminalToolbar）。
+			    跟随聚焦会话的贡献（共享 chrome，与 AppHeader titlebar.action 同策略）；无贡献不占位。 */}
+			<BridgeGuiSlot sessionId={bridgeSessionId} slot="terminal.toolbar" className="flex shrink-0 flex-wrap items-center gap-1 border-b px-2 py-0.5 text-xs" />
 			{!collapsed && (
 				<div className="terminal-pane-shell" onPointerDownCapture={focusTerminalSoon} onContextMenu={(event) => void copySelectionOnContextMenu(event)}>
 					{(loading || !contentReady) && <div className="terminal-placeholder">{t("terminal.starting")}</div>}

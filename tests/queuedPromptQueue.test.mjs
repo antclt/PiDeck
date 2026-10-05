@@ -53,7 +53,7 @@ test("pending prompts share the native content width constraint without hiding c
 	assert.doesNotMatch(composerPanelsSource, /justify-end/);
 	assert.doesNotMatch(composerPanelsSource, /w-\[clamp\(13\.5rem,36%,22\.5rem\)\]/);
 	assert.match(composerPanelsSource, /queued-row flex h-9 min-h-9 shrink-0/);
-	assert.match(composerPanelsSource, /truncate text-\[13px\] leading-5/);
+	assert.match(composerPanelsSource, /truncate text-control leading-5/);
 	assert.doesNotMatch(stylesSource, /\.queued-card \{/);
 });
 

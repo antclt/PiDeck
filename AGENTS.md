@@ -23,8 +23,14 @@ PiDeck 是 Electron 桌面应用，在多个项目目录间管理和运行 pi RP
 
 - pi 的 `ctx.ui` 声明式方法在 RPC 模式下被降级成空实现（见 pi `docs/rpc-extension-ui.md`），要接回只能在 pi 进程内拦截。主进程起只绑 `127.0.0.1` 的端点（`src/main/pi/bridge/BridgeServer.ts`，每 agent 一份 token，spawn 时注入 `PIDECK_BRIDGE_URL`/`PIDECK_BRIDGE_TOKEN`）；pi 侧由随包分发、`-e` 注入的桥扩展（`resources/extensions/pi-deck-gui-bridge*.ts`）推拉数据。`/bridge/<token>/model-trace` 子路由承载模型请求快照（`resources/extensions/pi-deck-model-trace.ts`，完整请求体落 `userData/logs/model-traces/`，时间线只留摘要 + traceId）。
 - 线格式唯一来源：宿主侧 `src/shared/types/bridge.ts`，桥侧 `resources/extensions/pi-deck-gui-bridge-types.ts` 逐字段对齐，由 `tests/guiBridge*.test.mjs` 与 `tests/modelTraceExtension.test.mjs` 兜底。
-- 已知耦合（唯一一处）：`pi-deck-gui-bridge-tui.ts` 用注入的 `PIDECK_BRIDGE_PI_PATH` + `createRequire` 解析 **pi 内部的 pi-tui**（要与 pi 同一份模块实例）；pi 升级挪动位置时必须降级为「组件渲染不出」而非报错。
+- 与 pi 内部的耦合已收敛到**路径定位**：`pi-deck-gui-bridge-tui.ts` 只解析 pi-tui 的安装路径（给 ext-points 做 types.d.ts 种子 + 诊断日志），不再加载模块；组件识别走实例原型链上的构造器名（serialize 的逐级匹配），不依赖 pi 安装布局。pi 升级挪动位置时定位失败只影响扩展点目录的一种子来源，必须静默降级而非报错。
 - fail-safe：端点起不来 → 不注入 env → 桥静默不工作；桥抛错 → 最多某落点缺席；两种都不得影响 pi 会话与其余功能。生命周期配对：`registerAgent` ↔ `unregisterAgent`（统一走 `AgentManager.unregisterBridgeSession`），stop/restart/删会话/退出都要注销。用户可在扩展设置页整体关掉桥（`removedBuiltInExtensions` → 不再注入），行为回到「没有桥」。
+
+**例外三：standby 运行时池（预热，只允许「提前起进程」这一用途）**
+
+- 一次 pi RPC 激活约 8.5s（实测 ≈ node/pi boot 0.5s + 用户 npm 扩展 5s + 内置 16 个 TS 扩展 2.4s），全部发生在 spawn→握手段。池的用法：草稿创建/激活完成后 `AgentManager.ensureStandbyAgent(projectId)` 后台起一个完整握手的进程待命（`src/main/pi/StandbyAgentPool.ts`：单槽位、容量 1、10min TTL 自动回收）；新会话激活经 `SessionRuntimeCoordinator.claimStandbyAgent` 认领，认领后照常走 applyLatestPreferences/mergePendingPermissionSettings，模型与权限热更新语义不变。
+- 只服务新会话（noSession/恢复历史会话不认领）；spawn 输入指纹（`src/main/pi/standbyFingerprint.ts`：扩展根/禁用集/offline/noExt/noSkills/customPiPath/WSL/代理/launchArgs）任一变化即丢弃回退普通 spawn，改设置无需重启池；信任走 `resolveTrustWithoutPrompt`，含资源未决策不池化（绝不后台弹 trust 弹窗）。
+- 已知限制：池化进程不带 PIDECK_SESSION_ID，安检门按默认档工作，per-session 安全覆盖对认领会话要重启才生效；池化 agent 对 agents:list/agent:state-changed 不可见。开关 `settings.standbyRuntimeEnabled`（默认开，开发者页可关）。启动耗时探针：`scripts/probePiStartup.mjs`（JITI_DEBUG=1 出逐模块 trace）。
 
 ## 目录结构与跨层契约
 
@@ -125,7 +131,7 @@ src/
 
 **IPC 与 preload**：preload 不做业务，只做校验后的转发与订阅封装；事件推送 preload 侧返回 unsubscribe 函数，渲染层卸载必须退订。
 
-**原生模块与打包**：node-pty 等原生模块必须 `asarUnpack` 并 postinstall 修权限（`scripts/fix-pty-permissions.js`）；afterPack 删 node_modules 冗余文件必须有对应测试（`tests/afterPackCleanup.test.mjs`）；资源路径用 `process.resourcesPath`/`app.getAppPath()` 推导，禁止裸 `__dirname` 假设 asar 可读，preload 路径走 `preloadPath.ts`。
+**原生模块与打包**：node-pty 等原生模块必须 `asarUnpack` 并 postinstall 修权限（`scripts/fix-pty-permissions.js`）；afterPack 删 node_modules 冗余文件必须有对应测试（`tests/afterPackCleanup.test.mjs`）；资源路径用 `process.resourcesPath`/`app.getAppPath()` 推导，禁止裸 `__dirname` 假设 asar 可读，preload 路径走 `preloadPath.ts`。**原生模块禁止顶层静态 import**——JS 包装可能在模块求值时同步加载对应平台二进制（koffi 即如此），跨 arch 打包时可选依赖（`@koromix/koffi-*`）不会自动跟随，缺二进制环境启动即崩（issue #313）；必须经专属模块函数内 `createRequire` 惰性加载 + try/catch 降级，守卫测试见 `tests/cua/cuaKoffiFallback.test.mjs`。
 
 **跨平台**：禁止硬编码 `/` 或 `\`；平台特判集中在专属模块（如 `linuxDisplayBackend.ts`）；Windows「偶发失败」优先怀疑路径空格/杀毒锁文件/长路径/权限弹窗，日志带足上下文；**WSL 项目的 git 一律走发行版内 git**——cwd 是 `\\wsl.localhost\...` UNC 时经 `wsl.exe -d <distro> … git` 执行（见 `src/main/git/gitWsl.ts`），理由：宿主 git.exe 经 9P 会被判 dubious ownership，且两套 git 索引视角不一致会让仓库反复「整树改动」；**git 子进程只有两个入口**——`execGit`（读类）与 `runGitCommand`（写类）都在 `src/main/git/gitRun.ts` 收口，新增 git 调用不得绕过。
 
@@ -184,6 +190,7 @@ src/
 | 生图存储 | **base64 不进 JSONL**（只存 ref）；读取永远有字节上界；`<img src>` 只走 `imageContentSrc()` | 生图会话存储 |
 | 会话消息编辑/删除/重发 | 墓碑是自造格式但与 pi 跨版本契约已验证（别误迁）；pi 活着禁改会话文件，三道闸不许放宽；unmerged 降级不弃快照 | 会话消息编辑/删除/重发 |
 | Markdown 渲染 | 唯一引擎 MarkdownStream，禁止再引 marked/react-markdown；流式与 settle 是两条路径，**复现要看最终态** | 会话 Markdown 渲染管线 |
+| 插件开发支持 | 能力目录 `pluginDevCatalog.ts` 镜像桥实现（19 落点/42 kind），新增落点/kind 必须同步目录+契约测试；`resources/plugin-dev` 要在 extraResources；demo 已存在不覆盖 | 插件开发支持 |
 | 发版 | CHANGELOG 中英一致 → sync-release-notes → sync-workflow-choices → 打包人工 smoke | docs/release-process.md |
 
 ## 协作流程
@@ -202,6 +209,26 @@ src/
 2. 只有用户明确说「提交吧」「commit」「push」等意图时才执行。
 3. 完成后简要总结，询问「需要我提交吗？」。
 4. 用户同意时，一个功能/修复的全部变更放一个 commit，不拆小 commit（用户另有要求除外）。
+
+### 多 agent 并行开发（硬性）
+
+> 背景：本仓库常被多个 agent 同时操作。无隔离时，A 的选择性 `git restore`/`clean` 会清掉 B 的未提交改动、`npm install` 会重建 `node_modules/.bin` 打断他人 typecheck、暂存区互相覆盖（2026-10 两轮实战事故）。总目标：**任何人的未提交工作不被另一个 agent 破坏**。
+
+**编排层（发起并行前先定）**
+
+1. 两个以上 agent 同时改 `src/` → 优先每人一个 `git worktree` + 独立分支，合并由单一收口人执行；不允许两个「写」agent 长期共享同一工作树。
+2. 无法 worktree 时按目录划 ownership，各 agent 只在指派目录内写；公共汇聚文件（`AGENTS.md`、`src/main/index.ts`、`src/shared/types/settings.ts`、i18n copy、`package*.json`）同一时刻只许一个写者。
+3. 只读任务（调研/评审/搜索）不受限，任意并行。
+
+**agent 行为红线（共享工作树时全部生效）**
+
+1. 开始写代码前先 `git status` 留基线，归属存疑时对照基线判断。
+2. **git 操作必须路径精确**：只许 `git add <本任务文件列表>`；禁止 `git add -A/-a/.`、对非本任务文件 `git restore`/`checkout --`、任何形式的 `git clean`、`git reset --hard`、`git stash`（stash 会收走他人改动）。要还原某文件，先确认其全部改动都是本任务产生的。
+3. `git status` 里非本任务产生的改动：不暂存、不还原、不删除、不评判——那是别人进行中的工作；同文件混着他人改动时用 hunk 级暂存（`git apply --cached`）或停下报告。
+4. 并行期间禁止 `npm install`/删改 `node_modules`（重建 .bin 会打断他人 typecheck 与 dev server）；依赖增删集中交给单一收口 agent。
+5. 不 kill 不认识的进程、不占他人 dev 端口、不清理 `.git/` 下不认识的文件（可能是别人的 checkpoint）；自己的工作文件不放 `.git/`。
+6. 提交前 `git diff --cached --stat` 自查只含本任务文件，混入立即按路径精确 unstage。
+7. 任务收尾时工作树应只剩他人改动——自己的全部已提交；带着未提交改动离开视为事故。
 
 ### 长期重构纪律
 

@@ -59,6 +59,8 @@ import { useAnnouncementNotifier } from "./hooks/useAnnouncementNotifier";
 import { useModelsVerifyNotifier } from "./hooks/useModelsVerifyNotifier";
 import { useBackgroundAskPatrol } from "./hooks/useBackgroundAskPatrol";
 import { announcementCenterOpenAtom, announcementNotificationEnabledAtom } from "./atoms/announcement-atoms";
+import { logoStyleAtom } from "./atoms/app-ui-atoms";
+import { LOGO_STYLE_STORAGE_KEY, resolveLogoStyle } from "./components/app/piTuiLogoData";
 import { openProviderLoginAtom } from "./atoms/providerLoginAtoms";
 import { useSessionLayout } from "./hooks/useSessionLayout";
 import { useFileEditor } from "./hooks/useFileEditor";
@@ -78,6 +80,7 @@ import { isLiveRuntimeStatus, sessionCommandFailureToast, type SessionRunCapabil
 import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeBackendPreference, readWelcomeDshModelPreference, readWelcomeModelPreference, readWelcomeThinkingPreference, resolveChatSessionBootstrap, resolveGuidePageBackend } from "./utils/chatSessionBootstrap";
 import { useAppAppearance } from "./hooks/appearance/useAppAppearance";
 import { useAppBootstrapInfo } from "./hooks/app/useAppBootstrapInfo";
+import { useBootOverlayReady } from "./hooks/app/useBootOverlayReady";
 import { useCommandPalette } from "./hooks/app/useCommandPalette";
 import { useSidebarArchiveActions } from "./hooks/sidebar/useSidebarArchiveActions";
 import { useSettingsUpdater } from "./hooks/settings/useSettingsUpdater";
@@ -201,6 +204,9 @@ export function App() {
 	const store = useStore();
 	// Composer input state is owned by ComposerArea; the root does not subscribe to each key.
 	const currentSessionId = useAtomValue(currentSessionIdAtom);
+	// 开屏交接：已聚焦会话（工作区知道自己该显示什么）才撤启动遮罩，
+	// 否则会先闪一帧「无会话空态 = 引导页」再变正常。
+	useBootOverlayReady(currentSessionId !== undefined);
 	const currentSession = useAtomValue(currentSessionAtom);
 	// currentSessionRuntime / currentSessionRuntimeUi / currentSessionSendState: sync store.get() only.
 	// Streaming subscriptions are in SessionRuntimeInjector.
@@ -461,6 +467,12 @@ export function App() {
 		setWorkbuddyImportProject,
 		cursorImportProject,
 		setCursorImportProject,
+		kimiImportProject,
+		setKimiImportProject,
+		kimiWorkImportProject,
+		setKimiWorkImportProject,
+		minimaxImportProject,
+		setMinimaxImportProject,
 		codexImportController,
 		claudeImportController,
 		qoderImportController,
@@ -468,6 +480,9 @@ export function App() {
 		zcodeImportController,
 		workbuddyImportController,
 		cursorImportController,
+		kimiImportController,
+		kimiWorkImportController,
+		minimaxImportController,
 		openCodexImport,
 		openClaudeImport,
 		openQoderImport,
@@ -475,6 +490,9 @@ export function App() {
 		openZCodeImport,
 		openWorkBuddyImport,
 		openCursorImport,
+		openKimiImport,
+		openKimiWorkImport,
+		openMinimaxImport,
 	} = useImportFlow({
 		setProjectMenu: () => undefined,
 		refreshProjectSessions,
@@ -493,6 +511,15 @@ export function App() {
 		importWorkBuddySessionsApi: api.workbuddySessions.import,
 		scanCursorSessions: api.cursorSessions.scan,
 		importCursorSessionsApi: api.cursorSessions.import,
+		scanKimiSessions: api.kimiSessions.scan,
+		importKimiSessionsApi: api.kimiSessions.import,
+		describeKimiWorkShareRoot: api.kimiWorkSessions.describe,
+		scanKimiWorkSessions: api.kimiWorkSessions.scan,
+		importKimiWorkSessionsApi: api.kimiWorkSessions.import,
+		scanMinimaxSessions: api.minimaxSessions.scan,
+		importMinimaxSessionsApi: api.minimaxSessions.import,
+		getSettings: api.settings.get,
+		updateSettings: api.settings.update,
 		t,
 	});
 
@@ -782,6 +809,19 @@ export function App() {
 	});
 	// 激活 Agent 数量告警：受设置 agentCountReminderEnabled 控制（默认开启），每个启动周期提示一次
 	useAgentLoadNotice(settings.agentCountReminderEnabled);
+
+	// logo 风格 → 渲染层镜像 atom + localStorage 缓存：LogoMark/侧栏/关于弹层订阅 atom 即时切换；
+	// localStorage 让下次启动的启动画面（React 挂载前）就能用同一风格，避免开屏闪回默认 pi-tui。
+	const setLogoStyle = useSetAtom(logoStyleAtom);
+	useEffect(() => {
+		const logoStyle = resolveLogoStyle(settings.logoStyle);
+		setLogoStyle(logoStyle);
+		try {
+			window.localStorage.setItem(LOGO_STYLE_STORAGE_KEY, logoStyle);
+		} catch {
+			// localStorage 不可用（隐私模式等）只影响启动画面回退 classic，不致命
+		}
+	}, [settings.logoStyle, setLogoStyle]);
 
 	// 公告通知开关 → 渲染层镜像 atom：通知调度与侧栏入口显隐共用同一数据源，
 	// 设置保存后即时生效（settings.get 首拉与 onSettingsApplied 都经此处同步）
@@ -1839,6 +1879,9 @@ export function App() {
 				if (source === "zcode") return openZCodeImport(project);
 				if (source === "workbuddy") return openWorkBuddyImport(project);
 				if (source === "cursor") return openCursorImport(project);
+				if (source === "kimi") return openKimiImport(project);
+				if (source === "kimiwork") return openKimiWorkImport(project);
+				if (source === "minimax") return openMinimaxImport(project);
 				return openOpenCodeImport(project);
 			},
 			importDirectorySessions: (project) => openDirectoryImport(project),
@@ -3064,6 +3107,9 @@ export function App() {
 					{zcodeImportProject && <ImportOverlayHost kind="zcode" project={zcodeImportProject} controller={zcodeImportController} onClose={() => setZcodeImportProject(null)} />}
 					{workbuddyImportProject && <ImportOverlayHost kind="workbuddy" project={workbuddyImportProject} controller={workbuddyImportController} onClose={() => setWorkbuddyImportProject(null)} />}
 					{cursorImportProject && <ImportOverlayHost kind="cursor" project={cursorImportProject} controller={cursorImportController} onClose={() => setCursorImportProject(null)} />}
+					{kimiImportProject && <ImportOverlayHost kind="kimi" project={kimiImportProject} controller={kimiImportController} onClose={() => setKimiImportProject(null)} />}
+					{kimiWorkImportProject && <ImportOverlayHost kind="kimiwork" project={kimiWorkImportProject} controller={kimiWorkImportController} onClose={() => setKimiWorkImportProject(null)} />}
+					{minimaxImportProject && <ImportOverlayHost kind="minimax" project={minimaxImportProject} controller={minimaxImportController} onClose={() => setMinimaxImportProject(null)} />}
 					{directoryImportProject && <ImportOverlayHost kind="directory" project={directoryImportProject} controller={directoryImportController} onClose={() => setDirectoryImportProject(null)} />}
 
 					{/* Scratch Pad（草稿本）：根级渲染，避免受 chat-pane grid 影响定位 */}
@@ -3108,7 +3154,7 @@ export function App() {
 				<DataEnvMismatchDialog />
 
 				{/* CUA 操作审批弹框：pi Agent 注入鼠标/键盘前的用户确认（事件驱动，根级渲染） */}
-				<CuaApprovalDialog request={cuaApproval.request} responding={cuaApproval.responding} open={cuaApproval.open} onOpenChange={cuaApproval.setOpen} onRespond={(allowed) => void cuaApproval.respond(allowed)} onCancel={cuaApproval.cancel} />
+				<CuaApprovalDialog request={cuaApproval.request} pendingCount={cuaApproval.pendingCount} responding={cuaApproval.responding} open={cuaApproval.open} onOpenChange={cuaApproval.setOpen} onRespond={(allowed) => void cuaApproval.respond(allowed)} onCancel={cuaApproval.cancel} />
 			</>
 		</FileLinkBaseProvider>
 	);

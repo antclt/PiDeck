@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { ipcChannels } from "../shared/ipc";
-import type { TokendanceAuthMode } from "../shared/tokendance";
+import type { TokendanceAuthMode, TokendancePaymentSessionResult } from "../shared/tokendance";
 import type { AnnouncementState } from "../shared/types/announcement";
 import type { RpcLogBatch, RpcLogEntry } from "../shared/types/rpcLog";
 import type { ModelTraceRecord } from "../shared/types/bridge";
@@ -68,6 +68,13 @@ import type {
 	WorkBuddySessionSummary,
 	CursorImportReport,
 	CursorSessionSummary,
+	KimiImportReport,
+	KimiSessionSummary,
+	KimiWorkShareRootInfo,
+	KimiWorkSessionSummary,
+	KimiWorkImportReport,
+	MinimaxImportReport,
+	MinimaxSessionSummary,
 	DirectoryImportReport,
 	DirectorySessionScanResult,
 	DirectorySessionSourceDir,
@@ -137,6 +144,7 @@ import type {
 	BranchDiffResult,
 	WorktreeEntry,
 	PiCliUpdateResult,
+	PiReleaseNotesPayload,
 	PiCommand,
 	RewindCheckpointPage,
 	RewindCheckpointPageParams,
@@ -399,6 +407,14 @@ const api = {
 		remove: (id: string) => ipcRenderer.invoke(ipcChannels.deleteCustomTheme, id) as Promise<void>,
 		/** 把 AI 主题开发指南写入主题目录并在资源管理器定位，返回文件路径 */
 		writeGuide: (locale: "zh-CN" | "en-US") => ipcRenderer.invoke(ipcChannels.writeCustomThemeGuide, locale) as Promise<string>,
+	},
+	pluginDev: {
+		/** 插件开发支持状态：用户扩展目录 + demo/指南是否已就位 */
+		status: () => ipcRenderer.invoke(ipcChannels.pluginDevStatus) as Promise<{ userExtensionsDir: string; demoInstalled: boolean; guideInstalled: boolean }>,
+		/** 把 AI 插件开发指南写入用户扩展目录并定位，返回文件路径 */
+		writeGuide: (locale: "zh-CN" | "en-US") => ipcRenderer.invoke(ipcChannels.pluginDevWriteGuide, locale) as Promise<string>,
+		/** 复制内置 demo 插件（已存在不覆盖，返回 exists 让 UI 提示） */
+		copyDemo: () => ipcRenderer.invoke(ipcChannels.pluginDevCopyDemo) as Promise<{ status: "copied" | "exists"; path: string }>,
 	},
 	sessions: {
 		list: (projectId?: string) => ipcRenderer.invoke(ipcChannels.sessionsList, projectId) as Promise<SessionSummary[]>,
@@ -760,6 +776,21 @@ const api = {
 		scan: (projectId: string) => ipcRenderer.invoke(ipcChannels.cursorSessionsScan, projectId) as Promise<CursorSessionSummary[]>,
 		import: (projectId: string, sourcePaths: string[]) => ipcRenderer.invoke(ipcChannels.cursorSessionsImport, projectId, sourcePaths) as Promise<CursorImportReport>,
 	},
+	kimiSessions: {
+		scan: (projectId: string) => ipcRenderer.invoke(ipcChannels.kimiSessionsScan, projectId) as Promise<KimiSessionSummary[]>,
+		import: (projectId: string, sourcePaths: string[]) => ipcRenderer.invoke(ipcChannels.kimiSessionsImport, projectId, sourcePaths) as Promise<KimiImportReport>,
+	},
+	/** Kimi Work（kimi-desktop 桌面版）会话导入；数据目录位置由探测链决定（见 kimiWorkSource）。 */
+	kimiWorkSessions: {
+		describe: () => ipcRenderer.invoke(ipcChannels.kimiWorkSessionsDescribe) as Promise<KimiWorkShareRootInfo>,
+		scan: (projectId: string) => ipcRenderer.invoke(ipcChannels.kimiWorkSessionsScan, projectId) as Promise<KimiWorkSessionSummary[]>,
+		import: (projectId: string, sourcePaths: string[]) => ipcRenderer.invoke(ipcChannels.kimiWorkSessionsImport, projectId, sourcePaths) as Promise<KimiWorkImportReport>,
+	},
+	/** MinimaxCode（CLI）会话导入；数据目录固定 ~/.minimax/v2/sessions，按 cwd 归属项目。 */
+	minimaxSessions: {
+		scan: (projectId: string) => ipcRenderer.invoke(ipcChannels.minimaxSessionsScan, projectId) as Promise<MinimaxSessionSummary[]>,
+		import: (projectId: string, sourcePaths: string[]) => ipcRenderer.invoke(ipcChannels.minimaxSessionsImport, projectId, sourcePaths) as Promise<MinimaxImportReport>,
+	},
 	/**
 	 * 外置目录会话导入：源目录由用户现选（从「现有会话目录」列表点选，或手选任意目录），
 	 * 导入 = 把会话挂到当前项目（catalog 归属改写），原文件不移动、不复制。
@@ -875,6 +906,8 @@ const api = {
 		setCustomPaths: (paths: readonly string[]) => ipcRenderer.invoke(ipcChannels.piSetCustomPaths, [...paths]) as Promise<{ paths: string[]; clearedActive: boolean }>,
 		checkUpdate: () => ipcRenderer.invoke(ipcChannels.piUpdateCheck) as Promise<PiUpdateCheckResult>,
 		update: () => ipcRenderer.invoke(ipcChannels.piUpdate) as Promise<PiCliUpdateResult>,
+		/** pi CLI 更新日志：点「更新详情」时按需拉取 (current, latest] 区间的 changelog 条目。 */
+		releaseNotes: (options: { latestVersion: string; currentVersion?: string }) => ipcRenderer.invoke(ipcChannels.piReleaseNotes, options) as Promise<PiReleaseNotesPayload>,
 		/** 执行安装命令（如 npm install -g pi）并返回执行结果 */
 		execInstall: (command: string) => ipcRenderer.invoke(ipcChannels.piExecInstall, command) as Promise<PiInstallExecResult>,
 		/** 检查 npm 是否可用 */
@@ -1032,8 +1065,7 @@ const api = {
 		list: (forceRefresh?: boolean) => ipcRenderer.invoke(ipcChannels.extensionsList, forceRefresh) as Promise<PiExtensionListResult>,
 		uninstall: (source: string, scope?: "user" | "project" | "unknown") => ipcRenderer.invoke(ipcChannels.extensionsUninstall, source, scope) as Promise<void>,
 		install: (source: string, projectId?: string) => ipcRenderer.invoke(ipcChannels.extensionsInstall, source, projectId) as Promise<string>,
-		toggle: (source: string, enabled: boolean, scope?: "user" | "project" | "unknown") => ipcRenderer.invoke(ipcChannels.extensionsToggle, source, enabled, scope) as Promise<void>,
-		setWhitelistDisabled: (enabled: boolean) => ipcRenderer.invoke(ipcChannels.extensionsSetWhitelistDisabled, enabled) as Promise<void>,
+		toggle: (source: string, enabled: boolean, scope?: "user" | "project" | "unknown", path?: string, projectId?: string) => ipcRenderer.invoke(ipcChannels.extensionsToggle, source, enabled, scope, path, projectId) as Promise<void>,
 		removeBuiltIn: (source: string) => ipcRenderer.invoke(ipcChannels.extensionsRemoveBuiltIn, source) as Promise<void>,
 		restoreBuiltIn: (source: string) => ipcRenderer.invoke(ipcChannels.extensionsRestoreBuiltIn, source) as Promise<void>,
 		update: () => ipcRenderer.invoke(ipcChannels.extensionsUpdate) as Promise<PiCliUpdateResult>,
@@ -1105,15 +1137,30 @@ const api = {
 				parsed: Record<string, unknown>;
 				diagnostic?: ConfigFileDiagnostic;
 			}>,
-		getMcp: (projectId?: string) => ipcRenderer.invoke(ipcChannels.configGetMcp, projectId) as Promise<import("../shared/types/mcp").McpConfigSnapshot>,
-		saveMcp: (data: import("../shared/types/mcp").McpConfigFile) =>
-			ipcRenderer.invoke(ipcChannels.configSaveMcp, data) as Promise<{
+		getMcp: (scope?: import("../shared/types/mcp").McpConfigScope) => ipcRenderer.invoke(ipcChannels.configGetMcp, scope) as Promise<import("../shared/types/mcp").McpConfigSnapshot>,
+		saveMcp: (data: import("../shared/types/mcp").McpConfigFile, scope?: import("../shared/types/mcp").McpConfigScope) =>
+			ipcRenderer.invoke(ipcChannels.configSaveMcp, data, scope) as Promise<{
 				valid: boolean;
 				error?: string;
 			}>,
 		probeMcp: (definition: import("../shared/types/mcp").McpServerDefinition) => ipcRenderer.invoke(ipcChannels.configProbeMcp, definition) as Promise<import("../shared/types/mcp").McpProbeResult>,
+		// pi mcp CLI：真实连接检测 + OAuth 登录/登出（仅命令路线；登录授权 URL 经 onMcpLoginUrl 推送）。
+		mcpListStatus: (scope?: import("../shared/types/mcp").McpConfigScope) => ipcRenderer.invoke(ipcChannels.mcpListStatus, scope) as Promise<import("../shared/types/mcp").McpCliListResult>,
+		mcpLogin: (server: string, timeoutSec?: number, scope?: import("../shared/types/mcp").McpConfigScope, operationId?: string) => ipcRenderer.invoke(ipcChannels.mcpLogin, server, timeoutSec, scope, operationId) as Promise<{ ok: boolean; output: string }>,
+		mcpLogout: (server: string, scope?: import("../shared/types/mcp").McpConfigScope) => ipcRenderer.invoke(ipcChannels.mcpLogout, server, scope) as Promise<{ ok: boolean; output: string }>,
+		onMcpLoginUrl: (callback: (payload: { server: string; scope?: import("../shared/types/mcp").McpConfigScope; operationId?: string; url: string }) => void) => {
+			const listener = (_event: Electron.IpcRendererEvent, payload: { server: string; scope?: import("../shared/types/mcp").McpConfigScope; operationId?: string; url: string }) => callback(payload);
+			ipcRenderer.on(ipcChannels.mcpLoginUrl, listener);
+			return () => {
+				ipcRenderer.removeListener(ipcChannels.mcpLoginUrl, listener);
+			};
+		},
 		// 只读：pi 全局配置目录（源文件编辑页标注实际路径用）。
 		getConfigDir: () => ipcRenderer.invoke(ipcChannels.configGetDir) as Promise<string>,
+		// pi 原生资源配置（内置扩展开关 + 四类资源数组原文）；作用域同 MCP：全局页/项目页。
+		piResourcesSummary: (scope?: import("../shared/types/mcp").McpConfigScope) => ipcRenderer.invoke(ipcChannels.piResourcesSummary, scope) as Promise<import("../shared/types/piResources").PiResourceConfigSummary>,
+		piResourcesSetBuiltin: (input: { scope?: import("../shared/types/mcp").McpConfigScope; name: import("../shared/types/piResources").PiBuiltinExtension; enabled: boolean; expectedRevision?: string }) =>
+			ipcRenderer.invoke(ipcChannels.piResourcesSetBuiltin, input) as Promise<import("../shared/types/piResources").PiResourceToggleResult>,
 		saveModels: (data: unknown) =>
 			ipcRenderer.invoke(ipcChannels.configSaveModels, data) as Promise<{
 				valid: boolean;
@@ -1165,6 +1212,15 @@ const api = {
 		tokendanceAuthCancel: (flowId: string) => ipcRenderer.invoke(ipcChannels.configTokendanceAuthCancel, { flowId }) as Promise<{ ok: boolean; error?: string }>,
 		/** 用一次性授权 code 交换 TokenDance API Key；成功后 key 只在本次响应出现，须立即写入配置。 */
 		tokendanceAuthExchange: (flowId: string, code: string) => ipcRenderer.invoke(ipcChannels.configTokendanceAuthExchange, { flowId, code }) as Promise<{ ok: true; key: string } | { ok: false; error: string }>,
+		/**
+		 * 创建 TokenDance 充值会话（amount 为整数元，1–100000）。
+		 * 成功回 paymentUrl（PC 渲染二维码）/ alipayUrl（移动端深链，可能缺失）/ statusUrl。
+		 */
+		tokendanceTopUpCreate: (amount: number) => ipcRenderer.invoke(ipcChannels.configTokendanceTopUpCreate, { amount }) as Promise<TokendancePaymentSessionResult>,
+		/** 查询充值会话状态（只接受主进程校验过的 status_url；3 秒轮询，expired_at 后停）。 */
+		tokendanceTopUpStatus: (statusUrl: string) => ipcRenderer.invoke(ipcChannels.configTokendanceTopUpStatus, { statusUrl }) as Promise<TokendancePaymentSessionResult>,
+		/** 在用户点击后唤起支付宝 App（仅 alipays:// 深链；移动端链路，PC 扫码不需要）。 */
+		tokendanceTopUpOpenAlipay: (url: string) => ipcRenderer.invoke(ipcChannels.configTokendanceTopUpOpenAlipay, { url }) as Promise<{ ok: boolean; error?: string }>,
 		/** 一键安装 TokenDance：供应商信息 + 目录模型写入 pi models.json 与 DSH llm-pi-ai；apiKey 可选（OAuth 后已持有）。 */
 		installTokendance: (apiKey?: string) =>
 			ipcRenderer.invoke(ipcChannels.configInstallTokendance, { apiKey }) as Promise<{

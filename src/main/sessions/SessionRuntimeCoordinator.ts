@@ -64,6 +64,10 @@ export interface SessionAgentGateway {
 	sendPrompt(input: SendPromptInput): Promise<SendPromptResult>;
 	getMessages(agentId: string): ChatMessage[];
 	create(input: CreateAgentInput): Promise<AgentTab>;
+	/** 可选能力：standby 池认领（pi 提供；dsh 无进程池概念不实现）。命中返回已握手 idle tab。 */
+	claimStandbyAgent?(input: { projectId: string; sessionId: string; noSession?: boolean }): Promise<AgentTab | null>;
+	/** 可选能力：standby 池补热（fire-and-forget，幂等）。 */
+	ensureStandbyAgent?(projectId: string): void;
 	restart(agentId: string): Promise<AgentTab>;
 	stop(agentId: string): Promise<void>;
 	rename(agentId: string, name: string): Promise<AgentTab>;
@@ -327,6 +331,23 @@ export class SessionRuntimeCoordinator {
 		});
 		this.deliveryByRequest.set(cacheKey, cacheEntry);
 		return cacheEntry.promise;
+	}
+
+	/**
+	 * catalog 外部删除清理的活性探针（纯查询，无 getAgentId 的终态解绑副作用）：
+	 * 绑定存在且 agent 未到终态即视为活会话——pi 在首条消息前可能尚未创建 session
+	 * 文件（预热激活后空闲进程甚至长期不写盘），「运行时还在、文件暂时不在」不能
+	 * 当成外部删除（2026-10-05：预热 attach 同秒扫描剔掉记录 → 闪回引导页、
+	 * 输入草稿丢失、发送另起新进程）。
+	 */
+	hasLiveRuntime(sessionId: string): boolean {
+		const agentId = this.agentIdBySession.get(sessionId);
+		if (!agentId) return false;
+		const tab = this.agents.list().find((candidate) => candidate.id === agentId);
+		if (!tab) return false;
+		if (!isTerminalAgent(tab)) return true;
+		// 与 getAgentId 同口径：回复级错误（Issue #218）的进程仍活着、待用户答问时同样保护。
+		return tab.status === "error" && this.hasPendingUiRequest(sessionId, agentId);
 	}
 
 	getAgentId(sessionId: string): string | undefined {
@@ -1329,6 +1350,16 @@ export class SessionRuntimeCoordinator {
 
 		const created = !tab;
 		if (!tab) {
+			// standby 池认领（仅 pi 网关实现，其余返回 null）：只服务「无既有会话文件」的新会话——
+			// 历史会话必须 --session 恢复，dsh 会话与 pi 进程形态不同，都回退正常创建。
+			// 认领到的进程模型/扩展是 spawn 时快照：模型/思考档由下面的 applyLatestPreferences
+			// 按 catalog 最新值热补；扩展/代理等 spawn-only 输入靠 AgentManager 的指纹比对，
+			// 不一致根本不会被认领。created 保持 true：认领的进程归本次激活所有，失败清理必须能停掉它。
+			if (entry.backend !== "dsh" && !entry.filePath) {
+				tab = (await this.agents.claimStandbyAgent?.({ projectId: entry.projectId, sessionId, noSession: entry.noSession }).catch(() => null)) ?? undefined;
+			}
+		}
+		if (!tab) {
 			// deckSessionId = catalog 会话身份（SessionRecord.id），与 UI 保存安全等级覆盖用的 key 同源，
 			// 确保扩展按 PIDECK_SESSION_ID 能命中 sessionLevels（历史扫描会话为文件路径，新会话为 UUID）。
 			tab = await this.agents.create({
@@ -1382,6 +1413,9 @@ export class SessionRuntimeCoordinator {
 		// 绑定完成后主动推送完整 runtime state：emitSessionRuntimeEvent 依赖 binding 才转发，
 		// 且在偏好应用（setModel/setThinking）之后执行，渲染层底栏拿到的是真实模型而不是旧残留。
 		await this.agents.publishRuntimeState(tab.id).catch(() => undefined);
+		// standby 补热：本次激活可能消耗了池化进程（或用户正连续开新会话），后台补一个待命。
+		// 仅 pi 后端补（dsh 无进程池概念）；ensure 自身幂等，且受 standbyRuntimeEnabled 设置闸。
+		if (entry.backend !== "dsh") this.agents.ensureStandbyAgent?.(entry.projectId);
 		return tab;
 	}
 

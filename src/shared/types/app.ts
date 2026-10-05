@@ -460,3 +460,23 @@ export type ChangelogPayload = {
 	/** 网络失败退回旧缓存：内容可能不是最新，UI 应提示「刷新」取最新。 */
 	stale: boolean;
 };
+
+/**
+ * pi CLI 更新日志拉取结果（用户点「更新详情」时按需拉取，见 main/pi/PiChangelogService）。
+ * markdown 为 null 表示所有源都失败或内容校验不通过——UI 降级为「在浏览器打开」；
+ * pageUrl 始终有值，正是给降级路径用的。
+ */
+export type PiReleaseNotesPayload = {
+	/** (current, latest] 区间的 markdown 正文；失败或区间为空为 null。 */
+	markdown: string | null;
+	/** 实际取到内容的源；失败为 null。 */
+	source: "jsdelivr" | "unpkg" | "github" | null;
+	/** 区间内的版本条目数。 */
+	versionCount: number;
+	/** CHANGELOG 网页地址，供降级「在浏览器打开」。 */
+	pageUrl: string;
+	/** 内容抓取时间（ISO）；内存缓存命中为当时时间，无内容为 null。 */
+	fetchedAt: string | null;
+	/** 区间因条数/字符上限被截断（截在版本边界）。 */
+	truncated: boolean;
+};

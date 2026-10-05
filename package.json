@@ -1,6 +1,6 @@
 {
   "name": "pi-desktop",
-  "version": "0.7.8",
+  "version": "0.7.9",
   "dshRuntimeVersion": "0.2.0-rc.2",
   "packageManager": "npm@11.6.2",
   "engines": {
@@ -123,6 +123,7 @@
     "koffi": "^3.2.1",
     "minimatch": "^10.2.5",
     "node-pty": "^1.1.0",
+    "proper-lockfile": "^4.1.2",
     "smol-toml": "^1.8.0",
     "sql.js": "^1.14.1",
     "tar": "^7.5.15",
@@ -190,6 +191,13 @@
         "to": "prompts",
         "filter": [
           "**/*"
+        ]
+      },
+      {
+        "from": "resources/plugin-dev",
+        "to": "plugin-dev",
+        "filter": [
+          "*.ts"
         ]
       },
       {

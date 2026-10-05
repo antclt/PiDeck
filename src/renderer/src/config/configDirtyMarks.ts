@@ -2,7 +2,7 @@ import type { ConfigTab } from "./configTypes";
 import { deepEqual } from "../utils/deepEqual";
 
 /** 脏标记 key：与 ConfigModal 的 sectionTabValue 编码一致（"config:<tab>" 或 section 名）。 */
-export type ConfigDirtyKey = `config:${ConfigTab}` | "skills" | "prompts";
+export type ConfigDirtyKey = `config:${ConfigTab}` | "skills" | "prompts" | "mcp";
 
 /**
  * loadConfig(target) 会把磁盘数据写回内存 state，被覆盖数据对应的「未保存修改」已不成立，

@@ -1,51 +1,39 @@
 /**
- * pi-deck-gui-bridge —— pi-tui 运行时加载器。
+ * pi-deck-gui-bridge —— pi-tui **路径**定位器（只解析路径，不加载模块）。
  *
- * **为什么不能直接 `import { Text } from "@earendil-works/pi-tui"`**：
- * pi 扩展由 jiti 加载，扩展里的裸 import 会从**扩展文件所在目录向上**查找 node_modules。
+ * ## 为什么不再加载 pi-tui 模块
+ *
+ * 序列化层（pi-deck-gui-bridge-serialize.ts）早期靠 `createRequire` 加载
+ * **与 pi 同一份**的 pi-tui 模块做 `instanceof` 判别——这是桥对 pi 内部
+ * 布局的硬耦合：要猜中安装位置、要同名包还在、要没被打进 bundle。
+ *
+ * 现在组件识别改为**沿实例原型链收集构造器名**（见 serialize 的 `hasKind`）：
+ * 类名直接读自活对象自己，天然同实例、天然覆盖子类（`Loader extends Text`），
+ * 不需要加载任何 pi 内部模块。本文件因此只剩一个职责：
+ *
+ * ## 现在的唯一职责：给「需要 pi 安装路径」的功能提供解析基点
+ *
+ * - ext-points 扩展要从 pi 的 `dist/core/extensions/types.d.ts` 运行时推导
+ *   扩展点清单，需要一个位于 pi 安装树内的种子路径；
+ * - 桥启动时打一条诊断日志（定位成功与否、走了哪条路径）。
+ *
+ * 定位失败不抛错、不影响桥与 pi —— 调用方各自降级（fail-safe）。
+ *
+ * ## 为什么解析路径也不能静态 import
+ *
+ * pi 扩展由 jiti 加载，裸 import 会从**扩展文件所在目录向上**找 node_modules。
  * 本仓库（以及 <userData>/builtin-extensions 覆盖层）里都没有 pi-tui，
- * 静态 import 会直接 MODULE_NOT_FOUND → pi 启动失败。
+ * 静态 import 会直接 MODULE_NOT_FOUND → pi 启动失败。因此仍是
+ * 「先定位 pi 自己的安装位置，再从那里解析」。
  *
- * **为什么不能自己装一份 pi-tui**：桥与 pi 内部必须是**同一份模块实例**，
- * 否则 `instanceof` 全部为 false，语义化适配器退化成纯 ANSI（§6.3 问题 A）。
- *
- * 因此：**先定位 pi 自己的安装位置，再从那里解析 pi-tui**。
- * Phase 0 S3 已实测该路径下 `instanceof` 成立且与 pi 内部同实例。
- *
- * 加载失败时返回 null，桥整体降级为「不工作」——**绝不抛错影响 pi**（§14.5）。
- * 适配器另有 `constructor.name` + 形状探测兜底（§6.3 对策 2），故 pi-tui 加载失败
- * 只损失 `instanceof` 的精度，不会让桥完全失效。
+ * ⚠️ 这里**刻意不用 `import.meta.url` / `require.main`**：
+ * 扩展既可能被 jiti 按 ESM 加载，也可能被测试按 CJS 转译执行，
+ * 两者对 `import.meta` / `require` 的可用性相反。只用 `process.*` 才两边都安全。
  */
 
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-
-/** pi-tui 的关键导出（只声明桥真正用到的部分，避免依赖完整 .d.ts）。 */
-export type PiTuiModule = {
-	Text: new (...args: unknown[]) => PiTuiComponent;
-	TruncatedText: new (...args: unknown[]) => PiTuiComponent;
-	Markdown: new (...args: unknown[]) => PiTuiComponent;
-	Box: new (...args: unknown[]) => PiTuiComponent & { children?: PiTuiComponent[] };
-	VStack: new (...args: unknown[]) => PiTuiComponent & { children?: PiTuiComponent[] };
-	HStack: new (...args: unknown[]) => PiTuiComponent & { children?: PiTuiComponent[] };
-	Spacer: new (...args: unknown[]) => PiTuiComponent;
-	Input: new (...args: unknown[]) => PiTuiComponent & { getValue?: () => string };
-	Editor: new (...args: unknown[]) => PiTuiComponent;
-	SelectList: new (...args: unknown[]) => PiTuiComponent & {
-		setSelectedIndex?: (index: number) => void;
-		setFilter?: (filter: string) => void;
-		getSelectedItem?: () => { value: string; label: string } | null;
-	};
-	SettingsList: new (...args: unknown[]) => PiTuiComponent;
-	ScrollView: new (...args: unknown[]) => PiTuiComponent & { children?: PiTuiComponent[] };
-	Loader: new (...args: unknown[]) => PiTuiComponent;
-	CancellableLoader: new (...args: unknown[]) => PiTuiComponent;
-	Image: new (...args: unknown[]) => PiTuiComponent;
-	Container: new (...args: unknown[]) => PiTuiComponent & { children?: PiTuiComponent[] };
-	getKeybindings?: () => { matches?: (data: string, id: string) => boolean } | undefined;
-	Key?: Record<string, string>;
-};
 
 /** pi-tui 组件的最小结构（只依赖公开契约，不依赖完整 .d.ts）。 */
 export type PiTuiComponent = {
@@ -56,10 +44,10 @@ export type PiTuiComponent = {
 	constructor?: { name?: string };
 };
 
-/** 解析结果：成功给出模块与来源，失败给出原因（供日志，不影响 pi）。 */
-export type PiTuiLoadResult = { module: PiTuiModule; resolvedPath: string; via: string } | { module: null; error: string };
+/** 定位结果：成功给出路径与来源，失败给出原因（供日志，不影响 pi）。 */
+export type PiTuiLocateResult = { path: string; via: string } | { path: null; error: string };
 
-let cached: PiTuiLoadResult | null = null;
+let cached: PiTuiLocateResult | null = null;
 
 /**
  * 收集「pi 安装位置」的候选锚点文件。
@@ -72,10 +60,6 @@ let cached: PiTuiLoadResult | null = null;
  *
  * 每个锚点只用于 `createRequire` 的解析基点，**不要求它本身存在**：
  * `createRequire` 只用它的目录去向上找 node_modules（已实测）。
- *
- * ⚠️ 这里**刻意不用 `import.meta.url` / `require.main`**：
- * 扩展既可能被 jiti 按 ESM 加载，也可能被测试按 CJS 转译执行，
- * 两者对 `import.meta` / `require` 的可用性相反。只用 `process.*` 才两边都安全。
  */
 function collectAnchorCandidates(): { anchor: string; via: string }[] {
 	const anchors: { anchor: string; via: string }[] = [];
@@ -195,41 +179,31 @@ function resolvePiTuiPath(): { path: string; via: string } | null {
 }
 
 /**
- * 加载 pi-tui 模块（进程内只解析一次，结果缓存）。
+ * 定位 pi-tui 的安装路径（进程内只解析一次，结果缓存）。
  *
- * 返回 `{ module: null }` 表示加载失败：桥应继续工作，适配器退化为形状判定。
+ * 返回 `{ path: null }` 表示定位失败：桥与序列化不受影响，
+ * 只有 ext-points 的 types.d.ts 种子少一路（它还有 argv 兜底）。
  */
-export function loadPiTui(): PiTuiLoadResult {
+export function locatePiTui(): PiTuiLocateResult {
 	if (cached) return cached;
 	const resolved = resolvePiTuiPath();
 	if (!resolved) {
-		cached = { module: null, error: "无法定位 @earendil-works/pi-tui（已尝试 env / argv[1] / require.main / execPath 兜底）" };
+		cached = { path: null, error: "无法定位 @earendil-works/pi-tui（已尝试 env / argv / execPath / npm 全局前缀 / cwd 兜底）" };
 		return cached;
 	}
-	try {
-		const req = createRequire(resolved.path);
-		const mod = req(resolved.path) as PiTuiModule;
-		if (!mod || typeof mod.Text !== "function") {
-			cached = { module: null, error: `pi-tui 已解析但缺少 Text 导出: ${resolved.path}` };
-			return cached;
-		}
-		cached = { module: mod, resolvedPath: resolved.path, via: resolved.via };
-		return cached;
-	} catch (error) {
-		cached = { module: null, error: `加载 pi-tui 失败: ${error instanceof Error ? error.message : String(error)}` };
-		return cached;
-	}
+	cached = resolved;
+	return cached;
 }
 
-/** 已解析到的 pi-tui 路径（仅用于诊断日志；未加载时为 null）。 */
+/** 已定位到的 pi-tui 路径（仅用于 ext-points 种子与诊断日志；未定位时为 null）。 */
 export function piTuiResolvedPath(): string | null {
-	if (!cached || !cached.module) return null;
-	return cached.resolvedPath;
+	if (!cached || !cached.path) return null;
+	return cached.path;
 }
 
-/** 已解析来源描述（诊断用）。 */
+/** 已定位来源描述（诊断用）。 */
 export function piTuiResolvedVia(): string | null {
-	if (!cached || !cached.module) return null;
+	if (!cached || !cached.path) return null;
 	return cached.via;
 }
 

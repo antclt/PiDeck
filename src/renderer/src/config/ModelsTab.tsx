@@ -335,11 +335,11 @@ export function ModelsTab(props: {
 					{/* 排序说明：顺序是跨页共用的偏好（AppSettings.providerOrder），
 					    不写在这里用户只能靠试——拖了之后模型选择器也跟着变会让人困惑。 */}
 					{visibleProviderNames.length > 1 && (
-						<div className="mb-2.5 flex items-start gap-2 text-[11px] leading-relaxed text-text-tertiary">
+						<div className="mb-2.5 flex items-start gap-2 text-micro leading-relaxed text-text-tertiary">
 							<ArrowUpDown size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
 							<span className="min-w-0 flex-1">{t("config.providerOrderHint")}</span>
 							{(props.providerOrder?.length ?? 0) > 0 && props.onResetProviders && (
-								<Button variant="ghost" size="sm" className="h-5 shrink-0 px-1.5 text-[11px] font-normal text-text-tertiary hover:text-text-primary" onClick={props.onResetProviders} disabled={saving}>
+								<Button variant="ghost" size="sm" className="h-5 shrink-0 px-1.5 text-micro font-normal text-text-tertiary hover:text-text-primary" onClick={props.onResetProviders} disabled={saving}>
 									{t("config.providerOrderReset")}
 								</Button>
 							)}
@@ -361,28 +361,28 @@ export function ModelsTab(props: {
 								<strong className="mt-3.5 mb-1.5 block text-sm text-text-primary">{t("config.providerGuideApis")}</strong>
 								<div className="grid grid-cols-3 gap-1.5">
 									<div className="flex flex-col gap-0.5 rounded-sm bg-bg-hover px-2.5 py-2">
-										<code className="font-mono text-[11px] font-semibold text-[color:var(--color-accent)]">openai-completions</code>
-										<span className="text-[11px] text-text-tertiary">{t("config.providerGuideApiDesc1")}</span>
+										<code className="font-mono text-micro font-semibold text-[color:var(--color-accent)]">openai-completions</code>
+										<span className="text-micro text-text-tertiary">{t("config.providerGuideApiDesc1")}</span>
 									</div>
 									<div className="flex flex-col gap-0.5 rounded-sm bg-bg-hover px-2.5 py-2">
-										<code className="font-mono text-[11px] font-semibold text-[color:var(--color-accent)]">anthropic-messages</code>
-										<span className="text-[11px] text-text-tertiary">{t("config.providerGuideApiDesc2")}</span>
+										<code className="font-mono text-micro font-semibold text-[color:var(--color-accent)]">anthropic-messages</code>
+										<span className="text-micro text-text-tertiary">{t("config.providerGuideApiDesc2")}</span>
 									</div>
 									<div className="flex flex-col gap-0.5 rounded-sm bg-bg-hover px-2.5 py-2">
-										<code className="font-mono text-[11px] font-semibold text-[color:var(--color-accent)]">openai-responses</code>
-										<span className="text-[11px] text-text-tertiary">{t("config.providerGuideApiDesc3")}</span>
+										<code className="font-mono text-micro font-semibold text-[color:var(--color-accent)]">openai-responses</code>
+										<span className="text-micro text-text-tertiary">{t("config.providerGuideApiDesc3")}</span>
 									</div>
 									<div className="flex flex-col gap-0.5 rounded-sm bg-bg-hover px-2.5 py-2">
-										<code className="font-mono text-[11px] font-semibold text-[color:var(--color-accent)]">openai-codex-responses</code>
-										<span className="text-[11px] text-text-tertiary">{t("config.providerGuideApiDesc5")}</span>
+										<code className="font-mono text-micro font-semibold text-[color:var(--color-accent)]">openai-codex-responses</code>
+										<span className="text-micro text-text-tertiary">{t("config.providerGuideApiDesc5")}</span>
 									</div>
 									<div className="flex flex-col gap-0.5 rounded-sm bg-bg-hover px-2.5 py-2">
-										<code className="font-mono text-[11px] font-semibold text-[color:var(--color-accent)]">google-generative-ai</code>
-										<span className="text-[11px] text-text-tertiary">{t("config.providerGuideApiDesc4")}</span>
+										<code className="font-mono text-micro font-semibold text-[color:var(--color-accent)]">google-generative-ai</code>
+										<span className="text-micro text-text-tertiary">{t("config.providerGuideApiDesc4")}</span>
 									</div>
 									<div className="flex flex-col gap-0.5 rounded-sm bg-bg-hover px-2.5 py-2">
-										<code className="font-mono text-[11px] font-semibold text-[color:var(--color-accent)]">mistral-conversations</code>
-										<span className="text-[11px] text-text-tertiary">{t("config.providerGuideApiDesc6")}</span>
+										<code className="font-mono text-micro font-semibold text-[color:var(--color-accent)]">mistral-conversations</code>
+										<span className="text-micro text-text-tertiary">{t("config.providerGuideApiDesc6")}</span>
 									</div>
 								</div>
 
@@ -391,19 +391,19 @@ export function ModelsTab(props: {
 									<tbody>
 										<tr>
 											<td className="w-[180px] border-b border-border-subtle px-2.5 py-1.5 align-top">
-												<code className="rounded-[4px] bg-[color:color-mix(in_srgb,var(--color-accent)_5%,transparent)] px-1.5 py-px font-mono text-[11px] text-[color:var(--color-accent)]">supportsDeveloperRole</code>
+												<code className="rounded-xs bg-[color:color-mix(in_srgb,var(--color-accent)_5%,transparent)] px-1.5 py-px font-mono text-micro text-[color:var(--color-accent)]">supportsDeveloperRole</code>
 											</td>
 											<td className="border-b border-border-subtle px-2.5 py-1.5 align-top">{t("config.providerGuideCompatDevRole")}</td>
 										</tr>
 										<tr>
 											<td className="w-[180px] border-b border-border-subtle px-2.5 py-1.5 align-top">
-												<code className="rounded-[4px] bg-[color:color-mix(in_srgb,var(--color-accent)_5%,transparent)] px-1.5 py-px font-mono text-[11px] text-[color:var(--color-accent)]">supportsReasoningEffort</code>
+												<code className="rounded-xs bg-[color:color-mix(in_srgb,var(--color-accent)_5%,transparent)] px-1.5 py-px font-mono text-micro text-[color:var(--color-accent)]">supportsReasoningEffort</code>
 											</td>
 											<td className="border-b border-border-subtle px-2.5 py-1.5 align-top">{t("config.providerGuideCompatReasoning")}</td>
 										</tr>
 										<tr>
 											<td className="w-[180px] border-b border-border-subtle px-2.5 py-1.5 align-top">
-												<code className="break-all rounded-[4px] bg-[color:color-mix(in_srgb,var(--color-accent)_5%,transparent)] px-1.5 py-px font-mono text-[11px] text-[color:var(--color-accent)]">requiresReasoningContentOnAssistantMessages</code>
+												<code className="break-all rounded-xs bg-[color:color-mix(in_srgb,var(--color-accent)_5%,transparent)] px-1.5 py-px font-mono text-micro text-[color:var(--color-accent)]">requiresReasoningContentOnAssistantMessages</code>
 											</td>
 											<td className="border-b border-border-subtle px-2.5 py-1.5 align-top">{t("config.providerGuideCompatReasoningContent")}</td>
 										</tr>
@@ -583,7 +583,7 @@ export function ModelsTab(props: {
 									</div>
 
 									{isExpanded && (
-										<div className="config-provider-body border-t border-border-subtle bg-bg-muted pt-3">
+										<div className="config-provider-body border-t border-border-subtle bg-bg-muted pt-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
 											<div className="config-provider-form mx-4 my-3.5 grid gap-2.5 rounded-lg border border-border-subtle bg-bg-panel p-3.5">
 												<ProviderConnectionForm
 													baseUrl={provider.baseUrl ?? ""}
@@ -609,7 +609,7 @@ export function ModelsTab(props: {
 													advancedHint={
 														(providerComplexFields.length > 0 || providerAdvancedFields.length > 0) && (
 															<div className="mt-1.5 mb-2.5 flex items-start gap-2.5 rounded-md border border-border-subtle bg-bg-muted px-3 py-2 text-text-secondary">
-																<strong className="min-w-[100px] shrink-0 whitespace-nowrap text-[11px] font-semibold text-text-primary">{t("config.advancedPreservedTitle")}</strong>
+																<strong className="min-w-[100px] shrink-0 whitespace-nowrap text-micro font-semibold text-text-primary">{t("config.advancedPreservedTitle")}</strong>
 																<span>
 																	{t("config.advancedPreservedProvider", {
 																		fields: [...providerComplexFields, ...providerAdvancedFields].join(", "),
@@ -633,7 +633,7 @@ export function ModelsTab(props: {
 													<div className="flex min-w-0 flex-wrap items-center gap-2">
 														<span>{t("config.modelList")}</span>
 														{isModelBatchMode && (
-															<span className="rounded-full bg-[color:var(--color-accent-soft)] px-2 py-0.5 text-[11px] font-medium tabular-nums text-[color:var(--color-accent)]">
+															<span className="rounded-full bg-[color:var(--color-accent-soft)] px-2 py-0.5 text-micro font-medium tabular-nums text-[color:var(--color-accent)]">
 																{t("config.modelBatchSelected", {
 																	selected: selectedModelCount,
 																	total: provider.models.length,
@@ -818,7 +818,7 @@ export function ModelsTab(props: {
 								</button>
 								{hiddenSectionOpen && (
 									<div className="border-t border-border-subtle px-3.5 py-2">
-										<p className="mb-2 text-[11px] leading-relaxed text-text-tertiary">{t("config.hiddenProvidersHint")}</p>
+										<p className="mb-2 text-micro leading-relaxed text-text-tertiary">{t("config.hiddenProvidersHint")}</p>
 										<div className="flex flex-col gap-1">
 											{hiddenProviderNames.map((hiddenName) => (
 												<div key={hiddenName} className="flex items-center justify-between gap-2 rounded-sm bg-bg-muted px-2.5 py-1.5">

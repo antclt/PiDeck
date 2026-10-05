@@ -325,7 +325,7 @@ export function SessionContextMeter(props: {
 						ref={panelRef}
 						role="dialog"
 						aria-label={reading}
-						className="fixed z-[100] cursor-default rounded-xl border border-border bg-popover p-3 text-xs leading-5 text-text-secondary shadow-lg"
+						className="fixed z-[100] cursor-default rounded-xl border border-border bg-popover p-3 text-xs leading-5 text-text-secondary shadow-[var(--shadow-popover)]"
 						style={{
 							left: placement?.left,
 							top: placement?.top,

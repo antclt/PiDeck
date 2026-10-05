@@ -41,7 +41,7 @@ export type SidebarActions = {
 		reorder: (sourceProjectId: string, targetProjectId: string) => Promise<void>;
 		reveal: (project: Project) => Promise<void>;
 		openWithEditor: (project: Project) => void;
-		importSessions: (project: Project, source: "codex" | "claude" | "qoder" | "opencode" | "zcode" | "workbuddy" | "cursor") => void;
+		importSessions: (project: Project, source: "codex" | "claude" | "qoder" | "opencode" | "zcode" | "workbuddy" | "cursor" | "kimi" | "kimiwork" | "minimax") => void;
 		/** 导入其他目录的会话：源目录现选，用于目录移动/改名后找回历史。 */
 		importDirectorySessions: (project: Project) => void;
 		manageResources: (project: Project) => void;
@@ -406,7 +406,7 @@ export function SidebarContent(props: SidebarContentProps) {
 									</TooltipContent>
 								</Tooltip>
 								{/* 更新角标：PiDeck / Pi CLI / 模型目录任一有可提示更新时显示圆点 */}
-								{hasPendingUpdate && <span className="pointer-events-none absolute right-1 top-1 size-2 rounded-full bg-[var(--color-accent)]" aria-hidden="true" />}
+								{hasPendingUpdate && <span className="pointer-events-none absolute right-1 top-1 size-2 rounded-full bg-[var(--color-accent)] ring-2 ring-[var(--color-bg-sidebar)]" aria-hidden="true" />}
 							</div>
 						</DockItem>
 						{/* 公告中心入口：未读红点在组件内部按 atom 派生（单一 owner） */}
@@ -498,6 +498,18 @@ export function SidebarContent(props: SidebarContentProps) {
 					}}
 					onImportCursorSessions={() => {
 						actions.projects.importSessions(menuProject, "cursor");
+						controller.closeMenu();
+					}}
+					onImportKimiSessions={() => {
+						actions.projects.importSessions(menuProject, "kimi");
+						controller.closeMenu();
+					}}
+					onImportKimiWorkSessions={() => {
+						actions.projects.importSessions(menuProject, "kimiwork");
+						controller.closeMenu();
+					}}
+					onImportMinimaxSessions={() => {
+						actions.projects.importSessions(menuProject, "minimax");
 						controller.closeMenu();
 					}}
 					onImportDirectorySessions={() => {

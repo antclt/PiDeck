@@ -158,7 +158,16 @@ export type BridgeUpdate =
 	| { type: "thinking-label"; label: string | undefined; tone?: BridgeTone }
 	| { type: "resync" }
 	| { type: "overlay"; elementId: string; node: BridgeUINode | null; options?: BridgeOverlayOptions }
-	| { type: "overlay-update"; elementId: string; node: BridgeUINode };
+	| { type: "overlay-update"; elementId: string; node: BridgeUINode }
+	/**
+	 * 服务调用（桥 → 宿主，一次性请求/响应）：`gui.filePicker` / `gui.openPath` 这类
+	 * 需要**宿主原生能力**（Electron 对话框 / shell）的接口。
+	 *
+	 * 走桥轮询而非新路由：service-call 搭在 updates 里上行，宿主处理完把 service-result
+	 * 放进事件队列随**同一轮**轮询响应带回 —— 一次 HTTP 往返完成，不增加轮询延迟。
+	 * 主进程在转发前拦截，渲染层永远看不到这个类型。
+	 */
+	| { type: "service-call"; serviceId: string; service: BridgeServiceName; args?: unknown };
 
 /**
  * PiDeck 回灌给桥的交互事件。
@@ -174,7 +183,12 @@ export type BridgeEvent = { targetId?: string } & (
 	| { type: "key"; nodeId: string; key: string }
 	| { type: "filter"; nodeId: string; filter: string }
 	| { type: "action"; actionId: string; payload?: unknown }
+	/** service-call 的响应（宿主 → 桥）：result 形状由 service 决定。 */
+	| { type: "service-result"; serviceId: string; ok: boolean; result?: unknown; error?: string }
 );
+
+/** 宿主原生服务（桥进程内没有的能力，经 service-call 请求）。 */
+export type BridgeServiceName = "filePicker" | "openPath";
 
 /** 桥某个会话的落点集合（渲染层状态）。 */
 export type BridgeSessionUi = {
@@ -249,7 +263,27 @@ export const BRIDGE_TARGET = {
 } as const;
 
 /** GUI 专属落点（§7.1-B 的 15 个位置）。 */
-export const BRIDGE_GUI_SLOTS = ["sidebar.panel", "sidebar.section", "content.view", "composer.toolbar", "titlebar.action", "banner", "tool.extra", "message.extra", "thinking.extra", "dialog.action", "dialog.body", "settings.section", "config.page", "session.item", "context.menu"] as const;
+export const BRIDGE_GUI_SLOTS = [
+	"sidebar.panel",
+	"sidebar.section",
+	"content.view",
+	"composer.toolbar",
+	"titlebar.action",
+	"banner",
+	"tool.extra",
+	"message.extra",
+	"thinking.extra",
+	"dialog.action",
+	"dialog.body",
+	"settings.section",
+	"config.page",
+	"session.item",
+	"context.menu",
+	"timeline.event",
+	"statusbar.item",
+	"terminal.toolbar",
+	"git.panel.section",
+] as const;
 
 export type BridgeGuiSlot = (typeof BRIDGE_GUI_SLOTS)[number];
 

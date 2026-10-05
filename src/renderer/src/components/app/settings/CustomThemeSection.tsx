@@ -186,7 +186,7 @@ export function CustomThemeSection({ draft, updateDraft }: CustomThemeSectionPro
 					{t("settings.customThemesCopyDir")}
 				</Button>
 			</div>
-			{dir ? <div className="font-mono text-[11px] leading-relaxed text-text-faint break-all">{dir}</div> : null}
+			{dir ? <div className="font-mono text-micro leading-relaxed text-text-faint break-all">{dir}</div> : null}
 
 			{/* 主题卡片列表 */}
 			<div className="flex flex-col gap-1.5">
@@ -201,7 +201,7 @@ export function CustomThemeSection({ draft, updateDraft }: CustomThemeSectionPro
 									<AlertTriangle className="mt-0.5 size-4 shrink-0 text-[var(--color-danger)]" />
 									<div className="min-w-0">
 										<div className="truncate font-mono text-xs">{item.id}.json</div>
-										<div className="truncate text-[11px] text-text-tertiary">{item.parseError[0]}</div>
+										<div className="truncate text-micro text-text-tertiary">{item.parseError[0]}</div>
 									</div>
 								</div>
 							) : (
@@ -221,7 +221,7 @@ export function CustomThemeSection({ draft, updateDraft }: CustomThemeSectionPro
 												</Badge>
 											) : null}
 										</div>
-										<div className="truncate text-[11px] text-text-tertiary">{[item.version, item.author, item.description].filter(Boolean).join(" · ")}</div>
+										<div className="truncate text-micro text-text-tertiary">{[item.version, item.author, item.description].filter(Boolean).join(" · ")}</div>
 									</div>
 									<div className="flex shrink-0 items-center gap-1">
 										{applied ? (

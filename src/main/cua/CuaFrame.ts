@@ -36,6 +36,17 @@ export const DEFAULT_MAX_LONG_EDGE = 1280;
 export const DEFAULT_QUALITY = 75;
 
 /**
+ * Requested thumbnail ceiling. `DesktopCapturerSource.thumbnail` IS the capture:
+ * Electron scales it down to the requested `thumbnailSize` (aspect preserved),
+ * it is never a full-resolution image regardless of what older comments claimed.
+ * Requesting 1x1 therefore returns a 1x1 JPEG — observed live on the 0.7.8
+ * packaged build where `cua_capture` always answered `width:1, height:1`.
+ * Request a ceiling above any real monitor resolution so the source comes back
+ * at native size; the resize step below enforces the actual output budget.
+ */
+export const THUMBNAIL_REQUEST_SIZE = 8192;
+
+/**
  * Capture the full screen and produce a JPEG frame.
  */
 export async function captureScreen(options: CaptureOptions = {}): Promise<Frame> {
@@ -45,7 +56,7 @@ export async function captureScreen(options: CaptureOptions = {}): Promise<Frame
 
 	const sources = await desktopCapturer.getSources({
 		types: ["screen"],
-		thumbnailSize: { width: 1, height: 1 }, // We only need the nativeImage from the source.
+		thumbnailSize: { width: THUMBNAIL_REQUEST_SIZE, height: THUMBNAIL_REQUEST_SIZE },
 	});
 
 	const source = options.displayId ? sources.find((s) => String(s.id) === String(options.displayId)) : sources[0];
@@ -54,7 +65,6 @@ export async function captureScreen(options: CaptureOptions = {}): Promise<Frame
 		throw new Error(`Screen source not found: ${options.displayId ?? "primary"}`);
 	}
 
-	// electron's desktopCapturer source.thumbnail is a NativeImage at full resolution.
 	let image: NativeImage = source.thumbnail;
 	const originalSize = image.getSize();
 

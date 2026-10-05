@@ -6,6 +6,7 @@ import { load } from "js-yaml";
 import type { PatchOptions } from "@deepseek-ai/cordis-plugin-include";
 import type * as AppBoot from "@deepseek-ai/dsh-app-boot";
 import { pideckDshHome } from "./pideckDshHome";
+import { rewriteLoaderExprPackageResolves } from "./dshProfileExprRewrite";
 import { agentTeamPresetPatchPath, shippedPresetPatchPaths } from "./dshPresetComposition";
 import { dshProfileDir, dumpProfilePatches, initializeDshProfileSettings, isRecord } from "./dshProfileSettings";
 
@@ -65,7 +66,16 @@ export async function prepareDshHostProfile(home: string, runtimeRequire: Return
 	const presets = shippedPresetPatchPaths(dirname(webManifestPath), files).flatMap((path) => appBoot.loadOverlayPatches("pideck-dsh", path));
 	// agent-team 预设排在最后：官方 patch 自述「Apply after dsh-base」——cordis 后行覆盖先行，
 	// 其 tool-subagent* 禁用行必须晚于 preset/legacy 行才能压住 standard 等预设对这些工具的再启用。
-	const composition = [...deployment, ...presets, ...legacyPresetRows(home), ...(agentTeamPreset ? agentTeamPresetRows(runtimeRequire, appBoot) : [])];
+	const composed = [...deployment, ...presets, ...legacyPresetRows(home), ...(agentTeamPreset ? agentTeamPresetRows(runtimeRequire, appBoot) : [])];
+	// 官方 cordis 预设的 createRequire(baseUrl).resolve(...) 表达式在 PiDeck 的
+	// profile 布局下解析不到外置 runtime 包，dump 前改写为预解析路径（详见 dshProfileExprRewrite）。
+	const composition = rewriteLoaderExprPackageResolves(composed, (specifier) => {
+		try {
+			return runtimeRequire.resolve(specifier);
+		} catch {
+			return undefined;
+		}
+	});
 	const dir = dshProfileDir(home);
 	const bundleDir = join(dir, "node_modules", "@pideck", "dsh-host-composition");
 	mkdirSync(bundleDir, { recursive: true });

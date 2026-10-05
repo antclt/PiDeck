@@ -1,73 +1,42 @@
-import { useState } from "react";
 import { t } from "../i18n";
-import { Button } from "../components/ui-shadcn/button";
 import type { McpServerDefinition, McpServerListItem, McpServerTransport } from "../../../shared/types/mcp";
 
-const ADAPTER_INSTALL_SOURCE = "npm:pi-mcp-adapter";
+// 识别规则/类型来自 shared（主进程会话启动提醒与渲染层横幅共用单一来源）。
+export { MCP_PROXY_EXTENSION_RULES, detectThirdPartyMcpExtensions } from "../../../shared/mcpThirdParty";
+export type { ThirdPartyMcpExtension } from "../../../shared/mcpThirdParty";
 
+/** 渲染层传输推断（仅 stdio/http；pi 0.99 无 socket）。 */
 export function inferMcpTransport(definition: McpServerDefinition): McpServerTransport {
 	if (typeof definition.url === "string" && definition.url.trim()) return "http";
-	if (typeof definition.socket === "string" && definition.socket.trim()) return "socket";
 	return "stdio";
 }
 
 /**
- * 停用判定：pi 0.99 内置 MCP 只认 `enabled`（默认 true）；`disabled` 是
- * adapter 时代字段，0.99 已不识别。过渡期两者都写、都读：旧配置（disabled:true）\ * 仍显示为停用，新写入一律带 enabled，保存时不清 legacy 字段以兼容旧版 pi。
+ * 停用判定：pi 0.99.2 内置 MCP 只认 `enabled`（默认 true）。
+ * `disabled` 是 adapter 时代字段，pi 静默忽略。
  */
 export function isMcpServerDisabled(definition: McpServerDefinition): boolean {
-	return definition.enabled === false || definition.disabled === true;
+	return definition.enabled === false;
 }
 
-/** Adapter installation guide shown before MCP configuration becomes useful. */
-export function McpAdapterGuide(props: { onInstalled: () => void }) {
-	const [installing, setInstalling] = useState(false);
-	const [installFailed, setInstallFailed] = useState(false);
-	const [copied, setCopied] = useState(false);
-	const installCmd = `pi install ${ADAPTER_INSTALL_SOURCE}`;
-
-	const install = async () => {
-		setInstalling(true);
-		setInstallFailed(false);
-		try {
-			await window.piDesktop.extensions.install(ADAPTER_INSTALL_SOURCE);
-			props.onInstalled();
-		} catch {
-			setInstallFailed(true);
-		} finally {
-			setInstalling(false);
-		}
-	};
-
-	const copyCommand = async () => {
-		try {
-			await navigator.clipboard.writeText(installCmd);
-			setCopied(true);
-			window.setTimeout(() => setCopied(false), 2000);
-		} catch {
-			// The command remains selectable when clipboard access is unavailable.
-		}
-	};
-
-	return (
-		<div className="rounded-md border border-border-subtle bg-bg-panel p-4">
-			<p className="text-control text-muted-foreground">{t("config.mcp.notInstalled.desc")}</p>
-			<div className="mt-3 flex flex-wrap items-center gap-2">
-				<Button variant="default" size="sm" onClick={() => void install()} disabled={installing} loading={installing}>
-					{installing ? t("config.mcp.notInstalled.installing") : t("config.mcp.notInstalled.install")}
-				</Button>
-				<code className="rounded-sm border border-border-subtle bg-bg-hover px-2 py-1 font-mono text-micro">{installCmd}</code>
-				<Button variant="ghost" size="sm" onClick={() => void copyCommand()}>
-					{copied ? t("config.mcp.notInstalled.copied") : t("config.mcp.notInstalled.copyCmd")}
-				</Button>
-			</div>
-			{installFailed ? <p className="mt-2 text-micro text-danger">{t("config.mcp.notInstalled.installFailed")}</p> : null}
-			<p className="mt-2 text-micro text-muted-foreground">{t("config.mcp.notInstalled.restartHint")}</p>
-		</div>
-	);
+/** 旧文件里仍有 `disabled` 字段（pi 不识别）：展示迁移提示，不当作已停用。 */
+export function hasLegacyDisabledField(definition: McpServerDefinition): boolean {
+	return (definition as { disabled?: unknown }).disabled === true;
 }
 
-/** 全局 MCP 来源列表：合并结果按名字升序（页面固定全局作用域，不再分项目/全局两组）。 */
+/** 判定是否使用供应商登录 token（auth.provider），该模式不使用 MCP OAuth。 */
+export function usesProviderAuth(definition: McpServerDefinition): boolean {
+	return typeof definition.auth?.provider === "string" && definition.auth.provider.length > 0;
+}
+
+/** 判定是否使用 MCP OAuth：HTTP、无 Authorization 头、无 auth.provider。 */
+export function usesMcpOAuth(definition: McpServerDefinition): boolean {
+	if (typeof definition.url !== "string" || !definition.url.trim()) return false;
+	if (usesProviderAuth(definition)) return false;
+	return !Object.keys(definition.headers ?? {}).some((header) => header.toLowerCase() === "authorization");
+}
+
+/** 全局/项目 MCP 来源列表：合并结果按名字升序。 */
 export function McpServerListPane(props: { servers: McpServerListItem[]; selected: string | null; creating: boolean; onSelect: (name: string) => void }) {
 	return (
 		<div className="flex min-h-0 flex-col gap-1 overflow-auto rounded-md border border-border-subtle bg-bg-panel p-1.5">
@@ -87,6 +56,7 @@ export function McpServerListPane(props: { servers: McpServerListItem[]; selecte
 						>
 							<span className={`size-1.5 shrink-0 rounded-full ${disabled ? "bg-muted-foreground" : "bg-[var(--color-success)]"}`} aria-hidden="true" />
 							<span className="min-w-0 flex-1 truncate font-medium">{item.name}</span>
+							{item.originScope === "project-pi" ? <span className="shrink-0 rounded-sm border border-border-subtle px-1 text-micro text-muted-foreground">{t("config.mcp.layer.projectPi")}</span> : null}
 							<span className="shrink-0 text-micro text-muted-foreground">{inferMcpTransport(item.definition)}</span>
 						</button>
 					);

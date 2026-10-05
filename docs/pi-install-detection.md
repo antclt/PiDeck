@@ -140,6 +140,24 @@ PiLocator 会在裸 Node 沙箱里被加载，不能把便携 Node 安装器整�
 `~/.config/PiDeck/pi-runtime/pi-global/bin/pi`（来源 `portable`，版本 0.87.1）。
 自愈后 `~/.config/PiDeck/pi-runtime/node/bin/npm --version` → `11.6.2`。
 
+### 6）更新能力的版本门槛与结果核验（2026-10-05）
+
+「能直接执行 bash」「能流式返回 bash 输出」「能自更新 pi」是三种不同能力，不能共用版本门槛：
+
+| 能力 | 最低版本 | 官方依据 |
+|---|---|---|
+| RPC 直接执行 bash（`type: "bash"`） | 0.14.0 | [0.14.0 发布说明](https://pi.dev/changelog/releases/0.14.0) |
+| RPC bash 的 `bash_execution_update` 流式事件 | 0.82.0 | [0.82.0 发布说明](https://pi.dev/changelog/releases/0.82.0) |
+| pi 自更新（`pi update --self`） | 0.70.3 | [0.70.3 发布说明](https://pi.dev/changelog/releases/0.70.3) |
+
+PiDeck 的设置页更新走主进程的 Node `execFile` + `PiLocator` 平台适配，不走会话 RPC bash。
+改走会话 bash 会额外依赖活跃会话、影响会话历史，并不能消除底层包管理器或网络失败，因此不因缺少流式事件强制升级 pi。
+
+- **自更新**：pi ≥ 0.70.3 使用 `pi update --self`；低于门槛、门槛版本的预发布版或版本未知时，提示用原安装方式手动升级后重新检测，不猜测 npm/pnpm 命令、不另装第二份。
+- **扩展更新**：支持自更新的版本使用 `pi update --extensions`，更旧版本保留只更新包的 `pi update`；版本未知时先要求重新检测，避免把新版本的裸 `update` 误当成只更新扩展。
+- **更新目标**：检查、执行、结果核验使用同一份安装设置快照；执行后失效版本缓存并重新检测该安装。退出码 0 但版本未达到检查时的目标版本，仍返回失败，不显示「更新成功」。
+- **失败信息**：更新检查的网络失败不能当成「无需更新」；命令失败保留有长度上限、已脱敏的 stdout/stderr 与错误详情，便于区分网络、代理、权限或安装来源问题。扩展更新部分失败时也失效列表缓存。
+
 ## 验证
 
 ```bash

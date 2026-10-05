@@ -1,24 +1,25 @@
 import { Button } from "../components/ui-shadcn/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui-shadcn/table";
 import { useEffect, useState, type ReactNode } from "react";
-import { ShoppingBag, ToggleLeft, ToggleRight } from "lucide-react";
+import { Loader2, ShoppingBag, ToggleLeft, ToggleRight, Hammer } from "lucide-react";
 import type { PiCliUpdateResult, PiExtensionListResult, PiExtensionSummary, ProjectResourceOverrides } from "../../../shared/types";
 import { t } from "../i18n";
 import { showNotice } from "../utils/notice";
 import { writeClipboard } from "../utils/clipboard";
 import { ExtensionStoreTab } from "./ExtensionStoreTab";
+import { PluginDevSection } from "./PluginDevSection";
 import { ContentTabs } from "./ContentTabs";
 import { isProjectDiscoverySource, type ResourceScope } from "./resourceScopeModel";
 import { DiscoveredExtensionRow, ExtensionTableRow } from "./extensionsTableRows";
 import { RecommendedPackagesPanel } from "./extensionsRecommendedPackages";
 import { BuiltInExtensionsUpdatePanel } from "./BuiltInExtensionsUpdatePanel";
+import { PiBuiltinExtensionsPanel } from "./PiBuiltinExtensionsPanel";
 
 type ExtensionsApi = {
 	list: () => Promise<PiExtensionListResult>;
 	uninstall: (source: string, scope?: "user" | "project" | "unknown") => Promise<void>;
 	install: (source: string, projectId?: string) => Promise<string>;
-	toggle: (source: string, enabled: boolean, scope?: "user" | "project" | "unknown") => Promise<void>;
-	setWhitelistDisabled: (enabled: boolean) => Promise<void>;
+	toggle: (source: string, enabled: boolean, scope?: "user" | "project" | "unknown", path?: string, projectId?: string) => Promise<void>;
 	removeBuiltIn: (source: string) => Promise<void>;
 	update: () => Promise<PiCliUpdateResult>;
 	updateOne: (source: string) => Promise<PiCliUpdateResult>;
@@ -68,30 +69,9 @@ export function ExtensionsTab(props: {
 	onShowInFolder: (extension: PiExtensionSummary) => void;
 }) {
 	// 一级 tab：已安装 / 扩展商店（与 SkillsTab 的「本地/商店」结构对齐）
-	const [extTab, setExtTab] = useState<"local" | "store">("local");
+	const [extTab, setExtTab] = useState<"local" | "store" | "dev">("local");
 	const [removingBuiltIn, setRemovingBuiltIn] = useState<string | null>(null);
 	const [togglingSource, setTogglingSource] = useState<string | null>(null);
-	// 白名单总开关（「禁用 -e 参数」）：true = 不注入 --no-extensions/-e，pi 默认加载全部扩展。
-	// 从 PiDeck settings 读取默认状态；切换写入后本地同步，供 RPC 下次启动生效。
-	const [whitelistDisabled, setWhitelistDisabled] = useState(false);
-	const [togglingWhitelist, setTogglingWhitelist] = useState(false);
-
-	// 首次挂载读取白名单总开关状态（读取失败保持默认关闭，不影响禁用列表功能）
-	useEffect(() => {
-		let cancelled = false;
-		void (async () => {
-			try {
-				const settings = await window.piDesktop.settings.get();
-				if (!cancelled) setWhitelistDisabled(Boolean(settings.disableExtensionWhitelist));
-			} catch {
-				// 读取失败时保持默认值，不阻塞扩展列表展示
-			}
-		})();
-		return () => {
-			cancelled = true;
-		};
-	}, []);
-
 	// 首次加载或列表刷新时展示扩展冲突通知
 	useEffect(() => {
 		if (!props.data.conflicts || props.data.conflicts.length === 0) return;
@@ -145,26 +125,6 @@ export function ExtensionsTab(props: {
 	// 单扩展更新进行中的 source（与批量更新互斥，同一时间只跑一个 pi update）
 	const [updatingOne, setUpdatingOne] = useState<string | null>(null);
 
-	/**
-	 * 切换白名单总开关（「禁用 -e 参数」）：开启后 PiProcess 不再注入 --no-extensions/-e，
-	 * pi 默认加载全部扩展，禁用列表暂不生效——防御个别扩展的 -e 注入导致 RPC 启动失败。
-	 * 写入 PiDeck settings，下次 RPC 启动生效；列表本身不变化，无需刷新。
-	 */
-	const handleToggleWhitelist = async () => {
-		if (togglingWhitelist) return;
-		setTogglingWhitelist(true);
-		const next = !whitelistDisabled;
-		try {
-			await getExtensionsApi().setWhitelistDisabled(next);
-			setWhitelistDisabled(next);
-			showNotice(t(next ? "config.extensionWhitelistOnToast" : "config.extensionWhitelistOffToast"), 3500);
-		} catch (e) {
-			showNotice(t("config.extensionWhitelistToggleFailed", { error: formatExtensionError(e) }), 4500, "error");
-		} finally {
-			setTogglingWhitelist(false);
-		}
-	};
-
 	const handleUpdateExtensions = async () => {
 		setUpdating("all");
 		setUpdateResult(null);
@@ -210,7 +170,7 @@ export function ExtensionsTab(props: {
 	const uniqueDiscoveryExtensions = props.discoveryExtensions.filter((item) => !installedSources.has(item.source));
 	const renderExtensionRows = (extensions: PiExtensionSummary[], inherited: boolean) =>
 		extensions.map((extension) => {
-			const disabledHere = inherited && disabledGlobalSources.has(extension.source);
+			const disabledHere = inherited && disabledGlobalSources.has((extension.path ?? extension.source).toLowerCase());
 			return (
 				<ExtensionTableRow
 					key={`${extension.scope}:${extension.id}`}
@@ -233,25 +193,26 @@ export function ExtensionsTab(props: {
 
 	return (
 		<div className="extensions-tab">
+			{/* pi 原生内置扩展开关：写 settings.json 的 builtin: 条目，全局/项目各自生效 */}
+			<PiBuiltinExtensionsPanel scope={props.scope} projectId={props.projectId} onChanged={props.onRefresh} />
 			{/* 一级 tab：已安装 / 扩展商店（shadcn Tabs，与 SkillsTab 的「本地/商店」结构对齐） */}
 			<div className="mb-3 flex items-center justify-between gap-3">
 				<ContentTabs
 					value={extTab}
 					onValueChange={(v) => {
-						if (v !== "local" && v !== "store") return;
+						if (v !== "local" && v !== "store" && v !== "dev") return;
 						setExtTab(v);
 						// 切回本地时刷新列表（原 TabsTrigger onClick 行为迁到 onValueChange 统一处理）
 						if (v === "local") props.onRefresh();
 					}}
-					items={[
-						{ value: "local", label: t("config.nav.extensions") },
-						{ value: "store", label: t("config.extensionStoreTab"), icon: <ShoppingBag size={14} strokeWidth={1.8} /> },
-					]}
+					items={[{ value: "local", label: t("config.nav.extensions") }, { value: "store", label: t("config.extensionStoreTab"), icon: <ShoppingBag size={14} strokeWidth={1.8} /> }, ...(props.scope === "global" ? [{ value: "dev", label: t("config.pluginDevTab"), icon: <Hammer size={14} strokeWidth={1.8} /> }] : [])]}
 				/>
 				{/* 全局下拉：商店 tab 右侧、Tabs 行内（不进 Table） */}
 				<div className="shrink-0">{props.scopeSelector}</div>
 			</div>
-			{extTab === "store" ? (
+			{extTab === "dev" ? (
+				<PluginDevSection />
+			) : extTab === "store" ? (
 				<ExtensionStoreTab installedExtensions={props.scope === "project" ? props.data.extensions.filter((extension) => extension.scope === "project") : props.data.extensions} projectId={props.scope === "project" ? props.projectId : undefined} onInstalled={() => props.onRefresh()} />
 			) : (
 				<>
@@ -306,11 +267,6 @@ export function ExtensionsTab(props: {
 							<div className="skills-toolbar-actions flex shrink-0 flex-wrap items-center justify-end gap-1.5">
 								{props.scope === "global" ? (
 									<>
-										{/* 白名单总开关：开启后 -e 白名单失效，pi 默认加载全部扩展（防御个别扩展导致启动失败） */}
-										<Button variant={whitelistDisabled ? "default" : "outline"} size="sm" onClick={() => void handleToggleWhitelist()} disabled={props.loading || togglingWhitelist} title={t("config.extensionWhitelistHint")}>
-											{whitelistDisabled ? <ToggleRight size={18} strokeWidth={1.8} className="mr-1.5" aria-hidden="true" /> : <ToggleLeft size={18} strokeWidth={1.8} className="mr-1.5" aria-hidden="true" />}
-											{t(whitelistDisabled ? "config.extensionWhitelistOn" : "config.extensionWhitelistOff")}
-										</Button>
 										{/* 工具栏统一 size=sm，与设置页/会话顶栏控件高度对齐 */}
 										<Button variant="outline" size="sm" onClick={handleUpdateExtensions} disabled={props.loading || Boolean(updating)}>
 											{updating ? t("settings.updating") : t("settings.updateExtensionsAll")}
@@ -331,7 +287,10 @@ export function ExtensionsTab(props: {
 						    仅当还没有任何数据可显示时才让位给加载占位；刷新中沿用旧表格，行高不变、视口与焦点都留在原处。 */}
 						<div className="overflow-hidden rounded-lg border border-border-subtle bg-bg-panel">
 							{props.loading && visibleExtensions.length === 0 ? (
-								<div className="py-12 text-center text-control text-muted-foreground">{t("config.loadingExtensions")}</div>
+								<div className="flex items-center justify-center gap-2 py-12 text-control text-muted-foreground">
+									<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+									{t("config.loadingExtensions")}
+								</div>
 							) : visibleExtensions.length === 0 ? (
 								<div className="py-12 text-center text-control text-muted-foreground">{t("config.emptyExtensions")}</div>
 							) : (

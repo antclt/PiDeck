@@ -157,7 +157,7 @@ export function BridgeWidgetSlot({ sessionId, placement }: { sessionId: string |
  *        <BridgeSlotBoundary>
  *          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
  *            {entries.map(([key, text]) => (
- *              <span key={key} className={`text-[11px] ${bridgeToneClass(ui?.bridgeStatusTone?.[key]) || "text-muted-foreground"}`} data-bridge-status={key}>
+ *              <span key={key} className={`text-micro ${bridgeToneClass(ui?.bridgeStatusTone?.[key]) || "text-muted-foreground"}`} data-bridge-status={key}>
  *                {text}
  *              </span>
  *            ))}
@@ -284,7 +284,7 @@ export function BridgeGuiSlot({ sessionId, slot, matchKey, className, titleClass
 					// key 用完整落点 id：同 key 不同 owner 的两份贡献必须能共存
 					<div key={targetId} data-bridge-slot={targetId} data-bridge-slot-key={`${slot}:${key}`} data-bridge-slot-owner={owner}>
 						{/* 分组标题：桥把 opts.title 挂在节点 slot 元信息上（§7.1-B） */}
-						{node.slot?.title ? <div className={titleClassName ?? "mb-1 text-[11px] font-medium text-muted-foreground"}>{node.slot.title}</div> : null}
+						{node.slot?.title ? <div className={titleClassName ?? "mb-1 text-micro font-medium text-muted-foreground"}>{node.slot.title}</div> : null}
 						{renderBridgeNode(node, withTarget(onEvent, targetId), targetId)}
 					</div>
 				))}

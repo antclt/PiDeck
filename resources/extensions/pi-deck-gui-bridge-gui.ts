@@ -484,6 +484,24 @@ export function createGuiNamespace(runtime: BridgeRuntime): GuiNamespace {
 			runtime.transport.push({ type: "ui-update", targetId: `gui:command:${id}`, node: null });
 		},
 
+		/**
+		 * 宿主原生文件选择框（PiDeck 的 Electron dialog）。返回用户选中的路径数组；
+		 * 用户取消返回 null；宿主不支持或超时 reject。参数在宿主侧再校验一遍（边界防线）。
+		 */
+		async filePicker(options?: { title?: string; multiple?: boolean; directory?: boolean; filters?: { name: string; extensions: string[] }[] }): Promise<string[] | null> {
+			const result = await callHostService(runtime, "filePicker", options);
+			if (result === null || result === undefined) return null;
+			if (!Array.isArray(result) || result.some((item) => typeof item !== "string")) return null;
+			return result as string[];
+		},
+
+		/** 用系统默认程序打开本地文件/目录（等价于用户双击）。成功 true，其余 false。 */
+		async openPath(path: string): Promise<boolean> {
+			if (typeof path !== "string" || !path) return false;
+			const result = await callHostService(runtime, "openPath", { path });
+			return result === true;
+		},
+
 		toast(message: string, options) {
 			const actions = (options?.actions ?? []).map((action) => ({
 				label: action.label,
@@ -749,6 +767,47 @@ export function clearGuiContributions(runtime: BridgeRuntime, owner: string): vo
 /** 当前贡献数（诊断/测试用）。 */
 export function guiContributionCount(runtime: BridgeRuntime): number {
 	return guiState(runtime).contributions.size;
+}
+
+/** 宿主服务超时：宿主不可达/老版本不回 service-result 时，扩展侧 Promise 不能永久挂死。 */
+const SERVICE_TIMEOUT_MS = 120_000;
+
+/**
+ * 发起一次宿主原生服务调用（filePicker/openPath）。
+ *
+ * 协议：service-call 搭轮询上行，service-result 随下一轮轮询响应带回（§9.2 同源）。
+ * `resolveServiceResult` 是唯一收口 —— 结果到达、超时、transport 关闭都会走它，
+ * 保证 pendingServices 不泄漏（timer 与 Promise 一一配对清理）。
+ */
+function callHostService(runtime: BridgeRuntime, service: "filePicker" | "openPath", args: unknown): Promise<unknown> {
+	const state = guiState(runtime);
+	const serviceId = `gui-service-${state.serviceSeq++}`;
+	return new Promise<unknown>((resolve, reject) => {
+		const timer = setTimeout(() => {
+			resolveServiceResult(runtime, serviceId, false, undefined, "service timeout");
+		}, SERVICE_TIMEOUT_MS);
+		timer.unref?.();
+		state.pendingServices.set(serviceId, {
+			resolve: (value) => {
+				clearTimeout(timer);
+				resolve(value);
+			},
+			reject: (error) => {
+				clearTimeout(timer);
+				reject(error);
+			},
+		});
+		runtime.transport.push({ type: "service-call", serviceId, service, args: args === undefined ? null : args });
+	});
+}
+
+/** service-result 事件到达 / 超时触发时的唯一收口（幂等：二次到达直接忽略）。 */
+export function resolveServiceResult(runtime: BridgeRuntime, serviceId: string, ok: boolean, result?: unknown, error?: string): void {
+	const pending = guiState(runtime).pendingServices.get(serviceId);
+	if (!pending) return;
+	guiState(runtime).pendingServices.delete(serviceId);
+	if (ok) pending.resolve(result ?? null);
+	else pending.reject(new Error(error || "service failed"));
 }
 
 /**

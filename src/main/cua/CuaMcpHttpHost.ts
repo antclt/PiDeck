@@ -60,6 +60,11 @@ export class CuaMcpHttpHost {
 				void this.handleRequest(req, res);
 			});
 
+			// Startup failures reject the promise; later runtime errors only log.
+			// Two distinct handlers — previously a second persistent `on(error)`
+			// also invoked `reject` forever after the promise had settled (dead
+			// code that also swallowed the error event semantics twice).
+			this.server.once("error", reject);
 			this.server.on("error", (err) => {
 				this.deps.onLog?.("error", `CUA MCP HTTP host error: ${err.message}`);
 			});
@@ -71,8 +76,6 @@ export class CuaMcpHttpHost {
 				this.deps.onLog?.("info", `CUA MCP HTTP host listening on 127.0.0.1:${this.actualPort}${MCP_PATH}`);
 				resolve(this.actualPort);
 			});
-
-			this.server.on("error", reject);
 		});
 	}
 

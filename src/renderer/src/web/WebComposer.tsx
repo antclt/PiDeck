@@ -17,6 +17,7 @@ import { t } from "@/i18n";
 import type { AvailableModel, SessionModelPreference } from "../../../shared/types";
 import { compressImageToDataUrl, imagesFromPasteEvent } from "./webImageCompress";
 import { WebModelSelector } from "./WebModelSheet";
+import { WebBackendSelector } from "./WebBackendSelector";
 import { WebThinkingSelector } from "./WebThinkingSelector";
 import { WebPromptPicker } from "./WebPromptPicker";
 
@@ -26,6 +27,10 @@ const MAX_ATTACHED_IMAGES = 4;
 export function WebComposer(props: {
 	disabled: boolean;
 	streaming: boolean;
+	/** 第四批：后端选择驻留 composer（对齐桌面端后端切换，仅草稿期可切）。 */
+	backend?: import("../../../shared/types").AgentBackend;
+	backendLocked?: boolean;
+	onBackendChange?: (backend: import("../../../shared/types").AgentBackend) => void;
 	/** 第三批：模型/思考选择驻留 composer（从 WebHeader 迁入）。 */
 	model?: SessionModelPreference;
 	models: AvailableModel[];
@@ -127,7 +132,7 @@ export function WebComposer(props: {
 				/>
 				{attachError ? <div className="px-3 text-micro text-danger">{t("web.imageAttachFailed")}</div> : null}
 				<div className="flex shrink-0 items-center justify-between gap-2 px-3 pb-2.5">
-					<span className="flex min-w-0 items-center gap-1.5">
+					<span className="flex min-w-0 items-center gap-0.5">
 						<input
 							ref={fileInputRef}
 							type="file"
@@ -140,6 +145,7 @@ export function WebComposer(props: {
 								event.target.value = "";
 							}}
 						/>
+						{props.onBackendChange ? <WebBackendSelector backend={props.backend ?? "pi"} locked={Boolean(props.backendLocked)} onChange={props.onBackendChange} /> : null}
 						<WebModelSelector model={props.model} models={props.models} refreshing={props.refreshingModels} onRefresh={props.onRefreshModels} onChange={props.onModelChange} />
 						<WebThinkingSelector level={props.thinkingLevel} onChange={props.onThinkingChange} />
 						{/* 移动端相机直拍：capture 调起后置相机，单张；仅触屏设备显示（桌面无相机语义） */}
@@ -179,7 +185,7 @@ export function WebComposer(props: {
 							{t("app.stop")}
 						</Button>
 					) : (
-						<Button type="submit" size="sm" className="h-8 shrink-0" disabled={props.disabled || busy || (!draft.trim() && images.length === 0)}>
+						<Button type="submit" size="sm" className="h-8 shrink-0 whitespace-nowrap" disabled={props.disabled || busy || (!draft.trim() && images.length === 0)}>
 							{t("app.send")}
 						</Button>
 					)}

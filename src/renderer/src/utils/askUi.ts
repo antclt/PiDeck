@@ -531,6 +531,15 @@ export function emptyAskSingleDraft() {
 }
 
 /**
+ * 单问题卡的初始草稿（含 input 题预填）：request.prefill 只在纯输入题上有意义，
+ * 选项题忽略它。用工厂而不是让调用方手动拼：预填规则（undefined 容错）只活在这里，
+ * Overlay 的首帧与后续 patch 共用同一入口，避免两处初始化漂移（首帧丢了预填会直接表现为输入框空白）。
+ */
+export function initialAskSingleDraft(prefill?: string) {
+	return { ...emptyAskSingleDraft(), ...(typeof prefill === "string" && prefill ? { value: prefill } : {}) };
+}
+
+/**
  * 草稿 key 是否仍是本次请求的 key。
  *
  * key = `${sessionId}:${agentId}:${runtimeGeneration}:${requestId}`，理论上 family key 与内容恒等；

@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
 import type { UsageAggregated, UsageStatsDetectResult } from "../../../../../shared/types";
 import { t } from "../../../i18n";
 import { SettingsSection } from "./SettingsStorageTab";
@@ -219,7 +220,12 @@ export function UsageStatsTab() {
 					</Button>
 				)}
 			</div>
-			{phase === "loading" && <div className="usage-stats-hint">{t("usageStats.loading")}</div>}
+			{phase === "loading" && (
+				<div className="usage-stats-hint flex items-center justify-center gap-2">
+					<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+					{t("usageStats.loading")}
+				</div>
+			)}
 			{phase === "missing" && <NotInstalledCard onRefresh={refresh} />}
 			{phase === "error" && (
 				<div className="usage-stats-hint">

@@ -72,8 +72,8 @@ export function SessionTeamStrip(props: { sessionId: string }) {
 			<div className="flex h-9 w-full items-center gap-2.5 px-3">
 				<button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left" aria-expanded={!collapsed} onClick={toggleCollapsed}>
 					<Users size={14} aria-hidden="true" className="shrink-0 text-text-tertiary" />
-					<span className="shrink-0 text-[13px] font-medium leading-6 text-foreground">{t("sessionTeam.title")}</span>
-					<span className="min-w-0 flex-1 truncate text-[13px] leading-5 text-text-tertiary">{teamSummaryLabel(team)}</span>
+					<span className="shrink-0 text-control font-medium leading-6 text-foreground">{t("sessionTeam.title")}</span>
+					<span className="min-w-0 flex-1 truncate text-control leading-5 text-text-tertiary">{teamSummaryLabel(team)}</span>
 					<span className="shrink-0 text-text-tertiary" aria-hidden="true">
 						{collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
 					</span>
@@ -85,17 +85,17 @@ export function SessionTeamStrip(props: { sessionId: string }) {
 					    min-height:auto，不锁行高整列会被线性压扁（2027-01 排版事故）。 */}
 					{team?.failure && <p className="shrink-0 rounded-md bg-[var(--color-danger)]/10 px-2 py-1 text-xs leading-5 text-[var(--color-danger)]">{t("sessionTeam.failure", { failure: team.failure })}</p>}
 					{members.map((member) => (
-						<div key={member.id} className="flex min-w-0 shrink-0 items-center gap-2.5 overflow-hidden text-[13px] leading-5">
+						<div key={member.id} className="flex min-w-0 shrink-0 items-center gap-2.5 overflow-hidden text-control leading-5">
 							<span className={`size-1.5 shrink-0 rounded-full ${memberPhaseDotClass(member)}`} aria-hidden="true" />
 							<span className="min-w-0 shrink-0 truncate font-medium text-text-secondary">{member.name}</span>
 							<span className="min-w-0 flex-1 truncate text-xs text-text-tertiary">{memberPhaseLabel(member)}</span>
 						</div>
 					))}
 					{tasks.length > 0 && <p className="shrink-0 pt-1 text-xs font-medium uppercase tracking-wide text-text-tertiary">{t("sessionTeam.tasks")}</p>}
-					{tasks.length === 0 && members.length === 0 && <p className="shrink-0 text-[13px] leading-5 text-text-tertiary">{t("sessionTeam.noTasks")}</p>}
+					{tasks.length === 0 && members.length === 0 && <p className="shrink-0 text-control leading-5 text-text-tertiary">{t("sessionTeam.noTasks")}</p>}
 					{tasks.map((task) => (
-						<div key={task.id} className="flex min-w-0 shrink-0 items-center gap-2.5 overflow-hidden text-[13px] leading-5">
-							<span className={`size-1.5 shrink-0 rounded-full ${taskStatusDotClass(task)}`} aria-hidden="true" />
+						<div key={task.id} className="flex min-w-0 shrink-0 items-center gap-2.5 overflow-hidden text-control leading-5">
+							<span className={`size-1.5 shrink-0 rounded-full transition-colors ${taskStatusDotClass(task)}`} aria-hidden="true" />
 							<span className="min-w-0 flex-1 truncate text-text-secondary">{task.subject}</span>
 							<span className="shrink-0 truncate text-xs text-text-tertiary">{task.ownerName ?? t("sessionTeam.unassigned")}</span>
 						</div>

@@ -1,8 +1,10 @@
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useAtom, useSetAtom } from "jotai";
-import { ArrowDownToLine, ArrowUpFromLine, Check, ChevronDown, ChevronsDownUp, ChevronsUpDown, ClipboardPaste, FileCode2, FolderGit2, GitBranch, Loader2, Plus, RefreshCw, RotateCcw, Sparkles } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Check, CheckCircle2, ChevronDown, ChevronsDownUp, ChevronsUpDown, ClipboardPaste, FileCode2, FolderGit2, GitBranch, Loader2, Plus, RefreshCw, RotateCcw, Sparkles, TriangleAlert } from "lucide-react";
 import { Button } from "../ui-shadcn/button";
+import { BridgeGuiSlot, useBridgeSessionId } from "../bridge/BridgeSlot";
+import { useAnimationWindow } from "../../hooks/useAnimationWindow";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "../ui-shadcn/context-menu";
 import { ConfirmDialog } from "./AppParts";
 import { dismissNotice, showNotice, type NoticeId } from "../../utils/notice";
@@ -394,7 +396,7 @@ function PaneSash(props: { before: PaneId; after: PaneId; beforeHeight: number; 
 
 	return (
 		<div
-			className="git-pane-sash relative z-[1] box-border h-1.5 shrink-0 basis-1.5 -my-[3px] cursor-row-resize touch-none before:absolute before:top-0.5 before:right-0 before:left-0 before:h-px before:bg-[var(--git-panel-border)] before:transition-[background-color,height] before:duration-150 hover:before:h-0.5 hover:before:bg-[var(--color-accent)] focus-visible:before:h-0.5 focus-visible:before:bg-[var(--color-accent)]"
+			className="git-pane-sash relative z-[1] box-border h-1.5 shrink-0 basis-1.5 -my-[3px] cursor-row-resize touch-none before:absolute before:top-0.5 before:right-0 before:left-0 before:h-px before:bg-[var(--git-panel-border)] before:transition-[background-color,height] before:duration-fast hover:before:h-0.5 hover:before:bg-[var(--color-accent)] focus-visible:before:h-0.5 focus-visible:before:bg-[var(--color-accent)]"
 			role="separator"
 			tabIndex={0}
 			aria-orientation="horizontal"
@@ -411,7 +413,13 @@ function PaneSash(props: { before: PaneId; after: PaneId; beforeHeight: number; 
 }
 
 export function GitPanel(props: GitPanelProps) {
+	const [paneAnimSeq, setPaneAnimSeq] = useState(0);
+	// 开合动画窗口：只在 toggle 后 180ms 内给分区挂 height 过渡（挂在 .git-panel[data-pane-animating]），
+	// sash 拖拽改 --git-pane-height 时窗口不在，避免拖拽橡皮筋。定时器收口在 hook（面板源码有 setTimeout 守卫）。
+	const paneAnimating = useAnimationWindow(paneAnimSeq, 180);
 	const panelRef = useRef<HTMLDivElement>(null);
+	// 桥落点跟随聚焦会话（共享 chrome 策略，见 git.panel.section 挂载处注释）
+	const bridgeSessionId = useBridgeSessionId();
 	// Missing-model guidance opens Common settings directly at the Git summary section.
 	const openSettings = useSetAtom(openSettingsAtom);
 	const repoScopeKey = props.repoScopeKey ?? props.projectId;
@@ -848,6 +856,7 @@ export function GitPanel(props: GitPanelProps) {
 		setResourceOpen((current) => ({ ...current, [key]: !current[key] }));
 	};
 	const togglePane = (id: PaneId) => {
+		setPaneAnimSeq((v) => v + 1);
 		setPaneState((current) => {
 			const open = { ...current.open, [id]: !current.open[id] };
 			const next = { ...current, open };
@@ -1298,7 +1307,7 @@ export function GitPanel(props: GitPanelProps) {
 	);
 
 	return (
-		<div ref={panelRef} className={`git-panel flex min-h-0 flex-col overflow-hidden bg-background text-foreground${layout === "full" ? " h-full" : ""}`} aria-label={t("git.sourceControl")}>
+		<div ref={panelRef} data-pane-animating={paneAnimating || undefined} className={`git-panel flex min-h-0 flex-col overflow-hidden bg-background text-foreground${layout === "full" ? " h-full" : ""}`} aria-label={t("git.sourceControl")}>
 			{layout !== "historyOnly" && (
 				<>
 					{/* 当前分支 + 切换下拉：无边框、宽度收窄，把空间留给仓库名和提交区。 */}
@@ -1314,7 +1323,7 @@ export function GitPanel(props: GitPanelProps) {
 							type="button"
 							variant="ghost"
 							size="xs"
-							className={`inline-flex h-6 items-center gap-0.5 rounded-sm border-0 bg-transparent px-1 text-left text-[11px] text-[var(--git-panel-fg)] shadow-none hover:bg-[var(--git-panel-hover)]${layout === "changesOnly" ? " max-w-[26%] shrink min-w-0" : " max-w-[9rem] min-w-0"}`}
+							className={`inline-flex h-6 items-center gap-0.5 rounded-sm border-0 bg-transparent px-1 text-left text-micro text-[var(--git-panel-fg)] shadow-none hover:bg-[var(--git-panel-hover)]${layout === "changesOnly" ? " max-w-[26%] shrink min-w-0" : " max-w-[9rem] min-w-0"}`}
 							onClick={() => {
 								if (!branchOpen) updateBranchDropdownPosition();
 								setBranchOpen((v) => !v);
@@ -1332,7 +1341,7 @@ export function GitPanel(props: GitPanelProps) {
 							<span className="git-branch-label min-w-0 flex-1 truncate">{props.currentBranch || t("app.branchNone")}</span>
 							{/* 多仓变更行已经很挤，数字角标会把按钮撑回宽胶囊；单仓仍显示分支数。 */}
 							{layout !== "changesOnly" && props.branches.length > 0 && <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-muted px-1 text-[10px] font-medium tabular-nums text-muted-foreground">{props.branches.length}</span>}
-							<ChevronDown size={12} className={`shrink-0 text-muted-foreground transition-transform duration-150${branchOpen ? " rotate-180" : ""}`} />
+							<ChevronDown size={12} className={`shrink-0 text-muted-foreground transition-transform duration-fast${branchOpen ? " rotate-180" : ""}`} />
 						</Button>
 						{notAGitRepo && (
 							<Button type="button" variant="ghost" size="icon-sm" className="size-7 inline-grid size-7 place-items-center rounded-md border border-border text-muted-foreground hover:bg-accent hover:text-accent-foreground" title={t("git.initInBranchBar")} disabled={initializing} onClick={() => void doInitRepo()}>
@@ -1422,14 +1431,15 @@ export function GitPanel(props: GitPanelProps) {
 							<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
 								{gitNotInstalled ? (
 									<div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
-										<div className="text-[32px] leading-none opacity-60">⚡</div>
+										{/* 未装 git 的空状态用统一的 lucide 矢量图标（三角警示 + 弱化色），弃用 emoji ⚡（跨平台字形不稳、显糙） */}
+										<TriangleAlert aria-hidden size={32} strokeWidth={1.5} className="text-text-tertiary" />
 										<div className="text-sm font-semibold text-text-primary">{t("git.gitNotInstalled")}</div>
 										<div className="max-w-[360px] text-xs leading-[22px] text-text-tertiary">{t("git.gitNotInstalledDesc")}</div>
 									</div>
 								) : notAGitRepo ? (
 									<div className="flex flex-col items-center gap-4 px-4 py-8 text-center">
-										<div className="text-[13px] leading-[22px] text-[var(--git-desc-fg)]">{t("git.notAGitRepo")}</div>
-										<Button type="button" variant="ghost" size="sm" className=" h-auto px-2.5 text-[13px]" disabled={initializing} onClick={() => void doInitRepo()}>
+										<div className="text-control leading-[22px] text-[var(--git-desc-fg)]">{t("git.notAGitRepo")}</div>
+										<Button type="button" variant="ghost" size="sm" className=" h-auto px-2.5 text-control" disabled={initializing} onClick={() => void doInitRepo()}>
 											{initializing ? <Loader2 size={14} className="animate-pideck-spin" /> : t("git.initRepo")}
 										</Button>
 									</div>
@@ -1439,7 +1449,7 @@ export function GitPanel(props: GitPanelProps) {
 											<ContextMenuTrigger asChild>
 												<Textarea
 													ref={commitInputRef}
-													className="git-scm-input min-h-14 max-h-[100px] w-full resize-y rounded-sm border border-[var(--git-input-border)] bg-[var(--git-input-bg)] px-2 py-1 text-[13px] leading-[20px] text-[var(--git-panel-fg)] outline-none placeholder:text-[var(--git-desc-fg)]"
+													className="git-scm-input min-h-14 max-h-[100px] w-full resize-y rounded-sm border border-[var(--git-input-border)] bg-[var(--git-input-bg)] px-2 py-1 text-control leading-[20px] text-[var(--git-panel-fg)] outline-none placeholder:text-[var(--git-desc-fg)]"
 													placeholder={t("git.commitPlaceholder", {
 														branch: props.currentBranch ?? "HEAD",
 													})}
@@ -1464,9 +1474,9 @@ export function GitPanel(props: GitPanelProps) {
 										<div className="flex items-stretch gap-2">
 											<Button
 												type="button"
-												variant="ghost"
+												variant="outline"
 												size="icon-sm"
-												className="min-w-8 border border-border-subtle bg-bg-panel text-text-secondary hover:bg-bg-hover hover:text-text-primary"
+												className="min-w-8 text-text-secondary hover:text-text-primary"
 												title={commitGenLoading ? t("git.generateCommitMessageProgress") : t("git.generateCommitMessage")}
 												aria-label={t("git.generateCommitMessage")}
 												disabled={commitGenLoading || mutating}
@@ -1482,8 +1492,14 @@ export function GitPanel(props: GitPanelProps) {
 									</div>
 								)}
 
-								{error && <div className="flex min-h-[22px] shrink-0 items-center gap-1 px-[9px] text-[13px] text-[var(--git-conflict)]">{error}</div>}
-								{!loading && total === 0 && !error && <div className="git-status-msg flex min-h-[22px] shrink-0 items-center gap-1 px-[9px] text-[13px] text-[var(--git-desc-fg)]">{t("git.noPendingChanges")}</div>}
+								{error && <div className="flex min-h-[22px] shrink-0 items-center gap-1 px-[9px] text-control text-[var(--git-conflict)]">{error}</div>}
+								{!loading && total === 0 && !error && (
+									/* 工作区干净的完成态：勾图标 + 文案，替代裸一行灰字（用户需要一眼确认「没有待处理」而不是「加载失败」） */
+									<div className="git-status-msg flex min-h-[22px] shrink-0 items-center gap-1.5 px-[9px] text-control text-[var(--git-desc-fg)]">
+										<CheckCircle2 size={13} aria-hidden="true" className="shrink-0" />
+										{t("git.noPendingChanges")}
+									</div>
+								)}
 
 								<div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
 									{groups.merge.length > 0 && (
@@ -1560,6 +1576,9 @@ export function GitPanel(props: GitPanelProps) {
 								</div>
 							</div>
 						)}
+						{/* GUI 扩展桥：Git 面板底部附加区块落点（ctx.gui.setGitPanelSection）。
+					    跟随聚焦会话的贡献（共享 chrome，与 AppHeader titlebar.action 同策略）；无贡献不占位。 */}
+						<BridgeGuiSlot sessionId={bridgeSessionId} slot="git.panel.section" className="flex max-h-[30%] shrink-0 flex-col gap-1 overflow-y-auto border-t px-2 py-1" />
 					</section>
 				</>
 			)}
@@ -1663,8 +1682,14 @@ export function GitPanel(props: GitPanelProps) {
 
 			{showSmartCommitPrompt &&
 				createPortal(
-					<div className="absolute inset-0 z-[1200] flex items-center justify-center bg-[var(--overlay-backdrop-soft)] p-6" role="presentation" onClick={() => setShowSmartCommitPrompt(false)}>
-						<div className="w-[min(520px,calc(100vw-48px))] rounded-lg border border-border-subtle bg-bg-panel p-4 font-sans text-text-primary shadow-[var(--shadow-modal)]" role="alertdialog" aria-modal="true" aria-labelledby="git-smart-commit-title" onClick={(event) => event.stopPropagation()}>
+					<div className="absolute inset-0 z-[1200] flex items-center justify-center bg-[var(--overlay-backdrop-soft)] p-6 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-base" role="presentation" onClick={() => setShowSmartCommitPrompt(false)}>
+						<div
+							className="w-[min(520px,calc(100vw-48px))] rounded-lg border border-border-subtle bg-bg-panel p-4 font-sans text-text-primary shadow-[var(--shadow-modal)] motion-safe:animate-in motion-safe:zoom-in-95 motion-safe:duration-base"
+							role="alertdialog"
+							aria-modal="true"
+							aria-labelledby="git-smart-commit-title"
+							onClick={(event) => event.stopPropagation()}
+						>
 							<strong id="git-smart-commit-title" className="text-base leading-6">
 								{t("git.smartCommitTitle")}
 							</strong>
@@ -1789,13 +1814,13 @@ function CompareChanges(props: {
 								onChange={(value) => setTarget(value)}
 							/>
 						</Label>
-						<Button type="button" variant="ghost" size="sm" className=" h-auto px-2.5 text-[13px]" disabled={!base || !target || base === target || loading} onClick={() => void run()}>
+						<Button type="button" variant="ghost" size="sm" className=" h-auto px-2.5 text-control" disabled={!base || !target || base === target || loading} onClick={() => void run()}>
 							{loading ? <Loader2 size={14} className="animate-pideck-spin" /> : t("git.compare")}
 						</Button>
 					</div>
 					{result && (
 						<>
-							<div className="flex-[0_0_auto] border-t border-[var(--git-panel-border)] px-2.5 py-1 text-[11px] text-[var(--git-desc-fg)]">
+							<div className="flex-[0_0_auto] border-t border-[var(--git-panel-border)] px-2.5 py-1 text-micro text-[var(--git-desc-fg)]">
 								{t("git.compareSummary", {
 									ahead: result.ahead,
 									behind: result.behind,
@@ -1809,7 +1834,7 @@ function CompareChanges(props: {
 							</div>
 						</>
 					)}
-					{!result && <div className="flex min-h-[22px] shrink-0 items-center gap-1 px-[9px] text-[13px] text-[var(--git-desc-fg)]">{t("git.compareHint")}</div>}
+					{!result && <div className="flex min-h-[22px] shrink-0 items-center gap-1 px-[9px] text-control text-[var(--git-desc-fg)]">{t("git.compareHint")}</div>}
 				</div>
 			)}
 		</section>

@@ -6,11 +6,100 @@
 
 ## 当前基线
 
-- 最近核对版本：`pi 0.85.0`（2026-09-04 发布）
+- 最近核对版本：`pi 1.0.2`（1.0.1/1.0.2 于 2026-10-03/04 发布；依据：npm 包 CHANGELOG + dist 与 1.0.0 逐文件 diff；未运行真实供应商 OAuth）
 - PiDeck 通信方式：`pi --mode rpc`，stdio JSON-RPC
 - 本记录范围：Pi 后端（`src/main/pi/`）以及 PiDeck 对 Pi 配置/事件的适配
 - 不包含：DSH 的 `pwsh_persistent`、Electron 自带终端、PiDeck 自己的应用更新器
-- 当前原则：PiDeck 不替 Pi 管理内置工具选择，不自动安装 PowerShell 7，不向 Pi 传硬编码 `--tools` 白名单。
+- 当前原则：工具选择由用户决定，PiDeck 的图形编辑器写 pi 原生 `settings.json`，解析与执行仍归 pi；不自动安装 PowerShell 7，不向 Pi 传硬编码 `--tools` 白名单。
+
+## 白名单机制移除核对（2026-10-01 终态，源码逐项验证）
+
+执行计划 A5 的「退出三类 argv 白名单」已落地。源码级核对结果：
+
+| 核对项 | 事实 |
+|---|---|
+| `--no-extensions` + 逐条 `-e` 白名单注入分支 | **已删除**（PiProcess 启动参数组装中不存在该路径） |
+| `--no-skills` + `--skill` 白名单注入 | **已删除** |
+| `--no-prompt-templates` + `--prompt-template` 白名单注入 | **已删除** |
+| `skillWhitelistResolver` / `promptWhitelistResolver` / `piProcessSkillResolvers` / `piProcessPromptResolvers` / `whitelistSkipNotice` / `builtInExtensionToggles` | **模块已删除** |
+| 白名单总开关（`extensions:set-whitelist-disabled` IPC、preload、扩展页按钮、`disableExtensionWhitelist` 设置字段、中英文案、预算跳过诊断） | **全部删除** |
+| `resolveEnabledExtensionPaths` | 改名 `resolveLoadableExtensionPaths` 且**始终返回数组**，仅作「会加载哪些扩展」只读查询（压缩归属启发式使用），不再有 null 白名单语义 |
+| 诊断开关 `piRpcNoExtensions` / `piRpcNoSkills` | **保留**（开发设置里的总关开关，语义就是「一个都不加载」） |
+| `ExtensionManager.setEnabled` 的旧禁用列表写入 | 仅作原生服务未装配时的兜底通道（渐进迁移）；生产装配后走 `PiResourceConfigService` 原生规则 |
+| 残留 `--no-*` 参数使用位置 | 仅三处合法场景：PiProcess 诊断开关、模型列表/探测快查（`modelListCache`/`PiModelProber`）、git 快照探针（`gitIpc`）——均与白名单机制无关 |
+| 迁移门禁 | `AgentManager.createUnlocked` 在 spawn 前 `await resourceMigrationGate(projectId)`（幂等，全局启动即跑、项目按需） |
+
+真实冒烟证据（`scripts/smoke-pi-native-resources.mjs`，对 pi 0.99.2 与 1.0.0 各 19/19）：
+无白名单启动下，原生 `+/-` 规则真实控制技能/扩展加载、`-builtin:mcp` 生效、项目层覆盖生效、
+未信任项目不读项目配置、旧禁用记录迁移后 pi 真的不加载该资源。
+
+## 1.0.1 / 1.0.2 审计矩阵（npm 包 dist 源码逐条核对）
+
+核对方式：npm pack 拉取 1.0.2 完整包，与本机 1.0.0 逐文件 diff；`package-manager.js`/`settings-manager.js` **逐字节一致**（资源过滤与 defaultTools 合并零变化，A 系列/T1 直接适用）。
+
+| 上游变化 | PiDeck 处理 | 状态 | 代码/验证 | 移除条件 |
+|---|---|---|---|---|
+| **MCP 项目覆盖条目**：项目 `.pi/mcp.json` 无 `command/url/type` 的条目合法，只覆盖全局同名 server 的 `enabled/exposure/toolExposure`（#10277） | 校验 + 合并均已适配：项目层无传输条目按覆盖形态处理（只允许三键、需全局基座），部分覆盖保留全局传输/凭据；全局层仍要求完整传输。PiDeck 自己的「在本项目停用」继续写 `{url,enabled:false}` 整体替换（两种形态都合法） | 已适配 | `mcpConfig.validateMcpServerValue`/`mergeMcpServersWithErrors`、`tests/mcpConfig.test.mjs` | 无 |
+| `oauth.clientRegistration: "dcr"/"cimd"`（Client ID Metadata Document 代替动态注册，#10302） | 类型 + 校验（cimd 禁 clientId/clientName、回调须 localhost/127.0.0.1 的 /callback）+ 表单字段 + 中英文案 | 已适配 | `types/mcp.ts`、`mcpConfig.validateOAuth`、`McpTab.tsx`、`tests/mcpConfig.test.mjs` | 无 |
+| `samplingParamsByThinkingLevel`（models.json 按思考档位配采样参数，#9776） | 已验证 `normalizeModelsForPi` 用 `...data` 展开，未知顶层字段（含本字段）原样保留；可视化编辑不感知也不丢 | 无需改动 | `ConfigManager.normalizeModelsForPi` 的 spread 语义 | 无 |
+| 资源过滤 / defaultTools 合并（`package-manager.js`/`settings-manager.js`） | 与 1.0.0 逐字节一致 | **已核对无变化** | diff 验证 | — |
+| Nix flake、`pi.registerToolRenderer()`、Clef 分类器、TUI/供应商/内存泄漏修复、`--models` 尾逗号修复 | 运行时行为，PiDeck 不经手；`--provider` 缺 `--model` 报错不影响 PiDeck（探测始终成对传） | 无需改动 | — | — |
+| 移除 `npm-shrinkwrap.json`（npm 安装不再锁传递依赖） | PiDeck 不打包 pi；用户侧安装行为变化与 PiDeck 无关，`pi update` 推荐托管安装的提示由 pi 自己展示 | 无需改动 | — | — |
+
+## 1.0.0 审计矩阵（本机 dist 源码逐条核对）
+
+结论：**资源管理与 defaultTools 合并语义完全未变，0.99.2 适配全部直接适用**；变化集中在 MCP OAuth（凭据按 name+URL、`authServerMetadataUrl`、`iss` 校验、scope 保留）与 TUI。本轮已修两处 + 一处文案。
+
+| 上游变化（CHANGELOG + 源码核实） | PiDeck 处理 | 状态 | 代码/验证 | 移除条件 |
+|---|---|---|---|---|
+| `settings.json` 资源过滤：`RESOURCE_TYPES`/`isEnabledByOverrides`/`applyPackageFilter`/`applyPackageDeltaFilter`/builtin 处理逐行一致（`package-manager.js`） | A1–A5 原生规则层/迁移/白名单移除全部直接适用 | **已核对无变化** | 源码比对 | — |
+| `defaultTools` 合并：`mergeDefaultTools`/`resolveDefaultTools` 与 0.99.2 逐行一致（`settings-manager.js`） | T1 编码回验继续有效 | **已核对无变化** | 源码比对 | — |
+| MCP schema：名称正则/exposure 四值 + 别名/项目层禁 `auth`/`enabled` 语义不变；**新增 `oauth.authServerMetadataUrl`**（https 或环回 http，替代 OAuth 自动发现） | 类型 + 校验 + 表单字段（高级区） | 已适配（本轮） | `types/mcp.ts`、`mcpConfig.validateOAuth`、`McpTab`、`tests/mcpConfig.test.mjs` | 无 |
+| **OAuth 凭据改为按服务器名 + URL 分别存储**（`McpOAuthCredentialStore.forServer(name, url)`）；按 URL 存的旧凭据自动迁移给第一个使用它的服务器；`credentials.remove(name, url)` | 登出确认文案更新（旧文案称同 URL 全部失效，已不准确） | 已适配（本轮） | `McpTab` 登出确认、`rendererCopy.*.ts` | 无 |
+| MCP OAuth 安全加固：RFC 9207 `iss` 校验、空 `scope` 容忍、`insufficient_scope` 追加登录保留已授 scope、登录 URL 超链接修复 | pi 运行时行为，PiDeck 不经手令牌交换 | 无需改动 | — | — |
+| `pi mcp list/login/logout` 仍不接受 `-l`（帮助文本与命令分发核实：`-l` 只属于 add/remove）；登录输出格式不变 | M2 的作用域假设与 URL 逐行解析继续有效 | **已核对无变化** | `extensions/mcp/cli.js` 源码比对 | — |
+| RPC `get_commands` 的 `sourceInfo`（含 `builtin:mcp` 合成路径）不变 | M3 第三方接管提醒继续有效 | **已核对无变化** | `modes/rpc/rpc-mode.js` 源码比对 | — |
+| **`quietStartup` 新增 `"header"` 三态**（保留版本横幅、隐藏模型范围行与资源列表） | 设置页布尔开关会把 `"header"` 覆盖成 true/false——已改三态下拉并保留原值 | **已修复数据丢失缺陷**（本轮） | `SettingsTab.tsx`、`tests/settingsQuietStartup.test.mjs` | 无 |
+| codemode 描述瘦身 ~40%（`models.generateImages()`、错误恢复提示、`"name" in tools` 探测） | pi 运行时行为；PiDeck 的 codemode 预算提示文案仍准确 | 无需改动 | — | — |
+| `/login` 顶层提供 Radius 登录并可写入 `auth:{provider:"radius"}` 的 MCP 配置 | PiDeck 已按 `auth.provider` 展示「供应商登录」并隐藏 MCP OAuth 按钮 | 无需改动 | `McpResourceViews.usesProviderAuth` | — |
+| TUI 默认全屏（`tuiMode`）、`--provider` 缺 `--model` 报错、主题/内存/补全等修复 | PiDeck 走 RPC 不受 TUI 影响；PiModelProber 始终同时传 `--provider --model` | 无需改动 | `PiModelProber.tsx` 核实 | — |
+
+## 0.99.2 增量核对
+
+来源：[v0.99.2 发布说明](https://github.com/earendil-works/pi/releases/tag/v0.99.2)、[v0.99.1 → v0.99.2 差异](https://github.com/earendil-works/pi/compare/v0.99.1...v0.99.2)。以下已并入执行计划第 1.4 节及原有阶段，不是另一份独立计划。
+
+前轮本地源码核对中已有 description/clientName/provider auth 等内容，但版本归属写成了 0.99.1；按正式 tag 校正为 0.99.2。本轮用明确版本的本机包重跑了四组 defaultTools 合并、exposure alias、namespace、HTTPS/loopback、clientName 和 provider-token 回调的纯内存探针，未访问真实凭据或 MCP 网络服务。
+
+| 变化 | PiDeck 适配结论 | 状态/验收 |
+|---|---|---|
+| 默认 codemode 的 MCP 不进工具描述，首轮只等待含 direct 工具的服务器；其他服务器后台连接 | 去掉两种 codemode exposure 的误导性解释；不在桌面 prompt 前增加全连接检测，不从 codemode 描述判断服务器不存在 | 待 A5/M2/M3；慢连接不能阻塞普通首轮 |
+| `description`、`mcp_servers` 提示词段、`describeNamespace()` | 补配置编辑/导入/保存；提示词和工具搜索归 pi，PiDeck 不生成另一份 server 摘要 | 待 M1/M3；字段保留与请求日志兼容 |
+| MCP namespace 将 `-` 规范为 `_`；工具重名都加 hash；server 命名冲突拒绝 | 校验配置命名冲突；toolExposure 仍按 server 原始工具名，RPC 工具名原样消费。现有 `mcp__` badge 判断无需换算法 | 待 M1/V1；新旧历史名称、hash 后缀用例 |
+| `oauth.clientName` | 类型/表单/导入支持非空客户端名称；仅注册时生效，改名需登出再注册，不能自动替用户登出 | 待 M1/M3 |
+| HTTP `auth.provider` 使用供应商当前 token，逐请求刷新，配置限全局和 HTTPS（loopback HTTP 例外） | 复用现有供应商登录入口；不调用 MCP OAuth login/logout，不读取/复制 provider token，不允许项目 provider-auth 覆盖 | 待 M1/M2/M3 |
+| **0.99.2 独立 MCP CLI 未传 providerToken 回调**，会话路径有该回调 | CLI 对 provider-auth 的认证结论不能代表会话；如实保留报告并标注检测限制，不提示用户反复 MCP OAuth 登录；不引入 SDK 验证通道 | 源码与纯内存探针已确认；处理待 M2/M3。上游修复后重核并撤销限制 |
+| `/reload` 只激活 defaultTools 新增项，移除项仍可活跃，CLI tools flags 优先 | 不是新增 RPC，也不是完整重置工具集；桌面继续以新建/重启完整应用配置，不发送虚构 reload_config | 待 T1/V1；运行态和配置态文案分开 |
+| Anthropic workload identity federation | native env 清洗当前保留其变量；补假值透传测试，token 文件读取/交换/刷新归 pi；WSL 不自动拷宿主凭据路径 | 待 A1/A5/V1；不新增联邦认证 UI |
+| `/mcp` TUI 超链接、TUI 单行折叠；codemode worker/image、provider/model/retry 修复 | 独立 CLI login 仍是明文 URL，RPC 命令定义未改；不移植 TUI renderer 或重写 pi 内部逻辑，相关既有接入路径回归 | 上游随外部 pi 升级生效；PiDeck 验收待 V1 |
+
+`package-manager/settings-manager` 未在本次 tag 差异中改动，原生资源管理方向保持。静态模型 catalog 的源数据也未改；PiDeck 的构建期 `pi-ai@0.99.1` 和 DSH 独立依赖不随外部 CLI 补丁版本自动升级。
+
+## 0.99.x 整体适配矩阵
+
+以下按当前工作区事实记录，**初版代码存在不等于适配已验收**。完整收尾与原生资源迁移方案见 [pi 原生资源管理与 MCP / Codemode 执行计划](./pi-0.99-mcp-codemode-plan.md)；其中阶段和测试尚待执行，本次文档更新没有重跑业务测试。
+
+| 上游变化 | PiDeck 当前处理与待办 | 状态 | 代码/验证入口 | 兼容代码移除条件 |
+|---|---|---|---|---|
+| `--no-extensions` 连带关闭 mcp/codemode/tool-search/llama.cpp；0.99+ 支持 `builtin:` | 白名单机制已整体移除：普通启动不再传 `--no-extensions`（内置四扩展随 pi 正常加载）；`piRpcNoExtensions` 诊断开关仍在（诊断路径本来就要求一个扩展都不加载）；PiDeck 自带扩展仍以 `-e` 附加 | 已完成（提交 `37b38180` + A5 清理） | `PiProcess.ts`、`piProcessExtensionResolvers.ts`、迁移门禁 `AgentManager.createUnlocked` | 不适用（白名单已删除） |
+| 原生 `extensions/skills/prompts/packages` 支持过滤和项目覆盖；`pi config` 提供四个内置扩展开关 | 已完成：原生规则层/服务/启动期迁移；技能、提示词、扩展的全局与项目开关都写原生过滤规则，列表与发现按原生条目投影；四个内置扩展开关有全局/项目 UI。白名单机制与私有禁用字段写入已全部移除，旧记录仅由启动迁移读取并清理 | 已完成（提交 `42f6ffda`…`f6880d9b` + A5 清理） | `piResourceRules.ts`、`PiResourceConfigService.ts`、`piResourceMigration*.ts`、`PiBuiltinExtensionsPanel.tsx`、各 Manager / `resourceDiscovery.ts` | 原生管理基线为 pi >= 0.99.2；私有旧字段仅作迁移读取，不再双写 |
+| MCP 全局 + 已信任项目配置，同名项目定义整体替换全局 | 当前数据层仍浅合并，项目只读；需要完整 project CRUD、来源展示、有效停用覆盖与恢复继承 | 待 M1 | `mcpConfig.ts`、`ConfigManager.ts`、`McpTab.tsx`、`tests/mcpConfig.test.mjs` | 无；整体替换是长期原生语义 |
+| MCP schema：`enabled/exposure/toolExposure/oauth`、全局 `auth.provider`、顶层 `autoEnableCodemode` | 已有表单初版；需补严格类型校验、未知字段保留、OAuth 字段与原生 provider auth；`codemode-deferred` 仅为 `codemode` 别名 | 部分实现，待 M1/M3 | `types/mcp.ts`、`mcpConfig.ts`、`mcpForm.ts`、MCP UI 测试 | 旧别名读取跟随 pi，不能当成第五种独立 exposure |
+| `pi mcp list/login/logout` CLI | 已有命令包装和页面按钮；尚缺准确 scope/cwd、WSL/agentDir 对齐、取消、操作身份、退出原因校验和 URL 分块处理。报告仅代表 CLI 检测进程 | 部分实现，待 M2 | `piMcpCli.ts`、system IPC/preload；应补 CLI 行为测试 | 长期只走 CLI，不以 RPC OAuth 或 SDK 桥替代 |
+| 第三方 `/mcp` 扩展可替换内置 MCP | 已有已知包识别和启动提醒初版；缺当前 runtime 来源确认、迟到结果保护、可靠首轮投递和可用导航 | 部分实现，待 M3 | `mcpThirdParty.ts`、`AgentManager.ts`；应补启动提醒行为测试 | 保留准确的检测/卸载引导，不恢复 adapter 安装教程 |
+| 默认工具选择及 codemode 子设置 | 多选初版已存在；显式空列表后添加工具会错误恢复默认，项目跨层空数组语义未处理，子字段启用判断及未知字段保存有缺陷 | 部分实现，待 T1 | `defaultTools.ts`、`DefaultToolsInput.tsx`、`SettingsTab.tsx`、`tests/defaultTools.test.mjs` | 无；必须按实际原生合并语义编码 |
+| `disabled` 不是原生启停字段；socket / SSE 不支持 | UI 仍将 `disabled` 当作停用，启用实际写 `enabled:true`；导入器仍有 legacy 转换路径。须纠正展示、校验和导入，保留原文且提示不支持项 | 待 M1/M3 | `McpResourceViews.isMcpServerDisabled`、`McpTab.toggleDisabled`、`mcpImport.ts` | 仅在明确旧来源导入时转为原生值；不能永久伪装 legacy 字段生效 |
+| OAuth 凭据存于 `mcp-auth.json` | 备份 file key 已加入；脱敏、旧备份兼容与恢复行为仍需验证 | 待 M1 验证 | `ConfigBackupManager.ts`、`types/backup.ts`、`tests/configBackupManager.test.mjs` | 无；凭据继续由 pi 管理，PiDeck 不借备份实现认证 |
+| bash 结构化结果 1MiB + `truncated/full_output_path`（codemode 脚本可见） | 提交 `65da84fe` 已适配提示；本轮不扩展该逻辑 | 已有提交 | `65da84fe` | 不适用 |
 
 ## 0.85.0 适配矩阵
 

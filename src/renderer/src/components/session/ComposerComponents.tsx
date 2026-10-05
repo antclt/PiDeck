@@ -428,7 +428,7 @@ export function ComposerBottomBar(props: {
 						<div className="composer-mode-cluster inline-flex h-7 min-w-0 items-center rounded-md bg-bg-hover pr-0.5">
 							<button
 								type="button"
-								className="composer-mode-exit mr-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-text-tertiary transition-[color,background-color] duration-150 hover:bg-bg-active hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
+								className="composer-mode-exit mr-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-text-tertiary transition-[color,background-color] duration-fast hover:bg-bg-active hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
 								aria-label={isGoalMode ? t("app.composerModeCancelGoal") : isImageGenMode ? t("app.composerModeCancelImagegen") : t("app.composerModeCancelPlan")}
 								title={isGoalMode ? t("app.composerModeCancelGoal") : isImageGenMode ? t("app.composerModeCancelImagegen") : t("app.composerModeCancelPlan")}
 								disabled={props.disabled}
@@ -583,17 +583,29 @@ function ModelThinkingChip(props: {
 					<span className="flex-none truncate text-muted-foreground" title={t("app.thinkingPickerTitle")}>
 						{props.thinkingText}
 					</span>
-					<ChevronDown size={12} aria-hidden="true" className={`flex-none text-muted-foreground transition-transform duration-150${open ? " rotate-180" : ""}`} />
+					<ChevronDown size={12} aria-hidden="true" className={`flex-none text-muted-foreground transition-transform duration-fast${open ? " rotate-180" : ""}`} />
 				</Button>
 			</PopoverTrigger>
 			<PopoverContent align="center" side="top" className="w-56 p-1">
 				<div className="flex flex-col">
-					<button type="button" className="flex h-9 items-center gap-2 rounded-md px-2 text-left text-control hover:bg-muted/60 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent" onClick={() => drillIn(props.onPickModel)} disabled={props.disabled} title={t("app.modelPickerTitle")}>
+					<button
+						type="button"
+						className="flex h-9 items-center gap-2 rounded-md px-2 text-left text-control transition-colors hover:bg-muted/60 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent"
+						onClick={() => drillIn(props.onPickModel)}
+						disabled={props.disabled}
+						title={t("app.modelPickerTitle")}
+					>
 						<span className="text-muted-foreground">{t("app.model")}</span>
 						<span className="min-w-0 flex-1 truncate text-foreground">{modelValue}</span>
 						<ChevronRight size={14} aria-hidden="true" className="flex-none text-muted-foreground" />
 					</button>
-					<button type="button" className="flex h-9 items-center gap-2 rounded-md px-2 text-left text-control hover:bg-muted/60 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent" onClick={() => drillIn(props.onPickThinking)} disabled={props.thinkingDisabled} title={t("app.thinkingPickerTitle")}>
+					<button
+						type="button"
+						className="flex h-9 items-center gap-2 rounded-md px-2 text-left text-control transition-colors hover:bg-muted/60 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent"
+						onClick={() => drillIn(props.onPickThinking)}
+						disabled={props.thinkingDisabled}
+						title={t("app.thinkingPickerTitle")}
+					>
 						<span className="text-muted-foreground">{t("app.think")}</span>
 						<span className="min-w-0 flex-1 truncate text-foreground">{props.thinkingText}</span>
 						<ChevronRight size={14} aria-hidden="true" className="flex-none text-muted-foreground" />
@@ -699,7 +711,7 @@ function ModelListStatusGuide(props: { report: ModelListReport | null; refreshin
 				{hardFailure ? t("app.modelListLoadFailed") : t("app.modelListEmptyTitle")}
 			</div>
 			<p className="text-caption leading-relaxed text-muted-foreground">{t(textKey)}</p>
-			{report.detail && <pre className="max-h-28 w-full overflow-auto whitespace-pre-wrap break-all rounded-md border border-border/60 bg-muted/40 p-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground">{report.detail}</pre>}
+			{report.detail && <pre className="max-h-28 w-full overflow-auto whitespace-pre-wrap break-all rounded-md border border-border/60 bg-muted/40 p-2.5 font-mono text-micro leading-relaxed text-muted-foreground">{report.detail}</pre>}
 			{props.onRefresh && (
 				<Button variant="outline" size="sm" className="mt-1" onClick={props.onRefresh} disabled={props.refreshing}>
 					<RefreshCw size={13} className={props.refreshing ? "animate-pideck-spin" : ""} aria-hidden="true" />
@@ -1050,7 +1062,7 @@ export function PromptTemplatePicker(props: {
 									<span className="font-mono text-control font-semibold text-foreground" title={`/${template.name}`}>
 										/{template.name}
 									</span>
-									{template.argumentHint && <code className="rounded bg-accent/10 px-1.5 py-0.5 font-mono text-[11px] text-accent-foreground">{template.argumentHint}</code>}
+									{template.argumentHint && <code className="rounded bg-accent/10 px-1.5 py-0.5 font-mono text-micro text-accent-foreground">{template.argumentHint}</code>}
 								</span>
 								{template.description && (
 									<span className="mt-0.5 block truncate text-caption text-muted-foreground" title={template.description}>

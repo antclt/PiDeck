@@ -4,6 +4,7 @@ import { ImageIcon } from "lucide-react";
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
 import { Badge } from "../ui-shadcn/badge";
+import { PiTuiLogoMark, useLogoStyle } from "../app/PiTuiLogo";
 
 const SOURCE_LABELS: Record<SessionSource, string> = {
 	pi: t("sessionSource.pi"),
@@ -14,6 +15,9 @@ const SOURCE_LABELS: Record<SessionSource, string> = {
 	zcode: t("sessionSource.zcode"),
 	workbuddy: t("sessionSource.workbuddy"),
 	cursor: t("sessionSource.cursor"),
+	kimi: t("sessionSource.kimi"),
+	kimiwork: t("sessionSource.kimiwork"),
+	minimax: t("sessionSource.minimax"),
 };
 
 const SOURCE_TONES: Record<SessionSource, string> = {
@@ -30,6 +34,12 @@ const SOURCE_TONES: Record<SessionSource, string> = {
 	cursor: "border-muted-foreground/40 text-muted-foreground",
 	// Qoder 同样无随包品牌 SVG：自绘「Q」环形+尾笔标记，沿用中性色惯例（与 zcode/workbuddy 一致）。
 	qoder: "border-muted-foreground/40 text-muted-foreground",
+	// Kimi Code 无随包品牌 SVG：自绘「K」字形标记，沿用中性色惯例（与 zcode/workbuddy 一致）。
+	kimi: "border-muted-foreground/40 text-muted-foreground",
+	// Kimi Work（kimi-desktop 桌面版）同上，用「K+右上角标」区分桌面版，沿用中性色惯例。
+	kimiwork: "border-muted-foreground/40 text-muted-foreground",
+	// MinimaxCode（CLI）无随包品牌 SVG：自绘「M」字形标记，沿用中性色惯例。
+	minimax: "border-muted-foreground/40 text-muted-foreground",
 };
 
 function SourceLogo(props: { source: SessionSource }) {
@@ -101,16 +111,45 @@ function SourceLogo(props: { source: SessionSource }) {
 		);
 	}
 
-	return (
-		<svg viewBox="140 140 520 520" className="size-3.5" aria-hidden="true" focusable="false">
-			<path fill="currentColor" fillRule="evenodd" d="M165.29 165.29H517.36V400H400v117.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z" />
-			<path fill="currentColor" d="M517.36 400H634.72V634.72H517.36Z" />
-		</svg>
-	);
+	if (props.source === "kimi") {
+		// Kimi Code 无随包品牌 SVG，用等宽「K」字形作为可辨识标记（与 zcode 的 Z 同一惯例）。
+		return (
+			<svg viewBox="0 0 24 24" className="size-3.5" aria-hidden="true" focusable="false">
+				<path fill="currentColor" d="M4 3h3.4v7.4L15.6 3h4.2l-9.2 8.4L20.4 21h-4.3l-7.2-7.2-1.5 1.4V21H4z" />
+			</svg>
+		);
+	}
+
+	if (props.source === "kimiwork") {
+		// Kimi Work（kimi-desktop 桌面版）：同源「K」字形 + 右上角实心小方块（桌面应用角标意象），
+		// 与 Kimi Code 的 K 区分；沿用中性色惯例。
+		return (
+			<svg viewBox="0 0 24 24" className="size-3.5" aria-hidden="true" focusable="false">
+				<path fill="currentColor" d="M3 3.6h3.4V11l8.2-7.4h4.2l-9.2 8.4L20 20.4h-4.3l-7.2-7.2-1.1 1V20.4H3z" />
+				<path fill="currentColor" d="M17.2 1.8h5v5h-5z" />
+			</svg>
+		);
+	}
+
+	if (props.source === "minimax") {
+		// MinimaxCode（CLI）：自绘「M」字形标记（无公开品牌 SVG），沿用中性色惯例（与 kimi/zcode 一致）。
+		return (
+			<svg viewBox="0 0 24 24" className="size-3.5" aria-hidden="true" focusable="false">
+				<path fill="currentColor" d="M3 4h3.3l6.7 10.2L19.7 4H23v16h-3.4v-9.9L13.9 18h-1.8L6.4 10.1V20H3z" />
+			</svg>
+		);
+	}
+
+	// pi 来源与后端标记共用入口，避免复制的旧 SVG 绕过 Logo 风格设置。
+	return <PiLogo />;
 }
 
-/** pi 官方 logo（品牌窗口标记，来源徽章同款）。 */
+/** pi 后端 / 来源标记：订阅统一 Logo 风格；经典保留单色，pi-tui 复用官方三色位图。 */
 export function PiLogo(props: { className?: string }) {
+	const logoStyle = useLogoStyle();
+	if (logoStyle === "pi-tui") {
+		return <PiTuiLogoMark size={14} className={props.className ?? "size-3.5"} />;
+	}
 	return (
 		<svg viewBox="140 140 520 520" className={props.className ?? "size-3.5"} aria-hidden="true" focusable="false">
 			<path fill="currentColor" fillRule="evenodd" d="M165.29 165.29H517.36V400H400v117.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z" />

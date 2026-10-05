@@ -133,7 +133,7 @@ function WebSubagentsStrip({ subagents }: { subagents: PiSubagentEntry[] }) {
 									</button>
 								)}
 							</div>
-							{isOpen ? <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-bg-muted p-1.5 text-[11px] leading-relaxed text-text-secondary">{entry.error ?? entry.result}</pre> : null}
+							{isOpen ? <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-bg-muted p-1.5 text-micro leading-relaxed text-text-secondary">{entry.error ?? entry.result}</pre> : null}
 						</li>
 					);
 				})}

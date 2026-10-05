@@ -1,7 +1,5 @@
-import type { WhitelistSkip } from "./PiProcess";
 import { resolveDisabledExtensionsCopy, resolveDisabledExtensionsReason } from "./extensionStartupFallback";
 import type { DisabledExtensionsReason } from "./extensionStartupFallback";
-import { resolveWhitelistSkipCopy } from "./whitelistSkipNotice";
 
 /** 启动期诊断的可选项与 AgentManager.addLocalizedMessage 的 options 同构（含 i18n 参数与调试细节）。 */
 export interface StartupDiagnosticOptions {
@@ -29,8 +27,6 @@ export interface StartupDiagnosticsHost {
 	emitNotice(payload: Record<string, unknown>): void;
 	/** settingsStore 的 piRpcNoExtensions 当前值（「扩展被禁用」成因判定）。 */
 	isNoExtensionsSetting(): boolean;
-	/** 主进程 warn 日志（白名单跳过提示用）。 */
-	warn(message: string, data?: Record<string, unknown>): void;
 }
 
 /**
@@ -121,31 +117,5 @@ export class StartupDiagnosticsQueue {
 			duration: copy.noticeDurationMs,
 			...(copy.noticeAction ? { action: copy.noticeAction } : {}),
 		});
-	}
-
-	/**
-	 * 某类白名单（扩展/技能/提示词）因超出启动参数预算被跳过：告知用户本次「禁用」不生效。
-	 * 跳过本身不影响启动，但用户看到「禁用的东西又被加载了」会当成 bug，必须显式说明。
-	 * 三类共用同一条命令行预算（见 PiProcess.evaluateWhitelistBudget），可能同时被跳过，
-	 * 因此按条逐条提示，而不是把两种资源揉成一句话。
-	 * 与扩展回退同一条启动期诊断链路（首个 run 时落到时间线），理由见 queueStartupDiagnostic。
-	 */
-	notifyWhitelistSkipped(agentId: string, entries: readonly WhitelistSkip[]): void {
-		for (const entry of entries) {
-			const copy = resolveWhitelistSkipCopy(entry);
-			this.host.warn("Whitelist skipped: too many entries for launch args", {
-				agentId,
-				kind: entry.kind,
-				count: entry.count,
-				estimatedChars: entry.chars,
-				budget: entry.budget,
-			});
-			this.queueStartupDiagnostic(agentId, {
-				role: "system",
-				i18nKey: copy.i18nKey,
-				fallbackText: copy.fallbackText,
-				options: { params: { count: entry.count, budget: entry.budget } },
-			});
-		}
 	}
 }

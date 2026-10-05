@@ -11,7 +11,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.7.8-blue)
+![Version](https://img.shields.io/badge/version-0.7.9-blue)
 
 <!-- star-history:start -->
 <picture>
@@ -81,25 +81,24 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.7.8** (2026-10-03)
+> **Latest: v0.7.9** (2026-10-05)
 
-### v0.7.8 Release Highlights
-- 🚀 **Data folder renamed to PiDeck with automatic migration**
-- 🚀 **Custom themes (JSON theme packs + an AI authoring guide)**
-- 🚀 **Usage probe template for Volcengine Ark (AK/SK)**
-- 🚀 **Provider names now accept Chinese**
-- 🚀 **DSH "Add provider" now collects everything it needs**
-- 🚀 **Clear the model preselection in one click**
-- 🚀 **Voice dictation in the composer**
-- 🚀 **Grouped process timeline (on by default)**
-- 🚀 **Automatic session titles are now on by default**
-- 🚀 **Import Qoder sessions**
-- 🚀 **Model configuration export / import panel (#261)**
-- 🚀 **The send button now carries the delivery menu**
-- ✨ **One-click pi install no longer fails on Windows**
-- ✨ **Fixed path linkification swallowing the rest of the text**
-- ✨ **Fixed Chinese prose slashes being mistaken for paths**
-- ✨ **Session titles are no longer locked to the first message (#266)**
+### v0.7.9 Release Highlights
+- 🚀 **TokenDance top-up (agent payment)**
+- 🚀 **Standby runtime pool — new sessions activate instantly**
+- 🚀 **Plugin development interface (capability catalog + AI authoring guide + demo)**
+- 🚀 **Session imports: Kimi Code, Kimi Work and MinimaxCode**
+- 🚀 **Adapts to pi 1.0.x — resource management now rides pi's native config**
+- 🚀 **In-app pi update details and a more reliable updater**
+- 🚀 **CUA: full-chain fixes and an auto-approve switch**
+- 🚀 **Logo & app icon in the official pi TUI style**
+- 🚀 **Web: pick the backend when creating a session**
+- 🚀 **Session housekeeping: external deletions and orphan processes**
+- 🚀 **Four waves of UI polish + global motion pass**
+- ✨ **No more flash of the guide page at startup**
+- ✨ **Win11 snap layouts restore exactly**
+- ✨ **Session timestamps no longer churn (#314)**
+- ✨ **Multi-reply turns edit and save correctly (#310)**
 
 [View Full Changelog →](CHANGELOG.md)
 

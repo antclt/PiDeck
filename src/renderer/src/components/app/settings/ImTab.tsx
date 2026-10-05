@@ -8,7 +8,7 @@ import { Input } from "../../ui-shadcn/input";
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 import { ConfirmDialog } from "../../app/AppParts";
 import { writeClipboard } from "../../../utils/clipboard";
 import type { FeishuBotConfig, FeishuBridgeStatus, FeishuChatBinding, FeishuTestResult } from "../../../../../shared/types";
@@ -306,7 +306,12 @@ export function ImTab(_props: Props) {
 	const statusLabel = t(`config.im.status.${status.status}` as Parameters<typeof t>[0]) || status.status;
 
 	if (loading) {
-		return <div className="py-12 text-center text-control text-text-tertiary">{t("common.loading")}</div>;
+		return (
+			<div className="flex items-center justify-center gap-2 py-12 text-control text-text-tertiary">
+				<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+				{t("common.loading")}
+			</div>
+		);
 	}
 
 	return (
@@ -380,7 +385,6 @@ export function ImTab(_props: Props) {
 									if (addStep !== "input") setAddStep("input");
 								}}
 								placeholder="cli_xxxxxxxxxxxx"
-								className="config-input"
 								disabled={addStep !== "input"}
 							/>
 						</div>
@@ -395,7 +399,6 @@ export function ImTab(_props: Props) {
 									if (addStep !== "input") setAddStep("input");
 								}}
 								placeholder="••••••••••••••••"
-								className="config-input"
 								disabled={addStep !== "input"}
 							/>
 						</div>
@@ -403,7 +406,7 @@ export function ImTab(_props: Props) {
 							<Label>
 								{t("config.im.botName")} <span className="config-field-optional">({t("common.optional")})</span>
 							</Label>
-							<Input type="text" value={botName} onChange={(e) => setBotName(e.target.value)} placeholder={t("config.im.botNamePlaceholder")} className="config-input" disabled={addStep !== "input"} />
+							<Input type="text" value={botName} onChange={(e) => setBotName(e.target.value)} placeholder={t("config.im.botNamePlaceholder")} disabled={addStep !== "input"} />
 						</div>
 
 						{/* 连接成功后才显示 Open ID 输入框 */}
@@ -413,7 +416,7 @@ export function ImTab(_props: Props) {
 									<Label>
 										{t("config.im.openId")} <span className="config-field-required">*</span>
 									</Label>
-									<Input type="text" value={addFormOpenId} onChange={(e) => setAddFormOpenId(e.target.value)} placeholder="ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxx" className="config-input" />
+									<Input type="text" value={addFormOpenId} onChange={(e) => setAddFormOpenId(e.target.value)} placeholder="ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
 								</div>
 								<div className="config-im-openid-hint">💡 {t("config.im.openIdHint")}</div>
 							</div>
@@ -453,7 +456,7 @@ export function ImTab(_props: Props) {
 					const visibleBotBindings = botBindings.slice(0, visibleBindingCount);
 					const secretValue = revealedSecrets[bot.id];
 					return (
-						<div key={bot.id} className={`mb-2 overflow-hidden rounded-lg border border-border-subtle bg-bg-panel transition-[border-color,box-shadow,background-color] duration-150 config-im-bot-card${isThisConnected ? " border-[var(--color-accent)]/30" : ""}`}>
+						<div key={bot.id} className={`mb-2 overflow-hidden rounded-lg border border-border-subtle bg-bg-panel transition-[border-color,box-shadow,background-color] duration-fast config-im-bot-card${isThisConnected ? " border-[var(--color-accent)]/30" : ""}`}>
 							<div
 								className="flex cursor-pointer items-center gap-3 px-3.5 py-2.5 hover:bg-bg-hover config-im-bot-header"
 								onClick={() =>
@@ -471,7 +474,7 @@ export function ImTab(_props: Props) {
 										{bot.name}
 										{isThisConnected && <span className="config-im-connected-badge">{t("config.im.connected")}</span>}
 									</div>
-									<div className="text-[11px] text-text-tertiary">
+									<div className="text-micro text-text-tertiary">
 										{t("config.im.expandHint")} · {t("config.im.appId")}: {bot.appId.slice(0, 14)}… · {t("config.im.linkedAgentsCount", { count: botBindings.length })}
 									</div>
 								</div>
@@ -535,7 +538,7 @@ export function ImTab(_props: Props) {
 								</div>
 							</div>
 							{isExpanded && (
-								<div className="border-t border-border-subtle px-3.5 py-2.5 text-xs config-im-bot-details" onClick={(e) => e.stopPropagation()}>
+								<div className="border-t border-border-subtle px-3.5 py-2.5 text-xs config-im-bot-details motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast" onClick={(e) => e.stopPropagation()}>
 									<div className="config-im-bot-detail-section">
 										<div className="config-im-section-title">{t("config.im.appCredentials")}</div>
 										<div className="config-im-credential-grid">

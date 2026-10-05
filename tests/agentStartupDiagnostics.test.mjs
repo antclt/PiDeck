@@ -13,6 +13,9 @@ const preloadSource = readFileSync("src/preload/index.ts", "utf8");
 const ipcSource = readFileSync("src/shared/ipc.ts", "utf8");
 const appSource = readFileSync("src/renderer/src/App.tsx", "utf8");
 const rendererMainSource = readFileSync("src/renderer/src/main.tsx", "utf8");
+// 遮罩撤除实现/时机已收口到独立模块（启动交接：内容就绪再撤，见
+// tests/bootOverlayDismissal.test.mjs），main.tsx 只留硬兼底超时。
+const bootOverlaySource = readFileSync("src/renderer/src/utils/bootOverlay.ts", "utf8");
 
 test("agent startup writes diagnostics across renderer IPC and pi launch boundaries", () => {
 	assert.match(ipcSource, /rendererLog:\s*"renderer:log"/);
@@ -56,7 +59,9 @@ test("renderer startup reports bootstrap mount and global errors", () => {
 	assert.match(rendererMainSource, /Maximum update depth exceeded/);
 	assert.match(rendererMainSource, /lastUpdateDepthDiagnosticAt/);
 	assert.match(rendererMainSource, /Renderer root element missing/);
-	assert.match(rendererMainSource, /function dismissBootOverlay\(\)/);
+	assert.match(bootOverlaySource, /export function dismissBootOverlay\(\)/);
+	// 挂载帧不得撤遮罩（会露出无会话空态那一帧）；硬兼底必须保留
+	assert.doesNotMatch(rendererMainSource, /requestAnimationFrame\(\s*dismissBootOverlay\s*\)/);
 	assert.match(rendererMainSource, /window\.setTimeout\(dismissBootOverlay, 1500\)/);
 });
 

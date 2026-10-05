@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { copyFile, mkdir, open, readFile, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { AgentBackend, AgentTab, SessionEnvironment, SessionModelPreference, SessionRecord, SessionSource, SessionSummary } from "../../shared/types";
@@ -300,6 +301,10 @@ export class SessionCatalog {
 
 	private identityContext: SessionCatalogContext;
 
+	/** 会话活性探针（由 SessionRuntimeCoordinator 注入）：有活跃运行时绑定的会话，
+	 *  其 filePath 指向的 jsonl 可能尚未由 pi 落盘，外部删除清理不得误剔。 */
+	private sessionLivenessProbe?: (sessionId: string) => boolean;
+
 	constructor(
 		private readonly filePath: string,
 		identityContext: SessionCatalogContext = {},
@@ -311,6 +316,11 @@ export class SessionCatalog {
 
 	setIdentityContext(context: SessionCatalogContext): void {
 		this.identityContext = { ...context };
+	}
+
+	/** 注入活性探针（main 装配时一次性接线）；传 undefined 解除。 */
+	setSessionLivenessProbe(probe: ((sessionId: string) => boolean) | undefined): void {
+		this.sessionLivenessProbe = probe;
 	}
 
 	async load(): Promise<void> {
@@ -829,19 +839,37 @@ export class SessionCatalog {
 		this.assertLoaded();
 		return this.enqueueMutation((entries) => {
 			const entry = this.requireEntry(entries, input.sessionId);
+			// #314 幂等基线：runtime 事件风暴会反复 attach 同一会话的相同路径/ID。
+			// 先记录 mutation 前快照，无实际变化不得刷新 updatedAt——活动区排序与
+			// 时间戳都取 updatedAt，重复刷新会让已停止/空闲会话被顶到最前、时间跳动。
+			const before = {
+				filePath: entry.filePath,
+				piSessionId: entry.piSessionId,
+				dshSessionId: entry.dshSessionId,
+				agentPreset: entry.agentPreset,
+				status: entry.status,
+				originKey: entry.originKey,
+				createdAt: entry.createdAt,
+				model: entry.model,
+				thinkingLevel: entry.thinkingLevel,
+				importedSourceId: entry.importedSourceId,
+			};
 			// pi 可能上报相对 cwd 的 sessionFile：写入 catalog 前归一化为绝对路径，
 			// 否则与扫描器绝对路径 originKey 不一致，同一文件会出现两条记录。
 			const filePath = input.filePath && this.resolveFilePath ? this.resolveFilePath(entry.projectId, input.filePath, entry.environment) : input.filePath;
-			const previousFilePath = entry.filePath;
 			// DSH 的 sessionPath 是 host zstd，不是 pi JSONL；写进 filePath 会让渲染层
 			// 把空会话当成有磁盘历史（起始页 / 骨架来回抽）。
 			if (filePath && entry.backend !== "dsh") entry.filePath = filePath;
 			if (input.piSessionId) entry.piSessionId = input.piSessionId;
+			let restoredDismissed = false;
 			if (input.dshSessionId) {
 				entry.dshSessionId = input.dshSessionId;
 				// 只有明确找回才清墓碑。激活回写同一 host id 时如果清掉，
 				// 用户删映射后迟到的 attach 会让下次自动同步再导回来。
-				if (input.restoreDismissed) {
+				if (input.restoreDismissed && this.dismissedDshSessionIds.has(input.dshSessionId)) {
+					// 墓碑集合随 writeSnapshot 落盘：delete 已发生在回调内，必须计入
+					// changed，否则 changed:false 时内存已删但快照不落盘，重启后墓碑复活。
+					restoredDismissed = true;
 					this.dismissedDshSessionIds.delete(input.dshSessionId);
 				}
 			}
@@ -854,8 +882,9 @@ export class SessionCatalog {
 			if (input.promoteToActive && input.dshSessionId && !entry.filePath && entry.status === "draft") {
 				entry.status = "active";
 			}
+			let mergedDuplicate = false;
 			if (entry.filePath) {
-				const pathUnchanged = Boolean(previousFilePath && canonicalizeSessionPath(previousFilePath, entry.environment) === canonicalizeSessionPath(entry.filePath, entry.environment));
+				const pathUnchanged = Boolean(before.filePath && canonicalizeSessionPath(before.filePath, entry.environment) === canonicalizeSessionPath(entry.filePath, entry.environment));
 				const nextOriginKey = pathUnchanged && entry.originKey ? entry.originKey : this.originKeyForEntry(entry);
 				entry.originKey = nextOriginKey;
 				entry.status = "active";
@@ -868,8 +897,26 @@ export class SessionCatalog {
 					entry.importedSourceId ??= duplicate.importedSourceId;
 					entry.createdAt = Math.min(entry.createdAt, duplicate.createdAt);
 					entries.splice(duplicateIndex, 1);
+					mergedDuplicate = true;
 				}
 			}
+			// 快照对比逐字段判定真实变化；路径按 canonical 形态比较，隔离分隔符/大小写差异。
+			const touched =
+				restoredDismissed ||
+				mergedDuplicate ||
+				canonicalizeSessionPath(before.filePath ?? "", entry.environment) !== canonicalizeSessionPath(entry.filePath ?? "", entry.environment) ||
+				before.piSessionId !== entry.piSessionId ||
+				before.dshSessionId !== entry.dshSessionId ||
+				before.agentPreset !== entry.agentPreset ||
+				before.status !== entry.status ||
+				before.originKey !== entry.originKey ||
+				before.createdAt !== entry.createdAt ||
+				before.model !== entry.model ||
+				before.thinkingLevel !== entry.thinkingLevel ||
+				before.importedSourceId !== entry.importedSourceId;
+			// 无实际变化：不刷新 updatedAt、不落盘（enqueueMutation changed:false 跳过快照），
+			// 让 runtime 事件风暴里的重复 attach 成为廉价 no-op。
+			if (!touched) return { value: cloneEntry(entry), changed: false };
 			entry.updatedAt = Date.now();
 			return { value: cloneEntry(entry), changed: true };
 		});
@@ -987,8 +1034,44 @@ export class SessionCatalog {
 		// 只更新文件身份、预览和结构元数据，不能用 pi/TUI 的标题覆盖 PiDeck 名称。
 		// 同一次读取仍校验会话头：invalidOrigins 收集非有效会话文件，下面据此清洗与拒绝。
 		const { titles: fetchedTitles, legacyProbes: fetchedLegacyProbes, invalid: invalidOrigins, parents: fetchedParents, forked: fetchedForked } = await this.collectScannedTitles(summaries, context);
+
+		// 外部删除清理（在入锁前完成磁盘探测）：mergeScanned 历史上只增改不删，
+		// pi 会话文件被外部删除（pi 回收站、用户手工 rm、脚本清理）后条目会永远
+		// 残留在侧栏。安全闸（缺一不可）：
+		// - 仅本项目 + source=pi + backend≠dsh：dsh 会话文件由 $DSH_HOME 托管；
+		// - environment=native：WSL 条目跳过——发行版未运行时 UNC existsSync 恒
+		//   false，会把正常会话误删；
+		// - 必须真实 existsSync 缺失（而非「不在本轮 summaries 里」），部分扫描/
+		//   手动导入调用不会误判；
+		// - 父目录必须还在：目录也不在 = 磁盘/网络盘整体离线（或路径临时不可达），
+		//   不能当成「文件被删」误清；目录在而文件不在才是确定的外部删除。
+		const externallyMissingIds = new Set<string>();
+		for (const entry of this.entries) {
+			if (entry.projectId !== projectId) continue;
+			if (entry.source !== "pi" || entry.backend === "dsh") continue;
+			if (entry.environment !== "native") continue;
+			if (!entry.filePath) continue;
+			// 活跃运行时的文件可能尚未落盘：pi 首条消息才创建 jsonl，预热激活后空闲
+			// 进程甚至长期不写。有活绑定的会话「文件暂时不在」不是外部删除，跳过；
+			// 运行终结后下一轮扫描按真实缺失清理（2026-10-05 事故：预热 attach 同秒
+			// 扫描剔掉记录 → 闪回引导页、输入草稿丢失、发送另起新进程）。
+			if (this.sessionLivenessProbe?.(entry.id)) continue;
+			if (existsSync(entry.filePath)) continue;
+			if (!existsSync(dirname(entry.filePath))) continue;
+			externallyMissingIds.add(entry.id);
+		}
+
 		return this.enqueueMutation((entries) => {
 			let changed = false;
+
+			// 剔除磁盘已消失的 pi 原生条目（探测结果在入锁前算好）。
+			if (externallyMissingIds.size > 0) {
+				for (let index = entries.length - 1; index >= 0; index -= 1) {
+					if (!externallyMissingIds.has(entries[index]!.id)) continue;
+					entries.splice(index, 1);
+					changed = true;
+				}
+			}
 
 			// 清洗存量脏数据：pi-subagents artifactDir="session"（默认）的产物转储
 			// 曾被旧版扫描误注册成 active 条目，导致每个子代理在侧栏「嵌套 + 顶层平铺」

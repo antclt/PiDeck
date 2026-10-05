@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { t, type TranslationKey } from "../../../i18n";
 import { showNotice } from "../../../utils/notice";
 import { Button } from "../../ui-shadcn/button";
@@ -207,7 +208,10 @@ export function BackupTab() {
 					</Button>
 				</div>
 				{isLoading ? (
-					<p className="px-0.5 py-1 text-caption text-muted-foreground">{t("common.loading")}</p>
+					<p className="flex items-center gap-1.5 px-0.5 py-1 text-caption text-muted-foreground">
+						<Loader2 size={12} className="animate-pideck-spin" aria-hidden="true" />
+						{t("common.loading")}
+					</p>
 				) : backups.length === 0 ? (
 					<p className="px-0.5 py-1 text-caption text-muted-foreground">{t("settings.backup.empty")}</p>
 				) : (

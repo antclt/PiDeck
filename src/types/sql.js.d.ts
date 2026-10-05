@@ -14,6 +14,10 @@ declare module "sql.js" {
 
 	interface Statement {
 		run(params?: unknown[]): Statement;
+		/** 步进一行；有数据返回 true（游标到尾返回 false）。 */
+		step(): boolean;
+		/** 取当前行（列名 → 值）；必须在 step() 返回 true 后调用。 */
+		getAsObject(): Record<string, unknown>;
 		free(): boolean;
 	}
 

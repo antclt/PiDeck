@@ -43,7 +43,7 @@ export const ErrorStep = memo(function ErrorStep(props: { group: ErrorGroupItem;
 		<div style={{ display: props.hidden ? "none" : undefined }}>
 			<TimelineMarker kind="tool" tone="error" contentClassName="pb-1">
 				<section className="tool-card w-full min-w-0 tone-error" data-error-step="true" data-message-id={props.group.id}>
-					<div className="relative flex min-h-7 items-center rounded-md transition-colors duration-150 hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)]">
+					<div className="relative flex min-h-7 items-center rounded-md transition-colors duration-fast hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)]">
 						{/* 整行可点展开（与 ToolCard 的 trigger 同构）：原来只有 20px chevron 可点，
 						    用户反馈「无法点击」；无详情时保持 div，不渲染空展开。 */}
 						{hasDetail ? (
@@ -61,7 +61,7 @@ export const ErrorStep = memo(function ErrorStep(props: { group: ErrorGroupItem;
 					</div>
 					{/* 展开的错误详情："429 Too Many Requests …" 完整原文/栈帧 */}
 					{expanded && (
-						<div className="px-1 pb-1">
+						<div className="px-1 pb-1 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
 							<StepTraceDetails message={props.group.message} />
 						</div>
 					)}

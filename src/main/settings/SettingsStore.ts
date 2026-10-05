@@ -116,6 +116,7 @@ const defaultSettings: AppSettings = {
 	themeScheduleDarkStart: "19:00",
 	accent: "default",
 	themeSkin: "classic-green",
+	logoStyle: "pi-tui",
 	customThemeOverrides: {},
 	backgroundImage: "",
 	backgroundImageOpacity: 0.8,
@@ -231,8 +232,12 @@ Gitmoji 对应关系：
 	idleAgentKeepCount: 5,
 	idleAgentTimeoutMin: 60,
 
+	// standby 预热池默认开启：新建会话近即时；10 分钟未使用自动回收，与闲置释放互补
+	standbyRuntimeEnabled: true,
+
 	// CUA 默认关闭：关闭时不监听本地端点、不改动 pi 的 mcp.json，与现状完全一致
 	cuaEnabled: false,
+	cuaAutoApprove: false,
 
 	favoriteModels: [],
 	// 提供商与模型显示开关默认全显示：隐藏列表为空 = 不隐藏任何提供商/模型
@@ -253,14 +258,13 @@ Gitmoji 对应关系：
 	/** 用户禁用的扩展（scope+source）；非空时 RPC 启动走白名单模式 */
 	disabledExtensions: [],
 	/** 白名单总开关：true 时不走 -e 注入，默认加载全部扩展（防御启动失败） */
-	disableExtensionWhitelist: false,
 
 	// ── 技能管理 ──
-	/** 用户禁用的全局技能名（小写 name）；非空时 RPC 启动走 --no-skills + --skill 白名单 */
+	/** 旧版技能禁用记录（小写 name）；现代版本写 pi 原生过滤规则，此字段仅由启动迁移读取并清理 */
 	disabledSkills: [],
 
 	// ── 提示词模板管理 ──
-	/** 用户禁用的全局提示词模板名（小写 name）；非空时 RPC 启动走 --no-prompt-templates + --prompt-template 白名单 */
+	/** 旧版提示词禁用记录（小写 name）；现代版本写 pi 原生过滤规则，此字段仅由启动迁移读取并清理 */
 	disabledPrompts: [],
 
 	// 生图参数：记在 composer 底栏，跨会话复用；缺省不指定分辨率、不带水印
@@ -579,8 +583,16 @@ export class SettingsStore {
 		if ("cuaEnabled" in safePatch && typeof safePatch.cuaEnabled !== "boolean") {
 			delete safePatch.cuaEnabled;
 		}
+		// 免审批开关同理：只接受布尔值（安全相关设置，非法值一律回退原值）。
+		if ("cuaAutoApprove" in safePatch && typeof safePatch.cuaAutoApprove !== "boolean") {
+			delete safePatch.cuaAutoApprove;
+		}
 		if ("navigationMode" in safePatch && safePatch.navigationMode !== "tabs" && safePatch.navigationMode !== "simple") {
 			delete safePatch.navigationMode;
+		}
+		// Logo 风格只接受已知枚举，非法值保持原设置（缺省 classic 由默认值完成）。
+		if ("logoStyle" in safePatch && safePatch.logoStyle !== "classic" && safePatch.logoStyle !== "pi-tui") {
+			delete safePatch.logoStyle;
 		}
 		// 会话 Tab 最大宽度：非有限数值直接丢弃（保持原设置），合法值钳到 80–400。
 		if ("sessionTabMaxWidth" in safePatch) {

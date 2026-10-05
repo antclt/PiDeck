@@ -18,6 +18,11 @@ import { resolveAppTimes } from "../utils/appInfoTimes";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { PiMcpCli } from "../pi/piMcpCli";
+import { piChangelogService } from "../pi/PiChangelogService";
+import { validateMcpConfigFile } from "../config/mcpConfig";
+import { PiResourceConfigService } from "../config/PiResourceConfigService";
+import { PiResourceStateStore } from "../config/PiResourceStateStore";
 import { tmpdir } from "node:os";
 import { installPiRuntimeNode, piRuntimeNodeBinDir, probeNodeVersion, detectPiRuntimeNode } from "../pi/runtimeNodeInstall";
 import { runPiGlobalInstall } from "../pi/piGlobalInstall";
@@ -35,6 +40,7 @@ import type { RpcLogger } from "../logging/RpcLogger";
 import type { SessionRuntimeCoordinator } from "../sessions/SessionRuntimeCoordinator";
 import { resolveConfigProxyTarget } from "../sessions/sessionProxyPolicy";
 import { setConfiguredGitPath } from "../git/gitExecutable";
+import { applyWindowLogoStyle } from "../appWindowLogo";
 import { detectDshRunnerNode } from "../dsh/dshRunnerNode";
 import { DSH_RUNNER_NODE_ENV } from "../dsh/dshRunnerNodeSidecar";
 import { installDshRunnerNodeSidecar } from "../dsh/dshRunnerNodeInstall";
@@ -46,6 +52,7 @@ import { fetchModelList, getCachedModelList, invalidateModelListCache, modelsFro
 import { TokendanceCatalogStore } from "../config/tokendanceCatalog";
 import type { TokendanceInstallResult } from "../config/tokendanceInstaller";
 import type { TokendanceAuthMode, TokendanceAuthStore } from "../config/tokendanceAuth";
+import type { TokendancePaymentStore } from "../config/tokendancePayment";
 import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
 
 import { probePiModel } from "../pi/PiModelProber";
@@ -90,17 +97,20 @@ function isStringRecord(value: unknown): value is Record<string, string> {
 }
 
 const MCP_EXPOSURE_VALUES = ["codemode", "codemode-deferred", "deferred", "direct", "hidden"];
+/** 仅属于全局层的字段：项目层含它会被 pi 跳过（auth）或仅能读不能校验（不拦）。 */
+function isProviderAuth(value: unknown): boolean {
+	return isUnknownRecord(value) && (value.provider === undefined || typeof value.provider === "string");
+}
 
 function isMcpServerDefinition(value: unknown): value is McpServerDefinition {
 	if (!isUnknownRecord(value)) return false;
 	const optionalString = (key: string) => !(key in value) || value[key] === undefined || typeof value[key] === "string";
-	const optionalNumber = (key: string) => !(key in value) || value[key] === undefined || typeof value[key] === "number";
 	const optionalExposure = (key: string) => !(key in value) || value[key] === undefined || (typeof value[key] === "string" && MCP_EXPOSURE_VALUES.includes(value[key]));
+	// pi 0.99.2 内置 MCP schema：command/cwd/url + exposure/toolExposure/enabled/timeout/description
+	// + oauth + auth.provider。legacy 字段（socket/lifecycle/directTools/disabled…）pi 静默忽略，PiDeck 不再接受。
 	return (
-		["command", "cwd", "url", "socket", "bearerToken", "bearerTokenEnv"].every(optionalString) &&
-		optionalNumber("idleTimeout") &&
-		optionalNumber("requestTimeoutMs") &&
-		// pi 0.99 内置 MCP 字段：exposure / toolExposure / enabled / timeout
+		["command", "cwd", "url"].every(optionalString) &&
+		optionalString("description") &&
 		optionalExposure("exposure") &&
 		(!("toolExposure" in value) || value.toolExposure === undefined || (isUnknownRecord(value.toolExposure) && Object.values(value.toolExposure).every((entry) => typeof entry === "string" && MCP_EXPOSURE_VALUES.includes(entry)))) &&
 		(!("enabled" in value) || value.enabled === undefined || typeof value.enabled === "boolean") &&
@@ -108,10 +118,8 @@ function isMcpServerDefinition(value: unknown): value is McpServerDefinition {
 		(!("args" in value) || value.args === undefined || (Array.isArray(value.args) && value.args.every((entry) => typeof entry === "string"))) &&
 		(!("env" in value) || value.env === undefined || isStringRecord(value.env)) &&
 		(!("headers" in value) || value.headers === undefined || isStringRecord(value.headers)) &&
-		(!("auth" in value) || value.auth === undefined || value.auth === "bearer" || value.auth === "oauth") &&
-		(!("lifecycle" in value) || value.lifecycle === undefined || ["lazy", "eager", "keep-alive", "lazy-keep-alive"].includes(String(value.lifecycle))) &&
-		(!("disabled" in value) || value.disabled === undefined || typeof value.disabled === "boolean") &&
-		(!("directTools" in value) || value.directTools === undefined || typeof value.directTools === "boolean" || (Array.isArray(value.directTools) && value.directTools.every((entry) => typeof entry === "string")))
+		(!("oauth" in value) || value.oauth === undefined || isUnknownRecord(value.oauth)) &&
+		(!("auth" in value) || value.auth === undefined || isProviderAuth(value.auth))
 	);
 }
 
@@ -121,6 +129,27 @@ function isMcpConfigFile(value: unknown): value is McpConfigFile {
 	if (!("mcpServers" in value) || value.mcpServers === undefined) return true;
 	if (!isUnknownRecord(value.mcpServers)) return false;
 	return Object.values(value.mcpServers).every(isMcpServerDefinition);
+}
+
+/**
+ * MCP 作用域请求：`{scope:"global"}` / `{scope:"project",projectId}`。
+ * 渲染层只能传注册过的 projectId，不传路径。旧的无参/裸 projectId 形式按全局处理，兼容旧预加载。
+ */
+type McpScopeRequest = { kind: "global" } | { kind: "project"; projectId: string };
+
+function parseMcpScopeRequest(value: unknown): McpScopeRequest {
+	if (value === undefined || value === null) return { kind: "global" };
+	if (typeof value === "string") {
+		if (!value.trim() || value.length > 256) throw new Error("Invalid project id.");
+		return { kind: "project", projectId: value.trim() };
+	}
+	if (!isUnknownRecord(value)) throw new Error("Invalid MCP scope.");
+	const scope = value.scope;
+	if (scope === undefined || scope === "global") return { kind: "global" };
+	if (scope !== "project") throw new Error("Invalid MCP scope.");
+	const projectId = value.projectId;
+	if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256) throw new Error("Invalid project id.");
+	return { kind: "project", projectId: projectId.trim() };
 }
 
 export type SystemIpcDeps = {
@@ -133,6 +162,11 @@ export type SystemIpcDeps = {
 	appLogger: AppLogger;
 	rpcLogger: RpcLogger;
 	sessionRuntimeCoordinator: SessionRuntimeCoordinator;
+	/**
+	 * 项目目录的信任判定（index.ts 注入，已处理 WSL 路径映射）。未装配时按未信任处理，
+	 * 使项目 MCP 读写不会在缺少门禁的路径上放开。
+	 */
+	isProjectTrusted?: (projectId: string, projectRoot: string) => Promise<boolean>;
 	/** pi 环境引导：便携 Node 安装器（下载/解压 IO 由 index.ts 装配 DSH 同源实现）；未装配 = 引导入口降级不可用。 */
 	piRuntimeNodeInstaller?: import("../pi/runtimeNodeInstall").RuntimeNodeInstallerDeps;
 	/** DSH 后端判定（G17：RPC 日志按 backend 分流）。 */
@@ -161,6 +195,8 @@ export type SystemIpcDeps = {
 	tokendanceCatalog?: TokendanceCatalogStore;
 	/** 内置 TokenDance OAuth 授权流程（PKCE verifier 内存持有）；未装配 = 授权入口不可用。 */
 	tokendanceAuth?: TokendanceAuthStore;
+	/** 内置 TokenDance 充值会话（创建 + 状态查询，Key 不出主进程）；未装配 = 充值入口不可用。 */
+	tokendancePayment?: TokendancePaymentStore;
 	/** TokenDance 一键安装（写入 pi models.json + DSH llm-pi-ai）；未装配 = 配置入口不可用。 */
 	tokendanceInstall?: (apiKey?: string) => Promise<TokendanceInstallResult>;
 	/** 环境体检编排器（问题反馈页一键排障）。 */
@@ -339,6 +375,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		appLogger,
 		rpcLogger,
 		sessionRuntimeCoordinator,
+		isProjectTrusted,
 		isDshAgent,
 		setDshRpcLogging,
 		isDshRpcLogging,
@@ -386,11 +423,29 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		modelCapabilityCache,
 		tokendanceCatalog,
 		tokendanceAuth,
+		tokendancePayment,
 		tokendanceInstall,
 		diagnosticsMonitor,
 		environmentDoctor,
 		logBundleExporter,
 	} = deps;
+
+	/** `pi mcp` CLI 封装（连接检测 / OAuth 登录登出）；惰性构造，无状态可安全复用。 */
+	let piMcpCli: PiMcpCli | null = null;
+	/** pi 原生资源配置服务（懒建：只在用户打开相关页面/切换开关时才需要）。 */
+	let piResourceService: PiResourceConfigService | undefined;
+	const getPiMcpCli = () => {
+		piMcpCli ??= new PiMcpCli({
+			locator: piLocator,
+			getSettings: () => settingsStore.get(),
+			resolveProjectScope: async (projectId) => {
+				const root = projectResourceManager.getProjectRoot(projectId);
+				const trusted = isProjectTrusted ? await isProjectTrusted(projectId, root) : false;
+				return { cwd: root, trusted };
+			},
+		});
+		return piMcpCli;
+	};
 
 	/**
 	 * Models/auth 的任何写入都必须同时失效 CLI fallback 与 Pi-authoritative
@@ -1031,6 +1086,16 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			void appLogger.info("pi", "Pi update command completed", { updated: result.updated, bytes: result.output.length });
 			return result;
 		});
+		// pi 更新日志：用户点「更新详情」才按需拉取（不参与版本检查的自动调度）。
+		ipcMain.handle(ipcChannels.piReleaseNotes, async (_event, rawOptions) => {
+			// 输入校验在边界：渲染层数据一律不可信，版本号必须是 semver 形态的字符串。
+			const options = (rawOptions ?? {}) as { latestVersion?: unknown; currentVersion?: unknown };
+			const latestVersion = typeof options.latestVersion === "string" ? options.latestVersion : "";
+			const currentVersion = typeof options.currentVersion === "string" ? options.currentVersion : undefined;
+			const result = await piChangelogService.getReleaseNotes({ latestVersion, currentVersion });
+			void appLogger.info("pi", "Pi release notes fetched", { source: result.source, versionCount: result.versionCount, truncated: result.truncated });
+			return result;
+		});
 	}
 
 	// ── 应用信息 ─────────────────────────────────────────────────────
@@ -1583,6 +1648,10 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		if ("autoDownloadUpdates" in patch) {
 			updateService?.applyAutoDownloadPreference();
 		}
+		// Logo 风格：立即切换窗口/任务栏/Dock 图标（安装包静态图标恒为 classic，见 appWindowLogo.ts）。
+		if ("logoStyle" in patch && prevSettings.logoStyle !== settings.logoStyle) {
+			applyWindowLogoStyle(settings.logoStyle, getMainWindow);
+		}
 		// 更新源切换（预设镜像 / 自定义镜像前缀）：立即重建 feed URL，无需重启生效。
 		if ("updateSource" in patch || "customUpdateSourceUrl" in patch) {
 			updateService?.applyUpdateSource();
@@ -1774,19 +1843,36 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.configGetSettings, () => configManager.getSettingsConfig());
 	ipcMain.handle(ipcChannels.configGetTrust, () => configManager.getTrustConfig());
 	// MCP project layers are selected by a stable registered project id; renderer paths are never trusted.
-	ipcMain.handle(ipcChannels.configGetMcp, (_event, projectId?: unknown) => {
-		if (projectId === undefined) return configManager.getMcpConfig();
-		if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256) {
-			throw new Error("Invalid project id.");
-		}
-		return configManager.getMcpConfig(projectResourceManager.getProjectRoot(projectId.trim()));
+	// MCP 作用域：projectId 省略 = 全局页；项目页固定写项目 .pi/mcp.json（读也要过信任门禁）。
+	const assertTrustedMcpProject = async (projectId: string, root: string): Promise<void> => {
+		if (!isProjectTrusted) throw new Error(mainCopy("mainProjectResource.projectNotTrusted"));
+		if (!(await isProjectTrusted(projectId, root))) throw new Error(mainCopy("mainProjectResource.projectNotTrusted"));
+	};
+	ipcMain.handle(ipcChannels.configGetMcp, async (_event, scope: unknown) => {
+		const parsed = parseMcpScopeRequest(scope);
+		if (parsed.kind === "global") return configManager.getMcpConfig();
+		const root = projectResourceManager.getProjectRoot(parsed.projectId);
+		await assertTrustedMcpProject(parsed.projectId, root);
+		return configManager.getMcpConfig(root, { writableScope: "project-pi", projectTrusted: true });
 	});
-	ipcMain.handle(ipcChannels.configSaveMcp, async (_event, data: unknown) => {
+	ipcMain.handle(ipcChannels.configSaveMcp, async (_event, data: unknown, scope: unknown) => {
+		const parsed = parseMcpScopeRequest(scope);
 		if (!isMcpConfigFile(data)) {
 			return { valid: false, error: "mcp.json must contain an object of server definitions" };
 		}
-		const result = await configManager.saveMcpConfig(data);
+		let result: { valid: boolean; error?: string };
+		if (parsed.kind === "global") {
+			result = await configManager.saveMcpConfig(data);
+		} else {
+			const root = projectResourceManager.getProjectRoot(parsed.projectId);
+			await assertTrustedMcpProject(parsed.projectId, root);
+			// 项目写入走 ProjectResourceManager：canonical 边界 + 临时文件 rename，拒绝 junction 逃逸。
+			const validationError = validateMcpConfigFile(data, { scope: "project-pi" });
+			result = validationError ? { valid: false, error: validationError } : { valid: true };
+			if (result.valid) await projectResourceManager.saveProjectMcpConfig(parsed.projectId, data);
+		}
 		void appLogger.info("config", "MCP config saved", {
+			scope: parsed.kind,
 			serverCount: Object.keys(data.mcpServers ?? {}).length,
 		});
 		return result;
@@ -1797,6 +1883,81 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			return { ok: false, error: "invalid MCP server definition" };
 		}
 		return configManager.probeMcpServer(definition);
+	});
+
+	// ── pi mcp CLI：真实连接检测 + OAuth 登录/登出（仅命令路线，不走 RPC，见计划 M4/M6）──
+
+	ipcMain.handle(ipcChannels.mcpListStatus, async (_event, scope: unknown) => {
+		const parsed = parseMcpScopeRequest(scope);
+		const result = await getPiMcpCli().list(parsed.kind === "global" ? { scope: "global" } : { scope: "project", projectId: parsed.projectId });
+		void appLogger.info("config", "pi mcp list finished", {
+			scope: parsed.kind,
+			servers: result.servers.length,
+			errors: result.errors.length,
+			connected: result.servers.filter((server) => server.state === "connected").length,
+		});
+		return result;
+	});
+
+	ipcMain.handle(ipcChannels.mcpLogin, (event, server: unknown, timeoutSec: unknown, scope: unknown, operationId: unknown) => {
+		if (typeof server !== "string" || !server.trim() || server.length > 128) {
+			return Promise.resolve({ ok: false, output: "invalid server name" });
+		}
+		const seconds = typeof timeoutSec === "number" && Number.isFinite(timeoutSec) && timeoutSec > 0 ? Math.min(Math.floor(timeoutSec), 600) : 240;
+		const parsed = parseMcpScopeRequest(scope);
+		const operation = typeof operationId === "string" && operationId.length <= 128 ? operationId : undefined;
+		const webContents = event.sender;
+		return getPiMcpCli()
+			.login(parsed.kind === "global" ? { scope: "global" } : { scope: "project", projectId: parsed.projectId }, server.trim(), seconds, {
+				operationId: operation,
+				onUrl: (url) => {
+					// WSL 下 pi 自动开浏览器经常失败；把授权 URL 推给 UI 内嵌兜底（不弹 toast，见计划 M2）。
+					// 带 operationId + scope：迟到结果不会串到别的 server/作用域/已关闭页面。
+					if (!webContents.isDestroyed()) webContents.send(ipcChannels.mcpLoginUrl, { server: server.trim(), scope: parsed, operationId: operation, url });
+				},
+			})
+			.catch((error: unknown) => ({ ok: false as const, output: error instanceof Error ? error.message : String(error) }));
+	});
+
+	ipcMain.handle(ipcChannels.mcpLogout, async (_event, server: unknown, scope: unknown) => {
+		if (typeof server !== "string" || !server.trim() || server.length > 128) {
+			return { ok: false, output: "invalid server name" };
+		}
+		const parsed = parseMcpScopeRequest(scope);
+		return getPiMcpCli().logout(parsed.kind === "global" ? { scope: "global" } : { scope: "project", projectId: parsed.projectId }, server.trim());
+	});
+	// ── pi 原生资源配置（内置扩展开关 + 四类资源数组）──
+	// 只改 pi 自己认识的字段；未知字段、用户 glob 与显式路径一律保留（见计划 A2/A4）。
+	const getPiResources = (): import("../config/PiResourceConfigService").PiResourceConfigService => {
+		piResourceService ??= new PiResourceConfigService(
+			{
+				globalSettingsPath: () => join(configManager.getConfigDir(), "settings.json"),
+				resolveProject: async (projectId) => {
+					const root = projectResourceManager.getProjectRoot(projectId);
+					const trusted = isProjectTrusted ? await isProjectTrusted(projectId, root) : false;
+					return { root, trusted };
+				},
+			},
+			new PiResourceStateStore(join(app.getPath("userData"), "pi-native-resources.json")),
+			{ projectTrust: (projectId, root) => (isProjectTrusted ? isProjectTrusted(projectId, root) : Promise.resolve(false)) },
+		);
+		return piResourceService;
+	};
+	ipcMain.handle(ipcChannels.piResourcesSummary, async (_event, scope: unknown) => {
+		const parsed = parseMcpScopeRequest(scope);
+		return getPiResources().readSummary(parsed.kind === "global" ? { scope: "global" } : { scope: "project", projectId: parsed.projectId });
+	});
+	ipcMain.handle(ipcChannels.piResourcesSetBuiltin, async (_event, input: unknown) => {
+		if (!isUnknownRecord(input)) throw new Error("Invalid built-in extension input.");
+		const parsed = parseMcpScopeRequest(input.scope);
+		const name = input.name;
+		const enabled = input.enabled;
+		if (typeof name !== "string" || typeof enabled !== "boolean") throw new Error("Invalid built-in extension input.");
+		const result = await getPiResources().setBuiltinEnabled(parsed.kind === "global" ? { scope: "global" } : { scope: "project", projectId: parsed.projectId }, name as import("../../shared/types/piResources").PiBuiltinExtension, enabled, {
+			expectedRevision: typeof input.expectedRevision === "string" ? input.expectedRevision : undefined,
+		});
+		void appLogger.info("config", "pi built-in extension toggled", { scope: parsed.kind, name, enabled, ok: result.ok });
+		return result;
 	});
 	// 只读：pi 全局配置目录，供源文件编辑页标注实际路径（渲染层不感知配置位置）。
 	ipcMain.handle(ipcChannels.configGetDir, () => configManager.getConfigDir());
@@ -1965,6 +2126,50 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 				error: error instanceof Error ? error.message : String(error),
 			});
 			return { ok: false, modelCount: 0, piSaved: false, dshSaved: false, error: "TokenDance install failed" };
+		}
+	});
+	ipcMain.handle(ipcChannels.configTokendanceTopUpCreate, async (_event, payload: unknown) => {
+		// 用赋值与开支付接口同一个 Key（该 Key 所属账户）；未装配 = 主进程无充值能力（预览/测试壳）。
+		if (!tokendancePayment) return { ok: false, code: "not-configured" } as const;
+		// 边界校验：amount 必须是整数元（渲染层入参不可信）；范围判定与渲染层提示共用同一份常量。
+		const amount = payload && typeof payload === "object" ? (payload as { amount?: unknown }).amount : undefined;
+		const result = await tokendancePayment.createSession(amount);
+		if (result.ok) {
+			// 只记金额与到期时间，不记会话 ID / payment_url（含渠道参数，无诊断价值）。
+			void appLogger.info("config", "TokenDance top-up session created", { amount: result.session.amount, expiredAt: result.session.expiredAt });
+		} else {
+			void appLogger.warn("config", "TokenDance top-up session failed", { code: result.code, detail: result.detail });
+		}
+		return result;
+	});
+	ipcMain.handle(ipcChannels.configTokendanceTopUpStatus, async (_event, payload: unknown) => {
+		if (!tokendancePayment) return { ok: false, code: "not-configured" } as const;
+		// 边界校验：statusUrl 必须是非空字符串；同源 + 路径前缀白名单在 store 内判定（不信任渲染层）。
+		const statusUrl = payload && typeof payload === "object" ? (payload as { statusUrl?: unknown }).statusUrl : undefined;
+		if (typeof statusUrl !== "string" || !statusUrl) {
+			return { ok: false, code: "bad-status-url" } as const;
+		}
+		const result = await tokendancePayment.fetchSession(statusUrl);
+		// 轮询是常态（每 3s 一次），失败只在主进程记 warn，不刷 info 日志。
+		if (!result.ok) void appLogger.warn("config", "TokenDance top-up status failed", { code: result.code, detail: result.detail });
+		return result;
+	});
+	ipcMain.handle(ipcChannels.configTokendanceTopUpOpenAlipay, async (_event, payload: unknown) => {
+		// 浏览器支付宝深链：只允许 alipays://（渲染层入参不可信），否则 shell.openExternal
+		// 会变成任意协议启动器；必须在用户点击后调用，不得由渲染层自动触发。
+		const url = payload && typeof payload === "object" ? (payload as { url?: unknown }).url : undefined;
+		if (typeof url !== "string" || url.length > 4096 || !/^alipays:\/\/\S+$/i.test(url)) {
+			return { ok: false, error: "Invalid alipay deep link" } as const;
+		}
+		try {
+			await shell.openExternal(url);
+			return { ok: true } as const;
+		} catch (error) {
+			// 未安装支付宝/浏览器拦截：返回失败让渲染层提示改用扫码，不抛异常。
+			void appLogger.warn("config", "TokenDance alipay deep link failed", {
+				error: error instanceof Error ? error.message : String(error),
+			});
+			return { ok: false, error: "TokenDance alipay deep link failed" } as const;
 		}
 	});
 	ipcMain.handle(ipcChannels.configTestProvider, async (_event, payload: unknown) => {

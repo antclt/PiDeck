@@ -34,7 +34,7 @@ import type { RecentSessionRow } from "./activitySessionsModel";
 /** 与 `SessionTree.sessionRowClass` 逐字一致（history-session-row 的历史样式基座）。
  *  `tests/sidebarActivityRecent.test.mjs` 有逐字一致性断言：改这里必须同步 SessionTree。 */
 const recentRowClass =
-	"group/resource conversation agent-row relative flex min-h-8 w-full items-center gap-1.5 rounded-lg border border-transparent px-2 py-0 text-left text-body text-foreground shadow-none transition-[background-color,border-color,box-shadow] duration-200 hover:border-border-subtle hover:bg-muted/60 hover:text-foreground focus-visible:bg-muted/70 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset";
+	"group/resource conversation agent-row relative flex min-h-8 w-full items-center gap-1.5 rounded-lg border border-transparent px-2 py-0 text-left text-body text-foreground shadow-none transition-[background-color,border-color,box-shadow] duration-base hover:border-border-subtle hover:bg-muted/60 hover:text-foreground focus-visible:bg-muted/70 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset";
 
 /** 与 `SessionTree.selectedRowClass` 逐字一致：选中底用 active 面，不用描边。 */
 const selectedRowClass = "active bg-bg-active text-foreground";

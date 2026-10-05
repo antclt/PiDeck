@@ -13,7 +13,7 @@ export function WorkbenchFileTabs(props: { tabs: readonly WorkbenchEditorTabItem
 						role="tab"
 						aria-selected={tab.active}
 						title={tab.title}
-						className={cn("max-w-48 truncate rounded px-2 py-1 text-xs", tab.active ? "bg-muted text-foreground" : "text-muted-foreground", tab.preview && "italic")}
+						className={cn("max-w-48 truncate rounded px-2 py-1 text-xs", tab.active ? "bg-bg-active text-text-primary" : "text-muted-foreground", tab.preview && "italic")}
 						onClick={() => props.onSelect(tab.id)}
 						onDoubleClick={() => props.onPromote(tab.id)}
 					>

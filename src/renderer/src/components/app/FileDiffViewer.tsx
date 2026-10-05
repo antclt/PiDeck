@@ -2,7 +2,7 @@ import type { ProjectFileAccessScope } from "../../../../shared/types";
 import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
 import { useSetAtom } from "jotai";
 import { t } from "../../i18n";
-import { ArrowLeft, Maximize, Minimize2, Rows2, SquareSplitHorizontal, X, Eye, FileCode } from "lucide-react";
+import { ArrowLeft, Maximize, Minimize2, Rows2, SquareSplitHorizontal, X, Eye, FileCode, Loader2 } from "lucide-react";
 import { Button } from "../ui-shadcn/button";
 import { cn } from "../../lib/utils";
 import { MarkdownStream } from "../session/MarkdownStream";
@@ -476,7 +476,15 @@ export function FileDiffViewer(props: {
 				</div>
 			</div>
 			<div className="file-diff-body">
-				{loading && <div className="file-diff-loading">{t("common.loading")}</div>}
+				{/* 加载态补 spinner，与 Git 树 ResourceRow 的 Loader2 动效同语言；外层 .file-diff-loading 是 grid 居中，内层用 inline-flex 排图标+文案 */}
+				{loading && (
+					<div className="file-diff-loading">
+						<span className="inline-flex items-center gap-2">
+							<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+							{t("common.loading")}
+						</span>
+					</div>
+				)}
 				{error && <div className="file-diff-error">{error}</div>}
 				{!loading && !error && (
 					<>
@@ -515,8 +523,9 @@ export function FileDiffViewer(props: {
 												display: "grid",
 												placeItems: "center",
 											}}
-											className="text-caption text-foreground/50"
+											className="flex items-center justify-center gap-2 text-caption text-foreground/50"
 										>
+											<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
 											{t("common.loading")}
 										</div>
 									}
@@ -538,8 +547,9 @@ export function FileDiffViewer(props: {
 												display: "grid",
 												placeItems: "center",
 											}}
-											className="text-caption text-foreground/50"
+											className="flex items-center justify-center gap-2 text-caption text-foreground/50"
 										>
+											<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
 											{t("common.loading")}
 										</div>
 									}

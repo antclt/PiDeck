@@ -25,10 +25,9 @@
   height: min(850px, calc(100vh - 48px));
   display: flex;
   flex-direction: column;
-  border-radius: var(--radius-lg);
-  background: var(--color-bg-panel);
-  box-shadow: var(--shadow-xl);
-  overflow: hidden;
+  /* 外壳属性(border-radius/background/box-shadow/overflow)已删：这些由 DialogContent 的
+     rounded-lg / bg-background / shadow-lg / overflow-hidden utility 提供，双源时
+     胜者取决于层序注入顺序，属定时炸弹（2027-03 收口）。 */
 }
 .codex-import-modal .modal-header small {
   display: block;
@@ -196,8 +195,9 @@
   color: var(--color-info);
 }
 .codex-status.subagent {
-  background: color-mix(in srgb, #6366f1 14%, var(--color-bg-panel));
-  color: #6366f1;
+  /* 子代理身份色与 --color-thinking 同源（#6366f1 靛蓝），不再裸写色值 */
+  background: color-mix(in srgb, var(--color-thinking) 14%, var(--color-bg-panel));
+  color: var(--color-thinking);
 }
 .codex-subagent-toggle {
   justify-self: start;
@@ -282,244 +282,17 @@
   align-items: flex-end;
   gap: 5px;
 }
-.outline-zone {
-  position: relative;
-  width: 30px;
-  height: 30px;
-}
-.outline-trigger {
-  width: 30px;
-  height: 30px;
-  border: 1px solid var(--color-border-subtle);
-  background: var(--color-bg-panel);
-  color: var(--color-text-tertiary);
-  border-radius: var(--radius-lg);
-  padding: 0;
-  display: grid;
-  place-items: center;
-  font-size: var(--font-size-body);
-  cursor: ns-resize;
-  touch-action: none;
-}
-.outline-trigger:hover {
-  color: var(--color-accent);
-  border-color: var(--color-accent);
-}
-.outline-trigger.is-disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-.outline-trigger.is-disabled:hover {
-  color: var(--color-text-tertiary);
-  border-color: var(--color-border-subtle);
-}
-.conversation-outline {
-  position: absolute;
-  right: 0;
-  top: 0;
-  transform: translateX(8px);
-  width: 280px;
-  max-height: 70vh;
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--color-bg-panel);
-  opacity: 0;
-  pointer-events: none;
-  transition:
-    opacity 0.14s ease,
-    transform 0.14s ease;
-}
-.outline-zone:hover .conversation-outline,
-.outline-hover.dragging .conversation-outline {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateX(0);
-}
-.outline-zone:hover .outline-trigger:not(.is-disabled),
-.outline-hover.dragging .outline-trigger:not(.is-disabled) {
-  /* 大纲面板展开时按钮半透明保留：既让位给面板，也不至于「移入即消失」的割裂感 */
-  opacity: 0.4;
-}
-.outline-title {
-  padding: 8px 8px 6px;
-  color: var(--color-text-tertiary);
-  font-size: var(--font-size-caption);
-  white-space: nowrap;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-  cursor: default;
-}
-.outline-drag-handle {
-  display: inline-grid;
-  place-items: center;
-  width: 18px;
-  height: 20px;
-  border-radius: var(--radius-md);
-  color: var(--color-text-tertiary);
-  cursor: ns-resize;
-  touch-action: none;
-  font-size: var(--font-size-control);
-  line-height: 1;
-}
-.outline-drag-handle:hover {
-  background: var(--color-bg-active);
-  color: var(--color-accent);
-}
-.outline-count {
-  background: var(--color-bg-hover);
-  color: var(--color-text-tertiary);
-  font-family: var(--font-family-business);
-  font-size: var(--font-size-micro);
-  padding: 1px 6px;
-  border-radius: 999px;
-  font-variant-numeric: tabular-nums;
-}
-.outline-list {
-  overflow-y: auto;
-  padding: 0 4px 6px;
-}
-.outline-expand {
-  width: 100%;
-  border: 0;
-  border-radius: var(--radius-lg);
-  background: var(--color-bg-active);
-  color: var(--color-accent);
-  padding: 6px 8px;
-  font-size: var(--font-size-caption);
-  cursor: pointer;
-  margin-bottom: 4px;
-}
-.outline-expand:hover {
-  background: var(--color-accent-soft);
-}
-.conversation-outline button {
-  width: 100%;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  border: 0;
-  border-radius: var(--radius-lg);
-  background: transparent;
-  padding: 7px 8px;
-  text-align: left;
-  color: var(--color-text-secondary);
-}
-.conversation-outline button:hover {
-  /* 目录项 hover 用主题色淡背景（与下拉高亮一致，跟随 data-accent），不用品牌绿左边框 */
-  background: var(--color-accent-soft);
-  color: var(--color-text-primary);
-}
-.conversation-outline strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--font-size-caption);
-  font-weight: 500;
-}
-.conversation-outline span {
-  color: var(--color-text-tertiary);
-  font-size: var(--font-size-micro);
-}
-.conversation-outline .outline-user strong {
-  color: var(--color-info);
-}
-.scratch-pad-entry {
-  position: static;
-  width: 30px;
-  height: 30px;
-  border: 1px solid var(--color-border-subtle);
-  background: var(--color-bg-panel);
-  color: var(--color-text-tertiary);
-  border-radius: var(--radius-lg);
-  padding: 0;
-  display: grid;
-  place-items: center;
+/* 任务清单勾选框：跟随主题 accent 色（不用浏览器默认蓝），尺寸对齐 13px 正文行高，焦点环与全局一致 */
+.scratch-pad-checkbox {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--color-accent);
   cursor: pointer;
 }
-.scratch-pad-entry:hover,
-.scratch-pad-entry.active {
-  color: var(--color-accent);
-  border-color: var(--color-accent);
-}
-.terminal-entry {
-  position: static;
-  width: 30px;
-  height: 30px;
-  border: 1px solid var(--color-border-subtle);
-  background: var(--color-bg-panel);
-  color: var(--color-text-tertiary);
-  border-radius: var(--radius-lg);
-  padding: 0;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-}
-.terminal-entry:hover,
-.terminal-entry.active {
-  color: var(--color-accent);
-  border-color: var(--color-accent);
-}
-.files-entry {
-  position: static;
-  width: 30px;
-  height: 30px;
-  border: 1px solid var(--color-border-subtle);
-  background: var(--color-bg-panel);
-  color: var(--color-text-tertiary);
-  border-radius: var(--radius-lg);
-  padding: 0;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-}
-.files-entry:hover,
-.files-entry.active {
-  color: var(--color-accent);
-  border-color: var(--color-accent);
-}
-.git-entry {
-  position: static;
-  width: 30px;
-  height: 30px;
-  border: 1px solid var(--color-border-subtle);
-  background: var(--color-bg-panel);
-  color: var(--color-text-tertiary);
-  border-radius: var(--radius-lg);
-  padding: 0;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-}
-.git-entry:hover,
-.git-entry.active {
-  color: var(--color-accent);
-  border-color: var(--color-accent);
-}
-.git-entry:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-.editors-entry {
-  position: static;
-  width: 30px;
-  height: 30px;
-  border: 1px solid var(--color-border-subtle);
-  background: var(--color-bg-panel);
-  color: var(--color-text-tertiary);
-  border-radius: var(--radius-lg);
-  padding: 0;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-}
-.editors-entry:hover,
-.editors-entry.active {
-  color: var(--color-accent);
-  border-color: var(--color-accent);
+.scratch-pad-checkbox:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
 }
 
 /* 内置浏览器入口按钮，样式与 editors-entry 一致，保持视觉统一 */
@@ -575,28 +348,6 @@
   background: var(--color-bg-hover);
   color: var(--color-text-primary);
 }
-
-/* 标签栏右侧操作区（全屏/关闭按钮） */
-
-
-
-
-
-/* 设备 UA 切换：自绘菜单，避免原生 select 与桌面 UI 风格不一致。 */
-.browser-device-trigger:hover,
-.browser-device-trigger.active {
-  color: var(--color-accent);
-  border-color: var(--color-accent);
-  background: var(--color-bg-hover);
-}
-.browser-device-menu-item:hover,
-.browser-device-menu-item.active {
-  background: var(--color-bg-hover);
-  color: var(--color-accent);
-}
-
-
-
 
 .browser-webview {
   flex: 1;
@@ -687,14 +438,13 @@
 .settings-tabs button:hover .settings-tab-icon {
   color: var(--color-text-secondary);
 }
-.settings-tabs button.active .settings-tab-icon {
-  color: var(--color-accent);
-}
 .settings-tab-icon:hover {
   color: var(--color-text-secondary);
 }
+/* 选中态图标用 primary（=accent 同色相的语义强调色）：--color-accent 是「面」色，
+   不作字色/图标色（AGENTS CSS 第 5 条）。 */
 .settings-tabs [data-state="active"] .settings-tab-icon {
-  color: var(--color-accent);
+  color: var(--color-primary);
 }
 .modal-header {
   height: 68px;
@@ -768,56 +518,6 @@
   font-weight: 600;
   font-family: var(--font-family-business);
   font-variant-numeric: tabular-nums;
-}
-
-/* Agent 状态徽章 */
-
-.agent-status-badge.status-running {
-  background: color-mix(
-    in srgb,
-    var(--color-success) 12%,
-    var(--color-bg-panel)
-  );
-  border-color: color-mix(
-    in srgb,
-    var(--color-success) 22%,
-    var(--color-border-subtle)
-  );
-  color: var(--color-success);
-}
-
-.agent-status-badge.status-idle {
-  background: var(--color-chat-card-bg);
-  color: var(--color-text-secondary);
-}
-
-.agent-status-badge.status-starting {
-  background: color-mix(
-    in srgb,
-    var(--color-warning) 12%,
-    var(--color-bg-panel)
-  );
-  border-color: color-mix(
-    in srgb,
-    var(--color-warning) 22%,
-    var(--color-border-subtle)
-  );
-  color: var(--color-warning);
-  animation: pulse-badge 2s ease-in-out infinite;
-}
-
-.agent-status-badge.status-error {
-  background: color-mix(
-    in srgb,
-    var(--color-danger) 10%,
-    var(--color-bg-panel)
-  );
-  border-color: color-mix(
-    in srgb,
-    var(--color-danger) 22%,
-    var(--color-border-subtle)
-  );
-  color: var(--color-danger);
 }
 
 @keyframes pulse-badge {
@@ -962,29 +662,6 @@
   background: var(--color-bg-muted);
   box-sizing: border-box;
 }
-.model-favorite-star {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  color: var(--color-text-quaternary);
-  cursor: pointer;
-  transition:
-    color 0.15s,
-    transform 0.15s;
-  border-radius: var(--radius-pill);
-}
-
-.model-favorite-star:hover {
-  color: var(--color-warning);
-  transform: scale(1.15);
-}
-
-.model-favorite-star.favorited {
-  color: var(--color-warning);
-}
 
 @keyframes toast-in {
   from {
@@ -1031,6 +708,9 @@
   color: var(--color-text-primary);
   /* 与 config-main 统一：内容区用面板白 */
   background: var(--color-bg-panel);
+  /* tab 切换入场：内层 TabsContent 按 tab 条件挂载，挂载即播一次淡入；
+     全局 reduced-motion 规则会把它压成单帧。 */
+  animation: fadeIn 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 /* 设置分区与设置行已迁移 UI 2.0（Tailwind + shadcn，见 settings/SettingRows.tsx）：
@@ -1119,6 +799,7 @@
   padding: var(--space-5);
   background: color-mix(in srgb, var(--color-bg-app) 62%, transparent);
   backdrop-filter: blur(4px);
+  animation: fadeIn 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .config-update-dialog {
@@ -1131,6 +812,7 @@
   border-radius: var(--radius-lg);
   background: var(--color-bg-panel);
   box-shadow: var(--shadow-lg);
+  animation: dialogOverlayIn var(--transition-base) var(--ease-out);
 }
 
 .config-update-dialog-header,
@@ -1143,23 +825,8 @@
 
 .config-update-dialog .setting-update-output {
   margin: 0;
-}
-
-.setting-path,
-.setting-error-detail {
+}.setting-path{
   word-break: break-all;
-}
-
-/* pi 路径管理面板 */
-.setting-pi-path-panel {
-  margin: 4px 0 8px;
-}
-/* pi 路径 / WSL 字段的旧 setting-field 布局规则已随 UI 2.0 迁移删除 */
-.setting-pi-path-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
 }
 .setting-wsl-fields {
   display: flex;
@@ -1215,6 +882,7 @@
   border-radius: 50%;
   flex-shrink: 0;
   margin-top: 4px;
+  transition: background-color var(--transition-base) ease, box-shadow var(--transition-base) ease;
 }
 .pi-status-dot.online {
   background: var(--color-success, #22c55e);
@@ -1277,12 +945,6 @@
   vertical-align: middle;
   flex-shrink: 0;
   animation: setting-dirty-pulse 2s ease-in-out infinite;
-}
-.setting-field > span,
-.setting-section-header strong {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
 }
 @keyframes setting-dirty-pulse {
   0%, 100% { opacity: 1; }
@@ -1475,9 +1137,6 @@
   background: var(--color-bg-panel);
 }
 
-
-
-
 /* ── 技能商店二级 tab 栏 ──────────────────────────── */
 .skills-store-content {
   display: flex;
@@ -1625,17 +1284,6 @@
   align-items: center;
   gap: 6px;
 }
-.skillhub-install-result.success {
-  background: var(--color-accent-soft);
-  color: var(--color-accent-strong);
-  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
-}
-.skillhub-install-result.error {
-  background: var(--color-danger-soft);
-  color: var(--color-danger);
-  border: 1px solid color-mix(in srgb, var(--color-danger) 30%, transparent);
-}
-
 
 @keyframes fadeInUp {
   from {
@@ -1650,8 +1298,6 @@
 
 /* 确认对话框 */
 
-
-
 /* a 标签用作按钮时（如在线文档链接）补全 flex 布局 */
 
 /* 在段落中作为链接使用的 button，保持文本链接外观并继承字体 */
@@ -1664,15 +1310,7 @@
 }
 .config-link-like:hover {
   color: var(--color-accent-strong);
-}
-
-/* 批量选择 checkbox */
-
-/* 确认对话框中的危险按钮（红色背景） */
-
-.config-toolbar-actions,
-.config-model-list-actions,
-.config-test-controls {
+}.config-test-controls{
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1726,95 +1364,21 @@
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
   }
-}
-
-:root[data-theme="dark"] .search-box,
-:root[data-theme="dark"] .composer-box,
-:root[data-theme="dark"] .feedback-body textarea,
-:root[data-theme="dark"] .setting-field input,
-:root[data-theme="dark"] .config-add-provider-row input,
-:root[data-theme="dark"] .config-provider-card,
-:root[data-theme="dark"] .config-provider-form,
-:root[data-theme="dark"] .config-form-card,
-:root[data-theme="dark"] .config-model-card,
-:root[data-theme="dark"] .config-field input,
-:root[data-theme="dark"] .config-field select,
-:root[data-theme="dark"] .config-field textarea,
-:root[data-theme="dark"] .session-card,
-:root[data-theme="dark"] .codex-session-row,
-/* settings-layout / config 侧栏与内容同底，暗色不再单独叠 muted 灰面 */
-:root[data-theme="dark"] .feedback-body,
-:root[data-theme="dark"] .codex-import-toolbar,
-:root[data-theme="dark"] .config-provider-body {
+}:root[data-theme="dark"] .search-box, :root[data-theme="dark"] .composer-box, :root[data-theme="dark"] .config-provider-card, :root[data-theme="dark"] .config-provider-form, :root[data-theme="dark"] .config-field input, :root[data-theme="dark"] .config-field select, :root[data-theme="dark"] .config-field textarea, :root[data-theme="dark"] .session-card, :root[data-theme="dark"] .codex-session-row, :root[data-theme="dark"] .codex-import-toolbar, :root[data-theme="dark"] .config-provider-body{
   background: var(--color-bg-muted);
   color: var(--color-text-primary);
-}
-
-:root[data-theme="dark"] .setting-proxy-panel,
-:root[data-theme="dark"] .setting-pi-path-panel,
-:root[data-theme="dark"] .feedback-report-block,
-:root[data-theme="dark"] .codex-import-modal,
-:root[data-theme="dark"] .context-menu,
-:root[data-theme="dark"] .branch-dropdown {
+}:root[data-theme="dark"] .setting-proxy-panel, :root[data-theme="dark"] .codex-import-modal, :root[data-theme="dark"] .context-menu{
   background: var(--color-bg-panel);
   color: var(--color-text-primary);
   border-color: var(--color-border-subtle);
-}
-
-:root[data-theme="dark"] .modal-header,
-:root[data-theme="dark"] .config-primary-tabs,
-:root[data-theme="dark"] .config-tabs,
-:root[data-theme="dark"] .settings-tabs,
-:root[data-theme="dark"] .feedback-actions {
+}:root[data-theme="dark"] .modal-header, :root[data-theme="dark"] .settings-tabs, :root[data-theme="dark"] .feedback-actions{
   background: var(--color-bg-panel);
   border-color: var(--color-border-subtle);
-}
-
-:root[data-theme="dark"] .feedback-report-block pre,
-:root[data-theme="dark"] .update-notes,
-:root[data-theme="dark"] pre,
-:root[data-theme="dark"] code {
+}:root[data-theme="dark"] pre, :root[data-theme="dark"] code{
   background: var(--color-code-bg);
   color: var(--color-code-text);
   border-color: var(--color-border-subtle);
 }
-
-/* 头部导出/导入按钮：完全覆盖 .modal-header button 的固定宽高，回归 config-btn 原始尺寸 */
-
-/* 配置弹窗关闭按钮 */
-
-
-.config-icon-btn.danger:hover {
-  background: var(--color-danger-soft);
-  color: var(--color-danger);
-}
-
-.config-add-provider-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-bottom: 14px;
-}
-
-.config-add-provider-row input {
-  flex: 1;
-  /* 与工具栏 sm 按钮同高，避免新增供应商行输入偏高 */
-  height: var(--control-height-md);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-sm);
-  padding: 0 12px;
-  font-size: var(--font-size-control);
-  background: var(--color-bg-panel);
-  color: var(--color-text-primary);
-}
-
-.config-add-provider-row input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: var(--focus-ring);
-}
-
-
 
 .config-provider-card.expanded {
   /* 展开态使用轻量绿色强调，避免强描边抢走弹窗主体层级；允许自定义下拉菜单溢出显示。 */
@@ -1825,28 +1389,11 @@
   );
   box-shadow: var(--shadow-border);
   overflow: visible;
-}
-
-
-
-
-
-
-
-
-
-
-
-.config-advanced-preserved a,
-.config-model-advanced-note a,
-.config-diagnostic-card a {
+}.config-diagnostic-card a{
   color: var(--color-accent);
   text-decoration: none;
   font-weight: 500;
-}
-.config-advanced-preserved a:hover,
-.config-model-advanced-note a:hover,
-.config-diagnostic-card a:hover {
+}.config-diagnostic-card a:hover{
   text-decoration: underline;
 }
 .config-diagnostic-card {
@@ -1889,7 +1436,6 @@
   flex-wrap: wrap;
 }
 
-
 .config-base-url-field {
   display: flex;
   flex-direction: column;
@@ -1897,8 +1443,6 @@
   min-width: 0;
   width: 100%;
 }
-
-
 
 .config-header-field {
   /* 预设下拉 + 自定义输入纵向堆叠：每个控件占满整行，
@@ -1920,8 +1464,6 @@
   font-size: var(--font-size-caption);
   line-height: 1.35;
 }
-
-
 
 .config-select-trigger {
   width: 100%;
@@ -1951,24 +1493,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-
-
-
-
-.config-combobox-menu button:hover,
-.config-combobox-menu button.active {
-  background: var(--color-bg-active);
-  color: var(--color-accent);
-}
-/* config-combobox 在 form-row 右侧列保持 padding-right 以避开切换按钮。
-   只匹配直接子元素，避免误伤嵌套在 .config-header-field 内的 ConfigSelect。 */
-.config-form-row > .config-combobox {
-  grid-column: 2;
-}
-.config-form-row .config-combobox input {
-  padding-right: 38px;
 }
 
 .config-models-section {
@@ -2028,115 +1552,7 @@
   white-space: nowrap;
 }
 
-
-
-
-
-
-
-
-.config-card-details.empty {
-  display: none;
-}
-
-
-.config-auth-card.editing {
-  /* 与 Models provider 展开态保持一致，Auth 不再像裸表单直接贴在列表中。 */
-  border-color: color-mix(
-    in srgb,
-    var(--color-accent) 32%,
-    var(--color-border-subtle)
-  );
-  box-shadow: var(--shadow-border);
-}
-
-
-
-
-
-/* Auth 使用指南 */
-
-/* Provider 配置指南 */
-
-/* Auth 供应商选择器 */
-/* 服务商选择器中来自 models.json 的分隔线 */
-.config-auth-selector-item.selected {
-  border-color: var(--color-accent);
-  background: color-mix(
-    in srgb,
-    var(--color-accent) 10%,
-    var(--color-bg-panel)
-  );
-  font-weight: 500;
-}
-.config-auth-selector-item.configured {
-  opacity: 0.6;
-}
-
-
-
-
-
-
-
-/* enabledModels 下拉多选 */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-.config-enabled-models-glob-add.selected {
-  border-color: var(--color-danger);
-  background: color-mix(in srgb, var(--color-danger) 6%, transparent);
-}
-
-
-
-
-
-.config-enabled-models-option.selected {
-  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-bg-panel));
-}
-
-
-
-.config-enabled-models-option.selected .config-enabled-models-checkbox {
-  border-color: var(--color-accent);
-  background: var(--color-accent);
-  /* 文字色跟随 inverse token：暗色模式 accent 反转为浅色，写死 white 会白底白字 */
-  color: var(--color-text-inverse);
-}
-
-
-
-
-/* 供应商分组 */
-
-
-
-
-
-.config-enabled-provider-header.collapsed::before {
-  transform: rotate(-90deg);
-}
-
-
-
-
-
 /* Settings 行内 combobox：复用 config-combobox 样式，适配 settings-row 布局 */
-
 
 .config-checkbox-label {
   display: flex !important;
@@ -2171,8 +1587,6 @@
   gap: 6px;
 }
 
-
-
 .config-model-chip.selected {
   border-color: color-mix(
     in srgb,
@@ -2192,17 +1606,6 @@
   opacity: 0.68;
   background: var(--color-bg-muted);
 }
-
-
-
-
-
-
-.config-model-combobox-check.checked {
-  border-color: var(--color-accent);
-  background: var(--color-accent);
-}
-
 
 /* 测试连接结果面板 */
 .config-test-result {
@@ -2258,23 +1661,6 @@
   gap: 6px;
 }
 
-
-
-
-
-
-.config-test-request-url,
-.config-test-request-body {
-  font-family: var(--font-family-mono);
-  font-size: var(--font-size-caption);
-  background: var(--color-bg-muted);
-  padding: 3px 8px;
-  border-radius: var(--radius-sm);
-  word-break: break-all;
-  color: var(--color-text-primary);
-  line-height: 1.6;
-}
-
 .config-test-hint {
   margin-top: 8px;
   padding: 8px 10px;
@@ -2302,29 +1688,6 @@
   outline: none;
   border-color: var(--color-accent);
   box-shadow: var(--focus-ring);
-}
-
-/* 源文件编辑已迁移到 CodeMirrorEditor（语法高亮/折叠/JSON lint），旧 textarea 样式随其移除。 */
-
-/* ── 信任目录 ─────────────────────────────────────────── */
-
-.config-trust-tab .config-toolbar {
-  align-items: flex-start;
-  gap: var(--space-4);
-}
-
-.config-trust-tab .config-toolbar strong {
-  display: block;
-  color: var(--color-text-primary);
-  font-size: var(--font-size-heading);
-  line-height: var(--line-height-heading);
-}
-
-.config-trust-tab .config-toolbar p {
-  margin: var(--space-1) 0 0;
-  color: var(--color-text-tertiary);
-  font-size: var(--font-size-caption);
-  line-height: var(--line-height-body);
 }
 
 .config-trust-add {
@@ -2740,32 +2103,6 @@
   align-items: center;
 }
 
-/* 调试按钮 */
-.debug-toggle.active {
-  border-color: color-mix(
-    in srgb,
-    var(--color-accent) 32%,
-    var(--color-border-subtle)
-  );
-  background: var(--color-bg-active);
-  color: var(--color-accent);
-}
-
-/* ── 本次会话修改文件区域 ─────────────────────── */
-
-.modified-file-row.running {
-  color: var(--color-text-secondary);
-}
-
-.modified-file-icon.done {
-  color: var(--color-accent);
-}
-
-.modified-file-row.running .modified-file-icon {
-  color: var(--color-warning);
-  animation: pulse-running 1.5s ease-in-out infinite;
-}
-
 /* 会话文件摘要卡片：位于输入框上方、扩展 widget 下方，默认可折叠。 */
 .session-file-summary-list-card {
   max-width: 100%;
@@ -2799,7 +2136,7 @@
 }
 
 .session-file-summary-header:focus-visible {
-  outline: var(--focus-ring);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: -2px;
 }
 
@@ -2934,10 +2271,6 @@ div.fixed.inset-0.z-50 {
   display: grid;
   gap: var(--space-3);
 }
-.skills-tab .config-toolbar > div:first-child {
-  display: grid;
-  gap: 4px;
-}
 .skills-restart-hint {
   color: var(--color-text-tertiary);
   font-size: var(--font-size-caption);
@@ -2945,10 +2278,6 @@ div.fixed.inset-0.z-50 {
 .skills-toolbar-actions {
   display: flex;
   gap: 8px;
-}
-.skills-list {
-  display: grid;
-  gap: var(--space-2);
 }
 .skill-badges {
   display: flex;
@@ -2974,23 +2303,7 @@ div.fixed.inset-0.z-50 {
 .skill-state.invalid {
   background: var(--color-danger-soft);
   color: var(--color-danger);
-}
-.skill-card-actions {
-  align-items: center;
-}
-
-:root[data-theme="dark"] .config-card,
-:root[data-theme="dark"] .config-provider-card,
-:root[data-theme="dark"] .config-model-card,
-:root[data-theme="dark"] .config-model-item,
-:root[data-theme="dark"] .config-auth-card,
-:root[data-theme="dark"] .config-advanced-preserved,
-:root[data-theme="dark"] .config-model-advanced-note,
-:root[data-theme="dark"] .config-diagnostic-card,
-:root[data-theme="dark"] .extension-card,
-:root[data-theme="dark"] .session-delete-confirm,
-:root[data-theme="dark"] .conversation-outline,
-:root[data-theme="dark"] .toast {
+}:root[data-theme="dark"] .config-provider-card, :root[data-theme="dark"] .config-diagnostic-card, :root[data-theme="dark"] .toast{
   background: var(--color-bg-panel);
   color: var(--color-text-primary);
   border-color: var(--color-border-subtle);
@@ -3001,40 +2314,18 @@ div.fixed.inset-0.z-50 {
 :root[data-theme="dark"] select,
 :root[data-theme="dark"] button {
   color-scheme: dark;
-}
-
-:root[data-theme="dark"] .config-btn,
-:root[data-theme="dark"] .session-rename-button,
-:root[data-theme="dark"] .feedback-actions button,
-:root[data-theme="dark"] .update-actions button,
-:root[data-theme="dark"] .codex-import-actions button {
+}:root[data-theme="dark"] .config-btn, :root[data-theme="dark"] .session-rename-button, :root[data-theme="dark"] .feedback-actions button, :root[data-theme="dark"] .codex-import-actions button{
   background: var(--color-bg-panel);
   color: var(--color-text-primary);
   border-color: var(--color-border-subtle);
-}
-
-:root[data-theme="dark"] .config-btn:hover:not(:disabled),
-:root[data-theme="dark"] .session-rename-button:hover:not(:disabled),
-:root[data-theme="dark"] .feedback-actions button:hover,
-:root[data-theme="dark"] .update-actions button:hover,
-:root[data-theme="dark"] .codex-import-actions button:hover {
+}:root[data-theme="dark"] .config-btn:hover:not(:disabled), :root[data-theme="dark"] .session-rename-button:hover:not(:disabled), :root[data-theme="dark"] .feedback-actions button:hover, :root[data-theme="dark"] .codex-import-actions button:hover{
   background: var(--color-bg-hover);
   border-color: var(--color-border-strong);
-}
-
-:root[data-theme="dark"] .config-btn.primary,
-:root[data-theme="dark"] .feedback-actions button.primary,
-:root[data-theme="dark"] .update-actions button.primary,
-:root[data-theme="dark"] .codex-import-actions .primary-action {
+}:root[data-theme="dark"] .config-btn.primary, :root[data-theme="dark"] .feedback-actions button.primary, :root[data-theme="dark"] .codex-import-actions .primary-action{
   background: var(--color-accent);
   color: var(--color-text-inverse);
   border-color: var(--color-accent);
-}
-
-:root[data-theme="dark"] .conversation-title strong,
-:root[data-theme="dark"] .config-provider-name,
-:root[data-theme="dark"] .session-card strong,
-:root[data-theme="dark"] .codex-session-title strong {
+}:root[data-theme="dark"] .conversation-title strong, :root[data-theme="dark"] .session-card strong, :root[data-theme="dark"] .codex-session-title strong{
   color: var(--color-text-primary);
 }
 
@@ -3350,7 +2641,6 @@ div.fixed.inset-0.z-50 {
   -webkit-app-region: no-drag;
 }
 
-
 /* ── 渲染异常页（AppErrorBoundary）──────────────
  * 与系统一致的 shadcn 卡片语言：品牌 Logo + 状态胶囊 + 主次按钮，
  * 颜色全部走 token（明暗自适应），微动效只保留入场与状态点呼吸。
@@ -3549,36 +2839,11 @@ div.fixed.inset-0.z-50 {
   width: 26px;
 }
 
-
 .config-thinking-levels-row .config-select-trigger > span {
   font-size: 11px;
-}
-
-.config-thinking-levels-row .config-select-value {
-  font-size: 11px;
-}
-
-/* 壁纸模式下业务弹框只保留 DialogContent 这一层底色；布局容器透明，
+}/* 壁纸模式下业务弹框只保留 DialogContent 这一层底色；布局容器透明，
    否则 header 是一层、body 又叠一层同色面板，最终看起来像两个透明度。 */
-:root[data-bg-image="on"] .config-modal .config-layout,
-:root[data-bg-image="on"] .config-modal .config-sidebar,
-:root[data-bg-image="on"] .config-modal .config-main,
-:root[data-bg-image="on"] .config-modal .config-content,
-:root[data-bg-image="on"] .config-modal .config-provider-card,
-:root[data-bg-image="on"] .config-modal .config-provider-body,
-:root[data-bg-image="on"] .config-modal .config-provider-form,
-:root[data-bg-image="on"] .config-modal .config-models-section,
-:root[data-bg-image="on"] .config-modal .config-model-table,
-:root[data-bg-image="on"] .settings-modal .settings-layout,
-:root[data-bg-image="on"] .settings-modal .settings-tabs,
-:root[data-bg-image="on"] .settings-modal .settings-panel,
-:root[data-bg-image="on"] .project-resources-dialog .project-resources-body,
-:root[data-bg-image="on"] .feedback-modal-shell .feedback-body,
-:root[data-bg-image="on"] .feedback-modal-shell .feedback-environment-section,
-:root[data-bg-image="on"] .feedback-modal-shell .feedback-environment-content,
-:root[data-bg-image="on"] .feedback-modal-shell .feedback-actions,
-:root[data-bg-image="on"] .feedback-modal-shell .feedback-actions [data-slot="button"][data-variant="secondary"],
-:root[data-bg-image="on"] .environment-dialog .environment-body {
+:root[data-bg-image="on"] .config-modal .config-layout, :root[data-bg-image="on"] .config-modal .config-sidebar, :root[data-bg-image="on"] .config-modal .config-main, :root[data-bg-image="on"] .config-modal .config-content, :root[data-bg-image="on"] .config-modal .config-provider-card, :root[data-bg-image="on"] .config-modal .config-provider-body, :root[data-bg-image="on"] .config-modal .config-provider-form, :root[data-bg-image="on"] .config-modal .config-models-section, :root[data-bg-image="on"] .config-modal .config-model-table, :root[data-bg-image="on"] .settings-modal .settings-layout, :root[data-bg-image="on"] .settings-modal .settings-tabs, :root[data-bg-image="on"] .settings-modal .settings-panel, :root[data-bg-image="on"] .feedback-modal-shell .feedback-environment-content, :root[data-bg-image="on"] .feedback-modal-shell .feedback-actions, :root[data-bg-image="on"] .feedback-modal-shell .feedback-actions [data-slot="button"][data-variant="secondary"], :root[data-bg-image="on"] .environment-dialog .environment-body{
   background: transparent;
 }
 

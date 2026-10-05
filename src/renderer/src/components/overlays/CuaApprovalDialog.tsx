@@ -3,32 +3,15 @@ import { MousePointer2 } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
 import { ApprovalCard } from "../ui-shadcn/approval-card";
+import { dequeueApproval, enqueueApproval, peekApproval } from "../../utils/cuaApprovalQueue";
 
-// Minimum viable i18n: the project has full key-based i18n, but CUA is a new
-// feature and we don't want to block on zh-CN/en-US key additions right now.
-// Use inline labels that will be migrated to translation keys in a follow-up.
-const LABELS = {
-	title: "CUA 操作审批",
-	waiting: "等待审批",
-	actionLabel: "操作",
-	sessionLabel: "会话",
-	agentLabel: "Agent",
-	generationLabel: "代次",
-	detailLabel: "详情",
-	allow: "允许",
-	deny: "拒绝",
-	allowHint: "允许此次操作",
-	denyHint: "拒绝此次操作",
-	close: "关闭",
-} as const;
-
-const ACTION_LABELS: Record<string, string> = {
-	click: "鼠标点击",
-	type: "键盘输入",
-	scroll: "滚动",
-	capture: "屏幕截图",
-	list_windows: "窗口列表",
-	get_state: "状态查询",
+const ACTION_LABEL_KEYS: Record<string, TranslationKey> = {
+	click: "cua.action.click",
+	type: "cua.action.type",
+	scroll: "cua.action.scroll",
+	capture: "cua.action.capture",
+	list_windows: "cua.action.list_windows",
+	get_state: "cua.action.get_state",
 };
 
 export type CuaApprovalPayload = {
@@ -41,7 +24,7 @@ export type CuaApprovalPayload = {
 	timestampMs: number;
 };
 
-export function CuaApprovalDialog(props: { request: CuaApprovalPayload | null; responding: boolean; open: boolean; onOpenChange: (open: boolean) => void; onRespond: (allowed: boolean) => void; onCancel: () => void }) {
+export function CuaApprovalDialog(props: { request: CuaApprovalPayload | null; pendingCount?: number; responding: boolean; open: boolean; onOpenChange: (open: boolean) => void; onRespond: (allowed: boolean) => void; onCancel: () => void }) {
 	const { request } = props;
 
 	const formatDetail = useCallback((detail: unknown): string => {
@@ -56,7 +39,8 @@ export function CuaApprovalDialog(props: { request: CuaApprovalPayload | null; r
 
 	if (!request) return null;
 
-	const actionLabel = ACTION_LABELS[request.action] ?? request.action;
+	const actionKey = ACTION_LABEL_KEYS[request.action];
+	const actionLabel = actionKey ? t(actionKey) : request.action;
 	const isReadonly = request.action === "capture" || request.action === "list_windows" || request.action === "get_state";
 
 	// Read-only actions should never trigger approval, but if they do, auto-allow.
@@ -64,34 +48,37 @@ export function CuaApprovalDialog(props: { request: CuaApprovalPayload | null; r
 		return null;
 	}
 
+	const pendingCount = props.pendingCount ?? 1;
+	const description = pendingCount > 1 ? `${actionLabel} · ${t("cua.approval.waiting")} · ${t("cua.approval.pending")} ${pendingCount}` : `${actionLabel} · ${t("cua.approval.waiting")}`;
+
 	return (
 		// 根级浮层：CUA 审批必须固定定位（同 AskPanelOverlay 的 fixed z-50 约定）。
 		// ApprovalCard 本体是 position:relative 的内联卡片；若直接挂在 #root 下、排在 100vh 的
 		// .wechat-shell 之后，在 body{overflow:hidden} 下会被排到视口外而永远不可见。
 		<div className="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4">
 			<div className="pointer-events-auto w-full max-w-[560px]">
-				<ApprovalCard open={props.open} onOpenChange={props.onOpenChange} title={LABELS.title} description={`${actionLabel} · ${LABELS.waiting}`} status={LABELS.waiting} statusTone="active" onCancel={props.onCancel} cancelDisabled={props.responding} cancelLabel={LABELS.close} className="w-full">
+				<ApprovalCard open={props.open} onOpenChange={props.onOpenChange} title={t("cua.approval.title")} description={description} status={t("cua.approval.waiting")} statusTone="active" onCancel={props.onCancel} cancelDisabled={props.responding} cancelLabel={t("cua.approval.close")} className="w-full">
 					<div className="flex flex-col gap-2">
 						{/* 操作类型徽标 */}
 						<div className="flex flex-wrap items-center gap-1.5">
 							<span className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-bg-muted px-2 py-0.5 text-micro font-medium text-text-secondary">
 								<MousePointer2 size={12} className="shrink-0 text-[var(--color-warning)]" aria-hidden="true" />
-								<span className="shrink-0">{LABELS.actionLabel}</span>
+								<span className="shrink-0">{t("cua.approval.action")}</span>
 								<span className="font-semibold text-text-primary">{actionLabel}</span>
 							</span>
 							<span className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-bg-muted px-2 py-0.5 text-micro font-medium text-text-secondary">
-								<span className="shrink-0">{LABELS.sessionLabel}</span>
+								<span className="shrink-0">{t("cua.approval.session")}</span>
 								<span className="font-mono text-text-primary">{request.sessionId.slice(0, 8)}</span>
 							</span>
 							{request.agentId && (
 								<span className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-bg-muted px-2 py-0.5 text-micro font-medium text-text-secondary">
-									<span className="shrink-0">{LABELS.agentLabel}</span>
+									<span className="shrink-0">{t("cua.approval.agent")}</span>
 									<span className="font-mono text-text-primary">{request.agentId}</span>
 								</span>
 							)}
 							{typeof request.runtimeGeneration === "number" && (
 								<span className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-bg-muted px-2 py-0.5 text-micro font-medium text-text-secondary">
-									<span className="shrink-0">{LABELS.generationLabel}</span>
+									<span className="shrink-0">{t("cua.approval.generation")}</span>
 									<span className="font-mono text-text-primary">{request.runtimeGeneration}</span>
 								</span>
 							)}
@@ -99,17 +86,17 @@ export function CuaApprovalDialog(props: { request: CuaApprovalPayload | null; r
 
 						{/* 详情区 */}
 						<div className="rounded-md border border-border-subtle bg-bg-muted px-2.5 py-2">
-							<div className="mb-1 text-micro font-semibold text-text-tertiary">{LABELS.detailLabel}</div>
+							<div className="mb-1 text-micro font-semibold text-text-tertiary">{t("cua.approval.detail")}</div>
 							<pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-micro leading-relaxed text-text-primary">{formatDetail(request.detail)}</pre>
 						</div>
 
 						{/* 允许/拒绝 */}
 						<div className="flex gap-2">
-							<Button variant="default" className="h-8 px-3" disabled={props.responding} title={LABELS.allowHint} onClick={() => props.onRespond(true)}>
-								{LABELS.allow}
+							<Button variant="default" className="h-8 px-3" disabled={props.responding} title={t("cua.approval.allowHint")} onClick={() => props.onRespond(true)}>
+								{t("cua.approval.allow")}
 							</Button>
-							<Button variant="outline" className="h-8 px-3" disabled={props.responding} title={LABELS.denyHint} onClick={() => props.onRespond(false)}>
-								{LABELS.deny}
+							<Button variant="outline" className="h-8 px-3" disabled={props.responding} title={t("cua.approval.denyHint")} onClick={() => props.onRespond(false)}>
+								{t("cua.approval.deny")}
 							</Button>
 						</div>
 					</div>
@@ -122,51 +109,66 @@ export function CuaApprovalDialog(props: { request: CuaApprovalPayload | null; r
 /**
  * Hook that subscribes to CUA approval requests from the main process
  * and manages the dialog state.
+ *
+ * 队列化：主进程可能背靠背发多个审批（如 agent 批量操作）。先前实现只保存
+ * 一条 pendingRequest，新请求直接覆盖旧请求，被覆盖者只剩 30s 超时兜底，
+ * 用户永远看不到。现改为 FIFO 队列（队首呈现、响应后出队），纯策略见
+ * utils/cuaApprovalQueue.ts（可单测）。
  */
 export function useCuaApproval() {
-	const [pendingRequest, setPendingRequest] = useState<CuaApprovalPayload | null>(null);
+	const [queue, setQueue] = useState<CuaApprovalPayload[]>([]);
 	const [responding, setResponding] = useState(false);
-	const [open, setOpen] = useState(false);
+	const request = peekApproval(queue) ?? null;
 
 	useEffect(() => {
 		const unsubscribe = window.piDesktop.cua.onApprovalRequest((payload: CuaApprovalPayload) => {
-			setPendingRequest(payload);
-			setOpen(true);
+			setQueue((prev) => enqueueApproval(prev, payload));
 		});
 		return unsubscribe;
 	}, []);
 
 	const respond = useCallback(
 		async (allowed: boolean) => {
-			if (!pendingRequest) return;
+			if (!request) return;
 			setResponding(true);
 			try {
-				await window.piDesktop.cua.sendApprovalResponse(pendingRequest.requestId, {
+				await window.piDesktop.cua.sendApprovalResponse(request.requestId, {
 					allowed,
 					reason: allowed ? undefined : "user_denied",
 				});
 			} finally {
 				setResponding(false);
-				setOpen(false);
-				setPendingRequest(null);
+				setQueue((prev) => dequeueApproval(prev));
 			}
 		},
-		[pendingRequest],
+		[request],
 	);
 
+	// open 派生自队列：App.tsx 的 onOpenChange(false) 手动关闭视为拒绝当前
+	// 队首（fail-closed，与主进程超时语义一致），队列前进到下一条。
 	const cancel = useCallback(() => {
-		if (pendingRequest) {
-			void window.piDesktop.cua.sendApprovalResponse(pendingRequest.requestId, {
+		if (request) {
+			void window.piDesktop.cua.sendApprovalResponse(request.requestId, {
 				allowed: false,
 				reason: "cancelled",
 			});
 		}
-		setOpen(false);
-		setPendingRequest(null);
-	}, [pendingRequest]);
+		setQueue((prev) => dequeueApproval(prev));
+	}, [request]);
+
+	const open = queue.length > 0;
+	// 保持既有受控接口（App.tsx 传 onOpenChange={cuaApproval.setOpen}）：
+	// 外部关闭请求 = 拒绝当前队首。
+	const setOpen = useCallback(
+		(nextOpen: boolean) => {
+			if (!nextOpen) cancel();
+		},
+		[cancel],
+	);
 
 	return {
-		request: pendingRequest,
+		request,
+		pendingCount: queue.length,
 		responding,
 		open,
 		setOpen,

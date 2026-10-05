@@ -137,3 +137,51 @@ test("getSessionOverrides reflects setSessionOverride", () => {
 	assert.strictEqual(overrides.sess1, false);
 	assert.strictEqual(overrides.sess2, true);
 });
+
+// ── 免审批模式（cuaAutoApprove 设置）：只绕过审批对话框，杀开关仍生效 ──
+
+test("auto-approve allows write actions without an approval handler", async () => {
+	const gate = new CuaGate({ enabled: true, autoApprove: true });
+	const decision = await gate.check("click", "sess1", { x: 100, y: 100 });
+	assert.strictEqual(decision.allowed, true);
+	assert.strictEqual(decision.reason, "auto_approve");
+});
+
+test("auto-approve does not override the global kill switch", async () => {
+	const gate = new CuaGate({ enabled: false, autoApprove: true });
+	const decision = await gate.check("type", "sess1", { text: "hello" });
+	assert.strictEqual(decision.allowed, false);
+	assert.strictEqual(decision.reason, "cua_disabled");
+});
+
+test("auto-approve does not override session-level kill switches", async () => {
+	const gate = new CuaGate({ enabled: true, autoApprove: true });
+	gate.setSessionOverride("sess1", false);
+	const decision = await gate.check("scroll", "sess1", { x: 10, y: 10 });
+	assert.strictEqual(decision.allowed, false);
+	assert.strictEqual(decision.reason, "cua_disabled");
+});
+
+test("auto-approve accepts a provider function resolved per check", async () => {
+	let on = false;
+	const gate = new CuaGate({ enabled: true, autoApprove: () => on });
+	gate.setApprovalHandler(async () => ({ allowed: false, reason: "denied_by_user" }));
+
+	const denied = await gate.check("click", "sess1", {});
+	assert.strictEqual(denied.allowed, false);
+	assert.strictEqual(denied.reason, "denied_by_user");
+
+	on = true;
+	const allowed = await gate.check("click", "sess1", {});
+	assert.strictEqual(allowed.allowed, true);
+	assert.strictEqual(allowed.reason, "auto_approve");
+});
+
+test("setAutoApprove updates the bypass at runtime", async () => {
+	const gate = new CuaGate({ enabled: true });
+	gate.setApprovalHandler(async () => ({ allowed: true }));
+	gate.setAutoApprove(true);
+	assert.strictEqual(gate.isAutoApprove(), true);
+	const decision = await gate.check("click", "sess1", {});
+	assert.strictEqual(decision.reason, "auto_approve");
+});

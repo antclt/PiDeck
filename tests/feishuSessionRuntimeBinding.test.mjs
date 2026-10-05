@@ -721,7 +721,7 @@ test("Feishu select ask renders option card; button click answers via sendUIResp
 	assert.equal(JSON.stringify(uiResponses), JSON.stringify([["A", "req-1", { value: "生产" }]]));
 	assert.equal(bridge.getPendingAskForChat("chat"), undefined, "pending ask must be cleared");
 	assert.ok(
-		sent.some((s) => s.data.content.includes("已选择：生产")),
+		sent.some((s) => s.data.content.includes("已选择: 生产")),
 		"user should get an answer confirmation",
 	);
 });
@@ -843,7 +843,7 @@ test("Feishu text reply answers a pending input ask instead of queuing a prompt"
 	});
 	assert.equal(JSON.stringify(uiResponses), JSON.stringify([["A", "req-4", { value: "帮我写一个脚本" }]]));
 	assert.equal(prompts.length, 0, "text reply must not be queued as a new prompt");
-	assert.ok(sent.some((s) => s.data.content.includes("已选择：帮我写一个脚本")));
+	assert.ok(sent.some((s) => s.data.content.includes("已选择: 帮我写一个脚本")));
 });
 
 test("Feishu confirm pending: text reply shows guidance instead of answering", async () => {
@@ -904,7 +904,7 @@ test("Feishu card input submit answers the pending ask via input_value", async (
 	});
 	assert.equal(JSON.stringify(uiResponses), JSON.stringify([["A", "req-7", { value: "卡片里输入的回答" }]]));
 	assert.equal(bridge.getPendingAskForChat("chat"), undefined, "pending ask must be consumed");
-	assert.ok(sent.some((s) => s.data.content.includes("已收到回答：卡片里输入的回答")));
+	assert.ok(sent.some((s) => s.data.content.includes("已收到回答: 卡片里输入的回答")));
 });
 
 // 回归（select 编号回复）：卡片列表带编号，纯数字文本回复必须映射到对应选项值。

@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Loader2 } from "lucide-react";
 import type { AppLogEntry, AppLogLevel } from "../../../../../shared/types";
 import { t } from "../../../i18n";
 import { desktopApi } from "../../../desktopApi";
@@ -148,7 +149,10 @@ export function LogViewer() {
 			</div>
 			{error && <div className="mb-3.5 rounded-sm border border-danger/20 bg-danger-soft px-3.5 py-2.5 text-control leading-relaxed text-danger whitespace-pre-line">{error}</div>}
 			{loading ? (
-				<div className="py-12 text-center text-control text-text-tertiary">{t("common.loading")}</div>
+				<div className="flex items-center justify-center gap-2 py-12 text-control text-text-tertiary">
+					<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+					{t("common.loading")}
+				</div>
 			) : entries.length === 0 ? (
 				<div className="py-12 text-center text-control text-text-tertiary">{t("logs.empty")}</div>
 			) : (

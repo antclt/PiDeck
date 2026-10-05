@@ -10,6 +10,10 @@ import { enumerateWindows, GetSystemMetrics, type WindowInfo } from "./CuaWin32"
 
 const SM_CXSCREEN = 0;
 const SM_CYSCREEN = 1;
+const SM_XVIRTUALSCREEN = 76;
+const SM_YVIRTUALSCREEN = 77;
+const SM_CXVIRTUALSCREEN = 78;
+const SM_CYVIRTUALSCREEN = 79;
 const TITLE_BAR_HEIGHT = 30;
 
 export type DisplayInfo = {
@@ -17,9 +21,25 @@ export type DisplayInfo = {
 	height: number;
 };
 
+export type VirtualDisplayInfo = {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+};
+
+export type ScreenRect = {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+};
+
 export type OcclusionInfo = {
 	window: WindowInfo;
 	visibleRect: { x: number; y: number; width: number; height: number };
+	/** Exact visible fragments (before bounding-box merge), for point hit tests. */
+	visibleRects: ScreenRect[];
 	occludedArea: number;
 	titleBarPoint?: { x: number; y: number };
 };
@@ -28,6 +48,22 @@ export function getPrimaryDisplay(): DisplayInfo {
 	return {
 		width: GetSystemMetrics(SM_CXSCREEN),
 		height: GetSystemMetrics(SM_CYSCREEN),
+	};
+}
+
+/**
+ * Full virtual desktop bounds (all monitors). Input injection MUST normalize
+ * against this rect, not the primary display: MOUSEEVENTF_VIRTUALDESK maps
+ * 0..65535 across the entire virtual desktop, whose origin can be negative on
+ * multi-monitor layouts. Using primary-only metrics there sends the cursor to
+ * the wrong screen (or clamps it to (0,0)).
+ */
+export function getVirtualDisplay(): VirtualDisplayInfo {
+	return {
+		x: GetSystemMetrics(SM_XVIRTUALSCREEN),
+		y: GetSystemMetrics(SM_YVIRTUALSCREEN),
+		width: GetSystemMetrics(SM_CXVIRTUALSCREEN),
+		height: GetSystemMetrics(SM_CYVIRTUALSCREEN),
 	};
 }
 
@@ -92,19 +128,26 @@ function subtractRect(a: { x: number; y: number; width: number; height: number }
 /**
  * Enumerate windows and compute occlusion info.
  */
-export function analyzeWindows(): OcclusionInfo[] {
-	const windows = enumerateWindows();
-	const display = getPrimaryDisplay();
-	const screenRect = { x: 0, y: 0, width: display.width, height: display.height };
+export function analyzeWindows(options: { includeInvisible?: boolean } = {}): OcclusionInfo[] {
+	const includeInvisible = options.includeInvisible ?? false;
+	const windows = enumerateWindows(includeInvisible);
+	const display = getVirtualDisplay();
+	const screenRect: ScreenRect = { x: display.x, y: display.y, width: display.width, height: display.height };
 
 	const result: OcclusionInfo[] = [];
-	const occluders: { x: number; y: number; width: number; height: number }[] = [];
+	const occluders: ScreenRect[] = [];
 
 	for (const w of windows) {
-		// Clip to screen bounds.
+		// Invisible windows occupy no pixels: not occluders, nothing visible.
+		if (!w.isVisible) {
+			result.push({ window: w, visibleRect: { x: 0, y: 0, width: 0, height: 0 }, visibleRects: [], occludedArea: rectArea(w.rect) });
+			continue;
+		}
+
+		// Clip to virtual desktop bounds.
 		const clipped = intersectRects(w.rect, screenRect);
 		if (!clipped) {
-			result.push({ window: w, visibleRect: { x: 0, y: 0, width: 0, height: 0 }, occludedArea: rectArea(w.rect) });
+			result.push({ window: w, visibleRect: { x: 0, y: 0, width: 0, height: 0 }, visibleRects: [], occludedArea: rectArea(w.rect) });
 			continue;
 		}
 
@@ -163,7 +206,7 @@ export function analyzeWindows(): OcclusionInfo[] {
 		}
 		const visibleRect = visiblePieces.length > 0 ? { x: minX, y: minY, width: maxX - minX, height: maxY - minY } : { x: 0, y: 0, width: 0, height: 0 };
 
-		result.push({ window: w, visibleRect, occludedArea, titleBarPoint });
+		result.push({ window: w, visibleRect, visibleRects: visiblePieces, occludedArea, titleBarPoint });
 
 		// Add this window's rectangle as an occluder for subsequent (behind) windows.
 		occluders.push(clipped);
@@ -176,9 +219,10 @@ export function analyzeWindows(): OcclusionInfo[] {
  * Find a window whose title contains the given substring (case-insensitive).
  */
 export function findWindowByTitle(titleSubstring: string): OcclusionInfo | undefined {
-	const analyzed = analyzeWindows();
+	const analyzed = analyzeWindows({ includeInvisible: true });
 	const needle = titleSubstring.toLowerCase();
-	return analyzed.find((info) => info.window.title.toLowerCase().includes(needle));
+	// Prefer visible matches; fall back to hidden windows (activatable via restore).
+	return analyzed.find((info) => info.window.isVisible && info.window.title.toLowerCase().includes(needle)) ?? analyzed.find((info) => info.window.title.toLowerCase().includes(needle));
 }
 
 /**

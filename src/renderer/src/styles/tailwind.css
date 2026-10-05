@@ -92,9 +92,17 @@
   --color-border: var(--color-border-default);
   --color-input: var(--color-border-default);
   --color-ring: var(--color-accent-strong);
+  --radius-xs: var(--radius-xs);
   --radius-sm: var(--radius-sm);
   --radius-md: var(--radius-md);
   --radius-lg: var(--radius-lg);
+  /* 尺寸档阴影桥接：shadow-* utility 从 Tailwind 默认灰切到 foundation 主题档
+     （浅色值与默认刻度一致，暗色加深）；同名声明被 legacy 层 foundation.css 覆盖生效 */
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --shadow-2xl: var(--shadow-2xl);
 
   --font-sans: var(--font-family-base);
   --font-brand: var(--font-family-brand);

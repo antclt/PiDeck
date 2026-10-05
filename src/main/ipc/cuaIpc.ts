@@ -53,16 +53,27 @@ export class CuaIpcManager {
 				return { enabled: this.deps.gate.isEnabled(), sessionOverrides: this.deps.gate.getSessionOverrides() };
 			}
 			const patch = value as {
-				enabled?: boolean;
-				sessionOverride?: { sessionId: string; enabled: boolean | null };
+				enabled?: unknown;
+				sessionOverride?: { sessionId?: unknown; enabled?: unknown } | null;
 			};
 
 			if (typeof patch.enabled === "boolean") {
 				this.deps.gate.setEnabled(patch.enabled);
 			}
 
-			if (patch.sessionOverride) {
-				this.deps.gate.setSessionOverride(patch.sessionOverride.sessionId, patch.sessionOverride.enabled);
+			// 输入校验在边界：sessionOverride 结构非法时忽略并记录，不写入 gate。
+			const override = patch.sessionOverride;
+			if (override != null && typeof override === "object") {
+				const validId = typeof override.sessionId === "string" && override.sessionId.trim().length > 0;
+				const validFlag = typeof override.enabled === "boolean" || override.enabled === null;
+				if (validId && validFlag) {
+					this.deps.gate.setSessionOverride(override.sessionId as string, override.enabled as boolean | null);
+				} else {
+					this.deps.log("cua", "cuaSetState: ignored invalid sessionOverride", {
+						sessionIdType: typeof override.sessionId,
+						enabledType: typeof override.enabled,
+					});
+				}
 			}
 
 			return {
@@ -86,7 +97,18 @@ export class CuaIpcManager {
 			clearTimeout(pending.timeoutId);
 			this.pendingApprovals.delete(requestId);
 
-			const result = response && typeof response === "object" && !Array.isArray(response) ? (response as { allowed: boolean; reason?: string }) : { allowed: false, reason: "invalid_response" };
+			// 渲染层数据不可信：allowed 必须是严格 boolean、reason 必须是字符串，
+			// 任何越界形态一律当作拒绝（fail closed），防止 truthy 值绕过审批。
+			let result: CuaApprovalResponse = { allowed: false, reason: "invalid_response" };
+			if (response && typeof response === "object" && !Array.isArray(response)) {
+				const candidate = response as { allowed?: unknown; reason?: unknown };
+				if (typeof candidate.allowed === "boolean") {
+					result = {
+						allowed: candidate.allowed,
+						reason: typeof candidate.reason === "string" ? candidate.reason : undefined,
+					};
+				}
+			}
 
 			pending.resolve(result);
 		});

@@ -229,11 +229,11 @@ export class ConfigManager {
 	}
 
 	/**
-	 * 合并 pi-mcp-adapter 各层 mcp.json；可写层固定为当前 configDir/mcp.json。
-	 * projectPath 有值时额外合并项目 `.mcp.json` / `.pi/mcp.json`（只读）。
+	 * 合并 pi 原生 MCP 两层配置（全局 agentDir + 可选项目 .pi/mcp.json）。
+	 * 默认可写层是全局 mcp.json；项目页传 writableScope:"project-pi" 让项目层成为可写目标。
 	 */
-	async getMcpConfig(projectPath?: string): Promise<McpConfigSnapshot> {
-		return loadMcpConfigSnapshot(this.configDir, projectPath);
+	async getMcpConfig(projectPath?: string, options: { writableScope?: "pi-agent" | "project-pi"; projectTrusted?: boolean } = {}): Promise<McpConfigSnapshot> {
+		return loadMcpConfigSnapshot(this.configDir, projectPath, undefined, options);
 	}
 
 	async saveMcpConfig(file: McpConfigFile): Promise<ConfigValidationResult> {
@@ -242,7 +242,6 @@ export class ConfigManager {
 		await this.writeJsonFileAtomic("mcp.json", file);
 		return { valid: true };
 	}
-
 	async probeMcpServer(definition: McpServerDefinition): Promise<McpProbeResult> {
 		return probeMcpServer(definition);
 	}
@@ -876,6 +875,14 @@ export class ConfigManager {
 			await this.writeJsonFile("mcp.json", mcpFile);
 		}
 		return { valid: true };
+	}
+
+	/**
+	 * 解析 provider 端点，供主进程内其它链路复用（TokenDance 充值取 baseUrl/apiKey）。
+	 * 只在本进程内使用，API Key 不回传渲染层；未命中返回 matched=false。
+	 */
+	async resolveProviderEndpoint(provider: string, backend: UsageProbeBackend = "pi") {
+		return this.resolveUsageEndpoint(provider, backend);
 	}
 
 	/**

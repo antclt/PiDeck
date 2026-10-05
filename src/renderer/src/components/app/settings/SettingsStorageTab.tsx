@@ -1,5 +1,6 @@
 import { ConfirmDialog } from "../../ui-shadcn/ConfirmDialog";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { Loader2 } from "lucide-react";
 import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
 import { SectionHeading } from "../../ui-shadcn/section-heading";
@@ -169,7 +170,13 @@ export function StorageTab(props: { settings: AppSettings; onChange: (patch: Par
 			<SettingsSection title={t("settings.storage.rpcLogs")}>
 				<div className="flex items-center justify-between gap-3 px-0.5 py-1.5">
 					<span className="text-caption text-muted-foreground">
-						{t("settings.storage.rpcLogsSize")}：{rpcLogsSize || t("common.loading")}
+						{t("settings.storage.rpcLogsSize")}：
+						{rpcLogsSize || (
+							<span className="inline-flex items-center gap-1">
+								<Loader2 size={11} className="animate-pideck-spin" aria-hidden="true" />
+								{t("common.loading")}
+							</span>
+						)}
 					</span>
 					<Button variant="secondary" loading={clearing === "rpc" || clearing === "all"} disabled={clearing !== null} onClick={() => confirmClear("rpc", t("settings.storage.rpcLogs"))}>
 						{t("common.delete")}
@@ -180,7 +187,13 @@ export function StorageTab(props: { settings: AppSettings; onChange: (patch: Par
 			<SettingsSection title={t("settings.storage.pasteFiles")} description={t("settings.storage.pasteFilesDesc")}>
 				<div className="flex items-center justify-between gap-3 px-0.5 py-1.5">
 					<span className="text-caption text-muted-foreground">
-						{t("settings.storage.pasteFilesSize")}：{pasteFilesSize || t("common.loading")}
+						{t("settings.storage.pasteFilesSize")}：
+						{pasteFilesSize || (
+							<span className="inline-flex items-center gap-1">
+								<Loader2 size={11} className="animate-pideck-spin" aria-hidden="true" />
+								{t("common.loading")}
+							</span>
+						)}
 					</span>
 					<Button variant="secondary" loading={clearing === "paste" || clearing === "all"} disabled={clearing !== null} onClick={() => confirmClear("paste", t("settings.storage.pasteFiles"))}>
 						{t("common.delete")}
@@ -191,7 +204,13 @@ export function StorageTab(props: { settings: AppSettings; onChange: (patch: Par
 			<SettingsSection title={t("settings.storage.appLogs")} boxed={false}>
 				<div className="flex items-center justify-between gap-3 px-0.5 py-1.5">
 					<span className="text-caption text-muted-foreground">
-						{t("settings.storage.appLogsSize")}：{logsSize || t("common.loading")}
+						{t("settings.storage.appLogsSize")}：
+						{logsSize || (
+							<span className="inline-flex items-center gap-1">
+								<Loader2 size={11} className="animate-pideck-spin" aria-hidden="true" />
+								{t("common.loading")}
+							</span>
+						)}
 					</span>
 					<div className="flex items-center gap-2">
 						<Button variant="secondary" onClick={handleOpenFolder}>

@@ -24,6 +24,7 @@ import { isLiveRuntimeStatus } from "../../utils/sessionCommands";
 import { composeFailureNotice, isRetryStatusMessage, reduceFailureNoticePass, type FailureNoticePassState } from "./timelineFailureNotice";
 import { SessionStartSurface } from "./SessionStartSurface";
 import { NotifyMessageCard, shouldRenderNotifyCard } from "./NotifyMessageCard";
+import { ExtensionEntryCard } from "./ExtensionEntryCard";
 import { MessageScroller } from "../agents/message-scroller";
 import { askEchoBySessionIdAtomFamily } from "../../atoms/ask-echo-atoms";
 import { injectAskEchoMessage } from "../../utils/askUi";
@@ -756,7 +757,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 			{controller.loadMoreError && (
 				<div className="flex flex-col items-center gap-1 px-6 pb-3 text-center">
 					<p className="text-xs font-medium text-destructive">{t("timeline.loadMoreFailed")}</p>
-					<p className="max-w-[560px] text-[11px] text-muted-foreground" title={controller.loadMoreError}>
+					<p className="max-w-[560px] text-micro text-muted-foreground" title={controller.loadMoreError}>
 						{t("timeline.loadMoreFailedHint")}
 					</p>
 				</div>
@@ -835,7 +836,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
           - 学 Proma：总折叠压缩单行 DOM；另在贴底时只挂尾部 N 个 agent-run
             （见 turnRenderWindow），上滚放开。分页仍做数据窗口治理。 */}
 			{hasActiveConversation && !isConversationLoading && activeMessages.length > 0 && (
-				<div className="message-list min-w-0 w-full mx-auto transition-opacity duration-150">
+				<div className="message-list min-w-0 w-full mx-auto transition-opacity duration-fast">
 					{displayRuns.map((item, index) => {
 						if (item.kind === "agent-run") {
 							// Only an active model turn keeps its latest run live. Context
@@ -911,6 +912,11 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 								// Pending extension UI is rendered once in the timeline footer.
 								// Legacy in-memory messages may still contain this placeholder.
 								return null;
+							}
+							// 扩展输出条目（pi appendEntry / type:"custom"）：主进程读侧投影的可见性补齐卡，
+							// 不是回合边界，只让 /btw 这类扩展输出到达用户（issue #285）。
+							if (meta?.type === "customEntry") {
+								return <ExtensionEntryCard key={message.id} message={message} />;
 							}
 							// 扩展 custom 消息（pi custom_message 条目）：只有面向用户的通知类白名单
 							// 才渲染成卡片（如子代理后台任务完成），其余（display:false 的内部上下文

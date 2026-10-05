@@ -3,7 +3,7 @@ import { getDefaultStore, useAtom, useAtomValue } from "jotai";
 import { settingsFocusAtom, type SettingsPaneId, type SettingsTabId } from "../../atoms";
 import { hasPendingUpdateAtom } from "../../atoms/update-atoms";
 import { useSettingsFocus } from "./settings/useSettingsFocus.ts";
-import { Settings2, Network, Wrench, PawPrint, Bell, Trash2, Brush, Eye, ChartColumnBig, Activity, MessageSquare, ImageIcon, DatabaseBackup, Globe, FileCode2, GitBranch, SlidersHorizontal, MonitorCog, Keyboard, X } from "lucide-react";
+import { Settings2, Network, Wrench, PawPrint, Bell, Trash2, Brush, Eye, ChartColumnBig, Activity, MessageSquare, ImageIcon, DatabaseBackup, Globe, FileCode2, GitBranch, Loader2, SlidersHorizontal, MonitorCog, Keyboard, X } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
 import { applyAppearanceAttributes, type AppearanceSettings } from "../../themeAppearance";
 import { applyCustomThemeTokens, applyFontSizeAttributes } from "../../hooks/appearance/useAppAppearance";
@@ -157,8 +157,20 @@ class SettingsModalErrorBoundary extends Component<{ onClose: () => void; childr
 		return { error };
 	}
 
+	/** 重试：清掉错误重新渲染子树。懒加载 chunk 的失败结果被 React 缓存在模块级，重试无效时需走「刷新应用」。 */
+	private readonly handleRetry = () => {
+		this.setState({ error: null });
+	};
+
+	/** 刷新应用：懒加载 chunk 拉取失败只有整页刷新能可靠恢复（更新后旧 chunk 已被替换）。 */
+	private readonly handleReload = () => {
+		window.location.reload();
+	};
+
 	override render() {
 		if (!this.state.error) return this.props.children;
+		// 三大浏览器懒加载 chunk 拉取失败的报错文案（常见于应用更新 / dev 热更新后），给出针对性提示。
+		const isChunkLoadError = /failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed/i.test(this.state.error.message);
 		// #115：错误兜底直接走 shadcn Dialog 外壳
 		return (
 			<Dialog open onOpenChange={(next) => !next && this.props.onClose()}>
@@ -171,16 +183,23 @@ class SettingsModalErrorBoundary extends Component<{ onClose: () => void; childr
 							</Button>
 						</DialogClose>
 					</DialogHeader>
-					<div className="settings-layout">
-						<div className="settings-content" style={{ padding: "var(--space-5)" }}>
-							<div className="config-diagnostic-card">
-								<div>
-									<strong>{t("settings.renderCrashed")}</strong>
-									<span>{this.state.error.message}</span>
-									<small>{t("settings.renderCrashedHelp")}</small>
-								</div>
-								<pre>{this.state.error.stack ?? this.state.error.message}</pre>
+					{/* 不能套 .settings-layout：那是 196px 侧栏 + 内容的双列栅格，唯一子项会被挤进侧栏列（布局错位的根因） */}
+					<div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-5" role="alert">
+						<div className="config-diagnostic-card">
+							<div>
+								<strong>{t("settings.renderCrashed")}</strong>
+								<span>{this.state.error.message}</span>
+								<small>{isChunkLoadError ? t("settings.renderCrashedChunkHint") : t("settings.renderCrashedHelp")}</small>
 							</div>
+							<pre>{this.state.error.stack ?? this.state.error.message}</pre>
+						</div>
+						<div className="flex items-center justify-end gap-2">
+							<Button type="button" variant="outline" onClick={this.handleRetry}>
+								{t("app.renderErrorRetry")}
+							</Button>
+							<Button type="button" variant="default" onClick={this.handleReload}>
+								{t("app.renderErrorReload")}
+							</Button>
 						</div>
 					</div>
 				</DialogContent>
@@ -191,7 +210,14 @@ class SettingsModalErrorBoundary extends Component<{ onClose: () => void; childr
 
 /** tab chunk 加载占位：轻量居中提示，避免首次切到某 tab 时空白闪烁 */
 function SettingsTabLoading() {
-	return <div className="settings-panel grid min-w-0 min-h-40 place-items-center text-caption text-text-tertiary">{t("common.loading")}</div>;
+	return (
+		<div className="settings-panel grid min-w-0 min-h-40 place-items-center text-caption text-text-tertiary">
+			<span className="flex items-center gap-2">
+				<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+				{t("common.loading")}
+			</span>
+		</div>
+	);
 }
 
 /**
@@ -578,7 +604,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 							   黄点/禁用态由配置页内部脏集合与保存状态上报 */
 							<>
 								<Button variant="default" size="sm" onClick={() => void configPaneRef.current?.saveCurrent()} disabled={configPaneState.saving} title={configPaneState.hasDirty ? t("config.dirtyTooltip") : undefined}>
-									{configPaneState.hasDirty && <span className="size-2 rounded-full bg-amber-400" aria-hidden="true" />}
+									{configPaneState.hasDirty && <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" />}
 									{configPaneState.saving ? t("common.saving") : t("common.save")}
 								</Button>
 								<Button variant="outline" size="sm" onClick={() => configPaneRef.current?.exportConfig()}>
@@ -634,17 +660,17 @@ function SettingsModalContent(props: SettingsModalProps) {
 					{/* 顶层分区 tab：直接用 shadcn Tabs 默认观感（bg-muted p-1 圆角条），与全局组件统一；
 				    不再套自定义 tab 条样式，只做外边距/自定宽定位。 */}
 					<TabsList className="mx-3 mt-2.5 w-auto justify-start gap-0.5 self-start" aria-label={t("settings.title")}>
-						<TabsTrigger value="settings" className="h-8 gap-1.5 px-3 text-[13px]">
+						<TabsTrigger value="settings" className="h-8 gap-1.5 px-3 text-control">
 							<MonitorCog className="size-4" aria-hidden="true" />
 							{t("settings.panes.system")}
 							{/* 系统设置分区黄点：全局设置/视觉桥/生图草稿任一有未保存 */}
-							{hasAnyDirtyChanges ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+							{hasAnyDirtyChanges ? <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" /> : null}
 						</TabsTrigger>
-						<TabsTrigger value="config" className="h-8 gap-1.5 px-3 text-[13px]">
+						<TabsTrigger value="config" className="h-8 gap-1.5 px-3 text-control">
 							<SlidersHorizontal className="size-4" aria-hidden="true" />
 							{t("settings.panes.config")}
 							{/* 配置管理分区黄点：由 ConfigPane 内部脏集合上报 */}
-							{configPaneState.hasDirty ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+							{configPaneState.hasDirty ? <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" /> : null}
 						</TabsTrigger>
 					</TabsList>
 					<TabsContent value="config" forceMount hidden={pane !== "config"} className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -691,7 +717,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 										两者可并存；均为装饰（aria-hidden），语义由 tab 内卡片文案承担。 */}
 											<div className="ml-auto flex items-center gap-1">
 												{tab.id === "dev" && hasPendingUpdate ? <span className="size-1.5 rounded-full bg-[var(--color-accent)]" aria-hidden="true" /> : null}
-												{dirtyTabIds.has(tab.id as SettingsUnsavedTabId) ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+												{dirtyTabIds.has(tab.id as SettingsUnsavedTabId) ? <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" /> : null}
 											</div>
 										</TabsTrigger>
 									</Fragment>

@@ -4,7 +4,7 @@ import { getAppLogger } from "../logging/sharedLogger";
 import type { ConfigBackupActionResult, ConfigBackupDetail, ConfigBackupListResult, ConfigBackupMeta, ConfigBackupReason } from "../../shared/types/backup";
 
 /**
- * 配置备份管理器：把 pi 配置文件（~/.pi/agent/ 下 models.json / auth.json / settings.json / mcp.json）
+ * 配置备份管理器：把 pi 配置文件（~/.pi/agent/ 下 models.json / auth.json / settings.json / mcp.json / mcp-auth.json）
  * 与 PiDeck 设置（userData/settings.json）打包成带时间戳的 JSON 备份。
  *
  * 设计要点：
@@ -28,7 +28,8 @@ export type ConfigBackupManagerDeps = {
 };
 
 /** 备份文件命名空间前缀：pi 文件与 pideck 文件分开，避免两个 settings.json 同名冲突。 */
-export const BACKUP_FILE_KEYS = ["pi/models.json", "pi/auth.json", "pi/settings.json", "pi/mcp.json", "pideck/settings.json"] as const;
+// pi/mcp-auth.json：pi 0.99 内置 MCP 的 OAuth 凭据（缺失时按「未登录」处理，restore 幂等）。
+export const BACKUP_FILE_KEYS = ["pi/models.json", "pi/auth.json", "pi/settings.json", "pi/mcp.json", "pi/mcp-auth.json", "pideck/settings.json"] as const;
 
 const BACKUP_DIR_NAME = "config-backups";
 const BACKUP_FILE_PREFIX = "backup-";

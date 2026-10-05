@@ -1,4 +1,4 @@
-import { app, type BrowserWindow, Notification } from "electron";
+import { app, dialog, shell, type BrowserWindow, Notification } from "electron";
 import { randomUUID } from "node:crypto";
 import { stat, unlink, writeFile } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
@@ -34,18 +34,21 @@ import { sanitizeBridgeUpdate, stripBridgeAnsi } from "../../shared/bridgeText";
 import { collectSessionFileChanges } from "../../shared/fileChanges";
 import { extractPiToolTruncation } from "../../shared/formatToolDetail";
 import { COMPACT_CANCELLED_BY_OWNER, COMPACT_CANCELLED_BY_USER_ABORT, COMPACT_HOOK_REJECT_MAX_MS, COMPACT_OBSERVATION_MAX_AGE_MS, COMPACT_ROUTED_TO_OWNER, COMPACT_USER_ABORT_WINDOW_MS, COMPACT_WAIT_TIMEOUT } from "../../shared/compactFeedback";
-import { PiProcess, type WhitelistSkip } from "./PiProcess";
+import { PiProcess } from "./PiProcess";
+import { createBridgeServiceHandler } from "./bridge/bridgeServices";
 import { APP_DEEP_LINK_SCHEME } from "../utils/deepLinkScheme";
 import { createCompactRpcRequest } from "./compactRpc";
-import { resolveWhitelistSkipCopy, WHITELIST_SKIP_KIND_COPY } from "./whitelistSkipNotice";
 import { readPiCompactionOwnership, type PiCompactionOwnership } from "./compactionOwner";
 import { mergeSubagentSources } from "./derivedSubagents";
 import { parseAvailableThinkingLevelsResponse } from "./thinkingLevels";
 import { listActiveBuiltInExtensionPaths } from "../extensions/builtInExtensions";
 import { createPiProcessExtensionResolvers } from "../extensions/piProcessExtensionResolvers";
-import { createPiProcessSkillResolvers } from "../skills/piProcessSkillResolvers";
-import { createPiProcessPromptResolvers } from "../prompts/piProcessPromptResolvers";
+import { piVersionAtLeast } from "../extensions/extensionVersionGate";
+import { resolveLoadableExtensionPaths } from "../extensions/enabledExtensionResolver";
+import { resolveBuiltInExtensionsOverlayDir } from "../extensions/builtInExtensions";
 import { getBridgeServer } from "./bridge/BridgeServer";
+import { StandbyAgentPool, STANDBY_TTL_MS } from "./StandbyAgentPool";
+import { computeStandbyFingerprint } from "./standbyFingerprint";
 import type { BridgeEvent, BridgeUpdate, ModelTraceInput } from "../../shared/types/bridge";
 import { describeExtensionFallbackSkip, formatExtensionFallbackDebug, resolveDisabledExtensionsCopy, resolveDisabledExtensionsReason, shouldRetryWithoutExtensions } from "./extensionStartupFallback";
 import type { DisabledExtensionsReason } from "./extensionStartupFallback";
@@ -149,6 +152,8 @@ export class AgentManager {
 	/** pi 后端支持全部可选能力。 */
 	readonly capabilities: ReadonlySet<AgentGatewayCapability> = new Set(["compact", "fork", "getForkMessages", "editMessage", "deleteMessage", "getCommands", "exportHtml"]);
 	private readonly agents = new Map<string, AgentRuntime>();
+	/** 桥原生服务是否已注入（幂等标记，见 registerBridgeSession）。 */
+	private bridgeServicesInstalled = false;
 	private readonly messages = new Map<string, ChatMessage[]>();
 	/** 工具完整结果 LRU 缓存：截断下发后完整文本仅存于此（运行期「查看完整输出」走内存，
 	 *  历史会话回退读会话文件）。键为 pi message id，agent 停止时随 clearAgentState 释放。 */
@@ -391,6 +396,15 @@ export class AgentManager {
 	private onAutomaticTitleChanged?: (agentId: string, title: string, source: AutomaticTitleSource) => void;
 	/** 已发送 ask 系统通知的 agent；新一轮 run（agent_start）时清除，避免同一轮多次提问刷屏。 */
 	private readonly notifiedAskAgents = new Set<string>();
+	/** standby 池（单实例）：put 顶替/TTL 到期统一走 onExpire → stop 回收进程。 */
+	private readonly standbyPool = new StandbyAgentPool({
+		ttlMs: STANDBY_TTL_MS,
+		onExpire: (agentId) => {
+			void this.stop(agentId);
+		},
+	});
+	/** standby 创建去重：池只在握手成功后登记，创建期间靠本标记挡住并发 ensure。 */
+	private standbySpawnPending = false;
 	private wslEnvironment: WslEnvironment | null = null;
 
 	/**
@@ -468,7 +482,13 @@ export class AgentManager {
 		 * 选择器可见、TUI 可用，但 PiDeck 运行中的 Agent 快照没有）。
 		 */
 		private readonly resolveModelInCatalog?: (provider: string, modelId: string) => Promise<boolean>,
+		/**
+		 * 第三方接管型 MCP 扩展列表（计划 M5b）。由 main/index.ts 注入 ExtensionManager.list()
+		 * 的轻量查询（缓存优先）；缺省 = 不检测（测试/预览环境）。
+		 */
+		private readonly listThirdPartyMcpExtensions?: () => Promise<import("../../shared/mcpThirdParty").ThirdPartyMcpExtension[]>,
 	) {
+		// resourceMigrationGate 由 index.ts 在迁移器装配后注入（构造早于迁移器）。
 		this.messageEmit = new MessageEmitBatcher({
 			getMessages: (agentId) => this.messages.get(agentId) ?? [],
 			computeDisplayWindowStart: (messages) => this.computeDisplayWindowStart(messages),
@@ -482,7 +502,6 @@ export class AgentManager {
 			addLocalizedMessage: (agentId, role, i18nKey, fallbackText, options) => this.addLocalizedMessage(agentId, role, i18nKey, fallbackText, options),
 			emitNotice: (payload) => this.emit(ipcChannels.agentsNotice, payload),
 			isNoExtensionsSetting: () => Boolean(this.settingsStore.get().piRpcNoExtensions),
-			warn: (message, data) => void this.appLogger?.warn("agent", message, data),
 		});
 		// 项目信任闸（Wave 4C）：宿主回调只暴露配置读写/日志/WSL 环境/窗口获取。
 		this.projectTrust = new ProjectTrustGate({
@@ -561,12 +580,8 @@ export class AgentManager {
 			// 扩展解析器与模型能力缓存共用（piProcessExtensionResolvers）：
 			// 保证「选择器能看到扩展贡献的模型」与「运行时实际加载的扩展」同源。
 			// 技能/模板解析器同源：禁用的技能与提示词模板在 RPC 启动时以白名单剔除。
+			// PiDeck 自带扩展注入（普通资源启停已交给 pi 原生 settings.json 过滤规则）。
 			...createPiProcessExtensionResolvers(cwd, settings),
-			// WSL 场景把 distro 家目录并入技能白名单扫描（issue #203）：WSL 里的 pi 以
-			// distro 内 HOME 运行，Linux 家目录的全局技能必须与 Windows 侧取并集注入；
-			// UNC 路径由 PiProcess 在 spawn 前转换为 distro 内 Linux 路径。
-			...createPiProcessSkillResolvers(cwd, settings, this.wslEnvironment ? [this.wslEnvironment.windowsHome] : undefined),
-			...createPiProcessPromptResolvers(cwd, settings),
 			// 会话身份 = PiDeck 会话 key（SessionRecord.id，UUID 或旧版文件路径），扩展按它解析等级覆盖；
 			// 匿名会话（noSession）无 key，扩展仅用全局默认等级。
 			securitySessionId: securitySessionKey ?? sessionPath,
@@ -596,6 +611,17 @@ export class AgentManager {
 		try {
 			const server = getBridgeServer();
 			if (!server.ready) return undefined;
+			// 宿主原生服务（gui.filePicker/gui.openPath）注入一次：BridgeServer 不 import electron，
+			// 这里组装真实实现（幂等，重复注入无害）。
+			if (!this.bridgeServicesInstalled) {
+				server.setServiceHandler(
+					createBridgeServiceHandler({
+						showOpenDialog: (options) => dialog.showOpenDialog(options),
+						openPath: (path) => shell.openPath(path),
+					}),
+				);
+				this.bridgeServicesInstalled = true;
+			}
 			const { url, token } = server.registerAgent(
 				agentId,
 				(update) => this.handleBridgeUpdate(agentId, update),
@@ -834,8 +860,72 @@ export class AgentManager {
 		return { client, process, state };
 	}
 
-	/** 启动期诊断队列（暂存/落盘/扩展禁用与白名单跳过提示）：见 startupDiagnosticsQueue.ts（Wave 4A 迁出）。 */
+	/** 启动期诊断队列（暂存/落盘/扩展禁用提示）：见 startupDiagnosticsQueue.ts（Wave 4A 迁出）。 */
 	private readonly startupDiagnostics: StartupDiagnosticsQueue;
+	/** 已 toast 过的「第三方 MCP 接管」扩展 source（本次运行内去重，见 notifyMcpThirdPartyTakeover）。 */
+	private readonly mcpThirdPartyNoticesSent = new Set<string>();
+
+	/**
+	 * 第三方接管型 MCP 扩展提醒（计划 M3）：pi 0.99 内置 MCP 后，pi-mcp-adapter 等
+	 * 注册 /mcp 的扩展会整体顶掉内置 MCP——会话里配置的 mcp.json 不被读取，属「静默能力
+	 * 缺失」。双通道：① 首个 run 落时间线系统诊断；② sticky 全局 toast（带 MCP 页导航）。
+	 * 仅 pi >= 0.99 提醒（旧版内置 MCP 不存在，adapter 反而是必需品）；DSH 无 pi 扩展不涉及。
+	 */
+	private async notifyMcpThirdPartyTakeover(agentId: string, piVersion: string | null): Promise<void> {
+		if (!this.listThirdPartyMcpExtensions) return;
+		if (!piVersionAtLeast(piVersion, "0.99.0")) return;
+		const runtime = this.agents.get(agentId);
+		let hits: import("../../shared/mcpThirdParty").ThirdPartyMcpExtension[];
+		try {
+			hits = await this.listThirdPartyMcpExtensions();
+		} catch {
+			return; // 扩展列表不可用：宁可漏提醒也不在启动链路报错
+		}
+		// 运行时事实优先：`/mcp` 命令的来源比安装列表更能代表当前会话。
+		// 诊断无扩展（piRpcNoExtensions）或被配置停用时 get_commands 里就没有 mcp，
+		// 这种情况不能发「当前被接管」的断言。
+		const owner = runtime ? await this.resolveMcpCommandOwner(runtime) : null;
+		if (runtime && owner && owner.builtin) return;
+		const active = hits.filter((hit) => hit.enabled);
+		if (active.length === 0) return;
+		// mcp.json 里是否有启用的 server 决定文案分档（有 → 现在就受影响；无 → 暂无影响）。
+		let hasEnabledServer = false;
+		try {
+			const snapshot = await this.configManager.getMcpConfig();
+			hasEnabledServer = snapshot.servers.some((server) => server.definition.enabled !== false);
+		} catch {
+			// 配置读取失败按「无 server」分档，避免阻塞提醒
+		}
+		// 运行时确认了第三方 `/mcp` 时只谈那个来源；没有运行时结论（老版本/探测失败）时按安装列表逐条提醒。
+		const confirmedSource = owner && !owner.builtin ? owner.sourcePath : undefined;
+		const mentioned = confirmedSource ? active.filter((hit) => confirmedSource.includes(hit.source)) : active;
+		if (mentioned.length === 0) return;
+		for (const hit of mentioned) {
+			const command = hit.isLocalFile ? "" : hit.uninstallCommand;
+			// 时间线诊断：由队列决定暂存（首个 run 前）还是直接落盘。
+			this.startupDiagnostics.deliver(agentId, {
+				role: "system",
+				i18nKey: hasEnabledServer ? "diagnostic.mcpThirdParty.takeoverActive" : "diagnostic.mcpThirdParty.takeoverIdle",
+				fallbackText: hasEnabledServer
+					? `已安装 ${hit.source}，会话中的 MCP 由它接管，PiDeck MCP 页配置的服务器不会被当前会话加载。${command ? `建议卸载：${command}` : ""}`
+					: `已安装 ${hit.source}，它会接管 MCP 会话（当前未配置 MCP 服务器，暂无影响）；之后在 PiDeck 配置的 MCP 不会生效。${command ? `建议卸载：${command}` : ""}`,
+				options: { params: { source: hit.source, ...(command ? { command } : {}) } },
+			});
+			// 全局 toast：本次运行每个扩展只弹一次（连续新建会话/进程重连不刷屏）。
+			if (this.mcpThirdPartyNoticesSent.has(hit.source)) continue;
+			this.mcpThirdPartyNoticesSent.add(hit.source);
+			this.emit(ipcChannels.agentsNotice, {
+				agentId,
+				message: hasEnabledServer ? `你的 MCP 由 ${hit.source} 接管，PiDeck 里配置的服务器不会被本会话加载。` : `${hit.source} 会接管 MCP（当前未配置服务器，暂无影响）；之后在 PiDeck 配的 MCP 不会生效。`,
+				i18nKey: hasEnabledServer ? "notice.mcpThirdParty.takeoverActive" : "notice.mcpThirdParty.takeoverIdle",
+				i18nParams: { source: hit.source, ...(command ? { command } : {}) },
+				kind: hasEnabledServer ? "warning" : "info",
+				duration: Number.POSITIVE_INFINITY,
+				// 渲染层解析成导航（主进程不持有 UI 路径）：去配置管理 → MCP 页。
+				action: "openMcpSettings",
+			});
+		}
+	}
 
 	/** Windows 主进程文件操作必须使用可由 host 访问的路径。 */
 	private toSessionHostPath(sessionPath: string): string {
@@ -866,7 +956,99 @@ export class AgentManager {
 	}
 
 	list() {
-		return [...this.agents.values()].map((runtime) => runtime.tab).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+		// standby 池化进程对一切 list 消费者不可见（UI 状态、IdleAgentReleaser 等），
+		// 否则闲置释放器会把预热进程当普通闲置 agent 释放掉；claim 转正后清标记即可见。
+		return [...this.agents.values()]
+			.map((runtime) => runtime.tab)
+			.filter((tab) => !tab.standby)
+			.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+	}
+
+	/**
+	 * standby 池入口（会话链路在「用户可能马上要新建会话」的时机调用：草稿创建/激活完成等）。
+	 * 幂等：池里已有同项目条目或创建进行中时直接返回；真正的 spawn 在后台完成。
+	 */
+	ensureStandbyAgent(projectId: string): void {
+		if (!this.settingsStore.get().standbyRuntimeEnabled) return;
+		if (this.standbyPool.has(projectId) || this.standbySpawnPending) return;
+		this.standbySpawnPending = true;
+		void this.createStandbyAgent(projectId).finally(() => {
+			this.standbySpawnPending = false;
+		});
+	}
+
+	/**
+	 * 认领 standby：命中（项目一致 + spawn 指纹一致 + 进程仍 idle）则转正返回已握手 tab，
+	 * 调用方跳过 createAgent 直接绑定会话；任何不满足都返回 null 回退正常创建。
+	 * 会话级代理覆盖（on/off）与飞书绑定是 spawn 时注入的 env，池化进程按全局/未绑定 spawn，
+	 * 服务不了这类会话，直接拒绝认领。
+	 */
+	async claimStandbyAgent(input: { projectId: string; sessionId?: string; noSession?: boolean }): Promise<AgentTab | null> {
+		if (!this.settingsStore.get().standbyRuntimeEnabled || input.noSession) return null;
+		const project = this.getProject(input.projectId);
+		if (!project) return null;
+		const proxyMode = this.resolveSessionProxy?.(input.sessionId);
+		if (proxyMode === "on" || proxyMode === "off") return null;
+		if (this.isFeishuSession?.(input.sessionId) === true) return null;
+		if ((await this.projectTrust.resolveTrustWithoutPrompt(project)) === null) return null;
+		const entry = this.standbyPool.take(input.projectId, this.computeStandbyFingerprintFor(project));
+		if (!entry) return null;
+		const runtime = this.agents.get(entry.agentId);
+		if (!runtime || runtime.tab.status !== "idle") {
+			// 池条目与 agents map 不一致（已崩/被并发停掉）：回收残留，回退正常创建。
+			if (runtime) void this.stop(entry.agentId);
+			return null;
+		}
+		runtime.tab.standby = undefined;
+		void this.appLogger?.info("agent", "Standby agent claimed", { agentId: entry.agentId, projectId: input.projectId, sessionId: input.sessionId });
+		this.emitState();
+		return runtime.tab;
+	}
+
+	/** 后台 spawn 一个 standby：完整走 createUnlocked（信任/扩展回退/握手），成功后登记进池。 */
+	private async createStandbyAgent(projectId: string): Promise<void> {
+		try {
+			const project = this.getProject(projectId);
+			if (!project) return;
+			// 需要用户交互决策信任的项目不做后台池化（绝不后台弹窗）。
+			if ((await this.projectTrust.resolveTrustWithoutPrompt(project)) === null) return;
+			const fingerprint = this.computeStandbyFingerprintFor(project);
+			const tab = await this.createUnlocked({ projectId, standby: true });
+			this.standbyPool.put({ projectId, fingerprint, agentId: tab.id });
+			void this.appLogger?.info("agent", "Standby agent ready", { agentId: tab.id, projectId });
+		} catch (error) {
+			// 预热失败静默降级：下次 ensure 再试，绝不影响正常创建链路。
+			void this.appLogger?.warn("agent", "Standby agent spawn failed", { projectId, error: error instanceof Error ? error.message : String(error) });
+		}
+	}
+
+	/**
+	 * spawn 指纹：快照所有「只能 spawn 时注入」的输入（PiProcessSettings/扩展列表/桥/WSL/cwd）。
+	 * claim 时不一致即废弃池化进程回退正常创建——这就是「改设置/扩展后何时生效」的答案：
+	 * 已在跑的会话照旧（本来就是），下一个 spawn（含新预热）自动用新值。
+	 */
+	private computeStandbyFingerprintFor(project: Project): string {
+		const settings = this.settingsStore.get();
+		const bridge = getBridgeServer();
+		return computeStandbyFingerprint({
+			projectPath: project.path,
+			trustMarker: "prompt-free",
+			piCliPath: settings.customPiPath,
+			offline: Boolean(settings.piRpcOffline),
+			noExtensions: Boolean(settings.piRpcNoExtensions),
+			noSkills: Boolean(settings.piRpcNoSkills),
+			piProxyEnabled: Boolean(settings.piProxyEnabled),
+			piProxyUrl: settings.piProxyUrl ?? "",
+			piProxyBypass: settings.piProxyBypass ?? "",
+			disabledExtensions: (settings.disabledExtensions ?? []).map((entry) => `${entry.scope}:${entry.source}`),
+			disabledSkills: settings.disabledSkills ?? [],
+			disabledPrompts: settings.disabledPrompts ?? [],
+			extensionRoots: createPiProcessExtensionResolvers(project.path, settings).resolveBuiltInExtensionPaths(),
+			wsl: this.wslEnvironment ? { distro: this.wslEnvironment.distro, user: this.wslEnvironment.user, projectPath: this.toSessionProtocolPath(project.path) } : undefined,
+			bridgeAvailable: bridge.ready,
+			bridgeUrl: bridge.ready ? String(bridge.listeningPort) : "",
+			autoSessionTitle: Boolean(settings.autoSessionTitle),
+		});
 	}
 
 	/**
@@ -1403,10 +1585,23 @@ export class AgentManager {
 		);
 	}
 
+	/**
+	 * Agent spawn 前的资源配置迁移保证（index.ts 注入；幂等）。
+	 * 为什么必须在 spawn 前：旧禁用记录一旦退出白名单就再无生效途径，未迁移就启动
+	 * 等于把用户停用的资源重新加载（见执行计划 A5）。
+	 */
+	private resourceMigrationGate?: (projectId?: string) => Promise<void>;
+
+	configureResourceMigrationGate(gate: (projectId?: string) => Promise<void>): void {
+		this.resourceMigrationGate = gate;
+	}
+
 	private async createUnlocked(input: CreateAgentInput) {
 		const t0 = Date.now();
 		const project = this.getProject(input.projectId);
 		if (!project) throw new Error(`Project not found: ${input.projectId}`);
+		// 先迁移该项目作用域的旧禁用记录；失败不阻塞启动（迁移内部已记录，且旧记录会被保留）。
+		await this.resourceMigrationGate?.(project.id).catch(() => undefined);
 
 		const sessionIdentityDefaults = this.getAgentSessionIdentityDefaults();
 		const sessionEnvironment = input.environment ?? sessionIdentityDefaults.environment;
@@ -1442,6 +1637,7 @@ export class AgentManager {
 			wslUser: input.wslUser ?? (sessionEnvironment === "wsl" ? sessionIdentityDefaults.wslUser : undefined),
 			importedSourceId: input.importedSourceId,
 			noSession: input.noSession,
+			standby: input.standby ? true : undefined,
 			createdAt: Date.now(),
 		};
 
@@ -1500,11 +1696,6 @@ export class AgentManager {
 			cwd: diag?.cwd,
 			fallbackFromExtensions,
 		});
-		// 白名单因条数过多被跳过：本次 pi 按默认发现加载全部扩展/技能/提示词（禁用不生效），
-		// 需显式告知用户。
-		if (diag?.whitelistSkipped && diag.whitelistSkipped.length > 0) {
-			this.startupDiagnostics.notifyWhitelistSkipped(id, diag.whitelistSkipped);
-		}
 
 		try {
 			void this.appLogger?.info("agent", "Agent get_state request completed", { agentId: id });
@@ -1530,7 +1721,10 @@ export class AgentManager {
 				fallbackFromExtensions,
 				debugDetails: handshake.fallbackDebug,
 			});
-			if (tab.sessionPath) {
+			// 第三方接管型 MCP 扩展提醒（M5b）：异步、不 await，绝不阻塞 Agent 就绪。
+			void this.notifyMcpThirdPartyTakeover(id, diag?.piVersion ?? null);
+			// standby 的 sessionPath 是 pi 预分配的新文件（尚未落盘），当历史加载只会报假错误。
+			if (tab.sessionPath && !tab.standby) {
 				void this.loadMessages(id, true, this.readRecentMessagesFromSessionFile(tab.sessionPath, AgentManager.MAX_HISTORY_LOAD_TURNS), { preserveMessagesAfter })
 					.then(() => {
 						void this.appLogger?.info("agent", "Agent recent history loaded from file", {
@@ -2206,7 +2400,7 @@ export class AgentManager {
 	 * 探测「这个会话的上下文窗口由谁管」（见 pi/compactionOwner.ts 的背景说明）。
 	 *
 	 * 两层证据：
-	 * 1. 「装了且启用」：用与 spawn 同源的扩展白名单解析（`resolveEnabledExtensionPaths`）——
+	 * 1. 「装了且启用」：用与 spawn 同源的加载查询（`resolveLoadableExtensionPaths`，原生过滤 + 旧禁用记录）——
 	 *    PiDeck 扩展管理里禁用的扩展不会出现在路径集合里，不能按磁盘 packages 判接管；
 	 * 2. 「命令本次可用」：`get_commands` 确认 /ctx-wrapup 已注册（compaction-off 模式 /
 	 *    子会话下 MC 不注册它）。
@@ -2220,7 +2414,21 @@ export class AgentManager {
 			const projectCwd = project?.path;
 			const sessionCommandNames = await this.listRegisteredCommandNames(runtime);
 			// 与 spawn 同源的白名单解析；拿不到项目 cwd 时传 undefined（退回磁盘 packages 推导）
-			const loadedExtensionPaths = projectCwd ? createPiProcessExtensionResolvers(projectCwd, this.settingsStore.get()).resolveEnabledExtensionPaths() : undefined;
+			// 与运行时同源的「会加载哪些扩展」查询（原生过滤 + 旧禁用记录）。
+			const loadedExtensionPaths = projectCwd
+				? resolveLoadableExtensionPaths({
+						cwd: projectCwd,
+						includeProjectResources: true,
+						disabled: this.settingsStore.get().disabledExtensions ?? [],
+						removedBuiltInExtensions: this.settingsStore.get().removedBuiltInExtensions ?? [],
+						builtInRoots: {
+							appPath: app.getAppPath(),
+							resourcesPath: process.resourcesPath,
+							isDev: !app.isPackaged,
+							overlayDir: resolveBuiltInExtensionsOverlayDir(app.getPath("userData")),
+						},
+					})
+				: undefined;
 			return readPiCompactionOwnership({
 				projectCwd,
 				sessionCommandNames,
@@ -2240,10 +2448,41 @@ export class AgentManager {
 	 * 不区分 extension/prompt/skill 来源：`/ctx-wrapup` 这类接管者命令只可能来自扩展。
 	 */
 	private async listRegisteredCommandNames(runtime: AgentRuntime): Promise<string[] | undefined> {
+		const commands = await this.listRegisteredCommands(runtime);
+		if (!commands) return undefined;
+		return commands.map((command) => command.name).filter((name) => name.length > 0);
+	}
+
+	/** `get_commands` 原始条目（带 source/sourceInfo）；失败返回 undefined。 */
+	private async listRegisteredCommands(runtime: AgentRuntime): Promise<Array<{ name: string; source?: string; sourcePath?: string }> | undefined> {
 		const response = await runtime.process.client.request({ type: "get_commands" }, 10_000).catch(() => undefined);
 		const commands = (response?.data as { commands?: unknown[] } | undefined)?.commands;
 		if (!Array.isArray(commands)) return undefined;
-		return commands.map((command) => (command && typeof command === "object" ? (command as { name?: unknown }).name : undefined)).filter((name): name is string => typeof name === "string" && name.length > 0);
+		return commands
+			.filter((command): command is Record<string, unknown> => typeof command === "object" && command !== null)
+			.map((command) => {
+				const sourceInfo = typeof command.sourceInfo === "object" && command.sourceInfo !== null ? (command.sourceInfo as { path?: unknown }) : undefined;
+				return {
+					name: typeof command.name === "string" ? command.name : "",
+					source: typeof command.source === "string" ? command.source : undefined,
+					sourcePath: typeof sourceInfo?.path === "string" ? sourceInfo.path : undefined,
+				};
+			})
+			.filter((command) => command.name.length > 0);
+	}
+
+	/**
+	 * 当前会话的 `/mcp` 命令是否来自 pi 内置扩展。
+	 * `get_commands` 的 `sourceInfo.path` 对内置扩展是 `builtin:mcp`，第三方接管是扩展文件路径。
+	 * 返回 null = 无法确认（老版本/探测失败），调用方应降级而不是断言。
+	 */
+	private async resolveMcpCommandOwner(runtime: AgentRuntime): Promise<{ builtin: boolean; sourcePath?: string } | null> {
+		const commands = await this.listRegisteredCommands(runtime);
+		if (!commands) return null;
+		const mcp = commands.find((command) => command.name === "mcp");
+		if (!mcp) return null;
+		const path = mcp.sourcePath ?? "";
+		return { builtin: path === "builtin:mcp", ...(path ? { sourcePath: path } : {}) };
 	}
 
 	/**
@@ -3565,6 +3804,8 @@ export class AgentManager {
 
 	stopAll() {
 		// 应用退出时统一清理所有 pi 子进程，避免后台 agent 残留占用模型或文件句柄。
+		// standby 也在 agents map 里会被下面循环停掉；清池只为防 TTL 到期后再重复 stop。
+		this.standbyPool.clear();
 		for (const runtime of this.agents.values()) {
 			this.userInitiatedStop.add(runtime.tab.id);
 			this.clearAgentState(runtime.tab.id);
@@ -3743,6 +3984,8 @@ export class AgentManager {
 	/** createUnlocked 路径的进程 exit：支持压缩后自动重连，其余标 closed。 */
 	private handleCreateProcessExit(agentId: string, tab: AgentTab, payload: { code: number | null; signal: string | null }) {
 		if (this.startupHandshakeAgents.has(agentId)) return;
+		// standby 进程在绑定前退出：立即从池剔除，避免 claim 到死进程（TTL 会兜其他泄漏路径）。
+		if (this.standbyPool.status()?.agentId === agentId) this.standbyPool.clear();
 		// 用户主动停止 → 不自动重连
 		if (this.userInitiatedStop.has(agentId)) {
 			this.userInitiatedStop.delete(agentId);
@@ -3975,18 +4218,6 @@ export class AgentManager {
 		if (diag.blockedExtensions && diag.blockedExtensions.length > 0) {
 			// 桌面端已自动隔离的扩展（如 codeisland），方便用户对照「为何 RPC 没加载该扩展」。
 			lines.push(`已自动隔离扩展: ${diag.blockedExtensions.join(", ")}`);
-		}
-		if (diag.whitelistSkipped && diag.whitelistSkipped.length > 0) {
-			// 白名单条数超命令行预算 → 本次未注入 --no-extensions/--no-skills/--no-prompt-templates，
-			// pi 按默认发现加载了全部资源，对应「禁用」在本会话不生效。
-			// 排查「禁用为何无效」时这条是关键上下文。
-			const skipped = diag.whitelistSkipped
-				.map((entry) => {
-					const meta = WHITELIST_SKIP_KIND_COPY[entry.kind];
-					return `${meta.label} ${entry.count} 个（≈ ${entry.chars} 字符 / 预算 ${entry.budget}）`;
-				})
-				.join("、");
-			lines.push(`白名单注入: 已跳过 ${skipped} → 本次「禁用」不生效`);
 		}
 		lines.push("");
 		lines.push("━━━ 排查步骤 ━━━");

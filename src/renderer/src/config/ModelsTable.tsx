@@ -260,7 +260,7 @@ export function ModelsTable(props: ModelsTableProps) {
 									<TableCell className="min-w-0 p-2">
 										<Popover>
 											<PopoverTrigger asChild>
-												<Button variant="outline" size="sm" className="h-7 w-full justify-between gap-1 px-2 font-mono text-[11px]" title={t("config.thinkingLevels")}>
+												<Button variant="outline" size="sm" className="h-7 w-full justify-between gap-1 px-2 font-mono text-micro" title={t("config.thinkingLevels")}>
 													<span className="min-w-0 truncate">{thinkingSummary}</span>
 													<Brain className="size-3.5 shrink-0 opacity-60" aria-hidden="true" />
 												</Button>
@@ -268,7 +268,7 @@ export function ModelsTable(props: ModelsTableProps) {
 											<PopoverContent align="start" className="w-56 p-2">
 												{canEditThinkingDefault && (
 													<div className="mb-1.5 border-b border-border-subtle pb-1.5">
-														<div className="mb-1 text-[11px] font-semibold text-text-secondary">{t("config.thinkingLevelDefault")}</div>
+														<div className="mb-1 text-micro font-semibold text-text-secondary">{t("config.thinkingLevelDefault")}</div>
 														<ConfigSelect value={thinkingDefaultValue} options={thinkingDefaultOptions} onChange={(v) => props.onUpdateModelThinkingLevelDefault!(i, v)} disabled={thinkingDefaultDisabled} />
 														<div className="mt-1 text-[10px] leading-relaxed text-text-tertiary">{thinkingAvailabilityText}</div>
 														<div className="mt-0.5 text-[10px] leading-relaxed text-text-tertiary">{t("config.thinkingLevelDefaultHint")}</div>
@@ -392,7 +392,7 @@ export function ModelsTable(props: ModelsTableProps) {
 											<div className="mb-1.5 flex items-start justify-between gap-2">
 												<div>
 													<div className="text-xs font-medium text-text-primary">{t("config.costTiersTitle")}</div>
-													<div className="text-[11px] leading-relaxed text-text-tertiary">{t("config.costTiersHint")}</div>
+													<div className="text-micro leading-relaxed text-text-tertiary">{t("config.costTiersHint")}</div>
 												</div>
 												<Button variant="outline" size="sm" onClick={() => applyTiers([...(tierEditor?.drafts ?? []), emptyTierDraft()])}>
 													<Plus className="size-3.5" />
@@ -435,11 +435,11 @@ export function ModelsTable(props: ModelsTableProps) {
 													</TableBody>
 												</Table>
 											) : (
-												<div className="rounded-sm bg-bg-muted px-2 py-1.5 text-[11px] text-text-secondary">{t("config.costTiersEmpty")}</div>
+												<div className="rounded-sm bg-bg-muted px-2 py-1.5 text-micro text-text-secondary">{t("config.costTiersEmpty")}</div>
 											)}
 										</div>
 										{(modelComplexFields.length > 0 || modelAdvancedFields.length > 0) && (
-											<div className="mt-1 rounded-sm bg-bg-muted px-2 py-1.5 text-[11px] leading-relaxed text-text-secondary">
+											<div className="mt-1 rounded-sm bg-bg-muted px-2 py-1.5 text-micro leading-relaxed text-text-secondary">
 												{t("config.advancedPreservedModel", {
 													fields: [...modelComplexFields, ...modelAdvancedFields].join(", "),
 												})}

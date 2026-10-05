@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { UIMessage } from "ai";
-import type { AvailableModel } from "../../../shared/types";
+import type { AgentBackend, AvailableModel } from "../../../shared/types";
 import { createSessionModelPreference } from "../../../shared/modelDisplayName";
 import { t } from "@/i18n";
 import { WebSidebar, type WebSessionRowAction } from "./WebSidebar";
@@ -24,7 +24,6 @@ import { WebTimeline } from "./WebTimeline";
 import { WebComposer } from "./WebComposer";
 import { WebDshToolsPanel } from "./WebDshToolsPanel";
 import { WebBranchBar } from "./WebBranchBar";
-import { WebRewindPanel } from "./WebRewindPanel";
 import { WebWorkspaceDrawer } from "./WebWorkspaceDrawer";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui-shadcn/alert-dialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui-shadcn/dialog";
@@ -41,7 +40,7 @@ import { applyWebTheme, readStoredWebTheme, resolveWebTheme, storeWebTheme, syst
 import { registerWebServiceWorker, usePwaInstall } from "./webPwa";
 import { decideStreamRecovery } from "./webStreamRecovery";
 import type { AgentUiResponse } from "../../../shared/types";
-import type { WebProject, WebState, WebContextUsage } from "./webTypes";
+import type { WebProject, WebRuntime, WebState, WebContextUsage } from "./webTypes";
 
 /** 分页元数据：已加载消息总数 + 更早一页的游标。 */
 type HistoryMeta = {
@@ -76,13 +75,14 @@ export function WebChatApp() {
 	// 首页（无会话）时选择的模型/思考级别：暂存为待用偏好，随下一次新建会话生效
 	const [pendingModel, setPendingModel] = useState<{ provider: string; modelId: string; modelName: string } | null>(null);
 	const [pendingThinkingLevel, setPendingThinkingLevel] = useState<string | null>(null);
+	// 首页（无会话）时选择的后端：随下一次新建会话生效（对齐桌面 welcome 页语义）
+	const [pendingBackend, setPendingBackend] = useState<AgentBackend | null>(null);
 	// 手机端默认把聊天作为主画面，项目树通过抽屉按需打开，避免列表占满首屏。
 	const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 	const [uiResponding, setUiResponding] = useState(false);
 	// S6.3：DSH 工具面板（goals/subagents/skills）开关
 	const [dshToolsOpen, setDshToolsOpen] = useState(false);
-	// P1：rewind / workspace 抽屉 / 重命名 / 删除确认
-	const [rewindOpen, setRewindOpen] = useState(false);
+	// P1：workspace 抽屉 / 重命名 / 删除确认
 	const [workspaceOpen, setWorkspaceOpen] = useState(false);
 	const [renameDraft, setRenameDraft] = useState<{ sessionId: string; title: string } | null>(null);
 	const [renameValue, setRenameValue] = useState("");
@@ -96,6 +96,9 @@ export function WebChatApp() {
 	const messagesBySessionRef = useRef<Record<string, UIMessage[]>>({});
 	const loadedSessionsRef = useRef<Set<string>>(new Set());
 	const historyMetaRef = useRef<Record<string, HistoryMeta>>({});
+	// 本页「新建」的零消息草稿：后端切换仅对这类会话开放（复制/克隆/fork 与历史会话自带
+	// 消息记录，后端不可切——消息归属创建时的后端，切了会让历史错位）。
+	const webDraftSessionsRef = useRef<Set<string>>(new Set());
 	const activeSessionIdRef = useRef<string>("");
 	// 首页直发暂存：新建会话后等 useChat 实例切换完成，再投递首条消息（含图片）
 	const pendingSendRef = useRef<{ sessionId: string; text: string; images?: string[] } | null>(null);
@@ -121,6 +124,9 @@ export function WebChatApp() {
 	const recoveryLastAttemptRef = useRef(0);
 	const statusRef = useRef(status);
 	statusRef.current = status;
+	// runtime 忙态镜像：刷新页面/端口中断后 useChat 已回 ready 而 pi 仍在跑，
+	// 恢复判定用它区分「真正空闲」与「脱节待追赶」（render 期赋值，在 activeRuntime 计算之后）。
+	const activeRuntimeRef = useRef<WebRuntime | undefined>(undefined);
 	const { canInstall, install } = usePwaInstall();
 
 	// 主题：应用为与桌面同源的 data-theme 机制；跟随系统变化时重解析
@@ -170,6 +176,7 @@ export function WebChatApp() {
 		const maybeRecover = () => {
 			const decision = decideStreamRecovery({
 				status: statusRef.current,
+				runtimeBusy: activeRuntimeRef.current?.status === "running" || activeRuntimeRef.current?.status === "starting",
 				documentVisible: !document.hidden,
 				online: navigator.onLine,
 				lastAttemptAt: recoveryLastAttemptRef.current,
@@ -232,6 +239,7 @@ export function WebChatApp() {
 	const runtimeFor = (sessionId: string) => state.runtimes.find((runtime) => runtime.sessionId === sessionId);
 	const activeSession = state.sessions.find((session) => session.id === activeSessionId);
 	const activeRuntime = activeSessionId ? runtimeFor(activeSessionId) : undefined;
+	activeRuntimeRef.current = activeRuntime;
 
 	// 切换会话：优先从缓存恢复；未加载过则拉取历史页注入
 	useEffect(() => {
@@ -294,6 +302,27 @@ export function WebChatApp() {
 				if (disposed) return;
 				setState(next);
 				setConnected(true);
+				// 脱节追赶：useChat 已回 ready 但 runtime 仍在跑（刷新/断网后本轮 SSE 已死，
+				// 恢复触发器只在 visibilitychange/online 时发）→ 借主轮询周期补拉磁盘快照，
+				// 防抖在 decideStreamRecovery 内，脱节后每 5s 最多追一次直到 runtime 空闲。
+				const runtimeStillBusy = (() => {
+					const runtime = next.runtimes.find((entry) => entry.sessionId === activeSessionIdRef.current);
+					return runtime?.status === "running" || runtime?.status === "starting";
+				})();
+				if (runtimeStillBusy) {
+					const decision = decideStreamRecovery({
+						status: statusRef.current,
+						runtimeBusy: true,
+						documentVisible: !document.hidden,
+						online: navigator.onLine,
+						lastAttemptAt: recoveryLastAttemptRef.current,
+						now: Date.now(),
+					});
+					if (decision.recover) {
+						recoveryLastAttemptRef.current = Date.now();
+						void recoverFromDisk(false);
+					}
+				}
 				// 初始页面保持空会话，让用户明确选择项目/会话；外部删除当前会话时也回到空状态。
 				if (activeSessionIdRef.current && !next.sessions.some((session) => session.id === activeSessionIdRef.current)) {
 					setActiveSessionId("");
@@ -304,12 +333,15 @@ export function WebChatApp() {
 		};
 		void refresh();
 		// 流式时 1s 一轮：ask 确认不能等 3s 才出现在手机上。
-		const timer = setInterval(refresh, streaming ? 1000 : 3000);
+		// runtime 忙但 useChat 已 ready（脱节态）也走 1s：磁盘追赶频率由恢复防抖控制，
+		// 高频轮询是为了 runtime 一空闲就收尾、状态圆点及时回落。
+		const runtimeBusyNow = activeRuntime?.status === "running" || activeRuntime?.status === "starting";
+		const timer = setInterval(refresh, streaming || runtimeBusyNow ? 1000 : 3000);
 		return () => {
 			disposed = true;
 			clearInterval(timer);
 		};
-	}, [streaming]);
+	}, [streaming, activeRuntime?.status]);
 
 	// P0：停止 = 客户端断流 + 尽力打断 pi runtime（有 agent 时）。两者都发：
 	// stop() 只断 SSE，pi 会继续跑完；abortRuntime 才是真正的打断命令。
@@ -337,6 +369,26 @@ export function WebChatApp() {
 		void sendMessage({ text }, { body: { images } });
 	};
 
+	// 草稿期后端切换：无会话 → 暂存随下次新建生效；有会话 → 仅「本页新建零消息草稿」可写
+	// catalog（历史/复制/克隆/fork 会话自带消息记录，切后端会让历史错位，一律拒绝）。
+	// 切后端同时清空模型/思考偏好（pi 与 dsh/生图的模型目录不同，跨后端偏好无效）。
+	const handleBackendChange = async (backend: AgentBackend) => {
+		if (activeSession && (activeRuntime || backendSwitchLocked(activeSession.id))) return;
+		if (!activeSession) {
+			setPendingBackend(backend);
+			setPendingModel(null);
+			setPendingThinkingLevel(null);
+			return;
+		}
+		setCommandError(null);
+		try {
+			await updateSessionRecord(activeSession.id, { backend, model: null, thinkingLevel: null });
+			await refreshNow();
+		} catch (error) {
+			setCommandError(error instanceof Error ? error.message : String(error));
+		}
+	};
+
 	// 首页直发流程：优先内置 chat 项目（未配置项目时的兜底），否则取第一个项目；
 	// 创建期间复用 creatingProjectId 短暂禁用输入，防止重复提交。
 	const sendFromHome = async (text: string, images: string[]) => {
@@ -349,10 +401,11 @@ export function WebChatApp() {
 		setCommandError(null);
 		try {
 			const id = await createSession(project.id, {
+				...(pendingBackend ? { backend: pendingBackend } : {}),
 				...(pendingModel ? { model: pendingModel } : {}),
 				...(pendingThinkingLevel ? { thinkingLevel: pendingThinkingLevel } : {}),
 			});
-			markSessionLoaded(id);
+			markSessionLoaded(id, true);
 			setActiveSessionId(id);
 			setMobileSidebarOpen(false);
 			// 会话 id 变化后 useChat 重建实例；等新实例就绪再投递（见上方 effect）
@@ -366,22 +419,30 @@ export function WebChatApp() {
 		}
 	};
 
-	// 新会话无历史：预标记为已加载（空缓存），避免切过去时多余拉取
-	const markSessionLoaded = (id: string) => {
+	// 新会话无历史：预标记为已加载（空缓存），避免切过去时多余拉取。
+	// freshDraft = 本页 createSession 新建的零消息草稿（复制/克隆/fork 不算，它们自带历史；
+	// 标记只用于后端切换的开放判定，见 backendSwitchLocked）。
+	const markSessionLoaded = (id: string, freshDraft = false) => {
+		if (freshDraft) webDraftSessionsRef.current.add(id);
 		loadedSessionsRef.current.add(id);
 		messagesBySessionRef.current[id] = [];
 		historyMetaRef.current[id] = { total: 0, nextBefore: null };
 	};
+
+	// 后端切换锁定：仅「本页新建且尚无任何消息」的草稿可切。已激活 runtime 的会话由调用方
+	// 叠加锁定；历史会话（pi/DSH/生图）与复制/克隆/fork 出的会话一律锁死。
+	const backendSwitchLocked = (sessionId: string) => !webDraftSessionsRef.current.has(sessionId) || (messagesBySessionRef.current[sessionId]?.length ?? 0) > 0 || (historyMetaRef.current[sessionId]?.total ?? 0) > 0;
 
 	const handleCreateSession = async (projectId: string) => {
 		setCreatingProjectId(projectId);
 		setCommandError(null);
 		try {
 			const id = await createSession(projectId, {
+				...(pendingBackend ? { backend: pendingBackend } : {}),
 				...(pendingModel ? { model: pendingModel } : {}),
 				...(pendingThinkingLevel ? { thinkingLevel: pendingThinkingLevel } : {}),
 			});
-			markSessionLoaded(id);
+			markSessionLoaded(id, true);
 			setActiveSessionId(id);
 			setMobileSidebarOpen(false);
 			await refreshNow();
@@ -771,7 +832,6 @@ export function WebChatApp() {
 					permissionPreset={activeSession?.permissionPreset}
 					actions={{
 						onPermissionChange: activeSession?.backend === "dsh" ? (preset) => void handlePermissionChange(preset) : undefined,
-						onOpenRewind: activeTarget ? () => setRewindOpen(true) : undefined,
 						onOpenWorkspace: activeSession ? () => setWorkspaceOpen(true) : undefined,
 						onRename: activeSessionId ? () => void runSessionAction("rename", activeSessionId) : undefined,
 						onDuplicate: activeSessionId ? () => void runSessionAction("duplicate", activeSessionId) : undefined,
@@ -819,6 +879,9 @@ export function WebChatApp() {
 					prefill={prefill ?? undefined}
 					onSend={handleSend}
 					onStop={handleStop}
+					backend={activeSession?.backend ?? pendingBackend ?? "pi"}
+					backendLocked={activeSession ? Boolean(activeRuntime) || backendSwitchLocked(activeSession.id) : false}
+					onBackendChange={(backend) => void handleBackendChange(backend)}
 					model={activeSession?.model ?? pendingModel ?? undefined}
 					models={models}
 					refreshingModels={modelsRefreshing}
@@ -833,28 +896,6 @@ export function WebChatApp() {
 			<WebSearchDialog open={searchOpen} onOpenChange={setSearchOpen} messages={messages} onJump={scrollToMessage} />
 			<WebSkillsExtensionsDialog open={assetsOpen} onOpenChange={setAssetsOpen} />
 			{dshToolsOpen && activeSessionId && <WebDshToolsPanel sessionId={activeSessionId} onClose={() => setDshToolsOpen(false)} />}
-			{/* P1：rewind 检查点面板（需活跃 runtime；conversation/all 恢复会 fork 新会话并切换） */}
-			{rewindOpen && activeTarget && (
-				<WebRewindPanel
-					sessionId={activeTarget.sessionId}
-					target={activeTarget}
-					open={rewindOpen}
-					onClose={() => setRewindOpen(false)}
-					onRestored={(result) => {
-						setRewindOpen(false);
-						void (async () => {
-							if (result.forkedSessionId) {
-								markSessionLoaded(result.forkedSessionId);
-								await refreshNow();
-								setActiveSessionId(result.forkedSessionId);
-							} else {
-								await refreshNow();
-								await reloadActiveHistory();
-							}
-						})();
-					}}
-				/>
-			)}
 			{/* P3：工作区抽屉（Git 状态/diff + 文件浏览，projectId 来自活跃会话） */}
 			{workspaceOpen && activeSession && <WebWorkspaceDrawer projectId={activeSession.projectId} open={workspaceOpen} onClose={() => setWorkspaceOpen(false)} />}
 			{/* P1：重命名会话对话框 */}

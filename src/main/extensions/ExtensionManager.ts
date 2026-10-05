@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { clearTimeout, setTimeout } from "node:timers";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { basename, join, relative, sep } from "node:path";
 import { homedir } from "node:os";
@@ -9,14 +10,27 @@ import type { PiLocator } from "../pi/PiLocator";
 import { PiProcess } from "../pi/PiProcess";
 import { toWslLinuxPath, toWindowsHostPath, type WslEnvironment } from "../wsl/WslPaths";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
-import { BUILT_IN_EXTENSIONS, INTERNAL_BUILT_IN_EXTENSIONS, isDefaultDisabledBuiltInExtension, readEffectiveBuiltInExtensionsVersion, resolveBuiltInExtensionPath, type BuiltInExtensionPathRoots } from "./builtInExtensions";
+import { BUILT_IN_EXTENSIONS, INTERNAL_BUILT_IN_EXTENSIONS, isBuiltInExtensionName, isDefaultDisabledBuiltInExtension, readEffectiveBuiltInExtensionsVersion, resolveBuiltInExtensionPath, type BuiltInExtensionPathRoots } from "./builtInExtensions";
 import { MIN_PI_VERSION_FOR_EXTENSION_WHITELIST, piVersionAtLeast } from "./extensionVersionGate";
 // 版本比较与应用更新检查共用同一实现（含预发布语义：beta < 同号正式版）。
 import { compareVersions } from "../utils/versionCompare";
 import { discoverExtensionEntries } from "./extensionDiscovery";
+import { parsePiVersion } from "./extensionVersionGate";
+import { redactForReport, truncateText } from "../health/redact";
 
+/** pi 0.70.3 introduced self-update and the packages-only --extensions flag. */
+const MIN_PI_VERSION_FOR_SELF_UPDATE = "0.70.3";
 const PI_LATEST_VERSION_URL = "https://pi.dev/api/latest-version";
 const PI_LATEST_VERSION_TIMEOUT_MS = 10_000;
+
+/** Numbered prereleases at the introduction boundary must not enable a not-yet-stable CLI API. */
+function supportsPiSelfUpdate(version: string | undefined): boolean {
+	const normalized = parsePiVersion(version);
+	if (!normalized) return false;
+	const [core] = normalized.split("-");
+	const comparison = compareVersions(core ?? "", MIN_PI_VERSION_FOR_SELF_UPDATE);
+	return comparison > 0 || (comparison === 0 && !normalized.includes("-"));
+}
 
 export { BUILT_IN_EXTENSIONS } from "./builtInExtensions";
 
@@ -77,6 +91,11 @@ export class ExtensionManager {
 
 	private get homeDir(): string {
 		return this.wslEnvironment?.windowsHome ?? homedir();
+	}
+
+	/** 当前生效的用户 home（供插件开发等需要与扩展目录同源的调用方读取）。 */
+	get userHomeDir(): string {
+		return this.homeDir;
 	}
 
 	/** 缓存的 pi 版本号，用于条件性传递 --no-approve。 */
@@ -189,7 +208,8 @@ export class ExtensionManager {
 				ext.enabled = !removedBuiltIn.has(ext.source) && (!isDefaultDisabledBuiltInExtension(ext.source) || optInBuiltIn.has(ext.source));
 				if (builtInVersion) ext.currentVersion = builtInVersion;
 			} else {
-				ext.enabled = !disabledExtKeys.has(`${ext.scope}:${ext.source}`);
+				// 原生投影优先（迁移后 disabledExtensions 已清空）；未装配时退回旧列表。
+				ext.enabled = this.nativeEnabledReader?.(ext) ?? !disabledExtKeys.has(`${ext.scope}:${ext.source}`);
 			}
 		}
 
@@ -255,7 +275,10 @@ export class ExtensionManager {
 			source,
 			path,
 			scope: "user",
-			builtIn: source.startsWith("pi-deck-"),
+			// 内置身份只认白名单成员（-e 注入清单）：用户目录里的 pi-deck-* 不再因前缀被判
+			// 成内置——插件开发复制的 demo（pi-deck-demo-plugin.ts）是用户可编辑的普通扩展，
+			// 启停/卸载走普通路径；真正的内置副本（历史部署残留）仍按内置处理，由启动迁移清理。
+			builtIn: isBuiltInExtensionName(source),
 		}));
 	}
 
@@ -322,7 +345,7 @@ export class ExtensionManager {
 		const extensionsDir = join(this.homeDir, ".pi", "agent", "extensions");
 		const trimmed = source.trim();
 		const name = basename(trimmed);
-		if (!name || name !== trimmed || !name.startsWith("pi-deck-") || name === "." || name === "..") {
+		if (!name || name !== trimmed || !isBuiltInExtensionName(name)) {
 			throw new Error("非法内置扩展路径");
 		}
 		await rm(join(extensionsDir, name), { force: true });
@@ -340,7 +363,8 @@ export class ExtensionManager {
 	 */
 	async disableBuiltIn(source: string): Promise<void> {
 		const normalized = source.trim();
-		if (!normalized.startsWith("pi-deck-")) {
+		// 白名单成员才可操作：pi-deck-* 前缀不足以证明内置身份（demo 等用户文件同前缀）。
+		if (!isBuiltInExtensionName(normalized)) {
 			throw new Error("只能操作内置扩展");
 		}
 		if ((INTERNAL_BUILT_IN_EXTENSIONS as readonly string[]).includes(normalized)) {
@@ -357,7 +381,8 @@ export class ExtensionManager {
 
 	async removeBuiltIn(source: string): Promise<void> {
 		const normalized = source.trim();
-		if (!normalized.startsWith("pi-deck-")) {
+		// 白名单判定（与 disableBuiltIn 一致）：防 IPC 直接传非内置名（如 demo）走内置删除路径。
+		if (!isBuiltInExtensionName(normalized)) {
 			throw new Error("只能操作内置扩展");
 		}
 		await this.disableBuiltIn(normalized);
@@ -406,8 +431,10 @@ export class ExtensionManager {
 	async uninstall(source: string, scope: PiExtensionSummary["scope"] = "user"): Promise<void> {
 		const normalized = source.trim();
 		if (!normalized) throw new Error(this.translate("mainExtension.sourceRequired"));
-		// 阻止卸载 PiDeck 内置扩展（如 pi-deck-file-capture）
-		if (normalized.startsWith("pi-deck-")) {
+		// 只挡白名单内置成员：pi-deck- 前缀不足以证明内置身份——插件开发 demo
+		// （pi-deck-demo-plugin.ts）是普通本地扩展，卸载走删文件路径；真内置行的
+		// 「卸载」由 removeBuiltIn（标记 removed + 删文件）承担，不能混用普通卸载。
+		if (isBuiltInExtensionName(normalized)) {
 			throw new Error(this.translate("mainExtension.builtInCannotUninstall"));
 		}
 		// 本地 .ts/目录扩展不在 pi package 列表里，pi remove 会报 No matching package；
@@ -437,8 +464,12 @@ export class ExtensionManager {
 	}
 
 	async checkPiUpdate(): Promise<PiUpdateCheckResult> {
+		return this.checkPiUpdateFor({ ...this.getSettings() });
+	}
+
+	/** Pin the installation settings throughout a check/update, even if the user switches runtimes. */
+	private async checkPiUpdateFor(settings: AppSettings): Promise<PiUpdateCheckResult> {
 		try {
-			const settings = this.getSettings();
 			const status = await this.locator.check(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
 			if (!status.installed) return { hasUpdate: false, error: this.translate("mainExtension.piNotInstalled") };
 			// 与 `pi update --self` 使用同一个 pi.dev 版本接口，避免 npm latest 与 Pi 官方
@@ -450,13 +481,17 @@ export class ExtensionManager {
 				hasUpdate: compareVersions(latestVersion, status.version ?? "0.0.0") > 0,
 			};
 		} catch (error) {
-			console.error("[ExtensionManager] Pi update check failed", error);
-			return { hasUpdate: false, error: this.translate("mainExtension.updateCheckFailed") };
+			const detail = this.sanitizeCommandOutput(error instanceof Error ? error.message : String(error));
+			void getAppLogger()?.error("extensions", "Pi update check failed", { error: detail });
+			return { hasUpdate: false, error: `${this.translate("mainExtension.updateCheckFailed")}\n${detail}` };
 		}
 	}
 
+	/** Self-update only the selected pi installation, and verify it instead of trusting exit status. */
 	async updatePi(): Promise<PiCliUpdateResult> {
-		const check = await this.checkPiUpdate();
+		const settings = { ...this.getSettings() };
+		const check = await this.checkPiUpdateFor(settings);
+		if (check.error) throw new Error(check.error);
 		if (!check.hasUpdate) {
 			return {
 				command: "pi update --self",
@@ -469,37 +504,50 @@ export class ExtensionManager {
 				updated: false,
 			};
 		}
-		// pi 0.84.3 起 `pi update --self` 是官方自更新入口；旧版的子命令是 `pi update pi`。
-		// 版本未知（未安装/探测失败）时保守走旧写法，与新 pi 的报错一起暴露给用户。
-		const version = await this.getPiVersion();
-		const selfUpdateSupported = piVersionAtLeast(version, "0.84.3");
-		const updateArgs = selfUpdateSupported ? ["update", "--self"] : ["update", "pi"];
-		const command = updateArgs.join(" ");
-		const output = await this.runPi(updateArgs, 120_000, { offline: false });
-		const result = this.toUpdateResult(command, output, true);
-		// 自更新成功后版本必然变化：失效本地与跨进程的版本缓存，
-		// 否则新 agent 还会拿旧版本做门槛判断（白名单/信任标志）。
-		if (result.updated) {
+		// Older versions have no self-update API: do not guess npm/pnpm/standalone ownership.
+		if (!supportsPiSelfUpdate(check.currentVersion)) {
+			throw new Error(this.translate("mainExtension.piSelfUpdateUnsupported", { version: check.currentVersion || "?", minimum: MIN_PI_VERSION_FOR_SELF_UPDATE }));
+		}
+		let output: string;
+		try {
+			output = await this.runPi(["update", "--self"], 120_000, { offline: false, settings, version: check.currentVersion });
+		} finally {
+			// A failed updater may still have changed files; never reuse a pre-update version probe.
 			this.piVersion = null;
 			this.piVersionPromise = null;
 			PiProcess.invalidateVersionCache();
 		}
-		return result;
+		const status = await this.locator.check(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
+		if (!status.installed || !status.version || compareVersions(status.version, check.latestVersion ?? "0.0.0") < 0) {
+			throw new Error(`${this.translate("mainExtension.piUpdateNotApplied", { current: status.version || "?", latest: check.latestVersion || "?" })}\n${this.sanitizeCommandOutput(output)}`);
+		}
+		return this.toUpdateResult("pi update --self", output, true);
 	}
 
+	/** Before self-update existed, bare `pi update` updated packages only. Keep that safe compatibility. */
 	async updateExtensions(): Promise<PiCliUpdateResult> {
-		const output = await this.runPi(["update", "--extensions"], 120_000, { offline: false });
-		// 更新后版本信息变化，强制下次 list 重新获取。
-		this.invalidateListCache();
-		return this.toUpdateResult("pi update --extensions", output, true);
+		const settings = { ...this.getSettings() };
+		const status = await this.locator.check(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
+		if (!status.installed) throw new Error(this.translate("mainExtension.piNotInstalled"));
+		if (!parsePiVersion(status.version)) throw new Error(this.translate("mainExtension.piVersionUnknown"));
+		const args = supportsPiSelfUpdate(status.version) ? ["update", "--extensions"] : ["update"];
+		try {
+			const output = await this.runPi(args, 120_000, { offline: false, settings, version: status.version });
+			return this.toUpdateResult(`pi ${args.join(" ")}`, output, true);
+		} finally {
+			// A multi-package failure can still update earlier packages; refresh their displayed versions.
+			this.invalidateListCache();
+		}
 	}
 
 	/** 更新单个扩展：`pi update <source>`，source 与 list 输出一致（如 npm:context-mode）。 */
 	async updateExtension(source: string): Promise<PiCliUpdateResult> {
-		const output = await this.runPi(["update", source], 120_000, { offline: false });
-		// 更新后版本信息变化，强制下次 list 重新获取。
-		this.invalidateListCache();
-		return this.toUpdateResult(`pi update ${source}`, output, true);
+		try {
+			const output = await this.runPi(["update", source], 120_000, { offline: false });
+			return this.toUpdateResult(`pi update ${source}`, output, true);
+		} finally {
+			this.invalidateListCache();
+		}
 	}
 
 	private async enrichExtensionVersion(extension: PiExtensionSummary): Promise<PiExtensionSummary> {
@@ -572,8 +620,13 @@ export class ExtensionManager {
 		});
 	}
 
+	/** CLI output can include registry credentials or personal paths; redact before logging/displaying it. */
+	private sanitizeCommandOutput(value: string): string {
+		return truncateText(redactForReport(value.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "").trim(), this.homeDir), 4_000);
+	}
+
 	private toUpdateResult(command: string, output: string, updated: boolean): PiCliUpdateResult {
-		return { command, output: output.trim(), updated };
+		return { command: this.sanitizeCommandOutput(command), output: this.sanitizeCommandOutput(output), updated };
 	}
 
 	/**
@@ -581,10 +634,33 @@ export class ExtensionManager {
 	 * 启动 RPC 时由白名单模式生效；enabled=true 从列表移除。
 	 * 不写 pi settings.json：pi 0.82.x 不支持 disabledExtensions，写了也不生效。
 	 */
-	async setEnabled(source: string, enabled: boolean, scope: PiExtensionSummary["scope"] = "user"): Promise<void> {
-		// 禁用动作受版本门槛约束：白名单机制（--no-extensions + -e）依赖 pi >= 0.60
-		// 的目录/包源语义，过低版本禁用不生效（还会导致白名单降级），这里直接拒绝并提示。
-		// 启用/移除禁用条目无风险（只是回到默认发现），不做检查；版本未知（getPiVersion 为
+	/**
+	 * 注入原生开关（A4）：装配后扩展到开关写 pi settings.json 的过滤规则
+	 * （包安装 → 整包停用；本地文件扩展 → 顶层精确 `+path`/`-path`），
+	 * 与 TUI 的 pi config 等价。未装配时退回旧禁用列表（渐进迁移，行为不突变）。
+	 */
+	configureNativeToggle(toggle: (input: { source: string; path?: string; scope: PiExtensionSummary["scope"]; projectId?: string; enabled: boolean }) => Promise<{ ok: boolean; error?: string }>): void {
+		this.nativeToggle = toggle;
+	}
+
+	/** 注入原生有效状态读取（迁移完成后禁用列表不再是真值来源）。 */
+	configureNativeEnabledReader(reader: (extension: PiExtensionSummary) => boolean | undefined): void {
+		this.nativeEnabledReader = reader;
+	}
+
+	private nativeToggle: ((input: { source: string; path?: string; scope: PiExtensionSummary["scope"]; projectId?: string; enabled: boolean }) => Promise<{ ok: boolean; error?: string }>) | null = null;
+	private nativeEnabledReader: ((extension: PiExtensionSummary) => boolean | undefined) | null = null;
+
+	async setEnabled(source: string, enabled: boolean, scope: PiExtensionSummary["scope"] = "user", path?: string, projectId?: string): Promise<void> {
+		// 原生配置优先：迁移完成后旧禁用列表已清空，开关直接写 pi 的过滤规则。
+		if (this.nativeToggle) {
+			const result = await this.nativeToggle({ source, path, scope, projectId, enabled });
+			if (!result.ok) throw new Error(result.error ?? "Extension toggle failed.");
+			this.invalidateListCache();
+			return;
+		}
+		// 旧兜底路径的版本门槛（原生开关已在上方优先处理）：过低版本的资源过滤语义不可考，
+		// 直接拒绝禁用并提示；启用/移除禁用条目无风险，不做检查；版本未知（getPiVersion 为
 		// null，如 pi 未安装/探测失败）时放行，避免拦截其他流程。
 		if (!enabled) {
 			const version = await this.getPiVersion();
@@ -607,24 +683,6 @@ export class ExtensionManager {
 	/** 当前禁用的扩展条目（PiDeck settings，白名单模式依据）。 */
 	getDisabledExtensions(): DisabledExtensionEntry[] {
 		return this.getPiDeckSettings().disabledExtensions ?? [];
-	}
-
-	/**
-	 * 白名单总开关是否关闭（true = 不走 -e 白名单，默认加载全部扩展）。
-	 * 默认 false：有禁用列表时 PiProcess 才启用白名单模式。
-	 */
-	isWhitelistDisabled(): boolean {
-		return Boolean(this.getPiDeckSettings().disableExtensionWhitelist);
-	}
-
-	/**
-	 * 切换白名单总开关（UI：扩展列表上方「禁用 -e 参数」按钮）。
-	 * 开启后 PiProcess 不再注入 --no-extensions/-e，pi 默认加载全部扩展，
-	 * 禁用列表暂不生效——用于防御个别扩展的白名单注入导致 RPC 启动失败。
-	 * 开关变化不影响扩展列表本身，无需 invalidateListCache。
-	 */
-	async setWhitelistDisabled(enabled: boolean): Promise<void> {
-		await this.patchPiDeckSettings({ disableExtensionWhitelist: Boolean(enabled) });
 	}
 
 	/**
@@ -657,13 +715,14 @@ export class ExtensionManager {
 		return null;
 	}
 
-	private async runPi(args: string[], timeout: number, options: { offline?: boolean; cwd?: string; projectInstall?: boolean } = {}): Promise<string> {
+	private async runPi(args: string[], timeout: number, options: { offline?: boolean; cwd?: string; projectInstall?: boolean; settings?: AppSettings; version?: string } = {}): Promise<string> {
 		// 项目安装必须让 pi 读取已通过 PiDeck trust 校验的项目资源；--no-approve 会绕过该路径。
 		const finalArgs = [...args];
-		if (!options.projectInstall && (await this.noApproveSupported())) {
+		const noApproveSupported = options.version === undefined ? await this.noApproveSupported() : piVersionAtLeast(options.version, "0.79.0");
+		if (!options.projectInstall && noApproveSupported) {
 			finalArgs.push("--no-approve");
 		}
-		const settings = this.getSettings();
+		const settings = options.settings ?? this.getSettings();
 		// 设置页装扩展可以等 WSL which；不能在 resolveCommand 里同步卡住主进程。
 		if (settings.wslEnabled && settings.wslDistro && settings.wslUser) {
 			await this.locator.warmWslCommand(settings.wslDistro, settings.wslUser);
@@ -677,6 +736,7 @@ export class ExtensionManager {
 		// list/remove 默认走离线模式避免配置页被网络拖慢；store install 与 update 显式允许联网，
 		// 否则 pi 只会返回简化的结果，无法真正完成包安装/更新。
 		if (options.offline !== false) env.PI_OFFLINE = "1";
+		else delete env.PI_OFFLINE;
 		return new Promise<string>((resolve, reject) => {
 			execFile(
 				invocation.command,
@@ -692,15 +752,19 @@ export class ExtensionManager {
 				},
 				(error, stdout, stderr) => {
 					if (error) {
-						console.error("[ExtensionManager] pi command failed", {
-							args: finalArgs,
-							error: error.message,
-							stderr: stderr.trim(),
+						const detail = this.sanitizeCommandOutput([stderr, stdout, error.message].filter(Boolean).join("\n"));
+						void getAppLogger()?.error("extensions", "pi command failed", {
+							args: finalArgs.map((arg) => this.sanitizeCommandOutput(arg)),
+							error: detail,
+							code: error.code,
+							signal: error.signal,
 						});
-						reject(new Error(this.translate("mainExtension.commandFailed")));
+						const reason = this.translate(error.killed ? "mainExtension.commandTimedOut" : "mainExtension.commandFailed", { seconds: timeout / 1_000 });
+						reject(new Error(`${reason}\n${detail}`));
 						return;
 					}
-					resolve(stdout);
+					// Update tools often write their actionable package-manager notices to stderr.
+					resolve(args[0] === "update" && stderr.trim() ? `${stdout}\n${stderr}` : stdout);
 				},
 			);
 		});

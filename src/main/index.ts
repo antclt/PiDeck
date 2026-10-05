@@ -1,7 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, safeStorage, screen, session, shell, Tray, Notification } from "electron";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { homedir } from "node:os";
 import { createWriteStream, existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { is } from "@electron-toolkit/utils";
@@ -24,6 +25,16 @@ import { acquireVersionSingleInstance, type FocusPayload } from "./singleInstanc
 import { mainProcessJsFlags, rendererHeapAdditionalArguments } from "./v8HeapLimits";
 import { isDevToolsShortcut, toggleMainWindowDevTools } from "./devTools";
 import { isShortcutInput, refreshShortcutBindings } from "./appShortcuts";
+// 主进程复用共享的接管型扩展识别规则（与渲染层横幅单一来源；纯函数无依赖）。
+import { detectThirdPartyMcpExtensions } from "../shared/mcpThirdParty";
+import { PiResourceConfigService } from "./config/PiResourceConfigService";
+import { isPackageSource, isEntryDisabled, packageSourceOf } from "./config/PiResourceConfigService";
+import { projectResourceEnabled } from "./config/piResourceRules";
+import { PiResourceStateStore } from "./config/PiResourceStateStore";
+import { readPiConfigFile } from "./config/piConfigFileStore";
+import { runGlobalResourceMigration, runProjectResourceMigration } from "./config/piResourceMigrationRunner";
+import type { ResolvedMigrationResource } from "./config/piResourceMigration";
+import type { PiResourceScope } from "../shared/types/piResources";
 import { createWindowZoomShortcutHandler } from "./windowZoom";
 import { DEFAULT_DEV_USER_DATA_NAME, isSharedDevBranch, readDevGitBranch, resolveDevUserDataDirName, sanitizeDevBranchSegment } from "./devIsolation";
 import { KEEP_DEV_HTTP_CACHE_ENV, clearDevRendererCache } from "./devRendererCache";
@@ -40,6 +51,7 @@ import type { DataEnvMode } from "../shared/types/dataEnv";
 // 使用 ?asset 后缀导入图标，electron-vite 会在构建时将其复制到输出目录并提供正确的运行时路径
 // 这解决了打包后 build/ 目录不在 asar 中导致托盘图标丢失的问题
 import iconPath from "../../build/icon.png?asset";
+import { applyWindowLogoStyle } from "./appWindowLogo";
 
 // 构建标记：npm run dist:*:dev 打包时由 vite define 注入 true（构建期替换，非运行时环境变量）。
 declare const __PIDECK_DEV_BUILD__: boolean;
@@ -273,6 +285,9 @@ import { OpenCodeSessionImporter } from "./sessions/OpenCodeSessionImporter";
 import { ZCodeSessionImporter } from "./sessions/ZCodeSessionImporter";
 import { WorkBuddySessionImporter } from "./sessions/WorkBuddySessionImporter";
 import { CursorSessionImporter } from "./sessions/CursorSessionImporter";
+import { KimiSessionImporter } from "./sessions/KimiSessionImporter";
+import { KimiWorkSessionImporter } from "./sessions/KimiWorkSessionImporter";
+import { MinimaxSessionImporter } from "./sessions/MinimaxSessionImporter";
 import { DirectorySessionImporter } from "./sessions/DirectorySessionImporter";
 import { normalizeSessionPathKey } from "./sessions/directorySessionImport";
 import { SettingsStore } from "./settings/SettingsStore";
@@ -286,6 +301,9 @@ import { ConfigBackupManager } from "./config/ConfigBackupManager";
 import { TokendanceCatalogStore } from "./config/tokendanceCatalog";
 import { installTokendanceProvider } from "./config/tokendanceInstaller";
 import { TokendanceAuthStore } from "./config/tokendanceAuth";
+import { TokendancePaymentStore } from "./config/tokendancePayment";
+import { usageProbeRequest } from "./config/usageProbeTransport";
+import { TOKENDANCE_PROVIDER } from "../shared/tokendance";
 import { TerminalSessionManager } from "./terminal/TerminalSessionManager";
 import { startTrayRegistrationVerify, type TrayRegistrationVerify } from "./tray/trayRegistrationVerify";
 import { TelemetryService } from "./telemetry/TelemetryService";
@@ -301,8 +319,6 @@ import { registerBuiltInExtensionIpc } from "./ipc/builtInExtensionIpc";
 import { PROMPTS_STORE_CHANNELS, SKILLS_STORE_CHANNELS, registerContentStoreIpc } from "./ipc/contentStoreIpc";
 import { PromptStoreUpdater } from "./prompts/promptStoreUpdater";
 import { SkillStoreUpdater } from "./skills/skillStoreUpdater";
-import { createPiProcessSkillResolvers } from "./skills/piProcessSkillResolvers";
-import { createPiProcessPromptResolvers } from "./prompts/piProcessPromptResolvers";
 import { ProjectResourceManager } from "./projects/ProjectResourceManager";
 import { ResourceImportManager } from "./resourceImport/ResourceImportManager";
 import { toWslLinuxPath, toWindowsHostPath } from "./wsl/WslPaths";
@@ -313,6 +329,8 @@ import { constrainWindowBoundsToWorkArea, type LastWindowBounds, MIN_WINDOW_HEIG
 import { createRendererCrashRecoveryGuard } from "./window/rendererCrashRecovery";
 import { registerBackgroundImageProtocol, registerBackgroundsIpc } from "./ipc/backgroundsIpc";
 import { registerThemesIpc } from "./ipc/themesIpc";
+import { registerPluginDevIpc } from "./ipc/pluginDevIpc";
+import { PluginDevService } from "./extensions/PluginDevService";
 import { registerGitIpc } from "./ipc/gitIpc";
 import { registerStoreIpc } from "./ipc/storeIpc";
 import { registerTerminalIpc } from "./ipc/terminalIpc";
@@ -409,6 +427,11 @@ let openCodeSessionImporter: OpenCodeSessionImporter;
 let zcodeSessionImporter: ZCodeSessionImporter;
 let workbuddySessionImporter: WorkBuddySessionImporter;
 let cursorSessionImporter: CursorSessionImporter;
+let kimiSessionImporter: KimiSessionImporter;
+/** Kimi Work（桌面版）会话导入；daimon-share 位置不固定，内部走探测链。 */
+let kimiWorkSessionImporter: KimiWorkSessionImporter;
+/** MinimaxCode（CLI）会话导入；数据目录固定 ~/.minimax，无探测链。 */
+let minimaxSessionImporter: MinimaxSessionImporter;
 /** 外置目录会话导入（项目目录移动/改名后找回历史）；只建 catalog 引用，不复制文件。 */
 let directorySessionImporter: DirectorySessionImporter;
 let settingsStore: SettingsStore;
@@ -435,6 +458,17 @@ let dshAgentManager: DshAgentManager;
 /** 多后端合成网关（pi + dsh + 未来后端）；启动装配后赋值，供发送链路按 agentId 路由。 */
 let compositeAgentGateway: CompositeAgentGateway | undefined;
 let configManager: ConfigManager;
+/** pi 原生资源配置服务与迁移状态（A2/A3；启动装配，IPC 复用）。 */
+let piResourceConfigService: PiResourceConfigService | undefined;
+let piResourceStateStore: PiResourceStateStore | undefined;
+/** Agent spawn 前的迁移保证（幂等）；由启动装配注入，未注入时视为无需迁移。 */
+let ensurePiResourceMigration: ((projectId?: string) => Promise<void>) | undefined;
+/** 全局 settings.json 的 skills / prompts / extensions 条目缓存（供列表状态投影；迁移/开关后刷新）。 */
+let skillManagerNativeEntries: string[] | null = null;
+let promptManagerNativeEntries: string[] | null = null;
+let extensionManagerNativeEntries: string[] | null = null;
+/** settings.json 的 packages 条目缓存：整包停用写在这里，扩展投影必须一并读取。 */
+let extensionManagerNativePackages: unknown[] | null = null;
 let configBackupManager: ConfigBackupManager | undefined;
 let promptManager: PromptManager;
 let xuePromptManager: XuePromptManager;
@@ -623,7 +657,11 @@ function emitSessionRuntimeEvent(agentId: string, sourceChannel: string, payload
 		const tab = payload as Partial<AgentTab>;
 		if (typeof tab.sessionPath === "string" && tab.sessionPath) {
 			const entry = sessionCatalog.get(runtimeBinding.sessionId);
-			if (canAttachRuntimeMetadata(entry, tab) && (entry?.filePath !== tab.sessionPath || entry.piSessionId !== tab.sessionId)) {
+			// #314：pi 上报的路径与 catalog 持久化路径可能只是形态差异（分隔符/大小写、
+			// resolveFilePath 归一先后不同）。裸字符串比较永真时每个 runtime 事件都会
+			// 触发一次 attach；canonical 归一后再比，无实质变化不再入队。
+			const sessionPathUnchanged = entry?.filePath !== undefined && canonicalizeSessionPath(entry.filePath, entry.environment) === canonicalizeSessionPath(tab.sessionPath, entry.environment);
+			if (canAttachRuntimeMetadata(entry, tab) && (!sessionPathUnchanged || entry.piSessionId !== tab.sessionId)) {
 				// 仅 pi JSONL 走文件配对。DSH 的 sessionPath 是 zstd，canAttach 已拒绝；
 				// host id 由 Coordinator activate/dispatch 回写 dshSessionId。
 				void sessionCatalog
@@ -1662,6 +1700,9 @@ async function createWindow() {
 		},
 	});
 	const createdWindow = mainWindow;
+	// Windows 建窗时可能裁掉工作区外的不可见 resize border；构造参数不足以精确还原贴边外框。
+	// 显示/最大化前显式设置已解析的几何，避免重启后高度再次被原生建窗流程缩短。
+	createdWindow.setBounds(startupWindowBounds);
 	configureBrowserPanelWebviewHost(createdWindow);
 	let hasShownMainWindow = false;
 	function showMainWindowOnce() {
@@ -2271,6 +2312,13 @@ function registerIpc() {
 	registerBackgroundImageProtocol();
 	registerBackgroundsIpc();
 	registerThemesIpc();
+	// 插件开发支持：demo/指南落 ~/.pi/agent/extensions（与扩展列表同一 home 来源）
+	const pluginDevService = new PluginDevService(resolveBuiltInExtensionRoots(), () => extensionManager?.userHomeDir ?? homedir());
+	registerPluginDevIpc(pluginDevService, {
+		// demo 是落进用户扩展目录的普通扩展：落盘后同步失效扩展列表缓存，
+		// 避免已打开的扩展页/缓存读看不到新行（与安装包后失效缓存同一语义）。
+		onExtensionFilesChanged: () => extensionManager?.invalidateListCache(),
+	});
 	registerProjectsIpc({
 		projectStore,
 		settingsStore,
@@ -2518,6 +2566,9 @@ function registerIpc() {
 		zcodeSessionImporter,
 		workbuddySessionImporter,
 		cursorSessionImporter,
+		kimiSessionImporter,
+		kimiWorkSessionImporter,
+		minimaxSessionImporter,
 		directorySessionImporter,
 		appLogger,
 		terminalManager,
@@ -2871,6 +2922,16 @@ function registerIpc() {
 		appLogger,
 		rpcLogger,
 		sessionRuntimeCoordinator,
+		// 项目目录信任判定（trust.json 最近父目录语义，与 storeIpc 同源）。
+		// 漏装配会让项目作用域全部按「未信任」处理：项目 MCP 读写、项目 MCP 的 pi mcp CLI、
+		// 以及 piResources 的项目级内置扩展开关都会被拒，而与 trust.json 里实际写了什么无关。
+		// WSL 项目例外：信任判定用发行版内的 Linux 路径（trust.json 键也是 Linux 路径）。
+		isProjectTrusted: async (projectId, projectRoot) => {
+			const project = projectStore.get(projectId);
+			const settings = settingsStore.get();
+			const trustPath = project?.environment === "wsl" && process.platform === "win32" && settings.wslEnabled && settings.wslDistro ? toWslLinuxPath(projectRoot, { distro: settings.wslDistro }) : projectRoot;
+			return (await configManager.getProjectTrustDecision(trustPath)) === true;
+		},
 		// pi 环境引导：便携 Node 安装器的真实 IO（下载/解压与 DSH runtime 同源，
 		// 测试里注入替身；未装配时引导安装入口降级不可用）。
 		piRuntimeNodeInstaller: {
@@ -2914,6 +2975,12 @@ function registerIpc() {
 		tokendanceCatalog: tokendanceCatalogStore,
 		// 内置 TokenDance OAuth 授权（PKCE S256 headless；verifier 内存持有，重启失效）
 		tokendanceAuth: new TokendanceAuthStore(),
+		// 内置 TokenDance 充值：与模型调用同一个 API Key（从 models.json 解析，只在本进程使用），
+		// 创建/查询都走既有用量探针传输层（Electron net，服从系统代理与超时/字节上界）。
+		tokendancePayment: new TokendancePaymentStore({
+			resolveEndpoint: () => configManager.resolveProviderEndpoint(TOKENDANCE_PROVIDER),
+			request: usageProbeRequest,
+		}),
 		// 一键安装：pi models.json + DSH llm-pi-ai 双落盘（复用迁移服务的写盘策略：
 		// host 就绪走官方 settings API，否则直写 settings.yaml/.credentials.yaml）
 		tokendanceInstall: (apiKey) =>
@@ -3050,6 +3117,8 @@ function registerIpc() {
 			await settingsStore.load();
 			// 快捷键覆盖可能随备份一起被恢复：同步刷新主进程生效绑定，无需重启
 			refreshShortcutBindings(settingsStore.get());
+			// Logo 风格也可能随备份恢复：同步刷新窗口/Dock 图标
+			applyWindowLogoStyle(settingsStore.get().logoStyle, () => mainWindow);
 			void piModelCapabilityCache?.refresh().catch(() => undefined);
 		},
 	});
@@ -3145,6 +3214,9 @@ app
 		zcodeSessionImporter = new ZCodeSessionImporter(mainCopy);
 		workbuddySessionImporter = new WorkBuddySessionImporter(mainCopy);
 		cursorSessionImporter = new CursorSessionImporter(mainCopy);
+		kimiSessionImporter = new KimiSessionImporter(mainCopy);
+		kimiWorkSessionImporter = new KimiWorkSessionImporter(mainCopy);
+		minimaxSessionImporter = new MinimaxSessionImporter(mainCopy);
 		// 外置目录会话导入：不复制会话文件，只把选定目录里的会话挂到当前项目（catalog 归属改写）。
 		// 候选来自 SessionScanner 的全量清单（list() 不带项目参数）——项目目录改名后，
 		// 那批会话仍然躺在 sessions 树里，只是项目过滤把它们排除了。
@@ -3284,12 +3356,41 @@ app
 			onError: (message, detail) => void appLogger?.warn("backup", message, { detail }),
 		});
 		promptManager = new PromptManager(undefined, mainCopy);
-		// 注入设置读写：模板开关同步持久化禁用列表（--no-prompt-templates/--prompt-template
-		// 白名单模式的依据），跨重启保留。
+		// 注入旧禁用列表读写（原生服务未装配时的兜底通道；迁移后为空，仅兼容读取）。
 		promptManager.configureSettings(
 			() => settingsStore.get(),
 			(patch) => settingsStore.update(patch),
 		);
+		// 原生配置接线（A4）：模板开关写 pi settings.json 精确规则，列表状态按原生条目投影。
+		promptManager.configureNativeToggle(async (templatePath, enabled) => {
+			const service = piResourceConfigService;
+			if (!service) return { ok: false, error: "pi resource service unavailable" };
+			const saved = await service.setFileResourceEnabled({ scope: { scope: "global" }, kind: "prompts", resourceId: templatePath, enabled });
+			if (saved.ok) await refreshPromptProjection();
+			return saved;
+		});
+		promptManager.configureNativeEnabledReader((templatePath) => {
+			const entries = promptManagerNativeEntries;
+			if (!entries) return undefined;
+			return projectResourceEnabled({ entries, value: templatePath, baseDir: dirname(templatePath) });
+		});
+		// 项目作用域：模板开关写项目 `.pi/settings.json` 的 prompts 精确规则。
+		promptManager.configureNativeProjectToggle(async (projectId, templatePath, enabled) => {
+			const service = piResourceConfigService;
+			if (!service) return { ok: false, error: "pi resource service unavailable" };
+			return service.setFileResourceEnabled({ scope: { scope: "project", projectId }, kind: "prompts", resourceId: templatePath, enabled });
+		});
+		promptManager.configureNativeProjectEntriesReader(async (projectId) => {
+			const project = projectStore.get(projectId);
+			if (!project) return null;
+			try {
+				const file = await readPiConfigFile(join(project.path, ".pi", "settings.json"));
+				const value = file.data.prompts;
+				return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+			} catch {
+				return null;
+			}
+		});
 		// 提示词商店官方模板 / 内置技能热更新：与内置扩展同一套「resources 只读 → userData 覆盖层」机制。
 		// 覆盖层供查询侧（XuePromptManager / SkillManager）叠加解析：远端新增/修改的模板与技能免发版生效。
 		const promptStoreUpdater = new PromptStoreUpdater({
@@ -3318,12 +3419,29 @@ app
 		skillManager = new SkillManager(undefined, mainCopy);
 		// 内置技能覆盖层叠加：安装内置技能模板时覆盖层优先（修 bug/新增技能免发版）
 		skillManager.configureSkillOverlay(() => skillStoreUpdater.resolveEffectiveOverlayDir());
-		// 注入设置读写：技能开关同步持久化禁用列表（--no-skills/--skill 白名单模式的依据），
-		// 跨重启保留，不再只依赖 SKILL.md frontmatter（该标记仅阻止模型自动调用）。
+		// 注入旧禁用列表读写（原生服务未装配时的兜底通道；迁移后为空，仅兼容读取）。
 		skillManager.configureSettings(
 			() => settingsStore.get(),
 			(patch) => settingsStore.update(patch),
 		);
+		// 原生配置接线（A4）：迁移后禁用列表不再是真值来源，技能开关直接写 pi settings.json
+		// 的精确过滤规则；列表状态也按原生条目投影（见 PiResourceConfigService）。
+		// 闭包延迟读 piResourceConfigService（它在启动迁移阶段才装配）。
+		skillManager.configureNativeToggle(async (skillPath, enabled) => {
+			const service = piResourceConfigService;
+			if (!service) return { ok: false, error: "pi resource service unavailable" };
+			// revision 交给服务内部锁内重读；这里不传，避免把并发页面草稿误判成冲突。
+			const saved = await service.setFileResourceEnabled({ scope: { scope: "global" }, kind: "skills", resourceId: skillPath, enabled });
+			if (saved.ok) await refreshSkillProjection();
+			return saved;
+		});
+		// 状态投影：按原生条目判定该技能当前是否加载（排除 → 强制包含 → 强制排除）。
+		// 运行时真值仍是 pi；这里只用于列表展示与开关初始值。
+		skillManager.configureNativeEnabledReader((skillPath) => {
+			const entries = skillManagerNativeEntries;
+			if (!entries) return undefined;
+			return projectResourceEnabled({ entries, value: skillPath, baseDir: dirname(skillPath) });
+		});
 		// 启动时自动安装内置 usage-probe 技能模板到用户全局技能目录：
 		// pi 只扫 ~/.pi/agent/skills、~/.agents/skills，不读 pideck 打包资源目录（resources/skills），
 		// 必须落到用户目录，用户才能在聊天里 /skill:usage-probe 让 AI 引导写用量探针配置。
@@ -3363,6 +3481,60 @@ app
 			// 才能反映「当前真正生效」的那一份。
 			resolveBuiltInExtensionRoots(),
 		);
+		// 原生配置接线（A4）：扩展到开关写 pi settings.json 的过滤规则
+		// （包安装 → 整包停用；本地文件扩展 → 顶层精确 +/-路径），列表状态按原生条目投影。
+		// 闭包延迟读 piResourceConfigService（启动迁移阶段才装配）。
+		extensionManager.configureNativeToggle(async ({ source, path, scope, projectId, enabled }) => {
+			const service = piResourceConfigService;
+			if (!service) return { ok: false, error: "pi resource service unavailable" };
+			let target: PiResourceScope;
+			if (scope === "project") {
+				// 项目作用域必须由渲染层显式给出注册 projectId：缺它就报错，绝不猜一个项目写错配置。
+				if (!projectId) return { ok: false, error: "Project scope requires a project id." };
+				target = { scope: "project", projectId };
+			} else {
+				target = { scope: "global" };
+			}
+			const saved = await service.setExtensionEnabled({ scope: target, source, path, enabled });
+			if (saved.ok) await refreshExtensionProjection();
+			return saved;
+		});
+		extensionManager.configureNativeEnabledReader((extension) => {
+			const entries = extensionManagerNativeEntries;
+			if (!entries) return undefined;
+			// 包安装的扩展：整包停用写在 packages 条目过滤里（不在顶层 extensions 数组），
+			// 必须单独查——否则开关写成功了、刷新后仍显示启用，开关弹回。
+			if (extensionManagerNativePackages && isPackageSource(extension.source)) {
+				const pkg = extensionManagerNativePackages.find((entry) => packageSourceOf(entry) === extension.source);
+				if (pkg && isEntryDisabled(pkg)) return false;
+			}
+			return projectResourceEnabled({ entries, value: extension.path ?? extension.source, baseDir: extension.path ? dirname(extension.path) : "" });
+		});
+		// 项目侧资源开关写项目 `.pi/settings.json` 的原生过滤规则（A4）。
+		// 项目自有资源用精确 `-path`；继承全局资源写「绝对路径 plain + +/-」，与 pi config 一致。
+		const projectNativeRules = {
+			setResourceEnabled: async (projectId: string, kind: "extensions" | "skills" | "prompts", value: string, enabled: boolean) => {
+				const service = piResourceConfigService;
+				if (!service) return { ok: false, error: "pi resource service unavailable" };
+				return service.setFileResourceEnabled({ scope: { scope: "project", projectId }, kind, resourceId: value, enabled });
+			},
+			setInheritedOverride: async (projectId: string, kind: "extensions" | "skills" | "prompts", value: string, state: "inherit" | "enabled" | "disabled") => {
+				const service = piResourceConfigService;
+				if (!service) return { ok: false, error: "pi resource service unavailable" };
+				return service.setProjectInheritedOverride({ projectId, kind, value, state });
+			},
+			readEntries: async (projectId: string, kind: "extensions" | "skills" | "prompts") => {
+				try {
+					const project = projectStore.get(projectId);
+					if (!project) return null;
+					const file = await readPiConfigFile(join(project.path, ".pi", "settings.json"));
+					const value = file.data[kind];
+					return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+				} catch {
+					return null;
+				}
+			},
+		};
 		projectResourceManager = new ProjectResourceManager(
 			(projectId) => projectStore.get(projectId),
 			mainCopy,
@@ -3388,6 +3560,7 @@ app
 					return { skills: settings.disabledSkills, prompts: settings.disabledPrompts };
 				},
 			},
+			projectNativeRules,
 		);
 		resourceImportManager = new ResourceImportManager(
 			configManager,
@@ -3456,6 +3629,24 @@ app
 					// 目录查询失败（pi 缺失/CLI 异常等）时退回旧行为：不标 needsRestart，
 					// 保持错误形态不变，避免把可诊断错误变成误导性的“重启即可”。
 					return false;
+				}
+			},
+			// 第三方接管型 MCP 扩展提醒（M5b）：复用 ExtensionManager.list() 的缓存路径（轻扫描，
+			// 不查 npm view），把命中的接管型扩展交给 AgentManager 在启动后提醒。闭包延迟读
+			// extensionManager（构造晚于 agentManager）；列表查询失败时返回空集（宁可漏提醒也不报错）。
+			async () => {
+				try {
+					const list = await extensionManager?.list(false);
+					if (!list) return [];
+					return detectThirdPartyMcpExtensions(list.extensions).map((hit) => ({
+						source: hit.source,
+						scope: hit.scope,
+						enabled: hit.enabled,
+						uninstallCommand: hit.uninstallCommand,
+						isLocalFile: hit.isLocalFile,
+					}));
+				} catch {
+					return [];
 				}
 			},
 		);
@@ -3966,6 +4157,8 @@ app
 		await settingsStore.load();
 		// 快捷键覆盖从磁盘载入后立即刷新主进程生效绑定（此后 settings:update 路径实时刷新）
 		refreshShortcutBindings(settingsStore.get());
+		// Logo 风格：启动时按已加载设置刷新窗口/Dock 图标（此后 settings:update 路径实时刷新）
+		applyWindowLogoStyle(settingsStore.get().logoStyle, () => mainWindow);
 		piModelCapabilityCache = new PiModelCapabilityCache({
 			// 模型能力水合分两档（详见 docs/pi-model-capability-plan.md）：
 			// - 快速档（默认，loadExtensions=false）：--no-extensions。实测 418 模型下
@@ -3991,14 +4184,7 @@ app
 					piLocator,
 					// 与 AgentManager 同一套扩展/技能解析（内置注入 + 禁用白名单），
 					// 保证「选择器看到的模型」与「运行时实际加载的扩展」同源。
-					{
-						...createPiProcessExtensionResolvers(process.cwd(), settingsStore.get()),
-						// 技能白名单解析器同源注入；该进程固定 piRpcNoSkills（模型查询不需要技能），
-						// PiProcess 侧会因 noSkills 关闭白名单，此处仅为装配一致性。
-						...createPiProcessSkillResolvers(process.cwd(), settingsStore.get()),
-						// 提示词模板白名单解析器同源注入（与技能一致）。
-						...createPiProcessPromptResolvers(process.cwd(), settingsStore.get()),
-					},
+					{ ...createPiProcessExtensionResolvers(process.cwd(), settingsStore.get()) },
 				),
 			getConfigDirectory: () => configManager.getConfigDir(),
 			watchDirectory: watchPiConfigDirectory,
@@ -4023,14 +4209,149 @@ app
 			// 把 pi-subagents transcript 等无 type 头的产物挡在 catalog 之外（#168）。
 			(filePath, options) => sessionScanner.inferSessionNameAndValidity(filePath, options),
 		);
-		// 定时任务存储先行构造：两份本地 JSON（session-catalog / automation）互不依赖，
-		// 各自带损坏兜底，并行读取省一个串行磁盘环节；装配点统一等两者落定。
 		automationStore = new AutomationStore(join(app.getPath("userData"), "automation.json"));
-		await Promise.all([sessionCatalog.load(), automationStore.load()]);
+		const automationStorePreload = automationStore.load();
+		await Promise.all([sessionCatalog.load(), automationStorePreload]);
+
+		// ── 旧禁用记录 → pi 原生配置迁移（计划 A3/A5）──
+		// 启动期一次性执行：旧列表一旦被清理，原生过滤就是唯一生效来源。
+		// 失败/未解析时保留旧记录并记日志（下次启动幂等重试），不静默打开用户禁用的资源。
+		piResourceStateStore = new PiResourceStateStore(join(app.getPath("userData"), "pi-native-resources.json"));
+		piResourceConfigService = new PiResourceConfigService(
+			{
+				globalSettingsPath: () => join(configManager.getConfigDir(), "settings.json"),
+				resolveProject: async (projectId) => {
+					const project = projectStore.get(projectId);
+					if (!project || project.kind === "chat") return null;
+					const root = project.path;
+					const settings = settingsStore.get();
+					const trustPath = process.platform === "win32" && project.environment === "wsl" && settings.wslEnabled && settings.wslDistro ? toWslLinuxPath(root, { distro: settings.wslDistro }) : root;
+					return { root, trusted: (await configManager.getProjectTrustDecision(trustPath)) === true };
+				},
+			},
+			piResourceStateStore,
+			{ projectTrust: async (projectId, _root) => (await configManager.getProjectTrustDecision(projectStore.get(projectId)?.path ?? "")) === true },
+		);
+		/** 刷新技能/模板状态投影缓存（迁移完成、或用户切开关后调用）。 */
+		const readNativeEntries = async (key: "skills" | "prompts" | "extensions"): Promise<string[] | null> => {
+			try {
+				const file = await readPiConfigFile(join(configManager.getConfigDir(), "settings.json"));
+				const value = file.data[key];
+				return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+			} catch {
+				return null;
+			}
+		};
+		const refreshSkillProjection = async (): Promise<void> => {
+			skillManagerNativeEntries = await readNativeEntries("skills");
+		};
+		const refreshPromptProjection = async (): Promise<void> => {
+			promptManagerNativeEntries = await readNativeEntries("prompts");
+		};
+		const refreshExtensionProjection = async (): Promise<void> => {
+			try {
+				const file = await readPiConfigFile(join(configManager.getConfigDir(), "settings.json"));
+				const extensions = file.data.extensions;
+				const packages = file.data.packages;
+				extensionManagerNativeEntries = Array.isArray(extensions) ? extensions.filter((item): item is string => typeof item === "string") : [];
+				extensionManagerNativePackages = Array.isArray(packages) ? packages.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null && !Array.isArray(item)) : [];
+			} catch {
+				extensionManagerNativeEntries = null;
+				extensionManagerNativePackages = null;
+			}
+		};
+		/**
+		 * 迁移依赖：全局与项目共用（项目迁移也需要全局资源做名称→路径映射）。
+		 * 迁移是「旧禁用记录 → 原生过滤规则」的唯一入口，必须在任何 Agent spawn 前跑完，
+		 * 否则退出白名单后旧记录不再有任何生效途径（见计划 A5）。
+		 */
+		const migrationDeps: import("./config/piResourceMigrationRunner").MigrationRunnerDeps = {
+			service: piResourceConfigService,
+			state: piResourceStateStore,
+			readSettings: () => settingsStore.get(),
+			resolveGlobalResources: async () => {
+				const settings = settingsStore.get();
+				const resources: ResolvedMigrationResource[] = [];
+				// 迁移只需要「旧禁用记录里的名字 → 原生过滤匹配值」的映射，直接用各 Manager
+				// 的列表（它们已按原生规则投影状态，但这里要的是全部条目，与启用与否无关）。
+				const extensionList = await extensionManager?.list(false).catch(() => null);
+				for (const item of extensionList?.extensions ?? []) {
+					if (!item.source || item.builtIn) continue;
+					resources.push({ kind: "extensions", name: item.source, value: item.path ?? item.source, scope: item.scope === "project" ? "project" : "user" });
+				}
+				const skills = await skillManager?.list().catch(() => null);
+				for (const skill of skills?.skills ?? []) {
+					if (skill.sourceId !== "pi-global" && skill.sourceId !== "agents-global") continue;
+					resources.push({ kind: "skills", name: skill.name, value: skill.path, scope: "user" });
+				}
+				const prompts = await promptManager?.list().catch(() => null);
+				for (const template of prompts?.templates ?? []) {
+					if (template.scope === "project") continue;
+					resources.push({ kind: "prompts", name: template.name, value: template.path, scope: "user" });
+				}
+				return resources;
+			},
+			readProjectLegacyState: async (projectId) => projectResourceManager.readProjectLegacyDisables(projectId),
+			resolveProjectResources: async (projectId) => {
+				const project = projectStore.get(projectId);
+				if (!project) return [];
+				const resources: ResolvedMigrationResource[] = [];
+				for (const skill of (await projectResourceManager.list(projectId).catch(() => null))?.skills ?? []) {
+					if (typeof skill.path === "string") resources.push({ kind: "skills", name: skill.name, value: skill.path, scope: "project" });
+				}
+				return resources;
+			},
+			writeSettingsPatch: async (patch) => {
+				await settingsStore.update(patch as Parameters<typeof settingsStore.update>[0]);
+			},
+			clearProjectLegacyState: async (projectId, patch) => {
+				await projectResourceManager.clearProjectLegacyDisables(projectId, patch);
+			},
+			logger: { info: (scope, message, detail) => void appLogger.info(scope, message, detail), warn: (scope, message, detail) => void appLogger.warn(scope, message, detail) },
+		};
+		/** 迁移后刷新投影缓存：否则列表仍按旧列表显示，与实际生效的原生规则不一致。 */
+		const refreshAllProjections = async (): Promise<void> => {
+			await Promise.all([refreshSkillProjection(), refreshPromptProjection(), refreshExtensionProjection()]);
+		};
+		let globalMigrationRun: Promise<void> | null = null;
+		const projectMigrationRuns = new Map<string, Promise<void>>();
+		/**
+		 * 确保该作用域的旧禁用记录已迁移（幂等、并发复用同一个 Promise）。
+		 * Agent spawn 前必须 await：迁移未完成就启动会话会把用户停用的资源重新加载。
+		 */
+		const ensureResourceMigration = async (projectId?: string): Promise<void> => {
+			if (!projectId) {
+				globalMigrationRun ??= runGlobalResourceMigration(migrationDeps).then(async (result) => {
+					await refreshAllProjections();
+					if (result.errors.length > 0) {
+						void appLogger.warn("migration", "Global resource migration reported problems", { status: result.status, errors: result.errors });
+					}
+				});
+				return globalMigrationRun;
+			}
+			let run = projectMigrationRuns.get(projectId);
+			if (!run) {
+				run = runProjectResourceMigration(migrationDeps, projectId).then(async (result) => {
+					await refreshAllProjections();
+					if (result.errors.length > 0) {
+						void appLogger.warn("migration", "Project resource migration reported problems", { projectId, status: result.status, errors: result.errors });
+					}
+				});
+				projectMigrationRuns.set(projectId, run);
+			}
+			return run;
+		};
+		// 启动即开始全局迁移（不阻塞窗口创建），并把它交给 AgentManager 在 spawn 前 await。
+		void ensureResourceMigration();
+		ensurePiResourceMigration = ensureResourceMigration;
+		agentManager.configureResourceMigrationGate(ensureResourceMigration);
 		// 多后端网关装配：pi + dsh（DSH 在窗口创建后后台预热，失败时按需重试）。
 		// Coordinator 与事件桥接均面向合成器，新增后端只需追加网关实例。
 		compositeAgentGateway = new CompositeAgentGateway([agentManager, dshAgentManager]);
 		sessionRuntimeCoordinator = new SessionRuntimeCoordinator(sessionCatalog, compositeAgentGateway, sendAgentPromptWithIntegrations, appLogger);
+		// catalog 外部删除清理的活性探针：预热激活后 pi 可能尚未写出会话文件，
+		// 有活跃绑定的记录不得被扫描当「外部删除」剔掉。
+		sessionCatalog.setSessionLivenessProbe((sessionId) => sessionRuntimeCoordinator?.hasLiveRuntime(sessionId) === true);
 
 		// 定时任务调度器与执行编排器装配
 		automationRunCoordinator = new AutomationRunCoordinator({
@@ -4445,14 +4766,17 @@ app
 		cuaService = new CuaService({
 			getMainWindow: () => mainWindow,
 			log: (domain, message, details) => void appLogger.info(domain, message, details),
+			// 免审批设置实时读取：改设置即时生效，无需重启 CUA 服务。
+			getAutoApprove: () => settingsStore.get().cuaAutoApprove,
 		});
 		if (settingsStore.get().cuaEnabled) {
 			void cuaService.start().catch((error) => {
 				void appLogger.warn("cua", "CUA service start failed", error);
 			});
 		}
-		quitCleanup.register("cua", () => {
-			void cuaService?.dispose();
+		quitCleanup.register("cua", async () => {
+			// runAll 会逐项 await：返回 dispose 的 Promise 保证退出前 host 关闭 + mcp.json 反注册完成（早前 `void` 掉 Promise，退出竞态）。
+			await cuaService?.dispose();
 			cuaService = null;
 		});
 

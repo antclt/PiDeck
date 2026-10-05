@@ -105,6 +105,9 @@ export type AgentTab = {
 	wslUser?: string;
 	importedSourceId?: string;
 	noSession?: boolean;
+	/** standby 池化进程：已握手完成但尚未绑定任何会话（预热 spawn，UI 不可见）。
+	 *  被 claim 后清回 undefined；仅主进程内部使用，渲染层不应看到 standby=true 的 tab。 */
+	standby?: boolean;
 	/** Monotonic binding generation assigned by SessionRuntimeCoordinator. */
 	runtimeGeneration?: number;
 	createdAt: number;
@@ -311,6 +314,8 @@ export type CreateAgentInput = {
 	 * 与 pi 进程自身的 sessionId（AgentTab.sessionId / piSessionId）语义不同，不可混用。
 	 */
 	deckSessionId?: string;
+	/** standby 池预热 spawn：不绑定会话、不注入 PIDECK_SESSION_ID，创建后由 StandbyAgentPool 托管（仅 AgentManager 内部使用）。 */
+	standby?: boolean;
 	environment?: SessionEnvironment;
 	source?: SessionSource;
 	wslDistro?: string;

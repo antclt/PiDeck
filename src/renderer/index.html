@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' file: data: blob: pideck-bg: pideck-pet: pideck-img: https://cloudcache.tencent-cloud.com https://skillhub-1388575217.cos.accelerate.myqcloud.com; font-src 'self' data:; frame-src 'self' file: blob:; media-src 'self' pideck-sound:; connect-src 'self' ws://127.0.0.1:* ws://localhost:* http://127.0.0.1:* http://localhost:* https://api.skillhub.cn"
+      content="default-src 'self'; script-src 'self' 'unsafe-eval' blob: 'sha256-K8sYepxaimDwr/9LogtXqSk/PPwduZDgGcohCVEMuak='; style-src 'self' 'unsafe-inline'; img-src 'self' file: data: blob: pideck-bg: pideck-pet: pideck-img: https://cloudcache.tencent-cloud.com https://skillhub-1388575217.cos.accelerate.myqcloud.com; font-src 'self' data:; frame-src 'self' file: blob:; media-src 'self' pideck-sound:; connect-src 'self' ws://127.0.0.1:* ws://localhost:* http://127.0.0.1:* http://localhost:* https://api.skillhub.cn"
     />
     <title></title>
     <style>
@@ -74,6 +74,19 @@
       .boot-logo svg {
         width: 48px;
         height: 48px;
+      }
+      /* logo 风格切换（与渲染层 piTuiLogo.ts 同源）：默认 pi-tui（官方三色像素标），显式选 classic 时切回拼图标 */
+      .boot-logo .boot-logo-pi-tui {
+        display: none;
+        /* 4×4 位图为 1:1 正方形（官方半块字符每格上下两个正方形像素），与 classic 同尺寸 */
+        width: 48px;
+        height: 48px;
+      }
+      html.logo-pi-tui .boot-logo .boot-logo-classic {
+        display: none;
+      }
+      html.logo-pi-tui .boot-logo .boot-logo-pi-tui {
+        display: block;
       }
 
       .boot-title {
@@ -177,11 +190,25 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- 下方内联脚本靠 CSP `script-src` 的内容哈希白名单放行（hash 见 <head> 的 CSP）：
+         脚本按内容哈希授权，不是 'unsafe-inline'；改动脚本文本后必须重算 sha256 并同步 CSP ——
+         否则会被默默拦截、开屏永远回落经典标（tests/piTuiLogo.test.mjs 会重算哈希兜底）。 -->
+    <!-- 同步读 logo 风格缓存（App.tsx 写入，键与 piTuiLogo.ts LOGO_STYLE_STORAGE_KEY 一致）：
+         启动画面在 React 挂载前渲染，用 html class 切换两套 logo；默认 pi-tui，仅显式选 classic 才不挂 class。
+         键名带版本后缀（v2）：缓存值就是上次启动时的 logoStyle，无法区分「旧默认遗留」与「用户显式选择」，
+         翻默认值时必须同步升版本号，否则开屏会沿用上一版默认标。 -->
+    <script>
+      try {
+        if (localStorage.getItem("pideck:logo-style:v2") !== "classic") {
+          document.documentElement.classList.add("logo-pi-tui");
+        }
+      } catch (e) {}
+    </script>
     <!-- 启动画面覆盖层：React 挂载后通过 fade-out 动画淡出再移除 -->
     <div id="boot-overlay">
       <div class="boot-brand">
         <div class="boot-logo">
-          <svg viewBox="140 140 520 520" aria-hidden="true">
+          <svg class="boot-logo-classic" viewBox="140 140 520 520" aria-hidden="true">
             <defs>
               <linearGradient id="boot-logo-silver" x1="0.2" y1="0" x2="0.8" y2="1">
                 <stop stop-color="#ffffff"/>
@@ -191,6 +218,19 @@
             </defs>
             <path fill="url(#boot-logo-silver)" fill-rule="evenodd" d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z"/>
             <path fill="url(#boot-logo-silver)" d="M517.36 400H634.72V634.72H517.36Z"/>
+          </svg>
+          <!-- pi 官方 TUI logo：4×4 像素位图（coral/blue/yellow），与 piTuiLogo.ts 逐格一致 -->
+          <svg class="boot-logo-pi-tui" viewBox="0 0 4 4" aria-hidden="true" shape-rendering="crispEdges">
+            <rect x="0" y="0" width="1" height="1" fill="#E48A7A"/>
+            <rect x="1" y="0" width="1" height="1" fill="#E48A7A"/>
+            <rect x="2" y="0" width="1" height="1" fill="#E48A7A"/>
+            <rect x="0" y="1" width="1" height="1" fill="#4F8EB3"/>
+            <rect x="2" y="1" width="1" height="1" fill="#E48A7A"/>
+            <rect x="0" y="2" width="1" height="1" fill="#4F8EB3"/>
+            <rect x="1" y="2" width="1" height="1" fill="#4F8EB3"/>
+            <rect x="3" y="2" width="1" height="1" fill="#EAB65D"/>
+            <rect x="0" y="3" width="1" height="1" fill="#4F8EB3"/>
+            <rect x="3" y="3" width="1" height="1" fill="#EAB65D"/>
           </svg>
         </div>
         <strong class="boot-title">PiDeck</strong>

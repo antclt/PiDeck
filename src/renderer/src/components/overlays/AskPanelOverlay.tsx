@@ -236,13 +236,13 @@ export function AskPanelOverlay() {
 						<div className="min-w-0">
 							<div className="truncate text-sm font-medium">{t("askPanel.title")}</div>
 							{questionSummary || summary ? (
-								<div className="truncate text-[11px] text-muted-foreground" title={questionSummary || summary}>
+								<div className="truncate text-micro text-muted-foreground" title={questionSummary || summary}>
 									{questionSummary || summary}
 								</div>
 							) : null}
 						</div>
 						{running ? (
-							<span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+							<span className="inline-flex shrink-0 items-center gap-1 text-micro font-medium text-emerald-600 dark:text-emerald-400">
 								<span className="size-1.5 animate-pulse rounded-full bg-emerald-500" aria-hidden="true" />
 								{t("askPanel.running")}
 							</span>

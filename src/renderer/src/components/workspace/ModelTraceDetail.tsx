@@ -50,7 +50,7 @@ function TraceBlockView({ block }: { block: TraceBlock }) {
 						<Wrench className="size-3 text-muted-foreground" aria-hidden="true" />
 						{block.name}
 					</div>
-					{block.args ? <pre className={`overflow-auto rounded bg-background/60 p-1.5 font-mono text-[11px] leading-snug ${BLOCK_MAX_H}`}>{block.args}</pre> : null}
+					{block.args ? <pre className={`overflow-auto rounded bg-background/60 p-1.5 font-mono text-micro leading-snug ${BLOCK_MAX_H}`}>{block.args}</pre> : null}
 				</div>
 			);
 		case "tool_result":
@@ -60,7 +60,7 @@ function TraceBlockView({ block }: { block: TraceBlock }) {
 						{t("rpc.traceToolResult")}
 						{block.isError ? <span className="rounded bg-destructive/15 px-1 text-destructive">{t("rpc.traceToolError")}</span> : null}
 					</div>
-					<pre className={`overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-snug ${block.isError ? "text-destructive" : ""} ${BLOCK_MAX_H}`}>{block.text}</pre>
+					<pre className={`overflow-auto whitespace-pre-wrap break-words font-mono text-micro leading-snug ${block.isError ? "text-destructive" : ""} ${BLOCK_MAX_H}`}>{block.text}</pre>
 				</div>
 			);
 	}
@@ -79,7 +79,7 @@ function TraceMessageRow({ message, index }: { message: TraceMessage; index: num
 				<span className="shrink-0 tabular-nums text-[10px] text-muted-foreground/60">{t("rpc.traceChars", { n: message.chars })}</span>
 			</button>
 			{open && (
-				<div className="flex flex-col gap-2 px-2 pb-2 pl-9">
+				<div className="flex flex-col gap-2 px-2 pb-2 pl-9 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
 					{message.blocks.map((block, blockIndex) => (
 						<TraceBlockView key={blockIndex} block={block} />
 					))}
@@ -99,7 +99,7 @@ function SectionHeader({ icon, label, meta, open, onToggle, children }: { icon: 
 				<span className="text-xs font-medium">{label}</span>
 				{meta ? <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground/70">{meta}</span> : <span className="flex-1" />}
 			</button>
-			{open && children}
+			{open && <div className="motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">{children}</div>}
 		</div>
 	);
 }
@@ -156,7 +156,7 @@ export function ModelTraceDetail({ payloadJson, summary }: { payloadJson: string
 									))}
 								</div>
 								<div className="flex justify-end border-t border-border/40 px-2 py-1">
-									<Button type="button" variant="ghost" size="sm" className="h-6 gap-1 px-2 text-[11px]" onClick={() => void copyTextWithCopiedNotice(view.system!.text)}>
+									<Button type="button" variant="ghost" size="sm" className="h-6 gap-1 px-2 text-micro" onClick={() => void copyTextWithCopiedNotice(view.system!.text)}>
 										<Copy className="size-3" aria-hidden="true" />
 										{t("common.copy")}
 									</Button>

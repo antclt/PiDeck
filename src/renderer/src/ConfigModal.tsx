@@ -3,7 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui-shadcn
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "./components/ui-shadcn/dialog";
 import { ConfirmDialog } from "./components/ui-shadcn/ConfirmDialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "./components/ui-shadcn/alert-dialog";
-import { X, Blocks, Cpu, FileCode2, FileText, KeyRound, Puzzle, Settings2, Shield, ShieldCheck, Sparkles, PlugZap, FolderOpen } from "lucide-react";
+import { X, Blocks, Cpu, FileCode2, FileText, KeyRound, Loader2, Puzzle, Settings2, Shield, ShieldCheck, Sparkles, PlugZap, FolderOpen } from "lucide-react";
 import { cn } from "./lib/utils";
 import { deepClone } from "./utils/deepEqual";
 import { showNotice } from "./utils/notice";
@@ -37,7 +37,7 @@ import { CodeMirrorEditor } from "./components/app/CodeMirrorEditor";
 import { translateBuiltinPromptDescription } from "./composerBehavior";
 import type { AuthFile, ConfigTab, ModelItem, ModelsFile, SettingsFile } from "./config/configTypes";
 import type { ConfigFileDiagnostic, PiExtensionListResult, PiExtensionSummary, PiPromptTemplateListResult, PiPromptTemplateSummary, PiSkillListResult, PiSkillLocation, PiSkillSummary, Project, ProjectResourceDiscoveryResult, ProjectResourceListResult } from "../../shared/types";
-import { globalPromptOverrideKey, globalSkillOverrideKey, isGlobalSkillSourceId } from "../../shared/resourceIdentity";
+import { isGlobalSkillSourceId } from "../../shared/resourceIdentity";
 import { emptyDiscoveryData, emptyProjectResourceData, GLOBAL_SKILL_SOURCES, isGlobalSkill, isProjectExtension, isProjectPrompt, isProjectSkill, PROJECT_SKILL_SOURCES, type ResourceScope } from "./config/resourceScopeModel";
 import { getModelUserAgentOverride, getProviderHeaders, KNOWN_PROVIDER_ENDPOINTS, setModelUserAgentOverride } from "./config/providerHeaders";
 import { TOKENDANCE_PROVIDER } from "../../shared/tokendance";
@@ -58,7 +58,7 @@ const api: PiDesktopApi = (window as unknown as { piDesktop: PiDesktopApi }).piD
 // 其余组直接以 section 名作 value；Tabs 受控 value 由此编码，业务仍走 section/tab 双 state，
 // loadConfig 等既有依赖零改动。
 // `page.*` 是桥贡献的独立配置页（落点 `config.page`）—— 数量由扩展决定，不是静态枚举。
-type ConfigSection = "config" | "security" | "skills" | "prompts" | "extensions" | `page.${string}`;
+type ConfigSection = "config" | "security" | "skills" | "prompts" | "extensions" | "mcp" | `page.${string}`;
 
 // 注意：修改 ConfigSection/ConfigTab 枚举时需同步更新 CONFIG_SECTIONS/CONFIG_TABS 校验数组
 
@@ -85,7 +85,7 @@ function loadLastConfigBackendPane(): "dsh" | "pi" {
 }
 
 /** 全部合法 section / config 组子 tab，用于校验持久化值（避免版本更新后残留旧值导致无高亮）。 */
-const CONFIG_SECTIONS: readonly ConfigSection[] = ["config", "security", "skills", "prompts", "extensions"];
+const CONFIG_SECTIONS: readonly ConfigSection[] = ["config", "security", "skills", "prompts", "extensions", "mcp"];
 const CONFIG_TABS: readonly ConfigTab[] = ["models", "auth", "settings", "trust", "mcp", "raw"];
 /**
  * 读取上次打开的 tab；localStorage 不可用、无记录或值已失效时返回 null（由调用方回退默认值）。
@@ -473,6 +473,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	dirtyTabsRef.current = dirtyTabs;
 	/** MCP 页句柄：自管加载/保存，顶部统一保存按钮经 saveByKey 转发。 */
 	const mcpTabRef = useRef<McpTabHandle>(null);
+	/** 项目资源管理器里的 MCP 页句柄（项目作用域；主配置页没有这个 section）。 */
+	const resourceMcpTabRef = useRef<McpTabHandle>(null);
 	/** 关闭弹框时存在未保存修改 → 弹出保存确认（借鉴设置页关闭逻辑） */
 	const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
 	const hasDirty = dirtyTabs.size > 0;
@@ -1930,7 +1932,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					await api.projectResources.toggleInherited({
 						projectId: effectiveProjectId,
 						kind: "prompt",
-						key: globalPromptOverrideKey(template.name),
+						// 原生规则写的是 pi 能匹配的文件路径；不能传 PiDeck 身份键（pi 不认，写了也不生效）
+						key: template.path,
 						enabled,
 					});
 				}
@@ -2037,7 +2040,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					await api.projectResources.toggleInherited({
 						projectId: effectiveProjectId,
 						kind: "skill",
-						key: globalSkillOverrideKey(skill.sourceId, skill.name),
+						// 原生规则写的是 pi 能匹配的文件路径；身份键（pi-global:<名>）pi 不认，写了也不生效
+						key: skill.path,
 						enabled,
 					});
 				}
@@ -2196,13 +2200,15 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 				await api.projectResources.toggleInherited({
 					projectId: effectiveProjectId,
 					kind: "extension",
-					key: extension.source,
+					// 文件扩展用路径；包扩展回退 source（包级过滤走 packages，路径形态 pi 同样能匹配到入口文件时才生效）
+					key: extension.path ?? extension.source,
 					enabled,
 				});
 			}
 			return;
 		}
-		await api.extensions.toggle(extension.source, enabled, extension.scope);
+		// 传路径与项目上下文：本地文件扩展需要精确路径，项目作用域需要 projectId 写项目 .pi/settings.json。
+		await api.extensions.toggle(extension.source, enabled, extension.scope, extension.path, effectiveProjectId);
 	};
 
 	const handleRequestExtensionUninstall = (extension: PiExtensionSummary) => {
@@ -2317,6 +2323,16 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		[markDirty, clearDirty],
 	);
 
+	/** 资源管理器（项目作用域）MCP 页脏状态。必须 memo：McpTab 的 load 依赖这个回调，
+	 *  传内联箭头会让每次父组件渲染都重跑 load，用磁盘内容冲掉正在输入的表单（见 McpTab 的 ref 兼底）。 */
+	const handleResourceMcpDirtyChange = useCallback(
+		(dirty: boolean) => {
+			if (dirty) markDirty("mcp");
+			else clearDirty("mcp");
+		},
+		[markDirty, clearDirty],
+	);
+
 	/** 按 tab 编码分发到对应保存 handler；返回是否保存成功（false = 保存失败，由错误提示区展示原因）。 */
 	const saveByKey = async (tabKey: string): Promise<boolean> => {
 		switch (tabKey) {
@@ -2356,6 +2372,15 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 				const ok = (await mcpTabRef.current?.save()) ?? false;
 				if (ok) {
 					clearDirty("config:mcp");
+					onSaved();
+					showToast(t("config.saved"));
+				}
+				return ok;
+			}
+			case "mcp": {
+				const ok = (await resourceMcpTabRef.current?.save()) ?? false;
+				if (ok) {
+					clearDirty("mcp");
 					onSaved();
 					showToast(t("config.saved"));
 				}
@@ -2490,7 +2515,12 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	// 同一 JSX element 可在多处渲染，不会造成重复副作用。
 	const statusBlock = (
 		<>
-			{loading && <div className="py-12 text-center text-control text-muted-foreground">{t("common.loading")}</div>}
+			{loading && (
+				<div className="flex items-center justify-center gap-2 py-12 text-control text-muted-foreground">
+					<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+					{t("common.loading")}
+				</div>
+			)}
 			{error && <div className="mb-3.5 rounded-sm border border-danger/20 bg-danger-soft px-3.5 py-2.5 text-control leading-relaxed text-danger whitespace-pre-line">{error}</div>}
 		</>
 	);
@@ -2513,12 +2543,12 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						variant={embedded ? "line" : "default"}
 						className={cn("shrink-0", embedded ? "justify-start gap-1 px-3" : "config-backend-switch h-9 justify-start gap-1 border-b border-border/60 px-3")}
 					>
-						<TabsTrigger variant={embedded ? "line" : "default"} value="pi" className={cn("h-8 gap-1.5 px-3 text-[13px] font-medium", !embedded && "config-backend-tab")}>
+						<TabsTrigger variant={embedded ? "line" : "default"} value="pi" className={cn("h-8 gap-1.5 px-3 text-control font-medium", !embedded && "config-backend-tab")}>
 							<PiLogo className="size-3.5 shrink-0" />
 							{t("config.backend.pi")}
 							{hasPiDirty ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
 						</TabsTrigger>
-						<TabsTrigger variant={embedded ? "line" : "default"} value="dsh" className={cn("h-8 gap-1.5 px-3 text-[13px] font-medium", !embedded && "config-backend-tab")}>
+						<TabsTrigger variant={embedded ? "line" : "default"} value="dsh" className={cn("h-8 gap-1.5 px-3 text-control font-medium", !embedded && "config-backend-tab")}>
 							<DshLogo className="size-3.5 shrink-0" />
 							{t("config.backend.dsh")}
 							{/* 后端分页黄点：该后端任意分区有草稿时提醒 */}
@@ -2591,6 +2621,16 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 									</span>
 									{t("config.nav.extensions")}
 								</TabsTrigger>
+								{/* MCP 在配置管理弹窗里由「配置文件」组的 config:mcp 承担（全局作用域 + 导入扫描源）；
+								    这里只在项目资源管理器（resourceOnly）提供项目作用域入口，避免同名双入口用户无法选择。 */}
+								{resourceOnly && (
+									<TabsTrigger value="mcp" className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
+										<span className="config-nav-icon">
+											<PlugZap size={14} aria-hidden="true" />
+										</span>
+										{t("config.nav.mcp")}
+									</TabsTrigger>
+								)}
 								<TabsTrigger value="skills" className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
 									<span className="config-nav-icon">
 										<Sparkles size={14} aria-hidden="true" />
@@ -2804,7 +2844,10 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 													</div>
 												</div>
 												{editGlobalLoading ? (
-													<div className="py-12 text-center text-control text-text-tertiary">{t("common.loading")}</div>
+													<div className="flex items-center justify-center gap-2 py-12 text-control text-text-tertiary">
+														<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+														{t("common.loading")}
+													</div>
 												) : (
 													<div className="prompts-monaco-wrap">
 														<CodeMirrorEditor
@@ -2934,10 +2977,28 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						{/* forceMount：MCP 页自管草稿，切走再回来不能丢未保存编辑；inactive 必须 hidden，否则叠在别的 tab 上。 */}
 						<TabsContent value="config:mcp" forceMount className="config-main min-w-0 data-[state=inactive]:hidden">
 							<div className="config-content flex min-h-0 flex-col">
-								{/* MCP 页固定全局作用域（项目下拉已移除）；activeProjectId 只作导入扫描的项目来源。 */}
-								<McpTab ref={mcpTabRef} activeProjectId={projectId} onDirtyChange={handleMcpDirtyChange} />
+								{/* 全局作用域：activeProjectId 只作导入扫描的项目来源，配置仍写全局 mcp.json。 */}
+								<McpTab
+									ref={mcpTabRef}
+									activeProjectId={projectId}
+									onGoToExtensions={() => {
+										// 同区导航：扩展页与 MCP 页都属于配置区/项目资源区，保留当前作用域。
+										setSection("extensions");
+									}}
+									onDirtyChange={handleMcpDirtyChange}
+								/>
 							</div>
 						</TabsContent>
+
+						{/* 只有项目资源管理器会走到这里（见左侧导航同名开关）；forceMount：面板自管草稿，
+						    切走再回来不能丢未保存编辑，inactive 必须 hidden，否则叠在别的 tab 上。 */}
+						{resourceOnly ? (
+							<TabsContent value="mcp" forceMount className="config-main min-w-0 data-[state=inactive]:hidden">
+								<div className="config-content flex min-h-0 flex-col">
+									<McpTab ref={resourceMcpTabRef} projectId={resourceOnly && projectKind !== "chat" ? effectiveProjectId : undefined} projectName={resourceOnly ? projectName : undefined} onGoToExtensions={() => setSection("extensions")} onDirtyChange={handleResourceMcpDirtyChange} />
+								</div>
+							</TabsContent>
+						) : null}
 
 						<TabsContent value="config:trust" className="config-main min-w-0">
 							<div className="config-content">

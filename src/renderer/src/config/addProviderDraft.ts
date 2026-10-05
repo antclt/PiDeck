@@ -60,6 +60,19 @@ export function resolveInitialReasoningContentReplay(
 }
 
 /**
+ * 供应商编辑页的初始化重置键：重置只由「页面模式 + 编辑对象身份」决定，与 initial 的
+ * 引用无关。ModelsTab 在 JSX 内联构造预填对象，父组件刷新会传内容相同、引用不同的
+ * initial；初始化 effect 若按引用做依赖，会把用户未保存的 API 类型 / User-Agent 草稿
+ * 和测试结果整体冲回旧配置（issue #311）。键语义：
+ *  - 同一供应商同一模式内的父组件刷新 → 键不变，不重置（保草稿与测试结果）；
+ *  - 切换供应商 / add↔edit / 编辑对象消失 → 键变化，重新初始化。
+ * 参数只取结构子集（不依赖 UI 层的 ProviderDialogInitial），因此可在单测直接调用。
+ */
+export function providerDialogResetKey(mode: "add" | "edit", initial: { name: string } | undefined): string {
+	return `${mode}:${mode === "edit" ? (initial?.name ?? "") : ""}`;
+}
+
+/**
  * 「获取模型」成功后的 baseUrl 归一化：检测侧若走通了版本路径（/v1 等）而草稿
  * 仍是不带版本的根路径，会返回 suggestedBaseUrl（见 ConfigManager.fetchProviderModels）。
  * pi 会话原样使用 models.json 的 baseUrl，不改写则「拉取正常、会话 404」。

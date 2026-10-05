@@ -128,7 +128,8 @@ export function ExtensionTableRow(props: {
 						title={props.toggling ? t("config.extensionToggling") : effectiveEnabled ? t("config.extensionDisable") : t("config.extensionEnable")}
 						aria-busy={props.toggling}
 					/>
-					{extension.builtIn && extension.enabled !== false && !inherited && (
+					{/* 内置行卸载（removeBuiltIn）：不限于启用态——已禁用的内置扩展同样可移除，避免「先禁用就再也即不掉」 */}
+					{extension.builtIn && !inherited && (
 						<Button variant="ghost" size="icon-sm" className="size-7" disabled={props.removingBuiltIn} onClick={() => props.onRemoveBuiltIn(extension)} title={props.removingBuiltIn ? t("config.uninstalling") : t("config.uninstall")}>
 							<Trash2 size={14} strokeWidth={1.8} />
 						</Button>

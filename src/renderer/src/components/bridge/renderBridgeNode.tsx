@@ -31,7 +31,7 @@ function BridgeCodeBlock({ code }: { code: string }): ReactNode {
 	const [copied, setCopied] = useState(false);
 	return (
 		<div className="relative">
-			<pre className="overflow-x-auto rounded-md bg-muted/50 p-2 pr-14 font-mono text-[11px] leading-relaxed">
+			<pre className="overflow-x-auto rounded-md bg-muted/50 p-2 pr-14 font-mono text-micro leading-relaxed">
 				<code>{code}</code>
 			</pre>
 			<button
@@ -184,7 +184,7 @@ export function renderBridgeNode(node: BridgeUINode | null | undefined, onEvent:
 			return node.label ? (
 				<div key={reactKey} className="flex items-center gap-2 py-1">
 					<span className="h-px flex-1 bg-border" />
-					<span className="text-[11px] text-muted-foreground">{node.label}</span>
+					<span className="text-micro text-muted-foreground">{node.label}</span>
 					<span className="h-px flex-1 bg-border" />
 				</div>
 			) : (
@@ -254,7 +254,7 @@ export function renderBridgeNode(node: BridgeUINode | null | undefined, onEvent:
 		// ── 基础展示 ────────────────────────────────────────────
 		case "badge":
 			return (
-				<Badge key={reactKey} variant={node.tone === "danger" ? "destructive" : "secondary"} className="text-[11px]">
+				<Badge key={reactKey} variant={node.tone === "danger" ? "destructive" : "secondary"} className="text-micro">
 					{node.label ?? ""}
 				</Badge>
 			);
@@ -262,7 +262,7 @@ export function renderBridgeNode(node: BridgeUINode | null | undefined, onEvent:
 		case "icon":
 			// 图标名不是 lucide 的稳定契约，渲染成小号文本标记（不猜图标、不崩）
 			return (
-				<span key={reactKey} className={`text-[11px] ${bridgeToneClass(node.tone)}`} aria-label={node.name}>
+				<span key={reactKey} className={`text-micro ${bridgeToneClass(node.tone)}`} aria-label={node.name}>
 					{node.name}
 				</span>
 			);
@@ -320,7 +320,7 @@ export function renderBridgeNode(node: BridgeUINode | null | undefined, onEvent:
 		case "ansi":
 			// ★ 降级保命路径：剥了 ANSI 的等宽文本块
 			return (
-				<pre key={reactKey} className="overflow-x-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
+				<pre key={reactKey} className="overflow-x-auto font-mono text-micro leading-relaxed whitespace-pre-wrap">
 					{(node.lines ?? []).join("\n")}
 				</pre>
 			);
@@ -390,7 +390,7 @@ function BridgeCollapse({ node, onEvent }: { node: BridgeUINode; onEvent: Bridge
 				</span>
 				<span className="flex-1 truncate text-xs font-medium">{node.label ?? ""}</span>
 				{typeof node.count === "number" ? (
-					<Badge variant="secondary" className="text-[11px]">
+					<Badge variant="secondary" className="text-micro">
 						{node.count}
 					</Badge>
 				) : null}

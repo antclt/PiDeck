@@ -89,7 +89,7 @@ export function ComposerImageGenOptions(props: {
 				</Select>
 			) : null}
 			{extra.watermark ? (
-				<label className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md px-1.5 text-control text-foreground hover:bg-muted/60 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50" title={t("imagegen.watermarkHint")}>
+				<label className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md px-1.5 text-control text-foreground transition-colors hover:bg-muted/60 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50" title={t("imagegen.watermarkHint")}>
 					<Switch size="sm" checked={props.watermark} disabled={props.disabled} onCheckedChange={props.onWatermarkChange} aria-label={t("imagegen.watermark")} />
 					<span className="whitespace-nowrap">{t("imagegen.watermark")}</span>
 				</label>
@@ -133,7 +133,7 @@ function ImageGenSizeCombobox(props: { value: string; disabled?: boolean; onChan
 			<PopoverTrigger asChild>
 				<Button type="button" variant="ghost" size="sm" disabled={props.disabled} className="composer-bar-btn h-7 max-w-[9.5rem] gap-1 rounded-md px-1.5 text-control font-medium text-foreground hover:bg-muted/60" title={t("imagegen.sizeHint")} aria-label={t("imagegen.size")}>
 					<span className="min-w-0 truncate">{sizeTriggerLabel(props.value)}</span>
-					<ChevronDown size={12} aria-hidden="true" className={`flex-none text-muted-foreground transition-transform duration-150${open ? " rotate-180" : ""}`} />
+					<ChevronDown size={12} aria-hidden="true" className={`flex-none text-muted-foreground transition-transform duration-fast${open ? " rotate-180" : ""}`} />
 				</Button>
 			</PopoverTrigger>
 			<PopoverContent align="start" side="top" className="w-52 p-0">

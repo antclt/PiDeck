@@ -107,7 +107,6 @@ let previewSettings: AppSettings = {
 	/** 扩展禁用白名单：与 SettingsStore 默认一致，预览壳不启用白名单 */
 	/** 扩展禁用白名单：与 SettingsStore 默认一致，预览壳不启用白名单 */
 	disabledExtensions: [],
-	disableExtensionWhitelist: false,
 	/** 技能禁用列表：与 SettingsStore 默认一致，预览壳不启用技能白名单 */
 	disabledSkills: [],
 	/** 提示词模板禁用列表：与 SettingsStore 默认一致，预览壳不启用模板白名单 */
@@ -185,6 +184,7 @@ let previewSettings: AppSettings = {
 	idleAgentTimeoutMin: 60,
 	// CUA 默认关闭：预览壳与主进程 SettingsStore 默认保持一致
 	cuaEnabled: false,
+	cuaAutoApprove: false,
 	favoriteModels: [],
 	// 提供商与模型显示开关：与 SettingsStore 默认一致，预览壳默认全显示
 	hiddenProviders: [],
@@ -529,6 +529,12 @@ export function createPreviewApi(): PiDesktopApi {
 			remove: async () => undefined,
 			writeGuide: async () => "",
 		},
+		pluginDev: {
+			// 预览模式：无扩展目录可写，状态固定“未安装”
+			status: async () => ({ userExtensionsDir: "", demoInstalled: false, guideInstalled: false }),
+			writeGuide: async () => "",
+			copyDemo: async () => ({ status: "copied" as const, path: "" }),
+		},
 		sessions: {
 			list: async () => getSessions(),
 			// 预览模式无 DSH host：空预设目录满足接口契约
@@ -867,6 +873,20 @@ export function createPreviewApi(): PiDesktopApi {
 			scan: async () => [],
 			import: async () => ({ results: [], imported: 0, failed: 0 }),
 		},
+		kimiSessions: {
+			scan: async () => [],
+			import: async () => ({ results: [], imported: 0, failed: 0 }),
+		},
+		kimiWorkSessions: {
+			describe: async () => ({ root: null, origin: null, sessionsFound: false }),
+			scan: async () => [],
+			import: async () => ({ results: [], imported: 0, failed: 0 }),
+		},
+		// MinimaxCode 导入预览桩：预览环境无 ~/.minimax 可扫
+		minimaxSessions: {
+			scan: async () => [],
+			import: async () => ({ results: [], imported: 0, failed: 0 }),
+		},
 		directorySessions: {
 			scan: async () => ({ sessions: [], kind: "none" }),
 			listSources: async () => [],
@@ -992,6 +1012,14 @@ export function createPreviewApi(): PiDesktopApi {
 				currentVersion: "preview",
 				latestVersion: "preview",
 				hasUpdate: false,
+			}),
+			releaseNotes: async () => ({
+				markdown: "## [preview] - 2026-01-01\n\n- Preview mode: pi release notes",
+				source: "github",
+				versionCount: 1,
+				pageUrl: "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/CHANGELOG.md",
+				fetchedAt: null,
+				truncated: false,
 			}),
 			update: async () => ({
 				command: "pi update pi --no-approve",
@@ -1221,7 +1249,6 @@ export function createPreviewApi(): PiDesktopApi {
 			uninstall: async () => undefined,
 			install: async (_source: string) => "",
 			toggle: async () => undefined,
-			setWhitelistDisabled: async () => undefined,
 			removeBuiltIn: async () => undefined,
 			restoreBuiltIn: async () => undefined,
 			update: async () => ({
@@ -1486,11 +1513,20 @@ export function createPreviewApi(): PiDesktopApi {
 				writableRaw: '{\n  "mcpServers": {}\n}\n',
 				layers: [],
 				servers: [],
+				invalidServers: [],
 			}),
 			saveMcp: async () => ({ valid: true }),
 			probeMcp: async () => ({ ok: true, transport: "stdio" as const, detail: "preview" }),
+			// 预览模式无 pi CLI：连接检测返回空集，登录/登出静默失败，授权 URL 无订阅源。
+			mcpListStatus: async () => ({ servers: [], errors: [] }),
+			mcpLogin: async () => ({ ok: false, output: "preview" }),
+			mcpLogout: async () => ({ ok: false, output: "preview" }),
+			onMcpLoginUrl: () => () => undefined,
 			// 预览模式无真实 pi 配置目录，返回占位（源文件页不显示路径行）。
 			getConfigDir: async () => "",
+			// 预览模式没有真实 settings.json：返回空摘要，开关操作直接失败。
+			piResourcesSummary: async () => ({ settingsPath: "", exists: false, revision: "preview", builtins: [], entries: { extensions: [], skills: [], prompts: [], themes: [] } }),
+			piResourcesSetBuiltin: async () => ({ ok: false, error: "preview" }),
 			saveModels: async () => ({ valid: true, modelLoadOk: true, modelCount: 2, modelLoadReason: null, modelLoadDetail: "" }),
 			// 预览模式无主进程验证链路：返回空订阅函数保持 API 形状一致。
 			onModelsVerifyResult: () => () => {},
@@ -1517,6 +1553,10 @@ export function createPreviewApi(): PiDesktopApi {
 			tokendanceAuthAwait: async () => ({ ok: false, error: "preview" }),
 			tokendanceAuthCancel: async () => ({ ok: true }),
 			tokendanceAuthExchange: async () => ({ ok: false, error: "preview" }),
+			// 设计预览：充值接口不触真实网络（弹窗能看到完整链路，但创建会话必然失败）
+			tokendanceTopUpCreate: async () => ({ ok: false, code: "not-configured" }),
+			tokendanceTopUpStatus: async () => ({ ok: false, code: "not-configured" }),
+			tokendanceTopUpOpenAlipay: async () => ({ ok: false, error: "preview" }),
 			installTokendance: async () => ({ ok: false, modelCount: 0, piSaved: false, dshSaved: false, error: "preview" }),
 			testProvider: async () => ({
 				success: true,

@@ -124,7 +124,7 @@ export function NoticeToastCard({ toastId, kind, title, description, actions }: 
 			</span>
 
 			<div className="min-w-0 flex-1">
-				<p ref={titleRef} className="max-h-[60px] min-w-0 overflow-hidden text-[13px] font-medium leading-5 break-words text-text-primary">
+				<p ref={titleRef} className="max-h-[60px] min-w-0 overflow-hidden text-control font-medium leading-5 break-words text-text-primary">
 					{title}
 				</p>
 				{description ? (

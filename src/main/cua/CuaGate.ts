@@ -56,6 +56,12 @@ export type CuaGateConfig = {
 	enabled: boolean;
 	/** Session-level kill switches. Keyed by sessionId. */
 	sessionOverrides: Map<string, boolean>;
+	/**
+	 * 免审批模式：开启后写操作跳过审批对话框直接放行（reason=auto_approve）。
+	 * 只绕过审批，全局/会话杀开关仍然生效（关掉 CUA 就一律拒绝）。
+	 * 支持布尔或每次 check 时解析的 provider（主进程用它读实时设置）。
+	 */
+	autoApprove: boolean | (() => boolean);
 	/** Approval timeout in milliseconds. */
 	approvalTimeoutMs: number;
 	/**
@@ -74,6 +80,7 @@ export class CuaGate {
 		this.config = {
 			enabled: config?.enabled ?? true,
 			sessionOverrides: config?.sessionOverrides ?? new Map(),
+			autoApprove: config?.autoApprove ?? false,
 			approvalTimeoutMs: config?.approvalTimeoutMs ?? 30000,
 			approvalHandler: config?.approvalHandler ?? null,
 		};
@@ -110,6 +117,12 @@ export class CuaGate {
 			return { allowed: false, reason: "cua_disabled" };
 		}
 
+		// 免审批模式：在杀开关之后、审批对话框之前放行——只省掉人工确认，
+		// 不削弱禁用语义。reason 标记 auto_approve 便于工具输出侧审计。
+		if (this.resolveAutoApprove()) {
+			return { allowed: true, reason: "auto_approve" };
+		}
+
 		// No handler wired → fail closed.
 		const handler = this.config.approvalHandler;
 		if (!handler) {
@@ -143,6 +156,18 @@ export class CuaGate {
 	}
 
 	/**
+	 * Set (or clear) the auto-approve bypass. Boolean or provider function.
+	 */
+	setAutoApprove(value: boolean | (() => boolean)): void {
+		this.config.autoApprove = value;
+	}
+
+	/** Whether auto-approve is currently resolved on (for state reporting). */
+	isAutoApprove(): boolean {
+		return this.resolveAutoApprove();
+	}
+
+	/**
 	 * Set a session-level override.
 	 */
 	setSessionOverride(sessionId: string, enabled: boolean | null): void {
@@ -171,6 +196,11 @@ export class CuaGate {
 	/** Snapshot of the session overrides (for IPC state reporting). */
 	getSessionOverrides(): Record<string, boolean> {
 		return Object.fromEntries(this.config.sessionOverrides);
+	}
+
+	private resolveAutoApprove(): boolean {
+		const value = this.config.autoApprove;
+		return typeof value === "function" ? value() : value;
 	}
 
 	private withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {

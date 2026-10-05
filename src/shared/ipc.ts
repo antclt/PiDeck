@@ -302,6 +302,21 @@ export const ipcChannels = {
 	workbuddySessionsImport: "workbuddy-sessions:import",
 	cursorSessionsScan: "cursor-sessions:scan",
 	cursorSessionsImport: "cursor-sessions:import",
+	kimiSessionsScan: "kimi-sessions:scan",
+	kimiSessionsImport: "kimi-sessions:import",
+	/**
+	 * Kimi Work（kimi-desktop 桌面版）会话导入：数据目录位置不固定（默认安装位置
+	 * / daimon-storage.json 自定义位置 / PiDeck settings 手动指定），describe 返回探测结果。
+	 */
+	kimiWorkSessionsDescribe: "kimi-work-sessions:describe",
+	kimiWorkSessionsScan: "kimi-work-sessions:scan",
+	kimiWorkSessionsImport: "kimi-work-sessions:import",
+	/**
+	 * MinimaxCode（CLI）会话导入：数据目录固定在 ~/.minimax/v2/sessions，
+	 * 扫描返回按 cwd 归属项目的会话列表（cwd 取自 llm-call.json 的 working directory）。
+	 */
+	minimaxSessionsScan: "minimax-sessions:scan",
+	minimaxSessionsImport: "minimax-sessions:import",
 	/**
 	 * 外置目录会话导入（项目目录移动/改名后找回历史）：扫描用户选定的目录
 	 * （旧项目目录 / 某个 encoded 分组目录 / pi sessions 根）里的会话。
@@ -358,7 +373,6 @@ export const ipcChannels = {
 	extensionsUninstall: "extensions:uninstall",
 	extensionsInstall: "extensions:install",
 	extensionsToggle: "extensions:toggle",
-	extensionsSetWhitelistDisabled: "extensions:set-whitelist-disabled",
 	extensionsRemoveBuiltIn: "extensions:remove-built-in",
 	extensionsRestoreBuiltIn: "extensions:restore-built-in",
 	extensionsUpdate: "extensions:update",
@@ -471,6 +485,7 @@ export const ipcChannels = {
 	/** 验证 WSL 连接：检查 distro + user 是否可达，以及 pi 是否已安装 */
 	wslValidateConnection: "wsl:validate-connection",
 	piUpdateCheck: "pi:update-check",
+	piReleaseNotes: "pi:release-notes",
 	piUpdate: "pi:update",
 	/** 在系统终端中执行安装命令（npm install）并返回结果 */
 	piExecInstall: "pi:exec-install",
@@ -630,14 +645,26 @@ export const ipcChannels = {
 	configGetAuth: "config:get-auth",
 	configGetSettings: "config:get-settings",
 	configGetTrust: "config:get-trust",
-	/** 读取合并后的 MCP 服务列表 + Pi 可写层（pi-mcp-adapter mcp.json）。 */
+	/** 读取合并后的 MCP 服务列表 + Pi 可写层（pi 内置 MCP 0.99+ 读取的 mcp.json）。 */
 	configGetMcp: "config:get-mcp",
 	/** 整份写入 ~/.pi/agent/mcp.json（可视化保存）。 */
 	configSaveMcp: "config:save-mcp",
 	/** 轻量探测：stdio 命令是否在 PATH、HTTP URL 是否可达；不 spawn MCP SDK。 */
 	configProbeMcp: "config:probe-mcp",
+	/** 真实连接检测：spawn `pi mcp list --json`，返回每台 server 的 state/tools/errors。 */
+	mcpListStatus: "mcp:list-status",
+	/** OAuth 登录：spawn `pi mcp login <server>`；授权 URL 经 mcpLoginUrl 事件推送。 */
+	mcpLogin: "mcp:login",
+	/** OAuth 登出：spawn `pi mcp logout <server>`。 */
+	mcpLogout: "mcp:logout",
+	/** OAuth 登录过程中捕获的授权 URL（{ server, url }），供 UI 内嵌兑底链接。 */
+	mcpLoginUrl: "mcp:login-url",
 	resourceImportScan: "resource-import:scan",
 	resourceImportApply: "resource-import:apply",
+	/** pi 原生资源配置摘要（内置扩展开关 + 四类资源数组原文）。 */
+	piResourcesSummary: "pi-resources:summary",
+	/** 切换 pi 原生内置扩展（mcp / llama.cpp / codemode / tool-search）。 */
+	piResourcesSetBuiltin: "pi-resources:set-builtin",
 	/** 只读返回 pi 全局配置目录（渲染层展示源文件实际编辑位置）。 */
 	configGetDir: "config:get-dir",
 	configSaveModels: "config:save-models",
@@ -662,6 +689,12 @@ export const ipcChannels = {
 	configTokendanceAuthCancel: "config:tokendance-auth-cancel",
 	/** 提交一次性授权 code 交换 TokenDance API Key（成功返回完整 key） */
 	configTokendanceAuthExchange: "config:tokendance-auth-exchange",
+	/** 创建 TokenDance 充值会话（整数元；返回聚合码内容/支付宝深链/status_url） */
+	configTokendanceTopUpCreate: "config:tokendance-topup-create",
+	/** 查询充值会话状态（只接受服务端下发且通过白名单校验的 status_url） */
+	configTokendanceTopUpStatus: "config:tokendance-topup-status",
+	/** 由用户点击浏览器支付宝 App 深链（仅允许 alipays://；不得自动跳转） */
+	configTokendanceTopUpOpenAlipay: "config:tokendance-topup-open-alipay",
 	/** 测试 provider 连接（隔离探针）：临时 agent 目录 + PI_CODING_AGENT_DIR 跑真实 pi，测当前表单值且不落盘正式配置 */
 	configTestProvider: "config:test-provider",
 	/** 查询 provider 用量/余额（主进程按 provider 名路由：门控 → 端点解析 → 模板探测） */
@@ -837,6 +870,14 @@ export const ipcChannels = {
 	deleteCustomTheme: "themes:delete",
 	/** 把 AI 主题开发指南写入主题目录并在资源管理器定位 */
 	writeCustomThemeGuide: "themes:write-guide",
+
+	// ===== 插件开发（~/.pi/agent/extensions/ 目录） =====
+	/** 插件开发支持状态：目录路径 + demo/指南是否已就位 */
+	pluginDevStatus: "plugin-dev:status",
+	/** 把 AI 插件开发指南写入用户扩展目录并在资源管理器定位 */
+	pluginDevWriteGuide: "plugin-dev:write-guide",
+	/** 复制内置 demo 插件到用户扩展目录（已存在不覆盖） */
+	pluginDevCopyDemo: "plugin-dev:copy-demo",
 
 	// ===== 内置浏览器 =====
 	browserOpenExternal: "browser:open-external",

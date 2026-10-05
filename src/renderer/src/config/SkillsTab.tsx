@@ -15,7 +15,7 @@ import { Input } from "../components/ui-shadcn/input";
 import { Textarea } from "../components/ui-shadcn/textarea";
 import { CreateResourceCard, CreateResourceField } from "./ConfigShared";
 import type { ResourceScope } from "./resourceScopeModel";
-import { globalSkillOverrideKey, isGlobalSkillSourceId } from "../../../shared/resourceIdentity";
+import { isGlobalSkillSourceId } from "../../../shared/resourceIdentity";
 import { ResourceImportDialog } from "./ResourceImportDialog";
 
 export function SkillsTab(props: {
@@ -227,7 +227,7 @@ export function SkillsTab(props: {
 									) : null}
 									{globalSkills.map((skill) => {
 										const inherited = props.scope === "project";
-										const disabledHere = isGlobalSkillSourceId(skill.sourceId) ? disabledGlobalKeys.has(globalSkillOverrideKey(skill.sourceId, skill.name)) : false;
+										const disabledHere = isGlobalSkillSourceId(skill.sourceId) ? disabledGlobalKeys.has(skill.path.toLowerCase()) : false;
 										return <SkillTableRow key={skill.id} skill={skill} effectiveEnabled={skill.enabled && !disabledHere} inherited={inherited} onToggle={props.onToggle} onDelete={props.onDelete} onEdit={props.onEdit} onRename={props.onRename} />;
 									})}
 									{props.scope === "project" && uniqueDiscoverySkills.filter((item) => !isProjectDiscoverySource(item.sourceId)).map((item) => <DiscoveredSkillRow key={item.id} item={item} />)}

@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 import { trashPath } from "../fs/trash";
 import type { AppSettings, CreatePiPromptTemplateInput, PiPromptTemplateListResult, PiPromptTemplateSummary } from "../../shared/types";
 import { parseWslUncPath, toWindowsHostPath, type WslEnvironment } from "../wsl/WslPaths";
+import { projectResourceEnabled } from "../config/piResourceRules";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 
 type PromptCopy = (key: MainProcessTranslationKey, params?: Record<string, string | number>) => string;
@@ -43,11 +44,33 @@ export class PromptManager {
 		this.promptsDir = join(home ?? homedir(), ".pi", "agent", "prompts");
 	}
 
-	/** 注入 PiDeck 设置读写：启用后 toggle 同步持久化禁用列表（模板白名单模式的依据）。 */
+	/** 注入 PiDeck 设置读写：旧禁用列表的兼容通道（原生服务未装配时使用；迁移后为空）。 */
 	configureSettings(getSettings: () => AppSettings, patchSettings: (patch: Partial<AppSettings>) => Promise<AppSettings>) {
 		this.settingsProvider = getSettings;
 		this.settingsPatcher = patchSettings;
 	}
+
+	/**
+	 * 注入原生开关与状态投影（A4：迁移完成后禁用列表不再是真值来源）。
+	 * 装配后模板开关写 pi settings.json 的精确过滤规则。
+	 */
+	configureNativeToggle(toggle: (templatePath: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>): void {
+		this.nativeToggle = toggle;
+	}
+
+	configureNativeEnabledReader(reader: (templatePath: string) => boolean | undefined): void {
+		this.nativeEnabledReader = reader;
+	}
+
+	/** 项目作用域的原生开关（写项目 `.pi/settings.json` 的 prompts 精确规则）。 */
+	configureNativeProjectToggle(toggle: (projectId: string, templatePath: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>): void {
+		this.nativeProjectToggle = toggle;
+	}
+
+	private nativeProjectToggle: ((projectId: string, templatePath: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>) | null = null;
+
+	private nativeToggle: ((templatePath: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>) | null = null;
+	private nativeEnabledReader: ((templatePath: string) => boolean | undefined) | null = null;
 
 	/** 模板名是否在 PiDeck settings 禁用列表（小写比较；未配置 settings 时视为未禁用）。 */
 	private isDisabledInSettings(name: string): boolean {
@@ -57,14 +80,20 @@ export class PromptManager {
 	}
 
 	/**
-	 * 开关模板：写 PiDeck settings 禁用列表（模板白名单模式 --no-prompt-templates/
-	 * --prompt-template 的依据）。内置推荐模板（builtin://，无磁盘文件）不可禁用。
+	 * 开关模板：原生配置优先写 pi settings.json 的 prompts 精确规则；
+	 * 未装配原生服务时退回 PiDeck settings 禁用列表（旧机制，迁移后为空）。
+	 * 内置推荐模板（builtin://，无磁盘文件）不可禁用。
 	 */
 	async toggle(filePath: string, enabled: boolean): Promise<PiPromptTemplateSummary> {
 		const comparablePath = await this.resolveExistingGlobalPath(filePath);
 		const { templates } = await this.list();
 		const template = templates.find((item) => item.path === comparablePath);
 		if (!template) throw new Error(this.translate("mainPrompt.fileNotFound"));
+		if (this.nativeToggle) {
+			const result = await this.nativeToggle(template.path, enabled);
+			if (!result.ok) throw new Error(this.translate("mainPrompt.toggleFailed", { error: result.error ?? "unknown" }));
+			return { ...template, enabled };
+		}
 		if (this.settingsProvider && this.settingsPatcher) {
 			const current = this.settingsProvider().disabledPrompts ?? [];
 			const nameKey = template.name.toLowerCase();
@@ -89,11 +118,17 @@ export class PromptManager {
 	}
 
 	/** Toggles one project-owned template by updating that project's whitelist input. */
-	async toggleInProject(projectPath: string, promptName: string, enabled: boolean): Promise<PiPromptTemplateSummary> {
+	async toggleInProject(projectPath: string, promptName: string, enabled: boolean, projectId?: string): Promise<PiPromptTemplateSummary> {
 		const projectRoot = resolve(this.hostPath(projectPath));
 		const boundary = await this.createProjectBoundary(projectRoot);
 		const name = this.validProjectPromptName(promptName);
 		const target = await this.resolveExistingProjectPath(boundary, join(projectRoot, ".pi", "prompts", `${name}.md`));
+		// 原生过滤规则优先：项目自有模板写 `.pi/settings.json` 的 prompts 精确 `-path`。
+		if (this.nativeProjectToggle && projectId) {
+			const result = await this.nativeProjectToggle(projectId, target, enabled);
+			if (!result.ok) throw new Error(this.translate("mainPrompt.toggleFailed", { error: result.error ?? "unknown" }));
+			return this.readProjectTemplate(target, name, enabled);
+		}
 		const settingsFile = await this.resolveProjectWritePath(boundary, join(projectRoot, ".pi", "settings.json"));
 		let settings: Record<string, unknown> = {};
 		if (existsSync(settingsFile)) {
@@ -113,6 +148,11 @@ export class PromptManager {
 		settings.disabledPrompts = next;
 		await mkdir(dirname(settingsFile), { recursive: true });
 		await writeFile(settingsFile, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+		return this.readProjectTemplate(target, name, enabled);
+	}
+
+	/** 读取单个项目模板结果（原生与私有两条写入路径共用）。 */
+	private async readProjectTemplate(target: string, name: string, enabled: boolean): Promise<PiPromptTemplateSummary> {
 		const raw = await readFile(target, "utf8");
 		const frontmatter = this.parseFrontmatter(raw);
 		return {
@@ -234,8 +274,9 @@ export class PromptManager {
 				content: raw,
 				userCreated: true,
 				scope: "global",
-				// 禁用状态 = PiDeck settings 禁用列表（模板白名单模式的依据）
-				enabled: !this.isDisabledInSettings(name),
+				// 禁用状态 = 原生投影优先；未装配原生服务时退回 PiDeck settings 禁用列表
+				// 优先原生投影（迁移后 disabledPrompts 已清空）；未装配时退回旧列表。
+				enabled: this.nativeEnabledReader?.(fullPath) ?? !this.isDisabledInSettings(name),
 			});
 		}
 
@@ -276,7 +317,7 @@ export class PromptManager {
 	}
 
 	/** 扫描项目 .pi/prompts/ 目录下的模板 */
-	async listByProject(projectPath: string): Promise<PiPromptTemplateListResult> {
+	async listByProject(projectPath: string, projectId?: string): Promise<PiPromptTemplateListResult> {
 		const projectRoot = resolve(this.hostPath(projectPath));
 		const boundary = await this.createProjectBoundary(projectRoot);
 		const lexicalPromptsDir = join(projectRoot, ".pi", "prompts");
@@ -315,8 +356,21 @@ export class PromptManager {
 				enabled: !disabledNames.has(name.toLowerCase()),
 			});
 		}
+		// 原生投影优先（迁移后项目私有 disabledPrompts 已清空）。
+		const projectEntries = this.nativeProjectEntries && projectId ? await this.nativeProjectEntries(projectId) : null;
+		if (projectEntries) {
+			const baseDir = join(projectRoot, ".pi");
+			for (const template of templates) template.enabled = projectResourceEnabled({ entries: projectEntries, value: template.path, baseDir });
+		}
 		templates.sort((a, b) => a.name.localeCompare(b.name));
 		return { templates, globalDir: lexicalPromptsDir };
+	}
+
+	/** 项目层原生 prompts 条目读取器（列表投影用）；未装配时返回 null。 */
+	private nativeProjectEntries: ((projectId: string) => Promise<string[] | null>) | null = null;
+
+	configureNativeProjectEntriesReader(reader: (projectId: string) => Promise<string[] | null>): void {
+		this.nativeProjectEntries = reader;
 	}
 
 	/** 在项目 .pi/prompts/ 下创建模板 */

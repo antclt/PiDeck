@@ -13,7 +13,7 @@ import type { FetchedModel, ConfigProxyMode } from "../../../shared/types/fetche
 import type { ModelItem, ProviderCompat } from "./configTypes";
 import { ModelsTable } from "./ModelsTable";
 import { ProviderConnectionForm, type ProviderTestResult } from "./ProviderConnectionForm";
-import { buildProviderConfigFromDraft, resolveFetchedBaseUrl, resolveInitialReasoningContentReplay, type AddProviderDraft } from "./addProviderDraft";
+import { buildProviderConfigFromDraft, providerDialogResetKey, resolveFetchedBaseUrl, resolveInitialReasoningContentReplay, type AddProviderDraft } from "./addProviderDraft";
 import { applyModelPatches, applyAdaptiveTemplateReset, computeModelSpecPatches, mergeAdaptiveModelTemplate } from "../utils/modelSpecAutoFill";
 import { countSelectedModelIndexes, removeSelectedModelIndexes, toggleAllModelIndexes, toggleModelIndex } from "./modelBatchSelection";
 
@@ -82,7 +82,12 @@ export function AddProviderDialog(props: {
 	const [fetchedModels, setFetchedModels] = useState<FetchedModel[] | null>(null);
 	const [selectedFetchedIds, setSelectedFetchedIds] = useState<string[]>([]);
 
-	// 每次进入页面重置草稿：add=空表单；edit=预填现有配置（含模型列表）
+	// 每次进入页面重置草稿：add=空表单；edit=预填现有配置（含模型列表）。
+	// 重置只按 resetKey（模式 + 编辑对象身份）触发：ModelsTab 在 JSX 内联构造预填对象，
+	// 父组件刷新会传内容相同、引用不同的 initial，按引用做依赖会把未保存的
+	// API 类型 / User-Agent 草稿和测试结果整体冲回旧配置（issue #311）；切换供应商、
+	// add/edit 模式切换或重新进入页面（重新挂载）时 resetKey 变化，照常初始化。
+	const resetKey = providerDialogResetKey(props.mode, props.initial);
 	useEffect(() => {
 		const initial = props.initial;
 		setName(initial?.name ?? "");
@@ -110,7 +115,7 @@ export function AddProviderDialog(props: {
 		setResettingModelKey(null);
 		setTestModelId("");
 		setTestResult(null);
-	}, [props.initial, props.mode]);
+	}, [resetKey]);
 
 	const trimmedName = name.trim();
 	const nameValid = isValidProviderName(trimmedName);
@@ -327,8 +332,8 @@ export function AddProviderDialog(props: {
 									if (e.key === "Enter") submit();
 								}}
 							/>
-							{trimmedName !== "" && !nameValid && <span className="text-[11px] leading-relaxed text-destructive">{t("config.providerNameRule")}</span>}
-							{duplicate && <span className="text-[11px] leading-relaxed text-destructive">{t("config.providerNameDuplicate")}</span>}
+							{trimmedName !== "" && !nameValid && <span className="text-micro leading-relaxed text-destructive">{t("config.providerNameRule")}</span>}
+							{duplicate && <span className="text-micro leading-relaxed text-destructive">{t("config.providerNameDuplicate")}</span>}
 						</div>
 					</div>
 					{/* 连接字段 + 测试连接 + 兼容性：与模型页展开卡片同一套组件（ProviderConnectionForm） */}
@@ -362,7 +367,7 @@ export function AddProviderDialog(props: {
 						<div className="flex min-w-0 flex-wrap items-center gap-2">
 							<span className="text-xs font-semibold text-text-primary">{t("config.modelList")}</span>
 							{modelBatchMode && (
-								<span className="rounded-full bg-[color:var(--color-accent-soft)] px-2 py-0.5 text-[11px] font-medium tabular-nums text-[color:var(--color-accent)]">
+								<span className="rounded-full bg-[color:var(--color-accent-soft)] px-2 py-0.5 text-micro font-medium tabular-nums text-[color:var(--color-accent)]">
 									{t("config.modelBatchSelected", {
 										selected: countSelectedModelIndexes(selectedModelIndexes, models.length),
 										total: models.length,
@@ -413,7 +418,7 @@ export function AddProviderDialog(props: {
 							</div>
 						</div>
 					)}
-					{fetchError && <div className="mb-2 rounded-sm border border-danger/20 bg-danger-soft px-3 py-2 text-[11px] leading-relaxed text-danger whitespace-pre-line">{fetchError}</div>}
+					{fetchError && <div className="mb-2 rounded-sm border border-danger/20 bg-danger-soft px-3 py-2 text-micro leading-relaxed text-danger whitespace-pre-line">{fetchError}</div>}
 					{/* 已配置模型列表：与展开卡片同款模型表格（页内草稿管理，确认时随 provider 一起提交） */}
 					<ModelsTable
 						models={models}
@@ -451,7 +456,7 @@ export function AddProviderDialog(props: {
 						focusModelKey={pendingModelFocusKey}
 						onFocusHandled={() => setPendingModelFocusKey(null)}
 					/>
-					<p className="mt-1.5 text-[11px] leading-relaxed text-text-tertiary">{t("config.providerDialogModelsHint")}</p>
+					<p className="mt-1.5 text-micro leading-relaxed text-text-tertiary">{t("config.providerDialogModelsHint")}</p>
 				</div>
 			</div>
 

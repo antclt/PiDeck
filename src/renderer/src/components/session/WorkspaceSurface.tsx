@@ -1,5 +1,5 @@
 import { cn } from "../../lib/utils";
-import { useAtom } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, ChevronsDownUp, FileText, Folder, FolderOpen, FolderTree, LoaderCircle, RefreshCw, X } from "lucide-react";
 import { normalizeSessionPathForCompare } from "../../agentListDisplay";
@@ -11,7 +11,7 @@ import { FileSortControl } from "./FileSortControl";
 import { getFileIconSeti, getFileIconColor, getFileTypeLabel } from "../../fileIcons";
 import { sortFileNodes, FILE_SORT_OPTIONS, FILE_SORT_DEFAULT_DIRECTION, type FileSortMode, type FileSortDirection } from "../../utils/fileTreeSort";
 import { compactMiddlePackages } from "../../utils/fileTreeCompact";
-import { compactMiddlePackagesAtom } from "../../atoms/app-ui-atoms";
+import { compactMiddlePackagesAtom, activeEditorFileAtom } from "../../atoms/app-ui-atoms";
 import { writeFileNodeDragPayload } from "../app/AppUtils";
 import { t } from "../../i18n";
 import type { WorkspaceDrawerPanel } from "../../hooks/useWorkspacePanels";
@@ -464,6 +464,10 @@ function FileNode(props: {
 }) {
 	const { node, expandedDirs, onToggleDirectory, depth = 0 } = props;
 	const expanded = expandedDirs.has(node.path);
+	/* 当前活跃编辑器文件高亮：单击预览即点亮，双击常驻、切换 tab 同步跟随（activeEditorFileAtom 由 useFileEditor 写入）。
+	   树行跨六层 props 链，订阅 atom 而非透传。 */
+	const activeEditorFile = useAtomValue(activeEditorFileAtom);
+	const isActiveFile = node.type === "file" && node.path === activeEditorFile;
 	const typeLabel = node.type === "file" ? getFileTypeLabel(node.name) : "";
 	const rowStyle = {
 		/* 每层 8px：旧 16 在窄抽屉里空白过大（标注「缩进太大」）。 */
@@ -522,13 +526,13 @@ function FileNode(props: {
 	   2027-01：hover 高亮加与侧栏行同款的过渡动画（transition-[background-color,
 	   border-color,box-shadow] duration-200），移入文件列表时背景平滑渐变而非瞬切。 */
 	const fileRowButtonClass =
-		"file-node-row inline-flex h-[28px] min-h-0 w-full items-center justify-start gap-1.5 rounded-sm border-0 bg-transparent py-0 text-left text-body font-normal text-foreground transition-[background-color,border-color,box-shadow] duration-200 hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset";
+		"file-node-row inline-flex h-[28px] min-h-0 w-full items-center justify-start gap-1.5 rounded-sm border-0 bg-transparent py-0 text-left text-body font-normal text-foreground transition-[background-color,border-color,box-shadow] duration-base hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset";
 	if (node.type === "file")
 		return (
 			<div className="file-node" style={rowStyle}>
 				<button
 					type="button"
-					className={cn("file", fileRowButtonClass)}
+					className={cn("file", fileRowButtonClass, isActiveFile && "bg-accent text-accent-foreground hover:bg-accent")}
 					style={rowStyle}
 					title={`${node.relativePath}\n${typeLabel}`}
 					draggable

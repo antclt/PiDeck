@@ -17,6 +17,13 @@ export type AppAccentMode = "default" | "green" | "blue" | "purple" | "amber" | 
  * classic-green 为出厂默认（中性黑白灰）；fresh-green 为全屏绿色主题（表面带绿色调）。
  */
 export type AppSkinId = "classic-green" | "fresh-green" | "graphite" | "sea-blue" | "warm-beige" | "custom";
+/** Logo 风格：pi-tui = pi 官方 TUI 三色像素标（coral/blue/yellow，默认）；classic = PiDeck 四块拼图 π（显式选择） */
+export type LogoStyle = "classic" | "pi-tui";
+
+/** 解析 logo 风格：仅 "classic" 视为显式选择经典；其余（null/undefined/未知旧值）一律回落默认 pi-tui。主进程窗口图标与渲染层 UI 共用。 */
+export function resolveLogoStyle(value: string | null | undefined): LogoStyle {
+	return value === "classic" ? "classic" : "pi-tui";
+}
 export type AppLanguageMode = "system" | "zh-CN" | "en-US" | "pseudo";
 export type LinkOpenMode = "external" | "internal";
 
@@ -99,6 +106,8 @@ export type AppSettings = {
 	accent: AppAccentMode;
 	/** 皮肤（换肤）：内置预设见 themePresets.ts SKIN_PRESETS；custom 走 customThemeOverrides/customTheme */
 	themeSkin: AppSkinId;
+	/** Logo 风格：可选以兼容旧 settings.json，缺省按 classic 处理；启动画面经 localStorage 提前生效 */
+	logoStyle?: LogoStyle;
 	/** 自定义主题：CSS 变量名 → 值（键不含 -- 前缀），叠加在内置皮肤之上 */
 	customThemeOverrides: Record<string, string>;
 	/**
@@ -341,6 +350,11 @@ export type AppSettings = {
 	/** 闲置判定时长（分钟），默认 60：agent 连续闲置超过该时长才可被释放 */
 	idleAgentTimeoutMin: number;
 
+	// ── standby 预热池：空闲时预先启动一个已握手的 pi 进程，新建/草稿会话激活近即时 ──
+	/** 是否启用 standby 预热（默认 true）：每项目最多一个，约 300MB 内存，10 分钟未使用自动回收。
+	 *  修改后只影响下一次预热/认领（进程 spawn 参数无法热更，指纹不匹配自动回退正常创建）。 */
+	standbyRuntimeEnabled?: boolean;
+
 	// ── CUA（Computer Use Agent）：让 Agent 观察屏幕并注入鼠标/键盘输入 ──
 	/**
 	 * 是否启用 CUA 能力，默认 false。
@@ -349,6 +363,12 @@ export type AppSettings = {
 	 * 真实输入注入另有每次操作审批门 + 全局/会话杀开关双重兜底。
 	 */
 	cuaEnabled: boolean;
+	/**
+	 * CUA 免审批（自动放行），默认 false。
+	 * 开启后写操作（点击/输入/滚动）跳过逐次审批对话框直接执行；
+	 * 全局/会话杀开关仍然生效（关掉 CUA 仍一律拒绝）。风险自担型开关。
+	 */
+	cuaAutoApprove: boolean;
 
 	// ── 模型收藏：ModelPicker 中用 ☆ 标记，收藏的模型在列表中置顶 ──
 	/** 收藏的模型 ID 列表 */
@@ -528,6 +548,16 @@ export type AppSettings = {
 	 */
 	pinnedSessionIds?: string[];
 
+	// ── 会话导入 ──
+	/**
+	 * Kimi Work（kimi-desktop 桌面版）daimon-share 数据目录的用户显式指定位置。
+	 * undefined/空串 = 未指定，走探测链（kimi-desktop 的 daimon-storage.json →
+	 * 默认安装位置 %APPDATA%/kimi-desktop/daimon-share）。用户在 Kimi Work 里把
+	 * 数据目录自定义到任意盘符时，靠探测链自动找到；此项仅用于探测失败时的手动指定。
+	 * 优先级最高，非空时不再读探测链。
+	 */
+	kimiWorkShareRoot?: string;
+
 	// ── 扩展管理 ──
 	/**
 	 * 用户手动移除（或因三方冲突自动让位）的内置扩展列表（如 pi-deck-todo.ts）。
@@ -536,43 +566,29 @@ export type AppSettings = {
 	removedBuiltInExtensions: string[];
 
 	/**
-	 * 用户显式开启的「默认关闭」内置扩展（见 DEFAULT_DISABLED_BUILT_IN_EXTENSIONS，
-	 * 目前为 GUI 扩展桥与扩展点面板）。这些扩展不进 removedBuiltInExtensions——
-	 * 默认就是不注入，opt-in 列表存在才随 -e 注入。
+	 * 用户显式开启的「默认关闭」内置扩展（GUI 扩展桥/扩展点面板等 opt-in）。
+	 * 这些扩展不进 removedBuiltInExtensions——默认不注入，列表存在才随 -e 注入。
 	 */
 	enabledBuiltInExtensions: string[];
 
 	/**
-	 * 用户禁用的扩展列表（source 标识 + 作用域），存储于 PiDeck 自身设置（不写 pi settings）。
-	 * pi 0.82.x 不识别 settings.json 的 disabledExtensions，禁用只能靠 PiDeck 启动 RPC 时
-	 * 切「白名单模式」：--no-extensions + 逐条 -e 注入未禁用扩展实现（见 enabledExtensionResolver）。
-	 * 列表为空 = 白名单关闭，pi 自动发现全部扩展（兼容用户在 PiDeck 外手动安装的扩展）。
+	 * 旧版扩展禁用记录（source 标识 + 作用域）。
+	 * 现代版本已改为写 pi 原生 `settings.json` 过滤规则；此字段仅由启动迁移读取并清理，
+	 * 迁移完成前它仍会被扩展运行时查询与压缩归属启发式读取（见执行计划 A5）。
 	 */
 	disabledExtensions: DisabledExtensionEntry[];
 
 	/**
-	 * 白名单模式总开关（默认 false = 启用白名单机制）。
-	 * true = 不走 -e 注入，pi 按默认方式加载全部扩展（禁用列表暂不生效），
-	 * 用于防御个别扩展的 -e 注入 / 白名单枚举导致 RPC 启动失败的情况。
-	 */
-	disableExtensionWhitelist: boolean;
-
-	/**
 	 * 用户禁用的全局技能名列表（与 SkillManager.list 的 name 去重键一致，比较时小写），
 	 * 存储于 PiDeck 自身设置（不写 pi settings）。
-	 * pi 的 frontmatter `disable-model-invocation` 只阻止模型自动调用、技能仍被加载；
-	 * 完全禁用只能靠 PiDeck 启动 RPC 时切「白名单模式」：--no-skills + 逐条 --skill
-	 * 注入未禁用技能（见 skillWhitelistResolver）。
-	 * 列表为空 = 白名单关闭，pi 自动发现全部技能（兼容用户在 PiDeck 外手动安装的技能）。
+	 * 现代版本已改为写 pi 原生 `settings.json` 过滤规则；此字段仅由启动迁移读取并清理。
+	 * pi 的 frontmatter `disable-model-invocation` 只阻止模型自动调用，与「完全不加载」不同。
 	 */
 	disabledSkills: string[];
 
 	/**
-	 * 用户禁用的全局提示词模板名列表（与 PromptManager.list 的 name 一致，比较时小写），
-	 * 存储于 PiDeck 自身设置（不写 pi settings）。
-	 * 完全禁用只能靠 PiDeck 启动 RPC 时切「白名单模式」：--no-prompt-templates +
-	 * 逐条 --prompt-template 注入未禁用模板（见 promptWhitelistResolver）。
-	 * 列表为空 = 白名单关闭，pi 自动发现全部模板。
+	 * 旧版提示词禁用记录（与 PromptManager.list 的 name 一致，比较时小写）。
+	 * 现代版本已改为写 pi 原生 `settings.json` 过滤规则；此字段仅由启动迁移读取并清理。
 	 */
 	disabledPrompts: string[];
 
@@ -754,6 +770,7 @@ export function createDefaultAppSettings(): AppSettings {
 		themeScheduleDarkStart: "19:00",
 		accent: "default",
 		themeSkin: "classic-green",
+		logoStyle: "pi-tui",
 		customThemeOverrides: {},
 		backgroundImage: "",
 		backgroundImageOpacity: 0.8,
@@ -762,8 +779,6 @@ export function createDefaultAppSettings(): AppSettings {
 		piEnvironmentChecked: false,
 		/** 扩展禁用白名单：与 SettingsStore 默认一致，空数组 = 不启用白名单（首屏未拉到真实设置前的默认值） */
 		disabledExtensions: [],
-		disableExtensionWhitelist: false,
-		/** 默认关闭的内置扩展 opt-in 列表：与 SettingsStore 默认一致，空数组 = 桥/面板等默认不注入 */
 		enabledBuiltInExtensions: [],
 		/** 技能禁用列表：与 SettingsStore 默认一致，空数组 = 不启用技能白名单 */
 		disabledSkills: [],
@@ -843,7 +858,9 @@ export function createDefaultAppSettings(): AppSettings {
 		idleAgentAutoRelease: true,
 		idleAgentKeepCount: 5,
 		idleAgentTimeoutMin: 60,
+		standbyRuntimeEnabled: true,
 		cuaEnabled: false,
+		cuaAutoApprove: false,
 		favoriteModels: [],
 
 		// 字体配置：与 main SettingsStore 默认值保持一致，避免启动时闪烁

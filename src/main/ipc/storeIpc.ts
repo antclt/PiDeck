@@ -14,7 +14,7 @@ import type { ExtensionManager } from "../extensions/ExtensionManager";
 import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
 import type { ConfigManager } from "../config/ConfigManager";
 import { getPiPackageCatalog } from "../extensions/piPackageCatalog";
-import { isDefaultDisabledBuiltInExtension } from "../extensions/builtInExtensions";
+import { isBuiltInExtensionName, isDefaultDisabledBuiltInExtension } from "../extensions/builtInExtensions";
 
 export type StoreIpcDeps = {
 	promptManager: PromptManager;
@@ -94,7 +94,8 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 		return promptManager.readContent(validPath);
 	});
 	ipcMain.handle(ipcChannels.promptsListByProject, async (_event, projectId: unknown) => {
-		return promptManager.listByProject(projectRoot(projectId));
+		const root = projectRoot(projectId);
+		return promptManager.listByProject(root, (projectId as string).trim());
 	});
 	ipcMain.handle(ipcChannels.promptsCreateInProject, async (_event, projectId: unknown, input: unknown) => {
 		const validInput = promptInput(input);
@@ -145,7 +146,7 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 		if (typeof enabled !== "boolean") {
 			throw new Error("Invalid project prompt toggle input.");
 		}
-		const result = await promptManager.toggleInProject(projectRoot(projectId), validName, enabled);
+		const result = await promptManager.toggleInProject(projectRoot(projectId), validName, enabled, (projectId as string).trim());
 		void appLogger.info("prompt", "Project prompt template toggled", {
 			projectId,
 			name: validName,
@@ -587,9 +588,11 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 		});
 		return result;
 	});
-	ipcMain.handle(ipcChannels.extensionsToggle, async (_event, source: string, enabled: boolean, scope?: "user" | "project" | "unknown") => {
-		// 内置扩展走 removedBuiltInExtensions + RPC -e，不再写用户扩展目录 / pi disabledExtensions。
-		if (source.startsWith("pi-deck-") && source.endsWith(".ts")) {
+	ipcMain.handle(ipcChannels.extensionsToggle, async (_event, source: string, enabled: boolean, scope?: "user" | "project" | "unknown", path?: unknown, projectId?: unknown) => {
+		// 内置扩展走 removedBuiltInExtensions + RPC -e，不再写用户扩展目录 / pi 过滤规则。
+		// 白名单判定：pi-deck-* 前缀不足以证明内置身份（插件开发 demo 同前缀，
+		// 是普通本地扩展，必须走原生过滤规则分支）。
+		if (isBuiltInExtensionName(source)) {
 			if (isDefaultDisabledBuiltInExtension(source)) {
 				// 默认关闭的内置扩展（GUI 桥/扩展点面板）：开关写 enabledBuiltInExtensions（opt-in）。
 				// 注意不碰 removedBuiltInExtensions——那是「默认启用扩展的用户禁用」机制，语义互斥。
@@ -600,16 +603,13 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 				await extensionManager.disableBuiltIn(source);
 			}
 		} else {
-			// 非内置扩展禁用记录存 PiDeck settings（scope+source），启动 RPC 时走白名单模式生效。
-			await extensionManager.setEnabled(source, enabled, scope);
+			// 原生过滤规则：本地文件扩展要精确路径，项目作用域要 projectId（来自渲染层，主进程校验）。
+			const extensionPath = typeof path === "string" && path.length <= 32_768 ? path : undefined;
+			const resolvedProjectId = typeof projectId === "string" && projectId.trim() && projectId.length <= 256 ? projectId.trim() : undefined;
+			if (scope === "project" && !resolvedProjectId) throw new Error("Project scope requires a project id.");
+			await extensionManager.setEnabled(source, enabled, scope, extensionPath, resolvedProjectId);
 		}
-		void appLogger.info("extension", "Extension toggled", { source, enabled, scope });
-	});
-	ipcMain.handle(ipcChannels.extensionsSetWhitelistDisabled, async (_event, enabled: boolean) => {
-		// 白名单总开关：开启后 PiProcess 不再注入 --no-extensions/-e，pi 默认加载全部扩展，
-		// 禁用列表暂不生效（防御个别扩展的 -e 注入/白名单枚举导致 RPC 启动失败）。
-		await extensionManager.setWhitelistDisabled(Boolean(enabled));
-		void appLogger.info("extension", "Extension whitelist master switch toggled", { whitelistDisabled: !!enabled });
+		void appLogger.info("extension", "Extension toggled", { source, enabled, scope, projectId });
 	});
 	ipcMain.handle(ipcChannels.extensionsUpdate, async () => {
 		const result = await extensionManager.updateExtensions();

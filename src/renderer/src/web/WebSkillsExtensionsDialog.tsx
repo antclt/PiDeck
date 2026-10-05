@@ -91,7 +91,7 @@ export function WebSkillsExtensionsDialog({ open, onOpenChange }: { open: boolea
 												</p>
 												{skill.description ? <p className="mt-0.5 line-clamp-2 text-xs text-text-muted">{skill.description}</p> : null}
 												{skill.warnings.length > 0 ? (
-													<p className="mt-0.5 flex items-center gap-1 text-[11px] text-amber-500">
+													<p className="mt-0.5 flex items-center gap-1 text-micro text-amber-500">
 														<AlertTriangle className="size-3 shrink-0" />
 														<span className="truncate">{skill.warnings[0]}</span>
 													</p>
@@ -104,7 +104,7 @@ export function WebSkillsExtensionsDialog({ open, onOpenChange }: { open: boolea
 							)}
 						</TabsContent>
 						<TabsContent value="extensions" className="min-h-0 overflow-y-auto">
-							<p className="mb-2 text-[11px] text-text-muted">{t("web.extensionRestartHint")}</p>
+							<p className="mb-2 text-micro text-text-muted">{t("web.extensionRestartHint")}</p>
 							{state.extensions.length === 0 ? (
 								<p className="py-6 text-center text-sm text-text-muted">{t("web.extensionsEmpty")}</p>
 							) : (
@@ -117,7 +117,7 @@ export function WebSkillsExtensionsDialog({ open, onOpenChange }: { open: boolea
 													{extension.currentVersion ? <span className="ml-1.5 text-[10px] font-normal text-text-muted">v{extension.currentVersion}</span> : null}
 													{extension.builtIn ? <span className="ml-1.5 rounded bg-primary/10 px-1 text-[10px] text-primary">built-in</span> : null}
 												</p>
-												{state.conflicts.some((conflict) => conflict.thirdParty === extension.source) ? <p className="mt-0.5 text-[11px] text-amber-500">{t("web.extensionConflict", { name: state.conflicts.find((conflict) => conflict.thirdParty === extension.source)?.builtIn ?? "" })}</p> : null}
+												{state.conflicts.some((conflict) => conflict.thirdParty === extension.source) ? <p className="mt-0.5 text-micro text-amber-500">{t("web.extensionConflict", { name: state.conflicts.find((conflict) => conflict.thirdParty === extension.source)?.builtIn ?? "" })}</p> : null}
 											</div>
 											<Switch checked={extension.enabled ?? true} aria-label={t("web.extensionToggle")} onCheckedChange={(checked) => void onExtensionToggle(extension, checked)} />
 										</li>

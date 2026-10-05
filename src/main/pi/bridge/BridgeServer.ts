@@ -17,8 +17,11 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
-import type { BridgeEvent, BridgeUpdate, ModelTraceInput } from "../../../shared/types/bridge";
+import type { BridgeEvent, BridgeServiceName, BridgeUpdate, ModelTraceInput } from "../../../shared/types/bridge";
 import { getAppLogger } from "../../logging/sharedLogger";
+
+/** 宿主原生服务执行器（filePicker/openPath；由 AgentManager 注入真实 Electron 实现）。 */
+export type BridgeServiceHandler = (service: BridgeServiceName, args: unknown) => Promise<unknown>;
 
 /** 单个 agent 的桥会话。 */
 type BridgeSession = {
@@ -65,6 +68,13 @@ export class BridgeServer {
 	private readonly sessions = new Map<string, BridgeSession>();
 	/** token → agentId 反查（请求路径里只有 token）。 */
 	private readonly agentByToken = new Map<string, string>();
+	/** 宿主原生服务执行器（未注入时 service-call 直接回错误，fail-safe）。 */
+	private serviceHandler: BridgeServiceHandler | null = null;
+
+	/** 注入服务执行器（AgentManager 启动时调用一次；BridgeServer 自身不 import electron）。 */
+	setServiceHandler(handler: BridgeServiceHandler | null): void {
+		this.serviceHandler = handler;
+	}
 
 	/** 端点是否已就绪。 */
 	get ready(): boolean {
@@ -259,6 +269,11 @@ export class BridgeServer {
 			session.updateCount += updates.length;
 			for (const update of updates) {
 				try {
+					// service-call 在主进程就地消化：不转发渲染层，结果进事件队列随下一轮轮询带回
+					if (update.type === "service-call") {
+						void this.handleServiceCall(session, update);
+						continue;
+					}
 					session.onUpdate(update);
 				} catch (error) {
 					// 单个更新转发失败不影响其余，也不影响桥
@@ -287,6 +302,35 @@ export class BridgeServer {
 			} catch {
 				// 响应已发出
 			}
+		}
+	}
+
+	/** 执行一次宿主服务调用，把结果排入该会话的事件队列（随下一次轮询响应带回）。 */
+	private async handleServiceCall(session: BridgeSession, update: Extract<BridgeUpdate, { type: "service-call" }>): Promise<void> {
+		const { serviceId, service, args } = update;
+		if (typeof serviceId !== "string" || !serviceId) {
+			return; // 形状非法：没有 serviceId 可回，只能丢弃并记日志
+		}
+		if (typeof service !== "string") {
+			this.pushEvent(session.agentId, { type: "service-result", serviceId, ok: false, error: "invalid service-call" });
+			return;
+		}
+		const handler = this.serviceHandler;
+		if (!handler) {
+			this.pushEvent(session.agentId, { type: "service-result", serviceId, ok: false, error: "service unavailable" });
+			return;
+		}
+		try {
+			const result = await handler(service as BridgeServiceName, args);
+			this.pushEvent(session.agentId, { type: "service-result", serviceId, ok: true, result: result === undefined ? null : result });
+		} catch (error) {
+			// 服务失败不能影响桥：回错误结果，扩展侧 Promise reject
+			void getAppLogger()?.warn("gui-bridge", "Bridge service call failed", {
+				agentId: session.agentId,
+				service,
+				error: error instanceof Error ? error.message : String(error),
+			});
+			this.pushEvent(session.agentId, { type: "service-result", serviceId, ok: false, error: error instanceof Error ? error.message : "service failed" });
 		}
 	}
 
