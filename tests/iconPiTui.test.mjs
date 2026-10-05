@@ -14,8 +14,31 @@ const { PI_TUI_COLORS, PI_TUI_LOGO_CELLS } = loadTsCommonJs("src/renderer/src/co
  * 应用图标 pi-tui 风格资源契约：
  * 1) build/icon-pi-tui.svg 与 renderer 的 piTuiLogoData 位图逐格一致（三色像素标），
  *    且容器规格与 classic build/icon.svg 同款（rx 228 深色渐变底 + shine），中心高 520 等高；
- * 2) scripts/make-icon.js 产出的 build/icon-pi-tui.png 是 256×256 透明留白 PNG（运行时 setIcon 用）。
+ * 2) scripts/make-icon.js 产出的 build/icon-pi-tui.png 是 256×256 透明留白 PNG（运行时 setIcon 用）；
+ * 3) 打包静态图标（icon.ico / icon.icns / icons/*.png）底图是 pi-tui，而运行时 classic 选项用的
+ *    build/icon.png 仍是 pi 字标——两者混淆会让「Logo 风格」切到 classic 时显示成 pi-tui 标。
  */
+
+/** pi-tui 品牌三色；按容差匹配像素，避免抗锯齿边缘导致的精确比较失败。 */
+const TUI_RGB = [
+	[0xe4, 0x8a, 0x7a],
+	[0x4f, 0x8e, 0xb3],
+	[0xea, 0xb6, 0x5d],
+];
+
+/** 统计图片中 pi-tui 三色像素占不透明像素的比例。 */
+async function tuiColorRatio(file) {
+	const { data, info } = await sharp(file).resize(64, 64, { fit: "fill" }).raw().toBuffer({ resolveWithObject: true });
+	let hit = 0;
+	let total = 0;
+	for (let i = 0; i < data.length; i += info.channels) {
+		if (info.channels === 4 && data[i + 3] < 128) continue;
+		total += 1;
+		const [r, g, b] = [data[i], data[i + 1], data[i + 2]];
+		if (TUI_RGB.some(([cr, cg, cb]) => Math.abs(r - cr) < 30 && Math.abs(g - cg) < 30 && Math.abs(b - cb) < 30)) hit += 1;
+	}
+	return total === 0 ? 0 : hit / total;
+}
 
 test("icon-pi-tui.svg contains the same 10-cell bitmap as renderer piTuiLogoData", () => {
 	const svg = fs.readFileSync(path.join(root, "build", "icon-pi-tui.svg"), "utf8");
@@ -53,4 +76,53 @@ test("make-icon.js emitted build/icon-pi-tui.png as a 256x256 transparent PNG", 
 	assert.equal(meta.width, 256);
 	assert.equal(meta.height, 256);
 	assert.equal(meta.channels, 4, "must keep alpha channel for icon padding");
+});
+
+test("packaging icons (ico/icns/icons dir) are rendered from the pi-tui mark", async () => {
+	// 安装包/exe/Dock/Linux 的静态图标在构建期烘进二进制，运行时改不了 → 固定取 pi-tui 底图。
+	for (const rel of ["icons/256x256.png", "icons/512x512.png", "icons/1024x1024.png"]) {
+		const file = path.join(root, "build", rel);
+		assert.ok(fs.existsSync(file), `${rel} must be generated (npm run make-icon)`);
+		const ratio = await tuiColorRatio(file);
+		assert.ok(ratio > 0.05, `${rel} must use the pi-tui tri-color mark (got ${(ratio * 100).toFixed(1)}% brand pixels)`);
+	}
+
+	// ico/icns 的容器头完整性：损坏的产物会让 electron-builder 静默回退到默认 Electron 图标。
+	const ico = await fs.promises.readFile(path.join(root, "build", "icon.ico"));
+	assert.equal(ico.readUInt16LE(0), 0, "ico reserved field");
+	assert.equal(ico.readUInt16LE(2), 1, "ico type must be icon");
+	assert.ok(ico.readUInt16LE(4) >= 7, "ico must embed the full size ladder");
+	const icns = await fs.promises.readFile(path.join(root, "build", "icon.icns"));
+	assert.equal(icns.subarray(0, 4).toString("ascii"), "icns", "icns header");
+});
+
+test("runtime classic icon stays the Pi lettermark, not a copy of the pi-tui packaging set", async () => {
+	// 回归门禁：icon.png 曾经是 icons/512x512.png 的拷贝；那套改成 pi-tui 之后若还拷贝，
+	// 设置里切到「PiDeck 经典」会显示成 pi-tui 标（两个选项看起来一模一样）。
+	const file = path.join(root, "build", "icon.png");
+	assert.ok(fs.existsSync(file), "icon.png must be generated (npm run make-icon)");
+	const ratio = await tuiColorRatio(file);
+	assert.ok(ratio < 0.01, `classic icon.png must not contain pi-tui brand colors (got ${(ratio * 100).toFixed(1)}%)`);
+});
+
+test("tray icon follows logoStyle at creation and on settings change (source scan)", () => {
+	// 托盘图标曾经硬编码 classic iconPath：切换「Logo 风格」时窗口/Dock 变了、托盘不变。
+	// 两处契约：setupTray 首建按当前设置取图；settingsUpdate 的 logoStyle 分支同时刷托盘。
+	const appWindowLogo = fs.readFileSync(path.join(root, "src", "main", "appWindowLogo.ts"), "utf8");
+	const index = fs.readFileSync(path.join(root, "src", "main", "index.ts"), "utf8");
+	const systemIpc = fs.readFileSync(path.join(root, "src", "main", "ipc", "systemIpc.ts"), "utf8");
+
+	// 窗口与托盘共用一条图标解析路径，避免新增风格时漏改其中一处
+	assert.match(appWindowLogo, /export function resolveLogoImage\(/, "shared icon resolver must exist");
+	assert.match(appWindowLogo, /export function applyTrayLogoStyle\(/, "tray switcher must exist");
+	assert.match(appWindowLogo, /tray\.setImage\(image\.resize\(/, "tray must resize before setImage");
+
+	// setupTray 首建读设置值，资源缺失时降级回 iconPath（托盘必须建得出来）
+	const setupTray = index.slice(index.indexOf("function setupTray()"));
+	assert.match(setupTray.slice(0, 600), /resolveLogoImage\(settingsStore\.get\(\)\.logoStyle\)/, "setupTray must honor the saved logoStyle");
+
+	// 设置变更分支：窗口与托盘成对刷新
+	const logoBranch = systemIpc.slice(systemIpc.indexOf('if ("logoStyle" in patch'));
+	assert.match(logoBranch.slice(0, 400), /applyWindowLogoStyle\(settings\.logoStyle/, "window icon refresh");
+	assert.match(logoBranch.slice(0, 400), /applyTrayLogoStyle\(settings\.logoStyle/, "tray icon refresh");
 });

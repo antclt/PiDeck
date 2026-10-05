@@ -40,7 +40,7 @@ import type { RpcLogger } from "../logging/RpcLogger";
 import type { SessionRuntimeCoordinator } from "../sessions/SessionRuntimeCoordinator";
 import { resolveConfigProxyTarget } from "../sessions/sessionProxyPolicy";
 import { setConfiguredGitPath } from "../git/gitExecutable";
-import { applyWindowLogoStyle } from "../appWindowLogo";
+import { applyTrayLogoStyle, applyWindowLogoStyle } from "../appWindowLogo";
 import { detectDshRunnerNode } from "../dsh/dshRunnerNode";
 import { DSH_RUNNER_NODE_ENV } from "../dsh/dshRunnerNodeSidecar";
 import { installDshRunnerNodeSidecar } from "../dsh/dshRunnerNodeInstall";
@@ -204,6 +204,8 @@ export type SystemIpcDeps = {
 	/** 诊断产物导出器（Markdown / zip 日志包）。 */
 	logBundleExporter?: LogBundleExporter;
 	getMainWindow: () => Electron.BrowserWindow | null;
+	/** 当前托盘实例（index.ts 持有）；Logo 风格切换时一并刷新托盘图标，未创建/已销毁返回 null。 */
+	getTray?: () => Electron.Tray | null;
 	mainCopy: (key: string, params?: Record<string, string | number>) => string;
 	/** Check for app update（index.ts 注入：直接触发 UpdateService.checkNow，结果经快照推送）。 */
 	checkForAppUpdate: () => Promise<void>;
@@ -381,6 +383,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		isDshRpcLogging,
 		setDshRpcLogWatching,
 		getMainWindow,
+		getTray,
 		mainCopy,
 		checkForAppUpdate,
 		downloadAppUpdate,
@@ -1648,9 +1651,11 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		if ("autoDownloadUpdates" in patch) {
 			updateService?.applyAutoDownloadPreference();
 		}
-		// Logo 风格：立即切换窗口/任务栏/Dock 图标（安装包静态图标恒为 classic，见 appWindowLogo.ts）。
+		// Logo 风格：立即切换窗口/任务栏/Dock/托盘图标（安装包与 exe 的静态图标在构建期烘进二进制，
+		// 运行时改不了，见 appWindowLogo.ts）。
 		if ("logoStyle" in patch && prevSettings.logoStyle !== settings.logoStyle) {
 			applyWindowLogoStyle(settings.logoStyle, getMainWindow);
+			if (getTray) applyTrayLogoStyle(settings.logoStyle, getTray);
 		}
 		// 更新源切换（预设镜像 / 自定义镜像前缀）：立即重建 feed URL，无需重启生效。
 		if ("updateSource" in patch || "customUpdateSourceUrl" in patch) {
