@@ -116,9 +116,13 @@ export function AppSidebar(props: AppSidebarProps) {
 									<BrandLockup />
 								</div>
 							</AboutPopover>
-							<Button type="button" variant="ghost" size="icon-sm" className="icon-button list-toggle-native size-7" aria-label={props.listCollapsed ? t("app.expandList") : t("app.collapseList")} title={props.listCollapsed ? t("app.expandList") : t("app.collapseList")} onClick={props.toggleListCollapsed}>
-								<PanelLeft size={14} strokeWidth={2} aria-hidden="true" />
-							</Button>
+							{/* 简洁模式顶部 simple-navigation-bar 已有同语义的列表折叠/展开按钮
+							（面板折叠后它仍常驻），侧栏内再渲染一份就是同屏双入口；标签模式没有那条导航条，保留此处按钮。 */}
+							{!props.simple && (
+								<Button type="button" variant="ghost" size="icon-sm" className="icon-button list-toggle-native size-7" aria-label={props.listCollapsed ? t("app.expandList") : t("app.collapseList")} title={props.listCollapsed ? t("app.expandList") : t("app.collapseList")} onClick={props.toggleListCollapsed}>
+									<PanelLeft size={14} strokeWidth={2} aria-hidden="true" />
+								</Button>
+							)}
 						</div>
 					</>
 				}

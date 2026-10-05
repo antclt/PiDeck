@@ -25,6 +25,9 @@ async function switchMode(window: Page, label: string) {
 fixture("simple layout: right file tabs, expand/restore, switch modes without remounting editor", async ({ window }, testInfo) => {
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
 	await expect(window.locator(".simple-navigation-bar")).toBeVisible();
+	// 简洁模式：列表折叠入口只保留顶部 simple-navigation-bar 那份，侧栏工具条内不再重复渲染。
+	await expect(window.locator(".list-toolbar .list-toggle-native")).toHaveCount(0);
+	await expect(window.locator(".simple-navigation-bar button[title='折叠列表']")).toBeVisible();
 	await expect(window.getByRole("tab", { name: "项目", exact: true })).toHaveCount(0);
 	const project = window.locator(".conversation").filter({ hasText: "simple-project" }).first();
 	await project
@@ -53,9 +56,12 @@ fixture("simple layout: right file tabs, expand/restore, switch modes without re
 	await window.keyboard.insertText("// preserved edit");
 	await switchMode(window, "标签模式");
 	await expect(window.locator(".simple-navigation-bar")).toHaveCount(0);
+	// 标签模式没有顶部导航条，折叠入口回到侧栏工具条。
+	await expect(window.locator(".list-toolbar .list-toggle-native")).toBeVisible();
 	await expect(editor).toHaveAttribute("data-instance-proof", "original");
 	await expect(editor).toContainText("preserved edit");
 	await switchMode(window, "简洁模式");
+	await expect(window.locator(".list-toolbar .list-toggle-native")).toHaveCount(0);
 	await expect(editor).toHaveAttribute("data-instance-proof", "original");
 	await editor.click();
 	await window.keyboard.press("ControlOrMeta+z");
