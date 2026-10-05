@@ -16,6 +16,7 @@ const SOURCE_LABELS: Record<SessionSource, string> = {
 	workbuddy: t("sessionSource.workbuddy"),
 	cursor: t("sessionSource.cursor"),
 	kimi: t("sessionSource.kimi"),
+	kimiwork: t("sessionSource.kimiwork"),
 };
 
 const SOURCE_TONES: Record<SessionSource, string> = {
@@ -34,6 +35,8 @@ const SOURCE_TONES: Record<SessionSource, string> = {
 	qoder: "border-muted-foreground/40 text-muted-foreground",
 	// Kimi Code 无随包品牌 SVG：自绘「K」字形标记，沿用中性色惯例（与 zcode/workbuddy 一致）。
 	kimi: "border-muted-foreground/40 text-muted-foreground",
+	// Kimi Work（kimi-desktop 桌面版）同上，用「K+右上角标」区分桌面版，沿用中性色惯例。
+	kimiwork: "border-muted-foreground/40 text-muted-foreground",
 };
 
 function SourceLogo(props: { source: SessionSource }) {
@@ -110,6 +113,17 @@ function SourceLogo(props: { source: SessionSource }) {
 		return (
 			<svg viewBox="0 0 24 24" className="size-3.5" aria-hidden="true" focusable="false">
 				<path fill="currentColor" d="M4 3h3.4v7.4L15.6 3h4.2l-9.2 8.4L20.4 21h-4.3l-7.2-7.2-1.5 1.4V21H4z" />
+			</svg>
+		);
+	}
+
+	if (props.source === "kimiwork") {
+		// Kimi Work（kimi-desktop 桌面版）：同源「K」字形 + 右上角实心小方块（桌面应用角标意象），
+		// 与 Kimi Code 的 K 区分；沿用中性色惯例。
+		return (
+			<svg viewBox="0 0 24 24" className="size-3.5" aria-hidden="true" focusable="false">
+				<path fill="currentColor" d="M3 3.6h3.4V11l8.2-7.4h4.2l-9.2 8.4L20 20.4h-4.3l-7.2-7.2-1.1 1V20.4H3z" />
+				<path fill="currentColor" d="M17.2 1.8h5v5h-5z" />
 			</svg>
 		);
 	}

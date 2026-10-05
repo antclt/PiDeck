@@ -534,6 +534,7 @@ export function SessionSourceFilterMenu(props: { menu: { projectId: string; x: n
 		workbuddy: t("sessionSource.workbuddy"),
 		cursor: t("sessionSource.cursor"),
 		kimi: t("sessionSource.kimi"),
+		kimiwork: t("sessionSource.kimiwork"),
 		dsh: t("sessionBackend.dsh"),
 		imagegen: t("sessionBackend.imagegen"),
 	};
@@ -577,6 +578,7 @@ export function ProjectContextMenu(props: {
 	onImportCursorSessions: () => void;
 	onImportKimiSessions: () => void;
 	/** 导入 Kimi Work（kimi-desktop 桌面版）会话；数据目录位置由探测链/手动指定决定。 */
+	onImportKimiWorkSessions: () => void;
 	/** 导入其他目录的会话（项目目录被移动/改名后找回历史） */
 	onImportDirectorySessions: () => void;
 	onManageProjectResources: () => void;
@@ -689,6 +691,7 @@ export function ProjectContextMenu(props: {
 							<DropdownMenuItem onSelect={props.onImportWorkBuddySessions}>{t("menu.importWorkBuddy")}</DropdownMenuItem>
 							<DropdownMenuItem onSelect={props.onImportCursorSessions}>{t("menu.importCursor")}</DropdownMenuItem>
 							<DropdownMenuItem onSelect={props.onImportKimiSessions}>{t("menu.importKimi")}</DropdownMenuItem>
+							<DropdownMenuItem onSelect={props.onImportKimiWorkSessions}>{t("menu.importKimiWork")}</DropdownMenuItem>
 							{/* 目录移动/改名后历史找不到时的找回入口：源目录现选，不复制文件。
 							    放在「导入会话」子菜单最后并加分隔线，与「其它工具导入」区分开。 */}
 							<DropdownMenuSeparator />

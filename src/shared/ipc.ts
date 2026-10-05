@@ -305,6 +305,13 @@ export const ipcChannels = {
 	kimiSessionsScan: "kimi-sessions:scan",
 	kimiSessionsImport: "kimi-sessions:import",
 	/**
+	 * Kimi Work（kimi-desktop 桌面版）会话导入：数据目录位置不固定（默认安装位置
+	 * / daimon-storage.json 自定义位置 / PiDeck settings 手动指定），describe 返回探测结果。
+	 */
+	kimiWorkSessionsDescribe: "kimi-work-sessions:describe",
+	kimiWorkSessionsScan: "kimi-work-sessions:scan",
+	kimiWorkSessionsImport: "kimi-work-sessions:import",
+	/**
 	 * 外置目录会话导入（项目目录移动/改名后找回历史）：扫描用户选定的目录
 	 * （旧项目目录 / 某个 encoded 分组目录 / pi sessions 根）里的会话。
 	 * 返回 { sessions, kind }；kind=ancestor 表示用户选到了 ~/.pi 这类会话树的祖先目录。

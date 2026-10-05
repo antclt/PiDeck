@@ -23,6 +23,10 @@ import type {
 	CursorImportReport,
 	KimiSessionSummary,
 	KimiImportReport,
+	KimiWorkSessionSummary,
+	KimiWorkImportReport,
+	KimiWorkShareRootInfo,
+	KimiWorkShareRootOrigin,
 	DirectorySessionSummary,
 	DirectorySessionSourceDir,
 	DirectorySourceKind,
@@ -30,6 +34,7 @@ import type {
 	Project,
 } from "../../../../shared/types";
 import { Checkbox } from "../ui-shadcn/checkbox";
+import { Input } from "../ui-shadcn/input";
 import { Label } from "../../components/ui-shadcn/label";
 import { DirectoryImportSourceList } from "./DirectoryImportSourceList";
 import { ImportListNoMatch, ImportListSearchRow, ImportListWindowFooter } from "./ImportListControls";
@@ -729,3 +734,104 @@ export function KimiImportModal(props: {
 	return <SessionImportModal copyPrefix="kimi" formatStatus={formatKimiStatus} {...props} />;
 }
 
+function formatKimiWorkStatus(status: KimiWorkSessionSummary["status"]) {
+	if (status === "current") return t("kimiwork.status.current");
+	if (status === "outdated") return t("kimiwork.status.outdated");
+	return t("kimiwork.status.new");
+}
+
+/** 数据目录来源标签：让用户知道这个位置是从哪得出的（手动指定 > Kimi 配置 > 默认安装位）。 */
+function kimiWorkOriginCopy(origin: KimiWorkShareRootOrigin) {
+	if (origin === "settings") return t("kimiwork.origin.settings");
+	if (origin === "app-config") return t("kimiwork.origin.appConfig");
+	return t("kimiwork.origin.default");
+}
+
+/**
+ * Kimi Work（kimi-desktop 桌面版）会话导入弹窗。
+ *
+ * 与 CLI 版（KimiImportModal）的差异：数据目录位置不固定——头部展示主进程的探测结果
+ * （位置 + 来源），探测失败时提供手动指定输入（写入 settings.kimiWorkShareRoot，优先级最高）。
+ * 头部固定一行「导入影响说明」（只读源/建议关闭 Kimi Work/覆盖语义），满足导入前知情。
+ */
+export function KimiWorkImportModal(props: {
+	project: Project;
+	sessions: KimiWorkSessionSummary[];
+	selectedPaths: string[];
+	loading: boolean;
+	importing: boolean;
+	report: KimiWorkImportReport | null;
+	/** 数据目录探测结果（null = 尚未探测完成）。 */
+	shareRoot: KimiWorkShareRootInfo | null;
+	/** settings 里手动指定的目录（空串 = 未指定，走探测链）。 */
+	customRoot: string;
+	/** 手动指定输入框草稿。 */
+	customRootDraft: string;
+	onSetCustomRootDraft: (value: string) => void;
+	onApplyCustomRoot: () => void;
+	onClearCustomRoot: () => void;
+	onClose: () => void;
+	onRefresh: () => void;
+	onToggle: (sourcePath: string) => void;
+	onToggleAll: () => void;
+	onImport: () => void;
+}) {
+	const found = props.shareRoot?.root ?? null;
+	return (
+		<SessionImportModal
+			copyPrefix="kimiwork"
+			formatStatus={formatKimiWorkStatus}
+			project={props.project}
+			sessions={props.sessions}
+			selectedPaths={props.selectedPaths}
+			loading={props.loading}
+			importing={props.importing}
+			report={props.report}
+			onClose={props.onClose}
+			onRefresh={props.onRefresh}
+			onToggle={props.onToggle}
+			onToggleAll={props.onToggleAll}
+			onImport={props.onImport}
+			headerExtra={
+				<div className="flex flex-col gap-2 px-4 pb-3 text-xs text-muted-foreground">
+					<div className="flex flex-wrap items-center gap-2">
+						<span className="shrink-0">{t("kimiwork.sourceLabel")}</span>
+						<code className="min-w-0 flex-1 truncate" title={found ?? undefined}>
+							{found ?? t("kimiwork.notFound")}
+						</code>
+						{found && props.shareRoot?.origin && <span className="shrink-0 rounded bg-surface-hover px-1.5 py-0.5">{kimiWorkOriginCopy(props.shareRoot.origin)}</span>}
+						{found && props.shareRoot?.sessionsFound === false && (
+							<span className="shrink-0 text-warning" title={t("kimiwork.sessionsMissingHint")}>
+								{t("kimiwork.sessionsMissing")}
+							</span>
+						)}
+						{props.customRoot && (
+							<Button variant="ghost" size="sm" className="h-6 shrink-0 px-1.5 text-xs" onClick={props.onClearCustomRoot} disabled={props.importing}>
+								{t("kimiwork.clearCustomRoot")}
+							</Button>
+						)}
+					</div>
+					{/* 手动指定入口始终可见：自动探测成功时也可覆盖（优先级最高），不用等探测失败 */}
+					<div className="flex flex-wrap items-center gap-2">
+						<span className="shrink-0">{t("kimiwork.customRootLabel")}</span>
+						<Input value={props.customRootDraft} onChange={(event) => props.onSetCustomRootDraft(event.target.value)} placeholder={t("kimiwork.customRootPlaceholder")} className="h-7 min-w-0 flex-1 text-xs" />
+						<Button variant="outline" size="sm" className="h-7 shrink-0 px-2.5 text-xs shadow-none rounded-lg" onClick={props.onApplyCustomRoot} disabled={props.importing || !props.customRootDraft.trim()}>
+							{t("kimiwork.applyCustomRoot")}
+						</Button>
+					</div>
+					{/* 导入前知情：只读源不修改 Kimi Work 原文件；运行中导入可能缺最新条目；重复导入覆盖旧副本。 */}
+					<span className="text-muted-foreground/80">{t("kimiwork.impactNote")}</span>
+				</div>
+			}
+			emptyOverride={
+				!found && props.shareRoot ? (
+					// 未探测到数据目录：空列表的真正原因不是「没有会话」，引导手动指定位置。
+					<div className="codex-import-empty">
+						<strong>{t("kimiwork.missingRootTitle")}</strong>
+						<span>{t("kimiwork.missingRootDesc")}</span>
+					</div>
+				) : undefined
+			}
+		/>
+	);
+}

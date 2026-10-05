@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ClaudeImportModal, CodexImportModal, CursorImportModal, DirectoryImportModal, KimiImportModal, OpenCodeImportModal, QoderImportModal, WorkBuddyImportModal, ZCodeImportModal } from "../app/ImportModals";
+import { ClaudeImportModal, CodexImportModal, CursorImportModal, DirectoryImportModal, KimiImportModal, KimiWorkImportModal, OpenCodeImportModal, QoderImportModal, WorkBuddyImportModal, ZCodeImportModal } from "../app/ImportModals";
 import type {
 	CodexImportReport,
 	CodexSessionSummary,
@@ -22,6 +22,7 @@ import type {
 	Project,
 } from "../../../../shared/types";
 import type { ImportController } from "../../hooks/useImportFlow";
+import type { KimiWorkImportController } from "../../hooks/useKimiWorkImport";
 import type { DirectoryImportController } from "../../hooks/useDirectoryImport";
 
 export type ImportOverlayHostProps =
@@ -34,6 +35,7 @@ export type ImportOverlayHostProps =
 	| { kind: "cursor"; project: Project; controller: ImportController<CursorSessionSummary, CursorImportReport>; onClose: () => void }
 	| { kind: "kimi"; project: Project; controller: ImportController<KimiSessionSummary, KimiImportReport>; onClose: () => void }
 	/** Kimi Work（桌面版）控制器多带数据目录探测结果与手动指定状态。 */
+	| { kind: "kimiwork"; project: Project; controller: KimiWorkImportController; onClose: () => void }
 	/** 目录导入源目录现选，控制器多带「已选目录 / 只看失效目录」两组状态。 */
 	| { kind: "directory"; project: Project; controller: DirectoryImportController; onClose: () => void };
 
@@ -131,6 +133,24 @@ export function ImportOverlayHost(props: ImportOverlayHostProps) {
 		return (
 			<>
 				<KimiImportModal project={props.project} {...props.controller} onClose={props.onClose} onRefresh={props.controller.refresh} onToggle={props.controller.toggle} onToggleAll={props.controller.toggleAll} onImport={() => void props.controller.importSelected()} />
+				{renderImportError(props.controller.error)}
+			</>
+		);
+	if (props.kind === "kimiwork")
+		return (
+			<>
+				<KimiWorkImportModal
+					project={props.project}
+					{...props.controller}
+					onClose={props.onClose}
+					onRefresh={props.controller.refresh}
+					onToggle={props.controller.toggle}
+					onToggleAll={props.controller.toggleAll}
+					onImport={() => void props.controller.importSelected()}
+					onSetCustomRootDraft={props.controller.setCustomRootDraft}
+					onApplyCustomRoot={() => void props.controller.applyCustomRoot()}
+					onClearCustomRoot={() => void props.controller.clearCustomRoot()}
+				/>
 				{renderImportError(props.controller.error)}
 			</>
 		);

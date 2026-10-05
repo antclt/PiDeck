@@ -548,6 +548,16 @@ export type AppSettings = {
 	 */
 	pinnedSessionIds?: string[];
 
+	// ── 会话导入 ──
+	/**
+	 * Kimi Work（kimi-desktop 桌面版）daimon-share 数据目录的用户显式指定位置。
+	 * undefined/空串 = 未指定，走探测链（kimi-desktop 的 daimon-storage.json →
+	 * 默认安装位置 %APPDATA%/kimi-desktop/daimon-share）。用户在 Kimi Work 里把
+	 * 数据目录自定义到任意盘符时，靠探测链自动找到；此项仅用于探测失败时的手动指定。
+	 * 优先级最高，非空时不再读探测链。
+	 */
+	kimiWorkShareRoot?: string;
+
 	// ── 扩展管理 ──
 	/**
 	 * 用户手动移除（或因三方冲突自动让位）的内置扩展列表（如 pi-deck-todo.ts）。

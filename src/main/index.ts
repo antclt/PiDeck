@@ -286,6 +286,7 @@ import { ZCodeSessionImporter } from "./sessions/ZCodeSessionImporter";
 import { WorkBuddySessionImporter } from "./sessions/WorkBuddySessionImporter";
 import { CursorSessionImporter } from "./sessions/CursorSessionImporter";
 import { KimiSessionImporter } from "./sessions/KimiSessionImporter";
+import { KimiWorkSessionImporter } from "./sessions/KimiWorkSessionImporter";
 import { DirectorySessionImporter } from "./sessions/DirectorySessionImporter";
 import { normalizeSessionPathKey } from "./sessions/directorySessionImport";
 import { SettingsStore } from "./settings/SettingsStore";
@@ -426,6 +427,8 @@ let zcodeSessionImporter: ZCodeSessionImporter;
 let workbuddySessionImporter: WorkBuddySessionImporter;
 let cursorSessionImporter: CursorSessionImporter;
 let kimiSessionImporter: KimiSessionImporter;
+/** Kimi Work（桌面版）会话导入；daimon-share 位置不固定，内部走探测链。 */
+let kimiWorkSessionImporter: KimiWorkSessionImporter;
 /** 外置目录会话导入（项目目录移动/改名后找回历史）；只建 catalog 引用，不复制文件。 */
 let directorySessionImporter: DirectorySessionImporter;
 let settingsStore: SettingsStore;
@@ -2561,6 +2564,7 @@ function registerIpc() {
 		workbuddySessionImporter,
 		cursorSessionImporter,
 		kimiSessionImporter,
+		kimiWorkSessionImporter,
 		directorySessionImporter,
 		appLogger,
 		terminalManager,
@@ -3207,6 +3211,7 @@ app
 		workbuddySessionImporter = new WorkBuddySessionImporter(mainCopy);
 		cursorSessionImporter = new CursorSessionImporter(mainCopy);
 		kimiSessionImporter = new KimiSessionImporter(mainCopy);
+		kimiWorkSessionImporter = new KimiWorkSessionImporter(mainCopy);
 		// 外置目录会话导入：不复制会话文件，只把选定目录里的会话挂到当前项目（catalog 归属改写）。
 		// 候选来自 SessionScanner 的全量清单（list() 不带项目参数）——项目目录改名后，
 		// 那批会话仍然躺在 sessions 树里，只是项目过滤把它们排除了。

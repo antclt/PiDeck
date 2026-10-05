@@ -877,6 +877,11 @@ export function createPreviewApi(): PiDesktopApi {
 			scan: async () => [],
 			import: async () => ({ results: [], imported: 0, failed: 0 }),
 		},
+		kimiWorkSessions: {
+			describe: async () => ({ root: null, origin: null, sessionsFound: false }),
+			scan: async () => [],
+			import: async () => ({ results: [], imported: 0, failed: 0 }),
+		},
 		directorySessions: {
 			scan: async () => ({ sessions: [], kind: "none" }),
 			listSources: async () => [],
@@ -1543,6 +1548,10 @@ export function createPreviewApi(): PiDesktopApi {
 			tokendanceAuthAwait: async () => ({ ok: false, error: "preview" }),
 			tokendanceAuthCancel: async () => ({ ok: true }),
 			tokendanceAuthExchange: async () => ({ ok: false, error: "preview" }),
+			// 设计预览：充值接口不触真实网络（弹窗能看到完整链路，但创建会话必然失败）
+			tokendanceTopUpCreate: async () => ({ ok: false, code: "not-configured" }),
+			tokendanceTopUpStatus: async () => ({ ok: false, code: "not-configured" }),
+			tokendanceTopUpOpenAlipay: async () => ({ ok: false, error: "preview" }),
 			installTokendance: async () => ({ ok: false, modelCount: 0, piSaved: false, dshSaved: false, error: "preview" }),
 			testProvider: async () => ({
 				success: true,

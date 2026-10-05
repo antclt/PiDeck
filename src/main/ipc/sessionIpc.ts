@@ -104,6 +104,7 @@ import type { ZCodeSessionImporter } from "../sessions/ZCodeSessionImporter";
 import type { WorkBuddySessionImporter } from "../sessions/WorkBuddySessionImporter";
 import type { CursorSessionImporter } from "../sessions/CursorSessionImporter";
 import type { KimiSessionImporter } from "../sessions/KimiSessionImporter";
+import type { KimiWorkSessionImporter } from "../sessions/KimiWorkSessionImporter";
 import type { AppLogger } from "../logging/AppLogger";
 
 /**
@@ -318,6 +319,8 @@ export type SessionIpcDeps = {
 	workbuddySessionImporter: WorkBuddySessionImporter;
 	cursorSessionImporter: CursorSessionImporter;
 	kimiSessionImporter: KimiSessionImporter;
+	/** Kimi Work（桌面版）会话导入：daimon-share 位置可被用户自定义，scan/import 内部走探测链。 */
+	kimiWorkSessionImporter: KimiWorkSessionImporter;
 	/** 外置目录会话导入（项目目录移动/改名后找回历史；只建 catalog 引用，不复制原文件）。 */
 	directorySessionImporter: DirectorySessionImporter;
 	appLogger: AppLogger;
@@ -392,6 +395,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		workbuddySessionImporter,
 		cursorSessionImporter,
 		kimiSessionImporter,
+		kimiWorkSessionImporter,
 		directorySessionImporter,
 		appLogger,
 		terminalManager,
@@ -1949,6 +1953,36 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		void appLogger.info("session", "Kimi sessions imported", {
 			projectId,
 			sourceCount: sourcePaths.length,
+		});
+		return result;
+	});
+	// ── Kimi Work（kimi-desktop 桌面版）会话导入 ─────────────────────────────
+	// 与 CLI 版（上方）的差异：数据目录不固定——先 describe 探测（settings 手动指定 >
+	// daimon-storage.json 记录的自定义位置 > 默认安装位置），弹窗把探测结果展示给用户。
+	// scan/import 全部走探测链，用户改 Kimi Work 数据位置后 PiDeck 无需改设置。
+	ipcMain.handle(ipcChannels.kimiWorkSessionsDescribe, async () => {
+		const customRoot = settingsStore.get().kimiWorkShareRoot;
+		const result = await kimiWorkSessionImporter.describeShareRoot(customRoot);
+		void appLogger.debug("session", "Kimi Work share root described", { origin: result.origin });
+		return result;
+	});
+	ipcMain.handle(ipcChannels.kimiWorkSessionsScan, async (_event, projectId: string) => {
+		const project = projectStore.get(projectId);
+		if (!project) throw new Error(`Project not found: ${projectId}`);
+		const customRoot = settingsStore.get().kimiWorkShareRoot;
+		const result = await kimiWorkSessionImporter.scan(project.path, customRoot);
+		void appLogger.debug("session", "Kimi Work sessions scanned", { projectId, count: result.length });
+		return result;
+	});
+	ipcMain.handle(ipcChannels.kimiWorkSessionsImport, async (_event, projectId: string, sourcePaths: string[]) => {
+		const project = projectStore.get(projectId);
+		if (!project) throw new Error(`Project not found: ${projectId}`);
+		const customRoot = settingsStore.get().kimiWorkShareRoot;
+		const result = await kimiWorkSessionImporter.import(project.path, sourcePaths, customRoot);
+		void appLogger.info("session", "Kimi Work sessions imported", {
+			projectId,
+			sourceCount: sourcePaths.length,
+			imported: result.imported,
 		});
 		return result;
 	});
