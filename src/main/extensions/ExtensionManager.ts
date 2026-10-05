@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { clearTimeout, setTimeout } from "node:timers";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { basename, join, relative, sep } from "node:path";
 import { homedir } from "node:os";
@@ -14,9 +15,22 @@ import { MIN_PI_VERSION_FOR_EXTENSION_WHITELIST, piVersionAtLeast } from "./exte
 // 版本比较与应用更新检查共用同一实现（含预发布语义：beta < 同号正式版）。
 import { compareVersions } from "../utils/versionCompare";
 import { discoverExtensionEntries } from "./extensionDiscovery";
+import { parsePiVersion } from "./extensionVersionGate";
+import { redactForReport, truncateText } from "../health/redact";
 
+/** pi 0.70.3 introduced self-update and the packages-only --extensions flag. */
+const MIN_PI_VERSION_FOR_SELF_UPDATE = "0.70.3";
 const PI_LATEST_VERSION_URL = "https://pi.dev/api/latest-version";
 const PI_LATEST_VERSION_TIMEOUT_MS = 10_000;
+
+/** Numbered prereleases at the introduction boundary must not enable a not-yet-stable CLI API. */
+function supportsPiSelfUpdate(version: string | undefined): boolean {
+	const normalized = parsePiVersion(version);
+	if (!normalized) return false;
+	const [core] = normalized.split("-");
+	const comparison = compareVersions(core ?? "", MIN_PI_VERSION_FOR_SELF_UPDATE);
+	return comparison > 0 || (comparison === 0 && !normalized.includes("-"));
+}
 
 export { BUILT_IN_EXTENSIONS } from "./builtInExtensions";
 
@@ -450,8 +464,12 @@ export class ExtensionManager {
 	}
 
 	async checkPiUpdate(): Promise<PiUpdateCheckResult> {
+		return this.checkPiUpdateFor({ ...this.getSettings() });
+	}
+
+	/** Pin the installation settings throughout a check/update, even if the user switches runtimes. */
+	private async checkPiUpdateFor(settings: AppSettings): Promise<PiUpdateCheckResult> {
 		try {
-			const settings = this.getSettings();
 			const status = await this.locator.check(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
 			if (!status.installed) return { hasUpdate: false, error: this.translate("mainExtension.piNotInstalled") };
 			// 与 `pi update --self` 使用同一个 pi.dev 版本接口，避免 npm latest 与 Pi 官方
@@ -463,13 +481,17 @@ export class ExtensionManager {
 				hasUpdate: compareVersions(latestVersion, status.version ?? "0.0.0") > 0,
 			};
 		} catch (error) {
-			console.error("[ExtensionManager] Pi update check failed", error);
-			return { hasUpdate: false, error: this.translate("mainExtension.updateCheckFailed") };
+			const detail = this.sanitizeCommandOutput(error instanceof Error ? error.message : String(error));
+			void getAppLogger()?.error("extensions", "Pi update check failed", { error: detail });
+			return { hasUpdate: false, error: `${this.translate("mainExtension.updateCheckFailed")}\n${detail}` };
 		}
 	}
 
+	/** Self-update only the selected pi installation, and verify it instead of trusting exit status. */
 	async updatePi(): Promise<PiCliUpdateResult> {
-		const check = await this.checkPiUpdate();
+		const settings = { ...this.getSettings() };
+		const check = await this.checkPiUpdateFor(settings);
+		if (check.error) throw new Error(check.error);
 		if (!check.hasUpdate) {
 			return {
 				command: "pi update --self",
@@ -482,37 +504,50 @@ export class ExtensionManager {
 				updated: false,
 			};
 		}
-		// pi 0.84.3 起 `pi update --self` 是官方自更新入口；旧版的子命令是 `pi update pi`。
-		// 版本未知（未安装/探测失败）时保守走旧写法，与新 pi 的报错一起暴露给用户。
-		const version = await this.getPiVersion();
-		const selfUpdateSupported = piVersionAtLeast(version, "0.84.3");
-		const updateArgs = selfUpdateSupported ? ["update", "--self"] : ["update", "pi"];
-		const command = updateArgs.join(" ");
-		const output = await this.runPi(updateArgs, 120_000, { offline: false });
-		const result = this.toUpdateResult(command, output, true);
-		// 自更新成功后版本必然变化：失效本地与跨进程的版本缓存，
-		// 否则新 agent 还会拿旧版本做门槛判断（白名单/信任标志）。
-		if (result.updated) {
+		// Older versions have no self-update API: do not guess npm/pnpm/standalone ownership.
+		if (!supportsPiSelfUpdate(check.currentVersion)) {
+			throw new Error(this.translate("mainExtension.piSelfUpdateUnsupported", { version: check.currentVersion || "?", minimum: MIN_PI_VERSION_FOR_SELF_UPDATE }));
+		}
+		let output: string;
+		try {
+			output = await this.runPi(["update", "--self"], 120_000, { offline: false, settings, version: check.currentVersion });
+		} finally {
+			// A failed updater may still have changed files; never reuse a pre-update version probe.
 			this.piVersion = null;
 			this.piVersionPromise = null;
 			PiProcess.invalidateVersionCache();
 		}
-		return result;
+		const status = await this.locator.check(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
+		if (!status.installed || !status.version || compareVersions(status.version, check.latestVersion ?? "0.0.0") < 0) {
+			throw new Error(`${this.translate("mainExtension.piUpdateNotApplied", { current: status.version || "?", latest: check.latestVersion || "?" })}\n${this.sanitizeCommandOutput(output)}`);
+		}
+		return this.toUpdateResult("pi update --self", output, true);
 	}
 
+	/** Before self-update existed, bare `pi update` updated packages only. Keep that safe compatibility. */
 	async updateExtensions(): Promise<PiCliUpdateResult> {
-		const output = await this.runPi(["update", "--extensions"], 120_000, { offline: false });
-		// 更新后版本信息变化，强制下次 list 重新获取。
-		this.invalidateListCache();
-		return this.toUpdateResult("pi update --extensions", output, true);
+		const settings = { ...this.getSettings() };
+		const status = await this.locator.check(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
+		if (!status.installed) throw new Error(this.translate("mainExtension.piNotInstalled"));
+		if (!parsePiVersion(status.version)) throw new Error(this.translate("mainExtension.piVersionUnknown"));
+		const args = supportsPiSelfUpdate(status.version) ? ["update", "--extensions"] : ["update"];
+		try {
+			const output = await this.runPi(args, 120_000, { offline: false, settings, version: status.version });
+			return this.toUpdateResult(`pi ${args.join(" ")}`, output, true);
+		} finally {
+			// A multi-package failure can still update earlier packages; refresh their displayed versions.
+			this.invalidateListCache();
+		}
 	}
 
 	/** 更新单个扩展：`pi update <source>`，source 与 list 输出一致（如 npm:context-mode）。 */
 	async updateExtension(source: string): Promise<PiCliUpdateResult> {
-		const output = await this.runPi(["update", source], 120_000, { offline: false });
-		// 更新后版本信息变化，强制下次 list 重新获取。
-		this.invalidateListCache();
-		return this.toUpdateResult(`pi update ${source}`, output, true);
+		try {
+			const output = await this.runPi(["update", source], 120_000, { offline: false });
+			return this.toUpdateResult(`pi update ${source}`, output, true);
+		} finally {
+			this.invalidateListCache();
+		}
 	}
 
 	private async enrichExtensionVersion(extension: PiExtensionSummary): Promise<PiExtensionSummary> {
@@ -585,8 +620,13 @@ export class ExtensionManager {
 		});
 	}
 
+	/** CLI output can include registry credentials or personal paths; redact before logging/displaying it. */
+	private sanitizeCommandOutput(value: string): string {
+		return truncateText(redactForReport(value.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "").trim(), this.homeDir), 4_000);
+	}
+
 	private toUpdateResult(command: string, output: string, updated: boolean): PiCliUpdateResult {
-		return { command, output: output.trim(), updated };
+		return { command: this.sanitizeCommandOutput(command), output: this.sanitizeCommandOutput(output), updated };
 	}
 
 	/**
@@ -675,13 +715,14 @@ export class ExtensionManager {
 		return null;
 	}
 
-	private async runPi(args: string[], timeout: number, options: { offline?: boolean; cwd?: string; projectInstall?: boolean } = {}): Promise<string> {
+	private async runPi(args: string[], timeout: number, options: { offline?: boolean; cwd?: string; projectInstall?: boolean; settings?: AppSettings; version?: string } = {}): Promise<string> {
 		// 项目安装必须让 pi 读取已通过 PiDeck trust 校验的项目资源；--no-approve 会绕过该路径。
 		const finalArgs = [...args];
-		if (!options.projectInstall && (await this.noApproveSupported())) {
+		const noApproveSupported = options.version === undefined ? await this.noApproveSupported() : piVersionAtLeast(options.version, "0.79.0");
+		if (!options.projectInstall && noApproveSupported) {
 			finalArgs.push("--no-approve");
 		}
-		const settings = this.getSettings();
+		const settings = options.settings ?? this.getSettings();
 		// 设置页装扩展可以等 WSL which；不能在 resolveCommand 里同步卡住主进程。
 		if (settings.wslEnabled && settings.wslDistro && settings.wslUser) {
 			await this.locator.warmWslCommand(settings.wslDistro, settings.wslUser);
@@ -695,6 +736,7 @@ export class ExtensionManager {
 		// list/remove 默认走离线模式避免配置页被网络拖慢；store install 与 update 显式允许联网，
 		// 否则 pi 只会返回简化的结果，无法真正完成包安装/更新。
 		if (options.offline !== false) env.PI_OFFLINE = "1";
+		else delete env.PI_OFFLINE;
 		return new Promise<string>((resolve, reject) => {
 			execFile(
 				invocation.command,
@@ -710,15 +752,19 @@ export class ExtensionManager {
 				},
 				(error, stdout, stderr) => {
 					if (error) {
-						console.error("[ExtensionManager] pi command failed", {
-							args: finalArgs,
-							error: error.message,
-							stderr: stderr.trim(),
+						const detail = this.sanitizeCommandOutput([stderr, stdout, error.message].filter(Boolean).join("\n"));
+						void getAppLogger()?.error("extensions", "pi command failed", {
+							args: finalArgs.map((arg) => this.sanitizeCommandOutput(arg)),
+							error: detail,
+							code: error.code,
+							signal: error.signal,
 						});
-						reject(new Error(this.translate("mainExtension.commandFailed")));
+						const reason = this.translate(error.killed ? "mainExtension.commandTimedOut" : "mainExtension.commandFailed", { seconds: timeout / 1_000 });
+						reject(new Error(`${reason}\n${detail}`));
 						return;
 					}
-					resolve(stdout);
+					// Update tools often write their actionable package-manager notices to stderr.
+					resolve(args[0] === "update" && stderr.trim() ? `${stdout}\n${stderr}` : stdout);
 				},
 			);
 		});

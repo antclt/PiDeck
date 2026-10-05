@@ -1,97 +1,22 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import ts from "typescript";
-import vm from "node:vm";
-import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
+import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
 
-const nodeRequire = createRequire(import.meta.url);
-
-let builtInExtensionsModule = null;
-
-/**
- * builtInExtensions.ts 依赖 ./builtInExtensionsManifest（覆盖层清单校验），
- * nodeRequire 解析不了无扩展名的 .ts 相对导入，统一交给 loadTsCommonJs。
- * 模块级缓存保证实例唯一：覆盖层可用性缓存住在模块内部。
- */
-function loadBuiltInExtensionsModule() {
-	if (!builtInExtensionsModule) {
-		builtInExtensionsModule = loadTsCommonJs("src/main/extensions/builtInExtensions.ts");
-	}
-	return builtInExtensionsModule;
-}
+/** Resolve production imports from their source directory; stub only desktop side effects. */
+const loadProductionTs = createTsSandbox({
+	stubs: {
+		"../fs/trash": { trashPath: (path) => rm(path, { recursive: true, force: true }) },
+		"../logging/sharedLogger": { getAppLogger: () => null },
+		"../pi/PiProcess": { PiProcess: { invalidateVersionCache: () => {} } },
+	},
+	globals: { fetch: (...args) => globalThis.fetch(...args) },
+});
 
 function loadExtensionManagerModule() {
-	const source = readFileSync("src/main/extensions/ExtensionManager.ts", "utf8");
-	const output = ts.transpileModule(source, {
-		compilerOptions: {
-			module: ts.ModuleKind.CommonJS,
-			target: ts.ScriptTarget.ES2022,
-			esModuleInterop: true,
-		},
-		fileName: "ExtensionManager.ts",
-	}).outputText;
-	const module = { exports: {} };
-	vm.runInNewContext(
-		output,
-		{
-			module,
-			exports: module.exports,
-			require: (specifier) => {
-				if (specifier === "../wsl/WslPaths") {
-					return { toWindowsHostPath: (path) => path };
-				}
-				// 25fd516 起 ExtensionManager 依赖内置扩展清单模块；按真实模块透传（纯数据 + 纯函数）
-				if (specifier === "./extensionDiscovery") {
-					return nodeRequire("../src/main/extensions/extensionDiscovery.ts");
-				}
-				if (specifier === "./builtInExtensions") {
-					return loadBuiltInExtensionsModule();
-				}
-				// 删除走系统回收站统一入口；测试环境没有回收站，模拟为真实删除（rm 已在测试 import 中）。
-				if (specifier === "../fs/trash") {
-					return {
-						trashPath: async (p) => {
-							await rm(p, { recursive: true, force: true });
-						},
-					};
-				}
-				// 共享日志器：测试环境未注册实例，返回 null 让调用方静默跳过
-				if (specifier === "../logging/sharedLogger") {
-					return { getAppLogger: () => null };
-				}
-				if (specifier === "./extensionVersionGate") {
-					// 版本门槛模块新增了对 ../utils/versionCompare 的无扩展名相对导入，
-					// node 原生类型剥离解析不了，改用能递归处理相对导入的 loadTsCommonJs。
-					return loadTsCommonJs("src/main/extensions/extensionVersionGate.ts");
-				}
-				// updatePi 成功后调用 PiProcess.invalidateVersionCache；桩掉避免拉 PiProcess 依赖图。
-				if (specifier === "../pi/PiProcess") {
-					return { PiProcess: { invalidateVersionCache: () => {} } };
-				}
-				// ExtensionManager 依赖 ../utils/versionCompare 的 compareVersions；.ts 经 node 类型剥离可 require。
-				if (specifier === "../utils/versionCompare") {
-					return nodeRequire("../src/main/utils/versionCompare.ts");
-				}
-				return nodeRequire(specifier);
-			},
-			Promise,
-			Set,
-			Map,
-			JSON,
-			Error,
-			AbortController: globalThis.AbortController,
-			setTimeout: globalThis.setTimeout,
-			clearTimeout: globalThis.clearTimeout,
-			fetch: (...args) => globalThis.fetch(...args),
-		},
-		{ filename: "ExtensionManager.ts" },
-	);
-	return module.exports;
+	return loadProductionTs("src/main/extensions/ExtensionManager.ts");
 }
 
 function deferred() {

@@ -1,82 +1,25 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import ts from "typescript";
-import vm from "node:vm";
-import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
+import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
 
 const require = createRequire(import.meta.url);
 
-let builtInExtensionsModule = null;
-
-/**
- * builtInExtensions.ts 依赖 ./builtInExtensionsManifest（覆盖层清单校验），
- * 裸 require 解析不了无扩展名的 .ts 相对导入，统一交给 loadTsCommonJs；
- * 模块级缓存保证实例唯一（覆盖层可用性缓存住在模块内部）。
- */
-function loadBuiltInExtensionsModule() {
-	if (!builtInExtensionsModule) {
-		builtInExtensionsModule = loadTsCommonJs("src/main/extensions/builtInExtensions.ts");
-	}
-	return builtInExtensionsModule;
-}
-
-function transpile(filePath) {
-	return ts.transpileModule(readFileSync(filePath, "utf8"), {
-		compilerOptions: {
-			module: ts.ModuleKind.CommonJS,
-			target: ts.ScriptTarget.ES2022,
-		},
-	}).outputText;
-}
-
-function loadWslPaths() {
-	const sandbox = { exports: {}, require };
-	vm.runInNewContext(transpile("src/main/wsl/WslPaths.ts"), sandbox, { filename: "WslPaths.ts" });
-	return sandbox.exports;
-}
-
+/** Keep real WSL path semantics and resolve every production dependency from its source file. */
 function loadExtensionManager(fsOverrides = {}) {
-	const wslPaths = loadWslPaths();
-	const sandbox = {
-		exports: {},
-		require: (id) => {
-			if (id === "node:fs/promises") {
-				return { ...require(id), ...fsOverrides };
-			}
-			if (id === "../wsl/WslPaths") return wslPaths;
-			// 25fd516 起 ExtensionManager 依赖内置扩展清单模块；按真实模块透传（纯数据 + 纯函数）
-			if (id === "./extensionDiscovery") {
-				return require("../src/main/extensions/extensionDiscovery.ts");
-			}
-			if (id === "./builtInExtensions") {
-				return loadBuiltInExtensionsModule();
-			}
-			// 删除走系统回收站统一入口；本测试不触达删除路径，提供 noop stub 即可。
-			if (id === "../fs/trash") return { trashPath: async () => {} };
-			if (id === "../logging/sharedLogger") return { getAppLogger: () => null };
-			if (id === "./extensionVersionGate") {
-				return loadTsCommonJs("src/main/extensions/extensionVersionGate.ts");
-			}
-			// updatePi 成功后调用 PiProcess.invalidateVersionCache；桩掉避免拉 PiProcess 依赖图。
-			if (id === "../pi/PiProcess") {
-				return { PiProcess: { invalidateVersionCache: () => {} } };
-			}
-			// ExtensionManager 依赖 ../utils/versionCompare 的 compareVersions；.ts 经 node 类型剥离可 require。
-			if (id === "../utils/versionCompare") {
-				return require("../src/main/utils/versionCompare.ts");
-			}
-			return require(id);
+	const load = createTsSandbox({
+		stubs: {
+			"node:fs/promises": { ...require("node:fs/promises"), ...fsOverrides },
+			"../fs/trash": { trashPath: async () => {} },
+			"../logging/sharedLogger": { getAppLogger: () => null },
+			"../pi/PiProcess": { PiProcess: { invalidateVersionCache: () => {} } },
 		},
-	};
-	vm.runInNewContext(transpile("src/main/extensions/ExtensionManager.ts"), sandbox, {
-		filename: "ExtensionManager.ts",
 	});
-	return { ...sandbox.exports, wslPaths };
+	return { ...load("src/main/extensions/ExtensionManager.ts"), wslPaths: load("src/main/wsl/WslPaths.ts") };
 }
 
 test("reads an installed WSL npm extension version through its canonical host path", async () => {

@@ -1,85 +1,30 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import ts from "typescript";
-import vm from "node:vm";
 import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
 
 const require = createRequire(import.meta.url);
 
-/**
- * 生产 TS 依赖图加载器（按**源文件目录**解析相对 import，同实例内缓存）。
- *
- * 这里不用手写 require 桥：它以 tests/ 为基准解析，生产模块一新增本地 import
- * 就整片失败，而且「只给部分导出」的桩会静默变成 undefined —— 本文件 2026-09
- * 就因为 ExtensionManager 新增 `INTERNAL_BUILT_IN_EXTENSIONS` 导入而红了三条。
- */
-const loadProductionTs = createTsSandbox();
-
-/** 本地 TS 依赖 → 仓库相对路径（未列出的相对 import 会落到 Node 解析而失败，需补表）。 */
-const LOCAL_TS_MODULES = {
-	"../wsl/WslPaths": "src/main/wsl/WslPaths.ts",
-	"./builtInExtensions": "src/main/extensions/builtInExtensions.ts",
-	"./extensionVersionGate": "src/main/extensions/extensionVersionGate.ts",
-	"./extensionDiscovery": "src/main/extensions/extensionDiscovery.ts",
-	"../utils/versionCompare": "src/main/utils/versionCompare.ts",
-};
-
-function transpile(filePath) {
-	return ts.transpileModule(readFileSync(filePath, "utf8"), {
-		compilerOptions: {
-			module: ts.ModuleKind.CommonJS,
-			target: ts.ScriptTarget.ES2022,
-		},
-	}).outputText;
-}
-
-/**
- * 加载 ExtensionManager，并把 homeDir 重定向到 fixture（通过 mock os.homedir）。
- * 同时可 mock runPi 输出，便于测 list 冲突路径。
- */
+/** Load the real dependency graph while redirecting user files and pi execution to fixtures. */
 function loadExtensionManager({ homeDir, runPiOutput = "", fsOverrides = {} } = {}) {
 	const realOs = require("node:os");
-	const sandbox = {
-		exports: {},
-		require: (id) => {
-			if (id === "node:os") {
-				return {
-					...realOs,
-					homedir: () => homeDir ?? realOs.homedir(),
-				};
-			}
-			if (id === "node:fs/promises") {
-				return { ...require(id), ...fsOverrides };
-			}
-			if (id === "node:child_process") {
-				const real = require(id);
-				return {
-					...real,
-					execFile: (cmd, args, opts, cb) => {
-						// runPi 走 execFile；返回预设 stdout，模拟 pi list
-						queueMicrotask(() => cb(null, runPiOutput, ""));
-					},
-				};
-			}
-			// 需替换为替身的依赖（外部副作用 / 需重定向 home）
-			if (id === "../pi/PiLocator") return {};
-			// updatePi 成功后调用 PiProcess.invalidateVersionCache；桩掉避免拉 PiProcess 依赖图。
-			if (id === "../pi/PiProcess") return { PiProcess: { invalidateVersionCache: () => {} } };
-			if (id === "../fs/trash") return { trashPath: async () => {} };
-			if (id === "../logging/sharedLogger") return { getAppLogger: () => null };
-			// 其余本地 TS 依赖一律加载**真模块**（含导出与行为），不再造部分导出桩
-			if (LOCAL_TS_MODULES[id]) return loadProductionTs(LOCAL_TS_MODULES[id]);
-			return require(id);
+	const load = createTsSandbox({
+		stubs: {
+			"node:os": { ...realOs, homedir: () => homeDir ?? realOs.homedir() },
+			"node:fs/promises": { ...require("node:fs/promises"), ...fsOverrides },
+			"node:child_process": {
+				...require("node:child_process"),
+				execFile: (_command, _args, _options, callback) => queueMicrotask(() => callback(null, runPiOutput, "")),
+			},
+			"../pi/PiProcess": { PiProcess: { invalidateVersionCache: () => {} } },
+			"../fs/trash": { trashPath: async () => {} },
+			"../logging/sharedLogger": { getAppLogger: () => null },
 		},
-	};
-	vm.runInNewContext(transpile("src/main/extensions/ExtensionManager.ts"), sandbox, {
-		filename: "ExtensionManager.ts",
 	});
-	return sandbox.exports;
+	return load("src/main/extensions/ExtensionManager.ts");
 }
 
 test("disableBuiltIn records removal and deletes user extension file", async () => {
