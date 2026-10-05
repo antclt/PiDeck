@@ -882,6 +882,11 @@ export function createPreviewApi(): PiDesktopApi {
 			scan: async () => [],
 			import: async () => ({ results: [], imported: 0, failed: 0 }),
 		},
+		// MinimaxCode 导入预览桩：预览环境无 ~/.minimax 可扫
+		minimaxSessions: {
+			scan: async () => [],
+			import: async () => ({ results: [], imported: 0, failed: 0 }),
+		},
 		directorySessions: {
 			scan: async () => ({ sessions: [], kind: "none" }),
 			listSources: async () => [],

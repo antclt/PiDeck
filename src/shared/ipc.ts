@@ -312,6 +312,12 @@ export const ipcChannels = {
 	kimiWorkSessionsScan: "kimi-work-sessions:scan",
 	kimiWorkSessionsImport: "kimi-work-sessions:import",
 	/**
+	 * MinimaxCode（CLI）会话导入：数据目录固定在 ~/.minimax/v2/sessions，
+	 * 扫描返回按 cwd 归属项目的会话列表（cwd 取自 llm-call.json 的 working directory）。
+	 */
+	minimaxSessionsScan: "minimax-sessions:scan",
+	minimaxSessionsImport: "minimax-sessions:import",
+	/**
 	 * 外置目录会话导入（项目目录移动/改名后找回历史）：扫描用户选定的目录
 	 * （旧项目目录 / 某个 encoded 分组目录 / pi sessions 根）里的会话。
 	 * 返回 { sessions, kind }；kind=ancestor 表示用户选到了 ~/.pi 这类会话树的祖先目录。
@@ -479,7 +485,7 @@ export const ipcChannels = {
 	/** 验证 WSL 连接：检查 distro + user 是否可达，以及 pi 是否已安装 */
 	wslValidateConnection: "wsl:validate-connection",
 	piUpdateCheck: "pi:update-check",
-piReleaseNotes: "pi:release-notes",
+	piReleaseNotes: "pi:release-notes",
 	piUpdate: "pi:update",
 	/** 在系统终端中执行安装命令（npm install）并返回结果 */
 	piExecInstall: "pi:exec-install",

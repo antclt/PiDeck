@@ -18,6 +18,8 @@ import type {
 	KimiWorkImportReport,
 	KimiWorkSessionSummary,
 	KimiWorkShareRootInfo,
+	MinimaxImportReport,
+	MinimaxSessionSummary,
 	Project,
 } from "../../../shared/types";
 import { useImportSource, type ImportController } from "./useImportSource";
@@ -75,6 +77,10 @@ export interface UseImportFlowInput {
 	getSettings: () => Promise<{ kimiWorkShareRoot?: string }>;
 	/** API: 更新设置（kimiWorkShareRoot 手动指定目录） */
 	updateSettings: (patch: { kimiWorkShareRoot?: string }) => Promise<unknown>;
+	/** API: scan MinimaxCode sessions */
+	scanMinimaxSessions: (projectId: string) => Promise<MinimaxSessionSummary[]>;
+	/** API: import MinimaxCode sessions */
+	importMinimaxSessionsApi: (projectId: string, sourcePaths: string[]) => Promise<MinimaxImportReport>;
 	/** Translation function */
 	t: Parameters<typeof useImportSource<CodexSessionSummary, CodexImportReport>>[0]["t"];
 }
@@ -98,6 +104,8 @@ export interface UseImportFlowOutput {
 	setKimiImportProject: React.Dispatch<React.SetStateAction<Project | null>>;
 	kimiWorkImportProject: Project | null;
 	setKimiWorkImportProject: React.Dispatch<React.SetStateAction<Project | null>>;
+	minimaxImportProject: Project | null;
+	setMinimaxImportProject: React.Dispatch<React.SetStateAction<Project | null>>;
 	codexImportController: ImportController<CodexSessionSummary, CodexImportReport>;
 	claudeImportController: ImportController<ClaudeSessionSummary, ClaudeImportReport>;
 	qoderImportController: ImportController<QoderSessionSummary, QoderImportReport>;
@@ -107,6 +115,7 @@ export interface UseImportFlowOutput {
 	cursorImportController: ImportController<CursorSessionSummary, CursorImportReport>;
 	kimiImportController: ImportController<KimiSessionSummary, KimiImportReport>;
 	kimiWorkImportController: KimiWorkImportController;
+	minimaxImportController: ImportController<MinimaxSessionSummary, MinimaxImportReport>;
 	openCodexImport: (project: Project) => Promise<void>;
 	openClaudeImport: (project: Project) => Promise<void>;
 	openQoderImport: (project: Project) => Promise<void>;
@@ -116,6 +125,7 @@ export interface UseImportFlowOutput {
 	openCursorImport: (project: Project) => Promise<void>;
 	openKimiImport: (project: Project) => Promise<void>;
 	openKimiWorkImport: (project: Project) => Promise<void>;
+	openMinimaxImport: (project: Project) => Promise<void>;
 }
 
 /**
@@ -200,6 +210,14 @@ export function useImportFlow(input: UseImportFlowInput): UseImportFlowOutput {
 		updateSettings: input.updateSettings,
 	});
 
+	// MinimaxCode 数据目录固定（~/.minimax），无 describe 步骤，与其他简单源同构
+	const minimax = useImportSource<MinimaxSessionSummary, MinimaxImportReport>({
+		...base,
+		copyPrefix: "minimax",
+		scan: input.scanMinimaxSessions,
+		importSessions: input.importMinimaxSessionsApi,
+	});
+
 	return {
 		codexImportProject: codex.project,
 		setCodexImportProject: codex.setProject,
@@ -219,6 +237,8 @@ export function useImportFlow(input: UseImportFlowInput): UseImportFlowOutput {
 		setKimiImportProject: kimi.setProject,
 		kimiWorkImportProject: kimiWork.project,
 		setKimiWorkImportProject: kimiWork.setProject,
+		minimaxImportProject: minimax.project,
+		setMinimaxImportProject: minimax.setProject,
 		codexImportController: codex.controller,
 		claudeImportController: claude.controller,
 		qoderImportController: qoder.controller,
@@ -228,6 +248,7 @@ export function useImportFlow(input: UseImportFlowInput): UseImportFlowOutput {
 		cursorImportController: cursor.controller,
 		kimiImportController: kimi.controller,
 		kimiWorkImportController: kimiWork.controller,
+		minimaxImportController: minimax.controller,
 		openCodexImport: codex.open,
 		openClaudeImport: claude.open,
 		openQoderImport: qoder.open,
@@ -237,5 +258,6 @@ export function useImportFlow(input: UseImportFlowInput): UseImportFlowOutput {
 		openCursorImport: cursor.open,
 		openKimiImport: kimi.open,
 		openKimiWorkImport: kimiWork.open,
+		openMinimaxImport: minimax.open,
 	};
 }

@@ -73,6 +73,8 @@ import type {
 	KimiWorkShareRootInfo,
 	KimiWorkSessionSummary,
 	KimiWorkImportReport,
+	MinimaxImportReport,
+	MinimaxSessionSummary,
 	DirectoryImportReport,
 	DirectorySessionScanResult,
 	DirectorySessionSourceDir,
@@ -783,6 +785,11 @@ const api = {
 		describe: () => ipcRenderer.invoke(ipcChannels.kimiWorkSessionsDescribe) as Promise<KimiWorkShareRootInfo>,
 		scan: (projectId: string) => ipcRenderer.invoke(ipcChannels.kimiWorkSessionsScan, projectId) as Promise<KimiWorkSessionSummary[]>,
 		import: (projectId: string, sourcePaths: string[]) => ipcRenderer.invoke(ipcChannels.kimiWorkSessionsImport, projectId, sourcePaths) as Promise<KimiWorkImportReport>,
+	},
+	/** MinimaxCode（CLI）会话导入；数据目录固定 ~/.minimax/v2/sessions，按 cwd 归属项目。 */
+	minimaxSessions: {
+		scan: (projectId: string) => ipcRenderer.invoke(ipcChannels.minimaxSessionsScan, projectId) as Promise<MinimaxSessionSummary[]>,
+		import: (projectId: string, sourcePaths: string[]) => ipcRenderer.invoke(ipcChannels.minimaxSessionsImport, projectId, sourcePaths) as Promise<MinimaxImportReport>,
 	},
 	/**
 	 * 外置目录会话导入：源目录由用户现选（从「现有会话目录」列表点选，或手选任意目录），

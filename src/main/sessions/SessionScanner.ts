@@ -1708,7 +1708,7 @@ export class SessionScanner {
 		};
 	}
 
-	/** 导入器约定文件名：codex_<id>.jsonl / claude_<id>.jsonl / qoder_<id>.jsonl / opencode_<id>.jsonl / zcode_<id>.jsonl / cursor_<id>.jsonl / kimi_<id>.jsonl。 */
+	/** 导入器约定文件名：codex_<id>.jsonl / claude_<id>.jsonl / qoder_<id>.jsonl / opencode_<id>.jsonl / zcode_<id>.jsonl / cursor_<id>.jsonl / kimi_<id>.jsonl / minimax_<id>.jsonl。 */
 	private inferSourceFromFileName(filePath: string): NonNullable<SessionSummary["source"]> {
 		const base = basename(filePath).toLowerCase();
 		if (base.startsWith("codex_")) return "codex";
@@ -1719,6 +1719,7 @@ export class SessionScanner {
 		if (base.startsWith("workbuddy_")) return "workbuddy";
 		if (base.startsWith("cursor_")) return "cursor";
 		if (base.startsWith("kimi_")) return "kimi";
+		if (base.startsWith("minimax_")) return "minimax";
 		return "pi";
 	}
 
@@ -1814,6 +1815,7 @@ export class SessionScanner {
 				else if (entry.type === "workbuddy_import") source = "workbuddy";
 				else if (entry.type === "cursor_import") source = "cursor";
 				else if (entry.type === "kimi_import") source = "kimi";
+				else if (entry.type === "minimax_import") source = "minimax";
 			}
 
 			projectPath ||= entry.cwd || entry.projectPath || entry.header?.cwd || entry.data?.cwd || entry.session?.cwd || entry.data?.session?.cwd;

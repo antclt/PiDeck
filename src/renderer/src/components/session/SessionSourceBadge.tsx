@@ -17,6 +17,7 @@ const SOURCE_LABELS: Record<SessionSource, string> = {
 	cursor: t("sessionSource.cursor"),
 	kimi: t("sessionSource.kimi"),
 	kimiwork: t("sessionSource.kimiwork"),
+	minimax: t("sessionSource.minimax"),
 };
 
 const SOURCE_TONES: Record<SessionSource, string> = {
@@ -37,6 +38,8 @@ const SOURCE_TONES: Record<SessionSource, string> = {
 	kimi: "border-muted-foreground/40 text-muted-foreground",
 	// Kimi Work（kimi-desktop 桌面版）同上，用「K+右上角标」区分桌面版，沿用中性色惯例。
 	kimiwork: "border-muted-foreground/40 text-muted-foreground",
+	// MinimaxCode（CLI）无随包品牌 SVG：自绘「M」字形标记，沿用中性色惯例。
+	minimax: "border-muted-foreground/40 text-muted-foreground",
 };
 
 function SourceLogo(props: { source: SessionSource }) {
@@ -124,6 +127,15 @@ function SourceLogo(props: { source: SessionSource }) {
 			<svg viewBox="0 0 24 24" className="size-3.5" aria-hidden="true" focusable="false">
 				<path fill="currentColor" d="M3 3.6h3.4V11l8.2-7.4h4.2l-9.2 8.4L20 20.4h-4.3l-7.2-7.2-1.1 1V20.4H3z" />
 				<path fill="currentColor" d="M17.2 1.8h5v5h-5z" />
+			</svg>
+		);
+	}
+
+	if (props.source === "minimax") {
+		// MinimaxCode（CLI）：自绘「M」字形标记（无公开品牌 SVG），沿用中性色惯例（与 kimi/zcode 一致）。
+		return (
+			<svg viewBox="0 0 24 24" className="size-3.5" aria-hidden="true" focusable="false">
+				<path fill="currentColor" d="M3 4h3.3l6.7 10.2L19.7 4H23v16h-3.4v-9.9L13.9 18h-1.8L6.4 10.1V20H3z" />
 			</svg>
 		);
 	}

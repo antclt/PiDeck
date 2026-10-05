@@ -348,6 +348,47 @@ export type KimiWorkImportReport = {
 	imported: number;
 	failed: number;
 };
+
+// ── Minimax Code Session Import Types ────────────────────────────────
+// MinimaxCode（CLI 编码助手）：会话落在 ~/.minimax/v2/sessions/
+// YYYY/MM/DD/<HH-mm-ss-sid>-session_<id>/ 目录，内含 manifest.json（sessionId/
+// createdAtMs/title 等）、messages.jsonl（anthropic 风格 role+content blocks）与
+// llm-call.json（systemPrompt 内含 working directory，作为 cwd 来源）。
+
+/** Minimax Code 会话导入状态：未导入 / 已是最新 / 源更新后可覆盖。 */
+export type MinimaxImportStatus = "new" | "current" | "outdated";
+
+export type MinimaxSessionSummary = {
+	id: string;
+	sourcePath: string;
+	targetPath: string;
+	cwd: string;
+	title: string;
+	preview: string;
+	createdAt: number;
+	updatedAt: number;
+	messageCount: number;
+	status: MinimaxImportStatus;
+	sourceSize: number;
+	importedSourceMtime?: number;
+};
+
+export type MinimaxImportResult = {
+	id: string;
+	sourcePath: string;
+	targetPath?: string;
+	title?: string;
+	success: boolean;
+	overwritten?: boolean;
+	messageCount?: number;
+	error?: string;
+};
+
+export type MinimaxImportReport = {
+	results: MinimaxImportResult[];
+	imported: number;
+	failed: number;
+};
 //
 // 场景：项目目录被移动/改名后，pi 会话仍按「旧 cwd 的 encoded 分组目录」留在
 // ~/.pi/agent/sessions 下，与新项目的路径不再匹配 → 侧栏看不到历史。

@@ -105,6 +105,7 @@ import type { WorkBuddySessionImporter } from "../sessions/WorkBuddySessionImpor
 import type { CursorSessionImporter } from "../sessions/CursorSessionImporter";
 import type { KimiSessionImporter } from "../sessions/KimiSessionImporter";
 import type { KimiWorkSessionImporter } from "../sessions/KimiWorkSessionImporter";
+import type { MinimaxSessionImporter } from "../sessions/MinimaxSessionImporter";
 import type { AppLogger } from "../logging/AppLogger";
 
 /**
@@ -321,6 +322,8 @@ export type SessionIpcDeps = {
 	kimiSessionImporter: KimiSessionImporter;
 	/** Kimi Work（桌面版）会话导入：daimon-share 位置可被用户自定义，scan/import 内部走探测链。 */
 	kimiWorkSessionImporter: KimiWorkSessionImporter;
+	/** MinimaxCode（CLI）会话导入：数据目录固定 ~/.minimax/v2/sessions，无探测链。 */
+	minimaxSessionImporter: MinimaxSessionImporter;
 	/** 外置目录会话导入（项目目录移动/改名后找回历史；只建 catalog 引用，不复制原文件）。 */
 	directorySessionImporter: DirectorySessionImporter;
 	appLogger: AppLogger;
@@ -396,6 +399,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		cursorSessionImporter,
 		kimiSessionImporter,
 		kimiWorkSessionImporter,
+		minimaxSessionImporter,
 		directorySessionImporter,
 		appLogger,
 		terminalManager,
@@ -1980,6 +1984,27 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		const customRoot = settingsStore.get().kimiWorkShareRoot;
 		const result = await kimiWorkSessionImporter.import(project.path, sourcePaths, customRoot);
 		void appLogger.info("session", "Kimi Work sessions imported", {
+			projectId,
+			sourceCount: sourcePaths.length,
+			imported: result.imported,
+		});
+		return result;
+	});
+	// ── MinimaxCode（CLI）会话导入 ─────────────────────────────────────
+	// 数据目录固定 ~/.minimax/v2/sessions（无 describe/探测链）；cwd 取自每个会话
+	// 目录 llm-call.json 的 systemPrompt（working directory 行），与项目路径匹配才列出。
+	ipcMain.handle(ipcChannels.minimaxSessionsScan, async (_event, projectId: string) => {
+		const project = projectStore.get(projectId);
+		if (!project) throw new Error(`Project not found: ${projectId}`);
+		const result = await minimaxSessionImporter.scan(project.path);
+		void appLogger.debug("session", "MinimaxCode sessions scanned", { projectId, count: result.length });
+		return result;
+	});
+	ipcMain.handle(ipcChannels.minimaxSessionsImport, async (_event, projectId: string, sourcePaths: string[]) => {
+		const project = projectStore.get(projectId);
+		if (!project) throw new Error(`Project not found: ${projectId}`);
+		const result = await minimaxSessionImporter.import(project.path, sourcePaths);
+		void appLogger.info("session", "MinimaxCode sessions imported", {
 			projectId,
 			sourceCount: sourcePaths.length,
 			imported: result.imported,

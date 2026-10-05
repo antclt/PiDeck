@@ -27,6 +27,8 @@ import type {
 	KimiWorkImportReport,
 	KimiWorkShareRootInfo,
 	KimiWorkShareRootOrigin,
+	MinimaxSessionSummary,
+	MinimaxImportReport,
 	DirectorySessionSummary,
 	DirectorySessionSourceDir,
 	DirectorySourceKind,
@@ -728,6 +730,29 @@ export function KimiImportModal(props: {
 	onImport: () => void;
 }) {
 	return <SessionImportModal copyPrefix="kimi" formatStatus={formatKimiStatus} {...props} />;
+}
+
+function formatMinimaxStatus(status: MinimaxSessionSummary["status"]) {
+	if (status === "current") return t("minimax.status.current");
+	if (status === "outdated") return t("minimax.status.outdated");
+	return t("minimax.status.new");
+}
+
+/** MinimaxCode（CLI）会话导入弹窗：数据目录固定 ~/.minimax，与其它简单源同构。 */
+export function MinimaxImportModal(props: {
+	project: Project;
+	sessions: MinimaxSessionSummary[];
+	selectedPaths: string[];
+	loading: boolean;
+	importing: boolean;
+	report: MinimaxImportReport | null;
+	onClose: () => void;
+	onRefresh: () => void;
+	onToggle: (sourcePath: string) => void;
+	onToggleAll: () => void;
+	onImport: () => void;
+}) {
+	return <SessionImportModal copyPrefix="minimax" formatStatus={formatMinimaxStatus} {...props} />;
 }
 
 function formatKimiWorkStatus(status: KimiWorkSessionSummary["status"]) {

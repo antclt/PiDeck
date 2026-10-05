@@ -94,7 +94,7 @@ export type FileSearchResult = {
 	type: "file" | "directory";
 };
 
-export type SessionSource = "pi" | "codex" | "claude" | "opencode" | "zcode" | "workbuddy" | "cursor" | "qoder" | "kimi" | "kimiwork";
+export type SessionSource = "pi" | "codex" | "claude" | "opencode" | "zcode" | "workbuddy" | "cursor" | "qoder" | "kimi" | "kimiwork" | "minimax";
 export type SessionEnvironment = "native" | "wsl";
 
 /**
