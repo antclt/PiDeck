@@ -1275,6 +1275,17 @@ function refreshTrayContextMenu(): void {
 					isQuitting = true;
 					app.quit();
 				},
+				toggleFloatingBall: (visible) => {
+					if (visible) {
+						void floatingController?.show();
+					} else {
+						floatingController?.hide();
+					}
+				},
+				exitFloatingBall: () => {
+					void floatingController?.exit();
+				},
+				isFloatingBallActive: () => floatingController?.isActive() ?? false,
 			}),
 		),
 	);
@@ -3737,8 +3748,17 @@ app
 						if (!result.accepted) return { ok: false, message: result.error };
 						return { ok: true };
 					},
-					onClose: () => {
-						// 浮窗关闭后回悬浮球（如果用户还开着悬浮球模式）。
+					onExit: () => {
+						// 关闭浮窗：退出悬浮球模式，回主窗口
+						settingsStore.update({ floatingBallEnabled: false });
+						floatingController?.hide();
+						focusMainWindow();
+					},
+					onCollapse: () => {
+						// 收起浮窗：回悬浮球（保持悬浮球模式）
+						if (settingsStore.get().floatingBallEnabled) {
+							void floatingController?.show();
+						}
 					},
 				});
 				await miniOverlayWindow.show();

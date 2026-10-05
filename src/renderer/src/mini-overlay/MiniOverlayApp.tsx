@@ -14,6 +14,7 @@ const zh = {
 	noSessions: "暂无活跃会话",
 	emptyProjects: "暂无项目，请先在主窗口添加",
 	close: "关闭",
+	collapse: "收起为悬浮球",
 };
 const en = {
 	title: "PiDeck Mini Overlay",
@@ -25,6 +26,19 @@ const en = {
 	noSessions: "No active sessions",
 	emptyProjects: "No projects yet. Add one in the main window.",
 	close: "Close",
+	collapse: "Collapse to floating ball",
+};
+
+const dragRegion = { WebkitAppRegion: "drag" } as CSSProperties;
+const noDrag = { WebkitAppRegion: "no-drag" } as CSSProperties;
+
+const cardStyle: CSSProperties = {
+	borderRadius: 16,
+	overflow: "hidden",
+	background: "var(--color-bg-app, #1a1a1e)",
+	border: "1px solid var(--border, rgba(255,255,255,0.08))",
+	boxShadow: "0 12px 40px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05)",
+	...(noDrag as object),
 };
 
 export function MiniOverlayApp() {
@@ -66,69 +80,101 @@ export function MiniOverlayApp() {
 	const projects = state?.projects ?? [];
 
 	return (
-		<div className="flex h-screen w-screen flex-col bg-background text-foreground" style={{ borderRadius: 12, overflow: "hidden", border: "1px solid var(--border)", boxShadow: "0 8px 32px rgba(0,0,0,0.24)" }}>
-			{/* 顶部：状态总览 + 关闭 */}
-			<header className="flex shrink-0 items-center justify-between border-b border-border/60 px-3 py-2" style={{} as CSSProperties}>
-				<div className="flex items-center gap-2">
-					<span className="text-xs font-medium text-muted-foreground">{copy.title}</span>
-					<span className="text-[10px] text-muted-foreground/70">
-						{copy.running(running)} · {copy.active(active)}
-					</span>
-				</div>
-				<button type="button" className="flex h-5 w-5 items-center justify-center rounded hover:bg-accent" onClick={() => void desktopApi.miniOverlay.close()} style={{} as CSSProperties} aria-label={copy.close}>
-					<X size={12} />
-				</button>
-			</header>
+		<div className="flex h-screen w-screen flex-col" style={{ background: "transparent", ...dragRegion }}>
+			<div className="flex h-full w-full flex-col" style={cardStyle}>
+				{/* 顶部：状态总览 + 关闭 */}
+				<header className="flex shrink-0 items-center justify-between border-b px-3 py-2" style={{ borderColor: "var(--border, rgba(255,255,255,0.08))", ...noDrag }}>
+					<div className="flex items-center gap-2">
+						<span className="text-xs font-medium" style={{ color: "var(--color-text-secondary, rgba(255,255,255,0.6))" }}>
+							{copy.title}
+						</span>
+						<span className="text-[10px]" style={{ color: "var(--color-text-tertiary, rgba(255,255,255,0.35))" }}>
+							{copy.running(running)} · {copy.active(active)}
+						</span>
+					</div>
+					<div className="flex items-center gap-1">
+						<button type="button" className="flex h-5 w-5 items-center justify-center rounded hover:bg-white/10" onClick={() => void desktopApi.miniOverlay.collapse()} aria-label={copy.collapse} title={copy.collapse}>
+							<ChevronDown size={12} style={{ color: "var(--color-text-secondary, rgba(255,255,255,0.6))" }} />
+						</button>
+						<button type="button" className="flex h-5 w-5 items-center justify-center rounded hover:bg-white/10" onClick={() => void desktopApi.miniOverlay.close()} aria-label={copy.close} title={copy.close}>
+							<X size={12} style={{ color: "var(--color-text-secondary, rgba(255,255,255,0.6))" }} />
+						</button>
+					</div>
+				</header>
 
-			{/* 快捷输入区 */}
-			<div className="shrink-0 border-b border-border/60 px-3 py-2.5">
-				<div className="flex items-center gap-1.5">
-					<select className="h-7 flex-1 rounded-md border border-input bg-background px-2 text-xs" value={projectId} onChange={(e) => setProjectId(e.target.value)} style={{} as CSSProperties}>
-						{projects.length === 0 ? <option value="">{copy.emptyProjects}</option> : null}
-						{projects.map((p) => (
-							<option key={p.id} value={p.id}>
-								{p.name}
-							</option>
-						))}
-					</select>
-					<button type="button" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground disabled:opacity-50" disabled={!canSend} onClick={() => void handleSend()} aria-label={copy.send} style={{} as CSSProperties}>
-						{sending ? <span className="animate-spin text-[10px]">…</span> : <Plus size={14} />}
-					</button>
+				{/* 快捷输入区 */}
+				<div className="shrink-0 border-b px-3 py-2.5" style={{ borderColor: "var(--border, rgba(255,255,255,0.08))", ...noDrag }}>
+					<div className="flex items-center gap-1.5">
+						<select
+							className="h-7 flex-1 rounded-md border px-2 text-xs"
+							style={{
+								background: "var(--color-bg-elevated, rgba(255,255,255,0.06))",
+								borderColor: "var(--border, rgba(255,255,255,0.1))",
+								color: "var(--color-text-primary, rgba(255,255,255,0.9))",
+								...noDrag,
+							}}
+							value={projectId}
+							onChange={(e) => setProjectId(e.target.value)}
+						>
+							{projects.length === 0 ? <option value="">{copy.emptyProjects}</option> : null}
+							{projects.map((p) => (
+								<option key={p.id} value={p.id}>
+									{p.name}
+								</option>
+							))}
+						</select>
+						<button type="button" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md disabled:opacity-40" style={{ background: "var(--color-accent, #4f8ef7)", color: "var(--color-accent-foreground, #fff)", ...noDrag }} disabled={!canSend} onClick={() => void handleSend()} aria-label={copy.send}>
+							{sending ? <span className="animate-spin text-[10px]">…</span> : <Plus size={14} />}
+						</button>
+					</div>
+					<textarea
+						className="mt-2 w-full resize-none rounded-md border px-2 py-1.5 text-xs"
+						style={{
+							background: "var(--color-bg-elevated, rgba(255,255,255,0.06))",
+							borderColor: "var(--border, rgba(255,255,255,0.1))",
+							color: "var(--color-text-primary, rgba(255,255,255,0.9))",
+							...noDrag,
+						}}
+						rows={3}
+						placeholder={copy.quickPromptPlaceholder}
+						value={prompt}
+						onChange={(e) => setPrompt(e.target.value)}
+						onKeyDown={(e) => {
+							if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+								e.preventDefault();
+								void handleSend();
+							}
+						}}
+					/>
+					{sendError ? (
+						<p className="mt-1 text-[10px]" style={{ color: "var(--color-error, #f87171)" }}>
+							{sendError}
+						</p>
+					) : null}
 				</div>
-				<textarea
-					className="mt-2 w-full resize-none rounded-md border border-input bg-background px-2 py-1.5 text-xs"
-					rows={3}
-					placeholder={copy.quickPromptPlaceholder}
-					value={prompt}
-					onChange={(e) => setPrompt(e.target.value)}
-					onKeyDown={(e) => {
-						if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-							e.preventDefault();
-							void handleSend();
-						}
-					}}
-					style={{} as CSSProperties}
-				/>
-				{sendError ? <p className="mt-1 text-[10px] text-destructive">{sendError}</p> : null}
-			</div>
 
-			{/* 最近会话 */}
-			<div className="flex-1 overflow-y-auto px-2 py-2">
-				<p className="mb-1.5 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{copy.recent}</p>
-				{sessions.length === 0 ? (
-					<p className="px-1 text-xs text-muted-foreground">{copy.noSessions}</p>
-				) : (
-					<ul className="space-y-0.5">
-						{sessions.map((s) => (
-							<li key={s.id}>
-								<button type="button" className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent" onClick={() => handleJump(s.id, s.projectId)} style={{} as CSSProperties}>
-									<span className="truncate">{s.title}</span>
-									<ArrowRight size={12} className="shrink-0 text-muted-foreground" />
-								</button>
-							</li>
-						))}
-					</ul>
-				)}
+				{/* 最近会话 */}
+				<div className="flex-1 overflow-y-auto px-2 py-2" style={noDrag}>
+					<p className="mb-1.5 px-1 text-[10px] font-medium uppercase tracking-wide" style={{ color: "var(--color-text-tertiary, rgba(255,255,255,0.35))" }}>
+						{copy.recent}
+					</p>
+					{sessions.length === 0 ? (
+						<p className="px-1 text-xs" style={{ color: "var(--color-text-secondary, rgba(255,255,255,0.5))" }}>
+							{copy.noSessions}
+						</p>
+					) : (
+						<ul className="space-y-0.5">
+							{sessions.map((s) => (
+								<li key={s.id}>
+									<button type="button" className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs hover:bg-white/8" onClick={() => handleJump(s.id, s.projectId)} style={{ color: "var(--color-text-primary, rgba(255,255,255,0.9))", ...noDrag }}>
+										<span className="truncate">{s.title}</span>
+										<ArrowRight size={12} className="shrink-0" style={{ color: "var(--color-text-tertiary, rgba(255,255,255,0.35))" }} />
+									</button>
+								</li>
+							))}
+						</ul>
+					)}
+				</div>
 			</div>
 		</div>
 	);

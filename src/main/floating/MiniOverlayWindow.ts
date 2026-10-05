@@ -32,8 +32,10 @@ export interface MiniOverlayWindowDeps {
 	onJumpToSession: (sessionId: string, projectId: string) => void;
 	/** 快捷输入：创建草稿会话并发送 prompt。 */
 	onQuickPrompt: (projectId: string, text: string) => Promise<{ ok: boolean; message?: string }>;
-	/** 退出浮窗（回悬浮球）。 */
-	onClose: () => void;
+	/** 退出浮窗：关闭悬浮球模式，回主窗口。 */
+	onExit?: () => void;
+	/** 收起浮窗：回悬浮球，保持悬浮球模式。 */
+	onCollapse?: () => void;
 }
 
 /**
@@ -67,10 +69,12 @@ export class MiniOverlayWindow {
 			x: workArea.x + workArea.width - MINI_OVERLAY_W - 24,
 			y: workArea.y + Math.floor((workArea.height - MINI_OVERLAY_H) / 2),
 			frame: false,
-			transparent: false,
+			transparent: true,
+			backgroundColor: "#00000000",
 			resizable: false,
 			skipTaskbar: true,
 			alwaysOnTop: true,
+			hasShadow: false,
 			show: false,
 			webPreferences: {
 				preload: preloadPath,
@@ -86,7 +90,7 @@ export class MiniOverlayWindow {
 			this.win = null;
 			this.removeAgentStateListener?.();
 			this.removeAgentStateListener = null;
-			this.deps.onClose();
+			this.deps.onExit?.();
 		});
 		this.win.once("ready-to-show", () => {
 			this.win?.show();
@@ -162,6 +166,15 @@ export class MiniOverlayWindow {
 		ipcMain.handle(ipcChannels.miniOverlayClose, (event) => {
 			if (event.sender !== win.webContents) return;
 			this.hide();
+			// 关闭浮窗后退出悬浮球模式（回主窗口）
+			this.deps.onExit?.();
+		});
+		ipcMain.removeHandler(ipcChannels.miniOverlayCollapse);
+		ipcMain.handle(ipcChannels.miniOverlayCollapse, (event) => {
+			if (event.sender !== win.webContents) return;
+			this.hide();
+			// 收起浮窗后回悬浮球（保持悬浮球模式）
+			this.deps.onCollapse?.();
 		});
 	}
 }

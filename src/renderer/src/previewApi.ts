@@ -280,6 +280,7 @@ export function createPreviewApi(): PiDesktopApi {
 			jumpToSession: async () => undefined,
 			quickPrompt: async () => ({ ok: false, message: "preview mode" }),
 			close: async () => undefined,
+			collapse: async () => undefined,
 		},
 		// 预览模式没有真实 pi 认证宿主；提供与 preload 同形状的安全空实现，
 		// 避免新增认证能力让静态预览整站无法通过类型检查或初始化。

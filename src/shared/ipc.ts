@@ -979,6 +979,7 @@ export const ipcChannels = {
 	miniOverlayJumpToSession: "mini-overlay:jump-to-session",
 	miniOverlayQuickPrompt: "mini-overlay:quick-prompt",
 	miniOverlayClose: "mini-overlay:close",
+	miniOverlayCollapse: "mini-overlay:collapse",
 	floatingBallSetEnabled: "floating-ball:set-enabled",
 	/** 渲染层 → 主进程：启用/取消资源管理器右键菜单注册 */
 	shellMenuSetEnabled: "shell-menu:set-enabled",

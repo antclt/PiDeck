@@ -241,6 +241,7 @@ const api = {
 		jumpToSession: (sessionId: string, projectId: string) => ipcRenderer.invoke(ipcChannels.miniOverlayJumpToSession, sessionId, projectId) as Promise<void>,
 		quickPrompt: (projectId: string, text: string) => ipcRenderer.invoke(ipcChannels.miniOverlayQuickPrompt, projectId, text) as Promise<{ ok: boolean; message?: string }>,
 		close: () => ipcRenderer.invoke(ipcChannels.miniOverlayClose) as Promise<void>,
+		collapse: () => ipcRenderer.invoke(ipcChannels.miniOverlayCollapse) as Promise<void>,
 	} /**
 	 * pi 供应商认证（`/login`）：pi 的登录只在它的 CLI 交互层存在，应用内登录走
 	 * 这条例外通道（见 AGENTS.md「认证例外通道」）。调用方就是登录弹框。

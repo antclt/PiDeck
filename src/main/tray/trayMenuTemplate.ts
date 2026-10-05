@@ -17,6 +17,10 @@ export interface TrayMenuCallbacks {
 	openLogsDir: () => void;
 	restart: () => void;
 	quit: () => void;
+	/** 悬浮球：显示/隐藏/退出。 */
+	toggleFloatingBall?: (visible: boolean) => void;
+	exitFloatingBall?: () => void;
+	isFloatingBallActive?: () => boolean;
 }
 
 /** 最近项目在托盘菜单里的显示上限：项目多时取排序后前 N 个（与侧栏同序：置顶/最近打开优先）。 */
@@ -58,6 +62,26 @@ export function buildTrayMenuTemplate(copy: (key: MainProcessTranslationKey, par
 			label: copy("tray.showWindow"),
 			click: () => callbacks.showWindow(),
 		},
+		// 悬浮球控制：显示/隐藏/退出
+		...(callbacks.toggleFloatingBall
+			? [
+					{ type: "separator" as const },
+					{
+						label: copy("tray.floatingBall"),
+						submenu: [
+							{
+								label: callbacks.isFloatingBallActive?.() ? copy("tray.floatingBallHide") : copy("tray.floatingBallShow"),
+								click: () => callbacks.toggleFloatingBall?.(!callbacks.isFloatingBallActive?.()),
+							},
+							{
+								label: copy("tray.floatingBallExit"),
+								click: () => callbacks.exitFloatingBall?.(),
+								enabled: callbacks.isFloatingBallActive?.() ?? false,
+							},
+						],
+					},
+				]
+			: []),
 		{ type: "separator" },
 		...projectItems,
 		{ type: "separator" },
