@@ -133,6 +133,7 @@ export class FloatingController {
 	async show(): Promise<void> {
 		if (this.destroyed || this.win) return;
 		const settings = this.deps.settingsStore.get();
+		getAppLogger()?.info("floating-ball", "show() called", { enabled: settings.floatingBallEnabled, destroyed: this.destroyed, hasWin: !!this.win });
 		if (!settings.floatingBallEnabled) return;
 		const pos = (await loadPos()) ?? this.defaultPos();
 		const sourcePreloadPath = join(__dirname, "../preload/index.js");
@@ -165,12 +166,16 @@ export class FloatingController {
 			this.state.visible = false;
 		});
 		this.win.once("ready-to-show", () => {
+			getAppLogger()?.info("floating-ball", "ready-to-show fired");
 			this.win?.show();
 			this.state.visible = true;
 			this.pushState();
 		});
 		this.win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
 			getAppLogger()?.error("floating-ball", "Floater load failed", { errorCode, errorDescription, url: validatedURL });
+		});
+		this.win.webContents.on("did-finish-load", () => {
+			getAppLogger()?.info("floating-ball", "did-finish-load");
 		});
 		if (is.dev && process.env.ELECTRON_RENDERER_URL) {
 			await this.win.loadURL(`${process.env.ELECTRON_RENDERER_URL}/floater.html`);
