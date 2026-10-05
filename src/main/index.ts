@@ -646,7 +646,11 @@ function emitSessionRuntimeEvent(agentId: string, sourceChannel: string, payload
 		const tab = payload as Partial<AgentTab>;
 		if (typeof tab.sessionPath === "string" && tab.sessionPath) {
 			const entry = sessionCatalog.get(runtimeBinding.sessionId);
-			if (canAttachRuntimeMetadata(entry, tab) && (entry?.filePath !== tab.sessionPath || entry.piSessionId !== tab.sessionId)) {
+			// #314：pi 上报的路径与 catalog 持久化路径可能只是形态差异（分隔符/大小写、
+			// resolveFilePath 归一先后不同）。裸字符串比较永真时每个 runtime 事件都会
+			// 触发一次 attach；canonical 归一后再比，无实质变化不再入队。
+			const sessionPathUnchanged = entry?.filePath !== undefined && canonicalizeSessionPath(entry.filePath, entry.environment) === canonicalizeSessionPath(tab.sessionPath, entry.environment);
+			if (canAttachRuntimeMetadata(entry, tab) && (!sessionPathUnchanged || entry.piSessionId !== tab.sessionId)) {
 				// 仅 pi JSONL 走文件配对。DSH 的 sessionPath 是 zstd，canAttach 已拒绝；
 				// host id 由 Coordinator activate/dispatch 回写 dshSessionId。
 				void sessionCatalog
