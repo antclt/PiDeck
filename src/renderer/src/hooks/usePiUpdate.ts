@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useSetAtom } from "jotai";
 import { t } from "../i18n";
 import { settingsOpenAtom } from "../atoms";
@@ -49,6 +49,9 @@ export function usePiUpdate(options: UsePiUpdateOptions) {
 		}
 	}, [settings.piInstall, piStatus]);
 
+	// 缓存复核的会话级闸门（effect 本体在 persistPiInstall 声明之后）。
+	const piStatusRevalidatedRef = useRef(false);
+
 	// ---- Pi 更新相关 state ----
 	const [piUpdating, setPiUpdating] = useState(false);
 	const [piUpdateChecking, setPiUpdateChecking] = useState(false);
@@ -88,6 +91,30 @@ export function usePiUpdate(options: UsePiUpdateOptions) {
 		},
 		[api],
 	);
+
+	// 缓存恢复后按会话静默复核一次：pi 可能已被外部升级（npm/self-update），
+	// 持久化的版本会永久过期——startup 检测只在首次引导跑（piEnvironmentChecked 之后
+	// 没人纠正缓存，实测 dev 实例停在 0.84.4 而真实已是 1.0.2）。
+	// hook 挂在 App 上，此 effect 随应用启动触发，每渲染会话至多一次 spawn，
+	// 不违反「打开设置页不自动检测 pi」的约束（tests/piUpdateStartupNotice.test.mjs）。
+	useEffect(() => {
+		if (piStatusRevalidatedRef.current || !settings.piInstall || !piStatus?.installed) return;
+		piStatusRevalidatedRef.current = true;
+		void (async () => {
+			try {
+				const next = await api.pi.check(false);
+				// 只在确认仍安装时纠正展示与缓存：探测失败可能是暂时性的（杀软锁文件等），
+				// 不用「疑似未安装」静默盖掉上次成功的结果。
+				if (!next.installed) return;
+				setPiStatus(next);
+				if (next.command !== settings.piInstall?.command || next.version !== settings.piInstall?.version) {
+					setSettings(await persistPiInstall(next));
+				}
+			} catch {
+				// 静默失败：缓存照常显示，真实错误由下次手动检测或会话启动暴露。
+			}
+		})();
+	}, [settings.piInstall, piStatus, api, persistPiInstall, setSettings]);
 
 	/**
 	 * 拉取全部 pi 安装。
