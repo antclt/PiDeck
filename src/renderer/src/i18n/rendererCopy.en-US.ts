@@ -1939,6 +1939,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.mcp.toolExposure.add": "Add",
 	"config.mcp.toolExposure.empty": "No overrides; every tool follows the exposure above.",
 	"config.mcp.status.title": "Connection status",
+	"config.mcp.serverCount": "{count} servers",
 	"config.mcp.status.check": "Check connection",
 	"config.mcp.status.checking": "Checking…",
 	"config.mcp.status.connected": "connected · {count} tools",

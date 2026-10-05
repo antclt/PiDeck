@@ -1934,6 +1934,7 @@ export const zhCN = {
 	"config.mcp.toolExposure.add": "添加",
 	"config.mcp.toolExposure.empty": "暂无覆盖，全部工具跟随上方 exposure。",
 	"config.mcp.status.title": "连接状态",
+	"config.mcp.serverCount": "{count} 个服务器",
 	"config.mcp.status.check": "检测连接",
 	"config.mcp.status.checking": "检测中…",
 	"config.mcp.status.connected": "已连接 · {count} 个工具",

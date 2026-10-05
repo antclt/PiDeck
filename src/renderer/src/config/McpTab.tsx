@@ -7,7 +7,7 @@
  */
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { Plus, Trash2, PlugZap, RefreshCw, Radio, LogIn, LogOut, TriangleAlert } from "lucide-react";
+import { Plus, Trash2, PlugZap, RefreshCw, TriangleAlert } from "lucide-react";
 import { t } from "../i18n";
 import { showNotice } from "../utils/notice";
 import { Button } from "../components/ui-shadcn/button";
@@ -17,7 +17,7 @@ import { Label } from "../components/ui-shadcn/label";
 import { Textarea } from "../components/ui-shadcn/textarea";
 import { ConfigSelect, openDocsInSystemBrowser, SecretInput } from "./ConfigShared";
 import { ConfirmDialog } from "../components/ui-shadcn/ConfirmDialog";
-import { detectThirdPartyMcpExtensions, hasLegacyDisabledField, inferMcpTransport, isMcpServerDisabled, McpServerListPane, McpStatusRow, usesMcpOAuth, usesProviderAuth, type ThirdPartyMcpExtension } from "./McpResourceViews";
+import { detectThirdPartyMcpExtensions, hasLegacyDisabledField, inferMcpTransport, isMcpServerDisabled, McpServerListPane, usesMcpOAuth, usesProviderAuth, type ThirdPartyMcpExtension } from "./McpResourceViews";
 import { argsToText, buildMcpDisplayServers, isMcpServerName, recordToText, textToArgs, textToRecord } from "./mcpForm";
 import { resolveExposureAliases } from "../../../shared/mcpExposure";
 import { isProjectUntrustedError } from "./projectResourceErrors";
@@ -237,6 +237,8 @@ export const McpTab = forwardRef<
 	const displayServers = useMemo(() => (snapshot ? buildMcpDisplayServers(snapshot, writable) : []), [snapshot, writable]);
 	/** 使用供应商登录（auth.provider）的 server：不使用 MCP OAuth，登录/登出按钮不适用。 */
 	const providerAuthServerNames = useMemo(() => new Set(displayServers.filter((item) => usesProviderAuth(item.definition)).map((item) => item.name)), [displayServers]);
+	/** 连接状态按名索引（列表行内直接显示状态/工具数/登录入口）。 */
+	const statusByName = useMemo(() => Object.fromEntries((status?.servers ?? []).map((server) => [server.name, server])), [status]);
 
 	// 切换 server 或重新加载后清掉 toolExposure 草稿行，避免把上一台的编辑串到下一台。
 	useEffect(() => {
@@ -664,60 +666,31 @@ export const McpTab = forwardRef<
 					</span>
 				))}
 
-				{/* 真实连接检测（pi mcp list --json）：配置正确 ≠ 能连上，这里给出 state/tools/errors。 */}
-				<div className="rounded-md border border-border-subtle bg-bg-panel p-2.5">
-					<div className="flex items-center justify-between gap-2">
-						<div className="flex items-center gap-1.5 text-control font-medium">
-							<Radio size={14} />
-							{t("config.mcp.status.title")}
-						</div>
-						<Button variant="outline" size="sm" onClick={() => void runStatusCheck()} disabled={statusLoading || saving} title={statusError === t("config.mcp.draftBlocked") ? t("config.mcp.draftBlocked") : undefined}>
-							{statusLoading ? t("config.mcp.status.checking") : t("config.mcp.status.check")}
-						</Button>
-					</div>
-					{statusError ? <p className="mt-2 text-micro text-danger">{statusError}</p> : null}
-					{status ? (
-						<div className="mt-2 grid gap-1.5">
-							{status.servers.map((server) => (
-								<McpStatusRow
-									key={server.name}
-									server={server}
-									providerAuth={providerAuthServerNames.has(server.name)}
-									hasCredential={(snapshot?.oauthCredentialNames ?? []).includes(server.name)}
-									loggingIn={loggingInServer === server.name}
-									loginUrl={loginUrl?.server === server.name ? loginUrl : null}
-									onLogin={(name) => void runLogin(name)}
-									onLogout={(name) => setLogoutConfirm(name)}
-									onOpenAuthUrl={(url) => void window.piDesktop.app.openExternal(url, true)}
-								/>
-							))}
-							{status.servers.length === 0 ? <p className="text-micro text-muted-foreground">{t("config.mcp.status.empty")}</p> : null}
-							{status.errors.map((message, index) => (
-								<p key={index} className="rounded-sm border border-danger/20 px-2 py-1 text-micro text-danger">
-									{message}
-								</p>
-							))}
-							{status.note ? <p className="text-micro text-muted-foreground">{status.note}</p> : null}
-						</div>
-					) : null}
-					{/* 登录/登出/检测结果始终显示：此前只在状态列表缺少该 server 时渲染，常见失败被吞掉。 */}
-					{loginResult ? (
-						<p className={`mt-2 break-all text-micro ${loginResult.ok ? "text-[var(--color-success)]" : "text-danger"}`}>
-							{loginResult.server}: {loginResult.output || (loginResult.ok ? t("config.mcp.oauth.done") : t("config.mcp.oauth.failed"))}
-						</p>
-					) : null}
-				</div>
-
 				<div className="grid min-h-0 flex-1 grid-cols-[minmax(220px,280px)_minmax(0,1fr)] gap-3 max-[820px]:grid-cols-1">
-					<McpServerListPane
-						servers={displayServers}
-						selected={selected}
-						creating={Boolean(creating)}
-						onSelect={(name) => {
-							setSelected(name);
-							setProbe(null);
-						}}
-					/>
+					<div className="flex min-h-0 flex-col gap-1.5">
+						<McpServerListPane
+							servers={displayServers}
+							selected={selected}
+							creating={Boolean(creating)}
+							onSelect={(name) => {
+								setSelected(name);
+								setProbe(null);
+							}}
+							statusByName={statusByName}
+							credentialNames={new Set(snapshot?.oauthCredentialNames ?? [])}
+							providerAuthNames={providerAuthServerNames}
+							loggingInServer={loggingInServer}
+							onLogin={(name) => void runLogin(name)}
+							onLogout={(name) => setLogoutConfirm(name)}
+							onRefreshStatus={() => void runStatusCheck()}
+							statusLoading={statusLoading}
+						/>
+						{loginResult ? (
+							<p className={`mt-2 break-all text-micro ${loginResult.ok ? "text-[var(--color-success)]" : "text-danger"}`}>
+								{loginResult.server}: {loginResult.output || (loginResult.ok ? t("config.mcp.oauth.done") : t("config.mcp.oauth.failed"))}
+							</p>
+						) : null}
+					</div>
 
 					<div className="flex min-h-0 flex-col gap-3 overflow-auto rounded-md border border-border-subtle bg-bg-panel p-3">
 						{!selected && !creating ? (
