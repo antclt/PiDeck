@@ -3741,11 +3741,11 @@ app
 			},
 			onExpandCompact: async () => {
 				floatingController?.hide();
+				// 小任务模式：主窗口变 compact 浮窗（不显示主窗口，直接 enterCompact）
 				if (mainWindow && !mainWindow.isDestroyed()) {
-					mainWindow.show();
-					mainWindow.focus();
-					void quickTaskChrome.controller.open(app.getPath("desktop"));
+					mainWindow.hide();
 				}
+				await quickTaskChrome.controller.open(app.getPath("desktop"));
 			},
 			onShowMainWindow: () => {
 				if (mainWindow && !mainWindow.isDestroyed()) {
