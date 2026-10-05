@@ -215,8 +215,9 @@ export class FloatingController {
 		this.pushState();
 	}
 
-	/** 设置页 toggle：enabled 变化时 show/hide 悬浮球。 */
+	/** 设置页 toggle：enabled 变化时 show/hide 悬浮球，并立即保存设置。 */
 	async setEnabled(enabled: boolean): Promise<void> {
+		await this.deps.settingsStore.update({ floatingBallEnabled: enabled });
 		if (enabled) {
 			await this.show();
 		} else {

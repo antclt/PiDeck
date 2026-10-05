@@ -51,7 +51,7 @@ import type { DataEnvMode } from "../shared/types/dataEnv";
 // 使用 ?asset 后缀导入图标，electron-vite 会在构建时将其复制到输出目录并提供正确的运行时路径
 // 这解决了打包后 build/ 目录不在 asar 中导致托盘图标丢失的问题
 import iconPath from "../../build/icon.png?asset";
-import { applyWindowLogoStyle } from "./appWindowLogo";
+import { applyTrayLogoStyle, applyWindowLogoStyle, resolveLogoImage } from "./appWindowLogo";
 
 // 构建标记：npm run dist:*:dev 打包时由 vite define 注入 true（构建期替换，非运行时环境变量）。
 declare const __PIDECK_DEV_BUILD__: boolean;
@@ -1420,8 +1420,10 @@ function handleVersionFocusRequest(payload?: FocusPayload) {
 focusExistingWindow = handleVersionFocusRequest;
 
 function setupTray() {
-	// iconPath 由 electron-vite 的 ?asset 后缀自动解析，打包后也能正确定位
-	const icon = nativeImage.createFromPath(iconPath);
+	// 托盘图标跟随设置里的「Logo 风格」；resolveLogoImage 按风格选 build/icon.png 或 icon-pi-tui.png
+	// （均由 electron-vite 的 ?asset 后缀解析，打包后也能正确定位）。
+	// 资源缺失时降级回 classic iconPath：托盘必须建得出来——closeToTray 开启时它是唯一的唤回入口。
+	const icon = resolveLogoImage(settingsStore.get().logoStyle)?.image ?? nativeImage.createFromPath(iconPath);
 
 	/** 创建托盘实例；首次创建与自愈重建共用同一条路径，避免两处行为漂移。 */
 	const createTrayInstance = (): Tray => {
@@ -3051,6 +3053,8 @@ function registerIpc() {
 		listDshMonitorSessions: () => dshAgentManager.list().map((tab) => ({ title: tab.title })),
 		stopDshHostFromMonitor,
 		getMainWindow: () => mainWindow,
+		// Logo 风格切换要同时刷托盘；Tray 实例归本文件持有，按 getter 注入避免 systemIpc 直接引用。
+		getTray: () => tray,
 		mainCopy: mainCopy as (key: string, params?: Record<string, string | number>) => string,
 		// 适配层：checkForAppUpdate 直接触发 UpdateService 检查（结果经快照推送）；
 		// download/install 同样转发给 UpdateService（electron-updater 驱动）。
@@ -3767,6 +3771,10 @@ app
 		quitCleanup.register("floating-ball", () => floatingController?.destroy());
 		quitCleanup.register("mini-overlay", () => miniOverlayWindow?.destroy());
 		registerFloatingIpc(floatingController);
+		// 启动时如果悬浮球已开启，自动显示（用户上次开着悬浮球退出了应用）
+		if (settingsStore.get().floatingBallEnabled) {
+			void floatingController.show();
+		}
 
 		// RPC 日志是合并落盘的（250ms / 256 行刷一批），退出前把缓冲刷干净。
 		// 必须排在 pi-agents 之后：runAll 顺序执行，先停进程（最后几条日志在这里产生）再刷盘。
