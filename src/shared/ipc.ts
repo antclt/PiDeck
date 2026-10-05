@@ -673,6 +673,12 @@ export const ipcChannels = {
 	configTokendanceAuthCancel: "config:tokendance-auth-cancel",
 	/** 提交一次性授权 code 交换 TokenDance API Key（成功返回完整 key） */
 	configTokendanceAuthExchange: "config:tokendance-auth-exchange",
+	/** 创建 TokenDance 充值会话（整数元；返回聚合码内容/支付宝深链/status_url） */
+	configTokendanceTopUpCreate: "config:tokendance-topup-create",
+	/** 查询充值会话状态（只接受服务端下发且通过白名单校验的 status_url） */
+	configTokendanceTopUpStatus: "config:tokendance-topup-status",
+	/** 由用户点击浏览器支付宝 App 深链（仅允许 alipays://；不得自动跳转） */
+	configTokendanceTopUpOpenAlipay: "config:tokendance-topup-open-alipay",
 	/** 测试 provider 连接（隔离探针）：临时 agent 目录 + PI_CODING_AGENT_DIR 跑真实 pi，测当前表单值且不落盘正式配置 */
 	configTestProvider: "config:test-provider",
 	/** 查询 provider 用量/余额（主进程按 provider 名路由：门控 → 端点解析 → 模板探测） */

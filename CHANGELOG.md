@@ -1,3 +1,8 @@
+## v0.7.9 (Unreleased)
+
+### 🚀 New Features
+- **TokenDance top-up (agent payment)** — The TokenDance card on the configuration page gains a "top up" entry: enter an integer amount (1-100000 CNY) to get a payment QR code, pay with WeChat or Alipay, and PiDeck confirms the status every 3 seconds - only a server-confirmed `paid` reports the credit and refreshes the balance. On mobile it shows a single "Pay with Alipay" button that opens the app only when you click it (older sessions without a deep link fall back to QR scanning). Requests go straight to TokenDance's official payment API carrying only your own API key, so the credit lands in the TokenDance account that owns that key: the dialog shows the target key's last four characters so you can verify it, and if the provider endpoint has been pointed at a third-party relay the top-up is refused outright instead of crediting the relay's account. Expired, failed and refunded sessions each explain the outcome so you can create a new one.
+
 ## v0.7.8 - 2026-10-03
 
 ### 🚀 New Features

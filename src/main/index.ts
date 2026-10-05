@@ -298,6 +298,9 @@ import { ConfigBackupManager } from "./config/ConfigBackupManager";
 import { TokendanceCatalogStore } from "./config/tokendanceCatalog";
 import { installTokendanceProvider } from "./config/tokendanceInstaller";
 import { TokendanceAuthStore } from "./config/tokendanceAuth";
+import { TokendancePaymentStore } from "./config/tokendancePayment";
+import { usageProbeRequest } from "./config/usageProbeTransport";
+import { TOKENDANCE_PROVIDER } from "../shared/tokendance";
 import { TerminalSessionManager } from "./terminal/TerminalSessionManager";
 import { startTrayRegistrationVerify, type TrayRegistrationVerify } from "./tray/trayRegistrationVerify";
 import { TelemetryService } from "./telemetry/TelemetryService";
@@ -2961,6 +2964,12 @@ function registerIpc() {
 		tokendanceCatalog: tokendanceCatalogStore,
 		// 内置 TokenDance OAuth 授权（PKCE S256 headless；verifier 内存持有，重启失效）
 		tokendanceAuth: new TokendanceAuthStore(),
+		// 内置 TokenDance 充值：与模型调用同一个 API Key（从 models.json 解析，只在本进程使用），
+		// 创建/查询都走既有用量探针传输层（Electron net，服从系统代理与超时/字节上界）。
+		tokendancePayment: new TokendancePaymentStore({
+			resolveEndpoint: () => configManager.resolveProviderEndpoint(TOKENDANCE_PROVIDER),
+			request: usageProbeRequest,
+		}),
 		// 一键安装：pi models.json + DSH llm-pi-ai 双落盘（复用迁移服务的写盘策略：
 		// host 就绪走官方 settings API，否则直写 settings.yaml/.credentials.yaml）
 		tokendanceInstall: (apiKey) =>

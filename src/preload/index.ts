@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { ipcChannels } from "../shared/ipc";
-import type { TokendanceAuthMode } from "../shared/tokendance";
+import type { TokendanceAuthMode, TokendancePaymentSessionResult } from "../shared/tokendance";
 import type { AnnouncementState } from "../shared/types/announcement";
 import type { RpcLogBatch, RpcLogEntry } from "../shared/types/rpcLog";
 import type { ModelTraceRecord } from "../shared/types/bridge";
@@ -1187,6 +1187,15 @@ const api = {
 		tokendanceAuthCancel: (flowId: string) => ipcRenderer.invoke(ipcChannels.configTokendanceAuthCancel, { flowId }) as Promise<{ ok: boolean; error?: string }>,
 		/** 用一次性授权 code 交换 TokenDance API Key；成功后 key 只在本次响应出现，须立即写入配置。 */
 		tokendanceAuthExchange: (flowId: string, code: string) => ipcRenderer.invoke(ipcChannels.configTokendanceAuthExchange, { flowId, code }) as Promise<{ ok: true; key: string } | { ok: false; error: string }>,
+		/**
+		 * 创建 TokenDance 充值会话（amount 为整数元，1–100000）。
+		 * 成功回 paymentUrl（PC 渲染二维码）/ alipayUrl（移动端深链，可能缺失）/ statusUrl。
+		 */
+		tokendanceTopUpCreate: (amount: number) => ipcRenderer.invoke(ipcChannels.configTokendanceTopUpCreate, { amount }) as Promise<TokendancePaymentSessionResult>,
+		/** 查询充值会话状态（只接受主进程校验过的 status_url；3 秒轮询，expired_at 后停）。 */
+		tokendanceTopUpStatus: (statusUrl: string) => ipcRenderer.invoke(ipcChannels.configTokendanceTopUpStatus, { statusUrl }) as Promise<TokendancePaymentSessionResult>,
+		/** 在用户点击后唤起支付宝 App（仅 alipays:// 深链；移动端链路，PC 扫码不需要）。 */
+		tokendanceTopUpOpenAlipay: (url: string) => ipcRenderer.invoke(ipcChannels.configTokendanceTopUpOpenAlipay, { url }) as Promise<{ ok: boolean; error?: string }>,
 		/** 一键安装 TokenDance：供应商信息 + 目录模型写入 pi models.json 与 DSH llm-pi-ai；apiKey 可选（OAuth 后已持有）。 */
 		installTokendance: (apiKey?: string) =>
 			ipcRenderer.invoke(ipcChannels.configInstallTokendance, { apiKey }) as Promise<{

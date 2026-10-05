@@ -51,6 +51,7 @@ import { fetchModelList, getCachedModelList, invalidateModelListCache, modelsFro
 import { TokendanceCatalogStore } from "../config/tokendanceCatalog";
 import type { TokendanceInstallResult } from "../config/tokendanceInstaller";
 import type { TokendanceAuthMode, TokendanceAuthStore } from "../config/tokendanceAuth";
+import type { TokendancePaymentStore } from "../config/tokendancePayment";
 import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
 
 import { probePiModel } from "../pi/PiModelProber";
@@ -193,6 +194,8 @@ export type SystemIpcDeps = {
 	tokendanceCatalog?: TokendanceCatalogStore;
 	/** 内置 TokenDance OAuth 授权流程（PKCE verifier 内存持有）；未装配 = 授权入口不可用。 */
 	tokendanceAuth?: TokendanceAuthStore;
+	/** 内置 TokenDance 充值会话（创建 + 状态查询，Key 不出主进程）；未装配 = 充值入口不可用。 */
+	tokendancePayment?: TokendancePaymentStore;
 	/** TokenDance 一键安装（写入 pi models.json + DSH llm-pi-ai）；未装配 = 配置入口不可用。 */
 	tokendanceInstall?: (apiKey?: string) => Promise<TokendanceInstallResult>;
 	/** 环境体检编排器（问题反馈页一键排障）。 */
@@ -419,6 +422,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		modelCapabilityCache,
 		tokendanceCatalog,
 		tokendanceAuth,
+		tokendancePayment,
 		tokendanceInstall,
 		diagnosticsMonitor,
 		environmentDoctor,
@@ -2111,6 +2115,50 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 				error: error instanceof Error ? error.message : String(error),
 			});
 			return { ok: false, modelCount: 0, piSaved: false, dshSaved: false, error: "TokenDance install failed" };
+		}
+	});
+	ipcMain.handle(ipcChannels.configTokendanceTopUpCreate, async (_event, payload: unknown) => {
+		// 用赋值与开支付接口同一个 Key（该 Key 所属账户）；未装配 = 主进程无充值能力（预览/测试壳）。
+		if (!tokendancePayment) return { ok: false, code: "not-configured" } as const;
+		// 边界校验：amount 必须是整数元（渲染层入参不可信）；范围判定与渲染层提示共用同一份常量。
+		const amount = payload && typeof payload === "object" ? (payload as { amount?: unknown }).amount : undefined;
+		const result = await tokendancePayment.createSession(amount);
+		if (result.ok) {
+			// 只记金额与到期时间，不记会话 ID / payment_url（含渠道参数，无诊断价值）。
+			void appLogger.info("config", "TokenDance top-up session created", { amount: result.session.amount, expiredAt: result.session.expiredAt });
+		} else {
+			void appLogger.warn("config", "TokenDance top-up session failed", { code: result.code, detail: result.detail });
+		}
+		return result;
+	});
+	ipcMain.handle(ipcChannels.configTokendanceTopUpStatus, async (_event, payload: unknown) => {
+		if (!tokendancePayment) return { ok: false, code: "not-configured" } as const;
+		// 边界校验：statusUrl 必须是非空字符串；同源 + 路径前缀白名单在 store 内判定（不信任渲染层）。
+		const statusUrl = payload && typeof payload === "object" ? (payload as { statusUrl?: unknown }).statusUrl : undefined;
+		if (typeof statusUrl !== "string" || !statusUrl) {
+			return { ok: false, code: "bad-status-url" } as const;
+		}
+		const result = await tokendancePayment.fetchSession(statusUrl);
+		// 轮询是常态（每 3s 一次），失败只在主进程记 warn，不刷 info 日志。
+		if (!result.ok) void appLogger.warn("config", "TokenDance top-up status failed", { code: result.code, detail: result.detail });
+		return result;
+	});
+	ipcMain.handle(ipcChannels.configTokendanceTopUpOpenAlipay, async (_event, payload: unknown) => {
+		// 浏览器支付宝深链：只允许 alipays://（渲染层入参不可信），否则 shell.openExternal
+		// 会变成任意协议启动器；必须在用户点击后调用，不得由渲染层自动触发。
+		const url = payload && typeof payload === "object" ? (payload as { url?: unknown }).url : undefined;
+		if (typeof url !== "string" || url.length > 4096 || !/^alipays:\/\/\S+$/i.test(url)) {
+			return { ok: false, error: "Invalid alipay deep link" } as const;
+		}
+		try {
+			await shell.openExternal(url);
+			return { ok: true } as const;
+		} catch (error) {
+			// 未安装支付宝/浏览器拦截：返回失败让渲染层提示改用扫码，不抛异常。
+			void appLogger.warn("config", "TokenDance alipay deep link failed", {
+				error: error instanceof Error ? error.message : String(error),
+			});
+			return { ok: false, error: "TokenDance alipay deep link failed" } as const;
 		}
 	});
 	ipcMain.handle(ipcChannels.configTestProvider, async (_event, payload: unknown) => {
