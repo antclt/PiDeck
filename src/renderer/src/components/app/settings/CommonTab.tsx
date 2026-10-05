@@ -374,7 +374,17 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 
 			{/* 悬浮球：主窗口可隐藏为屏幕角落的 64px 常驻小圆点，点开展开小任务浮窗/工作台 */}
 			<SettingsSection title={t("settings.floatingBallSection")} description={t("settings.floatingBallSectionDesc")}>
-				<SettingSwitchRow anchor="common-floating-ball-enabled" title={t("settings.floatingBallEnabled")} description={t("settings.floatingBallEnabledDesc")} checked={draft.floatingBallEnabled ?? false} dirty={isDirty("floatingBallEnabled")} onChange={(checked) => updateDraft({ floatingBallEnabled: checked })} />
+				<SettingSwitchRow
+					anchor="common-floating-ball-enabled"
+					title={t("settings.floatingBallEnabled")}
+					description={t("settings.floatingBallEnabledDesc")}
+					checked={draft.floatingBallEnabled ?? false}
+					dirty={isDirty("floatingBallEnabled")}
+					onChange={(checked) => {
+						updateDraft({ floatingBallEnabled: checked });
+						void desktopApi.floatingBall.setEnabled(checked);
+					}}
+				/>
 				<SettingSwitchRow
 					anchor="common-floating-ball-always-on-top"
 					title={t("settings.floatingBallAlwaysOnTop")}

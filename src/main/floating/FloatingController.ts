@@ -169,6 +169,9 @@ export class FloatingController {
 			this.state.visible = true;
 			this.pushState();
 		});
+		this.win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+			getAppLogger()?.error("floating-ball", "Floater load failed", { errorCode, errorDescription, url: validatedURL });
+		});
 		if (is.dev && process.env.ELECTRON_RENDERER_URL) {
 			await this.win.loadURL(`${process.env.ELECTRON_RENDERER_URL}/floater.html`);
 		} else {
@@ -204,6 +207,22 @@ export class FloatingController {
 		if (this.win && !this.win.isDestroyed()) {
 			this.win.setAlwaysOnTop(settings.floatingBallAlwaysOnTop, "screen-saver");
 		}
+		this.pushState();
+	}
+
+	/** 设置页 toggle：enabled 变化时 show/hide 悬浮球。 */
+	async setEnabled(enabled: boolean): Promise<void> {
+		if (enabled) {
+			await this.show();
+		} else {
+			this.hide();
+		}
+	}
+
+	/** 设置页切换展开目标。 */
+	setExpandTarget(target: "mini" | "compact"): void {
+		this.state.expandTarget = target;
+		void this.deps.settingsStore.update({ floatingBallExpandTarget: target });
 		this.pushState();
 	}
 
