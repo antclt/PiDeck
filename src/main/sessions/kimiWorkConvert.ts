@@ -3,14 +3,7 @@ import type { SessionImportCopy } from "./SessionImportCopy";
 import { importedContentHasToolCall, importedUnknownBlockAsText, normalizeImportedStopReason } from "./importNormalize";
 import { normalizeImportedToolArguments } from "./importToolArguments";
 import { asArray, readNumber, readRecord, readString, type KimiRecord } from "./kimiSessionSource";
-import {
-	cleanKimiTitle,
-	convertKimiAssistantContent,
-	extractKimiMessage,
-	joinKimiTextBlocks,
-	kimiUsageToPi,
-	type NormalizedKimiMessage,
-} from "./kimiSessionConvert";
+import { cleanKimiTitle, convertKimiAssistantContent, extractKimiMessage, joinKimiTextBlocks, kimiUsageToPi, type NormalizedKimiMessage } from "./kimiSessionConvert";
 
 /**
  * Kimi Work（kimi-desktop 桌面版）wire.jsonl → pi 原生会话 JSONL 转换。

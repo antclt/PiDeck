@@ -16,7 +16,7 @@ import { createRequire } from "node:module";
  */
 
 /** koffi 默认导出对象的类型（纯类型查询，编译后彻底擦除，不产生运行时 import）。 */
-export type Koffi = (typeof import("koffi"))["default"];
+export type Koffi = typeof import("koffi")["default"];
 
 /** 同步加载 koffi；原生模块缺失/加载失败会把底层错误原样抛出，由调用方降级。 */
 export function requireKoffi(): Koffi {

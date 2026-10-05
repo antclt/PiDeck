@@ -63,11 +63,7 @@ export function PiChangelogDialog(props: {
 			>
 				<DialogHeader>
 					<DialogTitle>{t("piChangelog.title")}</DialogTitle>
-					<DialogDescription>
-						{state.status === "ready"
-							? t("piChangelog.subtitleVersions", { current: props.currentVersion ?? "?", latest: props.latestVersion, count: state.payload.versionCount })
-							: t("piChangelog.subtitle", { current: props.currentVersion ?? "?", latest: props.latestVersion })}
-					</DialogDescription>
+					<DialogDescription>{state.status === "ready" ? t("piChangelog.subtitleVersions", { current: props.currentVersion ?? "?", latest: props.latestVersion, count: state.payload.versionCount }) : t("piChangelog.subtitle", { current: props.currentVersion ?? "?", latest: props.latestVersion })}</DialogDescription>
 				</DialogHeader>
 
 				{state.status === "loading" && <p className="py-8 text-center text-caption text-muted-foreground">{t("changelog.loading")}</p>}

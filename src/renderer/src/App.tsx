@@ -471,6 +471,8 @@ export function App() {
 		setKimiImportProject,
 		kimiWorkImportProject,
 		setKimiWorkImportProject,
+		minimaxImportProject,
+		setMinimaxImportProject,
 		codexImportController,
 		claudeImportController,
 		qoderImportController,
@@ -480,6 +482,7 @@ export function App() {
 		cursorImportController,
 		kimiImportController,
 		kimiWorkImportController,
+		minimaxImportController,
 		openCodexImport,
 		openClaudeImport,
 		openQoderImport,
@@ -489,6 +492,7 @@ export function App() {
 		openCursorImport,
 		openKimiImport,
 		openKimiWorkImport,
+		openMinimaxImport,
 	} = useImportFlow({
 		setProjectMenu: () => undefined,
 		refreshProjectSessions,
@@ -512,6 +516,8 @@ export function App() {
 		describeKimiWorkShareRoot: api.kimiWorkSessions.describe,
 		scanKimiWorkSessions: api.kimiWorkSessions.scan,
 		importKimiWorkSessionsApi: api.kimiWorkSessions.import,
+		scanMinimaxSessions: api.minimaxSessions.scan,
+		importMinimaxSessionsApi: api.minimaxSessions.import,
 		getSettings: api.settings.get,
 		updateSettings: api.settings.update,
 		t,
@@ -1875,6 +1881,7 @@ export function App() {
 				if (source === "cursor") return openCursorImport(project);
 				if (source === "kimi") return openKimiImport(project);
 				if (source === "kimiwork") return openKimiWorkImport(project);
+				if (source === "minimax") return openMinimaxImport(project);
 				return openOpenCodeImport(project);
 			},
 			importDirectorySessions: (project) => openDirectoryImport(project),
@@ -3101,7 +3108,8 @@ export function App() {
 					{workbuddyImportProject && <ImportOverlayHost kind="workbuddy" project={workbuddyImportProject} controller={workbuddyImportController} onClose={() => setWorkbuddyImportProject(null)} />}
 					{cursorImportProject && <ImportOverlayHost kind="cursor" project={cursorImportProject} controller={cursorImportController} onClose={() => setCursorImportProject(null)} />}
 					{kimiImportProject && <ImportOverlayHost kind="kimi" project={kimiImportProject} controller={kimiImportController} onClose={() => setKimiImportProject(null)} />}
-				{kimiWorkImportProject && <ImportOverlayHost kind="kimiwork" project={kimiWorkImportProject} controller={kimiWorkImportController} onClose={() => setKimiWorkImportProject(null)} />}
+					{kimiWorkImportProject && <ImportOverlayHost kind="kimiwork" project={kimiWorkImportProject} controller={kimiWorkImportController} onClose={() => setKimiWorkImportProject(null)} />}
+					{minimaxImportProject && <ImportOverlayHost kind="minimax" project={minimaxImportProject} controller={minimaxImportController} onClose={() => setMinimaxImportProject(null)} />}
 					{directoryImportProject && <ImportOverlayHost kind="directory" project={directoryImportProject} controller={directoryImportController} onClose={() => setDirectoryImportProject(null)} />}
 
 					{/* Scratch Pad（草稿本）：根级渲染，避免受 chat-pane grid 影响定位 */}

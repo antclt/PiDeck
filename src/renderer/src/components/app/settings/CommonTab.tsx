@@ -308,6 +308,14 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 			{/* 闲置 Agent 内存优化：自动释放长时间闲置的 agent 进程，降低多会话内存占用 */}
 			<SettingsSection title={t("settings.idleAgentSection")} description={t("settings.idleAgentSectionDesc")}>
 				<SettingSwitchRow anchor="common-idle-agent-auto-release" title={t("settings.idleAgentAutoRelease")} description={t("settings.idleAgentAutoReleaseDesc")} checked={draft.idleAgentAutoRelease ?? true} dirty={isDirty("idleAgentAutoRelease")} onChange={(checked) => updateDraft({ idleAgentAutoRelease: checked })} />
+				<SettingSwitchRow
+					anchor="common-standby-runtime-enabled"
+					title={t("settings.standbyRuntimeEnabled")}
+					description={t("settings.standbyRuntimeEnabledDesc")}
+					checked={draft.standbyRuntimeEnabled ?? true}
+					dirty={isDirty("standbyRuntimeEnabled")}
+					onChange={(checked) => updateDraft({ standbyRuntimeEnabled: checked })}
+				/>
 				<SettingRow
 					anchor="common-idle-agent-keep-count"
 					title={

@@ -97,7 +97,10 @@ export function WebPromptPicker(props: { disabled?: boolean; onPick: (content: s
 					{loadError ? (
 						<div className="px-2 py-3 text-center text-caption text-danger">{t("web.promptLoadFailed")}</div>
 					) : loading && prompts.length === 0 ? (
-						<div className="flex items-center justify-center gap-2 px-2 py-3 text-caption text-muted-foreground"><Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />{t("web.promptLibraryLoading")}</div>
+						<div className="flex items-center justify-center gap-2 px-2 py-3 text-caption text-muted-foreground">
+							<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+							{t("web.promptLibraryLoading")}
+						</div>
 					) : prompts.length === 0 ? (
 						<div className="px-2 py-3 text-center text-caption text-muted-foreground">{t("web.promptEmpty")}</div>
 					) : null}

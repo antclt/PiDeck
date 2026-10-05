@@ -287,7 +287,10 @@ export function ExtensionsTab(props: {
 						    仅当还没有任何数据可显示时才让位给加载占位；刷新中沿用旧表格，行高不变、视口与焦点都留在原处。 */}
 						<div className="overflow-hidden rounded-lg border border-border-subtle bg-bg-panel">
 							{props.loading && visibleExtensions.length === 0 ? (
-								<div className="flex items-center justify-center gap-2 py-12 text-control text-muted-foreground"><Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />{t("config.loadingExtensions")}</div>
+								<div className="flex items-center justify-center gap-2 py-12 text-control text-muted-foreground">
+									<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+									{t("config.loadingExtensions")}
+								</div>
 							) : visibleExtensions.length === 0 ? (
 								<div className="py-12 text-center text-control text-muted-foreground">{t("config.emptyExtensions")}</div>
 							) : (

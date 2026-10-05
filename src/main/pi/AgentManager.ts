@@ -958,7 +958,10 @@ export class AgentManager {
 	list() {
 		// standby 池化进程对一切 list 消费者不可见（UI 状态、IdleAgentReleaser 等），
 		// 否则闲置释放器会把预热进程当普通闲置 agent 释放掉；claim 转正后清标记即可见。
-		return [...this.agents.values()].map((runtime) => runtime.tab).filter((tab) => !tab.standby).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+		return [...this.agents.values()]
+			.map((runtime) => runtime.tab)
+			.filter((tab) => !tab.standby)
+			.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 	}
 
 	/**

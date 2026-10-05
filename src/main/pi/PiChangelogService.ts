@@ -69,12 +69,7 @@ export type ChangelogRange = {
  * - latestVersion 缺失/非法：不做上界过滤（钉版拉取下全文本来就是该版本为止）。
  * - 区间为空（已是最新）：markdown 为空串、versionCount 0，UI 不应走到这（按钮只在有更新时出现）。
  */
-export function extractChangelogRange(
-	markdown: string,
-	currentVersion: string | undefined,
-	latestVersion: string | undefined,
-	options: { maxVersions?: number; maxChars?: number } = {},
-): ChangelogRange {
+export function extractChangelogRange(markdown: string, currentVersion: string | undefined, latestVersion: string | undefined, options: { maxVersions?: number; maxChars?: number } = {}): ChangelogRange {
 	const maxVersions = options.maxVersions ?? MAX_RANGE_VERSIONS;
 	const maxChars = options.maxChars ?? MAX_RANGE_CHARS;
 	// 按 `## [x.y.z]` 段落头切分；第一段是文件头（# Changelog 与引言），丢弃。
