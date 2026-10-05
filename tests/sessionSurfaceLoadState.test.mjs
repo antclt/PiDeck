@@ -91,7 +91,7 @@ test("timeline skeleton copy is history loading, not agent starting", () => {
 	assert.match(timelineSource, /t\("app\.historyLoading"\)/);
 	assert.doesNotMatch(timelineSource.slice(timelineSource.indexOf("{isConversationLoading && (")), /t\("app\.agentStarting"\)/);
 	assert.match(zh, /"app\.historyLoading": "正在加载历史…"/);
-	assert.match(en, /"app\.historyLoading": "Loading history\.\.\."/);
+	assert.match(en, /"app\.historyLoading": "Loading history…"/);
 });
 
 test("unloaded session with no load state must not flash the start surface", () => {
