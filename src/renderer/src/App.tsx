@@ -150,7 +150,6 @@ import { FileLinkBaseProvider } from "./components/session/FileLinkBase";
 import { useSessionWorkspaceChrome } from "./hooks/useSessionWorkspaceChrome";
 import { useQuickTask } from "./hooks/useQuickTask";
 import { QuickTaskSurface } from "./components/app/QuickTaskSurface";
-import { ScratchPadOverlay } from "./components/overlays/ScratchPadOverlay";
 import { AskPanelOverlay } from "./components/overlays/AskPanelOverlay";
 import { TerminalDockPanel } from "./components/terminal/TerminalDockPanel";
 import { ResizablePanel, ResizablePanelGroup } from "./components/ui-shadcn/resizable";
@@ -708,7 +707,7 @@ export function App() {
 		showToast,
 	});
 
-	const scratchPad = useScratchPad();
+	const scratchPad = useScratchPad(workspace);
 	// CUA 操作审批：根级订阅主进程推送的审批请求并渲染确认弹框（事件驱动，全局唯一一份）。
 	const cuaApproval = useCuaApproval();
 	// DSH runtime 安装态同步：全进程只挂这一份（IPC 拉取 + 变更订阅 → dshRuntimeStatusAtom）。
@@ -2831,6 +2830,13 @@ export function App() {
 									onTogglePinned: () => workspace.toggleDrawerPanelPinned("browser"),
 									onClick: () => handleToolDrawerAction("browser"),
 								},
+								{
+									id: "scratchPad",
+									label: t("scratchPad.title"),
+									icon: <Pencil size={16} />,
+									active: scratchPad.isOpen,
+									onClick: scratchPad.toggle,
+								},
 								// RPC 日志专属 Tab：默认隐藏，任一存活的 agent 开启记录后才出现
 								//（门控与目标 agent 计算见 rpcLogTabTargetAgentId）。
 								...(rpcLogTabTargetAgentId
@@ -2852,7 +2858,7 @@ export function App() {
 							]}
 						/>
 					}
-					drawerContent={(visibleDrawerPanel) => <DrawerSurface drawer={visibleDrawerPanel} drawerCollapsed={drawerCollapsed} git={drawerPorts.git} chrome={drawerPorts.chrome} browser={drawerPorts.browser} files={drawerPorts.files} rpcLog={drawerPorts.rpcLog} />}
+					drawerContent={(visibleDrawerPanel) => <DrawerSurface drawer={visibleDrawerPanel} drawerCollapsed={drawerCollapsed} git={drawerPorts.git} chrome={drawerPorts.chrome} browser={drawerPorts.browser} files={drawerPorts.files} rpcLog={drawerPorts.rpcLog} scratchPad={scratchPad} />}
 					setListCollapsed={setListCollapsed}
 					setListWidth={setListWidth}
 					setDrawerCollapsed={setDrawerCollapsed}
@@ -3111,9 +3117,6 @@ export function App() {
 					{kimiWorkImportProject && <ImportOverlayHost kind="kimiwork" project={kimiWorkImportProject} controller={kimiWorkImportController} onClose={() => setKimiWorkImportProject(null)} />}
 					{minimaxImportProject && <ImportOverlayHost kind="minimax" project={minimaxImportProject} controller={minimaxImportController} onClose={() => setMinimaxImportProject(null)} />}
 					{directoryImportProject && <ImportOverlayHost kind="directory" project={directoryImportProject} controller={directoryImportController} onClose={() => setDirectoryImportProject(null)} />}
-
-					{/* Scratch Pad（草稿本）：根级渲染，避免受 chat-pane grid 影响定位 */}
-					<ScratchPadOverlay controller={scratchPad} />
 
 					{/* 定时任务与自动化管理中心全功能弹窗（模态呈现，不覆盖会话工作区） */}
 					<AutomationModal

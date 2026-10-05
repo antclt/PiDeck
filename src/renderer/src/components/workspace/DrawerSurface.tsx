@@ -2,6 +2,8 @@ import { BrowserSurface } from "./BrowserSurface";
 import { GitDrawerHost, type GitDrawerApi } from "./GitDrawerHost";
 import { RewindPanel } from "./RewindPanel";
 import { RpcLogPanel } from "./RpcLogPanel";
+import { ScratchPadDrawer } from "../scratchPad/ScratchPadDrawer";
+import type { useScratchPad } from "../../hooks/useScratchPad";
 import { DrawerContent } from "../app/AppParts";
 import { SessionTrajectoryPanel } from "../session/trajectory/SessionTrajectoryPanel";
 import { LazyWrapper } from "../../hooks/useLazyComponent";
@@ -104,15 +106,18 @@ export interface DrawerSurfaceProps {
 	browser: DrawerBrowserPort;
 	files: DrawerFilesPort;
 	rpcLog: DrawerRpcLogPort;
+	scratchPad: ReturnType<typeof useScratchPad>;
 }
 
 export function DrawerSurface(props: DrawerSurfaceProps) {
-	const { drawer, drawerCollapsed, git, chrome, browser, files, rpcLog } = props;
+	const { drawer, drawerCollapsed, git, chrome, browser, files, rpcLog, scratchPad } = props;
 
 	return (
 		<>
-			{/* 各面板不再挂「标题 + ×」顶栏：关闭/切换改走会话 Tab 栏右侧活动图标。 */}
-			{drawer === "trajectory" && !drawerCollapsed ? (
+			{/* 工具面板共享抽屉开关；草稿本保留自身编辑工具行。 */}
+			{drawer === "scratchPad" && !drawerCollapsed ? (
+				<ScratchPadDrawer controller={scratchPad} />
+			) : drawer === "trajectory" && !drawerCollapsed ? (
 				<div className="drawer-content-frame flex min-h-0 flex-1 flex-col overflow-hidden">
 					<SessionTrajectoryPanel />
 				</div>

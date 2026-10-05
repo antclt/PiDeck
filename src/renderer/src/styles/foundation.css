@@ -2573,16 +2573,13 @@ select:focus-visible {
 :root[data-bg-image="on"] .terminal-xterm .xterm-screen {
   background: transparent !important;
 }
-/* 壁纸模式下弹窗（shadcn Dialog + 草稿本）统一用「弹窗基线」：比普通面板实一档，
+/* 壁纸模式下弹窗（shadcn Dialog）统一用「弹窗基线」：比普通面板实一档，
    与侧栏/会话区/抽屉同一基色，≥90% 不透明度保证内容可读。弹窗下方仍是页面正文，
    面板档（背景图可见度 80% → 30%）会让正文透进弹窗内容（用户反馈「有些弹窗
    页面太透了」）——所以弹窗只有这一档，不再有按业务类型降档的例外。
    关键：在 dialog-content 上局部覆盖 bg 系列变量（CSS 变量继承）——
    弹窗内 section 卡片/控件引用同一档位，消除 Header 透、Body 实的多层叠加。 */
-:root[data-bg-image="on"] [data-slot="dialog-content"],
-/* 草稿本：与弹框共享同基色令牌注入（header/body 同基色顶部一体），透明度同样
-   走弹窗基线——它是书写平面，面板档会把下层正文透进正文影响书写。 */
-:root[data-bg-image="on"] .scratch-pad-panel {
+:root[data-bg-image="on"] [data-slot="dialog-content"] {
   --wallpaper-dialog-alpha: max(90%, calc(var(--wallpaper-panel-alpha, 30%) + 35%));
   background-color: color-mix(in srgb, var(--wallpaper-base, var(--color-bg-app)) var(--wallpaper-dialog-alpha), transparent);
   --color-bg-panel: color-mix(in srgb, var(--wallpaper-base, var(--color-bg-app)) var(--wallpaper-dialog-alpha), transparent);

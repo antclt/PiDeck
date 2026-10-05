@@ -76,11 +76,11 @@ test("Pi management and feedback dialogs inherit page wallpaper transparency", (
 });
 
 test("all wallpaper dialogs share one readable baseline (no panel-alpha downgrade)", () => {
-	// 回归守卫：弹窗透明度只保留「弹窗基线」一档。若有人再把某个弹窗（或草稿本）
-	// 按面板档降档，背景图模式下该弹窗立刻发虚——这里逐条锁住。
+	// 回归守卫：弹窗透明度只保留「弹窗基线」一档。
+	// 按面板档降档会让背景图模式下的弹窗发虚；草稿本已复用普通抽屉底色。
 	assert.doesNotMatch(css, /--wallpaper-dialog-alpha:\s*var\(--wallpaper-panel-alpha,\s*30%\)/, "no surface may downgrade dialogs to panel alpha");
-	// 草稿本与 shadcn DialogContent 共用同一条基线规则（同一份 bg token 注入）。
-	assert.match(css, /:root\[data-bg-image="on"\] \[data-slot="dialog-content"\],[\s\S]{0,240}?:root\[data-bg-image="on"\] \.scratch-pad-panel \{[\s\S]{0,240}?--wallpaper-dialog-alpha: max\(90%, calc\(var\(--wallpaper-panel-alpha, 30%\) \+ 35%\)\);/);
+	assert.match(css, /:root\[data-bg-image="on"\]\s+\[data-slot="dialog-content"\]\s*\{[\s\S]{0,240}?--wallpaper-dialog-alpha:\s*max\(90%,\s*calc\(var\(--wallpaper-panel-alpha,\s*30%\)\s*\+\s*35%\)\);/);
+	assert.doesNotMatch(css, /\.scratch-pad-panel\s*\{/);
 	// 工作台弹框仍要扁平化内部卡片底色，避免双层半透明（≈51%）白形成磨砂补丁。
 	assert.match(css, /\[data-slot="dialog-content"\]\.environment-dialog \{[\s\S]{0,700}?--color-bg-panel: transparent;[\s\S]{0,200}?--color-card: transparent;[\s\S]{0,200}?--color-bg-muted: transparent;/);
 });
