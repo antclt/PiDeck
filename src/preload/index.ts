@@ -139,6 +139,7 @@ import type {
 	BranchDiffResult,
 	WorktreeEntry,
 	PiCliUpdateResult,
+	PiReleaseNotesPayload,
 	PiCommand,
 	RewindCheckpointPage,
 	RewindCheckpointPageParams,
@@ -889,6 +890,8 @@ const api = {
 		setCustomPaths: (paths: readonly string[]) => ipcRenderer.invoke(ipcChannels.piSetCustomPaths, [...paths]) as Promise<{ paths: string[]; clearedActive: boolean }>,
 		checkUpdate: () => ipcRenderer.invoke(ipcChannels.piUpdateCheck) as Promise<PiUpdateCheckResult>,
 		update: () => ipcRenderer.invoke(ipcChannels.piUpdate) as Promise<PiCliUpdateResult>,
+		/** pi CLI 更新日志：点「更新详情」时按需拉取 (current, latest] 区间的 changelog 条目。 */
+		releaseNotes: (options: { latestVersion: string; currentVersion?: string }) => ipcRenderer.invoke(ipcChannels.piReleaseNotes, options) as Promise<PiReleaseNotesPayload>,
 		/** 执行安装命令（如 npm install -g pi）并返回执行结果 */
 		execInstall: (command: string) => ipcRenderer.invoke(ipcChannels.piExecInstall, command) as Promise<PiInstallExecResult>,
 		/** 检查 npm 是否可用 */

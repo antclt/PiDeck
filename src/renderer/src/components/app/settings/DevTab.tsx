@@ -17,6 +17,7 @@ import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { CatalogSection } from "./CatalogSection";
 import { DshRunnerNodeRow } from "./DshRunnerNodeRow";
 import { PiCommandSourcePanel } from "../PiCommandSourcePanel";
+import { PiChangelogDialog } from "./PiChangelogDialog";
 
 type DevTabProps = {
 	draft: AppSettings;
@@ -99,6 +100,8 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
 	const piUpdateStatus = props.piUpdateCheck ?? piCliStatus;
 	const piUpdateAvailable = Boolean(piUpdateStatus?.hasUpdate);
 	const piUpdateNotice = piUpdateAvailable && piUpdateStatus?.latestVersion ? piUpdateStatus : null;
+	// 「更新详情」弹窗：只在有更新时出现入口，打开时才拉取 changelog。
+	const [piChangelogOpen, setPiChangelogOpen] = useState(false);
 
 	// ── 数据环境（仅 dev 包显示）：当前模式 + 切换入口（改模式需重启生效，规格 §6 设置页修改入口）──
 	const isDevChannel = channelInfo?.channel === "dev";
@@ -244,13 +247,19 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
 				</div>
 				{/* 后台检查发现的 Pi CLI 更新必须靠近操作按钮，避免提示与入口分属不同分区。 */}
 				{piUpdateNotice && (
-					<div className="mb-2 rounded-md border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-3 py-2 text-caption text-text-primary">
-						{t("settings.piUpdateAvailableDetail", {
-							current: piUpdateNotice.currentVersion ?? t("common.unknown"),
-							latest: piUpdateNotice.latestVersion,
-						})}
+					<div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-3 py-2 text-caption text-text-primary">
+						<span>
+							{t("settings.piUpdateAvailableDetail", {
+								current: piUpdateNotice.currentVersion ?? t("common.unknown"),
+								latest: piUpdateNotice.latestVersion,
+							})}
+						</span>
+						<Button variant="ghost" size="sm" className="shrink-0" onClick={() => setPiChangelogOpen(true)}>
+							{t("settings.piUpdateDetails")}
+						</Button>
 					</div>
 				)}
+				{piUpdateNotice?.latestVersion && <PiChangelogDialog open={piChangelogOpen} onOpenChange={setPiChangelogOpen} currentVersion={piUpdateNotice.currentVersion} latestVersion={piUpdateNotice.latestVersion} />}
 				{props.piUpdateResult && (
 					<pre className="setting-update-output">
 						{props.piUpdateResult.command}

@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { PiMcpCli } from "../pi/piMcpCli";
+import { piChangelogService } from "../pi/PiChangelogService";
 import { validateMcpConfigFile } from "../config/mcpConfig";
 import { PiResourceConfigService } from "../config/PiResourceConfigService";
 import { PiResourceStateStore } from "../config/PiResourceStateStore";
@@ -1083,6 +1084,16 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			const result = await extensionManager.updatePi();
 			if (result.updated) void refreshPiModelCatalogs().catch(() => undefined);
 			void appLogger.info("pi", "Pi update command completed", { updated: result.updated, bytes: result.output.length });
+			return result;
+		});
+		// pi 更新日志：用户点「更新详情」才按需拉取（不参与版本检查的自动调度）。
+		ipcMain.handle(ipcChannels.piReleaseNotes, async (_event, rawOptions) => {
+			// 输入校验在边界：渲染层数据一律不可信，版本号必须是 semver 形态的字符串。
+			const options = (rawOptions ?? {}) as { latestVersion?: unknown; currentVersion?: unknown };
+			const latestVersion = typeof options.latestVersion === "string" ? options.latestVersion : "";
+			const currentVersion = typeof options.currentVersion === "string" ? options.currentVersion : undefined;
+			const result = await piChangelogService.getReleaseNotes({ latestVersion, currentVersion });
+			void appLogger.info("pi", "Pi release notes fetched", { source: result.source, versionCount: result.versionCount, truncated: result.truncated });
 			return result;
 		});
 	}

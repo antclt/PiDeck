@@ -1003,6 +1003,14 @@ export function createPreviewApi(): PiDesktopApi {
 				latestVersion: "preview",
 				hasUpdate: false,
 			}),
+			releaseNotes: async () => ({
+				markdown: "## [preview] - 2026-01-01\n\n- Preview mode: pi release notes",
+				source: "github",
+				versionCount: 1,
+				pageUrl: "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/CHANGELOG.md",
+				fetchedAt: null,
+				truncated: false,
+			}),
 			update: async () => ({
 				command: "pi update pi --no-approve",
 				output: "Preview mode: pi update output",
