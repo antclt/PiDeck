@@ -210,6 +210,26 @@ src/
 3. 完成后简要总结，询问「需要我提交吗？」。
 4. 用户同意时，一个功能/修复的全部变更放一个 commit，不拆小 commit（用户另有要求除外）。
 
+### 多 agent 并行开发（硬性）
+
+> 背景：本仓库常被多个 agent 同时操作。无隔离时，A 的选择性 `git restore`/`clean` 会清掉 B 的未提交改动、`npm install` 会重建 `node_modules/.bin` 打断他人 typecheck、暂存区互相覆盖（2026-10 两轮实战事故）。总目标：**任何人的未提交工作不被另一个 agent 破坏**。
+
+**编排层（发起并行前先定）**
+
+1. 两个以上 agent 同时改 `src/` → 优先每人一个 `git worktree` + 独立分支，合并由单一收口人执行；不允许两个「写」agent 长期共享同一工作树。
+2. 无法 worktree 时按目录划 ownership，各 agent 只在指派目录内写；公共汇聚文件（`AGENTS.md`、`src/main/index.ts`、`src/shared/types/settings.ts`、i18n copy、`package*.json`）同一时刻只许一个写者。
+3. 只读任务（调研/评审/搜索）不受限，任意并行。
+
+**agent 行为红线（共享工作树时全部生效）**
+
+1. 开始写代码前先 `git status` 留基线，归属存疑时对照基线判断。
+2. **git 操作必须路径精确**：只许 `git add <本任务文件列表>`；禁止 `git add -A/-a/.`、对非本任务文件 `git restore`/`checkout --`、任何形式的 `git clean`、`git reset --hard`、`git stash`（stash 会收走他人改动）。要还原某文件，先确认其全部改动都是本任务产生的。
+3. `git status` 里非本任务产生的改动：不暂存、不还原、不删除、不评判——那是别人进行中的工作；同文件混着他人改动时用 hunk 级暂存（`git apply --cached`）或停下报告。
+4. 并行期间禁止 `npm install`/删改 `node_modules`（重建 .bin 会打断他人 typecheck 与 dev server）；依赖增删集中交给单一收口 agent。
+5. 不 kill 不认识的进程、不占他人 dev 端口、不清理 `.git/` 下不认识的文件（可能是别人的 checkpoint）；自己的工作文件不放 `.git/`。
+6. 提交前 `git diff --cached --stat` 自查只含本任务文件，混入立即按路径精确 unstage。
+7. 任务收尾时工作树应只剩他人改动——自己的全部已提交；带着未提交改动离开视为事故。
+
 ### 长期重构纪律
 
 - 大重构先写对照计划（能力 parity 表 + 合并门禁），文档放 `docs/` 并注明状态；落地后收口（更新状态行或删除），不留悬空计划文档。
