@@ -272,6 +272,7 @@ export function createPreviewApi(): PiDesktopApi {
 			setEnabled: async () => undefined,
 			setExpandTarget: async () => undefined,
 			dragStart: async () => undefined,
+			dragMove: async () => undefined,
 			dragEnd: async () => undefined,
 			contextMenu: async () => undefined,
 		},

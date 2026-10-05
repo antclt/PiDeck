@@ -2749,7 +2749,18 @@ export function App() {
 						) : undefined
 					}
 					compactContent={
-						quickTask.active ? (
+						// 极简浮窗模式：渲染当前活跃会话（不是 quickTask）
+						new URLSearchParams(window.location.search).get("mini-overlay") === "1" ? (
+							currentSession ? (
+								<SessionPaneServicesProvider value={sessionPaneServices}>
+									<ChatSessionPane sessionId={currentSession.id} focused onFocusPane={() => focusSessionPane(currentSession.id)} splitPane={false} />
+								</SessionPaneServicesProvider>
+							) : (
+								<div className="flex h-full items-center justify-center text-sm" style={{ color: "var(--color-text-secondary, rgba(255,255,255,0.5))" }}>
+									暂无活跃会话，请在主窗口创建
+								</div>
+							)
+						) : quickTask.active ? (
 							<QuickTaskSurface task={quickTask}>
 								<SessionPaneServicesProvider value={sessionPaneServices}>{quickTask.session && <ChatSessionPane sessionId={quickTask.session.id} focused onFocusPane={() => focusSessionPane(quickTask.session!.id)} splitPane={false} />}</SessionPaneServicesProvider>
 							</QuickTaskSurface>

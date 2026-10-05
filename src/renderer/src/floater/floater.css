@@ -48,14 +48,12 @@
 	height: 64px;
 	border-radius: 50%;
 	border: none;
-	background: rgba(20, 20, 24, 0.85);
-	backdrop-filter: blur(12px);
+	background: transparent;
 	cursor: pointer;
 	display: grid;
 	place-items: center;
 	padding: 0;
-	transition: transform 0.15s ease, box-shadow 0.15s ease;
-	box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+	transition: transform 0.15s ease;
 }
 
 .floater-ball:hover {

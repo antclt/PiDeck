@@ -7,6 +7,7 @@ import { useNotifyLayoutResized } from "../../hooks/useNotifyLayoutResized";
 import { LIST_WIDTH_MIN, LIST_WIDTH_MAX } from "../../hooks/useResize";
 import { DRAWER_WIDTH_MIN, DRAWER_WIDTH_MIN_PINNED, DRAWER_WIDTH_MAX, type WorkspaceDrawerPanel } from "../../hooks/useWorkspacePanels";
 import { cn } from "../../lib/utils";
+import { desktopApi } from "../../desktopApi";
 import { shouldCommitPanelPixels } from "../../lib/shellPanelLayout";
 
 /**
@@ -350,9 +351,25 @@ export function AppShell(props: AppShellProps) {
 		}
 	}
 
-	if (props.compactContent)
+	if (props.compactContent) {
+		// 极简浮窗模式：URL query mini-overlay=1 时注入收起/关闭按钮
+		const isMiniOverlayMode = new URLSearchParams(window.location.search).get("mini-overlay") === "1";
 		return (
 			<div className={["wechat-shell quick-task-shell bg-bg-app [[data-bg-image=on]_&]:bg-transparent", useNativeTitleBar ? "" : "custom-titlebar-enabled", !useNativeTitleBar && platform === "darwin" ? "mac-custom-titlebar" : ""].filter(Boolean).join(" ")}>
+				{isMiniOverlayMode ? (
+					<div className="mini-overlay-chrome">
+						<button type="button" onClick={() => void desktopApi.miniOverlay.collapse()} aria-label="收起为悬浮球" title="收起为悬浮球">
+							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+								<path d="m6 9 6 6 6-6" />
+							</svg>
+						</button>
+						<button type="button" onClick={() => void desktopApi.miniOverlay.close()} aria-label="关闭" title="关闭">
+							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+								<path d="M18 6 6 18M6 6l12 12" />
+							</svg>
+						</button>
+					</div>
+				) : null}
 				<AppHeader
 					useNativeTitleBar={useNativeTitleBar}
 					platform={platform}
@@ -370,6 +387,7 @@ export function AppShell(props: AppShellProps) {
 				{children}
 			</div>
 		);
+	}
 	return (
 		<div
 			ref={shellRef}

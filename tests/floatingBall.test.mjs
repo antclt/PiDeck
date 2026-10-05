@@ -72,6 +72,6 @@ test("MiniOverlayWindow 尺寸常量", async () => {
 		electron: { BrowserWindow: class {}, ipcMain: { handle() {}, removeHandler() {} }, screen: { getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }) }, app: { getPath: () => "/tmp" } },
 	});
 	assert.ok(typeof MiniOverlayWindow === "function");
-	assert.equal(MINI_OVERLAY_W, 360);
-	assert.equal(MINI_OVERLAY_H, 480);
+	assert.equal(MINI_OVERLAY_W, 480);
+	assert.equal(MINI_OVERLAY_H, 640);
 });

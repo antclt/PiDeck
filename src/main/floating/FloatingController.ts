@@ -309,17 +309,16 @@ export class FloatingController {
 			dragOffset = { x: cursor.x - boundsX, y: cursor.y - boundsY };
 			moved = false;
 		});
-		// 拖动经 polling 而非 IPC move（渲染层 rAF 直推位置，主进程只做落盘与吸附）
-		const poll = setInterval(() => {
-			if (!dragOffset || win.isDestroyed()) return;
-			const cursor = screen.getCursorScreenPoint();
-			const x = cursor.x - dragOffset.x;
-			const y = cursor.y - dragOffset.y;
+		// 拖动经渲染层 rAF 直推 IPC move（比主进程 polling 流畅），主进程只做落盘与吸附
+		ipcMain.removeHandler(ipcChannels.floatingBallDragMove);
+		ipcMain.handle(ipcChannels.floatingBallDragMove, (event, cursorX: number, cursorY: number) => {
+			if (event.sender !== win.webContents || !dragOffset) return;
+			const x = cursorX - dragOffset.x;
+			const y = cursorY - dragOffset.y;
 			const [cx, cy] = win.getPosition();
 			if (Math.abs(cx - x) > 2 || Math.abs(cy - y) > 2) moved = true;
 			win.setPosition(x, y);
-		}, 16);
-		win.on("closed", () => clearInterval(poll));
+		});
 		ipcMain.removeHandler(ipcChannels.floatingBallDragEnd);
 		ipcMain.handle(ipcChannels.floatingBallDragEnd, (event) => {
 			if (event.sender !== win.webContents) return;

@@ -232,6 +232,7 @@ const api = {
 		setEnabled: (enabled: boolean) => ipcRenderer.invoke(ipcChannels.floatingBallSetEnabled, enabled) as Promise<void>,
 		setExpandTarget: (target: "mini" | "compact") => ipcRenderer.invoke(ipcChannels.floatingBallSetExpandTarget, target) as Promise<void>,
 		dragStart: () => ipcRenderer.invoke(ipcChannels.floatingBallDragStart) as Promise<void>,
+		dragMove: (x: number, y: number) => ipcRenderer.invoke(ipcChannels.floatingBallDragMove, x, y) as Promise<void>,
 		dragEnd: () => ipcRenderer.invoke(ipcChannels.floatingBallDragEnd) as Promise<void>,
 		contextMenu: () => ipcRenderer.invoke(ipcChannels.floatingBallContextMenu) as Promise<void>,
 	},

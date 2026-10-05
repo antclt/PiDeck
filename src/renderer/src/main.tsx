@@ -88,6 +88,12 @@ if (!rootElement) {
 	throw new Error("Renderer root element missing");
 }
 
+// 极简浮窗模式：URL query mini-overlay=1 时加 CSS 类（强制单栏布局 + 隐藏侧栏/抽屉/标题栏）
+const isMiniOverlayMode = new URLSearchParams(window.location.search).get("mini-overlay") === "1";
+if (isMiniOverlayMode) {
+	document.body.classList.add("mini-overlay-mode");
+}
+
 ReactDOM.createRoot(rootElement).render(
 	<React.StrictMode>
 		<AppErrorBoundary>

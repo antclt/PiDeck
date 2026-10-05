@@ -11,8 +11,8 @@ import type { ProjectStore } from "../projects/ProjectStore";
 import { getAppLogger } from "../logging/sharedLogger";
 
 /** 极简浮窗尺寸：状态总览 + 快捷输入 + 最近会话，刚好一屏放得下。 */
-export const MINI_OVERLAY_W = 360;
-export const MINI_OVERLAY_H = 480;
+export const MINI_OVERLAY_W = 480;
+export const MINI_OVERLAY_H = 640;
 
 /** 极简浮窗状态快照：渲染层据此渲染状态区、快捷输入与最近会话列表。 */
 export interface MiniOverlayState {
@@ -98,9 +98,9 @@ export class MiniOverlayWindow {
 			this.pushState();
 		});
 		if (is.dev && process.env.ELECTRON_RENDERER_URL) {
-			await this.win.loadURL(`${process.env.ELECTRON_RENDERER_URL}/mini-overlay.html`);
+			await this.win.loadURL(`${process.env.ELECTRON_RENDERER_URL}/index.html?mini-overlay=1`);
 		} else {
-			await this.win.loadFile(join(__dirname, "../renderer/mini-overlay.html"));
+			await this.win.loadFile(join(__dirname, "../renderer/index.html"), { query: { "mini-overlay": "1" } });
 		}
 		this.win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 		this.win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {

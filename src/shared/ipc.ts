@@ -971,6 +971,7 @@ export const ipcChannels = {
 	floatingBallEnter: "floating-ball:enter",
 	floatingBallExit: "floating-ball:exit",
 	floatingBallDragStart: "floating-ball:drag-start",
+	floatingBallDragMove: "floating-ball:drag-move",
 	floatingBallDragEnd: "floating-ball:drag-end",
 	floatingBallContextMenu: "floating-ball:context-menu",
 	floatingBallSetExpandTarget: "floating-ball:set-expand-target",

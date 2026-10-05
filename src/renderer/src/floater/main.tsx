@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
-import { LogoMark } from "../components/app/LogoMark";
+import { PiTuiLogoMark } from "../components/app/PiTuiLogo";
 import "./floater.css";
 
 /** 悬浮球窗口的窄状态类型（与 main/floating/FloatingController.ts 对齐）。 */
@@ -22,6 +22,7 @@ const api = (
 				getState: () => Promise<FloatingBallState>;
 				onStateChanged: (cb: (state: FloatingBallState) => void) => () => void;
 				dragStart: () => Promise<void>;
+				dragMove: (x: number, y: number) => Promise<void>;
 				dragEnd: () => Promise<void>;
 				contextMenu: () => Promise<void>;
 			};
@@ -61,16 +62,29 @@ function FloaterApp() {
 		draggingRef.current = true;
 		setDragging(true);
 		void api.floatingBall.dragStart();
-		const onMove = () => {
-			/* 位置由主进程 polling 光标坐标更新，渲染层无需处理 move */
+		let rafId = 0;
+		const onMove = (ev: MouseEvent) => {
+			if (!draggingRef.current) return;
+			cancelAnimationFrame(rafId);
+			rafId = requestAnimationFrame(() => {
+				void api.floatingBall.dragMove(ev.screenX, ev.screenY);
+			});
 		};
 		const onUp = () => {
 			draggingRef.current = false;
 			setDragging(false);
+			cancelAnimationFrame(rafId);
 			void api.floatingBall.dragEnd();
 			window.removeEventListener("mousemove", onMove);
 			window.removeEventListener("mouseup", onUp);
+			clearTimeout(stuckTimeout);
 		};
+		// 长按拖动久了粘住：5s 无 mouseup 自动清理
+		const stuckTimeout = setTimeout(() => {
+			if (draggingRef.current) {
+				onUp();
+			}
+		}, 5000);
 		window.addEventListener("mousemove", onMove);
 		window.addEventListener("mouseup", onUp);
 	};
@@ -94,7 +108,7 @@ function FloaterApp() {
 				</div>
 			) : null}
 			<button type="button" className={`floater-ball${dragging ? " floater-ball--dragging" : ""}${state.runningCount > 0 ? " floater-ball--running" : ""}`} onMouseDown={onMouseDown} onContextMenu={onContextMenu} aria-label={text} title={text}>
-				<LogoMark size={40} />
+				<PiTuiLogoMark size={40} />
 				{state.runningCount > 0 ? <span className="floater-count">{state.runningCount}</span> : null}
 			</button>
 		</div>
