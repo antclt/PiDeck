@@ -15,6 +15,7 @@ const SOURCE_LABELS: Record<SessionSource, string> = {
 	zcode: t("sessionSource.zcode"),
 	workbuddy: t("sessionSource.workbuddy"),
 	cursor: t("sessionSource.cursor"),
+	kimi: t("sessionSource.kimi"),
 };
 
 const SOURCE_TONES: Record<SessionSource, string> = {
@@ -31,6 +32,8 @@ const SOURCE_TONES: Record<SessionSource, string> = {
 	cursor: "border-muted-foreground/40 text-muted-foreground",
 	// Qoder 同样无随包品牌 SVG：自绘「Q」环形+尾笔标记，沿用中性色惯例（与 zcode/workbuddy 一致）。
 	qoder: "border-muted-foreground/40 text-muted-foreground",
+	// Kimi Code 无随包品牌 SVG：自绘「K」字形标记，沿用中性色惯例（与 zcode/workbuddy 一致）。
+	kimi: "border-muted-foreground/40 text-muted-foreground",
 };
 
 function SourceLogo(props: { source: SessionSource }) {
@@ -98,6 +101,15 @@ function SourceLogo(props: { source: SessionSource }) {
 		return (
 			<svg viewBox="0 0 24 24" className="size-3.5" aria-hidden="true" focusable="false">
 				<path fill="currentColor" fillRule="evenodd" d="M11 2a9 9 0 1 0 5.2 16.3l3.2 3.2 2.1-2.1-3.2-3.2A9 9 0 0 0 11 2Zm0 3.3a5.7 5.7 0 1 1 0 11.4 5.7 5.7 0 0 1 0-11.4Z" />
+			</svg>
+		);
+	}
+
+	if (props.source === "kimi") {
+		// Kimi Code 无随包品牌 SVG，用等宽「K」字形作为可辨识标记（与 zcode 的 Z 同一惯例）。
+		return (
+			<svg viewBox="0 0 24 24" className="size-3.5" aria-hidden="true" focusable="false">
+				<path fill="currentColor" d="M4 3h3.4v7.4L15.6 3h4.2l-9.2 8.4L20.4 21h-4.3l-7.2-7.2-1.5 1.4V21H4z" />
 			</svg>
 		);
 	}

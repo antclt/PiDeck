@@ -258,8 +258,44 @@ export type CursorImportReport = {
 	failed: number;
 };
 
+// ── Kimi Code Session Import Types ─────────────────────────────────────
+
+/** Kimi Code 会话导入状态：未导入 / 已是最新 / 源更新后可覆盖。 */
+export type KimiImportStatus = "new" | "current" | "outdated";
+
+export type KimiSessionSummary = {
+	id: string;
+	sourcePath: string;
+	targetPath: string;
+	cwd: string;
+	title: string;
+	preview: string;
+	createdAt: number;
+	updatedAt: number;
+	messageCount: number;
+	status: KimiImportStatus;
+	sourceSize: number;
+	importedSourceMtime?: number;
+};
+
+export type KimiImportResult = {
+	id: string;
+	sourcePath: string;
+	targetPath?: string;
+	title?: string;
+	success: boolean;
+	overwritten?: boolean;
+	messageCount?: number;
+	error?: string;
+};
+
+export type KimiImportReport = {
+	results: KimiImportResult[];
+	imported: number;
+	failed: number;
+};
+
 // ── Directory (外置目录) Session Import Types ──────────────────────────
-//
 // 场景：项目目录被移动/改名后，pi 会话仍按「旧 cwd 的 encoded 分组目录」留在
 // ~/.pi/agent/sessions 下，与新项目的路径不再匹配 → 侧栏看不到历史。
 // 该导入源让用户从一个「现有会话目录」列表里点选（旧项目目录 / 某个 encoded 分组目录），

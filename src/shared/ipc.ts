@@ -302,6 +302,8 @@ export const ipcChannels = {
 	workbuddySessionsImport: "workbuddy-sessions:import",
 	cursorSessionsScan: "cursor-sessions:scan",
 	cursorSessionsImport: "cursor-sessions:import",
+	kimiSessionsScan: "kimi-sessions:scan",
+	kimiSessionsImport: "kimi-sessions:import",
 	/**
 	 * 外置目录会话导入（项目目录移动/改名后找回历史）：扫描用户选定的目录
 	 * （旧项目目录 / 某个 encoded 分组目录 / pi sessions 根）里的会话。

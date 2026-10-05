@@ -873,6 +873,10 @@ export function createPreviewApi(): PiDesktopApi {
 			scan: async () => [],
 			import: async () => ({ results: [], imported: 0, failed: 0 }),
 		},
+		kimiSessions: {
+			scan: async () => [],
+			import: async () => ({ results: [], imported: 0, failed: 0 }),
+		},
 		directorySessions: {
 			scan: async () => ({ sessions: [], kind: "none" }),
 			listSources: async () => [],

@@ -68,6 +68,8 @@ import type {
 	WorkBuddySessionSummary,
 	CursorImportReport,
 	CursorSessionSummary,
+	KimiImportReport,
+	KimiSessionSummary,
 	DirectoryImportReport,
 	DirectorySessionScanResult,
 	DirectorySessionSourceDir,
@@ -767,6 +769,10 @@ const api = {
 	cursorSessions: {
 		scan: (projectId: string) => ipcRenderer.invoke(ipcChannels.cursorSessionsScan, projectId) as Promise<CursorSessionSummary[]>,
 		import: (projectId: string, sourcePaths: string[]) => ipcRenderer.invoke(ipcChannels.cursorSessionsImport, projectId, sourcePaths) as Promise<CursorImportReport>,
+	},
+	kimiSessions: {
+		scan: (projectId: string) => ipcRenderer.invoke(ipcChannels.kimiSessionsScan, projectId) as Promise<KimiSessionSummary[]>,
+		import: (projectId: string, sourcePaths: string[]) => ipcRenderer.invoke(ipcChannels.kimiSessionsImport, projectId, sourcePaths) as Promise<KimiImportReport>,
 	},
 	/**
 	 * 外置目录会话导入：源目录由用户现选（从「现有会话目录」列表点选，或手选任意目录），

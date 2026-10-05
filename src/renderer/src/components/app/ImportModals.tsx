@@ -21,6 +21,8 @@ import type {
 	WorkBuddyImportReport,
 	CursorSessionSummary,
 	CursorImportReport,
+	KimiSessionSummary,
+	KimiImportReport,
 	DirectorySessionSummary,
 	DirectorySessionSourceDir,
 	DirectorySourceKind,
@@ -704,3 +706,26 @@ export function CursorImportModal(props: {
 }) {
 	return <SessionImportModal copyPrefix="cursor" formatStatus={formatCursorStatus} {...props} />;
 }
+
+function formatKimiStatus(status: KimiSessionSummary["status"]) {
+	if (status === "current") return t("kimi.status.current");
+	if (status === "outdated") return t("kimi.status.outdated");
+	return t("kimi.status.new");
+}
+
+export function KimiImportModal(props: {
+	project: Project;
+	sessions: KimiSessionSummary[];
+	selectedPaths: string[];
+	loading: boolean;
+	importing: boolean;
+	report: KimiImportReport | null;
+	onClose: () => void;
+	onRefresh: () => void;
+	onToggle: (sourcePath: string) => void;
+	onToggleAll: () => void;
+	onImport: () => void;
+}) {
+	return <SessionImportModal copyPrefix="kimi" formatStatus={formatKimiStatus} {...props} />;
+}
+

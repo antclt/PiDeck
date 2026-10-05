@@ -103,6 +103,7 @@ import type { OpenCodeSessionImporter } from "../sessions/OpenCodeSessionImporte
 import type { ZCodeSessionImporter } from "../sessions/ZCodeSessionImporter";
 import type { WorkBuddySessionImporter } from "../sessions/WorkBuddySessionImporter";
 import type { CursorSessionImporter } from "../sessions/CursorSessionImporter";
+import type { KimiSessionImporter } from "../sessions/KimiSessionImporter";
 import type { AppLogger } from "../logging/AppLogger";
 
 /**
@@ -316,6 +317,7 @@ export type SessionIpcDeps = {
 	zcodeSessionImporter: ZCodeSessionImporter;
 	workbuddySessionImporter: WorkBuddySessionImporter;
 	cursorSessionImporter: CursorSessionImporter;
+	kimiSessionImporter: KimiSessionImporter;
 	/** 外置目录会话导入（项目目录移动/改名后找回历史；只建 catalog 引用，不复制原文件）。 */
 	directorySessionImporter: DirectorySessionImporter;
 	appLogger: AppLogger;
@@ -389,6 +391,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		zcodeSessionImporter,
 		workbuddySessionImporter,
 		cursorSessionImporter,
+		kimiSessionImporter,
 		directorySessionImporter,
 		appLogger,
 		terminalManager,
@@ -1924,6 +1927,23 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		if (!project) throw new Error(`Project not found: ${projectId}`);
 		const result = await cursorSessionImporter.import(project.path, sourcePaths);
 		void appLogger.info("session", "Cursor sessions imported", {
+			projectId,
+			sourceCount: sourcePaths.length,
+		});
+		return result;
+	});
+	ipcMain.handle(ipcChannels.kimiSessionsScan, async (_event, projectId: string) => {
+		const project = projectStore.get(projectId);
+		if (!project) throw new Error(`Project not found: ${projectId}`);
+		const result = await kimiSessionImporter.scan(project.path);
+		void appLogger.debug("session", "Kimi sessions scanned", { projectId });
+		return result;
+	});
+	ipcMain.handle(ipcChannels.kimiSessionsImport, async (_event, projectId: string, sourcePaths: string[]) => {
+		const project = projectStore.get(projectId);
+		if (!project) throw new Error(`Project not found: ${projectId}`);
+		const result = await kimiSessionImporter.import(project.path, sourcePaths);
+		void appLogger.info("session", "Kimi sessions imported", {
 			projectId,
 			sourceCount: sourcePaths.length,
 		});
