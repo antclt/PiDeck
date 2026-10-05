@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { argsToText, buildMcpDisplayServers, isMcpServerName, omitUndefined, recordToText, textToArgs, textToRecord } = loadTsCommonJs("src/renderer/src/config/mcpForm.ts");
+const { argsToText, buildMcpDisplayServers, isMcpServerName, omitUndefined, parseSmartAddInput, recordToText, suggestNameFromCommand, suggestNameFromDefinition, suggestNameFromUrl, textToArgs, textToRecord, uniqueServerName } = loadTsCommonJs("src/renderer/src/config/mcpForm.ts");
 
 test("MCP form args round-trip splits on whitespace", () => {
 	assert.equal(argsToText(["-y", "chrome-devtools-mcp@1.6.0"]), "-y chrome-devtools-mcp@1.6.0");
@@ -101,4 +101,55 @@ test("display servers 标记草稿已删的本层条目：待删除 vs 回退继
 	// 草稿还在的条目无标记
 	const withDraft = buildMcpDisplayServers(snapshot, { mcpServers: { gone: { command: "gone" } } });
 	assert.equal(withDraft.find((item) => item.name === "gone").pendingDelete, undefined);
+});
+
+test("parseSmartAddInput：URL / 无协议域名 / 命令行 / JSON 三形态 / 非法输入", () => {
+	// vm 加载的模块对象与测试领域原型不同：一律展开成测试领域的普通对象再比较
+	assert.deepEqual({ ...parseSmartAddInput("https://mcp.linear.app/mcp") }, { kind: "url", url: "https://mcp.linear.app/mcp" });
+	assert.deepEqual({ ...parseSmartAddInput("mcp.example.com/mcp") }, { kind: "url", url: "https://mcp.example.com/mcp" });
+	assert.deepEqual({ ...parseSmartAddInput("example.com") }, { kind: "url", url: "https://example.com" });
+	// 命令行：普通与带引号参数
+	const quoted = parseSmartAddInput('node server.js --port "8080 x"');
+	assert.deepEqual({ kind: quoted.kind, command: quoted.command, args: [...quoted.args] }, { kind: "command", command: "node", args: ["server.js", "--port", "8080 x"] });
+	// JSON 三形态：整块 / 命名映射 / 单条裸定义
+	const jsonParsed = parseSmartAddInput('{"mcpServers":{"a":{"url":"https://a/mcp"},"b":{"command":"npx"}}}');
+	assert.deepEqual(
+		{ kind: jsonParsed.kind, servers: [...jsonParsed.servers].map((server) => ({ name: server.name, definition: JSON.parse(JSON.stringify(server.definition)) })) },
+		{
+			kind: "json",
+			servers: [
+				{ name: "a", definition: { url: "https://a/mcp" } },
+				{ name: "b", definition: { command: "npx" } },
+			],
+		},
+	);
+	assert.equal(parseSmartAddInput('{"linear":{"url":"https://mcp.linear.app/mcp"}}').servers[0].name, "linear");
+	assert.equal(parseSmartAddInput('{"command":"npx"}').servers[0].definition.command, "npx");
+	// 非法/空输入
+	assert.equal(parseSmartAddInput(""), null);
+	assert.equal(parseSmartAddInput("   "), null);
+	const broken = parseSmartAddInput("{ broken");
+	assert.deepEqual({ kind: broken.kind, command: broken.command, args: [...broken.args] }, { kind: "command", command: "{", args: ["broken"] }); // 非 JSON 落命令行分支
+});
+
+test("suggestNameFromUrl：去常见前缀、取主干、非法字符清洗", () => {
+	assert.equal(suggestNameFromUrl("https://mcp.linear.app/mcp"), "linear");
+	assert.equal(suggestNameFromUrl("https://mcp.beui.dev/mcp"), "beui");
+	assert.equal(suggestNameFromUrl("https://api.example.com/mcp"), "example");
+	assert.equal(suggestNameFromUrl("https://example.com/mcp"), "example");
+	assert.equal(suggestNameFromUrl("not a url"), ""); // 无法推断时返回空串，由调用方兜底
+});
+
+test("suggestNameFromCommand：运行器取包名，非运行器取基名", () => {
+	assert.equal(suggestNameFromCommand("npx", ["-y", "@scope/mcp-github"]), "github");
+	assert.equal(suggestNameFromCommand("uvx", ["mcp-server-fetch"]), "server-fetch");
+	assert.equal(suggestNameFromCommand("/usr/local/bin/my-mcp", []), "my-mcp");
+	assert.equal(suggestNameFromCommand("node", ["server.js"]), "node");
+});
+
+test("uniqueServerName：冲突追加序号，非法字符清洗并小写", () => {
+	const existing = new Set(["linear", "linear-2"]);
+	assert.equal(uniqueServerName("Linear", existing), "linear-3");
+	assert.equal(uniqueServerName("Fresh Name!", existing), "fresh-name");
+	assert.equal(uniqueServerName("", existing), "server");
 });

@@ -17,12 +17,13 @@ import { Label } from "../components/ui-shadcn/label";
 import { Textarea } from "../components/ui-shadcn/textarea";
 import { ConfigSelect, openDocsInSystemBrowser, SecretInput } from "./ConfigShared";
 import { ConfirmDialog } from "../components/ui-shadcn/ConfirmDialog";
-import { detectThirdPartyMcpExtensions, hasLegacyDisabledField, inferMcpTransport, isMcpServerDisabled, McpServerListPane, usesMcpOAuth, usesProviderAuth, type ThirdPartyMcpExtension } from "./McpResourceViews";
+import { detectThirdPartyMcpExtensions, hasLegacyDisabledField, inferMcpTransport, isMcpServerDisabled, McpServerListPane, McpStatusRow, usesMcpOAuth, usesProviderAuth, type ThirdPartyMcpExtension } from "./McpResourceViews";
 import { argsToText, buildMcpDisplayServers, isMcpServerName, recordToText, textToArgs, textToRecord } from "./mcpForm";
 import { resolveExposureAliases } from "../../../shared/mcpExposure";
 import { isProjectUntrustedError } from "./projectResourceErrors";
 import type { McpCliListResult, McpConfigFile, McpConfigScope, McpConfigSnapshot, McpExposure, McpOAuth, McpProbeResult, McpServerDefinition, McpServerListItem, McpServerTransport } from "../../../shared/types/mcp";
 import { ResourceImportDialog } from "./ResourceImportDialog";
+import { McpSmartAdd, type SmartAddEntry } from "./McpSmartAdd";
 
 const api = (
 	window as unknown as {
@@ -251,6 +252,8 @@ export const McpTab = forwardRef<
 	 * 只用于显示/预选：草稿与落盘仍保留原文，不主动改写用户文件。
 	 */
 	const editingDisplayDef = useMemo(() => resolveExposureAliases(editingDef), [editingDef]);
+	/** OAuth 高级参数已从表单移除：仅当定义里预设了这些字段（粘贴/导入）时显示只读提示，原值照常保留。 */
+	const hasPresetOAuth = Boolean(editingDef.oauth && Object.keys(editingDef.oauth).length > 0);
 
 	const applyWritable = useCallback(
 		(next: McpConfigFile) => {
@@ -272,6 +275,13 @@ export const McpTab = forwardRef<
 
 	const startCreate = () => {
 		setCreating({ name: "", definition: blankDefinition("stdio") });
+		setSelected(null);
+		setProbe(null);
+	};
+
+	/** 智能添加（默认入口）：清空选中让编辑区显示粘贴面板。 */
+	const openSmartAdd = () => {
+		setCreating(null);
 		setSelected(null);
 		setProbe(null);
 	};
@@ -500,11 +510,54 @@ export const McpTab = forwardRef<
 		}
 	};
 
+	/** 统一落盘入口：显式接收待写内容（智能添加在 setState 后立刻保存，不能用闭包里的旧 writable）。 */
+	const persistServers = useCallback(
+		async (toSave: McpConfigFile): Promise<boolean> => {
+			if (snapshot?.writableError) {
+				setError(t("config.mcp.writableBroken"));
+				return false;
+			}
+			setSaving(true);
+			setError(null);
+			try {
+				const result = await api.config.saveMcp(toSave, scope, snapshot?.revision);
+				if (!result.valid) {
+					if (result.conflict) {
+						// 乐观锁：磁盘上的 mcp.json 被外部改过（pi/手改/其它窗口），必须以磁盘为准。
+						setError(t("config.mcp.conflict"));
+						await load();
+						return false;
+					}
+					setError(result.error ?? t("config.saveFailed"));
+					return false;
+				}
+				await load();
+				return true;
+			} catch (caught) {
+				setError(caught instanceof Error ? caught.message : String(caught));
+				return false;
+			} finally {
+				setSaving(false);
+			}
+		},
+		[load, scope, snapshot?.writableError],
+	);
+
+	/** 智能添加：写入草稿 → 立即落盘（乐观锁保护）→ 自动跑一次真实连接检测（B 片状态卡的数据源）。 */
+	const handleSmartAdd = useCallback(
+		async (entries: SmartAddEntry[]) => {
+			if (entries.length === 0) return;
+			const nextServers = { ...(writable.mcpServers ?? {}) };
+			for (const entry of entries) nextServers[entry.name] = entry.definition;
+			const toSave: McpConfigFile = { ...writable, mcpServers: nextServers };
+			applyWritable(toSave);
+			const ok = await persistServers(toSave);
+			if (ok) void runStatusCheck();
+		},
+		[applyWritable, persistServers, runStatusCheck, writable],
+	);
+
 	const save = useCallback(async (): Promise<boolean> => {
-		if (snapshot?.writableError) {
-			setError(t("config.mcp.writableBroken"));
-			return false;
-		}
 		const toSave: McpConfigFile = {
 			...writable,
 			mcpServers: { ...(writable.mcpServers ?? {}) },
@@ -526,30 +579,10 @@ export const McpTab = forwardRef<
 			}
 			toSave.mcpServers = { ...toSave.mcpServers, [name]: creating.definition };
 		}
-		setSaving(true);
-		setError(null);
-		try {
-			const result = await api.config.saveMcp(toSave, scope, snapshot?.revision);
-			if (!result.valid) {
-				if (result.conflict) {
-					// 乐观锁：磁盘上的 mcp.json 被外部改过（pi/手改/其它窗口），必须以磁盘为准。
-					setError(t("config.mcp.conflict"));
-					await load();
-					return false;
-				}
-				setError(result.error ?? t("config.saveFailed"));
-				return false;
-			}
-			await load();
-			if (creating?.name.trim()) setSelected(creating.name.trim());
-			return true;
-		} catch (caught) {
-			setError(isProjectUntrustedError(caught) ? t("config.projectUntrusted.notice") : caught instanceof Error ? caught.message : String(caught));
-			return false;
-		} finally {
-			setSaving(false);
-		}
-	}, [creating, displayServers, load, scope, snapshot?.writableError, writable]);
+		const ok = await persistServers(toSave);
+		if (ok && creating?.name.trim()) setSelected(creating.name.trim());
+		return ok;
+	}, [creating, displayServers, persistServers, writable]);
 
 	useImperativeHandle(ref, () => ({ save, reload: load }), [save, load]);
 
@@ -581,7 +614,7 @@ export const McpTab = forwardRef<
 						{t("common.refresh")}
 					</Button>
 					<ResourceImportDialog kind="mcp" sourceProjectId={activeProjectId} triggerLabel={t("config.import.button")} onImported={() => void load()} />
-					<Button size="sm" onClick={startCreate} disabled={saving || Boolean(creating)}>
+					<Button size="sm" onClick={openSmartAdd} disabled={saving || Boolean(creating)}>
 						<Plus size={14} />
 						{t("config.mcp.add")}
 					</Button>
@@ -630,406 +663,309 @@ export const McpTab = forwardRef<
 						{layer.exists ? "" : ` · ${t("config.mcp.missing")}`}
 					</span>
 				))}
-			</div>
-			{snapshot?.writablePath ? (
-				<p className="truncate font-mono text-micro text-muted-foreground" title={snapshot.writablePath}>
-					{t("config.mcp.writingTo")}: {snapshot.writablePath}
-				</p>
-			) : null}
 
-			{/* 真实连接检测（pi mcp list --json）：配置正确 ≠ 能连上，这里给出 state/tools/errors。 */}
-			<div className="rounded-md border border-border-subtle bg-bg-panel p-2.5">
-				<div className="flex items-center justify-between gap-2">
-					<div className="flex items-center gap-1.5 text-control font-medium">
-						<Radio size={14} />
-						{t("config.mcp.status.title")}
+				{/* 真实连接检测（pi mcp list --json）：配置正确 ≠ 能连上，这里给出 state/tools/errors。 */}
+				<div className="rounded-md border border-border-subtle bg-bg-panel p-2.5">
+					<div className="flex items-center justify-between gap-2">
+						<div className="flex items-center gap-1.5 text-control font-medium">
+							<Radio size={14} />
+							{t("config.mcp.status.title")}
+						</div>
+						<Button variant="outline" size="sm" onClick={() => void runStatusCheck()} disabled={statusLoading || saving} title={statusError === t("config.mcp.draftBlocked") ? t("config.mcp.draftBlocked") : undefined}>
+							{statusLoading ? t("config.mcp.status.checking") : t("config.mcp.status.check")}
+						</Button>
 					</div>
-					<Button variant="outline" size="sm" onClick={() => void runStatusCheck()} disabled={statusLoading || saving} title={statusError === t("config.mcp.draftBlocked") ? t("config.mcp.draftBlocked") : undefined}>
-						{statusLoading ? t("config.mcp.status.checking") : t("config.mcp.status.check")}
-					</Button>
-				</div>
-				{statusError ? <p className="mt-2 text-micro text-danger">{statusError}</p> : null}
-				{status ? (
-					<div className="mt-2 grid gap-1.5">
-						{status.servers.map((server) => (
-							<div key={server.name} className="rounded-sm border border-border-subtle px-2.5 py-1.5">
-								<div className="flex flex-wrap items-center gap-2">
-									<span className={`size-1.5 shrink-0 rounded-full ${server.state === "connected" ? "bg-[var(--color-success)]" : server.state === "needs-auth" ? "bg-[var(--color-warning,#d97706)]" : server.state === "disabled" ? "bg-muted-foreground" : "bg-danger"}`} aria-hidden="true" />
-									<span className="text-control font-medium">{server.name}</span>
-									<span className="text-micro text-muted-foreground">
-										{server.state === "connected" ? t("config.mcp.status.connected", { count: server.tools.length }) : server.state === "needs-auth" ? t("config.mcp.status.needsAuth") : server.state === "disabled" ? t("config.mcp.status.disabled") : t("config.mcp.status.disconnected")}
-									</span>
-									<span className="text-micro text-muted-foreground">· {server.exposure}</span>
-									{providerAuthServerNames.has(server.name) ? (
-										// provider-auth 不是 MCP OAuth：不能提示再去 MCP 登录，也不能在这里登出。
-										<span className="text-micro text-muted-foreground">{t("config.mcp.providerAuth.statusHint")}</span>
-									) : (
-										<>
-											{server.state === "needs-auth" ? (
-												loggingInServer === server.name ? (
-													<span className="text-micro text-muted-foreground">{t("config.mcp.oauth.loggingIn")}</span>
-												) : (
-													<Button variant="outline" size="xs" onClick={() => void runLogin(server.name)}>
-														<LogIn size={12} />
-														{t("config.mcp.oauth.login")}
-													</Button>
-												)
-											) : null}
-											{/* 只对真有已存凭据的 server 显示登出（beui 这类无 OAuth 的不再误显） */}
-											{(snapshot?.oauthCredentialNames ?? []).includes(server.name) ? (
-												<Button variant="ghost" size="xs" onClick={() => setLogoutConfirm(server.name)}>
-													<LogOut size={12} />
-													{t("config.mcp.oauth.logout")}
-												</Button>
-											) : null}
-										</>
-									)}
-								</div>
-								{loggingInServer === server.name ? (
-									<div className="mt-1 flex flex-wrap items-center gap-1.5 text-micro text-muted-foreground">
-										<span>{t("config.mcp.status.loginPending")}</span>
-										{loginUrl?.server === server.name ? (
-											<button type="button" className="text-primary underline underline-offset-2" onClick={() => void window.piDesktop.app.openExternal(loginUrl.url, true)}>
-												{t("config.mcp.oauth.openAuthLink")}
-											</button>
-										) : null}
-									</div>
-								) : null}
-								{server.error ? (
-									<p className="mt-1 break-all text-micro text-danger" title={server.error}>
-										{server.error}
-									</p>
-								) : null}
-								{server.tools.length > 0 && server.state !== "connected" ? <p className="mt-1 truncate font-mono text-micro text-muted-foreground">{server.tools.join(", ")}</p> : null}
-							</div>
-						))}
-						{status.servers.length === 0 ? <p className="text-micro text-muted-foreground">{t("config.mcp.status.empty")}</p> : null}
-						{status.errors.map((message, index) => (
-							<p key={index} className="rounded-sm border border-danger/20 px-2 py-1 text-micro text-danger">
-								{message}
-							</p>
-						))}
-						{status.note ? <p className="text-micro text-muted-foreground">{status.note}</p> : null}
-					</div>
-				) : null}
-				{/* 登录/登出/检测结果始终显示：此前只在状态列表缺少该 server 时渲染，常见失败被吞掉。 */}
-				{loginResult ? (
-					<p className={`mt-2 break-all text-micro ${loginResult.ok ? "text-[var(--color-success)]" : "text-danger"}`}>
-						{loginResult.server}: {loginResult.output || (loginResult.ok ? t("config.mcp.oauth.done") : t("config.mcp.oauth.failed"))}
-					</p>
-				) : null}
-			</div>
-
-			<div className="grid min-h-0 flex-1 grid-cols-[minmax(220px,280px)_minmax(0,1fr)] gap-3 max-[820px]:grid-cols-1">
-				<McpServerListPane
-					servers={displayServers}
-					selected={selected}
-					creating={Boolean(creating)}
-					onSelect={(name) => {
-						setSelected(name);
-						setProbe(null);
-					}}
-				/>
-
-				<div className="flex min-h-0 flex-col gap-3 overflow-auto rounded-md border border-border-subtle bg-bg-panel p-3">
-					{!selected && !creating ? (
-						<div className="py-8 text-center text-micro text-muted-foreground">{t("config.mcp.selectHint")}</div>
-					) : (
-						<>
-							{selectedItem?.pendingDelete ? (
-								<div className="flex flex-wrap items-center gap-2 rounded-sm border border-border-subtle bg-bg-hover px-2.5 py-2 text-micro text-muted-foreground">
-									<span>{t("config.mcp.pendingDeleteNotice")}</span>
-									<Button variant="outline" size="xs" onClick={undoDelete} disabled={saving}>
-										{t("config.mcp.undoDelete")}
-									</Button>
-								</div>
-							) : null}
-							<div className="grid gap-2">
-								<Label>{t("config.mcp.field.name")}</Label>
-								<Input
-									value={creating ? creating.name : (selected ?? "")}
-									onChange={(event) => {
-										if (!creating) return;
-										setCreating({ ...creating, name: event.target.value });
-										markDirty();
-									}}
-									disabled={!creating || saving}
-									placeholder="chrome-devtools"
-									className="h-8 font-mono"
+					{statusError ? <p className="mt-2 text-micro text-danger">{statusError}</p> : null}
+					{status ? (
+						<div className="mt-2 grid gap-1.5">
+							{status.servers.map((server) => (
+								<McpStatusRow
+									key={server.name}
+									server={server}
+									providerAuth={providerAuthServerNames.has(server.name)}
+									hasCredential={(snapshot?.oauthCredentialNames ?? []).includes(server.name)}
+									loggingIn={loggingInServer === server.name}
+									loginUrl={loginUrl?.server === server.name ? loginUrl : null}
+									onLogin={(name) => void runLogin(name)}
+									onLogout={(name) => setLogoutConfirm(name)}
+									onOpenAuthUrl={(url) => void window.piDesktop.app.openExternal(url, true)}
 								/>
-							</div>
-							<div className="grid gap-2">
-								<Label>{t("config.mcp.field.transport")}</Label>
-								<ConfigSelect value={transport} options={TRANSPORT_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))} onChange={(value) => switchTransport(value as McpServerTransport)} />
-							</div>
-							<div className="flex flex-wrap items-center gap-1.5">
-								<Button variant="outline" size="sm" onClick={() => void runProbe()} disabled={probing || saving}>
-									<PlugZap size={14} />
-									{probing ? t("config.mcp.probing") : t("config.mcp.probe")}
-								</Button>
-								{creating ? (
-									<Button variant="ghost" size="sm" onClick={cancelCreate}>
-										{t("common.cancel")}
-									</Button>
-								) : selectedItem?.pendingDelete ? (
-									<Button variant="outline" size="sm" onClick={undoDelete} disabled={saving}>
-										{t("config.mcp.undoDelete")}
-									</Button>
-								) : (
-									<Button variant="outline" size="sm" className="text-destructive" onClick={removeSelected} disabled={saving}>
-										<Trash2 size={13} />
-										{selectedItem?.ownedByWritable ? t("common.delete") : t("config.mcp.disableInstead")}
-									</Button>
-								)}
-							</div>
-							{probe ? <div className={`rounded-sm border px-2.5 py-2 text-micro ${probe.ok ? "border-[var(--color-success)]/30 text-[var(--color-success)]" : "border-danger/20 text-danger"}`}>{probe.ok ? `${t("config.mcp.probeOk")} · ${probe.detail}` : `${t("config.mcp.probeFail")} · ${probe.error}`}</div> : null}
-							{transport === "stdio" ? (
-								<>
-									<div className="grid gap-2">
-										<Label>{t("config.mcp.field.command")}</Label>
-										<Input value={editingDef.command ?? ""} onChange={(event) => patchEditing({ command: event.target.value, url: undefined })} className="h-8 font-mono" placeholder="npx" />
-									</div>
-									<div className="grid gap-2">
-										<Label>{t("config.mcp.field.args")}</Label>
-										<Input value={argsToText(editingDef.args)} onChange={(event) => patchEditing({ args: textToArgs(event.target.value) })} className="h-8 font-mono" placeholder="-y chrome-devtools-mcp@1.6.0" />
-									</div>
-									<div className="grid gap-2">
-										<Label>{t("config.mcp.field.cwd")}</Label>
-										<Input value={editingDef.cwd ?? ""} onChange={(event) => patchEditing({ cwd: event.target.value || undefined })} className="h-8 font-mono" />
-									</div>
-								</>
-							) : null}
-							{transport === "http" ? (
-								<>
-									<div className="grid gap-2">
-										<Label>{t("config.mcp.field.url")}</Label>
-										<Input
-											value={editingDef.url ?? ""}
-											onChange={(event) => patchEditing({ url: event.target.value, command: undefined, args: undefined })}
-											// 新建预填的裸 https:// 只是提示：首次聚焦全选，打字即整体替换，避免拼出畸形 URL
-											onFocus={(event) => {
-												if (event.currentTarget.value === "https://") event.currentTarget.select();
-											}}
-											className="h-8 font-mono"
-											placeholder="https://mcp.example.com/mcp"
-										/>
-									</div>
-									<div className="grid gap-2">
-										<Label>{t("config.mcp.field.headers")}</Label>
-										<Textarea value={recordToText(editingDef.headers)} onChange={(event) => patchEditing({ headers: textToRecord(event.target.value) })} placeholder={t("config.mcp.field.headersPlaceholder")} className="min-h-20 font-mono text-control" />
-									</div>
-									{/* 供应商登录（auth.provider）仅全局可配：项目层被 pi 校验拒绝。开关开启后 pi 用所选供应商凭据。 */}
-									{!isProjectScope ? (
-										<div className="rounded-sm border border-border-subtle p-2.5">
-											<div className="flex items-center justify-between gap-2">
-												<div className="min-w-0">
-													<div className="text-control font-medium">{t("config.mcp.providerAuth.section")}</div>
-													<p className="mt-0.5 text-micro text-muted-foreground">{t("config.mcp.providerAuth.sectionHint")}</p>
-												</div>
-												<Switch checked={usesProviderAuth(editingDef)} disabled={saving || knownProviders.length === 0} onCheckedChange={(checked) => patchEditing(checked ? { auth: { provider: knownProviders[0] } } : { auth: undefined })} />
-											</div>
-											{knownProviders.length === 0 ? <p className="mt-1 text-micro text-muted-foreground">{t("config.mcp.providerAuth.emptyHint")}</p> : null}
-											{usesProviderAuth(editingDef) ? (
-												<div className="mt-2 grid gap-1">
-													<Label>{t("config.mcp.providerAuth.provider")}</Label>
-													<ConfigSelect value={editingDef.auth?.provider ?? ""} options={knownProviders.map((provider) => ({ value: provider, label: provider }))} onChange={(value) => patchEditing({ auth: { provider: value } })} />
-													<p className="text-micro text-muted-foreground">{t("config.mcp.providerAuth.hint", { provider: editingDef.auth?.provider ?? "" })}</p>
-												</div>
-											) : null}
-										</div>
-									) : null}
-									{usesProviderAuth(editingDef) && isProjectScope ? (
-										<div className="rounded-sm border border-border-subtle p-2.5">
-											<div className="text-control font-medium">{t("config.mcp.providerAuth.section")}</div>
-											<p className="mt-0.5 text-micro text-muted-foreground">{t("config.mcp.providerAuth.hint", { provider: editingDef.auth?.provider ?? "" })}</p>
-										</div>
-									) : !usesProviderAuth(editingDef) ? (
-										<div className="rounded-sm border border-border-subtle p-2.5">
-											<div className="text-control font-medium">{t("config.mcp.oauth.section")}</div>
-											<p className="mb-2 mt-0.5 text-micro text-muted-foreground">{t("config.mcp.oauth.sectionHint")}</p>
-											<div className="grid gap-2">
-												<div className="grid gap-1">
-													<Label>{t("config.mcp.oauth.clientId")}</Label>
-													<Input value={editingDef.oauth?.clientId ?? ""} onChange={(event) => patchOauth({ clientId: event.target.value || undefined })} className="h-8 font-mono" />
-												</div>
-												<div className="grid gap-1">
-													<Label>{t("config.mcp.oauth.clientSecret")}</Label>
-													<SecretInput value={editingDef.oauth?.clientSecret ?? ""} onChange={(value) => patchOauth({ clientSecret: value || undefined })} placeholder={t("config.mcp.oauth.secretPlaceholder")} />
-												</div>
-												<div className="grid gap-1">
-													<Label>{t("config.mcp.oauth.clientName")}</Label>
-													<Input value={editingDef.oauth?.clientName ?? ""} onChange={(event) => patchOauth({ clientName: event.target.value || undefined })} className="h-8 font-mono" placeholder="pi" />
-													<p className="text-micro text-muted-foreground">{t("config.mcp.oauth.clientNameHint")}</p>
-												</div>
-												<div className="grid gap-1">
-													<Label>{t("config.mcp.oauth.callbackPort")}</Label>
-													<Input
-														value={editingDef.oauth?.callbackPort === undefined ? "" : String(editingDef.oauth.callbackPort)}
-														onChange={(event) => {
-															const raw = event.target.value.trim();
-															if (raw === "") {
-																patchOauth({ callbackPort: undefined });
-																return;
-															}
-															const parsed = Number(raw);
-															if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535) patchOauth({ callbackPort: parsed });
-														}}
-														className="h-8 font-mono"
-														placeholder="8765"
-														inputMode="numeric"
-													/>
-												</div>
-												<div className="grid gap-1">
-													<Label>{t("config.mcp.oauth.callbackUrl")}</Label>
-													<Input value={editingDef.oauth?.callbackUrl ?? ""} onChange={(event) => patchOauth({ callbackUrl: event.target.value || undefined })} className="h-8 font-mono" placeholder="http://127.0.0.1:8765/callback" />
-													<p className="text-micro text-muted-foreground">{t("config.mcp.oauth.callbackUrlHint")}</p>
-												</div>
-												<div className="grid gap-1">
-													<Label>{t("config.mcp.oauth.scope")}</Label>
-													<Input value={editingDef.oauth?.scope ?? ""} onChange={(event) => patchOauth({ scope: event.target.value || undefined })} className="h-8 font-mono" placeholder="read:project write:project" />
-													<p className="text-micro text-muted-foreground">{t("config.mcp.oauth.scopeHint")}</p>
-												</div>
-												<div className="grid gap-1">
-													<Label>{t("config.mcp.oauth.authServerMetadataUrl")}</Label>
-													<Input value={editingDef.oauth?.authServerMetadataUrl ?? ""} onChange={(event) => patchOauth({ authServerMetadataUrl: event.target.value || undefined })} className="h-8 font-mono" placeholder="https://auth.example.com/.well-known/oauth-authorization-server" />
-													<p className="text-micro text-muted-foreground">{t("config.mcp.oauth.authServerMetadataUrlHint")}</p>
-												</div>
-												<div className="grid gap-1">
-													<Label>{t("config.mcp.oauth.clientRegistration")}</Label>
-													<Input value={editingDef.oauth?.clientRegistration ?? ""} onChange={(event) => patchOauth({ clientRegistration: event.target.value === "dcr" || event.target.value === "cimd" ? event.target.value : undefined })} className="h-8 font-mono" placeholder="dcr" />
-													<p className="text-micro text-muted-foreground">{t("config.mcp.oauth.clientRegistrationHint")}</p>
-												</div>
-											</div>
-										</div>
-									) : null}
-								</>
-							) : null}
-							<div className="grid gap-2">
-								<Label>{t("config.mcp.field.exposure")}</Label>
-								<ConfigSelect value={editingDisplayDef.exposure ?? "codemode"} options={EXPOSURE_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))} onChange={(value) => patchEditing({ exposure: value as McpExposure })} />
-								<p className="text-micro text-muted-foreground">{t("config.mcp.exposureHint")}</p>
-							</div>
-							<div className="rounded-sm border border-border-subtle p-2.5">
-								<div className="flex items-center justify-between gap-2">
-									<div>
-										<div className="text-control font-medium">{t("config.mcp.toolExposure.section")}</div>
-										<p className="mt-0.5 text-micro text-muted-foreground">{t("config.mcp.toolExposure.sectionHint")}</p>
-									</div>
-									<Button variant="outline" size="xs" onClick={addToolExposureRow}>
-										<Plus size={13} />
-										{t("config.mcp.toolExposure.add")}
-									</Button>
-								</div>
-								{rows.map((row) => (
-									<div key={row.rowId} className="mt-2 flex items-center gap-1.5">
-										<Input value={row.pattern} onChange={(event) => commitToolExposureRows(rows.map((entry) => (entry.rowId === row.rowId ? { ...entry, pattern: event.target.value } : entry)))} className="h-8 min-w-0 flex-1 font-mono" placeholder="get_*" />
-										<ConfigSelect
-											value={row.exposure}
-											options={EXPOSURE_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))}
-											onChange={(value) => commitToolExposureRows(rows.map((entry) => (entry.rowId === row.rowId ? { ...entry, exposure: value as McpExposure } : entry)))}
-											triggerClassName="w-36 shrink-0"
-										/>
-										<Button
-											variant="ghost"
-											size="icon-sm"
-											className="size-7 shrink-0 text-muted-foreground"
-											onClick={() => {
-												const next = rows.filter((entry) => entry.rowId !== row.rowId);
-												setToolExposureOverride(next.length > 0 ? next : null);
-												patchEditing({ toolExposure: next.length > 0 ? Object.fromEntries(next.map((entry) => [entry.pattern, entry.exposure])) : undefined });
-											}}
-											title={t("common.delete")}
-										>
-											<Trash2 size={13} />
+							))}
+							{status.servers.length === 0 ? <p className="text-micro text-muted-foreground">{t("config.mcp.status.empty")}</p> : null}
+							{status.errors.map((message, index) => (
+								<p key={index} className="rounded-sm border border-danger/20 px-2 py-1 text-micro text-danger">
+									{message}
+								</p>
+							))}
+							{status.note ? <p className="text-micro text-muted-foreground">{status.note}</p> : null}
+						</div>
+					) : null}
+					{/* 登录/登出/检测结果始终显示：此前只在状态列表缺少该 server 时渲染，常见失败被吞掉。 */}
+					{loginResult ? (
+						<p className={`mt-2 break-all text-micro ${loginResult.ok ? "text-[var(--color-success)]" : "text-danger"}`}>
+							{loginResult.server}: {loginResult.output || (loginResult.ok ? t("config.mcp.oauth.done") : t("config.mcp.oauth.failed"))}
+						</p>
+					) : null}
+				</div>
+
+				<div className="grid min-h-0 flex-1 grid-cols-[minmax(220px,280px)_minmax(0,1fr)] gap-3 max-[820px]:grid-cols-1">
+					<McpServerListPane
+						servers={displayServers}
+						selected={selected}
+						creating={Boolean(creating)}
+						onSelect={(name) => {
+							setSelected(name);
+							setProbe(null);
+						}}
+					/>
+
+					<div className="flex min-h-0 flex-col gap-3 overflow-auto rounded-md border border-border-subtle bg-bg-panel p-3">
+						{!selected && !creating ? (
+							<McpSmartAdd existingNames={new Set(displayServers.map((item) => item.name))} disabled={saving} onAdd={handleSmartAdd} onManual={startCreate} />
+						) : (
+							<>
+								{selectedItem?.pendingDelete ? (
+									<div className="flex flex-wrap items-center gap-2 rounded-sm border border-border-subtle bg-bg-hover px-2.5 py-2 text-micro text-muted-foreground">
+										<span>{t("config.mcp.pendingDeleteNotice")}</span>
+										<Button variant="outline" size="xs" onClick={undoDelete} disabled={saving}>
+											{t("config.mcp.undoDelete")}
 										</Button>
 									</div>
-								))}
-								{rows.length === 0 ? <p className="mt-1.5 text-micro text-muted-foreground">{t("config.mcp.toolExposure.empty")}</p> : null}
-							</div>
-							<div className="grid gap-2">
-								<Label>{t("config.mcp.field.timeout")}</Label>
-								<Input
-									value={editingDef.timeout === undefined ? "" : String(editingDef.timeout)}
-									onChange={(event) => {
-										const raw = event.target.value.trim();
-										// 留空 = 用 pi 默认（60s）；只接受 >0 的有限秒数，无效输入不回写。
-										if (raw === "") {
-											patchEditing({ timeout: undefined });
-											return;
-										}
-										const parsed = Number(raw);
-										if (Number.isFinite(parsed) && parsed > 0) patchEditing({ timeout: parsed });
-									}}
-									className="h-8 font-mono"
-									placeholder="60"
-									inputMode="numeric"
-								/>
-								<p className="text-micro text-muted-foreground">{t("config.mcp.timeoutHint")}</p>
-							</div>
-							{transport === "stdio" ? (
+								) : null}
+								{creating ? (
+									<button type="button" className="self-start text-micro text-primary hover:underline" onClick={openSmartAdd}>
+										← {t("config.mcp.smartAdd.back")}
+									</button>
+								) : null}
 								<div className="grid gap-2">
-									<Label>{t("config.mcp.field.env")}</Label>
-									<Textarea value={recordToText(editingDef.env)} onChange={(event) => patchEditing({ env: textToRecord(event.target.value) })} placeholder={t("config.mcp.field.envPlaceholder")} className="min-h-20 font-mono text-control" />
-								</div>
-							) : null}
-							<div className="flex items-center justify-between gap-3 rounded-sm border border-border-subtle px-2.5 py-2">
-								<div>
-									<div className="text-control font-medium">{t("config.mcp.field.enabled")}</div>
-									<div className="text-micro text-muted-foreground">{t("config.mcp.field.enabledHint")}</div>
-								</div>
-								<Switch
-									checked={!isMcpServerDisabled(editingDef)}
-									onCheckedChange={(checked) => {
-										// pi 0.99 内置 MCP 只认 `enabled`：启用删键、停用写 false（不写 adapter 的 disabled）。
-										if (creating) {
-											if (checked) {
-												const { enabled: _ignored, ...kept } = creating.definition as McpServerDefinition & { enabled?: unknown };
-												setCreating({ ...creating, definition: kept });
-											} else {
-												patchEditing({ enabled: false });
-											}
+									<Label>{t("config.mcp.field.name")}</Label>
+									<Input
+										value={creating ? creating.name : (selected ?? "")}
+										onChange={(event) => {
+											if (!creating) return;
+											setCreating({ ...creating, name: event.target.value });
 											markDirty();
-											return;
-										}
-										if (selectedItem) toggleDisabled(selectedItem, !checked);
-									}}
-								/>
-							</div>
-							{selectedItem && !creating ? (
-								<p className="text-micro text-muted-foreground" title={selectedItem.originPath}>
-									{t("config.mcp.origin")}: {selectedItem.originPath}
-									{selectedItem.ownedByWritable ? "" : ` · ${t("config.mcp.inheritedHint")}`}
-								</p>
-							) : null}
-							{/* 继承条目（项目页里来自全局）只能覆盖/停用，不能在这里删除或编辑全局定义。 */}
-							{isProjectScope && selectedItem && !creating && !selectedItem.ownedByWritable ? (
-								<div className="flex flex-wrap items-center gap-1.5 rounded-sm border border-border-subtle bg-bg-hover px-2.5 py-2">
-									<Button variant="outline" size="xs" onClick={() => toggleDisabled(selectedItem, true)} disabled={saving}>
-										{t("config.mcp.disableInherited")}
-									</Button>
-									<Button variant="ghost" size="xs" onClick={restoreInherited} disabled={saving || !hasLocalOverride}>
-										{t("config.mcp.restoreInherited")}
-									</Button>
+										}}
+										disabled={!creating || saving}
+										placeholder="chrome-devtools"
+										className="h-8 font-mono"
+									/>
 								</div>
-							) : null}
-						</>
-					)}
+								<div className="grid gap-2">
+									<Label>{t("config.mcp.field.transport")}</Label>
+									<ConfigSelect value={transport} options={TRANSPORT_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))} onChange={(value) => switchTransport(value as McpServerTransport)} />
+								</div>
+								<div className="flex flex-wrap items-center gap-1.5">
+									<Button variant="outline" size="sm" onClick={() => void runProbe()} disabled={probing || saving}>
+										<PlugZap size={14} />
+										{probing ? t("config.mcp.probing") : t("config.mcp.probe")}
+									</Button>
+									{creating ? (
+										<Button variant="ghost" size="sm" onClick={cancelCreate}>
+											{t("common.cancel")}
+										</Button>
+									) : selectedItem?.pendingDelete ? (
+										<Button variant="outline" size="sm" onClick={undoDelete} disabled={saving}>
+											{t("config.mcp.undoDelete")}
+										</Button>
+									) : (
+										<Button variant="outline" size="sm" className="text-destructive" onClick={removeSelected} disabled={saving}>
+											<Trash2 size={13} />
+											{selectedItem?.ownedByWritable ? t("common.delete") : t("config.mcp.disableInstead")}
+										</Button>
+									)}
+								</div>
+								{probe ? <div className={`rounded-sm border px-2.5 py-2 text-micro ${probe.ok ? "border-[var(--color-success)]/30 text-[var(--color-success)]" : "border-danger/20 text-danger"}`}>{probe.ok ? `${t("config.mcp.probeOk")} · ${probe.detail}` : `${t("config.mcp.probeFail")} · ${probe.error}`}</div> : null}
+								{transport === "stdio" ? (
+									<>
+										<div className="grid gap-2">
+											<Label>{t("config.mcp.field.command")}</Label>
+											<Input value={editingDef.command ?? ""} onChange={(event) => patchEditing({ command: event.target.value, url: undefined })} className="h-8 font-mono" placeholder="npx" />
+										</div>
+										<div className="grid gap-2">
+											<Label>{t("config.mcp.field.args")}</Label>
+											<Input value={argsToText(editingDef.args)} onChange={(event) => patchEditing({ args: textToArgs(event.target.value) })} className="h-8 font-mono" placeholder="-y chrome-devtools-mcp@1.6.0" />
+										</div>
+										<div className="grid gap-2">
+											<Label>{t("config.mcp.field.cwd")}</Label>
+											<Input value={editingDef.cwd ?? ""} onChange={(event) => patchEditing({ cwd: event.target.value || undefined })} className="h-8 font-mono" />
+										</div>
+									</>
+								) : null}
+								{transport === "http" ? (
+									<>
+										<div className="grid gap-2">
+											<Label>{t("config.mcp.field.url")}</Label>
+											<Input
+												value={editingDef.url ?? ""}
+												onChange={(event) => patchEditing({ url: event.target.value, command: undefined, args: undefined })}
+												// 新建预填的裸 https:// 只是提示：首次聚焦全选，打字即整体替换，避免拼出畸形 URL
+												onFocus={(event) => {
+													if (event.currentTarget.value === "https://") event.currentTarget.select();
+												}}
+												className="h-8 font-mono"
+												placeholder="https://mcp.example.com/mcp"
+											/>
+										</div>
+										<div className="grid gap-2">
+											<Label>{t("config.mcp.field.headers")}</Label>
+											<Textarea value={recordToText(editingDef.headers)} onChange={(event) => patchEditing({ headers: textToRecord(event.target.value) })} placeholder={t("config.mcp.field.headersPlaceholder")} className="min-h-20 font-mono text-control" />
+										</div>
+										{/* 供应商登录（auth.provider）仅全局可配：项目层被 pi 校验拒绝。开关开启后 pi 用所选供应商凭据。 */}
+										{!isProjectScope ? (
+											<div className="rounded-sm border border-border-subtle p-2.5">
+												<div className="flex items-center justify-between gap-2">
+													<div className="min-w-0">
+														<div className="text-control font-medium">{t("config.mcp.providerAuth.section")}</div>
+														<p className="mt-0.5 text-micro text-muted-foreground">{t("config.mcp.providerAuth.sectionHint")}</p>
+													</div>
+													<Switch checked={usesProviderAuth(editingDef)} disabled={saving || knownProviders.length === 0} onCheckedChange={(checked) => patchEditing(checked ? { auth: { provider: knownProviders[0] } } : { auth: undefined })} />
+												</div>
+												{knownProviders.length === 0 ? <p className="mt-1 text-micro text-muted-foreground">{t("config.mcp.providerAuth.emptyHint")}</p> : null}
+												{usesProviderAuth(editingDef) ? (
+													<div className="mt-2 grid gap-1">
+														<Label>{t("config.mcp.providerAuth.provider")}</Label>
+														<ConfigSelect value={editingDef.auth?.provider ?? ""} options={knownProviders.map((provider) => ({ value: provider, label: provider }))} onChange={(value) => patchEditing({ auth: { provider: value } })} />
+														<p className="text-micro text-muted-foreground">{t("config.mcp.providerAuth.hint", { provider: editingDef.auth?.provider ?? "" })}</p>
+													</div>
+												) : null}
+											</div>
+										) : null}
+										{usesProviderAuth(editingDef) && isProjectScope ? (
+											<div className="rounded-sm border border-border-subtle p-2.5">
+												<div className="text-control font-medium">{t("config.mcp.providerAuth.section")}</div>
+												<p className="mt-0.5 text-micro text-muted-foreground">{t("config.mcp.providerAuth.hint", { provider: editingDef.auth?.provider ?? "" })}</p>
+											</div>
+										) : null}
+										<div className="grid gap-2">
+											<Label>{t("config.mcp.field.exposure")}</Label>
+											<ConfigSelect value={editingDisplayDef.exposure ?? "codemode"} options={EXPOSURE_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))} onChange={(value) => patchEditing({ exposure: value as McpExposure })} />
+											<p className="text-micro text-muted-foreground">{t("config.mcp.exposureHint")}</p>
+										</div>
+									</>
+								) : null}
+								<div className="rounded-sm border border-border-subtle p-2.5">
+									<div className="flex items-center justify-between gap-2">
+										<div>
+											<div className="text-control font-medium">{t("config.mcp.toolExposure.section")}</div>
+											<p className="mt-0.5 text-micro text-muted-foreground">{t("config.mcp.toolExposure.sectionHint")}</p>
+										</div>
+										<Button variant="outline" size="xs" onClick={addToolExposureRow}>
+											<Plus size={13} />
+											{t("config.mcp.toolExposure.add")}
+										</Button>
+									</div>
+									{rows.map((row) => (
+										<div key={row.rowId} className="mt-2 flex items-center gap-1.5">
+											<Input value={row.pattern} onChange={(event) => commitToolExposureRows(rows.map((entry) => (entry.rowId === row.rowId ? { ...entry, pattern: event.target.value } : entry)))} className="h-8 min-w-0 flex-1 font-mono" placeholder="get_*" />
+											<ConfigSelect
+												value={row.exposure}
+												options={EXPOSURE_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))}
+												onChange={(value) => commitToolExposureRows(rows.map((entry) => (entry.rowId === row.rowId ? { ...entry, exposure: value as McpExposure } : entry)))}
+												triggerClassName="w-36 shrink-0"
+											/>
+											<Button
+												variant="ghost"
+												size="icon-sm"
+												className="size-7 shrink-0 text-muted-foreground"
+												onClick={() => {
+													const next = rows.filter((entry) => entry.rowId !== row.rowId);
+													setToolExposureOverride(next.length > 0 ? next : null);
+													patchEditing({ toolExposure: next.length > 0 ? Object.fromEntries(next.map((entry) => [entry.pattern, entry.exposure])) : undefined });
+												}}
+												title={t("common.delete")}
+											>
+												<Trash2 size={13} />
+											</Button>
+										</div>
+									))}
+									{rows.length === 0 ? <p className="mt-1.5 text-micro text-muted-foreground">{t("config.mcp.toolExposure.empty")}</p> : null}
+								</div>
+								<div className="grid gap-2">
+									<Label>{t("config.mcp.field.timeout")}</Label>
+									<Input
+										value={editingDef.timeout === undefined ? "" : String(editingDef.timeout)}
+										onChange={(event) => {
+											const raw = event.target.value.trim();
+											// 留空 = 用 pi 默认（60s）；只接受 >0 的有限秒数，无效输入不回写。
+											if (raw === "") {
+												patchEditing({ timeout: undefined });
+												return;
+											}
+											const parsed = Number(raw);
+											if (Number.isFinite(parsed) && parsed > 0) patchEditing({ timeout: parsed });
+										}}
+										className="h-8 font-mono"
+										placeholder="60"
+										inputMode="numeric"
+									/>
+									<p className="text-micro text-muted-foreground">{t("config.mcp.timeoutHint")}</p>
+								</div>
+								{transport === "stdio" ? (
+									<div className="grid gap-2">
+										<Label>{t("config.mcp.field.env")}</Label>
+										<Textarea value={recordToText(editingDef.env)} onChange={(event) => patchEditing({ env: textToRecord(event.target.value) })} placeholder={t("config.mcp.field.envPlaceholder")} className="min-h-20 font-mono text-control" />
+									</div>
+								) : null}
+								<div className="flex items-center justify-between gap-3 rounded-sm border border-border-subtle px-2.5 py-2">
+									<div>
+										<div className="text-control font-medium">{t("config.mcp.field.enabled")}</div>
+										<div className="text-micro text-muted-foreground">{t("config.mcp.field.enabledHint")}</div>
+									</div>
+									<Switch
+										checked={!isMcpServerDisabled(editingDef)}
+										onCheckedChange={(checked) => {
+											// pi 0.99 内置 MCP 只认 `enabled`：启用删键、停用写 false（不写 adapter 的 disabled）。
+											if (creating) {
+												if (checked) {
+													const { enabled: _ignored, ...kept } = creating.definition as McpServerDefinition & { enabled?: unknown };
+													setCreating({ ...creating, definition: kept });
+												} else {
+													patchEditing({ enabled: false });
+												}
+												markDirty();
+												return;
+											}
+											if (selectedItem) toggleDisabled(selectedItem, !checked);
+										}}
+									/>
+								</div>
+								{selectedItem && !creating ? (
+									<p className="text-micro text-muted-foreground" title={selectedItem.originPath}>
+										{t("config.mcp.origin")}: {selectedItem.originPath}
+										{selectedItem.ownedByWritable ? "" : ` · ${t("config.mcp.inheritedHint")}`}
+									</p>
+								) : null}
+								{/* 继承条目（项目页里来自全局）只能覆盖/停用，不能在这里删除或编辑全局定义。 */}
+								{isProjectScope && selectedItem && !creating && !selectedItem.ownedByWritable ? (
+									<div className="flex flex-wrap items-center gap-1.5 rounded-sm border border-border-subtle bg-bg-hover px-2.5 py-2">
+										<Button variant="outline" size="xs" onClick={() => toggleDisabled(selectedItem, true)} disabled={saving}>
+											{t("config.mcp.disableInherited")}
+										</Button>
+										<Button variant="ghost" size="xs" onClick={restoreInherited} disabled={saving || !hasLocalOverride}>
+											{t("config.mcp.restoreInherited")}
+										</Button>
+									</div>
+								) : null}
+							</>
+						)}
+					</div>
 				</div>
+				{logoutConfirm ? (
+					<ConfirmDialog
+						title={t("config.mcp.oauth.logoutConfirmTitle")}
+						message={t("config.mcp.oauth.logoutConfirmBody", { name: logoutConfirm })}
+						confirmLabel={t("config.mcp.oauth.logout")}
+						danger
+						onConfirm={() => {
+							const server = logoutConfirm;
+							setLogoutConfirm(null);
+							void runLogout(server);
+						}}
+						onCancel={() => setLogoutConfirm(null)}
+					/>
+				) : null}
 			</div>
-			{logoutConfirm ? (
-				<ConfirmDialog
-					title={t("config.mcp.oauth.logoutConfirmTitle")}
-					message={t("config.mcp.oauth.logoutConfirmBody", { name: logoutConfirm })}
-					confirmLabel={t("config.mcp.oauth.logout")}
-					danger
-					onConfirm={() => {
-						const server = logoutConfirm;
-						setLogoutConfirm(null);
-						void runLogout(server);
-					}}
-					onCancel={() => setLogoutConfirm(null)}
-				/>
-			) : null}
 		</div>
 	);
 });
