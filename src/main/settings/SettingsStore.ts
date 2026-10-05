@@ -226,6 +226,12 @@ Gitmoji 对应关系：
 	// 巡游碰边后 idle 停顿默认 5 分钟
 	petPatrolPauseMin: 5,
 
+	// ── 悬浮球（floater）：默认关闭；开启后主窗口可隐藏为常驻小圆点 ──
+	floatingBallEnabled: false,
+	floatingBallExpandTarget: "mini",
+	floatingBallAlwaysOnTop: true,
+	floatingBallSnapToEdge: true,
+
 	// ── 闲置 agent 内存优化：自动释放长时间闲置的 agent 进程 ──
 	// 默认开启；保留最近闲置的 5 个；连续闲置 1 小时（60 分钟）才可释放
 	idleAgentAutoRelease: true,

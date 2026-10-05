@@ -342,6 +342,16 @@ export type AppSettings = {
 	/** 巡游碰边后 idle 停顿时长（分钟），默认 5，范围 1–30 */
 	petPatrolPauseMin: number;
 
+	// ── 悬浮球（floater）：主窗口隐藏后屏幕角落的常驻小圆点，点开进入小任务浮窗/工作台 ──
+	/** 是否启用悬浮球，默认 false：开启后主窗口可隐藏为 64px 悬浮球，不挡屏 */
+	floatingBallEnabled: boolean;
+	/** 悬浮球点击后的展开目标：mini=极简浮窗（状态+快捷输入+最近会话），compact=小任务紧凑模式（主窗口紧凑化） */
+	floatingBallExpandTarget: "mini" | "compact";
+	/** 悬浮球是否始终置顶，默认 true */
+	floatingBallAlwaysOnTop: boolean;
+	/** 悬浮球边缘吸附：拖动松手后是否自动贴到屏幕左右边缘，默认 true */
+	floatingBallSnapToEdge: boolean;
+
 	// ── 闲置 Agent 内存优化：自动释放长时间闲置的 agent 进程，降低多会话内存占用 ──
 	/** 是否自动释放闲置 agent，默认 true：开关关闭后闲置 agent 常驻内存不释放 */
 	idleAgentAutoRelease: boolean;
@@ -854,6 +864,11 @@ export function createDefaultAppSettings(): AppSettings {
 		petScale: DEFAULT_PET_SCALE,
 		petPatrolEnabled: true,
 		petPatrolPauseMin: 5,
+		// 悬浮球默认关闭：开启后主窗口可隐藏为小圆点，不影响现状
+		floatingBallEnabled: false,
+		floatingBallExpandTarget: "mini",
+		floatingBallAlwaysOnTop: true,
+		floatingBallSnapToEdge: true,
 		// 闲置 agent 自动释放：与 main SettingsStore 默认值保持一致，避免启动时闪烁
 		idleAgentAutoRelease: true,
 		idleAgentKeepCount: 5,

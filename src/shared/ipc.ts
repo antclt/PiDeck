@@ -965,6 +965,21 @@ export const ipcChannels = {
 	quickTaskExit: "quick-task:exit",
 	shellMenuQuickTaskGetState: "shell-menu:quick-task-get-state",
 	shellMenuQuickTaskSetEnabled: "shell-menu:quick-task-set-enabled",
+	// ===== 悬浮球（floater）：主窗口隐藏后的常驻小圆点 =====
+	floatingBallGetState: "floating-ball:get-state",
+	floatingBallState: "floating-ball:state",
+	floatingBallEnter: "floating-ball:enter",
+	floatingBallExit: "floating-ball:exit",
+	floatingBallDragStart: "floating-ball:drag-start",
+	floatingBallDragEnd: "floating-ball:drag-end",
+	floatingBallContextMenu: "floating-ball:context-menu",
+	floatingBallSetExpandTarget: "floating-ball:set-expand-target",
+	// ===== 极简浮窗（mini overlay）：悬浮球点击展开的状态总览+快捷输入窗 =====
+	miniOverlayState: "mini-overlay:state",
+	miniOverlayJumpToSession: "mini-overlay:jump-to-session",
+	miniOverlayQuickPrompt: "mini-overlay:quick-prompt",
+	miniOverlayClose: "mini-overlay:close",
+	floatingBallSetEnabled: "floating-ball:set-enabled",
 	/** 渲染层 → 主进程：启用/取消资源管理器右键菜单注册 */
 	shellMenuSetEnabled: "shell-menu:set-enabled",
 

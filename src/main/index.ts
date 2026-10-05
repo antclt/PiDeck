@@ -372,6 +372,9 @@ import { registerClipboardIpc } from "./ipc/clipboardIpc";
 import { registerShellMenuIpc } from "./ipc/shellMenuIpc";
 import { QuickTaskWindowChrome } from "./quickTask/quickTaskWindowChrome";
 import { registerQuickTaskIpc } from "./ipc/quickTaskIpc";
+import { registerFloatingIpc } from "./ipc/floatingIpc";
+import { FloatingController } from "./floating/FloatingController";
+import { MiniOverlayWindow } from "./floating/MiniOverlayWindow";
 import { BROWSER_PANEL_PARTITION as BROWSER_PANEL_PARTITION_SHARED, isAllowedBrowserPanelUrl as isAllowedBrowserPanelUrlShared } from "./browser/browserSecurity";
 import { WebServiceManager } from "./web/WebServiceManager";
 import { WebWorkspaceRoutes } from "./web/WebWorkspaceRoutes";
@@ -406,6 +409,8 @@ const quickTaskChrome = new QuickTaskWindowChrome({
 	getWindow: () => mainWindow,
 	saveWorkbenchBounds: (bounds) => saveLastWindowBounds(app.getPath("userData"), bounds),
 });
+let floatingController: FloatingController | null = null;
+let miniOverlayWindow: MiniOverlayWindow | null = null;
 let tray: Tray | null = null;
 /** Linux 托盘注册验收器（见 tray/trayRegistrationVerify.ts），退出清理里与 tray 一起停 */
 let trayRegistrationVerify: TrayRegistrationVerify | null = null;
@@ -1315,6 +1320,8 @@ function focusMainWindow() {
 	}
 	mainWindow.show();
 	mainWindow.focus();
+	// 主窗口回来时关闭极简浮窗（避免两个窗口并存）
+	miniOverlayWindow?.hide();
 	if (process.platform === "win32") {
 		// Windows 前置窗口用「临时置顶再取消」hack 抢前台（直接 focus 可能被前台锁拦截）。
 		// 必须原样还原用户置顶状态，否则会把用户手动置顶的窗口取消置顶；
@@ -1882,7 +1889,12 @@ async function createWindow() {
 	// 关闭窗口时根据设置决定：隐藏到托盘还是正常退出
 	mainWindow.on("close", (event) => {
 		if (!isQuitting && quickTaskChrome.interceptClose(event)) return;
-		if (!isQuitting && settingsStore.get().closeToTray) {
+		if (!isQuitting && settingsStore.get().floatingBallEnabled) {
+			// 悬浮球开启时，关闭主窗口 = 隐藏到悬浮球（不退出）
+			event.preventDefault();
+			mainWindow?.hide();
+			void floatingController?.show();
+		} else if (!isQuitting && settingsStore.get().closeToTray) {
 			event.preventDefault();
 			mainWindow?.hide();
 		} else if (!isQuitting) {
@@ -3692,6 +3704,70 @@ app
 		);
 		// C12：退出清理登记（before-quit 统一 runAll，新增资源不再改 before-quit）
 		quitCleanup.register("pi-agents", () => agentManager?.stopAll());
+
+		// 悬浮球控制器：主窗口隐藏后常驻屏幕角落的小圆点，点击展开 mini 浮窗/紧凑模式。
+		// 延迟到 agentManager 就绪后创建，因为依赖 addStateListener 订阅运行状态。
+		floatingController = new FloatingController({
+			settingsStore,
+			getMainWindow: () => mainWindow,
+			onExpandMini: async () => {
+				floatingController?.hide();
+				// 极简浮窗：360×480 状态总览+快捷输入+最近会话，独立于主窗口运行。
+				miniOverlayWindow ??= new MiniOverlayWindow({
+					settingsStore,
+					agentManager,
+					projectStore,
+					onJumpToSession: (sessionId, projectId) => {
+						focusMainWindow();
+						queueFocusTarget({ sessionId, projectId });
+						mainWindow?.webContents.once("did-finish-load", () => {
+							flushPendingFocusTargetOnLoad();
+						});
+					},
+					onQuickPrompt: async (projectId, text) => {
+						// 快捷输入：创建草稿 → activateRuntime → agentManager.sendPrompt（与渲染层 useQuickTask 同链路）
+						const draft = await sessionCatalog.createDraft({ projectId, title: text.slice(0, 40), environment: "native", backend: agentManager.backend });
+						const runtime = await sessionRuntimeCoordinator.activateRuntime(draft.id);
+						if (!runtime.ok) return { ok: false, message: runtime.error.code };
+						const result = await agentManager.sendPrompt({ agentId: runtime.value.agentId, message: text });
+						if (!result.accepted) return { ok: false, message: result.error };
+						return { ok: true };
+					},
+					onClose: () => {
+						// 浮窗关闭后回悬浮球（如果用户还开着悬浮球模式）。
+					},
+				});
+				await miniOverlayWindow.show();
+			},
+			onExpandCompact: async () => {
+				floatingController?.hide();
+				if (mainWindow && !mainWindow.isDestroyed()) {
+					mainWindow.show();
+					mainWindow.focus();
+					void quickTaskChrome.controller.open(app.getPath("desktop"));
+				}
+			},
+			onShowMainWindow: () => {
+				if (mainWindow && !mainWindow.isDestroyed()) {
+					mainWindow.show();
+					mainWindow.focus();
+				}
+			},
+			addAgentStateListener: (listener) => agentManager.addStateListener(listener),
+			getActiveAgentCount: () => agentManager.list().filter((t) => t.status !== "closed").length,
+			getRunningAgentCount: () => agentManager.list().filter((t) => t.status === "running").length,
+			getRecentRunningTitles: () =>
+				agentManager
+					.list()
+					.filter((t) => t.status === "running")
+					.map((t) => t.title)
+					.filter(Boolean)
+					.slice(0, 3) as string[],
+		});
+		quitCleanup.register("floating-ball", () => floatingController?.destroy());
+		quitCleanup.register("mini-overlay", () => miniOverlayWindow?.destroy());
+		registerFloatingIpc(floatingController);
+
 		// RPC 日志是合并落盘的（250ms / 256 行刷一批），退出前把缓冲刷干净。
 		// 必须排在 pi-agents 之后：runAll 顺序执行，先停进程（最后几条日志在这里产生）再刷盘。
 		quitCleanup.register("rpc-logs-flush", () => rpcLogger?.flushPending());

@@ -1,0 +1,93 @@
+/* 悬浮球（floater）——透明窗口内的圆形 Logo + 状态气泡 */
+.floater-root {
+	width: 100%;
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 4px;
+	background: transparent;
+	user-select: none;
+}
+
+.floater-badge {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 8px;
+	border-radius: 10px;
+	background: rgba(20, 20, 24, 0.85);
+	backdrop-filter: blur(8px);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	max-width: 220px;
+	overflow: hidden;
+}
+
+.floater-badge-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: #4ade80;
+	flex-shrink: 0;
+	animation: floater-pulse 1.6s ease-in-out infinite;
+}
+
+.floater-badge-text {
+	font-size: 11px;
+	line-height: 1.3;
+	color: rgba(255, 255, 255, 0.9);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.floater-ball {
+	position: relative;
+	width: 64px;
+	height: 64px;
+	border-radius: 50%;
+	border: none;
+	background: transparent;
+	cursor: pointer;
+	display: grid;
+	place-items: center;
+	padding: 0;
+	transition: transform 0.15s ease, box-shadow 0.15s ease;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.floater-ball:hover {
+	transform: scale(1.06);
+}
+
+.floater-ball--dragging {
+	transform: scale(0.96);
+	cursor: grabbing;
+}
+
+.floater-ball--running {
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), 0 0 0 3px rgba(74, 222, 128, 0.35);
+}
+
+.floater-count {
+	position: absolute;
+	top: -2px;
+	right: -2px;
+	min-width: 18px;
+	height: 18px;
+	padding: 0 4px;
+	border-radius: 9px;
+	background: #ef4444;
+	color: #fff;
+	font-size: 10px;
+	font-weight: 600;
+	display: grid;
+	place-items: center;
+	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+@keyframes floater-pulse {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.35; }
+}

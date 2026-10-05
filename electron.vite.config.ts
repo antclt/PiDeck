@@ -201,6 +201,8 @@ export default defineConfig({
           index: resolve("src/renderer/index.html"),
           pet: resolve("src/renderer/pet.html"),
           web: resolve("src/renderer/web.html"),
+          floater: resolve("src/renderer/floater.html"),
+          miniOverlay: resolve("src/renderer/mini-overlay.html"),
         },
         output: {
           // 将大体积的第三方依赖拆分为独立 chunk，减少首屏需要加载和解析的 JS 体积。
