@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -377,4 +378,32 @@ test("validateMcpConfigFile checks autoEnableCodemode, transport rules and names
 	assert.match(validateMcpConfigFile({ mcpServers: { "dev-radius": { command: "a" }, dev_radius: { command: "b" } } }), /conflicts with/);
 	// 项目作用域下的 auth 被拒
 	assert.match(validateMcpConfigFile({ mcpServers: { a: { url: "https://x", auth: { provider: "anthropic" } } } }, { scope: "project-pi" }), /only allowed in the global/);
+});
+
+test("快照解析 mcp-auth.json 键名为已存凭据 server 名（只读键名）", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pideck-mcp-auth-"));
+	const home = join(root, "home");
+	const agentDir = join(home, ".pi", "agent");
+	try {
+		await mkdir(agentDir, { recursive: true });
+		await writeFile(join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: { linear: { url: "https://mcp.linear.app/mcp" }, beui: { url: "https://mcp.beui.dev/mcp" } } }), "utf8");
+		// 三种键形态：新（mcp__名|url）、历史（裸 URL）、未知（丢弃）
+		await writeFile(join(agentDir, "mcp-auth.json"), JSON.stringify({ "mcp__linear|https://mcp.linear.app/mcp": { access_token: "x" }, "https://mcp.beui.dev/mcp": { access_token: "y" }, "mcp__ghost|https://gone/mcp": {} }), "utf8");
+		const snapshot = await loadMcpConfigSnapshot(agentDir);
+		assert.deepEqual([...snapshot.oauthCredentialNames], ["beui", "linear"]);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("没有 mcp-auth.json 时 oauthCredentialNames 为空", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pideck-mcp-noauth-"));
+	const agentDir = join(root, "agent");
+	try {
+		await mkdir(agentDir, { recursive: true });
+		const snapshot = await loadMcpConfigSnapshot(agentDir);
+		assert.deepEqual([...snapshot.oauthCredentialNames], []);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
 });

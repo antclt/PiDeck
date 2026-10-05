@@ -69,3 +69,36 @@ test("MCP form server names match the main-process rule", () => {
 	assert.equal(isMcpServerName("has space"), false);
 	assert.equal(isMcpServerName("../evil"), false);
 });
+
+test("display servers 标记草稿已删的本层条目：待删除 vs 回退继承", () => {
+	// 用 plain object 构造快照；类型经 TS 校验，测试里只断言关键字段
+	const snapshot = {
+		writablePath: "/home/me/.pi/agent/mcp.json",
+		// writableFile = 磁盘上的可写层（有 gone/inherited 两条）；第二参 writable = 草稿（已全删）
+		writableFile: { mcpServers: { gone: { command: "gone" }, inherited: { command: "g" } } },
+		writableRaw: "",
+		revision: "r1",
+		lowerLayerNames: ["inherited"],
+		layers: [],
+		servers: [
+			{ name: "gone", definition: { command: "gone" }, originPath: "/home/me/.pi/agent/mcp.json", originScope: "pi-agent", ownedByWritable: true },
+			{ name: "inherited", definition: { command: "g" }, originPath: "/home/me/.pi/agent/mcp.json", originScope: "pi-agent", ownedByWritable: true },
+			{ name: "pure-global", definition: { command: "g2" }, originPath: "/g/mcp.json", originScope: "pi-agent", ownedByWritable: false },
+		],
+		invalidServers: [],
+	};
+	const items = buildMcpDisplayServers(snapshot, { mcpServers: {} });
+	const gone = items.find((item) => item.name === "gone");
+	const inherited = items.find((item) => item.name === "inherited");
+	const pureGlobal = items.find((item) => item.name === "pure-global");
+	// 仅本层有 → 待删除；下层还有同名 → 保存后回退为继承（不是消失）
+	assert.equal(gone.pendingDelete, true);
+	assert.equal(gone.revertsToInherited, false);
+	assert.equal(inherited.pendingDelete, true);
+	assert.equal(inherited.revertsToInherited, true);
+	// 纯继承条目（从未在本层）不受影响
+	assert.equal(pureGlobal.pendingDelete, undefined);
+	// 草稿还在的条目无标记
+	const withDraft = buildMcpDisplayServers(snapshot, { mcpServers: { gone: { command: "gone" } } });
+	assert.equal(withDraft.find((item) => item.name === "gone").pendingDelete, undefined);
+});

@@ -55,8 +55,9 @@ export function McpServerListPane(props: { servers: McpServerListItem[]; selecte
 							}}
 						>
 							<span className={`size-1.5 shrink-0 rounded-full ${disabled ? "bg-muted-foreground" : "bg-[var(--color-success)]"}`} aria-hidden="true" />
-							<span className="min-w-0 flex-1 truncate font-medium">{item.name}</span>
-							{item.originScope === "project-pi" ? <span className="shrink-0 rounded-sm border border-border-subtle px-1 text-micro text-muted-foreground">{t("config.mcp.layer.projectPi")}</span> : null}
+							<span className={`min-w-0 flex-1 truncate font-medium ${item.pendingDelete && !item.revertsToInherited ? "line-through opacity-60" : ""}`}>{item.name}</span>
+							{item.pendingDelete ? <span className="shrink-0 rounded-sm border border-border-subtle px-1 text-micro text-muted-foreground">{item.revertsToInherited ? t("config.mcp.revertBadge") : t("config.mcp.pendingDeleteBadge")}</span> : null}
+							{item.originScope === "project-pi" && !item.pendingDelete ? <span className="shrink-0 rounded-sm border border-border-subtle px-1 text-micro text-muted-foreground">{t("config.mcp.layer.projectPi")}</span> : null}
 							<span className="shrink-0 text-micro text-muted-foreground">{inferMcpTransport(item.definition)}</span>
 						</button>
 					);

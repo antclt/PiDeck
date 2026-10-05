@@ -50,7 +50,13 @@ export function buildMcpDisplayServers(snapshot: McpConfigSnapshot, writable: Mc
 	const items = snapshot.servers.map((item) => {
 		seen.add(item.name);
 		const overlay = writableServers[item.name];
-		if (!overlay) return item;
+		if (!overlay) {
+			// 草稿里没有但磁盘可写层有 = 用户在本层删了它，保存后才生效：标记待删除。
+			// 下层（如全局）还有同名定义时改标「回退为继承」——保存后条目不会消失，只是换层。
+			const pendingDelete = Boolean(snapshot.writableFile.mcpServers?.[item.name]);
+			if (!pendingDelete) return item;
+			return { ...item, pendingDelete: true, revertsToInherited: snapshot.lowerLayerNames.includes(item.name) };
+		}
 		// pi 语义：同名条目由可写层**整体替换**，不是字段级合并。
 		return {
 			...item,

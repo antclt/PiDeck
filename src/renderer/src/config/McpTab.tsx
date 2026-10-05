@@ -29,6 +29,7 @@ const api = (
 		piDesktop: {
 			config: {
 				getMcp: (scope?: McpConfigScope) => Promise<McpConfigSnapshot>;
+				getAuth: () => Promise<{ raw: string; parsed: Record<string, unknown>; diagnostic?: unknown }>;
 				saveMcp: (data: McpConfigFile, scope?: McpConfigScope, expectedRevision?: string) => Promise<{ valid: boolean; error?: string; conflict?: boolean }>;
 				probeMcp: (definition: McpServerDefinition) => Promise<McpProbeResult>;
 				/** pi mcp CLI：真实连接检测 + OAuth 登录/登出（仅命令路线，见计划 M2）。 */
@@ -156,6 +157,8 @@ export const McpTab = forwardRef<
 	const [logoutConfirm, setLogoutConfirm] = useState<string | null>(null);
 	/** 第三方接管型 MCP 扩展（pi-mcp-adapter 等）识别结果；null = 探测失败（横幅降级，不阻塞编辑）。 */
 	const [thirdPartyMcp, setThirdPartyMcp] = useState<ThirdPartyMcpExtension[] | null>(null);
+	/** auth.json 里已配置的供应商名（供应商登录下拉数据源）；只读键名。 */
+	const [knownProviders, setKnownProviders] = useState<string[]>([]);
 	const loadGenerationRef = useRef(0);
 	/** 当前登录操作的绑定身份：只有同一次操作的 URL 事件才能更新登录区域。 */
 	const loginOperationRef = useRef<{ operationId: string; server: string } | null>(null);
@@ -212,6 +215,24 @@ export const McpTab = forwardRef<
 		};
 	}, [load]);
 
+	useEffect(() => {
+		let cancelled = false;
+		void api.config
+			.getAuth()
+			.then((auth) => {
+				if (cancelled) return;
+				setKnownProviders(
+					Object.keys(auth.parsed ?? {}).filter((key) => {
+						const value = (auth.parsed as Record<string, unknown>)[key];
+						return key.trim() !== "" && value !== null && typeof value === "object";
+					}),
+				);
+			})
+			.catch(() => undefined);
+		return () => {
+			cancelled = true;
+		};
+	}, []);
 	const displayServers = useMemo(() => (snapshot ? buildMcpDisplayServers(snapshot, writable) : []), [snapshot, writable]);
 	/** 使用供应商登录（auth.provider）的 server：不使用 MCP OAuth，登录/登出按钮不适用。 */
 	const providerAuthServerNames = useMemo(() => new Set(displayServers.filter((item) => usesProviderAuth(item.definition)).map((item) => item.name)), [displayServers]);
@@ -351,6 +372,20 @@ export const McpTab = forwardRef<
 			return;
 		}
 		upsert(item.name, inherit.definition);
+	};
+
+	/** 撤销「待删除」：把磁盘上的原定义放回草稿；若草稿因此与磁盘一致则清除脏标记。 */
+	const undoDelete = () => {
+		if (!selected || !snapshot) return;
+		const original = snapshot.writableFile.mcpServers?.[selected];
+		if (!original) return;
+		const restored = { ...(writable.mcpServers ?? {}), [selected]: original };
+		setWritable({ ...writable, mcpServers: restored });
+		if (JSON.stringify({ ...writable, mcpServers: restored }) === JSON.stringify(snapshot.writableFile)) {
+			onDirtyChangeRef.current(false);
+		} else {
+			markDirty();
+		}
 	};
 
 	const removeSelected = () => {
@@ -640,7 +675,8 @@ export const McpTab = forwardRef<
 													</Button>
 												)
 											) : null}
-											{server.transport.startsWith("http") ? (
+											{/* 只对真有已存凭据的 server 显示登出（beui 这类无 OAuth 的不再误显） */}
+											{(snapshot?.oauthCredentialNames ?? []).includes(server.name) ? (
 												<Button variant="ghost" size="xs" onClick={() => setLogoutConfirm(server.name)}>
 													<LogOut size={12} />
 													{t("config.mcp.oauth.logout")}
@@ -700,6 +736,14 @@ export const McpTab = forwardRef<
 						<div className="py-8 text-center text-micro text-muted-foreground">{t("config.mcp.selectHint")}</div>
 					) : (
 						<>
+							{selectedItem?.pendingDelete ? (
+								<div className="flex flex-wrap items-center gap-2 rounded-sm border border-border-subtle bg-bg-hover px-2.5 py-2 text-micro text-muted-foreground">
+									<span>{t("config.mcp.pendingDeleteNotice")}</span>
+									<Button variant="outline" size="xs" onClick={undoDelete} disabled={saving}>
+										{t("config.mcp.undoDelete")}
+									</Button>
+								</div>
+							) : null}
 							<div className="grid gap-2">
 								<Label>{t("config.mcp.field.name")}</Label>
 								<Input
@@ -718,6 +762,27 @@ export const McpTab = forwardRef<
 								<Label>{t("config.mcp.field.transport")}</Label>
 								<ConfigSelect value={transport} options={TRANSPORT_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))} onChange={(value) => switchTransport(value as McpServerTransport)} />
 							</div>
+							<div className="flex flex-wrap items-center gap-1.5">
+								<Button variant="outline" size="sm" onClick={() => void runProbe()} disabled={probing || saving}>
+									<PlugZap size={14} />
+									{probing ? t("config.mcp.probing") : t("config.mcp.probe")}
+								</Button>
+								{creating ? (
+									<Button variant="ghost" size="sm" onClick={cancelCreate}>
+										{t("common.cancel")}
+									</Button>
+								) : selectedItem?.pendingDelete ? (
+									<Button variant="outline" size="sm" onClick={undoDelete} disabled={saving}>
+										{t("config.mcp.undoDelete")}
+									</Button>
+								) : (
+									<Button variant="outline" size="sm" className="text-destructive" onClick={removeSelected} disabled={saving}>
+										<Trash2 size={13} />
+										{selectedItem?.ownedByWritable ? t("common.delete") : t("config.mcp.disableInstead")}
+									</Button>
+								)}
+							</div>
+							{probe ? <div className={`rounded-sm border px-2.5 py-2 text-micro ${probe.ok ? "border-[var(--color-success)]/30 text-[var(--color-success)]" : "border-danger/20 text-danger"}`}>{probe.ok ? `${t("config.mcp.probeOk")} · ${probe.detail}` : `${t("config.mcp.probeFail")} · ${probe.error}`}</div> : null}
 							{transport === "stdio" ? (
 								<>
 									<div className="grid gap-2">
@@ -738,18 +803,47 @@ export const McpTab = forwardRef<
 								<>
 									<div className="grid gap-2">
 										<Label>{t("config.mcp.field.url")}</Label>
-										<Input value={editingDef.url ?? ""} onChange={(event) => patchEditing({ url: event.target.value, command: undefined, args: undefined })} className="h-8 font-mono" placeholder="https://mcp.example.com/mcp" />
+										<Input
+											value={editingDef.url ?? ""}
+											onChange={(event) => patchEditing({ url: event.target.value, command: undefined, args: undefined })}
+											// 新建预填的裸 https:// 只是提示：首次聚焦全选，打字即整体替换，避免拼出畸形 URL
+											onFocus={(event) => {
+												if (event.currentTarget.value === "https://") event.currentTarget.select();
+											}}
+											className="h-8 font-mono"
+											placeholder="https://mcp.example.com/mcp"
+										/>
 									</div>
 									<div className="grid gap-2">
 										<Label>{t("config.mcp.field.headers")}</Label>
 										<Textarea value={recordToText(editingDef.headers)} onChange={(event) => patchEditing({ headers: textToRecord(event.target.value) })} placeholder={t("config.mcp.field.headersPlaceholder")} className="min-h-20 font-mono text-control" />
 									</div>
-									{usesProviderAuth(editingDef) ? (
+									{/* 供应商登录（auth.provider）仅全局可配：项目层被 pi 校验拒绝。开关开启后 pi 用所选供应商凭据。 */}
+									{!isProjectScope ? (
+										<div className="rounded-sm border border-border-subtle p-2.5">
+											<div className="flex items-center justify-between gap-2">
+												<div className="min-w-0">
+													<div className="text-control font-medium">{t("config.mcp.providerAuth.section")}</div>
+													<p className="mt-0.5 text-micro text-muted-foreground">{t("config.mcp.providerAuth.sectionHint")}</p>
+												</div>
+												<Switch checked={usesProviderAuth(editingDef)} disabled={saving || knownProviders.length === 0} onCheckedChange={(checked) => patchEditing(checked ? { auth: { provider: knownProviders[0] } } : { auth: undefined })} />
+											</div>
+											{knownProviders.length === 0 ? <p className="mt-1 text-micro text-muted-foreground">{t("config.mcp.providerAuth.emptyHint")}</p> : null}
+											{usesProviderAuth(editingDef) ? (
+												<div className="mt-2 grid gap-1">
+													<Label>{t("config.mcp.providerAuth.provider")}</Label>
+													<ConfigSelect value={editingDef.auth?.provider ?? ""} options={knownProviders.map((provider) => ({ value: provider, label: provider }))} onChange={(value) => patchEditing({ auth: { provider: value } })} />
+													<p className="text-micro text-muted-foreground">{t("config.mcp.providerAuth.hint", { provider: editingDef.auth?.provider ?? "" })}</p>
+												</div>
+											) : null}
+										</div>
+									) : null}
+									{usesProviderAuth(editingDef) && isProjectScope ? (
 										<div className="rounded-sm border border-border-subtle p-2.5">
 											<div className="text-control font-medium">{t("config.mcp.providerAuth.section")}</div>
 											<p className="mt-0.5 text-micro text-muted-foreground">{t("config.mcp.providerAuth.hint", { provider: editingDef.auth?.provider ?? "" })}</p>
 										</div>
-									) : (
+									) : !usesProviderAuth(editingDef) ? (
 										<div className="rounded-sm border border-border-subtle p-2.5">
 											<div className="text-control font-medium">{t("config.mcp.oauth.section")}</div>
 											<p className="mb-2 mt-0.5 text-micro text-muted-foreground">{t("config.mcp.oauth.sectionHint")}</p>
@@ -807,7 +901,7 @@ export const McpTab = forwardRef<
 												</div>
 											</div>
 										</div>
-									)}
+									) : null}
 								</>
 							) : null}
 							<div className="grid gap-2">
@@ -918,23 +1012,6 @@ export const McpTab = forwardRef<
 									</Button>
 								</div>
 							) : null}
-							<div className="flex flex-wrap items-center gap-1.5">
-								<Button variant="outline" size="sm" onClick={() => void runProbe()} disabled={probing || saving}>
-									<PlugZap size={14} />
-									{probing ? t("config.mcp.probing") : t("config.mcp.probe")}
-								</Button>
-								{creating ? (
-									<Button variant="ghost" size="sm" onClick={cancelCreate}>
-										{t("common.cancel")}
-									</Button>
-								) : (
-									<Button variant="outline" size="sm" className="text-destructive" onClick={removeSelected} disabled={saving}>
-										<Trash2 size={13} />
-										{selectedItem?.ownedByWritable ? t("common.delete") : t("config.mcp.disableInstead")}
-									</Button>
-								)}
-							</div>
-							{probe ? <div className={`rounded-sm border px-2.5 py-2 text-micro ${probe.ok ? "border-[var(--color-success)]/30 text-[var(--color-success)]" : "border-danger/20 text-danger"}`}>{probe.ok ? `${t("config.mcp.probeOk")} · ${probe.detail}` : `${t("config.mcp.probeFail")} · ${probe.error}`}</div> : null}
 						</>
 					)}
 				</div>

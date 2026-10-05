@@ -60,6 +60,18 @@ test("McpTab 保存必须带乐观锁 revision，冲突时提示并重载", () =
 	assert.match(tab, /if \(result\.conflict\) \{[\s\S]{0,240}?t\("config\.mcp\.conflict"\)[\s\S]{0,80}?await load\(\);/);
 });
 
+test("登出按凭据显示；auth.provider 获得全局创建入口（项目层只读）", () => {
+	const tab = readFileSync("src/renderer/src/config/McpTab.tsx", "utf8");
+	// C：快照解析已存凭据 server 名（读 mcp-auth.json 键名），登出按钮据此显示
+	assert.match(tab, /\(snapshot\?\.oauthCredentialNames \?{2} \[\]\)\.includes\(server\.name\)/);
+	// D：开关仅全局（项目层被 pi 校验拒绝）；供应商数据来自 auth.json 键名，凭据值不进渲染层
+	assert.match(tab, /disabled=\{saving \|\| knownProviders\.length === 0\}/);
+	assert.match(tab, /patchEditing\(checked \? \{ auth: \{ provider: knownProviders\[0\] \} \} : \{ auth: undefined \}\)/);
+	assert.match(tab, /api\.config\n?\s*\.getAuth\(\)|getAuth: \(\) => Promise/);
+	// 项目作用域不给创建入口：provider 卡片带 !isProjectScope 门
+	assert.match(tab, /\{!isProjectScope \? \([\s\S]{0,600}?providerAuth\.sectionHint/);
+});
+
 test("dirty-mark helpers include config:mcp", () => {
 	const { dirtyKeysClearedByReload, ALL_CONFIG_DIRTY_KEYS } = loadTsCommonJs("src/renderer/src/config/configDirtyMarks.ts");
 	assert.deepEqual(new Set(dirtyKeysClearedByReload("mcp")), new Set(["config:mcp", "config:raw"]));

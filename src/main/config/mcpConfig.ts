@@ -567,12 +567,31 @@ export async function loadMcpConfigSnapshot(piAgentDir: string, projectPath?: st
 	}
 
 	const merged = mergeMcpServersWithErrors(loaded, writablePath);
+	// 已存 OAuth 凭据的 server 名：读 mcp-auth.json 的键名（mcp__<名>|<url>，历史版本是裸 URL 键）。
+	// 只读键名，凭据值永不进内存/日志。
+	let oauthCredentialNames: string[] = [];
+	try {
+		const authRaw = await readFile(join(piAgentDir, "mcp-auth.json"), "utf8");
+		const parsedAuth: unknown = JSON.parse(authRaw);
+		if (parsedAuth && typeof parsedAuth === "object" && !Array.isArray(parsedAuth)) {
+			const keys = Object.keys(parsedAuth as Record<string, unknown>);
+			const byUrl = new Map(loaded.flatMap((layer) => Object.entries(layer.file.mcpServers ?? {}).map(([name, def]) => [typeof def.url === "string" ? def.url : "", name])));
+			const knownNames = new Set(loaded.flatMap((layer) => Object.keys(layer.file.mcpServers ?? {})));
+			oauthCredentialNames = [...new Set(keys.map((key) => (key.startsWith("mcp__") ? key.slice(5).split("|")[0] : (byUrl.get(key) ?? ""))).filter((name) => name && knownNames.has(name)))].sort();
+		}
+	} catch {
+		// 没有 mcp-auth.json / 解析失败：视为没有任何已存凭据。
+	}
+	// 可写层以下各层定义过的名字：项目层删除覆盖时，UI 据此区分「回退为继承」与「消失」。
+	const lowerLayerNames = [...new Set(loaded.filter((layer) => layer.kind !== writableScope).flatMap((layer) => Object.keys(layer.file.mcpServers ?? {})))].sort();
 	return {
 		writablePath,
 		writableFile,
 		writableRaw,
 		writableError,
 		revision: revisionOf(writableRaw, writableExists),
+		oauthCredentialNames,
+		lowerLayerNames,
 		layers,
 		servers: merged.servers,
 		invalidServers: merged.invalidServers,
