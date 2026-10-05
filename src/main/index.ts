@@ -306,6 +306,7 @@ import { usageProbeRequest } from "./config/usageProbeTransport";
 import { TOKENDANCE_PROVIDER } from "../shared/tokendance";
 import { TerminalSessionManager } from "./terminal/TerminalSessionManager";
 import { startTrayRegistrationVerify, type TrayRegistrationVerify } from "./tray/trayRegistrationVerify";
+import { buildTrayMenuTemplate, TRAY_RECENT_PROJECTS_LIMIT } from "./tray/trayMenuTemplate";
 import { TelemetryService } from "./telemetry/TelemetryService";
 import { PromptManager } from "./prompts/PromptManager";
 import { XuePromptManager } from "./prompts/XuePromptManager";
@@ -594,6 +595,8 @@ function broadcastVisibleProjects(): void {
 	// 这里只广播 store 清单；渲染层接到事件后会再调用 projects:list 附加实时 presence。
 	// 直接把未检测版本写进 atom 会短暂抹掉 missing 标记，使失效目录看起来又恢复正常。
 	window.webContents.send(ipcChannels.projectsChanged, visible);
+	// 项目集变化同步重建托盘菜单（最近项目区），否则增删项目后菜单滞后。
+	refreshTrayContextMenu();
 }
 
 /**
@@ -1240,33 +1243,67 @@ function restartApp(): void {
 
 function refreshTrayContextMenu(): void {
 	if (!tray) return;
+	// 项目取非聊天项目前 N（ProjectStore.list 已按置顶/最近打开排序）；菜单在项目集变化时重建（broadcastVisibleProjects / projectsIpc 回调）。
+	const recentProjects = projectStore
+		.list()
+		.filter((p) => p.kind !== "chat")
+		.slice(0, TRAY_RECENT_PROJECTS_LIMIT)
+		.map((p) => ({ id: p.id, name: p.name, path: p.path }));
 	tray.setContextMenu(
-		Menu.buildFromTemplate([
-			{
-				label: mainCopy("tray.showWindow"),
-				click: () => {
-					if (mainWindow && !mainWindow.isDestroyed()) {
-						mainWindow.show();
-						mainWindow.focus();
-					}
+		Menu.buildFromTemplate(
+			buildTrayMenuTemplate(mainCopy, app.getVersion(), recentProjects, {
+				showWindow: focusMainWindow,
+				checkUpdate: checkForUpdatesFromTray,
+				openProject: (projectId) => {
+					// 与桌宠/通知同一条跳转链路：窗口置前 + renderer 按 projectId 切项目
+					queueFocusTarget({ projectId });
+					focusMainWindow();
 				},
-			},
-			{ type: "separator" },
-			{
-				// 托盘重启与系统设置 IPC 的 appRestart 保持同一套清理语义
-				label: mainCopy("tray.restart"),
-				click: restartApp,
-			},
-			{ type: "separator" },
-			{
-				label: mainCopy("tray.quit"),
-				click: () => {
+				openDataDir: () => {
+					void shell.openPath(app.getPath("userData"));
+				},
+				openLogsDir: () => {
+					void shell.openPath(join(app.getPath("userData"), "logs"));
+				},
+				restart: restartApp,
+				quit: () => {
 					isQuitting = true;
 					app.quit();
 				},
-			},
-		]),
+			}),
+		),
 	);
+}
+
+/**
+ * 托盘「检查更新」：走 UpdateService.checkNow（与渲染层手动检测同一链路，结果状态也同步给窗口 UI），
+ * 完成后用系统通知告知结果；点击通知聚焦主窗口（渲染层已有更新横幅/下载入口）。
+ */
+function checkForUpdatesFromTray(): void {
+	void (async () => {
+		try {
+			if (updateService) {
+				await updateService.checkNow();
+				const snapshot = updateService.getSnapshot();
+				const latest = snapshot.app?.latestVersion;
+				if (snapshot.app?.hasUpdate && latest) {
+					notifyFromTray(mainCopy("tray.updateAvailableTitle"), mainCopy("tray.updateAvailableBody", { version: latest }));
+					return;
+				}
+			}
+			notifyFromTray(mainCopy("tray.upToDateTitle"), mainCopy("tray.upToDateBody", { version: app.getVersion() }));
+		} catch (error) {
+			void appLogger?.warn("update", "Tray update check failed", { error: error instanceof Error ? error.message : String(error) });
+			notifyFromTray(mainCopy("update.checkFailed"), "");
+		}
+	})();
+}
+
+/** 托盘通知：点击即聚焦主窗口（更新/最新两种结果都引导回窗口）。 */
+function notifyFromTray(title: string, body: string): void {
+	const notification = new Notification({ title, body, silent: false });
+	notification.on("click", () => focusMainWindow());
+	notification.show();
 }
 
 /** 从托盘/任务栏/二次启动唤起主窗口：处理最小化、隐藏到托盘两种状态。 */
@@ -1395,10 +1432,13 @@ function setupTray() {
 
 	tray = createTrayInstance();
 	refreshTrayContextMenu();
+	// 项目集变化（增删/重命名/最近打开排序）经 ProjectStore.onChanged 统一派发，重建托盘「最近项目」区。
+	const stopTrayProjectListener = projectStore.onChanged(() => refreshTrayContextMenu());
 
 	// C12：退出清理登记（before-quit 统一 runAll）——验收器必须一起停，
 	// 否则退出阶段还会把已销毁的 tray 再重建一次。
 	quitCleanup.register("tray", () => {
+		stopTrayProjectListener();
 		trayRegistrationVerify?.stop();
 		trayRegistrationVerify = null;
 		tray?.destroy();

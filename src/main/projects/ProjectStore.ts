@@ -23,6 +23,27 @@ export class ProjectStore {
 
 	constructor(private readonly chooseProjectTitle: () => string = () => "Choose project folder") {}
 
+	// 项目集变化监听（托盘菜单等主进程侧 UI 重建用）：所有 mutation 汇聚于 save()，
+	// 此处统一派发，避免在 IPC/自动导入/worktree 等散点各挂一份。
+	private changeListeners: Array<() => void> = [];
+
+	onChanged(listener: () => void): () => void {
+		this.changeListeners.push(listener);
+		return () => {
+			this.changeListeners = this.changeListeners.filter((entry) => entry !== listener);
+		};
+	}
+
+	private emitChanged(): void {
+		for (const listener of this.changeListeners) {
+			try {
+				listener();
+			} catch {
+				// 监听器（如托盘重建）失败不能阻断项目持久化本身
+			}
+		}
+	}
+
 	async load() {
 		try {
 			const raw = await readFile(this.filePath, "utf8");
@@ -404,5 +425,6 @@ export class ProjectStore {
 		// 项目列表是桌面端自己的轻量状态，不写入 pi session，避免影响 pi 原生会话格式。
 		await mkdir(app.getPath("userData"), { recursive: true });
 		await writeFile(this.filePath, JSON.stringify(this.projects, null, 2), "utf8");
+		this.emitChanged();
 	}
 }
