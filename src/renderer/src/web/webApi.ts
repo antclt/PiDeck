@@ -10,7 +10,6 @@
 import type { UIMessage } from "ai";
 import type { AvailableModel, AgentBackend, ChatMessage, SessionCommandResult, SessionFileChange, SessionLaunchPreferences, SessionMessagePage, SessionRuntimeTarget, SessionTargetedValue, SessionTodoSnapshot, UpdateSessionRecordInput } from "../../../shared/types";
 import type { CommitEntry, GitBranchInfo, GitResourceGroups, ImageContent, PiExtensionSummary, PiSkillLocation, PiSkillSummary, PiSubagentEntry, YaoPromptCategory } from "../../../shared/types";
-import type { RewindCheckpointPage, RewindRestoreResult, RewindRestoreScope } from "../../../shared/types";
 import type { AgentUiResponse } from "../../../shared/types";
 import type { WebContextUsage, WebFileNodeLite, WebState } from "./webTypes";
 
@@ -414,24 +413,6 @@ export function deleteRuntimeMessage(sessionId: string, target: SessionRuntimeTa
 /** P1：准备重发——取回该消息文本（+图片），由调用方填入 composer。 */
 export function prepareResend(sessionId: string, target: SessionRuntimeTarget, messageId: string): Promise<{ text: string; images?: ImageContent[] }> {
 	return callRuntimeCommand<{ text: string; images?: ImageContent[] }>(sessionId, target, "prepare-resend", { messageId });
-}
-
-/** P1：rewind 检查点分页列表（新的在前，beforeTimestamp 为游标）。 */
-export function fetchRewindCheckpoints(sessionId: string, target: SessionRuntimeTarget, limit?: number, beforeTimestamp?: number): Promise<RewindCheckpointPage> {
-	return callRuntimeCommand<RewindCheckpointPage>(sessionId, target, "rewind-list", {
-		...(limit != null ? { limit } : {}),
-		...(beforeTimestamp != null ? { beforeTimestamp } : {}),
-	});
-}
-
-/** P1：检查点 diff（unified 文本）。 */
-export function fetchRewindDiff(sessionId: string, target: SessionRuntimeTarget, checkpointId: string): Promise<string> {
-	return callRuntimeCommand<string>(sessionId, target, "rewind-diff", { checkpointId });
-}
-
-/** P1：恢复检查点（files/conversation/all；conversation/all 会 fork 出新会话）。 */
-export function restoreRewind(sessionId: string, target: SessionRuntimeTarget, checkpointId: string, scope: RewindRestoreScope): Promise<RewindRestoreResult> {
-	return callRuntimeCommand<RewindRestoreResult>(sessionId, target, "rewind-restore", { checkpointId, scope });
 }
 
 /** P2：上下文用量（runtime state 子集，供头部圆环轮询）。 */

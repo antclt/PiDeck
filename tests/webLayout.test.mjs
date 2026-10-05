@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const webCss = readFileSync("src/renderer/src/web/web.css", "utf8");
@@ -124,6 +124,27 @@ test("Web session strips stay collapsed by default and use real tokens only", ()
 	assert.doesNotMatch(webSessionStrips, /bg-bg-surface|text-text-muted|bg-bg-inset/, "these tokens do not exist in the theme bridge — they silently no-op");
 	// 折叠条只占一行：标题行可点（aria-expanded），明细展开后才渲染。
 	assert.match(webSessionStrips, /aria-expanded=\{open\}/);
+});
+
+// 回归：头部上下文环必须可点开详情弹层（移动端无悬停 title，纯展示等于点不动）。
+test("Web header context ring opens a usage sheet instead of being display-only", () => {
+	// 环渲染带 onClick（非纯展示），且套了 32px 触区按钮。
+	assert.match(webHeader, /<ContextRing usage=\{contextUsage\} onClick=\{\(\) => setContextSheetOpen\(true\)\} \/>/);
+	assert.match(webHeader, /if \(props\.onClick\) \{[\s\S]*?<Button[^>]*onClick=\{props\.onClick\}/);
+	// 详情弹层走 WebBottomSheet，主体列总量/输入/输出并提供压缩入口。
+	assert.match(webHeader, /import \{ WebBottomSheet \} from "\.\/WebBottomSheet";/);
+	assert.match(webHeader, /<ContextUsageSheetBody usage=\{contextUsage\} onCompact=\{actions\?\.onCompact\}/);
+	assert.match(webHeader, /web\.inputTokens/);
+	assert.match(webHeader, /web\.outputTokens/);
+});
+
+// 回归：web 端不再展示 rewind 检查点（用户明确要求移除；服务端路由与桌面不受影响）。
+test("Web rewind checkpoint UI is fully removed from the renderer", () => {
+	assert.ok(!existsSync("src/renderer/src/web/WebRewindPanel.tsx"), "WebRewindPanel.tsx must be deleted");
+	assert.doesNotMatch(webHeader, /onOpenRewind|History/);
+	assert.doesNotMatch(webChatApp, /WebRewindPanel|rewindOpen|onOpenRewind/);
+	// 溢出菜单仍保留压缩等动作（移除 rewind 不得误伤其余入口）。
+	assert.match(webHeader, /onCompact \? <DropdownMenuItem onClick=\{actions\.onCompact\}/);
 });
 
 // 回归：后端切换仅对「本页新建零消息草稿」开放。历史会话（含复制/克隆/fork 出的）自带

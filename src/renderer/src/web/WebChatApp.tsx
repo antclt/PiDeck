@@ -24,7 +24,6 @@ import { WebTimeline } from "./WebTimeline";
 import { WebComposer } from "./WebComposer";
 import { WebDshToolsPanel } from "./WebDshToolsPanel";
 import { WebBranchBar } from "./WebBranchBar";
-import { WebRewindPanel } from "./WebRewindPanel";
 import { WebWorkspaceDrawer } from "./WebWorkspaceDrawer";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui-shadcn/alert-dialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui-shadcn/dialog";
@@ -83,8 +82,7 @@ export function WebChatApp() {
 	const [uiResponding, setUiResponding] = useState(false);
 	// S6.3：DSH 工具面板（goals/subagents/skills）开关
 	const [dshToolsOpen, setDshToolsOpen] = useState(false);
-	// P1：rewind / workspace 抽屉 / 重命名 / 删除确认
-	const [rewindOpen, setRewindOpen] = useState(false);
+	// P1：workspace 抽屉 / 重命名 / 删除确认
 	const [workspaceOpen, setWorkspaceOpen] = useState(false);
 	const [renameDraft, setRenameDraft] = useState<{ sessionId: string; title: string } | null>(null);
 	const [renameValue, setRenameValue] = useState("");
@@ -805,7 +803,6 @@ export function WebChatApp() {
 					permissionPreset={activeSession?.permissionPreset}
 					actions={{
 						onPermissionChange: activeSession?.backend === "dsh" ? (preset) => void handlePermissionChange(preset) : undefined,
-						onOpenRewind: activeTarget ? () => setRewindOpen(true) : undefined,
 						onOpenWorkspace: activeSession ? () => setWorkspaceOpen(true) : undefined,
 						onRename: activeSessionId ? () => void runSessionAction("rename", activeSessionId) : undefined,
 						onDuplicate: activeSessionId ? () => void runSessionAction("duplicate", activeSessionId) : undefined,
@@ -870,28 +867,6 @@ export function WebChatApp() {
 			<WebSearchDialog open={searchOpen} onOpenChange={setSearchOpen} messages={messages} onJump={scrollToMessage} />
 			<WebSkillsExtensionsDialog open={assetsOpen} onOpenChange={setAssetsOpen} />
 			{dshToolsOpen && activeSessionId && <WebDshToolsPanel sessionId={activeSessionId} onClose={() => setDshToolsOpen(false)} />}
-			{/* P1：rewind 检查点面板（需活跃 runtime；conversation/all 恢复会 fork 新会话并切换） */}
-			{rewindOpen && activeTarget && (
-				<WebRewindPanel
-					sessionId={activeTarget.sessionId}
-					target={activeTarget}
-					open={rewindOpen}
-					onClose={() => setRewindOpen(false)}
-					onRestored={(result) => {
-						setRewindOpen(false);
-						void (async () => {
-							if (result.forkedSessionId) {
-								markSessionLoaded(result.forkedSessionId);
-								await refreshNow();
-								setActiveSessionId(result.forkedSessionId);
-							} else {
-								await refreshNow();
-								await reloadActiveHistory();
-							}
-						})();
-					}}
-				/>
-			)}
 			{/* P3：工作区抽屉（Git 状态/diff + 文件浏览，projectId 来自活跃会话） */}
 			{workspaceOpen && activeSession && <WebWorkspaceDrawer projectId={activeSession.projectId} open={workspaceOpen} onClose={() => setWorkspaceOpen(false)} />}
 			{/* P1：重命名会话对话框 */}
