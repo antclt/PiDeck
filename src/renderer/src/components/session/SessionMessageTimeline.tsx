@@ -24,6 +24,7 @@ import { isLiveRuntimeStatus } from "../../utils/sessionCommands";
 import { composeFailureNotice, isRetryStatusMessage, reduceFailureNoticePass, type FailureNoticePassState } from "./timelineFailureNotice";
 import { SessionStartSurface } from "./SessionStartSurface";
 import { NotifyMessageCard, shouldRenderNotifyCard } from "./NotifyMessageCard";
+import { ExtensionEntryCard } from "./ExtensionEntryCard";
 import { MessageScroller } from "../agents/message-scroller";
 import { askEchoBySessionIdAtomFamily } from "../../atoms/ask-echo-atoms";
 import { injectAskEchoMessage } from "../../utils/askUi";
@@ -911,6 +912,11 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 								// Pending extension UI is rendered once in the timeline footer.
 								// Legacy in-memory messages may still contain this placeholder.
 								return null;
+							}
+							// 扩展输出条目（pi appendEntry / type:"custom"）：主进程读侧投影的可见性补齐卡，
+							// 不是回合边界，只让 /btw 这类扩展输出到达用户（issue #285）。
+							if (meta?.type === "customEntry") {
+								return <ExtensionEntryCard key={message.id} message={message} />;
 							}
 							// 扩展 custom 消息（pi custom_message 条目）：只有面向用户的通知类白名单
 							// 才渲染成卡片（如子代理后台任务完成），其余（display:false 的内部上下文

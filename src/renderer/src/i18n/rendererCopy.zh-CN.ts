@@ -902,6 +902,11 @@ export const zhCN = {
 	"notify.subagent.stopped": "子代理已停止",
 	"notify.expand": "展开完整通知",
 	"notify.collapse": "收起完整通知",
+	// 扩展输出条目卡（pi appendEntry / type:"custom"）：RPC 模式下 registerEntryRenderer 不工作，
+	// 时间线卡片是扩展输出唯一能到达用户的通道（issue #285）
+	"notify.extensionEntryTitle": "扩展输出",
+	"notify.extensionEntryEmpty": "无内容",
+	"notify.extensionEntryTruncated": "内容过大，已省略详情",
 	// 修改的文件横栏（会话级文件汇总）
 	"sessionFiles.title": "修改的文件",
 	"sessionFiles.empty": "会话暂无文件修改",

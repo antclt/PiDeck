@@ -104,6 +104,7 @@ const askUiMock = {
 	splitAskOption: (option) => ({ label: option }),
 	emptyAskBatchDraft: () => ({ answers: {}, labels: {}, customAnswerIds: [], inputValues: {}, currentTab: 0, expanded: true }),
 	emptyAskSingleDraft: () => ({ selectedOption: "", value: "", expanded: true }),
+	initialAskSingleDraft: (prefill) => ({ selectedOption: "", value: typeof prefill === "string" && prefill ? prefill : "", expanded: true }),
 	isSameAskDraftKey: (left, right) => left === right,
 	commitBatchAnswer: (draft, questionId, value, label, wasCustom) => ({
 		...draft,

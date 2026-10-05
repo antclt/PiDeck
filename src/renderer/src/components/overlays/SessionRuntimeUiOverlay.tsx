@@ -14,7 +14,7 @@ import {
 	buildAskResponse,
 	commitBatchAnswer,
 	emptyAskBatchDraft,
-	emptyAskSingleDraft,
+	initialAskSingleDraft,
 	formatAskTitle,
 	isComposingKeyboardEvent,
 	isSameAskDraftKey,
@@ -639,7 +639,7 @@ export function SessionRuntimeUiOverlay({ sessionId, runtime, ui, responder, onE
 	// 从 atom 原样恢复——选择是「用户进度」，不该随组件生命周期蒸发（详见 ask-draft-atoms.ts）。
 	const requestKey = request ? `${sessionId}:${request.agentId}:${ui?.runtimeGeneration}:${request.requestId}` : "";
 	const [draft, setDraft] = useAtom(askDraftBySessionRequestAtomFamily(requestKey));
-	const single = draft?.single ?? emptyAskSingleDraft();
+	const single = draft?.single ?? initialAskSingleDraft(request?.prefill);
 	const value = single.value;
 	const selectedOption = single.selectedOption;
 	const expanded = single.expanded;
@@ -661,7 +661,7 @@ export function SessionRuntimeUiOverlay({ sessionId, runtime, ui, responder, onE
 
 	/** 单问题卡草稿写盘：合并 single 侧字段，batch 侧原样保留。 */
 	function commitSingleDraft(patch: Partial<AskSingleDraft>) {
-		setDraft((current) => ({ ...(current ?? { key: requestKey }), key: requestKey, single: { ...(current?.single ?? emptyAskSingleDraft()), ...patch } }));
+		setDraft((current) => ({ ...(current ?? { key: requestKey }), key: requestKey, single: { ...(current?.single ?? initialAskSingleDraft(request?.prefill)), ...patch } }));
 	}
 
 	if (!request || !requestState) return null;

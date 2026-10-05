@@ -905,6 +905,11 @@ export const enUS: Record<TranslationKey, string> = {
 	"notify.subagent.stopped": "Subagent stopped",
 	"notify.expand": "Show full notice",
 	"notify.collapse": "Collapse notice",
+	// Extension entry card (pi appendEntry / type:"custom"): registerEntryRenderer is inert in RPC mode,
+	// the timeline card is the only channel extension output reaches the user (issue #285)
+	"notify.extensionEntryTitle": "Extension output",
+	"notify.extensionEntryEmpty": "No content",
+	"notify.extensionEntryTruncated": "Content too large; details omitted",
 	// Modified files strip (session-scoped file summary)
 	"sessionFiles.title": "Modified Files",
 	"sessionFiles.empty": "No files changed in this session",
