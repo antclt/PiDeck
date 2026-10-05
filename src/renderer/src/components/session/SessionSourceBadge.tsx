@@ -4,6 +4,7 @@ import { ImageIcon } from "lucide-react";
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
 import { Badge } from "../ui-shadcn/badge";
+import { PiTuiLogoMark, useLogoStyle } from "../app/PiTuiLogo";
 
 const SOURCE_LABELS: Record<SessionSource, string> = {
 	pi: t("sessionSource.pi"),
@@ -101,16 +102,16 @@ function SourceLogo(props: { source: SessionSource }) {
 		);
 	}
 
-	return (
-		<svg viewBox="140 140 520 520" className="size-3.5" aria-hidden="true" focusable="false">
-			<path fill="currentColor" fillRule="evenodd" d="M165.29 165.29H517.36V400H400v117.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z" />
-			<path fill="currentColor" d="M517.36 400H634.72V634.72H517.36Z" />
-		</svg>
-	);
+	// pi 来源与后端标记共用入口，避免复制的旧 SVG 绕过 Logo 风格设置。
+	return <PiLogo />;
 }
 
-/** pi 官方 logo（品牌窗口标记，来源徽章同款）。 */
+/** pi 后端 / 来源标记：订阅统一 Logo 风格；经典保留单色，pi-tui 复用官方三色位图。 */
 export function PiLogo(props: { className?: string }) {
+	const logoStyle = useLogoStyle();
+	if (logoStyle === "pi-tui") {
+		return <PiTuiLogoMark size={14} className={props.className ?? "size-3.5"} />;
+	}
 	return (
 		<svg viewBox="140 140 520 520" className={props.className ?? "size-3.5"} aria-hidden="true" focusable="false">
 			<path fill="currentColor" fillRule="evenodd" d="M165.29 165.29H517.36V400H400v117.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z" />

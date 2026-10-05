@@ -126,6 +126,29 @@ test("Web session strips stay collapsed by default and use real tokens only", ()
 	assert.match(webSessionStrips, /aria-expanded=\{open\}/);
 });
 
+// 回归（流式脱节追赶）：刷新/断网后 useChat 回 ready 但 runtime 仍在跑时，
+// 主轮询必须带 runtimeBusy 做恢复判定并周期补拉磁盘快照——否则页面永远停在旧文本。
+test("Web stream recovery wires runtimeBusy into every decision site", () => {
+	// 两个恢复触发点都携带 runtimeBusy（事件触发器 + 主轮询兼容）。
+	assert.equal((webChatApp.match(/runtimeBusy:/g) ?? []).length, 2);
+	// 脱节态轮询提速：间隔取决于 streaming 或 runtime 忙态，且 effect 依赖含 runtime 状态。
+	assert.match(webChatApp, /setInterval\(refresh,\s*streaming \|\| runtimeBusyNow \? 1000 : 3000\)/);
+	assert.match(webChatApp, /\}, \[streaming, activeRuntime\?\.status\]\)/);
+	// 忙态镜像 ref 在 render 期赋值（供事件回调读取最新值）。
+	assert.match(webChatApp, /activeRuntimeRef\.current = activeRuntime;/);
+});
+
+// 回归：「加载更多」前插的是更早历史，入口必须在消息流顶部（往上滚到顶才碰得到），
+// 曾经渲染在列表底部（最新消息处），语义反了。
+test("Web load-more-history entry stays at the top of the message flow", () => {
+	const loadMoreIndex = webTimeline.indexOf("{/* 分页加载更多");
+	const entriesIndex = webTimeline.indexOf("{timelineEntries.map(");
+	assert.ok(loadMoreIndex >= 0 && entriesIndex >= 0, "load-more block and entries render must exist");
+	assert.ok(loadMoreIndex < entriesIndex, "load-more must render BEFORE the message entries (top of flow)");
+	// 底部不再残留第二份加载更多入口。
+	assert.equal((webTimeline.match(/hasMoreHistory && \(/g) ?? []).length, 1);
+});
+
 // 回归：头部上下文环必须可点开详情弹层（移动端无悬停 title，纯展示等于点不动）。
 test("Web header context ring opens a usage sheet instead of being display-only", () => {
 	// 环渲染带 onClick（非纯展示），且套了 32px 触区按钮。

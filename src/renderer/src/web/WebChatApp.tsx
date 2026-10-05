@@ -40,7 +40,7 @@ import { applyWebTheme, readStoredWebTheme, resolveWebTheme, storeWebTheme, syst
 import { registerWebServiceWorker, usePwaInstall } from "./webPwa";
 import { decideStreamRecovery } from "./webStreamRecovery";
 import type { AgentUiResponse } from "../../../shared/types";
-import type { WebProject, WebState, WebContextUsage } from "./webTypes";
+import type { WebProject, WebRuntime, WebState, WebContextUsage } from "./webTypes";
 
 /** 分页元数据：已加载消息总数 + 更早一页的游标。 */
 type HistoryMeta = {
@@ -124,6 +124,9 @@ export function WebChatApp() {
 	const recoveryLastAttemptRef = useRef(0);
 	const statusRef = useRef(status);
 	statusRef.current = status;
+	// runtime 忙态镜像：刷新页面/端口中断后 useChat 已回 ready 而 pi 仍在跑，
+	// 恢复判定用它区分「真正空闲」与「脱节待追赶」（render 期赋值，在 activeRuntime 计算之后）。
+	const activeRuntimeRef = useRef<WebRuntime | undefined>(undefined);
 	const { canInstall, install } = usePwaInstall();
 
 	// 主题：应用为与桌面同源的 data-theme 机制；跟随系统变化时重解析
@@ -173,6 +176,7 @@ export function WebChatApp() {
 		const maybeRecover = () => {
 			const decision = decideStreamRecovery({
 				status: statusRef.current,
+				runtimeBusy: activeRuntimeRef.current?.status === "running" || activeRuntimeRef.current?.status === "starting",
 				documentVisible: !document.hidden,
 				online: navigator.onLine,
 				lastAttemptAt: recoveryLastAttemptRef.current,
@@ -235,6 +239,7 @@ export function WebChatApp() {
 	const runtimeFor = (sessionId: string) => state.runtimes.find((runtime) => runtime.sessionId === sessionId);
 	const activeSession = state.sessions.find((session) => session.id === activeSessionId);
 	const activeRuntime = activeSessionId ? runtimeFor(activeSessionId) : undefined;
+	activeRuntimeRef.current = activeRuntime;
 
 	// 切换会话：优先从缓存恢复；未加载过则拉取历史页注入
 	useEffect(() => {
@@ -297,6 +302,27 @@ export function WebChatApp() {
 				if (disposed) return;
 				setState(next);
 				setConnected(true);
+				// 脱节追赶：useChat 已回 ready 但 runtime 仍在跑（刷新/断网后本轮 SSE 已死，
+				// 恢复触发器只在 visibilitychange/online 时发）→ 借主轮询周期补拉磁盘快照，
+				// 防抖在 decideStreamRecovery 内，脱节后每 5s 最多追一次直到 runtime 空闲。
+				const runtimeStillBusy = (() => {
+					const runtime = next.runtimes.find((entry) => entry.sessionId === activeSessionIdRef.current);
+					return runtime?.status === "running" || runtime?.status === "starting";
+				})();
+				if (runtimeStillBusy) {
+					const decision = decideStreamRecovery({
+						status: statusRef.current,
+						runtimeBusy: true,
+						documentVisible: !document.hidden,
+						online: navigator.onLine,
+						lastAttemptAt: recoveryLastAttemptRef.current,
+						now: Date.now(),
+					});
+					if (decision.recover) {
+						recoveryLastAttemptRef.current = Date.now();
+						void recoverFromDisk(false);
+					}
+				}
 				// 初始页面保持空会话，让用户明确选择项目/会话；外部删除当前会话时也回到空状态。
 				if (activeSessionIdRef.current && !next.sessions.some((session) => session.id === activeSessionIdRef.current)) {
 					setActiveSessionId("");
@@ -307,12 +333,15 @@ export function WebChatApp() {
 		};
 		void refresh();
 		// 流式时 1s 一轮：ask 确认不能等 3s 才出现在手机上。
-		const timer = setInterval(refresh, streaming ? 1000 : 3000);
+		// runtime 忙但 useChat 已 ready（脱节态）也走 1s：磁盘追赶频率由恢复防抖控制，
+		// 高频轮询是为了 runtime 一空闲就收尾、状态圆点及时回落。
+		const runtimeBusyNow = activeRuntime?.status === "running" || activeRuntime?.status === "starting";
+		const timer = setInterval(refresh, streaming || runtimeBusyNow ? 1000 : 3000);
 		return () => {
 			disposed = true;
 			clearInterval(timer);
 		};
-	}, [streaming]);
+	}, [streaming, activeRuntime?.status]);
 
 	// P0：停止 = 客户端断流 + 尽力打断 pi runtime（有 agent 时）。两者都发：
 	// stop() 只断 SSE，pi 会继续跑完；abortRuntime 才是真正的打断命令。
