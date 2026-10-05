@@ -4335,6 +4335,9 @@ app
 		// Coordinator 与事件桥接均面向合成器，新增后端只需追加网关实例。
 		compositeAgentGateway = new CompositeAgentGateway([agentManager, dshAgentManager]);
 		sessionRuntimeCoordinator = new SessionRuntimeCoordinator(sessionCatalog, compositeAgentGateway, sendAgentPromptWithIntegrations, appLogger);
+		// catalog 外部删除清理的活性探针：预热激活后 pi 可能尚未写出会话文件，
+		// 有活跃绑定的记录不得被扫描当「外部删除」剔掉。
+		sessionCatalog.setSessionLivenessProbe((sessionId) => sessionRuntimeCoordinator?.hasLiveRuntime(sessionId) === true);
 
 		// 定时任务调度器与执行编排器装配
 		automationRunCoordinator = new AutomationRunCoordinator({

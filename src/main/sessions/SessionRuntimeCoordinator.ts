@@ -329,6 +329,23 @@ export class SessionRuntimeCoordinator {
 		return cacheEntry.promise;
 	}
 
+	/**
+	 * catalog 外部删除清理的活性探针（纯查询，无 getAgentId 的终态解绑副作用）：
+	 * 绑定存在且 agent 未到终态即视为活会话——pi 在首条消息前可能尚未创建 session
+	 * 文件（预热激活后空闲进程甚至长期不写盘），「运行时还在、文件暂时不在」不能
+	 * 当成外部删除（2026-10-05：预热 attach 同秒扫描剔掉记录 → 闪回引导页、
+	 * 输入草稿丢失、发送另起新进程）。
+	 */
+	hasLiveRuntime(sessionId: string): boolean {
+		const agentId = this.agentIdBySession.get(sessionId);
+		if (!agentId) return false;
+		const tab = this.agents.list().find((candidate) => candidate.id === agentId);
+		if (!tab) return false;
+		if (!isTerminalAgent(tab)) return true;
+		// 与 getAgentId 同口径：回复级错误（Issue #218）的进程仍活着、待用户答问时同样保护。
+		return tab.status === "error" && this.hasPendingUiRequest(sessionId, agentId);
+	}
+
 	getAgentId(sessionId: string): string | undefined {
 		const agentId = this.agentIdBySession.get(sessionId);
 		if (!agentId) return undefined;

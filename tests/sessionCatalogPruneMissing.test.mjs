@@ -159,6 +159,58 @@ test("does not touch entries owned by other projects during this project's scan"
 	}
 });
 
+test("skips pruning an entry whose session has a live runtime (prewarm attaches filePath before pi writes the file)", async () => {
+	// 2026-10-05 实机事故：草稿预热激活 → attachRuntime 写入 filePath，但 pi 首条
+	// 消息才创建 jsonl。同秒的扫描把记录当「外部删除」剔掉 → 整页闪回引导页、
+	// 输入草稿丢失、发送又另起新进程。活跃绑定必须挡下外部删除判定。
+	const { SessionCatalog } = loadCatalog();
+	const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-prune-live-"));
+	const catalogFile = join(dir, "sessions.json");
+	const futureFile = join(dir, "not-yet-written.jsonl");
+	try {
+		const seed = {
+			version: 1,
+			sessions: [seedEntry({ id: "prewarmed", filePath: futureFile })],
+		};
+		await writeFile(catalogFile, JSON.stringify(seed), "utf8");
+		const catalog = new SessionCatalog(catalogFile);
+		await catalog.load();
+		catalog.setSessionLivenessProbe((sessionId) => sessionId === "prewarmed");
+		await catalog.mergeScanned("project-1", []);
+		assert.equal(catalog.listEntries().length, 1, "live runtime must survive even though the file does not exist yet");
+
+		// 运行终结（探针不再报告活跃）后，下一轮扫描按真实缺失正常清理。
+		catalog.setSessionLivenessProbe(() => false);
+		await catalog.mergeScanned("project-1", []);
+		assert.equal(catalog.listEntries().length, 0, "once the runtime is gone, the missing file is pruned as before");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+test("skips pruning for other entries sharing the scan when only one session is live", async () => {
+	// 探针按 sessionId 精确放行：同项目其它文件缺失的条目不受影响。
+	const { SessionCatalog } = loadCatalog();
+	const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-prune-live-scope-"));
+	const catalogFile = join(dir, "sessions.json");
+	try {
+		const seed = {
+			version: 1,
+			sessions: [seedEntry({ id: "live", filePath: join(dir, "live-not-written.jsonl") }), seedEntry({ id: "dead", filePath: join(dir, "dead-gone.jsonl") })],
+		};
+		await writeFile(catalogFile, JSON.stringify(seed), "utf8");
+		const catalog = new SessionCatalog(catalogFile);
+		await catalog.load();
+		catalog.setSessionLivenessProbe((sessionId) => sessionId === "live");
+		await catalog.mergeScanned("project-1", []);
+		const ids = catalog.listEntries().map((entry) => entry.id);
+		// vm realm 数组与宿主数组原型不同，deepEqual 会误报——按文本比较。
+		assert.deepEqual(JSON.parse(JSON.stringify(ids)), ["live"], "only the live entry survives");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
 test("keeps non-pi sources and draft entries without filePath", async () => {
 	const { SessionCatalog } = loadCatalog();
 	const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-prune-source-"));

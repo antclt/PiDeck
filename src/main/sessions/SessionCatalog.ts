@@ -301,6 +301,10 @@ export class SessionCatalog {
 
 	private identityContext: SessionCatalogContext;
 
+	/** 会话活性探针（由 SessionRuntimeCoordinator 注入）：有活跃运行时绑定的会话，
+	 *  其 filePath 指向的 jsonl 可能尚未由 pi 落盘，外部删除清理不得误剔。 */
+	private sessionLivenessProbe?: (sessionId: string) => boolean;
+
 	constructor(
 		private readonly filePath: string,
 		identityContext: SessionCatalogContext = {},
@@ -312,6 +316,11 @@ export class SessionCatalog {
 
 	setIdentityContext(context: SessionCatalogContext): void {
 		this.identityContext = { ...context };
+	}
+
+	/** 注入活性探针（main 装配时一次性接线）；传 undefined 解除。 */
+	setSessionLivenessProbe(probe: ((sessionId: string) => boolean) | undefined): void {
+		this.sessionLivenessProbe = probe;
 	}
 
 	async load(): Promise<void> {
@@ -1042,6 +1051,11 @@ export class SessionCatalog {
 			if (entry.source !== "pi" || entry.backend === "dsh") continue;
 			if (entry.environment !== "native") continue;
 			if (!entry.filePath) continue;
+			// 活跃运行时的文件可能尚未落盘：pi 首条消息才创建 jsonl，预热激活后空闲
+			// 进程甚至长期不写。有活绑定的会话「文件暂时不在」不是外部删除，跳过；
+			// 运行终结后下一轮扫描按真实缺失清理（2026-10-05 事故：预热 attach 同秒
+			// 扫描剔掉记录 → 闪回引导页、输入草稿丢失、发送另起新进程）。
+			if (this.sessionLivenessProbe?.(entry.id)) continue;
 			if (existsSync(entry.filePath)) continue;
 			if (!existsSync(dirname(entry.filePath))) continue;
 			externallyMissingIds.add(entry.id);
