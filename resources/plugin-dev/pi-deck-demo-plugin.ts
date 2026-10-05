@@ -9,16 +9,18 @@
  *   用户级（所有项目生效）：~/.pi/agent/extensions/pi-deck-demo-plugin.ts
  *   项目级（仅当前项目）：<项目>/.pi/extensions/pi-deck-demo-plugin.ts
  *
- * 【演示了什么】
+ * 【演示了什么】（刻意只占一个侧栏面板，不碰输入区/终端/时间线等共享位置）
  * 1. /demo 命令（pi 原生能力，任何宿主可用）
  * 2. 事件监听：统计本会话的回合数与工具调用（pi 原生能力）
  * 3. ctx.ui.setWidget：状态条渲染（终端与 PiDeck 都可用）
- * 4. ctx.ui.gui：PiDeck 专属 UI 落点——侧栏面板 + 输入区工具条 + 状态区/时间线/终端工具区
+ * 4. ctx.ui.gui.setSidebarPanel：侧栏统计面板（PiDeck 专属 GUI 落点，动态内容）
  * 5. 宿主原生服务：gui.filePicker（原生文件选择）与 gui.openPath（系统默认程序打开）
+ *    —— 以面板内按钮触发，不常驻其他界面位置
  *
  * 【改我】
  * 这个文件就是你的起步模板：改 key、改文案、改节点树，重启会话看效果。
- * 完整能力清单（42 种节点、19 个落点、事件表）见扩展目录里的 AI-PLUGIN-GUIDE.md。
+ * 完整落点清单（19 个，含输入区/状态区/终端/Git 面板等）与节点目录（42 种 kind）
+ * 见扩展目录里的 AI-PLUGIN-GUIDE.md——demo 故意只占侧栏，其他落点照指南表格用即可。
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -32,10 +34,6 @@ type GuiNode = Record<string, unknown> & { kind: string; children?: GuiNode[] };
 /** ctx.ui.gui 的形状（只在 PiDeck 里存在；纯终端下为 undefined，用前必须判空）。 */
 type GuiLike = {
 	setSidebarPanel: (key: string, factory: unknown, options?: { title?: string; order?: number }) => void;
-	setComposerToolbar: (key: string, factory: unknown, options?: { title?: string; order?: number }) => void;
-	setStatusbarItem: (key: string, factory: unknown, options?: { title?: string; order?: number }) => void;
-	setTerminalToolbar: (key: string, factory: unknown, options?: { title?: string; order?: number }) => void;
-	setTimelineEvent: (key: string, factory: unknown, options?: { title?: string; order?: number }) => void;
 	command: (id: string, handler: () => void) => void;
 	toast: (message: string, options?: { tone?: string }) => void;
 	overlay: (node: GuiNode) => { close: () => void };
@@ -67,15 +65,6 @@ const state: DemoState = {
 	lastPicked: "",
 };
 
-const state: DemoState = {
-	turns: 0,
-	toolCalls: 0,
-	lastTool: "-",
-	startedAt: "",
-	greetings: 0,
-	lastPicked: "",
-};
-
 export default function demoPlugin(pi: ExtensionAPI): void {
 	// ── 1. /demo 命令：pi 原生扩展点 ─────────────────────────────
 	pi.registerCommand("demo", {
@@ -83,7 +72,7 @@ export default function demoPlugin(pi: ExtensionAPI): void {
 		handler: async (_args, ctx) => {
 			const gui = getGui(ctx);
 			if (gui) {
-				gui.toast("Demo 插件已就绪：侧栏统计面板 + 输入区按钮都在工作", { tone: "success" });
+				gui.toast("Demo 插件已就绪：左侧栏的「Demo 统计」面板在工作", { tone: "success" });
 				showAboutOverlay(gui);
 			} else {
 				// 纯终端宿主：ctx.ui.notify 退化可用，永远要有非 GUI 兜底
@@ -123,7 +112,7 @@ export default function demoPlugin(pi: ExtensionAPI): void {
 	});
 }
 
-// ── 4. PiDeck 专属：GUI 落点挂载（幂等）────────────────────────
+// ── 3. PiDeck 专属：GUI 落点挂载（幂等；只占侧栏一个位置）──────
 let mounted = false;
 let unmounted = false;
 
@@ -150,46 +139,13 @@ function mountGui(ctx: { ui?: { gui?: GuiLike } }): void {
 		{ title: "Demo 统计", order: 500 },
 	);
 
-	// 输入区工具条 —— 静态按钮组，直接返回 GuiNode 即可
-	gui.setComposerToolbar("demo-actions", () => toolbarNode(), { order: 500 });
-
-	// 会话头部状态区 —— 动态紧凑条目（setStatusbarItem；render 每帧重建，读闭包状态）
-	gui.setStatusbarItem("demo-status", () => ({
-		render: () => ({
-			kind: "hstack",
-			gap: 8,
-			children: [
-				{ kind: "badge", label: "Demo", tone: "accent" },
-				{ kind: "text", text: `回合 ${state.turns} · 工具 ${state.toolCalls} · 问候 ${state.greetings}`, style: ["dim"] },
-			],
-		}),
-	}));
-
-	// 终端面板工具区 —— 另一处共享 chrome 落点示例
-	gui.setTerminalToolbar("demo-terminal", () => ({
-		kind: "hstack",
-		gap: 6,
-		children: [{ kind: "button", label: "终端 × Demo", actionId: "demo.hello", variant: "ghost" }],
-	}));
-
-	// 时间线底部事件条 —— 静态标记
-	gui.setTimelineEvent("demo-note", () => ({
-		kind: "hstack",
-		gap: 6,
-		children: [
-			{ kind: "badge", label: "Demo", tone: "success" },
-			{ kind: "text", text: "会话开始于 " + (state.startedAt || "-") + "；本条由 setTimelineEvent 渲染", style: ["dim"] },
-		],
-	}));
-
-	// 交互回调：按钮 actionId → gui.command 注册（与节点树解耦）
+	// 交互回调：按钮 actionId → gui.command 注册（与节点树解耦）。
+	// filePicker/openPath（宿主原生服务）也从面板按钮触发——不额外占用界面位置。
 	gui.command("demo.hello", () => {
 		state.greetings += 1;
 		gui.toast(`Hello from your plugin! （第 ${state.greetings} 次问候）`, { tone: "accent" });
 	});
 	gui.command("demo.about", () => showAboutOverlay(gui));
-
-	// 宿主原生服务：文件选择 + 系统打开（Promise 往返，取消/失败都要兑底）
 	gui.command("demo.pickfile", () => {
 		void (async () => {
 			try {
@@ -201,7 +157,7 @@ function mountGui(ctx: { ui?: { gui?: GuiLike } }): void {
 				state.lastPicked = picked[0];
 				gui.toast(`已选：${picked[0]}`, { tone: "success" });
 			} catch (error) {
-				// 老版 PiDeck 不支持该服务 / 超时会 reject —— 插件必须兑底
+				// 老版 PiDeck 不支持该服务 / 超时会 reject —— 插件必须兜底
 				gui.toast(`filePicker 失败：${error instanceof Error ? error.message : String(error)}`, { tone: "warning" });
 			}
 		})();
@@ -222,7 +178,7 @@ function mountGui(ctx: { ui?: { gui?: GuiLike } }): void {
 	});
 }
 
-/** 侧栏面板内容：vstack + keyvalue + button 的组合示例。 */
+/** 侧栏面板内容：vstack + keyvalue + button 的组合示例（GUI 落点演示全部集中在这里）。 */
 function statsPanelNode(): GuiNode {
 	return {
 		kind: "vstack",
@@ -239,20 +195,24 @@ function statsPanelNode(): GuiNode {
 					{ key: "问候次数", value: String(state.greetings) },
 				],
 			},
-			{ kind: "button", label: "重置统计", actionId: "demo.reset", variant: "outline" },
-		],
-	};
-}
-
-/** 输入区工具条：hstack + button。actionId 对应上面 gui.command 注册的处理器。 */
-function toolbarNode(): GuiNode {
-	return {
-		kind: "hstack",
-		gap: 6,
-		children: [
-			{ kind: "button", label: "👋 Hello", actionId: "demo.hello", variant: "ghost" },
-			{ kind: "button", label: "选文件", actionId: "demo.pickfile", variant: "ghost" },
-			{ kind: "button", label: "打开所选", actionId: "demo.openpicked", variant: "ghost" },
+			{
+				kind: "hstack",
+				gap: 6,
+				children: [
+					{ kind: "button", label: "👋 Hello", actionId: "demo.hello", variant: "outline" },
+					{ kind: "button", label: "重置统计", actionId: "demo.reset", variant: "outline" },
+				],
+			},
+			{ kind: "divider", label: "宿主原生服务" },
+			{
+				kind: "hstack",
+				gap: 6,
+				children: [
+					{ kind: "button", label: "选文件", actionId: "demo.pickfile", variant: "outline" },
+					{ kind: "button", label: "打开所选", actionId: "demo.openpicked", variant: "outline" },
+				],
+			},
+			{ kind: "text", text: state.lastPicked ? `最近所选：${state.lastPicked}` : "（filePicker/openPath 演示，见下方按钮）", style: ["dim"] },
 			{ kind: "button", label: "关于 Demo", actionId: "demo.about", variant: "ghost" },
 		],
 	};
@@ -271,8 +231,9 @@ function showAboutOverlay(gui: GuiLike): void {
 					"",
 					"- 注册 `/命令`（本文件的 `/demo`）",
 					"- 监听会话/消息/工具事件",
-					"- 在侧栏、输入区、横幅等 **19 个落点**渲染 UI",
+					"- 在侧栏、输入区、横幅等 **19 个落点**渲染 UI（demo 只占侧栏，其余见指南表格）",
 					"- 使用 42 种声明式节点（本浮层就是 `card + markdown + button`）",
+					"- 调用宿主原生服务（filePicker / openPath，见侧栏面板按钮）",
 					"",
 					"改这个文件 → 重启会话 → 立即看效果。",
 				].join("\n"),
