@@ -3,7 +3,7 @@ import { useAtomValue } from "jotai";
 import { logoStyleAtom } from "../../atoms/app-ui-atoms";
 import { PI_TUI_COLORS, PI_TUI_LOGO_CELLS, PI_TUI_PIECES, type PiTuiColorKey } from "./piTuiLogoData";
 
-/** 订阅 logo 风格镜像 atom；Web 独立环境无人写入，恒为 classic（现状）。 */
+/** 订阅 logo 风格镜像 atom；Web 独立环境无人写入 → 恒取 atom 默认（pi-tui），与桌面默认品牌位一致。 */
 export function useLogoStyle(): "classic" | "pi-tui" {
 	return useAtomValue(logoStyleAtom);
 }

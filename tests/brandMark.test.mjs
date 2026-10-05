@@ -49,7 +49,8 @@ test("in-app brand surfaces use the Pi glyph, not the spider mark", () => {
 	assert.match(app, PI_GLYPH);
 	assert.match(boot, /id="boot-logo-silver"/);
 	assert.match(boot, PI_GLYPH);
-	assert.match(webBrand, /<PiLogoCanvas size=\{18\} playOnClick \/>/);
+	// Web 品牌位与桌面同构：按 logoStyle 分支（Web 无人写入 → 恒取默认 pi-tui 三色像素标）。
+	assert.match(webBrand, /logoStyle === "pi-tui"\s*\?\s*<PiTuiLogoCanvas size=\{18\} playOnClick \/>\s*:\s*<PiLogoCanvas size=\{18\} playOnClick \/>/);
 	assert.doesNotMatch(webBrand, /autoPlay/);
 	assert.match(webBrand, />\s*PiDeck\s*</);
 	assert.match(webTimeline, /<LogoMark size=\{66\} \/>/);
