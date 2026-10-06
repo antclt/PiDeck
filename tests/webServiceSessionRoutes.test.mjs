@@ -421,6 +421,49 @@ test("runtime HTTP commands preserve the full generation-validated target", asyn
 	});
 });
 
+test("runtime restart streams heartbeat bytes while pending and still returns parseable JSON", async () => {
+	let releaseRestart;
+	const restartGate = new Promise((resolve) => {
+		releaseRestart = resolve;
+	});
+	await withServer(async ({ baseUrl, runtime }) => {
+		const target = {
+			sessionId: runtime.sessionId,
+			agentId: runtime.agentId,
+			runtimeGeneration: runtime.runtimeGeneration,
+		};
+		const response = await fetch(`${baseUrl}/api/sessions/session-1/runtime/restart`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ target }),
+		});
+		// 响应头先行到达：pending 期间浏览器能确认请求活着，而不是转圈黑盒。
+		assert.equal(response.status, 200);
+		const reader = response.body.getReader();
+		// 第一个数据块应是心跳（JSON 前导空白），而不是最终结果——证明重启期间有持续字节。
+		const first = await reader.read();
+		assert.equal(first.done, false);
+		const firstText = new TextDecoder().decode(first.value);
+		assert.equal(firstText.trim(), "");
+		releaseRestart();
+		let rest = "";
+		for (;;) {
+			const chunk = await reader.read();
+			if (chunk.done) break;
+			rest += new TextDecoder().decode(chunk.value);
+		}
+		// 前导心跳空白不影响 JSON 解析（客户端 fetch().json() 的口径）。
+		const body = JSON.parse(firstText + rest);
+		assert.equal(body.result.ok, true);
+		assert.equal(body.result.value.restarted, true);
+	}, {
+		restartSessionRuntime: async () => {
+			await restartGate;
+			return { ok: true, value: { restarted: true } };
+		},
+	});
+});
+
 test("runtime rewind routes forward checkpointId/scope and keep the validated target", async () => {
 	await withServer(async ({ baseUrl, runtime, calls }) => {
 		const target = {
