@@ -77,6 +77,10 @@ export type WebContextUsage = {
 	contextOverflow?: boolean;
 	inputTokens?: number;
 	outputTokens?: number;
+	/** DSH 权限预设（runtime state 直出，与桌面 DshPermissionMenu 同一数据源）。
+	 *  头部盾牌图标以它为准；会话记录里的 permissionPreset 只做无 runtime 时兜底——
+	 *  乐观切换会被 /api/state 轮询冲掉，单信会话记录会让图标切完又弹回去。 */
+	permissionPreset?: string;
 };
 
 /** 文件抽屉节点（P3）：后端已剥离绝对路径，只留项目内相对信息。 */

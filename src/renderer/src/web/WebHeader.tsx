@@ -6,14 +6,14 @@
  * 运行态来自 useChat status（submitted/streaming）与轮询的 runtime.status 兜底。
  */
 import { useState } from "react";
-import { Download, EllipsisVertical, Menu, Monitor, Moon, MoreHorizontal, PanelRight, Puzzle, Search, ShieldCheck, Sun, Target } from "lucide-react";
+import { Check, Download, EllipsisVertical, Menu, Monitor, Moon, MoreHorizontal, PanelRight, Puzzle, Search, Sun, Target } from "lucide-react";
 import type { AgentBackend } from "../../../shared/types";
 import { Button } from "@/components/ui-shadcn/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui-shadcn/select";
 import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { SessionBackendMark } from "@/components/session/SessionSourceBadge";
 import { DSH_PERMISSION_PRESETS } from "@/components/session/DshPermissionMenu";
+import { permissionStrengthIcon } from "@/utils/permissionLevelIcon";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui-shadcn/dropdown-menu";
 import { WebBottomSheet } from "./WebBottomSheet";
 import type { WebContextUsage } from "./webTypes";
@@ -60,6 +60,11 @@ export function WebHeader(props: {
 	const { title, status, onOpenSidebar, backend, contextUsage, permissionPreset, actions, onOpenDshTools, onOpenSearch, themePreference, onCycleTheme, canInstall, onInstall, onOpenAssets } = props;
 	// 上下文详情弹层：移动端无悬停 title 提示，环必须可点开详情（对齐桌面 SessionContextMeter 点开面板语义）。
 	const [contextSheetOpen, setContextSheetOpen] = useState(false);
+	// DSH 权限预设：图标按统一保护强度语义取（#214 与桌面 DshPermissionMenu 同源），
+	// 触发钮只显示一个盾牌 logo——宽 Select 曾在窄屏把标题挤没。
+	const knownPreset = DSH_PERMISSION_PRESETS.find((item) => item.id === permissionPreset);
+	const PermissionIcon = permissionStrengthIcon(knownPreset?.strength ?? "unknown");
+	const permissionLabel = permissionPreset ? (knownPreset ? t(knownPreset.labelKey) : t("dshPermission.custom")) : t("dshPermission.unknown");
 	// 头部固定单行：标题+状态占左侧，右侧动作收敛后窄屏不再换行错位（全局入口收进溢出菜单）。
 	return (
 		<>
@@ -73,9 +78,21 @@ export function WebHeader(props: {
 						{backend && <SessionBackendMark backend={backend} className="size-4 shrink-0 rounded" />}
 						<span className="min-w-0 truncate">{title}</span>
 					</strong>
-					{/* 运行态：随标题展示。flex-col 容器默认 stretch 会把 inline pill 拉成整行横条，
-				    这里 self-start 让它收缩为左对齐的小标记。 */}
-					<span className={cn("agent-status-indicator self-start", status === "running" && "status-running", status === "starting" && "status-starting", status === "error" && "status-error", status === "idle" && "status-idle")}>{t(statusLabelKey(status))}</span>
+					{/* 运行态：紧凑小圆点+文字，不用带边框底色的大 pill（旧 agent-status-indicator
+						在头部占两行高度且视觉过重；侧栏列表仍沿用该样式，此处不动它）。 */}
+					<span className="flex items-center gap-1 self-start text-micro text-muted-foreground">
+						<span
+							className={cn(
+								"size-1.5 shrink-0 rounded-full",
+								status === "running" && "animate-pulse bg-[var(--color-accent)]",
+								status === "starting" && "animate-pulse bg-[var(--color-warning)]",
+								status === "error" && "bg-[var(--color-danger)]",
+								status === "idle" && "bg-[var(--color-info)]",
+							)}
+							aria-hidden="true"
+						/>
+						{t(statusLabelKey(status))}
+					</span>
 				</div>
 				<div className="web-header-actions flex min-w-0 items-center justify-end gap-1.5">
 					{/* P2：上下文用量环（无窗口数据时隐藏；超限变红；点击开详情弹层） */}
@@ -87,21 +104,24 @@ export function WebHeader(props: {
 							<span className="hidden sm:inline">{t("web.dshTools")}</span>
 						</Button>
 					)}
-					{/* P1：DSH 权限预设（read-only / workspace-write / danger-full-access） */}
+					{/* P1：DSH 权限预设——单盾牌图标（强度语义：read-only=ShieldAlert / workspace-write=ShieldCheck /
+						full-access=ShieldOff），下拉选档；与桌面 DshPermissionMenu 同一交互族。 */}
 					{backend === "dsh" && actions?.onPermissionChange ? (
-						<Select value={permissionPreset ?? ""} onValueChange={(preset) => actions?.onPermissionChange?.(preset)}>
-							<SelectTrigger size="sm" className="h-8 w-36 border-transparent bg-transparent px-2 text-caption text-muted-foreground hover:bg-muted/60" aria-label={t("web.permission")} title={t("web.permission")}>
-								<ShieldCheck className="size-3.5 shrink-0" aria-hidden="true" />
-								<SelectValue placeholder={t("dshPermission.unknown")} />
-							</SelectTrigger>
-							<SelectContent>
+						<DropdownMenu>
+							<DropdownMenuTrigger asChild>
+								<Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground" aria-label={t("web.permission")} title={`${t("web.permission")} · ${permissionLabel}`}>
+									<PermissionIcon className="size-4" aria-hidden="true" />
+								</Button>
+							</DropdownMenuTrigger>
+							<DropdownMenuContent align="end" className="w-56">
 								{DSH_PERMISSION_PRESETS.map((preset) => (
-									<SelectItem key={preset.id} value={preset.id}>
-										{t(preset.labelKey)}
-									</SelectItem>
+									<DropdownMenuItem key={preset.id} onClick={() => actions?.onPermissionChange?.(preset.id)}>
+										<span className="min-w-0 flex-1 truncate">{t(preset.labelKey)}</span>
+										{preset.id === permissionPreset ? <Check className="size-4 shrink-0" aria-hidden="true" /> : null}
+									</DropdownMenuItem>
 								))}
-							</SelectContent>
-						</Select>
+							</DropdownMenuContent>
+						</DropdownMenu>
 					) : null}
 					{/* P3：工作区抽屉（Git / 文件）入口 */}
 					{actions?.onOpenWorkspace ? (

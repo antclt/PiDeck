@@ -866,7 +866,7 @@ export function WebChatApp() {
 					onOpenSidebar={() => setMobileSidebarOpen(true)}
 					backend={activeSession?.backend}
 					contextUsage={contextUsage}
-					permissionPreset={activeSession?.permissionPreset}
+					permissionPreset={contextUsage?.permissionPreset ?? activeSession?.permissionPreset}
 					actions={{
 						onPermissionChange: activeSession?.backend === "dsh" ? (preset) => void handlePermissionChange(preset) : undefined,
 						onOpenWorkspace: activeSession ? () => setWorkspaceOpen(true) : undefined,
