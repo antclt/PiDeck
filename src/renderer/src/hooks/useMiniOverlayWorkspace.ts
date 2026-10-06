@@ -101,8 +101,7 @@ export function useMiniOverlayWorkspace(options: MiniOverlayWorkspaceOptions) {
 	useEffect(() => {
 		if (restorePendingRef.current) return;
 		try {
-			const entry: PersistedMiniOverlayWorkspace =
-				view === "session" && session ? { view: "session", sessionId: session.id, projectId: session.projectId } : { view: view === "new" ? "new" : "home" };
+			const entry: PersistedMiniOverlayWorkspace = view === "session" && session ? { view: "session", sessionId: session.id, projectId: session.projectId } : { view: view === "new" ? "new" : "home" };
 			window.localStorage.setItem(MINI_OVERLAY_WORKSPACE_KEY, JSON.stringify(entry));
 		} catch {
 			// 存储异常（隐私模式/配额）不影响导航本身。

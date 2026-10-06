@@ -81,9 +81,14 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.7.9** (2026-10-05)
+> **Latest: v0.7.9 (Unreleased)** ()
 
-### v0.7.9 Release Highlights
+### v0.7.9 (Unreleased) Release Highlights
+- 🚀 **Floating ball & mini overlay - minimize to a ball, expand to the full app**
+- 🚀 **Richer tray right-click menu**
+- 🚀 **Tray icon follows the Logo style**
+- 🚀 **Scratch pad moved into the right sidebar**
+- 🚀 **Anonymous heartbeat gains feature-adoption and usage-scale stats**
 - 🚀 **TokenDance top-up (agent payment)**
 - 🚀 **Standby runtime pool — new sessions activate instantly**
 - 🚀 **Plugin development interface (capability catalog + AI authoring guide + demo)**
@@ -91,10 +96,6 @@
 - 🚀 **Adapts to pi 1.0.x — resource management now rides pi's native config**
 - 🚀 **In-app pi update details and a more reliable updater**
 - 🚀 **CUA: full-chain fixes and an auto-approve switch**
-- 🚀 **Logo & app icon in the official pi TUI style**
-- 🚀 **Web: pick the backend when creating a session**
-- 🚀 **Session housekeeping: external deletions and orphan processes**
-- 🚀 **Four waves of UI polish + global motion pass**
 - ✨ **No more flash of the guide page at startup**
 - ✨ **Win11 snap layouts restore exactly**
 - ✨ **Session timestamps no longer churn (#314)**
