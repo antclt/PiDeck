@@ -345,8 +345,11 @@ export class FloatingController {
 		const { workArea } = display;
 		const midX = workArea.x + workArea.width / 2;
 		const targetX = x + FLOATER_SIZE / 2 < midX ? workArea.x : workArea.x + workArea.width - FLOATER_SIZE;
+		// y 钳制在工作区内（避免贴出屏幕外）
 		const clampedY = Math.max(workArea.y, Math.min(y, workArea.y + workArea.height - FLOATER_SIZE - FLOATER_BADGE_H));
-		return { x: targetX, y: clampedY };
+		// x 也要钳制（多显示器时 targetX 可能超出）
+		const clampedX = Math.max(workArea.x, Math.min(targetX, workArea.x + workArea.width - FLOATER_SIZE));
+		return { x: clampedX, y: clampedY };
 	}
 
 	private defaultPos(): FloaterPos {

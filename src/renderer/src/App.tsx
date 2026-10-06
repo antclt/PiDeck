@@ -2756,8 +2756,30 @@ export function App() {
 									<ChatSessionPane sessionId={currentSession.id} focused onFocusPane={() => focusSessionPane(currentSession.id)} splitPane={false} />
 								</SessionPaneServicesProvider>
 							) : (
-								<div className="flex h-full items-center justify-center text-sm" style={{ color: "var(--color-text-secondary, rgba(255,255,255,0.5))" }}>
-									暂无活跃会话，请在主窗口创建
+								<div className="flex h-full flex-col items-center justify-center gap-3 text-sm" style={{ color: "var(--color-text-secondary, rgba(255,255,255,0.5))" }}>
+									<p>暂无活跃会话</p>
+									<Button
+										variant="default"
+										size="sm"
+										onClick={() => {
+											// 新建会话：创建草稿并激活（与主窗口「+」同链路）
+											void (async () => {
+												const projects = await api.projects.list();
+												if (projects.length === 0) return;
+												const project = projects[0];
+												const session = await api.sessions.createDraft({
+													projectId: project.id,
+													title: `${project.name} agent`,
+													backend: "pi",
+												});
+												upsertSession(session);
+												selectSessionCommand(project.id, session.id, false);
+												workspaceChrome.registerOpenSession(session.id, "permanent");
+											})();
+										}}
+									>
+										新建会话
+									</Button>
 								</div>
 							)
 						) : quickTask.active ? (

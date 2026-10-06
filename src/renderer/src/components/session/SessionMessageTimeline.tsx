@@ -960,7 +960,8 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 			    这里仍用正常流布局而不是 sticky/z-index，避免覆盖最后一条工具调用或回答。 */}
 			{props.runtimeUi ? <div className="session-runtime-ui mx-auto w-full min-w-0 empty:hidden">{props.runtimeUi}</div> : null}
 
-			{/* 发送清屏垫片（pin-to-top）已于 2026 移除：其与流式跟随有冲突、偶发页面抖动。 */}
+			{/* 发送定位垫片：让长历史下的新消息即使尚未有足够自然内容，也能平滑到视口顶部。 */}
+			<div aria-hidden="true" data-send-scroll-spacer="true" className="shrink-0" />
 
 			{multiSelectOpen && <MultiSelectModal renderedRuns={reconciledRuns} onClose={() => setMultiSelectOpen(false)} onCopy={copySelectedMessages} />}
 

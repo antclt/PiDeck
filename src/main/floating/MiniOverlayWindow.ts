@@ -48,6 +48,8 @@ export class MiniOverlayWindow {
 	private readonly deps: MiniOverlayWindowDeps;
 	private removeAgentStateListener: (() => void) | null = null;
 	private destroyed = false;
+	/** collapse/hide 时抑制 onExit（避免主动收起也退出悬浮球模式） */
+	private suppressOnExit = false;
 
 	constructor(deps: MiniOverlayWindowDeps) {
 		this.deps = deps;
@@ -90,7 +92,9 @@ export class MiniOverlayWindow {
 			this.win = null;
 			this.removeAgentStateListener?.();
 			this.removeAgentStateListener = null;
-			this.deps.onExit?.();
+			// 只有用户主动关闭（点 X 按钮）才退出悬浮球模式；collapse/hide 不触发
+			if (!this.suppressOnExit) this.deps.onExit?.();
+			this.suppressOnExit = false;
 		});
 		this.win.once("ready-to-show", () => {
 			this.win?.show();
@@ -111,6 +115,7 @@ export class MiniOverlayWindow {
 	}
 
 	hide(): void {
+		this.suppressOnExit = true;
 		if (this.win && !this.win.isDestroyed()) {
 			this.win.close();
 		}

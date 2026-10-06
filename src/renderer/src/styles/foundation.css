@@ -3274,14 +3274,16 @@ select:focus-visible {
   }
 }
 
-/* ===== 极简浮窗模式（mini-overlay）=====
- * 浮窗加载 index.html?mini-overlay=1 时 body 加 .mini-overlay-mode。
- * 强制单栏布局：隐藏侧栏/抽屉/标题栏/底部栏，会话区占满 480×640。
- */
+/* 浮窗模式：隐藏 AppHeader 的窗口控制按钮（最小化/最大化/关闭），只留 mini-overlay-chrome 的收起/关闭 */
+.mini-overlay-mode .window-controls {
+  display: none !important;
+}
 .mini-overlay-mode .wechat-shell {
   border-radius: 16px;
   overflow: hidden;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  /* 透明窗口的系统阴影已足够，不再叠加 CSS 阴影 */
+  /* 背景跟随系统主题（dark/light），不强制白色 */
+  background: transparent;
 }
 .mini-overlay-mode .shell-panel-list,
 .mini-overlay-mode .shell-panel-drawer,

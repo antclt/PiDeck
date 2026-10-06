@@ -52,8 +52,8 @@ export const mainProcessZhCN = {
 	"tray.restart": "重启 PiDeck",
 	"tray.quit": "退出 PiDeck",
 	"tray.floatingBall": "悬浮球",
-	"tray.floatingBallShow": "显示悬浮球",
-	"tray.floatingBallHide": "隐藏悬浮球",
+	"tray.floatingBallToggle": "切换悬浮球显示",
+
 	"tray.floatingBallExit": "退出悬浮球",
 	"floater.expandMini": "极简浮窗",
 	"floater.expandCompact": "小任务模式",
@@ -323,8 +323,8 @@ export const mainProcessEnUS: Record<MainProcessTranslationKey, string> = {
 	"tray.restart": "Restart PiDeck",
 	"tray.quit": "Quit PiDeck",
 	"tray.floatingBall": "Floating ball",
-	"tray.floatingBallShow": "Show floating ball",
-	"tray.floatingBallHide": "Hide floating ball",
+	"tray.floatingBallToggle": "Toggle floating ball",
+
 	"tray.floatingBallExit": "Exit floating ball",
 	"floater.expandMini": "Mini overlay",
 	"floater.expandCompact": "Quick task mode",

@@ -62,7 +62,7 @@ export function buildTrayMenuTemplate(copy: (key: MainProcessTranslationKey, par
 			label: copy("tray.showWindow"),
 			click: () => callbacks.showWindow(),
 		},
-		// 悬浮球控制：显示/隐藏/退出
+		// 悬浮球控制：显示/隐藏/退出（label 静态，点击时动态切换）
 		...(callbacks.toggleFloatingBall
 			? [
 					{ type: "separator" as const },
@@ -70,7 +70,7 @@ export function buildTrayMenuTemplate(copy: (key: MainProcessTranslationKey, par
 						label: copy("tray.floatingBall"),
 						submenu: [
 							{
-								label: callbacks.isFloatingBallActive?.() ? copy("tray.floatingBallHide") : copy("tray.floatingBallShow"),
+								label: copy("tray.floatingBallToggle"),
 								click: () => callbacks.toggleFloatingBall?.(!callbacks.isFloatingBallActive?.()),
 							},
 							{
