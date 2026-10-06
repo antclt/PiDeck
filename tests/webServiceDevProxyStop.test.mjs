@@ -37,14 +37,17 @@ function startFakeVite() {
 		socket.write("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
 	});
 	return new Promise((resolve) => {
-		server.listen(0, "127.0.0.1", () => resolve({
-			server,
-			port: server.address().port,
-			close: () => new Promise((resolveClose) => {
-				for (const socket of sockets) socket.destroy();
-				server.close(() => resolveClose());
+		server.listen(0, "127.0.0.1", () =>
+			resolve({
+				server,
+				port: server.address().port,
+				close: () =>
+					new Promise((resolveClose) => {
+						for (const socket of sockets) socket.destroy();
+						server.close(() => resolveClose());
+					}),
 			}),
-		}));
+		);
 	});
 }
 

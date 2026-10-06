@@ -107,6 +107,7 @@
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "sync:main": "node scripts/sync-main.mjs",
     "typecheck": "tsc --noEmit",
+    "preflight": "node scripts/release-preflight.mjs",
     "make-icon": "node scripts/make-icon.js",
     "compile-exe": "node scripts/compile-exe.js",
     "test:e2e": "npm run build:fast && playwright test",
