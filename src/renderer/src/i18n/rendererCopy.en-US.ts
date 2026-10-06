@@ -4982,6 +4982,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"web.compactContext": "Compact context",
 	"web.cloneSession": "Clone session",
 	"web.copyMarkdown": "Copy session as Markdown",
+	"web.refreshMessages": "Refresh messages",
 	"web.copied": "Copied",
 	"web.copyFailed": "Copy failed",
 	"web.actionFailed": "Action failed",

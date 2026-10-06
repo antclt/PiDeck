@@ -4965,6 +4965,7 @@ export const zhCN = {
 	"web.compactContext": "压缩上下文",
 	"web.cloneSession": "克隆会话",
 	"web.copyMarkdown": "复制会话为 Markdown",
+	"web.refreshMessages": "刷新会话消息",
 	"web.copied": "已复制",
 	"web.copyFailed": "复制失败",
 	"web.actionFailed": "操作失败",

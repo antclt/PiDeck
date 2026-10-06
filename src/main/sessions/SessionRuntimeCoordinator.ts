@@ -809,6 +809,9 @@ export class SessionRuntimeCoordinator {
 			// 仍持有旧 sessionId/generation。只要 agentId 仍有 live 绑定，就用 live 绑定
 			// 规范化目标，别让陈旧身份挡住停止（此前用户只能靠重启停掉后台 Agent）。
 			const stopTarget = this.resolveStopTarget(target);
+			// 与在途 prompt dispatch 并发时先等 lease 释放（毫秒级窗口），不直接报
+			// 「dispatch is in progress」；超时后 reserveBoundRuntime 照旧硬失败。
+			await this.waitForNoDispatchLease(stopTarget.sessionId, stopTarget.agentId);
 			reservation = this.reserveBoundRuntime(stopTarget.sessionId, stopTarget.agentId);
 			await this.agents.stop(stopTarget.agentId);
 			this.requireCurrentReservation(reservation);
@@ -1150,6 +1153,9 @@ export class SessionRuntimeCoordinator {
 			throw new Error("Session runtime changed before restart");
 		}
 
+		// 与在途 prompt dispatch 并发时先等 lease 释放，避免重启/停止撞上毫秒级发送窗口
+		// 直接报「prompt dispatch is in progress」（web 端头部菜单触发 restart 的常见竞态）。
+		await this.waitForNoDispatchLease(sessionId, agentId);
 		const reservation = this.reserveBoundRuntime(sessionId, agentId);
 		try {
 			let tab = await this.agents.restart(agentId);
@@ -2076,6 +2082,21 @@ export class SessionRuntimeCoordinator {
 
 	private hasDispatchLease(sessionId?: string, agentId?: string): boolean {
 		return Boolean((sessionId && this.dispatchLeasesBySession.get(sessionId)?.size) || (agentId && this.dispatchLeasesByAgent.get(agentId)?.size));
+	}
+
+	/**
+	 * 瞬态 dispatch lease 宽限：stop/restart/activate 与在途发送并发时，prompt dispatch
+	 * 只覆盖 sendAgentPrompt 的 RPC 窗口（毫秒到秒级，pi 忙时排队会更久），此时硬抛
+	 * 「prompt dispatch is in progress」对用户只是一次无意义的失败——等 lease 释放后
+	 * 重试同一操作即可成功。在 deadline 内轮询等待，超时则返回让调用方走原有
+	 * assert 硬失败路径（保留既有错误语义，避免无限挂起）。
+	 */
+	private async waitForNoDispatchLease(sessionId: string, agentId: string, timeoutMs = 2000): Promise<void> {
+		const deadline = Date.now() + timeoutMs;
+		while (this.hasDispatchLease(sessionId, agentId)) {
+			if (Date.now() >= deadline) return;
+			await new Promise<void>((resolve) => setTimeout(resolve, 50));
+		}
 	}
 
 	private assertNoDispatchLease(sessionId?: string, agentId?: string): void {

@@ -6,7 +6,7 @@
  * 运行态来自 useChat status（submitted/streaming）与轮询的 runtime.status 兜底。
  */
 import { useState } from "react";
-import { Check, Download, EllipsisVertical, Menu, Monitor, Moon, MoreHorizontal, PanelRight, Puzzle, Search, Sun, Target } from "lucide-react";
+import { Check, Download, EllipsisVertical, Menu, Monitor, Moon, MoreHorizontal, PanelRight, Puzzle, RefreshCw, Search, Sun, Target } from "lucide-react";
 import type { AgentBackend } from "../../../shared/types";
 import { Button } from "@/components/ui-shadcn/button";
 import { t } from "@/i18n";
@@ -31,6 +31,8 @@ export type WebHeaderActions = {
 	onCompact?: () => void;
 	onClone?: () => void;
 	onCopyMarkdown?: () => void;
+	/** 手动从磁盘重拉当前会话消息（桌面端跑出的新输出不自动出现时的兜底入口）。 */
+	onRefreshMessages?: () => void;
 	onOpenWorkspace?: () => void;
 	onPermissionChange?: (preset: string) => void;
 };
@@ -81,16 +83,7 @@ export function WebHeader(props: {
 					{/* 运行态：紧凑小圆点+文字，不用带边框底色的大 pill（旧 agent-status-indicator
 						在头部占两行高度且视觉过重；侧栏列表仍沿用该样式，此处不动它）。 */}
 					<span className="flex items-center gap-1 self-start text-micro text-muted-foreground">
-						<span
-							className={cn(
-								"size-1.5 shrink-0 rounded-full",
-								status === "running" && "animate-pulse bg-[var(--color-accent)]",
-								status === "starting" && "animate-pulse bg-[var(--color-warning)]",
-								status === "error" && "bg-[var(--color-danger)]",
-								status === "idle" && "bg-[var(--color-info)]",
-							)}
-							aria-hidden="true"
-						/>
+						<span className={cn("size-1.5 shrink-0 rounded-full", status === "running" && "animate-pulse bg-[var(--color-accent)]", status === "starting" && "animate-pulse bg-[var(--color-warning)]", status === "error" && "bg-[var(--color-danger)]", status === "idle" && "bg-[var(--color-info)]")} aria-hidden="true" />
 						{t(statusLabelKey(status))}
 					</span>
 				</div>
@@ -130,7 +123,7 @@ export function WebHeader(props: {
 						</Button>
 					) : null}
 					{/* P1/P3：会话与 runtime 操作溢出菜单（任一回调存在才渲染） */}
-					{actions && (actions.onRename || actions.onRestart || actions.onCompact || actions.onClone || actions.onCopyMarkdown || actions.onExportHtml || actions.onDuplicate || actions.onDelete) ? (
+					{actions && (actions.onRename || actions.onRestart || actions.onCompact || actions.onClone || actions.onCopyMarkdown || actions.onExportHtml || actions.onDuplicate || actions.onDelete || actions.onRefreshMessages) ? (
 						<DropdownMenu>
 							<DropdownMenuTrigger asChild>
 								<Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground" aria-label={t("web.sessionMenu")} title={t("web.sessionMenu")}>
@@ -142,6 +135,12 @@ export function WebHeader(props: {
 								{actions.onDuplicate ? <DropdownMenuItem onClick={actions.onDuplicate}>{t("web.duplicate")}</DropdownMenuItem> : null}
 								{actions.onExportHtml ? <DropdownMenuItem onClick={actions.onExportHtml}>{t("web.exportHtml")}</DropdownMenuItem> : null}
 								{actions.onCopyMarkdown ? <DropdownMenuItem onClick={actions.onCopyMarkdown}>{t("web.copyMarkdown")}</DropdownMenuItem> : null}
+								{actions.onRefreshMessages ? (
+									<DropdownMenuItem onClick={actions.onRefreshMessages}>
+										<RefreshCw className="size-4" aria-hidden="true" />
+										{t("web.refreshMessages")}
+									</DropdownMenuItem>
+								) : null}
 								{actions.onRestart || actions.onCompact || actions.onClone ? <DropdownMenuSeparator /> : null}
 								{actions.onRestart ? <DropdownMenuItem onClick={actions.onRestart}>{t("web.restartRuntime")}</DropdownMenuItem> : null}
 								{actions.onCompact ? <DropdownMenuItem onClick={actions.onCompact}>{t("web.compactContext")}</DropdownMenuItem> : null}
