@@ -132,6 +132,7 @@ import {
 import { isSameSessionPath } from "./agentListDisplay";
 import { t } from "./i18n";
 import { isChatProject, loadSessionSourceFilter, saveSessionSourceFilter, isReplacementForPendingAgent, isPendingAgentId, migrateAgentRecord, stampIdleSessionDuration, type PendingAgentTab } from "./rendererUtils";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui-shadcn/select";
 import type { SessionFilterPill } from "./sessionFilterPills";
 import { useResize } from "./hooks/useResize";
 import { ARCHIVED_SESSION_TOAST_MS, archivedSessionToastMessage, useSessionActions } from "./hooks/useSessionActions";
@@ -2746,6 +2747,11 @@ export function App() {
 			<>
 				<AppBootstrap {...bootstrapProps} />
 				<AppShell
+					miniOverlaySwitchToQuickTask={() => {
+						// 小窗 → 任务模式：带上当前会话的项目路径（无会话时主进程回退桌面）
+						const projectPath = currentSession ? projects.find((item) => item.id === currentSession.projectId)?.path : undefined;
+						void api.miniOverlay.switchToQuickTask(projectPath);
+					}}
 					navigationChrome={
 						simpleMode ? (
 							<div className="simple-navigation-bar flex h-8 shrink-0 items-center gap-0.5 bg-(--simple-shell-surface) px-2 [&_button]:[-webkit-app-region:no-drag]">
@@ -2769,30 +2775,41 @@ export function App() {
 									<ChatSessionPane sessionId={currentSession.id} focused onFocusPane={() => focusSessionPane(currentSession.id)} splitPane={false} />
 								</SessionPaneServicesProvider>
 							) : (
-								<div className="flex h-full flex-col items-center justify-center gap-3 text-sm" style={{ color: "var(--color-text-secondary, rgba(255,255,255,0.5))" }}>
-									<p>暂无活跃会话</p>
-									<Button
-										variant="default"
-										size="sm"
-										onClick={() => {
-											// 新建会话：创建草稿并激活（与主窗口「+」同链路）
+								<div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+									<p>{t("miniOverlay.noActiveSession")}</p>
+									{/* 空态新建：用户显式选项目（不再默认 projects[0]，避免「选了别的项目却建到 Chat」） */}
+									<Select
+										value=""
+										onValueChange={(projectId) => {
 											void (async () => {
-												const projects = await api.projects.list();
-												if (projects.length === 0) return;
-												const project = projects[0];
-												const session = await api.sessions.createDraft({
-													projectId: project.id,
-													title: `${project.name} agent`,
-													backend: "pi",
-												});
-												upsertSession(session);
-												selectSessionCommand(project.id, session.id, false);
-												workspaceChrome.registerOpenSession(session.id, "permanent");
+												const project = projects.find((item) => item.id === projectId);
+												if (!project) return;
+												try {
+													const session = await api.sessions.createDraft({
+														projectId: project.id,
+														title: `${project.name} agent`,
+														backend: "pi",
+													});
+													upsertSession(session);
+													selectSessionCommand(project.id, session.id, false);
+													workspaceChrome.registerOpenSession(session.id, "permanent");
+												} catch {
+													showToast(t("miniOverlay.createSessionFailed"), 4000, "error");
+												}
 											})();
 										}}
 									>
-										新建会话
-									</Button>
+										<SelectTrigger className="w-44">
+											<SelectValue placeholder={t("miniOverlay.newSession")} />
+										</SelectTrigger>
+										<SelectContent>
+											{projects.map((project) => (
+												<SelectItem key={project.id} value={project.id}>
+													{isChatProject(project) ? t("app.chatProject") : project.name}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
 								</div>
 							)
 						) : quickTask.active ? (

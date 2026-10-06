@@ -553,7 +553,19 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			.listEntries()
 			.filter((entry) => entry.projectId === projectId)
 			.map((entry) => sessionCatalog.getRecord(entry.id))
-			.filter((record): record is SessionRecord => Boolean(record));
+			.filter((record): record is SessionRecord => Boolean(record))
+			// 与 mergeScanned 同口径排序：小窗项目选择器直接取 sessions[0]，
+			// 乱序会把陈旧记录顶到最前（陈旧子代理记录曾因此在小窗报 ENOENT）。
+			.sort((left, right) => right.updatedAt - left.updatedAt)
+			// 死链过滤：文件已删但清理闸还没跑到（mergeScanned 在后台异步调度）时，
+			// 别让「最近会话」落到一个必然 ENOENT 的记录上。
+			// 豁免：无文件记录（imagegen/草稿）、dsh（filePath 由 host 侧解析，
+			// 本地路径可能不存在）、UNC/WSL 路径（发行版停机时 existsSync
+			// 恒 false，不能误藏整组会话）。
+			.filter((record) => {
+				if (!record.filePath || record.backend === "dsh" || record.filePath.startsWith("\\\\")) return true;
+				return existsSync(record.filePath);
+			});
 
 		// 纯读路径：事件回调/订阅刷新专用，不再触发扫描（防止推送-拉取循环触发）
 		if (options?.scan === false) return cachedRecords;

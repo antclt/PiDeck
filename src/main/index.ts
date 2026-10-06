@@ -3215,7 +3215,7 @@ function registerIpc() {
 		menuTitle: mainCopy("shellMenu.openWithPiDeck"),
 		quickTaskTitle: mainCopy("shellMenu.quickTask"),
 	});
-	registerQuickTaskIpc(quickTaskChrome.controller);
+	// registerQuickTaskIpc 移至 floating/mini-overlay 装配处（依赖 expandMiniOverlay 做模式互切）。
 }
 
 function sendTelemetryHeartbeat() {
@@ -3737,47 +3737,59 @@ app
 
 		// 悬浮球控制器：主窗口隐藏后常驻屏幕角落的小圆点，点击展开 mini 浮窗/紧凑模式。
 		// 延迟到 agentManager 就绪后创建，因为依赖 addStateListener 订阅运行状态。
+		// 极简浮窗：360×480 状态总览+快捷输入+最近会话，独立于主窗口运行。
+		// 创建逻辑与展开逻辑拆开：悬浮球点击（onExpandMini）与任务模式→小窗互切共用。
+		const ensureMiniOverlayWindow = (): MiniOverlayWindow => {
+			miniOverlayWindow ??= new MiniOverlayWindow({
+				settingsStore,
+				agentManager,
+				projectStore,
+				onJumpToSession: (sessionId, projectId) => {
+					focusMainWindow();
+					queueFocusTarget({ sessionId, projectId });
+					mainWindow?.webContents.once("did-finish-load", () => {
+						flushPendingFocusTargetOnLoad();
+					});
+				},
+				onQuickPrompt: async (projectId, text) => {
+					// 快捷输入：创建草稿 → activateRuntime → agentManager.sendPrompt（与渲染层 useQuickTask 同链路）
+					const draft = await sessionCatalog.createDraft({ projectId, title: text.slice(0, 40), environment: "native", backend: agentManager.backend });
+					const runtime = await sessionRuntimeCoordinator.activateRuntime(draft.id);
+					if (!runtime.ok) return { ok: false, message: runtime.error.code };
+					const result = await agentManager.sendPrompt({ agentId: runtime.value.agentId, message: text });
+					if (!result.accepted) return { ok: false, message: result.error };
+					return { ok: true };
+				},
+				onExit: () => {
+					// 关闭浮窗：退出悬浮球模式，回主窗口
+					settingsStore.update({ floatingBallEnabled: false });
+					floatingController?.hide();
+					focusMainWindow();
+				},
+				onCollapse: () => {
+					// 收起浮窗：回悬浮球（保持悬浮球模式）
+					if (settingsStore.get().floatingBallEnabled) {
+						void floatingController?.show();
+					}
+				},
+				onSwitchToQuickTask: async (projectPath) => {
+					// 小窗 → 任务模式：不回悬浮球（与 onExpandCompact 一致），
+					// 主窗口以 quick-task 紧凑形态打开；未带项目路径时用桌面。
+					floatingController?.hide();
+					await quickTaskChrome.controller.open(projectPath ?? app.getPath("desktop"));
+				},
+			});
+			return miniOverlayWindow;
+		};
+		async function expandMiniOverlay(): Promise<void> {
+			floatingController?.hide();
+			await ensureMiniOverlayWindow().show();
+		}
+
 		floatingController = new FloatingController({
 			settingsStore,
 			getMainWindow: () => mainWindow,
-			onExpandMini: async () => {
-				floatingController?.hide();
-				// 极简浮窗：360×480 状态总览+快捷输入+最近会话，独立于主窗口运行。
-				miniOverlayWindow ??= new MiniOverlayWindow({
-					settingsStore,
-					agentManager,
-					projectStore,
-					onJumpToSession: (sessionId, projectId) => {
-						focusMainWindow();
-						queueFocusTarget({ sessionId, projectId });
-						mainWindow?.webContents.once("did-finish-load", () => {
-							flushPendingFocusTargetOnLoad();
-						});
-					},
-					onQuickPrompt: async (projectId, text) => {
-						// 快捷输入：创建草稿 → activateRuntime → agentManager.sendPrompt（与渲染层 useQuickTask 同链路）
-						const draft = await sessionCatalog.createDraft({ projectId, title: text.slice(0, 40), environment: "native", backend: agentManager.backend });
-						const runtime = await sessionRuntimeCoordinator.activateRuntime(draft.id);
-						if (!runtime.ok) return { ok: false, message: runtime.error.code };
-						const result = await agentManager.sendPrompt({ agentId: runtime.value.agentId, message: text });
-						if (!result.accepted) return { ok: false, message: result.error };
-						return { ok: true };
-					},
-					onExit: () => {
-						// 关闭浮窗：退出悬浮球模式，回主窗口
-						settingsStore.update({ floatingBallEnabled: false });
-						floatingController?.hide();
-						focusMainWindow();
-					},
-					onCollapse: () => {
-						// 收起浮窗：回悬浮球（保持悬浮球模式）
-						if (settingsStore.get().floatingBallEnabled) {
-							void floatingController?.show();
-						}
-					},
-				});
-				await miniOverlayWindow.show();
-			},
+			onExpandMini: expandMiniOverlay,
 			onExpandCompact: async () => {
 				floatingController?.hide();
 				// 小任务模式：主窗口变 compact 浮窗（不显示主窗口，直接 enterCompact）
@@ -3806,6 +3818,13 @@ app
 		quitCleanup.register("floating-ball", () => floatingController?.destroy());
 		quitCleanup.register("mini-overlay", () => miniOverlayWindow?.destroy());
 		registerFloatingIpc(floatingController);
+		// quick-task IPC 与 floating/mini-overlay 共置：switchToMiniOverlay 依赖 expandMiniOverlay（小窗⇄任务模式互切）。
+		registerQuickTaskIpc(quickTaskChrome.controller, {
+			onSwitchToMiniOverlay: async () => {
+				if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
+				await expandMiniOverlay();
+			},
+		});
 		// 启动时如果悬浮球已开启，自动显示（用户上次开着悬浮球退出了应用）
 		if (settingsStore.get().floatingBallEnabled) {
 			void floatingController.show();

@@ -981,6 +981,10 @@ export const ipcChannels = {
 	miniOverlayQuickPrompt: "mini-overlay:quick-prompt",
 	miniOverlayClose: "mini-overlay:close",
 	miniOverlayCollapse: "mini-overlay:collapse",
+	/** 小窗 → 任务模式：隐藏小窗与悬浮球，主窗口以 quick-task 紧凑形态打开。 */
+	miniOverlaySwitchToQuickTask: "mini-overlay:switch-to-quick-task",
+	/** 任务模式 → 小窗：退出 quick-task 恢复主窗口尺寸后隐藏，展开极简浮窗。 */
+	quickTaskSwitchToMiniOverlay: "quick-task:switch-to-mini-overlay",
 	floatingBallSetEnabled: "floating-ball:set-enabled",
 	/** 渲染层 → 主进程：启用/取消资源管理器右键菜单注册 */
 	shellMenuSetEnabled: "shell-menu:set-enabled",

@@ -8,6 +8,8 @@ import { LIST_WIDTH_MIN, LIST_WIDTH_MAX } from "../../hooks/useResize";
 import { DRAWER_WIDTH_MIN, DRAWER_WIDTH_MIN_PINNED, DRAWER_WIDTH_MAX, type WorkspaceDrawerPanel } from "../../hooks/useWorkspacePanels";
 import { cn } from "../../lib/utils";
 import { desktopApi } from "../../desktopApi";
+import { ListTodo } from "lucide-react";
+import { t } from "../../i18n";
 import { MiniOverlayProjectPicker } from "../mini-overlay/MiniOverlayProjectPicker";
 import { shouldCommitPanelPixels } from "../../lib/shellPanelLayout";
 
@@ -42,6 +44,8 @@ export interface AppShellProps {
 	navigationChrome?: ReactNode;
 	/** Compact mode reuses this window's session store and preserves workbench layout preferences. */
 	compactContent?: ReactNode;
+	/** 小窗 chrome：切到任务模式（由 App 解析当前项目路径后调 IPC）；不传则不显示按钮。 */
+	miniOverlaySwitchToQuickTask?: () => void;
 	listCollapsed: boolean;
 	listWidth: number;
 	drawer: WorkspaceDrawerPanel | null;
@@ -356,7 +360,7 @@ export function AppShell(props: AppShellProps) {
 		// 极简浮窗模式：URL query mini-overlay=1 时注入收起/关闭按钮
 		const isMiniOverlayMode = new URLSearchParams(window.location.search).get("mini-overlay") === "1";
 		return (
-			<div className={["wechat-shell quick-task-shell bg-bg-app [[data-bg-image=on]_&]:bg-transparent", useNativeTitleBar ? "" : "custom-titlebar-enabled", !useNativeTitleBar && platform === "darwin" ? "mac-custom-titlebar" : ""].filter(Boolean).join(" ")}>
+			<div className={["wechat-shell quick-task-shell bg-bg-app [[data-bg-image=on]_&]:bg-transparent", isMiniOverlayMode ? "mini-overlay-shell" : "", useNativeTitleBar ? "" : "custom-titlebar-enabled", !useNativeTitleBar && platform === "darwin" ? "mac-custom-titlebar" : ""].filter(Boolean).join(" ")}>
 				{isMiniOverlayMode ? (
 					<div className="mini-overlay-chrome">
 						{/* 项目切换：浮窗模式下没有侧边栏，用 Select 替代 */}
@@ -364,20 +368,30 @@ export function AppShell(props: AppShellProps) {
 							onSelectProject={(projectId) => {
 								// 选项目后跳到该项目的最近会话（没有则新建草稿）
 								void (async () => {
-									const sessions = await desktopApi.sessions.listCatalog(projectId);
-									if (sessions.length > 0) {
-										// 激活最近会话：发事件让 App.tsx 的 selectSessionCommand 处理
-										window.dispatchEvent(new CustomEvent("mini-overlay:select-session", { detail: { projectId, sessionId: sessions[0].id } }));
-									} else {
-										const projects = await desktopApi.projects.list();
-										const project = projects.find((p) => p.id === projectId);
-										if (!project) return;
-										const session = await desktopApi.sessions.createDraft({ projectId, title: `${project.name} agent`, backend: "pi" });
-										window.dispatchEvent(new CustomEvent("mini-overlay:select-session", { detail: { projectId, sessionId: session.id } }));
+									try {
+										const sessions = await desktopApi.sessions.listCatalog(projectId);
+										if (sessions.length > 0) {
+											// 激活最近会话：发事件让 App.tsx 的 selectSessionCommand 处理
+											window.dispatchEvent(new CustomEvent("mini-overlay:select-session", { detail: { projectId, sessionId: sessions[0].id } }));
+										} else {
+											const projects = await desktopApi.projects.list();
+											const project = projects.find((p) => p.id === projectId);
+											if (!project) return;
+											const session = await desktopApi.sessions.createDraft({ projectId, title: `${project.name} agent`, backend: "pi" });
+											window.dispatchEvent(new CustomEvent("mini-overlay:select-session", { detail: { projectId, sessionId: session.id } }));
+										}
+									} catch {
+										// IPC 失败（如项目目录不可达）：保持当前会话，用户可重选；
+										// 不再静默吞成 unhandled rejection 弹全局错误。
 									}
 								})();
 							}}
 						/>
+						{props.miniOverlaySwitchToQuickTask ? (
+							<button type="button" onClick={props.miniOverlaySwitchToQuickTask} aria-label={t("miniOverlay.quickTaskMode")} title={t("miniOverlay.quickTaskMode")}>
+								<ListTodo size={13} strokeWidth={2} />
+							</button>
+						) : null}
 						<button type="button" onClick={() => void desktopApi.miniOverlay.collapse()} aria-label="收起为悬浮球" title="收起为悬浮球">
 							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
 								<path d="m6 9 6 6 6-6" />

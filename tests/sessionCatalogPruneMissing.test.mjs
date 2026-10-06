@@ -233,3 +233,50 @@ test("keeps non-pi sources and draft entries without filePath", async () => {
 		await rm(dir, { recursive: true, force: true });
 	}
 });
+
+test("prunes nested subagent session entries whose whole parent session directory was deleted", async () => {
+	// 2027-02 小窗 ENOENT 事故：嵌套子代理会话的 filePath 形如
+	// <encoded>/<父会话目录>/<agentId>/run-N/session.jsonl。父会话目录被 pi 整体清理后，
+	// 直接父目录（run-N）也不存在——旧的「dirname 在才清」闸把它当成「磁盘离线」
+	// 永远跳过，陈旧记录残留并会顶到小窗项目切换的 sessions[0]。
+	// 修复后锚点是「逐级向上第一个存在的祖先目录」（项目 encoded 目录在 = 确定删除）。
+	const { SessionCatalog } = loadCatalog();
+	const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-prune-subagent-"));
+	const catalogFile = join(dir, "sessions.json");
+	try {
+		const nestedFile = join(dir, "2026-08-02T04-26-52-784Z_parent", "ef6005bb", "run-0", "session.jsonl");
+		const seed = {
+			version: 1,
+			sessions: [seedEntry({ id: "stale-subagent", title: "subagent-researcher-ef6005bb-1", filePath: nestedFile })],
+		};
+		await writeFile(catalogFile, JSON.stringify(seed), "utf8");
+		const catalog = new SessionCatalog(catalogFile);
+		await catalog.load();
+		await catalog.mergeScanned("project-1", []);
+		assert.equal(catalog.listEntries().length, 0, "nested subagent entry pruned once the project dir anchor exists but the file is gone");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+test("keeps entries when no ancestor exists within the climb limit (disk/offline protection)", async () => {
+	// 爬升上限 6 层：路径深于上限且所有祖先都不存在时视为「磁盘/路径整体不可达」，跳过清理。
+	const { SessionCatalog } = loadCatalog();
+	const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-prune-deep-"));
+	const catalogFile = join(dir, "sessions.json");
+	try {
+		// dirname 起 7 层全不存在的路径（a/b/c/d/e/f/g/file.jsonl，爬升 6 次查不到存在的目录）。
+		const deepFile = join(dir, "a", "b", "c", "d", "e", "f", "g", "file.jsonl");
+		const seed = {
+			version: 1,
+			sessions: [seedEntry({ id: "deep-offline", filePath: deepFile })],
+		};
+		await writeFile(catalogFile, JSON.stringify(seed), "utf8");
+		const catalog = new SessionCatalog(catalogFile);
+		await catalog.load();
+		await catalog.mergeScanned("project-1", []);
+		assert.equal(catalog.listEntries().length, 1, "entry survives when no existing ancestor is found within the climb limit");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});

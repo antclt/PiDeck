@@ -36,6 +36,8 @@ export interface MiniOverlayWindowDeps {
 	onExit?: () => void;
 	/** 收起浮窗：回悬浮球，保持悬浮球模式。 */
 	onCollapse?: () => void;
+	/** 切换到任务模式：隐藏小窗（不回悬浮球），主窗口以 quick-task 紧凑形态打开。 */
+	onSwitchToQuickTask?: (projectPath?: string) => Promise<void>;
 }
 
 /**
@@ -180,6 +182,14 @@ export class MiniOverlayWindow {
 			this.hide();
 			// 收起浮窗后回悬浮球（保持悬浮球模式）
 			this.deps.onCollapse?.();
+		});
+		ipcMain.removeHandler(ipcChannels.miniOverlaySwitchToQuickTask);
+		ipcMain.handle(ipcChannels.miniOverlaySwitchToQuickTask, async (event, projectPath?: string) => {
+			if (event.sender !== win.webContents) return;
+			if (projectPath !== undefined && typeof projectPath !== "string") return;
+			this.hide();
+			// 切换到任务模式：不回悬浮球（与 onExpandCompact 一致，悬浮球同时隐藏）
+			await this.deps.onSwitchToQuickTask?.(projectPath);
 		});
 	}
 }
