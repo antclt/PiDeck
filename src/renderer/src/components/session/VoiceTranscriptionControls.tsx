@@ -25,7 +25,7 @@ const TRANSCRIBING_PILL_CLASS = "flex h-7 items-center gap-1 rounded-md bg-muted
 export function VoiceTranscriptionControls(props: { state: VoiceTranscriptionState; busy?: boolean; disabled?: boolean; readLevel: () => number; onStart: () => void; onStop: () => void; onCancel: () => void }) {
 	const busyLabel = t(props.state === "requesting" ? "voice.requesting" : props.busy === false ? "voice.finalizing" : "voice.transcribing");
 	return (
-		<div className="flex h-7 shrink-0 items-center justify-end gap-1">
+		<div className="composer-voice-controls flex h-7 shrink-0 items-center justify-end gap-1">
 			{props.state === "idle" ? (
 				<VoiceTip label={t("voice.start")}>
 					<Button type="button" variant="ghost" size="icon" ripple disabled={props.disabled} aria-label={t("voice.start")} className={BAR_BUTTON_CLASS} onClick={props.onStart}>

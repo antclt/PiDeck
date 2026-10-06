@@ -138,6 +138,23 @@ function scannedFileStemTitle(filePath: string): string {
 	return stem;
 }
 
+/**
+ * 外部删除判定的锚点：从 filePath 父目录逐级向上，返回第一个真实存在的祖先目录；
+ * 一路到文件系统根都不存在（或超过爬升上限）返回 undefined。
+ * 爬升上限 6：嵌套子代理会话最深结构为 <encoded>/<父会话目录>/<agentId>/run-N/session.jsonl，
+ * 从 run-N 爬到 encoded 需 4 层，留 2 层余量；网络盘/移动盘掉线时 2-3 层内即到根停下。
+ */
+function findExistingAncestorDir(filePath: string, maxDepth = 6): string | undefined {
+	let dir = dirname(filePath);
+	for (let depth = 0; depth < maxDepth; depth += 1) {
+		if (existsSync(dir)) return dir;
+		const parent = dirname(dir);
+		if (parent === dir) return undefined;
+		dir = parent;
+	}
+	return undefined;
+}
+
 /** 侧栏/Tab 展示用：pi 文件名时间戳不是会话名。 */
 function catalogDisplayTitle(title: string | undefined): string | undefined {
 	if (!title) return undefined;
@@ -1043,8 +1060,12 @@ export class SessionCatalog {
 		//   false，会把正常会话误删；
 		// - 必须真实 existsSync 缺失（而非「不在本轮 summaries 里」），部分扫描/
 		//   手动导入调用不会误判；
-		// - 父目录必须还在：目录也不在 = 磁盘/网络盘整体离线（或路径临时不可达），
-		//   不能当成「文件被删」误清；目录在而文件不在才是确定的外部删除。
+		// - 必须有存在的祖先目录锚点：从父目录逐级向上找第一个存在的目录，找到
+		//   即「磁盘可达而文件不在」= 确定的外部删除；一路到根都不存在（磁盘/
+		//   网络盘整体离线、路径临时不可达）才跳过。只看直接父目录会把嵌套子
+		//   代理会话（<encoded>/<父会话目录>/<agentId>/run-N/session.jsonl）漏掉——
+		//   父会话目录被整体删除后多级父目录都不在，记录永远残留并会在小窗
+		//   报 ENOENT（2027-02 事故）。
 		const externallyMissingIds = new Set<string>();
 		for (const entry of this.entries) {
 			if (entry.projectId !== projectId) continue;
@@ -1057,7 +1078,7 @@ export class SessionCatalog {
 			// 扫描剔掉记录 → 闪回引导页、输入草稿丢失、发送另起新进程）。
 			if (this.sessionLivenessProbe?.(entry.id)) continue;
 			if (existsSync(entry.filePath)) continue;
-			if (!existsSync(dirname(entry.filePath))) continue;
+			if (!findExistingAncestorDir(entry.filePath)) continue;
 			externallyMissingIds.add(entry.id);
 		}
 

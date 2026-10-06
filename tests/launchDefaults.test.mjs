@@ -380,3 +380,87 @@ test("enabledModels 脏形状（非数组/非字符串项）被忽略", () => {
 		assert.equal(result.model, undefined);
 	}
 });
+
+// ── pi 目录宽化（catalogModels）：选择器提供的模型（如 auth 官方供应商）不在
+// models.json 里，但真实可用——存在性校验必须按 models.json ∪ catalog 判定，
+// 否则这类 lastUsed/welcomeModel 被判死，新会话每次都要重选模型（用户报告）。
+
+const ZAI_CATALOG = [{ provider: "zai-coding-cn", id: "glm-5.3", name: "GLM-5.3" }];
+
+test("lastUsed 指向 pi 目录模型（不在 models.json）也能兜底", () => {
+	const out = resolve({
+		settings: {},
+		models: OPENAI,
+		catalogModels: ZAI_CATALOG,
+		lastUsedModel: { provider: "zai-coding-cn", modelId: "glm-5.3" },
+	});
+	assert.deepEqual(fullPlain(out.model), { provider: "zai-coding-cn", modelId: "glm-5.3", modelName: "GLM-5.3" });
+});
+
+test("引导页点选 pi 目录模型不被判死（保留点选名称快照）", () => {
+	const out = resolve({
+		settings: {},
+		models: OPENAI,
+		catalogModels: ZAI_CATALOG,
+		welcomeModel: { provider: "zai-coding-cn", modelId: "glm-5.3", modelName: " Picked GLM " },
+	});
+	assert.deepEqual(fullPlain(out.model), { provider: "zai-coding-cn", modelId: "glm-5.3", modelName: "Picked GLM" });
+});
+
+test("显式默认指向 pi 目录模型也算有效配置", () => {
+	const out = resolve({
+		settings: { defaultProvider: "zai-coding-cn", defaultModel: "glm-5.3" },
+		models: OPENAI,
+		catalogModels: ZAI_CATALOG,
+	});
+	assert.equal(out.defaultModelConfigured, true);
+	assert.deepEqual(fullPlain(out.model), { provider: "zai-coding-cn", modelId: "glm-5.3", modelName: "GLM-5.3" });
+});
+
+test("enabledModels pattern 也能匹配 pi 目录模型", () => {
+	const out = resolve({
+		settings: { enabledModels: ["zai-coding-cn/glm*"] },
+		models: OPENAI,
+		catalogModels: ZAI_CATALOG,
+	});
+	assert.deepEqual(fullPlain(out.model), { provider: "zai-coding-cn", modelId: "glm-5.3", modelName: "GLM-5.3" });
+});
+
+test("同名模型 models.json 名称快照优先于目录", () => {
+	const models = { providers: { openai: { models: [{ id: "gpt-5.2", name: "Local GPT" }] } } };
+	const out = resolve({
+		settings: {},
+		models,
+		catalogModels: [{ provider: "openai", id: "gpt-5.2", name: "Catalog GPT" }],
+		lastUsedModel: { provider: "openai", modelId: "gpt-5.2" },
+	});
+	assert.equal(out.model?.modelName, "Local GPT");
+});
+
+test("两边都不存在 → 维持失效回退（目录不放宽失效语义）", () => {
+	const out = resolve({
+		settings: {},
+		models: OPENAI,
+		catalogModels: ZAI_CATALOG,
+		lastUsedModel: { provider: "ghost", modelId: "nope" },
+	});
+	assert.equal(out.model, undefined);
+});
+
+test("catalogModels 脏形状（非数组/脏项/缺 provider/id）被忽略", () => {
+	const a = resolve({ settings: {}, models: OPENAI, catalogModels: "junk", lastUsedModel: { provider: "zai-coding-cn", modelId: "glm-5.3" } });
+	const b = resolve({ settings: {}, models: OPENAI, catalogModels: [{ provider: 1 }, { id: "x" }, "junk"], lastUsedModel: { provider: "zai-coding-cn", modelId: "glm-5.3" } });
+	assert.equal(a.model, undefined);
+	assert.equal(b.model, undefined);
+});
+
+test("不传 catalogModels 时维持旧行为（仅 models.json 校验）", () => {
+	const out = resolve({ settings: {}, models: OPENAI, lastUsedModel: { provider: "zai-coding-cn", modelId: "glm-5.3" } });
+	assert.equal(out.model, undefined);
+});
+
+test("isModelInModelsConfig 支持目录宽化（createDraft 幽灵校验同源）", () => {
+	const { isModelInModelsConfig } = load("src/main/sessions/launchDefaults.ts");
+	assert.equal(isModelInModelsConfig(OPENAI, { provider: "zai-coding-cn", modelId: "glm-5.3" }), false);
+	assert.equal(isModelInModelsConfig(OPENAI, { provider: "zai-coding-cn", modelId: "glm-5.3" }, ZAI_CATALOG), true);
+});

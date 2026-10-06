@@ -93,6 +93,7 @@ let previewSettings: AppSettings = {
 	showNativeMenu: false,
 	sendShortcut: "enter-send",
 	defaultAgentBackend: "pi",
+	floatingBallShowRunningBadge: true,
 	theme: "system",
 	themeScheduleLightStart: "07:00",
 	themeScheduleDarkStart: "19:00",
@@ -189,7 +190,7 @@ let previewSettings: AppSettings = {
 	idleAgentTimeoutMin: 60,
 	// CUA 默认关闭：预览壳与主进程 SettingsStore 默认保持一致
 	cuaEnabled: false,
-	cuaAutoApprove: false,
+	cuaAutoApprove: true,
 	favoriteModels: [],
 	// 提供商与模型显示开关：与 SettingsStore 默认一致，预览壳默认全显示
 	hiddenProviders: [],
@@ -263,9 +264,9 @@ export function createPreviewApi(): PiDesktopApi {
 	return {
 		clipboard: clipboardStub,
 		// 资源管理器右键菜单预览桩：预览环境无注册表操作，一律报不支持
-		quickTask: { getState: async () => ({ active: false, requestId: 0 }), onChanged: () => () => undefined, exit: async () => undefined },
+		quickTask: { getState: async () => ({ active: false, requestId: 0 }), onChanged: () => () => undefined, exit: async () => undefined, switchToMiniOverlay: async () => undefined },
 		floatingBall: {
-			getState: async () => ({ visible: false, alwaysOnTop: true, snapToEdge: true, expandTarget: "mini" as const, activeCount: 0, runningCount: 0, recentTitles: [], locale: "zh-CN" as const }),
+			getState: async () => ({ visible: false, alwaysOnTop: true, snapToEdge: true, expandTarget: "mini" as const, showRunningBadge: true, activeCount: 0, runningCount: 0, recentTitles: [], locale: "zh-CN" as const }),
 			onStateChanged: () => () => undefined,
 			enter: async () => undefined,
 			exit: async () => undefined,
@@ -282,6 +283,7 @@ export function createPreviewApi(): PiDesktopApi {
 			quickPrompt: async () => ({ ok: false, message: "preview mode" }),
 			close: async () => undefined,
 			collapse: async () => undefined,
+			switchToQuickTask: async () => undefined,
 		},
 		// 预览模式没有真实 pi 认证宿主；提供与 preload 同形状的安全空实现，
 		// 避免新增认证能力让静态预览整站无法通过类型检查或初始化。

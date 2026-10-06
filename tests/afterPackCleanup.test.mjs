@@ -95,6 +95,17 @@ test("package.json unpacks node-pty so packaged terminal can load pty.node", () 
 	assert.ok(unpack.includes("node_modules/@deepseek-ai/dsh-subprocess-local/node_modules/node-pty/**"), "asarUnpack must list the nested DSH node-pty 1.2 prebuild used by dsh-subprocess-local");
 });
 
+test("package.json unpacks koffi platform packages for all build targets", () => {
+	const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+	const unpack = pkg.build?.asarUnpack ?? [];
+	// koffi 3.x 的平台二进制拆在 @koromix/koffi-<os>-<arch> 可选依赖里，npm 只装宿主
+	// 平台的包。显式条目曾被删导致 0.7.8 linux 回归（7f72fa98a 恢复）；交叉打包产物
+	//（arm64 runner 打 x64 mac 包，issue #313）不能依赖 smart-unpack 兜底，这里固化契约。
+	for (const entry of ["node_modules/@koromix/koffi-win32-x64/**", "node_modules/@koromix/koffi-linux-x64/**", "node_modules/@koromix/koffi-linux-arm64/**", "node_modules/@koromix/koffi-darwin-arm64/**", "node_modules/@koromix/koffi-darwin-x64/**"]) {
+		assert.ok(unpack.includes(entry), `asarUnpack must list ${entry}; koffi .node can only dlopen from a real filesystem path`);
+	}
+});
+
 test("package.json unpacks sharp native packages for every dependency depth", () => {
 	const pkg = JSON.parse(readFileSync("package.json", "utf8"));
 	const unpack = pkg.build?.asarUnpack ?? [];

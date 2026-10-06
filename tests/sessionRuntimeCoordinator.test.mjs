@@ -388,7 +388,8 @@ test("dispatch lease blocks restart, direct bind, and catalog scan until send se
 	const sending = coordinator.send(prompt());
 	await started.promise;
 	assert.throws(() => coordinator.bindExistingAgent("session-1", "agent-2"), /prompt dispatch is in progress/);
-	await assert.rejects(coordinator.restartSession("session-1", "agent-1"), /prompt dispatch is in progress/);
+	// restart 与在途 dispatch 并发时不再立即硬失败：等待 lease 释放（瞬态窗口宽限）后成功
+	const restartedWhileDispatching = coordinator.restartSession("session-1", "agent-1");
 	assert.equal(
 		coordinator.attachCatalogRuntimes([
 			{
@@ -399,14 +400,29 @@ test("dispatch lease blocks restart, direct bind, and catalog scan until send se
 		]).length,
 		0,
 	);
-	assert.equal(harness.calls.restart, 0);
-
 	release.resolve();
 	const result = await sending;
 	assert.equal(result.accepted, true);
-	const restarted = await coordinator.restartSession("session-1", "agent-1");
+	const restarted = await restartedWhileDispatching;
 	assert.equal(restarted.id, "agent-restarted");
 	assert.equal(harness.calls.restart, 1);
+});
+
+test("restart still fails when dispatch lease is held beyond grace window", async () => {
+	const { SessionRuntimeCoordinator } = loadCoordinator();
+	const started = deferred();
+	const harness = createHarness({
+		sender: async () => {
+			started.resolve();
+			await new Promise(() => {});
+		},
+	});
+	const coordinator = new SessionRuntimeCoordinator(harness.catalog, harness.agents, harness.sender);
+	coordinator.bindExistingAgent("session-1", "agent-1");
+	const sending = coordinator.send(prompt());
+	await started.promise;
+	// lease 永不释放：等满宽限窗口（2s）后仍走原有硬失败语义
+	await assert.rejects(coordinator.restartSession("session-1", "agent-1"), /prompt dispatch is in progress/);
 });
 
 test("dispatch lease is released when sender throws", async () => {

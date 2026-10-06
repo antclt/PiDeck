@@ -9,6 +9,7 @@ const webModelSheet = readFileSync("src/renderer/src/web/WebModelSheet.tsx", "ut
 const webChatApp = readFileSync("src/renderer/src/web/WebChatApp.tsx", "utf8");
 const webSessionStrips = readFileSync("src/renderer/src/web/WebSessionStrips.tsx", "utf8");
 const webTimeline = readFileSync("src/renderer/src/web/WebTimeline.tsx", "utf8");
+const webDshToolsPanel = readFileSync("src/renderer/src/web/WebDshToolsPanel.tsx", "utf8");
 
 test("Web shell keeps sidebar and chat pane in a horizontal split", () => {
 	assert.match(webCss, /\.app\.wechat-shell\s*\{[\s\S]*?flex-direction:\s*row;/, "the desktop shell defaults to a vertical layout, so Web must explicitly restore the horizontal split");
@@ -112,9 +113,23 @@ test("Web timeline groups assistant messages into collapsible execution folds", 
 	assert.match(webCss, /\.web-app \.execution-fold-details\s*\{[\s\S]*?border-left:/);
 });
 
-// 回归：状态 pill 在 flex-col 标题块里必须 self-start，否则被 stretch 拉成整行横条。
+// 回归：头部运行态用紧凑「小圆点+文字」（self-start 防 stretch 拉横条），不用带边框底色的
+// agent-status-indicator 大 pill——它在头部占两行高度、与标题/DSH 徽标挤在一起视觉过重。
 test("Web header status pill stays compact inside the flex-col title block", () => {
-	assert.match(webHeader, /agent-status-indicator self-start/);
+	assert.doesNotMatch(webHeader, /"agent-status-indicator/);
+	assert.match(webHeader, /self-start text-micro text-muted-foreground/);
+	assert.match(webHeader, /size-1\.5 shrink-0 rounded-full/);
+	assert.match(webHeader, /animate-pulse bg-\[var\(--color-accent\)\]/);
+});
+
+// 回归：DSH 权限预设入口是单盾牌图标（#214 保护强度语义），下拉选档；
+// 曾是 w-36 宽 Select（盾牌+预设文字+箭头三个视觉件），窄屏把标题挤没。
+test("Web header DSH permission entry is a single strength icon button", () => {
+	assert.match(webHeader, /permissionStrengthIcon\(knownPreset\?\.strength/);
+	assert.doesNotMatch(webHeader, /SelectTrigger|SelectValue/);
+	assert.match(webHeader, /<PermissionIcon className="size-4" aria-hidden="true" \/>/);
+	// 数据源对齐桌面：runtime state 直出优先，会话记录只兜底——否则乐观切换被轮询冲掉、图标切完弹回。
+	assert.match(webChatApp, /permissionPreset=\{contextUsage\?\.permissionPreset\s*\?\?\s*activeSession\?\.permissionPreset\}/);
 });
 
 // 回归：三条 strip 默认折叠、无框化，且不使用不存在的 Tailwind token
@@ -147,6 +162,15 @@ test("Web load-more-history entry stays at the top of the message flow", () => {
 	assert.ok(loadMoreIndex < entriesIndex, "load-more must render BEFORE the message entries (top of flow)");
 	// 底部不再残留第二份加载更多入口。
 	assert.equal((webTimeline.match(/hasMoreHistory && \(/g) ?? []).length, 1);
+});
+
+// 回归：DSH 工具面板的内容容器必须限高——静态插件清单 30+ 条曾把 Dialog 撑出屏幕，
+// shadcn DialogContent（default 尺寸）本身不限高，上限必须在面板内部。
+test("Web DSH tools panel caps its scroll area so long plugin lists stay on-screen", () => {
+	assert.match(webDshToolsPanel, /max-h-\[60vh\]\s+min-h-40\s+overflow-y-auto/);
+	// 同面板横向超屏：4 个 tab 在窄屏放不下曾把最后一个 tab 裁掉，tab 条必须可横向滚动且按钮不压缩。
+	assert.match(webDshToolsPanel, /flex\s+gap-1\s+overflow-x-auto\s+border-b\s+border-border-subtle/);
+	assert.ok((webDshToolsPanel.match(/shrink-0\s+gap-1\.5/g) ?? []).length >= 4, "all tab buttons must be shrink-0");
 });
 
 // 回归：头部上下文环必须可点开详情弹层（移动端无悬停 title，纯展示等于点不动）。

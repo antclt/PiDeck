@@ -276,6 +276,7 @@ import { SessionCatalog, canAttachRuntimeMetadata } from "./sessions/SessionCata
 import { aggregateDshProxyMode, buildHostProxyEnvPatch, resolveDshHostProxyMode, resolveEffectiveSessionProxyMode } from "./sessions/sessionProxyPolicy";
 import { SessionRuntimeCoordinator, type SessionRuntimeBinding } from "./sessions/SessionRuntimeCoordinator";
 import { IdleAgentReleaser } from "./sessions/IdleAgentReleaser";
+import { StaleDraftReaper } from "./sessions/StaleDraftReaper";
 import { SessionCommandIpcError } from "./sessions/SessionCommandIpcError";
 import { appendSessionForkSuffix } from "./sessions/sessionForkTitle";
 import { CodexSessionImporter } from "./sessions/CodexSessionImporter";
@@ -367,7 +368,7 @@ import { ReplyActionRuleStore } from "./replyactions/ReplyActionRuleStore";
 import { QUICK_MESSAGES_DEFAULT_RESOURCE_NAME, QUICK_MESSAGES_FILE_NAME, REPLY_ACTIONS_DEFAULT_RESOURCE_NAME, REPLY_ACTIONS_FILE_NAME } from "../shared/quickMessages";
 import { getPiAiCatalogIndex, lookupPiAiCatalogEntry, setPiAiCatalogUserDataDir } from "./pi/piAiBuiltinCatalog";
 import { PiAiCatalogUpdater } from "./pi/PiAiCatalogUpdater";
-import { fetchModelList, refreshModelCatalogIfStale, refreshModelList } from "./pi/modelListCache";
+import { fetchModelList, refreshModelCatalogIfStale, refreshModelList, getCachedModelList } from "./pi/modelListCache";
 import { registerFilesIpc } from "./ipc/filesIpc";
 import { registerClipboardIpc } from "./ipc/clipboardIpc";
 import { registerShellMenuIpc } from "./ipc/shellMenuIpc";
@@ -427,6 +428,7 @@ let sessionCatalog: SessionCatalog;
 let sessionRuntimeCoordinator: SessionRuntimeCoordinator;
 /** 闲置 agent 自动释放器（内存优化）：whenReady 阶段装配，quit 时 stop */
 let idleAgentReleaser: IdleAgentReleaser | null = null;
+let staleDraftReaper: StaleDraftReaper | null = null;
 let codexSessionImporter: CodexSessionImporter;
 let claudeSessionImporter: ClaudeSessionImporter;
 let qoderSessionImporter: QoderSessionImporter;
@@ -647,6 +649,8 @@ function sendSessionRuntimeEnvelope(event: SessionRuntimeEvent): void {
 	if (window && !window.isDestroyed()) {
 		window.webContents.send(ipcChannels.sessionsRuntimeEvent, event);
 	}
+	// 极简浮窗是独立渲染进程，流式事件单独转发，否则会话页停在打开时的快照。
+	miniOverlayWindow?.sendRuntimeEvent(event);
 }
 
 function emitSessionRuntimeEvent(agentId: string, sourceChannel: string, payload: unknown): boolean {
@@ -728,9 +732,9 @@ async function createAnonymousSession(input: CreateAnonymousSessionInput): Promi
 	try {
 		const [settingsResult, modelsResult] = await Promise.all([configManager.getSettingsConfig(), configManager.getModelsConfig()]);
 		// 渲染层/引导页显式传入的模型（欢迎页偏好等）也可能指向已删除条目：
-		// 校验仍存在于 models.json，不存在则交给 launchDefaults 按配置默认 →
+		// 校验仍存在（models.json ∪ pi 目录，与选择器可选范围一致），不存在则交给 launchDefaults 按配置默认 →
 		// enabledModels → lastUsed 的顺序兜底。
-		if (model && !isModelInModelsConfig(modelsResult.parsed, model)) {
+		if (model && !isModelInModelsConfig(modelsResult.parsed, model, getCachedModelList())) {
 			model = undefined;
 		}
 		// 缺省填充与引导页展示共用同一解析器（launchDefaults，含「最后一次使用」优先）：
@@ -739,6 +743,8 @@ async function createAnonymousSession(input: CreateAnonymousSessionInput): Promi
 			backend: "pi",
 			settings: settingsResult.parsed,
 			models: modelsResult.parsed,
+			// 与 createDraft 同源：存在性校验含 pi 目录（冷缓存 null 时退回仅 models.json）。
+			catalogModels: getCachedModelList(),
 			lastUsedModel: settingsStore.get().lastUsedModel,
 		});
 		if (!model) {
@@ -1332,8 +1338,9 @@ function focusMainWindow() {
 	}
 	mainWindow.show();
 	mainWindow.focus();
-	// 主窗口回来时关闭极简浮窗（避免两个窗口并存）
-	miniOverlayWindow?.hide();
+	// 主窗口回来时默认关闭极简浮窗（避免两个窗口并存）；
+	// 「固定在最上方」开启（含未显式设置的默认 true）时浮窗常驻，只响应手动隐藏/收起。
+	if (settingsStore.get().floatingBallAlwaysOnTop === false) miniOverlayWindow?.hide();
 	if (process.platform === "win32") {
 		// Windows 前置窗口用「临时置顶再取消」hack 抢前台（直接 focus 可能被前台锁拦截）。
 		// 必须原样还原用户置顶状态，否则会把用户手动置顶的窗口取消置顶；
@@ -1673,6 +1680,20 @@ function configureBrowserPanelWebviewHost(window: BrowserWindow): void {
 				event.preventDefault();
 				return;
 			}
+			// Ctrl(+Shift)+Tab 在网页内无既有含义（浏览器里它就是切宿主 tab），
+			// 内置浏览器里同样切 PiDeck 会话标签页。
+			if (isShortcutInput("cycleSessionTabs", input)) {
+				event.preventDefault();
+				if (!window || window.isDestroyed()) return;
+				window.webContents.send(ipcChannels.appShortcutTriggered, "cycleSessionTabs");
+				return;
+			}
+			if (isShortcutInput("cycleSessionTabsReverse", input)) {
+				event.preventDefault();
+				if (!window || window.isDestroyed()) return;
+				window.webContents.send(ipcChannels.appShortcutTriggered, "cycleSessionTabsReverse");
+				return;
+			}
 			if (!isShortcutInput("toggleDevTools", input)) return;
 			event.preventDefault();
 			toggleMainWindowDevTools(window);
@@ -1976,6 +1997,18 @@ async function createWindow() {
 		if (isShortcutInput("toggleVoiceRecording", input)) {
 			event.preventDefault();
 			mainWindow.webContents.send(ipcChannels.appShortcutTriggered, "toggleVoiceRecording");
+			return;
+		}
+		// Ctrl(+Shift)+Tab 循环切换会话标签页：Tab 顺序在渲染层 atoms，主进程只命中广播。
+		// 输入框聚焦时仍生效（浏览器同款惯例，Ctrl+Tab 无文本编辑含义）。
+		if (isShortcutInput("cycleSessionTabs", input)) {
+			event.preventDefault();
+			mainWindow.webContents.send(ipcChannels.appShortcutTriggered, "cycleSessionTabs");
+			return;
+		}
+		if (isShortcutInput("cycleSessionTabsReverse", input)) {
+			event.preventDefault();
+			mainWindow.webContents.send(ipcChannels.appShortcutTriggered, "cycleSessionTabsReverse");
 			return;
 		}
 		if (isShortcutInput("toggleDevTools", input)) {
@@ -3215,7 +3248,7 @@ function registerIpc() {
 		menuTitle: mainCopy("shellMenu.openWithPiDeck"),
 		quickTaskTitle: mainCopy("shellMenu.quickTask"),
 	});
-	registerQuickTaskIpc(quickTaskChrome.controller);
+	// registerQuickTaskIpc 移至 floating/mini-overlay 装配处（依赖 expandMiniOverlay 做模式互切）。
 }
 
 function sendTelemetryHeartbeat() {
@@ -3737,47 +3770,59 @@ app
 
 		// 悬浮球控制器：主窗口隐藏后常驻屏幕角落的小圆点，点击展开 mini 浮窗/紧凑模式。
 		// 延迟到 agentManager 就绪后创建，因为依赖 addStateListener 订阅运行状态。
+		// 极简浮窗：360×480 状态总览+快捷输入+最近会话，独立于主窗口运行。
+		// 创建逻辑与展开逻辑拆开：悬浮球点击（onExpandMini）与任务模式→小窗互切共用。
+		const ensureMiniOverlayWindow = (): MiniOverlayWindow => {
+			miniOverlayWindow ??= new MiniOverlayWindow({
+				settingsStore,
+				agentManager,
+				projectStore,
+				onJumpToSession: (sessionId, projectId) => {
+					focusMainWindow();
+					queueFocusTarget({ sessionId, projectId });
+					mainWindow?.webContents.once("did-finish-load", () => {
+						flushPendingFocusTargetOnLoad();
+					});
+				},
+				onQuickPrompt: async (projectId, text) => {
+					// 快捷输入：创建草稿 → activateRuntime → agentManager.sendPrompt（与渲染层 useQuickTask 同链路）
+					const draft = await sessionCatalog.createDraft({ projectId, title: text.slice(0, 40), environment: "native", backend: agentManager.backend });
+					const runtime = await sessionRuntimeCoordinator.activateRuntime(draft.id);
+					if (!runtime.ok) return { ok: false, message: runtime.error.code };
+					const result = await agentManager.sendPrompt({ agentId: runtime.value.agentId, message: text });
+					if (!result.accepted) return { ok: false, message: result.error };
+					return { ok: true };
+				},
+				onExit: () => {
+					// 关闭浮窗：退出悬浮球模式，回主窗口
+					settingsStore.update({ floatingBallEnabled: false });
+					floatingController?.hide();
+					focusMainWindow();
+				},
+				onCollapse: () => {
+					// 收起浮窗：回悬浮球（保持悬浮球模式）
+					if (settingsStore.get().floatingBallEnabled) {
+						void floatingController?.show();
+					}
+				},
+				onSwitchToQuickTask: async (projectPath) => {
+					// 小窗 → 任务模式：不回悬浮球（与 onExpandCompact 一致），
+					// 主窗口以 quick-task 紧凑形态打开；未带项目路径时用桌面。
+					floatingController?.hide();
+					await quickTaskChrome.controller.open(projectPath ?? app.getPath("desktop"));
+				},
+			});
+			return miniOverlayWindow;
+		};
+		async function expandMiniOverlay(): Promise<void> {
+			floatingController?.hide();
+			await ensureMiniOverlayWindow().show();
+		}
+
 		floatingController = new FloatingController({
 			settingsStore,
 			getMainWindow: () => mainWindow,
-			onExpandMini: async () => {
-				floatingController?.hide();
-				// 极简浮窗：360×480 状态总览+快捷输入+最近会话，独立于主窗口运行。
-				miniOverlayWindow ??= new MiniOverlayWindow({
-					settingsStore,
-					agentManager,
-					projectStore,
-					onJumpToSession: (sessionId, projectId) => {
-						focusMainWindow();
-						queueFocusTarget({ sessionId, projectId });
-						mainWindow?.webContents.once("did-finish-load", () => {
-							flushPendingFocusTargetOnLoad();
-						});
-					},
-					onQuickPrompt: async (projectId, text) => {
-						// 快捷输入：创建草稿 → activateRuntime → agentManager.sendPrompt（与渲染层 useQuickTask 同链路）
-						const draft = await sessionCatalog.createDraft({ projectId, title: text.slice(0, 40), environment: "native", backend: agentManager.backend });
-						const runtime = await sessionRuntimeCoordinator.activateRuntime(draft.id);
-						if (!runtime.ok) return { ok: false, message: runtime.error.code };
-						const result = await agentManager.sendPrompt({ agentId: runtime.value.agentId, message: text });
-						if (!result.accepted) return { ok: false, message: result.error };
-						return { ok: true };
-					},
-					onExit: () => {
-						// 关闭浮窗：退出悬浮球模式，回主窗口
-						settingsStore.update({ floatingBallEnabled: false });
-						floatingController?.hide();
-						focusMainWindow();
-					},
-					onCollapse: () => {
-						// 收起浮窗：回悬浮球（保持悬浮球模式）
-						if (settingsStore.get().floatingBallEnabled) {
-							void floatingController?.show();
-						}
-					},
-				});
-				await miniOverlayWindow.show();
-			},
+			onExpandMini: expandMiniOverlay,
 			onExpandCompact: async () => {
 				floatingController?.hide();
 				// 小任务模式：主窗口变 compact 浮窗（不显示主窗口，直接 enterCompact）
@@ -3806,6 +3851,13 @@ app
 		quitCleanup.register("floating-ball", () => floatingController?.destroy());
 		quitCleanup.register("mini-overlay", () => miniOverlayWindow?.destroy());
 		registerFloatingIpc(floatingController);
+		// quick-task IPC 与 floating/mini-overlay 共置：switchToMiniOverlay 依赖 expandMiniOverlay（小窗⇄任务模式互切）。
+		registerQuickTaskIpc(quickTaskChrome.controller, {
+			onSwitchToMiniOverlay: async () => {
+				if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
+				await expandMiniOverlay();
+			},
+		});
 		// 启动时如果悬浮球已开启，自动显示（用户上次开着悬浮球退出了应用）
 		if (settingsStore.get().floatingBallEnabled) {
 			void floatingController.show();
@@ -4083,13 +4135,18 @@ app
 			createSessionDraft: async (input) => {
 				const project = projectStore.get(input.projectId);
 				if (!project) throw new Error(mainCopy("project.notFound"));
-				return sessionCatalog.createDraft({
+				const draft = await sessionCatalog.createDraft({
 					projectId: input.projectId,
 					title: input.title?.trim() || mainCopy("session.newTitle"),
 					environment: settingsStore.get().wslEnabled ? "wsl" : "native",
 					model: input.model ? createSessionModelPreference(input.model.provider, input.model.modelId, input.model.modelName) : undefined,
 					thinkingLevel: input.thinkingLevel,
 				});
+				// standby 补热：与桌面 IPC（sessionIpc createDraft）同款——Web 建草稿即「马上要开聊」，
+				// 趁用户输入空窗后台预热 pi 进程；首条消息经 activateRuntime 认领实现秒级启动。
+				// fire-and-forget；ensure 幂等且受 standbyRuntimeEnabled 设置闸。
+				if (draft.backend !== "dsh") agentManager.ensureStandbyAgent(draft.projectId);
+				return draft;
 			},
 			createAnonymousSession,
 			updateSessionRecord: async (sessionId, patch) => {
@@ -4577,6 +4634,22 @@ app
 		);
 		idleAgentReleaser.start();
 		quitCleanup.register("idle-agent-releaser", () => idleAgentReleaser?.stop());
+		// 零内容草稿自动清理：小窗/主窗「新建后不用」的空草稿在运行期间定期剔除
+		// （语义对齐 SessionCatalog.load 的启动清理，但豁免用户投入信号：命名/选模型/预选配置）。
+		// 删除后广播 catalog-refreshed，侧栏静默重拉，空白条目即消失。
+		staleDraftReaper = new StaleDraftReaper(
+			sessionCatalog,
+			sessionRuntimeCoordinator,
+			(projectIds) => {
+				if (!mainWindow || mainWindow.isDestroyed()) return;
+				for (const projectId of projectIds) {
+					mainWindow.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId });
+				}
+			},
+			appLogger,
+		);
+		staleDraftReaper.start();
+		quitCleanup.register("stale-draft-reaper", () => staleDraftReaper?.stop());
 		// 只有 PiDeck 自动命名扩展的专用 marker 才能领取 fresh placeholder。
 		// pi /name、JSONL session_info 与重启 get_state 都不会经过这里，catalog 因而
 		// 始终是侧栏和 Tab 的显示标题权威。

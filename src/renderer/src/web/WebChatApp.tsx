@@ -33,6 +33,7 @@ import { chatMessagesToUiMessages, createProject, createSession, deleteProject, 
 import { abortRuntime, cloneRuntime, compactRuntime, copySession, deleteSession, downloadSessionHtml, editRuntimeMessage, deleteRuntimeMessage, prepareResend, renameSession, restartRuntime } from "./webApi";
 import { fetchRuntimeContextUsage, setRuntimePermission } from "./webApi";
 import { sessionUiMessagesToMarkdown } from "./webMarkdown";
+import { removeMessageOptimistic, replaceMessageTextOptimistic } from "./webMessageOptimistic";
 import { WebSessionStrips } from "./WebSessionStrips";
 import { WebSearchDialog } from "./WebSearchDialog";
 import { WebSkillsExtensionsDialog } from "./WebSkillsExtensionsDialog";
@@ -89,6 +90,12 @@ export function WebChatApp() {
 	const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 	// P2：composer 预填充（重发取回文本）；nonce 避免同文本重复触发
 	const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null);
+	// 消息编辑/删除乐观更新：进行中操作（气泡转状态指示）、删除退场动画目标、编辑成功闪环目标。
+	// runtime 编辑/删除要走「停 agent → 改文件 → pi 重载」全链路（数秒），先本地落地再静默对齐服务端。
+	const [pendingMessageAction, setPendingMessageAction] = useState<{ kind: "edit" | "delete"; id: string } | null>(null);
+	const [exitingMessageIds, setExitingMessageIds] = useState<ReadonlySet<string>>(new Set());
+	const [flashMessageId, setFlashMessageId] = useState<string | null>(null);
+	const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	// P2：上下文用量（随主轮询拉取 runtime state 子集）
 	const [contextUsage, setContextUsage] = useState<WebContextUsage | undefined>(undefined);
 
@@ -99,6 +106,10 @@ export function WebChatApp() {
 	// 本页「新建」的零消息草稿：后端切换仅对这类会话开放（复制/克隆/fork 与历史会话自带
 	// 消息记录，后端不可切——消息归属创建时的后端，切了会让历史错位）。
 	const webDraftSessionsRef = useRef<Set<string>>(new Set());
+	// 会话消息刷新去重：同会话在途只发一次（切换 SWR / busy 收尾 / 手动刷新共用入口）
+	const refreshingSessionsRef = useRef<Set<string>>(new Set());
+	// 主轮询用：上一轮活跃会话 runtime 是否 busy，用于捕拿 busy→idle 边沿做收尾拉取
+	const runtimeBusyPrevRef = useRef(false);
 	const activeSessionIdRef = useRef<string>("");
 	// 首页直发暂存：新建会话后等 useChat 实例切换完成，再投递首条消息（含图片）
 	const pendingSendRef = useRef<{ sessionId: string; text: string; images?: string[] } | null>(null);
@@ -241,30 +252,14 @@ export function WebChatApp() {
 	const activeRuntime = activeSessionId ? runtimeFor(activeSessionId) : undefined;
 	activeRuntimeRef.current = activeRuntime;
 
-	// 切换会话：优先从缓存恢复；未加载过则拉取历史页注入
+	// 切换会话：stale-while-revalidate——缓存命中先展示旧快照立即渲染，再后台重拉磁盘
+	// 最新（桌面端/其他端跑出的新消息不会漏）；未加载过的会话直接拉首页注入。
 	useEffect(() => {
 		if (!activeSessionId) return;
 		if (loadedSessionsRef.current.has(activeSessionId)) {
 			setMessages(messagesBySessionRef.current[activeSessionId] ?? []);
-			return;
 		}
-		void fetchMessagePage(activeSessionId)
-			.then((page) => {
-				const history = chatMessagesToUiMessages(page.messages);
-				messagesBySessionRef.current[activeSessionId] = history;
-				historyMetaRef.current[activeSessionId] = {
-					total: page.total,
-					nextBefore: page.nextBefore,
-				};
-				loadedSessionsRef.current.add(activeSessionId);
-				// 仅当仍停留在该会话时才注入（避免切走后 setMessages 串台）
-				if (activeSessionIdRef.current === activeSessionId) {
-					setMessages(history);
-				}
-			})
-			.catch(() => {
-				// 历史加载失败：保留空时间线，不阻塞流式
-			});
+		void refreshSessionMessages(activeSessionId);
 	}, [activeSessionId, setMessages]);
 
 	// 流式期间同步缓存：仅 streaming 时回写（空闲时 setMessages 来自历史恢复/分页，
@@ -310,6 +305,7 @@ export function WebChatApp() {
 					return runtime?.status === "running" || runtime?.status === "starting";
 				})();
 				if (runtimeStillBusy) {
+					runtimeBusyPrevRef.current = true;
 					const decision = decideStreamRecovery({
 						status: statusRef.current,
 						runtimeBusy: true,
@@ -322,6 +318,11 @@ export function WebChatApp() {
 						recoveryLastAttemptRef.current = Date.now();
 						void recoverFromDisk(false);
 					}
+				} else if (runtimeBusyPrevRef.current) {
+					// busy→idle 边沿：runtime 刚跑完（含桌面端发起的一轮），磁盘已有最终输出；
+					// 若最后一段输出落在 5s 防抖窗口内会漏同步，这里无视防抖直接收尾拉一次。
+					runtimeBusyPrevRef.current = false;
+					void refreshSessionMessages(activeSessionIdRef.current);
 				}
 				// 初始页面保持空会话，让用户明确选择项目/会话；外部删除当前会话时也回到空状态。
 				if (activeSessionIdRef.current && !next.sessions.some((session) => session.id === activeSessionIdRef.current)) {
@@ -618,19 +619,39 @@ export function WebChatApp() {
 			}
 		: undefined;
 
+	/** 从磁盘重拉指定会话历史写缓存；活跃且 useChat 空闲时同步注入（streaming 中只更新缓存，不打断打字机）。 */
+	const refreshSessionMessages = async (sessionId: string) => {
+		if (!sessionId || refreshingSessionsRef.current.has(sessionId)) return;
+		refreshingSessionsRef.current.add(sessionId);
+		try {
+			const page = await fetchMessagePage(sessionId);
+			const history = chatMessagesToUiMessages(page.messages);
+			messagesBySessionRef.current[sessionId] = history;
+			historyMetaRef.current[sessionId] = { total: page.total, nextBefore: page.nextBefore };
+			loadedSessionsRef.current.add(sessionId);
+			// 仅活跃会话且非流式中才注入（避免切走后串台/打断 SSE 渲染）；
+			// 流式结束后由 busy→idle 边沿收尾或下次切换时对齐。
+			if (activeSessionIdRef.current === sessionId && statusRef.current === "ready") setMessages(history);
+		} catch {
+			// 刷新失败保持现状（下次轮询/操作会重试）；首次加载失败不标已加载，切回时自动重试
+		} finally {
+			refreshingSessionsRef.current.delete(sessionId);
+		}
+	};
+
 	/** 重新拉取活跃会话历史（编辑/删除/压缩后刷新时间线）。 */
 	const reloadActiveHistory = async () => {
 		if (!activeSessionId) return;
-		try {
-			const page = await fetchMessagePage(activeSessionId);
-			const history = chatMessagesToUiMessages(page.messages);
-			messagesBySessionRef.current[activeSessionId] = history;
-			historyMetaRef.current[activeSessionId] = { total: page.total, nextBefore: page.nextBefore };
-			loadedSessionsRef.current.add(activeSessionId);
-			if (activeSessionIdRef.current === activeSessionId) setMessages(history);
-		} catch {
-			// 刷新失败保持现状（下次轮询/操作会重试）
-		}
+		await refreshSessionMessages(activeSessionId);
+	};
+
+	/** 乐观更新本地时间线：改 per-session 缓存，目标仍是活跃会话时同步注入 useChat。 */
+	const applyLocalMessages = (sessionId: string, updater: (messages: UIMessage[]) => UIMessage[]) => {
+		const current = messagesBySessionRef.current[sessionId] ?? [];
+		const next = updater(current);
+		if (next === current) return;
+		messagesBySessionRef.current[sessionId] = next;
+		if (activeSessionIdRef.current === sessionId) setMessages(next);
 	};
 
 	const runSessionAction = async (action: WebSessionRowAction, sessionId: string) => {
@@ -722,24 +743,45 @@ export function WebChatApp() {
 	};
 
 	const handleEditMessage = async (messageId: string, newText: string) => {
-		if (!activeTarget) return;
+		if (!activeTarget || pendingMessageAction) return;
 		setCommandError(null);
+		setPendingMessageAction({ kind: "edit", id: messageId });
+		// 乐观替换文本 + 确认色环：不等服务端回包（runtime 编辑要走 pi 重载，耗时数秒，干等旧文本就是本入口要修的问题）。
+		applyLocalMessages(activeTarget.sessionId, (messages) => replaceMessageTextOptimistic(messages, messageId, newText));
+		setFlashMessageId(messageId);
+		if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+		flashTimerRef.current = setTimeout(() => setFlashMessageId(null), 1200);
 		try {
 			await editRuntimeMessage(activeTarget.sessionId, activeTarget, messageId, newText);
+			// 服务端终态与乐观一致，静默对齐（顺带刷新 entryId 锚点），无视觉跳动。
 			await reloadActiveHistory();
 		} catch (error) {
+			// 失败回滚到服务端真相
+			await reloadActiveHistory();
 			setCommandError(error instanceof Error ? error.message : String(error));
+		} finally {
+			setPendingMessageAction(null);
 		}
 	};
 
 	const handleDeleteMessage = async (messageId: string) => {
-		if (!activeTarget) return;
+		if (!activeTarget || pendingMessageAction) return;
 		setCommandError(null);
+		setPendingMessageAction({ kind: "delete", id: messageId });
+		// 先播放退场动画，播完才从本地列表摘除（与服务端墓碑语义一致：只摘目标一条，回复保留）。
+		setExitingMessageIds(new Set([messageId]));
+		await new Promise((resolve) => setTimeout(resolve, 190));
+		applyLocalMessages(activeTarget.sessionId, (messages) => removeMessageOptimistic(messages, messageId));
+		setExitingMessageIds(new Set());
 		try {
 			await deleteRuntimeMessage(activeTarget.sessionId, activeTarget, messageId);
 			await reloadActiveHistory();
 		} catch (error) {
+			// 失败回滚到服务端真相
+			await reloadActiveHistory();
 			setCommandError(error instanceof Error ? error.message : String(error));
+		} finally {
+			setPendingMessageAction(null);
 		}
 	};
 
@@ -829,7 +871,7 @@ export function WebChatApp() {
 					onOpenSidebar={() => setMobileSidebarOpen(true)}
 					backend={activeSession?.backend}
 					contextUsage={contextUsage}
-					permissionPreset={activeSession?.permissionPreset}
+					permissionPreset={contextUsage?.permissionPreset ?? activeSession?.permissionPreset}
 					actions={{
 						onPermissionChange: activeSession?.backend === "dsh" ? (preset) => void handlePermissionChange(preset) : undefined,
 						onOpenWorkspace: activeSession ? () => setWorkspaceOpen(true) : undefined,
@@ -837,6 +879,7 @@ export function WebChatApp() {
 						onDuplicate: activeSessionId ? () => void runSessionAction("duplicate", activeSessionId) : undefined,
 						onExportHtml: activeSessionId ? () => void runSessionAction("export", activeSessionId) : undefined,
 						onCopyMarkdown: activeSessionId ? () => void handleCopyMarkdown() : undefined,
+						onRefreshMessages: activeSessionId ? () => void refreshSessionMessages(activeSessionId) : undefined,
 						onRestart: activeTarget ? () => void runRuntimeAction("restart") : undefined,
 						onCompact: activeTarget ? () => void runRuntimeAction("compact") : undefined,
 						onClone: activeTarget ? () => void runRuntimeAction("clone") : undefined,
@@ -868,6 +911,9 @@ export function WebChatApp() {
 					onRespondUi={(response) => void handleRespondUi(response)}
 					onLoadMore={() => void handleLoadMore()}
 					canManageMessages={Boolean(activeTarget)}
+					pendingMessageAction={pendingMessageAction}
+					exitingMessageIds={exitingMessageIds}
+					flashMessageId={flashMessageId}
 					onEditMessage={(messageId, newText) => void handleEditMessage(messageId, newText)}
 					onDeleteMessage={(messageId) => void handleDeleteMessage(messageId)}
 					onResendMessage={(messageId) => void handleResendMessage(messageId)}

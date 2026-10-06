@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "version": "1.0.1",
-  "bundleSha256": "0f30c64e26736787d10a4c0ad882cf2cab8b9bf5b287a77e29f95b40884b6943",
+  "bundleSha256": "ef8e35ec40c4284e17d5157babe77cdd1e92a4190f906c56f44b602063d9e189",
   "fileCount": 26,
   "files": [
     {
@@ -11,8 +11,8 @@
     },
     {
       "name": "pi-deck-ext-points.ts",
-      "sha256": "95ce24f64cbb1b54e6283b32a53f2bde9bf6b394ff90a986f222265397bbf62c",
-      "bytes": 28217
+      "sha256": "7956d29538ca436f65481fb7bd9fa41652b96132a239712d6023f506758485c1",
+      "bytes": 28445
     },
     {
       "name": "pi-deck-goal-mode.ts",

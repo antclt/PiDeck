@@ -107,6 +107,7 @@
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "sync:main": "node scripts/sync-main.mjs",
     "typecheck": "tsc --noEmit",
+    "preflight": "node scripts/release-preflight.mjs",
     "make-icon": "node scripts/make-icon.js",
     "compile-exe": "node scripts/compile-exe.js",
     "test:e2e": "npm run build:fast && playwright test",
@@ -154,6 +155,9 @@
       "node_modules/**/@img/sharp-*/**",
       "node_modules/@koromix/koffi-win32-x64/**",
       "node_modules/@koromix/koffi-linux-x64/**",
+      "node_modules/@koromix/koffi-linux-arm64/**",
+      "node_modules/@koromix/koffi-darwin-arm64/**",
+      "node_modules/@koromix/koffi-darwin-x64/**",
       "node_modules/node-addon-require-builtin-win32-x64-msvc/**"
     ],
     "directories": {

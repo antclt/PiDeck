@@ -223,6 +223,8 @@ const api = {
 		getState: () => ipcRenderer.invoke(ipcChannels.quickTaskGetState) as Promise<import("../shared/types/quickTask").QuickTaskState>,
 		onChanged: (callback: (state: import("../shared/types/quickTask").QuickTaskState) => void) => subscribe(ipcChannels.quickTaskChanged, callback),
 		exit: () => ipcRenderer.invoke(ipcChannels.quickTaskExit) as Promise<void>,
+		/** 任务模式 → 小窗：退出 quick-task 并展开极简浮窗。 */
+		switchToMiniOverlay: () => ipcRenderer.invoke(ipcChannels.quickTaskSwitchToMiniOverlay) as Promise<void>,
 	},
 	floatingBall: {
 		getState: () => ipcRenderer.invoke(ipcChannels.floatingBallGetState) as Promise<import("../main/floating/FloatingController").FloatingBallState>,
@@ -243,6 +245,8 @@ const api = {
 		quickPrompt: (projectId: string, text: string) => ipcRenderer.invoke(ipcChannels.miniOverlayQuickPrompt, projectId, text) as Promise<{ ok: boolean; message?: string }>,
 		close: () => ipcRenderer.invoke(ipcChannels.miniOverlayClose) as Promise<void>,
 		collapse: () => ipcRenderer.invoke(ipcChannels.miniOverlayCollapse) as Promise<void>,
+		/** 小窗 → 任务模式：隐藏小窗，主窗口以 quick-task 紧凑形态打开（projectPath 缺省用桌面）。 */
+		switchToQuickTask: (projectPath?: string) => ipcRenderer.invoke(ipcChannels.miniOverlaySwitchToQuickTask, projectPath) as Promise<void>,
 	} /**
 	 * pi 供应商认证（`/login`）：pi 的登录只在它的 CLI 交互层存在，应用内登录走
 	 * 这条例外通道（见 AGENTS.md「认证例外通道」）。调用方就是登录弹框。

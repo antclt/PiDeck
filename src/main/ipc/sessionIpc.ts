@@ -44,6 +44,7 @@ import { dshUnavailablePageFor } from "../dsh/dshManualStop";
 import { validateNpmSpec } from "../dsh/dshPluginNpmRunner";
 import { validateSearchKeyword } from "../dsh/dshPluginMarket";
 import { downgradeRunningStartedBefore, downgradeStaleRunning } from "../pi/derivedSubagents";
+import { getCachedModelList } from "../pi/modelListCache";
 import { resolveLaunchDefaultOptions, isModelInModelsConfig } from "../sessions/launchDefaults";
 import { BackgroundScanCoordinator } from "../sessions/BackgroundScanCoordinator";
 import { DIRECTORY_IMPORT_MAX_SUMMARIES } from "../sessions/directorySessionImport";
@@ -553,7 +554,25 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			.listEntries()
 			.filter((entry) => entry.projectId === projectId)
 			.map((entry) => sessionCatalog.getRecord(entry.id))
-			.filter((record): record is SessionRecord => Boolean(record));
+			.filter((record): record is SessionRecord => Boolean(record))
+			// 与 mergeScanned 同口径排序：小窗项目选择器直接取 sessions[0]，
+			// 乱序会把陈旧记录顶到最前（陈旧子代理记录曾因此在小窗报 ENOENT）。
+			.sort((left, right) => right.updatedAt - left.updatedAt)
+			// 死链过滤：文件已删但清理闸还没跑到（mergeScanned 在后台异步调度）时，
+			// 别让「最近会话」落到一个必然 ENOENT 的记录上。
+			// 豁免：无文件记录（imagegen/草稿）、dsh（filePath 由 host 侧解析，
+			// 本地路径可能不存在）、UNC/WSL 路径（发行版停机时 existsSync
+			// 恒 false，不能误藏整组会话）、活绑定运行时（standby 预分配的
+			// sessionPath 在 pi 首条消息前不落盘，existsSync 恒 false；若按死链
+			// 隐藏，catalog 刷新会把当前选中的草稿剔出列表 → 渲染层
+			// replaceProjectSessionsAtom 清空焦点 → 闪回引导页、输入丢失、
+			// 引导页重发另建会话留下孤儿空闲 Agent——2026-10-06 事故，与
+			// mergeScanned 的 liveness 豁免同口径）。
+			.filter((record) => {
+				if (!record.filePath || record.backend === "dsh" || record.filePath.startsWith("\\\\")) return true;
+				if (sessionRuntimeCoordinator.hasLiveRuntime(record.id)) return true;
+				return existsSync(record.filePath);
+			});
 
 		// 纯读路径：事件回调/订阅刷新专用，不再触发扫描（防止推送-拉取循环触发）
 		if (options?.scan === false) return cachedRecords;
@@ -613,16 +632,21 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			try {
 				const [settingsResult, modelsResult] = await Promise.all([configManager.getSettingsConfig(), configManager.getModelsConfig()]);
 				// 引导页/渲染层显式传入的模型（如欢迎页偏好）也可能指向已删除的供应商/模型：
-				// 校验其仍存在于 models.json，不存在则交给解析器按欢迎页点选 → 配置默认 →
-				// enabledModels → lastUsed 的顺序兜底，避免新会话带着幽灵模型启动。
+				// 校验其仍存在（models.json ∪ pi 目录，与选择器可选范围一致），不存在则交给
+				// 解析器按欢迎页点选 → 配置默认 → enabledModels → lastUsed 的顺序兜底，
+				// 避免新会话带着幽灵模型启动。
 				if (input.backend !== "dsh" && model) {
 					if (
 						typeof model.provider !== "string" ||
 						typeof model.modelId !== "string" ||
-						!isModelInModelsConfig(modelsResult.parsed, {
-							provider: model.provider,
-							modelId: model.modelId,
-						})
+						!isModelInModelsConfig(
+							modelsResult.parsed,
+							{
+								provider: model.provider,
+								modelId: model.modelId,
+							},
+							getCachedModelList(),
+						)
 					) {
 						model = undefined;
 					}
@@ -636,6 +660,9 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 					backend: input.backend,
 					settings: settingsResult.parsed,
 					models: modelsResult.parsed,
+					// pi 目录快照（同步，冷时 null）：lastUsed/welcomeModel 的存在性校验
+					// 按 models.json ∪ 目录判定，与选择器可选范围一致。
+					catalogModels: getCachedModelList(),
 					// lastUsed 语义：用户最近一次实际发送所用模型；仅无显式默认与偏好时参与。
 					lastUsedModel: settingsStore.get().lastUsedModel,
 					welcomeModel: input.welcomeModel && typeof input.welcomeModel.provider === "string" && typeof input.welcomeModel.modelId === "string" ? input.welcomeModel : undefined,
@@ -684,6 +711,8 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				backend,
 				settings: settingsResult.parsed,
 				models: modelsResult.parsed,
+				// 与 createDraft 同源：存在性校验含 pi 目录，否则引导页预选与创建再次分叉。
+				catalogModels: getCachedModelList(),
 				// lastUsed 语义：引导页预选默认 = 用户最后一次实际使用的模型。
 				lastUsedModel: settingsStore.get().lastUsedModel,
 			});

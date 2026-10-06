@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-eval' blob: 'sha256-K8sYepxaimDwr/9LogtXqSk/PPwduZDgGcohCVEMuak='; style-src 'self' 'unsafe-inline'; img-src 'self' file: data: blob: pideck-bg: pideck-pet: pideck-img: https://cloudcache.tencent-cloud.com https://skillhub-1388575217.cos.accelerate.myqcloud.com; font-src 'self' data:; frame-src 'self' file: blob:; media-src 'self' pideck-sound:; connect-src 'self' ws://127.0.0.1:* ws://localhost:* http://127.0.0.1:* http://localhost:* https://api.skillhub.cn"
+      content="default-src 'self'; script-src 'self' 'unsafe-eval' blob: 'sha256-3J92GheWBI+lGFgdHYEVj96AogMnMVg3+pKCge4cDSk='; style-src 'self' 'unsafe-inline'; img-src 'self' file: data: blob: pideck-bg: pideck-pet: pideck-img: https://cloudcache.tencent-cloud.com https://skillhub-1388575217.cos.accelerate.myqcloud.com; font-src 'self' data:; frame-src 'self' file: blob:; media-src 'self' pideck-sound:; connect-src 'self' ws://127.0.0.1:* ws://localhost:* http://127.0.0.1:* http://localhost:* https://api.skillhub.cn"
     />
     <title></title>
     <style>
@@ -34,6 +34,8 @@
         transition: opacity 420ms cubic-bezier(0.22, 1, 0.36, 1), transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
         will-change: opacity, transform;
       }
+      /* 小窗是模式切换，不是应用冷启动；在 React 下载前就去掉开屏动画。 */
+      html.skip-boot-overlay #boot-overlay { display: none; }
       #boot-overlay.fade-out {
         opacity: 0;
         transform: scale(1.02);
@@ -198,6 +200,9 @@
          键名带版本后缀（v2）：缓存值就是上次启动时的 logoStyle，无法区分「旧默认遗留」与「用户显式选择」，
          翻默认值时必须同步升版本号，否则开屏会沿用上一版默认标。 -->
     <script>
+      if (new URLSearchParams(location.search).get("mini-overlay") === "1") {
+        document.documentElement.classList.add("skip-boot-overlay");
+      }
       try {
         if (localStorage.getItem("pideck:logo-style:v2") !== "classic") {
           document.documentElement.classList.add("logo-pi-tui");

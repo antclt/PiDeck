@@ -3274,18 +3274,6 @@ select:focus-visible {
   }
 }
 
-/* 浮窗模式：隐藏 AppHeader 的窗口控制按钮（最小化/最大化/关闭），只留 mini-overlay-chrome 的收起/关闭 */
-.mini-overlay-mode .window-controls {
-  display: none !important;
-}
-.mini-overlay-mode .wechat-shell {
-  border-radius: 16px;
-  overflow: hidden;
-  /* 半透明毛玻璃背景（有辨识度，不跟桌面/其他软件融合） */
-  background: rgba(18, 18, 18, 0.85);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-}
 .mini-overlay-mode .shell-panel-list,
 .mini-overlay-mode .shell-panel-drawer,
 .mini-overlay-mode .splitter {
@@ -3302,47 +3290,17 @@ select:focus-visible {
 .mini-overlay-mode .chat-pane {
   border-radius: 0;
 }
-/* 浮窗模式：隐藏安全提示、快捷消息 logo、分支标签 */
-.mini-overlay-mode .composer-hints,
-.mini-overlay-mode .composer-security-hint,
-.mini-overlay-mode .branch-badge,
-.mini-overlay-mode .composer-branch {
+/* 浮窗模式：精简输入底栏——隐藏安全等级/DSH 权限、快捷消息、分支展示与语音输入，
+   保留模型 chip（见下方截断规则）。锚点是组件上的语义 class（composer-bar-btn.*），
+   旧版曾用 .composer-hints/.branch-badge 等不存在的类名，从未生效（2027-02 重写）。 */
+.mini-overlay-root .composer-bar-btn.security,
+.mini-overlay-root .composer-bar-btn.quick-messages,
+.mini-overlay-root .composer-bar-btn.branch,
+.mini-overlay-root .composer-bar-branch,
+.mini-overlay-root .composer-voice-controls {
   display: none !important;
 }
-/* 模型选择器：显示模型名但截断，不挤发送键 */
-.mini-overlay-mode .model-selector,
-.mini-overlay-mode .composer-model-picker {
-  max-width: 140px;
-}
-.mini-overlay-mode .model-selector__label,
-.mini-overlay-mode .composer-model-picker__label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100px;
-}
-/* 浮窗顶部注入的收起/关闭按钮（fixed 定位，不占布局） */
-.mini-overlay-mode .mini-overlay-chrome {
-  position: fixed;
-  top: 8px;
-  right: 8px;
-  z-index: 1000;
-  display: flex;
-  gap: 4px;
-}
-.mini-overlay-mode .mini-overlay-chrome button {
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  border: none;
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--color-text-secondary, rgba(255, 255, 255, 0.6));
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  transition: background 0.15s ease;
-}
-.mini-overlay-mode .mini-overlay-chrome button:hover {
-  background: rgba(255, 255, 255, 0.15);
+/* 模型 chip：浮窗宽度有限，长模型名必须截断避免挤掉发送键（全局 max-w-[52ch] 过宽） */
+.mini-overlay-root .composer-bar-btn.model-thinking {
+  max-width: 18ch;
 }
