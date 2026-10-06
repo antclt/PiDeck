@@ -66,6 +66,37 @@ test("resolveBuiltinExtensionState reflects layer and inherited exact rules", ()
 	assert.equal(inherit.explicitInLayer, false);
 });
 
+test("builtin global exclusions honor globs and exact negative rules after includes", () => {
+	for (const pattern of ["!builtin:*", "!builtin:{mcp,codemode}", "!builtin:code?ode"]) {
+		const state = resolveBuiltinExtensionState({ entries: [pattern], name: "codemode" });
+		assert.equal(state.enabled, false, pattern);
+		assert.equal(state.explicitInLayer, true, pattern);
+	}
+	assert.equal(resolveBuiltinExtensionState({ entries: ["!builtin:*", "+builtin:codemode"], name: "codemode" }).enabled, true);
+	assert.equal(resolveBuiltinExtensionState({ entries: ["-builtin:codemode", "+builtin:codemode"], name: "codemode" }).enabled, false);
+	assert.equal(resolveBuiltinExtensionState({ entries: ["+builtin:*", "!builtin:codemode"], name: "codemode" }).enabled, false, "+ is exact, not a glob");
+	assert.equal(resolveBuiltinExtensionState({ entries: ["builtin:codemode"], name: "codemode" }).explicitInLayer, false, "plain sources are not overrides");
+});
+
+test("builtin project overrides use the last matching rule and otherwise inherit", () => {
+	const baseEntries = ["!builtin:*"];
+	const inherited = resolveBuiltinExtensionState({ baseEntries, entries: ["-builtin:mcp"], name: "codemode" });
+	assert.equal(inherited.enabled, false);
+	assert.equal(inherited.explicitInLayer, false);
+	assert.equal(inherited.explicitInBase, true);
+	assert.equal(resolveBuiltinExtensionState({ baseEntries, entries: ["-builtin:codemode", "+builtin:codemode"], name: "codemode" }).enabled, true);
+	assert.equal(resolveBuiltinExtensionState({ baseEntries, entries: ["+builtin:codemode", "!builtin:*"], name: "codemode" }).enabled, false);
+	assert.equal(resolveBuiltinExtensionState({ baseEntries, entries: ["!builtin:*", "+builtin:codemode"], name: "codemode" }).enabled, true);
+});
+
+test("builtin exact rules match Pi's normalized virtual specifier without Windows case folding", () => {
+	assert.equal(resolveBuiltinExtensionState({ entries: ["-./builtin:codemode"], name: "codemode", platform: "win32" }).enabled, false);
+	assert.equal(resolveBuiltinExtensionState({ entries: ["-builtin:CODEMODE"], name: "codemode", platform: "win32" }).enabled, true);
+	const on = setBuiltinExtensionEnabled({ entries: ["-./builtin:codemode", "!builtin:*", "-builtin:mcp"], name: "codemode", enabled: true });
+	assert.deepEqual([...on], ["!builtin:*", "-builtin:mcp", "+builtin:codemode"]);
+	assert.equal(resolveBuiltinExtensionState({ entries: on, name: "codemode" }).enabled, true);
+});
+
 test("package whole-disable writes empty filters for all four kinds", () => {
 	const entry = { source: "npm:demo", version: "1.2.3", futureField: { keep: true } };
 	const disabled = disablePackageFilters(entry);

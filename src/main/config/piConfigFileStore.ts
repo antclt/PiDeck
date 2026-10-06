@@ -11,10 +11,9 @@
  * 或在别处（TUI）刚做的修改。
  */
 
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { dirname, join } from "node:path";
-import { existsSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
 
 export type PiConfigFileRead = {
@@ -82,11 +81,10 @@ export async function writePiConfigFile(path: string, mutate: PiConfigMutation, 
 	const directory = dirname(path);
 	await mkdir(directory, { recursive: true });
 
-	// 文件不存在时 proper-lockfile 无法加锁（它 lock 的是已存在的路径）：先用一个空文件占位。
-	const existed = existsSync(path);
-	if (!existed) await writeFile(path, "{}\n", { encoding: "utf8", flag: "wx" }).catch(() => undefined);
-
+	// realpath:false 可直接锁住尚不存在的文件；占位文件会把 missing revision 改成内容哈希，
+	// 导致首次开关误报冲突，并在写入失败时留下用户未请求的 settings.json。
 	let release: (() => Promise<void>) | undefined;
+	let temporary: string | undefined;
 	try {
 		release = await lockfile.lock(path, { realpath: false, retries: { retries: 20, minTimeout: 20, maxTimeout: 200 } });
 	} catch (error) {
@@ -94,26 +92,31 @@ export async function writePiConfigFile(path: string, mutate: PiConfigMutation, 
 	}
 	try {
 		const current = await readPiConfigFile(path);
+		// The first write may have no file at all. Keep the synthetic lock target
+		// out of the revision comparison so a missing-file summary can be saved.
+		const currentRevision = current.exists ? current.revision : "missing";
 		if (current.error) {
 			return { ok: false, error: current.error, revision: current.revision };
 		}
-		if (options.expectedRevision !== undefined && options.expectedRevision !== current.revision) {
-			return { ok: false, error: "settings.json changed on disk; reload before saving.", revision: current.revision, conflict: true };
+		if (options.expectedRevision !== undefined && options.expectedRevision !== currentRevision) {
+			return { ok: false, error: "settings.json changed on disk; reload before saving.", revision: currentRevision, conflict: true };
 		}
 		const next = mutate(current.data);
 		if ("abort" in next && typeof next.abort === "string") {
-			return { ok: false, error: next.abort, revision: current.revision };
+			return { ok: false, error: next.abort, revision: currentRevision };
 		}
 		const raw = `${JSON.stringify(next, null, 2)}\n`;
-		if (raw === current.raw) return { ok: true, revision: current.revision, data: next };
+		if (raw === current.raw) return { ok: true, revision: currentRevision, data: next };
 		// 原子替换：临时文件放在同目录，避免跨设备 rename。
-		const temporary = join(directory, `.${path.slice(path.lastIndexOf("/") + 1)}.${process.pid}.${Date.now()}.tmp`);
+		temporary = join(directory, `.${basename(path)}.${process.pid}.${Date.now()}.tmp`);
 		await writeFile(temporary, raw, "utf8");
 		await rename(temporary, path);
 		return { ok: true, revision: revisionOf(raw, true), data: next };
 	} catch (error) {
 		return { ok: false, error: error instanceof Error ? error.message : String(error) };
 	} finally {
+		// 仅清理本次写入的临时文件，rename 失败也不能残留或动到原配置。
+		if (temporary) await rm(temporary, { force: true }).catch(() => undefined);
 		await release().catch(() => undefined);
 	}
 }

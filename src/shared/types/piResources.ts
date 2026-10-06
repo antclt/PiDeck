@@ -29,7 +29,10 @@ export type PiResourceEffectiveState = "enabled" | "disabled" | "unavailable";
 /** pi 原生内置扩展在当前作用域的开关状态。 */
 export type PiBuiltinExtensionState = {
 	name: PiBuiltinExtension;
+	/** 扩展是否允许 Pi 加载；不是 codemode/tool-search 工具是否选入 defaultTools。 */
 	enabled: boolean;
+	/** codemode/tool-search 在当前 defaultTools 解析结果中的选择状态。 */
+	toolEnabled?: boolean;
 	/** 本层是否有显式条目（false = 沿用下层/默认）。 */
 	explicitInLayer: boolean;
 	/** 生效来源：本层显式 / 继承。 */

@@ -2035,6 +2035,8 @@ export const zhCN = {
 	"config.piResources.on": "已启用",
 	"config.piResources.off": "已停用",
 	"config.piResources.inherited": "沿用全局设置",
+	"config.piResources.toolOn": "工具已选中",
+	"config.piResources.toolOff": "工具未选中",
 	"config.piResources.restartHint": "运行中的会话保持启动时的加载状态；不会自动重启。",
 	"config.piResources.builtin.mcp": "内置 MCP：读取 mcp.json 并把服务器工具提供给模型。",
 	"config.piResources.builtin.llama": "本地 llama.cpp provider 支持。",

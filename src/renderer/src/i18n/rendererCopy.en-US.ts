@@ -2040,6 +2040,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.piResources.on": "Enabled",
 	"config.piResources.off": "Disabled",
 	"config.piResources.inherited": "Inherited from global",
+	"config.piResources.toolOn": "Tool selected",
+	"config.piResources.toolOff": "Tool not selected",
 	"config.piResources.restartHint": "Running sessions keep what they loaded at startup; nothing restarts automatically.",
 	"config.piResources.builtin.mcp": "Built-in MCP: reads mcp.json and exposes server tools to the model.",
 	"config.piResources.builtin.llama": "Local llama.cpp provider support.",

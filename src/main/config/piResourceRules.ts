@@ -11,6 +11,7 @@
  * 那是 PiResourceConfigService 的职责。
  */
 
+import { minimatch } from "minimatch";
 import type { PiBuiltinExtension, PiResourceKind } from "../../shared/types/piResources";
 import { builtinSpecifier } from "../../shared/types/piResources";
 
@@ -221,27 +222,44 @@ function relativePosix(from: string, to: string): string {
  */
 export function setBuiltinExtensionEnabled(options: { entries: readonly string[]; name: PiBuiltinExtension; enabled: boolean }): string[] {
 	const specifier = builtinSpecifier(options.name);
-	const cleaned = stripExactResourceRules(options.entries, specifier);
+	// builtin 是虚拟标识符，不是 Windows 文件路径；按 pi 的精确规则清理，保留用户 glob。
+	const cleaned = options.entries.filter((entry) => !(entry.startsWith("+") || entry.startsWith("-")) || !builtinPatternMatches(specifier, entry.slice(1), true));
 	return options.enabled ? [...cleaned, `+${specifier}`] : [...cleaned, `-${specifier}`];
 }
 
 /**
- * 计算某个内置扩展在当前层（可含继承层）的开关状态。
- * `baseEntries` 是下层原始值（项目层传全局数组）；语义与 pi 一致：
- * 精确 `-builtin:<name>` 生效即停用；`+builtin:<name>` 在任何更宽的排除之后生效。
+ * 投影 pi 的内置扩展规则：全局按 ! → + → - 生效，项目按最后一条匹配的覆盖规则生效。
+ * 两层顺序不同（package-manager 的 isEnabledByOverrides / applyAutoloadDisabledPatterns），
+ * 不能合并成同一套求值；plain 来源声明不算显式覆盖。
  */
 export function resolveBuiltinExtensionState(options: { baseEntries?: readonly string[]; entries: readonly string[]; name: PiBuiltinExtension; platform?: NodeJS.Platform }): { enabled: boolean; explicitInLayer: boolean; explicitInBase: boolean } {
-	const platform = options.platform ?? process.platform;
 	const specifier = builtinSpecifier(options.name);
-	const inLayer = options.entries.some((entry) => isExactMatch(entry, specifier, platform));
-	const inBase = (options.baseEntries ?? []).some((entry) => isExactMatch(entry, specifier, platform));
-	// 简化投影：只看本层/下层的精确条目。更宽的 glob 由上游解析层负责（pi 实际加载才是真值）。
-	const enabled = options.entries.some((entry) => isExactMatch(entry, specifier, platform) && entry.startsWith("+"))
-		? true
-		: options.entries.some((entry) => isExactMatch(entry, specifier, platform) && entry.startsWith("-"))
-			? false
-			: options.baseEntries?.some((entry) => isExactMatch(entry, specifier, platform) && entry.startsWith("-"))
-				? false
-				: true;
-	return { enabled, explicitInLayer: inLayer, explicitInBase: inBase };
+	const matches = (entry: string): boolean => {
+		if (entry.startsWith("!")) return builtinPatternMatches(specifier, entry.slice(1), false);
+		return (entry.startsWith("+") || entry.startsWith("-")) && builtinPatternMatches(specifier, entry.slice(1), true);
+	};
+	const evaluateGlobal = (entries: readonly string[]): boolean => {
+		let enabled = !entries.some((entry) => entry.startsWith("!") && matches(entry));
+		if (entries.some((entry) => entry.startsWith("+") && matches(entry))) enabled = true;
+		if (entries.some((entry) => entry.startsWith("-") && matches(entry))) enabled = false;
+		return enabled;
+	};
+	let enabled = evaluateGlobal(options.baseEntries ?? options.entries);
+	if (options.baseEntries !== undefined) {
+		for (const entry of options.entries) {
+			if (matches(entry)) enabled = entry.startsWith("+");
+		}
+	}
+	return {
+		enabled,
+		explicitInLayer: options.entries.some(matches),
+		explicitInBase: (options.baseEntries ?? []).some(matches),
+	};
+}
+
+/** 虚拟路径区分大小写；! 用 minimatch，+/- 只剥 ./ 前缀后精确匹配，与 pi 一致。 */
+function builtinPatternMatches(value: string, pattern: string, exact: boolean): boolean {
+	const normalized = pattern.replace(/\\/g, "/");
+	if (exact) return (normalized.startsWith("./") ? normalized.slice(2) : normalized) === value;
+	return minimatch(value, normalized);
 }
