@@ -64,11 +64,13 @@ test("登出按凭据显示；auth.provider 获得全局创建入口（项目层
 	const tab = readFileSync("src/renderer/src/config/McpTab.tsx", "utf8");
 	// C：快照解析已存凭据 server 名（读 mcp-auth.json 键名），登出按钮据此显示
 	// D：开关仅全局（项目层被 pi 校验拒绝）；供应商数据来自 auth.json 键名，凭据值不进渲染层
-	assert.match(tab, /disabled=\{saving \|\| knownProviders\.length === 0\}/);
-	assert.match(tab, /patchEditing\(checked \? \{ auth: \{ provider: knownProviders\[0\] \} \} : \{ auth: undefined \}\)/);
+	// 认证方式选择器（deriveAuthMode + knownProviders）在连接与认证段内
+	assert.match(tab, /deriveAuthMode\(editingDef\)/);
+	assert.match(tab, /patchEditing\(\{ auth: \{ provider: knownProviders\[0\] \} \}\)/);
 	assert.match(tab, /api\.config\n?\s*\.getAuth\(\)|getAuth: \(\) => Promise/);
-	// 项目作用域不给创建入口：provider 卡片带 !isProjectScope 门
-	assert.match(tab, /\{!isProjectScope \? \([\s\S]{0,600}?providerAuth\.sectionHint/);
+	// 项目作用域：认证方式选择器仅远程 HTTP + 全局；项目层只读展示
+	assert.match(tab, /transport === "http" && !isProjectScope \? \([\s\S]{0,200}?config\.mcp\.auth\.method/);
+	assert.match(tab, /transport === "http" && isProjectScope && usesProviderAuth\(editingDef\) \?/);
 });
 
 test("dirty-mark helpers include config:mcp", () => {

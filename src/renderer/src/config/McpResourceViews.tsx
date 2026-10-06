@@ -57,7 +57,7 @@ export function McpServerListPane(props: {
 }) {
 	const stateOf = (name: string): { state: string; tools: string[]; error?: string } | undefined => props.statusByName[name];
 	return (
-		<div className="flex min-h-0 flex-col gap-1 overflow-auto rounded-md border border-border-subtle bg-bg-panel p-1.5">
+		<div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto rounded-md border border-border-subtle bg-bg-panel p-1.5">
 			<div className="flex items-center justify-between gap-2 px-1 pb-0.5">
 				<span className="text-micro text-muted-foreground">{t("config.mcp.serverCount", { count: props.servers.length })}</span>
 				<Button variant="ghost" size="icon-xs" onClick={props.onRefreshStatus} disabled={props.statusLoading} title={t("config.mcp.status.check")}>
