@@ -132,7 +132,7 @@ import {
 import { isSameSessionPath } from "./agentListDisplay";
 import { t } from "./i18n";
 import { isChatProject, loadSessionSourceFilter, saveSessionSourceFilter, isReplacementForPendingAgent, isPendingAgentId, migrateAgentRecord, stampIdleSessionDuration, type PendingAgentTab } from "./rendererUtils";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui-shadcn/select";
+import { MiniOverlaySurface } from "./components/mini-overlay/MiniOverlaySurface";
 import type { SessionFilterPill } from "./sessionFilterPills";
 import { useResize } from "./hooks/useResize";
 import { ARCHIVED_SESSION_TOAST_MS, archivedSessionToastMessage, useSessionActions } from "./hooks/useSessionActions";
@@ -1116,19 +1116,6 @@ export function App() {
 
 	const quickTask = useQuickTask({ ready: settingsLoaded, backend: effectiveAgentBackend, upsertSession, selectSession: selectSessionCommand, registerSession: workspaceChrome.registerOpenSession, refreshProjects, getSessionRecord });
 
-	// 浮窗模式：监听 mini-overlay:select-session 事件（项目切换后发到这里激活会话）
-	useEffect(() => {
-		const handler = (e: Event) => {
-			const detail = (e as CustomEvent).detail;
-			if (detail?.projectId && detail?.sessionId) {
-				selectSessionCommand(detail.projectId, detail.sessionId, false);
-				workspaceChrome.registerOpenSession(detail.sessionId, "permanent");
-			}
-		};
-		window.addEventListener("mini-overlay:select-session", handler);
-		return () => window.removeEventListener("mini-overlay:select-session", handler);
-	}, [selectSessionCommand, workspaceChrome]);
-
 	// 关闭 Tab / 分屏退栏时的焦点切换：只改 currentSession，不碰 Tab 登记
 	useEffect(() => {
 		workspaceChrome.bindFocusHandlers({
@@ -1203,6 +1190,7 @@ export function App() {
 		async (projectId: string, sessionId: string, tabMode: "preview" | "permanent" = "permanent") => {
 			const openedId = await runOpenSidebarSessionById(projectId, sessionId);
 			if (openedId) workspaceChrome.registerOpenSession(openedId, tabMode);
+			return openedId;
 		},
 		[runOpenSidebarSessionById, workspaceChrome],
 	);
@@ -1912,7 +1900,9 @@ export function App() {
 		sessions: {
 			// 简洁模式没有临时预览；标签模式保留原设置及双击晋升。
 			simpleNavigation: settings.navigationMode === "simple",
-			open: (projectId, sessionId, tabMode) => openSidebarSessionByIdWithTab(projectId, sessionId, settings.navigationMode === "simple" ? "permanent" : (tabMode ?? settings.sessionTabOpenMode)),
+			open: async (projectId, sessionId, tabMode) => {
+				await openSidebarSessionByIdWithTab(projectId, sessionId, settings.navigationMode === "simple" ? "permanent" : (tabMode ?? settings.sessionTabOpenMode));
+			},
 			// 活动页「最近会话」跨项目展示：后台静默预热尚未扫描的项目 catalog。
 			ensureCatalogsLoaded: (projectIds) => {
 				for (const projectId of projectIds) ensureProjectCatalogLoaded(projectId, true);
@@ -2333,7 +2323,9 @@ export function App() {
 			deleteMessage,
 			forkFromUserMessage,
 			forkingMessageId,
-			openSidebarSessionById: (projectId: string, sessionId: string) => openSidebarSessionByIdWithTab(projectId, sessionId, "permanent"),
+			openSidebarSessionById: async (projectId: string, sessionId: string) => {
+				await openSidebarSessionByIdWithTab(projectId, sessionId, "permanent");
+			},
 			focusAskSessionById: jumpToAskSession,
 			agents: displayAgents,
 			queuedPromptsBySession: queue.queuedPrompts,
@@ -2747,11 +2739,6 @@ export function App() {
 			<>
 				<AppBootstrap {...bootstrapProps} />
 				<AppShell
-					miniOverlaySwitchToQuickTask={() => {
-						// 小窗 → 任务模式：带上当前会话的项目路径（无会话时主进程回退桌面）
-						const projectPath = currentSession ? projects.find((item) => item.id === currentSession.projectId)?.path : undefined;
-						void api.miniOverlay.switchToQuickTask(projectPath);
-					}}
 					navigationChrome={
 						simpleMode ? (
 							<div className="simple-navigation-bar flex h-8 shrink-0 items-center gap-0.5 bg-(--simple-shell-surface) px-2 [&_button]:[-webkit-app-region:no-drag]">
@@ -2770,48 +2757,21 @@ export function App() {
 					compactContent={
 						// 极简浮窗模式：渲染当前活跃会话（不是 quickTask）
 						new URLSearchParams(window.location.search).get("mini-overlay") === "1" ? (
-							currentSession ? (
-								<SessionPaneServicesProvider value={sessionPaneServices}>
-									<ChatSessionPane sessionId={currentSession.id} focused onFocusPane={() => focusSessionPane(currentSession.id)} splitPane={false} />
-								</SessionPaneServicesProvider>
-							) : (
-								<div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
-									<p>{t("miniOverlay.noActiveSession")}</p>
-									{/* 空态新建：用户显式选项目（不再默认 projects[0]，避免「选了别的项目却建到 Chat」） */}
-									<Select
-										value=""
-										onValueChange={(projectId) => {
-											void (async () => {
-												const project = projects.find((item) => item.id === projectId);
-												if (!project) return;
-												try {
-													const session = await api.sessions.createDraft({
-														projectId: project.id,
-														title: `${project.name} agent`,
-														backend: "pi",
-													});
-													upsertSession(session);
-													selectSessionCommand(project.id, session.id, false);
-													workspaceChrome.registerOpenSession(session.id, "permanent");
-												} catch {
-													showToast(t("miniOverlay.createSessionFailed"), 4000, "error");
-												}
-											})();
-										}}
-									>
-										<SelectTrigger className="w-44">
-											<SelectValue placeholder={t("miniOverlay.newSession")} />
-										</SelectTrigger>
-										<SelectContent>
-											{projects.map((project) => (
-												<SelectItem key={project.id} value={project.id}>
-													{isChatProject(project) ? t("app.chatProject") : project.name}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								</div>
-							)
+							<MiniOverlaySurface
+								activeProjectId={activeProjectId}
+								onCreateSession={createSessionDraftWithTab}
+								onOpenSession={openSidebarSessionByIdWithTab}
+								onSwitchToQuickTask={() => {
+									const projectPath = currentSession ? projects.find((item) => item.id === currentSession.projectId)?.path : undefined;
+									void api.miniOverlay.switchToQuickTask(projectPath).catch(() => showToast(t("miniOverlay.windowActionFailed"), 4000, "error"));
+								}}
+							>
+								{currentSession ? (
+									<SessionPaneServicesProvider value={sessionPaneServices}>
+										<ChatSessionPane sessionId={currentSession.id} focused onFocusPane={() => focusSessionPane(currentSession.id)} splitPane={false} />
+									</SessionPaneServicesProvider>
+								) : null}
+							</MiniOverlaySurface>
 						) : quickTask.active ? (
 							<QuickTaskSurface task={quickTask}>
 								<SessionPaneServicesProvider value={sessionPaneServices}>{quickTask.session && <ChatSessionPane sessionId={quickTask.session.id} focused onFocusPane={() => focusSessionPane(quickTask.session!.id)} splitPane={false} />}</SessionPaneServicesProvider>

@@ -12,8 +12,9 @@ import { getAppLogger } from "../logging/sharedLogger";
 
 /** 悬浮球尺寸（圆形 64px，与工作台主窗口无关）。 */
 export const FLOATER_SIZE = 64;
-/** 状态气泡宽度（悬浮球上方展示运行状态文本）。 */
-const FLOATER_BADGE_H = 22;
+/** 文字气泡与圆环都必须落在透明窗口内，不能只按圆形 Logo 的宽度建窗。 */
+const FLOATER_WINDOW_W = 224;
+const FLOATER_WINDOW_H = 104;
 
 function posPath(): string {
 	return join(app.getPath("userData"), "floater-position.json");
@@ -28,7 +29,7 @@ async function loadPos(): Promise<FloaterPos | null> {
 	try {
 		const raw = await readFile(posPath(), "utf8");
 		const parsed = JSON.parse(raw);
-		if (typeof parsed.x === "number" && typeof parsed.y === "number") return parsed;
+		if (Number.isFinite(parsed.x) && Number.isFinite(parsed.y)) return parsed;
 		return null;
 	} catch {
 		return null;
@@ -135,12 +136,14 @@ export class FloatingController {
 		const settings = this.deps.settingsStore.get();
 		getAppLogger()?.info("floating-ball", "show() called", { enabled: settings.floatingBallEnabled, destroyed: this.destroyed, hasWin: !!this.win });
 		if (!settings.floatingBallEnabled) return;
-		const pos = (await loadPos()) ?? this.defaultPos();
+		const savedPos = (await loadPos()) ?? this.defaultPos();
+		// 显示器拔插、缩放变化或旧版离屏位置都要在建窗前恢复到当前工作区。
+		const pos = this.constrainPosition(savedPos.x, savedPos.y, FLOATER_WINDOW_W, FLOATER_WINDOW_H, false);
 		const sourcePreloadPath = join(__dirname, "../preload/index.js");
 		const preloadPath = await preparePreloadPath(sourcePreloadPath, "floater-preload.js");
 		this.win = new BrowserWindow({
-			width: FLOATER_SIZE,
-			height: FLOATER_SIZE + FLOATER_BADGE_H,
+			width: FLOATER_WINDOW_W,
+			height: FLOATER_WINDOW_H,
 			x: pos.x,
 			y: pos.y,
 			frame: false,
@@ -300,38 +303,46 @@ export class FloatingController {
 
 	private attachDragHandlers(win: BrowserWindow): void {
 		let dragOffset: { x: number; y: number } | null = null;
+		let dragStart: { x: number; y: number } | null = null;
 		let moved = false;
+		/** 开始、移动与结束都读 Electron DIP 光标；不能混用渲染层缩放后的 screenX/Y。 */
+		const moveFromCursor = () => {
+			if (!dragOffset || !dragStart) return;
+			const cursor = screen.getCursorScreenPoint();
+			if (Math.abs(cursor.x - dragStart.x) > 2 || Math.abs(cursor.y - dragStart.y) > 2) moved = true;
+			win.setPosition(Math.round(cursor.x - dragOffset.x), Math.round(cursor.y - dragOffset.y));
+		};
 		ipcMain.removeHandler(ipcChannels.floatingBallDragStart);
 		ipcMain.handle(ipcChannels.floatingBallDragStart, (event) => {
-			if (event.sender !== win.webContents) return;
+			if (event.sender !== win.webContents || win.isDestroyed()) return;
 			const [boundsX, boundsY] = win.getPosition();
 			const cursor = screen.getCursorScreenPoint();
 			dragOffset = { x: cursor.x - boundsX, y: cursor.y - boundsY };
+			dragStart = cursor;
 			moved = false;
 		});
-		// 拖动经渲染层 rAF 直推 IPC move（比主进程 polling 流畅），主进程只做落盘与吸附
+		// rAF 只负责通知采样时机；坐标以宿主为准，避免 DPI/页面缩放与迟到事件累积漂移。
 		ipcMain.removeHandler(ipcChannels.floatingBallDragMove);
-		ipcMain.handle(ipcChannels.floatingBallDragMove, (event, cursorX: number, cursorY: number) => {
-			if (event.sender !== win.webContents || !dragOffset) return;
-			const x = cursorX - dragOffset.x;
-			const y = cursorY - dragOffset.y;
-			const [cx, cy] = win.getPosition();
-			if (Math.abs(cx - x) > 2 || Math.abs(cy - y) > 2) moved = true;
-			win.setPosition(x, y);
+		ipcMain.handle(ipcChannels.floatingBallDragMove, (event) => {
+			if (event.sender !== win.webContents || win.isDestroyed()) return;
+			moveFromCursor();
 		});
 		ipcMain.removeHandler(ipcChannels.floatingBallDragEnd);
 		ipcMain.handle(ipcChannels.floatingBallDragEnd, (event) => {
-			if (event.sender !== win.webContents) return;
+			if (event.sender !== win.webContents || win.isDestroyed() || !dragOffset) return;
+			// mouseup 前最后一帧可能被 renderer 取消，结束时补采样一次。
+			moveFromCursor();
 			dragOffset = null;
-			const [x, y] = win.getPosition();
-			const snap = this.deps.settingsStore.get().floatingBallSnapToEdge;
-			const finalPos = snap ? this.snapToEdge(x, y) : { x, y };
-			if (snap && (finalPos.x !== x || finalPos.y !== y)) {
-				win.setPosition(finalPos.x, finalPos.y);
+			dragStart = null;
+			if (!moved) {
+				this.handleClick();
+				return;
 			}
+			const bounds = win.getBounds();
+			const snap = this.deps.settingsStore.get().floatingBallSnapToEdge;
+			const finalPos = this.constrainPosition(bounds.x, bounds.y, bounds.width, bounds.height, snap);
+			win.setPosition(finalPos.x, finalPos.y);
 			void savePos(finalPos);
-			// 拖动距离过小视为点击
-			if (!moved) this.handleClick();
 		});
 		ipcMain.removeHandler(ipcChannels.floatingBallContextMenu);
 		ipcMain.handle(ipcChannels.floatingBallContextMenu, (event) => {
@@ -340,23 +351,23 @@ export class FloatingController {
 		});
 	}
 
-	private snapToEdge(x: number, y: number): { x: number; y: number } {
-		const display = screen.getDisplayNearestPoint({ x, y });
-		const { workArea } = display;
-		const midX = workArea.x + workArea.width / 2;
-		const targetX = x + FLOATER_SIZE / 2 < midX ? workArea.x : workArea.x + workArea.width - FLOATER_SIZE;
-		// y 钳制在工作区内（避免贴出屏幕外）
-		const clampedY = Math.max(workArea.y, Math.min(y, workArea.y + workArea.height - FLOATER_SIZE - FLOATER_BADGE_H));
-		// x 也要钳制（多显示器时 targetX 可能超出）
-		const clampedX = Math.max(workArea.x, Math.min(targetX, workArea.x + workArea.width - FLOATER_SIZE));
-		return { x: clampedX, y: clampedY };
+	/** 按完整窗口尺寸约束到最近显示器；关闭贴边也保留离屏保护。 */
+	private constrainPosition(x: number, y: number, width: number, height: number, snap: boolean): FloaterPos {
+		const { workArea } = screen.getDisplayNearestPoint({ x: x + width / 2, y: y + height / 2 });
+		const maxX = Math.max(workArea.x, workArea.x + workArea.width - width);
+		const maxY = Math.max(workArea.y, workArea.y + workArea.height - height);
+		const targetX = snap ? (x + width / 2 < workArea.x + workArea.width / 2 ? workArea.x : maxX) : x;
+		return {
+			x: Math.round(Math.max(workArea.x, Math.min(targetX, maxX))),
+			y: Math.round(Math.max(workArea.y, Math.min(y, maxY))),
+		};
 	}
 
 	private defaultPos(): FloaterPos {
 		const display = screen.getPrimaryDisplay();
 		const { workArea } = display;
 		return {
-			x: workArea.x + workArea.width - FLOATER_SIZE - 24,
+			x: workArea.x + workArea.width - FLOATER_WINDOW_W - 24,
 			y: workArea.y + Math.floor(workArea.height * 0.4),
 		};
 	}
