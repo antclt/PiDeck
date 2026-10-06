@@ -356,16 +356,7 @@ export function AppShell(props: AppShellProps) {
 		// 改由系统接管（DWM 投影 + Win11 圆角），与任务模式同款观感。
 		const isMiniOverlayMode = new URLSearchParams(window.location.search).get("mini-overlay") === "1";
 		return (
-			<div
-				className={[
-					"wechat-shell quick-task-shell bg-bg-app [[data-bg-image=on]_&]:bg-transparent",
-					isMiniOverlayMode ? "mini-overlay-shell overflow-hidden" : "",
-					useNativeTitleBar ? "" : "custom-titlebar-enabled",
-					!useNativeTitleBar && platform === "darwin" ? "mac-custom-titlebar" : "",
-				]
-					.filter(Boolean)
-					.join(" ")}
-			>
+			<div className={["wechat-shell quick-task-shell bg-bg-app [[data-bg-image=on]_&]:bg-transparent", isMiniOverlayMode ? "mini-overlay-shell overflow-hidden" : "", useNativeTitleBar ? "" : "custom-titlebar-enabled", !useNativeTitleBar && platform === "darwin" ? "mac-custom-titlebar" : ""].filter(Boolean).join(" ")}>
 				{!isMiniOverlayMode ? (
 					<AppHeader
 						useNativeTitleBar={useNativeTitleBar}

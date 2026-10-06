@@ -81,11 +81,12 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.7.9 (Unreleased)** ()
+> **Latest: v0.7.9 (2026-10-07)** (2026-10-07)
 
-### v0.7.9 (Unreleased) Release Highlights
+### v0.7.9 (2026-10-07) Release Highlights
 - 🚀 **Compaction sliders in Settings**
 - 🚀 **Floating ball & mini overlay - minimize to a ball, pick up where you left off**
+- 🚀 **Mini overlay home: direct access to active sessions**
 - 🚀 **Richer tray right-click menu**
 - 🚀 **Tray icon follows the Logo style**
 - 🚀 **Scratch pad moved into the right sidebar**
@@ -95,7 +96,6 @@
 - 🚀 **Plugin development interface (capability catalog + AI authoring guide + demo)**
 - 🚀 **Session imports: Kimi Code, Kimi Work and MinimaxCode**
 - 🚀 **Adapts to pi 1.0.x — resource management now rides pi's native config**
-- 🚀 **In-app pi update details and a more reliable updater**
 - ✨ **New sessions keep your last-used model**
 - ✨ **No more flash of the guide page at startup**
 - ✨ **Win11 snap layouts restore exactly**
