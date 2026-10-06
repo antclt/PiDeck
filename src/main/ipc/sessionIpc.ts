@@ -44,6 +44,7 @@ import { dshUnavailablePageFor } from "../dsh/dshManualStop";
 import { validateNpmSpec } from "../dsh/dshPluginNpmRunner";
 import { validateSearchKeyword } from "../dsh/dshPluginMarket";
 import { downgradeRunningStartedBefore, downgradeStaleRunning } from "../pi/derivedSubagents";
+import { getCachedModelList } from "../pi/modelListCache";
 import { resolveLaunchDefaultOptions, isModelInModelsConfig } from "../sessions/launchDefaults";
 import { BackgroundScanCoordinator } from "../sessions/BackgroundScanCoordinator";
 import { DIRECTORY_IMPORT_MAX_SUMMARIES } from "../sessions/directorySessionImport";
@@ -631,16 +632,21 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			try {
 				const [settingsResult, modelsResult] = await Promise.all([configManager.getSettingsConfig(), configManager.getModelsConfig()]);
 				// 引导页/渲染层显式传入的模型（如欢迎页偏好）也可能指向已删除的供应商/模型：
-				// 校验其仍存在于 models.json，不存在则交给解析器按欢迎页点选 → 配置默认 →
-				// enabledModels → lastUsed 的顺序兜底，避免新会话带着幽灵模型启动。
+				// 校验其仍存在（models.json ∪ pi 目录，与选择器可选范围一致），不存在则交给
+				// 解析器按欢迎页点选 → 配置默认 → enabledModels → lastUsed 的顺序兜底，
+				// 避免新会话带着幽灵模型启动。
 				if (input.backend !== "dsh" && model) {
 					if (
 						typeof model.provider !== "string" ||
 						typeof model.modelId !== "string" ||
-						!isModelInModelsConfig(modelsResult.parsed, {
-							provider: model.provider,
-							modelId: model.modelId,
-						})
+						!isModelInModelsConfig(
+							modelsResult.parsed,
+							{
+								provider: model.provider,
+								modelId: model.modelId,
+							},
+							getCachedModelList(),
+						)
 					) {
 						model = undefined;
 					}
@@ -654,6 +660,9 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 					backend: input.backend,
 					settings: settingsResult.parsed,
 					models: modelsResult.parsed,
+					// pi 目录快照（同步，冷时 null）：lastUsed/welcomeModel 的存在性校验
+					// 按 models.json ∪ 目录判定，与选择器可选范围一致。
+					catalogModels: getCachedModelList(),
 					// lastUsed 语义：用户最近一次实际发送所用模型；仅无显式默认与偏好时参与。
 					lastUsedModel: settingsStore.get().lastUsedModel,
 					welcomeModel: input.welcomeModel && typeof input.welcomeModel.provider === "string" && typeof input.welcomeModel.modelId === "string" ? input.welcomeModel : undefined,
@@ -702,6 +711,8 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				backend,
 				settings: settingsResult.parsed,
 				models: modelsResult.parsed,
+				// 与 createDraft 同源：存在性校验含 pi 目录，否则引导页预选与创建再次分叉。
+				catalogModels: getCachedModelList(),
 				// lastUsed 语义：引导页预选默认 = 用户最后一次实际使用的模型。
 				lastUsedModel: settingsStore.get().lastUsedModel,
 			});
