@@ -5,6 +5,7 @@ import { TimelineMarker } from "../TimelineMarker";
 import { Badge } from "../../ui-shadcn/badge";
 import { t, translateI18nDescriptor } from "../../../i18n";
 import { stripAnsi } from "../TimelineFormat";
+import { useRetryCountdown } from "../../../hooks/useRetryCountdown";
 import { resolveStepDetail, StepTraceDetails } from "./StepTraceDetails";
 
 /**
@@ -26,7 +27,17 @@ export const RetryStep = memo(function RetryStep(props: { group: RetryGroupItem;
 	const retryFailed = status === "error";
 	const [expanded, setExpanded] = useState(false);
 	const hasDetail = Boolean(resolveStepDetail(props.group.message));
-	const label = stripAnsi(translateI18nDescriptor(props.group.message.meta, props.group.message.text) || props.group.message.text).trim();
+	const remainingSeconds = useRetryCountdown(props.group.message, props.hidden);
+	// 只覆盖结构化文案参数；次数/错误详情仍取原消息，倒数不触发时间线整体刷新。
+	const descriptor =
+		remainingSeconds === null
+			? props.group.message.meta
+			: {
+					...props.group.message.meta,
+					i18nKey: remainingSeconds > 0 ? "diagnostic.retryScheduledAfterDelay" : "diagnostic.retryScheduled",
+					i18nParams: { ...props.group.message.meta?.i18nParams, delaySeconds: remainingSeconds },
+				};
+	const label = stripAnsi(translateI18nDescriptor(descriptor, props.group.message.text) || props.group.message.text).trim();
 	// 状态徽章与 ToolCard 三态同构（outline 琥珀 / danger-soft 红 / secondary 完成），
 	// 扫读语言一致：一眼区分「在等重试 / 重试也救不回来 / 重试成功」。
 	const statusBadge = retryRunning ? (
