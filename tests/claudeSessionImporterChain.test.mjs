@@ -204,7 +204,7 @@ test("import/scan: 旧转换器版本的产物标记 outdated，引导重导修�
 		const raw = readFileSync(targetPath, "utf8");
 		const markerLine = raw.split(/\r?\n/).find((line) => line.includes('"claude_import"'));
 		assert.ok(markerLine, "产物必须含 claude_import 标记");
-		const downgraded = raw.replace(markerLine, markerLine.replace('"version":2', '"version":1'));
+		const downgraded = raw.replace(markerLine, markerLine.replace(/"version":\d+/, '"version":0'));
 		assert.notEqual(downgraded, raw, "标记版本必须可被降级（断言替换真的发生）");
 		writeFileSync(targetPath, downgraded, "utf8");
 

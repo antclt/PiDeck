@@ -30,8 +30,10 @@ type ClaudePushMessage = (role: "user" | "assistant" | "toolResult", content: un
  * 旧版本产物在扫描列表里显示 outdated，引导用户重导修复。
  * v2：活链重建 + 孤儿 toolResult 降级（修复 rewind/中断续聊的废弃分支导致的
  * 「tool 消息前无 tool_calls」400）。
+ * v3：并行 toolCall 合并（Qoder 把一轮并行调用写成连续单 call assistant 条目，
+ * 逐条写出同样产生孤儿 toolResult）。
  */
-export const CLAUDE_IMPORT_CONVERTER_VERSION = 2;
+export const CLAUDE_IMPORT_CONVERTER_VERSION = 3;
 
 /**
  * Claude Code（~/.claude/projects）会话导入器。
@@ -185,28 +187,8 @@ export class ClaudeSessionImporter {
 			await sink(JSON.stringify(entry));
 		};
 
-		const pushMessage = async (role: "user" | "assistant" | "toolResult", content: unknown[], extra: Record<string, unknown> = {}, timestampValue?: string) => {
+		const emitMessage = async (role: "user" | "assistant" | "toolResult", content: unknown[], extra: Record<string, unknown> = {}, timestampValue?: string) => {
 			if (content.length === 0) return;
-			// 与 pi transformMessages 同口径的 tool 配对跟踪：assistant 的 toolCall 挂起，
-			// 任一 user 消息出现即关闭挂起（pi 请求时会为未应答的 toolCall 补占位结果，不会 400）。
-			// 挂起集之外的 toolResult 在 OpenAI completions 请求里是「前面没有 tool_calls 的
-			// tool 消息」→ 严格供应商 400，降级为用户文本保留内容。
-			if (role === "assistant") {
-				pendingToolCalls.clear();
-				for (const item of content) {
-					const block = item as Record<string, unknown>;
-					if (block?.type === "toolCall" && typeof block.id === "string") pendingToolCalls.add(block.id);
-				}
-			} else if (role === "user") {
-				pendingToolCalls.clear();
-			} else if (role === "toolResult") {
-				const toolCallId = String(extra.toolCallId ?? "");
-				if (!pendingToolCalls.delete(toolCallId)) {
-					const text = this.extractPiText(content).trim();
-					if (!text) return;
-					return pushMessage("user", [{ type: "text", text: this.translate("session.importedOrphanToolResult", { tool: String(extra.toolName ?? "tool"), text }) }], {}, timestampValue);
-				}
-			}
 			const id = this.makeId(sessionId, sequence++);
 			const ts = timestampValue || new Date().toISOString();
 			await pushEntry({
@@ -230,6 +212,53 @@ export class ClaudeSessionImporter {
 			if (role === "user" && text && !titleState.title) {
 				titleState.title = this.cleanTitle(text);
 			}
+		};
+
+		// assistant 运行合并缓冲：Claude Code 把同一轮响应拆成多个连续 assistant 条目
+		// （Qoder 并行调用的 call_00_/call_01_ 拆分、长文本/思考分片、call 与结果之间的
+		// 穿插评论）。只要 user/toolResult 不出现就仍属同一轮——并为一条 assistant 写出
+		// （OpenAI 多 tool_calls 语义），否则 pi transformMessages 在每个新 assistant 边界
+		// 重置挂起集，靠前 call 的 toolResult 变孤儿（严格供应商 400）。
+		// 任何非 assistant 消息到来或转换结束时先冲刷；运行期间 toolCall id 持续累积进 pendingToolCalls。
+		let mergeBuffer: { content: unknown[]; extra: Record<string, unknown>; timestampValue?: string } | null = null;
+		const flushMergeBuffer = async () => {
+			if (!mergeBuffer) return;
+			const buffered = mergeBuffer;
+			mergeBuffer = null;
+			await emitMessage("assistant", buffered.content, buffered.extra, buffered.timestampValue);
+		};
+
+		const pushMessage = async (role: "user" | "assistant" | "toolResult", content: unknown[], extra: Record<string, unknown> = {}, timestampValue?: string) => {
+			if (content.length === 0) return;
+			if (role === "assistant") {
+				if (mergeBuffer) mergeBuffer.content.push(...content);
+				else {
+					// 新运行开启 = pi 语义的新 assistant 边界：关闭上一段挂起集
+					pendingToolCalls.clear();
+					mergeBuffer = { content: [...content], extra, timestampValue };
+				}
+				for (const item of content) {
+					const block = item as Record<string, unknown>;
+					if (block?.type === "toolCall" && typeof block.id === "string") pendingToolCalls.add(block.id);
+				}
+				return;
+			}
+			await flushMergeBuffer();
+			// 与 pi transformMessages 同口径的 tool 配对跟踪：任一 user 消息出现即关闭挂起
+			// （pi 请求时会为未应答的 toolCall 补占位结果，不会 400）。挂起集之外的 toolResult
+			// 在 OpenAI completions 请求里是「前面没有 tool_calls 的 tool 消息」→ 严格供应商
+			// 400，降级为用户文本保留内容。
+			if (role === "user") {
+				pendingToolCalls.clear();
+			} else if (role === "toolResult") {
+				const toolCallId = String(extra.toolCallId ?? "");
+				if (!pendingToolCalls.delete(toolCallId)) {
+					const text = this.extractPiText(content).trim();
+					if (!text) return;
+					return pushMessage("user", [{ type: "text", text: this.translate("session.importedOrphanToolResult", { tool: String(extra.toolName ?? "tool"), text }) }], {}, timestampValue);
+				}
+			}
+			await emitMessage(role, content, extra, timestampValue);
 		};
 
 		// 写入会话头
@@ -336,6 +365,9 @@ export class ClaudeSessionImporter {
 				await this.pushClaudeToolResult(entry, entry, pushMessage);
 			}
 		}
+
+		// 尾部冲刷：文件以并行调用结尾时缓冲里的 toolCall 不能丢
+		await flushMergeBuffer();
 
 		const title = titleState.title || this.cleanTitle(basename(session.sourcePath)) || this.translate("session.importedTitle", { source: this.sourceLabel });
 		// 使用 pi 原生 session_info 格式追加在末尾，避免旧版 sessionName 行（无 type 字段）
