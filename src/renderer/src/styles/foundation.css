@@ -3281,9 +3281,10 @@ select:focus-visible {
 .mini-overlay-mode .wechat-shell {
   border-radius: 16px;
   overflow: hidden;
-  /* 透明窗口的系统阴影已足够，不再叠加 CSS 阴影 */
-  /* 背景跟随系统主题（dark/light），不强制白色 */
-  background: transparent;
+  /* 半透明毛玻璃背景（有辨识度，不跟桌面/其他软件融合） */
+  background: rgba(18, 18, 18, 0.85);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
 }
 .mini-overlay-mode .shell-panel-list,
 .mini-overlay-mode .shell-panel-drawer,
@@ -3300,6 +3301,25 @@ select:focus-visible {
 }
 .mini-overlay-mode .chat-pane {
   border-radius: 0;
+}
+/* 浮窗模式：隐藏安全提示、快捷消息 logo、分支标签 */
+.mini-overlay-mode .composer-hints,
+.mini-overlay-mode .composer-security-hint,
+.mini-overlay-mode .branch-badge,
+.mini-overlay-mode .composer-branch {
+  display: none !important;
+}
+/* 模型选择器：显示模型名但截断，不挤发送键 */
+.mini-overlay-mode .model-selector,
+.mini-overlay-mode .composer-model-picker {
+  max-width: 140px;
+}
+.mini-overlay-mode .model-selector__label,
+.mini-overlay-mode .composer-model-picker__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100px;
 }
 /* 浮窗顶部注入的收起/关闭按钮（fixed 定位，不占布局） */
 .mini-overlay-mode .mini-overlay-chrome {

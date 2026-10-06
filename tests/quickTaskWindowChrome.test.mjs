@@ -63,6 +63,8 @@ function windowStub({ normal = { x: 200, y: 100, width: 1280, height: 900 }, max
 		setMinimumSize: (w, h) => {
 			minimum = [w, h];
 		},
+		setAlwaysOnTop() {},
+		setSkipTaskbar() {},
 		setBounds: (value) => {
 			bounds = { ...value };
 		},

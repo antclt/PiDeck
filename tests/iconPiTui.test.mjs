@@ -65,7 +65,7 @@ test("icon-pi-tui.svg keeps the classic container spec and stays vector-only", (
 	assert.match(svg, /rx="228"/, "container corner radius must match classic icon.svg");
 	assert.match(svg, /viewBox="0 0 4 4"/, "bitmap viewport must be 4x4");
 	assert.match(svg, /width="693" height="520"/, "bitmap height 520 matches classic wordmark; width is 4:3");
-	assert.match(svg, /translate\(166, 170\)/, "bitmap centered horizontally, baseline aligned with classic wordmark");
+	assert.match(svg, /translate\(166, 252\)/, "bitmap centered horizontally and vertically in the icon container");
 	assert.ok(!svg.includes("data:image/png"), "must not embed raster data");
 });
 

@@ -8,6 +8,7 @@ import { LIST_WIDTH_MIN, LIST_WIDTH_MAX } from "../../hooks/useResize";
 import { DRAWER_WIDTH_MIN, DRAWER_WIDTH_MIN_PINNED, DRAWER_WIDTH_MAX, type WorkspaceDrawerPanel } from "../../hooks/useWorkspacePanels";
 import { cn } from "../../lib/utils";
 import { desktopApi } from "../../desktopApi";
+import { MiniOverlayProjectPicker } from "../mini-overlay/MiniOverlayProjectPicker";
 import { shouldCommitPanelPixels } from "../../lib/shellPanelLayout";
 
 /**
@@ -358,6 +359,25 @@ export function AppShell(props: AppShellProps) {
 			<div className={["wechat-shell quick-task-shell bg-bg-app [[data-bg-image=on]_&]:bg-transparent", useNativeTitleBar ? "" : "custom-titlebar-enabled", !useNativeTitleBar && platform === "darwin" ? "mac-custom-titlebar" : ""].filter(Boolean).join(" ")}>
 				{isMiniOverlayMode ? (
 					<div className="mini-overlay-chrome">
+						{/* 项目切换：浮窗模式下没有侧边栏，用 Select 替代 */}
+						<MiniOverlayProjectPicker
+							onSelectProject={(projectId) => {
+								// 选项目后跳到该项目的最近会话（没有则新建草稿）
+								void (async () => {
+									const sessions = await desktopApi.sessions.listCatalog(projectId);
+									if (sessions.length > 0) {
+										// 激活最近会话：发事件让 App.tsx 的 selectSessionCommand 处理
+										window.dispatchEvent(new CustomEvent("mini-overlay:select-session", { detail: { projectId, sessionId: sessions[0].id } }));
+									} else {
+										const projects = await desktopApi.projects.list();
+										const project = projects.find((p) => p.id === projectId);
+										if (!project) return;
+										const session = await desktopApi.sessions.createDraft({ projectId, title: `${project.name} agent`, backend: "pi" });
+										window.dispatchEvent(new CustomEvent("mini-overlay:select-session", { detail: { projectId, sessionId: session.id } }));
+									}
+								})();
+							}}
+						/>
 						<button type="button" onClick={() => void desktopApi.miniOverlay.collapse()} aria-label="收起为悬浮球" title="收起为悬浮球">
 							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
 								<path d="m6 9 6 6 6-6" />

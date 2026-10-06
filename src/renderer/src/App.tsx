@@ -1115,6 +1115,19 @@ export function App() {
 
 	const quickTask = useQuickTask({ ready: settingsLoaded, backend: effectiveAgentBackend, upsertSession, selectSession: selectSessionCommand, registerSession: workspaceChrome.registerOpenSession, refreshProjects, getSessionRecord });
 
+	// 浮窗模式：监听 mini-overlay:select-session 事件（项目切换后发到这里激活会话）
+	useEffect(() => {
+		const handler = (e: Event) => {
+			const detail = (e as CustomEvent).detail;
+			if (detail?.projectId && detail?.sessionId) {
+				selectSessionCommand(detail.projectId, detail.sessionId, false);
+				workspaceChrome.registerOpenSession(detail.sessionId, "permanent");
+			}
+		};
+		window.addEventListener("mini-overlay:select-session", handler);
+		return () => window.removeEventListener("mini-overlay:select-session", handler);
+	}, [selectSessionCommand, workspaceChrome]);
+
 	// 关闭 Tab / 分屏退栏时的焦点切换：只改 currentSession，不碰 Tab 登记
 	useEffect(() => {
 		workspaceChrome.bindFocusHandlers({
