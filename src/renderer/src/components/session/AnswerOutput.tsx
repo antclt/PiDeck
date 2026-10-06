@@ -2,7 +2,9 @@ import { memo } from "react";
 import { useAtomValue } from "jotai";
 import { streamingTextBySessionIdAtomFamily } from "../../atoms/session-atoms";
 import { MarkdownStream } from "./MarkdownStream";
+import { RawToolCallFallback } from "./RawToolCallFallback";
 import { cleanAnswerText } from "./timeline/answerText.ts";
+import { detectLeakedToolCallXml } from "./timeline/leakedToolCallText.ts";
 
 /**
  * 中间回答视觉档位。
@@ -59,9 +61,10 @@ export const AnswerOutput = memo(function AnswerOutput(props: {
 	}
 	const cleanText = cleanAnswerText(props.text ?? "");
 	if (!cleanText) return null;
+	// 兜底（issue #315）：服务端漏出的工具调用协议原文不走 markdown，折叠展示。
 	return (
 		<div className={answerOutputClassName(props.variant ?? "process")} data-message-id={props.messageId} data-is-streaming="0" data-variant={props.variant ?? "process"} data-settle={props.settle ? "1" : undefined} style={{ display: props.hidden ? "none" : undefined }}>
-			<MarkdownStream text={cleanText} isStreaming={false} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />
+			{detectLeakedToolCallXml(cleanText) ? <RawToolCallFallback text={cleanText} messageId={props.messageId} /> : <MarkdownStream text={cleanText} isStreaming={false} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />}
 		</div>
 	);
 });
@@ -76,7 +79,8 @@ const LiveAnswerBody = memo(function LiveAnswerBody(props: { sessionId: string; 
 	const text = cleanAnswerText(sourceText);
 	return (
 		<div className={answerOutputClassName("answer")} data-live-answer="true" data-is-streaming={props.isStreaming ? "1" : "0"} data-variant="answer" style={{ display: props.hidden ? "none" : undefined }}>
-			<MarkdownStream text={text} isStreaming={Boolean(props.isStreaming)} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />
+			{/* 兜底判定要求闭标记已到（见 detectLeakedToolCallXml）：流式半截 XML 仍走 markdown，落定后切换。 */}
+			{detectLeakedToolCallXml(text) ? <RawToolCallFallback text={text} /> : <MarkdownStream text={text} isStreaming={Boolean(props.isStreaming)} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />}
 		</div>
 	);
 });
