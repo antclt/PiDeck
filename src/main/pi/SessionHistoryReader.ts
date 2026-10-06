@@ -29,6 +29,37 @@ function readString(record: Record<string, unknown> | undefined, key: string): s
 	return typeof value === "string" ? value : undefined;
 }
 
+/** 内部记账类 customType 前缀：这些 type:"custom" 条目是 PiDeck / pi-subagents 的运行审计（子代理 record、
+ * start 锚点、todo 快照等），不是面向用户的扩展输出，不投影成时间线卡片（否则高频快照会刷屏）。
+ * 其余 customType 一律视为扩展输出（pi 的 appendEntry 在 RPC 模式下没有 registerEntryRenderer，
+ * 时间线卡片是它们唯一能到达用户的通道，见 issue #285）。 */
+const INTERNAL_CUSTOM_TYPE_PREFIXES: readonly string[] = ["subagents:", "pi-deck-"];
+
+/** 扩展输出卡片的 data 载荷上限（序列化后字符数）：超出则不携带原始数据、只带标题，避免大体量快照进渲染层。 */
+const CUSTOM_ENTRY_DATA_MAX_JSON_LENGTH = 16 * 1024;
+
+/** customType 是否为需要投影成时间线卡片的扩展输出（非内部记账）。 */
+export function isDisplayableCustomEntryType(customType: string | undefined): boolean {
+	if (!customType) return false;
+	return !INTERNAL_CUSTOM_TYPE_PREFIXES.some((prefix) => customType.startsWith(prefix));
+}
+
+/** 扩展输出卡片的折叠行预览：优先取 data 里首个非空字符串字段（如 pi-plan-btw 的 query），否则退化成截断 JSON。 */
+export function customEntryHeadline(data: unknown): string {
+	if (typeof data === "string") return data.slice(0, 120);
+	if (isRecord(data)) {
+		for (const value of Object.values(data)) {
+			if (typeof value === "string" && value.trim()) return value.slice(0, 120);
+		}
+	}
+	try {
+		const serialized = JSON.stringify(data) ?? "";
+		return serialized.slice(0, 120);
+	} catch {
+		return "";
+	}
+}
+
 type SessionDisplayEntry = {
 	id: string;
 	parentId: string | null;
@@ -867,7 +898,7 @@ export class SessionHistoryReader {
 	}
 
 	/**
-	 * 把范围内的 custom_message 条目构造成时间线卡片（含插入偏移）。
+	 * 把范围内的 custom_message / custom 条目构造成时间线卡片（含插入偏移）。
 	 *
 	 * 为什么要在读侧合成：PiDeck 不写 pi 的会话文件（会话读写归 pi），而 pi 用
 	 * custom_message 承载「扩展对用户的通知」——子代理后台任务完成时正是用这条消息
@@ -877,6 +908,12 @@ export class SessionHistoryReader {
 	 * 这里把它投影成 role="system" + meta.type="customMessage" 的消息，渲染层按
 	 * customType 白名单决定是否画成通知卡（display:false 的内部上下文注入不画，
 	 * 但仍参与回合边界判定）。
+	 *
+	 * type:"custom"（pi 的 appendEntry）在同一次扫描里投影成 meta.type="customEntry"
+	 * 的扩展输出卡：RPC 模式下 pi 的 registerEntryRenderer 不工作，时间线卡片是扩展
+	 * 输出唯一能到达用户的通道（issue #285，pi-plan 的 /btw 等）。内部记账类
+	 * customType（subagents: / pi-deck- 前缀）不投影，高频快照不刷屏；custom 条目
+	 * 不是回合边界，只做可见性补齐。
 	 *
 	 * 偏移语义：offset = 该通知之前有多少条消息条目（即「下一条消息之前」），
 	 * 与压缩卡片的 insertAt 同一（activeMessageEntries 绝对下标）空间。
@@ -896,9 +933,16 @@ export class SessionHistoryReader {
 				messageCount += 1;
 				continue;
 			}
-			if (entry.type !== "custom_message") continue;
-			if (!inRange(messageCount)) continue;
-			placements.push({ entry, offset: messageCount });
+			if (entry.type === "custom_message") {
+				if (!inRange(messageCount)) continue;
+				placements.push({ entry, offset: messageCount });
+				continue;
+			}
+			// 扩展输出（appendEntry）：内部记账类与超长降级条目不投影（见 isDisplayableCustomEntryType）
+			if (entry.type === "custom" && !entry.oversized && isDisplayableCustomEntryType(entry.customType)) {
+				if (!inRange(messageCount)) continue;
+				placements.push({ entry, offset: messageCount });
+			}
 		}
 		if (placements.length === 0) return [];
 
@@ -910,11 +954,39 @@ export class SessionHistoryReader {
 		for (let i = 0; i < placements.length; i++) {
 			const parsed = rawLines[i];
 			if (!isRecord(parsed)) continue;
+			const timestamp = typeof parsed.timestamp === "string" ? Date.parse(parsed.timestamp) : Number.NaN;
+			if (placements[i].entry.type === "custom") {
+				// 扩展输出卡：text 只服务折叠行预览，展开内容由 meta.data 驱动（渲染层格式化）
+				const data = parsed.data;
+				let serializedData = "";
+				try {
+					serializedData = data === undefined ? "" : (JSON.stringify(data) ?? "");
+				} catch {
+					serializedData = "";
+				}
+				const withinBudget = serializedData.length <= CUSTOM_ENTRY_DATA_MAX_JSON_LENGTH;
+				cards.push({
+					offset: placements[i].offset,
+					card: {
+						id: `${agentId}-customentry-${placements[i].entry.id}`,
+						agentId,
+						role: "system",
+						text: customEntryHeadline(data),
+						timestamp: Number.isFinite(timestamp) ? timestamp : Date.now(),
+						meta: {
+							type: "customEntry",
+							customType: placements[i].entry.customType,
+							...(withinBudget ? { data } : { dataTruncated: true }),
+							entryId: placements[i].entry.id,
+						},
+					},
+				});
+				continue;
+			}
 			const content = typeof parsed.content === "string" ? parsed.content : "";
 			// 空正文没有可展示信息：不占位（仍不影响回合边界——边界由 stopReason 兜底）
 			if (!content.trim()) continue;
 			const customType = readString(parsed, "customType") ?? placements[i].entry.customType;
-			const timestamp = typeof parsed.timestamp === "string" ? Date.parse(parsed.timestamp) : Number.NaN;
 			cards.push({
 				offset: placements[i].offset,
 				card: {

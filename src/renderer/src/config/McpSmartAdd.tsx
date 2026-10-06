@@ -62,7 +62,7 @@ export function McpSmartAdd(props: { existingNames: ReadonlySet<string>; disable
 			<div>
 				<div className="text-control font-medium">{t("config.mcp.smartAdd.title")}</div>
 				<p className="mt-0.5 text-micro text-muted-foreground">{t("config.mcp.smartAdd.hint")}</p>
-			<p className="text-micro text-muted-foreground">{t("config.mcp.smartAdd.authHint")}</p>
+				<p className="text-micro text-muted-foreground">{t("config.mcp.smartAdd.authHint")}</p>
 			</div>
 			<Input
 				value={raw}

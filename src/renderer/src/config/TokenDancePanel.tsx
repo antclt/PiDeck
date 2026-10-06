@@ -11,10 +11,12 @@
  * - 侵入性最低：只在配置页显示；不启动弹通知，用户不打开配置页则完全无感知。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronUp, ExternalLink, KeyRound, Loader2, PlugZap, ShieldCheck, Sparkles } from "lucide-react";
+import { ChevronDown, ChevronUp, ExternalLink, KeyRound, Loader2, PlugZap, ShieldCheck, Sparkles, Wallet } from "lucide-react";
 import { t } from "../i18n";
 import { desktopApi } from "../desktopApi";
 import { showNotice } from "../utils/notice";
+import { useProviderUsageRefresh } from "../hooks/useProviderUsage";
+import { TokenDanceTopUpDialog } from "./TokenDanceTopUpDialog";
 import { Button } from "../components/ui-shadcn/button";
 import { Input } from "../components/ui-shadcn/input";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/ui-shadcn/dialog";
@@ -324,7 +326,11 @@ export function TokenDancePanel(props: TokenDancePanelProps) {
 		error: null,
 	});
 	const [setupOpen, setSetupOpen] = useState(false);
+	const [topUpOpen, setTopUpOpen] = useState(false);
 	const [installing, setInstalling] = useState(false);
+	// 到账后刷新余额缓存：会话上下文面板与用量弹窗订阅同一 atom，一处刷新多处联动。
+	const refreshUsage = useProviderUsageRefresh();
+	const handlePaid = useCallback(() => refreshUsage(TOKENDANCE_PROVIDER), [refreshUsage]);
 
 	// 目录只读展示（模型数/时效）；失败不阻塞「配置」——写入时主进程会再取目录并报错。
 	const loadCatalog = useCallback(async (): Promise<ModelItem[]> => {
@@ -399,7 +405,7 @@ export function TokenDancePanel(props: TokenDancePanelProps) {
 			{expanded && (
 				<>
 					{/* 平台优势（聚合 + 特价 + 新用户体验额度）；详情给官网链接，由用户自行核对 */}
-					<ul className="mt-2 grid gap-1 text-xs text-text-secondary">
+					<ul className="mt-2 grid gap-1 text-xs text-text-secondary motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
 						<li className="flex items-start gap-1.5">
 							<span className="mt-0.5 shrink-0 text-[var(--color-accent)]">●</span>
 							{t("config.tokendance.advantageOne")}
@@ -449,10 +455,17 @@ export function TokenDancePanel(props: TokenDancePanelProps) {
 					{props.configured ? t("config.tokendance.alreadyConfigured") : t("config.tokendance.addToConfig")}
 				</Button>
 				{props.configured && (
-					<Button size="sm" variant="outline" onClick={() => setSetupOpen(true)}>
-						<KeyRound className="size-3.5" aria-hidden="true" />
-						{t("config.tokendance.oauthButton")}
-					</Button>
+					<>
+						<Button size="sm" variant="outline" onClick={() => setSetupOpen(true)}>
+							<KeyRound className="size-3.5" aria-hidden="true" />
+							{t("config.tokendance.oauthButton")}
+						</Button>
+						{/* 充值入口：只在已配置（已有 API Key）时出现——未配置时无 Key，无法发起充值 */}
+						<Button size="sm" variant="outline" onClick={() => setTopUpOpen(true)}>
+							<Wallet className="size-3.5" aria-hidden="true" />
+							{t("config.tokendance.topUpButton")}
+						</Button>
+					</>
 				)}
 				<Button size="sm" variant="ghost" onClick={openSite}>
 					<ExternalLink className="size-3.5" aria-hidden="true" />
@@ -462,6 +475,8 @@ export function TokenDancePanel(props: TokenDancePanelProps) {
 
 			{/* 单一操作弹窗：授权 + 交换 Key + 写入配置一次完成 */}
 			<TokenDanceSetupDialog open={setupOpen} onOpenChange={setSetupOpen} configured={props.configured} modelCount={catalog.models.length} onDone={props.onInstalled} />
+			{/* 充值弹窗：创建支付会话（主进程）→ 扫码 → 轮询到账 */}
+			<TokenDanceTopUpDialog open={topUpOpen} onOpenChange={setTopUpOpen} onPaid={handlePaid} />
 		</section>
 	);
 }

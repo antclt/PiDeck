@@ -14,7 +14,7 @@ import type { ExtensionManager } from "../extensions/ExtensionManager";
 import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
 import type { ConfigManager } from "../config/ConfigManager";
 import { getPiPackageCatalog } from "../extensions/piPackageCatalog";
-import { isDefaultDisabledBuiltInExtension } from "../extensions/builtInExtensions";
+import { isBuiltInExtensionName, isDefaultDisabledBuiltInExtension } from "../extensions/builtInExtensions";
 
 export type StoreIpcDeps = {
 	promptManager: PromptManager;
@@ -590,7 +590,9 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 	});
 	ipcMain.handle(ipcChannels.extensionsToggle, async (_event, source: string, enabled: boolean, scope?: "user" | "project" | "unknown", path?: unknown, projectId?: unknown) => {
 		// 内置扩展走 removedBuiltInExtensions + RPC -e，不再写用户扩展目录 / pi 过滤规则。
-		if (source.startsWith("pi-deck-") && source.endsWith(".ts")) {
+		// 白名单判定：pi-deck-* 前缀不足以证明内置身份（插件开发 demo 同前缀，
+		// 是普通本地扩展，必须走原生过滤规则分支）。
+		if (isBuiltInExtensionName(source)) {
 			if (isDefaultDisabledBuiltInExtension(source)) {
 				// 默认关闭的内置扩展（GUI 桥/扩展点面板）：开关写 enabledBuiltInExtensions（opt-in）。
 				// 注意不碰 removedBuiltInExtensions——那是「默认启用扩展的用户禁用」机制，语义互斥。

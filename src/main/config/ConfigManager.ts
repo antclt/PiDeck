@@ -883,6 +883,14 @@ export class ConfigManager {
 	}
 
 	/**
+	 * 解析 provider 端点，供主进程内其它链路复用（TokenDance 充值取 baseUrl/apiKey）。
+	 * 只在本进程内使用，API Key 不回传渲染层；未命中返回 matched=false。
+	 */
+	async resolveProviderEndpoint(provider: string, backend: UsageProbeBackend = "pi") {
+		return this.resolveUsageEndpoint(provider, backend);
+	}
+
+	/**
 	 * 查询 provider 用量/余额（学 cc-switch 的三层模型，全部按 provider 名路由）：
 	 * 1. 门控：providers[name].enabled === false → 不查（返回「未启用」结构化结果，
 	 *    UI 据此显示小按钮引导配置）；

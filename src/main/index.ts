@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, ne
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, release as osRelease } from "node:os";
 import { createWriteStream, existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { is } from "@electron-toolkit/utils";
@@ -51,7 +51,7 @@ import type { DataEnvMode } from "../shared/types/dataEnv";
 // 使用 ?asset 后缀导入图标，electron-vite 会在构建时将其复制到输出目录并提供正确的运行时路径
 // 这解决了打包后 build/ 目录不在 asar 中导致托盘图标丢失的问题
 import iconPath from "../../build/icon.png?asset";
-import { applyWindowLogoStyle } from "./appWindowLogo";
+import { applyTrayLogoStyle, applyWindowLogoStyle, resolveLogoImage } from "./appWindowLogo";
 
 // 构建标记：npm run dist:*:dev 打包时由 vite define 注入 true（构建期替换，非运行时环境变量）。
 declare const __PIDECK_DEV_BUILD__: boolean;
@@ -276,6 +276,7 @@ import { SessionCatalog, canAttachRuntimeMetadata } from "./sessions/SessionCata
 import { aggregateDshProxyMode, buildHostProxyEnvPatch, resolveDshHostProxyMode, resolveEffectiveSessionProxyMode } from "./sessions/sessionProxyPolicy";
 import { SessionRuntimeCoordinator, type SessionRuntimeBinding } from "./sessions/SessionRuntimeCoordinator";
 import { IdleAgentReleaser } from "./sessions/IdleAgentReleaser";
+import { StaleDraftReaper } from "./sessions/StaleDraftReaper";
 import { SessionCommandIpcError } from "./sessions/SessionCommandIpcError";
 import { appendSessionForkSuffix } from "./sessions/sessionForkTitle";
 import { CodexSessionImporter } from "./sessions/CodexSessionImporter";
@@ -285,6 +286,9 @@ import { OpenCodeSessionImporter } from "./sessions/OpenCodeSessionImporter";
 import { ZCodeSessionImporter } from "./sessions/ZCodeSessionImporter";
 import { WorkBuddySessionImporter } from "./sessions/WorkBuddySessionImporter";
 import { CursorSessionImporter } from "./sessions/CursorSessionImporter";
+import { KimiSessionImporter } from "./sessions/KimiSessionImporter";
+import { KimiWorkSessionImporter } from "./sessions/KimiWorkSessionImporter";
+import { MinimaxSessionImporter } from "./sessions/MinimaxSessionImporter";
 import { DirectorySessionImporter } from "./sessions/DirectorySessionImporter";
 import { normalizeSessionPathKey } from "./sessions/directorySessionImport";
 import { SettingsStore } from "./settings/SettingsStore";
@@ -298,9 +302,14 @@ import { ConfigBackupManager } from "./config/ConfigBackupManager";
 import { TokendanceCatalogStore } from "./config/tokendanceCatalog";
 import { installTokendanceProvider } from "./config/tokendanceInstaller";
 import { TokendanceAuthStore } from "./config/tokendanceAuth";
+import { TokendancePaymentStore } from "./config/tokendancePayment";
+import { usageProbeRequest } from "./config/usageProbeTransport";
+import { TOKENDANCE_PROVIDER } from "../shared/tokendance";
 import { TerminalSessionManager } from "./terminal/TerminalSessionManager";
 import { startTrayRegistrationVerify, type TrayRegistrationVerify } from "./tray/trayRegistrationVerify";
+import { buildTrayMenuTemplate, TRAY_RECENT_PROJECTS_LIMIT } from "./tray/trayMenuTemplate";
 import { TelemetryService } from "./telemetry/TelemetryService";
+import { collectTelemetrySnapshot } from "./telemetry/telemetrySnapshot";
 import { PromptManager } from "./prompts/PromptManager";
 import { XuePromptManager } from "./prompts/XuePromptManager";
 import { SkillManager } from "./skills/SkillManager";
@@ -365,6 +374,9 @@ import { registerClipboardIpc } from "./ipc/clipboardIpc";
 import { registerShellMenuIpc } from "./ipc/shellMenuIpc";
 import { QuickTaskWindowChrome } from "./quickTask/quickTaskWindowChrome";
 import { registerQuickTaskIpc } from "./ipc/quickTaskIpc";
+import { registerFloatingIpc } from "./ipc/floatingIpc";
+import { FloatingController } from "./floating/FloatingController";
+import { MiniOverlayWindow } from "./floating/MiniOverlayWindow";
 import { BROWSER_PANEL_PARTITION as BROWSER_PANEL_PARTITION_SHARED, isAllowedBrowserPanelUrl as isAllowedBrowserPanelUrlShared } from "./browser/browserSecurity";
 import { WebServiceManager } from "./web/WebServiceManager";
 import { WebWorkspaceRoutes } from "./web/WebWorkspaceRoutes";
@@ -399,6 +411,8 @@ const quickTaskChrome = new QuickTaskWindowChrome({
 	getWindow: () => mainWindow,
 	saveWorkbenchBounds: (bounds) => saveLastWindowBounds(app.getPath("userData"), bounds),
 });
+let floatingController: FloatingController | null = null;
+let miniOverlayWindow: MiniOverlayWindow | null = null;
 let tray: Tray | null = null;
 /** Linux 托盘注册验收器（见 tray/trayRegistrationVerify.ts），退出清理里与 tray 一起停 */
 let trayRegistrationVerify: TrayRegistrationVerify | null = null;
@@ -414,6 +428,7 @@ let sessionCatalog: SessionCatalog;
 let sessionRuntimeCoordinator: SessionRuntimeCoordinator;
 /** 闲置 agent 自动释放器（内存优化）：whenReady 阶段装配，quit 时 stop */
 let idleAgentReleaser: IdleAgentReleaser | null = null;
+let staleDraftReaper: StaleDraftReaper | null = null;
 let codexSessionImporter: CodexSessionImporter;
 let claudeSessionImporter: ClaudeSessionImporter;
 let qoderSessionImporter: QoderSessionImporter;
@@ -421,6 +436,11 @@ let openCodeSessionImporter: OpenCodeSessionImporter;
 let zcodeSessionImporter: ZCodeSessionImporter;
 let workbuddySessionImporter: WorkBuddySessionImporter;
 let cursorSessionImporter: CursorSessionImporter;
+let kimiSessionImporter: KimiSessionImporter;
+/** Kimi Work（桌面版）会话导入；daimon-share 位置不固定，内部走探测链。 */
+let kimiWorkSessionImporter: KimiWorkSessionImporter;
+/** MinimaxCode（CLI）会话导入；数据目录固定 ~/.minimax，无探测链。 */
+let minimaxSessionImporter: MinimaxSessionImporter;
 /** 外置目录会话导入（项目目录移动/改名后找回历史）；只建 catalog 引用，不复制文件。 */
 let directorySessionImporter: DirectorySessionImporter;
 let settingsStore: SettingsStore;
@@ -583,6 +603,8 @@ function broadcastVisibleProjects(): void {
 	// 这里只广播 store 清单；渲染层接到事件后会再调用 projects:list 附加实时 presence。
 	// 直接把未检测版本写进 atom 会短暂抹掉 missing 标记，使失效目录看起来又恢复正常。
 	window.webContents.send(ipcChannels.projectsChanged, visible);
+	// 项目集变化同步重建托盘菜单（最近项目区），否则增删项目后菜单滞后。
+	refreshTrayContextMenu();
 }
 
 /**
@@ -646,7 +668,11 @@ function emitSessionRuntimeEvent(agentId: string, sourceChannel: string, payload
 		const tab = payload as Partial<AgentTab>;
 		if (typeof tab.sessionPath === "string" && tab.sessionPath) {
 			const entry = sessionCatalog.get(runtimeBinding.sessionId);
-			if (canAttachRuntimeMetadata(entry, tab) && (entry?.filePath !== tab.sessionPath || entry.piSessionId !== tab.sessionId)) {
+			// #314：pi 上报的路径与 catalog 持久化路径可能只是形态差异（分隔符/大小写、
+			// resolveFilePath 归一先后不同）。裸字符串比较永真时每个 runtime 事件都会
+			// 触发一次 attach；canonical 归一后再比，无实质变化不再入队。
+			const sessionPathUnchanged = entry?.filePath !== undefined && canonicalizeSessionPath(entry.filePath, entry.environment) === canonicalizeSessionPath(tab.sessionPath, entry.environment);
+			if (canAttachRuntimeMetadata(entry, tab) && (!sessionPathUnchanged || entry.piSessionId !== tab.sessionId)) {
 				// 仅 pi JSONL 走文件配对。DSH 的 sessionPath 是 zstd，canAttach 已拒绝；
 				// host id 由 Coordinator activate/dispatch 回写 dshSessionId。
 				void sessionCatalog
@@ -1225,33 +1251,78 @@ function restartApp(): void {
 
 function refreshTrayContextMenu(): void {
 	if (!tray) return;
+	// 项目取非聊天项目前 N（ProjectStore.list 已按置顶/最近打开排序）；菜单在项目集变化时重建（broadcastVisibleProjects / projectsIpc 回调）。
+	const recentProjects = projectStore
+		.list()
+		.filter((p) => p.kind !== "chat")
+		.slice(0, TRAY_RECENT_PROJECTS_LIMIT)
+		.map((p) => ({ id: p.id, name: p.name, path: p.path }));
 	tray.setContextMenu(
-		Menu.buildFromTemplate([
-			{
-				label: mainCopy("tray.showWindow"),
-				click: () => {
-					if (mainWindow && !mainWindow.isDestroyed()) {
-						mainWindow.show();
-						mainWindow.focus();
-					}
+		Menu.buildFromTemplate(
+			buildTrayMenuTemplate(mainCopy, app.getVersion(), recentProjects, {
+				showWindow: focusMainWindow,
+				checkUpdate: checkForUpdatesFromTray,
+				openProject: (projectId) => {
+					// 与桌宠/通知同一条跳转链路：窗口置前 + renderer 按 projectId 切项目
+					queueFocusTarget({ projectId });
+					focusMainWindow();
 				},
-			},
-			{ type: "separator" },
-			{
-				// 托盘重启与系统设置 IPC 的 appRestart 保持同一套清理语义
-				label: mainCopy("tray.restart"),
-				click: restartApp,
-			},
-			{ type: "separator" },
-			{
-				label: mainCopy("tray.quit"),
-				click: () => {
+				openDataDir: () => {
+					void shell.openPath(app.getPath("userData"));
+				},
+				openLogsDir: () => {
+					void shell.openPath(join(app.getPath("userData"), "logs"));
+				},
+				restart: restartApp,
+				quit: () => {
 					isQuitting = true;
 					app.quit();
 				},
-			},
-		]),
+				toggleFloatingBall: (visible) => {
+					if (visible) {
+						void floatingController?.show();
+					} else {
+						floatingController?.hide();
+					}
+				},
+				exitFloatingBall: () => {
+					void floatingController?.exit();
+				},
+				isFloatingBallActive: () => floatingController?.isActive() ?? false,
+			}),
+		),
 	);
+}
+
+/**
+ * 托盘「检查更新」：走 UpdateService.checkNow（与渲染层手动检测同一链路，结果状态也同步给窗口 UI），
+ * 完成后用系统通知告知结果；点击通知聚焦主窗口（渲染层已有更新横幅/下载入口）。
+ */
+function checkForUpdatesFromTray(): void {
+	void (async () => {
+		try {
+			if (updateService) {
+				await updateService.checkNow();
+				const snapshot = updateService.getSnapshot();
+				const latest = snapshot.app?.latestVersion;
+				if (snapshot.app?.hasUpdate && latest) {
+					notifyFromTray(mainCopy("tray.updateAvailableTitle"), mainCopy("tray.updateAvailableBody", { version: latest }));
+					return;
+				}
+			}
+			notifyFromTray(mainCopy("tray.upToDateTitle"), mainCopy("tray.upToDateBody", { version: app.getVersion() }));
+		} catch (error) {
+			void appLogger?.warn("update", "Tray update check failed", { error: error instanceof Error ? error.message : String(error) });
+			notifyFromTray(mainCopy("update.checkFailed"), "");
+		}
+	})();
+}
+
+/** 托盘通知：点击即聚焦主窗口（更新/最新两种结果都引导回窗口）。 */
+function notifyFromTray(title: string, body: string): void {
+	const notification = new Notification({ title, body, silent: false });
+	notification.on("click", () => focusMainWindow());
+	notification.show();
 }
 
 /** 从托盘/任务栏/二次启动唤起主窗口：处理最小化、隐藏到托盘两种状态。 */
@@ -1263,6 +1334,8 @@ function focusMainWindow() {
 	}
 	mainWindow.show();
 	mainWindow.focus();
+	// 主窗口回来时关闭极简浮窗（避免两个窗口并存）
+	miniOverlayWindow?.hide();
 	if (process.platform === "win32") {
 		// Windows 前置窗口用「临时置顶再取消」hack 抢前台（直接 focus 可能被前台锁拦截）。
 		// 必须原样还原用户置顶状态，否则会把用户手动置顶的窗口取消置顶；
@@ -1361,8 +1434,10 @@ function handleVersionFocusRequest(payload?: FocusPayload) {
 focusExistingWindow = handleVersionFocusRequest;
 
 function setupTray() {
-	// iconPath 由 electron-vite 的 ?asset 后缀自动解析，打包后也能正确定位
-	const icon = nativeImage.createFromPath(iconPath);
+	// 托盘图标跟随设置里的「Logo 风格」；resolveLogoImage 按风格选 build/icon.png 或 icon-pi-tui.png
+	// （均由 electron-vite 的 ?asset 后缀解析，打包后也能正确定位）。
+	// 资源缺失时降级回 classic iconPath：托盘必须建得出来——closeToTray 开启时它是唯一的唤回入口。
+	const icon = resolveLogoImage(settingsStore.get().logoStyle)?.image ?? nativeImage.createFromPath(iconPath);
 
 	/** 创建托盘实例；首次创建与自愈重建共用同一条路径，避免两处行为漂移。 */
 	const createTrayInstance = (): Tray => {
@@ -1380,10 +1455,13 @@ function setupTray() {
 
 	tray = createTrayInstance();
 	refreshTrayContextMenu();
+	// 项目集变化（增删/重命名/最近打开排序）经 ProjectStore.onChanged 统一派发，重建托盘「最近项目」区。
+	const stopTrayProjectListener = projectStore.onChanged(() => refreshTrayContextMenu());
 
 	// C12：退出清理登记（before-quit 统一 runAll）——验收器必须一起停，
 	// 否则退出阶段还会把已销毁的 tray 再重建一次。
 	quitCleanup.register("tray", () => {
+		stopTrayProjectListener();
 		trayRegistrationVerify?.stop();
 		trayRegistrationVerify = null;
 		tray?.destroy();
@@ -1827,7 +1905,12 @@ async function createWindow() {
 	// 关闭窗口时根据设置决定：隐藏到托盘还是正常退出
 	mainWindow.on("close", (event) => {
 		if (!isQuitting && quickTaskChrome.interceptClose(event)) return;
-		if (!isQuitting && settingsStore.get().closeToTray) {
+		if (!isQuitting && settingsStore.get().floatingBallEnabled) {
+			// 悬浮球开启时，关闭主窗口 = 隐藏到悬浮球（不退出）
+			event.preventDefault();
+			mainWindow?.hide();
+			void floatingController?.show();
+		} else if (!isQuitting && settingsStore.get().closeToTray) {
 			event.preventDefault();
 			mainWindow?.hide();
 		} else if (!isQuitting) {
@@ -2551,6 +2634,9 @@ function registerIpc() {
 		zcodeSessionImporter,
 		workbuddySessionImporter,
 		cursorSessionImporter,
+		kimiSessionImporter,
+		kimiWorkSessionImporter,
+		minimaxSessionImporter,
 		directorySessionImporter,
 		appLogger,
 		terminalManager,
@@ -2957,6 +3043,12 @@ function registerIpc() {
 		tokendanceCatalog: tokendanceCatalogStore,
 		// 内置 TokenDance OAuth 授权（PKCE S256 headless；verifier 内存持有，重启失效）
 		tokendanceAuth: new TokendanceAuthStore(),
+		// 内置 TokenDance 充值：与模型调用同一个 API Key（从 models.json 解析，只在本进程使用），
+		// 创建/查询都走既有用量探针传输层（Electron net，服从系统代理与超时/字节上界）。
+		tokendancePayment: new TokendancePaymentStore({
+			resolveEndpoint: () => configManager.resolveProviderEndpoint(TOKENDANCE_PROVIDER),
+			request: usageProbeRequest,
+		}),
 		// 一键安装：pi models.json + DSH llm-pi-ai 双落盘（复用迁移服务的写盘策略：
 		// host 就绪走官方 settings API，否则直写 settings.yaml/.credentials.yaml）
 		tokendanceInstall: (apiKey) =>
@@ -2975,6 +3067,8 @@ function registerIpc() {
 		listDshMonitorSessions: () => dshAgentManager.list().map((tab) => ({ title: tab.title })),
 		stopDshHostFromMonitor,
 		getMainWindow: () => mainWindow,
+		// Logo 风格切换要同时刷托盘；Tray 实例归本文件持有，按 getter 注入避免 systemIpc 直接引用。
+		getTray: () => tray,
 		mainCopy: mainCopy as (key: string, params?: Record<string, string | number>) => string,
 		// 适配层：checkForAppUpdate 直接触发 UpdateService 检查（结果经快照推送）；
 		// download/install 同样转发给 UpdateService（electron-updater 驱动）。
@@ -3123,7 +3217,7 @@ function registerIpc() {
 		menuTitle: mainCopy("shellMenu.openWithPiDeck"),
 		quickTaskTitle: mainCopy("shellMenu.quickTask"),
 	});
-	registerQuickTaskIpc(quickTaskChrome.controller);
+	// registerQuickTaskIpc 移至 floating/mini-overlay 装配处（依赖 expandMiniOverlay 做模式互切）。
 }
 
 function sendTelemetryHeartbeat() {
@@ -3139,6 +3233,20 @@ function sendTelemetryHeartbeat() {
 			arch: process.arch,
 			packaged: app.isPackaged,
 		},
+		// 匿名快照：功能开关状态与规模计数，不碰路径/项目名/内容/凭据（口径见设置页遥测文案）
+		snapshot: () =>
+			collectTelemetrySnapshot({
+				settings: settingsStore.get(),
+				sessionsTotal: sessionCatalog.listEntries().length,
+				projectsTotal: projectStore.list().length,
+				agentsActive: agentManager.list().length,
+				feishuBotsTotal: listBots().length,
+				automationTasksTotal: automationStore?.listTasks().length ?? 0,
+				systemLocale: app.getLocale(),
+				portable: Boolean(process.env.PORTABLE_EXECUTABLE_DIR),
+				uptimeMs: process.uptime() * 1000,
+				osRelease: osRelease(),
+			}),
 		capture: async (request) => {
 			const response = await net.fetch(request.url, {
 				method: "POST",
@@ -3190,6 +3298,9 @@ app
 		zcodeSessionImporter = new ZCodeSessionImporter(mainCopy);
 		workbuddySessionImporter = new WorkBuddySessionImporter(mainCopy);
 		cursorSessionImporter = new CursorSessionImporter(mainCopy);
+		kimiSessionImporter = new KimiSessionImporter(mainCopy);
+		kimiWorkSessionImporter = new KimiWorkSessionImporter(mainCopy);
+		minimaxSessionImporter = new MinimaxSessionImporter(mainCopy);
 		// 外置目录会话导入：不复制会话文件，只把选定目录里的会话挂到当前项目（catalog 归属改写）。
 		// 候选来自 SessionScanner 的全量清单（list() 不带项目参数）——项目目录改名后，
 		// 那批会话仍然躺在 sessions 树里，只是项目过滤把它们排除了。
@@ -3625,6 +3736,102 @@ app
 		);
 		// C12：退出清理登记（before-quit 统一 runAll，新增资源不再改 before-quit）
 		quitCleanup.register("pi-agents", () => agentManager?.stopAll());
+
+		// 悬浮球控制器：主窗口隐藏后常驻屏幕角落的小圆点，点击展开 mini 浮窗/紧凑模式。
+		// 延迟到 agentManager 就绪后创建，因为依赖 addStateListener 订阅运行状态。
+		// 极简浮窗：360×480 状态总览+快捷输入+最近会话，独立于主窗口运行。
+		// 创建逻辑与展开逻辑拆开：悬浮球点击（onExpandMini）与任务模式→小窗互切共用。
+		const ensureMiniOverlayWindow = (): MiniOverlayWindow => {
+			miniOverlayWindow ??= new MiniOverlayWindow({
+				settingsStore,
+				agentManager,
+				projectStore,
+				onJumpToSession: (sessionId, projectId) => {
+					focusMainWindow();
+					queueFocusTarget({ sessionId, projectId });
+					mainWindow?.webContents.once("did-finish-load", () => {
+						flushPendingFocusTargetOnLoad();
+					});
+				},
+				onQuickPrompt: async (projectId, text) => {
+					// 快捷输入：创建草稿 → activateRuntime → agentManager.sendPrompt（与渲染层 useQuickTask 同链路）
+					const draft = await sessionCatalog.createDraft({ projectId, title: text.slice(0, 40), environment: "native", backend: agentManager.backend });
+					const runtime = await sessionRuntimeCoordinator.activateRuntime(draft.id);
+					if (!runtime.ok) return { ok: false, message: runtime.error.code };
+					const result = await agentManager.sendPrompt({ agentId: runtime.value.agentId, message: text });
+					if (!result.accepted) return { ok: false, message: result.error };
+					return { ok: true };
+				},
+				onExit: () => {
+					// 关闭浮窗：退出悬浮球模式，回主窗口
+					settingsStore.update({ floatingBallEnabled: false });
+					floatingController?.hide();
+					focusMainWindow();
+				},
+				onCollapse: () => {
+					// 收起浮窗：回悬浮球（保持悬浮球模式）
+					if (settingsStore.get().floatingBallEnabled) {
+						void floatingController?.show();
+					}
+				},
+				onSwitchToQuickTask: async (projectPath) => {
+					// 小窗 → 任务模式：不回悬浮球（与 onExpandCompact 一致），
+					// 主窗口以 quick-task 紧凑形态打开；未带项目路径时用桌面。
+					floatingController?.hide();
+					await quickTaskChrome.controller.open(projectPath ?? app.getPath("desktop"));
+				},
+			});
+			return miniOverlayWindow;
+		};
+		async function expandMiniOverlay(): Promise<void> {
+			floatingController?.hide();
+			await ensureMiniOverlayWindow().show();
+		}
+
+		floatingController = new FloatingController({
+			settingsStore,
+			getMainWindow: () => mainWindow,
+			onExpandMini: expandMiniOverlay,
+			onExpandCompact: async () => {
+				floatingController?.hide();
+				// 小任务模式：主窗口变 compact 浮窗（不显示主窗口，直接 enterCompact）
+				if (mainWindow && !mainWindow.isDestroyed()) {
+					mainWindow.hide();
+				}
+				await quickTaskChrome.controller.open(app.getPath("desktop"));
+			},
+			onShowMainWindow: () => {
+				if (mainWindow && !mainWindow.isDestroyed()) {
+					mainWindow.show();
+					mainWindow.focus();
+				}
+			},
+			addAgentStateListener: (listener) => agentManager.addStateListener(listener),
+			getActiveAgentCount: () => agentManager.list().filter((t) => t.status !== "closed").length,
+			getRunningAgentCount: () => agentManager.list().filter((t) => t.status === "running").length,
+			getRecentRunningTitles: () =>
+				agentManager
+					.list()
+					.filter((t) => t.status === "running")
+					.map((t) => t.title)
+					.filter(Boolean)
+					.slice(0, 3) as string[],
+		});
+		quitCleanup.register("floating-ball", () => floatingController?.destroy());
+		quitCleanup.register("mini-overlay", () => miniOverlayWindow?.destroy());
+		registerFloatingIpc(floatingController);
+		// quick-task IPC 与 floating/mini-overlay 共置：switchToMiniOverlay 依赖 expandMiniOverlay（小窗⇄任务模式互切）。
+		registerQuickTaskIpc(quickTaskChrome.controller, {
+			onSwitchToMiniOverlay: async () => {
+				if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
+				await expandMiniOverlay();
+			},
+		});
+		// 启动时如果悬浮球已开启，自动显示（用户上次开着悬浮球退出了应用）
+		if (settingsStore.get().floatingBallEnabled) {
+			void floatingController.show();
+		}
+
 		// RPC 日志是合并落盘的（250ms / 256 行刷一批），退出前把缓冲刷干净。
 		// 必须排在 pi-agents 之后：runAll 顺序执行，先停进程（最后几条日志在这里产生）再刷盘。
 		quitCleanup.register("rpc-logs-flush", () => rpcLogger?.flushPending());
@@ -3897,13 +4104,18 @@ app
 			createSessionDraft: async (input) => {
 				const project = projectStore.get(input.projectId);
 				if (!project) throw new Error(mainCopy("project.notFound"));
-				return sessionCatalog.createDraft({
+				const draft = await sessionCatalog.createDraft({
 					projectId: input.projectId,
 					title: input.title?.trim() || mainCopy("session.newTitle"),
 					environment: settingsStore.get().wslEnabled ? "wsl" : "native",
 					model: input.model ? createSessionModelPreference(input.model.provider, input.model.modelId, input.model.modelName) : undefined,
 					thinkingLevel: input.thinkingLevel,
 				});
+				// standby 补热：与桌面 IPC（sessionIpc createDraft）同款——Web 建草稿即「马上要开聊」，
+				// 趁用户输入空窗后台预热 pi 进程；首条消息经 activateRuntime 认领实现秒级启动。
+				// fire-and-forget；ensure 幂等且受 standbyRuntimeEnabled 设置闸。
+				if (draft.backend !== "dsh") agentManager.ensureStandbyAgent(draft.projectId);
+				return draft;
 			},
 			createAnonymousSession,
 			updateSessionRecord: async (sessionId, patch) => {
@@ -4322,6 +4534,9 @@ app
 		// Coordinator 与事件桥接均面向合成器，新增后端只需追加网关实例。
 		compositeAgentGateway = new CompositeAgentGateway([agentManager, dshAgentManager]);
 		sessionRuntimeCoordinator = new SessionRuntimeCoordinator(sessionCatalog, compositeAgentGateway, sendAgentPromptWithIntegrations, appLogger);
+		// catalog 外部删除清理的活性探针：预热激活后 pi 可能尚未写出会话文件，
+		// 有活跃绑定的记录不得被扫描当「外部删除」剔掉。
+		sessionCatalog.setSessionLivenessProbe((sessionId) => sessionRuntimeCoordinator?.hasLiveRuntime(sessionId) === true);
 
 		// 定时任务调度器与执行编排器装配
 		automationRunCoordinator = new AutomationRunCoordinator({
@@ -4388,6 +4603,22 @@ app
 		);
 		idleAgentReleaser.start();
 		quitCleanup.register("idle-agent-releaser", () => idleAgentReleaser?.stop());
+		// 零内容草稿自动清理：小窗/主窗「新建后不用」的空草稿在运行期间定期剔除
+		// （语义对齐 SessionCatalog.load 的启动清理，但豁免用户投入信号：命名/选模型/预选配置）。
+		// 删除后广播 catalog-refreshed，侧栏静默重拉，空白条目即消失。
+		staleDraftReaper = new StaleDraftReaper(
+			sessionCatalog,
+			sessionRuntimeCoordinator,
+			(projectIds) => {
+				if (!mainWindow || mainWindow.isDestroyed()) return;
+				for (const projectId of projectIds) {
+					mainWindow.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId });
+				}
+			},
+			appLogger,
+		);
+		staleDraftReaper.start();
+		quitCleanup.register("stale-draft-reaper", () => staleDraftReaper?.stop());
 		// 只有 PiDeck 自动命名扩展的专用 marker 才能领取 fresh placeholder。
 		// pi /name、JSONL session_info 与重启 get_state 都不会经过这里，catalog 因而
 		// 始终是侧栏和 Tab 的显示标题权威。
@@ -4736,6 +4967,8 @@ app
 		cuaService = new CuaService({
 			getMainWindow: () => mainWindow,
 			log: (domain, message, details) => void appLogger.info(domain, message, details),
+			// 免审批设置实时读取：改设置即时生效，无需重启 CUA 服务。
+			getAutoApprove: () => settingsStore.get().cuaAutoApprove,
 		});
 		if (settingsStore.get().cuaEnabled) {
 			void cuaService.start().catch((error) => {

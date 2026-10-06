@@ -2,7 +2,7 @@ import assert from "node:assert";
 import test from "node:test";
 import { loadTsCommonJs } from "../helpers/loadTsCommonJs.mjs";
 
-// CuaEngine pulls koffi (handle math) plus every Win32 input path — all stubbed
+// CuaEngine pulls handle math plus every Win32 input path — all stubbed
 // so a test run can never inject real OS input.
 
 function makeState() {
@@ -25,8 +25,8 @@ function makeState() {
 function loadEngine(state) {
 	return loadTsCommonJs("src/main/cua/CuaEngine.ts", {
 		stubs: {
-			koffi: { address: (ptr) => Number(ptr) || 0 },
 			"./CuaWin32": {
+				koffiAddress: (ptr) => Number(ptr) || 0,
 				clickAt: (x, y, button, w, h, ox, oy) => {
 					if (state.clickAtError) throw state.clickAtError;
 					state.clicks.push({ x, y, button, w, h, ox, oy });

@@ -131,9 +131,10 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 						<SelectContent>
 							<SelectItem value="classic">
 								<span className="flex items-center gap-2">
-									<svg viewBox="140 140 520 520" width="14" height="14" aria-hidden="true" shapeRendering="crispEdges">
-										<rect x="165" y="165" width="352" height="235" fill="#f4f4f5" />
-										<rect x="517" y="400" width="117" height="235" fill="#a7a8ab" />
+									{/* 经典银灰标需要黑底承托，不能直接放在浅色菜单上；保留完整 π 轮廓与镂空。 */}
+									<svg viewBox="140 140 520 520" width="16" height="16" className="size-4 shrink-0 rounded-xs bg-black p-px" aria-hidden="true" shapeRendering="crispEdges">
+										<path fill="#f4f4f5" fillRule="evenodd" d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z" />
+										<path fill="#a7a8ab" d="M517.36 400H634.72V634.72H517.36Z" />
 									</svg>
 									<span>{t("settings.logoStyleClassic")}</span>
 								</span>

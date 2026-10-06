@@ -776,6 +776,24 @@
       }
     },
     {
+      "id": "eu.anthropic.claude-sonnet-5-5",
+      "name": "Claude Sonnet 5.5 (EU)",
+      "provider": "amazon-bedrock",
+      "api": "bedrock-converse-stream",
+      "baseUrl": "https://bedrock-runtime.eu-central-1.amazonaws.com",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "contextWindow": 1000000,
+      "maxTokens": 128000,
+      "thinkingLevelMap": {
+        "xhigh": "xhigh",
+        "max": "max"
+      }
+    },
+    {
       "id": "eu.mistral.pixtral-large-2502-v1:0",
       "name": "Pixtral Large (25.02) (EU)",
       "provider": "amazon-bedrock",
@@ -1241,6 +1259,56 @@
       ],
       "contextWindow": 131072,
       "maxTokens": 8192
+    },
+    {
+      "id": "in.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "name": "Claude Haiku 4.5 (India)",
+      "provider": "amazon-bedrock",
+      "api": "bedrock-converse-stream",
+      "baseUrl": "https://bedrock-runtime.us-east-1.amazonaws.com",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "contextWindow": 200000,
+      "maxTokens": 64000
+    },
+    {
+      "id": "in.anthropic.claude-opus-5",
+      "name": "Claude Opus 5 (India)",
+      "provider": "amazon-bedrock",
+      "api": "bedrock-converse-stream",
+      "baseUrl": "https://bedrock-runtime.us-east-1.amazonaws.com",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "contextWindow": 1000000,
+      "maxTokens": 128000,
+      "thinkingLevelMap": {
+        "xhigh": "xhigh",
+        "max": "max"
+      }
+    },
+    {
+      "id": "in.anthropic.claude-sonnet-5",
+      "name": "Claude Sonnet 5 (India)",
+      "provider": "amazon-bedrock",
+      "api": "bedrock-converse-stream",
+      "baseUrl": "https://bedrock-runtime.us-east-1.amazonaws.com",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "contextWindow": 1000000,
+      "maxTokens": 128000,
+      "thinkingLevelMap": {
+        "xhigh": "xhigh",
+        "max": "max"
+      }
     },
     {
       "id": "in.openai.gpt-5.6-luna",
@@ -2385,6 +2453,24 @@
       }
     },
     {
+      "id": "us.anthropic.claude-sonnet-5-5",
+      "name": "Claude Sonnet 5.5 (US)",
+      "provider": "amazon-bedrock",
+      "api": "bedrock-converse-stream",
+      "baseUrl": "https://bedrock-runtime.us-east-1.amazonaws.com",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "contextWindow": 1000000,
+      "maxTokens": 128000,
+      "thinkingLevelMap": {
+        "xhigh": "xhigh",
+        "max": "max"
+      }
+    },
+    {
       "id": "us.meta.llama3-1-70b-instruct-v1:0",
       "name": "Llama 3.1 70B Instruct (US)",
       "provider": "amazon-bedrock",
@@ -3070,7 +3156,7 @@
     {
       "id": "gpt-4",
       "name": "GPT-4",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": false,
       "input": [
@@ -3082,7 +3168,7 @@
     {
       "id": "gpt-4-turbo",
       "name": "GPT-4 Turbo",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": false,
       "input": [
@@ -3095,7 +3181,7 @@
     {
       "id": "gpt-4.1",
       "name": "GPT-4.1",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": false,
       "input": [
@@ -3108,7 +3194,7 @@
     {
       "id": "gpt-4.1-mini",
       "name": "GPT-4.1 mini",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": false,
       "input": [
@@ -3121,7 +3207,7 @@
     {
       "id": "gpt-4.1-nano",
       "name": "GPT-4.1 nano",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": false,
       "input": [
@@ -3134,7 +3220,7 @@
     {
       "id": "gpt-4o",
       "name": "GPT-4o",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": false,
       "input": [
@@ -3147,7 +3233,7 @@
     {
       "id": "gpt-4o-2024-05-13",
       "name": "GPT-4o (2024-05-13)",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": false,
       "input": [
@@ -3160,7 +3246,7 @@
     {
       "id": "gpt-4o-2024-08-06",
       "name": "GPT-4o (2024-08-06)",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": false,
       "input": [
@@ -3173,7 +3259,7 @@
     {
       "id": "gpt-4o-2024-11-20",
       "name": "GPT-4o (2024-11-20)",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": false,
       "input": [
@@ -3186,7 +3272,7 @@
     {
       "id": "gpt-4o-mini",
       "name": "GPT-4o mini",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": false,
       "input": [
@@ -3199,7 +3285,7 @@
     {
       "id": "gpt-5",
       "name": "GPT-5",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3215,7 +3301,7 @@
     {
       "id": "gpt-5-chat-latest",
       "name": "GPT-5 Chat Latest",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": false,
       "input": [
@@ -3231,7 +3317,7 @@
     {
       "id": "gpt-5-mini",
       "name": "GPT-5 Mini",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3247,7 +3333,7 @@
     {
       "id": "gpt-5-nano",
       "name": "GPT-5 Nano",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3263,7 +3349,7 @@
     {
       "id": "gpt-5-pro",
       "name": "GPT-5 Pro",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3279,7 +3365,7 @@
     {
       "id": "gpt-5.1",
       "name": "GPT-5.1",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3295,7 +3381,7 @@
     {
       "id": "gpt-5.2",
       "name": "GPT-5.2",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3312,7 +3398,7 @@
     {
       "id": "gpt-5.2-chat-latest",
       "name": "GPT-5.2 Chat",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3329,7 +3415,7 @@
     {
       "id": "gpt-5.2-pro",
       "name": "GPT-5.2 Pro",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3346,7 +3432,7 @@
     {
       "id": "gpt-5.3-chat-latest",
       "name": "GPT-5.3 Chat (latest)",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": false,
       "input": [
@@ -3363,7 +3449,7 @@
     {
       "id": "gpt-5.3-codex",
       "name": "GPT-5.3 Codex",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3380,7 +3466,7 @@
     {
       "id": "gpt-5.3-codex-spark",
       "name": "GPT-5.3 Codex Spark",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3397,7 +3483,7 @@
     {
       "id": "gpt-5.4",
       "name": "GPT-5.4",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3414,7 +3500,7 @@
     {
       "id": "gpt-5.4-mini",
       "name": "GPT-5.4 mini",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3431,7 +3517,7 @@
     {
       "id": "gpt-5.4-nano",
       "name": "GPT-5.4 nano",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3448,7 +3534,7 @@
     {
       "id": "gpt-5.4-pro",
       "name": "GPT-5.4 Pro",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3465,7 +3551,7 @@
     {
       "id": "gpt-5.5",
       "name": "GPT-5.5",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3482,7 +3568,7 @@
     {
       "id": "gpt-5.5-pro",
       "name": "GPT-5.5 Pro",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3501,7 +3587,7 @@
     {
       "id": "gpt-5.6-luna",
       "name": "GPT-5.6 Luna",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3519,7 +3605,7 @@
     {
       "id": "gpt-5.6-sol",
       "name": "GPT-5.6 Sol",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3537,7 +3623,7 @@
     {
       "id": "gpt-5.6-terra",
       "name": "GPT-5.6 Terra",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3555,7 +3641,7 @@
     {
       "id": "gpt-6-astra",
       "name": "GPT-6 Astra",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3577,7 +3663,7 @@
     {
       "id": "gpt-6-luna",
       "name": "GPT-6 Luna",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3599,7 +3685,7 @@
     {
       "id": "gpt-6-sol",
       "name": "GPT-6 Sol",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3621,7 +3707,7 @@
     {
       "id": "gpt-6.1-sol",
       "name": "GPT-6.1 Sol",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3643,7 +3729,7 @@
     {
       "id": "gpt-daybreak-blue-latest",
       "name": "Daybreak Blue",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3656,7 +3742,7 @@
     {
       "id": "gpt-daybreak-red-latest",
       "name": "Daybreak Red",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3669,7 +3755,7 @@
     {
       "id": "gpt-realtime-2.1",
       "name": "GPT-Realtime-2.1",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3682,7 +3768,7 @@
     {
       "id": "o1",
       "name": "o1",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3695,7 +3781,7 @@
     {
       "id": "o1-pro",
       "name": "o1-pro",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3708,7 +3794,7 @@
     {
       "id": "o3",
       "name": "o3",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3721,7 +3807,7 @@
     {
       "id": "o3-mini",
       "name": "o3-mini",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3733,7 +3819,7 @@
     {
       "id": "o3-pro",
       "name": "o3-pro",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3746,7 +3832,7 @@
     {
       "id": "o4-mini",
       "name": "o4-mini",
-      "provider": "azure-openai-responses",
+      "provider": "azure",
       "api": "azure-openai-responses",
       "reasoning": true,
       "input": [
@@ -3755,6 +3841,26 @@
       ],
       "contextWindow": 200000,
       "maxTokens": 100000
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro",
+      "provider": "azure",
+      "api": "openai-completions",
+      "reasoning": true,
+      "input": [
+        "text"
+      ],
+      "contextWindow": 1000000,
+      "maxTokens": 384000,
+      "thinkingLevelMap": {
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      }
     },
     {
       "id": "deepseek-ai/DeepSeek-V4-Flash-0731",
@@ -4316,7 +4422,7 @@
       }
     },
     {
-      "id": "claude-fable-5.1",
+      "id": "claude-fable-5-1",
       "name": "Claude Fable 5.1",
       "provider": "cloudflare-ai-gateway",
       "api": "anthropic-messages",
@@ -4335,7 +4441,7 @@
       }
     },
     {
-      "id": "claude-haiku-4.5",
+      "id": "claude-haiku-4-5",
       "name": "Claude Haiku 4.5 (latest)",
       "provider": "cloudflare-ai-gateway",
       "api": "anthropic-messages",
@@ -4349,7 +4455,7 @@
       "maxTokens": 64000
     },
     {
-      "id": "claude-opus-4.5",
+      "id": "claude-opus-4-5",
       "name": "Claude Opus 4.5 (latest)",
       "provider": "cloudflare-ai-gateway",
       "api": "anthropic-messages",
@@ -4363,7 +4469,7 @@
       "maxTokens": 64000
     },
     {
-      "id": "claude-opus-4.6",
+      "id": "claude-opus-4-6",
       "name": "Claude Opus 4.6",
       "provider": "cloudflare-ai-gateway",
       "api": "anthropic-messages",
@@ -4380,7 +4486,7 @@
       }
     },
     {
-      "id": "claude-opus-4.7",
+      "id": "claude-opus-4-7",
       "name": "Claude Opus 4.7",
       "provider": "cloudflare-ai-gateway",
       "api": "anthropic-messages",
@@ -4398,7 +4504,7 @@
       }
     },
     {
-      "id": "claude-opus-4.8",
+      "id": "claude-opus-4-8",
       "name": "Claude Opus 4.8",
       "provider": "cloudflare-ai-gateway",
       "api": "anthropic-messages",
@@ -4434,7 +4540,7 @@
       }
     },
     {
-      "id": "claude-opus-5.5",
+      "id": "claude-opus-5-5",
       "name": "Claude Opus 5.5",
       "provider": "cloudflare-ai-gateway",
       "api": "anthropic-messages",
@@ -4452,7 +4558,7 @@
       }
     },
     {
-      "id": "claude-sonnet-4.5",
+      "id": "claude-sonnet-4-5",
       "name": "Claude Sonnet 4.5 (latest)",
       "provider": "cloudflare-ai-gateway",
       "api": "anthropic-messages",
@@ -4466,7 +4572,7 @@
       "maxTokens": 64000
     },
     {
-      "id": "claude-sonnet-4.6",
+      "id": "claude-sonnet-4-6",
       "name": "Claude Sonnet 4.6",
       "provider": "cloudflare-ai-gateway",
       "api": "anthropic-messages",
@@ -5259,6 +5365,28 @@
         "xhigh": null,
         "max": null
       }
+    },
+    {
+      "id": "@cf/cloudflare/clef",
+      "name": "Clef",
+      "provider": "cloudflare-workers-ai",
+      "api": "cloudflare-workers-ai-system-one",
+      "baseUrl": "https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai",
+      "input": [
+        "text"
+      ],
+      "contextWindow": 65536
+    },
+    {
+      "id": "@cf/cloudflare/clef-flash",
+      "name": "Clef Flash",
+      "provider": "cloudflare-workers-ai",
+      "api": "cloudflare-workers-ai-system-one",
+      "baseUrl": "https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai",
+      "input": [
+        "text"
+      ],
+      "contextWindow": 65536
     },
     {
       "id": "typesafe/jev",
@@ -9776,6 +9904,41 @@
       }
     },
     {
+      "id": "deepseek-ai/deepseek-v4.1-flash",
+      "name": "DeepSeek V4.1 Flash",
+      "provider": "nvidia",
+      "api": "openai-completions",
+      "baseUrl": "https://integrate.api.nvidia.com/v1",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "contextWindow": 1000000,
+      "maxTokens": 384000,
+      "thinkingLevelMap": {
+        "minimal": null,
+        "low": null,
+        "medium": null,
+        "high": "high",
+        "max": "max"
+      }
+    },
+    {
+      "id": "google/diffusiongemma-26b-a4b-it",
+      "name": "DiffusionGemma 26B A4B IT",
+      "provider": "nvidia",
+      "api": "openai-completions",
+      "baseUrl": "https://integrate.api.nvidia.com/v1",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "contextWindow": 250000,
+      "maxTokens": 32768
+    },
+    {
       "id": "google/gemma-3-12b-it",
       "name": "Gemma 3 12B IT",
       "provider": "nvidia",
@@ -11140,8 +11303,36 @@
       "maxTokens": 131072
     },
     {
+      "id": "qwen3.7-plus",
+      "name": "Qwen3.7 Plus",
+      "provider": "opencode-go",
+      "api": "anthropic-messages",
+      "baseUrl": "https://opencode.ai/zen/go",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "contextWindow": 1000000,
+      "maxTokens": 65536
+    },
+    {
       "id": "qwen3.8-flash",
       "name": "Qwen3.8 Flash",
+      "provider": "opencode-go",
+      "api": "anthropic-messages",
+      "baseUrl": "https://opencode.ai/zen/go",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "contextWindow": 1000000,
+      "maxTokens": 131072
+    },
+    {
+      "id": "qwen3.8-max",
+      "name": "Qwen3.8 Max",
       "provider": "opencode-go",
       "api": "anthropic-messages",
       "baseUrl": "https://opencode.ai/zen/go",
@@ -11479,43 +11670,6 @@
       ],
       "contextWindow": 204800,
       "maxTokens": 131072
-    },
-    {
-      "id": "qwen3.7-plus",
-      "name": "Qwen3.7 Plus",
-      "provider": "opencode-go",
-      "api": "openai-completions",
-      "baseUrl": "https://opencode.ai/zen/go/v1",
-      "reasoning": true,
-      "input": [
-        "text",
-        "image"
-      ],
-      "contextWindow": 1000000,
-      "maxTokens": 65536
-    },
-    {
-      "id": "qwen3.8-max",
-      "name": "Qwen3.8 Max",
-      "provider": "opencode-go",
-      "api": "openai-completions",
-      "baseUrl": "https://opencode.ai/zen/go/v1",
-      "reasoning": true,
-      "input": [
-        "text",
-        "image"
-      ],
-      "contextWindow": 1000000,
-      "maxTokens": 131072,
-      "thinkingLevelMap": {
-        "off": null,
-        "minimal": null,
-        "low": "low",
-        "medium": "medium",
-        "high": null,
-        "xhigh": "xhigh",
-        "max": null
-      }
     },
     {
       "id": "space-bunny-free",
@@ -12404,6 +12558,19 @@
     {
       "id": "ling-3.0-flash-fin-free",
       "name": "Ling 3.0 Flash Fin Free",
+      "provider": "opencode",
+      "api": "openai-completions",
+      "baseUrl": "https://opencode.ai/zen/v1",
+      "reasoning": true,
+      "input": [
+        "text"
+      ],
+      "contextWindow": 262144,
+      "maxTokens": 32768
+    },
+    {
+      "id": "ling-3.1-flash-free",
+      "name": "Ling 3.1 Flash Free",
       "provider": "opencode",
       "api": "openai-completions",
       "baseUrl": "https://opencode.ai/zen/v1",
@@ -13923,7 +14090,7 @@
         "image"
       ],
       "contextWindow": 1048576,
-      "maxTokens": 943718,
+      "maxTokens": 131072,
       "thinkingLevelMap": {
         "off": null,
         "minimal": null,
@@ -13944,8 +14111,8 @@
       "input": [
         "text"
       ],
-      "contextWindow": 262144,
-      "maxTokens": 235929,
+      "contextWindow": 1048576,
+      "maxTokens": 131072,
       "thinkingLevelMap": {
         "off": null,
         "minimal": null,
@@ -14633,8 +14800,8 @@
       "input": [
         "text"
       ],
-      "contextWindow": 163840,
-      "maxTokens": 147456
+      "contextWindow": 128000,
+      "maxTokens": 115200
     },
     {
       "id": "deepseek/deepseek-chat-v3.1",
@@ -14704,8 +14871,8 @@
       "input": [
         "text"
       ],
-      "contextWindow": 131072,
-      "maxTokens": 65536
+      "contextWindow": 163840,
+      "maxTokens": 147456
     },
     {
       "id": "deepseek/deepseek-v3.2-exp",
@@ -14731,7 +14898,7 @@
         "text"
       ],
       "contextWindow": 1048576,
-      "maxTokens": 131072,
+      "maxTokens": 943718,
       "thinkingLevelMap": {
         "off": "none",
         "minimal": null,
@@ -15626,7 +15793,7 @@
         "text"
       ],
       "contextWindow": 262144,
-      "maxTokens": 235929
+      "maxTokens": 32768
     },
     {
       "id": "inclusionai/ling-3.0-flash-sante:free",
@@ -15651,6 +15818,19 @@
       "input": [
         "text",
         "image"
+      ],
+      "contextWindow": 262144,
+      "maxTokens": 32768
+    },
+    {
+      "id": "inclusionai/ling-3.1-flash",
+      "name": "inclusionAI: Ling 3.1 Flash",
+      "provider": "openrouter",
+      "api": "openai-completions",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "reasoning": true,
+      "input": [
+        "text"
       ],
       "contextWindow": 262144,
       "maxTokens": 32768
@@ -16593,8 +16773,8 @@
       "input": [
         "text"
       ],
-      "contextWindow": 202800,
-      "maxTokens": 182520,
+      "contextWindow": 262144,
+      "maxTokens": 16384,
       "thinkingLevelMap": {
         "off": "none",
         "minimal": null,
@@ -16638,7 +16818,7 @@
         "text"
       ],
       "contextWindow": 262144,
-      "maxTokens": 131072
+      "maxTokens": 32768
     },
     {
       "id": "nvidia/nemotron-3.5-lightning:free",
@@ -19011,8 +19191,8 @@
       "input": [
         "text"
       ],
-      "contextWindow": 262144,
-      "maxTokens": 235929,
+      "contextWindow": 131072,
+      "maxTokens": 32768,
       "thinkingLevelMap": {
         "off": null
       }
@@ -19164,7 +19344,7 @@
         "image"
       ],
       "contextWindow": 262144,
-      "maxTokens": 65536
+      "maxTokens": 235929
     },
     {
       "id": "qwen/qwen3.5-397b-a17b",
@@ -19248,7 +19428,7 @@
         "image"
       ],
       "contextWindow": 262144,
-      "maxTokens": 81920
+      "maxTokens": 262140
     },
     {
       "id": "qwen/qwen3.6-35b-a3b",
@@ -19381,29 +19561,6 @@
       ],
       "contextWindow": 1000000,
       "maxTokens": 131072,
-      "thinkingLevelMap": {
-        "off": "none",
-        "minimal": null,
-        "low": "low",
-        "medium": "medium",
-        "high": null,
-        "xhigh": "xhigh",
-        "max": null
-      }
-    },
-    {
-      "id": "qwen/qwen3.8-27b:free",
-      "name": "Qwen: Qwen3.8 27B (free)",
-      "provider": "openrouter",
-      "api": "openai-completions",
-      "baseUrl": "https://openrouter.ai/api/v1",
-      "reasoning": true,
-      "input": [
-        "text",
-        "image"
-      ],
-      "contextWindow": 262144,
-      "maxTokens": 235929,
       "thinkingLevelMap": {
         "off": "none",
         "minimal": null,
@@ -19621,29 +19778,6 @@
       "maxTokens": 16384
     },
     {
-      "id": "stealth/space-bunny-alpha",
-      "name": "Space Bunny Alpha",
-      "provider": "openrouter",
-      "api": "openai-completions",
-      "baseUrl": "https://openrouter.ai/api/v1",
-      "reasoning": true,
-      "input": [
-        "text",
-        "image"
-      ],
-      "contextWindow": 1000000,
-      "maxTokens": 524288,
-      "thinkingLevelMap": {
-        "off": null,
-        "minimal": null,
-        "low": "low",
-        "medium": "medium",
-        "high": "high",
-        "xhigh": "xhigh",
-        "max": "max"
-      }
-    },
-    {
       "id": "stepfun/step-3.5-flash",
       "name": "StepFun: Step 3.5 Flash",
       "provider": "openrouter",
@@ -19760,7 +19894,7 @@
         "image"
       ],
       "contextWindow": 524288,
-      "maxTokens": 471859,
+      "maxTokens": 262144,
       "thinkingLevelMap": {
         "off": "none",
         "minimal": "minimal",
@@ -20306,7 +20440,7 @@
         "text"
       ],
       "contextWindow": 1048576,
-      "maxTokens": 943718,
+      "maxTokens": 131072,
       "thinkingLevelMap": {
         "off": "none",
         "minimal": null,
@@ -20467,6 +20601,17 @@
       "maxTokens": 131072
     },
     {
+      "id": "black-forest-labs/flux-3-image",
+      "name": "Black Forest Labs: FLUX.3 Image",
+      "provider": "openrouter",
+      "api": "openrouter-images",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "input": [
+        "text",
+        "image"
+      ]
+    },
+    {
       "id": "black-forest-labs/flux.2-flex",
       "name": "Black Forest Labs: FLUX.2 Flex",
       "provider": "openrouter",
@@ -20519,6 +20664,17 @@
       "input": [
         "image",
         "text"
+      ]
+    },
+    {
+      "id": "bytedance-seed/seedream-5-0-flash",
+      "name": "ByteDance Seed: Seedream 5.0 Flash",
+      "provider": "openrouter",
+      "api": "openrouter-images",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "input": [
+        "text",
+        "image"
       ]
     },
     {
@@ -21070,6 +21226,17 @@
       ]
     },
     {
+      "id": "tencent/hy-image-v3.5-preview",
+      "name": "Tencent: Hy Image 3.5 Preview",
+      "provider": "openrouter",
+      "api": "openrouter-images",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "input": [
+        "text",
+        "image"
+      ]
+    },
+    {
       "id": "x-ai/grok-imagine-image-2.0",
       "name": "xAI: Grok Imagine Image 2.0",
       "provider": "openrouter",
@@ -21103,6 +21270,30 @@
       "contextWindow": 32000
     },
     {
+      "id": "cloudflare/clef",
+      "name": "Cloudflare: Clef",
+      "provider": "openrouter",
+      "api": "typesafe-system-one",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "input": [
+        "text",
+        "image"
+      ],
+      "contextWindow": 65536
+    },
+    {
+      "id": "cloudflare/clef-flash",
+      "name": "Cloudflare: Clef Flash",
+      "provider": "openrouter",
+      "api": "typesafe-system-one",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "input": [
+        "text",
+        "image"
+      ],
+      "contextWindow": 65536
+    },
+    {
       "id": "inception/mercury-decide:free",
       "name": "Inception: Mercury Decide (free)",
       "provider": "openrouter",
@@ -21123,6 +21314,29 @@
         "text"
       ],
       "contextWindow": 8192
+    },
+    {
+      "id": "liquid/d1",
+      "name": "LiquidAI: D1",
+      "provider": "openrouter",
+      "api": "typesafe-system-one",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "input": [
+        "text"
+      ],
+      "contextWindow": 65536
+    },
+    {
+      "id": "perplexity/pplx-decider-v1-27b",
+      "name": "Perplexity: Decider V1 27B",
+      "provider": "openrouter",
+      "api": "typesafe-system-one",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "input": [
+        "text",
+        "image"
+      ],
+      "contextWindow": 262144
     },
     {
       "id": "respan/span-01",
@@ -22709,26 +22923,6 @@
       }
     },
     {
-      "id": "deepseek-ai/DeepSeek-V4-Pro",
-      "name": "DeepSeek V4 Pro",
-      "provider": "together",
-      "api": "openai-completions",
-      "baseUrl": "https://api.together.ai/v1",
-      "reasoning": true,
-      "input": [
-        "text"
-      ],
-      "contextWindow": 512000,
-      "maxTokens": 384000,
-      "thinkingLevelMap": {
-        "minimal": null,
-        "low": null,
-        "medium": null,
-        "high": "high",
-        "xhigh": null
-      }
-    },
-    {
       "id": "deepseek-ai/DeepSeek-V4-Pro-0813",
       "name": "DeepSeek V4 Pro 0813",
       "provider": "together",
@@ -22743,7 +22937,9 @@
       "thinkingLevelMap": {
         "minimal": null,
         "low": null,
-        "medium": null
+        "medium": null,
+        "high": "high",
+        "xhigh": null
       }
     },
     {
@@ -22759,25 +22955,6 @@
       ],
       "contextWindow": 1048576,
       "maxTokens": 384000,
-      "thinkingLevelMap": {
-        "minimal": null,
-        "low": null,
-        "medium": null
-      }
-    },
-    {
-      "id": "google/gemma-4-31B-it",
-      "name": "Gemma 4 31B Instruct",
-      "provider": "together",
-      "api": "openai-completions",
-      "baseUrl": "https://api.together.ai/v1",
-      "reasoning": true,
-      "input": [
-        "text",
-        "image"
-      ],
-      "contextWindow": 262144,
-      "maxTokens": 131072,
       "thinkingLevelMap": {
         "minimal": null,
         "low": null,
@@ -22875,28 +23052,6 @@
     {
       "id": "openai/gpt-oss-120b",
       "name": "GPT OSS 120B",
-      "provider": "together",
-      "api": "openai-completions",
-      "baseUrl": "https://api.together.ai/v1",
-      "reasoning": true,
-      "input": [
-        "text"
-      ],
-      "contextWindow": 131072,
-      "maxTokens": 131072,
-      "thinkingLevelMap": {
-        "off": null,
-        "minimal": null,
-        "low": "low",
-        "medium": "medium",
-        "high": "high",
-        "xhigh": null,
-        "max": null
-      }
-    },
-    {
-      "id": "openai/gpt-oss-20b",
-      "name": "GPT OSS 20B",
       "provider": "together",
       "api": "openai-completions",
       "baseUrl": "https://api.together.ai/v1",
@@ -24084,6 +24239,20 @@
       "maxTokens": 32768
     },
     {
+      "id": "deepseek/deepseek-v4.1-flash-fast",
+      "name": "DeepSeek V4.1 Flash Fast",
+      "provider": "vercel-ai-gateway",
+      "api": "anthropic-messages",
+      "baseUrl": "https://ai-gateway.vercel.sh",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "contextWindow": 1048576,
+      "maxTokens": 1000000
+    },
+    {
       "id": "fireworks/ember-1",
       "name": "Ember-1",
       "provider": "vercel-ai-gateway",
@@ -24347,19 +24516,6 @@
     {
       "id": "inclusionai/ling-3.0-flash-sante",
       "name": "Ling 3.0 Flash Sante",
-      "provider": "vercel-ai-gateway",
-      "api": "anthropic-messages",
-      "baseUrl": "https://ai-gateway.vercel.sh",
-      "reasoning": true,
-      "input": [
-        "text"
-      ],
-      "contextWindow": 256000,
-      "maxTokens": 32000
-    },
-    {
-      "id": "inclusionai/ling-3.0-flash-sante-free",
-      "name": "Ling 3.0 Flash Sante (Free)",
       "provider": "vercel-ai-gateway",
       "api": "anthropic-messages",
       "baseUrl": "https://ai-gateway.vercel.sh",
@@ -26653,6 +26809,28 @@
       ],
       "contextWindow": 200000,
       "maxTokens": 128000
+    },
+    {
+      "id": "convaiinnovations/laya",
+      "name": "Laya",
+      "provider": "vercel-ai-gateway",
+      "api": "typesafe-system-one",
+      "baseUrl": "https://ai-gateway.vercel.sh/typesafe/v1",
+      "input": [
+        "text"
+      ],
+      "contextWindow": 8192
+    },
+    {
+      "id": "convaiinnovations/laya-free",
+      "name": "Laya (Free)",
+      "provider": "vercel-ai-gateway",
+      "api": "typesafe-system-one",
+      "baseUrl": "https://ai-gateway.vercel.sh/typesafe/v1",
+      "input": [
+        "text"
+      ],
+      "contextWindow": 8192
     },
     {
       "id": "liquid/d1",

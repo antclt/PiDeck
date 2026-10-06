@@ -10,10 +10,12 @@ import { ComposerPickerHost } from "./ComposerPickerHost";
 import { SecurityControl } from "./SecurityControl";
 import { QuickMessageMenu } from "./QuickMessageMenu";
 import { modelPendingByIdAtom } from "../../atoms/composer-atoms";
+import { sessionRecordsAtom } from "../../atoms";
 import { ComposerRuntimeIntegrations } from "./ComposerRuntimeIntegrations";
 import { useSessionPaneServices } from "./SessionPaneServices";
 import { desktopApi } from "../../desktopApi";
 import { COMPOSER_TEXT_MAX_HEIGHT } from "../../rendererUtils";
+import { GUIDE_BOOTSTRAP_SESSION_ID } from "../../utils/chatSessionBootstrap";
 import { chatContentWidthStyle } from "./chatContentWidth";
 import { ComposerStatsLine } from "./ComposerStatsLine";
 import { ComposerWidgetLayoutProvider, type ComposerWidgetCollapsedByKey, useComposerWidgetLayoutValue } from "./ComposerWidgetLayout";
@@ -123,10 +125,22 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 	});
 
 	const modelPendingMap = useAtomValue(modelPendingByIdAtom);
+	const sessionRecords = useAtomValue(sessionRecordsAtom);
 
 	const prewarmStartedForSessionRef = useRef<string | undefined>(undefined);
 	useEffect(() => {
 		if (!props.sessionId || !window.piDesktop) return;
+		// 引导页虚拟会话（GUIDE_BOOTSTRAP_SESSION_ID）没有 catalog 记录，activateRuntime
+		// 必然报「会话不存在」：预热只能跳过——真正的 standby 预热由首次发送时的
+		// createDraft IPC 触发（sessionIpc createDraft → ensureStandbyAgent）。
+		if (props.sessionId === GUIDE_BOOTSTRAP_SESSION_ID) return;
+		// 空白草稿（status=draft，从未发送）不做激活预热：standby 池进程已由 createDraft
+		// 预热握手完毕，输入时 activateRuntime 只会把池进程认领给一个可能永不发送的草稿、
+		// 并立刻补一个替补进程——悬浮窗「反复新建→输入→放弃」会堆积一串空闲进程
+		// （2026-10-06 事故）。首条消息发送时 coordinator.activate 的懒认领路径同样
+		// 从池里拿热进程（毫秒级），无感启动不受损；激活预热只保留给恢复历史会话等
+		// --session 慢路径。
+		if (sessionRecords[props.sessionId]?.status === "draft") return;
 		if (!composer.draft.trim() && composer.attachments.length === 0 && composer.pasteFiles.files.length === 0) return;
 		if (prewarmStartedForSessionRef.current === props.sessionId) return;
 		prewarmStartedForSessionRef.current = props.sessionId;
@@ -134,7 +148,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 		// 输入是比“打开会话”更可靠的发送意图信号；只在首次输入后预热一次，
 		// 避免用户仅浏览历史时创建进程，也避免每个按键重复触发 IPC。
 		void desktopApi.sessions.activateRuntime(props.sessionId).catch(() => undefined);
-	}, [composer.attachments.length, composer.draft, composer.pasteFiles.files.length, props.sessionId]);
+	}, [composer.attachments.length, composer.draft, composer.pasteFiles.files.length, props.sessionId, sessionRecords]);
 
 	return (
 		<ComposerRuntimeIntegrations sessionId={props.sessionId}>

@@ -308,6 +308,14 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 			{/* 闲置 Agent 内存优化：自动释放长时间闲置的 agent 进程，降低多会话内存占用 */}
 			<SettingsSection title={t("settings.idleAgentSection")} description={t("settings.idleAgentSectionDesc")}>
 				<SettingSwitchRow anchor="common-idle-agent-auto-release" title={t("settings.idleAgentAutoRelease")} description={t("settings.idleAgentAutoReleaseDesc")} checked={draft.idleAgentAutoRelease ?? true} dirty={isDirty("idleAgentAutoRelease")} onChange={(checked) => updateDraft({ idleAgentAutoRelease: checked })} />
+				<SettingSwitchRow
+					anchor="common-standby-runtime-enabled"
+					title={t("settings.standbyRuntimeEnabled")}
+					description={t("settings.standbyRuntimeEnabledDesc")}
+					checked={draft.standbyRuntimeEnabled ?? true}
+					dirty={isDirty("standbyRuntimeEnabled")}
+					onChange={(checked) => updateDraft({ standbyRuntimeEnabled: checked })}
+				/>
 				<SettingRow
 					anchor="common-idle-agent-keep-count"
 					title={
@@ -364,9 +372,64 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 				</SettingRow>
 			</SettingsSection>
 
+			{/* 悬浮球：主窗口可隐藏为屏幕角落的 64px 常驻小圆点，点开展开小任务浮窗/工作台 */}
+			<SettingsSection title={t("settings.floatingBallSection")} description={t("settings.floatingBallSectionDesc")}>
+				<SettingSwitchRow
+					anchor="common-floating-ball-enabled"
+					title={t("settings.floatingBallEnabled")}
+					description={t("settings.floatingBallEnabledDesc")}
+					checked={draft.floatingBallEnabled ?? false}
+					dirty={isDirty("floatingBallEnabled")}
+					onChange={(checked) => {
+						updateDraft({ floatingBallEnabled: checked });
+						void desktopApi.floatingBall.setEnabled(checked);
+					}}
+				/>
+				<SettingSwitchRow
+					anchor="common-floating-ball-always-on-top"
+					title={t("settings.floatingBallAlwaysOnTop")}
+					description={t("settings.floatingBallAlwaysOnTopDesc")}
+					checked={draft.floatingBallAlwaysOnTop ?? true}
+					disabled={!draft.floatingBallEnabled}
+					dirty={isDirty("floatingBallAlwaysOnTop")}
+					onChange={(checked) => updateDraft({ floatingBallAlwaysOnTop: checked })}
+				/>
+				<SettingSwitchRow
+					anchor="common-floating-ball-snap-to-edge"
+					title={t("settings.floatingBallSnapToEdge")}
+					description={t("settings.floatingBallSnapToEdgeDesc")}
+					checked={draft.floatingBallSnapToEdge ?? true}
+					disabled={!draft.floatingBallEnabled}
+					dirty={isDirty("floatingBallSnapToEdge")}
+					onChange={(checked) => updateDraft({ floatingBallSnapToEdge: checked })}
+				/>
+				<SettingRow
+					anchor="common-floating-ball-expand-target"
+					title={
+						<span className="inline-flex items-center gap-1.5">
+							<DirtyMarker dirty={isDirty("floatingBallExpandTarget")} label={t("settings.floatingBallExpandTarget")} />
+							{t("settings.floatingBallExpandTarget")}
+						</span>
+					}
+					description={t("settings.floatingBallExpandTargetDesc")}
+				>
+					<Select value={draft.floatingBallExpandTarget ?? "mini"} onValueChange={(value) => updateDraft({ floatingBallExpandTarget: value as "mini" | "compact" })} disabled={!draft.floatingBallEnabled}>
+						<SelectTrigger className="w-40">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="mini">{t("settings.floatingBallExpandMini")}</SelectItem>
+							<SelectItem value="compact">{t("settings.floatingBallExpandCompact")}</SelectItem>
+						</SelectContent>
+					</Select>
+				</SettingRow>
+			</SettingsSection>
+
 			{/* CUA 桌面操作（实验性）：开启后才监听回环 MCP 端点并注册给 pi；真实输入另有杀开关与逐次审批兜底。 */}
 			<SettingsSection title={t("settings.cuaSection")} description={t("settings.cuaSectionDesc")}>
 				<SettingSwitchRow anchor="common-cua-enabled" title={t("settings.cuaEnabled")} description={t("settings.cuaEnabledDesc")} checked={draft.cuaEnabled ?? false} dirty={isDirty("cuaEnabled")} onChange={(checked) => updateDraft({ cuaEnabled: checked })} />
+				{/* 免审批：依赖 CUA 主开关，主开关关闭时置灰；只绕过审批对话框，杀开关仍生效 */}
+				<SettingSwitchRow anchor="common-cua-auto-approve" title={t("settings.cuaAutoApprove")} description={t("settings.cuaAutoApproveDesc")} checked={draft.cuaAutoApprove ?? false} disabled={!draft.cuaEnabled} dirty={isDirty("cuaAutoApprove")} onChange={(checked) => updateDraft({ cuaAutoApprove: checked })} />
 			</SettingsSection>
 
 			{/* 文件资源管理器集成：注册「用 PiDeck 打开」右键菜单（目录与空白处），

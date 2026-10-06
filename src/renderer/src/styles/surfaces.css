@@ -708,6 +708,9 @@
   color: var(--color-text-primary);
   /* 与 config-main 统一：内容区用面板白 */
   background: var(--color-bg-panel);
+  /* tab 切换入场：内层 TabsContent 按 tab 条件挂载，挂载即播一次淡入；
+     全局 reduced-motion 规则会把它压成单帧。 */
+  animation: fadeIn 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 /* 设置分区与设置行已迁移 UI 2.0（Tailwind + shadcn，见 settings/SettingRows.tsx）：
@@ -796,6 +799,7 @@
   padding: var(--space-5);
   background: color-mix(in srgb, var(--color-bg-app) 62%, transparent);
   backdrop-filter: blur(4px);
+  animation: fadeIn 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .config-update-dialog {
@@ -808,6 +812,7 @@
   border-radius: var(--radius-lg);
   background: var(--color-bg-panel);
   box-shadow: var(--shadow-lg);
+  animation: dialogOverlayIn var(--transition-base) var(--ease-out);
 }
 
 .config-update-dialog-header,
@@ -877,6 +882,7 @@
   border-radius: 50%;
   flex-shrink: 0;
   margin-top: 4px;
+  transition: background-color var(--transition-base) ease, box-shadow var(--transition-base) ease;
 }
 .pi-status-dot.online {
   background: var(--color-success, #22c55e);

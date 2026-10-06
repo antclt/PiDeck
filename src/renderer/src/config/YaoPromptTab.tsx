@@ -1,7 +1,7 @@
 import { Button } from "../components/ui-shadcn/button";
 import { showNotice } from "../utils/notice";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Check, ChevronLeft, ChevronRight, Download } from "lucide-react";
+import { Loader2, ArrowLeft, Check, ChevronLeft, ChevronRight, Download } from "lucide-react";
 import type { YaoPromptListResult, YaoPromptItem, YaoPromptDetailResult, PiPromptTemplateSummary, PiPromptTemplateListResult } from "../../../shared/types";
 import { t } from "../i18n";
 import { desktopApi } from "../desktopApi";
@@ -171,7 +171,10 @@ export function YaoPromptTab(props: { onImported?: () => void; projectId?: strin
 					</Button>
 				</div>
 				{previewLoading ? (
-					<div className="py-12 text-center text-control text-text-tertiary">{t("common.loading")}</div>
+					<div className="flex items-center justify-center gap-2 py-12 text-control text-text-tertiary">
+						<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+						{t("common.loading")}
+					</div>
 				) : previewDetail ? (
 					<div className="prompt-store-preview">
 						<div className="prompt-store-preview-header">
@@ -221,7 +224,10 @@ export function YaoPromptTab(props: { onImported?: () => void; projectId?: strin
 			{error && <div className="mb-3.5 rounded-sm border border-danger/20 bg-danger-soft px-3.5 py-2.5 text-control leading-relaxed text-danger whitespace-pre-line">{error}</div>}
 			{/* toast 已改用 sonner */}
 			{initialLoading ? (
-				<div className="py-12 text-center text-control text-text-tertiary">{t("common.loading")}</div>
+				<div className="flex items-center justify-center gap-2 py-12 text-control text-text-tertiary">
+					<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+					{t("common.loading")}
+				</div>
 			) : !data || data.categories.length === 0 ? (
 				<div className="py-12 text-center text-control text-text-tertiary">{t("config.yaoNoData")}</div>
 			) : (
@@ -243,7 +249,10 @@ export function YaoPromptTab(props: { onImported?: () => void; projectId?: strin
 					{/* 提示词列表 */}
 					<div className="prompt-store-results">
 						{loading ? (
-							<div className="py-12 text-center text-control text-text-tertiary">{t("common.loading")}</div>
+							<div className="flex items-center justify-center gap-2 py-12 text-control text-text-tertiary">
+								<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+								{t("common.loading")}
+							</div>
 						) : activePrompts.length === 0 ? (
 							<div className="py-12 text-center text-control text-text-tertiary">{t("config.yaoNoMatches")}</div>
 						) : (

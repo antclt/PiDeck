@@ -54,7 +54,11 @@ const ZH: Dict = {
 	installHeading: "二、放哪里、怎么生效",
 	install: ["- 用户级（所有项目生效）：把 `.ts` 文件放进 `{USER_DIR}`（不存在就创建）", "- 项目级（仅当前项目）：放进 `{PROJECT_DIR}`", "- 生效方式：**重启会话**（PiDeck 会话工具栏的重启按钮）。设置 → 扩展页可启用/禁用单个扩展", "- 多文件插件：用子目录 + `index.ts` 入口；npm 依赖写在旁边的 package.json 里"],
 	quickstartHeading: "三、三分钟起步（复制 demo 改）",
-	quickstart: ["1. 把应用内置的 `{DEMO}` 复制到上述目录（PiDeck 设置 → 扩展 → 插件开发 → 「复制 demo 插件」）", "2. 重启会话：侧栏出现「Demo 统计」面板，输入区出现两个按钮，`/demo` 命令可执行", "3. demo 演示了全部三层能力：命令注册、事件统计、GUI 落点渲染——照着改就是你的插件"],
+	quickstart: [
+		"1. 把应用内置的 `{DEMO}` 复制到上述目录（PiDeck 设置 → 扩展 → 插件开发 → 「复制 demo 插件」）",
+		"2. 重启会话：侧栏出现「Demo 统计」面板（含 Hello/选文件/打开按钮），`/demo` 命令可执行；demo 刻意只占侧栏一个落点，不碰输入区等共享位置",
+		"3. demo 演示了全部三层能力：命令注册、事件统计、GUI 落点与宿主服务——照着改就是你的插件",
+	],
 	piApiHeading: "四、pi 原生扩展点（任何宿主可用）",
 	piApiLead: "默认导出一个工厂函数，收到 `pi: ExtensionAPI`：",
 	eventsHeading: "常用事件（pi.on）",
@@ -113,7 +117,7 @@ const EN: Dict = {
 	quickstartHeading: "3. Three-minute quickstart (copy the demo)",
 	quickstart: [
 		"1. Copy the bundled `{DEMO}` into the directory above (PiDeck → Settings → Extensions → Plugin development → “Copy demo plugin”)",
-		"2. Restart the session: a “Demo stats” panel appears in the sidebar, two buttons appear above the composer, and `/demo` runs",
+		"2. Restart the session: a “Demo stats” panel appears in the sidebar (with Hello / pick-file / open buttons) and `/demo` runs. The demo deliberately occupies only the sidebar slot — it never touches the composer or other shared areas",
 		"3. The demo exercises all three layers — command, event stats, GUI slots — copy and modify it",
 	],
 	piApiHeading: "4. Native pi extension points (work in any host)",

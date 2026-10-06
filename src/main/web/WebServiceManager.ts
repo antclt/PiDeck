@@ -239,6 +239,10 @@ export class WebServiceManager {
 
 	private readonly eventStreamRouter: WebEventStreamRouter;
 
+	/** dev 模式被劫持的 upgrade socket（vite HMR 代理）：Node 的 closeAllConnections
+	 *  不追踪 upgrade 后的 socket，不手动销毁会让 stop() 的 server.close() 永远等不到回调。 */
+	private readonly hijackedSockets = new Set<import("node:stream").Duplex>();
+
 	constructor(private readonly deps: WebServiceDependencies) {
 		this.devRendererUrl = deps.devRendererUrl?.trim() ? deps.devRendererUrl.trim().replace(/\/$/, "") : "";
 		this.eventStreamRouter = new WebEventStreamRouter((agentId) => this.deps.getSessionIdForAgent(agentId));
@@ -293,8 +297,23 @@ export class WebServiceManager {
 		} catch {
 			// 旧版 Node 无该方法时忽略，退化为等待连接自然关闭
 		}
+		// 销毁被劫持的 upgrade socket（dev HMR 代理），否则 server.close() 回调不触发、stop() 挂死。
+		for (const socket of this.hijackedSockets) {
+			try {
+				socket.destroy();
+			} catch {
+				// 已销毁的 socket 重复 destroy 是安全的，防御即可
+			}
+		}
+		this.hijackedSockets.clear();
 		await new Promise<void>((resolve, reject) => {
-			server.close((error) => (error ? reject(error) : resolve()));
+			// 超时兜底：任何未被追踪的连接形态（未来新增代理/长连接）都不能再把设置切换卡死。
+			const timer = setTimeout(() => resolve(), 1500);
+			server.close((error) => {
+				clearTimeout(timer);
+				if (error) reject(error);
+				else resolve();
+			});
 		});
 	}
 
@@ -787,9 +806,13 @@ export class WebServiceManager {
 				case "abort":
 					result = await this.deps.abortSessionRuntime(target);
 					break;
-				case "restart":
-					result = await this.deps.restartSessionRuntime(target);
-					break;
+				case "restart": {
+					// 重启走专属链路：pending 期间每 2s 回心跳——重启 5~10s 期间浏览器不再只有一个
+					// 转圈的黑盒，能持续确认请求活着。
+					await this.executeRestartWithProgress(target, response);
+					// 专属链路自己写完响应，通用壳不再二次写。
+					return;
+				}
 				case "compact":
 					result = await this.deps.compactSessionRuntime(target, body.prompt);
 					break;
@@ -856,6 +879,38 @@ export class WebServiceManager {
 		}
 
 		await this.serveRenderer(url, response);
+	}
+
+	/**
+	 * 会话 runtime 重启专属链路：先 flush 响应头，pending 期间每 2s 写一个空白字节当心跳。
+	 * 重启 5~10s 期间浏览器不再只有一个转圈的黑盒，能持续确认请求活着；
+	 * 心跳写的是 JSON body 前导空白，最终 \n 结尾的完整 JSON 对客户端解析无影响。
+	 */
+	private async executeRestartWithProgress(target: SessionRuntimeTarget, response: ServerResponse): Promise<void> {
+		if (!response.headersSent) {
+			response.writeHead(200, {
+				"content-type": "application/json; charset=utf-8",
+				"cache-control": "no-store",
+				"access-control-allow-origin": "*",
+			});
+		}
+		const heartbeat = setInterval(() => {
+			try {
+				response.write(" ");
+			} catch {
+				// 客户端已断开时静默，最终 end 阶段失败也无碍
+			}
+		}, 2000);
+		try {
+			const result = await this.deps.restartSessionRuntime(target);
+			response.end(JSON.stringify({ result }));
+		} catch (error) {
+			// restartSessionRuntime 正常路径返回 {ok:false} 结构不抛；这里只是防御外层 500 的兜底。
+			console.error("[WebService] Session restart failed", error);
+			this.sendError(response, 500, "webError.internal", "The web service encountered an internal error");
+		} finally {
+			clearInterval(heartbeat);
+		}
 	}
 
 	/** 按 sessionId 找活跃 runtime 的 agentId（DSH 工具面板路由；无 runtime 返回 undefined）。 */
@@ -1522,6 +1577,9 @@ export class WebServiceManager {
 	 */
 	private proxyDevWebSocket(request: IncomingMessage, socket: import("node:stream").Duplex, head: Buffer) {
 		const devUrl = new URL(this.devRendererUrl);
+		// 劫持 socket 追踪：客户端侧 socket 一进入代理就登记，stop() 统一销毁（见 hijackedSockets 注释）。
+		this.hijackedSockets.add(socket);
+		socket.on("close", () => this.hijackedSockets.delete(socket));
 		// vite 会校验 HMR 握手的 Host/Origin：把两者改写为 dev server 自身，
 		// 否则外部端口访问时 vite 按「跨源请求」拒绝 403，HMR 连不上。
 		const headers = {
@@ -1537,6 +1595,8 @@ export class WebServiceManager {
 			method: "GET",
 		});
 		upstream.on("upgrade", (upstreamResponse, upstreamSocket, upstreamHead) => {
+			this.hijackedSockets.add(upstreamSocket);
+			upstreamSocket.on("close", () => this.hijackedSockets.delete(upstreamSocket));
 			const headerLines = Object.entries(upstreamResponse.headers)
 				.map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(", ") : value}`)
 				.join("\r\n");

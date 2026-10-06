@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 
-import koffi from "koffi";
+import { requireKoffi, type Koffi } from "./koffiRuntime";
 
 /**
  * Low-level Win32 bindings for CUA (Computer Use Agent).
@@ -27,9 +27,14 @@ import koffi from "koffi";
  * 平台范围（2026-09-29 与 cua 作者对齐）：CUA 能力现阶段仅支持 Windows，
  * macOS/Linux 后补。但本模块会被主进程入口链无条件 import，因此**顶层禁止
  * 任何 koffi 原生调用**（曾因顶层 `koffi.load("user32.dll")` 在 Linux/macOS
- * 启动即崩，表现为「双击无反应」，journal 报 Failed to load shared library）。
+ * 启动即崩，表现为「双击无反应」，journal 报 Failed to load shared library），
+ * **连静态 `import koffi` 也不行**——koffi 的 JS 包装在模块求值时就同步加载
+ * 原生二进制，打包缺对应 arch 的 `@koromix/koffi-*` 可选依赖时（arm64 runner
+ * 打的 x64 macOS 包即缺 darwin-x64，issue #313）import 本身抛
+ * 「Cannot find the native Koffi module」，整个应用启动即崩。
  * 约定：
- * - win32：首次访问 `user32`/`kernel32` 时才加载 DLL 并绑定；
+ * - win32：经 `./koffiRuntime` 在函数内 createRequire 加载，加载失败降级为
+ *   `koffiStub` 并记录原因；首次访问 `user32`/`kernel32` 时才加载 DLL 并绑定；
  * - 其它平台：`koffiStub` 提供可赋值的占位（顶层 `const xxx = user32.func(...)`
  *   能完成初始化），真正调用任何 CUA 操作时抛带平台说明的错误；
  * - 未来补 mac/linux 时：替换 `koffiStub` 为对应平台实现，保持「模块加载零原生调用」
@@ -38,8 +43,12 @@ import koffi from "koffi";
 
 const isWindows = process.platform === "win32";
 
+/** win32 上 koffi 加载失败时的原因；null 表示未尝试或加载成功（降级后的报错文案用）。 */
+let koffiLoadError: string | null = null;
+
 function unavailable(op: string): never {
-	throw new Error(`CUA Win32 bindings are only available on Windows (got ${op} on ${process.platform}).`);
+	const reason = koffiLoadError ? `koffi native module failed to load (${koffiLoadError})` : "CUA Win32 bindings are only available on Windows";
+	throw new Error(`CUA Win32 bindings unavailable: ${reason} (got ${op} on ${process.platform}).`);
 }
 
 /** 非 Windows 上的绑定占位：可赋值给顶层 const，真正调用时才抛。 */
@@ -47,22 +56,40 @@ function stubFunc(name: string): (...args: unknown[]) => never {
 	return (...args: unknown[]) => unavailable(`${name}(${args.length} args)`);
 }
 
-/** 非 Windows 上的 koffi 占位：load/struct/proto 只需「返回可赋值的占位」，不触达原生层。 */
+/** 无可用 koffi 时的占位：load/struct/proto 只需「返回可赋值的占位」，不触达原生层。 */
 const koffiStub = {
 	load: (_name: string) => ({ func: (signature: string) => stubFunc(signature) }),
 	struct: (name: string) => ({ __koffiStruct: name }),
 	proto: (name: string) => ({ __koffiProto: name }),
 	sizeof: () => 0,
 	address: () => 0,
-} as unknown as typeof koffi;
+} as unknown as Koffi;
 
-const koffiLazy: typeof koffi = isWindows ? koffi : koffiStub;
+/**
+ * koffi 运行时解析：只在 win32 上加载（其它平台 CUA 暂无实现，连 require 都不
+ * 发起，macOS/Linux 的打包有没有 koffi 二进制都不再影响启动）；win32 上加载
+ * 失败也降级为占位——CUA 是实验能力，原生模块缺失不许拖垮整个应用启动。
+ */
+const koffiLazy: Koffi = (() => {
+	if (!isWindows) return koffiStub;
+	try {
+		return requireKoffi();
+	} catch (err) {
+		koffiLoadError = err instanceof Error ? err.message : String(err);
+		return koffiStub;
+	}
+})();
 
-let cachedUser32: ReturnType<typeof koffi.load> | null = null;
-let cachedKernel32: ReturnType<typeof koffi.load> | null = null;
+/** 取 koffi 指针/句柄地址（CuaEngine 的 HWND 归一化用）；占位平台上同其它绑定，调用时才抛。 */
+export function koffiAddress(value: unknown): bigint {
+	return koffiLazy.address(value);
+}
+
+let cachedUser32: ReturnType<Koffi["load"]> | null = null;
+let cachedKernel32: ReturnType<Koffi["load"]> | null = null;
 
 /** 惰性 DLL 句柄：win32 首次访问时加载；其它平台由 koffiStub 提供占位。 */
-function dll(name: "user32" | "kernel32"): ReturnType<typeof koffi.load> {
+function dll(name: "user32" | "kernel32"): ReturnType<Koffi["load"]> {
 	if (name === "user32") {
 		cachedUser32 ??= koffiLazy.load("user32.dll");
 		return cachedUser32;
@@ -80,8 +107,8 @@ function dll(name: "user32" | "kernel32"): ReturnType<typeof koffi.load> {
  * 就是「模块一加载就崩」（2026-09-30 打包版启动失败：崩溃点看着在入口
  * `require("koffi")`，实际是本模块第一条绑定语句）。
  */
-function lazyDll(name: "user32" | "kernel32"): ReturnType<typeof koffi.load> {
-	return new Proxy({} as ReturnType<typeof koffi.load>, {
+function lazyDll(name: "user32" | "kernel32"): ReturnType<Koffi["load"]> {
+	return new Proxy({} as ReturnType<Koffi["load"]>, {
 		get: (_target, prop) => {
 			const lib = dll(name);
 			const value = Reflect.get(lib, prop);
@@ -90,8 +117,8 @@ function lazyDll(name: "user32" | "kernel32"): ReturnType<typeof koffi.load> {
 	});
 }
 
-export const user32: ReturnType<typeof koffi.load> = lazyDll("user32");
-export const kernel32: ReturnType<typeof koffi.load> = lazyDll("kernel32");
+export const user32: ReturnType<Koffi["load"]> = lazyDll("user32");
+export const kernel32: ReturnType<Koffi["load"]> = lazyDll("kernel32");
 
 // ---------------------------------------------------------------------------
 // Structs

@@ -28,6 +28,19 @@ test("ready 且无 error 时不恢复（正常态轮询自己会追平）", () =
 	assert.equal(decideStreamRecovery({ ...base, status: "ready" }).recover, false);
 });
 
+// 回归：刷新页面/端口中断后 useChat 已回 ready 但 pi 仍在跑（本轮 SSE 已死），
+// 此时必须允许落盘追赶，否则页面永远停在旧文本（用户报障：刷新后文本不动）。
+test("ready 但 runtime 忙（脱节态）允许静默追赶", () => {
+	const decision = decideStreamRecovery({ ...base, status: "ready", runtimeBusy: true });
+	assert.equal(decision.recover, true);
+	assert.equal(decision.notify, false, "脱节追赶不打扰用户");
+});
+
+test("ready + runtime 忙也受防抖限制（不造成追赶风暴）", () => {
+	assert.equal(decideStreamRecovery({ ...base, status: "ready", runtimeBusy: true, lastAttemptAt: base.now - 1000 }).recover, false);
+	assert.equal(decideStreamRecovery({ ...base, status: "ready", runtimeBusy: true, lastAttemptAt: base.now - WEB_RECOVERY_DEBOUNCE_MS - 1 }).recover, true);
+});
+
 test("error 态立即恢复并提示用户", () => {
 	const decision = decideStreamRecovery({ ...base, status: "error" });
 	assert.equal(decision.recover, true);

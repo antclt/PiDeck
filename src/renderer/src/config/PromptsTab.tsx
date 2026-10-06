@@ -3,7 +3,7 @@ import { Switch } from "../components/ui-shadcn/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui-shadcn/table";
 import { showNotice } from "../utils/notice";
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Check, FileEdit, FileText, Pencil, ShoppingBag, Trash2, X } from "lucide-react";
+import { Loader2, Check, FileEdit, FileText, Pencil, ShoppingBag, Trash2, X } from "lucide-react";
 import type { PiPromptTemplateListResult, PiPromptTemplateSummary, ProjectResourceOverrides } from "../../../shared/types";
 import { t } from "../i18n";
 import { CodeMirrorEditor } from "../components/app/CodeMirrorEditor";
@@ -308,6 +308,7 @@ export function PromptsTab(props: {
 						title={t("config.createPrompt")}
 						submit={
 							<Button size="sm" variant="default" disabled={!canCreate || props.creating} onClick={props.onCreate}>
+								{props.loading || props.creating ? <Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" /> : null}
 								{props.loading || props.creating ? t("common.loading") : t("config.create")}
 							</Button>
 						}
@@ -374,7 +375,10 @@ export function PromptsTab(props: {
 									</div>
 								</div>
 								{props.editLoading ? (
-									<div className="py-12 text-center text-control text-text-tertiary">{t("common.loading")}</div>
+									<div className="flex items-center justify-center gap-2 py-12 text-control text-text-tertiary">
+										<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+										{t("common.loading")}
+									</div>
 								) : (
 									<div className="prompts-monaco-wrap">
 										<CodeMirrorEditor value={props.editContent} onChange={props.onChangeEditContent} />

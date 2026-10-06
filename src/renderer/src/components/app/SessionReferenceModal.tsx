@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
 import { Button } from "../ui-shadcn/button";
 import { cn } from "../../lib/utils";
@@ -175,7 +175,12 @@ export function SessionReferenceModal(props: { session: SessionSummary; onClose:
 				</DialogHeader>
 
 				<div className="min-h-0 flex-1 overflow-y-auto px-3 py-2.5">
-					{loading && <div className="flex items-center justify-center px-4 py-10 text-caption text-text-tertiary">{t("common.loading")}...</div>}
+					{loading && (
+						<div className="flex items-center justify-center gap-2 px-4 py-10 text-caption text-text-tertiary">
+							<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+							{t("common.loading")}...
+						</div>
+					)}
 					{error && (
 						<div className="flex items-center justify-center px-4 py-10 text-caption text-[var(--color-error)]">
 							{t("sessionRef.loadError")}: {error}

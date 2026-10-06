@@ -187,3 +187,70 @@ test("import: Claude 导入器根目录不受子类影响（sourceRoot 覆盖只
 		rmSync(home, { recursive: true, force: true });
 	}
 });
+
+test("import: 连续单 toolCall assistant（并行批量调用）合并为一条，toolResult 全部配对", async () => {
+	const home = mkdtempSync(join(tmpdir(), "qoder-home-"));
+	try {
+		const projectPath = "F:\\PiDeck";
+		const sessionId = "sess-parallel";
+		// Qoder 把一轮并行调用写成连续的单 call assistant 条目（call_00_/call_01_ 前缀编号），
+		// 逐条写出会让 pi 请求转换把除最后一个 call 外的 toolResult 判成孤儿（严格供应商 400）
+		const entries = [
+			{ type: "user", sessionId, cwd: projectPath, timestamp: "2026-09-25T00:00:00.000Z", message: { role: "user", content: [{ type: "text", text: "批量读三个文件" }] } },
+			{
+				type: "assistant",
+				sessionId,
+				cwd: projectPath,
+				timestamp: "2026-09-25T00:00:01.000Z",
+				message: {
+					role: "assistant",
+					content: [
+						{ type: "thinking", thinking: "并行读取", signature: "" },
+						{ type: "tool_use", id: "call_00_a", name: "Read", input: { file_path: "a.ts" } },
+					],
+				},
+			},
+			{ type: "assistant", sessionId, cwd: projectPath, timestamp: "2026-09-25T00:00:01.100Z", message: { role: "assistant", content: [{ type: "tool_use", id: "call_01_b", name: "Read", input: { file_path: "b.ts" } }] } },
+			{ type: "assistant", sessionId, cwd: projectPath, timestamp: "2026-09-25T00:00:01.200Z", message: { role: "assistant", content: [{ type: "tool_use", id: "call_02_c", name: "Read", input: { file_path: "c.ts" } }] } },
+			{ type: "user", sessionId, cwd: projectPath, timestamp: "2026-09-25T00:00:02.000Z", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "call_00_a", content: "aaa" }] } },
+			{ type: "user", sessionId, cwd: projectPath, timestamp: "2026-09-25T00:00:02.100Z", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "call_01_b", content: "bbb" }] } },
+			{ type: "user", sessionId, cwd: projectPath, timestamp: "2026-09-25T00:00:02.200Z", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "call_02_c", content: "ccc" }] } },
+			{ type: "assistant", sessionId, cwd: projectPath, timestamp: "2026-09-25T00:00:03.000Z", message: { role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text: "三个文件都读完了。" }] } },
+		];
+		const { file } = writeQoderSession(home, projectPath, sessionId, entries);
+
+		const importer = loadImporter(home);
+		const report = await importer.import(projectPath, [file]);
+		assert.equal(report.imported, 1);
+		const lines = readFileSync(report.results[0].targetPath, "utf8")
+			.split(/\r?\n/)
+			.filter(Boolean)
+			.map((line) => JSON.parse(line));
+
+		const assistants = lines.filter((line) => line.type === "message" && line.message?.role === "assistant");
+		const merged = assistants.find((line) => line.message.content.some((item) => item.type === "toolCall"));
+		assert.ok(merged, "应有含 toolCall 的 assistant 消息");
+		const calls = merged.message.content.filter((item) => item.type === "toolCall");
+		assert.deepEqual(
+			calls.map((item) => item.id),
+			["call_00_a", "call_01_b", "call_02_c"],
+			"三个并行调用必须合并进同一条 assistant",
+		);
+
+		// 合并 assistant 之后紧跟三个 toolResult，顺序与 id 一一配对
+		const mergedIndex = lines.indexOf(merged);
+		const following = lines.slice(mergedIndex + 1, mergedIndex + 4);
+		assert.deepEqual(
+			following.map((line) => [line.message?.role, line.message?.toolCallId]),
+			[
+				["toolResult", "call_00_a"],
+				["toolResult", "call_01_b"],
+				["toolResult", "call_02_c"],
+			],
+			"toolResult 必须紧跟合并 assistant 且全部配对（不允许降级或孤儿）",
+		);
+		assert.equal(following[0].message.content[0].text, "aaa");
+	} finally {
+		rmSync(home, { recursive: true, force: true });
+	}
+});

@@ -533,6 +533,9 @@ export function SessionSourceFilterMenu(props: { menu: { projectId: string; x: n
 		zcode: t("sessionSource.zcode"),
 		workbuddy: t("sessionSource.workbuddy"),
 		cursor: t("sessionSource.cursor"),
+		kimi: t("sessionSource.kimi"),
+		kimiwork: t("sessionSource.kimiwork"),
+		minimax: t("sessionSource.minimax"),
 		dsh: t("sessionBackend.dsh"),
 		imagegen: t("sessionBackend.imagegen"),
 	};
@@ -574,6 +577,11 @@ export function ProjectContextMenu(props: {
 	onImportZCodeSessions: () => void;
 	onImportWorkBuddySessions: () => void;
 	onImportCursorSessions: () => void;
+	onImportKimiSessions: () => void;
+	/** 导入 Kimi Work（kimi-desktop 桌面版）会话；数据目录位置由探测链/手动指定决定。 */
+	onImportKimiWorkSessions: () => void;
+	/** 导入 MinimaxCode（CLI）会话；数据目录固定 ~/.minimax/v2/sessions。 */
+	onImportMinimaxSessions: () => void;
 	/** 导入其他目录的会话（项目目录被移动/改名后找回历史） */
 	onImportDirectorySessions: () => void;
 	onManageProjectResources: () => void;
@@ -685,6 +693,9 @@ export function ProjectContextMenu(props: {
 							<DropdownMenuItem onSelect={props.onImportZCodeSessions}>{t("menu.importZCode")}</DropdownMenuItem>
 							<DropdownMenuItem onSelect={props.onImportWorkBuddySessions}>{t("menu.importWorkBuddy")}</DropdownMenuItem>
 							<DropdownMenuItem onSelect={props.onImportCursorSessions}>{t("menu.importCursor")}</DropdownMenuItem>
+							<DropdownMenuItem onSelect={props.onImportKimiSessions}>{t("menu.importKimi")}</DropdownMenuItem>
+							<DropdownMenuItem onSelect={props.onImportKimiWorkSessions}>{t("menu.importKimiWork")}</DropdownMenuItem>
+							<DropdownMenuItem onSelect={props.onImportMinimaxSessions}>{t("menu.importMinimax")}</DropdownMenuItem>
 							{/* 目录移动/改名后历史找不到时的找回入口：源目录现选，不复制文件。
 							    放在「导入会话」子菜单最后并加分隔线，与「其它工具导入」区分开。 */}
 							<DropdownMenuSeparator />

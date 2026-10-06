@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { atom, useAtomValue, useSetAtom, useStore } from "jotai";
-import { animateScrollTop, pinScrollDurationMs } from "../lib/pinTurnScroll";
+import { latestUserMessageId, SendScrollPositioner } from "./timeline/sendScroll";
 import { selectAtom } from "jotai/utils";
 import { desktopApi } from "../desktopApi";
 import type { AgentRuntimeState, ChatMessage, SessionMessagePage, SessionRecord } from "../../../shared/types";
@@ -70,11 +70,6 @@ const RUNTIME_HISTORY_TURN_PAGE_SIZE = 3;
  *  首次上滚 9 轮内零延迟；翻页与 runtime 同用 3 轮 cohort。
  *  2026-09 统一轮次协议：废除旧的「按消息条数(100)」页大小，页大小只以轮次计。 */
 const DISK_INITIAL_TURN_PAGE_SIZE = 9;
-/** 发送时把新 user turn 钉到视口顶的目标间距（px）。
- *  小于阈值我们就认为它已经贴顶，跳过定位动画，避免毫无意义的短暂滑动。 */
-const PIN_TO_TOP_TARGET_GAP_PX = 24;
-const PIN_TO_TOP_SKIP_EPSILON_PX = 8;
-
 /** 翻页成功后仅开放实际带回的 cohort，防止消息页大小与 DOM 窗口脱节。
  *  disk 消息页不一定以 user 消息开头（可能在长回答中间切断）；只要页非空就至少开放 1 轮，
  *  否则新增 agent-run 会被尾部窗口裁掉，出现「数据已加载但看不见」的无反馈。 */
@@ -616,10 +611,9 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 	 */
 	const userScrollIntentFrameRef = useRef<number | undefined>(undefined);
 	const settleScrollCancelRef = useRef<(() => void) | undefined>(undefined);
-	/** 发消息置顶的取消句柄；与完结重定位相反——它只服务于「发送那一刻」。 */
-	const pinToTopCancelRef = useRef<(() => void) | undefined>(undefined);
-	/** 最近一次触发置顶的 user messageId：同 id 重放/重复渲染不重复动画。 */
-	const pinnedSendMessageIdRef = useRef<string | null>(null);
+	/** 发送定位只比较 user 身份变化；首帧/切会话取基线，不重播历史消息。 */
+	const sendScrollRef = useRef(new SendScrollPositioner());
+	const sendMessageBaselineRef = useRef<{ ownerKey: string; messageId: string | undefined } | undefined>(undefined);
 	const scrollerScrollApiRef = useRef<MessageScrollerScrollApi | null>(null);
 	const loadMoreAnchorRef = useRef<Tagged<TimelineAnchor> | undefined>(undefined);
 	/** 浏览态钉行：扩窗/翻页前冻住正在看的那一轮，布局变高时按漂移补位置。 */
@@ -673,8 +667,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		setShowScrollToBottom(nextRestoreState.showScrollToBottom);
 		setScrolledWindowTurns(nextRestoreState.scrolledWindowTurns);
 		// 会话切换：发送定位与任何残留动画一律作废，不得把旧会话的动画带到新会话。
-		pinToTopCancelRef.current?.();
-		pinToTopCancelRef.current = undefined;
+		sendScrollRef.current.reset();
 		settleScrollCancelRef.current?.();
 		settleScrollCancelRef.current = undefined;
 	}
@@ -718,6 +711,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		browsePinFrozenRef.current = false;
 		skipBrowsePinRef.current = false;
 		historyBrowseGenerationRef.current += 1;
+		sendScrollRef.current.cancel();
 		// 历史浏览事务结束（回底/重锁）同样作废在途的「最终回答安静定位」动画：
 		// 回底后视口应停在底部，不能让动画把刚回底的位置再拉到 30% 高度。
 		settleScrollCancelRef.current?.();
@@ -740,6 +734,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		// 先解引擎：只改 React autoScroll 会留下 isAtBottom=true，扩窗增高时 RO 钉底。
 		// autoScroll 已是 false 也要 stopScroll——两套状态可能已经分叉。
 		scrollerScrollApiRef.current?.stopScroll();
+		sendScrollRef.current.cancel();
 		// 进入历史浏览（用户上滚/点「显示更早」）：在途的定位动画立即作废，
 		// 程序化滚动不得继续覆盖用户正在做的滚动。
 		settleScrollCancelRef.current?.();
@@ -950,7 +945,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 	 * 必须走 restoreAt。人手滚动不走这里（只更新 expected，见 handleTimelineScroll）。
 	 */
 	const pinBrowseRow = useCallback(() => {
-		if (skipBrowsePinRef.current || autoScrollRef.current) return;
+		if (skipBrowsePinRef.current || autoScrollRef.current || sendScrollRef.current.isAnimating) return;
 		const pin = browsePinRef.current;
 		const timeline = timelineRef.current;
 		if (!pin || !timeline) return;
@@ -988,6 +983,8 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 
 	const setAutoScrollFromScroller = useCallback(
 		(following: boolean) => {
+			// stopScroll 的迟到 onFollowChange(false) 不得覆盖发送动画的恢复跟随。
+			if (sendScrollRef.current.isAnimating) return;
 			// 从历史浏览回到跟随时，先同步关闭旧浏览事务；不能等 autoScroll effect，
 			// 否则同一帧内的扩窗 rAF 或迟到分页仍可覆盖这次重锁。
 			if (following && !autoScrollRef.current) invalidateHistoryBrowsing();
@@ -998,78 +995,35 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		[invalidateHistoryBrowsing],
 	);
 
-	/**
-	 * 新 run 开始（busy 边沿）时调用：若在途 settle 定位动画（系统态移动视口），
-	 * 取消动画并恢复跟随贴底——否则动画飞行中发送新一轮，视口会永久停在旧 run
-	 * 的 30% 锚点：新 run 流式在视口外展开且不跟随，结束后自身 settle 也不 arm
-	 * （F1，2026-09 对抗审查）。无在途动画（用户正在读历史）则不打扰。
-	 */
-	/**
-	 * 发送把新一轮 user turn 顺滑钉到视口顶的历史背景：原先这条动画挂在「回复完毕」
-	 * 之后，用户看起来的感觉是「答案结束了又滚回去」，所以被撤。现在只在发送触发时
-	 * 跳一次，同一动画不会出现在完结/Tab来回路径上。
-	 *
-	 * 实现原则（防止再出旧问题）：
-	 * - 不再处理「执行过程自动收起」/骨架之类分支，只认 user 行；
-	 * - 目标已经跟期望差不多（≤8px）就不动，避免无意义抖动；
-	 * - 动一次就停下来，后续 assistant/工具出现不串联补滚（时间线高度交给垫片交给渲染层）。
-	 */
+	const sendMessageId = latestUserMessageId(messages);
 	useLayoutEffect(() => {
-		// 切换会话 / 首次恢复阶段不触发发送定位；否则会把「切回历史恢复」误判为新发送，
-		// 演化出用户所描述的「tab 来回切换的时候又滚回去」。
-		if (restorePhase !== "complete") return;
-		const last = messages[messages.length - 1];
-		if (!last || !last.id.endsWith("-user")) return;
-		if (pinnedSendMessageIdRef.current === last.id) return;
-		pinnedSendMessageIdRef.current = last.id;
-		// 鉴在引擎锁底（autoScroll=true）下，滚上去会被 ResizeObserver 拉回来。先解锁，
-		// 再我们自己控。
-		const api = scrollerScrollApiRef.current;
-		api?.stopScroll();
-		autoScrollRef.current = false;
-		setAutoScroll(false);
-		setShowScrollToBottom(true);
-		// 同一帧 DOM 下 user 行刚刚挂载，需要两帧再量位（第一帧可能的浏览器还没
-		// 完成插入后的布局）。
-		let cancelled = false;
-		const twoFrames = () =>
-			new Promise<void>((resolve) => {
-				requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-			});
-		void twoFrames().then(() => {
-			if (cancelled) return;
-			const timeline = timelineRef.current;
-			if (!timeline) return;
-			const row = timeline.querySelector(`[data-message-id="${CSS.escape(last.id)}"]`) as HTMLElement | null;
-			if (!row) return;
-			const gap = row.getBoundingClientRect().top - timeline.getBoundingClientRect().top;
-			if (Math.abs(gap - PIN_TO_TOP_TARGET_GAP_PX) <= PIN_TO_TOP_SKIP_EPSILON_PX) return;
-			const target = timeline.scrollTop + (gap - PIN_TO_TOP_TARGET_GAP_PX);
-			const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-			if (reduceMotion) {
-				timeline.scrollTo({ top: target, behavior: "instant" });
-				return;
-			}
-			const durationMs = pinScrollDurationMs(target - timeline.scrollTop);
-			markProgrammaticScroll(durationMs + 120);
-			let done = false;
-			pinToTopCancelRef.current?.();
-			const cancel = animateScrollTop(timeline, target, {
-				isCancelled: () => cancelled || ownerKeyRef.current !== ownerKey,
-				onComplete: () => {
-					done = true;
-					clearProgrammaticTimelineScroll();
-					pinToTopCancelRef.current = undefined;
-				},
-			});
-			if (!done) pinToTopCancelRef.current = cancel;
+		const baseline = sendMessageBaselineRef.current;
+		sendMessageBaselineRef.current = { ownerKey, messageId: sendMessageId };
+		// 恢复/首帧只记录基线；role 判定覆盖 UUID、DSH 和最快同帧抵达的 assistant。
+		if (!baseline || baseline.ownerKey !== ownerKey || restorePhase !== "complete" || !sendMessageId || baseline.messageId === sendMessageId) return;
+		const timeline = timelineRef.current;
+		if (!timeline) return;
+		sendScrollRef.current.pin(timeline, sendMessageId, {
+			onStart: () => {
+				invalidateHistoryBrowsing();
+				scrollerScrollApiRef.current?.restoreAt(timeline.scrollTop);
+				autoScrollRef.current = false;
+				setAutoScroll(false);
+				setShowScrollToBottom(false);
+			},
+			onComplete: () => {
+				if (ownerKeyRef.current !== ownerKey) return;
+				autoScrollRef.current = true;
+				setAutoScroll(true);
+				setShowScrollToBottom(false);
+				void scrollerScrollApiRef.current?.scrollToBottom({ animation: "instant" });
+			},
+			isFollowing: () => autoScrollRef.current,
+			markProgrammaticScroll,
+			clearProgrammaticScroll: clearProgrammaticTimelineScroll,
 		});
-		return () => {
-			cancelled = true;
-		};
-	}, [markProgrammaticScroll, messages, restorePhase]);
-
-	/** 计算垫片高度：让「用户消息顶 + 视口高 == 内容总高」，滚到底时用户消息正好钉在顶部。 */
+	}, [clearProgrammaticTimelineScroll, invalidateHistoryBrowsing, markProgrammaticScroll, ownerKey, restorePhase, sendMessageId]);
+	useEffect(() => () => sendScrollRef.current.reset(), []);
 
 	const loadMoreMessages = useCallback(
 		(source: "scroll" | "button" = "scroll") => {
@@ -1449,6 +1403,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 			// 「最终回答安静定位」动画——动画自激发的 scroll 派生意图带 source="scroll"，
 			// 且被 programmaticScroll 窗口抑制，不会把自己取消掉（状态驱动取消）。
 			if (source === "input") {
+				sendScrollRef.current.cancel();
 				settleScrollCancelRef.current?.();
 				settleScrollCancelRef.current = undefined;
 			}

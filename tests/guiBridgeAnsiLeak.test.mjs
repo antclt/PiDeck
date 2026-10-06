@@ -201,7 +201,7 @@ describe("bridge ANSI: pi-tui 组件树（footer/header/widget/editor 同一条�
 	const tui = makeTui();
 
 	it("Text 适配器：真彩色 → text 节点（净文本 + style）", () => {
-		const node = serializeMod.serializeComponent(new tui.Text(MCP_ANSI), ctx(), null);
+		const node = serializeMod.serializeComponent(new tui.Text(MCP_ANSI), ctx());
 		assertNoEscapes(node, "Text 节点");
 		// 单行单 run → 直接是 text 节点
 		assert.equal(node.kind, "text");
@@ -210,13 +210,13 @@ describe("bridge ANSI: pi-tui 组件树（footer/header/widget/editor 同一条�
 	});
 
 	it("TruncatedText / Loader 的字符串字段不得带 ESC", () => {
-		assertNoEscapes(serializeMod.serializeComponent(new tui.TruncatedText(MCP_ANSI), ctx(), null), "TruncatedText 节点");
+		assertNoEscapes(serializeMod.serializeComponent(new tui.TruncatedText(MCP_ANSI), ctx()), "TruncatedText 节点");
 		const styled = themeMod.createBridgeTheme().fg("accent", "loading");
-		assertNoEscapes(serializeMod.serializeComponent(new tui.Loader(`${CSI_ERASE}${styled}`, [`${CSI_ERASE}|`]), ctx(), null), "Loader 节点");
+		assertNoEscapes(serializeMod.serializeComponent(new tui.Loader(`${CSI_ERASE}${styled}`, [`${CSI_ERASE}|`]), ctx()), "Loader 节点");
 	});
 
 	it("★ 未知组件降级 ansi：非 SGR 残留必须剥净", () => {
-		const node = serializeMod.serializeComponent(new tui.Unknown([`${CSI_ERASE}${MCP_ANSI}`, OSC_LINK, `${CHARSET}tail`]), ctx(), null);
+		const node = serializeMod.serializeComponent(new tui.Unknown([`${CSI_ERASE}${MCP_ANSI}`, OSC_LINK, `${CHARSET}tail`]), ctx());
 		assert.equal(node.kind, "ansi");
 		assertNoEscapes(node, "ansi 降级节点");
 		assert.deepEqual([...node.lines], [MCP_CLEAN, "docs", "tail"]);

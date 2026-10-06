@@ -22,7 +22,7 @@ import type { UIBridgeTransport } from "./pi-deck-gui-bridge-transport";
 import { repushGuiState, findContributionNode, resolveServiceResult } from "./pi-deck-gui-bridge-gui";
 import { hashUINode, serialize, componentOf, invokeAction } from "./pi-deck-gui-bridge-serialize";
 import { createBridgeTheme, sanitizeBridgeUpdate, type BridgeTheme } from "./pi-deck-gui-bridge-theme";
-import { loadPiTui, type PiTuiComponent, type PiTuiModule } from "./pi-deck-gui-bridge-tui";
+import type { PiTuiComponent } from "./pi-deck-gui-bridge-tui";
 import type { GuiComponent } from "./pi-deck-gui-bridge-gui-types";
 
 /** 落点 id（与 PiDeck 侧约定）。 */
@@ -197,11 +197,6 @@ export function createBridgeRuntime(rawTransport: UIBridgeTransport): BridgeRunt
 			state.hiddenThinkingLabel = clean.label;
 		}
 		transport.push(clean);
-	}
-
-	/** 取 pi-tui 模块（可能为 null → 适配器走形状判定）。 */
-	function piTui(): PiTuiModule | null {
-		return loadPiTui().module;
 	}
 
 	/**

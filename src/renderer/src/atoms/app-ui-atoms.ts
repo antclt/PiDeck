@@ -16,8 +16,8 @@ export const settingsOpenAtom = atom(false);
 
 /** Logo 风格的渲染层镜像（App.tsx 在 settings 变化时同步写入，照 announcement-atoms 模式）。
  *  LogoMark / PiTuiLogo / AppParts 侧栏 / AboutPopover 订阅，避免 settings props 透传链；
- *  Web 独立环境无人写入，永远默认 classic（现状），不引入额外通道。 */
-export const logoStyleAtom = atom<"classic" | "pi-tui">("classic");
+ *  Web 独立环境无人写入，保持默认 pi-tui（与 settings 默认同源），不引入额外通道。 */
+export const logoStyleAtom = atom<"classic" | "pi-tui">("pi-tui");
 
 /** 当前活跃编辑器 tab 的文件路径（无 tab 时为 null）：文件抽屉树行高亮用。
  *  由 useFileEditor 在 activeTab 变化时写入；抽屉树跨六个组件层级订阅，

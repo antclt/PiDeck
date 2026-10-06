@@ -17,12 +17,12 @@ export type AppAccentMode = "default" | "green" | "blue" | "purple" | "amber" | 
  * classic-green 为出厂默认（中性黑白灰）；fresh-green 为全屏绿色主题（表面带绿色调）。
  */
 export type AppSkinId = "classic-green" | "fresh-green" | "graphite" | "sea-blue" | "warm-beige" | "custom";
-/** Logo 风格：classic = PiDeck 四块拼图 π（默认）；pi-tui = pi 官方 TUI 三色像素标（coral/blue/yellow） */
+/** Logo 风格：pi-tui = pi 官方 TUI 三色像素标（coral/blue/yellow，默认）；classic = PiDeck 四块拼图 π（显式选择） */
 export type LogoStyle = "classic" | "pi-tui";
 
-/** 解析 logo 风格：仅 "pi-tui" 视为新风格，其余（null/undefined/未知旧值）一律 classic。主进程窗口图标与渲染层 UI 共用。 */
+/** 解析 logo 风格：仅 "classic" 视为显式选择经典；其余（null/undefined/未知旧值）一律回落默认 pi-tui。主进程窗口图标与渲染层 UI 共用。 */
 export function resolveLogoStyle(value: string | null | undefined): LogoStyle {
-	return value === "pi-tui" ? "pi-tui" : "classic";
+	return value === "classic" ? "classic" : "pi-tui";
 }
 export type AppLanguageMode = "system" | "zh-CN" | "en-US" | "pseudo";
 export type LinkOpenMode = "external" | "internal";
@@ -342,6 +342,16 @@ export type AppSettings = {
 	/** 巡游碰边后 idle 停顿时长（分钟），默认 5，范围 1–30 */
 	petPatrolPauseMin: number;
 
+	// ── 悬浮球（floater）：主窗口隐藏后屏幕角落的常驻小圆点，点开进入小任务浮窗/工作台 ──
+	/** 是否启用悬浮球，默认 false：开启后主窗口可隐藏为 64px 悬浮球，不挡屏 */
+	floatingBallEnabled: boolean;
+	/** 悬浮球点击后的展开目标：mini=极简浮窗（状态+快捷输入+最近会话），compact=小任务紧凑模式（主窗口紧凑化） */
+	floatingBallExpandTarget: "mini" | "compact";
+	/** 悬浮球是否始终置顶，默认 true */
+	floatingBallAlwaysOnTop: boolean;
+	/** 悬浮球边缘吸附：拖动松手后是否自动贴到屏幕左右边缘，默认 true */
+	floatingBallSnapToEdge: boolean;
+
 	// ── 闲置 Agent 内存优化：自动释放长时间闲置的 agent 进程，降低多会话内存占用 ──
 	/** 是否自动释放闲置 agent，默认 true：开关关闭后闲置 agent 常驻内存不释放 */
 	idleAgentAutoRelease: boolean;
@@ -349,6 +359,11 @@ export type AppSettings = {
 	idleAgentKeepCount: number;
 	/** 闲置判定时长（分钟），默认 60：agent 连续闲置超过该时长才可被释放 */
 	idleAgentTimeoutMin: number;
+
+	// ── standby 预热池：空闲时预先启动一个已握手的 pi 进程，新建/草稿会话激活近即时 ──
+	/** 是否启用 standby 预热（默认 true）：每项目最多一个，约 300MB 内存，10 分钟未使用自动回收。
+	 *  修改后只影响下一次预热/认领（进程 spawn 参数无法热更，指纹不匹配自动回退正常创建）。 */
+	standbyRuntimeEnabled?: boolean;
 
 	// ── CUA（Computer Use Agent）：让 Agent 观察屏幕并注入鼠标/键盘输入 ──
 	/**
@@ -358,6 +373,12 @@ export type AppSettings = {
 	 * 真实输入注入另有每次操作审批门 + 全局/会话杀开关双重兜底。
 	 */
 	cuaEnabled: boolean;
+	/**
+	 * CUA 免审批（自动放行），默认 false。
+	 * 开启后写操作（点击/输入/滚动）跳过逐次审批对话框直接执行；
+	 * 全局/会话杀开关仍然生效（关掉 CUA 仍一律拒绝）。风险自担型开关。
+	 */
+	cuaAutoApprove: boolean;
 
 	// ── 模型收藏：ModelPicker 中用 ☆ 标记，收藏的模型在列表中置顶 ──
 	/** 收藏的模型 ID 列表 */
@@ -536,6 +557,16 @@ export type AppSettings = {
 	 * 在展示时安全忽略，避免修改 pi 会话文件或把短生命周期 agentId 持久化。
 	 */
 	pinnedSessionIds?: string[];
+
+	// ── 会话导入 ──
+	/**
+	 * Kimi Work（kimi-desktop 桌面版）daimon-share 数据目录的用户显式指定位置。
+	 * undefined/空串 = 未指定，走探测链（kimi-desktop 的 daimon-storage.json →
+	 * 默认安装位置 %APPDATA%/kimi-desktop/daimon-share）。用户在 Kimi Work 里把
+	 * 数据目录自定义到任意盘符时，靠探测链自动找到；此项仅用于探测失败时的手动指定。
+	 * 优先级最高，非空时不再读探测链。
+	 */
+	kimiWorkShareRoot?: string;
 
 	// ── 扩展管理 ──
 	/**
@@ -749,7 +780,7 @@ export function createDefaultAppSettings(): AppSettings {
 		themeScheduleDarkStart: "19:00",
 		accent: "default",
 		themeSkin: "classic-green",
-		logoStyle: "classic",
+		logoStyle: "pi-tui",
 		customThemeOverrides: {},
 		backgroundImage: "",
 		backgroundImageOpacity: 0.8,
@@ -833,11 +864,18 @@ export function createDefaultAppSettings(): AppSettings {
 		petScale: DEFAULT_PET_SCALE,
 		petPatrolEnabled: true,
 		petPatrolPauseMin: 5,
+		// 悬浮球默认关闭：开启后主窗口可隐藏为小圆点，不影响现状
+		floatingBallEnabled: false,
+		floatingBallExpandTarget: "mini",
+		floatingBallAlwaysOnTop: true,
+		floatingBallSnapToEdge: true,
 		// 闲置 agent 自动释放：与 main SettingsStore 默认值保持一致，避免启动时闪烁
 		idleAgentAutoRelease: true,
 		idleAgentKeepCount: 5,
 		idleAgentTimeoutMin: 60,
+		standbyRuntimeEnabled: true,
 		cuaEnabled: false,
+		cuaAutoApprove: false,
 		favoriteModels: [],
 
 		// 字体配置：与 main SettingsStore 默认值保持一致，避免启动时闪烁

@@ -19,6 +19,7 @@ import { SessionQueuedMessagesStrip } from "./SessionQueuedMessagesStrip";
 import { SessionSurfaceStage } from "./SessionSurfaceStage";
 import { ComposerArea } from "./ComposerArea";
 import { useReplyActions } from "../../hooks/useReplyActions";
+import { useAnimationWindow } from "../../hooks/useAnimationWindow";
 import { chatContentWidthStyle } from "./chatContentWidth";
 import { TerminalDockPanel, TERMINAL_PANEL_COLLAPSED_SIZE, TERMINAL_PANEL_MIN_SIZE } from "../terminal/TerminalDockPanel";
 import { useSessionPaneServices } from "./SessionPaneServices";
@@ -191,6 +192,9 @@ export function SessionView({
 	const terminalPanelRef = useRef<PanelImperativeHandle | null>(null);
 	const sessionGroupRef = useRef<GroupImperativeHandle | null>(null);
 	const terminalProgrammaticExpireRef = useRef(0);
+	// 折叠/展开动画窗口：terminalCollapsed 翻转后短暂给面板挂 flex-grow 过渡，
+	// 让程序化 setLayout 有 160ms 高度渐变；拖拽时属性不在，直接操作不橡皮筋。
+	const terminalCollapseAnimating = useAnimationWindow(terminalCollapsed, 200);
 
 	const terminalPanelVisible = !isLanWeb && !settingsOpen && !environmentDialog && terminalDockVisible && terminalOpen;
 	// 空会话磁盘就绪后卸底部栏，改由 timeline 内 SessionStartSurface 居中输入。
@@ -286,6 +290,7 @@ export function SessionView({
 				key={`${sessionId}:${sessionResizableGroupKey(sessionPanels)}`}
 				orientation="vertical"
 				className="session-v-group"
+				data-terminal-collapse-anim={terminalCollapseAnimating || undefined}
 				groupRef={sessionGroupRef}
 				defaultLayout={sessionGroupDefaultLayout(sessionPanels, terminalCollapsed ? TERMINAL_PANEL_COLLAPSED_SIZE : terminalRowHeight, Math.max(1, window.innerHeight - 120))}
 				resizeTargetMinimumSize={{ fine: 20, coarse: 24 }}

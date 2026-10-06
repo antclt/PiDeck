@@ -302,6 +302,21 @@ export const ipcChannels = {
 	workbuddySessionsImport: "workbuddy-sessions:import",
 	cursorSessionsScan: "cursor-sessions:scan",
 	cursorSessionsImport: "cursor-sessions:import",
+	kimiSessionsScan: "kimi-sessions:scan",
+	kimiSessionsImport: "kimi-sessions:import",
+	/**
+	 * Kimi Work（kimi-desktop 桌面版）会话导入：数据目录位置不固定（默认安装位置
+	 * / daimon-storage.json 自定义位置 / PiDeck settings 手动指定），describe 返回探测结果。
+	 */
+	kimiWorkSessionsDescribe: "kimi-work-sessions:describe",
+	kimiWorkSessionsScan: "kimi-work-sessions:scan",
+	kimiWorkSessionsImport: "kimi-work-sessions:import",
+	/**
+	 * MinimaxCode（CLI）会话导入：数据目录固定在 ~/.minimax/v2/sessions，
+	 * 扫描返回按 cwd 归属项目的会话列表（cwd 取自 llm-call.json 的 working directory）。
+	 */
+	minimaxSessionsScan: "minimax-sessions:scan",
+	minimaxSessionsImport: "minimax-sessions:import",
 	/**
 	 * 外置目录会话导入（项目目录移动/改名后找回历史）：扫描用户选定的目录
 	 * （旧项目目录 / 某个 encoded 分组目录 / pi sessions 根）里的会话。
@@ -470,6 +485,7 @@ export const ipcChannels = {
 	/** 验证 WSL 连接：检查 distro + user 是否可达，以及 pi 是否已安装 */
 	wslValidateConnection: "wsl:validate-connection",
 	piUpdateCheck: "pi:update-check",
+	piReleaseNotes: "pi:release-notes",
 	piUpdate: "pi:update",
 	/** 在系统终端中执行安装命令（npm install）并返回结果 */
 	piExecInstall: "pi:exec-install",
@@ -673,6 +689,12 @@ export const ipcChannels = {
 	configTokendanceAuthCancel: "config:tokendance-auth-cancel",
 	/** 提交一次性授权 code 交换 TokenDance API Key（成功返回完整 key） */
 	configTokendanceAuthExchange: "config:tokendance-auth-exchange",
+	/** 创建 TokenDance 充值会话（整数元；返回聚合码内容/支付宝深链/status_url） */
+	configTokendanceTopUpCreate: "config:tokendance-topup-create",
+	/** 查询充值会话状态（只接受服务端下发且通过白名单校验的 status_url） */
+	configTokendanceTopUpStatus: "config:tokendance-topup-status",
+	/** 由用户点击浏览器支付宝 App 深链（仅允许 alipays://；不得自动跳转） */
+	configTokendanceTopUpOpenAlipay: "config:tokendance-topup-open-alipay",
 	/** 测试 provider 连接（隔离探针）：临时 agent 目录 + PI_CODING_AGENT_DIR 跑真实 pi，测当前表单值且不落盘正式配置 */
 	configTestProvider: "config:test-provider",
 	/** 查询 provider 用量/余额（主进程按 provider 名路由：门控 → 端点解析 → 模板探测） */
@@ -943,6 +965,27 @@ export const ipcChannels = {
 	quickTaskExit: "quick-task:exit",
 	shellMenuQuickTaskGetState: "shell-menu:quick-task-get-state",
 	shellMenuQuickTaskSetEnabled: "shell-menu:quick-task-set-enabled",
+	// ===== 悬浮球（floater）：主窗口隐藏后的常驻小圆点 =====
+	floatingBallGetState: "floating-ball:get-state",
+	floatingBallState: "floating-ball:state",
+	floatingBallEnter: "floating-ball:enter",
+	floatingBallExit: "floating-ball:exit",
+	floatingBallDragStart: "floating-ball:drag-start",
+	floatingBallDragMove: "floating-ball:drag-move",
+	floatingBallDragEnd: "floating-ball:drag-end",
+	floatingBallContextMenu: "floating-ball:context-menu",
+	floatingBallSetExpandTarget: "floating-ball:set-expand-target",
+	// ===== 极简浮窗（mini overlay）：悬浮球点击展开的状态总览+快捷输入窗 =====
+	miniOverlayState: "mini-overlay:state",
+	miniOverlayJumpToSession: "mini-overlay:jump-to-session",
+	miniOverlayQuickPrompt: "mini-overlay:quick-prompt",
+	miniOverlayClose: "mini-overlay:close",
+	miniOverlayCollapse: "mini-overlay:collapse",
+	/** 小窗 → 任务模式：隐藏小窗与悬浮球，主窗口以 quick-task 紧凑形态打开。 */
+	miniOverlaySwitchToQuickTask: "mini-overlay:switch-to-quick-task",
+	/** 任务模式 → 小窗：退出 quick-task 恢复主窗口尺寸后隐藏，展开极简浮窗。 */
+	quickTaskSwitchToMiniOverlay: "quick-task:switch-to-mini-overlay",
+	floatingBallSetEnabled: "floating-ball:set-enabled",
 	/** 渲染层 → 主进程：启用/取消资源管理器右键菜单注册 */
 	shellMenuSetEnabled: "shell-menu:set-enabled",
 

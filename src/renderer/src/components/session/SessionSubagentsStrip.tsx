@@ -142,7 +142,7 @@ const PiSubagentEntryRow = (props: {
 
 	return (
 		<li className={`rounded ${isActive ? "bg-muted/40" : ""}`}>
-			<button type="button" className="flex min-w-0 w-full items-center gap-2 rounded px-2 py-1.5 text-left text-control leading-5 hover:bg-muted/60" aria-expanded={!collapsed} onClick={toggleCollapsed}>
+			<button type="button" className="flex min-w-0 w-full items-center gap-2 rounded px-2 py-1.5 text-left text-control leading-5 transition-colors hover:bg-muted/60" aria-expanded={!collapsed} onClick={toggleCollapsed}>
 				<span className="grid size-5 shrink-0 place-items-center">
 					<SubagentStatusIcon status={effectiveStatus} />
 				</span>
@@ -153,7 +153,7 @@ const PiSubagentEntryRow = (props: {
 				<ChevronDown size={13} className={`shrink-0 text-text-tertiary transition-transform ${collapsed ? "" : "rotate-180"}`} aria-hidden="true" />
 			</button>
 			{!collapsed && (
-				<div className="flex flex-col gap-1.5 px-2 pb-2 pl-9 text-xs leading-5 text-text-secondary">
+				<div className="flex flex-col gap-1.5 px-2 pb-2 pl-9 text-xs leading-5 text-text-secondary motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
 					{/* 元信息行：本地化状态徽标 + 起止时间与量化指标 */}
 					<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-text-tertiary">
 						<span className={`rounded px-1.5 py-0.5 text-micro font-medium ${subagentStatusBadgeClass(effectiveStatus)}`}>{t(lost ? "sessionSubagents.status.lost" : `sessionSubagents.status.${subagentStatusLabelSuffix(effectiveStatus)}`)}</span>
@@ -299,7 +299,7 @@ const DshSubagentEntryRow = (props: { agentId: string; entry: DshSubagentEntry }
 
 	return (
 		<li className="rounded hover:bg-muted/40">
-			<button type="button" className="flex min-w-0 w-full items-center gap-2 rounded px-2 py-1.5 text-left text-control leading-5 hover:bg-muted/60" aria-expanded={!collapsed} onClick={() => void toggle()}>
+			<button type="button" className="flex min-w-0 w-full items-center gap-2 rounded px-2 py-1.5 text-left text-control leading-5 transition-colors hover:bg-muted/60" aria-expanded={!collapsed} onClick={() => void toggle()}>
 				<span className="grid size-5 shrink-0 place-items-center">{entry.activity === "running" ? <Loader2 size={14} className="animate-pideck-spin text-[var(--color-accent)]" /> : <span className="size-2 rounded-full bg-muted-foreground/60" aria-hidden="true" />}</span>
 				<span className="min-w-0 flex-1 truncate font-medium text-foreground">{entry.label ?? entry.id}</span>
 				{entry.activity === "running" && (

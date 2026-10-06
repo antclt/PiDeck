@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FileDiff, RefreshCw, TriangleAlert, Undo2 } from "lucide-react";
+import { Loader2, FileDiff, RefreshCw, TriangleAlert, Undo2 } from "lucide-react";
 import { useAtomValue } from "jotai";
 import { t, type TranslationKey } from "../../i18n";
 import { sessionRuntimeBySessionIdAtomFamily } from "../../atoms/session-selectors";
@@ -240,7 +240,10 @@ export function RewindCheckpointList(props: { sessionId: string }) {
 				</Tooltip>
 			</div>
 			{loading && checkpoints.length === 0 ? (
-				<p className="px-1 py-2 text-xs text-text-tertiary">{t("common.loading")}</p>
+				<p className="flex items-center gap-1.5 px-1 py-2 text-xs text-text-tertiary">
+					<Loader2 size={12} className="animate-pideck-spin" aria-hidden="true" />
+					{t("common.loading")}
+				</p>
 			) : loadError ? (
 				<p className="px-1 py-2 text-xs text-destructive">{loadError}</p>
 			) : checkpoints.length === 0 ? (
@@ -375,7 +378,18 @@ function CheckpointRow(props: {
 				</div>
 			</div>
 			{diffVisible && (
-				<div className="mt-1.5 max-h-40 overflow-auto rounded-md bg-muted/40 px-2 py-1.5 font-mono text-[10px] leading-4 text-text-secondary">{props.diffLoading ? <span>{t("common.loading")}</span> : props.diff ? <pre className="whitespace-pre-wrap">{props.diff}</pre> : <span>{t("rewind.diffEmpty")}</span>}</div>
+				<div className="mt-1.5 max-h-40 overflow-auto rounded-md bg-muted/40 px-2 py-1.5 font-mono text-[10px] leading-4 text-text-secondary">
+					{props.diffLoading ? (
+						<span className="inline-flex items-center gap-1">
+							<Loader2 size={10} className="animate-pideck-spin" aria-hidden="true" />
+							{t("common.loading")}
+						</span>
+					) : props.diff ? (
+						<pre className="whitespace-pre-wrap">{props.diff}</pre>
+					) : (
+						<span>{t("rewind.diffEmpty")}</span>
+					)}
+				</div>
 			)}
 		</div>
 	);

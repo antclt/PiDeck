@@ -80,6 +80,7 @@ import { isLiveRuntimeStatus, sessionCommandFailureToast, type SessionRunCapabil
 import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeBackendPreference, readWelcomeDshModelPreference, readWelcomeModelPreference, readWelcomeThinkingPreference, resolveChatSessionBootstrap, resolveGuidePageBackend } from "./utils/chatSessionBootstrap";
 import { useAppAppearance } from "./hooks/appearance/useAppAppearance";
 import { useAppBootstrapInfo } from "./hooks/app/useAppBootstrapInfo";
+import { useBootOverlayReady } from "./hooks/app/useBootOverlayReady";
 import { useCommandPalette } from "./hooks/app/useCommandPalette";
 import { useSidebarArchiveActions } from "./hooks/sidebar/useSidebarArchiveActions";
 import { useSettingsUpdater } from "./hooks/settings/useSettingsUpdater";
@@ -131,6 +132,7 @@ import {
 import { isSameSessionPath } from "./agentListDisplay";
 import { t } from "./i18n";
 import { isChatProject, loadSessionSourceFilter, saveSessionSourceFilter, isReplacementForPendingAgent, isPendingAgentId, migrateAgentRecord, stampIdleSessionDuration, type PendingAgentTab } from "./rendererUtils";
+import { MiniOverlaySurface } from "./components/mini-overlay/MiniOverlaySurface";
 import type { SessionFilterPill } from "./sessionFilterPills";
 import { useResize } from "./hooks/useResize";
 import { ARCHIVED_SESSION_TOAST_MS, archivedSessionToastMessage, useSessionActions } from "./hooks/useSessionActions";
@@ -149,7 +151,6 @@ import { FileLinkBaseProvider } from "./components/session/FileLinkBase";
 import { useSessionWorkspaceChrome } from "./hooks/useSessionWorkspaceChrome";
 import { useQuickTask } from "./hooks/useQuickTask";
 import { QuickTaskSurface } from "./components/app/QuickTaskSurface";
-import { ScratchPadOverlay } from "./components/overlays/ScratchPadOverlay";
 import { AskPanelOverlay } from "./components/overlays/AskPanelOverlay";
 import { TerminalDockPanel } from "./components/terminal/TerminalDockPanel";
 import { ResizablePanel, ResizablePanelGroup } from "./components/ui-shadcn/resizable";
@@ -203,6 +204,9 @@ export function App() {
 	const store = useStore();
 	// Composer input state is owned by ComposerArea; the root does not subscribe to each key.
 	const currentSessionId = useAtomValue(currentSessionIdAtom);
+	// 开屏交接：已聚焦会话（工作区知道自己该显示什么）才撤启动遮罩，
+	// 否则会先闪一帧「无会话空态 = 引导页」再变正常。
+	useBootOverlayReady(currentSessionId !== undefined);
 	const currentSession = useAtomValue(currentSessionAtom);
 	// currentSessionRuntime / currentSessionRuntimeUi / currentSessionSendState: sync store.get() only.
 	// Streaming subscriptions are in SessionRuntimeInjector.
@@ -463,6 +467,12 @@ export function App() {
 		setWorkbuddyImportProject,
 		cursorImportProject,
 		setCursorImportProject,
+		kimiImportProject,
+		setKimiImportProject,
+		kimiWorkImportProject,
+		setKimiWorkImportProject,
+		minimaxImportProject,
+		setMinimaxImportProject,
 		codexImportController,
 		claudeImportController,
 		qoderImportController,
@@ -470,6 +480,9 @@ export function App() {
 		zcodeImportController,
 		workbuddyImportController,
 		cursorImportController,
+		kimiImportController,
+		kimiWorkImportController,
+		minimaxImportController,
 		openCodexImport,
 		openClaudeImport,
 		openQoderImport,
@@ -477,6 +490,9 @@ export function App() {
 		openZCodeImport,
 		openWorkBuddyImport,
 		openCursorImport,
+		openKimiImport,
+		openKimiWorkImport,
+		openMinimaxImport,
 	} = useImportFlow({
 		setProjectMenu: () => undefined,
 		refreshProjectSessions,
@@ -495,6 +511,15 @@ export function App() {
 		importWorkBuddySessionsApi: api.workbuddySessions.import,
 		scanCursorSessions: api.cursorSessions.scan,
 		importCursorSessionsApi: api.cursorSessions.import,
+		scanKimiSessions: api.kimiSessions.scan,
+		importKimiSessionsApi: api.kimiSessions.import,
+		describeKimiWorkShareRoot: api.kimiWorkSessions.describe,
+		scanKimiWorkSessions: api.kimiWorkSessions.scan,
+		importKimiWorkSessionsApi: api.kimiWorkSessions.import,
+		scanMinimaxSessions: api.minimaxSessions.scan,
+		importMinimaxSessionsApi: api.minimaxSessions.import,
+		getSettings: api.settings.get,
+		updateSettings: api.settings.update,
 		t,
 	});
 
@@ -683,7 +708,7 @@ export function App() {
 		showToast,
 	});
 
-	const scratchPad = useScratchPad();
+	const scratchPad = useScratchPad(workspace);
 	// CUA 操作审批：根级订阅主进程推送的审批请求并渲染确认弹框（事件驱动，全局唯一一份）。
 	const cuaApproval = useCuaApproval();
 	// DSH runtime 安装态同步：全进程只挂这一份（IPC 拉取 + 变更订阅 → dshRuntimeStatusAtom）。
@@ -786,7 +811,7 @@ export function App() {
 	useAgentLoadNotice(settings.agentCountReminderEnabled);
 
 	// logo 风格 → 渲染层镜像 atom + localStorage 缓存：LogoMark/侧栏/关于弹层订阅 atom 即时切换；
-	// localStorage 让下次启动的启动画面（React 挂载前）就能用新风格，避免开屏闪回 classic。
+	// localStorage 让下次启动的启动画面（React 挂载前）就能用同一风格，避免开屏闪回默认 pi-tui。
 	const setLogoStyle = useSetAtom(logoStyleAtom);
 	useEffect(() => {
 		const logoStyle = resolveLogoStyle(settings.logoStyle);
@@ -1165,6 +1190,7 @@ export function App() {
 		async (projectId: string, sessionId: string, tabMode: "preview" | "permanent" = "permanent") => {
 			const openedId = await runOpenSidebarSessionById(projectId, sessionId);
 			if (openedId) workspaceChrome.registerOpenSession(openedId, tabMode);
+			return openedId;
 		},
 		[runOpenSidebarSessionById, workspaceChrome],
 	);
@@ -1854,6 +1880,9 @@ export function App() {
 				if (source === "zcode") return openZCodeImport(project);
 				if (source === "workbuddy") return openWorkBuddyImport(project);
 				if (source === "cursor") return openCursorImport(project);
+				if (source === "kimi") return openKimiImport(project);
+				if (source === "kimiwork") return openKimiWorkImport(project);
+				if (source === "minimax") return openMinimaxImport(project);
 				return openOpenCodeImport(project);
 			},
 			importDirectorySessions: (project) => openDirectoryImport(project),
@@ -1871,7 +1900,9 @@ export function App() {
 		sessions: {
 			// 简洁模式没有临时预览；标签模式保留原设置及双击晋升。
 			simpleNavigation: settings.navigationMode === "simple",
-			open: (projectId, sessionId, tabMode) => openSidebarSessionByIdWithTab(projectId, sessionId, settings.navigationMode === "simple" ? "permanent" : (tabMode ?? settings.sessionTabOpenMode)),
+			open: async (projectId, sessionId, tabMode) => {
+				await openSidebarSessionByIdWithTab(projectId, sessionId, settings.navigationMode === "simple" ? "permanent" : (tabMode ?? settings.sessionTabOpenMode));
+			},
 			// 活动页「最近会话」跨项目展示：后台静默预热尚未扫描的项目 catalog。
 			ensureCatalogsLoaded: (projectIds) => {
 				for (const projectId of projectIds) ensureProjectCatalogLoaded(projectId, true);
@@ -2292,7 +2323,9 @@ export function App() {
 			deleteMessage,
 			forkFromUserMessage,
 			forkingMessageId,
-			openSidebarSessionById: (projectId: string, sessionId: string) => openSidebarSessionByIdWithTab(projectId, sessionId, "permanent"),
+			openSidebarSessionById: async (projectId: string, sessionId: string) => {
+				await openSidebarSessionByIdWithTab(projectId, sessionId, "permanent");
+			},
 			focusAskSessionById: jumpToAskSession,
 			agents: displayAgents,
 			queuedPromptsBySession: queue.queuedPrompts,
@@ -2722,7 +2755,24 @@ export function App() {
 						) : undefined
 					}
 					compactContent={
-						quickTask.active ? (
+						// 极简浮窗模式：渲染当前活跃会话（不是 quickTask）
+						new URLSearchParams(window.location.search).get("mini-overlay") === "1" ? (
+							<MiniOverlaySurface
+								activeProjectId={activeProjectId}
+								onCreateSession={createSessionDraftWithTab}
+								onOpenSession={openSidebarSessionByIdWithTab}
+								onSwitchToQuickTask={() => {
+									const projectPath = currentSession ? projects.find((item) => item.id === currentSession.projectId)?.path : undefined;
+									void api.miniOverlay.switchToQuickTask(projectPath).catch(() => showToast(t("miniOverlay.windowActionFailed"), 4000, "error"));
+								}}
+							>
+								{currentSession ? (
+									<SessionPaneServicesProvider value={sessionPaneServices}>
+										<ChatSessionPane sessionId={currentSession.id} focused onFocusPane={() => focusSessionPane(currentSession.id)} splitPane={false} />
+									</SessionPaneServicesProvider>
+								) : null}
+							</MiniOverlaySurface>
+						) : quickTask.active ? (
 							<QuickTaskSurface task={quickTask}>
 								<SessionPaneServicesProvider value={sessionPaneServices}>{quickTask.session && <ChatSessionPane sessionId={quickTask.session.id} focused onFocusPane={() => focusSessionPane(quickTask.session!.id)} splitPane={false} />}</SessionPaneServicesProvider>
 							</QuickTaskSurface>
@@ -2803,6 +2853,13 @@ export function App() {
 									onTogglePinned: () => workspace.toggleDrawerPanelPinned("browser"),
 									onClick: () => handleToolDrawerAction("browser"),
 								},
+								{
+									id: "scratchPad",
+									label: t("scratchPad.title"),
+									icon: <Pencil size={16} />,
+									active: scratchPad.isOpen,
+									onClick: scratchPad.toggle,
+								},
 								// RPC 日志专属 Tab：默认隐藏，任一存活的 agent 开启记录后才出现
 								//（门控与目标 agent 计算见 rpcLogTabTargetAgentId）。
 								...(rpcLogTabTargetAgentId
@@ -2824,7 +2881,7 @@ export function App() {
 							]}
 						/>
 					}
-					drawerContent={(visibleDrawerPanel) => <DrawerSurface drawer={visibleDrawerPanel} drawerCollapsed={drawerCollapsed} git={drawerPorts.git} chrome={drawerPorts.chrome} browser={drawerPorts.browser} files={drawerPorts.files} rpcLog={drawerPorts.rpcLog} />}
+					drawerContent={(visibleDrawerPanel) => <DrawerSurface drawer={visibleDrawerPanel} drawerCollapsed={drawerCollapsed} git={drawerPorts.git} chrome={drawerPorts.chrome} browser={drawerPorts.browser} files={drawerPorts.files} rpcLog={drawerPorts.rpcLog} scratchPad={scratchPad} />}
 					setListCollapsed={setListCollapsed}
 					setListWidth={setListWidth}
 					setDrawerCollapsed={setDrawerCollapsed}
@@ -3079,10 +3136,10 @@ export function App() {
 					{zcodeImportProject && <ImportOverlayHost kind="zcode" project={zcodeImportProject} controller={zcodeImportController} onClose={() => setZcodeImportProject(null)} />}
 					{workbuddyImportProject && <ImportOverlayHost kind="workbuddy" project={workbuddyImportProject} controller={workbuddyImportController} onClose={() => setWorkbuddyImportProject(null)} />}
 					{cursorImportProject && <ImportOverlayHost kind="cursor" project={cursorImportProject} controller={cursorImportController} onClose={() => setCursorImportProject(null)} />}
+					{kimiImportProject && <ImportOverlayHost kind="kimi" project={kimiImportProject} controller={kimiImportController} onClose={() => setKimiImportProject(null)} />}
+					{kimiWorkImportProject && <ImportOverlayHost kind="kimiwork" project={kimiWorkImportProject} controller={kimiWorkImportController} onClose={() => setKimiWorkImportProject(null)} />}
+					{minimaxImportProject && <ImportOverlayHost kind="minimax" project={minimaxImportProject} controller={minimaxImportController} onClose={() => setMinimaxImportProject(null)} />}
 					{directoryImportProject && <ImportOverlayHost kind="directory" project={directoryImportProject} controller={directoryImportController} onClose={() => setDirectoryImportProject(null)} />}
-
-					{/* Scratch Pad（草稿本）：根级渲染，避免受 chat-pane grid 影响定位 */}
-					<ScratchPadOverlay controller={scratchPad} />
 
 					{/* 定时任务与自动化管理中心全功能弹窗（模态呈现，不覆盖会话工作区） */}
 					<AutomationModal

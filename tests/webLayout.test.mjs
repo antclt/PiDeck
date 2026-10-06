@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const webCss = readFileSync("src/renderer/src/web/web.css", "utf8");
@@ -9,6 +9,7 @@ const webModelSheet = readFileSync("src/renderer/src/web/WebModelSheet.tsx", "ut
 const webChatApp = readFileSync("src/renderer/src/web/WebChatApp.tsx", "utf8");
 const webSessionStrips = readFileSync("src/renderer/src/web/WebSessionStrips.tsx", "utf8");
 const webTimeline = readFileSync("src/renderer/src/web/WebTimeline.tsx", "utf8");
+const webDshToolsPanel = readFileSync("src/renderer/src/web/WebDshToolsPanel.tsx", "utf8");
 
 test("Web shell keeps sidebar and chat pane in a horizontal split", () => {
 	assert.match(webCss, /\.app\.wechat-shell\s*\{[\s\S]*?flex-direction:\s*row;/, "the desktop shell defaults to a vertical layout, so Web must explicitly restore the horizontal split");
@@ -112,9 +113,23 @@ test("Web timeline groups assistant messages into collapsible execution folds", 
 	assert.match(webCss, /\.web-app \.execution-fold-details\s*\{[\s\S]*?border-left:/);
 });
 
-// 回归：状态 pill 在 flex-col 标题块里必须 self-start，否则被 stretch 拉成整行横条。
+// 回归：头部运行态用紧凑「小圆点+文字」（self-start 防 stretch 拉横条），不用带边框底色的
+// agent-status-indicator 大 pill——它在头部占两行高度、与标题/DSH 徽标挤在一起视觉过重。
 test("Web header status pill stays compact inside the flex-col title block", () => {
-	assert.match(webHeader, /agent-status-indicator self-start/);
+	assert.doesNotMatch(webHeader, /"agent-status-indicator/);
+	assert.match(webHeader, /self-start text-micro text-muted-foreground/);
+	assert.match(webHeader, /size-1\.5 shrink-0 rounded-full/);
+	assert.match(webHeader, /animate-pulse bg-\[var\(--color-accent\)\]/);
+});
+
+// 回归：DSH 权限预设入口是单盾牌图标（#214 保护强度语义），下拉选档；
+// 曾是 w-36 宽 Select（盾牌+预设文字+箭头三个视觉件），窄屏把标题挤没。
+test("Web header DSH permission entry is a single strength icon button", () => {
+	assert.match(webHeader, /permissionStrengthIcon\(knownPreset\?\.strength/);
+	assert.doesNotMatch(webHeader, /SelectTrigger|SelectValue/);
+	assert.match(webHeader, /<PermissionIcon className="size-4" aria-hidden="true" \/>/);
+	// 数据源对齐桌面：runtime state 直出优先，会话记录只兜底——否则乐观切换被轮询冲掉、图标切完弹回。
+	assert.match(webChatApp, /permissionPreset=\{contextUsage\?\.permissionPreset\s*\?\?\s*activeSession\?\.permissionPreset\}/);
 });
 
 // 回归：三条 strip 默认折叠、无框化，且不使用不存在的 Tailwind token
@@ -124,4 +139,70 @@ test("Web session strips stay collapsed by default and use real tokens only", ()
 	assert.doesNotMatch(webSessionStrips, /bg-bg-surface|text-text-muted|bg-bg-inset/, "these tokens do not exist in the theme bridge — they silently no-op");
 	// 折叠条只占一行：标题行可点（aria-expanded），明细展开后才渲染。
 	assert.match(webSessionStrips, /aria-expanded=\{open\}/);
+});
+
+// 回归（流式脱节追赶）：刷新/断网后 useChat 回 ready 但 runtime 仍在跑时，
+// 主轮询必须带 runtimeBusy 做恢复判定并周期补拉磁盘快照——否则页面永远停在旧文本。
+test("Web stream recovery wires runtimeBusy into every decision site", () => {
+	// 两个恢复触发点都携带 runtimeBusy（事件触发器 + 主轮询兼容）。
+	assert.equal((webChatApp.match(/runtimeBusy:/g) ?? []).length, 2);
+	// 脱节态轮询提速：间隔取决于 streaming 或 runtime 忙态，且 effect 依赖含 runtime 状态。
+	assert.match(webChatApp, /setInterval\(refresh,\s*streaming \|\| runtimeBusyNow \? 1000 : 3000\)/);
+	assert.match(webChatApp, /\}, \[streaming, activeRuntime\?\.status\]\)/);
+	// 忙态镜像 ref 在 render 期赋值（供事件回调读取最新值）。
+	assert.match(webChatApp, /activeRuntimeRef\.current = activeRuntime;/);
+});
+
+// 回归：「加载更多」前插的是更早历史，入口必须在消息流顶部（往上滚到顶才碰得到），
+// 曾经渲染在列表底部（最新消息处），语义反了。
+test("Web load-more-history entry stays at the top of the message flow", () => {
+	const loadMoreIndex = webTimeline.indexOf("{/* 分页加载更多");
+	const entriesIndex = webTimeline.indexOf("{timelineEntries.map(");
+	assert.ok(loadMoreIndex >= 0 && entriesIndex >= 0, "load-more block and entries render must exist");
+	assert.ok(loadMoreIndex < entriesIndex, "load-more must render BEFORE the message entries (top of flow)");
+	// 底部不再残留第二份加载更多入口。
+	assert.equal((webTimeline.match(/hasMoreHistory && \(/g) ?? []).length, 1);
+});
+
+// 回归：DSH 工具面板的内容容器必须限高——静态插件清单 30+ 条曾把 Dialog 撑出屏幕，
+// shadcn DialogContent（default 尺寸）本身不限高，上限必须在面板内部。
+test("Web DSH tools panel caps its scroll area so long plugin lists stay on-screen", () => {
+	assert.match(webDshToolsPanel, /max-h-\[60vh\]\s+min-h-40\s+overflow-y-auto/);
+	// 同面板横向超屏：4 个 tab 在窄屏放不下曾把最后一个 tab 裁掉，tab 条必须可横向滚动且按钮不压缩。
+	assert.match(webDshToolsPanel, /flex\s+gap-1\s+overflow-x-auto\s+border-b\s+border-border-subtle/);
+	assert.ok((webDshToolsPanel.match(/shrink-0\s+gap-1\.5/g) ?? []).length >= 4, "all tab buttons must be shrink-0");
+});
+
+// 回归：头部上下文环必须可点开详情弹层（移动端无悬停 title，纯展示等于点不动）。
+test("Web header context ring opens a usage sheet instead of being display-only", () => {
+	// 环渲染带 onClick（非纯展示），且套了 32px 触区按钮。
+	assert.match(webHeader, /<ContextRing usage=\{contextUsage\} onClick=\{\(\) => setContextSheetOpen\(true\)\} \/>/);
+	assert.match(webHeader, /if \(props\.onClick\) \{[\s\S]*?<Button[^>]*onClick=\{props\.onClick\}/);
+	// 详情弹层走 WebBottomSheet，主体列总量/输入/输出并提供压缩入口。
+	assert.match(webHeader, /import \{ WebBottomSheet \} from "\.\/WebBottomSheet";/);
+	assert.match(webHeader, /<ContextUsageSheetBody usage=\{contextUsage\} onCompact=\{actions\?\.onCompact\}/);
+	assert.match(webHeader, /web\.inputTokens/);
+	assert.match(webHeader, /web\.outputTokens/);
+});
+
+// 回归：web 端不再展示 rewind 检查点（用户明确要求移除；服务端路由与桌面不受影响）。
+test("Web rewind checkpoint UI is fully removed from the renderer", () => {
+	assert.ok(!existsSync("src/renderer/src/web/WebRewindPanel.tsx"), "WebRewindPanel.tsx must be deleted");
+	assert.doesNotMatch(webHeader, /onOpenRewind|History/);
+	assert.doesNotMatch(webChatApp, /WebRewindPanel|rewindOpen|onOpenRewind/);
+	// 溢出菜单仍保留压缩等动作（移除 rewind 不得误伤其余入口）。
+	assert.match(webHeader, /onCompact \? <DropdownMenuItem onClick=\{actions\.onCompact\}/);
+});
+
+// 回归：后端切换仅对「本页新建零消息草稿」开放。历史会话（含复制/克隆/fork 出的）自带
+// 消息记录，后端不可切——否则 pi/DSH/生图的历史消息会被错挂到另一个后端上。
+test("Web backend switcher stays draft-only; historical sessions are locked", () => {
+	assert.match(webChatApp, /webDraftSessionsRef = useRef<Set<string>>\(new Set\(\)\)/);
+	assert.match(webChatApp, /markSessionLoaded = \(id: string, freshDraft = false\)/);
+	// 仅两处 createSession 新建流程标记 freshDraft；复制/克隆/fork 的 markSessionLoaded(id) 不标记。
+	assert.equal((webChatApp.match(/markSessionLoaded\(id, true\)/g) ?? []).length, 2);
+	// 锁定判定贯通渲染与点击守卫（防弹层已开后的状态竞态）。
+	assert.match(webChatApp, /const backendSwitchLocked = \(sessionId: string\) =>/);
+	assert.match(webChatApp, /backendLocked=\{activeSession \? Boolean\(activeRuntime\) \|\| backendSwitchLocked\(activeSession\.id\) : false\}/);
+	assert.match(webChatApp, /if \(activeSession && \(activeRuntime \|\| backendSwitchLocked\(activeSession\.id\)\)\) return;/);
 });

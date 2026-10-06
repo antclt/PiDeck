@@ -624,7 +624,7 @@ export function PiAiProvidersCard(props: {
 							/>
 
 							{isOpen && (
-								<div className="grid gap-3 border-t border-border/40 px-3 py-3">
+								<div className="grid gap-3 border-t border-border/40 px-3 py-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
 									<ApiKeyField ref={keyRef} value={keyDrafts[entry.key] ?? ""} onChange={(next) => setKeyDrafts((prev) => ({ ...prev, [entry.key]: next }))} ops={ops} />
 									<CustomSettings label={t("config.dsh.customSettings")}>
 										<p className="text-micro text-muted-foreground">{t("config.dsh.customSettingsHint")}</p>
@@ -858,7 +858,7 @@ export function DeepseekRouteCard(props: {
 					/>
 
 					{open && (
-						<div className="grid gap-3 border-t border-border/40 px-3 py-3">
+						<div className="grid gap-3 border-t border-border/40 px-3 py-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
 							<ApiKeyField ref={keyRef} value={keyDraft} onChange={setKeyDraft} ops={ops} />
 							<CustomSettings label={t("config.dsh.customSettings")}>
 								<p className="text-micro text-muted-foreground">{t("config.dsh.customSettingsHint")}</p>

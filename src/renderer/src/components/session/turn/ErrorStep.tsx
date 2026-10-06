@@ -61,7 +61,7 @@ export const ErrorStep = memo(function ErrorStep(props: { group: ErrorGroupItem;
 					</div>
 					{/* 展开的错误详情："429 Too Many Requests …" 完整原文/栈帧 */}
 					{expanded && (
-						<div className="px-1 pb-1">
+						<div className="px-1 pb-1 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
 							<StepTraceDetails message={props.group.message} />
 						</div>
 					)}

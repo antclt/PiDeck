@@ -37,7 +37,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { GUI_SLOT_METHODS } from "./pi-deck-gui-bridge-gui-spec";
-import { loadPiTui, piTuiResolvedPath } from "./pi-deck-gui-bridge-tui";
+import { locatePiTui, piTuiResolvedPath } from "./pi-deck-gui-bridge-tui";
 
 const SECTION_KEY = "ext-points";
 const DRAFT_NAME_MAX = 60;
@@ -81,11 +81,11 @@ function walkUpForTypesDts(seed: string): string | null {
  *
  * 原先只看桥那边的 pi-tui 解析缓存（`piTuiResolvedPath()`），但那是**跨模块赌博**：
  * 两个扩展各自 import `pi-deck-gui-bridge-tui` 时未必共享同一份模块实例，
- * ext-points 自己没 loadPiTui 过就永远拿到 null，于是清单永久降级为只列 PiDeck 专属落点（当时 14 个）。
+ * ext-points 自己没 locatePiTui 过就永远拿到 null，于是清单永久降级为只列 PiDeck 专属落点（当时 14 个）。
  *
  * 现在自给自足，按代价从低到高试三个种子：
- * 1. 桥已解析的 pi-tui 路径（热缓存，零成本）
- * 2. 自己 loadPiTui 一次（拿到本实例的解析结果；失败不报错）
+ * 1. 桥已定位的 pi-tui 路径（热缓存，零成本）
+ * 2. 自己 locatePiTui 一次（拿到本实例的解析结果；失败不报错）
  * 3. `process.argv[1]` —— pi 的 cli.js 路径（桥日志已证其含 pi-coding-agent）
  */
 function resolvePiTypesDts(): string | null {
@@ -95,14 +95,14 @@ function resolvePiTypesDts(): string | null {
 		if (hit) return hit;
 	}
 	try {
-		const loaded = loadPiTui();
-		const fromSelf = loaded.module ? loaded.resolvedPath : null;
+		const located = locatePiTui();
+		const fromSelf = located.path;
 		if (fromSelf) {
 			const hit = walkUpForTypesDts(fromSelf);
 			if (hit) return hit;
 		}
 	} catch {
-		// 自己加载失败不影响会话，继续走 argv 兜底
+		// 自己定位失败不影响会话，继续走 argv 兜底
 	}
 	const entry = process.argv[1];
 	if (entry) {

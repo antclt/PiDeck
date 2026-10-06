@@ -52,7 +52,7 @@ pi 以 `--mode rpc` 运行时没有终端，`rpc-mode.js` 里一批 UI 方法被
 |---|---|
 | `PIDECK_BRIDGE_URL` | PiDeck 监听的桥端点（`http://127.0.0.1:<port>/bridge/<token>`） |
 | `PIDECK_BRIDGE_TOKEN` | 本次 spawn 独享的令牌（多会话天然隔离） |
-| `PIDECK_BRIDGE_PI_PATH` | pi 安装路径（桥据此定位**与 pi 同实例**的 pi-tui） |
+| `PIDECK_BRIDGE_PI_PATH` | pi 安装路径（桥据此定位 pi-tui 路径，作扩展点目录的种子与诊断） |
 
 **纯终端跑 pi 时**（没有这些环境变量）：桥**静默不工作**，pi 行为完全不变。
 
@@ -488,8 +488,8 @@ GUI 上的一次点击 → PiDeck 回传事件 → 桥在 pi 进程内调**公�
 | 日志 | 含义 |
 |---|---|
 | `已包装 ctx.ui 的声明式扩展点（…）` | 桥已挂载成功 |
-| `pi-tui 已加载: <来源>` | 语义化翻译可用（`instanceof` 生效） |
-| `pi-tui 加载失败，适配器退化为形状判定` | 仍可用，但组件识别精度下降 |
+| `pi-tui 已定位: <来源>` | pi-tui 路径解析成功（扩展点目录可用完整清单） |
+| `pi-tui 定位失败（不影响序列化，仅少一路 types.d.ts 种子）` | 组件序列化不受影响，扩展点目录可能降级 |
 | `PIDECK_BRIDGE_URL 未设置：桥静默不工作` | 纯终端模式，符合预期 |
 | `落点 xxx 的 factory 抛错，该落点隐藏` | 你的 `factory` 抛了异常，检查扩展代码 |
 | `落点 xxx 的 render() 返回值非法，该贡献隐藏` | `render()` 返回的不是合法 `GuiNode` |

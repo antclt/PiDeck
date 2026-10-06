@@ -89,5 +89,9 @@ export { resolveLogoStyle } from "../../../../shared/types/settings";
 /**
  * logo 风格的 localStorage 缓存键：App.tsx 在 settings 权威值就绪/变化时写入，
  * index.html 启动画面内联脚本读取（两处字符串必须一致，tests/piTuiLogo.test.mjs 锚定）。
+ *
+ * 带版本后缀是刻意的：缓存值就是「上次启动时的 logoStyle」，一旦默认值翻转，
+ * 旧缓存既可能是旧默认遗留、也可能是用户显式选择，脚本无从区分——
+ * 必须升版本让整批旧缓存失效，否则开屏会沿用上一版默认（v2：classic 默认翻为 pi-tui）。
  */
-export const LOGO_STYLE_STORAGE_KEY = "pideck:logo-style";
+export const LOGO_STYLE_STORAGE_KEY = "pideck:logo-style:v2";

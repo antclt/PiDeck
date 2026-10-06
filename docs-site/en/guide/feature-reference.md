@@ -208,7 +208,7 @@ Triggered by `⑂` on a queued message. It:
 
 ### Other panels & entries
 
-- **Scratch pad**: `Ctrl/Cmd+Shift+S` (also a tool-rail button). Create/delete notes, Markdown mode, task checkboxes, export to file. Notes follow the session.
+- **Scratch pad**: click the session tool-rail button or press `Ctrl/Cmd+Shift+S` to open/close it in the right sidebar, sharing panel switching and width adjustment with other sidebar tools. Select notes from the top dropdown; create/delete notes, edit/preview Markdown, toggle task checkboxes, and export to file. Content is saved automatically.
 - **Trace panel**: drawer "Trace" tab — per-round lanes of input/model/tool events.
 - **Checkpoints (Rewind)**: drawer "Checkpoints" tab — see below.
 - **Session start page**: no messages yet — a large centered composer plus a project switcher.

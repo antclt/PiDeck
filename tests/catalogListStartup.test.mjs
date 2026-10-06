@@ -17,6 +17,28 @@ test("first catalog list returns disk cache instead of awaiting a full scan", ()
 	assert.match(handler, /return cachedRecords;/);
 });
 
+test("cached catalog branch is sorted by recency and filters dead file links", () => {
+	// 2027-02 小窗 ENOENT 事故：缓存分支乱序返回，小窗项目切换取 sessions[0]
+	// 拿到 8 月陈旧子代理死链记录（文件已删、清理闸未跑到）→ 小窗报
+	// ENOENT + 「选择了别的项目却建到 Chat」。缓存分支必须与 mergeScanned
+	// 同口径排序（updatedAt desc），并在返回前滤掉文件已消失的非 WSL/dsh 记录。
+	const handler = sessionIpc.slice(sessionIpc.indexOf("ipcChannels.sessionsCatalogList"), sessionIpc.indexOf("ipcChannels.sessionsCatalogCreateDraft"));
+	assert.match(handler, /\.sort\(\s*\(left,\s*right\)\s*=>\s*right\.updatedAt\s*-\s*left\.updatedAt\s*\)/);
+	assert.match(handler, /record\.backend\s*===\s*"dsh"/);
+	assert.match(handler, /existsSync\(record\.filePath\)/);
+	assert.match(handler, /startsWith\("\\\\\\\\"\)/);
+});
+
+test("dead file link filter exempts sessions with a live runtime", () => {
+	// 2026-10-06 事故：standby 预分配的 sessionPath 在 pi 首条消息前不落盘，
+	// 已认领预热进程的聚焦草稿被死链过滤剔出列表 → 渲染层
+	// replaceProjectSessionsAtom 清空焦点 → 闪回引导页、输入丢失、引导页重发
+	// 另建会话留下孤儿空闲 Agent。与 mergeScanned 的 liveness 豁免同口径：
+	// hasLiveRuntime 命中的记录必须保留，且判定顺序在 existsSync 之前。
+	const handler = sessionIpc.slice(sessionIpc.indexOf("ipcChannels.sessionsCatalogList"), sessionIpc.indexOf("ipcChannels.sessionsCatalogCreateDraft"));
+	assert.match(handler, /if\s*\(\s*sessionRuntimeCoordinator\.hasLiveRuntime\(record\.id\)\s*\)\s*return true;\s*return existsSync\(record\.filePath\);/);
+});
+
 test("catalog list scan does not parse JSONL bodies", () => {
 	// 侧栏 list() 只 stat + 路径推断；正文留给点击后的 readRecordMessagePage。
 	const listBlock = scanner.slice(scanner.indexOf("private async listUnqueued"), scanner.indexOf("private async resolveScanRoots"));

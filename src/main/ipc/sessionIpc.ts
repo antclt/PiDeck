@@ -103,6 +103,9 @@ import type { OpenCodeSessionImporter } from "../sessions/OpenCodeSessionImporte
 import type { ZCodeSessionImporter } from "../sessions/ZCodeSessionImporter";
 import type { WorkBuddySessionImporter } from "../sessions/WorkBuddySessionImporter";
 import type { CursorSessionImporter } from "../sessions/CursorSessionImporter";
+import type { KimiSessionImporter } from "../sessions/KimiSessionImporter";
+import type { KimiWorkSessionImporter } from "../sessions/KimiWorkSessionImporter";
+import type { MinimaxSessionImporter } from "../sessions/MinimaxSessionImporter";
 import type { AppLogger } from "../logging/AppLogger";
 
 /**
@@ -316,6 +319,11 @@ export type SessionIpcDeps = {
 	zcodeSessionImporter: ZCodeSessionImporter;
 	workbuddySessionImporter: WorkBuddySessionImporter;
 	cursorSessionImporter: CursorSessionImporter;
+	kimiSessionImporter: KimiSessionImporter;
+	/** Kimi Work（桌面版）会话导入：daimon-share 位置可被用户自定义，scan/import 内部走探测链。 */
+	kimiWorkSessionImporter: KimiWorkSessionImporter;
+	/** MinimaxCode（CLI）会话导入：数据目录固定 ~/.minimax/v2/sessions，无探测链。 */
+	minimaxSessionImporter: MinimaxSessionImporter;
 	/** 外置目录会话导入（项目目录移动/改名后找回历史；只建 catalog 引用，不复制原文件）。 */
 	directorySessionImporter: DirectorySessionImporter;
 	appLogger: AppLogger;
@@ -389,6 +397,9 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		zcodeSessionImporter,
 		workbuddySessionImporter,
 		cursorSessionImporter,
+		kimiSessionImporter,
+		kimiWorkSessionImporter,
+		minimaxSessionImporter,
 		directorySessionImporter,
 		appLogger,
 		terminalManager,
@@ -542,7 +553,25 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			.listEntries()
 			.filter((entry) => entry.projectId === projectId)
 			.map((entry) => sessionCatalog.getRecord(entry.id))
-			.filter((record): record is SessionRecord => Boolean(record));
+			.filter((record): record is SessionRecord => Boolean(record))
+			// 与 mergeScanned 同口径排序：小窗项目选择器直接取 sessions[0]，
+			// 乱序会把陈旧记录顶到最前（陈旧子代理记录曾因此在小窗报 ENOENT）。
+			.sort((left, right) => right.updatedAt - left.updatedAt)
+			// 死链过滤：文件已删但清理闸还没跑到（mergeScanned 在后台异步调度）时，
+			// 别让「最近会话」落到一个必然 ENOENT 的记录上。
+			// 豁免：无文件记录（imagegen/草稿）、dsh（filePath 由 host 侧解析，
+			// 本地路径可能不存在）、UNC/WSL 路径（发行版停机时 existsSync
+			// 恒 false，不能误藏整组会话）、活绑定运行时（standby 预分配的
+			// sessionPath 在 pi 首条消息前不落盘，existsSync 恒 false；若按死链
+			// 隐藏，catalog 刷新会把当前选中的草稿剔出列表 → 渲染层
+			// replaceProjectSessionsAtom 清空焦点 → 闪回引导页、输入丢失、
+			// 引导页重发另建会话留下孤儿空闲 Agent——2026-10-06 事故，与
+			// mergeScanned 的 liveness 豁免同口径）。
+			.filter((record) => {
+				if (!record.filePath || record.backend === "dsh" || record.filePath.startsWith("\\\\")) return true;
+				if (sessionRuntimeCoordinator.hasLiveRuntime(record.id)) return true;
+				return existsSync(record.filePath);
+			});
 
 		// 纯读路径：事件回调/订阅刷新专用，不再触发扫描（防止推送-拉取循环触发）
 		if (options?.scan === false) return cachedRecords;
@@ -659,6 +688,9 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			title: draft.title,
 			model: draft.model,
 		});
+		// standby 补热：草稿创建是「用户马上要开聊」的最强信号，趁用户阅读/输入的空窗
+		// 后台预热一个 pi 进程待命（fire-and-forget；ensure 幂等且受 standbyRuntimeEnabled 闸）。
+		if (input.backend !== "dsh") agentManager.ensureStandbyAgent(input.projectId);
 		return draft;
 	});
 	ipcMain.handle(ipcChannels.sessionsResolveLaunchDefaults, async (_event, input?: ResolveLaunchDefaultsInput): Promise<ResolvedLaunchDefaults> => {
@@ -1926,6 +1958,74 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		void appLogger.info("session", "Cursor sessions imported", {
 			projectId,
 			sourceCount: sourcePaths.length,
+		});
+		return result;
+	});
+	ipcMain.handle(ipcChannels.kimiSessionsScan, async (_event, projectId: string) => {
+		const project = projectStore.get(projectId);
+		if (!project) throw new Error(`Project not found: ${projectId}`);
+		const result = await kimiSessionImporter.scan(project.path);
+		void appLogger.debug("session", "Kimi sessions scanned", { projectId });
+		return result;
+	});
+	ipcMain.handle(ipcChannels.kimiSessionsImport, async (_event, projectId: string, sourcePaths: string[]) => {
+		const project = projectStore.get(projectId);
+		if (!project) throw new Error(`Project not found: ${projectId}`);
+		const result = await kimiSessionImporter.import(project.path, sourcePaths);
+		void appLogger.info("session", "Kimi sessions imported", {
+			projectId,
+			sourceCount: sourcePaths.length,
+		});
+		return result;
+	});
+	// ── Kimi Work（kimi-desktop 桌面版）会话导入 ─────────────────────────────
+	// 与 CLI 版（上方）的差异：数据目录不固定——先 describe 探测（settings 手动指定 >
+	// daimon-storage.json 记录的自定义位置 > 默认安装位置），弹窗把探测结果展示给用户。
+	// scan/import 全部走探测链，用户改 Kimi Work 数据位置后 PiDeck 无需改设置。
+	ipcMain.handle(ipcChannels.kimiWorkSessionsDescribe, async () => {
+		const customRoot = settingsStore.get().kimiWorkShareRoot;
+		const result = await kimiWorkSessionImporter.describeShareRoot(customRoot);
+		void appLogger.debug("session", "Kimi Work share root described", { origin: result.origin });
+		return result;
+	});
+	ipcMain.handle(ipcChannels.kimiWorkSessionsScan, async (_event, projectId: string) => {
+		const project = projectStore.get(projectId);
+		if (!project) throw new Error(`Project not found: ${projectId}`);
+		const customRoot = settingsStore.get().kimiWorkShareRoot;
+		const result = await kimiWorkSessionImporter.scan(project.path, customRoot);
+		void appLogger.debug("session", "Kimi Work sessions scanned", { projectId, count: result.length });
+		return result;
+	});
+	ipcMain.handle(ipcChannels.kimiWorkSessionsImport, async (_event, projectId: string, sourcePaths: string[]) => {
+		const project = projectStore.get(projectId);
+		if (!project) throw new Error(`Project not found: ${projectId}`);
+		const customRoot = settingsStore.get().kimiWorkShareRoot;
+		const result = await kimiWorkSessionImporter.import(project.path, sourcePaths, customRoot);
+		void appLogger.info("session", "Kimi Work sessions imported", {
+			projectId,
+			sourceCount: sourcePaths.length,
+			imported: result.imported,
+		});
+		return result;
+	});
+	// ── MinimaxCode（CLI）会话导入 ─────────────────────────────────────
+	// 数据目录固定 ~/.minimax/v2/sessions（无 describe/探测链）；cwd 取自每个会话
+	// 目录 llm-call.json 的 systemPrompt（working directory 行），与项目路径匹配才列出。
+	ipcMain.handle(ipcChannels.minimaxSessionsScan, async (_event, projectId: string) => {
+		const project = projectStore.get(projectId);
+		if (!project) throw new Error(`Project not found: ${projectId}`);
+		const result = await minimaxSessionImporter.scan(project.path);
+		void appLogger.debug("session", "MinimaxCode sessions scanned", { projectId, count: result.length });
+		return result;
+	});
+	ipcMain.handle(ipcChannels.minimaxSessionsImport, async (_event, projectId: string, sourcePaths: string[]) => {
+		const project = projectStore.get(projectId);
+		if (!project) throw new Error(`Project not found: ${projectId}`);
+		const result = await minimaxSessionImporter.import(project.path, sourcePaths);
+		void appLogger.info("session", "MinimaxCode sessions imported", {
+			projectId,
+			sourceCount: sourcePaths.length,
+			imported: result.imported,
 		});
 		return result;
 	});

@@ -276,6 +276,116 @@ test("attachRuntime does not clear a DSH delete tombstone unless restoreDismisse
 	}
 });
 
+// 回归（#314）：runtime 事件风暴会反复 attach 同一会话的相同路径/ID。attachRuntime
+// 必须幂等：无实际变化不得刷新 updatedAt——活动区排序/时间戳用 updatedAt，
+// 重复刷新会让已停止/空闲会话被顶到最前且时间显示不断跳动。
+test("attachRuntime is idempotent: identical re-attach must not bump updatedAt", async () => {
+	const { SessionCatalog } = loadCatalog();
+	const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-attach-idempotent-"));
+	try {
+		const catalog = new SessionCatalog(join(dir, "sessions.json"));
+		await catalog.load();
+		const draft = await catalog.createDraft({
+			projectId: "project-1",
+			title: "Idle session",
+			environment: "native",
+		});
+		await catalog.attachRuntime({
+			sessionId: draft.id,
+			filePath: "C:\\Sessions\\idle.jsonl",
+			piSessionId: "pi-1",
+		});
+		const attachedAt = catalog.getRecord(draft.id)?.updatedAt;
+		assert.ok(typeof attachedAt === "number");
+		// 分离时钟：两次 attach 不落在同一毫秒，避免同值 Date.now() 假绿。
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		// 同一路径、同一 pi 会话 ID 的重复 attach（runtime 事件风暴的真实形态）。
+		await catalog.attachRuntime({
+			sessionId: draft.id,
+			filePath: "C:\\Sessions\\idle.jsonl",
+			piSessionId: "pi-1",
+		});
+		assert.equal(catalog.getRecord(draft.id)?.updatedAt, attachedAt, "重复 attach 相同数据不得刷新 updatedAt");
+		// 分隔符/大小写形态差异（native 规范化后等价）同样视为未变。
+		await catalog.attachRuntime({
+			sessionId: draft.id,
+			filePath: "C:/sessions/IDLE.jsonl",
+			piSessionId: "pi-1",
+		});
+		assert.equal(catalog.getRecord(draft.id)?.updatedAt, attachedAt, "canonical 等价路径不得刷新 updatedAt");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+test("attachRuntime still refreshes updatedAt when runtime metadata actually changes", async () => {
+	const { SessionCatalog } = loadCatalog();
+	const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-attach-changed-"));
+	try {
+		const catalog = new SessionCatalog(join(dir, "sessions.json"));
+		await catalog.load();
+		const draft = await catalog.createDraft({
+			projectId: "project-1",
+			title: "Live session",
+			environment: "native",
+		});
+		await catalog.attachRuntime({
+			sessionId: draft.id,
+			filePath: "C:\\Sessions\\live.jsonl",
+			piSessionId: "pi-1",
+		});
+		const firstAt = catalog.getRecord(draft.id)?.updatedAt;
+		assert.ok(typeof firstAt === "number");
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		await catalog.attachRuntime({
+			sessionId: draft.id,
+			filePath: "C:\\Sessions\\live.jsonl",
+			piSessionId: "pi-2",
+		});
+		const secondAt = catalog.getRecord(draft.id)?.updatedAt;
+		assert.ok(typeof secondAt === "number" && secondAt > firstAt, "piSessionId 变化必须刷新 updatedAt");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+// 墓碑清除发生在 enqueueMutation 回调内：若不计入 changed，内存里已删但快照不落盘，
+// 重启后墓碑复活。restoreDismissed 必须无条件计入 changed。
+test("attachRuntime restoreDismissed persists even when nothing else changes", async () => {
+	const { SessionCatalog } = loadCatalog();
+	const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-attach-restore-"));
+	try {
+		const catalog = new SessionCatalog(join(dir, "sessions.json"));
+		await catalog.load();
+		const draft = await catalog.createDraft({
+			projectId: "project-1",
+			title: "Restored session",
+			environment: "native",
+			backend: "dsh",
+		});
+		await catalog.rememberDismissedDshSession("session-old");
+		await catalog.attachRuntime({
+			sessionId: draft.id,
+			dshSessionId: "session-old",
+		});
+		const firstAt = catalog.getRecord(draft.id)?.updatedAt;
+		assert.ok(typeof firstAt === "number");
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		await catalog.attachRuntime({
+			sessionId: draft.id,
+			dshSessionId: "session-old",
+			restoreDismissed: true,
+		});
+		const secondAt = catalog.getRecord(draft.id)?.updatedAt;
+		assert.ok(typeof secondAt === "number" && secondAt > firstAt, "清除墓碑必须刷新 updatedAt 计入 changed");
+		const reloaded = new SessionCatalog(join(dir, "sessions.json"));
+		await reloaded.load();
+		assert.equal(reloaded.listDismissedDshSessionIds().has("session-old"), false, "墓碑清除必须随快照落盘");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
 // 回归：外部会话重复导入（自动同步与手动导入并发、配置页重复点击、host-ready 重放）
 // 必须幂等吸收——同一 dshSessionId 只保留一条记录，后续导入只更新标题/项目归属，
 // 否则侧栏出现两条同 host 会话记录（「重复导入」用户问题）。

@@ -86,3 +86,15 @@ test("issue #321 复制 demo 后失效扩展列表缓存", async () => {
 	await registered.get(ipcChannels.pluginDevCopyDemo)();
 	assert.equal(invalidated, 1, "复制 demo 落盘后必须失效扩展列表缓存，否则已打开的扩展页看不到新行");
 });
+
+test("issue #321 扩展开关/移除路由按白名单判定内置身份（源码契约）", async () => {
+	const { readFileSync } = await import("node:fs");
+	const storeIpc = readFileSync("src/main/ipc/storeIpc.ts", "utf8");
+	// 开关路由必须用白名单：demo（pi-deck-* 前缀但非内置）被误路由进内置分支时，
+	// 「关」会打到 disableBuiltIn 并被守卫拒绝、「开」会变成无意义的 restoreBuiltIn。
+	assert.match(storeIpc, /isBuiltInExtensionName\(source\)/);
+	assert.doesNotMatch(storeIpc, /startsWith\(\s*"pi-deck-"\s*\)/);
+	// 内置操作入口（removeBuiltIn/disableBuiltIn/uninstall）一律白名单守卫。
+	const manager = readFileSync("src/main/extensions/ExtensionManager.ts", "utf8");
+	assert.doesNotMatch(manager, /uninstall[\s\S]{0,400}startsWith\("pi-deck-"\)/);
+});

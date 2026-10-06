@@ -124,6 +124,8 @@ export function BrowserPanel(props: {
 	const { onClose, onMinimize, onToggleFullscreen } = props;
 	const [initialTab] = useState(() => getInitialActiveTab());
 	const webviewRef = useRef<WebviewElement | null>(null);
+	// DOM ref 就位不代表 Electron guest 可用；就绪状态只随该 webview 挂载生命周期重置。
+	const webviewReadyRef = useRef(false);
 	const defaultUARef = useRef<string | null>(null);
 	const [tabs, setTabs] = useState<TabEntry[]>(() => [...moduleState.tabs]);
 	const [activeTabId, setActiveTabId] = useState<string | null>(() => moduleState.activeTabId);
@@ -145,7 +147,7 @@ export function BrowserPanel(props: {
 	}, []);
 
 	const applyDeviceUserAgent = useCallback((wv: WebviewElement | null, nextDevice: DeviceType) => {
-		if (!wv) return;
+		if (!wv?.isConnected || !webviewReadyRef.current) return;
 		const preset = DEVICE_PRESETS.find((item) => item.id === nextDevice);
 		if (preset?.userAgent) {
 			wv.setUserAgent(preset.userAgent);
@@ -164,7 +166,7 @@ export function BrowserPanel(props: {
 	const loadUrl = useCallback(
 		(targetUrl: string, nextDevice = moduleState.device) => {
 			const wv = webviewRef.current;
-			if (!wv) return;
+			if (!wv?.isConnected || !webviewReadyRef.current) return;
 			applyDeviceUserAgent(wv, nextDevice);
 			setUrl(targetUrl);
 			setInputValue(targetUrl);
@@ -183,17 +185,19 @@ export function BrowserPanel(props: {
 		const wv = webviewRef.current;
 		if (!wv) return;
 
-		if (!defaultUARef.current) {
-			try {
-				defaultUARef.current = wv.getUserAgent();
-			} catch {
-				defaultUARef.current = null;
-			}
-		}
-		applyDeviceUserAgent(wv, moduleState.device);
-
+		const updateNavigationState = () => {
+			if (!wv.isConnected || !webviewReadyRef.current) return;
+			setCanGoBack(wv.canGoBack());
+			setCanGoForward(wv.canGoForward());
+		};
 		const onDomReady = () => {
+			if (!wv.isConnected) return;
 			webviewReadyRef.current = true;
+			// UA 与历史查询同样依赖 guest；恢复移动设备模式时也必须等 dom-ready。
+			if (!defaultUARef.current) defaultUARef.current = wv.getUserAgent();
+			applyDeviceUserAgent(wv, moduleState.device);
+			updateNavigationState();
+			pendingNavigateListener?.();
 		};
 		wv.addEventListener("dom-ready", onDomReady);
 
@@ -201,8 +205,7 @@ export function BrowserPanel(props: {
 			const nextUrl = (event as unknown as WebviewEvent<"did-navigate">).url;
 			setUrl(nextUrl);
 			setInputValue(nextUrl);
-			setCanGoBack(wv.canGoBack());
-			setCanGoForward(wv.canGoForward());
+			updateNavigationState();
 			updateActiveTab({ url: nextUrl });
 		};
 		const onDidNavigateInPage = (event: Event) => {
@@ -216,8 +219,8 @@ export function BrowserPanel(props: {
 		const onDidStopLoading = () => {
 			setIsLoading(false);
 			setLoadProgress(0);
-			setCanGoBack(wv.canGoBack());
-			setCanGoForward(wv.canGoForward());
+			updateNavigationState();
+			pendingNavigateListener?.();
 		};
 		const onDidFailLoad = (event: Event) => {
 			const failure = event as unknown as WebviewEvent<"did-fail-load">;
@@ -274,7 +277,7 @@ export function BrowserPanel(props: {
 			wv.removeEventListener("new-window", onNewWindow);
 			webviewReadyRef.current = false;
 		};
-	}, [applyDeviceUserAgent, updateActiveTab, url]);
+	}, [applyDeviceUserAgent, updateActiveTab]);
 
 	// 不再在卸载时清空 moduleState：折叠抽屉、切换面板后重新打开仍保留之前的 tab 状态。
 	// 关闭最后一个 tab 时 closeTab 已处理 moduleState 清理并调用 onClose。
@@ -310,22 +313,22 @@ export function BrowserPanel(props: {
 		loadUrl(DEFAULT_HOME);
 	}, [loadUrl, persistTabs]);
 
-	// webview 是否已触发 dom-ready，用于延迟外部导航直到 webview 就绪。
-	const webviewReadyRef = useRef(false);
-
 	// 外部导航消费：navigateTo 经监听器触发（module 变量不触发 React 重渲染）；
 	// webview 未挂载/加载中时 50ms 自重试，替代旧 50ms 常驻轮询——空转时钟归零。
 	useEffect(() => {
 		let alive = true;
 		let retryTimer = 0;
 		const consumePendingNavigate = () => {
+			// 链接及就绪事件可能连续到达，只保留一条重试链，卸载时才能完整取消。
+			window.clearTimeout(retryTimer);
+			retryTimer = 0;
 			if (!alive || !pendingNavigateUrl) return;
 			const url = pendingNavigateUrl;
 			moduleState.navigateKey = 0;
 			const wv = webviewRef.current;
-			// webview 未挂载（面板刚开）或正在加载中：保留 pendingNavigateUrl 稍后重试，
-			// 避免 URL 被静默丢弃（与旧轮询的等待语义一致）
-			if (!wv || (wv.isLoading && wv.isLoading())) {
+			// 必须先确认 DOM 连接和 dom-ready，再调用 isLoading；否则 Electron 会同步抛错。
+			// 未就绪或加载中时保留 URL，等事件唤醒或重试后再消费，不能静默丢请求。
+			if (!wv?.isConnected || !webviewReadyRef.current || wv.isLoading()) {
 				retryTimer = window.setTimeout(() => {
 					if (alive) consumePendingNavigate();
 				}, 50);
@@ -450,13 +453,20 @@ export function BrowserPanel(props: {
 			</div>
 
 			<div className="flex shrink-0 items-center gap-1 border-b border-border/40 px-2 py-1.5">
-				<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" disabled={!canGoBack} onClick={() => webviewRef.current?.goBack()} title={t("browser.back")}>
+				<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" disabled={!canGoBack} onClick={() => webviewReadyRef.current && webviewRef.current?.isConnected && webviewRef.current.goBack()} title={t("browser.back")}>
 					<ArrowLeft size={14} />
 				</Button>
-				<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" disabled={!canGoForward} onClick={() => webviewRef.current?.goForward()} title={t("browser.forward")}>
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					className="size-7 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30"
+					disabled={!canGoForward}
+					onClick={() => webviewReadyRef.current && webviewRef.current?.isConnected && webviewRef.current.goForward()}
+					title={t("browser.forward")}
+				>
 					<ArrowRight size={14} />
 				</Button>
-				<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" onClick={() => webviewRef.current?.reload()} title={t("browser.reload")}>
+				<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" onClick={() => webviewReadyRef.current && webviewRef.current?.isConnected && webviewRef.current.reload()} title={t("browser.reload")}>
 					<RefreshCw size={14} />
 				</Button>
 				<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" onClick={() => loadUrl(DEFAULT_HOME)} title={t("browser.home")}>

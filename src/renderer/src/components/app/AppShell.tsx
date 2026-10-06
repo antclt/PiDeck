@@ -350,26 +350,40 @@ export function AppShell(props: AppShellProps) {
 		}
 	}
 
-	if (props.compactContent)
+	if (props.compactContent) {
+		// 小窗的标题栏/导航归 MiniOverlaySurface；任务模式继续复用工作台窗口控制。
+		const isMiniOverlayMode = new URLSearchParams(window.location.search).get("mini-overlay") === "1";
 		return (
-			<div className={["wechat-shell quick-task-shell bg-bg-app [[data-bg-image=on]_&]:bg-transparent", useNativeTitleBar ? "" : "custom-titlebar-enabled", !useNativeTitleBar && platform === "darwin" ? "mac-custom-titlebar" : ""].filter(Boolean).join(" ")}>
-				<AppHeader
-					useNativeTitleBar={useNativeTitleBar}
-					platform={platform}
-					toggleAlwaysOnTop={toggleAlwaysOnTop}
-					isWindowAlwaysOnTop={isWindowAlwaysOnTop}
-					minimizeWindow={minimizeWindow}
-					toggleMaximizeWindow={toggleMaximizeWindow}
-					isWindowMaximized={isWindowMaximized}
-					onWindowMaximizedChange={onWindowMaximizedChange}
-					closeWindow={closeWindow}
-				/>
+			<div
+				className={[
+					"wechat-shell quick-task-shell bg-bg-app [[data-bg-image=on]_&]:bg-transparent",
+					isMiniOverlayMode ? "mini-overlay-shell overflow-hidden rounded-xl shadow-[inset_0_0_0_1px_var(--color-border-strong),0_8px_32px_#0000002e]" : "",
+					useNativeTitleBar ? "" : "custom-titlebar-enabled",
+					!useNativeTitleBar && platform === "darwin" ? "mac-custom-titlebar" : "",
+				]
+					.filter(Boolean)
+					.join(" ")}
+			>
+				{!isMiniOverlayMode ? (
+					<AppHeader
+						useNativeTitleBar={useNativeTitleBar}
+						platform={platform}
+						toggleAlwaysOnTop={toggleAlwaysOnTop}
+						isWindowAlwaysOnTop={isWindowAlwaysOnTop}
+						minimizeWindow={minimizeWindow}
+						toggleMaximizeWindow={toggleMaximizeWindow}
+						isWindowMaximized={isWindowMaximized}
+						onWindowMaximizedChange={onWindowMaximizedChange}
+						closeWindow={closeWindow}
+					/>
+				) : null}
 				<main ref={chatPaneRef} className="flex min-h-0 flex-1 flex-col">
 					{props.compactContent}
 				</main>
 				{children}
 			</div>
 		);
+	}
 	return (
 		<div
 			ref={shellRef}

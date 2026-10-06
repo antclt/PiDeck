@@ -9,7 +9,7 @@
  * - 流式期间底部显示响应指示器；出错显示诊断卡
  */
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, Brain, Check, ChevronDown, ChevronRight, ChevronUp, Copy, ListTree, MessagesSquare, Pencil, RefreshCw, Share2, Trash2, Wrench, X } from "lucide-react";
+import { Loader2, ArrowDown, Brain, Check, ChevronDown, ChevronRight, ChevronUp, Copy, ListTree, MessagesSquare, Pencil, RefreshCw, Share2, Trash2, Wrench, X } from "lucide-react";
 import type { UIMessage } from "ai";
 import { Button } from "@/components/ui-shadcn/button";
 import { t } from "@/i18n";
@@ -169,6 +169,10 @@ export const WebUserBubble = memo(function WebUserBubble(props: {
 	onEdit?: (messageId: string, newText: string) => void;
 	onDelete?: (messageId: string) => void;
 	onResend?: (messageId: string) => void;
+	/** 乐观更新进行中：编辑=等待服务端确认（操作行换成转圈+文案），删除=即将退场 */
+	pendingAction?: "edit" | "delete" | null;
+	/** 编辑保存成功的确认反馈：气泡闪一拍品牌色环 */
+	flash?: boolean;
 }) {
 	const text = uiMessageText(props.message);
 	const images = uiMessageImages(props.message);
@@ -227,35 +231,43 @@ export const WebUserBubble = memo(function WebUserBubble(props: {
 			) : (
 				<>
 					{text.trim() ? (
-						<div className="w-fit min-w-0 max-w-[min(82%,64ch)] rounded-2xl border border-border bg-muted/60 px-3.5 py-2.5 text-sm text-foreground [overflow-wrap:anywhere] break-words">
+						<div className={cn("w-fit min-w-0 max-w-[min(82%,64ch)] rounded-2xl border border-border bg-muted/60 px-3.5 py-2.5 text-sm text-foreground [overflow-wrap:anywhere] break-words", props.flash && "web-msg-flash-ring")}>
 							<div className="text-chat text-text-primary whitespace-pre-wrap break-words">{text}</div>
 						</div>
 					) : null}
-					{/* hover 操作行：复制恒有；编辑/删除/重发需 runtime 存活；触屏无 hover，常驻显示 */}
-					<div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/user:opacity-100 focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100">
-						<ActionButton label={t("web.msgCopy")} onClick={() => void copyTextToClipboard(text)}>
-							<Copy className="size-3.5" aria-hidden="true" />
-						</ActionButton>
-						{manage ? (
-							<>
-								<ActionButton
-									label={t("web.msgEdit")}
-									onClick={() => {
-										setEditDraft(text);
-										setEditing(true);
-									}}
-								>
-									<Pencil className="size-3.5" aria-hidden="true" />
-								</ActionButton>
-								<ActionButton label={t("web.msgResend")} onClick={() => props.onResend?.(props.message.id)}>
-									<RefreshCw className="size-3.5" aria-hidden="true" />
-								</ActionButton>
-								<ActionButton label={t("web.msgDelete")} danger onClick={() => props.onDelete?.(props.message.id)}>
-									<Trash2 className="size-3.5" aria-hidden="true" />
-								</ActionButton>
-							</>
-						) : null}
-					</div>
+					{/* hover 操作行：复制恒有；编辑/删除/重发需 runtime 存活；触屏无 hover，常驻显示。
+						乐观更新进行中整行换成状态指示，避免重复触发。 */}
+					{props.pendingAction ? (
+						<div className="mt-1 flex items-center gap-1.5 text-xs text-text-tertiary" role="status">
+							<Loader2 className="size-3.5 animate-pideck-spin" aria-hidden="true" />
+							{props.pendingAction === "edit" ? t("web.msgSaving") : t("web.msgDeleting")}
+						</div>
+					) : (
+						<div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/user:opacity-100 focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100">
+							<ActionButton label={t("web.msgCopy")} onClick={() => void copyTextToClipboard(text)}>
+								<Copy className="size-3.5" aria-hidden="true" />
+							</ActionButton>
+							{manage ? (
+								<>
+									<ActionButton
+										label={t("web.msgEdit")}
+										onClick={() => {
+											setEditDraft(text);
+											setEditing(true);
+										}}
+									>
+										<Pencil className="size-3.5" aria-hidden="true" />
+									</ActionButton>
+									<ActionButton label={t("web.msgResend")} onClick={() => props.onResend?.(props.message.id)}>
+										<RefreshCw className="size-3.5" aria-hidden="true" />
+									</ActionButton>
+									<ActionButton label={t("web.msgDelete")} danger onClick={() => props.onDelete?.(props.message.id)}>
+										<Trash2 className="size-3.5" aria-hidden="true" />
+									</ActionButton>
+								</>
+							) : null}
+						</div>
+					)}
 				</>
 			)}
 		</article>
@@ -681,6 +693,12 @@ export function WebTimeline(props: {
 	uiResponding?: boolean;
 	onRespondUi?: (response: AgentUiResponse) => void;
 	onLoadMore: () => void;
+	/** 乐观更新：进行中编辑/删除的消息（气泡操作行换成状态指示） */
+	pendingMessageAction?: { kind: "edit" | "delete"; id: string } | null;
+	/** 删除退场动画进行中的消息 id（动画播完才从列表摘除） */
+	exitingMessageIds?: ReadonlySet<string>;
+	/** 编辑保存成功的确认反馈：气泡闪一拍品牌色环 */
+	flashMessageId?: string | null;
 	/** P1：消息操作（runtime 存活时可用） */
 	canManageMessages?: boolean;
 	onEditMessage?: (messageId: string, newText: string) => void;
@@ -728,6 +746,16 @@ export function WebTimeline(props: {
 	return (
 		<section className="message-timeline relative h-full min-h-0 flex-1 overflow-y-auto" ref={timelineRef} onScroll={updateScrollState}>
 			<div className="message-list flex flex-col gap-4 p-4 pb-2 sm:px-6">
+				{/* 分页加载更多：历史向上前插，入口必须在消息流顶部——往上滚到顶才碰得到；
+					放底部语义反了（底部是最新消息）。前插后靠浏览器原生 scroll anchoring 稳住视口。 */}
+				{hasMoreHistory && (
+					<div className="flex justify-center py-1">
+						<Button variant="outline" size="sm" disabled={loadingMore} onClick={onLoadMore} className="h-8 px-4 text-caption">
+							{loadingMore ? <Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" /> : null}
+							{loadingMore ? t("timeline.loadingMore") : t("timeline.loadMoreHistory", { count: moreCount })}
+						</Button>
+					</div>
+				)}
 				{!hasActiveSession && messages.length === 0 ? (
 					<div className="empty-state">
 						<div className="empty-logo">
@@ -744,23 +772,34 @@ export function WebTimeline(props: {
 					</div>
 				) : (
 					<>
-						{timelineEntries.map((entry) => (
-							<div key={entry.id} id={`web-msg-${entry.id}`} className="scroll-mt-24">
-								{entry.kind === "user" ? (
-									<WebUserBubble message={entry.message} canManage={props.canManageMessages} onEdit={props.onEditMessage} onDelete={props.onDeleteMessage} onResend={props.onResendMessage} />
-								) : (
-									<>
-										{/* 回合聚合后锚点补偿：回合内非首条消息保留 web-msg-{id} 定位（跳转/分支定位用） */}
-										{entry.turn.messageIds
-											.filter((messageId) => messageId !== entry.id)
-											.map((messageId) => (
-												<span key={messageId} id={`web-msg-${messageId}`} className="sr-only" />
-											))}
-										<WebAssistantTurn turn={entry.turn} isStreaming={streaming && entry.id === lastEntryId} />
-									</>
-								)}
-							</div>
-						))}
+						{timelineEntries.map((entry) => {
+							const exiting = entry.kind === "user" ? Boolean(props.exitingMessageIds?.has(entry.id)) : entry.turn.messageIds.some((messageId) => Boolean(props.exitingMessageIds?.has(messageId)));
+							return (
+								<div key={entry.id} id={`web-msg-${entry.id}`} className={cn("scroll-mt-24", exiting && "web-msg-exiting")}>
+									{entry.kind === "user" ? (
+										<WebUserBubble
+											message={entry.message}
+											canManage={props.canManageMessages}
+											onEdit={props.onEditMessage}
+											onDelete={props.onDeleteMessage}
+											onResend={props.onResendMessage}
+											pendingAction={props.pendingMessageAction?.id === entry.message.id ? props.pendingMessageAction.kind : null}
+											flash={props.flashMessageId === entry.message.id}
+										/>
+									) : (
+										<>
+											{/* 回合聚合后锚点补偿：回合内非首条消息保留 web-msg-{id} 定位（跳转/分支定位用） */}
+											{entry.turn.messageIds
+												.filter((messageId) => messageId !== entry.id)
+												.map((messageId) => (
+													<span key={messageId} id={`web-msg-${messageId}`} className="sr-only" />
+												))}
+											<WebAssistantTurn turn={entry.turn} isStreaming={streaming && entry.id === lastEntryId} />
+										</>
+									)}
+								</div>
+							);
+						})}
 					</>
 				)}
 
@@ -786,15 +825,6 @@ export function WebTimeline(props: {
 				<Button variant="secondary" size="icon" className="absolute right-4 bottom-4 z-10 size-9 rounded-full border border-border bg-background/95 shadow-md" onClick={scrollToBottom} aria-label={t("web.scrollToBottom")} title={t("web.scrollToBottom")}>
 					<ArrowDown className="size-4" aria-hidden="true" />
 				</Button>
-			)}
-
-			{/* 分页加载更多 */}
-			{hasMoreHistory && (
-				<div className="flex justify-center py-3">
-					<Button variant="outline" size="sm" disabled={loadingMore} onClick={onLoadMore} className="h-8 px-4 text-caption">
-						{loadingMore ? t("timeline.loadingMore") : t("timeline.loadMoreHistory", { count: moreCount })}
-					</Button>
-				</div>
 			)}
 		</section>
 	);

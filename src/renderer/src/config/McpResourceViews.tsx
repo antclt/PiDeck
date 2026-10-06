@@ -61,7 +61,7 @@ export function McpServerListPane(props: {
 			<div className="flex items-center justify-between gap-2 px-1 pb-0.5">
 				<span className="text-micro text-muted-foreground">{t("config.mcp.serverCount", { count: props.servers.length })}</span>
 				<Button variant="ghost" size="icon-xs" onClick={props.onRefreshStatus} disabled={props.statusLoading} title={t("config.mcp.status.check")}>
-					<RefreshCw size={12} className={props.statusLoading ? "animate-spin" : ""} />
+					<RefreshCw size={12} className={props.statusLoading ? "animate-pideck-spin" : ""} />
 				</Button>
 			</div>
 			{props.servers.length === 0 && !props.creating ? (

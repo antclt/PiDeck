@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -40,13 +41,29 @@ test("three animation pieces reassemble the settled bitmap exactly", () => {
 	}
 });
 
-test("resolveLogoStyle only accepts pi-tui, everything else falls back to classic", () => {
+test("resolveLogoStyle treats classic as explicit opt-in, everything else falls back to pi-tui", () => {
 	assert.equal(resolveLogoStyle("pi-tui"), "pi-tui");
 	assert.equal(resolveLogoStyle("classic"), "classic");
-	assert.equal(resolveLogoStyle(null), "classic");
-	assert.equal(resolveLogoStyle(undefined), "classic");
-	assert.equal(resolveLogoStyle("Pi-TUI"), "classic");
-	assert.equal(resolveLogoStyle("garbage"), "classic");
+	assert.equal(resolveLogoStyle(null), "pi-tui");
+	assert.equal(resolveLogoStyle(undefined), "pi-tui");
+	assert.equal(resolveLogoStyle("Pi-TUI"), "pi-tui");
+	assert.equal(resolveLogoStyle("garbage"), "pi-tui");
+});
+
+test("logo 风格缓存键带版本后缀（翻默认值时必须升版本，否则开屏沿用旧默认）", () => {
+	assert.match(LOGO_STYLE_STORAGE_KEY, /:v\d+$/u, "LOGO_STYLE_STORAGE_KEY 必须形如 pideck:logo-style:vN");
+});
+
+test("开屏内联脚本按内容哈希进 CSP 白名单（否则被 script-src 静默拦截，开屏永远回落经典标）", () => {
+	const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+	const html = readFileSync(`${repoRoot}src/renderer/index.html`, "utf8");
+	const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+	assert.ok(script, "index.html 必须保留开屏内联脚本");
+	const hash = `sha256-${createHash("sha256").update(script, "utf8").digest("base64")}`;
+	const csp = html.match(/Content-Security-Policy"\s*content="([^"]+)"/)?.[1] ?? "";
+	assert.ok(csp.includes(`'${hash}'`), `CSP script-src 必须含脚本内容哈希 ${hash}（改脚本文本后需同步更新 CSP）`);
+	assert.match(csp, /script-src [^;]*'self'/, "script-src 必须保留 'self'");
+	assert.doesNotMatch(csp, /script-src[^;]*'unsafe-inline'/, "禁止用 'unsafe-inline' 绕过内联限制（应改用内容哈希）");
 });
 
 test("boot splash reads the same localStorage key and embeds the same pi-tui bitmap", () => {
@@ -54,11 +71,29 @@ test("boot splash reads the same localStorage key and embeds the same pi-tui bit
 	const html = readFileSync(`${repoRoot}src/renderer/index.html`, "utf8");
 	// 启动画面内联脚本（无法 import 共享常量）必须与 LOGO_STYLE_STORAGE_KEY 同步；空白容忍防格式化断言
 	assert.match(html, new RegExp(`localStorage\\.getItem\\(\\s*["']${LOGO_STYLE_STORAGE_KEY.replace(":", "\\:")}["']\\s*\\)`), "boot splash must read LOGO_STYLE_STORAGE_KEY");
+	// 新默认 pi-tui：仅显式选 classic 才不挂 class（与 shared/settings 默认同源）
+	assert.match(html, new RegExp(`localStorage\\.getItem\\(\\s*["']${LOGO_STYLE_STORAGE_KEY.replace(":", "\\:")}["']\\s*\\)\\s*!==\\s*["']classic["']`), "boot splash 默认 pi-tui（非 classic 即挂 class）");
 	// 开屏 pi-tui SVG 与数据模块逐格一致（颜色 + 位置抽样锚定）
 	assert.match(html, /class="boot-logo-pi-tui"[\s\S]*?fill="#E48A7A"[\s\S]*?fill="#4F8EB3"[\s\S]*?fill="#EAB65D"/);
 	assert.match(html, /<rect x="3" y="3" width="1" height="1" fill="#EAB65D"\/>/);
 	// classic / pi-tui 显隐互斥（html.logo-pi-tui class 切换）
 	assert.match(html, /html\.logo-pi-tui \.boot-logo \.boot-logo-classic\s*\{\s*display:\s*none/);
+	// 官方位图为 1:1 正方形（半块字符每格上下两个正方形像素），不得再按 4:3 压成 48×36
+	const bootRule = html.match(/\.boot-logo \.boot-logo-pi-tui\s*\{[^}]*\}/u);
+	assert.ok(bootRule, "boot splash 应有 pi-tui logo 尺寸规则");
+	assert.match(bootRule[0], /height:\s*48px/, "开屏 pi-tui 高度须与宽度一致（48px，1:1）");
+});
+
+test("PiTuiLogo component renders the 4x4 bitmap as a square (SVG and Canvas)", () => {
+	const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+	const source = readFileSync(`${repoRoot}src/renderer/src/components/app/PiTuiLogo.tsx`, "utf8");
+	// 官方 TUI 半块字符：每字符格上下叠两个正方形像素 → 4×4 位图整体 1:1。
+	// 2026-12 曾误按「2 行字符」把高度算成 3/4：SVG 被挤出侧向留白、canvas 方形缓冲被 CSS 纵向压扁，
+	// 品牌区 logo 明显偏扁——本测试锁住「正方形」契约（空白容忍，AGENTS.md 格式化要求）。
+	assert.match(source, /width=\{size\}\s*height=\{size\}/, "svg 宽高必须相等（位图 1:1）");
+	assert.doesNotMatch(source, /\(size \* 3\) \/ 4|\(cssSize \* 3\) \/ 4/, "不得再按 4:3 计算高度");
+	const paintSection = source.slice(source.indexOf("function paintCells"));
+	assert.match(paintSection, /const cssW = cssSize;\s*const cssH = cssSize;/, "canvas CSS 尺寸必须为 1:1");
 });
 
 test("LogoMark sidebar and about logo branch on logoStyle (source scan, whitespace tolerant)", () => {
@@ -96,18 +131,18 @@ const seedSettings = (userData, extra) => {
 	writeFileSync(join(userData, "settings.json"), JSON.stringify({ installationType: "installed", chatContentWidthPct: 80, ...extra }));
 };
 
-test("SettingsStore: logoStyle 默认 classic、旧配置缺字段零迁移、非法值被清洗", async () => {
+test("SettingsStore: logoStyle 默认 pi-tui、旧配置缺字段回落新默认、非法值被清洗", async () => {
 	const { SettingsStore, userData } = makeSettingsStore();
 	seedSettings(userData, {});
 	const store = new SettingsStore();
 	await store.load();
-	assert.equal(store.get().logoStyle, "classic", "旧 settings.json 缺 logoStyle 时回落 classic");
+	assert.equal(store.get().logoStyle, "pi-tui", "旧 settings.json 缺 logoStyle 时回落新默认 pi-tui");
 
-	await store.update({ logoStyle: "pi-tui" });
-	assert.equal(store.get().logoStyle, "pi-tui");
+	await store.update({ logoStyle: "classic" });
+	assert.equal(store.get().logoStyle, "classic", "显式选 classic 生效");
 
 	await store.update({ logoStyle: "neon" });
-	assert.equal(store.get().logoStyle, "pi-tui", "非法枚举被丢弃，保持原设置");
+	assert.equal(store.get().logoStyle, "classic", "非法枚举被丢弃，保持原设置");
 });
 
 test("logoStyle 默认值三处同源（shared 默认 / SettingsStore 默认 / atom 初值）", () => {
@@ -119,7 +154,7 @@ test("logoStyle 默认值三处同源（shared 默认 / SettingsStore 默认 / a
 		["src/shared/types/settings.ts", sharedDefaults],
 		["src/main/settings/SettingsStore.ts", storeDefaults],
 	]) {
-		assert.match(source, /logoStyle\s*:\s*"classic"/, `${path} 默认 classic`);
+		assert.match(source, /logoStyle\s*:\s*"pi-tui"/, `${path} 默认 pi-tui`);
 	}
-	assert.match(atoms, /logoStyleAtom\s*=\s*atom<"classic"\s*\|\s*"pi-tui">\("classic"\)/, "atom 初值 classic");
+	assert.match(atoms, /logoStyleAtom\s*=\s*atom<"classic"\s*\|\s*"pi-tui">\("pi-tui"\)/, "atom 初值 pi-tui");
 });

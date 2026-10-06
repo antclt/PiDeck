@@ -1,6 +1,6 @@
 {
   "name": "pi-desktop",
-  "version": "0.7.8",
+  "version": "0.7.9",
   "dshRuntimeVersion": "0.2.0-rc.2",
   "packageManager": "npm@11.6.2",
   "engines": {
@@ -107,6 +107,7 @@
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "sync:main": "node scripts/sync-main.mjs",
     "typecheck": "tsc --noEmit",
+    "preflight": "node scripts/release-preflight.mjs",
     "make-icon": "node scripts/make-icon.js",
     "compile-exe": "node scripts/compile-exe.js",
     "test:e2e": "npm run build:fast && playwright test",
@@ -344,7 +345,7 @@
     "@deepseek-ai/dsh-subprocess": "0.2.0-rc.2",
     "@deepseek-ai/dsh-timeout": "0.2.0-rc.2",
     "@deepseek-ai/dsh-workflow": "0.2.0-rc.2",
-    "@earendil-works/pi-ai": "1.0.0",
+    "@earendil-works/pi-ai": "1.0.4",
     "@fiahfy/icns": "^0.0.7",
     "@lezer/highlight": "^1.2.3",
     "@pierre/diffs": "^1.3.5",

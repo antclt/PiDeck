@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, ClipboardList, Copy, Radio, Save, X } from "lucide-react";
+import { Loader2, ChevronDown, ClipboardList, Copy, Radio, Save, X } from "lucide-react";
 import { t } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
 import { Input } from "../ui-shadcn/input";
@@ -121,7 +121,13 @@ const RpcLogRow = memo(function RpcLogRow(props: { log: RpcLogEntry; expanded: b
 			// 解析失败（截断/畸形）时组件内部自动退回原始 JSON 兑底。
 			if (tracePayload !== undefined) detail = <ModelTraceDetail payloadJson={tracePayload} summary={trace} />;
 			else if (traceView?.status === "missing") detail = <div className="rpc-log-detail-note">{t("rpc.modelTraceMissing")}</div>;
-			else detail = <div className="rpc-log-detail-note">{t("rpc.modelLoading")}</div>;
+			else
+				detail = (
+					<div className="rpc-log-detail-note flex items-center gap-1.5">
+						<Loader2 size={12} className="animate-pideck-spin" aria-hidden="true" />
+						{t("rpc.modelLoading")}
+					</div>
+				);
 		} else if (log.data !== undefined) {
 			detail = <pre className="rpc-log-detail">{jsonText}</pre>;
 		}

@@ -89,7 +89,7 @@ export function ComposerImageGenOptions(props: {
 				</Select>
 			) : null}
 			{extra.watermark ? (
-				<label className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md px-1.5 text-control text-foreground hover:bg-muted/60 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50" title={t("imagegen.watermarkHint")}>
+				<label className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md px-1.5 text-control text-foreground transition-colors hover:bg-muted/60 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50" title={t("imagegen.watermarkHint")}>
 					<Switch size="sm" checked={props.watermark} disabled={props.disabled} onCheckedChange={props.onWatermarkChange} aria-label={t("imagegen.watermark")} />
 					<span className="whitespace-nowrap">{t("imagegen.watermark")}</span>
 				</label>

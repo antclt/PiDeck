@@ -13,7 +13,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { Bot, Eye, EyeOff } from "lucide-react";
+import { Loader2, Bot, Eye, EyeOff } from "lucide-react";
 import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
 import type { ProviderUsageResult, UsageProbeProviderConfig, UsageProbeTemplateCategory } from "../../../shared/types/providerUsage";
@@ -432,7 +432,10 @@ export function UsageProbeConfigDialog(props: {
 				</DialogHeader>
 				<div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 pb-3">
 					{!loaded ? (
-						<div className="py-4 text-center text-caption text-text-tertiary">{t("common.loading")}</div>
+						<div className="flex items-center justify-center gap-2 py-4 text-caption text-text-tertiary">
+							<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+							{t("common.loading")}
+						</div>
 					) : (
 						<>
 							{loadErrors.length > 0 && <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-caption leading-relaxed text-amber-600 dark:text-amber-400">{loadErrors.join("\n")}</div>}

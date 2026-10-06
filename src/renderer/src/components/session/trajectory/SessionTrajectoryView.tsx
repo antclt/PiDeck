@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { useAtomValue } from "jotai";
-import { Activity, ArrowLeft, Check, Clock, Copy, CornerUpLeft, FileJson, Hash, Wrench } from "lucide-react";
+import { Loader2, Activity, ArrowLeft, Check, Clock, Copy, CornerUpLeft, FileJson, Hash, Wrench } from "lucide-react";
 import type { AgentRuntimeState, ChatMessage } from "../../../../../shared/types";
 import type { SessionProcessEvent } from "../../../../../shared/types/trajectory";
 import type { ModelTraceLogData } from "../../../../../shared/types/rpcLog";
@@ -181,7 +181,8 @@ export function SessionTrajectoryView(props: {
 					) : null}
 				</div>
 				{props.hasMoreMessages ? (
-					<button type="button" className="shrink-0 rounded-sm px-1.5 text-caption text-muted-foreground hover:text-foreground" disabled={props.isLoadingMoreMessages} onClick={props.onLoadMore}>
+					<button type="button" className="inline-flex shrink-0 items-center gap-1 rounded-sm px-1.5 text-caption text-muted-foreground hover:text-foreground" disabled={props.isLoadingMoreMessages} onClick={props.onLoadMore}>
+						{props.isLoadingMoreMessages ? <Loader2 size={11} className="animate-pideck-spin" aria-hidden="true" /> : null}
 						{props.isLoadingMoreMessages ? t("session.trajectory.loadingOlder") : t("session.trajectory.loadOlder")}
 					</button>
 				) : null}
@@ -409,7 +410,7 @@ function CopyableBlock(props: { label?: string; text: string }) {
 				{props.label ? <span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">{props.label}</span> : <span />}
 				<button
 					type="button"
-					className="inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+					className="inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 					onClick={() => {
 						void onCopy();
 					}}

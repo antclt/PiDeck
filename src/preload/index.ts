@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { ipcChannels } from "../shared/ipc";
-import type { TokendanceAuthMode } from "../shared/tokendance";
+import type { TokendanceAuthMode, TokendancePaymentSessionResult } from "../shared/tokendance";
 import type { AnnouncementState } from "../shared/types/announcement";
 import type { RpcLogBatch, RpcLogEntry } from "../shared/types/rpcLog";
 import type { ModelTraceRecord } from "../shared/types/bridge";
@@ -68,6 +68,13 @@ import type {
 	WorkBuddySessionSummary,
 	CursorImportReport,
 	CursorSessionSummary,
+	KimiImportReport,
+	KimiSessionSummary,
+	KimiWorkShareRootInfo,
+	KimiWorkSessionSummary,
+	KimiWorkImportReport,
+	MinimaxImportReport,
+	MinimaxSessionSummary,
 	DirectoryImportReport,
 	DirectorySessionScanResult,
 	DirectorySessionSourceDir,
@@ -137,6 +144,7 @@ import type {
 	BranchDiffResult,
 	WorktreeEntry,
 	PiCliUpdateResult,
+	PiReleaseNotesPayload,
 	PiCommand,
 	RewindCheckpointPage,
 	RewindCheckpointPageParams,
@@ -215,11 +223,34 @@ const api = {
 		getState: () => ipcRenderer.invoke(ipcChannels.quickTaskGetState) as Promise<import("../shared/types/quickTask").QuickTaskState>,
 		onChanged: (callback: (state: import("../shared/types/quickTask").QuickTaskState) => void) => subscribe(ipcChannels.quickTaskChanged, callback),
 		exit: () => ipcRenderer.invoke(ipcChannels.quickTaskExit) as Promise<void>,
+		/** 任务模式 → 小窗：退出 quick-task 并展开极简浮窗。 */
+		switchToMiniOverlay: () => ipcRenderer.invoke(ipcChannels.quickTaskSwitchToMiniOverlay) as Promise<void>,
 	},
-	/**
+	floatingBall: {
+		getState: () => ipcRenderer.invoke(ipcChannels.floatingBallGetState) as Promise<import("../main/floating/FloatingController").FloatingBallState>,
+		onStateChanged: (callback: (state: import("../main/floating/FloatingController").FloatingBallState) => void) => subscribe(ipcChannels.floatingBallState, callback),
+		enter: () => ipcRenderer.invoke(ipcChannels.floatingBallEnter) as Promise<void>,
+		exit: () => ipcRenderer.invoke(ipcChannels.floatingBallExit) as Promise<void>,
+		setEnabled: (enabled: boolean) => ipcRenderer.invoke(ipcChannels.floatingBallSetEnabled, enabled) as Promise<void>,
+		setExpandTarget: (target: "mini" | "compact") => ipcRenderer.invoke(ipcChannels.floatingBallSetExpandTarget, target) as Promise<void>,
+		dragStart: () => ipcRenderer.invoke(ipcChannels.floatingBallDragStart) as Promise<void>,
+		dragMove: (x: number, y: number) => ipcRenderer.invoke(ipcChannels.floatingBallDragMove, x, y) as Promise<void>,
+		dragEnd: () => ipcRenderer.invoke(ipcChannels.floatingBallDragEnd) as Promise<void>,
+		contextMenu: () => ipcRenderer.invoke(ipcChannels.floatingBallContextMenu) as Promise<void>,
+	},
+
+	miniOverlay: {
+		onStateChanged: (callback: (state: import("../main/floating/MiniOverlayWindow").MiniOverlayState) => void) => subscribe(ipcChannels.miniOverlayState, callback),
+		jumpToSession: (sessionId: string, projectId: string) => ipcRenderer.invoke(ipcChannels.miniOverlayJumpToSession, sessionId, projectId) as Promise<void>,
+		quickPrompt: (projectId: string, text: string) => ipcRenderer.invoke(ipcChannels.miniOverlayQuickPrompt, projectId, text) as Promise<{ ok: boolean; message?: string }>,
+		close: () => ipcRenderer.invoke(ipcChannels.miniOverlayClose) as Promise<void>,
+		collapse: () => ipcRenderer.invoke(ipcChannels.miniOverlayCollapse) as Promise<void>,
+		/** 小窗 → 任务模式：隐藏小窗，主窗口以 quick-task 紧凑形态打开（projectPath 缺省用桌面）。 */
+		switchToQuickTask: (projectPath?: string) => ipcRenderer.invoke(ipcChannels.miniOverlaySwitchToQuickTask, projectPath) as Promise<void>,
+	} /**
 	 * pi 供应商认证（`/login`）：pi 的登录只在它的 CLI 交互层存在，应用内登录走
 	 * 这条例外通道（见 AGENTS.md「认证例外通道」）。调用方就是登录弹框。
-	 */
+	 */,
 	piAuth: {
 		listProviders: () => ipcRenderer.invoke(ipcChannels.piAuthListProviders) as Promise<{ ok: true; list: import("../shared/types/piAuth").PiAuthProviderList } | { ok: false; errorKind: import("../shared/types/piAuth").PiAuthErrorKind; error: string }>,
 		login: (request: import("../shared/types/piAuth").PiAuthLoginRequest) => ipcRenderer.invoke(ipcChannels.piAuthLogin, request) as Promise<import("../shared/types/piAuth").PiAuthLoginResult>,
@@ -768,6 +799,21 @@ const api = {
 		scan: (projectId: string) => ipcRenderer.invoke(ipcChannels.cursorSessionsScan, projectId) as Promise<CursorSessionSummary[]>,
 		import: (projectId: string, sourcePaths: string[]) => ipcRenderer.invoke(ipcChannels.cursorSessionsImport, projectId, sourcePaths) as Promise<CursorImportReport>,
 	},
+	kimiSessions: {
+		scan: (projectId: string) => ipcRenderer.invoke(ipcChannels.kimiSessionsScan, projectId) as Promise<KimiSessionSummary[]>,
+		import: (projectId: string, sourcePaths: string[]) => ipcRenderer.invoke(ipcChannels.kimiSessionsImport, projectId, sourcePaths) as Promise<KimiImportReport>,
+	},
+	/** Kimi Work（kimi-desktop 桌面版）会话导入；数据目录位置由探测链决定（见 kimiWorkSource）。 */
+	kimiWorkSessions: {
+		describe: () => ipcRenderer.invoke(ipcChannels.kimiWorkSessionsDescribe) as Promise<KimiWorkShareRootInfo>,
+		scan: (projectId: string) => ipcRenderer.invoke(ipcChannels.kimiWorkSessionsScan, projectId) as Promise<KimiWorkSessionSummary[]>,
+		import: (projectId: string, sourcePaths: string[]) => ipcRenderer.invoke(ipcChannels.kimiWorkSessionsImport, projectId, sourcePaths) as Promise<KimiWorkImportReport>,
+	},
+	/** MinimaxCode（CLI）会话导入；数据目录固定 ~/.minimax/v2/sessions，按 cwd 归属项目。 */
+	minimaxSessions: {
+		scan: (projectId: string) => ipcRenderer.invoke(ipcChannels.minimaxSessionsScan, projectId) as Promise<MinimaxSessionSummary[]>,
+		import: (projectId: string, sourcePaths: string[]) => ipcRenderer.invoke(ipcChannels.minimaxSessionsImport, projectId, sourcePaths) as Promise<MinimaxImportReport>,
+	},
 	/**
 	 * 外置目录会话导入：源目录由用户现选（从「现有会话目录」列表点选，或手选任意目录），
 	 * 导入 = 把会话挂到当前项目（catalog 归属改写），原文件不移动、不复制。
@@ -883,6 +929,8 @@ const api = {
 		setCustomPaths: (paths: readonly string[]) => ipcRenderer.invoke(ipcChannels.piSetCustomPaths, [...paths]) as Promise<{ paths: string[]; clearedActive: boolean }>,
 		checkUpdate: () => ipcRenderer.invoke(ipcChannels.piUpdateCheck) as Promise<PiUpdateCheckResult>,
 		update: () => ipcRenderer.invoke(ipcChannels.piUpdate) as Promise<PiCliUpdateResult>,
+		/** pi CLI 更新日志：点「更新详情」时按需拉取 (current, latest] 区间的 changelog 条目。 */
+		releaseNotes: (options: { latestVersion: string; currentVersion?: string }) => ipcRenderer.invoke(ipcChannels.piReleaseNotes, options) as Promise<PiReleaseNotesPayload>,
 		/** 执行安装命令（如 npm install -g pi）并返回执行结果 */
 		execInstall: (command: string) => ipcRenderer.invoke(ipcChannels.piExecInstall, command) as Promise<PiInstallExecResult>,
 		/** 检查 npm 是否可用 */
@@ -1188,6 +1236,15 @@ const api = {
 		tokendanceAuthCancel: (flowId: string) => ipcRenderer.invoke(ipcChannels.configTokendanceAuthCancel, { flowId }) as Promise<{ ok: boolean; error?: string }>,
 		/** 用一次性授权 code 交换 TokenDance API Key；成功后 key 只在本次响应出现，须立即写入配置。 */
 		tokendanceAuthExchange: (flowId: string, code: string) => ipcRenderer.invoke(ipcChannels.configTokendanceAuthExchange, { flowId, code }) as Promise<{ ok: true; key: string } | { ok: false; error: string }>,
+		/**
+		 * 创建 TokenDance 充值会话（amount 为整数元，1–100000）。
+		 * 成功回 paymentUrl（PC 渲染二维码）/ alipayUrl（移动端深链，可能缺失）/ statusUrl。
+		 */
+		tokendanceTopUpCreate: (amount: number) => ipcRenderer.invoke(ipcChannels.configTokendanceTopUpCreate, { amount }) as Promise<TokendancePaymentSessionResult>,
+		/** 查询充值会话状态（只接受主进程校验过的 status_url；3 秒轮询，expired_at 后停）。 */
+		tokendanceTopUpStatus: (statusUrl: string) => ipcRenderer.invoke(ipcChannels.configTokendanceTopUpStatus, { statusUrl }) as Promise<TokendancePaymentSessionResult>,
+		/** 在用户点击后唤起支付宝 App（仅 alipays:// 深链；移动端链路，PC 扫码不需要）。 */
+		tokendanceTopUpOpenAlipay: (url: string) => ipcRenderer.invoke(ipcChannels.configTokendanceTopUpOpenAlipay, { url }) as Promise<{ ok: boolean; error?: string }>,
 		/** 一键安装 TokenDance：供应商信息 + 目录模型写入 pi models.json 与 DSH llm-pi-ai；apiKey 可选（OAuth 后已持有）。 */
 		installTokendance: (apiKey?: string) =>
 			ipcRenderer.invoke(ipcChannels.configInstallTokendance, { apiKey }) as Promise<{

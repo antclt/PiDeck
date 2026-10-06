@@ -79,7 +79,7 @@ function TraceMessageRow({ message, index }: { message: TraceMessage; index: num
 				<span className="shrink-0 tabular-nums text-[10px] text-muted-foreground/60">{t("rpc.traceChars", { n: message.chars })}</span>
 			</button>
 			{open && (
-				<div className="flex flex-col gap-2 px-2 pb-2 pl-9">
+				<div className="flex flex-col gap-2 px-2 pb-2 pl-9 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
 					{message.blocks.map((block, blockIndex) => (
 						<TraceBlockView key={blockIndex} block={block} />
 					))}
@@ -99,7 +99,7 @@ function SectionHeader({ icon, label, meta, open, onToggle, children }: { icon: 
 				<span className="text-xs font-medium">{label}</span>
 				{meta ? <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground/70">{meta}</span> : <span className="flex-1" />}
 			</button>
-			{open && children}
+			{open && <div className="motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">{children}</div>}
 		</div>
 	);
 }

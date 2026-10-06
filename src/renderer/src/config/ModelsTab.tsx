@@ -583,7 +583,7 @@ export function ModelsTab(props: {
 									</div>
 
 									{isExpanded && (
-										<div className="config-provider-body border-t border-border-subtle bg-bg-muted pt-3">
+										<div className="config-provider-body border-t border-border-subtle bg-bg-muted pt-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
 											<div className="config-provider-form mx-4 my-3.5 grid gap-2.5 rounded-lg border border-border-subtle bg-bg-panel p-3.5">
 												<ProviderConnectionForm
 													baseUrl={provider.baseUrl ?? ""}

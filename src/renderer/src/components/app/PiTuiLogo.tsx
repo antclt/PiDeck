@@ -3,7 +3,7 @@ import { useAtomValue } from "jotai";
 import { logoStyleAtom } from "../../atoms/app-ui-atoms";
 import { PI_TUI_COLORS, PI_TUI_LOGO_CELLS, PI_TUI_PIECES, type PiTuiColorKey } from "./piTuiLogoData";
 
-/** 订阅 logo 风格镜像 atom；Web 独立环境无人写入，恒为 classic（现状）。 */
+/** 订阅 logo 风格镜像 atom；Web 独立环境无人写入 → 恒取 atom 默认（pi-tui），与桌面默认品牌位一致。 */
 export function useLogoStyle(): "classic" | "pi-tui" {
 	return useAtomValue(logoStyleAtom);
 }
@@ -13,8 +13,10 @@ export function useLogoStyle(): "classic" | "pi-tui" {
  * 位图与颜色来自 piTuiLogo.ts（对齐 pi 源码 pi-logo.ts）。
  */
 export function PiTuiLogoMark({ size = 32, className }: { size?: number; className?: string }) {
+	// 官方 TUI 用半块字符渲染 4×4 位图（每字符=上下两个正方形像素）→ 位图本身 1:1 正方形；
+	// 曾误按「2 行字符」把高度压成 3/4，品牌区 logo 被压扁/留白（2026-12 用户反馈修正）。
 	return (
-		<svg viewBox="0 0 4 4" width={size} height={(size * 3) / 4} className={className} aria-hidden="true" shapeRendering="crispEdges">
+		<svg viewBox="0 0 4 4" width={size} height={size} className={className} aria-hidden="true" shapeRendering="crispEdges">
 			{Object.entries(PI_TUI_LOGO_CELLS).map(([key, color]) => {
 				const [y, x] = key.split(":").map(Number);
 				return <rect key={key} x={x} y={y} width={1} height={1} fill={PI_TUI_COLORS[color]} />;
@@ -78,8 +80,9 @@ function paintCells(canvas: HTMLCanvasElement, cells: Cells, cssSize: number) {
 		canvas.width = bitmap;
 		canvas.height = bitmap;
 	}
+	// CSS 尺寸必须 1:1：缓冲是正方形，CSS 压成 4:3 会被浏览器纵向挤扁（曾按「2 行字符」误算）
 	const cssW = cssSize;
-	const cssH = (cssSize * 3) / 4;
+	const cssH = cssSize;
 	canvas.style.width = `${cssW}px`;
 	canvas.style.height = `${cssH}px`;
 	const cell = bitmap / grid;
@@ -121,7 +124,7 @@ function easeOutCubic(t: number) {
 }
 
 export type PiTuiLogoCanvasProps = {
-	/** 画布 CSS 宽度（位图 4:3，高度 = size*3/4） */
+	/** 画布 CSS 宽高（位图 1:1 正方形） */
 	size?: number;
 	/** 点击是否重播落位动画；默认 true，与 PiLogoCanvas 侧栏品牌位行为一致 */
 	playOnClick?: boolean;

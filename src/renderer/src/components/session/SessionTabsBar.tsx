@@ -785,7 +785,7 @@ function EditorWorkbenchTab(props: {
 							role="tab-close"
 							aria-label={t("tabs.close")}
 							title={t("tabs.close")}
-							className={cn("inline-grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground/70 hover:bg-accent hover:text-foreground", tab.active ? "opacity-60 hover:opacity-100" : "opacity-0 group-hover:opacity-60")}
+							className={cn("inline-grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground/70 transition-[color,background-color,opacity] hover:bg-accent hover:text-foreground", tab.active ? "opacity-60 hover:opacity-100" : "opacity-0 group-hover:opacity-60")}
 							onClick={(event) => {
 								event.stopPropagation();
 								props.onClose?.(tab.id);
@@ -1052,7 +1052,7 @@ function SessionTab(props: {
 										role="tab-close"
 										aria-label={t("tabs.close")}
 										title={t("tabs.close")}
-										className={cn("inline-grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground/70 hover:bg-accent hover:text-foreground", active ? "opacity-60 hover:opacity-100" : "opacity-0 group-hover:opacity-60")}
+										className={cn("inline-grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground/70 transition-[color,background-color,opacity] hover:bg-accent hover:text-foreground", active ? "opacity-60 hover:opacity-100" : "opacity-0 group-hover:opacity-60")}
 										onClick={(event) => {
 											event.stopPropagation();
 											close();

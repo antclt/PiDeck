@@ -4,6 +4,7 @@ import { useAtom, useSetAtom } from "jotai";
 import { ArrowDownToLine, ArrowUpFromLine, Check, CheckCircle2, ChevronDown, ChevronsDownUp, ChevronsUpDown, ClipboardPaste, FileCode2, FolderGit2, GitBranch, Loader2, Plus, RefreshCw, RotateCcw, Sparkles, TriangleAlert } from "lucide-react";
 import { Button } from "../ui-shadcn/button";
 import { BridgeGuiSlot, useBridgeSessionId } from "../bridge/BridgeSlot";
+import { useAnimationWindow } from "../../hooks/useAnimationWindow";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "../ui-shadcn/context-menu";
 import { ConfirmDialog } from "./AppParts";
 import { dismissNotice, showNotice, type NoticeId } from "../../utils/notice";
@@ -412,6 +413,10 @@ function PaneSash(props: { before: PaneId; after: PaneId; beforeHeight: number; 
 }
 
 export function GitPanel(props: GitPanelProps) {
+	const [paneAnimSeq, setPaneAnimSeq] = useState(0);
+	// 开合动画窗口：只在 toggle 后 180ms 内给分区挂 height 过渡（挂在 .git-panel[data-pane-animating]），
+	// sash 拖拽改 --git-pane-height 时窗口不在，避免拖拽橡皮筋。定时器收口在 hook（面板源码有 setTimeout 守卫）。
+	const paneAnimating = useAnimationWindow(paneAnimSeq, 180);
 	const panelRef = useRef<HTMLDivElement>(null);
 	// 桥落点跟随聚焦会话（共享 chrome 策略，见 git.panel.section 挂载处注释）
 	const bridgeSessionId = useBridgeSessionId();
@@ -851,6 +856,7 @@ export function GitPanel(props: GitPanelProps) {
 		setResourceOpen((current) => ({ ...current, [key]: !current[key] }));
 	};
 	const togglePane = (id: PaneId) => {
+		setPaneAnimSeq((v) => v + 1);
 		setPaneState((current) => {
 			const open = { ...current.open, [id]: !current.open[id] };
 			const next = { ...current, open };
@@ -1301,7 +1307,7 @@ export function GitPanel(props: GitPanelProps) {
 	);
 
 	return (
-		<div ref={panelRef} className={`git-panel flex min-h-0 flex-col overflow-hidden bg-background text-foreground${layout === "full" ? " h-full" : ""}`} aria-label={t("git.sourceControl")}>
+		<div ref={panelRef} data-pane-animating={paneAnimating || undefined} className={`git-panel flex min-h-0 flex-col overflow-hidden bg-background text-foreground${layout === "full" ? " h-full" : ""}`} aria-label={t("git.sourceControl")}>
 			{layout !== "historyOnly" && (
 				<>
 					{/* 当前分支 + 切换下拉：无边框、宽度收窄，把空间留给仓库名和提交区。 */}
@@ -1676,8 +1682,14 @@ export function GitPanel(props: GitPanelProps) {
 
 			{showSmartCommitPrompt &&
 				createPortal(
-					<div className="absolute inset-0 z-[1200] flex items-center justify-center bg-[var(--overlay-backdrop-soft)] p-6" role="presentation" onClick={() => setShowSmartCommitPrompt(false)}>
-						<div className="w-[min(520px,calc(100vw-48px))] rounded-lg border border-border-subtle bg-bg-panel p-4 font-sans text-text-primary shadow-[var(--shadow-modal)]" role="alertdialog" aria-modal="true" aria-labelledby="git-smart-commit-title" onClick={(event) => event.stopPropagation()}>
+					<div className="absolute inset-0 z-[1200] flex items-center justify-center bg-[var(--overlay-backdrop-soft)] p-6 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-base" role="presentation" onClick={() => setShowSmartCommitPrompt(false)}>
+						<div
+							className="w-[min(520px,calc(100vw-48px))] rounded-lg border border-border-subtle bg-bg-panel p-4 font-sans text-text-primary shadow-[var(--shadow-modal)] motion-safe:animate-in motion-safe:zoom-in-95 motion-safe:duration-base"
+							role="alertdialog"
+							aria-modal="true"
+							aria-labelledby="git-smart-commit-title"
+							onClick={(event) => event.stopPropagation()}
+						>
 							<strong id="git-smart-commit-title" className="text-base leading-6">
 								{t("git.smartCommitTitle")}
 							</strong>

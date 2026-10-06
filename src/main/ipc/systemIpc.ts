@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { PiMcpCli } from "../pi/piMcpCli";
+import { piChangelogService } from "../pi/PiChangelogService";
 import { validateMcpConfigFile } from "../config/mcpConfig";
 import { PiResourceConfigService } from "../config/PiResourceConfigService";
 import { PiResourceStateStore } from "../config/PiResourceStateStore";
@@ -39,7 +40,7 @@ import type { RpcLogger } from "../logging/RpcLogger";
 import type { SessionRuntimeCoordinator } from "../sessions/SessionRuntimeCoordinator";
 import { resolveConfigProxyTarget } from "../sessions/sessionProxyPolicy";
 import { setConfiguredGitPath } from "../git/gitExecutable";
-import { applyWindowLogoStyle } from "../appWindowLogo";
+import { applyTrayLogoStyle, applyWindowLogoStyle } from "../appWindowLogo";
 import { detectDshRunnerNode } from "../dsh/dshRunnerNode";
 import { DSH_RUNNER_NODE_ENV } from "../dsh/dshRunnerNodeSidecar";
 import { installDshRunnerNodeSidecar } from "../dsh/dshRunnerNodeInstall";
@@ -51,6 +52,7 @@ import { fetchModelList, getCachedModelList, invalidateModelListCache, modelsFro
 import { TokendanceCatalogStore } from "../config/tokendanceCatalog";
 import type { TokendanceInstallResult } from "../config/tokendanceInstaller";
 import type { TokendanceAuthMode, TokendanceAuthStore } from "../config/tokendanceAuth";
+import type { TokendancePaymentStore } from "../config/tokendancePayment";
 import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
 
 import { probePiModel } from "../pi/PiModelProber";
@@ -193,6 +195,8 @@ export type SystemIpcDeps = {
 	tokendanceCatalog?: TokendanceCatalogStore;
 	/** 内置 TokenDance OAuth 授权流程（PKCE verifier 内存持有）；未装配 = 授权入口不可用。 */
 	tokendanceAuth?: TokendanceAuthStore;
+	/** 内置 TokenDance 充值会话（创建 + 状态查询，Key 不出主进程）；未装配 = 充值入口不可用。 */
+	tokendancePayment?: TokendancePaymentStore;
 	/** TokenDance 一键安装（写入 pi models.json + DSH llm-pi-ai）；未装配 = 配置入口不可用。 */
 	tokendanceInstall?: (apiKey?: string) => Promise<TokendanceInstallResult>;
 	/** 环境体检编排器（问题反馈页一键排障）。 */
@@ -200,6 +204,8 @@ export type SystemIpcDeps = {
 	/** 诊断产物导出器（Markdown / zip 日志包）。 */
 	logBundleExporter?: LogBundleExporter;
 	getMainWindow: () => Electron.BrowserWindow | null;
+	/** 当前托盘实例（index.ts 持有）；Logo 风格切换时一并刷新托盘图标，未创建/已销毁返回 null。 */
+	getTray?: () => Electron.Tray | null;
 	mainCopy: (key: string, params?: Record<string, string | number>) => string;
 	/** Check for app update（index.ts 注入：直接触发 UpdateService.checkNow，结果经快照推送）。 */
 	checkForAppUpdate: () => Promise<void>;
@@ -377,6 +383,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		isDshRpcLogging,
 		setDshRpcLogWatching,
 		getMainWindow,
+		getTray,
 		mainCopy,
 		checkForAppUpdate,
 		downloadAppUpdate,
@@ -419,6 +426,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		modelCapabilityCache,
 		tokendanceCatalog,
 		tokendanceAuth,
+		tokendancePayment,
 		tokendanceInstall,
 		diagnosticsMonitor,
 		environmentDoctor,
@@ -1081,6 +1089,16 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			void appLogger.info("pi", "Pi update command completed", { updated: result.updated, bytes: result.output.length });
 			return result;
 		});
+		// pi 更新日志：用户点「更新详情」才按需拉取（不参与版本检查的自动调度）。
+		ipcMain.handle(ipcChannels.piReleaseNotes, async (_event, rawOptions) => {
+			// 输入校验在边界：渲染层数据一律不可信，版本号必须是 semver 形态的字符串。
+			const options = (rawOptions ?? {}) as { latestVersion?: unknown; currentVersion?: unknown };
+			const latestVersion = typeof options.latestVersion === "string" ? options.latestVersion : "";
+			const currentVersion = typeof options.currentVersion === "string" ? options.currentVersion : undefined;
+			const result = await piChangelogService.getReleaseNotes({ latestVersion, currentVersion });
+			void appLogger.info("pi", "Pi release notes fetched", { source: result.source, versionCount: result.versionCount, truncated: result.truncated });
+			return result;
+		});
 	}
 
 	// ── 应用信息 ─────────────────────────────────────────────────────
@@ -1633,9 +1651,11 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		if ("autoDownloadUpdates" in patch) {
 			updateService?.applyAutoDownloadPreference();
 		}
-		// Logo 风格：立即切换窗口/任务栏/Dock 图标（安装包静态图标恒为 classic，见 appWindowLogo.ts）。
+		// Logo 风格：立即切换窗口/任务栏/Dock/托盘图标（安装包与 exe 的静态图标在构建期烘进二进制，
+		// 运行时改不了，见 appWindowLogo.ts）。
 		if ("logoStyle" in patch && prevSettings.logoStyle !== settings.logoStyle) {
 			applyWindowLogoStyle(settings.logoStyle, getMainWindow);
+			if (getTray) applyTrayLogoStyle(settings.logoStyle, getTray);
 		}
 		// 更新源切换（预设镜像 / 自定义镜像前缀）：立即重建 feed URL，无需重启生效。
 		if ("updateSource" in patch || "customUpdateSourceUrl" in patch) {
@@ -2118,6 +2138,50 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 				error: error instanceof Error ? error.message : String(error),
 			});
 			return { ok: false, modelCount: 0, piSaved: false, dshSaved: false, error: "TokenDance install failed" };
+		}
+	});
+	ipcMain.handle(ipcChannels.configTokendanceTopUpCreate, async (_event, payload: unknown) => {
+		// 用赋值与开支付接口同一个 Key（该 Key 所属账户）；未装配 = 主进程无充值能力（预览/测试壳）。
+		if (!tokendancePayment) return { ok: false, code: "not-configured" } as const;
+		// 边界校验：amount 必须是整数元（渲染层入参不可信）；范围判定与渲染层提示共用同一份常量。
+		const amount = payload && typeof payload === "object" ? (payload as { amount?: unknown }).amount : undefined;
+		const result = await tokendancePayment.createSession(amount);
+		if (result.ok) {
+			// 只记金额与到期时间，不记会话 ID / payment_url（含渠道参数，无诊断价值）。
+			void appLogger.info("config", "TokenDance top-up session created", { amount: result.session.amount, expiredAt: result.session.expiredAt });
+		} else {
+			void appLogger.warn("config", "TokenDance top-up session failed", { code: result.code, detail: result.detail });
+		}
+		return result;
+	});
+	ipcMain.handle(ipcChannels.configTokendanceTopUpStatus, async (_event, payload: unknown) => {
+		if (!tokendancePayment) return { ok: false, code: "not-configured" } as const;
+		// 边界校验：statusUrl 必须是非空字符串；同源 + 路径前缀白名单在 store 内判定（不信任渲染层）。
+		const statusUrl = payload && typeof payload === "object" ? (payload as { statusUrl?: unknown }).statusUrl : undefined;
+		if (typeof statusUrl !== "string" || !statusUrl) {
+			return { ok: false, code: "bad-status-url" } as const;
+		}
+		const result = await tokendancePayment.fetchSession(statusUrl);
+		// 轮询是常态（每 3s 一次），失败只在主进程记 warn，不刷 info 日志。
+		if (!result.ok) void appLogger.warn("config", "TokenDance top-up status failed", { code: result.code, detail: result.detail });
+		return result;
+	});
+	ipcMain.handle(ipcChannels.configTokendanceTopUpOpenAlipay, async (_event, payload: unknown) => {
+		// 浏览器支付宝深链：只允许 alipays://（渲染层入参不可信），否则 shell.openExternal
+		// 会变成任意协议启动器；必须在用户点击后调用，不得由渲染层自动触发。
+		const url = payload && typeof payload === "object" ? (payload as { url?: unknown }).url : undefined;
+		if (typeof url !== "string" || url.length > 4096 || !/^alipays:\/\/\S+$/i.test(url)) {
+			return { ok: false, error: "Invalid alipay deep link" } as const;
+		}
+		try {
+			await shell.openExternal(url);
+			return { ok: true } as const;
+		} catch (error) {
+			// 未安装支付宝/浏览器拦截：返回失败让渲染层提示改用扫码，不抛异常。
+			void appLogger.warn("config", "TokenDance alipay deep link failed", {
+				error: error instanceof Error ? error.message : String(error),
+			});
+			return { ok: false, error: "TokenDance alipay deep link failed" } as const;
 		}
 	});
 	ipcMain.handle(ipcChannels.configTestProvider, async (_event, payload: unknown) => {

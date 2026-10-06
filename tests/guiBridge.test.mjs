@@ -120,7 +120,7 @@ describe("bridge serialize: 适配器", () => {
 	const tui = makeFakePiTui();
 
 	it("Text → text 节点，带 nodeId", () => {
-		const node = serializeMod.serializeComponent(new tui.Text("hello"), ctx(), null);
+		const node = serializeMod.serializeComponent(new tui.Text("hello"), ctx());
 		assert.equal(node.kind, "text");
 		assert.equal(node.text, "hello");
 		assert.ok(node.id, "必须有 nodeId");
@@ -128,27 +128,27 @@ describe("bridge serialize: 适配器", () => {
 
 	it("同一实例两次序列化 nodeId 稳定", () => {
 		const t = new tui.Text("stable");
-		const a = serializeMod.serializeComponent(t, ctx(), null);
-		const b = serializeMod.serializeComponent(t, ctx(), null);
+		const a = serializeMod.serializeComponent(t, ctx());
+		const b = serializeMod.serializeComponent(t, ctx());
 		assert.equal(a.id, b.id, "同实例 nodeId 必须稳定（事件回灌主键）");
 	});
 
 	it("不同实例 nodeId 不同", () => {
-		const a = serializeMod.serializeComponent(new tui.Text("a"), ctx(), null);
-		const b = serializeMod.serializeComponent(new tui.Text("b"), ctx(), null);
+		const a = serializeMod.serializeComponent(new tui.Text("a"), ctx());
+		const b = serializeMod.serializeComponent(new tui.Text("b"), ctx());
 		assert.notEqual(a.id, b.id);
 	});
 
 	it("componentOf 能由 nodeId 反查组件", () => {
 		const t = new tui.Text("findme");
-		const node = serializeMod.serializeComponent(t, ctx(), null);
+		const node = serializeMod.serializeComponent(t, ctx());
 		assert.equal(serializeMod.componentOf(node.id), t, "事件回灌依赖反查");
 	});
 
 	it("Box → box 节点，children 递归", () => {
 		const box = new tui.Box(1, 2);
 		box.addChild(new tui.Text("child"));
-		const node = serializeMod.serializeComponent(box, ctx(), null);
+		const node = serializeMod.serializeComponent(box, ctx());
 		assert.equal(node.kind, "box");
 		assert.deepEqual([...node.padding], [1, 2]);
 		assert.equal(node.children.length, 1);
@@ -159,29 +159,29 @@ describe("bridge serialize: 适配器", () => {
 		const v = new tui.VStack();
 		v.addChild(new tui.Text("a"));
 		v.addChild(new tui.Text("b"));
-		const vn = serializeMod.serializeComponent(v, ctx(), null);
+		const vn = serializeMod.serializeComponent(v, ctx());
 		assert.equal(vn.kind, "vstack");
 		assert.equal(vn.children.length, 2);
 
 		const h = new tui.HStack();
 		h.addChild(new tui.Text("x"));
-		assert.equal(serializeMod.serializeComponent(h, ctx(), null).kind, "hstack");
+		assert.equal(serializeMod.serializeComponent(h, ctx()).kind, "hstack");
 	});
 
 	it("Spacer → spacer 节点", () => {
-		const node = serializeMod.serializeComponent(new tui.Spacer(3), ctx(), null);
+		const node = serializeMod.serializeComponent(new tui.Spacer(3), ctx());
 		assert.equal(node.kind, "spacer");
 		assert.equal(node.size, 3);
 	});
 
 	it("Loader 优先于 Text（继承顺序陷阱）", () => {
 		// Loader extends Text：适配器顺序写错会得到 kind:"text"
-		const node = serializeMod.serializeComponent(new tui.Loader(), ctx(), null);
+		const node = serializeMod.serializeComponent(new tui.Loader(), ctx());
 		assert.equal(node.kind, "loader", "Loader 必须命中 loader 适配器而不是 text");
 	});
 
 	it("CancellableLoader 也识别为 loader 且标记 cancellable", () => {
-		const node = serializeMod.serializeComponent(new tui.CancellableLoader(), ctx(), null);
+		const node = serializeMod.serializeComponent(new tui.CancellableLoader(), ctx());
 		assert.equal(node.kind, "loader");
 		assert.equal(node.cancellable, true);
 	});
@@ -195,7 +195,7 @@ describe("bridge serialize: 适配器", () => {
 			5,
 			makeSelectTheme(),
 		);
-		const node = serializeMod.serializeComponent(list, ctx(), null);
+		const node = serializeMod.serializeComponent(list, ctx());
 		assert.equal(node.kind, "select");
 		assert.equal(node.items.length, 2);
 		assert.equal(node.items[0].label, "Alpha");
@@ -205,14 +205,14 @@ describe("bridge serialize: 适配器", () => {
 	it("Input → input 节点，走公开 getValue()", () => {
 		const input = new tui.Input({ placeholder: "type" });
 		input.setValue("typed");
-		const node = serializeMod.serializeComponent(input, ctx(), null);
+		const node = serializeMod.serializeComponent(input, ctx());
 		assert.equal(node.kind, "input");
 		assert.equal(node.value, "typed");
 		assert.equal(node.placeholder, "type");
 	});
 
 	it("SettingsList → settings 节点", () => {
-		const node = serializeMod.serializeComponent(new tui.SettingsList([{ id: "a", label: "A", currentValue: "on" }]), ctx(), null);
+		const node = serializeMod.serializeComponent(new tui.SettingsList([{ id: "a", label: "A", currentValue: "on" }]), ctx());
 		assert.equal(node.kind, "settings");
 		assert.equal(node.items[0].label, "A");
 	});
@@ -223,7 +223,7 @@ describe("bridge serialize: 适配器", () => {
 				return ["\u001b[31mweird\u001b[0m output"];
 			}
 		}
-		const node = serializeMod.serializeComponent(new Weird(), ctx(), null);
+		const node = serializeMod.serializeComponent(new Weird(), ctx());
 		assert.equal(node.kind, "ansi");
 		assert.ok(!node.lines.join("").includes("\u001b"), "ansi 降级必须剥掉 ANSI");
 	});
@@ -234,7 +234,7 @@ describe("bridge serialize: 适配器", () => {
 				throw new Error("render exploded");
 			}
 		}
-		const node = serializeMod.serializeComponent(new Boom(), ctx(), null);
+		const node = serializeMod.serializeComponent(new Boom(), ctx());
 		assert.equal(node.kind, "ansi");
 		assert.deepEqual([...node.lines], []);
 	});
@@ -242,14 +242,14 @@ describe("bridge serialize: 适配器", () => {
 	it("深度上限：环状结构不无限递归", () => {
 		const box = new tui.Box(0, 0);
 		box.addChild(box); // 自环
-		const node = serializeMod.serializeComponent(box, ctx(), null);
+		const node = serializeMod.serializeComponent(box, ctx());
 		assert.ok(node, "自环必须被深度上限截断而不是栈溢出");
 	});
 
 	it("节点数上限生效", () => {
 		const v = new tui.VStack();
 		for (let i = 0; i < 50; i += 1) v.addChild(new tui.Text(`line ${i}`));
-		const node = serializeMod.serializeComponent(v, { width: 80, depth: 0, count: { value: 1999 } }, null);
+		const node = serializeMod.serializeComponent(v, { width: 80, depth: 0, count: { value: 1999 } });
 		assert.ok(node.children.length < 50, `应被数量上限截断，实际 ${node.children.length}`);
 	});
 
@@ -262,18 +262,42 @@ describe("bridge serialize: 适配器", () => {
 	});
 
 	it("null / undefined 输入返回 null", () => {
-		assert.equal(serializeMod.serializeComponent(null, ctx(), null), null);
-		assert.equal(serializeMod.serializeComponent(undefined, ctx(), null), null);
+		assert.equal(serializeMod.serializeComponent(null, ctx()), null);
+		assert.equal(serializeMod.serializeComponent(undefined, ctx()), null);
 	});
 
 	it("无 render 的对象返回 null", () => {
-		assert.equal(serializeMod.serializeComponent({ notAComponent: true }, ctx(), null), null);
+		assert.equal(serializeMod.serializeComponent({ notAComponent: true }, ctx()), null);
 	});
 
-	it("形状兜底：mod=null 时靠 constructor.name 命中", () => {
-		const node = serializeMod.serializeComponent(new tui.Text("by name"), ctx(), null);
+	it("原型链识别：靠本类构造器名命中（不加载 pi-tui 模块）", () => {
+		const node = serializeMod.serializeComponent(new tui.Text("by name"), ctx());
 		assert.equal(node.kind, "text");
 		assert.equal(node.text, "by name");
+	});
+
+	it("原型链识别：本类优先于父类（HStack extends VStack 不被父类截胡）", () => {
+		// fake tui 里 HStack extends VStack：若按「父类也能命中」平铺匹配，
+		// 排在前面的 VStack 适配器会先截胡 —— 逐级匹配必须让本类赢
+		const h = new tui.HStack();
+		h.addChild(new tui.Text("x"));
+		const node = serializeMod.serializeComponent(h, ctx());
+		assert.equal(node.kind, "hstack");
+	});
+
+	it("原型链识别：未知子类回落到父类适配器（前向兼容）", () => {
+		// pi 未来新增 class FancyLoader extends Loader 时无需改桥也能语义化
+		class FancyLoader extends tui.Loader {}
+		const node = serializeMod.serializeComponent(new FancyLoader(), ctx());
+		assert.equal(node.kind, "loader", "Loader 的未知子类应命中 loader 适配器");
+		assert.equal(node.cancellable, false);
+	});
+
+	it("原型链识别：CancellableLoader 的子类仍标记 cancellable", () => {
+		class FancyCancellable extends tui.CancellableLoader {}
+		const node = serializeMod.serializeComponent(new FancyCancellable(), ctx());
+		assert.equal(node.kind, "loader");
+		assert.equal(node.cancellable, true);
 	});
 });
 

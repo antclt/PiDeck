@@ -178,12 +178,18 @@ let previewSettings: AppSettings = {
 	petScale: DEFAULT_PET_SCALE,
 	petPatrolEnabled: true,
 	petPatrolPauseMin: 5,
+	// 悬浮球默认关闭
+	floatingBallEnabled: false,
+	floatingBallExpandTarget: "mini",
+	floatingBallAlwaysOnTop: true,
+	floatingBallSnapToEdge: true,
 	// 闲置 agent 自动释放（预览模式不真实释放，仅保持设置项可用）
 	idleAgentAutoRelease: true,
 	idleAgentKeepCount: 5,
 	idleAgentTimeoutMin: 60,
 	// CUA 默认关闭：预览壳与主进程 SettingsStore 默认保持一致
 	cuaEnabled: false,
+	cuaAutoApprove: false,
 	favoriteModels: [],
 	// 提供商与模型显示开关：与 SettingsStore 默认一致，预览壳默认全显示
 	hiddenProviders: [],
@@ -257,7 +263,27 @@ export function createPreviewApi(): PiDesktopApi {
 	return {
 		clipboard: clipboardStub,
 		// 资源管理器右键菜单预览桩：预览环境无注册表操作，一律报不支持
-		quickTask: { getState: async () => ({ active: false, requestId: 0 }), onChanged: () => () => undefined, exit: async () => undefined },
+		quickTask: { getState: async () => ({ active: false, requestId: 0 }), onChanged: () => () => undefined, exit: async () => undefined, switchToMiniOverlay: async () => undefined },
+		floatingBall: {
+			getState: async () => ({ visible: false, alwaysOnTop: true, snapToEdge: true, expandTarget: "mini" as const, activeCount: 0, runningCount: 0, recentTitles: [], locale: "zh-CN" as const }),
+			onStateChanged: () => () => undefined,
+			enter: async () => undefined,
+			exit: async () => undefined,
+			setEnabled: async () => undefined,
+			setExpandTarget: async () => undefined,
+			dragStart: async () => undefined,
+			dragMove: async () => undefined,
+			dragEnd: async () => undefined,
+			contextMenu: async () => undefined,
+		},
+		miniOverlay: {
+			onStateChanged: () => () => undefined,
+			jumpToSession: async () => undefined,
+			quickPrompt: async () => ({ ok: false, message: "preview mode" }),
+			close: async () => undefined,
+			collapse: async () => undefined,
+			switchToQuickTask: async () => undefined,
+		},
 		// 预览模式没有真实 pi 认证宿主；提供与 preload 同形状的安全空实现，
 		// 避免新增认证能力让静态预览整站无法通过类型检查或初始化。
 		piAuth: {
@@ -872,6 +898,20 @@ export function createPreviewApi(): PiDesktopApi {
 			scan: async () => [],
 			import: async () => ({ results: [], imported: 0, failed: 0 }),
 		},
+		kimiSessions: {
+			scan: async () => [],
+			import: async () => ({ results: [], imported: 0, failed: 0 }),
+		},
+		kimiWorkSessions: {
+			describe: async () => ({ root: null, origin: null, sessionsFound: false }),
+			scan: async () => [],
+			import: async () => ({ results: [], imported: 0, failed: 0 }),
+		},
+		// MinimaxCode 导入预览桩：预览环境无 ~/.minimax 可扫
+		minimaxSessions: {
+			scan: async () => [],
+			import: async () => ({ results: [], imported: 0, failed: 0 }),
+		},
 		directorySessions: {
 			scan: async () => ({ sessions: [], kind: "none" }),
 			listSources: async () => [],
@@ -997,6 +1037,14 @@ export function createPreviewApi(): PiDesktopApi {
 				currentVersion: "preview",
 				latestVersion: "preview",
 				hasUpdate: false,
+			}),
+			releaseNotes: async () => ({
+				markdown: "## [preview] - 2026-01-01\n\n- Preview mode: pi release notes",
+				source: "github",
+				versionCount: 1,
+				pageUrl: "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/CHANGELOG.md",
+				fetchedAt: null,
+				truncated: false,
 			}),
 			update: async () => ({
 				command: "pi update pi --no-approve",
@@ -1533,6 +1581,10 @@ export function createPreviewApi(): PiDesktopApi {
 			tokendanceAuthAwait: async () => ({ ok: false, error: "preview" }),
 			tokendanceAuthCancel: async () => ({ ok: true }),
 			tokendanceAuthExchange: async () => ({ ok: false, error: "preview" }),
+			// 设计预览：充值接口不触真实网络（弹窗能看到完整链路，但创建会话必然失败）
+			tokendanceTopUpCreate: async () => ({ ok: false, code: "not-configured" }),
+			tokendanceTopUpStatus: async () => ({ ok: false, code: "not-configured" }),
+			tokendanceTopUpOpenAlipay: async () => ({ ok: false, error: "preview" }),
 			installTokendance: async () => ({ ok: false, modelCount: 0, piSaved: false, dshSaved: false, error: "preview" }),
 			testProvider: async () => ({
 				success: true,

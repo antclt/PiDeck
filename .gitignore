@@ -114,3 +114,4 @@ pideck-host/
 resources/dsh-runner-node/node.exe
 resources/dsh-runner-node/node
 dist-runtime/dsh-runner-node/
+*.log

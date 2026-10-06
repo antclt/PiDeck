@@ -7,7 +7,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useSetAtom } from "jotai";
 import { imageGenConfigAtom } from "../../atoms";
-import { ChevronDown, Plus, Trash2 } from "lucide-react";
+import { Loader2, ChevronDown, Plus, Trash2 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui-shadcn/collapsible";
 import { DEFAULT_IMAGE_GEN_EXTRA_PARAMS, EMPTY_IMAGE_GEN_CONFIG, type ImageGenConfigFile, type ImageGenExtraParam, type ImageGenProviderConfig } from "../../../../shared/imageGenConfig";
@@ -202,7 +202,12 @@ export const ImageGenSection = forwardRef<ImageGenSectionHandle, ImageGenSection
 	};
 
 	if (loading) {
-		return <div className="py-12 text-center text-control text-muted-foreground">{t("common.loading")}</div>;
+		return (
+			<div className="flex items-center justify-center gap-2 py-12 text-control text-muted-foreground">
+				<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+				{t("common.loading")}
+			</div>
+		);
 	}
 
 	const allCollapsed = draft.providers.length > 0 && draft.providers.every((provider) => collapsedIds.has(provider.id));

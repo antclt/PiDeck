@@ -24,6 +24,7 @@ import { isLiveRuntimeStatus } from "../../utils/sessionCommands";
 import { composeFailureNotice, isRetryStatusMessage, reduceFailureNoticePass, type FailureNoticePassState } from "./timelineFailureNotice";
 import { SessionStartSurface } from "./SessionStartSurface";
 import { NotifyMessageCard, shouldRenderNotifyCard } from "./NotifyMessageCard";
+import { ExtensionEntryCard } from "./ExtensionEntryCard";
 import { MessageScroller } from "../agents/message-scroller";
 import { askEchoBySessionIdAtomFamily } from "../../atoms/ask-echo-atoms";
 import { injectAskEchoMessage } from "../../utils/askUi";
@@ -912,6 +913,11 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 								// Legacy in-memory messages may still contain this placeholder.
 								return null;
 							}
+							// 扩展输出条目（pi appendEntry / type:"custom"）：主进程读侧投影的可见性补齐卡，
+							// 不是回合边界，只让 /btw 这类扩展输出到达用户（issue #285）。
+							if (meta?.type === "customEntry") {
+								return <ExtensionEntryCard key={message.id} message={message} />;
+							}
 							// 扩展 custom 消息（pi custom_message 条目）：只有面向用户的通知类白名单
 							// 才渲染成卡片（如子代理后台任务完成），其余（display:false 的内部上下文
 							// 注入）保持不可见——但它们仍是回合边界（见 AppUtils 的 customMessage 分支）。
@@ -954,7 +960,8 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 			    这里仍用正常流布局而不是 sticky/z-index，避免覆盖最后一条工具调用或回答。 */}
 			{props.runtimeUi ? <div className="session-runtime-ui mx-auto w-full min-w-0 empty:hidden">{props.runtimeUi}</div> : null}
 
-			{/* 发送清屏垫片（pin-to-top）已于 2026 移除：其与流式跟随有冲突、偶发页面抖动。 */}
+			{/* 发送定位垫片：让长历史下的新消息即使尚未有足够自然内容，也能平滑到视口顶部。 */}
+			<div aria-hidden="true" data-send-scroll-spacer="true" className="shrink-0" />
 
 			{multiSelectOpen && <MultiSelectModal renderedRuns={reconciledRuns} onClose={() => setMultiSelectOpen(false)} onCopy={copySelectedMessages} />}
 

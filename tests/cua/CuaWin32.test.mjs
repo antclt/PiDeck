@@ -120,7 +120,7 @@ test("module import binds koffi LibraryHandle methods to the handle", () => {
 	// 截成 `app.asar:33`，看着像 `require("koffi")` 炸了）。句柄方法必须 bind 回去。
 	const koffi = createReceiverSensitiveKoffi();
 	const mod = loadTsCommonJs("src/main/cua/CuaWin32.ts", {
-		stubs: { koffi },
+		stubs: { "./koffiRuntime": { requireKoffi: () => koffi } },
 		globals: { process: { platform: "win32" } },
 	});
 
@@ -161,7 +161,7 @@ test("sendInputs packs INPUT records as 40-byte buffers (SendInput layout regres
 	// SendInput 恒 ERROR_INVALID_PARAMETER 返回 0（实机注入全静默失效）。
 	const koffi = createSendInputCapturingKoffi();
 	const mod = loadTsCommonJs("src/main/cua/CuaWin32.ts", {
-		stubs: { koffi },
+		stubs: { "./koffiRuntime": { requireKoffi: () => koffi } },
 		globals: { process: { platform: "win32" } },
 	});
 

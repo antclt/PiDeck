@@ -167,7 +167,7 @@ export function ModelsTable(props: {
 									)}
 								</div>
 								{isOpen && (
-									<div className="grid gap-2.5 border-t border-border/40 px-3 py-2.5 sm:grid-cols-2">
+									<div className="grid gap-2.5 border-t border-border/40 px-3 py-2.5 sm:grid-cols-2 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
 										<label className="grid gap-1">
 											<span className="text-micro text-muted-foreground">{t("config.contextWindow")}</span>
 											<Input
