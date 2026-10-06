@@ -276,6 +276,7 @@ import { SessionCatalog, canAttachRuntimeMetadata } from "./sessions/SessionCata
 import { aggregateDshProxyMode, buildHostProxyEnvPatch, resolveDshHostProxyMode, resolveEffectiveSessionProxyMode } from "./sessions/sessionProxyPolicy";
 import { SessionRuntimeCoordinator, type SessionRuntimeBinding } from "./sessions/SessionRuntimeCoordinator";
 import { IdleAgentReleaser } from "./sessions/IdleAgentReleaser";
+import { StaleDraftReaper } from "./sessions/StaleDraftReaper";
 import { SessionCommandIpcError } from "./sessions/SessionCommandIpcError";
 import { appendSessionForkSuffix } from "./sessions/sessionForkTitle";
 import { CodexSessionImporter } from "./sessions/CodexSessionImporter";
@@ -427,6 +428,7 @@ let sessionCatalog: SessionCatalog;
 let sessionRuntimeCoordinator: SessionRuntimeCoordinator;
 /** 闲置 agent 自动释放器（内存优化）：whenReady 阶段装配，quit 时 stop */
 let idleAgentReleaser: IdleAgentReleaser | null = null;
+let staleDraftReaper: StaleDraftReaper | null = null;
 let codexSessionImporter: CodexSessionImporter;
 let claudeSessionImporter: ClaudeSessionImporter;
 let qoderSessionImporter: QoderSessionImporter;
@@ -4601,6 +4603,22 @@ app
 		);
 		idleAgentReleaser.start();
 		quitCleanup.register("idle-agent-releaser", () => idleAgentReleaser?.stop());
+		// 零内容草稿自动清理：小窗/主窗「新建后不用」的空草稿在运行期间定期剔除
+		// （语义对齐 SessionCatalog.load 的启动清理，但豁免用户投入信号：命名/选模型/预选配置）。
+		// 删除后广播 catalog-refreshed，侧栏静默重拉，空白条目即消失。
+		staleDraftReaper = new StaleDraftReaper(
+			sessionCatalog,
+			sessionRuntimeCoordinator,
+			(projectIds) => {
+				if (!mainWindow || mainWindow.isDestroyed()) return;
+				for (const projectId of projectIds) {
+					mainWindow.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId });
+				}
+			},
+			appLogger,
+		);
+		staleDraftReaper.start();
+		quitCleanup.register("stale-draft-reaper", () => staleDraftReaper?.stop());
 		// 只有 PiDeck 自动命名扩展的专用 marker 才能领取 fresh placeholder。
 		// pi /name、JSONL session_info 与重启 get_state 都不会经过这里，catalog 因而
 		// 始终是侧栏和 Tab 的显示标题权威。

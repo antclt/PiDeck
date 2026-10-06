@@ -561,9 +561,15 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			// 别让「最近会话」落到一个必然 ENOENT 的记录上。
 			// 豁免：无文件记录（imagegen/草稿）、dsh（filePath 由 host 侧解析，
 			// 本地路径可能不存在）、UNC/WSL 路径（发行版停机时 existsSync
-			// 恒 false，不能误藏整组会话）。
+			// 恒 false，不能误藏整组会话）、活绑定运行时（standby 预分配的
+			// sessionPath 在 pi 首条消息前不落盘，existsSync 恒 false；若按死链
+			// 隐藏，catalog 刷新会把当前选中的草稿剔出列表 → 渲染层
+			// replaceProjectSessionsAtom 清空焦点 → 闪回引导页、输入丢失、
+			// 引导页重发另建会话留下孤儿空闲 Agent——2026-10-06 事故，与
+			// mergeScanned 的 liveness 豁免同口径）。
 			.filter((record) => {
 				if (!record.filePath || record.backend === "dsh" || record.filePath.startsWith("\\\\")) return true;
+				if (sessionRuntimeCoordinator.hasLiveRuntime(record.id)) return true;
 				return existsSync(record.filePath);
 			});
 
