@@ -372,6 +372,59 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 				</SettingRow>
 			</SettingsSection>
 
+			{/* 悬浮球：主窗口可隐藏为屏幕角落的 64px 常驻小圆点，点开展开小任务浮窗/工作台 */}
+			<SettingsSection title={t("settings.floatingBallSection")} description={t("settings.floatingBallSectionDesc")}>
+				<SettingSwitchRow
+					anchor="common-floating-ball-enabled"
+					title={t("settings.floatingBallEnabled")}
+					description={t("settings.floatingBallEnabledDesc")}
+					checked={draft.floatingBallEnabled ?? false}
+					dirty={isDirty("floatingBallEnabled")}
+					onChange={(checked) => {
+						updateDraft({ floatingBallEnabled: checked });
+						void desktopApi.floatingBall.setEnabled(checked);
+					}}
+				/>
+				<SettingSwitchRow
+					anchor="common-floating-ball-always-on-top"
+					title={t("settings.floatingBallAlwaysOnTop")}
+					description={t("settings.floatingBallAlwaysOnTopDesc")}
+					checked={draft.floatingBallAlwaysOnTop ?? true}
+					disabled={!draft.floatingBallEnabled}
+					dirty={isDirty("floatingBallAlwaysOnTop")}
+					onChange={(checked) => updateDraft({ floatingBallAlwaysOnTop: checked })}
+				/>
+				<SettingSwitchRow
+					anchor="common-floating-ball-snap-to-edge"
+					title={t("settings.floatingBallSnapToEdge")}
+					description={t("settings.floatingBallSnapToEdgeDesc")}
+					checked={draft.floatingBallSnapToEdge ?? true}
+					disabled={!draft.floatingBallEnabled}
+					dirty={isDirty("floatingBallSnapToEdge")}
+					onChange={(checked) => updateDraft({ floatingBallSnapToEdge: checked })}
+				/>
+				<SettingRow
+					anchor="common-floating-ball-expand-target"
+					title={
+						<span className="inline-flex items-center gap-1.5">
+							<DirtyMarker dirty={isDirty("floatingBallExpandTarget")} label={t("settings.floatingBallExpandTarget")} />
+							{t("settings.floatingBallExpandTarget")}
+						</span>
+					}
+					description={t("settings.floatingBallExpandTargetDesc")}
+				>
+					<Select value={draft.floatingBallExpandTarget ?? "mini"} onValueChange={(value) => updateDraft({ floatingBallExpandTarget: value as "mini" | "compact" })} disabled={!draft.floatingBallEnabled}>
+						<SelectTrigger className="w-40">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="mini">{t("settings.floatingBallExpandMini")}</SelectItem>
+							<SelectItem value="compact">{t("settings.floatingBallExpandCompact")}</SelectItem>
+						</SelectContent>
+					</Select>
+				</SettingRow>
+			</SettingsSection>
+
 			{/* CUA 桌面操作（实验性）：开启后才监听回环 MCP 端点并注册给 pi；真实输入另有杀开关与逐次审批兜底。 */}
 			<SettingsSection title={t("settings.cuaSection")} description={t("settings.cuaSectionDesc")}>
 				<SettingSwitchRow anchor="common-cua-enabled" title={t("settings.cuaEnabled")} description={t("settings.cuaEnabledDesc")} checked={draft.cuaEnabled ?? false} dirty={isDirty("cuaEnabled")} onChange={(checked) => updateDraft({ cuaEnabled: checked })} />

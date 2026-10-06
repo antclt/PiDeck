@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "version": "1.0.1",
-  "bundleSha256": "3a14ab1d657cf8d2fe1effffb31ca19833cd91a8f27d3a7fa1d39dbf479c8a90",
+  "bundleSha256": "0f30c64e26736787d10a4c0ad882cf2cab8b9bf5b287a77e29f95b40884b6943",
   "fileCount": 26,
   "files": [
     {
@@ -11,8 +11,8 @@
     },
     {
       "name": "pi-deck-ext-points.ts",
-      "sha256": "dd7a9c6fe603deb2a3c3b02d9e44174c33f871805c8fd26e023047c013f107c7",
-      "bytes": 28238
+      "sha256": "95ce24f64cbb1b54e6283b32a53f2bde9bf6b394ff90a986f222265397bbf62c",
+      "bytes": 28217
     },
     {
       "name": "pi-deck-goal-mode.ts",
@@ -36,13 +36,13 @@
     },
     {
       "name": "pi-deck-gui-bridge-runtime.ts",
-      "sha256": "477732343012cd7e643b34a042f8374226747f19e79c303a371a45f9742a4142",
-      "bytes": 30339
+      "sha256": "45ebf16e64451ba576e2e96e98eebb70c184caa4316e4f419ab156e35235d2de",
+      "bytes": 30159
     },
     {
       "name": "pi-deck-gui-bridge-serialize.ts",
-      "sha256": "7f634884004ff84aa289c50e2cf6a9da98b4eb06b0d446a856282d8863e74fa0",
-      "bytes": 16053
+      "sha256": "de24881f8de01a6e0a40e77b806ea17a18f91f8d8a7b19f96f4f44c533d43c4e",
+      "bytes": 16179
     },
     {
       "name": "pi-deck-gui-bridge-theme.ts",
@@ -66,8 +66,8 @@
     },
     {
       "name": "pi-deck-gui-bridge.ts",
-      "sha256": "3d20778220a602f4349267cf1f5a1f0b9d7aefc9d55f628af922c11d20e54a9f",
-      "bytes": 9797
+      "sha256": "fdaa632d43a5050604988f08a14edf6f5cab1bf769df562cdc0252c6edd2d214",
+      "bytes": 9866
     },
     {
       "name": "pi-deck-model-trace.ts",

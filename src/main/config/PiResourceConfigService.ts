@@ -15,6 +15,7 @@
 import { join } from "node:path";
 import type { PiBuiltinExtension, PiBuiltinExtensionState, PiFileResourceToggleRequest, PiPackageToggleRequest, PiResourceConfigSummary, PiResourceKind, PiResourceScope, PiResourceToggleResult } from "../../shared/types/piResources";
 import { PI_BUILTIN_EXTENSIONS, PI_RESOURCE_KINDS } from "../../shared/types/piResources";
+import { resolveDefaultToolsInLayer } from "../../shared/defaultTools";
 import { readPiConfigFile, readStringArraySetting, writePiConfigFile } from "./piConfigFileStore";
 import { disablePackageDeltaFilters, disablePackageFilters, enablePackageDeltaFilters, isPackageDeltaFullyDisabled, isPackageFullyDisabled, resolveBuiltinExtensionState, setBuiltinExtensionEnabled, setResourceRuleEnabled, stripExactResourceRules } from "./piResourceRules";
 import type { PackageFilterSnapshot } from "./piResourceRules";
@@ -49,18 +50,20 @@ export class PiResourceConfigService {
 	async readSummary(scope: PiResourceScope): Promise<PiResourceConfigSummary> {
 		const settingsPath = await this.resolveSettingsPath(scope, { requireTrust: scope.scope === "global" ? false : true });
 		const file = await readPiConfigFile(settingsPath);
-		let baseEntries: string[] | undefined;
-		if (scope.scope === "project") {
-			// 项目内置扩展开关要按两层合并语义计算（项目 `+builtin:` 覆盖全局 `-builtin:`）。
-			const global = await readPiConfigFile(this.environment.globalSettingsPath());
-			if (!global.error) baseEntries = readStringArraySetting(global.data, "extensions");
-		}
+		const globalForProject = scope.scope === "project" ? await readPiConfigFile(this.environment.globalSettingsPath()) : undefined;
 		const entries = readStringArraySetting(file.data, "extensions");
+		// 一次全局快照同时供扩展与工具继承使用，避免读取期间两者落在不同 revision。
+		const baseEntries = globalForProject && !globalForProject.error ? readStringArraySetting(globalForProject.data, "extensions") : undefined;
+		const baseTools = globalForProject && !globalForProject.error && Array.isArray(globalForProject.data.defaultTools) ? readStringArraySetting(globalForProject.data, "defaultTools") : undefined;
+		const toolEntries = !file.error && Array.isArray(file.data.defaultTools) ? readStringArraySetting(file.data, "defaultTools") : undefined;
+		const resolvedTools = resolveDefaultToolsInLayer(baseTools, toolEntries);
 		const builtins: PiBuiltinExtensionState[] = PI_BUILTIN_EXTENSIONS.map((name) => {
 			const state = resolveBuiltinExtensionState({ baseEntries, entries, name });
+			const toolName = name === "tool-search" ? "tool_search" : name === "codemode" ? "codemode" : undefined;
 			return {
 				name,
 				enabled: state.enabled,
+				...(toolName ? { toolEnabled: state.enabled && resolvedTools.includes(toolName) } : {}),
 				explicitInLayer: state.explicitInLayer,
 				state: state.explicitInLayer ? (state.enabled ? "explicit-enabled" : "explicit-disabled") : "inherit",
 			};
@@ -68,7 +71,7 @@ export class PiResourceConfigService {
 		return {
 			settingsPath,
 			exists: file.exists,
-			...(file.error ? { error: file.error } : {}),
+			...(file.error || globalForProject?.error ? { error: file.error ?? globalForProject?.error } : {}),
 			revision: file.revision,
 			builtins,
 			entries: {

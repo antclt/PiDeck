@@ -76,6 +76,45 @@ test("project builtin state reflects global inheritance", async () => {
 	}
 });
 
+test("builtin summary distinguishes allowed extension loading from selected tools", async () => {
+	const { service, agentDir, projectRoot, cleanup } = setupProject();
+	try {
+		const builtin = (snapshot, name) => snapshot.builtins.find((item) => item.name === name);
+		const defaults = await service.readSummary({ scope: "global" });
+		assert.equal(builtin(defaults, "codemode").enabled, true);
+		assert.equal(builtin(defaults, "codemode").toolEnabled, false);
+		assert.equal(builtin(defaults, "tool-search").toolEnabled, false);
+		assert.equal(builtin(defaults, "mcp").toolEnabled, undefined);
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ extensions: ["!builtin:*", "+builtin:codemode"], defaultTools: ["+codemode"] }));
+		const global = await service.readSummary({ scope: "global" });
+		assert.equal(builtin(global, "codemode").toolEnabled, true);
+		writeFileSync(join(projectRoot, ".pi", "settings.json"), JSON.stringify({ defaultTools: ["-codemode", "+tool_search"], extensions: ["+builtin:tool-search"] }));
+		const project = await service.readSummary({ scope: "project", projectId: "p1" });
+		assert.equal(builtin(project, "codemode").enabled, true);
+		assert.equal(builtin(project, "codemode").toolEnabled, false);
+		assert.equal(builtin(project, "tool-search").toolEnabled, true);
+		await service.setBuiltinEnabled({ scope: "global" }, "codemode", false);
+		assert.equal(builtin(await service.readSummary({ scope: "global" }), "codemode").toolEnabled, false, "selected tools are unavailable when their extension is disabled");
+	} finally {
+		cleanup();
+	}
+});
+
+test("the first builtin switch writes a missing configuration using the summary revision", async () => {
+	const { service, cleanup } = setupProject();
+	try {
+		for (const scope of [{ scope: "global" }, { scope: "project", projectId: "p1" }]) {
+			const before = await service.readSummary(scope);
+			const result = await service.setBuiltinEnabled(scope, "codemode", false, { expectedRevision: before.revision });
+			assert.equal(result.ok, true, result.error);
+			const after = await service.readSummary(scope);
+			assert.equal(after.builtins.find((item) => item.name === "codemode").enabled, false);
+		}
+	} finally {
+		cleanup();
+	}
+});
+
 test("file resource toggle keeps explicit path and user globs", async () => {
 	const { service, agentDir, cleanup } = setupProject();
 	try {

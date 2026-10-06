@@ -2573,16 +2573,13 @@ select:focus-visible {
 :root[data-bg-image="on"] .terminal-xterm .xterm-screen {
   background: transparent !important;
 }
-/* 壁纸模式下弹窗（shadcn Dialog + 草稿本）统一用「弹窗基线」：比普通面板实一档，
+/* 壁纸模式下弹窗（shadcn Dialog）统一用「弹窗基线」：比普通面板实一档，
    与侧栏/会话区/抽屉同一基色，≥90% 不透明度保证内容可读。弹窗下方仍是页面正文，
    面板档（背景图可见度 80% → 30%）会让正文透进弹窗内容（用户反馈「有些弹窗
    页面太透了」）——所以弹窗只有这一档，不再有按业务类型降档的例外。
    关键：在 dialog-content 上局部覆盖 bg 系列变量（CSS 变量继承）——
    弹窗内 section 卡片/控件引用同一档位，消除 Header 透、Body 实的多层叠加。 */
-:root[data-bg-image="on"] [data-slot="dialog-content"],
-/* 草稿本：与弹框共享同基色令牌注入（header/body 同基色顶部一体），透明度同样
-   走弹窗基线——它是书写平面，面板档会把下层正文透进正文影响书写。 */
-:root[data-bg-image="on"] .scratch-pad-panel {
+:root[data-bg-image="on"] [data-slot="dialog-content"] {
   --wallpaper-dialog-alpha: max(90%, calc(var(--wallpaper-panel-alpha, 30%) + 35%));
   background-color: color-mix(in srgb, var(--wallpaper-base, var(--color-bg-app)) var(--wallpaper-dialog-alpha), transparent);
   --color-bg-panel: color-mix(in srgb, var(--wallpaper-base, var(--color-bg-app)) var(--wallpaper-dialog-alpha), transparent);
@@ -3275,4 +3272,77 @@ select:focus-visible {
   to {
     opacity: 1;
   }
+}
+
+/* 浮窗模式：隐藏 AppHeader 的窗口控制按钮（最小化/最大化/关闭），只留 mini-overlay-chrome 的收起/关闭 */
+.mini-overlay-mode .window-controls {
+  display: none !important;
+}
+.mini-overlay-mode .wechat-shell {
+  border-radius: 16px;
+  overflow: hidden;
+  /* 半透明毛玻璃背景（有辨识度，不跟桌面/其他软件融合） */
+  background: rgba(18, 18, 18, 0.85);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+.mini-overlay-mode .shell-panel-list,
+.mini-overlay-mode .shell-panel-drawer,
+.mini-overlay-mode .splitter {
+  display: none !important;
+}
+.mini-overlay-mode .shell-panel-chat {
+  flex: 1 1 100% !important;
+  min-width: 0 !important;
+}
+.mini-overlay-mode .custom-titlebar-enabled .titlebar,
+.mini-overlay-mode .app-statusbar {
+  display: none !important;
+}
+.mini-overlay-mode .chat-pane {
+  border-radius: 0;
+}
+/* 浮窗模式：隐藏安全提示、快捷消息 logo、分支标签 */
+.mini-overlay-mode .composer-hints,
+.mini-overlay-mode .composer-security-hint,
+.mini-overlay-mode .branch-badge,
+.mini-overlay-mode .composer-branch {
+  display: none !important;
+}
+/* 模型选择器：显示模型名但截断，不挤发送键 */
+.mini-overlay-mode .model-selector,
+.mini-overlay-mode .composer-model-picker {
+  max-width: 140px;
+}
+.mini-overlay-mode .model-selector__label,
+.mini-overlay-mode .composer-model-picker__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100px;
+}
+/* 浮窗顶部注入的收起/关闭按钮（fixed 定位，不占布局） */
+.mini-overlay-mode .mini-overlay-chrome {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  z-index: 1000;
+  display: flex;
+  gap: 4px;
+}
+.mini-overlay-mode .mini-overlay-chrome button {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-secondary, rgba(255, 255, 255, 0.6));
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  transition: background 0.15s ease;
+}
+.mini-overlay-mode .mini-overlay-chrome button:hover {
+  background: rgba(255, 255, 255, 0.15);
 }

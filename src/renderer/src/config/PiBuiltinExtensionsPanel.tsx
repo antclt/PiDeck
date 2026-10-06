@@ -8,7 +8,7 @@
  * （`-builtin:<name>` / `+builtin:<name>`），全局与项目作用域各自生效。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
 import { t } from "../i18n";
 import { showNotice } from "../utils/notice";
@@ -42,47 +42,75 @@ export function PiBuiltinExtensionsPanel(props: {
 	/** 切换成功后通知父层刷新依赖数据（例如 MCP 提示）。 */
 	onChanged?: () => void;
 }) {
-	const scope: PiResourceScope | undefined = props.scope === "project" && props.projectId ? { scope: "project", projectId: props.projectId } : { scope: "global" };
-	const [summary, setSummary] = useState<PiResourceConfigSummary | null>(null);
+	const scopeKind = props.scope === "project" && props.projectId ? "project" : "global";
+	const projectId = scopeKind === "project" ? props.projectId : undefined;
+	const scope: PiResourceScope = scopeKind === "project" && projectId ? { scope: "project", projectId } : { scope: "global" };
+	const [snapshot, setSnapshot] = useState<{ scope: PiResourceScope; summary: PiResourceConfigSummary } | null>(null);
+	const summary = snapshot && snapshot.scope.scope === scope.scope && (scope.scope === "global" || (snapshot.scope.scope === "project" && scope.scope === "project" && snapshot.scope.projectId === scope.projectId)) ? snapshot.summary : null;
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [toggling, setToggling] = useState<string | null>(null);
+	const readVersion = useRef(0);
+	const scopeVersion = useRef(0);
+	const pendingToggle = useRef(false);
 
 	const load = useCallback(async () => {
+		const version = ++readVersion.current;
 		setLoading(true);
 		setError(null);
 		try {
-			setSummary(await api().piResourcesSummary(scope));
+			const next = await api().piResourcesSummary(scope);
+			if (version !== readVersion.current) return;
+			setSnapshot({ scope, summary: next });
+			setError(next.error ?? null);
 		} catch (caught) {
-			setSummary(null);
+			if (version !== readVersion.current) return;
+			setSnapshot(null);
 			setError(caught instanceof Error ? caught.message : String(caught));
 		} finally {
-			setLoading(false);
+			if (version === readVersion.current) setLoading(false);
 		}
-	}, [scope]);
+	}, [scopeKind, projectId]);
 
 	useEffect(() => {
+		setSnapshot(null);
+		setToggling(null);
+		pendingToggle.current = false;
 		void load();
+		return () => {
+			// 切换作用域或卸载后，旧读写只能完成落盘，不得再覆盖当前面板。
+			scopeVersion.current += 1;
+			readVersion.current += 1;
+		};
 	}, [load]);
 
 	const toggle = async (name: PiBuiltinExtension, enabled: boolean) => {
-		if (toggling) return;
+		// 四个开关共享同一 settings revision，必须串行；ref 同时挡住同一帧的重复点击。
+		if (pendingToggle.current || loading || !summary || summary.error) return;
+		const version = scopeVersion.current;
+		pendingToggle.current = true;
 		setToggling(name);
+		setError(null);
 		try {
-			const result = await api().piResourcesSetBuiltin({ scope, name, enabled, expectedRevision: summary?.revision });
+			const result = await api().piResourcesSetBuiltin({ scope, name, enabled, expectedRevision: summary.revision });
+			if (version !== scopeVersion.current) return;
 			if (!result.ok) {
-				setError(result.error ?? t("config.piResources.saveFailed"));
-				// revision 冲突：重新读取，避免用户在旧草稿上继续切
+				// 冲突先刷新再显示错误，避免 load 清空保存失败提示。
 				if (result.error?.includes("changed on disk")) await load();
+				if (version === scopeVersion.current) setError(result.error ?? t("config.piResources.saveFailed"));
 				return;
 			}
 			await load();
+			if (version !== scopeVersion.current) return;
 			props.onChanged?.();
 			showNotice(t("config.piResources.saved"), 2500);
 		} catch (caught) {
-			setError(caught instanceof Error ? caught.message : String(caught));
+			if (version === scopeVersion.current) setError(caught instanceof Error ? caught.message : String(caught));
 		} finally {
-			setToggling(null);
+			if (version === scopeVersion.current) {
+				pendingToggle.current = false;
+				setToggling(null);
+			}
 		}
 	};
 
@@ -93,7 +121,7 @@ export function PiBuiltinExtensionsPanel(props: {
 					<div className="text-control font-medium">{t("config.piResources.title")}</div>
 					<p className="mt-0.5 text-micro text-muted-foreground">{t("config.piResources.hint")}</p>
 				</div>
-				<Button variant="outline" size="xs" onClick={() => void load()} disabled={loading}>
+				<Button variant="outline" size="xs" onClick={() => void load()} disabled={loading || toggling !== null}>
 					<RefreshCw size={13} />
 					{t("common.refresh")}
 				</Button>
@@ -121,11 +149,12 @@ export function PiBuiltinExtensionsPanel(props: {
 								<div className="flex items-center gap-1.5">
 									<span className="font-mono text-control text-text-primary">builtin:{item.name}</span>
 									<span className={`rounded-sm px-1 text-micro ${item.enabled ? "text-[var(--color-success)]" : "text-muted-foreground"}`}>{item.enabled ? t("config.piResources.on") : t("config.piResources.off")}</span>
-									{item.state === "inherit" ? <span className="text-micro text-muted-foreground">· {t("config.piResources.inherited")}</span> : null}
+									{item.state === "inherit" && scope.scope === "project" ? <span className="text-micro text-muted-foreground">· {t("config.piResources.inherited")}</span> : null}
+									{item.toolEnabled !== undefined ? <span className={`text-micro ${item.toolEnabled ? "text-[var(--color-success)]" : "text-muted-foreground"}`}>· {item.toolEnabled ? t("config.piResources.toolOn") : t("config.piResources.toolOff")}</span> : null}
 								</div>
 								<div className="mt-0.5 text-micro text-muted-foreground">{t(BUILTIN_HINTS[item.name] as never)}</div>
 							</div>
-							<Switch checked={item.enabled} disabled={toggling === item.name} onCheckedChange={(checked) => void toggle(item.name, checked)} aria-label={item.name} />
+							<Switch checked={item.enabled} disabled={loading || toggling !== null || !!summary.error} onCheckedChange={(checked) => void toggle(item.name, checked)} aria-label={item.name} />
 						</div>
 					))}
 					<p className="font-mono text-micro text-muted-foreground" title={summary.settingsPath}>

@@ -7,7 +7,7 @@ export const EDITOR_TAB_LIMIT = 5;
 export const EDITOR_TAB_TEXT_BUDGET = 24 * 1024 * 1024;
 
 /** rpcLog 是临时面板：绑定 agentId 的实时日志，关闭即还原打开前的面板，不参与项目持久化 */
-export type WorkspaceDrawerPanel = "files" | "sessions" | "browser" | "git" | "trajectory" | "rewind" | "rpcLog";
+export type WorkspaceDrawerPanel = "files" | "sessions" | "browser" | "git" | "trajectory" | "rewind" | "scratchPad" | "rpcLog";
 export type WorkspaceEditorMode = "view" | "diff";
 
 export type WorkspaceEditorTab = {
@@ -87,7 +87,7 @@ function readDrawerState(storage: WorkspacePanelOptions["storage"], key: string)
 		if (!parsed || typeof parsed !== "object") return null;
 		const value = parsed as { panel?: unknown; pinned?: unknown; pinnedPanels?: unknown; drawerPinned?: unknown };
 		const panel = value.panel === "editor" ? "files" : value.panel;
-		const validPanels = ["files", "sessions", "browser", "git", "trajectory", "rewind"];
+		const validPanels = ["files", "sessions", "browser", "git", "trajectory", "rewind", "scratchPad"];
 		const validPanel = panel === null || validPanels.includes(String(panel));
 		const pinnedPanels = Array.isArray(value.pinnedPanels) ? value.pinnedPanels.filter((item): item is WorkspaceDrawerPanel => typeof item === "string" && validPanels.includes(item)) : typeof value.pinned === "boolean" && value.pinned && validPanel && panel ? [panel as WorkspaceDrawerPanel] : undefined;
 		// drawerPinned（工作区钉住）只能来自显式持久化；旧存档无此字段 → false（见下方水合注释）。

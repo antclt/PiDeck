@@ -178,6 +178,11 @@ let previewSettings: AppSettings = {
 	petScale: DEFAULT_PET_SCALE,
 	petPatrolEnabled: true,
 	petPatrolPauseMin: 5,
+	// 悬浮球默认关闭
+	floatingBallEnabled: false,
+	floatingBallExpandTarget: "mini",
+	floatingBallAlwaysOnTop: true,
+	floatingBallSnapToEdge: true,
 	// 闲置 agent 自动释放（预览模式不真实释放，仅保持设置项可用）
 	idleAgentAutoRelease: true,
 	idleAgentKeepCount: 5,
@@ -259,6 +264,25 @@ export function createPreviewApi(): PiDesktopApi {
 		clipboard: clipboardStub,
 		// 资源管理器右键菜单预览桩：预览环境无注册表操作，一律报不支持
 		quickTask: { getState: async () => ({ active: false, requestId: 0 }), onChanged: () => () => undefined, exit: async () => undefined },
+		floatingBall: {
+			getState: async () => ({ visible: false, alwaysOnTop: true, snapToEdge: true, expandTarget: "mini" as const, activeCount: 0, runningCount: 0, recentTitles: [], locale: "zh-CN" as const }),
+			onStateChanged: () => () => undefined,
+			enter: async () => undefined,
+			exit: async () => undefined,
+			setEnabled: async () => undefined,
+			setExpandTarget: async () => undefined,
+			dragStart: async () => undefined,
+			dragMove: async () => undefined,
+			dragEnd: async () => undefined,
+			contextMenu: async () => undefined,
+		},
+		miniOverlay: {
+			onStateChanged: () => () => undefined,
+			jumpToSession: async () => undefined,
+			quickPrompt: async () => ({ ok: false, message: "preview mode" }),
+			close: async () => undefined,
+			collapse: async () => undefined,
+		},
 		// 预览模式没有真实 pi 认证宿主；提供与 preload 同形状的安全空实现，
 		// 避免新增认证能力让静态预览整站无法通过类型检查或初始化。
 		piAuth: {

@@ -64,6 +64,14 @@ const CODEX_EXTRA_TOOL_TYPES = new Set(["custom_tool_call", "web_search_call", "
 const CODEX_EXTRA_TOOL_RESULT_TYPES = new Set(["custom_tool_call_output", "tool_search_output"]);
 
 /**
+ * 转换器版本：写进 import 标记。转换逻辑影响**产物有效性**时 bump——
+ * 旧版本产物在扫描列表里显示 outdated，引导用户重导修复。
+ * v2：并行 toolCall 合并（修复一轮并行调用逐条写 assistant 导致的
+ * 「tool 消息前无 tool_calls」孤儿 toolResult，严格供应商 400）。
+ */
+export const CODEX_IMPORT_CONVERTER_VERSION = 2;
+
+/**
  * 会话名文本清洗（jsonl 提取与状态库标题共用）：
  * 剥注入包装 → 去内部标记 → 从粘贴文件列表里取 `## My request:` 正文。
  * 清洗后为空表示“这段文本不能当标题/预览”。
@@ -240,7 +248,8 @@ export class CodexSessionImporter {
 		const importMeta = await this.readImportMeta(targetPath);
 		const threadTitle = lookupCodexThreadTitle(titleMaps, session.meta.id ? String(session.meta.id) : undefined, session.sourcePath);
 		const converted = this.convertToPiSession(projectPath, session, threadTitle);
-		const status: CodexImportStatus = !importMeta ? "new" : importMeta.sourceMtime === session.sourceMtime && importMeta.sourceSize === session.sourceSize ? "current" : "outdated";
+		// 转换器版本不一致也按 outdated：旧转换产物可能含孤儿 toolResult（400 根因），引导重导
+		const status: CodexImportStatus = !importMeta ? "new" : importMeta.version !== CODEX_IMPORT_CONVERTER_VERSION || importMeta.sourceMtime !== session.sourceMtime || importMeta.sourceSize !== session.sourceSize ? "outdated" : "current";
 
 		const originalTimestamp = Date.parse(String(session.meta.timestamp ?? "")) || session.sourceMtime;
 		const threadInfo = getCodexSessionThreadInfo(session.meta);
@@ -285,7 +294,7 @@ export class CodexSessionImporter {
 		const pushEntry = (entry: Record<string, unknown>) => {
 			lines.push(JSON.stringify(entry));
 		};
-		const pushMessage = (role: "user" | "assistant" | "toolResult", content: unknown[], extra: Record<string, unknown> = {}, timestampValue?: unknown) => {
+		const emitMessage = (role: "user" | "assistant" | "toolResult", content: unknown[], extra: Record<string, unknown> = {}, timestampValue?: unknown) => {
 			if (content.length === 0) return;
 			const id = this.makeId(sessionId, sequence++);
 			const messageTimestamp = this.parseTimestamp(timestampValue) ?? session.sourceMtime + sequence;
@@ -314,6 +323,48 @@ export class CodexSessionImporter {
 			}
 		};
 
+		// assistant 运行合并缓冲 + tool 配对跟踪（判定规则与 Claude 导入器同款，改动必须两边同步）：
+		// Codex 把同一轮响应拆成多个连续 response_item（并行 function_call、call 与结果之间的
+		// 穿插文本），只要 user/toolResult 不出现就仍属同一轮——并为一条 assistant 写出
+		// （OpenAI 多 tool_calls 语义），否则 pi transformMessages 在每个新 assistant 边界重置
+		// 挂起集，靠前 call 的 toolResult 变孤儿（严格供应商 400）。
+		// 挂起集之外的 toolResult 降级为用户文本保留内容（同 Claude 导入器）。
+		const pendingToolCalls = new Set<string>();
+		let mergeBuffer: { content: unknown[]; extra: Record<string, unknown>; timestampValue: unknown } | null = null;
+		const flushMergeBuffer = () => {
+			if (!mergeBuffer) return;
+			const buffered = mergeBuffer;
+			mergeBuffer = null;
+			emitMessage("assistant", buffered.content, buffered.extra, buffered.timestampValue);
+		};
+		const pushMessage = (role: "user" | "assistant" | "toolResult", content: unknown[], extra: Record<string, unknown> = {}, timestampValue?: unknown) => {
+			if (content.length === 0) return;
+			if (role === "assistant") {
+				if (mergeBuffer) mergeBuffer.content.push(...content);
+				else {
+					pendingToolCalls.clear();
+					mergeBuffer = { content: [...content], extra, timestampValue };
+				}
+				for (const item of content) {
+					const block = item as Record<string, unknown>;
+					if (block?.type === "toolCall" && typeof block.id === "string") pendingToolCalls.add(block.id);
+				}
+				return;
+			}
+			flushMergeBuffer();
+			if (role === "user") {
+				pendingToolCalls.clear();
+			} else if (role === "toolResult") {
+				const toolCallId = String(extra.toolCallId ?? "");
+				if (!pendingToolCalls.delete(toolCallId)) {
+					const text = this.extractPiText(content).trim();
+					if (!text) return;
+					return pushMessage("user", [{ type: "text", text: this.translate("session.importedOrphanToolResult", { tool: String(extra.toolName ?? "tool"), text }) }], {}, timestampValue);
+				}
+			}
+			emitMessage(role, content, extra, timestampValue);
+		};
+
 		pushEntry({
 			type: "session",
 			version: 3,
@@ -323,7 +374,7 @@ export class CodexSessionImporter {
 		});
 		pushEntry({
 			type: "codex_import",
-			version: 1,
+			version: CODEX_IMPORT_CONVERTER_VERSION,
 			codexSessionId: sessionId,
 			sourcePath: session.sourcePath,
 			sourceMtime: session.sourceMtime,
@@ -484,6 +535,8 @@ export class CodexSessionImporter {
 			}
 		}
 
+		// 尾部冲刷：文件以并行调用结尾时缓冲里的 toolCall 不能丢
+		flushMergeBuffer();
 		if (pendingThinking) {
 			pushMessage("assistant", [{ type: "thinking", thinking: pendingThinking, thinkingSignature: "codex_reasoning" }]);
 		}
@@ -545,7 +598,7 @@ export class CodexSessionImporter {
 			writeBuffer += `${JSON.stringify(entry)}\n`;
 			if (writeBuffer.length >= 1024 * 1024) await flushBuffer();
 		};
-		const pushMessage = async (role: "user" | "assistant" | "toolResult", content: unknown[], extra: Record<string, unknown> = {}, timestampValue?: unknown) => {
+		const emitMessage = async (role: "user" | "assistant" | "toolResult", content: unknown[], extra: Record<string, unknown> = {}, timestampValue?: unknown) => {
 			if (content.length === 0) return;
 			const id = this.makeId(sessionId, sequence++);
 			const messageTimestamp = this.parseTimestamp(timestampValue) ?? session.sourceMtime + sequence;
@@ -574,6 +627,43 @@ export class CodexSessionImporter {
 			}
 		};
 
+		// assistant 运行合并缓冲 + tool 配对跟踪：与上方内存路径同款实现，改动必须两边同步。
+		const pendingToolCalls = new Set<string>();
+		let mergeBuffer: { content: unknown[]; extra: Record<string, unknown>; timestampValue: unknown } | null = null;
+		const flushMergeBuffer = async () => {
+			if (!mergeBuffer) return;
+			const buffered = mergeBuffer;
+			mergeBuffer = null;
+			await emitMessage("assistant", buffered.content, buffered.extra, buffered.timestampValue);
+		};
+		const pushMessage = async (role: "user" | "assistant" | "toolResult", content: unknown[], extra: Record<string, unknown> = {}, timestampValue?: unknown) => {
+			if (content.length === 0) return;
+			if (role === "assistant") {
+				if (mergeBuffer) mergeBuffer.content.push(...content);
+				else {
+					pendingToolCalls.clear();
+					mergeBuffer = { content: [...content], extra, timestampValue };
+				}
+				for (const item of content) {
+					const block = item as Record<string, unknown>;
+					if (block?.type === "toolCall" && typeof block.id === "string") pendingToolCalls.add(block.id);
+				}
+				return;
+			}
+			await flushMergeBuffer();
+			if (role === "user") {
+				pendingToolCalls.clear();
+			} else if (role === "toolResult") {
+				const toolCallId = String(extra.toolCallId ?? "");
+				if (!pendingToolCalls.delete(toolCallId)) {
+					const text = this.extractPiText(content).trim();
+					if (!text) return;
+					return pushMessage("user", [{ type: "text", text: this.translate("session.importedOrphanToolResult", { tool: String(extra.toolName ?? "tool"), text }) }], {}, timestampValue);
+				}
+			}
+			await emitMessage(role, content, extra, timestampValue);
+		};
+
 		try {
 			await pushEntry({
 				type: "session",
@@ -584,7 +674,7 @@ export class CodexSessionImporter {
 			});
 			await pushEntry({
 				type: "codex_import",
-				version: 1,
+				version: CODEX_IMPORT_CONVERTER_VERSION,
 				codexSessionId: sessionId,
 				sourcePath: session.sourcePath,
 				sourceMtime: session.sourceMtime,
@@ -761,6 +851,8 @@ export class CodexSessionImporter {
 				}
 			}
 
+			// 尾部冲刷：文件以并行调用结尾时缓冲里的 toolCall 不能丢
+			await flushMergeBuffer();
 			if (pendingThinking) {
 				await pushMessage("assistant", [{ type: "thinking", thinking: pendingThinking, thinkingSignature: "codex_reasoning" }]);
 			}

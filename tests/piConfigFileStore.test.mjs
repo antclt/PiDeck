@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import * as fsPromises from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, win32 } from "node:path";
+import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
@@ -105,6 +107,78 @@ test("writePiConfigFile creates a missing file and returns the new revision", as
 		const parsed = JSON.parse(readFileSync(path, "utf8"));
 		assert.deepEqual(parsed.extensions, ["-builtin:mcp"]);
 		assert.equal(result.revision, revisionOf(readFileSync(path, "utf8"), true));
+	} finally {
+		cleanup();
+	}
+});
+
+test("a missing settings file can be toggled with its summary revision without leaving a placeholder", async () => {
+	const { dir, cleanup } = tempDir();
+	try {
+		const path = join(dir, "settings.json");
+		const before = await readPiConfigFile(path);
+		const rejected = await writePiConfigFile(path, () => ({ abort: "cancelled" }), { expectedRevision: before.revision });
+		assert.equal(rejected.ok, false);
+		assert.equal(existsSync(path), false, "aborted writes must not create user config");
+		const saved = await writePiConfigFile(path, () => ({ extensions: ["-builtin:codemode"] }), { expectedRevision: before.revision });
+		assert.equal(saved.ok, true, saved.error);
+		assert.deepEqual(JSON.parse(readFileSync(path, "utf8")).extensions, ["-builtin:codemode"]);
+	} finally {
+		cleanup();
+	}
+});
+
+test("Windows config writes keep the temporary file in the same directory", async () => {
+	const writes = [];
+	const renames = [];
+	const raw = '{"extensions":[]}';
+	const path = "C:\\Users\\test user\\.pi\\agent\\settings.json";
+	const load = createTsSandbox({
+		stubs: {
+			"node:path": win32,
+			"node:fs": { existsSync: () => true },
+			"node:fs/promises": {
+				mkdir: async () => {},
+				readFile: async () => raw,
+				writeFile: async (target) => {
+					assert.equal(win32.dirname(target), win32.dirname(path), "temporary paths must use basename, not slash slicing");
+					writes.push(target);
+				},
+				rename: async (source, target) => renames.push([source, target]),
+				rm: async () => {},
+			},
+			"proper-lockfile": { lock: async () => async () => {} },
+		},
+	});
+	const store = load("src/main/config/piConfigFileStore.ts");
+	const result = await store.writePiConfigFile(path, (current) => ({ ...current, extensions: ["-builtin:codemode"] }));
+	assert.equal(result.ok, true, result.error);
+	assert.match(win32.basename(writes[0]), /^\.settings\.json\..*\.tmp$/);
+	assert.equal(renames[0][1], path);
+});
+
+test("a failed atomic rename cleans up only its own temporary file", async () => {
+	const { dir, cleanup } = tempDir();
+	try {
+		const path = join(dir, "settings.json");
+		writeFileSync(path, '{"extensions":[]}', "utf8");
+		const before = readFileSync(path, "utf8");
+		const load = createTsSandbox({
+			stubs: {
+				"node:fs/promises": {
+					...fsPromises,
+					rename: async () => {
+						throw new Error("rename denied");
+					},
+				},
+			},
+		});
+		const store = load("src/main/config/piConfigFileStore.ts");
+		const result = await store.writePiConfigFile(path, () => ({ extensions: ["-builtin:codemode"] }));
+		assert.equal(result.ok, false);
+		assert.match(result.error, /rename denied/);
+		assert.equal(readFileSync(path, "utf8"), before);
+		assert.deepEqual(readdirSync(dirname(path)), ["settings.json"]);
 	} finally {
 		cleanup();
 	}
