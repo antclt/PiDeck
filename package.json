@@ -155,6 +155,9 @@
       "node_modules/**/@img/sharp-*/**",
       "node_modules/@koromix/koffi-win32-x64/**",
       "node_modules/@koromix/koffi-linux-x64/**",
+      "node_modules/@koromix/koffi-linux-arm64/**",
+      "node_modules/@koromix/koffi-darwin-arm64/**",
+      "node_modules/@koromix/koffi-darwin-x64/**",
       "node_modules/node-addon-require-builtin-win32-x64-msvc/**"
     ],
     "directories": {
