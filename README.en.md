@@ -84,7 +84,8 @@
 > **Latest: v0.7.9 (Unreleased)** ()
 
 ### v0.7.9 (Unreleased) Release Highlights
-- 🚀 **Floating ball & mini overlay - minimize to a ball, expand to the full app**
+- 🚀 **Compaction sliders in Settings**
+- 🚀 **Floating ball & mini overlay - minimize to a ball, pick up where you left off**
 - 🚀 **Richer tray right-click menu**
 - 🚀 **Tray icon follows the Logo style**
 - 🚀 **Scratch pad moved into the right sidebar**
@@ -95,11 +96,10 @@
 - 🚀 **Session imports: Kimi Code, Kimi Work and MinimaxCode**
 - 🚀 **Adapts to pi 1.0.x — resource management now rides pi's native config**
 - 🚀 **In-app pi update details and a more reliable updater**
-- 🚀 **CUA: full-chain fixes and an auto-approve switch**
+- ✨ **New sessions keep your last-used model**
 - ✨ **No more flash of the guide page at startup**
 - ✨ **Win11 snap layouts restore exactly**
 - ✨ **Session timestamps no longer churn (#314)**
-- ✨ **Multi-reply turns edit and save correctly (#310)**
 
 [View Full Changelog →](CHANGELOG.md)
 
