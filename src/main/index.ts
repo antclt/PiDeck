@@ -4083,13 +4083,18 @@ app
 			createSessionDraft: async (input) => {
 				const project = projectStore.get(input.projectId);
 				if (!project) throw new Error(mainCopy("project.notFound"));
-				return sessionCatalog.createDraft({
+				const draft = await sessionCatalog.createDraft({
 					projectId: input.projectId,
 					title: input.title?.trim() || mainCopy("session.newTitle"),
 					environment: settingsStore.get().wslEnabled ? "wsl" : "native",
 					model: input.model ? createSessionModelPreference(input.model.provider, input.model.modelId, input.model.modelName) : undefined,
 					thinkingLevel: input.thinkingLevel,
 				});
+				// standby 补热：与桌面 IPC（sessionIpc createDraft）同款——Web 建草稿即「马上要开聊」，
+				// 趁用户输入空窗后台预热 pi 进程；首条消息经 activateRuntime 认领实现秒级启动。
+				// fire-and-forget；ensure 幂等且受 standbyRuntimeEnabled 设置闸。
+				if (draft.backend !== "dsh") agentManager.ensureStandbyAgent(draft.projectId);
+				return draft;
 			},
 			createAnonymousSession,
 			updateSessionRecord: async (sessionId, patch) => {
