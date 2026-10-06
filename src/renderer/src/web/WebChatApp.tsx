@@ -33,6 +33,7 @@ import { chatMessagesToUiMessages, createProject, createSession, deleteProject, 
 import { abortRuntime, cloneRuntime, compactRuntime, copySession, deleteSession, downloadSessionHtml, editRuntimeMessage, deleteRuntimeMessage, prepareResend, renameSession, restartRuntime } from "./webApi";
 import { fetchRuntimeContextUsage, setRuntimePermission } from "./webApi";
 import { sessionUiMessagesToMarkdown } from "./webMarkdown";
+import { removeMessageOptimistic, replaceMessageTextOptimistic } from "./webMessageOptimistic";
 import { WebSessionStrips } from "./WebSessionStrips";
 import { WebSearchDialog } from "./WebSearchDialog";
 import { WebSkillsExtensionsDialog } from "./WebSkillsExtensionsDialog";
@@ -89,6 +90,12 @@ export function WebChatApp() {
 	const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 	// P2：composer 预填充（重发取回文本）；nonce 避免同文本重复触发
 	const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null);
+	// 消息编辑/删除乐观更新：进行中操作（气泡转状态指示）、删除退场动画目标、编辑成功闪环目标。
+	// runtime 编辑/删除要走「停 agent → 改文件 → pi 重载」全链路（数秒），先本地落地再静默对齐服务端。
+	const [pendingMessageAction, setPendingMessageAction] = useState<{ kind: "edit" | "delete"; id: string } | null>(null);
+	const [exitingMessageIds, setExitingMessageIds] = useState<ReadonlySet<string>>(new Set());
+	const [flashMessageId, setFlashMessageId] = useState<string | null>(null);
+	const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	// P2：上下文用量（随主轮询拉取 runtime state 子集）
 	const [contextUsage, setContextUsage] = useState<WebContextUsage | undefined>(undefined);
 
@@ -633,6 +640,15 @@ export function WebChatApp() {
 		}
 	};
 
+	/** 乐观更新本地时间线：改 per-session 缓存，目标仍是活跃会话时同步注入 useChat。 */
+	const applyLocalMessages = (sessionId: string, updater: (messages: UIMessage[]) => UIMessage[]) => {
+		const current = messagesBySessionRef.current[sessionId] ?? [];
+		const next = updater(current);
+		if (next === current) return;
+		messagesBySessionRef.current[sessionId] = next;
+		if (activeSessionIdRef.current === sessionId) setMessages(next);
+	};
+
 	const runSessionAction = async (action: WebSessionRowAction, sessionId: string) => {
 		setCommandError(null);
 		try {
@@ -722,24 +738,45 @@ export function WebChatApp() {
 	};
 
 	const handleEditMessage = async (messageId: string, newText: string) => {
-		if (!activeTarget) return;
+		if (!activeTarget || pendingMessageAction) return;
 		setCommandError(null);
+		setPendingMessageAction({ kind: "edit", id: messageId });
+		// 乐观替换文本 + 确认色环：不等服务端回包（runtime 编辑要走 pi 重载，耗时数秒，干等旧文本就是本入口要修的问题）。
+		applyLocalMessages(activeTarget.sessionId, (messages) => replaceMessageTextOptimistic(messages, messageId, newText));
+		setFlashMessageId(messageId);
+		if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+		flashTimerRef.current = setTimeout(() => setFlashMessageId(null), 1200);
 		try {
 			await editRuntimeMessage(activeTarget.sessionId, activeTarget, messageId, newText);
+			// 服务端终态与乐观一致，静默对齐（顺带刷新 entryId 锚点），无视觉跳动。
 			await reloadActiveHistory();
 		} catch (error) {
+			// 失败回滚到服务端真相
+			await reloadActiveHistory();
 			setCommandError(error instanceof Error ? error.message : String(error));
+		} finally {
+			setPendingMessageAction(null);
 		}
 	};
 
 	const handleDeleteMessage = async (messageId: string) => {
-		if (!activeTarget) return;
+		if (!activeTarget || pendingMessageAction) return;
 		setCommandError(null);
+		setPendingMessageAction({ kind: "delete", id: messageId });
+		// 先播放退场动画，播完才从本地列表摘除（与服务端墓碑语义一致：只摘目标一条，回复保留）。
+		setExitingMessageIds(new Set([messageId]));
+		await new Promise((resolve) => setTimeout(resolve, 190));
+		applyLocalMessages(activeTarget.sessionId, (messages) => removeMessageOptimistic(messages, messageId));
+		setExitingMessageIds(new Set());
 		try {
 			await deleteRuntimeMessage(activeTarget.sessionId, activeTarget, messageId);
 			await reloadActiveHistory();
 		} catch (error) {
+			// 失败回滚到服务端真相
+			await reloadActiveHistory();
 			setCommandError(error instanceof Error ? error.message : String(error));
+		} finally {
+			setPendingMessageAction(null);
 		}
 	};
 
@@ -868,6 +905,9 @@ export function WebChatApp() {
 					onRespondUi={(response) => void handleRespondUi(response)}
 					onLoadMore={() => void handleLoadMore()}
 					canManageMessages={Boolean(activeTarget)}
+					pendingMessageAction={pendingMessageAction}
+					exitingMessageIds={exitingMessageIds}
+					flashMessageId={flashMessageId}
 					onEditMessage={(messageId, newText) => void handleEditMessage(messageId, newText)}
 					onDeleteMessage={(messageId) => void handleDeleteMessage(messageId)}
 					onResendMessage={(messageId) => void handleResendMessage(messageId)}

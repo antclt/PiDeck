@@ -4931,6 +4931,8 @@ export const zhCN = {
 	"web.msgEdit": "编辑",
 	"web.msgResend": "重发",
 	"web.msgDelete": "删除",
+	"web.msgSaving": "正在保存…",
+	"web.msgDeleting": "正在删除…",
 	"web.toolInput": "输入",
 	"web.toolOutput": "输出",
 	"web.toolError": "错误",

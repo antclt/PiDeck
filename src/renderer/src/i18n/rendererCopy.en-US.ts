@@ -4948,6 +4948,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"web.msgEdit": "Edit",
 	"web.msgResend": "Resend",
 	"web.msgDelete": "Delete",
+	"web.msgSaving": "Saving…",
+	"web.msgDeleting": "Deleting…",
 	"web.toolInput": "Input",
 	"web.toolOutput": "Output",
 	"web.toolError": "Error",
