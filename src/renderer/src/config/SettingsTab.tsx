@@ -12,7 +12,10 @@ import { SettingBox, SettingRow, SettingSwitchRow, ClearableSettingsInput } from
 import { SettingsSection } from "../components/app/settings/SettingsStorageTab";
 import { DefaultToolsInput } from "./DefaultToolsInput";
 import { defaultToolsDisablesAll, mergeCodemodeSetting, normalizeCodemodeInlineBudget, normalizeCodemodeMode } from "../../../shared/defaultTools";
+import { COMPACT_REFERENCE_WINDOW_TOKENS, COMPACTION_SLIDER_MAX_PERCENT, COMPACTION_SLIDER_MIN_PERCENT, compactionPercentToTokens, compactionTokensToPercent } from "../../../shared/compactionSlider";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui-shadcn/popover";
+import { Slider } from "../components/ui-shadcn/slider";
+import { desktopApi } from "../desktopApi";
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "../components/ui-shadcn/command";
 
 // ── 可用模型列表聚合（含供应商信息，供 enabledModels 多选用） ──
@@ -130,7 +133,10 @@ export function SettingsTab(props: {
 			key !== "transport" &&
 			// 「工具与 Codemode」区块占用：不走「其他设置项」的 JSON 兜底
 			key !== "defaultTools" &&
-			key !== "codemode",
+			key !== "codemode" &&
+			// 「会话压缩」常驻区块占用：开关 + 百分比滑条已在专项区块编辑，
+			// 原始 JSON 对象再出现在其他设置里就是同一配置的两处入口（重复）
+			key !== "compaction",
 	);
 
 	/**
@@ -205,6 +211,45 @@ export function SettingsTab(props: {
 	};
 
 	/**
+	 * 压缩百分比滑条的换算基数：默认模型的上下文窗口。
+	 * pi 的触发条件是 contextTokens > contextWindow - reserveTokens，两个 token 值
+	 * 的直观语义本来就是「窗口占比」。解析顺序：models.json 显式配置优先（同步、
+	 * 用户手填即真相），缺省时异步查 pi-ai 模型目录；都拿不到则回退数值输入。
+	 */
+	const defaultProvider = typeof data.defaultProvider === "string" ? data.defaultProvider : "";
+	const defaultModel = typeof data.defaultModel === "string" ? data.defaultModel : "";
+	const explicitContextWindow = defaultProvider && defaultModel ? props.modelsData?.providers[defaultProvider]?.models.find((m) => m.id === defaultModel)?.contextWindow : undefined;
+	const [catalogContextWindow, setCatalogContextWindow] = useState<number | undefined>(undefined);
+	useEffect(() => {
+		if (explicitContextWindow) {
+			setCatalogContextWindow(undefined);
+			return;
+		}
+		if (!defaultProvider || !defaultModel) {
+			setCatalogContextWindow(undefined);
+			return;
+		}
+		let cancelled = false;
+		desktopApi.projects
+			.getModelSpec(defaultProvider, defaultModel)
+			.then((spec) => {
+				if (!cancelled && typeof spec?.contextWindow === "number" && spec.contextWindow > 0) setCatalogContextWindow(spec.contextWindow);
+			})
+			.catch(() => {
+				/* 目录未命中时保持 undefined，UI 回退数值输入 */
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [defaultProvider, defaultModel, explicitContextWindow]);
+	// 识别不到模型窗口时也始终提供滑条：按参考窗口换算（业界最常见 200k；pi 默认值 16384/20000 恰为 8%/10%）。
+	// token 数始终如实展示，百分比只是编辑手感。
+	const hasModelWindow = typeof explicitContextWindow === "number" || typeof catalogContextWindow === "number";
+	const compactionContextWindow = explicitContextWindow ?? catalogContextWindow ?? COMPACT_REFERENCE_WINDOW_TOKENS;
+	const percentToTokens = (percent: number) => compactionPercentToTokens(percent, compactionContextWindow);
+	const tokensToPercent = (tokens: number) => compactionTokensToPercent(tokens, compactionContextWindow);
+
+	/**
 	 * 配置键名 → 显示标签。
 	 * 已登记 i18n 的键走多语言；未登记回退原始 key，避免未知字段空白。
 	 */
@@ -260,8 +305,6 @@ export function SettingsTab(props: {
 				return t("config.label.quietStartup");
 			case "collapseChangelog":
 				return t("config.label.collapseChangelog");
-			case "compaction":
-				return t("config.label.compaction");
 			case "sessionDir":
 				return t("config.label.sessionDir");
 			case "steeringMode":
@@ -482,37 +525,45 @@ export function SettingsTab(props: {
 				</SettingRow>
 			</SettingsSection>
 
-			{/* ── 会话压缩：拆成开关 + 两个 token 数，避免用户直接改 JSON 对象 ── */}
+			{/* ── 会话压缩：开关 + 百分比滑条（基数=默认模型窗口，识别不到时按参考窗口 200k，滑条始终可用）── */}
 			<SettingsSection title={t("config.compaction.title")} description={t("config.compaction.hint")}>
 				<SettingSwitchRow title={t("config.compaction.enabled")} checked={compactionConfig.enabled} onChange={(checked) => updateCompaction({ enabled: checked })} />
-				<SettingRow title={<span>{t("config.compaction.reserveTokens")}</span>} description={t("config.compaction.reserveTokensHint")}>
-					<Input
-						className="h-8 w-24 rounded-sm border border-border-subtle bg-bg-panel px-3 text-control text-text-primary outline-none focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
-						type="number"
-						min={0}
-						step={1024}
-						value={compactionConfig.reserveTokens}
-						onChange={(e) =>
-							updateCompaction({
-								reserveTokens: Math.max(0, Math.floor(Number(e.target.value) || 0)),
-							})
-						}
-					/>
+				{/* 百分比标签显示真实占比（不限制在滑条范围内）；滑条 value 用约束后的百分比，拖动时再换算回绝对 tokens */}
+				<SettingRow title={<span>{t("config.compaction.reserveTokens")}</span>} description={t("config.compaction.reserveTokensHint")} stacked>
+					<div className="flex w-full items-center gap-3">
+						<Slider
+							className="h-4 min-w-0 flex-1"
+							min={COMPACTION_SLIDER_MIN_PERCENT}
+							max={COMPACTION_SLIDER_MAX_PERCENT}
+							step={1}
+							value={[tokensToPercent(compactionConfig.reserveTokens)]}
+							onValueChange={([pct]) => updateCompaction({ reserveTokens: percentToTokens(pct ?? 0) })}
+							aria-label={t("config.compaction.reserveTokens")}
+						/>
+						<span className="w-32 shrink-0 text-right text-control text-text-secondary">
+							{Math.round((compactionConfig.reserveTokens / compactionContextWindow) * 100)}% · ≈{compactionConfig.reserveTokens.toLocaleString()}t
+						</span>
+					</div>
 				</SettingRow>
-				<SettingRow title={<span>{t("config.compaction.keepRecentTokens")}</span>} description={t("config.compaction.keepRecentTokensHint")}>
-					<Input
-						className="h-8 w-24 rounded-sm border border-border-subtle bg-bg-panel px-3 text-control text-text-primary outline-none focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
-						type="number"
-						min={0}
-						step={1024}
-						value={compactionConfig.keepRecentTokens}
-						onChange={(e) =>
-							updateCompaction({
-								keepRecentTokens: Math.max(0, Math.floor(Number(e.target.value) || 0)),
-							})
-						}
-					/>
+				<SettingRow title={<span>{t("config.compaction.keepRecentTokens")}</span>} description={t("config.compaction.keepRecentTokensHint")} stacked>
+					<div className="flex w-full items-center gap-3">
+						<Slider
+							className="h-4 min-w-0 flex-1"
+							min={COMPACTION_SLIDER_MIN_PERCENT}
+							max={COMPACTION_SLIDER_MAX_PERCENT}
+							step={1}
+							value={[tokensToPercent(compactionConfig.keepRecentTokens)]}
+							onValueChange={([pct]) => updateCompaction({ keepRecentTokens: percentToTokens(pct ?? 0) })}
+							aria-label={t("config.compaction.keepRecentTokens")}
+						/>
+						<span className="w-32 shrink-0 text-right text-control text-text-secondary">
+							{Math.round((compactionConfig.keepRecentTokens / compactionContextWindow) * 100)}% · ≈{compactionConfig.keepRecentTokens.toLocaleString()}t
+						</span>
+					</div>
 				</SettingRow>
+				<div className="px-1 pb-2 pt-1.5">
+					<small className="text-caption leading-relaxed text-muted-foreground">{hasModelWindow ? t("config.compaction.windowBaseHint", { window: compactionContextWindow.toLocaleString() }) : t("config.compaction.windowRefHint", { window: COMPACT_REFERENCE_WINDOW_TOKENS.toLocaleString() })}</small>
+				</div>
 				<div className="px-1 pb-2 pt-1.5">
 					<small className="text-caption leading-relaxed text-muted-foreground">{t("config.compaction.manualHint")}</small>
 				</div>
