@@ -1678,6 +1678,20 @@ function configureBrowserPanelWebviewHost(window: BrowserWindow): void {
 				event.preventDefault();
 				return;
 			}
+			// Ctrl(+Shift)+Tab 在网页内无既有含义（浏览器里它就是切宿主 tab），
+			// 内置浏览器里同样切 PiDeck 会话标签页。
+			if (isShortcutInput("cycleSessionTabs", input)) {
+				event.preventDefault();
+				if (!window || window.isDestroyed()) return;
+				window.webContents.send(ipcChannels.appShortcutTriggered, "cycleSessionTabs");
+				return;
+			}
+			if (isShortcutInput("cycleSessionTabsReverse", input)) {
+				event.preventDefault();
+				if (!window || window.isDestroyed()) return;
+				window.webContents.send(ipcChannels.appShortcutTriggered, "cycleSessionTabsReverse");
+				return;
+			}
 			if (!isShortcutInput("toggleDevTools", input)) return;
 			event.preventDefault();
 			toggleMainWindowDevTools(window);
@@ -1981,6 +1995,18 @@ async function createWindow() {
 		if (isShortcutInput("toggleVoiceRecording", input)) {
 			event.preventDefault();
 			mainWindow.webContents.send(ipcChannels.appShortcutTriggered, "toggleVoiceRecording");
+			return;
+		}
+		// Ctrl(+Shift)+Tab 循环切换会话标签页：Tab 顺序在渲染层 atoms，主进程只命中广播。
+		// 输入框聚焦时仍生效（浏览器同款惯例，Ctrl+Tab 无文本编辑含义）。
+		if (isShortcutInput("cycleSessionTabs", input)) {
+			event.preventDefault();
+			mainWindow.webContents.send(ipcChannels.appShortcutTriggered, "cycleSessionTabs");
+			return;
+		}
+		if (isShortcutInput("cycleSessionTabsReverse", input)) {
+			event.preventDefault();
+			mainWindow.webContents.send(ipcChannels.appShortcutTriggered, "cycleSessionTabsReverse");
 			return;
 		}
 		if (isShortcutInput("toggleDevTools", input)) {
