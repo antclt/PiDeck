@@ -108,7 +108,10 @@ test("sweep：只删零内容闲置草稿，豁免项保留，并回传受影响
 	assert.deepEqual(removed, ["stale"]);
 	// 广播按 projectId 去重回传（本次只删了 p1 的）
 	assert.deepEqual(reapedProjects, ["p1"]);
-	assert.deepEqual(entries.map((e) => e.id), ["fresh", "named", "focused", "live"]);
+	assert.deepEqual(
+		entries.map((e) => e.id),
+		["fresh", "named", "focused", "live"],
+	);
 });
 
 test("sweep：无可清理项时不触发广播", async () => {
