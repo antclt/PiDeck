@@ -4634,7 +4634,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.showNativeMenu": "Show native menu",
 
 	"settings.telemetry": "Anonymous usage stats",
-	"settings.telemetryDesc": "Helps understand version distribution, platform compatibility, and active installs. Project paths, code, message content, and file names are never collected.",
+	"settings.telemetryDesc": "Helps understand version and platform distribution, feature adoption, and active installs. Only versions, platform info, feature toggle states, and counts are collected — project paths, code, message content, and file names are never collected.",
 	"settings.testProxy": "Test proxy",
 	"settings.testingProxy": "Testing…",
 	"settings.toggle": "Toggle",

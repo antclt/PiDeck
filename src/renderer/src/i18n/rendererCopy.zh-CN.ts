@@ -4618,7 +4618,7 @@ export const zhCN = {
 	"settings.showNativeMenu": "显示原生菜单",
 
 	"settings.telemetry": "匿名使用统计",
-	"settings.telemetryDesc": "帮助了解版本分布、平台兼容性和活跃安装数量。不会收集项目路径、代码、消息内容或文件名。",
+	"settings.telemetryDesc": "帮助了解版本与平台分布、功能采用情况和活跃安装数量。仅收集版本、平台环境、功能开关状态与数量统计，不会收集项目路径、代码、消息内容或文件名。",
 	"settings.testProxy": "检测代理",
 	"settings.testingProxy": "检测中…",
 	"settings.toggle": "打开/关闭",

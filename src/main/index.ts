@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, ne
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, release as osRelease } from "node:os";
 import { createWriteStream, existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { is } from "@electron-toolkit/utils";
@@ -308,6 +308,7 @@ import { TerminalSessionManager } from "./terminal/TerminalSessionManager";
 import { startTrayRegistrationVerify, type TrayRegistrationVerify } from "./tray/trayRegistrationVerify";
 import { buildTrayMenuTemplate, TRAY_RECENT_PROJECTS_LIMIT } from "./tray/trayMenuTemplate";
 import { TelemetryService } from "./telemetry/TelemetryService";
+import { collectTelemetrySnapshot } from "./telemetry/telemetrySnapshot";
 import { PromptManager } from "./prompts/PromptManager";
 import { XuePromptManager } from "./prompts/XuePromptManager";
 import { SkillManager } from "./skills/SkillManager";
@@ -3230,6 +3231,20 @@ function sendTelemetryHeartbeat() {
 			arch: process.arch,
 			packaged: app.isPackaged,
 		},
+		// 匿名快照：功能开关状态与规模计数，不碰路径/项目名/内容/凭据（口径见设置页遥测文案）
+		snapshot: () =>
+			collectTelemetrySnapshot({
+				settings: settingsStore.get(),
+				sessionsTotal: sessionCatalog.listEntries().length,
+				projectsTotal: projectStore.list().length,
+				agentsActive: agentManager.list().length,
+				feishuBotsTotal: listBots().length,
+				automationTasksTotal: automationStore?.listTasks().length ?? 0,
+				systemLocale: app.getLocale(),
+				portable: Boolean(process.env.PORTABLE_EXECUTABLE_DIR),
+				uptimeMs: process.uptime() * 1000,
+				osRelease: osRelease(),
+			}),
 		capture: async (request) => {
 			const response = await net.fetch(request.url, {
 				method: "POST",
