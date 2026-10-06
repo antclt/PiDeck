@@ -217,10 +217,13 @@ test("main-process Session IPC errors expose stable copy and retain diagnostics 
 
 test("main-process user surfaces use stable copy and keep caught details in logs", () => {
 	const source = mainIpcSource;
+	// 托盘菜单已从 index.ts 抽到 src/main/tray/trayMenuTemplate.ts，文案经注入的 copy() 使用；
+	// 硬编码中文守卫也同步扫这个文件（tray 不在 mainIpcSources 的扫描范围内）。
+	const trayTemplate = readFileSync("src/main/tray/trayMenuTemplate.ts", "utf8");
+	for (const key of ["tray.showWindow", "tray.restart", "tray.quit"]) {
+		assert.match(trayTemplate, new RegExp(`copy\\("${key.replaceAll(".", "\\.")}"`));
+	}
 	for (const key of [
-		"tray.showWindow",
-		"tray.restart",
-		"tray.quit",
 		"dialog.chooseChatHistoryFolder",
 		"dialog.chooseProjectFolder",
 		// 应用更新由 UpdateService 将底层错误映射为状态快照，设置页用 renderer copy 呈现。

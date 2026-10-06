@@ -5,6 +5,7 @@ import test from "node:test";
 const toolCard = readFileSync("src/renderer/src/components/session/ToolCallComponents.tsx", "utf8");
 const turnExecution = readFileSync("src/renderer/src/components/session/turn/useTurnExecution.ts", "utf8");
 const controller = readFileSync("src/renderer/src/hooks/useSessionTimelineController.ts", "utf8");
+const sendScroll = readFileSync("src/renderer/src/hooks/timeline/sendScroll.ts", "utf8");
 const scroller = readFileSync("src/renderer/src/components/agents/message-scroller.tsx", "utf8");
 const turnRow = readFileSync("src/renderer/src/components/session/turn/TurnRow.tsx", "utf8");
 const timeline = readFileSync("src/renderer/src/components/session/SessionMessageTimeline.tsx", "utf8");
@@ -55,11 +56,15 @@ test("auto-collapse survives without completion-reposition; send-time pin is the
 	assert.doesNotMatch(timeline, /scheduleFinalAnswerSettle/);
 	assert.doesNotMatch(timeline, /scheduleSettleFinalAnswerTop/);
 	assert.doesNotMatch(timeline, /settleFinalAnswerTargetPx/);
-	// 自动滚动唯一路径：发送时 controller 对新 user 行做一次性置顶动画（含尾垫+未占改+取消）。
-	assert.match(controller, /pinScrollDurationMs/);
-	assert.match(controller, /pinToTopCancelRef/);
-	assert.match(controller, /PIN_TO_TOP_TARGET_GAP_PX/);
-	assert.match(controller, /PIN_TO_TOP_SKIP_EPSILON_PX/);
+	// 自动滚动唯一路径：发送时对新 user 行做一次性置顶动画（含尾垫+未占改+取消）。
+	// 612bb51c1 起实现从 controller 迁入 timeline/sendScroll.ts（SendScrollPositioner），
+	// 契约锚点改为新模块；controller 侧只保留接线断言。
+	assert.match(controller, /SendScrollPositioner/);
+	assert.doesNotMatch(controller, /scrollFinalAnswerIntoView|scheduleFinalAnswerSettle/);
+	assert.match(sendScroll, /pinScrollDurationMs/);
+	assert.match(sendScroll, /TARGET_GAP_PX/);
+	assert.match(sendScroll, /SKIP_EPSILON_PX/);
+	assert.match(sendScroll, /CANCEL_INPUTS/);
 	// isLatestRun（自动收起）保持按「最后一条显示条目」判定；
 	// live 挂载门用单独的 isLastAgentRun（最后一个 agent-run）判定——
 	// 两者语义不同，不能合并（见 liveMountDecision 回归）。

@@ -117,7 +117,10 @@ test("thinking and tool logos keep a distinct color even on the default zinc the
 	assert.match(foundation, /--color-thinking:\s*#6366f1/);
 	assert.match(foundation, /--color-thinking:\s*#818cf8/);
 	assert.match(css, /\.thinking-row-icon \{[\s\S]*?color:\s*var\(--color-thinking\)/);
-	assert.match(css, /\.tool-card-icon \{[\s\S]*?color:\s*var\(--color-info\)/);
+	// #115 后工具 logo 走身份色 --color-tool（与思考靛紫成对、与状态色解耦，皮肤可覆盖），
+	// 默认主题里它仍落回 info 蓝——锌灰主题下依然与 tertiary 拉开对比。
+	assert.match(css, /\.tool-card-icon \{[\s\S]*?color:\s*var\(--color-tool\)/);
+	assert.match(foundation, /--color-tool:\s*var\(--color-info\)/);
 	const skillIcon = css.match(/\.tool-card--skill \.tool-card-icon \{[\s\S]*?\n\}/)?.[0] ?? "";
 	assert.match(skillIcon, /color:\s*var\(--color-thinking\)/);
 	assert.doesNotMatch(skillIcon, /--color-brand-purple/);
