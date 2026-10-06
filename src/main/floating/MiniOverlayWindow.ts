@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen } from "electron";
+import { app, BrowserWindow, ipcMain, nativeTheme, screen } from "electron";
 import { join } from "node:path";
 import { is } from "@electron-toolkit/utils";
 import { ipcChannels } from "../../shared/ipc";
@@ -6,6 +6,7 @@ import { preparePreloadPath } from "../preloadPath";
 import { rendererHeapAdditionalArguments } from "../v8HeapLimits";
 import { readElectronChromiumSandboxPreference } from "../settings/SettingsStore";
 import type { SettingsStore } from "../settings/SettingsStore";
+import { resolveAppColorScheme } from "../../shared/themeSchedule";
 import type { AgentManager } from "../pi/AgentManager";
 import type { ProjectStore } from "../projects/ProjectStore";
 import { getAppLogger } from "../logging/sharedLogger";
@@ -42,8 +43,9 @@ export interface MiniOverlayWindowDeps {
 
 /**
  * MiniOverlayWindow —— 悬浮球点击展开的极简浮窗。
- * 360×480 无边框窗口：顶部状态总览（运行中/活跃数）+ 快捷输入框 + 最近会话列表 + 底部工具行。
+ * 480×640 无框窗口：顶部状态总览（运行中/活跃数）+ 快捷输入框 + 最近会话列表 + 底部工具行。
  * 主窗口隐藏时仍可独立工作（agent 状态经 AgentManager 订阅推送）。
+ * 窗口边界感（投影/圆角）交给系统 DWM，与任务模式（主窗口紧凑形态）同款，不用透明窗口自绘。
  */
 export class MiniOverlayWindow {
 	private win: BrowserWindow | null = null;
@@ -67,19 +69,25 @@ export class MiniOverlayWindow {
 		const preloadPath = await preparePreloadPath(sourcePreloadPath, "mini-overlay-preload.js");
 		const display = screen.getPrimaryDisplay();
 		const { workArea } = display;
+		// 与主窗口同源的主题底色：透明窗口在部分 Windows 环境会退化为生硬色块，非透明实底更稳。
+		const miniSettings = this.deps.settingsStore.get();
+		const isDarkTheme = resolveAppColorScheme({
+			theme: miniSettings.theme,
+			themeScheduleLightStart: miniSettings.themeScheduleLightStart,
+			themeScheduleDarkStart: miniSettings.themeScheduleDarkStart,
+			systemPrefersDark: nativeTheme.shouldUseDarkColors,
+		}) === "dark";
 		this.win = new BrowserWindow({
 			width: MINI_OVERLAY_W,
 			height: MINI_OVERLAY_H,
-			// 贴屏幕右缘，不间间 24px；圆角与描边在窗口内绘制，贴边后仍完整可见。
+			// 贴屏幕右缘，不留 24px 间隙；窗口边界感（投影/圆角）交给系统 DWM，与任务模式一致。
 			x: workArea.x + workArea.width - MINI_OVERLAY_W,
 			y: workArea.y + Math.floor((workArea.height - MINI_OVERLAY_H) / 2),
 			frame: false,
-			transparent: true,
-			backgroundColor: "#00000000",
+			backgroundColor: isDarkTheme ? "#121212" : "#f8f8f5",
 			resizable: false,
 			skipTaskbar: true,
 			alwaysOnTop: true,
-			hasShadow: false,
 			show: false,
 			webPreferences: {
 				preload: preloadPath,
