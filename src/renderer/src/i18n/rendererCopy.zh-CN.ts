@@ -35,6 +35,7 @@ export const zhCN = {
 	"miniOverlay.chatProjectHint": "无需工作目录，适合日常对话。",
 	"miniOverlay.selectProjectHint": "先选择一个项目或聊天空间。",
 	"miniOverlay.recentSessions": "最近会话",
+	"miniOverlay.activeSessions": "活动会话",
 	"miniOverlay.emptySession": "尚未发送消息",
 	"miniOverlay.loadingSessions": "正在加载最近会话…",
 	"miniOverlay.loadSessionsFailed": "最近会话加载失败，请重新选择项目。",

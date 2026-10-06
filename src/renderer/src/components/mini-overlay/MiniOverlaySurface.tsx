@@ -93,6 +93,30 @@ function MiniOverlayHome({ workspace }: { workspace: MiniOverlayWorkspace }) {
 					{workspace.project?.kind === "chat" ? t("miniOverlay.chatProjectHint") : workspace.project?.path || t("miniOverlay.selectProjectHint")}
 				</p>
 			</div>
+			{/* 活动会话：正在运行 agent 的会话跨项目直达，与悬浮球角标同语义；无运行任务时不占位。 */}
+			{workspace.activeSessions.length > 0 ? (
+				<div className="flex flex-col gap-2">
+					<h2 className="text-xs font-medium text-muted-foreground">{t("miniOverlay.activeSessions")}</h2>
+					<div className="flex flex-col gap-1.5">
+						{workspace.activeSessions.map((active) => (
+							<Button
+								key={active.id}
+								type="button"
+								variant="ghost"
+								className={active.isRunning ? "h-auto min-h-12 shrink-0 justify-start gap-2.5 border border-success/35 bg-success/8 px-3 py-2 text-left" : "h-auto min-h-12 shrink-0 justify-start gap-2.5 border border-border/60 px-3 py-2 text-left"}
+								loading={workspace.openingSessionId === active.id}
+								disabled={Boolean(workspace.openingSessionId)}
+								onClick={() => void workspace.openActiveSession(active.id, active.projectId)}
+							>
+								{/* 运行中脉冲绿点；空闲透明占位保持缩进对齐。 */}
+								<span className={active.isRunning ? "size-2 shrink-0 animate-pulse rounded-full bg-success" : "size-2 shrink-0 rounded-full bg-transparent"} aria-hidden />
+								<span className="min-w-0 flex-1 truncate text-xs font-medium">{active.title}</span>
+								<ArrowRight className="size-3.5 text-muted-foreground" />
+							</Button>
+						))}
+					</div>
+				</div>
+			) : null}
 			<div className="flex flex-col gap-2">
 				<h2 className="text-xs font-medium text-muted-foreground">{t("miniOverlay.recentSessions")}</h2>
 				{workspace.recentSessions.length > 0 ? (

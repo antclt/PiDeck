@@ -278,6 +278,7 @@ export function createPreviewApi(): PiDesktopApi {
 			contextMenu: async () => undefined,
 		},
 		miniOverlay: {
+			getState: async () => null,
 			onStateChanged: () => () => undefined,
 			jumpToSession: async () => undefined,
 			quickPrompt: async () => ({ ok: false, message: "preview mode" }),

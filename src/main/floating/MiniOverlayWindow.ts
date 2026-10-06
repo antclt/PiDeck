@@ -16,14 +16,10 @@ export const MINI_OVERLAY_W = 480;
 export const MINI_OVERLAY_H = 640;
 
 /** 极简浮窗状态快照：渲染层据此渲染状态区、快捷输入与最近会话列表。 */
-export interface MiniOverlayState {
-	visible: boolean;
-	runningCount: number;
-	activeCount: number;
-	recentSessions: Array<{ id: string; title: string; projectId: string }>;
-	projects: Array<{ id: string; name: string; path: string }>;
-	locale: "zh-CN" | "en-US";
-}
+// 类型定义在 shared/types/miniOverlay.ts（shared/types.ts barrel re-export）：
+// 渲染层 tsconfig 不含 src/main，hook/surface 从 shared 引用；此处 re-export 保持 preload 既有引用路径兼容。
+import type { MiniOverlayState } from "../../shared/types/miniOverlay";
+export type { MiniOverlayState, MiniOverlaySessionRef } from "../../shared/types/miniOverlay";
 
 export interface MiniOverlayWindowDeps {
 	settingsStore: SettingsStore;
@@ -71,12 +67,13 @@ export class MiniOverlayWindow {
 		const { workArea } = display;
 		// 与主窗口同源的主题底色：透明窗口在部分 Windows 环境会退化为生硬色块，非透明实底更稳。
 		const miniSettings = this.deps.settingsStore.get();
-		const isDarkTheme = resolveAppColorScheme({
-			theme: miniSettings.theme,
-			themeScheduleLightStart: miniSettings.themeScheduleLightStart,
-			themeScheduleDarkStart: miniSettings.themeScheduleDarkStart,
-			systemPrefersDark: nativeTheme.shouldUseDarkColors,
-		}) === "dark";
+		const isDarkTheme =
+			resolveAppColorScheme({
+				theme: miniSettings.theme,
+				themeScheduleLightStart: miniSettings.themeScheduleLightStart,
+				themeScheduleDarkStart: miniSettings.themeScheduleDarkStart,
+				systemPrefersDark: nativeTheme.shouldUseDarkColors,
+			}) === "dark";
 		this.win = new BrowserWindow({
 			width: MINI_OVERLAY_W,
 			height: MINI_OVERLAY_H,
@@ -150,29 +147,40 @@ export class MiniOverlayWindow {
 		this.hide();
 	}
 
-	private pushState(): void {
-		if (!this.win || this.win.isDestroyed()) return;
+	/** 组装快照与 win 解耦：pushState 与 mini-overlay:get-state handler 共用，避免初始推送竞态。 */
+	private buildState(): MiniOverlayState {
 		const tabs = this.deps.agentManager.list();
 		const running = tabs.filter((t) => t.status === "running");
 		const settings = this.deps.settingsStore.get();
-		const state: MiniOverlayState = {
+		const toSessionRef = (t: (typeof tabs)[number]) => ({ id: t.sessionId ?? t.id, title: t.title ?? "未命名", projectId: t.projectId, isRunning: t.status === "running" });
+		// 活动会话 = 全部打开中（非 closed）的会话，对齐桌面端 tab 列表：运行中的排最前，其余按创建时间降序；
+		// 若只列 running，没跑任务时区块整体消失，用户失去进入已打开会话的入口。
+		const openTabs = tabs.filter((t) => t.status !== "closed");
+		const byRecency = (a: (typeof tabs)[number], b: (typeof tabs)[number]) => (b.createdAt ?? 0) - (a.createdAt ?? 0);
+		return {
 			visible: true,
 			runningCount: running.length,
-			activeCount: tabs.filter((t) => t.status !== "closed").length,
-			recentSessions: tabs
-				.filter((t) => t.status !== "closed")
-				.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
-				.slice(0, 5)
-				.map((t) => ({ id: t.sessionId ?? t.id, title: t.title ?? "未命名", projectId: t.projectId })),
+			activeCount: openTabs.length,
+			activeSessions: [...openTabs.filter((t) => t.status === "running").sort(byRecency), ...openTabs.filter((t) => t.status !== "running").sort(byRecency)].map(toSessionRef),
+			recentSessions: openTabs.sort(byRecency).slice(0, 5).map(toSessionRef),
 			projects: this.deps.projectStore.list().map((p) => ({ id: p.id, name: p.name, path: p.path })),
 			locale: settings.language === "en-US" ? "en-US" : "zh-CN",
 		};
-		this.win.webContents.send(ipcChannels.miniOverlayState, state);
+	}
+
+	private pushState(): void {
+		if (!this.win || this.win.isDestroyed()) return;
+		this.win.webContents.send(ipcChannels.miniOverlayState, this.buildState());
 	}
 
 	private registerIpcHandlers(): void {
 		const win = this.win;
 		if (!win) return;
+		ipcMain.removeHandler(ipcChannels.miniOverlayGetState);
+		ipcMain.handle(ipcChannels.miniOverlayGetState, (event) => {
+			if (event.sender !== win.webContents) return null;
+			return this.buildState();
+		});
 		ipcMain.removeHandler(ipcChannels.miniOverlayJumpToSession);
 		ipcMain.handle(ipcChannels.miniOverlayJumpToSession, (event, sessionId: string, projectId: string) => {
 			if (event.sender !== win.webContents) return;

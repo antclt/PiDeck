@@ -36,6 +36,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"miniOverlay.chatProjectHint": "No working directory needed. Ideal for everyday conversations.",
 	"miniOverlay.selectProjectHint": "Choose a project or chat space first.",
 	"miniOverlay.recentSessions": "Recent sessions",
+	"miniOverlay.activeSessions": "Active sessions",
 	"miniOverlay.emptySession": "No messages yet",
 	"miniOverlay.loadingSessions": "Loading recent sessions…",
 	"miniOverlay.loadSessionsFailed": "Could not load recent sessions. Please select the project again.",

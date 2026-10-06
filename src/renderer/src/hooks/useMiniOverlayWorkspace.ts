@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAtomValue } from "jotai";
-import type { AgentBackend, AvailableModel, ResolvedLaunchDefaults, SessionLaunchPreferences, SessionModelPreference, SessionRecord } from "../../../shared/types";
+import type { AgentBackend, AvailableModel, MiniOverlayState, ResolvedLaunchDefaults, SessionLaunchPreferences, SessionModelPreference, SessionRecord } from "../../../shared/types";
 import { createSessionModelPreference } from "../../../shared/modelDisplayName";
 import { currentSessionAtom, effectiveAgentBackendAtom, projectInventoryAtom } from "../atoms";
 import { desktopApi } from "../desktopApi";
@@ -56,6 +56,8 @@ export function useMiniOverlayWorkspace(options: MiniOverlayWorkspaceOptions) {
 	const [recentSessions, setRecentSessions] = useState<SessionRecord[]>([]);
 	const [recentLoading, setRecentLoading] = useState(false);
 	const [recentFailed, setRecentFailed] = useState(false);
+	/** 主进程推的运行中会话：与悬浮球角标同源，跨项目直达入口的数据源。 */
+	const [activeSessions, setActiveSessions] = useState<MiniOverlayState["activeSessions"]>([]);
 	const [creating, setCreating] = useState(false);
 	const [openingSessionId, setOpeningSessionId] = useState<string>();
 	const pendingRef = useRef(false);
@@ -73,6 +75,25 @@ export function useMiniOverlayWorkspace(options: MiniOverlayWorkspaceOptions) {
 		mountedRef.current = true;
 		return () => {
 			mountedRef.current = false;
+		};
+	}, []);
+
+	// 运行中会话：先 getState 补齐订阅前可能错过的首推，再靠推送持续更新。
+	useEffect(() => {
+		let cancelled = false;
+		const apply = (state: MiniOverlayState) => {
+			if (!cancelled) setActiveSessions(state.activeSessions ?? []);
+		};
+		void desktopApi.miniOverlay
+			.getState()
+			.then((state) => {
+				if (state) apply(state);
+			})
+			.catch(() => undefined);
+		const off = desktopApi.miniOverlay.onStateChanged(apply);
+		return () => {
+			cancelled = true;
+			off();
 		};
 	}, []);
 
@@ -212,6 +233,21 @@ export function useMiniOverlayWorkspace(options: MiniOverlayWorkspaceOptions) {
 		},
 		[project],
 	);
+	// 活动会话自带 projectId，不依赖主页当前选中的项目。
+	const openActiveSession = useCallback(async (id: string, activeProjectId: string) => {
+		if (pendingRef.current) return;
+		pendingRef.current = true;
+		setOpeningSessionId(id);
+		try {
+			const opened = await commandsRef.current.onOpenSession(activeProjectId, id);
+			if (opened && mountedRef.current) setView("session");
+		} catch {
+			if (mountedRef.current) showNotice(t("miniOverlay.openSessionFailed"), 4000, "error");
+		} finally {
+			pendingRef.current = false;
+			if (mountedRef.current) setOpeningSessionId(undefined);
+		}
+	}, []);
 
 	return {
 		view,
@@ -224,6 +260,7 @@ export function useMiniOverlayWorkspace(options: MiniOverlayWorkspaceOptions) {
 		recentSessions,
 		recentLoading,
 		recentFailed,
+		activeSessions,
 		creating,
 		openingSessionId,
 		selectProject,
@@ -234,6 +271,7 @@ export function useMiniOverlayWorkspace(options: MiniOverlayWorkspaceOptions) {
 		showSession,
 		createSession,
 		openSession,
+		openActiveSession,
 	};
 }
 
