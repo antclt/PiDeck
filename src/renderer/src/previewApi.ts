@@ -93,6 +93,7 @@ let previewSettings: AppSettings = {
 	showNativeMenu: false,
 	sendShortcut: "enter-send",
 	defaultAgentBackend: "pi",
+	floatingBallShowRunningBadge: true,
 	theme: "system",
 	themeScheduleLightStart: "07:00",
 	themeScheduleDarkStart: "19:00",
@@ -265,7 +266,7 @@ export function createPreviewApi(): PiDesktopApi {
 		// 资源管理器右键菜单预览桩：预览环境无注册表操作，一律报不支持
 		quickTask: { getState: async () => ({ active: false, requestId: 0 }), onChanged: () => () => undefined, exit: async () => undefined, switchToMiniOverlay: async () => undefined },
 		floatingBall: {
-			getState: async () => ({ visible: false, alwaysOnTop: true, snapToEdge: true, expandTarget: "mini" as const, activeCount: 0, runningCount: 0, recentTitles: [], locale: "zh-CN" as const }),
+			getState: async () => ({ visible: false, alwaysOnTop: true, snapToEdge: true, expandTarget: "mini" as const, showRunningBadge: true, activeCount: 0, runningCount: 0, recentTitles: [], locale: "zh-CN" as const }),
 			onStateChanged: () => () => undefined,
 			enter: async () => undefined,
 			exit: async () => undefined,

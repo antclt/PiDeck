@@ -70,7 +70,8 @@ export class MiniOverlayWindow {
 		this.win = new BrowserWindow({
 			width: MINI_OVERLAY_W,
 			height: MINI_OVERLAY_H,
-			x: workArea.x + workArea.width - MINI_OVERLAY_W - 24,
+			// 贴屏幕右缘，不间间 24px；圆角与描边在窗口内绘制，贴边后仍完整可见。
+			x: workArea.x + workArea.width - MINI_OVERLAY_W,
 			y: workArea.y + Math.floor((workArea.height - MINI_OVERLAY_H) / 2),
 			frame: false,
 			transparent: true,
@@ -89,7 +90,9 @@ export class MiniOverlayWindow {
 			},
 		});
 		this.win.setMenu(null);
-		this.win.setAlwaysOnTop(true, "floating");
+		// 跟随悬浮球「固定在最上方」设置：开关只控层级，也决定主窗口回来时浮窗是否收起。
+		const alwaysOnTop = this.deps.settingsStore.get().floatingBallAlwaysOnTop !== false;
+		this.win.setAlwaysOnTop(alwaysOnTop, "floating");
 		this.win.on("closed", () => {
 			this.win = null;
 			this.removeAgentStateListener?.();
@@ -124,6 +127,14 @@ export class MiniOverlayWindow {
 		this.win = null;
 		this.removeAgentStateListener?.();
 		this.removeAgentStateListener = null;
+	}
+
+	/** 流式 runtime 事件转发：浮窗是独立渲染进程，收不到主窗口的 sessions:runtime-event，
+	 *  必须单独发一份，否则会话页只有打开瞬间的快照（失焦重建后才看到全部输出）。 */
+	sendRuntimeEvent(event: unknown): void {
+		if (this.win && !this.win.isDestroyed()) {
+			this.win.webContents.send(ipcChannels.sessionsRuntimeEvent, event);
+		}
 	}
 
 	destroy(): void {

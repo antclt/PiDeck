@@ -13,6 +13,37 @@ export type MiniOverlayWorkspaceOptions = {
 	onOpenSession: (projectId: string, sessionId: string) => Promise<string | undefined>;
 };
 
+/** 浮窗导航持久化 key：浮窗是独立渲染进程且 hide 即销毁，导航状态必须落 localStorage 才能跨重建保留。
+ *  同源下与主窗口共享存储，用 miniOverlay: 前缀隔离，只存最后浏览的会话页。 */
+const MINI_OVERLAY_WORKSPACE_KEY = "miniOverlay:workspace";
+
+interface PersistedMiniOverlayWorkspace {
+	view: "home" | "new" | "session";
+	sessionId?: string;
+	projectId?: string;
+}
+
+/** 恢复目标（仅会话页）：字段必填，避免使用处再收窄。 */
+interface RestorableSessionTarget {
+	view: "session";
+	sessionId: string;
+	projectId: string;
+}
+
+function readPersistedWorkspace(): RestorableSessionTarget | null {
+	try {
+		const raw = window.localStorage.getItem(MINI_OVERLAY_WORKSPACE_KEY);
+		if (!raw) return null;
+		const parsed: unknown = JSON.parse(raw);
+		if (!parsed || typeof parsed !== "object") return null;
+		const record = parsed as Partial<PersistedMiniOverlayWorkspace>;
+		if (record.view !== "session" || typeof record.sessionId !== "string" || typeof record.projectId !== "string") return null;
+		return { view: "session", sessionId: record.sessionId, projectId: record.projectId };
+	} catch {
+		return null;
+	}
+}
+
 /** 小窗导航与新建草稿的唯一 owner；复用会话命令，不自建第二套激活/目录状态。 */
 export function useMiniOverlayWorkspace(options: MiniOverlayWorkspaceOptions) {
 	const projects = useAtomValue(projectInventoryAtom);
@@ -32,6 +63,8 @@ export function useMiniOverlayWorkspace(options: MiniOverlayWorkspaceOptions) {
 	const commandsRef = useRef(options);
 	commandsRef.current = options;
 	const previousSessionIdRef = useRef(session?.id);
+	// 恢复未决期间抑制持久化写入，避免 bootstrap 激活的其他会话覆盖待恢复目标。
+	const restorePendingRef = useRef(true);
 	const project = projects.find((item) => item.id === projectId);
 	// 点选只属于当前项目/后端，切目录不能带入另一项目的局部模型。
 	const model = selectedModel?.projectId === projectId && selectedModel?.backend === backend ? selectedModel.model : undefined;
@@ -42,6 +75,39 @@ export function useMiniOverlayWorkspace(options: MiniOverlayWorkspaceOptions) {
 			mountedRef.current = false;
 		};
 	}, []);
+
+	// 打开浮窗时恢复上次浏览的会话页：收起/重建后不回到主页，由用户手动点主页返回。
+	useEffect(() => {
+		const persisted = readPersistedWorkspace();
+		if (!persisted || session?.id === persisted.sessionId) {
+			restorePendingRef.current = false;
+			return;
+		}
+		void commandsRef.current
+			.onOpenSession(persisted.projectId, persisted.sessionId)
+			.then((opened) => {
+				if (opened && mountedRef.current) setView("session");
+			})
+			.catch(() => {
+				// 会话/项目已不存在则留在主页，不提示。
+			})
+			.finally(() => {
+				restorePendingRef.current = false;
+			});
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- 仅 mount 时恢复一次，后续 session 变化由导航 effect 接管。
+	}, []);
+
+	// 按当前导航持久化：会话页记下会话身份；主页/新建页清除恢复目标（下次打开停主页）。
+	useEffect(() => {
+		if (restorePendingRef.current) return;
+		try {
+			const entry: PersistedMiniOverlayWorkspace =
+				view === "session" && session ? { view: "session", sessionId: session.id, projectId: session.projectId } : { view: view === "new" ? "new" : "home" };
+			window.localStorage.setItem(MINI_OVERLAY_WORKSPACE_KEY, JSON.stringify(entry));
+		} catch {
+			// 存储异常（隐私模式/配额）不影响导航本身。
+		}
+	}, [view, session?.id, session?.projectId]);
 
 	useEffect(() => {
 		if (session && session.id !== previousSessionIdRef.current) {

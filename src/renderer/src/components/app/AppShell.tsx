@@ -357,7 +357,7 @@ export function AppShell(props: AppShellProps) {
 			<div
 				className={[
 					"wechat-shell quick-task-shell bg-bg-app [[data-bg-image=on]_&]:bg-transparent",
-					isMiniOverlayMode ? "mini-overlay-shell overflow-hidden rounded-xl shadow-[inset_0_0_0_1px_var(--color-border-strong),0_8px_32px_#0000002e]" : "",
+					isMiniOverlayMode ? "mini-overlay-shell overflow-hidden rounded-xl shadow-[inset_0_0_0_2px_var(--color-border-strong),0_10px_40px_#00000052]" : "",
 					useNativeTitleBar ? "" : "custom-titlebar-enabled",
 					!useNativeTitleBar && platform === "darwin" ? "mac-custom-titlebar" : "",
 				]

@@ -649,6 +649,8 @@ function sendSessionRuntimeEnvelope(event: SessionRuntimeEvent): void {
 	if (window && !window.isDestroyed()) {
 		window.webContents.send(ipcChannels.sessionsRuntimeEvent, event);
 	}
+	// 极简浮窗是独立渲染进程，流式事件单独转发，否则会话页停在打开时的快照。
+	miniOverlayWindow?.sendRuntimeEvent(event);
 }
 
 function emitSessionRuntimeEvent(agentId: string, sourceChannel: string, payload: unknown): boolean {
@@ -1334,8 +1336,9 @@ function focusMainWindow() {
 	}
 	mainWindow.show();
 	mainWindow.focus();
-	// 主窗口回来时关闭极简浮窗（避免两个窗口并存）
-	miniOverlayWindow?.hide();
+	// 主窗口回来时默认关闭极简浮窗（避免两个窗口并存）；
+	// 「固定在最上方」开启（含未显式设置的默认 true）时浮窗常驻，只响应手动隐藏/收起。
+	if (settingsStore.get().floatingBallAlwaysOnTop === false) miniOverlayWindow?.hide();
 	if (process.platform === "win32") {
 		// Windows 前置窗口用「临时置顶再取消」hack 抢前台（直接 focus 可能被前台锁拦截）。
 		// 必须原样还原用户置顶状态，否则会把用户手动置顶的窗口取消置顶；
