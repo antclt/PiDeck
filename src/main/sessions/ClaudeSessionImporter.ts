@@ -26,6 +26,14 @@ type ParsedClaudeSession = {
 type ClaudePushMessage = (role: "user" | "assistant" | "toolResult", content: unknown[], extra?: Record<string, unknown>, timestampValue?: string) => Promise<void>;
 
 /**
+ * 转换器版本：写进 import 标记。转换逻辑影响**产物有效性**时 bump——
+ * 旧版本产物在扫描列表里显示 outdated，引导用户重导修复。
+ * v2：活链重建 + 孤儿 toolResult 降级（修复 rewind/中断续聊的废弃分支导致的
+ * 「tool 消息前无 tool_calls」400）。
+ */
+export const CLAUDE_IMPORT_CONVERTER_VERSION = 2;
+
+/**
  * Claude Code（~/.claude/projects）会话导入器。
  *
  * 同时作为「Claude 同构 transcript」家族的基类：Qoder 等工具的 JSONL 与本类的
@@ -86,11 +94,14 @@ export class ClaudeSessionImporter {
 			const existing = await this.readImportMeta(targetPath);
 			await mkdir(this.getProjectSessionDir(projectPath), { recursive: true });
 
+			// 第一遍流式扫描重建活链（只留存 uuid→parent，内存 O(行数)，不 materialize 记录）
+			const chainIds = await this.collectLiveChainIds(readJsonlObjects(sourcePath));
+
 			// 先写临时文件再原子改名：中途失败不会留下半截会话文件污染列表
 			handle = await open(tempPath, "w");
 			const buffered = createBufferedLineSink(handle);
 
-			const converted = await this.convertToPiSessionTo(projectPath, parsed, readJsonlObjects(sourcePath), buffered.sink);
+			const converted = await this.convertToPiSessionTo(projectPath, parsed, readJsonlObjects(sourcePath), buffered.sink, chainIds);
 			await buffered.flush();
 			await handle.close();
 			handle = undefined;
@@ -130,7 +141,8 @@ export class ClaudeSessionImporter {
 		const importMeta = await this.readImportMeta(targetPath);
 		// 扫描路径：entries 只是头部小数组，直接内存转换（体积有上界）
 		const converted = await this.convertToPiSession(projectPath, session);
-		const status: ClaudeImportStatus = !importMeta ? "new" : importMeta.sourceMtime === session.sourceMtime && importMeta.sourceSize === session.sourceSize ? "current" : "outdated";
+		// 转换器版本不一致也按 outdated：旧转换产物可能含孤儿 toolResult（400 根因），引导重导
+		const status: ClaudeImportStatus = !importMeta ? "new" : importMeta.version !== CLAUDE_IMPORT_CONVERTER_VERSION || importMeta.sourceMtime !== session.sourceMtime || importMeta.sourceSize !== session.sourceSize ? "outdated" : "current";
 
 		return {
 			id: session.meta.sessionId,
@@ -155,14 +167,19 @@ export class ClaudeSessionImporter {
 	 * - 导入（importOne）传逐行流式读取的迭代器 → 内存 O(单行)，巨型会话可导入；
 	 * - 扫描（toSummary）传头部已解析的小数组 → 体积有上界。
 	 * 两路共用同一份转换逻辑，避免像 Codex 那样维护两份实现而漂移（改一处漏一处）。
+	 *
+	 * `chainIds`：活链 uuid 集合（见 collectLiveChainIds，仅导入路径传入）；
+	 * 扫描路径的头部数组不知道文件尾是谁，传 null 不做过滤。
 	 */
-	private async convertToPiSessionTo(projectPath: string, session: ParsedClaudeSession, entries: Iterable<Record<string, any>> | AsyncIterable<Record<string, any>>, sink: (line: string) => Promise<void> | void): Promise<{ title: string; preview: string; messageCount: number }> {
+	private async convertToPiSessionTo(projectPath: string, session: ParsedClaudeSession, entries: Iterable<Record<string, any>> | AsyncIterable<Record<string, any>>, sink: (line: string) => Promise<void> | void, chainIds: Set<string> | null = null): Promise<{ title: string; preview: string; messageCount: number }> {
 		const sessionId = session.meta.sessionId;
 		const timestamp = new Date(session.meta.firstTimestamp).toISOString();
 		const titleState = { title: "", preview: "" };
 		let parentId: string | null = null;
 		let sequence = 0;
 		let messageCount = 0;
+		// 当前挂起的 toolCall id 集（配对跟踪，见 pushMessage）
+		const pendingToolCalls = new Set<string>();
 
 		const pushEntry = async (entry: Record<string, unknown>) => {
 			await sink(JSON.stringify(entry));
@@ -170,6 +187,26 @@ export class ClaudeSessionImporter {
 
 		const pushMessage = async (role: "user" | "assistant" | "toolResult", content: unknown[], extra: Record<string, unknown> = {}, timestampValue?: string) => {
 			if (content.length === 0) return;
+			// 与 pi transformMessages 同口径的 tool 配对跟踪：assistant 的 toolCall 挂起，
+			// 任一 user 消息出现即关闭挂起（pi 请求时会为未应答的 toolCall 补占位结果，不会 400）。
+			// 挂起集之外的 toolResult 在 OpenAI completions 请求里是「前面没有 tool_calls 的
+			// tool 消息」→ 严格供应商 400，降级为用户文本保留内容。
+			if (role === "assistant") {
+				pendingToolCalls.clear();
+				for (const item of content) {
+					const block = item as Record<string, unknown>;
+					if (block?.type === "toolCall" && typeof block.id === "string") pendingToolCalls.add(block.id);
+				}
+			} else if (role === "user") {
+				pendingToolCalls.clear();
+			} else if (role === "toolResult") {
+				const toolCallId = String(extra.toolCallId ?? "");
+				if (!pendingToolCalls.delete(toolCallId)) {
+					const text = this.extractPiText(content).trim();
+					if (!text) return;
+					return pushMessage("user", [{ type: "text", text: this.translate("session.importedOrphanToolResult", { tool: String(extra.toolName ?? "tool"), text }) }], {}, timestampValue);
+				}
+			}
 			const id = this.makeId(sessionId, sequence++);
 			const ts = timestampValue || new Date().toISOString();
 			await pushEntry({
@@ -206,7 +243,7 @@ export class ClaudeSessionImporter {
 
 		await pushEntry({
 			type: `${this.sourceKey}_import`,
-			version: 1,
+			version: CLAUDE_IMPORT_CONVERTER_VERSION,
 			sourceSessionId: sessionId,
 			sourcePath: session.sourcePath,
 			sourceMtime: session.sourceMtime,
@@ -228,6 +265,11 @@ export class ClaudeSessionImporter {
 
 		// 转换消息
 		for await (const entry of entries) {
+			// 只转换活链上的记录（见 collectLiveChainIds）；无 uuid 的记录不属于任何分支，保留
+			if (chainIds) {
+				const uuid = entry.uuid;
+				if (typeof uuid === "string" && uuid && !chainIds.has(uuid)) continue;
+			}
 			// 跳过非消息类型
 			if (entry.type === "file-history-snapshot") continue;
 			if (entry.type === "system" && entry.subtype === "turn_duration") continue;
@@ -324,6 +366,43 @@ export class ClaudeSessionImporter {
 	}
 
 	/**
+	 * 重建「活链」uuid 集合：源 transcript 是 uuid/parentUuid **树**——rewind、
+	 * 中断后续聊都从旧节点分叉，废弃分支仍按时间混在文件里。线性转换会把废弃
+	 * 分支插进 tool_use ↔ tool_result 之间，产物必然含孤儿 toolResult（严格供应商 400）。
+	 *
+	 * 以文件中**最后一条**带 uuid 的非 sidechain 记录为活链尖端，沿 parentUuid 回溯到根；
+	 * sidechain（Task 子代理）记录是支线转录，绝不作为尖端——否则文件恰好以子代理
+	 * 记录结尾时主链会被整体丢弃。整份文件都是 sidechain 时（独立的 subagents/*.jsonl
+	 * 也会作为会话导入）退化为以最后一条记录为尖端。无 uuid 信息时返回 null
+	 * （兼容无 uuid 的第三方同构文件）。
+	 */
+	private async collectLiveChainIds(entries: AsyncIterable<Record<string, any>>): Promise<Set<string> | null> {
+		const parentById = new Map<string, string | null>();
+		let tipId: string | null = null;
+		let anyTipId: string | null = null;
+		for await (const entry of entries) {
+			const uuid = typeof entry.uuid === "string" && entry.uuid ? entry.uuid : null;
+			if (!uuid) continue;
+			parentById.set(uuid, typeof entry.parentUuid === "string" && entry.parentUuid ? entry.parentUuid : null);
+			if (entry.isSidechain) {
+				anyTipId = uuid;
+			} else {
+				tipId = uuid;
+			}
+		}
+		const effectiveTip = tipId ?? anyTipId;
+		if (!effectiveTip) return null;
+		const chain = new Set<string>();
+		let cursor: string | null = effectiveTip;
+		// has(cursor) 防环：损坏文件的循环引用不会死循环，已收集的部分链仍是有效活链
+		while (cursor && !chain.has(cursor)) {
+			chain.add(cursor);
+			cursor = parentById.get(cursor) ?? null;
+		}
+		return chain;
+	}
+
+	/**
 	 * Claude Code 的 user 行可能是纯文本，也可能是 content[]：
 	 * tool_result 块（喂回模型的工具输出）必须写成 pi toolResult，不能 String(数组) 变成用户气泡。
 	 */
@@ -336,10 +415,7 @@ export class ClaudeSessionImporter {
 		}
 		if (!Array.isArray(raw)) return;
 		const userContent: Array<Record<string, unknown>> = [];
-		const flushUser = async () => {
-			if (userContent.length === 0) return;
-			await pushMessage("user", userContent.splice(0), {}, entry.timestamp);
-		};
+		const toolResults: Array<Record<string, unknown>> = [];
 		for (const item of raw) {
 			if (typeof item === "string") {
 				if (item.trim()) userContent.push({ type: "text", text: item });
@@ -348,8 +424,7 @@ export class ClaudeSessionImporter {
 			if (!item || typeof item !== "object") continue;
 			const record = item as Record<string, unknown>;
 			if (record.type === "tool_result") {
-				await flushUser();
-				await this.pushClaudeToolResult(record, entry, pushMessage);
+				toolResults.push(record);
 				continue;
 			}
 			if (record.type === "text") {
@@ -360,7 +435,14 @@ export class ClaudeSessionImporter {
 			const image = tryImportedImageBlock(record);
 			userContent.push(image ?? importedUnknownBlockAsText(record));
 		}
-		await flushUser();
+		// tool_result 必须先于本 entry 的文本写出：OpenAI completions 里 tool 消息只能
+		// 紧跟带 tool_calls 的 assistant，user 文本插在前面会把结果挤成孤儿（严格供应商 400）。
+		for (const record of toolResults) {
+			await this.pushClaudeToolResult(record, entry, pushMessage);
+		}
+		if (userContent.length > 0) {
+			await pushMessage("user", userContent, {}, entry.timestamp);
+		}
 	}
 
 	private async pushClaudeToolResult(payload: Record<string, any>, entry: Record<string, any>, pushMessage: ClaudePushMessage) {
