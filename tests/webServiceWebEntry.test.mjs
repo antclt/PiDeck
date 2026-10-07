@@ -30,11 +30,7 @@ test("rewriteWebHtmlAssetUrls: href/src 的 ./xxx 改写为 /xxx", () => {
 });
 
 test("rewriteWebHtmlAssetUrls: 已是绝对路径或其他属性不动，普通正文文本不受影响", () => {
-	const html = [
-		`<script type="module" src="/assets/already-absolute.js"></script>`,
-		`<img data-src="./keep-data-src.png">`,
-		`<p>说明：./assets 也会出现在正文里，不能被误改。</p>`,
-	].join("\n");
+	const html = [`<script type="module" src="/assets/already-absolute.js"></script>`, `<img data-src="./keep-data-src.png">`, `<p>说明：./assets 也会出现在正文里，不能被误改。</p>`].join("\n");
 	const out = rewriteWebHtmlAssetUrls(html);
 	assert.match(out, /src="\/assets\/already-absolute\.js"/);
 	assert.match(out, /data-src="\.\/keep-data-src\.png"/);
