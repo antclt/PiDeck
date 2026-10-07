@@ -9,9 +9,7 @@ import { resolve } from "node:path";
 import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
 
 const load = createTsSandbox();
-const { sessionFromPath, sessionPath } = load(
-	resolve(import.meta.dirname, "../src/renderer/src/web/webSessionRoute.ts"),
-);
+const { sessionFromPath, sessionPath } = load(resolve(import.meta.dirname, "../src/renderer/src/web/webSessionRoute.ts"));
 
 test("sessionFromPath: 解析 /s/<id> 并返回会话 id", () => {
 	assert.equal(sessionFromPath("/s/ab12cd34"), "ab12cd34");
@@ -53,10 +51,7 @@ test("sessionPath ↔ sessionFromPath 往返一致（合法 id 集合）", () =>
 });
 
 test("源码契约：WebChatApp 接线了 boot 恢复 / pushState 同步 / popstate 三段路由逻辑", () => {
-	const src = readFileSync(
-		resolve(import.meta.dirname, "../src/renderer/src/web/WebChatApp.tsx"),
-		"utf8",
-	);
+	const src = readFileSync(resolve(import.meta.dirname, "../src/renderer/src/web/WebChatApp.tsx"), "utf8");
 	assert.match(src, /routeRestoredRef/);
 	assert.match(src, /window\.history\.pushState/);
 	assert.match(src, /window\.history\.replaceState/);
@@ -65,10 +60,7 @@ test("源码契约：WebChatApp 接线了 boot 恢复 / pushState 同步 / popst
 });
 
 test("源码契约：服务端静态映射对无扩展名路径回落 web.html，/s/* 无需服务端路由", () => {
-	const src = readFileSync(
-		resolve(import.meta.dirname, "../src/main/web/WebServiceManager.ts"),
-		"utf8",
-	);
+	const src = readFileSync(resolve(import.meta.dirname, "../src/main/web/WebServiceManager.ts"), "utf8");
 	// 无扩展名 → web.html（SPA fallback）；带扩展名的静态资源走文件直出
 	assert.match(src, /web\.html/);
 });

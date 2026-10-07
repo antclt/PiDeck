@@ -3,7 +3,7 @@ import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type
 import { ChevronUp, Clock, Share, SquarePen, Trash } from "lucide-react";
 import { atom, useAtomValue, useSetAtom } from "jotai";
 import { selectAtom } from "jotai/utils";
-import type { AgentBackend, ImageContent } from "../../../../../shared/types";
+import type { AgentBackend, ChatMessage, ImageContent } from "../../../../../shared/types";
 import { liveTextActiveBySessionAtom, newTurnCollapseTickBySessionIdAtomFamily, runStepsVisibleMemoryBySessionIdAtomFamily, type RunStepsVisibleMemoryEntry } from "../../../atoms/session-atoms";
 import { turnFlowSettingsAtom } from "../../../atoms/app-ui-atoms";
 import { t } from "../../../i18n";

@@ -101,6 +101,10 @@ type SessionDisplayEntry = {
 	firstKeptEntryId?: string;
 	timestamp?: string;
 	tokensBefore?: number;
+	/** session 头条目的 parentSession 指针：pi fork 产物只存增量，历史在祖先文件里。 */
+	parentSession?: string;
+	/** fork 链合并索引中，本条目 offset 所属的文件（祖先条目非宿主文件）。 */
+	chainHostPath?: string;
 };
 
 type SessionDisplayIndex = {
@@ -118,6 +122,11 @@ type SessionDisplayIndex = {
 	metadata: SessionHistoryMetadata;
 	/** 构建时文件是否以完整行（\n）结尾：false 时禁止增量追加（旧最后一行可能被拼接污染） */
 	endsWithNewline: boolean;
+	/**
+	 * fork 链合并索引的祖先版本指纹（含祖先自身的链）：缓存命中时逐个 stat 校验，
+	 * 祖先文件变化（罕见：supersede 后旧会话冻结）则回退全量重建。
+	 */
+	chainSources?: Array<{ hostPath: string; size: number; mtimeMs: number }>;
 };
 
 export type SessionArchiveData = {
@@ -1196,11 +1205,19 @@ export class SessionHistoryReader {
 		return candidates.find((entry) => entry.id === matches[0].meta?.entryId);
 	}
 
+	/** 链深上限：重发/编辑可能连续 fork 多代；超深降级单文件读（丢祖先前缀，不阻塞打开）。 */
+	private static readonly MAX_CHAIN_DEPTH = 8;
+
 	private async getSessionDisplayIndex(sessionPath: string): Promise<SessionDisplayIndex> {
+		// toHostPath 只在 inner 解析一次：调用次数是可观测契约（诊断测试按调用序断言）
+		return this.getSessionDisplayIndexInner(sessionPath, 0, new Set());
+	}
+
+	private async getSessionDisplayIndexInner(sessionPath: string, depth: number, visited: Set<string>): Promise<SessionDisplayIndex> {
 		const hostPath = this.deps.toHostPath(sessionPath);
 		const version = await stat(hostPath);
 		const cached = this.sessionDisplayIndexes.get(hostPath);
-		if (cached && cached.size === version.size && cached.mtimeMs === version.mtimeMs) {
+		if (cached && cached.size === version.size && cached.mtimeMs === version.mtimeMs && (await this.chainSourcesUnchanged(cached))) {
 			this.sessionDisplayIndexes.delete(hostPath);
 			this.sessionDisplayIndexes.set(hostPath, cached);
 			return cached;
@@ -1258,11 +1275,71 @@ export class SessionHistoryReader {
 		);
 		const endsWithNewline = scan.endsWithNewline;
 		const activeBranch = this.traceActiveBranch(entries, lastEntryId);
-		const index = this.finishIndex(hostPath, version, entries, activeBranch, endsWithNewline);
+		const index = await this.mergeForkChain(hostPath, version, this.finishIndex(hostPath, version, entries, activeBranch, endsWithNewline), depth, visited);
 		this.sessionDisplayIndexes.delete(hostPath);
 		this.sessionDisplayIndexes.set(hostPath, index);
 		this.trimDisplayIndexCache();
 		return index;
+	}
+
+	/**
+	 * pi fork 产物（forkFromUserMessage/重发/编辑/回退 checkpoint 的子会话）只落增量：
+	 * header 带 parentSession 指针，会话正文在祖先文件里。这里把祖先活动分支的消息条目
+	 * 前置合并进子会话索引（条目标 chainHostPath，字节物化按各自文件读），时间线/分页/
+	 * 全文检索因此能看到完整历史；模型上下文本就由 pi 运行时沿链重建，此处只补展示层。
+	 * 祖先缺失（被清理）或链超深/成环时降级为单文件索引：丢前缀但不阻塞打开。
+	 */
+	private async mergeForkChain(hostPath: string, version: { size: number; mtimeMs: number }, own: SessionDisplayIndex, depth: number, visited: Set<string>): Promise<SessionDisplayIndex> {
+		const parentSession = [...own.entries.values()].find((entry) => entry.type === "session")?.parentSession;
+		if (!parentSession || depth >= SessionHistoryReader.MAX_CHAIN_DEPTH) return own;
+		const parentHostPath = this.deps.toHostPath(parentSession);
+		// 自引用（损坏头）与已访问路径都直接降级单文件读；深度上限兕底
+		if (parentHostPath === hostPath || visited.has(parentHostPath)) return own;
+		visited.add(parentHostPath);
+		let parent: SessionDisplayIndex;
+		try {
+			parent = await this.getSessionDisplayIndexInner(parentSession, depth + 1, visited);
+		} catch (error) {
+			void this.deps.logger?.info("session-history", "Fork parent session unavailable; reading child without ancestor prefix", {
+				hostPath,
+				parentSession,
+				error: error instanceof Error ? error.message : String(error),
+			});
+			return own;
+		}
+		// 祖先只取消息条目：设置类条目（model_change/system 等）子文件有自己的同 id 拷贝，
+		// 重复注入只会污染条目表与分支回溯。
+		const inherited = parent.activeMessageEntries.map((entry) => ({ ...entry, chainHostPath: parent.hostPath }));
+		const entries = new Map<string, SessionDisplayEntry>();
+		for (const entry of inherited) entries.set(entry.id, entry);
+		for (const entry of own.entries.values()) entries.set(entry.id, entry);
+		const activeBranch = [...inherited, ...own.activeBranch];
+		return {
+			hostPath: own.hostPath,
+			size: version.size,
+			mtimeMs: version.mtimeMs,
+			hasCompaction: activeBranch.some((entry) => entry.type === "compaction"),
+			entries,
+			activeBranch,
+			activeMessageEntries: activeBranch.filter((entry) => entry.type === "message" && entry.hasMessage),
+			metadata: deriveSessionHistoryMetadata(activeBranch),
+			endsWithNewline: own.endsWithNewline,
+			chainSources: [...(parent.chainSources ?? []), { hostPath: parent.hostPath, size: parent.size, mtimeMs: parent.mtimeMs }],
+		};
+	}
+
+	/** 合并索引缓存命中时校验祖先文件指纹：祖先变化（罕见，supersede 后旧文件冻结）则回退重建。 */
+	private async chainSourcesUnchanged(index: SessionDisplayIndex): Promise<boolean> {
+		if (!index.chainSources?.length) return true;
+		for (const source of index.chainSources) {
+			try {
+				const sourceVersion = await stat(source.hostPath);
+				if (sourceVersion.size !== source.size || sourceVersion.mtimeMs !== source.mtimeMs) return false;
+			} catch {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	/**
@@ -1342,6 +1419,8 @@ export class SessionHistoryReader {
 				firstKeptEntryId: typeof parsed.firstKeptEntryId === "string" ? parsed.firstKeptEntryId : undefined,
 				timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : undefined,
 				tokensBefore: typeof parsed.tokensBefore === "number" ? parsed.tokensBefore : undefined,
+				// fork 子会话的 session 头携带 parentSession 指针：链式索引靠它找祖先文件
+				parentSession: type === "session" ? (readString(parsed, "parentSession") ?? undefined) : undefined,
 			};
 		} catch {
 			return null;
@@ -1396,7 +1475,9 @@ export class SessionHistoryReader {
 				// 抽查旧索引首/末条目的 offset/byteLength 是否仍能解析出相同 id：
 				// 纯 append 保证 [0, oldSize) 字节不变 → 校验通过；整文件重写必然破坏末条目（或首条目）
 				// 的旧 offset 内容 → 返回 null，调用方回退全量重建。
-				const entriesInOrder = [...cached.entries.values()];
+				// 合并索引（fork 链）首条目可能来自祖先文件：探针只取宿主自身条目，
+				// 否则用宿主句柄读祖先 offset 必然 id 不匹配 → 每次都误判回退全量重建。
+				const entriesInOrder = [...cached.entries.values()].filter((entry) => !entry.chainHostPath);
 				const probes = [entriesInOrder[0], entriesInOrder[entriesInOrder.length - 1]];
 				for (const probe of probes) {
 					if (!probe) continue;
@@ -1459,7 +1540,9 @@ export class SessionHistoryReader {
 		const pivotIndex = current ? cached.activeBranch.findIndex((entry) => entry.id === current.id) : -1;
 		const baseBranch = pivotIndex >= 0 ? cached.activeBranch.slice(0, pivotIndex + 1) : cached.activeBranch;
 		const nextBranch = [...baseBranch, ...chain];
-		return this.finishIndex(hostPath, version, entries, nextBranch, scan.endsWithNewline);
+		// finishIndex 不感知 fork 链：增量追加不改变祖先集，保留合并索引的链指纹，
+		// 否则缓存命中路径会跳过祖先文件变化校验。
+		return { ...this.finishIndex(hostPath, version, entries, nextBranch, scan.endsWithNewline), chainSources: cached.chainSources };
 	}
 
 	/** 索引 LRU 上限裁剪：超出上限丢最旧（Map 迭代序 = 插入序）。 */
@@ -1498,7 +1581,22 @@ export class SessionHistoryReader {
 	private async readIndexedLines(hostPath: string, entries: SessionDisplayEntry[]): Promise<string[]> {
 		const lines = new Array<string>(entries.length).fill("");
 		if (entries.length === 0) return lines;
-		const handle = await open(hostPath, "r");
+		// fork 链合并索引里，祖先条目的 offset 属于祖先文件（chainHostPath）：
+		// 按连续段分组、各自开句柄读，段内沿用并发+字节预算，段序 = 条目序。
+		let cursor = 0;
+		while (cursor < entries.length) {
+			const sourcePath = entries[cursor].chainHostPath ?? hostPath;
+			let end = cursor + 1;
+			while (end < entries.length && (entries[end].chainHostPath ?? hostPath) === sourcePath) end += 1;
+			await this.readIndexedLinesFrom(sourcePath, entries, cursor, end, lines);
+			cursor = end;
+		}
+		return lines;
+	}
+
+	/** 读取 [start, end) 区间的条目字节（同一源文件）；结果按原下标写回 lines。 */
+	private async readIndexedLinesFrom(sourcePath: string, entries: SessionDisplayEntry[], start: number, end: number, lines: string[]): Promise<void> {
+		const handle = await open(sourcePath, "r");
 		const readOne = async (index: number): Promise<void> => {
 			const entry = entries[index];
 			if (entry.oversized) return;
@@ -1507,12 +1605,12 @@ export class SessionHistoryReader {
 			lines[index] = buffer.subarray(0, bytesRead).toString("utf8").replace(/\r$/, "");
 		};
 		try {
-			let cursor = 0;
-			while (cursor < entries.length) {
+			let cursor = start;
+			while (cursor < end) {
 				// 组一批：并发数上限 + 字节预算，两者先到者为准
 				const batch: number[] = [];
 				let batchBytes = 0;
-				while (cursor + batch.length < entries.length && batch.length < SessionHistoryReader.INDEXED_READ_CONCURRENCY) {
+				while (cursor + batch.length < end && batch.length < SessionHistoryReader.INDEXED_READ_CONCURRENCY) {
 					const entry = entries[cursor + batch.length];
 					if (batch.length > 0 && batchBytes + entry.byteLength > SessionHistoryReader.INDEXED_READ_BATCH_BYTES) break;
 					batchBytes += entry.byteLength;
@@ -1524,7 +1622,6 @@ export class SessionHistoryReader {
 		} finally {
 			await handle.close();
 		}
-		return lines;
 	}
 
 	private async readIndexedSessionMessages(hostPath: string, entries: SessionDisplayEntry[]): Promise<unknown[]> {

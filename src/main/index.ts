@@ -963,7 +963,7 @@ type AgentSessionReplacementResult = {
 	[key: string]: unknown;
 };
 
-async function replaceAgentSession(agentId: string, replace: () => Promise<unknown>, options?: { markForked?: boolean }): Promise<AgentSessionReplacementResult & { targetSessionId?: string }> {
+async function replaceAgentSession(agentId: string, replace: () => Promise<unknown>, options?: { markForked?: boolean; markSuperseded?: boolean }): Promise<AgentSessionReplacementResult & { targetSessionId?: string }> {
 	const originBinding = sessionRuntimeCoordinator.getRuntimeBinding(agentId);
 	const originEntry = originBinding ? sessionCatalog.get(originBinding.sessionId) : undefined;
 	const originKey = originEntry?.filePath
@@ -1023,6 +1023,12 @@ async function replaceAgentSession(agentId: string, replace: () => Promise<unkno
 				// switch_session / 历史会话换绑等不标记。
 				forked: options?.markForked,
 			});
+			// 重发/编辑 fork 化替换：旧会话记录打 supersededBy 标记（列表过滤用），
+			// 旧 JSONL 保留可恢复。放在 resolveTargetSessionId 内部：若标记写入失败，
+			// replaceBoundRuntime 的错误路径会走 canRestoreOrigin 回滚绑定（fail-closed）。
+			if (options?.markSuperseded && originEntry && originEntry.id !== target.id) {
+				await sessionCatalog.markSuperseded(originEntry.id, target.id);
+			}
 			return target.id;
 		},
 		canRestoreOrigin: () => {
