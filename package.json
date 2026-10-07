@@ -225,6 +225,10 @@
         "to": "pi-auth-host.mjs"
       },
       {
+        "from": "resources/pi-enhance-host.mjs",
+        "to": "pi-enhance-host.mjs"
+      },
+      {
         "from": "resources/pi-ai-catalog.json",
         "to": "pi-ai-catalog.json"
       },

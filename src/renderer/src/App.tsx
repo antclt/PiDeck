@@ -38,6 +38,7 @@ import {
 	busySendDeliveryAtom,
 	hiddenModulesAtom,
 	imageGenConfigAtom,
+	enhanceModelAtom,
 	dshRuntimeStatusAtom,
 	openSettingsAtom,
 	openAutomationModalAtom,
@@ -234,6 +235,7 @@ export function App() {
 	const removeSessionState = useSetAtom(removeSessionStateAtom);
 	const removeSessionComposerState = useSetAtom(removeSessionComposerStateAtom);
 	const setImageGenConfig = useSetAtom(imageGenConfigAtom);
+	const setEnhanceModel = useSetAtom(enhanceModelAtom);
 	const currentSessionIdRef = useRef<string | undefined>(currentSessionId);
 	currentSessionIdRef.current = currentSessionId;
 	const openSessionRequestRef = useRef(0);
@@ -1342,6 +1344,7 @@ export function App() {
 			.then((next) => {
 				setSettings(next);
 				setSettingsLoaded(true);
+				setEnhanceModel(next.enhanceModel ?? null);
 				piUpdate.setCustomPiPath(next.customPiPath ?? "");
 				if (!Object.values(next.externalEditors).some((editor) => editor.command)) {
 					void api.editors
