@@ -77,7 +77,7 @@ function extractText(message) {
  * 跑一次补全。delta 事件把 text_delta 累积后逐条转发；终止事件只发一条。
  * streamOptions.signal 驱动取消；reason=aborted 归为 errorKind "aborted"。
  */
-async function runComplete(runtime, normalizeContext, command) {
+async function runComplete(runtime, command) {
 	const { id, provider, modelId, systemPrompt, userText } = command;
 	const controller = new AbortController();
 	activeRuns.set(id, controller);
@@ -90,10 +90,15 @@ async function runComplete(runtime, normalizeContext, command) {
 			return;
 		}
 
-		const context = normalizeContext({
-			systemPrompt,
-			messages: [{ role: "user", content: userText, timestamp: Date.now() }],
-		});
+		// pi-ai 的 normalizeContext（compat 导出）在部分安装形态下不可达（报
+		// "normalizeContext is not a function"），这里按其实现内联展开：systemPrompt →
+		// 首条 system 消息（无 tools 时不带 toolsAdded），user 消息随其后。
+		const context = {
+			messages: [
+				...(systemPrompt ? [{ role: "system", content: systemPrompt, timestamp: 0 }] : []),
+				{ role: "user", content: userText, timestamp: Date.now() },
+			],
+		};
 
 		const stream = runtime.streamSimple(model, context, { signal: controller.signal });
 		let accumulated = "";
@@ -177,7 +182,7 @@ async function main() {
 				if (activeRuns.has(command.id)) return;
 				// started 必须先于 runComplete 内部的同步 send（getModel 同步可能立刻报错）。
 				send({ type: "started", id: command.id });
-				void runComplete(runtime, sdk.normalizeContext, command);
+				void runComplete(runtime, command);
 			} else if (command?.cmd === "cancel") {
 				if (typeof command.id === "string" && command.id) {
 					activeRuns.get(command.id)?.abort();
