@@ -12,7 +12,10 @@ const { SessionHistoryReader } = loadTsCommonJs("src/main/pi/SessionHistoryReade
 function textFromContent(content) {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
-	return content.filter((item) => item?.type === "text").map((item) => item.text ?? "").join("");
+	return content
+		.filter((item) => item?.type === "text")
+		.map((item) => item.text ?? "")
+		.join("");
 }
 
 function createReader(pathMap) {
@@ -78,14 +81,7 @@ test("missing fork ancestor degrades to child-only timeline instead of failing",
 	const directory = await mkdtemp(join(tmpdir(), "pideck-history-forkchain-missing-"));
 	try {
 		const childPath = join(directory, "child.jsonl");
-		await writeFile(
-			childPath,
-			[
-				JSON.stringify({ id: "session-child", type: "session", parentSession: join(directory, "deleted-parent.jsonl") }),
-				messageEntry("c-user-1", "session-child", "user", "GAMMA"),
-			].join("\n"),
-			"utf8",
-		);
+		await writeFile(childPath, [JSON.stringify({ id: "session-child", type: "session", parentSession: join(directory, "deleted-parent.jsonl") }), messageEntry("c-user-1", "session-child", "user", "GAMMA")].join("\n"), "utf8");
 		const messages = await createReader(new Map([["/root/child.jsonl", childPath]])).readSessionDisplayMessages("/root/child.jsonl");
 		assert.deepEqual(
 			Array.from(messages, (message) => message.text),
@@ -101,14 +97,7 @@ test("cyclic parentSession pointers terminate via visited guard", async () => {
 	try {
 		const childPath = join(directory, "child.jsonl");
 		// 互相指向的病态文件（手工构造/损坏）：不得死循环
-		await writeFile(
-			childPath,
-			[
-				JSON.stringify({ id: "session-child", type: "session", parentSession: "/root/child.jsonl" }),
-				messageEntry("c-user-1", "session-child", "user", "GAMMA"),
-			].join("\n"),
-			"utf8",
-		);
+		await writeFile(childPath, [JSON.stringify({ id: "session-child", type: "session", parentSession: "/root/child.jsonl" }), messageEntry("c-user-1", "session-child", "user", "GAMMA")].join("\n"), "utf8");
 		const messages = await createReader(new Map([["/root/child.jsonl", childPath]])).readSessionDisplayMessages("/root/child.jsonl");
 		assert.deepEqual(
 			Array.from(messages, (message) => message.text),
