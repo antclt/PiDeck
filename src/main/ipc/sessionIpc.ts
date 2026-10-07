@@ -570,6 +570,11 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			// mergeScanned 的 liveness 豁免同口径）。
 			.filter((record) => {
 				if (!record.filePath || record.backend === "dsh" || record.filePath.startsWith("\\\\")) return true;
+				// WSL 条目豁免：catalog 存的是 Linux 侧路径（/home/...），宿主 existsSync 恒
+				// false，按死链滤掉会把 WSL 用户的全部会话从列表里抹掉（2026-10-07 升级
+				// 0.7.9 反馈：58 条会话一条不少躺在 catalog，列表却全空）。
+				// 与 mergeScanned 清理闸（environment=wsl 跳过）同口径。
+				if (record.environment === "wsl") return true;
 				if (sessionRuntimeCoordinator.hasLiveRuntime(record.id)) return true;
 				return existsSync(record.filePath);
 			});
