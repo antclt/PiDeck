@@ -4801,6 +4801,7 @@ export const zhCN = {
 	"message.deleteReloadPrompt": "删除后该消息将从会话中移除，后续对话内容保留。此操作不可撤销。确定继续？",
 	"message.deleteFailed": "删除失败",
 	"message.resendFailed": "重发失败",
+	"message.resendSendFailedRolledBack": "重发未送出：模型拒绝了该请求。此消息之后的历史已回滚到重发点（原会话已自动备份），可直接重试。",
 	"message.anonymousEditUnsupported": "匿名会话不保存记录，无法编辑消息",
 	"message.anonymousDeleteUnsupported": "匿名会话不保存记录，无法删除消息",
 	"message.historyStopToEditTitle": "停止后编辑",

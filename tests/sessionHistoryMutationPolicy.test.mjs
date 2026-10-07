@@ -86,3 +86,13 @@ test("imagegen draft resend: restore prompt into composer instead of truncating 
 test("persisted flag wins over everything: file-backed session never uses anonymous paths", () => {
 	expectPath(resolve("edit", { persisted: true, isImageGenSession: true }), { path: "catalog", live: true });
 });
+
+test("resend rollback hint only for definite send failure (not unknown delivery)", () => {
+	const { shouldShowResendRollbackHint } = policy;
+	// 确定失败：历史已截断但没发出去 → 必须补状态说明（时间线变短有解释、有备份可重试）
+	assert.equal(shouldShowResendRollbackHint(false), true);
+	// 发送成功：无任何异常状态，不弹
+	assert.equal(shouldShowResendRollbackHint(true), false);
+	// 投递未知（IPC/网络断开）：消息可能已送达，不能断言「未送出」，不弹
+	assert.equal(shouldShowResendRollbackHint("unknown"), false);
+});

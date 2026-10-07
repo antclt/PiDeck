@@ -29,3 +29,14 @@ export function resolveHistoryMutationPath(options: { kind: HistoryMutationKind;
 	}
 	return { path: "unsupported-anonymous", reason: kind };
 }
+
+/**
+ * 重发发送结果 → 是否要补「已回滚」说明 toast。
+ *
+ * submitPromptSnapshot 返回 true=已接受、"unknown"=投递未知（可能已送达，不能断言「未送出」）、
+ * false=确定失败。仅确定失败时提示：重发与普通发送不同，发送前已经截断了该消息之后的历史，
+ * 只弹 API 错误用户看不出时间线为什么变短、数据是否丢失（「重发坏了」类反馈多源于此）。
+ */
+export function shouldShowResendRollbackHint(delivered: boolean | "unknown"): boolean {
+	return delivered === false;
+}

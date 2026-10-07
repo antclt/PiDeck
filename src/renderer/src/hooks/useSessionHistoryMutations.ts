@@ -7,8 +7,9 @@ import { cacheSessionMessagesAtom, setSessionHistoryMutationOverlayAtom, setSess
 import { requireSessionCommand, sessionCommandFailureToast } from "../utils/sessionCommands";
 import { setSessionQuotesAtom } from "../atoms/composer-atoms";
 import { extractQuoteTokens, pruneUnreferencedQuotes, rehydrateDraftFromMessage } from "../components/session/composer/quoteChip";
-import { resolveHistoryMutationPath } from "../utils/sessionHistoryMutationPolicy";
+import { resolveHistoryMutationPath, shouldShowResendRollbackHint } from "../utils/sessionHistoryMutationPolicy";
 import { sessionHistoryUnavailableState } from "../utils/sessionHistoryAvailability";
+import type { NoticeKind } from "../utils/notice";
 import { messageEntryId } from "../utils/sessionCommands";
 
 type ConfirmConfig = {
@@ -27,7 +28,7 @@ export interface SessionHistoryMutationsDeps {
 	isSessionRuntimeLive: (sessionId: string) => boolean;
 	showConfirm: (config: ConfirmConfig) => void;
 	clearConfirm: () => void;
-	showToast: (message: string, duration?: number) => void;
+	showToast: (message: string, duration?: number, kind?: NoticeKind) => void;
 	translateAgentErrorMessage: (message: string) => string;
 	submitPromptSnapshot: (sessionId: string, message: string, images?: ImageContent[]) => Promise<boolean | "unknown">;
 	openReplacedRuntimeSession: (projectId: string | undefined, targetSessionId: string | undefined) => Promise<void>;
@@ -290,7 +291,12 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
 					});
 					if (!snapshot) return;
 					showOverlay(sessionId, "activating");
-					await depsRef.current.submitPromptSnapshot(sessionId, snapshot.text, snapshot.images);
+					const delivered = await depsRef.current.submitPromptSnapshot(sessionId, snapshot.text, snapshot.images);
+					if (shouldShowResendRollbackHint(delivered)) {
+						// 发送失败前历史已截断：仅靠 submitPromptSnapshot 内部的 API 错误 toast，
+						// 用户看不出时间线为什么变短（「重发坏了」类反馈多源于此），补状态说明。
+						latest.showToast(t("message.resendSendFailedRolledBack"), undefined, "warning");
+					}
 				} catch (error) {
 					failToast(t("message.resendFailed"), error);
 				} finally {

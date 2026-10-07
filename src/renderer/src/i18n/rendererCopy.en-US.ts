@@ -4817,6 +4817,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"message.deleteReloadPrompt": "Deleting will remove this message from the session (following messages are kept). This cannot be undone. Continue?",
 	"message.deleteFailed": "Delete failed",
 	"message.resendFailed": "Resend failed",
+	"message.resendSendFailedRolledBack": "Resend not delivered: the model rejected the request. History after this message was rolled back to the resend point (the original session was backed up automatically) - just retry.",
 	"message.anonymousEditUnsupported": "Anonymous sessions don't persist records, so messages cannot be edited",
 	"message.anonymousDeleteUnsupported": "Anonymous sessions don't persist records, so messages cannot be deleted",
 	"message.historyStopToEditTitle": "Stop to edit",
