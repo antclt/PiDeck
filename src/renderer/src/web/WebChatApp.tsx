@@ -24,6 +24,7 @@ import { WebTimeline } from "./WebTimeline";
 import { WebComposer } from "./WebComposer";
 import { WebDshToolsPanel } from "./WebDshToolsPanel";
 import { WebBranchBar } from "./WebBranchBar";
+import { sessionFromPath, sessionPath } from "./webSessionRoute";
 import { WebWorkspaceDrawer } from "./WebWorkspaceDrawer";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui-shadcn/alert-dialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui-shadcn/dialog";
@@ -160,6 +161,41 @@ export function WebChatApp() {
 	// PWA：SW 注册一次（失败静默降级，不影响页面功能）
 	useEffect(() => {
 		registerWebServiceWorker();
+	}, []);
+
+	// ── 会话路由（URL ↔ activeSessionId）──
+	// 刷新/分享/回退能回到同一会话；首次恢复前不回写 URL，避免落地页加载瞬间把 /s/<id> 冲掉。
+	const routeRestoredRef = useRef(false);
+	useEffect(() => {
+		if (routeRestoredRef.current) return;
+		const id = sessionFromPath(window.location.pathname);
+		if (!id) {
+			routeRestoredRef.current = true;
+			return;
+		}
+		// 列表未拉到（空且未确认连通）时等待下一轮；确认后无此会话 → 死链，回根路径
+		if (state.sessions.some((session) => session.id === id)) {
+			setActiveSessionId(id);
+			routeRestoredRef.current = true;
+		} else if (state.sessions.length > 0 || connected) {
+			window.history.replaceState(null, "", "/");
+			routeRestoredRef.current = true;
+		}
+	}, [state.sessions, connected]);
+	// 选中变化 → pushState（popstate 驱动的变化路径已一致，自然短路不回写）
+	useEffect(() => {
+		if (!routeRestoredRef.current) return;
+		const desired = sessionPath(activeSessionId);
+		if (window.location.pathname === desired) return;
+		window.history.pushState(null, "", desired);
+	}, [activeSessionId]);
+	// 浏览器回退/前进：按 URL 恢复选中
+	useEffect(() => {
+		const onPopState = () => {
+			setActiveSessionId(sessionFromPath(window.location.pathname));
+		};
+		window.addEventListener("popstate", onPopState);
+		return () => window.removeEventListener("popstate", onPopState);
 	}, []);
 
 	// SSE 断线恢复：手机锁屏/切网/后台节流断流后，回前台/网络恢复/error 态时
