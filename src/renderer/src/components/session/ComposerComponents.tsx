@@ -914,7 +914,7 @@ export function ModelPicker(props: {
 			) : (
 				<>
 					{favorites.length > 0 && (
-						<CommandPickerGroup id="favorites" label={t("app.modelFavorites")} count={favorites.length}>
+						<CommandPickerGroup id="favorites" label={t("app.modelFavorites")} count={favorites.length} countText={t("config.count.models", { count: favorites.length })}>
 							{favorites.map((model) => renderModelRow(model, `favorites/${model.provider}/${model.id}`))}
 						</CommandPickerGroup>
 					)}
@@ -924,7 +924,7 @@ export function ModelPicker(props: {
 						</CommandPickerGroup>
 					))}
 					{hiddenModelList.length > 0 && props.onToggleHideModel && (
-						<CommandPickerGroup id="hidden-models" label={t("app.modelHiddenSection")} count={hiddenModelList.length} countText={t("app.modelHiddenCount", { count: hiddenModelList.length })}>
+						<CommandPickerGroup id="hidden-models" label={t("app.modelHiddenSection")} count={hiddenModelList.length} countText={t("config.count.models", { count: hiddenModelList.length })}>
 							{hiddenModelList.map((model) => {
 								const modelKey = `${model.provider}/${model.id}`;
 								// 与可见行同一套文案规则（provider/名称，单行），只是整体弱化显示。
