@@ -13,6 +13,7 @@ import { homedir } from "node:os";
 import type { McpConfigFile, McpConfigLayer, McpConfigLayerKind, McpConfigSnapshot, McpProbeResult, McpServerDefinition, McpServerListItem, McpServerTransport } from "../../shared/types/mcp";
 import { resolveExposureAlias, resolveExposureAliases } from "../../shared/mcpExposure";
 import { createProjectFileReadBoundary, resolveProjectFileReadPath, type ProjectFileReadBoundary } from "../files/projectFileAccess";
+import { revisionOf, writePiConfigFile } from "./piConfigFileStore";
 
 const MCP_DOCS_URL = "https://earendil-works.github.io/pi/docs/mcp";
 const HTTP_PROBE_TIMEOUT_MS = 8_000;
@@ -527,6 +528,7 @@ export async function loadMcpConfigSnapshot(piAgentDir: string, projectPath?: st
 	let writableFile: McpConfigFile = { mcpServers: {} };
 	let writableRaw = `${JSON.stringify({ mcpServers: {} }, null, 2)}
 `;
+	let writableExists = false;
 	let writablePath = join(piAgentDir, "mcp.json");
 	let writableError: string | undefined;
 	let projectBoundary: ProjectFileReadBoundary | undefined;
@@ -547,6 +549,7 @@ export async function loadMcpConfigSnapshot(piAgentDir: string, projectPath?: st
 		if (isWritable) {
 			writablePath = layer.path;
 			writableError = result.error;
+			writableExists = result.exists;
 			writableRaw =
 				result.exists && result.raw
 					? result.raw
@@ -564,15 +567,49 @@ export async function loadMcpConfigSnapshot(piAgentDir: string, projectPath?: st
 	}
 
 	const merged = mergeMcpServersWithErrors(loaded, writablePath);
+	// 已存 OAuth 凭据的 server 名：读 mcp-auth.json 的键名（mcp__<名>|<url>，历史版本是裸 URL 键）。
+	// 只读键名，凭据值永不进内存/日志。
+	let oauthCredentialNames: string[] = [];
+	try {
+		const authRaw = await readFile(join(piAgentDir, "mcp-auth.json"), "utf8");
+		const parsedAuth: unknown = JSON.parse(authRaw);
+		if (parsedAuth && typeof parsedAuth === "object" && !Array.isArray(parsedAuth)) {
+			const keys = Object.keys(parsedAuth as Record<string, unknown>);
+			const byUrl = new Map(loaded.flatMap((layer) => Object.entries(layer.file.mcpServers ?? {}).map(([name, def]) => [typeof def.url === "string" ? def.url : "", name])));
+			const knownNames = new Set(loaded.flatMap((layer) => Object.keys(layer.file.mcpServers ?? {})));
+			oauthCredentialNames = [...new Set(keys.map((key) => (key.startsWith("mcp__") ? key.slice(5).split("|")[0] : (byUrl.get(key) ?? ""))).filter((name) => name && knownNames.has(name)))].sort();
+		}
+	} catch {
+		// 没有 mcp-auth.json / 解析失败：视为没有任何已存凭据。
+	}
+	// 可写层以下各层定义过的名字：项目层删除覆盖时，UI 据此区分「回退为继承」与「消失」。
+	const lowerLayerNames = [...new Set(loaded.filter((layer) => layer.kind !== writableScope).flatMap((layer) => Object.keys(layer.file.mcpServers ?? {})))].sort();
 	return {
 		writablePath,
 		writableFile,
 		writableRaw,
 		writableError,
+		revision: revisionOf(writableRaw, writableExists),
+		oauthCredentialNames,
+		lowerLayerNames,
 		layers,
 		servers: merged.servers,
 		invalidServers: merged.invalidServers,
 	};
+}
+
+/**
+ * 把可视化表单的可写层写回 mcp.json（乐观锁）。
+ *
+ * 锁内重读 + revision 比对：不匹配 = 文件被外部（pi/手改/其它实例）改过，拒绝覆盖并
+ * 返回 conflict，让页面重新加载。mutate 只替换 mcpServers 键，顶层未知字段保留。
+ */
+export async function saveMcpConfigFile(path: string, file: McpConfigFile, options: { expectedRevision?: string } = {}): Promise<{ ok: boolean; error?: string; conflict?: boolean; revision?: string }> {
+	const validationError = validateMcpConfigFile(file);
+	if (validationError) return { ok: false, error: validationError };
+	const result = await writePiConfigFile(path, (current) => ({ ...current, mcpServers: file.mcpServers }), { expectedRevision: options.expectedRevision });
+	if (!result.ok) return { ok: false, error: result.error, conflict: result.conflict, revision: result.revision };
+	return { ok: true, revision: result.revision };
 }
 
 export function upsertWritableServer(writable: McpConfigFile, name: string, definition: McpServerDefinition): McpConfigFile {

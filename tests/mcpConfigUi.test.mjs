@@ -50,6 +50,29 @@ test("exposure 别名归一必须落到表单展示：别名住 shared，渲染�
 	assert.match(tab, /const base = editingDisplayDef\.toolExposure \?\? \{\};/);
 });
 
+test("McpTab 保存必须带乐观锁 revision，冲突时提示并重载", () => {
+	const tab = readFileSync("src/renderer/src/config/McpTab.tsx", "utf8");
+	const sharedTypes = readFileSync("src/shared/types/mcp.ts", "utf8");
+	// 快照带可写层内容哈希，保存时回传比对（P1-1：外部手改不被草稿静默覆盖）
+	assert.match(sharedTypes, /\/\*\*[\s\S]*?\*\/\n\trevision: string;/);
+	assert.match(tab, /api\.config\.saveMcp\(toSave, scope, snapshot\?\.revision\)/);
+	// 冲突分支：提示用户并以磁盘为准重新加载
+	assert.match(tab, /if \(result\.conflict\) \{[\s\S]{0,240}?t\("config\.mcp\.conflict"\)[\s\S]{0,80}?await load\(\);/);
+});
+
+test("登出按凭据显示；auth.provider 获得全局创建入口（项目层只读）", () => {
+	const tab = readFileSync("src/renderer/src/config/McpTab.tsx", "utf8");
+	// C：快照解析已存凭据 server 名（读 mcp-auth.json 键名），登出按钮据此显示
+	// D：开关仅全局（项目层被 pi 校验拒绝）；供应商数据来自 auth.json 键名，凭据值不进渲染层
+	// 认证方式选择器（deriveAuthMode + knownProviders）在连接与认证段内
+	assert.match(tab, /deriveAuthMode\(editingDef\)/);
+	assert.match(tab, /patchEditing\(\{ auth: \{ provider: knownProviders\[0\] \} \}\)/);
+	assert.match(tab, /api\.config\n?\s*\.getAuth\(\)|getAuth: \(\) => Promise/);
+	// 项目作用域：认证方式选择器仅远程 HTTP + 全局；项目层只读展示
+	assert.match(tab, /transport === "http" && !isProjectScope \? \([\s\S]{0,200}?config\.mcp\.auth\.method/);
+	assert.match(tab, /transport === "http" && isProjectScope && usesProviderAuth\(editingDef\) \?/);
+});
+
 test("dirty-mark helpers include config:mcp", () => {
 	const { dirtyKeysClearedByReload, ALL_CONFIG_DIRTY_KEYS } = loadTsCommonJs("src/renderer/src/config/configDirtyMarks.ts");
 	assert.deepEqual(new Set(dirtyKeysClearedByReload("mcp")), new Set(["config:mcp", "config:raw"]));

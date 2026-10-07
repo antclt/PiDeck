@@ -16,6 +16,7 @@ import { Button } from "../components/ui-shadcn/button";
 import { Switch } from "../components/ui-shadcn/switch";
 import type { PiBuiltinExtension, PiResourceConfigSummary, PiResourceScope } from "../../../shared/types/piResources";
 import type { ResourceScope } from "./resourceScopeModel";
+import { isProjectUntrustedError } from "./projectResourceErrors";
 
 type PiResourcesApi = {
 	piResourcesSummary: (scope?: PiResourceScope) => Promise<PiResourceConfigSummary>;
@@ -66,7 +67,7 @@ export function PiBuiltinExtensionsPanel(props: {
 		} catch (caught) {
 			if (version !== readVersion.current) return;
 			setSnapshot(null);
-			setError(caught instanceof Error ? caught.message : String(caught));
+			setError(isProjectUntrustedError(caught) ? t("config.projectUntrusted.notice") : caught instanceof Error ? caught.message : String(caught));
 		} finally {
 			if (version === readVersion.current) setLoading(false);
 		}
@@ -95,9 +96,9 @@ export function PiBuiltinExtensionsPanel(props: {
 			const result = await api().piResourcesSetBuiltin({ scope, name, enabled, expectedRevision: summary.revision });
 			if (version !== scopeVersion.current) return;
 			if (!result.ok) {
-				// 冲突先刷新再显示错误，避免 load 清空保存失败提示。
+				// Refresh conflicts before displaying the error, while retaining the trust-gate guidance.
 				if (result.error?.includes("changed on disk")) await load();
-				if (version === scopeVersion.current) setError(result.error ?? t("config.piResources.saveFailed"));
+				if (version === scopeVersion.current) setError(isProjectUntrustedError(result.error) ? t("config.projectUntrusted.notice") : (result.error ?? t("config.piResources.saveFailed")));
 				return;
 			}
 			await load();
@@ -105,7 +106,7 @@ export function PiBuiltinExtensionsPanel(props: {
 			props.onChanged?.();
 			showNotice(t("config.piResources.saved"), 2500);
 		} catch (caught) {
-			if (version === scopeVersion.current) setError(caught instanceof Error ? caught.message : String(caught));
+			if (version === scopeVersion.current) setError(isProjectUntrustedError(caught) ? t("config.projectUntrusted.notice") : caught instanceof Error ? caught.message : String(caught));
 		} finally {
 			if (version === scopeVersion.current) {
 				pendingToggle.current = false;
