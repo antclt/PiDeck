@@ -131,8 +131,9 @@ export function WebComposer(props: {
 					aria-label={t("web.promptPlaceholder")}
 				/>
 				{attachError ? <div className="px-3 text-micro text-danger">{t("web.imageAttachFailed")}</div> : null}
-				<div className="flex shrink-0 items-center justify-between gap-2 px-3 pb-2.5">
-					<span className="flex min-w-0 items-center gap-0.5">
+				{/* 工具行：左侧工具区横向滚动（对齐桌面 composer-bottom-left 范式），发送按钮钉在滚动区外永不被压 */}
+				<div className="flex shrink-0 items-center gap-2 px-3 pb-2.5">
+					<span className="flex min-w-0 flex-1 flex-nowrap items-center gap-0.5 overflow-x-auto overflow-y-hidden [scrollbar-width:none]">
 						<input
 							ref={fileInputRef}
 							type="file"
