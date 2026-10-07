@@ -5429,7 +5429,6 @@ export const enUS: Record<TranslationKey, string> = {
 	"web.themeToggle": "Toggle theme",
 	"web.globalMenu": "Global menu",
 	"web.installApp": "Install app",
-	"web.takePhoto": "Take photo",
 	"web.streamRecovered": "Network recovered — messages synced from history",
 	"web.streamRecoveryFailed": "Sync failed. Check your connection and retry",
 	"web.searchTitle": "Search messages",
