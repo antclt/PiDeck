@@ -51,6 +51,8 @@ export interface FloatingBallState {
 	alwaysOnTop: boolean;
 	snapToEdge: boolean;
 	expandTarget: "mini" | "compact";
+	/** 是否显示运行中任务数量角标（跟随设置热更）。 */
+	showRunningBadge: boolean;
 	activeCount: number;
 	runningCount: number;
 	recentTitles: string[];
@@ -98,6 +100,7 @@ export class FloatingController {
 			alwaysOnTop: settings.floatingBallAlwaysOnTop ?? true,
 			snapToEdge: settings.floatingBallSnapToEdge ?? true,
 			expandTarget: settings.floatingBallExpandTarget ?? "mini",
+			showRunningBadge: settings.floatingBallShowRunningBadge ?? true,
 			activeCount: 0,
 			runningCount: 0,
 			recentTitles: [],
@@ -205,12 +208,13 @@ export class FloatingController {
 		this.hide();
 	}
 
-	/** 设置变更热更（alwaysOnTop/snapToEdge/expandTarget）。 */
+	/** 设置变更热更（alwaysOnTop/snapToEdge/expandTarget/showRunningBadge）。 */
 	onSettingsChanged(): void {
 		const settings = this.deps.settingsStore.get();
 		this.state.alwaysOnTop = settings.floatingBallAlwaysOnTop;
 		this.state.snapToEdge = settings.floatingBallSnapToEdge;
 		this.state.expandTarget = settings.floatingBallExpandTarget;
+		this.state.showRunningBadge = settings.floatingBallShowRunningBadge ?? true;
 		this.state.locale = normalizeMainProcessLocale(settings.language);
 		if (this.win && !this.win.isDestroyed()) {
 			this.win.setAlwaysOnTop(settings.floatingBallAlwaysOnTop, "screen-saver");

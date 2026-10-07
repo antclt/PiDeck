@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAtomValue, useSetAtom, useStore } from "jotai";
-import { sessionRecordByIdAtomFamily, sessionRecordsAtom, sessionTabIdsAtom } from "../atoms";
-import { openPermanentSessionTab, openPreviewSessionTab, reorderSessionTabs, togglePinSessionTab, type SessionTabOpenMode } from "../utils/sessionTabs";
+import { currentSessionIdAtom, sessionRecordByIdAtomFamily, sessionRecordsAtom, sessionTabIdsAtom } from "../atoms";
+import { cycleSessionTab, openPermanentSessionTab, openPreviewSessionTab, reorderSessionTabs, togglePinSessionTab, type SessionTabOpenMode } from "../utils/sessionTabs";
 import { buildSplitLayoutFromDrop, edgeToOrientation, insertRootPaneFromDrop, nestSplitPaneFromDrop, replaceSplitPaneFromDrop, resolveSplitAfterClose, resolveSplitHostSessionId, splitLayoutSessionIds, type SessionSplitDropTarget, type SessionSplitLayout } from "../utils/sessionSplitEdge";
+import { desktopApi } from "../desktopApi";
 import type { FocusTargetPayload } from "../../../shared/types";
 
 const PINNED_TABS_STORAGE_KEY = "pideck.pinnedSessionTabIds";
@@ -339,6 +340,21 @@ export function useSessionWorkspaceChrome(options: { currentSessionId: string | 
 		},
 		[store],
 	);
+
+	// Ctrl(+Shift)+Tab 循环切换会话标签页：主进程 before-input-event 命中后广播
+	// appShortcutTriggered，这里按 Tab 顺序算目标并复用 selectTab 只切焦点（不改
+	// 预览/Pin 状态）。从 store 取实时快照，避免订阅闭包拿到过期的 Tab 列表。
+	// 声明在 selectTab 之后：useCallback 的 deps 同步求值，先引用会撞 TDZ。
+	const cycleTabsOnShortcut = useCallback(
+		(id: string) => {
+			if (id !== "cycleSessionTabs" && id !== "cycleSessionTabsReverse") return;
+			const target = cycleSessionTab(store.get(sessionTabIdsAtom), store.get(currentSessionIdAtom), id === "cycleSessionTabs" ? 1 : -1);
+			if (target) selectTab(target);
+		},
+		[store, selectTab],
+	);
+
+	useEffect(() => desktopApi.app.onShortcutTriggered(cycleTabsOnShortcut), [cycleTabsOnShortcut]);
 
 	const dropSplit = useCallback(
 		(draggedSessionId: string, target: SessionSplitDropTarget) => {

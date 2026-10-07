@@ -18,7 +18,7 @@
  * 见 parseAccelerator。纯函数实现，node --test 可直接单测，不依赖 electron 运行时。
  */
 
-export type ShortcutId = "openSettings" | "toggleDevTools" | "openNewSession" | "openSearch" | "openCommandPalette" | "cycleModel" | "cycleThinking" | "openQuickMessages" | "toggleVoiceRecording" | "zoomIn" | "zoomOut";
+export type ShortcutId = "openSettings" | "toggleDevTools" | "openNewSession" | "openSearch" | "openCommandPalette" | "cycleModel" | "cycleThinking" | "openQuickMessages" | "toggleVoiceRecording" | "cycleSessionTabs" | "cycleSessionTabsReverse" | "zoomIn" | "zoomOut";
 
 /** 设置页分组：general=通用（普通用户常用），dev=开发调试 */
 export type ShortcutGroupId = "general" | "dev";
@@ -111,6 +111,24 @@ export const SHORTCUT_DEFS: readonly ShortcutDef[] = [
 		// 开始/停止语音录音（需先在设置里开启语音输入）。功能键可裸按且全平台无
 		// 文本编辑/浏览器既有含义，避让已占用区（Ctrl+M/T、Ctrl+Shift+M 等）。
 		defaultAccelerator: { darwin: "F9", other: "F9" },
+	},
+	{
+		id: "cycleSessionTabs",
+		group: "general",
+		labelKey: "settings.shortcuts.cycleSessionTabsLabel",
+		descriptionKey: "settings.shortcuts.cycleSessionTabsDesc",
+		// 浏览器/IDE 惯例：Ctrl+Tab 切到下一个会话标签页，到头回绕。macOS 的 ⌘Tab 被
+		// 系统（应用切换器）占用，跟随 Chromium 系惯例用 Control+Tab（⌃⇥）。输入框聚焦时
+		// 仍然生效：Ctrl+Tab 在文本编辑里无既有含义（Tab 本身的焦点移动不受影响，修饰键在）。
+		defaultAccelerator: { darwin: "Ctrl+Tab", other: "Ctrl+Tab" },
+	},
+	{
+		id: "cycleSessionTabsReverse",
+		group: "general",
+		labelKey: "settings.shortcuts.cycleSessionTabsReverseLabel",
+		descriptionKey: "settings.shortcuts.cycleSessionTabsReverseDesc",
+		// cycleSessionTabs 的反向（上一个标签页），与浏览器 Ctrl+Shift+Tab 惯例成对。
+		defaultAccelerator: { darwin: "Ctrl+Shift+Tab", other: "Ctrl+Shift+Tab" },
 	},
 	{
 		id: "zoomIn",

@@ -92,7 +92,9 @@ export function buildLanes({ testConcurrency, e2e }) {
 		{
 			id: "unit-tests",
 			label: `单元测试（--test-concurrency=${testConcurrency}）`,
-			timeoutMs: 20 * MIN,
+			// 多 agent 并行开发时机器可能同时胞多个测试进程，全量套件会显著变慢；
+			// 实测空闲机 ~4min，抢资源时 >20min，这里放宽到 30min 减少误杀。
+			timeoutMs: 30 * MIN,
 			steps: [
 				{
 					label: "node --test tests/**",

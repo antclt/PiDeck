@@ -352,18 +352,11 @@ export function AppShell(props: AppShellProps) {
 
 	if (props.compactContent) {
 		// 小窗的标题栏/导航归 MiniOverlaySurface；任务模式继续复用工作台窗口控制。
+		// 边界感不在这里画：透明窗口里的自绘描边/投影被窗口矩形裁掉且颜色过淡，
+		// 改由系统接管（DWM 投影 + Win11 圆角），与任务模式同款观感。
 		const isMiniOverlayMode = new URLSearchParams(window.location.search).get("mini-overlay") === "1";
 		return (
-			<div
-				className={[
-					"wechat-shell quick-task-shell bg-bg-app [[data-bg-image=on]_&]:bg-transparent",
-					isMiniOverlayMode ? "mini-overlay-shell overflow-hidden rounded-xl shadow-[inset_0_0_0_1px_var(--color-border-strong),0_8px_32px_#0000002e]" : "",
-					useNativeTitleBar ? "" : "custom-titlebar-enabled",
-					!useNativeTitleBar && platform === "darwin" ? "mac-custom-titlebar" : "",
-				]
-					.filter(Boolean)
-					.join(" ")}
-			>
+			<div className={["wechat-shell quick-task-shell bg-bg-app [[data-bg-image=on]_&]:bg-transparent", isMiniOverlayMode ? "mini-overlay-shell overflow-hidden" : "", useNativeTitleBar ? "" : "custom-titlebar-enabled", !useNativeTitleBar && platform === "darwin" ? "mac-custom-titlebar" : ""].filter(Boolean).join(" ")}>
 				{!isMiniOverlayMode ? (
 					<AppHeader
 						useNativeTitleBar={useNativeTitleBar}

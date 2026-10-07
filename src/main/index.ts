@@ -368,7 +368,7 @@ import { ReplyActionRuleStore } from "./replyactions/ReplyActionRuleStore";
 import { QUICK_MESSAGES_DEFAULT_RESOURCE_NAME, QUICK_MESSAGES_FILE_NAME, REPLY_ACTIONS_DEFAULT_RESOURCE_NAME, REPLY_ACTIONS_FILE_NAME } from "../shared/quickMessages";
 import { getPiAiCatalogIndex, lookupPiAiCatalogEntry, setPiAiCatalogUserDataDir } from "./pi/piAiBuiltinCatalog";
 import { PiAiCatalogUpdater } from "./pi/PiAiCatalogUpdater";
-import { fetchModelList, refreshModelCatalogIfStale, refreshModelList } from "./pi/modelListCache";
+import { fetchModelList, refreshModelCatalogIfStale, refreshModelList, getCachedModelList } from "./pi/modelListCache";
 import { registerFilesIpc } from "./ipc/filesIpc";
 import { registerClipboardIpc } from "./ipc/clipboardIpc";
 import { registerShellMenuIpc } from "./ipc/shellMenuIpc";
@@ -649,6 +649,8 @@ function sendSessionRuntimeEnvelope(event: SessionRuntimeEvent): void {
 	if (window && !window.isDestroyed()) {
 		window.webContents.send(ipcChannels.sessionsRuntimeEvent, event);
 	}
+	// 极简浮窗是独立渲染进程，流式事件单独转发，否则会话页停在打开时的快照。
+	miniOverlayWindow?.sendRuntimeEvent(event);
 }
 
 function emitSessionRuntimeEvent(agentId: string, sourceChannel: string, payload: unknown): boolean {
@@ -730,9 +732,9 @@ async function createAnonymousSession(input: CreateAnonymousSessionInput): Promi
 	try {
 		const [settingsResult, modelsResult] = await Promise.all([configManager.getSettingsConfig(), configManager.getModelsConfig()]);
 		// 渲染层/引导页显式传入的模型（欢迎页偏好等）也可能指向已删除条目：
-		// 校验仍存在于 models.json，不存在则交给 launchDefaults 按配置默认 →
+		// 校验仍存在（models.json ∪ pi 目录，与选择器可选范围一致），不存在则交给 launchDefaults 按配置默认 →
 		// enabledModels → lastUsed 的顺序兜底。
-		if (model && !isModelInModelsConfig(modelsResult.parsed, model)) {
+		if (model && !isModelInModelsConfig(modelsResult.parsed, model, getCachedModelList())) {
 			model = undefined;
 		}
 		// 缺省填充与引导页展示共用同一解析器（launchDefaults，含「最后一次使用」优先）：
@@ -741,6 +743,8 @@ async function createAnonymousSession(input: CreateAnonymousSessionInput): Promi
 			backend: "pi",
 			settings: settingsResult.parsed,
 			models: modelsResult.parsed,
+			// 与 createDraft 同源：存在性校验含 pi 目录（冷缓存 null 时退回仅 models.json）。
+			catalogModels: getCachedModelList(),
 			lastUsedModel: settingsStore.get().lastUsedModel,
 		});
 		if (!model) {
@@ -1334,8 +1338,9 @@ function focusMainWindow() {
 	}
 	mainWindow.show();
 	mainWindow.focus();
-	// 主窗口回来时关闭极简浮窗（避免两个窗口并存）
-	miniOverlayWindow?.hide();
+	// 主窗口回来时默认关闭极简浮窗（避免两个窗口并存）；
+	// 「固定在最上方」开启（含未显式设置的默认 true）时浮窗常驻，只响应手动隐藏/收起。
+	if (settingsStore.get().floatingBallAlwaysOnTop === false) miniOverlayWindow?.hide();
 	if (process.platform === "win32") {
 		// Windows 前置窗口用「临时置顶再取消」hack 抢前台（直接 focus 可能被前台锁拦截）。
 		// 必须原样还原用户置顶状态，否则会把用户手动置顶的窗口取消置顶；
@@ -1675,6 +1680,20 @@ function configureBrowserPanelWebviewHost(window: BrowserWindow): void {
 				event.preventDefault();
 				return;
 			}
+			// Ctrl(+Shift)+Tab 在网页内无既有含义（浏览器里它就是切宿主 tab），
+			// 内置浏览器里同样切 PiDeck 会话标签页。
+			if (isShortcutInput("cycleSessionTabs", input)) {
+				event.preventDefault();
+				if (!window || window.isDestroyed()) return;
+				window.webContents.send(ipcChannels.appShortcutTriggered, "cycleSessionTabs");
+				return;
+			}
+			if (isShortcutInput("cycleSessionTabsReverse", input)) {
+				event.preventDefault();
+				if (!window || window.isDestroyed()) return;
+				window.webContents.send(ipcChannels.appShortcutTriggered, "cycleSessionTabsReverse");
+				return;
+			}
 			if (!isShortcutInput("toggleDevTools", input)) return;
 			event.preventDefault();
 			toggleMainWindowDevTools(window);
@@ -1978,6 +1997,18 @@ async function createWindow() {
 		if (isShortcutInput("toggleVoiceRecording", input)) {
 			event.preventDefault();
 			mainWindow.webContents.send(ipcChannels.appShortcutTriggered, "toggleVoiceRecording");
+			return;
+		}
+		// Ctrl(+Shift)+Tab 循环切换会话标签页：Tab 顺序在渲染层 atoms，主进程只命中广播。
+		// 输入框聚焦时仍生效（浏览器同款惯例，Ctrl+Tab 无文本编辑含义）。
+		if (isShortcutInput("cycleSessionTabs", input)) {
+			event.preventDefault();
+			mainWindow.webContents.send(ipcChannels.appShortcutTriggered, "cycleSessionTabs");
+			return;
+		}
+		if (isShortcutInput("cycleSessionTabsReverse", input)) {
+			event.preventDefault();
+			mainWindow.webContents.send(ipcChannels.appShortcutTriggered, "cycleSessionTabsReverse");
 			return;
 		}
 		if (isShortcutInput("toggleDevTools", input)) {

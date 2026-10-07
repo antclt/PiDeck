@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rename as renameFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rename as renameFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
@@ -33,6 +33,19 @@ function summary(overrides = {}) {
 		source: "pi",
 		...overrides,
 	};
+}
+
+/**
+ * 物化一个最小合法会话文件（首行 type 头），返回正斜杠绝对路径。
+ * mergeScanned 的外部删除清理（21c1c056b 起）会把「磁盘不存在且无存活运行时」的
+ * pi 条目当外部删除剔掉——涉及「扫描条目需跨多次 mergeScanned / 重载存活」的
+ * 用例必须用真实文件；假路径会被清理逻辑误删，导致 ID 断言失败。
+ */
+async function realSessionFile(dir, relativePath) {
+	const absolute = join(dir, relativePath);
+	await mkdir(dirname(absolute), { recursive: true });
+	await writeFile(absolute, '{"type":"session"}\n', "utf8");
+	return absolute.replace(/\\/g, "/");
 }
 
 test("does not restore an unsubmitted draft after the catalog is reloaded", async () => {
@@ -466,15 +479,19 @@ test("keeps a draft desktop session ID after Pi assigns a file path", async () =
 			model: { provider: "openai", modelId: "gpt-test" },
 			thinkingLevel: "high",
 		});
+		// 真实文件 + 大小写变体：外部删除清理要求文件存在，同时保留「同一文件不同
+		// 大小写/分隔符写法必须折叠到同一 originKey」的原始意图（Windows CI 文件系统
+		// 大小写不敏感，existsSync 对变体路径同样成立）。
+		const realPath = await realSessionFile(dir, "Example.jsonl");
 		await catalog.attachRuntime({
 			sessionId: draft.id,
-			filePath: "C:\\Sessions\\Example.jsonl",
+			filePath: realPath.replace("Example.jsonl", "Example.jsonl").replace(/\//g, "\\"),
 			piSessionId: "pi-123",
 		});
 		const records = await catalog.mergeScanned("project-1", [
 			summary({
-				filePath: "c:/sessions/example.jsonl",
-				id: "c:/sessions/example.jsonl",
+				filePath: realPath.toLowerCase(),
+				id: realPath.toLowerCase(),
 			}),
 		]);
 		assert.equal(records.length, 1);
@@ -566,16 +583,19 @@ test("folds a scanner-created duplicate into the original draft ID", async () =>
 			title: "New session",
 			environment: "native",
 		});
+		// 外部删除清理会剔掉磁盘不存在的条目：raced.jsonl 必须真实存在
+		const racedPath = await realSessionFile(dir, "raced.jsonl");
 		const scanned = summary({
-			filePath: "C:/sessions/raced.jsonl",
-			id: "C:/sessions/raced.jsonl",
+			filePath: racedPath,
+			id: racedPath,
 		});
 		const duringRace = await catalog.mergeScanned("project-1", [scanned]);
 		assert.equal(duringRace.length, 2);
 
 		await catalog.attachRuntime({
 			sessionId: draft.id,
-			filePath: "C:/sessions/raced.jsonl",
+			// 同一文件的反斜杠写法：attach 与扫描路径形式不同也必须折叠到同一条目
+			filePath: racedPath.replace(/\//g, "\\"),
 			piSessionId: "pi-raced",
 		});
 		const afterAttach = await catalog.mergeScanned("project-1", [scanned]);
@@ -758,13 +778,16 @@ test("maps scanned child parent paths to desktop session IDs and survives reload
 	try {
 		const catalog = new SessionCatalog(filePath);
 		await catalog.load();
+		// 真实文件：重载后的第二次 mergeScanned 不会把条目当外部删除剔掉
+		const parentPath = await realSessionFile(dir, "parent.jsonl");
+		const childPath = await realSessionFile(dir, "parent/child.jsonl");
 		const first = await catalog.mergeScanned("project-1", [
-			summary({ filePath: "C:/sessions/parent.jsonl", id: "C:/sessions/parent.jsonl", name: "Parent" }),
+			summary({ filePath: parentPath, id: parentPath, name: "Parent" }),
 			summary({
-				filePath: "C:/sessions/parent/child.jsonl",
-				id: "C:/sessions/parent/child.jsonl",
+				filePath: childPath,
+				id: childPath,
 				name: "Child",
-				parentSessionPath: "c:/sessions/parent.jsonl",
+				parentSessionPath: parentPath.toLowerCase(),
 			}),
 		]);
 		const parent = first.find((record) => record.title === "Parent");
@@ -775,12 +798,12 @@ test("maps scanned child parent paths to desktop session IDs and survives reload
 		const reloaded = new SessionCatalog(filePath);
 		await reloaded.load();
 		const second = await reloaded.mergeScanned("project-1", [
-			summary({ filePath: "c:/sessions/parent.jsonl", id: "c:/sessions/parent.jsonl", name: "Parent" }),
+			summary({ filePath: parentPath.toLowerCase(), id: parentPath.toLowerCase(), name: "Parent" }),
 			summary({
-				filePath: "c:/sessions/parent/child.jsonl",
-				id: "c:/sessions/parent/child.jsonl",
+				filePath: childPath,
+				id: childPath,
 				name: "Child",
-				parentSessionPath: "C:/sessions/parent.jsonl",
+				parentSessionPath: parentPath,
 			}),
 		]);
 		assert.equal(second.find((record) => record.title === "Parent")?.id, parent?.id);
@@ -1040,13 +1063,16 @@ test("attachRuntime absolutizes a relative pi sessionFile and folds the scanned 
 	const { SessionCatalog } = loadCatalog();
 	const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-"));
 	try {
-		const catalog = new SessionCatalog(join(dir, "sessions.json"), {}, absolutePathResolver("D:\\Project\\PiDeck"));
+		const catalog = new SessionCatalog(join(dir, "sessions.json"), {}, absolutePathResolver(dir));
 		await catalog.load();
 		const draft = await catalog.createDraft({
 			projectId: "project-1",
 			title: "PiDeck agent",
 			environment: "native",
 		});
+		// 解析基点用真实临时目录，且文件真实存在——否则外部删除清理会把折叠后的
+		// draft 条目当外部删除剔掉（扫描器只能看到真实存在的文件）。
+		const absoluteScanned = await realSessionFile(dir, ".pi/sessions/2026-08-08T10-47-19-239Z_abc.jsonl");
 
 		// pi 返回相对 cwd 的 sessionFile（sessionDir 配置为 ".pi/sessions"）
 		await catalog.attachRuntime({
@@ -1057,8 +1083,8 @@ test("attachRuntime absolutizes a relative pi sessionFile and folds the scanned 
 
 		// 后台扫描发现同一文件的绝对路径（修复前这里会产生第二条记录）
 		const scanned = summary({
-			id: "D:\\Project\\PiDeck\\.pi\\sessions\\2026-08-08T10-47-19-239Z_abc.jsonl",
-			filePath: "D:\\Project\\PiDeck\\.pi\\sessions\\2026-08-08T10-47-19-239Z_abc.jsonl",
+			id: absoluteScanned,
+			filePath: absoluteScanned,
 			name: "从用户输入推断的会话名",
 		});
 		const records = await catalog.mergeScanned("project-1", [scanned]);
@@ -1190,17 +1216,21 @@ test("nameless scanned summaries keep existing titles and use the file stem for 
 	try {
 		const catalog = new SessionCatalog(join(dir, "sessions.json"));
 		await catalog.load();
+		// 外部删除清理要求文件真实存在，否则条目被剔、ID 每轮变
+		const knownPath = await realSessionFile(dir, "known.jsonl");
+		await realSessionFile(dir, "2026-08-08T10-47-19-239Z_abc.jsonl");
+		await realSessionFile(dir, "2026-08-08T11-00-00-000Z_def.jsonl");
 		const [named] = await catalog.mergeScanned("project-1", [
 			summary({
-				filePath: "C:/sessions/known.jsonl",
-				id: "C:/sessions/known.jsonl",
+				filePath: knownPath,
+				id: knownPath,
 				name: "Saved title",
 			}),
 		]);
 		const [kept] = await catalog.mergeScanned("project-1", [
 			summary({
-				filePath: "C:/sessions/known.jsonl",
-				id: "C:/sessions/known.jsonl",
+				filePath: knownPath,
+				id: knownPath,
 				name: undefined,
 				preview: "",
 				messageCount: 0,
@@ -1212,8 +1242,8 @@ test("nameless scanned summaries keep existing titles and use the file stem for 
 
 		const records = await catalog.mergeScanned("project-1", [
 			summary({
-				filePath: "C:/sessions/2026-08-08T10-47-19-239Z_abc.jsonl",
-				id: "C:/sessions/2026-08-08T10-47-19-239Z_abc.jsonl",
+				filePath: knownPath.replace("known.jsonl", "2026-08-08T10-47-19-239Z_abc.jsonl"),
+				id: knownPath.replace("known.jsonl", "2026-08-08T10-47-19-239Z_abc.jsonl"),
 				name: undefined,
 			}),
 		]);
@@ -1224,17 +1254,17 @@ test("nameless scanned summaries keep existing titles and use the file stem for 
 		// 扫描器若仍把 sessionName=文件名带进 summary.name，也不能盖掉用户已有标题。
 		const afterStemName = await catalog.mergeScanned("project-1", [
 			summary({
-				filePath: "C:/sessions/known.jsonl",
-				id: "C:/sessions/known.jsonl",
+				filePath: knownPath,
+				id: knownPath,
 				name: "2026-08-08T10-47-19-239Z_abc",
 			}),
 		]);
-		assert.equal(afterStemName.find((record) => record.filePath === "C:/sessions/known.jsonl")?.title, "Saved title");
+		assert.equal(afterStemName.find((record) => record.filePath === knownPath)?.title, "Saved title");
 
 		const withStemName = await catalog.mergeScanned("project-1", [
 			summary({
-				filePath: "C:/sessions/2026-08-08T11-00-00-000Z_def.jsonl",
-				id: "C:/sessions/2026-08-08T11-00-00-000Z_def.jsonl",
+				filePath: knownPath.replace("known.jsonl", "2026-08-08T11-00-00-000Z_def.jsonl"),
+				id: knownPath.replace("known.jsonl", "2026-08-08T11-00-00-000Z_def.jsonl"),
 				name: "2026-08-08T11-00-00-000Z_def",
 			}),
 		]);
@@ -1286,6 +1316,9 @@ test("mergeScanned drops legacy subagent-artifacts entries", async () => {
 	const filePath = join(dir, "sessions.json");
 	try {
 		const now = Date.now();
+		// goodEntry 指向真实存在的文件——外部删除清理只剔磁盘缺失的条目；
+		// 脱条目仍用假路径（位于 subagent-artifacts 目录，按路径规则剔除，无需存在）。
+		const goodPath = await realSessionFile(dir, "real.jsonl");
 		const dirtyEntry = {
 			id: "dirty-artifact",
 			projectId: "project-1",
@@ -1305,8 +1338,8 @@ test("mergeScanned drops legacy subagent-artifacts entries", async () => {
 			source: "pi",
 			environment: "native",
 			status: "active",
-			originKey: "pi:native:c:/users/x/.pi/agent/sessions/--c--repo--/real.jsonl",
-			filePath: "C:\\Users\\X\\.pi\\agent\\sessions\\--C--repo--\\real.jsonl",
+			originKey: `pi:native:${goodPath.toLowerCase()}`,
+			filePath: goodPath,
 			createdAt: now,
 			updatedAt: now,
 		};
@@ -1341,23 +1374,29 @@ test("removeWithDescendants drops nested subagent catalog entries with the paren
 	try {
 		const catalog = new SessionCatalog(filePath);
 		await catalog.load();
+		// 真实文件：后续多次 mergeScanned 的外部删除清理不能把这些条目剔掉
+		const parentPath = await realSessionFile(dir, "parent.jsonl");
+		const childPath = await realSessionFile(dir, "parent/child.jsonl");
+		const nestedPath = await realSessionFile(dir, "parent/child/nested.jsonl");
+		const otherPath = await realSessionFile(dir, "other.jsonl");
+		const keepPath = await realSessionFile(dir, "other-project/keep.jsonl");
 		const records = await catalog.mergeScanned("project-1", [
-			summary({ filePath: "C:/sessions/parent.jsonl", id: "C:/sessions/parent.jsonl", name: "Parent" }),
+			summary({ filePath: parentPath, id: parentPath, name: "Parent" }),
 			summary({
-				filePath: "C:/sessions/parent/child.jsonl",
-				id: "C:/sessions/parent/child.jsonl",
+				filePath: childPath,
+				id: childPath,
 				name: "Child",
-				parentSessionPath: "c:/sessions/parent.jsonl",
+				parentSessionPath: parentPath.toLowerCase(),
 			}),
 			summary({
-				filePath: "C:/sessions/parent/child/nested.jsonl",
-				id: "C:/sessions/parent/child/nested.jsonl",
+				filePath: nestedPath,
+				id: nestedPath,
 				name: "Grandchild",
-				parentSessionPath: "C:/sessions/parent/child.jsonl",
+				parentSessionPath: childPath,
 			}),
-			summary({ filePath: "C:/sessions/other.jsonl", id: "C:/sessions/other.jsonl", name: "Unrelated" }),
+			summary({ filePath: otherPath, id: otherPath, name: "Unrelated" }),
 		]);
-		await catalog.mergeScanned("project-2", [summary({ filePath: "C:/other-project/keep.jsonl", id: "C:/other-project/keep.jsonl", name: "Other project" })]);
+		await catalog.mergeScanned("project-2", [summary({ filePath: keepPath, id: keepPath, name: "Other project" })]);
 		const parent = records.find((record) => record.title === "Parent");
 		const child = records.find((record) => record.title === "Child");
 		const grandchild = records.find((record) => record.title === "Grandchild");
@@ -1377,7 +1416,7 @@ test("removeWithDescendants drops nested subagent catalog entries with the paren
 
 		const oneId = await catalog.remove(unrelated.id);
 		assert.equal(oneId, true, "remove() remains a single-id operation");
-		await catalog.mergeScanned("project-1", [summary({ filePath: "C:/sessions/other.jsonl", id: "C:/sessions/other.jsonl", name: "Unrelated" })]);
+		await catalog.mergeScanned("project-1", [summary({ filePath: otherPath, id: otherPath, name: "Unrelated" })]);
 		const restoredUnrelated = catalog.listEntries().find((entry) => entry.title === "Unrelated");
 		assert.ok(restoredUnrelated, "unrelated session can still be merged back");
 

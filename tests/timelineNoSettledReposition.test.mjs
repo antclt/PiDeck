@@ -20,6 +20,8 @@ function timelineHarness() {
 		...host.react,
 		useLayoutEffect: host.react.useEffect,
 		useMemo: (factory, deps) => host.react.useCallback(factory, deps)(),
+		// SingleLinePreview 等新拉入的真实组件用到 memo：转发函数即可满足 harness 语义。
+		memo: (fn) => fn,
 	};
 	const atomKey = (name) => name;
 	const jsx = (type, props) => ({ type, props });
@@ -87,6 +89,7 @@ function timelineHarness() {
 			"../../utils/notice": {},
 			"../../i18n": { t: (key) => key },
 			"../../lib/utils": { cn: (...parts) => parts.filter(Boolean).join(" ") },
+			"@/lib/utils": { cn: (...parts) => parts.filter(Boolean).join(" ") },
 			"../ui-shadcn/button": {},
 			"lucide-react": {},
 			"./timelineFailureNotice": { reduceFailureNoticePass: ({ state }) => ({ state, toasts: [] }) },

@@ -230,6 +230,7 @@ Gitmoji 对应关系：
 	floatingBallEnabled: false,
 	floatingBallExpandTarget: "mini",
 	floatingBallAlwaysOnTop: true,
+	floatingBallShowRunningBadge: true,
 	floatingBallSnapToEdge: true,
 
 	// ── 闲置 agent 内存优化：自动释放长时间闲置的 agent 进程 ──
@@ -243,7 +244,8 @@ Gitmoji 对应关系：
 
 	// CUA 默认关闭：关闭时不监听本地端点、不改动 pi 的 mcp.json，与现状完全一致
 	cuaEnabled: false,
-	cuaAutoApprove: false,
+	// 自动审批默认开启；显式保存的 false 仍由 load 合并保留，不自动改写用户选择。
+	cuaAutoApprove: true,
 
 	favoriteModels: [],
 	// 提供商与模型显示开关默认全显示：隐藏列表为空 = 不隐藏任何提供商/模型

@@ -310,7 +310,7 @@ function main() {
 			process.exit(0);
 		}
 		for (const target of staleTargets) {
-			console.log(`  ❌ ${target.name} ${target.result.ok ? "存在未同步的改动" : "找不到亮点区块"}——跑 npm run sync:notes -- --apply 后重试`);
+			console.log(`  ❌ ${target.name} ${target.result.ok ? "存在未同步的改动" : "找不到亮点区块"}——跑 node scripts/sync-release-notes.js --apply 后重试`);
 		}
 		process.exit(1);
 	}

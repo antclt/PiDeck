@@ -349,6 +349,8 @@ export type AppSettings = {
 	floatingBallExpandTarget: "mini" | "compact";
 	/** 悬浮球是否始终置顶，默认 true */
 	floatingBallAlwaysOnTop: boolean;
+	/** 悬浮球是否显示运行中任务数量角标，默认 true：关闭后球面不再叠加数字徽章 */
+	floatingBallShowRunningBadge: boolean;
 	/** 悬浮球边缘吸附：拖动松手后是否自动贴到屏幕左右边缘，默认 true */
 	floatingBallSnapToEdge: boolean;
 
@@ -370,11 +372,11 @@ export type AppSettings = {
 	 * 是否启用 CUA 能力，默认 false。
 	 * 开启后主进程才会监听本地 MCP HTTP 端点并把 `pideck-cua` 写入
 	 * ~/.pi/agent/mcp.json；关闭时不监听、不改动 pi 配置（默认姿态为「关」）。
-	 * 真实输入注入另有每次操作审批门 + 全局/会话杀开关双重兜底。
+	 * 真实输入受全局/会话杀开关保护；关闭自动审批后，每次写操作需显式确认。
 	 */
 	cuaEnabled: boolean;
 	/**
-	 * CUA 免审批（自动放行），默认 false。
+	 * CUA 免审批（自动放行），默认 true；保留用户显式关闭的选择。
 	 * 开启后写操作（点击/输入/滚动）跳过逐次审批对话框直接执行；
 	 * 全局/会话杀开关仍然生效（关掉 CUA 仍一律拒绝）。风险自担型开关。
 	 */
@@ -868,6 +870,7 @@ export function createDefaultAppSettings(): AppSettings {
 		floatingBallEnabled: false,
 		floatingBallExpandTarget: "mini",
 		floatingBallAlwaysOnTop: true,
+		floatingBallShowRunningBadge: true,
 		floatingBallSnapToEdge: true,
 		// 闲置 agent 自动释放：与 main SettingsStore 默认值保持一致，避免启动时闪烁
 		idleAgentAutoRelease: true,
@@ -875,7 +878,7 @@ export function createDefaultAppSettings(): AppSettings {
 		idleAgentTimeoutMin: 60,
 		standbyRuntimeEnabled: true,
 		cuaEnabled: false,
-		cuaAutoApprove: false,
+		cuaAutoApprove: true,
 		favoriteModels: [],
 
 		// 字体配置：与 main SettingsStore 默认值保持一致，避免启动时闪烁

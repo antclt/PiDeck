@@ -395,6 +395,15 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 					onChange={(checked) => updateDraft({ floatingBallAlwaysOnTop: checked })}
 				/>
 				<SettingSwitchRow
+					anchor="common-floating-ball-show-running-badge"
+					title={t("settings.floatingBallShowRunningBadge")}
+					description={t("settings.floatingBallShowRunningBadgeDesc")}
+					checked={draft.floatingBallShowRunningBadge ?? true}
+					disabled={!draft.floatingBallEnabled}
+					dirty={isDirty("floatingBallShowRunningBadge")}
+					onChange={(checked) => updateDraft({ floatingBallShowRunningBadge: checked })}
+				/>
+				<SettingSwitchRow
 					anchor="common-floating-ball-snap-to-edge"
 					title={t("settings.floatingBallSnapToEdge")}
 					description={t("settings.floatingBallSnapToEdgeDesc")}
@@ -425,11 +434,11 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 				</SettingRow>
 			</SettingsSection>
 
-			{/* CUA 桌面操作（实验性）：开启后才监听回环 MCP 端点并注册给 pi；真实输入另有杀开关与逐次审批兜底。 */}
+			{/* CUA 桌面操作（实验性）：开启后才监听回环 MCP 端点并注册给 pi；自动审批默认开启，关闭后逐次确认。 */}
 			<SettingsSection title={t("settings.cuaSection")} description={t("settings.cuaSectionDesc")}>
 				<SettingSwitchRow anchor="common-cua-enabled" title={t("settings.cuaEnabled")} description={t("settings.cuaEnabledDesc")} checked={draft.cuaEnabled ?? false} dirty={isDirty("cuaEnabled")} onChange={(checked) => updateDraft({ cuaEnabled: checked })} />
 				{/* 免审批：依赖 CUA 主开关，主开关关闭时置灰；只绕过审批对话框，杀开关仍生效 */}
-				<SettingSwitchRow anchor="common-cua-auto-approve" title={t("settings.cuaAutoApprove")} description={t("settings.cuaAutoApproveDesc")} checked={draft.cuaAutoApprove ?? false} disabled={!draft.cuaEnabled} dirty={isDirty("cuaAutoApprove")} onChange={(checked) => updateDraft({ cuaAutoApprove: checked })} />
+				<SettingSwitchRow anchor="common-cua-auto-approve" title={t("settings.cuaAutoApprove")} description={t("settings.cuaAutoApproveDesc")} checked={draft.cuaAutoApprove ?? true} disabled={!draft.cuaEnabled} dirty={isDirty("cuaAutoApprove")} onChange={(checked) => updateDraft({ cuaAutoApprove: checked })} />
 			</SettingsSection>
 
 			{/* 文件资源管理器集成：注册「用 PiDeck 打开」右键菜单（目录与空白处），

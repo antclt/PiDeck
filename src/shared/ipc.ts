@@ -977,6 +977,7 @@ export const ipcChannels = {
 	floatingBallSetExpandTarget: "floating-ball:set-expand-target",
 	// ===== 极简浮窗（mini overlay）：悬浮球点击展开的状态总览+快捷输入窗 =====
 	miniOverlayState: "mini-overlay:state",
+	miniOverlayGetState: "mini-overlay:get-state",
 	miniOverlayJumpToSession: "mini-overlay:jump-to-session",
 	miniOverlayQuickPrompt: "mini-overlay:quick-prompt",
 	miniOverlayClose: "mini-overlay:close",

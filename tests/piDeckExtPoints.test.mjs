@@ -71,9 +71,9 @@ describe("pi-deck-ext-points: 运行时推导扩展点", () => {
 		assert.equal(events[0].signature, 'pi.on("session_shutdown", handler)');
 	});
 
-	it("GUI 落点来自桥的 spec 模块（同源，15 个）", () => {
+	it("GUI 落点来自桥的 spec 模块（同源，19 个）", () => {
 		const points = buildGuiPoints();
-		assert.equal(points.length, 15, `应有 15 个落点，实际 ${points.length}`);
+		assert.equal(points.length, 19, `应有 19 个落点，实际 ${points.length}`);
 		const labels = points.map((p) => p.label);
 		assert.ok(labels.includes("ctx.gui.setToolExtra"));
 		assert.ok(labels.includes("ctx.gui.setSidebarPanel"));

@@ -201,13 +201,13 @@ CUA 以 **主进程内 MCP Server** 形式挂载到 pi：PiDeck 主进程用 `@m
 ### 5.1 层级
 1. **全局杀开关**：`settings.json` 中 `cuaEnabled: false` 时，所有 CUA tool 返回 `CUA_DISABLED` 错误。
 2. **会话级开关**：每个会话可单独关闭 CUA（默认继承全局）。
-3. **动作审批门**：每次 `cua_click` / `cua_type` / `cua_scroll` 都需要用户显式确认；`cua_capture` / `cua_list_windows` / `cua_get_state` 只读，无需审批。
+3. **动作审批门**：`cuaAutoApprove` 默认 `true`，`cua_click` / `cua_type` / `cua_scroll` 自动放行，但仍受全局/会话杀开关限制；用户关闭自动审批后，每次写操作需要显式确认。新安装或旧配置缺少该字段时采用新默认值，已保存的 `false` 保持不变。`cua_capture` / `cua_list_windows` / `cua_get_state` 只读，无需审批。
 
 ### 5.2 审批弹窗内容
 - 操作类型（点击/输入/滚动）
 - 目标坐标或文本摘要
 - 目标窗口标题（若可识别）
-- 按钮：允许一次 / 允许 5 分钟 / 拒绝 / 拒绝并关闭 CUA
+- 自动审批关闭时的按钮：允许一次 / 允许 5 分钟 / 拒绝 / 拒绝并关闭 CUA
 
 ### 5.3 错误码
 | 错误 | 说明 |

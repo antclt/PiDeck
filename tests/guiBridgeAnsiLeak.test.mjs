@@ -601,7 +601,12 @@ describe("structural: 契约里每个 kind / 字符串字段都被净化覆盖",
 	});
 
 	it("★ 帧类型全覆盖：每种 BridgeUpdate 过宿主净化器都无 ESC", () => {
-		const frameTypes = [...new Set([...sharedSource.matchAll(/type:\s*"([a-z-]+)"/g)].map((m) => m[1]))].filter((type) => !["select", "navigate", "input", "key", "filter", "action"].includes(type));
+		const frameTypes = [...new Set([...sharedSource.matchAll(/type:\s*"([a-z-]+)"/g)].map((m) => m[1]))].filter(
+			(type) =>
+				// 后六位不是 updates 下行帧：select…action 是回灌事件；service-call 由主进程在
+				// 转发前拦截（渲染层永远看不到，bridge.ts 契约注释），service-result 走事件队列。
+				!["select", "navigate", "input", "key", "filter", "action", "service-call", "service-result"].includes(type),
+		);
 		assert.ok(frameTypes.includes("status") && frameTypes.includes("ui-update"), `应解析出帧类型，实际 ${frameTypes.join(",")}`);
 		const node = FIXTURES.find(([kind]) => kind === "card")[1];
 		const frames = {

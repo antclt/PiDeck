@@ -169,6 +169,10 @@ const GUI_SLOT_META: Record<string, { note: string }> = {
 	"config.page": { note: "「Pi 管理」侧栏的独立整页" },
 	"session.item": { note: "会话列表条目" },
 	"context.menu": { note: "右键菜单" },
+	"timeline.event": { note: "会话时间线底部的事件条" },
+	"statusbar.item": { note: "底部状态栏条目" },
+	"terminal.toolbar": { note: "终端面板工具栏" },
+	"git.panel.section": { note: "Git 面板分区" },
 };
 
 function buildGuiPoints(): ExtPoint[] {
