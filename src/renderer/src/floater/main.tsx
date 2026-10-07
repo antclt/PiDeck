@@ -33,13 +33,9 @@ const api = (
 	}
 ).piDesktop;
 
-/** 任务名截断只在视觉层发生；完整标题仍可经原生 tooltip 查看。 */
+/** 球体只承担拖拽/角标与简短无障碍文案；不展示任务标题（标题气泡已按需求移除）。 */
 function statusText(state: FloatingBallState): string {
-	if (state.runningCount > 0) {
-		const title = state.recentTitles[0];
-		const suffix = state.runningCount > 1 ? ` +${state.runningCount - 1}` : "";
-		return title ? `${title}${suffix}` : `Running ${state.runningCount}`;
-	}
+	if (state.runningCount > 0) return `Running ${state.runningCount}`;
 	if (state.activeCount > 0) return `Active ${state.activeCount}`;
 	return "PiDeck";
 }
@@ -111,12 +107,6 @@ function FloaterApp() {
 	const text = statusText(state);
 	return (
 		<div className="flex h-full w-full select-none flex-col items-center justify-end gap-1.5 bg-transparent px-2 pb-2 font-sans">
-			{state.runningCount > 0 ? (
-				<div className="flex h-5 w-full shrink-0 items-center gap-1.5 overflow-hidden rounded-full border border-white/15 bg-black/85 px-2.5 text-[11px] leading-4 text-white shadow-sm" title={state.recentTitles.join("、") || text}>
-					<span className="size-1.5 shrink-0 rounded-full bg-success" />
-					<span className="min-w-0 flex-1 truncate">{text}</span>
-				</div>
-			) : null}
 			<button
 				type="button"
 				className={`relative grid size-16 shrink-0 place-items-center rounded-full border border-border-strong bg-bg-panel text-foreground shadow-md transition-transform duration-fast focus-visible:outline-2 focus-visible:outline-primary ${dragging ? "scale-95 cursor-grabbing" : "cursor-grab hover:scale-[1.02]"} ${state.runningCount > 0 ? "ring-2 ring-success/50" : ""}`}

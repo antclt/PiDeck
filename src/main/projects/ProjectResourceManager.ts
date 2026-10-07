@@ -7,6 +7,7 @@ import { trashPath } from "../fs/trash";
 import type { CreateProjectSkillInput, PiExtensionSummary, PiPromptTemplateSummary, PiSkillLocation, PiSkillSummary, Project, ProjectInheritedResourceToggleInput, ProjectResourceDirectoryKind, ProjectResourceListResult, ProjectResourceOverrides } from "../../shared/types";
 import type { McpConfigFile } from "../../shared/types/mcp";
 import { parseMcpConfigFile, validateMcpConfigFile } from "../config/mcpConfig";
+import { revisionOf } from "../config/piConfigFileStore";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 import { emptyProjectResourceOverrides, projectResourceOverridesFromRecord, setProjectInheritedResourceEnabled } from "./projectResourceOverrides";
 import { projectResourceEnabled } from "../config/piResourceRules";
@@ -193,13 +194,29 @@ export class ProjectResourceManager {
 	 * Atomically replace the project-owned `.pi/mcp.json` after boundary and schema checks.
 	 * The temporary file lives beside the destination and is always cleaned up on failure.
 	 */
-	async saveProjectMcpConfig(projectId: string, file: McpConfigFile): Promise<void> {
+	async saveProjectMcpConfig(projectId: string, file: McpConfigFile, options: { expectedRevision?: string } = {}): Promise<{ ok: boolean; error?: string; conflict?: boolean }> {
 		const project = this.requireProject(projectId);
 		const validationError = validateMcpConfigFile(file);
 		if (validationError) throw new Error(validationError);
 
 		const boundary = await this.projectBoundary(project);
 		const lexicalPath = join(this.projectRoot(project), ".pi", "mcp.json");
+		// 乐观锁：页面快照的 revision 与磁盘不一致 = 外部改过（pi/手改），拒绝覆盖让页面重读。
+		// 写入本身仍走下方的临时文件 + rename（含 junction 防护）；预检与写入之间的极小窗口
+		// 由「外部修改只增不丢」的务实权衡接受（与内置扩展开关面板同一策略）。
+		if (options.expectedRevision !== undefined) {
+			let currentRevision = revisionOf("", false);
+			try {
+				const readPath = await resolveProjectFileReadPath(boundary, lexicalPath);
+				currentRevision = revisionOf(await readFile(readPath, "utf8"), true);
+			} catch {
+				// 文件不存在 = missing，与快照侧 revisionOf("", false) 哨兵一致。
+			}
+			if (currentRevision !== options.expectedRevision) {
+				return { ok: false, conflict: true, error: "mcp.json changed on disk; reload before saving." };
+			}
+		}
+
 		const safePath = await this.resolveProjectWritePath(project, lexicalPath);
 		await mkdir(dirname(safePath), { recursive: true });
 
@@ -220,6 +237,7 @@ export class ProjectResourceManager {
 		} finally {
 			await rm(temporaryPath, { force: true }).catch(() => undefined);
 		}
+		return { ok: true };
 	}
 
 	/**

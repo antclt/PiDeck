@@ -29,6 +29,7 @@ import type {
 	VoiceTranscriptionTestResult,
 } from "../shared/types/voiceTranscription";
 import type { WhisperInstallProgress, WhisperInstallResult, WhisperRuntimeStatus } from "../shared/types/whisperRuntime";
+import type { EnhanceEventPayload, EnhanceRunInput, EnhanceRunResult } from "../shared/types/enhance";
 import type { QuickMessagesSaveResult, QuickMessagesSnapshot } from "../shared/types/quickMessages";
 import type { ReplyActionRule, ReplyActionsSaveResult, ReplyActionsSnapshot } from "../shared/types/replyActions";
 import type {
@@ -240,6 +241,7 @@ const api = {
 	},
 
 	miniOverlay: {
+		getState: () => ipcRenderer.invoke(ipcChannels.miniOverlayGetState) as Promise<import("../main/floating/MiniOverlayWindow").MiniOverlayState | null>,
 		onStateChanged: (callback: (state: import("../main/floating/MiniOverlayWindow").MiniOverlayState) => void) => subscribe(ipcChannels.miniOverlayState, callback),
 		jumpToSession: (sessionId: string, projectId: string) => ipcRenderer.invoke(ipcChannels.miniOverlayJumpToSession, sessionId, projectId) as Promise<void>,
 		quickPrompt: (projectId: string, text: string) => ipcRenderer.invoke(ipcChannels.miniOverlayQuickPrompt, projectId, text) as Promise<{ ok: boolean; message?: string }>,
@@ -755,9 +757,10 @@ const api = {
 			>,
 		/** 列出可 fork 的用户消息 entryId，用于 meta.entryId 缺失时的正文回退匹配。 */
 		getRuntimeForkMessages: (target: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeGetForkMessages, target) as Promise<SessionCommandResult<SessionTargetedValue<Array<{ entryId: string; text: string }>>>>,
-		/** 从指定 entryId fork 新会话（pi /fork），成功后会替换当前 runtime 绑定。 */
-		forkRuntimeSession: (target: SessionRuntimeTarget, entryId: string) =>
-			ipcRenderer.invoke(ipcChannels.sessionsRuntimeFork, target, entryId) as Promise<
+		/** 从指定 entryId fork 新会话（pi /fork），成功后会替换当前 runtime 绑定。
+		 *  options.mutationFork：重发/编辑 fork 化重试——子会话继承原标题且旧会话打 supersededBy 从列表隐藏。 */
+		forkRuntimeSession: (target: SessionRuntimeTarget, entryId: string, options?: { mutationFork?: boolean; branchMode?: boolean }) =>
+			ipcRenderer.invoke(ipcChannels.sessionsRuntimeFork, target, entryId, options) as Promise<
 				SessionCommandResult<{
 					cancelled?: boolean;
 					text?: string;
@@ -1161,10 +1164,11 @@ const api = {
 				diagnostic?: ConfigFileDiagnostic;
 			}>,
 		getMcp: (scope?: import("../shared/types/mcp").McpConfigScope) => ipcRenderer.invoke(ipcChannels.configGetMcp, scope) as Promise<import("../shared/types/mcp").McpConfigSnapshot>,
-		saveMcp: (data: import("../shared/types/mcp").McpConfigFile, scope?: import("../shared/types/mcp").McpConfigScope) =>
-			ipcRenderer.invoke(ipcChannels.configSaveMcp, data, scope) as Promise<{
+		saveMcp: (data: import("../shared/types/mcp").McpConfigFile, scope?: import("../shared/types/mcp").McpConfigScope, expectedRevision?: string) =>
+			ipcRenderer.invoke(ipcChannels.configSaveMcp, data, scope, expectedRevision) as Promise<{
 				valid: boolean;
 				error?: string;
+				conflict?: boolean;
 			}>,
 		probeMcp: (definition: import("../shared/types/mcp").McpServerDefinition) => ipcRenderer.invoke(ipcChannels.configProbeMcp, definition) as Promise<import("../shared/types/mcp").McpProbeResult>,
 		// pi mcp CLI：真实连接检测 + OAuth 登录/登出（仅命令路线；登录授权 URL 经 onMcpLoginUrl 推送）。
@@ -1484,6 +1488,13 @@ const api = {
 		saveConfig: (config: ImageGenConfigFile) => ipcRenderer.invoke(ipcChannels.imagegenSaveConfig, config) as Promise<ImageGenSaveResult>,
 		/** 按 blob 引用名取回落盘图片 base64（历史消息只带 ref，展示走 pideck-img://） */
 		readImageBlob: (ref: string) => ipcRenderer.invoke(ipcChannels.imagegenReadImageBlob, ref) as Promise<ImageBlobPayload | null>,
+	},
+
+	// ── 提示词增强：独立 sidecar 复用用户那套 pi 的 ModelRuntime，流式事件按 runId 推送 ──
+	enhance: {
+		run: (input: EnhanceRunInput) => ipcRenderer.invoke(ipcChannels.enhanceRun, input) as Promise<EnhanceRunResult>,
+		cancel: () => ipcRenderer.invoke(ipcChannels.enhanceCancel) as Promise<{ ok: boolean }>,
+		onEvent: (callback: (payload: EnhanceEventPayload) => void) => subscribe(ipcChannels.enhanceEvent, callback),
 	},
 
 	voiceTranscription: {

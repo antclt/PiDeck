@@ -201,7 +201,12 @@ test("startup prefetch hydrates capabilities after WSL configuration", () => {
 	assert.match(indexSource, /syncWslConfig\(\)\s*\.?\s*then\(async \(\) =>/);
 	assert.match(indexSource, /piModelCapabilityCache\?\.watchConfigDirectory\(\)/);
 	assert.match(indexSource, /await piModelCapabilityCache\?\.ensure\(\)/);
-	assert.doesNotMatch(indexSource, /getCachedModelList\(\)/);
+	// 启动 prefetch 链必须异步水合，不得用同步 getCachedModelList() 顶替；
+	// getCachedModelList 允许出现在新会话预选路径（05fe4f3ef 有意引入），
+	// 所以只锁 prefetch 片段而不是整个文件。
+	const prefetchBlock = indexSource.match(/void syncWslConfig\(\)[\s\S]*?watchConfigDirectory\(\);/)?.[0] ?? "";
+	assert.ok(prefetchBlock.length > 100, "prefetch block not found in index.ts");
+	assert.doesNotMatch(prefetchBlock, /getCachedModelList\(\)/);
 });
 
 test("older pi unknown-option and empty CLI fall back to local models.json", () => {

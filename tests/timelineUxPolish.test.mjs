@@ -56,15 +56,16 @@ test("auto-collapse survives without completion-reposition; send-time pin is the
 	assert.doesNotMatch(timeline, /scheduleFinalAnswerSettle/);
 	assert.doesNotMatch(timeline, /scheduleSettleFinalAnswerTop/);
 	assert.doesNotMatch(timeline, /settleFinalAnswerTargetPx/);
-	// 自动滚动唯一路径：发送时对新 user 行做一次性置顶动画（含尾垫+未占改+取消）。
-	// 612bb51c1 起实现从 controller 迁入 timeline/sendScroll.ts（SendScrollPositioner），
-	// 契约锚点改为新模块；controller 侧只保留接线断言。
+	// 自动滚动唯一路径：实现住 hooks/timeline/sendScroll.ts（SendScrollPositioner，612bb51c1 起迁移），
+	// controller 侧只保留接线：发送时把新 user 行交给独立定位器。
 	assert.match(controller, /SendScrollPositioner/);
-	assert.doesNotMatch(controller, /scrollFinalAnswerIntoView|scheduleFinalAnswerSettle/);
-	assert.match(sendScroll, /pinScrollDurationMs/);
-	assert.match(sendScroll, /TARGET_GAP_PX/);
-	assert.match(sendScroll, /SKIP_EPSILON_PX/);
+	assert.doesNotMatch(controller, /scrollFinalAnswerIntoView|scheduleFinalAnswerSettle|scheduleSettleFinalAnswerTop|settleFinalAnswerTargetPx/);
+	assert.match(controller, /sendScrollRef\.current\.pin\(timeline, sendMessageId/);
+	assert.match(sendScroll, /pinScrollDurationMs\(distance\)/);
+	assert.match(sendScroll, /TARGET_GAP_PX = 24/);
+	assert.match(sendScroll, /SKIP_EPSILON_PX = 8/);
 	assert.match(sendScroll, /CANCEL_INPUTS/);
+	assert.match(sendScroll, /cancel = \(\): void/);
 	// isLatestRun（自动收起）保持按「最后一条显示条目」判定；
 	// live 挂载门用单独的 isLastAgentRun（最后一个 agent-run）判定——
 	// 两者语义不同，不能合并（见 liveMountDecision 回归）。

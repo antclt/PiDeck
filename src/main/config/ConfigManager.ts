@@ -7,7 +7,7 @@ import { net, session } from "electron";
 import type { Session } from "electron";
 import type { ConfigFileDiagnostic, ConfigFileReadResult } from "../../shared/types";
 import type { McpConfigFile, McpConfigSnapshot, McpProbeResult, McpServerDefinition } from "../../shared/types/mcp";
-import { loadMcpConfigSnapshot, mcpDocsUrl, probeMcpServer, validateMcpConfigFile } from "./mcpConfig";
+import { loadMcpConfigSnapshot, mcpDocsUrl, probeMcpServer, saveMcpConfigFile, validateMcpConfigFile } from "./mcpConfig";
 import { ensureOpenAiVersionPath, needsSessionBaseUrlVersionHint, suggestNormalizedBaseUrl } from "./baseUrlPath";
 import type { WslEnvironment } from "../wsl/WslPaths";
 import { mainProcessT, type MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
@@ -168,6 +168,10 @@ export type ConfigValidationResult = {
 	valid: boolean;
 	error?: string;
 	debugDetails?: string;
+	/** 乐观锁冲突：磁盘内容与页面快照不一致（调用方应提示重新加载）。 */
+	conflict?: boolean;
+	/** 写入成功后的新 revision；冲突时为磁盘当前 revision。 */
+	revision?: string;
 };
 
 type ConfigCopy = (key: MainProcessTranslationKey, params?: Record<string, string | number>) => string;
@@ -236,11 +240,12 @@ export class ConfigManager {
 		return loadMcpConfigSnapshot(this.configDir, projectPath, undefined, options);
 	}
 
-	async saveMcpConfig(file: McpConfigFile): Promise<ConfigValidationResult> {
+	async saveMcpConfig(file: McpConfigFile, options: { expectedRevision?: string } = {}): Promise<ConfigValidationResult> {
 		const error = validateMcpConfigFile(file);
 		if (error) return { valid: false, error };
-		await this.writeJsonFileAtomic("mcp.json", file);
-		return { valid: true };
+		// 锁内重读 + revision 乐观锁：外部（pi/手改/其它实例）改过则拒绝覆盖，只替换 mcpServers 键。
+		const result = await saveMcpConfigFile(join(this.configDir, "mcp.json"), file, { expectedRevision: options.expectedRevision });
+		return result.ok ? { valid: true, revision: result.revision } : { valid: false, error: result.error, conflict: result.conflict };
 	}
 	async probeMcpServer(definition: McpServerDefinition): Promise<McpProbeResult> {
 		return probeMcpServer(definition);

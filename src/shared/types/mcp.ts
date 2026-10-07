@@ -116,6 +116,10 @@ export type McpServerListItem = {
 	originScope: McpConfigLayerKind;
 	/** 定义层是否为 PiDeck 可写层（当前作用域）。 */
 	ownedByWritable: boolean;
+	/** 草稿已从本层删除、保存后才生效（磁盘上仍在）。 */
+	pendingDelete?: boolean;
+	/** 草稿删除的是本层覆盖，且下层（如全局）还有同名定义：保存后回退为继承而不是消失。 */
+	revertsToInherited?: boolean;
 };
 
 export type McpConfigSnapshot = {
@@ -126,10 +130,16 @@ export type McpConfigSnapshot = {
 	writableRaw: string;
 	/** 可写层 JSON 损坏时给出诊断；此时禁止可视化保存，避免空对象覆盖原文件。 */
 	writableError?: string;
+	/** 可写层内容哈希（revisionOf）：保存时回传作乐观锁，不匹配 = 文件被外部改过，拒绝覆盖。 */
+	revision: string;
 	layers: McpConfigLayer[];
 	servers: McpServerListItem[];
 	/** 未通过校验的条目（不参与有效列表，但必须展示给用户修复）。 */
 	invalidServers: Array<{ name: string; path: string; error: string; raw: unknown }>;
+	/** 可写层以下各层（如全局）定义过的 server 名：删除本层覆盖时用于判断「回退为继承」还是「消失」。 */
+	lowerLayerNames: string[];
+	/** mcp-auth.json 里已存 OAuth 凭据的 server 名（只读键名，凭据值永不进内存/日志）。 */
+	oauthCredentialNames: string[];
 };
 
 export type McpProbeOk = {
