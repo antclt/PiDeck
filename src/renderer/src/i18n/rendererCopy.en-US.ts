@@ -5140,7 +5140,6 @@ export const enUS: Record<TranslationKey, string> = {
 	"voice.start": "Start voice input",
 	// ===== Prompt enhance (composer ✦ button) =====
 	"enhance.start": "Enhance prompt",
-	"enhance.panelTitle": "Prompt enhancement",
 	"enhance.starting": "Requesting model…",
 	"enhance.streaming": "Enhancing",
 	"enhance.chars": "{count} chars",

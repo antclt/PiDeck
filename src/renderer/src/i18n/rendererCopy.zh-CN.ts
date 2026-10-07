@@ -5123,7 +5123,6 @@ export const zhCN = {
 	"voice.start": "开始语音输入",
 	// ===== 提示词增强（输入框 ✦ 按钮） =====
 	"enhance.start": "增强提示词",
-	"enhance.panelTitle": "提示词增强",
 	"enhance.starting": "正在请求模型…",
 	"enhance.streaming": "正在增强",
 	"enhance.chars": "{count} 字",
