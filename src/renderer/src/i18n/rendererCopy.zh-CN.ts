@@ -4759,6 +4759,7 @@ export const zhCN = {
 	"timeline.processGroup.done.tools": "已调用工具",
 	"timeline.processGroup.analyzing": "正在分析请求",
 	"timeline.processGroup.analyzed": "已完成分析",
+	"timeline.processGroup.extension": "扩展输出 ×{count}",
 	"timeline.processGroup.separator": "·",
 	"timeline.processGroup.joinTwo": "{first}并{second}",
 	"timeline.processGroup.joinList": "{items}",

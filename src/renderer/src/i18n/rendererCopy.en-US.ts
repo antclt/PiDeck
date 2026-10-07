@@ -4775,6 +4775,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"timeline.processGroup.done.tools": "Called tools",
 	"timeline.processGroup.analyzing": "Analyzing the request",
 	"timeline.processGroup.analyzed": "Finished analyzing",
+	"timeline.processGroup.extension": "Extensions ×{count}",
 	"timeline.processGroup.separator": "·",
 	"timeline.processGroup.joinTwo": "{first} and {second}",
 	"timeline.processGroup.joinList": "{items}",

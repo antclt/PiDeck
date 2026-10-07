@@ -895,7 +895,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		if (!entry?.filePath) return [];
 		// 有界「加载窗口」（9 轮 + 条目预算），不是全量历史：整量读出在大会话上
 		// 会同时顶爆主进程与渲染层（#213）；需要更早历史走 readRecordMessagePage。
-		const window = await agentManager.readSessionLoadWindow(entry.filePath, sessionId);
+		const window = await agentManager.readSessionLoadWindow(entry.filePath, sessionId, { projectId: entry.projectId });
 		const messages = window.messages;
 		const metadata = await agentManager.readSessionDisplayMetadata(entry.filePath);
 		await backfillHistoricalSessionMetadata(sessionId, metadata);
@@ -1019,7 +1019,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 					if (cached) return cached;
 				}
 			}
-			page = await agentManager.readSessionDisplayTurnPage(entry.filePath, sessionId, before, pageSize, options?.beforeEntryId);
+			page = await agentManager.readSessionDisplayTurnPage(entry.filePath, sessionId, before, pageSize, options?.beforeEntryId, { projectId: entry.projectId });
 			await backfillHistoricalSessionMetadata(sessionId, page);
 			return page;
 		} catch (error) {
