@@ -1702,6 +1702,15 @@ export function App() {
 		isImageGenSession: (sessionId) => (store.get(sessionMessagesCacheAtom)?.[sessionId]?.messages ?? []).some((message) => message.meta?.imageGen !== undefined),
 		// fork 化重发/编辑只服务 pi 后端：DSH 维持 legacy 路径（策略层返回 catalog）
 		isDshSession: (sessionId) => getSessionRecord(sessionId)?.backend === "dsh",
+		// fork 锚点是否为最后一条用户消息：尾部 → 替换语义（旧会话隐藏）；非尾部 → 分支模式（旧会话保留可见）。
+		// 缓存缺失时按非尾部处理（false），宁可两会话并存也不隐藏可能还有独属内容的旧会话。
+		isLastUserMessage: (sessionId, message) => {
+			const cached = store.get(sessionMessagesCacheAtom)?.[sessionId]?.messages;
+			if (!cached) return false;
+			const index = cached.findIndex((candidate) => candidate.id === message.id);
+			if (index < 0) return false;
+			return !cached.slice(index + 1).some((candidate) => candidate.role === "user");
+		},
 		// 生图重发：把失败的提示词（+参考图）放回输入框供一键重试。参考图直接整体替换附件栏
 		//（重发目标就是这轮消息自身，不需要前插保留——那是失败后保留用户新粘贴图的场景）。
 		restoreImageGenTurn: (sessionId, text, images) => {

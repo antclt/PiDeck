@@ -1824,11 +1824,14 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		}
 	}
 	ipcMain.handle(ipcChannels.sessionsRuntimeGetForkMessages, (_event, target: SessionRuntimeTarget) => sessionRuntimeCoordinator.getRuntimeForkMessages(target));
-	ipcMain.handle(ipcChannels.sessionsRuntimeFork, async (_event, target: SessionRuntimeTarget, entryId: string, options?: { mutationFork?: boolean }) => {
+	ipcMain.handle(ipcChannels.sessionsRuntimeFork, async (_event, target: SessionRuntimeTarget, entryId: string, options?: { mutationFork?: boolean; branchMode?: boolean }) => {
 		const validated = sessionRuntimeCoordinator.validateTarget(target);
 		if (!validated.ok) return validated;
-		// fork 化重试标记（重发/编辑迁移用）：只认显式 true，其余值按 false 处理（边界校验）
+		// fork 化重试标记（重发/编辑迁移用）：只认显式 true，其余值按 false 处理（边界校验）。
+		// branchMode：fork 锚点不是最后一条用户消息 → 旧会话保留可见（带 (fork) 后缀），
+		// 只有尾部替换才隐藏旧会话（supersededBy）。
 		const mutationFork = options?.mutationFork === true;
+		const branchMode = options?.branchMode === true;
 		try {
 			// DSH 后端：fork = session.fork 裁剪 + runtime 换绑新会话（catalog 的
 			// dshSessionId 同步更新，重启后 attach 到 fork 结果）。
@@ -1854,11 +1857,11 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			const value = await replaceAgentSession(
 				target.agentId,
 				() => agentManager.forkSession(target.agentId, entryId),
-				// 显式分支 fork：子会话带 (fork) 后缀、新旧都在列表；重发/编辑 fork 化：
-				// 子会话继承原标题（无后缀），旧会话打 supersededBy 从列表隐藏（文件保留）
-				mutationFork ? { markForked: false, markSuperseded: true } : { markForked: true },
+				// 显式分支 fork 与非尾部重试分支：子会话带 (fork) 后缀、新旧都在列表；
+				// 尾部重发/编辑 fork 化：子会话继承原标题，旧会话打 supersededBy 从列表隐藏（文件保留）
+				mutationFork && !branchMode ? { markForked: false, markSuperseded: true } : { markForked: true },
 			);
-			void appLogger.info("session", "Session forked", { sessionId: target.sessionId, entryId, mutationFork });
+			void appLogger.info("session", "Session forked", { sessionId: target.sessionId, entryId, mutationFork, branchMode });
 			notifyForkCatalogRefreshed(target.sessionId);
 			return {
 				ok: true as const,

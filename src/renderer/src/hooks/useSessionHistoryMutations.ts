@@ -42,6 +42,8 @@ export interface SessionHistoryMutationsDeps {
 	isImageGenSession?: (sessionId: string) => boolean;
 	/** DSH 会话判定：fork 化重发/编辑只服务 pi 后端，DSH 维持 legacy 路径。 */
 	isDshSession?: (sessionId: string) => boolean;
+	/** 目标消息是否是会话最后一条用户消息：决定 fork 后旧会话隐藏（替换）还是保留可见（分支）。 */
+	isLastUserMessage?: (sessionId: string, message: ChatMessage) => boolean;
 	/** 生图重发：把失败消息的提示词（+参考图）放回输入框供一键重试，代替对不存在的 pi 文件做截断。 */
 	restoreImageGenTurn?: (sessionId: string, text: string, images?: ImageContent[]) => void;
 }
@@ -235,7 +237,14 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
 				latest.showToast(t("app.forkMissingEntryId"), 4000);
 				return;
 			}
-			const result = requireSessionCommand(await api.sessions.forkRuntimeSession(target, entryId, { mutationFork: true }));
+			const result = requireSessionCommand(
+				await api.sessions.forkRuntimeSession(target, entryId, {
+					mutationFork: true,
+					// 分支模式：fork 锚点不是最后一条用户消息 → 旧会话还有独属它的后续轮次，
+					// 不隐藏（带 (fork) 后缀两会话并存）；尾部替换才打 supersededBy。
+					branchMode: latest.isLastUserMessage ? !latest.isLastUserMessage(sessionId, message) : false,
+				}),
+			);
 			if (result.cancelled) {
 				latest.showToast(t("app.forkCancelled"), 3500);
 				return;

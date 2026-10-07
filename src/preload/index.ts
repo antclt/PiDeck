@@ -759,7 +759,7 @@ const api = {
 		getRuntimeForkMessages: (target: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeGetForkMessages, target) as Promise<SessionCommandResult<SessionTargetedValue<Array<{ entryId: string; text: string }>>>>,
 		/** 从指定 entryId fork 新会话（pi /fork），成功后会替换当前 runtime 绑定。
 		 *  options.mutationFork：重发/编辑 fork 化重试——子会话继承原标题且旧会话打 supersededBy 从列表隐藏。 */
-		forkRuntimeSession: (target: SessionRuntimeTarget, entryId: string, options?: { mutationFork?: boolean }) =>
+		forkRuntimeSession: (target: SessionRuntimeTarget, entryId: string, options?: { mutationFork?: boolean; branchMode?: boolean }) =>
 			ipcRenderer.invoke(ipcChannels.sessionsRuntimeFork, target, entryId, options) as Promise<
 				SessionCommandResult<{
 					cancelled?: boolean;
