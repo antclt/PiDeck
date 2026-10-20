@@ -398,27 +398,43 @@ function TrajectoryOverview(props: { records: TrajectoryRecord[]; domainStart: n
 		setDraft(undefined);
 	};
 
-	const onWheel = (event: React.WheelEvent<HTMLDivElement>) => {
-		if (props.records.length === 0) return;
-		event.preventDefault();
-		const current = props.range ?? { start: props.domainStart, end: props.domainEnd };
-		const width = Math.max(current.end - current.start, MIN_ZOOM_SPAN_MS);
-		const factor = event.deltaY > 0 ? 1.2 : 0.8;
-		const nextWidth = Math.min(span, Math.max(MIN_ZOOM_SPAN_MS, width * factor));
-		const anchor = timeAt(event.clientX);
-		const leftRatio = (anchor - current.start) / width;
-		let start = anchor - nextWidth * leftRatio;
-		let end = start + nextWidth;
-		if (start < props.domainStart) {
-			start = props.domainStart;
-			end = start + nextWidth;
-		}
-		if (end > props.domainEnd) {
-			end = props.domainEnd;
-			start = end - nextWidth;
-		}
-		props.onRangeChange({ start, end });
-	};
+	const onWheel = useCallback(
+		(event: WheelEvent) => {
+			if (props.records.length === 0) return;
+			event.preventDefault();
+			const current = props.range ?? { start: props.domainStart, end: props.domainEnd };
+			const width = Math.max(current.end - current.start, MIN_ZOOM_SPAN_MS);
+			const factor = event.deltaY > 0 ? 1.2 : 0.8;
+			const nextWidth = Math.min(span, Math.max(MIN_ZOOM_SPAN_MS, width * factor));
+			const anchor = timeAt(event.clientX);
+			const leftRatio = (anchor - current.start) / width;
+			let start = anchor - nextWidth * leftRatio;
+			let end = start + nextWidth;
+			if (start < props.domainStart) {
+				start = props.domainStart;
+				end = start + nextWidth;
+			}
+			if (end > props.domainEnd) {
+				end = props.domainEnd;
+				start = end - nextWidth;
+			}
+			props.onRangeChange({ start, end });
+		},
+		[props.domainStart, props.domainEnd, props.range, props.records.length, props.onRangeChange, span, timeAt],
+	);
+
+	// React 的 onWheel 是 passive 监听：preventDefault 会被忽略并打出
+	// "Unable to preventDefault inside passive event listener" 警告，滚轮还会带着面板一起滚。
+	// 这里显式注册非 passive 原生监听，缩放时才真正吃掉滚轮事件。
+	const wheelRef = useRef(onWheel);
+	wheelRef.current = onWheel;
+	useLayoutEffect(() => {
+		const el = trackRef.current;
+		if (!el) return;
+		const handler = (event: WheelEvent) => wheelRef.current(event);
+		el.addEventListener("wheel", handler, { passive: false });
+		return () => el.removeEventListener("wheel", handler);
+	}, []);
 
 	const highlight = draft ?? props.range;
 
@@ -440,7 +456,6 @@ function TrajectoryOverview(props: { records: TrajectoryRecord[]; domainStart: n
 						dragRef.current = undefined;
 						setDraft(undefined);
 					}}
-					onWheel={onWheel}
 					onDoubleClick={() => props.onRangeChange(undefined)}
 				>
 					{highlight ? (
