@@ -1,6 +1,6 @@
 # 轨迹与会话数据消费优化计划（Trajectory & Session Consumer）
 
-> 状态：**S1/S2 已实施（S1：B1/B2/B3 红测转绿、索引事实读取器、facts 契约、DSH 覆盖范围、只读探针；S2：事件驱动刷新、单在途、作用域作废、引用稳定、hover 不重算）；S3 已实施（S4 待实施），S5 为条件性后续项。** S0 能力已存在于当前工作区，提交状态以 git 为准。实施后按阶段更新 §9；全部完成或作废时收口本文件。
+> 状态：**S1/S2 已实施（S1：B1/B2/B3 红测转绿、索引事实读取器、facts 契约、DSH 覆盖范围、只读探针；S2：事件驱动刷新、单在途、作用域作废、引用稳定、hover 不重算）；S1–S3 已实施；S4 数据面已落地（目录/标题 IPC），导轨 UI 合并与受控补页未做，S5 为条件性后续项。** S0 能力已存在于当前工作区，提交状态以 git 为准。实施后按阶段更新 §9；全部完成或作废时收口本文件。
 >
 > 本轮交付仅为计划文档，未开展实现或测试开发。计划中的实现范围是桌面消费侧：事实读取、刷新、渲染窗口、导轨；传输层与 Go 条目表仍归 [session-data-plane-plan.md](session-data-plane-plan.md)。不改 pi 会话写入语义、不扩展宿主控制通道、不增加依赖。
 >
@@ -329,7 +329,8 @@ S1 落地时增加 `scripts/probeTrajectoryRead.mjs`（当前尚不存在），�
 - [x] S2 事件驱动/5 秒兜底刷新、作用域隔离、清理与回合结束刷新（触发键 = 会话 + agentId + runtimeGeneration + 回合/压缩状态；model/thinking 变化未单独接入，由兜底覆盖）。
 - [ ] S2 now 完全脱离模型构建：已做到「hover/拖动不重算 + in-flight 时 1 秒低频时钟 + 相同事实版本不换引用」，domain 右端仍依赖 now（未做视觉验证前不擅自改时间轴）。
 - [x] S3 账本窗口 + 单轮预算 + 概览聚合：`trajectoryWindow.ts`（尾部 3 轮、单轮 ≤120、滚顶再放 3 轮、选中更早自动扩窗）+ 概览按 lane/像素聚合（每 lane ≤ min(250, ceil(w/4))，选中项补刻度）。**未做**：概览点击「切窗口到目标 3 轮」已由「选中自动扩窗」等价覆盖，但没有「回最新」按钮与按记录 ID 的滚动恢复（仍是 scrollTop 记忆）。
-- [ ] S4 活动用户目录 + 懒标题 + ID 映射 + 加载范围高亮，确认后连续补页，远目标单步推进。
+- [x] S4 活动用户目录 + 懒标题（数据面）：`SessionHistoryReader.readSessionOutline/readSessionOutlineTitle` + `sessions:catalog-read-outline{,-title}` 通道/handler/preload/preview/browser 成套；目录过滤 context_edit、`messageIndex` 用 activeMessageEntries 坐标、超预算保留首项+最近项、标题读一行截 80 字。测试 `tests/sessionOutlineDirectory.test.mjs`（5 项）。
+- [ ] S4 导轨 UI：索引目录与已加载消息合并、确认后连续补页（≤3 轮/页、≤20 轮、≤7 请求）、远目标单步、中断条件、加载范围高亮。
 - [ ] S4 预算/分屏/生命周期/非 pi 降级/分页中断测试。
 - [ ] 收口：更新维护说明，按 §3.5 移除已无必要的迁移兜底；确无生产消费者的旧入口成套删除，不夹带无关清理。
 

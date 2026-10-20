@@ -15,6 +15,7 @@ import type {
 	CreateAgentInput,
 	ForkMessage,
 	SessionFactsResult,
+	SessionOutlineSnapshot,
 	I18nParams,
 	ImageContent,
 	SessionMessageImageTarget,
@@ -1209,6 +1210,16 @@ export class AgentManager {
 	 */
 	async readSessionFacts(sessionPath: string): Promise<SessionFactsResult> {
 		return this.trajectoryFacts.read(sessionPath);
+	}
+
+	/** 用户检查点目录（导轨）：活动消息索引派生，超预算裁剪并标记。 */
+	async readSessionOutline(sessionPath: string, limit?: number): Promise<SessionOutlineSnapshot> {
+		return this.sessionHistoryReader.readSessionOutline(sessionPath, limit);
+	}
+
+	/** 导轨单项标题：按需读一行（≤1MiB），返回 80 字以内展示文本。 */
+	async readSessionOutlineTitle(sessionPath: string, entryId: string): Promise<string | undefined> {
+		return this.sessionHistoryReader.readSessionOutlineTitle(sessionPath, entryId);
 	}
 
 	/** 轮次维度显示分页：pageSize 复用为轮次数（readSessionDisplayTurnPage 内部夹紧上限） */

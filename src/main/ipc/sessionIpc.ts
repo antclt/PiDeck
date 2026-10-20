@@ -45,6 +45,7 @@ import type {
 	SessionSearchResult,
 } from "../../shared/types";
 import { parseSessionProcessEventsFromFile } from "../sessions/sessionProcessEventsFile";
+import type { SessionOutlineSnapshot as OutlineSnapshot } from "../../shared/types/outline";
 import type { SessionForkCommands } from "../sessions/sessionForkCommands";
 import { dshUnavailablePageFor } from "../dsh/dshManualStop";
 import { dshSessionModelPatch } from "../dsh/dshSessionModelSync";
@@ -246,6 +247,9 @@ export type DshBackendIpcDeps = {
 	readDshProcessEvents?: (agentId: string | undefined, dshSessionId: string | undefined) => Promise<{ events: import("../../shared/types/trajectory").SessionProcessEvent[]; fromStart: boolean }>;
 	/** pi 轨迹事实（索引候选 + 小批读取 + 内容版本缓存）；缺省时回退旧的全文件扫描。 */
 	readSessionFacts?: (sessionPath: string) => Promise<import("../../shared/types/trajectory").SessionFactsResult>;
+	/** 用户检查点目录（导轨）：pi 索引派生；缺省返回空目录。 */
+	readSessionOutline?: (sessionPath: string, limit?: number) => Promise<import("../../shared/types/outline").SessionOutlineSnapshot>;
+	readSessionOutlineTitle?: (sessionPath: string, entryId: string) => Promise<string | undefined>;
 	/** DSH 轨迹系统提示（运行时会话读投影缓存；历史会话从 host history 折叠 request/header；未装配返回 undefined）。 */
 	readDshSystemPrompt?: (agentId: string | undefined, dshSessionId: string | undefined) => Promise<string | undefined>;
 	/** DSH 「查看完整输出」（工具结果全文随投影消息存 meta.fullText）；未装配时抛错。 */
@@ -503,6 +507,8 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		readAcpMessages,
 		readDshProcessEvents,
 		readSessionFacts,
+		readSessionOutline,
+		readSessionOutlineTitle,
 		readDshSystemPrompt,
 		readDshMessageFullText,
 		resolveDshSessionFilePath,
@@ -1243,6 +1249,24 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		}
 		// 无索引入口时回退流式扫描（有界尾巴，仍受事件保留上限约束）。
 		return { events: await parseSessionProcessEventsFromFile(entry.filePath), version: "", coverage: { fromStart: true, chainComplete: true, readComplete: true, eventsTrimmed: false } };
+	});
+	// 导轨目录：只给用户检查点坐标（entryId + messageIndex + turnOrdinal），不带正文。
+	// 入参只有 sessionId 与可选上限（渲染层数据不可信，上限在边界夹紧）。
+	ipcMain.handle(ipcChannels.sessionsCatalogReadOutline, async (_event, sessionId: unknown, limit?: unknown): Promise<OutlineSnapshot> => {
+		const empty: OutlineSnapshot = { entries: [], total: 0, truncated: false };
+		if (typeof sessionId !== "string" || !sessionId.trim()) return empty;
+		const entry = sessionCatalog.get(sessionId);
+		if (!entry?.filePath || !readSessionOutline) return empty;
+		const bounded = typeof limit === "number" && Number.isFinite(limit) ? Math.min(Math.max(Math.floor(limit), 1), 10_000) : undefined;
+		return readSessionOutline(entry.filePath, bounded);
+	});
+	// 导轨单项标题：按需读一行；entryId 必须是会话内条目，空/超长直接拒绝。
+	ipcMain.handle(ipcChannels.sessionsCatalogReadOutlineTitle, async (_event, sessionId: unknown, entryId: unknown): Promise<string | undefined> => {
+		if (typeof sessionId !== "string" || !sessionId.trim()) return undefined;
+		if (typeof entryId !== "string" || !entryId.trim() || entryId.length > 200) return undefined;
+		const entry = sessionCatalog.get(sessionId);
+		if (!entry?.filePath || !readSessionOutlineTitle) return undefined;
+		return readSessionOutlineTitle(entry.filePath, entryId);
 	});
 	ipcMain.handle(ipcChannels.sessionsCatalogReadDshSystemPrompt, async (_event, sessionId: string): Promise<string | undefined> => {
 		if (typeof sessionId !== "string" || !sessionId.trim()) return undefined;

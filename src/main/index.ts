@@ -3384,6 +3384,8 @@ function registerIpc() {
 			readAcpMessages: (acpSessionId) => acpAgentManager.readMessagesByAcpSessionId(acpSessionId),
 			readDshProcessEvents: (agentId, dshSessionId) => dshAgentManager.readProcessEvents(agentId, dshSessionId),
 			readSessionFacts: (sessionPath) => agentManager.readSessionFacts(sessionPath),
+			readSessionOutline: (sessionPath, limit) => agentManager.readSessionOutline(sessionPath, limit),
+			readSessionOutlineTitle: (sessionPath, entryId) => agentManager.readSessionOutlineTitle(sessionPath, entryId),
 			readDshSystemPrompt: (agentId, dshSessionId) => dshAgentManager.readSystemPrompt(agentId, dshSessionId),
 			readDshMessageFullText: (agentId, messageId) => dshAgentManager.readMessageFullText(agentId, messageId),
 			resolveDshSessionFilePath: async (sessionId) => {

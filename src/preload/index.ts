@@ -107,6 +107,7 @@ import type {
 	UpdateSessionRecordInput,
 	SessionRecord,
 	SessionFactsResult,
+	SessionOutlineSnapshot,
 	SessionProcessEvent,
 	VisionBridgeConfig,
 	ProjectInheritedResourceToggleInput,
@@ -668,6 +669,8 @@ const api = {
 		prepareCatalogResend: (sessionId: string, messageId: string, entryId?: string) => ipcRenderer.invoke(ipcChannels.sessionsCatalogPrepareResend, sessionId, messageId, entryId) as Promise<SessionCommandResult<{ text: string; images?: ImageContent[] }>>,
 		/** 会话 JSONL 过程事件（session/model/thinking/custom），轨迹复盘用。 */
 		readProcessEvents: (sessionId: string) => ipcRenderer.invoke(ipcChannels.sessionsCatalogReadProcessEvents, sessionId) as Promise<SessionFactsResult>,
+		readOutline: (sessionId: string, limit?: number) => ipcRenderer.invoke(ipcChannels.sessionsCatalogReadOutline, sessionId, limit) as Promise<SessionOutlineSnapshot>,
+		readOutlineTitle: (sessionId: string, entryId: string) => ipcRenderer.invoke(ipcChannels.sessionsCatalogReadOutlineTitle, sessionId, entryId) as Promise<string | undefined>,
 		/** DSH 会话轨迹系统提示（request/header 的 EpochHeader.system；非 DSH/无数据返回 undefined）。 */
 		readDshSystemPrompt: (sessionId: string) => ipcRenderer.invoke(ipcChannels.sessionsCatalogReadDshSystemPrompt, sessionId) as Promise<string | undefined>,
 		/** 按需读取单条消息完整文本（工具结果截断后的「查看完整输出」）。
