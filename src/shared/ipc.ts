@@ -229,6 +229,29 @@ export const ipcChannels = {
 	automationUpdateSettings: "automation:update-settings",
 	automationPreviewCron: "automation:preview-cron",
 	automationChanged: "automation:changed",
+	/** 智能体市场（Agent Market）：配置 CRUD + 一次性调用（与划词工具同一域） */
+	agentProfilesGetSnapshot: "agent-profiles:get-snapshot",
+	agentProfilesCreate: "agent-profiles:create",
+	agentProfilesUpdate: "agent-profiles:update",
+	agentProfilesDelete: "agent-profiles:delete",
+	agentProfilesResetBuiltin: "agent-profiles:reset-builtin",
+	agentProfilesDuplicate: "agent-profiles:duplicate",
+	agentProfilesUpdateSettings: "agent-profiles:update-settings",
+	agentProfilesChanged: "agent-profiles:changed",
+	/** 一次性调用（划词翻译 / 市场面板）：事件按 runId 走 agentProfilesInvokeEvent。 */
+	agentProfilesInvoke: "agent-profiles:invoke",
+	agentProfilesInvokeCancel: "agent-profiles:invoke-cancel",
+	agentProfilesInvokeEvent: "agent-profiles:invoke-event",
+	/** 会话 ↔ 智能体绑定（「使用」新建会话时写入；解绑传 agentId=null）。 */
+	agentProfilesBindSession: "agent-profiles:bind-session",
+	/** 系统级划词浮窗（全局快捷键触发）：可见性/隐藏/发送回主窗口/捕获推流。 */
+	selectionToolGetState: "selection-tool:get-state",
+	selectionToolHide: "selection-tool:hide",
+	selectionToolInsertToMain: "selection-tool:insert-to-main",
+	selectionToolCaptured: "selection-tool:captured",
+	selectionToolStateChanged: "selection-tool:state-changed",
+	/** 主进程 → 主窗口：把系统级划词结果插入当前会话输入框。 */
+	selectionToolInserted: "selection-tool:inserted",
 	/** DSH 动态插件清单（G13 深化：进程内临时扩展，重启即失；按会话归属）。 */
 	dshPluginList: "dsh:plugin-list",
 	/** DSH 静态 Loader 条目清单（origin 标注 user/builtin 来源）。 */

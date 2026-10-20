@@ -33,10 +33,11 @@ PiDeck 是 Electron 桌面应用，在多个项目目录间管理和运行 pi RP
 - 已知限制：池化进程不带 PIDECK_SESSION_ID，安检门按默认档工作，per-session 安全覆盖对认领会话要重启才生效；池化 agent 对 agents:list/agent:state-changed 不可见。开关 `settings.standbyRuntimeEnabled`（默认开，开发者页可关）。启动耗时探针：`scripts/probePiStartup.mjs`（JITI_DEBUG=1 出逐模块 trace）。
 - 只读借用（Issue #316）：草稿会话斜杠命令预览 `AgentManager.draftCommands` 经 `StandbyAgentPool.peek(projectId)` 查同项目池进程的 `get_commands`（不认领、不消费、进程须 idle、指纹须新鲜）；链路 `sessions:draft-commands` IPC → 渲染层优先预览、空/失败回退本地技能/提示词发现；dsh/browser/preview 模式返回 null。
 
-**例外四：提示词增强侧车（`pi-enhance-host.mjs`，只允许「一次性单条补全请求」这一用途）**
+**例外四：一次性补全侧车（`pi-enhance-host.mjs`，只允许「一次性单条补全请求」用途：提示词增强 + 智能体一次性调用）**
 
 - 输入框提示词增强需要直接调 pi SDK 的补全（不走 RPC 会话），主进程经常驻单进程 sidecar 实现：`resources/pi-enhance-host.mjs`（stdout 只放 NDJSON 协议，载入 `PIDECK_PI_SDK_ENTRY` 指向的 pi `dist/index.js` 建 `ModelRuntime`），宿主侧收口在 `src/main/pi/enhance/EnhancePromptService.ts`，启动参数定位复用 `piAuthHostLaunch` 的 `resolvePiAuthHostLaunch`，必须列进 `extraResources`。
 - 常驻单进程多 run：新 run 打断旧 run、显式 cancel、boot/run 超时、进程意外退出都在服务层结算（每 run 回调恰好一次）；渲染层按 scopeKey 隔离，切会话作废进行中的 run，结果只回填发起方输入框。入口 `enhance:run`/`enhance:cancel`/`enhance:on-event` 在 `src/main/ipc/enhanceIpc.ts`（边界校验；provider/modelId 形态校验只挡空白/控制字符/超长，真实目录的 `builtin:` `https://` `a/b` 形态必须放行）与 preload 白名单；hook 为 `src/renderer/src/hooks/usePromptEnhance.ts`。目标模型优先级见 `src/shared/enhanceModelPreference.ts`：设置固定模型（`settings.enhanceModel`，设置页通用 tab）> 会话记录 > 引导页点选 > 部署/主进程默认，默认跟随会话模型。fail-safe 与 pi-auth 一致：sidecar 起不来只是按钮置灰 + toast，不影响 pi 会话与其余功能。禁止扩展成通用模型 API 桥。
+- **智能体一次性调用（划词工具 / 智能体市场）复用同一侧车协议，但必须独立实例**：装配层为 `src/main/agents/AgentInvokeService.ts` 注入**另一个** `EnhancePromptService` 实例（logger 命名空间 `agent-invoke`，退出清理登记名 `agent-invoke`），因为该服务的单飞语义是「新 run 打断旧 run」——共用实例会让划词翻译打断输入框增强。入口 `agent-profiles:invoke` / `agent-profiles:invoke-cancel` / `agent-profiles:invoke-event`（`src/main/ipc/agentInvokeIpc.ts`）。边界：`systemPrompt` 只能由主进程按 `agentId` 从 `AgentProfileStore`（`<userData>/agent-profiles.json`）解析，**渲染层不得直接传 systemPrompt**（只传短 instruction、目标语言与 provider/modelId）；一次性、无工具、不碰会话文件；事件按 runId 配对，`started|delta|done|aborted|error` 终态恰好一次。禁止把该通道做成任意 systemPrompt 直通。智能体本身是 PiDeck 层预设：会话与智能体的绑定存 `AgentMarketSettings.sessionAgentBindings`（只能经 `agent-profiles:bind-session` 改），发送时由 `sessionIpc` 调 `composeAgentInstruction` 把角色设定拼进 `SendPromptInput.agentMessage`（DSH 拒绝该通道，退化为可见前缀），PiDeck 不替 pi 写系统提示。**系统级划词**（`src/main/selection/`）是独立浮窗 + 唯一 `globalShortcut` 注册：键位来自 `shared/shortcuts.ts` 的 `openSelectionTool`，取词用模拟复制 + 剪贴板哨兵（读不到时返回 unsupported/capture-failed，绝不抛）；关开关必须立即注销快捷键，改键必须先释放旧键。
 
 **例外五：运行时控制扩展（`pi-deck-runtime.ts`，只允许 `/reload`）**
 
@@ -142,6 +143,8 @@ src/
 
 **窗口与 webview**：主窗口基线 `contextIsolation: true` + `nodeIntegration: false` + `webviewTag: true`（仅主窗口），新增窗口逐项评估禁止默认全开；Chromium 沙箱默认关闭是刻意的（Windows 安全软件/旧驱动在沙箱初始化触发 0x80000003），关闭时显式 `appendSwitch("no-sandbox")`，开关改动需整应用重启；`setWindowOpenHandler` 主窗口与 webview guest 都要注册（走 `openExternalUrl` 并 deny）；webview 用专属 `partition` 强制 `sandbox: true`/`nodeIntegration: false`/`webSecurity: true`，删除外部传入的 `preload`/`allowpopups`（见 `configureBrowserPanelWebviewHost`），`did-attach-webview` 校验 partition 不符立即 close，导航白名单 `will-frame-navigate`/`will-redirect`/`setWindowOpenHandler` 三层都要过（只拦一层会被重定向绕过）；自定义标题栏改动要验证三平台控制按钮、拖拽区、双击最大化。
 
+**E2E 测试窗口（不打扰模式）**：`PIDECK_E2E=1` 时主窗口默认摆到屏幕外（`src/main/e2eWindowMode.ts`：`setPosition(-32000,-32000)` + `setSkipTaskbar(true)` + `showInactive`），并关闭后台节流（`backgroundThrottling: false` 与 `disable-background-timer-throttling`/`disable-renderer-backgrounding`/`disable-backgrounding-occluded-windows` + `disable-features=CalculateNativeWinOcclusion`）——否则 Windows 遮挡判定会把屏幕外窗口当不可见、节流渲染，Playwright 点击/截图随机卡死。**跑 e2e 不得把窗口弹到用户桌面最前或抢焦点**：新增窗口/新 fixture 必须沿用同一开关，禁止 `show()`/`focus()`/`maximize()` 抢前台；需要真实窗口位置/几何断言的用例（如 `window-memory`、`quick-task`）必须 `test.use({ e2eWindowMode: "visible" })`（fixture 下发 `PIDECK_E2E_WINDOW_MODE=visible`），调试时想看窗口同样设该环境变量。摆放失败必须静默回退，不允许阻断 e2e（守卫：`tests/e2eWindowMode.test.mjs` + `e2e/window-background.spec.ts`）。
+
 **IPC 与 preload**：preload 不做业务，只做校验后的转发与订阅封装；事件推送 preload 侧返回 unsubscribe 函数，渲染层卸载必须退订。
 
 **原生模块与打包**：node-pty 等原生模块必须 `asarUnpack` 并 postinstall 修权限（`scripts/fix-pty-permissions.js`）；afterPack 删 node_modules 冗余文件必须有对应测试（`tests/afterPackCleanup.test.mjs`）；资源路径用 `process.resourcesPath`/`app.getAppPath()` 推导，禁止裸 `__dirname` 假设 asar 可读，preload 路径走 `preloadPath.ts`。**安装器完成页的「运行 PiDeck」必须直接启动 `$INSTDIR\${APP_EXECUTABLE_FILENAME}`**（`build/installer.nsh` 的 `customFinishPage`）——electron-builder 默认用 `$launchLink`，它优先取开始菜单 `PiDeck.lnk`，那条 .lnk 可能被指向另一份同名同版本的 PiDeck（解包构建/旧安装目录，实例 2026-10），装完点运行会跑错程序且版本号看着是对的；守卫测试 `tests/nsisFinishPageLaunch.test.mjs`。**原生模块禁止顶层静态 import**——JS 包装可能在模块求值时同步加载对应平台二进制（koffi 即如此），跨 arch 打包时可选依赖（`@koromix/koffi-*`）不会自动跟随，缺二进制环境启动即崩（issue #313）；必须经专属模块函数内 `createRequire` 惰性加载 + try/catch 降级，守卫测试见 `tests/cua/cuaKoffiFallback.test.mjs`。
@@ -165,6 +168,7 @@ src/
 | 针对性单测（改动涉及的测试文件，日常必跑） | `node --test tests/<相关>.test.mjs` |
 | 全量单测（仅跨域大改动/合并前最终确认） | `npm test` |
 | 单测串行（排查并发干扰） | `npm run test:serial` |
+| E2E（窗口默认屏幕外、不打扰；需要看窗口时设 `PIDECK_E2E_WINDOW_MODE=visible`） | `npx playwright test e2e/<相关>.spec.ts` |
 | 验证退出码（硬性） | 门禁命令禁止用管道吞 rc：`npm run typecheck \| tail` 返回的是 tail 的 0。用 `set -o pipefail` 或重定向到文件后查 `$?`（测试经沙箱 TS 转译对语法错误容错，可能假绿，typecheck/format 是唯一门禁——2026-10 实际漏过一个缺括号） |
 
 改动影响主进程/IPC/会话链路：typecheck + 相关针对性测试；纯 UI 样式微调至少 typecheck。
@@ -208,6 +212,7 @@ src/
 | 技能商店安装 | 商店搜索必须走注入的 `fetchImpl`（Electron net.fetch），禁裸全局 fetch（undici 不读代理，境外 API 挂到超时）；安装用 spawn+流式解析（禁 execFile 等终态输出）、进度走 `skillHub:install-progress`、子进程必注入代理 env（CLI 内部 git 不读 npm proxy） | 技能商店安装链路 |
 | 内置扩展热更新 | 判据是逐文件 sha256 不是版本号；覆盖层必须完整快照 + vendored 依赖；磁盘根统一走 `resolveBuiltInExtensionRoots()` | 内置扩展热更新 |
 | 生图存储 | **base64 不进 JSONL**（只存 ref）；读取永远有字节上界；`<img src>` 只走 `imageContentSrc()` | 生图会话存储 |
+| 智能体市场 / 划词工具 | 配置只落 `<userData>/agent-profiles.json`（内置 id `builtin-translate` 只补种不覆盖用户编辑）；一次性调用 `agent-profiles:invoke` 的 systemPrompt 只能由主进程按 agentId 解析（渲染层禁传），侧车必须**独立实例**（单飞语义，共用会打断输入框增强）；「使用」= 会话绑定（`sessionAgentBindings`），每次发送由主进程注入隐藏 `agentMessage`（DSH 退化为可见前缀），时间线只显示用户输入；市场是**页面覆盖层不是弹窗**，划词设置只在设置页；划词浮钮 mousedown 必须 preventDefault，与时间线「引用并提问」浮层共存时只能有一个浮层（时间线浮层内提供翻译动作）；系统级划词是**唯一 `globalShortcut` 注册**，键位仍来自 `shared/shortcuts.ts`，取词靠模拟复制+剪贴板哨兵并恢复原剪贴板，Wayland 无 xdotool 时降级 unsupported | 智能体市场与划词工具（agent-profiles.json + 一次性补全侧车 + 系统级划词浮窗） |
 | 会话消息编辑/删除/重发 | 编辑/删除写 pi 原生 `context_edit`（原文不改写、费用不回退；被移出的条目界面直接不显示，原始文件仍保留）；重发仍用 `deleted` 墓碑截断分支；追加条目的 parentId 必须取当前 leaf，pi 活着禁改会话文件，三道闸不许放宽 | 会话消息编辑/删除/重发 |
 | Markdown 渲染 | 唯一引擎 MarkdownStream，禁止再引 marked/react-markdown；流式与 settle 是两条路径，**复现要看最终态** | 会话 Markdown 渲染管线 |
 | 宿主插件 | 与 pi 扩展是两套系统（`src/main/plugins/`，不依赖 pi 进程）；授权按内容 sha256 指纹不按版本，指纹变即重新授权；历史读取 64MiB/10 万条硬预算；改 API/权限面必须同步 `src/preload/hostPlugin.ts` + `docs/host-plugin-dev-guide.md` + 脚手架（生成物过同一套 manifest 校验）；`service.local` 只给「点名权」（命令/参数/端口在主进程适配器里，id 白名单 `src/shared/localServices.ts`）；内置示例 `resources/host-plugins/` 由 `seedBuiltin` 落位（内容没被手改过才随新版刷新，手改过的永不覆盖；`seeded` 的 id 拒绝卸载）；`.pideck-plugin` NDJSON 归档逐文件 sha256；GitHub 安装只走 `codeload.github.com` 的 tar.gz + 自写 tar 解析（`src/main/plugins/hostPluginGitHub.ts`），禁为不可信输入引入第三方解压依赖，三条安装路径共用 `HostPluginManager.installFiles` 同一套预算与信任判定；pi-context 适配器 seam 是 fail-closed 契约 | 宿主插件 |
