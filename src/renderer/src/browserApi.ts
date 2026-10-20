@@ -262,7 +262,7 @@ export function createBrowserApi(): PiDesktopApi {
 				ok: false as const,
 				error: { code: "SESSION_COMMAND_FAILED" as const, debugDetails: "catalog message mutation is desktop-only" },
 			}),
-			readProcessEvents: async () => [],
+			readProcessEvents: async () => ({ events: [], version: "", coverage: { fromStart: true, chainComplete: true, readComplete: true, eventsTrimmed: false, reason: "unsupported" } }),
 			readReferenceMessages: async (sessionId) => {
 				const result = await request<{
 					messages: Awaited<ReturnType<PiDesktopApi["sessions"]["readReferenceMessages"]>>;

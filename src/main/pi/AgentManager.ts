@@ -14,6 +14,7 @@ import type {
 	ChatMessage,
 	CreateAgentInput,
 	ForkMessage,
+	SessionFactsResult,
 	I18nParams,
 	ImageContent,
 	SessionMessageImageTarget,
@@ -66,6 +67,7 @@ import { mergeHistoryWithPreservedMessages, stabilizeProjectedIdsFromIdentities,
 import { buildAgentSessionKey, toAbsoluteSessionPath, type AgentSessionIdentityDefaults } from "./agentSessionIdentity";
 import { SessionFileEditor, type SessionEntryTarget, type SessionFileRef } from "./SessionFileEditor";
 import { SessionHistoryReader, boundTurnWindowStart } from "./SessionHistoryReader";
+import { createTrajectoryFactsReader, type TrajectoryFactsReader } from "../sessions/trajectoryFactsReader";
 import { scanJsonlLines } from "../sessions/jsonlLineStream";
 import { estimateMessagesPayloadBytes } from "./messagePayloadSize";
 import { StoppedMessageIdentityCache } from "./stoppedMessageIdentity";
@@ -74,6 +76,7 @@ import { AgentMessageProjector, buildActiveBranchEntryIds as buildActiveBranchEn
 import { RewindCheckpointCoordinator } from "./RewindCheckpointCoordinator";
 import { LiveStreamChannel } from "./liveStreamChannel";
 import { resolveNotificationSessionId } from "./agentUtils";
+import { chatUsageFromPiUsage } from "./messageUsage";
 import { isRoleMessageRole } from "./sessionEntryIds";
 import { createStreamGateState, isStreamGateSealed, noteAbortSettled, openStreamGateForNewRun, sealStreamGate, type StreamGateState } from "./streamGate";
 import { RpcLiveLogTap } from "./rpcLiveLogTap";
@@ -190,6 +193,7 @@ export class AgentManager {
 	private readonly toolExecutingByAgent = new Map<string, string | null>();
 	private readonly sessionFileEditor: SessionFileEditor;
 	private readonly sessionHistoryReader: SessionHistoryReader;
+	private readonly trajectoryFacts: TrajectoryFactsReader;
 	private readonly messageProjector: AgentMessageProjector;
 	/**
 	 * agents:message 的节流批处理/增量标记/显示窗口推进收口在 MessageEmitBatcher；
@@ -533,6 +537,12 @@ export class AgentManager {
 						}
 					: undefined,
 			});
+		this.trajectoryFacts = createTrajectoryFactsReader({
+			source: {
+				getSessionFactIndex: (sessionPath) => this.sessionHistoryReader.getSessionFactIndex(sessionPath),
+				readSessionFactLines: (sessionPath, entries) => this.sessionHistoryReader.readSessionFactLines(sessionPath, entries),
+			},
+		});
 		this.sessionHistoryReader = new SessionHistoryReader({
 			toHostPath: (sessionPath) => this.toSessionHostPath(sessionPath),
 			convertMessages: (agentId, rawMessages, activeEntryIds) => this.convertAgentMessages(agentId, rawMessages, activeEntryIds),
@@ -1191,6 +1201,14 @@ export class AgentManager {
 	 */
 	async readSessionTodo(sessionPath: string): Promise<SessionTodoSnapshot | undefined> {
 		return this.sessionHistoryReader.readTodoSnapshot(sessionPath);
+	}
+
+	/**
+	 * 轨迹事实（提示词装载 + 过程事件）：索引选候选 + 小批读正文 + 内容版本缓存。
+	 * 文件未变时正文读取为 0；普通消息追加但事实未变时 version 不变。
+	 */
+	async readSessionFacts(sessionPath: string): Promise<SessionFactsResult> {
+		return this.trajectoryFacts.read(sessionPath);
 	}
 
 	/** 轮次维度显示分页：pageSize 复用为轮次数（readSessionDisplayTurnPage 内部夹紧上限） */
@@ -5220,6 +5238,16 @@ export class AgentManager {
 		const modelProvider = nonEmptyString(messageRecord?.provider);
 		const modelId = nonEmptyString(messageRecord?.model);
 		const extractedModel = modelProvider && modelId ? { provider: modelProvider, modelId } : undefined;
+		// 用量/实测耗时：message_end 的完整消息带 usage 与 durationMs（timestamp = 请求开始）。
+		// 轨迹账本的 token 列与真实区间依赖它们；缺失则不写（不补 0：未上报与 0 要可区分）。
+		const extractedUsage = chatUsageFromPiUsage(messageRecord?.usage);
+		const measuredDurationMs = typeof messageRecord?.durationMs === "number" && Number.isFinite(messageRecord.durationMs) ? messageRecord.durationMs : undefined;
+		const startedAtMs = typeof messageRecord?.timestamp === "number" && messageRecord.timestamp > 0 ? messageRecord.timestamp : undefined;
+		const usageMeta = {
+			...(extractedUsage ? { usage: extractedUsage } : {}),
+			...(measuredDurationMs !== undefined ? { durationMs: measuredDurationMs } : {}),
+			...(startedAtMs !== undefined && measuredDurationMs !== undefined ? { startedAt: startedAtMs } : {}),
+		};
 
 		if (existing) {
 			// 已有骨架：有抽出文本才覆盖；fallbackDelta 仅作追加兜底（终态路径）。
@@ -5233,6 +5261,9 @@ export class AgentManager {
 			}
 			if (extractedModel) {
 				existing.model = extractedModel;
+			}
+			if (Object.keys(usageMeta).length > 0) {
+				existing.meta = { ...existing.meta, ...usageMeta };
 			}
 			// 保留原始时间戳，不随 delta 刷新。
 			this.markMessagesDirtyFrom(agentId, existingIndex);
@@ -5248,6 +5279,7 @@ export class AgentManager {
 				timestamp: Date.now(),
 				...(finalStopReason ? { stopReason: finalStopReason } : {}),
 				...(extractedModel ? { model: extractedModel } : {}),
+				...(Object.keys(usageMeta).length > 0 ? { meta: usageMeta } : {}),
 			});
 			this.markMessagesDirtyFrom(agentId, list.length - 1);
 		}

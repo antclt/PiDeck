@@ -614,6 +614,36 @@ export type PluginHistoryGuard = {
 	remaining: { bytes: number; entries: number };
 };
 
+export type SessionFactEntry = {
+	id: string;
+	parentId: string | null;
+	type: string;
+	role?: string;
+	offset: number;
+	byteLength: number;
+	chainHostPath?: string;
+	oversized?: true;
+	// 以下元数据来自索引：事实读取不再为了普通事件读正文。
+	timestamp?: string;
+	summary?: string;
+	customType?: string;
+	modelChangeProvider?: string;
+	modelChangeId?: string;
+	thinkingLevel?: string;
+	tokensBefore?: number;
+};
+
+/** 事实读取所需的只读索引视图：活动父链条目（文件序）+ 版本指纹。 */
+export type SessionFactIndexSnapshot = {
+	hostPath: string;
+	size: number;
+	mtimeMs: number;
+	entries: SessionFactEntry[];
+	chainSources?: Array<{ hostPath: string; size: number; mtimeMs: number }>;
+	/** 会话头声明的 fork 来源；存在但 chainSources 缺失 = 祖先未合并。 */
+	headerParentSession?: string;
+};
+
 export class SessionHistoryReader {
 	private readonly sessionDisplayIndexes = new Map<string, SessionDisplayIndex>();
 	/** 宿主插件读取的单槽索引缓存：预算截断后的专用投影，与桌面 LRU 隔离，避免无总量上限的堆积。 */
@@ -680,6 +710,48 @@ export class SessionHistoryReader {
 	}
 
 	constructor(private readonly deps: SessionHistoryReaderDeps) {}
+
+	/**
+	 * 轨迹事实的只读索引视图：只返回活动父链的条目元数据（无正文）。
+	 * 调用方按类型选候选后再用 readSessionFactLines 小批读，正文读取量与实际需要成正比。
+	 */
+	async getSessionFactIndex(sessionPath: string): Promise<SessionFactIndexSnapshot> {
+		const index = await this.getSessionDisplayIndex(sessionPath);
+		const header = [...index.entries.values()].find((entry) => entry.type === "session");
+		return {
+			hostPath: index.hostPath,
+			size: index.size,
+			mtimeMs: index.mtimeMs,
+			entries: index.activeBranch.map((entry) => ({
+				id: entry.id,
+				parentId: entry.parentId,
+				type: entry.type,
+				role: entry.role,
+				offset: entry.offset,
+				byteLength: entry.byteLength,
+				...(entry.chainHostPath ? { chainHostPath: entry.chainHostPath } : {}),
+				...(entry.oversized ? { oversized: true as const } : {}),
+				...(entry.timestamp ? { timestamp: entry.timestamp } : {}),
+				...(entry.summary ? { summary: entry.summary } : {}),
+				...(entry.customType ? { customType: entry.customType } : {}),
+				...(entry.modelChangeProvider ? { modelChangeProvider: entry.modelChangeProvider } : {}),
+				...(entry.modelChangeId ? { modelChangeId: entry.modelChangeId } : {}),
+				...(entry.thinkingLevel ? { thinkingLevel: entry.thinkingLevel } : {}),
+				...(entry.tokensBefore !== undefined ? { tokensBefore: entry.tokensBefore } : {}),
+			})),
+			...(index.chainSources ? { chainSources: index.chainSources.map((source) => ({ ...source })) } : {}),
+			...(header?.parentSession ? { headerParentSession: header.parentSession } : {}),
+		};
+	}
+
+	/** 读指定条目正文（复用索引读取的并发/字节预算与 fork 来源配对）。 */
+	async readSessionFactLines(sessionPath: string, entries: SessionFactEntry[]): Promise<string[]> {
+		const index = await this.getSessionDisplayIndex(sessionPath);
+		return this.readIndexedLines(
+			index.hostPath,
+			entries.map((entry) => ({ ...entry, hasMessage: entry.type === "message" }) satisfies SessionDisplayEntry),
+		);
+	}
 
 	/**
 	 * 不启动 pi 进程，直接从 JSONL 构造与运行态相同的时间线数据。
@@ -1641,7 +1713,7 @@ export class SessionHistoryReader {
 		}
 		// pi 的完整 fork 已复制活动前缀（沿用 entry id），子文件就是分支权威；
 		// 再拼父分支不但重复消息，还会混入 fork 点之后/父会话后续追加的轮次。
-		if (own.activeMessageEntries.some((entry) => parent.entries.has(entry.id))) return own;
+		if (own.activeMessageEntries.some((entry) => parent.entries.has(entry.id))) return { ...own, chainSources: own.chainSources ?? [] };
 		// 增量 fork 才补祖先消息；offset/byteLength 必须与原始来源文件配对，
 		// 二级及以上的继承条目不能被重定向到直接父文件。
 		const inherited = parent.activeMessageEntries.map((entry) => ({ ...entry, chainHostPath: entry.chainHostPath ?? parent.hostPath }));

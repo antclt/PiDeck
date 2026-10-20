@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { useAtomValue } from "jotai";
 import { Loader2, Activity, ArrowLeft, Check, Clock, Copy, CornerUpLeft, FileJson, Hash, Wrench } from "lucide-react";
 import type { AgentRuntimeState, ChatMessage } from "../../../../../shared/types";
-import type { SessionProcessEvent } from "../../../../../shared/types/trajectory";
+import type { SessionProcessEvent, SessionPromptSnapshot } from "../../../../../shared/types/trajectory";
 import type { ModelTraceLogData } from "../../../../../shared/types/rpcLog";
 import { sessionRuntimeBySessionIdAtomFamily } from "../../../atoms";
 import { tpsDisplayModeAtom } from "../../../atoms/tps-atoms";
@@ -42,7 +42,12 @@ function kindLabel(record: TrajectoryRecord): string {
 	if (record.kind === "tool") return t("session.trajectory.kind.tool");
 	if (record.kind === "modelRequest") return t("session.trajectory.kind.modelRequest");
 	if (record.kind === "error") return t("session.trajectory.kind.error");
-	if (record.kind === "systemPrompt") return t("session.trajectory.kind.systemPrompt");
+	if (record.kind === "systemPrompt") {
+		if (record.promptKind === "initial") return t("session.trajectory.kind.systemPromptInitial");
+		if (record.promptKind === "update") return t("session.trajectory.kind.systemPromptUpdate");
+		if (record.promptKind === "snapshot") return t("session.trajectory.kind.systemPromptSnapshot");
+		return t("session.trajectory.kind.systemPrompt");
+	}
 	if (record.kind === "process") {
 		if (record.processKind === "session") return t("session.trajectory.kind.sessionHeader");
 		if (record.processKind === "sessionInfo") return t("session.trajectory.kind.sessionInfo");
@@ -52,6 +57,7 @@ function kindLabel(record: TrajectoryRecord): string {
 		if (record.processKind === "custom") return t("session.trajectory.kind.custom");
 		if (record.processKind === "import") return t("session.trajectory.kind.import");
 		if (record.processKind === "retry") return t("session.trajectory.kind.retry");
+		if (record.processKind === "usage") return t("session.trajectory.kind.usage");
 		return t("session.trajectory.kind.process");
 	}
 	return t("session.trajectory.kind.system");
@@ -91,6 +97,43 @@ function durationLabel(record: TrajectoryRecord): string {
 	return formatDuration(record.durationMs);
 }
 
+/** 账本行的时间列：有区间的显示耗时，时间点记录（用户/过程/系统提示词/错误）显示发生时刻。
+ *  「未测到」只用于有区间但没测到的记录，不给点记录冒充。 */
+function rowTimeLabel(record: TrajectoryRecord): string {
+	if (record.kind === "modelRequest") return traceSizeLabel(record.modelTrace?.payloadBytes) || "—";
+	if (record.endedAt === undefined) return t("session.trajectory.inFlight");
+	if (record.durationMs === undefined) return record.startedAt > 0 ? formatClock(record.startedAt) : "—";
+	return formatDuration(record.durationMs);
+}
+
+/** 紧凑 token 数（账本列窄，完整值走 hover 提示与检查器）。 */
+function compactTokens(value: number): string {
+	if (value >= 10_000) return `${Math.round(value / 1000)}k`;
+	if (value >= 1_000) return `${(value / 1000).toFixed(1)}k`;
+	return String(value);
+}
+
+/** 账本行内的「输入→输出」用量摘要；无用量（旧数据/未上报）不占位。 */
+function usageSummary(record: TrajectoryRecord): string | undefined {
+	if (!record.usage) return undefined;
+	return `${compactTokens(record.usage.inputTokens)}→${compactTokens(record.usage.outputTokens)}`;
+}
+
+/** 用量 hover 提示：完整数字（含缓存/推理），键名走 i18n。 */
+function usageTitle(record: TrajectoryRecord): string | undefined {
+	const usage = record.usage;
+	if (!usage) return undefined;
+	return [
+		`${t("session.trajectory.field.inputTokens")} ${usage.inputTokens}`,
+		`${t("session.trajectory.field.outputTokens")} ${usage.outputTokens}`,
+		usage.reasoningTokens !== undefined ? `${t("session.trajectory.field.reasoningTokens")} ${usage.reasoningTokens}` : undefined,
+		usage.cacheReadTokens !== undefined ? `${t("session.trajectory.field.cacheRead")} ${usage.cacheReadTokens}` : undefined,
+		usage.cacheWriteTokens !== undefined ? `${t("session.trajectory.field.cacheWrite")} ${usage.cacheWriteTokens}` : undefined,
+	]
+		.filter(Boolean)
+		.join(" · ");
+}
+
 /**
  * 会话轨迹复盘：3-lane 时间线 + turn 账本 + 选中 inspector。
  * 数据来自当前栏已加载的 ChatMessage（含历史页），不另开 IPC。
@@ -100,7 +143,6 @@ export function SessionTrajectoryView(props: {
 	sessionId: string;
 	messages: ChatMessage[];
 	processEvents?: SessionProcessEvent[];
-	systemPrompt?: string;
 	/** 会话是否 DSH 后端（系统提示说明文案按后端区分）。 */
 	isDsh?: boolean;
 	/** 模型请求快照摘要（pi 会话；每个请求一行，可回读完整请求体）。 */
@@ -131,10 +173,9 @@ export function SessionTrajectoryView(props: {
 		() =>
 			buildTrajectory(props.messages, now, {
 				processEvents: props.processEvents,
-				systemPrompt: props.systemPrompt,
 				modelTraces: props.modelTraces,
 			}),
-		[props.messages, props.processEvents, props.systemPrompt, props.modelTraces, now],
+		[props.messages, props.processEvents, props.modelTraces, now],
 	);
 	const visible = useMemo(() => filterRecordsByRange(model.records, range), [model.records, range]);
 	const selected = visible.find((record) => record.id === selectedId) ?? model.records.find((record) => record.id === selectedId);
@@ -383,7 +424,12 @@ function TrajectoryLedger(props: {
 									<span className={`mt-1 size-1.5 shrink-0 rounded-full ${laneTone(record.lane)}`} />
 									<span className="w-20 shrink-0 font-medium text-foreground">{kindLabel(record)}</span>
 									<span className="min-w-0 flex-1 truncate text-muted-foreground">{record.summary || "—"}</span>
-									<span className="shrink-0 tabular-nums text-muted-foreground">{durationLabel(record)}</span>
+									{usageSummary(record) ? (
+										<span className="shrink-0 tabular-nums text-micro text-muted-foreground" title={usageTitle(record)}>
+											{usageSummary(record)}
+										</span>
+									) : null}
+									<span className="shrink-0 tabular-nums text-muted-foreground">{rowTimeLabel(record)}</span>
 								</button>
 							</li>
 						);
@@ -423,6 +469,50 @@ function CopyableBlock(props: { label?: string; text: string }) {
 				</button>
 			</div>
 			<pre className="max-h-72 overflow-auto rounded-md bg-muted/50 p-2 text-micro leading-relaxed wrap-break-word whitespace-pre-wrap">{props.text}</pre>
+		</div>
+	);
+}
+
+/**
+ * 系统提示词快照详情：全文 + 当前工具目录 + 相对上一份的变更。
+ * 数据只来自会话事实（pi 的 system 条目重放 / dsh 的 system.message 与请求头），
+ * 没有事实就不渲染（不再用 pi-system 模板冒充）。
+ */
+function PromptSnapshotDetail(props: { prompt: SessionPromptSnapshot }) {
+	const prompt = props.prompt;
+	const changes = [
+		[t("session.trajectory.prompt.sectionsAdded"), prompt.sectionsAdded],
+		[t("session.trajectory.prompt.sectionsUpdated"), prompt.sectionsUpdated],
+		[t("session.trajectory.prompt.sectionsRemoved"), prompt.sectionsRemoved],
+		[t("session.trajectory.prompt.toolsAdded"), prompt.toolsAdded],
+		[t("session.trajectory.prompt.toolsRemoved"), prompt.toolsRemoved],
+	].filter((entry): entry is [string, string[]] => Array.isArray(entry[1]) && entry[1].length > 0);
+	return (
+		<div className="mt-2 border-t border-border/60 pt-3">
+			<dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-caption">
+				<dt className="text-muted-foreground">{t("session.trajectory.prompt.chars")}</dt>
+				<dd className="tabular-nums">{prompt.text.length}</dd>
+				<dt className="text-muted-foreground">{t("session.trajectory.prompt.tools")}</dt>
+				<dd className="tabular-nums">{prompt.tools.length}</dd>
+			</dl>
+			{changes.length > 0 ? (
+				<ul className="mt-2 space-y-1 text-caption">
+					{changes.map(([label, names]) => (
+						<li key={label} className="flex gap-1.5">
+							<span className="shrink-0 text-muted-foreground">{label}</span>
+							<span className="min-w-0 font-mono text-micro wrap-break-word">{names.join(", ")}</span>
+						</li>
+					))}
+				</ul>
+			) : null}
+			{prompt.tools.length > 0 ? (
+				<div className="mt-2">
+					<p className="mb-1 text-micro font-medium tracking-wide text-muted-foreground uppercase">{t("session.trajectory.prompt.toolList")}</p>
+					<p className="font-mono text-micro leading-relaxed text-muted-foreground wrap-break-word">{prompt.tools.join(", ")}</p>
+				</div>
+			) : null}
+			{prompt.truncated ? <p className="mt-2 text-caption text-amber-600 dark:text-amber-400">{t("session.trajectory.prompt.truncated")}</p> : null}
+			<CopyableBlock label={t("session.trajectory.prompt.fullText")} text={prompt.text} />
 		</div>
 	);
 }
@@ -494,6 +584,7 @@ function TrajectoryInspector(props: {
 				{record.kind === "tool" ? record.toolName : kindLabel(record)}
 			</div>
 			{record.kind === "systemPrompt" ? <p className="mb-2 text-caption text-muted-foreground">{props.isDsh ? t("session.trajectory.systemPromptHintDsh") : t("session.trajectory.systemPromptHint")}</p> : null}
+			{record.prompt ? <PromptSnapshotDetail prompt={record.prompt} /> : null}
 			<dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-caption">
 				{record.startedAt > 0 ? (
 					<>
@@ -541,6 +632,12 @@ function TrajectoryInspector(props: {
 						<dd className="tabular-nums">{record.usage.inputTokens}</dd>
 						<dt className="text-muted-foreground">{t("session.trajectory.field.outputTokens")}</dt>
 						<dd className="tabular-nums">{record.usage.outputTokens}</dd>
+						{record.usage.reasoningTokens !== undefined ? (
+							<>
+								<dt className="text-muted-foreground">{t("session.trajectory.field.reasoningTokens")}</dt>
+								<dd className="tabular-nums">{record.usage.reasoningTokens}</dd>
+							</>
+						) : null}
 						{record.usage.cacheReadTokens !== undefined ? (
 							<>
 								<dt className="text-muted-foreground">{t("session.trajectory.field.cacheRead")}</dt>
@@ -603,14 +700,14 @@ function TrajectoryInspector(props: {
 				) : null}
 			</dl>
 			{record.inputDetail ? <CopyableBlock label={t("session.trajectory.field.payload")} text={record.inputDetail} /> : null}
-			{record.outputDetail ? <CopyableBlock label={t("session.trajectory.field.result")} text={record.outputDetail} /> : null}
+			{record.outputDetail ? <CopyableBlock label={t("session.trajectory.field.result")} text={record.outputDetail} /> : null}{" "}
 			{record.kind === "modelRequest" && record.modelTrace?.agentId ? (
 				<button type="button" className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-border/70 px-2 py-1.5 text-caption hover:bg-muted" onClick={openTrace}>
 					<FileJson size={13} />
 					{t("session.trajectory.viewFullRequest")}
 				</button>
 			) : null}
-			{!record.inputDetail && !record.outputDetail && (record.detail || record.text) ? <CopyableBlock text={record.detail || record.text || ""} /> : null}
+			{!record.prompt && !record.inputDetail && !record.outputDetail && (record.detail || record.text) ? <CopyableBlock text={record.detail || record.text || ""} /> : null}
 			{state && (state.ttftMs !== undefined || state.inputTokens !== undefined || state.totalMs !== undefined || state.dshSessionStats !== undefined) ? (
 				<div className="mt-4 border-t border-border/60 pt-3">
 					<div className="mb-1 flex items-center gap-1 text-caption font-medium">

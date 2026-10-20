@@ -1,6 +1,12 @@
 import type { SessionProcessEvent } from "../../shared/types/trajectory";
 import { scanJsonlLines } from "./jsonlLineStream";
-import { MAX_EVENTS, parseSessionProcessEventLine } from "./sessionProcessEvents";
+import { MAX_EVENTS, createSessionProcessCollector, retainProcessEvents } from "./sessionProcessEvents";
+
+/**
+ * 事件上限满了之后，为了继续捕获后段提示词变化而额外扫描的正文字节预算。
+ * 超过就停：账本宁可只覆盖到某处并标记覆盖不足，也不能为一条轨迹读遍几百 MB。
+ */
+export const TRAIL_SCAN_BYTES = 8 * 1024 * 1024;
 
 /**
  * 直接从会话文件流式抽过程事件（历史会话的轨迹账本入口）。
@@ -12,18 +18,23 @@ import { MAX_EVENTS, parseSessionProcessEventLine } from "./sessionProcessEvents
  * 见 jsonlLineStream 模块注释。
  */
 export async function parseSessionProcessEventsFromFile(filePath: string): Promise<SessionProcessEvent[]> {
-	const events: SessionProcessEvent[] = [];
+	let events: SessionProcessEvent[] = [];
+	const collector = createSessionProcessCollector();
+	let trailBytes = 0;
 	try {
 		await scanJsonlLines(filePath, (line, context) => {
-			const event = parseSessionProcessEventLine(line, context.index);
-			if (!event) return;
-			events.push(event);
-			if (events.length >= MAX_EVENTS) return "stop";
+			// 已满上限：只为后续提示词变化继续扫一段有界尾巴，普通事件不再往尾部长。
+			if (events.length >= MAX_EVENTS) {
+				trailBytes += context.byteLength;
+				if (trailBytes > TRAIL_SCAN_BYTES) return "stop";
+			}
+			events.push(...collector.push(line, context.index));
+			if (events.length > MAX_EVENTS) events = retainProcessEvents(events, MAX_EVENTS);
 		});
 	} catch (error) {
 		// 读盘中途失败但已收到部分事件：返回部分结果；一条都没读到才按失败处理
 		// （与旧「整文件读失败」的对外表现一致，由 IPC 层转错误态）。
 		if (events.length === 0) throw error;
 	}
-	return events;
+	return retainProcessEvents([...events, ...collector.finish()], MAX_EVENTS);
 }

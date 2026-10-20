@@ -741,7 +741,7 @@ export function createPreviewApi(): PiDesktopApi {
 			removeCatalogMessageImage: async () => ({ ok: false as const, error: { code: "SESSION_COMMAND_FAILED" as const } }),
 			deleteCatalogMessage: async () => ({ ok: true as const, value: undefined }),
 			prepareCatalogResend: async () => ({ ok: true as const, value: { text: "" } }),
-			readProcessEvents: async () => [],
+			readProcessEvents: async () => ({ events: [], version: "", coverage: { fromStart: true, chainComplete: true, readComplete: true, eventsTrimmed: false, reason: "unsupported" } }),
 			readDshSystemPrompt: async () => undefined,
 			readMessageFullText: async () => ({ text: "" }),
 			readReferenceMessages: async () => [

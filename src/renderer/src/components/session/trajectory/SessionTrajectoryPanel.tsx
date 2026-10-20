@@ -42,20 +42,28 @@ export function SessionTrajectoryPanel() {
 		);
 	}
 
+	// 覆盖范围提示：预算/祖先/窗口缺失时说明「没读到」，不能伪装成「没有事实」。
+	const coverage = source.processCoverage;
+	const coverageNotice = !coverage ? undefined : !coverage.readComplete && coverage.reason === "budget" ? t("session.trajectory.coverageBudget") : !coverage.chainComplete ? t("session.trajectory.coverageAncestor") : !coverage.fromStart ? t("session.trajectory.coverageWindow") : undefined;
+
 	return (
-		<SessionTrajectoryView
-			sessionId={sessionId}
-			messages={source.messages}
-			processEvents={source.processEvents}
-			systemPrompt={source.systemPrompt}
-			modelTraces={source.modelTraces}
-			sourceSession={sourceSession}
-			onOpenSourceSession={sourceSession ? openSourceSession : undefined}
-			isDsh={source.isDshSession}
-			hasMoreMessages={source.hasMoreMessages}
-			isLoadingMoreMessages={source.isLoadingMoreMessages}
-			onLoadMore={source.loadMore}
-			variant="drawer"
-		/>
+		<div className="flex h-full min-h-0 flex-col" data-session-view="trajectory">
+			{coverageNotice ? <p className="shrink-0 border-b border-border/60 px-3 py-1.5 text-caption text-muted-foreground">{coverageNotice}</p> : null}
+			<div className="min-h-0 flex-1">
+				<SessionTrajectoryView
+					sessionId={sessionId}
+					messages={source.messages}
+					processEvents={source.processEvents}
+					modelTraces={source.modelTraces}
+					sourceSession={sourceSession}
+					onOpenSourceSession={sourceSession ? openSourceSession : undefined}
+					isDsh={source.isDshSession}
+					hasMoreMessages={source.hasMoreMessages}
+					isLoadingMoreMessages={source.isLoadingMoreMessages}
+					onLoadMore={source.loadMore}
+					variant="drawer"
+				/>
+			</div>
+		</div>
 	);
 }

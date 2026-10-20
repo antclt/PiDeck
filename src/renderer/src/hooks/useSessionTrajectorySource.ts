@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { atom, useAtomValue, useSetAtom } from "jotai";
 import { desktopApi } from "../desktopApi";
-import type { SessionProcessEvent } from "../../../shared/types/trajectory";
+import type { SessionFactsCoverage, SessionProcessEvent } from "../../../shared/types/trajectory";
 import type { SessionRecord } from "../../../shared/types";
 import { isModelTraceLogData } from "../../../shared/types/rpcLog";
 import { prependSessionHistoryPageAtom, prependSessionMessagePageAtom, sessionMessageCacheBySessionIdAtomFamily, sessionRecordByIdAtomFamily, sessionRuntimeBySessionIdAtomFamily, type SessionMessageCacheEntry, type SessionRuntimeViewState } from "../atoms";
 import { sessionHistoryUnavailableState } from "../utils/sessionHistoryAvailability";
 import { isLiveRuntimeStatus } from "../utils/sessionCommands";
-import { parseModelTracePayload } from "../utils/modelTraceParse";
 import type { TrajectoryModelTraceSummary } from "../components/session/trajectory/buildTrajectory";
 
 /** 与时间线 runtime 翻页对齐：一次补 3 轮，复用同一份消息缓存。 */
@@ -23,10 +22,9 @@ const EMPTY_RUNTIME_ATOM = atom<SessionRuntimeViewState | undefined>(undefined);
  */
 export function useSessionTrajectorySource(sessionId: string | undefined) {
 	const cachedEntry = useAtomValue(sessionId ? sessionMessageCacheBySessionIdAtomFamily(sessionId) : EMPTY_CACHE_ATOM);
-	// dsh 会话的系统提示在 DSH harness 内部组装（persona + sections），文本从
-	// request/header 事件读取（readDshSystemPrompt）；pi 的 pi-system 模板只对 pi
-	// 会话是「参考系统提示」。按 backend 区分来源，否则 dsh 会话的轨迹会错误显示
-	// pi 的系统提示（2026-08 用户反馈）。
+	// dsh 会话的过程事件由运行时会话按 mux/重放收集，历史会话从 host history 事件流
+	// 推导；两者的系统提示词快照都走同一条 processEvents 链路（不再单独读
+	// request/header 的「最后一份」文本——那条路径只能看到最新提示，看不到初始与变化）。
 	const record = useAtomValue(sessionId ? sessionRecordByIdAtomFamily(sessionId) : EMPTY_RECORD_ATOM);
 	const isDshSession = record?.backend === "dsh";
 	const runtime = useAtomValue(sessionId ? sessionRuntimeBySessionIdAtomFamily(sessionId) : EMPTY_RUNTIME_ATOM);
@@ -34,7 +32,8 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 	const prependHistoryPage = useSetAtom(prependSessionHistoryPageAtom);
 	const [isLoadingMore, setIsLoadingMore] = useState(false);
 	const [processEvents, setProcessEvents] = useState<SessionProcessEvent[]>([]);
-	const [systemPrompt, setSystemPrompt] = useState<string | undefined>(undefined);
+	// 事实覆盖范围：预算/祖先/窗口缺失时账本要能说明「没读到」而不是「没有」。
+	const [processCoverage, setProcessCoverage] = useState<SessionFactsCoverage | undefined>(undefined);
 	const [modelTraces, setModelTraces] = useState<TrajectoryModelTraceSummary[]>([]);
 	const loadSequenceRef = useRef(0);
 	const processSequenceRef = useRef(0);
@@ -48,12 +47,16 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 		const sequence = ++processSequenceRef.current;
 		void desktopApi.sessions
 			.readProcessEvents(sessionId)
-			.then((events) => {
+			.then((result) => {
 				if (processSequenceRef.current !== sequence) return;
-				setProcessEvents(events);
+				setProcessEvents(result.events);
+				setProcessCoverage(result.coverage);
 			})
 			.catch(() => {
-				if (processSequenceRef.current === sequence) setProcessEvents([]);
+				if (processSequenceRef.current === sequence) {
+					setProcessEvents([]);
+					setProcessCoverage(undefined);
+				}
 			});
 	}, [sessionId, cachedEntry?.revision, cachedEntry?.updatedAt]);
 
@@ -64,66 +67,6 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 	// 暂无法归属，接受缺失——快照保留 30 天，近期会话不受影响）。
 	const runtimeAgentId = runtime?.agentId;
 	const lastKnownAgentId = runtimeAgentId;
-
-	// 系统提示：pi 会话优先用最近一次模型请求快照里的真实 system（含技能上下文，
-	// 与发给供应商的请求体同源）；无快照/解析失败退回 pi-system 模板参考。
-	// dsh 会话从 host 的 request/header 事件读当轮真实系统提示（harness 按
-	// persona + sections 在请求时组装，dsh-web 轨迹同源），未装配/无数据时不展示。
-	useEffect(() => {
-		if (!sessionId) {
-			setSystemPrompt(undefined);
-			return;
-		}
-		let cancelled = false;
-		const loadPiTemplate = () => {
-			if (cancelled) return;
-			void desktopApi.prompts
-				.list()
-				.then((result) => {
-					if (cancelled) return;
-					const prompt = result.templates.find((item) => item.name === "pi-system");
-					setSystemPrompt(prompt?.content);
-				})
-				.catch(() => {
-					if (!cancelled) setSystemPrompt(undefined);
-				});
-		};
-		if (isDshSession) {
-			void desktopApi.sessions
-				.readDshSystemPrompt(sessionId)
-				.then((prompt) => {
-					if (cancelled) return;
-					setSystemPrompt(prompt);
-				})
-				.catch(() => {
-					if (!cancelled) setSystemPrompt(undefined);
-				});
-			return () => {
-				cancelled = true;
-			};
-		}
-		const latest = modelTraces.at(-1);
-		if (!latest?.agentId) {
-			loadPiTemplate();
-			return () => {
-				cancelled = true;
-			};
-		}
-		void desktopApi.rpcLogs
-			.getModelTrace({ agentId: latest.agentId, traceId: latest.traceId })
-			.then((traceRecord) => {
-				if (cancelled) return;
-				const systemText = traceRecord ? parseModelTracePayload(traceRecord.payloadJson).system?.text : undefined;
-				if (systemText && systemText.trim()) setSystemPrompt(systemText);
-				else loadPiTemplate();
-			})
-			.catch(() => {
-				if (!cancelled) loadPiTemplate();
-			});
-		return () => {
-			cancelled = true;
-		};
-	}, [sessionId, isDshSession, modelTraces]);
 
 	const messages = useMemo(() => {
 		if (!cachedEntry) return [];
@@ -225,7 +168,7 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 	return {
 		messages,
 		processEvents,
-		systemPrompt,
+		processCoverage,
 		modelTraces,
 		isDshSession,
 		hasMoreMessages: hasMore,

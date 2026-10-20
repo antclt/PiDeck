@@ -11,6 +11,7 @@ import {
 	type ToolDetailStatus,
 } from "../../shared/formatToolDetail";
 import { extractMessageText } from "./messageContent";
+import { chatUsageFromPiUsage } from "./messageUsage";
 import { asRecord } from "./agentUtils";
 import { isRoleMessageRole, takeActiveEntryId } from "./sessionEntryIds";
 
@@ -142,6 +143,12 @@ export class AgentMessageProjector {
 						const modelProvider = typeof typed.provider === "string" ? typed.provider : "";
 						const modelId = typeof typed.model === "string" ? typed.model : "";
 						const model = modelProvider && modelId ? { provider: modelProvider, modelId } : undefined;
+						// 用量与实测耗时：pi 的 assistant 消息自带 usage（含缓存/推理/费用）与
+						// durationMs（timestamp = 请求开始）。轨迹账本的 token 列与真实区间
+						// 全依赖这两个字段；丢掉就只能靠邻居锚点猜。
+						const usage = chatUsageFromPiUsage(typed.usage);
+						const measuredDurationMs = typeof typed.durationMs === "number" && Number.isFinite(typed.durationMs) ? typed.durationMs : undefined;
+						const startedAt = typeof typed.timestamp === "number" && typed.timestamp > 0 ? typed.timestamp : undefined;
 						return [
 							{
 								id: `${agentId}-history-${currentEntryId ?? index}`,
@@ -153,6 +160,9 @@ export class AgentMessageProjector {
 									...(currentEntryId ? { entryId: currentEntryId } : {}),
 									_piDeckMsgSeq: index,
 									...(recoveredImageGen && (recoveredImageGen.status === "complete" || recoveredImageGen.status === "generating" || recoveredImageGen.status === "error") ? { imageGen: recoveredImageGen } : {}),
+									...(usage ? { usage } : {}),
+									...(measuredDurationMs !== undefined ? { durationMs: measuredDurationMs } : {}),
+									...(startedAt !== undefined && measuredDurationMs !== undefined ? { startedAt } : {}),
 								},
 								...(thinking ? { thinking } : {}),
 								...(images.length > 0 ? { images } : {}),

@@ -30,6 +30,8 @@ import type {
 	SendPromptInput,
 	SendPromptResult,
 	SessionRecord,
+	SessionFactsCoverage,
+	SessionFactsResult,
 	SessionProcessEvent,
 	DshModelDiscoveryInput,
 	FetchedModel,
@@ -241,7 +243,9 @@ export type DshBackendIpcDeps = {
 	/** ACP 会话消息回读（运行时内存投影；未激活返回空数组）；未装配时返回空数组。 */
 	readAcpMessages?: (acpSessionId: string) => import("../../shared/types").ChatMessage[];
 	/** DSH 轨迹过程事件（运行时会话按 mux/重放收集；历史会话从 host history 推导；未装配时返回空数组）。 */
-	readDshProcessEvents?: (agentId: string | undefined, dshSessionId: string | undefined) => Promise<import("../../shared/types/trajectory").SessionProcessEvent[]>;
+	readDshProcessEvents?: (agentId: string | undefined, dshSessionId: string | undefined) => Promise<{ events: import("../../shared/types/trajectory").SessionProcessEvent[]; fromStart: boolean }>;
+	/** pi 轨迹事实（索引候选 + 小批读取 + 内容版本缓存）；缺省时回退旧的全文件扫描。 */
+	readSessionFacts?: (sessionPath: string) => Promise<import("../../shared/types/trajectory").SessionFactsResult>;
 	/** DSH 轨迹系统提示（运行时会话读投影缓存；历史会话从 host history 折叠 request/header；未装配返回 undefined）。 */
 	readDshSystemPrompt?: (agentId: string | undefined, dshSessionId: string | undefined) => Promise<string | undefined>;
 	/** DSH 「查看完整输出」（工具结果全文随投影消息存 meta.fullText）；未装配时抛错。 */
@@ -498,6 +502,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		readDshSessionModel,
 		readAcpMessages,
 		readDshProcessEvents,
+		readSessionFacts,
 		readDshSystemPrompt,
 		readDshMessageFullText,
 		resolveDshSessionFilePath,
@@ -1214,20 +1219,30 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			throw error;
 		}
 	});
-	ipcMain.handle(ipcChannels.sessionsCatalogReadProcessEvents, async (_event, sessionId: string): Promise<SessionProcessEvent[]> => {
-		if (typeof sessionId !== "string" || !sessionId.trim()) return [];
+	ipcMain.handle(ipcChannels.sessionsCatalogReadProcessEvents, async (_event, sessionId: string): Promise<SessionFactsResult> => {
+		const unavailable = (reason: SessionFactsCoverage["reason"]): SessionFactsResult => ({ events: [], version: "", coverage: { fromStart: true, chainComplete: true, readComplete: true, eventsTrimmed: false, ...(reason ? { reason } : {}) } });
+		if (typeof sessionId !== "string" || !sessionId.trim()) return unavailable("unavailable");
 		const entry = sessionCatalog.get(sessionId);
 		// DSH 会话没有 pi 会话文件：过程事件由运行时会话按 mux/重放收集，
 		// 历史（未激活）会话从 host history 事件流推导（轨迹账本的
 		// modelChange/permission/plan/goal/compaction 记录）。
 		if (entry?.backend === "dsh" && readDshProcessEvents) {
 			const target = sessionRuntimeCoordinator.getTarget(sessionId);
-			return readDshProcessEvents(target?.agentId, entry.dshSessionId);
+			const { events, fromStart } = await readDshProcessEvents(target?.agentId, entry.dshSessionId);
+			const last = events.at(-1);
+			return {
+				events,
+				version: `dsh:${events.length}:${last?.id ?? ""}:${last?.seq ?? ""}`,
+				coverage: { fromStart, chainComplete: true, readComplete: true, eventsTrimmed: false, ...(fromStart ? {} : { reason: "history-window" as const }) },
+			};
 		}
-		if (!entry?.filePath) return [];
-		// 流式扫描（收够 MAX_EVENTS 即停）：历史大会话读全文会撞 V8 单字符串上限 /
-		// 主进程 384MB 堆上限（闪退），而账本只需要前若干条记录。
-		return parseSessionProcessEventsFromFile(entry.filePath);
+		if (!entry?.filePath) return unavailable("unavailable");
+		if (readSessionFacts) {
+			// 索引候选 + 小批读 + 内容版本缓存：文件未变时不读正文（见 trajectoryFactsReader）。
+			return readSessionFacts(entry.filePath);
+		}
+		// 无索引入口时回退流式扫描（有界尾巴，仍受事件保留上限约束）。
+		return { events: await parseSessionProcessEventsFromFile(entry.filePath), version: "", coverage: { fromStart: true, chainComplete: true, readComplete: true, eventsTrimmed: false } };
 	});
 	ipcMain.handle(ipcChannels.sessionsCatalogReadDshSystemPrompt, async (_event, sessionId: string): Promise<string | undefined> => {
 		if (typeof sessionId !== "string" || !sessionId.trim()) return undefined;
