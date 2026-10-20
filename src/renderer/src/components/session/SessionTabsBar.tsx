@@ -20,6 +20,7 @@ import { TitleScrollText } from "../sidebar/TitleScrollText";
 import { SessionHeader } from "./SessionHeader";
 import type { SessionMenuRunControl } from "./SessionActionsMenu";
 import { SessionActivityIndicator } from "./SessionActivityIndicator";
+import { TAB_CLOSE_BUTTON_CLASS } from "../../utils/tabCloseButton";
 
 import { SESSION_TAB_DRAG_MIME } from "../../utils/sessionSplitEdge";
 import { buildSessionTabBarEntries } from "../../utils/sessionTabGroups";
@@ -628,7 +629,7 @@ function EditorWorkbenchTab(props: { tab: WorkbenchEditorTabItem; onSelect?: (ta
 							role="tab-close"
 							aria-label={t("tabs.close")}
 							title={t("tabs.close")}
-							className={cn("inline-grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground/70 transition-[color,background-color,opacity] hover:bg-accent hover:text-foreground", tab.active ? "opacity-60 hover:opacity-100" : "opacity-0 group-hover:opacity-60")}
+							className={cn(TAB_CLOSE_BUTTON_CLASS, tab.active ? "opacity-70 hover:opacity-100" : "opacity-0 group-hover:opacity-70")}
 							onClick={(event) => {
 								event.stopPropagation();
 								props.onClose?.(tab.id);
@@ -684,7 +685,7 @@ function HostPluginTab(props: { tab: { title: string; icon?: React.ComponentType
 					role="tab-close"
 					aria-label={t("tabs.close")}
 					title={t("tabs.close")}
-					className="inline-grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground/70 opacity-60 transition-[color,background-color,opacity] hover:bg-accent hover:text-foreground hover:opacity-100"
+					className={cn(TAB_CLOSE_BUTTON_CLASS, "opacity-70 hover:opacity-100")}
 					onClick={(event) => {
 						event.stopPropagation();
 						tab.onClose();
@@ -963,7 +964,7 @@ function SessionTab(props: {
 										role="tab-close"
 										aria-label={t("tabs.close")}
 										title={t("tabs.close")}
-										className={cn("inline-grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground/70 transition-[color,background-color,opacity] hover:bg-accent hover:text-foreground", active ? "opacity-60 hover:opacity-100" : "opacity-0 group-hover:opacity-60")}
+										className={cn(TAB_CLOSE_BUTTON_CLASS, active ? "opacity-70 hover:opacity-100" : "opacity-0 group-hover:opacity-70")}
 										onClick={(event) => {
 											event.stopPropagation();
 											close();
