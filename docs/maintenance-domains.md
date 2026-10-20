@@ -153,6 +153,19 @@
 - **回归测试必须跑真实层级**：表格行（cell 内 text）、跨换行正文（`\n` 之后仍是同一个 text 节点）、inline code `__fileLink` 分支、路径正好在末尾（不留空 text 节点）。写法见 `tests/markdownPathTailTruncation.test.mjs`（unified + remark-parse 二次解析对比可见文本，不依赖 cwd/真实项目）。
 - **考古别只看最近几笔提交**：渲染丢文本这类回归可能潜伏数周，用 `git log --oneline -- <文件>` / `git log -S <片段>` 回到底，确认是「谁引入、为什么当时测不出」，再把这两件事写进注释与测试。
 
+## 用户消息 chip 与自包含块（引用 / 会话 / 技能 / 提示词模板 / 文件）
+
+- **一条契约**：需要折叠成 chip 的东西，**落盘文本必须自带展示身份**（`<quoted_context label message_id>` / `<referenced_session name>` / `<skill name>` / `<prompt_template name>`）。展示侧只认块（`src/shared/expandedRefBlocks.ts`）与裸 token（`composer/chips.ts`）两种形态，不做「按正文反查名称」；旧消息没有块就显示全文，这是有意的兼容策略。
+- **保护区规则（2026-10 实测 bug 的结论）**：发送侧有三个展开器（引用 → 会话引用 → 提示词模板）。后一个不得改写前一个已生成的块，否则「引用里提到 `/commit`」会被替换成整份提交模板——落盘的引用原文被篡改，模型读到的历史与真实不符。判据集中在 `src/renderer/src/utils/protectedText.ts`（`computeProtectedRanges` / `replaceOutsideProtected`）。
+- **模板清单两个来源**：来源 A = `prompts:list`（`~/.pi/agent/prompts` + `<项目>/.pi/prompts`，带编辑元数据、离线可用）；来源 B = pi `get_commands` 的 `source: "prompt"` 条目 + 按 `sourceInfo.path` 读回的正文（覆盖 npm 包声明的 `pi.prompts`，例如 pi-subagents 的 `parallel-review`）。合并规则在 `src/renderer/src/utils/templateCatalog.ts`：**同名正文取 B**（B 是 pi 去重后的最终视图），A 的展示元数据保留。只缺 B 时 `/parallel-review` 会被原样发给 pi、由 pi 展开成无名字的正文，表现为「运行中有 chip、暂停/重载后整段展开」。
+- **模板正文由主进程读**（`src/main/prompts/runtimeTemplateBodies.ts`，IPC `sessions:runtime-prompt-templates`）：只读 `get_commands` 报出的路径（provenance 白名单），再校验绝对路径 / `.md` / 单份 ≤256KB，任一不满足就跳过该条并退回「交给 pi 展开」。禁止改成自己扫目录——pi 的模板来源含设置启用状态与包声明，重扫一份必然错位。
+- **两个展开入口都要补模板表**：直发走 `prepareMessage`，忙碌队列（steer/followUp）在**入队时**就展开（更早，不经 prepareMessage）。两处都要 `ensureTemplates`，且都必须 fail-open（补齐失败只影响「能否本地展开」，不能把消息卡住不发）。漏掉队列入口的现象：agent 收尾那一拍发 `/模板名`，原样入队 → flush 发 pi → chip 丢失（2026-10 e2e 间歇复现）。
+- **发送期读取用 ref 不用 state**：`useSessionSend` 的模板清单是 `getTemplates()` 回调（`templatesRef` 由 `loadTemplates` 同步写入 + 写入序号防旧结果覆盖）。用 state 快照会出现「打开会话立刻发 `/模板名` → 展开器认不出 → 退回 pi 展开」。
+- **草稿会话也能出 chip**：草稿还没有 runtime target，`loadTemplates` 走 `sessions:draft-prompt-templates`（复用 standby 池的命令预览借用，见 `AgentManager.draftCommands`）拿同一份正文；池关闭/未就绪时返回 null，退回 `prompts:list`（旧行为）。这条是「打开会话立刻发 `/模板名` 也能出 chip」的兜底，失败不影响发送。
+- **相邻命令**：`/a /b` 两条都要展开。单次 `String.replace` 会吃掉 `/a` 后的分隔符，让紧邻的 `/b` 失去 `(^|\s)` 前缀；`expandPromptTemplates` 因此循环替换到稳定（上限 8 轮）。块内文本受保护区约束，不会重复展开。
+- **块的 `kind` = pi 的资源类型**：`quote` / `session` / `skill` / `template` 四种，模板不再冒充技能（pi 自己就把 `source: "skill"` 与 `source: "prompt"` 分开）。展示层用 `visualKind` 映射复用同一套斜杠 chip 外观，`data-type` 保留真实类型——按类型写样式/测试时认 `data-type`，不要按 class 猜。
+- **扩展注册的命令**（`/plan`、第三方 `/xxx`）由 pi 执行且**不落盘任何消息**（`_tryExecuteExtensionCommand` 执行后早退），所以它们只有临时气泡，不做持久 chip；桌面接管命令（`/new` `/login` `/hotkeys` `/reload` `/compact`）由 `utils/composerSlashCommand.ts` 单一分类点拦截，不发给模型。
+
 ## 推送与 AtomGit 镜像（pre-push 钩子）
 
 - `.githooks/pre-push`（`core.hooksPath=.githooks`，`npm install` 的 prepare 会安装）会把本次推送的引用镜像到 AtomGit；默认尽力而为，失败只提示不阻断，`PI_DECK_ATOMGIT_STRICT=1` 才让镜像失败即推送失败。

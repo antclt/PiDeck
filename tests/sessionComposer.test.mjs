@@ -188,7 +188,7 @@ test("the real send state machine snapshots multiline atom text", async () => {
 	let submitted;
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		sendPrompt: async (input) => {
 			submitted = input;
@@ -206,7 +206,7 @@ test("the real send state machine preserves input typed during a rejected delive
 	const deferred = createDeferred();
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		sendPrompt: async () => deferred.promise,
 	});
@@ -224,7 +224,7 @@ test("the real send state machine handles pure images, double clicks, and unknow
 	let imageCalls = 0;
 	const imageSend = imageHarness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		sendPrompt: async (input) => {
 			imageCalls += 1;
@@ -240,7 +240,7 @@ test("the real send state machine handles pure images, double clicks, and unknow
 	let clickCalls = 0;
 	const clickSend = clickHarness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		sendPrompt: async () => {
 			clickCalls += 1;
@@ -257,7 +257,7 @@ test("the real send state machine handles pure images, double clicks, and unknow
 	let unknownCalls = 0;
 	const unknownSend = unknownHarness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		sendPrompt: async () => {
 			unknownCalls += 1;
@@ -282,7 +282,7 @@ test("a pre-send Chat surface promotes once and only sends through its real Sess
 	let submitted;
 	const send = harness.send({
 		sessionId: bootstrapId,
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		ensureSessionId: async (sourceSessionId) => {
 			promotionCalls += 1;
@@ -531,7 +531,7 @@ test("/new is intercepted as a desktop session create, not sent to pi", async ()
 	let createCalls = 0;
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		createNewSession: async () => {
 			createCalls += 1;
@@ -553,7 +553,7 @@ test("/login opens the provider login dialog instead of being sent to pi", async
 	const opened = [];
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		openProviderLogin: (providerId) => {
 			opened.push(providerId);
@@ -577,7 +577,7 @@ test("a bare /login without provider still opens the dialog", async () => {
 	const opened = [];
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		openProviderLogin: (providerId) => {
 			opened.push(providerId);
@@ -597,7 +597,7 @@ test("DSH session send is blocked with a friendly hint when runtime is missing",
 	let sendPromptCalls = 0;
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		sendPrompt: async () => {
 			sendPromptCalls += 1;
@@ -625,7 +625,7 @@ test("DSH session send blocks with broken reason when runtime is broken", async 
 	let sendPromptCalls = 0;
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		sendPrompt: async () => {
 			sendPromptCalls += 1;
@@ -647,7 +647,7 @@ test("DSH session send passes through when runtime is installed or checking", as
 		let sendPromptCalls = 0;
 		const send = harness.send({
 			sessionId: "session-a",
-			templates: [],
+			getTemplates: () => [],
 			compact: async () => undefined,
 			sendPrompt: async () => {
 				sendPromptCalls += 1;
@@ -671,7 +671,7 @@ test("/compact releases the send lock so a follow-up prompt can send", async () 
 	let sendPromptCalls = 0;
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => {
 			compactCalls += 1;
 		},

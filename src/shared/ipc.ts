@@ -158,6 +158,8 @@ export const ipcChannels = {
 	sessionsRuntimeCompact: "sessions:runtime-compact",
 	sessionsRuntimeState: "sessions:runtime-state",
 	sessionsRuntimeCommands: "sessions:runtime-commands",
+	sessionsRuntimePromptTemplates: "sessions:runtime-prompt-templates",
+	sessionsDraftPromptTemplates: "sessions:draft-prompt-templates",
 	/** 热重载 pi 扩展/技能/提示词（内部 reload 扩展命令；返回刷新后的命令表）。 */
 	sessionsRuntimeReloadResources: "sessions:runtime-reload-resources",
 	/** 草稿会话斜杠命令预览（只读借用 pi standby 进程；不可用返回 null）。 */

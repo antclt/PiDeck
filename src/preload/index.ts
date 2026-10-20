@@ -157,6 +157,7 @@ import type {
 	PiCliUpdateResult,
 	PiReleaseNotesPayload,
 	PiCommand,
+	RuntimePromptTemplate,
 	RewindCheckpointPage,
 	RewindCheckpointPageParams,
 	RewindRestoreResult,
@@ -771,10 +772,12 @@ const api = {
 		compactRuntime: (target: SessionRuntimeTarget, prompt?: string) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeCompact, target, prompt) as Promise<SessionCommandResult<SessionTargetedValue<AgentRuntimeState>>>,
 		getRuntimeState: (target: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeState, target) as Promise<SessionCommandResult<SessionTargetedValue<AgentRuntimeState>>>,
 		listRuntimeCommands: (target: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeCommands, target) as Promise<SessionCommandResult<SessionTargetedValue<PiCommand[]>>>,
+		listRuntimePromptTemplates: (target: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.sessionsRuntimePromptTemplates, target) as Promise<SessionCommandResult<SessionTargetedValue<RuntimePromptTemplate[]>>>,
 		/** 热重载 pi 扩展/技能/提示词；返回刷新后的命令表。 */
 		reloadResources: (target: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeReloadResources, target) as Promise<SessionCommandResult<SessionTargetedValue<PiCommand[]>>>,
 		/** 草稿会话命令预览（pi standby 进程只读查询；不可用/非 pi 返回 null）。 */
 		draftCommands: (projectId: string) => ipcRenderer.invoke(ipcChannels.sessionsDraftCommands, projectId) as Promise<PiCommand[] | null>,
+		draftPromptTemplates: (projectId: string) => ipcRenderer.invoke(ipcChannels.sessionsDraftPromptTemplates, projectId) as Promise<RuntimePromptTemplate[] | null>,
 		/** 运行中 Agent 快照里的模型；不在此列表 = 新加配置，切过去要重启。 */
 		listRuntimeModels: (target: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeListModels, target) as Promise<SessionCommandResult<SessionTargetedValue<AvailableModel[]>>>,
 		/** Pi 当前模型支持的 thinking levels；旧 Pi/非 Pi 后端返回 undefined，渲染层回退静态列表。 */

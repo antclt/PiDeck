@@ -854,6 +854,11 @@ export function createPreviewApi(): PiDesktopApi {
 				ok: true,
 				value: { target, value: [] },
 			}),
+			// 预览模式没有真实 pi 进程：无运行时模板正文，渲染层退回 prompts:list。
+			listRuntimePromptTemplates: async (target) => ({
+				ok: true,
+				value: { target, value: [] },
+			}),
 			// 预览模式没有真实 pi 进程，热重载无操作（入口也不会渲染）。
 			reloadResources: async (target) => ({
 				ok: true,
@@ -861,6 +866,7 @@ export function createPreviewApi(): PiDesktopApi {
 			}),
 			// 预览模式无 standby 池，草稿命令预览回退本地发现。
 			draftCommands: async () => null,
+			draftPromptTemplates: async () => null,
 			listRuntimeModels: async (target) => ({
 				ok: true,
 				value: { target, value: [] },

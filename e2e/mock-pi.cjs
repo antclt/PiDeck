@@ -678,6 +678,17 @@ function handleCommand(cmd) {
 		case "get_session_stats":
 			respond(cmd, { tokens: { input: 100, output: 50 }, contextUsage: { percent: contextPercent } });
 			return;
+		case "get_commands": {
+			// 提示词模板清单：渲染层靠这里的 source=prompt + sourceInfo.path 去读正文，
+			// 从而在发送前本地展开并保留 `/<模板名>` 身份（会话文件里存 <prompt_template>）。
+			// 路径固定取项目内 .pi/e2e-template.md（用例负责写入）；文件不存在时主进程
+			// 读正文会跳过，渲染层退回「交给 pi 展开」——不影响其他用例。
+			const templatePath = path.join(process.cwd(), ".pi", "e2e-template.md");
+			const commands = [];
+			if (fs.existsSync(templatePath)) commands.push({ name: "e2e-template", description: "E2E 模板", source: "prompt", sourceInfo: { path: templatePath } });
+			respond(cmd, { commands });
+			return;
+		}
 		case "get_available_models":
 			respond(cmd, { models: MODELS });
 			return;

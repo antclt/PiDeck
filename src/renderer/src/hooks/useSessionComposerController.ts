@@ -77,8 +77,10 @@ import { COMPOSER_IMAGE_MAX_BYTES, ComposerImageError, dataUrlToFile, getClipboa
 import { PASTE_TO_FILE_MIN_CHARS } from "../rendererUtils";
 import { resolveBackendSwitchDefaults } from "../utils/backendSwitchDefaults";
 import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeAcpToolPreference, readWelcomeBackendPreference, readWelcomeDshModelPreference, readWelcomeModelPreference, resolveGuidePageBackend, WELCOME_BACKEND_KEY } from "../utils/chatSessionBootstrap";
+import { expandSessionReferences } from "../sending/outgoingExpansion";
 import { showNotice } from "../utils/notice";
 import { requireSessionCommand, toSessionRuntimeTarget } from "../utils/sessionCommands";
+import { mergeRuntimeTemplates } from "../utils/templateCatalog";
 import { buildDraftResourceCommands, draftResourceCommandsForProject, selectComposerSuggestionCommands, standbyPreviewCommandsForProject, type DraftResourceCommandSnapshot, type StandbyPreviewCommandSnapshot } from "../utils/draftResourceCommands";
 import { isSessionRuntimeBusy, isUserFacingSessionStart } from "./useSessionTimelineController";
 import { truncateQuoteLabel } from "../components/session/composer/quoteChip";
@@ -499,12 +501,27 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		loaded: false,
 		loading: false,
 	});
+	// 运行时模板正文按「agentId:generation」缓存键刷新：runtime 对象本身每次状态变更都会换
+	// 引用，直接进依赖会让模板表随每次流式状态变化重拉。
+	const runtimeTargetKey = runtime?.agentId && runtime.runtimeGeneration !== undefined ? `${runtime.agentId}:${runtime.runtimeGeneration}` : "";
 	const templateKey = `${sessionId}:${record?.projectPath ?? ""}`;
 	const [templateState, setTemplateState] = useState<{
 		key: string;
 		items: PromptTemplateInfo[];
 	}>({ key: templateKey, items: [] });
 	const templates = templateState.key === templateKey ? templateState.items : [];
+	/**
+	 * 发送期读取的模板清单（同步引用）。
+	 *
+	 * 为什么不能用 state：`loadTemplates` 内部 `setTemplateState` 之后要等下一次渲染，而
+	 * 「打开会话立刻发 /模板名」这一拍里发送路径读到的还是旧数组——展开器认不出模板名，
+	 * 消息原样发给 pi，模板名就丢了（2026-10 e2e 抓到的竞态）。这里由 `loadTemplates`
+	 * 同步写入，发送路径用 `getTemplates()` 读它。
+	 */
+	const templatesRef = useRef<PromptTemplateInfo[]>(templates);
+	/** 模板加载写入序列：并发加载时只让「最后发起」的那份写进 templatesRef。 */
+	const templateWriteSeqRef = useRef(0);
+	const templateWrittenSeqRef = useRef(0);
 	const [sendShortcut, setSendShortcut] = useState<"enter-send" | "ctrl-enter-send" | "shift-enter-send">("enter-send");
 	const [sessionReference, setSessionReference] = useState<SessionSummary | null>(null);
 	const [sessionReferenceSelections, setSessionReferenceSelections] = useState<Record<string, SessionReferenceSelection>>({});
@@ -633,7 +650,11 @@ export function useSessionComposerController(options: UseSessionComposerControll
 
 	const loadTemplates = useCallback(async () => {
 		const token = templateRequestGateRef.current.begin(templateKey);
-		const next: PromptTemplateInfo[] = [];
+		// 写入序号在**发起时**分配（不是在结束时）：结束时分配会让「切走前发起、切走后完成」
+		// 的加载拿到更大的序号，把上一个会话的模板表写进 templatesRef，随后该会话的发送会用
+		// 错项目的模板正文展开（跨会话污染）。发起顺序才代表新旧。
+		const sequence = ++templateWriteSeqRef.current;
+		let next: PromptTemplateInfo[] = [];
 		try {
 			const globalResult = await desktopApi.prompts.list();
 			next.push(
@@ -659,11 +680,39 @@ export function useSessionComposerController(options: UseSessionComposerControll
 				// A project does not have to provide .pi/prompts.
 			}
 		}
+		// 来源 B：pi 实际加载的全部模板（含 npm 包声明的 pi.prompts）。缺了它，
+		// `/parallel-review` 这类包带模板只能交给 pi 展开，模板名不进会话文件，
+		// 时间线就还原不出 chip（2026-10 现场：运行中有 chip、暂停后变全文）。
+		const target = toSessionRuntimeTarget(sessionId, store.get(sessionRuntimeBySessionIdAtomFamily(sessionId)));
+		if (target) {
+			try {
+				const result = await desktopApi.sessions.listRuntimePromptTemplates(target);
+				if (result.ok) next = mergeRuntimeTemplates(next, result.value.value);
+			} catch {
+				// 读正文失败/进程换代：保留来源 A，行为退回「交给 pi 展开」
+			}
+		} else if (record?.projectId) {
+			// 草稿会话（还没绑定 runtime）没有 target：借 standby 池的命令表读同一份正文，
+			// 否则「打开会话立刻发 /模板名」这条消息只能交给 pi 展开，chip 当场丢失。
+			// 池未就绪/关闭时返回 null，行为退回来源 A。
+			try {
+				const templates = await desktopApi.sessions.draftPromptTemplates(record.projectId);
+				if (templates?.length) next = mergeRuntimeTemplates(next, templates);
+			} catch {
+				// 同上：预览失败不影响模板 A 与发送
+			}
+		}
+		// 发送期引用（templatesRef）不看 gate 的 current：并发加载时 gate 会作废较早的 token，
+		// 但那一份数据往往正是这次发送要的——按发起顺序，只让更新的那份覆盖已有的。
+		if (sequence >= templateWrittenSeqRef.current) {
+			templateWrittenSeqRef.current = sequence;
+			templatesRef.current = next;
+		}
 		if (templateRequestGateRef.current.isCurrent(token)) {
 			setTemplateState({ key: templateKey, items: next });
 		}
 		return next;
-	}, [record?.projectId, sessionId, templateKey]);
+	}, [record?.projectId, sessionId, store, templateKey, runtimeTargetKey]);
 
 	useEffect(() => {
 		liveDomDraftRef.current = { sessionId, value: draft };
@@ -897,6 +946,8 @@ export function useSessionComposerController(options: UseSessionComposerControll
 
 	useEffect(() => {
 		templateRequestGateRef.current.invalidate(templateKey);
+		templatesRef.current = [];
+		templateWrittenSeqRef.current = ++templateWriteSeqRef.current;
 		setTemplateState({ key: templateKey, items: [] });
 		void loadTemplates();
 	}, [loadTemplates, templateKey]);
@@ -1042,22 +1093,39 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		liveDomDraftRef.current = { sessionId, value: "" };
 	}, [sessionId]);
 
+	/**
+	 * 发送前补齐模板表：`/名称` 命中未知模板时补拉一次。
+	 *
+	 * 兜两类时机：runtime 刚绑定（模板表还没拉回来），以及**草稿会话的第一条消息**
+	 * （此刻还没有 runtime target，但项目的 standby 池能给出同一份清单）。
+	 * 两处都没有时保持原样，交给 pi 兜底展开。
+	 */
+	const ensureTemplatesForMessage = useCallback(
+		async (message: string) => {
+			const match = /^\/([^\s]+)/.exec(message.trim());
+			if (!match) return;
+			const name = match[1];
+			if (!name || templatesRef.current.some((template) => template.name === name)) return;
+			// 两条来源都在 loadTemplates 里：有 runtime 走运行时清单，草稿会话走 standby 预览。
+			// 两个都没有（无项目、池关闭）时重拉也没有意义。
+			const hasRuntime = Boolean(toSessionRuntimeTarget(sessionId, store.get(sessionRuntimeBySessionIdAtomFamily(sessionId))));
+			if (!hasRuntime && !record?.projectId) return;
+			// 补齐失败不影响发送本身（loadTemplates 内部各来源已各自兜错，这里再兜一层）
+			await loadTemplates().catch(() => undefined);
+		},
+		[loadTemplates, record?.projectId, sessionId, store],
+	);
+
 	const resolveSessionReferences = useCallback(
 		async (message: string) => {
-			let resolved = message;
-			const sessionsByLongestName = [...projectSessions].sort((left, right) => (right.name ?? right.filePath).length - (left.name ?? left.filePath).length);
-			for (const referencedSession of sessionsByLongestName) {
-				const sessionName = referencedSession.name ?? referencedSession.filePath;
-				const raw = `&${sessionName}`;
-				if (!resolved.toLowerCase().includes(raw.toLowerCase())) continue;
-				const escaped = raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-				const pattern = new RegExp(escaped, "gi");
-				const saved = sessionReferenceSelections[raw];
-				const selectedMessages = saved ? selectedSessionReferenceMessages(saved) : await desktopApi.sessions.readReferenceMessages(referencedSession.id);
-				const context = selectedMessages.map((item) => `[${item.role === "user" ? "User" : "Assistant"}]: ${item.content}`).join("\n");
-				resolved = resolved.replace(pattern, context ? `<referenced_session name="${sessionName}">\n${context}\n</referenced_session>` : "");
-			}
-			return resolved;
+			// 展开与保护区判定收口在 sending/outgoingExpansion（纯函数、可单测）：
+			// 引用块内的 `&会话名` 属于被引述的原文，不能当成真引用展开。
+			const targets = projectSessions.map((session) => ({ id: session.id, name: session.name ?? session.filePath }));
+			return await expandSessionReferences(message, targets, async (session) => {
+				const saved = sessionReferenceSelections[`&${session.name}`];
+				const selectedMessages = saved ? selectedSessionReferenceMessages(saved) : await desktopApi.sessions.readReferenceMessages(session.id);
+				return selectedMessages.map((item) => `[${item.role === "user" ? "User" : "Assistant"}]: ${item.content}`).join("\n");
+			});
 		},
 		[projectSessions, sessionReferenceSelections],
 	);
@@ -1090,8 +1158,12 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		sessionId,
 		sendPrompt: (input) => desktopApi.sessions.sendPrompt(input),
 		ensureSessionId,
-		templates,
+		getTemplates: () => templatesRef.current,
+		ensureTemplates: ensureTemplatesForMessage,
 		prepareMessage: async (message) => {
+			// 模板表可能在 runtime 刚绑定/首次加载完成前是空的：命中未知 `/名称` 时补拉一次，
+			// 否则这条消息会退回「交给 pi 展开」，模板名不进会话文件（chip 随之丢失）。
+			await ensureTemplatesForMessage(message);
 			const resolved = await resolveSessionReferences(message);
 			// 条上暂停后 composer 仍可能停在目标模式：发送前先 resume，否则 host 不会续轮。
 			if (isDshBackend && mode === "goal") {

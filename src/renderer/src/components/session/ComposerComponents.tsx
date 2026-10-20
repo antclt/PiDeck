@@ -1172,7 +1172,8 @@ export function PromptTemplatePicker(props: {
 					<CommandEmpty>{t("app.promptTemplateSearchEmpty")}</CommandEmpty>
 					{props.templates.length === 0 && <div className="px-6 py-10 text-center text-caption text-muted-foreground">{t("app.promptTemplateEmpty")}</div>}
 					{props.templates.map((template) => (
-						<CommandItem key={template.path} value={`/${template.name}`} keywords={[template.name, template.description, template.argumentHint ?? ""]} onSelect={() => props.onPick(template)} className="group min-h-10 items-center gap-2.5 rounded-md px-3 py-2">
+						// key 用 name+path：包带模板（来源 B）没有可编辑路径，path 恒为空，单用 path 会撞 key
+						<CommandItem key={`${template.name}:${template.path}`} value={`/${template.name}`} keywords={[template.name, template.description, template.argumentHint ?? ""]} onSelect={() => props.onPick(template)} className="group min-h-10 items-center gap-2.5 rounded-md px-3 py-2">
 							<span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted/70 text-muted-foreground">
 								<FileText size={14} strokeWidth={1.8} aria-hidden="true" />
 							</span>

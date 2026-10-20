@@ -13,6 +13,7 @@ import { canonicalizeSessionPath } from "../../shared/sessionIdentity";
 import { createSessionModelPreference } from "../../shared/modelDisplayName";
 import { modelThinkingLevelOf } from "../../shared/modelThinkingLevels";
 import { collectLatestTurnFileChanges } from "../../shared/fileChanges";
+import { readRuntimePromptTemplateBodies } from "../prompts/runtimeTemplateBodies";
 import type {
 	AvailableModel,
 	CreateSessionDraftInput,
@@ -1837,11 +1838,30 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 	ipcMain.handle(ipcChannels.sessionsRuntimeCompact, (_event, target: SessionRuntimeTarget, prompt?: string) => sessionRuntimeCoordinator.compactRuntime(target, prompt));
 	ipcMain.handle(ipcChannels.sessionsRuntimeState, (_event, target: SessionRuntimeTarget) => sessionRuntimeCoordinator.getRuntimeState(target));
 	ipcMain.handle(ipcChannels.sessionsRuntimeCommands, (_event, target: SessionRuntimeTarget) => sessionRuntimeCoordinator.listRuntimeCommands(target));
+	// 提示词模板正文：面板/气泡需要 `/<模板名>` 身份，而 pi 的 get_commands 只给路径。
+	// 主进程按登记路径读回正文（含包带模板），渲染层据此在发送前本地展开并保留名字。
+	// 读取失败/超限/非 prompt 来源一律跳过 → 渲染层退回「交给 pi 展开」（现状行为）。
+	ipcMain.handle(ipcChannels.sessionsRuntimePromptTemplates, async (_event, target: SessionRuntimeTarget) => {
+		const commands = await sessionRuntimeCoordinator.listRuntimeCommands(target);
+		if (!commands.ok) return commands;
+		const templates = await readRuntimePromptTemplateBodies(commands.value.value);
+		return { ok: true as const, value: { target: commands.value.target, value: templates } };
+	});
 	ipcMain.handle(ipcChannels.sessionsRuntimeReloadResources, (_event, target: SessionRuntimeTarget) => sessionRuntimeCoordinator.reloadResources(target));
 	// 草稿命令预览是只读提示增强：入参只有 projectId，非法值在 coordinator 层自然返回 null。
 	ipcMain.handle(ipcChannels.sessionsDraftCommands, (_event, projectId: string) => {
 		if (typeof projectId !== "string" || !projectId.trim()) return null;
 		return sessionRuntimeCoordinator.draftCommands(projectId);
+	});
+	// 草稿会话的模板正文（尚无 runtime 时可用的同一份清单来源）。
+	// 复用 standby 的命令预览借用：拿命令表 → 按 sourceInfo.path 读正文；离线/无池/失败返回 null，
+	// 渲染层退回 prompts:list（旧行为）。这是「打开会话立刻发 /模板名」也能出 chip 的兜底。
+	ipcMain.handle(ipcChannels.sessionsDraftPromptTemplates, async (_event, projectId: string) => {
+		if (typeof projectId !== "string" || !projectId.trim()) return null;
+		const commands = await sessionRuntimeCoordinator.draftCommands(projectId);
+		if (!Array.isArray(commands) || commands.length === 0) return null;
+		const templates = await readRuntimePromptTemplateBodies(commands);
+		return templates.length > 0 ? templates : null;
 	});
 	ipcMain.handle(ipcChannels.sessionsRuntimeListModels, (_event, target: SessionRuntimeTarget) => sessionRuntimeCoordinator.listRuntimeModels(target));
 	ipcMain.handle(ipcChannels.sessionsRuntimeThinkingLevels, (_event, target: SessionRuntimeTarget) => sessionRuntimeCoordinator.listRuntimeThinkingLevels(target));
