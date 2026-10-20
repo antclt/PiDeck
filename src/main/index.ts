@@ -372,12 +372,14 @@ import { registerProjectsIpc } from "./ipc/projectsIpc";
 import { registerRemoteHostIpc } from "./ipc/remoteHostIpc";
 import { registerRemoteProjectIpc } from "./ipc/remoteProjectIpc";
 import { registerRemoteProjectFileIpc } from "./ipc/remoteProjectFileIpc";
+import { registerRemoteProjectTransferIpc } from "./ipc/remoteProjectTransferIpc";
 import { registerRemoteProjectEntryIpc } from "./ipc/remoteProjectEntryIpc";
 import { registerRemoteProjectTrustIpc } from "./ipc/remoteProjectTrustIpc";
 import { registerRemoteSessionIpc } from "./ipc/remoteSessionIpc";
 import { registerRemotePiModelIpc } from "./ipc/remotePiModelIpc";
 import { createRemotePiModelProbe } from "./pi/RemotePiModelProbe";
 import { createRemoteHostConnectionService, type RemoteHostConnectionService } from "./remote/RemoteHostConnectionService";
+import { createRemoteModelCatalog, REMOTE_MODEL_CATALOG_CODES } from "./remote/RemotePiModelCatalog";
 import { createSshClientRuntime, resolvePosixSshClient, type SshClientRuntime } from "./remote/SshClientRuntime";
 import { buildPinnedSshInvocation } from "./remote/SshVerifiedConnection";
 import { createRemoteSessionHistoryReader } from "./remote/RemoteSessionHistoryReader";
@@ -2896,6 +2898,8 @@ function registerIpc() {
 			const service = createRemoteHostConnectionService({
 				userDataDir: app.getPath("userData"),
 				client,
+				// 内置扩展快照的来源：与本地 `-e` 注入同一份「当前生效」字节（覆盖层优先，整份校验）。
+				builtInExtensionRoots: resolveBuiltInExtensionRoots(),
 				onDisconnect: (hostId) => remoteTerminalManager?.closeHost(hostId),
 				// Push every transition to the window: `connect()` only returns the state it reached, so
 				// anything afterwards (degradation, reconnect, the shutdown after ready) is invisible without
@@ -2975,6 +2979,16 @@ function registerIpc() {
 	});
 	quitCleanup.register("remote-git-reads", remoteGitReads.dispose);
 	registerRemoteProjectFileIpc({
+		enabled: remoteExperimentEnabled,
+		service: remoteHostServiceIfEnabled,
+		locator: (projectId) => {
+			const project = projectStore.get(projectId);
+			return project && isRemoteProject(project) ? project.locator : undefined;
+		},
+	});
+	// 本机 ↔ 远端文件传输（上传走 stdin 分块，支持二进制；下载走只读 reader + 保存对话框）。
+	// 与只读项目通道共用同一份 locator 解析，避免「列表看得到、下载找不到」。
+	registerRemoteProjectTransferIpc({
 		enabled: remoteExperimentEnabled,
 		service: remoteHostServiceIfEnabled,
 		locator: (projectId) => {
@@ -3433,7 +3447,9 @@ function registerIpc() {
 		const client = await remoteSshClientIfEnabled();
 		const invocation = await buildPinnedSshInvocation(app.getPath("userData"), hostId, "ssh-batch", { client, remoteCommand });
 		const result = await client.run(invocation.executable, invocation.args);
-		return { exitCode: result.exitCode, stdout: result.stdout };
+		// stderr 也要回传：pi 对未知旗标的抱怨随版本在 stdout 或 stderr（模型目录的降级判据要用它），
+		// 丢掉就等于把「不认这个旗标」误判成「远端没有模型」。
+		return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr ?? "" };
 	};
 
 	/**
@@ -3468,6 +3484,46 @@ function registerIpc() {
 					logger: { warn: (message, details) => appLogger.warn("session", message, details) },
 				});
 				return await reader.readPage(input);
+			}
+		: undefined;
+
+	/**
+	 * 远端主机上的 pi 模型目录（与本机 `pi --list-models` 逐字对称）。
+	 *
+	 * 为什么不是「问运行中的远端 pi 进程」：那样会话没激活就没有目录（用户必须先盲发一条消息），
+	 * 而且目录会随 runtime 重启/空闲回收一起消失。这里就是「远端算好、传回来、缓存住」：
+	 * 同一条 pinned SSH 短命令跑一次 `pi --list-models`，本机同一个纯函数解析，按主机缓存。
+	 */
+	const remotePiModelCatalog = remoteExperimentEnabled
+		? createRemoteModelCatalog({
+				resolveFacts: async (hostId: string) => {
+					const port = await remoteHostServiceIfEnabled();
+					if (!port) throw new Error("REMOTE_CONNECTION_SERVICE_UNAVAILABLE");
+					const facts = await port.remotePiRuntimeFacts(hostId);
+					return { piPath: facts.piPath, nodePath: facts.nodePath };
+				},
+				run: runPinnedRemoteCommand,
+			})
+		: undefined;
+
+	/**
+	 * 按项目取远端模型目录：非远端项目返回 null（调用方据此走本机目录）。
+	 * 失败返回失败报告而不是空成功报告——空列表和「拿不到」在 UI 上必须是两种状态。
+	 */
+	const remoteModelCatalogForProject = remotePiModelCatalog
+		? async (projectId: string, sessionId: string, force: boolean): Promise<import("../shared/types").ModelListReport | null> => {
+				// 位置真相优先取**会话自己的 locator**（host rebind 会改写它），项目 locator 只做兜底——
+				// 两者错位时按项目取值会让选择器给出另一台主机的模型。
+				const sessionLocator = sessionId.length > 0 ? sessionCatalog.getLocator(sessionId) : undefined;
+				const project = projectStore.get(projectId);
+				const projectLocator = project !== undefined && isRemoteProject(project) ? project.locator : undefined;
+				const locator = sessionLocator?.kind === "ssh" ? { hostId: sessionLocator.hostId } : projectLocator;
+				if (locator === undefined) return null;
+				const result = await remotePiModelCatalog.load({ hostId: locator.hostId, force });
+				// 两种失败在 UI 上是两条不同的引导：空目录 = 去远端配置页加 provider；
+				// 命令失败 = 查远端 pi / 连接。压成一个码会让「空」的引导永远不可达。
+				if (!result.ok) return { models: [], ok: false, reason: result.code === REMOTE_MODEL_CATALOG_CODES.empty ? "empty" : "cli-failed", version: null, detail: result.code, source: "none", at: Date.now() };
+				return { models: result.models, ok: true, reason: null, version: null, detail: "", source: "remote", at: Date.now() };
 			}
 		: undefined;
 
@@ -4116,6 +4172,8 @@ function registerIpc() {
 			dshHost,
 		},
 		modelCapabilityCache: piModelCapabilityCache,
+		remoteModelCatalogForProject,
+		remoteModelCatalog: remotePiModelCatalog,
 		// 内置 TokenDance 模型目录（live fetch + userData 缓存；
 		// 作为一键配置的数据源：目录模型写入 models.json 后由 pi 运行时自行解析）
 		tokendanceCatalog: tokendanceCatalogStore,
@@ -4479,6 +4537,12 @@ app
 		securityStore = new SecurityStore({
 			settingsStore,
 			log: (domain, message, details) => void appLogger?.info(domain, message, details),
+			// 远端会话的安全门读的是远端副本：快照一变就热推到已连接主机（尽力而为，失败不影响本机）。
+			onSnapshotWritten: (bytes) => {
+				const pending = remoteHostServiceResolver?.();
+				if (pending === undefined) return;
+				pending.then((service) => service.pushSecurityPolicySnapshotToReadyHosts(bytes)).catch(() => undefined);
+			},
 		});
 		appLogger = new AppLogger();
 		setAppLogger(appLogger);
@@ -5005,6 +5069,9 @@ app
 				// 远端会话身份登记（P4.2 收口）的正门：catalog 也是懒取（AgentManager 比它更早装配）。
 				resolveCatalog: () => sessionCatalog,
 				settings: () => settingsStore.get(),
+				// runner 1.1.0 起支持 init 帧 env：安全门可以拿到 PIDECK_SECURITY_CONFIG。
+				envChannelAvailable: true,
+				securityPolicyBytes: () => securityStore.readSnapshotBytes(),
 				// 远端项目 trust 决策（P4.4b）：端口每次 prepare 现读，未决策/材料缺失/endpoint 变更都返回
 				// undefined ⇒ 一个 flag 都不加（零行为变更）。
 				resolveTrust: () => remoteProjectTrustService,

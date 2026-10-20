@@ -27,8 +27,10 @@ function skipReasonLabel(reason: string): string {
  * 布局照成熟做法（Codex）：**先列出 `~/.ssh/config` 里已经配好的主机让用户勾选**，手动填写是次要入口。
  * 理由很直接——用户要连的主机几乎总是已经配过 SSH 的，再让他把 host/user/port 手打一遍既啰嗦又容易错。
  *
- * 两种模式下「保存」做的是同一件事：提交后主进程会推送指纹确认，**指纹必须由用户亲眼看**，
- * 因此这里不做「保存即完成」的假象——提交后弹框关闭，由 ConnectionsTab 上的确认框接手。
+ * 两种模式下「保存」做的是同一件事：主进程在同一个动作里完成首次 host key 信任（TOFU）并落盘 pin，
+ * 成功后这台主机已经是 verified，可以直接连接——没有第二道「请核对指纹」的确认步骤。
+ * 主机密钥**变化**时不在这里处理：那属于连接期校验（pin 文件 + StrictHostKeyChecking=yes），
+ * 会以连接失败呈现，不会被静默接受。
  */
 export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId: string) => void }) {
 	const [candidates, setCandidates] = useState<RemoteHostConfigCandidate[]>([]);

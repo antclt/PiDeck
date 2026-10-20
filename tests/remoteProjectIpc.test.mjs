@@ -12,14 +12,15 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const HOSTS_FILE = "src/main/ipc/remoteHostIpc.ts";
 const PROJECT_FILE = "src/main/ipc/remoteProjectIpc.ts";
-const HOST_CHANNELS = ["remote:hosts-list", "remote:connect", "remote:disconnect", "remote:diagnostics", "remote:scan-config", "remote:add", "remote:answer-pin", "remote:repair-diagnose", "remote:repair-run", "remote:repair-answer"];
+const HOST_CHANNELS = ["remote:hosts-list", "remote:connect", "remote:disconnect", "remote:diagnostics", "remote:scan-config", "remote:add", "remote:repair-diagnose", "remote:repair-run", "remote:repair-answer"];
 const PROJECT_CHANNELS = ["remote:project-enroll", "remote:project-answer", "remote:project-list", "remote:project-read", "remote:project-search", "remote:project-root-status"];
 
 function registeredChannels(file, registerName, input) {
 	const handlers = new Map();
 	const module = loadTsCommonJs(file, {
 		stubs: {
-			electron: { ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) } },
+			// 下载通道用到保存对话框 / 窗口归属；这里只需要「不炸」，断言的是通道注册归属。
+			electron: { ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, dialog: { showSaveDialog: async () => ({ canceled: true }) }, BrowserWindow: { fromWebContents: () => null } },
 			"../remote/RemoteBrowseRoot": { resolveRemoteBrowseRoot: async ({ userPath }) => ({ canonicalPath: userPath }) },
 			"../remote/RemoteSearchReader": {
 				REMOTE_SEARCH_READER_CODES: { queryInvalid: "QUERY_INVALID", requestFailed: "REMOTE_WORKSPACE_REQUEST_FAILED", optionsInvalid: "REMOTE_WORKSPACE_READER_OPTIONS_INVALID" },

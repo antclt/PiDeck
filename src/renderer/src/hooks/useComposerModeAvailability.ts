@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { AgentBackend, ComposerAgentMode } from "../../../shared/types";
+import type { AgentBackend, ComposerAgentMode, RemoteSessionExtensions } from "../../../shared/types";
 import { desktopApi } from "../desktopApi";
 
 export const MODE_ORDER: ComposerAgentMode[] = ["normal", "goal", "plan"];
@@ -25,17 +25,22 @@ export function computeVisibleModes(options: { isImageGen: boolean; isVideoGen?:
  * - DSH 恒可用 plan/goal。
  * - pi 的 plan/goal 由内置扩展 pi-deck-plan-mode / pi-deck-goal-mode 的启用状态决定；
  *   扩展被关时若当前正处该模式，强制回退到普通模式（与旧 chip 行为对齐）。
+ * - **远端会话只认主进程实际注入的扩展**（`remoteExtensions.applied`）：注入面未到（会话还没 spawn）时
+ *   保持乐观可用，主进程在发送边界会剥掉未被识别的标记（见 AgentManager 的发送守卫），
+ *   所以不会出现「标记进 prompt 但只读不生效」。
  * - imageGenLocked（legacy pi 会话已有生图消息）或 backend=imagegen：锁定为生图，
  *   「+」菜单不提供 LLM 模式；imagegen 会话走专用生图底栏。
  * - videogen 同理（独立异步任务后端，无 LLM 模式概念），锁定为生视频。
  */
-export function useComposerModeAvailability(props: { backend?: AgentBackend; imageGenLocked?: boolean; value: ComposerAgentMode; disabled?: boolean; onChange: (mode: ComposerAgentMode) => void }) {
+export function useComposerModeAvailability(props: { backend?: AgentBackend; imageGenLocked?: boolean; value: ComposerAgentMode; disabled?: boolean; onChange: (mode: ComposerAgentMode) => void; isRemoteSession?: boolean; remoteExtensions?: RemoteSessionExtensions }) {
 	const isDsh = props.backend === "dsh";
 	// ACP 无隐藏 agentMessage 通道(plan/goal 的实现载体),模式菜单只留普通;
 	// pi 的扩展开关对 ACP 会话无意义,不查询。
 	const isAcp = props.backend === "acp";
 	const isImageGen = props.backend === "imagegen" || props.imageGenLocked === true;
 	const isVideoGen = props.backend === "videogen";
+	// 无会话（引导页）时传空 key：atom 解析不到任何注入面，行为与旧代码一致。
+	const remoteExtensions = props.remoteExtensions;
 	const [planModeAvailable, setPlanModeAvailable] = useState(true);
 	const [goalModeAvailable, setGoalModeAvailable] = useState(true);
 
@@ -50,6 +55,15 @@ export function useComposerModeAvailability(props: { backend?: AgentBackend; ima
 			setGoalModeAvailable(true);
 			return;
 		}
+		// 远端：本地扩展开关不是判据（真正生效的是远端注入快照）。注入面未到就先乐观开着，
+		// 发送时由主进程剥标记兜底；注入面拿不到 ⇒ 两个模式都关，不让用户选了却无反应。
+		if (props.isRemoteSession === true) {
+			if (remoteExtensions === undefined) return;
+			const applied = new Set(remoteExtensions.applied);
+			setPlanModeAvailable(applied.has("pi-deck-plan-mode.ts"));
+			setGoalModeAvailable(applied.has("pi-deck-goal-mode.ts"));
+			return;
+		}
 		try {
 			const result = await desktopApi.extensions.list();
 			const plan = result.extensions.find((extension) => extension.source === "pi-deck-plan-mode.ts");
@@ -61,7 +75,7 @@ export function useComposerModeAvailability(props: { backend?: AgentBackend; ima
 			setPlanModeAvailable(false);
 			setGoalModeAvailable(false);
 		}
-	}, [isAcp, isDsh]);
+	}, [isAcp, isDsh, props.isRemoteSession, remoteExtensions]);
 
 	// 首挂载与后端切换时同步一次可用性：refreshAvailability 的身份随 isAcp/isDsh 变化，
 	// 初始 useState(true) 只是乐观默认；ACP 会话若不同步，会在首次打开下拉前错误地显示

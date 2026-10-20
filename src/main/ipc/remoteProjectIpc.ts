@@ -13,9 +13,21 @@
  */
 
 import { createHash } from "node:crypto";
+import { createRemoteProjectTargetResolver } from "./remoteProjectTarget";
 import { ipcMain, type WebContents } from "electron";
 import { ipcChannels } from "../../shared/ipc";
-import type { RemoteProjectEnrollAnswerResult, RemoteProjectEnrollMode, RemoteProjectEnrollRequest, RemoteProjectEnrollResult, RemoteProjectListResult, RemoteProjectReadResult, RemoteProjectRootStatusResult, RemoteProjectSearchResult } from "../../shared/types/remoteHost";
+import type {
+	RemoteProjectDownloadResult,
+	RemoteProjectUploadResult,
+	RemoteProjectEnrollAnswerResult,
+	RemoteProjectEnrollMode,
+	RemoteProjectEnrollRequest,
+	RemoteProjectEnrollResult,
+	RemoteProjectListResult,
+	RemoteProjectReadResult,
+	RemoteProjectRootStatusResult,
+	RemoteProjectSearchResult,
+} from "../../shared/types/remoteHost";
 import { registerRemoteProjectCreateFlow } from "./remoteProjectCreateIpc";
 import type { RemoteHostConnectionService, RemoteProjectSession } from "../remote/RemoteHostConnectionService";
 import { REMOTE_HELPER_MAX_SEARCH_QUERY_LENGTH } from "../remote/RemoteHelperContract";
@@ -215,24 +227,7 @@ export function registerRemoteProjectIpc(input: {
 		}
 	});
 
-	/**
-	 * Resolve a project's ssh locator into the host/root pair a read needs.
-	 *
-	 * Deliberately performs no session work and returns no reader: switching the root, establishing the
-	 * session and the whole listing/file read happen together inside `withProjectSession`. Handing back a
-	 * reader here is exactly the shape that let a second project's root switch land in the middle of a
-	 * multi-chunk read. Every failure is a stable code; a non-ssh project is refused rather than guessed at.
-	 */
-	const projectReadTarget = async (projectId: unknown): Promise<{ hostId: string; remotePath: string; service: RemoteHostConnectionService } | { code: string }> => {
-		if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256) return { code: "REMOTE_PROJECT_TARGET_INVALID" };
-		if (input.projects === undefined) return { code: "REMOTE_PROJECT_ENROLL_UNAVAILABLE" };
-		const locator = input.projects.locator(projectId);
-		if (locator === undefined) return { code: "REMOTE_PROJECT_NOT_FOUND" };
-		if (locator.kind !== "ssh") return { code: "UNSUPPORTED_PROJECT_LOCATION" };
-		const resolvedService = await resolveService();
-		if ("code" in resolvedService) return { code: resolvedService.code };
-		return { hostId: locator.hostId, remotePath: locator.remotePath, service: resolvedService.service };
-	};
+	const projectReadTarget = createRemoteProjectTargetResolver({ service: input.service, locator: input.projects?.locator });
 
 	/**
 	 * Bind the reader's transport to one already-pinned session.

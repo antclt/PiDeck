@@ -63,7 +63,7 @@ export const REMOTE_BUNDLE_MAINTENANCE_CODES = {
 } as const;
 
 /** 远端脚本允许报告的 skip 原因（闭集：未知原因 = 输出不可信）。 */
-export const REMOTE_BUNDLE_MAINTENANCE_SKIP_REASONS = ["DEPLOY_ROOT_UNVERIFIABLE", "DEPLOY_LOCK_HELD", "DEPLOY_LOCK_REMOVE_FAILED", "BUNDLES_DIR_UNVERIFIABLE", "ACTIVE_BUNDLE_MISSING"] as const;
+export const REMOTE_BUNDLE_MAINTENANCE_SKIP_REASONS = ["DEPLOY_ROOT_UNVERIFIABLE", "DEPLOY_LOCK_HELD", "DEPLOY_LOCK_REMOVE_FAILED", "BUNDLES_DIR_UNVERIFIABLE", "ACTIVE_BUNDLE_MISSING", "EXTENSIONS_DIR_UNVERIFIABLE", "ACTIVE_EXTENSION_MISSING"] as const;
 export type RemoteBundleMaintenanceSkipReason = (typeof REMOTE_BUNDLE_MAINTENANCE_SKIP_REASONS)[number];
 const SKIP_REASONS: ReadonlySet<string> = new Set(REMOTE_BUNDLE_MAINTENANCE_SKIP_REASONS);
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -73,6 +73,8 @@ const MARKER_NONCE = /^[A-Za-z0-9]{8,64}$/;
 export type RemoteBundleMaintenanceOutcome = {
 	removedBundles: number;
 	keptBundles: number;
+	removedExtensions: number;
+	keptExtensions: number;
 	removedStaging: number;
 	keptStaging: number;
 	removedStaleLock: boolean;
@@ -108,14 +110,16 @@ const UNREFERENCED_TTL_MS = ${REMOTE_BUNDLE_MAINTENANCE_RETENTION.unreferencedTt
 const KEEP_UNREFERENCED = ${REMOTE_BUNDLE_MAINTENANCE_RETENTION.maxUnreferencedSnapshots};
 const MIN_DELETE_AGE_MS = ${REMOTE_BUNDLE_MAINTENANCE_RETENTION.minimumDeleteAgeMs};
 const BUNDLE_DIR = ${JSON.stringify(REMOTE_BOOTSTRAP_BUNDLE_DIR_NAME)};
+const EXTENSION_DIR = "extensions";
 const BUNDLE_MODE = 448;
 const DEPLOY_LOCK = ".deploy.lock";
+const EXTENSION_LOCK = ".deploy-ext.lock";
 const INPUT_INVALID = ${JSON.stringify(REMOTE_BUNDLE_MAINTENANCE_CODES.inputInvalid)};
 const argv = process.argv.slice(1);
-const marker = argv.length === 5 && MARKER.test(argv[1]) ? argv[1] : "";
+const marker = argv.length === 6 && MARKER.test(argv[1]) ? argv[1] : "";
 function out(value) { process.stdout.write(marker + JSON.stringify(value)); }
 function fail(code) { if (marker) out({ ok: false, code: code }); process.exitCode = 1; }
-function empty(skipped) { return { ok: true, removedBundles: 0, keptBundles: 0, removedStaging: 0, keptStaging: 0, removedStaleLock: false, unverifiable: 0, skipped: skipped || [] }; }
+function empty(skipped) { return { ok: true, removedBundles: 0, keptBundles: 0, removedExtensions: 0, keptExtensions: 0, removedStaging: 0, keptStaging: 0, removedStaleLock: false, unverifiable: 0, skipped: skipped || [] }; }
 function canonical(value) {
 	if (typeof value !== "string" || value.length === 0 || value.length > 4096 || !path.isAbsolute(value) || CONTROL.test(value)) return false;
 	if (value !== path.normalize(value) || value === path.dirname(value)) return false;
@@ -164,22 +168,22 @@ function removeExpiredStaging(deployRoot, now, result) {
 		else result.unverifiable += 1;
 	}
 }
-function sweepBundles(deployRoot, activeSha, now, result) {
-	const bundlesDir = path.join(deployRoot, BUNDLE_DIR);
-	let bundlesPresent = false;
-	try { bundlesPresent = fs.lstatSync(bundlesDir).isDirectory(); } catch {}
-	if (!bundlesPresent) return;
-	if (privateDir(bundlesDir) === null) { result.skipped.push("BUNDLES_DIR_UNVERIFIABLE"); return; }
+function sweepSnapshots(deployRoot, dirName, activeSha, now, result, removedKey, keptKey, dirSkipReason, activeSkipReason) {
+	const snapshotsDir = path.join(deployRoot, dirName);
+	let present = false;
+	try { present = fs.lstatSync(snapshotsDir).isDirectory(); } catch {}
+	if (!present) return;
+	if (privateDir(snapshotsDir) === null) { result.skipped.push(dirSkipReason); return; }
 	const known = new Set(), verified = [];
-	for (const name of fs.readdirSync(bundlesDir)) {
+	for (const name of fs.readdirSync(snapshotsDir)) {
 		if (!SHA.test(name)) { result.unverifiable += 1; continue; }
-		const target = path.join(bundlesDir, name);
+		const target = path.join(snapshotsDir, name);
 		const stat = bundleEntry(target);
 		if (stat === null) { result.unverifiable += 1; continue; }
 		known.add(name);
 		verified.push({ name: name, target: target, stat: stat });
 	}
-	if (!known.has(activeSha)) { result.skipped.push("ACTIVE_BUNDLE_MISSING"); return; }
+	if (!known.has(activeSha)) { result.skipped.push(activeSkipReason); return; }
 	const others = verified.filter(function (entry) { return entry.name !== activeSha; }).sort(function (left, right) { return Number(right.stat.mtimeMs) - Number(left.stat.mtimeMs); });
 	for (let index = 0; index < others.length; index += 1) {
 		const entry = others[index], age = now - Number(entry.stat.mtimeMs);
@@ -187,34 +191,37 @@ function sweepBundles(deployRoot, activeSha, now, result) {
 		const young = age < MIN_DELETE_AGE_MS;
 		const withinKept = index - 1 < KEEP_UNREFERENCED && age <= UNREFERENCED_TTL_MS;
 		if (rollback || young || withinKept) continue;
-		if (removeVerified(entry.target, entry.stat.dev, entry.stat.ino)) result.removedBundles += 1;
+		if (removeVerified(entry.target, entry.stat.dev, entry.stat.ino)) result[removedKey] += 1;
 		else result.unverifiable += 1;
 	}
-	result.keptBundles = known.size - result.removedBundles;
+	result[keptKey] = known.size - result[removedKey];
 }
-function sweep(deployRoot, activeSha, now) {
+function sweep(deployRoot, activeSha, activeExtensionSha, now) {
 	const result = empty([]);
-	const lockPath = path.join(deployRoot, DEPLOY_LOCK);
-	let lockPresent = false;
-	try { fs.lstatSync(lockPath); lockPresent = true; } catch {}
-	if (lockPresent) {
+	const locks = [DEPLOY_LOCK, EXTENSION_LOCK];
+	for (const lockName of locks) {
+		const lockPath = path.join(deployRoot, lockName);
+		let lockPresent = false;
+		try { fs.lstatSync(lockPath); lockPresent = true; } catch {}
+		if (!lockPresent) continue;
 		let holder = null;
 		try { holder = JSON.parse(fs.readFileSync(lockPath, "utf8")); } catch {}
 		if (holderAlive(holder)) { out(empty(["DEPLOY_LOCK_HELD"])); return; }
 		try { fs.unlinkSync(lockPath); result.removedStaleLock = true; } catch { result.skipped.push("DEPLOY_LOCK_REMOVE_FAILED"); }
 	}
-	sweepBundles(deployRoot, activeSha, now, result);
+	sweepSnapshots(deployRoot, BUNDLE_DIR, activeSha, now, result, "removedBundles", "keptBundles", "BUNDLES_DIR_UNVERIFIABLE", "ACTIVE_BUNDLE_MISSING");
+	if (activeExtensionSha !== "-") sweepSnapshots(deployRoot, EXTENSION_DIR, activeExtensionSha, now, result, "removedExtensions", "keptExtensions", "EXTENSIONS_DIR_UNVERIFIABLE", "ACTIVE_EXTENSION_MISSING");
 	removeExpiredStaging(deployRoot, now, result);
 	out(result);
 }
 try {
-	if (argv.length !== 5 || argv[0] !== ENTRY || marker === "") fail(INPUT_INVALID);
+	if (argv.length !== 6 || argv[0] !== ENTRY || marker === "") fail(INPUT_INVALID);
 	else {
-		const deployRoot = argv[2], activeSha = argv[3], now = Number(argv[4]);
+		const deployRoot = argv[2], activeSha = argv[3], activeExtensionSha = argv[4], now = Number(argv[5]);
 		const home = process.env.HOME;
-		if (!canonical(deployRoot) || !SHA.test(activeSha) || !Number.isSafeInteger(now) || now < 1) fail(INPUT_INVALID);
+		if (!canonical(deployRoot) || !SHA.test(activeSha) || (activeExtensionSha !== "-" && !SHA.test(activeExtensionSha)) || !Number.isSafeInteger(now) || now < 1) fail(INPUT_INVALID);
 		else if (!canonical(home) || deployRoot !== path.join(home, ".pideck", "remote-host") || privateDir(deployRoot) === null) out(empty(["DEPLOY_ROOT_UNVERIFIABLE"]));
-		else sweep(deployRoot, activeSha, now);
+		else sweep(deployRoot, activeSha, activeExtensionSha, now);
 	}
 } catch { fail(${JSON.stringify(REMOTE_BUNDLE_MAINTENANCE_CODES.sweepFailed)}); }
 `
@@ -236,14 +243,16 @@ export function remoteBundleMaintenanceMarker(nonce: unknown): string {
  * 一个字节都不发。deployRoot 用 runner 契约的 canonical POSIX 判据（remote 侧只可能是 POSIX）；
  * nodePath 必须是绝对路径且 basename 为 `node`（与 write guard 对解释器的要求一致）。
  */
-export function buildRemoteBundleMaintenanceCommand(input: { nodePath: unknown; deployRoot: unknown; activeBundleSha256: unknown; nonce: unknown; nowMs?: unknown }): { command: string; marker: string } {
+export function buildRemoteBundleMaintenanceCommand(input: { nodePath: unknown; deployRoot: unknown; activeBundleSha256: unknown; activeExtensionSha256?: unknown; nonce: unknown; nowMs?: unknown }): { command: string; marker: string } {
 	const nodePath = typeof input?.nodePath === "string" && isRemoteRunnerAbsolutePath(input.nodePath) && input.nodePath.slice(input.nodePath.lastIndexOf("/") + 1) === "node" ? input.nodePath : undefined;
 	const deployRoot = isRemoteRunnerAbsolutePath(input?.deployRoot) ? input.deployRoot : undefined;
 	const activeBundleSha256 = typeof input?.activeBundleSha256 === "string" && SHA256.test(input.activeBundleSha256) ? input.activeBundleSha256 : undefined;
+	// "-" 表示「本轮还不知道扩展快照的 active」：跳过 extensions/ 目录的清理，只扫 staging/锁。
+	const activeExtensionSha256 = input?.activeExtensionSha256 === undefined ? "-" : typeof input.activeExtensionSha256 === "string" && SHA256.test(input.activeExtensionSha256) ? input.activeExtensionSha256 : undefined;
 	const marker = remoteBundleMaintenanceMarker(input?.nonce);
 	const nowMs = input?.nowMs === undefined ? Date.now() : input.nowMs;
-	if (nodePath === undefined || deployRoot === undefined || activeBundleSha256 === undefined || typeof nowMs !== "number" || !Number.isSafeInteger(nowMs) || nowMs < 1) refuse(REMOTE_BUNDLE_MAINTENANCE_CODES.inputInvalid);
-	const command = [nodePath, "-e", REMOTE_BUNDLE_MAINTENANCE_INLINE_SOURCE, "--", REMOTE_BUNDLE_MAINTENANCE_ENTRY, marker, deployRoot, activeBundleSha256, String(nowMs)].map(quotePosixArgument).join(" ");
+	if (nodePath === undefined || deployRoot === undefined || activeBundleSha256 === undefined || activeExtensionSha256 === undefined || typeof nowMs !== "number" || !Number.isSafeInteger(nowMs) || nowMs < 1) refuse(REMOTE_BUNDLE_MAINTENANCE_CODES.inputInvalid);
+	const command = [nodePath, "-e", REMOTE_BUNDLE_MAINTENANCE_INLINE_SOURCE, "--", REMOTE_BUNDLE_MAINTENANCE_ENTRY, marker, deployRoot, activeBundleSha256, activeExtensionSha256, String(nowMs)].map(quotePosixArgument).join(" ");
 	if (command.length > REMOTE_HELPER_MAX_REMOTE_COMMAND_LENGTH) refuse(REMOTE_BUNDLE_MAINTENANCE_CODES.inputInvalid);
 	return { command, marker };
 }
@@ -268,8 +277,8 @@ export function parseRemoteBundleMaintenanceResult(stdout: unknown, marker: unkn
 		refuse(REMOTE_BUNDLE_MAINTENANCE_CODES.resultInvalid);
 	}
 	if (value.ok !== true) refuse(REMOTE_BUNDLE_MAINTENANCE_CODES.resultInvalid);
-	const outcome: RemoteBundleMaintenanceOutcome = { removedBundles: 0, keptBundles: 0, removedStaging: 0, keptStaging: 0, removedStaleLock: false, unverifiable: 0, skipped: [] };
-	for (const key of ["removedBundles", "keptBundles", "removedStaging", "keptStaging", "unverifiable"] as const) {
+	const outcome: RemoteBundleMaintenanceOutcome = { removedBundles: 0, keptBundles: 0, removedExtensions: 0, keptExtensions: 0, removedStaging: 0, keptStaging: 0, removedStaleLock: false, unverifiable: 0, skipped: [] };
+	for (const key of ["removedBundles", "keptBundles", "removedExtensions", "keptExtensions", "removedStaging", "keptStaging", "unverifiable"] as const) {
 		const count = value[key];
 		if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0 || count > 100000) refuse(REMOTE_BUNDLE_MAINTENANCE_CODES.resultInvalid);
 		outcome[key] = count;
@@ -294,9 +303,16 @@ export function parseRemoteBundleMaintenanceResult(stdout: unknown, marker: unkn
  * `REMOTE_MAINTENANCE_SWEEP_FAILED`；输出不可信抛 `REMOTE_MAINTENANCE_RESULT_INVALID`。
  * 调用方（bootstrap）必须当作**非致命**处理：已确认的部署不因清理失败而失败。
  */
-export async function maintainDeployedBundles(input: { userDataDir: string; hostId: string; client: SshClientRuntime; nodePath: string; deployRoot: string; activeBundleSha256: string; now?: () => number }): Promise<RemoteBundleMaintenanceOutcome> {
+export async function maintainDeployedBundles(input: { userDataDir: string; hostId: string; client: SshClientRuntime; nodePath: string; deployRoot: string; activeBundleSha256: string; activeExtensionSha256?: string; now?: () => number }): Promise<RemoteBundleMaintenanceOutcome> {
 	const nonce = randomBytes(16).toString("hex");
-	const { command, marker } = buildRemoteBundleMaintenanceCommand({ nodePath: input.nodePath, deployRoot: input.deployRoot, activeBundleSha256: input.activeBundleSha256, nonce, nowMs: (input.now ?? Date.now)() });
+	const { command, marker } = buildRemoteBundleMaintenanceCommand({
+		nodePath: input.nodePath,
+		deployRoot: input.deployRoot,
+		activeBundleSha256: input.activeBundleSha256,
+		...(input.activeExtensionSha256 === undefined ? {} : { activeExtensionSha256: input.activeExtensionSha256 }),
+		nonce,
+		nowMs: (input.now ?? Date.now)(),
+	});
 	const invocation = await buildPinnedSshInvocation(input.userDataDir, input.hostId, "ssh-batch", { client: input.client, remoteCommand: command });
 	let result: { exitCode: number; stdout: string };
 	try {

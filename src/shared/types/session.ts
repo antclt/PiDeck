@@ -539,6 +539,20 @@ export type SessionRuntimeTarget = {
 	runtimeGeneration: number;
 };
 
+/**
+ * 远端会话本次实际注入的 PiDeck 内置扩展（P4.4 扩展面）。
+ *
+ * `applied` 是**运行时事实上注入的 basename 列表**（顺序即 `-e` 顺序），不是编译期「应该能」：
+ * 渲染层的能力门（计划/目标模式、安全等级）只认它。空数组 + 闭集 reason 表示降级，UI 据此禁用入口
+ * 并给出原因，而不是让用户选了却什么都不发生。
+ */
+export type RemoteSessionExtensions = {
+	applied: readonly string[];
+	reason?: "REMOTE_PI_EXTENSIONS_UNSUPPORTED" | "REMOTE_EXTENSIONS_UNAVAILABLE" | "REMOTE_EXTENSIONS_DISABLED" | "REMOTE_EXTENSIONS_NONE";
+	/** 诊断用稳定码（不直接展示；reason=REMOTE_EXTENSIONS_UNAVAILABLE 时可能带部署失败码）。 */
+	detail?: string;
+};
+
 export type SessionRuntimeInfo = SessionRuntimeTarget & {
 	projectId: string;
 	cwd: string;
@@ -557,6 +571,8 @@ export type SessionRuntimeInfo = SessionRuntimeTarget & {
 	 * 而 runtime 快照（`sessions:runtime-info`）是渲染层重载/首次渲染时就能拿到的。
 	 */
 	remoteTrustUnhandled?: boolean;
+	/** 远端会话实际注入的内置扩展（见 `RemoteSessionExtensions`）；本机会话不带。 */
+	remoteExtensions?: RemoteSessionExtensions;
 	/** PiDeck 会话身份（AgentTab.deckSessionId 透传）：渲染层侧栏 ACP「agent↔会话」配对用，缺它会把同一会话画成两行。 */
 	deckSessionId?: string;
 };

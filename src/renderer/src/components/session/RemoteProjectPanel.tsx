@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, FilePlus2, FileText, Folder, FolderPlus, Link2, Loader2, MoreHorizontal, Search, TerminalSquare, Trash2, X } from "lucide-react";
+import { AlertTriangle, FilePlus2, FileText, Folder, FolderPlus, Link2, Loader2, MoreHorizontal, Search, TerminalSquare, Trash2, Upload, X } from "lucide-react";
 import type { RemoteWorkspaceEntry } from "../../../../shared/types/remoteHost";
 import type { RemoteEntryKind } from "../../../../shared/types/remoteFiles";
 import { desktopApi } from "../../desktopApi";
@@ -180,6 +180,37 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 		[files, closeDialogAfter, bumpTrash],
 	);
 
+	/** 上传到当前目录：选择对话框与写远端都在主进程；部分失败逐项回报。 */
+	const uploadFiles = useCallback(() => {
+		void (async () => {
+			const result = await desktopApi.remoteHosts.uploadProjectFiles(props.projectId, relative.join("/"));
+			if (!result.ok) {
+				if (result.canceled === true) return;
+				setError(t("project.remote.uploadFailed", { code: result.code }));
+				return;
+			}
+			setError(null);
+			if (result.failed.length > 0) setError(t("project.remote.uploadPartial", { count: result.failed.length, code: result.failed[0].code }));
+			await loadDirectory(relative);
+		})();
+	}, [props.projectId, relative, loadDirectory]);
+
+	/** 下载到本机：保存对话框与写盘都在主进程，这里只报失败（取消不是失败）。 */
+	const downloadEntry = useCallback(
+		(entry: RemoteWorkspaceEntry) => {
+			void (async () => {
+				const result = await desktopApi.remoteHosts.downloadProjectFile(props.projectId, relativePath(relative, entry.name));
+				if (result.ok) {
+					setError(null);
+					return;
+				}
+				if (result.canceled === true) return;
+				setError(t("project.remote.downloadFailed", { code: result.code }));
+			})();
+		},
+		[props.projectId, relative],
+	);
+
 	const openRowDialog = (entry: RemoteWorkspaceEntry, kind: "rename" | "delete"): void => {
 		if (entry.kind !== "file" && entry.kind !== "directory") return;
 		const path = relativePath(relative, entry.name);
@@ -213,6 +244,10 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 					<Button type="button" size="sm" variant="secondary" data-testid="remote-file-mkdir" disabled={files.busy || busy} onClick={() => setEntryDialog({ kind: "new", entryKind: "directory", parent: parentPath(relative) })}>
 						<FolderPlus className="size-3.5" />
 						{t("remoteFileEntry.newFolder")}
+					</Button>
+					<Button type="button" size="sm" variant="secondary" data-testid="remote-file-upload" disabled={files.busy || busy} onClick={uploadFiles}>
+						<Upload className="size-3.5" />
+						{t("remoteFileEntry.uploadAction")}
 					</Button>
 					<Button type="button" size="sm" variant="ghost" data-testid="remote-trash-toggle" aria-expanded={trashOpen} disabled={files.busy} onClick={() => setTrashOpen((open) => !open)}>
 						<Trash2 className="size-3.5" />
@@ -294,6 +329,11 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 											</Button>
 										</DropdownMenuTrigger>
 										<DropdownMenuContent align="end">
+											{entry.kind === "file" ? (
+												<DropdownMenuItem data-testid="remote-file-row-download" onSelect={() => downloadEntry(entry)}>
+													{t("remoteFileEntry.downloadAction")}
+												</DropdownMenuItem>
+											) : null}
 											<DropdownMenuItem data-testid="remote-file-row-rename" onSelect={() => openRowDialog(entry, "rename")}>
 												{t("remoteFileEntry.renameAction")}
 											</DropdownMenuItem>

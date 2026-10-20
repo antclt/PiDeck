@@ -55,6 +55,7 @@ import { parseAvailableThinkingLevelsResponse } from "./thinkingLevels";
 import { listActiveBuiltInExtensionPaths } from "../extensions/builtInExtensions";
 import { createPiProcessExtensionResolvers } from "../extensions/piProcessExtensionResolvers";
 import { piVersionAtLeast } from "../extensions/extensionVersionGate";
+import { PI_DECK_MODE_MARKER_EXTENSIONS } from "../../shared/composerModeMarkers";
 import { resolveLoadableExtensionPaths } from "../extensions/enabledExtensionResolver";
 import { collectEntryRendererTypes } from "./extensionEntryRendererScan";
 import { resolveBuiltInExtensionsOverlayDir } from "../extensions/builtInExtensions";
@@ -1031,6 +1032,23 @@ export class AgentManager {
 	}
 
 	/**
+	 * 会话模型目录分流用的窄接口：该 agent 是否跑在远端主机上。
+	 * 与 isRemoteRuntime 同一判据（项目 locator），只是把「按 agentId 问」暴露给 IPC 层——
+	 * 模型选择器只有 agentId，没有 projectId，不能自己推。
+	 */
+	isRemoteAgent(agentId: string): boolean {
+		return this.isRemoteRuntime(this.agents.get(agentId)?.tab.projectId ?? "");
+	}
+
+	/**
+	 * 同上，但按项目问：给「没有会话身份的入口」（小窗新建、自动化任务编辑器、引导页草稿）
+	 * 判远端用。没有这个，这些入口的模型选择器会默默给出本机目录，而它们最终仍会落到远端会话上。
+	 */
+	isRemoteProject(projectId: string): boolean {
+		return this.isRemoteRuntime(projectId);
+	}
+
+	/**
 	 * 这条 runtime 是否跑在远端主机上。
 	 *
 	 * 判据只看项目 locator（远端项目的 cwd 与会话文件都在那台机器上），不另存标记：远端身份在
@@ -1983,19 +2001,28 @@ export class AgentManager {
 		const t1 = Date.now();
 		let launch: { plan: RemoteSshPiRuntimeLaunchPlan; launcher: PiRuntimeLauncher };
 		try {
+			// 远端安全门读的是快照文件：先把本机快照落盘（幂等），否则首次 spawn 会因「读不到字节」
+			// 把安全门从注入面拿掉（安全等级随后失效，但 UI 会如实隐藏）。
+			await this.securityStore?.ensureSnapshotWritten();
 			// 远端事实（解释器 / pi 入口 / runner 路径）先取，再在构造点验 plan 形状：
 			// 门禁关闭/服务没建起来 → REMOTE_RUNTIME_UNAVAILABLE；主机没就绪 → SSH_HOST_NOT_READY；
 			// pi 探测失败 → REMOTE_PI_*；本机路径混进 plan → REMOTE_RUNTIME_PATH_INVALID。
-			const plan = await this.remoteRuntime.prepare({
+			const prepared = await this.remoteRuntime.prepare({
 				hostId,
 				remoteCwd,
 				...(input.sessionPath === undefined ? {} : { sessionFile: input.sessionPath }),
 				...(input.noSession ? { noSession: true } : {}),
+				// 与本地 `securitySessionId: securitySessionKey ?? sessionPath` 同一取值：扩展只用它查
+				// sessionLevels 字典，从不 fs 打开；远端历史会话没有 deckSessionId 时用远端会话文件路径。
+				...(input.deckSessionId === undefined && input.sessionPath === undefined ? {} : { sessionId: input.deckSessionId ?? input.sessionPath }),
 			});
+			const { plan } = prepared;
+			// 注入面跟着 tab 走（agents:state → 渲染层能力门）：UI 只认“实际注入了什么”，不认“应该能”。
+			tab.remoteExtensions = prepared.extensions;
 			launch = { plan, launcher: this.remoteRuntime.createLauncher() };
 			// 远端 plan 的 args 是「这次到底用什么会话文件起的 pi」的唯一权威记录（runner 的 plan 走 stdin，
 			// lease 里也没有 argv）——排「重启后是否真的接回同一会话」这类问题时，只看 app 日志就能定案。
-			void this.appLogger?.info("agent", "Remote pi runtime plan prepared", { agentId: id, hostId, args: plan.args.join(" ") });
+			void this.appLogger?.info("agent", "Remote pi runtime plan prepared", { agentId: id, hostId, args: plan.args.join(" "), extensions: prepared.extensions.applied.join(",") || prepared.extensions.reason || "none" });
 		} catch (error) {
 			// 准备失败走**与本地「pi 起不来」同一条**错误卡路径：调用方（协调器/渲染层）看到的是会话
 			// 启动失败 + 稳定码，而不是「会话正常起来了但什么都没发生」——更绝不允许回退本机 pi。
@@ -2374,11 +2401,39 @@ export class AgentManager {
 		return runtime.tab;
 	}
 
+	/**
+	 * 发送边界的隐藏标记守卫（P4.4 扩展面）。
+	 *
+	 * plan/goal 的实现载体是 `agentMessage` 里的隐藏标记：远端没注入对应扩展时没人识别它，
+	 * 标记会**原样进 prompt** 且只读工具集不生效——比“入口消失”更糟（用户以为模式生效了）。
+	 * 所以这里做一道与 UI 无关的兜底：`applied` 里没有该扩展 ⇒ 退回用户可见原文。
+	 *
+	 * 只对“已上报注入面”的会话生效（远端）；本机/DSH 的 `remoteExtensions` 是 undefined，行为不变。
+	 */
+	private resolveSendAgentMessage(runtime: AgentRuntime, input: SendPromptInput): string {
+		const fallback = input.message.trim();
+		const raw = input.agentMessage?.trim() || fallback || "Describe this image.";
+		const extensions = runtime.tab.remoteExtensions;
+		if (extensions === undefined) return raw;
+		const applied = new Set(extensions.applied);
+		for (const entry of PI_DECK_MODE_MARKER_EXTENSIONS) {
+			if (!raw.includes(entry.marker) || applied.has(entry.extension)) continue;
+			void this.appLogger?.warn("agent", "Dropped composer mode marker: extension not injected", {
+				agentId: runtime.tab.id,
+				mode: entry.mode,
+				extension: entry.extension,
+				applied: extensions.applied,
+			});
+			return fallback || raw;
+		}
+		return raw;
+	}
+
 	async sendPrompt(input: SendPromptInput): Promise<SendPromptResult> {
 		const runtime = this.requireRuntime(input.agentId);
 		const trimmed = input.message.trim();
 		const hasImages = input.images && input.images.length > 0;
-		const agentMessage = input.agentMessage?.trim() || trimmed || "Describe this image.";
+		const agentMessage = this.resolveSendAgentMessage(runtime, input);
 		// 允许只有图片没有文字的情况发送
 		if (!trimmed && !hasImages) {
 			return {
@@ -3190,8 +3245,16 @@ export class AgentManager {
 			const hostId = isRemoteProject(project) ? project.locator.hostId : undefined;
 			const remoteRuntime = this.remoteRuntime;
 			if (!hostId || !remoteRuntime) throw new Error(REMOTE_RUNTIME_CODES.unavailable);
-			const plan = await remoteRuntime.prepare({ hostId, remoteCwd: runtime.tab.cwd, sessionFile: sessionPath });
-			this.remoteLaunchByAgent.set(agentId, { plan, launcher: remoteRuntime.createLauncher() });
+			const prepared = await remoteRuntime.prepare({
+				hostId,
+				remoteCwd: runtime.tab.cwd,
+				sessionFile: sessionPath,
+				// 与 create 同一取值顺序（与本地 securitySessionId 同源）；重连也可能拿到新的会话文件。
+				...(runtime.tab.deckSessionId === undefined && sessionPath.length === 0 ? {} : { sessionId: runtime.tab.deckSessionId ?? sessionPath }),
+			});
+			// 重连可能换主机环境（版本/快照），注入面随之更新；UI 必须跟着变，不能留旧的能力门。
+			runtime.tab.remoteExtensions = prepared.extensions;
+			this.remoteLaunchByAgent.set(agentId, { plan: prepared.plan, launcher: remoteRuntime.createLauncher() });
 		}
 
 		void this.appLogger?.info("agent", "Reattaching process", {

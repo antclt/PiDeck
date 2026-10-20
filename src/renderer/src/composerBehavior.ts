@@ -3,10 +3,12 @@ export type SendShortcut = "enter-send" | "ctrl-enter-send" | "shift-enter-send"
 export type ComposerEnterIntent = "ignore" | "newline" | "send";
 
 import type { AgentBackend, ComposerAgentMode } from "@shared/types";
+import { PI_DECK_GOAL_MODE_MARKER, PI_DECK_PLAN_MODE_MARKER } from "../../shared/composerModeMarkers";
 import { formatPromptTemplateBlock } from "./components/session/composer/referenceBlocks";
 
-export const PI_DECK_PLAN_MODE_MARKER = "__PI_DECK_PLAN_MODE__";
-export const PI_DECK_GOAL_MODE_MARKER = "__PI_DECK_GOAL_MODE__";
+// 标记字面量定义搬到 `@shared/composerModeMarkers`（主进程发送边界兜底要用同一份），这里只转出，
+// 保持既有导入路径不变（renderer 内部与测试仍从本模块取）。
+export { PI_DECK_GOAL_MODE_MARKER, PI_DECK_PLAN_MODE_MARKER };
 
 export type ComposerPromptSubmission = {
 	/** 用户在 PiDeck 时间线里看到的原始消息，不能包含桌面端内部控制标记。 */

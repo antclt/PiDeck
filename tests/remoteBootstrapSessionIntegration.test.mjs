@@ -71,7 +71,7 @@ test("real frozen entry reaches finalized after snapshot upload through the prod
 	const launcher = {
 		async start(request) {
 			if (request.invocation.executable === "/usr/bin/ssh") {
-				child = spawn(process.execPath, ["-e", REMOTE_BOOTSTRAP_INLINE_SOURCE, "--", REMOTE_BOOTSTRAP_INLINE_ENTRY, "1", manifest.bundleSha256, NONCE], { env: { ...process.env, HOME: home }, stdio: ["pipe", "pipe", "pipe"] });
+				child = spawn(process.execPath, ["-e", REMOTE_BOOTSTRAP_INLINE_SOURCE, "--", REMOTE_BOOTSTRAP_INLINE_ENTRY, "1", manifest.bundleSha256, NONCE, "helper"], { env: { ...process.env, HOME: home }, stdio: ["pipe", "pipe", "pipe"] });
 				return entryHandle(child, (frame) => {
 					ready = frame;
 				});

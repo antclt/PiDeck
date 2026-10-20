@@ -97,3 +97,34 @@ test("参数上限与 runner 的 argv 上限同源耦合（不靠两处各写一
 	const source = readFileSync("src/main/pi/piRemoteRuntimePlan.ts", "utf8");
 	assert.match(source, /MAX_REMOTE_ARGS\s*=\s*REMOTE_RUNNER_MAX_ARGV_LENGTH\s*-\s*2/, "the plan cap must derive from the runner cap");
 });
+
+test("内置扩展注入：逐个 --extension，顺序保留，且只在 --session 之前追加", () => {
+	const extensionRoot = "/home/u/.pideck/remote-host/extensions/deadbeef";
+	const extensions = [`${extensionRoot}/pi-deck-plan-mode.ts`, `${extensionRoot}/pi-deck-todo.ts`];
+	assert.deepEqual([...buildRemotePiArgs({ extensions })], ["--mode", "rpc", "--no-themes", "--offline", "--extension", extensions[0], "--extension", extensions[1]]);
+	assert.deepEqual(
+		[...buildRemotePiArgs({ extensions, sessionFile: "/srv/app/.pi/agent/sessions/x.jsonl" })],
+		["--mode", "rpc", "--no-themes", "--offline", "--extension", extensions[0], "--extension", extensions[1], "--session", "/srv/app/.pi/agent/sessions/x.jsonl"],
+		"扩展必须在 --session 之前（与本地注入顺序一致）",
+	);
+	// 空数组 = 一个都不注入（与不传字段同义）。
+	assert.deepEqual([...buildRemotePiArgs({ extensions: [] })], [...basePiRpcArgs()]);
+});
+
+test("内置扩展注入：本机路径/相对路径/控制字节一律拒绝（不猜、不归一化）", () => {
+	const bad = ["C:/Users/u/pi-deck-todo.ts", "relative/pi-deck-todo.ts", "/srv/app/", "/srv/../app/x.ts", "/srv/\u0000/x.ts", "", 42, null];
+	for (const extension of bad) {
+		assert.throws(() => buildRemotePiArgs({ extensions: [extension] }), new RegExp(REMOTE_RUNTIME_PATH_INVALID), `must refuse ${JSON.stringify(extension)}`);
+	}
+});
+
+test("内置扩展注入：9 条装得下当前 runner 上限，12 条必须当场拒绝而不是被 runner 拒收", () => {
+	const { REMOTE_RUNNER_MAX_ARGV_LENGTH } = loadTsCommonJs("src/main/remote/RemoteRunnerContract.ts");
+	const extensions = (count) => Array.from({ length: count }, (_, index) => `/home/u/.pideck/remote-host/extensions/deadbeef/pi-deck-extension-${index}.ts`);
+	const worstCase = { ...PLAN_INPUT, sessionFile: "/srv/app/.pi/agent/sessions/x.jsonl", trust: "approve" };
+	const nine = buildRemotePiRuntimePlan({ ...worstCase, extensions: extensions(9) });
+	assert.ok([nine.nodePath, nine.piPath, ...nine.args].length <= REMOTE_RUNNER_MAX_ARGV_LENGTH);
+	assert.equal(nine.args.filter((arg) => arg === "--extension").length, 9);
+	// 12 条 × 2 + 基础/会话/trust 8 个参数 > 30 ⇒ 构造点抛稳定码（不能拖到 runner 才失败）。
+	assert.throws(() => buildRemotePiRuntimePlan({ ...worstCase, extensions: extensions(12) }), /REMOTE_RUNTIME_ARGS_TOO_MANY/);
+});

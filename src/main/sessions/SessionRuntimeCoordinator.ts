@@ -497,6 +497,20 @@ export class SessionRuntimeCoordinator {
 	}
 
 	/**
+	 * 会话级模型目录分流用的窄接口：这条会话是否属于远端主机。
+	 *
+	 * 与 getTarget 的分工：getTarget 回答「现在有没有活进程」，本方法回答「该归谁回答模型目录」——
+	 * 远端会话即使尚未激活也不得回退到本机目录（否则用户选到的模型远端根本不存在），
+	 * 因此未激活时返回 true，由调用方给「remote-inactive」而不是本机列表。
+	 */
+	isRemoteSession(sessionId: string): boolean {
+		const canonicalSessionId = this.canonicalSessionId(sessionId);
+		const entry = this.catalog.get(canonicalSessionId);
+		if (!entry) return false;
+		return this.remoteHostIdForSession(entry.projectId, entry.locator) !== undefined;
+	}
+
+	/**
 	 * 这条会话的 runtime 在哪台机器上（undefined = 本机）。
 	 *
 	 * 判据顺序：**条目自己的 locator 优先**（有 locator 的条目，位置真相就是它 —— 与之前逐字一致，
@@ -1790,7 +1804,10 @@ export class SessionRuntimeCoordinator {
 			return false;
 		}
 		await this.applyPreferences(latest, agentId);
-		this.lastAppliedBySession.set(sessionId, { agentId, preferences });
+		// 降级路径（远端/DSH 采纳宿主模型）会在 applyPreferences 内部改写 catalog：
+		// 这里必须重读，否则会把「采纳前的旧快照」记成已应用，下次激活又重试同一个必然失败的 set_model。
+		const applied = this.catalog.get(sessionId) ?? latest;
+		this.lastAppliedBySession.set(sessionId, { agentId, preferences: snapshotPreferences(applied) });
 		this.lastRequestedThinkingBySession.delete(sessionId);
 		return true;
 	}
@@ -1801,32 +1818,53 @@ export class SessionRuntimeCoordinator {
 		// selectModel 会拒绝。降级为「应用宿主默认模型」并告警，不让整个激活失败
 		// （否则每次重试都新建一个 host 会话 = 孤儿堆积）。pi 保持严格（模型应在 models.json）。
 		const isDsh = entry.backend === "dsh";
+		// 远端会话的偏好可能来自本机目录（引导页默认/旧版本留下的本机选择）——远端 pi 不认识这些模型
+		// 属于预期错配，不是「模型被删」。若按本机 pi 的严格语义抛错，远端会话会直接无法激活；
+		// 若弹「偏好被忽略」，用户会以为自己选错了。统一静默降级 + 把远端真实模型写回 catalog。
+		const isRemote = !isDsh && this.isRemoteSession(entry.id);
 		if (entry.model) {
 			try {
 				await this.agents.setModel(agentId, entry.model.provider, entry.model.modelId);
 			} catch (error) {
-				// pi 后端：模型既不在本地 models.json 也不在 pi 目录（AgentManager 不带
-				// needsRestart 标记地抛 "Model not found"）= 模型已被重命名/删除。与 DSH
-				// 同语义降级：保留 catalog 偏好、沿用 runtime 当前模型并给会话内系统提示，
-				// 不让整个激活/发送失败——否则每次发送都被 "Failed to apply session
-				// preferences" 挡死（2026-09 用户反馈：models.json 重命名模型后旧会话
-				// 无法再发送，报 Model not found: nacho/gpt-5.6-sol）。
-				// 带 needsRestart 的失败（模型存在但运行中 Agent 快照过期）不降级——
-				// 渲染层会引导用户重启 Agent 加载新配置。
-				const modelGoneOnPi = !isDsh && this.isModelGoneError(error);
-				if (!isDsh && !modelGoneOnPi) throw error;
-				void this.logger?.warn("session-runtime", modelGoneOnPi ? "pi model preference ignored: model no longer exists" : "DSH model preference ignored", {
-					sessionId: entry.id,
-					provider: entry.model.provider,
-					modelId: entry.model.modelId,
-					error: errorMessage(error),
-				});
-				// 降级路径两侧行为一致：保留 catalog 偏好、沿用当前模型，并**告知用户**。
-				// DSH 不提示的话，引导页点选（已作为显式 model 带入，issue #253）会在 host
-				// 拒绝时静默失效——底栏显示用户选的模型，实际跑的是部署默认。pi 侧本来就有
-				// 会话内系统消息；DSH 的 gateway 实现走 agentsNotice toast。
-				if (modelGoneOnPi || isDsh) {
-					this.agents.notifyModelPreferenceIgnored?.(agentId, entry.model.provider, entry.model.modelId);
+				if (isRemote) {
+					// 只有「远端确实不认识这个模型」才采纳宿主机当前模型。RPC 超时/远端进程刚退出是
+					// **瞬时故障**：那时拿 get_state 去覆盖 catalog 等于把用户显式选择的偏好静默销毁，
+					// 而用户看不到任何提示。瞬时故障保留偏好、下次激活自然重试。
+					if (/model not found/i.test(errorMessage(error))) {
+						await this.adoptRuntimeModelAfterRejection(entry.id, agentId, error);
+					} else {
+						void this.logger?.warn("session-runtime", "remote model preference deferred: runtime error", {
+							sessionId: entry.id,
+							provider: entry.model.provider,
+							modelId: entry.model.modelId,
+							error: errorMessage(error),
+						});
+					}
+				} else {
+					// pi 后端：模型既不在本地 models.json 也不在 pi 目录（AgentManager 不带
+					// needsRestart 标记地抛 "Model not found"）= 模型已被重命名/删除。与 DSH
+					// 同语义降级：保留 catalog 偏好、沿用 runtime 当前模型并给会话内系统提示，
+					// 不让整个激活/发送失败——否则每次发送都被 "Failed to apply session
+					// preferences" 挡死（2026-09 用户反馈：models.json 重命名模型后旧会话
+					// 无法再发送，报 Model not found: nacho/gpt-5.6-sol）。
+					// 带 needsRestart 的失败（模型存在但运行中 Agent 快照过期）不降级——
+					// 渲染层会引导用户重启 Agent 加载新配置。
+					// 走到这里 isRemote 恒为 false（远端分支在前面就分走了），所以这里只区分 pi / DSH。
+					const modelGoneOnPi = !isDsh && this.isModelGoneError(error);
+					if (!isDsh && !modelGoneOnPi) throw error;
+					void this.logger?.warn("session-runtime", modelGoneOnPi ? "pi model preference ignored: model no longer exists" : "DSH model preference ignored", {
+						sessionId: entry.id,
+						provider: entry.model.provider,
+						modelId: entry.model.modelId,
+						error: errorMessage(error),
+					});
+					// 降级路径两侧行为一致：保留 catalog 偏好、沿用当前模型，并**告知用户**。
+					// DSH 不提示的话，引导页点选（已作为显式 model 带入，issue #253）会在 host
+					// 拒绝时静默失效——底栏显示用户选的模型，实际跑的是部署默认。pi 侧本来就有
+					// 会话内系统消息；DSH 的 gateway 实现走 agentsNotice toast。
+					if (modelGoneOnPi || isDsh) {
+						this.agents.notifyModelPreferenceIgnored?.(agentId, entry.model.provider, entry.model.modelId);
+					}
 				}
 			}
 		}
@@ -1834,9 +1872,11 @@ export class SessionRuntimeCoordinator {
 			try {
 				await this.agents.setThinking(agentId, entry.thinkingLevel);
 			} catch (error) {
-				if (!isDsh) throw error;
+				// 远端会话与 DSH 同语义：档位能力由后端裁决，本机偏好带到远端可能整体不适用，
+				// 降级为「沿用 runtime 当前档位」，不阻断激活。
+				if (!isDsh && !isRemote) throw error;
 				const message = errorMessage(error);
-				void this.logger?.warn("session-runtime", "DSH thinking preference ignored", {
+				void this.logger?.warn("session-runtime", isDsh ? "DSH thinking preference ignored" : "remote thinking preference ignored", {
 					sessionId: entry.id,
 					thinkingLevel: entry.thinkingLevel,
 					error: message,
@@ -1849,6 +1889,42 @@ export class SessionRuntimeCoordinator {
 		// DSH 权限预设（草稿期预选 / 会话内切换回写）：激活时经 /permission 命令应用
 		if (entry.permissionPreset && this.agents.setPermission) {
 			await this.agents.setPermission(agentId, entry.permissionPreset);
+		}
+	}
+
+	/**
+	 * 远端会话的模型偏好被运行时拒绝后的收尾：不抛错、不提示，把运行时**实际**生效的模型/档位
+	 * 写回 catalog。
+	 *
+	 * 为什么必须回写：Preferences 失败分支不影响 runtime 启动，但底栏/选择器读的是 catalog
+	 * 里的 `model`。不回写就会长期显示一个远端从未用过的模型名（用户报「显示的模型跟实际跑的
+	 * 不是一回事」）。同时要刷新 lastAppliedBySession，否则之后每次激活都会重试同一个必然失败的
+	 * set_model。
+	 */
+	private async adoptRuntimeModelAfterRejection(sessionId: string, agentId: string, error: unknown): Promise<void> {
+		void this.logger?.info("session-runtime", "remote model preference not available on host; keeping host model", {
+			sessionId,
+			agentId,
+			error: errorMessage(error),
+		});
+		try {
+			const runtimeSelection = await this.agents.getRuntimeModelThinkingState?.(agentId);
+			if (!runtimeSelection) return;
+			const model = createSessionModelPreference(runtimeSelection.provider, runtimeSelection.modelId, runtimeSelection.modelName);
+			const updated = await this.catalog.update(sessionId, {
+				model,
+				...(runtimeSelection.thinkingLevel !== undefined ? { thinkingLevel: runtimeSelection.thinkingLevel } : {}),
+				updatedAt: Date.now(),
+			});
+			this.lastAppliedBySession.set(sessionId, { agentId, preferences: snapshotPreferences(updated) });
+			this.lastRequestedThinkingBySession.delete(sessionId);
+		} catch (adoptError) {
+			// 回写失败不能连带激活失败：下次用户在会话内切模型会修正展示。
+			void this.logger?.warn("session-runtime", "failed to adopt remote runtime model", {
+				sessionId,
+				agentId,
+				error: errorMessage(adoptError),
+			});
 		}
 	}
 
@@ -2091,6 +2167,8 @@ export class SessionRuntimeCoordinator {
 			// 远端 trust 现状随 runtime 快照一起给：渲染层重载/首次渲染就能显示提示，不用等下一条
 			// `agents:state`（那条推送只在该会话发生状态变化时才来）。本机会话不带该字段。
 			...(tab.remoteTrustUnhandled === true ? { remoteTrustUnhandled: true } : {}),
+			// 远端注入面同样随 runtime 快照下发：重载后 UI 的能力门不能退化成“应该能”。
+			...(tab.remoteExtensions === undefined ? {} : { remoteExtensions: tab.remoteExtensions }),
 			// PiDeck 会话身份透传：渲染层侧栏 ACP「agent↔会话」配对依赖它（见 SessionRuntimeInfo.deckSessionId）。
 			deckSessionId: tab.deckSessionId,
 		};

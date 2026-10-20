@@ -1,4 +1,4 @@
-import { decodeBundleManifest } from "./RemoteBootstrapContract";
+import { bootstrapTargetLayout, decodeBundleManifest, type RemoteBootstrapTarget } from "./RemoteBootstrapContract";
 import { REMOTE_BOOTSTRAP_MAX_FRAME_BYTES, REMOTE_BOOTSTRAP_PROTOCOL_VERSION, type RemoteBootstrapFileMode, type RemoteBootstrapInboundFrame, type RemoteBundleManifest } from "./RemoteHelperContract";
 
 /** A bootstrap staging session: frames out through write(), results in through stdout and process exit. */
@@ -21,6 +21,8 @@ export type BootstrapReadyFrame = { op: "ready"; protocolVersion: number; bundle
 export type BootstrapFinalizeOptions = {
 	/** Files that must land mode 0700; everything else is uploaded as 0600. */
 	executableNames?: readonly string[];
+	/** Closed deploy target: the value the entry echoes back in `finalized.active` is bound to it. */
+	target?: RemoteBootstrapTarget;
 	timeoutMs?: number;
 	timers?: BootstrapTimers;
 };
@@ -30,7 +32,7 @@ const MAX_TIMEOUT_MS = 600_000;
 const SHA256 = /^[0-9a-f]{64}$/;
 const CODE = /^[A-Z][A-Z0-9_]{2,63}$/;
 const NONCE = /^[A-Za-z0-9][A-Za-z0-9_-]{15,63}$/;
-const ACTIVE = /^\.\/bundles\/[0-9a-f]{64}$/;
+const ACTIVE = /^\.\/([A-Za-z0-9._-]{1,32})\/([0-9a-f]{64})$/;
 const CONTROL = /[\u0000-\u001f\u007f]/;
 
 function invalid(): never {
@@ -83,7 +85,8 @@ export function buildFinalizeFrames(manifest: RemoteBundleManifest, options: { e
 }
 
 /** Strictly decode one result frame; unknown or malformed lines return null so they can be ignored. */
-export function decodeBootstrapResult(line: string): BootstrapReadyFrame | { op: "finalized"; active: string; files: number } | { op: "aborted"; reason: "requested" | "eof" } | { op: "error"; code: string } | null {
+export function decodeBootstrapResult(line: string, target: RemoteBootstrapTarget = "helper"): BootstrapReadyFrame | { op: "finalized"; active: string; files: number } | { op: "aborted"; reason: "requested" | "eof" } | { op: "error"; code: string } | null {
+	const layout = bootstrapTargetLayout(target);
 	if (typeof line !== "string" || line.length === 0) return null;
 	let value: unknown;
 	try {
@@ -101,7 +104,7 @@ export function decodeBootstrapResult(line: string): BootstrapReadyFrame | { op:
 		if (typeof frame.bundleSha256 !== "string" || !SHA256.test(frame.bundleSha256)) return null;
 		if (typeof frame.nonce !== "string" || !NONCE.test(frame.nonce)) return null;
 		if (typeof frame.deployRoot !== "string" || !frame.deployRoot.startsWith("/") || frame.deployRoot.length > 4096 || CONTROL.test(frame.deployRoot)) return null;
-		if (frame.staging !== `.staging-${frame.nonce}`) return null;
+		if (frame.staging !== `${layout.stagingPrefix}${frame.nonce}`) return null;
 		return { op: "ready", protocolVersion: frame.protocolVersion, bundleSha256: frame.bundleSha256, nonce: frame.nonce, deployRoot: frame.deployRoot, staging: frame.staging };
 	}
 	if (frame.op === "error") {
@@ -116,7 +119,7 @@ export function decodeBootstrapResult(line: string): BootstrapReadyFrame | { op:
 		// The active path is bound to the pinned content-addressed shape; a free-form string from the
 		// remote must never become the path PiDeck records or later execs.
 		if (!onlyKeys(frame, ["v", "op", "active", "files"])) return null;
-		if (typeof frame.active !== "string" || !ACTIVE.test(frame.active)) return null;
+		if (typeof frame.active !== "string" || !ACTIVE.test(frame.active) || !frame.active.startsWith(`./${layout.directory}/`)) return null;
 		if (typeof frame.files !== "number" || !Number.isSafeInteger(frame.files) || frame.files < 0) return null;
 		return { op: "finalized", active: frame.active, files: frame.files };
 	}
@@ -129,6 +132,7 @@ export function decodeBootstrapResult(line: string): BootstrapReadyFrame | { op:
  */
 export function runBootstrapFinalize(session: BootstrapSession, manifest: RemoteBundleManifest, options: BootstrapFinalizeOptions = {}): Promise<BootstrapFinalizeOutcome> {
 	if (typeof session?.write !== "function" || typeof session?.onStdoutLine !== "function" || typeof session?.onExit !== "function") return Promise.reject(new Error("BOOTSTRAP_INPUT_INVALID"));
+	const activeDirectory = bootstrapTargetLayout(options.target ?? "helper").directory;
 	let frames: string[];
 	try {
 		frames = buildFinalizeFrames(manifest, options);
@@ -167,7 +171,7 @@ export function runBootstrapFinalize(session: BootstrapSession, manifest: Remote
 		timer = timers.setTimeout(() => finish({ status: "timeout" }), timeoutMs);
 		try {
 			unsubscribe = session.onStdoutLine((line) => {
-				const frame = decodeBootstrapResult(line);
+				const frame = decodeBootstrapResult(line, options.target);
 				if (frame === null || frame.op === "ready") return;
 				if (frame.op === "aborted") return finish({ status: "aborted", reason: frame.reason });
 				if (frame.op === "error") return finish({ status: "error", code: frame.code });
@@ -175,7 +179,7 @@ export function runBootstrapFinalize(session: BootstrapSession, manifest: Remote
 				if (!commitIssued) return finish({ status: "error", code: "BOOTSTRAP_FINALIZE_INCOMPLETE" });
 				// Bind the terminal frame to the manifest we just sent: the remote must not be able to name
 				// another active path or claim a different file count.
-				if (frame.active !== `./bundles/${manifest.bundleSha256}`) return finish({ status: "error", code: "BOOTSTRAP_ACTIVE_CONFLICT" });
+				if (frame.active !== `./${activeDirectory}/${manifest.bundleSha256}`) return finish({ status: "error", code: "BOOTSTRAP_ACTIVE_CONFLICT" });
 				if (frame.files !== manifest.files.length) return finish({ status: "error", code: "BOOTSTRAP_FINALIZE_INCOMPLETE" });
 				finish({ status: "finalized", active: frame.active, files: frame.files });
 			});

@@ -104,4 +104,15 @@ export const sessionRuntimeUiBySessionIdAtomFamily = atomFamily((sessionId: stri
  */
 export const sessionRemoteTrustUnhandledAtomFamily = atomFamily((sessionId: string) => atom((get) => get(sessionRuntimeByIdAtom)[sessionId]?.remoteTrustUnhandled === true));
 
+/**
+ * 这条会话实际注入的内置扩展（undefined = 本机会话 / 旧 main / 尚未 spawn）。
+ *
+ * 能力门的唯一输入：**不要**用「项目是远端」或「后端是 pi」推断 plan/goal 可用——那正是
+ * 「入口在、语义不生效」的来源。
+ */
+export const sessionRemoteExtensionsAtomFamily = atomFamily((sessionId: string) => atom((get) => get(sessionRuntimeByIdAtom)[sessionId]?.remoteExtensions));
+
+/** 这条会话是否属于 SSH 远端项目（能力门/安全控件的分支判据；会话记录是唯一来源）。 */
+export const sessionIsRemoteAtomFamily = atomFamily((sessionId: string) => atom((get) => get(sessionRecordsAtom)[sessionId]?.locator?.kind === "ssh"));
+
 export const sessionHistoryMutationOverlayBySessionIdAtomFamily = atomFamily((sessionId: string) => atom((get) => get(sessionHistoryMutationOverlayByIdAtom)[sessionId]));

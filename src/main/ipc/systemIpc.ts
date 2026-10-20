@@ -52,6 +52,7 @@ import { refreshShortcutBindings } from "../appShortcuts";
 import type { ConfigProxyMode } from "../../shared/types/fetchedModel";
 import type { SkillManager } from "../skills/SkillManager";
 import { fetchModelList, invalidateModelListCache, modelsFromPiConfig, refreshModelCatalogStore, refreshModelList, resolveModelListReport } from "../pi/modelListCache";
+import { resolveRemoteModelReport as resolveRemoteModelReportRouting } from "../pi/remoteModelReportRouting";
 import { TokendanceCatalogStore } from "../config/tokendanceCatalog";
 import type { TokendanceInstallResult } from "../config/tokendanceInstaller";
 import type { TokendanceAuthMode, TokendanceAuthStore } from "../config/tokendanceAuth";
@@ -197,6 +198,13 @@ export type SystemIpcDeps = {
 	providerMigration?: ProviderMigrationDeps;
 	/** 全局 Pi 模型 capability snapshot（启动/配置变更时 hydration，picker 只读）。 */
 	modelCapabilityCache: PiModelCapabilityCache;
+	/**
+	 * 远端项目的模型目录（pinned SSH 上跑一次 `pi --list-models`，结果按主机缓存）。
+	 * 未装配（实验开关关闭/非远端项目由返回值 null 表示）时远端会话按 `remote-inactive` 处理。
+	 */
+	remoteModelCatalogForProject?: (projectId: string, sessionId: string, force: boolean) => Promise<ModelListReport | null>;
+	/** 同一份远端目录缓存的失效入口（远端 models.json 改写后必须显式失效）。 */
+	remoteModelCatalog?: { invalidate: (hostId: string) => void };
 	/** 内置 TokenDance 模型目录（live fetch + userData 缓存）；未装配 = 列表不注入。 */
 	tokendanceCatalog?: TokendanceCatalogStore;
 	/** 内置 TokenDance OAuth 授权流程（PKCE verifier 内存持有）；未装配 = 授权入口不可用。 */
@@ -384,6 +392,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		appLogger,
 		rpcLogger,
 		sessionRuntimeCoordinator,
+		remoteModelCatalogForProject,
+		remoteModelCatalog,
 		isProjectTrusted,
 		isDshAgent,
 		setDshRpcLogging,
@@ -641,30 +651,14 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 
 	// ── 模型列表 ────────────────────────────────────────────────────
 
-	ipcMain.handle(ipcChannels.projectsListModels, async (_event, _projectId?: string) => {
-		try {
-			const snapshot = await modelCapabilityCache.ensure();
-			const models = snapshot?.models ?? (await fetchModelList(piLocator, settingsStore, configManager));
-			void appLogger.info("pi", "Model list resolved", {
-				count: models.length,
-				capabilitiesReady: snapshot !== null,
-				providers: [...new Set(models.map((m) => m.provider))].slice(0, 8),
-			});
-			// 供应商只来自 pi 配置（models.json）/内置 catalog：TokenDance 需用户在配置
-			// 页确认后写入，这里不做任何展示层注入（列表 = 运行时可用模型）。
-			return models;
-		} catch (error) {
-			void appLogger.warn("pi", "Failed to resolve model list", {
-				error: error instanceof Error ? error.message : String(error),
-			});
-			return [];
-		}
-	});
-
-	ipcMain.handle(ipcChannels.projectsListModelsReport, async (_event, projectId: unknown, force: unknown) => {
-		// 边界校验：渲染层入参不可信；projectId 仅透传（当前实现未使用），force 必须为布尔。
-		const projectIdArg = typeof projectId === "string" && projectId.length <= 256 ? projectId : undefined;
-		const forceArg = force === true;
+	/**
+	 * 本机模型目录解析（projects:list-models-report 与 sessions:list-models 的本机分支共用）。
+	 *
+	 * 抽出来的理由：远端会话走的是「远端主机上的 pi --list-models」（见 resolveRemoteModelReport），
+	 * 而本机路径的 force 刷新语义（pi update --models + 带扩展快照）与远端无关；两条通道路由到
+	 * 同一份本机实现，避免出现第二份「本机目录」定义而慢慢分叉。
+	 */
+	const resolveLocalModelReport = async (forceArg: boolean): Promise<ModelListReport> => {
 		try {
 			// 手动刷新（force）：先强制刷新 pi 模型目录缓存（pi update --models，
 			// force 绕过 4h 磁盘节流——官方 provider 新模型立刻可见），成功后再重新
@@ -719,6 +713,102 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 				at: Date.now(),
 			};
 		}
+	};
+
+	ipcMain.handle(ipcChannels.projectsListModels, async (_event, _projectId?: string) => {
+		try {
+			const snapshot = await modelCapabilityCache.ensure();
+			const models = snapshot?.models ?? (await fetchModelList(piLocator, settingsStore, configManager));
+			void appLogger.info("pi", "Model list resolved", {
+				count: models.length,
+				capabilitiesReady: snapshot !== null,
+				providers: [...new Set(models.map((m) => m.provider))].slice(0, 8),
+			});
+			// 供应商只来自 pi 配置（models.json）/内置 catalog：TokenDance 需用户在配置
+			// 页确认后写入，这里不做任何展示层注入（列表 = 运行时可用模型）。
+			return models;
+		} catch (error) {
+			void appLogger.warn("pi", "Failed to resolve model list", {
+				error: error instanceof Error ? error.message : String(error),
+			});
+			return [];
+		}
+	});
+
+	ipcMain.handle(ipcChannels.projectsListModelsReport, async (_event, _projectId: unknown, force: unknown) => {
+		// 边界校验：渲染层入参不可信；projectId 仍按原契约接受但当前实现不使用，force 必须为布尔。
+		return resolveLocalModelReport(force === true);
+	});
+
+	/**
+	 * 远端项目的模型目录：具体顺序与「绝不回退本机目录」的保证在
+	 * `src/main/pi/remoteModelReportRouting.ts`（纯策略，可单测）；这里只做依赖装配。
+	 */
+	const resolveRemoteModelReport = async (input: { projectId: string; sessionId: string; liveAgentId: string | undefined; force: boolean }): Promise<ModelListReport> =>
+		resolveRemoteModelReportRouting(
+			{ projectId: input.projectId, liveAgentId: input.liveAgentId },
+			{
+				// 目录解析失败（locator 读取异常等）折叠成 null，不让裸 rejection 穿过 IPC 边界。
+				loadCatalog: async (projectId) => {
+					if (!remoteModelCatalogForProject) return null;
+					try {
+						return await remoteModelCatalogForProject(projectId, input.sessionId, input.force);
+					} catch (error) {
+						void appLogger.warn("pi", "Remote model catalog resolution failed", { projectId, error: error instanceof Error ? error.message : String(error) });
+						return null;
+					}
+				},
+				askRuntime: async (agentId) => {
+					try {
+						const models = await agentManager.getAvailableModels(agentId);
+						void appLogger.info("pi", "Remote session model list resolved", { agentId, count: models.length });
+						return { models, ok: models.length > 0, reason: models.length > 0 ? null : "empty", version: null, detail: "", source: "remote", at: Date.now() };
+					} catch (error) {
+						void appLogger.warn("pi", "Remote session model list failed", { agentId, error: error instanceof Error ? error.message : String(error) });
+						return null;
+					}
+				},
+			},
+		);
+
+	/**
+	 * 会话级模型目录：远端会话**只**接受它自己那台远端 pi 的回答。
+	 *
+	 * 为什么不能复用 projects:list-models-report：那条永远回答本机目录（本机 pi --list-models /
+	 * models.json），而 set_model 的校验发生在远端 pi 上——给远端会话展示本机模型，用户选中后
+	 * 必然 `Model not found`，然后被偏好降级链路静默改回远端默认模型。这正是「远端能聊但选不了
+	 * 我那边的模型」的根因。
+	 *
+	 * 三种结果：
+	 * - 远端项目：`pi --list-models` 在**那台主机**上算目录（与本机同一个解析函数，按主机缓存，
+	 *   与 runtime 无关 ⇒ 草稿期也能选）；CLI 拿不到时若恰好有活 runtime 再问进程一次；
+	 * - 既非远端会话也没有远端 runtime：与 projects:list-models-report 逐字同源；
+	 * - 远端但所有来源都失败：`remote-inactive`，**绝不回退本机目录**（否则用户选到远端不存在的模型）。
+	 *
+	 * `projectId` 是给「没有真实会话身份」的入口兜底用的（小窗新建会话的虚拟 sessionId、自动化任务
+	 * 编辑器）。这些入口最终仍会落在远端项目里：只看 sessionId 会得到本机目录，让同一个错误从主选择器
+	 * 换到边缘入口重现。
+	 */
+	ipcMain.handle(ipcChannels.sessionsListModels, async (_event, rawSessionId: unknown, force: unknown, rawProjectId: unknown): Promise<ModelListReport> => {
+		// 边界校验：渲染层入参不可信；sessionId/projectId 只用于查 runtime，长度上限与其它会话通道一致。
+		const sessionId = typeof rawSessionId === "string" && rawSessionId.length > 0 && rawSessionId.length <= 256 ? rawSessionId : "";
+		const projectId = typeof rawProjectId === "string" && rawProjectId.length > 0 && rawProjectId.length <= 256 ? rawProjectId : "";
+		const forceArg = force === true;
+		const target = sessionId ? sessionRuntimeCoordinator.getTarget(sessionId) : undefined;
+		const liveRemoteAgentId = target && agentManager.isRemoteAgent(target.agentId) ? target.agentId : undefined;
+		// 两个判据都要看：会话不在 catalog 里时 isRemoteSession 一律 false（小窗新建的虚拟 sessionId、
+		// 自动化任务编辑器的固定 key 都属于这种），只看它会让这些入口在远端项目里拿到本机目录。
+		const isRemoteSession = (sessionId.length > 0 && sessionRuntimeCoordinator.isRemoteSession(sessionId)) || (projectId.length > 0 && agentManager.isRemoteProject(projectId));
+		if (isRemoteSession || liveRemoteAgentId !== undefined) {
+			return await resolveRemoteModelReport({
+				projectId,
+				sessionId,
+				liveAgentId: liveRemoteAgentId ?? (projectId.length > 0 ? agentManager.findLiveRemoteAgentId([projectId]) : undefined),
+				force: forceArg,
+			});
+		}
+		// 既不是远端会话、也没有远端 runtime：本机语义逐字不变。
+		return resolveLocalModelReport(forceArg);
 	});
 
 	// ── 模型规格（官方 pi-ai 目录；第三方 provider 按模型本体匹配）──
@@ -2077,6 +2167,9 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		const routed = await piConfigRouter.saveModels(data, options);
 		if (routed.kind === "remote") {
 			// 远端 patch 成功：不触碰本机模型缓存/后台 fork（本机 models.json 没变），只回传供下一次 patch 的 version。
+			// 但必须让**那台主机**的目录缓存失效：否则刚加完 provider/模型，选择器还要等 TTL 过期才看得到
+			// （本机侧当年就踩过同一坑，「新模型添加后下拉列表有时候没有」）。
+			remoteModelCatalog?.invalidate(routed.hostId);
 			void appLogger.info("config", "Remote models config patched", { hostId: routed.hostId, version: routed.version });
 			return { valid: true, remote: routed };
 		}

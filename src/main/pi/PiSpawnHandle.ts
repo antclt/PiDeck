@@ -62,6 +62,8 @@ export type LocalPiRuntimeLaunchPlan = {
  * 的 `runner.mjs`。`cwd` 是远端项目根（canonical）。`args` 只含 pi 自己的参数——解释器与入口由
  * launcher 拼成固定命令，不拼任何用户文本。
  */
+import type { RemoteRunnerEnv } from "../remote/RemoteRunnerContract";
+
 export type RemoteSshPiRuntimeLaunchPlan = {
 	readonly kind: "remote-ssh";
 	readonly hostId: string;
@@ -73,6 +75,8 @@ export type RemoteSshPiRuntimeLaunchPlan = {
 	readonly args: readonly string[];
 	/** 一次运行的身份：runner 用它给 lease 命名，launcher 用它就能拒绝不属于本次握手的 ready 帧。 */
 	readonly nonce: string;
+	/** 可选 `PIDECK_*` 环境（扩展配置）；运行时层面 runner 1.1.0 起才支持，旧 runner 会忽略该字段。 */
+	readonly env?: RemoteRunnerEnv;
 };
 
 /** 一个已经起来的 pi 运行时进程。 */

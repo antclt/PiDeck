@@ -13,8 +13,6 @@ import type {
 	RemoteHostDiagnosticsResult,
 	RemoteHostDisconnectResult,
 	RemoteHostListResult,
-	RemoteHostPinAnswerResult,
-	RemoteHostPinRequest,
 	RemoteHostRepairAnswerResult,
 	RemoteHostRepairDiagnosisResult,
 	RemoteHostRepairFinding,
@@ -319,38 +317,29 @@ export function registerRemoteHostIpc(input: { enabled: boolean; list: () => Pro
 				await rollbackDraft(store, profile.id);
 				throw error;
 			}
-			// Push the confirmation to the window that asked, so the dialog cannot be answered by another.
-			if (!event.sender.isDestroyed()) event.sender.send(ipcChannels.remoteHostPinRequest, pinRequestFrom(offer));
-			return { ok: true, hostId: profile.id, status: "pending" };
+			// 首次信任（TOFU）：主机密钥在这台机器上没有先例，`offerPin` 已经完成了真实握手并把候选
+			// 密钥指纹算出来——再让用户逐字比对一串 SHA256 只是仪式，产品上等于「添加主机」多一步必点
+			// 确认。这里直接按首次信任落盘（同 VSCode Remote / Codex 的默认策略），主机密钥**变化**
+			// 时不走这条路径：已验证主机不再进 add，运行时连接由 pin 文件 + StrictHostKeyChecking=yes
+			// 校验，密钥不符会以连接失败呈现，不会被静默接受。
+			// 仍用 confirmPin（而不是直接写盘），因为 endpoint 的 route digest / known_hosts 校验都在它里面。
+			const offerRevision = store.getSnapshot().revision;
+			// confirmPin 失败（offer 过期/被取消/revision 冲突）和返回 null 同一个后果：没有信任锚。
+			// 两种情况都必须回滚草稿，否则每失败一次就多一行永远未验证的空壳。
+			let confirmed: unknown;
+			try {
+				confirmed = await store.confirmPin({ requestId: offer.requestId, hostId: profile.id, senderId, choice: "approve" }, offerRevision);
+			} catch (error) {
+				await rollbackDraft(store, profile.id);
+				throw error;
+			}
+			if (!confirmed) {
+				await rollbackDraft(store, profile.id);
+				return { ok: false, code: "REMOTE_HOST_PIN_ANSWER_FAILED" };
+			}
+			return { ok: true, hostId: profile.id, status: "verified" };
 		} catch (error) {
 			return { ok: false, code: codeOf(error, "REMOTE_HOST_ADD_FAILED") };
-		}
-	});
-
-	/**
-	 * Answer a fingerprint confirmation.
-	 *
-	 * The `senderId` binding is what makes this safe: the broker only accepts an answer from the window
-	 * that was shown the fingerprint, and the answer carries just a `choice` — the endpoint itself is
-	 * main-owned payload the renderer never sees or supplies.
-	 */
-	ipcMain.handle(ipcChannels.remoteHostAnswerPin, async (event, requestId: unknown, hostId: unknown, choice: unknown): Promise<RemoteHostPinAnswerResult> => {
-		if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
-		if (typeof requestId !== "string" || requestId.length === 0 || requestId.length > 128) return { ok: false, code: "REMOTE_HOST_PIN_ANSWER_INVALID" };
-		if (typeof hostId !== "string" || !HOST_ID.test(hostId)) return { ok: false, code: "REMOTE_HOST_PIN_ANSWER_INVALID" };
-		if (choice !== "approve" && choice !== "deny") return { ok: false, code: "REMOTE_HOST_PIN_ANSWER_INVALID" };
-		const senderId = senderIdOf(event.sender);
-		if (senderId === undefined) return { ok: false, code: "REMOTE_HOST_PIN_ANSWER_INVALID" };
-		try {
-			// Must be the same pin store the offer was made in: the pending request lives in its broker.
-			const { store } = await openStores();
-			const revision = store.getSnapshot().revision;
-			const confirmed = await store.confirmPin({ requestId, hostId, senderId, choice }, revision);
-			// `null` means the user denied: the pin is not saved and the draft stays unverified, which is a
-			// deliberate outcome rather than a failure.
-			return { ok: true, hostId, approved: confirmed !== null };
-		} catch (error) {
-			return { ok: false, code: codeOf(error, "REMOTE_HOST_PIN_ANSWER_FAILED") };
 		}
 	});
 
@@ -516,10 +505,6 @@ async function rollbackDraft(store: { getSnapshot: () => { revision: number }; d
 function senderIdOf(sender: WebContents): number | undefined {
 	const id = sender?.id;
 	return Number.isSafeInteger(id) && id > 0 ? id : undefined;
-}
-
-function pinRequestFrom(offer: { requestId: string; expiresAt: number; hostId: string; hostName: string; user: string; port: number; hostKeyFingerprints: string[] }): RemoteHostPinRequest {
-	return { requestId: offer.requestId, expiresAt: offer.expiresAt, hostId: offer.hostId, hostName: offer.hostName, user: offer.user, port: offer.port, hostKeyFingerprints: [...offer.hostKeyFingerprints] };
 }
 
 /**

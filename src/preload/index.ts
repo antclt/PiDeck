@@ -362,12 +362,8 @@ const api = {
 		diagnostics: (hostId: string) => ipcRenderer.invoke(ipcChannels.remoteHostDiagnostics, hostId) as Promise<import("../shared/types/remoteHost").RemoteHostDiagnosticsResult>,
 		/** 扫描 ~/.ssh/config 列出可添加的候选（只读，不联网、不改配置）。 */
 		scanConfig: () => ipcRenderer.invoke(ipcChannels.remoteHostScanConfig) as Promise<import("../shared/types/remoteHost").RemoteHostConfigScanResult>,
-		/** 添加主机：建立 draft 并推送指纹确认（推送经 onPinRequest 到达）。 */
+		/** 添加主机：建立 draft、完成首次 host key 信任（TOFU）并落盘 pin；成功即 verified，可直接连接。 */
 		add: (input: import("../shared/types/remoteHost").RemoteHostAddInput) => ipcRenderer.invoke(ipcChannels.remoteHostAdd, input) as Promise<import("../shared/types/remoteHost").RemoteHostAddResult>,
-		/** 回答指纹确认：只能回答 main 签发的 requestId（指纹本身由 main 持有，渲染层不传）。 */
-		answerPin: (requestId: string, hostId: string, choice: "approve" | "deny") => ipcRenderer.invoke(ipcChannels.remoteHostAnswerPin, requestId, hostId, choice) as Promise<import("../shared/types/remoteHost").RemoteHostPinAnswerResult>,
-		/** 订阅指纹确认请求；返回 unsubscribe，组件卸载必须退订。 */
-		onPinRequest: (callback: (request: import("../shared/types/remoteHost").RemoteHostPinRequest) => void) => subscribe(ipcChannels.remoteHostPinRequest, callback),
 		/** 订阅连接状态推送；返回 unsubscribe，组件卸载必须退订。 */
 		onStateChange: (callback: (change: import("../shared/types/remoteHost").RemoteHostStateChange) => void) => subscribe(ipcChannels.remoteHostStateChanged, callback),
 		/** 只读：诊断 needs-repair 的原因与合法动作。 */
@@ -392,6 +388,10 @@ const api = {
 		listProject: (projectId: string, path: string) => ipcRenderer.invoke(ipcChannels.remoteProjectList, projectId, path) as Promise<import("../shared/types/remoteHost").RemoteProjectListResult>,
 		/** 按 projectId 读文件（相对路径）；内容为 base64。 */
 		readProjectFile: (projectId: string, path: string) => ipcRenderer.invoke(ipcChannels.remoteProjectRead, projectId, path) as Promise<import("../shared/types/remoteHost").RemoteProjectReadResult>,
+		/** 下载远端项目里的一个文件到本机（主进程弹保存对话框；取消是正常结果）。 */
+		downloadProjectFile: (projectId: string, path: string) => ipcRenderer.invoke(ipcChannels.remoteProjectDownload, projectId, path) as Promise<import("../shared/types/remoteHost").RemoteProjectDownloadResult>,
+		/** 上传本机文件到远端项目的某个目录（主进程弹选择对话框；取消是正常结果）。 */
+		uploadProjectFiles: (projectId: string, directory: string) => ipcRenderer.invoke(ipcChannels.remoteProjectUpload, projectId, directory) as Promise<import("../shared/types/remoteHost").RemoteProjectUploadResult>,
 		openProjectText: (projectId: string, path: string): Promise<import("../shared/types/remoteFiles").RemoteTextOpenResult> => ipcRenderer.invoke(ipcChannels.remoteProjectTextOpen, projectId, path),
 		saveProjectText: (projectId: string, path: string, content: string, version: string): Promise<import("../shared/types/remoteFiles").RemoteTextSaveResult> => ipcRenderer.invoke(ipcChannels.remoteProjectTextSave, projectId, path, content, version),
 		/** 远端文件管理：读取条目元数据并签发 rename/delete 的一次性 entry 令牌（不读正文）。 */
@@ -825,6 +825,12 @@ const api = {
 		listSessionFileChanges: (sessionId: string) => ipcRenderer.invoke(ipcChannels.sessionsListFileChanges, sessionId) as Promise<import("../shared/types").SessionFileChange[]>,
 		/** 会话级 todo 快照（pi-deck-todo custom 条目重建，历史会话任务 tab）。 */
 		listSessionTodo: (sessionId: string) => ipcRenderer.invoke(ipcChannels.sessionsListSessionTodo, sessionId) as Promise<import("../shared/types").SessionTodoSnapshot | undefined>,
+		/**
+		 * 会话级模型目录（按 location 分流）：远端会话由它自己那台远端 pi 回答，
+		 * 本机会话与 projects:list-models-report 同源。force = 手动刷新（仅本机分支生效）。
+		 * projectId 是可选的兜底：没有真实会话身份的入口（小窗新建/自动化编辑器）用它判远端项目。
+		 */
+		listModels: (sessionId: string, force?: boolean, projectId?: string) => ipcRenderer.invoke(ipcChannels.sessionsListModels, sessionId, force, projectId) as Promise<import("../shared/types").ModelListReport>,
 		/** DSH 技能目录（skill.list 只读；/name 斜杠调用，G7）。 */
 		listDshSkills: (agentId: string) => ipcRenderer.invoke(ipcChannels.dshListSkills, agentId) as Promise<import("../shared/types").DshSkillView[]>,
 		/** DSH 孤儿会话 id 列表（host 有但 catalog 无映射；G3/D11 清理提示用）。 */

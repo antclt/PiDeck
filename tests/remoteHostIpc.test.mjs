@@ -323,7 +323,7 @@ test("add expands an SSH-config IdentityFile ~/... to a local absolute path befo
 	const handler = handlers.get("remote:add");
 	// 真实 config 里最常见的形态：候选列表把 `IdentityFile ~/.ssh/id_*` 原样带过来。
 	const result = await handler({ sender }, { label: "serve", hostName: "10.81.2.15", user: "deploy", identityFile: "~/.ssh/id_ed25519" });
-	assert.deepEqual(JSON.parse(JSON.stringify(result)), { ok: true, hostId: HOST_ID, status: "pending" });
+	assert.deepEqual(JSON.parse(JSON.stringify(result)), { ok: true, hostId: HOST_ID, status: "verified" });
 	assert.equal(calls.createDraft.length, 1);
 	assert.equal(calls.createDraft[0].draft.identityFile, join(home, ".ssh", "id_ed25519"));
 	// 展开对象是本机 home：保存值必须能被 host store 的 isAbsolute 判据接受，而不是原样带 `~`。
@@ -354,26 +354,29 @@ test("add refuses identity-file forms it cannot normalize with a dedicated stabl
 });
 
 test("add binds the pin offer to the calling webContents, not a renderer-supplied id", async () => {
-	// 这是整个添加流程的安全核心：broker 只接受「被展示指纹的那个窗口」的回答。
-	// 若能由渲染层自报 senderId，任何脚本都能替用户确认指纹。
+	// 自动信任（TOFU）仍然把 offer/answer 绑在 window 上：broker 只认签发它的那个 webContents，
+	// 渲染层自报的 senderId 一律不采纳。这条防线不随「去掉弹框」而消失。
 	const { handlers, calls, sender } = addFlowHandlers();
 	const result = await handlers.get("remote:add")({ sender }, { label: "serve", hostName: "10.81.2.15", user: "deploy" });
-	assert.deepEqual(JSON.parse(JSON.stringify(result)), { ok: true, hostId: HOST_ID, status: "pending" });
+	assert.deepEqual(JSON.parse(JSON.stringify(result)), { ok: true, hostId: HOST_ID, status: "verified" });
 	assert.equal(calls.offerPin[0].senderId, 42, "the broker's sender binding must come from event.sender.id");
+	assert.equal(calls.confirmPin[0].answer.senderId, 42, "the automatic approval must answer as the same window");
+	assert.equal(calls.confirmPin[0].answer.choice, "approve");
 	// 渲染层即使自报 senderId 也不被采纳（readAddInput 根本不读该字段）。
 	const spoof = await handlers.get("remote:add")({ sender }, { label: "serve", hostName: "10.81.2.15", senderId: 1 });
 	assert.equal(spoof.ok, true);
 	assert.equal(calls.offerPin[1].senderId, 42, "a renderer-supplied senderId must be ignored");
 });
 
-test("add pushes the fingerprint request to the asking window", async () => {
+test("add performs first-use trust in one step: no fingerprint prompt is pushed", async () => {
+	// 产品决定（用户授权）：首次 host key 由主进程在同一动作里记录（TOFU，同 VSCode Remote），
+	// 不再弹「请核对 SHA256」——那一步对用户是仪式成本，而不是他能做的判断。
+	// 安全边界没有放宽：主机密钥**变化**仍由连接期的 pin 文件 + StrictHostKeyChecking=yes 拦住。
 	const { handlers, calls, sender } = addFlowHandlers();
-	await handlers.get("remote:add")({ sender }, { label: "serve", hostName: "10.81.2.15" });
-	assert.equal(calls.sent.length, 1);
-	assert.equal(calls.sent[0].channel, "remote:pin-request");
-	// 指纹必须真的推给用户——确认的本质就是让他核对这个值。
-	assert.deepEqual(JSON.parse(JSON.stringify(calls.sent[0].payload.hostKeyFingerprints)), ["SHA256:abc"]);
-	assert.equal(calls.sent[0].payload.requestId, "req-1");
+	const result = await handlers.get("remote:add")({ sender }, { label: "serve", hostName: "10.81.2.15" });
+	assert.equal(result.status, "verified");
+	assert.equal(calls.sent.length, 0, "no confirmation prompt may be pushed to the renderer");
+	assert.equal(calls.confirmPin.length, 1, "the offer is approved inside the same add call");
 });
 
 test("add reports a stable code when the offer fails, and sends nothing", async () => {
@@ -383,61 +386,9 @@ test("add reports a stable code when the offer fails, and sends nothing", async 
 	assert.equal(calls.sent.length, 0, "a failed offer must not push a confirmation dialog");
 });
 
-test("answerPin validates its inputs and its sender before the store is touched", async () => {
-	const { handlers, calls, sender } = addFlowHandlers();
-	const handler = handlers.get("remote:answer-pin");
-	for (const args of [
-		["", HOST_ID, "approve"],
-		["x".repeat(200), HOST_ID, "approve"],
-		["req-1", "not-an-id", "approve"],
-		["req-1", HOST_ID, "maybe"],
-		["req-1", HOST_ID, undefined],
-	]) {
-		const result = await handler({ sender }, ...args);
-		assert.equal(result.ok, false, `${JSON.stringify(args)} must be rejected`);
-	}
-	// senderId 非法的窗口不能回答。
-	const noSender = await handler({ sender: { id: 0, isDestroyed: () => false } }, "req-1", HOST_ID, "approve");
-	assert.equal(noSender.ok, false);
-	assert.equal(calls.confirmPin.length, 0, "invalid answers must not reach the store");
-});
-
-test("approving saves the pin and denying leaves the draft unverified", async () => {
-	// 先走一次 add，让桩记住这次确认被推给了哪个 sender（否则桩无法执行绑定检查）。
-	const approved = addFlowHandlers();
-	await approved.handlers.get("remote:add")({ sender: approved.sender }, { label: "serve", hostName: "10.81.2.15" });
-	const approveResult = await approved.handlers.get("remote:answer-pin")({ sender: approved.sender }, "req-1", HOST_ID, "approve");
-	assert.deepEqual(JSON.parse(JSON.stringify(approveResult)), { ok: true, hostId: HOST_ID, approved: true });
-	assert.equal(approved.calls.confirmPin[0].answer.choice, "approve");
-
-	const denied = addFlowHandlers();
-	await denied.handlers.get("remote:add")({ sender: denied.sender }, { label: "serve", hostName: "10.81.2.15" });
-	const denyResult = await denied.handlers.get("remote:answer-pin")({ sender: denied.sender }, "req-1", HOST_ID, "deny");
-	// 拒绝是正常结果而不是失败：没保存 pin，draft 保持未验证。
-	assert.deepEqual(JSON.parse(JSON.stringify(denyResult)), { ok: true, hostId: HOST_ID, approved: false });
-});
-
-test("an answer from a different window is refused", async () => {
-	// broker 的 sender 绑定：指纹展示给窗口 A，窗口 B 的回答必须无效——否则任何脚本都能替用户确认。
-	const { handlers, calls, sender } = addFlowHandlers();
-	await handlers.get("remote:add")({ sender }, { label: "serve", hostName: "10.81.2.15" });
-	const other = { id: 99, isDestroyed: () => false, send: () => undefined };
-	const result = await handlers.get("remote:answer-pin")({ sender: other }, "req-1", HOST_ID, "approve");
-	assert.equal(result.ok, false);
-	assert.equal(result.code, "CONFIRMATION_INVALID");
-	// 回答确实到达了桩（说明拦截发生在绑定检查处，而不是被前面的校验挡住）。
-	assert.equal(calls.confirmPin.at(-1).answer.senderId, 99);
-});
-
-test("a store error while answering becomes a stable code, not a thrown message", async () => {
-	const { handlers, sender } = addFlowHandlers({ confirmFails: true });
-	const result = await handlers.get("remote:answer-pin")({ sender }, "req-1", HOST_ID, "approve");
-	assert.deepEqual(JSON.parse(JSON.stringify(result)), { ok: false, code: "CONFIRMATION_EXPIRED" });
-});
-
 test("scan and add honour the feature gate", async () => {
 	const { handlers } = addFlowHandlers({ register: { enabled: false } });
-	for (const channel of ["remote:scan-config", "remote:add", "remote:answer-pin"]) {
+	for (const channel of ["remote:scan-config", "remote:add"]) {
 		const result = await handlers.get(channel)({ sender: { id: 42, isDestroyed: () => false } }, { label: "x", hostName: "y" }, HOST_ID, "approve");
 		assert.equal(result.ok, false, `${channel} must be gated`);
 		assert.equal(result.code, "REMOTE_FEATURE_DISABLED");
@@ -449,35 +400,26 @@ test("add re-reads the revision after the draft write, so the offer is not made 
 	// REMOTE_HOST_REVISION_CONFLICT——添加主机在 UI 上直接失败。桩现在会递增 revision 并校验期望值。
 	const { handlers, calls, sender } = addFlowHandlers();
 	const result = await handlers.get("remote:add")({ sender }, { label: "serve", hostName: "10.81.2.15" });
-	assert.deepEqual(JSON.parse(JSON.stringify(result)), { ok: true, hostId: HOST_ID, status: "pending" });
+	assert.deepEqual(JSON.parse(JSON.stringify(result)), { ok: true, hostId: HOST_ID, status: "verified" });
 	assert.equal(calls.createDraft[0].expected, 7, "the draft is written against the revision read before it");
 	assert.equal(calls.offerPin[0].expected, 8, "the offer must use the revision the draft committed, not the pre-write one");
-});
-
-test("answerPin validates against the current revision", async () => {
-	const { handlers, calls, sender } = addFlowHandlers();
-	await handlers.get("remote:add")({ sender }, { label: "serve", hostName: "10.81.2.15" });
-	const result = await handlers.get("remote:answer-pin")({ sender }, "req-1", HOST_ID, "approve");
-	assert.equal(result.ok, true);
-	// 回答时不先写入，因此期望值就是当时的 revision（8：draft 写入后）。
+	// 自动 approve 仍走 CAS：期望值同样取「当前」revision（offer 不写入，所以还是 8）。
 	assert.equal(calls.confirmPin[0].expected, 8);
 });
 
-test("the new add-host channels are declared and bridged in all three places", () => {
+test("the add-host channels are declared and bridged in all three places", () => {
 	const shared = readFileSync("src/shared/ipc.ts", "utf8");
 	const preload = readFileSync("src/preload/index.ts", "utf8");
 	for (const [key, channel] of [
 		["remoteHostScanConfig", "remote:scan-config"],
 		["remoteHostAdd", "remote:add"],
-		["remoteHostAnswerPin", "remote:answer-pin"],
-		["remoteHostPinRequest", "remote:pin-request"],
 	])
 		assert.match(shared, new RegExp(`${key}:\\s*"${channel}"`));
-	assert.match(preload, /scanConfig:\s*\(\)\s*=>\s*ipcRenderer\.invoke\(ipcChannels\.remoteHostScanConfig/);
+	assert.match(preload, /scanConfig:\s*\(\)?\s*=>\s*ipcRenderer\.invoke\(ipcChannels\.remoteHostScanConfig/);
 	assert.match(preload, /add:\s*\(input[\s\S]{0,120}?ipcRenderer\.invoke\(ipcChannels\.remoteHostAdd/);
-	assert.match(preload, /answerPin:\s*\(requestId[\s\S]{0,160}?ipcRenderer\.invoke\(ipcChannels\.remoteHostAnswerPin/);
-	// 订阅必须返回 unsubscribe（项目硬性规则），否则窗口销毁后仍在推送。
-	assert.match(preload, /onPinRequest:\s*\(callback[\s\S]{0,200}?subscribe\(ipcChannels\.remoteHostPinRequest/);
+	// 去掉人工确认后不得留下悬空通道/桥接（否则就是第二套死路径）。
+	assert.doesNotMatch(shared, /remoteHostAnswerPin|remoteHostPinRequest/);
+	assert.doesNotMatch(preload, /answerPin|onPinRequest/);
 });
 
 test("a service that fails to build is reported as a stable code, not an escaped rejection", async () => {
@@ -565,12 +507,10 @@ test("the connect button is only enabled for a verified, enabled host", () => {
 	assert.match(tab, /disabled=\{pending \|\| !connectable\}/);
 });
 
-test("the add and answer channels share one pin store, so the pending request survives", async () => {
-	// 实跑回归（2026-09）：确认弹框里点「信任」无效，主机永远停在「未验证」——因为
-	// remote:add 建了一个 pin store（待确认状态注册在它的 broker 里）并在返回前 dispose，
-	// 而 remote:answer-pin 又建了一个新的空 broker，于是连**展示过指纹的那个窗口**也被拒。
-	//
-	// 这条用例用的是**真正的 broker 语义**：offer 在 A 注册，answer 必须在同一实例上找得到。
+test("add approves the offer on the same pin store that issued it", async () => {
+	// 保留这条用例的真正目的：待确认状态挂在 pin store 的 broker 上，换实例就找不到。
+	// 弹框去掉后，offer 与自动 approve 都在同一次 remote:add 里完成，因此必须共用同一个实例——
+	// 否则「添加即验证」会静默退化成「添加后永远未验证」。
 	const requests = new Map();
 	let instances = 0;
 	const handlers = new Map();
@@ -596,7 +536,6 @@ test("the add and answer channels share one pin store, so the pending request su
 							},
 							async offerPin(hostId, senderId) {
 								const requestId = "req-shared";
-								// 待确认状态挂在**这个** pin store 的 broker 上；换实例就找不到。
 								requests.set(requestId, { hostId, senderId, store: pinStore });
 								return { requestId, expiresAt: 1, hostId, hostName: "10.81.2.15", user: "deploy", port: 22, hostKeyFingerprints: ["SHA256:x"] };
 							},
@@ -617,12 +556,11 @@ test("the add and answer channels share one pin store, so the pending request su
 	registerRemoteHostIpc({ enabled: true, userDataDir: "/tmp/ignored", list: async () => ({ snapshot: { status: "ready", profiles: [] }, findings: [] }) });
 	const sender = { id: 42, isDestroyed: () => false, send: () => undefined };
 	const add = await handlers.get("remote:add")({ sender }, { label: "serve", hostName: "10.81.2.15" });
-	assert.equal(add.ok, true);
-	const answer = await handlers.get("remote:answer-pin")({ sender }, "req-shared", HOST_ID, "approve");
-	assert.equal(answer.ok, true, `answer must find the pending request: ${JSON.stringify(answer)}`);
-	assert.equal(answer.approved, true);
+	assert.equal(add.ok, true, `add must succeed: ${JSON.stringify(add)}`);
+	assert.equal(add.status, "verified");
 	// 整个流程只应建一个 pin store；两个就说明待确认状态被分到了两个 broker 上。
-	assert.equal(instances, 1, "the add and answer channels must share one pin store");
+	assert.equal(instances, 1, "offer and automatic approval must share one pin store");
+	assert.equal(requests.size, 1);
 });
 
 test("the state-change channel is declared and bridged with an unsubscribe", () => {

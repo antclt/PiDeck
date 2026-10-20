@@ -61,6 +61,18 @@ export const REMOTE_RUNNER_MAX_ARG_LENGTH = 4096;
  * The pattern is exported as its source because the frozen body repeats that literal.
  */
 export const REMOTE_RUNNER_NONCE_PATTERN = "^[A-Za-z0-9_-]{16,64}$";
+/**
+ * Per-launch environment (runner 1.1.0): PiDeck passes extension configuration as `PIDECK_*` only.
+ *
+ * Why an allowlist instead of a free environment: the remote pi runs as the user's own account, and a
+ * launcher that could rewrite `PATH`, `HOME` or `NODE_OPTIONS` would be able to change which program the
+ * supervisor actually starts. A key outside the namespace is refused by both sides.
+ */
+export const REMOTE_RUNNER_MAX_ENV_ENTRIES = 32;
+export const REMOTE_RUNNER_MAX_ENV_VALUE = 4096;
+export const REMOTE_RUNNER_ENV_KEY_PATTERN = "^PIDECK_[A-Z0-9_]{1,64}$";
+const ENV_KEY = new RegExp(REMOTE_RUNNER_ENV_KEY_PATTERN);
+export type RemoteRunnerEnv = Readonly<Record<string, string>>;
 /** One nonce must not be able to name a file outside the lease directory. */
 const NONCE = new RegExp(REMOTE_RUNNER_NONCE_PATTERN);
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
@@ -88,12 +100,35 @@ export const REMOTE_RUNNER_KILL_CONFIRM_MS = 2000;
 /** Interval between two liveness probes of the group. */
 export const REMOTE_RUNNER_POLL_MS = 50;
 
-export type RemoteRunnerInitFrame = { v: 1; op: "start"; nonce: string; cwd: string; argv: readonly string[] };
+export type RemoteRunnerInitFrame = { v: 1; op: "start"; nonce: string; cwd: string; argv: readonly string[]; env?: RemoteRunnerEnv };
 /** `pid` and `pgid` are equal by construction: the pi process is a detached group leader of its own. */
 export type RemoteRunnerReadyFrame = { v: 1; op: "ready"; nonce: string; pid: number; pgid: number; startedAt: string };
 export type RemoteRunnerErrorFrame = { v: 1; op: "error"; code: RemoteRunnerCode };
 export type RemoteRunnerResultFrame = RemoteRunnerReadyFrame | RemoteRunnerErrorFrame;
-export type RemoteRunnerInitInput = { nonce: string; cwd: string; argv: readonly string[] };
+export type RemoteRunnerInitInput = { nonce: string; cwd: string; argv: readonly string[]; env?: RemoteRunnerEnv };
+
+/**
+ * Validate and normalize the optional `env` object exactly as the frozen runner reads it.
+ *
+ * Returns `undefined` for an absent value (a launcher that has nothing to configure sends no field at all)
+ * and throws `RUNNER_INPUT_INVALID` for anything outside the allowlist. Exported so the plan constructor
+ * and the launcher share one validator instead of each half-validating.
+ */
+export function readRemoteRunnerEnv(value: unknown): RemoteRunnerEnv | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value !== "object" || value === null || Array.isArray(value)) fail(REMOTE_RUNNER_CODE_INPUT_INVALID);
+	const keys = Object.keys(value);
+	if (keys.length === 0) return {};
+	if (keys.length > REMOTE_RUNNER_MAX_ENV_ENTRIES) fail(REMOTE_RUNNER_CODE_INPUT_INVALID);
+	const env: Record<string, string> = {};
+	for (const key of keys) {
+		if (!ENV_KEY.test(key)) fail(REMOTE_RUNNER_CODE_INPUT_INVALID);
+		const entry = (value as Record<string, unknown>)[key];
+		if (typeof entry !== "string" || entry.length > REMOTE_RUNNER_MAX_ENV_VALUE || CONTROL_CHARS.test(entry)) fail(REMOTE_RUNNER_CODE_INPUT_INVALID);
+		env[key] = entry;
+	}
+	return env;
+}
 
 /** ISO 8601 in the single shape `Date#toISOString` produces, which is the only shape the runner sends. */
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -146,7 +181,15 @@ function readInitFrame(value: unknown): RemoteRunnerInitFrame | null {
 		if (index < 2 && !isRemoteRunnerAbsolutePath(entry)) return null;
 		args.push(entry);
 	}
-	return { v: 1, op: "start", nonce, cwd, argv: args };
+	let env: RemoteRunnerEnv | undefined;
+	if (frame.env !== undefined) {
+		try {
+			env = readRemoteRunnerEnv(frame.env);
+		} catch {
+			return null;
+		}
+	}
+	return { v: 1, op: "start", nonce, cwd, argv: args, ...(env === undefined ? {} : { env }) };
 }
 
 function decodeLine(line: string | Uint8Array): string {
@@ -188,7 +231,7 @@ export function decodeRemoteRunnerInitFrame(line: string | Uint8Array): RemoteRu
  */
 export function buildRemoteRunnerInitFrame(input: RemoteRunnerInitInput): string {
 	if (typeof input !== "object" || input === null) fail(REMOTE_RUNNER_CODE_INPUT_INVALID);
-	const frame = readInitFrame({ v: 1, op: "start", nonce: input.nonce, cwd: input.cwd, argv: input.argv });
+	const frame = readInitFrame({ v: 1, op: "start", nonce: input.nonce, cwd: input.cwd, argv: input.argv, ...(input.env === undefined ? {} : { env: input.env }) });
 	if (frame === null) fail(REMOTE_RUNNER_CODE_INPUT_INVALID);
 	const line = JSON.stringify(frame);
 	if (Buffer.byteLength(line, "utf8") + 1 > REMOTE_RUNNER_MAX_INIT_FRAME_BYTES) fail(REMOTE_RUNNER_CODE_INPUT_INVALID);

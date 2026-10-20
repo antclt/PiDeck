@@ -1,5 +1,5 @@
 import type { ThinkingLevelMap } from "./modelSpecs";
-import type { SessionEnvironment, SessionLocator, SessionSource } from "./session";
+import type { SessionEnvironment, SessionLocator, RemoteSessionExtensions, SessionSource } from "./session";
 import type { TodoItem } from "./todo";
 
 /**
@@ -127,6 +127,12 @@ export type AgentTab = {
 	 * 会话不带它（undefined 或 false = 无此状态），旧 payload 缺字段时按「无标记」处理（不显示、不报错）。
 	 */
 	remoteTrustUnhandled?: boolean;
+	/**
+	 * 远端会话实际注入的 PiDeck 内置扩展（P4.4 扩展面）。本机/WSL/DSH/生图会话不带。
+	 * 每次 spawn / reattach 由远端运行时端口给出，随 `agents:state` 与 runtime 快照下发；
+	 * 渲染层的计划/目标/安全等级能力门只认这里的 `applied`。
+	 */
+	remoteExtensions?: RemoteSessionExtensions;
 	/** DSH agent 预设（会话「模式」）：新建/attach 时从 host 解析，回写 catalog 供头部只读展示。 */
 	agentPreset?: string;
 	wslDistro?: string;
@@ -299,6 +305,13 @@ export type ModelListFailReason =
 	 * 与 cli-failed 的区别：不是运行时故障，重试永远无效，可操作动作是「启动 host」。
 	 */
 	| "dsh-host-stopped"
+	/**
+	 * 远端会话没有任何可用的目录来源：既没装配远端目录通道（实验开关关闭/项目位置读不出来），
+	 * 也没有活着的远端 pi 进程可以问。正常情况下远端目录由主机上的 `pi --list-models` 提供，
+	 * 与「会话是否激活」无关，所以这个码不该是常态。
+	 * 绝不能回退到本机目录——那会让用户选到远端根本不存在的模型。
+	 */
+	| "remote-inactive"
 	| "empty";
 
 /** 模型列表加载报告（projects:list-models-report）：模型数组 + 为空时的失败原因与详情。
@@ -313,8 +326,13 @@ export type ModelListReport = {
 	version: string | null;
 	/** 失败详情（CLI stderr / 配置解析错误），已截断，可直接展示 */
 	detail: string;
-	/** 数据来源：cache / cli / config-fallback / none */
-	source: "cache" | "cli" | "config-fallback" | "none";
+	/**
+	 * 数据来源：cache / cli / config-fallback / none / remote。
+	 * remote = 远端主机自己算出来的目录：优先是该主机上的 `pi --list-models`（与本机同一个解析
+	 * 函数），失败时才可能是活着的远端 pi 进程经 `get_available_models` 回答。远端会话只会是
+	 * 这个来源——本机目录在远端没有意义（set_model 会在远端被拒）。
+	 */
+	source: "cache" | "cli" | "config-fallback" | "none" | "remote";
 	/** 报告生成时刻 */
 	at: number;
 };

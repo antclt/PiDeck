@@ -70,6 +70,22 @@ function addBundle(host, name, ageMs) {
 	return directory;
 }
 
+function addExtensionSnapshot(host, name, ageMs) {
+	const directory = join(host.deployRoot, "extensions", name);
+	mkdirSync(directory, { recursive: true, mode: 0o700 });
+	writeFileSync(join(directory, "pi-deck-todo.ts"), `// ${name}\n`);
+	if (POSIX) chmodSync(directory, 0o700);
+	setAge(directory, ageMs);
+	return directory;
+}
+
+function addExtensionDirectory(host) {
+	const directory = join(host.deployRoot, "extensions");
+	mkdirSync(directory, { recursive: true, mode: 0o700 });
+	if (POSIX) chmodSync(directory, 0o700);
+	return directory;
+}
+
 function addStaging(host, nonce, ageMs, leftover = true) {
 	const directory = join(host.deployRoot, `${REMOTE_BOOTSTRAP_STAGING_PREFIX}${nonce}`);
 	mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -92,7 +108,8 @@ function runSweep(host, activeSha, options = {}) {
 	const marker = options.marker ?? MARKER;
 	const now = options.now ?? NOW;
 	const deployRoot = options.deployRoot ?? host.deployRoot;
-	const child = spawnSync(process.execPath, ["-e", REMOTE_BUNDLE_MAINTENANCE_INLINE_SOURCE, "--", REMOTE_BUNDLE_MAINTENANCE_ENTRY, marker, deployRoot, activeSha, String(now)], { env: { ...process.env, HOME: options.home ?? host.home }, encoding: "utf8" });
+	const activeExtensionSha = options.activeExtensionSha ?? "-";
+	const child = spawnSync(process.execPath, ["-e", REMOTE_BUNDLE_MAINTENANCE_INLINE_SOURCE, "--", REMOTE_BUNDLE_MAINTENANCE_ENTRY, marker, deployRoot, activeSha, activeExtensionSha, String(now)], { env: { ...process.env, HOME: options.home ?? host.home }, encoding: "utf8" });
 	return { child, marker };
 }
 
@@ -109,6 +126,8 @@ test("the frozen source and retention constants are a stable contract", () => {
 	assert.ok(REMOTE_BUNDLE_MAINTENANCE_INLINE_SOURCE.includes(REMOTE_BUNDLE_MAINTENANCE_ENTRY));
 	assert.ok(REMOTE_BUNDLE_MAINTENANCE_INLINE_SOURCE.includes(REMOTE_BUNDLE_MAINTENANCE_MARKER_PREFIX));
 	assert.ok(REMOTE_BUNDLE_MAINTENANCE_INLINE_SOURCE.includes(REMOTE_BOOTSTRAP_STAGING_PREFIX));
+	assert.ok(REMOTE_BUNDLE_MAINTENANCE_INLINE_SOURCE.includes("extensions"));
+	assert.ok(REMOTE_BUNDLE_MAINTENANCE_INLINE_SOURCE.includes(".deploy-ext.lock"));
 	assert.ok(REMOTE_BUNDLE_MAINTENANCE_INLINE_SOURCE.includes(REMOTE_BOOTSTRAP_LOCK_FILE_NAME));
 	// plan §4.2 的数值被写死进冻结源码：改动必须同时改这里，防止「常量改了、远端还是旧行为」。
 	assert.equal(REMOTE_BUNDLE_MAINTENANCE_RETENTION.stagingTtlMs, 60 * 60 * 1000);
@@ -134,6 +153,51 @@ test("keeps the active bundle, the rollback snapshot and at most two more unrefe
 	assert.ok(existsSync(join(host.bundlesDir, sha("d"))), "未引用快照 1 保留");
 	assert.ok(existsSync(join(host.bundlesDir, sha("b"))), "未引用快照 2 保留");
 	assert.equal(existsSync(join(host.bundlesDir, sha("e"))), false, "超额的旧快照必须删除");
+});
+
+test("extensions snapshots are swept in their own directory and never touch bundles", (t) => {
+	const host = fakeHost(t);
+	addExtensionDirectory(host);
+	addBundle(host, ACTIVE, 30 * DAY);
+	const activeExt = sha("f");
+	addExtensionSnapshot(host, activeExt, 30 * DAY); // 本次激活：永远保留
+	addExtensionSnapshot(host, sha("1"), 2 * HOUR); // rollback
+	addExtensionSnapshot(host, sha("2"), 3 * HOUR);
+	addExtensionSnapshot(host, sha("3"), 2 * DAY + HOUR);
+	addExtensionSnapshot(host, sha("4"), 2 * DAY + 2 * HOUR); // 超额 ⇒ 删除
+
+	const result = outcome(host, ACTIVE, { activeExtensionSha: activeExt });
+	assert.equal(result.removedExtensions, 1);
+	assert.equal(result.keptExtensions, 4);
+	assert.equal(result.removedBundles, 0, "扩展 sweep 不得碰 helper bundles");
+	assert.ok(existsSync(join(host.deployRoot, "extensions", activeExt)));
+	assert.equal(existsSync(join(host.deployRoot, "extensions", sha("4"))), false);
+});
+
+test("an unknown active extension snapshot leaves extensions untouched", (t) => {
+	const host = fakeHost(t);
+	addExtensionDirectory(host);
+	addBundle(host, ACTIVE, 30 * DAY);
+	addExtensionSnapshot(host, sha("9"), 30 * DAY);
+
+	// 默认 activeExtensionSha="-"：本轮不知道扩展 active，就只扫 staging/锁，不猜、不删。
+	const result = outcome(host);
+	assert.equal(result.removedExtensions, 0);
+	assert.ok(existsSync(join(host.deployRoot, "extensions", sha("9"))));
+});
+
+test("a stale extension deploy lock is removed like the helper lock", (t) => {
+	const host = fakeHost(t);
+	addExtensionDirectory(host);
+	addBundle(host, ACTIVE, 30 * DAY);
+	const activeExt = sha("f");
+	addExtensionSnapshot(host, activeExt, 30 * DAY);
+	const lockPath = join(host.deployRoot, ".deploy-ext.lock");
+	writeFileSync(lockPath, JSON.stringify({ pid: 999999999, nonce: MARKER }), { mode: 0o600 });
+
+	const result = outcome(host, ACTIVE, { activeExtensionSha: activeExt });
+	assert.equal(result.removedStaleLock, true);
+	assert.equal(existsSync(lockPath), false);
 });
 
 test("an unreferenced snapshot older than seven days is deleted even when slots are free", (t) => {
@@ -281,7 +345,7 @@ test("the command builder sends only validated tokens and stays inside the pinne
 });
 
 test("the result parser accepts only one strictly shaped outcome after the marker", () => {
-	const valid = { ok: true, removedBundles: 1, keptBundles: 2, removedStaging: 0, keptStaging: 3, removedStaleLock: true, unverifiable: 0, skipped: ["DEPLOY_LOCK_REMOVE_FAILED"] };
+	const valid = { ok: true, removedBundles: 1, keptBundles: 2, removedExtensions: 0, keptExtensions: 1, removedStaging: 0, keptStaging: 3, removedStaleLock: true, unverifiable: 0, skipped: ["DEPLOY_LOCK_REMOVE_FAILED"] };
 	const parsed = parseRemoteBundleMaintenanceResult(`login banner\n${MARKER}${JSON.stringify(valid)}`, MARKER);
 	const { ok: accepted, ...expectedOutcome } = valid;
 	assert.equal(accepted, true);
@@ -310,5 +374,5 @@ test("the result parser accepts only one strictly shaped outcome after the marke
 		() => parseRemoteBundleMaintenanceResult(`${MARKER}{"ok":true}`, "PIDECK_SWEEP_short"),
 		(error) => error.message === REMOTE_BUNDLE_MAINTENANCE_CODES.resultInvalid,
 	);
-	assert.deepEqual([...REMOTE_BUNDLE_MAINTENANCE_SKIP_REASONS], ["DEPLOY_ROOT_UNVERIFIABLE", "DEPLOY_LOCK_HELD", "DEPLOY_LOCK_REMOVE_FAILED", "BUNDLES_DIR_UNVERIFIABLE", "ACTIVE_BUNDLE_MISSING"]);
+	assert.deepEqual([...REMOTE_BUNDLE_MAINTENANCE_SKIP_REASONS], ["DEPLOY_ROOT_UNVERIFIABLE", "DEPLOY_LOCK_HELD", "DEPLOY_LOCK_REMOVE_FAILED", "BUNDLES_DIR_UNVERIFIABLE", "ACTIVE_BUNDLE_MISSING", "EXTENSIONS_DIR_UNVERIFIABLE", "ACTIVE_EXTENSION_MISSING"]);
 });

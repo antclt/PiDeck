@@ -10,9 +10,11 @@ function createHarness(initial = {}) {
 	const notices = [];
 	let writes = 0;
 	let options = { sessionId: "catalog-session", backend: "pi", projectId: "project-a", enabled: true, ...initial };
-	const request = (backend, projectId, force) => {
+	// pi 的目录走会话级通道（sessions:list-models，主进程按 location 分流），
+	// DSH 仍走 host 级 listDshModels；两者都在这里用一个 request 队列表达。
+	const request = (backend, projectId, force, sessionId) => {
 		const deferred = Promise.withResolvers();
-		requests.push({ ...deferred, backend, projectId, force });
+		requests.push({ ...deferred, backend, projectId, force, sessionId });
 		return deferred.promise;
 	};
 	const { useBackendModelCatalog } = createTsSandbox({
@@ -33,8 +35,8 @@ function createHarness(initial = {}) {
 			},
 			"../desktopApi": {
 				desktopApi: {
-					projects: { listModelsReport: (projectId, force) => request("pi", projectId, force) },
-					sessions: { listDshModels: () => request("dsh") },
+					projects: { listModelsReport: (projectId, force) => request("pi-projects", projectId, force) },
+					sessions: { listDshModels: () => request("dsh"), listModels: (sessionId, force) => request("pi", undefined, force, sessionId) },
 				},
 			},
 			"../i18n": { t: (key) => `localized:${key}` },
@@ -91,7 +93,9 @@ test("Pi catalog publishes its report and does not refetch on unchanged renders"
 	h.render();
 	assert.equal(h.render().loading, true);
 	assert.equal(h.requests.length, 1);
-	assert.equal(h.requests[0].projectId, "project-a");
+	// pi 目录现在按会话取：request 带的是 sessionId（主进程据此按 location 分流），
+	// projectId 只留在 hook 的 scope 判定里（不进请求）。
+	assert.equal(h.requests[0].sessionId, "catalog-session");
 	assert.equal(h.requests[0].force, false);
 	const next = report();
 	h.requests[0].resolve(next);
@@ -212,14 +216,32 @@ for (const backend of ["pi", "dsh"]) {
 	}
 }
 
-test("same-source sessions reuse the accepted catalog without starting a new lookup", async () => {
+test("same-scope renders reuse the accepted catalog without starting a new lookup", async () => {
+	// 目录现在按**会话**取（远端会话由它自己那台远端 pi 回答），因此 scope 判定必须含 sessionId：
+	// 同一项目下的另一个会话可能是另一种 location，复用它的目录等于把本机模型给远端会话。
 	const h = createHarness();
 	h.render();
 	const accepted = report();
 	h.requests[0].resolve(accepted);
 	await settle();
-	assert.equal(h.render({ sessionId: "another-session" }).report, accepted);
+	// 同一个会话重复渲染（含 projectId 变化不影响已有 scope 的等价字段）→ 复用。
+	assert.equal(h.render().report, accepted);
 	assert.equal(h.requests.length, 1);
+	h.unmount();
+});
+
+test("a different session in the same project does not reuse the accepted catalog", async () => {
+	const h = createHarness();
+	h.render();
+	h.requests[0].resolve(report("session-a-model"));
+	await settle();
+	const other = h.render({ sessionId: "another-session" });
+	// 首屏必须立刻丢弃旧会话的目录（不能等新响应回来才隐藏）。
+	assert.equal(other.report, null);
+	assert.equal(h.requests.length, 2, "a new session must issue its own lookup");
+	h.requests[1].resolve(report("session-b-model"));
+	await settle();
+	assert.equal(h.render({ sessionId: "another-session" }).report.models[0].id, "session-b-model");
 	h.unmount();
 });
 

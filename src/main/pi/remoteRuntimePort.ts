@@ -20,13 +20,16 @@
  * trust flag 都不出现，远端行为与历史版本一致（远端 pi 是否加载项目 `.pi` 资源仍由它自己决定）。
  */
 import { randomUUID } from "node:crypto";
-import type { RemotePiRuntimeFacts } from "../remote/RemoteHostConnectionService";
+import type { RemoteExtensionSnapshotFacts, RemotePiRuntimeFacts } from "../remote/RemoteHostConnectionService";
+import { piVersionAtLeast } from "../extensions/extensionVersionGate";
+import { listRemoteInjectableExtensionNames } from "../extensions/remoteExtensionSnapshot";
 import type { RemoteSessionRegistration } from "../sessions/SessionCatalog";
 // 会话根解析与文件名 stem 都从 scanner 转出：远端会话身份的两个既有判定（根在哪、暂定标题取什么）
 // 只允许有一份实现。
 import { createRemoteSessionScanner, REMOTE_SESSION_MAX_ID_LENGTH, REMOTE_SESSION_MAX_PATH_LENGTH, titleFromRemoteSessionId, type RemoteSessionCatalogPort, type RemoteSessionScannerPort } from "../sessions/RemoteSessionScanner";
 import type { PiRuntimeLauncher, RemoteSshPiRuntimeLaunchPlan } from "./PiSpawnHandle";
 import { buildRemotePiRuntimePlan } from "./piRemoteRuntimePlan";
+import { remoteSecurityPolicyPath } from "../remote/RemoteSecurityPolicyArtifact";
 import type { PiRpcBaseArgsSettings, PiTrustOverride } from "./piRpcArgs";
 
 /**
@@ -61,6 +64,26 @@ export const REMOTE_RUNTIME_CODES = {
 	localOperationUnsupported: "REMOTE_RUNTIME_LOCAL_OPERATION_UNSUPPORTED",
 } as const;
 
+/** 远端注入内置扩展所需的最低 pi 版本（扩展按 1.x 事件面编写，0.85–0.99 不注入）。 */
+export const REMOTE_EXTENSIONS_MIN_PI_VERSION = "1.0.0";
+
+/** 未注入时给 UI / 日志的闭集原因（消息即码）。 */
+export type RemoteRuntimeExtensionReason = "REMOTE_PI_EXTENSIONS_UNSUPPORTED" | "REMOTE_EXTENSIONS_UNAVAILABLE" | "REMOTE_EXTENSIONS_DISABLED" | "REMOTE_EXTENSIONS_NONE";
+
+/** 本次运行实际注入的内置扩展（basename，顺序即 `-e` 顺序）；未注入时只给闭集原因。 */
+export type RemoteRuntimeExtensions = {
+	readonly applied: readonly string[];
+	readonly reason?: RemoteRuntimeExtensionReason;
+	/** 诊断用的底层稳定码（不直接上 UI；仅在 reason 为 unavailable 时有值）。 */
+	readonly detail?: string;
+};
+
+/** `prepare()` 的完整结果：启动计划 + 本次注入面（UI 的能力门只认 `applied`，不认“应该能”）。 */
+export type RemoteRuntimePrepareResult = {
+	readonly plan: RemoteSshPiRuntimeLaunchPlan;
+	readonly extensions: RemoteRuntimeExtensions;
+};
+
 /** 启动准备入参：远端主机 + 远端工作目录 + 可选的「重开同一会话」。 */
 export type RemoteRuntimePrepareInput = {
 	readonly hostId: string;
@@ -70,6 +93,8 @@ export type RemoteRuntimePrepareInput = {
 	readonly sessionFile?: string;
 	/** 匿名会话：远端 pi 不落会话文件（与本地 `PiProcess.start` 追加 `--no-session` 同一语义）。 */
 	readonly noSession?: boolean;
+	/** PiDeck 会话 key（`SessionRecord.id`）：安全等级快照按它查表，必须与本地 `securitySessionKey` 同源。 */
+	readonly sessionId?: string;
 };
 
 /**
@@ -96,7 +121,7 @@ export type RemoteSessionRegistrationRequest = {
  * 分成两条路各取一次，就会出现「用 A 会话的探测结果、经 B 通道起进程」。
  */
 export type RemoteRuntimePort = {
-	prepare(input: RemoteRuntimePrepareInput): Promise<RemoteSshPiRuntimeLaunchPlan>;
+	prepare(input: RemoteRuntimePrepareInput): Promise<RemoteRuntimePrepareResult>;
 	createLauncher(): PiRuntimeLauncher;
 	/**
 	 * 把 pi 上报的远端会话文件登记成 catalog 的 ssh locator 身份，返回这条 catalog 记录。
@@ -116,6 +141,10 @@ export type RemoteRuntimePort = {
  */
 export type RemoteRuntimeServicePort = {
 	remotePiRuntimeFacts(hostId: string): Promise<RemotePiRuntimeFacts>;
+	/** 部署（或复用已部署的）内置扩展快照；失败返回稳定码，不抛。 */
+	ensureRemoteExtensionSnapshot(hostId: string): Promise<RemoteExtensionSnapshotFacts>;
+	/** 把安全策略快照写到该主机（原子替换）。缺省 = 不支持远端安全门，安全门不会被注入。 */
+	pushSecurityPolicySnapshot?(hostId: string, bytes: Buffer | Uint8Array): Promise<void>;
 	createPiRuntimeLauncher(): PiRuntimeLauncher;
 } & RemoteSessionScannerPort;
 
@@ -131,6 +160,13 @@ export type RemoteRuntimeTrustPort = {
 	trustOverride(input: { readonly hostId: string; readonly remoteRoot: string }): Promise<PiTrustOverride | undefined>;
 };
 
+export type RemoteRuntimeSettings = PiRpcBaseArgsSettings & {
+	readonly autoSessionTitle?: boolean;
+	readonly piRpcNoExtensions?: boolean;
+	readonly removedBuiltInExtensions?: readonly string[];
+	readonly enabledBuiltInExtensions?: readonly string[];
+};
+
 export type RemoteRuntimePortDeps = {
 	/**
 	 * 按需解析连接服务；门禁关闭或装配缺失时返回 undefined（端口据此 fail-closed）。
@@ -139,8 +175,18 @@ export type RemoteRuntimePortDeps = {
 	 * 比它更早装配；解析器只在真正要起远端会话时才求值，也不会重复建第二个 client。
 	 */
 	resolveService(): Promise<RemoteRuntimeServicePort | undefined> | RemoteRuntimeServicePort | undefined;
-	/** pi 的基础参数只认这一个设置来源（与本地 `PiProcess` 同一份：`piRpcOffline`）。 */
-	settings(): PiRpcBaseArgsSettings;
+	/** pi 的基础参数与「哪个扩展开/关」只认这一个设置来源（与本地同一份 SettingsStore 快照）。 */
+	settings(): RemoteRuntimeSettings;
+	/**
+	 * runner init 帧的 `PIDECK_*` 环境通道是否可用。S2 接上 runner 1.1.0 后为 true；
+	 * 为 false 时 `remote-needs-env` 的扩展（安全门）**不注入**——加载了却拿不到策略就是静默假安全。
+	 */
+	envChannelAvailable?: boolean;
+	/**
+	 * 本机安全策略快照的字节（SecurityStore 写出的那一份）。缺省/读不到 ⇒ 远端安全门不注入；
+	 * 每次 prepare 现读，因为会话级等级覆盖会改快照内容。
+	 */
+	securityPolicyBytes?: () => Promise<Buffer | Uint8Array | undefined> | Buffer | Uint8Array | undefined;
 	/**
 	 * 远端项目 trust 的决策来源（可选）。未注入 = 永不表态（正式包/旧装配/测试替身的行为），
 	 * 与「用户没决策」同一条路径：一个 flag 都不加。
@@ -234,12 +280,63 @@ async function resolveTrustOverride(resolve: RemoteRuntimePortDeps["resolveTrust
 	}
 }
 
+/**
+ * 选本次要注入的内置扩展（纯决策，副作用只有“确保快照已部署”）。
+ *
+ * 判定顺序是**先便宜后贵**：设置开关 → 版本门槛 → 才去部署快照。版本不够的主机绝不应该为了“先看看有什么”
+ * 白传 524KB；诊断开关打开时同理。所有失败都折成闭集 reason，不抛——扩展是降级面，不是启动前置条件。
+ */
+async function selectRemoteExtensions(input: { service: RemoteRuntimeServicePort; hostId: string; version: string; settings: RemoteRuntimeSettings; envChannelAvailable: boolean }): Promise<{ paths: string[]; result: RemoteRuntimeExtensions }> {
+	if (input.settings.piRpcNoExtensions === true) return { paths: [], result: { applied: [], reason: "REMOTE_EXTENSIONS_DISABLED" } };
+	if (!piVersionAtLeast(input.version, REMOTE_EXTENSIONS_MIN_PI_VERSION)) return { paths: [], result: { applied: [], reason: "REMOTE_PI_EXTENSIONS_UNSUPPORTED" } };
+	let snapshot: RemoteExtensionSnapshotFacts;
+	try {
+		snapshot = await input.service.ensureRemoteExtensionSnapshot(input.hostId);
+	} catch (error) {
+		return { paths: [], result: { applied: [], reason: "REMOTE_EXTENSIONS_UNAVAILABLE", detail: stableRemoteCode(error) ?? "REMOTE_EXTENSIONS_UNAVAILABLE" } };
+	}
+	if (!snapshot.ok) return { paths: [], result: { applied: [], reason: "REMOTE_EXTENSIONS_UNAVAILABLE", detail: snapshot.code } };
+	const names = listRemoteInjectableExtensionNames({
+		available: new Set(snapshot.fileNames),
+		...(input.settings.removedBuiltInExtensions === undefined ? {} : { removedBuiltInExtensions: input.settings.removedBuiltInExtensions }),
+		...(input.settings.enabledBuiltInExtensions === undefined ? {} : { optInBuiltInExtensions: input.settings.enabledBuiltInExtensions }),
+		envAvailable: input.envChannelAvailable,
+		...(input.settings.autoSessionTitle === false ? { autoSessionTitle: false } : {}),
+	});
+	if (names.length === 0) return { paths: [], result: { applied: [], reason: "REMOTE_EXTENSIONS_NONE" } };
+	return { paths: names.map((name) => `${snapshot.root}/${name}`), result: { applied: names } };
+}
+
+/**
+ * 把安全策略快照推到主机；任何一步不成立都返回 false（调用方把安全门从注入名单里拿掉）。
+ *
+ * 为什么失败就必须不注入：security-gate 在拿不到快照时是 **fail-open**（扩展对缺失配置的既有契约），
+ * 「扩展在、策略没到」比完全没装更危险——用户看到等级选择器，实际什么都没拦。
+ */
+async function pushSecuritySnapshot(input: { service: RemoteRuntimeServicePort; hostId: string; readBytes: RemoteRuntimePortDeps["securityPolicyBytes"] }): Promise<boolean> {
+	const push = input.service.pushSecurityPolicySnapshot;
+	if (typeof push !== "function") return false;
+	let bytes: Buffer | Uint8Array | undefined;
+	try {
+		bytes = input.readBytes === undefined ? undefined : await input.readBytes();
+	} catch {
+		return false;
+	}
+	if (bytes === undefined || bytes.length === 0) return false;
+	try {
+		await push.call(input.service, input.hostId, bytes);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 export function createRemoteRuntimePort(deps: RemoteRuntimePortDeps): RemoteRuntimePort {
 	let launcher: PiRuntimeLauncher | undefined;
 	/** 计划里的 generation 是「这台主机上的第几次启动」：同一次运行内单调递增即可，不做跨重启持久化。 */
 	let generation = 0;
 	return {
-		async prepare(input: RemoteRuntimePrepareInput): Promise<RemoteSshPiRuntimeLaunchPlan> {
+		async prepare(input: RemoteRuntimePrepareInput): Promise<RemoteRuntimePrepareResult> {
 			// **每次调用**都重新解析服务：AgentManager 比连接服务先装配，门禁/连接状态也随时可能变
 			// （还没建、建失败、被 gate 关掉）。任何「构造时捕获一个当时还不存在的实例」的写法都会让
 			// 远端永远拿不到服务（那正是本批要避免的静默失败）。
@@ -248,6 +345,24 @@ export function createRemoteRuntimePort(deps: RemoteRuntimePortDeps): RemoteRunt
 			const facts = await service.remotePiRuntimeFacts(input.hostId);
 			// trust 决策在**每次 prepare**现读：撤销/改主意在下一轮 spawn 立即生效（本批明确不要求重启应用）。
 			const trust = await resolveTrustOverride(deps.resolveTrust, input);
+			const settings = deps.settings();
+			// 扩展注入面：版本/设置/部署三道门全部在端口里收口，AgentManager 只消费结果。
+			const extensions = await selectRemoteExtensions({ service, hostId: input.hostId, version: facts.version, settings, envChannelAvailable: deps.envChannelAvailable === true });
+			// 安全门：只有「扩展已注入」且「快照已写入」才保留；否则把它从名单里拿掉并如实反映在结果里。
+			let applied = [...extensions.result.applied];
+			let extensionPaths = [...extensions.paths];
+			let env: Record<string, string> | undefined;
+			if (applied.includes("pi-deck-security-gate.ts")) {
+				const pushed = await pushSecuritySnapshot({ service, hostId: input.hostId, readBytes: deps.securityPolicyBytes });
+				if (pushed) {
+					env = { PIDECK_SECURITY_CONFIG: remoteSecurityPolicyPath(facts.deployRoot), ...(input.sessionId === undefined ? {} : { PIDECK_SESSION_ID: input.sessionId }) };
+				} else {
+					applied = applied.filter((name) => name !== "pi-deck-security-gate.ts");
+					extensionPaths = extensionPaths.filter((path) => !path.endsWith("/pi-deck-security-gate.ts"));
+				}
+			}
+			const extensionResult: RemoteRuntimeExtensions =
+				applied.length === 0 && extensions.result.reason !== undefined ? { applied, reason: extensions.result.reason, ...(extensions.result.detail === undefined ? {} : { detail: extensions.result.detail }) } : { applied, ...(extensions.result.detail === undefined ? {} : { detail: extensions.result.detail }) };
 			const plan = buildRemotePiRuntimePlan({
 				hostId: input.hostId,
 				generation: (generation += 1),
@@ -259,13 +374,16 @@ export function createRemoteRuntimePort(deps: RemoteRuntimePortDeps): RemoteRunt
 				...(input.sessionFile === undefined ? {} : { sessionFile: input.sessionFile }),
 				// 未决策（含材料缺失 / 解析失败）⇒ 不传这个字段 ⇒ args 里不出现任何 trust flag。
 				...(trust === undefined ? {} : { trust }),
-				settings: deps.settings(),
+				...(extensionPaths.length === 0 ? {} : { extensions: extensionPaths }),
+				...(env === undefined ? {} : { env }),
+				settings,
 			});
 			launcher = service.createPiRuntimeLauncher();
 			// `--no-session` 在这里补：`buildRemotePiArgs` 只产出基础参数与 `--session`（远端与本地共享
 			// 同一份基础参数，不允许两处各写一套），而匿名会话在本地由 `PiProcess.start` 追加同一面旗标。
 			// 远端不补，pi 会把一次 PiDeck 匿名会话写成一个远端会话文件——PiDeck 这边并不认它。
-			return input.noSession ? { ...plan, args: [...plan.args, "--no-session"] } : plan;
+			const finalPlan = input.noSession ? { ...plan, args: [...plan.args, "--no-session"] } : plan;
+			return { plan: finalPlan, extensions: extensionResult };
 		},
 		createLauncher(): PiRuntimeLauncher {
 			if (!launcher) throw new Error(REMOTE_RUNTIME_CODES.launcherUnprepared);

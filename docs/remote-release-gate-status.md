@@ -14,7 +14,7 @@
 | 4 | 终端 prepare ticket 一次性/防重放/跨项目 | 🟢 已实现并真机通过 | helper 1.20.1 `terminal.prepare` 一次性 ticket + 固定 `terminal-runner.mjs`；真机终端 e2e 1.8m 通过（Windows 客户端→Linux 主机，ConPTY 帧分隔符缺陷已修）。agent-target 变体仍未做（project-only kind）。 |
 | 5 | 终端握手/输出/resize/close 与前台 shell 收敛 | 🟢 真机通过 | Windows 客户端→Linux 主机终端 e2e：项目隔离/保存代码/resize/关闭/断开/退出清理全通过；关闭后远端 shell 收敛在负载下最坏约 20–60s（测试等待已放宽到 60s，硬断言仍要求 gone）。 |
 | 6 | Git 输出尺寸与超时上限 | ✅ | 1 MiB/256 KiB/16 MiB 预算 + 同步 600s 预算（F1 修复，§5.16.2）。 |
-| 7 | Phase 0–5 全能力对照表通过 | ✅ | 文件管理/create-project/终端 ticket/会话真删/配置后端/模型目录全部交付；模型目录与连接探测走目标 host 的 live pi runtime 并脱敏返回；**逐供应商合成探测与用量查询仍为计划内 deferred**（入口禁用 + stable code 文案），不算能力缺口。 |
+| 7 | Phase 0–5 全能力对照表通过 | ✅ | 文件管理/create-project/终端 ticket/会话真删/配置后端/模型目录全部交付；模型目录与连接探测走目标 host 的 live pi runtime 并脱敏返回；**逐供应商合成探测与用量查询仍为计划内 deferred**（入口禁用 + stable code 文案），不算能力缺口。**§13「内置扩展」行（必须上传校验快照）已交付**（2026-10-19，S1+S2）：内容寻址快照 + 逐文件 `-e` + runner 1.1.0 `PIDECK_*` env；真机证据 `scripts/verify-remote-extensions.mjs` 全绿（快照 26 文件/抽查 sha、安全快照 0600、runner env、9 条 `-e`、远端 pi 1.3 注册 todo/plan/goal、`--with-prompt` 验计划标记未进会话文件）。S3（vision/bridge/trash-guard）明确未做，见 [计划](remote-extension-injection-plan.md) §11。 |
 | 8 | 独立安全审查完成 | 🟡 进行中 | round 1：0 critical/0 high/1 medium(F1 修复)/5 low/4 info；F2/F4/F5/F6 已修；round 2（[report](remote-security-review-round2.md)）：0 critical/high/medium，F1–F6 关闭，F3 project 终端已实现，新 2 low（R2-1/R2-2 均已修）+3 info；配置后端复审（[addendum](remote-security-review-config-addendum.md)）：2 medium（A1 原型污染、A2 secret 误判）+2 low，A1/A2/A4 已修、A3 显式偏差，helper 1.21.1 复验通过（任务 17：无 FAIL），1.21.2 补齐 A2 残余 camelCase 复合名。**独立第三方/人工 reviewer 仍缺**（现为 AI lane + Lead 复核）。 |
 | 9 | Windows/macOS 本机 → Linux 远端 smoke | 🟡 部分 | Windows 客户端→Linux 真机：G1–G5e 真机门禁（Git/同步/初始化/嵌套仓库）+ 文件编辑链路已有自动证据；终端切片与 macOS 客户端无证据。 |
 | 10 | `npm run pack` 资源检查 | 🟡 自动部分通过 | `npm run pack` 0（2026-10-18，release/win-unpacked）；`resources/` 含 `pi-auth-host.mjs`、`extensions/`（含 manifest）、`prompts/`、`skills/`、`pets/`、`xueprompts.db`、`pi-ai-catalog.json`；app.asar 内逐串命中冻结 helper 源码标记（`PIDECK_TERMINAL/1 READY`、`terminal-runner.mjs`、`terminal.prepare`、`createGitInitProgram`、`.pideck-trash`、F5 文案 key）。**packaged 构建仍被 `!app.isPackaged && PIDECK_REMOTE_EXPERIMENTAL=1` 挡住；发布前需产品决定是否放开 + 打包版人工 smoke（§4）。** |
@@ -60,6 +60,7 @@
 3. **独立安全 reviewer**：已有两轮 AI lane 只读审查 + Lead 复核（round 2 报告见 remote-security-review-round2.md）；计划要求的「独立第三方/人工 reviewer 签字」仍需要人。
 4. **文件管理 11 项签收点**：本批按文档建议方案（回收站 A + 空回收站 C）实现；用户可在验收时改，但实现已按建议走。
 5. **真实慢网络/长稳**：可自动跑有界 soak；数小时网络抖动下的用户感知需人工判断。
+6. **远端内置扩展注入**：S1+S2 已交付（2026-10-19）并通过真机自动证据（`scripts/verify-remote-extensions.mjs`）。仍需人工验收的是**产品观感/交互**：计划模式标记被剥后的 UI 呈现、todo 条、自动标题、安全等级在真实模型回合里的 deny/confirm；S3（vision/GUI 桥/trash-guard）未做，发布口径不能声称远端与本地能力完全一致。
 
 ## 5. 更新纪律
 

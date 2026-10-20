@@ -41,6 +41,14 @@ export type RemotePiArgsInput = {
 	 * 决策来源见 `RemoteProjectTrustService`（key = hostId + endpoint 身份摘要 + 规范项目根）。
 	 */
 	readonly trust?: PiTrustOverride;
+	/**
+	 * 要注入的内置扩展绝对 POSIX 路径（`--extension <path>`，顺序即注册顺序）。
+	 *
+	 * 路径由主进程从**已确认激活**的远端快照根拼出（`<deployRoot>/extensions/<sha>/<name>`），
+	 * 这里只做形状门：本机路径、相对路径、控制字节当场拒。未传/空数组 = 一个扩展都不注入
+	 * （旧行为逐字不变）。逐个用 `--extension` 而不是目录注入：pi 会递归把目录里的辅助模块当扩展加载。
+	 */
+	readonly extensions?: readonly string[];
 };
 
 /**
@@ -62,6 +70,10 @@ export type PiTrustOverride = "approve" | "no-approve";
  */
 export function buildRemotePiArgs(input: RemotePiArgsInput = {}): string[] {
 	const args = basePiRpcArgs(input.settings);
+	for (const extensionPath of input.extensions ?? []) {
+		assertRemoteAbsolutePath(extensionPath);
+		args.push("--extension", extensionPath);
+	}
 	if (input.sessionFile !== undefined) {
 		assertRemoteAbsolutePath(input.sessionFile);
 		args.push("--session", input.sessionFile);

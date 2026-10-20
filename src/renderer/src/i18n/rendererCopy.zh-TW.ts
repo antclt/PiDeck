@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: eea91cebb95a510129d7c64c4da369172007e25d2710155721d6ce98e6929f3e（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 4b335e08d6531e9c0d2635b51ef46c19bc1e84e46a6a95d243c1969292f85e94（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -867,6 +867,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"app.modelListFailCliFailed": "pi --list-models 執行失敗，拿不到模型列表。請點重新整理重試；若持續失敗，可在設定頁檢查 Pi 健康狀態。",
 	"app.modelListFailWafBlocked": "閘道器返回了 WAF 攔截頁而不是模型列表（挑戰頁 / 403 / 429）。這不是本地配置問題：可稍後重試、更換網路，或給該供應商設定自定義 User-Agent 後再重新整理。",
 	"app.modelListFailDshStopped": "DSH host 已被手動停止，模型目錄暫不可用（不會自動啟動）。到「設定 → DSH」點「啟動 host」後重試。",
+	"app.modelListFailRemoteInactive": "拿不到遠端主機上的模型列表（不會退回到本機目錄）。先確認這臺主機已連線，再點重新整理重試。",
 	"app.modelListFailEmpty": "沒有可用模型：Pi 目錄與本地 models.json 均無模型。請到「模型」設定頁新增 provider 與模型。",
 	"app.modelCollapseAllProviders": "摺疊所有提供商",
 	"app.modelExpandAllProviders": "展開所有提供商",
@@ -4142,7 +4143,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.tabs.connections": "連線",
 	"settings.connections.add": "新增",
 	"settings.connections.add.title": "新增 SSH 連線",
-	"settings.connections.add.hint": "從 ~/.ssh/config 選擇，或手動填寫。儲存後需要你核對主機指紋。",
+	"settings.connections.add.hint": "從 ~/.ssh/config 選擇，或手動填寫。儲存即完成信任並直接連上，不需要再確認指紋。",
 	"settings.connections.add.disabled": "遠端連線功能未啟用。",
 	"settings.connections.add.scanFailed": "無法讀取 ~/.ssh/config，請手動填寫。",
 	"settings.connections.add.skipped": "已跳過 {count} 項",
@@ -4158,14 +4159,6 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.connections.add.required": "顯示名稱與主機名不能為空。",
 	"settings.connections.add.badPort": "埠必須是 1-65535 之間的整數。",
 	"settings.connections.add.failed": "新增失敗：{code}",
-	"settings.connections.pin.title": "確認主機指紋",
-	"settings.connections.pin.hint": "請核對這些指紋與你掌握的一致後再繼續。",
-	"settings.connections.pin.target": "目標",
-	"settings.connections.pin.fingerprints": "主機金鑰指紋",
-	"settings.connections.pin.warning": "指紋是你與這臺主機之間唯一的信任憑據。不一致通常意味著中間人攻擊或主機已被更換。",
-	"settings.connections.pin.approve": "指紋正確，信任",
-	"settings.connections.pin.deny": "取消",
-	"settings.connections.pin.failed": "確認失敗：{code}",
 	"settings.connections.repair.title": "主機庫需要修復",
 	"settings.connections.repair.hint": "檢測到跨檔案不一致，寫入已被暫停。下面列出原因與可執行的動作。",
 	"settings.connections.repair.unavailable": "無法讀取修復診斷：{code}",
@@ -4209,6 +4202,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"project.remote.searchEmpty": "沒有匹配的檔名。",
 	"project.remote.searchSummary": "匹配 {count} 項（已檢查 {scanned} 項）",
 	"project.remote.searchTruncated": "結果已截斷：遠端達到掃描/匹配上限後停止，這裡不是全部匹配。",
+	"project.remote.downloadFailed": "下載失敗：{code}",
+	"project.remote.uploadFailed": "上傳失敗：{code}",
+	"project.remote.uploadPartial": "{count} 個檔案上傳失敗（{code}），其餘已上傳",
 	"project.remote.searchFailed": "無法搜尋：{code}",
 	"project.remote.searchUnwired": "搜尋通道尚未接線：請更新應用後再試。",
 	"settings.connections.title": "遠端主機",
@@ -6561,6 +6557,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"remoteFileEntry.parentLabel": "位置",
 	"remoteFileEntry.createAction": "建立",
 	"remoteFileEntry.renameTitle": "重新命名",
+	"remoteFileEntry.downloadAction": "下載到本機",
+	"remoteFileEntry.uploadAction": "上傳檔案",
 	"remoteFileEntry.renameAction": "重新命名",
 	"remoteFileEntry.deleteTitleFile": "刪除檔案",
 	"remoteFileEntry.deleteTitleFolder": "刪除資料夾",

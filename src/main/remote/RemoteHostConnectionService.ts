@@ -1,5 +1,5 @@
 import { buildPinnedSshInvocation, type PinnedSshInvocation } from "./SshVerifiedConnection";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { isAbsolute } from "node:path";
 import { RemoteHostStore } from "./RemoteHostStore";
 import { createRemoteHostOperationLock } from "./RemoteHostOperationLock";
@@ -7,6 +7,12 @@ import { resolveRemoteBrowseRoot } from "./RemoteBrowseRoot";
 import { bootstrapPinnedHost, resolveRemoteNodeExecutable } from "./RemoteBootstrapSession";
 import { resolveRemotePiExecutable } from "./RemotePiDiscovery";
 import { deployedRunnerPath } from "./RemoteBootstrapDeployment";
+import { writeRemoteSecurityPolicySnapshot } from "./RemoteSecurityPolicyArtifact";
+import { getAppLogger } from "../logging/sharedLogger";
+import { maintainDeployedBundles } from "./RemoteBundleMaintenance";
+import { deployRemoteExtensionSnapshot, deployedExtensionSnapshotRoot } from "./RemoteExtensionDeployment";
+import { readEffectiveExtensionSnapshot, remoteExtensionSnapshotFileNames } from "../extensions/remoteExtensionSnapshot";
+import type { BuiltInExtensionPathRoots } from "../extensions/builtInExtensions";
 import { createSshPiRuntimeLauncher } from "./SshPiRuntimeLauncher";
 import type { PiRuntimeLauncher } from "../pi/PiSpawnHandle";
 import { createSshConnectionManager, type SshConnectionManager, type SshHelperSession } from "./SshConnectionManager";
@@ -14,6 +20,7 @@ import { createSshProcessLauncher } from "./SshProcessLauncher";
 import { diagnosticCodeFromError } from "./SshConnectionDiagnostics";
 import type { SshClientRuntime } from "./SshClientRuntime";
 import type { SshProcessLauncher } from "./RemoteHostConnectionTypes";
+import { uploadRemoteProjectFile } from "./RemoteProjectFileUpload";
 import type { ConnectionMachineState } from "./RemoteHostConnectionState";
 
 /**
@@ -25,6 +32,20 @@ type HeldBootstrap = {
 	revision: number;
 	session: SshHelperSession;
 	generation: number;
+};
+
+/**
+ * 已部署的内置扩展快照（内容寻址），与 held bootstrap 同代缓存。
+ *
+ * 为什么缓存：快照每次会话都要用，而部署要一轮 ssh + scp；同一份 held session（同 revision/generation）
+ * 里重复部署只会白付一次上传。重连/换根会换 held session，缓存随之失效（与 `piProbe` 同判据）。
+ */
+type HeldExtensionSnapshot = {
+	revision: number;
+	generation: number;
+	sha256: string;
+	root: string;
+	fileNames: readonly string[];
 };
 
 /** Narrow, injectable view of the coordinator so tests never touch a real SSH process. */
@@ -46,6 +67,8 @@ export type RemoteHostConnectionPorts = {
 	 * tests never probe a real host; the default is the same resolver the enrollment flow already uses.
 	 */
 	verifyRoot: (input: { userDataDir: string; hostId: string; client: SshClientRuntime; userPath: string }) => Promise<{ canonicalPath: string }>;
+	/** 部署内置扩展快照（与 helper 部署同一个冻结入口，target=extensions）。 */
+	deployExtensions: typeof deployRemoteExtensionSnapshot;
 };
 
 export type RemoteHostConnectionServiceOptions = {
@@ -68,6 +91,11 @@ export type RemoteHostConnectionServiceOptions = {
 	onStateChange?: (entry: { hostId: string; state: ConnectionMachineState }) => void;
 	/** Explicit disconnect closes independent terminal PTYs, not ordinary helper root switches. */
 	onDisconnect?: (hostId: string) => void;
+	/**
+	 * 本机内置扩展根（`resolveBuiltInExtensionRoots()` 的同一份）。缺省时远端快照能力关闭：
+	 * 没有经过整份校验的字节就绝不往远端传。
+	 */
+	builtInExtensionRoots?: BuiltInExtensionPathRoots;
 	ports?: Partial<RemoteHostConnectionPorts>;
 };
 
@@ -119,7 +147,15 @@ export type RemotePiRuntimeFacts = {
 	readonly warning?: string;
 	/** 远端 runner.mjs 的绝对路径（内容寻址部署包内，由 held bootstrap 推出）。 */
 	readonly runnerPath: string;
+	/** 部署根（`<home>/.pideck/remote-host`）：安全策略快照等固定路径的父目录。 */
+	readonly deployRoot: string;
 };
+
+/**
+ * 内置扩展快照的部署结果。失败带稳定码，不抛异常：扩展缺失是降级，不是会话启动失败。
+ * `fileNames` 是本次激活目录里真实存在的文件名（来自整份校验的清单），注入侧按它过滤。
+ */
+export type RemoteExtensionSnapshotFacts = { readonly ok: true; readonly sha256: string; readonly root: string; readonly fileNames: readonly string[] } | { readonly ok: false; readonly code: string };
 
 type HostEntry = {
 	generation: number;
@@ -132,6 +168,10 @@ type HostEntry = {
 	 * inventing a TTL (a reconnect or rebind drops the held session, which drops this with it).
 	 */
 	piProbe?: PiProbeFacts;
+	/** Deployed built-in extension snapshot, valid exactly as long as the held bootstrap above. */
+	extensionSnapshot?: HeldExtensionSnapshot;
+	/** 上一次成功推送到该主机的安全策略 sha256（与 held 同代）；相同内容不重复写盘。 */
+	securityPolicySha256?: string;
 	manager?: SshConnectionManager;
 	/** In-flight connect, so dispose can wait for it instead of racing the spawn. */
 	inFlight?: Promise<RemoteHostConnectResult>;
@@ -174,6 +214,17 @@ function readRemoteHome(value: unknown): string | undefined {
 	return value;
 }
 
+/**
+ * 扩展快照部署失败的稳定码。
+ *
+ * 只认「整条消息就是一个码」的错误（本域所有失败都是这么约定的），其它一律折成固定码：既不能把
+ * 通用 SSH 失败伪装成「扩展问题」，也不能把半句路径/命令带进日志与 UI。
+ */
+function extensionDeployCodeOf(error: unknown): string {
+	const message = typeof error === "object" && error !== null && "message" in error ? (error as { message?: unknown }).message : undefined;
+	return typeof message === "string" && /^[A-Z][A-Z0-9_]{2,63}$/.test(message) ? message : "REMOTE_EXTENSIONS_DEPLOY_FAILED";
+}
+
 function defaultPorts(): RemoteHostConnectionPorts {
 	return {
 		bootstrap: bootstrapPinnedHost,
@@ -183,6 +234,7 @@ function defaultPorts(): RemoteHostConnectionPorts {
 		createNonce: createBootstrapNonce,
 		createSentinel: () => randomBytes(DEFAULT_NONCE_BYTES).toString("hex"),
 		verifyRoot: (input) => resolveRemoteBrowseRoot(input),
+		deployExtensions: deployRemoteExtensionSnapshot,
 	};
 }
 
@@ -311,9 +363,12 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 	/** Drop every resource of one host. The manager owns its attempts, so it is disposed first. */
 	function discard(entry: HostEntry): void {
 		entry.held = undefined;
-		// 同一个 held bootstrap 才代表同一台远端机器的同一份 pi 事实：一旦丢弃会话，缓存的探测也必须丢弃，
-		// 否则重连后会拿着一台已退役/已重建主机的 pi 路径去启会话。
+		// 同一个 held bootstrap 才代表同一台远端机器的同一份 pi 事实：一旦丢弃会话，缓存的探测与已部署
+		// 扩展快照都必须丢弃，否则重连后会拿一台已退役/已重建主机的事实去启会话。
 		entry.piProbe = undefined;
+		entry.extensionSnapshot = undefined;
+		// 远端策略文件仍在磁盘上，但新 held session 不再信任旧推送记录：下一次有会话时重推一次更稳。
+		entry.securityPolicySha256 = undefined;
 		const manager = entry.manager;
 		entry.manager = undefined;
 		if (manager !== undefined) void manager.dispose().catch(() => undefined);
@@ -582,6 +637,55 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 		}
 		return readCachedHome(hostId);
 	};
+	/**
+	 * 写一份安全策略快照到该主机的部署根（原子替换）。
+	 *
+	 * 与 facts/扩展快照同一个 host 锁与同一种「按需建立 held session」语义：等级变更要能热推，
+	 * 但推送本身不得与同主机的读取操作交错。失败抛稳定码，由调用方决定是否降级。
+	 */
+	const pushSnapshot = async (hostId: string, bytes: Buffer | Uint8Array): Promise<void> => {
+		if (typeof hostId !== "string" || !HOST_ID.test(hostId)) throw new Error("SSH_HOST_ID_INVALID");
+		const sha256 = createHash("sha256").update(bytes).digest("hex");
+		await operationLock.run(hostId, async () => {
+			const entry = entryFor(hostId);
+			// 内容没变就不再来一轮 ssh（同一次 held session 内等级只变几次，但 spawn 可能很多次）。
+			if (entry.securityPolicySha256 === sha256) return;
+			if (entry.held === undefined) {
+				const result = await connectLocked(hostId);
+				if (!result.ok) throw new Error(result.code);
+			}
+			const held = entry.held;
+			if (held === undefined) throw new Error("SSH_HOST_NOT_READY");
+			await writeRemoteSecurityPolicySnapshot({
+				userDataDir: options.userDataDir,
+				hostId,
+				generation: held.generation,
+				nodePath: held.session.nodePath,
+				deployRoot: held.session.deployRoot,
+				bytes,
+				client: options.client,
+				launcher,
+				nonce: ports.createNonce(),
+			});
+			entry.securityPolicySha256 = sha256;
+		});
+	};
+	/**
+	 * 广播一份快照到当前仍有 held session 的主机（安全等级热更新）。
+	 *
+	 * 尽力而为：单台失败只记 warn（下一次 prepare 会在该主机重新推送），不把一次设置变更变成错误。
+	 */
+	const pushSnapshotToReadyHosts = async (bytes: Buffer | Uint8Array): Promise<void> => {
+		const targets = [...hosts].filter(([, entry]) => entry.held !== undefined).map(([hostId]) => hostId);
+		for (const hostId of targets) {
+			try {
+				await pushSnapshot(hostId, bytes);
+			} catch (error) {
+				const message = typeof error === "object" && error !== null && "message" in error ? (error as { message?: unknown }).message : undefined;
+				void getAppLogger()?.warn("remote", "Remote security snapshot push failed", { hostId, code: typeof message === "string" && /^[A-Z][A-Z0-9_]{2,63}$/.test(message) ? message : "SECURITY_SNAPSHOT_PUSH_FAILED" });
+			}
+		}
+	};
 	return {
 		/**
 		 * The verified client this service drives.
@@ -725,8 +829,101 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 					version: probe.version,
 					...(probe.warning === undefined ? {} : { warning: probe.warning }),
 					runnerPath: deployedRunnerPath({ bundleSha256: held.session.bundleSha256, deployRoot: held.session.deployRoot, active: `./bundles/${held.session.bundleSha256}` }),
+					deployRoot: held.session.deployRoot,
 				};
 			});
+		},
+		/**
+		 * 部署本机生效的内置扩展快照，返回内容寻址根（`-e` 的父路径）。
+		 *
+		 * 与 `remotePiRuntimeFacts` 同一个锁与同一种「按需建立 held session」语义；缓存键是
+		 * revision + generation，所以重连/换根之后的第一次会话会重新部署（入口对已激活目录做只读复验，
+		 * 内容一致时不会重复改写）。任何失败都折叠成稳定码返回——扩展缺失是降级，不能卡住会话。
+		 */
+		async ensureRemoteExtensionSnapshot(hostId: string): Promise<RemoteExtensionSnapshotFacts> {
+			if (typeof hostId !== "string" || !HOST_ID.test(hostId)) return { ok: false, code: "SSH_HOST_ID_INVALID" };
+			const roots = options.builtInExtensionRoots;
+			if (roots === undefined) return { ok: false, code: "REMOTE_EXTENSIONS_UNAVAILABLE" };
+			const snapshot = readEffectiveExtensionSnapshot(roots);
+			if (snapshot === undefined) return { ok: false, code: "REMOTE_EXTENSIONS_UNAVAILABLE" };
+			const fileNames = remoteExtensionSnapshotFileNames(snapshot.manifest);
+			if (fileNames.length === 0) return { ok: false, code: "REMOTE_EXTENSIONS_UNAVAILABLE" };
+			return operationLock.run(hostId, async (): Promise<RemoteExtensionSnapshotFacts> => {
+				const entry = entryFor(hostId);
+				if (entry.held === undefined) {
+					const result = await connectLocked(hostId);
+					if (!result.ok) return { ok: false, code: result.code };
+				}
+				const held = entry.held;
+				if (held === undefined) return { ok: false, code: "SSH_HOST_NOT_READY" };
+				const cached = entry.extensionSnapshot;
+				if (cached !== undefined && cached.revision === held.revision && cached.generation === held.generation) return { ok: true, sha256: cached.sha256, root: cached.root, fileNames: cached.fileNames };
+				try {
+					const deployed = await ports.deployExtensions({
+						userDataDir: options.userDataDir,
+						hostId,
+						generation: held.generation,
+						nonce: ports.createNonce(),
+						nodePath: held.session.nodePath,
+						client: options.client,
+						launcher,
+						snapshot: { dir: snapshot.dir, names: fileNames },
+					});
+					const root = deployedExtensionSnapshotRoot(deployed);
+					entry.extensionSnapshot = { revision: held.revision, generation: held.generation, sha256: deployed.bundleSha256, root, fileNames };
+					// 非致命回收：这一轮刚确认了两个 active（helper + 扩展），sweep 可以清旧快照；失败只记日志。
+					void maintainDeployedBundles({
+						userDataDir: options.userDataDir,
+						hostId,
+						client: options.client,
+						nodePath: held.session.nodePath,
+						deployRoot: deployed.deployRoot,
+						activeBundleSha256: held.session.bundleSha256,
+						activeExtensionSha256: deployed.bundleSha256,
+					}).catch(() => undefined);
+					return { ok: true, sha256: deployed.bundleSha256, root, fileNames };
+				} catch (error) {
+					return { ok: false, code: extensionDeployCodeOf(error) };
+				}
+			});
+		},
+		async pushSecurityPolicySnapshot(hostId: string, bytes: Buffer | Uint8Array): Promise<void> {
+			await pushSnapshot(hostId, bytes);
+		},
+		/**
+		 * 把一个本机文件写到远端项目里（任意字节，stdin 分块）。
+		 *
+		 * 与 `pushSecurityPolicySnapshot` 同一条 stdin 通道纪律（持 per-host 操作锁、按需建 held session、
+		 * 失败折叠成稳定码），差别是目标路径来自项目 locator 而不是固定 deploy 根——所以 root 只接受
+		 * canonical 绝对路径，真正的越界判定在远端脚本里（BOUNDARY_SCRIPT），这里不重复实现。
+		 */
+		async uploadProjectFile(input: { hostId: string; root: string; relative: string; bytes: Buffer | Uint8Array; overwrite?: boolean }): Promise<void> {
+			if (typeof input.hostId !== "string" || !HOST_ID.test(input.hostId)) throw new Error("SSH_HOST_ID_INVALID");
+			await operationLock.run(input.hostId, async () => {
+				const entry = entryFor(input.hostId);
+				if (entry.held === undefined) {
+					const result = await connectLocked(input.hostId);
+					if (!result.ok) throw new Error(result.code);
+				}
+				const held = entry.held;
+				if (held === undefined) throw new Error("SSH_HOST_NOT_READY");
+				await uploadRemoteProjectFile({
+					userDataDir: options.userDataDir,
+					hostId: input.hostId,
+					generation: held.generation,
+					nodePath: held.session.nodePath,
+					root: input.root,
+					relative: input.relative,
+					bytes: input.bytes,
+					overwrite: input.overwrite === true,
+					client: options.client,
+					launcher,
+					nonce: ports.createNonce(),
+				});
+			});
+		},
+		async pushSecurityPolicySnapshotToReadyHosts(bytes: Buffer | Uint8Array): Promise<void> {
+			await pushSnapshotToReadyHosts(bytes);
 		},
 		/**
 		 * Send one helper request on a ready host.

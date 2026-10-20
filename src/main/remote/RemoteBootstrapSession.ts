@@ -2,8 +2,8 @@ import { buildPinnedSshInvocation, type PinnedSshInvocation } from "./SshVerifie
 import { frozenHelperBundleManifest, deployFrozenHelperBundle, type PreparedBundleResult } from "./RemoteBootstrapDeployment";
 import { maintainDeployedBundles, type RemoteBundleMaintenanceOutcome } from "./RemoteBundleMaintenance";
 import { getAppLogger } from "../logging/sharedLogger";
-import { decodeBootstrapResult, type BootstrapReadyFrame } from "./RemoteBootstrapTransfer";
-import { assertSupportedRemoteNodeVersion, buildRemoteNodeVersionCommand, REMOTE_BOOTSTRAP_ENTRY_ERROR_CODES } from "./RemoteBootstrapContract";
+import { decodeBootstrapResult, type BootstrapReadyFrame, type BootstrapSession } from "./RemoteBootstrapTransfer";
+import { assertSupportedRemoteNodeVersion, buildRemoteNodeVersionCommand, REMOTE_BOOTSTRAP_ENTRY_ERROR_CODES, type RemoteBootstrapTarget } from "./RemoteBootstrapContract";
 import { buildLoginShellPathCommand, listNodeCandidatesFromPath, parseLoginShellPath } from "./RemoteNodeDiscovery";
 import { REMOTE_BOOTSTRAP_PROTOCOL_VERSION } from "./RemoteHelperContract";
 import type { SshLauncherHandle, SshProcessExit, SshProcessLauncher } from "./RemoteHostConnectionTypes";
@@ -34,7 +34,7 @@ export class BootstrapReadyUnconfirmedError extends Error {
 }
 
 /** Wait for the frozen entry to acknowledge the exact bundle and nonce before allowing upload. */
-function awaitBootstrapReady(session: SshLauncherHandle, expected: { bundleSha256: string; nonce: string }): Promise<BootstrapReadyFrame> {
+function awaitBootstrapReady(session: SshLauncherHandle, expected: { bundleSha256: string; nonce: string; target: RemoteBootstrapTarget }): Promise<BootstrapReadyFrame> {
 	return new Promise((resolve, reject) => {
 		let settled = false;
 		let stderrSeen = false;
@@ -64,7 +64,7 @@ function awaitBootstrapReady(session: SshLauncherHandle, expected: { bundleSha25
 			// Both backlogged stdout and an already-settled exit replay in microtasks. Register stdout first
 			// so the entry's final error frame cannot be lost when the exit callback tears down listeners.
 			offLine = session.onStdoutLine((line) => {
-				const frame = decodeBootstrapResult(line);
+				const frame = decodeBootstrapResult(line, expected.target);
 				if (frame?.op === "error") {
 					fail(REMOTE_BOOTSTRAP_ENTRY_ERROR_CODES.some((code) => code === frame.code) ? frame.code : "BOOTSTRAP_READY_INVALID");
 					return;
@@ -94,9 +94,17 @@ export type PreparedBootstrapInput = {
 	generation: number;
 	nonce: string;
 	expectedBundleSha256: string;
+	/** 缺省 `helper`；扩展快照部署显式传 `extensions`。 */
+	target?: RemoteBootstrapTarget;
 	sshConnection: PinnedSshInvocation;
 	scpConnection: PinnedSshInvocation;
 	launcher: SshProcessLauncher;
+	/**
+	 * 部署另一半（写临时目录 + 上传 + finalize）。helper/runner 与扩展快照只在这里不同；
+	 * 会话/握手/校验/清理必须在下面一个地方完成，否则两条部署路会各自漂移。
+	 * 缺省 = helper 部署（历史调用点/测试的行为逐字不变）。
+	 */
+	deploy?(session: BootstrapSession, ready: BootstrapReadyFrame): Promise<PreparedBundleResult>;
 };
 
 function hasPinnedAlias(args: readonly string[], alias: string): boolean {
@@ -112,7 +120,10 @@ function hasPinnedAlias(args: readonly string[], alias: string): boolean {
 /** Own one verified entry process from ready through upload, finalize and shutdown. */
 export async function runPreparedBootstrap(input: PreparedBootstrapInput): Promise<PreparedBundleResult> {
 	if (!HOST_ID.test(input?.hostId) || !Number.isSafeInteger(input.generation) || input.generation < 0 || !NONCE.test(input.nonce) || !SHA256.test(input.expectedBundleSha256) || typeof input.launcher?.start !== "function") throw new Error("BOOTSTRAP_INPUT_INVALID");
-	if (input.expectedBundleSha256 !== frozenHelperBundleManifest().bundleSha256) throw new Error("BOOTSTRAP_INPUT_INVALID");
+	const target = input.target ?? "helper";
+	// 只有 helper target 有一个仓库内的权威 bundle 身份；扩展快照的 sha 由调用方按实际文件算出。
+	if (target === "helper" && input.expectedBundleSha256 !== frozenHelperBundleManifest().bundleSha256) throw new Error("BOOTSTRAP_INPUT_INVALID");
+	const deploy = input.deploy ?? ((deploySession, deployReady) => deployFrozenHelperBundle({ connection: input.scpConnection, ready: deployReady, launcher: input.launcher, session: deploySession, hostId: input.hostId, generation: input.generation }));
 	const alias = `pideck-${input.hostId}`;
 	if (
 		input.sshConnection?.destination !== input.scpConnection?.destination ||
@@ -126,8 +137,8 @@ export async function runPreparedBootstrap(input: PreparedBootstrapInput): Promi
 	const session = await input.launcher.start({ hostId: input.hostId, generation: input.generation, invocation: input.sshConnection, stdin: true, timeoutMs: SESSION_TIMEOUT_MS, maxOutputBytes: 64 * 1024, maxLineBytes: 4096 });
 	let confirmed = false;
 	try {
-		const ready = await awaitBootstrapReady(session, { bundleSha256: input.expectedBundleSha256, nonce: input.nonce });
-		const result = await deployFrozenHelperBundle({ connection: input.scpConnection, ready, launcher: input.launcher, session, hostId: input.hostId, generation: input.generation });
+		const ready = await awaitBootstrapReady(session, { bundleSha256: input.expectedBundleSha256, nonce: input.nonce, target });
+		const result = await deploy(session, ready);
 		confirmed = true;
 		return result;
 	} finally {
@@ -231,9 +242,19 @@ export async function bootstrapPinnedHost(input: { userDataDir: string; hostId: 
 	}
 	if (nodeVersion.exitCode !== 0) throw new Error("REMOTE_NODE_PROBE_FAILED");
 	assertSupportedRemoteNodeVersion(nodeVersion.stdout);
-	const sshConnection = await buildPinnedSshInvocation(input.userDataDir, input.hostId, "ssh-batch", { client: input.client, bootstrap: { nodeExecutable: input.nodePath, protocolVersion: REMOTE_BOOTSTRAP_PROTOCOL_VERSION, bundleSha256: manifest.bundleSha256, nonce: input.nonce } });
+	const sshConnection = await buildPinnedSshInvocation(input.userDataDir, input.hostId, "ssh-batch", { client: input.client, bootstrap: { nodeExecutable: input.nodePath, protocolVersion: REMOTE_BOOTSTRAP_PROTOCOL_VERSION, bundleSha256: manifest.bundleSha256, nonce: input.nonce, target: "helper" } });
 	const scpConnection = await buildPinnedSshInvocation(input.userDataDir, input.hostId, "scp", { client: input.client });
-	const deployed = await runPreparedBootstrap({ hostId: input.hostId, generation: input.generation, nonce: input.nonce, expectedBundleSha256: manifest.bundleSha256, sshConnection, scpConnection, launcher: input.launcher });
+	const deployed = await runPreparedBootstrap({
+		hostId: input.hostId,
+		generation: input.generation,
+		nonce: input.nonce,
+		expectedBundleSha256: manifest.bundleSha256,
+		target: "helper",
+		sshConnection,
+		scpConnection,
+		launcher: input.launcher,
+		deploy: (session, ready) => deployFrozenHelperBundle({ connection: scpConnection, ready, launcher: input.launcher, session, hostId: input.hostId, generation: input.generation }),
+	});
 	// 只在**已确认激活**之后清理（plan §4.2「清理与激活判据」；F2）。sweep 失败不影响本次部署的结果。
 	await sweepDeployedBundles({ userDataDir: input.userDataDir, hostId: input.hostId, client: input.client, nodePath: input.nodePath, deployRoot: deployed.deployRoot, activeBundleSha256: deployed.bundleSha256 });
 	return deployed;

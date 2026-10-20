@@ -77,26 +77,13 @@ export type RemoteHostAddInput = {
 };
 
 /**
- * 指纹确认请求：主进程 → 渲染层推送。
+ * 添加主机的阶段结果。
  *
- * `requestId` 是 main-only broker 签发的一次性凭证，渲染层**只能回答它**，不能自己构造候选。
- * 指纹列在这里是因为它是用户**必须亲眼看**的内容——确认的本质就是「这个指纹是不是我核过的那个」。
+ * `verified` = 已在主进程完成首次 host key 信任（TOFU）并落盘 pin，主机立刻可连接。没有
+ * `pending` 这种中间态：首次信任不需要用户逐字比对指纹（主机密钥变化时走的是连接期校验，
+ * 不会在这里被静默接受）。
  */
-export type RemoteHostPinRequest = {
-	requestId: string;
-	expiresAt: number;
-	hostId: string;
-	hostName: string;
-	user: string;
-	port: number;
-	hostKeyFingerprints: string[];
-};
-
-/** 添加主机的阶段结果：`pending` 表示已推送指纹确认、等待用户回答。 */
-export type RemoteHostAddResult = { ok: true; hostId: string; status: "pending" } | { ok: false; code: string };
-
-/** 回答指纹确认的结果。`hostId` 在成功时回显，便于 UI 定位到刚添加的那一行。 */
-export type RemoteHostPinAnswerResult = { ok: true; hostId: string; approved: boolean } | { ok: false; code: string };
+export type RemoteHostAddResult = { ok: true; hostId: string; status: "verified" } | { ok: false; code: string };
 
 /**
  * 连接状态变化推送。
@@ -203,6 +190,22 @@ export type RemoteProjectListResult = { ok: true; entries: RemoteWorkspaceEntry[
 
 /** 读项目内文件的结果；`contentBase64` 跨 IPC 传二进制。 */
 export type RemoteProjectReadResult = { ok: true; contentBase64: string; bytes: number; mtimeMs: number } | { ok: false; code: string };
+
+/**
+ * 下载结果。
+ *
+ * `canceled` 是用户动作而不是失败：界面不该为「点了取消」弹错误。
+ * `path` 只在成功时出现，是本机绝对路径（远端路径不进这个结构）。
+ */
+export type RemoteProjectDownloadResult = { ok: true; path: string; bytes: number } | { ok: false; code: string; canceled?: true };
+
+/**
+ * 上传结果。
+ *
+ * `uploaded` 只列真正写到远端的文件名（不含远端路径），`failed` 逐项说明哪个没传上去、为什么——
+ * 多选上传里一个失败不该让整批结果变成一个笼统的布尔值。
+ */
+export type RemoteProjectUploadResult = { ok: true; uploaded: Array<{ name: string; bytes: number }>; failed: Array<{ name: string; code: string }> } | { ok: false; code: string; canceled?: true };
 
 /** 一条文件名匹配；`path` 是**相对项目根**的 POSIX 路径，渲染层不得当成本机路径。 */
 export type RemoteProjectSearchEntry = { path: string; name: string; kind: RemoteWorkspacePathKind; bytes?: number };

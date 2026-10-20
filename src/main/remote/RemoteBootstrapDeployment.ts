@@ -1,6 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
+import { bootstrapTargetLayout, type RemoteBootstrapTarget } from "./RemoteBootstrapContract";
 import { REMOTE_BOOTSTRAP_BUNDLE_DIR_NAME, type RemoteBundleManifest } from "./RemoteHelperContract";
 import { runBootstrapFinalize, type BootstrapSession } from "./RemoteBootstrapTransfer";
 import { buildBundleManifest, withPrivateBundleUploadPlan, type BundleUploadInput } from "./RemoteBootstrapUpload";
@@ -39,14 +40,14 @@ export function frozenHelperBundleManifest(): RemoteBundleManifest {
 }
 
 /** Prepare only frozen helper code; the deployment retains and clears both the source and upload snapshot. */
-export async function deployFrozenHelperBundle(input: Omit<PreparedBundleDeployment, "directory" | "names" | "executableNames">): Promise<PreparedBundleResult> {
+export async function deployFrozenHelperBundle(input: Omit<PreparedBundleDeployment, "directory" | "names" | "executableNames" | "target">): Promise<PreparedBundleResult> {
 	const directory = await mkdtemp(join(tmpdir(), "pideck-frozen-helper-"));
 	try {
 		// Every reviewed artifact is written and hashed on its own: the entry, the Git worker it imports and the write
 		// programs that worker imports. The remote entry verifies each file's pinned digest before it activates.
 		for (const artifact of REMOTE_HELPER_ARTIFACTS) await writeFile(join(directory, artifact.name), artifact.source, { flag: "wx", mode: 0o400 });
 		await writeFile(join(directory, REMOTE_RUNNER_ENTRY_FILE_NAME), REMOTE_RUNNER_INLINE_SOURCE, { flag: "wx", mode: 0o400 });
-		return await deployPreparedBundle({ ...input, directory, names: [...REMOTE_HELPER_ARTIFACTS.map((artifact) => artifact.name), REMOTE_RUNNER_ENTRY_FILE_NAME] });
+		return await deployPreparedBundle({ ...input, target: "helper", directory, names: [...REMOTE_HELPER_ARTIFACTS.map((artifact) => artifact.name), REMOTE_RUNNER_ENTRY_FILE_NAME] });
 	} finally {
 		await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
 	}
@@ -55,8 +56,10 @@ export async function deployFrozenHelperBundle(input: Omit<PreparedBundleDeploym
 const HOST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SCP_TIMEOUT_MS = 120_000;
 const FINALIZE_TIMEOUT_MS = 120_000;
-/** The activated bundle directory exactly as the frozen entry reports it (`.staging-<nonce>` never appears). */
-const ACTIVE_BUNDLE = /^\.\/bundles\/([0-9a-f]{64})$/;
+/** The activated directory exactly as the frozen entry reports it (the staging name never appears). */
+function activeBundlePattern(target: RemoteBootstrapTarget): RegExp {
+	return new RegExp(`^\\./${bootstrapTargetLayout(target).directory}/([0-9a-f]{64})$`);
+}
 
 /**
  * Absolute remote path of the runner inside one confirmed activation — the `runnerPath` of a remote launch
@@ -71,7 +74,7 @@ const ACTIVE_BUNDLE = /^\.\/bundles\/([0-9a-f]{64})$/;
  */
 export function deployedRunnerPath(result: PreparedBundleResult): string {
 	if (typeof result !== "object" || result === null) throw new Error(REMOTE_RUNNER_CODE_INPUT_INVALID);
-	const active = ACTIVE_BUNDLE.exec(typeof result.active === "string" ? result.active : "");
+	const active = activeBundlePattern("helper").exec(typeof result.active === "string" ? result.active : "");
 	if (active === null || active[1] !== result.bundleSha256) throw new Error(REMOTE_RUNNER_CODE_INPUT_INVALID);
 	if (!isRemoteRunnerAbsolutePath(result.deployRoot)) throw new Error(REMOTE_RUNNER_CODE_INPUT_INVALID);
 	return `${result.deployRoot}/${REMOTE_BOOTSTRAP_BUNDLE_DIR_NAME}/${active[1]}/${REMOTE_RUNNER_ENTRY_FILE_NAME}`;
@@ -119,7 +122,7 @@ export async function deployPreparedBundle(input: PreparedBundleDeployment): Pro
 			const invocation = { ...input.connection, executable: plan.invocation.executable, args: plan.invocation.args, env: plan.invocation.env, cwd: plan.invocation.cwd };
 			const exit = await awaitUploadExit(input.launcher, input, invocation);
 			if (exit.kind !== "exited" || exit.code !== 0) throw new Error("BOOTSTRAP_UPLOAD_FAILED");
-			const outcome = await runBootstrapFinalize(input.session, plan.manifest, { executableNames: plan.executableNames, timeoutMs: FINALIZE_TIMEOUT_MS });
+			const outcome = await runBootstrapFinalize(input.session, plan.manifest, { executableNames: plan.executableNames, target: input.target, timeoutMs: FINALIZE_TIMEOUT_MS });
 			if (outcome.status === "timeout" || (outcome.status === "error" && outcome.code === "BOOTSTRAP_FINALIZE_UNCONFIRMED")) throw new Error("BOOTSTRAP_FINALIZE_UNCONFIRMED");
 			if (outcome.status !== "finalized") throw new Error(outcome.status === "aborted" ? "BOOTSTRAP_ABORTED" : "BOOTSTRAP_REMOTE_REJECTED");
 			finalized = true;

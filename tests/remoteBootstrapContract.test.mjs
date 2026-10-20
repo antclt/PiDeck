@@ -29,6 +29,7 @@ const {
 	REMOTE_BOOTSTRAP_LOCK_FILE_NAME,
 	REMOTE_BOOTSTRAP_STAGING_MODE,
 	REMOTE_BOOTSTRAP_STAGING_PREFIX,
+	REMOTE_BOOTSTRAP_TARGET_LAYOUT,
 } = loadTsCommonJs("src/main/remote/RemoteBootstrapContract.ts");
 
 const HOST_ID = "01234567-89ab-4def-8123-456789abcdef";
@@ -65,7 +66,7 @@ const bundleFile = (name, overrides = {}) => ({ name, sha256: SHA_A, bytes: 128,
 const manifestOf = (files, overrides = {}) => ({ schemaVersion: REMOTE_BUNDLE_MANIFEST_SCHEMA_VERSION, bundleSha256: SHA_B, files, ...overrides });
 const observedOf = (files) => files.map((file) => ({ name: file.name, sha256: file.sha256, bytes: file.bytes }));
 const ownerModeOf = (files, { owner = OWNER, executable = [], dataMode = REMOTE_BOOTSTRAP_FILE_MODE, entryMode = REMOTE_BOOTSTRAP_ENTRY_FILE_MODE } = {}) => files.map((file) => ({ name: file.name, owner, mode: executable.includes(file.name) ? entryMode : dataMode }));
-const commandInput = (overrides = {}) => ({ nodeExecutable: NODE_PATH, protocolVersion: 1, bundleSha256: SHA_B, nonce: NONCE, ...overrides });
+const commandInput = (overrides = {}) => ({ nodeExecutable: NODE_PATH, protocolVersion: 1, bundleSha256: SHA_B, nonce: NONCE, target: "helper", ...overrides });
 
 test("quotePosixArgument wraps a plain token in single quotes", () => {
 	assert.equal(quotePosixArgument("plain"), "'plain'");
@@ -115,8 +116,18 @@ test("buildBootstrapCommand emits the fixed token order", () => {
 	assert.ok(command.startsWith(`'${NODE_PATH}' '-e' '`));
 	assert.ok(command.includes(quotePosixArgument(REMOTE_BOOTSTRAP_INLINE_SOURCE)));
 	// `--` is required: without it node parses the leading `--pideck-…` argument as a bad option.
-	assert.ok(command.endsWith(`' '--' '${REMOTE_BOOTSTRAP_INLINE_ENTRY}' '1' '${SHA_B}' '${NONCE}'`));
-	assert.equal(command, [quotePosixArgument(NODE_PATH), quotePosixArgument("-e"), quotePosixArgument(REMOTE_BOOTSTRAP_INLINE_SOURCE), quotePosixArgument("--"), quotePosixArgument(REMOTE_BOOTSTRAP_INLINE_ENTRY), quotePosixArgument("1"), quotePosixArgument(SHA_B), quotePosixArgument(NONCE)].join(" "));
+	assert.ok(command.endsWith(`' '--' '${REMOTE_BOOTSTRAP_INLINE_ENTRY}' '1' '${SHA_B}' '${NONCE}' 'helper'`));
+	assert.equal(
+		command,
+		[quotePosixArgument(NODE_PATH), quotePosixArgument("-e"), quotePosixArgument(REMOTE_BOOTSTRAP_INLINE_SOURCE), quotePosixArgument("--"), quotePosixArgument(REMOTE_BOOTSTRAP_INLINE_ENTRY), quotePosixArgument("1"), quotePosixArgument(SHA_B), quotePosixArgument(NONCE), quotePosixArgument("helper")].join(" "),
+	);
+});
+
+test("buildBootstrapCommand carries the closed deploy target", () => {
+	assert.ok(buildBootstrapCommand(commandInput({ target: "extensions" })).endsWith(`' 'extensions'`));
+	for (const bad of ["", "bundles", "Extensions", "helper ", "helper\n", 1, null, undefined]) {
+		throwsCode(() => buildBootstrapCommand(commandInput({ target: bad })), "BOOTSTRAP_INPUT_INVALID");
+	}
 });
 
 test("buildBootstrapCommand accepts only a verified absolute node executable", () => {
@@ -174,8 +185,8 @@ test("resolveBootstrapDeployRoot rejects relative, traversal and control-charact
 });
 
 test("buildStagingIdentity names the staging directory after the nonce only", () => {
-	const identity = buildStagingIdentity({ hostId: HOST_ID, runtimeGeneration: 7, nonce: NONCE });
-	assert.equal(identity.directory, `${REMOTE_BOOTSTRAP_STAGING_PREFIX}${NONCE}`);
+	const identity = buildStagingIdentity({ hostId: HOST_ID, runtimeGeneration: 7, nonce: NONCE, target: "helper" });
+	assert.equal(identity.directory, `${REMOTE_BOOTSTRAP_TARGET_LAYOUT.helper.stagingPrefix}${NONCE}`);
 	assert.equal(identity.mode, REMOTE_BOOTSTRAP_STAGING_MODE);
 	assert.equal(identity.mode, "0700");
 	// Deploy-root relative, one segment: hostId is not unique across PiDeck instances (plan §171).
@@ -183,22 +194,29 @@ test("buildStagingIdentity names the staging directory after the nonce only", ()
 	assert.ok(!identity.directory.includes(HOST_ID));
 });
 
+test("each deploy target keeps its own staging prefix", () => {
+	assert.equal(buildStagingIdentity({ hostId: HOST_ID, runtimeGeneration: 1, nonce: NONCE, target: "extensions" }).directory, `${REMOTE_BOOTSTRAP_TARGET_LAYOUT.extensions.stagingPrefix}${NONCE}`);
+	for (const target of ["", "helper ", "extensionsx", 42, null]) {
+		throwsCode(() => buildStagingIdentity({ hostId: HOST_ID, runtimeGeneration: 1, nonce: NONCE, target }), "BOOTSTRAP_INPUT_INVALID");
+	}
+});
+
 test("buildStagingIdentity rejects a host id that is not a store UUID", () => {
 	for (const bad of ["", "host-1", HOST_ID.toUpperCase(), "01234567-89ab-0def-8123-456789abcdef", "01234567-89ab-4def-0123-456789abcdef", 42, null]) {
-		throwsCode(() => buildStagingIdentity({ hostId: bad, runtimeGeneration: 1, nonce: NONCE }), "BOOTSTRAP_INPUT_INVALID");
+		throwsCode(() => buildStagingIdentity({ hostId: bad, runtimeGeneration: 1, nonce: NONCE, target: "helper" }), "BOOTSTRAP_INPUT_INVALID");
 	}
 });
 
 test("buildStagingIdentity rejects an out-of-range runtime generation", () => {
 	for (const bad of [-1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 2, "7", null, undefined]) {
-		throwsCode(() => buildStagingIdentity({ hostId: HOST_ID, runtimeGeneration: bad, nonce: NONCE }), "BOOTSTRAP_INPUT_INVALID");
+		throwsCode(() => buildStagingIdentity({ hostId: HOST_ID, runtimeGeneration: bad, nonce: NONCE, target: "helper" }), "BOOTSTRAP_INPUT_INVALID");
 	}
-	assert.doesNotThrow(() => buildStagingIdentity({ hostId: HOST_ID, runtimeGeneration: 0, nonce: NONCE }));
+	assert.doesNotThrow(() => buildStagingIdentity({ hostId: HOST_ID, runtimeGeneration: 0, nonce: NONCE, target: "helper" }));
 });
 
 test("buildStagingIdentity rejects a nonce that cannot be a path segment", () => {
 	for (const bad of ["", "short", "a".repeat(65), "../x", "a/b", `a\\b`, `${NONCE}\u0000`, `${NONCE}/`, 42]) {
-		throwsCode(() => buildStagingIdentity({ hostId: HOST_ID, runtimeGeneration: 1, nonce: bad }), "BOOTSTRAP_INPUT_INVALID");
+		throwsCode(() => buildStagingIdentity({ hostId: HOST_ID, runtimeGeneration: 1, nonce: bad, target: "helper" }), "BOOTSTRAP_INPUT_INVALID");
 	}
 });
 
@@ -410,7 +428,26 @@ test("the inline source stays quotable as a single template token", () => {
 });
 
 test("the inline source keeps its fixed protocol vocabulary", () => {
-	for (const token of [REMOTE_BOOTSTRAP_INLINE_ENTRY, '"use strict"', 'require("node:fs")', "process.env.HOME", ".pideck", "remote-host", ".staging-", ".deploy.lock", "0o700", "0o600", "wx", "DEPLOY_LOCK_HELD", "BOOTSTRAP_DEPLOY_ROOT_INVALID", "BOOTSTRAP_STAGING_INVALID", "BOOTSTRAP_ENTRY_OP_UNSUPPORTED"]) {
+	for (const token of [
+		REMOTE_BOOTSTRAP_INLINE_ENTRY,
+		'"use strict"',
+		'require("node:fs")',
+		"process.env.HOME",
+		".pideck",
+		"remote-host",
+		".staging-",
+		".staging-ext-",
+		".deploy.lock",
+		".deploy-ext.lock",
+		"extensions",
+		"0o700",
+		"0o600",
+		"wx",
+		"DEPLOY_LOCK_HELD",
+		"BOOTSTRAP_DEPLOY_ROOT_INVALID",
+		"BOOTSTRAP_STAGING_INVALID",
+		"BOOTSTRAP_ENTRY_OP_UNSUPPORTED",
+	]) {
 		assert.ok(REMOTE_BOOTSTRAP_INLINE_SOURCE.includes(token), token);
 	}
 	// stdout carries protocol frames only; no console logging may sneak in.
@@ -442,7 +479,7 @@ test("the inline entry is byte-frozen", () => {
 	// This entry is the only code that runs on a remote before anything is deployed, so any edit must
 	// be deliberate: update this digest in the same commit that changes REMOTE_BOOTSTRAP_INLINE_SOURCE.
 	const digest = createHash("sha256").update(REMOTE_BOOTSTRAP_INLINE_SOURCE, "utf8").digest("hex");
-	assert.equal(digest, "1702099f62ee1a57f4bfaedb14a004a9f115a4c058f203247908b967a5d0c495");
+	assert.equal(digest, "c6b35f62bb3c6faed5c13fd4cf75926005574e854e22660c645b8d50abf90f7c");
 });
 
 test("the frozen entry refuses a deploy root that is not a private real directory", async (t) => {
@@ -458,7 +495,7 @@ test("the frozen entry refuses a deploy root that is not a private real director
 	// create directory symlinks without privileges, and a junction reports as a symlink to lstat).
 	await symlink(realRoot, join(home, ".pideck"), "junction");
 	const result = await new Promise((resolve) => {
-		const child = spawn(process.execPath, ["-e", REMOTE_BOOTSTRAP_INLINE_SOURCE, "--", REMOTE_BOOTSTRAP_INLINE_ENTRY, "1", "a".repeat(64), "noncevalue0123456789"], { env: { ...process.env, HOME: home }, stdio: ["pipe", "pipe", "pipe"] });
+		const child = spawn(process.execPath, ["-e", REMOTE_BOOTSTRAP_INLINE_SOURCE, "--", REMOTE_BOOTSTRAP_INLINE_ENTRY, "1", "a".repeat(64), "noncevalue0123456789", "helper"], { env: { ...process.env, HOME: home }, stdio: ["pipe", "pipe", "pipe"] });
 		let stdout = "";
 		child.stdout.on("data", (chunk) => (stdout += chunk));
 		child.on("close", (code) => resolve({ code, stdout }));
@@ -486,10 +523,10 @@ const POSIX = typeof process.getuid === "function";
 // The test builds the deployment paths from the frozen constants, not from literals: a segment, a
 // directory name or a lock name that drifts in the contract must fail here, not silently pass.
 const deployRootOf = (home) => join(home, ...REMOTE_BOOTSTRAP_DEPLOY_ROOT_SEGMENTS);
-const stagingOf = (home, nonce = NONCE) => join(deployRootOf(home), `${REMOTE_BOOTSTRAP_STAGING_PREFIX}${nonce}`);
-const lockPathOf = (home) => join(deployRootOf(home), REMOTE_BOOTSTRAP_LOCK_FILE_NAME);
+const stagingOf = (home, nonce = NONCE, target = "helper") => join(deployRootOf(home), `${REMOTE_BOOTSTRAP_TARGET_LAYOUT[target].stagingPrefix}${nonce}`);
+const lockPathOf = (home, target = "helper") => join(deployRootOf(home), REMOTE_BOOTSTRAP_TARGET_LAYOUT[target].lockFileName);
 const bundlesOf = (home) => join(deployRootOf(home), REMOTE_BOOTSTRAP_BUNDLE_DIR_NAME);
-const activeOf = (home, bundleSha256 = BUNDLE_SHA) => join(bundlesOf(home), bundleSha256);
+const activeOf = (home, bundleSha256 = BUNDLE_SHA, target = "helper") => join(deployRootOf(home), REMOTE_BOOTSTRAP_TARGET_LAYOUT[target].directory, bundleSha256);
 
 /** One declared file: its staged bytes, plus the digest, byte count and mode the frames declare. */
 function stagedFile(name, text, mode = "0600") {
@@ -510,10 +547,10 @@ function paddedFrame(frame, bytes) {
 }
 
 /** Launch the frozen entry against a throwaway HOME and collect the NDJSON frames it writes. */
-async function startSession(home, { nonce = NONCE, bundleSha256 = BUNDLE_SHA, shellCommand } = {}) {
+async function startSession(home, { nonce = NONCE, bundleSha256 = BUNDLE_SHA, shellCommand, target = "helper" } = {}) {
 	const child =
 		shellCommand === undefined
-			? spawn(process.execPath, ["-e", REMOTE_BOOTSTRAP_INLINE_SOURCE, "--", REMOTE_BOOTSTRAP_INLINE_ENTRY, "1", bundleSha256, nonce], { env: { ...process.env, HOME: home }, stdio: ["pipe", "pipe", "pipe"] })
+			? spawn(process.execPath, ["-e", REMOTE_BOOTSTRAP_INLINE_SOURCE, "--", REMOTE_BOOTSTRAP_INLINE_ENTRY, "1", bundleSha256, nonce, target], { env: { ...process.env, HOME: home }, stdio: ["pipe", "pipe", "pipe"] })
 			: spawn("/bin/sh", ["-c", shellCommand], { env: { ...process.env, HOME: home }, stdio: ["pipe", "pipe", "pipe"] });
 	const frames = [];
 	const waiters = new Set();
@@ -575,9 +612,10 @@ async function startSession(home, { nonce = NONCE, bundleSha256 = BUNDLE_SHA, sh
 
 /** Start the entry and wait for `ready`, the frame that announces where the upload has to land. */
 async function startStagingSession(home, options = {}) {
+	const target = options.target ?? "helper";
 	const session = await startSession(home, options);
 	const ready = await session.waitForFrame((frame) => frame.op === "ready");
-	assert.deepEqual(ready, { v: 1, op: "ready", protocolVersion: 1, bundleSha256: options.bundleSha256 ?? BUNDLE_SHA, nonce: options.nonce ?? NONCE, deployRoot: deployRootOf(home), staging: `${REMOTE_BOOTSTRAP_STAGING_PREFIX}${options.nonce ?? NONCE}`, stagingMode: "0700" });
+	assert.deepEqual(ready, { v: 1, op: "ready", protocolVersion: 1, bundleSha256: options.bundleSha256 ?? BUNDLE_SHA, nonce: options.nonce ?? NONCE, deployRoot: deployRootOf(home), staging: `${REMOTE_BOOTSTRAP_TARGET_LAYOUT[target].stagingPrefix}${options.nonce ?? NONCE}`, stagingMode: "0700" });
 	return session;
 }
 
@@ -600,10 +638,10 @@ test("the quoted bootstrap command reaches ready through a POSIX shell", { skip:
 });
 
 /** Upload one declared file into the staging directory; `mode` is overridable for mismatch cases. */
-async function stageFile(home, file, mode = file.mode) {
-	const target = join(stagingOf(home), file.name);
-	await writeFile(target, file.text, { mode: Number.parseInt(mode, 8) });
-	return target;
+async function stageFile(home, file, mode = file.mode, target = "helper") {
+	const targetPath = join(stagingOf(home, NONCE, target), file.name);
+	await writeFile(targetPath, file.text, { mode: Number.parseInt(mode, 8) });
+	return targetPath;
 }
 
 async function modeText(path) {
@@ -625,6 +663,27 @@ async function assertNothingActivated(home, label) {
 	await assert.rejects(lstat(stagingOf(home)), /ENOENT/, `${label}: staging must be removed`);
 	await assert.rejects(lstat(lockPathOf(home)), /ENOENT/, `${label}: the deploy lock must be released`);
 }
+
+test("the frozen entry deploys the two targets into their own directories and locks", async (t) => {
+	const home = await temporaryHome(t);
+	const files = [stagedFile("pi-deck-todo.ts", "export default function () {}\n")];
+	const session = await startStagingSession(home, { target: "extensions" });
+	for (const file of files) await stageFile(home, file, file.mode, "extensions");
+	// The helper target must not be touched by an extensions deployment.
+	await assert.rejects(lstat(bundlesOf(home)), /ENOENT/);
+	session.write(beginFrame(files.length), ...files.map((file) => fileFrame(file)), COMMIT_FRAME);
+	const result = await session.finish();
+	assert.equal(result.code, 0, result.stderr);
+	assert.deepEqual(
+		result.frames.map((frame) => frame.op),
+		["ready", "finalized"],
+	);
+	assert.deepEqual(result.frames[1], { v: 1, op: "finalized", active: `./extensions/${BUNDLE_SHA}`, files: 1 });
+	assert.equal(await readFile(join(activeOf(home, BUNDLE_SHA, "extensions"), files[0].name), "utf8"), files[0].text);
+	assert.deepEqual(await readdir(join(deployRootOf(home), REMOTE_BOOTSTRAP_TARGET_LAYOUT.extensions.directory)), [BUNDLE_SHA]);
+	await assert.rejects(lstat(stagingOf(home, NONCE, "extensions")), /ENOENT/);
+	await assert.rejects(lstat(lockPathOf(home, "extensions")), /ENOENT/);
+});
 
 test("the frozen entry finalizes a two-file bundle into an immutable active directory", async (t) => {
 	const home = await temporaryHome(t);

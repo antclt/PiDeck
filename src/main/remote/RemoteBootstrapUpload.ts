@@ -4,7 +4,7 @@ import { constants } from "node:fs";
 import { open, lstat, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { decodeBundleManifest, quotePosixArgument, REMOTE_BOOTSTRAP_STAGING_PREFIX } from "./RemoteBootstrapContract";
+import { bootstrapTargetLayout, decodeBundleManifest, quotePosixArgument, type RemoteBootstrapTarget } from "./RemoteBootstrapContract";
 import type { BootstrapReadyFrame } from "./RemoteBootstrapTransfer";
 import { REMOTE_BUNDLE_MANIFEST_SCHEMA_VERSION, REMOTE_BUNDLE_MAX_FILES, REMOTE_BUNDLE_MAX_FILE_BYTES, REMOTE_BUNDLE_MAX_TOTAL_BYTES, type RemoteBundleFile, type RemoteBundleManifest } from "./RemoteHelperContract";
 import type { PinnedSshInvocation } from "./SshVerifiedConnection";
@@ -27,7 +27,7 @@ export const REMOTE_BUNDLE_HASH_SEPARATOR = "\n";
 
 export type BundleFileObservation = { name: string; sha256: string; bytes: number };
 
-export type BundleUploadInput = { connection: PinnedSshInvocation; ready: BootstrapReadyFrame; directory: string; names: readonly string[]; executableNames?: readonly string[] };
+export type BundleUploadInput = { connection: PinnedSshInvocation; ready: BootstrapReadyFrame; directory: string; names: readonly string[]; executableNames?: readonly string[]; target?: RemoteBootstrapTarget };
 
 export type BundleUploadPlan = {
 	manifest: RemoteBundleManifest;
@@ -224,8 +224,9 @@ export async function withPrivateBundleUploadPlan<T>(input: BundleUploadInput, t
  * `-p` is deliberately absent: it would preserve the *local* mode, which on Windows is synthetic, and
  * the entry enforces the declared mode itself after the upload.
  */
-export function buildUploadInvocation(input: { connection: PinnedSshInvocation; ready: BootstrapReadyFrame; directory: string; names: readonly string[] }): BundleUploadPlan["invocation"] {
+export function buildUploadInvocation(input: { connection: PinnedSshInvocation; ready: BootstrapReadyFrame; directory: string; names: readonly string[]; target?: RemoteBootstrapTarget }): BundleUploadPlan["invocation"] {
 	if (!isPlainObject(input)) invalid();
+	const layout = bootstrapTargetLayout(input.target ?? "helper");
 	const connection = input.connection as PinnedSshInvocation | undefined;
 	const ready = input.ready as BootstrapReadyFrame | undefined;
 	const directory = input.directory;
@@ -241,7 +242,7 @@ export function buildUploadInvocation(input: { connection: PinnedSshInvocation; 
 	// The staging identity is validated rather than trusted: it decides where the bytes land remotely.
 	if (!usableDeployRoot(ready.deployRoot)) invalid();
 	if (typeof ready.nonce !== "string" || !NONCE.test(ready.nonce)) invalid();
-	if (ready.staging !== `${REMOTE_BOOTSTRAP_STAGING_PREFIX}${ready.nonce}`) invalid();
+	if (ready.staging !== `${layout.stagingPrefix}${ready.nonce}`) invalid();
 	if (typeof directory !== "string" || directory.length === 0 || /[\x00-\x1f\x7f]/.test(directory) || !isAbsolute(directory)) invalid();
 	if (!Array.isArray(names) || names.length === 0 || names.length > REMOTE_BUNDLE_MAX_FILES) invalid();
 	for (const name of names) {

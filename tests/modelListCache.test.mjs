@@ -248,7 +248,8 @@ test("picker flow loads models on welcome page (no record)", () => {
 	assert.match(preferenceController, /const catalogEnabled = options\.pickerOpen \|\| options\.cycleArmed/);
 	assert.match(preferenceController, /useBackendModelCatalog\(\{[\s\S]*?enabled: catalogEnabled/);
 	// 后端分支收敛在 hook 内：DSH 走 host 目录，pi 走诊断报告通道（含失败原因分类）
-	assert.match(hook, /listModelsReport\(options\.projectId, force\)/);
+	// pi 目录按会话取（sessions:list-models，主进程分流远端/本机），DSH 仍走 host 目录
+	assert.match(hook, /desktopApi\.sessions\.listModels\(options\.sessionId, force, options\.projectId\)/);
 	assert.match(hook, /desktopApi\.sessions\.listDshModels\(\)/);
 	assert.match(hook, /options\.backend === "dsh"/);
 });
@@ -410,8 +411,8 @@ test("model picker wires manual refresh + failure guide", () => {
 	const hook = readFileSync("src/renderer/src/hooks/useBackendModelCatalog.ts", "utf8");
 	const pickerHost = readFileSync("src/renderer/src/components/session/ComposerPickerHost.tsx", "utf8");
 	const components = readFileSync("src/renderer/src/components/session/ComposerComponents.tsx", "utf8");
-	// 数据源切到报告通道；reload(true) = 手动刷新（绕过缓存重新 fork）
-	assert.match(hook, /listModelsReport\(options\.projectId, force\)/);
+	// 数据源切到会话级报告通道；reload(true) = 手动刷新（绕过缓存重新 fork）
+	assert.match(hook, /desktopApi\.sessions\.listModels\(options\.sessionId, force, options\.projectId\)/);
 	assert.match(hook, /reload: load/);
 	assert.match(hook, /refreshing/);
 	// 选择器把报告/刷新状态传给 ModelPicker

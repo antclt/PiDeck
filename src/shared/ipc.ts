@@ -8,12 +8,8 @@ export const ipcChannels = {
 	remoteHostDiagnostics: "remote:diagnostics",
 	/** 扫描 ~/.ssh/config 列出可添加的候选（只读；不联网、不改动任何配置）。 */
 	remoteHostScanConfig: "remote:scan-config",
-	/** 添加主机：建立 draft 并推送指纹确认（推送走 remoteHostPinRequest）。 */
+	/** 添加主机：建立 draft、完成首次 host key 信任（TOFU）并落盘 pin，返回 verified。 */
 	remoteHostAdd: "remote:add",
-	/** 回答指纹确认（只能回答主进程签发的 requestId）。 */
-	remoteHostAnswerPin: "remote:answer-pin",
-	/** 主进程 → 渲染层：指纹确认请求推送。 */
-	remoteHostPinRequest: "remote:pin-request",
 	/** 主进程 → 渲染层：主机连接状态变化推送（connect 返回之后的迁移也在此到达）。 */
 	remoteHostStateChanged: "remote:state-changed",
 	/** 只读：诊断 needs-repair 的原因与合法动作（不写任何东西）。 */
@@ -34,6 +30,10 @@ export const ipcChannels = {
 	remoteProjectList: "remote:project-list",
 	/** 按 projectId 读文件（相对路径）。 */
 	remoteProjectRead: "remote:project-read",
+	/** 把远端项目里的一个文件下载到本机（主进程弹保存对话框；字节数受远端读上限约束）。 */
+	remoteProjectDownload: "remote:project-download",
+	/** 把本机文件上传到远端项目的当前目录（主进程弹选择对话框；stdin 分块写，支持二进制）。 */
+	remoteProjectUpload: "remote:project-upload",
 	/** 已有远端文本文件编辑：main持有版本，保存必须携带打开时签发的令牌。 */
 	remoteProjectTextOpen: "remote:project-text-open",
 	remoteProjectTextSave: "remote:project-text-save",
@@ -223,6 +223,13 @@ export const ipcChannels = {
 	sessionsListFileChanges: "sessions:list-file-changes",
 	/** 会话级 todo 快照：从会话文件 pi-deck-todo custom 条目重建最新计划。 */
 	sessionsListSessionTodo: "sessions:list-session-todo",
+	/**
+	 * 会话级模型目录（按 location 分流）：远端会话由该会话的远端 pi 进程回答
+	 * `get_available_models`，本机会话走 projects:list-models-report 同一套本机解析。
+	 * 与 projects:list-models-report 的区别：那条永远回答本机目录，给远端会话选模型
+	 * 必然 Model not found。
+	 */
+	sessionsListModels: "sessions:list-models",
 	/** DSH 会话轨迹系统提示（request/header 事件的 EpochHeader.system；非 DSH/无数据返回 undefined）。 */
 	sessionsCatalogReadDshSystemPrompt: "sessions:catalog-read-dsh-system-prompt",
 	sessionsCatalogReadReferenceMessages: "sessions:catalog-read-reference-messages",

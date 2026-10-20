@@ -49,10 +49,8 @@ const COVERED_HOST_ID_FIELDS = new Map([
 	["src/shared/types/remoteHost.ts:RemoteHostDisconnectResult", "runtime"],
 	["src/shared/types/remoteHost.ts:RemoteHostDiagnosticsResult", "runtime"],
 	["src/shared/types/remoteHost.ts:RemoteHostOperationFailure", "runtime"],
-	// 添加流程的两个结果类型同样只是回显 hostId（一个刚建的 draft），不持久化引用。
+	// 添加主机的结果只是回显 hostId（一个刚建的 draft/刚验证的主机），不持久化引用。
 	["src/shared/types/remoteHost.ts:RemoteHostAddResult", "runtime"],
-	["src/shared/types/remoteHost.ts:RemoteHostPinAnswerResult", "runtime"],
-	["src/shared/types/remoteHost.ts:RemoteHostPinRequest", "runtime"],
 	// 状态推送只是告诉界面「哪台主机变成什么状态」，不持久化任何东西。
 	["src/shared/types/remoteHost.ts:RemoteHostStateChange", "runtime"],
 	// 修复确认请求只是告知界面「要修哪台主机」，不持久化引用。

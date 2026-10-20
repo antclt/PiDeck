@@ -162,6 +162,40 @@ function requireNodeInterpreter(value: unknown, code: string): string {
 }
 
 /**
+ * 远端模型目录探测的 argv 形态。
+ *
+ * 与本机 `MODEL_LIST_FAST_ARGS` 同源：offline 跳过网络目录刷新，no-extensions/skills/themes 跳过发现加载。
+ * 远端跑这两个的好处都是真实的：不为一次模型列表去加载用户全部 npm 扩展（真机量级：带扩展 5s+，
+ * 快速档 1–3s），而且结果就是 pi 自己对远端 auth.json/models.json 的解析视图。
+ *
+ * `compat` 只给不认识这些旗标的老版本 pi 用（与本机 `MODEL_LIST_COMPAT_ARGS` 同一个降级概念）。
+ */
+export const REMOTE_PI_MODEL_LIST_ARGS: { readonly full: readonly string[]; readonly fast: readonly string[]; readonly compat: readonly string[] } = {
+	// full = 本机「带扩展」第一档：扩展可以 registerProvider 贡献模型（issue #181）。
+	// 代价是远端要加载用户全部扩展（真机量级 5s+），所以只在手动刷新时用。
+	full: ["--list-models", "--offline", "--no-skills", "--no-themes"],
+	fast: ["--list-models", "--offline", "--no-extensions", "--no-skills", "--no-themes"],
+	compat: ["--list-models"],
+};
+
+/** 远端模型目录命令的三档形态；顺序由调用方决定（默认快速档，手动刷新从 full 起步）。 */
+export type RemotePiListModelsMode = keyof typeof REMOTE_PI_MODEL_LIST_ARGS;
+
+/**
+ * 远端模型目录命令：`'<node>' '<pi>' '--list-models' …`。
+ *
+ * 与 `buildRemotePiVersionCommand` 同构、共用同一条 pinned ssh 通道：解释器必须是已解析的 node
+ * （远端 pi 是 `#!/usr/bin/env node` shim，非交互式 PATH 里只有系统 node），参数全部是这里的字面量，
+ * 没有任何用户输入进命令行。这样「远端模型列表」不需要新增 helper 方法、不需要活着的会话 runtime。
+ */
+export function buildRemotePiListModelsCommand(piPath: string, nodePath: string, mode: RemotePiListModelsMode = "fast"): string {
+	const args = REMOTE_PI_MODEL_LIST_ARGS[mode];
+	const command = [quotePosixArgument(requireNodeInterpreter(nodePath, REMOTE_PI_PATH_INVALID)), quotePosixArgument(requirePiExecutable(piPath)), ...args.map((arg) => quotePosixArgument(arg))].join(" ");
+	if (command.length > REMOTE_HELPER_MAX_REMOTE_COMMAND_LENGTH) fail(REMOTE_PI_PATH_INVALID);
+	return command;
+}
+
+/**
  * 构造探测远端 pi 版本的唯一命令：`'<nodePath>' '<piPath>' '--version'`。
  *
  * 三个 token 各自经 `quotePosixArgument` 单引号引用（与 `buildRemoteNodeVersionCommand` 同款，不另造

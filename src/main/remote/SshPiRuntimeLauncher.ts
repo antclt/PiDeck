@@ -24,7 +24,7 @@ import { buildPinnedSshInvocation } from "./SshVerifiedConnection";
 import type { SshClientRuntime } from "./SshClientRuntime";
 import type { SshLauncherHandle, SshProcessLauncher } from "./RemoteHostConnectionTypes";
 import { SSH_LAUNCHER_MAX_OUTPUT_BYTES, SSH_LAUNCHER_DEFAULT_MAX_LINE_BYTES } from "./SshProcessLauncher";
-import { buildRemoteRunnerCommand, decodeRemoteRunnerResultFrame, type RemoteRunnerReadyFrame } from "./RemoteRunnerContract";
+import { buildRemoteRunnerCommand, buildRemoteRunnerInitFrame, decodeRemoteRunnerResultFrame, type RemoteRunnerReadyFrame } from "./RemoteRunnerContract";
 import type { PiRuntimeExit, PiRuntimeLauncher, PiSpawnHandle, RemoteSshPiRuntimeLaunchPlan } from "./../pi/PiSpawnHandle";
 
 /** 握手上限：ready/error 必须在此时限内到，否则视为「握手未确认」并停掉会话。 */
@@ -192,8 +192,9 @@ export class SshPiRuntimeLauncher implements PiRuntimeLauncher {
 			maxLineBytes: SSH_LAUNCHER_DEFAULT_MAX_LINE_BYTES,
 		});
 		try {
-			// 初始化帧：cwd + [解释器, pi 入口, ...pi 参数]。任何用户文本都不进命令行。
-			session.write(JSON.stringify({ v: 1, op: "start", nonce: plan.nonce, cwd: plan.cwd, argv: [plan.nodePath, plan.piPath, ...plan.args] }));
+			// 初始化帧：cwd + [解释器, pi 入口, ...pi 参数] + 可选 PIDECK_* env。任何用户文本都不进命令行；
+			// 帧的构造/校验走同一份契约（比手写 JSON.stringify 多出的就是 `env` 的白名单与预算）。
+			session.write(buildRemoteRunnerInitFrame({ nonce: plan.nonce, cwd: plan.cwd, argv: [plan.nodePath, plan.piPath, ...plan.args], ...(plan.env === undefined ? {} : { env: plan.env }) }));
 			await awaitRunnerReady(session, { nonce: plan.nonce, timeoutMs: this.handshakeTimeoutMs });
 		} catch (error) {
 			await stopQuietly(session);

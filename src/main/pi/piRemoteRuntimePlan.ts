@@ -15,7 +15,7 @@
  *    只把**已解析的决策**透传下去，自己不认任何 flag 字面量（见 tests/remoteTrustFlagContract.test.mjs）。
  */
 import { PROJECT_HOST_ID_PATTERN } from "../../shared/projectLocation";
-import { REMOTE_RUNNER_MAX_ARGV_LENGTH } from "../remote/RemoteRunnerContract";
+import { REMOTE_RUNNER_MAX_ARGV_LENGTH, readRemoteRunnerEnv, type RemoteRunnerEnv } from "../remote/RemoteRunnerContract";
 import type { RemoteSshPiRuntimeLaunchPlan } from "./PiSpawnHandle";
 import { assertRemoteAbsolutePath, buildRemotePiArgs, type PiRpcBaseArgsSettings, type PiTrustOverride } from "./piRpcArgs";
 
@@ -48,6 +48,10 @@ export type RemotePiRuntimePlanInput = {
 	 * 调用方（远端运行时端口）从 trust 决策表解析后透传给这里，构造点不做任何默认值。
 	 */
 	readonly trust?: PiTrustOverride;
+	/** 本次要注入的内置扩展绝对 POSIX 路径（已由部署结果拼好；构造点只验形状与总数）。 */
+	readonly extensions?: readonly string[];
+	/** 可选的 `PIDECK_*` 环境（扩展配置）；未传 = runner 继承 SSH 会话环境，行为逐字不变。 */
+	readonly env?: RemoteRunnerEnv;
 	readonly settings?: PiRpcBaseArgsSettings;
 };
 
@@ -59,8 +63,10 @@ export function buildRemotePiRuntimePlan(input: RemotePiRuntimePlanInput): Remot
 	assertRemoteAbsolutePath(input.nodePath);
 	assertRemoteAbsolutePath(input.piPath);
 	assertRemoteAbsolutePath(input.runnerPath);
-	const args = buildRemotePiArgs({ settings: input.settings, ...(input.sessionFile === undefined ? {} : { sessionFile: input.sessionFile }), ...(input.trust === undefined ? {} : { trust: input.trust }) });
+	const args = buildRemotePiArgs({ settings: input.settings, ...(input.extensions === undefined ? {} : { extensions: input.extensions }), ...(input.sessionFile === undefined ? {} : { sessionFile: input.sessionFile }), ...(input.trust === undefined ? {} : { trust: input.trust }) });
 	if (args.length > MAX_REMOTE_ARGS) throw new Error("REMOTE_RUNTIME_ARGS_TOO_MANY");
+	// env 是可选扩展配置：形状/白名单/上限全部在这一个校验器里（runner 侧是同一份字面量）。
+	const env = readRemoteRunnerEnv(input.env);
 	return {
 		kind: "remote-ssh",
 		hostId: input.hostId,
@@ -71,5 +77,6 @@ export function buildRemotePiRuntimePlan(input: RemotePiRuntimePlanInput): Remot
 		cwd: input.remoteCwd,
 		args,
 		nonce: input.nonce,
+		...(env === undefined ? {} : { env }),
 	};
 }

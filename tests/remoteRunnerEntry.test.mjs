@@ -37,6 +37,8 @@ const {
 	REMOTE_RUNNER_LEASE_VERSION,
 	REMOTE_RUNNER_MAX_ARG_LENGTH,
 	REMOTE_RUNNER_MAX_ARGV_LENGTH,
+	REMOTE_RUNNER_MAX_ENV_ENTRIES,
+	REMOTE_RUNNER_MAX_ENV_VALUE,
 	REMOTE_RUNNER_MAX_INIT_FRAME_BYTES,
 	REMOTE_RUNNER_MAX_PATH_LENGTH,
 	REMOTE_RUNNER_MAX_TERM_GRACE_MS,
@@ -47,6 +49,8 @@ const {
 	REMOTE_RUNNER_PROTOCOL_VERSION,
 	REMOTE_RUNNER_TERM_GRACE_ENV,
 	REMOTE_RUNNER_TERM_GRACE_MS,
+	REMOTE_RUNNER_ENV_KEY_PATTERN,
+	readRemoteRunnerEnv,
 	buildRemoteRunnerCommand,
 	buildRemoteRunnerInitFrame,
 	decodeRemoteRunnerResultFrame,
@@ -56,7 +60,7 @@ const { deployedRunnerPath, frozenHelperBundleManifest } = loadTsCommonJs("src/m
 const { REMOTE_HELPER_ARTIFACTS, REMOTE_HELPER_ENTRY_FILE_NAME, REMOTE_HELPER_INLINE_SOURCE } = loadTsCommonJs("src/main/remote/RemoteHelperEntry.ts");
 
 /** Frozen digest, pinned here as well as in the module: editing the source means editing both. */
-const FROZEN_SHA256 = "b63858473bfbf20df7a6fe18ffbc7a6ee45fbbeed45c045b0ec5c8edc616376a";
+const FROZEN_SHA256 = "10734df2ae824b806c12afacdcaa93ac2ea0634fd2ea39fae9812c8c96104108";
 const TEST_TIMEOUT_MS = 40_000;
 const GUARD_TIMEOUT_MS = 15_000;
 const WINDOWS = process.platform === "win32";
@@ -271,6 +275,8 @@ runnerTest("the frozen body repeats the contract's literals and its command shap
 		["MAX_ARGV", REMOTE_RUNNER_MAX_ARGV_LENGTH],
 		["MAX_PATH", REMOTE_RUNNER_MAX_PATH_LENGTH],
 		["MAX_ARG", REMOTE_RUNNER_MAX_ARG_LENGTH],
+		["MAX_ENV", REMOTE_RUNNER_MAX_ENV_ENTRIES],
+		["MAX_ENV_VALUE", REMOTE_RUNNER_MAX_ENV_VALUE],
 		["DEFAULT_GRACE_MS", REMOTE_RUNNER_TERM_GRACE_MS],
 		["MIN_GRACE_MS", REMOTE_RUNNER_MIN_TERM_GRACE_MS],
 		["MAX_GRACE_MS", REMOTE_RUNNER_MAX_TERM_GRACE_MS],
@@ -280,12 +286,30 @@ runnerTest("the frozen body repeats the contract's literals and its command shap
 	]) {
 		assert.match(REMOTE_RUNNER_INLINE_SOURCE, new RegExp(`${name}\\s*=\\s*${value}\\b`), `${name} must be the contract's value`);
 	}
+	assert.ok(REMOTE_RUNNER_INLINE_SOURCE.includes(REMOTE_RUNNER_ENV_KEY_PATTERN), "the env allowlist must be the contract's literal");
 	// Two spawn facts the contract depends on: the fixed options, and that nothing else can start a process.
-	assert.match(REMOTE_RUNNER_INLINE_SOURCE, /cp\.spawn\([\s\S]{0,120}?shell\s*:\s*false[\s\S]{0,60}?detached\s*:\s*true[\s\S]{0,60}?stdio\s*:\s*\[\s*"pipe"\s*,\s*"pipe"\s*,\s*"pipe"\s*\]/, "the spawn options are fixed by the contract");
+	assert.match(REMOTE_RUNNER_INLINE_SOURCE, /spawnOptions=\{[^}]*shell:false[^}]*detached:true[^}]*stdio:\["pipe","pipe","pipe"\]/, "the spawn options are fixed by the contract");
+	assert.match(REMOTE_RUNNER_INLINE_SOURCE, /spawnOptions\.env=Object\.assign\(\{\},process\.env,job\.env\)/, "the per-launch env is merged over the supervisor env, never replacing it");
+	assert.match(REMOTE_RUNNER_INLINE_SOURCE, /cp\.spawn\(job\.argv\[0\],job\.argv\.slice\(1\),spawnOptions\)/, "the one spawn site uses the fixed options object");
 	assert.equal((REMOTE_RUNNER_INLINE_SOURCE.match(/cp\.spawn\(/g) ?? []).length, 1, "exactly one spawn site");
 	assert.ok(!/shell\s*:\s*true/.test(REMOTE_RUNNER_INLINE_SOURCE), "no shell may ever be involved");
 	assert.ok(!REMOTE_RUNNER_INLINE_SOURCE.includes("child.kill("), "reclamation never names a bare pid");
 	assert.ok(REMOTE_RUNNER_INLINE_SOURCE.includes("process.kill(-pgid"), "signals go to the process group");
+});
+
+runnerTest("per-launch env is allowlisted to PIDECK_ keys and bounded", () => {
+	const input = { nonce: "runner-env-000001", cwd: "/home/dev/project", argv: ["/usr/bin/node", "/usr/bin/pi", "--mode", "rpc"] };
+	const frame = JSON.parse(buildRemoteRunnerInitFrame({ ...input, env: { PIDECK_SECURITY_CONFIG: "/home/dev/.pideck/remote-host/security-policy.json", PIDECK_SESSION_ID: "abc" } }));
+	assert.deepEqual(frame.env, { PIDECK_SECURITY_CONFIG: "/home/dev/.pideck/remote-host/security-policy.json", PIDECK_SESSION_ID: "abc" });
+	// 未传 env ⇒ 帧里没有这个键（行为与 runner 1.0.0 逐字一致）。
+	assert.equal(Object.hasOwn(JSON.parse(buildRemoteRunnerInitFrame(input)), "env"), false);
+	for (const bad of [{ PATH: "/tmp/evil" }, { pideck_lower: "1" }, { PIDECK_A: "x".repeat(4097) }, { PIDECK_A: "a\nb" }, { PIDECK_A: "a\u0000b" }, { PIDECK_A: 1 }, []]) {
+		assert.throws(() => buildRemoteRunnerInitFrame({ ...input, env: bad }), /RUNNER_INPUT_INVALID/, `must refuse ${JSON.stringify(bad).slice(0, 60)}`);
+	}
+	const tooMany = Object.fromEntries(Array.from({ length: REMOTE_RUNNER_MAX_ENV_ENTRIES + 1 }, (_, index) => [`PIDECK_K${index}`, "1"]));
+	assert.throws(() => buildRemoteRunnerInitFrame({ ...input, env: tooMany }), /RUNNER_INPUT_INVALID/);
+	assert.deepEqual(plain(readRemoteRunnerEnv({ PIDECK_OK: "v" })), { PIDECK_OK: "v" });
+	assert.equal(readRemoteRunnerEnv(undefined), undefined);
 });
 
 runnerTest("the deploy bundle carries every reviewed file and the runner path resolves inside it", () => {
@@ -523,6 +547,25 @@ posixTest("a pi that exits on its own is transcribed and its survivors are recla
 	await waitForGone(facts.grandchild, "the fixture pi's child");
 	await waitForGone(facts.pid, "the fixture pi");
 	assert.equal(existsSync(leasePath(fixture.home, nonce)), false);
+});
+
+posixTest("init frame env reaches the child while the supervisor environment is preserved", async (t) => {
+	const base = mkdtempSync(join(tmpdir(), "pideck-runner-env-"));
+	const home = join(base, "home");
+	const cwd = join(base, "project");
+	mkdirSync(home, { mode: 0o700 });
+	mkdirSync(cwd);
+	const piPath = join(base, "env-pi.cjs");
+	const facts = join(base, "env-facts.json");
+	writeFileSync(piPath, 'require("node:fs").writeFileSync(process.argv[2], JSON.stringify({ pid: process.pid, value: process.env.PIDECK_RUNNER_TEST, path: typeof process.env.PATH }));process.exit(0);');
+	t.after(() => rmSync(base, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }));
+	const session = startRunner(t, { home });
+	session.writeInit(buildRemoteRunnerInitFrame({ nonce: "runner-env-000002", cwd, argv: [process.execPath, piPath, facts], env: { PIDECK_RUNNER_TEST: "ok" } }));
+	const handshake = await waitForHandshake(session);
+	assert.equal(handshake.op, "ready");
+	const reported = await readFacts(facts);
+	assert.equal(reported.value, "ok");
+	assert.equal(reported.path, "string", "the supervisor environment (PATH) is inherited, not replaced");
 });
 
 test("the runner refuses to start anything on win32", { skip: WINDOWS ? false : "POSIX-only branch: the runner supervises process groups" }, async (t) => {

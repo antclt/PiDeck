@@ -63,10 +63,10 @@ test("连接 tab 的每个主机状态都有中英文案", () => {
 
 test("连接面板引用的每个 i18n key 都在两份词典里存在", () => {
 	// 文案键拼错时界面会直接显示原始 key（settings.connections.xxx），代码里完全看不出来；
-	// 而这两个面板的文案量最大（添加/指纹确认），所以单独守一道。
+	// 而这两个面板的文案量最大（添加主机 / 修复），所以单独守一道。
 	const zh = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
 	const en = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
-	const panels = ["src/renderer/src/components/app/settings/ConnectionsTab.tsx", "src/renderer/src/components/app/settings/AddHostDialog.tsx", "src/renderer/src/components/app/settings/FingerprintConfirmDialog.tsx", "src/renderer/src/components/app/settings/RepairPanel.tsx"];
+	const panels = ["src/renderer/src/components/app/settings/ConnectionsTab.tsx", "src/renderer/src/components/app/settings/AddHostDialog.tsx", "src/renderer/src/components/app/settings/RepairPanel.tsx"];
 	const keys = new Set();
 	for (const file of panels) for (const match of readFileSync(file, "utf8").matchAll(/(?<![A-Za-z0-9_$])t\("([^"]+)"\)/g)) keys.add(match[1]);
 	assert.ok(keys.size > 20, "expected the connection panels to reference a substantial set of keys");

@@ -62,6 +62,10 @@ function createPort(resolveTrust) {
 			async remotePiRuntimeFacts() {
 				return FACTS;
 			},
+			// 本组只断言 trust flag：快照部署固定失败 ⇒ 不注入扩展 ⇒ 参数面与历史逐字一致。
+			async ensureRemoteExtensionSnapshot() {
+				return { ok: false, code: "REMOTE_EXTENSIONS_UNAVAILABLE" };
+			},
 			createPiRuntimeLauncher() {
 				// 本组只断言 plan（prepare 的返回值），启动器只需形状正确。
 				return {
@@ -76,7 +80,8 @@ function createPort(resolveTrust) {
 	});
 }
 
-const argsOf = (plan) => [...plan.args];
+// prepare() 现在返回 { plan, extensions }；本组只关心参数面，helper 同时接受原始 plan。
+const argsOf = (value) => [...(value && typeof value === "object" && "plan" in value ? value.plan : value).args];
 
 test("参数构造：未决策 ⇒ 不出现任何 trust flag；approve/deny ⇒ 各就各位", () => {
 	assert.deepEqual([...basePiRpcArgs()], BASE_ARGS, "本机与远端共享的基础参数不得被本轮改动碰");

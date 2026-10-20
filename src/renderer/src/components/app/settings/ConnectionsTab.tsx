@@ -3,11 +3,10 @@ import { desktopApi } from "../../../desktopApi";
 import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
 import { AddHostDialog } from "./AddHostDialog";
-import { FingerprintConfirmDialog } from "./FingerprintConfirmDialog";
 import { RepairPanel } from "./RepairPanel";
 import { RemoteProjectTrustPanel } from "./RemoteProjectTrustPanel";
 import { SettingsSection } from "./SettingsStorageTab";
-import type { RemoteHostConnectionState, RemoteHostDiagnosticEntry, RemoteHostListItem, RemoteHostPinRequest } from "../../../../../shared/types/remoteHost";
+import type { RemoteHostConnectionState, RemoteHostDiagnosticEntry, RemoteHostListItem } from "../../../../../shared/types/remoteHost";
 
 /**
  * 设置 → 连接：远端主机列表 + 连接开关 + 状态/诊断。
@@ -29,18 +28,6 @@ export function ConnectionsTab() {
 	const [message, setMessage] = useState<string | null>(null);
 	const [diagnostics, setDiagnostics] = useState<Record<string, RemoteHostDiagnosticEntry[]>>({});
 	const [adding, setAdding] = useState(false);
-	const [pinRequest, setPinRequest] = useState<RemoteHostPinRequest | null>(null);
-	const [pinBusy, setPinBusy] = useState(false);
-
-	/**
-	 * 订阅指纹确认推送。
-	 *
-	 * 必须在组件卸载时退订：窗口销毁后继续收到推送不仅浪费，还会让「确认」这件事脱离用户可见的上下文。
-	 */
-	useEffect(() => {
-		const unsubscribe = desktopApi.remoteHosts.onPinRequest((request) => setPinRequest(request));
-		return unsubscribe;
-	}, []);
 
 	/**
 	 * 订阅连接状态推送。
@@ -171,33 +158,12 @@ export function ConnectionsTab() {
 			{adding ? (
 				<AddHostDialog
 					onClose={() => setAdding(false)}
-					onSubmitted={() => {
-						// 提交后关弹框，由指纹确认接手；此时列表还是旧的（draft 尚未验证），等确认完再刷新。
+					onSubmitted={(hostId) => {
+						// 添加即已验证（首次信任在主进程内完成）：关框、刷新列表，并直接把这条新主机连上——
+						// 用户的下一步永远是「连上它」，多一次点击只是仪式。
 						setAdding(false);
 						void refresh();
-					}}
-				/>
-			) : null}
-			{pinRequest !== null ? (
-				<FingerprintConfirmDialog
-					request={pinRequest}
-					busy={pinBusy}
-					onAnswer={(choice) => {
-						const request = pinRequest;
-						if (request === null) return;
-						setPinBusy(true);
-						void (async () => {
-							try {
-								const result = await desktopApi.remoteHosts.answerPin(request.requestId, request.hostId, choice);
-								// 拒绝是正常结果；只有真正的失败（过期、非法、来自其他窗口）才提示。
-								if (!result.ok) setMessage(t("settings.connections.pin.failed", { code: result.code }));
-							} finally {
-								setPinBusy(false);
-								setPinRequest(null);
-								// 确认后必须重拉：新主机只有保存了 pin 才出现在列表里。
-								void refresh();
-							}
-						})();
+						void toggle(hostId, true);
 					}}
 				/>
 			) : null}
