@@ -1,5 +1,7 @@
 export type SessionOutlineItems = Array<{
 	id: string;
+	/** 会话文件条目 id：导轨目录合并时用来对齐未加载检查点。 */
+	entryId?: string;
 	role: string;
 	title: string;
 	time: string;

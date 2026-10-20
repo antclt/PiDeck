@@ -1,6 +1,6 @@
 # 轨迹与会话数据消费优化计划（Trajectory & Session Consumer）
 
-> 状态：**S1/S2 已实施（S1：B1/B2/B3 红测转绿、索引事实读取器、facts 契约、DSH 覆盖范围、只读探针；S2：事件驱动刷新、单在途、作用域作废、引用稳定、hover 不重算）；S1–S3 已实施；S4 数据面已落地（目录/标题 IPC），导轨 UI 合并与受控补页未做，S5 为条件性后续项。** S0 能力已存在于当前工作区，提交状态以 git 为准。实施后按阶段更新 §9；全部完成或作废时收口本文件。
+> 状态：**S1/S2 已实施（S1：B1/B2/B3 红测转绿、索引事实读取器、facts 契约、DSH 覆盖范围、只读探针；S2：事件驱动刷新、单在途、作用域作废、引用稳定、hover 不重算）；S1–S4 已实施（S4：目录/标题 IPC + 导轨合并 + 未加载项受控补页），S5 为条件性后续项。** S0 能力已存在于当前工作区，提交状态以 git 为准。实施后按阶段更新 §9；全部完成或作废时收口本文件。
 >
 > 本轮交付仅为计划文档，未开展实现或测试开发。计划中的实现范围是桌面消费侧：事实读取、刷新、渲染窗口、导轨；传输层与 Go 条目表仍归 [session-data-plane-plan.md](session-data-plane-plan.md)。不改 pi 会话写入语义、不扩展宿主控制通道、不增加依赖。
 >
@@ -289,6 +289,8 @@ S1 落地时增加 `scripts/probeTrajectoryRead.mjs`（当前尚不存在），�
 - 热命中正文读取 0、普通追加不回读旧事实、隐藏面板请求 0、默认 DOM 有界是可重复的主要收益判据。
 - 不为得到某个数字跳过分支/版本/完整性检查。若优化只增加维护成本且实测无收益，停在上一阶段，不继续增量化。
 
+> **S4 落地记录（2026-10-20）**：导轨数据面（`readSessionOutline`/`readSessionOutlineTitle` + 两个 IPC 通道）已提交；渲染侧 `buildOutline` 补 `meta.entryId`，`mergeOutlineRailItems` 把索引目录与已加载大纲按 entryId 合并（未加载项 `#序号` 占位，目录为空时整体回退），点击占位刻度复用既有 `loadMoreMessages` 连续补页（≤7 次请求，目标 entryId 出现即 `jumpToMessage`）。测试：目录数据面 5 项 + 合并 2 项。
+>
 > **S3 落地记录（2026-10-20）**：账本改为渲染窗口（`buildTrajectoryWindow`：尾部 3 轮、逐轮 120 步上限、滚到顶部再放 3 轮并有 200ms 冷却、选中更早记录自动扩到其所在轮）；概览从「一条记录一个按钮」改为按 lane + 像素桶聚合（`bucketOverviewTicks`：每 lane ≤ min(250, ceil(width/4))，桶显示 ×N，选中项一定有刻度）。15k 记录样本：账本挂载 ≤ 3×120+120、概览刻度 ≤ 4×min(250,ceil(w/4))+1，见 `tests/trajectoryWindow.test.mjs`（6 项）。
 >
 > **S2 落地记录（2026-10-20）**：事实/模型请求快照的拉取从 `cachedEntry.revision/updatedAt`（token flush ~20 次/秒）解耦为语义触发（回合边界、压缩状态、运行代次）＋活动时 5 秒兜底；同路径单在途 + 一个待刷新标记；切会话/换代立即作废迟到响应；相同 `version` 保持事件数组引用；失败保留上次成功数据。`SessionTrajectoryView` 的 hover 触发已删除（悬停不再重算整份账本），活动时长改由 in-flight 时的 1 秒定时器推进。契约测试 `tests/trajectoryRefreshContract.test.mjs`（7 项）守住这些结构约束。
@@ -330,7 +332,7 @@ S1 落地时增加 `scripts/probeTrajectoryRead.mjs`（当前尚不存在），�
 - [ ] S2 now 完全脱离模型构建：已做到「hover/拖动不重算 + in-flight 时 1 秒低频时钟 + 相同事实版本不换引用」，domain 右端仍依赖 now（未做视觉验证前不擅自改时间轴）。
 - [x] S3 账本窗口 + 单轮预算 + 概览聚合：`trajectoryWindow.ts`（尾部 3 轮、单轮 ≤120、滚顶再放 3 轮、选中更早自动扩窗）+ 概览按 lane/像素聚合（每 lane ≤ min(250, ceil(w/4))，选中项补刻度）。**未做**：概览点击「切窗口到目标 3 轮」已由「选中自动扩窗」等价覆盖，但没有「回最新」按钮与按记录 ID 的滚动恢复（仍是 scrollTop 记忆）。
 - [x] S4 活动用户目录 + 懒标题（数据面）：`SessionHistoryReader.readSessionOutline/readSessionOutlineTitle` + `sessions:catalog-read-outline{,-title}` 通道/handler/preload/preview/browser 成套；目录过滤 context_edit、`messageIndex` 用 activeMessageEntries 坐标、超预算保留首项+最近项、标题读一行截 80 字。测试 `tests/sessionOutlineDirectory.test.mjs`（5 项）。
-- [ ] S4 导轨 UI：索引目录与已加载消息合并、确认后连续补页（≤3 轮/页、≤20 轮、≤7 请求）、远目标单步、中断条件、加载范围高亮。
+- [x] S4 导轨 UI：索引目录与已加载消息合并（`mergeOutlineRailItems`，未加载项以 #序号占位）、点击未加载项走既有连续补页（最多 7 次请求，到目标即跳转）、目录为空时退回已加载大纲（dsh/ACP）。**未做**：远目标单步确认对话框、加载范围高亮、按记录 ID 的滚动恢复。
 - [ ] S4 预算/分屏/生命周期/非 pi 降级/分页中断测试。
 - [ ] 收口：更新维护说明，按 §3.5 移除已无必要的迁移兜底；确无生产消费者的旧入口成套删除，不夹带无关清理。
 
