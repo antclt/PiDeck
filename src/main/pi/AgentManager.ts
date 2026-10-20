@@ -29,11 +29,9 @@ import type {
 	SessionBranchTree,
 	SessionMessagePage,
 	SessionRuntimeModelSelection,
-	SessionFileChange,
 	SessionTodoSnapshot,
 } from "../../shared/types";
 import { ipcChannels } from "../../shared/ipc";
-import { collectSessionFileChanges } from "../../shared/fileChanges";
 import { extractPiToolTruncation } from "../../shared/formatToolDetail";
 import { COMPACT_CANCELLED_BY_OWNER, COMPACT_CANCELLED_BY_USER_ABORT, COMPACT_HOOK_REJECT_MAX_MS, COMPACT_OBSERVATION_MAX_AGE_MS, COMPACT_ROUTED_TO_OWNER, COMPACT_USER_ABORT_WINDOW_MS, COMPACT_WAIT_TIMEOUT } from "../../shared/compactFeedback";
 import { PiProcess } from "./PiProcess";
@@ -1186,22 +1184,6 @@ export class AgentManager {
 		const derived = await this.sessionHistoryReader.readDerivedSubagentEntries(sessionPath);
 		if (derived.length === 0) return records;
 		return mergeSubagentSources(records, derived);
-	}
-
-	/**
-	 * 最新一轮文件修改汇总：从会话文件中取「最后一个可展示 user 消息之后」的消息
-	 * 聚合 write/edit/create/patch（与渲染层 TimelineFormat 共用 shared/fileChanges
-	 * 解析，历史/活会话通用）。
-	 *
-	 * 为什么只取最新一轮：composer 上方「修改的文件」横栏的语义是「这次
-	 * 提问后 agent 动了哪些文件」，累计全量会让历史轮次文件长期堆积。
-	 *
-	 * 为什么不再走 readSessionDisplayMessages：它是「读整条活动分支 → 投影 → 再切
-	 * 最后一轮」，近 1 GiB 的会话会因此被全量展开一次（主进程堆直接爆）。
-	 * 现在由 SessionHistoryReader.readFileChangeMessages 做有界读（见其注释）。
-	 */
-	async readSessionFileChanges(sessionPath: string): Promise<SessionFileChange[]> {
-		return collectSessionFileChanges(await this.sessionHistoryReader.readFileChangeMessages(sessionPath, "_viewer"));
 	}
 
 	/**
@@ -5440,7 +5422,10 @@ export class AgentManager {
 		const text = status === "running" ? `${icon} ${toolName}` : `${icon} ${toolName}`;
 		// args 可能来自 event.args（对象）或 existing.meta.args（已序列化的 JSON 字符串）。
 		// 如果是后者（如 tool_execution_end 不带 args），直接复用已有字符串避免 double encoding。
-		const argsMeta = typeof args === "string" ? args : this.messageProjector.truncateForDetail(this.messageProjector.safeJson(args));
+		// 文件类工具（write/edit/create/patch）不适用 8000 截断：它们的参数里带着被写文件内容，
+		// 截断会把「已省略 N 字符」插进 JSON 字符串中间 → 不可解析 → 该文件从「修改的文件」清单
+		// 及重开后的历史视图里静默消失（见 serializeToolArgsForDelivery）。
+		const argsMeta = typeof args === "string" ? args : this.messageProjector.serializeToolArgs(toolName, args);
 		// 提取 ask_question 详情用于渲染提问卡片；支持批量（questions 数组）和单问题两种格式。
 		// pi RPC 返回格式可能为 result.details 嵌套 或 result 顶层（无 details 包装）
 		const askDetails: AskDetailsLike | undefined = (() => {

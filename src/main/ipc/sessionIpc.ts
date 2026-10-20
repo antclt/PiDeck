@@ -12,7 +12,6 @@ import { isRewindRestoreScope } from "../../shared/types/rewind";
 import { canonicalizeSessionPath } from "../../shared/sessionIdentity";
 import { createSessionModelPreference } from "../../shared/modelDisplayName";
 import { modelThinkingLevelOf } from "../../shared/modelThinkingLevels";
-import { collectLatestTurnFileChanges } from "../../shared/fileChanges";
 import { readRuntimePromptTemplateBodies } from "../prompts/runtimeTemplateBodies";
 import type {
 	AvailableModel,
@@ -1116,21 +1115,6 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			agentManager.syncSubagentPerfSpans(liveTarget.agentId, records, { emit: false });
 		}
 		return records;
-	});
-	/**
-	 * 会话级文件修改汇总：只读会话文件「最新一轮」的 write/edit/create/patch
-	 * （有界读，不展开整条活动分支；历史/活会话通用）。
-	 */
-	ipcMain.handle(ipcChannels.sessionsListFileChanges, async (_event, sessionId: string) => {
-		if (typeof sessionId !== "string" || !sessionId) return [];
-		const entry = sessionCatalog.get(sessionId);
-		// ACP 会话无 pi 会话文件，但 tool_call 原始参数里带 filePath/edit 内容：
-		// 从运行时消息投影按「最新一轮」口径聚合（与 pi 的 readFileChangeMessages
-		// 同语义；消息列表有界且在内存，无读盘风险）。2027-03 审计发现 I。
-		if (entry?.backend === "acp") return collectLatestTurnFileChanges(readAcpMessages?.(entry.acpSessionId ?? "") ?? []);
-		// DSH/生图/生视频会话无 pi 会话文件，文件汇总无意义
-		if (!entry?.filePath || entry.backend === "dsh" || entry.backend === "imagegen" || entry.backend === "videogen") return [];
-		return agentManager.readSessionFileChanges(entry.filePath);
 	});
 	/** 会话级 todo 快照：从会话文件 pi-deck-todo custom 条目重建最新计划（历史会话任务 tab）。 */
 	ipcMain.handle(ipcChannels.sessionsListSessionTodo, async (_event, sessionId: string) => {

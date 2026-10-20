@@ -1,29 +1,29 @@
 /**
- * Web 端会话活动监控条（第二批）：文件修改 / 子代理 / 任务清单。
+ * Web 端会话活动监控条：子代理 / 任务清单。
  *
- * 数据与桌面端 SessionFilesStrip / SessionSubagentsStrip / SessionTodoStrip 同源
- * （agentManager.readSessionFileChanges / readSessionSubagentRecords / readSessionTodo，
- * 经 /api/sessions/:id/{file-changes,subagents,todo}）。这里做轻量版呈现：
- * - 文件修改：chips（basename + 次数徽标），点击复制完整相对路径；
+ * 数据与桌面端 SessionSubagentsStrip / SessionTodoStrip 同源
+ * （agentManager.readSessionSubagentRecords / readSessionTodo，
+ * 经 /api/sessions/:id/{subagents,todo}）。这里做轻量版呈现：
  * - 子代理：类型徽标 + 描述 + 状态，可展开查看 result/error；
  * - 任务清单：完成态描边文本（与桌面一致以文本为准，不做交互）。
  * 轮询 5s 且页面不可见时跳过，避免手机后台空耗流量。
+ *
+ * 2027-02：「文件修改」条已移除。桌面端与 Web 端都不再展示会话级文件清单——
+ * 桌面侧由每轮末尾的 chip 行（turn/TurnFileChanges）承担，Web 端没有 TurnRow，
+ * 因此直接不展示（原 /api/sessions/:id/file-changes 端点已随之下线）。
  */
 import { useEffect, useState } from "react";
-import { CheckCircle2, ChevronDown, Circle, FileText, ListTodo, Sparkles } from "lucide-react";
-import type { PiSubagentEntry, SessionFileChange, SessionTodoSnapshot } from "../../../shared/types";
+import { CheckCircle2, ChevronDown, Circle, ListTodo, Sparkles } from "lucide-react";
+import type { PiSubagentEntry, SessionTodoSnapshot } from "../../../shared/types";
 import { t, type TranslationKey } from "@/i18n";
-import { copyTextToClipboard } from "./webClipboard";
-import { fetchSessionFileChanges, fetchSessionSubagents, fetchSessionTodo } from "./webApi";
+import { fetchSessionSubagents, fetchSessionTodo } from "./webApi";
 
 function useSessionActivity(sessionId: string | null) {
-	const [changes, setChanges] = useState<SessionFileChange[]>([]);
 	const [subagents, setSubagents] = useState<PiSubagentEntry[]>([]);
 	const [todo, setTodo] = useState<SessionTodoSnapshot | null>(null);
 
 	useEffect(() => {
 		if (!sessionId) {
-			setChanges([]);
 			setSubagents([]);
 			setTodo(null);
 			return;
@@ -32,9 +32,8 @@ function useSessionActivity(sessionId: string | null) {
 		const load = async () => {
 			if (document.hidden) return; // 后台标签页不轮询（SSE 断流时也无需刷新 strips）
 			try {
-				const [nextChanges, nextSubagents, nextTodo] = await Promise.all([fetchSessionFileChanges(sessionId), fetchSessionSubagents(sessionId), fetchSessionTodo(sessionId)]);
+				const [nextSubagents, nextTodo] = await Promise.all([fetchSessionSubagents(sessionId), fetchSessionTodo(sessionId)]);
 				if (cancelled) return;
-				setChanges(nextChanges);
 				setSubagents(nextSubagents);
 				setTodo(nextTodo);
 			} catch {
@@ -49,7 +48,7 @@ function useSessionActivity(sessionId: string | null) {
 		};
 	}, [sessionId]);
 
-	return { changes, subagents, todo };
+	return { subagents, todo };
 }
 
 const SUB_STATUS_LABEL: Record<PiSubagentEntry["status"], TranslationKey> = {
@@ -90,29 +89,6 @@ function StripShell({ icon, title, count, children }: { icon: React.ReactNode; t
 			</button>
 			{open ? <div className="px-1 pt-0.5 pb-2">{children}</div> : null}
 		</section>
-	);
-}
-
-function WebFileChangesStrip({ changes, onOpenFileChange }: { changes: SessionFileChange[]; onOpenFileChange?: (path: string) => void }) {
-	if (changes.length === 0) return null;
-	return (
-		<StripShell icon={<FileText className="size-3.5" />} title={t("web.filesStripTitle")} count={changes.length}>
-			<ul className="flex flex-wrap gap-1">
-				{changes.slice(0, 30).map((change) => (
-					<li key={change.path}>
-						<button
-							type="button"
-							title={`${change.path} × ${change.count}${onOpenFileChange ? ` · ${t("web.fileChangeOpenDiff")}` : ""}`}
-							onClick={() => (onOpenFileChange ? onOpenFileChange(change.path) : void copyTextToClipboard(change.path))}
-							className="flex items-center gap-1 rounded border border-border-subtle bg-bg-panel px-1.5 py-0.5 text-xs text-text-secondary transition-colors hover:bg-bg-hover"
-						>
-							<span className="max-w-44 truncate">{basename(change.path)}</span>
-							<span className="rounded bg-bg-muted px-1 text-micro tabular-nums text-text-tertiary">{change.count}</span>
-						</button>
-					</li>
-				))}
-			</ul>
-		</StripShell>
 	);
 }
 
@@ -164,15 +140,14 @@ function WebTodoStrip({ todo }: { todo: SessionTodoSnapshot | null }) {
 	);
 }
 
-/** 三条 strip 的组合容器：仅渲染有数据的一条或多条。 */
-export function WebSessionStrips({ sessionId, onOpenFileChange }: { sessionId: string | null; onOpenFileChange?: (path: string) => void }) {
-	const { changes, subagents, todo } = useSessionActivity(sessionId);
+/** strip 组合容器：仅渲染有数据的一条或多条。 */
+export function WebSessionStrips({ sessionId }: { sessionId: string | null }) {
+	const { subagents, todo } = useSessionActivity(sessionId);
 	if (!sessionId) return null;
-	const empty = changes.length === 0 && subagents.length === 0 && (!todo || todo.todos.length === 0);
+	const empty = subagents.length === 0 && (!todo || todo.todos.length === 0);
 	if (empty) return null;
 	return (
-		<div className="flex flex-col border-t border-border-subtle px-3" aria-label={t("web.filesStripTitle")}>
-			<WebFileChangesStrip changes={changes} onOpenFileChange={onOpenFileChange} />
+		<div className="flex flex-col border-t border-border-subtle px-3" aria-label={t("web.subagentsStripTitle")}>
 			<WebSubagentsStrip subagents={subagents} />
 			<WebTodoStrip todo={todo} />
 		</div>

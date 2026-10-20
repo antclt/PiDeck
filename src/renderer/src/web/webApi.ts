@@ -8,7 +8,7 @@
  * - 发送消息走 useChat（/api/chat 流式），不在此处重复实现
  */
 import type { UIMessage } from "ai";
-import type { AvailableModel, AgentBackend, ChatMessage, SessionCommandResult, SessionFileChange, SessionLaunchPreferences, SessionMessagePage, SessionRuntimeInfo, SessionRuntimeTarget, SessionTargetedValue, SessionTodoSnapshot, UpdateSessionRecordInput } from "../../../shared/types";
+import type { AvailableModel, AgentBackend, ChatMessage, SessionCommandResult, SessionLaunchPreferences, SessionMessagePage, SessionRuntimeInfo, SessionRuntimeTarget, SessionTargetedValue, SessionTodoSnapshot, UpdateSessionRecordInput } from "../../../shared/types";
 import type { CommitEntry, GitBranchInfo, GitResourceGroups, ImageContent, PiExtensionSummary, PiSkillLocation, PiSkillSummary, PiSubagentEntry, YaoPromptCategory } from "../../../shared/types";
 import type { AgentUiResponse } from "../../../shared/types";
 import type { WebContextUsage, WebFileNodeLite, WebState } from "./webTypes";
@@ -552,14 +552,7 @@ export async function fetchFileContent(projectId: string, path: string): Promise
 	return (await res.json()) as { content?: string; size?: number; tooLarge?: boolean; truncated?: boolean; binary?: boolean };
 }
 
-// ── 第二批：会话活动监控 strips（文件变更/子代理/todo，与桌面端同源数据） ──
-
-export async function fetchSessionFileChanges(sessionId: string): Promise<SessionFileChange[]> {
-	const res = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/file-changes`);
-	if (!res.ok) throw new Error(`file changes ${res.status}`);
-	const payload = (await res.json()) as { changes?: SessionFileChange[] };
-	return payload.changes ?? [];
-}
+// ── 会话活动监控 strips（子代理/todo，与桌面端同源数据） ──
 
 export async function fetchSessionSubagents(sessionId: string): Promise<PiSubagentEntry[]> {
 	const res = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/subagents`);

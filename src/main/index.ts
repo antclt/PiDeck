@@ -224,7 +224,6 @@ process.on("unhandledRejection", (reason) => {
 	console.error("Unhandled rejection:", reason);
 });
 import { ipcChannels } from "../shared/ipc";
-import { collectLatestTurnFileChanges } from "../shared/fileChanges";
 import { mainProcessT, normalizeMainProcessLocale, type MainProcessLocale, type MainProcessTranslationKey } from "../shared/i18n/mainProcessCopy";
 import { buildSessionOriginKey, canonicalizeSessionPath, toAbsoluteSessionPath } from "../shared/sessionIdentity";
 import type {
@@ -5141,14 +5140,6 @@ app
 			// Web 重发/编辑 fork 化：冷会话（无 runtime）先激活（与桌面 activateRuntime 同源）
 			activateSessionRuntime: (sessionId) => sessionRuntimeCoordinator.activateRuntime(sessionId),
 			// 会话活动监控（第二批 strips）：与桌面 sessionIpc.ts 同源同闸门
-			listSessionFileChanges: (sessionId) => {
-				const entry = sessionCatalog.get(sessionId);
-				// ACP 分支与桌面 sessionIpc 同源（审计发现 I）：运行时投影内存聚合，无读盘
-				if (entry?.backend === "acp") return Promise.resolve(collectLatestTurnFileChanges(acpAgentManager.readMessagesByAcpSessionId(entry.acpSessionId ?? "")));
-				// DSH/生图会话无 pi 会话文件，文件汇总无意义
-				if (!entry?.filePath || entry.backend === "dsh" || entry.backend === "imagegen") return Promise.resolve([]);
-				return agentManager.readSessionFileChanges(entry.filePath);
-			},
 			listSessionSubagents: async (sessionId) => {
 				const entry = sessionCatalog.get(sessionId);
 				if (!entry?.filePath) return [];

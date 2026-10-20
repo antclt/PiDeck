@@ -12,14 +12,14 @@ test("start surface reuses the session bottom composer, not a second input imple
 	assert.match(surface, /<ComposerArea/);
 	assert.match(surface, /import \{ ComposerArea \} from "\.\/ComposerArea"/);
 	assert.match(surface, /import \{ QueuedPromptPanel \} from "\.\/ComposerPanels"/);
-	assert.match(surface, /import \{ SessionFilesStrip \} from "\.\/SessionFilesStrip"/);
 	assert.match(surface, /import \{ SessionGoalStrip \} from "\.\/SessionGoalStrip"/);
 	assert.match(surface, /import \{ SessionSubagentsStrip \} from "\.\/SessionSubagentsStrip"/);
 	assert.match(surface, /import \{ SessionTodoStrip \} from "\.\/SessionTodoStrip"/);
 	assert.match(surface, /<SessionTodoStrip sessionId=\{props\.sessionId\} \/>/);
-	assert.match(surface, /<SessionFilesStrip sessionId=\{props\.sessionId\} \/>/);
 	assert.match(surface, /<SessionSubagentsStrip sessionId=\{props\.sessionId\} \/>/);
 	assert.match(surface, /<SessionGoalStrip sessionId=\{props\.sessionId\} \/>/);
+	// 「修改的文件」已改为每轮末尾的 chip 行；引导页没有轮次，不再挂文件条
+	assert.doesNotMatch(surface, /SessionFilesStrip/);
 	assert.match(surface, /useSessionPaneServices\(\)/);
 	assert.match(surface, /queuedPromptsBySession\[props\.sessionId\]/);
 	assert.match(surface, /<LogoMark size=\{72\} \/>/);

@@ -4,7 +4,6 @@ import { useSessionPaneServices } from "./SessionPaneServices";
 import { ComposerArea } from "./ComposerArea";
 import { QueuedPromptPanel } from "./ComposerPanels";
 import { SessionAcpRestoreStrip } from "./SessionAcpRestoreStrip";
-import { SessionFilesStrip } from "./SessionFilesStrip";
 import { SessionGoalStrip } from "./SessionGoalStrip";
 import { SessionSubagentsStrip } from "./SessionSubagentsStrip";
 import { SessionTodoStrip } from "./SessionTodoStrip";
@@ -65,7 +64,8 @@ export function SessionStartSurface(props: {
 						<>
 							{/* 未激活 ACP 会话：历史存 agent CLI 侧，时间线暂空（非新会话）。 */ <SessionAcpRestoreStrip sessionId={props.sessionId} />}
 							{!statusInSidebar && <SessionTodoStrip sessionId={props.sessionId} />}
-							{!statusInSidebar && <SessionFilesStrip sessionId={props.sessionId} />}
+							{/* 「修改的文件」已改为每轮末尾的 chip 行（TurnFileChanges）；
+							    引导页没有轮次，因此这里不再挂文件条。 */}
 							{!statusInSidebar && <SessionSubagentsStrip sessionId={props.sessionId} />}
 							<SessionGoalStrip sessionId={props.sessionId} />
 						</>

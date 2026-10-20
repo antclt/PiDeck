@@ -2,7 +2,6 @@ import { open, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { ChatMessage, ImageContent, PiSubagentEntry, SessionBranchNode, SessionBranchTree, SessionMessagePage, SessionTodoSnapshot } from "../../shared/types";
 import { parseTodoSnapshotData } from "../../shared/sessionTodo";
-import { isFileChangeToolName } from "../../shared/fileChanges";
 import { deriveToolSubagentEntries } from "./derivedSubagents";
 import { scanJsonlLines } from "../sessions/jsonlLineStream";
 import { readBoundedEntryPage } from "../sessions/boundedEntryPage";
@@ -670,21 +669,6 @@ export class SessionHistoryReader {
 	 */
 	private static readonly MAX_PAGE_WINDOW_ENTRIES = 600;
 
-	/**
-	 * 文件汇总的条目预算（最新一轮 + 无 user 边界的兜底窗口）。
-	 *
-	 * 单轮条目数正常在几十条量级；给 1600 是防御「单轮上千条工具调用」的极端会话——
-	 * 即便被截断，截断的也是同一轮里最旧的条目，横栏语义（本轮改了什么）仍然成立；
-	 * 横栏只是汇总视图，不像时间线那样需要逐条可见。
-	 */
-	private static readonly MAX_FILE_CHANGE_ENTRIES = 1600;
-
-	/**
-	 * 轮次边界探测次数上限：只为跳过「空文本 user 条目」，正常第一条即命中。
-	 * 超出上限时按索引 role 直接认定，避免异常数据把探测变成全量读盘。
-	 */
-	private static readonly FILE_CHANGE_BOUNDARY_PROBES = 4;
-
 	/** 启动加载窗口条目预算（供 AgentManager 对齐窗口口径）。 */
 	static maxLoadWindowEntries(): number {
 		return SessionHistoryReader.MAX_LOAD_WINDOW_ENTRIES;
@@ -746,9 +730,8 @@ export class SessionHistoryReader {
 	 * 危险：`sessionContent === undefined` 分支会把活动分支的每一行都读进内存并
 	 * 逐条投影成显示对象——近 1 GiB 的会话足以顶爆主进程 384MB 老生代堆。
 	 * 只有「确实需要完整时间线」的入口才可以用它；任何「先全量再切片」的用法
-	 * 都必须改成有界读（窗口/分页，或像文件汇总那样按需定向读，
-	 * 见 readFileChangeMessages）。2026-09 的「打开会话即闪退」就是这条路径被
-	 * 「最近一轮修改的文件」借用导致的。
+	 * 都必须改成有界读（窗口/分页）。2026-09 的「打开会话即闪退」就是这条路径被
+	 * 「最近一轮修改的文件」借用导致的（该入口已于 2027-02 随 files tab 一并下线）。
 	 */
 	async readSessionDisplayMessages(sessionPath: string, agentId = "_viewer", sessionContent?: string, options?: SessionDisplayReadOptions): Promise<ChatMessage[]> {
 		// 调用方未把全文放进内存时必须走会 yield 的索引 + offset 读，
@@ -854,84 +837,6 @@ export class SessionHistoryReader {
 		}
 
 		return this.applyContextEdits(this.deps.convertMessages(agentId, finalRaw, activeEntryIds), collectSessionContextEdits(activeBranch));
-	}
-
-	/**
-	 * 轮内过滤：只有 assistant（toolCall 参数在这里）与「可能是文件类工具」的
-	 * toolResult 参与文件汇总，其余条目整行不进内存。
-	 *
-	 * 保守优先：toolName 没捕获到（老索引/异常行）或 role 未知时一律读入——
-	 * 多读只是浪费一次 IO，漏读会让横栏少显示一个被改过的文件。
-	 * 真正的判定仍在聚合侧（getToolDiffTarget 用同一份 FILE_CHANGE_TOOL_RE），
-	 * 这里只是「要不要把这一行读进内存」的预判。
-	 */
-	private static isFileChangeSource(entry: SessionDisplayEntry): boolean {
-		if (entry.role === "assistant") return true;
-		if (entry.role === "toolResult") {
-			// toolName 缺失时投影会回退到 assistant toolCall 的名字，无法预判 → 读。
-			return !entry.toolName || isFileChangeToolName(entry.toolName);
-		}
-		return entry.role === undefined;
-	}
-
-	/**
-	 * 定位「最新一轮」的起点：最后一个「可展示 user 消息」在活动分支里的下标。
-	 *
-	 * 索引里只捕获了 role，而显示投影会丢掉空文本无图片的 user 条目（那种条目在
-	 * 时间线上不存在，渲染层 collectLatestTurnFileChanges 也不会把它当轮次边界）。
-	 * 为对齐这个口径，对候选条目做单行探测（自尾向前，次数有上限）——正常会话
-	 * 第一条就命中，只多读一行。
-	 *
-	 * 返回 -1 表示整条分支没有 user 边界（异常/老数据）。
-	 */
-	private async resolveFileChangeTurnBoundary(index: SessionDisplayIndex, entries: readonly SessionDisplayEntry[]): Promise<number> {
-		let probes = 0;
-		for (let i = entries.length - 1; i >= 0; i -= 1) {
-			if (entries[i].role !== "user") continue;
-			if (probes >= SessionHistoryReader.FILE_CHANGE_BOUNDARY_PROBES) return i;
-			probes += 1;
-			const raw = await this.readIndexedSessionMessages(index.hostPath, [entries[i]]);
-			const projected = this.deps.convertMessages("_viewer", raw, [entries[i].id]);
-			if (projected.some((message) => message.role === "user")) return i;
-		}
-		return -1;
-	}
-
-	/**
-	 * 「修改的文件」横栏的取数原语：**有界**返回最新一轮中可能产出 diff 的显示消息，
-	 * 调用方用 shared/fileChanges 的 collectSessionFileChanges 聚合。
-	 *
-	 * 为什么不能复用 readSessionDisplayMessages：那条路径是「读整条活动分支 →
-	 * 逐条投影成显示对象 → 再切出最后一轮」。对近 1 GiB 的会话，这等于让主进程
-	 * 把整段历史再全量展开一次：读盘字节 = 历史总字节，投影对象再翻一倍，
-	 * 直接顶爆主进程 384MB 老生代堆（用户表现为「一打开就闪退」）。
-	 *
-	 * 三层有界（全部由索引元数据决定，不靠正文）：
-	 * 1. 轮次边界取自索引里已捕获的 role，不为找边界读全量正文；
-	 * 2. 只读边界之后的条目 —— 读盘字节只与「一轮有多大」有关，与历史总长无关；
-	 * 3. 轮内只读可能产出 diff 的条目（assistant + 文件类工具结果），
-	 *    read/bash 等大体积工具结果整行不 materialize。
-	 *
-	 * 边界：没有 user 边界时回退聚合「尾部有界窗口」（见 MAX_FILE_CHANGE_ENTRIES），
-	 * 结果与 collectLatestTurnFileChanges 的「无 user 消息 → 聚合全部」一致，
-	 * 但不会因为异常数据退回全量展开。
-	 *
-	 * 已知取舍：toolCall 参数只在 assistant 行里，若有工具的 toolResult 落在边界之后、
-	 * 而它的 assistant toolCall 落在边界之前（用户在一轮工具执行中插话），该条会因取不到
-	 * 参数而被跳过。代价是多一个文件不出现在汇总横栏，不是数据丢失；为它把边界前的
-	 * assistant 行也读进来不划算（那正是本方法要避免的全量展开）。
-	 */
-	async readFileChangeMessages(sessionPath: string, agentId = "_viewer"): Promise<ChatMessage[]> {
-		const index = await this.getSessionDisplayIndex(sessionPath);
-		const entries = index.activeMessageEntries;
-		const boundary = await this.resolveFileChangeTurnBoundary(index, entries);
-		const scope = boundary < 0 ? entries.slice(Math.max(0, entries.length - SessionHistoryReader.MAX_FILE_CHANGE_ENTRIES)) : entries.slice(boundary + 1);
-		const readable = scope.filter((entry) => SessionHistoryReader.isFileChangeSource(entry));
-		if (readable.length === 0) return [];
-		const rawMessages = await this.readIndexedSessionMessages(index.hostPath, readable);
-		// isFileChangeSource 是「要不要读进内存」的保守预判（role 未知也读），
-		// 但 entryId 槽位必须严格按角色过滤：非角色条目会占位导致后续条目 id 错位。
-		return this.deps.convertMessages(agentId, rawMessages, roleMessageEntryIds(readable));
 	}
 
 	/**

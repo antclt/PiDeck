@@ -31,6 +31,7 @@ import { RetryStep } from "./RetryStep";
 import { ErrorStep } from "./ErrorStep";
 import { ToolStep } from "./ToolStep";
 import { ExtensionEntryStep } from "./ExtensionEntryStep";
+import { TurnFileChanges } from "./TurnFileChanges";
 import { useTurnExecution } from "./useTurnExecution";
 import type { DiffFileHandler } from "../ToolCallComponents";
 
@@ -436,6 +437,12 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 						/>
 					</div>
 				))}
+
+				{/* 本轮产物：修改的文件 chip 行（左缩进对齐正文列，虚线分隔）。
+				    位置对齐 Proma：正文之后、操作栏之前——「改了哪些文件」属于本轮结论，
+				    而非下一轮的输入（旧实现在 composer 上方的常驻卡片里，与轮次脱节）。
+				    流式中不渲染：文件列表还在长，逐条冒出来会让正文区持续抖动。 */}
+				<TurnFileChanges run={run} streaming={isRunLive || Boolean(props.isStreaming)} onOpenFile={props.onOpenFile} onDiffFile={props.onDiffFile} />
 
 				{/* 操作栏 + 尾部耗时/模型：合并为同一行，耗时与模型排在行末（少占一行高度）。
 				    耗时：回复生成中由 LiveDuration 实时计时（100ms 连续跳动，用户视线在底部），

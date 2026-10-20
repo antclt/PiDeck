@@ -7,6 +7,7 @@ import {
 	safeJson as sharedSafeJson,
 	truncateDetailWithMeta as truncateSharedDetailWithMeta,
 	truncateForDetail as truncateSharedForDetail,
+	serializeToolArgsForDelivery as serializeSharedToolArgs,
 	type ToolDetailStatus,
 } from "../../shared/formatToolDetail";
 import { extractMessageText } from "./messageContent";
@@ -233,7 +234,7 @@ export class AgentMessageProjector {
 									toolCallId,
 									...(startedAt !== undefined ? { startedAt } : {}),
 									...(durationMs !== undefined ? { durationMs } : {}),
-									args: this.truncateForDetail(this.safeJson(historicalCall?.args)),
+									args: this.serializeToolArgs(toolName, historicalCall?.args),
 									result: this.truncateForDetail(this.extractToolResultText(result) || this.safeJson(result)),
 									isError,
 									// pi 侧截断（与 truncated 的展示层截断区分）：历史会话回看时也能拿到完整输出路径
@@ -332,6 +333,14 @@ export class AgentMessageProjector {
 	/** 对超长工具文本做首尾截断，保留头部和尾部以兼顾开头信息和错误堆栈。 */
 	truncateForDetail(text: unknown): string {
 		return truncateSharedForDetail(text, this.deps.translate);
+	}
+
+	/**
+	 * 工具参数 → meta.args 字符串（文件类工具不适用 8000 截断，见 serializeToolArgsForDelivery）。
+	 * 实时 upsert 与历史投影必须共用本入口，否则重开软件后会与实时视图不一致。
+	 */
+	serializeToolArgs(toolName: string, args: unknown): string {
+		return serializeSharedToolArgs(toolName, args, this.deps.translate);
 	}
 
 	/**
