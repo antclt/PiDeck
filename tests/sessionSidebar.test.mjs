@@ -535,7 +535,9 @@ test("activity page keeps failed/stopped agents visible (error/closed)", () => {
 	// 因此不能按 isLiveRuntimeStatus 过滤——否则 error/closed 的失败会话在活动页消失。
 	assert.doesNotMatch(activeTree, /isLiveRuntimeStatus\(agent\.status\)/);
 	// 终态 Agent 仍以状态点区分（error=红点），行主体与 live 行共用同一渲染路径。
-	assert.match(activeTree, /sessionStatusDotClass\(agent\.status\)/);
+	// 色点走共享 SidebarStatusDot（状态→颜色仍是 sessionStatusDotClass，见 agentListDisplay）；
+	// 组件只在「没有色点语义」时整格不渲染，closed/detached 不再留空占位（#390）。
+	assert.match(activeTree, /<SidebarStatusDot status=\{agent\.status\} \/>/);
 	// 右键/重启入口不区分 live：失败会话也能从活动页菜单重启。
 	assert.match(activeTree, /openMenu\(\{ kind: "agent", agentId: agent\.id/);
 });

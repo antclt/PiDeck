@@ -1,12 +1,13 @@
-import { HatGlasses, Maximize2, Target } from "lucide-react";
-import { useAtomValue } from "jotai";
+import { HatGlasses, Maximize2, Search, Target } from "lucide-react";
+import { useAtomValue, useSetAtom } from "jotai";
 import { selectAtom } from "jotai/utils";
 import { useMemo, useState, type RefObject } from "react";
 import type { AgentRuntimeState } from "../../../../shared/types";
-import { sessionRecordByIdAtomFamily, sessionRuntimeBySessionIdAtomFamily, sessionSendStateByIdAtom, projectByIdAtomFamily } from "../../atoms";
+import { sessionRecordByIdAtomFamily, sessionRuntimeBySessionIdAtomFamily, sessionSendStateByIdAtom, projectByIdAtomFamily, requestSessionFindAtom } from "../../atoms";
 import { isUserFacingSessionStart } from "../../hooks/useSessionTimelineController";
 import { t } from "../../i18n";
 import { displayProjectDirectoryName } from "../../rendererUtils";
+import { supportsSessionFind } from "../../utils/sessionFindSupport";
 import { Button } from "../ui-shadcn/button";
 import { DshAgentPresetControl } from "./DshAgentPresetControl";
 import { DshAgentToolsPanel } from "./DshAgentToolsPanel";
@@ -77,6 +78,10 @@ export function SessionHeader(props: SessionHeaderProps) {
 	const projectName = props.projectName ?? (project ? displayProjectDirectoryName(project) : undefined);
 	// 会话标题：分屏优先用 paneTitle，其次 legacy title / session 模式记录标题。
 	const title = props.paneTitle ?? (sessionMode ? session?.title?.trim() || t("app.chatProject") : props.title);
+	// 会话内查找入口：与浮层共用 supportsSessionFind 判据（仅 pi 且已落盘），
+	// 点击只往会话级请求计数里加一次，真正打开/聚焦由 ChatSessionPane 的浮层处理。
+	const canFindInSession = supportsSessionFind(session);
+	const requestSessionFind = useSetAtom(requestSessionFindAtom);
 
 	const actions = (
 		<div ref={props.embedded ? props.headerRef : undefined} className={`chat-header-actions flex min-w-0 items-center justify-end gap-1.5${props.embedded ? " h-7 w-auto shrink-0" : ""}${isStarting ? " loading" : ""}`}>
@@ -87,6 +92,21 @@ export function SessionHeader(props: SessionHeaderProps) {
 			)}
 			{props.embedded && session?.backend === "dsh" && <DshAgentPresetControl sessionId={sessionId} />}
 			{sessionMode && session?.backend === "dsh" && <DshToolsButton sessionId={sessionId} />}
+			{/* 放大镜入口常驻头部工具条（与运行控制/「⋯」同列），不再浮在消息正文上：
+			    后者既压住正文、在自定义标题栏下还会落到窗口控件行（用户反馈）。 */}
+			{canFindInSession && (
+				<Button
+					type="button"
+					variant="ghost"
+					size="icon-sm"
+					className="h-7 w-7 min-w-0 rounded-md border-0 bg-transparent px-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+					title={t("sessionFind.open")}
+					aria-label={t("sessionFind.open")}
+					onClick={() => requestSessionFind(sessionId)}
+				>
+					<Search className="size-3.5" aria-hidden="true" />
+				</Button>
+			)}
 			{/* 原 Tab 栏「⋯」已并入这里：运行控制 + 会话操作对所有后端统一入口。 */}
 			{props.runControl || props.menu ? <SessionActionsControl runControl={props.runControl} menu={props.menu} /> : null}
 		</div>
