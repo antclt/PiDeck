@@ -106,3 +106,13 @@ test("目录为空时退回已加载大纲（非 pi 后端）", async () => {
 	const loaded = [{ id: "m1", role: "user", title: "只有已加载", time: "10:00" }];
 	assert.equal(mergeOutlineRailItems(loaded, []).length, 1);
 });
+
+test("窗口外的会话开头（初始提示词）不被裁掉", () => {
+	const records = [{ id: "sys", kind: "systemPrompt", lane: "input", turnIndex: 0, title: "初始提示词", summary: "initial", startedAt: 0 }, ...makeRecords({ turns: 40, perTurn: 30 })];
+	const windowed = buildTrajectoryWindow(records);
+	assert.ok(
+		windowed.records.some((record) => record.id === "sys"),
+		"初始提示词必须留在账本开头",
+	);
+	assert.ok(windowed.records.length <= TRAJECTORY_TURN_COHORT * TRAJECTORY_TURN_STEP_LIMIT + TRAJECTORY_EXTRA_RECORD_BUDGET);
+});

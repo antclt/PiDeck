@@ -50,6 +50,10 @@ export function buildTrajectoryWindow(records: readonly TrajectoryRecord[], opti
 	}
 	const kept: TrajectoryRecord[] = [];
 	let trimmed = false;
+	// 窗口外的「会话开头」必须保留：初始提示词、会话头这类记录 turnIndex 在窗口之前，
+	// 但它们不是「更早的历史」，而是账本的起点（否则会话开头看不到系统提示词）。
+	const head = records.filter((record) => record.turnIndex < startTurn).slice(0, TRAJECTORY_EXTRA_RECORD_BUDGET);
+	kept.push(...head);
 	for (const [, bucket] of [...byTurn.entries()].sort((left, right) => left[0] - right[0])) {
 		const windowed = boundMountedSteps(bucket, stepLimit);
 		if (windowed.hiddenCount > 0) trimmed = true;
