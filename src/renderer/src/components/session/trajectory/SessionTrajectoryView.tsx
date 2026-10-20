@@ -180,9 +180,14 @@ export function SessionTrajectoryView(props: {
 	const visible = useMemo(() => filterRecordsByRange(model.records, range), [model.records, range]);
 	const selected = visible.find((record) => record.id === selectedId) ?? model.records.find((record) => record.id === selectedId);
 
-	const refreshNow = useCallback(() => {
-		if (model.turns.some((turn) => turn.inFlight)) setNow(Date.now());
-	}, [model.turns]);
+	// 活动时长用低频时钟推进：只在本轮进行中才起 1 秒定时器，静态历史完全不动。
+	// 为什么不能在 hover 时刷新 now：轨迹模型依赖 now，悬停会把整份账本重算一遍。
+	const hasInFlight = model.turns.some((turn) => turn.inFlight);
+	useEffect(() => {
+		if (!hasInFlight) return;
+		const timer = setInterval(() => setNow(Date.now()), 1000);
+		return () => clearInterval(timer);
+	}, [hasInFlight]);
 
 	// 卸载前把当前滚动位置写回 store（切 tab 后组件卸载，位置靠 store 兜底）。
 	useEffect(() => {
@@ -230,7 +235,7 @@ export function SessionTrajectoryView(props: {
 					</button>
 				) : null}
 			</div>
-			<TrajectoryOverview records={model.records} domainStart={model.domainStart} domainEnd={model.domainEnd} range={range} selectedId={selected?.id} onSelect={setSelectedId} onRangeChange={setRange} onHoverTick={refreshNow} />
+			<TrajectoryOverview records={model.records} domainStart={model.domainStart} domainEnd={model.domainEnd} range={range} selectedId={selected?.id} onSelect={setSelectedId} onRangeChange={setRange} />
 			{props.sourceSession ? (
 				<div className="flex shrink-0 items-center gap-1.5 border-b border-border/60 px-3 py-1 text-caption text-muted-foreground">
 					<CornerUpLeft size={12} className="shrink-0" aria-hidden="true" />
@@ -248,7 +253,7 @@ export function SessionTrajectoryView(props: {
 	);
 }
 
-function TrajectoryOverview(props: { records: TrajectoryRecord[]; domainStart: number; domainEnd: number; range?: TrajectoryTimeRange; selectedId?: string; onSelect: (id: string) => void; onRangeChange: (range: TrajectoryTimeRange | undefined) => void; onHoverTick: () => void }) {
+function TrajectoryOverview(props: { records: TrajectoryRecord[]; domainStart: number; domainEnd: number; range?: TrajectoryTimeRange; selectedId?: string; onSelect: (id: string) => void; onRangeChange: (range: TrajectoryTimeRange | undefined) => void }) {
 	const trackRef = useRef<HTMLDivElement | null>(null);
 	const dragRef = useRef<{ x: number; start: number } | undefined>(undefined);
 	const [draft, setDraft] = useState<TrajectoryTimeRange | undefined>(undefined);
@@ -273,7 +278,6 @@ function TrajectoryOverview(props: { records: TrajectoryRecord[]; domainStart: n
 	};
 
 	const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-		props.onHoverTick();
 		const drag = dragRef.current;
 		if (!drag) return;
 		if (Math.abs(event.clientX - drag.x) < MIN_DRAG_PX && !draft) return;

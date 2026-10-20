@@ -7,6 +7,7 @@ import { isModelTraceLogData } from "../../../shared/types/rpcLog";
 import { prependSessionHistoryPageAtom, prependSessionMessagePageAtom, sessionMessageCacheBySessionIdAtomFamily, sessionRecordByIdAtomFamily, sessionRuntimeBySessionIdAtomFamily, type SessionMessageCacheEntry, type SessionRuntimeViewState } from "../atoms";
 import { sessionHistoryUnavailableState } from "../utils/sessionHistoryAvailability";
 import { isLiveRuntimeStatus } from "../utils/sessionCommands";
+import { isSessionTurnRunning } from "../utils/sessionActivityClock";
 import type { TrajectoryModelTraceSummary } from "../components/session/trajectory/buildTrajectory";
 
 /** 与时间线 runtime 翻页对齐：一次补 3 轮，复用同一份消息缓存。 */
@@ -38,27 +39,66 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 	const loadSequenceRef = useRef(0);
 	const processSequenceRef = useRef(0);
 	const traceSequenceRef = useRef(0);
+	const processVersionRef = useRef<string | undefined>(undefined);
+
+	// 事实刷新的触发条件：只认「回合边界 / 压缩状态 / 运行代次」这类语义事件。
+	// 为什么不再挂 cachedEntry.revision/updatedAt：它们随 token flush（~20 次/秒）变化，
+	// 会把轨迹事实读变成高频重拉；事实一次回合只变几次，事件驱动 + 5 秒兜底足够。
+	const turnRunning = isSessionTurnRunning(runtime?.state, runtime?.status);
+	const compacting = runtime?.state?.isCompacting === true;
+	const factsTriggerKey = [sessionId ?? "", runtime?.agentId ?? "", runtime?.runtimeGeneration ?? 0, turnRunning ? 1 : 0, compacting ? 1 : 0].join("|");
 
 	useEffect(() => {
 		if (!sessionId) {
 			setProcessEvents([]);
+			setProcessCoverage(undefined);
+			processVersionRef.current = undefined;
 			return;
 		}
-		const sequence = ++processSequenceRef.current;
-		void desktopApi.sessions
-			.readProcessEvents(sessionId)
-			.then((result) => {
-				if (processSequenceRef.current !== sequence) return;
-				setProcessEvents(result.events);
-				setProcessCoverage(result.coverage);
-			})
-			.catch(() => {
-				if (processSequenceRef.current === sequence) {
-					setProcessEvents([]);
-					setProcessCoverage(undefined);
-				}
-			});
-	}, [sessionId, cachedEntry?.revision, cachedEntry?.updatedAt]);
+		let disposed = false;
+		let inflight = false;
+		let pending = false;
+		// 作用域绑定：切会话/换代后旧响应一律作废（不等下一次请求才作废）。
+		const scope = ++processSequenceRef.current;
+
+		const run = () => {
+			if (disposed) return;
+			if (inflight) {
+				// 在途只留一个待刷新标记，不建无界队列。
+				pending = true;
+				return;
+			}
+			inflight = true;
+			void desktopApi.sessions
+				.readProcessEvents(sessionId)
+				.then((result) => {
+					if (disposed || processSequenceRef.current !== scope) return;
+					// 相同内容版本保持引用稳定：不触发下游轨迹模型重建。
+					setProcessEvents((previous) => (processVersionRef.current === result.version ? previous : result.events));
+					processVersionRef.current = result.version;
+					setProcessCoverage(result.coverage);
+				})
+				.catch(() => {
+					// 失败保留上一次成功数据，不清空后冒充「没有事实」。
+				})
+				.finally(() => {
+					inflight = false;
+					if (pending && !disposed) {
+						pending = false;
+						run();
+					}
+				});
+		};
+
+		run();
+		// 兜底只在会话活动时跑（轨迹面板挂载即「可见」，静态历史不轮询）。
+		const timer = turnRunning || compacting ? setInterval(run, 5000) : undefined;
+		return () => {
+			disposed = true;
+			if (timer) clearInterval(timer);
+			processSequenceRef.current += 1;
+		};
+	}, [factsTriggerKey, sessionId, turnRunning, compacting]);
 
 	// 模型请求快照（model-trace）：pi 会话的账本补充数据源（拉取 effect 在 messages
 	// 之后声明，重拉触发器之一是 messages.length）。DSH 请求体不走 pi 桥，无 trace。
@@ -110,7 +150,8 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 			.catch(() => {
 				if (traceSequenceRef.current === sequence) setModelTraces([]);
 			});
-	}, [sessionId, isDshSession, runtime?.status, runtimeAgentId, runtime?.runtimeGeneration, lastKnownAgentId, messages.length]);
+		// 与事实同口径：回合边界/代次变化才重拉，不跟 token 或消息条数刷新。
+	}, [factsTriggerKey, sessionId, isDshSession, runtime?.status, runtimeAgentId, runtime?.runtimeGeneration, lastKnownAgentId]);
 
 	const diskPage = cachedEntry?.source === "disk" ? cachedEntry.page : undefined;
 	const runtimeHistory = cachedEntry?.source === "runtime" ? cachedEntry.history : undefined;
