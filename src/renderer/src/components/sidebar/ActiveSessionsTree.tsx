@@ -161,9 +161,10 @@ export function ActiveSessionsTree(props: { controller: SidebarController; actio
 									<SidebarStatusDot status={agent.status} />
 									<div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7">
 										<div className="conversation-title flex min-w-0 items-center gap-1.5">
+											{/* 后端身份标放标题左侧（与顶部 Tab 一致，用户反馈原先在标题右侧）。 */}
+											{agent.backend === "acp" ? <AcpBackendMark acpToolId={record?.acpToolId} /> : <SessionBackendMark backend={agent.backend} />}
 											{/* 选中背景仍保留，聚焦行也允许 hover 查看完整标题 */}
 											<TitleScrollText text={displayTitle} className="font-medium" />
-											{agent.backend === "acp" ? <AcpBackendMark acpToolId={record?.acpToolId} /> : <SessionBackendMark backend={agent.backend} />}
 											{/* 待确认标记：该会话正在等用户回答 ask，与项目行徽章共用同一组件 */}
 											{pendingAsk && <PendingAskBadge count={1} />}
 											{record?.sideTask && <SideTaskMark />}

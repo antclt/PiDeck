@@ -159,10 +159,11 @@ function RecentSessionRowItem(props: { row: RecentSessionRow; projectName?: stri
 							{/* 关闭/解绑后 runtime 仍在位（closed/detached）：不能只判 runtime，否则空色点 + gap-1.5
 							    会在标题左侧留下一截空白（#390「状态小点占位没释放」）。无状态时整格不渲染。 */}
 							{props.actions.sessions.simpleNavigation ? <SessionActivityIndicator status={runtime?.status} sessionId={sessionId} /> : <SidebarStatusDot status={runtime?.status} />}
-							<TitleScrollText text={displayTitle} className={runtime ? "font-medium" : "font-normal text-muted-foreground/90"} />
+							{/* 后端/来源身份标放标题左侧（与顶部 Tab 一致，用户反馈原先在标题右侧）。 */}
 							{row.session.backend === "acp" ? <AcpBackendMark acpToolId={row.session.acpToolId} /> : (row.session.backend === "dsh" || row.session.backend === "imagegen") && <SessionBackendMark backend={row.session.backend} />}
-							{pendingAsk && <PendingAskBadge count={1} />}
 							{row.session.source && row.session.source !== "pi" && <SessionSourceBadge source={row.session.source} />}
+							<TitleScrollText text={displayTitle} className={runtime ? "font-medium" : "font-normal text-muted-foreground/90"} />
+							{pendingAsk && <PendingAskBadge count={1} />}
 							{row.session.channel && <SessionChannelMark channel={row.session.channel} />}
 							{row.session.sideTask && <SideTaskMark />}
 							{/* 相对时间常显，hover 行时让位给右侧「⋯」按钮（与上方活动行一致）。

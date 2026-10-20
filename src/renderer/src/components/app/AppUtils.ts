@@ -433,7 +433,7 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 	 *
 	 * 用途：无触发消息的回合边界。pi 每轮最后一条 assistant 带 stopReason="stop"
 	 * （中间消息为 toolUse，见 AgentMessageProjector 的 provider 归一化），所以 run 末尾
-	 * 已出现 stop 又来了新的 assistant/tool/thinking，就说明新回合已经开始。
+	 * 已出现 stop 又来了新的 assistant/tool/thinking/扩展输出，就说明新回合已经开始。
 	 *
 	 * 典型场景：父回合已结束，后台子代理完成时 pi 用 sendCustomMessage(triggerTurn)
 	 * 唤醒父会话；（a）唤醒消息是 role="custom"，旧实现整条丢弃 —— 既不可见也没有
@@ -521,7 +521,12 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 			// 扩展输出条目（appendEntry 投影卡）：与重试/错误同策略收进当前 run 的过程序列，
 			// 折进过程组（用户决策 2026-10：不单独成块）。先冲刷未成组的工具/思考保证时序；
 			// 连续到达的条目合进同一个组员（时间线里渲染为一组可展开行）。
+			// 已收尾回合（最后一条 assistant 带 stop）之后才到的扩展输出不属于该回合：
+			// 继续吸收会让它成为 run 的收尾条目，前面的最终回答因此被降级成中间回答折叠
+			// （bili 的 acp-nudge 等尾随通知的实际表现，2026-10 用户反馈）。先按回合边界
+			// 冲刷，随后 currentRun 为空 → 走下面的独立条目兜底，输出卡排在回答之后。
 			// 边界：run 尚未开始（会话开头/两回合之间的条目）保持独立条目兜底，不硬造空 run。
+			flushRunForTurnBoundary();
 			flushTools();
 			if (pendingRun && currentRun.length === 0) {
 				currentRun.push(...pendingRun);

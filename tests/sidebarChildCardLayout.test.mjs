@@ -12,6 +12,7 @@ const styles = readRendererStyles();
 const titleScrollText = readFileSync("src/renderer/src/components/sidebar/TitleScrollText.tsx", "utf8");
 const sessionTree = readFileSync("src/renderer/src/components/sidebar/SessionTree.tsx", "utf8");
 const activeSessionsTree = readFileSync("src/renderer/src/components/sidebar/ActiveSessionsTree.tsx", "utf8");
+const recentSessionSection = readFileSync("src/renderer/src/components/sidebar/RecentSessionsSection.tsx", "utf8");
 const dshSearchResults = readFileSync("src/renderer/src/components/sidebar/DshSearchResults.tsx", "utf8");
 const projectTree = readFileSync("src/renderer/src/components/sidebar/ProjectTree.tsx", "utf8");
 const agentListDisplay = readFileSync("src/renderer/src/agentListDisplay.ts", "utf8");
@@ -153,4 +154,32 @@ test("session tabs stay outside SessionView; header is standalone in pane", () =
 	// header 不再接收 widget chips（2026-08 移除：待办统一走输入框上方常驻条）
 	assert.doesNotMatch(sessionView, /widgetChips/);
 	assert.doesNotMatch(sessionView, /embedded/);
+});
+
+/**
+ * 身份标位置契约（用户反馈）：会话列表里 agent/backend logo 原先在标题右侧，
+ * 要求与顶部 Tab 一致放在标题左侧。源码顺序断言（空白容忍），防止后续重排又挪回去。
+ */
+test("sidebar session rows put backend/source marks left of the title (like tabs)", () => {
+	const indexOf = (source, pattern, label) => {
+		const index = source.search(pattern);
+		assert.ok(index >= 0, label);
+		return index;
+	};
+	const assertMarkBeforeTitle = (source, markPattern, titlePattern, label) => {
+		const mark = indexOf(source, markPattern, label + "：缺少身份标");
+		const title = indexOf(source, titlePattern, label + "：缺少标题组件");
+		assert.ok(mark < title, label + "：agent logo 必须在标题左侧（与顶部 Tab 一致）");
+	};
+
+	// 项目树：运行中 Agent 行 / 历史会话行 / 草稿行 / 子会话行
+	assertMarkBeforeTitle(sessionTree, /<AcpBackendMark acpToolId=\{agentSession\?\.acpToolId\}/, /<TitleScrollText text=\{displayTitle\}/, "SessionTree 运行中 Agent 行");
+	assertMarkBeforeTitle(sessionTree, /<AcpBackendMark acpToolId=\{child\.session\.acpToolId\}/, /<TitleScrollText text=\{child\.session\.name/, "SessionTree 历史会话行");
+	assertMarkBeforeTitle(sessionTree, /<AcpBackendMark acpToolId=\{session\.acpToolId\}/, /<TitleScrollText text=\{session\.title/, "SessionTree 草稿行");
+	assertMarkBeforeTitle(sessionTree, /\{badge\}/, /<TitleScrollText text=\{title\} \/>/, "SessionTree 子会话行");
+	// 历史会话行的来源徽标（codex 等）同样在标题左侧
+	assertMarkBeforeTitle(sessionTree, /<SessionSourceBadge source=\{child\.session\.source\}/, /<TitleScrollText text=\{child\.session\.name/, "SessionTree 历史会话来源标");
+	// 活动树与最近会话区
+	assertMarkBeforeTitle(activeSessionsTree, /<AcpBackendMark acpToolId=\{record\?\.acpToolId\}/, /<TitleScrollText text=\{displayTitle\}/, "ActiveSessionsTree 活动行");
+	assertMarkBeforeTitle(recentSessionSection, /<AcpBackendMark acpToolId=\{row\.session\.acpToolId\}/, /<TitleScrollText text=\{displayTitle\}/, "RecentSessionsSection 最近会话行");
 });
