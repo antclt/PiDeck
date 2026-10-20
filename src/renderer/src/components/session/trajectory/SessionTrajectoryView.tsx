@@ -170,14 +170,19 @@ export function SessionTrajectoryView(props: {
 	// 轨迹账本滚动容器的 ref + 记忆位：本次挂载是否已为当前会话恢复过滚动位置。
 	const ledgerScrollRef = useRef<HTMLDivElement | null>(null);
 	const scrollRestoredForRef = useRef<string | undefined>(undefined);
-	const model = useMemo(
-		() =>
-			buildTrajectory(props.messages, now, {
-				processEvents: props.processEvents,
-				modelTraces: props.modelTraces,
-			}),
-		[props.messages, props.processEvents, props.modelTraces, now],
-	);
+	const model = useMemo(() => {
+		const started = performance.now();
+		const built = buildTrajectory(props.messages, now, {
+			processEvents: props.processEvents,
+			modelTraces: props.modelTraces,
+		});
+		if (import.meta.env.DEV) {
+			DEV_METRICS.buildCalls = Number(DEV_METRICS.buildCalls ?? 0) + 1;
+			DEV_METRICS.lastBuildMs = Math.round((performance.now() - started) * 10) / 10;
+			DEV_METRICS.records = built.records.length;
+		}
+		return built;
+	}, [props.messages, props.processEvents, props.modelTraces, now]);
 	const visible = useMemo(() => filterRecordsByRange(model.records, range), [model.records, range]);
 	// 渲染窗口：只挂载尾部 3 轮（单轮 ≤120 条），挂载量与会话长度脱钩（计划 §5）。
 	// 滚到顶部再放 3 轮；选中更早的记录时自动扩到它所在轮，概览点击才能落到可见区。
@@ -194,6 +199,14 @@ export function SessionTrajectoryView(props: {
 	const windowed = useMemo(() => buildTrajectoryWindow(visible, { turnCount: windowTurnCount }), [visible, windowTurnCount]);
 	// 滚动事件会连发：200ms 内只放一轮，避免一次手势把预算打穿。
 	const lastExpandRef = useRef(0);
+	useEffect(() => {
+		if (!import.meta.env.DEV) return;
+		DEV_METRICS.sessionId = props.sessionId;
+		DEV_METRICS.mountedRecords = windowed.records.length;
+		DEV_METRICS.totalRecords = model.records.length;
+		DEV_METRICS.mountedTurns = model.turns.length;
+		(globalThis as { __pideckTrajectoryMetrics?: Record<string, unknown> }).__pideckTrajectoryMetrics = DEV_METRICS;
+	});
 	const requestEarlier = useCallback(() => {
 		const now = Date.now();
 		if (now - lastExpandRef.current < 200) return;
@@ -291,6 +304,9 @@ function TrajectoryOverview(props: { records: TrajectoryRecord[]; domainStart: n
 		return () => observer.disconnect();
 	}, []);
 	const ticks = useMemo(() => bucketOverviewTicks(props.records, { lanes: LANE_ORDER, width: trackWidth, selectedId: props.selectedId }), [props.records, props.selectedId, trackWidth]);
+	useEffect(() => {
+		if (import.meta.env.DEV) DEV_METRICS.overviewTicks = ticks.length;
+	}, [ticks.length]);
 
 	const timeAt = useCallback(
 		(clientX: number): number => {
@@ -415,6 +431,12 @@ function TrajectoryOverview(props: { records: TrajectoryRecord[]; domainStart: n
 		</div>
 	);
 }
+
+/**
+ * 冒烟探针（开发构建专用）：只写内存对象，不进生产、不写日志。
+ * DevTools 里读 `window.__pideckTrajectoryMetrics` 即可核对真实挂载量与重建次数。
+ */
+const DEV_METRICS: Record<string, unknown> = {};
 
 function turnDurationLabel(turn: { inFlight: boolean; durationMs?: number; startedAt: number } | undefined, now: number): string | undefined {
 	if (!turn) return undefined;
