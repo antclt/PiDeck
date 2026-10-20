@@ -73,10 +73,12 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 				.readProcessEvents(sessionId)
 				.then((result) => {
 					if (disposed || processSequenceRef.current !== scope) return;
-					// 相同内容版本保持引用稳定：不触发下游轨迹模型重建。
-					setProcessEvents((previous) => (processVersionRef.current === result.version ? previous : result.events));
-					processVersionRef.current = result.version;
-					setProcessCoverage(result.coverage);
+					// 兼容旧形状（数组）：主进程/预加载任一未更新时不能把事件变成 undefined。
+					const events = Array.isArray(result) ? result : (result?.events ?? []);
+					const version = Array.isArray(result) ? "" : (result?.version ?? "");
+					setProcessEvents((previous) => (processVersionRef.current === version ? previous : events));
+					processVersionRef.current = version;
+					setProcessCoverage(Array.isArray(result) ? undefined : result?.coverage);
 				})
 				.catch(() => {
 					// 失败保留上一次成功数据，不清空后冒充「没有事实」。

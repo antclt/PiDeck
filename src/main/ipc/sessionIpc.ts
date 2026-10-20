@@ -1245,7 +1245,16 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		if (!entry?.filePath) return unavailable("unavailable");
 		if (readSessionFacts) {
 			// 索引候选 + 小批读 + 内容版本缓存：文件未变时不读正文（见 trajectoryFactsReader）。
-			return readSessionFacts(entry.filePath);
+			try {
+				return await readSessionFacts(entry.filePath);
+			} catch (error) {
+				appLogger.warn("trajectory", "Read session facts failed", {
+					sessionId,
+					filePath: entry.filePath,
+					error: error instanceof Error ? error.message : String(error),
+				});
+				return unavailable("unavailable");
+			}
 		}
 		// 无索引入口时回退流式扫描（有界尾巴，仍受事件保留上限约束）。
 		return { events: await parseSessionProcessEventsFromFile(entry.filePath), version: "", coverage: { fromStart: true, chainComplete: true, readComplete: true, eventsTrimmed: false } };

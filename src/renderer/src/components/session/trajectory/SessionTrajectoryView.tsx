@@ -234,6 +234,7 @@ export function SessionTrajectoryView(props: {
 		DEV_METRICS.totalRecords = model.records.length;
 		DEV_METRICS.mountedTurns = model.turns.length;
 		DEV_METRICS.processEvents = props.processEvents?.length ?? 0;
+		DEV_METRICS.processEventsType = Array.isArray(props.processEvents) ? "array" : typeof props.processEvents;
 		DEV_METRICS.processRecords = model.records.filter((record) => record.lane === "process").length;
 		(globalThis as { __pideckTrajectoryMetrics?: Record<string, unknown> }).__pideckTrajectoryMetrics = DEV_METRICS;
 	});

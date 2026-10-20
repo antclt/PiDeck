@@ -43,7 +43,7 @@ test("单在途 + 待刷新标记 + 作用域作废", () => {
 });
 
 test("相同事实版本保持渲染引用，失败不清空旧数据", () => {
-	assert.match(hook, /processVersionRef\.current\s*===\s*result\.version\s*\?\s*previous\s*:\s*result\.events/);
+	assert.match(hook, /processVersionRef\.current\s*===\s*version\s*\?\s*previous\s*:\s*events/);
 	const catchBlock = hook.slice(hook.indexOf("readProcessEvents"));
 	assert.doesNotMatch(catchBlock.slice(0, catchBlock.indexOf("factsTriggerKey") > 0 ? catchBlock.indexOf("factsTriggerKey") : 600), /setProcessEvents\(\[\]\)/);
 });
