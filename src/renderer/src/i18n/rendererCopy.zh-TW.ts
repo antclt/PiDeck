@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 0f069e78c688f2602e7345fcd835aac4ec6e180a89053209c5e4c6af729e1cc8（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 166bfa83cb11d71bc369ba92c760ea6e666b7ede331dd8cf48ed7a0ad923e6da（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5871,6 +5871,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"session.trajectory.turn": "第 {index} 輪",
 	"session.trajectory.empty": "當前範圍沒有記錄",
 	"session.trajectory.noSession": "開啟一個會話後即可檢視思考軌跡",
+	"session.trajectory.foldAll": "全部摺疊",
+	"session.trajectory.unfoldAll": "全部展開",
 	"session.trajectory.turnSteps": "{steps} 步 · {tools} 工具",
 	"session.trajectory.groupFold": "… {steps} 個步驟 · {tools} 個工具呼叫，點選展開",
 	"session.trajectory.coverageBudget": "事實讀取已超出預算，更早的記錄未載入",

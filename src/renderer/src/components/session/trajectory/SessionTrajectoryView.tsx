@@ -188,6 +188,33 @@ export function SessionTrajectoryView(props: {
 	// 渲染窗口：只挂载尾部 3 轮（单轮 ≤120 条），挂载量与会话长度脱钩（计划 §5）。
 	// 滚到顶部再放 3 轮；选中更早的记录时自动扩到它所在轮，概览点击才能落到可见区。
 	const [turnCount, setTurnCount] = useState(3);
+	// 折叠状态放视图层：工具栏需要一个统一的「全部折叠/展开」入口。
+	const [foldedTurns, setFoldedTurns] = useState<Set<number>>(() => new Set(defaultFoldedTurns(model.turns)));
+	const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+	useEffect(() => {
+		setFoldedTurns(new Set(defaultFoldedTurns(model.turns)));
+		setExpandedGroups(new Set());
+	}, [props.sessionId]);
+	const toggleTurn = useCallback((turn: number) => {
+		setFoldedTurns((current) => {
+			const next = new Set(current);
+			if (next.has(turn)) next.delete(turn);
+			else next.add(turn);
+			return next;
+		});
+	}, []);
+	const toggleGroup = useCallback((key: string) => {
+		setExpandedGroups((current) => {
+			const next = new Set(current);
+			if (next.has(key)) next.delete(key);
+			else next.add(key);
+			return next;
+		});
+	}, []);
+	const allFolded = model.turns.length > 0 && model.turns.every((turn) => foldedTurns.has(turn.index));
+	const toggleAllTurns = useCallback(() => {
+		setFoldedTurns(allFolded ? new Set() : new Set(model.turns.map((turn) => turn.index)));
+	}, [allFolded, model.turns]);
 	useEffect(() => {
 		setTurnCount(3);
 	}, [props.sessionId]);
@@ -206,6 +233,8 @@ export function SessionTrajectoryView(props: {
 		DEV_METRICS.mountedRecords = windowed.records.length;
 		DEV_METRICS.totalRecords = model.records.length;
 		DEV_METRICS.mountedTurns = model.turns.length;
+		DEV_METRICS.processEvents = props.processEvents?.length ?? 0;
+		DEV_METRICS.processRecords = model.records.filter((record) => record.lane === "process").length;
 		(globalThis as { __pideckTrajectoryMetrics?: Record<string, unknown> }).__pideckTrajectoryMetrics = DEV_METRICS;
 	});
 	const requestEarlier = useCallback(() => {
@@ -258,6 +287,9 @@ export function SessionTrajectoryView(props: {
 					<span>{t("session.trajectory.turns", { count: dialogueTurns })}</span>
 					<span aria-hidden="true">·</span>
 					<span>{t("session.trajectory.records", { count: visible.length })}</span>
+					<button type="button" className="rounded-sm px-1.5 text-caption text-primary hover:underline" onClick={toggleAllTurns}>
+						{allFolded ? t("session.trajectory.unfoldAll") : t("session.trajectory.foldAll")}
+					</button>
 					{range ? (
 						<button type="button" className="rounded-sm px-1.5 text-caption text-primary hover:underline" onClick={() => setRange(undefined)}>
 							{t("session.trajectory.clearRange")}
@@ -282,7 +314,20 @@ export function SessionTrajectoryView(props: {
 				</div>
 			) : null}
 			<div className={drawer ? "grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(140px,38%)]" : "grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(220px,32%)]"}>
-				<TrajectoryLedger records={windowed.records} turns={model.turns} now={now} selectedId={selected?.id} onSelect={setSelectedId} borderBottom={drawer} scrollRef={ledgerScrollRef} onRequestEarlier={windowed.hasEarlier ? requestEarlier : undefined} />
+				<TrajectoryLedger
+					records={windowed.records}
+					turns={model.turns}
+					now={now}
+					selectedId={selected?.id}
+					onSelect={setSelectedId}
+					borderBottom={drawer}
+					scrollRef={ledgerScrollRef}
+					onRequestEarlier={windowed.hasEarlier ? requestEarlier : undefined}
+					foldedTurns={foldedTurns}
+					expandedGroups={expandedGroups}
+					onToggleTurn={toggleTurn}
+					onToggleGroup={toggleGroup}
+				/>
 				<TrajectoryInspector record={selected} runtimeState={runtime?.state} isDsh={props.isDsh} />
 			</div>
 		</div>
@@ -460,17 +505,12 @@ function TrajectoryLedger(props: {
 	scrollRef?: RefObject<HTMLDivElement | null>;
 	/** 滚到顶时再放一轮窗口；未裁剪时缺省（不显示「更早」入口）。 */
 	onRequestEarlier?: () => void;
-	/** 会话身份：切换会话时重置折叠状态。 */
-	sessionId?: string;
+	/** 折叠状态由视图层持有：工具栏的统一折叠入口要能改它。 */
+	foldedTurns: Set<number>;
+	expandedGroups: Set<string>;
+	onToggleTurn: (turn: number) => void;
+	onToggleGroup: (key: string) => void;
 }) {
-	// 默认折叠除最后一轮以外的轮次（打开轨迹先看「当前这轮在干什么」），
-	// 折叠行保留该轮第一条用户消息与步数/工具数摘要，信息不丢。
-	const [foldedTurns, setFoldedTurns] = useState<Set<number>>(() => new Set(defaultFoldedTurns(props.turns)));
-	const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-	useEffect(() => {
-		setFoldedTurns(new Set(defaultFoldedTurns(props.turns)));
-		setExpandedGroups(new Set());
-	}, [props.sessionId]);
 	const byTurn = useMemo(() => {
 		const map = new Map<number, TrajectoryRecord[]>();
 		for (const record of props.records) {
@@ -480,23 +520,6 @@ function TrajectoryLedger(props: {
 		}
 		return map;
 	}, [props.records]);
-
-	const toggleTurn = useCallback((turn: number) => {
-		setFoldedTurns((current) => {
-			const next = new Set(current);
-			if (next.has(turn)) next.delete(turn);
-			else next.add(turn);
-			return next;
-		});
-	}, []);
-	const toggleGroup = useCallback((key: string) => {
-		setExpandedGroups((current) => {
-			const next = new Set(current);
-			if (next.has(key)) next.delete(key);
-			else next.add(key);
-			return next;
-		});
-	}, []);
 
 	const row = (record: TrajectoryRecord) => (
 		<li key={record.id}>
@@ -529,13 +552,13 @@ function TrajectoryLedger(props: {
 			) : (
 				<ul className="divide-y divide-border/50">
 					{[...byTurn.entries()].map(([turnIndex, turnRecords]) => {
-						const folded = foldedTurns.has(turnIndex);
+						const folded = props.foldedTurns.has(turnIndex);
 						const summary = summarizeTurn(props.turns[turnIndex], props.turns[turnIndex]?.records ?? turnRecords);
 						const peek = folded ? foldedTurnPeek(turnRecords) : undefined;
 						const duration = turnDurationLabel(props.turns[turnIndex], props.now);
 						return (
 							<li key={`turn:${turnIndex}`}>
-								<button type="button" className="flex w-full items-center justify-between gap-2 bg-muted/40 px-3 py-1 text-micro font-medium tracking-wide text-muted-foreground uppercase hover:bg-muted/60" onClick={() => toggleTurn(turnIndex)}>
+								<button type="button" className="flex w-full items-center justify-between gap-2 bg-muted/40 px-3 py-1 text-micro font-medium tracking-wide text-muted-foreground uppercase hover:bg-muted/60" onClick={() => props.onToggleTurn(turnIndex)}>
 									<span>{t("session.trajectory.turn", { index: turnIndex + 1 })}</span>
 									<span className="flex items-center gap-2 tabular-nums normal-case">
 										<span>{t("session.trajectory.turnSteps", { steps: summary.steps, tools: summary.toolCalls })}</span>
@@ -550,10 +573,10 @@ function TrajectoryLedger(props: {
 											: []
 										: foldTurnRecords(turnRecords).map((item) => {
 												if (item.type === "record") return row(item.record);
-												if (expandedGroups.has(item.key)) return item.records.map(row);
+												if (props.expandedGroups.has(item.key)) return item.records.map(row);
 												return (
 													<li key={item.key}>
-														<button type="button" className="w-full px-3 py-1.5 text-left text-caption text-muted-foreground hover:bg-muted/50" onClick={() => toggleGroup(item.key)}>
+														<button type="button" className="w-full px-3 py-1.5 text-left text-caption text-muted-foreground hover:bg-muted/50" onClick={() => props.onToggleGroup(item.key)}>
 															{t("session.trajectory.groupFold", { steps: item.records.length, tools: item.toolCalls })}
 														</button>
 													</li>
