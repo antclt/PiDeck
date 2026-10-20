@@ -5864,6 +5864,8 @@ export const zhCN = {
 	"session.trajectory.turn": "第 {index} 轮",
 	"session.trajectory.empty": "当前范围没有记录",
 	"session.trajectory.noSession": "打开一个会话后即可查看思考轨迹",
+	"session.trajectory.turnSteps": "{steps} 步 · {tools} 工具",
+	"session.trajectory.groupFold": "… {steps} 个步骤 · {tools} 个工具调用，点击展开",
 	"session.trajectory.coverageBudget": "事实读取已超出预算，更早的记录未载入",
 	"session.trajectory.coverageAncestor": "父会话不可用，fork 之前的事实缺失",
 	"session.trajectory.coverageWindow": "只读到宿主页范围内的事实，初始提示词可能是窗口快照",

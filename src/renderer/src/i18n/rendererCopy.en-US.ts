@@ -5885,6 +5885,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"session.trajectory.turn": "Turn {index}",
 	"session.trajectory.empty": "No records in this range",
 	"session.trajectory.noSession": "Open a session to inspect its thinking trajectory",
+	"session.trajectory.turnSteps": "{steps} steps · {tools} tools",
+	"session.trajectory.groupFold": "… {steps} steps · {tools} tool calls · click to expand",
 	"session.trajectory.coverageBudget": "Fact read hit its budget; earlier records were not loaded",
 	"session.trajectory.coverageAncestor": "Parent session unavailable; facts from before the fork are missing",
 	"session.trajectory.coverageWindow": "Only facts within the host page are loaded; the first prompt may be a window snapshot",

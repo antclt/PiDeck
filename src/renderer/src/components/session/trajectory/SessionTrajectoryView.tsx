@@ -13,6 +13,7 @@ import { writeClipboard } from "../../../utils/clipboard";
 import { formatDuration, formatTime } from "../TimelineFormat";
 import { buildTrajectory, filterRecordsByRange, traceSizeLabel, type TrajectoryLane, type TrajectoryModelTraceSummary, type TrajectoryRecord, type TrajectoryTimeRange, type TrajectoryTurn } from "./buildTrajectory";
 import { bucketOverviewTicks, buildTrajectoryWindow } from "./trajectoryWindow";
+import { defaultFoldedTurns, foldedTurnPeek, foldTurnRecords, summarizeTurn } from "./trajectoryFold";
 import { ModelTraceDetail } from "../../workspace/ModelTraceDetail";
 import { countUserTurns } from "../timeline/turnRenderWindow";
 
@@ -459,8 +460,60 @@ function TrajectoryLedger(props: {
 	scrollRef?: RefObject<HTMLDivElement | null>;
 	/** 滚到顶时再放一轮窗口；未裁剪时缺省（不显示「更早」入口）。 */
 	onRequestEarlier?: () => void;
+	/** 会话身份：切换会话时重置折叠状态。 */
+	sessionId?: string;
 }) {
-	let lastTurn = -1;
+	// 默认折叠除最后一轮以外的轮次（打开轨迹先看「当前这轮在干什么」），
+	// 折叠行保留该轮第一条用户消息与步数/工具数摘要，信息不丢。
+	const [foldedTurns, setFoldedTurns] = useState<Set<number>>(() => new Set(defaultFoldedTurns(props.turns)));
+	const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+	useEffect(() => {
+		setFoldedTurns(new Set(defaultFoldedTurns(props.turns)));
+		setExpandedGroups(new Set());
+	}, [props.sessionId]);
+	const byTurn = useMemo(() => {
+		const map = new Map<number, TrajectoryRecord[]>();
+		for (const record of props.records) {
+			const bucket = map.get(record.turnIndex);
+			if (bucket) bucket.push(record);
+			else map.set(record.turnIndex, [record]);
+		}
+		return map;
+	}, [props.records]);
+
+	const toggleTurn = useCallback((turn: number) => {
+		setFoldedTurns((current) => {
+			const next = new Set(current);
+			if (next.has(turn)) next.delete(turn);
+			else next.add(turn);
+			return next;
+		});
+	}, []);
+	const toggleGroup = useCallback((key: string) => {
+		setExpandedGroups((current) => {
+			const next = new Set(current);
+			if (next.has(key)) next.delete(key);
+			else next.add(key);
+			return next;
+		});
+	}, []);
+
+	const row = (record: TrajectoryRecord) => (
+		<li key={record.id}>
+			<button type="button" className={`flex w-full items-start gap-2 px-3 py-1.5 text-left text-caption hover:bg-muted/50 ${record.id === props.selectedId ? "bg-muted" : ""}`} onClick={() => props.onSelect(record.id)}>
+				<span className={`mt-1 size-1.5 shrink-0 rounded-full ${laneTone(record.lane)}`} />
+				<span className="w-20 shrink-0 font-medium text-foreground">{kindLabel(record)}</span>
+				<span className="min-w-0 flex-1 truncate text-muted-foreground">{record.summary || "—"}</span>
+				{usageSummary(record) ? (
+					<span className="shrink-0 tabular-nums text-micro text-muted-foreground" title={usageTitle(record)}>
+						{usageSummary(record)}
+					</span>
+				) : null}
+				<span className="shrink-0 tabular-nums text-muted-foreground">{rowTimeLabel(record)}</span>
+			</button>
+		</li>
+	);
+
 	return (
 		<div
 			ref={props.scrollRef}
@@ -475,30 +528,38 @@ function TrajectoryLedger(props: {
 				<div className="px-3 py-6 text-center text-caption text-muted-foreground">{t("session.trajectory.empty")}</div>
 			) : (
 				<ul className="divide-y divide-border/50">
-					{props.records.map((record) => {
-						const showTurn = record.turnIndex !== lastTurn;
-						lastTurn = record.turnIndex;
-						const selected = record.id === props.selectedId;
-						const turnLabel = showTurn ? turnDurationLabel(props.turns[record.turnIndex], props.now) : undefined;
+					{[...byTurn.entries()].map(([turnIndex, turnRecords]) => {
+						const folded = foldedTurns.has(turnIndex);
+						const summary = summarizeTurn(props.turns[turnIndex], props.turns[turnIndex]?.records ?? turnRecords);
+						const peek = folded ? foldedTurnPeek(turnRecords) : undefined;
+						const duration = turnDurationLabel(props.turns[turnIndex], props.now);
 						return (
-							<li key={record.id}>
-								{showTurn ? (
-									<div className="flex items-center justify-between bg-muted/40 px-3 py-1 text-micro font-medium tracking-wide text-muted-foreground uppercase">
-										<span>{t("session.trajectory.turn", { index: record.turnIndex + 1 })}</span>
-										{turnLabel ? <span className="tabular-nums">{turnLabel}</span> : null}
-									</div>
-								) : null}
-								<button type="button" className={`flex w-full items-start gap-2 px-3 py-1.5 text-left text-caption hover:bg-muted/50 ${selected ? "bg-muted" : ""}`} onClick={() => props.onSelect(record.id)}>
-									<span className={`mt-1 size-1.5 shrink-0 rounded-full ${laneTone(record.lane)}`} />
-									<span className="w-20 shrink-0 font-medium text-foreground">{kindLabel(record)}</span>
-									<span className="min-w-0 flex-1 truncate text-muted-foreground">{record.summary || "—"}</span>
-									{usageSummary(record) ? (
-										<span className="shrink-0 tabular-nums text-micro text-muted-foreground" title={usageTitle(record)}>
-											{usageSummary(record)}
-										</span>
-									) : null}
-									<span className="shrink-0 tabular-nums text-muted-foreground">{rowTimeLabel(record)}</span>
+							<li key={`turn:${turnIndex}`}>
+								<button type="button" className="flex w-full items-center justify-between gap-2 bg-muted/40 px-3 py-1 text-micro font-medium tracking-wide text-muted-foreground uppercase hover:bg-muted/60" onClick={() => toggleTurn(turnIndex)}>
+									<span>{t("session.trajectory.turn", { index: turnIndex + 1 })}</span>
+									<span className="flex items-center gap-2 tabular-nums normal-case">
+										<span>{t("session.trajectory.turnSteps", { steps: summary.steps, tools: summary.toolCalls })}</span>
+										{summary.inputTokens + summary.outputTokens > 0 ? <span>{`${compactTokens(summary.inputTokens)}→${compactTokens(summary.outputTokens)}`}</span> : null}
+										{duration ? <span>{duration}</span> : null}
+									</span>
 								</button>
+								<ul className="divide-y divide-border/40">
+									{folded
+										? peek
+											? [row(peek)]
+											: []
+										: foldTurnRecords(turnRecords).map((item) => {
+												if (item.type === "record") return row(item.record);
+												if (expandedGroups.has(item.key)) return item.records.map(row);
+												return (
+													<li key={item.key}>
+														<button type="button" className="w-full px-3 py-1.5 text-left text-caption text-muted-foreground hover:bg-muted/50" onClick={() => toggleGroup(item.key)}>
+															{t("session.trajectory.groupFold", { steps: item.records.length, tools: item.toolCalls })}
+														</button>
+													</li>
+												);
+											})}
+								</ul>
 							</li>
 						);
 					})}

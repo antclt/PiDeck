@@ -116,3 +116,46 @@ test("窗口外的会话开头（初始提示词）不被裁掉", () => {
 	);
 	assert.ok(windowed.records.length <= TRAJECTORY_TURN_COHORT * TRAJECTORY_TURN_STEP_LIMIT + TRAJECTORY_EXTRA_RECORD_BUDGET);
 });
+
+test("轮摘要只统计已有数据（步数/工具数/耗时/token），不引入新来源", async () => {
+	const { summarizeTurn } = loadTsCommonJs("src/renderer/src/components/session/trajectory/trajectoryFold.ts");
+	const records = [
+		{ id: "u", kind: "user", lane: "input", turnIndex: 0, title: "", summary: "", startedAt: 0 },
+		{ id: "t1", kind: "tool", lane: "tools", turnIndex: 0, title: "", summary: "", startedAt: 1 },
+		{ id: "t2", kind: "tool", lane: "tools", turnIndex: 0, title: "", summary: "", startedAt: 2 },
+		{ id: "a", kind: "assistant", lane: "model", turnIndex: 0, title: "", summary: "", startedAt: 3, usage: { inputTokens: 1200, outputTokens: 300, reasoningTokens: 40 } },
+	];
+	const summary = summarizeTurn({ index: 0, id: "t0", startedAt: 0, inFlight: false, durationMs: 3400, records }, records);
+	assert.equal(summary.steps, 4);
+	assert.equal(summary.toolCalls, 2);
+	assert.equal(summary.inputTokens, 1200);
+	assert.equal(summary.outputTokens, 300);
+	assert.equal(summary.reasoningTokens, 40);
+	assert.equal(summary.durationMs, 3400);
+	// 没有 usage 时不编造 token
+	const bare = summarizeTurn(undefined, [records[0]]);
+	assert.equal(bare.inputTokens, 0);
+	assert.equal(bare.durationMs, undefined);
+});
+
+test("连续工具调用超过阈值才折叠，未超过原样输出", async () => {
+	const { foldTurnRecords, TRAJECTORY_STEP_GROUP_LIMIT } = loadTsCommonJs("src/renderer/src/components/session/trajectory/trajectoryFold.ts");
+	const tools = (count, prefix) => Array.from({ length: count }, (_, index) => ({ id: `${prefix}${index}`, kind: "tool", lane: "tools", turnIndex: 0, title: "", summary: "", startedAt: index }));
+	const short = foldTurnRecords(tools(TRAJECTORY_STEP_GROUP_LIMIT, "a"));
+	assert.equal(short.filter((item) => item.type === "group").length, 0);
+	const long = foldTurnRecords(tools(TRAJECTORY_STEP_GROUP_LIMIT + 1, "b"));
+	assert.equal(long.length, 1);
+	assert.equal(long[0].type, "group");
+	assert.equal(long[0].toolCalls, TRAJECTORY_STEP_GROUP_LIMIT + 1);
+});
+
+test("默认折叠除最后一轮以外全部轮次，折叠时露出该轮首条用户消息", async () => {
+	const { defaultFoldedTurns, foldedTurnPeek } = loadTsCommonJs("src/renderer/src/components/session/trajectory/trajectoryFold.ts");
+	const turns = [0, 1, 2].map((index) => ({ index, id: `t${index}`, startedAt: index, inFlight: false, records: [] }));
+	assert.equal(defaultFoldedTurns(turns).join(","), "0,1");
+	const peek = foldedTurnPeek([
+		{ id: "t1", kind: "tool", lane: "tools", turnIndex: 0, title: "", summary: "", startedAt: 1 },
+		{ id: "u", kind: "user", lane: "input", turnIndex: 0, title: "", summary: "", startedAt: 2 },
+	]);
+	assert.equal(peek.id, "u");
+});
