@@ -12,6 +12,7 @@ import { t } from "../../../i18n";
 import { writeClipboard } from "../../../utils/clipboard";
 import { formatDuration, formatTime } from "../TimelineFormat";
 import { buildTrajectory, filterRecordsByRange, traceSizeLabel, type TrajectoryLane, type TrajectoryModelTraceSummary, type TrajectoryRecord, type TrajectoryTimeRange, type TrajectoryTurn } from "./buildTrajectory";
+import { bucketOverviewTicks, buildTrajectoryWindow } from "./trajectoryWindow";
 import { ModelTraceDetail } from "../../workspace/ModelTraceDetail";
 import { countUserTurns } from "../timeline/turnRenderWindow";
 
@@ -178,6 +179,27 @@ export function SessionTrajectoryView(props: {
 		[props.messages, props.processEvents, props.modelTraces, now],
 	);
 	const visible = useMemo(() => filterRecordsByRange(model.records, range), [model.records, range]);
+	// 渲染窗口：只挂载尾部 3 轮（单轮 ≤120 条），挂载量与会话长度脱钩（计划 §5）。
+	// 滚到顶部再放 3 轮；选中更早的记录时自动扩到它所在轮，概览点击才能落到可见区。
+	const [turnCount, setTurnCount] = useState(3);
+	useEffect(() => {
+		setTurnCount(3);
+	}, [props.sessionId]);
+	const windowTurnCount = useMemo(() => {
+		const selectedTurn = visible.find((record) => record.id === selectedId)?.turnIndex;
+		const lastTurn = visible[visible.length - 1]?.turnIndex ?? 0;
+		const needed = selectedTurn === undefined ? 0 : lastTurn - selectedTurn + 1;
+		return Math.max(turnCount, needed);
+	}, [turnCount, selectedId, visible]);
+	const windowed = useMemo(() => buildTrajectoryWindow(visible, { turnCount: windowTurnCount }), [visible, windowTurnCount]);
+	// 滚动事件会连发：200ms 内只放一轮，避免一次手势把预算打穿。
+	const lastExpandRef = useRef(0);
+	const requestEarlier = useCallback(() => {
+		const now = Date.now();
+		if (now - lastExpandRef.current < 200) return;
+		lastExpandRef.current = now;
+		setTurnCount((current) => current + 3);
+	}, []);
 	const selected = visible.find((record) => record.id === selectedId) ?? model.records.find((record) => record.id === selectedId);
 
 	// 活动时长用低频时钟推进：只在本轮进行中才起 1 秒定时器，静态历史完全不动。
@@ -246,7 +268,7 @@ export function SessionTrajectoryView(props: {
 				</div>
 			) : null}
 			<div className={drawer ? "grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(140px,38%)]" : "grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(220px,32%)]"}>
-				<TrajectoryLedger records={visible} turns={model.turns} now={now} selectedId={selected?.id} onSelect={setSelectedId} borderBottom={drawer} scrollRef={ledgerScrollRef} />
+				<TrajectoryLedger records={windowed.records} turns={model.turns} now={now} selectedId={selected?.id} onSelect={setSelectedId} borderBottom={drawer} scrollRef={ledgerScrollRef} onRequestEarlier={windowed.hasEarlier ? requestEarlier : undefined} />
 				<TrajectoryInspector record={selected} runtimeState={runtime?.state} isDsh={props.isDsh} />
 			</div>
 		</div>
@@ -258,6 +280,17 @@ function TrajectoryOverview(props: { records: TrajectoryRecord[]; domainStart: n
 	const dragRef = useRef<{ x: number; start: number } | undefined>(undefined);
 	const [draft, setDraft] = useState<TrajectoryTimeRange | undefined>(undefined);
 	const span = Math.max(props.domainEnd - props.domainStart, 1);
+	// 概览刻度按像素聚合：标记数服从面板宽度，记录再多也不线性增加 DOM。
+	const [trackWidth, setTrackWidth] = useState(600);
+	useLayoutEffect(() => {
+		const el = trackRef.current;
+		if (!el) return;
+		setTrackWidth(el.clientWidth);
+		const observer = new ResizeObserver(() => setTrackWidth(el.clientWidth));
+		observer.observe(el);
+		return () => observer.disconnect();
+	}, []);
+	const ticks = useMemo(() => bucketOverviewTicks(props.records, { lanes: LANE_ORDER, width: trackWidth, selectedId: props.selectedId }), [props.records, props.selectedId, trackWidth]);
 
 	const timeAt = useCallback(
 		(clientX: number): number => {
@@ -354,24 +387,23 @@ function TrajectoryOverview(props: { records: TrajectoryRecord[]; domainStart: n
 					) : null}
 					{LANE_ORDER.map((lane, laneIndex) => (
 						<div key={lane} className="pointer-events-none absolute right-0 left-0" style={{ top: `${(laneIndex / LANE_ORDER.length) * 100}%`, height: `${100 / LANE_ORDER.length}%` }}>
-							{props.records
-								.filter((record) => record.lane === lane)
-								.map((record) => {
-									const end = record.endedAt ?? props.domainEnd;
-									const selected = record.id === props.selectedId;
+							{ticks
+								.filter((tick) => tick.lane === lane)
+								.map((tick) => {
+									const record = props.records.find((candidate) => candidate.id === tick.recordId);
 									return (
 										<button
-											key={record.id}
+											key={`${tick.lane}:${tick.recordId}:${tick.startedAt}`}
 											type="button"
-											title={`${kindLabel(record)} · ${record.summary}`}
-											className={`pointer-events-auto absolute top-1/2 h-2 -translate-y-1/2 rounded-sm ${laneTone(lane)} ${selected ? "ring-1 ring-foreground" : ""}`}
+											title={record ? `${kindLabel(record)}${tick.count > 1 ? ` ×${tick.count}` : ""} · ${record.summary}` : undefined}
+											className={`pointer-events-auto absolute top-1/2 h-2 -translate-y-1/2 rounded-sm ${laneTone(lane)} ${tick.selected ? "ring-1 ring-foreground" : ""}`}
 											style={{
-												left: `${projectLeft(record.startedAt, props.domainStart, span)}%`,
-												width: `${projectWidth(record.startedAt, end, props.domainStart, span)}%`,
+												left: `${projectLeft(tick.startedAt, props.domainStart, span)}%`,
+												width: `${Math.max(0.6, (100 / Math.max(1, props.records.length)) * Math.min(tick.count, 12))}%`,
 											}}
 											onClick={(event) => {
 												event.stopPropagation();
-												props.onSelect(record.id);
+												props.onSelect(tick.recordId);
 											}}
 										/>
 									);
@@ -403,10 +435,20 @@ function TrajectoryLedger(props: {
 	borderBottom?: boolean;
 	/** 滚动容器 ref：切 tab 卸载前保存、重挂载后恢复滚动位置。 */
 	scrollRef?: RefObject<HTMLDivElement | null>;
+	/** 滚到顶时再放一轮窗口；未裁剪时缺省（不显示「更早」入口）。 */
+	onRequestEarlier?: () => void;
 }) {
 	let lastTurn = -1;
 	return (
-		<div ref={props.scrollRef} className={`min-h-0 overflow-auto ${props.borderBottom ? "border-b border-border/60" : "border-r border-border/60"}`}>
+		<div
+			ref={props.scrollRef}
+			className={`min-h-0 overflow-auto ${props.borderBottom ? "border-b border-border/60" : "border-r border-border/60"}`}
+			onScroll={(event) => {
+				// 顶部 48px 内继续上滚 → 放下一轮窗口（滑动窗口，不累加挂载）。
+				if (event.currentTarget.scrollTop > 48) return;
+				props.onRequestEarlier?.();
+			}}
+		>
 			{props.records.length === 0 ? (
 				<div className="px-3 py-6 text-center text-caption text-muted-foreground">{t("session.trajectory.empty")}</div>
 			) : (
