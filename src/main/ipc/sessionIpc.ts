@@ -13,6 +13,7 @@ import { canonicalizeSessionPath } from "../../shared/sessionIdentity";
 import { createSessionModelPreference } from "../../shared/modelDisplayName";
 import { modelThinkingLevelOf } from "../../shared/modelThinkingLevels";
 import { readRuntimePromptTemplateBodies } from "../prompts/runtimeTemplateBodies";
+import { isDshAgentPresetLocked } from "../../shared/dshAgentPresetLock";
 import type {
 	AvailableModel,
 	CreateSessionDraftInput,
@@ -48,6 +49,7 @@ import { parseSessionProcessEventsFromFile } from "../sessions/sessionProcessEve
 import type { SessionOutlineSnapshot as OutlineSnapshot } from "../../shared/types/outline";
 import type { SessionForkCommands } from "../sessions/sessionForkCommands";
 import { dshUnavailablePageFor } from "../dsh/dshManualStop";
+import { dshRuntimeMissingPageFor } from "../dsh/dshRuntimeMissing";
 import { dshSessionModelPatch } from "../dsh/dshSessionModelSync";
 import { missingSessionFilePage } from "../sessions/sessionFileMissingPage";
 import { isSessionSearchFilePath } from "../sessions/sessionSearchPath";
@@ -61,6 +63,7 @@ import { DIRECTORY_IMPORT_MAX_SUMMARIES } from "../sessions/directorySessionImpo
 import type { DirectorySessionImporter } from "../sessions/DirectorySessionImporter";
 import { registerSessionImageMutationIpc } from "./sessionImageMutationIpc";
 import { acpMessagePage } from "../acp/acpMessagePage";
+import { composeAgentInstruction } from "../agents/agentPersonaInstruction";
 
 function isDshModelDiscoveryInput(input: unknown): input is DshModelDiscoveryInput {
 	if (!isRecord(input) || typeof input.settingsNs !== "string" || !input.settingsNs.trim()) return false;
@@ -279,6 +282,11 @@ export type DshBackendIpcDeps = {
 	readDshSubagentHistory?: (agentId: string, childSessionId: string, beforeSeq?: number, maxMessages?: number) => Promise<{ messages: import("../../shared/types").ChatMessage[]; hasMore: boolean }>;
 	/** DSH 技能目录（G7：skill.list 只读）；未装配时返回空列表。 */
 	listDshSkills?: (agentId: string) => Promise<import("../../shared/types").DshSkillView[]>;
+	/**
+	 * DSH 草稿会话的技能目录：按 deck sessionId 懒建/复用 host 会话后读 skill.list
+	 * （不启动 agent）；未装配时返回空列表。
+	 */
+	listDshSessionSkills?: (deckSessionId: string) => Promise<import("../../shared/types").DshSkillView[]>;
 	/** DSH 孤儿会话 id 列表（G3/D11：host 有但 catalog 无映射）；未装配时返回空列表。 */
 	listDshOrphans?: () => Promise<string[]>;
 	/** DSH 外部会话清单（dsh-web 等其他工具创建的 host 根会话）；未装配时返回空列表。 */
@@ -393,6 +401,13 @@ export type SessionIpcDeps = {
 	 * 返回 null 表示「索引未就绪/不可用」——渲染层据此提示而不是显示「无匹配」。
 	 */
 	sessionMessageSearch?: (sessionPath: string, query: string) => Promise<SessionSearchResult | null>;
+	/**
+	 * 会话绑定的智能体角色设定（「使用」智能体时写入 AgentProfileStore.sessionAgentBindings）：
+	 * 返回非空字符串时，sessionsSendPrompt 会把角色设定拼进本轮 prompt
+	 * （pi/acp 走隐藏 agentMessage，dsh 退化为可见前缀，见 composeAgentInstruction）。
+	 * 未装配（单测 / 旧宿主）时不做任何注入，发送行为与此前完全一致。
+	 */
+	resolveSessionAgentInstruction?: (sessionId: string) => string | undefined;
 	/** DSH 后端专用 IPC 依赖（C1 分组；未装配 = 无 DSH 后端）。 */
 	dshBackend?: DshBackendIpcDeps;
 };
@@ -469,6 +484,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		copyCatalogSession,
 		exportCatalogSessionHtml,
 		replaceAgentSession,
+		resolveSessionAgentInstruction,
 		dshBackend,
 		validationCatalogModels,
 	} = deps;
@@ -519,6 +535,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		listDshSubagents,
 		readDshSubagentHistory,
 		listDshSkills,
+		listDshSessionSkills,
 		listDshOrphans,
 		listDshForeignSessions,
 		importDshForeignSession,
@@ -619,6 +636,13 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		}
 	};
 
+	/**
+	 * 冷启动里程碑（3/3）：首个会话列表返回。前两个里程碑（app ready / first window shown）
+	 * 记在 index.ts，但用户真正看到内容要等这次扫描结束；scanMs 单独拆出来，才能区分
+	 * 「窗口起得慢」和「会话扫描慢」（侧栏扫描是唯一未进 sidecar 的机械成本，见
+	 * docs/session-data-plane-plan.md §7）。只在首个请求记录一次，切项目不再刷屏。
+	 */
+	let firstSessionListMilestoneLogged = false;
 	ipcMain.handle(ipcChannels.sessionsList, async (_event, projectId?: string) => {
 		const project = projectId ? projectStore.get(projectId) : undefined;
 		let projectPath = project?.path;
@@ -627,7 +651,18 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		if (projectPath && settingsStore.get().wslEnabled && settingsStore.get().wslDistro) {
 			projectPath = projectPath.replace(/^([A-Za-z]):\\/, (_: string, d: string) => `/mnt/${d.toLowerCase()}/`).replace(/\\/g, "/");
 		}
-		return sessionScanner.list(projectPath);
+		const startedAt = Date.now();
+		const sessions = await sessionScanner.list(projectPath);
+		if (!firstSessionListMilestoneLogged) {
+			firstSessionListMilestoneLogged = true;
+			void appLogger.info("app", "Cold start milestone: first session list", {
+				scanMs: Date.now() - startedAt,
+				sessions: sessions.length,
+				projectId: projectId ?? null,
+				processUptimeMs: Math.round(process.uptime() * 1000),
+			});
+		}
+		return sessions;
 	});
 	// 跨会话正文搜索：sidecar 不可用/boot 中/失败一律返回 null，渲染层回退标题过滤
 	ipcMain.handle(ipcChannels.sessionsSearchContent, async (_event, query: unknown) => {
@@ -916,8 +951,19 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			agentManager.releaseStandbyAgent(entry.projectId);
 		}
 		// DSH agent 预设同样创建即固定：激活会话的 preset 由 host 会话 header 权威持有，
-		// 渲染层只读展示，拒绝任何运行时改写（草稿期预选不受限）。
-		if (patch.agentPreset !== undefined && patch.agentPreset !== entry.agentPreset && entry.backend === "dsh" && (entry.status === "active" || sessionRuntimeCoordinator.getTarget(sessionId))) {
+		// 渲染层只读展示，拒绝任何运行时改写（未激活、还没有 host 会话的草稿才放行）。
+		// 判据与渲染层胶囊共用 shared/dshAgentPresetLock：两边同源才不会出现
+		// 「界面能点、主进程拒绝」的原始 IPC 报错。
+		if (
+			patch.agentPreset !== undefined &&
+			patch.agentPreset !== entry.agentPreset &&
+			isDshAgentPresetLocked({
+				backend: entry.backend,
+				status: entry.status,
+				dshSessionId: entry.dshSessionId,
+				hasRuntime: Boolean(sessionRuntimeCoordinator.getTarget(sessionId)),
+			})
+		) {
 			throw new Error(mainCopy("session.agentPresetLocked"));
 		}
 		const title = patch.title?.trim();
@@ -1154,7 +1200,9 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				// 转成带原因的空页，让渲染层出「运行时已停止 + 启动 host」专态，而不是把
 				// host 未运行报成「会话文件已删除/路径失效」——DSH 会话没有 pi 会话文件。
 				// 其余错误（host 崩溃 / 文件损坏）继续抛，渲染层按普通失败处理。
-				const unavailable = dshUnavailablePageFor(error);
+				// 运行时未安装（#375）与手动停止一样属于「可解释的不可用」，同样不该把原始
+				// MODULE_NOT_FOUND 抛给渲染层；其余错误（host 崩溃 / 文件损坏）继续抛。
+				const unavailable = dshUnavailablePageFor(error) ?? dshRuntimeMissingPageFor(error);
 				if (unavailable) return unavailable;
 				throw error;
 			}
@@ -1375,10 +1423,21 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		return readDshSubagentHistory(agentId, childSessionId, typeof beforeSeq === "number" ? beforeSeq : undefined, typeof maxMessages === "number" ? maxMessages : undefined);
 	});
 	// DSH 技能目录（G7：skill.list 只读；/name 斜杠调用提示由渲染层给）
-	ipcMain.handle(ipcChannels.dshListSkills, async (_event, agentId: unknown) => {
-		if (typeof agentId !== "string") return [];
-		if (!listDshSkills) return [];
-		return listDshSkills(agentId);
+	// 目标有两种寻址：agentId 字符串（运行中会话，工具面板/Web 端沿用）或
+	// { sessionId }（草稿会话，技能选择器在会话启动前读取目录）。
+	ipcMain.handle(ipcChannels.dshListSkills, async (_event, target: unknown) => {
+		if (typeof target === "string") {
+			if (!target.trim() || target.length > 256) return [];
+			if (!listDshSkills) return [];
+			return listDshSkills(target);
+		}
+		if (isRecord(target) && typeof target.sessionId === "string") {
+			const sessionId = target.sessionId.trim();
+			if (!sessionId || sessionId.length > 256) return [];
+			if (!listDshSessionSkills) return [];
+			return listDshSessionSkills(sessionId);
+		}
+		return [];
 	});
 	// DSH 孤儿会话列表（G3/D11：host 有但 catalog 无映射，用于清理提示）
 	ipcMain.handle(ipcChannels.dshListOrphans, async (): Promise<string[]> => {
@@ -1662,7 +1721,22 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			imageCount: input.images?.length ?? 0,
 		});
 		try {
-			const result = await sessionRuntimeCoordinator.send(input);
+			// 绑定了智能体的会话：注入角色设定。注入点是「发送前」的唯一收口，
+			// 所有来源（桌面输入框/排队投递/Web）都经过这里，渲染层无需每个入口各拼一次。
+			// 只改本轮载荷，不写会话文件：pi 的 agentMessage 对时间线不可见，dsh 退化为可见前缀。
+			const persona = resolveSessionAgentInstruction?.(input.sessionId);
+			const boundRecord = persona ? sessionCatalog.get(input.sessionId) : undefined;
+			let promptInput: SendSessionPromptInput = input;
+			if (persona && boundRecord) {
+				const composed = composeAgentInstruction({ persona, message: input.message, existingAgentMessage: input.agentMessage, backend: boundRecord.backend });
+				promptInput = { ...input, message: composed.message };
+				// dsh 分支没有隐藏载荷：必须删掉原有 agentMessage，否则 host 拒收整条 prompt。
+				if (composed.agentMessage === undefined) delete promptInput.agentMessage;
+				else promptInput.agentMessage = composed.agentMessage;
+				// 只记 id/后端/长度，角色设定是用户内容，不进日志。
+				void appLogger.debug("session", "Bound agent persona injected", { sessionId: input.sessionId, backend: boundRecord.backend ?? "pi", personaChars: persona.length });
+			}
+			const result = await sessionRuntimeCoordinator.send(promptInput);
 			if (result.agentId) {
 				const tab = agentManager.list().find((candidate) => candidate.id === result.agentId);
 				if (tab) emitSessionRuntimeEvent(tab.id, ipcChannels.agentsState, tab);

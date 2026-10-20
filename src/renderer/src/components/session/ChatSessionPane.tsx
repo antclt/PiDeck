@@ -1,12 +1,13 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { pendingMessageJumpAtom, sessionRecordByIdAtomFamily } from "../../atoms";
+import { pendingMessageJumpAtom, requestSessionFindAtom, sessionFindOpenRequestsAtom, sessionRecordByIdAtomFamily } from "../../atoms";
 import { useSessionTimelineController } from "../../hooks/useSessionTimelineController";
 import { SessionRuntimeInjector } from "./SessionRuntimeInjector";
 import { useSessionPaneServices } from "./SessionPaneServices";
 import { SessionFindOverlay } from "./SessionFindOverlay";
 import { desktopApi } from "../../desktopApi";
 import { t } from "../../i18n";
+import { supportsSessionFind } from "../../utils/sessionFindSupport";
 
 export type ChatSessionPaneProps = {
 	sessionId: string;
@@ -32,15 +33,18 @@ export function ChatSessionPane(props: ChatSessionPaneProps) {
 	const sessionTimeline = useSessionTimelineController({ sessionId });
 
 	// 会话内查找（Ctrl/Cmd+Shift+F）：openSignal 自增即请求浮层展开并聚焦输入框。
+	// 打开请求按会话 id 计数（atoms/session-find-atoms.ts）：头部放大镜按钮与本栏快捷键
+	// 写同一份信号，浮层只订阅本会话的那一格。
 	// 只有聚焦栏响应快捷键——分屏时按键作用于用户正在看的那一栏。
-	const [findSignal, setFindSignal] = useState(0);
+	const findSignal = useAtomValue(sessionFindOpenRequestsAtom)[sessionId] ?? 0;
+	const requestSessionFind = useSetAtom(requestSessionFindAtom);
 	useEffect(() => {
 		if (!focused) return;
 		return desktopApi.app.onShortcutTriggered((id) => {
 			if (id !== "findInSession") return;
-			setFindSignal((value) => value + 1);
+			requestSessionFind(sessionId);
 		});
-	}, [focused]);
+	}, [focused, requestSessionFind, sessionId]);
 
 	const localHeaderRef = useRef<HTMLDivElement | null>(null);
 	const localComposerRef = useRef<HTMLElement | null>(null);
@@ -52,7 +56,8 @@ export function ChatSessionPane(props: ChatSessionPaneProps) {
 
 	// 会话内查找依赖 pi 会话 JSONL 索引：DSH/ACP 后端不走 sidecar，直接不挂入口
 	// （避免出现一个永远「没有匹配」的搜索框）；草稿会话还没落盘文件，同样不挂入口（否则图标悬在欢迎页上）。
-	const findSupported = (!record?.backend || record.backend === "pi") && Boolean(record?.filePath);
+	// 判据与 SessionHeader 的放大镜入口共用（utils/sessionFindSupport），入口在就一定挂得上浮层。
+	const findSupported = supportsSessionFind(record);
 
 	const activeQueuedPrompts = services.queuedPromptsBySession[sessionId] ?? [];
 

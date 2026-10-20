@@ -56,9 +56,7 @@ const cold = await timed("cold", () => facts.read(file));
 const coldBytes = Buffer.byteLength(JSON.stringify(cold.value), "utf8");
 console.log(`cold read: ${cold.elapsed}ms, events ${cold.value.events.length}, payload ${(coldBytes / 1024).toFixed(1)}KB`);
 console.log(`  prompts ${cold.value.events.filter((event) => event.kind === "systemPrompt").length}`);
-console.log(
-	`  coverage fromStart=${cold.value.coverage.fromStart} chainComplete=${cold.value.coverage.chainComplete} readComplete=${cold.value.coverage.readComplete} eventsTrimmed=${cold.value.coverage.eventsTrimmed}`,
-);
+console.log(`  coverage fromStart=${cold.value.coverage.fromStart} chainComplete=${cold.value.coverage.chainComplete} readComplete=${cold.value.coverage.readComplete} eventsTrimmed=${cold.value.coverage.eventsTrimmed}`);
 const afterCold = facts.stats();
 console.log(`  body reads ${afterCold.bodyReads}, bytes ${(afterCold.bodyBytes / 1024).toFixed(1)}KB`);
 

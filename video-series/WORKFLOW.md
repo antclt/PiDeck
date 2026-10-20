@@ -222,3 +222,111 @@ video-series/
 git status video-series
 # 不应出现 *.mp4 / pipeline/EP0* / decks/EP0*
 ```
+
+---
+
+## 11. PiDeck AI 日更（`daily/`，另一条流水线）
+
+> 上手系列（`decks/` + `pipeline/`）是**长教程合集**；日更是**每天一条 60–90 秒短视频**。
+> 两条流水线独立，目录、脚本、产物都不共用。
+
+### 11.1 目录
+
+```
+daily/
+  config/series.json      栏目配置：账号、平台、画幅、时长区间、内容配比、音色、链接
+  prompts/daily-script.md 写稿 prompt（喂给写稿模型，输出定稿 JSON）
+  scripts/YYYY-MM-DD.json 定稿脚本：一份 JSON 描述整期（唯一事实源）
+  topics/build_pool.py    选题池：挖 CHANGELOG / 公告 / 维护域文档 / git log / gh issue
+  templates/deck_css.py   幻灯片设计语言（16:9 + 3:4 双画幅）
+  pipeline/daily_deck.py  脚本 JSON → HTML 幻灯片
+  pipeline/render_daily.py 渲染：截图 → TTS → 烧字幕 → 分片 → concat 成片
+  pipeline/publish_copy.py 发布文案：B 站 / 竖版 / 动态
+  publish/YYYY-MM-DD.md   发布文案成品（可提交）
+  out/YYYY-MM-DD/         渲染产物（可重新生成，不提交）
+```
+
+### 11.2 一天的工作流
+
+```bash
+cd video-series/daily
+
+# 1) 选题：从仓库真实素材里挖候选（技巧 / 更新 / 日志三类）
+python topics/build_pool.py --days 14
+
+# 2) 写稿：把 prompts/daily-script.md + 选题喂给写稿模型，产出 scripts/<date>.json
+#    （人工核对功能真实性与口径，必要时手改）
+
+# 3) 出片：一条命令跑完两个画幅
+python pipeline/render_daily.py --script scripts/2026-10-20.json
+#    产物：out/2026-10-20/2026-10-20-16x9.mp4 与 2026-10-20-3x4.mp4
+
+# 4) 发布文案
+python pipeline/publish_copy.py --script scripts/2026-10-20.json
+#    产物：publish/2026-10-20.md（含 B 站标题/简介/标签/动态 + 竖版标题/简介）
+
+# 5) 人工审核后自己上传（B 站 / 抖音 / 小红书）
+```
+
+### 11.3 常用参数
+
+| 命令 | 作用 |
+|------|------|
+| `render_daily.py --formats 16x9` | 只出一个画幅（调版式时快一半） |
+| `render_daily.py --no-tts` | 复用已有音频，只重烧画面（改字幕样式时用） |
+| `render_daily.py --force-tts` | 忽略缓存重新配音 |
+| `daily_deck.py --script ... ` | 只出 HTML，不配音（预览排版） |
+
+### 11.4 脚本 JSON 结构
+
+```jsonc
+{
+  "date": "2026-10-20",
+  "episode": 1,
+  "kind": "tip",                       // tip 技巧 / update 更新 / devlog 日志
+  "title": "在 PiDeck 里用 @ 引用文件，不用再手打路径",
+  "epTag": "Day 001",
+  "formats": ["16x9", "3x4"],
+  "voice": { "name": "zh-CN-YunxiNeural", "rate": "-10%", "pitch": "-2Hz" },
+  "slides": [
+    {
+      "id": "01-hook",                 // 两位序号前缀，决定顺序
+      "type": "hook",                 // hook/cover/steps/bullets/shot/quote/cta
+      "title": "还在手打文件路径？",
+      "lead": "想让 AI 读你项目里的文件，敲一个 @ 就够了。",
+      "narration": "还在手打文件路径？……"   // 口播词，逐 slide 一段 TTS
+    },
+    {
+      "id": "02-picker",
+      "type": "shot",
+      "image": "docs/images/files.png",     // 仓库 docs/images 下真实文件
+      "crop":    { "x": 0.145, "y": 0.45, "w": 0.30, "h": 0.45 },  // 16:9 裁剪框（0..1 比例）
+      "crop3x4": { "x": 0.155, "y": 0.46, "w": 0.265, "h": 0.42 }, // 竖版裁剪框，缺省回退 crop
+      "caption": "输入框里敲 @，项目里的文件直接列出来",
+      "narration": "……"
+    }
+  ],
+  "publish": { "bilibili": {...}, "vertical": {...}, "dynamic": "……" }
+}
+```
+
+`crop` / `crop3x4` 是 **0..1 的比例框**（x/y/w/h），不是像素。产品截图原图多在 2560×1380，
+整屏缩到窄画幅里只剩一条，必须裁到「弹窗/面板」那块才看得清。裁剪用 Pillow，
+缺 Pillow 时退化为不裁剪（出片优先于构图）。
+
+### 11.5 字幕烧录的两个坑
+
+1. **不能直接用 `subtitles=xxx.srt:force_style=...`**。SRT 没有分辨率信息，ffmpeg 内部转 ASS 时
+   固定用 384×288 作脚本分辨率，libass 再按画面尺寸放大——26 号字在 1080p 下会变成近 100px，
+   直接盖住画面。`render_daily.py` 的 `srt_to_ass()` 改为手写 ASS 头，显式写死
+   `PlayResX/PlayResY` = 画幅尺寸，样式里的数字才是真实像素。
+2. **libass 不会给无空格的中文断行**（只在空格/连字符处断），长句会顶出画面两侧。
+   `wrap_cjk()` 按字宽预估预折行（尽量在标点后断、避头尾），再用 ASS 的 `\N` 硬换行。
+   每行字数上限在 `templates/deck_css.py` 的 `FORMATS[*].subtitle.max_em`。
+
+### 11.6 提交
+
+只提交 `config/ prompts/ scripts/ templates/ pipeline/ topics/ publish/<date>.md`；
+`daily/out/` 与 `daily/publish/pool.*` 已在 `.gitignore` 里忽略。
+
+---

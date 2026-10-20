@@ -335,6 +335,15 @@ describe("最近会话区渲染契约", () => {
 		assert.doesNotMatch(foundationStyles, /\.agent-more-row,\s*\n\.session-more-row\s*\{[\s\S]{0,600}?padding:[^;]*14px/);
 	});
 
+	test("关闭/解绑的会话不留状态点占位（#390：标题左侧不再多出一截内边距）", () => {
+		// 两处会话行都走共享组件：组件自身在无色点语义时返回 null（行为见 sidebarStatusDot.test.mjs）
+		assert.match(recentSessionsSection, /<SidebarStatusDot status=\{runtime\?\.status\} \/>/);
+		assert.match(activeSessionsTree, /<SidebarStatusDot status=\{agent\.status\} \/>/);
+		// 旧写法只判 runtime 真值：detached/closed 时渲染空 span，连 gap 一起占位
+		assert.doesNotMatch(recentSessionsSection, /runtime && <span className=\{cn\("size-1\.5/);
+		assert.doesNotMatch(activeSessionsTree, /<span className=\{cn\("size-1\.5/);
+	});
+
 	test("最近会话为空时整段消失（不留悬空分界线）", () => {
 		assert.match(recentSessionsSection, /if\s*\(\s*props\.rows\.length === 0\s*\)\s*return null/);
 	});
