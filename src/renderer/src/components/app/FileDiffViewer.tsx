@@ -10,6 +10,7 @@ import { defaultUrlTransform } from "../session/MarkdownLinkCore";
 import { defaultRehypePlugins } from "streamdown";
 import rehypeKatex from "rehype-katex";
 import { remarkGfmNoSingleTilde } from "../../utils/markdownPlugins";
+import { imageMimeOrBinary } from "../../utils/imageMime";
 // CodeMirrorEditor 静态链上挂着整个 CodeMirror 6 全家桶（view/state/commands/
 // autocomplete/search/lint/lang-json），经 WorkbenchContent 静态 import 进主 chunk，
 // App 启动即解析。与 CodeDiffView 同款懒加载：首次打开编辑器才拉 chunk。
@@ -209,7 +210,8 @@ export function FileDiffViewer(props: {
 					if (!cancelled) setError(t("editor.binaryFileNotSupported", { ext }));
 					return;
 				}
-				const mime = isPdf ? "application/pdf" : mimeFromImageExt(ext);
+				// 传**路径**：映射按扩展名查表，传裸扩展名（"png"）会查不到而永远退化成 octet-stream。
+				const mime = isPdf ? "application/pdf" : imageMimeOrBinary(props.filePath);
 				const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
 				revokeMediaUrl();
 				const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
@@ -584,19 +586,6 @@ export function FileDiffViewer(props: {
  * dev preview interaction without giving project HTML the renderer's origin,
  * Electron bridge, popups, or file-system navigation privileges.
  */
-/** 图片扩展名 → MIME（Blob 类型；Chromium 按内容解码，类型仅作提示） */
-function mimeFromImageExt(ext: string): string {
-	const map: Record<string, string> = {
-		png: "image/png",
-		jpg: "image/jpeg",
-		jpeg: "image/jpeg",
-		gif: "image/gif",
-		webp: "image/webp",
-		bmp: "image/bmp",
-		ico: "image/x-icon",
-	};
-	return map[ext] ?? "application/octet-stream";
-}
 
 function HtmlPreview({ content }: { content: string }) {
 	return <iframe className="h-full w-full border-0 bg-[var(--color-bg-panel)]" srcDoc={content} title={t("editor.htmlPreview")} sandbox="allow-scripts allow-forms" referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", border: "none" }} />;

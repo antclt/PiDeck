@@ -31,6 +31,15 @@ export const REMOTE_PROJECT_UPLOAD_MAX_BYTES = 16 * 1024 * 1024;
 /** 单块原始字节数：base64 后约 1.4 MB，远小于 8 MiB 帧上限，16 MiB 的文件是 16 块。 */
 export const REMOTE_PROJECT_UPLOAD_CHUNK_BYTES = 1024 * 1024;
 
+/**
+ * 上传临时文件名的形状：`.<32 hex>.pideck-put`，写在目标同目录。
+ *
+ * 它只在一次上传窗口内存在；进程被强杀（超时 kill / OOM）时 `finally` 来不及跑，文件会留在远端。
+ * 列表与搜索据此把它隐藏——让用户看到「一个他没传过的文件」比残留本身更糟。带上 32 位 hex
+ * 是为了「只有我们造的名字会被隐藏」，用户自己的 `.foo.pideck-put` 照常显示。
+ */
+export const REMOTE_UPLOAD_TEMP_NAME = /^\.[a-f0-9]{32}\.pideck-put$/;
+
 export const REMOTE_PROJECT_UPLOAD_CODES = {
 	inputInvalid: "REMOTE_FILE_INPUT_INVALID",
 	tooLarge: "REMOTE_FILE_TOO_LARGE",

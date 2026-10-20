@@ -392,6 +392,8 @@ const api = {
 		downloadProjectFile: (projectId: string, path: string) => ipcRenderer.invoke(ipcChannels.remoteProjectDownload, projectId, path) as Promise<import("../shared/types/remoteHost").RemoteProjectDownloadResult>,
 		/** 上传本机文件到远端项目的某个目录（主进程弹选择对话框；取消是正常结果）。 */
 		uploadProjectFiles: (projectId: string, directory: string) => ipcRenderer.invoke(ipcChannels.remoteProjectUpload, projectId, directory) as Promise<import("../shared/types/remoteHost").RemoteProjectUploadResult>,
+		/** 拖放上传：本机路径来自 webUtils.getPathForFile，主进程逐条校验后走同一条写通道。 */
+		uploadProjectFilesFromPaths: (projectId: string, directory: string, paths: string[]) => ipcRenderer.invoke(ipcChannels.remoteProjectUploadPaths, projectId, directory, paths) as Promise<import("../shared/types/remoteHost").RemoteProjectUploadResult>,
 		openProjectText: (projectId: string, path: string): Promise<import("../shared/types/remoteFiles").RemoteTextOpenResult> => ipcRenderer.invoke(ipcChannels.remoteProjectTextOpen, projectId, path),
 		saveProjectText: (projectId: string, path: string, content: string, version: string): Promise<import("../shared/types/remoteFiles").RemoteTextSaveResult> => ipcRenderer.invoke(ipcChannels.remoteProjectTextSave, projectId, path, content, version),
 		/** 远端文件管理：读取条目元数据并签发 rename/delete 的一次性 entry 令牌（不读正文）。 */

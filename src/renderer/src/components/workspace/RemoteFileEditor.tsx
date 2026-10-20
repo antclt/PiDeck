@@ -1,13 +1,25 @@
 import { useState } from "react";
 import { Loader2, RefreshCw, Save } from "lucide-react";
 import { useRemoteFileDraft } from "../../hooks/useRemoteFileDraft";
+import { imageMimeForPath } from "../../utils/imageMime";
+import { RemoteImagePreview } from "./RemoteImagePreview";
 import { t } from "../../i18n";
 import { CodeMirrorEditor } from "../app/CodeMirrorEditor";
 import { Button } from "../ui-shadcn/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
 
-/** 复用CodeMirror的远端编辑宿主；不触达本机files API，不自动保存或自动丢弃冲突草稿。 */
+/**
+ * 复用CodeMirror的远端编辑宿主；不触达本机files API，不自动保存或自动丢弃冲突草稿。
+ *
+ * 图片走独立预览：远端文本通道拒绝非 UTF-8 内容，把 PNG 喂给草稿编辑器只会得到
+ * `REMOTE_FILE_NOT_TEXT`——那不是"文件坏了"，是"这个文件不该用编辑器打开"。
+ */
 export function RemoteFileEditor(props: { projectId: string; path: string }) {
+	if (imageMimeForPath(props.path) !== undefined) return <RemoteImagePreview projectId={props.projectId} path={props.path} />;
+	return <RemoteTextFileEditor projectId={props.projectId} path={props.path} />;
+}
+
+function RemoteTextFileEditor(props: { projectId: string; path: string }) {
 	const { draft, loadError, change, save, reload, dirty } = useRemoteFileDraft(props.projectId, props.path);
 	const [confirmReload, setConfirmReload] = useState(false);
 	const code = loadError ?? draft?.errorCode;

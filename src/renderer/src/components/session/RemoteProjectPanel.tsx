@@ -5,6 +5,7 @@ import type { RemoteEntryKind } from "../../../../shared/types/remoteFiles";
 import { desktopApi } from "../../desktopApi";
 import { useRemoteProjectEntries } from "../../hooks/useRemoteProjectEntries";
 import { useRemoteProjectSearch, REMOTE_SEARCH_UNWIRED_CODE } from "../../hooks/useRemoteProjectSearch";
+import { useRemoteProjectTransfer } from "../../hooks/useRemoteProjectTransfer";
 import { t } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
@@ -59,6 +60,10 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 	);
 
 	const searching = search.phase !== "idle";
+
+	// 传输关注点（上传 / 拖放 / 下载）整块在 hook 里，面板只保留接线：这个文件已经同时管导航、
+	// 搜索、写操作弹框与回收站，再塞传输就越过「单文件 ≤400 行」的目标。
+	const transfer = useRemoteProjectTransfer({ projectId: props.projectId, directory: relative.join("/"), reload: () => loadDirectory(relative), setError, searching });
 
 	const loadDirectory = useCallback(
 		async (segments: string[]) => {
@@ -180,37 +185,6 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 		[files, closeDialogAfter, bumpTrash],
 	);
 
-	/** 上传到当前目录：选择对话框与写远端都在主进程；部分失败逐项回报。 */
-	const uploadFiles = useCallback(() => {
-		void (async () => {
-			const result = await desktopApi.remoteHosts.uploadProjectFiles(props.projectId, relative.join("/"));
-			if (!result.ok) {
-				if (result.canceled === true) return;
-				setError(t("project.remote.uploadFailed", { code: result.code }));
-				return;
-			}
-			setError(null);
-			if (result.failed.length > 0) setError(t("project.remote.uploadPartial", { count: result.failed.length, code: result.failed[0].code }));
-			await loadDirectory(relative);
-		})();
-	}, [props.projectId, relative, loadDirectory]);
-
-	/** 下载到本机：保存对话框与写盘都在主进程，这里只报失败（取消不是失败）。 */
-	const downloadEntry = useCallback(
-		(entry: RemoteWorkspaceEntry) => {
-			void (async () => {
-				const result = await desktopApi.remoteHosts.downloadProjectFile(props.projectId, relativePath(relative, entry.name));
-				if (result.ok) {
-					setError(null);
-					return;
-				}
-				if (result.canceled === true) return;
-				setError(t("project.remote.downloadFailed", { code: result.code }));
-			})();
-		},
-		[props.projectId, relative],
-	);
-
 	const openRowDialog = (entry: RemoteWorkspaceEntry, kind: "rename" | "delete"): void => {
 		if (entry.kind !== "file" && entry.kind !== "directory") return;
 		const path = relativePath(relative, entry.name);
@@ -222,7 +196,7 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 	const fileOutcomeText = files.outcome !== null && files.outcome.operation !== "restore" && files.outcome.operation !== "prune" ? files.outcome.text : "";
 
 	return (
-		<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 py-3">
+		<div className={`flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 py-3 ${transfer.dragActive ? "outline outline-2 -outline-offset-2 outline-primary/60" : ""}`} data-testid="remote-project-drop" onDragOver={transfer.onDragOver} onDragLeave={transfer.onDragLeave} onDrop={transfer.onDrop}>
 			<div className="flex flex-wrap items-center gap-2 text-label">
 				<span className="rounded bg-muted px-1.5 py-0.5 font-medium text-muted-foreground">{t("project.remote.badge")}</span>
 				<strong className="text-body font-semibold text-foreground">{props.projectName}</strong>
@@ -245,7 +219,7 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 						<FolderPlus className="size-3.5" />
 						{t("remoteFileEntry.newFolder")}
 					</Button>
-					<Button type="button" size="sm" variant="secondary" data-testid="remote-file-upload" disabled={files.busy || busy} onClick={uploadFiles}>
+					<Button type="button" size="sm" variant="secondary" data-testid="remote-file-upload" disabled={files.busy || busy} onClick={transfer.uploadFiles}>
 						<Upload className="size-3.5" />
 						{t("remoteFileEntry.uploadAction")}
 					</Button>
@@ -330,7 +304,7 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 										</DropdownMenuTrigger>
 										<DropdownMenuContent align="end">
 											{entry.kind === "file" ? (
-												<DropdownMenuItem data-testid="remote-file-row-download" onSelect={() => downloadEntry(entry)}>
+												<DropdownMenuItem data-testid="remote-file-row-download" onSelect={() => transfer.downloadFile(relativePath(relative, entry.name))}>
 													{t("remoteFileEntry.downloadAction")}
 												</DropdownMenuItem>
 											) : null}

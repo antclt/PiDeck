@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 4b335e08d6531e9c0d2635b51ef46c19bc1e84e46a6a95d243c1969292f85e94（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 32aebd176aede5b17572317c182b9ec389c03795d596ff3965e46e531a5fcdf9（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4204,7 +4204,12 @@ export const zhTW: Record<TranslationKey, string> = {
 	"project.remote.searchTruncated": "結果已截斷：遠端達到掃描/匹配上限後停止，這裡不是全部匹配。",
 	"project.remote.downloadFailed": "下載失敗：{code}",
 	"project.remote.uploadFailed": "上傳失敗：{code}",
-	"project.remote.uploadPartial": "{count} 個檔案上傳失敗（{code}），其餘已上傳",
+	"project.remote.uploadNotAFile": "只支援上傳檔案：目錄請在裡面選檔案，或先打包。",
+	"project.remote.uploadTooLarge": "檔案超過 16 MiB 上限，暫不支援。",
+	"project.remote.uploadExists": "遠端已有同名檔案，未覆蓋（請先重新命名或刪除）。",
+	"project.remote.dropSearching": "搜尋狀態下不接受拖放：先清空搜尋再拖檔案。",
+	"project.remote.dropUnsupported": "拖進來的內容不是本機檔案，無法上傳（請從資源管理器拖檔案進來）。",
+	"project.remote.uploadPartial": "{count} 個檔案上傳失敗：{message}；其餘已上傳",
 	"project.remote.searchFailed": "無法搜尋：{code}",
 	"project.remote.searchUnwired": "搜尋通道尚未接線：請更新應用後再試。",
 	"settings.connections.title": "遠端主機",
@@ -6541,6 +6546,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"remoteFile.conflict": "遠端檔案已被其他程式修改，本次儲存已拒絕覆蓋。草稿仍保留，請複製需要的內容，再重新載入檔案。",
 	"remoteFile.expired": "檔案版本已失效。草稿仍保留，請重新載入後再編輯儲存。",
 	"remoteFile.tooLarge": "檔案或草稿超過 256 KiB，本次操作已拒絕。草稿仍保留。",
+	"remoteFile.imagePreview": "圖片預覽",
+	"remoteFile.imageFailed": "圖片讀取失敗：{code}",
 	"remoteFile.notText": "僅支援 UTF-8 文本及一致的 LF/CRLF 換行；不支援二進位制、無效編碼、混合換行或裸 CR。",
 	"remoteFile.notFound": "遠端檔案不存在。本功能不會建立新檔案。",
 	"remoteFile.permission": "沒有足夠權限，或檔案歸屬無法保持；儲存未獲確認。草稿仍保留。",

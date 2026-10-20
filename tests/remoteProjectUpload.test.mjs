@@ -194,8 +194,12 @@ test("上传/下载通道挂在项目域的传输模块上，且装配层真的�
 	const shared = readFileSync("src/shared/ipc.ts", "utf8");
 	assert.match(shared, /remoteProjectUpload: "remote:project-upload"/);
 	assert.match(shared, /remoteProjectDownload: "remote:project-download"/);
+	// 拖放通道同样要四处同步：少一处就是运行时 undefined。
+	assert.match(shared, /remoteProjectUploadPaths: "remote:project-upload-paths"/);
+	assert.match(transfer, /ipcChannels\.remoteProjectUploadPaths/);
+	assert.match(index, /registerRemoteProjectTransferIpc\(\{/);
 	const preload = readFileSync("src/preload/index.ts", "utf8");
-	for (const fn of ["uploadProjectFiles", "downloadProjectFile"]) assert.ok(preload.includes(fn + ":"), `preload 缺少 ${fn}`);
+	for (const fn of ["uploadProjectFiles", "uploadProjectFilesFromPaths", "downloadProjectFile"]) assert.ok(preload.includes(fn + ":"), `preload 缺少 ${fn}`);
 });
 
 test("正好一个整块只写一行 base64（边界不产生空块）", async () => {
@@ -232,4 +236,63 @@ test("stdin 行必须符合 launcher 契约：不含换行、且不超过 maxLin
 		assert.ok(!line.includes("\n") && !line.includes("\r"), "stdin 行不得自带换行");
 		assert.ok(Buffer.byteLength(line, "utf8") <= request.maxLineBytes, "每行必须在 launcher 上限内");
 	}
+});
+
+test("拖放路径解析：只收本机绝对路径，任一条不合法就整批拒", () => {
+	const { parseLocalUploadPaths, REMOTE_UPLOAD_MAX_FILES } = loadTsCommonJs("src/main/ipc/remoteUploadPaths.ts");
+	// 合法形态：POSIX / Windows 盘符 / UNC。
+	for (const paths of [["/etc/hosts"], [String.raw`C:\tmp\a.txt`], ["C:/tmp/a.txt"], [String.raw`\\server\share\x`]]) {
+		const result = parseLocalUploadPaths(paths);
+		assert.equal(result.ok, true, JSON.stringify(paths));
+	}
+	// 首尾空格是 POSIX 合法文件名的一部分：解析不得改写路径。
+	// 不 trim、不改写：前导空格会让「绝对路径」判据不成立 → 拒。宁可拒也不悄悄换个路径去读。
+	assert.equal(parseLocalUploadPaths([" /tmp/a "]).ok, false);
+	// 非法：相对路径、空、控制字符、非字符串、超条数、空数组。
+	assert.equal(parseLocalUploadPaths(["relative.txt"]).ok, false);
+	assert.equal(parseLocalUploadPaths([""]).ok, false);
+	assert.equal(parseLocalUploadPaths(["/tmp/a" + String.fromCharCode(0) + "b"]).ok, false);
+	assert.equal(parseLocalUploadPaths([1]).ok, false);
+	assert.equal(parseLocalUploadPaths([]).ok, false);
+	assert.equal(parseLocalUploadPaths(Array.from({ length: REMOTE_UPLOAD_MAX_FILES + 1 }, (_, i) => `/tmp/${i}`)).ok, false);
+	assert.equal(parseLocalUploadPaths(Array.from({ length: REMOTE_UPLOAD_MAX_FILES }, (_, i) => `/tmp/${i}`)).ok, true);
+});
+
+test("拖放只省掉对话框：两条通道共用同一个 uploadMany 与同一套大小门", () => {
+	const source = readFileSync("src/main/ipc/remoteProjectTransferIpc.ts", "utf8");
+	assert.match(source, /const uploadMany = async/);
+	assert.match(source, /return await uploadMany\(target, directory, parsed\.paths\);/);
+	assert.match(source, /return await uploadMany\(target, directory, choice\.filePaths\);/);
+	// 条数上限在边界一次判（不再在写循环里 slice 静默截断）。
+	assert.match(source, /parseLocalUploadPaths\(pathsValue\)/);
+	assert.doesNotMatch(source, /localPaths\.slice\(0, 32\)/);
+});
+
+test("渲染层拖放：经 webUtils 解析本机路径，解析不出来的项不静默上传", () => {
+	const hook = readFileSync("src/renderer/src/hooks/useRemoteProjectTransfer.ts", "utf8");
+	// Electron 32+ 的 File 没有 path，必须走 preload 的 getPathForFile。
+	assert.match(hook, /desktopApi\.files\.getPathForFile\(file\)/);
+	assert.match(hook, /uploadProjectFilesFromPaths\(/);
+	// dragOver 必须 preventDefault，否则 drop 根本不触发；且只认 Files。
+	assert.match(hook, /onDragOver[\s\S]{0,300}?types\.includes\("Files"\)/);
+	assert.match(hook, /onDragOver[\s\S]{0,400}?preventDefault\(\)/);
+	// 一个可用路径都没有时给出明确文案，而不是当成「上传了 0 个」的成功。
+	assert.match(hook, /dropUnsupported/);
+	// 面板只接线，事件与上传逻辑都在 hook 里（否则又会把面板撑过 400 行）。
+	const panel = readFileSync("src/renderer/src/components/session/RemoteProjectPanel.tsx", "utf8");
+	assert.match(panel, /useRemoteProjectTransfer\(/);
+	assert.match(panel, /onDrop=\{transfer\.onDrop\}/);
+	assert.doesNotMatch(panel, /getPathForFile/);
+});
+
+test("上传临时文件不出现在列表与搜索里（只有我们造的那个形状被隐藏）", () => {
+	const { REMOTE_UPLOAD_TEMP_NAME } = loadTsCommonJs("src/main/remote/RemoteProjectFileUpload.ts", { stubs });
+	assert.equal(REMOTE_UPLOAD_TEMP_NAME.test(".0123456789abcdef0123456789abcdef.pideck-put"), true);
+	// 用户自己的同后缀文件、以及别的隐藏文件都照常显示。
+	for (const name of [".env", ".gitignore", "my.pideck-put", ".short.pideck-put", ".0123456789abcdef0123456789abcdef.pideck-put.bak"]) {
+		assert.equal(REMOTE_UPLOAD_TEMP_NAME.test(name), false, name);
+	}
+	const ipc = readFileSync("src/main/ipc/remoteProjectIpc.ts", "utf8");
+	// 列表与搜索两处都要过滤：只过滤列表会让「搜索能搜到、列表看不到」变成新的困惑。
+	assert.equal((ipc.match(/REMOTE_UPLOAD_TEMP_NAME\.test\(/g) ?? []).length, 2, "列表与搜索都必须过滤临时文件");
 });

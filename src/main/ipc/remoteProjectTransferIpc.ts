@@ -16,10 +16,12 @@ import { BrowserWindow, dialog, ipcMain } from "electron";
 import { ipcChannels } from "../../shared/ipc";
 import type { RemoteProjectDownloadResult, RemoteProjectUploadResult } from "../../shared/types/remoteHost";
 import type { RemoteHostConnectionService, RemoteProjectSession } from "../remote/RemoteHostConnectionService";
+import type { RemoteProjectTarget } from "./remoteProjectTarget";
 import { REMOTE_PROJECT_UPLOAD_MAX_BYTES } from "../remote/RemoteProjectFileUpload";
 import { createRemoteWorkspaceReader, type RemoteWorkspacePort } from "../remote/RemoteWorkspaceReader";
 import { REMOTE_PROJECT_TRASH_DIR } from "../remote/RemoteProjectEntryCommands";
 import { createRemoteProjectTargetResolver } from "./remoteProjectTarget";
+import { parseLocalUploadPaths } from "./remoteUploadPaths";
 
 const CONTROL = /[\u0000-\u001f\u007f]/;
 
@@ -46,6 +48,33 @@ export function registerRemoteProjectTransferIpc(input: { enabled: boolean; serv
 	};
 
 	/**
+	 * 逐条上传并如实回报。
+	 *
+	 * 一个文件失败不影响其余项：多选/拖放一次传十个，把整批压成一个布尔值等于让用户猜哪个没上去。
+	 * 只有「一个都没成」才整批按失败返回（界面那时只需要一条错误）。
+	 */
+	const uploadMany = async (target: RemoteProjectTarget, directory: string, localPaths: readonly string[]): Promise<RemoteProjectUploadResult> => {
+		const uploaded: Array<{ name: string; bytes: number }> = [];
+		const failed: Array<{ name: string; code: string }> = [];
+		for (const localPath of localPaths) {
+			const name = basename(localPath);
+			try {
+				const info = await stat(localPath);
+				if (!info.isFile()) throw new Error("REMOTE_UPLOAD_NOT_A_FILE");
+				if (info.size < 1 || info.size > REMOTE_PROJECT_UPLOAD_MAX_BYTES) throw new Error("REMOTE_FILE_TOO_LARGE");
+				const bytes = await readFile(localPath);
+				await target.service.uploadProjectFile({ hostId: target.hostId, root: target.remotePath, relative: directory === "" ? name : `${directory}/${name}`, bytes });
+				uploaded.push({ name, bytes: bytes.length });
+			} catch (error) {
+				failed.push({ name, code: codeOf(error, "REMOTE_UPLOAD_FAILED") });
+			}
+		}
+		if (uploaded.length === 0 && failed.length === 1) return { ok: false, code: failed[0].code };
+		if (uploaded.length === 0) return { ok: false, code: "REMOTE_UPLOAD_FAILED" };
+		return { ok: true, uploaded, failed };
+	};
+
+	/**
 	 * 把本机文件上传到远端项目的某个目录。
 	 *
 	 * 选择对话框在主进程（本机路径绝不从渲染层来），字节经 `service.uploadProjectFile` 的 stdin 分块
@@ -65,25 +94,25 @@ export function registerRemoteProjectTransferIpc(input: { enabled: boolean; serv
 		const choice = owner === null || owner === undefined ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(owner, options);
 		if (choice.canceled === true || !Array.isArray(choice.filePaths) || choice.filePaths.length === 0) return { ok: false, code: "REMOTE_UPLOAD_CANCELED", canceled: true };
 
-		const uploaded: Array<{ name: string; bytes: number }> = [];
-		const failed: Array<{ name: string; code: string }> = [];
-		for (const localPath of choice.filePaths.slice(0, 32)) {
-			const name = basename(localPath);
-			try {
-				const info = await stat(localPath);
-				if (!info.isFile()) throw new Error("REMOTE_UPLOAD_NOT_A_FILE");
-				if (info.size < 1 || info.size > REMOTE_PROJECT_UPLOAD_MAX_BYTES) throw new Error("REMOTE_FILE_TOO_LARGE");
-				const bytes = await readFile(localPath);
-				await target.service.uploadProjectFile({ hostId: target.hostId, root: target.remotePath, relative: directory === "" ? name : `${directory}/${name}`, bytes });
-				uploaded.push({ name, bytes: bytes.length });
-			} catch (error) {
-				failed.push({ name, code: codeOf(error, "REMOTE_UPLOAD_FAILED") });
-			}
-		}
-		// 一个都没成：整批按失败返回（界面只需要一条错误）；部分成功用 ok:true + failed 明细。
-		if (uploaded.length === 0 && failed.length === 1) return { ok: false, code: failed[0].code };
-		if (uploaded.length === 0) return { ok: false, code: "REMOTE_UPLOAD_FAILED" };
-		return { ok: true, uploaded, failed };
+		return await uploadMany(target, directory, choice.filePaths);
+	});
+
+	/**
+	 * 拖放上传：渲染层给出本机文件绝对路径（来自 `webUtils.getPathForFile`），不再弹对话框。
+	 *
+	 * 信任模型：路径由**用户拖放动作**产生，但渲染层仍在往主进程传本机路径，所以这里逐条校验
+	 * （绝对路径、长度、控制字符）+ 逐个 `stat` 确认是常规文件，再走与对话框上传完全相同的
+	 * 大小门与写通道。也就是说「拖放」只是省掉一次选文件，不放宽任何远端写约束。
+	 */
+	ipcMain.handle(ipcChannels.remoteProjectUploadPaths, async (_event, projectIdValue: unknown, directoryValue: unknown, pathsValue: unknown): Promise<RemoteProjectUploadResult> => {
+		if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
+		const directory = typeof directoryValue === "string" ? directoryValue.trim() : "";
+		if (directoryValue !== undefined && directory !== "" && readRelative(directory) === undefined) return { ok: false, code: "REMOTE_PROJECT_PATH_INVALID" };
+		const parsed = parseLocalUploadPaths(pathsValue);
+		if (!parsed.ok) return { ok: false, code: "REMOTE_UPLOAD_INVALID_PATHS" };
+		const target = await projectTarget(projectIdValue);
+		if ("code" in target) return { ok: false, code: target.code };
+		return await uploadMany(target, directory, parsed.paths);
 	});
 
 	/**

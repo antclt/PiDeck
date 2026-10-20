@@ -477,6 +477,7 @@ export function createPreviewApi(): PiDesktopApi {
 			readProjectFile: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
 			downloadProjectFile: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
 			uploadProjectFiles: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			uploadProjectFilesFromPaths: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
 			openProjectText: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
 			saveProjectText: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
 			statProjectEntry: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),

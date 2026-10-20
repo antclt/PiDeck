@@ -32,6 +32,7 @@ import { registerRemoteProjectCreateFlow } from "./remoteProjectCreateIpc";
 import type { RemoteHostConnectionService, RemoteProjectSession } from "../remote/RemoteHostConnectionService";
 import { REMOTE_HELPER_MAX_SEARCH_QUERY_LENGTH } from "../remote/RemoteHelperContract";
 import { REMOTE_PROJECT_TRASH_DIR } from "../remote/RemoteProjectEntryCommands";
+import { REMOTE_UPLOAD_TEMP_NAME } from "../remote/RemoteProjectFileUpload";
 import { resolveRemoteBrowseRoot } from "../remote/RemoteBrowseRoot";
 import { createRemoteSearchReader, REMOTE_SEARCH_READER_CODES } from "../remote/RemoteSearchReader";
 import { createRemoteWorkspaceReader, type RemoteWorkspacePort } from "../remote/RemoteWorkspaceReader";
@@ -257,7 +258,9 @@ export function registerRemoteProjectIpc(input: {
 			// 回收站是项目根的保留命名空间（读通道也拒绝它）；只隐藏根目录下这一项，子目录里同名条目属于用户数据。
 			return {
 				ok: true,
-				entries: outcome.value.entries.filter((entry) => relative !== "" || entry.name !== REMOTE_PROJECT_TRASH_DIR).map((entry) => ({ name: entry.name, kind: entry.kind, ...(entry.bytes === undefined ? {} : { bytes: entry.bytes }) })),
+				// 两类条目不属于用户数据：回收站命名空间（只在根目录隐藏）与本通道自己的上传临时文件
+				// （强杀后可能残留）。后者按形状隐藏，用户自己造的同后缀文件照常显示。
+				entries: outcome.value.entries.filter((entry) => (relative !== "" || entry.name !== REMOTE_PROJECT_TRASH_DIR) && !REMOTE_UPLOAD_TEMP_NAME.test(entry.name)).map((entry) => ({ name: entry.name, kind: entry.kind, ...(entry.bytes === undefined ? {} : { bytes: entry.bytes }) })),
 			};
 		} catch (error) {
 			return { ok: false, code: codeOf(error, "REMOTE_PROJECT_READ_FAILED") };
@@ -317,7 +320,7 @@ export function registerRemoteProjectIpc(input: {
 			// 递归搜索会命中回收站里的归档条目，但它们不是用户可搜索的文件：按首段过滤整棵 .pideck-trash。
 			return {
 				ok: true,
-				entries: result.entries.filter((entry) => entry.path.split("/")[0] !== REMOTE_PROJECT_TRASH_DIR).map((entry) => ({ path: entry.path, name: entry.name, kind: entry.kind, ...(entry.bytes === undefined ? {} : { bytes: entry.bytes }) })),
+				entries: result.entries.filter((entry) => entry.path.split("/")[0] !== REMOTE_PROJECT_TRASH_DIR && !REMOTE_UPLOAD_TEMP_NAME.test(entry.path.split("/").at(-1) ?? "")).map((entry) => ({ path: entry.path, name: entry.name, kind: entry.kind, ...(entry.bytes === undefined ? {} : { bytes: entry.bytes }) })),
 				scanned: result.scanned,
 				truncated: result.truncated,
 			};
