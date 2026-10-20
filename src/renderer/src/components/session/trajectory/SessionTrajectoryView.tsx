@@ -12,6 +12,7 @@ import { t } from "../../../i18n";
 import { writeClipboard } from "../../../utils/clipboard";
 import { formatDuration, formatTime } from "../TimelineFormat";
 import { buildTrajectory, filterRecordsByRange, traceSizeLabel, type TrajectoryLane, type TrajectoryModelTraceSummary, type TrajectoryRecord, type TrajectoryTimeRange, type TrajectoryTurn } from "./buildTrajectory";
+import type { SessionFactsCoverage } from "../../../../../shared/types/trajectory";
 import { bucketOverviewTicks, buildTrajectoryWindow } from "./trajectoryWindow";
 import { defaultFoldedTurns, foldedTurnPeek, foldTurnRecords, summarizeTurn } from "./trajectoryFold";
 import { ModelTraceDetail } from "../../workspace/ModelTraceDetail";
@@ -149,6 +150,8 @@ export function SessionTrajectoryView(props: {
 	isDsh?: boolean;
 	/** 模型请求快照摘要（pi 会话；每个请求一行，可回读完整请求体）。 */
 	modelTraces?: TrajectoryModelTraceSummary[];
+	/** 事实覆盖范围（面板传入）：DEV 指标与「不可用」提示用。 */
+	coverage?: SessionFactsCoverage;
 	/** 来源会话（fork/子代理的父会话）：显示在面板顶部，可跳转。 */
 	sourceSession?: { sessionId: string; title: string };
 	/** 点击来源会话行时打开父会话（跨项目时缺省，行退化为纯展示）。 */
@@ -235,6 +238,7 @@ export function SessionTrajectoryView(props: {
 		DEV_METRICS.mountedTurns = model.turns.length;
 		DEV_METRICS.processEvents = props.processEvents?.length ?? 0;
 		DEV_METRICS.processEventsType = Array.isArray(props.processEvents) ? "array" : typeof props.processEvents;
+		DEV_METRICS.coverage = props.coverage ?? null;
 		DEV_METRICS.processRecords = model.records.filter((record) => record.lane === "process").length;
 		(globalThis as { __pideckTrajectoryMetrics?: Record<string, unknown> }).__pideckTrajectoryMetrics = DEV_METRICS;
 	});

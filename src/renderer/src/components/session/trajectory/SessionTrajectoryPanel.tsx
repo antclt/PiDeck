@@ -54,6 +54,7 @@ export function SessionTrajectoryPanel() {
 					sessionId={sessionId}
 					messages={source.messages}
 					processEvents={source.processEvents}
+					coverage={source.processCoverage}
 					modelTraces={source.modelTraces}
 					sourceSession={sourceSession}
 					onOpenSourceSession={sourceSession ? openSourceSession : undefined}
