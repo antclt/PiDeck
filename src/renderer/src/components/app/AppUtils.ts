@@ -487,6 +487,12 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 			}
 			appendRunMessage(message);
 		} else if (message.role === "tool") {
+			// PTC 子调用（meta.ptcNested）：DSH run_code 程序内部的文件类子调用（write/edit…）
+			// 只服务于「修改的文件」汇总（见 dshEventProjector 的 tool/ptc-dispatch 分支），
+			// 时间线仍只展示外层 run_code 卡——否则一轮 PTC 会凭空冒出几十张嵌套工具卡。
+			// 必须在任何分组动作（flushRunForTurnBoundary/flushThinking）之前跳过：
+			// 隐藏消息不应制造回合边界，也不能把思考组打散。
+			if (message.meta?.ptcNested === true) continue;
 			// 新回合可能直接从工具开始（唤醒后先调用工具），同样需要先断开
 			flushRunForTurnBoundary();
 			flushThinking();

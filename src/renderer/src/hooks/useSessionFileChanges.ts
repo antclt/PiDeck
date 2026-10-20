@@ -11,11 +11,17 @@
  * 导致文件随轮次无限堆积）。流式期未落盘部分仍由 run 增量合并补齐。
  */
 import { useEffect, useMemo, useState } from "react";
+import { useAtomValue } from "jotai";
 import type { SessionFileChange } from "../../../shared/types";
+import { collectLatestTurnFileChanges } from "../../../shared/fileChanges";
 import type { AgentRunItem } from "../components/app/AppUtils";
 import { collectRunFileChanges } from "../components/session/TimelineFormat";
 import { mergeRunFileChanges } from "../components/session/turn/fileChangesMerge";
 import { desktopApi } from "../desktopApi";
+import { sessionMessageCacheBySessionIdAtomFamily } from "../atoms/session-atoms";
+
+/** 稳定空数组：没 PTC 嵌套消息时让 mergeRunFileChanges 保持引用，旧后端行为不变。 */
+const EMPTY_FILE_CHANGES: SessionFileChange[] = [];
 
 export function useSessionFileChanges(sessionId: string, run?: AgentRunItem): { entries: SessionFileChange[]; loading: boolean } {
 	const [full, setFull] = useState<SessionFileChange[]>([]);
@@ -43,7 +49,17 @@ export function useSessionFileChanges(sessionId: string, run?: AgentRunItem): { 
 
 	// 当前 run 增量（流式未落盘部分），与全量合并
 	const runEntries = useMemo(() => (run ? collectRunFileChanges(run) : []), [run]);
-	const entries = useMemo(() => mergeRunFileChanges(full, runEntries), [full, runEntries]);
+	// PTC 侧（DSH run_code）：模型在程序里调 write/edit，顶层只有一张 run_code 卡，主进程对
+	// DSH 又固定返回 []（无 pi 会话文件）——两路都拿不到文件。这里改用投影出来的隐藏嵌套
+	// 工具消息（meta.ptcNested，见 dshEventProjector 的 tool/ptc-dispatch）自聚合本轮修改。
+	// 其它后端消息里没有这个标记，直接返回稳定空数组，合并结果与改前完全一致。
+	const cacheEntry = useAtomValue(sessionMessageCacheBySessionIdAtomFamily(sessionId));
+	const localEntries = useMemo(() => {
+		const messages = cacheEntry?.messages;
+		if (!messages || !messages.some((message) => message.meta?.ptcNested === true)) return EMPTY_FILE_CHANGES;
+		return collectLatestTurnFileChanges(messages);
+	}, [cacheEntry]);
+	const entries = useMemo(() => mergeRunFileChanges(mergeRunFileChanges(full, runEntries), localEntries), [full, runEntries, localEntries]);
 
 	return { entries, loading };
 }
