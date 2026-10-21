@@ -72,7 +72,7 @@ test("multi-repository panes have isolated persisted state and unique pane ids",
 test("directory actions stage and discard only their grouped resource paths", () => {
 	assert.match(resourceTree, /stageDir\?: \(paths: string\[\]\) => void/);
 	assert.match(resourceTree, /discardDir\?: \(resources: Array/);
-	assert.match(resourceTree, /props\.stageDir\?\.\(stageable\.map/);
+	assert.match(resourceTree, /props\.stageDir\?\.\(dirResources\.map\(\(resource\) => resource\.path\)\)/);
 	assert.match(resourceTree, /props\.discardDir\?\.\(discardable, dir \|\| "\/"\)/);
 	assert.match(panel, /setDirectoryDiscardTarget\(\{ resources, label \}\)/);
 	assert.match(panel, /props\.discardFiles\(props\.projectId, target\.resources\)/);

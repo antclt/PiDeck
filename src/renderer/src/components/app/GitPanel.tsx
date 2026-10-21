@@ -11,12 +11,12 @@ import { dismissNotice, showNotice, type NoticeId } from "../../utils/notice";
 import { writeClipboard } from "../../utils/clipboard";
 import { htmlToPlainText, readClipboardHtmlConsistent, readClipboardText } from "../../utils/clipboard";
 import { deepEqual } from "../../utils/deepEqual";
-import type { BranchDiffResult, CommitDetail, CommitEntry, GitAheadBehind, GitChangedFile, GitDiscardResource, GitResource, GitResourceGroupType, GitResourceGroups } from "../../../../shared/types";
+import type { BranchDiffResult, CommitDetail, CommitEntry, GitAheadBehind, GitChangedFile, GitDiscardResource, GitResourceGroupType, GitResourceGroups } from "../../../../shared/types";
 import { GitStatus } from "../../../../shared/types";
 import { EMPTY_GIT_COMMIT_COMPOSER, gitCommitComposerByScopeAtom, gitCommitScopeKey, openSettingsAtom, patchGitCommitComposer, type GitCommitComposerState } from "../../atoms";
 import { t } from "../../i18n";
 import { fileNameOnly, FileTree, getCollapsibleChangeDirs, ResourceGroup, ResourceRow } from "./git/GitResourceTree";
-import { collectChangeTreeDirPaths, type GitChangeViewMode } from "./git/changeTree";
+import { collectChangeTreeDirPaths, collectUnstagedResources, type GitChangeViewMode } from "./git/changeTree";
 import { GitCompactFilter, PaneHeader } from "./git/GitPanelControls";
 import { SourceControlGraph } from "./git/GitGraph";
 import { getViewportBoundMenuPlacement } from "./git/floatingMenuPosition";
@@ -892,20 +892,10 @@ export function GitPanel(props: GitPanelProps) {
 		setPaneState((current) => resizePair(current, before, after, beforeHeight, afterHeight));
 	};
 
-	const workingChanges = useMemo(() => {
-		// VS Code 语义：Changes 组始终显示全部变更（含已暂存），Staged 组单独列已暂存；
-		// 同一文件同时在 index 与 workingTree（暂存后又改）时只列一次，避免重复行
-		const seen = new Set<string>();
-		const result: GitResource[] = [];
-		for (const r of [...groups.workingTree, ...groups.untracked, ...groups.index]) {
-			if (seen.has(r.path)) continue;
-			seen.add(r.path);
-			result.push(r);
-		}
-		return result;
-	}, [groups.workingTree, groups.untracked, groups.index]);
-	/** 已暂存路径集合：Changes 组中这些文件不再显示 stage/rollback 行内按钮 */
-	const stagedPathSet = useMemo(() => new Set(groups.index.map((r) => r.path)), [groups.index]);
+	// 「未暂存的更改」= 工作区侧改动（workingTree + untracked）。已暂存资源只出现在「暂存的更改」组：
+	// 并进本组会让文件暂存后仍留在未暂存列表，点它还按 workingTree 取 diff 而失败（issue #391）。
+	// 暂存后又继续改的文件由 porcelain 同时给出 index + workingTree 两条资源，本组只保留后者。
+	const workingChanges = useMemo(() => collectUnstagedResources(groups), [groups]);
 	const stagedCount = groups.index.length;
 	const hasUnresolvedConflicts = groups.merge.length > 0;
 	// VS Code enables the action for either staged changes or working-tree changes
@@ -1649,7 +1639,6 @@ export function GitPanel(props: GitPanelProps) {
 												discardFile={discardFile}
 												deleteFile={props.deleteFiles ? deleteFile : undefined}
 												onOpenFile={props.onOpenFile}
-												stagedPaths={stagedPathSet}
 												projectRoot={props.projectRoot}
 												viewMode={changesViewMode}
 												collapsedDirs={collapsedChangeDirs}
