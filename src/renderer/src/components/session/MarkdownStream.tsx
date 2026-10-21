@@ -159,7 +159,9 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 	// 流结束 isStreaming 变 false 后，全量渲染（高亮/mermaid/表格/元素树）是一次
 	// 实测 70-100ms 的同步长任务：若发生在用户滚动/交互期间会造成可见卡顿与滚动跳动。
 	// 因此 settle 后先保持流式末帧的轻量渲染，requestIdleCallback 空闲时再切全量
-	// （timeout 兜底防永久延迟）；静态场景（从未流式，如 FileDiffViewer）不延迟。
+	// （timeout 兜底防永久延迟）。静态场景（从未流式，如 FileDiffViewer）分屏打开时，旁边
+	// 常是正在流式渲染的会话：小文档立即全量无可感卡顿；大文档（>40K）同样走 idle
+	// 调度，避免 shiki 全量高亮与会话流式渲染抢主线程（2027-02 分屏卡顿修复）。
 	const wasStreamingRef = useRef(false);
 	const [settleFull, setSettleFull] = useState(false);
 	const effectiveLight = props.light || isStreamingNow || !settleFull || shouldKeepLightOnSettle(props.text.length);
@@ -171,11 +173,16 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 			return;
 		}
 		if (!wasStreamingRef.current) {
-			// 静态场景（从未流式）：立即全量，不延迟
-			setSettleFull(true);
-			return;
+			// 静态场景（从未流式）：小文档（≤40K）立即全量；大文档首帧先轻量渲染，
+			// 空闲再补全量高亮（与流式 settle 同款调度）。首帧轻量期间 frozenSplit
+			// 走冻结切分渲染，文本立即可读可滚，不是白屏。
+			if (displayText.length <= STREAM_LIGHT_MAX_CHARS) {
+				setSettleFull(true);
+				return;
+			}
+		} else {
+			wasStreamingRef.current = false;
 		}
-		wasStreamingRef.current = false;
 		const schedule = () => setSettleFull(true);
 		const id = typeof window.requestIdleCallback === "function" ? window.requestIdleCallback(schedule, { timeout: 1500 }) : window.setTimeout(schedule, 50);
 		return () => {

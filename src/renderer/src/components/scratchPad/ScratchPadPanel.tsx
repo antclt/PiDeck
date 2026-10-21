@@ -84,6 +84,14 @@ const rehypeHighlightMark: Plugin<[], Root> = () => {
 	};
 };
 
+/*
+ * 预览插件列表必须提为模块级常量：内联数组每次重渲染生成新引用，
+ * MarkdownStream 的 memo（浅比较）随即失效 → 整篇重新解析（与 FileDiffViewer 同因，2027-02）。
+ */
+const SCRATCH_PAD_REMARK_PLUGINS = [remarkGfmNoSingleTilde, remarkInlineMathGuard, remarkMath, remarkBreaks];
+const SCRATCH_PAD_REHYPE_PLUGINS = [rehypeKatex, rehypeHighlightMark];
+const noopOpenExternal = (): void => undefined;
+
 /** 适配右侧栏：草稿选择收进顶部下拉，让窄栏也能保留完整编辑宽度。 */
 export const ScratchPadPanel = memo(function ScratchPadPanel(props: ScratchPadPanelProps) {
 	const { drafts, currentDraftPath, content, mode, onChangeContent, onSetMode, onToggleCheckbox, onExport, onSelectDraft, onCreateDraft, onDeleteDraft, onClose } = props;
@@ -241,9 +249,9 @@ export const ScratchPadPanel = memo(function ScratchPadPanel(props: ScratchPadPa
 						<MarkdownStream
 							key={`scratch-pad-${content}`}
 							text={prepareTaskListPreview(content)}
-							onOpenExternal={() => undefined}
-							remarkPlugins={[remarkGfmNoSingleTilde, remarkInlineMathGuard, remarkMath, remarkBreaks]}
-							rehypePlugins={[rehypeKatex, rehypeHighlightMark]}
+							onOpenExternal={noopOpenExternal}
+							remarkPlugins={SCRATCH_PAD_REMARK_PLUGINS}
+							rehypePlugins={SCRATCH_PAD_REHYPE_PLUGINS}
 							components={{
 								/* GFM task list：用 AST 节点行号直接定位源码行，避免 render-order 计数器漂移 */
 								li: ({ node, className, children, ...liProps }) => {
