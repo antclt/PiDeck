@@ -20,6 +20,7 @@ import {
 	saveSessionScrollAnchorAtom,
 	sessionScrollAnchorByIdAtom,
 	sessionSendStateByIdAtom,
+	sendPinAnimatingByIdAtom,
 	setSessionMessageLoadStateAtom,
 	touchSessionMessagesAtom,
 	type SessionLoadState,
@@ -691,6 +692,19 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 	const pendingSendScrollRef = useRef<{ ownerKey: string; messageId: string } | undefined>(undefined);
 	/** 已做过发送定位的消息：in-flight 发送态会在多次 render 里持续成立，不能重复播动画。 */
 	const positionedSendMessageRef = useRef<string | undefined>(undefined);
+	/**
+	 * 发送置顶动画进行中标记（session 级 atom）：TurnRow 的「新一轮折叠」据此等动画
+	 * 结束再收起上一轮——动画中收起会让上方内容骤缩，视口补偿把 scrollTop 往回带，
+	 * 用户看到「先向上再向下」的来回滚动（2026-10 反馈）。
+	 */
+	const setSendPinAnimating = useCallback(
+		(active: boolean) => {
+			const sessionId = options.sessionId;
+			if (!sessionId) return;
+			store.set(sendPinAnimatingByIdAtom, (prev) => (prev[sessionId] === active ? prev : { ...prev, [sessionId]: active }));
+		},
+		[options.sessionId, store],
+	);
 	const scrollerScrollApiRef = useRef<MessageScrollerScrollApi | null>(null);
 	const loadMoreAnchorRef = useRef<Tagged<TimelineAnchor> | undefined>(undefined);
 	/** 浏览态钉行：扩窗/翻页前冻住正在看的那一轮，布局变高时按漂移补位置。 */
@@ -1119,6 +1133,9 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		positionedSendMessageRef.current = sendMessageId;
 		sendScrollRef.current.pin(timeline, sendMessageId, {
 			onStart: () => {
+				// 先立标记再滚：TurnRow 的折叠 effect 与本动画跑在同一帧窗口里，
+				// 标记晚一步就会漏掉这次折叠。
+				setSendPinAnimating(true);
 				invalidateHistoryBrowsing();
 				scrollerScrollApiRef.current?.restoreAt(timeline.scrollTop);
 				autoScrollRef.current = false;
@@ -1126,17 +1143,23 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 				setShowScrollToBottom(false);
 			},
 			onComplete: () => {
+				setSendPinAnimating(false);
 				if (ownerKeyRef.current !== ownerKey) return;
 				autoScrollRef.current = true;
 				setAutoScroll(true);
 				setShowScrollToBottom(false);
 				void scrollerScrollApiRef.current?.scrollToBottom({ animation: "instant" });
 			},
+			// 用户滚动 / 切会话 / 下一次 pin 打断：不留标记，否则折叠会被无限期推迟。
+			onCancel: () => setSendPinAnimating(false),
 			isFollowing: () => autoScrollRef.current,
 			markProgrammaticScroll,
 			clearProgrammaticScroll: clearProgrammaticTimelineScroll,
 		});
-	}, [clearProgrammaticTimelineScroll, invalidateHistoryBrowsing, markProgrammaticScroll, options.sessionId, ownerKey, restorePhase, sendMessageId, store]);
+		// 短会话 / 行未挂载 / 距离为 0 时 pin 可能一次都不动画就返回（不触发 onStart）：
+		// 同步结算标记，避免残留 true。
+		if (!sendScrollRef.current.isAnimating) setSendPinAnimating(false);
+	}, [clearProgrammaticTimelineScroll, invalidateHistoryBrowsing, markProgrammaticScroll, options.sessionId, ownerKey, restorePhase, sendMessageId, store, setSendPinAnimating]);
 	useEffect(
 		() => () => {
 			pendingSendScrollRef.current = undefined;

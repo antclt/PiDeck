@@ -4173,7 +4173,7 @@ export const zhCN = {
 	"sessionFind.open": "在当前会话中查找",
 	"sessionFind.placeholder": "在当前会话中查找…",
 	"sessionFind.noResults": "没有匹配",
-	"sessionFind.unavailable": "会话索引尚未就绪，稍候再试（首次建索引需要一会儿）",
+	"sessionFind.unavailable": "暂时读不到会话内容，稍候再试",
 	"sessionFind.jumpFailed": "未能跳转到这条命中：它可能在更早的历史里，或已被移出当前上下文",
 	"sessionFind.searching": "查找中…",
 	"sessionFind.prev": "上一条命中",

@@ -19,6 +19,25 @@ import { decodeWslGitStderr, decodeWslGitStdout, planGitSpawn, resolveWslGitTarg
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * execFile 输出超上限（ERR_CHILD_PROCESS_STDIO_MAXBUFFER）时的错误，额外带上已收集到的截断输出。
+ *
+ * Node 其实把截断内容挂在 error.stdout 上，但那是 any 形状：调用方读它要类型收窄，还得知道
+ * 「有 stdout 不等于成功」。统一成这个错误后，「只消费输出前缀」的调用方（提交摘要）能显式降级；
+ * 其余调用方行为不变：message 仍是 execFile / 本模块原文（溢出报错本来就不带 `Command failed:` 前缀），
+ * 按失败处理的路径照旧，只是多了一个可选的截断输出可读。
+ */
+export class GitOutputOverflowError extends Error {
+	/** 截至上限的输出（已被截断，调用方只可当作前缀使用） */
+	readonly stdout: string;
+
+	constructor(message: string, stdout: string) {
+		super(message);
+		this.name = "GitOutputOverflowError";
+		this.stdout = stdout;
+	}
+}
+
 export type ExecGitOptions = {
 	cwd: string;
 	timeoutMs?: number;
@@ -33,16 +52,35 @@ const WSL_GIT_MAX_BUFFER = 16 * 1024 * 1024;
 export async function execGit(args: string[], options: ExecGitOptions): Promise<{ stdout: string; stderr: string }> {
 	const plan = planGitSpawn(args, { cwd: options.cwd, env: options.env, nativeCommand: currentGitExecutable() });
 	if (!plan.target) {
-		const { stdout, stderr } = await execFileAsync(plan.command, plan.args, {
-			cwd: plan.cwd,
-			env: plan.env ? { ...process.env, ...plan.env } : undefined,
-			timeout: options.timeoutMs,
-			maxBuffer: options.maxBuffer,
-			windowsHide: true,
-		});
-		return { stdout, stderr };
+		try {
+			const { stdout, stderr } = await execFileAsync(plan.command, plan.args, {
+				cwd: plan.cwd,
+				env: plan.env ? { ...process.env, ...plan.env } : undefined,
+				timeout: options.timeoutMs,
+				maxBuffer: options.maxBuffer,
+				windowsHide: true,
+			});
+			return { stdout, stderr };
+		} catch (error) {
+			throw toGitExecError(error);
+		}
 	}
 	return runWslGit(plan, options);
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+/**
+ * execFile 失败统一出口：输出超上限转成 GitOutputOverflowError（保留截断 stdout），
+ * 其它错误原样抛出（渲染层 gitOperationErrorText 依赖 `Command failed: …` 前缀与 stderr 字段）。
+ */
+function toGitExecError(error: unknown): unknown {
+	if (!isPlainObject(error) || error["code"] !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") return error;
+	const message = typeof error["message"] === "string" ? error["message"] : "stdout maxBuffer length exceeded";
+	const partial = typeof error["stdout"] === "string" ? error["stdout"] : "";
+	return new GitOutputOverflowError(message, partial);
 }
 
 /** 执行一个 git 命令（spawn 语义：进程树 kill、超时兜底、stdin 通道）。 */
@@ -194,7 +232,8 @@ function runWslGit(plan: GitSpawnPlan, options: { timeoutMs?: number; maxBuffer?
 			const stdoutRaw = Buffer.concat(stdoutChunks);
 			const stderr = decodeWslGitStderr(Buffer.concat(stderrChunks));
 			if (overflowed) {
-				settle(() => reject(new Error(`Command output exceeded ${maxBuffer} bytes: ${plan.display}`)));
+				// 带上已收集的截断输出：只消费前缀的调用方（提交摘要）可降级，其余照旧按失败处理
+				settle(() => reject(new GitOutputOverflowError(`Command output exceeded ${maxBuffer} bytes: ${plan.display}`, decodeWslGitStdout(stdoutRaw))));
 			} else if (code === 0) {
 				settle(() => resolve({ stdout: decodeWslGitStdout(stdoutRaw), stderr }));
 			} else {

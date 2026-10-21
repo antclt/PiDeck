@@ -1,4 +1,6 @@
+import { useSetAtom } from "jotai";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { quoteToolbarVisibleAtom } from "../atoms/agent-atoms";
 import { MAX_QUOTE_CHARS, QUOTE_EXCLUDED_SELECTOR, computeToolbarPosition, isQuotableRange, selectionIntegrityKey } from "../components/session/timeline/selectionToolbarPolicy";
 
 export type TimelineSelectionQuote = {
@@ -63,6 +65,15 @@ function isExcluded(node: Node | null): boolean {
  */
 export function useTimelineSelection(containerRef: RefObject<HTMLElement | null>): { quote: TimelineSelectionQuote | null; clear: () => void; toolbarRef: RefObject<HTMLButtonElement | null> } {
 	const [quote, setQuote] = useState<TimelineSelectionQuote | null>(null);
+	/**
+	 * 「引用浮层马上要出现」的让位信号（全局划词浮出按钮据此不挂）。
+	 *
+	 * 时序（2026-10 用户反馈「划词先闪一下智能体按钮，然后才出现引用/翻译浮层」）：
+	 * pointerup 后浮层要等 60ms（等浏览器稳定选区）才挂载；全局浮出按钮却在 mouseup
+	 * 当帧就出来了，于是先闪一个单按钮、再被浮层顶掉。让位信号必须在 pointerup 当帧
+	 * 由同一套可引用判定置位，而不是等浮层组件挂载后的 effect。
+	 */
+	const setQuoteToolbarVisible = useSetAtom(quoteToolbarVisibleAtom);
 	const evaluateTimerRef = useRef(0);
 	/** 浮层已展示且快照已定格：流式引起的选区塌陷不再收起，见组件头注释。 */
 	const lockedRef = useRef(false);
@@ -84,7 +95,8 @@ export function useTimelineSelection(containerRef: RefObject<HTMLElement | null>
 			followFrameRef.current = 0;
 		}
 		setQuote(null);
-	}, []);
+		setQuoteToolbarVisible(false);
+	}, [setQuoteToolbarVisible]);
 
 	useEffect(() => {
 		const container = containerRef.current;
@@ -102,6 +114,7 @@ export function useTimelineSelection(containerRef: RefObject<HTMLElement | null>
 				followFrameRef.current = 0;
 			}
 			setQuote(null);
+			setQuoteToolbarVisible(false);
 		};
 
 		// 锁定期的逐帧跟随：与滚动引擎同帧节拍，绕开 setState/React 渲染链（慢半拍根因）。
@@ -161,12 +174,13 @@ export function useTimelineSelection(containerRef: RefObject<HTMLElement | null>
 			releaseLock();
 		};
 
-		const evaluate = () => {
+		/**
+		 * 当前选区是否可以弹出引用浮层（同一套判据，供「立即让位」与「延迟评估」共用）。
+		 * pointerup 当帧就要知道答案：等 60ms 后再算，全局浮出按钮已经先画出来了。
+		 */
+		const readQuotableSelection = (): { selection: Selection; range: Range; text: string; messageId: string } | null => {
 			const selection = currentSelection();
-			if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-				setQuote(null);
-				return;
-			}
+			if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
 			const range = selection.getRangeAt(0);
 			const text = selection.toString();
 			const ok = isQuotableRange({
@@ -177,12 +191,19 @@ export function useTimelineSelection(containerRef: RefObject<HTMLElement | null>
 				text,
 				maxLength: MAX_QUOTE_CHARS,
 			});
-			if (!ok) {
+			if (!ok) return null;
+			return { selection, range, text, messageId: resolveMessageId(range.startContainer, container) ?? "" };
+		};
+
+		const evaluate = () => {
+			const quotable = readQuotableSelection();
+			if (!quotable) {
+				// 不可引用：既收起浮层，也撤掉让位信号（交给全局浮出按钮接管）。
 				releaseLock();
 				return;
 			}
+			const { selection, range, text, messageId } = quotable;
 			const rect = range.getBoundingClientRect();
-			const messageId = resolveMessageId(range.startContainer, container) ?? "";
 			lockedRef.current = true;
 			// 快照文本用 Selection.toString()：块级边界保留成 \n\n，引文才有段落结构（发给模型的上下文）。
 			// 比较键另取实时 Range 的纯文本（selectionIntegrityKey）——两者语义不同，
@@ -194,12 +215,19 @@ export function useTimelineSelection(containerRef: RefObject<HTMLElement | null>
 				messageId,
 				rect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
 			});
+			// 浮层即将出现：保持让位（pointerup 当帧已置位，这里补一次幂等写入）。
+			setQuoteToolbarVisible(true);
 			startFollow();
 		};
 
-		// pointerup/键盘选区结束后再评估：给浏览器一点时间稳定最终选区
+		/**
+		 * pointerup/键盘选区结束后再评估：给浏览器一点时间稳定最终选区。
+		 * 但「让位」必须当帧生效——否则全局划词浮出按钮会在 60ms 窗口里先画出来，
+		 * 用户看到的就是「先闪一个智能体按钮，再换成引用/翻译浮层」（2026-10 反馈）。
+		 */
 		const scheduleEvaluate = () => {
 			window.clearTimeout(evaluateTimerRef.current);
+			if (readQuotableSelection()) setQuoteToolbarVisible(true);
 			evaluateTimerRef.current = window.setTimeout(evaluate, 60);
 		};
 		const onPointerUp = (event: PointerEvent) => {
@@ -227,7 +255,9 @@ export function useTimelineSelection(containerRef: RefObject<HTMLElement | null>
 		document.addEventListener("selectionchange", onSelectionChange);
 		document.addEventListener("pointerdown", onPointerDown);
 		container.addEventListener("pointerup", onPointerUp);
-		document.addEventListener("keyup", onKeyUp);
+		// capture：让位信号必须早于全局划词监听的 keyup（同 document 上按注册顺序触发，
+		// 宿主在 App 根部先注册）——否则键盘扩选仍会先闪一帧浮出按钮。
+		document.addEventListener("keyup", onKeyUp, true);
 		// capture：捕获内层滚动容器（消息列自身可滚）
 		container.addEventListener("scroll", onScroll, true);
 		container.addEventListener("wheel", onUserScrollIntent, { passive: true });
@@ -236,6 +266,7 @@ export function useTimelineSelection(containerRef: RefObject<HTMLElement | null>
 
 		return () => {
 			window.clearTimeout(evaluateTimerRef.current);
+			setQuoteToolbarVisible(false);
 			if (followFrameRef.current) {
 				window.cancelAnimationFrame(followFrameRef.current);
 				followFrameRef.current = 0;
@@ -243,13 +274,13 @@ export function useTimelineSelection(containerRef: RefObject<HTMLElement | null>
 			document.removeEventListener("selectionchange", onSelectionChange);
 			document.removeEventListener("pointerdown", onPointerDown);
 			container.removeEventListener("pointerup", onPointerUp);
-			document.removeEventListener("keyup", onKeyUp);
+			document.removeEventListener("keyup", onKeyUp, true);
 			container.removeEventListener("scroll", onScroll, true);
 			container.removeEventListener("wheel", onUserScrollIntent);
 			container.removeEventListener("touchmove", onUserScrollIntent);
 			window.removeEventListener("resize", onScroll);
 		};
-	}, [containerRef]);
+	}, [containerRef, setQuoteToolbarVisible]);
 
 	return { quote, clear, toolbarRef };
 }

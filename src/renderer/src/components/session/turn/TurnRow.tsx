@@ -4,7 +4,7 @@ import { ChevronUp, Clock, Share, SquarePen, Trash } from "lucide-react";
 import { atom, useAtomValue, useSetAtom } from "jotai";
 import { selectAtom } from "jotai/utils";
 import type { AgentBackend, ChatMessage, ImageContent } from "../../../../../shared/types";
-import { liveTextActiveBySessionAtom, newTurnCollapseTickBySessionIdAtomFamily, runStepsVisibleMemoryBySessionIdAtomFamily, type RunStepsVisibleMemoryEntry } from "../../../atoms/session-atoms";
+import { liveTextActiveBySessionAtom, newTurnCollapseTickBySessionIdAtomFamily, runStepsVisibleMemoryBySessionIdAtomFamily, sendPinAnimatingBySessionIdAtomFamily, type RunStepsVisibleMemoryEntry } from "../../../atoms/session-atoms";
 import { turnFlowSettingsAtom } from "../../../atoms/app-ui-atoms";
 import { t } from "../../../i18n";
 import { useStreamSelectionPreserve } from "../../../hooks/useStreamSelectionPreserve";
@@ -40,6 +40,8 @@ import type { DiffFileHandler } from "../ToolCallComponents";
 const NO_LIVE_TEXT_ATOM = atom(false);
 /** sessionId 为空时的占位 atom：恒 0（无会话不订阅新一轮信号）。 */
 const NO_TURN_TICK_ATOM = atom(0);
+/** sessionId 为空时的占位 atom：恒 false（无会话不订阅发送置顶动画标记）。 */
+const NO_SEND_PIN_ANIMATING_ATOM = atom(false);
 /** sessionId 为空时的占位 atom：恒 undefined（无会话不订阅展开记忆）。 */
 const NO_STEPS_MEMORY_ATOM = atom<RunStepsVisibleMemoryEntry | undefined>(undefined);
 
@@ -192,6 +194,8 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 	// 设置变化低频；tick 经 atomFamily selectAtom 隔离，跨会话 bump 不触发本行重渲染。
 	const flowSettings = useAtomValue(turnFlowSettingsAtom);
 	const newTurnCollapseTick = useAtomValue(props.sessionId ? newTurnCollapseTickBySessionIdAtomFamily(props.sessionId) : NO_TURN_TICK_ATOM);
+	// 发送置顶动画进行中：此时收起上一轮会让上方内容骤缩，视口先向上再向下（见 useTurnExecution）。
+	const sendPinAnimating = useAtomValue(props.sessionId ? sendPinAnimatingBySessionIdAtomFamily(props.sessionId) : NO_SEND_PIN_ANIMATING_ATOM);
 	// 执行过程展开状态跨挂载记忆（run 级）：切会话再切回时恢复手动/流式展开的
 	// 轮次；selectAtom 按 run.id 取值，同会话其它 run 变化不重渲染本行。
 	const stepsVisibleMemoryAtom = useMemo(() => (props.sessionId ? selectAtom(runStepsVisibleMemoryBySessionIdAtomFamily(props.sessionId), (map) => map[run.id] ?? undefined, Object.is) : NO_STEPS_MEMORY_ATOM), [props.sessionId, run.id]);
@@ -218,6 +222,7 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 		isLatestRun: props.isLatestRun,
 		expandInterimDuringStream: flowSettings.expandInterimDuringStream,
 		newTurnCollapseTick,
+		sendPinAnimating,
 		autoCollapseTick: props.autoCollapseTick,
 		onAutoCollapsed: props.onAutoCollapsed,
 		stepsVisibleMemory,

@@ -98,3 +98,28 @@ test("manual/streaming expansion is remembered across remounts (session-scoped)"
 	// 重挂载时把当前 autoCollapseTick 视为已消费：旧信号不得在恢复展开的瞬间再收起
 	assert.match(turnExecution, /lastAutoCollapseTickRef = useRef\(opts\.autoCollapseTick \?\? 0\)/);
 });
+// 「发送后动画先向上再向下」根因回归（2026-10）：折叠信号在置顶动画途中到达，
+// 上一轮执行过程从新消息上方骤缩，动画中的视口补偿把 scrollTop 往回带。
+test("send-pin animation defers the new-turn collapse until it settles", () => {
+	const controller = readFileSync("src/renderer/src/hooks/useSessionTimelineController.ts", "utf8");
+	const sendScroll = readFileSync("src/renderer/src/hooks/timeline/sendScroll.ts", "utf8");
+	// 折叠延后判据（effect 在动画标记落回 false 后会重跑并消费同一个 tick）
+	assert.match(turnExecution, /if \(opts\.sendPinAnimating\) return;/);
+	assert.match(turnExecution, /opts\.newTurnCollapseTick, opts\.sendPinAnimating/);
+	// 会话级标记 atom + 删除会话时清理（family 无自动 GC）
+	assert.match(sessionAtoms, /export const sendPinAnimatingByIdAtom = atom<Record<string, boolean>>\(\{\}\)/);
+	assert.match(sessionAtoms, /sendPinAnimatingBySessionIdAtomFamily/);
+	assert.match(sessionAtoms, /sendPinAnimatingBySessionIdAtomFamily\.remove\(sessionId\)/);
+	assert.match(sessionAtoms, /set\(sendPinAnimatingByIdAtom, \(prevMap\) =>/);
+	// TurnRow 订阅并透传给 useTurnExecution
+	assert.match(turnRow, /sendPinAnimatingBySessionIdAtomFamily\(props\.sessionId\)/);
+	assert.match(turnRow, /\bsendPinAnimating,/);
+	// controller 在动画生命周期内维护标记：开始置 true、完成/取消置 false，
+	// 且 pin 立即结束（短会话/无行/距离 0）时同步兜底，避免标记悬挂让折叠永不执行。
+	assert.match(controller, /setSendPinAnimating\(true\)/);
+	assert.match(controller, /onCancel: \(\) => setSendPinAnimating\(false\)/);
+	assert.match(controller, /if \(!sendScrollRef\.current\.isAnimating\) setSendPinAnimating\(false\)/);
+	// 动画被用户滚动/切会话打断时 positioner 必须通知（否则 onComplete 永不触发）
+	assert.match(sendScroll, /onCancel\?: \(\) => void;/);
+	assert.match(sendScroll, /if \(wasAnimating\) this\.callbacks\?\.onCancel\?\.\(\);/);
+});

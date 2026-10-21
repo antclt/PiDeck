@@ -120,3 +120,24 @@ test("useTimelineSelection computes the integrity key from one source on both si
 	assert.match(source, /const text = selection\.toString\(\)/);
 	assert.match(source, /text: text\.trim\(\)/);
 });
+
+// 用户反馈（2026-10）：划词瞬间先闪一个「智能体/翻译」单按钮，再被「引用+翻译」浮层顶掉。
+// 根因：浮层要等 pointerup 后 60ms 才评估挂载，而让位信号（quoteToolbarVisibleAtom）
+// 是在浮层组件挂载后的 effect 里才置位——全局浮出按钮在 60ms 窗口里先画了一帧。
+test("引用浮层的让位信号在 pointerup 当帧发出，不再等浮层挂载", () => {
+	const hook = readFileSync("src/renderer/src/hooks/useTimelineSelection.ts", "utf8");
+	const toolbar = readFileSync("src/renderer/src/components/session/timeline/SelectionToolbar.tsx", "utf8");
+	// scheduleEvaluate 先当帧判定并置位，再排队 60ms 后评估
+	const schedule = hook.slice(hook.indexOf("const scheduleEvaluate ="), hook.indexOf("const onPointerUp ="));
+	assert.match(schedule, /readQuotableSelection\(\)\)\s*setQuoteToolbarVisible\(true\)/);
+	assert.ok(schedule.indexOf("setQuoteToolbarVisible(true)") < schedule.indexOf("window.setTimeout(evaluate, 60)"), "让位必须早于延迟评估");
+	// 判定与挂载共用同一套「可引用」读取器，避免两处判据漂移
+	assert.match(hook, /const readQuotableSelection = \(\): \{ selection: Selection; range: Range; text: string; messageId: string \} \| null/);
+	assert.match(hook, /const evaluate = \(\) => \{\s*const quotable = readQuotableSelection\(\);/);
+	// 所有收起路径都要撤让位，否则全局浮出按钮被永久压住
+	// clear / releaseLock（含「不可引用」分支）/ effect 卸载 三处都要撤
+	assert.ok((hook.match(/setQuoteToolbarVisible\(false\)/gu) ?? []).length >= 3, "所有收起路径都要撤让位，否则全局浮出按钮被永久压住");
+	// 浮层组件不再自己上报（挂载后上报晚一帧就是这次闪烁）；注释里提到 atom 名不算。
+	assert.doesNotMatch(toolbar, /import\s*\{[^}]*quoteToolbarVisibleAtom/);
+	assert.doesNotMatch(toolbar, /setQuoteToolbarVisible\(/);
+});

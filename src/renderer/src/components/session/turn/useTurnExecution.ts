@@ -41,6 +41,8 @@ export function useTurnExecution(opts: {
 	expandInterimDuringStream?: boolean;
 	/** 新一轮开始信号（session 级单调递增）。变化时非最新轮被强制收起。 */
 	newTurnCollapseTick?: number;
+	/** 发送置顶滚动动画进行中：新一轮折叠必须等它结束（见下 effect 注释）。 */
+	sendPinAnimating?: boolean;
 	/** 最新轮结束后的自动收起信号（timeline 侧 1.5s idle 计时）。 */
 	autoCollapseTick?: number;
 	/** 自动收起真正发生后回调（timeline 据此做「拉到中上方」定位）。 */
@@ -119,11 +121,17 @@ export function useTurnExecution(opts: {
 		// tick 已推进但本轮仍是最新（新一轮属于本轮的后续渲染）：等 isLatestRun
 		// 翻转后再消费，避免新 tick 被吞掉导致“最新轮失去最新位后不再折叠”。
 		if (opts.isLatestRun !== false) return;
+		// 发送置顶动画仍在跑：此刻收起上一轮，其执行过程（数百到上千 px）会从新消息
+		// 上方瞬间消失，动画中的视口补偿只能把 scrollTop 往回带——用户看到
+		// 「先向上再向下」的来回滚动（2026-10 反馈）。动画结束后再消费同一个 tick
+		// （本 effect 依赖 sendPinAnimating，标记落回 false 会重跑）。
+		// 置顶完成后上一轮已在新消息上方、处于视口外，此时再收不会引起可见位移。
+		if (opts.sendPinAnimating) return;
 		lastNewTurnCollapseTickRef.current = tick;
 		userOverrideRef.current = false;
 		setStepsVisible(false);
 		opts.onStepsVisibleMemoryChange?.(undefined, tick);
-	}, [opts.isLatestRun, opts.newTurnCollapseTick, opts.onStepsVisibleMemoryChange]);
+	}, [opts.isLatestRun, opts.newTurnCollapseTick, opts.sendPinAnimating, opts.onStepsVisibleMemoryChange]);
 
 	// timeline 侧 1.5s idle 后发来的自动收起信号。仅最新轮、仍有最终回答且执行过程
 	// 当前可见时收起；已经手动折叠/从未展开的轮次不回调，timeline 不会错误滚动。

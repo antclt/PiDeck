@@ -1,9 +1,9 @@
 import { useAtomValue, useSetAtom } from "jotai";
-import { useCallback, useEffect, useMemo, type RefObject } from "react";
+import { useCallback, useMemo, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Languages, Quote } from "lucide-react";
 import { sessionDraftByIdAtom, setSessionDraftAtom, setSessionQuotesAtom } from "../../../atoms";
-import { openSelectionInlineAtom, quoteToolbarVisibleAtom } from "../../../atoms/agent-atoms";
+import { openSelectionInlineAtom } from "../../../atoms/agent-atoms";
 import { buildDraftWithAppendedQuote, buildQuoteToken, createQuoteId, extractQuoteTokens, pruneUnreferencedQuotes, type QuoteSnippet } from "../composer/quoteChip";
 import { computeToolbarPosition } from "./selectionToolbarPolicy";
 import type { TimelineSelectionQuote } from "../../../hooks/useTimelineSelection";
@@ -23,14 +23,14 @@ const TOOLBAR_HEIGHT = 28;
  *    清除浏览器选区并聚焦本栏 composer。
  * 2. 翻译：把 { 原文, 选区矩形 } 写进 selectionInlineRequestAtom，由全局 SelectionToolHost 打开
  *    原地工具栏（结果直接流式输出在工具栏上）；这里只负责清选区、收起引用浮层，绝不另开浮层。
- * 浮层可见期间把 quoteToolbarVisibleAtom 置 true，全局划词浮出按钮据此让位，避免两个浮层叠在选区上。
+ * 让位信号（quoteToolbarVisibleAtom）由 useTimelineSelection 在 pointerup 当帧置位，
+ * 本组件只负责渲染——挂载后再上报会晚一帧，用户看到「先闪一个智能体按钮、再换成浮层」。
  */
 export function SelectionToolbar(props: { quote: TimelineSelectionQuote | null; sessionId: string; onConsume: () => void; toolbarRef: RefObject<HTMLElement | null> }) {
 	const drafts = useAtomValue(sessionDraftByIdAtom);
 	const setDraft = useSetAtom(setSessionDraftAtom);
 	const setQuotes = useSetAtom(setSessionQuotesAtom);
 	const openInline = useSetAtom(openSelectionInlineAtom);
-	const setQuoteToolbarVisible = useSetAtom(quoteToolbarVisibleAtom);
 	const quote = props.quote;
 	const toolbarRef = props.toolbarRef;
 
@@ -38,15 +38,6 @@ export function SelectionToolbar(props: { quote: TimelineSelectionQuote | null; 
 		if (!quote) return null;
 		return computeToolbarPosition(quote.rect, { width: window.innerWidth, height: window.innerHeight }, { width: TOOLBAR_WIDTH, height: TOOLBAR_HEIGHT });
 	}, [quote]);
-
-	// 可见性上报：本组件常驻挂载（quote 为 null 时只 return null），不能无条件置 true，
-	// 否则全局浮出按钮会被永久压住；只在有引用时上报，引用失效/卸载时清掉。
-	const quoteVisible = quote !== null;
-	useEffect(() => {
-		if (!quoteVisible) return;
-		setQuoteToolbarVisible(true);
-		return () => setQuoteToolbarVisible(false);
-	}, [quoteVisible, setQuoteToolbarVisible]);
 
 	// 容器从 button 换成 div（两个动作），父级 useTimelineSelection 的跟随循环仍按 ref 逐帧直写样式：
 	// 用回调 ref 把 DOM 节点同步进父级 RefObject，不改动 hook 的公开类型。
