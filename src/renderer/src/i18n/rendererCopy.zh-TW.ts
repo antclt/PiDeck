@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 9028128d3953e089efef4170a4e24c07c782c099065fd42be1eaa680fc970ceb（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: fafb922fe1c5d2880479bdc13472bca35ec110a1189e96a2c4d732793081c4d3（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5538,9 +5538,14 @@ export const zhTW: Record<TranslationKey, string> = {
 	"agent.tips.quickMessages": "按 {shortcut} 一鍵發出預設口令",
 	"agent.tips.composerTriggers": "輸入 / 呼叫命令、@ 引用檔案、& 引用會話",
 	"agent.tips.quoteSelection": "拖選回覆裡的文字，可以帶著引用繼續提問",
+	"agent.tips.selectionTool": "選中文字就能用智慧體翻譯；在其他應用裡選中後按 {shortcut} 也能彈窗",
 	"agent.tips.sendOptions": "傳送按鈕旁的下拉有「加入當前回合」「排隊到下一輪」「並行傳送」",
 	"agent.tips.workspaceRail": "右緣圖示欄可開關檔案、原始碼管理、軌跡、檢查點等面板",
+	"agent.tips.trajectoryTurns": "右欄「軌跡」把每輪收成「N 步 · M 工具」，預設只展開最後一輪",
+	"agent.tips.agentProfiles": "「智慧體」頁籤點卡片上的「使用」會新建會話並繫結角色設定，輸入框上方可展開",
+	"agent.tips.pageTabs": "「智慧體」「定時任務」是會話頁籤欄裡的頁面，切到別的會話也不會關掉",
 	"agent.tips.enhancePrompt": "輸入框底欄的 ✨ 能把草稿擴寫成完整提示詞",
+	"agent.tips.promptSuggestion": "回合結束後空輸入框會給出下一句建議，Tab 或 → 採納、Esc 忽略",
 	"agent.tips.terminalDock": "會話「更多操作」選單裡可開終端、草稿本和外部編輯器",
 	"agent.tips.sessionMenu": "會話標籤的「更多操作」選單可匯出 HTML、複製會話或開啟會話檔案",
 	"agent.tips.composerModes": "「+」選單裡可切換計劃/目標模式，點底欄標籤上的 × 回到普通模式",

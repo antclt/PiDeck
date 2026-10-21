@@ -349,6 +349,30 @@ const SETTINGS_ROW_ANCHORS = [
 		labelKey: "settings.cuaAutoApprove",
 		keywords: ["自动审批", "免确认", "cua 审批", "auto approve", "绕过弹窗"],
 	},
+	{
+		tab: "common",
+		slug: "common-prompt-suggestion-enabled",
+		labelKey: "settings.promptSuggestion.enabled",
+		keywords: ["输入预测", "下一句", "输入建议", "候选输入", "prompt suggestion", "prediction"],
+	},
+	{
+		tab: "common",
+		slug: "common-selection-tool-enabled",
+		labelKey: "settings.selectionTool.enabled",
+		keywords: ["划词", "应用内划词", "选中文字", "划词浮钮", "selection tool", "translate selection"],
+	},
+	{
+		tab: "common",
+		slug: "common-selection-tool-system",
+		labelKey: "settings.selectionTool.systemEnabled",
+		keywords: ["系统级划词", "全局划词", "全局快捷键", "任意应用划词", "划词浮窗", "system selection", "global hotkey"],
+	},
+	{
+		tab: "common",
+		slug: "common-selection-tool-agent",
+		labelKey: "settings.selectionTool.defaultAgent",
+		keywords: ["默认智能体", "划词智能体", "翻译智能体", "翻译官", "default agent", "selection agent"],
+	},
 
 	// ── 外观设置 ──────────────────────────────────────────────────────
 	{

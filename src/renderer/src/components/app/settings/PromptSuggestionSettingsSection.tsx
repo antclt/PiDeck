@@ -67,7 +67,7 @@ export function PromptSuggestionSettingsSection() {
 
 	return (
 		<SettingsSection id="settings-section-common-prompt-suggestion" title={t("settings.promptSuggestion.section")} description={t("settings.promptSuggestion.sectionDesc")}>
-			<SettingRow title={<label htmlFor={switchId}>{t("settings.promptSuggestion.enabled")}</label>} description={t("settings.promptSuggestion.enabledDesc")}>
+			<SettingRow anchor="common-prompt-suggestion-enabled" title={<label htmlFor={switchId}>{t("settings.promptSuggestion.enabled")}</label>} description={t("settings.promptSuggestion.enabledDesc")}>
 				<Switch id={switchId} checked={enabled} disabled={saving} onCheckedChange={(value) => void persist(value)} />
 			</SettingRow>
 

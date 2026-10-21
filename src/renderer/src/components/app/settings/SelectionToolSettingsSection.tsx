@@ -79,11 +79,11 @@ export function SelectionToolSettingsSection() {
 
 	return (
 		<SettingsSection id="settings-section-common-selection-tool" title={t("settings.selectionTool.title")} description={t("settings.selectionTool.description")}>
-			<SettingRow title={<label htmlFor={enableId}>{t("settings.selectionTool.enabled")}</label>} description={t("settings.selectionTool.enabledHint")}>
+			<SettingRow anchor="common-selection-tool-enabled" title={<label htmlFor={enableId}>{t("settings.selectionTool.enabled")}</label>} description={t("settings.selectionTool.enabledHint")}>
 				<Switch id={enableId} checked={settings.selectionToolEnabled} disabled={saving || !snapshot} onCheckedChange={(checked) => void persist({ selectionToolEnabled: checked })} />
 			</SettingRow>
 
-			<SettingRow title={<label htmlFor={systemId}>{t("settings.selectionTool.systemEnabled")}</label>} description={t("settings.selectionTool.systemEnabledHint")}>
+			<SettingRow anchor="common-selection-tool-system" title={<label htmlFor={systemId}>{t("settings.selectionTool.systemEnabled")}</label>} description={t("settings.selectionTool.systemEnabledHint")}>
 				<Switch id={systemId} checked={settings.systemSelectionEnabled} disabled={saving || !snapshot} onCheckedChange={(checked) => void persist({ systemSelectionEnabled: checked })} />
 			</SettingRow>
 
@@ -91,7 +91,7 @@ export function SelectionToolSettingsSection() {
 				<kbd className="rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs text-foreground">{accelerator || "—"}</kbd>
 			</SettingRow>
 
-			<SettingRow title={<span>{t("settings.selectionTool.defaultAgent")}</span>} description={t("settings.selectionTool.defaultAgentHint")}>
+			<SettingRow anchor="common-selection-tool-agent" title={<span>{t("settings.selectionTool.defaultAgent")}</span>} description={t("settings.selectionTool.defaultAgentHint")}>
 				<Select value={defaultAgentValue} disabled={saving || agents.length === 0} onValueChange={(value) => void persist({ selectionToolAgentId: value === DEFAULT_AGENT_SENTINEL ? null : value })}>
 					<SelectTrigger className="w-full" aria-label={t("settings.selectionTool.defaultAgent")}>
 						<SelectValue placeholder={defaultAgentLabel} />
