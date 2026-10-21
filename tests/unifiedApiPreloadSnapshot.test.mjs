@@ -13,6 +13,7 @@
  *   （整份 pluginDev 命名空间 3 方法）：命名空间 70→69、sessions 113→111；
  * 2026-10-21 刷新：轨迹 S4（sessions.readOutline / readOutlineTitle 入场）+ 远端市场/划词/
  *   技能目录等改动合并：命名空间 69→73、sessions 111→114（config/git/app 不变）。
+ * 2026-10-21 再刷新：selectionTool.resize（划词浮窗折叠 / 展开高度上报）入场，命名空间数与数量锚点不变。
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -20,7 +21,7 @@ import { test } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const NS_LIST_SHA256 = "f5c7f2c3eedb1c19172c04595dae6077647b19dd6f9e31406d3175ca38c17990";
-const FULL_METHODS_SHA256 = "1af92f04f83ddf71c7710a24bcf74df6127fcd65f034a18b1a1310cbc48558a8";
+const FULL_METHODS_SHA256 = "285980c7b7a456b1d77300274ebd0ab7e9cb63779462a802d2f2337fa1ffc2de";
 const NAMESPACE_COUNT = 73;
 
 /** 捕获 preload 暴露的 piDesktop；null/undefined/形态不符时显式红并给诊断（F8-6 共用）。 */

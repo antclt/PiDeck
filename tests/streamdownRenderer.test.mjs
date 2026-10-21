@@ -220,7 +220,9 @@ test("streaming overlong guard: plain-text fallback above STREAM_LIGHT_MAX_CHARS
 	// 只挂静态会让中文货币文本流式中被 KaTeX 渲染、settle 后变回原文（可见闪变）；
 	// 只挂流式则静态渲染丢失判别（2026-10 issue 357）
 	assert.match(stream, /import \{ remarkInlineMathGuard \} from "\.\.\/\.\.\/utils\/markdownInlineMath"/);
-	assert.match(stream, /NO_STREAM_REMARK_PLUGINS:[\s\S]{0,160}?= \[remarkInlineMathGuard\]/);
+	// 流式集合可随场景增补（如 remarkRecoverLocalImages：带空格的本地图片路径在流式中就要成图），
+	// 但行内公式判别必须始终在首位，且不能退化成空列表。
+	assert.match(stream, /NO_STREAM_REMARK_PLUGINS:[\s\S]{0,200}?= \[remarkInlineMathGuard[,\]]/);
 	assert.match(stream, /remarkGfmNoSingleTilde,\s*remarkInlineMathGuard/);
 });
 

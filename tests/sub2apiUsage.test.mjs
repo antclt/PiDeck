@@ -150,6 +150,9 @@ test("面板 JWT 失败不再纯静默：合并层带 panelBalanceError，401 �
 	// JWT 已到期，静默降级看起来像功能坏了）。
 	const source = readFileSync("src/main/config/ConfigManager.ts", "utf8");
 	assert.match(source, /else\s+result\.panelBalanceError\s*=\s*merged\.reason/);
-	assert.match(source, /result\.status\s*===\s*401/);
-	assert.match(source, /reason:\s*unauthorized\s*\?\s*"unauthorized"\s*:\s*"failed"/);
+	// 401 归因已随面板 JWT 自动续期抽到 sub2apiPanelSession（续期与 /auth/me 两条链路：
+	// 401 记为 unauthorized，网络错误 / 5xx / 结构变更记为 failed，续期失序仍能上到 UI）。
+	const panel = readFileSync("src/main/config/sub2apiPanelSession.ts", "utf8");
+	assert.match(panel, /result\.status\s*===\s*401/);
+	assert.match(panel, /reason:\s*unauthorized\s*\?\s*"unauthorized"\s*:\s*"failed"/);
 });

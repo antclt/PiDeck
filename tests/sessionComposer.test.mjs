@@ -90,6 +90,8 @@ function createSendHarness(initial = {}) {
 		setSessionSendStateAtom: {},
 		bindSessionRuntimeAtom: {},
 		upsertSessionAtom: {},
+		// `/reload` 期间禁止并发发送的只读标记（单独模块 ../atoms/session-commands-atoms，需单独桩）。
+		sessionReloadingByIdAtom: {},
 		// DSH 发送拦截门读取的只读 atom（初值 installed，测试按需改写）。
 		dshRuntimeStatusAtom: {},
 		openSettingsAtom: {},
@@ -101,6 +103,7 @@ function createSendHarness(initial = {}) {
 		[atoms.sessionComposerModeByIdAtom, { ...(initial.modes ?? {}) }],
 		[atoms.sessionRuntimeByIdAtom, { ...(initial.runtimes ?? {}) }],
 		[atoms.sessionSendStateByIdAtom, {}],
+		[atoms.sessionReloadingByIdAtom, {}],
 		[atoms.sessionRecordsAtom, { ...(initial.records ?? {}) }],
 		[atoms.dshRuntimeStatusAtom, { state: "installed" }],
 	]);
@@ -145,6 +148,7 @@ function createSendHarness(initial = {}) {
 			useStore: () => ({ get: (atom) => state.get(atom), set: (atom, input) => setAtom(atom, input) }),
 		},
 		"../atoms": atoms,
+		"../atoms/session-commands-atoms": { sessionReloadingByIdAtom: atoms.sessionReloadingByIdAtom },
 		"../composerBehavior": {
 			expandPromptTemplates: (message) => ({ message }),
 			buildComposerPromptSubmission: (message) => ({ message }),
