@@ -74,17 +74,11 @@ test("Button 各变体保留基类 text-control（#389 设置弹窗按钮字号�
 });
 
 test("文件类型徽标保留 text-micro（#389 修改文件 tab 徽标偏大）", () => {
-	const statusTabs = readFileSync("src/renderer/src/components/session/statusPanel/StatusTabs.tsx", "utf8");
-	const badgeBase = /cn\(\s*"([^"]*)"\s*,\s*FILE_KIND_BADGE_CLASS\[kind\]\s*,?\s*\)/.exec(statusTabs)?.[1];
-	assert.ok(badgeBase, "FileKindBadge 必须继续经 cn 合并基类与档位配色");
-	assert.match(badgeBase, /text-micro/, "徽标基类必须声明 text-micro");
-	const toneBlock = /const FILE_KIND_BADGE_CLASS[^=]*=\s*\{([\s\S]*?)\};/.exec(statusTabs)?.[1] ?? "";
-	const tones = [...toneBlock.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
-	assert.ok(tones.length >= 2, "FILE_KIND_BADGE_CLASS 应包含 write/edit 两档配色");
-	for (const tone of tones) {
-		const merged = classesOf(cn(badgeBase, tone));
-		assert.ok(merged.includes("text-micro"), `徽标配色 ${tone} 吞掉了 text-micro：${merged.join(" ")}`);
-	}
+	// 「修改的文件」已从 statusPanel 迁到轮末 chip（TurnFileChanges），
+	// 断言随功能一起搬到新落点：文件行徽标仍须用 text-micro，不得放大。
+	const turnFileChanges = readFileSync("src/renderer/src/components/session/turn/TurnFileChanges.tsx", "utf8");
+	assert.match(turnFileChanges, /className="shrink-0 text-micro/, "文件徽标基类必须声明 text-micro");
+	assert.doesNotMatch(turnFileChanges, /text-(xs|sm|base) font-semibold/, "徽标档位不得用更大的字号覆盖 text-micro");
 });
 
 test("文件树行字号在 cn 合并后保留（激活行不再被 text-accent-foreground 吞）", () => {

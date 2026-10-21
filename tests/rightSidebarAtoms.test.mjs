@@ -31,23 +31,9 @@ test("切换面板会话只通知状态真正变化的会话", () => {
 	assert.equal(notifyC, 0);
 });
 
-test("最近一轮 run：发布、按会话隔离、卸载（undefined）后删除", () => {
-	const store = createStore();
-	const runA = { kind: "agent-run", id: "run-a", items: [], endedAt: 1 };
-	const runB = { kind: "agent-run", id: "run-b", items: [], endedAt: 2 };
-	const familyA = atoms.sessionLatestAgentRunAtomFamily("session-a");
-	let notifyA = 0;
-	store.sub(familyA, () => {
-		notifyA += 1;
-	});
-	store.set(atoms.publishSessionLatestAgentRunAtom, { sessionId: "session-a", run: runA });
-	assert.equal(store.get(familyA), runA);
-	assert.equal(notifyA, 1);
-	store.set(atoms.publishSessionLatestAgentRunAtom, { sessionId: "session-b", run: runB });
-	assert.equal(notifyA, 1, "写别的会话不得通知本会话");
-	store.set(atoms.publishSessionLatestAgentRunAtom, { sessionId: "session-a", run: runA });
-	assert.equal(notifyA, 1, "同一 run 重复发布不得通知");
-	store.set(atoms.publishSessionLatestAgentRunAtom, { sessionId: "session-a", run: undefined });
-	assert.equal(store.get(familyA), undefined);
-	assert.equal(store.get(atoms.sessionLatestAgentRunAtomFamily("session-b")), runB);
+// 「最近一轮 run」系列 atom 已随面板 files tab 一并移除（2027-02）：
+// 文件修改改由每轮末尾的 chip 行（turn/TurnFileChanges）展示，不再需要跨组件发布 run。
+test("latest-agent-run atoms are gone with the files tab", () => {
+	assert.equal(atoms.sessionLatestAgentRunAtomFamily, undefined);
+	assert.equal(atoms.publishSessionLatestAgentRunAtom, undefined);
 });

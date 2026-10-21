@@ -45,15 +45,16 @@ test("有效收起态 = 用户偏好 或 自动收起；自动收起解除后回
 	assert.equal(layout.resolveBottomCollapsed({ collapsed: true, bottomPct: 45 }, false), true);
 });
 
-test("tab 解析：未知值回退待办", () => {
-	assert.equal(model.parseSessionStatusTab("files"), "files");
+test("tab 解析：未知值回退待办；已移除的 files tab 也回退待办", () => {
 	assert.equal(model.parseSessionStatusTab("subagents"), "subagents");
-	for (const raw of [null, undefined, "", "todos", 1, {}]) assert.equal(model.parseSessionStatusTab(raw), "todo");
+	// "files" 是 2027-02 移除的 tab：旧版本持久化的选中值必须安全回退，不能留下空面板
+	for (const raw of [null, undefined, "", "todos", "files", 1, {}]) assert.equal(model.parseSessionStatusTab(raw), "todo");
 });
 
-test("文件变更类型：无旧内容=整文件写入，有旧内容=局部编辑", () => {
-	assert.equal(model.fileChangeKind({ originalContent: "" }), "write");
-	assert.equal(model.fileChangeKind({ originalContent: "old" }), "edit");
+test("files tab 相关的纯函数已随 tab 移除", () => {
+	// fileChangeKind（write/edit 徽章）只服务于已删除的文件 tab
+	assert.equal(model.fileChangeKind, undefined);
+	assert.deepEqual([...model.SESSION_STATUS_TABS], ["todo", "subagents"]);
 });
 
 test("待办角标：已完成/总数，空列表不显示", () => {

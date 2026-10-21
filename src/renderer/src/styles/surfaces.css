@@ -330,8 +330,9 @@
   height: 16px;
   border: none;
   background: transparent;
-  color: var(--color-text-tertiary);
-  border-radius: 3px;
+  color: var(--color-text-secondary);
+  /* 圆形命中区：与会话/文件 Tab 的关闭钮统一（见 utils/tabCloseButton.ts） */
+  border-radius: 9999px;
   display: grid;
   place-items: center;
   cursor: pointer;
@@ -339,7 +340,8 @@
   padding: 0;
 }
 .browser-tab-close:hover {
-  background: var(--color-bg-hover);
+  /* 不用 bg-hover：它等于激活 Tab 的选中底色，圈会隐形；foreground 叠层在明暗主题都可见 */
+  background: color-mix(in srgb, var(--color-text-primary) 16%, transparent);
   color: var(--color-text-primary);
 }
 

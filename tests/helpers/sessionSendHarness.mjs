@@ -21,7 +21,7 @@ export function sessionRecord(id = SESSION_ID, overrides = {}) {
 }
 
 /** 用真实 composer/cache atoms 提升、移除会话，避免测试桩遗漏发送状态迁移。 */
-export function createSendHarness({ sessionId = BOOTSTRAP_ID, draft = "read &reference", attachments = [], quotes = {}, templates = [], beforePromotion, prepareMessage, sendPrompt, enqueue } = {}) {
+export function createSendHarness({ sessionId = BOOTSTRAP_ID, draft = "read &reference", attachments = [], quotes = {}, templates = [], beforePromotion, prepareMessage, sendPrompt, enqueue, ensureTemplates } = {}) {
 	const store = createStore();
 	const atoms = {};
 	const errors = [];
@@ -68,7 +68,9 @@ export function createSendHarness({ sessionId = BOOTSTRAP_ID, draft = "read &ref
 	store.set(atoms.currentSessionIdAtom, sessionId);
 	const options = {
 		sessionId,
-		templates,
+		// 发送期按需读取（模板表可能晚于首次渲染就绪）；harness 传固定清单即可
+		getTemplates: () => templates,
+		ensureTemplates,
 		prepareMessage,
 		enqueue,
 		compact: async () => {},

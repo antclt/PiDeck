@@ -66,7 +66,9 @@ test("first Session send is request-addressed and restores rejected snapshots", 
 
 test("the dev workspace toolbar persists for inactive agents and the empty state", () => {
 	// 轨迹浮层已下沉到每个会话表面，空会话与非聚焦会话都由同一挂载点承载。
-	assert.match(sessionSurfaceSource, /<ConversationOutline[\s\S]*items=\{outlineItems\}/);
+	assert.match(sessionSurfaceSource, /<ConversationOutline[\s\S]*items=\{railItems\}/);
+	// 导轨条目来自「已加载大纲 + 索引目录」的合并结果（S4），不再直接用 outlineItems。
+	assert.match(sessionSurfaceSource, /mergeOutlineRailItems\(outlineItems, directory\)/);
 	assert.doesNotMatch(sessionSurfaceSource, /hasActiveConversation/);
 	// 工具开关统一由 SessionTabsBar 接收，终端目标可由 agent 或项目提供。
 	assert.match(appSource, /const sessionToolActions: SessionToolAction\[\] = \[/);

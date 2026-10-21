@@ -158,16 +158,7 @@ export class WebApiRoutes {
 			this.sendJson(response, { sessions });
 			return true;
 		}
-		// ── 会话活动监控（第二批 strips）：文件变更/子代理/todo，与桌面 IPC 同源数据 ──
-		const fileChangesMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/file-changes$/);
-		if (fileChangesMatch && request.method === "GET") {
-			if (!this.deps.listSessionFileChanges) {
-				this.sendError(response, 503, "webError.stripsUnavailable", "session file changes are not available");
-				return true;
-			}
-			this.sendJson(response, { changes: await this.deps.listSessionFileChanges(decodeURIComponent(fileChangesMatch[1])) });
-			return true;
-		}
+		// ── 会话活动监控 strips：子代理/todo，与桌面 IPC 同源数据 ──
 		const subagentsMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/subagents$/);
 		if (subagentsMatch && request.method === "GET") {
 			if (!this.deps.listSessionSubagents) {

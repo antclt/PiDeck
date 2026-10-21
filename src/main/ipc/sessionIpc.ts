@@ -12,7 +12,7 @@ import { isRewindRestoreScope } from "../../shared/types/rewind";
 import { canonicalizeSessionPath } from "../../shared/sessionIdentity";
 import { createSessionModelPreference } from "../../shared/modelDisplayName";
 import { modelThinkingLevelOf } from "../../shared/modelThinkingLevels";
-import { collectLatestTurnFileChanges } from "../../shared/fileChanges";
+import { readRuntimePromptTemplateBodies } from "../prompts/runtimeTemplateBodies";
 import { isDshAgentPresetLocked } from "../../shared/dshAgentPresetLock";
 import type {
 	AvailableModel,
@@ -31,6 +31,8 @@ import type {
 	SendPromptInput,
 	SendPromptResult,
 	SessionRecord,
+	SessionFactsCoverage,
+	SessionFactsResult,
 	SessionProcessEvent,
 	DshModelDiscoveryInput,
 	FetchedModel,
@@ -44,6 +46,7 @@ import type {
 	SessionSearchResult,
 } from "../../shared/types";
 import { parseSessionProcessEventsFromFile } from "../sessions/sessionProcessEventsFile";
+import type { SessionOutlineSnapshot as OutlineSnapshot } from "../../shared/types/outline";
 import type { SessionForkCommands } from "../sessions/sessionForkCommands";
 import { dshUnavailablePageFor } from "../dsh/dshManualStop";
 import { dshRuntimeMissingPageFor } from "../dsh/dshRuntimeMissing";
@@ -244,7 +247,12 @@ export type DshBackendIpcDeps = {
 	/** ACP 会话消息回读（运行时内存投影；未激活返回空数组）；未装配时返回空数组。 */
 	readAcpMessages?: (acpSessionId: string) => import("../../shared/types").ChatMessage[];
 	/** DSH 轨迹过程事件（运行时会话按 mux/重放收集；历史会话从 host history 推导；未装配时返回空数组）。 */
-	readDshProcessEvents?: (agentId: string | undefined, dshSessionId: string | undefined) => Promise<import("../../shared/types/trajectory").SessionProcessEvent[]>;
+	readDshProcessEvents?: (agentId: string | undefined, dshSessionId: string | undefined) => Promise<{ events: import("../../shared/types/trajectory").SessionProcessEvent[]; fromStart: boolean }>;
+	/** pi 轨迹事实（索引候选 + 小批读取 + 内容版本缓存）；缺省时回退旧的全文件扫描。 */
+	readSessionFacts?: (sessionPath: string) => Promise<import("../../shared/types/trajectory").SessionFactsResult>;
+	/** 用户检查点目录（导轨）：pi 索引派生；缺省返回空目录。 */
+	readSessionOutline?: (sessionPath: string, limit?: number) => Promise<import("../../shared/types/outline").SessionOutlineSnapshot>;
+	readSessionOutlineTitle?: (sessionPath: string, entryId: string) => Promise<string | undefined>;
 	/** DSH 轨迹系统提示（运行时会话读投影缓存；历史会话从 host history 折叠 request/header；未装配返回 undefined）。 */
 	readDshSystemPrompt?: (agentId: string | undefined, dshSessionId: string | undefined) => Promise<string | undefined>;
 	/** DSH 「查看完整输出」（工具结果全文随投影消息存 meta.fullText）；未装配时抛错。 */
@@ -514,6 +522,9 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		readDshSessionModel,
 		readAcpMessages,
 		readDshProcessEvents,
+		readSessionFacts,
+		readSessionOutline,
+		readSessionOutlineTitle,
 		readDshSystemPrompt,
 		readDshMessageFullText,
 		resolveDshSessionFilePath,
@@ -1162,21 +1173,6 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		}
 		return records;
 	});
-	/**
-	 * 会话级文件修改汇总：只读会话文件「最新一轮」的 write/edit/create/patch
-	 * （有界读，不展开整条活动分支；历史/活会话通用）。
-	 */
-	ipcMain.handle(ipcChannels.sessionsListFileChanges, async (_event, sessionId: string) => {
-		if (typeof sessionId !== "string" || !sessionId) return [];
-		const entry = sessionCatalog.get(sessionId);
-		// ACP 会话无 pi 会话文件，但 tool_call 原始参数里带 filePath/edit 内容：
-		// 从运行时消息投影按「最新一轮」口径聚合（与 pi 的 readFileChangeMessages
-		// 同语义；消息列表有界且在内存，无读盘风险）。2027-03 审计发现 I。
-		if (entry?.backend === "acp") return collectLatestTurnFileChanges(readAcpMessages?.(entry.acpSessionId ?? "") ?? []);
-		// DSH/生图/生视频会话无 pi 会话文件，文件汇总无意义
-		if (!entry?.filePath || entry.backend === "dsh" || entry.backend === "imagegen" || entry.backend === "videogen") return [];
-		return agentManager.readSessionFileChanges(entry.filePath);
-	});
 	/** 会话级 todo 快照：从会话文件 pi-deck-todo custom 条目重建最新计划（历史会话任务 tab）。 */
 	ipcMain.handle(ipcChannels.sessionsListSessionTodo, async (_event, sessionId: string) => {
 		if (typeof sessionId !== "string" || !sessionId) return undefined;
@@ -1277,20 +1273,57 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			throw error;
 		}
 	});
-	ipcMain.handle(ipcChannels.sessionsCatalogReadProcessEvents, async (_event, sessionId: string): Promise<SessionProcessEvent[]> => {
-		if (typeof sessionId !== "string" || !sessionId.trim()) return [];
+	ipcMain.handle(ipcChannels.sessionsCatalogReadProcessEvents, async (_event, sessionId: string): Promise<SessionFactsResult> => {
+		const unavailable = (reason: SessionFactsCoverage["reason"]): SessionFactsResult => ({ events: [], version: "", coverage: { fromStart: true, chainComplete: true, readComplete: true, eventsTrimmed: false, ...(reason ? { reason } : {}) } });
+		if (typeof sessionId !== "string" || !sessionId.trim()) return unavailable("unavailable");
 		const entry = sessionCatalog.get(sessionId);
 		// DSH 会话没有 pi 会话文件：过程事件由运行时会话按 mux/重放收集，
 		// 历史（未激活）会话从 host history 事件流推导（轨迹账本的
 		// modelChange/permission/plan/goal/compaction 记录）。
 		if (entry?.backend === "dsh" && readDshProcessEvents) {
 			const target = sessionRuntimeCoordinator.getTarget(sessionId);
-			return readDshProcessEvents(target?.agentId, entry.dshSessionId);
+			const { events, fromStart } = await readDshProcessEvents(target?.agentId, entry.dshSessionId);
+			const last = events.at(-1);
+			return {
+				events,
+				version: `dsh:${events.length}:${last?.id ?? ""}:${last?.seq ?? ""}`,
+				coverage: { fromStart, chainComplete: true, readComplete: true, eventsTrimmed: false, ...(fromStart ? {} : { reason: "history-window" as const }) },
+			};
 		}
-		if (!entry?.filePath) return [];
-		// 流式扫描（收够 MAX_EVENTS 即停）：历史大会话读全文会撞 V8 单字符串上限 /
-		// 主进程 384MB 堆上限（闪退），而账本只需要前若干条记录。
-		return parseSessionProcessEventsFromFile(entry.filePath);
+		if (!entry?.filePath) return unavailable("unavailable");
+		if (readSessionFacts) {
+			// 索引候选 + 小批读 + 内容版本缓存：文件未变时不读正文（见 trajectoryFactsReader）。
+			try {
+				return await readSessionFacts(entry.filePath);
+			} catch (error) {
+				appLogger.warn("trajectory", "Read session facts failed", {
+					sessionId,
+					filePath: entry.filePath,
+					error: error instanceof Error ? error.message : String(error),
+				});
+				return unavailable("unavailable");
+			}
+		}
+		// 无索引入口时回退流式扫描（有界尾巴，仍受事件保留上限约束）。
+		return { events: await parseSessionProcessEventsFromFile(entry.filePath), version: "", coverage: { fromStart: true, chainComplete: true, readComplete: true, eventsTrimmed: false } };
+	});
+	// 导轨目录：只给用户检查点坐标（entryId + messageIndex + turnOrdinal），不带正文。
+	// 入参只有 sessionId 与可选上限（渲染层数据不可信，上限在边界夹紧）。
+	ipcMain.handle(ipcChannels.sessionsCatalogReadOutline, async (_event, sessionId: unknown, limit?: unknown): Promise<OutlineSnapshot> => {
+		const empty: OutlineSnapshot = { entries: [], total: 0, truncated: false };
+		if (typeof sessionId !== "string" || !sessionId.trim()) return empty;
+		const entry = sessionCatalog.get(sessionId);
+		if (!entry?.filePath || !readSessionOutline) return empty;
+		const bounded = typeof limit === "number" && Number.isFinite(limit) ? Math.min(Math.max(Math.floor(limit), 1), 10_000) : undefined;
+		return readSessionOutline(entry.filePath, bounded);
+	});
+	// 导轨单项标题：按需读一行；entryId 必须是会话内条目，空/超长直接拒绝。
+	ipcMain.handle(ipcChannels.sessionsCatalogReadOutlineTitle, async (_event, sessionId: unknown, entryId: unknown): Promise<string | undefined> => {
+		if (typeof sessionId !== "string" || !sessionId.trim()) return undefined;
+		if (typeof entryId !== "string" || !entryId.trim() || entryId.length > 200) return undefined;
+		const entry = sessionCatalog.get(sessionId);
+		if (!entry?.filePath || !readSessionOutlineTitle) return undefined;
+		return readSessionOutlineTitle(entry.filePath, entryId);
 	});
 	ipcMain.handle(ipcChannels.sessionsCatalogReadDshSystemPrompt, async (_event, sessionId: string): Promise<string | undefined> => {
 		if (typeof sessionId !== "string" || !sessionId.trim()) return undefined;
@@ -1911,11 +1944,30 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 	ipcMain.handle(ipcChannels.sessionsRuntimeCompact, (_event, target: SessionRuntimeTarget, prompt?: string) => sessionRuntimeCoordinator.compactRuntime(target, prompt));
 	ipcMain.handle(ipcChannels.sessionsRuntimeState, (_event, target: SessionRuntimeTarget) => sessionRuntimeCoordinator.getRuntimeState(target));
 	ipcMain.handle(ipcChannels.sessionsRuntimeCommands, (_event, target: SessionRuntimeTarget) => sessionRuntimeCoordinator.listRuntimeCommands(target));
+	// 提示词模板正文：面板/气泡需要 `/<模板名>` 身份，而 pi 的 get_commands 只给路径。
+	// 主进程按登记路径读回正文（含包带模板），渲染层据此在发送前本地展开并保留名字。
+	// 读取失败/超限/非 prompt 来源一律跳过 → 渲染层退回「交给 pi 展开」（现状行为）。
+	ipcMain.handle(ipcChannels.sessionsRuntimePromptTemplates, async (_event, target: SessionRuntimeTarget) => {
+		const commands = await sessionRuntimeCoordinator.listRuntimeCommands(target);
+		if (!commands.ok) return commands;
+		const templates = await readRuntimePromptTemplateBodies(commands.value.value);
+		return { ok: true as const, value: { target: commands.value.target, value: templates } };
+	});
 	ipcMain.handle(ipcChannels.sessionsRuntimeReloadResources, (_event, target: SessionRuntimeTarget) => sessionRuntimeCoordinator.reloadResources(target));
 	// 草稿命令预览是只读提示增强：入参只有 projectId，非法值在 coordinator 层自然返回 null。
 	ipcMain.handle(ipcChannels.sessionsDraftCommands, (_event, projectId: string) => {
 		if (typeof projectId !== "string" || !projectId.trim()) return null;
 		return sessionRuntimeCoordinator.draftCommands(projectId);
+	});
+	// 草稿会话的模板正文（尚无 runtime 时可用的同一份清单来源）。
+	// 复用 standby 的命令预览借用：拿命令表 → 按 sourceInfo.path 读正文；离线/无池/失败返回 null，
+	// 渲染层退回 prompts:list（旧行为）。这是「打开会话立刻发 /模板名」也能出 chip 的兜底。
+	ipcMain.handle(ipcChannels.sessionsDraftPromptTemplates, async (_event, projectId: string) => {
+		if (typeof projectId !== "string" || !projectId.trim()) return null;
+		const commands = await sessionRuntimeCoordinator.draftCommands(projectId);
+		if (!Array.isArray(commands) || commands.length === 0) return null;
+		const templates = await readRuntimePromptTemplateBodies(commands);
+		return templates.length > 0 ? templates : null;
 	});
 	ipcMain.handle(ipcChannels.sessionsRuntimeListModels, (_event, target: SessionRuntimeTarget) => sessionRuntimeCoordinator.listRuntimeModels(target));
 	ipcMain.handle(ipcChannels.sessionsRuntimeThinkingLevels, (_event, target: SessionRuntimeTarget) => sessionRuntimeCoordinator.listRuntimeThinkingLevels(target));

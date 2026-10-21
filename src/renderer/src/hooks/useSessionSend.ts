@@ -56,7 +56,19 @@ export type UseSessionSendOptions = {
 	sendPrompt: SessionPromptApi;
 	/** Promotes a renderer-only pre-send surface to a persistent Session. */
 	ensureSessionId?: (sessionId: string) => Promise<string>;
-	templates: PromptTemplate[];
+	/**
+	 * 模板清单的**读取函数**而不是快照：模板表在 runtime 刚绑定/首次加载完成前可能是空的，
+	 * 发送时按最新清单展开，避免「打开会话立刻发 /模板名 → 退回给 pi 展开 → 模板名丢失」。
+	 */
+	getTemplates: () => PromptTemplate[];
+	/**
+	 * 发送前补齐模板表（`/名称` 命中未知模板时补拉）。
+	 *
+	 * 队列分支（忙碌时 steer/followUp）在**入队时就展开**，比 prepareMessage 更早，
+	 * 所以这条也得单独补一次：否则「刚打开的会话 + agent 还在收尾」时会用手上还空的
+	 * 模板表展开，`/模板名` 原样入队、flush 时直接发给 pi，chip 随之丢失（2026-10 e2e 抓到）。
+	 */
+	ensureTemplates?: (message: string) => Promise<void>;
 	prepareMessage?: (message: string) => Promise<string>;
 	onDraftMutation?: (sessionId: string) => void;
 	compact: (target: SessionRuntimeTarget, prompt?: string) => Promise<void>;
@@ -439,7 +451,9 @@ export function useSessionSend(options: UseSessionSendOptions) {
 		//   steer    → flushQueuedSteerPrompts (while agent is busy)
 		//   followUp → flushNextQueuedPrompt (when agent becomes idle)
 		if (options.enqueue && (streamingBehavior === "steer" || streamingBehavior === "followUp")) {
-			const { message: expandedMessage, emptyTemplateName } = expandPromptTemplates(message, options.templates);
+			// fail-open：模板表补齐失败只影响「能否本地展开」，不能把整条消息卡住不给发
+			await options.ensureTemplates?.(message).catch(() => undefined);
+			const { message: expandedMessage, emptyTemplateName } = expandPromptTemplates(message, options.getTemplates());
 			if (emptyTemplateName) {
 				// 展开器会保留空模板的 /命令原文，不能靠消息是否空白判断正文有效。
 				sendingSessionIdsRef.current.delete(sourceSessionId);
@@ -513,7 +527,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 		}
 
 		if (releaseIfRetired()) return;
-		const { message: expandedMessage, description, emptyTemplateName } = expandPromptTemplates(preparedMessage, options.templates);
+		const { message: expandedMessage, description, emptyTemplateName } = expandPromptTemplates(preparedMessage, options.getTemplates());
 		if (emptyTemplateName) {
 			// 展开器保留空模板的 /命令原文；按 verdict 拦截，避免误发到主进程。
 			// 回填原始草稿（含引用 token），保留 chip 形态

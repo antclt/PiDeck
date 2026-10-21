@@ -1,5 +1,5 @@
-import { useAtomValue, useSetAtom } from "jotai";
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject, type ReactNode } from "react";
+import { useAtomValue } from "jotai";
+import { useEffect, useRef, useState, type CSSProperties, type RefObject, type ReactNode } from "react";
 import { type GroupImperativeHandle, type PanelImperativeHandle } from "react-resizable-panels";
 import { ResizablePanel, ResizablePanelGroup } from "../ui-shadcn/resizable";
 import type { ChatMessage, GitBranchInfo, ImageContent, TerminalTarget, TerminalThemeId } from "../../../../shared/types";
@@ -7,7 +7,6 @@ import type { SessionTimelineController } from "../../hooks/useSessionTimelineCo
 import { isLanWeb, desktopApi as api } from "../../desktopApi";
 import { SessionHeader } from "./SessionHeader";
 import { SessionBranchBar } from "./SessionBranchBar";
-import { SessionFilesStrip } from "./SessionFilesStrip";
 import { SessionGoalStrip } from "./SessionGoalStrip";
 import { SessionSubagentsStrip } from "./SessionSubagentsStrip";
 import { SessionTodoStrip } from "./SessionTodoStrip";
@@ -23,10 +22,8 @@ import { TerminalDockPanel, TERMINAL_PANEL_COLLAPSED_SIZE, TERMINAL_PANEL_MIN_SI
 import type { TerminalDockSettings } from "../terminal/TerminalDock";
 import { useSessionPaneServices } from "./SessionPaneServices";
 import { COMPOSER_MAX_HEIGHT, COMPOSER_MIN_HEIGHT, TIMELINE_MIN_HEIGHT, displayProjectDirectoryName, redistributeTerminalAgainstTimeline, shouldMountBottomComposer, sessionResizableGroupKey, sessionGroupDefaultLayout } from "../../rendererUtils";
-import { projectByIdAtomFamily, publishSessionLatestAgentRunAtom, sessionRecordByIdAtomFamily, sessionStatusInSidebarAtomFamily } from "../../atoms";
+import { projectByIdAtomFamily, sessionRecordByIdAtomFamily, sessionStatusInSidebarAtomFamily } from "../../atoms";
 import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
-import { groupToolMessages } from "../app/AppUtils";
-import type { AgentRunItem } from "./timeline/types";
 import { countUserTurns } from "./timeline/turnRenderWindow";
 
 // terminal 程序化布局保护窗口（ms）：setLayout 后该窗口内的 terminal
@@ -214,30 +211,8 @@ export function SessionView({
 		messageCount: sessionTimeline.messages.length,
 		isConversationLoading: sessionTimeline.isSurfaceLoading,
 	});
-	// 仅显示最近一轮的修改，避免把整个会话历史堆到输入框上方；切换到新一轮后，
-	// strip 会按新的 run 身份重置为默认折叠。
-	const latestAgentRun = useMemo<AgentRunItem | undefined>(() => {
-		const displayItems = groupToolMessages(sessionTimeline.messages);
-		let latestRun: AgentRunItem | undefined;
-		let latestUserTimestamp = 0;
-		for (const item of displayItems) {
-			if (item.kind === "message" && item.message.role === "user") {
-				latestUserTimestamp = Math.max(latestUserTimestamp, item.message.timestamp);
-			} else if (item.kind === "agent-run") {
-				latestRun = item;
-			}
-		}
-		// 新问题已发出但 Agent 尚未产生新 run 时，隐藏上一轮文件，避免误导。
-		return latestRun && latestUserTimestamp <= latestRun.endedAt ? latestRun : undefined;
-	}, [sessionTimeline.messages]);
-	// 右侧边栏「会话状态」面板复用这里算好的 run（文件修改实时增量），不重复解析时间线；
-	// 会话切换/卸载时撤回，避免面板展示过期 run。
-	const publishLatestAgentRun = useSetAtom(publishSessionLatestAgentRunAtom);
-	useEffect(() => {
-		publishLatestAgentRun({ sessionId, run: latestAgentRun });
-	}, [latestAgentRun, publishLatestAgentRun, sessionId]);
-	useEffect(() => () => publishLatestAgentRun({ sessionId, run: undefined }), [publishLatestAgentRun, sessionId]);
-	// 面板正可见地展示本会话时，输入框上方的待办/修改文件/子代理折叠条让位给面板
+	// 右侧边栏「会话状态」面板正可见地展示本会话时，输入框上方的待办/子代理折叠条让位给面板
+	//（文件修改已改由每轮末尾的 chip 行走轮次上下文，不再经过面板与 latestAgentRun）。
 	const statusInSidebar = useAtomValue(sessionStatusInSidebarAtomFamily(sessionId));
 	const sessionPanels = { terminal: terminalPanelVisible };
 	const timelineColumnMinSize = bottomComposerVisible ? TIMELINE_MIN_HEIGHT + COMPOSER_MIN_HEIGHT : TIMELINE_MIN_HEIGHT;
@@ -378,7 +353,9 @@ export function SessionView({
 										<SessionQueuedMessagesStrip sessionId={sessionId} />
 										{!statusInSidebar && <SessionTodoStrip sessionId={sessionId} />}
 										<SessionTeamStrip sessionId={sessionId} />
-										{!statusInSidebar && <SessionFilesStrip sessionId={sessionId} run={latestAgentRun} onOpenFile={onOpenFile} onDiffFile={onDiffFile} />}
+										{/* 「修改的文件」已改为每轮末尾的 chip 行（TurnFileChanges），
+										    不再作为 composer 上方的常驻卡片：它属于本轮结论，而不是下一轮的输入。
+										    右侧状态面板的「文件」tab 也已移除，那条链路（含会话级 IPC）整体下线。 */}
 										{!statusInSidebar && <SessionSubagentsStrip sessionId={sessionId} onOpenChildSession={onOpenBranchSession} />}
 										<SessionGoalStrip sessionId={sessionId} />
 									</>

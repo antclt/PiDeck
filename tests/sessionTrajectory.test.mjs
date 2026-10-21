@@ -174,13 +174,13 @@ test("trajectory source concatenates runtime history prefix with the live window
 	assert.match(source, /\[\.\.\.cachedEntry\.history\.messages, \.\.\.cachedEntry\.messages\]/);
 	assert.match(source, /prependSessionHistoryPageAtom/);
 	assert.match(source, /readProcessEvents/);
-	assert.match(source, /pi-system/);
-	// dsh 会话：系统提示由 harness 在请求时组装，从 host request/header 事件读取
-	// （readDshSystemPrompt），不加载 pi 的 pi-system 模板——否则 dsh 轨迹错误显示
-	// pi 的系统提示（2026-08 用户反馈）
+	// 系统提示词走 processEvents 快照链路（pi 会话文件重放 / dsh system.message），
+	// 不再单独读「最近一次请求头」或退回 pi-system 模板——那两条路只能看到最新提示，
+	// 看不到会话开头的初始提示词与中途变更（2026-10 轨迹补齐）。
+	assert.doesNotMatch(source, /pi-system/);
+	assert.doesNotMatch(source, /readDshSystemPrompt/);
 	assert.match(source, /record\?\.backend === "dsh"/);
 	assert.match(source, /isDshSession/);
-	assert.match(source, /readDshSystemPrompt/);
 	assert.match(panel, /currentSessionIdAtom/);
 	assert.match(panel, /processEvents/);
 });
@@ -191,10 +191,19 @@ test("first user message is the initial prompt; process events join the ledger",
 		processEvents: [
 			{ id: "s1", kind: "session", timestamp: 1000, summary: "cwd /repo", cwd: "/repo" },
 			{ id: "m1", kind: "modelChange", timestamp: 2500, summary: "openai/gpt", provider: "openai", modelId: "gpt" },
+			{
+				id: "p1",
+				kind: "systemPrompt",
+				timestamp: 500,
+				summary: "initial · 11 chars · 1 tools",
+				detail: "You are pi.",
+				prompt: { kind: "initial", text: "You are pi.", tools: ["bash"] },
+			},
 		],
-		systemPrompt: "You are pi.",
 	});
 	assert.equal(model.records[0].kind, "systemPrompt");
+	assert.equal(model.records[0].promptKind, "initial");
+	assert.equal(model.records[0].prompt?.text, "You are pi.");
 	assert.equal(model.records.find((r) => r.id === "u1")?.isInitialPrompt, true);
 	assert.equal(model.records.find((r) => r.id === "u2")?.isInitialPrompt, undefined);
 	assert.ok(model.records.some((r) => r.processKind === "session"));
@@ -357,4 +366,37 @@ test("modelRequest ledger wiring: kindLabel key, size label in duration column, 
 	assert.match(view, /traceSizeLabel/);
 	assert.match(view, /viewFullRequest/);
 	assert.match(view, /ModelTraceDetail/);
+});
+
+test("prompt updates stay where they happened; only the initial prompt is hoisted", () => {
+	const { buildTrajectory } = loadModule();
+	const model = buildTrajectory([msg({ id: "u1", role: "user", text: "go", timestamp: 1000 }), msg({ id: "a1", role: "assistant", text: "ok", timestamp: 2000, stopReason: "stop" })], 9000, {
+		processEvents: [
+			{ id: "p0", kind: "systemPrompt", timestamp: 500, summary: "initial", prompt: { kind: "initial", text: "base", tools: [] } },
+			{ id: "p1", kind: "systemPrompt", timestamp: 3000, summary: "update", prompt: { kind: "update", text: "base+v2", tools: ["bash"] } },
+		],
+	});
+	const order = model.records.map((record) => (record.kind === "systemPrompt" ? `prompt:${record.promptKind}` : record.kind)).join(",");
+	assert.equal(order, "prompt:initial,user,assistant,prompt:update");
+	assert.equal(model.records[0].prompt?.text, "base");
+	assert.equal(model.records[3].prompt?.tools.join(","), "bash");
+});
+
+test("system prompt snapshot renders in the ledger inspector, replacing the pi-system fallback", () => {
+	const view = readFileSync("src/renderer/src/components/session/trajectory/SessionTrajectoryView.tsx", "utf8");
+	assert.match(view, /function PromptSnapshotDetail/);
+	assert.match(view, /session\.trajectory\.prompt\.fullText/);
+	assert.match(view, /session\.trajectory\.prompt\.toolList/);
+	assert.match(view, /record\.promptKind === "initial"/);
+	assert.doesNotMatch(view, /readDshSystemPrompt|desktopApi.prompts/);
+});
+
+test("pi assistant durationMs drives the exact ledger span", () => {
+	const { buildTrajectory } = loadModule();
+	const model = buildTrajectory([msg({ id: "u1", role: "user", text: "go", timestamp: 1000 }), msg({ id: "a1", role: "assistant", text: "ok", timestamp: 1200, stopReason: "stop", meta: { durationMs: 4000, startedAt: 1200, usage: { inputTokens: 10, outputTokens: 20, reasoningTokens: 5 } } })]);
+	const assistant = model.records.find((record) => record.kind === "assistant");
+	assert.equal(assistant?.startedAt, 1200);
+	assert.equal(assistant?.endedAt, 5200);
+	assert.equal(assistant?.durationMs, 4000);
+	assert.equal(assistant?.usage?.reasoningTokens, 5);
 });

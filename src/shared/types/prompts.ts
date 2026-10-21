@@ -13,6 +13,15 @@ export type PiPromptTemplateSummary = {
 	enabled?: boolean;
 };
 
+/**
+ * 运行时提示词模板正文（来自 pi 的 `get_commands` 登记路径）。
+ *
+ * 与 `PiPromptTemplateSummary` 的区别：这条通道覆盖 **pi 实际加载的全部模板**——用户目录、
+ * 项目目录以及已安装 npm 包声明的 `pi.prompts`；PiDeck 的 prompts:list 只看前两者。
+ * 渲染层把两者合并后，`/<模板名>` 才能在发送前本地展开、把模板名写进会话文件。
+ */
+export type RuntimePromptTemplate = { name: string; content: string; description?: string };
+
 export type PiPromptTemplateListResult = {
 	templates: PiPromptTemplateSummary[];
 	globalDir: string;

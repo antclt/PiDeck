@@ -24,7 +24,6 @@ const sessionComponent = (file) => readFileSync(`src/renderer/src/components/ses
 /** 条内限高列表的锚点类（断言用它定位列表，而不是全文计数）。 */
 const CLAMPED_LISTS = [
 	["SessionSubagentsStrip.tsx", "max-h-\\[240px\\]"],
-	["SessionFilesStrip.tsx", "max-h-\\[200px\\]"],
 	["SessionTodoStrip.tsx", "max-h-\\[180px\\]"],
 	["SessionTeamStrip.tsx", "max-h-\\[260px\\]"],
 ];
@@ -62,3 +61,13 @@ for (const [file] of CLAMPED_LISTS.filter(([name]) => name !== "SessionSubagents
 		assert.equal(sessionComponent(file).split("overscroll-contain").length - 1, 0);
 	});
 }
+
+// 「修改的文件」最终形态：轮末 chip 行（turn/TurnFileChanges）。
+// 原先的两个使用方（composer 横栏卡、状态面板 files tab）都已移除，
+// 所以 FileEntryRow 一并删除——这里钉住「别再把自带滚轮的卡片塞回来」。
+test("composer widgets 里不再有文件条；状态面板的 FileEntryRow 已删除", () => {
+	assert.throws(() => readFileSync("src/renderer/src/components/session/statusPanel/FileEntryRow.tsx"), "FileEntryRow 应已随 files tab 删除");
+	assert.throws(() => readFileSync("src/renderer/src/components/session/SessionFilesStrip.tsx"), "SessionFilesStrip 应已删除");
+	const chip = readFileSync("src/renderer/src/components/session/turn/TurnFileChanges.tsx", "utf8");
+	assert.equal(chip.split("overscroll-contain").length - 1, 0, "轮末 chip 行不是滚动容器，不该带 overscroll-contain");
+});

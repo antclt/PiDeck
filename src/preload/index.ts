@@ -109,6 +109,8 @@ import type {
 	CreateAnonymousSessionResult,
 	UpdateSessionRecordInput,
 	SessionRecord,
+	SessionFactsResult,
+	SessionOutlineSnapshot,
 	SessionProcessEvent,
 	VisionBridgeConfig,
 	ProjectInheritedResourceToggleInput,
@@ -160,6 +162,7 @@ import type {
 	PiCliUpdateResult,
 	PiReleaseNotesPayload,
 	PiCommand,
+	RuntimePromptTemplate,
 	RewindCheckpointPage,
 	RewindCheckpointPageParams,
 	RewindRestoreResult,
@@ -668,7 +671,9 @@ const api = {
 		/** 无 runtime 时截断 JSONL 供重发。运行中必须先停 Agent。 */
 		prepareCatalogResend: (sessionId: string, messageId: string, entryId?: string) => ipcRenderer.invoke(ipcChannels.sessionsCatalogPrepareResend, sessionId, messageId, entryId) as Promise<SessionCommandResult<{ text: string; images?: ImageContent[] }>>,
 		/** 会话 JSONL 过程事件（session/model/thinking/custom），轨迹复盘用。 */
-		readProcessEvents: (sessionId: string) => ipcRenderer.invoke(ipcChannels.sessionsCatalogReadProcessEvents, sessionId) as Promise<SessionProcessEvent[]>,
+		readProcessEvents: (sessionId: string) => ipcRenderer.invoke(ipcChannels.sessionsCatalogReadProcessEvents, sessionId) as Promise<SessionFactsResult>,
+		readOutline: (sessionId: string, limit?: number) => ipcRenderer.invoke(ipcChannels.sessionsCatalogReadOutline, sessionId, limit) as Promise<SessionOutlineSnapshot>,
+		readOutlineTitle: (sessionId: string, entryId: string) => ipcRenderer.invoke(ipcChannels.sessionsCatalogReadOutlineTitle, sessionId, entryId) as Promise<string | undefined>,
 		/** DSH 会话轨迹系统提示（request/header 的 EpochHeader.system；非 DSH/无数据返回 undefined）。 */
 		readDshSystemPrompt: (sessionId: string) => ipcRenderer.invoke(ipcChannels.sessionsCatalogReadDshSystemPrompt, sessionId) as Promise<string | undefined>,
 		/** 按需读取单条消息完整文本（工具结果截断后的「查看完整输出」）。
@@ -714,8 +719,6 @@ const api = {
 			}>,
 		/** pi-subagents 扩展子代理列表（record + 子会话回填）。 */
 		listSessionSubagents: (sessionId: string) => ipcRenderer.invoke(ipcChannels.sessionsListSubagents, sessionId) as Promise<import("../shared/types").PiSubagentEntry[]>,
-		/** 会话级文件修改汇总（write/edit/create/patch 聚合，历史/活会话通用）。 */
-		listSessionFileChanges: (sessionId: string) => ipcRenderer.invoke(ipcChannels.sessionsListFileChanges, sessionId) as Promise<import("../shared/types").SessionFileChange[]>,
 		/** 会话级 todo 快照（pi-deck-todo custom 条目重建，历史会话任务 tab）。 */
 		listSessionTodo: (sessionId: string) => ipcRenderer.invoke(ipcChannels.sessionsListSessionTodo, sessionId) as Promise<import("../shared/types").SessionTodoSnapshot | undefined>,
 		/**
@@ -778,10 +781,12 @@ const api = {
 		compactRuntime: (target: SessionRuntimeTarget, prompt?: string) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeCompact, target, prompt) as Promise<SessionCommandResult<SessionTargetedValue<AgentRuntimeState>>>,
 		getRuntimeState: (target: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeState, target) as Promise<SessionCommandResult<SessionTargetedValue<AgentRuntimeState>>>,
 		listRuntimeCommands: (target: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeCommands, target) as Promise<SessionCommandResult<SessionTargetedValue<PiCommand[]>>>,
+		listRuntimePromptTemplates: (target: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.sessionsRuntimePromptTemplates, target) as Promise<SessionCommandResult<SessionTargetedValue<RuntimePromptTemplate[]>>>,
 		/** 热重载 pi 扩展/技能/提示词；返回刷新后的命令表。 */
 		reloadResources: (target: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeReloadResources, target) as Promise<SessionCommandResult<SessionTargetedValue<PiCommand[]>>>,
 		/** 草稿会话命令预览（pi standby 进程只读查询；不可用/非 pi 返回 null）。 */
 		draftCommands: (projectId: string) => ipcRenderer.invoke(ipcChannels.sessionsDraftCommands, projectId) as Promise<PiCommand[] | null>,
+		draftPromptTemplates: (projectId: string) => ipcRenderer.invoke(ipcChannels.sessionsDraftPromptTemplates, projectId) as Promise<RuntimePromptTemplate[] | null>,
 		/** 运行中 Agent 快照里的模型；不在此列表 = 新加配置，切过去要重启。 */
 		listRuntimeModels: (target: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeListModels, target) as Promise<SessionCommandResult<SessionTargetedValue<AvailableModel[]>>>,
 		/** Pi 当前模型支持的 thinking levels；旧 Pi/非 Pi 后端返回 undefined，渲染层回退静态列表。 */

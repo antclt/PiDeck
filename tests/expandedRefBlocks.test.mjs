@@ -122,3 +122,13 @@ test("textForSessionTitle strips vision bridge blocks (marker + description are 
 	// 引用块在前、视觉桥块在尾的混排：两者都剥，只留用户手写正文。
 	assert.equal(textForSessionTitle(`<quoted_context label="引用A" message_id="m1">\nA 全文\n</quoted_context>\n照着改\n\n${success}`), "照着改");
 });
+
+test("模板块有独立 kind（与 pi 的 skill / prompt 资源类型对齐）", () => {
+	const blocks = parseExpandedRefBlocks(SAMPLE);
+	assertJsonEqual(
+		blocks.map((block) => block.kind),
+		["quote", "session", "skill", "template"],
+	);
+	// 折叠成纯文本时仍与技能同一写法（/名称），纯文本出口不受类型拆分影响
+	assert.ok(replaceExpandedRefBlocksWithLabels(SAMPLE).includes("/review"));
+});

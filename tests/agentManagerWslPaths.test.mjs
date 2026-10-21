@@ -149,10 +149,7 @@ function loadAgentManager(existsPredicate = () => false) {
 											// 注入同一套 fs 替身——open 按 position 读 host 路径，路径断言依赖它
 											id === "../sessions/boundedEntryPage"
 											? loadTsCommonJs("src/main/sessions/boundedEntryPage.ts", { stubs: { "node:fs/promises": fsPromises } })
-											: // 会话文件汇总纯函数：本测试不覆盖，空实现满足 AgentManager 依赖契约
-												id === "../../shared/fileChanges"
-												? { collectLatestTurnFileChanges: () => [] }
-												: require(id),
+											: require(id),
 		},
 		{ filename: "SessionHistoryReader.ts" },
 	);
@@ -303,8 +300,6 @@ function loadAgentManager(existsPredicate = () => false) {
 					}),
 				};
 			}
-			// 会话文件汇总纯函数：本测试不覆盖，空实现满足 AgentManager 依赖契约
-			if (id === "../../shared/fileChanges") return { collectLatestTurnFileChanges: () => [] };
 			// rewind checkpoint 纯 git 模块：WSL 路径测试不涉及回退，空桩满足依赖契约
 			// （桩返回空对象即可——命名导入在调用时才取属性，本测试不触发 rewind 方法）。
 			if (id === "../rewind/index.ts") return {};

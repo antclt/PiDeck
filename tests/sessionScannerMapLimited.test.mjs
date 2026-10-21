@@ -22,20 +22,27 @@ const doubled = async (item) => item * 2;
 
 test("mapLimited 结果顺序与输入一致（滑动窗口不是乱序返回）", async () => {
 	const items = Array.from({ length: 25 }, (_, index) => index);
-	assert.deepEqual(Array.from(await createScanner().mapLimited(items, 4, doubled)), items.map((value) => value * 2));
+	assert.deepEqual(
+		Array.from(await createScanner().mapLimited(items, 4, doubled)),
+		items.map((value) => value * 2),
+	);
 });
 
 test("mapLimited 同时最多跑 concurrency 个 mapper", async () => {
 	const scanner = createScanner();
 	let inFlight = 0;
 	let peak = 0;
-	await scanner.mapLimited(Array.from({ length: 20 }, (_, index) => index), 3, async (item) => {
-		inFlight += 1;
-		peak = Math.max(peak, inFlight);
-		await new Promise((resolve) => setImmediate(resolve));
-		inFlight -= 1;
-		return item;
-	});
+	await scanner.mapLimited(
+		Array.from({ length: 20 }, (_, index) => index),
+		3,
+		async (item) => {
+			inFlight += 1;
+			peak = Math.max(peak, inFlight);
+			await new Promise((resolve) => setImmediate(resolve));
+			inFlight -= 1;
+			return item;
+		},
+	);
 	assert.equal(peak, 3);
 });
 
@@ -49,7 +56,11 @@ test("mapLimited 不通过 setTimeout 让出（Windows 上每次 16.3ms）", asy
 	};
 	try {
 		const scanner = createScanner();
-		await scanner.mapLimited(Array.from({ length: 200 }, (_, index) => index), 4, doubled);
+		await scanner.mapLimited(
+			Array.from({ length: 200 }, (_, index) => index),
+			4,
+			doubled,
+		);
 	} finally {
 		globalThis.setTimeout = original;
 	}
