@@ -114,16 +114,16 @@ test("F9-2 API 总览含三错误码全名、装配机制关键词与消费前�
 });
 
 test("F9-3 按域调用面覆盖 DOMAIN_CATALOG 全部 id 且表格行数一致", () => {
-	assert.equal(catalogIds.length, 60, "DOMAIN_CATALOG 应为 60 行");
+	assert.equal(catalogIds.length, 64, "DOMAIN_CATALOG 应为 64 行");
 	const uniqueCatalogIds = new Set(catalogIds);
-	assert.equal(uniqueCatalogIds.size, 60, "DOMAIN_CATALOG id 应无重复");
+	assert.equal(uniqueCatalogIds.size, 64, "DOMAIN_CATALOG id 应无重复");
 	const rowIds = backtickedRowIds(domainsChapter).filter((id) => uniqueCatalogIds.has(id));
-	assert.equal(new Set(rowIds).size, 60, "按域调用面应恰好 60 个域表格行（无重复）");
+	assert.equal(new Set(rowIds).size, 64, "按域调用面应恰好 64 个域表格行（无重复）");
 	for (const id of catalogIds) {
 		assert.ok(rowIds.includes(id), `按域调用面缺域 ${id}`);
 	}
-	// 表格行总数契约 = 域 60 行 + 导入器 11 行，无其他首列反引号表格行。
-	assert.equal(backtickedRowIds(domainsChapter).length, 60 + importerIds.length, "按域调用面表格行数应为 60 域 + 11 导入器");
+	// 表格行总数契约 = 域 64 行 + 导入器 11 行，无其他首列反引号表格行。
+	assert.equal(backtickedRowIds(domainsChapter).length, 64 + importerIds.length, "按域调用面表格行数应为 64 域 + 11 导入器");
 });
 
 test("F9-4 四条例外与 DSH 插件体系在域行上标注红线（关键词与域 id 邻近）", () => {

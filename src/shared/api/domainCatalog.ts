@@ -112,6 +112,10 @@ export const DOMAIN_CATALOG = [
 	// 命名空间伴生认领 settings（F1-6 冻结例外表）。
 	{ id: "web", group: "integration", manager: "WebServiceManager + WebEventStream/WebWorkspaceRoutes/WebI18n/WebNetwork", ipcFile: ["ipc/systemIpc.ts"], preloadNamespaces: ["settings"], channelPrefix: ["web"], aggregation: "aggregate" },
 	{ id: "enhance", group: "integration", manager: "EnhancePromptService（常驻 sidecar pi-enhance-host.mjs）", ipcFile: ["ipc/enhanceIpc.ts"], preloadNamespaces: ["enhance"], channelPrefix: ["enhance"], aggregation: "redline" },
+	// 裁决：输入预测（suggest:*）。与 enhance 同一侧车协议但**独立实例**（AGENTS.md 例外四：
+	// 三个消费者共享「新 run 打断旧 run」语义，共用实例会让预测打断增强），因此单独一行、
+	// 单独 redline：systemPrompt/userText 只由主进程常量注入，渲染层禁传。
+	{ id: "prompt-suggestion", group: "integration", manager: "EnhancePromptService（prompt-suggestion 独立实例，systemPrompt 由主进程常量注入）", ipcFile: ["ipc/promptSuggestionIpc.ts"], preloadNamespaces: ["suggestion"], channelPrefix: ["suggest"], aggregation: "redline" },
 	// 裁决：智能体（AgentProfileStore + AgentInvokeService）。一次性调用复用 enhance 侧车
 	// 协议但走独立 EnhancePromptService 实例（AGENTS.md 例外四）：systemPrompt 只由主进程按
 	// agentId 解析、渲染层禁传；本行按普通域聚合（配置 CRUD + 市场设置 + 一次性调用入口），

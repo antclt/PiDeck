@@ -192,6 +192,16 @@ export type AgentRunItem = {
 	askPending: boolean;
 	/** 阻塞中的提问弹起时刻（ask 工具 beganAt），用于把尾部耗时冻结在该时刻。 */
 	askPendingAt?: number;
+	/**
+	 * 本轮内被时间线隐藏、但必须参与「修改的文件」汇总的工具消息。
+	 *
+	 * 目前唯一来源：DSH PTC 模式（preset 走 run_code 单工具）的文件类子调用。它们由
+	 * dshEventProjector 投影成 meta.ptcNested=true 的隐藏消息——时间线只显示外层 run_code 卡，
+	 * 但如果直接丢弃，轮末 chip 行就完全拿不到本轮改了哪些文件（2027-02 实测 PTC 会话恒为空）。
+	 *
+	 * 因此这些消息**不进 items**（不渲染），而是存在这里专供 collectRunFileChanges 聚合。
+	 */
+	hiddenFileMessages?: ChatMessage[];
 };
 
 /** 扩展输出条目组：同一 run 内连续到达的 appendEntry 投影卡合为一个过程组成员（用户决策 2026-10：不单独成块，折进过程组）。 */
@@ -327,6 +337,8 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 	let currentRun: Array<MessageItem | ToolGroupItem | ThinkingGroupItem | RetryGroupItem | ErrorGroupItem | ExtensionEntryGroupItem> = [];
 	let runStartedAt = 0;
 	let runEndedAt = 0;
+	/** 当前 run 内被时间线隐藏、但需参与文件汇总的工具消息（见 AgentRunItem.hiddenFileMessages）。 */
+	let currentHiddenFileMessages: ChatMessage[] = [];
 	/** 当前回合的触发用户消息时间戳，用于替代 assistant/tool 时间戳作为回合起点 */
 	let lastUserTimestamp = 0;
 
@@ -371,11 +383,14 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 	function flushRun() {
 		flushTools();
 		flushThinking();
-		if (currentRun.length === 0) return;
+		// 只有隐藏文件消息的轮也要成组：PTC 会话常见「agent 静默改文件、本轮没有任何可见
+		// 文本或工具」——若在这里提前返回，轮末 chip 行会整个消失（用户看不到本轮改了什么）。
+		// 这种 run 的 items 为空，时间线不渲染任何内容，仅提供 chip 行数据。
+		if (currentRun.length === 0 && currentHiddenFileMessages.length === 0) return;
 
 		// 不再合并连续 assistant 消息：issue #130 要求多段回答原位平铺，
 		// 合并会把后段的 thinking 串接到前段消息上，导致思考被上移到两段文本之前。
-		const runStableId = currentRun[0] ? (currentRun[0].kind === "message" ? currentRun[0].message.id : currentRun[0].id) : "";
+		const runStableId = currentRun.length > 0 ? (currentRun[0].kind === "message" ? currentRun[0].message.id : currentRun[0].id) : `hidden-files:${currentHiddenFileMessages[0]?.id ?? "run"}`;
 		// 汇总本轮 ask_question 的用户等待时长：等待段不计入「回复耗时」。
 		// ask_question 工具结束时主进程已把等待从 durationMs 中扣除（见 AgentManager
 		// settleAskWait / upsertToolMessage），因此每笔等待量可反推：
@@ -413,8 +428,10 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 			askWaitMs,
 			askPending,
 			...(askPendingAt !== undefined ? { askPendingAt } : {}),
+			...(currentHiddenFileMessages.length > 0 ? { hiddenFileMessages: currentHiddenFileMessages } : {}),
 		});
 		currentRun = [];
+		currentHiddenFileMessages = [];
 		runStartedAt = 0;
 		runEndedAt = 0;
 		lastUserTimestamp = 0;
@@ -456,6 +473,7 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 		if (pendingRun) {
 			currentRun.push(...pendingRun);
 			pendingRun = null;
+			restorePendingHidden();
 		}
 		if (hasFinishedTurnInRun()) flushRun();
 	}
@@ -464,6 +482,15 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 	// 暂存起来，等下一条 assistant 到来后合并为同一 agent-run。
 	// 普通「上一轮只有工具/思考、用户又发新问题」场景不得使用此暂存，否则会串轮。
 	let pendingRun: (MessageItem | ToolGroupItem | ThinkingGroupItem | RetryGroupItem | ErrorGroupItem | ExtensionEntryGroupItem)[] | null = null;
+	/** pendingRun 的隐藏文件消息伙伴：跟随 currentRun 一同暂存/回填，避免跨段落错位。 */
+	let pendingHiddenFileMessages: ChatMessage[] | null = null;
+
+	/** 把暂存的隐藏文件消息回填到当前 run（必须紧跟每次 pendingRun 回填，否则跨段串数据）。 */
+	function restorePendingHidden() {
+		if (!pendingHiddenFileMessages) return;
+		currentHiddenFileMessages.push(...pendingHiddenFileMessages);
+		pendingHiddenFileMessages = null;
+	}
 
 	for (const message of messages) {
 		if (isThinkingOnly(message)) {
@@ -484,15 +511,25 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 			if (pendingRun) {
 				currentRun.push(...pendingRun);
 				pendingRun = null;
+				restorePendingHidden();
 			}
 			appendRunMessage(message);
 		} else if (message.role === "tool") {
 			// PTC 子调用（meta.ptcNested）：DSH run_code 程序内部的文件类子调用（write/edit…）
-			// 只服务于「修改的文件」汇总（见 dshEventProjector 的 tool/ptc-dispatch 分支），
 			// 时间线仍只展示外层 run_code 卡——否则一轮 PTC 会凭空冒出几十张嵌套工具卡。
-			// 必须在任何分组动作（flushRunForTurnBoundary/flushThinking）之前跳过：
+			// 但**不能直接丢弃**：这类消息是 PTC 会话「修改的文件」的唯一数据源（run_code 永远
+			// 命中不到 write/edit 工具名）。直接丢弃会让轮末 chip 行对 PTC 会话恒为空。
+			// 因此收进 hiddenFileMessages（不进 items，不渲染），供 collectRunFileChanges 聚合。
+			// 必须在任何分组动作（flushRunForTurnBoundary/flushThinking）之前处理：
 			// 隐藏消息不应制造回合边界，也不能把思考组打散。
-			if (message.meta?.ptcNested === true) continue;
+			if (message.meta?.ptcNested === true) {
+				currentHiddenFileMessages.push(message);
+				// 隐藏消息也要撑起轮内时间轴：若本轮没有任何可见内容，
+				// startedAt/endedAt 只能靠它们推导（否则 chip 行所属轮的时间为 0）。
+				if (currentRun.length === 0 && runStartedAt === 0) runStartedAt = message.timestamp;
+				runEndedAt = message.timestamp;
+				continue;
+			}
 			// 新回合可能直接从工具开始（唤醒后先调用工具），同样需要先断开
 			flushRunForTurnBoundary();
 			flushThinking();
@@ -510,6 +547,7 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 			if (pendingRun && currentRun.length === 0) {
 				currentRun.push(...pendingRun);
 				pendingRun = null;
+				restorePendingHidden();
 			}
 			if (currentRun.length === 0) {
 				result.push({ kind: "message", message });
@@ -531,6 +569,7 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 			if (pendingRun && currentRun.length === 0) {
 				currentRun.push(...pendingRun);
 				pendingRun = null;
+				restorePendingHidden();
 			}
 			if (currentRun.length === 0) {
 				result.push({ kind: "message", message });
@@ -559,6 +598,7 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 			} else if (pendingRun) {
 				currentRun.push(...pendingRun);
 				pendingRun = null;
+				restorePendingHidden();
 				flushRun();
 			}
 			result.push({ kind: "message", message });
@@ -572,6 +612,7 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 			if (pendingRun && currentRun.length === 0) {
 				currentRun.push(...pendingRun);
 				pendingRun = null;
+				restorePendingHidden();
 			}
 			if (currentRun.length === 0) {
 				result.push({ kind: "message", message });
@@ -584,6 +625,7 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 			if (pendingRun) {
 				currentRun.push(...pendingRun);
 				pendingRun = null;
+				restorePendingHidden();
 				flushRun();
 			}
 			// 用户消息到来时，当前 run 可能只有工具/思考、没有最终回答文本。
@@ -600,6 +642,11 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 				flushThinking();
 				pendingRun = [...currentRun];
 				currentRun = [];
+				// 隐藏文件消息跟随暂存：它们属于刚结束的这一段，不能潦到续答后的新段。
+				if (currentHiddenFileMessages.length > 0) {
+					pendingHiddenFileMessages = [...currentHiddenFileMessages];
+					currentHiddenFileMessages = [];
+				}
 				runStartedAt = 0;
 				runEndedAt = 0;
 			} else {
@@ -614,6 +661,7 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 	if (pendingRun) {
 		currentRun.push(...pendingRun);
 		pendingRun = null;
+		restorePendingHidden();
 	}
 	flushRun();
 

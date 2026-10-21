@@ -53,6 +53,8 @@ const timeline = compile("src/renderer/src/hooks/useSessionTimelineController.ts
 	"./timeline/sendScroll": compile("src/renderer/src/hooks/timeline/sendScroll.ts", {
 		"../../lib/pinTurnScroll": { animateScrollTop: () => () => undefined, pinScrollDurationMs: () => 320 },
 	}),
+	// 磁盘分页游标（控制器把 SessionMessagePage 收敛成缓存游标）：纯函数，直接编译真模块。
+	"../utils/sessionDiskPageCursor": compile("src/renderer/src/utils/sessionDiskPageCursor.ts"),
 });
 
 const composerController = readFileSync("src/renderer/src/hooks/useSessionComposerController.ts", "utf8");
