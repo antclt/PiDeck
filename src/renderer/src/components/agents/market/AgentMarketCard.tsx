@@ -33,14 +33,17 @@ export function AgentMarketCard({ agent, selectionDefault, active, onOpen, onUse
 	const usage = agent.usageCount > 0 ? t("agentMarket.usage", { count: agent.usageCount }) : t("agentMarket.neverUsed");
 
 	return (
-		<article className={cn("group relative flex flex-col gap-2 rounded-xl border border-border/50 bg-bg-panel/40 p-3 transition-colors hover:border-border hover:bg-bg-panel/70", active && "border-primary/40 bg-primary/5 hover:border-primary/40")}>
+		<article className={cn("group relative flex h-full flex-col gap-2 rounded-xl border border-border/50 bg-bg-panel/40 p-3 transition-colors hover:border-border hover:bg-bg-panel/70", active && "border-primary/40 bg-primary/5 hover:border-primary/40")}>
 			<button type="button" className="flex min-w-0 items-start gap-2.5 rounded-lg text-left focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none" title={t("agentMarket.detailTitle")} onClick={() => onOpen(agent)}>
 				<span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-bg-muted text-lg leading-none" aria-hidden="true">
 					{agent.icon ? agent.icon : <Bot className="size-4 text-muted-foreground" />}
 				</span>
-				<span className="min-w-0 flex-1">
-					<span className="flex flex-wrap items-center gap-1.5">
-						<span className="truncate text-sm font-medium text-foreground">{agent.name}</span>
+				<span className="flex min-w-0 flex-1 flex-col gap-1">
+					{/* 标题行不换行：徽标换到第二行会让各卡片简介起始位置参差；名称放不下时截断，靠 title 兜住全文。 */}
+					<span className="flex min-w-0 items-center gap-1.5">
+						<span className="min-w-0 truncate text-sm font-medium text-foreground" title={agent.name}>
+							{agent.name}
+						</span>
 						{agent.builtin && (
 							<Badge variant="neutral" size="sm">
 								{t("agentMarket.builtinBadge")}
@@ -52,11 +55,13 @@ export function AgentMarketCard({ agent, selectionDefault, active, onOpen, onUse
 							</Badge>
 						)}
 					</span>
-					<span className="mt-1 line-clamp-2 block text-xs leading-snug text-muted-foreground">{agent.description}</span>
+					{/* 不能再叠 block：Tailwind v4 里 .block 排在 .line-clamp-2 之后，display:block 会覆盖 -webkit-box，截断直接失效。 */}
+					<span className="line-clamp-2 text-xs leading-snug text-muted-foreground">{agent.description}</span>
 				</span>
 			</button>
 
-			<div className="relative flex h-7 shrink-0 items-center">
+			{/* mt-auto 把使用量/操作行吸到卡片底部：简介行数不同的卡片也在同一基线上对齐。 */}
+			<div className="relative mt-auto flex h-7 shrink-0 items-center">
 				<span className="absolute inset-y-0 left-0 flex max-w-full items-center truncate text-micro text-text-tertiary transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">{usage}</span>
 				<div className="absolute inset-y-0 right-0 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
 					{/* 「使用」不再是调用面板：新建一个绑定该智能体的会话并收起市场，角色设定对时间线隐藏。title 里说明这一点。 */}
