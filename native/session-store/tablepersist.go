@@ -18,6 +18,8 @@ package main
 //     条目 JSON 体积约为源会话行的 1/5（不含 toolResult/thinking），读取成本足够低。
 //   - **版本键与内存缓存同口径**：`size` + `mtimeMs` 都相等才复用；文件只变长且上次
 //     扫描以换行结尾时走**尾部增量**（复用已读到的条目，只解析新增行）。
+//     版本键看不出「文件被整份重写后恰好变长」，所以复用前还要用
+//     `verifyTableBoundary` 回读首/末条目的字节位置核对 id（见该函数注释）。
 //   - 一切失败都只 log：条目表是加速器，读到损坏/过期就重扫，绝不让会话打不开。
 //   - 目录有上限（文件数 + 总字节），超了按最旧淘汰，避免 userData 无限长。
 
@@ -36,7 +38,10 @@ import (
 
 const (
 	// tableFileVersion 条目文件格式版本：改结构/字段语义就递增，旧文件直接丢弃重扫。
-	tableFileVersion = 1
+	// v2：复用前新增字节边界校验（issue #392）。v1 条目文件可能已经与源文件脱节
+	// （整份重写后恰好变长 → 尾部增量错位 → 活动链从错位处截断，只剩尾部几轮），
+	// 递增版本号把用户手里这类失效文件一次性丢弃、按需重建。
+	tableFileVersion = 2
 	// tableFileSuffix 条目文件后缀（`<sha1>.table`）。
 	tableFileSuffix = ".table"
 	// maxTableFiles 磁盘上最多保留的条目文件数（含最近打开过的历史会话）。
@@ -108,6 +113,72 @@ func readPersistedTable(dir string, sessionPath string, size int64, mtimeMs floa
 		return table{Path: sessionPath, Size: header.Size, MtimeMs: header.MtimeMs, EndsWithNewline: header.EndsWithNewline, LastEntryID: header.LastEntryID, Entries: entries, OversizedLines: header.OversizedLines}, false, true
 	}
 	return table{}, false, false
+}
+
+// verifyTableBoundary 校验条目表记下的字节偏移是否仍与源文件对齐。
+//
+// 版本键只有 size + mtimeMs，看不出「文件被整份重写、恰好更长」：编辑消息、压缩重写、
+// 外部工具重建/导入、归档后换回另一份同名会话都会造成这种重写，而重写后条目 id 往往
+// 全换。此时尾部增量会从旧 size 处接着解析，条目从错位点起与文件完全脱节，活动链
+// （TS traceActiveBranch 从末条沿 parentId 回溯）就在断点处截断——用户看到的就是
+// issue #392 的「只剩最后几轮、也没有『加载更多』」，且这张错表按 size+mtime 永久命中，
+// 重启不自愈（删表才恢复）。
+//
+// 这里用与 TS 侧 appendIndexFromTail 同一招兜底：按表里的 offset/byteLength 读回源文件，
+// 比对解析出的 id；不符就让调用方丢弃命中、整份重扫并覆盖落盘。
+func verifyTableBoundary(path string, sessionSize int64, entries []displayEntry) bool {
+	if len(entries) == 0 {
+		return true
+	}
+	handle, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer handle.Close()
+	// 首条盯住会话 header（标题重写/`/reload` 重写首行会改变后续偏移），
+	// 末条盯住最常见的「改尾部 / 尾部错位」；len==1 时两者重合。
+	probes := []displayEntry{entries[0]}
+	if len(entries) > 1 {
+		probes = append(probes, entries[len(entries)-1])
+	}
+	for _, probe := range probes {
+		if !probeMatchesSource(handle, sessionSize, probe) {
+			return false
+		}
+	}
+	return true
+}
+
+// probeMatchesSource 读回单条条目所在字节段：普通行整行 JSON 解出 id；超长行只读
+// 64KiB 前缀（落盘条目本身也只留了前缀，见 appendLineSegment/parseOversizedEntry）。
+func probeMatchesSource(handle *os.File, sessionSize int64, probe displayEntry) bool {
+	if probe.Offset < 0 || probe.ByteLength <= 0 || probe.Offset > sessionSize-probe.ByteLength {
+		return false
+	}
+	oversized := probe.Oversized != nil && *probe.Oversized
+	length := probe.ByteLength
+	if oversized && length > oversizedPrefixBytes {
+		length = oversizedPrefixBytes
+	}
+	buffer := make([]byte, length)
+	read, err := handle.ReadAt(buffer, probe.Offset)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false
+	}
+	if int64(read) != length {
+		return false
+	}
+	if oversized {
+		entry, ok := parseOversizedEntry(string(buffer), probe.Offset, probe.ByteLength)
+		return ok && entry.ID == probe.ID
+	}
+	var parsed struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(buffer, &parsed); err != nil {
+		return false
+	}
+	return parsed.ID == probe.ID
 }
 
 func readEntryLines(reader *bufio.Reader, expected int) ([]displayEntry, error) {
