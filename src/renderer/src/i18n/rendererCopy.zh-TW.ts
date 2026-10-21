@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: f7b4c2a68020c727b42eaf1f2757ab006d0c6d5f054caa94a7a3b6bb69a4ebe1（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 998cc3743f8c503da1078a7c5ba6bd616cef847fb53825bfcbd40a0f6108913c（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -2227,7 +2227,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.mcp.pideck.apply": "應用授權並更新令牌",
 	"config.mcp.pideck.enable": "授權並啟用本地服務",
 	"config.mcp.pideck.disable": "關閉服務並撤銷令牌",
-	"config.mcp.pideck.connectionHint": "新增到當前 pi 配置後仍為停用，需要再開啟該條目。複製配置含訪問令牌；其他客戶端請按其格式配置 HTTP URL 和 Authorization。修改授權或重新啟用會更新令牌，請重新複製並替換舊配置。不會覆蓋已有 pideck 條目。",
+	"config.mcp.pideck.connectionHint": "新增到當前 pi 配置後仍為停用，落到條目頁點「啟用」即可。複製配置含訪問令牌；其他客戶端請按其格式配置 HTTP URL 和 Authorization。修改授權或重新啟用會更新令牌，請重新複製並替換舊配置。不會覆蓋已有 pideck 條目。",
 	"config.mcp.pideck.copy": "複製連線配置",
 	"config.mcp.pideck.copied": "已複製（含令牌）",
 	"config.mcp.pideck.add": "新增到當前 pi 配置（停用）",
@@ -2407,6 +2407,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.mcp.status.connected": "已連線 · {count} 個工具",
 	"config.mcp.status.needsAuth": "需要登入",
 	"config.mcp.status.disabled": "已停用",
+	"config.mcp.status.enable": "啟用",
+	"config.mcp.status.enableHint": "啟用後由 pi 原生 MCP 讀取該配置，新建或重啟會話後生效。",
 	"config.mcp.status.disconnected": "未連線",
 	"config.mcp.status.empty": "未配置 MCP 伺服器。",
 	"config.mcp.status.loginPending": "正在等待瀏覽器授權完成…",

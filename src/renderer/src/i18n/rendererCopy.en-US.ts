@@ -2227,7 +2227,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.mcp.pideck.enable": "Authorize and enable local service",
 	"config.mcp.pideck.disable": "Stop service and revoke token",
 	"config.mcp.pideck.connectionHint":
-		"Adding to the current pi configuration leaves the entry disabled; enable it separately. Copied configuration contains a token. For other clients, configure the HTTP URL and Authorization header in their format. Changing access or re-enabling rotates the token; copy again and replace the old configuration. Existing pideck entries are never overwritten.",
+		"Adding to the current pi configuration leaves the entry disabled; use Enable on the entry page to turn it on. Copied configuration contains a token. For other clients, configure the HTTP URL and Authorization header in their format. Changing access or re-enabling rotates the token; copy again and replace the old configuration. Existing pideck entries are never overwritten.",
 	"config.mcp.pideck.copy": "Copy connection configuration",
 	"config.mcp.pideck.copied": "Copied (includes token)",
 	"config.mcp.pideck.add": "Add to current pi configuration (disabled)",
@@ -2409,6 +2409,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.mcp.status.connected": "connected · {count} tools",
 	"config.mcp.status.needsAuth": "needs sign-in",
 	"config.mcp.status.disabled": "disabled",
+	"config.mcp.status.enable": "Enable",
+	"config.mcp.status.enableHint": "Once enabled, pi's built-in MCP reads this entry; takes effect in new or restarted sessions.",
 	"config.mcp.status.disconnected": "disconnected",
 	"config.mcp.status.empty": "No MCP servers configured.",
 	"config.mcp.status.loginPending": "Waiting for browser authorization…",
