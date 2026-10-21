@@ -66,6 +66,7 @@ export function ShortcutsTab(props: ShortcutsTabProps) {
 	const conflicts = useMemo(() => {
 		const byAcc = new Map<string, ShortcutId[]>();
 		for (const def of SHORTCUT_DEFS) {
+			if (def.hidden) continue;
 			const list = byAcc.get(resolved[def.id]) ?? [];
 			list.push(def.id);
 			byAcc.set(resolved[def.id], list);
@@ -150,7 +151,7 @@ export function ShortcutsTab(props: ShortcutsTabProps) {
 			</div>
 			{/* 按注册表分组渲染：通用 / 开发 */}
 			{(Object.keys(GROUP_LABEL_KEYS) as ShortcutGroupId[]).map((group) => {
-				const defs = SHORTCUT_DEFS.filter((def) => def.group === group);
+				const defs = SHORTCUT_DEFS.filter((def) => def.group === group && !def.hidden);
 				if (defs.length === 0) return null;
 				return (
 					<SettingsSection key={group} id={GROUP_SECTION_IDS[group]} title={t(GROUP_LABEL_KEYS[group])}>

@@ -21,12 +21,12 @@ import { GUIDE_BOOTSTRAP_SESSION_ID } from "../../utils/chatSessionBootstrap";
 import { chatContentWidthStyle } from "./chatContentWidth";
 import { ComposerStatsLine } from "./ComposerStatsLine";
 import { ComposerWidgetLayoutProvider, type ComposerWidgetCollapsedByKey, useComposerWidgetLayoutValue } from "./ComposerWidgetLayout";
+import { SessionAgentPromptBar } from "./SessionAgentPromptBar";
 import type { ChatMessage, GitBranchInfo } from "../../../../shared/types";
 import type { ReplyActionRule } from "../../../../shared/types/replyActions";
 import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
 import { VoiceTranscriptionControls } from "./VoiceTranscriptionControls";
 import { SessionReplyActions } from "./SessionReplyActions";
-import { BridgeGuiSlot, BridgeWidgetSlot } from "../bridge/BridgeSlot";
 import { SessionContextMeter } from "./SessionContextMeter";
 import { isComposerFeatureHidden, type HideableComposerFeatureId } from "../../../../shared/composerFeatures";
 
@@ -71,11 +71,11 @@ type ComposerExtrasProps = {
 	queuePanel?: ReactNode;
 	deliveryNotice: ReactNode;
 	attachmentBar: ReactNode;
+	/** 绑定智能体的会话：输入框上方的角色设定提示条（可展开查看提示词）。 */
+	agentBar: ReactNode;
 	composerBox: ReactNode;
 	/** 输入卡正下方 StatsLine；与输入卡同一列，不吃剩余高度。 */
 	statsLine?: ReactNode;
-	/** GUI 扩展桥：输入框上方挂件（aboveEditor）。 */
-	bridgeWidgetsAbove?: ReactNode;
 };
 
 /**
@@ -101,13 +101,12 @@ function ComposerMeasuredExtras(props: ComposerExtrasProps) {
 				    （2026-10 子代理条事故，契约见 tests/composerStripWheelChain.test.mjs）。 */}
 				<div className="flex min-h-0 min-w-0 flex-col gap-2 overflow-y-auto overscroll-contain pb-px empty:hidden">
 					{props.widgets}
-					{/* GUI 扩展桥：输入框上方挂件（aboveEditor）。无内容时该组件返回 null，不占位。 */}
-					{props.bridgeWidgetsAbove}
 					{props.queuePanel}
 					{props.deliveryNotice}
 				</div>
 				{hasAttachmentBar ? <div className="shrink-0">{props.attachmentBar}</div> : null}
 				<div className="flex w-full min-w-0 shrink-0 flex-col">
+					{props.agentBar}
 					{props.composerBox}
 					{props.statsLine}
 				</div>
@@ -117,6 +116,7 @@ function ComposerMeasuredExtras(props: ComposerExtrasProps) {
 }
 
 export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function ComposerArea(props, footerRef) {
+	const paneServices = useSessionPaneServices();
 	const composer = useSessionComposerController({
 		sessionId: props.sessionId,
 		enqueue: props.enqueue,
@@ -125,12 +125,14 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 		// @ 引用文件树；真实会话忽略该字段（record.projectId 优先）。
 		bootstrapProjectId: props.bootstrapProjectId,
 		// 预览 Tab 里发消息 → 自动晋升常驻（由 App 装配的 SessionPaneServices 提供）
-		onPromoteSession: useSessionPaneServices().promoteSessionToPermanent,
-		onCreateSession: useSessionPaneServices().runCreateSessionDraft,
+		onPromoteSession: paneServices.promoteSessionToPermanent,
+		onCreateSession: paneServices.runCreateSessionDraft,
 		// 输入框 `/login`：桌面接管后打开登录供应商弹框（pi 的登录只在它的 CLI 层）
-		onProviderLogin: useSessionPaneServices().openProviderLogin,
+		onProviderLogin: paneServices.openProviderLogin,
+		// `/reload`：桌面拦截后热重载 pi 资源，不写用户气泡
+		onReloadResources: (target) => paneServices.runSessionControl(target.sessionId, "reloadResources"),
 		// 「停止响应」后暂停排队消息自动投递（App 注入 queue.suppressSessionQueueAutoDrain）
-		suppressQueuedDrain: useSessionPaneServices().queueSuppressAutoDrain,
+		suppressQueuedDrain: paneServices.queueSuppressAutoDrain,
 	});
 	// ACP 会话配置(configOptions):枚举由 agent 回传,选择经 session/set_config_option 下发。
 	// agentId 未就绪/后端不符时 hook 内部自挂空,无额外成本。
@@ -139,7 +141,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 	const modelPendingMap = useAtomValue(modelPendingByIdAtom);
 	const sessionRecords = useAtomValue(sessionRecordsAtom);
 	// 输入框功能显示开关（外观设置）：只隐藏底栏入口，不停功能与快捷键（shared/composerFeatures.ts）
-	const hiddenComposerFeatures = useSessionPaneServices().hiddenComposerFeatures;
+	const hiddenComposerFeatures = paneServices.hiddenComposerFeatures;
 	const composerFeatureVisible = (feature: HideableComposerFeatureId): boolean => !isComposerFeatureHidden(hiddenComposerFeatures, feature);
 
 	const prewarmStartedForSessionRef = useRef<string | undefined>(undefined);
@@ -223,6 +225,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 								<ComposerMeasuredExtras
 									widgets={props.widgets ?? null}
 									queuePanel={props.queuePanel}
+									agentBar={<SessionAgentPromptBar sessionId={props.sessionId} />}
 									deliveryNotice={<SessionDeliveryNotice status={composer.sendState.status} message={composer.sendState.unknownSnapshot?.message} images={composer.sendState.unknownSnapshot?.images} error={composer.sendState.error} onAcknowledge={composer.delivery.acknowledgeUnknown} />}
 									attachmentBar={
 										composer.attachments.length > 0 || composer.pasteFiles.files.length > 0 ? (
@@ -251,8 +254,6 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 											}
 										/>
 									}
-									// GUI 扩展桥只挂输入框上方 widget；输入框下方保持 PiDeck 原生布局。
-									bridgeWidgetsAbove={<BridgeWidgetSlot sessionId={props.sessionId} placement="aboveEditor" />}
 									composerBox={
 										<div
 											// overflow-visible：保留命令面板/建议浮层；面板 minSize 已保证底栏不被裁切
@@ -277,19 +278,21 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 												validQuotes={composer.editor.validQuotes}
 												caretRef={composer.editor.caretRef}
 												placeholder={
-													composer.isStarting
-														? t("app.agentStartingPlaceholder")
-														: composer.bangMode === "bang-bang"
-															? t("app.composerSilentPlaceholder")
-															: composer.bangMode === "bang"
-																? t("app.composerShellPlaceholder")
-																: composer.mode === "plan"
-																	? t("app.composerPlanPlaceholder")
-																	: composer.mode === "goal"
-																		? t("app.composerGoalPlaceholder")
-																		: composer.acpToolName
-																			? t("app.composerAcpPlaceholder", { tool: composer.acpToolName })
-																			: t("app.composerEnterPlaceholder")
+													composer.suggestion?.visible
+														? ""
+														: composer.isStarting
+															? t("app.agentStartingPlaceholder")
+															: composer.bangMode === "bang-bang"
+																? t("app.composerSilentPlaceholder")
+																: composer.bangMode === "bang"
+																	? t("app.composerShellPlaceholder")
+																	: composer.mode === "plan"
+																		? t("app.composerPlanPlaceholder")
+																		: composer.mode === "goal"
+																			? t("app.composerGoalPlaceholder")
+																			: composer.acpToolName
+																				? t("app.composerAcpPlaceholder", { tool: composer.acpToolName })
+																				: t("app.composerEnterPlaceholder")
 												}
 												onFocus={composer.editor.onFocus}
 												onChange={composer.editor.onChange}
@@ -301,6 +304,8 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 												onDragOver={composer.editor.onDragOver}
 												onBlur={composer.editor.onBlur}
 												onChipClick={composer.editor.onChipClick}
+												// 输入预测：ghost 文案只做视觉层，不进入草稿/撤销；Tab / → 采纳。
+												suggestion={composer.suggestion?.visible ? composer.suggestion?.text : undefined}
 											/>
 											{composer.suggestions.open && !composer.isStarting ? (
 												<PromptSuggestions
@@ -406,14 +411,10 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 													/>
 												}
 											/>
-											{/* GUI 扩展桥：输入框工具栏不挂输入行内（扩展文本会干扰输入 UI，
-									    原位置曾被禁用），改挂输入区下方的独立条；无贡献不占位。 */}
 										</div>
 									}
 								/>
 							</footer>
-							{/* GUI 扩展桥：输入区工具栏落点（ctx.gui.setComposerToolbar）。 */}
-							<BridgeGuiSlot sessionId={props.sessionId} slot="composer.toolbar" className="flex shrink-0 flex-wrap items-center gap-1 px-3 pb-1" />
 							{composer.previewImage ? <ImagePreviewModal image={composer.previewImage} onClose={composer.modals.closePreview} /> : null}
 							{composer.delivery.videoConfirmPending ? (
 								<ConfirmDialog title={t("videogen.confirm.title")} message={t("videogen.confirm.body", { model: composer.delivery.videoGenConfig.activeModel })} confirmLabel={t("videogen.confirm.ok")} onConfirm={() => composer.delivery.confirmVideoGen()} onCancel={() => composer.delivery.cancelVideoGen()} />

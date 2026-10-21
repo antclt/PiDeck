@@ -2,11 +2,11 @@ import { open, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { ChatMessage, ImageContent, PiSubagentEntry, SessionBranchNode, SessionBranchTree, SessionMessagePage, SessionTodoSnapshot } from "../../shared/types";
 import { parseTodoSnapshotData } from "../../shared/sessionTodo";
-import { isFileChangeToolName } from "../../shared/fileChanges";
 import { deriveToolSubagentEntries } from "./derivedSubagents";
 import { scanJsonlLines } from "../sessions/jsonlLineStream";
 import { readBoundedEntryPage } from "../sessions/boundedEntryPage";
 import type { HostPluginEntriesPage, HostPluginEntryCursor } from "../../shared/types/hostPlugin";
+import type { SessionOutlineEntry, SessionOutlineSnapshot } from "../../shared/types/outline";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 import type { RpcResponse } from "./PiRpcClient";
 import type { AppLogger } from "../logging/AppLogger";
@@ -121,6 +121,64 @@ export function extractMessagePreviewFromLine(line: string): string {
 	return text.replace(/\s+/g, " ").trim().slice(0, BRANCH_PREVIEW_MAX_CHARS);
 }
 
+/** 索引预览长度上限：与 Go `previewMaxChars` 一致，导轨卡片一行够用。 */
+export const INDEX_PREVIEW_MAX_CHARS = 120;
+
+/**
+ * 用户消息预览（索引阶段计算，Go 侧 `messagePreviewText` 与之逐字段对齐）。
+ *
+ * 规则：content 为字符串；或内容块数组中第一段非空 `text`（不校验 block.type，
+ * 与 extractMessagePreviewFromLine 同语义）→ 空白压成单空格 → 按完整码点截 120 字。
+ */
+/** 预览要跳过的注入型引用块（用户看到的标题应是「他自己打的字」）。 */
+const PREVIEW_REF_TAGS = ["quoted_context", "referenced_session", "skill", "prompt_template"] as const;
+
+/**
+ * 跳过消息开头的注入引用块，返回用户真正输入的部分。
+ *
+ * 为什么必须先剥再截断：预览上限 120 字，引用块正文往往更长——先截断会把
+ * `<quoted_context ...>` 切成半截标签，导轨卡片就显示一坨 XML。
+ * 开头有引用块但找不到闭合标签（数据损坏/被截）时返回 undefined：宁可不产预览，
+ * 也不把半个标签当成标题。
+ */
+export function stripLeadingRefBlocks(text: string): string | undefined {
+	let rest = text;
+	for (;;) {
+		const trimmed = rest.replace(/^\s+/, "");
+		const tag = PREVIEW_REF_TAGS.find((name) => {
+			const open = `<${name}`;
+			if (!trimmed.startsWith(open)) return false;
+			const next = trimmed.charAt(open.length);
+			return next === ">" || /\s/.test(next);
+		});
+		if (tag === undefined) return trimmed;
+		const close = trimmed.toLowerCase().indexOf(`</${tag}>`);
+		if (close < 0) return undefined;
+		rest = trimmed.slice(close + tag.length + 3);
+	}
+}
+
+export function indexPreviewOf(message: Record<string, unknown> | undefined): string | undefined {
+	const content = message?.content;
+	let text: string | undefined;
+	if (typeof content === "string") text = content;
+	else if (Array.isArray(content)) {
+		for (const block of content) {
+			if (isRecord(block) && typeof block.text === "string" && block.text.trim()) {
+				text = block.text;
+				break;
+			}
+		}
+	}
+	if (text === undefined) return undefined;
+	const human = stripLeadingRefBlocks(text);
+	if (human === undefined) return undefined;
+	const collapsed = human.replace(/\s+/g, " ").trim();
+	if (!collapsed) return undefined;
+	const codePoints = Array.from(collapsed);
+	return codePoints.length > INDEX_PREVIEW_MAX_CHARS ? codePoints.slice(0, INDEX_PREVIEW_MAX_CHARS).join("") : collapsed;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -178,7 +236,7 @@ function parseIndexTableEntry(value: unknown): SessionDisplayEntry | null {
 		if (value.oversized !== true) return null;
 		entry.oversized = true;
 	}
-	const optionalStrings = ["modelChangeProvider", "modelChangeId", "thinkingLevel", "customType", "role", "toolName", "messageId", "summary", "firstKeptEntryId", "timestamp", "parentSession", "contextEditTargetId", "contextEditText"] as const;
+	const optionalStrings = ["modelChangeProvider", "modelChangeId", "thinkingLevel", "customType", "role", "toolName", "messageId", "summary", "firstKeptEntryId", "timestamp", "parentSession", "contextEditTargetId", "contextEditText", "preview"] as const;
 	for (const key of optionalStrings) {
 		const field = value[key];
 		if (field === undefined) continue;
@@ -284,6 +342,14 @@ type SessionDisplayEntry = {
 	messageTimestamp?: number;
 	/** 超长行降级条目：正文未解析（hasMessage 恒 false），只为维持 parentId 链而保留。 */
 	oversized?: true;
+	/**
+	 * 用户消息首段文本（空白压成单空格，≤INDEX_PREVIEW_MAX_CHARS 码点）。
+	 *
+	 * 为什么建索引时顺手带走：整行本来就要 JSON.parse（正文已在内存），事后再为
+	 * 导轨标题回读同一行是纯浪费。持久化进条目表后，未加载的历史也能显示真实提问文本
+	 * （对齐 dsh session-turn-outline 的 prompt 预览口径；Go 侧镜像见 table.go）。
+	 */
+	preview?: string;
 	summary?: string;
 	firstKeptEntryId?: string;
 	timestamp?: string;
@@ -615,6 +681,36 @@ export type PluginHistoryGuard = {
 	remaining: { bytes: number; entries: number };
 };
 
+export type SessionFactEntry = {
+	id: string;
+	parentId: string | null;
+	type: string;
+	role?: string;
+	offset: number;
+	byteLength: number;
+	chainHostPath?: string;
+	oversized?: true;
+	// 以下元数据来自索引：事实读取不再为了普通事件读正文。
+	timestamp?: string;
+	summary?: string;
+	customType?: string;
+	modelChangeProvider?: string;
+	modelChangeId?: string;
+	thinkingLevel?: string;
+	tokensBefore?: number;
+};
+
+/** 事实读取所需的只读索引视图：活动父链条目（文件序）+ 版本指纹。 */
+export type SessionFactIndexSnapshot = {
+	hostPath: string;
+	size: number;
+	mtimeMs: number;
+	entries: SessionFactEntry[];
+	chainSources?: Array<{ hostPath: string; size: number; mtimeMs: number }>;
+	/** 会话头声明的 fork 来源；存在但 chainSources 缺失 = 祖先未合并。 */
+	headerParentSession?: string;
+};
+
 export class SessionHistoryReader {
 	private readonly sessionDisplayIndexes = new Map<string, SessionDisplayIndex>();
 	/** 宿主插件读取的单槽索引缓存：预算截断后的专用投影，与桌面 LRU 隔离，避免无总量上限的堆积。 */
@@ -635,6 +731,10 @@ export class SessionHistoryReader {
 	 * 200 条全是大结果时仍可驻留数十 MB；超预算时按最旧先淘汰。
 	 */
 	private static readonly FULL_TEXT_CACHE_MAX_BYTES = 32 * 1024 * 1024;
+	/** 导轨目录上限：单次响应 10,000 项（2MiB 载荷的保守对应值）。 */
+	static readonly MAX_OUTLINE_ENTRIES = 10_000;
+	/** 标题展示长度（与 chip 标题同口径）。 */
+	static readonly OUTLINE_TITLE_CHARS = 80;
 	/**
 	 * 轮次分页预取缓存（2026-09 上滚丝滑）：disk 路径翻页时在后台读取下一页
 	 * 并暂存（键含文件版本/游标/页大小，pi 追加消息后自动失效），用户继续上滚时
@@ -670,21 +770,6 @@ export class SessionHistoryReader {
 	 */
 	private static readonly MAX_PAGE_WINDOW_ENTRIES = 600;
 
-	/**
-	 * 文件汇总的条目预算（最新一轮 + 无 user 边界的兜底窗口）。
-	 *
-	 * 单轮条目数正常在几十条量级；给 1600 是防御「单轮上千条工具调用」的极端会话——
-	 * 即便被截断，截断的也是同一轮里最旧的条目，横栏语义（本轮改了什么）仍然成立；
-	 * 横栏只是汇总视图，不像时间线那样需要逐条可见。
-	 */
-	private static readonly MAX_FILE_CHANGE_ENTRIES = 1600;
-
-	/**
-	 * 轮次边界探测次数上限：只为跳过「空文本 user 条目」，正常第一条即命中。
-	 * 超出上限时按索引 role 直接认定，避免异常数据把探测变成全量读盘。
-	 */
-	private static readonly FILE_CHANGE_BOUNDARY_PROBES = 4;
-
 	/** 启动加载窗口条目预算（供 AgentManager 对齐窗口口径）。 */
 	static maxLoadWindowEntries(): number {
 		return SessionHistoryReader.MAX_LOAD_WINDOW_ENTRIES;
@@ -696,6 +781,76 @@ export class SessionHistoryReader {
 	}
 
 	constructor(private readonly deps: SessionHistoryReaderDeps) {}
+
+	/**
+	 * 轨迹事实的只读索引视图：只返回活动父链的条目元数据（无正文）。
+	 * 调用方按类型选候选后再用 readSessionFactLines 小批读，正文读取量与实际需要成正比。
+	 */
+	async getSessionFactIndex(sessionPath: string): Promise<SessionFactIndexSnapshot> {
+		const index = await this.getSessionDisplayIndex(sessionPath);
+		const header = [...index.entries.values()].find((entry) => entry.type === "session");
+		return {
+			hostPath: index.hostPath,
+			size: index.size,
+			mtimeMs: index.mtimeMs,
+			entries: index.activeBranch.map((entry) => ({
+				id: entry.id,
+				parentId: entry.parentId,
+				type: entry.type,
+				role: entry.role,
+				offset: entry.offset,
+				byteLength: entry.byteLength,
+				...(entry.chainHostPath ? { chainHostPath: entry.chainHostPath } : {}),
+				...(entry.oversized ? { oversized: true as const } : {}),
+				...(entry.timestamp ? { timestamp: entry.timestamp } : {}),
+				...(entry.summary ? { summary: entry.summary } : {}),
+				...(entry.customType ? { customType: entry.customType } : {}),
+				...(entry.modelChangeProvider ? { modelChangeProvider: entry.modelChangeProvider } : {}),
+				...(entry.modelChangeId ? { modelChangeId: entry.modelChangeId } : {}),
+				...(entry.thinkingLevel ? { thinkingLevel: entry.thinkingLevel } : {}),
+				...(entry.tokensBefore !== undefined ? { tokensBefore: entry.tokensBefore } : {}),
+			})),
+			...(index.chainSources ? { chainSources: index.chainSources.map((source) => ({ ...source })) } : {}),
+			...(header?.parentSession ? { headerParentSession: header.parentSession } : {}),
+		};
+	}
+
+	/**
+	 * 用户检查点目录（右侧导轨）：活动消息索引派生，过滤 context_edit 移出的条目。
+	 * 超预算时保留首个与最近检查点，并告诉调用方被裁剪（不静默丢历史）。
+	 */
+	async readSessionOutline(sessionPath: string, limit = SessionHistoryReader.MAX_OUTLINE_ENTRIES): Promise<SessionOutlineSnapshot> {
+		const index = await this.getSessionDisplayIndex(sessionPath);
+		const excluded = new Set(index.contextEdits.excludedEntryIds);
+		const all: SessionOutlineEntry[] = [];
+		let ordinal = 0;
+		for (let messageIndex = 0; messageIndex < index.activeMessageEntries.length; messageIndex += 1) {
+			const entry = index.activeMessageEntries[messageIndex];
+			if (entry.type !== "message" || entry.role !== "user" || excluded.has(entry.id)) continue;
+			// 改写过的用户消息以改写文本为准（与时间线展示一致），否则用建索引时带走的预览。
+			const preview = index.contextEdits.replacementText.get(entry.id) ?? entry.preview;
+			all.push({
+				entryId: entry.id,
+				messageIndex,
+				turnOrdinal: ordinal,
+				...(entry.timestamp ? { timestamp: entry.timestamp } : {}),
+				...(preview ? { preview: clipOutlinePreview(preview) } : {}),
+			});
+			ordinal += 1;
+		}
+		if (all.length <= limit) return { entries: all, total: all.length, truncated: false };
+		// 保留首个 + 最近 (limit-1) 个：会话开头的问题与当下的上下文同样重要。
+		return { entries: [all[0], ...all.slice(all.length - (limit - 1))], total: all.length, truncated: true };
+	}
+
+	/** 读指定条目正文（复用索引读取的并发/字节预算与 fork 来源配对）。 */
+	async readSessionFactLines(sessionPath: string, entries: SessionFactEntry[]): Promise<string[]> {
+		const index = await this.getSessionDisplayIndex(sessionPath);
+		return this.readIndexedLines(
+			index.hostPath,
+			entries.map((entry) => ({ ...entry, hasMessage: entry.type === "message" }) satisfies SessionDisplayEntry),
+		);
+	}
 
 	/**
 	 * 不启动 pi 进程，直接从 JSONL 构造与运行态相同的时间线数据。
@@ -746,9 +901,8 @@ export class SessionHistoryReader {
 	 * 危险：`sessionContent === undefined` 分支会把活动分支的每一行都读进内存并
 	 * 逐条投影成显示对象——近 1 GiB 的会话足以顶爆主进程 384MB 老生代堆。
 	 * 只有「确实需要完整时间线」的入口才可以用它；任何「先全量再切片」的用法
-	 * 都必须改成有界读（窗口/分页，或像文件汇总那样按需定向读，
-	 * 见 readFileChangeMessages）。2026-09 的「打开会话即闪退」就是这条路径被
-	 * 「最近一轮修改的文件」借用导致的。
+	 * 都必须改成有界读（窗口/分页）。2026-09 的「打开会话即闪退」就是这条路径被
+	 * 「最近一轮修改的文件」借用导致的（该入口已于 2027-02 随 files tab 一并下线）。
 	 */
 	async readSessionDisplayMessages(sessionPath: string, agentId = "_viewer", sessionContent?: string, options?: SessionDisplayReadOptions): Promise<ChatMessage[]> {
 		// 调用方未把全文放进内存时必须走会 yield 的索引 + offset 读，
@@ -854,84 +1008,6 @@ export class SessionHistoryReader {
 		}
 
 		return this.applyContextEdits(this.deps.convertMessages(agentId, finalRaw, activeEntryIds), collectSessionContextEdits(activeBranch));
-	}
-
-	/**
-	 * 轮内过滤：只有 assistant（toolCall 参数在这里）与「可能是文件类工具」的
-	 * toolResult 参与文件汇总，其余条目整行不进内存。
-	 *
-	 * 保守优先：toolName 没捕获到（老索引/异常行）或 role 未知时一律读入——
-	 * 多读只是浪费一次 IO，漏读会让横栏少显示一个被改过的文件。
-	 * 真正的判定仍在聚合侧（getToolDiffTarget 用同一份 FILE_CHANGE_TOOL_RE），
-	 * 这里只是「要不要把这一行读进内存」的预判。
-	 */
-	private static isFileChangeSource(entry: SessionDisplayEntry): boolean {
-		if (entry.role === "assistant") return true;
-		if (entry.role === "toolResult") {
-			// toolName 缺失时投影会回退到 assistant toolCall 的名字，无法预判 → 读。
-			return !entry.toolName || isFileChangeToolName(entry.toolName);
-		}
-		return entry.role === undefined;
-	}
-
-	/**
-	 * 定位「最新一轮」的起点：最后一个「可展示 user 消息」在活动分支里的下标。
-	 *
-	 * 索引里只捕获了 role，而显示投影会丢掉空文本无图片的 user 条目（那种条目在
-	 * 时间线上不存在，渲染层 collectLatestTurnFileChanges 也不会把它当轮次边界）。
-	 * 为对齐这个口径，对候选条目做单行探测（自尾向前，次数有上限）——正常会话
-	 * 第一条就命中，只多读一行。
-	 *
-	 * 返回 -1 表示整条分支没有 user 边界（异常/老数据）。
-	 */
-	private async resolveFileChangeTurnBoundary(index: SessionDisplayIndex, entries: readonly SessionDisplayEntry[]): Promise<number> {
-		let probes = 0;
-		for (let i = entries.length - 1; i >= 0; i -= 1) {
-			if (entries[i].role !== "user") continue;
-			if (probes >= SessionHistoryReader.FILE_CHANGE_BOUNDARY_PROBES) return i;
-			probes += 1;
-			const raw = await this.readIndexedSessionMessages(index.hostPath, [entries[i]]);
-			const projected = this.deps.convertMessages("_viewer", raw, [entries[i].id]);
-			if (projected.some((message) => message.role === "user")) return i;
-		}
-		return -1;
-	}
-
-	/**
-	 * 「修改的文件」横栏的取数原语：**有界**返回最新一轮中可能产出 diff 的显示消息，
-	 * 调用方用 shared/fileChanges 的 collectSessionFileChanges 聚合。
-	 *
-	 * 为什么不能复用 readSessionDisplayMessages：那条路径是「读整条活动分支 →
-	 * 逐条投影成显示对象 → 再切出最后一轮」。对近 1 GiB 的会话，这等于让主进程
-	 * 把整段历史再全量展开一次：读盘字节 = 历史总字节，投影对象再翻一倍，
-	 * 直接顶爆主进程 384MB 老生代堆（用户表现为「一打开就闪退」）。
-	 *
-	 * 三层有界（全部由索引元数据决定，不靠正文）：
-	 * 1. 轮次边界取自索引里已捕获的 role，不为找边界读全量正文；
-	 * 2. 只读边界之后的条目 —— 读盘字节只与「一轮有多大」有关，与历史总长无关；
-	 * 3. 轮内只读可能产出 diff 的条目（assistant + 文件类工具结果），
-	 *    read/bash 等大体积工具结果整行不 materialize。
-	 *
-	 * 边界：没有 user 边界时回退聚合「尾部有界窗口」（见 MAX_FILE_CHANGE_ENTRIES），
-	 * 结果与 collectLatestTurnFileChanges 的「无 user 消息 → 聚合全部」一致，
-	 * 但不会因为异常数据退回全量展开。
-	 *
-	 * 已知取舍：toolCall 参数只在 assistant 行里，若有工具的 toolResult 落在边界之后、
-	 * 而它的 assistant toolCall 落在边界之前（用户在一轮工具执行中插话），该条会因取不到
-	 * 参数而被跳过。代价是多一个文件不出现在汇总横栏，不是数据丢失；为它把边界前的
-	 * assistant 行也读进来不划算（那正是本方法要避免的全量展开）。
-	 */
-	async readFileChangeMessages(sessionPath: string, agentId = "_viewer"): Promise<ChatMessage[]> {
-		const index = await this.getSessionDisplayIndex(sessionPath);
-		const entries = index.activeMessageEntries;
-		const boundary = await this.resolveFileChangeTurnBoundary(index, entries);
-		const scope = boundary < 0 ? entries.slice(Math.max(0, entries.length - SessionHistoryReader.MAX_FILE_CHANGE_ENTRIES)) : entries.slice(boundary + 1);
-		const readable = scope.filter((entry) => SessionHistoryReader.isFileChangeSource(entry));
-		if (readable.length === 0) return [];
-		const rawMessages = await this.readIndexedSessionMessages(index.hostPath, readable);
-		// isFileChangeSource 是「要不要读进内存」的保守预判（role 未知也读），
-		// 但 entryId 槽位必须严格按角色过滤：非角色条目会占位导致后续条目 id 错位。
-		return this.deps.convertMessages(agentId, rawMessages, roleMessageEntryIds(readable));
 	}
 
 	/**
@@ -1736,7 +1812,7 @@ export class SessionHistoryReader {
 		}
 		// pi 的完整 fork 已复制活动前缀（沿用 entry id），子文件就是分支权威；
 		// 再拼父分支不但重复消息，还会混入 fork 点之后/父会话后续追加的轮次。
-		if (own.activeMessageEntries.some((entry) => parent.entries.has(entry.id))) return own;
+		if (own.activeMessageEntries.some((entry) => parent.entries.has(entry.id))) return { ...own, chainSources: own.chainSources ?? [] };
 		// 增量 fork 才补祖先消息；offset/byteLength 必须与原始来源文件配对，
 		// 二级及以上的继承条目不能被重定向到直接父文件。
 		const inherited = parent.activeMessageEntries.map((entry) => ({ ...entry, chainHostPath: entry.chainHostPath ?? parent.hostPath }));
@@ -1862,6 +1938,8 @@ export class SessionHistoryReader {
 				toolName: readString(message, "toolName"),
 				messageId: typeof message?.id === "string" ? message.id : undefined,
 				messageTimestamp: typeof message?.timestamp === "number" ? message.timestamp : typeof parsed.timestamp === "string" ? Date.parse(parsed.timestamp) : undefined,
+				// 预览只取用户消息：助手/工具正文可能几十 KB，导轨也用不到。
+				preview: message?.role === "user" ? indexPreviewOf(message) : undefined,
 				summary: typeof parsed.summary === "string" ? parsed.summary : undefined,
 				firstKeptEntryId: typeof parsed.firstKeptEntryId === "string" ? parsed.firstKeptEntryId : undefined,
 				timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : undefined,
@@ -2407,4 +2485,10 @@ function extractEntryResultText(message: unknown): string {
 			.join("\n");
 	}
 	return "";
+}
+
+/** 索引预览 → 导轨卡片文本：压空白 + 截 80 字（卡片只有一行，全文留在账本/时间线里）。 */
+function clipOutlinePreview(text: string): string {
+	const compact = text.replace(/\s+/g, " ").trim();
+	return compact.length > SessionHistoryReader.OUTLINE_TITLE_CHARS ? `${compact.slice(0, SessionHistoryReader.OUTLINE_TITLE_CHARS)}…` : compact;
 }

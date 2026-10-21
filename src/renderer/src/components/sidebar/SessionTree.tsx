@@ -10,7 +10,6 @@ import { sessionRuntimeUiByIdAtom } from "../../atoms/session-atoms";
 import { t } from "../../i18n";
 import { formatRelativeTime } from "../../utils/relativeTime";
 import { hasPendingAskForSession } from "../../utils/askUi";
-import { BridgeGuiSlot } from "../bridge/BridgeSlot";
 import { filterSidebarSessions, getBoundSidebarRuntimeAgent, type SidebarController } from "../../hooks/useSidebarController";
 import { Button } from "../ui-shadcn/button";
 import type { SidebarActions } from "./SidebarContent";
@@ -77,7 +76,19 @@ function renderRuntimeStatusDot(status?: string | null) {
 	return <span className={cn("size-1.5 shrink-0 rounded-full", dotClass, status === "error" ? "" : "animate-pulse")} aria-label={label} title={label} />;
 }
 
-export function SessionTree(props: { project: Project; sessions: readonly SessionRecord[]; agents: readonly AgentTab[]; currentSessionId?: string; controller: SidebarController; actions: SidebarActions; nested?: boolean; visibleChildCount?: number; onShowMore?: () => void }) {
+export function SessionTree(props: {
+	project: Project;
+	sessions: readonly SessionRecord[];
+	agents: readonly AgentTab[];
+	currentSessionId?: string;
+	controller: SidebarController;
+	actions: SidebarActions;
+	nested?: boolean;
+	visibleChildCount?: number;
+	onShowMore?: () => void;
+	/** 无行可渲染时的空态（仅聊天分组传入）：空列表必须有可见反馈，不能静默 return null。 */
+	emptyState?: ReactNode;
+}) {
 	const filter = props.controller.sourceFilterFor(props.project.id);
 	const search = props.controller.search.trim();
 	// 待确认 ask 以**会话**为粒度展示：同一项目下可能多个会话各自在等回答，
@@ -128,8 +139,9 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
 	useEffect(() => {
 		if (hasRows) setRetainingExit(true);
 	}, [hasRows]);
-	// 最后一条也必须留到退场结束；空树最终仍不占 session-card 的空间。
-	if (!hasRows && !retainingExit) return null;
+	// 最后一条也必须留到退场结束；空树在调用方未提供空态时仍不占 session-card 的空间。
+	// 聊天分组提供 emptyState：展开且为空时显示「还没有聊天记录」，与「分组被折叠」区分开（#387）。
+	if (!hasRows && !retainingExit) return props.emptyState ? <>{props.emptyState}</> : null;
 
 	/** 单击走设置默认模式（App 层读 sessionTabOpenMode）；双击显式常驻。
 	 *  不设本地默认值：undefined 透传后由 App 的 sessions.open 用设置值兜底 */
@@ -191,8 +203,9 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
 					>
 						<div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7">
 							<div className="conversation-title flex min-w-0 items-center gap-1.5">
-								<TitleScrollText text={title} />
+								{/* 来源/后端标放标题左侧（与顶部 Tab 一致，用户反馈原先在标题右侧）。 */}
 								{badge}
+								<TitleScrollText text={title} />
 							</div>
 						</div>
 					</button>
@@ -286,10 +299,11 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
 								{props.actions.sessions.simpleNavigation ? <SessionActivityIndicator status={child.agent.status} sessionId={agentSession?.id} /> : renderRuntimeStatusDot(child.agent.status)}
 								<div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7">
 									<div className="conversation-title flex min-w-0 items-center gap-1.5">
+										{/* 后端身份标放标题左侧（与顶部 Tab 一致）。 */}
+										{child.agent.backend === "acp" ? <AcpBackendMark acpToolId={agentSession?.acpToolId} /> : <SessionBackendMark backend={child.agent.backend} />}
 										{/* 运行中 Agent 行：标题常被 truncate（如 "JZSSC40..."），悬浮展示完整标题；
                     选中背景仍保留，聚焦行也允许 hover 查看完整标题。 */}
 										<TitleScrollText text={displayTitle} className="font-medium" />
-										{child.agent.backend === "acp" ? <AcpBackendMark acpToolId={agentSession?.acpToolId} /> : <SessionBackendMark backend={child.agent.backend} />}
 										{/* 待确认 ask：运行中 Agent 行同样按会话粒度标记，避免多会话同时等待时分不清。 */}
 										{hasPendingAskForSession(agentSession?.id, sessionRuntimeUiById) && <PendingAskBadge count={1} />}
 										{agentSession?.sideTask && <SideTaskMark />}
@@ -347,18 +361,20 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
 							{pinned && <Pin className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />}
 							<div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7">
 								<div className="conversation-title flex min-w-0 items-center gap-1.5">
+									{/* 后端/来源身份标放标题左侧（与顶部 Tab 一致，用户反馈原先在标题右侧）：
+                      ACP 用工具品牌图标、DSH/生图用后端标、其余来源用来源徽标。 */}
+									{child.session.backend === "acp" ? <AcpBackendMark acpToolId={child.session.acpToolId} /> : (child.session.backend === "dsh" || child.session.backend === "imagegen") && <SessionBackendMark backend={child.session.backend} />}
+									{child.session.source && child.session.source !== "pi" && <SessionSourceBadge source={child.session.source} />}
 									{/* 历史会话（无运行态）文字降一级，与活跃 Agent/运行中会话形成层级差；
                   标题被截断时 hover 滚动展示全文（TitleScrollText，未溢出则静止）；
                   选中背景仍保留，聚焦行也允许 hover 查看完整标题。 */}
 									<TitleScrollText text={child.session.name || t("common.untitled")} className={cn(runtime ? "font-medium" : "font-normal text-muted-foreground/90")} />
-									{child.session.backend === "acp" ? <AcpBackendMark acpToolId={child.session.acpToolId} /> : (child.session.backend === "dsh" || child.session.backend === "imagegen") && <SessionBackendMark backend={child.session.backend} />}
 									{/* 待确认 ask：挂在会话行本身，用户一眼看出是哪个会话在等回答
                   （项目/标题栏徽章只给汇总数，多会话同时等待时分不清）。
                   与 ActiveSessionsTree、项目行共用 PendingAskBadge，语义与视觉一致。 */}
 									{hasPendingAskForSession(child.session.id, sessionRuntimeUiById) && <PendingAskBadge count={1} />}
 									{/* 生图角标：imagegen 后端会话的徽标已含生图标识，此处仅对遗留 pi 后端含生图消息的会话补图标 */}
 									{child.session.backend !== "imagegen" && child.session.hasImageGen && <ImageIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
-									{child.session.source && child.session.source !== "pi" && <SessionSourceBadge source={child.session.source} />}
 									{child.session.channel && <SessionChannelMark channel={child.session.channel} />}
 									{child.session.sideTask && <SideTaskMark />}
 									{renderToggle(groupKey, childCount)}
@@ -398,12 +414,6 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
 						<Ellipsis size={14} aria-hidden="true" />
 					</Button>
 				</div>
-				{/* GUI 扩展桥：会话列表条目附加落点（ctx.gui.setSessionItemExtra）。
-				    **追加**在行容器之后、子代理列表之前 —— 不改行本身的结构与 hover/拖拽行为（§7.4 只追加）。
-				    无贡献时返回 null，不占位。
-				    注：仓库无统一 SessionItem 组件，此处只接了 SessionTree 的历史会话行；
-				    ActiveSessionsTree / RecentSessionsSection / SessionTabsBar 仍为 pending。 */}
-				<BridgeGuiSlot sessionId={child.session.id} slot="session.item" className="flex flex-col gap-0.5 pl-5" />
 				{renderSubagents(groupKey, child.codexSubagents, child.piSubagents)}
 			</SidebarRemovalRow>
 		);
@@ -433,9 +443,10 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
 										<div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7">
 											<div className="conversation-title flex min-w-0 items-center gap-1.5">
 												{props.actions.sessions.simpleNavigation ? <SessionActivityIndicator status={runtime?.status} sessionId={session.id} /> : renderRuntimeStatusDot(runtime?.status)}
+												{/* 后端身份标放标题左侧（与顶部 Tab 一致）。 */}
+												{session.backend === "acp" ? <AcpBackendMark acpToolId={session.acpToolId} /> : <SessionBackendMark backend={session.backend} />}
 												{/* 草稿会话：选中背景仍保留，聚焦行也允许 hover 查看完整标题 */}
 												<TitleScrollText text={session.title || t("common.untitled")} className="font-medium" />
-												{session.backend === "acp" ? <AcpBackendMark acpToolId={session.acpToolId} /> : <SessionBackendMark backend={session.backend} />}
 												{/* 草稿会话同样按会话粒度标记待确认 ask。 */}
 												{hasPendingAskForSession(session.id, sessionRuntimeUiById) && <PendingAskBadge count={1} />}
 												{/* 侧边任务的草稿期也要认得出来：面板与左栏是同一会话，标记缺失会让人以为建了两条 */}

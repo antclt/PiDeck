@@ -131,12 +131,13 @@ async function clearAndSettle(tab, pickButton) {
 	tab.cleanup();
 }
 
-/** 应用日志管理行：删除按钮在「打开」右侧（同一 tab 里另有 RPC/粘贴/通知三类同名删除按钮）。 */
+/** 应用日志管理行：清理按钮在「打开」右侧（同一 tab 里另有清理全部/界面缓存/RPC/粘贴/通知等同名清理按钮）。 */
 function appLogsDeleteButton(buttons) {
 	const openIndex = buttons.findIndex((node) => node.props?.children === "common.open");
 	assert.ok(openIndex >= 0, "应用日志管理行应有「打开」按钮");
 	const button = buttons[openIndex + 1];
-	assert.equal(button?.props?.children, "common.delete", "「打开」右侧应是删除按钮");
+	assert.equal(button?.props?.children, "settings.storage.clearButton", "「打开」右侧应是红色清理按钮");
+	assert.equal(button?.props?.variant, "destructive", "清理按钮应是危险色");
 	return button;
 }
 
@@ -146,7 +147,7 @@ test("清空应用日志后查看器立刻换新结果，不需要手动刷新",
 
 test("「清理全部」同时清空了应用日志，查看器也要当场换新", async () => {
 	await clearAndSettle(setup(), (buttons) => {
-		const button = buttons.find((node) => node.props?.children === "settings.storage.clearAllButton");
+		const button = buttons.find((node) => node.props?.children === "settings.storage.clearButton");
 		assert.ok(button, "顶部应有「清理全部」按钮");
 		return button;
 	});

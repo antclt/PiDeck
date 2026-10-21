@@ -6,7 +6,8 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
  * 扩展输出条目（appendEntry 投影卡 meta.type=customEntry）折进过程组的分组行为。
  *
  * 用户决策 2026-10：扩展输出不再单独成块——run 内到达的条目吸收为 agent-run 的
- * `extension-entries` 组员（折进「执行过程」折叠组），run 未开始时保持独立条目兜底；
+ * `extension-entries` 组员（折进「执行过程」折叠组）；run 未开始、或回合已收尾
+ * （stop）之后才到达的条目保持独立条目兜底，避免把最终回答挤成中间回答。
  * `customMessage`（子代理完成通知）不受影响，仍是回合边界 + 独立通知卡。
  */
 
@@ -79,11 +80,60 @@ test("run 未开始时扩展输出保持独立条目兜底", () => {
 	assert.equal(result[0].message.id, "e1");
 });
 
-test("已收尾回合尾部到达的扩展输出仍归入该回合", () => {
-	const result = groupToolMessages([assistantMessage("a1", "回答", "stop"), extensionEntry("e1")]);
-	assert.equal(result.length, 1);
-	assert.equal(result[0].kind, "agent-run");
-	assert.deepEqual(runItemKinds(result[0]), ["message", "extension-entries"]);
+test("已收尾回合之后到达的扩展输出独立成卡，不把最终回答降级为中间回答", () => {
+	const entry = extensionEntry("e1");
+	const result = groupToolMessages([assistantMessage("a1", "回答", "stop"), entry]);
+	assert.deepEqual(
+		Array.from(result, (item) => item.kind),
+		["agent-run", "message"],
+		"stop 之后扩展输出不属于该回合，应排在 run 之后",
+	);
+	const run = result[0];
+	assert.deepEqual(runItemKinds(run), ["message"], "收尾回合不再吸收尾随扩展输出");
+	assert.equal(run.endedAt, 2, "尾随扩展输出不应延长本轮回复耗时");
+	assert.deepEqual(
+		Array.from(buildTurnDisplay(run), (item) => item.kind),
+		["final-answer"],
+		"最终回答必须常驻，不能被降级成中间回答",
+	);
+	assert.equal(result[1].message, entry, "独立卡持有原消息引用");
+});
+
+test("同一轮内先折进过程组、收尾后的尾随条目独立成卡", () => {
+	const midTurn = extensionEntry("e1");
+	const trailing = extensionEntry("e2");
+	const result = groupToolMessages([userMessage("u1"), assistantMessage("a1", "先看文件", "toolUse"), toolMessage("t1"), midTurn, assistantMessage("a2", "最终回答", "stop"), trailing]);
+	assert.deepEqual(
+		Array.from(result, (item) => item.kind),
+		["message", "agent-run", "message"],
+		"用户消息独立，回合内条目合成 run，收尾后的条目独立",
+	);
+	const run = result[1];
+	assert.deepEqual(runItemKinds(run), ["message", "tool-group", "extension-entries", "message"]);
+	assert.equal(result[2].message, trailing);
+	assert.deepEqual(
+		Array.from(buildTurnDisplay(run), (item) => item.kind),
+		["interim-answer", "process-entry", "process-entry", "final-answer"],
+		"回合内中间回答保留在折叠序列，最终回答常驻",
+	);
+});
+
+test("收尾回合之后的扩展输出也不会被下一轮吸收", () => {
+	const entry = extensionEntry("e1");
+	const result = groupToolMessages([assistantMessage("a1", "第一轮回答", "stop"), entry, assistantMessage("a2", "第二轮回答", "stop")]);
+	assert.deepEqual(
+		Array.from(result, (item) => item.kind),
+		["agent-run", "message", "agent-run"],
+		"扩展输出落在两轮之间，前后各成一个 run",
+	);
+	assert.deepEqual(
+		Array.from(buildTurnDisplay(result[0]), (item) => item.kind),
+		["final-answer"],
+	);
+	assert.deepEqual(
+		Array.from(buildTurnDisplay(result[2]), (item) => item.kind),
+		["final-answer"],
+	);
 });
 
 test("customMessage 仍是回合边界且不并入组员", () => {

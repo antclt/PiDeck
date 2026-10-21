@@ -9,7 +9,7 @@ PiDeck 可作为本机 MCP 服务，向 pi 和其他兼容客户端开放**明�
 1. 在 PiDeck 的 MCP 配置页，选择推荐服务中的 **PiDeck（本地只读服务）**。
 2. 勾选允许读取的项目（列表上方有“全选 / 全不选”，只作用于当前列表），或勾选 **“所有项目（含今后新建）”** 改用通配授权，然后点击“授权并启用本地服务”。授权不跟随当前选中的项目或标签变化：默认是显式白名单，**不会自动覆盖今后新建的项目**，新增项目后需重新进本页勾选并应用；勾选通配后才对今后新建的项目自动生效（新增项目不必再进本页，令牌也就不会因此轮换）。两种模式互斥：勾了通配就不再按项目列表展开。
 3. 若允许客户端停止正在生成的响应，勾选“允许停止正在生成的响应”。默认关闭，此时 `sessions_abort` **不会注册**，客户端在工具列表里看不到它。
-4. 接入 pi：点击“添加到当前 pi 配置（禁用）”。仅新增 `pideck` 条目，保留其他服务和配置；已存在本地或继承的同名条目时不覆盖。然后在 MCP 配置中单独启用该条目，由 **pi 原生 MCP 客户端**建立连接。
+4. 接入 pi：点击“添加到当前 pi 配置（禁用）”。仅新增 `pideck` 条目，保留其他服务和配置；已存在本地或继承的同名条目时不覆盖。随后界面会直接落到该条目页：在「连接与认证」里点「启用」（与下方「启用」开关等价），由 **pi 原生 MCP 客户端**建立连接；新建或重启会话后生效。
 5. 接入其他客户端：点击“复制连接配置”，按客户端要求填写 **Streamable HTTP URL** 和 `Authorization` 请求头。`enabled`、`exposure` 是 pi 配置项，其他客户端可能不接受它们。
 
 导出结构示例（端口与令牌必须使用应用生成的值）：
@@ -66,7 +66,7 @@ PiDeck 可作为本机 MCP 服务，向 pi 和其他兼容客户端开放**明�
 | `runtime_status` | 无；`arguments` 可省略或传 `{}` | `{ authorizedProjectCount, activeProjectCount, runningCount, runtimes: [{ sessionId, projectId, runtimeGeneration, status, busy, createdAt }] }`；只有活着的运行时，不含路径 |
 | `sessions_abort` | `sessionId`，可选 `expectedRuntimeGeneration`（整数 0–1000000） | `{ sessionId, aborted: true }`；**只在写开关打开时注册**，语义等同界面的“停止响应” |
 | `settings_get` | 无；`arguments` 可省略或传 `{}` | `{ app, agent, workspace }`，PiDeck 自身配置摘要；宿主未就绪时为 `null` |
-| `extensions_list` | 无；`arguments` 可省略或传 `{}` | `{ builtInVersion, injectionDisabled, builtIn, removedBuiltInExtensions, enabledBuiltInExtensions, disabledExtensions }`；宿主未就绪时为 `null` |
+| `extensions_list` | 无；`arguments` 可省略或传 `{}` | `{ builtInVersion, injectionDisabled, builtIn, removedBuiltInExtensions, disabledExtensions }`；宿主未就绪时为 `null` |
 | `sessions_list` | `projectId`，可选 `offset`（默认 0，整数 0–100000） | `{ sessions, nextOffset }`，每页最多 100 条，按更新时间倒序 |
 | `sessions_get` | `projectId`、`sessionId` | 单个会话元信息 |
 | `sessions_search` | `projectId`、`query`（1–500 字符），可选 `limit`（默认 20，1–100） | 会话元信息数组；标题的不区分大小写子串搜索，**不是全文搜索** |

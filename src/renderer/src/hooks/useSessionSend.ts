@@ -22,11 +22,14 @@ import {
 	upsertSessionAtom,
 	dshRuntimeStatusAtom,
 	openSettingsAtom,
+	removePendingUserMessages,
 } from "../atoms";
 import { applyDshGoalSendTransform, buildComposerPromptSubmission, deriveComposerAgentMode, expandPromptTemplates } from "../composerBehavior";
 import { expandQuoteTokens, stripQuoteTokens } from "../components/session/composer/quoteChip";
 import { t, translateI18nDescriptor } from "../i18n";
 import { DSH_INSTALL_SETTINGS_TARGET, maybeHintMissingDshRunnerNode, showDshRuntimeBlockHint } from "../utils/dshRuntimeHint";
+import { toSessionRuntimeTarget } from "../utils/sessionCommands";
+import { sessionReloadingByIdAtom } from "../atoms/session-commands-atoms";
 import { dshSendBlockReason } from "../../../shared/types/dshRuntime";
 
 export type EnqueuePromptSnapshot = {
@@ -54,7 +57,27 @@ export type UseSessionSendOptions = {
 	sendPrompt: SessionPromptApi;
 	/** Promotes a renderer-only pre-send surface to a persistent Session. */
 	ensureSessionId?: (sessionId: string) => Promise<string>;
-	templates: PromptTemplate[];
+	/**
+	 * 模板清单的**读取函数**而不是快照：模板表在 runtime 刚绑定/首次加载完成前可能是空的，
+	 * 发送时按最新清单展开，避免「打开会话立刻发 /模板名 → 退回给 pi 展开 → 模板名丢失」。
+	 */
+	getTemplates: () => PromptTemplate[];
+	/**
+	 * 发送前补齐模板表（`/名称` 命中未知模板时补拉）。
+	 *
+	 * 队列分支（忙碌时 steer/followUp）在**入队时就展开**，比 prepareMessage 更早，
+	 * 所以这条也得单独补一次：否则「刚打开的会话 + agent 还在收尾」时会用手上还空的
+	 * 模板表展开，`/模板名` 原样入队、flush 时直接发给 pi，chip 随之丢失（2026-10 e2e 抓到）。
+	 */
+	ensureTemplates?: (message: string) => Promise<void>;
+	/**
+	 * 后端已接管的命令名（pi 扩展命令 / 技能、DSH host 命令）：这些 `/名称` 不能本地展开。
+	 *
+	 * 为什么必须传：展开成 `<prompt_template>` 后消息不再以 `/` 开头，pi 的扩展命令与
+	 * DSH 的 slash 桥（`hostEntry.ts` 的 agent/pre-step 钩子）都不会再触发——
+	 * 命令被静默降级成普通提示词文字。来源见 `collectReservedCommandNames`。
+	 */
+	getReservedCommandNames?: () => ReadonlySet<string>;
 	prepareMessage?: (message: string) => Promise<string>;
 	onDraftMutation?: (sessionId: string) => void;
 	compact: (target: SessionRuntimeTarget, prompt?: string) => Promise<void>;
@@ -62,6 +85,8 @@ export type UseSessionSendOptions = {
 	createNewSession?: () => Promise<void>;
 	/** `/login [providerId]`：桌面拦截后打开登录供应商弹框（pi 的登录只在它的 CLI 层，走认证例外通道）。 */
 	openProviderLogin?: (providerId?: string) => void;
+	/** `/reload`：桌面拦截后热重载 pi 资源（不写用户气泡、不占发送锁）。 */
+	reloadResources?: (target: SessionRuntimeTarget) => Promise<void>;
 	resetComposerUi?: () => void;
 	recordPromptHistory?: (sessionId: string, message: string) => void;
 	refreshProject?: (projectId: string) => void;
@@ -147,6 +172,29 @@ export function useSessionSend(options: UseSessionSendOptions) {
 		}
 	}
 
+	/**
+	 * 投递被拒：撤掉这次请求的乐观用户气泡。
+	 *
+	 * 气泡只在「宿主确认后」才有资格留在时间线上——拒绝意味着它永远不会被写进会话日志，
+	 * 留着会变成幽灵消息（下次读盘/切回又凭空消失）。文字已由 restoreRejectedSnapshot
+	 * 回填草稿，用户可直接改完重发。
+	 */
+	function dropPendingUserMessage(targetSessionId: string, pendingRequestId: string) {
+		const entry = store.get(sessionMessagesCacheAtom)?.[targetSessionId];
+		if (!entry?.messages?.length) return;
+		const messages = removePendingUserMessages(entry.messages, pendingRequestId);
+		if (messages.length === entry.messages.length) return;
+		setCacheMessages({
+			sessionId: targetSessionId,
+			messages,
+			source: entry.source ?? "runtime",
+			windowStart: entry.windowStart,
+			cardCount: entry.cardCount,
+			history: entry.history,
+			windowStartFilePos: entry.windowStartFilePos,
+		});
+	}
+
 	/** 模板正文为空时统一的拦截提示：error 状态 + toast（带模板名，便于定位编辑）。 */
 	function rejectEmptyTemplate(targetSessionId: string, templateName: string) {
 		const message = t("app.promptTemplateEmptyBody", { name: templateName });
@@ -192,6 +240,11 @@ export function useSessionSend(options: UseSessionSendOptions) {
 		// atom 随 bootstrap 提升且跨 Composer 重挂载保留；局部 ref 只守当前实例。
 		const existingSend = store.get(sessionSendStateByIdAtom)[sourceSessionId];
 		if (sendingSessionIdsRef.current.has(sourceSessionId) || existingSend?.status === "activating" || existingSend?.status === "sending") return;
+		// 热重载会拆掉扩展运行时；期间禁止并发发送（含再次 /reload），避免把 handler 拆掉或让命令排队。
+		if (store.get(sessionReloadingByIdAtom)[sourceSessionId]) {
+			options.showError?.(t("sessionCommand.reloadResourcesBusy"), 3000);
+			return;
+		}
 
 		// overrideText 有值 = 快捷消息直发：正文来自弹框条目而非当前草稿。
 		// 这里固定三条约束（下面所有分支都靠 keepDraft 收口）：草稿/附件不参与本次发送、
@@ -280,6 +333,28 @@ export function useSessionSend(options: UseSessionSendOptions) {
 			store.set(openSettingsAtom, { tab: "shortcuts" });
 			return;
 		}
+		if (slashCommand.kind === "reload") {
+			// `/reload` 由桌面转成专用 IPC：主进程用内部扩展命令热重载 pi 资源，
+			// 不写乐观用户气泡、不进模型消息流。
+			clearComposerSnapshot(sourceSessionId, keepDraft);
+			resetComposerEphemeralUi(keepDraft);
+			sendingSessionIdsRef.current.delete(sourceSessionId);
+			const target = toSessionRuntimeTarget(sourceSessionId, runtimeAtEntry);
+			if (!target) {
+				options.showError?.(t("sessionCommand.runtimeUnavailable"), 4000);
+				return;
+			}
+			if (!options.reloadResources) {
+				options.showError?.(t("sessionCommand.reloadResourcesUnsupported"), 4000);
+				return;
+			}
+			try {
+				await options.reloadResources(target);
+			} catch (error) {
+				options.showError?.(error instanceof Error ? error.message : String(error), 5000);
+			}
+			return;
+		}
 		const isNewCommand = slashCommand.kind === "new";
 		const isCompactCommand = slashCommand.kind === "compact";
 		if (isNewCommand) {
@@ -324,6 +399,9 @@ export function useSessionSend(options: UseSessionSendOptions) {
 						text: message,
 						timestamp: Date.now(),
 						images: imageSnapshot,
+						// 待宿主确认：DSH 模型解析失败时用户消息从未写入会话日志，
+						// 快照里没有它——带标记才能在快照合并时接回（见 pendingUserMessage）。
+						meta: { pendingUserMessage: true, requestId },
 					},
 				],
 				source: "runtime" as const,
@@ -350,7 +428,10 @@ export function useSessionSend(options: UseSessionSendOptions) {
 		} catch (error) {
 			if (releaseIfRetired()) return;
 			// 普通发送已乐观清空草稿；队列与 /compact 尚未消费，不能重复回填。
-			if (publishBeforeActivation) restoreRejectedPrompt(sourceSessionId, keepDraft, rawDraft, imageSnapshot, quoteMap);
+			if (publishBeforeActivation) {
+				restoreRejectedPrompt(sourceSessionId, keepDraft, rawDraft, imageSnapshot, quoteMap);
+				dropPendingUserMessage(sourceSessionId, requestId);
+			}
 			const errorMessage = error instanceof Error ? error.message : String(error);
 			setSendState({
 				sessionId: sourceSessionId,
@@ -408,7 +489,9 @@ export function useSessionSend(options: UseSessionSendOptions) {
 		//   steer    → flushQueuedSteerPrompts (while agent is busy)
 		//   followUp → flushNextQueuedPrompt (when agent becomes idle)
 		if (options.enqueue && (streamingBehavior === "steer" || streamingBehavior === "followUp")) {
-			const { message: expandedMessage, emptyTemplateName } = expandPromptTemplates(message, options.templates);
+			// fail-open：模板表补齐失败只影响「能否本地展开」，不能把整条消息卡住不给发
+			await options.ensureTemplates?.(message).catch(() => undefined);
+			const { message: expandedMessage, emptyTemplateName } = expandPromptTemplates(message, options.getTemplates(), { reservedNames: options.getReservedCommandNames?.() });
 			if (emptyTemplateName) {
 				// 展开器会保留空模板的 /命令原文，不能靠消息是否空白判断正文有效。
 				sendingSessionIdsRef.current.delete(sourceSessionId);
@@ -456,6 +539,8 @@ export function useSessionSend(options: UseSessionSendOptions) {
 						text: message,
 						timestamp: Date.now(),
 						images: imageSnapshot,
+						// 同 publishOptimisticSubmission：待宿主快照确认的乐观气泡。
+						meta: { pendingUserMessage: true, requestId },
 					},
 				],
 				source: "runtime" as const,
@@ -468,8 +553,10 @@ export function useSessionSend(options: UseSessionSendOptions) {
 			preparedMessage = options.prepareMessage ? await options.prepareMessage(message) : message;
 		} catch (error) {
 			if (releaseIfRetired()) return;
-			// 拒绝时回填原始草稿（含 token），保留 chip 形态供用户修改重发
+			// 拒绝时回填原始草稿（含 token），保留 chip 形态供用户修改重发；
+			// 同时撤掉乐观气泡：这条消息不会进会话日志（失败前就已发布过一次）。
 			restoreRejectedPrompt(sessionId, keepDraft, rawDraft, imageSnapshot, quoteMap);
+			dropPendingUserMessage(sessionId, requestId);
 			const errorMessage = error instanceof Error ? error.message : String(error);
 			// ensureSessionId 已把 composer 状态搬到真实会话；失败也必须结算同一身份。
 			setSendState({
@@ -482,11 +569,12 @@ export function useSessionSend(options: UseSessionSendOptions) {
 		}
 
 		if (releaseIfRetired()) return;
-		const { message: expandedMessage, description, emptyTemplateName } = expandPromptTemplates(preparedMessage, options.templates);
+		const { message: expandedMessage, description, emptyTemplateName } = expandPromptTemplates(preparedMessage, options.getTemplates(), { reservedNames: options.getReservedCommandNames?.() });
 		if (emptyTemplateName) {
 			// 展开器保留空模板的 /命令原文；按 verdict 拦截，避免误发到主进程。
-			// 回填原始草稿（含引用 token），保留 chip 形态
+			// 回填原始草稿（含引用 token），保留 chip 形态，并撤掉已发布的乐观气泡。
 			restoreRejectedPrompt(sessionId, keepDraft, rawDraft, imageSnapshot, quoteMap);
+			dropPendingUserMessage(sessionId, requestId);
 			rejectEmptyTemplate(sessionId, emptyTemplateName);
 			sendingSessionIdsRef.current.delete(sourceSessionId);
 			return;
@@ -583,6 +671,8 @@ export function useSessionSend(options: UseSessionSendOptions) {
 			} else {
 				// 拒绝时回填原始草稿（含 token）保留 chip 形态；unknown 快照仍存展开后文本（已实际投递的内容）
 				restoreRejectedPrompt(sessionId, keepDraft, rawDraft, imageSnapshot, quoteMap);
+				// 宿主明确拒绝 = 消息不会进日志：撤掉乐观气泡，避免幽灵消息。
+				dropPendingUserMessage(sessionId, requestId);
 				setSendState({
 					sessionId,
 					state: { status: "error", requestId, error: deliveryError },

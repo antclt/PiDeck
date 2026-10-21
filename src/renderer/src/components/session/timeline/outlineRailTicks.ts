@@ -53,3 +53,41 @@ export function sampleWithFixedEnds<T>(items: readonly T[], maxCount: number): T
 	}
 	return sampled;
 }
+
+export type OutlineRailItem = { id: string; role: string; title: string; time: string; entryId?: string; pending?: boolean };
+
+/**
+ * 合并「已加载消息大纲」与「索引目录」（计划 §6 S4）。
+ *
+ * 为什么需要：刻度原先只覆盖已加载消息，长会话最上面的刻度不是第一条提问。
+ * 目录项按 entryId 去重：已加载的保留原文标题，未加载的用目录给的标题
+ * （索引建表时带走的用户消息 preview，不是序号占位），顺序按目录（= 活动链）为准。
+ */
+export function mergeOutlineRailItems(loaded: readonly OutlineRailItem[], directory: readonly { entryId: string; title: string; time?: string }[]): OutlineRailItem[] {
+	if (directory.length === 0) return [...loaded];
+	const byEntryId = new Map<string, OutlineRailItem>();
+	for (const item of loaded) if (item.entryId) byEntryId.set(item.entryId, item);
+	const merged: OutlineRailItem[] = [];
+	for (const entry of directory) {
+		const hit = byEntryId.get(entry.entryId);
+		if (hit) {
+			merged.push(hit);
+			continue;
+		}
+		merged.push({ id: `outline-pending:${entry.entryId}`, entryId: entry.entryId, role: "user", title: entry.title, time: entry.time ?? "", pending: true });
+	}
+	// 目录只覆盖用户检查点；已加载但没有 entryId 的 live 消息追加在尾部，不能凭空丢刻度。
+	const seen = new Set(merged.map((item) => item.id));
+	for (const item of loaded) if (!seen.has(item.id)) merged.push(item);
+	return merged;
+}
+
+/** 是否为「目录里有、消息还没加载」的占位刻度。 */
+export function isPendingRailItemId(id: string): boolean {
+	return id.startsWith("outline-pending:");
+}
+
+/** 从占位刻度 id 取回 entryId。 */
+export function pendingEntryIdOf(id: string): string | undefined {
+	return id.startsWith("outline-pending:") ? id.slice("outline-pending:".length) : undefined;
+}

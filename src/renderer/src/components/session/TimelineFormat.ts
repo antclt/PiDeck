@@ -2,7 +2,7 @@ import type { ChatMessage } from "../../../../shared/types";
 // 文件修改/工具名解析已迁往 shared/fileChanges（main 的 AgentManager 与渲染层共用同一份聚合口径）；
 // 此处 import 供本文件保留函数使用，并 re-export 保持既有 import 路径兼容。
 import { collectSessionFileChanges, getToolDiffTarget, getToolFilePath, getToolName, stripAnsi } from "../../../../shared/fileChanges.ts";
-export { collectSessionFileChanges, getToolDiffTarget, getToolName, stripAnsi };
+export { getToolDiffTarget, getToolName, stripAnsi };
 import type { AgentRunItem } from "../app/AppUtils";
 
 /* stripThinkingTags 与 AppUtils 同逻辑的内联副本（此文件被 node 单测直接加载，改动需同步） */
@@ -52,6 +52,10 @@ export type TurnFileDiffLine = {
  * 收集一轮 agent-run 内修改的文件：展开 run.items 的全部消息后复用
  * collectSessionFileChanges。run 完成后其内容不再变化，因此每轮底部展示天然固定，
  * 不会被后续消息清掉。
+ *
+ * 额外合并 `hiddenFileMessages`：DSH PTC 模式下文件修改是 run_code 内部的子调用，
+ * 被投影成隐藏消息（meta.ptcNested）不进入 items（时间线只显示外层 run_code 卡），
+ * 但它们是这类会话「改了哪些文件」的唯一数据源——漏了它们 PTC 会话的轮末清单恒为空。
  */
 export function collectRunFileChanges(run: AgentRunItem): Array<{ path: string; count: number; originalContent: string; content: string }> {
 	const msgs: ChatMessage[] = [];
@@ -62,6 +66,7 @@ export function collectRunFileChanges(run: AgentRunItem): Array<{ path: string; 
 			msgs.push(...item.messages);
 		}
 	}
+	if (run.hiddenFileMessages) msgs.push(...run.hiddenFileMessages);
 	return collectSessionFileChanges(msgs);
 }
 
@@ -80,6 +85,24 @@ export function fileChangeToDiffLines(entry: { originalContent: string; content:
 		lines.push({ id: `added-${index}`, type: "added", content });
 	});
 	return lines;
+}
+
+/**
+ * 单文件修改的增/删行数（轮末 chip 上的 +N / −N）。
+ *
+ * 口径（与 getToolDiffTarget 的 changedLines 解耦，因为后者是「最大行数」估算，
+ * 适合抽屉里的「约 N 行」，不能拆成加/减）：
+ * - write/create（originalContent 为空）：整文件视为新增，增 = 内容行数，减 = 0；
+ * - edit/patch：originalContent 是变动区域的旧文本、content 是新文本，
+ *   两者行数分别就是 −N / +N。
+ * 末尾换行会多算一个空行：需要跨行数比较，多算 1 比少算 1 更符合读感。
+ */
+export function fileChangeDelta(entry: { originalContent: string; content: string }): { added: number; removed: number } {
+	const countLines = (value: string) => (value.length === 0 ? 0 : value.split(/\r\n|\r|\n/).length);
+	return {
+		added: countLines(entry.content),
+		removed: countLines(entry.originalContent),
+	};
 }
 
 export function getToolDetailText(message: ChatMessage): string {

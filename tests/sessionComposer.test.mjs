@@ -90,6 +90,8 @@ function createSendHarness(initial = {}) {
 		setSessionSendStateAtom: {},
 		bindSessionRuntimeAtom: {},
 		upsertSessionAtom: {},
+		// `/reload` 期间禁止并发发送的只读标记（单独模块 ../atoms/session-commands-atoms，需单独桩）。
+		sessionReloadingByIdAtom: {},
 		// DSH 发送拦截门读取的只读 atom（初值 installed，测试按需改写）。
 		dshRuntimeStatusAtom: {},
 		openSettingsAtom: {},
@@ -101,6 +103,7 @@ function createSendHarness(initial = {}) {
 		[atoms.sessionComposerModeByIdAtom, { ...(initial.modes ?? {}) }],
 		[atoms.sessionRuntimeByIdAtom, { ...(initial.runtimes ?? {}) }],
 		[atoms.sessionSendStateByIdAtom, {}],
+		[atoms.sessionReloadingByIdAtom, {}],
 		[atoms.sessionRecordsAtom, { ...(initial.records ?? {}) }],
 		[atoms.dshRuntimeStatusAtom, { state: "installed" }],
 	]);
@@ -145,6 +148,7 @@ function createSendHarness(initial = {}) {
 			useStore: () => ({ get: (atom) => state.get(atom), set: (atom, input) => setAtom(atom, input) }),
 		},
 		"../atoms": atoms,
+		"../atoms/session-commands-atoms": { sessionReloadingByIdAtom: atoms.sessionReloadingByIdAtom },
 		"../composerBehavior": {
 			expandPromptTemplates: (message) => ({ message }),
 			buildComposerPromptSubmission: (message) => ({ message }),
@@ -188,7 +192,7 @@ test("the real send state machine snapshots multiline atom text", async () => {
 	let submitted;
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		sendPrompt: async (input) => {
 			submitted = input;
@@ -206,7 +210,7 @@ test("the real send state machine preserves input typed during a rejected delive
 	const deferred = createDeferred();
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		sendPrompt: async () => deferred.promise,
 	});
@@ -224,7 +228,7 @@ test("the real send state machine handles pure images, double clicks, and unknow
 	let imageCalls = 0;
 	const imageSend = imageHarness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		sendPrompt: async (input) => {
 			imageCalls += 1;
@@ -240,7 +244,7 @@ test("the real send state machine handles pure images, double clicks, and unknow
 	let clickCalls = 0;
 	const clickSend = clickHarness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		sendPrompt: async () => {
 			clickCalls += 1;
@@ -257,7 +261,7 @@ test("the real send state machine handles pure images, double clicks, and unknow
 	let unknownCalls = 0;
 	const unknownSend = unknownHarness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		sendPrompt: async () => {
 			unknownCalls += 1;
@@ -282,7 +286,7 @@ test("a pre-send Chat surface promotes once and only sends through its real Sess
 	let submitted;
 	const send = harness.send({
 		sessionId: bootstrapId,
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		ensureSessionId: async (sourceSessionId) => {
 			promotionCalls += 1;
@@ -531,7 +535,7 @@ test("/new is intercepted as a desktop session create, not sent to pi", async ()
 	let createCalls = 0;
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		createNewSession: async () => {
 			createCalls += 1;
@@ -553,7 +557,7 @@ test("/login opens the provider login dialog instead of being sent to pi", async
 	const opened = [];
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		openProviderLogin: (providerId) => {
 			opened.push(providerId);
@@ -577,7 +581,7 @@ test("a bare /login without provider still opens the dialog", async () => {
 	const opened = [];
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		openProviderLogin: (providerId) => {
 			opened.push(providerId);
@@ -597,7 +601,7 @@ test("DSH session send is blocked with a friendly hint when runtime is missing",
 	let sendPromptCalls = 0;
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		sendPrompt: async () => {
 			sendPromptCalls += 1;
@@ -625,7 +629,7 @@ test("DSH session send blocks with broken reason when runtime is broken", async 
 	let sendPromptCalls = 0;
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		sendPrompt: async () => {
 			sendPromptCalls += 1;
@@ -647,7 +651,7 @@ test("DSH session send passes through when runtime is installed or checking", as
 		let sendPromptCalls = 0;
 		const send = harness.send({
 			sessionId: "session-a",
-			templates: [],
+			getTemplates: () => [],
 			compact: async () => undefined,
 			sendPrompt: async () => {
 				sendPromptCalls += 1;
@@ -671,7 +675,7 @@ test("/compact releases the send lock so a follow-up prompt can send", async () 
 	let sendPromptCalls = 0;
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => {
 			compactCalls += 1;
 		},

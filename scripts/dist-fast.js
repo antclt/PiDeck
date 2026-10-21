@@ -18,6 +18,7 @@
  */
 const { execSync } = require("node:child_process");
 const path = require("node:path");
+const { electronBuilderEnv } = require("./electronBuilderEnv.js");
 
 const root = path.resolve(__dirname, "..");
 
@@ -45,7 +46,7 @@ execSync(`npx electron-builder --win ${formats} --config.compression=store`, {
 	cwd: root,
 	stdio: "inherit",
 	shell: true,
-	env: { ...process.env, PI_FAST_PACK: "1" },
+	env: electronBuilderEnv({ ...process.env, PI_FAST_PACK: "1" }),
 });
 
 console.log(`\n✅ 快速打包完成！产物在 release/ 目录。`);

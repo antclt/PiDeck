@@ -1,18 +1,18 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
+import { AnimatePresence } from "motion/react";
 import { useAtomValue } from "jotai";
-import { dshModuleHiddenAtom, imageGenModuleHiddenAtom, videoGenModuleHiddenAtom, composerModesHiddenAtom, acpEnabledAtom, acpToolsAtom } from "../../atoms";
-import { AlertCircle, BrainCircuit, Check, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, CornerDownLeft, Eye, EyeOff, FileText, GitBranch, ImageIcon, ListChecks, Loader2, Paperclip, Plus, RefreshCw, Settings2, Sparkles, Star, Target, X, Zap } from "lucide-react";
+import { dshModuleHiddenAtom, imageGenModuleHiddenAtom, videoGenModuleHiddenAtom, acpEnabledAtom, acpToolsAtom } from "../../atoms";
+import { AlertCircle, BrainCircuit, Check, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, CornerDownLeft, Eye, EyeOff, FileText, GitBranch, ImageIcon, LayoutGrid, ListChecks, Loader2, Paperclip, RefreshCw, Settings2, Sparkles, Star, Target, X, Zap } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
 import type { PromptEnhanceView } from "../../hooks/usePromptEnhance";
 import { PromptEnhanceControls } from "./PromptEnhanceControls";
 import { Button } from "../ui-shadcn/button";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "../ui-shadcn/command";
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
-import { Separator } from "../ui-shadcn/separator";
 import { cn } from "../../lib/utils";
 import { showNotice } from "../../utils/notice";
 import { ModelThinkingChip } from "./ModelThinkingChip";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
 import { ConfirmDialog } from "../app/AppParts";
 import { ComposerImageGenOptions } from "./ComposerImageGenOptions";
 import { ComposerVideoGenOptions } from "./ComposerVideoGenOptions";
@@ -28,6 +28,7 @@ import { WELCOME_DSH_MODEL_KEY, WELCOME_MODEL_KEY, isWelcomeModelLost, readWelco
 import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
 import { CommandPickerGroup, CommandPickerPanel, type CommandPickerFilter } from "../ui-shadcn/command-picker";
 import { computeModelPickerDefaultExpanded, groupModelsByProvider, modelPickerSearchFilter, modelRowLabel, modelRowName, orderProviderGroups, resolveModelPickerBody } from "./sessionPickerOptions";
+import { ComposerModeChip } from "./composer/ComposerModeChip";
 import type { AgentBackend, AgentRuntimeState, AvailableModel, ComposerAgentMode, GitBranchInfo, ModelListFailReason, ModelListReport, SessionRecord, SessionRuntimeTarget, UsageProbeBackend } from "../../../../shared/types";
 
 /** 单个 extension widget 卡片：可折叠标题栏 + 内容行，支持手动关闭 */
@@ -43,8 +44,30 @@ const MODE_LABEL: Record<ComposerAgentMode, TranslationKey> = {
 	videogen: "app.composerModeVideogen",
 };
 
+/**
+ * 特殊模式 chip 与「+」菜单模式项的短名：底栏不再出现「模式」二字（2026-10 用户反馈）。
+ * 全名仍在 MODE_LABEL 里，供可访问名、菜单悬浮说明与其它界面（会话 Tab 徽标、自动化任务编辑器）使用。
+ */
+const MODE_SHORT_LABEL: Partial<Record<ComposerAgentMode, TranslationKey>> = {
+	goal: "app.composerModeGoalShort",
+	plan: "app.composerModePlanShort",
+};
+
+/** 「+」菜单模式项的悬浮说明：在菜单里就能知道这个模式做什么，不用先选一次再试。 */
+const MODE_DESC_LABEL: Partial<Record<ComposerAgentMode, TranslationKey>> = {
+	goal: "app.composerModeGoalDesc",
+	plan: "app.composerModePlanDesc",
+};
+
+/** 特殊模式 chip 的退出文案：计划=取消本轮计划、目标=暂停自动推进（与旧退出×同一套文案）。 */
+const MODE_EXIT_LABEL: Partial<Record<ComposerAgentMode, TranslationKey>> = {
+	goal: "app.composerModeCancelGoal",
+	plan: "app.composerModeCancelPlan",
+};
+
 /** 模式图标：普通=闪电（直接执行），规划=清单，目标=靶心，生图=图片，生视频=场记板。
- * 普通模式原为扳手，2026-10 用户反馈不好看且与设置类扳手语义相近，改用闪电表达「直接执行」。 */
+ * 2026-10 起普通模式不再在底栏摆图标（普通态 = 没有 chip），但映射保持一致，
+ * 供「+」菜单/其它消费方按同一个入口取图标。 */
 function modeGlyph(mode: ComposerAgentMode) {
 	if (mode === "plan") return <ListChecks size={14} strokeWidth={2} aria-hidden="true" />;
 	if (mode === "imagegen") return <ImageIcon size={14} strokeWidth={2} aria-hidden="true" />;
@@ -252,7 +275,10 @@ export function ComposerBackendPicker(props: { backend: AgentBackend; acpToolId?
 		>
 			<SelectTrigger
 				size="sm"
-				className="composer-bar-btn backend h-7 gap-1 rounded-md border-transparent bg-transparent px-1.5 text-control font-semibold text-foreground hover:bg-muted/60 focus-visible:border-transparent focus-visible:ring-0 data-[state=open]:border-transparent data-[state=open]:bg-muted/60 data-[state=open]:ring-0 [&_[data-slot='select-icon']]:hidden"
+				/* size-7 + p-0 + justify-center = 与底栏其它图标按钮同一个 28×28 盒子；
+				   data-[size=sm]:h-7 必需——SelectTrigger 基底高度是 data 变体，
+				   base h-7 既压不过它，也不会被 tailwind-merge 合成一条。 */
+				className="composer-bar-btn backend size-7 justify-center rounded-md border-transparent bg-transparent p-0 text-control font-semibold text-foreground hover:bg-muted/60 focus-visible:border-transparent focus-visible:ring-0 data-[size=sm]:h-7 data-[state=open]:border-transparent data-[state=open]:bg-muted/60 data-[state=open]:ring-0 [&_[data-slot='select-icon']]:hidden"
 				title={`${triggerLabel} · ${t("session.backendPickerHint")}`}
 				aria-label={triggerLabel}
 			>
@@ -334,7 +360,7 @@ function ComposerBranchSwitcher(props: { gitInfo: GitBranchInfo; disabled?: bool
 							count: props.gitInfo.branches.length,
 						})}
 					>
-						<GitBranch size={14} strokeWidth={1.8} aria-hidden="true" />
+						<GitBranch size={15} strokeWidth={1.8} aria-hidden="true" />
 						<span className="composer-bar-branch-name min-w-0 truncate">{props.gitInfo.current}</span>
 						<ChevronDown size={12} strokeWidth={2} aria-hidden="true" className="shrink-0 text-muted-foreground" />
 					</Button>
@@ -496,14 +522,17 @@ export function ComposerBottomBar(props: {
 		welcomeModel: effectiveWelcomeModel,
 		defaultModel: props.defaultModel,
 	});
-	// 模型仅取会话记录或引导页默认，运行时快照不能覆盖用户已保存的选择。
+	// 模型优先取会话记录或引导页默认。DSH 例外：记录缺 model 时用 host 会话投影的
+	// 当前选择兜底（runtime.state 的 provider/modelId 来自 host modelSelection 投影）——
+	// 否则会显示全局部署默认，看起来像「别的会话的模型也改了」。pi 不接 runtime：
+	// 运行时状态是执行态，不能覆盖用户保存的选择。
 	const liveModel = resolveComposerLiveModel({
 		record: props.record?.model,
+		runtime: isDsh && props.state ? { provider: props.state.provider, modelId: props.state.modelId, modelName: props.state.modelName } : undefined,
 		fallback: guideDefaultModel,
 	});
 	// 用量查询链路随会话后端：DSH 会话走 dsh（$DSH_HOME 配置 + 凭据库），其余走 pi。
 	// 圆球面板必须与 DSH 卡片/选择器同一 backend，否则查的是另一条 usage-probes.json。
-	const isPlanMode = props.composerAgentMode === "plan";
 	const isImageGenMode = props.composerAgentMode === "imagegen";
 	const isVideoGenMode = props.composerAgentMode === "videogen";
 	// 生图/生视频底栏的「媒体后端」判据：模式 or 后端任一命中。
@@ -515,10 +544,8 @@ export function ComposerBottomBar(props: {
 	// 对这两个后端直接 return，退出×点了也不会生效（用户反馈「选中视频模式后没办法退出」）。
 	// 此时退出要走后端选择器（未开始对话）或新建会话（已锁定），不摆一个点了没反应的按钮。
 	const mediaModeIsBackend = props.backend === "imagegen" || props.backend === "videogen";
-	const isGoalMode = props.composerAgentMode === "goal";
-	const isSpecialMode = isPlanMode || isImageGenMode || isVideoGenMode || isGoalMode;
-	// 模式选择器常驻底栏（外移自「+」菜单，2026-10 用户要求直接可见）；可用性（plan/goal 扩展开关、
-	// imagegen 仅 pi、imageGenLocked 锁定）由专用 hook 统一维护（原 ComposerModeSelect 逻辑）。
+	// 模式可用性（plan/goal 扩展开关、ACP 无隐藏 agentMessage 通道、imagegen 仅 pi、imageGenLocked 锁定）
+	// 仍由专用 hook 统一维护；入口在「+」菜单的模式分组，底栏只保留正在生效的特殊模式 chip。
 	const { visibleModes, refreshAvailability } = useComposerModeAvailability({
 		backend: props.backend,
 		imageGenLocked: props.imageGenLocked,
@@ -526,13 +553,15 @@ export function ComposerBottomBar(props: {
 		disabled: props.disabled,
 		onChange: props.onChangeMode,
 	});
-	// 设置 → 外观 → 输入框功能显示可隐藏模式选择器；此时特殊模式由退出×兜底，不会锁死在 plan/goal。
-	const modesHidden = useAtomValue(composerModesHiddenAtom);
-	// 模式 chip 是否可用：可用时它自己就是开关（下拉里选「普通模式」退出，与 ComposerArea
-	// 的 onCancelPlan 是同一条 setMode("normal")），不重复摆第二个按钮（2026-10 用户反馈
-	// 「竖线 + 一堆东西」）；chip 缺席（生图会话 / 设置里隐藏了选择器 / 只剩 normal 一项）
-	// 才保留独立退出，避免无路可退。
-	const modeSwitcherVisible = visibleModes.length > 1 && !modesHidden;
+	// 模式入口 = 「+」菜单分组：只列计划/目标，普通模式不作为可选项（普通 = 不在任何特殊模式）。
+	// visibleModes 为空（生图/生视频会话、legacy 锁定、ACP 或 plan+goal 扩展都关）时整个分组不渲染。
+	// 不再有「输入框功能显示」里的模式开关（2026-10 用户反馈那行多余）：入口恒显示，退出靠底栏 chip 的 ×。
+	const specialModes = visibleModes.filter((mode) => mode === "plan" || mode === "goal");
+	const modeSectionVisible = specialModes.length > 0;
+	// chip 只在 plan/goal 出现，并排除两种「setMode 会直接 return」的情况：
+	// imageGenLocked（legacy pi 生图会话）与 mediaModeIsBackend（生图/生视频后端）——
+	// 那两种退出要走后端选择器或新建会话，摆一个点了没反应的按钮是上一轮的 bug。
+	const chipMode: "plan" | "goal" | null = props.composerAgentMode === "plan" || props.composerAgentMode === "goal" ? props.composerAgentMode : null;
 	const modelDisplay = computeModelDisplay(liveModel.modelId ? liveModel : undefined, props.modelPending);
 	const modelFrom = modelDisplay.from;
 	const modelTo = modelDisplay.to;
@@ -554,7 +583,10 @@ export function ComposerBottomBar(props: {
 	return (
 		<div className="composer-bottom-bar min-h-10 shrink-0 border-t border-transparent px-2.5 py-2">
 			<div className="composer-bottom-layout flex min-w-0 items-center gap-2">
-				<div className="composer-bottom-left flex min-w-0 flex-nowrap items-center gap-0.5 overflow-x-auto overflow-y-hidden [scrollbar-width:none]">
+				{/* 底栏统一节奏（2027-02 用户反馈「logo 大小、间隙不统一」）：所有图标控件 28×28 盒子（size-7）、
+				图标字形 15px、控件间距 4px（gap-1）——左区、会话级开关组、右区共用同一套数值，
+				不再出现「24px 盒子 + 2px 间距」与「28px 盒子 + 8px 间距」两种密度并存。 */}
+				<div className="composer-bottom-left flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none]">
 					{props.onChangeBackend ? (
 						<>
 							{/* picker 组内高亮当前工具（acpToolId），工具改选也走同一条后端切换链 */}
@@ -568,7 +600,7 @@ export function ComposerBottomBar(props: {
 						   点击时弹提示说明锁定原因与换后端的途径（新建会话）。 */
 						<button
 							type="button"
-							className="composer-bar-btn backend inline-flex h-7 cursor-pointer items-center gap-1 rounded-md px-1.5 text-control font-semibold text-foreground hover:bg-muted/60"
+							className="composer-bar-btn backend inline-flex size-7 cursor-pointer items-center justify-center rounded-md p-0 text-control font-semibold text-foreground hover:bg-muted/60"
 							title={lockedAcpTool ? `${lockedAcpTool.name} · ${t("session.backendLockedHint")}` : t("session.backendLockedHint")}
 							aria-label={lockedAcpTool ? `${lockedAcpTool.name} · ${t("session.backendLockedHint")}` : t("session.backendLockedHint")}
 							onClick={() => showNotice(t("session.backendLockedNotice"), 5000)}
@@ -586,70 +618,37 @@ export function ComposerBottomBar(props: {
 							)}
 						</button>
 					) : null}
-					{/* 特殊模式退出×：只在模式 chip 缺席时渲染（设置里隐藏了选择器 / 只剩 normal 一项 /
-					    plan+goal 扩展都关了）——chip 在场时它自己就是开关，下拉里选「普通模式」即可退出，
-					    与这里的 setMode("normal") 同一条路径，不再重复摆第二个按钮。
-					    imageGenLocked（legacy pi 生图会话）与 mediaModeIsBackend（生图/生视频后端）
-					    两种情况下 setMode 都会被 controller 直接拦回，一律不显示。 */}
-					{isSpecialMode && !props.imageGenLocked && !mediaModeIsBackend && !modeSwitcherVisible && (
-						<div className="composer-mode-cluster inline-flex h-7 min-w-0 items-center rounded-md bg-bg-hover pr-0.5">
-							<button
-								type="button"
-								className="composer-mode-exit mr-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-text-tertiary transition-[color,background-color] duration-fast hover:bg-bg-active hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
-								aria-label={isGoalMode ? t("app.composerModeCancelGoal") : isImageGenMode ? t("app.composerModeCancelImagegen") : isVideoGenMode ? t("app.composerModeCancelVideogen") : t("app.composerModeCancelPlan")}
-								title={isGoalMode ? t("app.composerModeCancelGoal") : isImageGenMode ? t("app.composerModeCancelImagegen") : isVideoGenMode ? t("app.composerModeCancelVideogen") : t("app.composerModeCancelPlan")}
-								disabled={props.disabled}
-								onClick={props.onCancelPlan}
-							>
-								<X size={12} strokeWidth={2} aria-hidden="true" />
-							</button>
-						</div>
-					)}
-					{/* 常驻模式选择器（外移自「+」菜单）：当前模式图标+名称直接可见可切；
-					    visibleModes 为空（imagegen 会话/legacy 锁定）不渲染，走专用生图底栏；
-					    输入框功能设置隐藏时收起入口（特殊模式仍可由上方退出×退出）；
-					    打开时刷新扩展开关可用性（设置页可能刚改过 plan/goal 扩展）。 */}
-					{/* 只剩 normal 一项（ACP 会话无 pi 扩展 / plan+goal 都被关）不渲染单选项下拉——
-					    没有意义还占位；ACP 的模式等价物是 configOptions 的 mode 类选项（已由 AcpConfigControls 渲染）。打开时刷新扩展开关可用性（设置页可能刚改过 plan/goal 扩展）。 */}
-					{modeSwitcherVisible ? (
-						<Select
-							value={props.composerAgentMode}
-							disabled={props.disabled}
-							onValueChange={(value) => props.onChangeMode(value as ComposerAgentMode)}
-							onOpenChange={(open) => {
-								// 打开时刷新扩展开关可用性：设置页可能刚改过 plan/goal 扩展（同后端 picker 的即时效）
-								if (open) void refreshAvailability();
-							}}
-						>
-							<SelectTrigger
-								size="sm"
-								className="composer-bar-btn mode h-7 gap-1 rounded-md border-transparent bg-transparent px-1.5 text-control font-semibold text-foreground hover:bg-muted/60 focus-visible:border-transparent focus-visible:ring-0 data-[state=open]:border-transparent data-[state=open]:bg-muted/60 data-[state=open]:ring-0 [&_[data-slot='select-icon']]:hidden"
-								/* normal 模式只显图标（默认态不需要读字，用户反馈过）；特殊模式（计划/目标/生图）显文本提醒非默认态。
-							    可访问性不降级：aria-label/title 始终携带当前模式全名，hover/读屏可读。菜单项保留文字便于扫读。
-							    外观与「+」等 ghost 按钮同族（2026-10 用户反馈实心底不好看）：SelectTrigger 基底自带
-							    bg-bg-input，必须显式 bg-transparent；自带 chevron 也隐藏——与后端选择器同理，
-							    图标+箭头并排会破坏居中，且右侧「+」已证明无箭头也认得出来是下拉。 */
-								aria-label={t(MODE_LABEL[props.composerAgentMode])}
-								title={t(MODE_LABEL[props.composerAgentMode])}
-							>
-								{modeGlyph(props.composerAgentMode)}
-								{props.composerAgentMode !== "normal" ? <span className="max-w-28 truncate">{t(MODE_LABEL[props.composerAgentMode])}</span> : null}
-							</SelectTrigger>
-							<SelectContent align="start">
-								{visibleModes.map((mode) => (
-									<SelectItem key={mode} value={mode}>
-										{modeGlyph(mode)}
-										{t(MODE_LABEL[mode])}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
-					) : null}
-					{/* 「+」入口：附件/技能/提示词收起为单个菜单（模式已常驻底栏，不再入此菜单）。 */}
-					<DropdownMenu>
+					{/* 竖线分界已按用户反馈整体去掉（历史那条线因 Separator 竖向 h-full 被压掉一直不可见，
+					    修复后露出来反而多余）：左区只靠间距分组，不再摆分隔线。 */}
+					{/* 特殊模式 chip（计划/目标）：底栏唯一的模式身份控件，同时就是退出按钮。
+					    普通模式不渲染任何东西（旧的闪电图标按用户反馈去掉，普通态 = 没有 chip）；
+					    进入模式走「+」菜单的模式分组；
+					    hover / 键盘聚焦时 chip 左侧图标旋成带圈 ×，点击回普通模式，
+					    与 ComposerArea 的 onCancelPlan 同一条 setMode("normal")。
+					    AnimatePresence 管进出场：切模式时旧 chip 淡出、新 chip 弹入（reduced-motion 下静态）。 */}
+					<AnimatePresence initial={false}>
+						{chipMode ? <ComposerModeChip key={chipMode} mode={chipMode} label={t(MODE_SHORT_LABEL[chipMode] ?? MODE_LABEL[chipMode])} icon={modeGlyph(chipMode)} title={t(MODE_EXIT_LABEL[chipMode] ?? MODE_LABEL[chipMode])} disabled={props.disabled} onExit={props.onCancelPlan} /> : null}
+					</AnimatePresence>
+					{/* 「+」入口：附件/技能/提示词 + 模式分组（计划/目标）。 */}
+					<DropdownMenu
+						onOpenChange={(open) => {
+							// 打开时刷新扩展开关可用性：设置页可能刚改过 plan/goal 扩展（与后端 picker 同一套即时效）
+							if (open) void refreshAvailability();
+						}}
+					>
 						<DropdownMenuTrigger asChild>
-							<Button variant="ghost" size="icon" className="composer-bar-btn icon size-7 rounded-md text-foreground hover:bg-muted/60" aria-label={t("app.composerAddTitle")} title={t("app.composerAddTitle")} disabled={props.disabled}>
-								<Plus size={15} strokeWidth={2} aria-hidden="true" />
+							<Button
+								variant="ghost"
+								size="icon"
+								data-testid="composer-add-menu"
+								/* 与后端/模式触发器同族：菜单关闭时 Radix 把焦点还给触发器，Button 基底的 ring 会闪一圈
+								   （2026-10 用户反馈过 focus 环闪）。这里用 bg 高亮代替 ring，指针用户不闪、键盘用户仍有焦点反馈。 */
+								className="composer-bar-btn icon size-7 rounded-md text-foreground hover:bg-muted/60 focus-visible:border-transparent focus-visible:bg-muted/60 focus-visible:ring-0"
+								aria-label={t("app.composerAddTitle")}
+								title={t("app.composerAddTitle")}
+								disabled={props.disabled}
+							>
+								<LayoutGrid size={15} strokeWidth={2} aria-hidden="true" />
 							</Button>
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="start" sideOffset={4} className="min-w-44">
@@ -668,21 +667,40 @@ export function ComposerBottomBar(props: {
 								<FileText size={14} strokeWidth={2} aria-hidden="true" />
 								{t("app.composerAddPrompt")}
 							</DropdownMenuItem>
+							{/* 模式入口（2026-10 从底栏常驻下拉收回「+」菜单）：只列计划/目标；
+							    普通模式不是可选项——普通就是「不选任何特殊模式」，退出走底栏 chip 上的 ×。
+							    当前项打勾，再点一次同样回到普通（与 chip 的 onCancelPlan 同一条 setMode("normal")）。 */}
+							{modeSectionVisible ? (
+								<>
+									<DropdownMenuSeparator />
+									<DropdownMenuLabel>{t("app.composerAddMode")}</DropdownMenuLabel>
+									{specialModes.map((mode) => {
+										const active = props.composerAgentMode === mode;
+										return (
+											<DropdownMenuItem key={mode} data-picker-value={mode} title={t(MODE_DESC_LABEL[mode] ?? MODE_LABEL[mode])} onSelect={() => props.onChangeMode(active ? "normal" : mode)}>
+												{modeGlyph(mode)}
+												<span className="min-w-0 truncate">{t(MODE_SHORT_LABEL[mode] ?? MODE_LABEL[mode])}</span>
+												{active ? <Check size={14} strokeWidth={2} className="ml-auto shrink-0 text-primary" aria-hidden="true" /> : null}
+											</DropdownMenuItem>
+										);
+									})}
+								</>
+							) : null}
 						</DropdownMenuContent>
 					</DropdownMenu>
 					{/* 生图/生视频后端无 pi/DSH runtime：安全等级（pi 安全门）与 DSH 权限预设都对图片/视频生成无意义，
 					   且 SecurityControl 按 backend 分发时没有 imagegen 分支会误显示成 pi 安全等级菜单；
 					   飞书镜像把输入同步到 IM，生图/生视频的 prompt 不走会话 runtime；
 					   快捷消息同理（正文是给对话模型的指令），四个控制位一起屏蔽。 */}
-					{/* 左区两组：①输入动作（模式/「+」）②会话级开关（飞书/安全等级/快捷消息）。
-						组间竖线让「改动输入内容」与「改动会话策略」不混成一片图标海。 */}
+					{/* 会话级开关组（飞书/安全等级/快捷消息）：与左区其余控件同一套尺寸与间距
+						（28px 盒子 + gap-1）；飞书触发器原本还带 8px 横向内边距（28px 盒子却宽 30px），
+						已收掉（见 integrations.css），否则同样是图标按钮却比邻居宽一圈。 */}
 					{isMediaComposer ? null : (
-						<>
-							{props.feishuIndicator || props.securityControl || props.quickMessagesControl ? <Separator orientation="vertical" className="mx-0.5 h-4" /> : null}
+						<div className="flex shrink-0 items-center gap-1">
 							{props.feishuIndicator}
 							{props.securityControl}
 							{props.quickMessagesControl}
-						</>
+						</div>
 					)}
 				</div>
 				<div className={`composer-bottom-center flex min-w-0 flex-1 items-center justify-center gap-4${isImageGenMode || isVideoGenMode ? " overflow-x-auto overflow-y-hidden [scrollbar-width:none]" : " overflow-hidden"}`}>
@@ -728,7 +746,7 @@ export function ComposerBottomBar(props: {
 					    （request/context 的 contextWindow + 消息估算），圆环不再因缺数据隐藏，
 					    原独立 compact 按钮移除，避免双入口。 */}
 				</div>
-				<div className="composer-bottom-right ml-auto flex shrink-0 items-center gap-2">
+				<div className="composer-bottom-right ml-auto flex shrink-0 items-center gap-1">
 					{/* 分支只读 chip 升级为可切换下拉：当前分支即触发器，展开列表选目标分支后
 					    先弹确认（切换会携带未提交更改），确认后才调栏级 switchBranch（绑定本栏项目）。 */}
 					{props.gitInfo?.current && props.onSwitchBranch ? (
@@ -741,7 +759,7 @@ export function ComposerBottomBar(props: {
 								count: props.gitInfo.branches.length,
 							})}
 						>
-							<GitBranch size={14} strokeWidth={1.8} aria-hidden="true" />
+							<GitBranch size={15} strokeWidth={1.8} aria-hidden="true" />
 							<span className="composer-bar-branch-name truncate">{props.gitInfo.current}</span>
 						</span>
 					) : null}
@@ -1154,7 +1172,8 @@ export function PromptTemplatePicker(props: {
 					<CommandEmpty>{t("app.promptTemplateSearchEmpty")}</CommandEmpty>
 					{props.templates.length === 0 && <div className="px-6 py-10 text-center text-caption text-muted-foreground">{t("app.promptTemplateEmpty")}</div>}
 					{props.templates.map((template) => (
-						<CommandItem key={template.path} value={`/${template.name}`} keywords={[template.name, template.description, template.argumentHint ?? ""]} onSelect={() => props.onPick(template)} className="group min-h-10 items-center gap-2.5 rounded-md px-3 py-2">
+						// key 用 name+path：包带模板（来源 B）没有可编辑路径，path 恒为空，单用 path 会撞 key
+						<CommandItem key={`${template.name}:${template.path}`} value={`/${template.name}`} keywords={[template.name, template.description, template.argumentHint ?? ""]} onSelect={() => props.onPick(template)} className="group min-h-10 items-center gap-2.5 rounded-md px-3 py-2">
 							<span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted/70 text-muted-foreground">
 								<FileText size={14} strokeWidth={1.8} aria-hidden="true" />
 							</span>

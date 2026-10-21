@@ -7,9 +7,11 @@ import {
 	safeJson as sharedSafeJson,
 	truncateDetailWithMeta as truncateSharedDetailWithMeta,
 	truncateForDetail as truncateSharedForDetail,
+	serializeToolArgsForDelivery as serializeSharedToolArgs,
 	type ToolDetailStatus,
 } from "../../shared/formatToolDetail";
 import { extractMessageText } from "./messageContent";
+import { chatUsageFromPiUsage } from "./messageUsage";
 import { asRecord } from "./agentUtils";
 import { isRoleMessageRole, takeActiveEntryId } from "./sessionEntryIds";
 
@@ -141,6 +143,12 @@ export class AgentMessageProjector {
 						const modelProvider = typeof typed.provider === "string" ? typed.provider : "";
 						const modelId = typeof typed.model === "string" ? typed.model : "";
 						const model = modelProvider && modelId ? { provider: modelProvider, modelId } : undefined;
+						// 用量与实测耗时：pi 的 assistant 消息自带 usage（含缓存/推理/费用）与
+						// durationMs（timestamp = 请求开始）。轨迹账本的 token 列与真实区间
+						// 全依赖这两个字段；丢掉就只能靠邻居锚点猜。
+						const usage = chatUsageFromPiUsage(typed.usage);
+						const measuredDurationMs = typeof typed.durationMs === "number" && Number.isFinite(typed.durationMs) ? typed.durationMs : undefined;
+						const startedAt = typeof typed.timestamp === "number" && typed.timestamp > 0 ? typed.timestamp : undefined;
 						return [
 							{
 								id: `${agentId}-history-${currentEntryId ?? index}`,
@@ -152,6 +160,9 @@ export class AgentMessageProjector {
 									...(currentEntryId ? { entryId: currentEntryId } : {}),
 									_piDeckMsgSeq: index,
 									...(recoveredImageGen && (recoveredImageGen.status === "complete" || recoveredImageGen.status === "generating" || recoveredImageGen.status === "error") ? { imageGen: recoveredImageGen } : {}),
+									...(usage ? { usage } : {}),
+									...(measuredDurationMs !== undefined ? { durationMs: measuredDurationMs } : {}),
+									...(startedAt !== undefined && measuredDurationMs !== undefined ? { startedAt } : {}),
 								},
 								...(thinking ? { thinking } : {}),
 								...(images.length > 0 ? { images } : {}),
@@ -233,7 +244,7 @@ export class AgentMessageProjector {
 									toolCallId,
 									...(startedAt !== undefined ? { startedAt } : {}),
 									...(durationMs !== undefined ? { durationMs } : {}),
-									args: this.truncateForDetail(this.safeJson(historicalCall?.args)),
+									args: this.serializeToolArgs(toolName, historicalCall?.args),
 									result: this.truncateForDetail(this.extractToolResultText(result) || this.safeJson(result)),
 									isError,
 									// pi 侧截断（与 truncated 的展示层截断区分）：历史会话回看时也能拿到完整输出路径
@@ -332,6 +343,14 @@ export class AgentMessageProjector {
 	/** 对超长工具文本做首尾截断，保留头部和尾部以兼顾开头信息和错误堆栈。 */
 	truncateForDetail(text: unknown): string {
 		return truncateSharedForDetail(text, this.deps.translate);
+	}
+
+	/**
+	 * 工具参数 → meta.args 字符串（文件类工具不适用 8000 截断，见 serializeToolArgsForDelivery）。
+	 * 实时 upsert 与历史投影必须共用本入口，否则重开软件后会与实时视图不一致。
+	 */
+	serializeToolArgs(toolName: string, args: unknown): string {
+		return serializeSharedToolArgs(toolName, args, this.deps.translate);
 	}
 
 	/**

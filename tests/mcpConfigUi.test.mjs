@@ -225,3 +225,21 @@ test("pi 0.99 起 MCP 内置：adapter 引导降级为可选提示，配置页�
 		assert.ok(en.includes(`"${key}"`), `en-US missing ${key}`);
 	}
 });
+
+test("停用条目在状态区就地提供启用出口，PiDeck 交接成功后落到该条目", () => {
+	const tab = readFileSync("src/renderer/src/config/McpTab.tsx", "utf8");
+	const zh = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
+	const en = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
+	// 回归：交接写入的条目是停用态，状态行只说「已停用」不给出口，用户找不到开启入口。
+	// 启用入口按配置状态（而非上一次检测结果）渲染，且只在条目归属本层可写时出现。
+	assert.match(tab, /isMcpServerDisabled\(\s*editingDef\s*\)\s*&&\s*selectedItem\?\.ownedByWritable/);
+	assert.match(tab, /toggleDisabled\(\s*selectedItem,\s*false\s*\)/);
+	assert.match(tab, /t\("config\.mcp\.status\.enable"\)/);
+	// 交接成功后直接选中 pideck，让启用入口就在眼前
+	assert.match(tab, /setSelected\(\s*"pideck"\s*\)/);
+	assert.match(tab, /setSelectedTemplate\(\s*null\s*\);[\s\S]{0,80}?setSelected\(\s*"pideck"\s*\)/);
+	for (const key of ["config.mcp.status.enable", "config.mcp.status.enableHint"]) {
+		assert.ok(zh.includes(`"${key}"`), `zh-CN missing ${key}`);
+		assert.ok(en.includes(`"${key}"`), `en-US missing ${key}`);
+	}
+});

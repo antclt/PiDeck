@@ -685,77 +685,6 @@ test("readHistoryPage 空会话返回空页且 nextBefore=null", async () => {
 	assert.equal(page.total, -1);
 });
 
-test("readSystemPrompt：运行时会话返回 attach 重放缓存的系统提示（request/header 折叠）", async () => {
-	const { host, sessions, historyBySession } = makeFakeHost();
-	sessions.set("session-old-9", { sessionId: "session-old-9", cwd: PROJECT.path, running: false, blank: false });
-	historyBySession.set("session-old-9", [
-		event("request/header", 1, {
-			header: { system: "你是 DSH 代理。\n## 准则\n…" },
-			reason: { kind: "steer", step: 1 },
-		}),
-		event("user/message", 2, {
-			content: [{ type: "text", text: "提问" }],
-			source: { kind: "user", rpcId: "rpc-9" },
-		}),
-		event("turn/start", 3),
-		event("assistant/message", 4, {
-			message: { content: [{ type: "text", text: "回复" }] },
-		}),
-	]);
-	const manager = new DshAgentManager(host, () => PROJECT);
-	const tab = await manager.create({ projectId: "project-1", backend: "dsh", dshSessionId: "session-old-9" });
-	// attach 重放后：运行时会话直接读 runtime 缓存（不重复拉 history）
-	const prompt = await manager.readSystemPrompt(tab.id, "session-old-9");
-	assert.equal(prompt, "你是 DSH 代理。\n## 准则\n…");
-});
-
-test("readSystemPrompt：历史会话从 host history 折叠最后一个 request/header", async () => {
-	const { host, sessions, historyBySession } = makeFakeHost();
-	sessions.set("session-hist-9", { sessionId: "session-hist-9", cwd: PROJECT.path, running: false, blank: false });
-	historyBySession.set("session-hist-9", [
-		event("request/header", 1, { header: { system: "第一版提示" } }),
-		event("user/message", 2, {
-			content: [{ type: "text", text: "提问" }],
-			source: { kind: "user", rpcId: "rpc-9" },
-		}),
-		event("assistant/message", 3, {
-			message: { content: [{ type: "text", text: "回复" }] },
-		}),
-		// 模型切换后第二次请求：last wins
-		event("request/header", 4, { header: { system: "第二版提示" } }),
-		event("user/message", 5, {
-			content: [{ type: "text", text: "追问" }],
-			source: { kind: "user", rpcId: "rpc-10" },
-		}),
-		event("assistant/message", 6, {
-			message: { content: [{ type: "text", text: "回复 2" }] },
-		}),
-	]);
-	const manager = new DshAgentManager(host, () => PROJECT);
-	// 未激活会话（agentId undefined）：走 host history 折叠
-	const prompt = await manager.readSystemPrompt(undefined, "session-hist-9");
-	assert.equal(prompt, "第二版提示");
-});
-
-test("readSystemPrompt：无 request/header / 无 host 时返回 undefined（不阻断轨迹）", async () => {
-	const { host, sessions, historyBySession } = makeFakeHost();
-	sessions.set("session-no-hdr", { sessionId: "session-no-hdr", cwd: PROJECT.path, running: false, blank: false });
-	historyBySession.set("session-no-hdr", [
-		event("user/message", 1, {
-			content: [{ type: "text", text: "提问" }],
-			source: { kind: "user", rpcId: "rpc-1" },
-		}),
-		event("assistant/message", 2, {
-			message: { content: [{ type: "text", text: "回复" }] },
-		}),
-	]);
-	const manager = new DshAgentManager(host, () => PROJECT);
-	assert.equal(await manager.readSystemPrompt(undefined, "session-no-hdr"), undefined);
-	// host 无该会话：history 返回空页 → undefined（不抛错）
-	assert.equal(await manager.readSystemPrompt(undefined, "session-missing-9"), undefined);
-	assert.equal(await manager.readSystemPrompt(undefined, undefined), undefined);
-});
-
 test("readHistoryPage host 冷启动：先 ensureStarted 等 boot，不抛「DSH host is not started」", async () => {
 	const { host, sessions, historyBySession, calls } = makeColdStartHost();
 	sessions.set("session-cold-1", { sessionId: "session-cold-1", cwd: PROJECT.path, running: false, blank: false });
@@ -940,6 +869,10 @@ test("capabilities 声明 fork/getForkMessages/compact/getCommands/exportHtml �
 	assert.ok(caps.has("exportHtml"));
 	assert.ok(!caps.has("editMessage"), "DSH 不支持编辑历史消息");
 	assert.ok(!caps.has("deleteMessage"));
+	// 声明即实现：CompositeAgentGateway 按能力名调同名方法，DSH 曾只实现 listCommands，
+	// `gateway.getCommands!(id)` 于是抛 TypeError → 命令白名单恒空（历史 `/命令` 不出 chip、
+	// `/` 菜单只剩静态建议）。fork 的网关方法名是 forkSession，故只锁 getCommands 这类同名者。
+	assert.equal(typeof manager.getCommands, "function", "声明了 getCommands 能力就必须有同名方法");
 });
 
 test("审批自动放行开启：approval 帧直接应答 allowed-once，不弹 agents:ui-request", async () => {
@@ -2223,4 +2156,57 @@ test("cancelQueuedMessage：remove 成功；queue-item-not-found 幂等；其他
 	// 空 itemId 是入参错误，不产生 RPC
 	await assert.rejects(() => manager.cancelQueuedMessage(tab.id, ""));
 	assert.equal(updateQueueCalls.length, 3);
+});
+
+// ── 会话模型真值冷读（catalog 补录 / Coordinator 跳过重放共用） ─────────────
+
+test("readSessionModelSelection：冷读 host 投影 next ?? lastUsed（不激活会话）", async () => {
+	const { host, client } = makeFakeHost();
+	client.sessionsProjections = async () => ({
+		result: {
+			ok: true,
+			value: { values: { modelSelection: { next: { provider: "magpie", model: "group/auto", reasoningEffort: "max" }, lastUsed: { provider: "magpie", model: "group/free" } } } },
+		},
+	});
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const selection = await manager.readSessionModelSelection("session-x");
+	assert.deepEqual(JSON.parse(JSON.stringify(selection)), { provider: "magpie", model: "group/auto", reasoningEffort: "max" }, "next 是下一次请求的选择，优先 lastUsed");
+});
+
+test("readSessionModelSelection：无 next 时取 lastUsed；都没有返回 undefined", async () => {
+	const { host, client } = makeFakeHost();
+	client.sessionsProjections = async () => ({
+		result: { ok: true, value: { values: { modelSelection: { next: null, lastUsed: { provider: "magpie", model: "group/free" } } } } },
+	});
+	const manager = new DshAgentManager(host, () => PROJECT);
+	assert.deepEqual(JSON.parse(JSON.stringify(await manager.readSessionModelSelection("session-x"))), { provider: "magpie", model: "group/free" });
+
+	client.sessionsProjections = async () => ({ result: { ok: true, value: { values: { modelSelection: { next: null, lastUsed: null } } } } });
+	assert.equal(await manager.readSessionModelSelection("session-x"), undefined);
+	client.sessionsProjections = async () => ({ result: { ok: false, error: { code: "gateway/internal", message: "boom" } } });
+	assert.equal(await manager.readSessionModelSelection("session-x"), undefined);
+});
+
+test("readSessionModelSelection：host 未就绪时不主动拉起，返回 undefined", async () => {
+	const { host, client } = makeFakeHost();
+	let projectionsRead = 0;
+	client.sessionsProjections = async () => {
+		projectionsRead += 1;
+		return { result: { ok: true, value: { values: { modelSelection: { next: null, lastUsed: { provider: "a", model: "b" } } } } } };
+	};
+	host.isHostReady = () => false;
+	const manager = new DshAgentManager(host, () => PROJECT);
+	assert.equal(await manager.readSessionModelSelection("session-x"), undefined);
+	assert.equal(projectionsRead, 0, "仅展示补录不得触发 host 冷读 RPC");
+});
+
+test("getRuntimeModelThinkingState：把 host 投影选择暴露给 Coordinator（无档位时不伪造）", async () => {
+	const { host } = makeFakeHost();
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	// create 时 refreshModelDirectory 已把模型目录默认值写进 runtime；档位未知。
+	const state = await manager.getRuntimeModelThinkingState(tab.id);
+	assert.equal(state.provider, "test");
+	assert.equal(state.modelId, "default");
+	assert.equal(state.thinkingLevel, undefined);
 });

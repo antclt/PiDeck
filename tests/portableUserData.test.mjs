@@ -64,8 +64,18 @@ test("主进程正式版先跑 userData 更名迁移，再走 resolveAppUserData
 	// 契约：打包态（含 dev 通道安装包）与便携版都经 resolveAppUserDataDir 判定
 	assert.match(src, /resolveAppUserDataDir\(\{\s*explicitDir:\s*gatedExplicitUserDataDir,/);
 	assert.match(src, /isPackaged:\s*app\.isPackaged,/);
-	// 契约：启动顺序（IPC 注册→飞书注册→备份→建窗），中间允许插入注释行与旁路装配行（2026-10 统一接口聚合层引入 registerAllDomains）
-	assert.match(src, /registerIpc\(\);\s*(?:^[\t ]*(?:\/\/[^\n]*|\w+\(\);)[\t ]*\n\s*)*registerFeishuIpc\(\{[\s\S]*?\}\);\s*(?:\/\/[^\n]*\n\s*)*configBackupManager\?\.ensureInitialBackups\(\);\s*await createWindow\(\);/m);
+	// 契约：启动顺序（IPC 注册→飞书注册→备份→建窗）。中间可插入其他装配（统一接口聚合层、微信桥、
+	// 划词浮窗预热等），所以按标记位置比较先后，不用跨大段代码的单一正则（2026-10 多次误红）。
+	const startupOrder = ["registerIpc();", "registerFeishuIpc({", "configBackupManager?.ensureInitialBackups();", "await createWindow();"].map((marker) => src.indexOf(marker));
+	assert.ok(
+		startupOrder.every((index) => index > 0),
+		"启动关键步骤必须都存在",
+	);
+	assert.deepEqual(
+		[...startupOrder].sort((a, b) => a - b),
+		startupOrder,
+		"启动顺序必须是 IPC 注册 → 飞书注册 → 备份 → 建窗",
+	);
 	assert.match(src, /Application startup failed/);
 	assert.match(src, /showErrorBox/);
 });

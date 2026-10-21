@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useAtomValue } from "jotai";
-import { Clock, History, ListFilter, PlayCircle, Plus, Sliders, X } from "lucide-react";
+import { Clock, History, ListFilter, PlayCircle, Plus, Sliders } from "lucide-react";
 import { automationActiveRunsAtom, automationTasksAtom } from "../../atoms/automation-atoms";
 import { projectInventoryAtom } from "../../atoms/project-atoms";
 import { t } from "../../i18n";
@@ -19,16 +19,15 @@ interface AutomationWorkspaceProps {
 	/** Omit for the cross-project overview; project menus pass an explicit owner id. */
 	projectId?: string;
 	onRouteChange: (route: AutomationWorkspaceRoute) => void;
-	onClose: () => void;
 	/** 点击执行记录关联会话时，由宿主切换项目并打开常驻会话 Tab。 */
 	onViewSession: (projectId: string, sessionId: string) => void;
 }
 
 /**
- * Persistent utility surface for scheduled-task management.
+ * 定时任务管理界面（页面内路由 + 头部），由会话 Tab 栏里的页面 Tab 承载。
  *
- * It deliberately has its own route state and header rather than entering the
- * session-tab registry: closing this surface never pauses tasks or changes sessions.
+ * 它保留自己的 route state：切到会话只是让页面失活（Tab 仍打开），
+ * 关闭页面 Tab 不会暂停任务，也不会改变当前会话。
  */
 export function AutomationWorkspace(props: AutomationWorkspaceProps) {
 	const activeRuns = useAtomValue(automationActiveRunsAtom);
@@ -85,9 +84,6 @@ export function AutomationWorkspace(props: AutomationWorkspaceProps) {
 							{t("automation.createTask")}
 						</Button>
 					)}
-					<Button type="button" variant="ghost" size="icon-sm" className="size-8 text-muted-foreground hover:bg-accent hover:text-accent-foreground" title={t("drawer.closePanel")} aria-label={t("drawer.closePanel")} onClick={props.onClose}>
-						<X className="size-4" />
-					</Button>
 				</div>
 			</header>
 

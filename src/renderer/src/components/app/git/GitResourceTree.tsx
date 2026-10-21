@@ -76,8 +76,6 @@ export const FileTree = memo(function FileTree(props: {
 	deleteFile?: (path: string) => void;
 	/** 行内“打开文件”按钮：打开编辑器而非 diff 视图 */
 	onOpenFile?: (path: string) => void;
-	/** 已暂存文件路径集合：Changes 组中这些文件不再显示 stage/rollback 按钮（VS Code 语义） */
-	stagedPaths?: ReadonlySet<string>;
 	mutating: boolean;
 	onOpenWorkspaceFileDiff: (group: GitResourceGroupType, path: string) => void;
 	/** 项目根目录路径，用于显示相对路径 */
@@ -114,22 +112,20 @@ export const FileTree = memo(function FileTree(props: {
 				run: () => props.unstageFile?.(r.path),
 			});
 		} else if (props.groupType === "workingTree" || props.groupType === "untracked") {
-			// 已暂存文件在 Changes 组仅保留打开按钮，暂存/回滚归 Staged 组（VS Code 语义）
-			if (!props.stagedPaths?.has(r.path)) {
-				actions.push({
-					label: t("git.stage"),
-					kind: "stage",
-					disabled: props.mutating,
-					run: () => props.stageFile?.(r.path),
-				});
-				// 回滚：tracked 走 git restore，untracked 走回收站删除
-				actions.push({
-					label: t("git.discardChanges"),
-					kind: "discard",
-					disabled: props.mutating,
-					run: () => props.discardFile?.(r.path, r.status === GitStatus.UNTRACKED ? "untracked" : "workingTree"),
-				});
-			}
+			// Changes 组只含工作区侧资源（见 collectUnstagedResources），每行都能再次暂存/回滚
+			actions.push({
+				label: t("git.stage"),
+				kind: "stage",
+				disabled: props.mutating,
+				run: () => props.stageFile?.(r.path),
+			});
+			// 回滚：tracked 走 git restore，untracked 走回收站删除
+			actions.push({
+				label: t("git.discardChanges"),
+				kind: "discard",
+				disabled: props.mutating,
+				run: () => props.discardFile?.(r.path, r.status === GitStatus.UNTRACKED ? "untracked" : "workingTree"),
+			});
 		}
 		if (props.onOpenFile) {
 			actions.push({
@@ -147,7 +143,7 @@ export const FileTree = memo(function FileTree(props: {
 				indent={depth * CHANGE_TREE_INDENT_PX}
 				onOpen={() =>
 					props.onOpenWorkspaceFileDiff(
-						// Changes 组合并了 workingTree + untracked + index，但 groupType 写死 workingTree；
+						// Changes 组只含工作区侧资源（workingTree + untracked，见 collectUnstagedResources）：
 						// 未跟踪文件按实际状态传 untracked，否则服务端在 workingTree 组找不到而打不开
 						props.groupType === "workingTree" && r.status === GitStatus.UNTRACKED ? "untracked" : props.groupType,
 						r.path,
@@ -164,8 +160,7 @@ export const FileTree = memo(function FileTree(props: {
 	 * 目录级操作只作用于传入的资源（树形视图传整棵子树），不影响其他目录。
 	 */
 	const renderDirHeader = (dir: string, label: string, dirResources: GitResource[], depth: number) => {
-		const stageable = dirResources.filter((resource) => !props.stagedPaths?.has(resource.path));
-		const discardable = stageable
+		const discardable = dirResources
 			.filter((resource) => resource.status === GitStatus.UNTRACKED || props.groupType === "workingTree")
 			.map((resource) => ({
 				path: resource.path,
@@ -193,7 +188,7 @@ export const FileTree = memo(function FileTree(props: {
 					{label}
 				</span>
 				<span className="ml-auto flex items-center gap-0.5">
-					{props.stageDir && stageable.length > 0 && (
+					{props.stageDir && dirResources.length > 0 && (
 						<Button
 							type="button"
 							variant="ghost"
@@ -204,7 +199,7 @@ export const FileTree = memo(function FileTree(props: {
 							disabled={props.mutating}
 							onClick={(event) => {
 								event.stopPropagation();
-								props.stageDir?.(stageable.map((resource) => resource.path));
+								props.stageDir?.(dirResources.map((resource) => resource.path));
 							}}
 						>
 							<Plus size={13} aria-hidden="true" />
@@ -362,7 +357,7 @@ export function ResourceRow(props: {
 	const letter = props.compareStatus ? compareStatusLetter(props.compareStatus) : props.letter;
 	const rowPadding = { paddingLeft: FILE_ROW_BASE_PADDING + (props.indent ?? 0) };
 	const row = (
-		<div className={`group git-resource-row flex h-[26px] items-center pr-[7px] text-sm leading-[26px] hover:bg-[var(--git-panel-hover)] focus-within:bg-[var(--git-panel-hover)] ${tone}`} title={props.path}>
+		<div className={`group git-resource-row flex h-[26px] items-center pr-[7px] text-body leading-[26px] hover:bg-[var(--git-panel-hover)] focus-within:bg-[var(--git-panel-hover)] ${tone}`} title={props.path}>
 			{props.onOpen ? (
 				<button
 					type="button"

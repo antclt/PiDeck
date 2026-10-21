@@ -1,22 +1,21 @@
 import { useAtomValue, useSetAtom } from "jotai";
 import { Clock } from "lucide-react";
-import { openAutomationModalAtom } from "../../atoms/automation-atoms";
-import { automationActiveRunsAtom } from "../../atoms/automation-atoms";
+import { automationActiveRunsAtom, openAutomationPageAtom } from "../../atoms/automation-atoms";
 import { t } from "../../i18n";
 
 /**
  * 侧栏顶部动作区的定时任务入口（新建会话 / 搜索会话下方）。
- * 点击打开定时任务管理弹框；有正在执行的任务时，行尾显示呼吸蓝点，
- * 避免用户还要翻底栏 Dock。
+ * 点击打开（或激活）会话 Tab 栏里的定时任务页面 Tab；有正在执行的任务时，
+ * 行尾显示呼吸蓝点，避免用户还要翻底栏 Dock。
  */
 export function AutomationDockButton() {
-	const openAutomationModal = useSetAtom(openAutomationModalAtom);
+	const openAutomationPage = useSetAtom(openAutomationPageAtom);
 	const activeRuns = useAtomValue(automationActiveRunsAtom);
 	const hasActive = activeRuns.length > 0;
 	const label = hasActive ? `${t("automation.title")} (${activeRuns.length})` : t("automation.title");
 
 	return (
-		<button type="button" className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-muted/60" aria-label={label} title={label} onClick={() => openAutomationModal()}>
+		<button type="button" className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-muted/60" aria-label={label} title={label} onClick={() => openAutomationPage()}>
 			<span className="relative shrink-0">
 				<Clock className="size-4 text-muted-foreground" aria-hidden="true" />
 				{hasActive && <span className="pointer-events-none absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-sky-500 animate-pulse" aria-hidden="true" />}

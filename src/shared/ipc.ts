@@ -126,14 +126,13 @@ export const ipcChannels = {
 	sessionsCatalogReadMessagePage: "sessions:catalog-read-message-page",
 	/** 会话 JSONL 过程事件（session/model/thinking/custom/compaction），供轨迹复盘，不进聊天时间线。 */
 	sessionsCatalogReadProcessEvents: "sessions:catalog-read-process-events",
+	sessionsCatalogReadOutline: "sessions:catalog-read-outline",
 	/** pi-subagents 扩展子代理列表：合成 record、桥接快照、工具调用推导。 */
 	sessionsListSubagents: "sessions:list-subagents",
 	/** 会话级文件修改汇总：从会话文件全量显示消息聚合 write/edit/create/patch。 */
-	sessionsListFileChanges: "sessions:list-file-changes",
 	/** 会话级 todo 快照：从会话文件 pi-deck-todo custom 条目重建最新计划。 */
 	sessionsListSessionTodo: "sessions:list-session-todo",
 	/** DSH 会话轨迹系统提示（request/header 事件的 EpochHeader.system；非 DSH/无数据返回 undefined）。 */
-	sessionsCatalogReadDshSystemPrompt: "sessions:catalog-read-dsh-system-prompt",
 	sessionsCatalogReadReferenceMessages: "sessions:catalog-read-reference-messages",
 	/** 按需读取单条消息完整文本（工具结果截断后的「查看完整输出」入口）。 */
 	sessionsCatalogReadMessageFullText: "sessions:catalog-read-message-full-text",
@@ -158,6 +157,10 @@ export const ipcChannels = {
 	sessionsRuntimeCompact: "sessions:runtime-compact",
 	sessionsRuntimeState: "sessions:runtime-state",
 	sessionsRuntimeCommands: "sessions:runtime-commands",
+	sessionsRuntimePromptTemplates: "sessions:runtime-prompt-templates",
+	sessionsDraftPromptTemplates: "sessions:draft-prompt-templates",
+	/** 热重载 pi 扩展/技能/提示词（内部 reload 扩展命令；返回刷新后的命令表）。 */
+	sessionsRuntimeReloadResources: "sessions:runtime-reload-resources",
 	/** 草稿会话斜杠命令预览（只读借用 pi standby 进程；不可用返回 null）。 */
 	sessionsDraftCommands: "sessions:draft-commands",
 	/** rewind checkpoint（refs/pi-checkpoints，纯 git，跨后端）。 */
@@ -186,7 +189,7 @@ export const ipcChannels = {
 	/** DSH 会话文件路径推导（渲染层右键「复制会话文件路径」；按 dshSessionId + cwd 计算 host 持久化路径）。 */
 	sessionsGetDshSessionPath: "sessions:get-dsh-session-path",
 	sessionsSearchContent: "sessions:search-content",
-	/** 会话内查找（单文件检索，命中按时间线返回）。 */
+	/** 会话内查找（入参 = SessionRecord.id：pi 走 session-index 单文件检索，DSH 走 host 历史投影；命中按时间线返回）。 */
 	sessionsSearchInSession: "sessions:search-in-session",
 	/** DSH 会话内容搜索（session.search；结果最多 20 会话，返回 sessionId + snippet）。 */
 	sessionsSearchDsh: "sessions:search-dsh",
@@ -227,6 +230,30 @@ export const ipcChannels = {
 	automationUpdateSettings: "automation:update-settings",
 	automationPreviewCron: "automation:preview-cron",
 	automationChanged: "automation:changed",
+	/** 智能体（Agent Market）：配置 CRUD + 一次性调用（与划词工具同一域） */
+	agentProfilesGetSnapshot: "agent-profiles:get-snapshot",
+	agentProfilesCreate: "agent-profiles:create",
+	agentProfilesUpdate: "agent-profiles:update",
+	agentProfilesDelete: "agent-profiles:delete",
+	agentProfilesResetBuiltin: "agent-profiles:reset-builtin",
+	agentProfilesDuplicate: "agent-profiles:duplicate",
+	agentProfilesUpdateSettings: "agent-profiles:update-settings",
+	agentProfilesChanged: "agent-profiles:changed",
+	/** 一次性调用（划词翻译 / 市场面板）：事件按 runId 走 agentProfilesInvokeEvent。 */
+	agentProfilesInvoke: "agent-profiles:invoke",
+	agentProfilesInvokeCancel: "agent-profiles:invoke-cancel",
+	agentProfilesInvokeEvent: "agent-profiles:invoke-event",
+	/** 会话 ↔ 智能体绑定（「使用」新建会话时写入；解绑传 agentId=null）。 */
+	agentProfilesBindSession: "agent-profiles:bind-session",
+	/** 系统级划词浮窗（全局快捷键触发）：可见性/隐藏/发送回主窗口/捕获推流。 */
+	selectionToolGetState: "selection-tool:get-state",
+	selectionToolHide: "selection-tool:hide",
+	selectionToolResize: "selection-tool:resize",
+	selectionToolInsertToMain: "selection-tool:insert-to-main",
+	selectionToolCaptured: "selection-tool:captured",
+	selectionToolStateChanged: "selection-tool:state-changed",
+	/** 主进程 → 主窗口：把系统级划词结果插入当前会话输入框。 */
+	selectionToolInserted: "selection-tool:inserted",
 	/** DSH 动态插件清单（G13 深化：进程内临时扩展，重启即失；按会话归属）。 */
 	dshPluginList: "dsh:plugin-list",
 	/** DSH 静态 Loader 条目清单（origin 标注 user/builtin 来源）。 */
@@ -655,25 +682,6 @@ export const ipcChannels = {
 
 	/** Agent Extension UI 协议：主进程 → 渲染进程，推送扩展的 UI 请求（select/confirm/input/editor） */
 	agentsUiRequest: "agents:ui-request",
-	/**
-	 * GUI 扩展桥：渲染进程 → 主进程，回灌交互事件（select/navigate/input/key/action）。
-	 *
-	 * 命名归 `sessions:*` 而不是 `agents:*`，理由有两条：
-	 * 1. 它与 `sessionsUiResponse` 同族 —— 都是「渲染层把用户对扩展 UI 的操作送回 pi」；
-	 * 2. 入参带 `sessionId + agentId + runtimeGeneration` 三个身份字段，
-	 *    语义上是会话级 runtime 命令（AGENTS.md 硬性要求），不是 agent 直发事件。
-	 * （`agents:*` 在 preload 侧另有「订阅必须进 DIRECT_EMIT_CHANNELS 白名单」的契约，
-	 * 而本通道是 invoke 不是订阅，放错族会误导后来者。）
-	 */
-	sessionsBridgeEvent: "sessions:bridge-event",
-	/**
-	 * GUI 扩展桥：渲染进程 → 主进程，请求桥全量重推一次（规格书 §9.4）。
-	 *
-	 * 与 `sessionsBridgeEvent` 同族：都是「渲染层把需求送回桥」，
-	 * 同样带 `sessionId + agentId + runtimeGeneration` 三个身份字段。
-	 * 主进程只在下一轮桥轮询的响应体里带一个 `resync: true`，不新开路由。
-	 */
-	sessionsBridgeResync: "sessions:bridge-resync",
 	/** 项目信任确认：主进程 → 渲染进程，启动 Agent 前请求用户对含 .pi 资源的项目做信任决策 */
 	projectsTrustRequest: "projects:trust-request",
 	/** 项目信任确认：渲染进程 → 主进程，回传用户的信任选择（trust-remember/trust-session/deny） */
@@ -952,6 +960,11 @@ export const ipcChannels = {
 	 * （2026-10，同 dshRuntimeInstallLocalDir）。
 	 */
 	hostPluginsInstallDirectory: "host-plugins:install-directory",
+	/**
+	 * 从 GitHub 仓库安装：渲染层只给一个 https://github.com/... 链接，主进程下载源码 tar.gz、
+	 * 定位 pideck-plugin.json 所在包根后走与归档/目录一致的重扫描与授权门（不执行仓库内任何代码）。
+	 */
+	hostPluginsInstallGitHub: "host-plugins:install-github",
 	/** 脚手架：在插件目录里生成 <id>/ 模板（已存在就拒经，不覆盖作者代码）。 */
 	hostPluginsScaffold: "host-plugins:scaffold",
 	hostPluginsSetEnabled: "host-plugins:set-enabled",
@@ -968,11 +981,6 @@ export const ipcChannels = {
 	hostPluginNavigate: "host-plugin:navigate",
 	/** 插件要求打开本地服务的 Web UI：地址由主进程适配器给，渲染层只负责开内置浏览器 */
 	hostPluginOpenBrowser: "host-plugin:open-browser",
-	pluginDevStatus: "plugin-dev:status",
-	/** 把 AI 插件开发指南写入用户扩展目录并在资源管理器定位 */
-	pluginDevWriteGuide: "plugin-dev:write-guide",
-	/** 复制内置 demo 插件到用户扩展目录（已存在不覆盖） */
-	pluginDevCopyDemo: "plugin-dev:copy-demo",
 
 	// ===== 内置浏览器 =====
 	browserOpenExternal: "browser:open-external",
@@ -995,6 +1003,13 @@ export const ipcChannels = {
 	 */
 	imagegenReadImageBlob: "imagegen:read-image-blob",
 
+	// ===== 对话内本地图片（pideck-file:// 的按需读取） =====
+	/**
+	 * 按绝对路径读取白名单内的本地图片字节（保存 / 复制用）。
+	 * 展示走 pideck-file:// 协议；渲染层 fetch 该 scheme 会被拦，所以字节从主进程拿。
+	 */
+	localImageReadBytes: "local-image:read-bytes",
+
 	// ===== 生视频（VideoGen）：提交-轮询-下载异步协议 =====
 	/** 提交生视频任务：受理后返回 jobId，产物经轮询事件推送 */
 	videogenSubmit: "videogen:submit",
@@ -1016,6 +1031,14 @@ export const ipcChannels = {
 	enhanceCancel: "enhance:cancel",
 	/** 增强过程事件（started/delta/done/aborted/error，单通道带 runId） */
 	enhanceEvent: "enhance:event",
+
+	// ===== 输入预测（回合结束后预测下一句输入，空输入框 ghost 展示） =====
+	/** 发起预测：受理后事件经 suggest:event 推送（形状与 enhance:event 一致） */
+	suggestRun: "suggest:run",
+	/** 取消进行中的预测（发新消息 / 切会话 / 关开关） */
+	suggestCancel: "suggest:cancel",
+	/** 预测过程事件（按 runId 配对） */
+	suggestEvent: "suggest:event",
 
 	// ===== Composer voice transcription =====
 	voiceTranscriptionGetConfig: "voice-transcription:get-config",

@@ -11,7 +11,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.9.1-blue)
+![Version](https://img.shields.io/badge/version-0.9.5-blue)
 
 <!-- star-history:start -->
 <picture>
@@ -81,25 +81,24 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.9.1** (2026-10-18)
+> **Latest: v0.9.5** (2026-10-21)
 
-### v0.9.1 Release Highlights
-- 🚀 **WeChat (ilink) support: a second IM channel on your phone**
-- 🚀 **Cross-session body search, not just titles**
-- 🚀 **Find in session (Ctrl/Cmd+Shift+F)**
-- 🚀 **Pinyin search for session titles and the file drawer**
-- 🚀 **Search file contents from the file drawer**
-- 🚀 **Side tasks: a second session that stays out of the tab bar**
-- 🚀 **Session-level average TPS**
-- 🚀 **Web on mobile: give the portrait screen back to content**
-- 🚀 **ACP tools available on stable builds**
-- 🚀 **Synced with pi 1.3.0**
-- 🚀 **DSH runtime upgraded to 0.2.1**
-- 🚀 **Prompt library as a remote asset, with millisecond search**
-- ✨ **On-disk session index on by default**
-- ✨ **Extension list prewarmed on first screen**
-- ✨ **Goal mode stops re-injecting the full objective every turn**
-- ✨ **List ordering is drag-only**
+### v0.9.5 Release Highlights
+- 🚀 **Trajectory inspector rebuilt: folded by turn, long sessions stay responsive**
+- 🚀 **The trajectory shows the real system prompt and usage for each turn**
+- 🚀 **Images in conversations finally render**
+- 🚀 **Agents: from a modal to a marketplace, and to a page tab**
+- 🚀 **In-app selection translation**
+- 🚀 **Input prediction: the next sentence, right after a turn ends**
+- 🚀 **Timeline right-click copy, and the selection survives streaming**
+- 🚀 **Runtime controls pinned in the session header, plus `/reload`**
+- 🚀 **Host plugins: card rows and install from GitHub**
+- 🚀 **The update page recommends the right installer for your device**
+- 🚀 **DSH: models can declare image input, and skills are readable before a session starts**
+- ✨ **Cold-start session scanning is 38× faster**
+- ✨ **About 0.86MB less on first paint**
+- ✨ **About 6.3MB smaller installer**
+- ✨ **End-of-turn "modified files": from a persistent card to a chip row**
 
 [View Full Changelog →](CHANGELOG.md)
 
@@ -171,7 +170,7 @@
 | **Desktop Pet** | Turn multi-agent status into a little companion on your desktop: aggregated states, always-on-top, scaling, petdex community pets. |
 | **Themes & Appearance** | One-click cycle through light / dark / follow-system (sidebar footer); semantic design tokens with natural dark-mode support. |
 | **Notifications** | Global notifications as card toasts; a dedicated Ask system-notification toggle keeps background queries silent, and "notify only when unfocused" stays quiet while the window is in front. |
-| **Application Updates** | App-update checks always run in the background and `autoDownloadUpdates` defaults to enabled; after download, the user confirms **Restart and install** in Settings. Windows/Linux use the bundled updater, while macOS opens the GitHub Release for manual installation; Pi CLI checks run independently. |
+| **Application Updates** | App-update checks always run in the background and `autoDownloadUpdates` defaults to enabled; after download, the user confirms **Restart and install** in Settings. Windows installers / Linux x64 AppImage use the bundled updater; unsigned macOS builds, Linux arm64, and deb/tar.gz installs recommend a matching installer for one-click download instead of sending users to pick one from the Release list; Pi CLI checks run independently. |
 | **Feishu Bot** | Bind a session to a Feishu bot to sync messages and status into a Feishu group. |
 | **LAN Web Service** | Start a local web service from Settings and open the web edition from any device on the LAN, with dual-backend session browsing and the DSH tool panel. |
 | **Process Monitor / Log Management** | Built-in process monitoring and cache/log management in Settings — no more digging through directories. |

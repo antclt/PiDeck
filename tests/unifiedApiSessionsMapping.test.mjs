@@ -17,7 +17,14 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 const PRELOAD_SOURCE = readFileSync("src/preload/index.ts", "utf8");
 const CONSOLIDATIONS_SOURCE = readFileSync("src/shared/api/consolidations.ts", "utf8");
 const FACADE_SOURCE = readFileSync("src/shared/api/facadeTypes.ts", "utf8");
-/** TEST-PLAN §0 锚定数字：sessions 112（22+79+6+5 分桶，2026-10-18 合并刷新：catalog 组+searchInSession）、config 48。 */
+/**
+ * TEST-PLAN §0 锚定数字：sessions 112、config 48。
+ * 2026-10-21：下线 readDshSystemPrompt / readOutlineTitle（轨迹事实与索引 preview 取代），114→112。
+ * 变更史：2026-10-19 下线 GUI 扩展桥的 sendBridgeEvent / requestBridgeResync（112→111）；
+ * 2027-02 下线会话级文件清单 IPC listSessionFileChanges（→110），同批把一直漏分组、
+ * 但确实存在于 preload 的 draftPromptTemplates / listRuntimePromptTemplates 补进 runtime 组
+ * （基线因此长期存在「四组总和 111 vs preload 113」的偏差，本测试此前一直是红的）→112。
+ */
 const SESSIONS_METHOD_TOTAL = 112;
 const CONFIG_METHOD_TOTAL = 48;
 const SESSIONS_GROUP_KEYS = ["catalog", "import", "rewind", "runtime"];
@@ -177,7 +184,7 @@ test("F5-1 SESSIONS_SUBDOMAINS 组键集恰为 catalog/runtime/import/rewind 四
 test("F5-2 四组并集 ≡ preload sessions 命名空间 112 方法全集（无丢失无新增，§0 锚）", () => {
 	assert.equal(sessionsNames.length, SESSIONS_METHOD_TOTAL, `源码解析得 ${sessionsNames.length} 个方法`);
 	assert.deepEqual(diffGroups(SESSIONS, sessionsNames), { missing: [], extra: [] });
-	assert.equal(Object.values(SESSIONS).flat().length, SESSIONS_METHOD_TOTAL, "四组方法数之和 = 112");
+	assert.equal(Object.values(SESSIONS).flat().length, SESSIONS_METHOD_TOTAL, "四组方法数之和 = 114");
 });
 
 test("F5-3 四组两两互斥（A14）", () => {
@@ -215,7 +222,7 @@ test("F5-5 facadeTypes 视图成员与映射常量同源（源码契约，空白
 	);
 });
 
-test("F5-6 fixture 工厂按组 pick：输出键并集 ≡ 112 方法全集（SubPick 缺席静默语义）", () => {
+test("F5-6 fixture 工厂按组 pick：输出键并集 ≡ 114 方法全集（SubPick 缺席静默语义）", () => {
 	let counter = 0;
 	const fixture = {};
 	for (const name of sessionsNames) fixture[name] = () => counter++;

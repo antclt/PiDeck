@@ -1,4 +1,4 @@
-import type { GitResource } from "../../../../../shared/types";
+import type { GitResource, GitResourceGroups } from "../../../../../shared/types";
 
 /**
  * Git 变更列表的树形建模（纯函数，无 React 依赖，便于单测）。
@@ -22,6 +22,19 @@ export function toRelativeChangePath(path: string, projectRoot?: string): string
 	if (normalizedPath.startsWith(`${normalizedRoot}/`)) return normalizedPath.slice(normalizedRoot.length + 1);
 	if (normalizedPath === normalizedRoot) return "";
 	return normalizedPath;
+}
+
+/**
+ * 「未暂存的更改」组要渲染的资源：只取工作区侧的 workingTree + untracked。
+ *
+ * git status --porcelain 对「暂存后又继续改」的文件会同时给出 index 与 workingTree 两条资源，
+ * 两者语义不同（index = HEAD↔暂存区，workingTree = 暂存区↔工作区），Changes 组只能渲染后者。
+ * 把 index 资源也并进来会让已暂存文件在「未暂存的更改」里多留一行（issue #391），点它还按
+ * workingTree 组取 diff，主进程在该组查不到资源 → 直接报「无法读取该工作区文件的差异内容」。
+ * 因此这里不做按路径去重：workingTree 与 untracked 天然互斥。
+ */
+export function collectUnstagedResources(groups: Pick<GitResourceGroups, "workingTree" | "untracked">): GitResource[] {
+	return [...groups.workingTree, ...groups.untracked];
 }
 
 /** 相对路径的目录部分；根级文件返回 ""（与扁平视图的根分组键一致）。 */

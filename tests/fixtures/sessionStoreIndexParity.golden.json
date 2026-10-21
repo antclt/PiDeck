@@ -1,9 +1,9 @@
 {
   "path": "tests/fixtures/sessionStoreIndexParity.jsonl",
-  "size": 2680,
+  "size": 3112,
   "mtimeMs": 0,
   "endsWithNewline": true,
-  "lastEntryId": "m18",
+  "lastEntryId": "m20",
   "entries": [
     {
       "id": "s1",
@@ -24,7 +24,8 @@
       "hasMessage": true,
       "role": "user",
       "messageTimestamp": 1772359201000,
-      "timestamp": "2026-03-01T10:00:01.000Z"
+      "timestamp": "2026-03-01T10:00:01.000Z",
+      "preview": "первый вопрос про 索引 🔍"
     },
     {
       "id": "m2",
@@ -50,7 +51,8 @@
       "offset": 636,
       "byteLength": 136,
       "hasMessage": false,
-      "role": "user"
+      "role": "user",
+      "preview": "строка без блока"
     },
     {
       "id": "m4",
@@ -89,7 +91,8 @@
       "offset": 1122,
       "byteLength": 124,
       "hasMessage": true,
-      "role": "user"
+      "role": "user",
+      "preview": "без timestamp"
     },
     {
       "id": "m8",
@@ -190,6 +193,25 @@
       "byteLength": 171,
       "hasMessage": true,
       "role": "assistant"
+    },
+    {
+      "id": "m19",
+      "parentId": "m18",
+      "type": "message",
+      "offset": 2680,
+      "byteLength": 252,
+      "hasMessage": true,
+      "role": "user",
+      "preview": "真正的问题在这里"
+    },
+    {
+      "id": "m20",
+      "parentId": "m19",
+      "type": "message",
+      "offset": 2933,
+      "byteLength": 178,
+      "hasMessage": true,
+      "role": "user"
     }
   ],
   "oversizedLines": 0

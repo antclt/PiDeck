@@ -4,7 +4,6 @@ import { useAtom, useSetAtom } from "jotai";
 import { ArrowDownToLine, ArrowUpFromLine, Check, CheckCircle2, ChevronDown, ChevronsDownUp, ChevronsUpDown, ClipboardPaste, FileCode2, FolderGit2, GitBranch, List, ListTree, Loader2, Plus, RefreshCw, RotateCcw, Sparkles, TriangleAlert } from "lucide-react";
 import { Button } from "../ui-shadcn/button";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui-shadcn/alert-dialog";
-import { BridgeGuiSlot, useBridgeSessionId } from "../bridge/BridgeSlot";
 import { useAnimationWindow } from "../../hooks/useAnimationWindow";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "../ui-shadcn/context-menu";
 import { ConfirmDialog } from "./AppParts";
@@ -12,12 +11,12 @@ import { dismissNotice, showNotice, type NoticeId } from "../../utils/notice";
 import { writeClipboard } from "../../utils/clipboard";
 import { htmlToPlainText, readClipboardHtmlConsistent, readClipboardText } from "../../utils/clipboard";
 import { deepEqual } from "../../utils/deepEqual";
-import type { BranchDiffResult, CommitDetail, CommitEntry, GitAheadBehind, GitChangedFile, GitDiscardResource, GitResource, GitResourceGroupType, GitResourceGroups } from "../../../../shared/types";
+import type { BranchDiffResult, CommitDetail, CommitEntry, GitAheadBehind, GitChangedFile, GitDiscardResource, GitResourceGroupType, GitResourceGroups } from "../../../../shared/types";
 import { GitStatus } from "../../../../shared/types";
 import { EMPTY_GIT_COMMIT_COMPOSER, gitCommitComposerByScopeAtom, gitCommitScopeKey, openSettingsAtom, patchGitCommitComposer, type GitCommitComposerState } from "../../atoms";
 import { t } from "../../i18n";
 import { fileNameOnly, FileTree, getCollapsibleChangeDirs, ResourceGroup, ResourceRow } from "./git/GitResourceTree";
-import { collectChangeTreeDirPaths, type GitChangeViewMode } from "./git/changeTree";
+import { collectChangeTreeDirPaths, collectUnstagedResources, type GitChangeViewMode } from "./git/changeTree";
 import { GitCompactFilter, PaneHeader } from "./git/GitPanelControls";
 import { SourceControlGraph } from "./git/GitGraph";
 import { getViewportBoundMenuPlacement } from "./git/floatingMenuPosition";
@@ -441,8 +440,6 @@ export function GitPanel(props: GitPanelProps) {
 	// sash 拖拽改 --git-pane-height 时窗口不在，避免拖拽橡皮筋。定时器收口在 hook（面板源码有 setTimeout 守卫）。
 	const paneAnimating = useAnimationWindow(paneAnimSeq, 180);
 	const panelRef = useRef<HTMLDivElement>(null);
-	// 桥落点跟随聚焦会话（共享 chrome 策略，见 git.panel.section 挂载处注释）
-	const bridgeSessionId = useBridgeSessionId();
 	// Missing-model guidance opens Common settings directly at the Git summary section.
 	const openSettings = useSetAtom(openSettingsAtom);
 	const repoScopeKey = props.repoScopeKey ?? props.projectId;
@@ -895,20 +892,10 @@ export function GitPanel(props: GitPanelProps) {
 		setPaneState((current) => resizePair(current, before, after, beforeHeight, afterHeight));
 	};
 
-	const workingChanges = useMemo(() => {
-		// VS Code 语义：Changes 组始终显示全部变更（含已暂存），Staged 组单独列已暂存；
-		// 同一文件同时在 index 与 workingTree（暂存后又改）时只列一次，避免重复行
-		const seen = new Set<string>();
-		const result: GitResource[] = [];
-		for (const r of [...groups.workingTree, ...groups.untracked, ...groups.index]) {
-			if (seen.has(r.path)) continue;
-			seen.add(r.path);
-			result.push(r);
-		}
-		return result;
-	}, [groups.workingTree, groups.untracked, groups.index]);
-	/** 已暂存路径集合：Changes 组中这些文件不再显示 stage/rollback 行内按钮 */
-	const stagedPathSet = useMemo(() => new Set(groups.index.map((r) => r.path)), [groups.index]);
+	// 「未暂存的更改」= 工作区侧改动（workingTree + untracked）。已暂存资源只出现在「暂存的更改」组：
+	// 并进本组会让文件暂存后仍留在未暂存列表，点它还按 workingTree 取 diff 而失败（issue #391）。
+	// 暂存后又继续改的文件由 porcelain 同时给出 index + workingTree 两条资源，本组只保留后者。
+	const workingChanges = useMemo(() => collectUnstagedResources(groups), [groups]);
 	const stagedCount = groups.index.length;
 	const hasUnresolvedConflicts = groups.merge.length > 0;
 	// VS Code enables the action for either staged changes or working-tree changes
@@ -1652,7 +1639,6 @@ export function GitPanel(props: GitPanelProps) {
 												discardFile={discardFile}
 												deleteFile={props.deleteFiles ? deleteFile : undefined}
 												onOpenFile={props.onOpenFile}
-												stagedPaths={stagedPathSet}
 												projectRoot={props.projectRoot}
 												viewMode={changesViewMode}
 												collapsedDirs={collapsedChangeDirs}
@@ -1665,9 +1651,6 @@ export function GitPanel(props: GitPanelProps) {
 								</div>
 							</div>
 						)}
-						{/* GUI 扩展桥：Git 面板底部附加区块落点（ctx.gui.setGitPanelSection）。
-					    跟随聚焦会话的贡献（共享 chrome，与 AppHeader titlebar.action 同策略）；无贡献不占位。 */}
-						<BridgeGuiSlot sessionId={bridgeSessionId} slot="git.panel.section" className="flex max-h-[30%] shrink-0 flex-col gap-1 overflow-y-auto border-t px-2 py-1" />
 					</section>
 				</>
 			)}

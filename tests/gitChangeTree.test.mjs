@@ -15,7 +15,7 @@ const load = (relativePath) => loadTsCommonJs(`${ROOT}/${relativePath}`);
 const readSource = (relativePath) => readFileSync(`${ROOT}/${relativePath}`, "utf8");
 
 const { GitStatus } = load("src/shared/types/git.ts");
-const { buildChangeTreeRows, changeDirOf, collectChangeTreeDirPaths, toRelativeChangePath } = load("src/renderer/src/components/app/git/changeTree.ts");
+const { buildChangeTreeRows, changeDirOf, collectChangeTreeDirPaths, collectUnstagedResources, toRelativeChangePath } = load("src/renderer/src/components/app/git/changeTree.ts");
 
 /** 完整 GitResource 工厂：纯函数只读 path，仍构造形状完整的资源，避免半截对象混进断言 */
 const file = (path, letter = "M") => ({ path, status: GitStatus.MODIFIED, letter });
@@ -107,6 +107,22 @@ test("多仓路径：项目根外的绝对路径按自身段建树，各自归�
 	// 而 repoA 有直属文件（readme.md）所以不合并——同一列表里两种形态可以共存。
 	assert.deepEqual(shape(rows), ["dir:repoA@0=2", "dir:repoA/src@1=1", "file:a.ts@2", "file:readme.md@1", "dir:repoB/src@0=1", "file:b.ts@1"], "两个根目录各自成树，文件不会挂到对方根下");
 	assert.equal(rows.find((row) => row.kind === "dir" && row.label === "repoB.src").path, "repoB/src", "合并后的折叠键仍是链尾真实路径");
+});
+
+test("collectUnstagedResources：Changes 组只取工作区侧改动，已暂存资源不留在未暂存列表（issue #391）", () => {
+	const stagedOnly = { path: "/p/only.ts", status: GitStatus.INDEX_MODIFIED, letter: "M" };
+	const stagedThenEditedInIndex = { path: "/p/both.ts", status: GitStatus.INDEX_MODIFIED, letter: "M" };
+	const stagedThenEditedInWorktree = { path: "/p/both.ts", status: GitStatus.MODIFIED, letter: "M" };
+	const untracked = { path: "/p/new.ts", status: GitStatus.UNTRACKED, letter: "U" };
+	// index 组对纯函数不是必需入参，显式传进来验证已有暂存资源不会混进返回值
+	const groups = { merge: [], index: [stagedOnly, stagedThenEditedInIndex], workingTree: [stagedThenEditedInWorktree], untracked: [untracked] };
+
+	assert.deepEqual(
+		Array.from(collectUnstagedResources(groups), (resource) => `${resource.letter}:${resource.path}`),
+		["M:/p/both.ts", "U:/p/new.ts"],
+		"只暂存的文件彻底离开未暂存组（否则暂存后还会留一行，点它按 workingTree 组取 diff 会失败）；暂存后又改的文件保留工作区侧那一条",
+	);
+	assert.equal(collectUnstagedResources({ workingTree: [], untracked: [] }).length, 0, "无未暂存改动时返回空列表");
 });
 
 test("接线契约：三个变更分组都传 viewMode，模式持久化且默认平铺", () => {

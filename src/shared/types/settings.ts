@@ -139,6 +139,16 @@ export type AppSettings = {
 	/** 增强时携带当前会话最近正文；缺省关闭，只有显式 true 才发送。 */
 	enhanceIncludeContext?: boolean;
 	/**
+	 * 输入预测：每轮答完后用一次模型调用预测用户下一句输入，空输入框里以 ghost 文案展示。
+	 * 缺省开启（老设置无此字段按开启处理）；显式 false 才关闭——关掉即完全不发请求。
+	 */
+	promptSuggestionEnabled?: boolean;
+	/**
+	 * 输入预测用的模型；null/缺省 = 跟随会话模型（与 enhanceModel 同一条优先级链，但两者互不影响）。
+	 * 非法形态（缺字段/非字符串）在 SettingsStore 加载与 update 时归一为 null。
+	 */
+	promptSuggestionModel?: { provider: string; modelId: string } | null;
+	/**
 	 * 全局快捷键用户覆盖：ShortcutId → accelerator（Electron 语法子集，见 shared/shortcuts.ts）。
 	 * 缺省键 = 平台默认值（macOS ⌘, 打开设置 / F12 开发者工具等）；设置页「快捷键管理」
 	 * 修改后写这里，主进程 before-input-event 匹配实时读取（无需重启）。
@@ -715,12 +725,6 @@ export type AppSettings = {
 	removedBuiltInExtensions: string[];
 
 	/**
-	 * 用户显式开启的「默认关闭」内置扩展（GUI 扩展桥/扩展点面板等 opt-in）。
-	 * 这些扩展不进 removedBuiltInExtensions——默认不注入，列表存在才随 -e 注入。
-	 */
-	enabledBuiltInExtensions: string[];
-
-	/**
 	 * 旧版扩展禁用记录（source 标识 + 作用域）。
 	 * 现代版本已改为写 pi 原生 `settings.json` 过滤规则；此字段仅由启动迁移读取并清理，
 	 * 迁移完成前它仍会被扩展运行时查询与压缩归属启发式读取（见执行计划 A5）。
@@ -983,7 +987,6 @@ export function createDefaultAppSettings(): AppSettings {
 		piEnvironmentChecked: false,
 		/** 扩展禁用白名单：与 SettingsStore 默认一致，空数组 = 不启用白名单（首屏未拉到真实设置前的默认值） */
 		disabledExtensions: [],
-		enabledBuiltInExtensions: [],
 		/** 技能禁用列表：与 SettingsStore 默认一致，空数组 = 不启用技能白名单 */
 		disabledSkills: [],
 		/** 提示词模板禁用列表：与 SettingsStore 默认一致，空数组 = 不启用模板白名单 */

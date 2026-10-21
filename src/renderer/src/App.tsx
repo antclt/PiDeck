@@ -27,6 +27,9 @@ import {
 	ScrollText,
 	// 抽屉侧边任务 Tab 图标：不用 PanelRight——那是会话头部抽屉开关的图形，并排会认错
 	Rocket,
+	// 会话 Tab 栏里的页面式工作区 Tab 图标（定时任务 / 智能体）
+	Clock,
+	Bot,
 } from "lucide-react";
 import { configureNoticeDefaults, showNotice, type NoticeKind } from "./utils/notice";
 import { copyTextWithCopiedNotice } from "./utils/clipboardNotice";
@@ -44,9 +47,17 @@ import {
 	imageGenConfigAtom,
 	enhanceModelAtom,
 	enhanceIncludeContextAtom,
+	promptSuggestionEnabledAtom,
+	promptSuggestionModelAtom,
 	dshRuntimeStatusAtom,
 	openSettingsAtom,
-	openAutomationModalAtom,
+	openAutomationPageAtom,
+	agentProfilesAtom,
+	activeWorkspacePageAtom,
+	openWorkspacePageIdsAtom,
+	openWorkspacePageAtom,
+	deactivateWorkspacePageAtom,
+	closeWorkspacePageAtom,
 	sessionRecordsAtom,
 	bumpNewTurnCollapseTickAtom,
 	rpcLoggingAgentIdsAtom,
@@ -56,7 +67,10 @@ import { type SidebarActions } from "./components/sidebar/SidebarContent";
 import { AppSidebar } from "./components/sidebar/AppSidebar";
 import { AppBootstrap } from "./components/app/AppBootstrap";
 import { SettingsFeatureRoot } from "./components/app/SettingsFeatureRoot";
-import { AutomationModal } from "./components/automation/AutomationModal";
+import { hostPluginPanelAtom } from "./atoms/host-plugin-atoms";
+import { AutomationPage } from "./components/automation/AutomationPage";
+import { AgentMarketPage } from "./components/agents/AgentMarketPage";
+import { SelectionToolHost } from "./components/selectionTool/SelectionToolHost";
 import { useRename } from "./hooks/useRename";
 import { useProjectRuntimeCapabilities } from "./hooks/useRuntimeCapabilities";
 import { useSessionRuntimeBridge } from "./hooks/useSessionRuntimeBridge";
@@ -86,7 +100,7 @@ import { useComposerStateSessionPrune } from "./hooks/useComposerStateSessionPru
 import { activeAgentIdAtom } from "./hooks/useSessionRuntimeController";
 import { useSessionHistoryMutations } from "./hooks/useSessionHistoryMutations";
 import { useUserMessageEditReplay } from "./hooks/useUserMessageEditReplay";
-import { isLiveRuntimeStatus, sessionCommandFailureToast, type SessionRunCapabilities, type SessionRunAction } from "./utils/sessionCommands";
+import { isLiveRuntimeStatus, resolveSessionReloadMode, sessionCommandFailureToast, type SessionRunAction, type SessionRunCapabilities, type SessionRunControlView } from "./utils/sessionCommands";
 import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeAcpToolPreference, readWelcomeBackendPreference, readWelcomeDshModelPreference, readWelcomeModelPreference, readWelcomeThinkingPreference, resolveChatSessionBootstrap, resolveGuidePageBackend } from "./utils/chatSessionBootstrap";
 import { useAppAppearance } from "./hooks/appearance/useAppAppearance";
 import { useAppBootstrapInfo } from "./hooks/app/useAppBootstrapInfo";
@@ -138,6 +152,7 @@ import {
 	setSessionMessageLoadStateAtom,
 	setSessionHistoryMutationOverlayAtom,
 	setSessionDraftAtom,
+	sessionDraftByIdAtom,
 	cacheSessionMessagesAtom,
 	upsertSessionAtom,
 	acpToolsAtom,
@@ -159,7 +174,7 @@ import { useWorktreeActions } from "./hooks/useWorktreeActions";
 import { ChatSessionPane } from "./components/session/ChatSessionPane";
 import { SessionSplitStage } from "./components/session/SessionSplitStage";
 import { splitLayoutSessionIds } from "./utils/sessionSplitEdge";
-import { SessionTabsBar, type SessionTabsBarProps, type SessionToolAction } from "./components/session/SessionTabsBar";
+import { SessionTabsBar, type SessionTabsBarProps, type SessionToolAction, type WorkspacePageTabItem } from "./components/session/SessionTabsBar";
 import { SessionPaneServicesProvider, type SessionFileOpenContext } from "./components/session/SessionPaneServices";
 import { SessionStatusPanel } from "./components/session/statusPanel/SessionStatusPanel";
 import { ProjectEmptyState } from "./components/session/ProjectEmptyState";
@@ -209,6 +224,7 @@ import type {
 	PiCommand,
 	Project,
 	AgentBackend,
+	AgentProfile,
 	SessionLaunchPreferences,
 	SessionRecord,
 	SessionSummary,
@@ -259,7 +275,16 @@ export function App() {
 	const agents = useAtomValue(agentInventoryAtom);
 	const setCurrentSessionId = useSetAtom(currentSessionIdAtom);
 	const replaceProjectSessions = useSetAtom(replaceProjectSessionsAtom);
-	const openAutomationModal = useSetAtom(openAutomationModalAtom);
+	const openAutomationPage = useSetAtom(openAutomationPageAtom);
+	// 页面式工作区（定时任务 / 智能体）：Tab 列表与当前呈现页面；切会话只失活、关闭才卸载。
+	const openWorkspacePageIds = useAtomValue(openWorkspacePageIdsAtom);
+	const activeWorkspacePage = useAtomValue(activeWorkspacePageAtom);
+	const openWorkspacePage = useSetAtom(openWorkspacePageAtom);
+	const deactivateWorkspacePage = useSetAtom(deactivateWorkspacePageAtom);
+	const closeWorkspacePage = useSetAtom(closeWorkspacePageAtom);
+	// 页面式插件面板与工作区页面共用会话列覆盖层：两者同时呈现会互相盖住，打开页面时收起插件页。
+	const hostPluginPanel = useAtomValue(hostPluginPanelAtom);
+	const setHostPluginPanel = useSetAtom(hostPluginPanelAtom);
 	// `/login`：打开供应商登录弹框（弹框自己从 atom 取预选供应商）。
 	const openProviderLogin = useSetAtom(openProviderLoginAtom);
 	const setProjects = useSetAtom(replaceProjectInventoryAtom);
@@ -279,6 +304,8 @@ export function App() {
 	const setImageGenConfig = useSetAtom(imageGenConfigAtom);
 	const setEnhanceModel = useSetAtom(enhanceModelAtom);
 	const setEnhanceIncludeContext = useSetAtom(enhanceIncludeContextAtom);
+	const setPromptSuggestionEnabled = useSetAtom(promptSuggestionEnabledAtom);
+	const setPromptSuggestionModel = useSetAtom(promptSuggestionModelAtom);
 	const currentSessionIdRef = useRef<string | undefined>(currentSessionId);
 	currentSessionIdRef.current = currentSessionId;
 	const openSessionRequestRef = useRef(0);
@@ -1298,6 +1325,135 @@ export function App() {
 		[createSessionDraftWithTab, setSessionDraft],
 	);
 
+	/**
+	 * 划词工具「发送到会话」：在活动项目新建草稿会话（标题 = 智能体名），把角色设定经
+	 * agentMessage 隐藏通道后发送。
+	 * - message 是用户可见原文（会话气泡），agentMessage 是实际发给 pi 的载荷；AgentManager
+	 *   在 agentMessage 非空时**整体替换** message，因此角色设定必须与原文拼在一起提交，
+	 *   时间线仍只显示原文（与 AutomationRunCoordinator / 飞书桥接的同一写法）。
+	 * - DSH 后端没有 agentMessage 通道且会拒收整条 prompt，角色设定退化为可见前缀；
+	 *   ACP 走 acpTurnSettlement 的同名通道，可以照常隐藏。
+	 * - 智能体偏好模型只在 pi 后端带入：DSH 的模型是 host route、ACP 由外部 CLI 决定，
+	 *   直接塞 pi 的 provider/modelId 会把草稿偏好写成无效值。
+	 * - 后端只保留 pi / dsh：ACP 需要用户先在草稿里点选外部 CLI 工具（这里没有该上下文，
+	 *   硬塞 acp 会建出无法激活的草稿），生图/生视频后端没有「提示词 agent」语义。
+	 *   其余后端一律回落 pi——智能体角色设定本来就是 pi 原生 agentMessage 的语言。
+	 */
+	const handleAgentSendToSession = useCallback(
+		async ({ agentId, text }: { agentId: string; text: string }): Promise<boolean> => {
+			const agent = store.get(agentProfilesAtom).find((profile) => profile.id === agentId);
+			const project = projects.find((candidate) => candidate.id === activeProjectId);
+			const trimmed = text.trim();
+			if (!agent || !project || !trimmed) return false;
+			const backend: AgentBackend = effectiveAgentBackend === "dsh" ? "dsh" : "pi";
+			try {
+				const title = `${agent.icon ? `${agent.icon} ` : ""}${agent.name}`.trim();
+				const session = await api.sessions.createDraft({
+					projectId: project.id,
+					title,
+					backend,
+					...(agent.model && backend === "pi" ? { model: agent.model } : {}),
+				});
+				upsertSession(session);
+				selectSessionCommand(project.id, session.id, false);
+				workspaceChrome.registerOpenSession(session.id, "permanent");
+				const persona = agent.systemPrompt.trim();
+				const hiddenPersona = session.backend !== "dsh";
+				const payload = `${persona}\n\n${trimmed}`;
+				const result = await api.sessions.sendPrompt({
+					sessionId: session.id,
+					requestId: crypto.randomUUID(),
+					message: hiddenPersona ? trimmed : payload,
+					...(hiddenPersona ? { agentMessage: payload } : {}),
+				});
+				if (!result.accepted) {
+					showToast(result.error || t("agentInvoke.errorTitle"), 4000, "error");
+					return false;
+				}
+				return true;
+			} catch (error) {
+				showToast(error instanceof Error ? error.message : String(error), 4000, "error");
+				return false;
+			}
+		},
+		[activeProjectId, effectiveAgentBackend, projects, selectSessionCommand, showToast, store, upsertSession, workspaceChrome],
+	);
+
+	/**
+	 * 智能体「使用」：新建会话并绑定该智能体（会话页面复用）。
+	 *
+	 * 角色设定不预填、不显示：主进程在绑定的会话每次发送时把 systemPrompt 拼进
+	 * agentMessage（对 UI 隐藏，见 src/main/ipc/sessionIpc.ts 的 resolveSessionAgentInstruction），
+	 * 因此时间线里只有用户自己输入的内容。标题用智能体名，侧栏一眼可认。
+	 */
+	const handleAgentUseAgent = useCallback(
+		async (agent: AgentProfile): Promise<boolean> => {
+			const project = projects.find((candidate) => candidate.id === activeProjectId) ?? projects[0];
+			if (!project) {
+				showToast(t("agentMarket.useFailed", { error: t("feedback.ai.noProject") }), 4000, "error");
+				return false;
+			}
+			// 后端只允许 pi/dsh：acp 需要用户先点选外部 CLI，生图/生视频没有提示词 agent 语义。
+			const backend: AgentBackend = (agent.backend ?? effectiveAgentBackend) === "dsh" ? "dsh" : "pi";
+			try {
+				const title = `${agent.icon ? `${agent.icon} ` : ""}${agent.name}`.trim();
+				const session = await api.sessions.createDraft({
+					projectId: project.id,
+					title,
+					backend,
+					...(agent.model && backend === "pi" ? { model: agent.model } : {}),
+				});
+				upsertSession(session);
+				// 先绑定再打开：打开瞬间用户就可能发送，绑定必须已落盘（主进程按会话查角色设定）。
+				await api.agentProfiles.bindSession({ sessionId: session.id, agentId: agent.id });
+				selectSessionCommand(project.id, session.id, false);
+				workspaceChrome.registerOpenSession(session.id, "permanent");
+				showToast(t("agentMarket.usedAgent", { name: agent.name }), 2600);
+				return true;
+			} catch (error) {
+				showToast(t("agentMarket.useFailed", { error: error instanceof Error ? error.message : String(error) }), 5000, "error");
+				return false;
+			}
+		},
+		[activeProjectId, effectiveAgentBackend, projects, selectSessionCommand, showToast, upsertSession, workspaceChrome],
+	);
+
+	/**
+	 * 系统级划词浮窗的「发送到 PiDeck」：把浮窗里的文本追加到当前会话输入框。
+	 * 没有已选会话（引导页）时落到引导页草稿，行为与手动粘贴一致。
+	 */
+	useEffect(() => {
+		return api.selectionTool.onInserted(({ text }) => {
+			const trimmed = text.trim();
+			if (!trimmed) return;
+			const targetSessionId = currentSessionId ?? GUIDE_BOOTSTRAP_SESSION_ID;
+			const existing = store.get(sessionDraftByIdAtom)[targetSessionId] ?? "";
+			setSessionDraft({ sessionId: targetSessionId, value: existing ? `${existing}\n\n${trimmed}` : trimmed });
+			showToast(t("selectionTool.inserted"), 2400);
+		});
+	}, [currentSessionId, setSessionDraft, showToast, store]);
+
+	// 页面式工作区（定时任务 / 智能体）与会话共用同一条 Tab 栏：用户点侧栏切会话/项目时
+	// 只让页面「失活」（页面 Tab 与搜索/编辑状态保留），否则会出现「点了另一个会话，
+	// 页面还盖在上面」的错觉（与 HostPluginPageOverlay 同约定；区别是它直接收起插件页）。
+	const workspacePageScopeRef = useRef<string | undefined>(undefined);
+	useEffect(() => {
+		const scope = `${activeProjectId ?? ""}|${currentSessionId ?? ""}`;
+		if (workspacePageScopeRef.current === undefined) {
+			workspacePageScopeRef.current = scope;
+			return;
+		}
+		if (scope === workspacePageScopeRef.current) return;
+		workspacePageScopeRef.current = scope;
+		deactivateWorkspacePage();
+	}, [activeProjectId, currentSessionId, deactivateWorkspacePage]);
+
+	// 会话列同一时刻只呈现一层页面：打开工作区页面时收起页面式插件面板
+	// （两者都占 absolute inset-0，叠在一起会互相遮挡，且插件伪 Tab 无法再被点开）。
+	useEffect(() => {
+		if (activeWorkspacePage && hostPluginPanel) setHostPluginPanel(null);
+	}, [activeWorkspacePage, hostPluginPanel, setHostPluginPanel]);
+
 	/** 侧栏/分支打开：选中成功后按 preview|permanent 登记 Tab */
 	const openSidebarSessionByIdWithTab = useCallback(
 		async (projectId: string, sessionId: string, tabMode: "preview" | "permanent" = "permanent") => {
@@ -1453,6 +1609,8 @@ export function App() {
 				setSettingsLoaded(true);
 				setEnhanceModel(next.enhanceModel ?? null);
 				setEnhanceIncludeContext(next.enhanceIncludeContext === true);
+				setPromptSuggestionEnabled(next.promptSuggestionEnabled !== false);
+				setPromptSuggestionModel(next.promptSuggestionModel ?? null);
 				piUpdate.setCustomPiPath(next.customPiPath ?? "");
 				if (!Object.values(next.externalEditors).some((editor) => editor.command)) {
 					void api.editors
@@ -2020,7 +2178,7 @@ export function App() {
 			},
 			importDirectorySessions: (project) => openDirectoryImport(project),
 			manageResources: (project) => setProjectResourcesProject(project),
-			manageAutomations: (projectId) => openAutomationModal(projectId),
+			manageAutomations: (projectId) => openAutomationPage(projectId),
 			toggleWorktree: toggleProjectWorktree,
 			copyPath: async (project) => {
 				await navigator.clipboard.writeText(project.path);
@@ -2362,12 +2520,39 @@ export function App() {
 				: undefined,
 		};
 	};
+	// Tab 右键菜单的运行控制：与 ⋯ 菜单共用策略函数，但按被右键的 sessionId 现算，
+	// 后台 Tab 也能直接停止/重启/重载。重载入口按后端分流（pi 热重载 / DSH host 重启）。
+	const buildTabsRunControl = (sessionId: string): SessionRunControlView | undefined => {
+		const capabilities = getSessionRunCapabilities(sessionId);
+		if (!capabilities) return undefined;
+		const target = getRuntimeTargetForSession(sessionId);
+		const record = store.get(sessionRecordsAtom)[sessionId];
+		return {
+			capabilities,
+			isStopping: Boolean(stoppingAgentId && stoppingAgentId === target?.agentId),
+			isRestarting: Boolean(target?.agentId && restartingAgentId === target.agentId) || activatingSessionId === sessionId,
+			isReloading: reloadingSessionId === sessionId,
+			reloadMode: resolveSessionReloadMode(record?.backend),
+			onAction: (action) => void runSessionControl(sessionId, action),
+		};
+	};
 	// ⋯ 菜单（当前会话）与 Tab 右键菜单（被右键的 Tab）共用同一工厂，闸门语义一致。
 	const tabsSessionActions = currentSessionId ? buildTabsSessionActions(currentSessionId) : undefined;
 
 	useEffect(() => {
 		if (settings.navigationMode === "simple" && workspaceChrome.previewSessionTabId) workspaceChrome.promotePreview(workspaceChrome.previewSessionTabId);
 	}, [settings.navigationMode, workspaceChrome.previewSessionTabId, workspaceChrome.promotePreview]);
+
+	// 会话 Tab 栏里的页面式工作区 Tab：标题固定走 i18n（不是会话、不参与自动会话标题），
+	// 激活态只由 activeWorkspacePage 决定；关闭即卸载页面（切会话只是失活）。
+	const workspacePageTabItems: WorkspacePageTabItem[] = openWorkspacePageIds.map((pageId) => ({
+		id: pageId,
+		title: t(pageId === "automation" ? "automation.title" : "agentMarket.title"),
+		icon: pageId === "automation" ? Clock : Bot,
+		active: activeWorkspacePage === pageId,
+		onSelect: () => openWorkspacePage(pageId),
+		onClose: () => closeWorkspacePage(pageId),
+	}));
 
 	const sessionTabsProps = {
 		tabs: workspaceChrome.sessionTabIds,
@@ -2414,15 +2599,18 @@ export function App() {
 		runControl: currentSessionId
 			? {
 					capabilities: getSessionRunCapabilities(currentSessionId),
-					isStopping: stoppingAgentId === activeAgentId,
+					isStopping: Boolean(stoppingAgentId && stoppingAgentId === activeAgentId),
 					isRestarting: restartingAgentId === activeAgentId || activatingSessionId === currentSessionId,
 					isReloading: reloadingSessionId === currentSessionId,
+					reloadMode: resolveSessionReloadMode(currentSessionRecord?.backend),
 					// 「复制 Agent ID」用：与上面的 isStopping 同源判定（activeAgentId 即当前会话绑定的进程实例）
 					agentId: activeAgentId,
 					onCloseAgent: activeAgentId ? () => requestCloseAgentForSession(currentSessionId) : undefined,
 					onAction: (action: SessionRunAction) => void runSessionControl(currentSessionId, action),
 				}
 			: undefined,
+		// Tab 右键：按被右键的 Tab 现算运行控制（后台 Tab 也能停止/重启/热重载）。
+		contextRunControl: buildTabsRunControl,
 		// 会话代理（网络代理）入口：与侧栏会话菜单同源，打开同一个弹框。
 		// 仅在有当前会话时给出；弹框内自行判断 DSH 等宿主差异并给出「下次启动生效」提示。
 		// ACP 隐藏：会话代理只在 pi spawn 时消费（AgentManager.resolveSessionProxy），
@@ -2464,6 +2652,45 @@ export function App() {
 		[setBranchByProject],
 	);
 
+	// 工具开关上收会话 Tab 栏（原右侧悬浮工具条入口的唯一挂载点）：
+	// 草稿纸 / 终端 / 外部编辑器，与抽屉开关同排。
+	// 终端按钮绑定 owner（agent 或项目），不再要求 agent 已激活；
+	// web 预览 / 无可用目标（纯聊天无项目）时隐藏，避免指向无处可开的终端。
+	const sessionToolActions: SessionToolAction[] = [
+		{
+			id: "scratch",
+			label: t("scratchPad.openTooltip"),
+			icon: <Pencil size={14} />,
+			active: scratchPad.isOpen,
+			onClick: () => scratchPad.toggle(),
+		},
+		...(!isLanWeb && terminalTarget
+			? [
+					{
+						id: "terminal",
+						label: t("app.terminal"),
+						icon: <Terminal size={14} />,
+						active: terminalOpen,
+						onClick: () => {
+							setTerminalOpenForOwner(!terminalOpen);
+						},
+					},
+				]
+			: []),
+		{
+			id: "editors",
+			label: t("app.openWithEditor"),
+			icon: <Code size={14} />,
+			active: editorsOpen,
+			onClick: (e) => {
+				const projectPath = activeAgent?.cwd || (activeProject && !isChatProject(activeProject) ? activeProject.path : null);
+				// 无项目目录也允许打开：编辑器入口在气泡内禁用并提示，
+				// 文件管理器不依赖项目（空路径由主进程回退用户主目录）
+				const anchor = adjustMenuPos(e.currentTarget.getBoundingClientRect().left - 4, e.currentTarget.getBoundingClientRect().bottom + 4, 240, 240);
+				workspace.openExternalEditorChooser(projectPath || "", anchor);
+			},
+		},
+	];
 	const sessionPaneServices = useMemo(
 		() => ({
 			simpleNavigation: settings.navigationMode === "simple",
@@ -2475,6 +2702,18 @@ export function App() {
 			onPreviewImage: setPreviewImage,
 			abortAgent,
 			restartActiveAgent,
+			getSessionRunCapabilities,
+			runSessionControl,
+			// 会话头部「⋯」菜单（原 Tab 栏「⋯」）：会话操作 / 代理 / 工具开关按本栏 sessionId 现算。
+			requestCloseAgentForSession,
+			getSessionMenu: (sessionId: string) => ({
+				sessionActions: buildTabsSessionActions(sessionId),
+				toolActions: sessionToolActions,
+				onOpenProxySetting: getSessionRecord(sessionId)?.backend !== "acp" ? () => setProxyDialogSessionId(sessionId) : undefined,
+			}),
+			stoppingAgentId,
+			activatingSessionId,
+			reloadingSessionId,
 			openProviderLogin,
 			runCreateSessionDraft: async () => {
 				await createSessionDraftWithTab();
@@ -2554,6 +2793,11 @@ export function App() {
 			queueFlushBySessionRef,
 			restartActiveAgent,
 			restartingAgentId,
+			getSessionRunCapabilities,
+			runSessionControl,
+			stoppingAgentId,
+			activatingSessionId,
+			reloadingSessionId,
 			openProviderLogin,
 			resendUserMessage,
 			sessionDurationByAgent,
@@ -2659,46 +2903,6 @@ export function App() {
 	}));
 	const workbenchEditorTabs = [...(simpleMode || !workbenchHasGitDiff ? fileTabs : []), ...(workbenchHasGitDiff && gitDrawerDiff ? [{ id: `git-diff:${gitDrawerDiff.filePath}`, label: gitDrawerDiff.label, title: gitDrawerDiff.filePath, active: true }] : [])];
 
-	// 工具开关上收会话 Tab 栏（原右侧悬浮工具条入口的唯一挂载点）：
-	// 草稿纸 / 终端 / 外部编辑器，与抽屉开关同排。
-	// 终端按钮绑定 owner（agent 或项目），不再要求 agent 已激活；
-	// web 预览 / 无可用目标（纯聊天无项目）时隐藏，避免指向无处可开的终端。
-	const sessionToolActions: SessionToolAction[] = [
-		{
-			id: "scratch",
-			label: t("scratchPad.openTooltip"),
-			icon: <Pencil size={14} />,
-			active: scratchPad.isOpen,
-			onClick: () => scratchPad.toggle(),
-		},
-		...(!isLanWeb && terminalTarget
-			? [
-					{
-						id: "terminal",
-						label: t("app.terminal"),
-						icon: <Terminal size={14} />,
-						active: terminalOpen,
-						onClick: () => {
-							setTerminalOpenForOwner(!terminalOpen);
-						},
-					},
-				]
-			: []),
-		{
-			id: "editors",
-			label: t("app.openWithEditor"),
-			icon: <Code size={14} />,
-			active: editorsOpen,
-			onClick: (e) => {
-				const projectPath = activeAgent?.cwd || (activeProject && !isChatProject(activeProject) ? activeProject.path : null);
-				// 无项目目录也允许打开：编辑器入口在气泡内禁用并提示，
-				// 文件管理器不依赖项目（空路径由主进程回退用户主目录）
-				const anchor = adjustMenuPos(e.currentTarget.getBoundingClientRect().left - 4, e.currentTarget.getBoundingClientRect().bottom + 4, 240, 240);
-				workspace.openExternalEditorChooser(projectPath || "", anchor);
-			},
-		},
-	];
-
 	// ── 命令面板（Ctrl/Cmd+P）────────────────────────────────────────────
 	//
 	// 与会话搜索（Ctrl+F / MorphingSearch）刻意分成两条链路：那边搜「项目/会话」实体
@@ -2742,12 +2946,14 @@ export function App() {
 		<SessionTabsBar
 			{...sessionTabsProps}
 			simple={simpleMode}
-			// 插件页占据会话区时，会话 Tab 不得显示选中态（当前呈现的不是会话）
-			currentSessionId={hostPluginPageTab ? undefined : currentSessionId}
-			pluginTab={simpleMode ? null : hostPluginPageTab}
-			// 点任意会话 Tab（含当前 Tab，sessionId 不变的场景）也要收起插件页；
-			// Overlay 的 scope 变化兑底只覆盖「切到别的会话」这一分支。
+			// 页面（插件页 / 定时任务 / 智能体）占据会话区时，会话 Tab 不得显示选中态（当前呈现的不是会话）
+			currentSessionId={activeWorkspacePage || hostPluginPageTab ? undefined : currentSessionId}
+			pageTabs={workspacePageTabItems}
+			pluginTab={simpleMode || activeWorkspacePage ? null : hostPluginPageTab}
+			// 点任意会话 Tab（含当前 Tab，sessionId 不变的场景）也要让出页面：插件页直接收起，
+			// 工作区页面只失活（Tab 保留，切回来状态还在）；Overlay 的 scope 变化兜底只覆盖「切到别的会话」。
 			onSelect={(sessionId) => {
+				deactivateWorkspacePage();
 				hostPluginPageTab?.onClose();
 				workspaceChrome.selectTab(sessionId);
 			}}
@@ -2806,6 +3012,15 @@ export function App() {
 				<div className="relative flex h-full min-h-0 min-w-0 flex-col">
 					{chatPaneSessionNode}
 					<HostPluginPageOverlay projectId={activeProject?.id} sessionId={currentSessionId} />
+					{/* 页面式工作区（定时任务 / 智能体）：会话 Tab 栏里的专属页面 Tab，覆盖会话列；
+					    关闭 Tab 才卸载，失活时 hidden 保留页面内状态 */}
+					<AutomationPage
+						active={activeWorkspacePage === "automation"}
+						onViewSession={(projectId, sessionId) => {
+							void openSidebarSessionByIdWithTab(projectId, sessionId, "permanent");
+						}}
+					/>
+					<AgentMarketPage active={activeWorkspacePage === "agents"} onUseAgent={handleAgentUseAgent} />
 				</div>
 			}
 			content={workbenchContentNode}
@@ -3388,12 +3603,8 @@ export function App() {
 					{minimaxImportProject && <ImportOverlayHost kind="minimax" project={minimaxImportProject} controller={minimaxImportController} onClose={() => setMinimaxImportProject(null)} />}
 					{directoryImportProject && <ImportOverlayHost kind="directory" project={directoryImportProject} controller={directoryImportController} onClose={() => setDirectoryImportProject(null)} />}
 
-					{/* 定时任务与自动化管理中心全功能弹窗（模态呈现，不覆盖会话工作区） */}
-					<AutomationModal
-						onViewSession={(projectId, sessionId) => {
-							void openSidebarSessionByIdWithTab(projectId, sessionId, "permanent");
-						}}
-					/>
+					{/* 划词工具：全局唯一挂载点（划选浮出按钮 + 原地工具栏） */}
+					<SelectionToolHost onSendToSession={handleAgentSendToSession} />
 
 					{/* 并行问询结果弹框（AskPanel）：独立匿名会话的结果展示，根级渲染 */}
 					<AskPanelOverlay />

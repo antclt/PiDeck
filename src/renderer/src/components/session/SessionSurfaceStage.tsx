@@ -1,11 +1,15 @@
 import { CircleArrowDown } from "lucide-react";
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAtomValue } from "jotai";
 import { selectAtom } from "jotai/utils";
 import type { SessionTimelineController } from "../../hooks/useSessionTimelineController";
 import type { SessionMessageTimelineProps } from "./SessionMessageTimeline";
 import { SessionMessageTimeline } from "./SessionMessageTimeline";
 import { outlineItemsBySessionIdAtomFamily, sessionHistoryMutationOverlayBySessionIdAtomFamily } from "../../atoms";
+import { isPendingRailItemId, mergeOutlineRailItems, pendingEntryIdOf } from "./timeline/outlineRailTicks";
+import { useSessionOutlineDirectory } from "../../hooks/useSessionOutlineDirectory";
+import { formatTime, summarizeMessage } from "../app/AppUtils";
+import { replaceExpandedRefBlocksWithLabels } from "../../../../shared/expandedRefBlocks";
 import { Button } from "../ui-shadcn/button";
 import { chatContentWidthStyle } from "./chatContentWidth";
 import { t, type TranslationKey } from "../../i18n";
@@ -27,17 +31,65 @@ const HISTORY_OVERLAY_COPY: Record<string, TranslationKey> = {
 /**
  * 中栏表面：只承载对话时间线。轨迹复盘已迁到右侧抽屉独立 tab。
  */
-export function SessionSurfaceStage(props: { sessionId: string; sessionTimeline: SessionTimelineController; timelineProps: Omit<SessionMessageTimelineProps, "sessionId" | "controller">; isRestarting: boolean }) {
-	const { sessionId, sessionTimeline, timelineProps, isRestarting } = props;
+export function SessionSurfaceStage(props: { sessionId: string; sessionTimeline: SessionTimelineController; timelineProps: Omit<SessionMessageTimelineProps, "sessionId" | "controller">; isRestarting: boolean; isReloading?: boolean }) {
+	const { sessionId, sessionTimeline, timelineProps, isRestarting, isReloading = false } = props;
 	// Assistant streaming rebuilds the derived array; equal user checkpoints should not rerender the rail.
 	const outlineItemsAtom = useMemo(() => selectAtom(outlineItemsBySessionIdAtomFamily(sessionId), (items) => items, areOutlineRailItemsEqual), [sessionId]);
 	const outlineItems = useAtomValue(outlineItemsAtom);
+	// 索引目录补齐「已加载消息之外」的用户检查点；未加载项点击后连续补页再跳转。
+	const directory = useSessionOutlineDirectory(sessionId, outlineItems.length);
+	// 目录项 → 导轨卡片：标题用索引预览（与已加载标题同一套归一，加载前后是同一句话），
+	// 时间与已加载项同一格式化口（此前误塞原始 ISO）。
+	const directoryRailItems = useMemo(
+		() =>
+			directory.map((entry) => ({
+				entryId: entry.entryId,
+				title: entry.preview ? summarizeMessage(replaceExpandedRefBlocksWithLabels(entry.preview)) : t("outline.turnFallback", { index: entry.turnOrdinal + 1 }),
+				time: entry.timestamp ? formatTime(Date.parse(entry.timestamp)) : "",
+			})),
+		[directory],
+	);
+	const railItems = useMemo(() => mergeOutlineRailItems(outlineItems, directoryRailItems), [outlineItems, directoryRailItems]);
+	const [pendingEntryId, setPendingEntryId] = useState<string | undefined>(undefined);
+	const [pendingAttempts, setPendingAttempts] = useState(0);
+	const pendingRailJump = useCallback(
+		(id: string) => {
+			if (!isPendingRailItemId(id)) {
+				sessionTimeline.jumpToMessage(id);
+				return;
+			}
+			setPendingAttempts(0);
+			setPendingEntryId(pendingEntryIdOf(id));
+		},
+		[sessionTimeline],
+	);
+	// 补页循环：每轮等已加载条数变化再决定继续；最多 7 次请求，到目标即停。
+	useEffect(() => {
+		if (!pendingEntryId) return;
+		const loaded = outlineItems.find((item) => item.entryId === pendingEntryId);
+		if (loaded) {
+			setPendingEntryId(undefined);
+			sessionTimeline.jumpToMessage(loaded.id);
+			return;
+		}
+		if (pendingAttempts >= 7) {
+			setPendingEntryId(undefined);
+			return;
+		}
+		const timer = setTimeout(() => {
+			setPendingAttempts((current) => current + 1);
+			sessionTimeline.loadMoreMessages("button");
+		}, 60);
+		return () => clearTimeout(timer);
+	}, [pendingEntryId, pendingAttempts, outlineItems, sessionTimeline]);
 	const mutationKind = useAtomValue(sessionHistoryMutationOverlayBySessionIdAtomFamily(sessionId));
-	const overlayVisible = isRestarting || Boolean(mutationKind);
-	const overlayLabel = isRestarting ? t("app.restarting") : mutationKind ? t(HISTORY_OVERLAY_COPY[mutationKind] ?? "message.historyOverlay.mutating") : t("app.restarting");
+	// 热重载（扩展/技能）不重启进程、也不改会话文件，但它会重建扩展运行时；
+	// 只转小按钮时用户看不出会话侧有任何变化，所以同样落一层「正在重载」遮罩。
+	const overlayVisible = isRestarting || isReloading || Boolean(mutationKind);
+	const overlayLabel = isReloading ? t("message.historyOverlay.reloadingResources") : isRestarting ? t("app.restarting") : mutationKind ? t(HISTORY_OVERLAY_COPY[mutationKind] ?? "message.historyOverlay.mutating") : t("app.restarting");
 	return (
 		<div className="relative h-full min-h-0">
-			<ConversationOutline className="session-outline-pane" timelineRef={sessionTimeline.timelineRef} onTimelineWheel={sessionTimeline.scrollTimelineBy} items={outlineItems} onJump={sessionTimeline.jumpToMessage} />
+			<ConversationOutline className="session-outline-pane" timelineRef={sessionTimeline.timelineRef} onTimelineWheel={sessionTimeline.scrollTimelineBy} items={railItems} onJump={pendingRailJump} />
 			<SessionMessageTimeline sessionId={sessionId} controller={sessionTimeline} {...timelineProps} />
 
 			{sessionTimeline.showScrollToBottom && (

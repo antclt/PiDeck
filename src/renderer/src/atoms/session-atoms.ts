@@ -11,7 +11,6 @@ import { findLastUserMessageIndex, shouldRefreshOutlineForRuntimeUpsert } from "
 import { releaseSessionOutlineProjection } from "./outlineProjectionCache";
 import { sameProjectSessionList } from "../utils/sessionRecordIdentity";
 import { resolveStreamingTextUpdate, shouldHoldLiveText, shouldReleaseHeldLiveText } from "../utils/liveTextHandoff";
-import type { BridgeOverlayOptions, BridgeTone, BridgeUINode, BridgeUpdate } from "../../../shared/types/bridge";
 
 /**
  * 渲染层会话消息缓存上限（LRU）。
@@ -91,8 +90,12 @@ export type SessionMessageCacheEntry = {
 	outlineRevision?: number;
 	/** Last user-message index in messages (not the separate history prefix). */
 	outlineLastUserIndex?: number;
-	/** Present only for paged historical reads; runtime owns an authoritative full snapshot. */
-	page?: Pick<SessionMessagePage, "total" | "nextBefore">;
+	/**
+	 * Present only for paged historical reads; runtime owns an authoritative full snapshot.
+	 * indexVersion/nextBeforeEntryId 也要留住：disk → runtime 交接时，磁盘页会整体转成
+	 * history 前缀，版本用来判断它是否与当前会话文件同代，游标用来继续向更早翻页。
+	 */
+	page?: Pick<SessionMessagePage, "total" | "nextBefore" | "nextBeforeEntryId" | "indexVersion">;
 	/** 激活显示窗口起点（runtime 数组下标空间，2026-08 激活分页）；>0 表示窗口前还有历史。 */
 	windowStart?: number;
 	/**
@@ -125,32 +128,6 @@ export type SessionRuntimeUiState = {
 	runtimeGeneration: number;
 	requests: Record<string, SessionRuntimeUiRequestState>;
 	widgets: Record<string, string[]>;
-	/**
-	 * GUI 扩展桥的落点树（§8.2 A 组）。
-	 *
-	 * 键是落点 id（`header` / `footer` / `editor` / `widget:<key>` / `gui:<slot>:<key>`），
-	 * 值是桥推来的 UINode 树（null 表示该落点无内容 → 渲染层不占位）。
-	 * 与 `widgets` 分开存放：`widgets` 是 pi 原生的字符串行 widget（保持原路，§14.4），
-	 * 这里是桥接管的组件树，两者互不干扰。
-	 */
-	bridgeTargets?: Record<string, BridgeUINode | null>;
-	/** 桥的状态栏条目（多 key 共存）。 */
-	bridgeStatus?: Record<string, string>;
-	/**
-	 * 状态条目的语义色（与 `bridgeStatus` 同键，值是桥侧量化后的 tone）。
-	 *
-	 * 与文本分开存：`bridgeStatus` 保持「key → 净文本」的原语义（老读者/老断言不受影响），
-	 * tone 是**增量**能力 —— 桥侧把 ANSI 配色量化成 tone 后单独下发（方案 B：保色）。
-	 */
-	bridgeStatusTone?: Record<string, BridgeTone>;
-	/** 桥的流式状态行（setWorkingMessage / setWorkingVisible / setWorkingIndicator）；`tone` 是文案的语义色。 */
-	bridgeWorking?: { message?: string; tone?: BridgeTone; visible?: boolean; frames?: string[] };
-	/** 桥的会话标题（setTitle）。 */
-	bridgeTitle?: string;
-	/** 桥的折叠思考块标签（setHiddenThinkingLabel）。 */
-	bridgeThinkingLabel?: string;
-	/** 桥的覆盖层（ctx.gui.custom 的 overlay / modal）。 */
-	bridgeOverlays?: Record<string, { node: BridgeUINode; options?: BridgeOverlayOptions }>;
 	notification?: {
 		requestId: string;
 		message: string;
@@ -368,6 +345,19 @@ export const bumpNewTurnCollapseTickAtom = atom(null, (_get, set, sessionId: str
 export const newTurnCollapseTickBySessionIdAtomFamily = atomFamily((sessionId: string) => selectAtom(newTurnCollapseTickByIdAtom, (map) => map[sessionId] ?? 0, Object.is));
 
 /**
+ * 「发送置顶动画进行中」信号（sessionId 键）。
+ *
+ * 发送那一刻时间线会把刚发出的消息平滑滚到视口顶部（SendScrollPositioner）。同一窗口内
+ * 若「新一轮折叠」把上一轮执行过程收掉，上方内容会整体骤缩数百到上千 px；动画中的视口
+ * 补偿只能把 scrollTop 瞬间往回带，于是用户看到的是「先向上再向下」的来回滚动（2026-10
+ * 反馈）。折叠信号因此等动画结束再消费（见 useTurnExecution），两者分属 controller 与
+ * TurnRow 两棵子树，用 atom 传递而不是互相 import。
+ */
+export const sendPinAnimatingByIdAtom = atom<Record<string, boolean>>({});
+
+export const sendPinAnimatingBySessionIdAtomFamily = atomFamily((sessionId: string) => selectAtom(sendPinAnimatingByIdAtom, (map) => map[sessionId] === true, Object.is));
+
+/**
  * run 级「执行过程展开状态」的跨挂载记忆条目。
  * atTick 记录写入时的 newTurnCollapseTick：新一轮只压过早于它的旧记忆，
  * 从新一轮之后再次写入的记忆必须在下一次重挂载时恢复（用户明确的最新意愿）。
@@ -448,15 +438,6 @@ export const currentSessionRuntimeUiAtom = atom((get) => {
 	const sessionId = get(currentSessionIdAtom);
 	return sessionId ? get(sessionRuntimeUiByIdAtom)[sessionId] : undefined;
 });
-
-/**
- * 按会话取 GUI 扩展桥的落点树（§8.2 A 组）。
- *
- * `selectAtom` + `Object.is`：外层 map 在任何会话推帧时整体重建，但**本会话**的落点表
- * 引用不变 → 别的会话推帧不会拖着本栏重渲。落点组件只订自己要渲染的那个 sessionId
- * （AGENTS.md「多实例必须按 session 订阅」，PR 评审 §2.3）。
- */
-export const sessionBridgeUiFamily = atomFamily((sessionId: string) => selectAtom(sessionRuntimeUiByIdAtom, (map) => map[sessionId]?.bridgeTargets, Object.is));
 
 export const currentSessionMessagesAtom = atom((get) => {
 	const sessionId = get(currentSessionIdAtom);
@@ -761,17 +742,41 @@ function messageEntryKey(message: ChatMessage): string {
 }
 
 /**
+ * 历史前缀是否仍与当前会话文件同代。
+ *
+ * 版本串是 `mtime:size`（主进程 stat 与分页 indexVersion 同口径）。不能用「字符串不等」
+ * 判异代：pi 每落盘一条消息都会**追加**写入，用户发一条消息 size 就会变——按不等即丢弃，
+ * 已加载的历史前缀会在发送瞬间整段消失（2026-10-21 用户诊断包：历史只在回复结束后才回来）。
+ * 同一分支的追加只会让文件变大；只有体积变小才说明历史被重写（压缩把历史换成摘要），
+ * 此时前缀下标空间失效必须丢弃。版本缺失/无法解析一律按异代处理（宁缺勿串）。
+ */
+export function isSameSessionFileGeneration(prefixVersion: string | undefined, flushVersion: string | undefined): boolean {
+	if (!flushVersion) return true;
+	if (!prefixVersion) return false;
+	if (prefixVersion === flushVersion) return true;
+	const readSize = (version: string): number | undefined => {
+		const size = Number(version.slice(version.lastIndexOf(":") + 1));
+		return Number.isFinite(size) ? size : undefined;
+	};
+	const prefixSize = readSize(prefixVersion);
+	const flushSize = readSize(flushVersion);
+	if (prefixSize === undefined || flushSize === undefined) return false;
+	// 追加：文件只会变大（mtime 变化不影响同代判定）。变小 = 被重写。
+	return flushSize >= prefixSize;
+}
+
+/**
  * 运行时窗口段更新时调和 disk 历史前缀（2026-08 激活分页）：
- * - fileVersion 变化（压缩/外部改写 JSONL）→ 前缀绝对下标空间失效，整段丢弃；
+ * - 文件被重写（体积变小，见 isSameSessionFileGeneration）→ 前缀绝对下标空间失效，整段丢弃；
  * - 窗口右移与前缀尾部重叠 → 按 entryId 去重（重叠部分以运行时窗口段为权威）；
  * - slideOut（trim 窗口右移滑出的旧窗口头部轮次）→ 并入前缀尾部，避免锚点轮空洞。
  */
 function reconcileHistoryPrefix(history: SessionMessageCacheEntry["history"], segment: ChatMessage[], fileVersion?: string, slideOut?: ChatMessage[]): SessionMessageCacheEntry["history"] {
 	if (!history && (!slideOut || slideOut.length === 0)) return undefined;
-	// fileVersion 变化 = 文件被改写（编辑/删除/压缩/外部变更）。此时前缀内容可能已失效：
+	// 文件被重写（编辑/删除/压缩/外部变更导致体积缩小）时前缀内容可能已失效：
 	// 编辑落在窗口外时，全量 flush 只带尾部窗口段，若旧前缀（尤其无 version 的异常前缀）
-	// 继续拼回去，用户会看到「编辑了不刷新，再编一条才看到」。故 version 缺失或不同都丢弃。
-	if (fileVersion && (!history?.version || fileVersion !== history.version)) {
+	// 继续拼回去，用户会看到「编辑了不刷新，再编一条才看到」。普通追加不算重写。
+	if (fileVersion && !isSameSessionFileGeneration(history?.version, fileVersion)) {
 		history = undefined;
 	}
 	const segmentKeys = new Set(segment.map(messageEntryKey));
@@ -802,6 +807,35 @@ function reconcileHistoryPrefix(history: SessionMessageCacheEntry["history"], se
 		...(nextBeforeEntryId !== undefined ? { nextBeforeEntryId } : {}),
 		version: history?.version ?? fileVersion,
 		messages,
+	};
+}
+
+/**
+ * disk → runtime 交接：把「激活前时间线正在显示的磁盘页」转成 history 前缀。
+ *
+ * 为什么必须显式转（2026-10-21 用户诊断包）：会话停着时时间线读的是磁盘页
+ * （source="disk"，历史就在 messages 里，没有 history 字段）。发送新消息触发 runtime
+ * 恢复后，主进程按「激活分页」只下发尾部窗口段，全量 flush 分支只拿 current.history
+ * 调和前缀——disk 条目没有这个字段，窗口段就整段替换掉磁盘历史，分页游标（page.nextBefore）
+ * 同时丢失，表现为「历史全部消失、上滑没有加载入口」，只能等本轮结束后的下一次读盘才回来。
+ * 首个 flush 若是 0 条空窗口（后台历史还没读出来 / 读取失败，日志里的
+ * "Agent recent history file load failed"），画面更会直接变成空会话。
+ *
+ * 版本守卫：version 取磁盘页的 indexVersion（与主进程 flush 的 fileVersion 同口径
+ * mtime:size）。普通追加（发消息落盘）不算重写；只有文件被重写（体积缩小，压缩把历史
+ * 换成摘要）时 reconcileHistoryPrefix 才整段丢弃——宁缺勿串。磁盘页没有版本时不冒险
+ * 保留（无法证明同代）。
+ */
+function historyPrefixFromDiskPage(current: SessionMessageCacheEntry | undefined): SessionMessageCacheEntry["history"] | undefined {
+	if (!current || current.source !== "disk" || current.messages.length === 0) return undefined;
+	const version = current.page?.indexVersion;
+	if (!version) return undefined;
+	return {
+		messages: current.messages,
+		// 磁盘页到顶（null）就是到顶；否则沿用它的续页游标，上滑还能继续往更早翻。
+		nextBefore: current.page?.nextBefore ?? null,
+		...(current.page?.nextBeforeEntryId ? { nextBeforeEntryId: current.page.nextBeforeEntryId } : {}),
+		version,
 	};
 }
 
@@ -1029,104 +1063,6 @@ function tryReleaseLiveThinkingAfterHistory(get: Getter, set: Setter, sessionId:
 	disposeStreamingThinkingFamily(liveId);
 }
 
-/**
- * 应用一帧 GUI 扩展桥更新（§8.2 A 组）。
- *
- * 纯函数：入参 base 与 payload，返回新 state。桥的每种更新只动自己那个字段，
- * 其余字段原样保留 —— 保证「只追加」（§7.4）在渲染层也成立。
- *
- * 未知 `update.type` 一律忽略（前向兼容：桥升级后推的新类型不会让旧 PiDeck 崩）。
- */
-function applyBridgeUpdate(base: SessionRuntimeUiState, payload: Record<string, unknown>, revision: number): SessionRuntimeUiState {
-	// 桥帧的 ANSI 净化**不在这里**：桥侧出帧口（`pi-deck-gui-bridge-runtime.ts` 的净化通路）
-	// 与主进程边界（`AgentManager.handleBridgeUpdate` → `shared/bridgeText.ts`）各收一次，
-	// 本函数拿到的已经是净文本，因此渲染层各分支不需要各自 stripAnsi。
-	const update = payload.bridgeUpdate as BridgeUpdate | undefined;
-	if (!update || typeof update !== "object" || typeof update.type !== "string") return { ...base, revision };
-
-	switch (update.type) {
-		case "ui-update": {
-			const targetId = typeof update.targetId === "string" ? update.targetId : "";
-			if (!targetId) return { ...base, revision };
-			const targets = { ...(base.bridgeTargets ?? {}) };
-			if (update.node === null || update.node === undefined) {
-				// 落点无内容 → 删键（渲染层据此「不占位」，§8.4 C）
-				delete targets[targetId];
-			} else {
-				targets[targetId] = update.node;
-			}
-			return { ...base, revision, bridgeTargets: targets };
-		}
-		case "status": {
-			const key = typeof update.key === "string" ? update.key : "";
-			if (!key) return { ...base, revision };
-			const status = { ...(base.bridgeStatus ?? {}) };
-			const tones = { ...(base.bridgeStatusTone ?? {}) };
-			if (update.text === undefined || update.text === null) {
-				delete status[key];
-				delete tones[key];
-			} else {
-				status[key] = String(update.text);
-				// tone 是可选增量：扩展这一帧没给颜色就把旧色撤掉，避免「改了文案还在用旧色」
-				if (update.tone) tones[key] = update.tone;
-				else delete tones[key];
-			}
-			return { ...base, revision, bridgeStatus: status, bridgeStatusTone: tones };
-		}
-		case "working": {
-			// 字段是「可选增量」语义：只覆盖本次带来的字段，未带的保持原值
-			const next = { ...(base.bridgeWorking ?? {}) };
-			if ("message" in update) {
-				next.message = update.message;
-				next.tone = update.tone;
-			}
-			if ("visible" in update) next.visible = update.visible;
-			if ("frames" in update) next.frames = update.frames;
-			return { ...base, revision, bridgeWorking: next };
-		}
-		case "title":
-			return { ...base, revision, bridgeTitle: typeof update.title === "string" ? update.title : undefined };
-		case "thinking-label":
-			return { ...base, revision, bridgeThinkingLabel: typeof update.label === "string" ? update.label : undefined };
-		case "overlay": {
-			const elementId = typeof update.elementId === "string" ? update.elementId : "";
-			if (!elementId) return { ...base, revision };
-			const overlays = { ...(base.bridgeOverlays ?? {}) };
-			if (update.node === null || update.node === undefined) delete overlays[elementId];
-			else overlays[elementId] = { node: update.node, options: update.options };
-			return { ...base, revision, bridgeOverlays: overlays };
-		}
-		case "overlay-update": {
-			const elementId = typeof update.elementId === "string" ? update.elementId : "";
-			if (!elementId || !update.node) return { ...base, revision };
-			const overlays = { ...(base.bridgeOverlays ?? {}) };
-			const existing = overlays[elementId];
-			overlays[elementId] = { node: update.node, options: existing?.options };
-			return { ...base, revision, bridgeOverlays: overlays };
-		}
-		case "resync": {
-			// 全量重推的**清场**（PR 评审 §3）：桥收到 resync 请求后紧接着会把当前还活着的
-			// 贡献逐条推回来（`pi-deck-gui-bridge-runtime.ts` 的 resync()：先推 resync，
-			// 再推 status / working / title / thinking-label / 各落点 / ctx.gui 贡献）。
-			// 只加 revision 的话，扩展撤回某个贡献却没推 `node: null` 时，旧节点会永久留在渲染层。
-			// 保留 requests / widgets（RPC 链路的状态，不在桥的重推范围内）。
-			return {
-				...base,
-				revision,
-				bridgeTargets: undefined,
-				bridgeOverlays: undefined,
-				bridgeStatus: undefined,
-				bridgeStatusTone: undefined,
-				bridgeWorking: undefined,
-				bridgeTitle: undefined,
-				bridgeThinkingLabel: undefined,
-			};
-		}
-		default:
-			return { ...base, revision };
-	}
-}
-
 function applySessionRuntimeUiEvent(current: SessionRuntimeUiState | undefined, event: SessionRuntimeEvent, payload: Record<string, unknown>, bindingChanged: boolean): SessionRuntimeUiState | undefined {
 	const base =
 		!current || bindingChanged || current.agentId !== event.agentId || current.runtimeGeneration !== event.runtimeGeneration
@@ -1198,10 +1134,6 @@ function applySessionRuntimeUiEvent(current: SessionRuntimeUiState | undefined, 
 		if (request.widgetLines?.length) widgets[widgetKey] = request.widgetLines;
 		else delete widgets[widgetKey];
 		return { ...base, revision, widgets };
-	}
-	// GUI 扩展桥：一帧 UI 更新 → 写进 bridgeTargets / bridgeStatus / …（§8.2 A 组）
-	if (request.method === "bridge:update") {
-		return applyBridgeUpdate(base, payload, revision);
 	}
 	if (!["select", "confirm", "input", "editor", "batch_ask"].includes(request.method)) {
 		return { ...base, revision };
@@ -1489,9 +1421,11 @@ export const applySessionRuntimeEventAtom = atom(null, (get, set, event: Session
 					// 长度校验：合并后本地长度 = 卡片 + (totalLength − W)；不满足说明增量已失序
 					// （漏事件/trim 未校准），丢弃等待全量
 					if (merged.length === totalLength - W + cardCount) {
+						// 宿主快照不含「尚未写进会话日志的乐观用户消息」（模型解析失败等），
+						// 增量替换会把气泡挤掉——按公共前缀接回原位（见 pendingUserMessage）。
 						set(cacheSessionMessagesAtom, {
 							sessionId: event.sessionId,
-							messages: merged,
+							messages: carryPendingUserMessages(current.messages, merged),
 							source: "runtime",
 							windowStart: W,
 							outlineChanged,
@@ -1510,13 +1444,17 @@ export const applySessionRuntimeEventAtom = atom(null, (get, set, event: Session
 				// trim 窗口右移的滑出轮：主进程把旧窗口头部（不再被新窗口覆盖的轮次）
 				// 随全量 flush 下发，并入历史前缀，避免「锚点轮从视口消失且翻不回来」
 				const slideOut = Array.isArray(payload.slideOut) ? (payload.slideOut as ChatMessage[]) : undefined;
+				// disk → runtime 交接：窗口段替换 messages 之前，先把磁盘页转成历史前缀
+				// （见 historyPrefixFromDiskPage 注释）。已是 runtime 前缀的照旧走 reconcile。
 				set(cacheSessionMessagesAtom, {
 					sessionId: event.sessionId,
-					messages: segment,
+					// 全量替换同样可能丢掉尚未被宿主记录的乐观用户消息（DSH 模型解析失败
+					// 会让回合直接 error 收口，用户消息从未进日志）——接回原位，避免「消息被吞」。
+					messages: carryPendingUserMessages(current?.messages ?? [], segment),
 					source: "runtime",
 					windowStart: payloadWindowStart,
 					cardCount,
-					history: reconcileHistoryPrefix(current?.history, segment, fileVersion, slideOut),
+					history: reconcileHistoryPrefix(current?.history ?? historyPrefixFromDiskPage(current), segment, fileVersion, slideOut),
 					...(typeof payloadWindowStartFilePos === "number" ? { windowStartFilePos: payloadWindowStartFilePos } : {}),
 				});
 			}
@@ -1544,9 +1482,6 @@ export const applySessionRuntimeEventAtom = atom(null, (get, set, event: Session
 			[event.sessionId]: nextUi,
 		});
 	}
-	// 应用级桥落点不在这里记任何锚点：它们由「当前聚焦会话」供给（见 BridgeSlot 的
-	// useBridgeSessionId）。曾经用「最后一个推过 bridge:update 的会话」回落，多会话并发
-	// 推帧会变成「后写者为胜」，会话删除/关闭后还会留下悬空 id（PR 评审 §3）。
 	// 2026-08 治理：无实质变化的推送跳过 atom 写入（emitStreamingStatePatch 在
 	// 流式期间每 50ms 一推且状态相同）。sessionRuntimeByIdAtom 的订阅者含整个
 	// timeline，新对象写入 = 100/s 级全量重渲染（O(消息数) + 分配压力），
@@ -1716,13 +1651,18 @@ export const removeSessionStateAtom = atom(null, (get, set, sessionId: string) =
 	// atomFamily 无自动 GC：会话删除时必须同步 remove 各 family 实例，否则长期泄漏（2026-10）。
 	liveThinkingIdBySessionIdAtomFamily.remove(sessionId);
 	newTurnCollapseTickBySessionIdAtomFamily.remove(sessionId);
+	sendPinAnimatingBySessionIdAtomFamily.remove(sessionId);
 	runStepsVisibleMemoryBySessionIdAtomFamily.remove(sessionId);
 	processGroupOpenBySessionIdAtomFamily.remove(sessionId);
 	streamingTextBySessionIdAtomFamily.remove(sessionId);
 	sessionMessageCacheBySessionIdAtomFamily.remove(sessionId);
-	// 桥落点按会话订阅（PR 评审 §3）：实例同样跟着会话删除一起释放。
-	sessionBridgeUiFamily.remove(sessionId);
 	set(streamingTextByIdAtom, (prevMap) => {
+		if (!(sessionId in prevMap)) return prevMap;
+		const nextMap = { ...prevMap };
+		delete nextMap[sessionId];
+		return nextMap;
+	});
+	set(sendPinAnimatingByIdAtom, (prevMap) => {
 		if (!(sessionId in prevMap)) return prevMap;
 		const nextMap = { ...prevMap };
 		delete nextMap[sessionId];
@@ -1750,3 +1690,83 @@ export const removeSessionStateAtom = atom(null, (get, set, sessionId: string) =
  * 生命周期短暂（点击→pane 挂载），切走即由消费方/写入方覆盖。
  */
 export const pendingMessageJumpAtom = atom<{ sessionId: string; messageId: string } | null>(null);
+
+/**
+ * 发送期「乐观用户消息」接管规则（纯函数，可单测）。
+ *
+ * 背景（2026-10 用户反馈「DSH 会话失败后发送的消息被吞了」）：
+ * 渲染层发出提示词时会先往缓存塞一条乐观用户气泡（id = requestId），等宿主把它写进
+ * 会话日志后再由运行时快照替换成正式消息。DSH 的模型解析发生在回合的 prepareRequest
+ * 阶段（@deepseek-ai/dsh-agent-loop：step() 先 prepareRequest，再 append user/message），
+ * 早于把用户消息写进日志——模型配置错误（pi-ai provider … has no configured model）
+ * 时回合直接以 error 收口，用户消息从未落盘：随后的快照里没有它，乐观气泡被整段替换，
+ * 界面上只剩一条错误诊断，用户刚发出的内容凭空消失。
+ *
+ * 规则：快照到达时，把「带 pending 标记、且快照里没有等价用户消息」的气泡接回原位；
+ * 一旦快照出现同文本用户消息 = 宿主已记录（或用户重发成功），标记气泡让位给正式消息。
+ * 标记只由发送路径写入，宿主投影永远不带它，因此不会把正式消息误判成乐观气泡。
+ *
+ * 放在本模块而不是 utils：session-atoms 是本仓库被最多手写 vm 加载器编译的模块，
+ * 新增相对 import 会让这些加载器整片 MODULE_NOT_FOUND（见 AGENTS「禁止手写 vm 加载器」）。
+ */
+
+/** ChatMessage.meta 键：待宿主确认的乐观用户消息。 */
+export const PENDING_USER_MESSAGE_META = "pendingUserMessage";
+
+function normalizeText(text: string | undefined): string {
+	return (text ?? "").replace(/\s+/gu, " ").trim();
+}
+
+/** 是否为本模块管理的乐观用户消息（必须是 user + 标记 + 可对账的 requestId）。 */
+export function isPendingUserMessage(message: ChatMessage): boolean {
+	if (message.role !== "user") return false;
+	if (message.meta?.[PENDING_USER_MESSAGE_META] !== true) return false;
+	return typeof message.meta?.requestId === "string" && message.meta.requestId.length > 0;
+}
+
+/**
+ * 用宿主快照替换窗口段时，把尚未被宿主记录的用户消息接回原位。
+ *
+ * - 快照里已有同 id 或同文本用户消息 → 视为已确认，不再保留（避免重复气泡）；
+ * - 否则插在「旧消息与新快照的公共前缀」之后——错误卡/回答通常正是那段新内容，
+ *   用户消息因此仍排在它前面，顺序与用户实际发送时一致。
+ */
+export function carryPendingUserMessages(previous: readonly ChatMessage[], next: readonly ChatMessage[]): ChatMessage[] {
+	const pendingAt = previous.flatMap((message, index) => (isPendingUserMessage(message) ? [{ message, index }] : []));
+	if (pendingAt.length === 0) return [...next];
+	const nextIds = new Set(next.map((message) => message.id));
+	const confirmedTexts = new Set(next.filter((message) => message.role === "user").map((message) => normalizeText(message.text)));
+	// 锚点：旧序列里排在这条气泡之后的第一个普通消息（快照里的错误卡/回答）。
+	// 后续快照虽然又追加了新内容，气泡仍然插在同一个锚点之前，位置不会随刷新漂移。
+	const insertions: Array<{ index: number; message: ChatMessage }> = [];
+	for (const { message, index } of pendingAt) {
+		if (nextIds.has(message.id) || confirmedTexts.has(normalizeText(message.text))) continue;
+		const anchor = previous.slice(index + 1).find((candidate) => !isPendingUserMessage(candidate) && nextIds.has(candidate.id));
+		const anchorIndex = anchor ? next.findIndex((candidate) => candidate.id === anchor.id) : -1;
+		insertions.push({ index: anchorIndex >= 0 ? anchorIndex : commonPrefixLength(previous, next), message });
+	}
+	if (insertions.length === 0) return [...next];
+	insertions.sort((left, right) => left.index - right.index);
+	const result: ChatMessage[] = [];
+	let cursor = 0;
+	for (const insertion of insertions) {
+		const at = Math.max(insertion.index, cursor);
+		result.push(...next.slice(cursor, at), insertion.message);
+		cursor = at;
+	}
+	result.push(...next.slice(cursor));
+	return result;
+}
+
+/** 旧序列（去掉乐观气泡）与新快照的公共前缀长度：兜底插入点。 */
+function commonPrefixLength(previous: readonly ChatMessage[], next: readonly ChatMessage[]): number {
+	const base = previous.filter((message) => !isPendingUserMessage(message));
+	let prefix = 0;
+	while (prefix < base.length && prefix < next.length && base[prefix].id === next[prefix].id) prefix += 1;
+	return prefix;
+}
+
+/** 投递被拒/从未送达：撤掉该次请求的乐观气泡（文字已由 restoreRejectedPrompt 回填草稿）。 */
+export function removePendingUserMessages(messages: readonly ChatMessage[], requestId: string): ChatMessage[] {
+	return messages.filter((message) => !(message.id === requestId && isPendingUserMessage(message)));
+}

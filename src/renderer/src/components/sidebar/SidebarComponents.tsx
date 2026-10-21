@@ -27,8 +27,9 @@ import {
 	PinOff,
 	Play,
 	Plus,
-	Power,
 	PanelRight,
+	ListRestart,
+	RefreshCcw,
 	Radio,
 	RefreshCw,
 	RotateCw,
@@ -41,7 +42,7 @@ import {
 } from "lucide-react";
 import { t } from "../../i18n";
 import { copyTextWithCopiedNotice } from "../../utils/clipboardNotice";
-import { canRunSessionAction, type SessionRunAction, type SessionRunCapabilities } from "../../utils/sessionCommands";
+import { canRunSessionAction, type SessionReloadMode, type SessionRunAction, type SessionRunCapabilities } from "../../utils/sessionCommands";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui-shadcn/alert-dialog";
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
 import { X } from "lucide-react";
@@ -56,7 +57,6 @@ import { SessionSourceBadge, SessionBackendMark, SessionChannelMark, SideTaskMar
 import { Checkbox } from "../ui-shadcn/checkbox";
 import { Input } from "../ui-shadcn/input";
 import { Label } from "../../components/ui-shadcn/label";
-import { BridgeGuiSlot, useBridgeSessionId } from "../bridge/BridgeSlot";
 import { SESSION_FILTER_PILLS, filterSessionsByPills, pillsPresentIn, type SessionFilterPill } from "../../sessionFilterPills";
 import { archivedDshWorkspaceLabel, archivedPiWorkspaceLabel, filterArchivedDshByFamily, filterArchivedPiByFamily, managerArchivedDshLabel, managerArchivedRowKey, mergeManagerArchived, sessionManagerRowKey, sessionWorkspaceLabel, worktreeFamilyProjects, type ManagerArchivedRow } from "../../sessionManagerModel";
 
@@ -83,8 +83,8 @@ export function SessionManagerModal(props: {
 	onRename: (session: SessionSummary) => void;
 	onExport: (session: SessionSummary) => void;
 	onDelete: (sessions: SessionSummary[]) => void;
-	/** 归档会话（可恢复）；运行中的会话由主进程拒绝并抛错 */
-	onArchive: (sessions: SessionSummary[]) => void;
+	/** 归档会话（可恢复）；运行中的会话由主进程拒绝，失败已由 action 层 toast、弹窗保持打开 */
+	onArchive: (sessions: SessionSummary[]) => Promise<void>;
 	/** 恢复归档会话 */
 	onUnarchive: (session: SessionSummary) => Promise<void>;
 	/** 列出已归档会话（含归档前原始路径，供按家族归属过滤） */
@@ -152,6 +152,22 @@ export function SessionManagerModal(props: {
 			setSelectAll(next.size === filteredSessions.length);
 			return next;
 		});
+	};
+
+	// 批量归档选中行（与删除同粒度）；运行中会话由主进程拒绝并交给 action 层 toast。
+	// 归档成功后弹窗保持打开：用户通常要连续清理或接着切到归档视图核对，关掉等于丢上下文。
+	const handleArchiveSelected = () => {
+		const toArchive = props.sessions.filter((s) => selected.has(s.id));
+		if (toArchive.length === 0) return;
+		void props
+			.onArchive(toArchive)
+			// 失败原因已由 action 层 toast；这里消费 rejection，避免落到全局「未处理异常」。
+			// 成败都清空选中：已归档行不能再留着勾选，批量计数也不能虚高。
+			.catch(() => undefined)
+			.finally(() => {
+				setSelected(new Set());
+				setSelectAll(false);
+			});
 	};
 
 	const handleDeleteSelected = () => {
@@ -250,16 +266,7 @@ export function SessionManagerModal(props: {
 						</div>
 						<div className="flex items-center gap-2">
 							{!showArchived && selected.size > 0 && (
-								<Button
-									variant="outline"
-									size="sm"
-									className="h-auto gap-1 border border-border-subtle px-3 py-1 text-caption font-medium text-text-tertiary transition-all duration-fast hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
-									onClick={() => {
-										// 批量归档选中行（与删除同粒度）；运行中会话由主进程拒绝并提示
-										const toArchive = props.sessions.filter((s) => selected.has(s.id));
-										if (toArchive.length > 0) props.onArchive(toArchive);
-									}}
-								>
+								<Button variant="outline" size="sm" className="h-auto gap-1 border border-border-subtle px-3 py-1 text-caption font-medium text-text-tertiary transition-all duration-fast hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" onClick={handleArchiveSelected}>
 									{t("sessionManager.archiveSelected", { count: selected.size })}
 								</Button>
 							)}
@@ -501,8 +508,6 @@ export function SessionManagerModal(props: {
  * 触发器不可见但提供定位矩形（Radix dropdown-menu 无独立 Anchor 部件）。
  */
 function MenuShell(props: { x: number; y: number; onClose: () => void; className?: string; children: ReactNode }) {
-	// GUI 扩展桥：右键菜单是应用级单实例 chrome，由当前聚焦会话的 pi 进程供给内容（不做回落）。
-	const bridgeSessionId = useBridgeSessionId();
 	return (
 		<DropdownMenu
 			open
@@ -513,12 +518,6 @@ function MenuShell(props: { x: number; y: number; onClose: () => void; className
 			<DropdownMenuTrigger aria-hidden tabIndex={-1} style={{ position: "fixed", left: props.x, top: props.y, width: 0, height: 0, padding: 0, border: 0, background: "transparent", pointerEvents: "none" }} />
 			<DropdownMenuContent align="start" side="bottom" className={props.className}>
 				{props.children}
-				{/* GUI 扩展桥：右键菜单扩展项落点（ctx.gui.setContextMenuItem）。
-				    追加在菜单原有条目**之后** —— 不插进原有分组、不改原有顺序（§7.4 只追加）。
-				    计划指出仓库**无统一菜单项注册表**；这里选 MenuShell 作宿主，
-				    因为它已是侧边栏各右键菜单的共享壳（会话/项目/草稿菜单都走它）。
-				    无贡献时返回 null，不占位、不留多余分隔线。 */}
-				<BridgeGuiSlot sessionId={bridgeSessionId} slot="context.menu" className="flex flex-col" />
 			</DropdownMenuContent>
 		</DropdownMenu>
 	);
@@ -760,6 +759,8 @@ export type SidebarRunControl = {
 	isStopping?: boolean;
 	isRestarting?: boolean;
 	isReloading?: boolean;
+	/** 重载入口语义：pi 热重载 / DSH host 重启 / 不提供。 */
+	reloadMode?: SessionReloadMode;
 	/**
 	 * 当前绑定运行实例的 agentId（pi 每次 spawn 随机生成）。
 	 * 只服务于「复制 Agent ID」：排查问题时要把它贴进日志/工单，而它与会话记录 id
@@ -786,7 +787,9 @@ function SidebarRunControlItems(props: { runControl: SidebarRunControl }) {
 
 	const primaryDisabled = disabled || !canRunSessionAction(capabilities, "start");
 	const abortDisabled = disabled || !canRunSessionAction(capabilities, "abort");
-	const reloadDisabled = disabled || !canRunSessionAction(capabilities, "reload");
+	const reloadMode = runControl.reloadMode ?? "none";
+	const reloadEntryDisabled = disabled || !canRunSessionAction(capabilities, "reloadResources") || Boolean(runControl.isReloading);
+	const reloadDisabled = disabled || !canRunSessionAction(capabilities, "reload") || Boolean(runControl.isReloading);
 
 	const primaryLabel = runControl.isRestarting ? t("app.restarting") : capabilities.primaryAction === "start" ? t("menu.startAgent") : t("menu.restartSession");
 
@@ -815,10 +818,18 @@ function SidebarRunControlItems(props: { runControl: SidebarRunControl }) {
 					{t("menu.stopAnswer")}
 				</span>
 			</DropdownMenuItem>
-			<DropdownMenuItem disabled={reloadDisabled} style={reloadDisabled ? { opacity: 0.4 } : undefined} onSelect={() => runControl.onAction("reload")}>
+			{reloadMode === "resources" ? (
+				<DropdownMenuItem disabled={reloadEntryDisabled} style={reloadEntryDisabled ? { opacity: 0.4 } : undefined} title={t("menu.reloadResourcesHint")} onSelect={() => runControl.onAction("reloadResources")}>
+					<span className="inline-flex items-center gap-2">
+						<RefreshCcw className={cn("size-3.5", runControl.isReloading && "animate-pideck-spin")} aria-hidden="true" />
+						{runControl.isReloading ? t("app.reloading") : t("menu.reloadResources")}
+					</span>
+				</DropdownMenuItem>
+			) : null}
+			<DropdownMenuItem disabled={reloadDisabled} style={reloadDisabled ? { opacity: 0.4 } : undefined} title={t("menu.reloadMessagesHint")} onSelect={() => runControl.onAction("reload")}>
 				<span className="inline-flex items-center gap-2">
-					<RefreshCw className="size-3.5" aria-hidden="true" />
-					{t("menu.reloadSession")}
+					<ListRestart className={cn("size-3.5", runControl.isReloading && "animate-pulse")} aria-hidden="true" />
+					{runControl.isReloading ? t("app.reloading") : t("menu.reloadMessages")}
 				</span>
 			</DropdownMenuItem>
 			{/* 复制 Agent ID：与运行控制同组——它标识的就是「当前绑定的那个进程实例」，

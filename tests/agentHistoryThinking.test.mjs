@@ -161,8 +161,6 @@ function loadAgentManagerModule() {
 				if (specifier === "./derivedSubagents") return { deriveToolSubagentEntries: () => [] };
 				// 会话 JSONL 流式行扫描器：真实加载（索引重建已改为流式，不再整文件 readFile）
 				if (specifier === "../sessions/jsonlLineStream") return loadTsCommonJs("src/main/sessions/jsonlLineStream.ts");
-				// 会话文件汇总纯函数：本测试不覆盖，空实现满足 AgentManager 依赖契约
-				if (specifier === "../../shared/fileChanges") return { collectLatestTurnFileChanges: () => [] };
 				// 其余相对 import 交给统一沙箱按源文件目录解析（生产新增本地模块不再整片 MODULE_NOT_FOUND）
 				return resolveUnstubbedRequire(specifier);
 			},
@@ -236,8 +234,6 @@ function loadAgentManagerModule() {
 				if (specifier === "./SessionFileEditor") {
 					return { SessionFileEditor: class {} };
 				}
-				// 会话文件汇总纯函数：本测试不覆盖，空实现满足 AgentManager 依赖契约
-				if (specifier === "../../shared/fileChanges") return { collectLatestTurnFileChanges: () => [] };
 				if (specifier === "./SessionHistoryReader") return historyReaderModule.exports;
 				if (specifier === "./sessionEntryIds") {
 					return {

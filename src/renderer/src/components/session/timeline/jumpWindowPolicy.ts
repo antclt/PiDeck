@@ -24,6 +24,29 @@ export type JumpPendingAction =
 	| { kind: "wait" }
 	| { kind: "give-up" };
 
+/**
+ * 目标消息无法挂载时的落点选择（折中：落到包含它的那一轮，而不是报「跳不到」）。
+ *
+ * 输入是「已渲染行」的起始消息下标（每行取其子树里最靠前的消息下标），目标是命中的
+ * 消息下标。优先挑「起始下标 ≤ 目标」里最靠后的一行（目标所在轮，或它前面最近的轮），
+ * 没有更早的行才退到最早的一行。返回 entries 下标；-1 = 没有可用落点。
+ *
+ * 为什么需要：已完成轮的执行过程默认折叠，折叠区里的中间回答/工具节点整块卸载，
+ * 扩窗（只多挂轮次）永远挂不出这些节点；旧实现扩到上限就弹「未能跳转」，
+ * 用户看到的是「搜到了却点不过去」（2027-02 反馈）。
+ */
+export function resolveJumpFallbackEntry(entries: ReadonlyArray<{ index: number }>, targetIndex: number): number {
+	if (entries.length === 0) return -1;
+	let before = -1;
+	let earliest = -1;
+	for (let position = 0; position < entries.length; position += 1) {
+		const index = entries[position].index;
+		if (index <= targetIndex && (before < 0 || index > entries[before].index)) before = position;
+		if (earliest < 0 || index < entries[earliest].index) earliest = position;
+	}
+	return before >= 0 ? before : earliest;
+}
+
 export function resolveJumpPendingAction(input: {
 	targetInLoadedData: boolean;
 	hasMorePages: boolean;

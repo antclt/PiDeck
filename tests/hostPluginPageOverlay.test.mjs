@@ -28,7 +28,7 @@ test("session tabs bar renders plugin pseudo-tab when provided", () => {
 
 test("app dismisses plugin page when any session tab clicked", () => {
 	// currentSessionId 置 undefined：插件页打开时会话 Tab 不显示选中态
-	assert.match(appSource, /currentSessionId=\{hostPluginPageTab \? undefined : currentSessionId\}/, "插件页打开时必须向 Tab 栏传 currentSessionId=undefined");
+	assert.match(appSource, /currentSessionId=\{[^}]*hostPluginPageTab\s*\?\s*undefined\s*:\s*currentSessionId\}/, "插件页/工作区页面打开时必须向 Tab 栏传 currentSessionId=undefined");
 	// 点任意会话 Tab（含当前 Tab）先收起插件页再正常选中
 	assert.match(appSource, /hostPluginPageTab\?\.onClose\(\);[\s\S]*?workspaceChrome\.selectTab\(sessionId\)/, "会话 Tab 点击必须先收起插件页再选中会话");
 });

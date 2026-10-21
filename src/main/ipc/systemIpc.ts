@@ -155,6 +155,11 @@ function parseMcpScopeRequest(value: unknown): McpScopeRequest {
 }
 
 export type SystemIpcDeps = {
+	/**
+	 * 设置保存后的主进程级副作用钩子（系统级划词全局快捷键等需要随设置即时重注册的能力）。
+	 * 与 refreshShortcutBindings 同一时机：保存即生效，无需重启。
+	 */
+	afterSettingsUpdate?: (settings: AppSettings) => void;
 	piLocator: PiLocator;
 	settingsStore: SettingsStore;
 	configManager: ConfigManager;
@@ -1667,6 +1672,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		if ("shortcuts" in patch) {
 			refreshShortcutBindings(settings);
 		}
+		// 主进程级副作用钩子：系统级划词快捷键等需要按新设置重注册（见 index.ts 装配）。
+		deps.afterSettingsUpdate?.(settings);
 		// Git 可执行文件路径：立即同步给 git 子进程解析器，保存后无需重启即生效。
 		if ("gitExecutablePath" in patch) {
 			setConfiguredGitPath(settings.gitExecutablePath);
@@ -2393,6 +2400,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			...(typeof input.secretAccessKey === "string" ? { secretAccessKey: input.secretAccessKey } : {}),
 			// Sub2API 面板 JWT（可选）：透传后模板构建才会挂 panelBalance 追加余额请求。
 			...(typeof input.panelJwt === "string" ? { panelJwt: input.panelJwt } : {}),
+			// 配套 refresh token：JWT 过期时测试按钮也能就地续期（不落盘）。
+			...(typeof input.panelRefreshToken === "string" ? { panelRefreshToken: input.panelRefreshToken } : {}),
 			...(typeof input.timeoutSecs === "number" ? { timeoutSecs: input.timeoutSecs } : {}),
 		});
 		void appLogger.info("config", "Usage probe tested", {

@@ -9,6 +9,7 @@ import { findImageGenProvider } from "../../../shared/imageGenConfig";
 import { findVideoGenProvider } from "../../../shared/videoGenConfig";
 import { resolveEnhanceTargetModel } from "../../../shared/enhanceModelPreference";
 import { collectPromptEnhanceContext } from "../utils/promptEnhanceContext";
+import { sessionCommandsRefreshTickAtom } from "../atoms/session-commands-atoms";
 import type { ImageGenMeta } from "../../../shared/types/imagegen";
 import type { VideoGenMeta } from "../../../shared/types/videogen";
 import {
@@ -17,6 +18,8 @@ import {
 	effectiveAgentBackendAtom,
 	enhanceModelAtom,
 	enhanceIncludeContextAtom,
+	promptSuggestionEnabledAtom,
+	promptSuggestionModelAtom,
 	imageGenConfigAtom,
 	projectByIdAtomFamily,
 	sessionAttachmentsBySessionIdAtomFamily,
@@ -76,8 +79,11 @@ import { COMPOSER_IMAGE_MAX_BYTES, ComposerImageError, dataUrlToFile, getClipboa
 import { PASTE_TO_FILE_MIN_CHARS } from "../rendererUtils";
 import { resolveBackendSwitchDefaults } from "../utils/backendSwitchDefaults";
 import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeAcpToolPreference, readWelcomeBackendPreference, readWelcomeDshModelPreference, readWelcomeModelPreference, resolveGuidePageBackend, WELCOME_BACKEND_KEY } from "../utils/chatSessionBootstrap";
+import { expandSessionReferences } from "../sending/outgoingExpansion";
 import { showNotice } from "../utils/notice";
 import { requireSessionCommand, toSessionRuntimeTarget } from "../utils/sessionCommands";
+import { collectReservedCommandNames, needsTemplateRefetch } from "../utils/reservedCommandNames";
+import { assembleTemplates, mergeRuntimeTemplates } from "../utils/templateCatalog";
 import { buildDraftResourceCommands, draftResourceCommandsForProject, selectComposerSuggestionCommands, standbyPreviewCommandsForProject, type DraftResourceCommandSnapshot, type StandbyPreviewCommandSnapshot } from "../utils/draftResourceCommands";
 import { isSessionRuntimeBusy, isUserFacingSessionStart } from "./useSessionTimelineController";
 import { truncateQuoteLabel } from "../components/session/composer/quoteChip";
@@ -88,6 +94,8 @@ import { useSessionSend, type EnqueuePromptSnapshot } from "./useSessionSend";
 const PASTE_FILE_CONTENT_MAX_BYTES = 2 * 1024 * 1024;
 import { useVoiceTranscription } from "./useVoiceTranscription";
 import { usePromptEnhance, type PromptEnhanceRequest } from "./usePromptEnhance";
+import { usePromptSuggestion } from "./usePromptSuggestion";
+import { isSessionTurnRunning } from "../utils/sessionActivityClock";
 import { resolveVoiceTranscriptionInsertion, type VoiceTranscriptionTarget } from "../utils/voiceTranscriptionInsert";
 
 /** 统一压缩结果 → 用户可见文案；所有分支都给文案（取消也要可见，见 classifyCompactError）。 */
@@ -165,6 +173,8 @@ export type UseSessionComposerControllerOptions = {
 	onCreateSession?: () => Promise<void>;
 	/** `/login` 拦截后打开登录供应商弹框；来自 SessionPaneServices。 */
 	onProviderLogin?: (providerId?: string) => void;
+	/** `/reload` 拦截后热重载 pi 资源（不写用户气泡）；来自 SessionPaneServices。 */
+	onReloadResources?: (target: SessionRuntimeTarget) => Promise<void>;
 	/** Passed through to useSessionSend.enqueue. */
 	enqueue?: (sessionId: string, snapshot: EnqueuePromptSnapshot) => boolean;
 	/** 「停止响应」时抑制排队消息自动投递；由 SessionPaneServices 注入 queue.suppressSessionQueueAutoDrain。 */
@@ -480,6 +490,8 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	const [imageGenOutputFormat, setImageGenOutputFormatState] = useState(DEFAULT_IMAGE_GEN_OUTPUT_FORMAT);
 	const [picker, setPicker] = useState<ComposerPickerKind | null>(null);
 	const [commands, setCommands] = useState<PiCommand[]>([]);
+	// 热重载后扩展/技能/提示词可能变化，但 runtime 身份不变；tick 强制重拉命令表。
+	const commandsRefreshTick = useAtomValue(sessionCommandsRefreshTickAtom);
 	const [draftResourceCommandSnapshot, setDraftResourceCommandSnapshot] = useState<DraftResourceCommandSnapshot>({ projectId: undefined, commands: [] });
 	const [standbyPreviewCommandSnapshot, setStandbyPreviewCommandSnapshot] = useState<StandbyPreviewCommandSnapshot>({ projectId: undefined, commands: [] });
 	const [files, setFiles] = useState<FileTreeNode[]>([]);
@@ -494,12 +506,27 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		loaded: false,
 		loading: false,
 	});
+	// 运行时模板正文按「agentId:generation」缓存键刷新：runtime 对象本身每次状态变更都会换
+	// 引用，直接进依赖会让模板表随每次流式状态变化重拉。
+	const runtimeTargetKey = runtime?.agentId && runtime.runtimeGeneration !== undefined ? `${runtime.agentId}:${runtime.runtimeGeneration}` : "";
 	const templateKey = `${sessionId}:${record?.projectPath ?? ""}`;
 	const [templateState, setTemplateState] = useState<{
 		key: string;
 		items: PromptTemplateInfo[];
 	}>({ key: templateKey, items: [] });
 	const templates = templateState.key === templateKey ? templateState.items : [];
+	/**
+	 * 发送期读取的模板清单（同步引用）。
+	 *
+	 * 为什么不能用 state：`loadTemplates` 内部 `setTemplateState` 之后要等下一次渲染，而
+	 * 「打开会话立刻发 /模板名」这一拍里发送路径读到的还是旧数组——展开器认不出模板名，
+	 * 消息原样发给 pi，模板名就丢了（2026-10 e2e 抓到的竞态）。这里由 `loadTemplates`
+	 * 同步写入，发送路径用 `getTemplates()` 读它。
+	 */
+	const templatesRef = useRef<PromptTemplateInfo[]>(templates);
+	/** 模板加载写入序列：并发加载时只让「最后发起」的那份写进 templatesRef。 */
+	const templateWriteSeqRef = useRef(0);
+	const templateWrittenSeqRef = useRef(0);
 	const [sendShortcut, setSendShortcut] = useState<"enter-send" | "ctrl-enter-send" | "shift-enter-send">("enter-send");
 	const [sessionReference, setSessionReference] = useState<SessionSummary | null>(null);
 	const [sessionReferenceSelections, setSessionReferenceSelections] = useState<Record<string, SessionReferenceSelection>>({});
@@ -628,37 +655,68 @@ export function useSessionComposerController(options: UseSessionComposerControll
 
 	const loadTemplates = useCallback(async () => {
 		const token = templateRequestGateRef.current.begin(templateKey);
-		const next: PromptTemplateInfo[] = [];
+		// 写入序号在**发起时**分配（不是在结束时）：结束时分配会让「切走前发起、切走后完成」
+		// 的加载拿到更大的序号，把上一个会话的模板表写进 templatesRef，随后该会话的发送会用
+		// 错项目的模板正文展开（跨会话污染）。发起顺序才代表新旧。
+		const sequence = ++templateWriteSeqRef.current;
+		let globalTemplates: PromptTemplateInfo[] = [];
+		let projectTemplates: PromptTemplateInfo[] = [];
 		try {
 			const globalResult = await desktopApi.prompts.list();
-			next.push(
-				...globalResult.templates.map((template) => ({
-					...template,
-					description: translateBuiltinPromptDescription(template),
-					argumentHint: parseArgumentHint(template.content),
-				})),
-			);
+			globalTemplates = globalResult.templates.map((template) => ({
+				...template,
+				description: translateBuiltinPromptDescription(template),
+				argumentHint: parseArgumentHint(template.content),
+			}));
 		} catch {
 			// Project templates remain usable when the global store is unavailable.
 		}
 		if (record?.projectId) {
 			try {
 				const projectResult = await desktopApi.prompts.listByProject(record.projectId);
-				next.push(
-					...projectResult.templates.map((template) => ({
-						...template,
-						argumentHint: parseArgumentHint(template.content),
-					})),
-				);
+				projectTemplates = projectResult.templates.map((template) => ({
+					...template,
+					argumentHint: parseArgumentHint(template.content),
+				}));
 			} catch {
 				// A project does not have to provide .pi/prompts.
 			}
+		}
+		// 同名以项目为准、禁用不进表——与 pi 的 rank + 去重规则一致（见 assembleTemplates）
+		let next: PromptTemplateInfo[] = assembleTemplates({ project: projectTemplates, global: globalTemplates });
+		// 来源 B：pi 实际加载的全部模板（含 npm 包声明的 pi.prompts）。缺了它，
+		// `/parallel-review` 这类包带模板只能交给 pi 展开，模板名不进会话文件，
+		// 时间线就还原不出 chip（2026-10 现场：运行中有 chip、暂停后变全文）。
+		const target = toSessionRuntimeTarget(sessionId, store.get(sessionRuntimeBySessionIdAtomFamily(sessionId)));
+		if (target) {
+			try {
+				const result = await desktopApi.sessions.listRuntimePromptTemplates(target);
+				if (result.ok) next = mergeRuntimeTemplates(next, result.value.value);
+			} catch {
+				// 读正文失败/进程换代：保留来源 A，行为退回「交给 pi 展开」
+			}
+		} else if (record?.projectId) {
+			// 草稿会话（还没绑定 runtime）没有 target：借 standby 池的命令表读同一份正文，
+			// 否则「打开会话立刻发 /模板名」这条消息只能交给 pi 展开，chip 当场丢失。
+			// 池未就绪/关闭时返回 null，行为退回来源 A。
+			try {
+				const templates = await desktopApi.sessions.draftPromptTemplates(record.projectId);
+				if (templates?.length) next = mergeRuntimeTemplates(next, templates);
+			} catch {
+				// 同上：预览失败不影响模板 A 与发送
+			}
+		}
+		// 发送期引用（templatesRef）不看 gate 的 current：并发加载时 gate 会作废较早的 token，
+		// 但那一份数据往往正是这次发送要的——按发起顺序，只让更新的那份覆盖已有的。
+		if (sequence >= templateWrittenSeqRef.current) {
+			templateWrittenSeqRef.current = sequence;
+			templatesRef.current = next;
 		}
 		if (templateRequestGateRef.current.isCurrent(token)) {
 			setTemplateState({ key: templateKey, items: next });
 		}
 		return next;
-	}, [record?.projectId, sessionId, templateKey]);
+	}, [record?.projectId, sessionId, store, templateKey, runtimeTargetKey]);
 
 	useEffect(() => {
 		liveDomDraftRef.current = { sessionId, value: draft };
@@ -831,7 +889,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		return () => {
 			current = false;
 		};
-	}, [isDshBackend, runtime?.agentId, runtime?.runtimeGeneration, sessionId]);
+	}, [isDshBackend, runtime?.agentId, runtime?.runtimeGeneration, sessionId, commandsRefreshTick]);
 
 	// Draft sessions have no Pi process to ask for get_commands. Discover the same local
 	// skills/prompts Pi will load; as soon as a runtime exists, its RPC list is authoritative.
@@ -892,12 +950,21 @@ export function useSessionComposerController(options: UseSessionComposerControll
 
 	useEffect(() => {
 		templateRequestGateRef.current.invalidate(templateKey);
+		templatesRef.current = [];
+		templateWrittenSeqRef.current = ++templateWriteSeqRef.current;
 		setTemplateState({ key: templateKey, items: [] });
 		void loadTemplates();
 	}, [loadTemplates, templateKey]);
 
 	const flatFiles = useMemo(() => flattenFiles(files), [files]);
 	const mergedCommands = useMemo(() => mergeCommands(commands), [commands]);
+	/**
+	 * 后端已接管的命令名（本地展开要避让）。用 ref 让发送路径读最新值：
+	 * 命令表是异步加载的，state 在「打开会话立刻发」这一拍还是空的。
+	 */
+	const reservedCommandNames = useMemo(() => collectReservedCommandNames(commands), [commands]);
+	const reservedCommandNamesRef = useRef<ReadonlySet<string>>(reservedCommandNames);
+	reservedCommandNamesRef.current = reservedCommandNames;
 	const validCommandNames = useMemo(() => new Set([...mergedCommands.map((command) => command.name), ...templates.map((template) => template.name)]), [mergedCommands, templates]);
 	const validFilePaths = useMemo(() => new Set(flatFiles.map((file) => file.relativePath)), [flatFiles]);
 	const validSessionRefs = useMemo(() => new Set(projectSessions.map((session) => session.name ?? session.filePath)), [projectSessions]);
@@ -1037,22 +1104,41 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		liveDomDraftRef.current = { sessionId, value: "" };
 	}, [sessionId]);
 
+	/**
+	 * 发送前补齐模板表：`/名称` 命中未知模板时补拉一次。
+	 *
+	 * 兜两类时机：runtime 刚绑定（模板表还没拉回来），以及**草稿会话的第一条消息**
+	 * （此刻还没有 runtime target，但项目的 standby 池能给出同一份清单）。
+	 * 两处都没有时保持原样，交给 pi 兜底展开。
+	 */
+	const ensureTemplatesForMessage = useCallback(
+		async (message: string) => {
+			const match = /^\/([^\s]+)/.exec(message.trim());
+			if (!match) return;
+			const name = match[1];
+			// 后端接管的命令（DSH host / pi 扩展 / 技能）永远不在模板表里：补拉只会白跑三趟
+			// IPC，而且它本来就不该被展开。
+			if (!needsTemplateRefetch(name, templatesRef.current, reservedCommandNamesRef.current)) return;
+			// 两条来源都在 loadTemplates 里：有 runtime 走运行时清单，草稿会话走 standby 预览。
+			// 两个都没有（无项目、池关闭）时重拉也没有意义。
+			const hasRuntime = Boolean(toSessionRuntimeTarget(sessionId, store.get(sessionRuntimeBySessionIdAtomFamily(sessionId))));
+			if (!hasRuntime && !record?.projectId) return;
+			// 补齐失败不影响发送本身（loadTemplates 内部各来源已各自兜错，这里再兜一层）
+			await loadTemplates().catch(() => undefined);
+		},
+		[loadTemplates, record?.projectId, sessionId, store],
+	);
+
 	const resolveSessionReferences = useCallback(
 		async (message: string) => {
-			let resolved = message;
-			const sessionsByLongestName = [...projectSessions].sort((left, right) => (right.name ?? right.filePath).length - (left.name ?? left.filePath).length);
-			for (const referencedSession of sessionsByLongestName) {
-				const sessionName = referencedSession.name ?? referencedSession.filePath;
-				const raw = `&${sessionName}`;
-				if (!resolved.toLowerCase().includes(raw.toLowerCase())) continue;
-				const escaped = raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-				const pattern = new RegExp(escaped, "gi");
-				const saved = sessionReferenceSelections[raw];
-				const selectedMessages = saved ? selectedSessionReferenceMessages(saved) : await desktopApi.sessions.readReferenceMessages(referencedSession.id);
-				const context = selectedMessages.map((item) => `[${item.role === "user" ? "User" : "Assistant"}]: ${item.content}`).join("\n");
-				resolved = resolved.replace(pattern, context ? `<referenced_session name="${sessionName}">\n${context}\n</referenced_session>` : "");
-			}
-			return resolved;
+			// 展开与保护区判定收口在 sending/outgoingExpansion（纯函数、可单测）：
+			// 引用块内的 `&会话名` 属于被引述的原文，不能当成真引用展开。
+			const targets = projectSessions.map((session) => ({ id: session.id, name: session.name ?? session.filePath }));
+			return await expandSessionReferences(message, targets, async (session) => {
+				const saved = sessionReferenceSelections[`&${session.name}`];
+				const selectedMessages = saved ? selectedSessionReferenceMessages(saved) : await desktopApi.sessions.readReferenceMessages(session.id);
+				return selectedMessages.map((item) => `[${item.role === "user" ? "User" : "Assistant"}]: ${item.content}`).join("\n");
+			});
 		},
 		[projectSessions, sessionReferenceSelections],
 	);
@@ -1085,8 +1171,13 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		sessionId,
 		sendPrompt: (input) => desktopApi.sessions.sendPrompt(input),
 		ensureSessionId,
-		templates,
+		getTemplates: () => templatesRef.current,
+		getReservedCommandNames: () => reservedCommandNamesRef.current,
+		ensureTemplates: ensureTemplatesForMessage,
 		prepareMessage: async (message) => {
+			// 模板表可能在 runtime 刚绑定/首次加载完成前是空的：命中未知 `/名称` 时补拉一次，
+			// 否则这条消息会退回「交给 pi 展开」，模板名不进会话文件（chip 随之丢失）。
+			await ensureTemplatesForMessage(message);
 			const resolved = await resolveSessionReferences(message);
 			// 条上暂停后 composer 仍可能停在目标模式：发送前先 resume，否则 host 不会续轮。
 			if (isDshBackend && mode === "goal") {
@@ -1104,6 +1195,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		onDraftMutation: markDraftMutation,
 		createNewSession: options.onCreateSession,
 		openProviderLogin: options.onProviderLogin,
+		reloadResources: options.onReloadResources,
 		compact: async (target, prompt) => {
 			await runManualCompact(target, prompt);
 		},
@@ -1482,12 +1574,32 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		[getPromptHistory, historyIndex, sessionId, setDraft, validSessionRefs],
 	);
 
+	// 输入预测的当前快照（声明在 onKeyDown 之前，但在下方预测 hook 之后赋值）：
+	// keydown 只读 ref，避免把「钩子返回值」塞进 useCallback 依赖造成每次渲染重建回调。
+	const suggestionRef = useRef<{ visible: boolean; accept: () => void; dismiss: () => void; acceptKey: (event: React.KeyboardEvent<HTMLDivElement>) => boolean } | null>(null);
+
 	const onKeyDown = useCallback(
 		(event: React.KeyboardEvent<HTMLDivElement>) => {
 			// IME 合成中一律不抢键：↑/↓ 是输入法选词、Esc 是取消合成、Enter 是确认候选。
 			// 放在候选菜单之前，保证菜单分支也走同一判定（TipTap 的 DOM 事件桥接没有
 			// nativeEvent，必须用共享判定口，不能只看 event.nativeEvent?.isComposing）。
 			if (isComposingKeyboardEvent(event)) return;
+
+			// 输入预测（ghost 文案）：Tab / → 采纳，Esc 忽略。只在空草稿可见，因此不会
+			// 与历史回溯、补全菜单、发送键冲突；先于其它分支拦截，避免 Tab 被默认焦点切换吃掉。
+			const ghost = suggestionRef.current;
+			if (ghost?.visible) {
+				if (ghost.acceptKey(event)) {
+					event.preventDefault();
+					ghost.accept();
+					return;
+				}
+				if (event.key === "Escape") {
+					event.preventDefault();
+					ghost.dismiss();
+					return;
+				}
+			}
 
 			if (suggestionsOpen && suggestionItems.length > 0) {
 				if (event.key === "ArrowDown") {
@@ -1688,12 +1800,14 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	// 目标模型优先级（resolveEnhanceTargetModel）：设置页指定的固定增强模型 >
 	// 会话记录 > 引导页点选 > 部署/主进程默认；引导页的 welcomeModel 存 localStorage，
 	// 这里不走 catalog 存在性校验——模型被删的边缘情况由主进程报 model-not-found，toast 可见。
-	const enhanceTarget = resolveEnhanceTargetModel({
-		configured: enhanceModelConfig,
+	// 增强与输入预测共用同一条优先级链，但各自的「固定模型」是独立设置项（enhanceModel /
+	// promptSuggestionModel）——预测每轮都发一次后台调用，常被单独指定成便宜的小模型。
+	const targetModelChain = {
 		recordModel: record?.model,
 		welcomeModel: (isDshBackend ? readWelcomeDshModelPreference() : readWelcomeModelPreference())?.model,
 		fallback: isDshBackend && dshDefault ? { provider: dshDefault.provider, modelId: dshDefault.model } : bootstrapDefaults?.model,
-	});
+	};
+	const enhanceTarget = resolveEnhanceTargetModel({ ...targetModelChain, configured: enhanceModelConfig });
 	const captureEnhanceRequest = useCallback((): PromptEnhanceRequest | null => {
 		if (!enhanceTarget) return null;
 		const draftSnapshot = liveDomDraftRef.current.sessionId === sessionId ? liveDomDraftRef.current.value : draft;
@@ -1720,6 +1834,26 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		captureRequest: captureEnhanceRequest,
 		applyText: applyEnhancedText,
 	});
+
+	// ===== 输入预测（回合结束后预测下一句输入，空输入框 ghost 展示）=====
+	// 与增强共用同一条优先级链（设置固定模型 > 会话模型 > 默认），但读的是独立的
+	// promptSuggestionModel 设置，并走独立侧车实例；
+	// 回合边界取 runtime 的权威 isTurnActive（agent_end），不用 isBusy（还含 compact 等中间态）。
+	// 采纳回填与增强同一条路径（applyEnhancedText：整体替换草稿 + 光标置尾 + 聚焦）。
+	const promptSuggestionEnabled = useAtomValue(promptSuggestionEnabledAtom);
+	const promptSuggestionModelConfig = useAtomValue(promptSuggestionModelAtom);
+	const suggestionTarget = resolveEnhanceTargetModel({ ...targetModelChain, configured: promptSuggestionModelConfig });
+	const suggestion = usePromptSuggestion({
+		scopeKey: sessionId,
+		enabled: promptSuggestionEnabled,
+		target: suggestionTarget,
+		turnRunning: isSessionTurnRunning(runtime?.state, runtime?.status),
+		// 用 hasContent 而不是 draft.length：纯空白、附件/粘贴文件也属于「有内容」，
+		// 否则预测会盖在已经放好附件的输入框上，Tab 还会把附件留下却把 ghost 当草稿采纳。
+		draftEmpty: !hasContent,
+		applyText: applyEnhancedText,
+	});
+	suggestionRef.current = suggestion;
 
 	/**
 	 * 大段粘贴文本 → 落盘 userData/paste-files + 附件栏 chip。
@@ -2259,6 +2393,8 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		busyDraftLocked,
 		voice,
 		enhance,
+		// 输入预测只对外暴露渲染所需的两个字段：文本与可见性（采纳/忽略走 keydown 内部）。
+		suggestion: { text: suggestion.text, visible: suggestion.visible },
 		editor: {
 			ref: editorRef,
 			caretRef,
@@ -2343,6 +2479,8 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			 */
 			canSendQuickMessage: !isStarting && !generatingImage && (!isDshBackend || runtime?.state?.modelRoutable !== false),
 			// 并行发送（拆分菜单）：当前草稿文本进独立 Ask 会话后台处理，成功后清空草稿。
+			// 上下文由 useAskPanel 按 originSessionId 自动生成（与队列面板共用同一口径），
+			// 这里只负责把来源会话传下去；不要在本入口另建一份 context，否则会再次分叉。
 			// 仅投递纯文本：并行问询不支持图片附件（与队列面板 onSendAsk 的 canAsk 判据一致），
 			// 带图时 ComposerSendControls 端按 canSendParallel=false 置灰。
 			canSendParallel: Boolean(draft.trim()) && attachments.length === 0 && !isStarting && !generatingImage && Boolean(effectiveProjectId),

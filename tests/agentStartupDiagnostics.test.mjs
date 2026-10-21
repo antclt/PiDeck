@@ -44,7 +44,9 @@ test("agent startup writes diagnostics across renderer IPC and pi launch boundar
 	assert.match(mainSource, /rpcMs/);
 	assert.match(mainSource, /Agent create failed/);
 	assert.match(sessionIpcSource, /Session prompt IPC received/);
-	assert.match(sessionIpcSource, /sessionRuntimeCoordinator\.send\(input\)/);
+	// 绑定智能体的会话在 send 前会重组成 promptInput（注入隐藏 agentMessage），
+	// 所以只锁「发送确实经过 runtime coordinator」这个契约，不锁局部变量名。
+	assert.match(sessionIpcSource, /await sessionRuntimeCoordinator\.send\(/);
 	assert.match(sessionIpcSource, /Session prompt IPC completed/);
 	assert.match(sessionIpcSource, /Session prompt IPC failed/);
 	assert.doesNotMatch(appSource, /api\.agents\.create\(/);

@@ -344,3 +344,124 @@ test("cacheHitPercentOf uses the dsh-web/pi shared formula", () => {
 	assert.equal(cacheHitPercentOf({ inputTokens: 0, outputTokens: 10 }), undefined);
 	assert.equal(cacheHitPercentOf(undefined), undefined);
 });
+
+test("system/message replays into an initial prompt snapshot and drops repeats", () => {
+	const first = collectDshProcessEvent([], event("system/message", { message: { content: [{ type: "text", text: "persona + sections" }] } }, 2, 1000));
+	assert.ok(first);
+	assert.equal(first.kind, "systemPrompt");
+	assert.equal(first.prompt.kind, "initial");
+	assert.equal(first.prompt.text, "persona + sections");
+	assert.equal(first.seq, 2);
+
+	const repeat = collectDshProcessEvent([first], event("system/message", { message: { content: [{ type: "text", text: "persona + sections" }] } }, 12, 3000));
+	assert.equal(repeat, undefined, "identical reloads must not add a ledger record");
+
+	const update = collectDshProcessEvent([first], event("system/message", { message: { content: [{ type: "text", text: "persona + extra rules" }] } }, 20, 5000));
+	assert.ok(update);
+	assert.equal(update.prompt.kind, "update");
+	assert.match(update.prompt.text, /extra rules/);
+});
+
+test("request/header records the tool catalog and diffs it against the previous prompt", () => {
+	const initial = collectDshProcessEvent([], event("system/message", { message: { content: [{ type: "text", text: "sys" }] } }, 2, 1000));
+	const header = event("request/header", { header: { config: { provider: "p", model: "m" }, tools: [{ name: "bash" }, { name: "read" }] } }, 3, 1100);
+	const withTools = collectDshProcessEvent([initial], header);
+	assert.ok(withTools);
+	assert.equal(withTools.prompt.kind, "update");
+	assert.equal(withTools.prompt.tools.join(","), "bash,read");
+	assert.equal(withTools.prompt.toolsAdded.join(","), "bash,read");
+
+	const later = collectDshProcessEvent([initial, withTools], event("request/header", { header: { config: { provider: "p", model: "m" }, tools: [{ name: "bash" }, { name: "write" }] } }, 9, 2000));
+	assert.ok(later);
+	assert.equal(later.prompt.tools.join(","), "bash,write");
+	assert.equal(later.prompt.toolsAdded.join(","), "write");
+	assert.equal(later.prompt.toolsRemoved.join(","), "read");
+
+	const unchanged = collectDshProcessEvent([initial, withTools], event("request/header", { header: { config: { provider: "p", model: "m" }, tools: [{ name: "bash" }, { name: "read" }] } }, 10, 2100));
+	assert.equal(unchanged, undefined);
+});
+
+test("token placeholder tool catalogs are not treated as tools", () => {
+	const initial = collectDshProcessEvent([], event("system/message", { message: { content: [{ type: "text", text: "sys" }] } }, 2, 1000));
+	assert.equal(collectDshProcessEvent([initial], event("request/header", { header: { config: { provider: "p", model: "m" }, tools: "{{tools}}" } }, 3, 1100)), undefined);
+});
+
+test("developer/message tool changes update the prompt tool set instead of adding noise", () => {
+	const initial = collectDshProcessEvent([], event("system/message", { message: { content: [{ type: "text", text: "sys" }] } }, 2, 1000));
+	const withTools = collectDshProcessEvent([initial], event("request/header", { header: { config: { provider: "p", model: "m" }, tools: [{ name: "bash" }, { name: "read" }] } }, 3, 1100));
+	const added = collectDshProcessEvent([initial, withTools], event("developer/message", { message: { content: [{ type: "tool-addition", toolName: "edit" }] } }, 4, 1200));
+	assert.ok(added);
+	assert.equal(added.kind, "systemPrompt");
+	assert.equal(added.prompt.tools.join(","), "bash,edit,read");
+	assert.equal(added.prompt.toolsAdded.join(","), "edit");
+
+	const text = collectDshProcessEvent([initial, withTools], event("developer/message", { message: { content: [{ type: "text", text: "workspace context injected" }] } }, 5, 1300));
+	assert.equal(text.kind, "custom");
+	assert.equal(text.customType, "context");
+	assert.match(text.summary, /workspace context/);
+});
+
+test("compaction/summary records the summary with tokensBefore and usage; end error is kept", () => {
+	const summary = collectDshProcessEvent([], event("compaction/summary", { compactionId: "c1", summary: "short recap", shadowedTokenCount: 81_000, provider: "p", model: "m", usage: { input: 100, output: 20 } }, 7, 7000));
+	assert.ok(summary);
+	assert.equal(summary.kind, "compaction");
+	assert.equal(summary.tokensBefore, 81_000);
+	assert.equal(summary.provider, "p");
+	assert.equal(summary.modelId, "m");
+	assert.equal(summary.summary, "short recap");
+	assert.match(summary.detail, /input 100/);
+	assert.match(summary.detail, /output 20/);
+
+	assert.equal(collectDshProcessEvent([], event("compaction/end", { compactionId: "c1" }, 8, 7100)), undefined);
+
+	const failed = collectDshProcessEvent([], event("compaction/end", { compactionId: "c1", error: { message: "provider down" } }, 9, 7200));
+	assert.ok(failed);
+	assert.equal(failed.kind, "compaction");
+	assert.match(failed.summary, /provider down/);
+});
+
+test("prompt snapshots survive the process-event cap", () => {
+	// 长会话排到 240 条以后时，初始提示词不能被裁掉——否则轨迹开头又看不到系统提示词。
+	const prompt = collectDshProcessEvent([], event("system/message", { message: { content: [{ type: "text", text: "sys" }] } }, 0, 1000));
+	let events = pushDshProcessEvent([], prompt);
+	for (let index = 0; index < DSH_PROCESS_EVENTS_LIMIT + 20; index += 1) {
+		events = pushDshProcessEvent(events, { id: `retry-${index}`, kind: "retry", timestamp: 2000 + index, seq: index + 1, summary: `retry ${index}`, retry: 1 });
+	}
+	assert.ok(events.length <= DSH_PROCESS_EVENTS_LIMIT + 1);
+	assert.equal(events[0].kind, "systemPrompt");
+	assert.equal(events[0].prompt.text, "sys");
+});
+
+// ── S1 红测基线（计划 docs/trajectory-session-consumer-plan.md §8.3）────────────
+// 与 pi 同一套提示词预算：≤96,000 码元且 ≤256KiB（262,144 字节）。
+
+const DSH_PROMPT_BYTE_LIMIT = 262_144;
+
+test("B3: dsh 系统提示同样受字节预算约束并按字节截断", () => {
+	// 90,000 × 3 = 270,000 字节 > 262,144；码元数未超 96,000。
+	const record = collectDshProcessEvent([], event("system/message", { message: { content: [{ type: "text", text: "中".repeat(90_000) }] } }, 2, 1000));
+	assert.ok(record, "首帧系统提示必须产出一条快照");
+	assert.equal(record.prompt.truncated, true, "字符数未超限但字节超限，必须标记 truncated");
+	assert.ok(Buffer.byteLength(record.prompt.text, "utf8") <= DSH_PROMPT_BYTE_LIMIT, `字节超限：${Buffer.byteLength(record.prompt.text, "utf8")}`);
+});
+
+test("B3: dsh 截断不得拆开 emoji 代理对", () => {
+	const record = collectDshProcessEvent([], event("system/message", { message: { content: [{ type: "text", text: "a".repeat(95_999) + "😀" }] } }, 2, 1000));
+	assert.ok(record);
+	assert.equal(record.prompt.truncated, true);
+	const last = record.prompt.text.charCodeAt(record.prompt.text.length - 1);
+	assert.ok(!(last >= 0xd800 && last <= 0xdbff), `结尾是孤立高代理（0x${last.toString(16)}）`);
+});
+
+test("窗口未覆盖会话开头时首个提示词标为 snapshot，不冒充 initial", () => {
+	const unseen = event("system/message", { message: { content: [{ type: "text", text: "window-only" }] } }, 2, 1000);
+	const windowed = collectDshProcessEvent([], unseen, { fromStart: false });
+	assert.ok(windowed);
+	assert.equal(windowed.prompt.kind, "snapshot");
+	// 未声明覆盖范围（默认）仍是会话初始装载。
+	const complete = collectDshProcessEvent([], event("system/message", { message: { content: [{ type: "text", text: "from-start" }] } }, 3, 2000));
+	assert.equal(complete.prompt.kind, "initial");
+	// 批量入口同样要把覆盖范围传下去（历史冷读走这条）。
+	const batch = collectDshProcessEvents([], [unseen], { fromStart: false });
+	assert.equal(batch.filter((entry) => entry.kind === "systemPrompt").pop().prompt.kind, "snapshot");
+});

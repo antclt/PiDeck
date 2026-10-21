@@ -25,19 +25,26 @@ export interface SidebarArchiveActionsDeps {
  * 归档区列表与永久删除。会话管理弹窗与侧栏会话菜单共用这一套动作。
  */
 export function useSidebarArchiveActions({ activeProjectId, showToast, overlays, refreshProjectSessions, dismissSessionTree, getSessionRecords }: SidebarArchiveActionsDeps) {
+	/**
+	 * 主进程拒绝（会话运行中/文件操作失败）统一转成可展示原因：剥掉 Electron 的
+	 * "Error invoking remote method 'xxx': " 包装前缀，空原因回退到调用方给的兜底文案。
+	 */
+	function sessionActionErrorMessage(error: unknown, fallback: string): string {
+		const raw = error instanceof Error ? error.message : String(error ?? "");
+		const reason = raw
+			.replace(/^Error invoking remote method ['"][^'"]+['"]:\s*/i, "")
+			.replace(/^Error:\s*/i, "")
+			.trim();
+		return reason || fallback;
+	}
+
 	async function deleteSidebarSession(projectId: string, session: SessionSummary) {
 		try {
 			await api.sessions.deleteRecord(session.id);
 		} catch (error) {
 			// 主进程可能拦截删除（会话正在使用中/删除失败），拒绝必须落成友好 toast，
 			// 否则会成为未处理 rejection（全局"未处理异常"弹窗，2026-08 用户反馈）。
-			// 剥离 Electron 的 "Error invoking remote method 'xxx': " 前缀，只展示主进程真实原因。
-			const raw = error instanceof Error ? error.message : String(error ?? "");
-			const reason = raw
-				.replace(/^Error invoking remote method ['"][^'"]+['"]:\s*/i, "")
-				.replace(/^Error:\s*/i, "")
-				.trim();
-			showToast(reason || t("app.sessionDeleteFailed"), 5000, "error");
+			showToast(sessionActionErrorMessage(error, t("app.sessionDeleteFailed")), 5000, "error");
 			return;
 		}
 		// 先关 Tab 再清状态，并带走 sibling-dir / parentSessionPath 子会话，避免空态 Composer 残留。
@@ -49,7 +56,14 @@ export function useSidebarArchiveActions({ activeProjectId, showToast, overlays,
 
 	/** 归档会话：从列表移除但不销毁文件；toast 按后端告知恢复入口（pi 走会话管理，DSH 走配置页归档区） */
 	async function archiveSidebarSession(projectId: string, session: SessionSummary) {
-		await api.sessions.archiveRecord(session.id);
+		try {
+			await api.sessions.archiveRecord(session.id);
+		} catch (error) {
+			// 运行中的会话会被主进程拒绝（先停止才能归档）；会话管理弹窗改成归档后不关闭，
+			// 这个 rejection 若继续上抛会变成全局「未处理异常」并弹出无关弹窗，统一转 toast。
+			showToast(sessionActionErrorMessage(error, t("app.sessionArchiveFailed")), 5000, "error");
+			return;
+		}
 		dismissSessionTree(session, projectId);
 		showToast(archivedSessionToastMessage(session), ARCHIVED_SESSION_TOAST_MS);
 		await refreshProjectSessions(projectId);

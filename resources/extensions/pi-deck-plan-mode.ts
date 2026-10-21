@@ -483,16 +483,25 @@ export default function piDeckPlanModeExtension(pi: ExtensionAPI): void {
 		const planModeEntry = entries
 			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === "pi-deck-plan-mode")
 			.pop() as { data?: PlanModeState } | undefined;
+		let droppedStaleTodos = false;
 		if (planModeEntry?.data) {
 			// plan 模式不跨会话恢复：新会话默认 normal，避免用户被锁在只读模式无法写入。
-			// 仅 execution（正在执行已确认计划）和 todos 跨会话续接。
-			todoItems = planModeEntry.data.todos ?? todoItems;
-			executionMode = planModeEntry.data.executing ?? executionMode;
+			// 待办只在执行态下续接：非执行态（计划草案）恢复回来的待办永远不会被
+			// [DONE:n] 标记（turn_end 靠 executionMode 拦截），只会永久挂成「N 待处理」，
+			// 且面板 X 只是渲染层隐藏、重开会话又会从会话文件里读回来（issue #393）。
+			const wasExecuting = planModeEntry.data.executing === true;
+			const restoredTodos = planModeEntry.data.todos ?? [];
+			droppedStaleTodos = !wasExecuting && restoredTodos.length > 0;
+			todoItems = wasExecuting ? restoredTodos : [];
+			executionMode = wasExecuting;
 			toolsBeforePlanMode = planModeEntry.data.toolsBeforePlanMode ?? toolsBeforePlanMode;
 		}
 		planModeEnabled = false;
 		// 激活来源是运行时状态，不随会话恢复（plan 模式本身不跨会话），重置避免残留。
 		activationSource = undefined;
 		updateWidget(ctx);
+		// 丢弃草案时同步写回：否则会话文件里的旧 todos 会一直被后来的恢复读到，
+		// 每次重开都要再过滤一遍（#393 里「关标签再打开又回来」的直接来源）。
+		if (droppedStaleTodos) persistState();
 	});
 }

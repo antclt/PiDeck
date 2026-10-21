@@ -1,4 +1,4 @@
-import { app, dialog, shell, type BrowserWindow, Notification } from "electron";
+import { app, shell, type BrowserWindow, Notification } from "electron";
 import { randomUUID } from "node:crypto";
 import { stat, unlink, writeFile } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
@@ -14,6 +14,8 @@ import type {
 	ChatMessage,
 	CreateAgentInput,
 	ForkMessage,
+	SessionFactsResult,
+	SessionOutlineSnapshot,
 	I18nParams,
 	ImageContent,
 	SessionMessageImageTarget,
@@ -29,16 +31,12 @@ import type {
 	SessionBranchTree,
 	SessionMessagePage,
 	SessionRuntimeModelSelection,
-	SessionFileChange,
 	SessionTodoSnapshot,
 } from "../../shared/types";
 import { ipcChannels } from "../../shared/ipc";
-import { sanitizeBridgeUpdate, stripBridgeAnsi } from "../../shared/bridgeText";
-import { collectSessionFileChanges } from "../../shared/fileChanges";
 import { extractPiToolTruncation } from "../../shared/formatToolDetail";
 import { COMPACT_CANCELLED_BY_OWNER, COMPACT_CANCELLED_BY_USER_ABORT, COMPACT_HOOK_REJECT_MAX_MS, COMPACT_OBSERVATION_MAX_AGE_MS, COMPACT_ROUTED_TO_OWNER, COMPACT_USER_ABORT_WINDOW_MS, COMPACT_WAIT_TIMEOUT } from "../../shared/compactFeedback";
 import { PiProcess } from "./PiProcess";
-import { createBridgeServiceHandler } from "./bridge/bridgeServices";
 import { APP_DISPLAY_NAME } from "../utils/appBrand";
 import { isMainWindowFocused, shouldAlertNow } from "../notifications/alertFocusGate";
 import { buildToastXml, notificationLaunchUrl, resolveNotificationLogoUri } from "../notifications/notificationToast";
@@ -52,10 +50,11 @@ import { piVersionAtLeast } from "../extensions/extensionVersionGate";
 import { resolveLoadableExtensionPaths } from "../extensions/enabledExtensionResolver";
 import { collectEntryRendererTypes } from "./extensionEntryRendererScan";
 import { resolveBuiltInExtensionsOverlayDir } from "../extensions/builtInExtensions";
-import { getBridgeServer } from "./bridge/BridgeServer";
+import { getModelTraceServer } from "./modelTrace/ModelTraceServer";
 import { StandbyAgentPool, STANDBY_TTL_MS } from "./StandbyAgentPool";
 import { computeStandbyFingerprint } from "./standbyFingerprint";
-import type { BridgeEvent, BridgeUpdate, ModelTraceInput } from "../../shared/types/bridge";
+import { STANDBY_CLAIM_WAIT_MS, StandbyWarmupTracker } from "./standbyWarmup";
+import type { ModelTraceInput } from "../../shared/types/modelTrace";
 import { describeExtensionFallbackSkip, formatExtensionFallbackDebug, resolveDisabledExtensionsCopy, resolveDisabledExtensionsReason, shouldRetryWithoutExtensions } from "./extensionStartupFallback";
 import type { DisabledExtensionsReason } from "./extensionStartupFallback";
 import { StartupDiagnosticsQueue } from "./startupDiagnosticsQueue";
@@ -70,6 +69,7 @@ import { mergeHistoryWithPreservedMessages, stabilizeProjectedIdsFromIdentities,
 import { buildAgentSessionKey, toAbsoluteSessionPath, type AgentSessionIdentityDefaults } from "./agentSessionIdentity";
 import { SessionFileEditor, type SessionEntryTarget, type SessionFileRef } from "./SessionFileEditor";
 import { SessionHistoryReader, boundTurnWindowStart } from "./SessionHistoryReader";
+import { createTrajectoryFactsReader, type TrajectoryFactsReader } from "../sessions/trajectoryFactsReader";
 import { scanJsonlLines } from "../sessions/jsonlLineStream";
 import { estimateMessagesPayloadBytes } from "./messagePayloadSize";
 import { StoppedMessageIdentityCache } from "./stoppedMessageIdentity";
@@ -78,6 +78,7 @@ import { AgentMessageProjector, buildActiveBranchEntryIds as buildActiveBranchEn
 import { RewindCheckpointCoordinator } from "./RewindCheckpointCoordinator";
 import { LiveStreamChannel } from "./liveStreamChannel";
 import { resolveNotificationSessionId } from "./agentUtils";
+import { chatUsageFromPiUsage } from "./messageUsage";
 import { isRoleMessageRole } from "./sessionEntryIds";
 import { createStreamGateState, isStreamGateSealed, noteAbortSettled, openStreamGateForNewRun, sealStreamGate, type StreamGateState } from "./streamGate";
 import { RpcLiveLogTap } from "./rpcLiveLogTap";
@@ -156,10 +157,8 @@ export class AgentManager {
 	/** 本网关的运行时后端身份：pi。 */
 	readonly backend: AgentBackend = "pi";
 	/** pi 后端支持全部可选能力。 */
-	readonly capabilities: ReadonlySet<AgentGatewayCapability> = new Set(["compact", "fork", "getForkMessages", "editMessage", "deleteMessage", "getCommands", "exportHtml"]);
+	readonly capabilities: ReadonlySet<AgentGatewayCapability> = new Set(["compact", "fork", "getForkMessages", "editMessage", "deleteMessage", "getCommands", "reloadResources", "exportHtml"]);
 	private readonly agents = new Map<string, AgentRuntime>();
-	/** 桥原生服务是否已注入（幂等标记，见 registerBridgeSession）。 */
-	private bridgeServicesInstalled = false;
 	private readonly messages = new Map<string, ChatMessage[]>();
 	/** 工具完整结果 LRU 缓存：截断下发后完整文本仅存于此（运行期「查看完整输出」走内存，
 	 *  历史会话回退读会话文件）。键为 pi message id，agent 停止时随 clearAgentState 释放。 */
@@ -196,6 +195,7 @@ export class AgentManager {
 	private readonly toolExecutingByAgent = new Map<string, string | null>();
 	private readonly sessionFileEditor: SessionFileEditor;
 	private readonly sessionHistoryReader: SessionHistoryReader;
+	private readonly trajectoryFacts: TrajectoryFactsReader;
 	private readonly messageProjector: AgentMessageProjector;
 	/**
 	 * agents:message 的节流批处理/增量标记/显示窗口推进收口在 MessageEmitBatcher；
@@ -411,8 +411,8 @@ export class AgentManager {
 			void this.stop(agentId);
 		},
 	});
-	/** standby 创建去重：池只在握手成功后登记，创建期间靠本标记挡住并发 ensure。 */
-	private standbySpawnPending = false;
+	/** 进行中的 standby 预热跟踪：ensure 去重、claim 等待、目标接力、取消（见 standbyWarmup.ts）。 */
+	private readonly standbyWarmup = new StandbyWarmupTracker();
 	private wslEnvironment: WslEnvironment | null = null;
 
 	/**
@@ -539,6 +539,12 @@ export class AgentManager {
 						}
 					: undefined,
 			});
+		this.trajectoryFacts = createTrajectoryFactsReader({
+			source: {
+				getSessionFactIndex: (sessionPath) => this.sessionHistoryReader.getSessionFactIndex(sessionPath),
+				readSessionFactLines: (sessionPath, entries) => this.sessionHistoryReader.readSessionFactLines(sessionPath, entries),
+			},
+		});
 		this.sessionHistoryReader = new SessionHistoryReader({
 			toHostPath: (sessionPath) => this.toSessionHostPath(sessionPath),
 			convertMessages: (agentId, rawMessages, activeEntryIds) => this.convertAgentMessages(agentId, rawMessages, activeEntryIds),
@@ -582,9 +588,9 @@ export class AgentManager {
 	 * 安全管理：确保策略快照已落盘（小 JSON 写，等完成后启动，保证扩展首次拦截即可读到）。
 	 * settingsOverride 仅用于本次 spawn（如扩展加载失败后强制 --no-extensions），不改持久设置。
 	 *
-	 * `agentId` 可选：提供时同时注册 GUI 扩展桥会话（§9.2），把
-	 * `PIDECK_BRIDGE_URL` / `PIDECK_BRIDGE_TOKEN` 注入 pi 子进程环境。
-	 * 不提供（如临时会话）则不注册 —— 桥在该进程里静默不工作。
+	 * `agentId` 可选：提供时同时注册模型快照会话，把
+	 * `PIDECK_MODEL_TRACE_URL` / `PIDECK_MODEL_TRACE_TOKEN` 注入 pi 子进程环境。
+	 * 不提供（如临时会话）则不注册 —— 扩展在该进程里静默不工作。
 	 */
 	private createPiProcess(cwd: string, sessionPath?: string, securitySessionKey?: string, settingsOverride?: Partial<Pick<AppSettings, "piRpcNoExtensions" | "piRpcNoSkills" | "removedBuiltInExtensions">>, agentId?: string): PiProcess {
 		const settings = settingsOverride ? { ...this.settingsStore.get(), ...settingsOverride } : this.settingsStore.get();
@@ -592,9 +598,9 @@ export class AgentManager {
 			void this.securityStore.ensureSnapshotWritten();
 		}
 		return new PiProcess(cwd, settings, undefined, {
-			// GUI 扩展桥：注册本 agent 的端点会话，拿到注入用的 URL/token。
-			// 端点未就绪时返回 undefined → 不注入 → 桥静默不工作（fail-safe）。
-			bridgeEnv: agentId ? this.registerBridgeSession(agentId) : undefined,
+			// 模型快照端点：注册本 agent 的会话，拿到注入用的 URL/token。
+			// 端点未就绪时返回 undefined → 不注入 → 扩展静默不工作（fail-safe）。
+			modelTraceEnv: agentId ? this.registerModelTraceSession(agentId) : undefined,
 			// 扩展解析器与模型能力缓存共用（piProcessExtensionResolvers）：
 			// 保证「选择器能看到扩展贡献的模型」与「运行时实际加载的扩展」同源。
 			// 技能/模板解析器同源：禁用的技能与提示词模板在 RPC 启动时以白名单剔除。
@@ -616,38 +622,19 @@ export class AgentManager {
 	}
 
 	/**
-	 * 注册 GUI 扩展桥会话，返回要注入 pi 子进程的环境变量（§9.2）。
+	 * 注册模型快照会话，返回要注入 pi 子进程的环境变量。
 	 *
-	 * 桥扩展读 `PIDECK_BRIDGE_URL` / `PIDECK_BRIDGE_TOKEN`，把 pi 侧被 RPC 丢弃的
-	 * 声明式 UI 扩展点推给 PiDeck。端点未就绪（起不来）时返回 undefined，
-	 * 调用方不注入 → 桥静默不工作，pi 与 PiDeck 都照常（fail-safe，§14.5）。
-	 *
-	 * 同一 token 也承载 `pi-deck-model-trace` 的模型请求快照（/model-trace 子路由），
-	 * 与会话一体注册、一体注销。
+	 * 端点未就绪（起不来）时返回 undefined，调用方不注入 → 扩展静默不工作，
+	 * pi 与 PiDeck 都照常（fail-safe）。
 	 */
-	private registerBridgeSession(agentId: string): Record<string, string> | undefined {
+	private registerModelTraceSession(agentId: string): Record<string, string> | undefined {
 		try {
-			const server = getBridgeServer();
+			const server = getModelTraceServer();
 			if (!server.ready) return undefined;
-			// 宿主原生服务（gui.filePicker/gui.openPath）注入一次：BridgeServer 不 import electron，
-			// 这里组装真实实现（幂等，重复注入无害）。
-			if (!this.bridgeServicesInstalled) {
-				server.setServiceHandler(
-					createBridgeServiceHandler({
-						showOpenDialog: (options) => dialog.showOpenDialog(options),
-						openPath: (path) => shell.openPath(path),
-					}),
-				);
-				this.bridgeServicesInstalled = true;
-			}
-			const { url, token } = server.registerAgent(
-				agentId,
-				(update) => this.handleBridgeUpdate(agentId, update),
-				(trace) => this.handleModelTrace(agentId, trace),
-			);
-			return { PIDECK_BRIDGE_URL: url, PIDECK_BRIDGE_TOKEN: token };
+			const { url, token } = server.registerAgent(agentId, (trace) => this.handleModelTrace(agentId, trace));
+			return { PIDECK_MODEL_TRACE_URL: url, PIDECK_MODEL_TRACE_TOKEN: token };
 		} catch (error) {
-			void this.appLogger?.warn("agent", "GUI bridge session registration failed; bridge stays idle", {
+			void this.appLogger?.warn("agent", "Model trace session registration failed; tracing stays idle", {
 				agentId,
 				error: error instanceof Error ? error.message : String(error),
 			});
@@ -656,7 +643,7 @@ export class AgentManager {
 	}
 
 	/**
-	 * 处理 pi 推来的一条模型请求快照（pi-deck-model-trace，走桥端点同链路）。
+	 * 处理 pi 推来的一条模型请求快照（pi-deck-model-trace）。
 	 *
 	 * 与 RPC 日志**同一开关**：未开启记录的 agent 直接丢弃（不落盘、不广播）。
 	 * 完整请求体写 model-traces 目录并在时间线里只留紧凑条目 —— 上百 KB 的
@@ -687,59 +674,11 @@ export class AgentManager {
 	}
 
 	/**
-	 * 桥推来的一帧更新 → 转发给渲染进程。
-	 *
-	 * 复用 `agents:ui-request` 通道（method 前缀 `bridge:`），与 `setWidget` 等
-	 * 现有 UI 请求走同一条落点链路 —— 不新开通道，也不落会话 JSONL
-	 * （桥状态是纯内存的运行时 UI，§7.7 要求 2）。
+	 * 注销某 agent 的快照会话（agent 停止 / 会话删除时调用）。
 	 */
-	private handleBridgeUpdate(agentId: string, update: BridgeUpdate): void {
-		const runtime = this.agents.get(agentId);
-		if (!runtime) return;
-		// 桥帧是**本机 HTTP 端点**收来的外部输入：出这道边界前统一净化字符串字段
-		// （2026-09 ANSI 泄漏事故的兜底；规则见 shared/bridgeText.ts）。
-		// 渲染层 atom 侧还有一次同源净化 —— 两层都只是「保险」，不是规则的第二份实现。
-		const payload = sanitizeBridgeUpdate(update);
-		this.emit(ipcChannels.agentsUiRequest, {
-			agentId,
-			requestId: `bridge-${payload.type}`,
-			method: "bridge:update",
-			title: "",
-			bridgeUpdate: payload,
-		});
-	}
-
-	/**
-	 * 渲染层来的交互事件 → 排入桥的待回灌队列。
-	 *
-	 * 桥在下次轮询（~100ms）时取走并在 pi 进程内调扩展注册的回调（§8.3）。
-	 */
-	pushBridgeEvent(agentId: string, event: BridgeEvent): boolean {
+	unregisterModelTraceSession(agentId: string): void {
 		try {
-			return getBridgeServer().pushEvent(agentId, event);
-		} catch {
-			return false;
-		}
-	}
-
-	/**
-	 * 请求桥在下一次轮询时全量重推一次（§9.4）。
-	 *
-	 * 渲染层丢过桥状态时调用（换绑定 / 切会话 / 开设置弹窗 / 应用启动）。
-	 * 与 `pushBridgeEvent` 同构：任何失败都只返回 false，**不抛错**（§14.5）。
-	 */
-	requestBridgeResync(agentId: string): boolean {
-		try {
-			return getBridgeServer().requestResync(agentId);
-		} catch {
-			return false;
-		}
-	}
-
-	/** 注销某 agent 的桥会话（agent 停止 / 会话删除时调用）。 */
-	unregisterBridgeSession(agentId: string): void {
-		try {
-			getBridgeServer().unregisterAgent(agentId);
+			getModelTraceServer().unregisterAgent(agentId);
 		} catch {
 			// 注销失败无副作用（token 会随端点关闭一起清掉）
 		}
@@ -983,29 +922,67 @@ export class AgentManager {
 	}
 
 	/**
-	 * standby 池入口（会话链路在「用户可能马上要新建会话」的时机调用：草稿创建/激活完成等）。
-	 * 幂等：池里已有同项目条目或创建进行中时直接返回；真正的 spawn 在后台完成。
+	 * standby 池入口（会话链路在「用户可能马上要新建会话」的时机调用：草稿创建/激活完成、
+	 * 启动期补热等）。幂等且「单飞」：池里已有同项目+同指纹条目直接返回；已有预热在跑时
+	 * 不再并行 spawn——请求目标（项目/指纹）不同则记为「最新期望目标」，当前预热 settle
+	 * （无论成败/取消）后接力补热（单槽池只留最新一个待命进程）。
 	 */
 	ensureStandbyAgent(projectId: string): void {
 		if (!this.settingsStore.get().standbyRuntimeEnabled) return;
-		if (this.standbyPool.has(projectId) || this.standbySpawnPending) return;
-		this.standbySpawnPending = true;
-		void this.createStandbyAgent(projectId).finally(() => {
-			this.standbySpawnPending = false;
-		});
+		const project = this.getProject(projectId);
+		if (!project) return;
+		const fingerprint = this.computeStandbyFingerprintFor(project);
+		const pooled = this.standbyPool.peek(projectId);
+		if (pooled && pooled.fingerprint === fingerprint) return;
+		if (this.standbyWarmup.hasPending()) {
+			// 已有预热在跑：绝不再并行 spawn 第二个 pi（两次冷启动互相拖慢且双倍内存）。
+			// 取消中的预热同样按「进行中」处理——等它 settle 再补热，避免取消/补热交错时漏掉最新请求。
+			if (!this.standbyWarmup.matches(projectId, fingerprint) || this.standbyWarmup.isCancelled()) {
+				this.standbyWarmup.requestProject(projectId, fingerprint);
+				void this.appLogger?.info("agent", "Standby warmup target queued", { projectId, pendingCancelled: this.standbyWarmup.isCancelled() });
+			}
+			return;
+		}
+		this.startStandbyWarmup(projectId, fingerprint);
+	}
+
+	/** 登记并启动一次后台预热；begin 幂等，已有预热在跑时不重复 spawn。 */
+	private startStandbyWarmup(projectId: string, fingerprint: string): void {
+		if (!this.standbyWarmup.begin(projectId, fingerprint)) {
+			// 竞态兜底：settle 与 finally 接力之间若有人先开始了新预热，把本次目标留在队列里，
+			// 等那一次 settle 后再接力——不能静默丢掉「预热进行中又切项目」的最新请求。
+			this.standbyWarmup.requestProject(projectId, fingerprint);
+			return;
+		}
+		void this.createStandbyAgent(projectId, fingerprint)
+			.catch(() => undefined) // createStandbyAgent 内部已兜底日志，这里只防未处理 rejection
+			.finally(() => this.warmLatestRequestedStandby());
+	}
+
+	/** 接力：当前预热 settle（无论成败/取消）后，为等待期间记录的最新目标补热一次。 */
+	private warmLatestRequestedStandby(): void {
+		const requested = this.standbyWarmup.takeRequestedProject();
+		if (!requested) return;
+		const pooled = this.standbyPool.peek(requested.projectId);
+		if (pooled && pooled.fingerprint === requested.fingerprint) return;
+		void this.appLogger?.info("agent", "Standby warmup relayed to latest target", { projectId: requested.projectId });
+		this.startStandbyWarmup(requested.projectId, requested.fingerprint);
 	}
 
 	/**
 	 * 丢弃指定项目未被认领的 standby 进程（回收，不是消费）：草稿会话切到非 pi 后端
 	 * （生图/生视频/DSH/ACP）时调用——该进程已经服务不了这个会话，继续挂着只能等
 	 * 10min TTL 自然到期（用户反馈的「没用到的预加载进程占着内存」）。
-	 * 只丢项目匹配的条目：池是单槽位，同项目另一个新草稿仍可能认领它。
-	 * 返回是否真的丢掉了条目（调用方无需关心失败：没池子/项目不符都当无事发生）。
+	 * 进行中的预热同样取消：它完成时绝不入池，只会被 stop（否则 TTL 到期前泄漏一个不可见进程）。
+	 * 只动项目匹配的条目/预热：池是单槽位，同项目另一个新草稿仍可能认领它。
+	 * 返回是否真的有条目或预热被丢弃（调用方无需关心失败：没池子/项目不符都当无事发生）。
 	 */
 	releaseStandbyAgent(projectId: string): boolean {
-		if (this.standbyPool.status()?.projectId !== projectId) return false;
+		const cancelledWarmup = this.standbyWarmup.cancelPending(projectId);
+		if (cancelledWarmup) void this.appLogger?.info("agent", "Standby warmup cancelled", { projectId });
+		if (this.standbyPool.status()?.projectId !== projectId) return cancelledWarmup;
 		const agentId = this.standbyPool.clear();
-		if (!agentId) return false;
+		if (!agentId) return cancelledWarmup;
 		// 与 TTL 到期同一条回收路径（stop 会顺带从 agents map 移除，standby 标记进程对 UI 本就不可见）
 		void this.stop(agentId);
 		void this.appLogger?.info("agent", "Standby agent released", { agentId, projectId });
@@ -1026,7 +1003,30 @@ export class AgentManager {
 		if (proxyMode === "on" || proxyMode === "off") return null;
 		if (this.isFeishuSession?.(input.sessionId) === true) return null;
 		if ((await this.projectTrust.resolveTrustWithoutPrompt(project)) === null) return null;
-		const entry = this.standbyPool.take(input.projectId, this.computeStandbyFingerprintFor(project));
+		const fingerprint = this.computeStandbyFingerprintFor(project);
+		let entry = this.standbyPool.take(input.projectId, fingerprint);
+		// 池里还没有条目，但后台正在为同一项目+同指纹预热：等它 settle 后直接认领，
+		// 等待期间绝不再发起第二次 spawn（否则就是「真会话 spawn 与 standby spawn 并行」的原缺陷）。
+		// 取消中的预热等不出结果（完成即 stop），直接回退普通 spawn。
+		if (!entry && this.standbyWarmup.matches(input.projectId, fingerprint) && !this.standbyWarmup.isCancelled()) {
+			void this.appLogger?.info("agent", "Standby claim waiting for in-flight warmup", { projectId: input.projectId, sessionId: input.sessionId, waitMs: STANDBY_CLAIM_WAIT_MS });
+			// 记录真实等待时长：这一对事件（waiting → adopted / fell back）是「认领等待省掉了
+			// 一次并行 spawn」的唯一直接证据，scripts/standbyWarmupReport.mjs 用它算收益。
+			const waitStartedAt = Date.now();
+			const settlement = await this.standbyWarmup.waitForClaim(input.projectId, fingerprint, STANDBY_CLAIM_WAIT_MS);
+			const waitedMs = Date.now() - waitStartedAt;
+			if (settlement?.ok) entry = this.standbyPool.take(input.projectId, fingerprint);
+			void this.appLogger?.info("agent", entry ? "Standby claim adopted in-flight warmup" : "Standby claim wait fell back to regular spawn", {
+				projectId: input.projectId,
+				sessionId: input.sessionId,
+				waitedMs,
+				// 预热进程已经等了多久才被认领：区分「启动期预热早已就绪」（收益最大）
+				// 与「草稿刚触发的预热」（等待时间短、收益小）。
+				...(entry ? { warmAgeMs: Date.now() - entry.createdAt } : {}),
+				timedOut: settlement === null,
+				cancelled: settlement?.cancelled === true,
+			});
+		}
 		if (!entry) return null;
 		const runtime = this.agents.get(entry.agentId);
 		if (!runtime || runtime.tab.status !== "idle") {
@@ -1035,24 +1035,48 @@ export class AgentManager {
 			return null;
 		}
 		runtime.tab.standby = undefined;
-		void this.appLogger?.info("agent", "Standby agent claimed", { agentId: entry.agentId, projectId: input.projectId, sessionId: input.sessionId });
+		// warmAgeMs = 进程从握手完成到被认领的闲置时长；启动期预热被首个新会话认领时通常最大。
+		void this.appLogger?.info("agent", "Standby agent claimed", { agentId: entry.agentId, projectId: input.projectId, sessionId: input.sessionId, warmAgeMs: Date.now() - entry.createdAt });
 		this.emitState();
 		return runtime.tab;
 	}
 
 	/** 后台 spawn 一个 standby：完整走 createUnlocked（信任/扩展回退/握手），成功后登记进池。 */
-	private async createStandbyAgent(projectId: string): Promise<void> {
+	private async createStandbyAgent(projectId: string, fingerprint: string): Promise<void> {
 		try {
 			const project = this.getProject(projectId);
-			if (!project) return;
+			if (!project) {
+				this.standbyWarmup.settle(null);
+				return;
+			}
 			// 需要用户交互决策信任的项目不做后台池化（绝不后台弹窗）。
-			if ((await this.projectTrust.resolveTrustWithoutPrompt(project)) === null) return;
-			const fingerprint = this.computeStandbyFingerprintFor(project);
+			if ((await this.projectTrust.resolveTrustWithoutPrompt(project)) === null) {
+				this.standbyWarmup.settle(null);
+				return;
+			}
 			const tab = await this.createUnlocked({ projectId, standby: true });
+			if (this.standbyWarmup.isCancelled()) {
+				// 取消路径时序：先 settle(null) 唤醒等待者（它们会回退普通 spawn），再 stop 进程；
+				// 绝不 put 进池——否则 TTL 到期前会泄漏一个不可见、也不会被任何人认领的 pi 进程。
+				this.standbyWarmup.settle(null);
+				void this.stop(tab.id);
+				void this.appLogger?.info("agent", "Standby warmup cancelled", { agentId: tab.id, projectId });
+				return;
+			}
+			if (tab.status !== "idle") {
+				// createUnlocked 握手失败会带着 error 状态返回 tab：不入池，按失败唤醒等待者。
+				this.standbyWarmup.settle(null);
+				void this.stop(tab.id);
+				void this.appLogger?.warn("agent", "Standby agent spawn failed", { projectId, error: `handshake status: ${tab.status}` });
+				return;
+			}
+			// 成功路径时序关键：先 put 再 settle——等待者被唤醒后会立刻 take，顺序反了就永远 miss。
 			this.standbyPool.put({ projectId, fingerprint, agentId: tab.id });
+			this.standbyWarmup.settle(tab.id);
 			void this.appLogger?.info("agent", "Standby agent ready", { agentId: tab.id, projectId });
 		} catch (error) {
 			// 预热失败静默降级：下次 ensure 再试，绝不影响正常创建链路。
+			this.standbyWarmup.settle(null);
 			void this.appLogger?.warn("agent", "Standby agent spawn failed", { projectId, error: error instanceof Error ? error.message : String(error) });
 		}
 	}
@@ -1085,13 +1109,13 @@ export class AgentManager {
 	}
 
 	/**
-	 * spawn 指纹：快照所有「只能 spawn 时注入」的输入（PiProcessSettings/扩展列表/桥/WSL/cwd）。
+	 * spawn 指纹：快照所有「只能 spawn 时注入」的输入（PiProcessSettings/扩展列表/模型快照端点/WSL/cwd）。
 	 * claim 时不一致即废弃池化进程回退正常创建——这就是「改设置/扩展后何时生效」的答案：
 	 * 已在跑的会话照旧（本来就是），下一个 spawn（含新预热）自动用新值。
 	 */
 	private computeStandbyFingerprintFor(project: Project): string {
 		const settings = this.settingsStore.get();
-		const bridge = getBridgeServer();
+		const modelTrace = getModelTraceServer();
 		return computeStandbyFingerprint({
 			projectPath: project.path,
 			trustMarker: "prompt-free",
@@ -1107,8 +1131,8 @@ export class AgentManager {
 			disabledPrompts: settings.disabledPrompts ?? [],
 			extensionRoots: createPiProcessExtensionResolvers(project.path, settings).resolveBuiltInExtensionPaths(),
 			wsl: this.wslEnvironment ? { distro: this.wslEnvironment.distro, user: this.wslEnvironment.user, projectPath: this.toSessionProtocolPath(project.path) } : undefined,
-			bridgeAvailable: bridge.ready,
-			bridgeUrl: bridge.ready ? String(bridge.listeningPort) : "",
+			modelTraceAvailable: modelTrace.ready,
+			modelTracePort: modelTrace.ready ? String(modelTrace.listeningPort) : "",
 			autoSessionTitle: Boolean(settings.autoSessionTitle),
 		});
 	}
@@ -1260,26 +1284,23 @@ export class AgentManager {
 	}
 
 	/**
-	 * 最新一轮文件修改汇总：从会话文件中取「最后一个可展示 user 消息之后」的消息
-	 * 聚合 write/edit/create/patch（与渲染层 TimelineFormat 共用 shared/fileChanges
-	 * 解析，历史/活会话通用）。
-	 *
-	 * 为什么只取最新一轮：composer 上方「修改的文件」横栏的语义是「这次
-	 * 提问后 agent 动了哪些文件」，累计全量会让历史轮次文件长期堆积。
-	 *
-	 * 为什么不再走 readSessionDisplayMessages：它是「读整条活动分支 → 投影 → 再切
-	 * 最后一轮」，近 1 GiB 的会话会因此被全量展开一次（主进程堆直接爆）。
-	 * 现在由 SessionHistoryReader.readFileChangeMessages 做有界读（见其注释）。
-	 */
-	async readSessionFileChanges(sessionPath: string): Promise<SessionFileChange[]> {
-		return collectSessionFileChanges(await this.sessionHistoryReader.readFileChangeMessages(sessionPath, "_viewer"));
-	}
-
-	/**
 	 * 会话级 todo 快照：读会话分支上最新 pi-deck-todo custom 条目（历史会话重建任务 tab）。
 	 */
 	async readSessionTodo(sessionPath: string): Promise<SessionTodoSnapshot | undefined> {
 		return this.sessionHistoryReader.readTodoSnapshot(sessionPath);
+	}
+
+	/**
+	 * 轨迹事实（提示词装载 + 过程事件）：索引选候选 + 小批读正文 + 内容版本缓存。
+	 * 文件未变时正文读取为 0；普通消息追加但事实未变时 version 不变。
+	 */
+	async readSessionFacts(sessionPath: string): Promise<SessionFactsResult> {
+		return this.trajectoryFacts.read(sessionPath);
+	}
+
+	/** 用户检查点目录（导轨）：活动消息索引派生，超预算裁剪并标记。 */
+	async readSessionOutline(sessionPath: string, limit?: number): Promise<SessionOutlineSnapshot> {
+		return this.sessionHistoryReader.readSessionOutline(sessionPath, limit);
 	}
 
 	/** 轮次维度显示分页：pageSize 复用为轮次数（readSessionDisplayTurnPage 内部夹紧上限） */
@@ -3668,9 +3689,9 @@ export class AgentManager {
 		this.captureRuntimeMessageIdentities(agentId);
 		runtime.process.stop();
 		this.agents.delete(agentId);
-		// restart 会换一个 agentId：旧 agentId 的桥会话（token → agentId 反查表 + 端点会话表）
-		// 必须在这里注销，否则每重启一次就多留一条永不回收的记录（PR 评审 §2）。
-		this.unregisterBridgeSession(agentId);
+		// restart 会换一个 agentId：旧 agentId 的模型快照会话必须在这里注销，
+		// 否则每重启一次就多留一条永不回收的记录。
+		this.unregisterModelTraceSession(agentId);
 		this.messages.delete(agentId);
 		this.activeToolCallsByAgent.delete(agentId);
 		this.toolExecutingByAgent.delete(agentId);
@@ -3794,6 +3815,43 @@ export class AgentManager {
 		// 超时 reject → Coordinator 转 SESSION_COMMAND_FAILED → 渲染层回退静态建议。
 		const response = await runtime.process.client.request({ type: "get_commands" }, 10_000);
 		return (response.data as { commands?: unknown[] } | undefined)?.commands ?? [];
+	}
+
+	/**
+	 * 热重载 pi 资源（扩展/技能/提示词/主题/上下文文件）。
+	 *
+	 * 为什么直接发 RPC prompt：pi 的 builtin `/reload` 只在 TUI 中执行，RPC 没有原生
+	 * reload 命令；PiDeck 内部扩展 `pi-deck-runtime.ts` 把它注册成扩展命令。这里直接
+	 * 走 `prompt`，不能复用 `sendPrompt`——后者会先写一条乐观用户消息，`/reload` 会
+	 * 污染会话时间线。
+	 *
+	 * 为什么先查命令表：若扩展未加载（`piRpcNoExtensions`、旧覆盖层、异常回退），把
+	 * `/reload` 当普通 prompt 发下去会让模型把命令文本当问题回答。按 `sourceInfo.path`
+	 * 的 basename 确认命令来自本扩展，并用 pi 实际分配的 invocationName 发送（重名时
+	 * pi 会给后缀，避免误执行用户扩展的同名命令）。
+	 */
+	async reloadResources(agentId: string): Promise<PiCommand[]> {
+		const runtime = this.requireRuntime(agentId);
+		if (!runtime.process.isRunning()) throw new Error("Agent process is not running");
+		if (runtime.tab.status !== "idle") throw new Error("Wait for the current response to finish before reloading.");
+		// 挂起的 Ask/UI 请求正在等用户回答；reload 会拆掉扩展 runtime，先让用户处理完。
+		if (this.uiGate.hasPendingUIRequests(agentId)) throw new Error("Answer or dismiss the pending question before reloading.");
+		const stateResponse = await runtime.process.client.request({ type: "get_state" }, 10_000).catch(() => undefined);
+		if (!stateResponse?.success) throw new Error("Unable to verify that the session is idle before reloading.");
+		const state = stateResponse.data as { isStreaming?: boolean; isCompacting?: boolean } | undefined;
+		if (state?.isStreaming || state?.isCompacting) throw new Error("Wait for the current response to finish before reloading.");
+
+		const registered = await this.listRegisteredCommands(runtime);
+		const reloadCommand = registered?.find((command) => basename(command.sourcePath ?? "") === "pi-deck-runtime.ts");
+		if (!reloadCommand) throw new Error("The reload extension is not loaded in this session");
+
+		const response = await runtime.process.client.request({ type: "prompt", message: `/${reloadCommand.name}` }, 120_000);
+		if (this.agents.get(agentId) !== runtime || !runtime.process.isRunning()) throw new Error("Session runtime changed during reload");
+		if (!response.success) throw new Error(response.error ?? "reload failed");
+		// pi 0.99+ 的权威信号；老版本没有该字段时按「扩展命令已注册」接受（上面已校验来源）。
+		const disposition = readPromptDisposition(response.data);
+		if (disposition !== undefined && disposition !== "handled") throw new Error("The reload command was not handled by pi");
+		return (await this.getCommands(agentId)) as PiCommand[];
 	}
 
 	/**
@@ -3990,8 +4048,8 @@ export class AgentManager {
 		const process = runtime.process;
 		this.captureRuntimeMessageIdentities(agentId);
 		this.agents.delete(agentId);
-		// 桥会话与 agent 生命周期配对：stop / 会话删除路径都走这里（PR 评审 §2）。
-		this.unregisterBridgeSession(agentId);
+		// 快照会话与 agent 生命周期配对：stop / 会话删除路径都走这里。
+		this.unregisterModelTraceSession(agentId);
 		this.messages.delete(agentId);
 		this.activeToolCallsByAgent.delete(agentId);
 		this.toolExecutingByAgent.delete(agentId);
@@ -4102,13 +4160,17 @@ export class AgentManager {
 
 	stopAll() {
 		// 应用退出时统一清理所有 pi 子进程，避免后台 agent 残留占用模型或文件句柄。
+		// 进行中的预热先标取消：它完成时必须直接 stop、绝不 put 回池；接力目标一并丢弃，
+		// 否则退出流程结束后还会补热出一个无人认领的进程。
+		this.standbyWarmup.cancelPending();
+		this.standbyWarmup.clearRequestedProject();
 		// standby 也在 agents map 里会被下面循环停掉；清池只为防 TTL 到期后再重复 stop。
 		this.standbyPool.clear();
 		for (const runtime of this.agents.values()) {
 			this.userInitiatedStop.add(runtime.tab.id);
 			this.clearAgentState(runtime.tab.id);
-			// 桥会话同步注销（quit 时 stopBridgeServer 会兜底，但按 agent 配对清理更早释放）
-			this.unregisterBridgeSession(runtime.tab.id);
+			// 快照会话同步注销（quit 时 stopModelTraceServer 会兜底，但按 agent 配对清理更早释放）
+			this.unregisterModelTraceSession(runtime.tab.id);
 			runtime.process.stop();
 		}
 		this.agents.clear();
@@ -5272,6 +5334,16 @@ export class AgentManager {
 		const modelProvider = nonEmptyString(messageRecord?.provider);
 		const modelId = nonEmptyString(messageRecord?.model);
 		const extractedModel = modelProvider && modelId ? { provider: modelProvider, modelId } : undefined;
+		// 用量/实测耗时：message_end 的完整消息带 usage 与 durationMs（timestamp = 请求开始）。
+		// 轨迹账本的 token 列与真实区间依赖它们；缺失则不写（不补 0：未上报与 0 要可区分）。
+		const extractedUsage = chatUsageFromPiUsage(messageRecord?.usage);
+		const measuredDurationMs = typeof messageRecord?.durationMs === "number" && Number.isFinite(messageRecord.durationMs) ? messageRecord.durationMs : undefined;
+		const startedAtMs = typeof messageRecord?.timestamp === "number" && messageRecord.timestamp > 0 ? messageRecord.timestamp : undefined;
+		const usageMeta = {
+			...(extractedUsage ? { usage: extractedUsage } : {}),
+			...(measuredDurationMs !== undefined ? { durationMs: measuredDurationMs } : {}),
+			...(startedAtMs !== undefined && measuredDurationMs !== undefined ? { startedAt: startedAtMs } : {}),
+		};
 
 		if (existing) {
 			// 已有骨架：有抽出文本才覆盖；fallbackDelta 仅作追加兜底（终态路径）。
@@ -5285,6 +5357,9 @@ export class AgentManager {
 			}
 			if (extractedModel) {
 				existing.model = extractedModel;
+			}
+			if (Object.keys(usageMeta).length > 0) {
+				existing.meta = { ...existing.meta, ...usageMeta };
 			}
 			// 保留原始时间戳，不随 delta 刷新。
 			this.markMessagesDirtyFrom(agentId, existingIndex);
@@ -5300,6 +5375,7 @@ export class AgentManager {
 				timestamp: Date.now(),
 				...(finalStopReason ? { stopReason: finalStopReason } : {}),
 				...(extractedModel ? { model: extractedModel } : {}),
+				...(Object.keys(usageMeta).length > 0 ? { meta: usageMeta } : {}),
 			});
 			this.markMessagesDirtyFrom(agentId, list.length - 1);
 		}
@@ -5474,7 +5550,10 @@ export class AgentManager {
 		const text = status === "running" ? `${icon} ${toolName}` : `${icon} ${toolName}`;
 		// args 可能来自 event.args（对象）或 existing.meta.args（已序列化的 JSON 字符串）。
 		// 如果是后者（如 tool_execution_end 不带 args），直接复用已有字符串避免 double encoding。
-		const argsMeta = typeof args === "string" ? args : this.messageProjector.truncateForDetail(this.messageProjector.safeJson(args));
+		// 文件类工具（write/edit/create/patch）不适用 8000 截断：它们的参数里带着被写文件内容，
+		// 截断会把「已省略 N 字符」插进 JSON 字符串中间 → 不可解析 → 该文件从「修改的文件」清单
+		// 及重开后的历史视图里静默消失（见 serializeToolArgsForDelivery）。
+		const argsMeta = typeof args === "string" ? args : this.messageProjector.serializeToolArgs(toolName, args);
 		// 提取 ask_question 详情用于渲染提问卡片；支持批量（questions 数组）和单问题两种格式。
 		// pi RPC 返回格式可能为 result.details 嵌套 或 result 顶层（无 details 包装）
 		const askDetails: AskDetailsLike | undefined = (() => {

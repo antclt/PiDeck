@@ -1,4 +1,23 @@
-import type { AgentBackend, AgentGatewayCapability, AgentRuntimeState, AgentTab, DshPermissionPreset, AvailableModel, ChatMessage, CreateAgentInput, DshQueuedMessage, DshSkillView, ImageContent, PiCommand, Project, SendPromptInput, SendPromptResult, SessionUiResponseInput, TodoItem } from "../../shared/types";
+import type {
+	AgentBackend,
+	AgentGatewayCapability,
+	AgentRuntimeState,
+	AgentTab,
+	DshPermissionPreset,
+	AvailableModel,
+	ChatMessage,
+	CreateAgentInput,
+	DshQueuedMessage,
+	DshSkillView,
+	ImageContent,
+	PiCommand,
+	Project,
+	SendPromptInput,
+	SendPromptResult,
+	SessionRuntimeModelSelection,
+	SessionUiResponseInput,
+	TodoItem,
+} from "../../shared/types";
 import { isDshPermissionPreset } from "../../shared/types/agent";
 import type { SessionProcessEvent } from "../../shared/types/trajectory";
 // DSH 会话 id 品牌类型（零运行时成本，仅类型擦除）
@@ -28,9 +47,10 @@ import {
 	type DshUsageTotals,
 } from "./dshProcessEvents";
 import { applyDshControlEvent, beginDshCancel, type DshControlState } from "./dshRuntimeControl";
-import { resolveDshModelDirectory, toDshAvailableModels } from "./dshModels";
+import { isDshModelImageUnsupportedRejection, readDshModelSelection, resolveDshModelDirectory, toDshAvailableModels } from "./dshModels";
 import { approvalUiRequest, buildDshRejectValue, buildDshRespondValue, parseDshApprovalFrame, parseDshQuestionFrame, questionUiRequest, type DshApprovalFrame, type DshQuestionFrame } from "./dshApprovalBridge";
-import { assembleDshHistoryEntries, countDshUserMessages, DSH_HISTORY_DEFAULT_TURN_PAGE_SIZE, normalizeDshTurnPageSize, planDshHistoryRounds, trimToOldestTurnStart } from "./dshHistoryPagePlan";
+import { assembleDshHistoryEntries, countDshUserMessages, DSH_HISTORY_DEFAULT_TURN_PAGE_SIZE, dshRuntimeWindowFields, normalizeDshTurnPageSize, planDshHistoryRounds, resolveDshHistoryWindow, trimToOldestTurnStart } from "./dshHistoryPagePlan";
+import { DSH_SESSION_FIND_MAX_MATCHES, findDshSessionMatches, type DshSessionFindResult } from "./dshSessionFind";
 import { isContextOverflowError } from "../../shared/contextOverflow";
 import { parseDshTeamProjection } from "./dshTeamProjection";
 import type { DshTeamState } from "../../shared/types/agent";
@@ -65,6 +85,27 @@ const DSH_PROJECTION_KEYS = ["contextPressure", "contextBreakdown", "tokenUsage"
  */
 function isDshImageMediaType(value: string): value is "image/png" | "image/jpeg" | "image/webp" | "image/gif" {
 	return value === "image/png" || value === "image/jpeg" || value === "image/webp" || value === "image/gif";
+}
+
+/** skills/list 的 host 错误：保留 error.code 以便上层区分「会话未 attach」与真实故障。 */
+export class DshSkillListError extends Error {
+	readonly code: string;
+
+	constructor(code: string, message: string) {
+		super(message);
+		this.name = "DshSkillListError";
+		this.code = code;
+	}
+}
+
+/** skills/list 条目 → 渲染层视图（listSkills / listSkillsByHostSession 共用同一映射）。 */
+function toDshSkillViews(skills: Array<{ name?: string; description?: string; whenToUse?: string; modelInvocable?: boolean }> | undefined): DshSkillView[] {
+	return (skills ?? []).map((skill) => ({
+		name: String(skill.name),
+		description: String(skill.description),
+		...(skill.whenToUse !== undefined && skill.whenToUse !== null ? { whenToUse: String(skill.whenToUse) } : {}),
+		modelInvocable: skill.modelInvocable !== false,
+	}));
 }
 
 /** DSH 历史消息里由投影器登记的持久化图片引用（canonical ImageBlock.attachment）。 */
@@ -116,6 +157,15 @@ export class DshAgentManager implements SessionAgentGateway {
 	/** 历史导出分页大小与页数上限（防超大会话导出失控；单页 500 事件 ≈ 数十轮对话）。 */
 	private static readonly EXPORT_HISTORY_PAGE_SIZE = 500;
 	private static readonly EXPORT_MAX_HISTORY_PAGES = 100;
+	/** 会话内查找历史快照的复用窗口：连续输入命中缓存，超过窗口不复用（下次检索重建，进程内最多一份）。 */
+	private static readonly SESSION_FIND_CACHE_TTL_MS = 60_000;
+	/**
+	 * 会话内查找的历史快照缓存（单份）：用户逐字输入时每 160ms 就会查一次，
+	 * 同一个 cursor（会话没有新事件）下不必重走整段分页。切换会话/新事件/超时即失效。
+	 */
+	private sessionFindCache?: { dshSessionId: string; cursor: number; messages: ChatMessage[]; expiresAt: number };
+	/** 正在构建的历史快照（按会话合并并发）：连续输入会并发发起多次检索，不能各走一遍分页。 */
+	private readonly sessionFindInflight = new Map<string, Promise<ChatMessage[]>>();
 	constructor(
 		private readonly dshHost: DshHost,
 		private readonly getProject: (id: string) => Project | undefined,
@@ -315,6 +365,7 @@ export class DshAgentManager implements SessionAgentGateway {
 					.map((entry) => ({ event: entry.event, view: entry.view }))
 					.filter((item): item is { event: NonNullable<typeof item.event>; view: typeof item.view } => Boolean(item.event))
 					.sort((left: { event: { seq?: number } }, right: { event: { seq?: number } }) => (left.event.seq ?? 0) - (right.event.seq ?? 0));
+				this.recordDshHistoryWindow(runtime, entries, history.result.value.hasMore === true);
 				for (const { event, view } of entries) {
 					runtime.projection = projectDshEvent(runtime.projection, event, agentId, view);
 				}
@@ -337,10 +388,6 @@ export class DshAgentManager implements SessionAgentGateway {
 				if (runtime.projection.todos !== undefined) runtime.todos = runtime.projection.todos;
 				// 尾页 projections baseline 兜底：底层完整折叠不受事件窗口截断影响
 				this.applyHistoryProjectionBaseline(runtime, history.result.value.projections);
-				// 轨迹系统提示随历史重放恢复（V4 system/message，兼容旧请求头）
-				if (runtime.projection.systemPrompt !== undefined) {
-					runtime.systemPrompt = runtime.projection.systemPrompt;
-				}
 			}
 		}
 		// attach 初值：list 的 projections.values 携带 host 折叠好的 contextPressure /
@@ -459,6 +506,16 @@ export class DshAgentManager implements SessionAgentGateway {
 					i18nKey: "session.sendDshWriterHeld",
 				};
 			}
+			// 模型输入模态没声明 image：DSH 在准入阶段就拒绝带图消息，请求根本没打到
+			// 模型。原始 JSON 对用户不可操作，映射为「去配置页打开输入模态」的文案。
+			if (isDshModelImageUnsupportedRejection(sent.result.error)) {
+				return {
+					accepted: false,
+					error: JSON.stringify(sent.result.error),
+					delivery: "rejected",
+					i18nKey: "session.sendDshModelNoImageInput",
+				};
+			}
 			return { accepted: false, error: JSON.stringify(sent.result.error), delivery: "rejected" };
 		}
 		this.logRpc(input.agentId, "recv", "sessions.prompt accepted");
@@ -561,6 +618,7 @@ export class DshAgentManager implements SessionAgentGateway {
 				.map((entry) => ({ event: entry.event, view: entry.view }))
 				.filter((item): item is { event: NonNullable<typeof item.event>; view: typeof item.view } => Boolean(item.event))
 				.sort((left: { event: { seq?: number } }, right: { event: { seq?: number } }) => (left.event.seq ?? 0) - (right.event.seq ?? 0));
+			this.recordDshHistoryWindow(runtime, entries, history.result.value.hasMore === true);
 			for (const { event, view } of entries) {
 				runtime.projection = projectDshEvent(runtime.projection, event, agentId, view);
 			}
@@ -587,6 +645,8 @@ export class DshAgentManager implements SessionAgentGateway {
 	async stop(agentId: string): Promise<void> {
 		const runtime = this.runtimes.get(agentId);
 		if (!runtime) return;
+		// 会话停用：会话内查找的历史快照随之作废（真值在 host，重开时按 cursor 重建）。
+		if (this.sessionFindCache?.dshSessionId === String(runtime.sessionId)) this.sessionFindCache = undefined;
 		// 先取消 host 回合：只断 mux 不解回合，host 仍占着会话，
 		// 下一会话 create/attach/selectModel 会落到 SESSION_COMMAND_FAILED。
 		await this.abort(agentId).catch(() => undefined);
@@ -715,8 +775,6 @@ export class DshAgentManager implements SessionAgentGateway {
 			if (projection.todos !== undefined) runtime.todos = projection.todos;
 			// 尾页 projections baseline：断连窗口内可能缺 todo 事件帧，baseline 完整兜底
 			this.applyHistoryProjectionBaseline(runtime, history.result.value.projections);
-			// 系统提示随补帧同步（request/header 事件可能落在断连窗口内）
-			if (projection.systemPrompt !== undefined) runtime.systemPrompt = projection.systemPrompt;
 			// 断连窗口内的过程事件（modelChange/权限/plan/压缩）一并补账
 			runtime.processEvents = collectDshProcessEvents(runtime.processEvents, freshEvents);
 			this.emitMessages(runtime);
@@ -759,6 +817,7 @@ export class DshAgentManager implements SessionAgentGateway {
 						.map((entry) => ({ event: entry.event, view: entry.view }))
 						.filter((item): item is { event: NonNullable<typeof item.event>; view: typeof item.view } => Boolean(item.event))
 						.sort((left: { event: { seq?: number } }, right: { event: { seq?: number } }) => (left.event.seq ?? 0) - (right.event.seq ?? 0));
+					this.recordDshHistoryWindow(runtime, entries, history.result.value.hasMore === true);
 					let projection = projectDshEvent(undefined, undefined, agentId);
 					for (const { event, view } of entries) {
 						projection = projectDshEvent(projection, event, agentId, view);
@@ -776,10 +835,6 @@ export class DshAgentManager implements SessionAgentGateway {
 					if (runtime.projection.todos !== undefined) runtime.todos = runtime.projection.todos;
 					// 尾页 projections baseline 兜底（新 host 的 registry 折叠与窗口无关）
 					this.applyHistoryProjectionBaseline(runtime, history.result.value.projections);
-					// 系统提示随恢复重放补齐（host 崩溃窗口内的 request/header 事件）
-					if (runtime.projection.systemPrompt !== undefined) {
-						runtime.systemPrompt = runtime.projection.systemPrompt;
-					}
 					// 过程事件随恢复重放补齐（host 崩溃窗口内的 modelChange/权限/plan 记录）
 					runtime.processEvents = collectDshProcessEvents(
 						runtime.processEvents,
@@ -949,58 +1004,87 @@ export class DshAgentManager implements SessionAgentGateway {
 	}
 
 	/**
+	 * host 会话当前模型/档位（投影 `modelSelection.next ?? lastUsed`，attach/切换时由
+	 * refreshModelDirectory 同步到 runtime）。
+	 *
+	 * 供 SessionRuntimeCoordinator 判断「catalog 偏好是否已在 host 生效」：DSH 的
+	 * session/selectModel 会把选择同时保存成部署默认模型（agentDefaultModel.saveSelection），
+	 * 只要偏好已生效就不该在每次激活/重启时重放，否则「打开/切换 DSH 会话」会改写全局默认。
+	 * 与 pi 的 getRuntimeModelThinkingState 不同：这里不发 get_state（DSH 的状态来自投影）。
+	 */
+	async getRuntimeModelThinkingState(agentId: string): Promise<SessionRuntimeModelSelection | undefined> {
+		const runtime = this.runtimes.get(agentId);
+		if (!runtime?.model) return undefined;
+		return {
+			provider: runtime.model.provider,
+			modelId: runtime.model.model,
+			modelName: runtime.model.model,
+			...(runtime.thinkingLevel !== undefined ? { thinkingLevel: runtime.thinkingLevel } : {}),
+		};
+	}
+
+	/**
+	 * 冷读 host 会话的当前模型选择（session/projections 的 modelSelection.next ?? lastUsed）。
+	 *
+	 * 用途：历史/外部 DSH 会话的模型只存在 host 投影里，PiDeck catalog 可能从未写过
+	 * model；打开会话读历史时补录 catalog，底栏/选择器才不会回退到全局部署默认
+	 * （见 dshSessionModelSync.ts 的线上案例）。只读：不激活会话、不写 host。
+	 * host 未就绪时直接返回 undefined——纯展示补录不得为浏览会话主动拉起 host。
+	 */
+	async readSessionModelSelection(dshSessionId: string): Promise<{ provider: string; model: string; reasoningEffort?: string } | undefined> {
+		if (!dshSessionId || !this.dshHost.isHostReady()) return undefined;
+		const client = this.dshHost.getClient();
+		if (!client) return undefined;
+		try {
+			const projection = await client.sessionsProjections({ sessionId: dshSessionId as SessionId });
+			if (!projection.result.ok) return undefined;
+			const value = projection.result.value;
+			if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+			const values = (value as { values?: unknown }).values;
+			if (!values || typeof values !== "object" || Array.isArray(values)) return undefined;
+			const selection = readDshModelSelection((values as Record<string, unknown>).modelSelection);
+			if (!selection) return undefined;
+			return { provider: selection.provider, model: selection.model, ...(selection.reasoningEffort !== undefined ? { reasoningEffort: selection.reasoningEffort } : {}) };
+		} catch (error) {
+			// 投影版本不兼容/会话不存在等：展示补录失败不能影响会话本身。
+			getAppLogger()?.warn("dsh-agent", "session model selection unavailable", {
+				sessionId: dshSessionId,
+				error: error instanceof Error ? error.message : String(error),
+			});
+			return undefined;
+		}
+	}
+
+	/**
 	 * 轨迹过程事件（G-context）：modelChange/permission/plan/goal/compaction 记录
 	 * （pi 会话文件过程事件的 DSH 等价物）。
 	 * - 运行时会话：mux 事件流 + attach/backfill 重放收集的缓存；
 	 * - 历史（未激活）会话：从 host history 尾部按事件流推导（与 dsh-web 历史页同数据源），
 	 *   失败/无 host 时返回空数组（不阻断轨迹展示）。
 	 */
-	async readProcessEvents(agentId: string | undefined, dshSessionId: string | undefined): Promise<SessionProcessEvent[]> {
+	async readProcessEvents(agentId: string | undefined, dshSessionId: string | undefined): Promise<{ events: SessionProcessEvent[]; fromStart: boolean; unavailable?: boolean }> {
 		if (agentId) {
 			const runtime = this.runtimes.get(agentId);
 			if (runtime) {
-				return [...runtime.processEvents].sort((left, right) => left.timestamp - right.timestamp);
+				return { events: [...runtime.processEvents].sort((left, right) => left.timestamp - right.timestamp), fromStart: true };
 			}
 		}
-		if (!dshSessionId) return [];
+		if (!dshSessionId) return { events: [], fromStart: true, unavailable: true };
 		try {
 			const client = await this.ensureClient();
 			const page = await this.historyPage(dshSessionId, { maxMessages: 1000 });
-			if (!page.result.ok) return [];
+			// host 明确返回失败（未就绪/错误）不是「没有事实」：标 unavailable 让前端可重试。
+			if (!page.result.ok) return { events: [], fromStart: true, unavailable: true };
+			// 历史冷读只有 host 的尾部页：还有更早的页时窗口未覆盖会话开头，
+			// 首个可见提示词只能是窗口快照（不能标成 initial，见计划 §3.4）。
+			const fromStart = page.result.value.hasMore !== true;
 			const events = (page.result.value.events ?? [])
 				.map((entry) => entry.event)
 				.filter((event): event is NonNullable<typeof event> => Boolean(event))
 				.sort((left: { seq?: number }, right: { seq?: number }) => (left.seq ?? 0) - (right.seq ?? 0));
-			return collectDshProcessEvents([], events).sort((left, right) => left.timestamp - right.timestamp);
+			return { events: collectDshProcessEvents([], events, { fromStart }).sort((left, right) => left.timestamp - right.timestamp), fromStart };
 		} catch {
-			return [];
-		}
-	}
-
-	/**
-	 * 轨迹系统提示（V4 system/message，兼容旧版 request/header）：
-	 * - 运行时会话：mux 实时 + attach/backfill 重放收集的投影缓存；
-	 * - 历史（未激活）会话：从 host history 尾部折叠系统提示事件，
-	 *   失败/无 host 时返回 undefined（不阻断轨迹展示）。
-	 */
-	async readSystemPrompt(agentId: string | undefined, dshSessionId: string | undefined): Promise<string | undefined> {
-		if (agentId) {
-			const runtime = this.runtimes.get(agentId);
-			if (runtime?.systemPrompt !== undefined) return runtime.systemPrompt;
-		}
-		if (!dshSessionId) return undefined;
-		try {
-			const client = await this.ensureClient();
-			const page = await this.historyPage(dshSessionId, { maxMessages: 1000 });
-			if (!page.result.ok) return undefined;
-			const events = (page.result.value.events ?? []).map((entry) => entry.event).filter((event): event is NonNullable<typeof event> => Boolean(event));
-			let projection = projectDshEvent(undefined, undefined, `dsh:${dshSessionId}`);
-			for (const event of events) {
-				projection = projectDshEvent(projection, event, `dsh:${dshSessionId}`);
-			}
-			return projection.systemPrompt;
-		} catch {
-			return undefined;
+			return { events: [], fromStart: true, unavailable: true };
 		}
 	}
 
@@ -1099,6 +1183,68 @@ export class DshAgentManager implements SessionAgentGateway {
 		};
 	}
 
+	/**
+	 * 会话内查找（Ctrl/Cmd+Shift+F）的 DSH 实现：把整段 host 会话历史投影成消息后做
+	 * 词元匹配（纯匹配逻辑与 pi 的 Go sidecar 同语义，见 dshSessionFind）。
+	 *
+	 * 为什么走 host 而不是读磁盘：DSH 会话日志是 zstd 压缩的分帧 JSONL，磁盘路径上
+	 * 没有投影后的消息 id/角色；host 的 session/page + 投影器是唯一权威口径，命中
+	 * 返回的 `dsh:<seq>` 也正好是时间线节点的 id（jumpToMessage 直接可用）。
+	 * 失败（host 未就绪/runtime 缺失/桥不可用）由调用方（sessionIpc）降级成 null。
+	 * 分页上限与 HTML 导出同口径（EXPORT_MAX_HISTORY_PAGES × 500 事件）：极端超长会话
+	 * 只覆盖最近约 5 万条事件，不会为了「搜到第一条」把整段日志读进内存。
+	 */
+	async searchSessionMessages(dshSessionId: string, query: string, limit = DSH_SESSION_FIND_MAX_MATCHES): Promise<DshSessionFindResult> {
+		const trimmed = query.trim();
+		if (!trimmed || !dshSessionId) return { matches: [], hitCount: 0 };
+		const messages = await this.searchSessionMessagesSnapshot(dshSessionId);
+		return findDshSessionMatches(messages, trimmed, limit);
+	}
+
+	/**
+	 * 查找用的历史快照：同一 cursor 直接复用（逐字输入不重走分页），cursor 前进或
+	 * 缓存过期才重建。cursor 读不到（桥未挂载/冷启动）时退化为每次重读，不做缓存——
+	 * 拿不到失效信号就缓存会把「刚发出去的消息」永久排除在搜索之外。
+	 */
+	private async searchSessionMessagesSnapshot(dshSessionId: string): Promise<ChatMessage[]> {
+		// cursor 与分页都要 host：先确保拉起（历史会话首次搜索可能 host 还没启动）。
+		await this.ensureClient();
+		const cursor = await this.readSessionFindCursor(dshSessionId);
+		const cached = this.sessionFindCache;
+		if (cursor !== undefined && cached && cached.dshSessionId === dshSessionId && cached.cursor === cursor && cached.expiresAt > Date.now()) {
+			return cached.messages;
+		}
+		const messages = await this.buildSessionFindSnapshot(dshSessionId);
+		if (cursor !== undefined) {
+			this.sessionFindCache = { dshSessionId, cursor, messages, expiresAt: Date.now() + DshAgentManager.SESSION_FIND_CACHE_TTL_MS };
+		}
+		return messages;
+	}
+
+	/** 同会话的快照构建只跑一遍：并发检索共享同一个 Promise（失败同步给所有等待方）。 */
+	private buildSessionFindSnapshot(dshSessionId: string): Promise<ChatMessage[]> {
+		const existing = this.sessionFindInflight.get(dshSessionId);
+		if (existing) return existing;
+		const promise = this.collectAllDshSessionMessages(dshSessionId).finally(() => {
+			if (this.sessionFindInflight.get(dshSessionId) === promise) this.sessionFindInflight.delete(dshSessionId);
+		});
+		this.sessionFindInflight.set(dshSessionId, promise);
+		return promise;
+	}
+
+	/** 冷读会话日志 cursor；失败返回 undefined（调用方据此关闭缓存，不阻断搜索）。 */
+	private async readSessionFindCursor(dshSessionId: string): Promise<number | undefined> {
+		try {
+			return await this.dshHost.readSessionCursor(dshSessionId);
+		} catch (error) {
+			getAppLogger()?.warn("dsh-agent", "session find cursor unavailable", {
+				sessionId: dshSessionId,
+				error: error instanceof Error ? error.message : String(error),
+			});
+			return undefined;
+		}
+	}
+
 	private syncModelDirectoryState(runtime: DshAgentRuntime, models: { current: { provider: string; model: string; reasoningEffort?: string }; routable: boolean }): void {
 		runtime.modelRoutable = models.routable;
 		runtime.model = { provider: models.current.provider, model: models.current.model };
@@ -1144,6 +1290,19 @@ export class DshAgentManager implements SessionAgentGateway {
 		}));
 	}
 
+	/**
+	 * SessionAgentGateway.getCommands（可选能力 getCommands）：`listCommands` 的别名。
+	 *
+	 * 必须显式声明：`capabilities` 里已登记 "getCommands"（否则 CompositeAgentGateway
+	 * 直接拒绝），但网关调用的是 **getCommands**，只实现 listCommands 会让
+	 * `gateway.getCommands!(id)` 抛 TypeError——渲染层的命令白名单恒为空，
+	 * 表现为「DSH 历史里的 `/命令` 不出 chip、`/` 菜单只有静态建议」。
+	 * ACP 同样是 listCommands + 这个别名（AcpAgentManager.getCommands），DSH 此前漏了。
+	 */
+	async getCommands(agentId: string): Promise<PiCommand[]> {
+		return this.listCommands(agentId);
+	}
+
 	// ── 会话 HTML 导出（G10：投影式导出，DSH wire 无 export_html）─────────────
 
 	/**
@@ -1169,9 +1328,20 @@ export class DshAgentManager implements SessionAgentGateway {
 		return this.writeSessionHtmlExport(messages, { title, cwd, dshSessionId });
 	}
 
-	/** 历史全量消息收集：从最新往前分页（beforeSeq 为排除边界，页间不重叠）。 */
+	/** 历史全量消息（导出用）：投影 + 图片引用回填。 */
 	private async collectAllDshMessages(dshSessionId: string): Promise<ChatMessage[]> {
-		const client = await this.ensureClient();
+		const messages = await this.collectAllDshSessionMessages(dshSessionId);
+		const client = this.requireClient();
+		return this.hydrateDshImageRefs(client, dshSessionId as SessionId, messages);
+	}
+
+	/**
+	 * 历史全量消息收集：从最新往前分页（beforeSeq 为排除边界，页间不重叠）。
+	 * 不回填图片附件（导出与会话内查找都不需要附件传输），回填由调用方按需追加：
+	 * 会话内查找每敲一个字就会走一次，逐张拉附件只会拖慢输入。
+	 */
+	private async collectAllDshSessionMessages(dshSessionId: string): Promise<ChatMessage[]> {
+		await this.ensureClient();
 		const entries: Array<{ event: Record<string, unknown>; view: unknown }> = [];
 		let beforeSeq: number | undefined;
 		for (let page = 0; page < DshAgentManager.EXPORT_MAX_HISTORY_PAGES; page += 1) {
@@ -1193,7 +1363,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		for (const { event, view } of entries) {
 			projection = projectDshEvent(projection, event, agentId, view);
 		}
-		return this.hydrateDshImageRefs(client, dshSessionId as SessionId, projection.messages);
+		return projection.messages;
 	}
 
 	/** 渲染 + 落盘（导出目录由装配层注入，写入前确保目录存在）。 */
@@ -1358,15 +1528,47 @@ export class DshAgentManager implements SessionAgentGateway {
 	 */
 	async listSkills(agentId: string): Promise<DshSkillView[]> {
 		const runtime = this.runtime(agentId);
-		const client = this.requireClient();
-		const listed = await client.skillsList({ sessionId: runtime.sessionId });
-		if (!listed.result.ok) return [];
-		return (listed.result.value.skills ?? []).map((skill) => ({
-			name: String(skill.name),
-			description: String(skill.description),
-			...(skill.whenToUse !== undefined && skill.whenToUse !== null ? { whenToUse: String(skill.whenToUse) } : {}),
-			modelInvocable: skill.modelInvocable !== false,
-		}));
+		// 工具面板等既有入口保持「失败返回空列表」的宽容语义（UI 只展示空态）。
+		try {
+			return await this.listSkillsByHostSession(String(runtime.sessionId));
+		} catch {
+			return [];
+		}
+	}
+
+	/**
+	 * 按 host 会话 id 列技能（不要求 live agent）。
+	 *
+	 * host 的 skill.list 只要会话 attached 即可：有 live agent 时用其 preset 的 skill
+	 * service，没有时回退全局 skill registry + 会话 preset 的 standing scope
+	 * （dsh-host-apiproxy 实际实现，不启动 agent/turn）。草稿会话拿到 host 会话 id 后
+	 * 即可在「会话启动前」读目录；`session-not-found` 会带 code 抛给调用方判定
+	 * （草稿可以安全换新会话，历史会话不行）。
+	 */
+	async listSkillsByHostSession(dshSessionId: string): Promise<DshSkillView[]> {
+		const client = await this.ensureClient();
+		const listed = await client.skillsList({ sessionId: dshSessionId as SessionId });
+		if (!listed.result.ok) {
+			const error = listed.result.error as { code?: unknown; message?: unknown } | undefined;
+			const code = typeof error?.code === "string" ? error.code : "internal";
+			const message = typeof error?.message === "string" ? error.message : "skill listing failed";
+			throw new DshSkillListError(code, message);
+		}
+		return toDshSkillViews(listed.result.value.skills);
+	}
+
+	/**
+	 * 为草稿会话准备一个可读技能目录的 host 会话（不启动 agent）。
+	 *
+	 * 与 create() 内部建会话同一条 `sessions.create` 路径，保证真正开聊时激活能 attach
+	 * 同一个会话（不会另起会话丢历史）；agentPreset 沿用草稿预选，host 可能回退部署
+	 * 默认，返回值里的实际 preset 由调用方决定是否回写 catalog。
+	 */
+	async ensureAttachableHostSession(cwd: string, agentPreset?: string): Promise<{ sessionId: string; agentPreset?: string }> {
+		const client = await this.ensureClient();
+		const created = await this.createHostSession(client, cwd, agentPreset);
+		if (!created.ok) throw new Error(`dsh session.create failed: ${created.error}`);
+		return created.agentPreset ? { sessionId: created.sessionId, agentPreset: created.agentPreset } : { sessionId: created.sessionId };
 	}
 
 	async setModel(agentId: string, provider: string, modelId: string): Promise<unknown> {
@@ -1601,6 +1803,9 @@ export class DshAgentManager implements SessionAgentGateway {
 			contextPressure: undefined,
 			contextBreakdown: undefined,
 			contextWindow: undefined,
+			// 新 host 会话的窗口边界重新按它自己的 attach 页判定（...runtime 会把旧会话的游标带过来）
+			historyHasOlder: undefined,
+			historyBeforeSeq: undefined,
 		};
 		const history = await this.historyPage(String(newSessionId), { maxMessages: 200 }).catch(() => null);
 		if (history?.result.ok) {
@@ -1608,6 +1813,7 @@ export class DshAgentManager implements SessionAgentGateway {
 				.map((entry) => ({ event: entry.event, view: entry.view }))
 				.filter((item): item is { event: NonNullable<typeof item.event>; view: typeof item.view } => Boolean(item.event))
 				.sort((left: { event: { seq?: number } }, right: { event: { seq?: number } }) => (left.event.seq ?? 0) - (right.event.seq ?? 0));
+			this.recordDshHistoryWindow(nextRuntime, entries, history.result.value.hasMore === true);
 			for (const { event, view } of entries) {
 				nextRuntime.projection = projectDshEvent(nextRuntime.projection, event, agentId, view);
 			}
@@ -1979,12 +2185,38 @@ export class DshAgentManager implements SessionAgentGateway {
 		}
 	}
 
+	/**
+	 * 运行时消息窗口（SessionAgentGateway 可选能力；emitReplacementState 消费）：
+	 * DSH 的 attach 只取尾部 200 条消息事件，窗口前的历史由渲染层「加载更多对话」补页。
+	 * 渲染层窗口协议只有 windowStart（数字）与 windowStartFilePos（数值游标）两个槽位，
+	 * 且 cardCount = len − totalLength + windowStart：这里用「有更早历史 = 1」的标记值，
+	 * 并让 totalLength 同步 +1，cardCount 仍为 0（增量 flush 偏移不受影响，DSH 也不发增量）。
+	 * windowStartFilePos 放窗口最旧事件 seq——readRecordMessagePage 的 before 会原样透传给
+	 * session/page 的 beforeSeq，正是 DSH 的分页游标。
+	 */
+	private historyWindowFields(runtime: DshAgentRuntime): { totalLength: number; windowStart?: number; windowStartFilePos?: number } {
+		return dshRuntimeWindowFields({ messageCount: runtime.messages.length, historyHasOlder: runtime.historyHasOlder, historyBeforeSeq: runtime.historyBeforeSeq });
+	}
+
+	/** 运行时消息窗口快照（emitReplacementState 用；与 emitMessages 同一窗口口径）。 */
+	getMessageWindow(agentId: string): { messages: ChatMessage[]; totalLength: number; windowStart?: number; windowStartFilePos?: number } {
+		const runtime = this.runtime(agentId);
+		return { messages: runtime.messages, ...this.historyWindowFields(runtime) };
+	}
+
 	private emitMessages(runtime: DshAgentRuntime): void {
 		this.emit(ipcChannels.agentsMessage, {
 			agentId: runtime.tab.id,
 			messages: runtime.messages,
-			totalLength: runtime.messages.length,
+			...this.historyWindowFields(runtime),
 		});
+	}
+
+	/** 记录 attach 窗口的「窗口前还有更早历史」信息（判定规则见 resolveDshHistoryWindow）。 */
+	private recordDshHistoryWindow(runtime: DshAgentRuntime, entries: ReadonlyArray<{ event: DshHistoryEntry["event"] }>, hasMore: boolean): void {
+		const window = resolveDshHistoryWindow(entries, hasMore);
+		runtime.historyHasOlder = window.historyHasOlder;
+		runtime.historyBeforeSeq = window.historyBeforeSeq;
 	}
 
 	/**
@@ -2373,7 +2605,6 @@ export class DshAgentManager implements SessionAgentGateway {
 			if (p.model) runtime.model = p.model;
 			if (p.contextWindow !== undefined) runtime.contextWindow = p.contextWindow;
 			if (p.usage) runtime.usage = p.usage;
-			if (p.systemPrompt !== undefined) runtime.systemPrompt = p.systemPrompt;
 			if ((event as { type?: string } | undefined)?.type === "goal/change") runtime.goal = p.goal;
 			if (p.permissionPreset !== undefined) runtime.permissionPreset = p.permissionPreset;
 			runtime.planModeActive = p.planModeActive;
@@ -2528,6 +2759,13 @@ type DshAgentRuntime = {
 	contextOverflow?: boolean;
 	/** 已投影的最大事件 seq（D6：mux 重连补帧时跳过已投影事件，避免重复）。 */
 	lastProjectedSeq?: number;
+	/**
+	 * attach 窗口前还有更早历史（host session/page 的 hasMore）与续页游标（窗口最旧事件 seq）。
+	 * DSH 的运行时消息窗口只取尾部 200 条消息事件；渲染层的分页协议只认
+	 * windowStart（数字）/windowStartFilePos（数值游标）两个槽位，见 emitMessages 的合成标记。
+	 */
+	historyHasOlder?: boolean;
+	historyBeforeSeq?: number;
 	/** 每个 host projection key 的水位线，按 DSH web 的 higher-seq-wins 规则维护。 */
 	projectionSeq: Map<string, number>;
 	/** 已尝试拉取过的 DSH attachmentId（避免 mux 每帧对同一图片重复 RPC）。 */
@@ -2541,8 +2779,6 @@ type DshAgentRuntime = {
 	sessionStats?: DshSessionStatsProjection;
 	/** host 侧排队消息（inbox 投影；空数组 = 无排队）。见 parseDshInboxProjection。 */
 	queuedMessages?: DshQueuedMessage[];
-	/** DSH 当轮真实系统提示（system/message 投影；attach/backfill 重放与 mux 实时双来源）。 */
-	systemPrompt?: string;
 	/**
 	 * 上下文占用投影（host contextPressure 单元）：provider 上报的最新请求大小 +
 	 * 下一条请求的估算成本 + 路由容量。mux session/projection 帧与 attach 初值双来源，

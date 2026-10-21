@@ -1,5 +1,5 @@
 import { useAtomValue } from "jotai";
-import { Check, ChevronDown, ChevronRight, CircleStop, CircleX, Copy, FileDown, FileText, Fingerprint, Folder, Globe, Link2, MessagesSquare, MoreHorizontal, Pencil, PanelLeft, PanelRight, Pin, PinOff, Play, Plus, RefreshCw, RotateCw, Terminal, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, CircleStop, CircleX, Copy, FileDown, FileText, Fingerprint, Folder, Globe, Link2, ListChecks, MessagesSquare, Pencil, PanelLeft, PanelRight, Pin, PinOff, ListRestart, Play, Plus, RefreshCcw, RotateCw, Target, Terminal, X } from "lucide-react";
 import { Fragment, useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { sessionRecordByIdAtomFamily, sessionRuntimeBySessionIdAtomFamily, sessionRecordsAtom, projectInventoryByIdAtom, projectByIdAtomFamily, acpEnabledAtom, acpToolsAtom } from "../../atoms";
 import { t } from "../../i18n";
@@ -7,7 +7,7 @@ import { displayProjectDirectoryName } from "../../rendererUtils";
 import { copyTextWithCopiedNotice } from "../../utils/clipboardNotice";
 import { AnimatedBadge } from "../motion/animated-badge";
 import { sessionStatusBadge } from "../../utils/sessionStatusBadge";
-import { canRunSessionAction, type SessionRunAction, type SessionRunCapabilities } from "../../utils/sessionCommands";
+import { canRunSessionAction, type SessionReloadMode, type SessionRunAction, type SessionRunCapabilities, type SessionRunControlView } from "../../utils/sessionCommands";
 import { sessionDisplayName } from "../../utils/sessionDisplayName";
 import { Button } from "../ui-shadcn/button";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "../ui-shadcn/context-menu";
@@ -18,7 +18,9 @@ import { cn } from "../../lib/utils";
 import { AcpBackendMark, SessionBackendBadge, SessionChannelMark, SideTaskMark } from "./SessionSourceBadge";
 import { TitleScrollText } from "../sidebar/TitleScrollText";
 import { SessionHeader } from "./SessionHeader";
+import type { SessionMenuRunControl } from "./SessionActionsMenu";
 import { SessionActivityIndicator } from "./SessionActivityIndicator";
+import { TAB_CLOSE_BUTTON_CLASS } from "../../utils/tabCloseButton";
 
 import { SESSION_TAB_DRAG_MIME } from "../../utils/sessionSplitEdge";
 import { buildSessionTabBarEntries } from "../../utils/sessionTabGroups";
@@ -75,6 +77,20 @@ export type WorkbenchEditorTabItem = {
 	title?: string;
 	preview?: boolean;
 	active?: boolean;
+};
+
+/**
+ * 页面式工作区 Tab（定时任务 / 智能体）：与会话 Tab 同栏并列的伪 Tab，但不是会话。
+ * 不参与会话固定/拖拽/分屏，也不进 sessionTabIds；点击激活页面，关闭即卸载页面。
+ */
+export type WorkspacePageTabItem = {
+	id: string;
+	title: string;
+	icon?: React.ComponentType<{ className?: string }>;
+	/** 该页面当前正在呈现（active=false 表示 Tab 仍打开但会话在前台）。 */
+	active?: boolean;
+	onSelect: () => void;
+	onClose: () => void;
 };
 
 /** Tab 栏工具开关项：App 层装配（与抽屉活动栏动作同构），本栏只负责渲染与激活态展示。 */
@@ -149,33 +165,20 @@ export type SessionTabsBarProps = {
 	 * simple 模式不渲染（无 Tab 栏语义，插件页直接铺满会话区）。
 	 */
 	pluginTab?: { title: string; icon?: React.ComponentType<{ className?: string }>; onClose: () => void } | null;
+	/**
+	 * 页面式工作区 Tab（定时任务 / 智能体）：挂在会话 Tab 之后、与会话同栏，
+	 * 激活时页面覆盖会话列（装配层把 currentSessionId 置 undefined，会话 Tab 退非选中）。
+	 */
+	pageTabs?: readonly WorkspacePageTabItem[];
 	onSelectEditorTab?: (tabId: string) => void;
 	onCloseEditorTab?: (tabId: string) => void;
 	onPromoteEditorPreview?: (tabId: string) => void;
 	/**
 	 * 当前会话的运行控制（全状态）：能力由 renderer 侧策略纯函数给出，
 	 * 本组件只按结论渲染与置灰，不做状态分叉。undefined = 无当前会话。
+	 * 会话头部控制钮（SessionActionsControl）与 Tab 右键菜单共用同一份快照。
 	 */
-	runControl?: {
-		capabilities: SessionRunCapabilities | undefined;
-		/** 关闭 Agent 进行中（closeAgent 期间）：菜单项据此显示进度文案，避免看起来没反应。 */
-		isStopping?: boolean;
-		isRestarting?: boolean;
-		isReloading?: boolean;
-		/**
-		 * 当前绑定运行实例的 agentId，仅用于「复制 Agent ID」。
-		 * 它与会话记录 id 不是一回事：agentId 每次 spawn 都换（排查问题时要贴进日志），
-		 * SessionRecord.id 才跨重启稳定。无绑定时为 undefined，菜单项隐藏。
-		 */
-		agentId?: string;
-		/**
-		 * 关闭 Agent（杀进程 + 解绑，会话记录与 Tab 保留）。
-		 * 与「停止回答」语义不同：后者只中断当前回合、进程继续跑；
-		 * 卡启动/卡回答时这是唯一出口，故不随运行策略置灰。
-		 */
-		onCloseAgent?: () => void;
-		onAction: (action: SessionRunAction) => void;
-	};
+	runControl?: SessionMenuRunControl;
 	/**
 	 * 打开当前会话的代理设置弹框（网络代理）。
 	 * 与侧栏「会话代理」同源：改完保存即自动重启 runtime 生效，不需要手动「停止 → 启动」。
@@ -194,6 +197,11 @@ export type SessionTabsBarProps = {
 	 * 装配层与 sessionActions 同一工厂（能力闸门一致）；返回 undefined = 无该会话记录，整组不渲染。
 	 */
 	contextSessionActions?: (sessionId: string) => SessionTabActions | undefined;
+	/**
+	 * Tab 右键菜单的运行控制组：按被右键 Tab 的 sessionId 现算能力（后台 Tab 同样可操作）。
+	 * 与右上角 ⋯ 菜单共用同一套策略函数；返回 undefined = 无 runtime/会话，整组不渲染。
+	 */
+	contextRunControl?: (sessionId: string) => SessionRunControlView | undefined;
 };
 
 /** 会话操作组（⋯ 菜单与 Tab 右键菜单共用）：能力闸门由装配层按目标会话算好
@@ -302,7 +310,7 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 		return () => {
 			resizeObserver.disconnect();
 		};
-	}, [props.tabs, props.pinnedTabs, props.splitGroupIds, props.splitGroupCollapsed, props.editorTabs]);
+	}, [props.tabs, props.pinnedTabs, props.splitGroupIds, props.splitGroupCollapsed, props.editorTabs, props.pageTabs]);
 
 	/** onDragOver 期间按鼠标位置相对目标 Tab 中点决定插入前后 */
 	const handleDragOver = (event: React.DragEvent, targetId: string) => {
@@ -403,6 +411,8 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 								// 右键菜单的「会话操作」组（重命名/复制/导出/路径/打开）：按本 Tab 的 sessionId 现取，
 								// 后台 Tab 也能操作；工厂与 ⋯ 菜单 sessionActions 同源（App 同一装配）。
 								sessionActions={props.contextSessionActions?.(sessionId)}
+								// 运行控制组：按被右键 Tab 现算能力，后台 Tab 的停止/重启/重载也走这里。
+								runControl={props.contextRunControl?.(sessionId)}
 								onDragStart={(event) => {
 									dragSourceRef.current = sessionId;
 									dragTargetRef.current = null;
@@ -421,7 +431,11 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 							return (
 								<>
 									{currentSessionId && renderTab(currentSessionId)}
-									{currentSessionId && !hasSplitGroup && <SessionHeader mode="session" sessionId={currentSessionId} embedded headerRef={embeddedHeaderRef} />}
+									{/* 页面式工作区 Tab（定时任务 / 智能体）：简洁模式也保留入口与关闭按钮 */}
+									{props.pageTabs?.map((tab) => (
+										<WorkspacePageTab key={tab.id} tab={tab} />
+									))}
+									{currentSessionId && !hasSplitGroup && <SessionHeader mode="session" sessionId={currentSessionId} embedded headerRef={embeddedHeaderRef} runControl={props.runControl} menu={{ sessionActions: props.sessionActions, toolActions: props.toolActions, onOpenProxySetting: props.onOpenProxySetting }} />}
 									{hasSplitGroup && (
 										<Button variant="ghost" size="icon-sm" aria-label={t("session.splitGroup.exitAll")} title={t("session.splitGroup.exitAll")} onClick={props.onExitAllSplit}>
 											<X className="size-3.5" />
@@ -552,6 +566,17 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 					{/* 浏览器式新建入口：跟在最后一张标签后面，下拉选择新建到哪个项目。
             （新建会话保留独立「+」按钮；⋯ 菜单只收运行控制与工具） */}
 					{!props.simple && <NewSessionMenu targets={props.newSessionTargets} onSelect={props.onNewSessionInProject} onNewAcpSession={props.onNewAcpSession} />}
+					{/* 页面式工作区 Tab（定时任务 / 智能体）：与会话 Tab 同栏并列，可关闭、不参与会话拖拽/固定 */}
+					{!props.simple && props.pageTabs && props.pageTabs.length > 0 ? (
+						<>
+							<span className="mx-0.5 h-5 w-px shrink-0 bg-border-strong" aria-hidden="true" />
+							{props.pageTabs.flatMap((tab, index) => {
+								const node = <WorkspacePageTab key={tab.id} tab={tab} />;
+								if (index === 0) return [node];
+								return [<span key={`page-tab-sep:${tab.id}`} className="mx-0.5 h-5 w-px shrink-0 bg-border-strong" aria-hidden="true" />, node];
+							})}
+						</>
+					) : null}
 					{/* 页面式插件面板伪 Tab：始终选中态（它就是当前呈现的视图），与会话 Tab 之间加竖线分隔 */}
 					{!props.simple && props.pluginTab ? (
 						<>
@@ -576,115 +601,11 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 				{tabsOverflow && <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 z-10 w-6 bg-gradient-to-l from-background/90 to-transparent" />}
 			</div>
 			{/* 右侧抽屉总开关：固定在会话 Tab 栏最右侧；面板切换图标在抽屉内活动栏。
-          ⋯ 菜单收运行控制（当前会话）与工具开关两组（新建会话保留独立「+」按钮）；
-          Tab 级操作（固定/关闭等）保留在 Tab 右键菜单。 */}
-			{props.onToggleDrawer || props.actions != null || (props.toolActions && props.toolActions.length > 0) || props.runControl || props.sessionActions ? (
+          运行控制 / 会话操作 / 工具开关已并入会话头部控制钮（SessionActionsControl），
+          本栏只保留「+」新建会话与抽屉开关；Tab 级操作（固定/关闭等）在 Tab 右键菜单。 */}
+			{props.onToggleDrawer || props.actions != null ? (
 				<div className="session-tabs-actions flex shrink-0 items-center gap-1 border-l border-border/30 pl-1">
 					{props.actions}
-					<DropdownMenu>
-						<DropdownMenuTrigger asChild>
-							<Button type="button" variant="ghost" size="icon-sm" className={`size-7${props.toolActions?.some((action) => action.active) ? " text-[var(--color-accent)]" : ""}`} title={t("tabs.moreActions")} aria-label={t("tabs.moreActions")}>
-								<MoreHorizontal className="size-3.5" aria-hidden="true" />
-							</Button>
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="end" className="min-w-44">
-							{/* 运行控制只作用于当前会话；全状态可用——「停止」仅在进程存活时可点，
-                  「启动/重启」在未启动/失败/已关闭时也保留入口（只是主控文案切换）。
-                  置灰用内联 style 而非 className——特异性最高，任何 CSS 都覆盖不了。 */}
-							{props.runControl?.capabilities && (
-								<>
-									<DropdownMenuLabel>{t("tabs.currentSessionGroup")}</DropdownMenuLabel>
-									<RunControlItems control={props.runControl} />
-									<DropdownMenuSeparator />
-								</>
-							)}
-							{/* 当前会话操作组：重命名 / 复制会话 / 导出 HTML / 复制会话文件路径 / 打开会话文件。
-                  与侧栏会话右键菜单同源同语义；搜索定位的会话不在侧栏可见时，
-                  ⋯ 菜单是唯一稳定入口（本组由此补齐）。 */}
-							{props.sessionActions && (
-								<>
-									{!props.runControl?.capabilities && <DropdownMenuLabel>{t("tabs.currentSessionGroup")}</DropdownMenuLabel>}
-									{/* 侧边任务：在目标会话的项目里开一条轻量会话，结果落在右侧抽屉面板 */}
-									{props.sessionActions.onCreateSideTask && (
-										<DropdownMenuItem onSelect={props.sessionActions.onCreateSideTask}>
-											<span className="inline-flex items-center gap-2">
-												<PanelRight className="size-3.5" aria-hidden="true" />
-												{t("menu.createSideTask")}
-											</span>
-										</DropdownMenuItem>
-									)}
-									{props.sessionActions.onRename && (
-										<DropdownMenuItem onSelect={props.sessionActions.onRename}>
-											<span className="inline-flex items-center gap-2">
-												<Pencil className="size-3.5" aria-hidden="true" />
-												{t("common.rename")}
-											</span>
-										</DropdownMenuItem>
-									)}
-									{props.sessionActions.canCopySession && (
-										<DropdownMenuItem onSelect={props.sessionActions.onCopySession}>
-											<span className="inline-flex items-center gap-2">
-												<Copy className="size-3.5" aria-hidden="true" />
-												{t("menu.copySession")}
-											</span>
-										</DropdownMenuItem>
-									)}
-									{props.sessionActions.canExportHtml && props.sessionActions.onExportSessionHtml && (
-										<DropdownMenuItem onSelect={props.sessionActions.onExportSessionHtml}>
-											<span className="inline-flex items-center gap-2">
-												<FileDown className="size-3.5" aria-hidden="true" />
-												{t("menu.exportHtml")}
-											</span>
-										</DropdownMenuItem>
-									)}
-									{props.sessionActions.hasFilePath && (
-										<>
-											<DropdownMenuItem onSelect={props.sessionActions.onCopySessionFilePath}>
-												<span className="inline-flex items-center gap-2">
-													<Link2 className="size-3.5" aria-hidden="true" />
-													{t("menu.copySessionFilePath")}
-												</span>
-											</DropdownMenuItem>
-											{props.sessionActions.onOpenSessionFile && (
-												<DropdownMenuItem onSelect={props.sessionActions.onOpenSessionFile}>
-													<span className="inline-flex items-center gap-2">
-														<FileText className="size-3.5" aria-hidden="true" />
-														{t("menu.openSessionFile")}
-													</span>
-												</DropdownMenuItem>
-											)}
-										</>
-									)}
-									{props.onOpenProxySetting ? <DropdownMenuSeparator /> : null}
-								</>
-							)}
-							{/* 会话代理（网络代理）：与侧栏同名入口一致；保存后自动重启 runtime 生效。
-                  放在工具开关组之前，语义上属于「会话级配置」而非「面板开关」。
-                  无运行控制能力时（如极端降级场景）补一个组标签，避免菜单项裸奔。 */}
-							{props.onOpenProxySetting && (
-								<>
-									{!props.runControl?.capabilities && !props.sessionActions && <DropdownMenuLabel>{t("tabs.currentSessionGroup")}</DropdownMenuLabel>}
-									<DropdownMenuItem onSelect={() => props.onOpenProxySetting?.()}>
-										<Globe className="size-3.5" aria-hidden="true" />
-										<span>{t("menu.sessionProxy")}</span>
-									</DropdownMenuItem>
-								</>
-							)}
-							{props.toolActions && props.toolActions.length > 0 && (
-								<>
-									<DropdownMenuSeparator />
-									<DropdownMenuLabel>{t("tabs.toolsGroup")}</DropdownMenuLabel>
-									{props.toolActions.map((action) => (
-										<DropdownMenuItem key={action.id} onClick={action.onClick}>
-											{action.icon}
-											<span>{action.label}</span>
-											{action.active ? <Check className="ml-auto size-3.5 text-[var(--color-accent)]" aria-hidden="true" /> : null}
-										</DropdownMenuItem>
-									))}
-								</>
-							)}
-						</DropdownMenuContent>
-					</DropdownMenu>
 					{props.onToggleDrawer ? (
 						<Button type="button" variant="ghost" size="icon-sm" className={`header-drawer-toggle size-7${props.drawerOpen ? " active" : ""}`} title={props.drawerOpen ? t("app.closeDrawer") : t("app.openDrawer")} aria-label={props.drawerOpen ? t("app.closeDrawer") : t("app.openDrawer")} onClick={props.onToggleDrawer}>
 							<PanelRight className="size-3.5" aria-hidden="true" />
@@ -712,7 +633,7 @@ function EditorWorkbenchTab(props: { tab: WorkbenchEditorTabItem; onSelect?: (ta
 					aria-selected={Boolean(tab.active)}
 					aria-label={tab.title ?? tab.label}
 					className={cn(
-						// 显式标明 length，避免 cn 把自定义 text-tab 当颜色类、被状态颜色覆盖。
+						// 显式标明 length 只设字号、不带行高（行高紧随其后用 leading-(--line-height-tab)）。
 						"session-tab group relative flex h-7 shrink-0 cursor-pointer select-none items-center rounded-md border px-2 text-[length:var(--font-size-tab)] leading-(--line-height-tab) transition-[color,background-color,border-color,box-shadow,transform] duration-base",
 						// 工作台文件/Diff Tab 宽度上限跟随外观设置（--session-tab-max-w 由 SessionTabsBar 根注入），
 						// 与会话 Tab 统一宽度来源，不再保留旧固定值。
@@ -742,7 +663,7 @@ function EditorWorkbenchTab(props: { tab: WorkbenchEditorTabItem; onSelect?: (ta
 							role="tab-close"
 							aria-label={t("tabs.close")}
 							title={t("tabs.close")}
-							className={cn("inline-grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground/70 transition-[color,background-color,opacity] hover:bg-accent hover:text-foreground", tab.active ? "opacity-60 hover:opacity-100" : "opacity-0 group-hover:opacity-60")}
+							className={cn(TAB_CLOSE_BUTTON_CLASS, tab.active ? "opacity-70 hover:opacity-100" : "opacity-0 group-hover:opacity-70")}
 							onClick={(event) => {
 								event.stopPropagation();
 								props.onClose?.(tab.id);
@@ -798,7 +719,7 @@ function HostPluginTab(props: { tab: { title: string; icon?: React.ComponentType
 					role="tab-close"
 					aria-label={t("tabs.close")}
 					title={t("tabs.close")}
-					className="inline-grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground/70 opacity-60 transition-[color,background-color,opacity] hover:bg-accent hover:text-foreground hover:opacity-100"
+					className={cn(TAB_CLOSE_BUTTON_CLASS, "opacity-70 hover:opacity-100")}
 					onClick={(event) => {
 						event.stopPropagation();
 						tab.onClose();
@@ -808,6 +729,58 @@ function HostPluginTab(props: { tab: { title: string; icon?: React.ComponentType
 				</button>
 			</span>
 			<span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-md bg-accent" />
+		</div>
+	);
+}
+
+/**
+ * 页面式工作区 Tab（定时任务 / 智能体）：与会话 Tab 同一套 session-tab 皮。
+ * 它不是会话：不拖拽、不固定、不参与分屏；点击激活页面，关闭按钮卸载页面。
+ * 激活态与文件 Tab 同款（灰色实底只画在激活 Tab 自己身上，无滑动动画）。
+ * 刻意不用 Tooltip：Tab 标题本身就是完整名称，避免与提示条契约（3 处悬停提示）纠缠。
+ */
+function WorkspacePageTab(props: { tab: WorkspacePageTabItem }) {
+	const { tab } = props;
+	const Icon = tab.icon;
+	return (
+		<div
+			role="tab"
+			aria-selected={Boolean(tab.active)}
+			aria-label={tab.title}
+			title={tab.title}
+			data-workspace-page-tab={tab.id}
+			tabIndex={0}
+			className={cn(
+				"session-tab group relative flex h-7 shrink-0 cursor-pointer select-none items-center rounded-md border border-transparent px-2 text-[length:var(--font-size-tab)] leading-(--line-height-tab) transition-[color,background-color,border-color,box-shadow,transform] duration-base",
+				"w-fit max-w-(--session-tab-max-w)",
+				tab.active ? "font-medium text-foreground" : "text-muted-foreground hover:-translate-y-px hover:bg-accent-soft hover:text-foreground",
+			)}
+			onClick={tab.onSelect}
+			onKeyDown={(event) => {
+				if (event.key === "Enter" || event.key === " ") {
+					event.preventDefault();
+					tab.onSelect();
+				}
+			}}
+		>
+			<span className="relative z-10 flex min-w-0 flex-1 items-center gap-1.5">
+				{Icon ? <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" /> : null}
+				<span className="min-w-0 flex-1 truncate">{tab.title}</span>
+				<button
+					type="button"
+					role="tab-close"
+					aria-label={t("tabs.close")}
+					title={t("tabs.close")}
+					className={cn("inline-grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground/70 transition-[color,background-color,opacity] hover:bg-accent hover:text-foreground", tab.active ? "opacity-60 hover:opacity-100" : "opacity-0 group-hover:opacity-60")}
+					onClick={(event) => {
+						event.stopPropagation();
+						tab.onClose();
+					}}
+				>
+					<X className="size-3" />
+				</button>
+			</span>
+			{tab.active && <span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-md bg-accent" />}
 		</div>
 	);
 }
@@ -879,7 +852,7 @@ function SessionTab(props: {
 	/** 拖拽插入指示：before=左缘竖线，after=右缘竖线 */
 	indicator?: "before" | "after" | null;
 	/** 运行操作反馈（仅当前会话 Tab 传入）：Tab 徽章显示 停止中/重启中/重载中 转动。
-	 *  运行控制菜单项（停止/重启/重新加载）已上收右上角 ⋯ 菜单，Tab 上不再提供。 */
+	 *  运行控制同时出现在右上角 ⋯ 菜单与本 Tab 的右键菜单（后台 Tab 也可操作）。 */
 	isStopping?: boolean;
 	isRestarting?: boolean;
 	isReloading?: boolean;
@@ -895,6 +868,8 @@ function SessionTab(props: {
 	onDragEnd: () => void;
 	/** 右键菜单的「会话操作」组（App 按 sessionId 参数化装配）；undefined = 整组不渲染 */
 	sessionActions?: SessionTabActions;
+	/** 右键菜单的运行控制组（App 按 sessionId 现算能力）；undefined = 整组不渲染 */
+	runControl?: SessionRunControlView;
 }) {
 	const { sessionId, active, pinned, preview, dragging } = props;
 	const record = useAtomValue(sessionRecordByIdAtomFamily(sessionId));
@@ -944,8 +919,19 @@ function SessionTab(props: {
 						) : (
 							(record?.backend === "dsh" || record?.backend === "imagegen") && <SessionBackendBadge backend={record.backend} className="h-4 shrink-0" />
 						)}
-						{runtime?.state?.planModeActive && <span className="shrink-0 text-xs text-muted-foreground">{t("app.composerModePlan")}</span>}
-						{runtime?.state?.goal && runtime.state.goal.phase !== "complete" && <span className="shrink-0 text-xs text-muted-foreground">{t("app.composerModeGoal")}</span>}
+						{/* 模式标记与输入框底栏 chip 同源：短名 + 图标（清单/靶心），全名留在 title/aria-label。 */}
+						{runtime?.state?.planModeActive && (
+							<span className="inline-flex shrink-0 items-center gap-0.5 text-xs text-muted-foreground" title={t("app.composerModePlan")} aria-label={t("app.composerModePlan")}>
+								<ListChecks className="size-3" aria-hidden="true" />
+								{t("app.composerModePlanShort")}
+							</span>
+						)}
+						{runtime?.state?.goal && runtime.state.goal.phase !== "complete" && (
+							<span className="inline-flex shrink-0 items-center gap-0.5 text-xs text-muted-foreground" title={t("app.composerModeGoal")} aria-label={t("app.composerModeGoal")}>
+								<Target className="size-3" aria-hidden="true" />
+								{t("app.composerModeGoalShort")}
+							</span>
+						)}
 					</div>
 				</TooltipTrigger>
 				<TooltipContent side="bottom" align="start" className="max-w-80">
@@ -1027,10 +1013,13 @@ function SessionTab(props: {
 								{/* 外部连接渠道（微信/飞书）：tab 上带渠道标志，与侧栏同一套徽标 */}
 								{record?.channel && <SessionChannelMark channel={record.channel} className="size-3.5 shrink-0" />}
 								{record?.sideTask && <SideTaskMark className="size-3.5 shrink-0" />}
-								{/* G12：DSH plan 模式 / danger 权限预设全局可见（数据来自 runtime state，tab 级常显） */}
+								{/* G12：DSH plan 模式 / danger 权限预设全局可见（数据来自 runtime state，tab 级常显）。
+								    文案与图标和输入框底栏 chip 统一：短名（计划/目标）+ 模式图标，全名留在 title/aria-label；
+								    Tab 很窄，旧全名「计划模式」会把标题再挤掉两个字。 */}
 								{runtime?.state?.planModeActive && (
-									<span className="shrink-0 rounded bg-primary/15 px-1 text-micro font-medium leading-4 text-primary" title={t("app.composerModePlan")}>
-										{t("app.composerModePlan")}
+									<span className="inline-flex shrink-0 items-center gap-0.5 rounded bg-primary/15 px-1 text-micro font-medium leading-4 text-primary" title={t("app.composerModePlan")} aria-label={t("app.composerModePlan")}>
+										<ListChecks className="size-2.5" aria-hidden="true" />
+										{t("app.composerModePlanShort")}
 									</span>
 								)}
 								{runtime?.state?.goal && runtime.state.goal.phase !== "complete" && (
@@ -1038,10 +1027,12 @@ function SessionTab(props: {
 										// 底色与 plan chip 同用 bg-primary/15：不能用 bg-accent/15——激活 tab 的
 										// 滑动背景就是实底 bg-accent，accent/15 叠上去完全不可见，chip 会退化成裸文字
 										//（浅色主题下尤其明显）。淡蓝底在明暗主题的激活/非激活 tab 上均可读。
-										className="shrink-0 rounded bg-primary/15 px-1 text-micro font-medium leading-4 text-primary"
+										className="inline-flex shrink-0 items-center gap-0.5 rounded bg-primary/15 px-1 text-micro font-medium leading-4 text-primary"
 										title={t("app.composerModeGoal")}
+										aria-label={t("app.composerModeGoal")}
 									>
-										{t("app.composerModeGoal")}
+										<Target className="size-2.5" aria-hidden="true" />
+										{t("app.composerModeGoalShort")}
 									</span>
 								)}
 								{/* 标题复用侧栏 TitleScrollText：溢出时 hover 滚动到尾、离开回开头（与左侧会话列表一致）。
@@ -1059,7 +1050,7 @@ function SessionTab(props: {
 										role="tab-close"
 										aria-label={t("tabs.close")}
 										title={t("tabs.close")}
-										className={cn("inline-grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground/70 transition-[color,background-color,opacity] hover:bg-accent hover:text-foreground", active ? "opacity-60 hover:opacity-100" : "opacity-0 group-hover:opacity-60")}
+										className={cn(TAB_CLOSE_BUTTON_CLASS, active ? "opacity-70 hover:opacity-100" : "opacity-0 group-hover:opacity-70")}
 										onClick={(event) => {
 											event.stopPropagation();
 											close();
@@ -1100,7 +1091,14 @@ function SessionTab(props: {
 				</TooltipContent>
 			</Tooltip>
 			<ContextMenuContent className="min-w-40">
-				{/* 固定/关闭等 Tab 级操作；运行控制在右上角 ⋯ 菜单 */}
+				{/* 运行控制（停止/重启/热重载/磁盘重载）：放在 Tab 级操作之前，右键就能直接操作 */}
+				{props.runControl ? (
+					<>
+						<RunControlContextItems control={props.runControl} />
+						<ContextMenuSeparator />
+					</>
+				) : null}
+				{/* 固定/关闭等 Tab 级操作 */}
 				<ContextMenuItem onSelect={() => props.onTogglePin(sessionId)}>
 					<span className="inline-flex items-center gap-2">
 						{pinned ? <PinOff className="size-3.5" aria-hidden="true" /> : <Pin className="size-3.5" aria-hidden="true" />}
@@ -1262,74 +1260,47 @@ function NewSessionMenu(props: { targets: readonly NewSessionTarget[]; onSelect:
 }
 
 /**
- * 当前会话运行控制菜单项（全状态）。
- *
- * 语义固定，只按策略结论置灰，不做状态 if/else：
- * - 主控项：未启动/失败/已关闭显示「启动 Agent」，live 显示「重启」；
- * - 停止回答：只中断当前正在跑的回合（abort），进程与绑定保留——与输入框停止按钮同义；
- * - 关闭 Agent：杀进程并解绑（会话记录与 Tab 保留），卡启动/卡回答的兜底出口；
- * - 重新加载：仅无进程时可用（live 强刷磁盘会覆盖流式消息）。
+ * Tab 右键菜单的运行控制组：与 ⋯ 菜单同一套策略结论，只是渲染成 ContextMenuItem。
+ * 作用目标是被右键的 Tab（后台 Tab 也能直接停止/重启/热重载）。
  */
-function RunControlItems(props: { control: NonNullable<SessionTabsBarProps["runControl"]> }) {
+function RunControlContextItems(props: { control: SessionRunControlView }) {
 	const { control } = props;
 	const capabilities = control.capabilities;
-	if (!capabilities) return null;
-
 	const startOrRestartDisabled = !canRunSessionAction(capabilities, "start") || Boolean(control.isRestarting);
 	const abortDisabled = !canRunSessionAction(capabilities, "abort");
+	const reloadMode = control.reloadMode ?? "none";
+	const reloadEntryDisabled = !canRunSessionAction(capabilities, "reloadResources") || Boolean(control.isReloading);
 	const reloadDisabled = !canRunSessionAction(capabilities, "reload") || Boolean(control.isReloading);
-
-	// 主控文案：未启动/失败/已关闭 → 「启动 Agent」；live → 「重启」。
 	const primaryLabel = control.isRestarting ? t("app.restarting") : capabilities.primaryAction === "start" ? t("tabs.startAgent") : t("app.restart");
-
-	// 先取成局部常量：在 onSelect 闭包里读 control.agentId 会丢掉窄化
-	const agentId = control.agentId;
 
 	return (
 		<>
-			<DropdownMenuItem disabled={startOrRestartDisabled} style={startOrRestartDisabled ? { opacity: 0.4 } : undefined} onSelect={() => control.onAction(capabilities.primaryAction)}>
+			<ContextMenuItem disabled={startOrRestartDisabled} style={startOrRestartDisabled ? { opacity: 0.4 } : undefined} onSelect={() => control.onAction(capabilities.primaryAction)}>
 				<span className="inline-flex items-center gap-2">
 					{capabilities.primaryAction === "start" ? <Play className={cn("size-3.5", control.isRestarting && "animate-pulse")} aria-hidden="true" /> : <RotateCw className={cn("size-3.5", control.isRestarting && "animate-pideck-spin")} aria-hidden="true" />}
 					{primaryLabel}
 				</span>
-			</DropdownMenuItem>
-			<DropdownMenuItem
-				disabled={abortDisabled}
-				style={abortDisabled ? { opacity: 0.4 } : undefined}
-				// 「停止回答」= abort：只中断当前正在跑的回合，进程与绑定保留；
-				// 杀进程的入口是同组的「关闭 Agent」（两者语义不同，别合并）。
-				title={t("tabs.stopAnswerHint")}
-				onSelect={() => control.onAction("abort")}
-			>
+			</ContextMenuItem>
+			<ContextMenuItem disabled={abortDisabled} style={abortDisabled ? { opacity: 0.4 } : undefined} title={t("tabs.stopAnswerHint")} onSelect={() => control.onAction("abort")}>
 				<span className="inline-flex items-center gap-2">
 					<CircleStop className="size-3.5" aria-hidden="true" />
 					{t("menu.stopAnswer")}
 				</span>
-			</DropdownMenuItem>
-			<DropdownMenuItem disabled={reloadDisabled} style={reloadDisabled ? { opacity: 0.4 } : undefined} onSelect={() => control.onAction("reload")}>
+			</ContextMenuItem>
+			{reloadMode === "resources" ? (
+				<ContextMenuItem disabled={reloadEntryDisabled} style={reloadEntryDisabled ? { opacity: 0.4 } : undefined} title={t("menu.reloadResourcesHint")} onSelect={() => control.onAction("reloadResources")}>
+					<span className="inline-flex items-center gap-2">
+						<RefreshCcw className={cn("size-3.5", control.isReloading && "animate-pideck-spin")} aria-hidden="true" />
+						{control.isReloading ? t("app.reloading") : t("menu.reloadResources")}
+					</span>
+				</ContextMenuItem>
+			) : null}
+			<ContextMenuItem disabled={reloadDisabled} style={reloadDisabled ? { opacity: 0.4 } : undefined} title={t("menu.reloadMessagesHint")} onSelect={() => control.onAction("reload")}>
 				<span className="inline-flex items-center gap-2">
-					<RefreshCw className={cn("size-3.5", control.isReloading && "animate-pideck-spin")} aria-hidden="true" />
-					{control.isReloading ? t("app.reloading") : t("menu.reloadSession")}
+					<ListRestart className={cn("size-3.5", control.isReloading && "animate-pulse")} aria-hidden="true" />
+					{control.isReloading ? t("app.reloading") : t("menu.reloadMessages")}
 				</span>
-			</DropdownMenuItem>
-			{/* 复制 Agent ID：与运行控制同组（它标识的就是当前绑定实例）；
-          无绑定（从未启动/已解绑）时不渲染，避免复制一个不存在的 id。 */}
-			{agentId ? (
-				<DropdownMenuItem onSelect={() => void copyTextWithCopiedNotice(agentId)}>
-					<span className="inline-flex items-center gap-2">
-						<Fingerprint className="size-3.5" aria-hidden="true" />
-						{t("menu.copyAgentId")}
-					</span>
-				</DropdownMenuItem>
-			) : null}
-			{control.onCloseAgent ? (
-				<DropdownMenuItem variant="destructive" title={t("menu.closeAgentHint")} onSelect={control.onCloseAgent}>
-					<span className="inline-flex items-center gap-2">
-						<X className={cn("size-3.5", control.isStopping && "animate-pulse")} aria-hidden="true" />
-						{control.isStopping ? t("app.closing") : t("menu.closeAgent")}
-					</span>
-				</DropdownMenuItem>
-			) : null}
+			</ContextMenuItem>
 		</>
 	);
 }

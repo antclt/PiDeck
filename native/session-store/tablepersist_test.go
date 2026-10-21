@@ -7,8 +7,10 @@ package main
 // session-summary-cache 的版本键测试同一招）。
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -86,6 +88,146 @@ func TestPersistedTableReusedAcrossCacheInstances(t *testing.T) {
 	// 条目字段来自磁盘条目文件（未被重扫覆盖）。
 	if second.Entries[1].Role == nil || *second.Entries[1].Role != "user" {
 		t.Fatalf("应复用磁盘条目里的 role=user，实际 %+v（说明偷偷重扫了源文件）", second.Entries[1].Role)
+	}
+}
+
+// chainBody 生成一条可追到根的会话链（header + rounds 轮 user/toolResult/assistant）。
+// prefix 决定 id 命名空间：整文件重写场景用不同前缀模拟「每条都换了新 id」。
+func chainBody(prefix string, rounds int, pad int) string {
+	var builder strings.Builder
+	builder.WriteString(`{"id":"` + prefix + `s1","type":"session"}` + "\n")
+	parent := prefix + "s1"
+	for round := 1; round <= rounds; round++ {
+		for _, step := range []string{"u", "t", "a"} {
+			id := fmt.Sprintf("%s%s%d", prefix, step, round)
+			fmt.Fprintf(&builder, `{"id":"%s","parentId":"%s","type":"message","message":{"role":"user","content":[{"type":"text","text":"%s"}]}}`+"\n", id, parent, strings.Repeat("x", pad))
+			parent = id
+		}
+	}
+	return builder.String()
+}
+
+// activeChain 复刻 TS traceActiveBranch：从末条沿 parentId 回溯，父条目缺失即停。
+// 返回回溯到的条目数（活动链长度）。
+func activeChain(entryTable table) int {
+	byID := make(map[string]displayEntry, len(entryTable.Entries))
+	for _, entry := range entryTable.Entries {
+		byID[entry.ID] = entry
+	}
+	length := 0
+	seen := make(map[string]bool, len(entryTable.Entries))
+	current, ok := byID[entryTable.LastEntryID]
+	for ok && !seen[current.ID] {
+		seen[current.ID] = true
+		length++
+		if current.ParentID == nil {
+			break
+		}
+		current, ok = byID[*current.ParentID]
+	}
+	return length
+}
+
+// 整文件重写且整体变长（外部工具重建 / 编辑后重写）：旧条目表的偏移全部失效。
+// 若仍按「只是变长」做尾部增量，条目会从错位处开始，parentId 链随即断开——
+// 表现就是 issue #392 的「只剩最后几轮、没有『加载更多』」，而且这张错表会按
+// size+mtime 一直命中，重启也不自愈。必须退回全量重扫。
+func TestPersistedTableRejectsRewrittenPrefixWhileGrowing(t *testing.T) {
+	fixture := newFixture(t)
+	source := fixture.path("sessions/rewritten.jsonl")
+	original := chainBody("a", 40, 0)
+	fixture.write("sessions/rewritten.jsonl", original)
+	tablesDir := filepath.Join(fixture.root, "tables")
+
+	first, err := getIndexTable(newTableCache(tablesDir), source)
+	if err != nil {
+		t.Fatalf("首次 getIndexTable 失败: %v", err)
+	}
+	if activeChain(first) != len(first.Entries) {
+		t.Fatalf("测试前提：首次扫描的活动链应覆盖全部条目，实际 %d/%d", activeChain(first), len(first.Entries))
+	}
+
+	// 整文件重写：每条都换新 id，同时整体变长（更长的正文）。
+	rewritten := chainBody("b", 40, 400)
+	if len(rewritten) <= len(original) {
+		t.Fatalf("测试前提：重写后必须比原文件长，%d vs %d", len(rewritten), len(original))
+	}
+	fixture.write("sessions/rewritten.jsonl", rewritten)
+
+	next, err := getIndexTable(newTableCache(tablesDir), source)
+	if err != nil {
+		t.Fatalf("重写后 getIndexTable 失败: %v", err)
+	}
+	info, err := os.Stat(source)
+	if err != nil {
+		t.Fatalf("stat 失败: %v", err)
+	}
+	fresh, err := scanTable(source, info.Size(), float64(info.ModTime().UnixNano())/1e6)
+	if err != nil {
+		t.Fatalf("对照全量重扫失败: %v", err)
+	}
+	if activeChain(next) != len(next.Entries) {
+		t.Fatalf("活动链必须覆盖全部条目（否则时间线只剩尾部几轮、且没有『加载更多』），实际 %d/%d", activeChain(next), len(next.Entries))
+	}
+	if got, want := len(next.Entries), len(fresh.Entries); got != want {
+		t.Fatalf("重写后条目数应等于全量重扫 %d，实际 %d（说明复用了失效的旧表）", want, got)
+	}
+	assertIDs(t, next, tableIDs(fresh)...)
+}
+
+// 旧版本写下的条目文件（版本号不符）一律丢弃重扫：升级后用户手里的失效表靠这条自愈。
+// 这里故意让 size/mtime 与源文件完全一致（只有版本号不同），否则这道门禁只是被版本键
+// 顺手挡住了，删掉版本号判断也测不出来。
+func TestPersistedTableRejectsOutdatedVersion(t *testing.T) {
+	fixture := newFixture(t)
+	source := fixture.path("sessions/version.jsonl")
+	fixture.write("sessions/version.jsonl", persistedFixtureBody)
+	info, err := os.Stat(source)
+	if err != nil {
+		t.Fatalf("stat 失败: %v", err)
+	}
+	tablesDir := filepath.Join(fixture.root, "tables")
+	if err := os.MkdirAll(tablesDir, 0o755); err != nil {
+		t.Fatalf("mkdir 失败: %v", err)
+	}
+	header := `{"version":` + strconv.Itoa(tableFileVersion-1) +
+		`,"path":` + strconv.Quote(filepath.ToSlash(source)) +
+		`,"size":` + strconv.FormatInt(info.Size(), 10) +
+		`,"mtimeMs":` + strconv.FormatFloat(float64(info.ModTime().UnixNano())/1e6, 'f', -1, 64) +
+		`,"endsWithNewline":true,"lastEntryId":"stale","oversizedLines":0,"entryCount":1}` + "\n"
+	staleEntry := `{"id":"stale","type":"message","offset":0,"byteLength":1,"hasMessage":true}` + "\n"
+	if err := os.WriteFile(tableFilePath(tablesDir, source), []byte(header+staleEntry), 0o644); err != nil {
+		t.Fatalf("写旧版条目文件失败: %v", err)
+	}
+
+	rescanned, err := getIndexTable(newTableCache(tablesDir), source)
+	if err != nil {
+		t.Fatalf("旧版条目文件应被丢弃重扫，实际报错: %v", err)
+	}
+	assertIDs(t, rescanned, "s1", "a1", "a2")
+}
+
+// 超长行（> 64MiB 只存 64KiB 前缀）也要能做边界校验：读前缀 + 正则抢 id，而不是解整行 JSON。
+func TestVerifyTableBoundaryHandlesOversizedEntries(t *testing.T) {
+	fixture := newFixture(t)
+	source := fixture.path("sessions/oversized.jsonl")
+	line := `{"id":"big1","parentId":"s1","type":"message","message":{"role":"toolResult","content":[{"type":"text","text":"` + strings.Repeat("z", 128*1024) + `"}]}}`
+	fixture.write("sessions/oversized.jsonl", line+"\n")
+	sessionSize := int64(len(line) + 1)
+	oversized := true
+	entry := displayEntry{ID: "big1", Offset: 0, ByteLength: int64(len(line)), Oversized: &oversized}
+	if !verifyTableBoundary(source, sessionSize, []displayEntry{entry}) {
+		t.Fatalf("超长行只读前缀也应该校验通过")
+	}
+	wrongID := entry
+	wrongID.ID = "other"
+	if verifyTableBoundary(source, sessionSize, []displayEntry{wrongID}) {
+		t.Fatalf("id 不符必须判定失配")
+	}
+	misplaced := entry
+	misplaced.Offset = 8
+	if verifyTableBoundary(source, sessionSize, []displayEntry{misplaced}) {
+		t.Fatalf("偏移错位必须判定失配")
 	}
 }
 

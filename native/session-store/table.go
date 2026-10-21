@@ -24,6 +24,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // displayEntry 是 TS SessionDisplayEntry 的镜像。
@@ -53,6 +54,12 @@ type displayEntry struct {
 	ContextEditTargetID *string         `json:"contextEditTargetId,omitempty"`
 	ContextEditExcludes *bool           `json:"contextEditExcludes,omitempty"`
 	ContextEditText     *string         `json:"contextEditText,omitempty"`
+	// Preview 用户消息首段文本（空白压成单空格，≤120 字），导轨/大纲直接用。
+	//
+	// 为什么在建索引时拿走：整行本来就要 JSON 解析（message.content 已在内存），
+	// 事后再为了显示标题回读同一行是纯浪费；持久化进条目表后，未加载的历史
+	// 也能显示真实提问文本（对齐 dsh session-turn-outline 的 prompt 预览口径）。
+	Preview *string `json:"preview,omitempty"`
 }
 
 type assistantModel struct {
@@ -256,6 +263,12 @@ func parseIndexEntry(line string, offset int64, byteLength int64) (displayEntry,
 				entry.MessageTimestamp = optionalFloat(ms)
 			}
 		}
+		// 预览只取用户消息：助手/工具正文可能有几十 KB，导轨也用不到。
+		if role, _ := rawString(message, "role"); role == "user" {
+			if preview, ok := messagePreviewText(message); ok {
+				entry.Preview = optionalString(preview)
+			}
+		}
 	}
 	if summary, ok := rawString(object, "summary"); ok {
 		entry.Summary = optionalString(summary)
@@ -283,6 +296,115 @@ func decodeStringRaw(raw json.RawMessage) (string, bool) {
 		return "", false
 	}
 	return value, true
+}
+
+// previewMaxChars 与 TS `INDEX_PREVIEW_MAX_CHARS` 一致：导轨卡片一行够用。
+const previewMaxChars = 120
+
+// previewRefTags 预览要跳过的注入型引用块（用户看到的标题应是他自己打的字）。
+// 与 TS `PREVIEW_REF_TAGS` 逐项对齐；顺序也一致（叠加多个块时影响剥离结果）。
+var previewRefTags = []string{"quoted_context", "referenced_session", "skill", "prompt_template"}
+
+// stripLeadingRefBlocks 跳过消息开头的注入引用块，返回用户真正输入的部分。
+//
+// 为什么必须先剥再截断：预览上限 120 字，引用块正文往往更长——先截断会把
+// `<quoted_context ...>` 切成半截标签，导轨卡片就显示一坨 XML。
+// 开头有引用块但找不到闭合标签时返回 ok=false：宁可不产预览，也不把半个标签当标题。
+func stripLeadingRefBlocks(text string) (string, bool) {
+	rest := text
+	for {
+		trimmed := strings.TrimLeftFunc(rest, unicode.IsSpace)
+		matched := ""
+		for _, tag := range previewRefTags {
+			open := "<" + tag
+			if !strings.HasPrefix(trimmed, open) || len(trimmed) == len(open) {
+				continue
+			}
+			switch next := trimmed[len(open)]; next {
+			case '>', ' ', '\t', '\n', '\r':
+				matched = tag
+			}
+			if matched != "" {
+				break
+			}
+		}
+		if matched == "" {
+			return trimmed, true
+		}
+		closeTag := "</" + matched + ">"
+		index := strings.Index(strings.ToLower(trimmed), closeTag)
+		if index < 0 {
+			return "", false
+		}
+		rest = trimmed[index+len(closeTag):]
+	}
+}
+
+// messagePreviewText 复刻 TS `indexPreviewOf`：message.content 为字符串或内容块数组时
+// 取第一段非空文本，剥掉开头的引用块，空白压成单空格，按码点截断到 120 字。
+//
+// 与 TS 同步点（sessionStoreIndexParity 覆盖）：不校验 block.type（只看 text 是否非空）、
+// 截断按完整码点（不切断代理对）、空文本或半个引用块视为没有预览。
+func messagePreviewText(message jsonObject) (string, bool) {
+	raw, ok := message["content"]
+	if !ok {
+		return "", false
+	}
+	text, hasText := decodeStringRaw(raw)
+	if !hasText {
+		var blocks []json.RawMessage
+		if err := json.Unmarshal(raw, &blocks); err != nil {
+			return "", false
+		}
+		for _, block := range blocks {
+			object, ok := decodeObject(block)
+			if !ok {
+				continue
+			}
+			candidate, ok := rawString(object, "text")
+			if !ok || strings.TrimSpace(candidate) == "" {
+				continue
+			}
+			text = candidate
+			hasText = true
+			break
+		}
+	}
+	if !hasText {
+		return "", false
+	}
+	human, ok := stripLeadingRefBlocks(text)
+	if !ok {
+		return "", false
+	}
+	collapsed := collapseWhitespace(human)
+	if collapsed == "" {
+		return "", false
+	}
+	runes := []rune(collapsed)
+	if len(runes) > previewMaxChars {
+		collapsed = string(runes[:previewMaxChars])
+	}
+	return collapsed, true
+}
+
+// collapseWhitespace 把任意空白序列压成单个空格并去掉首尾（JS `\s+` 的等价物）。
+func collapseWhitespace(text string) string {
+	var builder strings.Builder
+	builder.Grow(len(text))
+	pendingSpace := false
+	for _, r := range text {
+		if unicode.IsSpace(r) {
+			pendingSpace = builder.Len() > 0
+			continue
+		}
+		if pendingSpace {
+			builder.WriteByte(' ')
+			pendingSpace = false
+		}
+		builder.WriteRune(r)
+	}
+	return builder.String()
 }
 
 // joinTextBlocks 复刻 TS contextEditTextOf：只取 type 为 text 的块的 text，按序拼接。

@@ -33,10 +33,10 @@ type SessionFindOverlayProps = {
  * 位置随窗口尺寸/消息区尺寸变化重算。锚点必须是消息区（时间线视口）而不是整栏聊天区：
  * 自定义标题栏下聊天区顶到窗口上沿，其右上角就是窗口关闭键（见 sessionFindAnchor）。
  *
- * 只有快捷键会打开它：收起态什么都不渲染。曾经在消息区右上角常驻一个放大镜按钮充当
- * 「入口」，但它浮在正文之上、与标题栏工具行同列，看起来像多出来的一个 chrome 控件
- * （2027-02 用户反馈「默认不要展示、位置也不对」）。可发现性改由流式状态条的提示承担
- * （sessionFeatureTips 的 agent.tips.findInSession）。
+ * 浮层本身不含入口：收起态什么都不渲染。入口是会话头部工具条里的放大镜按钮
+ * （SessionHeader → requestSessionFindAtom），与快捷键 Ctrl/Cmd+Shift+F 写同一份
+ * 「按会话累加的打开请求」；不要再把常驻按钮浮回消息区右上角——那样会压住正文，
+ * 在自定义标题栏下还会落到窗口控件行（用户反馈「搜索图标跑到关闭窗口位置」）。
  */
 export function SessionFindOverlay(props: SessionFindOverlayProps) {
 	const [open, setOpen] = useState(false);

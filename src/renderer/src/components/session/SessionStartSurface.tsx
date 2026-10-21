@@ -4,7 +4,6 @@ import { useSessionPaneServices } from "./SessionPaneServices";
 import { ComposerArea } from "./ComposerArea";
 import { QueuedPromptPanel } from "./ComposerPanels";
 import { SessionAcpRestoreStrip } from "./SessionAcpRestoreStrip";
-import { SessionFilesStrip } from "./SessionFilesStrip";
 import { SessionGoalStrip } from "./SessionGoalStrip";
 import { SessionSubagentsStrip } from "./SessionSubagentsStrip";
 import { SessionTodoStrip } from "./SessionTodoStrip";
@@ -50,8 +49,11 @@ export function SessionStartSurface(props: {
 		<div className="session-start-surface flex min-h-full w-full flex-col items-center gap-8 bg-transparent px-6 pb-10 pt-[18vh] [--font-size-input:15.5px] [--line-height-input:25px]">
 			<LogoMark size={72} />
 			{props.projectSwitcher}
-			{/* 复用会话页底部输入框组件：高度随内容撑开，底部栏（模型/思考/模式/安全级别/git）与发送按钮全保留 */}
-			<div className="w-full max-w-[980px]">
+			{/* 复用会话页底部输入框组件：高度随内容撑开，底部栏（模型/思考/模式/安全级别/git）与发送按钮全保留。
+				宽度：容器 1080px；[--chat-content-pct-set:100%] 只在本页生效，抵消内容宽度设置（默认 80%）
+				在引导页的二次收窄——引导页没有消息列要对其，输入框直接用满容器
+				（composer 实际宽 = 容器 - 48px 两侧安全空隙）。 */}
+			<div className="w-full max-w-[1080px] [--chat-content-pct-set:100%]">
 				<ComposerArea
 					sessionId={props.sessionId}
 					gitInfo={gitInfo}
@@ -62,7 +64,8 @@ export function SessionStartSurface(props: {
 						<>
 							{/* 未激活 ACP 会话：历史存 agent CLI 侧，时间线暂空（非新会话）。 */ <SessionAcpRestoreStrip sessionId={props.sessionId} />}
 							{!statusInSidebar && <SessionTodoStrip sessionId={props.sessionId} />}
-							{!statusInSidebar && <SessionFilesStrip sessionId={props.sessionId} />}
+							{/* 「修改的文件」已改为每轮末尾的 chip 行（TurnFileChanges）；
+							    引导页没有轮次，因此这里不再挂文件条。 */}
 							{!statusInSidebar && <SessionSubagentsStrip sessionId={props.sessionId} />}
 							<SessionGoalStrip sessionId={props.sessionId} />
 						</>

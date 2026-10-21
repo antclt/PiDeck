@@ -143,6 +143,11 @@ function loadConfigManager() {
 			if (id === "./providerUsageCustom") {
 				return { parseSub2ApiPanelBalance: () => undefined };
 			}
+			// 面板登录态续期（sub2apiPanelSession）：ConfigManager 只用它拼余额请求，trust 测试不触达。
+			// 真实模块值导入 providerUsageCustom，走兜底 require 会重复踩上面的 ESM 扩展名问题。
+			if (id === "./sub2apiPanelSession") {
+				return { fetchSub2ApiPanelBalanceWithRefresh: async () => ({ ok: false, reason: "failed", tokens: { accessToken: "" } }) };
+			}
 			// 兜底：相对 specifier 指向未显式 stub 的 .ts 源文件时，按 ConfigManager 所在目录
 			// （src/main/config）解析成绝对路径再 require（node 24 类型剥离只认带扩展名的路径；
 			// ConfigManager 每加一个 import 都会走到这里）。

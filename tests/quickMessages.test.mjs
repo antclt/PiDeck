@@ -297,9 +297,10 @@ test("底栏接线：安全控制位右侧渲染 props.quickMessagesControl，�
 	// 生图/生视频后端没有对话 runtime，飞书镜像/安全等级/DSH 权限/快捷消息四个控制位都不该出现；
 	// 一起判断是为了防止将来只屏蔽其中几个。
 	// 守卫分支内允许夹其它节点（分组竖线 Separator、按需渲染的置空前分隔符等），不锚死「<> 后紧跟第一个控制位」；
+	// 也不锚死外层形状：2027-02 统一底栏间距后三个控制位包进一个 shrink-0 分组 div，外层可能是 <> 也可能是 <div>；
 	// 但三个控制位必须都在同一个守卫分支里、且自左向右保持原顺序——顺序错（快捷消息跑到安全等级左边）
 	// 与漏进守卫外（生图会话也露出入口）都要能被判红。
-	const guardedGroup = source.match(/isMediaComposer\s*\?\s*null\s*:\s*\(\s*<>([\s\S]*?)<\/>\s*\)/);
+	const guardedGroup = source.match(/isMediaComposer\s*\?\s*null\s*:\s*\(\s*(?:<>|<div[^>]*>)([\s\S]*?)(?:<\/>|<\/div>)\s*\)/);
 	assert.ok(guardedGroup, "四个控制位必须整体挂在 isMediaComposer ? null 分支里");
 	const guardedProps = [...guardedGroup[1].matchAll(/\{(props\.(?:feishuIndicator|securityControl|quickMessagesControl))\s*\}/g)].map((match) => match[1]);
 	assert.deepEqual(guardedProps, ["props.feishuIndicator", "props.securityControl", "props.quickMessagesControl"], "守卫分支内必须依次渲染飞书/安全等级/快捷消息，且三个都在");
@@ -414,7 +415,7 @@ test("设置页：遗留字段不再被渲染层直接读写（App 也不再往 
 	assert.match(hook, /desktopApi\.quickMessages\.save\(items\)/);
 });
 
-test("文案：入口/设置项关键 key 中英都有（缺一个界面就露出 key 名）", () => {
+test("文案：入口/设置项关键 key 中英都有（缺一个界面就露出 key 名）", async () => {
 	const keys = [
 		"app.quickMessagesTitle",
 		"app.quickMessagesHint",
@@ -442,6 +443,8 @@ test("文案：入口/设置项关键 key 中英都有（缺一个界面就露�
 		"settings.quickMessagesDefaultsUnavailable",
 	];
 	for (const locale of ["zh-CN", "en-US"]) {
+		// 词典按需加载：非 zh-CN 必须先 ensure，否则 t() 回退 zh-CN 让「缺文案」断言假绿。
+		await i18n.ensureI18nLocale(locale);
 		i18n.setI18nLocale(locale);
 		for (const key of keys) {
 			const text = i18n.t(key);
@@ -550,8 +553,9 @@ test("接线：ComposerArea 把本栏 sessionId 传给浮层（快捷键归属�
 	assert.match(readSource("src/renderer/src/components/session/ComposerArea.tsx"), /<QuickMessageMenu sessionId=\{props\.sessionId\}/);
 });
 
-test("文案：快捷键设置项中英都有（缺一个设置页就露出 key 名）", () => {
+test("文案：快捷键设置项中英都有（缺一个设置页就露出 key 名）", async () => {
 	for (const locale of ["zh-CN", "en-US"]) {
+		await i18n.ensureI18nLocale(locale);
 		i18n.setI18nLocale(locale);
 		for (const key of ["settings.shortcuts.openQuickMessagesLabel", "settings.shortcuts.openQuickMessagesDesc"]) {
 			const text = i18n.t(key);

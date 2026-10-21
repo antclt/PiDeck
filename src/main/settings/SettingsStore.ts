@@ -24,7 +24,7 @@ import {
 import { normalizePinnedSessionIds } from "../../shared/pinnedSessions";
 import { normalizeSessionSortMode } from "../../shared/sessionSort";
 import { normalizeHiddenModules } from "../../shared/hiddenModules";
-import { normalizeHiddenComposerFeatures, toggleHiddenComposerFeature } from "../../shared/composerFeatures";
+import { normalizeHiddenComposerFeatures } from "../../shared/composerFeatures";
 import { parseBusySendDelivery } from "../../shared/busySendDelivery";
 import { parseSessionStatusPlacement } from "../../shared/sessionStatusPlacement";
 import { normalizeTpsDisplayMode } from "../../shared/tps";
@@ -301,8 +301,6 @@ Gitmoji 对应关系：
 	// ── 扩展管理 ──
 	/** 用户手动移除的内置扩展，启动时跳过自动部署 */
 	removedBuiltInExtensions: [],
-	/** 用户显式开启的「默认关闭」内置扩展（GUI 扩展桥/扩展点面板），opt-in 才注入 */
-	enabledBuiltInExtensions: [],
 	/** 用户禁用的扩展（scope+source）；非空时 RPC 启动走白名单模式 */
 	disabledExtensions: [],
 	/** 白名单总开关：true 时不走 -e 注入，默认加载全部扩展（防御启动失败） */
@@ -323,6 +321,10 @@ Gitmoji 对应关系：
 	// 提示词增强模型：null = 跟随会话模型；设置页可指定固定模型
 	enhanceModel: null,
 	enhanceIncludeContext: false,
+	// 输入预测：默认开启；关掉后渲染层不发请求、不展示建议
+	promptSuggestionEnabled: true,
+	// 输入预测模型：null = 跟随会话模型（与 enhanceModel 各自独立，互不影响）
+	promptSuggestionModel: null,
 
 	// ── 更新检测：检查永远自动；自动下载默认开启（v0.7.4 起取代 disableUpdateCheck）──
 	autoDownloadUpdates: true,
@@ -604,12 +606,16 @@ export class SettingsStore {
 			this.settings.webRemoteCloudflaredExtraArgs = sanitizeCloudflaredExtraArgs(parsed.webRemoteCloudflaredExtraArgs) || undefined;
 			// 旧设置或脏值不能隐式打开向增强模型发送会话正文的开关。
 			this.settings.enhanceIncludeContext = parsed.enhanceIncludeContext === true;
+			// 输入预测只有显式 false 才关闭：老设置缺字段按默认开启处理。
+			this.settings.promptSuggestionEnabled = parsed.promptSuggestionEnabled !== false;
+			// 预测模型与增强模型同形态：脏值（缺字段/非字符串）一律回落 null = 跟随会话模型。
+			this.settings.promptSuggestionModel = normalizeEnhanceModel(this.settings.promptSuggestionModel);
 			// 隐藏模块来自旧 JSON 时可能是脏值（非数组/含空串与重复项）；统一清洗，缺字段回落空数组（全显示）。
 			this.settings.hiddenModules = normalizeHiddenModules(parsed.hiddenModules);
 			// 输入框功能入口同规则清洗（与 hiddenModules 共用实现）。
 			this.settings.hiddenComposerFeatures = normalizeHiddenComposerFeatures(parsed.hiddenComposerFeatures);
 			// 兼容迁移：模式选择器开关原在「功能模块」（hiddenModules）里，现归「输入框功能显示」。
-			this.migrateComposerModesVisibility();
+			this.migrateRemovedComposerModesToggle();
 		}
 		// showThinking 不再作为可持久化的独立配置项，完全跟随 pi agent 的 hideThinkingBlock。
 		// 启动时重新读取以确保每次启动都使用最新值，而非缓存的 defaultSettings。
@@ -662,18 +668,20 @@ export class SettingsStore {
 	}
 
 	/**
-	 * 兼容迁移：模式选择器开关从「功能模块」搬到「输入框功能显示」。
+	 * 兼容迁移：输入框「模式」显示开关已删除（2026-10 用户反馈不需要这一行）。
 	 *
-	 * 旧数据把它存在 hiddenModules 里（id 仍是 `composerModes`）；不清洗会让升级后的用户
-	 * 丢掉「已隐藏」状态（新模式选择器又冒出来），旧 id 也会永远滞留在 hiddenModules。
-	 * 搬完立即落盘：迁移是幂等的（源 id 已删），但不落盘就要等用户下一次改设置才生效。
-	 * 目标清单里已有该 id 时迁移等价于去重，同样安全。
+	 * 旧数据可能把 id 存在两处——最早在 hiddenModules，后来搬到 hiddenComposerFeatures。
+	 * 开关没了，两处残留都要清掉并落盘：否则设置对象会永久携带一个没有 UI 的隐藏项，
+	 * 旧 id 也会一直滞留在文件里。迁移幂等：两处都不含该 id 时直接返回。
 	 */
-	private migrateComposerModesVisibility() {
+	private migrateRemovedComposerModesToggle() {
 		const legacyHiddenModules = this.settings.hiddenModules ?? [];
-		if (!legacyHiddenModules.includes("composerModes")) return;
-		this.settings.hiddenModules = legacyHiddenModules.filter((id) => id !== "composerModes");
-		this.settings.hiddenComposerFeatures = toggleHiddenComposerFeature(this.settings.hiddenComposerFeatures ?? [], "composerModes", true);
+		const hiddenFeatures = this.settings.hiddenComposerFeatures ?? [];
+		const hasLegacy = legacyHiddenModules.includes("composerModes");
+		const hasCurrent = hiddenFeatures.includes("composerModes");
+		if (!hasLegacy && !hasCurrent) return;
+		if (hasLegacy) this.settings.hiddenModules = legacyHiddenModules.filter((id) => id !== "composerModes");
+		if (hasCurrent) this.settings.hiddenComposerFeatures = hiddenFeatures.filter((id) => id !== "composerModes");
 		void this.save().catch(() => undefined);
 	}
 
@@ -959,6 +967,10 @@ export class SettingsStore {
 		if ("dshRuntimeMigrationNoticeShown" in safePatch && typeof safePatch.dshRuntimeMigrationNoticeShown !== "boolean") {
 			delete safePatch.dshRuntimeMigrationNoticeShown;
 		}
+		// 输入预测开关：脏值先摘掉再做通用合并，否则字符串 "false" 会原样落进 settings。
+		if ("promptSuggestionEnabled" in safePatch && typeof safePatch.promptSuggestionEnabled !== "boolean") {
+			delete safePatch.promptSuggestionEnabled;
+		}
 		this.settings = { ...this.settings, ...safePatch };
 		// 生图字段来自渲染层，非法值丢掉，避免下次请求带坏 size/watermark。
 		if ("imageGenSize" in safePatch) {
@@ -977,6 +989,14 @@ export class SettingsStore {
 		// 上下文会发送给所选供应商：脏值不能隐式打开。
 		if ("enhanceIncludeContext" in safePatch) {
 			this.settings.enhanceIncludeContext = safePatch.enhanceIncludeContext === true;
+		}
+		// 输入预测开关同样只认布尔语义：非 false 的脏值不改变当前设置。
+		if ("promptSuggestionEnabled" in safePatch && typeof safePatch.promptSuggestionEnabled === "boolean") {
+			this.settings.promptSuggestionEnabled = safePatch.promptSuggestionEnabled;
+		}
+		// 预测模型同增强模型：入参不可信，非法形态一律归一为 null（跟随会话模型）。
+		if ("promptSuggestionModel" in safePatch) {
+			this.settings.promptSuggestionModel = normalizeEnhanceModel(this.settings.promptSuggestionModel);
 		}
 		if ("theme" in safePatch) {
 			this.settings.theme = this.normalizeThemeMode(this.settings.theme);

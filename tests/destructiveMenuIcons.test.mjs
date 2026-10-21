@@ -15,11 +15,13 @@ test("DropdownMenuItem and ContextMenuItem support descendant SVG coloring for d
 
 test("SessionTabsBar dangerous actions are configured with variant=destructive", () => {
 	const tabsSrc = readFileSync("src/renderer/src/components/session/SessionTabsBar.tsx", "utf8");
+	// ⋯ 菜单本体已拆到 SessionActionsMenu（Tab 栏只留右键菜单），破坏性项在那里断言。
+	const actionsSrc = readFileSync("src/renderer/src/components/session/SessionActionsMenu.tsx", "utf8");
 
 	// 破坏性语义归属「关闭 Agent」（杀进程 + 解绑）：必须标记 destructive。
 	// 2026-09 语义拆分后「停止回答」= abort（只中断当前回合、进程保留）不再是破坏性操作，
 	// 因此 destructive 从旧的 onAction("stop") 项移到了 onCloseAgent 项。
-	assert.match(tabsSrc, /<DropdownMenuItem\s+variant="destructive"\s+title=\{t\("menu\.closeAgentHint"\)\}\s+onSelect=\{control\.onCloseAgent\}/, "Close Agent action in more dropdown menu should have variant='destructive'");
+	assert.match(actionsSrc, /<DropdownMenuItem\s+variant="destructive"\s+title=\{t\("menu\.closeAgentHint"\)\}\s+onSelect=\{control\.onCloseAgent\}/, "Close Agent action in more dropdown menu should have variant='destructive'");
 
 	// 反向断言：abort 项不得再被标记 destructive，防止「中断回合」与「杀进程」两种语义再次被合并。
 	const abortPos = tabsSrc.indexOf('control.onAction("abort")');

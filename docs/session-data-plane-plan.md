@@ -17,7 +17,7 @@
 
 直接后果：
 
-- 每个新消费方（正文搜索、轨迹重建、token 统计…）都要重新发明「怎么读 JSONL、上界多少、缓存怎么失效」；
+- 每个新消费方（正文搜索、轨迹重建、token 统计…）都要重新发明「怎么读 JSONL、上界多少、缓存怎么失效」；**消费侧的读取上界、缓存与渲染成本另见 `docs/trajectory-session-consumer-plan.md`**（本文件只管传输层，不重复它的问题清单）；
 - 大会话必须整体进内存（32MiB 上限之外直接拒绝打开），打开成本随文件大小线性上升；
 - 上界与字段解释略有差异，容易出现「同一文件在不同 UI 里表现不一致」（历史上出现过 toolResult 配对、分支预览截断一类问题）。
 
@@ -242,6 +242,8 @@ TS 历史路径已经是「**索引 + 定向读行**」两段式，而不是「�
 
 **格式与失效**：一文件一条目文件（`<sha1(path)>.table`），首行 header JSON（`version`/`path`/`size`/`mtimeMs`/`endsWithNewline`/`entryCount`/`oversizedLines`），其后每行一个 `displayEntry` JSON（复用 Go 的 `json` 标签，不引入二进制定长记录：可选字段十几个，编码代码量与漂移风险都不划算）。版本键与内存缓存同口径：`size + mtimeMs` 都相等才整表复用；只是变长且上次停在换行边界 → 复用旧条目 + 只解析尾部（`scanTableFrom(start)`）；变短/损坏/版本不符 → 单文件全量重扫。目录上限 `maxTableFiles = 256` / `maxTableDirBytes = 512MiB`，按 mtime 淘汰最旧；单表上限 32MB。写盘走 `.tmp` + `os.Rename`，失败只 log。
 
+**v2 边界校验（issue #392）**：版本键看不出「文件被整份重写、恰好更长」——编辑消息、压缩重写、外部工具重建/导入都会造成这种重写，且重写后条目 id 往往全换；此时尾部增量从旧 `size` 处接着解析，条目从错位点起与文件脱节，活动链（`traceActiveBranch` 从末条沿 `parentId` 回溯）在断点处截断 = 用户看到的「只剩最后几轮、也没有『加载更多』」，而这张错表按 `size+mtimeMs` 永久命中、重启不自愈（删表才恢复）。现在复用命中（整表复用与尾部增量两种）之前都走 `verifyTableBoundary`：按表里的 `offset/byteLength` 回读**首条与末条**（超长行只读 64KiB 前缀并比正则抢到的 id），id 不符即丢弃命中、全量重扫覆盖落盘；同时 `tableFileVersion` 1 → 2，把用户手里已脱节的旧条目文件一次性丢弃重建（等价于报告者手删表）。残留取舍：同长改写且首/末条未变的中段改写仍可能误命中（与 TS 侧 `appendIndexFromTail` 首/末探针同一取舍）。
+
 **实测（本机，同一批真实会话，`get-index` 全程经协议子进程）**
 
 | 文件 | 大小 | 条目 | 冷（boot + 解析） | 重启后磁盘命中 #1 | #2 |
@@ -251,6 +253,6 @@ TS 历史路径已经是「**索引 + 定向读行**」两段式，而不是「�
 
 对照 §8.10：TS 冷建表 99–188ms、sidecar 内存命中 0ms（重启即失效）。**磁盘命中 14–20ms（含进程 boot 8–15ms）比 TS 冷建表快 5–12×**，且不随会话大小线性增长（只是读几百 KB 条目文件 + JSON 解码）。这满足 §8.8-Q3「证明收益再接线」的判据，故默认开启。
 
-**门禁**：`native/session-store/tablepersist_test.go` 8 个用例（跨实例复用——用「同长度改写 + 还原 mtime」证明真读了磁盘、尾部增量、残行不增量、损坏回退、截短重扫、无目录退化内存模式、目录淘汰保留最新与当前）；`tests/sessionStoreService.test.mjs` 18 项（含 argv 带 `tablesDir`）；`tests/sessionStoreIndexParity.test.mjs` 4 项 parity；`go -C native/session-store test ./...` 全绿。
+**门禁**：`native/session-store/tablepersist_test.go` 10 个用例（跨实例复用——用「同长度改写 + 还原 mtime」证明真读了磁盘、尾部增量、残行不增量、损坏回退、截短重扫、无目录退化内存模式、目录淘汰保留最新与当前、整份重写换 id 且变长必须等于全量重扫且活动链覆盖全部条目、旧版本号条目文件丢弃重扫）；`tests/sessionStoreService.test.mjs` 18 项（含 argv 带 `tablesDir`）；`tests/sessionStoreIndexParity.test.mjs` 4 项 parity；`go -C native/session-store test ./...` 全绿。
 
 **仍未做**：条目表尚未与 `state.bin` 合并（两套持久化并存，Wave 4 收敛）；`list-summaries`（Wave 3）因 TS 侧摘要缓存已足够快被判定不做（§8.10 后的实测结论）；`usage-rollup` 未动。

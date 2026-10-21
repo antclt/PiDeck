@@ -9,11 +9,12 @@ import type { AppSettings, DisabledExtensionEntry, PiCliUpdateResult, PiExtensio
 import type { PiLocator } from "../pi/PiLocator";
 import { toWslLinuxPath, toWindowsHostPath, type WslEnvironment } from "../wsl/WslPaths";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
-import { BUILT_IN_EXTENSIONS, INTERNAL_BUILT_IN_EXTENSIONS, isBuiltInExtensionName, isDefaultDisabledBuiltInExtension, type BuiltInExtensionPathRoots } from "./builtInExtensions";
+import { BUILT_IN_EXTENSIONS, INTERNAL_BUILT_IN_EXTENSIONS, isBuiltInExtensionName, type BuiltInExtensionPathRoots } from "./builtInExtensions";
 import { MIN_PI_VERSION_FOR_EXTENSION_WHITELIST, parsePiVersion, piVersionAtLeast } from "./extensionVersionGate";
 import { redactForReport, truncateText } from "../health/redact";
 import { PiSelfUpdateRunner, supportsPiSelfUpdate } from "../pi/piSelfUpdateRunner";
 import { PiExtensionCatalog, type ExtensionNativeState } from "./piExtensionCatalog";
+import { isPackageSource, isPathLikePackageSource } from "../../shared/piPackageSource";
 
 export { BUILT_IN_EXTENSIONS } from "./builtInExtensions";
 // 目录/版本查询域已抽到 piExtensionCatalog.ts（拆分 Wave 3）；以下是外部契约，原样再导出。
@@ -21,6 +22,16 @@ export { BUILT_IN_CONFLICT_KEYWORDS, extensionNameMatches, FILTERED_SUFFIX, type
 
 type SettingsProvider = () => AppSettings;
 type ExtensionCopy = (key: MainProcessTranslationKey, params?: Record<string, string | number>) => string;
+
+/**
+ * 本地文件扩展判定（纯函数，导出供单测）：只有「裸文件名」才是 ~/.pi/agent/extensions 下
+ * 自动发现的本地文件（卸载 = 删文件）；协议源与路径型 source（盘符 / UNC / POSIX 绝对 / ./ ../）
+ * 都是 pi 的 packages 条目，必须交给 `pi remove`。
+ * 判据来自 shared/piPackageSource，与「整包开关 / 项目资源」共用同一套识别，避免两处漂移。
+ */
+export function isLocalFileExtensionSource(source: string): boolean {
+	return !isPackageSource(source);
+}
 
 /**
  * 通过 pi CLI 管理已安装扩展，避免桌面端直接改写 pi settings 导致和 CLI 行为不一致。
@@ -119,10 +130,13 @@ export class ExtensionManager {
 
 	/**
 	 * 判断是否为本地文件扩展（~/.pi/agent/extensions 下自动发现的 .ts/目录）。
-	 * pi list 的包源都带 npm:/file:/github: 等协议前缀；裸文件名只能走文件系统删除。
+	 *
+	 * 只有「裸文件名」（`orca-agent-status.ts`、`my-extension`）才是这里的本地文件：
+	 * 协议源（npm:/file:/git:...）与路径型 source（`F:\pkg`、`./pkg`、`/opt/pkg`、UNC）都是
+	 * pi 的 packages 条目，不属于 extensions 目录。判定收口在 isLocalFileExtensionSource。
 	 */
 	private isLocalFileExtension(source: string): boolean {
-		return !/^(?:npm|file|github|git|https?):/i.test(source);
+		return isLocalFileExtensionSource(source);
 	}
 
 	/**
@@ -244,31 +258,6 @@ export class ExtensionManager {
 		this.invalidateListCache();
 	}
 
-	/**
-	 * 开关「默认关闭」（opt-in）的内置扩展：enabled=true 写入 enabledBuiltInExtensions，
-	 * false 则移出；不碰 removedBuiltInExtensions（那是另一套「用户主动禁用默认启用扩展」机制）。
-	 * 下次 Agent 启动时按 opt-in 列表决定是否随 -e 注入。
-	 */
-	async toggleBuiltIn(source: string, enabled: boolean): Promise<void> {
-		const normalized = source.trim();
-		if (!isDefaultDisabledBuiltInExtension(normalized)) {
-			throw new Error("仅默认关闭的内置扩展支持此开关");
-		}
-		// 自愈：历史上被「移除」过（进了 removedBuiltInExtensions）的 opt-in 扩展，
-		// 用户重新打开开关时同步清掉 removed 标记——否则开关 ON 但注入层仍被 removed 拦住。
-		if (enabled) {
-			const removed = this.getPiDeckSettings().removedBuiltInExtensions ?? [];
-			if (removed.includes(normalized)) {
-				await this.saveRemovedBuiltIn(removed.filter((s) => s !== normalized));
-			}
-		}
-		const current = this.getPiDeckSettings().enabledBuiltInExtensions ?? [];
-		const next = enabled ? (current.includes(normalized) ? current : [...current, normalized]) : current.filter((s) => s !== normalized);
-		if (next.length === current.length && next.every((s, i) => s === current[i])) return;
-		await this.patchPiDeckSettings({ enabledBuiltInExtensions: next });
-		this.invalidateListCache();
-	}
-
 	/** 卸载：user/unknown 走全局缓存；project 走 `pi remove -l`，projectRoot 由 IPC 层经信任校验解析后传入。 */
 	async uninstall(source: string, scope: PiExtensionSummary["scope"] = "user", options: { projectRoot?: string } = {}): Promise<void> {
 		const normalized = source.trim();
@@ -279,11 +268,14 @@ export class ExtensionManager {
 		if (isBuiltInExtensionName(normalized)) {
 			throw new Error(this.translate("mainExtension.builtInCannotUninstall"));
 		}
-		// 本地 .ts/目录扩展不在 pi package 列表里，pi remove 会报 No matching package；
+		// 裸文件名的本地 .ts/目录扩展不在 pi package 列表里，pi remove 会报 No matching package；
 		// 例如 orca-agent-status.ts 只能直接删文件。
 		if (this.isLocalFileExtension(normalized)) {
 			await this.removeLocalExtension(normalized);
 		} else {
+			// 协议源与路径型 source（pi install <本地目录>）都登记在 pi 的 packages 里，统一交给
+			// pi remove：路径型 source 绝不能落进 removeLocalExtension——那里会把 basename 拼到
+			// ~/.pi/agent/extensions 下删除，等于去删一个不存在的文件（必然失败且报告误导）。
 			// 项目层 remove 与 install 同一信任路径：带项目 cwd + projectInstall（不推 --no-approve）。
 			// --no-approve 下 pi 视项目为不信任直接拒改本地 packages（"Project is not trusted"），且无 cwd 会删错目录。
 			await this.runPi(["remove", normalized, ...(scope === "project" ? ["-l"] : [])], 30_000, options.projectRoot ? { cwd: options.projectRoot, projectInstall: true } : {});
@@ -334,11 +326,22 @@ export class ExtensionManager {
 		}
 	}
 
-	/** 更新单个扩展：`pi update <source>`，source 与 list 输出一致（如 npm:context-mode）。 */
+	/**
+	 * 更新单个扩展：`pi update <source>`，source 与 list 输出一致（如 npm:context-mode）。
+	 *
+	 * 路径型 source（`pi install <本地目录>`）没有稳定的单包更新语义：`pi update <path>` 在不同
+	 * pi 版本下会报 No matching package 或静默退回整包更新，UI 无法判断结果。统一改走
+	 * updateExtensions()（即 `pi update --extensions`，缓存失效与输出脱敏一并复用）；
+	 * 返回结果里的 command 如实展示实际执行的命令，用户不会被日志误导。
+	 */
 	async updateExtension(source: string): Promise<PiCliUpdateResult> {
+		const normalized = source.trim();
+		if (isPathLikePackageSource(normalized)) {
+			return this.updateExtensions();
+		}
 		try {
-			const output = await this.runPi(["update", source], 120_000, { offline: false });
-			return this.toUpdateResult(`pi update ${source}`, output, true);
+			const output = await this.runPi(["update", normalized], 120_000, { offline: false });
+			return this.toUpdateResult(`pi update ${normalized}`, output, true);
 		} finally {
 			this.invalidateListCache();
 		}
@@ -387,11 +390,7 @@ export class ExtensionManager {
 		const normalized = source.trim();
 		// 白名单判定：pi-deck-* 前缀不足以证明内置身份（插件开发 demo 同前缀，是普通本地扩展）。
 		if (isBuiltInExtensionName(normalized)) {
-			if (isDefaultDisabledBuiltInExtension(normalized)) {
-				// 默认关闭的内置扩展（GUI 桥/扩展点面板）：开关写 enabledBuiltInExtensions（opt-in）；
-				// 注意不碰 removedBuiltInExtensions——那是「默认启用扩展的用户禁用」机制，语义互斥。
-				await this.toggleBuiltIn(normalized, enabled);
-			} else if (enabled) {
+			if (enabled) {
 				await this.restoreBuiltIn(normalized);
 			} else {
 				await this.disableBuiltIn(normalized);

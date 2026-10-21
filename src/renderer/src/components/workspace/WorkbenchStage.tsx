@@ -2,7 +2,6 @@ import { useEffect, useRef, type ReactNode } from "react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../ui-shadcn/resizable";
 import type { WorkspaceContentOpenMode } from "../../../../shared/types";
-import { BridgeGuiSlot, useBridgeSessionId } from "../bridge/BridgeSlot";
 
 export type WorkbenchStageProps = {
 	simple?: boolean;
@@ -35,8 +34,6 @@ export function WorkbenchStage(props: WorkbenchStageProps) {
 	const sessionPanelRef = useRef<PanelImperativeHandle>(null);
 	const contentPanelRef = useRef<PanelImperativeHandle>(null);
 	const contentFrameRef = useRef<HTMLDivElement>(null);
-	// GUI 扩展桥：工作台渲染的是会话内的 `content.view`，按当前聚焦会话取。
-	const bridgeSessionId = useBridgeSessionId();
 
 	// 内容区宽度上报：右缘刻度轴（.outline-hover）默认贴窗口右缘，工作台分屏时
 	// 需右移内容区宽度才能落在消息区右缘。maximize 会话区收起，按 0 偏移回窗口右缘。
@@ -61,8 +58,11 @@ export function WorkbenchStage(props: WorkbenchStageProps) {
 		const contentPanel = contentPanelRef.current;
 		if (!panel || !contentPanel) return;
 		if (!props.hasContent) {
-			contentPanel.collapse();
+			// 顺序关键（2026-10-21 实测关掉后 48/52 留白）：maximize 状态下会话面板仍是收起态，
+			// 库的尺寸再平衡会把内容面板按「上次展开尺寸」补回 ~52%。先把会话面板 expand
+			// 回 expandToSize，再 collapse 内容面板，最终布局才是 [48, 0] → 会话独占整条。
 			panel.expand();
+			contentPanel.collapse();
 		} else {
 			contentPanel.expand();
 			if (props.layout === "maximize") panel.collapse();
@@ -88,11 +88,6 @@ export function WorkbenchStage(props: WorkbenchStageProps) {
 						<div ref={contentFrameRef} className="workbench-content-frame">
 							{props.simple && props.hasContent && props.contentChrome}
 							{props.content}
-							{/* GUI 扩展桥：主内容区落点（ctx.gui.setContentView）。
-							    **追加**在工作区内容之后 —— 不改内容区既有布局（§7.4 只追加）。
-							    WorkbenchStage 无 sessionId prop，按「当前聚焦会话」取（应用级单实例 chrome）。
-							    无贡献时返回 null，不占位。 */}
-							<BridgeGuiSlot sessionId={bridgeSessionId} slot="content.view" className="flex min-h-0 flex-col gap-2 overflow-auto p-2" />
 						</div>
 					</ResizablePanel>
 				</ResizablePanelGroup>

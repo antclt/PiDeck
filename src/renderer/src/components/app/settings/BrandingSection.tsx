@@ -127,6 +127,7 @@ export const BrandingSection = memo(function BrandingSection({ draft, updateDraf
 					{readError ? <p className="text-xs text-danger">{readError}</p> : null}
 				</SettingRow>
 			)}
+			{/* 显示名是短文本（≤24 字）：用普通行放进右侧控件列，与上方主题/Logo 风格同一列对齐，不占满整行（stacked 只留给 textarea 这类超长控件） */}
 			<SettingRow
 				title={
 					<>
@@ -135,7 +136,7 @@ export const BrandingSection = memo(function BrandingSection({ draft, updateDraf
 					</>
 				}
 				description={t("settings.appDisplayNameDesc")}
-				stacked
+				alignEnd={false}
 			>
 				<Input type="text" value={draft.appDisplayName ?? ""} maxLength={APP_DISPLAY_NAME_MAX_LENGTH} placeholder={APP_DISPLAY_NAME_DEFAULT} onChange={(event) => updateDraft({ appDisplayName: event.target.value })} aria-label={t("settings.appDisplayName")} />
 			</SettingRow>

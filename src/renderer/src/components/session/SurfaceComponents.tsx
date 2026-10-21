@@ -81,7 +81,6 @@ import {
 	Terminal,
 	UploadCloud,
 	Wrench,
-	X,
 	Star,
 	FolderOpen,
 	Copy,
@@ -105,6 +104,7 @@ import { cn } from "../../lib/utils";
 import { showNotice } from "../../utils/notice";
 import { desktopApi } from "../../desktopApi";
 import { ImageActionButtons } from "./imageActions";
+import { ImageLightbox } from "./ImageLightbox";
 import { Button } from "../ui-shadcn/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
 import type {
@@ -1154,28 +1154,11 @@ export const UserBubble = memo(function UserBubble(props: {
 });
 
 export function ImagePreviewModal(props: { image: ImageContent; onClose: () => void }) {
-	// 模态惯例：Escape 可关（右上角关闭钮可聚焦，但键盘用户不应被迫 Tab 寻找）
-	useEffect(() => {
-		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key === "Escape") props.onClose();
-		};
-		window.addEventListener("keydown", onKeyDown);
-		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [props.onClose]);
 	const src = imageContentSrc(props.image);
 	if (!src) return null;
-	return (
-		<div className="image-preview-modal" onClick={props.onClose}>
-			<button className="image-preview-close" onClick={props.onClose} aria-label={t("app.imagePreviewClose")}>
-				<X size={20} strokeWidth={2.4} />
-			</button>
-			<img src={src} alt={t("app.imagePreviewAlt")} onClick={(event) => event.stopPropagation()} />
-			{/* 预览态动作条：全尺寸查看时直接复制/保存（缩略图 hover 之外的第二个入口，两条路共用同一组件） */}
-			<div className="absolute bottom-6 left-1/2 z-10 -translate-x-1/2" onClick={(event) => event.stopPropagation()}>
-				<ImageActionButtons image={props.image} />
-			</div>
-		</div>
-	);
+	// 浮层本体在 ImageLightbox（Markdown 正文图片也走同一个组件）：动作条「复制/保存」
+	// 只对能拿到真实字节的 ImageContent 有意义，所以由这里注入。
+	return <ImageLightbox src={src} alt={t("app.imagePreviewAlt")} onClose={props.onClose} actions={<ImageActionButtons image={props.image} />} />;
 }
 
 // ANSI 转义码正则:匹配 \x1b[...m 等终端颜色/样式序列
@@ -1233,18 +1216,21 @@ function renderBubbleSegments(
 			return;
 		}
 		const { block } = segment;
+		// 数据层 kind 与视觉 kind 解耦：模板（/模板名）与技能（/skill:名）在 pi 是两种资源，
+		// 展示上共用同一套斜杠 chip 外观（data-type 保留真实类型，便于样式/测试按类型定位）。
 		const chipKind = block.kind;
+		const visualKind = chipKind === "template" ? "skill" : chipKind;
 		const label = block.kind === "session" ? block.name : block.label;
 		// skill/template 正文可能是一整份 SKILL.md 或提示词；它属于模型上下文，不应在
 		// 原生 title 中撑出巨大浮层。quote/session 仍保留全文悬浮预览。
-		const title = block.kind === "skill" ? `/${label}` : block.text;
-		const Icon = CHIP_ICONS[chipKind] ?? FileText;
+		const title = block.kind === "skill" || block.kind === "template" ? `/${label}` : block.text;
+		const Icon = CHIP_ICONS[visualKind] ?? FileText;
 		nodes.push(
-			<span key={`${chipKind}-${block.start}`} className={`input-chip input-chip--${chipKind}`} data-type={chipKind} title={title}>
+			<span key={`${chipKind}-${block.start}`} className={`input-chip input-chip--${visualKind}`} data-type={chipKind} title={title}>
 				{/* inline-block 是必须的：Tailwind preflight 把 svg 设为 display:block，
 				    仅靠 legacy 作用域在气泡外的渲染点会再次被拆行 */}
 				<Icon className="input-chip__icon inline-block shrink-0" width="12" height="12" aria-hidden="true" />
-				<span className="input-chip__label">{formatChipDisplayLabel(chipKind, label)}</span>
+				<span className="input-chip__label">{formatChipDisplayLabel(visualKind, label)}</span>
 			</span>,
 		);
 	});

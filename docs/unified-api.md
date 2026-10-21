@@ -17,7 +17,7 @@ PiDeck 桌面能力面统一门面 `piDeckApi` 的契约文档。三层结构：
 
 | 域 | 分组 | 主进程归属 | IPC 注册文件 | preload 命名空间 | 通道前缀 | 聚合方式 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `pi` | core | AgentManager（pi RPC 运行时宿主；pi 安装/路径检查面注册在 systemIpc.ts） | systemIpc.ts | `pi` | `pi` | `redline`（红线：GUI 桥与 standby 池宿主；只透传，禁止扩成通用桥） |
+| `pi` | core | AgentManager（pi RPC 运行时宿主；pi 安装/路径检查面注册在 systemIpc.ts） | systemIpc.ts | `pi` | `pi` | `redline`（红线：standby 池与模型快照端点宿主；只透传，禁止扩成通用桥） |
 | `sessions` | core | SessionCatalog + SessionScanner + SessionRuntimeCoordinator + SessionFileEditor/SessionHistoryReader/RewindCheckpointCoordinator | ipc/sessionIpc.ts, index.ts | `sessions` | `sessions`, `agents` | `consolidate` |
 | `dsh` | core | DshHost + DshAgentManager + DshApiClient + DshPluginInstallService + DshRuntimeInstaller/DshRuntimeManager | ipc/sessionIpc.ts | `sessions` | `dsh`, `dsh-runtime` | `redline`（红线：DSH 是既有能力非 PiDeck 扩展点；门面不聚合、只透传） |
 | `security` | core | SecurityStore | ipc/securityIpc.ts | `security` | `security` | `aggregate` |
@@ -32,6 +32,7 @@ PiDeck 桌面能力面统一门面 `piDeckApi` 的契约文档。三层结构：
 | `editors` | workspace | 外部编辑器检测 | ipc/editorsIpc.ts | `editors` | `editors` | `aggregate` |
 | `browser` | workspace | main/browser/（webview 宿主与导航白名单） | ipc/filesIpc.ts | `browser` | `browser` | `aggregate` |
 | `files` | workspace | 文件抽屉读写 | ipc/filesIpc.ts | `files` | `files` | `aggregate` |
+| `local-image` | workspace | 本地图片字节读取（Markdown 图片保存/复制） | ipc/localImageIpc.ts | `localImage` | `local-image` | `aggregate` |
 | `clipboard` | workspace | 剪贴板（sendSync 同步读） | ipc/clipboardIpc.ts | `clipboard` | `clipboard` | `aggregate` |
 | `paste-files` | workspace | 粘贴文件收集 | ipc/pasteFilesIpc.ts | `pasteFiles` | `paste-files` | `aggregate` |
 | `wsl` | workspace | WslPaths | ipc/systemIpc.ts | `wsl` | `wsl` | `aggregate` |
@@ -41,7 +42,6 @@ PiDeck 桌面能力面统一门面 `piDeckApi` 的契约文档。三层结构：
 | `scratch-pad` | workspace | 便签（ScratchPadStore） | ipc/scratchPadIpc.ts | `scratchPad` | `scratch-pad` | `aggregate` |
 | `shell-menu` | workspace | Shell 上下文菜单 | ipc/shellMenuIpc.ts | `shellMenu` | `shell-menu` | `aggregate` |
 | `dialog` | workspace | 系统文件选择器（无独立 Manager，dialog 命名空间消费） | ipc/filesIpc.ts, ipc/backgroundsIpc.ts | `dialog` | `dialog`, `backgrounds` | `aggregate` |
-| `plugin-dev` | workspace | PluginDevService | ipc/pluginDevIpc.ts | `pluginDev` | `plugin-dev` | `aggregate` |
 | `reply-actions` | workspace | 快捷回复动作 | ipc/replyActionsIpc.ts | `replyActions` | `reply-actions` | `aggregate` |
 | `prompts` | content | PromptManager + XuePromptManager | ipc/storeIpc.ts | `prompts` | `prompts` | `aggregate` |
 | `prompt-store` | content | promptStoreUpdater（提示词模板检索与导入） | ipc/storeIpc.ts | `promptStore` | `prompt-store` | `aggregate` |
@@ -62,6 +62,9 @@ PiDeck 桌面能力面统一门面 `piDeckApi` 的契约文档。三层结构：
 | `feishu` | integration | FeishuBridge/FeishuConnection/CardStream | ipc/feishuIpc.ts | `feishu` | `feishu` | `aggregate` |
 | `web` | integration | WebServiceManager + WebEventStream/WebWorkspaceRoutes/WebI18n/WebNetwork | ipc/systemIpc.ts | `settings` | `web` | `aggregate` |
 | `enhance` | integration | EnhancePromptService（常驻 sidecar pi-enhance-host.mjs） | ipc/enhanceIpc.ts | `enhance` | `enhance` | `redline`（红线：例外四，pi-enhance-host.mjs 单用途补全；禁止通用模型桥） |
+| `prompt-suggestion` | integration | EnhancePromptService（prompt-suggestion 独立实例，systemPrompt 由主进程常量注入） | ipc/promptSuggestionIpc.ts | `suggestion` | `suggest` | `redline`（红线：例外四，与 enhance 共用协议但独立实例；渲染层禁传 systemPrompt/userText） |
+| `agent-profiles` | integration | AgentProfileStore + AgentInvokeService（划词工具一次性调用，复用 pi-enhance-host sidecar 独立实例） | ipc/agentProfilesIpc.ts + ipc/agentInvokeIpc.ts | `agentProfiles` | `agent-profiles` | `aggregate`（例外四：systemPrompt 只能由主进程按 agentId 解析） |
+| `selection-tool` | integration | SelectionToolService + SelectionToolWindow（全局快捷键 + 系统级划词浮窗） | ipc/selectionToolIpc.ts | `selectionTool` | `selection-tool` | `aggregate` |
 | `channel-switch` | integration | ChannelSwitchService + UpdateService（更新通道切换） | ipc/channelSwitchIpc.ts | `channelSwitch` | `channel-switch` | `aggregate` |
 | `cua` | integration | CuaEngine + CuaGate + McpHttpHost + CuaService | ipc/cuaIpc.ts | `cua` | `cua` | `aggregate` |
 | `usage-stats` | integration | 用量统计 | ipc/usageStatsIpc.ts | `usageStats` | `usage-stats` | `aggregate` |

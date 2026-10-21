@@ -81,8 +81,9 @@ describe("Git panel VS Code Source Control contract", () => {
 	});
 
 	test("keeps resource groups inside Changes and retains VS Code decorations", () => {
-		// Changes 组始终显示全部变更（含已暂存），暂存后文件不会从 Changes 消失（VS Code 语义）
-		assert.match(panel, /\.\.\.groups\.workingTree, \.\.\.groups\.untracked, \.\.\.groups\.index/);
+		// 「未暂存的更改」只渲染工作区侧资源：已暂存文件必须离开该组（并进本组会重复一行且点开 diff 失败，issue #391）
+		assert.match(panel, /collectUnstagedResources\(groups\)/);
+		assert.doesNotMatch(panel, /\.\.\.groups\.workingTree, \.\.\.groups\.untracked, \.\.\.groups\.index/);
 		assert.match(panel, /groups\.merge\.length \+ stagedCount \+ workingChanges\.length/);
 		assert.match(resourceTree, /function GitStageGlyph/);
 		assert.match(resourceTree, /className=\{`size-6 rounded/);
@@ -338,9 +339,9 @@ describe("Git panel VS Code Source Control contract", () => {
 		assert.doesNotMatch(resourceTree, /label: t\("git\.discard"\)/);
 		assert.match(resourceTree, /label: t\("git\.discardChanges"\)/);
 		assert.match(resourceTree, /kind: "discard"/);
-		// Changes 组始终显示全部变更（含已暂存），已暂存文件不再出现 stage/rollback 按钮
-		assert.match(panel, /\.\.\.groups\.workingTree, \.\.\.groups\.untracked, \.\.\.groups\.index/);
-		assert.match(resourceTree, /props\.stagedPaths\?\.has\(r\.path\)/);
+		// Changes 组只含工作区侧资源，每行都能再次暂存/回滚：不能再按「路径已暂存」把按钮藏掉
+		assert.doesNotMatch(resourceTree, /stagedPaths/);
+		assert.doesNotMatch(panel, /stagedPathSet/);
 		assert.match(panel, /from "\.\/git\/GitResourceTree"/);
 		assert.match(panel, /<ConfirmDialog/);
 		assert.match(i18n, /"git\.discardConfirmMessage"/);

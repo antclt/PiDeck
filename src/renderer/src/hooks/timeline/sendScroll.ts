@@ -11,6 +11,8 @@ type SendScrollCallbacks = {
 	isFollowing: () => boolean;
 	markProgrammaticScroll: (durationMs: number) => void;
 	clearProgrammaticScroll: () => void;
+	/** 动画被用户输入/切会话/下一次 pin 打断（不会走 onComplete）。 */
+	onCancel?: () => void;
 };
 
 /** 最新 user 身份不依赖后端 ID 格式，也不要求它仍是数组最后一条。 */
@@ -75,9 +77,13 @@ export class SendScrollPositioner {
 		this.generation += 1;
 		this.stopAnimation?.();
 		this.stopAnimation = undefined;
+		const wasAnimating = this.isAnimating;
 		this.isAnimating = false;
 		this.detachInputs();
 		this.callbacks?.clearProgrammaticScroll();
+		// 被打断 = 接收方要自己结算（controller 据此撤掉「置顶动画进行中」标记），
+		// 否则标记会永远挂着，新一轮折叠被无限期推迟。
+		if (wasAnimating) this.callbacks?.onCancel?.();
 	};
 
 	private detachInputs(): void {
