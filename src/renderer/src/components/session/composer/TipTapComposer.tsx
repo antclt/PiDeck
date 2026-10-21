@@ -61,10 +61,14 @@ export const TipTapComposer = forwardRef<HTMLDivElement, TipTapComposerProps>(fu
 						// 只作视觉层：pointer-events-none 不抢光标，aria-hidden 不进读屏（否则会被当成
 						// 已输入的正文）。字号/行高/边距全部跟随 .rich-input 的 token，保证「看起来就像
 						// 用户已经打了这几个字」，位置与 placeholder 完全重合（placeholder 此时被置空）。
+						// 颜色必须走 text-text-faint（主题最浅文字档）：正文色继承自 .rich-input，
+						// 写成 text-tertiary（少了 text- 前缀）是无效 utility，会退化成正文原色——
+						// 2026-10 用户反馈「预测的文字不是灰色、太重」，就是这个类没生效。
 						props.suggestion ? (
-							<div className="pointer-events-none absolute inset-x-3 top-[10px] flex items-start gap-2 text-tertiary" style={{ fontSize: "var(--font-size-input)", lineHeight: "var(--line-height-input)" }} aria-hidden="true">
+							<div className="pointer-events-none absolute inset-x-3 top-[10px] flex items-start gap-2 text-text-faint" style={{ fontSize: "var(--font-size-input)", lineHeight: "var(--line-height-input)" }} aria-hidden="true">
 								<span className="min-w-0 truncate">{props.suggestion}</span>
-								<kbd className="mt-[3px] shrink-0 rounded border border-subtle px-1 text-[11px] leading-4 opacity-70">Tab</kbd>
+								{/* 键帽比文案深一档：ghost 句子要「轻」，但 Tab 提示必须读得清（faint 再叠 opacity 会糊）。 */}
+								<kbd className="mt-[3px] shrink-0 rounded border border-border-subtle px-1 text-[11px] leading-4 text-text-tertiary opacity-80">Tab</kbd>
 							</div>
 						) : null
 					}
