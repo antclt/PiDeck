@@ -253,9 +253,7 @@ export type DshBackendIpcDeps = {
 	readSessionFacts?: (sessionPath: string) => Promise<import("../../shared/types/trajectory").SessionFactsResult>;
 	/** 用户检查点目录（导轨）：pi 索引派生；缺省返回空目录。 */
 	readSessionOutline?: (sessionPath: string, limit?: number) => Promise<import("../../shared/types/outline").SessionOutlineSnapshot>;
-	readSessionOutlineTitle?: (sessionPath: string, entryId: string) => Promise<string | undefined>;
 	/** DSH 轨迹系统提示（运行时会话读投影缓存；历史会话从 host history 折叠 request/header；未装配返回 undefined）。 */
-	readDshSystemPrompt?: (agentId: string | undefined, dshSessionId: string | undefined) => Promise<string | undefined>;
 	/** DSH 「查看完整输出」（工具结果全文随投影消息存 meta.fullText）；未装配时抛错。 */
 	readDshMessageFullText?: (agentId: string, messageId: string) => Promise<{ text: string }>;
 	/** DSH 会话文件路径推导（按 catalog entry 的 dshSessionId + cwd）；未装配/不可推导返回 undefined。 */
@@ -530,8 +528,6 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		readDshProcessEvents,
 		readSessionFacts,
 		readSessionOutline,
-		readSessionOutlineTitle,
-		readDshSystemPrompt,
 		readDshMessageFullText,
 		resolveDshSessionFilePath,
 		searchDshSessions,
@@ -1379,26 +1375,6 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		if (!entry?.filePath || !readSessionOutline) return empty;
 		const bounded = typeof limit === "number" && Number.isFinite(limit) ? Math.min(Math.max(Math.floor(limit), 1), 10_000) : undefined;
 		return readSessionOutline(entry.filePath, bounded);
-	});
-	// 导轨单项标题：按需读一行；entryId 必须是会话内条目，空/超长直接拒绝。
-	ipcMain.handle(ipcChannels.sessionsCatalogReadOutlineTitle, async (_event, sessionId: unknown, entryId: unknown): Promise<string | undefined> => {
-		if (typeof sessionId !== "string" || !sessionId.trim()) return undefined;
-		if (typeof entryId !== "string" || !entryId.trim() || entryId.length > 200) return undefined;
-		const entry = sessionCatalog.get(sessionId);
-		if (!entry?.filePath || !readSessionOutlineTitle) return undefined;
-		return readSessionOutlineTitle(entry.filePath, entryId);
-	});
-	ipcMain.handle(ipcChannels.sessionsCatalogReadDshSystemPrompt, async (_event, sessionId: string): Promise<string | undefined> => {
-		if (typeof sessionId !== "string" || !sessionId.trim()) return undefined;
-		const entry = sessionCatalog.get(sessionId);
-		// DSH 会话的系统提示由 harness 在请求时组装（persona + sections），PiDeck
-		// 只能从 request/header 事件取；运行时会话读投影缓存，历史会话从 host history
-		// 折叠（未装配/无数据返回 undefined，轨迹不展示，不阻断）。
-		if (entry?.backend === "dsh" && readDshSystemPrompt) {
-			const target = sessionRuntimeCoordinator.getTarget(sessionId);
-			return readDshSystemPrompt(target?.agentId, entry.dshSessionId);
-		}
-		return undefined;
 	});
 	ipcMain.handle(ipcChannels.sessionsCatalogReadReferenceMessages, (_event, sessionId: string) => readCatalogSessionReferenceMessages(sessionId));
 	// 按需读取消息完整文本（工具结果截断后的「查看完整输出」）：

@@ -733,8 +733,6 @@ export class SessionHistoryReader {
 	private static readonly FULL_TEXT_CACHE_MAX_BYTES = 32 * 1024 * 1024;
 	/** 导轨目录上限：单次响应 10,000 项（2MiB 载荷的保守对应值）。 */
 	static readonly MAX_OUTLINE_ENTRIES = 10_000;
-	/** 单项标题读取上限：超过就只显示时间/序号占位。 */
-	static readonly MAX_OUTLINE_TITLE_BYTES = 1024 * 1024;
 	/** 标题展示长度（与 chip 标题同口径）。 */
 	static readonly OUTLINE_TITLE_CHARS = 80;
 	/**
@@ -843,19 +841,6 @@ export class SessionHistoryReader {
 		if (all.length <= limit) return { entries: all, total: all.length, truncated: false };
 		// 保留首个 + 最近 (limit-1) 个：会话开头的问题与当下的上下文同样重要。
 		return { entries: [all[0], ...all.slice(all.length - (limit - 1))], total: all.length, truncated: true };
-	}
-
-	/** 单个检查点的标题正文（按需读一行，≤1MiB；返回有效展示文本前 80 字）。 */
-	async readSessionOutlineTitle(sessionPath: string, entryId: string): Promise<string | undefined> {
-		const index = await this.getSessionDisplayIndex(sessionPath);
-		const replacement = index.contextEdits.replacementText.get(entryId);
-		if (replacement) return clipOutlineTitle(replacement);
-		const entry = index.activeMessageEntries.find((candidate) => candidate.id === entryId);
-		if (!entry || entry.oversized || entry.byteLength > SessionHistoryReader.MAX_OUTLINE_TITLE_BYTES) return undefined;
-		const [line] = await this.readIndexedLines(index.hostPath, [{ ...entry, hasMessage: true } satisfies SessionDisplayEntry]);
-		if (!line) return undefined;
-		const preview = extractMessagePreviewFromLine(line);
-		return preview ? clipOutlineTitle(preview) : undefined;
 	}
 
 	/** 读指定条目正文（复用索引读取的并发/字节预算与 fork 来源配对）。 */
@@ -2502,13 +2487,8 @@ function extractEntryResultText(message: unknown): string {
 	return "";
 }
 
-/** 索引预览 → 导轨卡片文本：压空白 + 截 80 字（与标题同口径）。 */
+/** 索引预览 → 导轨卡片文本：压空白 + 截 80 字（卡片只有一行，全文留在账本/时间线里）。 */
 function clipOutlinePreview(text: string): string {
-	return clipOutlineTitle(text);
-}
-
-/** 单行预览收敛成导轨标题：压空白 + 截 80 字。 */
-function clipOutlineTitle(text: string): string {
 	const compact = text.replace(/\s+/g, " ").trim();
 	return compact.length > SessionHistoryReader.OUTLINE_TITLE_CHARS ? `${compact.slice(0, SessionHistoryReader.OUTLINE_TITLE_CHARS)}…` : compact;
 }

@@ -3648,8 +3648,6 @@ function registerIpc() {
 			readDshProcessEvents: (agentId, dshSessionId) => dshAgentManager.readProcessEvents(agentId, dshSessionId),
 			readSessionFacts: (sessionPath) => agentManager.readSessionFacts(sessionPath),
 			readSessionOutline: (sessionPath, limit) => agentManager.readSessionOutline(sessionPath, limit),
-			readSessionOutlineTitle: (sessionPath, entryId) => agentManager.readSessionOutlineTitle(sessionPath, entryId),
-			readDshSystemPrompt: (agentId, dshSessionId) => dshAgentManager.readSystemPrompt(agentId, dshSessionId),
 			readDshMessageFullText: (agentId, messageId) => dshAgentManager.readMessageFullText(agentId, messageId),
 			resolveDshSessionFilePath: async (sessionId) => {
 				// F5：DSH 会话没有 pi 会话文件，「复制会话文件路径」按 catalog 的

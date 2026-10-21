@@ -264,7 +264,6 @@ export function createBrowserApi(): PiDesktopApi {
 			}),
 			readProcessEvents: async () => ({ events: [], version: "", coverage: { fromStart: true, chainComplete: true, readComplete: true, eventsTrimmed: false, reason: "unsupported" } }),
 			readOutline: async () => ({ entries: [], total: 0, truncated: false }),
-			readOutlineTitle: async () => undefined,
 			readReferenceMessages: async (sessionId) => {
 				const result = await request<{
 					messages: Awaited<ReturnType<PiDesktopApi["sessions"]["readReferenceMessages"]>>;

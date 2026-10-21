@@ -12,7 +12,8 @@
  *   同版下线 GUI 扩展桥（sessions.sendBridgeEvent / requestBridgeResync）与插件开发支持
  *   （整份 pluginDev 命名空间 3 方法）：命名空间 70→69、sessions 113→111；
  * 2026-10-21 刷新：轨迹 S4（sessions.readOutline / readOutlineTitle 入场）+ 远端市场/划词/
- *   技能目录等改动合并：命名空间 69→73、sessions 111→114（config/git/app 不变）。
+ *   技能目录等改动合并：命名空间 69→73、sessions 111→114（config/git/app 不变）；
+ * 2026-10-21：下线 readDshSystemPrompt 与 readOutlineTitle（轨迹事实/索引 preview 取代），114→112。
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -20,7 +21,7 @@ import { test } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const NS_LIST_SHA256 = "f5c7f2c3eedb1c19172c04595dae6077647b19dd6f9e31406d3175ca38c17990";
-const FULL_METHODS_SHA256 = "285980c7b7a456b1d77300274ebd0ab7e9cb63779462a802d2f2337fa1ffc2de";
+const FULL_METHODS_SHA256 = "0e8ebcf33f91541d90bfd4cf045dfa972db73f2663315e1401041858d9e74f70";
 const NAMESPACE_COUNT = 73;
 
 /** 捕获 preload 暴露的 piDesktop；null/undefined/形态不符时显式红并给诊断（F8-6 共用）。 */
@@ -62,8 +63,8 @@ test("F8-2 每命名空间排序方法清单摘要零漂移", () => {
 	assert.equal(sha256(methodLines.join(";")), FULL_METHODS_SHA256, "方法清单摘要漂移：任一命名空间的方法暴露面发生变化（A10 红线）");
 });
 
-test("F8-3 数量锚点：sessions 114 / config 48 / git 38 / app 32", () => {
-	assert.equal(Object.keys(api.sessions).length, 114, "sessions 方法数漂移");
+test("F8-3 数量锚点：sessions 112 / config 48 / git 38 / app 32", () => {
+	assert.equal(Object.keys(api.sessions).length, 112, "sessions 方法数漂移");
 	assert.equal(Object.keys(api.config).length, 48, "config 方法数漂移");
 	assert.equal(Object.keys(api.git).length, 38, "git 方法数漂移");
 	assert.equal(Object.keys(api.app).length, 32, "app 方法数漂移");

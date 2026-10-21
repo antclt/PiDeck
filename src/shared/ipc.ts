@@ -127,14 +127,12 @@ export const ipcChannels = {
 	/** 会话 JSONL 过程事件（session/model/thinking/custom/compaction），供轨迹复盘，不进聊天时间线。 */
 	sessionsCatalogReadProcessEvents: "sessions:catalog-read-process-events",
 	sessionsCatalogReadOutline: "sessions:catalog-read-outline",
-	sessionsCatalogReadOutlineTitle: "sessions:catalog-read-outline-title",
 	/** pi-subagents 扩展子代理列表：合成 record、桥接快照、工具调用推导。 */
 	sessionsListSubagents: "sessions:list-subagents",
 	/** 会话级文件修改汇总：从会话文件全量显示消息聚合 write/edit/create/patch。 */
 	/** 会话级 todo 快照：从会话文件 pi-deck-todo custom 条目重建最新计划。 */
 	sessionsListSessionTodo: "sessions:list-session-todo",
 	/** DSH 会话轨迹系统提示（request/header 事件的 EpochHeader.system；非 DSH/无数据返回 undefined）。 */
-	sessionsCatalogReadDshSystemPrompt: "sessions:catalog-read-dsh-system-prompt",
 	sessionsCatalogReadReferenceMessages: "sessions:catalog-read-reference-messages",
 	/** 按需读取单条消息完整文本（工具结果截断后的「查看完整输出」入口）。 */
 	sessionsCatalogReadMessageFullText: "sessions:catalog-read-message-full-text",

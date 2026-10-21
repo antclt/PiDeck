@@ -23,19 +23,19 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const CHANNEL_TOTAL = 702;
+const CHANNEL_TOTAL = 700;
 const PREFIX_COUNT = 87;
-const CHANNEL_DIGEST = "0321113e7f0000ee40b699b503e371aaa7e0d9964c34b14f57834261a9d56c5f";
+const CHANNEL_DIGEST = "84f683345ab5fe9dc77cab9fe6a88f0bd09dc5f91551c832fec6187e6cf04e23";
 
 const ipcChannels = loadTsCommonJs("src/shared/ipc.ts").ipcChannels;
 const entries = Object.entries(ipcChannels);
 const values = entries.map(([, value]) => value);
 
-test("F3-1 通道常量总数 === 702", () => {
+test("F3-1 通道常量总数 === 700", () => {
 	assert.equal(entries.length, CHANNEL_TOTAL);
 });
 
-test("F3-2 通道值唯一数 === 702（无重复通道字符串）", () => {
+test("F3-2 通道值唯一数 === 700（无重复通道字符串）", () => {
 	assert.equal(new Set(values).size, CHANNEL_TOTAL);
 });
 
