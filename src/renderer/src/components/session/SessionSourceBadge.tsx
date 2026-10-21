@@ -214,10 +214,20 @@ export function PiLogo(props: { className?: string }) {
 	);
 }
 
-/** DSH 官方 logo（DeepSeek 鲸鱼，取自 @deepseek-ai/dsh-web-frontend favicon.svg）。 */
+/** DeepSeek 官方品牌蓝（logo 原色）；暗色下提亮一档保证可辨识。 */
+export const DSH_LOGO_TONE = "text-[#4d6bfe] dark:text-[#8b9dff]";
+
+/**
+ * DSH 官方 logo（DeepSeek 鲸鱼，取自 @deepseek-ai/dsh-web-frontend favicon.svg）。
+ *
+ * 品牌蓝写进组件本身而不是让调用方各传一遍：鲸鱼是品牌标，缺省就应为官方蓝。
+ * 2026-10 用户反馈「回复行头与输入框的鲸鱼是黑灰的、和侧栏/Tab 的蓝标不是同一个」
+ * ——正是各调用点漏传 tone、退回 currentColor 导致的。调用方仍可用 text-* 覆盖
+ * （cn 走 twMerge，后面的类胜出），尺寸类照常生效。
+ */
 export function DshLogo(props: { className?: string }) {
 	return (
-		<svg viewBox="0 0 50 50" className={props.className ?? "size-3.5"} aria-hidden="true" focusable="false">
+		<svg viewBox="0 0 50 50" className={cn(DSH_LOGO_TONE, props.className ?? "size-3.5")} aria-hidden="true" focusable="false">
 			<path
 				fill="currentColor"
 				fillRule="nonzero"
@@ -264,9 +274,6 @@ export function AgentPresetLogo(props: { className?: string }) {
 	);
 }
 
-/** DeepSeek 官方品牌蓝（logo 原色）；暗色下提亮一档保证可辨识。 */
-const DSH_LOGO_TONE = "text-[#4d6bfe] dark:text-[#8b9dff]";
-
 /**
  * 后端标记：DSH 用官方鲸鱼 logo（品牌蓝），不再显示灰色「DSH」文本；
  * 生图/ACP 仍是「图标 + 短文本」，避免与来源徽标重复（工具名在输入框/会话详情展示）。
@@ -280,7 +287,7 @@ export function SessionBackendBadge(props: { backend?: AgentBackend; className?:
 	if (backend === "dsh") {
 		return (
 			<span role="img" aria-label={label} title={label} data-backend={backend} className={cn("inline-flex shrink-0 items-center justify-center", props.className)}>
-				<DshLogo className={cn("size-3.5", DSH_LOGO_TONE)} />
+				<DshLogo className="size-3.5" />
 			</span>
 		);
 	}
@@ -351,7 +358,7 @@ export function DshSourceBadge(props: { className?: string }) {
 	// 描边保持中性，logo 用 DeepSeek 官方品牌蓝：与列表/Tab 上的 DSH 标记同一观感。
 	return (
 		<Badge variant="outline" aria-label={label} title={label} data-source="dsh" className={cn("size-5 rounded-md border-border-strong p-0", props.className)}>
-			<DshLogo className={cn("size-3", DSH_LOGO_TONE)} />
+			<DshLogo className="size-3" />
 		</Badge>
 	);
 }
