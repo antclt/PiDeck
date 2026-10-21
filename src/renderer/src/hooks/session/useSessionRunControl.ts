@@ -7,6 +7,7 @@ import { openSettingsAtom } from "../../atoms/app-ui-atoms";
 import { sessionCommandsAtomFamily, sessionCommandsRefreshTickAtom, sessionReloadingByIdAtom } from "../../atoms/session-commands-atoms";
 import { canRunSessionAction, isLiveRuntimeStatus, requireSessionCommand, resolveSessionRunState, sessionCommandFailureToast, sessionRunCapabilities, SessionCommandFailure, toSessionRuntimeTarget, type SessionRunCapabilities, type SessionRunAction } from "../../utils/sessionCommands";
 import { sessionHistoryUnavailableState } from "../../utils/sessionHistoryAvailability";
+import { sessionDiskPageCursor } from "../../utils/sessionDiskPageCursor";
 import { DSH_INSTALL_SETTINGS_TARGET, maybeHintMissingDshRunnerNode, showDshRuntimeBlockHint } from "../../utils/dshRuntimeHint";
 import { dshSendBlockReason } from "../../../../shared/types/dshRuntime";
 import { isPendingAgentId, type PendingAgentTab } from "../../rendererUtils";
@@ -198,7 +199,7 @@ export function useSessionRunControl({
 				messages: page.messages,
 				source: "disk",
 				expectedRevision: 0,
-				page: { total: page.total, nextBefore: page.nextBefore },
+				page: sessionDiskPageCursor(page),
 				force: true,
 			});
 			setSessionMessageLoadState({ sessionId, state: { status: "ready" } });

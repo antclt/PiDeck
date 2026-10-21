@@ -90,8 +90,12 @@ export type SessionMessageCacheEntry = {
 	outlineRevision?: number;
 	/** Last user-message index in messages (not the separate history prefix). */
 	outlineLastUserIndex?: number;
-	/** Present only for paged historical reads; runtime owns an authoritative full snapshot. */
-	page?: Pick<SessionMessagePage, "total" | "nextBefore">;
+	/**
+	 * Present only for paged historical reads; runtime owns an authoritative full snapshot.
+	 * indexVersion/nextBeforeEntryId 也要留住：disk → runtime 交接时，磁盘页会整体转成
+	 * history 前缀，版本用来判断它是否与当前会话文件同代，游标用来继续向更早翻页。
+	 */
+	page?: Pick<SessionMessagePage, "total" | "nextBefore" | "nextBeforeEntryId" | "indexVersion">;
 	/** 激活显示窗口起点（runtime 数组下标空间，2026-08 激活分页）；>0 表示窗口前还有历史。 */
 	windowStart?: number;
 	/**
@@ -725,17 +729,41 @@ function messageEntryKey(message: ChatMessage): string {
 }
 
 /**
+ * 历史前缀是否仍与当前会话文件同代。
+ *
+ * 版本串是 `mtime:size`（主进程 stat 与分页 indexVersion 同口径）。不能用「字符串不等」
+ * 判异代：pi 每落盘一条消息都会**追加**写入，用户发一条消息 size 就会变——按不等即丢弃，
+ * 已加载的历史前缀会在发送瞬间整段消失（2026-10-21 用户诊断包：历史只在回复结束后才回来）。
+ * 同一分支的追加只会让文件变大；只有体积变小才说明历史被重写（压缩把历史换成摘要），
+ * 此时前缀下标空间失效必须丢弃。版本缺失/无法解析一律按异代处理（宁缺勿串）。
+ */
+export function isSameSessionFileGeneration(prefixVersion: string | undefined, flushVersion: string | undefined): boolean {
+	if (!flushVersion) return true;
+	if (!prefixVersion) return false;
+	if (prefixVersion === flushVersion) return true;
+	const readSize = (version: string): number | undefined => {
+		const size = Number(version.slice(version.lastIndexOf(":") + 1));
+		return Number.isFinite(size) ? size : undefined;
+	};
+	const prefixSize = readSize(prefixVersion);
+	const flushSize = readSize(flushVersion);
+	if (prefixSize === undefined || flushSize === undefined) return false;
+	// 追加：文件只会变大（mtime 变化不影响同代判定）。变小 = 被重写。
+	return flushSize >= prefixSize;
+}
+
+/**
  * 运行时窗口段更新时调和 disk 历史前缀（2026-08 激活分页）：
- * - fileVersion 变化（压缩/外部改写 JSONL）→ 前缀绝对下标空间失效，整段丢弃；
+ * - 文件被重写（体积变小，见 isSameSessionFileGeneration）→ 前缀绝对下标空间失效，整段丢弃；
  * - 窗口右移与前缀尾部重叠 → 按 entryId 去重（重叠部分以运行时窗口段为权威）；
  * - slideOut（trim 窗口右移滑出的旧窗口头部轮次）→ 并入前缀尾部，避免锚点轮空洞。
  */
 function reconcileHistoryPrefix(history: SessionMessageCacheEntry["history"], segment: ChatMessage[], fileVersion?: string, slideOut?: ChatMessage[]): SessionMessageCacheEntry["history"] {
 	if (!history && (!slideOut || slideOut.length === 0)) return undefined;
-	// fileVersion 变化 = 文件被改写（编辑/删除/压缩/外部变更）。此时前缀内容可能已失效：
+	// 文件被重写（编辑/删除/压缩/外部变更导致体积缩小）时前缀内容可能已失效：
 	// 编辑落在窗口外时，全量 flush 只带尾部窗口段，若旧前缀（尤其无 version 的异常前缀）
-	// 继续拼回去，用户会看到「编辑了不刷新，再编一条才看到」。故 version 缺失或不同都丢弃。
-	if (fileVersion && (!history?.version || fileVersion !== history.version)) {
+	// 继续拼回去，用户会看到「编辑了不刷新，再编一条才看到」。普通追加不算重写。
+	if (fileVersion && !isSameSessionFileGeneration(history?.version, fileVersion)) {
 		history = undefined;
 	}
 	const segmentKeys = new Set(segment.map(messageEntryKey));
@@ -766,6 +794,35 @@ function reconcileHistoryPrefix(history: SessionMessageCacheEntry["history"], se
 		...(nextBeforeEntryId !== undefined ? { nextBeforeEntryId } : {}),
 		version: history?.version ?? fileVersion,
 		messages,
+	};
+}
+
+/**
+ * disk → runtime 交接：把「激活前时间线正在显示的磁盘页」转成 history 前缀。
+ *
+ * 为什么必须显式转（2026-10-21 用户诊断包）：会话停着时时间线读的是磁盘页
+ * （source="disk"，历史就在 messages 里，没有 history 字段）。发送新消息触发 runtime
+ * 恢复后，主进程按「激活分页」只下发尾部窗口段，全量 flush 分支只拿 current.history
+ * 调和前缀——disk 条目没有这个字段，窗口段就整段替换掉磁盘历史，分页游标（page.nextBefore）
+ * 同时丢失，表现为「历史全部消失、上滑没有加载入口」，只能等本轮结束后的下一次读盘才回来。
+ * 首个 flush 若是 0 条空窗口（后台历史还没读出来 / 读取失败，日志里的
+ * "Agent recent history file load failed"），画面更会直接变成空会话。
+ *
+ * 版本守卫：version 取磁盘页的 indexVersion（与主进程 flush 的 fileVersion 同口径
+ * mtime:size）。普通追加（发消息落盘）不算重写；只有文件被重写（体积缩小，压缩把历史
+ * 换成摘要）时 reconcileHistoryPrefix 才整段丢弃——宁缺勿串。磁盘页没有版本时不冒险
+ * 保留（无法证明同代）。
+ */
+function historyPrefixFromDiskPage(current: SessionMessageCacheEntry | undefined): SessionMessageCacheEntry["history"] | undefined {
+	if (!current || current.source !== "disk" || current.messages.length === 0) return undefined;
+	const version = current.page?.indexVersion;
+	if (!version) return undefined;
+	return {
+		messages: current.messages,
+		// 磁盘页到顶（null）就是到顶；否则沿用它的续页游标，上滑还能继续往更早翻。
+		nextBefore: current.page?.nextBefore ?? null,
+		...(current.page?.nextBeforeEntryId ? { nextBeforeEntryId: current.page.nextBeforeEntryId } : {}),
+		version,
 	};
 }
 
@@ -1372,13 +1429,15 @@ export const applySessionRuntimeEventAtom = atom(null, (get, set, event: Session
 				// trim 窗口右移的滑出轮：主进程把旧窗口头部（不再被新窗口覆盖的轮次）
 				// 随全量 flush 下发，并入历史前缀，避免「锚点轮从视口消失且翻不回来」
 				const slideOut = Array.isArray(payload.slideOut) ? (payload.slideOut as ChatMessage[]) : undefined;
+				// disk → runtime 交接：窗口段替换 messages 之前，先把磁盘页转成历史前缀
+				// （见 historyPrefixFromDiskPage 注释）。已是 runtime 前缀的照旧走 reconcile。
 				set(cacheSessionMessagesAtom, {
 					sessionId: event.sessionId,
 					messages: segment,
 					source: "runtime",
 					windowStart: payloadWindowStart,
 					cardCount,
-					history: reconcileHistoryPrefix(current?.history, segment, fileVersion, slideOut),
+					history: reconcileHistoryPrefix(current?.history ?? historyPrefixFromDiskPage(current), segment, fileVersion, slideOut),
 					...(typeof payloadWindowStartFilePos === "number" ? { windowStartFilePos: payloadWindowStartFilePos } : {}),
 				});
 			}

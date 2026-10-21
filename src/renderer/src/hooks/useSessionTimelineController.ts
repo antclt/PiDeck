@@ -7,6 +7,7 @@ import { desktopApi } from "../desktopApi";
 import type { AgentRuntimeState, ChatMessage, SessionMessagePage, SessionRecord } from "../../../shared/types";
 import { t } from "../i18n";
 import { sessionHistoryUnavailableState } from "../utils/sessionHistoryAvailability";
+import { sessionDiskPageCursor } from "../utils/sessionDiskPageCursor";
 import {
 	cacheSessionMessagesAtom,
 	clearSessionHistoryAtom,
@@ -562,7 +563,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 					messages: page.messages,
 					source: "disk",
 					expectedRevision: 0,
-					page: { total: page.total, nextBefore: page.nextBefore },
+					page: sessionDiskPageCursor(page),
 				});
 				setLoadState({ sessionId, state: { status: "ready" } });
 			})
@@ -599,7 +600,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 				messages: page.messages,
 				source: "disk",
 				expectedRevision: 0,
-				page: { total: page.total, nextBefore: page.nextBefore },
+				page: sessionDiskPageCursor(page),
 				force: true,
 			});
 			setLoadState({ sessionId, state: { status: "ready" } });

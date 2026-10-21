@@ -9,6 +9,7 @@ import { setSessionQuotesAtom } from "../atoms/composer-atoms";
 import { extractQuoteTokens, pruneUnreferencedQuotes, rehydrateDraftFromMessage } from "../components/session/composer/quoteChip";
 import { resolveHistoryMutationPath, shouldShowResendRollbackHint } from "../utils/sessionHistoryMutationPolicy";
 import { sessionHistoryUnavailableState } from "../utils/sessionHistoryAvailability";
+import { sessionDiskPageCursor } from "../utils/sessionDiskPageCursor";
 import type { NoticeKind } from "../utils/notice";
 import { messageEntryId } from "../utils/sessionCommands";
 import { useSessionMessageImageRemoval } from "./useSessionMessageImageRemoval";
@@ -112,7 +113,7 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
 				messages: page.messages,
 				source: "disk",
 				expectedRevision: 0,
-				page: { total: page.total, nextBefore: page.nextBefore },
+				page: sessionDiskPageCursor(page),
 				force: true,
 			});
 			setLoadState({ sessionId, state: { status: "ready" } });
