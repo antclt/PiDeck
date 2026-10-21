@@ -247,7 +247,7 @@ export type DshBackendIpcDeps = {
 	/** ACP 会话消息回读（运行时内存投影；未激活返回空数组）；未装配时返回空数组。 */
 	readAcpMessages?: (acpSessionId: string) => import("../../shared/types").ChatMessage[];
 	/** DSH 轨迹过程事件（运行时会话按 mux/重放收集；历史会话从 host history 推导；未装配时返回空数组）。 */
-	readDshProcessEvents?: (agentId: string | undefined, dshSessionId: string | undefined) => Promise<{ events: import("../../shared/types/trajectory").SessionProcessEvent[]; fromStart: boolean }>;
+	readDshProcessEvents?: (agentId: string | undefined, dshSessionId: string | undefined) => Promise<{ events: import("../../shared/types/trajectory").SessionProcessEvent[]; fromStart: boolean; unavailable?: boolean }>;
 	/** pi 轨迹事实（索引候选 + 小批读取 + 内容版本缓存）；缺省时回退旧的全文件扫描。 */
 	readSessionFacts?: (sessionPath: string) => Promise<import("../../shared/types/trajectory").SessionFactsResult>;
 	/** 用户检查点目录（导轨）：pi 索引派生；缺省返回空目录。 */
@@ -1282,19 +1282,28 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		// modelChange/permission/plan/goal/compaction 记录）。
 		if (entry?.backend === "dsh" && readDshProcessEvents) {
 			const target = sessionRuntimeCoordinator.getTarget(sessionId);
-			const { events, fromStart } = await readDshProcessEvents(target?.agentId, entry.dshSessionId);
+			const { events, fromStart, unavailable } = await readDshProcessEvents(target?.agentId, entry.dshSessionId);
 			const last = events.at(-1);
+			if (events.length === 0) appLogger.debug("trajectory", "DSH process events empty", { sessionId, dshSessionId: entry.dshSessionId, unavailable: unavailable === true });
 			return {
 				events,
 				version: `dsh:${events.length}:${last?.id ?? ""}:${last?.seq ?? ""}`,
-				coverage: { fromStart, chainComplete: true, readComplete: true, eventsTrimmed: false, ...(fromStart ? {} : { reason: "history-window" as const }) },
+				coverage: {
+					fromStart,
+					chainComplete: true,
+					readComplete: true,
+					eventsTrimmed: false,
+					...(unavailable ? { reason: "unavailable" as const } : fromStart ? {} : { reason: "history-window" as const }),
+				},
 			};
 		}
 		if (!entry?.filePath) return unavailable("unavailable");
 		if (readSessionFacts) {
 			// 索引候选 + 小批读 + 内容版本缓存：文件未变时不读正文（见 trajectoryFactsReader）。
 			try {
-				return await readSessionFacts(entry.filePath);
+				const facts = await readSessionFacts(entry.filePath);
+				if (facts.events.length === 0) appLogger.debug("trajectory", "pi process events empty", { sessionId, filePath: entry.filePath, reason: facts.coverage.reason ?? null });
+				return facts;
 			} catch (error) {
 				appLogger.warn("trajectory", "Read session facts failed", {
 					sessionId,

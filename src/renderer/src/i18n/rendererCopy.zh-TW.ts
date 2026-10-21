@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: f72f06d621f2197e092dca2ab9441ebe89110e7ae5d6edc43568bc2814a9795b（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: acf9f8ae6e6d9b2c42b2d7bd54c19a53cff0bd9fbd3250fae06b95f46f3d8f50（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5880,6 +5880,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"session.trajectory.unfoldAll": "全部展開",
 	"session.trajectory.turnSteps": "{steps} 步 · {tools} 工具",
 	"session.trajectory.groupFold": "… {steps} 個步驟 · {tools} 個工具呼叫，點選展開",
+	"session.trajectory.coverageUnavailable": "過程事件暫時讀不到（後端未就緒或讀取失敗），會自動重試",
 	"session.trajectory.coverageBudget": "事實讀取已超出預算，更早的記錄未載入",
 	"session.trajectory.coverageAncestor": "父會話不可用，fork 之前的事實缺失",
 	"session.trajectory.coverageWindow": "只讀到宿主頁範圍內的事實，初始提示詞可能是視窗快照",

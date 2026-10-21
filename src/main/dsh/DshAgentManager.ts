@@ -1057,18 +1057,19 @@ export class DshAgentManager implements SessionAgentGateway {
 	 * - 历史（未激活）会话：从 host history 尾部按事件流推导（与 dsh-web 历史页同数据源），
 	 *   失败/无 host 时返回空数组（不阻断轨迹展示）。
 	 */
-	async readProcessEvents(agentId: string | undefined, dshSessionId: string | undefined): Promise<{ events: SessionProcessEvent[]; fromStart: boolean }> {
+	async readProcessEvents(agentId: string | undefined, dshSessionId: string | undefined): Promise<{ events: SessionProcessEvent[]; fromStart: boolean; unavailable?: boolean }> {
 		if (agentId) {
 			const runtime = this.runtimes.get(agentId);
 			if (runtime) {
 				return { events: [...runtime.processEvents].sort((left, right) => left.timestamp - right.timestamp), fromStart: true };
 			}
 		}
-		if (!dshSessionId) return { events: [], fromStart: true };
+		if (!dshSessionId) return { events: [], fromStart: true, unavailable: true };
 		try {
 			const client = await this.ensureClient();
 			const page = await this.historyPage(dshSessionId, { maxMessages: 1000 });
-			if (!page.result.ok) return { events: [], fromStart: true };
+			// host 明确返回失败（未就绪/错误）不是「没有事实」：标 unavailable 让前端可重试。
+			if (!page.result.ok) return { events: [], fromStart: true, unavailable: true };
 			// 历史冷读只有 host 的尾部页：还有更早的页时窗口未覆盖会话开头，
 			// 首个可见提示词只能是窗口快照（不能标成 initial，见计划 §3.4）。
 			const fromStart = page.result.value.hasMore !== true;
@@ -1078,7 +1079,7 @@ export class DshAgentManager implements SessionAgentGateway {
 				.sort((left: { seq?: number }, right: { seq?: number }) => (left.seq ?? 0) - (right.seq ?? 0));
 			return { events: collectDshProcessEvents([], events, { fromStart }).sort((left, right) => left.timestamp - right.timestamp), fromStart };
 		} catch {
-			return { events: [], fromStart: true };
+			return { events: [], fromStart: true, unavailable: true };
 		}
 	}
 

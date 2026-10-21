@@ -5873,6 +5873,7 @@ export const zhCN = {
 	"session.trajectory.unfoldAll": "全部展开",
 	"session.trajectory.turnSteps": "{steps} 步 · {tools} 工具",
 	"session.trajectory.groupFold": "… {steps} 个步骤 · {tools} 个工具调用，点击展开",
+	"session.trajectory.coverageUnavailable": "过程事件暂时读不到（后端未就绪或读取失败），会自动重试",
 	"session.trajectory.coverageBudget": "事实读取已超出预算，更早的记录未载入",
 	"session.trajectory.coverageAncestor": "父会话不可用，fork 之前的事实缺失",
 	"session.trajectory.coverageWindow": "只读到宿主页范围内的事实，初始提示词可能是窗口快照",

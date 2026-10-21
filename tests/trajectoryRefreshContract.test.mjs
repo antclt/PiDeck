@@ -58,3 +58,9 @@ test("hover 不再触发轨迹模型重算，活动时长走 1 秒低频时钟",
 	assert.match(view, /if\s*\(\s*!hasInFlight\s*\)\s*return;/);
 	assert.match(view, /setInterval\(\(\)\s*=>\s*setNow\(Date\.now\(\)\),\s*1000\)/);
 });
+
+test("后端不可用时自动重试且有上限（DSH host 未就绪不再永久空白）", () => {
+	assert.match(hook, /result\?\.coverage\.reason === "unavailable" && retries < 12/);
+	assert.match(hook, /retryTimer = setTimeout\(run, 5000\)/);
+	assert.match(hook, /if \(retryTimer\) clearTimeout\(retryTimer\)/);
+});

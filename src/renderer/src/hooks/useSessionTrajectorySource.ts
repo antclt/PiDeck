@@ -58,6 +58,10 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 		let disposed = false;
 		let inflight = false;
 		let pending = false;
+		// 后端「暂时不可用」（DSH host 未就绪、读取失败）不是「没有事实」：
+		// 面板开着时按 5 秒重试，最多 12 次（≈1 分钟），失败就停，不无限轮询。
+		let retries = 0;
+		let retryTimer: ReturnType<typeof setTimeout> | undefined;
 		// 作用域绑定：切会话/换代后旧响应一律作废（不等下一次请求才作废）。
 		const scope = ++processSequenceRef.current;
 
@@ -79,6 +83,13 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 					setProcessEvents((previous) => (processVersionRef.current === version ? previous : events));
 					processVersionRef.current = version;
 					setProcessCoverage(Array.isArray(result) ? undefined : result?.coverage);
+					// 后端未就绪：稍后自动重试，避免「DSH host 还在启动，轨迹永远空白」。
+					if (!Array.isArray(result) && result?.coverage.reason === "unavailable" && retries < 12) {
+						retries += 1;
+						retryTimer = setTimeout(run, 5000);
+					} else if (!Array.isArray(result) && result?.coverage.reason !== "unavailable") {
+						retries = 0;
+					}
 				})
 				.catch(() => {
 					// 失败保留上一次成功数据，不清空后冒充「没有事实」。
@@ -98,6 +109,7 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 		return () => {
 			disposed = true;
 			if (timer) clearInterval(timer);
+			if (retryTimer) clearTimeout(retryTimer);
 			processSequenceRef.current += 1;
 		};
 	}, [factsTriggerKey, sessionId, turnRunning, compacting]);
