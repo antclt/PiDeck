@@ -4,7 +4,7 @@ import { desktopApi } from "../desktopApi";
 import { agentProfileSnapshotAtom } from "../atoms/agent-atoms";
 
 /**
- * 全局同步主进程智能体市场快照（agents + settings + revision）。
+ * 全局同步主进程智能体快照（agents + settings + revision）。
  * 挂载在 AppBootstrap 顶层：初始拉一次快照，之后主进程每次广播
  * agent-profiles:changed（增删改、设置更新、使用次数变化）都重新拉全量快照。
  * 与 useAutomationSync 同构——渲染层不自己拼状态，只信主进程快照。

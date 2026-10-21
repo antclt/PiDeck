@@ -1,7 +1,8 @@
 import { atom } from "jotai";
 import type { AgentMarketSettings, AgentProfile, AgentProfileSnapshot } from "../../../shared/types";
+import { closeWorkspacePageAtom, openWorkspacePageAtom, workspacePageTabStateAtom } from "./workspace-page-atoms";
 
-/** 主进程智能体市场快照（agents + settings + revision）。null = 尚未取到初始快照。 */
+/** 主进程智能体快照（agents + settings + revision）。null = 尚未取到初始快照。 */
 export const agentProfileSnapshotAtom = atom<AgentProfileSnapshot | null>(null);
 
 /** 按展示顺序排序的智能体列表：内置在前（翻译默认第一个），其余按创建时间倒序。 */
@@ -23,17 +24,18 @@ export const agentMarketSettingsAtom = atom<AgentMarketSettings>((get) => {
 /** 市场页面打开时直接进入编辑页的智能体 id（null = 列表）。 */
 export const agentMarketEditingAgentIdAtom = atom<string | null>(null);
 
-/** 智能体市场页面（非模态页面式覆盖会话区）是否打开：从侧栏入口进入，关闭按钮/Esc 还原会话。 */
-export const agentMarketPageOpenAtom = atom<boolean>(false);
+/** 「智能体」页面 Tab 是否打开（会话 Tab 栏里的页面式工作区，见 workspace-page-atoms）。 */
+export const agentMarketPageOpenAtom = atom((get) => get(workspacePageTabStateAtom).tabs.includes("agents"));
 
-/** 打开智能体市场页面；editingAgentId 非空时直接进入该智能体的编辑页。 */
+/** 打开「智能体」页面 Tab；editingAgentId 非空时直接进入该智能体的编辑页。 */
 export const openAgentMarketPageAtom = atom(null, (_get, set, editingAgentId?: string | null) => {
 	set(agentMarketEditingAgentIdAtom, editingAgentId ?? null);
-	set(agentMarketPageOpenAtom, true);
+	set(openWorkspacePageAtom, "agents");
 });
 
+/** 关闭「智能体」页面 Tab（页面子树卸载，下一次打开回到列表）。 */
 export const closeAgentMarketPageAtom = atom(null, (_get, set) => {
-	set(agentMarketPageOpenAtom, false);
+	set(closeWorkspacePageAtom, "agents");
 	set(agentMarketEditingAgentIdAtom, null);
 });
 

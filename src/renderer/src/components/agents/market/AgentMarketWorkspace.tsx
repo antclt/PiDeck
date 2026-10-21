@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAtomValue } from "jotai";
-import { ArrowLeft, X } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import type { AgentProfile } from "../../../../../shared/types/agentProfile";
 import { agentMarketSettingsAtom, agentProfilesAtom } from "../../../atoms/agent-atoms";
 import { t } from "../../../i18n";
@@ -28,7 +28,7 @@ interface AgentMarketWorkspaceProps {
 }
 
 /**
- * 智能体市场工作区：列表（搜索 + 分类 + 卡片网格 + 详情侧栏）+ 编辑器。
+ * 智能体工作区：列表（搜索 + 分类 + 卡片网格 + 详情侧栏）+ 编辑器。
  *
  * 路由状态留在这里而不是 atom：它只在市场页面存活期间有意义，页面关闭即卸载，
  * 不需要跨窗口/跨会话持久化。智能体数据与设置仍走 atoms（Lead 的 useAgentProfileSync 同步）。
@@ -112,7 +112,7 @@ export function AgentMarketWorkspace({ initialEditingAgentId, onUseAgent, onClos
 		<div className="flex min-h-0 flex-1 flex-col">
 			{route.kind === "market" ? (
 				<>
-					<AgentMarketHeader query={filter.query} onQueryChange={handleQueryChange} onCreate={() => setRoute({ kind: "editor", agentId: null })} onClose={onClose} />
+					<AgentMarketHeader query={filter.query} onQueryChange={handleQueryChange} onCreate={() => setRoute({ kind: "editor", agentId: null })} />
 					<AgentMarketCategoryChips value={filter.category} onChange={handleCategoryChange} />
 					<div className="flex min-h-0 flex-1">
 						<div className="min-w-0 flex-1 overflow-y-auto px-5 py-3">
@@ -136,7 +136,7 @@ export function AgentMarketWorkspace({ initialEditingAgentId, onUseAgent, onClos
 				</>
 			) : (
 				<>
-					<AgentMarketRouteHeader title={routeTitle} builtin={Boolean(editingAgent?.builtin)} onBack={backToMarket} onClose={onClose} />
+					<AgentMarketRouteHeader title={routeTitle} builtin={Boolean(editingAgent?.builtin)} onBack={backToMarket} />
 					<AgentMarketEditor key={route.agentId ?? "new"} agent={editingAgent} onSaved={backToMarket} onCancel={backToMarket} />
 				</>
 			)}
@@ -146,8 +146,8 @@ export function AgentMarketWorkspace({ initialEditingAgentId, onUseAgent, onClos
 	);
 }
 
-/** 编辑器视图的子头部：返回市场 + 标题（+ 内置徽标）+ 关闭页面。 */
-function AgentMarketRouteHeader(props: { title: string; builtin: boolean; onBack: () => void; onClose: () => void }) {
+/** 编辑器视图的子头部：返回市场 + 标题（+ 内置徽标）。关闭页面统一交给会话 Tab。 */
+function AgentMarketRouteHeader(props: { title: string; builtin: boolean; onBack: () => void }) {
 	return (
 		<header className="flex shrink-0 items-center justify-between gap-4 border-b border-border/40 px-5 py-3">
 			<div className="flex min-w-0 items-center gap-2">
@@ -161,9 +161,6 @@ function AgentMarketRouteHeader(props: { title: string; builtin: boolean; onBack
 					</Badge>
 				)}
 			</div>
-			<Button type="button" variant="ghost" size="icon-sm" className="size-8 shrink-0 text-muted-foreground" title={t("common.close")} aria-label={t("common.close")} onClick={props.onClose}>
-				<X className="size-4" aria-hidden="true" />
-			</Button>
 		</header>
 	);
 }

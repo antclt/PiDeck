@@ -107,12 +107,15 @@ const PAGE_PATH = "src/renderer/src/components/agents/AgentMarketPage.tsx";
 const WORKSPACE_PATH = "src/renderer/src/components/agents/market/AgentMarketWorkspace.tsx";
 const EDITOR_PATH = "src/renderer/src/components/agents/market/AgentMarketEditor.tsx";
 
-test("市场是覆盖会话列的非模态页面，不再用 Dialog 弹框；page atom 驱动、Esc/关闭按钮收起", () => {
+test("页面是会话 Tab 栏里的专属页面 Tab（非弹窗）：覆盖会话列、失活隐藏、Esc/关闭按钮收起", () => {
 	const page = readSource(PAGE_PATH);
 	// 与 HostPluginPageOverlay 同一层级约定：absolute inset-0 z-30 只覆盖会话列（侧栏保持可交互）。
-	assert.match(page, /className="absolute\s+inset-0\s+z-30\s+flex\s+flex-col\s+bg-background"/);
-	assert.ok(!/ui-shadcn\/dialog/.test(page), "市场页面不得再引入 Dialog（用户反馈：不要弹窗）");
-	assert.ok(!/AgentMarketModal/.test(page), "市场页面不得回退到旧弹框宿主");
+	assert.match(page, /absolute\s+inset-0\s+z-30\s+flex\s+flex-col\s+bg-background/);
+	// 切到会话只失活（子树保持挂载、hidden 隐藏），搜索/详情/编辑状态不丢；关闭 Tab 才卸载。
+	assert.match(page, /!active\s*&&\s*"hidden"/);
+	assert.match(page, /active:\s*boolean/);
+	assert.ok(!/ui-shadcn\/dialog/.test(page), "页面不得再引入 Dialog（用户反馈：不要弹窗）");
+	assert.ok(!/AgentMarketModal/.test(page), "页面不得回退到旧弹框宿主");
 	assert.match(page, /agentMarketPageOpenAtom/);
 	assert.match(page, /closeAgentMarketPageAtom/);
 	// Esc 关闭：keydown 监听必须与 cleanup 成对（AGENTS.md 生命周期配对）。
@@ -163,12 +166,14 @@ test("编辑器后端下拉：跟随默认 + AGENT_PROFILE_BACKENDS，create/upd
 	assert.match(editor, /\.\.\.\(backend\s*\?\s*\{\s*backend\s*\}\s*:\s*\{\}\)/, "新建 payload 必须带上已选后端");
 });
 
-test("市场头部保留标题/说明/搜索/新建/关闭，不保留设置入口", () => {
+test("「智能体」页面头部保留标题/说明/搜索/新建，不再放关闭叉（关闭由会话 Tab 负责）", () => {
 	const header = readSource("src/renderer/src/components/agents/market/AgentMarketHeader.tsx");
-	for (const key of ["agentMarket.title", "agentMarket.subtitle", "agentMarket.searchPlaceholder", "agentMarket.create", "common.close"]) {
+	for (const key of ["agentMarket.title", "agentMarket.subtitle", "agentMarket.searchPlaceholder", "agentMarket.create"]) {
 		assert.match(header, new RegExp('t\\("' + key.replace(/\./g, "\\.") + '"\\)'), key + " 必须保留在页面头部");
 	}
-	assert.ok(!/onOpenSettings|Settings2/.test(header), "市场头部不得再有设置入口（设置搬到 PiDesk 设置页）");
+	assert.ok(!/onOpenSettings|Settings2/.test(header), "页面头部不得再有设置入口（设置搬到 PiDeck 设置页）");
+	assert.ok(!/common\.close/.test(header), "页面头部不得再有关闭按钮（Tab 负责关闭）");
+	assert.ok(!/<X\s/.test(header), "页面头部不得再渲染 X 图标");
 });
 
 test("「设为划词默认」走 agentProfiles.updateSettings（不自己拼快照）", () => {

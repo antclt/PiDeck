@@ -27,6 +27,9 @@ import {
 	ScrollText,
 	// 抽屉侧边任务 Tab 图标：不用 PanelRight——那是会话头部抽屉开关的图形，并排会认错
 	Rocket,
+	// 会话 Tab 栏里的页面式工作区 Tab 图标（定时任务 / 智能体）
+	Clock,
+	Bot,
 } from "lucide-react";
 import { configureNoticeDefaults, showNotice, type NoticeKind } from "./utils/notice";
 import { copyTextWithCopiedNotice } from "./utils/clipboardNotice";
@@ -47,10 +50,13 @@ import {
 	promptSuggestionEnabledAtom,
 	dshRuntimeStatusAtom,
 	openSettingsAtom,
-	openAutomationModalAtom,
+	openAutomationPageAtom,
 	agentProfilesAtom,
-	agentMarketPageOpenAtom,
-	closeAgentMarketPageAtom,
+	activeWorkspacePageAtom,
+	openWorkspacePageIdsAtom,
+	openWorkspacePageAtom,
+	deactivateWorkspacePageAtom,
+	closeWorkspacePageAtom,
 	sessionRecordsAtom,
 	bumpNewTurnCollapseTickAtom,
 	rpcLoggingAgentIdsAtom,
@@ -60,7 +66,8 @@ import { type SidebarActions } from "./components/sidebar/SidebarContent";
 import { AppSidebar } from "./components/sidebar/AppSidebar";
 import { AppBootstrap } from "./components/app/AppBootstrap";
 import { SettingsFeatureRoot } from "./components/app/SettingsFeatureRoot";
-import { AutomationModal } from "./components/automation/AutomationModal";
+import { hostPluginPanelAtom } from "./atoms/host-plugin-atoms";
+import { AutomationPage } from "./components/automation/AutomationPage";
 import { AgentMarketPage } from "./components/agents/AgentMarketPage";
 import { SelectionToolHost } from "./components/selectionTool/SelectionToolHost";
 import { useRename } from "./hooks/useRename";
@@ -166,7 +173,7 @@ import { useWorktreeActions } from "./hooks/useWorktreeActions";
 import { ChatSessionPane } from "./components/session/ChatSessionPane";
 import { SessionSplitStage } from "./components/session/SessionSplitStage";
 import { splitLayoutSessionIds } from "./utils/sessionSplitEdge";
-import { SessionTabsBar, type SessionTabsBarProps, type SessionToolAction } from "./components/session/SessionTabsBar";
+import { SessionTabsBar, type SessionTabsBarProps, type SessionToolAction, type WorkspacePageTabItem } from "./components/session/SessionTabsBar";
 import { SessionPaneServicesProvider, type SessionFileOpenContext } from "./components/session/SessionPaneServices";
 import { SessionStatusPanel } from "./components/session/statusPanel/SessionStatusPanel";
 import { ProjectEmptyState } from "./components/session/ProjectEmptyState";
@@ -267,7 +274,16 @@ export function App() {
 	const agents = useAtomValue(agentInventoryAtom);
 	const setCurrentSessionId = useSetAtom(currentSessionIdAtom);
 	const replaceProjectSessions = useSetAtom(replaceProjectSessionsAtom);
-	const openAutomationModal = useSetAtom(openAutomationModalAtom);
+	const openAutomationPage = useSetAtom(openAutomationPageAtom);
+	// 页面式工作区（定时任务 / 智能体）：Tab 列表与当前呈现页面；切会话只失活、关闭才卸载。
+	const openWorkspacePageIds = useAtomValue(openWorkspacePageIdsAtom);
+	const activeWorkspacePage = useAtomValue(activeWorkspacePageAtom);
+	const openWorkspacePage = useSetAtom(openWorkspacePageAtom);
+	const deactivateWorkspacePage = useSetAtom(deactivateWorkspacePageAtom);
+	const closeWorkspacePage = useSetAtom(closeWorkspacePageAtom);
+	// 页面式插件面板与工作区页面共用会话列覆盖层：两者同时呈现会互相盖住，打开页面时收起插件页。
+	const hostPluginPanel = useAtomValue(hostPluginPanelAtom);
+	const setHostPluginPanel = useSetAtom(hostPluginPanelAtom);
 	// `/login`：打开供应商登录弹框（弹框自己从 atom 取预选供应商）。
 	const openProviderLogin = useSetAtom(openProviderLoginAtom);
 	const setProjects = useSetAtom(replaceProjectInventoryAtom);
@@ -1362,7 +1378,7 @@ export function App() {
 	);
 
 	/**
-	 * 智能体市场「使用」：新建会话并绑定该智能体（会话页面复用）。
+	 * 智能体「使用」：新建会话并绑定该智能体（会话页面复用）。
 	 *
 	 * 角色设定不预填、不显示：主进程在绑定的会话每次发送时把 systemPrompt 拼进
 	 * agentMessage（对 UI 隐藏，见 src/main/ipc/sessionIpc.ts 的 resolveSessionAgentInstruction），
@@ -1415,21 +1431,26 @@ export function App() {
 		});
 	}, [currentSessionId, setSessionDraft, showToast, store]);
 
-	// 智能体市场页面属于「会话列」的覆盖层：用户点侧栏切会话/项目时收起，
-	// 否则会出现「点了另一个会话，页面还盖在上面」的错觉（与 HostPluginPageOverlay 同约定）。
-	const agentMarketPageOpen = useAtomValue(agentMarketPageOpenAtom);
-	const closeAgentMarketPage = useSetAtom(closeAgentMarketPageAtom);
-	const marketPageScopeRef = useRef<string | undefined>(undefined);
+	// 页面式工作区（定时任务 / 智能体）与会话共用同一条 Tab 栏：用户点侧栏切会话/项目时
+	// 只让页面「失活」（页面 Tab 与搜索/编辑状态保留），否则会出现「点了另一个会话，
+	// 页面还盖在上面」的错觉（与 HostPluginPageOverlay 同约定；区别是它直接收起插件页）。
+	const workspacePageScopeRef = useRef<string | undefined>(undefined);
 	useEffect(() => {
 		const scope = `${activeProjectId ?? ""}|${currentSessionId ?? ""}`;
-		if (marketPageScopeRef.current === undefined) {
-			marketPageScopeRef.current = scope;
+		if (workspacePageScopeRef.current === undefined) {
+			workspacePageScopeRef.current = scope;
 			return;
 		}
-		if (scope === marketPageScopeRef.current) return;
-		marketPageScopeRef.current = scope;
-		if (agentMarketPageOpen) closeAgentMarketPage();
-	}, [activeProjectId, currentSessionId, agentMarketPageOpen, closeAgentMarketPage]);
+		if (scope === workspacePageScopeRef.current) return;
+		workspacePageScopeRef.current = scope;
+		deactivateWorkspacePage();
+	}, [activeProjectId, currentSessionId, deactivateWorkspacePage]);
+
+	// 会话列同一时刻只呈现一层页面：打开工作区页面时收起页面式插件面板
+	// （两者都占 absolute inset-0，叠在一起会互相遮挡，且插件伪 Tab 无法再被点开）。
+	useEffect(() => {
+		if (activeWorkspacePage && hostPluginPanel) setHostPluginPanel(null);
+	}, [activeWorkspacePage, hostPluginPanel, setHostPluginPanel]);
 
 	/** 侧栏/分支打开：选中成功后按 preview|permanent 登记 Tab */
 	const openSidebarSessionByIdWithTab = useCallback(
@@ -2154,7 +2175,7 @@ export function App() {
 			},
 			importDirectorySessions: (project) => openDirectoryImport(project),
 			manageResources: (project) => setProjectResourcesProject(project),
-			manageAutomations: (projectId) => openAutomationModal(projectId),
+			manageAutomations: (projectId) => openAutomationPage(projectId),
 			toggleWorktree: toggleProjectWorktree,
 			copyPath: async (project) => {
 				await navigator.clipboard.writeText(project.path);
@@ -2518,6 +2539,17 @@ export function App() {
 	useEffect(() => {
 		if (settings.navigationMode === "simple" && workspaceChrome.previewSessionTabId) workspaceChrome.promotePreview(workspaceChrome.previewSessionTabId);
 	}, [settings.navigationMode, workspaceChrome.previewSessionTabId, workspaceChrome.promotePreview]);
+
+	// 会话 Tab 栏里的页面式工作区 Tab：标题固定走 i18n（不是会话、不参与自动会话标题），
+	// 激活态只由 activeWorkspacePage 决定；关闭即卸载页面（切会话只是失活）。
+	const workspacePageTabItems: WorkspacePageTabItem[] = openWorkspacePageIds.map((pageId) => ({
+		id: pageId,
+		title: t(pageId === "automation" ? "automation.title" : "agentMarket.title"),
+		icon: pageId === "automation" ? Clock : Bot,
+		active: activeWorkspacePage === pageId,
+		onSelect: () => openWorkspacePage(pageId),
+		onClose: () => closeWorkspacePage(pageId),
+	}));
 
 	const sessionTabsProps = {
 		tabs: workspaceChrome.sessionTabIds,
@@ -2911,12 +2943,14 @@ export function App() {
 		<SessionTabsBar
 			{...sessionTabsProps}
 			simple={simpleMode}
-			// 插件页占据会话区时，会话 Tab 不得显示选中态（当前呈现的不是会话）
-			currentSessionId={hostPluginPageTab ? undefined : currentSessionId}
-			pluginTab={simpleMode ? null : hostPluginPageTab}
-			// 点任意会话 Tab（含当前 Tab，sessionId 不变的场景）也要收起插件页；
-			// Overlay 的 scope 变化兑底只覆盖「切到别的会话」这一分支。
+			// 页面（插件页 / 定时任务 / 智能体）占据会话区时，会话 Tab 不得显示选中态（当前呈现的不是会话）
+			currentSessionId={activeWorkspacePage || hostPluginPageTab ? undefined : currentSessionId}
+			pageTabs={workspacePageTabItems}
+			pluginTab={simpleMode || activeWorkspacePage ? null : hostPluginPageTab}
+			// 点任意会话 Tab（含当前 Tab，sessionId 不变的场景）也要让出页面：插件页直接收起，
+			// 工作区页面只失活（Tab 保留，切回来状态还在）；Overlay 的 scope 变化兜底只覆盖「切到别的会话」。
 			onSelect={(sessionId) => {
+				deactivateWorkspacePage();
 				hostPluginPageTab?.onClose();
 				workspaceChrome.selectTab(sessionId);
 			}}
@@ -2975,8 +3009,15 @@ export function App() {
 				<div className="relative flex h-full min-h-0 min-w-0 flex-col">
 					{chatPaneSessionNode}
 					<HostPluginPageOverlay projectId={activeProject?.id} sessionId={currentSessionId} />
-					{/* 智能体市场：非模态页面（覆盖会话列，侧栏/抽屉仍可交互），关闭即还原会话视图 */}
-					<AgentMarketPage onUseAgent={handleAgentUseAgent} />
+					{/* 页面式工作区（定时任务 / 智能体）：会话 Tab 栏里的专属页面 Tab，覆盖会话列；
+					    关闭 Tab 才卸载，失活时 hidden 保留页面内状态 */}
+					<AutomationPage
+						active={activeWorkspacePage === "automation"}
+						onViewSession={(projectId, sessionId) => {
+							void openSidebarSessionByIdWithTab(projectId, sessionId, "permanent");
+						}}
+					/>
+					<AgentMarketPage active={activeWorkspacePage === "agents"} onUseAgent={handleAgentUseAgent} />
 				</div>
 			}
 			content={workbenchContentNode}
@@ -3558,13 +3599,6 @@ export function App() {
 					{kimiWorkImportProject && <ImportOverlayHost kind="kimiwork" project={kimiWorkImportProject} controller={kimiWorkImportController} onClose={() => setKimiWorkImportProject(null)} />}
 					{minimaxImportProject && <ImportOverlayHost kind="minimax" project={minimaxImportProject} controller={minimaxImportController} onClose={() => setMinimaxImportProject(null)} />}
 					{directoryImportProject && <ImportOverlayHost kind="directory" project={directoryImportProject} controller={directoryImportController} onClose={() => setDirectoryImportProject(null)} />}
-
-					{/* 定时任务与自动化管理中心全功能弹窗（模态呈现，不覆盖会话工作区） */}
-					<AutomationModal
-						onViewSession={(projectId, sessionId) => {
-							void openSidebarSessionByIdWithTab(projectId, sessionId, "permanent");
-						}}
-					/>
 
 					{/* 划词工具：全局唯一挂载点（划选浮出按钮 + 原地工具栏） */}
 					<SelectionToolHost onSendToSession={handleAgentSendToSession} />

@@ -4,8 +4,9 @@ import { openAgentMarketPageAtom } from "../../atoms/agent-atoms";
 import { t } from "../../i18n";
 
 /**
- * 侧栏顶部动作区的智能体市场入口（定时任务下方，与 AutomationDockButton 同款行）。
- * 点击进入市场页面（非模态覆盖会话列，侧栏保持可交互）；行内不放徽标——市场没有「正在运行」这类需要行尾提示的状态。
+ * 侧栏顶部动作区的「智能体」入口（定时任务下方，与 AutomationDockButton 同款行）。
+ * 点击打开（或激活）会话 Tab 栏里的「智能体」页面 Tab（覆盖会话列，侧栏保持可交互）；
+ * 行内不放徽标——页面没有「正在运行」这类需要行尾提示的状态。
  */
 export function AgentMarketDockButton() {
 	const openAgentMarketPage = useSetAtom(openAgentMarketPageAtom);

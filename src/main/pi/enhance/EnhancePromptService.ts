@@ -91,7 +91,7 @@ export type EnhanceRunCallbacks = {
 /**
  * 服务层 run 入参：渲染层契约（EnhanceRunInput）之上多一个可选的 systemPrompt。
  *
- * 为什么只在主进程侧：智能体市场的一次性调用由主进程按 agentId 解析角色设定，渲染层
+ * 为什么只在主进程侧：智能体的一次性调用由主进程按 agentId 解析角色设定，渲染层
  * 永远只能传 agentId（见 shared/types/agentProfile.ts）。若把该字段并进共享
  * EnhanceRunInput，enhance:run 的 IPC 校验（parseEnhanceRunInput 按共享类型收口）就被
  * 绕过——渲染层可以把任意系统指令塞进模型。缺省不传 = 内置增强模板，提示词增强的
@@ -226,7 +226,7 @@ export class EnhancePromptService {
 		// 定时器必须在写入首帧前就存在：异步 stdin error 可能紧跟 write() 触发，
 		// 此时错误处理会同步清理 activeRun，不能留下一个永不结算的定时器。
 		this.activeRun = { id: runId, callbacks, timer, accepted: false };
-		// 智能体市场的一次性调用会带自己的角色设定；空白值视作未提供，回落内置增强模板。
+		// 智能体的一次性调用会带自己的角色设定；空白值视作未提供，回落内置增强模板。
 		const systemPrompt = input.systemPrompt?.trim() || ENHANCE_SYSTEM_PROMPT;
 		// 输入预测与增强共用一条补全协议，但语义不同：sidecar 对 purpose="suggest" 不追加
 		// 「只改写最后一条草稿」约束（历史是待预测的对话，不是待改写的正文）。

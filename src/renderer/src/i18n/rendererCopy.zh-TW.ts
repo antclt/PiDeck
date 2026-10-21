@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: ef3dcc033009c5894542aa7221be84384a35166b49565ed2ef0976dc3687757a（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: a8baf63d5908801d45b7360a2669ce772282de008a29a7c92247c00c24284d33（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -6323,8 +6323,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"web.extensionToggle": "啟用或停用擴充套件",
 	"web.assetsLoading": "載入中…",
 
-	// ── 智能体市场 / 划词工具（Agent Market & Selection Tool） ──
-	"agentMarket.title": "智慧體市場",
+	// ── 智能体 / 划词工具（Agents & Selection Tool） ──
+	"agentMarket.title": "智慧體",
 	"agentMarket.subtitle": "管理你的智慧體：新增、編輯、隨時呼叫；在頁面中選中文字即可用預設智慧體翻譯",
 	"agentMarket.create": "新建智慧體",
 	"agentMarket.searchPlaceholder": "搜尋名稱、簡介或分類…",
@@ -6365,7 +6365,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"agentMarket.fieldModelHint": "留空則跟隨當前會話模型",
 	"agentMarket.fieldSystemPrompt": "角色設定",
 	"agentMarket.fieldSystemPromptPlaceholder": "描述智慧體的身份、目標、語氣與輸出格式……",
-	"agentMarket.fieldSystemPromptHint": "一次性呼叫時作為系統提示；傳送到會話時作為隱藏角色指令，不出現在對話正文裡。",
+	"agentMarket.fieldSystemPromptHint": "一次性呼叫時作為系統提示；傳送到會話時隨每條訊息注入，不出現在對話正文裡，可在輸入框上方展開檢視。",
 	"agentMarket.nameRequired": "請填寫名稱",
 	"agentMarket.promptRequired": "請填寫角色設定",
 	"agentMarket.detailTitle": "智慧體詳情",
@@ -6385,7 +6385,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"selectionTool.toolbarTitle": "用「{name}」翻譯選中文本",
 	"selectionTool.toolbarGeneric": "呼叫智慧體",
 
-	// 智能体调用面板（划词工具与市场「使用」共用）
+	// 智能体调用面板（划词工具与「智能体」页面「使用」共用）
 	"agentInvoke.title": "呼叫智慧體",
 	"agentInvoke.selectedCount": "已選 {count} 字",
 	"agentInvoke.sourceTitle": "原文",
@@ -6437,13 +6437,18 @@ export const zhTW: Record<TranslationKey, string> = {
 	"selectionTool.windowEmpty": "選中文字後按快捷鍵，或直接輸入內容",
 	"selectionTool.insertEmpty": "沒有可傳送的文本",
 	"agentMarket.useInSession": "使用",
-	"agentMarket.useInSessionHint": "新建會話並繫結該智慧體：角色設定隱藏，只顯示你的輸入",
+	"agentMarket.useInSessionHint": "新建會話並繫結該智慧體：角色設定隨訊息注入，可在輸入框上方展開檢視",
 	"agentMarket.backend": "後端",
 	"agentMarket.backendFollow": "跟隨預設",
 	"agentMarket.backendHint": "「使用」新建會話時採用該後端；劃詞一次性呼叫固定使用 pi 模型目錄",
 	"agentMarket.usedAgent": "已新建會話並繫結「{name}」",
 	"agentMarket.useFailed": "建立會話失敗：{error}",
 	"agentMarket.boundBadge": "智慧體會話",
+	"agentPromptBar.aria": "智慧體角色設定",
+	"agentPromptBar.roleLabel": "角色設定",
+	"agentPromptBar.expand": "展開提示詞",
+	"agentPromptBar.collapse": "收起提示詞",
+	"agentPromptBar.hint": "每次傳送時自動注入，不顯示在對話正文裡",
 	"settings.selectionTool.title": "劃詞工具",
 	"settings.selectionTool.description": "選中文字即可用智慧體翻譯；開啟系統級劃詞後，在其他應用裡也能用",
 	"settings.selectionTool.enabled": "應用內劃詞",

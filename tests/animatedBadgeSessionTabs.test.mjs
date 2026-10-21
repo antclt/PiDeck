@@ -72,9 +72,9 @@ test("session tab active background is instant (no shared-layout slide between t
 	assert.doesNotMatch(source, /from "motion\/react"/);
 	assert.doesNotMatch(source, /layoutId=\{/);
 	assert.doesNotMatch(source, /layoutRoot/);
-	// 三种 Tab（会话 / 文件 / 插件伪 Tab）各自保留一处静态选中底色，且只在激活时渲染。
+	// 四种 Tab（会话 / 文件 / 插件伪 Tab / 页面式工作区伪 Tab）各自保留一处静态选中底色，且只在激活时渲染。
 	const backgrounds = source.match(/pointer-events-none\s+absolute\s+inset-0\s+rounded-md\s+bg-accent/g) ?? [];
-	assert.equal(backgrounds.length, 3, "会话/文件/插件伪 Tab 各保留一处静态选中底色");
+	assert.equal(backgrounds.length, 4, "会话/文件/插件伪/页面工作区伪 Tab 各保留一处静态选中底色");
 	assert.match(source, /\{active &&\s*<span\s+aria-hidden="true"\s+className="pointer-events-none absolute inset-0 rounded-md bg-accent"/);
 	assert.match(source, /\{tab\.active &&\s*<span\s+aria-hidden="true"\s+className="pointer-events-none absolute inset-0 rounded-md bg-accent"/);
 });

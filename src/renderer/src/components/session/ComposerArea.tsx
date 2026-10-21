@@ -21,6 +21,7 @@ import { GUIDE_BOOTSTRAP_SESSION_ID } from "../../utils/chatSessionBootstrap";
 import { chatContentWidthStyle } from "./chatContentWidth";
 import { ComposerStatsLine } from "./ComposerStatsLine";
 import { ComposerWidgetLayoutProvider, type ComposerWidgetCollapsedByKey, useComposerWidgetLayoutValue } from "./ComposerWidgetLayout";
+import { SessionAgentPromptBar } from "./SessionAgentPromptBar";
 import type { ChatMessage, GitBranchInfo } from "../../../../shared/types";
 import type { ReplyActionRule } from "../../../../shared/types/replyActions";
 import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
@@ -70,6 +71,8 @@ type ComposerExtrasProps = {
 	queuePanel?: ReactNode;
 	deliveryNotice: ReactNode;
 	attachmentBar: ReactNode;
+	/** 绑定智能体的会话：输入框上方的角色设定提示条（可展开查看提示词）。 */
+	agentBar: ReactNode;
 	composerBox: ReactNode;
 	/** 输入卡正下方 StatsLine；与输入卡同一列，不吃剩余高度。 */
 	statsLine?: ReactNode;
@@ -103,6 +106,7 @@ function ComposerMeasuredExtras(props: ComposerExtrasProps) {
 				</div>
 				{hasAttachmentBar ? <div className="shrink-0">{props.attachmentBar}</div> : null}
 				<div className="flex w-full min-w-0 shrink-0 flex-col">
+					{props.agentBar}
 					{props.composerBox}
 					{props.statsLine}
 				</div>
@@ -221,6 +225,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 								<ComposerMeasuredExtras
 									widgets={props.widgets ?? null}
 									queuePanel={props.queuePanel}
+									agentBar={<SessionAgentPromptBar sessionId={props.sessionId} />}
 									deliveryNotice={<SessionDeliveryNotice status={composer.sendState.status} message={composer.sendState.unknownSnapshot?.message} images={composer.sendState.unknownSnapshot?.images} error={composer.sendState.error} onAcknowledge={composer.delivery.acknowledgeUnknown} />}
 									attachmentBar={
 										composer.attachments.length > 0 || composer.pasteFiles.files.length > 0 ? (

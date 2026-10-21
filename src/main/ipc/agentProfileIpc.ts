@@ -1,5 +1,5 @@
 /**
- * 智能体市场 IPC：智能体配置 CRUD + 市场设置（业务在 AgentProfileStore，本文件只做边界适配）。
+ * 智能体 IPC：智能体配置 CRUD + 市场设置（业务在 AgentProfileStore，本文件只做边界适配）。
  *
  * 渲染层数据一律不可信：名称/简介/图标/角色设定按共享常量卡长度，分类走白名单，
  * agentId 只校验形态与上限，模型引用只校验形状（目录键可能是中文/URL，不复制 pi 命名文法）。
@@ -40,7 +40,7 @@ const LOG_SCOPE = "agent-profiles";
 const MAX_AGENT_ID_CHARS = 200;
 
 /**
- * 注册智能体市场 IPC。
+ * 注册智能体 IPC。
  * 返回清理函数：卸载时退订 store 变更并摘掉全部 handler（与 automationIpc 同一生命周期约定）。
  */
 export function registerAgentProfileIpc(deps: AgentProfileIpcDeps): () => void {

@@ -33,8 +33,23 @@ test("load seeds the builtin translation agent on a fresh profile file", async (
 	await withStore(async ({ filePath }) => {
 		const store = new AgentProfileStore(filePath);
 		const snapshot = await store.load(1_000);
-		assert.equal(snapshot.agents.length, 1);
+		assert.equal(snapshot.agents.length, 4);
 		const [translate] = snapshot.agents;
+		// PiDeck 相关内置智能体：小助手 / 问题诊断 / 插件开发（提示词是产品内容，不是 UI 文案）。
+		const pideck = snapshot.agents.filter((agent) => agent.id.startsWith("builtin-pideck-"));
+		assert.deepEqual(
+			Array.from(pideck, (agent) => agent.id),
+			["builtin-pideck-helper", "builtin-pideck-diagnostic", "builtin-pideck-plugin-dev"],
+		);
+		assert.deepEqual(
+			Array.from(pideck, (agent) => agent.name),
+			["PiDeck 小助手", "PiDeck 问题诊断助手", "PiDeck 插件开发助手"],
+		);
+		for (const agent of pideck) {
+			assert.equal(agent.builtin, true);
+			assert.ok(agent.systemPrompt.length > 2_000, agent.id + " 的提示词必须足够完整");
+			assert.ok(agent.systemPrompt.length < AGENT_PROFILE_SYSTEM_PROMPT_MAX_CHARS);
+		}
 		const seed = getBuiltinSeed(BUILTIN_TRANSLATE_AGENT_ID);
 		assert.equal(translate.id, BUILTIN_TRANSLATE_AGENT_ID);
 		assert.equal(translate.name, "翻译官");
@@ -56,7 +71,7 @@ test("load seeds the builtin translation agent on a fresh profile file", async (
 		// 种子本身已落盘，重启不再依赖内存补种。
 		const persisted = await readPersisted(filePath);
 		assert.equal(persisted.version, 1);
-		assert.equal(persisted.agents.length, 1);
+		assert.equal(persisted.agents.length, 4);
 	});
 });
 
@@ -93,7 +108,7 @@ test("create/update/delete bump revision, emit changed events, and keep unspecif
 
 		assert.equal(await store.delete(created.id), true);
 		assert.equal(store.get(created.id), undefined);
-		assert.equal(store.list().length, 1);
+		assert.equal(store.list().length, 4);
 		assert.equal(store.getSnapshot().revision, 4);
 		assert.deepEqual(events, [1, 2, 3, 4]);
 
@@ -224,9 +239,9 @@ test("load recovers from corrupted JSON with an empty state plus the builtin see
 		const snapshot = await store.load(1_000);
 		assert.equal(snapshot.revision, 0);
 		assert.deepEqual(plain(snapshot.settings), { selectionToolEnabled: true, systemSelectionEnabled: true, selectionToolAgentId: null, sessionAgentBindings: {} });
-		assert.equal(snapshot.agents.length, 1);
+		assert.equal(snapshot.agents.length, 4);
 		assert.equal(snapshot.agents[0].id, BUILTIN_TRANSLATE_AGENT_ID);
-		assert.equal((await readPersisted(filePath)).agents.length, 1);
+		assert.equal((await readPersisted(filePath)).agents.length, 4);
 	});
 });
 
@@ -255,7 +270,7 @@ test("load keeps a selection that points at a re-seeded builtin agent", async ()
 		await writeFile(filePath, JSON.stringify({ version: 1, revision: 2, settings: { selectionToolEnabled: true, selectionToolAgentId: BUILTIN_TRANSLATE_AGENT_ID }, agents: [{ id: "custom", name: "自定义", systemPrompt: "设定" }] }), "utf8");
 		const store = new AgentProfileStore(filePath);
 		const snapshot = await store.load(1_000);
-		assert.equal(snapshot.agents.length, 2);
+		assert.equal(snapshot.agents.length, 5);
 		assert.equal(snapshot.settings.selectionToolAgentId, BUILTIN_TRANSLATE_AGENT_ID);
 	});
 });
@@ -350,7 +365,7 @@ test("create rejects blank required fields at the store boundary", async () => {
 		await store.load(1_000);
 		await assert.rejects(() => store.create({ name: "  ", systemPrompt: "设定" }), /Agent name is required/);
 		await assert.rejects(() => store.create({ name: "名字", systemPrompt: "" }), /Agent system prompt is required/);
-		assert.equal(store.list().length, 1);
+		assert.equal(store.list().length, 4);
 	});
 });
 
@@ -364,7 +379,7 @@ test("reads return deep copies that cannot mutate the store", async () => {
 		const snapshot = store.getSnapshot();
 		snapshot.agents[0].name = "被外部改掉";
 		snapshot.settings.selectionToolEnabled = false;
-		assert.equal(store.list().length, 1);
+		assert.equal(store.list().length, 4);
 		assert.equal(store.get(BUILTIN_TRANSLATE_AGENT_ID).name, "翻译官");
 		assert.equal(store.getSnapshot().settings.selectionToolEnabled, true);
 	});

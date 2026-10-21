@@ -1,5 +1,5 @@
 /**
- * 设置 → 通用 tab 内的「划词工具」设置区（用户反馈：划词设置属于设置页，不属于智能体市场）。
+ * 设置 → 通用 tab 内的「划词工具」设置区（用户反馈：划词设置属于设置页，不属于智能体）。
  *
  * 数据自持（与 PromptEnhanceSettingsSection / VoiceTranscriptionSettingsSection 同模式）：
  * 不进 CommonTab 草稿，改一项即时写 agent-profiles.json 的市场设置并回写快照 atom，

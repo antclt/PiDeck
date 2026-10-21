@@ -678,7 +678,7 @@ let usageStatsService: UsageStatsService | null = null;
 let piAuthService: PiAuthService | null = null;
 /** 提示词增强服务（输入框增强按钮的后端）：常驻助手进程复用用户那套 pi 的 ModelRuntime。 */
 let enhancePromptService: EnhancePromptService | null = null;
-/** 智能体市场配置存储（<userData>/agent-profiles.json）；null = 尚未初始化。 */
+/** 智能体配置存储（<userData>/agent-profiles.json）；null = 尚未初始化。 */
 let agentProfileStore: AgentProfileStore | null = null;
 /** 智能体一次性调用服务（划词工具 / 市场面板）：业务在 service，侧车进程在下面的 completion。 */
 let agentInvokeService: AgentInvokeService | null = null;
@@ -2938,7 +2938,7 @@ function registerIpc() {
 	registerEnhanceIpc(ipcMain, enhancePromptService);
 	// 输入预测（回合结束预测下一句输入）：同一侧车协议、独立实例；模型指令由主进程注入。
 	registerPromptSuggestionIpc(ipcMain, promptSuggestionService);
-	// 智能体市场：配置 CRUD + 一次性调用（划词工具）。store 在 whenReady 里已 load，
+	// 智能体：配置 CRUD + 一次性调用（划词工具）。store 在 whenReady 里已 load，
 	// 这里只按域注册边界 handler；直接调用走独立侧车实例（见 agentInvokeCompletionService）。
 	if (agentProfileStore) {
 		registerAgentProfileIpc({
@@ -5501,7 +5501,7 @@ app
 		);
 		automationStore = new AutomationStore(join(app.getPath("userData"), "automation.json"));
 		const automationStorePreload = automationStore.load();
-		// 智能体市场：配置存储（userData/agent-profiles.json）。load 内部做旧数据归一化与
+		// 智能体：配置存储（userData/agent-profiles.json）。load 内部做旧数据归一化与
 		// 内置翻译智能体补种；与 sessionCatalog 并行加载，不额外拖慢启动。
 		agentProfileStore = new AgentProfileStore(join(app.getPath("userData"), "agent-profiles.json"));
 		const agentProfileStorePreload = agentProfileStore.load();

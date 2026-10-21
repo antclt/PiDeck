@@ -6316,8 +6316,8 @@ export const zhCN = {
 	"web.extensionToggle": "启用或禁用扩展",
 	"web.assetsLoading": "加载中…",
 
-	// ── 智能体市场 / 划词工具（Agent Market & Selection Tool） ──
-	"agentMarket.title": "智能体市场",
+	// ── 智能体 / 划词工具（Agents & Selection Tool） ──
+	"agentMarket.title": "智能体",
 	"agentMarket.subtitle": "管理你的智能体：添加、编辑、随时调用；在页面中选中文字即可用默认智能体翻译",
 	"agentMarket.create": "新建智能体",
 	"agentMarket.searchPlaceholder": "搜索名称、简介或分类…",
@@ -6358,7 +6358,7 @@ export const zhCN = {
 	"agentMarket.fieldModelHint": "留空则跟随当前会话模型",
 	"agentMarket.fieldSystemPrompt": "角色设定",
 	"agentMarket.fieldSystemPromptPlaceholder": "描述智能体的身份、目标、语气与输出格式……",
-	"agentMarket.fieldSystemPromptHint": "一次性调用时作为系统提示；发送到会话时作为隐藏角色指令，不出现在对话正文里。",
+	"agentMarket.fieldSystemPromptHint": "一次性调用时作为系统提示；发送到会话时随每条消息注入，不出现在对话正文里，可在输入框上方展开查看。",
 	"agentMarket.nameRequired": "请填写名称",
 	"agentMarket.promptRequired": "请填写角色设定",
 	"agentMarket.detailTitle": "智能体详情",
@@ -6378,7 +6378,7 @@ export const zhCN = {
 	"selectionTool.toolbarTitle": "用「{name}」翻译选中文本",
 	"selectionTool.toolbarGeneric": "调用智能体",
 
-	// 智能体调用面板（划词工具与市场「使用」共用）
+	// 智能体调用面板（划词工具与「智能体」页面「使用」共用）
 	"agentInvoke.title": "调用智能体",
 	"agentInvoke.selectedCount": "已选 {count} 字",
 	"agentInvoke.sourceTitle": "原文",
@@ -6430,13 +6430,18 @@ export const zhCN = {
 	"selectionTool.windowEmpty": "选中文字后按快捷键，或直接输入内容",
 	"selectionTool.insertEmpty": "没有可发送的文本",
 	"agentMarket.useInSession": "使用",
-	"agentMarket.useInSessionHint": "新建会话并绑定该智能体：角色设定隐藏，只显示你的输入",
+	"agentMarket.useInSessionHint": "新建会话并绑定该智能体：角色设定随消息注入，可在输入框上方展开查看",
 	"agentMarket.backend": "后端",
 	"agentMarket.backendFollow": "跟随默认",
 	"agentMarket.backendHint": "「使用」新建会话时采用该后端；划词一次性调用固定使用 pi 模型目录",
 	"agentMarket.usedAgent": "已新建会话并绑定「{name}」",
 	"agentMarket.useFailed": "创建会话失败：{error}",
 	"agentMarket.boundBadge": "智能体会话",
+	"agentPromptBar.aria": "智能体角色设定",
+	"agentPromptBar.roleLabel": "角色设定",
+	"agentPromptBar.expand": "展开提示词",
+	"agentPromptBar.collapse": "收起提示词",
+	"agentPromptBar.hint": "每次发送时自动注入，不显示在对话正文里",
 	"settings.selectionTool.title": "划词工具",
 	"settings.selectionTool.description": "选中文字即可用智能体翻译；开启系统级划词后，在其他应用里也能用",
 	"settings.selectionTool.enabled": "应用内划词",

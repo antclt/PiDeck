@@ -6338,8 +6338,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"web.extensionToggle": "Enable or disable extension",
 	"web.assetsLoading": "Loading…",
 
-	// ── Agent Market & selection tool ──
-	"agentMarket.title": "Agent Market",
+	// ── Agents & selection tool ──
+	"agentMarket.title": "Agents",
 	"agentMarket.subtitle": "Manage your agents: add, edit, and invoke them anytime. Select text anywhere to translate it with your default agent.",
 	"agentMarket.create": "New agent",
 	"agentMarket.searchPlaceholder": "Search name, description, or category…",
@@ -6380,7 +6380,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"agentMarket.fieldModelHint": "Leave empty to follow the session model",
 	"agentMarket.fieldSystemPrompt": "Role instructions",
 	"agentMarket.fieldSystemPromptPlaceholder": "Describe the agent's identity, goal, tone, and output format…",
-	"agentMarket.fieldSystemPromptHint": "Used as the system prompt for one-shot calls; injected as a hidden role instruction when sending to a session.",
+	"agentMarket.fieldSystemPromptHint": "Used as the system prompt for one-shot calls; injected with every message when sending to a session (never shown as chat text) and expandable above the composer.",
 	"agentMarket.nameRequired": "Name is required",
 	"agentMarket.promptRequired": "Role instructions are required",
 	"agentMarket.detailTitle": "Agent details",
@@ -6400,7 +6400,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"selectionTool.toolbarTitle": 'Translate with "{name}"',
 	"selectionTool.toolbarGeneric": "Invoke agent",
 
-	// Agent invoke panel (shared by the selection tool and Market "Use")
+	// Agent invoke panel (shared by the selection tool and the Agents page "Use" action)
 	"agentInvoke.title": "Invoke agent",
 	"agentInvoke.selectedCount": "{count} chars selected",
 	"agentInvoke.sourceTitle": "Source",
@@ -6452,13 +6452,18 @@ export const enUS: Record<TranslationKey, string> = {
 	"selectionTool.windowEmpty": "Press the shortcut with text selected, or type here",
 	"selectionTool.insertEmpty": "Nothing to send",
 	"agentMarket.useInSession": "Use",
-	"agentMarket.useInSessionHint": "Create a session bound to this agent: the role prompt stays hidden and only your input is shown",
+	"agentMarket.useInSessionHint": "Create a session bound to this agent: its role prompt is injected with each message and can be expanded above the composer",
 	"agentMarket.backend": "Backend",
 	"agentMarket.backendFollow": "Follow default",
 	"agentMarket.backendHint": "Backend for sessions created via Use. One-shot selection translation always uses the pi model catalog.",
 	"agentMarket.usedAgent": 'Session created and bound to "{name}"',
 	"agentMarket.useFailed": "Failed to create session: {error}",
 	"agentMarket.boundBadge": "Agent session",
+	"agentPromptBar.aria": "Agent role prompt",
+	"agentPromptBar.roleLabel": "Role prompt",
+	"agentPromptBar.expand": "Show prompt",
+	"agentPromptBar.collapse": "Hide prompt",
+	"agentPromptBar.hint": "Injected automatically with every message; never shown as chat text",
 	"settings.selectionTool.title": "Selection tool",
 	"settings.selectionTool.description": "Translate selected text with an agent. Enable system-wide selection to use it in any app.",
 	"settings.selectionTool.enabled": "In-app selection tool",

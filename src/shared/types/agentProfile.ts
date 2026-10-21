@@ -1,5 +1,5 @@
 /**
- * 智能体市场（Agent Market）的跨进程契约。
+ * 智能体（Agent Market）的跨进程契约。
  *
  * 智能体是 PiDeck 层的「提示词预设」：名称 / 简介 / 图标 / 分类 / 角色设定 / 可选模型。
  * 运行时语义分两条，边界见 AGENTS.md「提示词增强侧车」例外四：
@@ -61,8 +61,18 @@ export type AgentProfile = {
 	lastUsedAt?: number;
 };
 
-/** 内置翻译智能体的稳定 id：市场种子、划词工具默认值、内置重置都按这个键定位。 */
+/** 内置翻译智能体的稳定 id：智能体种子、划词工具默认值、内置重置都按这个键定位。 */
 export const BUILTIN_TRANSLATE_AGENT_ID = "builtin-translate";
+
+/**
+ * PiDeck 相关内置智能体的稳定 id（发布后不可改）：
+ * - 小助手：产品功能/使用/开发/FAQ 的入门顾问
+ * - 问题诊断：定位故障、读诊断报告/日志、整理可提交的 Issue
+ * - 插件开发：宿主插件（Host Plugin）从脚手架到打包发布
+ */
+export const BUILTIN_PIDECK_HELPER_AGENT_ID = "builtin-pideck-helper";
+export const BUILTIN_PIDECK_DIAGNOSTIC_AGENT_ID = "builtin-pideck-diagnostic";
+export const BUILTIN_PIDECK_PLUGIN_DEV_AGENT_ID = "builtin-pideck-plugin-dev";
 
 /** 字段上限：编辑器、IPC 边界、存储归一化共用同一组常量，避免三处漂移。 */
 export const AGENT_PROFILE_NAME_MAX_CHARS = 60;

@@ -314,7 +314,7 @@ export function SidebarContent(props: SidebarContentProps) {
 					</button>
 					{/* 定时任务入口：放在新建/搜索下面，避免藏在底栏 Dock 里不好找 */}
 					<AutomationDockButton />
-					{/* 智能体市场入口：紧随定时任务，市场管理与划词调用同一个入口 */}
+					{/* 智能体入口：紧随定时任务，打开会话 Tab 栏里的「智能体」页面 */}
 					<AgentMarketDockButton />
 					{/* 宿主插件面板入口：与定时任务同区，无已启用面板时组件自身不渲染 */}
 					<HostPluginDockButtons projectId={props.currentProjectId} sessionId={props.currentSessionId} />

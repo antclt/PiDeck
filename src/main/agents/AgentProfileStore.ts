@@ -23,7 +23,7 @@ import { createBuiltinAgentProfile, getBuiltinSeed } from "./builtinAgents";
 export type { AgentProfilePatch } from "./agentProfileNormalize";
 
 /**
- * 智能体市场的唯一状态源：<userData>/agent-profiles.json（路径由装配层注入，便于测试）。
+ * 智能体的唯一状态源：<userData>/agent-profiles.json（路径由装配层注入，便于测试）。
  *
  * 与 AutomationStore 同一套骨架（串行写队列 + revision + onChanged + 读盘归一化），
  * 差异是它承载「用户可编辑的提示词预设」，所以：

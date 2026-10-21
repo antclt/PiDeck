@@ -1720,7 +1720,7 @@ const api = {
 		onChanged: (callback: (event: AutomationChangedEvent) => void) => subscribe<AutomationChangedEvent>(ipcChannels.automationChanged, callback),
 	},
 
-	// ── 智能体市场（Agent Market）：配置 CRUD + 一次性调用（划词工具共用同一协议） ──
+	// ── 智能体（Agent Market）：配置 CRUD + 一次性调用（划词工具共用同一协议） ──
 	agentProfiles: {
 		getSnapshot: () => ipcRenderer.invoke(ipcChannels.agentProfilesGetSnapshot) as Promise<AgentProfileSnapshot>,
 		create: (input: CreateAgentProfileInput) => ipcRenderer.invoke(ipcChannels.agentProfilesCreate, input) as Promise<AgentProfile>,

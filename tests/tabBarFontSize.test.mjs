@@ -24,7 +24,7 @@ const { cn } = loadTsCommonJs("src/renderer/src/lib/utils.ts");
 
 // 读取实际胶囊 class，经生产 cn 合并状态；只扫描源字符串会漏掉字号被误当颜色删除的回归。
 // 胶囊清单：文件 Tab、会话 Tab、插件面板伪 Tab（a902942bd 挂进 Tab 栏的页面式面板入口）。
-const PILL_NAMES = ["文件", "会话", "插件面板伪"];
+const PILL_NAMES = ["文件", "插件面板伪", "页面工作区伪", "会话"];
 for (const [index, pill] of [...tabsBar.matchAll(/"(session-tab group[^"]*)"/g)].entries()) {
 	for (const active of [false, true]) {
 		for (const preview of [false, true]) {
@@ -83,10 +83,11 @@ test("Tailwind 暴露 text-tab 工具类并接上 token", () => {
 	assert.match(tailwind, /--text-tab--line-height:\s*var\(--line-height-tab\)/);
 });
 
-test("SessionTabsBar：会话/文件/插件伪 Tab 消费字号及行高 token，字号不再依赖 text-micro", () => {
+test("SessionTabsBar：会话/文件/插件伪/页面工作区伪 Tab 消费字号及行高 token，字号不再依赖 text-micro", () => {
 	const pills = tabsBar.match(/"session-tab group[^"]*"/g) ?? [];
-	// a902942bd 起会话 Tab 栏还有页面式插件面板的伪 Tab，同样消费字号 token，计入契约
-	assert.equal(pills.length, 3, "应有会话 Tab、工作台文件 Tab 与插件面板伪 Tab 三处胶囊");
+	// a902942bd 起会话 Tab 栏还有页面式插件面板的伪 Tab；页面式工作区（定时任务 / 智能体）
+	// 也以同款伪 Tab 挂在同栏，同样消费字号 token，计入契约。
+	assert.equal(pills.length, 4, "应有会话 Tab、工作台文件 Tab、插件面板伪 Tab 与页面工作区伪 Tab 四处胶囊");
 	for (const pill of pills) {
 		assert.match(pill, /text-\[length:var\(--font-size-tab\)\]/);
 		assert.match(pill, /leading-\(--line-height-tab\)/);

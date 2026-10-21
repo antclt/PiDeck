@@ -78,6 +78,20 @@ export type WorkbenchEditorTabItem = {
 	active?: boolean;
 };
 
+/**
+ * 页面式工作区 Tab（定时任务 / 智能体）：与会话 Tab 同栏并列的伪 Tab，但不是会话。
+ * 不参与会话固定/拖拽/分屏，也不进 sessionTabIds；点击激活页面，关闭即卸载页面。
+ */
+export type WorkspacePageTabItem = {
+	id: string;
+	title: string;
+	icon?: React.ComponentType<{ className?: string }>;
+	/** 该页面当前正在呈现（active=false 表示 Tab 仍打开但会话在前台）。 */
+	active?: boolean;
+	onSelect: () => void;
+	onClose: () => void;
+};
+
 /** Tab 栏工具开关项：App 层装配（与抽屉活动栏动作同构），本栏只负责渲染与激活态展示。 */
 export type SessionToolAction = {
 	id: string;
@@ -150,6 +164,11 @@ export type SessionTabsBarProps = {
 	 * simple 模式不渲染（无 Tab 栏语义，插件页直接铺满会话区）。
 	 */
 	pluginTab?: { title: string; icon?: React.ComponentType<{ className?: string }>; onClose: () => void } | null;
+	/**
+	 * 页面式工作区 Tab（定时任务 / 智能体）：挂在会话 Tab 之后、与会话同栏，
+	 * 激活时页面覆盖会话列（装配层把 currentSessionId 置 undefined，会话 Tab 退非选中）。
+	 */
+	pageTabs?: readonly WorkspacePageTabItem[];
 	onSelectEditorTab?: (tabId: string) => void;
 	onCloseEditorTab?: (tabId: string) => void;
 	onPromoteEditorPreview?: (tabId: string) => void;
@@ -290,7 +309,7 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 		return () => {
 			resizeObserver.disconnect();
 		};
-	}, [props.tabs, props.pinnedTabs, props.splitGroupIds, props.splitGroupCollapsed, props.editorTabs]);
+	}, [props.tabs, props.pinnedTabs, props.splitGroupIds, props.splitGroupCollapsed, props.editorTabs, props.pageTabs]);
 
 	/** onDragOver 期间按鼠标位置相对目标 Tab 中点决定插入前后 */
 	const handleDragOver = (event: React.DragEvent, targetId: string) => {
@@ -411,6 +430,10 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 							return (
 								<>
 									{currentSessionId && renderTab(currentSessionId)}
+									{/* 页面式工作区 Tab（定时任务 / 智能体）：简洁模式也保留入口与关闭按钮 */}
+									{props.pageTabs?.map((tab) => (
+										<WorkspacePageTab key={tab.id} tab={tab} />
+									))}
 									{currentSessionId && !hasSplitGroup && <SessionHeader mode="session" sessionId={currentSessionId} embedded headerRef={embeddedHeaderRef} runControl={props.runControl} menu={{ sessionActions: props.sessionActions, toolActions: props.toolActions, onOpenProxySetting: props.onOpenProxySetting }} />}
 									{hasSplitGroup && (
 										<Button variant="ghost" size="icon-sm" aria-label={t("session.splitGroup.exitAll")} title={t("session.splitGroup.exitAll")} onClick={props.onExitAllSplit}>
@@ -542,6 +565,17 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 					{/* 浏览器式新建入口：跟在最后一张标签后面，下拉选择新建到哪个项目。
             （新建会话保留独立「+」按钮；⋯ 菜单只收运行控制与工具） */}
 					{!props.simple && <NewSessionMenu targets={props.newSessionTargets} onSelect={props.onNewSessionInProject} onNewAcpSession={props.onNewAcpSession} />}
+					{/* 页面式工作区 Tab（定时任务 / 智能体）：与会话 Tab 同栏并列，可关闭、不参与会话拖拽/固定 */}
+					{!props.simple && props.pageTabs && props.pageTabs.length > 0 ? (
+						<>
+							<span className="mx-0.5 h-5 w-px shrink-0 bg-border-strong" aria-hidden="true" />
+							{props.pageTabs.flatMap((tab, index) => {
+								const node = <WorkspacePageTab key={tab.id} tab={tab} />;
+								if (index === 0) return [node];
+								return [<span key={`page-tab-sep:${tab.id}`} className="mx-0.5 h-5 w-px shrink-0 bg-border-strong" aria-hidden="true" />, node];
+							})}
+						</>
+					) : null}
 					{/* 页面式插件面板伪 Tab：始终选中态（它就是当前呈现的视图），与会话 Tab 之间加竖线分隔 */}
 					{!props.simple && props.pluginTab ? (
 						<>
@@ -694,6 +728,58 @@ function HostPluginTab(props: { tab: { title: string; icon?: React.ComponentType
 				</button>
 			</span>
 			<span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-md bg-accent" />
+		</div>
+	);
+}
+
+/**
+ * 页面式工作区 Tab（定时任务 / 智能体）：与会话 Tab 同一套 session-tab 皮。
+ * 它不是会话：不拖拽、不固定、不参与分屏；点击激活页面，关闭按钮卸载页面。
+ * 激活态与文件 Tab 同款（灰色实底只画在激活 Tab 自己身上，无滑动动画）。
+ * 刻意不用 Tooltip：Tab 标题本身就是完整名称，避免与提示条契约（3 处悬停提示）纠缠。
+ */
+function WorkspacePageTab(props: { tab: WorkspacePageTabItem }) {
+	const { tab } = props;
+	const Icon = tab.icon;
+	return (
+		<div
+			role="tab"
+			aria-selected={Boolean(tab.active)}
+			aria-label={tab.title}
+			title={tab.title}
+			data-workspace-page-tab={tab.id}
+			tabIndex={0}
+			className={cn(
+				"session-tab group relative flex h-7 shrink-0 cursor-pointer select-none items-center rounded-md border border-transparent px-2 text-[length:var(--font-size-tab)] leading-(--line-height-tab) transition-[color,background-color,border-color,box-shadow,transform] duration-base",
+				"w-fit max-w-(--session-tab-max-w)",
+				tab.active ? "font-medium text-foreground" : "text-muted-foreground hover:-translate-y-px hover:bg-accent-soft hover:text-foreground",
+			)}
+			onClick={tab.onSelect}
+			onKeyDown={(event) => {
+				if (event.key === "Enter" || event.key === " ") {
+					event.preventDefault();
+					tab.onSelect();
+				}
+			}}
+		>
+			<span className="relative z-10 flex min-w-0 flex-1 items-center gap-1.5">
+				{Icon ? <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" /> : null}
+				<span className="min-w-0 flex-1 truncate">{tab.title}</span>
+				<button
+					type="button"
+					role="tab-close"
+					aria-label={t("tabs.close")}
+					title={t("tabs.close")}
+					className={cn("inline-grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground/70 transition-[color,background-color,opacity] hover:bg-accent hover:text-foreground", tab.active ? "opacity-60 hover:opacity-100" : "opacity-0 group-hover:opacity-60")}
+					onClick={(event) => {
+						event.stopPropagation();
+						tab.onClose();
+					}}
+				>
+					<X className="size-3" />
+				</button>
+			</span>
+			{tab.active && <span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-md bg-accent" />}
 		</div>
 	);
 }

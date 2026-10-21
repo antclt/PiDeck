@@ -229,7 +229,7 @@ export const ipcChannels = {
 	automationUpdateSettings: "automation:update-settings",
 	automationPreviewCron: "automation:preview-cron",
 	automationChanged: "automation:changed",
-	/** 智能体市场（Agent Market）：配置 CRUD + 一次性调用（与划词工具同一域） */
+	/** 智能体（Agent Market）：配置 CRUD + 一次性调用（与划词工具同一域） */
 	agentProfilesGetSnapshot: "agent-profiles:get-snapshot",
 	agentProfilesCreate: "agent-profiles:create",
 	agentProfilesUpdate: "agent-profiles:update",

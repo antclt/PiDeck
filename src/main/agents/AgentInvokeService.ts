@@ -1,5 +1,5 @@
 /**
- * 智能体市场「一次性调用」的宿主侧服务（划词翻译 / 市场面板试跑）。
+ * 智能体「一次性调用」的宿主侧服务（划词翻译 / 市场面板试跑）。
  *
  * 通道复用提示词增强侧车 `resources/pi-enhance-host.mjs` 的「一次性单条补全」
  * （见 AGENTS.md 例外四）：不新开第二条模型通道，也不让渲染层碰 pi SDK。区别只在
@@ -90,7 +90,7 @@ function invalidRequest(message: string): AgentInvokeResult {
 }
 
 /**
- * 智能体市场一次性调用服务。
+ * 智能体一次性调用服务。
  *
  * 生命周期：一次调用 = 一个侧车 run，同一时刻只有一个（新调用打断旧调用由
  * EnhancePromptService 保证）；`cancel()` 转发给侧车，渲染层停止按钮/关闭浮层共用。

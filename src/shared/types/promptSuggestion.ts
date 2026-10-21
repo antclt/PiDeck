@@ -17,7 +17,7 @@ export const PROMPT_SUGGESTION_MAX_CHARS = 200;
 /**
  * 发起一次预测。渲染层不传 userText / systemPrompt：
  * - userText 由主进程填固定触发句（渲染层无权决定模型收到的指令）；
- * - systemPrompt 只有主进程内置模板（与智能体市场同一收口原则）。
+ * - systemPrompt 只有主进程内置模板（与智能体同一收口原则）。
  */
 export type PromptSuggestionRunInput = {
 	provider: string;

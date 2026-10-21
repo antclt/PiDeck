@@ -112,7 +112,7 @@ export const DOMAIN_CATALOG = [
 	// 命名空间伴生认领 settings（F1-6 冻结例外表）。
 	{ id: "web", group: "integration", manager: "WebServiceManager + WebEventStream/WebWorkspaceRoutes/WebI18n/WebNetwork", ipcFile: ["ipc/systemIpc.ts"], preloadNamespaces: ["settings"], channelPrefix: ["web"], aggregation: "aggregate" },
 	{ id: "enhance", group: "integration", manager: "EnhancePromptService（常驻 sidecar pi-enhance-host.mjs）", ipcFile: ["ipc/enhanceIpc.ts"], preloadNamespaces: ["enhance"], channelPrefix: ["enhance"], aggregation: "redline" },
-	// 裁决：智能体市场（AgentProfileStore + AgentInvokeService）。一次性调用复用 enhance 侧车
+	// 裁决：智能体（AgentProfileStore + AgentInvokeService）。一次性调用复用 enhance 侧车
 	// 协议但走独立 EnhancePromptService 实例（AGENTS.md 例外四）：systemPrompt 只由主进程按
 	// agentId 解析、渲染层禁传；本行按普通域聚合（配置 CRUD + 市场设置 + 一次性调用入口），
 	// invoke 通道的红线约束由 AGENTS.md 例外四与 agentInvokeIpc 边界校验兜住，不扩成通用模型桥。
