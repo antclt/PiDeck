@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: d926b85f025c23270c03a69d7cafb64a95d87e037ec633af0f3d2a9830dee3ce（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 937873e70521d0573f4e4e57e0b76ddc484121a503832708348ca38355167839（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4380,6 +4380,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.sound.preset.waitingKnock": "敲門",
 	"settings.storage.title": "日誌與快取",
 	"settings.storage.desc": "檢視和管理應用日誌、RPC 日誌與輸入框貼上檔案",
+	"settings.storage.items": "清理項",
+	"settings.storage.rpcLogsDesc": "在會話選單開啟 RPC 日誌記錄後，宿主與 pi 子程序之間的訊息日誌",
 	"settings.storage.appLogsSize": "應用日誌大小",
 	"settings.storage.rpcLogsSize": "RPC 日誌大小",
 	"settings.storage.pasteFiles": "貼上檔案",
@@ -4393,13 +4395,11 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.storage.rpcLogs": "RPC 日誌",
 	"settings.storage.clearDone": "清理完成",
 	"settings.storage.clearConfirm": "確認刪除 {label} 嗎？刪除後將永久清除。",
-	"settings.storage.actions": "操作",
 	"settings.storage.clearAll": "清理全部",
 	"settings.storage.clearAllDesc": "同時清理應用日誌、RPC 日誌與貼上檔案",
-	"settings.storage.clearAllButton": "清理全部",
+	"settings.storage.clearButton": "清理",
 	"settings.storage.clearLocalStorage": "清理介面本地快取",
 	"settings.storage.clearLocalStorageDesc": "清理過濾器、檔案排序等渲染層介面快取；側欄/抽屜寬度會從應用設定恢復，不影響設定、會話與日誌",
-	"settings.storage.clearLocalStorageButton": "清理介面快取",
 	"settings.storage.clearLocalStorageConfirm": "確認清理介面本地快取嗎？過濾器、排序等渲染層偏好將重置，側欄/抽屜寬度會從應用設定恢復，頁面會自動重新整理。設定與會話資料不受影響。",
 	"settings.storage.openFolder": "開啟日誌資料夾",
 	"settings.storage.openFolderDesc": "在檔案管理器中檢視日誌檔案",

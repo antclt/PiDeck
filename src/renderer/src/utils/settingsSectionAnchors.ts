@@ -67,7 +67,7 @@ export const SETTINGS_SECTION_ANCHORS = [
 	{ tab: "dev", slug: "dev-runtime", labelKey: "settings.sectionRuntime", keywords: ["运行", "运行时", "runtime"] },
 	{ tab: "dev", slug: "dev-debug", labelKey: "settings.debug", keywords: ["调试", "debug"] },
 	{ tab: "dev", slug: "dev-privacy", labelKey: "settings.privacy", keywords: ["隐私", "遥测", "privacy", "telemetry"] },
-	{ tab: "storage", slug: "storage-actions", labelKey: "settings.storage.actions", keywords: ["清理缓存", "清理", "释放空间", "storage actions"] },
+	{ tab: "storage", slug: "storage-items", labelKey: "settings.storage.items", keywords: ["清理项", "清理缓存", "清理", "释放空间", "缓存", "临时数据", "cleanup items", "storage actions"] },
 	{ tab: "storage", slug: "storage-rpc-logs", labelKey: "settings.storage.rpcLogs", keywords: ["rpc 日志", "日志", "rpc logs"] },
 	{ tab: "storage", slug: "storage-paste-files", labelKey: "settings.storage.pasteFiles", keywords: ["粘贴文件", "临时文件", "图片缓存", "paste files"] },
 	{ tab: "storage", slug: "storage-notice-history", labelKey: "settings.storage.noticeHistory", keywords: ["通知历史", "公告历史", "notice history"] },
