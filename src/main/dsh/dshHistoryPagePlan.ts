@@ -129,6 +129,39 @@ export function assembleDshHistoryEntries<T extends DshHistoryEventEntry>(batche
 }
 
 /**
+ * attach 窗口的「窗口前还有更早历史」判定（渲染层补页/跳转的窗口标记来源）。
+ *
+ * host 报 hasMore=true 表示本次尾部窗口没有覆盖到会话开头；窗口最旧事件 seq 就是
+ * 下一批更早历史的排除边界（session/page 的 beforeSeq）。hasMore=false 或读不到
+ * 任何 seq 时视为「已含会话开头」，不开放补页（避免游标原地打转）。
+ */
+export function resolveDshHistoryWindow(entries: ReadonlyArray<DshHistoryEventEntry>, hasMore: boolean): { historyHasOlder: boolean; historyBeforeSeq?: number } {
+	let oldest: number | undefined;
+	for (const entry of entries) {
+		const seq = seqOf(entry);
+		if (seq !== undefined && (oldest === undefined || seq < oldest)) oldest = seq;
+	}
+	return hasMore && oldest !== undefined ? { historyHasOlder: true, historyBeforeSeq: oldest } : { historyHasOlder: false };
+}
+
+/**
+ * 渲染层运行时窗口协议字段（attach 窗口被截断时）。
+ *
+ * 协议只有 windowStart（窗口起点下标）与 windowStartFilePos（数值游标）两个槽位，
+ * 渲染层的卡片数按 `len − totalLength + windowStart` 推导。DSH 不知道窗口前的真实
+ * 消息数，这里用「有更早历史 = 1」的标记值并让 totalLength 同步 +1，保证卡片数恒 0；
+ * 渲染层据此只判断「还有更早历史」，并把 windowStartFilePos（窗口最旧事件 seq）
+ * 原样当作 session/page 的 beforeSeq 补页。
+ */
+export function dshRuntimeWindowFields(input: { messageCount: number; historyHasOlder?: boolean; historyBeforeSeq?: number }): { totalLength: number; windowStart?: number; windowStartFilePos?: number } {
+	const hasOlder = input.historyHasOlder === true && input.historyBeforeSeq !== undefined;
+	return {
+		totalLength: input.messageCount + (hasOlder ? 1 : 0),
+		...(hasOlder ? { windowStart: 1, windowStartFilePos: input.historyBeforeSeq } : {}),
+	};
+}
+
+/**
  * 把页首对齐到「本页最旧的 turn/start」。
  *
  * host 的分页切点是「消息组起点」（paginate 用 sourceEventSeqs 保证不切在消息中间），
