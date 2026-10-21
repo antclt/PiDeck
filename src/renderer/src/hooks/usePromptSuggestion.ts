@@ -4,6 +4,7 @@ import { sessionMessageCacheBySessionIdAtomFamily } from "../atoms/session-atoms
 import { desktopApi } from "../desktopApi";
 import { collectPromptEnhanceContext } from "../utils/promptEnhanceContext";
 import { isPromptSuggestionAcceptKey, normalizePromptSuggestion, shouldShowPromptSuggestion } from "../utils/promptSuggestion";
+import { logFromRenderer } from "../utils/rendererLog";
 
 /**
  * 输入预测的渲染域 hook：拥有「回合结束 → 一次预测 → 空输入框 ghost 文案 → Tab 采纳」状态机。
@@ -19,6 +20,14 @@ import { isPromptSuggestionAcceptKey, normalizePromptSuggestion, shouldShowPromp
 
 /** 回合结束后稍等一拍再取快照：agent_end 到消息缓存落地之间可能还差一次写入。 */
 const PREDICT_DELAY_MS = 300;
+
+/**
+ * 没预测/没结果的原因只记应用日志（scope=suggest，设置 → 日志可见），不弹 toast。
+ * 关键：区分「没触发」与「模型没给东西」——前者是本地判定，后者带字数为 0 的完成记录。
+ */
+function logSuggestion(level: "debug" | "info" | "warn", message: string, detail?: unknown): void {
+	logFromRenderer(level, "suggest", message, detail);
+}
 
 export type PromptSuggestionView = { text: string; visible: boolean };
 
@@ -72,13 +81,23 @@ export function usePromptSuggestion(input: {
 	const start = useCallback(() => {
 		if (!enabledRef.current) return;
 		const target = targetRef.current;
-		if (!target) return;
+		// 回合结束后目标模型才失效（切会话/改设置）：留一行原因，否则只是 ghost 不出现。
+		if (!target) {
+			logSuggestion("debug", "未预测：开关已开但没有可用目标模型（会话模型与固定模型都解析不到）");
+			return;
+		}
 		const messages = store.get(sessionMessageCacheBySessionIdAtomFamily(scopeKeyRef.current))?.messages ?? [];
 		const last = messages.at(-1);
 		// 只有「答完」才预测：错误/中断/最后一条还是用户消息时不猜，省一次无意义调用。
-		if (!last || last.role !== "assistant" || !last.text.trim()) return;
+		if (!last || last.role !== "assistant" || !last.text.trim()) {
+			logSuggestion("debug", `未预测：最后一条不是 assistant 正文（role=${last?.role ?? "none"}，本轮可能出错/被中断）`);
+			return;
+		}
 		const context = collectPromptEnhanceContext(messages);
-		if (!context.length) return;
+		if (!context.length) {
+			logSuggestion("debug", "未预测：上下文为空");
+			return;
+		}
 		const candidate = `pending-${Math.random().toString(36).slice(2)}`;
 		runIdRef.current = candidate;
 		void desktopApi.suggestion
@@ -86,11 +105,13 @@ export function usePromptSuggestion(input: {
 			.then((result) => {
 				// 等受理期间：用户已开始输入/切会话/关开关，候选 id 已被清掉 → 立即撤回。
 				if (runIdRef.current !== candidate) {
+					logSuggestion("debug", "输入预测已撤回：受理前用户已开始输入/切会话/关开关");
 					if (result.ok) void desktopApi.suggestion.cancel().catch(() => undefined);
 					return;
 				}
 				if (!result.ok) {
 					runIdRef.current = "";
+					// 主进程已记 「未受理」原因，这里不重复刷屏。
 					return;
 				}
 				runIdRef.current = result.runId;
@@ -108,6 +129,7 @@ export function usePromptSuggestion(input: {
 			if (event.phase === "done") {
 				const next = normalizePromptSuggestion(event.text);
 				runIdRef.current = "";
+				if (!next) logSuggestion("info", `输入预测无可用结果：模型返回 ${event.text.length} 字，清洗后为空`);
 				setText(next);
 				return;
 			}
@@ -128,6 +150,13 @@ export function usePromptSuggestion(input: {
 		}
 		if (!wasRunning) return;
 		clearTimer();
+		// 目标为空时下面的失效 effect 会清掉定时器，start() 根本跑不到；「没预测」的原因只能在这里记。
+		// 开关关着是用户的显式选择，不记日志（否则每轮都刷一条无意义记录）。
+		if (!enabledRef.current) return;
+		if (!targetRef.current) {
+			logSuggestion("debug", "未预测：开关已开但没有可用目标模型（会话模型与固定模型都解析不到）");
+			return;
+		}
 		timerRef.current = setTimeout(() => {
 			timerRef.current = null;
 			start();

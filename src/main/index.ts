@@ -2982,7 +2982,12 @@ function registerIpc() {
 	// 提示词增强（输入框增强按钮）：只做校验/适配，进程与协议在 EnhancePromptService
 	registerEnhanceIpc(ipcMain, enhancePromptService);
 	// 输入预测（回合结束预测下一句输入）：同一侧车协议、独立实例；模型指令由主进程注入。
-	registerPromptSuggestionIpc(ipcMain, promptSuggestionService);
+	// 预测不弹提示，全部结论都靠 scope=suggest 的应用日志（设置 → 日志）可查。
+	registerPromptSuggestionIpc(ipcMain, promptSuggestionService, {
+		debug: (message) => void appLogger?.debug("suggest", message),
+		info: (message) => void appLogger?.info("suggest", message),
+		warn: (message) => void appLogger?.warn("suggest", message),
+	});
 	// 智能体：配置 CRUD + 一次性调用（划词工具）。store 在 whenReady 里已 load，
 	// 这里只按域注册边界 handler；直接调用走独立侧车实例（见 agentInvokeCompletionService）。
 	if (agentProfileStore) {
