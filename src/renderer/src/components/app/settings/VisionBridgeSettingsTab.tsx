@@ -16,6 +16,7 @@ import { Check, RefreshCw, Trash2 } from "lucide-react";
 import { t } from "../../../i18n";
 import { desktopApi } from "../../../desktopApi";
 import { showNotice } from "../../../utils/notice";
+import { useFavoriteModels } from "../../../hooks/useFavoriteModels";
 import { Button } from "../../ui-shadcn/button";
 import { Input } from "../../ui-shadcn/input";
 import { Textarea } from "../../ui-shadcn/textarea";
@@ -57,6 +58,8 @@ export function VisionBridgeSettingsTab(props: {
 	// 模型列表加载不出来时选择器里的刷新按钮可立即重试。
 	const [models, setModels] = useState<AvailableModel[]>([]);
 	const [modelsRefreshing, setModelsRefreshing] = useState(false);
+	// 收藏与输入框模型选择器同源（设置页各选择器都打开前重读，避免缓存不一致）
+	const { favoriteModels, refreshFavoriteModels, toggleFavorite } = useFavoriteModels();
 	const loadModels = useCallback(async (force = false) => {
 		if (force) setModelsRefreshing(true);
 		try {
@@ -79,6 +82,7 @@ export function VisionBridgeSettingsTab(props: {
 
 	const openPicker = async () => {
 		await loadModels();
+		await refreshFavoriteModels();
 		setPickerOpen(true);
 	};
 
@@ -293,7 +297,16 @@ export function VisionBridgeSettingsTab(props: {
 
 			{/* 模型选择弹层：与会话模型选择器同一组件，行为一致 */}
 			{pickerOpen && (
-				<ModelPicker models={models} refreshing={modelsRefreshing} onRefresh={() => void loadModels(true)} current={draft?.provider ? { provider: draft.provider, modelId: draft.model } : undefined} favoriteModels={[]} onToggleFavorite={() => undefined} onPick={onPickModel} onClose={() => setPickerOpen(false)} />
+				<ModelPicker
+					models={models}
+					refreshing={modelsRefreshing}
+					onRefresh={() => void loadModels(true)}
+					current={draft?.provider ? { provider: draft.provider, modelId: draft.model } : undefined}
+					favoriteModels={favoriteModels}
+					onToggleFavorite={toggleFavorite}
+					onPick={onPickModel}
+					onClose={() => setPickerOpen(false)}
+				/>
 			)}
 		</div>
 	);

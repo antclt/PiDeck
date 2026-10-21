@@ -19,6 +19,8 @@ function rowsHarness({ initial = {}, settingKey = "enhanceModel" } = {}) {
 	const notices = [];
 	const patches = [];
 	const savedValues = [];
+	// 收藏态由 hooks/useFavoriteModels 自己负责（有独立单测），这里只记组件对它的调用。
+	const favoriteCalls = { refreshes: 0, toggles: [], favorites: [] };
 	let settings = { ...initial };
 	let update = async (patch) => (settings = { ...settings, ...patch });
 	const control = (name) => ({ [name]: () => null });
@@ -27,6 +29,15 @@ function rowsHarness({ initial = {}, settingKey = "enhanceModel" } = {}) {
 			react: { ...host.react, useId: () => "model-row" },
 			"../../../i18n": { t: (key) => key },
 			"../../../utils/notice": { showNotice: (message) => notices.push(message) },
+			"../../../hooks/useFavoriteModels": {
+				useFavoriteModels: () => ({
+					favoriteModels: favoriteCalls.favorites,
+					refreshFavoriteModels: async () => {
+						favoriteCalls.refreshes += 1;
+					},
+					toggleFavorite: (provider, modelId) => favoriteCalls.toggles.push([provider, modelId]),
+				}),
+			},
 			"../../../desktopApi": {
 				desktopApi: {
 					settings: {
@@ -65,6 +76,10 @@ function rowsHarness({ initial = {}, settingKey = "enhanceModel" } = {}) {
 		patches,
 		notices,
 		savedValues,
+		favoriteCalls,
+		setFavorites: (next) => {
+			favoriteCalls.favorites = next;
+		},
 		setUpdate: (fn) => {
 			update = fn;
 		},
@@ -175,4 +190,35 @@ test("磁盘返回值缺字段时归为跟随会话模型，不保留旧值", as
 		h.find((props) => typeof props.onOpen === "function"),
 		undefined,
 	);
+});
+
+/** 打开模型选择器（模式下拉选「指定固定模型」），返回取 ModelPicker props 的 getter。 */
+async function openPicker(h) {
+	h.modeSelect().onValueChange("custom");
+	await flush();
+	return () => h.find((props) => typeof props.onPick === "function");
+}
+
+test("打开选择器时刷新并透传收藏，切换收藏交给 useFavoriteModels", async () => {
+	const h = rowsHarness();
+	h.setFavorites(["pi-a/a"]);
+	h.render();
+	await flush();
+	const picker = await openPicker(h);
+	assert.equal(h.favoriteCalls.refreshes, 1, "打开前要以磁盘为准重读收藏");
+	assert.deepEqual(plain(picker().favoriteModels), ["pi-a/a"], "收藏要显示在设置页的模型选择器里");
+
+	picker().onToggleFavorite("pi-a", "a");
+	assert.deepEqual(h.favoriteCalls.toggles, [["pi-a", "a"]], "星标点击要真正走到收藏开关，不能是空实现");
+});
+
+test("每次打开都重读收藏，两个设置区块不会各缓存一份", async () => {
+	const h = rowsHarness();
+	h.render();
+	await flush();
+	const picker = await openPicker(h);
+	assert.equal(h.favoriteCalls.refreshes, 1);
+	picker().onClose();
+	await openPicker(h);
+	assert.equal(h.favoriteCalls.refreshes, 2, "再次打开要重新读磁盘（另一个选择器可能刚改过）");
 });

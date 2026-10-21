@@ -7,11 +7,15 @@
  *
  * 自管理保存（不进 CommonTab 草稿）：选中即写 settings，只认保存成功后的返回值并写穿 atom，
  * 失败回滚本地态并 toast——绝不让「界面选了、下一轮还用旧模型」这种半截状态存在。
+ *
+ * 收藏（settings.favoriteModels）与输入框的模型选择器同源，见 hooks/useFavoriteModels：
+ * 每次打开都以磁盘为准重新读取，切换收藏当场落盘。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../../../i18n";
 import { desktopApi } from "../../../desktopApi";
 import { showNotice } from "../../../utils/notice";
+import { useFavoriteModels } from "../../../hooks/useFavoriteModels";
 import { ModelPicker } from "../../session/ComposerComponents";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "../../ui-shadcn/select";
 import type { AppSettings, AvailableModel } from "../../../../../shared/types";
@@ -50,6 +54,7 @@ export function FixedModelSettingRows(props: {
 	const [pickerOpen, setPickerOpen] = useState(false);
 	const [models, setModels] = useState<AvailableModel[]>([]);
 	const [modelsRefreshing, setModelsRefreshing] = useState(false);
+	const { favoriteModels, refreshFavoriteModels, toggleFavorite } = useFavoriteModels();
 
 	// 挂载时以磁盘设置为基准（App 水合的 atom 可能晚于本组件挂载，这里以 get 为准）。
 	useEffect(() => {
@@ -107,10 +112,12 @@ export function FixedModelSettingRows(props: {
 		[configured, failedNotice, onSaved, savedNotice, settingKey],
 	);
 
+	// 收藏以磁盘为唯一真相（同 hooks/useFavoriteModels）：打开选择器时重读。
 	const openPicker = useCallback(async () => {
 		await loadModels();
+		await refreshFavoriteModels();
 		setPickerOpen(true);
-	}, [loadModels]);
+	}, [loadModels, refreshFavoriteModels]);
 
 	const disabled = !hydrated || saving;
 	const selectedLabel = configured ? `${configured.provider}/${configured.modelId}` : "";
@@ -151,8 +158,8 @@ export function FixedModelSettingRows(props: {
 					refreshing={modelsRefreshing}
 					onRefresh={() => void loadModels(true)}
 					current={configured ?? undefined}
-					favoriteModels={[]}
-					onToggleFavorite={() => undefined}
+					favoriteModels={favoriteModels}
+					onToggleFavorite={toggleFavorite}
 					onPick={(model) => {
 						setPickerOpen(false);
 						void persist({ provider: model.provider, modelId: model.id });
