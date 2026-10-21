@@ -3,19 +3,24 @@
  *
  * 自管理保存（与提示词增强同一模式）：开关一拨就落 settings 并写穿 atom，
  * composer 下一轮结束时即按新值决定是否发起预测，无需重开会话。
+ * 模型策略（跟随会话模型 / 指定固定模型）走 FixedModelSettingRows——
+ * 与提示词增强共用行与保存语义，但写的是独立的 settings.promptSuggestionModel：
+ * 预测是每轮都发一次的后台调用，用户常想用便宜的小模型，不必与增强模型绑定。
  */
 import { useCallback, useId, useEffect, useRef, useState } from "react";
 import { useSetAtom } from "jotai";
 import { t } from "../../../i18n";
 import { desktopApi } from "../../../desktopApi";
 import { showNotice } from "../../../utils/notice";
-import { promptSuggestionEnabledAtom } from "../../../atoms/composer-atoms";
+import { promptSuggestionEnabledAtom, promptSuggestionModelAtom } from "../../../atoms/composer-atoms";
 import { Switch } from "../../ui-shadcn/switch";
+import { FixedModelSettingRows } from "./FixedModelSettingRows";
 import { SettingsSection } from "./SettingsStorageTab";
 import { SettingRow } from "./SettingRows";
 
 export function PromptSuggestionSettingsSection() {
 	const setEnabledAtom = useSetAtom(promptSuggestionEnabledAtom);
+	const setModelAtom = useSetAtom(promptSuggestionModelAtom);
 	const switchId = useId();
 	const savingRef = useRef(false);
 	const [enabled, setEnabled] = useState(true);
@@ -65,6 +70,8 @@ export function PromptSuggestionSettingsSection() {
 			<SettingRow title={<label htmlFor={switchId}>{t("settings.promptSuggestion.enabled")}</label>} description={t("settings.promptSuggestion.enabledDesc")}>
 				<Switch id={switchId} checked={enabled} disabled={saving} onCheckedChange={(value) => void persist(value)} />
 			</SettingRow>
+
+			<FixedModelSettingRows settingKey="promptSuggestionModel" onSaved={setModelAtom} modeTitle={t("settings.promptSuggestion.modelMode")} modeDesc={t("settings.promptSuggestion.modelModeDesc")} savedNotice={t("settings.promptSuggestion.saved")} failedNotice={t("settings.promptSuggestion.saveFailed")} />
 		</SettingsSection>
 	);
 }

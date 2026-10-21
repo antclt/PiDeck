@@ -144,6 +144,11 @@ export type AppSettings = {
 	 */
 	promptSuggestionEnabled?: boolean;
 	/**
+	 * 输入预测用的模型；null/缺省 = 跟随会话模型（与 enhanceModel 同一条优先级链，但两者互不影响）。
+	 * 非法形态（缺字段/非字符串）在 SettingsStore 加载与 update 时归一为 null。
+	 */
+	promptSuggestionModel?: { provider: string; modelId: string } | null;
+	/**
 	 * 全局快捷键用户覆盖：ShortcutId → accelerator（Electron 语法子集，见 shared/shortcuts.ts）。
 	 * 缺省键 = 平台默认值（macOS ⌘, 打开设置 / F12 开发者工具等）；设置页「快捷键管理」
 	 * 修改后写这里，主进程 before-input-event 匹配实时读取（无需重启）。

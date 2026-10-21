@@ -22,6 +22,12 @@ export const enhanceIncludeContextAtom = atom(false);
 export const promptSuggestionEnabledAtom = atom(true);
 
 /**
+ * 输入预测的固定模型（settings.promptSuggestionModel 镜像）：null = 跟随会话模型。
+ * 与 enhanceModelAtom 互不影响——预测是后台调用，用户常想用便宜小模型，而增强要长表单改写能力。
+ */
+export const promptSuggestionModelAtom = atom<EnhanceModelSelection | null>(null);
+
+/**
  * 粘贴大文本 → 落盘文件 chip 的元数据（内容只在主进程受管目录，此处仅存指针）。
  * 新写入一律 inProject=false（userData/paste-files）：发送时折叠为原样文本内联；
  * 遗留项目内 chip（inProject=true）仍走 @"path" 引用。

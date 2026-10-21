@@ -323,6 +323,8 @@ Gitmoji 对应关系：
 	enhanceIncludeContext: false,
 	// 输入预测：默认开启；关掉后渲染层不发请求、不展示建议
 	promptSuggestionEnabled: true,
+	// 输入预测模型：null = 跟随会话模型（与 enhanceModel 各自独立，互不影响）
+	promptSuggestionModel: null,
 
 	// ── 更新检测：检查永远自动；自动下载默认开启（v0.7.4 起取代 disableUpdateCheck）──
 	autoDownloadUpdates: true,
@@ -606,6 +608,8 @@ export class SettingsStore {
 			this.settings.enhanceIncludeContext = parsed.enhanceIncludeContext === true;
 			// 输入预测只有显式 false 才关闭：老设置缺字段按默认开启处理。
 			this.settings.promptSuggestionEnabled = parsed.promptSuggestionEnabled !== false;
+			// 预测模型与增强模型同形态：脏值（缺字段/非字符串）一律回落 null = 跟随会话模型。
+			this.settings.promptSuggestionModel = normalizeEnhanceModel(this.settings.promptSuggestionModel);
 			// 隐藏模块来自旧 JSON 时可能是脏值（非数组/含空串与重复项）；统一清洗，缺字段回落空数组（全显示）。
 			this.settings.hiddenModules = normalizeHiddenModules(parsed.hiddenModules);
 			// 输入框功能入口同规则清洗（与 hiddenModules 共用实现）。
@@ -989,6 +993,10 @@ export class SettingsStore {
 		// 输入预测开关同样只认布尔语义：非 false 的脏值不改变当前设置。
 		if ("promptSuggestionEnabled" in safePatch && typeof safePatch.promptSuggestionEnabled === "boolean") {
 			this.settings.promptSuggestionEnabled = safePatch.promptSuggestionEnabled;
+		}
+		// 预测模型同增强模型：入参不可信，非法形态一律归一为 null（跟随会话模型）。
+		if ("promptSuggestionModel" in safePatch) {
+			this.settings.promptSuggestionModel = normalizeEnhanceModel(this.settings.promptSuggestionModel);
 		}
 		if ("theme" in safePatch) {
 			this.settings.theme = this.normalizeThemeMode(this.settings.theme);
