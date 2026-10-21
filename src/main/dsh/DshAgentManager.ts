@@ -49,7 +49,7 @@ import {
 import { applyDshControlEvent, beginDshCancel, type DshControlState } from "./dshRuntimeControl";
 import { isDshModelImageUnsupportedRejection, readDshModelSelection, resolveDshModelDirectory, toDshAvailableModels } from "./dshModels";
 import { approvalUiRequest, buildDshRejectValue, buildDshRespondValue, parseDshApprovalFrame, parseDshQuestionFrame, questionUiRequest, type DshApprovalFrame, type DshQuestionFrame } from "./dshApprovalBridge";
-import { assembleDshHistoryEntries, countDshUserMessages, DSH_HISTORY_DEFAULT_TURN_PAGE_SIZE, normalizeDshTurnPageSize, planDshHistoryRounds, trimToOldestTurnStart } from "./dshHistoryPagePlan";
+import { assembleDshHistoryEntries, countDshUserMessages, DSH_HISTORY_DEFAULT_TURN_PAGE_SIZE, dshRuntimeWindowFields, normalizeDshTurnPageSize, planDshHistoryRounds, resolveDshHistoryWindow, trimToOldestTurnStart } from "./dshHistoryPagePlan";
 import { DSH_SESSION_FIND_MAX_MATCHES, findDshSessionMatches, type DshSessionFindResult } from "./dshSessionFind";
 import { isContextOverflowError } from "../../shared/contextOverflow";
 import { parseDshTeamProjection } from "./dshTeamProjection";
@@ -365,6 +365,7 @@ export class DshAgentManager implements SessionAgentGateway {
 					.map((entry) => ({ event: entry.event, view: entry.view }))
 					.filter((item): item is { event: NonNullable<typeof item.event>; view: typeof item.view } => Boolean(item.event))
 					.sort((left: { event: { seq?: number } }, right: { event: { seq?: number } }) => (left.event.seq ?? 0) - (right.event.seq ?? 0));
+				this.recordDshHistoryWindow(runtime, entries, history.result.value.hasMore === true);
 				for (const { event, view } of entries) {
 					runtime.projection = projectDshEvent(runtime.projection, event, agentId, view);
 				}
@@ -621,6 +622,7 @@ export class DshAgentManager implements SessionAgentGateway {
 				.map((entry) => ({ event: entry.event, view: entry.view }))
 				.filter((item): item is { event: NonNullable<typeof item.event>; view: typeof item.view } => Boolean(item.event))
 				.sort((left: { event: { seq?: number } }, right: { event: { seq?: number } }) => (left.event.seq ?? 0) - (right.event.seq ?? 0));
+			this.recordDshHistoryWindow(runtime, entries, history.result.value.hasMore === true);
 			for (const { event, view } of entries) {
 				runtime.projection = projectDshEvent(runtime.projection, event, agentId, view);
 			}
@@ -821,6 +823,7 @@ export class DshAgentManager implements SessionAgentGateway {
 						.map((entry) => ({ event: entry.event, view: entry.view }))
 						.filter((item): item is { event: NonNullable<typeof item.event>; view: typeof item.view } => Boolean(item.event))
 						.sort((left: { event: { seq?: number } }, right: { event: { seq?: number } }) => (left.event.seq ?? 0) - (right.event.seq ?? 0));
+					this.recordDshHistoryWindow(runtime, entries, history.result.value.hasMore === true);
 					let projection = projectDshEvent(undefined, undefined, agentId);
 					for (const { event, view } of entries) {
 						projection = projectDshEvent(projection, event, agentId, view);
@@ -1824,6 +1827,9 @@ export class DshAgentManager implements SessionAgentGateway {
 			contextPressure: undefined,
 			contextBreakdown: undefined,
 			contextWindow: undefined,
+			// 新 host 会话的窗口边界重新按它自己的 attach 页判定（...runtime 会把旧会话的游标带过来）
+			historyHasOlder: undefined,
+			historyBeforeSeq: undefined,
 		};
 		const history = await this.historyPage(String(newSessionId), { maxMessages: 200 }).catch(() => null);
 		if (history?.result.ok) {
@@ -1831,6 +1837,7 @@ export class DshAgentManager implements SessionAgentGateway {
 				.map((entry) => ({ event: entry.event, view: entry.view }))
 				.filter((item): item is { event: NonNullable<typeof item.event>; view: typeof item.view } => Boolean(item.event))
 				.sort((left: { event: { seq?: number } }, right: { event: { seq?: number } }) => (left.event.seq ?? 0) - (right.event.seq ?? 0));
+			this.recordDshHistoryWindow(nextRuntime, entries, history.result.value.hasMore === true);
 			for (const { event, view } of entries) {
 				nextRuntime.projection = projectDshEvent(nextRuntime.projection, event, agentId, view);
 			}
@@ -2202,12 +2209,38 @@ export class DshAgentManager implements SessionAgentGateway {
 		}
 	}
 
+	/**
+	 * 运行时消息窗口（SessionAgentGateway 可选能力；emitReplacementState 消费）：
+	 * DSH 的 attach 只取尾部 200 条消息事件，窗口前的历史由渲染层「加载更多对话」补页。
+	 * 渲染层窗口协议只有 windowStart（数字）与 windowStartFilePos（数值游标）两个槽位，
+	 * 且 cardCount = len − totalLength + windowStart：这里用「有更早历史 = 1」的标记值，
+	 * 并让 totalLength 同步 +1，cardCount 仍为 0（增量 flush 偏移不受影响，DSH 也不发增量）。
+	 * windowStartFilePos 放窗口最旧事件 seq——readRecordMessagePage 的 before 会原样透传给
+	 * session/page 的 beforeSeq，正是 DSH 的分页游标。
+	 */
+	private historyWindowFields(runtime: DshAgentRuntime): { totalLength: number; windowStart?: number; windowStartFilePos?: number } {
+		return dshRuntimeWindowFields({ messageCount: runtime.messages.length, historyHasOlder: runtime.historyHasOlder, historyBeforeSeq: runtime.historyBeforeSeq });
+	}
+
+	/** 运行时消息窗口快照（emitReplacementState 用；与 emitMessages 同一窗口口径）。 */
+	getMessageWindow(agentId: string): { messages: ChatMessage[]; totalLength: number; windowStart?: number; windowStartFilePos?: number } {
+		const runtime = this.runtime(agentId);
+		return { messages: runtime.messages, ...this.historyWindowFields(runtime) };
+	}
+
 	private emitMessages(runtime: DshAgentRuntime): void {
 		this.emit(ipcChannels.agentsMessage, {
 			agentId: runtime.tab.id,
 			messages: runtime.messages,
-			totalLength: runtime.messages.length,
+			...this.historyWindowFields(runtime),
 		});
+	}
+
+	/** 记录 attach 窗口的「窗口前还有更早历史」信息（判定规则见 resolveDshHistoryWindow）。 */
+	private recordDshHistoryWindow(runtime: DshAgentRuntime, entries: ReadonlyArray<{ event: DshHistoryEntry["event"] }>, hasMore: boolean): void {
+		const window = resolveDshHistoryWindow(entries, hasMore);
+		runtime.historyHasOlder = window.historyHasOlder;
+		runtime.historyBeforeSeq = window.historyBeforeSeq;
 	}
 
 	/**
@@ -2751,6 +2784,13 @@ type DshAgentRuntime = {
 	contextOverflow?: boolean;
 	/** 已投影的最大事件 seq（D6：mux 重连补帧时跳过已投影事件，避免重复）。 */
 	lastProjectedSeq?: number;
+	/**
+	 * attach 窗口前还有更早历史（host session/page 的 hasMore）与续页游标（窗口最旧事件 seq）。
+	 * DSH 的运行时消息窗口只取尾部 200 条消息事件；渲染层的分页协议只认
+	 * windowStart（数字）/windowStartFilePos（数值游标）两个槽位，见 emitMessages 的合成标记。
+	 */
+	historyHasOlder?: boolean;
+	historyBeforeSeq?: number;
 	/** 每个 host projection key 的水位线，按 DSH web 的 higher-seq-wins 规则维护。 */
 	projectionSeq: Map<string, number>;
 	/** 已尝试拉取过的 DSH attachmentId（避免 mux 每帧对同一图片重复 RPC）。 */
