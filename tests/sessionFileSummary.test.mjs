@@ -207,9 +207,17 @@ test("TurnFileChanges: renders per run, hidden while streaming, tolerates runs w
 test("TurnFileChanges: accent-tinted chip with secondary text, 16px icon (no fixed chip-file blue)", () => {
 	const chip = readFileSync("src/renderer/src/components/session/turn/TurnFileChanges.tsx", "utf8");
 
-	// 底色来自主题 accent，不是固定身份色
-	assert.match(chip, /bg-\[color:color-mix\(in_srgb,var\(--color-accent\)_10%,transparent\)\]/, "chip background must derive from --color-accent so it follows data-accent");
+	// 底色来自主题 accent，不是固定身份色。
+	// 6% 是调过的：10% 在 neutral 主题下得 #e8e8e8，白底上像一块深灰「阴影」，
+	// 用户反馈「阴影有点深」；6% 得 #f1f1f1，几乎与页面同层。
+	assert.match(chip, /bg-\[color:color-mix\(in_srgb,var\(--color-accent\)_6%,transparent\)\]/, "chip background must derive from --color-accent (6% to stay unobtrusive)");
 	assert.doesNotMatch(chip, /bg-chip-file|text-chip-file/, "fixed chip-file blue is the bug being fixed");
+
+	// 行高不要手写覆盖类：text-control 这个 token 自带 --line-height-control
+	//（五档字号下 18/20/22/23/24px，约为字号的 1.5 倍），完全盖得住字形墨迹。
+	// 原代码的 leading-none 把它压成 1.0，实测字形上下各被裁 2px。
+	// 实测（5 档字号 × 4 档缩放 = 20 种组合）：不写 leading-* 余量 0.67~2px，全部完整。
+	assert.doesNotMatch(chip, /text-control leading-/, "do not override the token line-height: text-control already carries --line-height-control (hand-written leading-none clipped glyphs by 2px)");
 
 	// 文字色：secondary（产物比正文弱一档），hover 提到 primary
 	assert.match(chip, /text-text-secondary/, "chip text uses secondary (F scheme)");

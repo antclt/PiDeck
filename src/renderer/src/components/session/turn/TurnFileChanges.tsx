@@ -121,7 +121,7 @@ export const TurnFileChanges = memo(function TurnFileChanges(props: {
 							onClick={toggle}
 							aria-expanded={expanded}
 							title={expanded ? t("common.collapse") : t("sessionFiles.moreChipsHint", { count: hiddenCount })}
-							className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-xs border border-dashed border-border-strong px-2 py-1.5 text-control leading-none font-semibold text-text-tertiary tabular-nums transition-colors duration-[120ms] hover:border-solid hover:border-text-tertiary hover:bg-bg-muted hover:text-text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+							className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-xs border border-dashed border-border-strong px-2 py-1 text-control font-semibold text-text-tertiary tabular-nums transition-colors duration-[120ms] hover:border-solid hover:border-text-tertiary hover:bg-bg-muted hover:text-text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 							data-testid="turn-file-changes-more"
 						>
 							{expanded ? (
@@ -182,7 +182,7 @@ const FileChangeChip = memo(function FileChangeChip(props: { entry: FileEntry; o
 			// title 给完整相对路径：chip 只显示文件名，同名文件（多个 index.ts）靠悬停区分
 			title={props.noInteract ? undefined : entry.path}
 			onClick={props.noInteract ? undefined : () => props.onOpenFile?.(entry.path)}
-			className="inline-flex min-w-0 max-w-[min(100%,280px)] shrink-0 cursor-pointer items-center gap-1.5 rounded-xs bg-[color:color-mix(in_srgb,var(--color-accent)_10%,transparent)] px-2 py-1.5 text-control leading-none font-medium text-text-secondary transition-colors duration-[120ms] hover:bg-[color:color-mix(in_srgb,var(--color-accent)_18%,transparent)] hover:text-text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:cursor-default disabled:opacity-70"
+			className="inline-flex min-w-0 max-w-[min(100%,280px)] shrink-0 cursor-pointer items-center gap-1.5 rounded-xs bg-[color:color-mix(in_srgb,var(--color-accent)_6%,transparent)] px-2 py-1 text-control font-medium text-text-secondary transition-colors duration-[120ms] hover:bg-[color:color-mix(in_srgb,var(--color-accent)_12%,transparent)] hover:text-text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:cursor-default disabled:opacity-70"
 		>
 			<FileTypeGlyph fileName={fileName} />
 			<span className="min-w-0 truncate">{fileName}</span>

@@ -122,3 +122,64 @@ test("相邻命令与保护区组合：块内不动、块外两个都展开", ()
 	assert.equal(out.message.split("COMMIT-TEMPLATE-BODY").length - 1, 1, "块内那份不展开、块外那份展开");
 	assert.ok(out.message.includes("REVIEW-TEMPLATE-BODY"));
 });
+
+test("后端接管的命令不展开（DSH host 命令 / pi 扩展命令）", () => {
+	const { expandPromptTemplates } = composerBehavior();
+	const out = expandPromptTemplates("/commit", templates, { reservedNames: new Set(["commit"]) });
+	assert.equal(out.message, "/commit", "被后端接管的命令必须原样保留，否则命令永远不会执行");
+	assert.equal(out.description, undefined);
+});
+
+test("保留集只挡同名命令，其余照常展开", () => {
+	const { expandPromptTemplates } = composerBehavior();
+	const out = expandPromptTemplates("/commit /parallel-review", templates, { reservedNames: new Set(["commit"]) });
+	assert.ok(out.message.startsWith("/commit "), "commit 保持原样交给后端");
+	assert.ok(out.message.includes("REVIEW-TEMPLATE-BODY"), "未保留的模板照常展开");
+});
+
+test("保留命令与保护区可共存：块内不动、块外让路/展开", () => {
+	const { expandPromptTemplates } = composerBehavior();
+	const text = `<quoted_context label="x" message_id="m1">\n/commit\n</quoted_context> /commit /parallel-review`;
+	const out = expandPromptTemplates(text, templates, { reservedNames: new Set(["commit"]) }).message;
+	assert.equal(out.split("COMMIT-TEMPLATE-BODY").length - 1, 0, "引用内与保留命令都不展开");
+	assert.ok(out.includes("REVIEW-TEMPLATE-BODY"));
+});
+
+test("参数替换：$@ 模板把用户输入放进正文，不再重复追加（对齐 pi）", () => {
+	const { expandPromptTemplates } = composerBehavior();
+	const out = expandPromptTemplates("/pr 重构 高优先", [{ name: "pr", description: "", content: "Focus:\n\n$@\n\nDone" }]).message;
+	assert.ok(out.includes("Focus:\n\n重构 高优先\n\nDone"), `正文必须带参数，实际: ${JSON.stringify(out)}`);
+	// 参数只出现一次（不能既进正文又追加在块后）
+	assert.equal(out.split("重构").length - 1, 1);
+});
+
+test("参数替换：$1 位置参数进正文", () => {
+	const { expandPromptTemplates } = composerBehavior();
+	const out = expandPromptTemplates("/pr 高", [{ name: "pr", description: "", content: "Level: $1" }]).message;
+	assert.ok(out.includes("Level: 高"));
+	assert.ok(!out.includes("$1"));
+});
+
+test("参数替换：引号参数保持整体", () => {
+	const { expandPromptTemplates } = composerBehavior();
+	const out = expandPromptTemplates('/pr "两个 词"', [{ name: "pr", description: "", content: "[$1]" }]).message;
+	assert.ok(out.includes("[两个 词]"));
+});
+
+test("无占位符的模板仍把用户输入追加在块后（PiDeck 的兜底，不丢字）", () => {
+	const { expandPromptTemplates } = composerBehavior();
+	const out = expandPromptTemplates("/commit 收尾", templates).message;
+	assert.ok(out.includes("COMMIT-TEMPLATE-BODY"));
+	assert.ok(out.trimEnd().endsWith("收尾"), `用户输入不能被丢，实际: ${JSON.stringify(out)}`);
+});
+
+test("参数不会跨过相邻命令 / 引用块", () => {
+	const { expandPromptTemplates } = composerBehavior();
+	const two = expandPromptTemplates("/pr 甲 /commit 乙", [{ name: "pr", description: "", content: "P:$1" }, { name: "commit", description: "", content: "C:$1" }]).message;
+	assert.ok(two.includes("P:甲"), `pr 只吃自己的参数，实际: ${JSON.stringify(two)}`);
+	assert.ok(two.includes("C:乙"), `commit 吃自己的参数，实际: ${JSON.stringify(two)}`);
+
+	const quoted = expandPromptTemplates("/pr 甲 <quoted_context label=\"x\" message_id=\"m1\">\n引用\n</quoted_context>", [{ name: "pr", description: "", content: "P:$1" }]).message;
+	assert.ok(quoted.includes("P:甲"), "参数不能跨进引用块");
+	assert.ok(quoted.includes("<quoted_context"), "引用块必须原样保留");
+});

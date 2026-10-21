@@ -940,6 +940,10 @@ test("capabilities 声明 fork/getForkMessages/compact/getCommands/exportHtml �
 	assert.ok(caps.has("exportHtml"));
 	assert.ok(!caps.has("editMessage"), "DSH 不支持编辑历史消息");
 	assert.ok(!caps.has("deleteMessage"));
+	// 声明即实现：CompositeAgentGateway 按能力名调同名方法，DSH 曾只实现 listCommands，
+	// `gateway.getCommands!(id)` 于是抛 TypeError → 命令白名单恒空（历史 `/命令` 不出 chip、
+	// `/` 菜单只剩静态建议）。fork 的网关方法名是 forkSession，故只锁 getCommands 这类同名者。
+	assert.equal(typeof manager.getCommands, "function", "声明了 getCommands 能力就必须有同名方法");
 });
 
 test("审批自动放行开启：approval 帧直接应答 allowed-once，不弹 agents:ui-request", async () => {
