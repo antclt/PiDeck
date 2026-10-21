@@ -64,7 +64,7 @@ export class SelectionToolService {
 	}
 
 	getState(): SelectionToolWindowState {
-		return this.deps.window.getState();
+		return { ...this.deps.window.getState(), shortcutRegistered: this.accelerator !== null, shortcut: this.accelerator };
 	}
 
 	/** Escape / 关闭按钮 / 主进程收起：统一走窗口，不产生副作用。 */

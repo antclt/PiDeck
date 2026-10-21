@@ -390,7 +390,6 @@ test("a pane mounted with an in-flight optimistic message still gets send positi
 	}
 });
 
-
 /* ── 发送置顶动画进行中标记：TurnRow 的「新一轮折叠」据此延后 ──
  * 背景（2026-10 用户反馈「发送后动画先向上再向下」）：折叠信号在动画途中把上一轮执行过程
  * 收掉，上方内容骤缩 → 视口补偿把 scrollTop 往回带。标记必须在动画期间为 true，

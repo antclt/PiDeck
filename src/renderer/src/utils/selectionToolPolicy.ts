@@ -23,6 +23,22 @@ export const SELECTION_TOOL_UI_ATTR = "data-selection-tool-ui";
 export const SELECTION_TOOL_UI_SELECTOR = `[${SELECTION_TOOL_UI_ATTR}]`;
 
 /**
+ * mouseup 时不应重新评估选区的「交互面」：工具自身、Radix portal 菜单/弹层、时间线引用浮层。
+ *
+ * 场景（2026-10 用户反馈「复制后有 toast，还会出现一个单独的翻译按钮」）：
+ * 选中正文 → 右键菜单点「复制」→ 「引用/翻译」浮层因 pointerdown 让位收起 → 这一下 mouseup
+ * 落在 radix 菜单项上，旧实现把它当成新的划选手势，又把全局「翻译」浮钮画出来。
+ * 复制不是划词，菜单/浮层上的点击不应产出选区快照。
+ */
+export const SELECTION_TOOL_IGNORED_MOUSEUP_SELECTOR = `${SELECTION_TOOL_UI_SELECTOR}, [data-radix-popper-content-wrapper], [role="menu"], [data-quote-toolbar], button`;
+
+/** 该 mouseup 目标是否属于「复制/菜单/已有浮层」交互面（true = 不评估选区）。 */
+export function isSelectionToolIgnoredMouseUpTarget(element: Element | null): boolean {
+	if (!element) return false;
+	return Boolean(element.closest(SELECTION_TOOL_IGNORED_MOUSEUP_SELECTOR));
+}
+
+/**
  * 编辑面选择器：输入框 / 原生下拉 / 任何 contenteditable 宿主（composer 富文本编辑器）。
  * 这些区域的划选属于编辑操作（拖拽选词、Ctrl+A），弹翻译按钮会直接打断输入。
  */

@@ -1770,4 +1770,3 @@ function commonPrefixLength(previous: readonly ChatMessage[], next: readonly Cha
 export function removePendingUserMessages(messages: readonly ChatMessage[], requestId: string): ChatMessage[] {
 	return messages.filter((message) => !(message.id === requestId && isPendingUserMessage(message)));
 }
-

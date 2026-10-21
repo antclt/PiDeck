@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: fafb922fe1c5d2880479bdc13472bca35ec110a1189e96a2c4d732793081c4d3（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: f7b4c2a68020c727b42eaf1f2757ab006d0c6d5f054caa94a7a3b6bb69a4ebe1（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -6448,6 +6448,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"selectionTool.insertToMain": "傳送到 PiDeck",
 	"selectionTool.inserted": "已傳送到 PiDeck 輸入框",
 	"selectionTool.captureFailed": "沒有讀取到選中的文本，請先在目標應用裡選中文字再按快捷鍵",
+	"selectionTool.shortcutConflict": "系統級劃詞快捷鍵 {accelerator} 暫時不可用：可能被其他應用或另一個 PiDeck 例項佔用。請到「設定 → 快捷鍵」更換按鍵，或關閉佔用它的應用。",
 	"selectionTool.unsupported": "當前系統不支援系統級劃詞（Linux Wayland 需要 X11 / xdotool）",
 	"selectionTool.globalHotkeyHint": "按 {accelerator} 觸發",
 	"selectionTool.translating": "翻譯中…",
@@ -6477,6 +6478,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.selectionTool.enabledHint": "在 PiDeck 頁面內選中文字時浮出智慧體按鈕",
 	"settings.selectionTool.systemEnabled": "系統級劃詞（全域快捷鍵）",
 	"settings.selectionTool.systemEnabledHint": "在任意應用選中文字後按快捷鍵，在游標附近彈出翻譯浮窗",
+	"settings.selectionTool.shortcutConflict": "系統級劃詞快捷鍵 {accelerator} 被佔用，功能暫不可用；請更換快捷鍵或關閉佔用它的應用。",
 	"settings.selectionTool.hotkeyLabel": "系統級劃詞快捷鍵",
 	"settings.selectionTool.hotkeyHint": "當前快捷鍵：{accelerator}（可在「快捷鍵」頁修改）",
 	"settings.selectionTool.defaultAgent": "預設智慧體",
