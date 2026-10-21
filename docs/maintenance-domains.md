@@ -176,9 +176,11 @@
 - **保护区规则（2026-10 实测 bug 的结论）**：发送侧有三个展开器（引用 → 会话引用 → 提示词模板）。后一个不得改写前一个已生成的块，否则「引用里提到 `/commit`」会被替换成整份提交模板——落盘的引用原文被篡改，模型读到的历史与真实不符。判据集中在 `src/renderer/src/utils/protectedText.ts`（`computeProtectedRanges` / `replaceOutsideProtected`）。
 - **模板清单两个来源**：来源 A = `prompts:list`（`~/.pi/agent/prompts` + `<项目>/.pi/prompts`，带编辑元数据、离线可用）；来源 B = pi `get_commands` 的 `source: "prompt"` 条目 + 按 `sourceInfo.path` 读回的正文（覆盖 npm 包声明的 `pi.prompts`，例如 pi-subagents 的 `parallel-review`）。合并规则在 `src/renderer/src/utils/templateCatalog.ts`：**同名正文取 B**（B 是 pi 去重后的最终视图），A 的展示元数据保留。只缺 B 时 `/parallel-review` 会被原样发给 pi、由 pi 展开成无名字的正文，表现为「运行中有 chip、暂停/重载后整段展开」。
 - **frontmatter 剥离照抄 pi**（`utils/frontmatter.ts`，对齐 `dist/utils/frontmatter.js`）：先 `stripBom` + 换行归一（`
-` 与裸 `` 都变 `
+` 与裸 `
+` 都变 `
 `）→ 从下标 3 找**第一个** `
----` 作结束标记（所以 `--- ` 带尾空格也能剥）→ 正文 `trim()`。**三条缺一条就漏**：Windows 编辑器存的模板常带 BOM 或裸 ``，旧正则直接匹配失败，`---
+---` 作结束标记（所以 `--- ` 带尾空格也能剥）→ 正文 `trim()`。**三条缺一条就漏**：Windows 编辑器存的模板常带 BOM 或裸 `
+`，旧正则直接匹配失败，`---
 description: …
 ---` 就漏进消息（2026-10 实测）。「一键插入全文」走 `stripMarkdownFrontmatter`，保留文件原换行风格（CRLF 还是 CRLF），只额外容忍 BOM 与结束标记尾空格。
 - **模板参数替换照抄 pi**：`utils/templateArgs.ts` 逐条移植 pi 的 `parseCommandArgs` / `substituteArgs`（`$1` `$@` `$ARGUMENTS` `${N:-默认}` `${@:-默认}` `${@:N}` `${@:N:L}`；bash 切词支持引号；只替换模板串、参数内容不二次展开）。pi 的语义是「参数只进占位符，模板没占位符就丢弃用户输入」，PiDeck 保留一层兜底：**模板没有占位符时把用户输入追加在块后**（绝不丢字），有占位符时按 pi 把参数放进正文且不再追加。参数区间以「下一个命令 / 引用块起点 / 消息末尾」为界，不会吞掉相邻命令或引用块。
@@ -188,6 +190,7 @@ description: …
   - 因此展开前必须避让「后端已接管的命令」：`utils/reservedCommandNames.ts` 把 `source !== "prompt" && source !== "builtin"` 的命令名（pi 的 extension/skill、DSH 的 host 命令、ACP 命令）列为保留集，`expandPromptTemplates` 命中即原样保留。`builtin` 不保留：桌面内置命令由 `classifyComposerSlashCommand` 接管，未接管的本来就只是文本，否则用户建 `/export` 模板会失效。
 - **DSH 的 `/goal` 语义（读官方实现，不改）**：`packages/goal/command-goal` 把 objective 存进 goal 域（`ctx.goals.create`），命令本身不产生模型消息；之后**每一轮**由 `goal-round-driver` 发一条新的用户消息 `<goal_round>Objective: "…" Round: n/N …</goal_round>`，带 `source: { kind: "goal" }`。PiDeck 的投影器只认 `source.kind === "user"`（`dshEventProjector.ts` 的 `user/message` 分支），所以目标轮次**不进时间线**。结论：目标文本每轮重复是 DSH 的设计，若目标里含模板正文就随轮次重复——**属后端语义，PiDeck 不改**（不跳过 `/goal` 包装、不拆分消息），chip 只负责把所见文本渲染成标签。
 - **同名模板以项目为准（照抄 pi 的规则，不是自创）**：pi 的资源路径按 `resourcePrecedenceRank` 升序加载——project = 0 < user/global = 2 < package = 4 < builtin = 5，`dedupePrompts` 按名字去重且**先加载者胜**；被禁用的模板根本不会被加载。`assembleTemplates`（`utils/templateCatalog.ts`）复刻这三条：先剔除 `enabled === false`（项目禁用 → 回落到全局那份，而不是直接消失）→ 项目在前全局在后 → 按名去重留第一个。以前是「数组最后一个胜」的隐式约定，既与 pi 相反，也靠顺序巧合才碰对。
+- **已知缺口（记账，未修）：DSH 的技能可能被同名提示词模板抢走**。DSH 的技能不是命令表里的命令，而是扫用户消息里的 `(^|\s)/名字` 手势（`dsh` 的 `tool-skill` 里 `SKILL_GESTURE`），而 PiDeck 的保留集只收 DSH 的**命令**名。若同一项目里既有 DSH 技能 `cv-writer`、又有同名 PiDeck 模板，`/cv-writer` 会被本地展开成块 → DSH 看不到手势 → 技能静默不执行。**为什么先不修**：PiDeck 的技能清单（`~/.pi/agent/skills` + `~/.agents/skills`）与 DSH 的不同源（DSH 还有 `~/.dsh/skills`、项目 `.dsh/skills`），直接拿去当保留集会两头错——漏掉 DSH 独有技能、又误占只属于 pi 的技能名。要做对需先给 DSH 加一个技能清单桥（照 `pideckCommandsBridge` 的形态），再只对 DSH 会话使用真实清单。
 - **保留名的副作用（须知）**：后端命令优先意味着**同名提示词模板永远不展开**。例如装了本仓库内置扩展时 `/plan` `/goal` `/todo` `/todos` `/reload` 归扩展所有；DSH 会话里 `/permission` `/plan` `/compact` `/help` `/goal` `/subagent` `/feedback` 归 host 所有。想用同名模板只能改名或停用对应扩展。
 - **补拉只针对「可能存在的模板」**：`needsTemplateRefetch`（同文件）返回 false 的三种情况——不是 `/名称`、当前表里已有、名字属于保留集（保留名永远不会出现在模板表里，否则每发一次 `/permission` 都白跑三趟 IPC）。
 - **DSH 的命令表此前拿不到**：`DshAgentManager` 只实现了 `listCommands`，但网关按能力名调 `getCommands` → `TypeError` → 命令白名单恒空（历史 `/命令` 不出 chip、`/` 菜单只剩静态建议）。已补同名别名，并在 `tests/dshAgentManager.test.mjs` 加了「声明即实现」断言。
