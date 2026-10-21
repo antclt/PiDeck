@@ -4,6 +4,8 @@ import test from "node:test";
 
 const surface = readFileSync("src/renderer/src/components/session/SurfaceComponents.tsx", "utf8");
 const toolCalls = readFileSync("src/renderer/src/components/session/ToolCallComponents.tsx", "utf8");
+// 重试行与工具卡共用同一套三态徽章语言：颜色改一处必须两处一起改。
+const retryStep = readFileSync("src/renderer/src/components/session/turn/RetryStep.tsx", "utf8");
 const timelineFormat = readFileSync("src/renderer/src/components/session/TimelineFormat.ts", "utf8");
 const toolResult = readFileSync("src/renderer/src/components/agents/tool-result.tsx", "utf8");
 const runtimeInjector = readFileSync("src/renderer/src/components/session/SessionRuntimeInjector.tsx", "utf8");
@@ -145,10 +147,19 @@ test("tool card renders tri-state status badges with icons and i18n labels", () 
 	assert.match(toolCalls, /variant="outline" className="gap-1 border-danger\/40 bg-danger-soft px-1 py-0 text-chat-detail text-danger"/);
 	assert.match(toolCalls, /<CircleX size=\{9\}/);
 	assert.match(toolCalls, /t\("tool\.statusError"\)/);
-	// done：secondary 低强调 + CircleCheck 图标；ask_question 已回答时文案替换为「已回答」
-	assert.match(toolCalls, /variant="secondary" className="gap-1 px-1 py-0 text-chat-detail"/);
+	// done：soft 绿 outline（success-soft 底 + success 字 + 描边）+ CircleCheck 图标；
+	// 完成是正向终态，与 running 琥珀、error soft 红构成三色语义（用户反馈：完成也显示灰的）。
+	// ask_question 已回答时文案替换为「已回答」，同样走绿色。
+	assert.match(toolCalls, /variant="outline" className="gap-1 border-success\/40 bg-success-soft px-1 py-0 text-chat-detail text-success"/);
+	assert.doesNotMatch(toolCalls, /variant="secondary" className="gap-1 px-1 py-0 text-chat-detail"/);
 	assert.match(toolCalls, /<CircleCheck size=\{9\}/);
 	assert.match(toolCalls, /askCard\?\.answered \? t\("ask\.answered"\) : t\("tool\.statusDone"\)/);
+	// 重试行保持同一套三态语言：running 琥珀 / failed soft 红 / 成功 soft 绿，
+	// 不允许残留旧的灰色完成徽章（两处徽章改一处漏一处会被这条兜住）。
+	assert.match(retryStep, /variant="outline" className="gap-1 border-warning\/40 px-1 py-0 text-chat-detail text-warning"/);
+	assert.match(retryStep, /variant="outline" className="gap-1 border-danger\/40 bg-danger-soft px-1 py-0 text-chat-detail text-danger"/);
+	assert.match(retryStep, /variant="outline" className="gap-1 border-success\/40 bg-success-soft px-1 py-0 text-chat-detail text-success"/);
+	assert.doesNotMatch(retryStep, /variant="secondary"/);
 	// 旧实现「完成后不显示状态」的空文案分支已移除
 	assert.doesNotMatch(toolCalls, /statusLabel/);
 });
