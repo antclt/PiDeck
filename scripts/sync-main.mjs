@@ -6,12 +6,15 @@
  * 直接 `git switch main` 会被拒绝或互相打断。worktree 让整个合并发生在系统临时目录里，
  * 当前分支与工作区完全不受影响（合并完自动清理）。
  *
- * 流程：fetch → 建临时 worktree(target) → `merge --no-ff source` → 推 origin target
- *       → 若存在 atomgit 远端再显式推一次（pre-push 钩子已镜像时是幂等兜底）→ 删 worktree。
+ * 流程：fetch → 建临时 worktree(target) → 把 target 快进到远端同名分支 → `merge --no-ff source`
+ *       → 推 origin target → 若存在 atomgit 远端再显式推一次（pre-push 钩子已镜像时是幂等兜底）→ 删 worktree。
  *
  * 安全约定：
  * - 合并冲突一律 `merge --abort` 后退出 1，**绝不** `-X ours/theirs` 私自选边；
  * - 不改写历史、不 force push；
+ * - **合并前先把 target 对齐远端**（只走 `--ff-only`）：star-history 机器人会直接往 main 提交，
+ *   本地 target 落后时以旧提交为基底合并，产出不含远端历史、push 必然被判 non-fast-forward；
+ *   本地 target 与远端已分叉则中止交给人处理，不用 reset/rebase 自行「修复」；
  * - 无新提交且本地 target 与远端一致时什么都不做（幂等，可随时跑）；
  * - 任何失败路径都会清理临时 worktree（catch + finally，不用 process.exit 打断清理）；
  * - **只在「本文件就是入口」且不在 CI 时才会合并/推送**：纯函数供单测 import，若顶层直接调 main，
@@ -132,8 +135,27 @@ function preflight(options) {
 	}
 }
 
+/**
+ * 合并前把 worktree 里的 target 快进到远端同名分支。
+ *
+ * 为什么必须做：本地 target 可能落后远端（star-history 机器人每隔 12 小时直接往 main 提交）。
+ * 以落后的旧 target 为基底合并 source，产出的提交不含远端历史，push 会被判定 non-fast-forward
+ * 而整轮白跑（2026-10-21 实发版撞上）。这里只做快进；已经分叉说明状态异常，中止交给人处理。
+ */
+function alignTargetWithRemote(worktree, options) {
+	const remoteRef = `${options.remote}/${options.target}`;
+	const local = git(["rev-parse", options.target], worktree).stdout;
+	const remote = git(["rev-parse", remoteRef], worktree).stdout;
+	if (!local || !remote || local === remote) return;
+	const fastForwarded = git(["merge", "--ff-only", remoteRef], worktree);
+	if (!fastForwarded.ok) throw new SyncAbort(`本地 ${options.target} 与 ${remoteRef} 已分叉（快进失败），未做任何推送。请先手动合并后再同步：\n${firstLine(fastForwarded.stderr) || firstLine(fastForwarded.stdout)}`);
+	log(`↩️  本地 ${options.target} 快进到 ${remoteRef}（${short(local)} → ${short(remote)}）`);
+}
+
 /** 合并与推送都发生在临时 worktree 内；返回是否真的推送了。 */
 function mergeAndPush(worktree, options, mergeMessage) {
+	alignTargetWithRemote(worktree, options);
+
 	const merged = git(["merge", "--no-ff", options.source, "-m", mergeMessage], worktree);
 	if (!merged.ok) {
 		git(["merge", "--abort"], worktree);
