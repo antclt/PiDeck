@@ -76,7 +76,9 @@ test("FileDiffViewer: image/PDF get inline preview via base64 Blob URL", () => {
 	// 判定函数：图片/PDF 从二进制集合中单独识别
 	assert.match(textFile, /export function isImageFile/);
 	assert.match(textFile, /export function isPdfFile/);
-	assert.match(textFile, /IMAGE_EXTENSIONS = new Set/);
+	// 图片扩展名集合只有一份，在 imageMime.ts：这里派生，避免「远端能预览、本地打不开」。
+	assert.match(textFile, /BINARY_IMAGE_EXTENSIONS/);
+	assert.doesNotMatch(textFile, /IMAGE_EXTENSIONS = new Set/);
 	// view 模式图片/PDF 走二进制预览分支；diff 模式维持不支持提示
 	assert.match(viewer, /!isDiffMode && \(isImageFile\(props\.filePath\) \|\| isPdfFile\(props\.filePath\)\)/);
 	// 不用 file:// 直链：dev 模式 http 页面加载 file:// 子资源会被 Chromium webSecurity 拦截
@@ -85,7 +87,7 @@ test("FileDiffViewer: image/PDF get inline preview via base64 Blob URL", () => {
 	assert.match(viewer, /readBase64/);
 	assert.match(viewer, /URL\.createObjectURL/);
 	assert.match(viewer, /URL\.revokeObjectURL/);
-	assert.match(viewer, /mimeFromImageExt/);
+	assert.match(viewer, /imageMimeOrBinary/);
 	assert.match(viewer, /className="file-diff-media-preview"/);
 	assert.match(viewer, /className="file-diff-pdf-preview"/);
 	assert.match(viewer, /editor\.pdfPreview/);

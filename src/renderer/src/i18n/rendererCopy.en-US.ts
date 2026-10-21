@@ -4212,6 +4212,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"project.remote.searchTruncated": "Results are truncated: the remote stopped at its scan/match limit, so this is not every match.",
 	"project.remote.downloadFailed": "Download failed: {code}",
 	"project.remote.uploadFailed": "Upload failed: {code}",
+	"project.remote.uploadLocalIoTimeout": "Timed out reading the local file (a network share may be offline). Check the path and retry.",
 	"project.remote.uploadNotAFile": "Only files can be uploaded. Open the folder and pick files, or archive it first.",
 	"project.remote.uploadTooLarge": "The file exceeds the 16 MiB limit, which is not supported yet.",
 	"project.remote.uploadExists": "A file with that name already exists on the remote host; nothing was overwritten.",

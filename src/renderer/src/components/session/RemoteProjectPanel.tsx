@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, FilePlus2, FileText, Folder, FolderPlus, Link2, Loader2, MoreHorizontal, Search, TerminalSquare, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, FilePlus2, FileText, Folder, FolderPlus, Link2, Loader2, Search, TerminalSquare, Trash2, Upload, X } from "lucide-react";
 import type { RemoteWorkspaceEntry } from "../../../../shared/types/remoteHost";
 import type { RemoteEntryKind } from "../../../../shared/types/remoteFiles";
 import { desktopApi } from "../../desktopApi";
 import { useRemoteProjectEntries } from "../../hooks/useRemoteProjectEntries";
 import { useRemoteProjectSearch, REMOTE_SEARCH_UNWIRED_CODE } from "../../hooks/useRemoteProjectSearch";
 import { useRemoteProjectTransfer } from "../../hooks/useRemoteProjectTransfer";
+import { moveDestination, remoteDropOnBlankArea, remoteDropRoute, REMOTE_ENTRY_DRAG_TYPE } from "../../utils/remoteEntryDrag";
 import { t } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
@@ -13,6 +14,7 @@ import { Input } from "../ui-shadcn/input";
 import { sortRemoteEntries } from "./remoteProjectEntries";
 import { createRequestGate } from "./remoteRequestGate";
 import { RemoteFileEditor } from "../workspace/RemoteFileEditor";
+import { RemoteFileRow } from "./RemoteFileRow";
 import { RemoteProjectEntryDialogs, type RemoteEntryDialog } from "./RemoteProjectEntryDialogs";
 import { RemoteTrashPanel } from "./RemoteTrashPanel";
 import { remoteFileEntryKeepsInput } from "./remoteFileManagementState";
@@ -46,6 +48,14 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 	const [query, setQuery] = useState("");
 	const [entryDialog, setEntryDialog] = useState<RemoteEntryDialog | null>(null);
 	const [trashOpen, setTrashOpen] = useState(false);
+	/**
+	 * 内部拖放移动：被拖的条目 + 当前悬停的目录。
+	 *
+	 * 与「从资源管理器拖文件进来上传」是两件事：前者没有 `dataTransfer.files`（只有我们自己放的
+	 * 一个标记），所以面板根节点的 drop 处理必须能区分两者，否则内部拖动会被当成上传。
+	 */
+	const [dragEntry, setDragEntry] = useState<{ path: string; kind: RemoteEntryKind } | null>(null);
+	const [dropTarget, setDropTarget] = useState<string | null>(null);
 	const [trashReloadToken, setTrashReloadToken] = useState(0);
 	/** 请求代次闸门；组件卸载时作废所有在途结果。 */
 	const gateRef = useRef(createRequestGate());
@@ -96,6 +106,9 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 			setListed(true);
 			setRelative(segments);
 			setFile(null);
+			// 列表内容变了，拖动状态不能跨过去：源行可能已经被卸载，dragend 不会再来。
+			setDragEntry(null);
+			setDropTarget(null);
 			setEntries(sortRemoteEntries(result.entries));
 		},
 		[props.projectId],
@@ -185,6 +198,23 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 		[files, closeDialogAfter, bumpTrash],
 	);
 
+	/**
+	 * 把拖动的条目移动到目标目录。
+	 *
+	 * 复用 rename（服务端本来就是同目录树内的 rename）：不新增 IPC，也不放宽版本令牌与边界校验。
+	 * 拖到自己身上/自己的子目录由服务端 `assertRemoteProjectEntryMove` 拒绝，这里只拦「拖到同一目录」。
+	 */
+	const moveInto = useCallback(
+		(dragged: { path: string; kind: RemoteEntryKind }, targetDirectory: string) => {
+			const destination = moveDestination(dragged.path, targetDirectory);
+			if (destination === null) return;
+			void files.renameEntry(dragged.path, destination).then((result) => {
+				if (result.ok) void loadDirectory(relative);
+			});
+		},
+		[files, loadDirectory, relative],
+	);
+
 	const openRowDialog = (entry: RemoteWorkspaceEntry, kind: "rename" | "delete"): void => {
 		if (entry.kind !== "file" && entry.kind !== "directory") return;
 		const path = relativePath(relative, entry.name);
@@ -196,7 +226,32 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 	const fileOutcomeText = files.outcome !== null && files.outcome.operation !== "restore" && files.outcome.operation !== "prune" ? files.outcome.text : "";
 
 	return (
-		<div className={`flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 py-3 ${transfer.dragActive ? "outline outline-2 -outline-offset-2 outline-primary/60" : ""}`} data-testid="remote-project-drop" onDragOver={transfer.onDragOver} onDragLeave={transfer.onDragLeave} onDrop={transfer.onDrop}>
+		<div
+			className={`flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 py-3 ${transfer.dragActive ? "outline outline-2 -outline-offset-2 outline-primary/60" : ""}`}
+			data-testid="remote-project-drop"
+			onDragOver={(event) => {
+				// 内部拖动也接受 drop（不 preventDefault 就不会派发 drop）：落在空白处 = 当前目录，
+				// 条目本来就在这里，因此是个 no-op。这样「拖到空白」不会显示禁止光标，也不会被误当上传。
+				const route = remoteDropRoute({ hasFiles: event.dataTransfer.types.includes("Files"), hasEntryMarker: event.dataTransfer.types.includes(REMOTE_ENTRY_DRAG_TYPE) });
+				if (route === "move") {
+					event.preventDefault();
+					event.dataTransfer.dropEffect = "move";
+					return;
+				}
+				transfer.onDragOver(event);
+			}}
+			onDragLeave={transfer.onDragLeave}
+			onDrop={(event) => {
+				// 两条路径由纯函数判定（`remoteEntryDrag.ts`）：内部拖动落在空白处既不是移动也不算上传；
+				// 只有从系统拖进来的文件会走上传。
+				const route = remoteDropRoute({ hasFiles: event.dataTransfer.types.includes("Files"), hasEntryMarker: event.dataTransfer.types.includes(REMOTE_ENTRY_DRAG_TYPE) });
+				if (remoteDropOnBlankArea(route)) {
+					event.preventDefault();
+					return;
+				}
+				transfer.onDrop(event);
+			}}
+		>
 			<div className="flex flex-wrap items-center gap-2 text-label">
 				<span className="rounded bg-muted px-1.5 py-0.5 font-medium text-muted-foreground">{t("project.remote.badge")}</span>
 				<strong className="text-body font-semibold text-foreground">{props.projectName}</strong>
@@ -230,7 +285,32 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 				</div>
 			) : null}
 			<nav className="flex flex-wrap items-center gap-1 text-label">
-				<button type="button" className="underline" disabled={busy} onClick={() => void loadDirectory([])}>
+				<button
+					type="button"
+					className={`underline ${dropTarget === "" ? "rounded px-1 outline outline-1 -outline-offset-1 outline-primary/60" : ""}`}
+					disabled={busy}
+					onClick={() => void loadDirectory([])}
+					onDragOver={(event) => {
+						if (dragEntry === null) return;
+						event.preventDefault();
+						event.stopPropagation();
+						// 不给 dropEffect 时 Chromium 对自定义类型显示「禁止」光标，看着像放不了。
+						event.dataTransfer.dropEffect = "move";
+						setDropTarget("");
+					}}
+					onDragLeave={(event) => {
+						// 只在真正离开这个可放置区域时清高亮：从其内部子节点移出也会触发 dragleave。
+						if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+						if (dropTarget === "") setDropTarget(null);
+					}}
+					onDrop={(event) => {
+						if (dragEntry === null) return;
+						event.preventDefault();
+						event.stopPropagation();
+						setDropTarget(null);
+						moveInto(dragEntry, "");
+					}}
+				>
 					/
 				</button>
 				{relative.map((crumb, index) => (
@@ -282,42 +362,27 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 					{entries.map((entry) => {
 						const path = relativePath(relative, entry.name);
 						return (
-							<li key={entry.name} className="flex shrink-0 items-center gap-1">
-								<button
-									type="button"
-									className="flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-0.5 text-left text-label hover:bg-muted/60"
-									disabled={busy || entry.kind === "other"}
-									onClick={() => void (entry.kind === "directory" ? loadDirectory([...relative, entry.name]) : openFile([...relative, entry.name]))}
-								>
-									{entry.kind === "directory" ? <Folder className="size-3.5 shrink-0" /> : entry.kind === "file" ? <FileText className="size-3.5 shrink-0" /> : <Link2 className="size-3.5 shrink-0" />}
-									<span className="min-w-0 flex-1 truncate">{entry.name}</span>
-									{entry.bytes !== undefined ? <span className="shrink-0 text-muted-foreground">{entry.bytes} B</span> : null}
-									{/* 符号链接不跟随：helper 把它报为 other，这里如实禁用而不是假装能打开。 */}
-									{entry.kind === "other" ? <span className="shrink-0 text-muted-foreground">{t("project.remote.linkNotFollowed")}</span> : null}
-								</button>
-								{entry.kind !== "other" ? (
-									<DropdownMenu>
-										<DropdownMenuTrigger asChild>
-											<Button type="button" size="sm" variant="ghost" data-testid="remote-file-row-menu" aria-label={t("remoteFileEntry.renameTitle")} disabled={files.busy || busy}>
-												<MoreHorizontal className="size-4" />
-											</Button>
-										</DropdownMenuTrigger>
-										<DropdownMenuContent align="end">
-											{entry.kind === "file" ? (
-												<DropdownMenuItem data-testid="remote-file-row-download" onSelect={() => transfer.downloadFile(relativePath(relative, entry.name))}>
-													{t("remoteFileEntry.downloadAction")}
-												</DropdownMenuItem>
-											) : null}
-											<DropdownMenuItem data-testid="remote-file-row-rename" onSelect={() => openRowDialog(entry, "rename")}>
-												{t("remoteFileEntry.renameAction")}
-											</DropdownMenuItem>
-											<DropdownMenuItem data-testid="remote-file-row-delete" variant="destructive" onSelect={() => openRowDialog(entry, "delete")}>
-												{t("remoteFileEntry.deleteAction")}
-											</DropdownMenuItem>
-										</DropdownMenuContent>
-									</DropdownMenu>
-								) : null}
-							</li>
+							<RemoteFileRow
+								key={entry.name}
+								entry={entry}
+								path={path}
+								busy={busy}
+								filesBusy={files.busy}
+								dropTarget={dropTarget}
+								onOpen={() => void (entry.kind === "directory" ? loadDirectory([...relative, entry.name]) : openFile([...relative, entry.name]))}
+								onDragStartEntry={setDragEntry}
+								onDragEndEntry={() => {
+									setDragEntry(null);
+									setDropTarget(null);
+								}}
+								onDropTargetChange={setDropTarget}
+								onDropInto={(targetDirectory) => {
+									if (dragEntry !== null) moveInto(dragEntry, targetDirectory);
+								}}
+								onDownload={() => transfer.downloadFile(path)}
+								onRename={() => openRowDialog(entry, "rename")}
+								onDelete={() => openRowDialog(entry, "delete")}
+							/>
 						);
 					})}
 				</ul>

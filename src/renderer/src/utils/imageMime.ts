@@ -38,6 +38,12 @@ export function imageMimeForPath(path: string): string | undefined {
 }
 
 /**
+ * 本项目当作「二进制图片」的扩展名集合（供 `isTextFile` / `isBinaryExtension` 派生，避免两处各写一份）。
+ * SVG 不在其中：它是文本。
+ */
+export const BINARY_IMAGE_EXTENSIONS: ReadonlySet<string> = new Set(Object.keys(IMAGE_MIME_BY_EXT));
+
+/**
  * 差异/预览里当作 Blob 类型用：SVG 也给正确的 `image/svg+xml`（此时走的是 data-URL 预览，
  * 不是编辑器分流），其余未知类型统一 `application/octet-stream`（Chromium 按内容解码）。
  */

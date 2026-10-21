@@ -281,7 +281,9 @@ test("渲染层拖放：经 webUtils 解析本机路径，解析不出来的项�
 	// 面板只接线，事件与上传逻辑都在 hook 里（否则又会把面板撑过 400 行）。
 	const panel = readFileSync("src/renderer/src/components/session/RemoteProjectPanel.tsx", "utf8");
 	assert.match(panel, /useRemoteProjectTransfer\(/);
-	assert.match(panel, /onDrop=\{transfer\.onDrop\}/);
+	// 面板根的 drop 现在同时处理「内部移动」与「外部上传」，所以是包装函数而不是直接透传。
+	assert.match(panel, /onDrop=\{\(event\) => \{/);
+	assert.match(panel, /transfer\.onDrop\(event\)/);
 	assert.doesNotMatch(panel, /getPathForFile/);
 });
 

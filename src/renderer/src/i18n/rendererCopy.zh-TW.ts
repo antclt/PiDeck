@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 32aebd176aede5b17572317c182b9ec389c03795d596ff3965e46e531a5fcdf9（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 3585695ff0570887a6a48835be155c71fbbfe23e74f4ccf7671c07d0abe33dec（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4204,6 +4204,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"project.remote.searchTruncated": "結果已截斷：遠端達到掃描/匹配上限後停止，這裡不是全部匹配。",
 	"project.remote.downloadFailed": "下載失敗：{code}",
 	"project.remote.uploadFailed": "上傳失敗：{code}",
+	"project.remote.uploadLocalIoTimeout": "讀取本機檔案超時（網路盤/共享目錄可能已斷開），請檢查路徑後重試。",
 	"project.remote.uploadNotAFile": "只支援上傳檔案：目錄請在裡面選檔案，或先打包。",
 	"project.remote.uploadTooLarge": "檔案超過 16 MiB 上限，暫不支援。",
 	"project.remote.uploadExists": "遠端已有同名檔案，未覆蓋（請先重新命名或刪除）。",

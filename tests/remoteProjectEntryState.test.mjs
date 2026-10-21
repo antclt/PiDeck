@@ -59,7 +59,10 @@ test("rename/delete draft recycling removes clean drafts and keeps dirty ones ma
 
 test("UI contract anchors exist in the shipped renderer modules", () => {
 	const panel = readFileSync("src/renderer/src/components/session/RemoteProjectPanel.tsx", "utf8");
-	for (const testid of ["remote-file-toolbar", "remote-file-create", "remote-file-mkdir", "remote-file-row-menu", "remote-file-row-rename", "remote-file-row-delete", "remote-file-outcome", "remote-trash-toggle"]) assert.match(panel, new RegExp('data-testid="' + testid + '"'), testid + " must be mounted");
+	for (const testid of ["remote-file-toolbar", "remote-file-create", "remote-file-mkdir", "remote-file-upload", "remote-file-outcome", "remote-trash-toggle"]) assert.match(panel, new RegExp('data-testid="' + testid + '"'), testid + " must be mounted");
+	// 行级锚点已随行组件抽到 `RemoteFileRow`（面板只接线），两个文件都要在检查范围内。
+	const row = readFileSync("src/renderer/src/components/session/RemoteFileRow.tsx", "utf8");
+	for (const testid of ["remote-file-row-menu", "remote-file-row-rename", "remote-file-row-delete", "remote-file-row-download"]) assert.match(row, new RegExp('data-testid="' + testid + '"'), testid + " must be mounted");
 	const dialogs = readFileSync("src/renderer/src/components/session/RemoteProjectEntryDialogs.tsx", "utf8");
 	for (const testid of [
 		"remote-file-new-dialog",

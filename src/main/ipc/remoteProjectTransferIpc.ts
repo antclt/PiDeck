@@ -21,7 +21,7 @@ import { REMOTE_PROJECT_UPLOAD_MAX_BYTES } from "../remote/RemoteProjectFileUplo
 import { createRemoteWorkspaceReader, type RemoteWorkspacePort } from "../remote/RemoteWorkspaceReader";
 import { REMOTE_PROJECT_TRASH_DIR } from "../remote/RemoteProjectEntryCommands";
 import { createRemoteProjectTargetResolver } from "./remoteProjectTarget";
-import { parseLocalUploadPaths } from "./remoteUploadPaths";
+import { createLocalIoBudget, LOCAL_FILE_IO_TIMEOUT_MS, LOCAL_IO_TIMEOUT_CODE, parseLocalUploadPaths, withLocalIoTimeout } from "./remoteUploadPaths";
 
 const CONTROL = /[\u0000-\u001f\u007f]/;
 
@@ -56,20 +56,39 @@ export function registerRemoteProjectTransferIpc(input: { enabled: boolean; serv
 	const uploadMany = async (target: RemoteProjectTarget, directory: string, localPaths: readonly string[]): Promise<RemoteProjectUploadResult> => {
 		const uploaded: Array<{ name: string; bytes: number }> = [];
 		const failed: Array<{ name: string; code: string }> = [];
+		const budget = createLocalIoBudget();
 		for (const localPath of localPaths) {
 			const name = basename(localPath);
+			// 预算只统计本机 IO（stat + readFile）的耗时：把远端上传耗时也算进来，
+			// 一次慢上传就能把后面本机完全正常的文件扣成「本机 IO 超时」。
+			let localIoSplit = 0;
 			try {
-				const info = await stat(localPath);
+				// 本机 IO 也可能挂死：拖进来的 UNC / 已断开的网络盘上 `stat()` 会一直等（Windows 上尤其），
+				// 那会把这一次 IPC 永久挂在「上传中」。单条有上限，整批另有预算：第一条超时后剩余项
+				// 直接失败——`stat` 都不返回说明这些路径整体不可用，逐条再等没有信息增量。
+				if (budget.exhausted()) throw new Error(LOCAL_IO_TIMEOUT_CODE);
+				const statStartedAt = Date.now();
+				const info = await withLocalIoTimeout(stat(localPath), Math.min(LOCAL_FILE_IO_TIMEOUT_MS, budget.remaining()));
+				localIoSplit += Date.now() - statStartedAt;
 				if (!info.isFile()) throw new Error("REMOTE_UPLOAD_NOT_A_FILE");
 				if (info.size < 1 || info.size > REMOTE_PROJECT_UPLOAD_MAX_BYTES) throw new Error("REMOTE_FILE_TOO_LARGE");
-				const bytes = await readFile(localPath);
+				const readStartedAt = Date.now();
+				const bytes = await withLocalIoTimeout(readFile(localPath), Math.min(LOCAL_FILE_IO_TIMEOUT_MS, budget.remaining()));
+				localIoSplit += Date.now() - readStartedAt;
 				await target.service.uploadProjectFile({ hostId: target.hostId, root: target.remotePath, relative: directory === "" ? name : `${directory}/${name}`, bytes });
+				budget.spend(localIoSplit);
 				uploaded.push({ name, bytes: bytes.length });
 			} catch (error) {
-				failed.push({ name, code: codeOf(error, "REMOTE_UPLOAD_FAILED") });
+				const code = codeOf(error, "REMOTE_UPLOAD_FAILED");
+				// 本机 IO 超时（或整批路径都不可用）就把预算清零，剩余项立刻失败而不是各等 30s。
+				// 超时说明这些路径整体不可用：直接清零，剩余项立即失败而不是各等一个单条上限。
+				budget.spend(code === LOCAL_IO_TIMEOUT_CODE ? budget.remaining() : localIoSplit);
+				failed.push({ name, code });
 			}
 		}
-		if (uploaded.length === 0 && failed.length === 1) return { ok: false, code: failed[0].code };
+		// 一个都没成：把**第一条真实失败码**交出去。之前多文件全失败时折叠成笼统的
+		// REMOTE_UPLOAD_FAILED，于是「网络盘断掉」这种最需要说清的场景反而看不到原因。
+		if (uploaded.length === 0 && failed.length > 0) return { ok: false, code: failed[0].code };
 		if (uploaded.length === 0) return { ok: false, code: "REMOTE_UPLOAD_FAILED" };
 		return { ok: true, uploaded, failed };
 	};

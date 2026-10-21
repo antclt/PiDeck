@@ -1,6 +1,7 @@
 import { useCallback, useState, type DragEvent } from "react";
 import { desktopApi } from "../desktopApi";
 import { t } from "../i18n";
+import { REMOTE_ENTRY_DRAG_TYPE } from "../utils/remoteEntryDrag";
 
 /**
  * 远端项目面板的「本机 ↔ 远端」传输关注点（上传按钮 / 拖放上传 / 单条下载）。
@@ -27,6 +28,8 @@ export function useRemoteProjectTransfer(input: { projectId: string; directory: 
 				return t("project.remote.uploadExists");
 			case "REMOTE_UPLOAD_INVALID_PATHS":
 				return t("project.remote.dropUnsupported");
+			case "REMOTE_UPLOAD_LOCAL_IO_TIMEOUT":
+				return t("project.remote.uploadLocalIoTimeout");
 			default:
 				return t("project.remote.uploadFailed", { code });
 		}
@@ -105,6 +108,8 @@ export function useRemoteProjectTransfer(input: { projectId: string; directory: 
 	const onDragOver = useCallback((event: DragEvent<HTMLElement>) => {
 		// 不 preventDefault 就不会触发 drop（浏览器默认拒绝接收）。
 		if (!event.dataTransfer.types.includes("Files")) return;
+		// 内部拖动（条目→目录）也带 Files? 不带；但为稳妥起见只认真的文件拖入。
+		if (event.dataTransfer.types.includes(REMOTE_ENTRY_DRAG_TYPE)) return;
 		event.preventDefault();
 		setDragActive(true);
 	}, []);

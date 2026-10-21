@@ -4197,6 +4197,7 @@ export const zhCN = {
 	"project.remote.searchTruncated": "结果已截断：远端达到扫描/匹配上限后停止，这里不是全部匹配。",
 	"project.remote.downloadFailed": "下载失败：{code}",
 	"project.remote.uploadFailed": "上传失败：{code}",
+	"project.remote.uploadLocalIoTimeout": "读取本机文件超时（网络盘/共享目录可能已断开），请检查路径后重试。",
 	"project.remote.uploadNotAFile": "只支持上传文件：目录请在里面选文件，或先打包。",
 	"project.remote.uploadTooLarge": "文件超过 16 MiB 上限，暂不支持。",
 	"project.remote.uploadExists": "远端已有同名文件，未覆盖（请先重命名或删除）。",
