@@ -60,7 +60,7 @@ test("load seeds the builtin translation agent on a fresh profile file", async (
 		assert.equal(translate.systemPrompt, seed.systemPrompt);
 		assert.equal(translate.createdAt, BUILTIN_AGENT_SEED_CREATED_AT);
 		assert.equal(translate.usageCount, 0);
-		assert.deepEqual(plain(snapshot.settings), { selectionToolEnabled: true, systemSelectionEnabled: true, selectionToolAgentId: null, sessionAgentBindings: {} });
+		assert.deepEqual(plain(snapshot.settings), { selectionToolEnabled: true, systemSelectionEnabled: false, selectionToolAgentId: null, sessionAgentBindings: {} });
 		// 角色设定必须覆盖产品要求的每条规则（方向判定 / 只输出译文 / 格式保真 / 术语 / 单词多义）。
 		assert.match(translate.systemPrompt, /只输出译文/);
 		assert.match(translate.systemPrompt, /原文是中文 → 译为英文/);
@@ -222,7 +222,7 @@ test("load normalizes malformed persisted agents instead of failing", async () =
 		assert.equal(agentB.usageCount, 2);
 		assert.equal(agentB.lastUsedAt, 500);
 
-		assert.deepEqual(plain(snapshot.settings), { selectionToolEnabled: true, systemSelectionEnabled: true, selectionToolAgentId: null, sessionAgentBindings: {} });
+		assert.deepEqual(plain(snapshot.settings), { selectionToolEnabled: true, systemSelectionEnabled: false, selectionToolAgentId: null, sessionAgentBindings: {} });
 		assert.equal(snapshot.revision, 7);
 		assert.equal(snapshot.agents.filter((agent) => agent.id === BUILTIN_TRANSLATE_AGENT_ID).length, 1);
 		// 归一化结果写回磁盘：未知键与坏值不再出现。
@@ -238,7 +238,7 @@ test("load recovers from corrupted JSON with an empty state plus the builtin see
 		const store = new AgentProfileStore(filePath);
 		const snapshot = await store.load(1_000);
 		assert.equal(snapshot.revision, 0);
-		assert.deepEqual(plain(snapshot.settings), { selectionToolEnabled: true, systemSelectionEnabled: true, selectionToolAgentId: null, sessionAgentBindings: {} });
+		assert.deepEqual(plain(snapshot.settings), { selectionToolEnabled: true, systemSelectionEnabled: false, selectionToolAgentId: null, sessionAgentBindings: {} });
 		assert.equal(snapshot.agents.length, 4);
 		assert.equal(snapshot.agents[0].id, BUILTIN_TRANSLATE_AGENT_ID);
 		assert.equal((await readPersisted(filePath)).agents.length, 4);
@@ -252,15 +252,15 @@ test("settings updates persist and a deleted default agent clears the dangling s
 		const agent = await store.create({ name: "我的翻译", systemPrompt: "设定" }, 2_000);
 
 		const settings = await store.updateSettings({ selectionToolEnabled: false, selectionToolAgentId: agent.id });
-		assert.deepEqual(plain(settings), { selectionToolEnabled: false, systemSelectionEnabled: true, selectionToolAgentId: agent.id, sessionAgentBindings: {} });
+		assert.deepEqual(plain(settings), { selectionToolEnabled: false, systemSelectionEnabled: false, selectionToolAgentId: agent.id, sessionAgentBindings: {} });
 		assert.deepEqual(plain(store.getSnapshot().settings), plain(settings));
 
 		// store 层容错：未知默认智能体回退 null（IPC 边界会先抛 Agent not found，不静默）。
-		assert.deepEqual(plain(await store.updateSettings({ selectionToolAgentId: "ghost" })), { selectionToolEnabled: false, systemSelectionEnabled: true, selectionToolAgentId: null, sessionAgentBindings: {} });
+		assert.deepEqual(plain(await store.updateSettings({ selectionToolAgentId: "ghost" })), { selectionToolEnabled: false, systemSelectionEnabled: false, selectionToolAgentId: null, sessionAgentBindings: {} });
 
 		await store.updateSettings({ selectionToolAgentId: agent.id });
 		assert.equal(await store.delete(agent.id), true);
-		assert.deepEqual(plain(store.getSnapshot().settings), { selectionToolEnabled: false, systemSelectionEnabled: true, selectionToolAgentId: null, sessionAgentBindings: {} });
+		assert.deepEqual(plain(store.getSnapshot().settings), { selectionToolEnabled: false, systemSelectionEnabled: false, selectionToolAgentId: null, sessionAgentBindings: {} });
 		assert.equal((await readPersisted(filePath)).settings.selectionToolAgentId, null);
 	});
 });
@@ -439,7 +439,7 @@ test("bindSession binds/unbinds a session, returns the full settings, and bumps 
 		const settings = await store.bindSession({ sessionId: "session-a", agentId: agent.id });
 		assert.deepEqual(plain(settings.sessionAgentBindings), { "session-a": agent.id });
 		assert.equal(settings.selectionToolEnabled, true);
-		assert.equal(settings.systemSelectionEnabled, true);
+		assert.equal(settings.systemSelectionEnabled, false);
 		assert.equal(settings.selectionToolAgentId, null);
 		assert.equal(store.getSnapshot().revision, revisionBefore + 1);
 		assert.deepEqual(events, [revisionBefore + 1]);

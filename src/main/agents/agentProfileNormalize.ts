@@ -30,7 +30,7 @@ export const SCHEMA_VERSION = 1;
  * 市场设置缺省值：应用内划词与系统级划词默认开启（核心入口；系统级受快捷键冲突影响时用户可关），
  * 默认智能体留空 = 渲染层回退内置翻译官，会话绑定为空（「使用」智能体时才写入）。
  */
-export const DEFAULT_AGENT_MARKET_SETTINGS: AgentMarketSettings = { selectionToolEnabled: true, systemSelectionEnabled: true, selectionToolAgentId: null, sessionAgentBindings: {} };
+export const DEFAULT_AGENT_MARKET_SETTINGS: AgentMarketSettings = { selectionToolEnabled: true, systemSelectionEnabled: false, selectionToolAgentId: null, sessionAgentBindings: {} };
 
 /** 会话绑定上限：设置文件与 IPC 快照都随绑定数增长，超出后拒绝新绑定（解绑不受限），避免无界膨胀。 */
 export const MAX_SESSION_AGENT_BINDINGS = 2_000;

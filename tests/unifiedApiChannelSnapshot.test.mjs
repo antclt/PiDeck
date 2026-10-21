@@ -16,6 +16,8 @@
  * 2026-10-19 显式刷新：hostPluginsInstallGitHub（从 GitHub 仓库安装宿主插件，并行改动）+1；
  *   下线 GUI 扩展桥与插件开发支持 −5（sessionsBridgeEvent / sessionsBridgeResync /
  *   pluginDevStatus / pluginDevWriteGuide / pluginDevCopyDemo），`plugin-dev` 前缀随之消失（84 → 83）。
+ * 2026-10-21 合并刷新：selectionToolResize（划词浮窗折叠 / 展开高度上报）入场，同时下线
+ *   sessionsCatalogReadOutlineTitle 与 sessionsCatalogReadDshSystemPrompt（轨迹索引 preview 与事实读取取代），净 −2 → 700。
  * 刷新方式：entries.map(([k, v]) => `${k}=${v}`).sort().join("\n") 重算 sha256，写入 CHANNEL_DIGEST。
  */
 import assert from "node:assert/strict";

@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 937873e70521d0573f4e4e57e0b76ddc484121a503832708348ca38355167839（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 45f434b1d716f293e8ce8a1caa177cf1fa45bf2177e71bf330ea5d5821e8362c（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5541,7 +5541,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"agent.tips.quickMessages": "按 {shortcut} 一鍵發出預設口令",
 	"agent.tips.composerTriggers": "輸入 / 呼叫命令、@ 引用檔案、& 引用會話",
 	"agent.tips.quoteSelection": "拖選回覆裡的文字，可以帶著引用繼續提問",
-	"agent.tips.selectionTool": "選中文字就能用智慧體翻譯；在其他應用複製文字也會自動彈窗（{shortcut} 仍可手動觸發）",
+	"agent.tips.selectionTool": "選中文字就能用智慧體翻譯",
 	"agent.tips.sendOptions": "傳送按鈕旁的下拉有「加入當前回合」「排隊到下一輪」「並行傳送」",
 	"agent.tips.workspaceRail": "右緣圖示欄可開關檔案、原始碼管理、軌跡、檢查點等面板",
 	"agent.tips.trajectoryTurns": "右欄「軌跡」把每輪收成「N 步 · M 工具」，預設只展開最後一輪",
@@ -6476,7 +6476,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"agentPromptBar.collapse": "收起提示詞",
 	"agentPromptBar.hint": "每次傳送時自動注入，不顯示在對話正文裡",
 	"settings.selectionTool.title": "劃詞工具",
-	"settings.selectionTool.description": "選中文字即可用智慧體翻譯；開啟系統級劃詞後，在其他應用複製文字會自動彈出劃詞浮條（點「翻譯」後才把內容傳送給所選智慧體）",
+	"settings.selectionTool.description": "在 PiDeck 頁面內選中文字後，用所選智慧體翻譯或問答",
 	"settings.selectionTool.enabled": "應用內劃詞",
 	"settings.selectionTool.enabledHint": "在 PiDeck 頁面內選中文字時浮出智慧體按鈕",
 	"settings.selectionTool.systemEnabled": "系統級劃詞（複製即觸發）",

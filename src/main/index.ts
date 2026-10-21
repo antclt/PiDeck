@@ -27,7 +27,9 @@ import { registerSelectionToolIpc } from "./ipc/selectionToolIpc";
 import { SelectionToolService } from "./selection/SelectionToolService";
 import { SelectionToolWindow } from "./selection/SelectionToolWindow";
 import { ClipboardSelectionWatcher } from "./selection/clipboardSelectionWatcher";
+import { WindowsSelectionCapture } from "./selection/windowsSelectionCapture";
 import { resolveShortcutBindings } from "../shared/shortcuts";
+import { SYSTEM_SELECTION_TOOL_ENABLED } from "../shared/types/selectionTool";
 import { registerFeishuIpc } from "./ipc/feishuIpc";
 import { registerWeChatIpc } from "./ipc/wechatIpc";
 import { applyLinuxDisplayBackendWorkaround, isUsingLinuxXWaylandWorkaround } from "./linuxDisplayBackend";
@@ -699,6 +701,8 @@ let selectionToolWindow: SelectionToolWindow | null = null;
 let selectionToolService: SelectionToolService | null = null;
 /** 复制即触发监听：系统级划词开启时轮询外部剪贴板变更（不依赖快捷键）。 */
 let selectionClipboardWatcher: ClipboardSelectionWatcher | null = null;
+/** Windows 原生划词：鼠标手势 + UIAutomation 读选区，不依赖复制/快捷键。 */
+let windowsSelectionCapture: WindowsSelectionCapture | null = null;
 
 /**
  * 最近一次系统级划词快捷键冲突（accelerator）与已提示值。
@@ -742,9 +746,19 @@ function flushSelectionShortcutConflictNotice(): void {
 function syncSelectionToolShortcut(): void {
 	const service = selectionToolService;
 	if (!service) return;
+	if (!SYSTEM_SELECTION_TOOL_ENABLED) {
+		// 系统级划词暂时隐藏：不清持久化设置，但一切入口（快捷键/复制监听/原生捕获）都不启动。
+		selectionClipboardWatcher?.setEnabled(false);
+		windowsSelectionCapture?.setEnabled(false);
+		service.unregisterShortcut();
+		clearSelectionShortcutConflict();
+		return;
+	}
 	const systemEnabled = agentProfileStore?.getSnapshot().settings.systemSelectionEnabled === true;
 	// 复制即触发与快捷键解耦：快捷键被其它实例占用时，复制文本仍然可以自动弹窗。
 	selectionClipboardWatcher?.setEnabled(systemEnabled);
+	// Windows 优先用原生选区读取（Magpie 同款 UIA），复制监听只做 UIA 读不到时的兜底。
+	windowsSelectionCapture?.setEnabled(systemEnabled);
 	if (!systemEnabled) {
 		service.unregisterShortcut();
 		clearSelectionShortcutConflict();
@@ -5598,11 +5612,24 @@ app
 			},
 			logger: { warn: (message, detail) => void appLogger.warn("selection-tool", message, detail) },
 		});
+		// Windows 原生划词：拖选/双击后直接 UIA 读选区；读不到时才靠上面的剪贴板兜底。
+		windowsSelectionCapture = new WindowsSelectionCapture({
+			onSelection: ({ text }) => {
+				selectionClipboardWatcher?.suppressFor(2500);
+				void selectionToolService?.showText(text);
+			},
+			logger: {
+				info: (message, detail) => void appLogger.info("selection-tool", message, detail),
+				warn: (message, detail) => void appLogger.warn("selection-tool", message, detail),
+			},
+		});
 		// 预热放在 registerIpc 之后（见下方 assemble 段）：浮窗加载即会 settings.get / agentProfiles.getSnapshot，
 		// 提前 warmUp 会让首帧拿到「服务未就绪」的拒绝（只是闪一下默认主题，但没必要）。
 		quitCleanup.register("selection-tool", () => {
 			selectionClipboardWatcher?.dispose();
 			selectionClipboardWatcher = null;
+			windowsSelectionCapture?.dispose();
+			windowsSelectionCapture = null;
 			selectionToolService?.dispose();
 		});
 		// 市场设置的「系统级划词」开关保存后即时生效（不必重启应用）。
@@ -6031,9 +6058,8 @@ app
 				void appLogger?.warn("app", "Model trace endpoint startup failed", error);
 			});
 		registerIpc();
-		// 系统级划词浮窗预热：必须在 registerIpc 之后——浮窗加载即会 settings.get /
-		// agentProfiles.getSnapshot，提前预热会让首帧读到「服务未就绪」的拒绝。
-		void selectionToolWindow?.warmUp().catch(() => undefined);
+		// 系统级划词浮窗预热：功能隐藏期间连窗口都不加载，避免白占一个渲染进程。
+		if (SYSTEM_SELECTION_TOOL_ENABLED) void selectionToolWindow?.warmUp().catch(() => undefined);
 		// 统一接口聚合层：注册全部域与导入器并冻结（deps 缺省在 domainAssembly.ts 收集，FIND-5）
 		registerAllDomains();
 		registerFeishuIpc({

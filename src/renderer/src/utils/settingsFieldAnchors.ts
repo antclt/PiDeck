@@ -363,12 +363,6 @@ const SETTINGS_ROW_ANCHORS = [
 	},
 	{
 		tab: "common",
-		slug: "common-selection-tool-system",
-		labelKey: "settings.selectionTool.systemEnabled",
-		keywords: ["系统级划词", "全局划词", "全局快捷键", "任意应用划词", "划词浮窗", "system selection", "global hotkey"],
-	},
-	{
-		tab: "common",
 		slug: "common-selection-tool-agent",
 		labelKey: "settings.selectionTool.defaultAgent",
 		keywords: ["默认智能体", "划词智能体", "翻译智能体", "翻译官", "default agent", "selection agent"],

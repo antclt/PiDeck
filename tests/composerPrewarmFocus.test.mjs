@@ -26,6 +26,8 @@ const timeline = compile("src/renderer/src/hooks/useSessionTimelineController.ts
 	jotai: { atom: (value) => ({ _mockInit: value }) },
 	"jotai/utils": {},
 	"../atoms": {},
+	// 轨道揭示（2026-10 新增）：控制器只存/取标量 atom，stub 成稳定占位即可。
+	"../atoms/timeline-reveal-atoms": { clearTimelineRevealAtom: {}, requestTimelineRevealAtom: {} },
 	"../lib/pinTurnScroll": { animateScrollTop: () => () => undefined, pinScrollDurationMs: () => 320 },
 	"../desktopApi": {},
 	// 控制器用 t() 播报「DSH 已停止」文案，而 i18n.ts 会拉起整份字典 → 给最小 stub；

@@ -13,7 +13,8 @@
  *   （整份 pluginDev 命名空间 3 方法）：命名空间 70→69、sessions 113→111；
  * 2026-10-21 刷新：轨迹 S4（sessions.readOutline / readOutlineTitle 入场）+ 远端市场/划词/
  *   技能目录等改动合并：命名空间 69→73、sessions 111→114（config/git/app 不变）；
- * 2026-10-21：下线 readDshSystemPrompt 与 readOutlineTitle（轨迹事实/索引 preview 取代），114→112。
+ * 2026-10-21：下线 readDshSystemPrompt 与 readOutlineTitle（轨迹事实/索引 preview 取代），114→112；
+ *   同批合并 selectionTool.resize（划词浮窗折叠 / 展开高度上报）入场，命名空间数与数量锚点不变。
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
