@@ -146,7 +146,7 @@ test("清空应用日志后查看器立刻换新结果，不需要手动刷新",
 
 test("「清理全部」同时清空了应用日志，查看器也要当场换新", async () => {
 	await clearAndSettle(setup(), (buttons) => {
-		const button = buttons.find((node) => node.props?.children === "settings.storage.clearAllButton");
+		const button = buttons.find((node) => node.props?.children === "settings.storage.clearButton");
 		assert.ok(button, "顶部应有「清理全部」按钮");
 		return button;
 	});

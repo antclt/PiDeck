@@ -168,14 +168,14 @@ export function StorageTab(props: { settings: AppSettings; onChange: (patch: Par
 			<SettingsSection id="settings-section-storage-actions" title={t("settings.storage.actions")}>
 				<SettingRow level={1} title={<span>{t("settings.storage.clearAll")}</span>} description={t("settings.storage.clearAllDesc")}>
 					<Button variant="destructive" loading={clearing === "all"} disabled={clearing !== null} onClick={() => confirmClear("all", `${t("settings.storage.appLogs")} + ${t("settings.storage.rpcLogs")} + ${t("settings.storage.pasteFiles")} + ${t("settings.storage.noticeHistory")}`)}>
-						{t("settings.storage.clearAllButton")}
+						{t("settings.storage.clearButton")}
 					</Button>
 				</SettingRow>
 				{/* 界面本地缓存：纯 UI 偏好（布局宽度/折叠/排序等），无敏感数据；
 				   与 settings.json（主进程权威设置）互不影响，清空后刷新页面生效 */}
 				<SettingRow level={1} title={<span>{t("settings.storage.clearLocalStorage")}</span>} description={t("settings.storage.clearLocalStorageDesc")}>
 					<Button variant="destructive" disabled={clearing !== null} onClick={confirmClearLocalStorage}>
-						{t("settings.storage.clearLocalStorageButton")}
+						{t("settings.storage.clearButton")}
 					</Button>
 				</SettingRow>
 			</SettingsSection>
