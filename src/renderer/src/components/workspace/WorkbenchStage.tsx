@@ -58,8 +58,11 @@ export function WorkbenchStage(props: WorkbenchStageProps) {
 		const contentPanel = contentPanelRef.current;
 		if (!panel || !contentPanel) return;
 		if (!props.hasContent) {
-			contentPanel.collapse();
+			// 顺序关键（2026-10-21 实测关掉后 48/52 留白）：maximize 状态下会话面板仍是收起态，
+			// 库的尺寸再平衡会把内容面板按「上次展开尺寸」补回 ~52%。先把会话面板 expand
+			// 回 expandToSize，再 collapse 内容面板，最终布局才是 [48, 0] → 会话独占整条。
 			panel.expand();
+			contentPanel.collapse();
 		} else {
 			contentPanel.expand();
 			if (props.layout === "maximize") panel.collapse();

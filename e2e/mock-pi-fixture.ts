@@ -53,6 +53,32 @@ export type SeedImageGenConfig = ImageGenConfigFile;
 const repoRoot = resolve(__dirname, "..");
 
 /**
+ * 主窗口识别：主窗口加载渲染层入口（打包态 file://…/index.html，dev 态 localhost 根），
+ * 系统级划词浮窗加载 selection-tool.html。
+ *
+ * 为什么不能用 app.firstWindow()：主进程会 warmUp 划词浮窗（SelectionToolWindow），它是
+ * 同进程的第二个 BrowserWindow，且经常比主窗口先完成加载；firstWindow() 拿到浮窗后，
+ * 整条用例的断言都跑在浮窗页上，表现为「项目 Tab 永远等不到」（2026-10-21 全量 e2e 红）。
+ */
+function isMainWindow(page: Page): boolean {
+	const url = page.url();
+	if (!url || url === "about:blank") return false;
+	if (url.includes("selection-tool")) return false;
+	return /index\.html(?:[?#]|$)/.test(url) || /^https?:\/\/(localhost|127\.0\.0\.1)[:/]/.test(url);
+}
+
+/** 等主窗口出现（浮窗预热可能先到）；超时按启动失败处理，避免用例在错误页上漂移到别处超时。 */
+async function waitForMainWindow(app: ElectronApplication): Promise<Page> {
+	const deadline = Date.now() + 60_000;
+	while (Date.now() < deadline) {
+		const page = app.windows().find(isMainWindow);
+		if (page) return page;
+		await new Promise((resolve) => setTimeout(resolve, 100));
+	}
+	throw new Error("e2e: main window did not appear within 60s（只看到划词浮窗或空页）");
+}
+
+/**
  * Playwright option fixture 的「元组陷阱」归一化入口。
  *
  * `test.use({ seedXxx: [...] })` 的值会被 Playwright 按
@@ -233,7 +259,7 @@ export const test = base.extend<
 		}
 	},
 	window: async ({ app }, use) => {
-		const window = await app.firstWindow();
+		const window = await waitForMainWindow(app);
 		await window.waitForLoadState("domcontentloaded");
 		// 启动引导弹窗会抢焦点/遮拦点击，统一在这里挂上「出现即关」，
 		// 否则会伪装成业务失败（点击超时、打字被吞）。
