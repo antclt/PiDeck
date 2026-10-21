@@ -11,6 +11,7 @@
 const { execSync } = require("node:child_process");
 const path = require("node:path");
 const fs = require("node:fs");
+const { electronBuilderEnv } = require("./electronBuilderEnv.js");
 
 const root = path.resolve(__dirname, "..");
 
@@ -26,6 +27,7 @@ execSync(`npx electron-builder --win ${formats}`, {
 	cwd: root,
 	stdio: "inherit",
 	shell: true,
+	env: electronBuilderEnv(),
 });
 
 // Windows 自动更新由 electron-updater 的 NSIS provider 执行。每次发布必须让同一
