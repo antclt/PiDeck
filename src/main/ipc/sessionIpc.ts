@@ -43,6 +43,7 @@ import type {
 	ResolveLaunchDefaultsInput,
 	ResolvedLaunchDefaults,
 	ArchivedDshSession,
+	SessionSearchMatch,
 	SessionSearchResult,
 } from "../../shared/types";
 import { parseSessionProcessEventsFromFile } from "../sessions/sessionProcessEventsFile";
@@ -105,7 +106,7 @@ export function scheduleCatalogBackgroundScan(projectId: string, task: () => Pro
 import type { ProjectStore } from "../projects/ProjectStore";
 import type { SettingsStore } from "../settings/SettingsStore";
 import type { SessionScanner } from "../sessions/SessionScanner";
-import type { SessionCatalog } from "../sessions/SessionCatalog";
+import type { SessionCatalog, SessionCatalogEntry } from "../sessions/SessionCatalog";
 import type { SessionRuntimeCoordinator } from "../sessions/SessionRuntimeCoordinator";
 import { SessionCommandIpcError } from "../sessions/SessionCommandIpcError";
 import { appendSessionForkSuffix } from "../sessions/sessionForkTitle";
@@ -261,6 +262,11 @@ export type DshBackendIpcDeps = {
 	resolveDshSessionFilePath?: (sessionId: string) => Promise<string | undefined>;
 	/** DSH 会话内容搜索（session.search）；未装配时返回空列表。 */
 	searchDshSessions?: (query: string) => Promise<Array<{ sessionId: string; snippet: string }>>;
+	/**
+	 * DSH 会话内查找（Ctrl/Cmd+Shift+F）：把整段 host 会话历史投影成消息后匹配。
+	 * 未装配 / host 不可用时由调用方降级为 null（渲染层显示「暂时读不到」）。
+	 */
+	searchDshSessionMessages?: (dshSessionId: string, query: string) => Promise<{ matches: SessionSearchMatch[]; hitCount: number }>;
 	/** DSH 创建目标（G5）；未装配时抛错。 */
 	createDshGoal?: (agentId: string, objective: string, maxGoalRounds?: number) => Promise<void>;
 	/** DSH 目标操作（G5：pause/resume/complete/clear）；未装配时抛错。 */
@@ -679,20 +685,68 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		}
 	});
 
-	// 会话内查找：只搜当前会话单个文件，命中按时间线顺序（上一条/下一条导航）。
-	ipcMain.handle(ipcChannels.sessionsSearchInSession, async (_event, sessionPath: unknown, query: unknown) => {
-		const searcher = deps.sessionMessageSearch;
-		if (!searcher) return null;
-		if (typeof sessionPath !== "string" || typeof query !== "string") return null;
-		const trimmedPath = sessionPath.trim();
+	/**
+	 * DSH 会话内查找：host 历史投影 → 词元匹配，包成跨会话搜索的同形信封——
+	 * 渲染层浮层只读 sessions[0].matches / hitCount，形状一致才能共用 hook 与浮层。
+	 * filePath 给出 host 会话日志路径（排查用；推不出来时退化成 dsh:<id>）。
+	 */
+	const searchDshSessionInSession = async (entry: SessionCatalogEntry, query: string): Promise<SessionSearchResult | null> => {
+		const searcher = dshBackend?.searchDshSessionMessages;
+		const dshSessionId = entry.dshSessionId;
+		if (!searcher || !dshSessionId) return null;
+		try {
+			const found = await searcher(dshSessionId, query);
+			if (found.hitCount === 0) return { sessions: [], totalHitSessions: 0, truncated: false };
+			let logPath: string | undefined;
+			if (resolveDshSessionFilePath) {
+				try {
+					logPath = await resolveDshSessionFilePath(entry.id);
+				} catch {
+					logPath = undefined;
+				}
+			}
+			return {
+				sessions: [
+					{
+						filePath: logPath ?? `dsh:${dshSessionId}`,
+						updatedAtMs: entry.updatedAt,
+						matches: found.matches,
+						hitCount: found.hitCount,
+					},
+				],
+				totalHitSessions: 1,
+				truncated: found.hitCount > found.matches.length,
+			};
+		} catch (error) {
+			void appLogger.warn("session", "DSH in-session search failed", {
+				sessionId: entry.id,
+				dshSessionId,
+				error: error instanceof Error ? error.message : String(error),
+			});
+			return null;
+		}
+	};
+
+	// 会话内查找（Ctrl/Cmd+Shift+F）：入参是 **SessionRecord.id**（不是路径）。
+	// 路径/后端身份一律由主进程从 catalog 解析，渲染层传什么路径都不生效：
+	// - pi：sidecar 只索引会话文件（.jsonl），路径再兜一道 isSessionSearchFilePath；
+	// - DSH：没有 pi JSONL，整段 host 历史投影后本地匹配（命中 id = 投影消息 id）。
+	// 命中按时间线顺序返回（上一条/下一条导航）；未装配/后端不可用返回 null
+	// （渲染层显示「暂时读不到」而不是「没有匹配」）。
+	ipcMain.handle(ipcChannels.sessionsSearchInSession, async (_event, sessionId: unknown, query: unknown) => {
+		if (typeof sessionId !== "string" || typeof query !== "string") return null;
 		const trimmed = query.trim();
+		if (!trimmed || trimmed.length > 256) return null;
+		const entry = sessionCatalog.get(sessionId.trim());
+		if (!entry) return null;
+		if (entry.backend === "dsh") return searchDshSessionInSession(entry, trimmed);
+		const searcher = deps.sessionMessageSearch;
 		// 路径必须像会话文件（无歧义绝对路径 + .jsonl）：sidecar 只索引真实会话文件，
 		// 这里再兜一道，避免把任意路径透传给子进程。判定收口在 sessionSearchPath，
 		// Windows 反斜杠路径与 POSIX 正斜杠路径都放行（旧实现只认 `/`，Windows 全被拒）。
-		if (!isSessionSearchFilePath(trimmedPath)) return null;
-		if (!trimmed || trimmed.length > 256) return null;
+		if (!searcher || !entry.filePath || !isSessionSearchFilePath(entry.filePath)) return null;
 		try {
-			return await searcher(trimmedPath, trimmed);
+			return await searcher(entry.filePath, trimmed);
 		} catch (error) {
 			void appLogger.warn("session", "In-session search failed", { error: error instanceof Error ? error.message : String(error) });
 			return null;

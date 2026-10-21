@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: acf9f8ae6e6d9b2c42b2d7bd54c19a53cff0bd9fbd3250fae06b95f46f3d8f50（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 78b297b0b5d0d656f361c1657f20ef2977630187b1e211632a89617f9b22c538（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4180,7 +4180,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"sessionFind.open": "在當前會話中查詢",
 	"sessionFind.placeholder": "在當前會話中查詢…",
 	"sessionFind.noResults": "沒有匹配",
-	"sessionFind.unavailable": "會話索引尚未就緒，稍候再試（首次建索引需要一會兒）",
+	"sessionFind.unavailable": "暫時讀不到會話內容，稍候再試",
 	"sessionFind.jumpFailed": "未能跳轉到這條命中：它可能在更早的歷史裡，或已被移出當前上下文",
 	"sessionFind.searching": "查詢中…",
 	"sessionFind.prev": "上一條命中",

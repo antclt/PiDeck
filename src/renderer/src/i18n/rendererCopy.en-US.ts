@@ -4187,7 +4187,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"sessionFind.open": "Find in current session",
 	"sessionFind.placeholder": "Find in current session…",
 	"sessionFind.noResults": "No matches",
-	"sessionFind.unavailable": "Session index is still warming up — try again in a moment (the first build can take a while)",
+	"sessionFind.unavailable": "Session content isn't available yet — try again in a moment",
 	"sessionFind.jumpFailed": "Couldn't jump to this hit: it may sit further back in history or was removed from the current context",
 	"sessionFind.searching": "Searching…",
 	"sessionFind.prev": "Previous match",

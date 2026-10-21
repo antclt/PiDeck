@@ -54,8 +54,9 @@ export function ChatSessionPane(props: ChatSessionPaneProps) {
 	const chatHeaderRef = focused ? layoutRefs.chatHeaderRef : localHeaderRef;
 	const composerRef = focused ? layoutRefs.composerRef : localComposerRef;
 
-	// 会话内查找依赖 pi 会话 JSONL 索引：DSH/ACP 后端不走 sidecar，直接不挂入口
-	// （避免出现一个永远「没有匹配」的搜索框）；草稿会话还没落盘文件，同样不挂入口（否则图标悬在欢迎页上）。
+	// 会话内查找按后端有检索源才挂入口：pi 走会话 JSONL 索引，DSH 走 host 历史投影；
+	// ACP/生图没有可检索历史、草稿会话（pi 未落盘 / DSH 未建 host 会话）还没有内容，
+	// 都不挂入口（否则会出现一个永远「没有匹配」的搜索框、图标悬在欢迎页上）。
 	// 判据与 SessionHeader 的放大镜入口共用（utils/sessionFindSupport），入口在就一定挂得上浮层。
 	const findSupported = supportsSessionFind(record);
 
@@ -99,7 +100,9 @@ export function ChatSessionPane(props: ChatSessionPaneProps) {
 					// 会话切换必须重挂：单栏模式下 pane 实例跨会话复用（App.tsx 的 solo 分支没有 key），
 					// 不重挂会把上一个会话的搜索框+关键词带过来，一切会话就自己搜起来。
 					key={sessionId}
-					sessionId={record?.filePath ?? sessionId}
+					// 传稳定会话 id（不是会话文件路径）：主进程按 catalog 的后端分派检索源，
+					// pi/DSH 共用同一条 IPC，渲染层不感知后端差异。
+					sessionId={sessionId}
 					// 锚点是本栏消息区（时间线视口）而不是整栏聊天区：分屏时两栏各贴自己的右上角，
 					// 单栏时也不会落到窗口控件那一行（理由见 sessionFindAnchor）。
 					anchorRef={sessionTimeline.timelineRef}
