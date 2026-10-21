@@ -48,6 +48,7 @@
 | 现有能力 | 实际口径 | 本计划如何使用 |
 |---|---|---|
 | `SessionHistoryReader` 显示索引 | 32 文件 LRU；`entries` 包含非活动分支，`activeBranch` 是当前父链，`activeMessageEntries` 是分页坐标 | 复用索引，不把整个索引或私有可变 Map 暴露给 IPC |
+| 索引入口 `preview`（表 v3） | 建索引时从已解析的 `message.content` 取用户消息首段文本（剥掉开头的注入引用块，压空白，≤120 码点），随条目表持久化（Go `displayEntry.Preview` / TS `SessionDisplayEntry.preview`，parity 用例逐条比对） | 导轨目录直接带出标题，未加载的历史也有真实提问文本；读取路径零额外 IO |
 | session-store Wave 2b | 默认开启；磁盘条目表命中可免源文件全扫；缺失/关闭回退 TS 建索引 | 不新增 Go 协议、配置开关或缓存文件 |
 | fork 合并 | 完整复制前缀的子文件为权威；增量 fork 补祖先消息；`chainHostPath` 配对偏移，`chainSources` 记录祖先版本 | 事实还需核对祖先非消息条目，不能假设当前合并消息表包含全部事实 |
 | `readIndexedLines` | 按偏移读行，但会累计传入条目的全部行字符串；批次字节预算只限制并发读取 | 不把整批事实候选直接交给它后再截断 |
@@ -289,7 +290,9 @@ S1 落地时增加 `scripts/probeTrajectoryRead.mjs`（当前尚不存在），�
 - 热命中正文读取 0、普通追加不回读旧事实、隐藏面板请求 0、默认 DOM 有界是可重复的主要收益判据。
 - 不为得到某个数字跳过分支/版本/完整性检查。若优化只增加维护成本且实测无收益，停在上一阶段，不继续增量化。
 
-> **S4 落地记录（2026-10-20）**：导轨数据面（`readSessionOutline`/`readSessionOutlineTitle` + 两个 IPC 通道）已提交；渲染侧 `buildOutline` 补 `meta.entryId`，`mergeOutlineRailItems` 把索引目录与已加载大纲按 entryId 合并（未加载项 `#序号` 占位，目录为空时整体回退），点击占位刻度复用既有 `loadMoreMessages` 连续补页（≤7 次请求，目标 entryId 出现即 `jumpToMessage`）。测试：目录数据面 5 项 + 合并 2 项。
+> **S4 落地记录（2026-10-20）**：导轨数据面（`readSessionOutline`/`readSessionOutlineTitle` + 两个 IPC 通道）已提交；渲染侧 `buildOutline` 补 `meta.entryId`，`mergeOutlineRailItems` 把索引目录与已加载大纲按 entryId 合并（未加载项 `#序号` 占位，目录为空时整体回退），点击占位刻度复用既有 `loadMoreMessages` 连续补页（≤7 次请求，目标 entryId 出现即 `jumpToMessage`）。测试：目录数据面 10 项 + 合并 2 项。
+>
+> **导轨标题来源修正（同日）**：先前未加载刻度靠 `#序号` 占位 + 原始 ISO 时间，看不懂。按 dsh `session-turn-outline` 的口径（预览在建流时即落地，"before and after its events load 是同一句话"）改为**索引内持久化 preview**：`displayEntry.Preview`（Go）/ `SessionDisplayEntry.preview`（TS）在建索引时从已解析的 `message.content` 取出，剥掉开头注入引用块（`quoted_context`/`referenced_session`/`skill`/`prompt_template`；未闭合则不产预览），压空白后截 120 码点；条目表 `tableFileVersion` 2→3 强制重建一次（31MB 实测 417–436ms，之后磁盘命中 14–20ms）。导轨目录随 `sessions:catalog-read-outline` 返回 `preview`，渲染层用与已加载标题同一套归一（`replaceExpandedRefBlocksWithLabels` + `summarizeMessage`），时间与已加载项同一格式化口。新增 parity 用例逐条比对 Go/TS 两侧 preview，Go 侧 4 组单测（取值、范围、码点截断、引用块剥离）。
 >
 > **S3 落地记录（2026-10-20）**：账本改为渲染窗口（`buildTrajectoryWindow`：尾部 3 轮、逐轮 120 步上限、滚到顶部再放 3 轮并有 200ms 冷却、选中更早记录自动扩到其所在轮）；概览从「一条记录一个按钮」改为按 lane + 像素桶聚合（`bucketOverviewTicks`：每 lane ≤ min(250, ceil(width/4))，桶显示 ×N，选中项一定有刻度）。15k 记录样本：账本挂载 ≤ 3×120+120、概览刻度 ≤ 4×min(250,ceil(w/4))+1，见 `tests/trajectoryWindow.test.mjs`（6 项）。
 >
@@ -297,7 +300,7 @@ S1 落地时增加 `scripts/probeTrajectoryRead.mjs`（当前尚不存在），�
 >
 > **S1 落地记录（2026-10-20）**：`scripts/probeTrajectoryRead.mjs` 在真实会话上测得——0.4MB / 1 份 29.8KB 提示词：索引 3.1–3.5ms、冷读 1.9–2.2ms（正文 1 次）、热读 0.1–0.2ms（正文 0 次）、version 稳定；2.2MB / 856 条目旧会话：索引 15.6ms、冷读 1.9ms、正文 0 次（该会话无系统条目）。收益来自「不再扫文件」而非微优化；旧全文件扫描 38.8MB / 116.9ms 的路径现在只在未注入索引读取器时启用。
 >
-> 已知未覆盖：① 降级路径缺故障注入用例（`readSessionFacts` 缺失才回退旧扫描）；② DSH 运行时（已激活）会话仍默认 `fromStart: true`，宿主 attach 是否回放到会话开头由后续阶段核实；③ `sessions:catalog-read-dsh-system-prompt` 已无轨迹消费者，删除留给 S3/S5 一并评估。
+> 已知未覆盖：① 降级路径缺故障注入用例（`readSessionFacts` 缺失才回退旧扫描）；② DSH 运行时（已激活）会话仍默认 `fromStart: true`，宿主 attach 是否回放到会话开头由后续阶段核实；③ `sessions:catalog-read-dsh-system-prompt` 与 `sessions:catalog-read-outline-title` 已无轨迹消费者（后者被索引 preview 取代），删除留给收口阶段一并做。
 
 各阶段是可独立验证/回滚的交付单元；S1 契约改动必须把主进程、preload 与 renderer 成套交付/回滚。sidecar 降级沿用已有开关，迁移期旧入口按 §3.5 受控启用与移除，不新增永久备用扫描系统。只提交本任务改动，提交与推送按当前用户授权和仓库协作规则执行。
 
@@ -331,6 +334,7 @@ S1 落地时增加 `scripts/probeTrajectoryRead.mjs`（当前尚不存在），�
 - [x] S2 事件驱动/5 秒兜底刷新、作用域隔离、清理与回合结束刷新（触发键 = 会话 + agentId + runtimeGeneration + 回合/压缩状态；model/thinking 变化未单独接入，由兜底覆盖）。
 - [ ] S2 now 完全脱离模型构建：已做到「hover/拖动不重算 + in-flight 时 1 秒低频时钟 + 相同事实版本不换引用」，domain 右端仍依赖 now（未做视觉验证前不擅自改时间轴）。
 - [x] S3 账本窗口 + 单轮预算 + 概览聚合：`trajectoryWindow.ts`（尾部 3 轮、单轮 ≤120、滚顶再放 3 轮、选中更早自动扩窗）+ 概览按 lane/像素聚合（每 lane ≤ min(250, ceil(w/4))，选中项补刻度）。**未做**：概览点击「切窗口到目标 3 轮」已由「选中自动扩窗」等价覆盖，但没有「回最新」按钮与按记录 ID 的滚动恢复（仍是 scrollTop 记忆）。
+- [x] S4 导轨标题来自索引 preview（不靠回读正文）：表版本 v3 + Go/TS 双侧镜像 + parity 用例。
 - [x] S4 活动用户目录 + 懒标题（数据面）：`SessionHistoryReader.readSessionOutline/readSessionOutlineTitle` + `sessions:catalog-read-outline{,-title}` 通道/handler/preload/preview/browser 成套；目录过滤 context_edit、`messageIndex` 用 activeMessageEntries 坐标、超预算保留首项+最近项、标题读一行截 80 字。测试 `tests/sessionOutlineDirectory.test.mjs`（5 项）。
 - [x] S4 导轨 UI：索引目录与已加载消息合并（`mergeOutlineRailItems`，未加载项以 #序号占位）、点击未加载项走既有连续补页（最多 7 次请求，到目标即跳转）、目录为空时退回已加载大纲（dsh/ACP）。**未做**：远目标单步确认对话框、加载范围高亮、按记录 ID 的滚动恢复。
 - [ ] S4 预算/分屏/生命周期/非 pi 降级/分页中断测试。

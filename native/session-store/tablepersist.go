@@ -41,7 +41,8 @@ const (
 	// v2：复用前新增字节边界校验（issue #392）。v1 条目文件可能已经与源文件脱节
 	// （整份重写后恰好变长 → 尾部增量错位 → 活动链从错位处截断，只剩尾部几轮），
 	// 递增版本号把用户手里这类失效文件一次性丢弃、按需重建。
-	tableFileVersion = 2
+	// v3：条目新增 user 消息 preview（导轨标题）；旧表没有该字段，必须重扫一次。
+	tableFileVersion = 3
 	// tableFileSuffix 条目文件后缀（`<sha1>.table`）。
 	tableFileSuffix = ".table"
 	// maxTableFiles 磁盘上最多保留的条目文件数（含最近打开过的历史会话）。

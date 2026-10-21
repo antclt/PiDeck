@@ -4068,6 +4068,7 @@ export const zhCN = {
 	"outline.count": "{count} 条",
 	"outline.drag": "拖动调整位置",
 	"outline.showAll": "显示全部 {count} 条",
+	"outline.turnFallback": "第 {index} 轮",
 	"outline.title": "会话定位",
 	"outline.trigger": "会话定位 · {count} 条",
 	"prompt.closeHint": "Esc 关闭",

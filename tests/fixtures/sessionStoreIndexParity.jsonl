@@ -18,3 +18,5 @@ not json at all
 {"type":"message","id":"m16","parentId":"m15","timestamp":"2026-03-01T10:10:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"финал ✨"}]}}
 {"type":"message","id":"m17","parentId":"m16","message":{"role":"assistant","provider":"openai","model":"gpt-5.2-codex","content":[{"type":"text","text":"со сменой модели"}]}}
 {"type":"message","id":"m18","parentId":"m17","message":{"role":"assistant","provider":"openai","model":"","content":[{"type":"text","text":"пустая модель"}]}}
+{"type":"message","id":"m19","parentId":"m18","message":{"role":"user","content":[{"type":"text","text":"<quoted_context label=\"模型：打开远端项目\" message_id=\"db59\">\n引用正文一大段\n</quoted_context>\n真正的问题在这里"}]}}
+{"type":"message","id":"m20","parentId":"m19","message":{"role":"user","content":[{"type":"text","text":"<quoted_context label=\"x\" message_id=\"y\">\n未闭合的引用块"}]}}
