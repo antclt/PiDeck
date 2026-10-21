@@ -83,7 +83,7 @@ import { expandSessionReferences } from "../sending/outgoingExpansion";
 import { showNotice } from "../utils/notice";
 import { requireSessionCommand, toSessionRuntimeTarget } from "../utils/sessionCommands";
 import { collectReservedCommandNames, needsTemplateRefetch } from "../utils/reservedCommandNames";
-import { mergeRuntimeTemplates } from "../utils/templateCatalog";
+import { assembleTemplates, mergeRuntimeTemplates } from "../utils/templateCatalog";
 import { buildDraftResourceCommands, draftResourceCommandsForProject, selectComposerSuggestionCommands, standbyPreviewCommandsForProject, type DraftResourceCommandSnapshot, type StandbyPreviewCommandSnapshot } from "../utils/draftResourceCommands";
 import { isSessionRuntimeBusy, isUserFacingSessionStart } from "./useSessionTimelineController";
 import { truncateQuoteLabel } from "../components/session/composer/quoteChip";
@@ -659,32 +659,31 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		// 的加载拿到更大的序号，把上一个会话的模板表写进 templatesRef，随后该会话的发送会用
 		// 错项目的模板正文展开（跨会话污染）。发起顺序才代表新旧。
 		const sequence = ++templateWriteSeqRef.current;
-		let next: PromptTemplateInfo[] = [];
+		let globalTemplates: PromptTemplateInfo[] = [];
+		let projectTemplates: PromptTemplateInfo[] = [];
 		try {
 			const globalResult = await desktopApi.prompts.list();
-			next.push(
-				...globalResult.templates.map((template) => ({
-					...template,
-					description: translateBuiltinPromptDescription(template),
-					argumentHint: parseArgumentHint(template.content),
-				})),
-			);
+			globalTemplates = globalResult.templates.map((template) => ({
+				...template,
+				description: translateBuiltinPromptDescription(template),
+				argumentHint: parseArgumentHint(template.content),
+			}));
 		} catch {
 			// Project templates remain usable when the global store is unavailable.
 		}
 		if (record?.projectId) {
 			try {
 				const projectResult = await desktopApi.prompts.listByProject(record.projectId);
-				next.push(
-					...projectResult.templates.map((template) => ({
-						...template,
-						argumentHint: parseArgumentHint(template.content),
-					})),
-				);
+				projectTemplates = projectResult.templates.map((template) => ({
+					...template,
+					argumentHint: parseArgumentHint(template.content),
+				}));
 			} catch {
 				// A project does not have to provide .pi/prompts.
 			}
 		}
+		// 同名以项目为准、禁用不进表——与 pi 的 rank + 去重规则一致（见 assembleTemplates）
+		let next: PromptTemplateInfo[] = assembleTemplates({ project: projectTemplates, global: globalTemplates });
 		// 来源 B：pi 实际加载的全部模板（含 npm 包声明的 pi.prompts）。缺了它，
 		// `/parallel-review` 这类包带模板只能交给 pi 展开，模板名不进会话文件，
 		// 时间线就还原不出 chip（2026-10 现场：运行中有 chip、暂停后变全文）。
