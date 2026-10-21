@@ -36,6 +36,7 @@ import type {
 } from "../shared/types/voiceTranscription";
 import type { WhisperInstallProgress, WhisperInstallResult, WhisperRuntimeStatus } from "../shared/types/whisperRuntime";
 import type { EnhanceEventPayload, EnhanceRunInput, EnhanceRunResult } from "../shared/types/enhance";
+import type { PromptSuggestionRunInput, PromptSuggestionRunResult } from "../shared/types/promptSuggestion";
 import type { AgentChangedEvent, AgentInvokeEventPayload, AgentInvokeInput, AgentInvokeResult, AgentMarketSettings, AgentProfile, AgentProfileSnapshot, BindAgentSessionInput, CreateAgentProfileInput, UpdateAgentMarketSettingsInput, UpdateAgentProfileInput } from "../shared/types/agentProfile";
 import type { SelectionToolInsertInput, SelectionToolShowPayload, SelectionToolWindowState } from "../shared/types/selectionTool";
 import type { QuickMessagesSaveResult, QuickMessagesSnapshot } from "../shared/types/quickMessages";
@@ -1637,6 +1638,13 @@ const api = {
 		run: (input: EnhanceRunInput) => ipcRenderer.invoke(ipcChannels.enhanceRun, input) as Promise<EnhanceRunResult>,
 		cancel: () => ipcRenderer.invoke(ipcChannels.enhanceCancel) as Promise<{ ok: boolean }>,
 		onEvent: (callback: (payload: EnhanceEventPayload) => void) => subscribe(ipcChannels.enhanceEvent, callback),
+	},
+
+	// ── 输入预测：回合结束后预测下一句输入（与提示词增强同一条侧车协议、独立实例）──
+	suggestion: {
+		run: (input: PromptSuggestionRunInput) => ipcRenderer.invoke(ipcChannels.suggestRun, input) as Promise<PromptSuggestionRunResult>,
+		cancel: () => ipcRenderer.invoke(ipcChannels.suggestCancel) as Promise<{ ok: boolean }>,
+		onEvent: (callback: (payload: EnhanceEventPayload) => void) => subscribe(ipcChannels.suggestEvent, callback),
 	},
 
 	voiceTranscription: {

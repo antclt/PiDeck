@@ -50,12 +50,24 @@ export const TipTapComposer = forwardRef<HTMLDivElement, TipTapComposerProps>(fu
 					ref={setHostRef}
 					// overflow-hidden：把滚动关进 ProseMirror；否则 EditorContent 中间层
 					// 不传高度约束时，内容会直接撑出 composer-box。
-					className="tiptap-composer-host flex min-w-0 flex-1 flex-col overflow-hidden"
+					// relative：输入预测的 ghost 文案以绝对定位怼齐 ProseMirror 的 padding。
+					className="tiptap-composer-host relative flex min-w-0 flex-1 flex-col overflow-hidden"
 					data-placeholder={props.placeholder}
 					onFocus={props.onFocus}
 					onBlur={props.onBlur}
 				>
 					<EditorContent editor={editor} className="tiptap-composer-surface flex min-w-0 flex-1 flex-col overflow-hidden" />
+					{
+						// 只作视觉层：pointer-events-none 不抢光标，aria-hidden 不进读屏（否则会被当成
+						// 已输入的正文）。字号/行高/边距全部跟随 .rich-input 的 token，保证「看起来就像
+						// 用户已经打了这几个字」，位置与 placeholder 完全重合（placeholder 此时被置空）。
+						props.suggestion ? (
+							<div className="pointer-events-none absolute inset-x-3 top-[10px] flex items-start gap-2 text-tertiary" style={{ fontSize: "var(--font-size-input)", lineHeight: "var(--line-height-input)" }} aria-hidden="true">
+								<span className="min-w-0 truncate">{props.suggestion}</span>
+								<kbd className="mt-[3px] shrink-0 rounded border border-subtle px-1 text-[11px] leading-4 opacity-70">Tab</kbd>
+							</div>
+						) : null
+					}
 				</div>
 			</ContextMenuTrigger>
 			<ContextMenuContent alignOffset={-6}>

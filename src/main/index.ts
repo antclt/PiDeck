@@ -473,6 +473,7 @@ import { RpcLogLiveBroadcaster } from "./logging/RpcLogLiveBroadcaster";
 import { registerEditorsIpc } from "./ipc/editorsIpc";
 import { registerPiAuthIpc } from "./ipc/piAuthIpc";
 import { registerEnhanceIpc } from "./ipc/enhanceIpc";
+import { registerPromptSuggestionIpc } from "./ipc/promptSuggestionIpc";
 import { detectExternalEditors, listConfiguredExternalEditors, mergeDetectedExternalEditors, openProjectInEditor, validateExternalEditorCommand } from "./editors/EditorDetector";
 import { FeishuBridge, type SessionRuntimeBindingGateway } from "./feishu/FeishuBridge";
 import { feishuT, normalizeFeishuLocale, type FeishuLocale } from "./feishu/FeishuI18n";
@@ -681,6 +682,11 @@ let enhancePromptService: EnhancePromptService | null = null;
 let agentProfileStore: AgentProfileStore | null = null;
 /** 智能体一次性调用服务（划词工具 / 市场面板）：业务在 service，侧车进程在下面的 completion。 */
 let agentInvokeService: AgentInvokeService | null = null;
+/**
+ * 输入预测服务（回合结束后预测下一句输入）：与提示词增强同协议，但**独立实例**——
+ * 单飞语义下共用会让预测把用户正在跑的增强打断（同 agentInvokeCompletionService 的理由）。
+ */
+let promptSuggestionService: EnhancePromptService | null = null;
 /**
  * 智能体调用专用侧车实例。与提示词增强共用同一套 pi-enhance-host 协议，但必须是
  * **独立进程**：EnhancePromptService 是「新 run 打断旧 run」的单飞语义，共用实例会
@@ -2896,6 +2902,33 @@ function resolveBuiltInExtensionRoots(): BuiltInExtensionPathRoots {
 	};
 }
 
+/**
+ * 一次补全侧车（pi-enhance-host）实例的公共装配：提示词增强 / 智能体调用 / 输入预测各自
+ * 一个独立进程（EnhancePromptService 的单飞语义是「新 run 打断旧 run」，共用实例会互相打断）。
+ * resolveLaunch 现求值：用户改自定义 pi 路径后下次调用即生效，无需重启。
+ */
+function createCompletionHelperService(namespace: "enhance" | "agent-invoke" | "suggest"): EnhancePromptService {
+	const log = (level: "debug" | "info" | "warn" | "error", message: string) => void appLogger?.[level](namespace, message);
+	return new EnhancePromptService({
+		resolveLaunch: () =>
+			resolvePiAuthHostLaunch({
+				settings: settingsStore.get(),
+				locator: piLocator as PiLocator,
+				userDataPath: app.getPath("userData"),
+				appPath: app.getAppPath(),
+				resourcesPath: process.resourcesPath,
+				isPackaged: app.isPackaged,
+				helperFilename: PI_ENHANCE_HOST_FILENAME,
+			}),
+		logger: {
+			debug: (message) => log("debug", message),
+			info: (message) => log("info", message),
+			warn: (message) => log("warn", message),
+			error: (message) => log("error", message),
+		},
+	});
+}
+
 function registerIpc() {
 	// 用量统计：业务在 UsageStatsService，handler 薄层只校验/适配
 	registerUsageStatsIpc(ipcMain, usageStatsService);
@@ -2903,6 +2936,8 @@ function registerIpc() {
 	registerPiAuthIpc(ipcMain, piAuthService);
 	// 提示词增强（输入框增强按钮）：只做校验/适配，进程与协议在 EnhancePromptService
 	registerEnhanceIpc(ipcMain, enhancePromptService);
+	// 输入预测（回合结束预测下一句输入）：同一侧车协议、独立实例；模型指令由主进程注入。
+	registerPromptSuggestionIpc(ipcMain, promptSuggestionService);
 	// 智能体市场：配置 CRUD + 一次性调用（划词工具）。store 在 whenReady 里已 load，
 	// 这里只按域注册边界 handler；直接调用走独立侧车实例（见 agentInvokeCompletionService）。
 	if (agentProfileStore) {
@@ -4315,26 +4350,12 @@ app
 		quitCleanup.register("pi-auth", () => piAuthService?.dispose());
 		// 提示词增强助手（见 AGENTS.md「提示词增强例外通道」）：常驻单进程，复用认证
 		// 同一套 pi 入口解析；用户改自定义 pi 路径后下次增强生效（resolveLaunch 现求值）。
-		enhancePromptService = new EnhancePromptService({
-			resolveLaunch: () =>
-				resolvePiAuthHostLaunch({
-					settings: settingsStore.get(),
-					locator: piLocator as PiLocator,
-					userDataPath: app.getPath("userData"),
-					appPath: app.getAppPath(),
-					resourcesPath: process.resourcesPath,
-					isPackaged: app.isPackaged,
-					helperFilename: PI_ENHANCE_HOST_FILENAME,
-				}),
-			logger: {
-				debug: (message) => void appLogger?.debug("enhance", message),
-				info: (message) => void appLogger?.info("enhance", message),
-				warn: (message) => void appLogger?.warn("enhance", message),
-				error: (message) => void appLogger?.error("enhance", message),
-			},
-		});
+		enhancePromptService = createCompletionHelperService("enhance");
 		// C12：增强助手是常驻子进程，退出时必须回收。
 		quitCleanup.register("enhance-prompt", () => enhancePromptService?.dispose());
+		// 输入预测：与增强同协议、独立进程；启动期只装配，首次预测才拉起侧车。
+		promptSuggestionService = createCompletionHelperService("suggest");
+		quitCleanup.register("prompt-suggestion", () => promptSuggestionService?.dispose());
 		// DSH 用量链路（backend="dsh"）：配置落 $DSH_HOME/usage-probes.json、凭据从
 		// $DSH_HOME/.credentials.yaml 读，与 pi 侧链路（~/.pi/agent）完全同构、互不干扰。
 		// DSH_HOME 解析与 DshHost 同一套（设置覆盖 > ~/.dsh > 应用私有目录），getter 每次求值，
@@ -5487,24 +5508,7 @@ app
 		await Promise.all([sessionCatalog.load(), automationStorePreload, agentProfileStorePreload]);
 		// 智能体一次性调用（划词工具 / 市场面板）：复用提示词增强侧车协议，但**独立实例**。
 		// 侧车进程常驻、首次调用才拉起（EnhancePromptService 的现有语义），启动期只做装配。
-		agentInvokeCompletionService = new EnhancePromptService({
-			resolveLaunch: () =>
-				resolvePiAuthHostLaunch({
-					settings: settingsStore.get(),
-					locator: piLocator as PiLocator,
-					userDataPath: app.getPath("userData"),
-					appPath: app.getAppPath(),
-					resourcesPath: process.resourcesPath,
-					isPackaged: app.isPackaged,
-					helperFilename: PI_ENHANCE_HOST_FILENAME,
-				}),
-			logger: {
-				debug: (message) => void appLogger.debug("agent-invoke", message),
-				info: (message) => void appLogger.info("agent-invoke", message),
-				warn: (message) => void appLogger.warn("agent-invoke", message),
-				error: (message) => void appLogger.error("agent-invoke", message),
-			},
-		});
+		agentInvokeCompletionService = createCompletionHelperService("agent-invoke");
 		// C12：常驻子进程，退出时必须回收（与 enhance-prompt 同一清理登记表）。
 		quitCleanup.register("agent-invoke", () => agentInvokeCompletionService?.dispose());
 		agentInvokeService = new AgentInvokeService({

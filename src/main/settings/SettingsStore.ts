@@ -321,6 +321,8 @@ Gitmoji 对应关系：
 	// 提示词增强模型：null = 跟随会话模型；设置页可指定固定模型
 	enhanceModel: null,
 	enhanceIncludeContext: false,
+	// 输入预测：默认开启；关掉后渲染层不发请求、不展示建议
+	promptSuggestionEnabled: true,
 
 	// ── 更新检测：检查永远自动；自动下载默认开启（v0.7.4 起取代 disableUpdateCheck）──
 	autoDownloadUpdates: true,
@@ -602,6 +604,8 @@ export class SettingsStore {
 			this.settings.webRemoteCloudflaredExtraArgs = sanitizeCloudflaredExtraArgs(parsed.webRemoteCloudflaredExtraArgs) || undefined;
 			// 旧设置或脏值不能隐式打开向增强模型发送会话正文的开关。
 			this.settings.enhanceIncludeContext = parsed.enhanceIncludeContext === true;
+			// 输入预测只有显式 false 才关闭：老设置缺字段按默认开启处理。
+			this.settings.promptSuggestionEnabled = parsed.promptSuggestionEnabled !== false;
 			// 隐藏模块来自旧 JSON 时可能是脏值（非数组/含空串与重复项）；统一清洗，缺字段回落空数组（全显示）。
 			this.settings.hiddenModules = normalizeHiddenModules(parsed.hiddenModules);
 			// 输入框功能入口同规则清洗（与 hiddenModules 共用实现）。
@@ -959,6 +963,10 @@ export class SettingsStore {
 		if ("dshRuntimeMigrationNoticeShown" in safePatch && typeof safePatch.dshRuntimeMigrationNoticeShown !== "boolean") {
 			delete safePatch.dshRuntimeMigrationNoticeShown;
 		}
+		// 输入预测开关：脏值先摘掉再做通用合并，否则字符串 "false" 会原样落进 settings。
+		if ("promptSuggestionEnabled" in safePatch && typeof safePatch.promptSuggestionEnabled !== "boolean") {
+			delete safePatch.promptSuggestionEnabled;
+		}
 		this.settings = { ...this.settings, ...safePatch };
 		// 生图字段来自渲染层，非法值丢掉，避免下次请求带坏 size/watermark。
 		if ("imageGenSize" in safePatch) {
@@ -977,6 +985,10 @@ export class SettingsStore {
 		// 上下文会发送给所选供应商：脏值不能隐式打开。
 		if ("enhanceIncludeContext" in safePatch) {
 			this.settings.enhanceIncludeContext = safePatch.enhanceIncludeContext === true;
+		}
+		// 输入预测开关同样只认布尔语义：非 false 的脏值不改变当前设置。
+		if ("promptSuggestionEnabled" in safePatch && typeof safePatch.promptSuggestionEnabled === "boolean") {
+			this.settings.promptSuggestionEnabled = safePatch.promptSuggestionEnabled;
 		}
 		if ("theme" in safePatch) {
 			this.settings.theme = this.normalizeThemeMode(this.settings.theme);

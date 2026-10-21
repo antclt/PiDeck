@@ -1030,6 +1030,14 @@ export const ipcChannels = {
 	/** 增强过程事件（started/delta/done/aborted/error，单通道带 runId） */
 	enhanceEvent: "enhance:event",
 
+	// ===== 输入预测（回合结束后预测下一句输入，空输入框 ghost 展示） =====
+	/** 发起预测：受理后事件经 suggest:event 推送（形状与 enhance:event 一致） */
+	suggestRun: "suggest:run",
+	/** 取消进行中的预测（发新消息 / 切会话 / 关开关） */
+	suggestCancel: "suggest:cancel",
+	/** 预测过程事件（按 runId 配对） */
+	suggestEvent: "suggest:event",
+
 	// ===== Composer voice transcription =====
 	voiceTranscriptionGetConfig: "voice-transcription:get-config",
 	voiceTranscriptionSaveConfig: "voice-transcription:save-config",

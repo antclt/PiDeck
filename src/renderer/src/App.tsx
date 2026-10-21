@@ -44,6 +44,7 @@ import {
 	imageGenConfigAtom,
 	enhanceModelAtom,
 	enhanceIncludeContextAtom,
+	promptSuggestionEnabledAtom,
 	dshRuntimeStatusAtom,
 	openSettingsAtom,
 	openAutomationModalAtom,
@@ -286,6 +287,7 @@ export function App() {
 	const setImageGenConfig = useSetAtom(imageGenConfigAtom);
 	const setEnhanceModel = useSetAtom(enhanceModelAtom);
 	const setEnhanceIncludeContext = useSetAtom(enhanceIncludeContextAtom);
+	const setPromptSuggestionEnabled = useSetAtom(promptSuggestionEnabledAtom);
 	const currentSessionIdRef = useRef<string | undefined>(currentSessionId);
 	currentSessionIdRef.current = currentSessionId;
 	const openSessionRequestRef = useRef(0);
@@ -1584,6 +1586,7 @@ export function App() {
 				setSettingsLoaded(true);
 				setEnhanceModel(next.enhanceModel ?? null);
 				setEnhanceIncludeContext(next.enhanceIncludeContext === true);
+				setPromptSuggestionEnabled(next.promptSuggestionEnabled !== false);
 				piUpdate.setCustomPiPath(next.customPiPath ?? "");
 				if (!Object.values(next.externalEditors).some((editor) => editor.command)) {
 					void api.editors

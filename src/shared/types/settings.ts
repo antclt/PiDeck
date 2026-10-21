@@ -139,6 +139,11 @@ export type AppSettings = {
 	/** 增强时携带当前会话最近正文；缺省关闭，只有显式 true 才发送。 */
 	enhanceIncludeContext?: boolean;
 	/**
+	 * 输入预测：每轮答完后用一次模型调用预测用户下一句输入，空输入框里以 ghost 文案展示。
+	 * 缺省开启（老设置无此字段按开启处理）；显式 false 才关闭——关掉即完全不发请求。
+	 */
+	promptSuggestionEnabled?: boolean;
+	/**
 	 * 全局快捷键用户覆盖：ShortcutId → accelerator（Electron 语法子集，见 shared/shortcuts.ts）。
 	 * 缺省键 = 平台默认值（macOS ⌘, 打开设置 / F12 开发者工具等）；设置页「快捷键管理」
 	 * 修改后写这里，主进程 before-input-event 匹配实时读取（无需重启）。
