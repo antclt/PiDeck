@@ -4387,7 +4387,6 @@ export const zhCN = {
 	"settings.storage.rpcLogs": "RPC 日志",
 	"settings.storage.clearDone": "清理完成",
 	"settings.storage.clearConfirm": "确认删除 {label} 吗？删除后将永久清除。",
-	"settings.storage.actions": "操作",
 	"settings.storage.clearAll": "清理全部",
 	"settings.storage.clearAllDesc": "同时清理应用日志、RPC 日志与粘贴文件",
 	"settings.storage.clearButton": "清理",

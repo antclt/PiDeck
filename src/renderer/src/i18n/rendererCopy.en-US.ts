@@ -4402,7 +4402,6 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.storage.rpcLogs": "RPC Logs",
 	"settings.storage.clearDone": "Cleanup completed",
 	"settings.storage.clearConfirm": "Are you sure you want to delete {label}? This cannot be undone.",
-	"settings.storage.actions": "Actions",
 	"settings.storage.clearAll": "Clear All",
 	"settings.storage.clearAllDesc": "Clear app logs, RPC logs, and pasted text files at once",
 	"settings.storage.clearButton": "Clear",

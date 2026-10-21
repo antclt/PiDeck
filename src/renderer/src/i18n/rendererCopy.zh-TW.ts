@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 08d8626b08a560eadb0b0318bc7332b103fdec3c4df3fe90b082eff03ef1e514（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 563c19a3fe3099a722d306919f18da14b2ed1efb6e3258d764b03717eb418da4（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4394,7 +4394,6 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.storage.rpcLogs": "RPC 日誌",
 	"settings.storage.clearDone": "清理完成",
 	"settings.storage.clearConfirm": "確認刪除 {label} 嗎？刪除後將永久清除。",
-	"settings.storage.actions": "操作",
 	"settings.storage.clearAll": "清理全部",
 	"settings.storage.clearAllDesc": "同時清理應用日誌、RPC 日誌與貼上檔案",
 	"settings.storage.clearButton": "清理",
