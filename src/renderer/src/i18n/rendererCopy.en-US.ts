@@ -4387,6 +4387,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.sound.preset.waitingKnock": "Knock",
 	"settings.storage.title": "Logs & Cache",
 	"settings.storage.desc": "View and manage app logs, RPC logs, and pasted text files",
+	"settings.storage.items": "Cleanup Items",
+	"settings.storage.rpcLogsDesc": "Message log between the host and the pi subprocess, captured after enabling RPC logging from a session menu",
 	"settings.storage.appLogsSize": "App logs size",
 	"settings.storage.rpcLogsSize": "RPC logs size",
 	"settings.storage.pasteFiles": "Pasted Files",

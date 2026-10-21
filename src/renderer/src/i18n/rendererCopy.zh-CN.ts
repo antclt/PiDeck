@@ -4372,6 +4372,8 @@ export const zhCN = {
 	"settings.sound.preset.waitingKnock": "敲门",
 	"settings.storage.title": "日志与缓存",
 	"settings.storage.desc": "查看和管理应用日志、RPC 日志与输入框粘贴文件",
+	"settings.storage.items": "清理项",
+	"settings.storage.rpcLogsDesc": "在会话菜单开启 RPC 日志记录后，宿主与 pi 子进程之间的消息日志",
 	"settings.storage.appLogsSize": "应用日志大小",
 	"settings.storage.rpcLogsSize": "RPC 日志大小",
 	"settings.storage.pasteFiles": "粘贴文件",

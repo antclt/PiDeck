@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: cc45f31cd288602308db2439e5f45d2701d09f0d49a200df1da427f8c56b9199（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 64e6e195adbe24db332d1a246eeb4c032427b2e54b6c2385c2937905082b0b01（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4379,6 +4379,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.sound.preset.waitingKnock": "敲門",
 	"settings.storage.title": "日誌與快取",
 	"settings.storage.desc": "檢視和管理應用日誌、RPC 日誌與輸入框貼上檔案",
+	"settings.storage.items": "清理項",
+	"settings.storage.rpcLogsDesc": "在會話選單開啟 RPC 日誌記錄後，宿主與 pi 子程序之間的訊息日誌",
 	"settings.storage.appLogsSize": "應用日誌大小",
 	"settings.storage.rpcLogsSize": "RPC 日誌大小",
 	"settings.storage.pasteFiles": "貼上檔案",
