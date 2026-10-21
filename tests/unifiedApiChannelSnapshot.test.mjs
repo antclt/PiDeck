@@ -2,7 +2,7 @@
  * F3 · IPC 通道快照守卫（TEST-PLAN §F3，6 例，锚定数字见 TEST-PLAN §0）。
  *
  * src/shared/ipc.ts 的 ipcChannels 常量表是全部 IPC 通道的唯一来源；本测试把它的
- * 规模与形状锚定为快照（676 通道 / 83 前缀 / 排序摘要）。快照变更只允许显式发生
+ * 规模与形状锚定为快照（701 通道 / 87 前缀 / 排序摘要）。快照变更只允许显式发生
  * 且附领域正当理由——本轮（T4 契约层）任何快照红 = 违例。
  *
  * 2026-10-16 显式刷新（+4 通道，均附领域正当理由）：
@@ -23,19 +23,19 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const CHANNEL_TOTAL = 676;
-const PREFIX_COUNT = 83;
-const CHANNEL_DIGEST = "4f34b09e05330537ab7c10b09e9dc3dbe64a43e8c0efc5666f31d9435666c73e";
+const CHANNEL_TOTAL = 701;
+const PREFIX_COUNT = 87;
+const CHANNEL_DIGEST = "cac49aeeb6c314203010b499cfea1af9f10293b0e5ad9d1f2dcd69ededd3345b";
 
 const ipcChannels = loadTsCommonJs("src/shared/ipc.ts").ipcChannels;
 const entries = Object.entries(ipcChannels);
 const values = entries.map(([, value]) => value);
 
-test("F3-1 通道常量总数 === 676", () => {
+test("F3-1 通道常量总数 === 701", () => {
 	assert.equal(entries.length, CHANNEL_TOTAL);
 });
 
-test("F3-2 通道值唯一数 === 676（无重复通道字符串）", () => {
+test("F3-2 通道值唯一数 === 701（无重复通道字符串）", () => {
 	assert.equal(new Set(values).size, CHANNEL_TOTAL);
 });
 
@@ -62,7 +62,7 @@ test("F3-5 锚点抽查：appGetChannel=update:get-channel、sessionsRuntimeEven
 	assert.equal(countByPrefix("enhance"), 3);
 });
 
-test("F3-6 通道域前缀种类 === 83", () => {
+test("F3-6 通道域前缀种类 === 87", () => {
 	const prefixes = new Set(values.map((value) => value.split(":")[0]));
 	assert.equal(prefixes.size, PREFIX_COUNT);
 });

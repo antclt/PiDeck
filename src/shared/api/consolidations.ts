@@ -100,6 +100,8 @@ export const SESSIONS_SUBDOMAINS = {
 		"readDshSubagentHistory",
 		"readDshSystemPrompt",
 		"readMessageFullText",
+		"readOutline",
+		"readOutlineTitle",
 		"readProcessEvents",
 		"readReferenceMessages",
 		"reloadResources",
