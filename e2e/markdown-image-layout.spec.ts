@@ -28,6 +28,9 @@ const at = (offsetMs: number) => new Date(now - offsetMs).toISOString();
 
 test.use({
 	seedProjects: [project],
+	// 下方断言按中文文案定位（侧栏「项目」分段），必须钉死 UI 语言：默认 settings.language 为
+	// "system"，CI runner 是 en-US 会渲染 "Projects"，本用例在 GitHub 上直接 30s 超时失败。
+	seedSettings: { language: "zh-CN" },
 	seedSessionFiles: [
 		{
 			projectPath: project.path,
