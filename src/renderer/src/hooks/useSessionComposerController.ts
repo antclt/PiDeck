@@ -19,6 +19,7 @@ import {
 	enhanceModelAtom,
 	enhanceIncludeContextAtom,
 	promptSuggestionEnabledAtom,
+	promptSuggestionModelAtom,
 	imageGenConfigAtom,
 	projectByIdAtomFamily,
 	sessionAttachmentsBySessionIdAtomFamily,
@@ -1789,12 +1790,14 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	// 目标模型优先级（resolveEnhanceTargetModel）：设置页指定的固定增强模型 >
 	// 会话记录 > 引导页点选 > 部署/主进程默认；引导页的 welcomeModel 存 localStorage，
 	// 这里不走 catalog 存在性校验——模型被删的边缘情况由主进程报 model-not-found，toast 可见。
-	const enhanceTarget = resolveEnhanceTargetModel({
-		configured: enhanceModelConfig,
+	// 增强与输入预测共用同一条优先级链，但各自的「固定模型」是独立设置项（enhanceModel /
+	// promptSuggestionModel）——预测每轮都发一次后台调用，常被单独指定成便宜的小模型。
+	const targetModelChain = {
 		recordModel: record?.model,
 		welcomeModel: (isDshBackend ? readWelcomeDshModelPreference() : readWelcomeModelPreference())?.model,
 		fallback: isDshBackend && dshDefault ? { provider: dshDefault.provider, modelId: dshDefault.model } : bootstrapDefaults?.model,
-	});
+	};
+	const enhanceTarget = resolveEnhanceTargetModel({ ...targetModelChain, configured: enhanceModelConfig });
 	const captureEnhanceRequest = useCallback((): PromptEnhanceRequest | null => {
 		if (!enhanceTarget) return null;
 		const draftSnapshot = liveDomDraftRef.current.sessionId === sessionId ? liveDomDraftRef.current.value : draft;
@@ -1823,14 +1826,17 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	});
 
 	// ===== 输入预测（回合结束后预测下一句输入，空输入框 ghost 展示）=====
-	// 与增强共用同一套目标模型解析（设置固定模型 > 会话模型 > 默认），但走独立侧车实例；
+	// 与增强共用同一条优先级链（设置固定模型 > 会话模型 > 默认），但读的是独立的
+	// promptSuggestionModel 设置，并走独立侧车实例；
 	// 回合边界取 runtime 的权威 isTurnActive（agent_end），不用 isBusy（还含 compact 等中间态）。
 	// 采纳回填与增强同一条路径（applyEnhancedText：整体替换草稿 + 光标置尾 + 聚焦）。
 	const promptSuggestionEnabled = useAtomValue(promptSuggestionEnabledAtom);
+	const promptSuggestionModelConfig = useAtomValue(promptSuggestionModelAtom);
+	const suggestionTarget = resolveEnhanceTargetModel({ ...targetModelChain, configured: promptSuggestionModelConfig });
 	const suggestion = usePromptSuggestion({
 		scopeKey: sessionId,
 		enabled: promptSuggestionEnabled,
-		target: enhanceTarget,
+		target: suggestionTarget,
 		turnRunning: isSessionTurnRunning(runtime?.state, runtime?.status),
 		// 用 hasContent 而不是 draft.length：纯空白、附件/粘贴文件也属于「有内容」，
 		// 否则预测会盖在已经放好附件的输入框上，Tab 还会把附件留下却把 ghost 当草稿采纳。

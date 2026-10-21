@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 78b297b0b5d0d656f361c1657f20ef2977630187b1e211632a89617f9b22c538（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 9028128d3953e089efef4170a4e24c07c782c099065fd42be1eaa680fc970ceb（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5980,18 +5980,20 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.enhance.sectionDesc": "輸入框 ✦ 按鈕通過 pi SDK 改寫草稿，不依賴 DSH。預設跟隨會話模型；DSH 會話建議指定 pi 中可用的固定模型。",
 	"settings.enhance.modelMode": "增強模型",
 	"settings.enhance.modelModeDesc": "跟隨會話模型，或固定用一個模型來改寫提示詞",
-	"settings.enhance.followSession": "跟隨會話模型",
-	"settings.enhance.customModel": "指定固定模型",
-	"settings.enhance.model": "固定模型",
-	"settings.enhance.modelPlaceholder": "選擇模型",
 	"settings.enhance.saveFailed": "儲存失敗，請重試",
 	"settings.enhance.saved": "已儲存，下次增強立即生效，無需重開會話；進行中的增強仍使用發起時的設定",
 	"settings.enhance.includeContext": "增強時攜帶會話上下文",
 	"settings.enhance.includeContextDesc": "預設關閉。開啟後將當前會話最近已載入的使用者/助手正文（最多 {messages} 條、{chars} 字元）傳送給增強模型，可能增加用量。不攜帶思考、工具結果或圖片，也不讀取附件檔案。",
+	"settings.fixedModel.followSession": "跟隨會話模型",
+	"settings.fixedModel.customModel": "指定固定模型",
+	"settings.fixedModel.model": "固定模型",
+	"settings.fixedModel.placeholder": "選擇模型",
 	"settings.promptSuggestion.section": "輸入預測",
-	"settings.promptSuggestion.sectionDesc": "每輪迴答結束後，用當前模型預測你接下來最可能輸入的一句話，顯示在空輸入框裡。",
+	"settings.promptSuggestion.sectionDesc": "每輪迴答結束後，用當前模型預測你接下來最可能輸入的一句話，顯示在空輸入框裡。預設跟隨會話模型，也可單獨指定預測模型；DSH 會話建議指定 pi 中可用的固定模型。",
 	"settings.promptSuggestion.enabled": "啟用輸入預測",
 	"settings.promptSuggestion.enabledDesc": "輸入框為空時按 Tab 或 → 採納，Esc 忽略。每輪結束會額外發起一次模型呼叫，並攜帶最近對話上下文。",
+	"settings.promptSuggestion.modelMode": "預測模型",
+	"settings.promptSuggestion.modelModeDesc": "跟隨會話模型，或固定用一個模型來做輸入預測（與提示詞增強各自獨立）",
 	"settings.promptSuggestion.saved": "已儲存，下一輪迴答後立即生效",
 	"settings.promptSuggestion.saveFailed": "儲存失敗，請重試",
 	"voice.requesting": "正在請求麥克風權限",
