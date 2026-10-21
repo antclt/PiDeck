@@ -70,6 +70,14 @@ export type UseSessionSendOptions = {
 	 * 模板表展开，`/模板名` 原样入队、flush 时直接发给 pi，chip 随之丢失（2026-10 e2e 抓到）。
 	 */
 	ensureTemplates?: (message: string) => Promise<void>;
+	/**
+	 * 后端已接管的命令名（pi 扩展命令 / 技能、DSH host 命令）：这些 `/名称` 不能本地展开。
+	 *
+	 * 为什么必须传：展开成 `<prompt_template>` 后消息不再以 `/` 开头，pi 的扩展命令与
+	 * DSH 的 slash 桥（`hostEntry.ts` 的 agent/pre-step 钩子）都不会再触发——
+	 * 命令被静默降级成普通提示词文字。来源见 `collectReservedCommandNames`。
+	 */
+	getReservedCommandNames?: () => ReadonlySet<string>;
 	prepareMessage?: (message: string) => Promise<string>;
 	onDraftMutation?: (sessionId: string) => void;
 	compact: (target: SessionRuntimeTarget, prompt?: string) => Promise<void>;
@@ -483,7 +491,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 		if (options.enqueue && (streamingBehavior === "steer" || streamingBehavior === "followUp")) {
 			// fail-open：模板表补齐失败只影响「能否本地展开」，不能把整条消息卡住不给发
 			await options.ensureTemplates?.(message).catch(() => undefined);
-			const { message: expandedMessage, emptyTemplateName } = expandPromptTemplates(message, options.getTemplates());
+			const { message: expandedMessage, emptyTemplateName } = expandPromptTemplates(message, options.getTemplates(), { reservedNames: options.getReservedCommandNames?.() });
 			if (emptyTemplateName) {
 				// 展开器会保留空模板的 /命令原文，不能靠消息是否空白判断正文有效。
 				sendingSessionIdsRef.current.delete(sourceSessionId);
@@ -561,7 +569,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 		}
 
 		if (releaseIfRetired()) return;
-		const { message: expandedMessage, description, emptyTemplateName } = expandPromptTemplates(preparedMessage, options.getTemplates());
+		const { message: expandedMessage, description, emptyTemplateName } = expandPromptTemplates(preparedMessage, options.getTemplates(), { reservedNames: options.getReservedCommandNames?.() });
 		if (emptyTemplateName) {
 			// 展开器保留空模板的 /命令原文；按 verdict 拦截，避免误发到主进程。
 			// 回填原始草稿（含引用 token），保留 chip 形态，并撤掉已发布的乐观气泡。

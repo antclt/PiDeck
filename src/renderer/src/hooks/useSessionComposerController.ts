@@ -82,6 +82,7 @@ import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeAcpToolPreference, readWelcomeBa
 import { expandSessionReferences } from "../sending/outgoingExpansion";
 import { showNotice } from "../utils/notice";
 import { requireSessionCommand, toSessionRuntimeTarget } from "../utils/sessionCommands";
+import { collectReservedCommandNames, needsTemplateRefetch } from "../utils/reservedCommandNames";
 import { mergeRuntimeTemplates } from "../utils/templateCatalog";
 import { buildDraftResourceCommands, draftResourceCommandsForProject, selectComposerSuggestionCommands, standbyPreviewCommandsForProject, type DraftResourceCommandSnapshot, type StandbyPreviewCommandSnapshot } from "../utils/draftResourceCommands";
 import { isSessionRuntimeBusy, isUserFacingSessionStart } from "./useSessionTimelineController";
@@ -958,6 +959,13 @@ export function useSessionComposerController(options: UseSessionComposerControll
 
 	const flatFiles = useMemo(() => flattenFiles(files), [files]);
 	const mergedCommands = useMemo(() => mergeCommands(commands), [commands]);
+	/**
+	 * 后端已接管的命令名（本地展开要避让）。用 ref 让发送路径读最新值：
+	 * 命令表是异步加载的，state 在「打开会话立刻发」这一拍还是空的。
+	 */
+	const reservedCommandNames = useMemo(() => collectReservedCommandNames(commands), [commands]);
+	const reservedCommandNamesRef = useRef<ReadonlySet<string>>(reservedCommandNames);
+	reservedCommandNamesRef.current = reservedCommandNames;
 	const validCommandNames = useMemo(() => new Set([...mergedCommands.map((command) => command.name), ...templates.map((template) => template.name)]), [mergedCommands, templates]);
 	const validFilePaths = useMemo(() => new Set(flatFiles.map((file) => file.relativePath)), [flatFiles]);
 	const validSessionRefs = useMemo(() => new Set(projectSessions.map((session) => session.name ?? session.filePath)), [projectSessions]);
@@ -1109,7 +1117,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			const match = /^\/([^\s]+)/.exec(message.trim());
 			if (!match) return;
 			const name = match[1];
-			if (!name || templatesRef.current.some((template) => template.name === name)) return;
+			// 后端接管的命令（DSH host / pi 扩展 / 技能）永远不在模板表里：补拉只会白跑三趟
+			// IPC，而且它本来就不该被展开。
+			if (!needsTemplateRefetch(name, templatesRef.current, reservedCommandNamesRef.current)) return;
 			// 两条来源都在 loadTemplates 里：有 runtime 走运行时清单，草稿会话走 standby 预览。
 			// 两个都没有（无项目、池关闭）时重拉也没有意义。
 			const hasRuntime = Boolean(toSessionRuntimeTarget(sessionId, store.get(sessionRuntimeBySessionIdAtomFamily(sessionId))));
@@ -1163,6 +1173,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		sendPrompt: (input) => desktopApi.sessions.sendPrompt(input),
 		ensureSessionId,
 		getTemplates: () => templatesRef.current,
+		getReservedCommandNames: () => reservedCommandNamesRef.current,
 		ensureTemplates: ensureTemplatesForMessage,
 		prepareMessage: async (message) => {
 			// 模板表可能在 runtime 刚绑定/首次加载完成前是空的：命中未知 `/名称` 时补拉一次，

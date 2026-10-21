@@ -122,3 +122,25 @@ test("相邻命令与保护区组合：块内不动、块外两个都展开", ()
 	assert.equal(out.message.split("COMMIT-TEMPLATE-BODY").length - 1, 1, "块内那份不展开、块外那份展开");
 	assert.ok(out.message.includes("REVIEW-TEMPLATE-BODY"));
 });
+
+test("后端接管的命令不展开（DSH host 命令 / pi 扩展命令）", () => {
+	const { expandPromptTemplates } = composerBehavior();
+	const out = expandPromptTemplates("/commit", templates, { reservedNames: new Set(["commit"]) });
+	assert.equal(out.message, "/commit", "被后端接管的命令必须原样保留，否则命令永远不会执行");
+	assert.equal(out.description, undefined);
+});
+
+test("保留集只挡同名命令，其余照常展开", () => {
+	const { expandPromptTemplates } = composerBehavior();
+	const out = expandPromptTemplates("/commit /parallel-review", templates, { reservedNames: new Set(["commit"]) });
+	assert.ok(out.message.startsWith("/commit "), "commit 保持原样交给后端");
+	assert.ok(out.message.includes("REVIEW-TEMPLATE-BODY"), "未保留的模板照常展开");
+});
+
+test("保留命令与保护区可共存：块内不动、块外让路/展开", () => {
+	const { expandPromptTemplates } = composerBehavior();
+	const text = `<quoted_context label="x" message_id="m1">\n/commit\n</quoted_context> /commit /parallel-review`;
+	const out = expandPromptTemplates(text, templates, { reservedNames: new Set(["commit"]) }).message;
+	assert.equal(out.split("COMMIT-TEMPLATE-BODY").length - 1, 0, "引用内与保留命令都不展开");
+	assert.ok(out.includes("REVIEW-TEMPLATE-BODY"));
+});

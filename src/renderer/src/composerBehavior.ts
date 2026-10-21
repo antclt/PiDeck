@@ -195,8 +195,12 @@ function stripFrontmatter(raw: string): string {
  * - 展开结果写成自包含 `<prompt_template>` 块：模型仍读完整模板正文，气泡可在重启、
  *   模板改名或删除后稳定还原为 `/模板名` chip（不依赖当前模板列表）
  */
-export function expandPromptTemplates(message: string, templates: PromptTemplateInfo[]): { message: string; description?: string; emptyTemplateName?: string } {
+export function expandPromptTemplates(message: string, templates: PromptTemplateInfo[], options?: { reservedNames?: ReadonlySet<string> }): { message: string; description?: string; emptyTemplateName?: string } {
 	if (!templates.length || !message.includes("/")) return { message };
+	// 后台已经拥有这个名字（pi 扩展命令 / 技能、DSH host 命令）：不能由本地展开抢走。
+	// DSH 的 slash 桥只认「消息以 / 开头」才会 `ctx.commands.execute`，一旦我们把它换成
+	// `<prompt_template>` 块，host 命令就永远不会执行；pi 侧同理（扩展命令在 prompt 前处理）。
+	const reserved = options?.reservedNames;
 
 	// 按 name 长度降序排序，确保正则交替时最长匹配优先
 	const sorted = [...templates].sort((a, b) => b.name.length - a.name.length);
@@ -210,37 +214,34 @@ export function expandPromptTemplates(message: string, templates: PromptTemplate
 
 	// 构建 /name1|/name2|/name3 的单一正则，捕获命令前后的空白分隔符
 	const escapedNames = sorted.map((t) => t.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-	const regex = new RegExp(`(^|\\s)/(${escapedNames.join("|")})(\\s|$)`, "g");
+	// 命令后的边界用**前瞻**捕获（`(?=(\s|$))`）而不是消耗掉：
+	// 消耗分隔符会让紧邻的第二个命令失去 `(^|\s)` 前缀（`/a /b` 只展开 a，2026-10 复核发现）。
+	const regex = new RegExp(`(^|\\s)/(${escapedNames.join("|")})(?=(\\s|$))`, "g");
 
 	// 已展开的自包含块（引用 / 会话引用 / 技能 / 模板）是只读区：块内的 `/模板名`
 	// 属于被引用或被引述的原文，替换它会篡改引用内容（2026-10 实测：引用里提到
 	// /commit，落盘后引用正文变成了整份提交模板）。
 	//
-	// 反复替换到稳定：单次 replace 会「吃掉」分隔符（`/a /b` 里 /a 的匹配带走它后面的空格，
-	// 紧邻的 /b 因此失去 `(^|\s)` 前缀而不展开）。块内文本受保护区约束，
-	// 第二轮不会重复展开已生成的块；上限 8 轮兜底防意外自我增长。
-	let expanded = message;
-	let previous = "";
-	for (let pass = 0; pass < 8 && expanded !== previous; pass += 1) {
-		previous = expanded;
-		expanded = replaceOutsideProtected(expanded, regex, (_match, prefix, name, suffix) => {
-			matchedName = name;
-			const rawContent = nameToContent.get(name) ?? "/" + name;
-			// 剥离 content 中的 frontmatter 元数据，只保留正文，
-			// 避免 `---\ndescription: xxx\n---` 泄漏到 pi agent 的对话消息中。
-			const content = stripFrontmatter(rawContent);
-			// 正文为空时（如 UI 新建模板只有 frontmatter）不展开，保留 /name 原文：
-			// 直接展开会产出空白/仅分隔符消息，被主进程拒为“消息不能为空”。
-			if (!content.trim()) {
-				emptyTemplateName = name;
-				return _match;
-			}
-			// 命令后有用户输入时用两个换行分隔模板内容和用户输入，提升可读性。
-			// 内容和模板名一起编码：前端展示只折叠为 /name，但模型仍可读取完整正文。
-			const separator = suffix && /\s/.test(suffix) ? "\n\n" : "";
-			return prefix + formatPromptTemplateBlock(name, content) + separator;
-		});
-	}
+	// 单次遍历（不做级联展开）：模板正文里若恰好出现 `/另一个模板名`，不应被二次展开。
+	const expanded = replaceOutsideProtected(message, regex, (_match, prefix, name, suffix) => {
+		// 由后端接管的命令保持原样（pi 扩展命令 / 技能、DSH host 命令）
+		if (reserved?.has(name)) return _match;
+		matchedName = name;
+		const rawContent = nameToContent.get(name) ?? "/" + name;
+		// 剥离 content 中的 frontmatter 元数据，只保留正文，
+		// 避免 `---\ndescription: xxx\n---` 泄漏到 pi agent 的对话消息中。
+		const content = stripFrontmatter(rawContent);
+		// 正文为空时（如 UI 新建模板只有 frontmatter）不展开，保留 /name 原文：
+		// 直接展开会产出空白/仅分隔符消息，被主进程拒为“消息不能为空”。
+		if (!content.trim()) {
+			emptyTemplateName = name;
+			return _match;
+		}
+		// 命令后有用户输入时用两个换行分隔模板内容和用户输入，提升可读性。
+		// 内容和模板名一起编码：前端展示只折叠为 /name，但模型仍可读取完整正文。
+		const separator = suffix && /\s/.test(suffix) ? "\n\n" : "";
+		return prefix + formatPromptTemplateBlock(name, content) + separator;
+	});
 
 	return {
 		message: expanded,

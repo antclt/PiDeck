@@ -1327,6 +1327,19 @@ export class DshAgentManager implements SessionAgentGateway {
 		}));
 	}
 
+	/**
+	 * SessionAgentGateway.getCommands（可选能力 getCommands）：`listCommands` 的别名。
+	 *
+	 * 必须显式声明：`capabilities` 里已登记 "getCommands"（否则 CompositeAgentGateway
+	 * 直接拒绝），但网关调用的是 **getCommands**，只实现 listCommands 会让
+	 * `gateway.getCommands!(id)` 抛 TypeError——渲染层的命令白名单恒为空，
+	 * 表现为「DSH 历史里的 `/命令` 不出 chip、`/` 菜单只有静态建议」。
+	 * ACP 同样是 listCommands + 这个别名（AcpAgentManager.getCommands），DSH 此前漏了。
+	 */
+	async getCommands(agentId: string): Promise<PiCommand[]> {
+		return this.listCommands(agentId);
+	}
+
 	// ── 会话 HTML 导出（G10：投影式导出，DSH wire 无 export_html）─────────────
 
 	/**
