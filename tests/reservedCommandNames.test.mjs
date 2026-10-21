@@ -38,7 +38,15 @@ test("source 缺省视为后端接管（宁可让路，不抢命令）", () => {
 test("桌面内置命令不占位：用户仍可建同名提示词模板", () => {
 	// builtin 由 classifyComposerSlashCommand 接管，未接管的本来就只是文本；
 	// 若把 builtin 当保留项，`/export` 这类模板会被静默地发成字面量。
-	assert.deepEqual(plain(collectReservedCommandNames([{ name: "export", source: "builtin" }, { name: "copy", source: "builtin" }])), []);
+	assert.deepEqual(
+		plain(
+			collectReservedCommandNames([
+				{ name: "export", source: "builtin" },
+				{ name: "copy", source: "builtin" },
+			]),
+		),
+		[],
+	);
 });
 
 test("ACP 命令（source=acp）同样让路", () => {

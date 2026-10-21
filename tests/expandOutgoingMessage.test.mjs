@@ -175,11 +175,14 @@ test("无占位符的模板仍把用户输入追加在块后（PiDeck 的兜底�
 
 test("参数不会跨过相邻命令 / 引用块", () => {
 	const { expandPromptTemplates } = composerBehavior();
-	const two = expandPromptTemplates("/pr 甲 /commit 乙", [{ name: "pr", description: "", content: "P:$1" }, { name: "commit", description: "", content: "C:$1" }]).message;
+	const two = expandPromptTemplates("/pr 甲 /commit 乙", [
+		{ name: "pr", description: "", content: "P:$1" },
+		{ name: "commit", description: "", content: "C:$1" },
+	]).message;
 	assert.ok(two.includes("P:甲"), `pr 只吃自己的参数，实际: ${JSON.stringify(two)}`);
 	assert.ok(two.includes("C:乙"), `commit 吃自己的参数，实际: ${JSON.stringify(two)}`);
 
-	const quoted = expandPromptTemplates("/pr 甲 <quoted_context label=\"x\" message_id=\"m1\">\n引用\n</quoted_context>", [{ name: "pr", description: "", content: "P:$1" }]).message;
+	const quoted = expandPromptTemplates('/pr 甲 <quoted_context label="x" message_id="m1">\n引用\n</quoted_context>', [{ name: "pr", description: "", content: "P:$1" }]).message;
 	assert.ok(quoted.includes("P:甲"), "参数不能跨进引用块");
 	assert.ok(quoted.includes("<quoted_context"), "引用块必须原样保留");
 });

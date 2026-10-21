@@ -17,7 +17,10 @@
 
 /** pi 的 `stripBom` + 换行归一。 */
 function normalizeFrontmatterSource(content: string): string {
-	return content.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+	return content
+		.replace(/^\uFEFF/, "")
+		.replace(/\r\n/g, "\n")
+		.replace(/\r/g, "\n");
 }
 
 /**

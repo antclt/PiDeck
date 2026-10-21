@@ -168,4 +168,3 @@ export function collectSessionFileChanges(messages: readonly ChatMessage[]): Ses
 	}
 	return [...map.values()];
 }
-
