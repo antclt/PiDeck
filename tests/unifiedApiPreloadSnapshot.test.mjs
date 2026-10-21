@@ -20,7 +20,7 @@ import { test } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const NS_LIST_SHA256 = "f5c7f2c3eedb1c19172c04595dae6077647b19dd6f9e31406d3175ca38c17990";
-const FULL_METHODS_SHA256 = "1af92f04f83ddf71c7710a24bcf74df6127fcd65f034a18b1a1310cbc48558a8";
+const FULL_METHODS_SHA256 = "285980c7b7a456b1d77300274ebd0ab7e9cb63779462a802d2f2337fa1ffc2de";
 const NAMESPACE_COUNT = 73;
 
 /** 捕获 preload 暴露的 piDesktop；null/undefined/形态不符时显式红并给诊断（F8-6 共用）。 */
