@@ -111,7 +111,8 @@ test("the smoke script's usage guard and fingerprint input are unchanged by the 
  */
 test("the frozen entry distinguishes a missing WebCrypto from a pre-try load failure by frame count", () => {
 	const nonce = randomBytes(16).toString("hex");
-	const argv = [REMOTE_BOOTSTRAP_INLINE_ENTRY, "1", "a".repeat(64), nonce];
+	// 冻结 entry 的 argv 现在是 5 段：entry protocolVersion sha256 nonce target（target 为闭集 helper | extensions）。
+	const argv = [REMOTE_BOOTSTRAP_INLINE_ENTRY, "1", "a".repeat(64), nonce, "helper"];
 	const runEntry = (source, env) => spawnSync(process.execPath, ["-e", source, "--", ...argv], { encoding: "utf8", env: { ...process.env, ...env }, timeout: 20_000 });
 	const frames = (result) => (result.stdout.trim() ? result.stdout.trim().split("\n") : []);
 

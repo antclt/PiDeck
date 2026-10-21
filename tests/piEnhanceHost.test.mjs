@@ -134,3 +134,24 @@ test("本地模型配置刷新期间取消，不能继续创建付费流", { tim
 	assert.equal(result.type, "error");
 	assert.equal(result.errorKind, "aborted");
 });
+
+test("purpose=suggest 时历史是待预测对话：不追加「只改写最后一条草稿」约束", { timeout: 10_000 }, async (t) => {
+	const h = await hostHarness(t);
+	const context = [
+		{ role: "user", text: "帮我看看这个报错" },
+		{ role: "assistant", text: "是空指针，已经修好" },
+	];
+	const result = JSON.parse((await h.complete("suggest", { purpose: "suggest", systemPrompt: "predict only", userText: "以上对话已结束。", context })).text);
+	const system = result.context.messages[0].content;
+	assert.ok(system.includes("预测"), system);
+	assert.equal(system.includes("只改写最后一条用户草稿"), false, system);
+	const background = result.context.messages[1];
+	assert.equal(background.role, "user");
+	assert.ok(background.content.startsWith("对话历史（JSON）："), background.content);
+	assert.equal(result.context.messages.at(-1).content, "以上对话已结束。");
+
+	// 对照：不带 purpose 的增强仍走「只改写草稿」的旧约束，两条路径不能互相污染。
+	const rewrite = JSON.parse((await h.complete("rewrite", { context })).text);
+	assert.ok(rewrite.context.messages[0].content.includes("只改写最后一条用户草稿"));
+	assert.ok(rewrite.context.messages[1].content.startsWith("会话参考数据（JSON）："));
+});

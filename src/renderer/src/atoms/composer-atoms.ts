@@ -16,6 +16,12 @@ export const enhanceModelAtom = atom<EnhanceModelSelection | null>(null);
 export const enhanceIncludeContextAtom = atom(false);
 
 /**
+ * 输入预测开关镜像（settings.promptSuggestionEnabled）：默认开启，显式关掉才停发请求。
+ * App 首拉 settings 时水合；设置页保存后写穿（composer 读 atom 决定是否发起预测）。
+ */
+export const promptSuggestionEnabledAtom = atom(true);
+
+/**
  * 粘贴大文本 → 落盘文件 chip 的元数据（内容只在主进程受管目录，此处仅存指针）。
  * 新写入一律 inProject=false（userData/paste-files）：发送时折叠为原样文本内联；
  * 遗留项目内 chip（inProject=true）仍走 @"path" 引用。

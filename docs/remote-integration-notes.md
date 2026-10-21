@@ -215,3 +215,52 @@ CDP 直连实测；`npm run pack:dev` 的 win-unpacked 产物同法验证。
 
 - `tests/sessionForkFailureLogging.test.mjs`（新）：失败必须写 warn 且保留 debugDetails/elapsedMs、入口日志先于失败日志、target 校验失败也留痕、成功路径仍是 info。
 - `tests/sessionRuntimeReplacement.test.mjs`：原「cannot cross an active dispatch lease」改为「**超出宽限期**仍失败」（5.17s），并新增「**瞬态 lease 被等掉**后 fork 成功」（244ms）——两条互为反例，防止宽限被写成恒等，也防止有人把宽限删掉只留硬失败。
+
+---
+
+## 10. 第二轮同步（2026-10-20，dev → 76f752f17..origin/dev 117 提交）
+
+> 本节记录第二批次追赶 `origin/dev` 的冲突决策与验证证据。上一轮（§1–§8）是首次并入 dev 的 59 文件 / 204 hunk；本轮规模更小但性质相同。
+
+### 10.1 规模与冲突
+
+- 落后 `origin/dev` **117 个提交**（769 文件 / +41179 −20488）；分叉后双方共改 63 文件，`git merge-tree` 预演判定**真实冲突 20 文件 / 41 hunk**（与实跑完全一致）。
+- 关键判断：`git diff --name-only 76f752f17..origin/dev | grep -i remote` **为空** —— dev 这 117 个提交一个远端文件都没动。冲突全部来自我们顺带改过的共享汇聚点（sessionIpc / AgentManager / App.tsx / i18n / unifiedApi 快照测试），**远端地基零竞争**。
+
+### 10.2 解决原则（沿用 §2 并补充）
+
+1. **dev 架构优先**：GUI 扩展桥整体下线（dev 用 `modelTrace` 端点取代）、`SessionActionsMenu` 承接 Tab 栏「⋯」菜单、`WorktreeTree` 键从 path 改 ProjectId —— 冲突一律按 dev 新结构落，远端能力以端口/路由方式叠加。
+2. **本仓语义先于 dev 写法**：`WorktreeEntry` 保留 `ProjectFileTarget`（远端工作区必需），因此 `useWorktreeActions` / `ProjectTree` / `SidebarContent` / `AppSidebar` 统一回到 `removingWorktreeProjectIds`，不跟随 dev 的纯 path。
+3. **生成物只走脚本**：四份 `*.zh-TW.ts` 冲突先取 dev 侧基线，再 `node scripts/genZhTwCopy.mjs` 整体重算（6915 条）。
+4. **快照锚点显式刷新**：unifiedApi 四个测试先取 dev 值，再用真实运行值覆盖（见 §10.4）。
+
+### 10.3 分批与落点
+
+| 批次 | 文件 | 关键决策 |
+| --- | --- | --- |
+| A 主进程核心 | sessionIpc / AgentManager / SessionRuntimeCoordinator / sessionForkCommands | DSH fork 取 dev 的 `replaceDsh*Session` 新语义，保留本仓远端 fork 日志（`logger.warn` 改为可选以兼容测试替身）；`sessionsListFileChanges` 随 dev 下线删除；`applyPreferences` 合并「远端静默降级」+「DSH 不重放偏好」两条独立判据 |
+| A2 主进程外围 | preload / atoms/index | `listModels`（远端分流）与 dev 新签名 `listDshSkills(target)` 并存；`remote-trust-atoms` 与 `agent-atoms`/`workspace-page-atoms` 并存；删掉 dev 已下线的 `bridgeText` / `bridgeServices` import |
+| B 渲染层 | App / ComposerComponents / SessionView / SidebarContent / FileDiffViewer | `SessionFilesStrip`（dev 已删，迁轮末 chip）移除；`LayoutGrid` 取代 `Plus`；侧栏归档失败仍转 toast（dev 改为保持弹窗打开）；`BridgeGuiSlot` 随桥下线移除 |
+| B2 i18n | rendererCopy ×3 + mainProcessCopy.zh-TW | 远端键块与 dev 智能体键块**全保留**（0 重复键、6915 条对齐） |
+| C 测试 | quickMessages / unifiedApi ×4 | `quickMessages` 取更严格的 HEAD 正则（兼容 fragment 与任意标签容器）；unifiedApi 按实跑值刷新 |
+
+### 10.4 合并专属修复（本轮新增）
+
+`npm run test:serial` 首跑 52 失败，逐条定位后**全部修绿**（现在只剩 §7 已记录的基线红灯）：
+
+- `sessionComposer`（11 例）：测试桩缺 dev 新增的 `bumpNewTurnCollapseTickAtom` / `sessionMessagesCacheAtom` / `sessionReloadingByIdAtom`，且 `setAtom` 未处理 `cacheSessionMessagesAtom`。
+- `composerPrewarmFocus`：`useSessionTimelineController` 新增 `../utils/sessionDiskPageCursor` 依赖，补编译真模块。
+- `sessionProxyEntrypoints` / `destructiveMenuIcons`：Tab 栏「⋯」菜单迁入 `SessionActionsMenu`，断言改读新文件。
+- `queuedPromptAbortSuppression` / `agentStartupDiagnostics` / `streamdownRenderer` / `sidebarEmptyProjectContainer` / `portableUserData`：源码正则跟随 dev 重构（`paneServices` 取值、`promptInput` 形参、`remarkRecoverLocalImages` 入场、`emptyState` 分支、启动序列插入 `registerAllDomains`）。
+- `spinnerUtility`：远端两处 `animate-spin` 改 `animate-pideck-spin`（reduced-motion 才生效）。
+- `settingsFieldAnchors`：登记 dev 新增的 `common-selection-tool` 小节。
+- `configTrustWsl`：补 `./sub2apiPanelSession` stub（dev 新增 ConfigManager 依赖）。
+- `dshRuntimeIpc` / `sub2apiUsage` / `piResourceConfigService` / `remoteNodeResolution` / `sshVerifiedConnection` / `remoteHostVersionGate`：跟随 dev 的条件与归属变更（预热门控去掉 defaultBackend、401 归因下沉、`isPackageSource` 纳入路径形态、`buildBootstrapCommand` 新增必填 `target`）。
+- `unifiedApi` 快照刷新：通道 676→767 / 前缀 83→88、preload 命名空间 69→77、sessions 方法 112→118、DOMAIN_CATALOG 60→65（补 `local-image` / `agent-profiles` / `selection-tool` / `suggestion` 四域）；`SESSIONS_SUBDOMAINS` 补分组 `listModels` / `readOutline` / `readOutlineTitle`。
+- `remoteExtensionSnapshot`：dev 下线 GUI 桥与扩展点面板（`HIDDEN_BUILT_IN_EXTENSIONS` / `DEFAULT_DISABLED_BUILT_IN_EXTENSIONS` 随之消失），镜像表删除两条并补 `pi-deck-runtime.ts`。
+
+### 10.5 门禁结果
+
+- `npm run typecheck` = **0**；`npm run check:format` = 0（3716 文件）。
+- `npm run test:serial`：13357 例 / 13058 pass / **22 fail** / 277 skip；失败集合**完全落在 §7 已记录的基线清单**（sessionCatalogCommand 8、rewindCheckpointCore 2、remoteSessionRootIsolation 2、fileIcons 2、sshClientRuntime / remoteRunnerEntry / remoteProjectFileService / remoteHelperSearchNames / remoteGitRecovery / remoteBrowseRoot / remoteBootstrapSessionIntegration / piRuntimeLauncher / feishuSessionRuntimeBinding 各 1），**零合并专属失败**。
+- 相对上一轮（§8：12753 例 / 无合并专属失败）例数增长来自 dev 新增测试；基线红灯清单未扩大。

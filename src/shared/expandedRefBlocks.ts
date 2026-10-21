@@ -207,8 +207,19 @@ export function parseExpandedSessionBlocks(text: string): ExpandedSessionBlock[]
 	return blocks;
 }
 
-/** 统一后的引用块（quote / session / skill）。 */
-export type ExpandedRefBlock = { kind: "quote"; label: string; messageId: string; text: string; start: number; end: number } | { kind: "session"; name: string; text: string; start: number; end: number } | { kind: "skill"; label: string; text: string; start: number; end: number };
+/**
+ * 统一后的自包含块（quote / session / skill / template）。
+ *
+ * `skill` 与 `template` 是两个类型而不是一个：pi 自己就把技能与提示词模板分成两种资源
+ * （`get_commands` 的 `source: "skill"` / `source: "prompt"`），转换语义完全不同（技能只重建
+ * `/skill:名称`，模板只重建 `/模板名`）。展示层可以共用同一套斜杠视觉，但数据层必须能区分，
+ * 否则未来任何「按类型处理」的需求都要靠 label 前缀猜。
+ */
+export type ExpandedRefBlock =
+	| { kind: "quote"; label: string; messageId: string; text: string; start: number; end: number }
+	| { kind: "session"; name: string; text: string; start: number; end: number }
+	| { kind: "skill"; label: string; text: string; start: number; end: number }
+	| { kind: "template"; label: string; text: string; start: number; end: number };
 
 /**
  * 统一解析消息文本中所有需要折叠展示的自包含块。
@@ -242,8 +253,8 @@ export function parseExpandedRefBlocks(text: string): ExpandedRefBlock[] {
 			end: b.end,
 		})),
 		...parseExpandedPromptTemplateBlocks(text).map((b) => ({
-			kind: "skill" as const,
-			// 模板在 composer 中本来就是 /模板名，复用 skill chip 的斜杠视觉语义。
+			// 独立 kind：与 pi 的资源类型对齐（skill / prompt 两种），展示层再决定复用哪套视觉。
+			kind: "template" as const,
 			label: b.name,
 			text: b.text,
 			start: b.start,

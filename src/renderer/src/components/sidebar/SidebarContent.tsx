@@ -9,7 +9,7 @@ import { isManagerSessionSummary, worktreeFamilyProjects } from "../../sessionMa
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
 import { showNotice } from "../../utils/notice";
-import { resolveSessionRunState, sessionRunCapabilities, type SessionRunAction } from "../../utils/sessionCommands";
+import { resolveSessionReloadMode, resolveSessionRunState, sessionRunCapabilities, type SessionRunAction } from "../../utils/sessionCommands";
 import { getBoundSidebarRuntimeAgent, getBoundSidebarRuntimeAgentByAgentId, type SidebarController } from "../../hooks/useSidebarController";
 import type { RpcLogEntry } from "../../../../shared/types/rpcLog";
 import type { SidebarRunControl } from "./SidebarComponents";
@@ -24,8 +24,8 @@ import { Dock, DockItem } from "../motion/dock";
 import { UpdateDotHint } from "./UpdateDotHint";
 import { AnnouncementCenter } from "./AnnouncementCenter";
 import { AutomationDockButton } from "../automation/AutomationDockButton";
+import { AgentMarketDockButton } from "../agents/AgentMarketDockButton";
 import { HostPluginDockButtons } from "../plugins/HostPluginDockButtons";
-import { BridgeGuiSlot } from "../bridge/BridgeSlot";
 import { MorphingSearch, type MorphingSearchItem } from "../motion/morphing-search";
 import { parseSidebarNavTab } from "../../utils/sidebarNavTab";
 import { pinyinKeys } from "../../utils/pinyinSearch";
@@ -150,7 +150,7 @@ export type SidebarContentProps = {
 	worktreesByProject: Readonly<Record<string, readonly WorktreeEntry[]>>;
 	branchByProject?: Readonly<Record<string, string | null | undefined>>;
 	creatingWorktree?: boolean;
-	/** Child projects currently being removed. */
+	/** 正在删除的 worktree 子项目 id 集合（透传给 ProjectTree 驱动淡出动画）。 */
 	removingWorktreeProjectIds?: ReadonlySet<string>;
 	isLanWeb?: boolean;
 	chrome?: ReactNode;
@@ -244,7 +244,7 @@ export function SidebarContent(props: SidebarContentProps) {
 	 * 因此「有绑定」按 agentId 判定，与 Tab 下拉共用同一套策略函数避免判定漂移。
 	 * 过渡态（starting）由策略函数自身识别，侧栏不额外维护 busy。
 	 */
-	const buildSidebarRunControl = (sessionId: string): SidebarRunControl => {
+	const buildSidebarRunControl = (sessionId: string, backend: AgentBackend | undefined): SidebarRunControl => {
 		const runtime = controller.catalog.runtimeBySessionId[sessionId];
 		const hasBinding = Boolean(runtime?.agentId);
 		return {
@@ -254,6 +254,7 @@ export function SidebarContent(props: SidebarContentProps) {
 			}),
 			// 快照里有 agentId 就带上：菜单「复制 Agent ID」依赖它，且与 hasBinding 同源判定
 			agentId: runtime?.agentId,
+			reloadMode: resolveSessionReloadMode(backend),
 			onAction: (action) => void actions.sessions.runControl(sessionId, action),
 		};
 	};
@@ -325,6 +326,8 @@ export function SidebarContent(props: SidebarContentProps) {
 					</button>
 					{/* 定时任务入口：放在新建/搜索下面，避免藏在底栏 Dock 里不好找 */}
 					<AutomationDockButton />
+					{/* 智能体入口：紧随定时任务，打开会话 Tab 栏里的「智能体」页面 */}
+					<AgentMarketDockButton />
 					{/* 宿主插件面板入口：与定时任务同区，无已启用面板时组件自身不渲染 */}
 					<HostPluginDockButtons projectId={props.currentProjectId} sessionId={props.currentSessionId} />
 				</div>
@@ -419,12 +422,6 @@ export function SidebarContent(props: SidebarContentProps) {
 						branchByProject={props.branchByProject}
 						removingWorktreeProjectIds={props.removingWorktreeProjectIds}
 					/>
-					{/* GUI 扩展桥：侧边栏面板/分区落点（ctx.gui.setSidebarPanel / setSidebarSection）。
-					    **旁插**在 ProjectTree 之后 —— 不改侧边栏原有结构（§7.4 只追加）。
-					    侧边栏是应用级 chrome，桥状态按「当前聚焦会话」取（桥的运行时状态本就是按
-					    runtimeGeneration 存的，detach 即清）；无贡献时返回 null，不占位。 */}
-					<BridgeGuiSlot sessionId={props.currentSessionId} slot="sidebar.panel" className="flex flex-col gap-2 px-2 py-2" />
-					<BridgeGuiSlot sessionId={props.currentSessionId} slot="sidebar.section" className="flex flex-col gap-2 px-2 py-2" />
 				</section>
 			</div>
 			{/* 底栏 dock（beUI Dock）：设置/公告/反馈/主题切换收进浮动卡片，铺满底栏宽度
@@ -682,7 +679,7 @@ export function SidebarContent(props: SidebarContentProps) {
 						controller.closeMenu();
 					}}
 					// 运行控制全状态（启动/停止/重启/重载）：按 runtime 快照算能力，不再分 live/非 live 两套入口
-					runControl={menuAgentSessionId ? buildSidebarRunControl(menuAgentSessionId) : undefined}
+					runControl={menuAgentSessionId ? buildSidebarRunControl(menuAgentSessionId, menuAgent.backend) : undefined}
 					// 会话代理：与 Tab 菜单/Session 菜单共用 App 层弹窗宿主；agent 维度此前缺失该入口
 					onOpenProxySetting={
 						menuAgentSessionId
@@ -760,7 +757,7 @@ export function SidebarContent(props: SidebarContentProps) {
 					menu={{ x: menu.x, y: menu.y }}
 					onClose={controller.closeMenu}
 					// 草稿会话同样给运行控制：不必先打开会话发消息就能启动 Agent
-					runControl={buildSidebarRunControl(menuDraft.id)}
+					runControl={buildSidebarRunControl(menuDraft.id, menuDraft.backend)}
 					onCloseAgent={
 						menuDraftBoundAgent
 							? () => {
@@ -802,7 +799,7 @@ export function SidebarContent(props: SidebarContentProps) {
 						void actions.sessions.createSideTask(menuSession.projectId ?? menu.projectId, menuSession.backend);
 					}}
 					// 运行控制全状态：未启动的历史会话主控项即「启动 Agent」
-					runControl={buildSidebarRunControl(menuSession.id)}
+					runControl={buildSidebarRunControl(menuSession.id, menuSession.backend)}
 					onExport={() => {
 						void actions.sessions.export(menu.projectId, menuSession);
 						controller.closeMenu();
@@ -890,11 +887,13 @@ export function SidebarContent(props: SidebarContentProps) {
 					onRename={(session) => actions.sessions.rename(managerProject.id, session)}
 					onExport={(session) => void actions.sessions.export(managerProject.id, session)}
 					onDelete={(sessions) => Promise.all(sessions.map((session) => actions.sessions.delete(managerProject.id, session))).then(controller.closeSessionManager)}
-					onArchive={(sessions) =>
-						Promise.all(sessions.map((session) => actions.sessions.archive(managerProject.id, session)))
-							.then(controller.closeSessionManager)
-							.catch((error: unknown) => showNotice(error instanceof Error ? error.message : String(error), 5000, "error"))
-					}
+					onArchive={async (sessions) => {
+						// 归档成功后弹窗保持打开（用户要继续管理/切到归档视图核对），关闭只由用户触发。
+						// 家族列表跨多个工作区：按会话归属项目归档，dismiss/refresh 才不会落到错误项目，
+						// 否则弹窗留着时子工作区的行会残留。
+						// 失败必须转 toast：弹窗不关闭时，静默失败会让用户以为已经归档而反复点击。
+						await Promise.all(sessions.map((session) => actions.sessions.archive(session.projectId ?? managerProject.id, session))).catch((error: unknown) => showNotice(error instanceof Error ? error.message : String(error), 5000, "error"));
+					}}
 					onUnarchive={(archived) => actions.sessions.unarchive(archived, managerProject.id)}
 					listArchived={actions.sessions.listArchived}
 					deleteArchived={(archivedPath) => actions.sessions.deleteArchived(archivedPath)}

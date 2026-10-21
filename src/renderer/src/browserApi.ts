@@ -262,7 +262,9 @@ export function createBrowserApi(): PiDesktopApi {
 				ok: false as const,
 				error: { code: "SESSION_COMMAND_FAILED" as const, debugDetails: "catalog message mutation is desktop-only" },
 			}),
-			readProcessEvents: async () => [],
+			readProcessEvents: async () => ({ events: [], version: "", coverage: { fromStart: true, chainComplete: true, readComplete: true, eventsTrimmed: false, reason: "unsupported" } }),
+			readOutline: async () => ({ entries: [], total: 0, truncated: false }),
+			readOutlineTitle: async () => undefined,
 			readReferenceMessages: async (sessionId) => {
 				const result = await request<{
 					messages: Awaited<ReturnType<PiDesktopApi["sessions"]["readReferenceMessages"]>>;
@@ -280,9 +282,6 @@ export function createBrowserApi(): PiDesktopApi {
 				return response.result;
 			},
 			onRuntimeEvent: (callback) => subscribe(runtimeListeners, callback),
-			// GUI 扩展桥：LAN Web 模式没有 Electron 主进程的桥端点，恒丢弃（形状完整即可）
-			sendBridgeEvent: async () => false,
-			requestBridgeResync: async () => false,
 			listRuntimes: async () => {
 				const result = await request<{ runtimes: SessionRuntimeInfo[] }>("/api/sessions/runtimes");
 				return result.runtimes;
@@ -306,6 +305,11 @@ export function createBrowserApi(): PiDesktopApi {
 			compactRuntime: (target, prompt) => sessionRuntimeCommand(target, "compact", { prompt }),
 			getRuntimeState: (target) => sessionRuntimeCommand(target, "state"),
 			listRuntimeCommands: (target) => sessionRuntimeCommand(target, "commands"),
+			// LAN Web 没有桌面端的内部 reload 扩展注入链路；入口按 backend/能力隐藏。
+			reloadResources: async () => ({
+				ok: false,
+				error: { code: "SESSION_COMMAND_FAILED", debugDetails: "reload resources is not supported over LAN Web" },
+			}),
 			// 浏览器模式无 standby 池访问能力，草稿命令预览回退本地发现。
 			draftCommands: async () => null,
 			listRuntimeModels: (target) => sessionRuntimeCommand(target, "models"),

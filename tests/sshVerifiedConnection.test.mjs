@@ -184,7 +184,8 @@ test("a helper command rides after the destination and only on a batch session",
 test("a frozen bootstrap command may exceed the helper limit, but arbitrary batch commands cannot", async (t) => {
 	const { directory, profile } = await fixture(t);
 	const { client } = configRunner(profile.id);
-	const bootstrap = { nodeExecutable: "/usr/bin/node", protocolVersion: 1, bundleSha256: "a".repeat(64), nonce: "0123456789abcdef0123456789abcdef" };
+	// target 是冻结的闭集（helper | extensions）：远端扩展快照部署与 helper 共用同一入口。
+	const bootstrap = { nodeExecutable: "/usr/bin/node", protocolVersion: 1, bundleSha256: "a".repeat(64), nonce: "0123456789abcdef0123456789abcdef", target: "helper" };
 	const expected = buildBootstrapCommand(bootstrap);
 	assert.ok(expected.length > 8192);
 	const invocation = await buildPinnedSshInvocation(directory, profile.id, "ssh-batch", { client, bootstrap });

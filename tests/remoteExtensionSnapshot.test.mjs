@@ -19,7 +19,7 @@ const snapshotModule = loadTsCommonJs("src/main/extensions/remoteExtensionSnapsh
 const builtIns = loadTsCommonJs("src/main/extensions/builtInExtensions.ts");
 
 const { REMOTE_EXTENSION_DISPOSITIONS, listRemoteInjectableExtensionNames, readEffectiveExtensionSnapshot, remoteExtensionSnapshotFileNames, hasRemoteExtensionDependencies } = snapshotModule;
-const { BUILT_IN_EXTENSIONS, INTERNAL_BUILT_IN_EXTENSIONS, HIDDEN_BUILT_IN_EXTENSIONS, DEFAULT_DISABLED_BUILT_IN_EXTENSIONS } = builtIns;
+const { BUILT_IN_EXTENSIONS, INTERNAL_BUILT_IN_EXTENSIONS } = builtIns;
 
 const sha256 = (text) => createHash("sha256").update(text, "utf8").digest("hex");
 
@@ -50,13 +50,14 @@ test("每一份内置扩展都在镜像表里有明确处置", () => {
 	assert.equal(Object.keys(REMOTE_EXTENSION_DISPOSITIONS).length, names.length, "镜像表不得出现已删除的扩展名");
 });
 
-test("注入名单：顺序与本地一致，hidden/默认关闭/removed 都不进远端", () => {
+test("注入名单：顺序与本地一致，local-only/not-applicable 都不进远端", () => {
 	const available = new Set([...BUILT_IN_EXTENSIONS, ...INTERNAL_BUILT_IN_EXTENSIONS]);
 	const names = listRemoteInjectableExtensionNames({ available, envAvailable: true });
 	// 顺序来自 BUILT_IN_EXTENSIONS：request-size 在 ask 之前、plan 在 todo 之前。
 	assert.ok(names.indexOf("pi-deck-request-size-recovery.ts") < names.indexOf("pi-deck-ask-question.ts"));
 	assert.ok(names.indexOf("pi-deck-plan-mode.ts") < names.indexOf("pi-deck-todo.ts"));
-	for (const hidden of HIDDEN_BUILT_IN_EXTENSIONS) assert.equal(names.includes(hidden), false, `${hidden} 是 hidden，不得注入`);
+	// 注：dev 已下线「已隐藏 / 默认关闭（opt-in）」两组内置扩展（GUI 桥与扩展点面板随之下线），
+	// 那两道判据不再存在；这里只验证处置表与顺序，以及 local-only/not-applicable 的排除。
 	for (const localOnly of Object.entries(REMOTE_EXTENSION_DISPOSITIONS).filter(([, value]) => value === "local-only" || value === "not-applicable")) assert.equal(names.includes(localOnly[0]), false);
 	assert.equal(names.includes("pi-deck-trash-guard.ts"), false);
 	assert.equal(names.includes("pi-deck-vision.ts"), false);
@@ -84,12 +85,6 @@ test("注入名单：noExtensions / removed / 自动标题开关逐个生效", (
 	// 快照里不存在（旧/半截快照）就跳过，绝不凭“应该存在”注入。
 	const partial = listRemoteInjectableExtensionNames({ available: new Set(["pi-deck-plan-mode.ts"]) });
 	assert.deepEqual([...partial], ["pi-deck-plan-mode.ts"]);
-});
-
-test("默认关闭的扩展只有显式 opt-in 才进远端", () => {
-	// 现有默认关闭集合全是 hidden（桥/扩展点），所以这里用名字集合验证规则本身：
-	const available = new Set([...BUILT_IN_EXTENSIONS, ...INTERNAL_BUILT_IN_EXTENSIONS]);
-	for (const name of DEFAULT_DISABLED_BUILT_IN_EXTENSIONS) assert.equal(listRemoteInjectableExtensionNames({ available, envAvailable: true }).includes(name), false);
 });
 
 test("生效快照：覆盖层优先，整份校验通过才算数", (t) => {

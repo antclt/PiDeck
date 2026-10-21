@@ -2,7 +2,7 @@ import type { ChatMessage } from "../../../../shared/types";
 // 文件修改/工具名解析已迁往 shared/fileChanges（main 的 AgentManager 与渲染层共用同一份聚合口径）；
 // 此处 import 供本文件保留函数使用，并 re-export 保持既有 import 路径兼容。
 import { collectSessionFileChanges, getToolDiffTarget, getToolFilePath, getToolName, stripAnsi } from "../../../../shared/fileChanges.ts";
-export { collectSessionFileChanges, getToolDiffTarget, getToolName, stripAnsi };
+export { getToolDiffTarget, getToolName, stripAnsi };
 import type { AgentRunItem } from "../app/AppUtils";
 
 /* stripThinkingTags 与 AppUtils 同逻辑的内联副本（此文件被 node 单测直接加载，改动需同步） */
@@ -80,6 +80,24 @@ export function fileChangeToDiffLines(entry: { originalContent: string; content:
 		lines.push({ id: `added-${index}`, type: "added", content });
 	});
 	return lines;
+}
+
+/**
+ * 单文件修改的增/删行数（轮末 chip 上的 +N / −N）。
+ *
+ * 口径（与 getToolDiffTarget 的 changedLines 解耦，因为后者是「最大行数」估算，
+ * 适合抽屉里的「约 N 行」，不能拆成加/减）：
+ * - write/create（originalContent 为空）：整文件视为新增，增 = 内容行数，减 = 0；
+ * - edit/patch：originalContent 是变动区域的旧文本、content 是新文本，
+ *   两者行数分别就是 −N / +N。
+ * 末尾换行会多算一个空行：需要跨行数比较，多算 1 比少算 1 更符合读感。
+ */
+export function fileChangeDelta(entry: { originalContent: string; content: string }): { added: number; removed: number } {
+	const countLines = (value: string) => (value.length === 0 ? 0 : value.split(/\r\n|\r|\n/).length);
+	return {
+		added: countLines(entry.content),
+		removed: countLines(entry.originalContent),
+	};
 }
 
 export function getToolDetailText(message: ChatMessage): string {

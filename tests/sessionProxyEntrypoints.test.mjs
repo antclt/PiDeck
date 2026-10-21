@@ -17,8 +17,11 @@ test("Tab 栏 ⋯ 菜单提供会话代理入口", () => {
 	const source = readFileSync(TABS_BAR, "utf8");
 	// props 暴露回调，由 App 装配（组件本身不持有弹窗状态）
 	assert.match(source, /onOpenProxySetting\?: \(\) => void;/);
-	// 菜单内渲染该项，复用侧栏同款文案 key
-	assert.match(source, /props\.onOpenProxySetting && \([\s\S]*?t\("menu\.sessionProxy"\)/);
+	// 菜单项已随 Tab 栏「⋯」菜单整体迁入 SessionActionsMenu（dev 重构），
+	// Tab 栏只负责把回调经 menu 传下去；两处都必须成立。
+	assert.match(source, /onOpenProxySetting: props\.onOpenProxySetting/);
+	const actionsMenu = readFileSync("src/renderer/src/components/session/SessionActionsMenu.tsx", "utf8");
+	assert.match(actionsMenu, /menu\?\.onOpenProxySetting[\s\S]*?t\("menu\.sessionProxy"\)/);
 });
 
 test("Agent 右键菜单提供会话代理入口（此前缺失，用户报障点）", () => {

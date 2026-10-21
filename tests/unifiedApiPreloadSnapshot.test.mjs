@@ -2,23 +2,26 @@
  * F8 · preload 暴露面快照守卫（TEST-PLAN §F8，6 例=4 正+2 负）。
  *
  * 捕获 src/preload/index.ts 经 contextBridge 实际暴露的 piDesktop API，对
- * 74 命名空间清单与每命名空间方法清单做 sha256 快照（A10：暴露面零变化），
- * 并核对数量锚点（sessions 115 / config 48 / git 59 / app 32）与订阅形态。
+ * 77 命名空间清单与每命名空间方法清单做 sha256 快照（A10：暴露面零变化），
+ * 并核对数量锚点（sessions 118 / config 48 / git 59 / app 32）与订阅形态。
  * 摘要来源：T7 只读探针实测（2026-10-14；2026-10-16 合并刷新随 dev 演进重算：
  * yaoPrompts 方法与 sessions.searchContent、skillHub.onInstallProgress 入场，命名空间数不变；
  * 2026-10-17 再刷新：files.searchContent（file-index 工作区文件内容检索）入场，命名空间/方法数锚点不变；
- * 2026-10-18 再刷新：sessions.searchInSession（会话内查找）入场，sessions 111→112；
- * 2026-10-18 远端合并刷新：remoteHosts/probeRemoteModels/remoteTrust/remoteSessions 四命名空间
- * 与 sessions/git 的远端通道面入场，命名空间 70→74、sessions 112→115、git 38→59）。
+ * 2026-10-18 再刷新：sessions.searchInSession（会话内查找）入场，sessions 111→112，命名空间数不变；
+ * 2026-10-19 再刷新：sessions.reloadResources（pi 热重载扩展/技能）入场，sessions 112→113；
+ *   同版下线 GUI 扩展桥（sessions.sendBridgeEvent / requestBridgeResync）与插件开发支持
+ *   （整份 pluginDev 命名空间 3 方法）：命名空间 70→69、sessions 113→111）；
+ * 2026-10-20 远端集成合并刷新：远端四命名空间（remoteHosts / probeRemoteModels / remoteTrust /
+ *   remoteSessions）与 sessions/git 的远端通道面入场，命名空间 69→77、sessions 111→118、git 38→59。
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const NS_LIST_SHA256 = "360669919426ea7b7af920df48a01ba5bf9aa470128bc08ddf8c0885af91b221";
-const FULL_METHODS_SHA256 = "2594d6583707f25149d1707bf74726aa061a84359406626695fce53d8103efa1";
-const NAMESPACE_COUNT = 74;
+const NS_LIST_SHA256 = "d7881650417ced09bcafb62322edca6cdfecbbcd7d2bfb8d4c3006104f696e5d";
+const FULL_METHODS_SHA256 = "f865e3a397cb5b245bdf2015b16679ddf11c9bba1c77ec60fce898cb937a0b71";
+const NAMESPACE_COUNT = 77;
 
 /** 捕获 preload 暴露的 piDesktop；null/undefined/形态不符时显式红并给诊断（F8-6 共用）。 */
 function assertValidCapture(capture) {
@@ -50,7 +53,7 @@ const api = capturePreloadApi();
 const namespaces = sortedKeys(api);
 const methodLines = namespaces.map((ns) => `${ns}=${sortedKeys(api[ns]).join(",")}`);
 
-test("F8-1 preload 顶层命名空间数 === 74 且排序清单摘要零漂移", () => {
+test("F8-1 preload 顶层命名空间数 === 69 且排序清单摘要零漂移", () => {
 	assert.equal(namespaces.length, NAMESPACE_COUNT, `命名空间数 ${namespaces.length} ≠ ${NAMESPACE_COUNT}`);
 	assert.equal(sha256(namespaces.join(",")), NS_LIST_SHA256, "命名空间清单摘要漂移：preload 暴露面发生变化（A10 红线）");
 });
@@ -59,8 +62,8 @@ test("F8-2 每命名空间排序方法清单摘要零漂移", () => {
 	assert.equal(sha256(methodLines.join(";")), FULL_METHODS_SHA256, "方法清单摘要漂移：任一命名空间的方法暴露面发生变化（A10 红线）");
 });
 
-test("F8-3 数量锚点：sessions 115 / config 48 / git 59 / app 32", () => {
-	assert.equal(Object.keys(api.sessions).length, 115, "sessions 方法数漂移");
+test("F8-3 数量锚点：sessions 118 / config 48 / git 59 / app 32", () => {
+	assert.equal(Object.keys(api.sessions).length, 118, "sessions 方法数漂移");
 	assert.equal(Object.keys(api.config).length, 48, "config 方法数漂移");
 	assert.equal(Object.keys(api.git).length, 59, "git 方法数漂移");
 	assert.equal(Object.keys(api.app).length, 32, "app 方法数漂移");

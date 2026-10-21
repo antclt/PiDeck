@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: e996c36909fce8d4fe01c9934916563518d69ec317b43c9771f4cf9bb9349683（来自 src/shared/i18n/mainProcessCopy.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 26514420f1f5cb88483f8996114427ca00e39c0d88d69b945e8d98ba0c0d85f6（来自 src/shared/i18n/mainProcessCopy.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import type { MainProcessTranslationKey } from "./mainProcessCopy";
 
@@ -50,6 +50,8 @@ export const mainProcessZhTW: Record<MainProcessTranslationKey, string> = {
 	"sessionCommand.runtimeUnavailable": "當前會話沒有可用的執行例項，請重新開啟會話。",
 	"sessionCommand.runtimeChanged": "會話執行例項已發生變化，請重試剛才的操作。",
 	"sessionCommand.runtimeBusy": "會話正在處理其他操作，請稍後重試。",
+	"sessionCommand.reloadResourcesBusy": "請先停止當前回答或等待壓縮完成，再重新載入擴充套件與技能。",
+	"sessionCommand.reloadResourcesUnsupported": "當前會話不支援熱重載擴充套件與技能。",
 	"sessionCommand.commandFailed": "會話操作失敗，請重試。",
 	"sessionCommand.modelNotFound": "模型未找到：{model}。該模型可能尚未在本地 models.json 中配置。",
 	"sessionCommand.fileTooLarge": "會話檔案過大（{sizeMb}MB，上限 {limitMb}MB），無法編輯訊息。請改用其他會話，或先匯出後歸檔該會話。",
@@ -103,7 +105,7 @@ export const mainProcessZhTW: Record<MainProcessTranslationKey, string> = {
 	"session.notFound": "會話不存在，請重新整理會話列表後重試。",
 	"session.invalidModel": "模型選擇無效，請重新選擇。",
 	"session.backendLocked": "會話已建立，後端（Pi / DSH）不可切換。",
-	"session.agentPresetLocked": "會話已建立，Agent 模式（預設）不可更改。",
+	"session.agentPresetLocked": "會話已建立，Agent 模式（預設）已固定且不可切換；如需其他模式，請新建會話。",
 	"session.fileNotFound": "會話檔案不存在，請重新整理會話列表後重試。",
 	"session.copyDshUnsupported": "DSH 歷史會話暫不支援直接複製，請開啟會話後使用執行中 Agent 的「複製會話」。",
 	"session.exportFailed": "會話匯出失敗，請重試。",

@@ -39,7 +39,7 @@ export function RemoteModelCatalogSection(props: { hostId: string }) {
 					<span className="text-micro text-muted-foreground">{t("remoteModel.probeHint")}</span>
 				</div>
 				<Button type="button" variant="outline" size="sm" className="ml-auto h-8 gap-1.5" disabled={loading} onClick={() => void runProbe()} data-testid="remote-model-probe">
-					<RefreshCw className={"size-3.5 " + (loading ? "animate-spin" : "")} aria-hidden="true" />
+					<RefreshCw className={"size-3.5 " + (loading ? "animate-pideck-spin" : "")} aria-hidden="true" />
 					{loading ? t("remoteModel.probing") : t("remoteModel.probeAction")}
 				</Button>
 			</div>

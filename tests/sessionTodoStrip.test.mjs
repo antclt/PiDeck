@@ -3,9 +3,10 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 /**
- * 恢复 dsh-web 形态的独立横栏卡（SessionTodoStrip / SessionFilesStrip /
- * SessionSubagentsStrip 取代 SessionWidgetsCard 分段条与悬浮弹层）后的契约断言：
+ * 恢复 dsh-web 形态的独立横栏卡（SessionTodoStrip / SessionSubagentsStrip /
+ * SessionGoalStrip 取代 SessionWidgetsCard 分段条与悬浮弹层）后的契约断言：
  * i18n 文案、composer 挂载链、progressLabel / dismiss 纯函数、旧组件删除。
+ * 「修改的文件」已从横栏卡改为每轮末尾的 chip 行（turn/TurnFileChanges）。
  */
 const composerSource = () => readFileSync("src/renderer/src/components/session/ComposerArea.tsx", "utf8");
 const viewSource = () => readFileSync("src/renderer/src/components/session/SessionView.tsx", "utf8");
@@ -14,7 +15,7 @@ const stripSource = () => readFileSync("src/renderer/src/components/session/Sess
 const zh = () => readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
 const en = () => readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
 
-test("composer forwards widgets slot; session surfaces mount the three strips then goal", () => {
+test("composer forwards widgets slot; session surfaces mount the remaining strips then goal", () => {
 	const composer = composerSource();
 	const view = viewSource();
 	const start = startSource();
@@ -22,17 +23,18 @@ test("composer forwards widgets slot; session surfaces mount the three strips th
 	assert.match(composer, /widgets\?: ReactNode/);
 	assert.match(composer, /\{props\.widgets \?\? null\}/);
 	assert.match(composer, /<ComposerMeasuredExtras[\s\S]{0,200}?widgets=\{props\.widgets \?\? null\}/);
-	// SessionView：todo → files → subagents → goal，独立横栏卡顺序挂载
+	// SessionView：todo → subagents → goal，独立横栏卡顺序挂载。
+	// 「修改的文件」已改为每轮末尾的 chip 行（turn/TurnFileChanges），不再占 composer 槽位。
 	assert.match(view, /<SessionTodoStrip sessionId=\{sessionId\} \/>/);
-	assert.match(view, /<SessionFilesStrip[\s\S]*?run=\{latestAgentRun\}[\s\S]*?onDiffFile=\{onDiffFile\}/);
 	assert.match(view, /<SessionSubagentsStrip[\s\S]*?onOpenChildSession=\{onOpenBranchSession\}/);
 	assert.match(view, /<SessionGoalStrip sessionId=\{sessionId\} \/>/);
-	assert.ok(view.indexOf("<SessionTodoStrip") < view.indexOf("<SessionFilesStrip") && view.indexOf("<SessionFilesStrip") < view.indexOf("<SessionSubagentsStrip") && view.indexOf("<SessionSubagentsStrip") < view.indexOf("<SessionGoalStrip"), "strip order must be todo → files → subagents → goal in SessionView widgets");
-	// SessionStartSurface：引导页同样挂三个横栏 + goal
+	assert.ok(view.indexOf("<SessionTodoStrip") < view.indexOf("<SessionSubagentsStrip") && view.indexOf("<SessionSubagentsStrip") < view.indexOf("<SessionGoalStrip"), "strip order must be todo → subagents → goal in SessionView widgets");
+	assert.doesNotMatch(view, /SessionFilesStrip/, "composer must not mount the files strip any more");
+	// SessionStartSurface：引导页同样挂剩余横栏 + goal（无轮次，所以没有文件 chip 行）
 	assert.match(start, /<SessionTodoStrip sessionId=\{props\.sessionId\} \/>/);
-	assert.match(start, /<SessionFilesStrip sessionId=\{props\.sessionId\} \/>/);
 	assert.match(start, /<SessionSubagentsStrip sessionId=\{props\.sessionId\} \/>/);
 	assert.match(start, /<SessionGoalStrip sessionId=\{props\.sessionId\} \/>/);
+	assert.doesNotMatch(start, /SessionFilesStrip/);
 });
 
 test("todo strip copy is present in both locale dictionaries", () => {

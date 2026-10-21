@@ -40,6 +40,16 @@ test("settings expose workspace content open mode; split orientation removed", (
 	assert.doesNotMatch(surfaces, /\.file-diff-tab-bar\s*\{[^}]*border-top:\s*2px solid var\(--color-accent\)/);
 });
 
+test("closing the reading surface expands the session pane before collapsing the content pane", () => {
+	// 2026-10-21 现场：占满中间栏后在最大化状态关闭文件，会话栏停在 48%、右半边留白。
+	// 根因是 order——先 collapse 内容面板再 expand 会话面板时，库的尺寸再平衡会把内容
+	// 面板按上次展开尺寸弹回 ~52%；反过来先 expand 会话再 collapse 内容才是 [48, 0]。
+	const effectStart = stage.indexOf("if (!props.hasContent)");
+	assert.ok(effectStart > 0, "WorkbenchStage 必须有「无内容」分支");
+	const branch = stage.slice(effectStart, stage.indexOf("} else {", effectStart));
+	assert.match(branch, /panel\.expand\(\)[\s\S]*contentPanel\.collapse\(\)/, "无内容时必须先 expand 会话面板、再 collapse 内容面板");
+});
+
 test("WorkbenchStage hosts session + content with collapse-safe maximize", () => {
 	assert.match(stage, /export function WorkbenchStage/);
 	assert.match(stage, /layout === "maximize"/);

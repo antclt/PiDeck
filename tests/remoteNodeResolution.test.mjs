@@ -153,5 +153,5 @@ test("the resolved path satisfies the bootstrap contract's executable shape", as
 	const { promise } = run("/home/u/.nvm/versions/node/v24.11.0/bin", { "/home/u/.nvm/versions/node/v24.11.0/bin/node": "v24.11.0\n" });
 	const resolved = await promise;
 	const { buildBootstrapCommand } = loadTsCommonJs("src/main/remote/RemoteBootstrapContract.ts");
-	assert.doesNotThrow(() => buildBootstrapCommand({ nodeExecutable: resolved.nodePath, protocolVersion: 1, bundleSha256: "a".repeat(64), nonce: "A1b2C3d4e5f6a7b8" }));
+	assert.doesNotThrow(() => buildBootstrapCommand({ nodeExecutable: resolved.nodePath, protocolVersion: 1, bundleSha256: "a".repeat(64), nonce: "A1b2C3d4e5f6a7b8", target: "helper" }));
 });

@@ -35,7 +35,7 @@ export function HostPluginPanelHost({ projectId, sessionId }: { projectId?: stri
 				className={
 					compact
 						? "flex h-[min(340px,calc(100vh-64px))] w-[min(380px,calc(100vw-48px))] flex-col gap-0 overflow-hidden bg-background p-0"
-						: // 与 AutomationModal 同一尺寸语系：近全屏大页面感，而不是小弹框（用户反馈的统计页面场景）
+						: // 与定时任务页面同一尺寸语系：近全屏大页面感，而不是小弹框（用户反馈的统计页面场景）
 							"flex h-[min(760px,calc(100vh-64px))] max-w-[min(1100px,calc(100vw-48px))] flex-col gap-0 overflow-hidden bg-background p-0"
 				}
 				aria-describedby={undefined}

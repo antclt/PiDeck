@@ -72,9 +72,9 @@ test("session tab active background is instant (no shared-layout slide between t
 	assert.doesNotMatch(source, /from "motion\/react"/);
 	assert.doesNotMatch(source, /layoutId=\{/);
 	assert.doesNotMatch(source, /layoutRoot/);
-	// 三种 Tab（会话 / 文件 / 插件伪 Tab）各自保留一处静态选中底色，且只在激活时渲染。
+	// 四种 Tab（会话 / 文件 / 插件伪 Tab / 页面式工作区伪 Tab）各自保留一处静态选中底色，且只在激活时渲染。
 	const backgrounds = source.match(/pointer-events-none\s+absolute\s+inset-0\s+rounded-md\s+bg-accent/g) ?? [];
-	assert.equal(backgrounds.length, 3, "会话/文件/插件伪 Tab 各保留一处静态选中底色");
+	assert.equal(backgrounds.length, 4, "会话/文件/插件伪/页面工作区伪 Tab 各保留一处静态选中底色");
 	assert.match(source, /\{active &&\s*<span\s+aria-hidden="true"\s+className="pointer-events-none absolute inset-0 rounded-md bg-accent"/);
 	assert.match(source, /\{tab\.active &&\s*<span\s+aria-hidden="true"\s+className="pointer-events-none absolute inset-0 rounded-md bg-accent"/);
 });
@@ -84,26 +84,47 @@ test("sidebar SessionTree still uses its own status dot (unchanged)", () => {
 	assert.match(source, /sessionStatusDotClass/);
 });
 
-test("tab dropdown menu: no switch-to item, state-based disable with visible gray", () => {
+test("session menu (moved out of the tab bar) keeps state-based disable with visible gray", () => {
 	const source = readFileSync("src/renderer/src/components/session/SessionTabsBar.tsx", "utf8");
+	const menu = readFileSync("src/renderer/src/components/session/SessionActionsMenu.tsx", "utf8");
+	const control = readFileSync("src/renderer/src/components/session/SessionActionsControl.tsx", "utf8");
 	// “切换到此会话”已移除（点击 Tab 本体即切换，菜单项冗余）
 	assert.doesNotMatch(source, /tabs\.switchTo/);
 	assert.doesNotMatch(source, /MousePointerClick/);
-	// 运行控制已上收右上角 ⋯ 更多操作菜单（当前会话分组）：
+	// 运行控制与会话操作已从 Tab 栏「⋯」整体迁入会话头部控制钮：
+	// Tab 栏不再有下拉菜单钮，菜单项逻辑落在 SessionActionsMenu。
+	// Tab 栏不再有「⋯」下拉钮（整组迁入会话头部控制钮），也没有「切换到此会话」项
+	assert.doesNotMatch(source, /t\("tabs\.moreActions"\)/);
+	assert.match(source, /ContextMenuTrigger asChild/);
 	// 全状态可用——菜单项不再按 live/终态分两套渲染，能力统一走策略函数，
 	// 置灰用内联 style（特异性最高，置灰可见）。
-	assert.match(source, /function RunControlItems\(/);
-	assert.match(source, /canRunSessionAction\(capabilities, "start"\)/);
+	assert.match(menu, /function SessionRunMenuItems\(/);
+	assert.match(menu, /canRunSessionAction\(capabilities, "start"\)/);
 	// 「停止回答」= abort（只中断当前回合，进程保留）；杀进程的入口是「关闭 Agent」菜单项
-	assert.match(source, /canRunSessionAction\(capabilities, "abort"\)/);
-	assert.match(source, /canRunSessionAction\(capabilities, "reload"\)/);
-	assert.match(source, /\? \{ opacity: 0\.4 \} : undefined/);
+	assert.match(menu, /canRunSessionAction\(capabilities, "abort"\)/);
+	assert.match(menu, /canRunSessionAction\(capabilities, "reloadResources"\)/);
+	assert.match(menu, /canRunSessionAction\(capabilities, "reload"\)/);
+	assert.match(menu, /control\.reloadMode/);
+	assert.match(menu, /t\("menu\.reloadResources"\)/);
+	assert.match(menu, /\? \{ opacity: 0\.4 \} : undefined/);
 	// 主控项按状态切换文案：未启动/失败/已关闭 → 启动 Agent；live → 重启
-	assert.match(source, /capabilities\.primaryAction === "start"/);
-	assert.match(source, /t\("tabs\.startAgent"\)/);
-	// ⋯ 菜单按功能分组：当前会话 / 工具（分组只做标签显示）
-	assert.match(source, /DropdownMenuLabel>\{t\("tabs\.currentSessionGroup"\)\}/);
-	assert.match(source, /DropdownMenuLabel>\{t\("tabs\.toolsGroup"\)\}/);
+	assert.match(menu, /capabilities\.primaryAction === "start"/);
+	assert.match(menu, /t\("tabs\.startAgent"\)/);
+	// 菜单按功能分组：当前会话 / 工具（分组只做标签显示）
+	assert.match(menu, /DropdownMenuLabel>\{t\("tabs\.currentSessionGroup"\)\}/);
+	assert.match(menu, /DropdownMenuLabel>\{t\("tabs\.toolsGroup"\)\}/);
+	// 头部控制钮：常驻的运行/重载快捷钮 + 下拉箭头（不是省略号，菜单入口一眼可辨），
+	// 菜单内容复用同一套 items。
+	assert.match(control, /ChevronDown/);
+	assert.match(control, /SessionMenuItems/);
+	assert.match(control, /menu\.reloadResources/);
+	// 「重启」与「重载」图标必须语义正确且互相可辨：
+	// 重启=顺时针圆周箭头（RotateCw），重载=逆时针双箭头（RefreshCcw）；
+	// 电源符号语义是关机，不能用在这里。
+	assert.match(control, /<RotateCw\b/);
+	assert.match(control, /<RefreshCcw\b/);
+	assert.doesNotMatch(control, /<Power\b/);
+	assert.doesNotMatch(control, /<Puzzle\b/);
 	// Tab 级菜单为右键 ContextMenu（固定/关闭等），下拉触发按钮已移除
 	assert.match(source, /ContextMenuTrigger asChild/);
 	assert.doesNotMatch(source, /role="tab-menu"/);

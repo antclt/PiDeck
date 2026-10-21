@@ -7,40 +7,9 @@
 
 import type { IpcMain } from "electron";
 import { ipcChannels } from "../../shared/ipc";
-import { ENHANCE_CONTEXT_MAX_CHARS, ENHANCE_CONTEXT_MAX_MESSAGES, type EnhanceContextMessage, type EnhanceEventPayload, type EnhanceRunInput } from "../../shared/types/enhance";
+import type { EnhanceEventPayload, EnhanceRunInput } from "../../shared/types/enhance";
 import type { EnhancePromptService } from "../pi/enhance/EnhancePromptService";
-
-/** 模型/供应商 id 是目录中的原始键：中文、空格、冒号、URL 均合法，
- * 不在 IPC 层复制 pi 的命名文法，也不 trim 后改掉实际查找键。 */
-const MAX_MODEL_ID_LENGTH = 160;
-const MODEL_ID_CONTROL_CHARACTERS = /[\p{Cc}\u2028\u2029]/u;
-
-/** 草稿上限：输入框粘贴的长文本也会被增强，64KB 覆盖合理用途并挡住误传。 */
-const MAX_DRAFT_LENGTH = 64 * 1024;
-
-function nonEmptyString(value: unknown, maxLength: number): value is string {
-	return typeof value === "string" && value.trim().length > 0 && value.length <= maxLength;
-}
-
-/** 只拒绝空名称、控制字符与超长值；其余交给 pi 的模型目录匹配。 */
-function isModelId(value: unknown): value is string {
-	return nonEmptyString(value, MAX_MODEL_ID_LENGTH) && !MODEL_ID_CONTROL_CHARACTERS.test(value);
-}
-
-/** 上下文只接受正文白名单，并在发给独立助手前再次执行总预算检查。 */
-function parseContext(value: unknown): EnhanceContextMessage[] | undefined {
-	if (value === undefined) return undefined;
-	if (!Array.isArray(value) || value.length > ENHANCE_CONTEXT_MAX_MESSAGES) throw new Error("Invalid enhance input: context");
-	const result: EnhanceContextMessage[] = [];
-	let chars = 0;
-	for (const item of value) {
-		if (typeof item !== "object" || item === null || Array.isArray(item) || !("role" in item) || (item.role !== "user" && item.role !== "assistant") || !("text" in item) || !nonEmptyString(item.text, ENHANCE_CONTEXT_MAX_CHARS)) throw new Error("Invalid enhance input: context");
-		chars += item.text.length;
-		if (chars > ENHANCE_CONTEXT_MAX_CHARS) throw new Error("Invalid enhance input: context");
-		result.push({ role: item.role, text: item.text });
-	}
-	return result.length ? result : undefined;
-}
+import { MAX_DRAFT_LENGTH, isModelId, nonEmptyString, parseContextMessages } from "./enhancePayloadValidation";
 
 function parseEnhanceRunInput(value: unknown): EnhanceRunInput {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("Invalid enhance input: not an object");
@@ -49,8 +18,8 @@ function parseEnhanceRunInput(value: unknown): EnhanceRunInput {
 	if (!isModelId(record.provider)) throw new Error("Invalid enhance input: provider");
 	if (!isModelId(record.modelId)) throw new Error("Invalid enhance input: modelId");
 	if (!nonEmptyString(record.userText, MAX_DRAFT_LENGTH)) throw new Error("Invalid enhance input: userText");
-	const context = parseContext(record.context);
-	return { provider: record.provider, modelId: record.modelId, userText: record.userText, ...(context ? { context } : {}) };
+	const context = parseContextMessages(record.context, "enhance");
+	return { provider: record.provider, modelId: record.modelId, userText: record.userText, ...(context.length ? { context } : {}) };
 }
 
 export function registerEnhanceIpc(ipc: IpcMain, service: EnhancePromptService | null): void {

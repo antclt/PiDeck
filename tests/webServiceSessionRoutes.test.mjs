@@ -90,7 +90,7 @@ function fixture(overrides = {}) {
 		status: "idle",
 		createdAt: 2,
 	};
-	const calls = { createDraft: 0, createAnonymous: 0, createAgent: 0, createProject: [], deleteProject: [], send: [], stateTargets: [], modelTargets: [], rewindTargets: [], rewindParams: [], rewindRestores: [], fileChanges: [], subagents: [], todo: [] };
+	const calls = { createDraft: 0, createAnonymous: 0, createAgent: 0, createProject: [], deleteProject: [], send: [], stateTargets: [], modelTargets: [], rewindTargets: [], rewindParams: [], rewindRestores: [], subagents: [], todo: [] };
 	const targeted = (target, value) => ({ ok: true, value: { target, value } });
 	const deps = {
 		// SSE 流式依赖：测试环境不订阅真实 pi 事件，但必须提供可调用实现满足契约。
@@ -144,10 +144,6 @@ function fixture(overrides = {}) {
 			windowStart: 30,
 			truncated: true,
 		}),
-		listSessionFileChanges: async (sessionId) => {
-			calls.fileChanges.push(sessionId);
-			return [{ path: "src/a.ts", changeType: "edit", additions: 1, deletions: 0, timestamp: 1 }];
-		},
 		listSessionSubagents: async (sessionId) => {
 			calls.subagents.push(sessionId);
 			return [{ id: "sub-1", name: "explore", status: "completed", startedAt: 1 }];
@@ -949,13 +945,9 @@ async function startMockDevServer() {
 }
 
 /** dev 模式（devRendererUrl 已注入）下，静态请求全部代理到 vite dev server。 */
-test("session activity strips routes expose file changes, subagents, and todo snapshots", async () => {
+test("session activity strips routes expose subagents and todo snapshots", async () => {
 	await withServer(async ({ baseUrl }) => {
-		// 与桌面 IPC 同源的三条监控路由：形状 + 按 sessionId 取数
-		const files = await (await fetch(`${baseUrl}/api/sessions/session-1/file-changes`)).json();
-		assert.equal(files.changes.length, 1);
-		assert.equal(files.changes[0].path, "src/a.ts");
-
+		// 与桌面 IPC 同源的监控路由：形状 + 按 sessionId 取数
 		const subs = await (await fetch(`${baseUrl}/api/sessions/session-1/subagents`)).json();
 		assert.equal(subs.subagents[0].id, "sub-1");
 
@@ -964,6 +956,15 @@ test("session activity strips routes expose file changes, subagents, and todo sn
 
 		const missing = await (await fetch(`${baseUrl}/api/sessions/missing-session/todo`)).json();
 		assert.equal(missing.todo, null);
+	});
+});
+
+test("/api/sessions/:id/file-changes 已下线（2027-02）", async () => {
+	await withServer(async ({ baseUrl }) => {
+		// 会话级文件清单不再由 Web 端展示：桌面与 Web 都不再需要这条路由。
+		// 未命中路由即走兜底 404（而不是 503 或 200 空列表），确保它确实被移除。
+		const res = await fetch(`${baseUrl}/api/sessions/session-1/file-changes`);
+		assert.equal(res.status, 404);
 	});
 });
 

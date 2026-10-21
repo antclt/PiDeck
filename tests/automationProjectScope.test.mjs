@@ -15,7 +15,7 @@ test("a project menu opens its own automation task table", () => {
 	assert.match(sidebar, /onManageAutomations=\{\(\) => \{?\s*actions\.projects\.manageAutomations\(menuProject\.id\)/);
 	assert.match(projectMenu, /onManageAutomations: \(\) => void/);
 	assert.match(projectMenu, /<Clock className="size-3\.5"/);
-	assert.match(app, /manageAutomations: \(projectId\) => openAutomationModal\(projectId\)/);
+	assert.match(app, /manageAutomations: \(projectId\) => openAutomationPage\(projectId\)/);
 });
 
 test("project scope filters tasks and runs and locks new task ownership", () => {

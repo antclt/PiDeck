@@ -64,8 +64,10 @@ test("主进程正式版先跑 userData 更名迁移，再走 resolveAppUserData
 	// 契约：打包态（含 dev 通道安装包）与便携版都经 resolveAppUserDataDir 判定
 	assert.match(src, /resolveAppUserDataDir\(\{\s*explicitDir:\s*gatedExplicitUserDataDir,/);
 	assert.match(src, /isPackaged:\s*app\.isPackaged,/);
-	// 契约：启动顺序（IPC 注册→飞书注册→备份→建窗），中间允许插入注释行与旁路装配行（2026-10 统一接口聚合层引入 registerAllDomains）
-	assert.match(src, /registerIpc\(\);\s*(?:^[\t ]*(?:\/\/[^\n]*|\w+\(\);)[\t ]*\n\s*)*registerFeishuIpc\(\{[\s\S]*?\}\);\s*(?:\/\/[^\n]*\n\s*)*configBackupManager\?\.ensureInitialBackups\(\);\s*await createWindow\(\);/m);
+	// 契约：启动顺序（IPC 注册→飞书注册→备份→建窗）。中段用房泛匹配：dev 在两条注册之间
+	// 新增了 registerAllDomains / selectionToolWindow.warmUp，之后又插了 wechatService 装配，
+	// 逐行枚举跟不上演进；这里只锁「顺序与终点」。
+	assert.match(src, /registerIpc\(\);[\s\S]*?registerFeishuIpc\(\{[\s\S]*?\}\);[\s\S]*?configBackupManager\?\.ensureInitialBackups\(\);[\s\S]*?await createWindow\(\);/m);
 	assert.match(src, /Application startup failed/);
 	assert.match(src, /showErrorBox/);
 });

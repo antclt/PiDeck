@@ -5,8 +5,6 @@ import { settingsFocusAtom, settingsOpenAtom } from "../../atoms";
 import { updateStatusAtom } from "../../atoms/update-atoms";
 import { flushUpdateInstallPreflight, updateInstallPreflightTasksAtom } from "../../atoms/update-install-preflight";
 import { desktopApi as api } from "../../desktopApi";
-import { useBridgeResync } from "../../hooks/useBridgeResync";
-import { useBridgeSessionId } from "../bridge/BridgeSlot";
 import type { PiUpdateController } from "../../hooks/usePiUpdate";
 import { t } from "../../i18n";
 import { showNotice } from "../../utils/notice";
@@ -36,19 +34,9 @@ export function SettingsFeatureRoot(props: SettingsFeatureRootProps) {
 	const setOpen = useSetAtom(settingsOpenAtom);
 	const setFocus = useSetAtom(settingsFocusAtom);
 	const setUpdateStatus = useSetAtom(updateStatusAtom);
+	const updateStatus = useAtomValue(updateStatusAtom);
 	const updateInstallPreflightTasks = useAtomValue(updateInstallPreflightTasksAtom);
 	const updateInstallInFlightRef = useRef(false);
-	// 设置弹窗是**挂载/卸载**式（关闭时整个弹窗 return null），所以这里每次打开
-	// 都强制向桥要一次快照（§9.4 触发 3）—— 不用非 force 版本是因为
-	// 「绑定没变但桥侧贡献丢过」（如扩展 /reload 后重建）也需要补推。
-	// 补推对象是当前聚焦会话（应用级落点由它供给，不做回落）。
-	const bridgeSessionId = useBridgeSessionId();
-	const { requestResync: requestBridgeResync } = useBridgeResync(bridgeSessionId);
-	useEffect(() => {
-		if (!open) return;
-		requestBridgeResync({ force: true });
-	}, [open, requestBridgeResync]);
-
 	// 打开设置页即视为「已看过」更新圆点解释（无论从侧栏/toast/深链进入）：
 	// 用户已找到入口，coachmark 无需再弹（持久化标记，settings.update 幂等）。
 	useEffect(() => {
@@ -74,6 +62,11 @@ export function SettingsFeatureRoot(props: SettingsFeatureRootProps) {
 		if (updateInstallInFlightRef.current) return;
 		updateInstallInFlightRef.current = true;
 		try {
+			// manual 交付只是打开已下载的安装包，不退出应用，不需要编辑器落盘闸门。
+			if (updateStatus?.deliveryMode === "manual") {
+				await api.app.installUpdate();
+				return;
+			}
 			const allSaved = await flushUpdateInstallPreflight(updateInstallPreflightTasks.values());
 			if (!allSaved) {
 				showNotice(t("update.saveBeforeInstallDetail"), 0, "error", t("update.saveBeforeInstallTitle"));
@@ -92,7 +85,7 @@ export function SettingsFeatureRoot(props: SettingsFeatureRootProps) {
 		} finally {
 			updateInstallInFlightRef.current = false;
 		}
-	}, [updateInstallPreflightTasks]);
+	}, [updateInstallPreflightTasks, updateStatus?.deliveryMode]);
 
 	// 按字段级 useMemo 稳定弹窗 props：App 根组件重渲染（低频）不会连带
 	// 重渲染 SettingsModal（memo）。piUpdate 内部函数均为 useCallback，

@@ -46,9 +46,10 @@ test("main entry 把 runtime 状态服务注入 sessionIpc", () => {
 	assert.match(mainEntry, /getDshRuntimeStatus: \(\) => dshRuntimeStatus\.getStatus\(\)/);
 	assert.match(mainEntry, /canCreateDshSession: \(\) => dshRuntimeStatus\.canCreateDshSession\(\)/);
 	// runtime 不可用时不要白预热 host（约 200MB 的 utilityProcess）。
-	// 预热门控收敛到 dshWarmupEnabled()（含 default backend dsh + canCreateDshSession
-	// + 未手动停止），条件本体仍在该 helper 内。
-	assert.match(mainEntry, /function dshWarmupEnabled\(\): boolean[\s\S]{0,400}defaultAgentBackend === "dsh" &&\s*dshRuntimeStatus\.canCreateDshSession\(\)/);
+	// 预热门控收敛到 dshWarmupEnabled()，条件本体仍在该 helper 内。
+	// dev 已刻意移除 `defaultAgentBackend === "dsh"` 要求（runtime 装了就预热），
+	// 现条件 = canCreateDshSession && !dshManualStopped（手动停止优先）。
+	assert.match(mainEntry, /function dshWarmupEnabled\(\): boolean[\s\S]{0,400}dshRuntimeStatus\.canCreateDshSession\(\)[\s\S]{0,200}dshManualStopped !== true/);
 });
 
 test("preload 暴露安装态查询与订阅，订阅返回退订函数", () => {

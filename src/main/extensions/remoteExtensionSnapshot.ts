@@ -15,7 +15,7 @@
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { BUILT_IN_EXTENSIONS, INTERNAL_BUILT_IN_EXTENSIONS, isDefaultDisabledBuiltInExtension, isHiddenBuiltInExtension, resolveBuiltInExtensionPath, type BuiltInExtensionName, type BuiltInExtensionPathRoots } from "./builtInExtensions";
+import { BUILT_IN_EXTENSIONS, INTERNAL_BUILT_IN_EXTENSIONS, resolveBuiltInExtensionPath, type BuiltInExtensionName, type BuiltInExtensionPathRoots } from "./builtInExtensions";
 import { invalidateVerifiedArtifactFileHashCache, readVerifiedArtifact, type BuiltInExtensionsManifest } from "./builtInExtensionsManifest";
 
 /**
@@ -38,11 +38,8 @@ export type RemoteExtensionDisposition = "remote" | "remote-needs-env" | "local-
  * 「本机平台特有行为」的，一律不进远端；凡是「纯 pi 扩展 API + 会话条目 + RPC UI」的都可以进。
  */
 export const REMOTE_EXTENSION_DISPOSITIONS: Record<BuiltInExtensionName, RemoteExtensionDisposition> = {
-	// 桥的端点是 PiDeck 本机的 127.0.0.1（`PIDECK_BRIDGE_URL`），远端 pi 连不到；要做先设计 SSH 反向隧道。
-	"pi-deck-gui-bridge.ts": "local-only",
-	// 扩展点面板依赖桥挂出的 `ctx.ui.gui`。
-	"pi-deck-ext-points.ts": "local-only",
-	// 模型请求快照同样经桥上传。
+	// 模型请求快照经本机端点（`PIDECK_MODEL_TRACE_URL`，127.0.0.1）上传，远端 pi 连不到；
+	// 要做先设计 SSH 反向隧道。
 	"pi-deck-model-trace.ts": "local-only",
 	// 纯 input 钩子 + RPC UI（select/confirm），跨传输成立。
 	"pi-deck-request-size-recovery.ts": "remote",
@@ -70,6 +67,9 @@ export const REMOTE_EXTENSION_DISPOSITIONS: Record<BuiltInExtensionName, RemoteE
 	"pi-deck-vision.ts": "local-only",
 	// 只在 PiDeck 给 pi 进程注入本地代理环境（PIDECK_PI_PROXY_SCOPE）时才有意义；远端没有这份环境。
 	"pi-deck-shell-proxy.ts": "not-applicable",
+	// 纯 RPC 侧 `reload` 命令（ctx.reload()）：宿主经专用 IPC 触发，远端 pi 同样没有原生 /reload，
+	// 且它不依赖任何本机资源，因此可以注入。
+	"pi-deck-runtime.ts": "remote",
 };
 
 /** 全部内置扩展入口（含内部适配器），顺序与 `-e` 注入顺序一致。 */
@@ -99,21 +99,19 @@ export type RemoteExtensionListInput = {
 /**
  * 本次远端会话实际注入的扩展 basenames，顺序与 `BUILT_IN_EXTENSIONS` 一致（pi 按 `-e` 顺序注册）。
  *
- * 判定顺序刻意与 `listActiveBuiltInExtensionPaths` 对齐：noExtensions → hidden → 默认关闭（需显式 opt-in）
- * → 用户移除 → 远端处置 → 快照里存在 → 标题开关。任何一条不满足都跳过，**不抛错**：远端少一个扩展
- * 是降级，不是启动失败。
+ * 判定顺序刻意与 `listActiveBuiltInExtensionPaths` 对齐：noExtensions → 用户移除 → 远端处置
+ * → 快照里存在 → 标题开关。任何一条不满足都跳过，**不抛错**：远端少一个扩展是降级，不是启动失败。
+ *
+ * 注：dev 已整体下线「默认关闭（opt-in）」与「已隐藏」两组内置扩展（GUI 桥/扩展点面板随之下线），
+ * 所以本函数不再有那两道判据；`optInBuiltInExtensions` 入参保留只为兼容既有调用点。
  */
 export function listRemoteInjectableExtensionNames(input: RemoteExtensionListInput): string[] {
 	if (input.noExtensions === true) return [];
 	const removed = new Set((input.removedBuiltInExtensions ?? []).map((name) => name.trim()).filter(Boolean));
-	const optIn = new Set((input.optInBuiltInExtensions ?? []).map((name) => name.trim()).filter(Boolean));
 	const envAvailable = input.envAvailable === true;
 	const names: string[] = [];
 	for (const name of ALL_BUILT_IN_EXTENSION_NAMES) {
 		if (!isRemoteInjectable(REMOTE_EXTENSION_DISPOSITIONS[name], envAvailable)) continue;
-		// 已隐藏的内置扩展：与本地同理，历史 opt-in 残留也不能把它注回命令行。
-		if (isHiddenBuiltInExtension(name)) continue;
-		if (isDefaultDisabledBuiltInExtension(name) && !optIn.has(name)) continue;
 		if (name !== "pi-deck-shell-proxy.ts" && removed.has(name)) continue;
 		if (name === "pi-deck-session-title.ts" && input.autoSessionTitle === false) continue;
 		if (!input.available.has(name)) continue;

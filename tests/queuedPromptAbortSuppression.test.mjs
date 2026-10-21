@@ -111,7 +111,7 @@ test("abort entry points are wired to queue suppression", () => {
 	assert.match(appSource, /queueSuppressAutoDrain:\s*queue\.suppressSessionQueueAutoDrain/);
 
 	const composerAreaSource = readFileSync("src/renderer/src/components/session/ComposerArea.tsx", "utf8");
-	assert.match(composerAreaSource, /suppressQueuedDrain:\s*useSessionPaneServices\(\)\.queueSuppressAutoDrain/);
+	assert.match(composerAreaSource, /suppressQueuedDrain:\s*paneServices\.queueSuppressAutoDrain/);
 
 	const servicesSource = readFileSync("src/renderer/src/components/session/SessionPaneServices.tsx", "utf8");
 	assert.match(servicesSource, /queueSuppressAutoDrain\?:\s*\(sessionId:\s*string\)\s*=>\s*void/);

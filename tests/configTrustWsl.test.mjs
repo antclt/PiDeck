@@ -63,6 +63,11 @@ function loadConfigManager() {
 				return loadTsCommonJs("src/main/config/tokendanceAttribution.ts");
 			}
 			// 用量探针传输层抽取（6d9e2294）后新增的依赖；trust 测试不调用用量探测，空实现即可
+			// Sub2API 面板余额会话（dev 新增 ConfigManager 依赖）：trust 测试不触达用量探测链，
+			// 空实现足够；缺这一条时 require 会回落到以 tests/ 为基准解析 .ts 而报 MODULE_NOT_FOUND。
+			if (id === "./sub2apiPanelSession") {
+				return { fetchSub2ApiPanelBalanceWithRefresh: async () => ({ ok: false }) };
+			}
 			if (id === "./usageProbeTransport") {
 				return {
 					usageProbeRequest: async () => {

@@ -39,7 +39,7 @@ function loadModule() {
 	return sandbox.exports;
 }
 
-const { resolveSessionRunState, sessionRunCapabilities, canRunSessionAction, resolveProxyApplyStrategy } = loadModule();
+const { resolveSessionRunState, resolveSessionReloadMode, sessionRunCapabilities, canRunSessionAction, resolveProxyApplyStrategy } = loadModule();
 
 /** 所有状态 + binding 组合：覆盖「无进程」的两类以及终态持有绑定的情形。 */
 const STATE_MATRIX = [
@@ -140,6 +140,34 @@ test("in-flight queued prompts block restart but not abort", () => {
 	assert.equal(caps.canRestart, false);
 	// 停止回答（abort）不受影响：中断当前回合正是「就停这一步、别丢排队消息」的意图。
 	assert.equal(caps.canAbort, true);
+});
+
+test("hot reload is only available for live idle sessions with no queued sends", () => {
+	const idle = sessionRunCapabilities({ state: "idle", hasBinding: true });
+	assert.equal(idle.canHotReload, true);
+	assert.equal(canRunSessionAction(idle, "reloadResources"), true);
+
+	for (const input of [
+		{ state: "starting", hasBinding: true },
+		{ state: "running", hasBinding: true },
+		{ state: "error", hasBinding: true },
+		{ state: "closed", hasBinding: true },
+		{ state: "unstarted", hasBinding: false },
+	]) {
+		assert.equal(sessionRunCapabilities(input).canHotReload, false, `state=${input.state}`);
+	}
+
+	// busy（重启/停止/重载/激活在途）与排队消息都会拆掉正在处理的 handler，必须挡住。
+	assert.equal(sessionRunCapabilities({ state: "idle", hasBinding: true, busy: true }).canHotReload, false);
+	assert.equal(sessionRunCapabilities({ state: "idle", hasBinding: true, hasInFlightQueuedPrompt: true }).canHotReload, false);
+});
+
+test("reload entry is pi-only: DSH and ACP report no reload mode", () => {
+	assert.equal(resolveSessionReloadMode(undefined), "resources");
+	assert.equal(resolveSessionReloadMode("pi"), "resources");
+	// DSH 共享 host、ACP 由外部 CLI 托管：没有会话级 reload，头部工具条也整组不显示。
+	assert.equal(resolveSessionReloadMode("dsh"), "none");
+	assert.equal(resolveSessionReloadMode("acp"), "none");
 });
 
 test("resolveSessionRunState normalizes runtime snapshots", () => {

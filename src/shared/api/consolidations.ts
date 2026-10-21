@@ -59,6 +59,10 @@ export const SESSIONS_SUBDOMAINS = {
 		"detectDshRunnerNode",
 		"discoverDshModels",
 		"draftCommands",
+		// 2027-02 补齐基线遗漏：这两个方法在 preload sessions 命名空间里一直存在，
+		// 但从未归入任何子域，导致「四组并集 ≡ 全集」锚点长期偏差 2。
+		// 两者都是按目标取提示词模板（草稿 / runtime），与 draftCommands 同语义，归 runtime。
+		"draftPromptTemplates",
 		"editRuntimeMessage",
 		"exportRuntimeHtml",
 		"forkRuntimeSession",
@@ -83,7 +87,9 @@ export const SESSIONS_SUBDOMAINS = {
 		"listDshSubagents",
 		"listDshUserPlugins",
 		"listRuntimeCommands",
+		"listModels",
 		"listRuntimeModels",
+		"listRuntimePromptTemplates",
 		"listRuntimeThinkingLevels",
 		"listRuntimes",
 		"listSessionSubagents",
@@ -98,16 +104,17 @@ export const SESSIONS_SUBDOMAINS = {
 		"readDshSubagentHistory",
 		"readDshSystemPrompt",
 		"readMessageFullText",
+		"readOutline",
+		"readOutlineTitle",
 		"readProcessEvents",
 		"readReferenceMessages",
-		"requestBridgeResync",
+		"reloadResources",
 		"resolveLaunchDefaults",
 		"restartDshHost",
 		"restartRuntime",
 		"runDshGoalAction",
 		"runDshPlugin",
 		"searchDshPluginMarket",
-		"sendBridgeEvent",
 		"sendPrompt",
 		"sendUiResponse",
 		"setDshCredential",
@@ -126,7 +133,7 @@ export const SESSIONS_SUBDOMAINS = {
 		"updateDshSettings",
 	],
 	import: ["describeDshCredentials", "describeDshSettings", "importDshForeignSession", "importDshRuntimeDir", "importDshRuntimeFile", "listDshForeignSessions", "searchDshSessions", "syncDshForeignSessions"],
-	rewind: ["getBranchTree", "getRewindCheckpointDiff", "listRewindCheckpoints", "listSessionFileChanges", "restoreRewindCheckpoint"],
+	rewind: ["getBranchTree", "getRewindCheckpointDiff", "listRewindCheckpoints", "restoreRewindCheckpoint"],
 } as const satisfies Record<SessionSubdomainId, readonly string[]>;
 
 /**

@@ -38,7 +38,7 @@ export const RetryStep = memo(function RetryStep(props: { group: RetryGroupItem;
 					i18nParams: { ...props.group.message.meta?.i18nParams, delaySeconds: remainingSeconds },
 				};
 	const label = stripAnsi(translateI18nDescriptor(descriptor, props.group.message.text) || props.group.message.text).trim();
-	// 状态徽章与 ToolCard 三态同构（outline 琥珀 / danger-soft 红 / secondary 完成），
+	// 状态徽章与 ToolCard 三态同构（outline 琥珀 / danger-soft 红 / success-soft 绿），
 	// 扫读语言一致：一眼区分「在等重试 / 重试也救不回来 / 重试成功」。
 	const statusBadge = retryRunning ? (
 		<Badge variant="outline" className="gap-1 border-warning/40 px-1 py-0 text-chat-detail text-warning">
@@ -50,7 +50,7 @@ export const RetryStep = memo(function RetryStep(props: { group: RetryGroupItem;
 			{t("tool.statusError")}
 		</Badge>
 	) : (
-		<Badge variant="secondary" className="gap-1 px-1 py-0 text-chat-detail">
+		<Badge variant="outline" className="gap-1 border-success/40 bg-success-soft px-1 py-0 text-chat-detail text-success">
 			<CircleCheck size={9} aria-hidden="true" />
 			{t("tool.statusDone")}
 		</Badge>

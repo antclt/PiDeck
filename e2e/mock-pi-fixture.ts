@@ -53,6 +53,32 @@ export type SeedImageGenConfig = ImageGenConfigFile;
 const repoRoot = resolve(__dirname, "..");
 
 /**
+ * 主窗口识别：主窗口加载渲染层入口（打包态 file://…/index.html，dev 态 localhost 根），
+ * 系统级划词浮窗加载 selection-tool.html。
+ *
+ * 为什么不能用 app.firstWindow()：主进程会 warmUp 划词浮窗（SelectionToolWindow），它是
+ * 同进程的第二个 BrowserWindow，且经常比主窗口先完成加载；firstWindow() 拿到浮窗后，
+ * 整条用例的断言都跑在浮窗页上，表现为「项目 Tab 永远等不到」（2026-10-21 全量 e2e 红）。
+ */
+function isMainWindow(page: Page): boolean {
+	const url = page.url();
+	if (!url || url === "about:blank") return false;
+	if (url.includes("selection-tool")) return false;
+	return /index\.html(?:[?#]|$)/.test(url) || /^https?:\/\/(localhost|127\.0\.0\.1)[:/]/.test(url);
+}
+
+/** 等主窗口出现（浮窗预热可能先到）；超时按启动失败处理，避免用例在错误页上漂移到别处超时。 */
+async function waitForMainWindow(app: ElectronApplication): Promise<Page> {
+	const deadline = Date.now() + 60_000;
+	while (Date.now() < deadline) {
+		const page = app.windows().find(isMainWindow);
+		if (page) return page;
+		await new Promise((resolve) => setTimeout(resolve, 100));
+	}
+	throw new Error("e2e: main window did not appear within 60s（只看到划词浮窗或空页）");
+}
+
+/**
  * Playwright option fixture 的「元组陷阱」归一化入口。
  *
  * `test.use({ seedXxx: [...] })` 的值会被 Playwright 按
@@ -74,10 +100,23 @@ function normalizeSeeds<T>(name: string, value: readonly T[] | T | undefined, re
 	throw new Error(`${name} 只收到单个对象（不是数组）——这几乎一定是 Playwright 把 >=2 元素的数组当成 [value, options] 元组截断了。${requirement} 多个种子请用函数式覆盖：test.use({ ${name}: async ({}, use) => use([a, b]) })`);
 }
 
+/** E2E 窗口摆放：默认 quiet（屏幕外，不遮挡用户桌面）；需要真实几何的用例切 visible。 */
+export type E2EWindowMode = "quiet" | "visible";
+
 export const test = base.extend<
-	MockPiFixture & { seedProjects: SeedProject[] | undefined; seedFeishuBots: SeedFeishuBot[] | undefined; seedSessionFiles: SeedSessionFile[] | undefined; seedSettings: SeedSettings | undefined; seedImageGenConfig: SeedImageGenConfig | undefined; launchArgs: string[]; mockSessionInProject: boolean }
+	MockPiFixture & {
+		seedProjects: SeedProject[] | undefined;
+		seedFeishuBots: SeedFeishuBot[] | undefined;
+		seedSessionFiles: SeedSessionFile[] | undefined;
+		seedSettings: SeedSettings | undefined;
+		seedImageGenConfig: SeedImageGenConfig | undefined;
+		launchArgs: string[];
+		mockSessionInProject: boolean;
+		e2eWindowMode: E2EWindowMode;
+	}
 >({
 	seedProjects: [undefined, { option: true }],
+	e2eWindowMode: ["quiet", { option: true }],
 	seedFeishuBots: [undefined, { option: true }],
 	seedSessionFiles: [undefined, { option: true }],
 	seedSettings: [undefined, { option: true }],
@@ -85,7 +124,7 @@ export const test = base.extend<
 	// Exercise real startup intents with the same isolated profile and mock RPC backend.
 	launchArgs: [[], { option: true }],
 	mockSessionInProject: [false, { option: true }],
-	app: async ({ seedProjects, seedFeishuBots, seedSessionFiles, seedSettings, seedImageGenConfig, launchArgs, mockSessionInProject }, use) => {
+	app: async ({ seedProjects, seedFeishuBots, seedSessionFiles, seedSettings, seedImageGenConfig, launchArgs, mockSessionInProject, e2eWindowMode }, use) => {
 		// 先归一化（元组陷阱见 normalizeSeeds 注释）：非法值在启动 Electron 之前就报错，
 		// 避免用例因「种子项目凭空消失」在后面超时。
 		const projects = normalizeSeeds("seedProjects", seedProjects, "项目需含 id / name / path（用 makeSeedProject 生成）。");
@@ -187,8 +226,10 @@ export const test = base.extend<
 			const env = {
 				...process.env,
 				CI: "1",
-				// PIDECK_E2E：主进程 isE2E 开关，窗口 showInactive 不抢焦点、不最大化（见 main/index.ts）
+				// PIDECK_E2E：主进程 isE2E 开关，窗口不抢焦点、不最大化，并默认摆到屏幕外（见 main/index.ts）
 				PIDECK_E2E: "1",
+				// quiet（默认）= 窗口屏幕外，不遮挡用户桌面；visible 给需要真实窗口几何的用例回退。
+				PIDECK_E2E_WINDOW_MODE: e2eWindowMode,
 				PIDECK_MOCK_SESSION_IN_PROJECT: mockSessionInProject ? "1" : "0",
 				// 主进程按 PIDECK_E2E_USER_DATA_DIR 覆写 userData（与 fixtures.ts 同源）。
 				// 缺了它 app.setPath("userData") 仍指向真实开发目录：seedProjects / seedSettings /
@@ -218,7 +259,7 @@ export const test = base.extend<
 		}
 	},
 	window: async ({ app }, use) => {
-		const window = await app.firstWindow();
+		const window = await waitForMainWindow(app);
 		await window.waitForLoadState("domcontentloaded");
 		// 启动引导弹窗会抢焦点/遮拦点击，统一在这里挂上「出现即关」，
 		// 否则会伪装成业务失败（点击超时、打字被吞）。

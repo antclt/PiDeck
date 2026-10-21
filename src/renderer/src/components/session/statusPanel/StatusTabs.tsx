@@ -1,26 +1,24 @@
 import type { ReactNode } from "react";
-import { Bot, ChevronDown, ChevronUp, FileEdit, ListChecks } from "lucide-react";
-import { cn } from "@/lib/utils";
-import type { SessionFileChange } from "../../../../../shared/types";
+import { Bot, ChevronDown, ChevronUp, ListChecks } from "lucide-react";
 import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
 import { TabsList, TabsTrigger } from "../../ui-shadcn/tabs";
 import type { AgentTodoItem } from "../agentTodoParser";
-import { FileEntry } from "../SessionFilesStrip";
 import { DshSubagentEntryRow, PiSubagentEntryRow, type SessionSubagentList } from "../SessionSubagentsStrip";
 import { TodoItemRow, progressLabel } from "../SessionTodoStrip";
-import type { DiffFileHandler } from "../ToolCallComponents";
-import { fileChangeKind, type FileChangeKind, type SessionStatusTab } from "./sessionStatusPanelModel";
+import type { SessionStatusTab } from "./sessionStatusPanelModel";
 
 /**
- * 会话状态面板的展示件：tab 栏（32px，与收起高度一致）与三个 tab 的内容。
+ * 会话状态面板的展示件：tab 栏（32px，与收起高度一致）与各 tab 内容。
  * 行组件全部复用输入框上方折叠条的同款实现，只换外层容器。
+ *
+ * 2027-02：files tab 已移除——文件修改由每轮末尾的 chip 行（turn/TurnFileChanges）
+ * 在轮次上下文里展示，右侧再挂一份会话级列表只是重复入口。
  */
 
 export type StatusTabBadges = {
 	/** 待办「已完成/总数」，空列表为 null */
 	todo: string | null;
-	files: number;
 	subagentsTotal: number;
 	subagentsRunning: number;
 };
@@ -43,7 +41,6 @@ function CountBadge({ children }: { children: ReactNode }) {
 export function StatusTabBar(props: { badges?: StatusTabBadges; collapsed: boolean; autoCollapsed: boolean; onToggleCollapsed: () => void; onTriggerClick: () => void }) {
 	const { badges } = props;
 	const todoLabel = t("sessionStatus.tab.todo");
-	const filesLabel = t("sessionStatus.tab.files");
 	const subagentsLabel = t("sessionStatus.tab.subagents");
 	const running = badges?.subagentsRunning ?? 0;
 	const subagentsTotal = badges?.subagentsTotal ?? 0;
@@ -52,14 +49,6 @@ export function StatusTabBar(props: { badges?: StatusTabBadges; collapsed: boole
 		<div className="flex h-8 shrink-0 items-center border-b border-border-subtle">
 			<TabsList variant="line" className="h-8 min-w-0 flex-1 overflow-hidden border-b-0">
 				<StatusTrigger value="todo" icon={<ListChecks className="size-3.5" aria-hidden="true" />} label={todoLabel} description={[todoLabel, badges?.todo].filter(Boolean).join(" · ")} badge={badges?.todo ? <CountBadge>{badges.todo}</CountBadge> : null} onClick={props.onTriggerClick} />
-				<StatusTrigger
-					value="files"
-					icon={<FileEdit className="size-3.5" aria-hidden="true" />}
-					label={filesLabel}
-					description={badges && badges.files > 0 ? `${filesLabel} · ${t("sessionFiles.count", { count: badges.files })}` : filesLabel}
-					badge={badges && badges.files > 0 ? <CountBadge>{badges.files}</CountBadge> : null}
-					onClick={props.onTriggerClick}
-				/>
 				<StatusTrigger
 					value="subagents"
 					icon={<Bot className="size-3.5" aria-hidden="true" />}
@@ -102,38 +91,6 @@ export function StatusTodoTab({ items }: { items: AgentTodoItem[] }) {
 				))}
 			</ul>
 		</div>
-	);
-}
-
-const FILE_KIND_BADGE_CLASS: Record<FileChangeKind, string> = {
-	write: "bg-success/15 text-success",
-	edit: "bg-info/15 text-info",
-};
-
-function FileKindBadge({ kind }: { kind: FileChangeKind }) {
-	const label = kind === "write" ? t("sessionStatus.fileKind.write") : t("sessionStatus.fileKind.edit");
-	const hint = kind === "write" ? t("sessionStatus.fileKindHint.write") : t("sessionStatus.fileKindHint.edit");
-	return (
-		// h-9 与 FileEntry 顶部文件行对齐，展开 diff 后徽标仍钉在首行
-		<span className="flex h-9 shrink-0 items-center">
-			<span className={cn("rounded px-1 py-0.5 text-micro font-medium leading-none", FILE_KIND_BADGE_CLASS[kind])} title={hint}>
-				{label}
-			</span>
-		</span>
-	);
-}
-
-export function StatusFilesTab(props: { sessionId: string; entries: SessionFileChange[]; loading: boolean; onOpenFile?: (path: string) => void; onDiffFile?: DiffFileHandler }) {
-	if (props.entries.length === 0) return <StatusEmpty>{props.loading ? t("sessionFiles.loading") : t("sessionFiles.empty")}</StatusEmpty>;
-	return (
-		<ul className="flex flex-col gap-1 px-2 py-2">
-			{props.entries.map((entry) => (
-				<li key={entry.path} className="flex min-w-0 shrink-0 items-start gap-1.5">
-					<FileKindBadge kind={fileChangeKind(entry)} />
-					<FileEntry sessionId={props.sessionId} entry={entry} onOpenFile={props.onOpenFile} onDiffFile={props.onDiffFile} />
-				</li>
-			))}
-		</ul>
 	);
 }
 

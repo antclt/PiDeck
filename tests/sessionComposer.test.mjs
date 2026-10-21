@@ -93,6 +93,12 @@ function createSendHarness(initial = {}) {
 		// DSH 发送拦截门读取的只读 atom（初值 installed，测试按需改写）。
 		dshRuntimeStatusAtom: {},
 		openSettingsAtom: {},
+		// dev 新增：新回合折叠节拍、会话消息缓存（useSessionSend 在发送成功后写入/失效）。
+		bumpNewTurnCollapseTickAtom: {},
+		cacheSessionMessagesAtom: {},
+		sessionMessagesCacheAtom: {},
+		// dev 新增：会话重载态（useSessionSend 的 reload 分支读取；键为 sessionId）。
+		sessionReloadingByIdAtom: {},
 	};
 	const state = new Map([
 		[atoms.sessionDraftByIdAtom, { ...(initial.drafts ?? {}) }],
@@ -103,6 +109,9 @@ function createSendHarness(initial = {}) {
 		[atoms.sessionSendStateByIdAtom, {}],
 		[atoms.sessionRecordsAtom, { ...(initial.records ?? {}) }],
 		[atoms.dshRuntimeStatusAtom, { state: "installed" }],
+		[atoms.sessionReloadingByIdAtom, {}],
+		[atoms.sessionMessagesCacheAtom, {}],
+		[atoms.bumpNewTurnCollapseTickAtom, 0],
 	]);
 	// DSH runtime 拦截时弹的「去安装」提示（showDshRuntimeBlockHint 的替身）。
 	const hints = [];
@@ -129,6 +138,11 @@ function createSendHarness(initial = {}) {
 			if (Object.keys(value).length > 0) next[input.sessionId] = value;
 			else delete next[input.sessionId];
 			state.set(atoms.sessionQuotesByIdAtom, next);
+		} else if (atom === atoms.cacheSessionMessagesAtom) {
+			// dev 新增：发送路径把乐观消息写进会话消息缓存（useSessionSend 的 setCacheMessages）。
+			const cache = { ...(state.get(atoms.sessionMessagesCacheAtom) ?? {}) };
+			cache[input.sessionId] = { messages: input.messages, source: input.source };
+			state.set(atoms.sessionMessagesCacheAtom, cache);
 		} else if (atom === atoms.setSessionSendStateAtom) {
 			const next = { ...state.get("sendStates") };
 			if (input.state.status === "idle") delete next[input.sessionId];
@@ -164,6 +178,7 @@ function createSendHarness(initial = {}) {
 		"../../../shared/types/dshRuntime": { dshSendBlockReason },
 		// `/login` 拦截后的入口：记录调用参数，断言「没被当普通消息发出去」。
 		"../utils/composerSlashCommand": { classifyComposerSlashCommand },
+		"../atoms/session-commands-atoms": { sessionReloadingByIdAtom: atoms.sessionReloadingByIdAtom },
 		"../utils/dshRuntimeHint": {
 			// useSessionSend 顶部还解构了 DSH_INSTALL_SETTINGS_TARGET / maybeHintMissingDshRunnerNode
 			// （后者在 DSH 会话放行后调用，探测本机 Node）；测试环境 desktopApi 不存在，桩为 no-op。
@@ -188,7 +203,7 @@ test("the real send state machine snapshots multiline atom text", async () => {
 	let submitted;
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		sendPrompt: async (input) => {
 			submitted = input;
@@ -206,7 +221,7 @@ test("the real send state machine preserves input typed during a rejected delive
 	const deferred = createDeferred();
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		sendPrompt: async () => deferred.promise,
 	});
@@ -224,7 +239,7 @@ test("the real send state machine handles pure images, double clicks, and unknow
 	let imageCalls = 0;
 	const imageSend = imageHarness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		sendPrompt: async (input) => {
 			imageCalls += 1;
@@ -240,7 +255,7 @@ test("the real send state machine handles pure images, double clicks, and unknow
 	let clickCalls = 0;
 	const clickSend = clickHarness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		sendPrompt: async () => {
 			clickCalls += 1;
@@ -257,7 +272,7 @@ test("the real send state machine handles pure images, double clicks, and unknow
 	let unknownCalls = 0;
 	const unknownSend = unknownHarness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		sendPrompt: async () => {
 			unknownCalls += 1;
@@ -282,7 +297,7 @@ test("a pre-send Chat surface promotes once and only sends through its real Sess
 	let submitted;
 	const send = harness.send({
 		sessionId: bootstrapId,
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		ensureSessionId: async (sourceSessionId) => {
 			promotionCalls += 1;
@@ -531,7 +546,7 @@ test("/new is intercepted as a desktop session create, not sent to pi", async ()
 	let createCalls = 0;
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		createNewSession: async () => {
 			createCalls += 1;
@@ -553,7 +568,7 @@ test("/login opens the provider login dialog instead of being sent to pi", async
 	const opened = [];
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		openProviderLogin: (providerId) => {
 			opened.push(providerId);
@@ -577,7 +592,7 @@ test("a bare /login without provider still opens the dialog", async () => {
 	const opened = [];
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		openProviderLogin: (providerId) => {
 			opened.push(providerId);
@@ -597,7 +612,7 @@ test("DSH session send is blocked with a friendly hint when runtime is missing",
 	let sendPromptCalls = 0;
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		sendPrompt: async () => {
 			sendPromptCalls += 1;
@@ -625,7 +640,7 @@ test("DSH session send blocks with broken reason when runtime is broken", async 
 	let sendPromptCalls = 0;
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => undefined,
 		sendPrompt: async () => {
 			sendPromptCalls += 1;
@@ -647,7 +662,7 @@ test("DSH session send passes through when runtime is installed or checking", as
 		let sendPromptCalls = 0;
 		const send = harness.send({
 			sessionId: "session-a",
-			templates: [],
+			getTemplates: () => [],
 			compact: async () => undefined,
 			sendPrompt: async () => {
 				sendPromptCalls += 1;
@@ -671,7 +686,7 @@ test("/compact releases the send lock so a follow-up prompt can send", async () 
 	let sendPromptCalls = 0;
 	const send = harness.send({
 		sessionId: "session-a",
-		templates: [],
+		getTemplates: () => [],
 		compact: async () => {
 			compactCalls += 1;
 		},

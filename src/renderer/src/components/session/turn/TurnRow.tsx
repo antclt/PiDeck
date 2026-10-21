@@ -7,6 +7,7 @@ import type { AgentBackend, ChatMessage, ImageContent } from "../../../../../sha
 import { liveTextActiveBySessionAtom, newTurnCollapseTickBySessionIdAtomFamily, runStepsVisibleMemoryBySessionIdAtomFamily, type RunStepsVisibleMemoryEntry } from "../../../atoms/session-atoms";
 import { turnFlowSettingsAtom } from "../../../atoms/app-ui-atoms";
 import { t } from "../../../i18n";
+import { useStreamSelectionPreserve } from "../../../hooks/useStreamSelectionPreserve";
 import { Button } from "../../ui-shadcn/button";
 import { Collapsible, CollapsibleContent } from "../../ui-shadcn/collapsible";
 import { formatDuration } from "../TimelineFormat";
@@ -31,8 +32,8 @@ import { RetryStep } from "./RetryStep";
 import { ErrorStep } from "./ErrorStep";
 import { ToolStep } from "./ToolStep";
 import { ExtensionEntryStep } from "./ExtensionEntryStep";
+import { TurnFileChanges } from "./TurnFileChanges";
 import { useTurnExecution } from "./useTurnExecution";
-import { BridgeGuiSlot, useBridgeThinkingLabel } from "../../bridge/BridgeSlot";
 import type { DiffFileHandler } from "../ToolCallComponents";
 
 /** sessionId 为空时的占位 atom：恒 false（无会话不挂 live）。 */
@@ -96,6 +97,9 @@ export type TurnRowProps = {
 export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 	const { run } = props;
 	const rowRef = useRef<HTMLElement | null>(null);
+	// 流式期间保持划选（MarkdownStream 每帧重渲染会挤掉浏览器选区，见 hook 头注释）。
+	// 挂在本轮容器上：live 正文与 settled 正文都在 rowRef 内，流式 churn 与 settle 换树都能覆盖。
+	useStreamSelectionPreserve(rowRef);
 	const [editing, setEditing] = useState(false);
 	const [editText, setEditText] = useState("");
 	const editAreaRef = useRef<HTMLDivElement | null>(null);
@@ -187,9 +191,6 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 	// 流式对话行为设置（App 同步写入）+ 新一轮信号（composer 发送成功后 bump）。
 	// 设置变化低频；tick 经 atomFamily selectAtom 隔离，跨会话 bump 不触发本行重渲染。
 	const flowSettings = useAtomValue(turnFlowSettingsAtom);
-	// GUI 扩展桥：扩展设的折叠思考块标签（ctx.ui.setHiddenThinkingLabel）。
-	// 无贡献时为 undefined，ThinkingBlock 保持原生耗时小字（§7.4 只追加）。
-	const bridgeThinkingLabel = useBridgeThinkingLabel(props.sessionId);
 	const newTurnCollapseTick = useAtomValue(props.sessionId ? newTurnCollapseTickBySessionIdAtomFamily(props.sessionId) : NO_TURN_TICK_ATOM);
 	// 执行过程展开状态跨挂载记忆（run 级）：切会话再切回时恢复手动/流式展开的
 	// 轮次；selectAtom 按 run.id 取值，同会话其它 run 变化不重渲染本行。
@@ -364,7 +365,7 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 											if (item.kind === "process-entry") {
 												itemKey = item.entry.id;
 												if (item.entry.kind === "thinking-entry") {
-													content = <ThinkingStep group={item.entry.group} hidden={!stepsVisible} showThinking={props.showThinking} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} sessionId={props.sessionId} hiddenLabel={bridgeThinkingLabel} />;
+													content = <ThinkingStep group={item.entry.group} hidden={!stepsVisible} showThinking={props.showThinking} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />;
 												} else if (item.entry.kind === "retry-entry") {
 													// 自动重试过程行：与工具/思考同层，失败红、运行中旋转（见 RetryStep 注释）
 													content = <RetryStep group={{ kind: "retry-group", id: item.entry.id, message: item.entry.message }} hidden={!stepsVisible} />;
@@ -441,6 +442,12 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 					</div>
 				))}
 
+				{/* 本轮产物：修改的文件 chip 行（左缩进对齐正文列，虚线分隔）。
+				    位置对齐 Proma：正文之后、操作栏之前——「改了哪些文件」属于本轮结论，
+				    而非下一轮的输入（旧实现在 composer 上方的常驻卡片里，与轮次脱节）。
+				    流式中不渲染：文件列表还在长，逐条冒出来会让正文区持续抖动。 */}
+				<TurnFileChanges run={run} streaming={isRunLive || Boolean(props.isStreaming)} onOpenFile={props.onOpenFile} onDiffFile={props.onDiffFile} />
+
 				{/* 操作栏 + 尾部耗时/模型：合并为同一行，耗时与模型排在行末（少占一行高度）。
 				    耗时：回复生成中由 LiveDuration 实时计时（100ms 连续跳动，用户视线在底部），
 				    回复结束后固定为总耗时。全轮只有一个耗时显示点（行头只留时间戳），
@@ -497,10 +504,6 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 					</div>
 				)}
 			</div>
-			{/* GUI 扩展桥：消息气泡附加落点（ctx.gui.setMessageExtra，key = role）。
-			    TurnRow 渲染的是助手回合，故按 role="assistant" 匹配。
-			    **追加在默认内容下方**，不顶替气泡（§7.1-B / §7.4）。无贡献时不占位。 */}
-			<BridgeGuiSlot sessionId={props.sessionId} slot="message.extra" matchKey="assistant" className="mt-1 flex flex-col gap-1" />
 		</article>
 	);
 }, turnRowPropsEqual);

@@ -34,14 +34,15 @@ test("session view and start surface mount the strips then goal", () => {
 	const view = viewSource();
 	const start = startSource();
 	assert.match(view, /<SessionTodoStrip sessionId=\{sessionId\} \/>/);
-	assert.match(view, /<SessionFilesStrip[\s\S]*?run=\{latestAgentRun\}[\s\S]*?onDiffFile=\{onDiffFile\}/);
 	assert.match(view, /<SessionSubagentsStrip[\s\S]*?onOpenChildSession=\{onOpenBranchSession\}/);
 	assert.match(view, /<SessionGoalStrip sessionId=\{sessionId\} \/>/);
-	assert.ok(view.indexOf("<SessionTodoStrip") < view.indexOf("<SessionFilesStrip") && view.indexOf("<SessionFilesStrip") < view.indexOf("<SessionSubagentsStrip") && view.indexOf("<SessionSubagentsStrip") < view.indexOf("<SessionGoalStrip"), "strip order must be todo → files → subagents → goal in SessionView widgets");
+	assert.ok(view.indexOf("<SessionTodoStrip") < view.indexOf("<SessionSubagentsStrip") && view.indexOf("<SessionSubagentsStrip") < view.indexOf("<SessionGoalStrip"), "strip order must be todo → subagents → goal in SessionView widgets");
+	// 「修改的文件」已改为每轮末尾的 chip 行（turn/TurnFileChanges），不再占 composer 槽位
+	assert.doesNotMatch(view, /SessionFilesStrip/);
 	assert.match(start, /<SessionTodoStrip sessionId=\{props\.sessionId\} \/>/);
-	assert.match(start, /<SessionFilesStrip sessionId=\{props\.sessionId\} \/>/);
 	assert.match(start, /<SessionSubagentsStrip sessionId=\{props\.sessionId\} \/>/);
 	assert.match(start, /<SessionGoalStrip sessionId=\{props\.sessionId\} \/>/);
+	assert.doesNotMatch(start, /SessionFilesStrip/);
 });
 
 test("goal and queue copy is present in both locale dictionaries", () => {

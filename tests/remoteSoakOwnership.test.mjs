@@ -68,7 +68,9 @@ test("resource permission errors are not converted to a fake zero/absent process
 	assert.deepEqual(f.kills, []);
 });
 
-test("the fd-kind inventory reads a real /proc and buckets Chromium shared memory instead of listing it per segment", () => {
+// /proc/<pid>/fd 只存在于 Linux：macOS 与 Windows 上这个用例没有意义（旧版靠「碰巧有 fd」
+// 才绿过，Windows 上恒红）。用平台门禁显式 skip，不把环境限制伪装成功能回归。
+test("the fd-kind inventory reads a real /proc and buckets Chromium shared memory instead of listing it per segment", { skip: process.platform !== "linux" ? "/proc/<pid>/fd only exists on Linux" : false }, () => {
 	const { readSoakFdKinds } = loadTsCommonJs("e2e/remote-soak-evidence.ts");
 	const kinds = readSoakFdKinds(process.pid, 200);
 	const total = Object.values(kinds).reduce((sum, count) => sum + count, 0);

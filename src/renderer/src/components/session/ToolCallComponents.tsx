@@ -20,7 +20,6 @@ import { FileDiff } from "../agents/file-diff";
 import { desktopApi } from "../../desktopApi";
 import { copyTextWithCopiedNotice } from "../../utils/clipboardNotice";
 import { formatDuration, getToolDetailText, getToolDiffTarget, getToolExitCode, getToolLiveStartTimestamp, getToolName, getToolStatus, fileChangeToDiffLines } from "./TimelineFormat";
-import { BridgeGuiSlot } from "../bridge/BridgeSlot";
 import { useInsideProcessGroupBody } from "./turn/processGroupScrollContext";
 
 export type DiffFileHandler = (path: string, originalContent?: string, content?: string) => void;
@@ -237,7 +236,8 @@ export const ToolCard = memo(function ToolCard(props: {
 	const askCard = props.message.meta?._askCard as AskCardSummary | undefined;
 	const isAskCard = Boolean(askCard?.question) || (toolName.toLowerCase() === "ask_question" && status === "running");
 	// 状态徽章（借鉴 AI Elements Tool 的 getStatusBadge）：三态图标+文案 pill 一眼可辨。
-	// running 保留琥珀色警示位；error 用 destructive 红；done 用 secondary。
+	// running 琥珀（进行中）、error soft 红（失败）、done soft 绿（完成）——完成是正向终态，
+	// 用绿色与失败/进行中形成三色语义；旧实现用 secondary 灰，用户反馈「完成了还是灰的」。
 	// 低强调确认（ask_question 已回答时文案替换为「已回答」）。
 	// 随 trigger 行紧凑化（24px）同步收紧：图标 11→9px、Badge 内边距 py-0.5→py-0、px-1.5→px-1。
 	// 2026-11：移除 running 的转圈动画（用户反馈动画具干扰性），只保留「进行中」文字；
@@ -280,7 +280,7 @@ export const ToolCard = memo(function ToolCard(props: {
 			);
 		}
 		return (
-			<Badge variant="secondary" className="gap-1 px-1 py-0 text-chat-detail">
+			<Badge variant="outline" className="gap-1 border-success/40 bg-success-soft px-1 py-0 text-chat-detail text-success">
 				<CircleCheck size={9} aria-hidden="true" />
 				{askCard?.answered ? t("ask.answered") : t("tool.statusDone")}
 			</Badge>
@@ -453,10 +453,6 @@ export const ToolCard = memo(function ToolCard(props: {
 						)}
 					</div>
 				)}
-				{/* GUI 扩展桥：工具卡附加落点（ctx.gui.setToolExtra，key = toolName）。
-				    **在默认内容下方追加**，不顶替默认工具卡（§7.1-B / §7.4 只追加）。
-				    无该 toolName 的贡献时返回 null，不占位。 */}
-				<BridgeGuiSlot sessionId={props.sessionId} slot="tool.extra" matchKey={toolName} className="ml-5 mt-1 flex flex-col gap-1 pl-3" />
 			</section>
 		</TimelineMarker>
 	);

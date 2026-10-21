@@ -289,7 +289,7 @@ export function RemoteGitPanel({ project }: { project: RemoteProject }) {
 			) : null}
 			{state.loading || state.diffLoading || state.mutating ? (
 				<div role="status" className="flex items-center gap-2 p-3 text-text-secondary">
-					<LoaderCircle size={14} className="animate-spin" />
+					<LoaderCircle size={14} className="animate-pideck-spin" />
 					{t(
 						state.mutating
 							? state.mutatingKind === "init"

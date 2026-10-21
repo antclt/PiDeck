@@ -1,5 +1,6 @@
 import type { ChatMessage, DshQueuedMessage, ImageContent, TodoItem } from "../../shared/types";
 import { defaultToolDetailTranslate, formatToolDetail, truncateDetailWithMeta, type ToolDetailTranslate } from "../../shared/formatToolDetail";
+import { getToolFilePath, isFileChangeToolName } from "../../shared/fileChanges";
 
 /**
  * DSH SessionEvent → PiDeck ChatMessage 投影（纯函数，无副作用，可单测）。
@@ -75,6 +76,21 @@ const TOOL_RESULT_MAX_CHARS = 2000;
 /** 运行时收窄：仅当值是对象且非数组时返回（用于可选字段的安全读取）。 */
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * PTC 子调用实参：实测 `tool/ptc-dispatch` 的 `arguments` 是对象（dsh-tools 已解析）；
+ * 兼容 JSON 字符串——与 `tool/call` 的 arguments 约定同源，避免版本差异时静默丢文件。
+ */
+function parseArgsObject(value: unknown): Record<string, unknown> | undefined {
+	if (isRecord(value)) return value;
+	if (typeof value !== "string" || !value.trim()) return undefined;
+	try {
+		const parsed: unknown = JSON.parse(value);
+		return isRecord(parsed) ? parsed : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 /** 两版 TodoItem 列表是否等价（长度 + content/status 逐一比对，避免无谓的 stateChanged）。 */
@@ -637,6 +653,44 @@ export function projectDshEvent(
 			next.activeToolCalls = activeToolCalls;
 			next.executingTool = Array.from(activeToolCalls.values()).at(-1);
 			next.stateChanged = true;
+			break;
+		}
+		case "tool/ptc-dispatch": {
+			// PTC 模式（preset 走 run_code 单工具）下，模型不是在顶层调 write/edit，而是在程序里
+			// `await tools.write(...)`：每次子调用只落 `tool/ptc-dispatch` 事件
+			// （dsh-tools 的 session.append("tool/ptc-dispatch")），时间线里只有一张 run_code 卡。
+			// 后果：DSH 会话的「本轮修改的文件」（composer 横栏 + 右侧状态面板）恒为空
+			// ——两侧都按 toolName=write/edit… 收集，run_code 永远命中不到（用户反馈）。
+			//
+			// 这里只把**文件修改类**子调用投影成隐藏工具消息（meta.ptcNested）：
+			// - 渲染层 AppUtils.groupToolMessages 会跳过它们（时间线仍只显示外层 run_code）；
+			// - shared/fileChanges.collectSessionFileChanges 照常按 toolName + file_path 命中，
+			//   文件汇总因此能拿到路径与 diff（edit 的 old_string/new_string、write 的 content
+			//   与 DSH 工具实参同形，无需额外适配）。
+			// 只投影完成态（`tool/ptc-dispatch`），跳过 `-start`：横栏按文件聚合，运行中没有新内容。
+			const ptcName = typeof data.name === "string" ? data.name : "";
+			if (!isFileChangeToolName(ptcName)) break;
+			const ptcArgs = parseArgsObject(data.arguments);
+			// 没有路径的子调用对文件汇总无意义（也避免给隐藏消息留下无主卡片）。
+			if (!ptcArgs || !getToolFilePath(ptcArgs)) break;
+			const ptcSubCallId = typeof data.subCallId === "string" ? data.subCallId : undefined;
+			next.messages = appendMessageOnce(base.messages, {
+				id: ptcSubCallId ? `dsh:ptc:${ptcSubCallId}` : `dsh:${seq}`,
+				agentId,
+				role: "tool",
+				text: ptcName,
+				timestamp: eventTime(event.time),
+				meta: {
+					toolCallId: ptcSubCallId ?? `dsh:ptc:${seq}`,
+					toolName: ptcName,
+					status: data.isError === true ? "error" : "done",
+					args: ptcArgs,
+					// 隐藏标记：时间线分组跳过，文件汇总照常读取（见上）。
+					ptcNested: true,
+					...(typeof data.parentCallId === "string" ? { ptcParentCallId: data.parentCallId } : {}),
+				},
+			});
+			next.messagesChanged = true;
 			break;
 		}
 		case "turn/start": {

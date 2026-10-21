@@ -1,5 +1,6 @@
 import { atom } from "jotai";
 import type { AutomationRun, AutomationSettings, AutomationSnapshot, AutomationTaskSummary } from "../../../shared/types";
+import { closeWorkspacePageAtom, openWorkspacePageAtom, workspacePageTabStateAtom } from "./workspace-page-atoms";
 
 /**
  * 主进程定时任务与自动化快照（含 tasks、runs、settings 与 revision）。
@@ -7,28 +8,31 @@ import type { AutomationRun, AutomationSettings, AutomationSnapshot, AutomationT
  */
 export const automationSnapshotAtom = atom<AutomationSnapshot | null>(null);
 
-/**
- * 定时任务管理弹框是否打开。
- * 管理界面（AutomationWorkspace）以模态弹框呈现，避免覆盖会话区打断当前工作流。
- */
-export const automationModalOpenAtom = atom<boolean>(false);
+/** 定时任务页面 Tab 是否打开（页面式工作区，见 workspace-page-atoms）。 */
+export const automationPageOpenAtom = atom((get) => get(workspacePageTabStateAtom).tabs.includes("automation"));
 
 /**
- * 弹框打开时锁定的项目范围（null = 跨项目总览）。
- * 由 openAutomationModalAtom 在每次打开时写入，关闭后不清（下次打开必然重写）。
+ * 页面打开时锁定的项目范围（null = 跨项目总览）。
+ * 由 openAutomationPageAtom 在每次打开时写入，关闭后不清（下次打开必然重写）。
  */
-export const automationModalProjectIdAtom = atom<string | null>(null);
+export const automationPageProjectIdAtom = atom<string | null>(null);
 
 /**
- * 打开定时任务管理弹框；传 projectId 时任务表锁定到该项目（项目菜单入口）。
+ * 打开定时任务页面 Tab；传 projectId 时任务表锁定到该项目（项目菜单入口）。
+ * 已打开时只激活并刷新范围，不重复建 Tab。
  */
-export const openAutomationModalAtom = atom(null, (_get, set, projectId?: string) => {
-	set(automationModalProjectIdAtom, projectId ?? null);
-	set(automationModalOpenAtom, true);
+export const openAutomationPageAtom = atom(null, (_get, set, projectId?: string) => {
+	set(automationPageProjectIdAtom, projectId ?? null);
+	set(openWorkspacePageAtom, "automation");
+});
+
+/** 关闭定时任务页面 Tab（页面子树卸载，下一次打开回到任务列表）。 */
+export const closeAutomationPageAtom = atom(null, (_get, set) => {
+	set(closeWorkspacePageAtom, "automation");
 });
 
 /**
- * 当前在管理弹窗中选中的任务 ID（null = 未选中或处于新建模式）。
+ * 当前在管理页面中选中的任务 ID（null = 未选中或处于新建模式）。
  */
 export const automationSelectedTaskIdAtom = atom<string | null>(null);
 

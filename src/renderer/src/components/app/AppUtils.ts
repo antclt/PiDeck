@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
 import type { ChatMessage, FileTreeNode, PiCommand } from "../../../../shared/types";
 import { fileTreeNodeKey } from "../../utils/fileTreeLazy";
 import { isRetryStatusMessage } from "../session/timelineFailureNotice";
-import type { TranslationKey } from "../../i18n";
+import { t, type TranslationKey } from "../../i18n";
 import { formatFilePathRef } from "../session/composer/chips";
 import { replaceExpandedRefBlocksWithLabels } from "../session/composer/quoteChip";
 
@@ -435,7 +435,7 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 	 *
 	 * 用途：无触发消息的回合边界。pi 每轮最后一条 assistant 带 stopReason="stop"
 	 * （中间消息为 toolUse，见 AgentMessageProjector 的 provider 归一化），所以 run 末尾
-	 * 已出现 stop 又来了新的 assistant/tool/thinking，就说明新回合已经开始。
+	 * 已出现 stop 又来了新的 assistant/tool/thinking/扩展输出，就说明新回合已经开始。
 	 *
 	 * 典型场景：父回合已结束，后台子代理完成时 pi 用 sendCustomMessage(triggerTurn)
 	 * 唤醒父会话；（a）唤醒消息是 role="custom"，旧实现整条丢弃 —— 既不可见也没有
@@ -489,6 +489,12 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 			}
 			appendRunMessage(message);
 		} else if (message.role === "tool") {
+			// PTC 子调用（meta.ptcNested）：DSH run_code 程序内部的文件类子调用（write/edit…）
+			// 只服务于「修改的文件」汇总（见 dshEventProjector 的 tool/ptc-dispatch 分支），
+			// 时间线仍只展示外层 run_code 卡——否则一轮 PTC 会凭空冒出几十张嵌套工具卡。
+			// 必须在任何分组动作（flushRunForTurnBoundary/flushThinking）之前跳过：
+			// 隐藏消息不应制造回合边界，也不能把思考组打散。
+			if (message.meta?.ptcNested === true) continue;
 			// 新回合可能直接从工具开始（唤醒后先调用工具），同样需要先断开
 			flushRunForTurnBoundary();
 			flushThinking();
@@ -517,7 +523,12 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 			// 扩展输出条目（appendEntry 投影卡）：与重试/错误同策略收进当前 run 的过程序列，
 			// 折进过程组（用户决策 2026-10：不单独成块）。先冲刷未成组的工具/思考保证时序；
 			// 连续到达的条目合进同一个组员（时间线里渲染为一组可展开行）。
+			// 已收尾回合（最后一条 assistant 带 stop）之后才到的扩展输出不属于该回合：
+			// 继续吸收会让它成为 run 的收尾条目，前面的最终回答因此被降级成中间回答折叠
+			// （bili 的 acp-nudge 等尾随通知的实际表现，2026-10 用户反馈）。先按回合边界
+			// 冲刷，随后 currentRun 为空 → 走下面的独立条目兜底，输出卡排在回答之后。
 			// 边界：run 尚未开始（会话开头/两回合之间的条目）保持独立条目兜底，不硬造空 run。
+			flushRunForTurnBoundary();
 			flushTools();
 			if (pendingRun && currentRun.length === 0) {
 				currentRun.push(...pendingRun);
@@ -650,6 +661,8 @@ export function buildOutline(messages: ChatMessage[]) {
 		.filter((message) => message.role === "user")
 		.map((message) => ({
 			id: message.id,
+			// 导轨目录用 entryId 对齐未加载检查点；缺 meta.entryId 的 live 消息退回 id。
+			entryId: typeof message.meta?.entryId === "string" ? message.meta.entryId : undefined,
 			role: message.role,
 			// 定位轴标题是纯文本出口：先折叠自包含引用块，否则标题就是 <quoted_context …>
 			title: summarizeMessage(replaceExpandedRefBlocksWithLabels(message.text)),
@@ -805,6 +818,20 @@ const PINNED_COMMAND_NAMES = new Set<string>();
 // 会话菜单导出 HTML、圆环/打开会话文件、设置页、复制会话），所以直接不列；
 // `/hotkeys` 无等价按钮，靠 classifyComposerSlashCommand 接管到设置里的快捷键页。
 const HIDDEN_DESKTOP_BUILTIN_COMMAND_NAMES = new Set(["model", "resume", "fork", "name", "logout", "goal", "tree", "reload", "copy", "export", "share", "session", "settings", "clone"]);
+
+/**
+ * 内置扩展命令的菜单描述：pi 进程没有渲染层词典，扩展只能给英文 fallback；
+ * 渲染层对这些已知命令补 i18n 描述（不覆盖用户扩展自带 description）。
+ */
+const COMMAND_DESCRIPTION_KEYS: Record<string, TranslationKey> = {
+	reload: "prompt.command.reload.description",
+};
+
+function localizedCommandDescription(command: PiCommand): string {
+	const key = COMMAND_DESCRIPTION_KEYS[command.name];
+	if (key) return t(key);
+	return command.description ?? "";
+}
 
 function isBuiltinDesktopCommand(command: PiCommand) {
 	return command.source == null || command.source === "builtin";
@@ -982,7 +1009,7 @@ export function buildSuggestionItems(prompt: string, cursor: number, commands: P
 			.map(({ command }) => ({
 				key: command.name,
 				label: `/${command.name}`,
-				description: command.description ?? "",
+				description: localizedCommandDescription(command),
 				value: `/${command.name}`,
 			}));
 	}

@@ -1,4 +1,23 @@
-import type { AgentBackend, AgentGatewayCapability, AgentRuntimeState, AgentTab, DshPermissionPreset, AvailableModel, ChatMessage, CreateAgentInput, DshQueuedMessage, DshSkillView, ImageContent, PiCommand, Project, SendPromptInput, SendPromptResult, SessionUiResponseInput, TodoItem } from "../../shared/types";
+import type {
+	AgentBackend,
+	AgentGatewayCapability,
+	AgentRuntimeState,
+	AgentTab,
+	DshPermissionPreset,
+	AvailableModel,
+	ChatMessage,
+	CreateAgentInput,
+	DshQueuedMessage,
+	DshSkillView,
+	ImageContent,
+	PiCommand,
+	Project,
+	SendPromptInput,
+	SendPromptResult,
+	SessionRuntimeModelSelection,
+	SessionUiResponseInput,
+	TodoItem,
+} from "../../shared/types";
 import { isDshPermissionPreset } from "../../shared/types/agent";
 import type { SessionProcessEvent } from "../../shared/types/trajectory";
 // DSH 会话 id 品牌类型（零运行时成本，仅类型擦除）
@@ -29,7 +48,7 @@ import {
 	type DshUsageTotals,
 } from "./dshProcessEvents";
 import { applyDshControlEvent, beginDshCancel, type DshControlState } from "./dshRuntimeControl";
-import { resolveDshModelDirectory, toDshAvailableModels } from "./dshModels";
+import { isDshModelImageUnsupportedRejection, readDshModelSelection, resolveDshModelDirectory, toDshAvailableModels } from "./dshModels";
 import { approvalUiRequest, buildDshRejectValue, buildDshRespondValue, parseDshApprovalFrame, parseDshQuestionFrame, questionUiRequest, type DshApprovalFrame, type DshQuestionFrame } from "./dshApprovalBridge";
 import { assembleDshHistoryEntries, countDshUserMessages, DSH_HISTORY_DEFAULT_TURN_PAGE_SIZE, normalizeDshTurnPageSize, planDshHistoryRounds, trimToOldestTurnStart } from "./dshHistoryPagePlan";
 import { isContextOverflowError } from "../../shared/contextOverflow";
@@ -66,6 +85,27 @@ const DSH_PROJECTION_KEYS = ["contextPressure", "contextBreakdown", "tokenUsage"
  */
 function isDshImageMediaType(value: string): value is "image/png" | "image/jpeg" | "image/webp" | "image/gif" {
 	return value === "image/png" || value === "image/jpeg" || value === "image/webp" || value === "image/gif";
+}
+
+/** skills/list 的 host 错误：保留 error.code 以便上层区分「会话未 attach」与真实故障。 */
+export class DshSkillListError extends Error {
+	readonly code: string;
+
+	constructor(code: string, message: string) {
+		super(message);
+		this.name = "DshSkillListError";
+		this.code = code;
+	}
+}
+
+/** skills/list 条目 → 渲染层视图（listSkills / listSkillsByHostSession 共用同一映射）。 */
+function toDshSkillViews(skills: Array<{ name?: string; description?: string; whenToUse?: string; modelInvocable?: boolean }> | undefined): DshSkillView[] {
+	return (skills ?? []).map((skill) => ({
+		name: String(skill.name),
+		description: String(skill.description),
+		...(skill.whenToUse !== undefined && skill.whenToUse !== null ? { whenToUse: String(skill.whenToUse) } : {}),
+		modelInvocable: skill.modelInvocable !== false,
+	}));
 }
 
 /** DSH 历史消息里由投影器登记的持久化图片引用（canonical ImageBlock.attachment）。 */
@@ -459,6 +499,16 @@ export class DshAgentManager implements SessionAgentGateway {
 					error: JSON.stringify(sent.result.error),
 					delivery: "rejected",
 					i18nKey: "session.sendDshWriterHeld",
+				};
+			}
+			// 模型输入模态没声明 image：DSH 在准入阶段就拒绝带图消息，请求根本没打到
+			// 模型。原始 JSON 对用户不可操作，映射为「去配置页打开输入模态」的文案。
+			if (isDshModelImageUnsupportedRejection(sent.result.error)) {
+				return {
+					accepted: false,
+					error: JSON.stringify(sent.result.error),
+					delivery: "rejected",
+					i18nKey: "session.sendDshModelNoImageInput",
 				};
 			}
 			return { accepted: false, error: JSON.stringify(sent.result.error), delivery: "rejected" };
@@ -951,31 +1001,86 @@ export class DshAgentManager implements SessionAgentGateway {
 	}
 
 	/**
+	 * host 会话当前模型/档位（投影 `modelSelection.next ?? lastUsed`，attach/切换时由
+	 * refreshModelDirectory 同步到 runtime）。
+	 *
+	 * 供 SessionRuntimeCoordinator 判断「catalog 偏好是否已在 host 生效」：DSH 的
+	 * session/selectModel 会把选择同时保存成部署默认模型（agentDefaultModel.saveSelection），
+	 * 只要偏好已生效就不该在每次激活/重启时重放，否则「打开/切换 DSH 会话」会改写全局默认。
+	 * 与 pi 的 getRuntimeModelThinkingState 不同：这里不发 get_state（DSH 的状态来自投影）。
+	 */
+	async getRuntimeModelThinkingState(agentId: string): Promise<SessionRuntimeModelSelection | undefined> {
+		const runtime = this.runtimes.get(agentId);
+		if (!runtime?.model) return undefined;
+		return {
+			provider: runtime.model.provider,
+			modelId: runtime.model.model,
+			modelName: runtime.model.model,
+			...(runtime.thinkingLevel !== undefined ? { thinkingLevel: runtime.thinkingLevel } : {}),
+		};
+	}
+
+	/**
+	 * 冷读 host 会话的当前模型选择（session/projections 的 modelSelection.next ?? lastUsed）。
+	 *
+	 * 用途：历史/外部 DSH 会话的模型只存在 host 投影里，PiDeck catalog 可能从未写过
+	 * model；打开会话读历史时补录 catalog，底栏/选择器才不会回退到全局部署默认
+	 * （见 dshSessionModelSync.ts 的线上案例）。只读：不激活会话、不写 host。
+	 * host 未就绪时直接返回 undefined——纯展示补录不得为浏览会话主动拉起 host。
+	 */
+	async readSessionModelSelection(dshSessionId: string): Promise<{ provider: string; model: string; reasoningEffort?: string } | undefined> {
+		if (!dshSessionId || !this.dshHost.isHostReady()) return undefined;
+		const client = this.dshHost.getClient();
+		if (!client) return undefined;
+		try {
+			const projection = await client.sessionsProjections({ sessionId: dshSessionId as SessionId });
+			if (!projection.result.ok) return undefined;
+			const value = projection.result.value;
+			if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+			const values = (value as { values?: unknown }).values;
+			if (!values || typeof values !== "object" || Array.isArray(values)) return undefined;
+			const selection = readDshModelSelection((values as Record<string, unknown>).modelSelection);
+			if (!selection) return undefined;
+			return { provider: selection.provider, model: selection.model, ...(selection.reasoningEffort !== undefined ? { reasoningEffort: selection.reasoningEffort } : {}) };
+		} catch (error) {
+			// 投影版本不兼容/会话不存在等：展示补录失败不能影响会话本身。
+			getAppLogger()?.warn("dsh-agent", "session model selection unavailable", {
+				sessionId: dshSessionId,
+				error: error instanceof Error ? error.message : String(error),
+			});
+			return undefined;
+		}
+	}
+
+	/**
 	 * 轨迹过程事件（G-context）：modelChange/permission/plan/goal/compaction 记录
 	 * （pi 会话文件过程事件的 DSH 等价物）。
 	 * - 运行时会话：mux 事件流 + attach/backfill 重放收集的缓存；
 	 * - 历史（未激活）会话：从 host history 尾部按事件流推导（与 dsh-web 历史页同数据源），
 	 *   失败/无 host 时返回空数组（不阻断轨迹展示）。
 	 */
-	async readProcessEvents(agentId: string | undefined, dshSessionId: string | undefined): Promise<SessionProcessEvent[]> {
+	async readProcessEvents(agentId: string | undefined, dshSessionId: string | undefined): Promise<{ events: SessionProcessEvent[]; fromStart: boolean }> {
 		if (agentId) {
 			const runtime = this.runtimes.get(agentId);
 			if (runtime) {
-				return [...runtime.processEvents].sort((left, right) => left.timestamp - right.timestamp);
+				return { events: [...runtime.processEvents].sort((left, right) => left.timestamp - right.timestamp), fromStart: true };
 			}
 		}
-		if (!dshSessionId) return [];
+		if (!dshSessionId) return { events: [], fromStart: true };
 		try {
 			const client = await this.ensureClient();
 			const page = await this.historyPage(dshSessionId, { maxMessages: 1000 });
-			if (!page.result.ok) return [];
+			if (!page.result.ok) return { events: [], fromStart: true };
+			// 历史冷读只有 host 的尾部页：还有更早的页时窗口未覆盖会话开头，
+			// 首个可见提示词只能是窗口快照（不能标成 initial，见计划 §3.4）。
+			const fromStart = page.result.value.hasMore !== true;
 			const events = (page.result.value.events ?? [])
 				.map((entry) => entry.event)
 				.filter((event): event is NonNullable<typeof event> => Boolean(event))
 				.sort((left: { seq?: number }, right: { seq?: number }) => (left.seq ?? 0) - (right.seq ?? 0));
-			return collectDshProcessEvents([], events).sort((left, right) => left.timestamp - right.timestamp);
+			return { events: collectDshProcessEvents([], events, { fromStart }).sort((left, right) => left.timestamp - right.timestamp), fromStart };
 		} catch {
-			return [];
+			return { events: [], fromStart: true };
 		}
 	}
 
@@ -1360,15 +1465,47 @@ export class DshAgentManager implements SessionAgentGateway {
 	 */
 	async listSkills(agentId: string): Promise<DshSkillView[]> {
 		const runtime = this.runtime(agentId);
-		const client = this.requireClient();
-		const listed = await client.skillsList({ sessionId: runtime.sessionId });
-		if (!listed.result.ok) return [];
-		return (listed.result.value.skills ?? []).map((skill) => ({
-			name: String(skill.name),
-			description: String(skill.description),
-			...(skill.whenToUse !== undefined && skill.whenToUse !== null ? { whenToUse: String(skill.whenToUse) } : {}),
-			modelInvocable: skill.modelInvocable !== false,
-		}));
+		// 工具面板等既有入口保持「失败返回空列表」的宽容语义（UI 只展示空态）。
+		try {
+			return await this.listSkillsByHostSession(String(runtime.sessionId));
+		} catch {
+			return [];
+		}
+	}
+
+	/**
+	 * 按 host 会话 id 列技能（不要求 live agent）。
+	 *
+	 * host 的 skill.list 只要会话 attached 即可：有 live agent 时用其 preset 的 skill
+	 * service，没有时回退全局 skill registry + 会话 preset 的 standing scope
+	 * （dsh-host-apiproxy 实际实现，不启动 agent/turn）。草稿会话拿到 host 会话 id 后
+	 * 即可在「会话启动前」读目录；`session-not-found` 会带 code 抛给调用方判定
+	 * （草稿可以安全换新会话，历史会话不行）。
+	 */
+	async listSkillsByHostSession(dshSessionId: string): Promise<DshSkillView[]> {
+		const client = await this.ensureClient();
+		const listed = await client.skillsList({ sessionId: dshSessionId as SessionId });
+		if (!listed.result.ok) {
+			const error = listed.result.error as { code?: unknown; message?: unknown } | undefined;
+			const code = typeof error?.code === "string" ? error.code : "internal";
+			const message = typeof error?.message === "string" ? error.message : "skill listing failed";
+			throw new DshSkillListError(code, message);
+		}
+		return toDshSkillViews(listed.result.value.skills);
+	}
+
+	/**
+	 * 为草稿会话准备一个可读技能目录的 host 会话（不启动 agent）。
+	 *
+	 * 与 create() 内部建会话同一条 `sessions.create` 路径，保证真正开聊时激活能 attach
+	 * 同一个会话（不会另起会话丢历史）；agentPreset 沿用草稿预选，host 可能回退部署
+	 * 默认，返回值里的实际 preset 由调用方决定是否回写 catalog。
+	 */
+	async ensureAttachableHostSession(cwd: string, agentPreset?: string): Promise<{ sessionId: string; agentPreset?: string }> {
+		const client = await this.ensureClient();
+		const created = await this.createHostSession(client, cwd, agentPreset);
+		if (!created.ok) throw new Error(`dsh session.create failed: ${created.error}`);
+		return created.agentPreset ? { sessionId: created.sessionId, agentPreset: created.agentPreset } : { sessionId: created.sessionId };
 	}
 
 	async setModel(agentId: string, provider: string, modelId: string): Promise<unknown> {

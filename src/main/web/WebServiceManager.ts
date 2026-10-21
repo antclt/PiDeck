@@ -18,7 +18,6 @@ import type {
 	SendSessionPromptInput,
 	SendSessionPromptResult,
 	SessionCommandResult,
-	SessionFileChange,
 	SessionMessagePage,
 	SessionRecord,
 	SessionRuntimeInfo,
@@ -138,8 +137,7 @@ export type WebServiceDependencies = {
 	forkRuntimeSession: (target: SessionRuntimeTarget, entryId: string, options?: { mutationFork?: boolean; branchMode?: boolean }) => Promise<SessionForkResult>;
 	/** 冷会话激活（Web 重发/编辑 fork 化用；与桌面 sessionsRuntimeActivate 同源）。 */
 	activateSessionRuntime?: (sessionId: string) => Promise<SessionCommandResult<SessionRuntimeInfo>>;
-	/** 会话活动监控（第二批 strips）：文件变更/子代理/todo 快照，装配侧对齐桌面 IPC 语义（含 running 降级对账）。缺省时路由返回 503。 */
-	listSessionFileChanges?: (sessionId: string) => Promise<SessionFileChange[]>;
+	/** 会话活动监控 strips：子代理/todo 快照，装配侧对齐桌面 IPC 语义（含 running 降级对账）。缺省时路由返回 503。 */
 	listSessionSubagents?: (sessionId: string) => Promise<PiSubagentEntry[]>;
 	listSessionTodo?: (sessionId: string) => Promise<SessionTodoSnapshot | undefined>;
 	listPendingUiRequests: () => PendingUiRequestSnapshot[];
@@ -322,7 +320,8 @@ export class WebServiceManager {
 	}
 
 	private async start(host: string, port: number, requiresAuth = true, tokenPolicy: WebTokenPolicy = {}) {
-		// 启动时绑定 pi 事件源；路由器只在存在活跃 SSE 连接时转发，空闲时零开销。
+		// 启动时绑定 pi 事件源；路由器无订阅者时也维护会话级回放源（内存有界），
+		// 外部流中途接入时才能补齐本轮已渲染内容；帧写出仍只对活跃 SSE 连接发生。
 		// 状态推送：pi 事件是 runtime 状态翻转 / ask 待确认的源头，到达时去抖比对一次快照
 		// （/api/events 订阅者从中拿到即时推送，不再依赖 Web 端轮询发现）。
 		this.eventStreamRouter.bindPiSource(
