@@ -38,7 +38,7 @@ import type { WhisperInstallProgress, WhisperInstallResult, WhisperRuntimeStatus
 import type { EnhanceEventPayload, EnhanceRunInput, EnhanceRunResult } from "../shared/types/enhance";
 import type { PromptSuggestionRunInput, PromptSuggestionRunResult } from "../shared/types/promptSuggestion";
 import type { AgentChangedEvent, AgentInvokeEventPayload, AgentInvokeInput, AgentInvokeResult, AgentMarketSettings, AgentProfile, AgentProfileSnapshot, BindAgentSessionInput, CreateAgentProfileInput, UpdateAgentMarketSettingsInput, UpdateAgentProfileInput } from "../shared/types/agentProfile";
-import type { SelectionToolInsertInput, SelectionToolShowPayload, SelectionToolWindowState } from "../shared/types/selectionTool";
+import type { SelectionToolInsertInput, SelectionToolResizeInput, SelectionToolShowPayload, SelectionToolWindowState } from "../shared/types/selectionTool";
 import type { QuickMessagesSaveResult, QuickMessagesSnapshot } from "../shared/types/quickMessages";
 import type { NoticeHistoryFileEntry, NoticeHistoryRecordInput } from "../shared/types/noticeHistory";
 import type { ReplyActionRule, ReplyActionsSaveResult, ReplyActionsSnapshot } from "../shared/types/replyActions";
@@ -1750,6 +1750,8 @@ const api = {
 	selectionTool: {
 		getState: () => ipcRenderer.invoke(ipcChannels.selectionToolGetState) as Promise<SelectionToolWindowState>,
 		hide: () => ipcRenderer.invoke(ipcChannels.selectionToolHide) as Promise<void>,
+		/** 折叠浮条 ↔ 展开结果面板：渲染层按内容请求窗口尺寸。 */
+		resize: (input: SelectionToolResizeInput) => ipcRenderer.invoke(ipcChannels.selectionToolResize, input) as Promise<void>,
 		/** 浮窗「发送到 PiDeck」：把文本插入主窗口当前会话输入框。 */
 		insertToMain: (input: SelectionToolInsertInput) => ipcRenderer.invoke(ipcChannels.selectionToolInsertToMain, input) as Promise<boolean>,
 		/** 浮窗显示时主进程推送的捕获文本（空串 = 没读到，让用户手输）。 */

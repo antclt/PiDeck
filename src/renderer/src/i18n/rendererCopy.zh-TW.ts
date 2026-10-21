@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 998cc3743f8c503da1078a7c5ba6bd616cef847fb53825bfcbd40a0f6108913c（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: cc45f31cd288602308db2439e5f45d2701d09f0d49a200df1da427f8c56b9199（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5540,7 +5540,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"agent.tips.quickMessages": "按 {shortcut} 一鍵發出預設口令",
 	"agent.tips.composerTriggers": "輸入 / 呼叫命令、@ 引用檔案、& 引用會話",
 	"agent.tips.quoteSelection": "拖選回覆裡的文字，可以帶著引用繼續提問",
-	"agent.tips.selectionTool": "選中文字就能用智慧體翻譯；在其他應用裡選中後按 {shortcut} 也能彈窗",
+	"agent.tips.selectionTool": "選中文字就能用智慧體翻譯；在其他應用複製文字也會自動彈窗（{shortcut} 仍可手動觸發）",
 	"agent.tips.sendOptions": "傳送按鈕旁的下拉有「加入當前回合」「排隊到下一輪」「並行傳送」",
 	"agent.tips.workspaceRail": "右緣圖示欄可開關檔案、原始碼管理、軌跡、檢查點等面板",
 	"agent.tips.trajectoryTurns": "右欄「軌跡」把每輪收成「N 步 · M 工具」，預設只展開最後一輪",
@@ -6450,16 +6450,16 @@ export const zhTW: Record<TranslationKey, string> = {
 	"selectionTool.insertToMain": "傳送到 PiDeck",
 	"selectionTool.inserted": "已傳送到 PiDeck 輸入框",
 	"selectionTool.captureFailed": "沒有讀取到選中的文本，請先在目標應用裡選中文字再按快捷鍵",
-	"selectionTool.shortcutConflict": "系統級劃詞快捷鍵 {accelerator} 暫時不可用：可能被其他應用或另一個 PiDeck 例項佔用。請到「設定 → 快捷鍵」更換按鍵，或關閉佔用它的應用。",
+	"selectionTool.shortcutConflict": "系統級劃詞快捷鍵 {accelerator} 暫時不可用：可能被其他應用或另一個 PiDeck 例項佔用。複製觸發不受影響；可到「設定 → 快捷鍵」更換按鍵，或關閉佔用它的應用。",
 	"selectionTool.unsupported": "當前系統不支援系統級劃詞（Linux Wayland 需要 X11 / xdotool）",
-	"selectionTool.globalHotkeyHint": "按 {accelerator} 觸發",
+	"selectionTool.globalHotkeyHint": "按 {accelerator} 手動觸發",
 	"selectionTool.translating": "翻譯中…",
 	"selectionTool.translate": "翻譯",
 	"selectionTool.ask": "問答",
 	"selectionTool.targetLabel": "目標語言",
 	"selectionTool.hide": "隱藏",
 	"selectionTool.windowTitle": "劃詞翻譯",
-	"selectionTool.windowEmpty": "選中文字後按快捷鍵，或直接輸入內容",
+	"selectionTool.windowEmpty": "複製文字後自動彈出，或直接輸入內容",
 	"selectionTool.insertEmpty": "沒有可傳送的文本",
 	"agentMarket.useInSession": "使用",
 	"agentMarket.useInSessionHint": "新建會話並繫結該智慧體：角色設定隨訊息注入，可在輸入框上方展開檢視",
@@ -6475,14 +6475,14 @@ export const zhTW: Record<TranslationKey, string> = {
 	"agentPromptBar.collapse": "收起提示詞",
 	"agentPromptBar.hint": "每次傳送時自動注入，不顯示在對話正文裡",
 	"settings.selectionTool.title": "劃詞工具",
-	"settings.selectionTool.description": "選中文字即可用智慧體翻譯；開啟系統級劃詞後，在其他應用裡也能用",
+	"settings.selectionTool.description": "選中文字即可用智慧體翻譯；開啟系統級劃詞後，在其他應用複製文字會自動彈出劃詞浮條（點「翻譯」後才把內容傳送給所選智慧體）",
 	"settings.selectionTool.enabled": "應用內劃詞",
 	"settings.selectionTool.enabledHint": "在 PiDeck 頁面內選中文字時浮出智慧體按鈕",
-	"settings.selectionTool.systemEnabled": "系統級劃詞（全域快捷鍵）",
-	"settings.selectionTool.systemEnabledHint": "在任意應用選中文字後按快捷鍵，在游標附近彈出翻譯浮窗",
-	"settings.selectionTool.shortcutConflict": "系統級劃詞快捷鍵 {accelerator} 被佔用，功能暫不可用；請更換快捷鍵或關閉佔用它的應用。",
-	"settings.selectionTool.hotkeyLabel": "系統級劃詞快捷鍵",
-	"settings.selectionTool.hotkeyHint": "當前快捷鍵：{accelerator}（可在「快捷鍵」頁修改）",
+	"settings.selectionTool.systemEnabled": "系統級劃詞（複製即觸發）",
+	"settings.selectionTool.systemEnabledHint": "在任意應用複製文字後，自動在游標附近彈出劃詞浮條；點「翻譯」後才呼叫智慧體，快捷鍵仍可手動觸發",
+	"settings.selectionTool.shortcutConflict": "系統級劃詞快捷鍵 {accelerator} 被佔用；複製觸發仍可用。可更換快捷鍵或關閉佔用它的應用。",
+	"settings.selectionTool.hotkeyLabel": "備用快捷鍵",
+	"settings.selectionTool.hotkeyHint": "複製已可自動觸發；當前備用快捷鍵：{accelerator}（可在「快捷鍵」頁修改）",
 	"settings.selectionTool.defaultAgent": "預設智慧體",
 	"settings.selectionTool.defaultAgentAuto": "自動（內建翻譯官）",
 	"settings.selectionTool.defaultAgentHint": "應用內浮鈕與系統浮窗預設使用這個智慧體",
@@ -6490,5 +6490,5 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.selectionTool.saved": "已儲存",
 	"settings.selectionTool.saveFailed": "儲存失敗，請重試",
 	"settings.shortcuts.openSelectionToolLabel": "系統級劃詞翻譯",
-	"settings.shortcuts.openSelectionToolDesc": "在任意應用中選中文字後按下，在游標附近彈出劃詞翻譯浮窗",
+	"settings.shortcuts.openSelectionToolDesc": "備用入口：在任意應用選中文字後按下，在游標附近彈出劃詞翻譯浮窗（複製文字也會自動觸發）",
 };

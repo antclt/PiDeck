@@ -6,6 +6,16 @@
  * 浮窗是独立 BrowserWindow，使用同一份 preload（desktopApi）。
  */
 
+/** 浮窗尺寸（主进程建窗与渲染层折叠/展开共用；避免两处魔法数字漂移）。 */
+export const SELECTION_TOOL_WINDOW_WIDTH = 440;
+/** 折叠态：只露出顶部操作栏，Magpie 式浮条。 */
+export const SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT = 46;
+/** 展开态：操作栏 + 原文 + 结果面板。 */
+export const SELECTION_TOOL_WINDOW_EXPANDED_HEIGHT = 280;
+
+/** 浮窗渲染层请求调整窗口尺寸（折叠条 ↔ 结果面板）。 */
+export type SelectionToolResizeInput = { width: number; height: number };
+
 /** 浮窗可见性 + 全局快捷键注册状态（主进程 → 渲染层）。 */
 export type SelectionToolWindowState = {
 	visible: boolean;

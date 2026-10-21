@@ -2081,6 +2081,7 @@ export function createPreviewApi(): PiDesktopApi {
 		selectionTool: {
 			getState: async () => ({ visible: false }),
 			hide: async () => {},
+			resize: async () => {},
 			insertToMain: async () => false,
 			onCaptured: () => () => {},
 			onStateChanged: () => () => {},

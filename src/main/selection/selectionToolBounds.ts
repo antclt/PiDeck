@@ -16,9 +16,19 @@ export const SELECTION_TOOL_CURSOR_OFFSET = 14;
 /** 浮窗与显示器可用区边缘的最小留白：留出圆角/阴影呼吸，避免贴边被裁。 */
 export const SELECTION_TOOL_SCREEN_MARGIN = 8;
 
-/** 浮窗固定尺寸：紧凑卡片（头部 + 语言 chips + 原文 + 结果 + 操作行）刚好放得下。 */
-export const SELECTION_TOOL_WINDOW_WIDTH = 440;
-export const SELECTION_TOOL_WINDOW_HEIGHT = 280;
+// 尺寸的唯一来源在 shared/types/selectionTool；这里 re-export 供窗口与旧测试继续使用。
+export {
+	SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT,
+	SELECTION_TOOL_WINDOW_EXPANDED_HEIGHT,
+	SELECTION_TOOL_WINDOW_WIDTH,
+} from "../../shared/types/selectionTool";
+import { SELECTION_TOOL_WINDOW_EXPANDED_HEIGHT } from "../../shared/types/selectionTool";
+
+/** 兼容旧命名：展开态高度（结果面板）。 */
+export const SELECTION_TOOL_WINDOW_HEIGHT = SELECTION_TOOL_WINDOW_EXPANDED_HEIGHT;
+
+/** 非聚焦浮窗的自动收起时间：不抢焦点，也不能一直悬在目标应用上方。 */
+export const SELECTION_TOOL_AUTO_HIDE_MS = 30_000;
 
 /**
  * 依次尝试「首选位置」与「翻转位置」，两者都不在允许区间时贴最近边界。

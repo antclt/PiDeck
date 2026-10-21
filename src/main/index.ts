@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, safeStorage, screen, session, shell, Tray, Notification } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, safeStorage, screen, session, shell, Tray, Notification } from "electron";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
@@ -26,6 +26,7 @@ import { registerAgentInvokeIpc } from "./ipc/agentInvokeIpc";
 import { registerSelectionToolIpc } from "./ipc/selectionToolIpc";
 import { SelectionToolService } from "./selection/SelectionToolService";
 import { SelectionToolWindow } from "./selection/SelectionToolWindow";
+import { ClipboardSelectionWatcher } from "./selection/clipboardSelectionWatcher";
 import { resolveShortcutBindings } from "../shared/shortcuts";
 import { registerFeishuIpc } from "./ipc/feishuIpc";
 import { registerWeChatIpc } from "./ipc/wechatIpc";
@@ -696,6 +697,8 @@ let agentInvokeCompletionService: EnhancePromptService | null = null;
 let selectionToolWindow: SelectionToolWindow | null = null;
 /** 系统级划词服务：取词、浮窗展示与全局快捷键注册的唯一归属地。 */
 let selectionToolService: SelectionToolService | null = null;
+/** 复制即触发监听：系统级划词开启时轮询外部剪贴板变更（不依赖快捷键）。 */
+let selectionClipboardWatcher: ClipboardSelectionWatcher | null = null;
 
 /**
  * 最近一次系统级划词快捷键冲突（accelerator）与已提示值。
@@ -740,6 +743,8 @@ function syncSelectionToolShortcut(): void {
 	const service = selectionToolService;
 	if (!service) return;
 	const systemEnabled = agentProfileStore?.getSnapshot().settings.systemSelectionEnabled === true;
+	// 复制即触发与快捷键解耦：快捷键被其它实例占用时，复制文本仍然可以自动弹窗。
+	selectionClipboardWatcher?.setEnabled(systemEnabled);
 	if (!systemEnabled) {
 		service.unregisterShortcut();
 		clearSelectionShortcutConflict();
@@ -5583,10 +5588,25 @@ app
 				warn: (scope, message, detail) => void appLogger.warn(scope, message, detail),
 				error: (scope, message, detail) => void appLogger.error(scope, message, detail),
 			},
+			suppressClipboardWatcher: (durationMs) => selectionClipboardWatcher?.suppressFor(durationMs),
+		});
+		// 复制即触发：外部应用复制文字 → 光标附近自动弹翻译浮窗（Magpie 式交互）。
+		// 自己的窗口有焦点时不触发：应用内复制由应用内划词处理，浮窗自己的复制也不会再弹一个。
+		selectionClipboardWatcher = new ClipboardSelectionWatcher({
+			readText: () => clipboard.readText(),
+			isOwnWindowFocused: () => BrowserWindow.getAllWindows().some((win) => !win.isDestroyed() && win.isFocused()),
+			onCaptured: (text) => {
+				void selectionToolService?.showText(text);
+			},
+			logger: { warn: (message, detail) => void appLogger.warn("selection-tool", message, detail) },
 		});
 		// 预热放在 registerIpc 之后（见下方 assemble 段）：浮窗加载即会 settings.get / agentProfiles.getSnapshot，
 		// 提前 warmUp 会让首帧拿到「服务未就绪」的拒绝（只是闪一下默认主题，但没必要）。
-		quitCleanup.register("selection-tool", () => selectionToolService?.dispose());
+		quitCleanup.register("selection-tool", () => {
+			selectionClipboardWatcher?.dispose();
+			selectionClipboardWatcher = null;
+			selectionToolService?.dispose();
+		});
 		// 市场设置的「系统级划词」开关保存后即时生效（不必重启应用）。
 		agentProfileStore.onChanged(() => syncSelectionToolShortcut());
 		syncSelectionToolShortcut();

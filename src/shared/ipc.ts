@@ -250,6 +250,7 @@ export const ipcChannels = {
 	/** 系统级划词浮窗（全局快捷键触发）：可见性/隐藏/发送回主窗口/捕获推流。 */
 	selectionToolGetState: "selection-tool:get-state",
 	selectionToolHide: "selection-tool:hide",
+	selectionToolResize: "selection-tool:resize",
 	selectionToolInsertToMain: "selection-tool:insert-to-main",
 	selectionToolCaptured: "selection-tool:captured",
 	selectionToolStateChanged: "selection-tool:state-changed",

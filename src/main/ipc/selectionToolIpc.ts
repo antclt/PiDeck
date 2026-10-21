@@ -13,7 +13,7 @@
  */
 import { ipcMain } from "electron";
 import { ipcChannels } from "../../shared/ipc";
-import { SELECTION_TOOL_TEXT_MAX_CHARS, type SelectionToolInsertInput, type SelectionToolWindowState } from "../../shared/types/selectionTool";
+import { SELECTION_TOOL_TEXT_MAX_CHARS, type SelectionToolInsertInput, type SelectionToolResizeInput, type SelectionToolWindowState } from "../../shared/types/selectionTool";
 import type { SelectionToolService } from "../selection/SelectionToolService";
 import type { SelectionToolWindow } from "../selection/SelectionToolWindow";
 
@@ -49,6 +49,17 @@ export function parseSelectionToolInsertInput(value: unknown): SelectionToolInse
 	return { text: trimmed };
 }
 
+/** 校验折叠/展开尺寸：有限数字，范围由窗口层再夹紧（IPC 入参不可信）。 */
+export function parseSelectionToolResizeInput(value: unknown): SelectionToolResizeInput | null {
+	if (typeof value !== "object" || value === null) return null;
+	const width = Reflect.get(value, "width");
+	const height = Reflect.get(value, "height");
+	if (typeof width !== "number" || typeof height !== "number") return null;
+	if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+	if (width <= 0 || height <= 0 || width > 2000 || height > 2000) return null;
+	return { width, height };
+}
+
 export function registerSelectionToolIpc(deps: SelectionToolIpcDeps): void {
 	const currentState = (): SelectionToolWindowState => deps.service?.getState() ?? deps.window?.getState() ?? EMPTY_STATE;
 
@@ -63,6 +74,13 @@ export function registerSelectionToolIpc(deps: SelectionToolIpcDeps): void {
 			return;
 		}
 		deps.window?.hide();
+	});
+
+	ipcMain.removeHandler(ipcChannels.selectionToolResize);
+	ipcMain.handle(ipcChannels.selectionToolResize, (_event, input: unknown) => {
+		const parsed = parseSelectionToolResizeInput(input);
+		if (!parsed || !deps.window) return;
+		deps.window.resize(parsed);
 	});
 
 	ipcMain.removeHandler(ipcChannels.selectionToolInsertToMain);
