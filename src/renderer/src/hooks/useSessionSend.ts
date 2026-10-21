@@ -22,6 +22,7 @@ import {
 	upsertSessionAtom,
 	dshRuntimeStatusAtom,
 	openSettingsAtom,
+	removePendingUserMessages,
 } from "../atoms";
 import { applyDshGoalSendTransform, buildComposerPromptSubmission, deriveComposerAgentMode, expandPromptTemplates } from "../composerBehavior";
 import { expandQuoteTokens, stripQuoteTokens } from "../components/session/composer/quoteChip";
@@ -161,6 +162,29 @@ export function useSessionSend(options: UseSessionSendOptions) {
 			// token 与全文必须一同回填；发送期间新增的引用保留，以免重试变成孤儿 token。
 			setQuotes({ sessionId: targetSessionId, value: (current) => ({ ...quoteSnapshot, ...current }) });
 		}
+	}
+
+	/**
+	 * 投递被拒：撤掉这次请求的乐观用户气泡。
+	 *
+	 * 气泡只在「宿主确认后」才有资格留在时间线上——拒绝意味着它永远不会被写进会话日志，
+	 * 留着会变成幽灵消息（下次读盘/切回又凭空消失）。文字已由 restoreRejectedSnapshot
+	 * 回填草稿，用户可直接改完重发。
+	 */
+	function dropPendingUserMessage(targetSessionId: string, pendingRequestId: string) {
+		const entry = store.get(sessionMessagesCacheAtom)?.[targetSessionId];
+		if (!entry?.messages?.length) return;
+		const messages = removePendingUserMessages(entry.messages, pendingRequestId);
+		if (messages.length === entry.messages.length) return;
+		setCacheMessages({
+			sessionId: targetSessionId,
+			messages,
+			source: entry.source ?? "runtime",
+			windowStart: entry.windowStart,
+			cardCount: entry.cardCount,
+			history: entry.history,
+			windowStartFilePos: entry.windowStartFilePos,
+		});
 	}
 
 	/** 模板正文为空时统一的拦截提示：error 状态 + toast（带模板名，便于定位编辑）。 */
@@ -367,6 +391,9 @@ export function useSessionSend(options: UseSessionSendOptions) {
 						text: message,
 						timestamp: Date.now(),
 						images: imageSnapshot,
+						// 待宿主确认：DSH 模型解析失败时用户消息从未写入会话日志，
+						// 快照里没有它——带标记才能在快照合并时接回（见 pendingUserMessage）。
+						meta: { pendingUserMessage: true, requestId },
 					},
 				],
 				source: "runtime" as const,
@@ -393,7 +420,10 @@ export function useSessionSend(options: UseSessionSendOptions) {
 		} catch (error) {
 			if (releaseIfRetired()) return;
 			// 普通发送已乐观清空草稿；队列与 /compact 尚未消费，不能重复回填。
-			if (publishBeforeActivation) restoreRejectedPrompt(sourceSessionId, keepDraft, rawDraft, imageSnapshot, quoteMap);
+			if (publishBeforeActivation) {
+				restoreRejectedPrompt(sourceSessionId, keepDraft, rawDraft, imageSnapshot, quoteMap);
+				dropPendingUserMessage(sourceSessionId, requestId);
+			}
 			const errorMessage = error instanceof Error ? error.message : String(error);
 			setSendState({
 				sessionId: sourceSessionId,
@@ -501,6 +531,8 @@ export function useSessionSend(options: UseSessionSendOptions) {
 						text: message,
 						timestamp: Date.now(),
 						images: imageSnapshot,
+						// 同 publishOptimisticSubmission：待宿主快照确认的乐观气泡。
+						meta: { pendingUserMessage: true, requestId },
 					},
 				],
 				source: "runtime" as const,
@@ -513,8 +545,10 @@ export function useSessionSend(options: UseSessionSendOptions) {
 			preparedMessage = options.prepareMessage ? await options.prepareMessage(message) : message;
 		} catch (error) {
 			if (releaseIfRetired()) return;
-			// 拒绝时回填原始草稿（含 token），保留 chip 形态供用户修改重发
+			// 拒绝时回填原始草稿（含 token），保留 chip 形态供用户修改重发；
+			// 同时撤掉乐观气泡：这条消息不会进会话日志（失败前就已发布过一次）。
 			restoreRejectedPrompt(sessionId, keepDraft, rawDraft, imageSnapshot, quoteMap);
+			dropPendingUserMessage(sessionId, requestId);
 			const errorMessage = error instanceof Error ? error.message : String(error);
 			// ensureSessionId 已把 composer 状态搬到真实会话；失败也必须结算同一身份。
 			setSendState({
@@ -530,8 +564,9 @@ export function useSessionSend(options: UseSessionSendOptions) {
 		const { message: expandedMessage, description, emptyTemplateName } = expandPromptTemplates(preparedMessage, options.getTemplates());
 		if (emptyTemplateName) {
 			// 展开器保留空模板的 /命令原文；按 verdict 拦截，避免误发到主进程。
-			// 回填原始草稿（含引用 token），保留 chip 形态
+			// 回填原始草稿（含引用 token），保留 chip 形态，并撤掉已发布的乐观气泡。
 			restoreRejectedPrompt(sessionId, keepDraft, rawDraft, imageSnapshot, quoteMap);
+			dropPendingUserMessage(sessionId, requestId);
 			rejectEmptyTemplate(sessionId, emptyTemplateName);
 			sendingSessionIdsRef.current.delete(sourceSessionId);
 			return;
@@ -628,6 +663,8 @@ export function useSessionSend(options: UseSessionSendOptions) {
 			} else {
 				// 拒绝时回填原始草稿（含 token）保留 chip 形态；unknown 快照仍存展开后文本（已实际投递的内容）
 				restoreRejectedPrompt(sessionId, keepDraft, rawDraft, imageSnapshot, quoteMap);
+				// 宿主明确拒绝 = 消息不会进日志：撤掉乐观气泡，避免幽灵消息。
+				dropPendingUserMessage(sessionId, requestId);
 				setSendState({
 					sessionId,
 					state: { status: "error", requestId, error: deliveryError },
