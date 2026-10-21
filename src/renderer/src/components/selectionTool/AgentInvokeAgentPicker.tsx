@@ -7,6 +7,8 @@ export type AgentInvokeAgentPickerProps = {
 	agents: readonly AgentProfile[];
 	selected: AgentProfile | null;
 	onSelect: (agentId: string) => void;
+	/** 紧凑浮条模式：去掉边框/背景，只留「图标 + 名称 + 箭头」，给 Magpie 式单行条让位。 */
+	compact?: boolean;
 };
 
 /**
@@ -15,7 +17,7 @@ export type AgentInvokeAgentPickerProps = {
  * 触发按钮自身带 aria-label，空列表时禁用并显示「选择智能体」。
  * 紧凑尺寸（h-6 / max-w-150）：头部一行还要放动作切换、目标语言与三个图标按钮。
  */
-export function AgentInvokeAgentPicker({ agents, selected, onSelect }: AgentInvokeAgentPickerProps) {
+export function AgentInvokeAgentPicker({ agents, selected, onSelect, compact = false }: AgentInvokeAgentPickerProps) {
 	const disabled = agents.length === 0;
 	return (
 		<DropdownMenu>
@@ -25,7 +27,11 @@ export function AgentInvokeAgentPicker({ agents, selected, onSelect }: AgentInvo
 					disabled={disabled}
 					aria-label={t("agentInvoke.selectAgent")}
 					title={t("agentInvoke.selectAgent")}
-					className="inline-flex h-6 max-w-[150px] min-w-0 items-center gap-1 rounded-md border border-border-subtle bg-transparent px-1.5 text-xs text-foreground transition-colors hover:bg-accent-soft disabled:pointer-events-none disabled:opacity-50"
+					className={
+						compact
+							? "inline-flex h-6 max-w-[104px] min-w-0 items-center gap-1 rounded-md px-1 text-xs text-foreground transition-colors hover:bg-accent-soft disabled:pointer-events-none disabled:opacity-50"
+							: "inline-flex h-6 max-w-[150px] min-w-0 items-center gap-1 rounded-md border border-border-subtle bg-transparent px-1.5 text-xs text-foreground transition-colors hover:bg-accent-soft disabled:pointer-events-none disabled:opacity-50"
+					}
 				>
 					{selected?.icon ? (
 						<span className="text-sm leading-none" aria-hidden="true">

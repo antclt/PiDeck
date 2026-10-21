@@ -29,7 +29,7 @@ export const SESSION_FEATURE_TIPS: readonly SessionFeatureTip[] = [
 	{ textKey: "agent.tips.quickMessages", shortcutId: "openQuickMessages" },
 	{ textKey: "agent.tips.composerTriggers" },
 	{ textKey: "agent.tips.quoteSelection" },
-	{ textKey: "agent.tips.selectionTool", shortcutId: "openSelectionTool" },
+	{ textKey: "agent.tips.selectionTool" },
 	{ textKey: "agent.tips.sendOptions" },
 	{ textKey: "agent.tips.pasteAttach" },
 	{ textKey: "agent.tips.enhancePrompt" },

@@ -22,7 +22,7 @@ import { ipcChannels } from "../../shared/ipc";
 import type { SelectionToolShowPayload, SelectionToolWindowState } from "../../shared/types/selectionTool";
 import type { AppLogger } from "../logging/AppLogger";
 import { readElectronChromiumSandboxPreference } from "../settings/SettingsStore";
-import { SELECTION_TOOL_AUTO_HIDE_MS, SELECTION_TOOL_SCREEN_MARGIN, SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT, SELECTION_TOOL_WINDOW_WIDTH, clampSelectionToolPosition } from "./selectionToolBounds";
+import { SELECTION_TOOL_AUTO_HIDE_MS, SELECTION_TOOL_SCREEN_MARGIN, SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT, SELECTION_TOOL_WINDOW_COLLAPSED_WIDTH, SELECTION_TOOL_WINDOW_WIDTH, clampSelectionToolPosition } from "./selectionToolBounds";
 import type { SelectionToolResizeInput } from "../../shared/types/selectionTool";
 
 export type SelectionToolWindowDeps = {
@@ -91,7 +91,7 @@ export class SelectionToolWindow {
 		try {
 			// 每次新的复制/快捷键触发都从折叠浮条开始，避免上一轮展开尺寸残留。
 			try {
-				win.setContentSize(SELECTION_TOOL_WINDOW_WIDTH, SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT);
+				win.setContentSize(SELECTION_TOOL_WINDOW_COLLAPSED_WIDTH, SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT);
 			} catch {
 				// 窗口尚未完成初始化：保持既有尺寸即可，渲染层挂载后会再请求一次。
 			}
@@ -142,8 +142,8 @@ export class SelectionToolWindow {
 		if (existing && !existing.isDestroyed()) return existing;
 		try {
 			const win = new BrowserWindow({
-				width: SELECTION_TOOL_WINDOW_WIDTH,
-				// 初始只给折叠浮条高度；点开翻译后由渲染层请求展开到结果面板高度。
+				width: SELECTION_TOOL_WINDOW_COLLAPSED_WIDTH,
+				// 初始只给折叠浮条高度；点开翻译后由渲染层请求展开到结果面板尺寸。
 				height: SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT,
 				show: false,
 				frame: false,
@@ -232,7 +232,7 @@ export class SelectionToolWindow {
 	private applyCursorPosition(win: BrowserWindow): void {
 		const cursor = screen.getCursorScreenPoint();
 		const display = screen.getDisplayNearestPoint(cursor);
-		const position = clampSelectionToolPosition({ cursor, workArea: display.workArea, size: { width: SELECTION_TOOL_WINDOW_WIDTH, height: SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT } });
+		const position = clampSelectionToolPosition({ cursor, workArea: display.workArea, size: { width: SELECTION_TOOL_WINDOW_COLLAPSED_WIDTH, height: SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT } });
 		win.setPosition(position.x, position.y, false);
 	}
 
@@ -240,7 +240,7 @@ export class SelectionToolWindow {
 	resize(input: SelectionToolResizeInput): void {
 		const win = this.win;
 		if (!win || win.isDestroyed()) return;
-		const width = Math.round(Math.min(560, Math.max(360, input.width)));
+		const width = Math.round(Math.min(560, Math.max(320, input.width)));
 		const height = Math.round(Math.min(600, Math.max(SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT, input.height)));
 		try {
 			win.setContentSize(width, height);

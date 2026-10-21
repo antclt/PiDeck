@@ -15,12 +15,15 @@ test("system selection window is a Magpie-style bar first, result panel after ac
 	assert.match(view, /SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT/);
 	assert.match(view, /SELECTION_TOOL_WINDOW_EXPANDED_HEIGHT/);
 	assert.match(view, /desktopApi\.selectionTool\s*\.resize\(/);
-	assert.match(view, /点「翻译\/问答」|展开结果面板/);
+	assert.match(view, /SELECTION_TOOL_WINDOW_COLLAPSED_WIDTH/);
+	assert.match(view, /compact=\{!expanded\}/);
+	assert.match(view, /折叠条只留智能体/);
 
 	// 不抢焦点 + 非聚焦自动收起 + 折叠/展开窗口尺寸。
 	assert.match(windowSource, /showInactive\(\)/);
 	assert.doesNotMatch(windowSource, /win\.focus\(\)/);
 	assert.match(windowSource, /SELECTION_TOOL_AUTO_HIDE_MS/);
+	assert.match(windowSource, /SELECTION_TOOL_WINDOW_COLLAPSED_WIDTH/);
 	assert.match(windowSource, /resize\(input: SelectionToolResizeInput\)/);
 	assert.match(ipc, /selectionToolResize/);
 	assert.match(ipc, /parseSelectionToolResizeInput/);
