@@ -273,19 +273,21 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 												validQuotes={composer.editor.validQuotes}
 												caretRef={composer.editor.caretRef}
 												placeholder={
-													composer.isStarting
-														? t("app.agentStartingPlaceholder")
-														: composer.bangMode === "bang-bang"
-															? t("app.composerSilentPlaceholder")
-															: composer.bangMode === "bang"
-																? t("app.composerShellPlaceholder")
-																: composer.mode === "plan"
-																	? t("app.composerPlanPlaceholder")
-																	: composer.mode === "goal"
-																		? t("app.composerGoalPlaceholder")
-																		: composer.acpToolName
-																			? t("app.composerAcpPlaceholder", { tool: composer.acpToolName })
-																			: t("app.composerEnterPlaceholder")
+													composer.suggestion?.visible
+														? ""
+														: composer.isStarting
+															? t("app.agentStartingPlaceholder")
+															: composer.bangMode === "bang-bang"
+																? t("app.composerSilentPlaceholder")
+																: composer.bangMode === "bang"
+																	? t("app.composerShellPlaceholder")
+																	: composer.mode === "plan"
+																		? t("app.composerPlanPlaceholder")
+																		: composer.mode === "goal"
+																			? t("app.composerGoalPlaceholder")
+																			: composer.acpToolName
+																				? t("app.composerAcpPlaceholder", { tool: composer.acpToolName })
+																				: t("app.composerEnterPlaceholder")
 												}
 												onFocus={composer.editor.onFocus}
 												onChange={composer.editor.onChange}
@@ -297,6 +299,8 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 												onDragOver={composer.editor.onDragOver}
 												onBlur={composer.editor.onBlur}
 												onChipClick={composer.editor.onChipClick}
+												// 输入预测：ghost 文案只做视觉层，不进入草稿/撤销；Tab / → 采纳。
+												suggestion={composer.suggestion?.visible ? composer.suggestion?.text : undefined}
 											/>
 											{composer.suggestions.open && !composer.isStarting ? (
 												<PromptSuggestions

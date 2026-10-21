@@ -18,6 +18,7 @@ import {
 	effectiveAgentBackendAtom,
 	enhanceModelAtom,
 	enhanceIncludeContextAtom,
+	promptSuggestionEnabledAtom,
 	imageGenConfigAtom,
 	projectByIdAtomFamily,
 	sessionAttachmentsBySessionIdAtomFamily,
@@ -91,6 +92,8 @@ import { useSessionSend, type EnqueuePromptSnapshot } from "./useSessionSend";
 const PASTE_FILE_CONTENT_MAX_BYTES = 2 * 1024 * 1024;
 import { useVoiceTranscription } from "./useVoiceTranscription";
 import { usePromptEnhance, type PromptEnhanceRequest } from "./usePromptEnhance";
+import { usePromptSuggestion } from "./usePromptSuggestion";
+import { isSessionTurnRunning } from "../utils/sessionActivityClock";
 import { resolveVoiceTranscriptionInsertion, type VoiceTranscriptionTarget } from "../utils/voiceTranscriptionInsert";
 
 /** 统一压缩结果 → 用户可见文案；所有分支都给文案（取消也要可见，见 classifyCompactError）。 */
@@ -1560,12 +1563,32 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		[getPromptHistory, historyIndex, sessionId, setDraft, validSessionRefs],
 	);
 
+	// 输入预测的当前快照（声明在 onKeyDown 之前，但在下方预测 hook 之后赋值）：
+	// keydown 只读 ref，避免把「钩子返回值」塞进 useCallback 依赖造成每次渲染重建回调。
+	const suggestionRef = useRef<{ visible: boolean; accept: () => void; dismiss: () => void; acceptKey: (event: React.KeyboardEvent<HTMLDivElement>) => boolean } | null>(null);
+
 	const onKeyDown = useCallback(
 		(event: React.KeyboardEvent<HTMLDivElement>) => {
 			// IME 合成中一律不抢键：↑/↓ 是输入法选词、Esc 是取消合成、Enter 是确认候选。
 			// 放在候选菜单之前，保证菜单分支也走同一判定（TipTap 的 DOM 事件桥接没有
 			// nativeEvent，必须用共享判定口，不能只看 event.nativeEvent?.isComposing）。
 			if (isComposingKeyboardEvent(event)) return;
+
+			// 输入预测（ghost 文案）：Tab / → 采纳，Esc 忽略。只在空草稿可见，因此不会
+			// 与历史回溯、补全菜单、发送键冲突；先于其它分支拦截，避免 Tab 被默认焦点切换吃掉。
+			const ghost = suggestionRef.current;
+			if (ghost?.visible) {
+				if (ghost.acceptKey(event)) {
+					event.preventDefault();
+					ghost.accept();
+					return;
+				}
+				if (event.key === "Escape") {
+					event.preventDefault();
+					ghost.dismiss();
+					return;
+				}
+			}
 
 			if (suggestionsOpen && suggestionItems.length > 0) {
 				if (event.key === "ArrowDown") {
@@ -1798,6 +1821,23 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		captureRequest: captureEnhanceRequest,
 		applyText: applyEnhancedText,
 	});
+
+	// ===== 输入预测（回合结束后预测下一句输入，空输入框 ghost 展示）=====
+	// 与增强共用同一套目标模型解析（设置固定模型 > 会话模型 > 默认），但走独立侧车实例；
+	// 回合边界取 runtime 的权威 isTurnActive（agent_end），不用 isBusy（还含 compact 等中间态）。
+	// 采纳回填与增强同一条路径（applyEnhancedText：整体替换草稿 + 光标置尾 + 聚焦）。
+	const promptSuggestionEnabled = useAtomValue(promptSuggestionEnabledAtom);
+	const suggestion = usePromptSuggestion({
+		scopeKey: sessionId,
+		enabled: promptSuggestionEnabled,
+		target: enhanceTarget,
+		turnRunning: isSessionTurnRunning(runtime?.state, runtime?.status),
+		// 用 hasContent 而不是 draft.length：纯空白、附件/粘贴文件也属于「有内容」，
+		// 否则预测会盖在已经放好附件的输入框上，Tab 还会把附件留下却把 ghost 当草稿采纳。
+		draftEmpty: !hasContent,
+		applyText: applyEnhancedText,
+	});
+	suggestionRef.current = suggestion;
 
 	/**
 	 * 大段粘贴文本 → 落盘 userData/paste-files + 附件栏 chip。
@@ -2337,6 +2377,8 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		busyDraftLocked,
 		voice,
 		enhance,
+		// 输入预测只对外暴露渲染所需的两个字段：文本与可见性（采纳/忽略走 keydown 内部）。
+		suggestion: { text: suggestion.text, visible: suggestion.visible },
 		editor: {
 			ref: editorRef,
 			caretRef,

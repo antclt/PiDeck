@@ -97,7 +97,7 @@ export type EnhanceRunCallbacks = {
  * 绕过——渲染层可以把任意系统指令塞进模型。缺省不传 = 内置增强模板，提示词增强的
  * 线上行为逐字节不变（守卫：tests/enhancePromptService.test.mjs）。
  */
-export type EnhanceServiceRunInput = EnhanceRunInput & { systemPrompt?: string };
+export type EnhanceServiceRunInput = EnhanceRunInput & { systemPrompt?: string; purpose?: "suggest" };
 
 export type EnhanceAcceptResult = { ok: true; runId: string } | { ok: false; errorKind: EnhanceErrorKind; message: string };
 
@@ -228,7 +228,9 @@ export class EnhancePromptService {
 		this.activeRun = { id: runId, callbacks, timer, accepted: false };
 		// 智能体市场的一次性调用会带自己的角色设定；空白值视作未提供，回落内置增强模板。
 		const systemPrompt = input.systemPrompt?.trim() || ENHANCE_SYSTEM_PROMPT;
-		const sent = this.sendToHelper({ cmd: "complete", id: runId, provider: input.provider, modelId: input.modelId, systemPrompt, userText: input.userText, ...(input.context?.length ? { context: input.context } : {}) });
+		// 输入预测与增强共用一条补全协议，但语义不同：sidecar 对 purpose="suggest" 不追加
+		// 「只改写最后一条草稿」约束（历史是待预测的对话，不是待改写的正文）。
+		const sent = this.sendToHelper({ cmd: "complete", id: runId, provider: input.provider, modelId: input.modelId, systemPrompt, userText: input.userText, ...(input.purpose ? { purpose: input.purpose } : {}), ...(input.context?.length ? { context: input.context } : {}) });
 		if (!sent.ok) {
 			if (this.activeRun?.id === runId) this.settleActive("protocol", sent.message);
 			else clearTimeout(timer);

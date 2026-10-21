@@ -1886,6 +1886,13 @@ export function createPreviewApi(): PiDesktopApi {
 			onEvent: () => () => {},
 		},
 
+		// 输入预测在预览态没有主进程，直接按「不支持」返回：composer 会静默不显示 ghost。
+		suggestion: {
+			run: async () => ({ ok: false, errorKind: "sdk-unavailable", message: "preview mode" }),
+			cancel: async () => ({ ok: true }),
+			onEvent: () => () => {},
+		},
+
 		voiceTranscription: {
 			getConfig: async () => ({ ...DEFAULT_VOICE_TRANSCRIPTION_CONFIG, hasApiKey: false, hasVolcAppId: false, hasVolcAccessToken: false, apiKeyHint: null, volcAppIdHint: null, volcAccessTokenHint: null, runtimeReady: false }),
 			saveConfig: async (config) => ({
