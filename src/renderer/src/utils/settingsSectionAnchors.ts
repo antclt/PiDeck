@@ -33,6 +33,7 @@ export const SETTINGS_SECTION_ANCHORS = [
 	{ tab: "common", slug: "common-window", labelKey: "settings.sectionWindow", keywords: ["窗口", "托盘", "关闭行为", "window", "tray"] },
 	{ tab: "common", slug: "common-prompt-enhance", labelKey: "settings.enhance.section", keywords: ["提示词增强", "提示词优化", "prompt 增强", "enhance"] },
 	{ tab: "common", slug: "common-prompt-suggestion", labelKey: "settings.promptSuggestion.section", keywords: ["输入预测", "下一句", "候选输入", "输入建议", "prompt suggestion", "prediction"] },
+	{ tab: "common", slug: "common-selection-tool", labelKey: "settings.selectionTool.title", keywords: ["划词", "划词翻译", "选中文字", "系统级划词", "全局划词", "翻译浮窗", "selection tool", "translate selection"] },
 	{ tab: "common", slug: "common-voice-input", labelKey: "voice.settings.title", keywords: ["语音输入", "语音转写", "录音", "voice", "speech"] },
 	{ tab: "notification", slug: "notification-channels", labelKey: "settings.notificationSection", keywords: ["通知", "系统通知", "事件通知", "notification"] },
 	{ tab: "notification", slug: "notification-in-app", labelKey: "settings.inAppNotificationSection", keywords: ["应用内通知", "站内通知", "in-app notification"] },
