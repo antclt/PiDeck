@@ -18,7 +18,6 @@ import type {
 	SendSessionPromptInput,
 	SendSessionPromptResult,
 	SessionCommandResult,
-	SessionFileChange,
 	SessionMessagePage,
 	SessionRecord,
 	SessionRuntimeInfo,
@@ -138,8 +137,7 @@ export type WebServiceDependencies = {
 	forkRuntimeSession: (target: SessionRuntimeTarget, entryId: string, options?: { mutationFork?: boolean; branchMode?: boolean }) => Promise<SessionForkResult>;
 	/** 冷会话激活（Web 重发/编辑 fork 化用；与桌面 sessionsRuntimeActivate 同源）。 */
 	activateSessionRuntime?: (sessionId: string) => Promise<SessionCommandResult<SessionRuntimeInfo>>;
-	/** 会话活动监控（第二批 strips）：文件变更/子代理/todo 快照，装配侧对齐桌面 IPC 语义（含 running 降级对账）。缺省时路由返回 503。 */
-	listSessionFileChanges?: (sessionId: string) => Promise<SessionFileChange[]>;
+	/** 会话活动监控 strips：子代理/todo 快照，装配侧对齐桌面 IPC 语义（含 running 降级对账）。缺省时路由返回 503。 */
 	listSessionSubagents?: (sessionId: string) => Promise<PiSubagentEntry[]>;
 	listSessionTodo?: (sessionId: string) => Promise<SessionTodoSnapshot | undefined>;
 	listPendingUiRequests: () => PendingUiRequestSnapshot[];

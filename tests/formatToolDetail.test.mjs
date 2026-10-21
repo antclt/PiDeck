@@ -112,3 +112,42 @@ test("truncateDetailWithMeta 超长时首尾截断并标记 truncated", () => {
 	assert.ok(cut.text.startsWith("xxxxx"));
 	assert.ok(cut.text.endsWith("xxxxx"));
 });
+
+/**
+ * 文件类工具的 args 不能被 8000 截断（2027-02 回归）。
+ *
+ * 事故：write/edit 的 args 里带着被写文件内容，首尾截断把「已省略 N 字符」插进
+ * JSON 字符串中间 → meta.args 不可解析 → 渲染层 getToolDiffTarget 取不到 file_path
+ * → 该文件从「修改的文件」清单里静默消失。本机 60 个会话实测丢 5.0%（213/4221），
+ * 全部是 >8000 的 write/edit；修复后降到 0.69%（剩下的是模型自己发的无路径 edit）。
+ */
+test("serializeToolArgsForDelivery：文件类工具保留完整 args，其余工具维持 8000 截断", () => {
+	const { serializeToolArgsForDelivery, TOOL_ARGS_FILE_CHANGE_MAX_CHARS } = loadTsCommonJs("src/shared/formatToolDetail.ts");
+	assert.ok(TOOL_ARGS_FILE_CHANGE_MAX_CHARS > 100_000, "文件类上限必须远高于单文件内容量级");
+
+	// 20KB 的写文件参数：截断时代（8000）会破 JSON
+	const content = Array.from({ length: 700 }, (_, i) => `export const line${i} = ${i};`).join("\n");
+	const args = { file_path: "src/a.ts", content };
+	const rawJson = JSON.stringify(args, null, 2);
+	assert.ok(rawJson.length > 8000, "样本必须超过旧的 8000 上限，否则测不到这条规则");
+
+	for (const toolName of ["write", "edit", "create", "patch", "Write", "MultiEdit"]) {
+		const delivered = serializeToolArgsForDelivery(toolName, args, enTranslate);
+		assert.equal(delivered.length, rawJson.length, `${toolName} 的 args 不得被截断`);
+		assert.deepEqual(JSON.parse(delivered), args, `${toolName} 的 args 必须仍是合法 JSON`);
+	}
+
+	// 非文件类工具维持原有 8000 截断（bash/read 的 args 只是命令行或路径）
+	for (const toolName of ["bash", "read", "grep", "ask_question"]) {
+		const delivered = serializeToolArgsForDelivery(toolName, args, enTranslate);
+		assert.ok(delivered.length < rawJson.length, `${toolName} 的 args 仍应按 8000 截断`);
+	}
+});
+
+test("serializeToolArgsForDelivery：文件类工具的极端巨型参数仍被上限挡住", () => {
+	const { serializeToolArgsForDelivery, TOOL_ARGS_FILE_CHANGE_MAX_CHARS } = loadTsCommonJs("src/shared/formatToolDetail.ts");
+	const huge = "x".repeat(TOOL_ARGS_FILE_CHANGE_MAX_CHARS + 1000);
+	const delivered = serializeToolArgsForDelivery("write", { file_path: "a.ts", content: huge }, enTranslate);
+	assert.ok(delivered.length < huge.length + 200, "超过上限必须截断，避免异常参数撑爆主进程");
+	assert.match(delivered, /\[truncated/);
+});

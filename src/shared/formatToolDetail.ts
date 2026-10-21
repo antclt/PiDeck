@@ -1,5 +1,6 @@
 import type { MainProcessTranslationKey } from "./i18n/mainProcessCopy";
 import { mainProcessT } from "./i18n/mainProcessCopy";
+import { isFileChangeToolName } from "./fileChanges.ts";
 
 /**
  * 工具卡展开区文案（PI / DSH 共用）：整理成「工具 / 状态 / 参数 / 结果」写入 meta.detailText。
@@ -8,6 +9,31 @@ import { mainProcessT } from "./i18n/mainProcessCopy";
 
 /** 单段 args/result/details 与整段 detailText 的首尾截断上限（与历史 PI 投影器同值）。 */
 export const TOOL_DETAIL_MAX_CHARS = 8000;
+
+/**
+ * 文件类工具的 args 上限。
+ *
+ * 为什么单独一档（2027-02 实测）：write/edit 的 args 里带着被写文件的完整内容 /
+ * 变动区域，首尾截断会把中间插进「已省略 N 字符」提示——JSON 从此不可解析，
+ * 渲染层 getToolDiffTarget 取不到 file_path，该文件从「修改的文件」清单里整个消失
+ * （本机 60 个会话实测丢 5.0%，213/4221，全部是 >8000 的 write/edit）。
+ * 这类调用只占全部工具调用的 0.4%、平均 1886 字节，放开后一个显示窗口
+ * （9 轮 / 1200 条目上限）的 args 合计也就 1MB 量级——远小于 result 的 10MB。
+ * 上限仍保留，只挡异常巨型参数（整目录灌入、base64 内嵌），避免真被撑爆。
+ */
+export const TOOL_ARGS_FILE_CHANGE_MAX_CHARS = 1_000_000;
+
+/**
+ * 工具参数序列化为 meta.args 的统一入口（实时 upsert 与历史投影共用）。
+ *
+ * 文件类工具（write/edit/create/patch）用远高一档的上限，保证 JSON 可解析、
+ * 「修改的文件」清单在实时与重开历史时都不会漏文件；其余工具维持 8000 截断
+ * （bash/read/grep 的 args 只是命令行或路径，截断不影响功能）。
+ */
+export function serializeToolArgsForDelivery(toolName: string, args: unknown, translate: ToolDetailTranslate): string {
+	const maxChars = isFileChangeToolName(toolName) ? TOOL_ARGS_FILE_CHANGE_MAX_CHARS : TOOL_DETAIL_MAX_CHARS;
+	return truncateForDetail(safeJson(args), translate, maxChars);
+}
 
 export type ToolDetailTranslate = (key: MainProcessTranslationKey, params?: Record<string, string | number>) => string;
 

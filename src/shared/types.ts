@@ -29,6 +29,7 @@ export * from "./types/security";
 export * from "./types/modelSpecs";
 export * from "./types/fetchedModel";
 export * from "./types/trajectory";
+export * from "./types/outline";
 export * from "./types/todo";
 export * from "./types/dshPlugin";
 export * from "./types/dshLlm";

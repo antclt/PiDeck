@@ -126,10 +126,11 @@ export const ipcChannels = {
 	sessionsCatalogReadMessagePage: "sessions:catalog-read-message-page",
 	/** 会话 JSONL 过程事件（session/model/thinking/custom/compaction），供轨迹复盘，不进聊天时间线。 */
 	sessionsCatalogReadProcessEvents: "sessions:catalog-read-process-events",
+	sessionsCatalogReadOutline: "sessions:catalog-read-outline",
+	sessionsCatalogReadOutlineTitle: "sessions:catalog-read-outline-title",
 	/** pi-subagents 扩展子代理列表：合成 record、桥接快照、工具调用推导。 */
 	sessionsListSubagents: "sessions:list-subagents",
 	/** 会话级文件修改汇总：从会话文件全量显示消息聚合 write/edit/create/patch。 */
-	sessionsListFileChanges: "sessions:list-file-changes",
 	/** 会话级 todo 快照：从会话文件 pi-deck-todo custom 条目重建最新计划。 */
 	sessionsListSessionTodo: "sessions:list-session-todo",
 	/** DSH 会话轨迹系统提示（request/header 事件的 EpochHeader.system；非 DSH/无数据返回 undefined）。 */
@@ -158,6 +159,8 @@ export const ipcChannels = {
 	sessionsRuntimeCompact: "sessions:runtime-compact",
 	sessionsRuntimeState: "sessions:runtime-state",
 	sessionsRuntimeCommands: "sessions:runtime-commands",
+	sessionsRuntimePromptTemplates: "sessions:runtime-prompt-templates",
+	sessionsDraftPromptTemplates: "sessions:draft-prompt-templates",
 	/** 热重载 pi 扩展/技能/提示词（内部 reload 扩展命令；返回刷新后的命令表）。 */
 	sessionsRuntimeReloadResources: "sessions:runtime-reload-resources",
 	/** 草稿会话斜杠命令预览（只读借用 pi standby 进程；不可用返回 null）。 */

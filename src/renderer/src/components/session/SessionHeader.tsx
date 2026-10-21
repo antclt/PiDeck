@@ -95,15 +95,7 @@ export function SessionHeader(props: SessionHeaderProps) {
 			{/* 放大镜入口常驻头部工具条（与运行控制/「⋯」同列），不再浮在消息正文上：
 			    后者既压住正文、在自定义标题栏下还会落到窗口控件行（用户反馈）。 */}
 			{canFindInSession && (
-				<Button
-					type="button"
-					variant="ghost"
-					size="icon-sm"
-					className="h-7 w-7 min-w-0 rounded-md border-0 bg-transparent px-0 text-muted-foreground hover:bg-accent hover:text-foreground"
-					title={t("sessionFind.open")}
-					aria-label={t("sessionFind.open")}
-					onClick={() => requestSessionFind(sessionId)}
-				>
+				<Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7 min-w-0 rounded-md border-0 bg-transparent px-0 text-muted-foreground hover:bg-accent hover:text-foreground" title={t("sessionFind.open")} aria-label={t("sessionFind.open")} onClick={() => requestSessionFind(sessionId)}>
 					<Search className="size-3.5" aria-hidden="true" />
 				</Button>
 			)}

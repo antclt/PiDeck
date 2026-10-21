@@ -1216,18 +1216,21 @@ function renderBubbleSegments(
 			return;
 		}
 		const { block } = segment;
+		// 数据层 kind 与视觉 kind 解耦：模板（/模板名）与技能（/skill:名）在 pi 是两种资源，
+		// 展示上共用同一套斜杠 chip 外观（data-type 保留真实类型，便于样式/测试按类型定位）。
 		const chipKind = block.kind;
+		const visualKind = chipKind === "template" ? "skill" : chipKind;
 		const label = block.kind === "session" ? block.name : block.label;
 		// skill/template 正文可能是一整份 SKILL.md 或提示词；它属于模型上下文，不应在
 		// 原生 title 中撑出巨大浮层。quote/session 仍保留全文悬浮预览。
-		const title = block.kind === "skill" ? `/${label}` : block.text;
-		const Icon = CHIP_ICONS[chipKind] ?? FileText;
+		const title = block.kind === "skill" || block.kind === "template" ? `/${label}` : block.text;
+		const Icon = CHIP_ICONS[visualKind] ?? FileText;
 		nodes.push(
-			<span key={`${chipKind}-${block.start}`} className={`input-chip input-chip--${chipKind}`} data-type={chipKind} title={title}>
+			<span key={`${chipKind}-${block.start}`} className={`input-chip input-chip--${visualKind}`} data-type={chipKind} title={title}>
 				{/* inline-block 是必须的：Tailwind preflight 把 svg 设为 display:block，
 				    仅靠 legacy 作用域在气泡外的渲染点会再次被拆行 */}
 				<Icon className="input-chip__icon inline-block shrink-0" width="12" height="12" aria-hidden="true" />
-				<span className="input-chip__label">{formatChipDisplayLabel(chipKind, label)}</span>
+				<span className="input-chip__label">{formatChipDisplayLabel(visualKind, label)}</span>
 			</span>,
 		);
 	});

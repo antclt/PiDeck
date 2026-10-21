@@ -14,6 +14,8 @@ import type {
 	ChatMessage,
 	CreateAgentInput,
 	ForkMessage,
+	SessionFactsResult,
+	SessionOutlineSnapshot,
 	I18nParams,
 	ImageContent,
 	SessionMessageImageTarget,
@@ -29,11 +31,9 @@ import type {
 	SessionBranchTree,
 	SessionMessagePage,
 	SessionRuntimeModelSelection,
-	SessionFileChange,
 	SessionTodoSnapshot,
 } from "../../shared/types";
 import { ipcChannels } from "../../shared/ipc";
-import { collectSessionFileChanges } from "../../shared/fileChanges";
 import { extractPiToolTruncation } from "../../shared/formatToolDetail";
 import { COMPACT_CANCELLED_BY_OWNER, COMPACT_CANCELLED_BY_USER_ABORT, COMPACT_HOOK_REJECT_MAX_MS, COMPACT_OBSERVATION_MAX_AGE_MS, COMPACT_ROUTED_TO_OWNER, COMPACT_USER_ABORT_WINDOW_MS, COMPACT_WAIT_TIMEOUT } from "../../shared/compactFeedback";
 import { PiProcess } from "./PiProcess";
@@ -69,6 +69,7 @@ import { mergeHistoryWithPreservedMessages, stabilizeProjectedIdsFromIdentities,
 import { buildAgentSessionKey, toAbsoluteSessionPath, type AgentSessionIdentityDefaults } from "./agentSessionIdentity";
 import { SessionFileEditor, type SessionEntryTarget, type SessionFileRef } from "./SessionFileEditor";
 import { SessionHistoryReader, boundTurnWindowStart } from "./SessionHistoryReader";
+import { createTrajectoryFactsReader, type TrajectoryFactsReader } from "../sessions/trajectoryFactsReader";
 import { scanJsonlLines } from "../sessions/jsonlLineStream";
 import { estimateMessagesPayloadBytes } from "./messagePayloadSize";
 import { StoppedMessageIdentityCache } from "./stoppedMessageIdentity";
@@ -77,6 +78,7 @@ import { AgentMessageProjector, buildActiveBranchEntryIds as buildActiveBranchEn
 import { RewindCheckpointCoordinator } from "./RewindCheckpointCoordinator";
 import { LiveStreamChannel } from "./liveStreamChannel";
 import { resolveNotificationSessionId } from "./agentUtils";
+import { chatUsageFromPiUsage } from "./messageUsage";
 import { isRoleMessageRole } from "./sessionEntryIds";
 import { createStreamGateState, isStreamGateSealed, noteAbortSettled, openStreamGateForNewRun, sealStreamGate, type StreamGateState } from "./streamGate";
 import { RpcLiveLogTap } from "./rpcLiveLogTap";
@@ -193,6 +195,7 @@ export class AgentManager {
 	private readonly toolExecutingByAgent = new Map<string, string | null>();
 	private readonly sessionFileEditor: SessionFileEditor;
 	private readonly sessionHistoryReader: SessionHistoryReader;
+	private readonly trajectoryFacts: TrajectoryFactsReader;
 	private readonly messageProjector: AgentMessageProjector;
 	/**
 	 * agents:message 的节流批处理/增量标记/显示窗口推进收口在 MessageEmitBatcher；
@@ -536,6 +539,12 @@ export class AgentManager {
 						}
 					: undefined,
 			});
+		this.trajectoryFacts = createTrajectoryFactsReader({
+			source: {
+				getSessionFactIndex: (sessionPath) => this.sessionHistoryReader.getSessionFactIndex(sessionPath),
+				readSessionFactLines: (sessionPath, entries) => this.sessionHistoryReader.readSessionFactLines(sessionPath, entries),
+			},
+		});
 		this.sessionHistoryReader = new SessionHistoryReader({
 			toHostPath: (sessionPath) => this.toSessionHostPath(sessionPath),
 			convertMessages: (agentId, rawMessages, activeEntryIds) => this.convertAgentMessages(agentId, rawMessages, activeEntryIds),
@@ -1275,26 +1284,28 @@ export class AgentManager {
 	}
 
 	/**
-	 * 最新一轮文件修改汇总：从会话文件中取「最后一个可展示 user 消息之后」的消息
-	 * 聚合 write/edit/create/patch（与渲染层 TimelineFormat 共用 shared/fileChanges
-	 * 解析，历史/活会话通用）。
-	 *
-	 * 为什么只取最新一轮：composer 上方「修改的文件」横栏的语义是「这次
-	 * 提问后 agent 动了哪些文件」，累计全量会让历史轮次文件长期堆积。
-	 *
-	 * 为什么不再走 readSessionDisplayMessages：它是「读整条活动分支 → 投影 → 再切
-	 * 最后一轮」，近 1 GiB 的会话会因此被全量展开一次（主进程堆直接爆）。
-	 * 现在由 SessionHistoryReader.readFileChangeMessages 做有界读（见其注释）。
-	 */
-	async readSessionFileChanges(sessionPath: string): Promise<SessionFileChange[]> {
-		return collectSessionFileChanges(await this.sessionHistoryReader.readFileChangeMessages(sessionPath, "_viewer"));
-	}
-
-	/**
 	 * 会话级 todo 快照：读会话分支上最新 pi-deck-todo custom 条目（历史会话重建任务 tab）。
 	 */
 	async readSessionTodo(sessionPath: string): Promise<SessionTodoSnapshot | undefined> {
 		return this.sessionHistoryReader.readTodoSnapshot(sessionPath);
+	}
+
+	/**
+	 * 轨迹事实（提示词装载 + 过程事件）：索引选候选 + 小批读正文 + 内容版本缓存。
+	 * 文件未变时正文读取为 0；普通消息追加但事实未变时 version 不变。
+	 */
+	async readSessionFacts(sessionPath: string): Promise<SessionFactsResult> {
+		return this.trajectoryFacts.read(sessionPath);
+	}
+
+	/** 用户检查点目录（导轨）：活动消息索引派生，超预算裁剪并标记。 */
+	async readSessionOutline(sessionPath: string, limit?: number): Promise<SessionOutlineSnapshot> {
+		return this.sessionHistoryReader.readSessionOutline(sessionPath, limit);
+	}
+
+	/** 导轨单项标题：按需读一行（≤1MiB），返回 80 字以内展示文本。 */
+	async readSessionOutlineTitle(sessionPath: string, entryId: string): Promise<string | undefined> {
+		return this.sessionHistoryReader.readSessionOutlineTitle(sessionPath, entryId);
 	}
 
 	/** 轮次维度显示分页：pageSize 复用为轮次数（readSessionDisplayTurnPage 内部夹紧上限） */
@@ -5328,6 +5339,16 @@ export class AgentManager {
 		const modelProvider = nonEmptyString(messageRecord?.provider);
 		const modelId = nonEmptyString(messageRecord?.model);
 		const extractedModel = modelProvider && modelId ? { provider: modelProvider, modelId } : undefined;
+		// 用量/实测耗时：message_end 的完整消息带 usage 与 durationMs（timestamp = 请求开始）。
+		// 轨迹账本的 token 列与真实区间依赖它们；缺失则不写（不补 0：未上报与 0 要可区分）。
+		const extractedUsage = chatUsageFromPiUsage(messageRecord?.usage);
+		const measuredDurationMs = typeof messageRecord?.durationMs === "number" && Number.isFinite(messageRecord.durationMs) ? messageRecord.durationMs : undefined;
+		const startedAtMs = typeof messageRecord?.timestamp === "number" && messageRecord.timestamp > 0 ? messageRecord.timestamp : undefined;
+		const usageMeta = {
+			...(extractedUsage ? { usage: extractedUsage } : {}),
+			...(measuredDurationMs !== undefined ? { durationMs: measuredDurationMs } : {}),
+			...(startedAtMs !== undefined && measuredDurationMs !== undefined ? { startedAt: startedAtMs } : {}),
+		};
 
 		if (existing) {
 			// 已有骨架：有抽出文本才覆盖；fallbackDelta 仅作追加兜底（终态路径）。
@@ -5341,6 +5362,9 @@ export class AgentManager {
 			}
 			if (extractedModel) {
 				existing.model = extractedModel;
+			}
+			if (Object.keys(usageMeta).length > 0) {
+				existing.meta = { ...existing.meta, ...usageMeta };
 			}
 			// 保留原始时间戳，不随 delta 刷新。
 			this.markMessagesDirtyFrom(agentId, existingIndex);
@@ -5356,6 +5380,7 @@ export class AgentManager {
 				timestamp: Date.now(),
 				...(finalStopReason ? { stopReason: finalStopReason } : {}),
 				...(extractedModel ? { model: extractedModel } : {}),
+				...(Object.keys(usageMeta).length > 0 ? { meta: usageMeta } : {}),
 			});
 			this.markMessagesDirtyFrom(agentId, list.length - 1);
 		}
@@ -5530,7 +5555,10 @@ export class AgentManager {
 		const text = status === "running" ? `${icon} ${toolName}` : `${icon} ${toolName}`;
 		// args 可能来自 event.args（对象）或 existing.meta.args（已序列化的 JSON 字符串）。
 		// 如果是后者（如 tool_execution_end 不带 args），直接复用已有字符串避免 double encoding。
-		const argsMeta = typeof args === "string" ? args : this.messageProjector.truncateForDetail(this.messageProjector.safeJson(args));
+		// 文件类工具（write/edit/create/patch）不适用 8000 截断：它们的参数里带着被写文件内容，
+		// 截断会把「已省略 N 字符」插进 JSON 字符串中间 → 不可解析 → 该文件从「修改的文件」清单
+		// 及重开后的历史视图里静默消失（见 serializeToolArgsForDelivery）。
+		const argsMeta = typeof args === "string" ? args : this.messageProjector.serializeToolArgs(toolName, args);
 		// 提取 ask_question 详情用于渲染提问卡片；支持批量（questions 数组）和单问题两种格式。
 		// pi RPC 返回格式可能为 result.details 嵌套 或 result 顶层（无 details 包装）
 		const askDetails: AskDetailsLike | undefined = (() => {

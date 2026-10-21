@@ -149,7 +149,8 @@ test("expanded skill and prompt template blocks restore slash chip labels", () =
 		blocks.map((block) => ({ kind: block.kind, label: block.kind === "session" ? block.name : block.label })),
 		[
 			{ kind: "skill", label: "skill:cv-project-writer" },
-			{ kind: "skill", label: "review-pr" },
+			// 模板块自 2026-10 起是独立 kind（与 pi 的 skill / prompt 两种资源对齐）
+			{ kind: "template", label: "review-pr" },
 		],
 	);
 	assert.equal(replaceExpandedRefBlocksWithLabels(`${skillText}\n\n${templateText}`), "/skill:cv-project-writer\n\n/review-pr");

@@ -659,6 +659,8 @@ export function buildOutline(messages: ChatMessage[]) {
 		.filter((message) => message.role === "user")
 		.map((message) => ({
 			id: message.id,
+			// 导轨目录用 entryId 对齐未加载检查点；缺 meta.entryId 的 live 消息退回 id。
+			entryId: typeof message.meta?.entryId === "string" ? message.meta.entryId : undefined,
 			role: message.role,
 			// 定位轴标题是纯文本出口：先折叠自包含引用块，否则标题就是 <quoted_context …>
 			title: summarizeMessage(replaceExpandedRefBlocksWithLabels(message.text)),

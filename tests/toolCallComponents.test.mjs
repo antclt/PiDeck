@@ -26,8 +26,10 @@ test("tool-call rendering stays isolated behind the SurfaceComponents facade", (
 test("timeline tool rendering and message rows share formatting helpers", () => {
 	assert.match(toolCalls, /from "\.\/TimelineFormat"/);
 	assert.match(surface, /from "\.\/TimelineFormat"/);
-	// 文件修改/工具名解析已迁往 shared/fileChanges（main/renderer 共用），TimelineFormat re-export 保持兼容
-	assert.match(timelineFormat, /export \{ collectSessionFileChanges, getToolDiffTarget, getToolName, stripAnsi \};/);
+	// 文件修改/工具名解析已迁往 shared/fileChanges（main/renderer 共用）。
+	// 2027-02：collectSessionFileChanges 已不再经 TimelineFormat re-export（它只在文件内部供
+	// collectRunFileChanges 使用），其余三个仍有外部消费者，故保留兼容导出。
+	assert.match(timelineFormat, /export \{ getToolDiffTarget, getToolName, stripAnsi \};/);
 	assert.match(timelineFormat, /export function formatDuration/);
 	assert.match(timelineFormat, /export function getToolStatus/);
 });

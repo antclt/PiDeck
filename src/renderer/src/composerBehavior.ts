@@ -4,6 +4,7 @@ export type ComposerEnterIntent = "ignore" | "newline" | "send";
 
 import type { AgentBackend, ComposerAgentMode } from "@shared/types";
 import { formatPromptTemplateBlock } from "./components/session/composer/referenceBlocks";
+import { replaceOutsideProtected } from "./utils/protectedText";
 
 export const PI_DECK_PLAN_MODE_MARKER = "__PI_DECK_PLAN_MODE__";
 export const PI_DECK_GOAL_MODE_MARKER = "__PI_DECK_GOAL_MODE__";
@@ -211,23 +212,35 @@ export function expandPromptTemplates(message: string, templates: PromptTemplate
 	const escapedNames = sorted.map((t) => t.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
 	const regex = new RegExp(`(^|\\s)/(${escapedNames.join("|")})(\\s|$)`, "g");
 
-	const expanded = message.replace(regex, (_match, prefix, name, suffix) => {
-		matchedName = name;
-		const rawContent = nameToContent.get(name) ?? "/" + name;
-		// 剥离 content 中的 frontmatter 元数据，只保留正文，
-		// 避免 `---\ndescription: xxx\n---` 泄漏到 pi agent 的对话消息中。
-		const content = stripFrontmatter(rawContent);
-		// 正文为空时（如 UI 新建模板只有 frontmatter）不展开，保留 /name 原文：
-		// 直接展开会产出空白/仅分隔符消息，被主进程拒为“消息不能为空”。
-		if (!content.trim()) {
-			emptyTemplateName = name;
-			return _match;
-		}
-		// 命令后有用户输入时用两个换行分隔模板内容和用户输入，提升可读性。
-		// 内容和模板名一起编码：前端展示只折叠为 /name，但模型仍可读取完整正文。
-		const separator = suffix && /\s/.test(suffix) ? "\n\n" : "";
-		return prefix + formatPromptTemplateBlock(name, content) + separator;
-	});
+	// 已展开的自包含块（引用 / 会话引用 / 技能 / 模板）是只读区：块内的 `/模板名`
+	// 属于被引用或被引述的原文，替换它会篡改引用内容（2026-10 实测：引用里提到
+	// /commit，落盘后引用正文变成了整份提交模板）。
+	//
+	// 反复替换到稳定：单次 replace 会「吃掉」分隔符（`/a /b` 里 /a 的匹配带走它后面的空格，
+	// 紧邻的 /b 因此失去 `(^|\s)` 前缀而不展开）。块内文本受保护区约束，
+	// 第二轮不会重复展开已生成的块；上限 8 轮兜底防意外自我增长。
+	let expanded = message;
+	let previous = "";
+	for (let pass = 0; pass < 8 && expanded !== previous; pass += 1) {
+		previous = expanded;
+		expanded = replaceOutsideProtected(expanded, regex, (_match, prefix, name, suffix) => {
+			matchedName = name;
+			const rawContent = nameToContent.get(name) ?? "/" + name;
+			// 剥离 content 中的 frontmatter 元数据，只保留正文，
+			// 避免 `---\ndescription: xxx\n---` 泄漏到 pi agent 的对话消息中。
+			const content = stripFrontmatter(rawContent);
+			// 正文为空时（如 UI 新建模板只有 frontmatter）不展开，保留 /name 原文：
+			// 直接展开会产出空白/仅分隔符消息，被主进程拒为“消息不能为空”。
+			if (!content.trim()) {
+				emptyTemplateName = name;
+				return _match;
+			}
+			// 命令后有用户输入时用两个换行分隔模板内容和用户输入，提升可读性。
+			// 内容和模板名一起编码：前端展示只折叠为 /name，但模型仍可读取完整正文。
+			const separator = suffix && /\s/.test(suffix) ? "\n\n" : "";
+			return prefix + formatPromptTemplateBlock(name, content) + separator;
+		});
+	}
 
 	return {
 		message: expanded,

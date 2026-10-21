@@ -356,11 +356,6 @@ export function WebChatApp() {
 		if (!project?.root) return;
 		setFilePreview({ kind: "file", projectId: project.id, projectRoot: project.root, path, line });
 	}, []);
-	const openDiffPreview = useCallback((path: string) => {
-		const project = previewProjectRef.current;
-		if (!project?.root) return;
-		setFilePreview({ kind: "diff", projectId: project.id, projectRoot: project.root, path });
-	}, []);
 
 	const overlayOpen = mobileSidebarOpen || searchOpen || assetsOpen || dshToolsOpen || workspaceOpen || filePreview != null || renameDraft != null || deleteConfirmId != null;
 	useEffect(() => {
@@ -1164,7 +1159,7 @@ export function WebChatApp() {
 					onResendMessage={(messageId) => void handleResendMessage(messageId)}
 					onOpenFile={openFilePreview}
 				/>
-				<WebSessionStrips sessionId={activeSessionId} onOpenFileChange={openDiffPreview} />
+				<WebSessionStrips sessionId={activeSessionId} />
 				<WebComposer
 					disabled={Boolean(creatingProjectId)}
 					streaming={combinedStreaming}
