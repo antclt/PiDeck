@@ -52,6 +52,10 @@ export type TurnFileDiffLine = {
  * 收集一轮 agent-run 内修改的文件：展开 run.items 的全部消息后复用
  * collectSessionFileChanges。run 完成后其内容不再变化，因此每轮底部展示天然固定，
  * 不会被后续消息清掉。
+ *
+ * 额外合并 `hiddenFileMessages`：DSH PTC 模式下文件修改是 run_code 内部的子调用，
+ * 被投影成隐藏消息（meta.ptcNested）不进入 items（时间线只显示外层 run_code 卡），
+ * 但它们是这类会话「改了哪些文件」的唯一数据源——漏了它们 PTC 会话的轮末清单恒为空。
  */
 export function collectRunFileChanges(run: AgentRunItem): Array<{ path: string; count: number; originalContent: string; content: string }> {
 	const msgs: ChatMessage[] = [];
@@ -62,6 +66,7 @@ export function collectRunFileChanges(run: AgentRunItem): Array<{ path: string; 
 			msgs.push(...item.messages);
 		}
 	}
+	if (run.hiddenFileMessages) msgs.push(...run.hiddenFileMessages);
 	return collectSessionFileChanges(msgs);
 }
 

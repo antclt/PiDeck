@@ -17,11 +17,12 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
 function hookHarness() {
 	const host = quickMessageHookHost();
 	const calls = [];
+	// IPC 入参是 SessionRecord.id（主进程按 catalog 的后端分派 pi/DSH 检索源），不是会话文件路径。
 	const windowStub = {
 		piDesktop: {
 			sessions: {
-				searchInSession: (sessionPath, query) => {
-					const call = { sessionPath, query };
+				searchInSession: (sessionId, query) => {
+					const call = { sessionId, query };
 					calls.push(call);
 					return new Promise((resolve, reject) => {
 						call.resolve = resolve;
@@ -37,7 +38,7 @@ function hookHarness() {
 	});
 
 	let state = null;
-	const render = (sessionPath, query, enabled = true) => (state = host.render(() => useSessionMessageSearch(sessionPath, query, enabled)));
+	const render = (sessionId, query, enabled = true) => (state = host.render(() => useSessionMessageSearch(sessionId, query, enabled)));
 	return { host, calls, render, view: () => state, SESSION_FIND_DEBOUNCE_MS, SESSION_FIND_MIN_QUERY_LENGTH };
 }
 
@@ -47,34 +48,34 @@ const HIT = {
 	truncated: false,
 };
 
-test("输入停顿防抖后按会话文件路径发起检索，并落命中结果", async () => {
+test("输入停顿防抖后按会话 id 发起检索，并落命中结果", async () => {
 	const h = hookHarness();
-	h.render("C:/s/a.jsonl", "alpha");
+	h.render("s1", "alpha");
 	await flush();
 	// 防抖期内不发请求，且立刻进入「查找中」
 	assert.equal(h.calls.length, 0);
-	h.render("C:/s/a.jsonl", "alpha");
+	h.render("s1", "alpha");
 	assert.equal(h.view().isSearching, true);
 	await new Promise((resolve) => setTimeout(resolve, h.SESSION_FIND_DEBOUNCE_MS + 20));
 	assert.equal(h.calls.length, 1);
-	assert.equal(h.calls[0].sessionPath, "C:/s/a.jsonl");
+	assert.equal(h.calls[0].sessionId, "s1");
 	assert.equal(h.calls[0].query, "alpha");
 	h.calls[0].resolve(HIT);
 	await flush();
-	h.render("C:/s/a.jsonl", "alpha");
+	h.render("s1", "alpha");
 	assert.equal(h.view().result.sessions[0].matches[0].messageId, "m1");
 	assert.equal(h.view().isSearching, false);
 	assert.equal(h.view().unavailable, false);
 	h.host.unmount();
 });
 
-test("主进程返回 null（索引未就绪/降级）标为 unavailable，而不是「没有匹配」", async () => {
+test("主进程返回 null（pi 索引未就绪 / DSH host 不可用）标为 unavailable，而不是「没有匹配」", async () => {
 	const h = hookHarness();
-	h.render("C:/s/a.jsonl", "alpha");
+	h.render("s1", "alpha");
 	await new Promise((resolve) => setTimeout(resolve, h.SESSION_FIND_DEBOUNCE_MS + 20));
 	h.calls[0].resolve(null);
 	await flush();
-	h.render("C:/s/a.jsonl", "alpha");
+	h.render("s1", "alpha");
 	assert.equal(h.view().result, null);
 	assert.equal(h.view().unavailable, true);
 	h.host.unmount();
@@ -82,36 +83,36 @@ test("主进程返回 null（索引未就绪/降级）标为 unavailable，而�
 
 test("切会话后迟到回包被丢弃：上一个会话的命中不会贴到新会话", async () => {
 	const h = hookHarness();
-	h.render("C:/s/a.jsonl", "alpha");
+	h.render("s1", "alpha");
 	await new Promise((resolve) => setTimeout(resolve, h.SESSION_FIND_DEBOUNCE_MS + 20));
 	assert.equal(h.calls.length, 1);
 	// 切到另一个会话（同一关键词）：新一代请求发出
-	h.render("C:/s/b.jsonl", "alpha");
+	h.render("s2", "alpha");
 	await new Promise((resolve) => setTimeout(resolve, h.SESSION_FIND_DEBOUNCE_MS + 20));
 	assert.equal(h.calls.length, 2);
-	assert.equal(h.calls[1].sessionPath, "C:/s/b.jsonl");
+	assert.equal(h.calls[1].sessionId, "s2");
 	// 新的一代先回
 	h.calls[1].resolve({ ...HIT, sessions: [{ ...HIT.sessions[0], filePath: "C:/s/b.jsonl", matches: [{ ...HIT.sessions[0].matches[0], messageId: "b1" }] }] });
 	await flush();
-	h.render("C:/s/b.jsonl", "alpha");
+	h.render("s2", "alpha");
 	assert.equal(h.view().result.sessions[0].matches[0].messageId, "b1");
 	// 旧一代后回：必须被丢弃
 	h.calls[0].resolve(HIT);
 	await flush();
-	h.render("C:/s/b.jsonl", "alpha");
+	h.render("s2", "alpha");
 	assert.equal(h.view().result.sessions[0].matches[0].messageId, "b1");
 	h.host.unmount();
 });
 
 test("空查询与关闭（enabled=false）都不发请求且清空结果", async () => {
 	const h = hookHarness();
-	h.render("C:/s/a.jsonl", "");
+	h.render("s1", "");
 	await new Promise((resolve) => setTimeout(resolve, h.SESSION_FIND_DEBOUNCE_MS + 20));
 	assert.equal(h.calls.length, 0);
 	assert.equal(h.view().result, null);
 	assert.equal(h.view().isSearching, false);
 
-	h.render("C:/s/a.jsonl", "alpha", false);
+	h.render("s1", "alpha", false);
 	await new Promise((resolve) => setTimeout(resolve, h.SESSION_FIND_DEBOUNCE_MS + 20));
 	assert.equal(h.calls.length, 0, "浮层收起时不检索");
 	h.host.unmount();
@@ -119,11 +120,11 @@ test("空查询与关闭（enabled=false）都不发请求且清空结果", asyn
 
 test("请求失败只把状态标为 unavailable，不抛出到渲染层", async () => {
 	const h = hookHarness();
-	h.render("C:/s/a.jsonl", "alpha");
+	h.render("s1", "alpha");
 	await new Promise((resolve) => setTimeout(resolve, h.SESSION_FIND_DEBOUNCE_MS + 20));
 	h.calls[0].reject(new Error("ipc boom"));
 	await flush();
-	h.render("C:/s/a.jsonl", "alpha");
+	h.render("s1", "alpha");
 	assert.equal(h.view().unavailable, true);
 	assert.equal(h.view().isSearching, false);
 	h.host.unmount();
@@ -135,17 +136,24 @@ test("渠道与契约接线：IPC 常量、preload 白名单、主进程 handler
 	const ipc = read("src/shared/ipc.ts");
 	assert.match(ipc, /sessionsSearchInSession:\s*"sessions:search-in-session"/);
 	const preload = read("src/preload/index.ts");
-	assert.match(preload, /searchInSession:\s*\(sessionPath: string, query: string\) => ipcRenderer\.invoke\(ipcChannels\.sessionsSearchInSession, sessionPath, query\)/);
+	// 入参是 SessionRecord.id（不是会话文件路径）：路径/后端身份一律由主进程从 catalog 解析
+	assert.match(preload, /searchInSession:\s*\(\s*sessionId: string,\s*query: string\s*\)\s*=>\s*ipcRenderer\.invoke\(ipcChannels\.sessionsSearchInSession,\s*sessionId,\s*query\s*\)/);
 	const handler = read("src/main/ipc/sessionIpc.ts");
-	// 入参校验：路径必须像会话文件（绝对路径 + .jsonl，Windows 反斜杠/POSIX 都放行）
 	assert.match(handler, /ipcMain\.handle\(ipcChannels\.sessionsSearchInSession/);
+	// pi 分支：路径从 catalog 取（渲染层传路径不生效），并再兜一道「像会话文件」的校验
+	assert.match(handler, /const\s+entry\s*=\s*sessionCatalog\.get\(sessionId\.trim\(\)\)/);
 	assert.match(handler, /import\s*\{\s*isSessionSearchFilePath\s*\}\s*from\s*["']\.\.\/sessions\/sessionSearchPath["']/);
-	assert.match(handler, /!isSessionSearchFilePath\(trimmedPath\)\)\s*return null/);
+	assert.match(handler, /!isSessionSearchFilePath\(entry\.filePath\)\)\s*return null/);
 	assert.match(handler, /trimmed\.length > 256/);
+	// DSH 分支：没有 pi JSONL，走 host 历史投影（装配点由 dshBackend 分组注入）
+	assert.match(handler, /entry\.backend\s*===\s*"dsh"/);
+	assert.match(handler, /searchDshSessionMessages/);
+	assert.match(handler, /const\s+searcher\s*=\s*deps\.sessionMessageSearch/);
 	// 短路：未装配 / 校验不过一律 null（渲染层据此显示不可用态）
-	assert.match(handler, /const searcher = deps\.sessionMessageSearch;\s*\n\s*if \(!searcher\) return null;/);
+	assert.match(handler, /!searcher\s*\|\|\s*!entry\.filePath\s*\|\|\s*!isSessionSearchFilePath\(entry\.filePath\)\)\s*return null/);
 	const wiring = read("src/main/index.ts");
 	assert.match(wiring, /sessionMessageSearch: async \(sessionPath, query\) => \{[\s\S]{0,600}?sessionIndexService\.searchInSession\(roots, sessionPath, query\)/);
+	assert.match(wiring, /searchDshSessionMessages:\s*\(\s*dshSessionId,\s*query\s*\)\s*=>\s*dshAgentManager\.searchSessionMessages\(\s*dshSessionId,\s*query\s*\)/);
 	// 主进程快捷键分支 + 聚焦栏响应
 	assert.match(wiring, /isShortcutInput\("findInSession", input\)[\s\S]{0,200}?"findInSession"/);
 	const shortcuts = read("src/shared/shortcuts.ts");
@@ -153,7 +161,8 @@ test("渠道与契约接线：IPC 常量、preload 白名单、主进程 handler
 	const pane = read("src/renderer/src/components/session/ChatSessionPane.tsx");
 	assert.match(pane, /id !== "findInSession"/);
 	assert.match(pane, /<SessionFindOverlay/);
-	assert.match(pane, /sessionId=\{record\?\.filePath \?\? sessionId\}/);
+	assert.match(pane, /sessionId=\{sessionId\}/);
+	assert.doesNotMatch(pane, /record\?\.filePath \?\? sessionId/);
 	// 点击命中必须真的跳得过去：命中 id 是会话文件条目 id（meta.entryId），时间线节点
 	// 用的是投影 id，controller 必须先归一（否则查不到 DOM，点击毫无反应——2027-02 用户反馈）。
 	assert.match(pane, /onJump=\{\(messageId\) => \{[\s\S]{0,80}?sessionTimeline\.jumpToMessage\(messageId\)/);
@@ -243,17 +252,20 @@ test("浮层收起态不渲染任何常驻入口：没有 portal、没有可见�
 // 浮层与快捷键读同一份计数。入口与浮层必须共用 supportsSessionFind，否则会出现
 // 「按钮点了没反应」（按钮挂上、浮层没挂）或「DSH 会话挂着永远没有匹配的搜索框」。
 
-test("入口判据：仅 pi 且已落盘的会话支持会话内查找", async () => {
+test("入口判据：pi 已落盘、DSH 已建 host 会话才支持会话内查找", async () => {
 	const { supportsSessionFind } = loadTsCommonJs("src/renderer/src/utils/sessionFindSupport.ts");
 	assert.equal(supportsSessionFind(undefined), false);
 	// 旧 catalog 记录 backend 缺省 = pi
 	assert.equal(supportsSessionFind({ backend: undefined, filePath: "C:/s/a.jsonl" }), true);
 	assert.equal(supportsSessionFind({ backend: "pi", filePath: "C:/s/a.jsonl" }), true);
-	// DSH/ACP/生图没有 pi JSONL 索引，挂上去只会永远「没有匹配」
-	assert.equal(supportsSessionFind({ backend: "dsh", filePath: "C:/s/a.jsonl" }), false);
-	assert.equal(supportsSessionFind({ backend: "acp", filePath: "C:/s/a.jsonl" }), false);
+	// DSH 没有 pi JSONL，但有 host 会话历史可查（与 pi 走同一条 IPC，主进程按后端分派）
+	assert.equal(supportsSessionFind({ backend: "dsh", dshSessionId: "dsh-1" }), true);
+	// DSH 草稿还没建 host 会话：没有可检索内容，不挂入口
+	assert.equal(supportsSessionFind({ backend: "dsh", dshSessionId: undefined, filePath: "C:/s/a.jsonl" }), false);
+	// ACP/生图没有可检索历史源，挂上去只会永远「没有匹配」
+	assert.equal(supportsSessionFind({ backend: "acp", filePath: "C:/s/a.jsonl", acpSessionId: "a1" }), false);
 	assert.equal(supportsSessionFind({ backend: "imagegen", filePath: "C:/s/a.jsonl" }), false);
-	// 草稿还没落盘
+	// pi 草稿还没落盘
 	assert.equal(supportsSessionFind({ backend: "pi", filePath: undefined }), false);
 });
 
@@ -313,8 +325,8 @@ function overlayHarness() {
 			"../../i18n": { t: (key) => key },
 			"../../hooks/useSessionMessageSearch": {
 				SESSION_FIND_MIN_QUERY_LENGTH: 1,
-				useSessionMessageSearch: (sessionPath, query, open) => {
-					searchCalls.push({ sessionPath, query, open });
+				useSessionMessageSearch: (sessionId, query, open) => {
+					searchCalls.push({ sessionId, query, open });
 					return { result: null, isSearching: false, unavailable: false };
 				},
 			},
@@ -331,7 +343,7 @@ function overlayHarness() {
 	});
 	const anchorRef = { current: null };
 	// 渲染结果 = 收起态 null / 展开态面板元素（props.role = "dialog"）
-	const render = (openSignal, sessionPath = "C:/s/a.jsonl") => host.render(() => SessionFindOverlay({ sessionId: sessionPath, anchorRef, openSignal, onJump: () => undefined }));
+	const render = (openSignal, sessionId = "s1") => host.render(() => SessionFindOverlay({ sessionId, anchorRef, openSignal, onJump: () => undefined }));
 	return { host, render, searchCalls };
 }
 
@@ -365,7 +377,7 @@ test("会话内查找浮层按会话隔离：单栏 pane 复用换会话时必�
 	assert.equal(render(2).props.role, "dialog");
 	host.unmount();
 	const fresh = overlayHarness();
-	const mountedAtSignalTwo = fresh.render(2, "C:/s/b.jsonl");
+	const mountedAtSignalTwo = fresh.render(2, "s2");
 	assert.equal(mountedAtSignalTwo, null, "新会话挂载时仍是收起态，不渲染浮层");
 	assert.equal(fresh.searchCalls.at(-1)?.open, false, "新会话挂载时不得自动检索");
 	fresh.host.unmount();

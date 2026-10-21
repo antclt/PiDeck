@@ -20,18 +20,20 @@ import {
 	saveSessionScrollAnchorAtom,
 	sessionScrollAnchorByIdAtom,
 	sessionSendStateByIdAtom,
+	sendPinAnimatingByIdAtom,
 	setSessionMessageLoadStateAtom,
 	touchSessionMessagesAtom,
 	type SessionLoadState,
 	type SessionScrollAnchor,
 } from "../atoms";
+import { clearTimelineRevealAtom, requestTimelineRevealAtom } from "../atoms/timeline-reveal-atoms";
 import type { MessageScrollerScrollApi } from "../components/agents/message-scroller";
 import { TURN_WINDOW_AUTO_EXPAND_THRESHOLD, resolveAutoExpandThreshold } from "./timeline/autoExpandThreshold";
 import { shouldAutoExpandRenderWindow, shouldApplyDelayedHistoryResult } from "./timeline/scrollHistoryPolicy";
 import { beginProgrammaticScroll, clearProgrammaticScroll, createProgrammaticScrollGuard, finishProgrammaticScrollFrame, isProgrammaticScrollActive } from "./timeline/programmaticScrollGuard";
 import { browsePinScrollTop, followBrowsePinAfterUserScroll, shouldCompensateBrowsePin, type BrowsePin } from "./timeline/browsePin";
 import { countUserTurns, TIMELINE_MOUNTED_TURN_LIMIT, TIMELINE_SCROLLED_TURN_LIMIT, TIMELINE_WINDOW_EXPAND_STEP } from "../components/session/timeline/turnRenderWindow";
-import { estimateJumpExpandTurns, resolveJumpPendingAction } from "../components/session/timeline/jumpWindowPolicy";
+import { estimateJumpExpandTurns, resolveJumpFallbackEntry, resolveJumpPendingAction } from "../components/session/timeline/jumpWindowPolicy";
 import { resolveJumpMessageIndex, resolveJumpScrollTarget } from "../components/session/timeline/jumpTarget";
 
 /** 滚动接近顶部自动加载历史的阈值（px，2026-11 轮次模型）：
@@ -694,6 +696,19 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 	const pendingSendScrollRef = useRef<{ ownerKey: string; messageId: string } | undefined>(undefined);
 	/** 已做过发送定位的消息：in-flight 发送态会在多次 render 里持续成立，不能重复播动画。 */
 	const positionedSendMessageRef = useRef<string | undefined>(undefined);
+	/**
+	 * 发送置顶动画进行中标记（session 级 atom）：TurnRow 的「新一轮折叠」据此等动画
+	 * 结束再收起上一轮——动画中收起会让上方内容骤缩，视口补偿把 scrollTop 往回带，
+	 * 用户看到「先向上再向下」的来回滚动（2026-10 反馈）。
+	 */
+	const setSendPinAnimating = useCallback(
+		(active: boolean) => {
+			const sessionId = options.sessionId;
+			if (!sessionId) return;
+			store.set(sendPinAnimatingByIdAtom, (prev) => (prev[sessionId] === active ? prev : { ...prev, [sessionId]: active }));
+		},
+		[options.sessionId, store],
+	);
 	const scrollerScrollApiRef = useRef<MessageScrollerScrollApi | null>(null);
 	const loadMoreAnchorRef = useRef<Tagged<TimelineAnchor> | undefined>(undefined);
 	/** 浏览态钉行：扩窗/翻页前冻住正在看的那一轮，布局变高时按漂移补位置。 */
@@ -710,6 +725,25 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 	 */
 	const [pendingJump, setPendingJump] = useState<Tagged<{ messageId: string; expandAttempts: number; loadAttempts: number; nonce: number }> | undefined>(undefined);
 	const jumpNonceRef = useRef(0);
+	/**
+	 * 跳转揭示：目标消息已加载但 DOM 节点没挂载时（命中在已完成轮的执行过程折叠区里，
+	 * 折叠收起会把中间回答/工具整块卸载），先让包含它的 TurnRow 展开折叠，再走既有
+	 * pendingJump 重试循环完成落位。按会话隔离，切会话/跳转结算后清空。
+	 */
+	const revealSessionId = options.sessionId;
+	const requestRevealWrite = useSetAtom(requestTimelineRevealAtom);
+	const clearRevealWrite = useSetAtom(clearTimelineRevealAtom);
+	const requestTimelineReveal = useCallback(
+		(messageId: string) => {
+			if (!revealSessionId || !messageId) return;
+			requestRevealWrite({ sessionId: revealSessionId, messageId });
+		},
+		[requestRevealWrite, revealSessionId],
+	);
+	const clearTimelineReveal = useCallback(() => {
+		if (!revealSessionId) return;
+		clearRevealWrite(revealSessionId);
+	}, [clearRevealWrite, revealSessionId]);
 	/** 旧实现中新增 run 开始的「取消完结动画并立即跟随」逻辑已随服务完结定位一起删除。
 	 *  保留同名为 no-op，防调用处崩溃；所有自动滚动只在发送那一刻。 */
 	const cancelSettledRepositionForNewRun = useCallback(() => {
@@ -1122,6 +1156,9 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		positionedSendMessageRef.current = sendMessageId;
 		sendScrollRef.current.pin(timeline, sendMessageId, {
 			onStart: () => {
+				// 先立标记再滚：TurnRow 的折叠 effect 与本动画跑在同一帧窗口里，
+				// 标记晚一步就会漏掉这次折叠。
+				setSendPinAnimating(true);
 				invalidateHistoryBrowsing();
 				scrollerScrollApiRef.current?.restoreAt(timeline.scrollTop);
 				autoScrollRef.current = false;
@@ -1129,17 +1166,23 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 				setShowScrollToBottom(false);
 			},
 			onComplete: () => {
+				setSendPinAnimating(false);
 				if (ownerKeyRef.current !== ownerKey) return;
 				autoScrollRef.current = true;
 				setAutoScroll(true);
 				setShowScrollToBottom(false);
 				void scrollerScrollApiRef.current?.scrollToBottom({ animation: "instant" });
 			},
+			// 用户滚动 / 切会话 / 下一次 pin 打断：不留标记，否则折叠会被无限期推迟。
+			onCancel: () => setSendPinAnimating(false),
 			isFollowing: () => autoScrollRef.current,
 			markProgrammaticScroll,
 			clearProgrammaticScroll: clearProgrammaticTimelineScroll,
 		});
-	}, [clearProgrammaticTimelineScroll, invalidateHistoryBrowsing, markProgrammaticScroll, options.sessionId, ownerKey, restorePhase, sendMessageId, store]);
+		// 短会话 / 行未挂载 / 距离为 0 时 pin 可能一次都不动画就返回（不触发 onStart）：
+		// 同步结算标记，避免残留 true。
+		if (!sendScrollRef.current.isAnimating) setSendPinAnimating(false);
+	}, [clearProgrammaticTimelineScroll, invalidateHistoryBrowsing, markProgrammaticScroll, options.sessionId, ownerKey, restorePhase, sendMessageId, store, setSendPinAnimating]);
 	useEffect(
 		() => () => {
 			pendingSendScrollRef.current = undefined;
@@ -1364,8 +1407,13 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 				const target = resolveJumpScrollTarget(existing);
 				scrollJumpTargetIntoView(timeline, target);
 				highlightMessage(target, requestOwnerKey);
+				clearTimelineReveal();
 				return;
 			}
+			// 命中可能在已完成轮的「执行过程」折叠区里：Radix 收起会把中间回答/工具整块卸载，
+			// 扩窗（只多挂轮次）永远挂不出这些节点。先请求包含它的 TurnRow 展开折叠，
+			// 再由下面的 pendingJump 重试循环完成落位。
+			if (index >= 0) requestTimelineReveal(targetNodeId);
 			const hasMorePages = diskPage ? diskPage.nextBefore !== null : historyHasMore;
 			if (index < 0 && !hasMorePages) return;
 			// 目标可能在贴底 turn 窗口外（先取消跟随以展开挂载），也可能在尚未加载的
@@ -1382,7 +1430,39 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 				value: { messageId, expandAttempts: 0, loadAttempts: 0, nonce: jumpNonceRef.current },
 			});
 		},
-		[combinedMessages, diskPage, escapeAutoScroll, expandWindowBatched, highlightMessage, historyHasMore, ownerKey, scrollJumpTargetIntoView],
+		[clearTimelineReveal, combinedMessages, diskPage, escapeAutoScroll, expandWindowBatched, highlightMessage, historyHasMore, ownerKey, requestTimelineReveal, scrollJumpTargetIntoView],
+	);
+
+	/**
+	 * 目标节点挂不出来时的兜底落点：在已渲染的 [data-message-id] 里找包含目标（或离它最近且
+	 * 在其之前）的那一轮，落到轮次行——折叠区没展开/超出单轮挂载预算时，至少停在正确的一轮，
+	 * 而不是弹「未能跳转」。行长取子树里最靠前的消息下标：run.id 可能是思考组 id
+	 * （msg-thinking-*）而不是消息 id，但行内渲染的节点一定是消息。
+	 */
+	const findFallbackJumpRow = useCallback(
+		(messageId: string): HTMLElement | null => {
+			const timeline = timelineRef.current;
+			if (!timeline) return null;
+			const targetIndex = resolveJumpMessageIndex(combinedMessages, messageId);
+			if (targetIndex < 0) return null;
+			const indexById = new Map<string, number>();
+			for (let index = 0; index < combinedMessages.length; index += 1) indexById.set(combinedMessages[index].id, index);
+			const rows = new Map<HTMLElement, number>();
+			for (const node of timeline.querySelectorAll<HTMLElement>("[data-message-id]")) {
+				const id = node.getAttribute("data-message-id");
+				if (!id) continue;
+				// 思考组 id = msg-thinking-<消息 id>：降级到消息本身，避免整轮缺席兜底索引。
+				const index = indexById.get(id) ?? (id.startsWith("msg-thinking-") ? indexById.get(id.slice("msg-thinking-".length)) : undefined);
+				if (index === undefined) continue;
+				const row = node.closest<HTMLElement>(".turn-row, .user-turn") ?? node;
+				const current = rows.get(row);
+				if (current === undefined || index < current) rows.set(row, index);
+			}
+			const entries = [...rows].map(([row, index]) => ({ row, index }));
+			const picked = resolveJumpFallbackEntry(entries, targetIndex);
+			return picked >= 0 ? entries[picked].row : null;
+		},
+		[combinedMessages],
 	);
 
 	useEffect(() => {
@@ -1390,8 +1470,10 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		browsePinRef.current = null;
 		browsePinFrozenRef.current = false;
 		skipBrowsePinRef.current = false;
-		// 切会话：取消旧会话遗留的挂起跳转与动画状态。
+		// 切会话：取消旧会话遗留的挂起跳转与动画状态（揭示请求也一并清掉，
+		// 否则切回来的第一帧会把上一轮的折叠自动撑开）。
 		setPendingJump(undefined);
+		clearTimelineReveal();
 		clearProgrammaticTimelineScroll();
 		settleScrollCancelRef.current?.();
 		settleScrollCancelRef.current = undefined;
@@ -1403,7 +1485,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 			userScrollIntentFrameRef.current = undefined;
 		}
 		return clearHighlightTimers;
-	}, [clearHighlightTimers, clearProgrammaticTimelineScroll, ownerKey]);
+	}, [clearHighlightTimers, clearProgrammaticTimelineScroll, clearTimelineReveal, ownerKey]);
 
 	useLayoutEffect(() => {
 		if (ownerKey === LEGACY_OWNER_KEY) return;
@@ -1652,6 +1734,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 			const target = resolveJumpScrollTarget(element);
 			scrollJumpTargetIntoView(timeline, target);
 			highlightMessage(target, ownerKey);
+			clearTimelineReveal();
 			return;
 		}
 		// 目标未挂载：按策略兜底扩窗（指数步长）/ 跳转驱动补页 / 放弃（防呆上限）。
@@ -1668,6 +1751,15 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		if (action.kind === "give-up") {
 			skipBrowsePinRef.current = false;
 			setPendingJump(undefined);
+			clearTimelineReveal();
+			// 目标在已加载数据里、只是折叠区没挂出来（超出单轮挂载预算/特殊条目）：
+			// 退到包含它的那一轮，而不是报「跳不到」——用户至少落在正确的位置。
+			const fallbackRow = findFallbackJumpRow(pendingJump.value.messageId);
+			if (fallbackRow) {
+				scrollJumpTargetIntoView(timeline, fallbackRow);
+				highlightMessage(fallbackRow, ownerKey);
+				return;
+			}
 			// 静默放弃会被当成「点了没反应」（本次 bug 的原始反馈）：补页/扩窗都到上限时
 			// 必须给一句反馈，要么历史太远加载不到，要么这条已被 context_edit 移出展示。
 			toast(t("sessionFind.jumpFailed"));
@@ -1688,7 +1780,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 			return;
 		}
 		expandWindow(action.turns);
-	}, [combinedMessages, controllerEnabled, diskPage, expandWindow, highlightMessage, historyHasMore, isLoadingMessagePage, loadMoreMessages, ownerKey, pendingJump, scrollJumpTargetIntoView, scrolledWindowTurns]);
+	}, [clearTimelineReveal, combinedMessages, controllerEnabled, diskPage, expandWindow, findFallbackJumpRow, highlightMessage, historyHasMore, isLoadingMessagePage, loadMoreMessages, ownerKey, pendingJump, scrollJumpTargetIntoView, scrolledWindowTurns]);
 
 	return {
 		timelineRef,

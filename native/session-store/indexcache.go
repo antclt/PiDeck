@@ -113,7 +113,14 @@ func getIndexTable(cache *tableCache, path string) (table, error) {
 	}
 
 	// 磁盘条目文件：版本键一致直接用；只是变长且上次停在换行边界时尾部增量。
-	if persisted, hit, appendable := readPersistedTable(cache.dir, path, size, mtimeMs); hit {
+	// 两种命中都要先回读字节边界核对 id：版本键看不出「整份重写后恰好变长」，
+	// 错位的旧表会让活动链截断（issue #392，见 verifyTableBoundary）。
+	persisted, hit, appendable := readPersistedTable(cache.dir, path, size, mtimeMs)
+	if (hit || appendable) && !verifyTableBoundary(path, size, persisted.Entries) {
+		logf("get-index %s persisted table out of sync with file, full rescan", path)
+		hit, appendable = false, false
+	}
+	if hit {
 		logf("get-index %s table=disk entries=%d", path, len(persisted.Entries))
 		cache.put(persisted)
 		return persisted, nil

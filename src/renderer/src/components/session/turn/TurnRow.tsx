@@ -4,7 +4,8 @@ import { ChevronUp, Clock, Share, SquarePen, Trash } from "lucide-react";
 import { atom, useAtomValue, useSetAtom } from "jotai";
 import { selectAtom } from "jotai/utils";
 import type { AgentBackend, ChatMessage, ImageContent } from "../../../../../shared/types";
-import { liveTextActiveBySessionAtom, newTurnCollapseTickBySessionIdAtomFamily, runStepsVisibleMemoryBySessionIdAtomFamily, type RunStepsVisibleMemoryEntry } from "../../../atoms/session-atoms";
+import { liveTextActiveBySessionAtom, newTurnCollapseTickBySessionIdAtomFamily, runStepsVisibleMemoryBySessionIdAtomFamily, sendPinAnimatingBySessionIdAtomFamily, type RunStepsVisibleMemoryEntry } from "../../../atoms/session-atoms";
+import { timelineRevealRequestsAtom, type TimelineRevealRequest } from "../../../atoms/timeline-reveal-atoms";
 import { turnFlowSettingsAtom } from "../../../atoms/app-ui-atoms";
 import { t } from "../../../i18n";
 import { useStreamSelectionPreserve } from "../../../hooks/useStreamSelectionPreserve";
@@ -21,6 +22,7 @@ import { buildProcessSummary } from "../timeline/segmentSummary";
 import { pickEditableAssistantMessage, visibleAssistantText } from "../timeline/editableAnswerTarget";
 import type { AgentRunItem, MessageItem } from "../timeline/types";
 import { sameAgentRunForRender } from "../../app/AppUtils";
+import { runContainsMessage } from "../timeline/runMessageLookup";
 import { FinalAnswer } from "./FinalAnswer";
 import { InterimAnswer } from "./InterimAnswer";
 import { ProcessFold } from "./ProcessFold";
@@ -40,8 +42,12 @@ import type { DiffFileHandler } from "../ToolCallComponents";
 const NO_LIVE_TEXT_ATOM = atom(false);
 /** sessionId 为空时的占位 atom：恒 0（无会话不订阅新一轮信号）。 */
 const NO_TURN_TICK_ATOM = atom(0);
+/** sessionId 为空时的占位 atom：恒 false（无会话不订阅发送置顶动画标记）。 */
+const NO_SEND_PIN_ANIMATING_ATOM = atom(false);
 /** sessionId 为空时的占位 atom：恒 undefined（无会话不订阅展开记忆）。 */
 const NO_STEPS_MEMORY_ATOM = atom<RunStepsVisibleMemoryEntry | undefined>(undefined);
+/** sessionId 为空时的占位 atom：恒 undefined（无会话不订阅跳转揭示请求）。 */
+const NO_REVEAL_REQUEST_ATOM = atom<TimelineRevealRequest | undefined>(undefined);
 
 /**
  * 一轮 AI 回答的扁平容器：左侧竖线聚合，内含思考/工具/回答。
@@ -192,6 +198,8 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 	// 设置变化低频；tick 经 atomFamily selectAtom 隔离，跨会话 bump 不触发本行重渲染。
 	const flowSettings = useAtomValue(turnFlowSettingsAtom);
 	const newTurnCollapseTick = useAtomValue(props.sessionId ? newTurnCollapseTickBySessionIdAtomFamily(props.sessionId) : NO_TURN_TICK_ATOM);
+	// 发送置顶动画进行中：此时收起上一轮会让上方内容骤缩，视口先向上再向下（见 useTurnExecution）。
+	const sendPinAnimating = useAtomValue(props.sessionId ? sendPinAnimatingBySessionIdAtomFamily(props.sessionId) : NO_SEND_PIN_ANIMATING_ATOM);
 	// 执行过程展开状态跨挂载记忆（run 级）：切会话再切回时恢复手动/流式展开的
 	// 轮次；selectAtom 按 run.id 取值，同会话其它 run 变化不重渲染本行。
 	const stepsVisibleMemoryAtom = useMemo(() => (props.sessionId ? selectAtom(runStepsVisibleMemoryBySessionIdAtomFamily(props.sessionId), (map) => map[run.id] ?? undefined, Object.is) : NO_STEPS_MEMORY_ATOM), [props.sessionId, run.id]);
@@ -218,11 +226,27 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 		isLatestRun: props.isLatestRun,
 		expandInterimDuringStream: flowSettings.expandInterimDuringStream,
 		newTurnCollapseTick,
+		sendPinAnimating,
 		autoCollapseTick: props.autoCollapseTick,
 		onAutoCollapsed: props.onAutoCollapsed,
 		stepsVisibleMemory,
 		onStepsVisibleMemoryChange,
 	});
+
+	// 跳转揭示请求：目标消息（会话内查找/跨会话搜索的命中）属于本轮时展开执行过程折叠栏，
+	// 让折叠区里的中间回答/工具节点挂载出来——已完成轮默认折叠，Radix 收起会整块卸载，
+	// controller 只扩轮次窗口永远挂不出这些节点，旧行为最后只能弹「未能跳转」。
+	// nonce 只认变化：同一目标重复点击也生效；请求表按会话分格，别的会话的变化不重渲染本行。
+	const revealSessionId = props.sessionId;
+	const revealRequestAtom = useMemo(() => (revealSessionId ? selectAtom(timelineRevealRequestsAtom, (requests) => requests[revealSessionId], Object.is) : NO_REVEAL_REQUEST_ATOM), [revealSessionId]);
+	const revealRequest = useAtomValue(revealRequestAtom);
+	const lastRevealNonceRef = useRef<number | undefined>(undefined);
+	useEffect(() => {
+		if (!revealRequest || revealRequest.nonce === lastRevealNonceRef.current) return;
+		if (!runContainsMessage(run, revealRequest.messageId)) return;
+		lastRevealNonceRef.current = revealRequest.nonce;
+		setStepsVisibleFromUser(true);
+	}, [revealRequest, run, setStepsVisibleFromUser]);
 
 	// 中间内容（思考/工具/中间回答）与最终回答分组：
 	// 中间内容统一收进执行过程折叠容器（stepsVisible 整体控制显隐），

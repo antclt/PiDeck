@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "version": "1.0.1",
-  "bundleSha256": "d00ce1db18e4853233c25ebf0b1a61d55471f22db4ffcab52e26fdf0b5bf32db",
+  "bundleSha256": "30a961dc3c0ba8964d652626806fe3e4c0ed7b3d2386baf4fefce7a9ff985c63",
   "fileCount": 16,
   "files": [
     {
@@ -26,8 +26,8 @@
     },
     {
       "name": "pi-deck-plan-mode.ts",
-      "sha256": "ee840a6c63c22f803e6347611772b2caa8f3d4518a9a8d466a3bd7dd2f869026",
-      "bytes": 19897
+      "sha256": "a6b42533e73e84798c1f31881d8562b46b09bee2c4cc084be73bd46bd05e2a6d",
+      "bytes": 20564
     },
     {
       "name": "pi-deck-request-size-recovery.ts",

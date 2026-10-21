@@ -11,6 +11,11 @@ export type SessionOutlineEntry = {
 	/** 第几个用户发言权（从 0 起）；连发 user 各自计数，用于估算距离。 */
 	turnOrdinal: number;
 	timestamp?: string;
+	/**
+	 * 用户消息首段文本（建索引时带走的预览，≤120 码点）。
+	 * 导轨用它在消息未加载时也显示真实提问，不再靠序号占位。
+	 */
+	preview?: string;
 };
 
 export type SessionOutlineSnapshot = {

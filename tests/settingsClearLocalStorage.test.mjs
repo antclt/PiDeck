@@ -10,7 +10,7 @@ const tab = readFileSync("src/renderer/src/components/app/settings/SettingsStora
 const zh = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
 const en = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
 
-const NEW_KEYS = ["settings.storage.clearLocalStorage", "settings.storage.clearLocalStorageDesc", "settings.storage.clearLocalStorageButton", "settings.storage.clearLocalStorageConfirm"];
+const NEW_KEYS = ["settings.storage.clearLocalStorage", "settings.storage.clearLocalStorageDesc", "settings.storage.clearLocalStorageConfirm"];
 
 test("clearing UI cache goes through a danger ConfirmDialog, not a bare button", () => {
 	assert.match(tab, /confirmClearLocalStorage/);

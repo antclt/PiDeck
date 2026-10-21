@@ -26,6 +26,8 @@ const timeline = compile("src/renderer/src/hooks/useSessionTimelineController.ts
 	jotai: { atom: (value) => ({ _mockInit: value }) },
 	"jotai/utils": {},
 	"../atoms": {},
+	// 时间线「揭示目标」请求（dev 迁入独立 atom 文件）：controller 只发请求，测试不触达该路径。
+	"../atoms/timeline-reveal-atoms": { requestTimelineRevealAtom: { _stub: true }, clearTimelineRevealAtom: { _stub: true } },
 	"../lib/pinTurnScroll": { animateScrollTop: () => () => undefined, pinScrollDurationMs: () => 320 },
 	"../desktopApi": {},
 	// 控制器用 t() 播报「DSH 已停止」文案，而 i18n.ts 会拉起整份字典 → 给最小 stub；
@@ -55,6 +57,8 @@ const timeline = compile("src/renderer/src/hooks/useSessionTimelineController.ts
 	"./timeline/sendScroll": compile("src/renderer/src/hooks/timeline/sendScroll.ts", {
 		"../../lib/pinTurnScroll": { animateScrollTop: () => () => undefined, pinScrollDurationMs: () => 320 },
 	}),
+	// 磁盘分页游标（控制器把 SessionMessagePage 收敛成缓存游标）：纯函数，直接编译真模块。
+	"../utils/sessionDiskPageCursor": compile("src/renderer/src/utils/sessionDiskPageCursor.ts"),
 });
 
 const composerController = readFileSync("src/renderer/src/hooks/useSessionComposerController.ts", "utf8");

@@ -19,9 +19,12 @@ function hookHarness() {
 	const host = quickMessageHookHost();
 	let messages = [];
 	let runResult = { ok: true, runId: "run-1" };
+	let contextEmpty = false;
 	const payloads = [];
 	const cancelled = [];
 	const applies = [];
+	// 预测不弹 toast：没预测/没结果的原因只能靠应用日志（scope=suggest）解释。
+	const logs = [];
 	let eventSink = null;
 
 	const { usePromptSuggestion } = loadTsCommonJs("src/renderer/src/hooks/usePromptSuggestion.ts", {
@@ -29,7 +32,8 @@ function hookHarness() {
 			react: host.react,
 			jotai: { useStore: () => ({ get: () => ({ messages }) }) },
 			"../atoms/session-atoms": { sessionMessageCacheBySessionIdAtomFamily: (sessionId) => ({ sessionId }) },
-			"../utils/promptEnhanceContext": { collectPromptEnhanceContext: (list) => list.map(({ role, text }) => ({ role, text })) },
+			"../utils/promptEnhanceContext": { collectPromptEnhanceContext: (list) => (contextEmpty ? [] : list.map(({ role, text }) => ({ role, text }))) },
+			"../utils/rendererLog": { logFromRenderer: (level, scope, message, detail) => logs.push({ level, scope, message, detail }) },
 			"../desktopApi": {
 				desktopApi: {
 					suggestion: {
@@ -65,8 +69,10 @@ function hookHarness() {
 		payloads,
 		cancelled,
 		applies,
+		logs,
 		setMessages: (next) => (messages = next),
 		setRunResult: (value) => (runResult = value),
+		setContextEmpty: (value) => (contextEmpty = value),
 		emit: (event) => eventSink?.(event),
 		hasEventSink: () => !!eventSink,
 	};
@@ -206,4 +212,46 @@ test("开关关闭或无目标模型：不发起请求；事件订阅随卸载�
 	assert.equal(h.hasEventSink(), true);
 	h.host.unmount();
 	assert.equal(h.hasEventSink(), false);
+});
+
+/** 「没预测」与「没结果」必须能在日志里分辨：前者是本地判定（debug），后者是模型确实没给东西（info）。 */
+const suggestionLogs = (h, text) => h.logs.filter((entry) => entry.scope === "suggest" && entry.message.includes(text));
+
+test("没预测的原因进应用日志：无目标模型 / 最后一条不是正文 / 上下文为空", async () => {
+	let h = hookHarness();
+	h.setMessages(ASSISTANT_LAST);
+	await finishTurn(h, { target: null });
+	assert.equal(h.payloads.length, 0);
+	assert.equal(suggestionLogs(h, "没有可用目标模型")[0]?.level, "debug");
+
+	h = hookHarness();
+	h.setMessages([{ role: "user", text: "还没回答" }]);
+	await finishTurn(h);
+	assert.equal(h.payloads.length, 0);
+	assert.match(suggestionLogs(h, "最后一条不是 assistant 正文")[0]?.message ?? "", /role=user/);
+
+	h = hookHarness();
+	h.setMessages(ASSISTANT_LAST);
+	h.setContextEmpty(true);
+	await finishTurn(h);
+	assert.equal(h.payloads.length, 0);
+	assert.ok(suggestionLogs(h, "上下文为空").length > 0);
+});
+
+test("开关关着不记日志（每轮都刷一条只会淹没有用信息）", async () => {
+	const h = hookHarness();
+	h.setMessages(ASSISTANT_LAST);
+	await finishTurn(h, { enabled: false });
+	assert.deepEqual(h.logs, []);
+});
+
+test("模型返回空建议：记 info 并保持无 ghost（区别于请求失败）", async () => {
+	const h = hookHarness();
+	h.setMessages(ASSISTANT_LAST);
+	await finishTurn(h);
+	h.emit({ runId: "run-1", phase: "done", text: "   " });
+	assert.equal(h.render().visible, false);
+	const line = suggestionLogs(h, "无可用结果")[0];
+	assert.equal(line?.level, "info");
+	assert.match(line.message, /清洗后为空/);
 });

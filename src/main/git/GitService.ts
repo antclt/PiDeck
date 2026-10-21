@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { trashPath } from "../fs/trash";
 import { REF_BASE } from "../rewind/checkpointConstants";
 import type { RunGitOptions } from "./gitProcess";
-import { execGit, runGitCommand } from "./gitRun";
+import { execGit, GitOutputOverflowError, runGitCommand } from "./gitRun";
 import { resolveWslGitTarget, toHostGitOutputPath } from "./gitWsl";
 import { parsePorcelainStatus } from "./gitStatusParser";
 import type { GitBranchInfo, CommitEntry, GitRef, GitFileStatus, GitResourceGroupType, GitAheadBehind } from "../../shared/types";
@@ -12,6 +12,9 @@ import { GitStatus } from "../../shared/types";
 import type { LocalGitBranchDiffResult, LocalGitChangedFile, LocalGitCommitDetail, LocalGitCommitFileDiff, LocalGitResource, LocalGitResourceGroups, LocalGitWorkspaceFileDiff, LocalGitDiscardResource } from "./localGitTypes";
 
 const GIT_MUTATION_TIMEOUT_MS = 30_000;
+
+/** 提交摘要读暂存区 diff 的输出上限：超过即降级用截断输出（提示词只用前 8000 字符）。 */
+const STAGED_DIFF_MAX_BUFFER = 10 * 1024 * 1024;
 
 /** 渲染层传入的 hash 是不可信输入：以 `-` 开头的值会被 git 当作选项
  *  （如 cherry-pick 的 `--exec=` 参数注入），非全 SHA 的短 ref 也可能命中意外对象。
@@ -378,14 +381,23 @@ export class GitService {
 	 * 完全不同，曾因这里 `catch { return "" }` 把失败静默当成空串，前端只能显示
 	 * 「模型没有返回提交摘要」误导用户去查模型配置（issue #338）。
 	 * @param cwd 仓库工作目录
-	 * @param maxBytes 最大返回字符数（默认 100KB），超出截断。maxBuffer 固定为 10MB 确保 git 完整输出。
+	 * @param maxBytes 最大返回字符数（默认 100KB），超出截断。溢出时改用已收集的截断输出（见下）。
 	 */
 	async getStagedDiff(cwd: string, maxBytes = 100 * 1024): Promise<string> {
-		const { stdout } = await execGit(["diff", "--staged", "--unified=3"], {
-			cwd,
-			timeoutMs: GIT_MUTATION_TIMEOUT_MS,
-			maxBuffer: 10 * 1024 * 1024,
-		});
+		let stdout: string;
+		try {
+			({ stdout } = await execGit(["diff", "--staged", "--unified=3"], {
+				cwd,
+				timeoutMs: GIT_MUTATION_TIMEOUT_MS,
+				maxBuffer: STAGED_DIFF_MAX_BUFFER,
+			}));
+		} catch (error) {
+			// 一次暂存太多文件（生成物/lockfile/整目录）时 diff 会超过 maxBuffer。提交摘要只把前 8000 字符
+			// 塞进 prompt（见 gitIpc），拿得到前缀就够用：宁可给模型一段截断的 diff，也不要整条失败报
+			// 「stdout maxBuffer length exceeded」（issue #391 评论）。其它失败（超时/仓库损坏）仍照旧抛出。
+			if (!(error instanceof GitOutputOverflowError)) throw error;
+			stdout = error.stdout;
+		}
 		// 无暂存内容时返回空，不回退到工作区 diff：由调用方提示用户先暂存
 		if (!stdout.trim()) return "";
 		return stdout.length > maxBytes ? stdout.slice(0, maxBytes) + "\n\n... (diff truncated)" : stdout;

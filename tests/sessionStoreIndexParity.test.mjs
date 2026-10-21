@@ -118,3 +118,33 @@ test("sidecar 抛错/返回 null 时不影响读取", async () => {
 	assert.equal(expected.metadata.model.modelId, "gpt-5.2");
 	assert.equal(expected.metadata.thinkingLevel, "high");
 });
+
+test("用户消息 preview 与 Go 条目表逐条一致（导轨标题不靠回读）", async () => {
+	const { indexPreviewOf } = loadTsCommonJs("src/main/pi/SessionHistoryReader.ts");
+	const lines = readFileSync(FIXTURE, "utf8")
+		.split("\n")
+		.filter((line) => line.trim());
+	const byId = new Map();
+	for (const line of lines) {
+		let parsed;
+		try {
+			parsed = JSON.parse(line);
+		} catch {
+			// fixture 里故意保留了损坏行（坏行不产条目），与索引侧同语义跳过。
+			continue;
+		}
+		if (!parsed || typeof parsed.id !== "string") continue;
+		// 与两侧同序解析消息来源：parsed.message → data.message →（旧格式）整行自带 role。
+		const nested = parsed.message && typeof parsed.message === "object" ? parsed.message : undefined;
+		const dataMessage = parsed.data && typeof parsed.data === "object" && parsed.data.message && typeof parsed.data.message === "object" ? parsed.data.message : undefined;
+		const message = nested ?? dataMessage ?? (typeof parsed.role === "string" ? parsed : undefined);
+		byId.set(parsed.id, message?.role === "user" ? indexPreviewOf(message) : undefined);
+	}
+	let compared = 0;
+	for (const entry of GOLDEN.entries) {
+		assert.equal(entry.preview ?? undefined, byId.get(entry.id), `条目 ${entry.id} 的 preview 与 TS 解析不一致`);
+		if (entry.preview) compared += 1;
+	}
+	// 防止 fixture 被改瘦后测试变空转：至少要有用户消息预览被比对。
+	assert.equal(compared > 0, true);
+});

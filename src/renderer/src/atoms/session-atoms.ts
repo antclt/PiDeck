@@ -379,6 +379,19 @@ export const bumpNewTurnCollapseTickAtom = atom(null, (_get, set, sessionId: str
 export const newTurnCollapseTickBySessionIdAtomFamily = atomFamily((sessionId: string) => selectAtom(newTurnCollapseTickByIdAtom, (map) => map[sessionId] ?? 0, Object.is));
 
 /**
+ * 「发送置顶动画进行中」信号（sessionId 键）。
+ *
+ * 发送那一刻时间线会把刚发出的消息平滑滚到视口顶部（SendScrollPositioner）。同一窗口内
+ * 若「新一轮折叠」把上一轮执行过程收掉，上方内容会整体骤缩数百到上千 px；动画中的视口
+ * 补偿只能把 scrollTop 瞬间往回带，于是用户看到的是「先向上再向下」的来回滚动（2026-10
+ * 反馈）。折叠信号因此等动画结束再消费（见 useTurnExecution），两者分属 controller 与
+ * TurnRow 两棵子树，用 atom 传递而不是互相 import。
+ */
+export const sendPinAnimatingByIdAtom = atom<Record<string, boolean>>({});
+
+export const sendPinAnimatingBySessionIdAtomFamily = atomFamily((sessionId: string) => selectAtom(sendPinAnimatingByIdAtom, (map) => map[sessionId] === true, Object.is));
+
+/**
  * run 级「执行过程展开状态」的跨挂载记忆条目。
  * atTick 记录写入时的 newTurnCollapseTick：新一轮只压过早于它的旧记忆，
  * 从新一轮之后再次写入的记忆必须在下一次重挂载时恢复（用户明确的最新意愿）。
@@ -573,7 +586,9 @@ export const cacheSessionMessagesAtom = atom(
 		input: {
 			sessionId: string;
 			messages: ChatMessage[];
-			source: "disk" | "runtime";
+			// "remote"：远端会话文件经主进程有界窗口读回的历史（游标是字节偏移，与本地磁盘页不同）；
+			// 本地页与 runtime 更新只写 disk/runtime，这里放宽是为了让远端历史页能原样转存。
+			source: "disk" | "runtime" | "remote";
 			expectedRevision?: number;
 			page?: Pick<SessionMessagePage, "total" | "nextBefore">;
 			/** runtime 窗口协议字段（2026-08 激活分页） */
@@ -1460,9 +1475,11 @@ export const applySessionRuntimeEventAtom = atom(null, (get, set, event: Session
 					// 长度校验：合并后本地长度 = 卡片 + (totalLength − W)；不满足说明增量已失序
 					// （漏事件/trim 未校准），丢弃等待全量
 					if (merged.length === totalLength - W + cardCount) {
+						// 宿主快照不含「尚未写进会话日志的乐观用户消息」（模型解析失败等），
+						// 增量替换会把气泡挤掉——按公共前缀接回原位（见 pendingUserMessage）。
 						set(cacheSessionMessagesAtom, {
 							sessionId: event.sessionId,
-							messages: merged,
+							messages: carryPendingUserMessages(current.messages, merged),
 							source: "runtime",
 							windowStart: W,
 							outlineChanged,
@@ -1485,7 +1502,9 @@ export const applySessionRuntimeEventAtom = atom(null, (get, set, event: Session
 				// （见 historyPrefixFromDiskPage 注释）。已是 runtime 前缀的照旧走 reconcile。
 				set(cacheSessionMessagesAtom, {
 					sessionId: event.sessionId,
-					messages: segment,
+					// 全量替换同样可能丢掉尚未被宿主记录的乐观用户消息（DSH 模型解析失败
+					// 会让回合直接 error 收口，用户消息从未进日志）——接回原位，避免「消息被吞」。
+					messages: carryPendingUserMessages(current?.messages ?? [], segment),
 					source: "runtime",
 					windowStart: payloadWindowStart,
 					cardCount,
@@ -1696,11 +1715,18 @@ export const removeSessionStateAtom = atom(null, (get, set, sessionId: string) =
 	// atomFamily 无自动 GC：会话删除时必须同步 remove 各 family 实例，否则长期泄漏（2026-10）。
 	liveThinkingIdBySessionIdAtomFamily.remove(sessionId);
 	newTurnCollapseTickBySessionIdAtomFamily.remove(sessionId);
+	sendPinAnimatingBySessionIdAtomFamily.remove(sessionId);
 	runStepsVisibleMemoryBySessionIdAtomFamily.remove(sessionId);
 	processGroupOpenBySessionIdAtomFamily.remove(sessionId);
 	streamingTextBySessionIdAtomFamily.remove(sessionId);
 	sessionMessageCacheBySessionIdAtomFamily.remove(sessionId);
 	set(streamingTextByIdAtom, (prevMap) => {
+		if (!(sessionId in prevMap)) return prevMap;
+		const nextMap = { ...prevMap };
+		delete nextMap[sessionId];
+		return nextMap;
+	});
+	set(sendPinAnimatingByIdAtom, (prevMap) => {
 		if (!(sessionId in prevMap)) return prevMap;
 		const nextMap = { ...prevMap };
 		delete nextMap[sessionId];
@@ -1728,3 +1754,83 @@ export const removeSessionStateAtom = atom(null, (get, set, sessionId: string) =
  * 生命周期短暂（点击→pane 挂载），切走即由消费方/写入方覆盖。
  */
 export const pendingMessageJumpAtom = atom<{ sessionId: string; messageId: string } | null>(null);
+
+/**
+ * 发送期「乐观用户消息」接管规则（纯函数，可单测）。
+ *
+ * 背景（2026-10 用户反馈「DSH 会话失败后发送的消息被吞了」）：
+ * 渲染层发出提示词时会先往缓存塞一条乐观用户气泡（id = requestId），等宿主把它写进
+ * 会话日志后再由运行时快照替换成正式消息。DSH 的模型解析发生在回合的 prepareRequest
+ * 阶段（@deepseek-ai/dsh-agent-loop：step() 先 prepareRequest，再 append user/message），
+ * 早于把用户消息写进日志——模型配置错误（pi-ai provider … has no configured model）
+ * 时回合直接以 error 收口，用户消息从未落盘：随后的快照里没有它，乐观气泡被整段替换，
+ * 界面上只剩一条错误诊断，用户刚发出的内容凭空消失。
+ *
+ * 规则：快照到达时，把「带 pending 标记、且快照里没有等价用户消息」的气泡接回原位；
+ * 一旦快照出现同文本用户消息 = 宿主已记录（或用户重发成功），标记气泡让位给正式消息。
+ * 标记只由发送路径写入，宿主投影永远不带它，因此不会把正式消息误判成乐观气泡。
+ *
+ * 放在本模块而不是 utils：session-atoms 是本仓库被最多手写 vm 加载器编译的模块，
+ * 新增相对 import 会让这些加载器整片 MODULE_NOT_FOUND（见 AGENTS「禁止手写 vm 加载器」）。
+ */
+
+/** ChatMessage.meta 键：待宿主确认的乐观用户消息。 */
+export const PENDING_USER_MESSAGE_META = "pendingUserMessage";
+
+function normalizeText(text: string | undefined): string {
+	return (text ?? "").replace(/\s+/gu, " ").trim();
+}
+
+/** 是否为本模块管理的乐观用户消息（必须是 user + 标记 + 可对账的 requestId）。 */
+export function isPendingUserMessage(message: ChatMessage): boolean {
+	if (message.role !== "user") return false;
+	if (message.meta?.[PENDING_USER_MESSAGE_META] !== true) return false;
+	return typeof message.meta?.requestId === "string" && message.meta.requestId.length > 0;
+}
+
+/**
+ * 用宿主快照替换窗口段时，把尚未被宿主记录的用户消息接回原位。
+ *
+ * - 快照里已有同 id 或同文本用户消息 → 视为已确认，不再保留（避免重复气泡）；
+ * - 否则插在「旧消息与新快照的公共前缀」之后——错误卡/回答通常正是那段新内容，
+ *   用户消息因此仍排在它前面，顺序与用户实际发送时一致。
+ */
+export function carryPendingUserMessages(previous: readonly ChatMessage[], next: readonly ChatMessage[]): ChatMessage[] {
+	const pendingAt = previous.flatMap((message, index) => (isPendingUserMessage(message) ? [{ message, index }] : []));
+	if (pendingAt.length === 0) return [...next];
+	const nextIds = new Set(next.map((message) => message.id));
+	const confirmedTexts = new Set(next.filter((message) => message.role === "user").map((message) => normalizeText(message.text)));
+	// 锚点：旧序列里排在这条气泡之后的第一个普通消息（快照里的错误卡/回答）。
+	// 后续快照虽然又追加了新内容，气泡仍然插在同一个锚点之前，位置不会随刷新漂移。
+	const insertions: Array<{ index: number; message: ChatMessage }> = [];
+	for (const { message, index } of pendingAt) {
+		if (nextIds.has(message.id) || confirmedTexts.has(normalizeText(message.text))) continue;
+		const anchor = previous.slice(index + 1).find((candidate) => !isPendingUserMessage(candidate) && nextIds.has(candidate.id));
+		const anchorIndex = anchor ? next.findIndex((candidate) => candidate.id === anchor.id) : -1;
+		insertions.push({ index: anchorIndex >= 0 ? anchorIndex : commonPrefixLength(previous, next), message });
+	}
+	if (insertions.length === 0) return [...next];
+	insertions.sort((left, right) => left.index - right.index);
+	const result: ChatMessage[] = [];
+	let cursor = 0;
+	for (const insertion of insertions) {
+		const at = Math.max(insertion.index, cursor);
+		result.push(...next.slice(cursor, at), insertion.message);
+		cursor = at;
+	}
+	result.push(...next.slice(cursor));
+	return result;
+}
+
+/** 旧序列（去掉乐观气泡）与新快照的公共前缀长度：兜底插入点。 */
+function commonPrefixLength(previous: readonly ChatMessage[], next: readonly ChatMessage[]): number {
+	const base = previous.filter((message) => !isPendingUserMessage(message));
+	let prefix = 0;
+	while (prefix < base.length && prefix < next.length && base[prefix].id === next[prefix].id) prefix += 1;
+	return prefix;
+}
+
+/** 投递被拒/从未送达：撤掉该次请求的乐观气泡（文字已由 restoreRejectedPrompt 回填草稿）。 */
+export function removePendingUserMessages(messages: readonly ChatMessage[], requestId: string): ChatMessage[] {
+	return messages.filter((message) => !(message.id === requestId && isPendingUserMessage(message)));
+}

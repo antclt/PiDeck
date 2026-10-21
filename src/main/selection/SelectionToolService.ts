@@ -13,7 +13,7 @@
  *    调用方据此提示用户改键，服务自己只落日志不打扰用户。
  */
 import { globalShortcut } from "electron";
-import type { SelectionToolShowPayload, SelectionToolWindowState } from "../../shared/types/selectionTool";
+import { SELECTION_TOOL_TEXT_MAX_CHARS, type SelectionToolShowPayload, type SelectionToolWindowState } from "../../shared/types/selectionTool";
 import type { SelectionToolWindow } from "./SelectionToolWindow";
 import type { SystemSelectionReadResult } from "./systemSelectionReader";
 import { readSystemSelection } from "./systemSelectionReader";
@@ -37,6 +37,8 @@ export type SelectionToolServiceDeps = {
 	readSelection?: () => Promise<SystemSelectionReadResult>;
 	/** 覆盖快捷键注册（单测用）；缺省走 electron globalShortcut。 */
 	shortcuts?: SelectionToolShortcutBridge;
+	/** 取词模拟复制前后抑制「复制即触发」监听，避免哨兵/恢复内容触发第二个浮窗。 */
+	suppressClipboardWatcher?: (durationMs: number) => void;
 };
 
 const LOG_SCOPE = "selection-tool";
@@ -64,7 +66,7 @@ export class SelectionToolService {
 	}
 
 	getState(): SelectionToolWindowState {
-		return this.deps.window.getState();
+		return { ...this.deps.window.getState(), shortcutRegistered: this.accelerator !== null, shortcut: this.accelerator };
 	}
 
 	/** Escape / 关闭按钮 / 主进程收起：统一走窗口，不产生副作用。 */
@@ -78,6 +80,17 @@ export class SelectionToolService {
 	}
 
 	/**
+	 * 剪贴板触发入口：外部应用复制文字后直接展示（不模拟复制、不改剪贴板）。
+	 * 与快捷键触发共用同一个浮窗；同一时间只有一个实例。
+	 */
+	async showText(text: string): Promise<void> {
+		if (this.disposed || this.capturing) return;
+		const normalized = text.trim();
+		if (!normalized) return;
+		await this.deps.window.show({ text: normalized.slice(0, SELECTION_TOOL_TEXT_MAX_CHARS) });
+	}
+
+	/**
 	 * 快捷键触发入口。永不抛：取词失败也弹窗，让用户看到「没读到选区」而不是毫无反馈。
 	 */
 	async trigger(): Promise<void> {
@@ -88,6 +101,8 @@ export class SelectionToolService {
 				this.hide();
 				return;
 			}
+			// 模拟复制会写哨兵/恢复剪贴板；期间抑制复制监听，避免同一动作触发两次浮窗。
+			this.deps.suppressClipboardWatcher?.(2500);
 			const result = this.deps.readSelection ? await this.deps.readSelection() : await readSystemSelection();
 			if (!result.ok) {
 				this.deps.logger?.info(LOG_SCOPE, "System selection capture failed", { reason: result.reason });

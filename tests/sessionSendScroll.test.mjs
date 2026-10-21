@@ -13,6 +13,8 @@ function sendScrollHarness({ height = 2800, viewportHeight = 600, latestTop = he
 	let sessionId = "s1";
 	let loadStatus = startLoading ? "loading" : "ready";
 	let sendStatus = startWithOptimistic ? { status: "activating", requestId: "optimistic-uuid" } : { status: "idle" };
+	// controller 通过会话级 atom 标记「发送置顶动画进行中」（TurnRow 据此延后新一轮折叠）。
+	let sendPinAnimating = {};
 	let messages = startWithOptimistic ? [{ id: "optimistic-uuid", role: "user", text: "new question", timestamp: 1, agentId: "" }] : startLoading ? [] : [{ id: "history-user", role: "user", text: "history", timestamp: 1, agentId: "agent" }];
 	const rowTops = new Map(startWithOptimistic ? [["optimistic-uuid", latestTop]] : startLoading ? [] : [["history-user", latestTop]]);
 	const frames = new Map();
@@ -77,15 +79,21 @@ function sendScrollHarness({ height = 2800, viewportHeight = 600, latestTop = he
 		sessionRecordByIdAtomFamily: () => "record",
 		sessionMessageLoadStateAtom: "load",
 		sessionSendStateByIdAtom: "send",
+		sendPinAnimatingByIdAtom: "sendPinAnimating",
 		sessionScrollAnchorByIdAtom: "anchors",
 	};
 	const store = {
+		set(key, updater) {
+			if (key !== "sendPinAnimating") return;
+			sendPinAnimating = typeof updater === "function" ? updater(sendPinAnimating) : updater;
+		},
 		get(key) {
 			if (key === "cache") return { [sessionId]: { messages, source: "runtime" } };
 			if (key === "entry") return { messages, source: "runtime" };
 			if (key === "load") return { [sessionId]: { status: loadStatus } };
 			if (key === "send") return { [sessionId]: sendStatus };
 			if (key === "record") return { id: sessionId, projectId: "p1", status: "active", filePath: "/tmp/s1.jsonl", messageCount: messages.length };
+			if (key === "sendPinAnimating") return sendPinAnimating;
 			return {};
 		},
 	};
@@ -207,6 +215,10 @@ function sendScrollHarness({ height = 2800, viewportHeight = 600, latestTop = he
 		},
 		rowGap(id) {
 			return rowTops.get(id) - viewport.scrollTop;
+		},
+		/** 会话级「发送置顶动画进行中」标记（TurnRow 折叠延后依据）。 */
+		sendPinAnimating(id = "s1") {
+			return sendPinAnimating[id] === true;
 		},
 		input(name = "wheel") {
 			listeners.get(name)?.({ type: name });
@@ -373,6 +385,65 @@ test("a pane mounted with an in-flight optimistic message still gets send positi
 		h.releaseLoad();
 		h.finish();
 		assert.ok(Math.abs(h.rowGap("optimistic-uuid") - 24) <= 1, `gap=${h.rowGap("optimistic-uuid")}`);
+	} finally {
+		h.unmount();
+	}
+});
+
+/* ── 发送置顶动画进行中标记：TurnRow 的「新一轮折叠」据此延后 ──
+ * 背景（2026-10 用户反馈「发送后动画先向上再向下」）：折叠信号在动画途中把上一轮执行过程
+ * 收掉，上方内容骤缩 → 视口补偿把 scrollTop 往回带。标记必须在动画期间为 true，
+ * 且任何结束路径（完成 / 用户滚动 / 切会话 / 短会话）都要落回 false，否则折叠永远不执行。 */
+
+test("清屏动画期间标记会话为「置顶中」，动画结束即撤销", () => {
+	const h = sendScrollHarness();
+	try {
+		h.browse();
+		h.send();
+		h.advance();
+		assert.equal(h.sendPinAnimating(), true, "动画开始后必须立起标记");
+		h.finish();
+		assert.equal(h.sendPinAnimating(), false, "动画结束后必须撤销标记");
+	} finally {
+		h.unmount();
+	}
+});
+
+test("用户滚动打断动画时同样撤销标记（不留悬挂 true）", () => {
+	const h = sendScrollHarness();
+	try {
+		h.browse();
+		h.send();
+		for (let i = 0; i < 6; i++) h.advance();
+		assert.equal(h.sendPinAnimating(), true);
+		h.input();
+		assert.equal(h.sendPinAnimating(), false, "用户接管滚动后不得继续推迟折叠");
+	} finally {
+		h.unmount();
+	}
+});
+
+test("切会话时撤销标记，不把旧会话的「置顶中」带到新会话", () => {
+	const h = sendScrollHarness();
+	try {
+		h.browse();
+		h.send();
+		h.advance();
+		assert.equal(h.sendPinAnimating(), true);
+		h.switchSession();
+		assert.equal(h.sendPinAnimating("s1"), false);
+	} finally {
+		h.unmount();
+	}
+});
+
+test("短会话不播置顶动画，也不残留标记", () => {
+	const h = sendScrollHarness({ height: 160 });
+	try {
+		h.send();
+		h.advance();
+		h.finish();
+		assert.equal(h.sendPinAnimating(), false);
 	} finally {
 		h.unmount();
 	}

@@ -1,5 +1,5 @@
 /**
- * 系统级划词浮窗：单个无边框透明 BrowserWindow（440×280），跟随光标弹出。
+ * 系统级划词浮窗：单个无边框透明 BrowserWindow（宽 440；折叠 46 / 展开 280），跟随光标弹出。
  *
  * 职责边界：只管窗口生命周期/定位/加载与「把捕获载荷推给渲染层」；
  * 取词在 systemSelectionReader，快捷键与去重在 SelectionToolService，
@@ -22,7 +22,8 @@ import { ipcChannels } from "../../shared/ipc";
 import type { SelectionToolShowPayload, SelectionToolWindowState } from "../../shared/types/selectionTool";
 import type { AppLogger } from "../logging/AppLogger";
 import { readElectronChromiumSandboxPreference } from "../settings/SettingsStore";
-import { SELECTION_TOOL_WINDOW_HEIGHT, SELECTION_TOOL_WINDOW_WIDTH, clampSelectionToolPosition } from "./selectionToolBounds";
+import { SELECTION_TOOL_AUTO_HIDE_MS, SELECTION_TOOL_SCREEN_MARGIN, SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT, SELECTION_TOOL_WINDOW_WIDTH, clampSelectionToolPosition } from "./selectionToolBounds";
+import type { SelectionToolResizeInput } from "../../shared/types/selectionTool";
 
 export type SelectionToolWindowDeps = {
 	/** preload 绝对路径：装配层用 preparePreloadPath(join(__dirname, "../preload/index.js"), "selection-tool-preload.js") 解析。 */
@@ -40,6 +41,8 @@ export class SelectionToolWindow {
 	private disposed = false;
 	/** 渲染页加载失败过：下次 show 重新创建窗口（否则会一直复用一个空白页）。 */
 	private loadFailed = false;
+	/** 非聚焦弹出的自动收起定时器：Magpie 式浮条不能抢走目标应用焦点，也不能永久悬停。 */
+	private autoHideTimer: ReturnType<typeof setTimeout> | null = null;
 	private readonly stateListeners = new Set<(state: SelectionToolWindowState) => void>();
 	private readonly closedListeners = new Set<() => void>();
 
@@ -79,21 +82,29 @@ export class SelectionToolWindow {
 		await this.loadPromise;
 	}
 
-	/** 弹窗：定位到光标附近 → 等渲染层加载完 → 推送捕获载荷 → 显示并聚焦。永不抛。 */
+	/** 弹窗：定位到光标附近 → 等渲染层加载完 → 推送捕获载荷 → showInactive 显示（不抢焦点）。永不抛。 */
 	async show(payload: SelectionToolShowPayload): Promise<void> {
 		if (this.disposed) return;
 		this.dropFailedWindow();
 		const win = this.ensureWindow();
 		if (!win) return;
 		try {
+			// 每次新的复制/快捷键触发都从折叠浮条开始，避免上一轮展开尺寸残留。
+			try {
+				win.setContentSize(SELECTION_TOOL_WINDOW_WIDTH, SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT);
+			} catch {
+				// 窗口尚未完成初始化：保持既有尺寸即可，渲染层挂载后会再请求一次。
+			}
 			this.applyCursorPosition(win);
 			await this.loadPromise;
 			if (this.disposed || win.isDestroyed()) return;
 			// 先订阅后推送的时序由渲染层保证（selection-tool/main.tsx 在 React 挂载前订阅），
 			// 这里只需等 did-finish-load：模块脚本此时已执行完。
 			win.webContents.send(ipcChannels.selectionToolCaptured, payload);
-			if (!win.isVisible()) win.show();
-			win.focus();
+			// showInactive：复制即触发时绝不把焦点从目标应用抢走（Magpie 的「never steals focus」）。
+			// 用户点击浮窗后会自然获得焦点，失焦仍走 blur 收起；未点击则靠定时器兜底。
+			if (!win.isVisible()) win.showInactive();
+			this.armAutoHide();
 			this.notifyStateChanged();
 		} catch (error) {
 			this.deps.logger?.error("selection-tool", "Failed to show selection tool window", { error: error instanceof Error ? error.message : String(error) });
@@ -104,6 +115,7 @@ export class SelectionToolWindow {
 	hide(): void {
 		const win = this.win;
 		if (!win || win.isDestroyed() || !win.isVisible()) return;
+		this.clearAutoHide();
 		win.hide();
 		this.notifyStateChanged();
 	}
@@ -113,6 +125,7 @@ export class SelectionToolWindow {
 		if (this.disposed) return;
 		this.disposed = true;
 		this.loadFailed = false;
+		this.clearAutoHide();
 		this.stateListeners.clear();
 		this.closedListeners.clear();
 		const win = this.win;
@@ -130,7 +143,8 @@ export class SelectionToolWindow {
 		try {
 			const win = new BrowserWindow({
 				width: SELECTION_TOOL_WINDOW_WIDTH,
-				height: SELECTION_TOOL_WINDOW_HEIGHT,
+				// 初始只给折叠浮条高度；点开翻译后由渲染层请求展开到结果面板高度。
+				height: SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT,
 				show: false,
 				frame: false,
 				transparent: true,
@@ -164,6 +178,7 @@ export class SelectionToolWindow {
 			win.on("blur", () => this.hide());
 			win.on("closed", () => {
 				if (this.win !== win) return;
+				this.clearAutoHide();
 				this.win = null;
 				this.loadPromise = null;
 				for (const listener of this.closedListeners) listener();
@@ -217,8 +232,49 @@ export class SelectionToolWindow {
 	private applyCursorPosition(win: BrowserWindow): void {
 		const cursor = screen.getCursorScreenPoint();
 		const display = screen.getDisplayNearestPoint(cursor);
-		const position = clampSelectionToolPosition({ cursor, workArea: display.workArea, size: { width: SELECTION_TOOL_WINDOW_WIDTH, height: SELECTION_TOOL_WINDOW_HEIGHT } });
+		const position = clampSelectionToolPosition({ cursor, workArea: display.workArea, size: { width: SELECTION_TOOL_WINDOW_WIDTH, height: SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT } });
 		win.setPosition(position.x, position.y, false);
+	}
+
+	/** 渲染层折叠/展开时调整窗口高度；宽度固定，尺寸变化后把窗口夹回当前显示器工作区。 */
+	resize(input: SelectionToolResizeInput): void {
+		const win = this.win;
+		if (!win || win.isDestroyed()) return;
+		const width = Math.round(Math.min(560, Math.max(360, input.width)));
+		const height = Math.round(Math.min(600, Math.max(SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT, input.height)));
+		try {
+			win.setContentSize(width, height);
+			const bounds = win.getBounds();
+			const workArea = screen.getDisplayMatching(bounds).workArea;
+			// 用请求尺寸而不是 getBounds()：Windows 上 setContentSize 后 bounds 可能同一 tick 还未刷新，
+			// 用旧高度夹紧会让展开面板底部超出工作区。
+			const maxX = Math.max(workArea.x + SELECTION_TOOL_SCREEN_MARGIN, workArea.x + workArea.width - SELECTION_TOOL_SCREEN_MARGIN - width);
+			const maxY = Math.max(workArea.y + SELECTION_TOOL_SCREEN_MARGIN, workArea.y + workArea.height - SELECTION_TOOL_SCREEN_MARGIN - height);
+			const x = Math.min(Math.max(bounds.x, workArea.x + SELECTION_TOOL_SCREEN_MARGIN), maxX);
+			const y = Math.min(Math.max(bounds.y, workArea.y + SELECTION_TOOL_SCREEN_MARGIN), maxY);
+			if (x !== bounds.x || y !== bounds.y) win.setPosition(x, y, false);
+			// 展开后重新计时：即使用户还没点进窗口，也给足阅读/操作时间。
+			if (win.isVisible()) this.armAutoHide();
+		} catch (error) {
+			this.deps.logger?.warn("selection-tool", "Failed to resize selection tool window", { error: error instanceof Error ? error.message : String(error) });
+		}
+	}
+
+	/** 非聚焦弹出后 30s 自动收起；期间用户点击浮窗获得焦点，失焦时 blur 会立即收起。 */
+	private armAutoHide(): void {
+		this.clearAutoHide();
+		this.autoHideTimer = setTimeout(() => {
+			this.autoHideTimer = null;
+			const win = this.win;
+			if (!win || win.isDestroyed() || win.isFocused()) return;
+			this.hide();
+		}, SELECTION_TOOL_AUTO_HIDE_MS);
+	}
+
+	private clearAutoHide(): void {
+		if (!this.autoHideTimer) return;
+		clearTimeout(this.autoHideTimer);
+		this.autoHideTimer = null;
 	}
 
 	private notifyStateChanged(): void {

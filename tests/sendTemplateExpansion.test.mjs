@@ -62,3 +62,20 @@ test("ensureTemplates 抛错不阻断发送（fail-open：退回交给 pi 展开
 	assert.equal(enqueued.length, 1, "模板表补齐失败也必须照常入队");
 	assert.match(enqueued[0].message, /(^|\s)\/review(\s|$)/, "未展开时保留原文，由 pi 兜底展开");
 });
+
+test("队列分支也遵守保留集：后端命令原样入队（DSH host 命令不被抢）", async () => {
+	const templates = [{ name: "permission", path: "", description: "", content: "PERMISSION-BODY" }];
+	const enqueued = [];
+	const harness = createSendHarness({
+		draft: "/permission allow",
+		templates,
+		reservedCommandNames: new Set(["permission"]),
+		enqueue: (sessionId, payload) => {
+			enqueued.push(payload);
+			return true;
+		},
+	});
+	await harness.send("steer");
+	assert.equal(enqueued.length, 1);
+	assert.equal(enqueued[0].message, "/permission allow", "DSH 的 /permission 必须原样交给 host 执行");
+});

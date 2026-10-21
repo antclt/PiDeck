@@ -585,7 +585,14 @@ export const McpTab = forwardRef<
 				setError(t("config.mcp.nameDuplicate"));
 				return false;
 			}
-			return persistServers(next);
+			const ok = await persistServers(next);
+			// 交接写入的条目按设计是停用态，用户下一步就是启用它：直接落到 pideck 条目页，
+			// 不必让他在左栏里自己找（交接成功后停在面板上，面板只会变成「已存在」）。
+			if (ok) {
+				setSelectedTemplate(null);
+				setSelected("pideck");
+			}
+			return ok;
 		},
 		[writable, displayServers, persistServers],
 	);
@@ -835,6 +842,18 @@ export const McpTab = forwardRef<
 								) : (
 									<p className="text-micro text-muted-foreground">{t("config.mcp.status.notTested")}</p>
 								)}
+								{/* 「已停用」只描述状态、不给出路：就地补一个启用入口，用户不必再去下方「启用」卡片找开关
+								    （实测反馈：PiDeck 本地服务交接后条目是停用态，只看到已停用不知道哪里开启）。
+								    启用写本层配置，因此仅在条目归属本层（可写）时出现；继承来的停用要去对应层改。 */}
+								{selected && !creating && isMcpServerDisabled(editingDef) && selectedItem?.ownedByWritable ? (
+									<div className="mt-2 flex flex-wrap items-center gap-2">
+										<Button variant="outline" size="xs" onClick={() => void toggleDisabled(selectedItem, false)} disabled={saving || statusLoading}>
+											<PlugZap size={12} />
+											{t("config.mcp.status.enable")}
+										</Button>
+										<span className="text-micro text-muted-foreground">{t("config.mcp.status.enableHint")}</span>
+									</div>
+								) : null}
 								{/* 登录/登出操作行：OAuth 型服务（远程 HTTP、无静态 Authorization 头、非供应商登录）。出口规则：有凭据→登出；
 								 检测出 needs-auth/disconnected→登录；disabled（停用）不显示——先启用再登录才是正常顺序，
 								 公共服务停用时挂登录按钮纯属困惑；未检测也不显示——公共服务（beui）与需登录服务无法区分。 */}

@@ -146,12 +146,14 @@ test("空暂存区 / 无仓库 / 读 diff 失败走独立错误码，不再误�
 	assert.match(gitIpc, /Generate commit message skipped: nothing staged/);
 	assert.match(gitIpc, /Generate commit message failed: repository path unresolved/);
 
-	// GitService.getStagedDiff 不得再 catch 成空串（真 git 行为见
-	// tests/gitCommitFileDiff.integration.test.mjs 的对应用例）
+	// GitService.getStagedDiff 不得把失败吞成空串（真 git 行为见
+	// tests/gitCommitFileDiff.integration.test.mjs 的对应用例）。唯一允许的 catch 是「输出溢出降级成
+	// 截断 diff」（issue #391 评论），并且必须把其它错误原样抛出——否则又回到「失败看起来像空暂存区」。
 	const stagedDiffStart = gitService.indexOf("async getStagedDiff(");
 	const stagedDiffBody = gitService.slice(stagedDiffStart, gitService.indexOf("async getCommitLog(", stagedDiffStart));
 	assert.ok(stagedDiffBody.length > 0, "未找到 getStagedDiff 方法体");
-	assert.doesNotMatch(stagedDiffBody, /catch/);
+	assert.doesNotMatch(stagedDiffBody, /catch\s*(\([^)]*\))?\s*\{\s*return\s*""/, "catch 不能把失败吞成空串");
+	assert.match(stagedDiffBody, /if \(!\(error instanceof GitOutputOverflowError\)\) throw error/, "溢出以外的失败必须原样抛出（超时 / 仓库损坏不能被当成空暂存区）");
 
 	// 渲染层：空暂存区给「先暂存」提示 + 刷新真实状态，而不是「检查模型设置」
 	assert.match(gitPanel, /result\.code === "GIT_COMMIT_EMPTY_DIFF"/);

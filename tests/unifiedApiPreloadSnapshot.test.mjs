@@ -10,9 +10,9 @@
  * 2026-10-18 再刷新：sessions.searchInSession（会话内查找）入场，sessions 111→112，命名空间数不变；
  * 2026-10-19 再刷新：sessions.reloadResources（pi 热重载扩展/技能）入场，sessions 112→113；
  *   同版下线 GUI 扩展桥（sessions.sendBridgeEvent / requestBridgeResync）与插件开发支持
- *   （整份 pluginDev 命名空间 3 方法）：命名空间 70→69、sessions 113→111）；
- * 2026-10-20 远端集成合并刷新：远端四命名空间（remoteHosts / probeRemoteModels / remoteTrust /
- *   remoteSessions）与 sessions/git 的远端通道面入场，命名空间 69→77、sessions 111→118、git 38→59。
+ *   （整份 pluginDev 命名空间 3 方法）：命名空间 70→69、sessions 113→111；
+ * 2026-10-21 刷新：轨迹 S4（sessions.readOutline / readOutlineTitle 入场）+ 远端市场/划词/
+ *   技能目录等改动合并：命名空间 69→73、sessions 111→114（config/git/app 不变）。
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -20,7 +20,7 @@ import { test } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const NS_LIST_SHA256 = "d7881650417ced09bcafb62322edca6cdfecbbcd7d2bfb8d4c3006104f696e5d";
-const FULL_METHODS_SHA256 = "f865e3a397cb5b245bdf2015b16679ddf11c9bba1c77ec60fce898cb937a0b71";
+const FULL_METHODS_SHA256 = "3e28efb2214637905c8bf1a1f00ebc843a27cf2853784e422e899e8235d1971e";
 const NAMESPACE_COUNT = 77;
 
 /** 捕获 preload 暴露的 piDesktop；null/undefined/形态不符时显式红并给诊断（F8-6 共用）。 */
@@ -53,7 +53,7 @@ const api = capturePreloadApi();
 const namespaces = sortedKeys(api);
 const methodLines = namespaces.map((ns) => `${ns}=${sortedKeys(api[ns]).join(",")}`);
 
-test("F8-1 preload 顶层命名空间数 === 69 且排序清单摘要零漂移", () => {
+test("F8-1 preload 顶层命名空间数 === 77 且排序清单摘要零漂移", () => {
 	assert.equal(namespaces.length, NAMESPACE_COUNT, `命名空间数 ${namespaces.length} ≠ ${NAMESPACE_COUNT}`);
 	assert.equal(sha256(namespaces.join(",")), NS_LIST_SHA256, "命名空间清单摘要漂移：preload 暴露面发生变化（A10 红线）");
 });

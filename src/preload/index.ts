@@ -38,7 +38,7 @@ import type { WhisperInstallProgress, WhisperInstallResult, WhisperRuntimeStatus
 import type { EnhanceEventPayload, EnhanceRunInput, EnhanceRunResult } from "../shared/types/enhance";
 import type { PromptSuggestionRunInput, PromptSuggestionRunResult } from "../shared/types/promptSuggestion";
 import type { AgentChangedEvent, AgentInvokeEventPayload, AgentInvokeInput, AgentInvokeResult, AgentMarketSettings, AgentProfile, AgentProfileSnapshot, BindAgentSessionInput, CreateAgentProfileInput, UpdateAgentMarketSettingsInput, UpdateAgentProfileInput } from "../shared/types/agentProfile";
-import type { SelectionToolInsertInput, SelectionToolShowPayload, SelectionToolWindowState } from "../shared/types/selectionTool";
+import type { SelectionToolInsertInput, SelectionToolResizeInput, SelectionToolShowPayload, SelectionToolWindowState } from "../shared/types/selectionTool";
 import type { QuickMessagesSaveResult, QuickMessagesSnapshot } from "../shared/types/quickMessages";
 import type { NoticeHistoryFileEntry, NoticeHistoryRecordInput } from "../shared/types/noticeHistory";
 import type { ReplyActionRule, ReplyActionsSaveResult, ReplyActionsSnapshot } from "../shared/types/replyActions";
@@ -597,7 +597,8 @@ const api = {
 		list: (projectId?: string) => ipcRenderer.invoke(ipcChannels.sessionsList, projectId) as Promise<SessionSummary[]>,
 		/** 跨会话正文搜索（Go sidecar）；null = 不可用（未构建/boot 中/失败），调用方回退标题过滤。 */
 		searchContent: (query: string) => ipcRenderer.invoke(ipcChannels.sessionsSearchContent, query) as Promise<SessionSearchResult | null>,
-		searchInSession: (sessionPath: string, query: string) => ipcRenderer.invoke(ipcChannels.sessionsSearchInSession, sessionPath, query) as Promise<SessionSearchResult | null>,
+		/** 会话内查找（Ctrl/Cmd+Shift+F）：sessionId = SessionRecord.id，主进程按后端分派（pi 走索引 / DSH 走 host 历史）。 */
+		searchInSession: (sessionId: string, query: string) => ipcRenderer.invoke(ipcChannels.sessionsSearchInSession, sessionId, query) as Promise<SessionSearchResult | null>,
 		listCatalog: (projectId: string, options?: { scan?: boolean }) => ipcRenderer.invoke(ipcChannels.sessionsCatalogList, projectId, options) as Promise<SessionRecord[]>,
 		/** 后台扫描完成推送：目录缓存已合并，监听方应以 scan:false 重新拉取。返回退订函数。 */
 		onCatalogRefreshed: (listener: (input: { projectId: string }) => void) => {
@@ -1900,6 +1901,8 @@ const api = {
 	selectionTool: {
 		getState: () => ipcRenderer.invoke(ipcChannels.selectionToolGetState) as Promise<SelectionToolWindowState>,
 		hide: () => ipcRenderer.invoke(ipcChannels.selectionToolHide) as Promise<void>,
+		/** 折叠浮条 ↔ 展开结果面板：渲染层按内容请求窗口尺寸。 */
+		resize: (input: SelectionToolResizeInput) => ipcRenderer.invoke(ipcChannels.selectionToolResize, input) as Promise<void>,
 		/** 浮窗「发送到 PiDeck」：把文本插入主窗口当前会话输入框。 */
 		insertToMain: (input: SelectionToolInsertInput) => ipcRenderer.invoke(ipcChannels.selectionToolInsertToMain, input) as Promise<boolean>,
 		/** 浮窗显示时主进程推送的捕获文本（空串 = 没读到，让用户手输）。 */

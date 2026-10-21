@@ -264,3 +264,34 @@ CDP 直连实测；`npm run pack:dev` 的 win-unpacked 产物同法验证。
 - `npm run typecheck` = **0**；`npm run check:format` = 0（3716 文件）。
 - `npm run test:serial`：13357 例 / 13058 pass / **22 fail** / 277 skip；失败集合**完全落在 §7 已记录的基线清单**（sessionCatalogCommand 8、rewindCheckpointCore 2、remoteSessionRootIsolation 2、fileIcons 2、sshClientRuntime / remoteRunnerEntry / remoteProjectFileService / remoteHelperSearchNames / remoteGitRecovery / remoteBrowseRoot / remoteBootstrapSessionIntegration / piRuntimeLauncher / feishuSessionRuntimeBinding 各 1），**零合并专属失败**。
 - 相对上一轮（§8：12753 例 / 无合并专属失败）例数增长来自 dev 新增测试；基线红灯清单未扩大。
+
+---
+
+## 11. 第三轮同步（2026-10-20，dev → 40 提交）
+
+> 第二轮合并（§10）落地后 dev 又推进 40 个提交。本轮规模最小：**11 文件 / 10 hunk**。
+
+### 11.1 冲突与决策
+
+| 文件 | 决策 |
+| --- | --- |
+| `sessionIpc.ts` | 两边 import 全保留（`ArchivedRemoteSessionEntry` 远端归档 + `SessionCatalogEntry` dev 的 DSH 搜索） |
+| `shared/api/domainCatalog.ts` | 输入预测域取 dev 的 `prompt-suggestion`（与 enhance 同协议独立实例 + redline 标注，语义更准） |
+| `GitPanel.tsx` | 保留 `ProjectFileTarget`（本仓 14 处使用，dev 版完全没有） |
+| `git/GitResourceTree.tsx` | 全部取本仓：`target` 方案 + `readOnly`/`indexActionsOnly` 远端门控；补回 dev 删掉的 `stageable` 定义（`stagedPaths` 过滤是 VS Code 语义，不能丢） |
+| `docs/unified-api.md` | 取 dev 的三行（`prompt-suggestion` / `agent-profiles` / `selection-tool` 齐全）；删掉上一轮手动加的重复 3 行；行数标注 61→65 |
+| `rendererCopy.zh-TW.ts` | 生成物，取 dev 侧后 `genZhTwCopy` 重算（6928 条） |
+| 4 个 unifiedApi + gitRepoSwitcher | 按实跑值刷新 |
+
+### 11.2 合并专属修复
+
+- `sessionComposer`：dev 起首次发送在 `ensureSessionId` 之前就 `publishOptimisticSubmission`（发 activating + 清草稿），测试桩缺 `removePendingUserMessages` —— 缺它时 `TypeError` 被外层 catch 吞成 `unknown` 状态，rejected 用例假红。补真实实现；`setAtom` 统一只认 `sessionSendStateByIdAtom` 一份真源（dev 的 `isCurrentRequest` 会回读它比 `requestId`）。
+- `composerPrewarmFocus`：`useSessionTimelineController` 新增 `../atoms/timeline-reveal-atoms` 依赖，补 stub。
+- `gitPanelUi`：断言从「组件不许有 `stagedPaths`」改为「装配层不再传 `stagedPathSet` / `stagedPaths={}`」——组件保留可选 prop 作 VS Code 语义兜底，但生产不传。
+- `settingsFieldAnchors`：上一轮加的 `common-selection-tool` 与 dev 新增重复（slug 冲突），删掉自己那条保留 dev 的（关键词更全）。
+- `sessionFeatureTips`：dev 的 `agent.tips.selectionTool` 英文 132 字符超 96 上限，压到 85。
+
+### 11.3 门禁结果
+
+- `npm run typecheck` = **0**；`npm run check:format` = 0（3748 文件）。
+- `npm run test:serial`：13510 例 / 13210 pass / **22 fail** / 278 skip；失败集合与 §10.5 **完全一致**（仍是那 13 个已记录基线文件），零新增。

@@ -121,6 +121,64 @@ export function extractMessagePreviewFromLine(line: string): string {
 	return text.replace(/\s+/g, " ").trim().slice(0, BRANCH_PREVIEW_MAX_CHARS);
 }
 
+/** 索引预览长度上限：与 Go `previewMaxChars` 一致，导轨卡片一行够用。 */
+export const INDEX_PREVIEW_MAX_CHARS = 120;
+
+/**
+ * 用户消息预览（索引阶段计算，Go 侧 `messagePreviewText` 与之逐字段对齐）。
+ *
+ * 规则：content 为字符串；或内容块数组中第一段非空 `text`（不校验 block.type，
+ * 与 extractMessagePreviewFromLine 同语义）→ 空白压成单空格 → 按完整码点截 120 字。
+ */
+/** 预览要跳过的注入型引用块（用户看到的标题应是「他自己打的字」）。 */
+const PREVIEW_REF_TAGS = ["quoted_context", "referenced_session", "skill", "prompt_template"] as const;
+
+/**
+ * 跳过消息开头的注入引用块，返回用户真正输入的部分。
+ *
+ * 为什么必须先剥再截断：预览上限 120 字，引用块正文往往更长——先截断会把
+ * `<quoted_context ...>` 切成半截标签，导轨卡片就显示一坨 XML。
+ * 开头有引用块但找不到闭合标签（数据损坏/被截）时返回 undefined：宁可不产预览，
+ * 也不把半个标签当成标题。
+ */
+export function stripLeadingRefBlocks(text: string): string | undefined {
+	let rest = text;
+	for (;;) {
+		const trimmed = rest.replace(/^\s+/, "");
+		const tag = PREVIEW_REF_TAGS.find((name) => {
+			const open = `<${name}`;
+			if (!trimmed.startsWith(open)) return false;
+			const next = trimmed.charAt(open.length);
+			return next === ">" || /\s/.test(next);
+		});
+		if (tag === undefined) return trimmed;
+		const close = trimmed.toLowerCase().indexOf(`</${tag}>`);
+		if (close < 0) return undefined;
+		rest = trimmed.slice(close + tag.length + 3);
+	}
+}
+
+export function indexPreviewOf(message: Record<string, unknown> | undefined): string | undefined {
+	const content = message?.content;
+	let text: string | undefined;
+	if (typeof content === "string") text = content;
+	else if (Array.isArray(content)) {
+		for (const block of content) {
+			if (isRecord(block) && typeof block.text === "string" && block.text.trim()) {
+				text = block.text;
+				break;
+			}
+		}
+	}
+	if (text === undefined) return undefined;
+	const human = stripLeadingRefBlocks(text);
+	if (human === undefined) return undefined;
+	const collapsed = human.replace(/\s+/g, " ").trim();
+	if (!collapsed) return undefined;
+	const codePoints = Array.from(collapsed);
+	return codePoints.length > INDEX_PREVIEW_MAX_CHARS ? codePoints.slice(0, INDEX_PREVIEW_MAX_CHARS).join("") : collapsed;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -178,7 +236,7 @@ function parseIndexTableEntry(value: unknown): SessionDisplayEntry | null {
 		if (value.oversized !== true) return null;
 		entry.oversized = true;
 	}
-	const optionalStrings = ["modelChangeProvider", "modelChangeId", "thinkingLevel", "customType", "role", "toolName", "messageId", "summary", "firstKeptEntryId", "timestamp", "parentSession", "contextEditTargetId", "contextEditText"] as const;
+	const optionalStrings = ["modelChangeProvider", "modelChangeId", "thinkingLevel", "customType", "role", "toolName", "messageId", "summary", "firstKeptEntryId", "timestamp", "parentSession", "contextEditTargetId", "contextEditText", "preview"] as const;
 	for (const key of optionalStrings) {
 		const field = value[key];
 		if (field === undefined) continue;
@@ -284,6 +342,14 @@ type SessionDisplayEntry = {
 	messageTimestamp?: number;
 	/** 超长行降级条目：正文未解析（hasMessage 恒 false），只为维持 parentId 链而保留。 */
 	oversized?: true;
+	/**
+	 * 用户消息首段文本（空白压成单空格，≤INDEX_PREVIEW_MAX_CHARS 码点）。
+	 *
+	 * 为什么建索引时顺手带走：整行本来就要 JSON.parse（正文已在内存），事后再为
+	 * 导轨标题回读同一行是纯浪费。持久化进条目表后，未加载的历史也能显示真实提问文本
+	 * （对齐 dsh session-turn-outline 的 prompt 预览口径；Go 侧镜像见 table.go）。
+	 */
+	preview?: string;
 	summary?: string;
 	firstKeptEntryId?: string;
 	timestamp?: string;
@@ -763,11 +829,14 @@ export class SessionHistoryReader {
 		for (let messageIndex = 0; messageIndex < index.activeMessageEntries.length; messageIndex += 1) {
 			const entry = index.activeMessageEntries[messageIndex];
 			if (entry.type !== "message" || entry.role !== "user" || excluded.has(entry.id)) continue;
+			// 改写过的用户消息以改写文本为准（与时间线展示一致），否则用建索引时带走的预览。
+			const preview = index.contextEdits.replacementText.get(entry.id) ?? entry.preview;
 			all.push({
 				entryId: entry.id,
 				messageIndex,
 				turnOrdinal: ordinal,
 				...(entry.timestamp ? { timestamp: entry.timestamp } : {}),
+				...(preview ? { preview: clipOutlinePreview(preview) } : {}),
 			});
 			ordinal += 1;
 		}
@@ -1884,6 +1953,8 @@ export class SessionHistoryReader {
 				toolName: readString(message, "toolName"),
 				messageId: typeof message?.id === "string" ? message.id : undefined,
 				messageTimestamp: typeof message?.timestamp === "number" ? message.timestamp : typeof parsed.timestamp === "string" ? Date.parse(parsed.timestamp) : undefined,
+				// 预览只取用户消息：助手/工具正文可能几十 KB，导轨也用不到。
+				preview: message?.role === "user" ? indexPreviewOf(message) : undefined,
 				summary: typeof parsed.summary === "string" ? parsed.summary : undefined,
 				firstKeptEntryId: typeof parsed.firstKeptEntryId === "string" ? parsed.firstKeptEntryId : undefined,
 				timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : undefined,
@@ -2429,6 +2500,11 @@ function extractEntryResultText(message: unknown): string {
 			.join("\n");
 	}
 	return "";
+}
+
+/** 索引预览 → 导轨卡片文本：压空白 + 截 80 字（与标题同口径）。 */
+function clipOutlinePreview(text: string): string {
+	return clipOutlineTitle(text);
 }
 
 /** 单行预览收敛成导轨标题：压空白 + 截 80 字。 */

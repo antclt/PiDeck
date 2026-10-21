@@ -49,6 +49,20 @@ function register() {
 	return { ...fake, run: ipc.handlers.get("suggest:run"), cancel: ipc.handlers.get("suggest:cancel") };
 }
 
+/** 带日志收集的装配：预测不弹 toast，日志是「为什么没预测」的唯一证据。 */
+function registerWithLogs() {
+	const ipc = createFakeIpc();
+	const fake = createFakeService();
+	const lines = [];
+	const logger = {
+		debug: (message) => lines.push({ level: "debug", message }),
+		info: (message) => lines.push({ level: "info", message }),
+		warn: (message) => lines.push({ level: "warn", message }),
+	};
+	registerPromptSuggestionIpc(ipc, fake.service, logger);
+	return { ...fake, ipc, lines, run: ipc.handlers.get("suggest:run") };
+}
+
 const CONTEXT = [
 	{ role: "user", text: "帮我把登录页改一下" },
 	{ role: "assistant", text: "已经改好，并补了测试" },
@@ -133,4 +147,84 @@ test("窗口销毁后不再发事件；cancel 透传到服务；服务缺失时�
 	registerPromptSuggestionIpc(broken, null);
 	await assert.rejects(broken.handlers.get("suggest:run")(createEvent().event, VALID), /not available/);
 	await assert.rejects(broken.handlers.get("suggest:cancel")(createEvent().event), /not available/);
+});
+
+/** 预测是无声功能：日志必须能区分「发起 / 完成（含 0 字）/ 中断 / 失败 / 入参被拒」。 */
+const MODEL_LABEL = `${VALID.provider}/${VALID.modelId}`;
+const linesContaining = (lines, text) => lines.filter((entry) => entry.message.includes(text));
+
+function assertNoUserContent(lines) {
+	const dumped = lines.map((entry) => entry.message).join("\n");
+	for (const { text } of CONTEXT) assert.equal(dumped.includes(text), false, `日志不得包含用户内容：${text}`);
+}
+
+test("日志：发起时记模型与上下文条数，完成时记字数与耗时且不含用户内容", async () => {
+	const h = registerWithLogs();
+	await h.run(createEvent().event, VALID);
+	const startLine = linesContaining(h.lines, "输入预测发起")[0];
+	assert.equal(startLine?.level, "debug");
+	assert.ok(startLine.message.includes(MODEL_LABEL));
+	assert.match(startLine.message, /上下文 2 条/);
+	assert.equal(linesContaining(h.lines, "已受理")[0]?.level, "debug");
+
+	h.callbacks().onDone("看看测试");
+	const doneLine = linesContaining(h.lines, "输入预测完成")[0];
+	assert.equal(doneLine?.level, "info");
+	assert.match(doneLine.message, /4 字/);
+	assert.match(doneLine.message, /\d+ms/);
+	assertNoUserContent(h.lines);
+});
+
+test("日志：模型返回空内容写明 0 字，与失败区分开", async () => {
+	const h = registerWithLogs();
+	await h.run(createEvent().event, VALID);
+	h.callbacks().onDone("");
+	const doneLine = linesContaining(h.lines, "输入预测完成")[0];
+	assert.equal(doneLine?.level, "info");
+	assert.match(doneLine.message, /0 字（模型返回空内容）/);
+});
+
+test("日志：中断与失败各有独立记录（含错误分类与原因）", async () => {
+	const h = registerWithLogs();
+	await h.run(createEvent().event, VALID);
+	h.callbacks().onAborted();
+	h.callbacks().onError("model-error", "boom");
+	assert.match(linesContaining(h.lines, "输入预测中断")[0]?.message ?? "", /被新回合\/新请求取代|用户取消/);
+	const errorLine = linesContaining(h.lines, "输入预测失败")[0];
+	assert.equal(errorLine?.level, "warn");
+	assert.match(errorLine.message, /（model-error）：boom/);
+});
+
+test("日志：入参被拒与受理失败都留痕（否则渲染层只看到 ghost 不出现）", async () => {
+	const rejected = registerWithLogs();
+	await assert.rejects(rejected.run(createEvent().event, { ...VALID, context: [] }));
+	const rejectLine = linesContaining(rejected.lines, "请求被拒绝")[0];
+	assert.equal(rejectLine?.level, "warn");
+	assert.match(rejectLine.message, /Invalid suggestion input: context/);
+
+	const unaccepted = createFakeIpc();
+	const lines = [];
+	registerPromptSuggestionIpc(
+		unaccepted,
+		{
+			enhance: async () => ({ ok: false, errorKind: "sdk-unavailable", message: "增强助手启动失败，请重试" }),
+			cancel: () => undefined,
+		},
+		{ debug: (message) => lines.push({ level: "debug", message }), info: (message) => lines.push({ level: "info", message }), warn: (message) => lines.push({ level: "warn", message }) },
+	);
+	const result = await unaccepted.handlers.get("suggest:run")(createEvent().event, VALID);
+	assert.equal(result.ok, false);
+	const line = linesContaining(lines, "输入预测未受理")[0];
+	assert.equal(line?.level, "warn");
+	assert.match(line.message, /sdk-unavailable/);
+});
+
+test("不注入 logger 时静默工作（降级装配 / 单测默认）", async () => {
+	const h = register();
+	assert.equal((await h.run(createEvent().event, VALID)).ok, true);
+	assert.doesNotThrow(() => {
+		h.callbacks().onDone("x");
+		h.callbacks().onAborted();
+		h.callbacks().onError("model-error", "boom");
+	});
 });

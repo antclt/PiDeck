@@ -19,6 +19,7 @@ import {
 	enhanceModelAtom,
 	enhanceIncludeContextAtom,
 	promptSuggestionEnabledAtom,
+	promptSuggestionModelAtom,
 	imageGenConfigAtom,
 	projectByIdAtomFamily,
 	sessionAttachmentsBySessionIdAtomFamily,
@@ -81,7 +82,8 @@ import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeAcpToolPreference, readWelcomeBa
 import { expandSessionReferences } from "../sending/outgoingExpansion";
 import { showNotice } from "../utils/notice";
 import { requireSessionCommand, toSessionRuntimeTarget } from "../utils/sessionCommands";
-import { mergeRuntimeTemplates } from "../utils/templateCatalog";
+import { collectReservedCommandNames, needsTemplateRefetch } from "../utils/reservedCommandNames";
+import { assembleTemplates, mergeRuntimeTemplates } from "../utils/templateCatalog";
 import { buildDraftResourceCommands, draftResourceCommandsForProject, selectComposerSuggestionCommands, standbyPreviewCommandsForProject, type DraftResourceCommandSnapshot, type StandbyPreviewCommandSnapshot } from "../utils/draftResourceCommands";
 import { isSessionRuntimeBusy, isUserFacingSessionStart } from "./useSessionTimelineController";
 import { truncateQuoteLabel } from "../components/session/composer/quoteChip";
@@ -657,32 +659,31 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		// 的加载拿到更大的序号，把上一个会话的模板表写进 templatesRef，随后该会话的发送会用
 		// 错项目的模板正文展开（跨会话污染）。发起顺序才代表新旧。
 		const sequence = ++templateWriteSeqRef.current;
-		let next: PromptTemplateInfo[] = [];
+		let globalTemplates: PromptTemplateInfo[] = [];
+		let projectTemplates: PromptTemplateInfo[] = [];
 		try {
 			const globalResult = await desktopApi.prompts.list();
-			next.push(
-				...globalResult.templates.map((template) => ({
-					...template,
-					description: translateBuiltinPromptDescription(template),
-					argumentHint: parseArgumentHint(template.content),
-				})),
-			);
+			globalTemplates = globalResult.templates.map((template) => ({
+				...template,
+				description: translateBuiltinPromptDescription(template),
+				argumentHint: parseArgumentHint(template.content),
+			}));
 		} catch {
 			// Project templates remain usable when the global store is unavailable.
 		}
 		if (record?.projectId) {
 			try {
 				const projectResult = await desktopApi.prompts.listByProject(record.projectId);
-				next.push(
-					...projectResult.templates.map((template) => ({
-						...template,
-						argumentHint: parseArgumentHint(template.content),
-					})),
-				);
+				projectTemplates = projectResult.templates.map((template) => ({
+					...template,
+					argumentHint: parseArgumentHint(template.content),
+				}));
 			} catch {
 				// A project does not have to provide .pi/prompts.
 			}
 		}
+		// 同名以项目为准、禁用不进表——与 pi 的 rank + 去重规则一致（见 assembleTemplates）
+		let next: PromptTemplateInfo[] = assembleTemplates({ project: projectTemplates, global: globalTemplates });
 		// 来源 B：pi 实际加载的全部模板（含 npm 包声明的 pi.prompts）。缺了它，
 		// `/parallel-review` 这类包带模板只能交给 pi 展开，模板名不进会话文件，
 		// 时间线就还原不出 chip（2026-10 现场：运行中有 chip、暂停后变全文）。
@@ -957,6 +958,13 @@ export function useSessionComposerController(options: UseSessionComposerControll
 
 	const flatFiles = useMemo(() => flattenFiles(files), [files]);
 	const mergedCommands = useMemo(() => mergeCommands(commands), [commands]);
+	/**
+	 * 后端已接管的命令名（本地展开要避让）。用 ref 让发送路径读最新值：
+	 * 命令表是异步加载的，state 在「打开会话立刻发」这一拍还是空的。
+	 */
+	const reservedCommandNames = useMemo(() => collectReservedCommandNames(commands), [commands]);
+	const reservedCommandNamesRef = useRef<ReadonlySet<string>>(reservedCommandNames);
+	reservedCommandNamesRef.current = reservedCommandNames;
 	const validCommandNames = useMemo(() => new Set([...mergedCommands.map((command) => command.name), ...templates.map((template) => template.name)]), [mergedCommands, templates]);
 	const validFilePaths = useMemo(() => new Set(flatFiles.map((file) => file.relativePath)), [flatFiles]);
 	const validSessionRefs = useMemo(() => new Set(projectSessions.map((session) => session.name ?? session.filePath)), [projectSessions]);
@@ -1109,7 +1117,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			const match = /^\/([^\s]+)/.exec(message.trim());
 			if (!match) return;
 			const name = match[1];
-			if (!name || templatesRef.current.some((template) => template.name === name)) return;
+			// 后端接管的命令（DSH host / pi 扩展 / 技能）永远不在模板表里：补拉只会白跑三趟
+			// IPC，而且它本来就不该被展开。
+			if (!needsTemplateRefetch(name, templatesRef.current, reservedCommandNamesRef.current)) return;
 			// 两条来源都在 loadTemplates 里：有 runtime 走运行时清单，草稿会话走 standby 预览。
 			// 两个都没有（无项目、池关闭）时重拉也没有意义。
 			const hasRuntime = Boolean(toSessionRuntimeTarget(sessionId, store.get(sessionRuntimeBySessionIdAtomFamily(sessionId))));
@@ -1163,6 +1173,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		sendPrompt: (input) => desktopApi.sessions.sendPrompt(input),
 		ensureSessionId,
 		getTemplates: () => templatesRef.current,
+		getReservedCommandNames: () => reservedCommandNamesRef.current,
 		ensureTemplates: ensureTemplatesForMessage,
 		prepareMessage: async (message) => {
 			// 模板表可能在 runtime 刚绑定/首次加载完成前是空的：命中未知 `/名称` 时补拉一次，
@@ -1790,12 +1801,14 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	// 目标模型优先级（resolveEnhanceTargetModel）：设置页指定的固定增强模型 >
 	// 会话记录 > 引导页点选 > 部署/主进程默认；引导页的 welcomeModel 存 localStorage，
 	// 这里不走 catalog 存在性校验——模型被删的边缘情况由主进程报 model-not-found，toast 可见。
-	const enhanceTarget = resolveEnhanceTargetModel({
-		configured: enhanceModelConfig,
+	// 增强与输入预测共用同一条优先级链，但各自的「固定模型」是独立设置项（enhanceModel /
+	// promptSuggestionModel）——预测每轮都发一次后台调用，常被单独指定成便宜的小模型。
+	const targetModelChain = {
 		recordModel: record?.model,
 		welcomeModel: (isDshBackend ? readWelcomeDshModelPreference() : readWelcomeModelPreference())?.model,
 		fallback: isDshBackend && dshDefault ? { provider: dshDefault.provider, modelId: dshDefault.model } : bootstrapDefaults?.model,
-	});
+	};
+	const enhanceTarget = resolveEnhanceTargetModel({ ...targetModelChain, configured: enhanceModelConfig });
 	const captureEnhanceRequest = useCallback((): PromptEnhanceRequest | null => {
 		if (!enhanceTarget) return null;
 		const draftSnapshot = liveDomDraftRef.current.sessionId === sessionId ? liveDomDraftRef.current.value : draft;
@@ -1824,14 +1837,17 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	});
 
 	// ===== 输入预测（回合结束后预测下一句输入，空输入框 ghost 展示）=====
-	// 与增强共用同一套目标模型解析（设置固定模型 > 会话模型 > 默认），但走独立侧车实例；
+	// 与增强共用同一条优先级链（设置固定模型 > 会话模型 > 默认），但读的是独立的
+	// promptSuggestionModel 设置，并走独立侧车实例；
 	// 回合边界取 runtime 的权威 isTurnActive（agent_end），不用 isBusy（还含 compact 等中间态）。
 	// 采纳回填与增强同一条路径（applyEnhancedText：整体替换草稿 + 光标置尾 + 聚焦）。
 	const promptSuggestionEnabled = useAtomValue(promptSuggestionEnabledAtom);
+	const promptSuggestionModelConfig = useAtomValue(promptSuggestionModelAtom);
+	const suggestionTarget = resolveEnhanceTargetModel({ ...targetModelChain, configured: promptSuggestionModelConfig });
 	const suggestion = usePromptSuggestion({
 		scopeKey: sessionId,
 		enabled: promptSuggestionEnabled,
-		target: enhanceTarget,
+		target: suggestionTarget,
 		turnRunning: isSessionTurnRunning(runtime?.state, runtime?.status),
 		// 用 hasContent 而不是 draft.length：纯空白、附件/粘贴文件也属于「有内容」，
 		// 否则预测会盖在已经放好附件的输入框上，Tab 还会把附件留下却把 ghost 当草稿采纳。

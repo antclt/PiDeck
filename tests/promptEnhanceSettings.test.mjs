@@ -1,3 +1,10 @@
+/**
+ * 提示词增强设置区（设置 → 通用）的保存语义测试。
+ *
+ * 模型策略行已抽到 FixedModelSettingRows（见 fixedModelSettingRows.test.mjs），这里只锁定
+ * 本 section 独有的「增强时携带会话上下文」开关：默认关闭、保存成功才写穿输入框状态、
+ * 失败不启用、同一帧只发一次请求。
+ */
 import assert from "node:assert/strict";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
@@ -42,6 +49,7 @@ function settingsHarness(initial = {}) {
 			"../../session/ComposerComponents": control("ModelPicker"),
 			"../../ui-shadcn/select": Object.assign({}, ...["Select", "SelectContent", "SelectGroup", "SelectItem", "SelectTrigger", "SelectValue"].map(control)),
 			"../../ui-shadcn/switch": control("Switch"),
+			"./FixedModelSettingRows": control("FixedModelSettingRows"),
 			"./SettingsStorageTab": control("SettingsSection"),
 			"./SettingRows": { ...control("SettingRow"), ...control("SettingsModelPickerControl") },
 		},
@@ -54,13 +62,19 @@ function settingsHarness(initial = {}) {
 		find,
 		patches,
 		notices,
-		model: () => values.get(modelAtom),
 		context: () => values.get(contextAtom),
 		setUpdate: (fn) => {
 			update = fn;
 		},
 	};
 }
+
+test("模型策略行交给共享组件，且明确指向增强模型字段", () => {
+	const h = settingsHarness();
+	const rows = h.find((props) => "settingKey" in props);
+	assert.equal(rows.settingKey, "enhanceModel");
+	assert.equal(typeof rows.onSaved, "function");
+});
 
 test("旧设置上下文默认关闭，开关保存成功才同步到输入框，保存提示无需重开会话", async () => {
 	const h = settingsHarness();
@@ -87,43 +101,18 @@ test("旧设置上下文默认关闭，开关保存成功才同步到输入框�
 	assert.deepEqual(h.notices, ["settings.enhance.saved"]);
 });
 
-test("固定模型保存后立即写穿输入框状态，采用磁盘返回值；恢复跟随会话会清空覆盖", async () => {
-	const h = settingsHarness({ enhanceModel: { provider: "pi-old", modelId: "old" } });
-	h.render();
-	await flush();
-	h.find((props) => props.onOpen).onOpen();
-	await flush();
-	const saved = { provider: "pi-new", modelId: "normalized" };
-	h.setUpdate(async () => ({ enhanceModel: saved }));
-	h.find((props) => props.onPick).onPick({ provider: "pi-new", id: "new" });
-	await flush();
-	assert.deepEqual(plain(h.model()), saved);
-	assert.equal(h.find((props) => props.onOpen).value, "pi-new/normalized");
-	assert.deepEqual(h.patches, [{ enhanceModel: { provider: "pi-new", modelId: "new" } }]);
-	h.setUpdate(async (patch) => patch);
-	h.find((props) => props.onValueChange).onValueChange("session");
-	await flush();
-	assert.equal(h.model(), null);
-	assert.equal(h.find((props) => props.onValueChange).value, "session");
-});
-
-test("保存失败不切换增强模型、不意外打开上下文，并保留可读提示", async () => {
-	const original = { provider: "pi-old", modelId: "old" };
-	const h = settingsHarness({ enhanceModel: original });
+test("保存失败不启用上下文，并保留可读提示", async () => {
+	const h = settingsHarness();
 	h.render();
 	await flush();
 	h.setUpdate(async () => {
 		throw new Error("disk full");
 	});
-	h.find((props) => props.onValueChange).onValueChange("session");
-	await flush();
-	assert.deepEqual(h.model(), original);
-	assert.equal(h.find((props) => props.onValueChange).value, "custom");
 	h.find((props) => props.id === "context-switch").onCheckedChange(true);
 	await flush();
 	assert.equal(h.context(), false);
 	assert.equal(h.find((props) => props.id === "context-switch").checked, false);
-	assert.deepEqual(h.notices, ["settings.enhance.saveFailed", "settings.enhance.saveFailed"]);
+	assert.deepEqual(h.notices, ["settings.enhance.saveFailed"]);
 });
 
 test("同一帧重复操作只能发一次保存，避免旧响应覆盖新配置", async () => {

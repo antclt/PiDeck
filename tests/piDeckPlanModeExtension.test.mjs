@@ -117,6 +117,10 @@ function createHarness() {
 		queueSelectResponse(value) {
 			selectResponses.push(value);
 		},
+		/** 预置历史条目：模拟从会话文件恢复（sessionManager.getEntries 的输入）。 */
+		seedEntries(entries) {
+			appendedEntries.push(...entries);
+		},
 		async runCommand(name, args) {
 			const command = commands.get(name);
 			assert.ok(command, `command ${name} not registered`);
@@ -133,6 +137,12 @@ function createHarness() {
 		},
 		async runAgentEnd(messages) {
 			return handlers.get("agent_end")({ messages }, context);
+		},
+		async runTurnEnd(message) {
+			return handlers.get("turn_end")({ message }, context);
+		},
+		async runSessionStart() {
+			return handlers.get("session_start")({}, context);
 		},
 	};
 }
@@ -302,4 +312,69 @@ test("choosing execute from the menu restores write tools and sends execution pr
 	assert.equal(tools.includes("write"), true);
 	// 执行提示词经 sendMessage 注入（followUp + triggerTurn）。
 	assert.ok(harness.sentMessages.some((m) => String(m.message?.content ?? "").includes("Execute the approved plan")));
+});
+
+// issue #393：计划待办面板没有清理出口——没走完执行流程的草案会永久挂在界面上。
+test("session_start drops a non-executing plan draft instead of restoring it", async () => {
+	const harness = createHarness();
+	// 会话文件里残留的草案：规划态产出计划后没点「开始执行」，用户切回普通模式并关标签。
+	harness.seedEntries([
+		{
+			type: "custom",
+			customType: "pi-deck-plan-mode",
+			data: {
+				enabled: true,
+				executing: false,
+				todos: [
+					{ step: 1, text: "读取现有实现", completed: false },
+					{ step: 2, text: "编写迁移脚本", completed: false },
+				],
+			},
+		},
+	]);
+
+	await harness.runSessionStart();
+
+	// 面板不再被草案撑出来。
+	assert.equal(harness.widgets.has("pi-deck-plan-todos"), false);
+	await harness.runCommand("todos", "");
+	assert.ok(harness.notifications.at(-1).message.includes("没有活跃的计划事项"));
+
+	// 落盘收敛：写回的条目必须是空待办、非执行态，否则下次重开又会被读回来。
+	const last = harness.appendedEntries.at(-1);
+	assert.equal(last.customType, "pi-deck-plan-mode");
+	// 条目在 vm 沙箱里创建，跨 realm 的数组不能用 deepEqual 比原型。
+	assert.equal(last.data.todos.length, 0);
+	assert.equal(last.data.executing, false);
+
+	// 草案状态不得被当成执行态往上下文里注入执行指令。
+	const started = await harness.runBeforeAgentStart();
+	assert.equal(started, undefined);
+});
+
+test("session_start still restores an executing plan and keeps tracking [DONE:n]", async () => {
+	const harness = createHarness();
+	harness.seedEntries([
+		{
+			type: "custom",
+			customType: "pi-deck-plan-mode",
+			data: {
+				enabled: false,
+				executing: true,
+				todos: [
+					{ step: 1, text: "读取现有实现", completed: false },
+					{ step: 2, text: "编写迁移脚本", completed: false },
+				],
+			},
+		},
+	]);
+
+	await harness.runSessionStart();
+
+	assert.equal(harness.widgets.get("pi-deck-plan-todos")?.[0], "计划进度 0/2");
+	const started = await harness.runBeforeAgentStart();
+	assert.ok(started?.message?.content?.includes("[EXECUTING PI_DECK PLAN]"));
+
+	await harness.runTurnEnd(assistantMessage("第一步完成 [DONE:1]"));
+	assert.equal(harness.widgets.get("pi-deck-plan-todos")?.[0], "计划进度 1/2");
 });

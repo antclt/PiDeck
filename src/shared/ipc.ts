@@ -291,7 +291,7 @@ export const ipcChannels = {
 	/** DSH 会话文件路径推导（渲染层右键「复制会话文件路径」；按 dshSessionId + cwd 计算 host 持久化路径）。 */
 	sessionsGetDshSessionPath: "sessions:get-dsh-session-path",
 	sessionsSearchContent: "sessions:search-content",
-	/** 会话内查找（单文件检索，命中按时间线返回）。 */
+	/** 会话内查找（入参 = SessionRecord.id：pi 走 session-index 单文件检索，DSH 走 host 历史投影；命中按时间线返回）。 */
 	sessionsSearchInSession: "sessions:search-in-session",
 	/** DSH 会话内容搜索（session.search；结果最多 20 会话，返回 sessionId + snippet）。 */
 	sessionsSearchDsh: "sessions:search-dsh",
@@ -350,6 +350,7 @@ export const ipcChannels = {
 	/** 系统级划词浮窗（全局快捷键触发）：可见性/隐藏/发送回主窗口/捕获推流。 */
 	selectionToolGetState: "selection-tool:get-state",
 	selectionToolHide: "selection-tool:hide",
+	selectionToolResize: "selection-tool:resize",
 	selectionToolInsertToMain: "selection-tool:insert-to-main",
 	selectionToolCaptured: "selection-tool:captured",
 	selectionToolStateChanged: "selection-tool:state-changed",

@@ -2,6 +2,7 @@ import { atom, createStore } from "jotai/vanilla";
 import { createTsSandbox } from "./createTsSandbox.mjs";
 
 export const BOOTSTRAP_ID = "renderer:chat-bootstrap";
+const EMPTY_RESERVED = new Set();
 export const SESSION_ID = "catalog-session";
 
 /** 显式控制异步边界，不以 sleep 猜测跨 VM promise 的完成顺序。 */
@@ -21,7 +22,7 @@ export function sessionRecord(id = SESSION_ID, overrides = {}) {
 }
 
 /** 用真实 composer/cache atoms 提升、移除会话，避免测试桩遗漏发送状态迁移。 */
-export function createSendHarness({ sessionId = BOOTSTRAP_ID, draft = "read &reference", attachments = [], quotes = {}, templates = [], beforePromotion, prepareMessage, sendPrompt, enqueue, ensureTemplates } = {}) {
+export function createSendHarness({ sessionId = BOOTSTRAP_ID, draft = "read &reference", attachments = [], quotes = {}, templates = [], beforePromotion, prepareMessage, sendPrompt, enqueue, ensureTemplates, reservedCommandNames } = {}) {
 	const store = createStore();
 	const atoms = {};
 	const errors = [];
@@ -71,6 +72,7 @@ export function createSendHarness({ sessionId = BOOTSTRAP_ID, draft = "read &ref
 		// 发送期按需读取（模板表可能晚于首次渲染就绪）；harness 传固定清单即可
 		getTemplates: () => templates,
 		ensureTemplates,
+		getReservedCommandNames: () => reservedCommandNames ?? EMPTY_RESERVED,
 		prepareMessage,
 		enqueue,
 		compact: async () => {},

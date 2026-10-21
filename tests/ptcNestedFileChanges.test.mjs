@@ -17,8 +17,19 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const { projectDshEvent } = loadTsCommonJs("src/main/dsh/dshEventProjector.ts");
 const { groupToolMessages } = loadTsCommonJs("src/renderer/src/components/app/AppUtils.ts");
-const { collectLatestTurnFileChanges } = loadTsCommonJs("src/shared/fileChanges.ts");
+const { collectRunFileChanges } = loadTsCommonJs("src/renderer/src/components/session/TimelineFormat.ts");
 
+/**
+ * 取「轮末 chip 行」实际使用的文件清单（本测试的断言必须走这条真实链路）。
+ *
+ * 不要再拿 collectLatestTurnFileChanges 测：它按「最后一个 user 消息」切轮，是已下线的
+ * 横栏时代的取数函数，与现在 chip 行使用的 collectRunFileChanges（按 run 聚合、
+ * 并合并 hiddenFileMessages）不是同一条链路——用它会把 PTC 的回归测成绿的。
+ */
+function lastRunFiles(messages) {
+	const runs = Array.from(groupToolMessages(Array.from(messages))).filter((item) => item.kind === "agent-run");
+	return runs.length > 0 ? Array.from(collectRunFileChanges(runs[runs.length - 1])) : [];
+}
 const AGENT = "dsh:session-ptc";
 
 /** 构造 SessionEvent：{ type, seq, time, data }（与 DSH 实测形状一致）。 */
@@ -107,7 +118,7 @@ test("文件汇总命中嵌套子调用：本轮 write/edit 的路径与 diff �
 		dispatchEvent(4, "edit", { file_path: "D:\\repo\\b.md", old_string: "old", new_string: "new" }),
 		event("tool/result", 5, { message: { toolCallId: "rc-1", content: [{ type: "text", text: "done" }], isError: false } }),
 	]);
-	const entries = Array.from(collectLatestTurnFileChanges(Array.from(p.messages)));
+	const entries = lastRunFiles(p.messages);
 	assert.deepEqual(
 		entries.map((entry) => entry.path),
 		["D:\\repo\\a.md", "D:\\repo\\b.md"],
@@ -119,11 +130,16 @@ test("文件汇总命中嵌套子调用：本轮 write/edit 的路径与 diff �
 	assert.equal(entries[1].content, "new");
 });
 
-test("上一轮的嵌套修改不串到本轮（以最后一个 user 消息为边界）", () => {
+test("上一轮的嵌套修改不串到本轮（两轮各自独立聚合）", () => {
 	const p = projectAll([event("user/message", 1, { content: [{ type: "text", text: "第一轮" }] }), dispatchEvent(2, "write", { file_path: "old.md", content: "old\n" }), event("user/message", 3, { content: [{ type: "text", text: "第二轮" }] }), dispatchEvent(4, "write", { file_path: "new.md", content: "new\n" })]);
-	const entries = Array.from(collectLatestTurnFileChanges(Array.from(p.messages)));
+	const runs = Array.from(groupToolMessages(Array.from(p.messages))).filter((item) => item.kind === "agent-run");
+	assert.equal(runs.length, 2, "两轮应各自成组");
 	assert.deepEqual(
-		entries.map((entry) => entry.path),
+		Array.from(collectRunFileChanges(runs[0])).map((entry) => entry.path),
+		["old.md"],
+	);
+	assert.deepEqual(
+		lastRunFiles(p.messages).map((entry) => entry.path),
 		["new.md"],
 	);
 });

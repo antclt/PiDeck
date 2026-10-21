@@ -1,7 +1,7 @@
 import { useAtomValue } from "jotai";
 import { useCallback, useEffect, useState } from "react";
 import { agentMarketSettingsAtom } from "../atoms/agent-atoms";
-import { isSelectionToolAnchorElement, normalizeSelectionText, SELECTION_TOOL_UI_SELECTOR, type SelectionAnchorRect } from "../utils/selectionToolPolicy";
+import { isSelectionToolAnchorElement, isSelectionToolIgnoredMouseUpTarget, normalizeSelectionText, SELECTION_TOOL_UI_SELECTOR, type SelectionAnchorRect } from "../utils/selectionToolPolicy";
 
 /** 选区快照：文本在展示那刻定格（下一次 mousedown 会清掉浏览器选区），anchorRect 是 fixed 定位用的视口坐标。 */
 export type SelectionToolSnapshot = { text: string; anchorRect: SelectionAnchorRect };
@@ -79,11 +79,21 @@ export function useSelectionTool(): SelectionToolController {
 		};
 
 		const onMouseUp = (event: MouseEvent) => {
-			// 只响应主键（右键菜单/中键滚动不应触发展示）；工具 UI 上的点击不重算快照，
-			// 否则点击浮出按钮会走一遍「空选区」判定把快照清掉。
+			// 只响应主键（右键菜单/中键滚动不应触发展示）；工具 UI / 菜单 / 引用浮层上的点击
+			// 不重算快照：复制菜单项、翻译/引用按钮都不是新的划选手势，否则复制完会重新弹出翻译按钮。
 			if (event.button !== 0) return;
-			if (event.target instanceof Element && event.target.closest(SELECTION_TOOL_UI_SELECTOR)) return;
+			if (isSelectionToolIgnoredMouseUpTarget(event.target instanceof Element ? event.target : null)) return;
 			evaluate();
+		};
+		const onPointerDown = (event: PointerEvent) => {
+			// 新的按压 = 用户开始别的交互（含右键/点复制菜单）：先收起旧快照。
+			// 浮出按钮自身必须放行（mousedown preventDefault，否则点击按钮会先清选区）。
+			if (event.target instanceof Element && event.target.closest(SELECTION_TOOL_UI_SELECTOR)) return;
+			dismiss();
+		};
+		const onCopy = () => {
+			// 键盘 Ctrl/Cmd+C 不会触发 pointerdown：复制是「复制」而不是「划词」，同样收起浮钮。
+			dismiss();
 		};
 		const onKeyUp = (event: KeyboardEvent) => {
 			if (event.key === "Escape") {
@@ -101,6 +111,9 @@ export function useSelectionTool(): SelectionToolController {
 		const onViewportChange = () => dismiss();
 
 		document.addEventListener("mouseup", onMouseUp);
+		// capture：Radix 菜单项可能在自己的 pointerdown 里做处理，确保复制/菜单交互一定先收起快照。
+		document.addEventListener("pointerdown", onPointerDown, true);
+		document.addEventListener("copy", onCopy);
 		document.addEventListener("keyup", onKeyUp);
 		document.addEventListener("selectionchange", onSelectionChange);
 		// scroll 用捕获：消息列/抽屉等内层滚动容器也要收起。
@@ -109,6 +122,8 @@ export function useSelectionTool(): SelectionToolController {
 
 		return () => {
 			document.removeEventListener("mouseup", onMouseUp);
+			document.removeEventListener("pointerdown", onPointerDown, true);
+			document.removeEventListener("copy", onCopy);
 			document.removeEventListener("keyup", onKeyUp);
 			document.removeEventListener("selectionchange", onSelectionChange);
 			document.removeEventListener("scroll", onViewportChange, true);

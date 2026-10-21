@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, safeStorage, screen, session, shell, Tray, Notification } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, safeStorage, screen, session, shell, Tray, Notification } from "electron";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
@@ -26,6 +26,7 @@ import { registerAgentInvokeIpc } from "./ipc/agentInvokeIpc";
 import { registerSelectionToolIpc } from "./ipc/selectionToolIpc";
 import { SelectionToolService } from "./selection/SelectionToolService";
 import { SelectionToolWindow } from "./selection/SelectionToolWindow";
+import { ClipboardSelectionWatcher } from "./selection/clipboardSelectionWatcher";
 import { resolveShortcutBindings } from "../shared/shortcuts";
 import { registerFeishuIpc } from "./ipc/feishuIpc";
 import { registerWeChatIpc } from "./ipc/wechatIpc";
@@ -759,30 +760,76 @@ let agentInvokeCompletionService: EnhancePromptService | null = null;
 let selectionToolWindow: SelectionToolWindow | null = null;
 /** 系统级划词服务：取词、浮窗展示与全局快捷键注册的唯一归属地。 */
 let selectionToolService: SelectionToolService | null = null;
+/** 复制即触发监听：系统级划词开启时轮询外部剪贴板变更（不依赖快捷键）。 */
+let selectionClipboardWatcher: ClipboardSelectionWatcher | null = null;
+
+/**
+ * 最近一次系统级划词快捷键冲突（accelerator）与已提示值。
+ * 注册失败常见于 accelerator 被其他应用或另一个 PiDeck 实例占用；只写日志会让用户
+ * 以为「系统级划词只在本应用生效」，所以失败要弹一次可执行提示（设置页另有常驻警告）。
+ * 窗口尚未创建时保持未提示状态，由后续 focus/did-finish-load 重试补发。
+ */
+let selectionShortcutConflict: string | null = null;
+let selectionShortcutConflictNotified: string | null = null;
+
+function notifySelectionShortcutConflict(accelerator: string): void {
+	selectionShortcutConflict = accelerator;
+	if (selectionShortcutConflictNotified === accelerator) return;
+	if (!mainWindow || mainWindow.isDestroyed()) return;
+	emitAgentsNotice({
+		message: `System selection shortcut ${accelerator} is unavailable`,
+		i18nKey: "selectionTool.shortcutConflict",
+		i18nParams: { accelerator },
+		kind: "warning",
+	});
+	selectionShortcutConflictNotified = accelerator;
+}
+
+function clearSelectionShortcutConflict(): void {
+	selectionShortcutConflict = null;
+	selectionShortcutConflictNotified = null;
+}
+
+/** 窗口就绪/重新聚焦后补发上次未送达的冲突提示（首次注册发生在建窗之前）。 */
+function flushSelectionShortcutConflictNotice(): void {
+	if (selectionShortcutConflict) notifySelectionShortcutConflict(selectionShortcutConflict);
+}
 
 /**
  * 同步系统级划词的全局快捷键（开关、键位、市场设置任一变化都调用）。
  *
  * globalShortcut 是应用级独占资源：关闭开关必须立刻注销，改键必须先释放旧键再注册
- * （Electron 对同一 accelerator 重复注册返回 false）。注册失败只记日志——常见原因是
- * 该组合被其他应用占用，此时设置页仍显示键位、用户可改键或关闭开关。
+ * （Electron 对同一 accelerator 重复注册返回 false）。注册失败时登记冲突并提示用户——
+ * 常见原因是该组合被其他应用/另一个 PiDeck 实例占用，用户可改键或关闭占用方。
  */
 function syncSelectionToolShortcut(): void {
 	const service = selectionToolService;
 	if (!service) return;
 	const systemEnabled = agentProfileStore?.getSnapshot().settings.systemSelectionEnabled === true;
+	// 复制即触发与快捷键解耦：快捷键被其它实例占用时，复制文本仍然可以自动弹窗。
+	selectionClipboardWatcher?.setEnabled(systemEnabled);
 	if (!systemEnabled) {
 		service.unregisterShortcut();
+		clearSelectionShortcutConflict();
 		return;
 	}
 	const accelerator = resolveShortcutBindings(settingsStore.get().shortcuts ?? {}, process.platform).openSelectionTool;
 	if (!accelerator) {
 		service.unregisterShortcut();
+		clearSelectionShortcutConflict();
 		return;
 	}
-	if (service.getRegisteredShortcut() === accelerator) return;
+	if (service.getRegisteredShortcut() === accelerator) {
+		clearSelectionShortcutConflict();
+		return;
+	}
 	const registered = service.setShortcut(accelerator);
-	if (!registered) void appLogger.warn("selection-tool", "Global shortcut registration failed", { accelerator });
+	if (!registered) {
+		void appLogger.warn("selection-tool", "Global shortcut registration failed", { accelerator });
+		notifySelectionShortcutConflict(accelerator);
+		return;
+	}
+	clearSelectionShortcutConflict();
 }
 /** 粘贴文件启动清理（registerIpc 阶段赋值；whenReady 后 fire-and-forget 执行） */
 let cleanupPasteFiles: (() => Promise<number>) | undefined;
@@ -2458,6 +2505,10 @@ async function createWindow() {
 		});
 		// 恢复用户设置的窗口缩放；在 did-finish-load 后应用，避免早期设置被覆盖。
 		mainWindow?.webContents.setZoomFactor(settingsStore.get().zoomFactor);
+		// 系统级划词快捷键在建窗前注册失败（常见于另一个 PiDeck 实例占用）时重试并补发提示；
+		// renderer 若尚未订阅 toast，后续 focus 会再兜底一次（通知去重）。
+		syncSelectionToolShortcut();
+		flushSelectionShortcutConflictNotice();
 		// 加载期排队的通知跳转目标补发一次（renderer 挂载后还会主动拉取，幂等兜底）
 		flushPendingFocusTargetOnLoad();
 		// —— 数据环境通知（规格 §6：首帧后与渲染层对齐目录归属）——
@@ -3222,7 +3273,12 @@ function registerIpc() {
 	// 提示词增强（输入框增强按钮）：只做校验/适配，进程与协议在 EnhancePromptService
 	registerEnhanceIpc(ipcMain, enhancePromptService);
 	// 输入预测（回合结束预测下一句输入）：同一侧车协议、独立实例；模型指令由主进程注入。
-	registerPromptSuggestionIpc(ipcMain, promptSuggestionService);
+	// 预测不弹提示，全部结论都靠 scope=suggest 的应用日志（设置 → 日志）可查。
+	registerPromptSuggestionIpc(ipcMain, promptSuggestionService, {
+		debug: (message) => void appLogger?.debug("suggest", message),
+		info: (message) => void appLogger?.info("suggest", message),
+		warn: (message) => void appLogger?.warn("suggest", message),
+	});
 	// 智能体：配置 CRUD + 一次性调用（划词工具）。store 在 whenReady 里已 load，
 	// 这里只按域注册边界 handler；直接调用走独立侧车实例（见 agentInvokeCompletionService）。
 	if (agentProfileStore) {
@@ -4091,6 +4147,9 @@ function registerIpc() {
 				return dshAgentManager.resolveSessionFilePath(project.path, entry.dshSessionId);
 			},
 			searchDshSessions: (query) => dshHost.searchSessions(query),
+			// 会话内查找（Ctrl/Cmd+Shift+F）的 DSH 分支：DSH 会话没有 pi JSONL，
+			// 由 DshAgentManager 把 host 历史投影成消息后做词元匹配（与 pi 的 Go sidecar 同语义）。
+			searchDshSessionMessages: (dshSessionId, query) => dshAgentManager.searchSessionMessages(dshSessionId, query),
 			createDshGoal: (agentId, objective, maxGoalRounds) => dshAgentManager.createGoal(agentId, objective, maxGoalRounds),
 			runDshGoalAction: (agentId, action) => dshAgentManager.goalAction(agentId, action),
 			cancelDshQueuedMessage: (agentId, itemId) => dshAgentManager.cancelQueuedMessage(agentId, itemId),
@@ -6089,13 +6148,34 @@ app
 				warn: (scope, message, detail) => void appLogger.warn(scope, message, detail),
 				error: (scope, message, detail) => void appLogger.error(scope, message, detail),
 			},
+			suppressClipboardWatcher: (durationMs) => selectionClipboardWatcher?.suppressFor(durationMs),
+		});
+		// 复制即触发：外部应用复制文字 → 光标附近自动弹翻译浮窗（Magpie 式交互）。
+		// 自己的窗口有焦点时不触发：应用内复制由应用内划词处理，浮窗自己的复制也不会再弹一个。
+		selectionClipboardWatcher = new ClipboardSelectionWatcher({
+			readText: () => clipboard.readText(),
+			isOwnWindowFocused: () => BrowserWindow.getAllWindows().some((win) => !win.isDestroyed() && win.isFocused()),
+			onCaptured: (text) => {
+				void selectionToolService?.showText(text);
+			},
+			logger: { warn: (message, detail) => void appLogger.warn("selection-tool", message, detail) },
 		});
 		// 预热放在 registerIpc 之后（见下方 assemble 段）：浮窗加载即会 settings.get / agentProfiles.getSnapshot，
 		// 提前 warmUp 会让首帧拿到「服务未就绪」的拒绝（只是闪一下默认主题，但没必要）。
-		quitCleanup.register("selection-tool", () => selectionToolService?.dispose());
+		quitCleanup.register("selection-tool", () => {
+			selectionClipboardWatcher?.dispose();
+			selectionClipboardWatcher = null;
+			selectionToolService?.dispose();
+		});
 		// 市场设置的「系统级划词」开关保存后即时生效（不必重启应用）。
 		agentProfileStore.onChanged(() => syncSelectionToolShortcut());
 		syncSelectionToolShortcut();
+		// 同一台机器可能同时跑 dev 与安装版：后启动的实例会因 globalShortcut 被前者占用而注册失败。
+		// 用户切回窗口/关掉另一个实例时重试一次，不必重启；仍失败则补发一次可执行提示。
+		app.on("browser-window-focus", () => {
+			syncSelectionToolShortcut();
+			flushSelectionShortcutConflictNotice();
+		});
 		// #354：身份归并会把被吸收的历史会话 ID 从 catalog 移除，而侧栏置顶按稳定 ID 存在
 		// settings.json 里，不迁移就是死链（用户看到置顶丢失）。必须在本行完成——它早于
 		// createWindow，渲染层首次 settings.get 拿到的就是迁移后的值。

@@ -99,6 +99,9 @@ function createSendHarness(initial = {}) {
 		sessionMessagesCacheAtom: {},
 		// dev 新增：会话重载态（useSessionSend 的 reload 分支读取；键为 sessionId）。
 		sessionReloadingByIdAtom: {},
+		// 拒绝分支要撤掉乐观气泡：调用模块级纯函数 removePendingUserMessages。
+		// 缺它是硬错（TypeError 被外层 catch 吞成 unknown），必须补真实实现。
+		removePendingUserMessages: (messages, pendingRequestId) => messages.filter((message) => !(message.id === pendingRequestId && message.meta?.pendingUserMessage === true)),
 	};
 	const state = new Map([
 		[atoms.sessionDraftByIdAtom, { ...(initial.drafts ?? {}) }],
@@ -144,11 +147,13 @@ function createSendHarness(initial = {}) {
 			cache[input.sessionId] = { messages: input.messages, source: input.source };
 			state.set(atoms.sessionMessagesCacheAtom, cache);
 		} else if (atom === atoms.setSessionSendStateAtom) {
-			const next = { ...state.get("sendStates") };
+			// 只认 sessionSendStateByIdAtom 一份真源：dev 的 isCurrentRequest 会回读它比对 requestId，
+			// 测试里若另有 "sendStates" 副本，两边就会分叉（曾导致 rejected 被误判成 unknown）。
+			const next = { ...state.get(atoms.sessionSendStateByIdAtom) };
 			if (input.state.status === "idle") delete next[input.sessionId];
 			else next[input.sessionId] = input.state;
-			state.set("sendStates", next);
 			state.set(atoms.sessionSendStateByIdAtom, next);
+			state.set("sendStates", next);
 		}
 	};
 	const module = compile("src/renderer/src/hooks/useSessionSend.ts", {
@@ -219,18 +224,24 @@ test("the real send state machine snapshots multiline atom text", async () => {
 test("the real send state machine preserves input typed during a rejected delivery", async () => {
 	const harness = createSendHarness({ drafts: { "session-a": "first\nsecond" } });
 	const deferred = createDeferred();
+	// dev 起首次发送在 ensureSessionId 之前就发「activating」并就地清空草稿
+	// （publishOptimisticSubmission → clearComposerSnapshot）。所以「发送期间用户继续输入」
+	// 必须发生在 in-flight 窗口内：在 sendPrompt 里写入，才与真实时序一致。
 	const send = harness.send({
 		sessionId: "session-a",
 		getTemplates: () => [],
 		compact: async () => undefined,
-		sendPrompt: async () => deferred.promise,
+		sendPrompt: async () => {
+			harness.state.set(harness.atoms.sessionDraftByIdAtom, { "session-a": "new\ninput" });
+			return deferred.promise;
+		},
 	});
 	const pending = send();
-	harness.state.set(harness.atoms.sessionDraftByIdAtom, { "session-a": "new\ninput" });
+	await Promise.resolve();
 	deferred.resolve({ accepted: false, delivery: "rejected", error: "rejected" });
 	await pending;
 	assert.equal(harness.state.get(harness.atoms.sessionDraftByIdAtom)["session-a"], "first\nsecond\n\nnew\ninput");
-	assert.equal(harness.state.get("sendStates")["session-a"].status, "error");
+	assert.equal(harness.state.get(harness.atoms.sessionSendStateByIdAtom)["session-a"].status, "error");
 });
 
 test("the real send state machine handles pure images, double clicks, and unknown delivery", async () => {

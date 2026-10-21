@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
@@ -8,6 +9,7 @@ const {
 	SELECTION_TOOL_MIN_CHARS,
 	SELECTION_TOOL_MAX_CHARS,
 	SELECTION_TOOL_UI_SELECTOR,
+	SELECTION_TOOL_IGNORED_MOUSEUP_SELECTOR,
 	SELECTION_TOOL_EDITABLE_SELECTOR,
 	SELECTION_INLINE_WIDTH,
 	SELECTION_INLINE_MIN_WIDTH,
@@ -16,6 +18,7 @@ const {
 	SELECTION_INLINE_ACTION_LABEL_KEYS,
 	normalizeSelectionText,
 	isSelectionToolAnchorElement,
+	isSelectionToolIgnoredMouseUpTarget,
 	clampFloatingPosition,
 	resolveSelectionInlineWidth,
 	toSelectionAnchorRect,
@@ -153,6 +156,34 @@ test("every invoke action has a selection-tool toolbar label key", () => {
 	assert.deepEqual(Object.keys(SELECTION_INLINE_ACTION_LABEL_KEYS).sort(), ["chat", "translate"]);
 	assert.equal(SELECTION_INLINE_ACTION_LABEL_KEYS.translate, "selectionTool.translate");
 	assert.equal(SELECTION_INLINE_ACTION_LABEL_KEYS.chat, "selectionTool.ask");
+});
+
+test("copy/menu interactions do not re-open the floating translate button", () => {
+	// 用户反馈：选中文字后点右键「复制」，已有 toast，但又冒出单独的翻译按钮。
+	// 根因是复制菜单项的 mouseup 被当成新的划选手势；这些交互面必须由策略层统一排除。
+	const selector = SELECTION_TOOL_IGNORED_MOUSEUP_SELECTOR;
+	for (const marker of ["data-selection-tool-ui", "data-radix-popper-content-wrapper", '[role="menu"]', "data-quote-toolbar", "button"]) {
+		assert.ok(selector.includes(marker), `交互面选择器漏了 ${marker}`);
+	}
+	const fakeTarget = (tokens) => ({ closest: (candidate) => (tokens.some((token) => candidate.includes(token)) ? {} : null) });
+	assert.equal(isSelectionToolIgnoredMouseUpTarget(null), false);
+	assert.equal(isSelectionToolIgnoredMouseUpTarget(fakeTarget(["data-selection-tool-ui"])), true);
+	assert.equal(isSelectionToolIgnoredMouseUpTarget(fakeTarget(["data-radix-popper-content-wrapper"])), true);
+	assert.equal(isSelectionToolIgnoredMouseUpTarget(fakeTarget(['[role="menu"]'])), true);
+	assert.equal(isSelectionToolIgnoredMouseUpTarget(fakeTarget(["data-quote-toolbar"])), true);
+	assert.equal(isSelectionToolIgnoredMouseUpTarget(fakeTarget(["button"])), true);
+	assert.equal(isSelectionToolIgnoredMouseUpTarget(fakeTarget(["message-body"])), false);
+});
+
+test("selection hook dismisses the snapshot on outside pointerdown and native copy", () => {
+	const hook = readFileSync("src/renderer/src/hooks/useSelectionTool.ts", "utf8");
+	assert.match(hook, /isSelectionToolIgnoredMouseUpTarget/);
+	assert.match(hook, /document\.addEventListener\("pointerdown"/);
+	assert.match(hook, /document\.addEventListener\("copy"/);
+	// 浮出按钮自身必须放行 pointerdown，否则点按钮时先清选区
+	assert.match(hook, /closest\(SELECTION_TOOL_UI_SELECTOR\)\) return;\s*\n\s*dismiss\(\);/);
+	assert.match(hook, /document\.removeEventListener\("pointerdown"/);
+	assert.match(hook, /document\.removeEventListener\("copy"/);
 });
 
 test("every translate target has a pre-added i18n label key", () => {

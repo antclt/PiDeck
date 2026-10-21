@@ -6,8 +6,27 @@
  * 浮窗是独立 BrowserWindow，使用同一份 preload（desktopApi）。
  */
 
-/** 浮窗可见性状态（主进程 → 渲染层）。 */
-export type SelectionToolWindowState = { visible: boolean };
+/** 浮窗尺寸（主进程建窗与渲染层折叠/展开共用；避免两处魔法数字漂移）。 */
+export const SELECTION_TOOL_WINDOW_WIDTH = 440;
+/** 折叠态：只露出顶部操作栏，Magpie 式浮条。 */
+export const SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT = 46;
+/** 展开态：操作栏 + 原文 + 结果面板。 */
+export const SELECTION_TOOL_WINDOW_EXPANDED_HEIGHT = 280;
+
+/** 浮窗渲染层请求调整窗口尺寸（折叠条 ↔ 结果面板）。 */
+export type SelectionToolResizeInput = { width: number; height: number };
+
+/** 浮窗可见性 + 全局快捷键注册状态（主进程 → 渲染层）。 */
+export type SelectionToolWindowState = {
+	visible: boolean;
+	/**
+	 * 系统级快捷键当前是否注册成功。undefined = 旧窗口状态/未装配服务（渲染层按「未知」处理）。
+	 * 失败常见于 accelerator 被其他应用或另一个 PiDeck 实例占用。
+	 */
+	shortcutRegistered?: boolean;
+	/** 当前已注册的 accelerator；null = 未注册。 */
+	shortcut?: string | null;
+};
 
 /** 主进程捕获到选区后推给浮窗的载荷；text 为空时浮窗显示输入框让用户手动输入。 */
 export type SelectionToolShowPayload = {

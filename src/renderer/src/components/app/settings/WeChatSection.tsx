@@ -25,6 +25,7 @@ import { dshUiVisibilityFor } from "../../../../../shared/types/dshRuntime";
 import { dshRuntimeStatusAtom } from "../../../atoms/dsh-atoms";
 import { formatI18nDateTime, t, type TranslationKey } from "../../../i18n";
 import { desktopApi } from "../../../desktopApi";
+import { useFavoriteModels } from "../../../hooks/useFavoriteModels";
 import { useQrDataUrl } from "./useQrDataUrl";
 
 /**
@@ -158,6 +159,15 @@ export function WeChatSection() {
 	useEffect(() => {
 		void loadModels();
 	}, [loadModels]);
+
+	// 收藏与输入框模型选择器同源（设置页各选择器都打开前重读，避免缓存不一致）
+	const { favoriteModels, refreshFavoriteModels, toggleFavorite } = useFavoriteModels();
+
+	const openPicker = useCallback(async () => {
+		await loadModels();
+		await refreshFavoriteModels();
+		setPickerOpen(true);
+	}, [loadModels, refreshFavoriteModels]);
 
 	useEffect(() => {
 		void loadSnapshot();
@@ -468,7 +478,7 @@ export function WeChatSection() {
 				<div className="flex flex-col gap-2">
 					<div className="flex items-center justify-between gap-2">
 						<span className="text-foreground text-xs font-medium">{t("config.wechat.modelChain")}</span>
-						<Button size="sm" variant="secondary" disabled={busy} onClick={() => setPickerOpen(true)}>
+						<Button size="sm" variant="secondary" disabled={busy} onClick={() => void openPicker()}>
 							<Plus className="mr-1 h-3.5 w-3.5" />
 							{t("config.wechat.modelChainAdd")}
 						</Button>
@@ -555,8 +565,8 @@ export function WeChatSection() {
 					loading={models.length === 0 && !modelsRefreshing}
 					refreshing={modelsRefreshing}
 					onRefresh={() => void loadModels(true)}
-					favoriteModels={[]}
-					onToggleFavorite={() => undefined}
+					favoriteModels={favoriteModels}
+					onToggleFavorite={toggleFavorite}
 					expandAllProviders
 					onPick={(model) => {
 						setPickerOpen(false);

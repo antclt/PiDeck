@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
@@ -101,4 +102,43 @@ test("trimToOldestTurnStart：只在 hasMore 时把页首裁到完整轮起点",
 	assert.equal(plan.trimToOldestTurnStart(entries, false).length, 4, "已到会话开头（hasMore=false）时不裁剪，否则前言会被吃掉");
 	assert.equal(plan.trimToOldestTurnStart([{ event: { type: "user/message", seq: 1 } }], true).length, 1, "老日志没有 turn/start 时保持 host 切点");
 	assert.deepEqual(seqs(plan.trimToOldestTurnStart(entries.slice(2), true)), [3, 4], "页首本身就是 turn/start 时不动（index=0）");
+});
+
+test("resolveDshHistoryWindow：hasMore 时用窗口最旧事件 seq 做续页游标，否则不开放补页", () => {
+	// 事件可能乱序：取最小 seq，而不是数组第一个
+	const entries = [{ event: { type: "assistant/message", seq: 12 } }, { event: { type: "turn/start", seq: 7 } }, { event: { type: "user/message", seq: 9 } }];
+	assert.deepEqual({ ...plan.resolveDshHistoryWindow(entries, true) }, { historyHasOlder: true, historyBeforeSeq: 7 });
+	// 已含会话开头：没有更早历史，不开放补页（否则游标原地打转）
+	assert.deepEqual({ ...plan.resolveDshHistoryWindow(entries, false) }, { historyHasOlder: false });
+	// 没有任何可解析 seq：无法定位边界，宁可不补页
+	assert.deepEqual({ ...plan.resolveDshHistoryWindow([{ event: { type: "x", seq: undefined } }], true) }, { historyHasOlder: false });
+	assert.deepEqual({ ...plan.resolveDshHistoryWindow([], true) }, { historyHasOlder: false });
+});
+
+test("dshRuntimeWindowFields：截断窗口用「有更早历史 = 1」标记 + seq 游标，卡片数恒 0", () => {
+	// 有更早历史：windowStart 标记 1，totalLength 同步 +1（len − totalLength + windowStart = 0）
+	const truncated = plan.dshRuntimeWindowFields({ messageCount: 173, historyHasOlder: true, historyBeforeSeq: 7 });
+	assert.equal(truncated.totalLength, 174);
+	assert.equal(truncated.windowStart, 1);
+	assert.equal(truncated.windowStartFilePos, 7);
+	assert.equal(truncated.totalLength - truncated.windowStart, 173, "卡片数推导必须为 0（否则增量合并偏移会错位）");
+	// 已含会话开头：不开放补页，不带任何窗口字段（全窗口语义）
+	assert.deepEqual({ ...plan.dshRuntimeWindowFields({ messageCount: 12, historyHasOlder: false, historyBeforeSeq: 7 }) }, { totalLength: 12 });
+	// 有更早历史但拿不到游标：不能补页（宁可不给入口，也不让游标原地打转）
+	assert.deepEqual({ ...plan.dshRuntimeWindowFields({ messageCount: 12, historyHasOlder: true, historyBeforeSeq: undefined }) }, { totalLength: 12 });
+});
+
+test("接线：attach 截断信息进运行时窗口协议（main），渲染层用同一游标补页", () => {
+	const read = (file) => readFileSync(file, "utf8");
+	const manager = read("src/main/dsh/DshAgentManager.ts");
+	// 四个 attach 入口（create/restart/崩溃恢复/fork）都要记录窗口边界
+	const recorded = manager.match(/this\.recordDshHistoryWindow\(/g) ?? [];
+	assert.equal(recorded.length, 4, `create/restart/崩溃恢复/fork 四个 attach 入口都要记录窗口边界，实际 ${recorded.length}`);
+	assert.match(manager, /private recordDshHistoryWindow\(/);
+	assert.match(manager, /getMessageWindow\(agentId: string\)/);
+	assert.match(manager, /dshRuntimeWindowFields\(\{\s*messageCount: runtime\.messages\.length/);
+	// 渲染层：windowStart 决定「还有更早历史」，windowStartFilePos 作为首次补页游标
+	const controller = read("src/renderer/src/hooks/useSessionTimelineController.ts");
+	assert.match(controller, /cachedEntry\.windowStart\s*\?\?\s*0\)\s*>\s*0/);
+	assert.match(controller, /typeof cachedEntry\?\.windowStartFilePos === "number" \? cachedEntry\.windowStartFilePos : undefined/);
 });

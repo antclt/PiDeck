@@ -153,7 +153,7 @@ export const FileTree = memo(function FileTree(props: {
 				indent={depth * CHANGE_TREE_INDENT_PX}
 				onOpen={() =>
 					props.onOpenWorkspaceFileDiff(
-						// Changes 组合并了 workingTree + untracked + index，但 groupType 写死 workingTree；
+						// Changes 组只含工作区侧资源（workingTree + untracked，见 collectUnstagedResources）：
 						// 未跟踪文件按实际状态传 untracked，否则服务端在 workingTree 组找不到而打不开
 						props.groupType === "workingTree" && r.status === GitStatus.UNTRACKED ? "untracked" : props.groupType,
 						r.target,
@@ -170,6 +170,7 @@ export const FileTree = memo(function FileTree(props: {
 	 * 目录级操作只作用于传入的资源（树形视图传整棵子树），不影响其他目录。
 	 */
 	const renderDirHeader = (dir: string, label: string, dirResources: GitResource[], depth: number) => {
+		// 已暂存文件在 Changes 组不再提供目录级暂存（VS Code 语义）：目录按钮与行内按钮同一判据。
 		const stageable = dirResources.filter((resource) => !props.stagedPaths?.has(resource.path));
 		const discardable = stageable
 			.filter((resource) => resource.status === GitStatus.UNTRACKED || props.groupType === "workingTree")

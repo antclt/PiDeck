@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // table.go 的镜像语义测试：这里钉住的是"与 TS parseIndexLine 逐字段一致"的细节，
@@ -357,5 +358,78 @@ func TestTableCacheEvictsLeastRecentlyUsed(t *testing.T) {
 	_, _, evicted := cache.statsSnapshot()
 	if evicted == 0 {
 		t.Fatal("应记录淘汰次数")
+	}
+}
+
+// preview：用户消息首段文本在建索引时带走（导轨标题不靠回读正文）。
+func TestParseIndexEntryPreview(t *testing.T) {
+	cases := []struct {
+		name     string
+		line     string
+		expected string
+	}{
+		{"字符串 content", `{"id":"u1","type":"message","message":{"role":"user","content":"你好  世界"}}`, "你好 世界"},
+		{"内容块数组取首段文本", `{"id":"u2","type":"message","message":{"role":"user","content":[{"type":"image"},{"type":"text","text":"第一条"},{"type":"text","text":"第二条"}]}}`, "第一条"},
+		{"空白压成单空格并去首尾", `{"id":"u3","type":"message","message":{"role":"user","content":"  第一行\n\n  第二行  "}}`, "第一行 第二行"},
+	}
+	for _, testCase := range cases {
+		entry := mustParse(t, testCase.line)
+		if entry.Preview == nil {
+			t.Fatalf("%s：应产出 preview", testCase.name)
+		}
+		if *entry.Preview != testCase.expected {
+			t.Fatalf("%s：preview=%q，期望 %q", testCase.name, *entry.Preview, testCase.expected)
+		}
+	}
+}
+
+func TestParseIndexEntryPreviewScope(t *testing.T) {
+	// 助手/工具消息不产 preview（正文可能几十 KB，导轨用不到）。
+	assistant := mustParse(t, `{"id":"a1","type":"message","message":{"role":"assistant","content":"回答正文"}}`)
+	if assistant.Preview != nil {
+		t.Fatalf("assistant 不应有 preview: %q", *assistant.Preview)
+	}
+	// 空文本与纯图片不产 preview（避免导轨出现空标题）。
+	empty := mustParse(t, `{"id":"u1","type":"message","message":{"role":"user","content":"   "}}`)
+	if empty.Preview != nil {
+		t.Fatalf("空白 content 不应有 preview: %q", *empty.Preview)
+	}
+	imageOnly := mustParse(t, `{"id":"u2","type":"message","message":{"role":"user","content":[{"type":"image"}]}}`)
+	if imageOnly.Preview != nil {
+		t.Fatalf("纯图片不应有 preview: %q", *imageOnly.Preview)
+	}
+}
+
+func TestMessagePreviewTextTruncatesByRune(t *testing.T) {
+	// 按完整码点截断：emoji 不能被切成半个代理对（Go 侧按 rune，等价于 TS 的码点切片）。
+	message := jsonObject{"content": json.RawMessage(`"` + strings.Repeat("😀", 200) + `"`)}
+	preview, ok := messagePreviewText(message)
+	if !ok {
+		t.Fatal("应产出 preview")
+	}
+	if runes := []rune(preview); len(runes) != previewMaxChars {
+		t.Fatalf("截断后应为 %d 个码点，实际 %d", previewMaxChars, len(runes))
+	}
+	if !utf8.ValidString(preview) {
+		t.Fatal("截断不能产生非法 UTF-8（半个 emoji）")
+	}
+}
+
+func TestPreviewSkipsLeadingRefBlocks(t *testing.T) {
+	// 开头的注入引用块必须剥掉：否则先按 120 字截断会把 <quoted_context ...> 切半，
+	// 导轨卡片显示半截 XML（真实数据里很常见：用户引用上下文再提问）。
+	entry := mustParse(t, `{"id":"u1","type":"message","message":{"role":"user","content":[{"type":"text","text":"<quoted_context label=\"模型：打开远端项目\" message_id=\"db59\">\n引用正文\n</quoted_context>\n真正的问题在这里"}]}}`)
+	if entry.Preview == nil || *entry.Preview != "真正的问题在这里" {
+		t.Fatalf("应剥掉引用块只留提问，实际 %v", entry.Preview)
+	}
+	// 多个引用块叠加也要剥干净。
+	stacked := mustParse(t, `{"id":"u2","type":"message","message":{"role":"user","content":"<skill name=\"a\">\n用法\n</skill>\n<referenced_session name=\"b\">\n内容\n</referenced_session>\n最终提问"}}`)
+	if stacked.Preview == nil || *stacked.Preview != "最终提问" {
+		t.Fatalf("叠加引用块应全部剥掉，实际 %v", stacked.Preview)
+	}
+	// 未闭合的引用块不产预览（宁缺勿脏）。
+	broken := mustParse(t, `{"id":"u3","type":"message","message":{"role":"user","content":"<quoted_context label=\"x\" message_id=\"y\">\n未闭合"}}`)
+	if broken.Preview != nil {
+		t.Fatalf("未闭合引用块不应有 preview: %q", *broken.Preview)
 	}
 }
