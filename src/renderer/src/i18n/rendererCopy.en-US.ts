@@ -4082,6 +4082,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"outline.count": "{count} items",
 	"outline.drag": "Drag to reposition",
 	"outline.showAll": "Show all {count}",
+	"outline.turnFallback": "Turn {index}",
 	"outline.title": "Conversation Outline",
 	"outline.trigger": "Conversation outline · {count}",
 	"prompt.closeHint": "Esc Close",

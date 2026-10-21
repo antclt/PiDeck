@@ -743,8 +743,6 @@ export function createPreviewApi(): PiDesktopApi {
 			prepareCatalogResend: async () => ({ ok: true as const, value: { text: "" } }),
 			readProcessEvents: async () => ({ events: [], version: "", coverage: { fromStart: true, chainComplete: true, readComplete: true, eventsTrimmed: false, reason: "unsupported" } }),
 			readOutline: async () => ({ entries: [], total: 0, truncated: false }),
-			readOutlineTitle: async () => undefined,
-			readDshSystemPrompt: async () => undefined,
 			readMessageFullText: async () => ({ text: "" }),
 			readReferenceMessages: async () => [
 				{ role: "user", content: "Preview user message", timestamp: Date.now() - 60000 },

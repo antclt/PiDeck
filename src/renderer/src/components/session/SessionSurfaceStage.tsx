@@ -8,6 +8,8 @@ import { SessionMessageTimeline } from "./SessionMessageTimeline";
 import { outlineItemsBySessionIdAtomFamily, sessionHistoryMutationOverlayBySessionIdAtomFamily } from "../../atoms";
 import { isPendingRailItemId, mergeOutlineRailItems, pendingEntryIdOf } from "./timeline/outlineRailTicks";
 import { useSessionOutlineDirectory } from "../../hooks/useSessionOutlineDirectory";
+import { formatTime, summarizeMessage } from "../app/AppUtils";
+import { replaceExpandedRefBlocksWithLabels } from "../../../../shared/expandedRefBlocks";
 import { Button } from "../ui-shadcn/button";
 import { chatContentWidthStyle } from "./chatContentWidth";
 import { t, type TranslationKey } from "../../i18n";
@@ -36,7 +38,18 @@ export function SessionSurfaceStage(props: { sessionId: string; sessionTimeline:
 	const outlineItems = useAtomValue(outlineItemsAtom);
 	// 索引目录补齐「已加载消息之外」的用户检查点；未加载项点击后连续补页再跳转。
 	const directory = useSessionOutlineDirectory(sessionId, outlineItems.length);
-	const railItems = useMemo(() => mergeOutlineRailItems(outlineItems, directory), [outlineItems, directory]);
+	// 目录项 → 导轨卡片：标题用索引预览（与已加载标题同一套归一，加载前后是同一句话），
+	// 时间与已加载项同一格式化口（此前误塞原始 ISO）。
+	const directoryRailItems = useMemo(
+		() =>
+			directory.map((entry) => ({
+				entryId: entry.entryId,
+				title: entry.preview ? summarizeMessage(replaceExpandedRefBlocksWithLabels(entry.preview)) : t("outline.turnFallback", { index: entry.turnOrdinal + 1 }),
+				time: entry.timestamp ? formatTime(Date.parse(entry.timestamp)) : "",
+			})),
+		[directory],
+	);
+	const railItems = useMemo(() => mergeOutlineRailItems(outlineItems, directoryRailItems), [outlineItems, directoryRailItems]);
 	const [pendingEntryId, setPendingEntryId] = useState<string | undefined>(undefined);
 	const [pendingAttempts, setPendingAttempts] = useState(0);
 	const pendingRailJump = useCallback(

@@ -2,7 +2,7 @@
  * F3 · IPC 通道快照守卫（TEST-PLAN §F3，6 例，锚定数字见 TEST-PLAN §0）。
  *
  * src/shared/ipc.ts 的 ipcChannels 常量表是全部 IPC 通道的唯一来源；本测试把它的
- * 规模与形状锚定为快照（702 通道 / 87 前缀 / 排序摘要）。快照变更只允许显式发生
+ * 规模与形状锚定为快照（701 通道 / 87 前缀 / 排序摘要）。快照变更只允许显式发生
  * 且附领域正当理由——本轮（T4 契约层）任何快照红 = 违例。
  *
  * 2026-10-16 显式刷新（+4 通道，均附领域正当理由）：
@@ -16,7 +16,8 @@
  * 2026-10-19 显式刷新：hostPluginsInstallGitHub（从 GitHub 仓库安装宿主插件，并行改动）+1；
  *   下线 GUI 扩展桥与插件开发支持 −5（sessionsBridgeEvent / sessionsBridgeResync /
  *   pluginDevStatus / pluginDevWriteGuide / pluginDevCopyDemo），`plugin-dev` 前缀随之消失（84 → 83）。
- * 2026-10-21 显式刷新：selectionToolResize（划词浮窗折叠 / 展开时的窗口高度上报）+1（701 → 702），前缀数不变。
+ * 2026-10-21 合并刷新：selectionToolResize（划词浮窗折叠 / 展开高度上报）入场，同时下线
+ *   sessionsCatalogReadOutlineTitle 与 sessionsCatalogReadDshSystemPrompt（轨迹索引 preview 与事实读取取代），净 −2 → 700。
  * 刷新方式：entries.map(([k, v]) => `${k}=${v}`).sort().join("\n") 重算 sha256，写入 CHANNEL_DIGEST。
  */
 import assert from "node:assert/strict";
@@ -24,19 +25,19 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const CHANNEL_TOTAL = 702;
+const CHANNEL_TOTAL = 700;
 const PREFIX_COUNT = 87;
-const CHANNEL_DIGEST = "0321113e7f0000ee40b699b503e371aaa7e0d9964c34b14f57834261a9d56c5f";
+const CHANNEL_DIGEST = "84f683345ab5fe9dc77cab9fe6a88f0bd09dc5f91551c832fec6187e6cf04e23";
 
 const ipcChannels = loadTsCommonJs("src/shared/ipc.ts").ipcChannels;
 const entries = Object.entries(ipcChannels);
 const values = entries.map(([, value]) => value);
 
-test("F3-1 通道常量总数 === 702", () => {
+test("F3-1 通道常量总数 === 700", () => {
 	assert.equal(entries.length, CHANNEL_TOTAL);
 });
 
-test("F3-2 通道值唯一数 === 702（无重复通道字符串）", () => {
+test("F3-2 通道值唯一数 === 700（无重复通道字符串）", () => {
 	assert.equal(new Set(values).size, CHANNEL_TOTAL);
 });
 

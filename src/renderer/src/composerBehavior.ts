@@ -4,6 +4,7 @@ export type ComposerEnterIntent = "ignore" | "newline" | "send";
 
 import type { AgentBackend, ComposerAgentMode } from "@shared/types";
 import { formatPromptTemplateBlock } from "./components/session/composer/referenceBlocks";
+import { extractFrontmatter, stripFrontmatter } from "./utils/frontmatter";
 import { computeProtectedRanges, overlapsProtected } from "./utils/protectedText";
 import { parseCommandArgs, substituteArgs } from "./utils/templateArgs";
 
@@ -65,9 +66,13 @@ export function toSkillInvocationToken(backend: AgentBackend, name: string): str
  * 无 frontmatter 的纯正文原样返回；frontmatter 后的首个空行不保留。
  */
 export function stripMarkdownFrontmatter(content: string): string {
-	const match = content.match(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/);
-	if (!match) return content;
-	return content.slice(match[0].length).replace(/^\r?\n/, "");
+	// 「一键插入全文」路径要保留文件原本的换行风格（CRLF 就还是 CRLF），所以不做 pi 那样的
+	// 换行归一；但要容忍 Windows 编辑器常见的两件事：BOM 开头、结束标记写成 `--- `（尾空格）。
+	// 模型侧走的是 utils/frontmatter 的严格版本（pi 对齐）。
+	const withoutBom = content.replace(/^\uFEFF/, "");
+	const match = withoutBom.match(/^---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/);
+	if (!match) return withoutBom;
+	return withoutBom.slice(match[0].length).replace(/^(?:\r?\n)+/, "");
 }
 
 /**
@@ -81,9 +86,11 @@ export function appendContentToDraft(draft: string, content: string): string {
 }
 
 export function parseArgumentHint(content: string): string | undefined {
-	const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-	if (!match) return undefined;
-	for (const line of match[1].split(/\r?\n/)) {
+	// 与 pi 的 frontmatter 提取同一套边界（BOM / 换行归一）：否则会出现
+	// 「模板能展开但菜单里看不到 argument-hint」的古怪现象。
+	const yaml = extractFrontmatter(content).yaml;
+	if (yaml === null) return undefined;
+	for (const line of yaml.split("\n")) {
 		const idx = line.indexOf(":");
 		if (idx === -1) continue;
 		const key = line.slice(0, idx).trim();
@@ -167,13 +174,6 @@ export function translateBuiltinPromptDescription(template: PromptTemplateInfo):
 	const isChinese = typeof document !== "undefined" && document.documentElement.lang?.startsWith("zh");
 	const map = isChinese ? BUILTIN_PROMPT_DESC_CN : BUILTIN_PROMPT_DESC_EN;
 	return map[template.name] ?? template.description;
-}
-
-/** 移除 markdown frontmatter 块（--- 包裹的元数据），仅返回正文。
- *  prompt 模板的 content 包含完整原始内容（含 frontmatter），
- *  展开时需剥离 frontmatter，避免 `---\ndescription: xxx\n---` 污染对话消息。 */
-function stripFrontmatter(raw: string): string {
-	return raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
 }
 
 /**

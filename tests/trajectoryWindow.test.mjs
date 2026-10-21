@@ -80,22 +80,24 @@ test("宽度极小也不出现 0 刻度", () => {
 	assert.ok(ticks.length > 0);
 });
 
-test("导轨目录合并：已加载项保留原标题，未加载项以序号占位且可按 entryId 回查", async () => {
+test("导轨目录合并：已加载项保留原标题，未加载项用索引预览（不是序号占位）", async () => {
 	const { mergeOutlineRailItems, isPendingRailItemId, pendingEntryIdOf } = loadTsCommonJs("src/renderer/src/components/session/timeline/outlineRailTicks.ts");
 	const loaded = [
 		{ id: "m1", entryId: "e1", role: "user", title: "第一条提问", time: "10:00" },
 		{ id: "m3", entryId: "e3", role: "user", title: "第二条提问", time: "10:05" },
 	];
 	const directory = [
-		{ entryId: "e1", turnOrdinal: 0, timestamp: "2026-01-01T02:00:00.000Z" },
-		{ entryId: "e2", turnOrdinal: 1, timestamp: "2026-01-01T02:01:00.000Z" },
-		{ entryId: "e3", turnOrdinal: 2, timestamp: "2026-01-01T02:05:00.000Z" },
+		// 标题来自索引里持久化的 preview：加载前后是同一句话，不再显示 #序号。
+		{ entryId: "e1", title: "第一条提问", time: "10/21 10:00" },
+		{ entryId: "e2", title: "中间那条还没加载的提问", time: "10/21 10:01" },
+		{ entryId: "e3", title: "第二条提问", time: "10/21 10:05" },
 	];
 	const merged = mergeOutlineRailItems(loaded, directory);
 	assert.equal(merged.length, 3);
-	assert.equal(merged[0].title, "第一条提问");
+	assert.equal(merged[0].id, "m1", "已加载项必须复用原对象（标题以时间线为准）");
 	assert.equal(merged[1].pending, true);
-	assert.equal(merged[1].title, "#2");
+	assert.equal(merged[1].title, "中间那条还没加载的提问");
+	assert.equal(merged[1].time, "10/21 10:01", "时间必须是格式化后的展示文本，不是原始 ISO");
 	assert.equal(isPendingRailItemId(merged[1].id), true);
 	assert.equal(pendingEntryIdOf(merged[1].id), "e2");
 	assert.equal(merged[2].id, "m3");

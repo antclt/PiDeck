@@ -1303,11 +1303,6 @@ export class AgentManager {
 		return this.sessionHistoryReader.readSessionOutline(sessionPath, limit);
 	}
 
-	/** 导轨单项标题：按需读一行（≤1MiB），返回 80 字以内展示文本。 */
-	async readSessionOutlineTitle(sessionPath: string, entryId: string): Promise<string | undefined> {
-		return this.sessionHistoryReader.readSessionOutlineTitle(sessionPath, entryId);
-	}
-
 	/** 轮次维度显示分页：pageSize 复用为轮次数（readSessionDisplayTurnPage 内部夹紧上限） */
 	async readSessionDisplayTurnPage(sessionPath: string, agentId = "_viewer", before?: number, turnCount?: number, beforeEntryId?: string, options?: { projectId?: string }): Promise<SessionMessagePage> {
 		const page = await this.sessionHistoryReader.readSessionDisplayTurnPage(sessionPath, agentId, before, turnCount, beforeEntryId, { entryRendererTypes: this.resolveEntryRendererTypesForProject(options?.projectId) });
