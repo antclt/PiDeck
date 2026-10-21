@@ -999,6 +999,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"app.sessionDeleted": "Session deleted",
 	"app.sessionDeletedFromArchive": "Deleted from archive",
 	"app.sessionDeleteFailed": "Failed to delete session",
+	"app.sessionArchiveFailed": "Failed to archive session",
 	"session.deletedDshKeepData": "Session record deleted (DSH host data remains in DSH_HOME; clean it up manually)",
 	"app.sessionArchived": "Session archived. Open the project's Session Manager → Archived to view and restore it.",
 	"app.sessionArchivedDsh": "Session archived. Open Configuration → DSH → Archive to view and restore it.",

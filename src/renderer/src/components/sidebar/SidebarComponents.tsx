@@ -83,8 +83,8 @@ export function SessionManagerModal(props: {
 	onRename: (session: SessionSummary) => void;
 	onExport: (session: SessionSummary) => void;
 	onDelete: (sessions: SessionSummary[]) => void;
-	/** 归档会话（可恢复）；运行中的会话由主进程拒绝并抛错 */
-	onArchive: (sessions: SessionSummary[]) => void;
+	/** 归档会话（可恢复）；运行中的会话由主进程拒绝，失败已由 action 层 toast、弹窗保持打开 */
+	onArchive: (sessions: SessionSummary[]) => Promise<void>;
 	/** 恢复归档会话 */
 	onUnarchive: (session: SessionSummary) => Promise<void>;
 	/** 列出已归档会话（含归档前原始路径，供按家族归属过滤） */
@@ -152,6 +152,22 @@ export function SessionManagerModal(props: {
 			setSelectAll(next.size === filteredSessions.length);
 			return next;
 		});
+	};
+
+	// 批量归档选中行（与删除同粒度）；运行中会话由主进程拒绝并交给 action 层 toast。
+	// 归档成功后弹窗保持打开：用户通常要连续清理或接着切到归档视图核对，关掉等于丢上下文。
+	const handleArchiveSelected = () => {
+		const toArchive = props.sessions.filter((s) => selected.has(s.id));
+		if (toArchive.length === 0) return;
+		void props
+			.onArchive(toArchive)
+			// 失败原因已由 action 层 toast；这里消费 rejection，避免落到全局「未处理异常」。
+			// 成败都清空选中：已归档行不能再留着勾选，批量计数也不能虚高。
+			.catch(() => undefined)
+			.finally(() => {
+				setSelected(new Set());
+				setSelectAll(false);
+			});
 	};
 
 	const handleDeleteSelected = () => {
@@ -250,16 +266,7 @@ export function SessionManagerModal(props: {
 						</div>
 						<div className="flex items-center gap-2">
 							{!showArchived && selected.size > 0 && (
-								<Button
-									variant="outline"
-									size="sm"
-									className="h-auto gap-1 border border-border-subtle px-3 py-1 text-caption font-medium text-text-tertiary transition-all duration-fast hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
-									onClick={() => {
-										// 批量归档选中行（与删除同粒度）；运行中会话由主进程拒绝并提示
-										const toArchive = props.sessions.filter((s) => selected.has(s.id));
-										if (toArchive.length > 0) props.onArchive(toArchive);
-									}}
-								>
+								<Button variant="outline" size="sm" className="h-auto gap-1 border border-border-subtle px-3 py-1 text-caption font-medium text-text-tertiary transition-all duration-fast hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]" onClick={handleArchiveSelected}>
 									{t("sessionManager.archiveSelected", { count: selected.size })}
 								</Button>
 							)}

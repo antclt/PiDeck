@@ -995,6 +995,7 @@ export const zhCN = {
 	"app.sessionDeleted": "已删除会话",
 	"app.sessionDeletedFromArchive": "已从归档删除",
 	"app.sessionDeleteFailed": "删除会话失败",
+	"app.sessionArchiveFailed": "归档会话失败",
 	"session.deletedDshKeepData": "会话记录已删除（DSH host 数据保留在 DSH_HOME，可手动清理）",
 	"app.sessionArchived": "已归档会话。可在项目右键「会话管理」→「已归档」中查看并恢复",
 	"app.sessionArchivedDsh": "已归档会话。可在「配置管理」的 DSH 页「归档区」查看并恢复",

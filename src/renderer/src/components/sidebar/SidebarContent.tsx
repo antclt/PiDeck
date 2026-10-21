@@ -861,7 +861,12 @@ export function SidebarContent(props: SidebarContentProps) {
 					onRename={(session) => actions.sessions.rename(managerProject.id, session)}
 					onExport={(session) => void actions.sessions.export(managerProject.id, session)}
 					onDelete={(sessions) => Promise.all(sessions.map((session) => actions.sessions.delete(managerProject.id, session))).then(controller.closeSessionManager)}
-					onArchive={(sessions) => Promise.all(sessions.map((session) => actions.sessions.archive(managerProject.id, session))).then(controller.closeSessionManager)}
+					onArchive={async (sessions) => {
+						// 归档成功后弹窗保持打开（用户要继续管理/切到归档视图核对），关闭只由用户触发。
+						// 家族列表跨多个工作区：按会话归属项目归档，dismiss/refresh 才不会落到错误项目，
+						// 否则弹窗留着时子工作区的行会残留。
+						await Promise.all(sessions.map((session) => actions.sessions.archive(session.projectId ?? managerProject.id, session)));
+					}}
 					onUnarchive={(archived) => actions.sessions.unarchive(archived, managerProject.id)}
 					listArchived={actions.sessions.listArchived}
 					deleteArchived={(archivedPath) => actions.sessions.deleteArchived(archivedPath)}

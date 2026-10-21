@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: d5afba81d5303d2d65678e7a1610176bff24715345fc9befb2fe1e1dbde53584（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: ef3dcc033009c5894542aa7221be84384a35166b49565ed2ef0976dc3687757a（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -1002,6 +1002,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"app.sessionDeleted": "已刪除會話",
 	"app.sessionDeletedFromArchive": "已從歸檔刪除",
 	"app.sessionDeleteFailed": "刪除會話失敗",
+	"app.sessionArchiveFailed": "歸檔會話失敗",
 	"session.deletedDshKeepData": "會話記錄已刪除（DSH host 資料保留在 DSH_HOME，可手動清理）",
 	"app.sessionArchived": "已歸檔會話。可在專案右鍵「會話管理」→「已歸檔」中檢視並恢復",
 	"app.sessionArchivedDsh": "已歸檔會話。可在「配置管理」的 DSH 頁「歸檔區」檢視並恢復",
