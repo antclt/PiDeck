@@ -270,6 +270,19 @@
   min-height: 0;
 }
 
+/* ── 移动端长内容换行（Web 走查 #4）─────────────────────────────────────
+   390px 视口下 .markdown-body 的有序/无序列表实测 scrollWidth 溢出容器（373 > 358）：
+   timeline.css 只给 .assistant-text 等节点声明了 overflow-wrap/word-break，列表项
+   自身仍是默认的 normal，长英文串/路径会把行盒顶宽。这里按 .web-app 作用域补齐，
+   不影响桌面端（桌面端列表宽裕，保持原排版）。 */
+.web-app .markdown-body ul,
+.web-app .markdown-body ol,
+.web-app .markdown-body li {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  min-width: 0;
+}
+
 /* Mobile starts with chat full-screen; the project tree is a temporary drawer. */
 .mobile-sidebar-toggle,
 .mobile-sidebar-close,

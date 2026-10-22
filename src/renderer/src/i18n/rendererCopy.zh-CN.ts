@@ -5799,6 +5799,7 @@ export const zhCN = {
 	"web.openProjects": "打开项目列表",
 	"web.closeProjects": "关闭项目列表",
 	"web.deleteProject": "移除项目",
+	"web.deleteProjectConfirmTitle": "移除项目？",
 	"web.deleteProjectConfirm": "只移除项目列表记录，不删除项目文件。确定继续吗？",
 	"web.projectPathPlaceholder": "输入项目目录路径",
 	"web.createProject": "添加项目",

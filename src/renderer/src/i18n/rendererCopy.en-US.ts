@@ -5821,6 +5821,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"web.openProjects": "Open projects",
 	"web.closeProjects": "Close projects",
 	"web.deleteProject": "Remove project",
+	"web.deleteProjectConfirmTitle": "Remove project?",
 	"web.deleteProjectConfirm": "This removes the project from the list without deleting files. Continue?",
 	"web.projectPathPlaceholder": "Enter a project directory path",
 	"web.createProject": "Add project",

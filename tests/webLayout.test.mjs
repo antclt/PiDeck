@@ -244,3 +244,35 @@ test("External stream stays alive across turns; visibility gates the connection"
 	// 渲染层：流式标志贯通分组（末段正文挂 liveTextId 常显、不提升为 finalText）。
 	assert.match(webTimeline, /groupTimelineEntries\(messages, \{ isStreaming: props\.streaming \}\)/);
 });
+
+// 回归（Web 走查 #2）：上下文用量百分比必须走自适应精度。
+// pi 的 contextPercent 是浮点（实测 45.50234375），直接插值会显示成「45.50234375%」；
+// 桌面端早已用 formatPercent，Web 端两处展示（环 tooltip / 详情大数字）此前漏了。
+test("Web context usage renders adaptive-precision percentages", () => {
+	assert.match(webHeader, /import \{ formatPercent \} from "\.\.\/components\/session\/TimelineFormat";/);
+	assert.match(webHeader, /function resolveContextPercent\(usage: WebContextUsage\): number/);
+	assert.equal((webHeader.match(/resolveContextPercent\(/g) ?? []).length >= 3, true, "both the ring and the detail body must resolve through the shared helper");
+	// 展示点不再裸插 percent
+	assert.doesNotMatch(webHeader, /\$\{percent\}%/, "percent must be formatted, not interpolated raw");
+	assert.match(webHeader, /\$\{formatPercent\(percent\)\}%/);
+});
+
+// 回归（Web 走查 #4）：390px 视口下 markdown 列表项实测溢出容器（scrollWidth 373 > clientWidth 358）。
+// timeline.css 只给 .assistant-text 声明了换行策略，列表项自身仍是默认 normal。
+test("Web markdown lists wrap long content instead of overflowing", () => {
+	const listRule = webCss.slice(webCss.indexOf(".web-app .markdown-body ul,"));
+	assert.ok(listRule.length > 0, "wrap rule must exist in web.css");
+	assert.match(listRule.slice(0, 400), /overflow-wrap:\s*anywhere;/, "list items need anywhere wrapping at 390px");
+	assert.match(listRule.slice(0, 400), /word-break:\s*break-word;/);
+	assert.match(listRule.slice(0, 400), /min-width:\s*0;/);
+});
+
+// 回归（Web 走查 #11）：删除项目此前用原生 window.confirm，与删除会话的 AlertDialog 两套风格。
+test("Web destructive confirmations both use AlertDialog, never window.confirm", () => {
+	assert.match(webSidebar, /from "@\/components\/ui-shadcn\/alert-dialog"/);
+	assert.doesNotMatch(webSidebar, /window\.confirm/, "window.confirm has no styling and breaks mobile gestures");
+	assert.match(webSidebar, /AlertDialog open=\{pendingDeleteProject != null\}/);
+	assert.match(webSidebar, /t\("web\.deleteProjectConfirmTitle"\)/);
+	assert.match(webSidebar, /t\("web\.deleteProjectConfirm"\)/);
+	assert.match(webChatApp, /AlertDialog open=\{deleteConfirmId != null\}/);
+});

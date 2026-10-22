@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 6ef88268749a55e2ae1de0678655628b62104ec14be2dbd0948099f95ba4b7c1（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: b7edb49e4b62458fda996798007e2116c3da742a196bda999ef30bc5f771f65b（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5806,6 +5806,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"web.openProjects": "開啟專案列表",
 	"web.closeProjects": "關閉專案列表",
 	"web.deleteProject": "移除專案",
+	"web.deleteProjectConfirmTitle": "移除專案？",
 	"web.deleteProjectConfirm": "只移除專案列表記錄，不刪除專案檔案。確定繼續嗎？",
 	"web.projectPathPlaceholder": "輸入專案目錄路徑",
 	"web.createProject": "新增專案",

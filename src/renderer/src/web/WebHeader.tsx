@@ -17,6 +17,18 @@ import { permissionStrengthIcon } from "@/utils/permissionLevelIcon";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui-shadcn/dropdown-menu";
 import { WebBottomSheet } from "./WebBottomSheet";
 import type { WebContextUsage } from "./webTypes";
+import { formatPercent } from "../components/session/TimelineFormat";
+
+/**
+ * 上下文占用百分比（数值）：pi 侧直接透传 contextPercent（浮点，可能是 45.50234375），
+ * 缺失时按 tokens/window 兜底。展示一律经 formatPercent 做自适应精度。
+ */
+function resolveContextPercent(usage: WebContextUsage): number {
+	const contextWindow = usage.contextWindow ?? 0;
+	const contextTokens = usage.contextTokens ?? 0;
+	const percent = usage.contextPercent ?? (contextWindow > 0 ? Math.min(100, (contextTokens / contextWindow) * 100) : 0);
+	return Number.isFinite(percent) ? Math.min(100, Math.max(0, percent)) : 0;
+}
 import type { ResolvedWebTheme, WebThemePreference } from "./webTheme";
 
 export type WebHeaderStatus = "idle" | "starting" | "running" | "error";
@@ -251,13 +263,14 @@ export function WebHeader(props: {
 function ContextRing(props: { usage: WebContextUsage; onClick?: () => void }) {
 	const window = props.usage.contextWindow ?? 0;
 	const tokens = props.usage.contextTokens ?? 0;
-	const percent = props.usage.contextPercent ?? (window > 0 ? Math.min(100, Math.round((tokens / window) * 100)) : 0);
+	const percent = resolveContextPercent(props.usage);
 	const overflow = props.usage.contextOverflow === true || percent >= 100;
 	// 12px 环 + 2px 描边，SVG 圆弧按 percent 扫过（-90° 起笔）
 	const radius = 5;
 	const circumference = 2 * Math.PI * radius;
 	const dash = (Math.min(100, Math.max(0, percent)) / 100) * circumference;
-	const tooltip = `${t("web.contextUsage")} ${percent}% · ${tokens.toLocaleString()} / ${window.toLocaleString()}${overflow ? ` · ${t("web.contextOverflow")}` : ""}`;
+	// 展示走自适应精度：pi 直接透传的 contextPercent 是浮点（如 45.50234375），原样插值会显示成乱码般的长小数
+	const tooltip = `${t("web.contextUsage")} ${formatPercent(percent)}% · ${tokens.toLocaleString()} / ${window.toLocaleString()}${overflow ? ` · ${t("web.contextOverflow")}` : ""}`;
 	const ring = (
 		<svg viewBox="0 0 14 14" className="size-4">
 			<circle cx="7" cy="7" r={radius} fill="none" strokeWidth="2" className="stroke-border" />
@@ -284,7 +297,7 @@ function ContextUsageSheetBody(props: { usage: WebContextUsage; onCompact?: () =
 	const { usage } = props;
 	const window = usage.contextWindow ?? 0;
 	const tokens = usage.contextTokens ?? 0;
-	const percent = usage.contextPercent ?? (window > 0 ? Math.min(100, Math.round((tokens / window) * 100)) : 0);
+	const percent = resolveContextPercent(usage);
 	const overflow = usage.contextOverflow === true || percent >= 100;
 	const rows = [
 		{ key: "context", label: t("web.contextUsage"), value: `${tokens.toLocaleString()} / ${window.toLocaleString()}` },
@@ -295,7 +308,7 @@ function ContextUsageSheetBody(props: { usage: WebContextUsage; onCompact?: () =
 		<div className="flex flex-col gap-3 px-3 pb-3">
 			<div className="flex items-center gap-3">
 				<ContextRing usage={usage} />
-				<span className={cn("text-2xl font-semibold leading-none", overflow ? "text-danger" : "text-foreground")}>{percent}%</span>
+				<span className={cn("text-2xl font-semibold leading-none", overflow ? "text-danger" : "text-foreground")}>{formatPercent(percent)}%</span>
 				{overflow ? <span className="rounded-full bg-danger/10 px-2 py-0.5 text-micro text-danger">{t("web.contextOverflow")}</span> : null}
 			</div>
 			<ul className="flex flex-col gap-1.5">

@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, Copy, Download, FolderPlus, GitFork, MoreVertical, Pencil, Play, Plus, Search, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui-shadcn/button";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui-shadcn/alert-dialog";
 import { Input } from "@/components/ui-shadcn/input";
 import { t } from "@/i18n";
 import { WebBrandLockup } from "./WebBrandLockup";
@@ -210,9 +211,17 @@ export function WebSidebar(props: {
 		}
 	};
 
-	const requestDelete = async (project: WebProject) => {
+	// 移除项目与删除会话同为不可恢复操作：走与会话删除一致的 AlertDialog，
+	// 不用原生 confirm 弹窗（无样式，且移动端会打断手势）。
+	const [pendingDeleteProject, setPendingDeleteProject] = useState<WebProject | null>(null);
+	const requestDelete = (project: WebProject) => {
 		if (project.kind === "chat") return;
-		if (typeof window !== "undefined" && !window.confirm(t("web.deleteProjectConfirm"))) return;
+		setPendingDeleteProject(project);
+	};
+	const confirmDeleteProject = async () => {
+		const project = pendingDeleteProject;
+		if (!project) return;
+		setPendingDeleteProject(null);
 		await props.onDeleteProject(project.id);
 	};
 
@@ -297,7 +306,7 @@ export function WebSidebar(props: {
 												{creating ? <span className="size-3 animate-pideck-spin rounded-full border border-current border-t-transparent" aria-hidden="true" /> : <Plus className="size-3.5" aria-hidden="true" />}
 											</Button>
 											{project.kind !== "chat" && (
-												<Button type="button" variant="ghost" size="icon" className="project-action size-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" title={t("web.deleteProject")} aria-label={t("web.deleteProject")} onClick={() => void requestDelete(project)}>
+												<Button type="button" variant="ghost" size="icon" className="project-action size-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" title={t("web.deleteProject")} aria-label={t("web.deleteProject")} onClick={() => requestDelete(project)}>
 													<Trash2 className="size-3.5" aria-hidden="true" />
 												</Button>
 											)}
@@ -333,6 +342,20 @@ export function WebSidebar(props: {
 						)}
 						{state.projects.length === 0 && ungroupedSessions.length === 0 && <div className="px-2 py-3 text-caption text-muted-foreground">{t("app.emptyNoProject")}</div>}
 					</div>
+					<AlertDialog open={pendingDeleteProject != null} onOpenChange={(open) => !open && setPendingDeleteProject(null)}>
+						<AlertDialogContent>
+							<AlertDialogHeader>
+								<AlertDialogTitle>{t("web.deleteProjectConfirmTitle")}</AlertDialogTitle>
+								<AlertDialogDescription>{t("web.deleteProjectConfirm")}</AlertDialogDescription>
+							</AlertDialogHeader>
+							<AlertDialogFooter>
+								<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+								<AlertDialogAction className="bg-danger text-danger-foreground hover:bg-danger/90" onClick={() => void confirmDeleteProject()}>
+									{t("web.deleteProject")}
+								</AlertDialogAction>
+							</AlertDialogFooter>
+						</AlertDialogContent>
+					</AlertDialog>
 				</div>
 				{/* 底栏连接状态 */}
 				<div className="toolbar-actions sidebar-bottom-actions flex shrink-0 items-center gap-0.5 border-t border-border px-1.5 py-1">
