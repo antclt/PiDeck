@@ -78,8 +78,8 @@ PiDeck 可作为本机 MCP 服务，向 pi 和其他兼容客户端开放**明�
 | `automation_tasks_list` | `projectId` | `{ tasks: [{ id, name, projectId, schedule, enabled, backend, model, thinkingLevel, mode, permissionPreset, budget, createdAt, updatedAt, lastScheduledAt, nextRunAt }] }`；**不含 prompt** |
 | `automation_tasks_get` | `projectId`、`taskId` | 任务详情（元信息 + `prompt`）；不存在或不属于该项目返回 `automation-task-not-found` |
 | `automation_runs_list` | `projectId`，可选 `taskId`、`limit`（默认 20，1–100） | `{ runs: [{ id, taskId, taskName, trigger, status, scheduledFor, sessionId, queuedAt, startedAt, endedAt, durationMs, inputTokens, outputTokens, costUsd, stepCount, changedFiles, error, skippedReason, budgetReason }] }`；按排队时间倒序，`error` 截断到 2000 字符 |
-| `automation_task_create` | `projectId`、`name`、`prompt`、`schedule`（`{type:"cron", expression}` 或 `{type:"manual"}`），可选 `enabled` / `backend` / `model` / `thinkingLevel` / `mode` / `permissionPreset` / `budget` | 创建后的任务详情；**只在定时任务写开关打开时注册** |
-| `automation_task_update` | `taskId` + 任意可改字段（不能改 projectId）；空 patch 返回 `automation-patch-empty` | 更新后的任务详情 |
+| `automation_task_create` | `projectId`、`name`、`prompt`、`schedule`（`{type:"cron", expression}` 或 `{type:"manual"}`），可选 `enabled` / `backend`（`pi`/`dsh`）/ `model` / `thinkingLevel` / `mode`（`normal`/`plan`/`goal`）/ `permissionPreset` / `budget` | 创建后的任务详情；**只在定时任务写开关打开时注册**。`budget` 省略时用默认上限（30 分钟 / 20 万 tokens / 2 美元 / 200 步），字段传 `null` = 不限 |
+| `automation_task_update` | `taskId` + 任意可改字段（不能改 projectId）；`budget` 按字段合并、`null` 解除该上限；空 patch 返回 `automation-patch-empty` | 更新后的任务详情 |
 | `automation_task_delete` | `taskId` | `{ taskId, deleted: true }`；运行历史保留 |
 | `automation_task_run_now` | `taskId` | 一次运行的结果投影（status 通常为 `queued`）；会真实启动会话并消耗模型额度 |
 | `automation_run_abort` | `runId` | `{ runId, aborted }`；已结束的运行返回 `aborted:false` |

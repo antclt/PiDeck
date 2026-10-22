@@ -366,7 +366,7 @@ export function createPiDeckMcpServer(deps: PiDeckMcpToolDeps): McpServer {
 		};
 		tool(
 			"automation_task_create",
-			"Create a scheduled task in an authorized project. schedule is either {type:cron, expression} (five-field local-time cron) or {type:manual}; manual tasks run via automation_task_run_now. Budget fields are optional; omit for unlimited. The prompt is stored in PiDeck and returned by automation_tasks_get within the same authorized project.",
+			"Create a scheduled task in an authorized project. schedule is either {type:cron, expression} (five-field local-time cron) or {type:manual}; manual tasks run via automation_task_run_now. Budget is optional: omit it to use PiDeck defaults (30 min timeout, 200k tokens, $2, 200 steps); pass null for a field to lift that limit. The prompt is stored in PiDeck and returned by automation_tasks_get within the same authorized project.",
 			{
 				projectId: id,
 				name: automationName,
@@ -404,7 +404,7 @@ export function createPiDeckMcpServer(deps: PiDeckMcpToolDeps): McpServer {
 		);
 		tool(
 			"automation_task_update",
-			"Update a scheduled task in an authorized project. Omitted fields keep their value; prompt and schedule edits restart the scheduling window like the UI. Tasks cannot be moved to another project.",
+			"Update a scheduled task in an authorized project. Omitted fields keep their value; budget is merged field by field and null lifts a limit; prompt and schedule edits restart the scheduling window like the UI. Tasks cannot be moved to another project.",
 			{
 				taskId: id,
 				name: automationName.optional(),
