@@ -661,6 +661,14 @@ export type AppSettings = {
 	 * 缺省 "pi"（2026-12 兼容期调整：默认回归 pi，用户可在设置中切换为 dsh）。
 	 */
 	defaultAgentBackend: AgentBackend;
+	/**
+	 * 用户是否手动指定过默认后端（设置页选中 pi/dsh 即置 true）。
+	 *
+	 * 缺省 false = 自动：只装了 DSH runtime 而没有 pi 时用 dsh，其余情况用 pi
+	 * （见 resolveAutoAgentBackend）。一旦用户自己选过，自动逻辑不再改写，
+	 * 否则「我明明选了 pi，装个 DSH 就被改掉」会让人无法信任这个设置。
+	 */
+	defaultAgentBackendManual?: boolean;
 
 	// ── Agent 启动诊断/加速（开发设置） ──
 	/**
@@ -977,6 +985,7 @@ export function createDefaultAppSettings(): AppSettings {
 		showNativeMenu: false,
 		sendShortcut: "enter-send",
 		defaultAgentBackend: "pi",
+		defaultAgentBackendManual: false,
 		theme: "system",
 		themeScheduleLightStart: "07:00",
 		themeScheduleDarkStart: "19:00",

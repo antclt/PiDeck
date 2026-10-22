@@ -155,3 +155,16 @@ export function resolveEffectiveAgentBackend(backend: AgentBackend, dshState: Ds
 	if (backend === "dsh" && dshState !== "installed") return "pi";
 	return backend;
 }
+
+/**
+ * 用户没手动选过后端时的自动选择（纯函数，单测见 tests/dshRuntimeStatus.test.mjs）。
+ *
+ * 产品口径（用户要求）：只装了 DSH runtime → dsh；只有 pi → pi；两者都有 → pi；都没有 → pi。
+ * 即 dsh 只在「没 pi 可用、而 dsh 真的能跑」时才当默认，避免自动把老 pi 用户换到 dsh。
+ * checking（启动首帧尚未判定）不算已安装：调用方应等探测结果再写设置，否则启动时会
+ * 把「只装 dsh」误判成「都没有」而写成 pi。
+ */
+export function resolveAutoAgentBackend(input: { piInstalled: boolean; dshState: DshRuntimeState }): "pi" | "dsh" {
+	if (input.dshState === "installed" && !input.piInstalled) return "dsh";
+	return "pi";
+}

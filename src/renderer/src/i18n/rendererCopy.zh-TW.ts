@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 0f5066a0332ffb1b36d52d8f0c09e13f6f04f0c79b30d8eb8d139a55446631bc（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: a16324a0ecb2ac3da80f97a92e6b1e7fb783d255051197244fc21eb65b2e97c5（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -3849,6 +3849,19 @@ export const zhTW: Record<TranslationKey, string> = {
 	"environment.setupUseThisPath": "使用這份",
 	"environment.setupAdvancedTitle": "手動安裝 / 檢視檢測詳情",
 	"environment.setupAdvancedDesc": "一鍵安裝失敗時，可以在這裡手動執行安裝命令、檢視安裝輸出、檢測報錯和已搜尋的目錄。",
+	// —— 不装 pi 的替代路径：DSH 内置运行时（需先下载 runtime；安装/修复都跳配置管理的 DSH 分页）——
+	"environment.dshTitle": "不裝 Pi 也能用：DSH 執行時",
+	"environment.dshDesc": "DSH 是 PiDeck 內建的另一套 Agent 執行時，裝上後可以直接新建會話，不需要 pi，也不需要 Node.js。需要先下載一次執行時。",
+	"environment.dshChecking": "正在檢測 DSH 執行時…",
+	"environment.dshInstalled": "已檢測到 DSH 執行時 {version}，可以把它設為預設後端。",
+	"environment.dshDefaultActive": "新建會話已經預設使用 DSH 執行時 {version}。",
+	"environment.dshOutdated": "DSH 執行時版本與當前 PiDeck 不匹配，重新安裝後才能使用。",
+	"environment.dshBroken": "DSH 執行時已損壞或不完整，重新安裝即可恢復。",
+	"environment.dshInstall": "安裝 DSH 執行時",
+	"environment.dshRepair": "重灌 DSH 執行時",
+	"environment.dshManage": "管理 DSH 執行時",
+	"environment.dshUse": "改用 DSH 後端",
+	"environment.dshSwitched": "已改用 DSH 後端，新建會話將使用 DSH。",
 	// —— 检测到多个 pi 安装时的选择列表（含官方安装器、包管理器全局、PiDeck 便携副本）——
 	"environment.installsTitle": "檢測到 {count} 個 Pi 安裝",
 	"environment.installsDesc": "PiDeck 現在固定使用其中一個。想換成別的就選一個，之後啟動會話、更新 Pi、管理擴充套件都用它。",
@@ -5246,7 +5259,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.sendShortcut.enter": "Enter 傳送，Ctrl/Shift+Enter 換行",
 	"settings.sendShortcut.shift": "Shift + Enter 傳送，Enter 換行",
 	"settings.defaultAgentBackend": "預設 Agent 後端",
-	"settings.defaultAgentBackendDesc": "新建會話（側欄「+」、引導頁、並行問詢）使用的後端；已建立的會話不受影響。",
+	"settings.defaultAgentBackendDesc": "新建會話（側欄「+」、引導頁、並行問詢）使用的後端；已建立的會話不受影響。預設會自動判斷：只有 DSH 執行時、沒有 pi 時用 DSH，其餘情況用 Pi；手動選過之後就不再自動改寫。",
 	"settings.defaultAgentBackendPi": "Pi（經典後端）",
 	"settings.defaultAgentBackendDsh": "DSH（DeepSeek Harness 內嵌）",
 	"settings.defaultAgentBackendDshUnavailable": "DSH（後端未安裝）",

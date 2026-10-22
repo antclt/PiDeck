@@ -8,7 +8,7 @@ import type { PiInstallation, PiInstallStatus, PiInstallExecResult } from "../..
 import type { PiEnvironmentGuide } from "../../hooks/usePiEnvironmentGuide";
 import { PiCommandSourcePanel } from "../app/PiCommandSourcePanel";
 import { shouldOfferInstallationChoice } from "../../utils/piInstallationOptions";
-import { EnvironmentSetupPanel } from "./EnvironmentSetupPanel";
+import { EnvironmentSetupPanel, type EnvironmentSetupPanelProps } from "./EnvironmentSetupPanel";
 
 /**
  * Pi 环境检测弹窗。
@@ -25,6 +25,8 @@ export function EnvironmentDialog(props: {
 	onOpenInstallDocs: () => void;
 	/** pi 环境引导（检测 Node/npm → 一键安装 → 重新检测）的域状态与命令 */
 	guide: PiEnvironmentGuide;
+	/** DSH 替代路径（不装 pi 也能用）：运行时状态与「去安装 / 改用」动作，由 App 装配 */
+	dsh: EnvironmentSetupPanelProps["dsh"];
 	/** 用户手动输入的 pi 路径 */
 	customPath: string;
 	/** 正在校验自定义路径 */
@@ -128,6 +130,7 @@ export function EnvironmentDialog(props: {
 							searchedDirs={searchedDirs}
 							onOpenInstallDocs={props.onOpenInstallDocs}
 							onChooseInstallation={props.onChooseInstallation}
+							dsh={props.dsh}
 							manual={{
 								command: props.installCommand,
 								executing: props.installExecuting,

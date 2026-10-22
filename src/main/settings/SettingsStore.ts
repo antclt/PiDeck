@@ -339,7 +339,10 @@ Gitmoji 对应关系：
 	customUpdateSourceUrl: "",
 
 	// ── Agent 后端：默认 pi（经典后端），用户可在设置中切换为 dsh ──
+	// defaultAgentBackendManual=false 时由 resolveAutoAgentBackend 按安装情况自动选择：
+	// 只装了 DSH runtime 而没有 pi → dsh，其余（只有 pi / 两者都有 / 都没有）→ pi。
 	defaultAgentBackend: "pi",
+	defaultAgentBackendManual: false,
 
 	// ── DSH 外部会话：默认启动时只读扫磁盘入侧栏（不 boot host）──
 	dshAutoImportSessions: true,
@@ -752,6 +755,11 @@ export class SettingsStore {
 		// IPC 入参不可信：自动标题开关只接受布尔值，非法值保持原有设置。
 		if ("autoSessionTitle" in safePatch && typeof safePatch.autoSessionTitle !== "boolean") {
 			delete safePatch.autoSessionTitle;
+		}
+		// 「用户是否手动选过后端」是安全阀：非布尔值不能写进去，否则自动选择可能被意外锁死或反复改写。
+		// （后端枚举本身沿用既有写法不做白名单，避免与 AgentBackend 未来扩展不一致。）
+		if ("defaultAgentBackendManual" in safePatch && typeof safePatch.defaultAgentBackendManual !== "boolean") {
+			delete safePatch.defaultAgentBackendManual;
 		}
 		// TPS 模式只接受两个已知枚举；非法 IPC 入参保留原设置。
 		if ("tpsDisplayMode" in safePatch && safePatch.tpsDisplayMode !== "streaming" && safePatch.tpsDisplayMode !== "endToEnd") {

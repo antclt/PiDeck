@@ -232,7 +232,13 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 					description={t("settings.defaultAgentBackendDesc")}
 					alignEnd={false}
 				>
-					<Select value={draft.defaultAgentBackend} onValueChange={(value) => updateDraft({ defaultAgentBackend: value as AppSettings["defaultAgentBackend"] })}>
+					<Select
+						value={draft.defaultAgentBackend}
+						onValueChange={(value) =>
+							// 手动选择即接管：置 manual 后自动选择（只有 DSH 时默认 dsh）不再改写用户的选择。
+							updateDraft({ defaultAgentBackend: value as AppSettings["defaultAgentBackend"], defaultAgentBackendManual: true })
+						}
+					>
 						<SelectTrigger className="w-full">
 							<SelectValue />
 						</SelectTrigger>

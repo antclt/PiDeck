@@ -1,5 +1,6 @@
-import { AlertCircle, Check, ChevronDown, Circle, FolderOpen, Loader2 } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, Circle, FolderOpen, Loader2, Sparkles } from "lucide-react";
 import type { PiInstallExecResult, PiInstallStatus } from "../../../../shared/types";
+import type { DshRuntimeState } from "../../../../shared/types/dshRuntime";
 import type { PiEnvironmentGuide } from "../../hooks/usePiEnvironmentGuide";
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
@@ -70,6 +71,18 @@ export interface EnvironmentSetupPanelProps {
 	onOpenInstallDocs: () => void;
 	/** 选一份已经找到的 pi（主进程实测校验通过后切换并关窗）；没传就不渲染选择按钮 */
 	onChooseInstallation?: (path: string) => void;
+	/**
+	 * DSH 运行时这条替代路径：不装 pi 也能用（用户要求「不止可以用 pi」）。
+	 * 安装/修复统一跳到配置管理的 DSH 分页——未装时那就是安装引导页。
+	 */
+	dsh: {
+		state: DshRuntimeState;
+		runtimeVersion?: string;
+		/** 当前默认后端是否已经是 dsh */
+		isDefault: boolean;
+		onOpenInstall: () => void;
+		onUseAsDefault: () => void;
+	};
 }
 
 /**
@@ -80,7 +93,7 @@ export interface EnvironmentSetupPanelProps {
  * 用户既不知道要先点哪个，也看不出「点了会发生什么」。现在只剩一个主动作。
  */
 export function EnvironmentSetupPanel(props: EnvironmentSetupPanelProps) {
-	const { guide, manual, customPath, onChooseInstallation } = props;
+	const { guide, manual, customPath, onChooseInstallation, dsh } = props;
 	const nodeStatus = guide.nodeStatus;
 	const nodeReady = Boolean(nodeStatus?.installed || nodeStatus?.systemNodeAvailable);
 	const nodeUnsupported = Boolean(nodeStatus && !nodeReady && nodeStatus.installSupported === false);
@@ -100,6 +113,21 @@ export function EnvironmentSetupPanel(props: EnvironmentSetupPanelProps) {
 				? t("environment.setupNodeUnsupported")
 				: t("environment.setupNodeMissing");
 	const npmDetail = npmReady ? t("environment.setupNpmFound", { version: guide.npmVersion ?? "" }) : guide.npmChecking ? t("environment.checking") : t("environment.setupNpmMissing");
+	// DSH 替代路径：文案与动作按运行时状态分派——只有真能跑的 runtime 才谈「改用」，
+	// 未安装/损坏/版本不符一律先去安装页（那页同时也是修复入口）。
+	const dshInstalled = dsh.state === "installed";
+	const dshSummary =
+		dsh.state === "checking"
+			? t("environment.dshChecking")
+			: dshInstalled
+				? dsh.isDefault
+					? t("environment.dshDefaultActive", { version: dsh.runtimeVersion ?? "" })
+					: t("environment.dshInstalled", { version: dsh.runtimeVersion ?? "" })
+				: dsh.state === "outdated"
+					? t("environment.dshOutdated")
+					: dsh.state === "broken"
+						? t("environment.dshBroken")
+						: t("environment.dshDesc");
 
 	return (
 		<>
@@ -155,6 +183,29 @@ export function EnvironmentSetupPanel(props: EnvironmentSetupPanelProps) {
 					</p>
 				)}
 			</section>
+
+			{/* 不装 pi 的替代路径：DSH 是内置运行时（需先下载 runtime），装上就能直接新建会话。 */}
+			<aside className="flex shrink-0 flex-col gap-2.5 rounded-lg border border-border-subtle p-4">
+				<div className="flex flex-col gap-1">
+					<h4 className="m-0 flex items-center gap-1.5 text-xs font-semibold text-text-primary">
+						<Sparkles size={13} aria-hidden="true" className="text-primary" />
+						{t("environment.dshTitle")}
+					</h4>
+					<p className="m-0 text-xs leading-relaxed text-text-secondary">{dshSummary}</p>
+				</div>
+				<div className="flex flex-wrap items-center gap-2">
+					{dshInstalled && !dsh.isDefault && (
+						<Button size="sm" variant="outline" onClick={dsh.onUseAsDefault}>
+							{t("environment.dshUse")}
+						</Button>
+					)}
+					{dsh.state !== "checking" && (
+						<Button size="sm" variant={dshInstalled ? "ghost" : "outline"} onClick={dsh.onOpenInstall}>
+							{dshInstalled ? t("environment.dshManage") : dsh.state === "notInstalled" ? t("environment.dshInstall") : t("environment.dshRepair")}
+						</Button>
+					)}
+				</div>
+			</aside>
 
 			<Collapsible className="shrink-0 rounded-lg border border-border bg-muted" defaultOpen={guide.alreadyInstalled.length > 0 || guide.failure?.reason === "pi-undetected"}>
 				<CollapsibleTrigger className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg px-4 py-3 text-left text-xs font-medium text-text-secondary hover:text-text-primary">

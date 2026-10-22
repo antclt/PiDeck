@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { configureNoticeDefaults, showNotice, type NoticeKind } from "./utils/notice";
 import { copyTextWithCopiedNotice } from "./utils/clipboardNotice";
+import { DSH_INSTALL_SETTINGS_TARGET } from "./utils/dshRuntimeHint";
 import { buildSettingsCommands, type PaletteCommand } from "./utils/commandPaletteCommands";
 import { CommandPalette } from "./components/overlays/CommandPalette";
 import { CommandPaletteOnboarding, markCommandPaletteOnboardingSeen } from "./components/overlays/CommandPaletteOnboarding";
@@ -175,6 +176,7 @@ import { useResize } from "./hooks/useResize";
 import { ARCHIVED_SESSION_TOAST_MS, archivedSessionToastMessage, useSessionActions } from "./hooks/useSessionActions";
 import { useScratchPad } from "./hooks/useScratchPad";
 import { useDshRuntimeStatusSync } from "./hooks/useDshRuntimeStatusSync";
+import { useAutoDefaultAgentBackend } from "./hooks/useAutoDefaultAgentBackend";
 import { useDshRuntimeMigrationNotice } from "./hooks/useDshRuntimeMigrationNotice";
 import { useDshRuntimeInstallProgressSync } from "./hooks/useDshRuntimeInstallProgressSync";
 import { useWorktreeActions } from "./hooks/useWorktreeActions";
@@ -770,6 +772,17 @@ export function App() {
 		void checkGuideNode();
 		void checkGuideNpm();
 	}, [environmentDialog, checkGuideNode, checkGuideNpm]);
+	// 默认后端自动选择：没有手动选过时，只装了 DSH runtime（没有 pi）就用 dsh，否则 pi。
+	// piInstalled 用实时检测优先、持久化缓存兜底：首次引导前 piStatus 还是 null。
+	const dshRuntimeStatus = useAtomValue(dshRuntimeStatusAtom);
+	useAutoDefaultAgentBackend({
+		api,
+		settings,
+		setSettings,
+		dshState: dshRuntimeStatus.state,
+		// 环境检测完成前用持久化缓存顶一下（缓存只说明上次装过 pi），避免启动瞬间因 piStatus 为空误判成「只有 DSH」。
+		piInstalled: piStatus ? piStatus.installed : Boolean(settings.piInstall),
+	});
 	// 抽屉宽度状态由 useWorkspacePanels 统一管理（全局 localStorage 持久化，键 pid:drawer-width），
 	// AppShell 拖拽提交经 setDrawerWidth 回写；此处不再持有独立 useState，避免双份状态漂移。
 	const drawerWidth = workspace.drawerWidth;
@@ -1662,7 +1675,12 @@ export function App() {
 				}
 				if (!next.piEnvironmentChecked) {
 					// 首次检测延后一帧启动,先让主界面完成绘制,避免 packaged app 打开时出现几秒白屏。
-					window.setTimeout(() => void piUpdate.checkPiInstall("startup"), 300);
+					window.setTimeout(() => {
+						// 默认后端已是可用 DSH 时不再弹出「没有 pi」：只装 DSH 的用户不需要每次启动都被催装 pi。
+						// 探针可能还没落地（checking），那就照常检测——宁可多问一次，不能把真正缺后端的用户闷死。
+						if (next.defaultAgentBackend === "dsh" && store.get(dshRuntimeStatusAtom).state === "installed") return;
+						void piUpdate.checkPiInstall("startup");
+					}, 300);
 				}
 			})
 			.catch(() => {
@@ -3537,6 +3555,26 @@ export function App() {
 							status={piStatus}
 							checking={piChecking}
 							guide={piGuide}
+							dsh={{
+								state: dshRuntimeStatus.state,
+								runtimeVersion: dshRuntimeStatus.runtimeVersion,
+								isDefault: settings.defaultAgentBackend === "dsh",
+								onOpenInstall: () => {
+									// 安装/修复入口就是配置管理 → DSH 分页（未装时那页即安装引导），关窗避免两层弹层叠压
+									setEnvironmentDialog(false);
+									store.set(openSettingsAtom, DSH_INSTALL_SETTINGS_TARGET);
+								},
+								onUseAsDefault: () => {
+									void (async () => {
+										// 手动选择：置 manual 后自动选择不再改写；同时标记 pi 环境已确认，
+										// 否则只装 DSH 的用户每次启动都会被打一次「没有 pi」。
+										const next = await api.settings.update({ defaultAgentBackend: "dsh", defaultAgentBackendManual: true, piEnvironmentChecked: true });
+										setSettings(next);
+										setEnvironmentDialog(false);
+										showToast(t("environment.dshSwitched"));
+									})();
+								},
+							}}
 							onClose={() => {
 								setEnvironmentDialog(false);
 								piUpdate.setCustomPathResult(null);

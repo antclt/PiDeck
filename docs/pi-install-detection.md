@@ -194,8 +194,28 @@ PiDeck 的设置页更新走主进程的 Node `execFile` + `PiLocator` 平台适
   检测口径只有一处，避免引导页与主流程各判一次。
 - **失败文案**：`node-unsupported` / `node-prepare` / `npm-missing` / `pi-install` / `pi-undetected` 映射成可执行的一句话；
   `pi-undetected`（装完 PATH 里仍找不到 pi）直接提示去展开「我已经装过 Pi」指定路径或看手动输出。
-- **测试**：`tests/piOneClickInstall.test.mjs`（14 例：跳过/回退/失败分支、镜像透传、已有安装、重检失败）、
+- **测试**：`tests/piOneClickInstall.test.mjs`（15 例：跳过/回退/失败分支、镜像透传、已有安装、重检失败、刚装完便携 Node 仍无 npm 不重复下载）、
   `tests/dialogLinkMode.test.mjs`（nodejs.org 外链仍强制系统浏览器）、`tests/environmentDialogScroll.test.mjs`（限高滚动不回退）。
+
+### 8）不装 pi 的替代路径：DSH 运行时 + 默认后端自动选择（2026-10）
+
+环境检测弹窗原来只讲 pi，只装 DSH 的用户会被反复提示「没有 pi」，而且 DSH 装好也不会成为新会话的默认后端。现在：
+
+- **提示**：未安装态主卡下方是 `EnvironmentSetupPanel` 的 DSH 卡（`environment.dshTitle`），按 `dshRuntimeStatusAtom.state` 分派文案：
+  未装/损坏/版本不符只给「安装/重装 DSH 运行时」，已装且不是默认后端给「改用 DSH 后端」，已装且是默认只给「管理 DSH 运行时」。
+- **跳转**：安装/修复一律 `closeEnvironmentDialog()` + `store.set(openSettingsAtom, DSH_INSTALL_SETTINGS_TARGET)`
+  （`utils/dshRuntimeHint.ts` 的 `{ tab: "common", pane: "config", backendPane: "dsh" }`）——未装时这一页就是安装引导，已装时是版本/目录/卸载管理。
+  关窗在前，避免两层弹层叠压。
+- **自动默认后端**：`resolveAutoAgentBackend({ piInstalled, dshState })`（`shared/types/dshRuntime.ts`，纯函数）只有
+  `dshState === "installed" && !piInstalled` 才回 `"dsh"`，其余（含 checking/broken/outdated）一律 `"pi"`——与
+  `resolveEffectiveAgentBackend` 的回落口径一致，避免写了 dsh 又被运行时挡回 pi 来回抖动。
+  `renderer/src/hooks/useAutoDefaultAgentBackend.ts` 在 App 里装配：`piInstalled = piStatus ? piStatus.installed : Boolean(settings.piInstall)`
+  （检测未完成时用持久化缓存顶一下，避免启动瞬间误判成「只有 DSH」）。
+- **用户可改，且改了就不再被改写**：设置项 `defaultAgentBackendManual`（缺省 false = 自动）。设置页手选后端时同时置 true；
+  环境检测里点「改用 DSH 后端」也会置 true，并把 `piEnvironmentChecked` 置 true——只装 DSH 的用户不会每次启动都被弹「没有 pi」。
+  主进程 `SettingsStore.update` 只接受布尔值，非法入参丢弃（安全阀：否则自动选择可能被锁死）。
+- **测试**：`tests/dshRuntimeStatus.test.mjs`（`resolveAutoAgentBackend` 五组：只有 dsh / 都有 / 只有 pi / 都没有 / checking·broken·outdated 不算已装）、
+  `tests/autoDefaultAgentBackend.test.mjs`（默认 manual=false、老配置兼容、manual=true 落盘保留、非布尔入参不写盘、设置页与 App 接线契约）。
 
 ## 验证
 
