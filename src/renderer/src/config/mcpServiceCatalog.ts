@@ -58,7 +58,6 @@ export type McpCatalogTextKey =
 	| "config.mcp.catalog.braveSearchHint"
 	| "config.mcp.catalog.firecrawlHint"
 	| "config.mcp.catalog.figmaHint"
-	| "config.mcp.catalog.figmaAuthNotice"
 	| "config.mcp.catalog.larkHint"
 	| "config.mcp.catalog.dingtalkHint"
 	| "config.mcp.catalog.amapHint"
@@ -111,11 +110,6 @@ export type McpServiceCatalogEntry = {
 	credentials?: McpCatalogCredentialField[];
 	/** 无凭据时的完整定义（凭据由 credentials 声明在保存时注入）。 */
 	base: McpServerDefinition;
-	/**
-	 * 认证侧的坑与替代路径（保存前展示）。目前只用于「授权服务器只放行白名单客户端」的服务，
-	 * 例如 Figma 的动态客户端注册对 `client_name` 做白名单校验：pi 用默认名会被 403。
-	 */
-	authNoticeKey?: McpCatalogTextKey;
 };
 
 /**
@@ -430,7 +424,6 @@ export const MCP_SERVICE_CATALOG: readonly McpServiceCatalogEntry[] = [
 		docsUrl: "https://developers.figma.com/docs/figma-mcp-server/remote-server-installation",
 		auth: "oauth",
 		base: { url: "https://mcp.figma.com/mcp" },
-		authNoticeKey: "config.mcp.catalog.figmaAuthNotice",
 	},
 	{
 		id: "qcc",

@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 3a55b37492ecab1c7afec38341c179d53a84429ad22f05c4fd4cdbc272d4526e（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 13a80213ba55a664469c3bc8928a26602a3f4b7d3acd90e6fba2e3c5ebdb16de（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -2335,8 +2335,6 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.mcp.catalog.credentialArgs": "憑據將以命令列引數 {{flag}} 傳給服務程序。",
 	"config.mcp.catalog.credentialOptionalHint": "該服務不填金鑰也可用（有額度限制）；填寫則{{target}}",
 	"config.mcp.catalog.oauthHint": "該服務用 OAuth 授權：儲存後在上方狀態區點「登入」，瀏覽器完成授權，無需手填令牌。",
-	"config.mcp.catalog.oauthClientNameNotice": "已自動寫入 OAuth 客戶端名「{{name}}」（動態註冊時傳送）。若登入失敗，先在列表裡登出再重試。",
-	"config.mcp.catalog.figmaAuthNotice": "Figma 的動態客戶端註冊只放行白名單客戶端（用預設名 pi 會返回 403 Forbidden）。這裡已自動改用白名單客戶端名註冊；這是借用他人標識，Figma 收緊後會失效，屆時改用 Figma 桌面版 MCP 服務（本機 127.0.0.1:3845/mcp）。",
 	"config.mcp.catalog.noAuthHint": "該服務無需認證，儲存後即可使用。",
 	"config.mcp.catalog.configured": "已配置",
 	"config.mcp.catalog.aiSetup.title": "讓 AI 幫你配",

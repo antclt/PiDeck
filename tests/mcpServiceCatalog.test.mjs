@@ -202,6 +202,7 @@ test("Figma registers under an allow-listed DCR client name; other OAuth entries
 		assert.deepEqual(plain(buildCatalogBase(byId[id])), plain(byId[id].base), id);
 		assert.equal(Object.hasOwn(buildCatalogBase(byId[id]), "oauth"), false, id);
 	}
-	// 坑点必须在表单里可见：登记覆盖或带 authNoticeKey 的条目都要有文案 key。
-	assert.equal(byId.figma.authNoticeKey, "config.mcp.catalog.figmaAuthNotice");
+	// 覆盖值不得泄露到条目的静态字段上（表单不展示，避免无意义文案）；只走 buildCatalogBase 注入。
+	assert.equal(Object.hasOwn(byId.figma, "authNoticeKey"), false);
+	assert.equal(Object.hasOwn(byId.figma.base, "oauth"), false);
 });

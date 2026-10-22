@@ -2338,9 +2338,6 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.mcp.catalog.credentialArgs": "The credential is passed to the server process as the {{flag}} command-line argument.",
 	"config.mcp.catalog.credentialOptionalHint": "This service also works without a key (limited quota); if provided, {{target}}",
 	"config.mcp.catalog.oauthHint": "This service uses OAuth: after saving, click Sign in above — the browser finishes authorization, no manual token.",
-	"config.mcp.catalog.oauthClientNameNotice": "OAuth client name “{{name}}” is written automatically (sent on dynamic registration). If sign-in fails, sign out in the list and retry.",
-	"config.mcp.catalog.figmaAuthNotice":
-		"Figma's dynamic client registration only accepts allow-listed clients (the default name pi gets 403 Forbidden). This entry registers under an allow-listed client name instead. That borrows another client's identity, so it breaks once Figma tightens the list — then switch to the Figma desktop MCP server (127.0.0.1:3845/mcp on this machine).",
 	"config.mcp.catalog.noAuthHint": "No authentication needed; it works right after saving.",
 	"config.mcp.catalog.configured": "Configured",
 	"config.mcp.catalog.aiSetup.title": "Let AI set it up",
