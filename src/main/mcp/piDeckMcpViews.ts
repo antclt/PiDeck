@@ -7,7 +7,8 @@
  *    与调用方已经算好的运行时列表。
  */
 import { basename } from "node:path";
-import type { PiDeckMcpBuiltInExtension, PiDeckMcpExtensionsView, PiDeckMcpRuntimeView, PiDeckMcpSettingsView } from "../../shared/types/piDeckMcp";
+import type { AgentProfile } from "../../shared/types/agentProfile";
+import type { PiDeckMcpAgentSummary, PiDeckMcpBuiltInExtension, PiDeckMcpExtensionsView, PiDeckMcpRuntimeView, PiDeckMcpSettingsView } from "../../shared/types/piDeckMcp";
 import type { AppSettings } from "../../shared/types/settings";
 import { BUILT_IN_EXTENSIONS, INTERNAL_BUILT_IN_EXTENSIONS } from "../extensions/builtInExtensions";
 
@@ -58,6 +59,30 @@ export function buildPiDeckMcpExtensionsView(input: { settings: AppSettings; bui
 		builtIn,
 		removedBuiltInExtensions: [...input.settings.removedBuiltInExtensions],
 		disabledExtensions: input.settings.disabledExtensions.map((entry) => ({ scope: entry.scope, source: entry.source })),
+	};
+}
+
+/**
+ * 单个智能体的元信息投影。
+ *
+ * 允许清单之外的字段一律不出去，尤其 **systemPrompt**（用户自写的角色设定）：
+ * 客户端按 id 使用即可，角色设定只在主进程内解析；也不带磁盘路径或绑定表。
+ * 新增 AgentProfile 字段默认不可见。
+ */
+export function buildPiDeckMcpAgentSummary(agent: AgentProfile): PiDeckMcpAgentSummary {
+	return {
+		id: agent.id,
+		name: agent.name,
+		description: agent.description,
+		icon: agent.icon,
+		category: agent.category,
+		builtin: agent.builtin === true,
+		model: agent.model ? { provider: agent.model.provider, modelId: agent.model.modelId } : null,
+		backend: agent.backend ?? null,
+		usageCount: agent.usageCount,
+		lastUsedAt: agent.lastUsedAt ?? null,
+		createdAt: agent.createdAt,
+		updatedAt: agent.updatedAt,
 	};
 }
 

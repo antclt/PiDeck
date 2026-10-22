@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: bd898409857759505671d7b90066f008135e2080fa173b351c8714e8da878a12（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 2848e44f6a8ee5a59caa9bfaf837f769dcd38285f4f2740f604f91e730e88f85（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -2217,9 +2217,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.mcp.smartAdd.authHint": "可從左側選擇 Linear、GitHub 或 Brave 模板。自定義服務可貼上 URL、命令列或 JSON；headers 和 env 可在儲存後手動編輯。",
 	"config.mcp.template.configured": "已配置",
 	"config.mcp.template.recommended": "推薦服務",
-	"config.mcp.catalog.pideck": "PiDeck（本地只讀服務）",
-	"config.mcp.catalog.pideckHint": "讀取已授權專案和會話，以及本機設定摘要與內建擴充套件狀態。預設關閉，僅本機可訪問。",
-	"config.mcp.pideck.hint": "向 pi 和其他 MCP 客戶端開放專案列表、會話元資訊、標題搜尋、分頁歷史，以及本機設定摘要與內建擴充套件狀態。不會執行命令、修改會話、讀取任意檔案，也不輸出令牌、代理憑據或磁碟路徑。",
+	"config.mcp.catalog.pideck": "PiDeck（本地 MCP 服務）",
+	"config.mcp.catalog.pideckHint": "讀取已授權專案和會話、本機設定摘要與內建擴充套件狀態，以及智慧體元資訊；寫能力需單獨開啟。預設關閉，僅本機可訪問。",
+	"config.mcp.pideck.hint": "向 pi 和其他 MCP 客戶端開放專案列表、會話元資訊、標題搜尋、分頁歷史，以及本機設定摘要、內建擴充套件狀態與智慧體元資訊。預設只讀；只有顯式開啟寫開關後才允許中斷回答或管理智慧體。不會執行命令、修改會話內容、讀取任意檔案，也不輸出令牌、代理憑據、磁碟路徑或智慧體的角色設定。",
 	"config.mcp.pideck.warning": "任何持有令牌的客戶端都能讀取所選專案的全部可見會話，包括今後新增的會話；內容可能含敏感資訊，也可能被客戶端傳送給模型。請僅授權必要專案，不要分享連線配置。",
 	"config.mcp.pideck.running": "服務執行中",
 	"config.mcp.pideck.stopped": "服務已關閉",
@@ -2231,7 +2231,10 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.mcp.pideck.allProjectsHint": "跟隨模式：新增專案自動可讀，改專案列表無需重新應用，令牌也不再因新增專案而輪換；已刪除的專案自動失效。勾選後下面的逐項選擇不生效。",
 	"config.mcp.pideck.control": "寫操作",
 	"config.mcp.pideck.allowControl": "允許中斷正在產生的回答（等同停止按鈕）",
-	"config.mcp.pideck.allowControlHint": "僅此一項寫能力：可停止正在進行的回答，不會刪除會話或檔案，也不能啟動、重啟或改配置；已在輸入框排隊等待發送的訊息不受影響。",
+	"config.mcp.pideck.allowControlHint": "可停止正在進行的回答，不會刪除會話或檔案，也不能啟動、重啟或改配置；已在輸入框排隊等待發送的訊息不受影響。",
+	"config.mcp.pideck.agentWriteSection": "智慧體管理",
+	"config.mcp.pideck.allowAgentWrite": "允許建立/編輯/刪除智慧體並繫結會話",
+	"config.mcp.pideck.allowAgentWriteHint": "關閉時客戶端只能讀取智慧體元資訊（名稱/簡介/分類等）。開啟後可建立、修改、刪除智慧體，並把已授權專案的會話繫結到智慧體（等同介面的「使用」）；角色設定（systemPrompt）只寫不讀，任何工具都不會返回它，也不開放模型呼叫。",
 	"config.mcp.pideck.apply": "應用授權並更新令牌",
 	"config.mcp.pideck.enable": "授權並啟用本地服務",
 	"config.mcp.pideck.disable": "關閉服務並撤銷令牌",

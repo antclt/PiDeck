@@ -1,4 +1,5 @@
 /** PiDeck's optional, local-only MCP host. Management is desktop-only, never an MCP tool. */
+import type { AgentModelRef, AgentProfileBackend, AgentProfileCategory } from "./agentProfile";
 import type { McpConfigFile } from "./mcp";
 import type { AppSettings } from "./settings";
 
@@ -13,6 +14,11 @@ export type PiDeckMcpAccess = {
 	allProjects: boolean;
 	/** 写能力开关（默认关）：开启后客户端可中断进行中的回答（当前仅 sessions_abort）。 */
 	allowControl: boolean;
+	/**
+	 * 智能体写能力开关（默认关）：开启后客户端可创建/编辑/删除智能体、绑定会话与智能体。
+	 * 角色设定（systemPrompt）是**只写不读**：创建/编辑可传，但任何工具都不返回它。
+	 */
+	allowAgentWrite: boolean;
 };
 export type PiDeckMcpProject = { id: string; name: string };
 export type PiDeckMcpState = PiDeckMcpAccess & {
@@ -91,6 +97,29 @@ export type PiDeckMcpRuntimeView = {
 	activeProjectCount: number;
 	/** 已授权项目数（通配模式下随项目增删变化） */
 	authorizedProjectCount: number;
+};
+
+/**
+ * 宿主级智能体元信息投影（与项目白名单无关）。
+ * **刻意不含 systemPrompt**：角色设定只写不读，留在主进程内解析；
+ * 只输出显式允许清单，不含文件路径、会话绑定表等私有状态。
+ */
+export type PiDeckMcpAgentSummary = {
+	id: string;
+	name: string;
+	description: string;
+	icon: string;
+	category: AgentProfileCategory;
+	/** 内置智能体（可编辑、不可删除） */
+	builtin: boolean;
+	/** 首选模型；null = 跟随会话/设置链 */
+	model: AgentModelRef | null;
+	/** 「使用」新建会话时的后端；null = 跟随设置默认 */
+	backend: AgentProfileBackend | null;
+	usageCount: number;
+	lastUsedAt: number | null;
+	createdAt: number;
+	updatedAt: number;
 };
 
 export type PiDeckMcpResult<T> = { ok: true; value: T } | { ok: false; code: string };

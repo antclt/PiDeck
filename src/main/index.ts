@@ -3177,6 +3177,28 @@ function registerIpc() {
 		// 与 settings 同样不假设装配顺序。
 		runtimes: () => sessionRuntimeCoordinator.listRuntimes(),
 		abortRuntime: (target) => sessionRuntimeCoordinator.abortRuntime(target),
+		// 智能体目录：agentProfileStore 在启动后段（见下方 load 段）才装配，闭包在请求时求值。
+		// 未就绪时读返回空列表/undefined，写统一报 operation-failed（工具层映射为安全错误码）。
+		agents: {
+			list: () => agentProfileStore?.list() ?? [],
+			get: (agentId) => agentProfileStore?.get(agentId),
+			create: async (input) => {
+				if (!agentProfileStore) throw new Error("operation-failed");
+				return agentProfileStore.create(input);
+			},
+			update: async (agentId, patch) => {
+				if (!agentProfileStore) throw new Error("operation-failed");
+				return agentProfileStore.update(agentId, patch);
+			},
+			delete: async (agentId) => {
+				if (!agentProfileStore) throw new Error("operation-failed");
+				return agentProfileStore.delete(agentId);
+			},
+			bindSession: async (input) => {
+				if (!agentProfileStore) throw new Error("operation-failed");
+				return agentProfileStore.bindSession(input);
+			},
+		},
 		warn: mcpWarning,
 	});
 	const unregisterPiDeckMcp = registerPiDeckMcpIpc(piDeckMcp, () => mainWindow, mcpWarning);

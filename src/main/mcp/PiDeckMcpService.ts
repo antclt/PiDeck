@@ -2,8 +2,10 @@
 import { randomBytes } from "node:crypto";
 import type { PiDeckMcpAccess, PiDeckMcpProject, PiDeckMcpState } from "../../shared/types/piDeckMcp";
 import type { McpConfigFile } from "../../shared/types/mcp";
+import type { BindAgentSessionInput, CreateAgentProfileInput, AgentProfile } from "../../shared/types/agentProfile";
 import type { SessionCommandResult, SessionRuntimeInfo, SessionRuntimeTarget } from "../../shared/types/session";
 import type { AppSettings } from "../../shared/types/settings";
+import type { AgentProfilePatch } from "../agents/AgentProfileStore";
 import { emptyPiDeckMcpConfig, piDeckMcpAccessSchema, readPiDeckMcpConfig, writePiDeckMcpConfig, type PiDeckMcpConfig } from "../config/piDeckMcpConfig";
 import type { HostPluginSessions } from "../plugins/HostPluginSessions";
 import { buildPiDeckMcpExtensionsView, buildPiDeckMcpRuntimeView, buildPiDeckMcpSettingsView } from "./piDeckMcpViews";
@@ -29,6 +31,18 @@ export class PiDeckMcpService {
 			runtimes: () => SessionRuntimeInfo[];
 			/** 中断一个 agent 正在产生的回答；只由 sessions_abort 调用。target 的 runtimeGeneration 由 coordinator 校验。 */
 			abortRuntime: (target: SessionRuntimeTarget) => Promise<SessionCommandResult<unknown>>;
+			/**
+			 * 智能体目录（宿主级）。agent-profiles 在启动后段才装配，闭包在请求时求值；
+			 * 写工具是否注册由配置里的 allowAgentWrite 决定，不在这里做判断。
+			 */
+			agents: {
+				list: () => AgentProfile[];
+				get: (agentId: string) => AgentProfile | undefined;
+				create: (input: CreateAgentProfileInput) => Promise<AgentProfile>;
+				update: (agentId: string, patch: AgentProfilePatch) => Promise<AgentProfile>;
+				delete: (agentId: string) => Promise<boolean>;
+				bindSession: (input: BindAgentSessionInput) => Promise<unknown>;
+			};
 			warn: (code: string) => void;
 		},
 	) {
@@ -58,6 +72,7 @@ export class PiDeckMcpService {
 			projectIds: [...this.config.projectIds],
 			allProjects: this.config.allProjects,
 			allowControl: this.config.allowControl,
+			allowAgentWrite: this.config.allowAgentWrite,
 			running: Boolean(this.endpoint),
 			endpoint: this.endpoint,
 			projects: this.deps.projects(),
@@ -157,6 +172,8 @@ export class PiDeckMcpService {
 						return { sessionId: runtime.sessionId, agentId: runtime.agentId, projectId: runtime.projectId, runtimeGeneration: runtime.runtimeGeneration };
 					},
 					controlEnabled: () => this.config.allowControl,
+					agents: this.deps.agents,
+					agentWriteEnabled: () => this.config.allowAgentWrite,
 					abort: async (target) => {
 						// 开关在请求开始后才被关掉时（工具已注册）也必须拒绝，所以每次调用都复查。
 						if (!this.config.allowControl) throw new Error("control-disabled");
@@ -184,7 +201,11 @@ export class PiDeckMcpService {
 	async connection(): Promise<McpConfigFile> {
 		await this.pending;
 		if (!this.config.enabled || !this.endpoint || this.disposed) throw new Error("service-disabled");
-		return { mcpServers: { pideck: { url: this.endpoint, headers: { Authorization: `Bearer ${this.config.token}` }, enabled: false, exposure: "codemode", description: "Read-only access to explicitly authorized PiDeck projects and saved sessions." } } };
+		// 能力描述随开关变化：客户端/用户能一眼看出当前是否允许多于只读。
+		const capabilities = ["Read-only access to explicitly authorized PiDeck projects and saved sessions."];
+		if (this.config.allowControl) capabilities.push("Runtime control: abort the response a running session is producing.");
+		if (this.config.allowAgentWrite) capabilities.push("Agent management: create/edit/delete agent presets and bind them to sessions (role prompts are write-only).");
+		return { mcpServers: { pideck: { url: this.endpoint, headers: { Authorization: `Bearer ${this.config.token}` }, enabled: false, exposure: "codemode", description: capabilities.join(" ") } } };
 	}
 
 	async dispose(): Promise<void> {

@@ -5,7 +5,7 @@ import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const REPO_ROOT = resolve(import.meta.dirname, "..");
-const { buildPiDeckMcpExtensionsView, buildPiDeckMcpSettingsView } = loadTsCommonJs(resolve(REPO_ROOT, "src/main/mcp/piDeckMcpViews.ts"));
+const { buildPiDeckMcpAgentSummary, buildPiDeckMcpExtensionsView, buildPiDeckMcpSettingsView } = loadTsCommonJs(resolve(REPO_ROOT, "src/main/mcp/piDeckMcpViews.ts"));
 const { createDefaultAppSettings } = loadTsCommonJs(resolve(REPO_ROOT, "src/shared/types/settings.ts"));
 const { listActiveBuiltInExtensionPaths } = loadTsCommonJs(resolve(REPO_ROOT, "src/main/extensions/builtInExtensions.ts"));
 
@@ -132,4 +132,32 @@ test("extensions_list 覆盖注入开关、用户扩展开关与内置清单，�
 		view.builtIn.every((entry) => !entry.id.includes("/") && !entry.id.includes("\\")),
 		true,
 	);
+});
+
+test("agents 投影只输出元信息允许清单：systemPrompt 与路径不泄漏", () => {
+	const agent = {
+		id: "a1",
+		name: "翻译",
+		description: "一句话说明",
+		icon: "🌐",
+		systemPrompt: `角色设定 ${SECRET}`,
+		category: "translation",
+		builtin: false,
+		model: { provider: "p", modelId: "m" },
+		backend: "pi",
+		createdAt: 1,
+		updatedAt: 2,
+		usageCount: 3,
+		lastUsedAt: 4,
+	};
+	const view = buildPiDeckMcpAgentSummary(agent);
+	assert.equal("systemPrompt" in view, false, "角色设定不得进入投影");
+	assert.equal(JSON.stringify(view).includes(SECRET), false, `投影泄漏了标记：${JSON.stringify(view)}`);
+	assert.deepEqual(plain(view), { id: "a1", name: "翻译", description: "一句话说明", icon: "🌐", category: "translation", builtin: false, model: { provider: "p", modelId: "m" }, backend: "pi", usageCount: 3, lastUsedAt: 4, createdAt: 1, updatedAt: 2 });
+	// 可选项缺省时给 null（客户端不必区分 undefined），但依旧没有角色设定。
+	const bare = buildPiDeckMcpAgentSummary({ ...agent, model: undefined, backend: undefined, lastUsedAt: undefined, builtin: undefined });
+	assert.equal(bare.model, null);
+	assert.equal(bare.backend, null);
+	assert.equal(bare.lastUsedAt, null);
+	assert.equal(bare.builtin, false);
 });

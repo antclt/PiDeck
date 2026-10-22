@@ -10,6 +10,8 @@ export function usePiDeckMcp() {
 	// 授权草稿：通配与写开关不进 state 校验，只在 apply 时与 projectIds 一起提交。
 	const [allProjects, setAllProjects] = useState(false);
 	const [allowControl, setAllowControl] = useState(false);
+	// 智能体写能力草稿：与 allowControl 同一次 apply 提交，关闭时一并撤回。
+	const [allowAgentWrite, setAllowAgentWrite] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const generation = useRef(0);
@@ -31,6 +33,7 @@ export function usePiDeckMcp() {
 			setProjectIds(result.value.projectIds);
 			setAllProjects(result.value.allProjects);
 			setAllowControl(result.value.allowControl);
+			setAllowAgentWrite(result.value.allowAgentWrite);
 			setError(result.value.error ?? null);
 		} catch {
 			if (generation.current === epoch) setError("operation-failed");
@@ -57,14 +60,15 @@ export function usePiDeckMcp() {
 			setBusy(true);
 			setError(null);
 			try {
-				// 关闭 = 撤回全部授权：两个开关一并落回安全默认，重新启用时必须显式重选。
-				const result = await desktopApi.piDeckMcp.setAccess(enabled ? { enabled, projectIds, allProjects, allowControl } : { enabled: false, projectIds: [], allProjects: false, allowControl: false });
+				// 关闭 = 撤回全部授权：写开关一并落回安全默认，重新启用时必须显式重选。
+				const result = await desktopApi.piDeckMcp.setAccess(enabled ? { enabled, projectIds, allProjects, allowControl, allowAgentWrite } : { enabled: false, projectIds: [], allProjects: false, allowControl: false, allowAgentWrite: false });
 				if (generation.current !== epoch) return;
 				if (result.ok) {
 					setState(result.value);
 					setProjectIds(result.value.projectIds);
 					setAllProjects(result.value.allProjects);
 					setAllowControl(result.value.allowControl);
+					setAllowAgentWrite(result.value.allowAgentWrite);
 				} else {
 					setError(result.code);
 					// Failure can have stopped the listener: never keep displaying stale running state.
@@ -80,7 +84,7 @@ export function usePiDeckMcp() {
 				}
 			}
 		},
-		[projectIds, allProjects, allowControl],
+		[projectIds, allProjects, allowControl, allowAgentWrite],
 	);
 
 	/** Sensitive connection config lives only for this operation, not in component/atom state. */
@@ -110,5 +114,5 @@ export function usePiDeckMcp() {
 			}
 		}
 	}, []);
-	return { state, projectIds, setProjectIds, allProjects, setAllProjects, allowControl, setAllowControl, busy, error, refresh, apply, withConnection };
+	return { state, projectIds, setProjectIds, allProjects, setAllProjects, allowControl, setAllowControl, allowAgentWrite, setAllowAgentWrite, busy, error, refresh, apply, withConnection };
 }

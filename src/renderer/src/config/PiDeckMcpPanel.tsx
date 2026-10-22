@@ -14,7 +14,8 @@ export function PiDeckMcpPanel({ existingNames, disabled, onAdd }: { existingNam
 	const prefix = useId();
 	const [copied, setCopied] = useState(false);
 	const busy = disabled || host.busy;
-	const changed = host.state && (host.projectIds.length !== host.state.projectIds.length || host.projectIds.some((id) => !host.state?.projectIds.includes(id)) || host.allProjects !== host.state.allProjects || host.allowControl !== host.state.allowControl);
+	const changed =
+		host.state && (host.projectIds.length !== host.state.projectIds.length || host.projectIds.some((id) => !host.state?.projectIds.includes(id)) || host.allProjects !== host.state.allProjects || host.allowControl !== host.state.allowControl || host.allowAgentWrite !== (host.state.allowAgentWrite ?? false));
 	// 「全选」只覆盖当前项目列表；要跟随今后新建的项目得用通配授权，而不是逐个勾。
 	const projectCount = host.state?.projects.length ?? 0;
 	const allSelected = projectCount > 0 && host.projectIds.length === projectCount;
@@ -69,6 +70,15 @@ export function PiDeckMcpPanel({ existingNames, disabled, onAdd }: { existingNam
 					<Label htmlFor={`${prefix}-control`}>{t("config.mcp.pideck.allowControl")}</Label>
 				</div>
 				<p className="text-micro text-muted-foreground">{t("config.mcp.pideck.allowControlHint")}</p>
+			</fieldset>
+			{/* 智能体写能力：默认关；关闭时只读元信息，开启后 CRUD + 会话绑定，角色设定只写不读 */}
+			<fieldset disabled={busy || !host.state} className="flex flex-col gap-2">
+				<legend className="mb-2 text-control font-medium">{t("config.mcp.pideck.agentWriteSection")}</legend>
+				<div className="flex shrink-0 items-center gap-2">
+					<Checkbox id={`${prefix}-agent-write`} checked={host.allowAgentWrite} onCheckedChange={(checked) => host.setAllowAgentWrite(checked === true)} />
+					<Label htmlFor={`${prefix}-agent-write`}>{t("config.mcp.pideck.allowAgentWrite")}</Label>
+				</div>
+				<p className="text-micro text-muted-foreground">{t("config.mcp.pideck.allowAgentWriteHint")}</p>
 			</fieldset>
 			<div className="flex flex-wrap gap-2">
 				<Button

@@ -10,6 +10,7 @@ import test from "node:test";
 
 const { PiDeckMcpService } = loadTsCommonJs("src/main/mcp/PiDeckMcpService.ts");
 const { HostPluginSessions } = loadTsCommonJs("src/main/plugins/HostPluginSessions.ts");
+const { AgentProfileStore } = loadTsCommonJs("src/main/agents/AgentProfileStore.ts");
 const { createDefaultAppSettings } = loadTsCommonJs("src/shared/types/settings.ts");
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
@@ -44,13 +45,24 @@ async function fixture(t, override = {}) {
 		{ id: "p1", name: "Allowed" },
 		{ id: "p2", name: "Private" },
 	];
+	// 真实 AgentProfileStore（临时文件）：内置种子、长度归一、绑定清理都走生产实现，而不是假桩。
+	const agentStore = new AgentProfileStore(join(dir, "agent-profiles.json"));
+	await agentStore.load();
+	const agents = {
+		list: () => agentStore.list(),
+		get: (agentId) => agentStore.get(agentId),
+		create: (input) => agentStore.create(input),
+		update: (agentId, patch) => agentStore.update(agentId, patch),
+		delete: (agentId) => agentStore.delete(agentId),
+		bindSession: (input) => agentStore.bindSession(input),
+	};
 	const configPath = join(dir, "mcp-host.json");
-	const service = new PiDeckMcpService({ configPath, projects: () => projects, sessions, settings: () => null, builtInExtensionsVersion: () => null, runtimes: () => [], abortRuntime: async () => ({ ok: true, value: undefined }), warn: () => undefined, ...override });
+	const service = new PiDeckMcpService({ configPath, projects: () => projects, sessions, agents, settings: () => null, builtInExtensionsVersion: () => null, runtimes: () => [], abortRuntime: async () => ({ ok: true, value: undefined }), warn: () => undefined, ...override });
 	t.after(async () => {
 		await service.dispose();
 		await rm(dir, { recursive: true, force: true });
 	});
-	return { service, projects, configPath, sessions, dir };
+	return { service, projects, configPath, sessions, agentStore, dir };
 }
 
 async function connect(t, service) {
@@ -71,6 +83,7 @@ test("MCP is off by default, has no endpoint/credential and exports disabled con
 		// 旧配置文件没有这两个字段，默认值必须让升级后的行为原样延续：显式白名单 + 无写能力。
 		allProjects: false,
 		allowControl: false,
+		allowAgentWrite: false,
 		running: false,
 		projects: [
 			{ id: "p1", name: "Allowed" },
@@ -89,7 +102,7 @@ test("MCP is off by default, has no endpoint/credential and exports disabled con
 	assert.match(definition.url, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
 	assert.deepEqual(
 		(await client.listTools()).tools.map((v) => v.name),
-		["projects_list", "settings_get", "extensions_list", "runtime_status", "sessions_list", "sessions_get", "sessions_search", "sessions_entries"],
+		["projects_list", "settings_get", "extensions_list", "runtime_status", "agents_list", "agents_get", "sessions_list", "sessions_get", "sessions_search", "sessions_entries"],
 	);
 	for (const tool of (await client.listTools()).tools) assert.equal(tool.annotations.readOnlyHint, true);
 	// 写开关默认关：写工具不注册，客户端连看都看不到，而不是注册后拒绝。
@@ -370,7 +383,7 @@ test("disconnected requests keep their IO budget until settled, then release slo
 	await new Promise((r) => setImmediate(r));
 	const recovered = await list();
 	assert.equal(recovered.status, 200, "SDK shutdown must not strand completed request slots");
-	assert.equal((await recovered.json()).result.tools.length, 8);
+	assert.equal((await recovered.json()).result.tools.length, 10);
 });
 
 test("通配授权跟随项目列表：新增项目立即可读，已删除项目当场失效", async (t) => {
@@ -408,6 +421,7 @@ test("通配/写开关字段向后兼容，且 enabled 必须至少有一块可�
 	const legacy = await read({ version: 1, enabled: true, projectIds: ["p1"], port: 41234, token: "a".repeat(64) });
 	assert.equal(legacy.allProjects, false);
 	assert.equal(legacy.allowControl, false);
+	assert.equal(legacy.allowAgentWrite, false);
 	assert.equal(legacy.projectIds[0], "p1");
 	// enabled 但既没白名单也不是通配：这份配置谁都不能读，必须 fail closed 而不是静默监听。
 	await assert.rejects(read(base), /config-read-failed/);
@@ -469,4 +483,78 @@ test("写开关只在打开时注册 sessions_abort；中断按代次校验，�
 	assert.equal((await call("sessions_abort", { sessionId: "s2" })).isError, true);
 	assert.equal((await call("sessions_abort", { sessionId: "s1", expectedRuntimeGeneration: generation })).isError, undefined);
 	assert.deepEqual(aborted, [{ sessionId: "s1", agentId: "a1", runtimeGeneration: 3 }]);
+});
+
+test("智能体只读工具：宿主级、只出元信息，systemPrompt 永不返回", async (t) => {
+	const { service, agentStore } = await fixture(t);
+	await service.setAccess({ enabled: true, projectIds: ["p1"], allowControl: false });
+	const { client } = await connect(t, service);
+	const builtin = agentStore.get("builtin-translate");
+	assert.ok(builtin && builtin.systemPrompt.length > 0, "内置翻译智能体必须存在且带角色设定");
+	const tools = (await client.listTools()).tools;
+	for (const name of ["agents_list", "agents_get"]) assert.equal(tools.find((tool) => tool.name === name)?.annotations.readOnlyHint, true, `${name} 是只读工具`);
+	const list = (await client.callTool({ name: "agents_list" })).structuredContent.data;
+	// 内置种子（翻译/小助手/诊断/插件开发）都在；智能体是宿主级，不需要项目白名单。
+	assert.ok(list.length >= 4, "内置智能体应全部出现在元信息列表里");
+	const translate = list.find((agent) => agent.id === "builtin-translate");
+	assert.equal(translate.builtin, true);
+	assert.equal(translate.name, builtin.name);
+	const serialized = JSON.stringify(list);
+	assert.equal(serialized.includes("systemPrompt"), false, "元信息投影不得出现 systemPrompt 键");
+	assert.equal(serialized.includes(builtin.systemPrompt.slice(0, 24)), false, "角色设定正文不得经只读工具外泄");
+	const missing = await client.callTool({ name: "agents_get", arguments: { agentId: "missing-agent" } });
+	assert.equal(missing.isError, true);
+	assert.equal(JSON.parse(missing.content[0].text).code, "agent-not-found");
+});
+
+test("智能体写工具默认不注册；打开后可创建/编辑/删除/绑定，角色设定只写不读", async (t) => {
+	const { service } = await fixture(t);
+	await service.setAccess({ enabled: true, projectIds: ["p1"], allowControl: false });
+	const off = (await connect(t, service)).client;
+	assert.equal(
+		(await off.listTools()).tools.some((tool) => tool.name === "agents_create"),
+		false,
+		"写开关关闭时工具不注册",
+	);
+	assert.equal((await service.getState()).allowAgentWrite, false);
+
+	await service.setAccess({ enabled: true, projectIds: ["p1"], allowControl: false, allowAgentWrite: true });
+	assert.equal((await service.getState()).allowAgentWrite, true);
+	const { client } = await connect(t, service);
+	const tools = (await client.listTools()).tools;
+	for (const name of ["agents_create", "agents_update", "agents_delete", "agents_bind_session"]) {
+		const write = tools.find((tool) => tool.name === name);
+		assert.ok(write, `${name} 应随写开关注册`);
+		assert.equal(write.annotations.readOnlyHint, false, "写工具不能被标成只读");
+		assert.equal(write.annotations.destructiveHint, false);
+	}
+
+	const created = await client.callTool({ name: "agents_create", arguments: { name: "MCP 角色", systemPrompt: "只写不读的角色设定", category: "coding" } });
+	assert.equal(created.isError, undefined);
+	assert.equal(JSON.stringify(created).includes("只写不读的角色设定"), false, "写入的角色设定不得回显");
+	const agentId = created.structuredContent.data.id;
+	assert.equal(created.structuredContent.data.name, "MCP 角色");
+	assert.equal(created.structuredContent.data.category, "coding");
+
+	const updated = await client.callTool({ name: "agents_update", arguments: { agentId, name: "改名", systemPrompt: "新的角色设定" } });
+	assert.equal(updated.structuredContent.data.name, "改名");
+	assert.equal(JSON.stringify(updated).includes("新的角色设定"), false, "更新角色设定同样不回显");
+	const empty = await client.callTool({ name: "agents_update", arguments: { agentId } });
+	assert.equal(JSON.parse(empty.content[0].text).code, "agent-patch-empty");
+
+	// 绑定会话：会话必须属于已授权项目（s1 → p1），未授权项目 / 会话不存在 / 智能体不存在都要拒绝。
+	const bound = await client.callTool({ name: "agents_bind_session", arguments: { projectId: "p1", sessionId: "s1", agentId } });
+	assert.equal(bound.isError, undefined);
+	assert.deepEqual(bound.structuredContent.data, { projectId: "p1", sessionId: "s1", agentId });
+	assert.equal((await client.callTool({ name: "agents_bind_session", arguments: { projectId: "p2", sessionId: "s2", agentId } })).isError, true);
+	assert.equal((await client.callTool({ name: "agents_bind_session", arguments: { projectId: "p1", sessionId: "missing", agentId } })).isError, true);
+	assert.equal((await client.callTool({ name: "agents_bind_session", arguments: { projectId: "p1", sessionId: "s1", agentId: "missing-agent" } })).isError, true);
+	assert.equal((await client.callTool({ name: "agents_bind_session", arguments: { projectId: "p1", sessionId: "s1", agentId: null } })).isError, undefined, "agentId=null 解绑");
+
+	// 内置不可删；自建可删，删完 agents_get 返回 agent-not-found。
+	const builtinDelete = await client.callTool({ name: "agents_delete", arguments: { agentId: "builtin-translate" } });
+	assert.equal(JSON.parse(builtinDelete.content[0].text).code, "agent-not-deletable");
+	const deleted = await client.callTool({ name: "agents_delete", arguments: { agentId } });
+	assert.deepEqual(deleted.structuredContent.data, { agentId, deleted: true });
+	assert.equal((await client.callTool({ name: "agents_get", arguments: { agentId } })).isError, true);
 });
