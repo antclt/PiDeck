@@ -3426,7 +3426,12 @@ function registerIpc() {
 	// pideck-file://：对话内本地图片只读通道。白名单根=项目目录（含 worktree）+ 聊天工作区
 	// + userData + 专属临时图片目录。**不放行整个 %TEMP%**：安装器/解压/其它程序的临时文件
 	// 不该被消息内容当图床读（取舍见 docs/markdown-image-rendering-plan.md）。
-	const resolveLocalImageRoots = () => [app.getPath("userData"), join(app.getPath("temp"), "pideck-shots"), projectStore.getChatProjectPath(), ...projectStore.list().map((project) => project.path)];
+	// 对话内本地图的白名单根。除了项目/运行时目录，还包含**桌面**：人和 agent 都习惯把
+	// 截图、设计稿放在桌面（2026-10-21 实测：会话里 `~/Desktop/PiDeck-Settings-*/x.png`
+	// 全被判 403，因为桌面不在白名单）。用 `app.getPath("desktop")` 而不是拼 home/Desktop：
+	// 它跟随用户重定向（OneDrive/自定义位置），路径不存在时 realpath 失败会退回原值，
+	// 目录里也不可能有能读到的文件，不会放宽真实边界。
+	const resolveLocalImageRoots = () => [app.getPath("userData"), app.getPath("desktop"), join(app.getPath("temp"), "pideck-shots"), projectStore.getChatProjectPath(), ...projectStore.list().map((project) => project.path)];
 	// 协议与 IPC 共用同一份「已规范化 + 5s 缓存」的根列表：realpathSync.native 是同步调用，
 	// 一条消息几十张图时不能每次请求都把全部项目根重算一遍。
 	const canonicalLocalImageRoots = createCanonicalRootsProvider(resolveLocalImageRoots);
