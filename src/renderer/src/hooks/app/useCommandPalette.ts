@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAtomValue, useStore } from "jotai";
-import { CircleStop, Fingerprint, Puzzle, RefreshCw, RotateCw, Settings2, SquarePen } from "lucide-react";
+import { Bot, CircleStop, Clock, Fingerprint, Puzzle, RefreshCw, RotateCw, Settings2, SquarePen } from "lucide-react";
 import { buildSettingsCommands, type PaletteCommand } from "../../utils/commandPaletteCommands";
 import { markCommandPaletteOnboardingSeen } from "../../components/overlays/CommandPaletteOnboarding";
 import { openSettingsAtom } from "../../atoms/app-ui-atoms";
 import { hostPluginCatalogAtom, hostPluginPanelAtom } from "../../atoms/host-plugin-atoms";
+import { isModuleHidden } from "../../../../shared/hiddenModules";
 import { copyTextWithCopiedNotice } from "../../utils/clipboardNotice";
 import { desktopApi as api } from "../../desktopApi";
 import { t } from "../../i18n";
@@ -15,6 +16,10 @@ export interface CommandPaletteActions {
 	restartActiveAgent: (agentId?: string) => Promise<void> | void;
 	closeAgent: (agentId: string) => Promise<void> | void;
 	runSessionControl: (sessionId: string, action: "reload") => Promise<void> | void;
+	/** 打开会话 Tab 栏里的「定时任务」页面（功能模块可隐藏侧栏入口，命令面板保留直达路径）。 */
+	openAutomationPage: () => void;
+	/** 打开会话 Tab 栏里的「智能体」页面，同上。 */
+	openAgentMarketPage: () => void;
 }
 
 /**
@@ -68,6 +73,27 @@ export function useCommandPalette({ activeProjectId, currentSessionId, activeAge
 			keywords: ["settings", "设置", "偏好", "preferences", "配置"],
 			icon: Settings2,
 			run: () => store.set(openSettingsAtom, { tab: "common" }),
+		});
+
+		// 页面式工作区（定时任务 / 智能体）：侧栏入口可被外观设置→功能模块收起，
+		// 命令面板始终保留直达路径——隐藏后「找不回来」是最糟的结果。
+		commands.push({
+			id: "action:open-automation",
+			group: actionGroup,
+			title: t("command.actionOpenAutomation"),
+			subtitle: isModuleHidden(hiddenModules, "automation") ? t("command.openHiddenPageHint") : undefined,
+			keywords: ["定时任务", "自动化", "automation", "cron", "schedule", "任务计划"],
+			icon: Clock,
+			run: () => actions.openAutomationPage(),
+		});
+		commands.push({
+			id: "action:open-agents",
+			group: actionGroup,
+			title: t("command.actionOpenAgents"),
+			subtitle: isModuleHidden(hiddenModules, "agents") ? t("command.openHiddenPageHint") : undefined,
+			keywords: ["智能体", "agent", "agents", "角色", "agent market"],
+			icon: Bot,
+			run: () => actions.openAgentMarketPage(),
 		});
 
 		// 运行控制类命令只在有当前会话时才出现——没有目标时列出来只会点了没反应。

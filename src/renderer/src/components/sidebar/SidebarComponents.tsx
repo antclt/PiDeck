@@ -590,7 +590,8 @@ export function ProjectContextMenu(props: {
 	/** 导入其他目录的会话（项目目录被移动/改名后找回历史） */
 	onImportDirectorySessions: () => void;
 	onManageProjectResources: () => void;
-	onManageAutomations: () => void;
+	/** 定时任务模块被隐藏时传 undefined：入口随之消失（只是隐藏 UI，任务照常调度）。 */
+	onManageAutomations?: () => void;
 	onManageSessions: () => void;
 	onFilterSessions: () => void;
 	onToggleWorktree: () => void;
@@ -666,10 +667,12 @@ export function ProjectContextMenu(props: {
 				<List className="size-3.5" aria-hidden="true" />
 				{t("menu.manageSessions")}
 			</DropdownMenuItem>
-			<DropdownMenuItem onSelect={props.onManageAutomations}>
-				<Clock className="size-3.5" aria-hidden="true" />
-				{t("automation.title")}
-			</DropdownMenuItem>
+			{props.onManageAutomations && (
+				<DropdownMenuItem onSelect={props.onManageAutomations}>
+					<Clock className="size-3.5" aria-hidden="true" />
+					{t("automation.title")}
+				</DropdownMenuItem>
+			)}
 			{/* 内置聊天项目没有 .pi/.agents 资源目录，不暴露项目管理入口，避免打开即报
 			    "Chat 项目不支持项目级资源"（由弹窗本体兜底） */}
 			{props.menu.project.kind !== "chat" && (

@@ -389,6 +389,12 @@ const SETTINGS_ROW_ANCHORS = [
 	},
 	{
 		tab: "appearance",
+		slug: "appearance-scroll-on-send",
+		labelKey: "settings.scrollToLatestOnSend",
+		keywords: ["发送后滚动", "自动滚动", "回到底部", "滚动到最新", "scroll to bottom", "auto scroll", "send scroll"],
+	},
+	{
+		tab: "appearance",
 		slug: "appearance-native-title-bar",
 		labelKey: "settings.nativeTitleBar",
 		keywords: ["原生标题栏", "标题栏", "title bar", "窗口标题"],
@@ -403,7 +409,7 @@ const SETTINGS_ROW_ANCHORS = [
 		tab: "appearance",
 		slug: "appearance-modules",
 		labelKey: "settings.modules.title",
-		keywords: ["隐藏模块", "功能模块", "隐藏", "显示模块", "hide", "modules", "收起", "dsh", "飞书", "桌宠", "生图", "功能提示", "响应提示", "tips"],
+		keywords: ["隐藏模块", "功能模块", "隐藏", "显示模块", "hide", "modules", "收起", "dsh", "飞书", "桌宠", "生图", "功能提示", "响应提示", "tips", "定时任务", "智能体", "automation", "agents"],
 	},
 
 	// ── Git ──────────────────────────────────────────────────────────

@@ -20,11 +20,14 @@ export const HIDEABLE_SETTINGS_TAB_IDS = ["im", "pet", "vision", "imagegen", "vi
 
 /**
  * 全部可隐藏模块：设置 tab + `dsh`（DSH 后端不是设置 tab，它对应配置管理的 DSH 分页
- * 与新建会话的 DSH 后端选项）+ `respondingTips`（流式状态条右侧的功能提示轮播）。
+ * 与新建会话的 DSH 后端选项）+ `respondingTips`（流式状态条右侧的功能提示轮播）
+ * + `automation` / `agents`（会话 Tab 栏里的页面式工作区「定时任务」「智能体」）。
  *
- * respondingTips 没有自己的设置页，但同属「只收起界面入口」语义，所以挂在同一张清单里。
+ * respondingTips / automation / agents 都没有自己的设置页，但同属「只收起界面入口」语义，
+ * 所以挂在同一张清单里：隐藏只摘掉侧栏与菜单入口，已建任务照常调度、已保存智能体与绑定
+ * 照常生效；命令面板（Ctrl+P）保留打开这两个页面的命令，隐藏不等于不可达。
  */
-export const HIDEABLE_MODULE_IDS = [...HIDEABLE_SETTINGS_TAB_IDS, "dsh", "respondingTips"] as const;
+export const HIDEABLE_MODULE_IDS = [...HIDEABLE_SETTINGS_TAB_IDS, "dsh", "respondingTips", "automation", "agents"] as const;
 
 export type HideableSettingsTabId = (typeof HIDEABLE_SETTINGS_TAB_IDS)[number];
 export type HideableModuleId = (typeof HIDEABLE_MODULE_IDS)[number];

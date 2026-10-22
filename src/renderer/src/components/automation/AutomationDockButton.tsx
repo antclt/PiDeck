@@ -1,6 +1,7 @@
 import { useAtomValue, useSetAtom } from "jotai";
 import { Clock } from "lucide-react";
 import { automationActiveRunsAtom, openAutomationPageAtom } from "../../atoms/automation-atoms";
+import { automationModuleHiddenAtom } from "../../atoms/app-ui-atoms";
 import { t } from "../../i18n";
 
 /**
@@ -11,6 +12,9 @@ import { t } from "../../i18n";
 export function AutomationDockButton() {
 	const openAutomationPage = useSetAtom(openAutomationPageAtom);
 	const activeRuns = useAtomValue(automationActiveRunsAtom);
+	// 外观设置→功能模块里隐藏了「定时任务」：只摘掉入口，调度器与已建任务不受影响
+	const hidden = useAtomValue(automationModuleHiddenAtom);
+	if (hidden) return null;
 	const hasActive = activeRuns.length > 0;
 	const label = hasActive ? `${t("automation.title")} (${activeRuns.length})` : t("automation.title");
 

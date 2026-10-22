@@ -42,7 +42,9 @@ import {
 	defaultAgentBackendAtom,
 	effectiveAgentBackendAtom,
 	busySendDeliveryAtom,
+	scrollToLatestOnSendAtom,
 	hiddenModulesAtom,
+	openAgentMarketPageAtom,
 	hiddenComposerFeaturesAtom,
 	imageGenConfigAtom,
 	enhanceModelAtom,
@@ -277,6 +279,7 @@ export function App() {
 	const setCurrentSessionId = useSetAtom(currentSessionIdAtom);
 	const replaceProjectSessions = useSetAtom(replaceProjectSessionsAtom);
 	const openAutomationPage = useSetAtom(openAutomationPageAtom);
+	const openAgentMarketPage = useSetAtom(openAgentMarketPageAtom);
 	// 页面式工作区（定时任务 / 智能体）：Tab 列表与当前呈现页面；切会话只失活、关闭才卸载。
 	const openWorkspacePageIds = useAtomValue(openWorkspacePageIdsAtom);
 	const activeWorkspacePage = useAtomValue(activeWorkspacePageAtom);
@@ -697,6 +700,12 @@ export function App() {
 	useEffect(() => {
 		setBusySendDelivery(settings.busySendDelivery);
 	}, [settings.busySendDelivery, setBusySendDelivery]);
+
+	// 「发送后自动回底」同步给时间线 controller（决策时刻读 atom，设置保存后下一次发送即生效）。
+	const setScrollToLatestOnSend = useSetAtom(scrollToLatestOnSendAtom);
+	useEffect(() => {
+		setScrollToLatestOnSend(settings.scrollToLatestOnSend !== false);
+	}, [settings.scrollToLatestOnSend, setScrollToLatestOnSend]);
 
 	// 隐藏的功能模块同步给不持有 settings props 的消费方（ConfigModal Pi/DSH 分页、composer 后端下拉），
 	// 与 defaultAgentBackend 同一模式。
@@ -2940,7 +2949,7 @@ export function App() {
 		currentSessionId,
 		activeAgentId,
 		hiddenModules: settings.hiddenModules ?? [],
-		actions: { selectProjectCommand, restartActiveAgent, closeAgent, runSessionControl },
+		actions: { selectProjectCommand, restartActiveAgent, closeAgent, runSessionControl, openAutomationPage: () => openAutomationPage(), openAgentMarketPage: () => openAgentMarketPage() },
 	});
 
 	// 窗口缩放快捷键（Ctrl/Cmd+= / Ctrl/Cmd+-）由主进程直接改 zoomFactor 并落盘

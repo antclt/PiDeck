@@ -406,6 +406,12 @@ export type AppSettings = {
 	 */
 	sessionStatusPlacement: SessionStatusPlacement;
 	/**
+	 * 发送消息后是否把时间线滚动到最新（缺省开启；显式 false 才关闭）。
+	 * 关闭后发送不动视口：用户上翻读历史时不会被拽回底部；停在底部时仍由跟底引擎跟随新回复。
+	 * 消费方是 useSessionTimelineController 的发送定位 effect（决策时刻读 atom 镜像）。
+	 */
+	scrollToLatestOnSend?: boolean;
+	/**
 	 * 会话 Tab 最大宽度（px，80–400，默认 104=旧硬编码值）。仅封顶不设下限宽度：
 	 * Tab 按内容收缩（w-fit），短标题的 Tab 不受影响；有前置徽标时上限另加
 	 * SESSION_TAB_BADGE_EXTRA_WIDTH（28px，旧 132px 差值）。外观设置滑杆可调。
@@ -1053,6 +1059,7 @@ export function createDefaultAppSettings(): AppSettings {
 		contentMaxWidth: 1800,
 		chatContentWidthPct: 80,
 		sessionStatusPlacement: "composer",
+		scrollToLatestOnSend: true,
 		navigationMode: "tabs",
 		sessionTabMaxWidth: SESSION_TAB_MAX_WIDTH_DEFAULT,
 		maxEditorFileSizeMB: 5,

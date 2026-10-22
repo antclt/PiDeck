@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: e31c5ecec40cd95b4b33d4aedea7be3b11890cab83cf97168bba85eee87dfe7e（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: b1d4460cef8aa82f329cd7f6393abe58b6191e63408ba36c013286da5a3cfc28（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -1271,6 +1271,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"command.groupConfig": "配置管理",
 	"command.openSettingsHint": "開啟設定頁",
 	"command.openHiddenSettingsHint": "已隱藏，點選顯示",
+	"command.openHiddenPageHint": "已隱藏，點選開啟",
+	"command.actionOpenAutomation": "開啟定時任務",
+	"command.actionOpenAgents": "開啟智慧體",
 	"command.openConfigHint": "開啟配置管理",
 	"command.configModels": "模型配置",
 	"command.configAuth": "認證與帳號",
@@ -4605,6 +4608,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.sectionUpdates": "版本與更新",
 	"settings.sectionRuntime": "執行",
 	"settings.sectionEditors": "外部編輯器",
+	"settings.scrollToLatestOnSend": "傳送訊息後自動滾動到最新",
+	"settings.scrollToLatestOnSendDesc": "預設開啟。關閉後傳送時保持當前滾動位置：上翻看歷史時不會被拽回底部；停在底部時仍會跟隨新回覆增長。",
 	"settings.contentWidthPct": "聊天內容寬度",
 	"settings.contentWidthPctDesc": "訊息、輸入框與待發送共用同一寬度。100% 接近全寬（仍留 12px 邊距）。",
 	"settings.sessionStatusPlacement": "會話狀態位置",
@@ -5052,6 +5057,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.modules.dshDesc": "配置管理的 DSH 分頁、輸入框的 DSH 後端選項",
 	"settings.modules.respondingTips": "功能提示",
 	"settings.modules.respondingTipsDesc": "流式響應狀態條右側輪播的功能提示；只關掉這幾行提示本身，不影響提示裡提到的任何功能",
+	"settings.modules.automationDesc": "側欄「定時任務」入口與專案選單入口；已建任務照常按計劃執行，命令面板（Ctrl+P）仍可開啟頁面",
+	"settings.modules.agentsDesc": "側欄「智慧體」入口；已儲存的智慧體與會話繫結照常生效，命令面板（Ctrl+P）仍可開啟頁面",
 	"settings.modules.imDesc": "飛書 / 微信等外部連線設定頁",
 	"settings.modules.petDesc": "桌面寵物設定頁",
 	"settings.modules.visionDesc": "視覺橋設定頁",

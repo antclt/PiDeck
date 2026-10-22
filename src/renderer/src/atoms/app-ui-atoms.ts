@@ -131,6 +131,19 @@ export const hiddenComposerFeaturesAtom = atom<readonly string[]>([]);
 /** 流式状态条右侧的功能提示轮播是否被隐藏（设置 → 外观 → 功能模块）。 */
 export const respondingTipsHiddenAtom = atom((get) => isModuleHidden(get(hiddenModulesAtom), "respondingTips"));
 
+/** 定时任务入口是否被隐藏：侧栏入口 + 项目菜单入口；已建任务照常按计划执行。 */
+export const automationModuleHiddenAtom = atom((get) => isModuleHidden(get(hiddenModulesAtom), "automation"));
+
+/** 智能体入口是否被隐藏：侧栏「智能体」入口；已保存的智能体与会话绑定照常生效。 */
+export const agentsModuleHiddenAtom = atom((get) => isModuleHidden(get(hiddenModulesAtom), "agents"));
+
+/**
+ * 发送消息后是否滚动到最新（设置项 scrollToLatestOnSend 的渲染层快照）。
+ * App 在 settings 变化时写入；useSessionTimelineController 的发送定位 effect 在决策时刻
+ * 用 store.get 读取（不订阅，避免设置改动重挂载时间线），默认开启。
+ */
+export const scrollToLatestOnSendAtom = atom(true);
+
 /**
  * 忙碌时发送消息的默认投递行为（设置项 busySendDelivery 的渲染层快照）。
  * App 在 settings 变化时写入；composer/发送链路在决策时刻读取，

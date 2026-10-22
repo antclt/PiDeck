@@ -103,6 +103,7 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "fontFamilyMonoCustom", tab: "appearance", itemKey: "settings.fontFamilyMonoCustomField" },
 	{ field: "chatContentWidthPct", tab: "appearance", itemKey: "settings.contentWidthPct" },
 	{ field: "sessionStatusPlacement", tab: "appearance", itemKey: "settings.sessionStatusPlacement" },
+	{ field: "scrollToLatestOnSend", tab: "appearance", itemKey: "settings.scrollToLatestOnSend" },
 	{ field: "contentMaxWidth", tab: "appearance", itemKey: "settings.contentWidthPct" },
 	{ field: "navigationMode", tab: "appearance", itemKey: "settings.navigationMode" },
 	{ field: "sessionTabMaxWidth", tab: "appearance", itemKey: "settings.sessionTabMaxWidth" },

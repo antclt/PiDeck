@@ -480,6 +480,16 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 						</SelectContent>
 					</Select>
 				</SettingRow>
+				{/* 发送后回底：默认开启（历史行为），关掉后上翻读历史时发送不会被拽回底部 */}
+				<SettingSwitchRow
+					anchor="appearance-scroll-on-send"
+					title={t("settings.scrollToLatestOnSend")}
+					description={t("settings.scrollToLatestOnSendDesc")}
+					checked={draft.scrollToLatestOnSend !== false}
+					dirty={isDirty("scrollToLatestOnSend")}
+					dirtyLabel={t("settings.scrollToLatestOnSend")}
+					onChange={(checked) => updateDraft({ scrollToLatestOnSend: checked })}
+				/>
 			</SettingsSection>
 
 			{/* 窗口样式 */}

@@ -19,6 +19,7 @@ import {
 	sessionRecordByIdAtomFamily,
 	saveSessionScrollAnchorAtom,
 	sessionScrollAnchorByIdAtom,
+	scrollToLatestOnSendAtom,
 	sessionSendStateByIdAtom,
 	sendPinAnimatingByIdAtom,
 	setSessionMessageLoadStateAtom,
@@ -1113,6 +1114,15 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		const baseline = sendMessageBaselineRef.current;
 		sendMessageBaselineRef.current = { ownerKey, messageId: sendMessageId };
 		if (!baseline || baseline.ownerKey !== ownerKey) return;
+		// 用户关掉「发送消息后自动滚动到最新」：发送不动视口，也不登记挂起定位。
+		// baseline 仍照常推进（上面已写），否则重新打开开关后会把这条旧发送误判成新消息再拽一次。
+		// 停在底部时仍由跟底引擎按内容增长跟随新回复——这里只禁止「发送那一刻的强制定位」。
+		// 沙箱兜底：部分单测整体 stub ../atoms（见下方 sendState 同款处理），缺该 atom 时按默认「开启」。
+		if (scrollToLatestOnSendAtom != null && store.get(scrollToLatestOnSendAtom) === false) {
+			pendingSendScrollRef.current = undefined;
+			positionedSendMessageRef.current = sendMessageId;
+			return;
+		}
 		const changed = Boolean(sendMessageId) && baseline.messageId !== sendMessageId;
 		// 发送态用于区分「用户提交」和「读盘/投影填充历史」：部分单测沙箱会整体 stub
 		// ../atoms 后单独加载真实模块，缺这个 atom 时按「无在途发送」处理（生产恒存在）。

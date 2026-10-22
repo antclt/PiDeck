@@ -2,7 +2,7 @@ import { Activity, Bolt, CirclePlus, Clock, Folder, Globe, MessageSquare, Monito
 import { useEffect, useState, type ReactNode } from "react";
 import type { AgentBackend, AgentTab, AppThemeMode, ArchivedDshSession, ArchivedPiSession, Project, SessionRecord, SessionSummary, WorktreeEntry } from "../../../../shared/types";
 import { AgentContextMenu, DraftSessionContextMenu, ProjectContextMenu, SessionContextMenu, SessionManagerModal, SessionSourceFilterMenu, WorktreeCreateDialog } from "./SidebarParts";
-import { sessionRecordToSummary } from "../../atoms";
+import { automationModuleHiddenAtom, sessionRecordToSummary } from "../../atoms";
 import { hasPendingUpdateAtom, pendingAppUpdateAtom, pendingCatalogUpdateAtom, pendingPiUpdateAtom, updateStatusAtom } from "../../atoms/update-atoms";
 import { useAtomValue } from "jotai";
 import { isManagerSessionSummary, worktreeFamilyProjects } from "../../sessionManagerModel";
@@ -165,6 +165,8 @@ export function SidebarContent(props: SidebarContentProps) {
 	const hasPendingCatalogUpdate = useAtomValue(pendingCatalogUpdateAtom);
 	const hasPendingUpdate = useAtomValue(hasPendingUpdateAtom);
 	const updateStatus = useAtomValue(updateStatusAtom);
+	// 功能模块隐藏「定时任务」时，项目菜单里的入口一并收起（侧栏入口见 AutomationDockButton）
+	const automationHidden = useAtomValue(automationModuleHiddenAtom);
 	// tooltip 清单条目：按「哪一类有更新」组装，让用户不用猜圆点指的是什么。
 	const updateItems = [
 		hasPendingAppUpdate && updateStatus?.app?.latestVersion ? t("update.dotMenuApp", { version: updateStatus.app.latestVersion }) : null,
@@ -556,10 +558,14 @@ export function SidebarContent(props: SidebarContentProps) {
 						actions.projects.manageResources(menuProject);
 						controller.closeMenu();
 					}}
-					onManageAutomations={() => {
-						actions.projects.manageAutomations(menuProject.id);
-						controller.closeMenu();
-					}}
+					onManageAutomations={
+						automationHidden
+							? undefined
+							: () => {
+									actions.projects.manageAutomations(menuProject.id);
+									controller.closeMenu();
+								}
+					}
 					onManageSessions={() => {
 						controller.openSessionManager(menuProject.id);
 						controller.closeMenu();

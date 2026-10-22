@@ -241,6 +241,8 @@ Gitmoji 对应关系：
 	chatContentWidthPct: 80,
 	// 会话状态默认显示在输入框上方折叠条（另一选项：右侧边栏下半区）
 	sessionStatusPlacement: "composer",
+	// 发送后自动滚动到最新：默认开启（与历史行为一致），显式 false 才关闭
+	scrollToLatestOnSend: true,
 	// 会话 Tab 最大宽度默认 104px：与旧硬编码 max-w-[104px] 一致，迁移零回归。
 	navigationMode: "tabs",
 	sessionTabMaxWidth: SESSION_TAB_MAX_WIDTH_DEFAULT,
@@ -608,6 +610,8 @@ export class SettingsStore {
 			this.settings.enhanceIncludeContext = parsed.enhanceIncludeContext === true;
 			// 输入预测只有显式 false 才关闭：老设置缺字段按默认开启处理。
 			this.settings.promptSuggestionEnabled = parsed.promptSuggestionEnabled !== false;
+			// 发送后回底同规则：老 settings.json 缺字段 = 开启（保持现有行为，零迁移）。
+			this.settings.scrollToLatestOnSend = parsed.scrollToLatestOnSend !== false;
 			// 预测模型与增强模型同形态：脏值（缺字段/非字符串）一律回落 null = 跟随会话模型。
 			this.settings.promptSuggestionModel = normalizeEnhanceModel(this.settings.promptSuggestionModel);
 			// 隐藏模块来自旧 JSON 时可能是脏值（非数组/含空串与重复项）；统一清洗，缺字段回落空数组（全显示）。
@@ -970,6 +974,10 @@ export class SettingsStore {
 		// 输入预测开关：脏值先摘掉再做通用合并，否则字符串 "false" 会原样落进 settings。
 		if ("promptSuggestionEnabled" in safePatch && typeof safePatch.promptSuggestionEnabled !== "boolean") {
 			delete safePatch.promptSuggestionEnabled;
+		}
+		// 发送后回底开关同规则：只认布尔，脏值不落盘（缺失 = 保持当前值）。
+		if ("scrollToLatestOnSend" in safePatch && typeof safePatch.scrollToLatestOnSend !== "boolean") {
+			delete safePatch.scrollToLatestOnSend;
 		}
 		this.settings = { ...this.settings, ...safePatch };
 		// 生图字段来自渲染层，非法值丢掉，避免下次请求带坏 size/watermark。
