@@ -5813,6 +5813,7 @@ export const zhCN = {
 	"web.connected": "已连接",
 	"web.connecting": "连接中…",
 	"web.promptPlaceholder": "发送消息到当前会话",
+	"web.promptPlaceholderEmpty": "输入消息即可新建会话，或从左侧选择项目、现有会话",
 	"web.composerHint": "Enter 发送，Shift+Enter 换行",
 	"web.emptySelection": "直接输入消息即可自动新建会话开始对话；或从左侧选择项目、现有会话。",
 	"web.sendNoProject": "当前没有可用项目，请先在左侧添加一个项目目录。",

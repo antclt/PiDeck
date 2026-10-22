@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: b7edb49e4b62458fda996798007e2116c3da742a196bda999ef30bc5f771f65b（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 778d8a86224dfd25f129026e5ed3547478b7fbc60716d5c55cba1e0cc618a188（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5820,6 +5820,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"web.connected": "已連線",
 	"web.connecting": "連線中…",
 	"web.promptPlaceholder": "傳送訊息到當前會話",
+	"web.promptPlaceholderEmpty": "輸入訊息即可新建會話，或從左側選擇專案、現有會話",
 	"web.composerHint": "Enter 傳送，Shift+Enter 換行",
 	"web.emptySelection": "直接輸入訊息即可自動新建會話開始對話；或從左側選擇專案、現有會話。",
 	"web.sendNoProject": "當前沒有可用專案，請先在左側新增一個專案目錄。",

@@ -5835,6 +5835,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"web.connected": "Connected",
 	"web.connecting": "Connecting…",
 	"web.promptPlaceholder": "Send a message to the current session",
+	"web.promptPlaceholderEmpty": "Type a message to start a new session, or pick a project or session on the left",
 	"web.composerHint": "Enter to send, Shift+Enter for a new line",
 	"web.emptySelection": "Type a message to start a new session automatically, or pick a project or an existing session from the sidebar.",
 	"web.sendNoProject": "No project available. Add a project directory from the sidebar first.",

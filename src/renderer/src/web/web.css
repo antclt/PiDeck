@@ -114,6 +114,18 @@
 
 /* ── dsh-web 结构精修（仅 Web 页）─────────────────────────────────────── */
 
+/* 键盘焦点环：Web 页大量交互是「图标按钮 + 自定义会话行」（原生 button 的
+   outline 被 shadcn button 的 outline-none 清掉，会话行又不是 button），
+   走查 14 实测图标按钮 focus 后 outlineStyle: none 且 boxShadow 透明，键盘用户
+   完全看不到落点。这里统一补一层 ring，视觉与桌面端 foundation 的中性环一致。 */
+.web-app button:focus-visible,
+.web-app [role="button"]:focus-visible,
+.web-app a:focus-visible,
+.web-app [tabindex]:focus-visible {
+  outline: 2px solid var(--color-text-primary);
+  outline-offset: 2px;
+}
+
 /* 侧栏：layer-2 表面 + 细边框；会话行 hover 用 interactive hover 面 */
 .web-app .chat-list-pane {
   background: var(--color-bg-sidebar);

@@ -41,7 +41,7 @@ import { WebSessionStrips } from "./WebSessionStrips";
 import { WebFilePreview, type WebFilePreviewTarget } from "./WebFilePreview";
 import { WebSearchDialog } from "./WebSearchDialog";
 import { WebSkillsExtensionsDialog } from "./WebSkillsExtensionsDialog";
-import { applyWebTheme, readStoredWebTheme, resolveWebTheme, storeWebTheme, systemPrefersDark, type ResolvedWebTheme, type WebThemePreference } from "./webTheme";
+import { applyWebTheme, nextWebTheme, readStoredWebTheme, resolveWebTheme, storeWebTheme, systemPrefersDark, type ResolvedWebTheme, type WebThemePreference } from "./webTheme";
 import { registerWebServiceWorker, usePwaInstall } from "./webPwa";
 import { decideStreamRecovery } from "./webStreamRecovery";
 import { useWebHeaderAutoHide } from "./useWebHeaderAutoHide";
@@ -172,7 +172,8 @@ export function WebChatApp() {
 		return () => media.removeEventListener("change", onChange);
 	}, []);
 	const cycleTheme = () => {
-		const next: WebThemePreference = themePreference === "light" ? "dark" : themePreference === "dark" ? "system" : "light";
+		// system → 跳到与当前解析结果相反的一档：系统此时是亮色却切到 light，用户看不到任何变化。
+		const next: WebThemePreference = nextWebTheme(themePreference, resolvedTheme);
 		setThemePreference(next);
 		storeWebTheme(next);
 	};
@@ -1161,6 +1162,7 @@ export function WebChatApp() {
 				/>
 				<WebSessionStrips sessionId={activeSessionId} />
 				<WebComposer
+					hasSession={Boolean(activeSessionId)}
 					disabled={Boolean(creatingProjectId)}
 					streaming={combinedStreaming}
 					prefill={prefill ?? undefined}

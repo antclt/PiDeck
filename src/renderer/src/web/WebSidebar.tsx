@@ -8,7 +8,7 @@
  * 交互：点击项目行 = 展开/收起；点击项目行内的 "+" = 新建会话（POST /api/sessions）；
  * 点击会话行 = 打开会话（切 activeSessionId）。
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Download, FolderPlus, GitFork, MoreVertical, Pencil, Play, Plus, Search, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui-shadcn/button";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui-shadcn/alert-dialog";
@@ -42,16 +42,43 @@ function matchesSearch(value: string, search: string): boolean {
 	return !search || value.toLowerCase().includes(search.toLowerCase());
 }
 
-const UNGROUPED_GROUP_KEY = "__web_ungrouped__";
+/** 折叠态每个项目先渲染的会话条数。 */
+const COLLAPSED_SESSION_LIMIT = 5;
+/** 每次增量加载的会话条数：数百条会话一次全渲染会造出 4000+ 节点，滚动到底再补。 */
+const SESSION_PAGE_STEP = 50;
 
 /** 会话行可执行的操作（P1；由 WebChatApp 提供实现）。 */
 export type WebSessionRowAction = "rename" | "duplicate" | "export" | "delete";
 
-/** 项目会话列表的会话行 + 「更多会话」折叠按钮。 */
-function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: string) => WebRuntime | undefined; activeSessionId: string; showAll: boolean; onToggleShowAll: () => void; onSelect: (sessionId: string) => void; onSessionAction?: (action: WebSessionRowAction, sessionId: string) => void }) {
-	const { sessions, runtimeFor, activeSessionId, showAll, onToggleShowAll, onSelect, onSessionAction } = props;
-	const visible = showAll ? sessions : sessions.slice(0, 5);
+/**
+ * 项目会话列表：初始只渲染一个窗口（默认 5 条），滚动到末尾自动追加 50 条。
+ *
+ * 为什么不做一次性全展开：单项目 400 条会话会造出 4000+ DOM 节点（实测 258ms 卡顿），
+ * 而用户一屏只看得到十几条。哨兵同时是按钮——IntersectionObserver 不可用时仍可手动展开。
+ */
+function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: string) => WebRuntime | undefined; activeSessionId: string; initialLimit: number; onSelect: (sessionId: string) => void; onSessionAction?: (action: WebSessionRowAction, sessionId: string) => void }) {
+	const { sessions, runtimeFor, activeSessionId, initialLimit, onSelect, onSessionAction } = props;
+	const [rendered, setRendered] = useState(initialLimit);
+	// 折叠/展开语义反转（进入或退出搜索）时回到初始窗口；sessions 不作为依赖——
+	// 父级每次 render 都会 filter 出新数组，否则增量加载会被无限重置。
+	useEffect(() => setRendered(initialLimit), [initialLimit]);
+	const sentinelRef = useRef<HTMLButtonElement | null>(null);
+	const visible = sessions.slice(0, Math.min(rendered, sessions.length));
 	const hiddenCount = sessions.length - visible.length;
+	useEffect(() => {
+		if (hiddenCount <= 0) return;
+		const sentinel = sentinelRef.current;
+		if (!sentinel || typeof IntersectionObserver === "undefined") return;
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (!entries.some((entry) => entry.isIntersecting)) return;
+				setRendered((current) => Math.min(sessions.length, current + SESSION_PAGE_STEP));
+			},
+			{ rootMargin: "160px 0px" },
+		);
+		observer.observe(sentinel);
+		return () => observer.disconnect();
+	}, [hiddenCount, sessions.length]);
 	// 会话操作面板：移动端底部滑出、桌面居中卡片（WebBottomSheet 两形态），
 	// 替代 DropdownMenu——触屏无 hover 看不见触发钮，且菜单会从侧栏右缘弹出遮挡聊天区。
 	const [menuSessionId, setMenuSessionId] = useState<string | null>(null);
@@ -93,8 +120,22 @@ function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: st
 				);
 			})}
 			{hiddenCount > 0 && (
-				<button type="button" className="conversation session-row relative flex min-h-7 w-full items-center justify-start gap-1.5 rounded-md border border-transparent px-2 py-0 text-left text-caption text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground" onClick={onToggleShowAll}>
-					{showAll ? t("common.collapse") : t("web.moreSessions", { count: hiddenCount })}
+				<button
+					type="button"
+					ref={sentinelRef}
+					className="conversation session-row relative flex min-h-7 w-full items-center justify-start gap-1.5 rounded-md border border-transparent px-2 py-0 text-left text-caption text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+					onClick={() => setRendered((current) => Math.min(sessions.length, current + SESSION_PAGE_STEP))}
+				>
+					{t("web.moreSessions", { count: hiddenCount })}
+				</button>
+			)}
+			{rendered > initialLimit && Number.isFinite(initialLimit) && (
+				<button
+					type="button"
+					className="conversation session-row relative flex min-h-7 w-full items-center justify-start gap-1.5 rounded-md border border-transparent px-2 py-0 text-left text-caption text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+					onClick={() => setRendered(initialLimit)}
+				>
+					{t("common.collapse")}
 				</button>
 			)}
 			{/* 会话操作面板：跨端 BottomSheet，大触控行，不被侧栏右缘裁剪 */}
@@ -155,8 +196,6 @@ export function WebSidebar(props: {
 	const { state, activeSessionId, creatingProjectId, connected, mobileOpen } = props;
 	const [search, setSearch] = useState("");
 	const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set());
-	// 会话数超过上限时展开的项目（默认每个项目只展示最近 N 条，点「更多」展开全部）
-	const [expandedSessionProjects, setExpandedSessionProjects] = useState<Set<string>>(() => new Set());
 	const [addingProject, setAddingProject] = useState(false);
 	const [projectPath, setProjectPath] = useState("");
 	const [projectBusy, setProjectBusy] = useState(false);
@@ -178,22 +217,14 @@ export function WebSidebar(props: {
 	/** 会话按最近活动时间降序（最新在上） */
 	const sortedSessions = useMemo(() => [...state.sessions].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0)), [state.sessions]);
 
-	const toggleSessionExpand = (projectId: string) => {
-		setExpandedSessionProjects((current) => {
-			const next = new Set(current);
-			if (next.has(projectId)) next.delete(projectId);
-			else next.add(projectId);
-			return next;
-		});
-	};
-
 	// 未分组会话 = projectId 不匹配任何已登记项目的 catalog 记录（孤儿/项目被删等）。
 	// 兜底分组始终可见，不会被项目折叠状态吞掉；搜索时仍按标题过滤。
 	const searching = search.trim().length > 0;
 	const projectIds = useMemo(() => new Set(state.projects.map((project) => project.id)), [state.projects]);
 	const ungroupedSessions = useMemo(() => sortedSessions.filter((session) => !projectIds.has(session.projectId) && matchesSearch(session.title || session.id, search.trim())), [sortedSessions, projectIds, search]);
-	const showAllUngrouped = searching || expandedSessionProjects.has(UNGROUPED_GROUP_KEY);
-	const toggleUngroupedExpand = () => toggleSessionExpand(UNGROUPED_GROUP_KEY);
+	// 搜索态需要一次看到全部命中结果（命中集合通常很小，且用户预期「搜到即列出」）；
+	// 非搜索态只渲染初始窗口，其余靠滚动/点击增量加载。
+	const sessionLimit = searching ? Number.POSITIVE_INFINITY : COLLAPSED_SESSION_LIMIT;
 
 	const submitProject = async () => {
 		const path = projectPath.trim();
@@ -283,7 +314,6 @@ export function WebSidebar(props: {
 						{sortedProjects.map((project) => {
 							const projectSessions = sortedSessions.filter((session) => session.projectId === project.id).filter((session) => matchesSearch(session.title || session.id, search.trim()));
 							const expanded = searching || expandedProjects.has(project.id);
-							const showAllSessions = searching || expandedSessionProjects.has(project.id);
 							const projectName = displayProjectName(project);
 							const creating = creatingProjectId === project.id;
 							return (
@@ -314,7 +344,7 @@ export function WebSidebar(props: {
 									</div>
 									{expanded && (
 										<div className="project-children mt-2 flex flex-col gap-2 px-1 pb-1">
-											<SessionRows sessions={projectSessions} runtimeFor={runtimeFor} activeSessionId={activeSessionId} showAll={showAllSessions} onToggleShowAll={() => toggleSessionExpand(project.id)} onSelect={props.onSelectSession} onSessionAction={props.onSessionAction} />
+											<SessionRows sessions={projectSessions} runtimeFor={runtimeFor} activeSessionId={activeSessionId} initialLimit={sessionLimit} onSelect={props.onSelectSession} onSessionAction={props.onSessionAction} />
 											{projectSessions.length === 0 && <div className="px-6 py-1 text-caption text-muted-foreground">{t("web.noSessions")}</div>}
 										</div>
 									)}
@@ -336,7 +366,7 @@ export function WebSidebar(props: {
 									</div>
 								</div>
 								<div className="project-children mt-2 flex flex-col gap-2 px-1 pb-1">
-									<SessionRows sessions={ungroupedSessions} runtimeFor={runtimeFor} activeSessionId={activeSessionId} showAll={showAllUngrouped} onToggleShowAll={() => toggleUngroupedExpand()} onSelect={props.onSelectSession} onSessionAction={props.onSessionAction} />
+									<SessionRows sessions={ungroupedSessions} runtimeFor={runtimeFor} activeSessionId={activeSessionId} initialLimit={sessionLimit} onSelect={props.onSelectSession} onSessionAction={props.onSessionAction} />
 								</div>
 							</div>
 						)}

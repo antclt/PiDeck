@@ -90,11 +90,12 @@ export function WebHeader(props: {
 							<Menu className="size-4" aria-hidden="true" />
 						</Button>
 						<div className="web-title-block flex min-w-0 flex-1 flex-col gap-0.5">
-							<strong className="flex min-w-0 items-center gap-1.5 truncate text-sm font-semibold tracking-tight text-foreground" title={title}>
+							{/* 语义标题：整页唯一的 h1（会话名/空态文案），屏幕阅读器靠它定位主区 */}
+							<h1 className="flex min-w-0 items-center gap-1.5 truncate text-sm font-semibold tracking-tight text-foreground" title={title}>
 								{/* 后端徽标（C18 同源）：与侧栏会话行一致，头部可辨 pi/dsh */}
 								{backend && <SessionBackendMark backend={backend} className="size-4 shrink-0 rounded" />}
 								<span className="min-w-0 truncate">{title}</span>
-							</strong>
+							</h1>
 							{/* 运行态：紧凑小圆点+文字，不用带边框底色的大 pill（旧 agent-status-indicator
 						在头部占两行高度且视觉过重；侧栏列表仍沿用该样式，此处不动它）。 */}
 							<span className="flex items-center gap-1 self-start text-micro text-muted-foreground">

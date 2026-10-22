@@ -276,3 +276,61 @@ test("Web destructive confirmations both use AlertDialog, never window.confirm",
 	assert.match(webSidebar, /t\("web\.deleteProjectConfirm"\)/);
 	assert.match(webChatApp, /AlertDialog open=\{deleteConfirmId != null\}/);
 });
+
+// 回归（Web 走查 #8）：侧栏「更多会话」此前一次渲染 407 行（258ms、DOM 4363 节点）。
+// 改成首屏窗口 + 滚动/点击增量，避免大 catalog 打开即卡顿。
+test("Web sidebar renders session rows through an incremental window", () => {
+	assert.doesNotMatch(webSidebar, /const visible = showAll \? sessions : sessions\.slice\(0, 5\);/, "one-shot full render is the regression");
+	assert.match(webSidebar, /const SESSION_PAGE_STEP = 50;/);
+	assert.match(webSidebar, /const COLLAPSED_SESSION_LIMIT = 5;/);
+	assert.match(webSidebar, /const visible = sessions\.slice\(0, Math\.min\(rendered, sessions\.length\)\);/);
+	// 哨兵既是 IntersectionObserver 目标又是按钮：观察器不可用时仍能手动加载
+	assert.match(webSidebar, /new IntersectionObserver\(/);
+	assert.match(webSidebar, /ref=\{sentinelRef\}/);
+	assert.doesNotMatch(webSidebar, /showAll=\{/, "expanded-session set state is gone; the window owns paging now");
+});
+
+// 回归（Web 走查 #9）：模型弹层 343 个 button / 16605px 滚动高度，一次全渲染。
+test("Web model sheet renders rows through an incremental window", () => {
+	assert.match(webModelSheet, /const MODEL_ROW_WINDOW = 40;/);
+	assert.match(webModelSheet, /const MODEL_ROW_STEP = 40;/);
+	assert.match(webModelSheet, /function flattenModelRows\(/);
+	assert.match(webModelSheet, /const visibleRows = rows\.slice\(0, Math\.min\(rendered, rows\.length\)\);/);
+	assert.match(webModelSheet, /new IntersectionObserver\(/);
+	// 搜索词变化必须回到首屏窗口，否则过滤后仍渲染旧窗口的行
+	assert.match(webModelSheet, /useEffect\(\(\) => setRendered\(MODEL_ROW_WINDOW\), \[query\]\);/);
+});
+
+// 回归（Web 走查 #12）：主题三态循环从 system 出发时必须跳到与系统相反的一档，
+// 否则系统亮色时第一次点击毫无变化，用户以为按钮坏了。
+test("Web theme cycle always produces a visible change", () => {
+	const webTheme = readFileSync("src/renderer/src/web/webTheme.ts", "utf8");
+	assert.match(webTheme, /export function nextWebTheme\(pref: WebThemePreference, resolved: ResolvedWebTheme\): WebThemePreference/);
+	assert.match(webTheme, /return resolved === "dark" \? "light" : "dark";/);
+	assert.match(webChatApp, /nextWebTheme\(themePreference, resolvedTheme\)/);
+});
+
+// 回归（Web 走查 #14）：图标按钮的原生 outline 被 shadcn 的 outline-none 清掉，
+// 键盘用户看不到落点——Web 作用域内统一补 focus 环。
+test("Web interactive elements keep a visible focus ring", () => {
+	const focusRule = webCss.slice(webCss.indexOf(".web-app button:focus-visible,"));
+	assert.ok(focusRule.length > 0, "focus-visible rule must exist in web.css");
+	assert.match(focusRule.slice(0, 300), /outline:\s*2px solid var\(--color-text-primary\);/);
+	assert.match(focusRule.slice(0, 300), /outline-offset:\s*2px;/);
+});
+
+// 回归（Web 走查 #15）：整页此前没有任何 h1/h2/h3，屏幕阅读器无法定位主区。
+test("Web header exposes the session title as the page heading", () => {
+	assert.match(webHeader, /<h1 className="flex min-w-0 items-center gap-1\.5 truncate/);
+	assert.match(webHeader, /<\/h1>/);
+});
+
+// 回归（Web 走查 #5）：无会话时输入框不能再写「发送到当前会话」——此时输入是新建会话入口。
+test("Web composer placeholder explains new-session mode when nothing is selected", () => {
+	const webComposer = readFileSync("src/renderer/src/web/WebComposer.tsx", "utf8");
+	assert.match(webComposer, /function composerPlaceholder\(hasSession: boolean, planMode: boolean\): string/);
+	assert.match(webComposer, /t\("web\.promptPlaceholderEmpty"\)/);
+	assert.match(webComposer, /placeholder=\{placeholder\}/);
+	assert.match(webComposer, /aria-label=\{placeholder\}/);
+	assert.match(webChatApp, /hasSession=\{Boolean\(activeSessionId\)\}/);
+});

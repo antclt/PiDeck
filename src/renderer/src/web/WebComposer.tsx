@@ -32,6 +32,15 @@ import { resolveComposerCollapsed } from "./composerCollapse";
 /** 单会话图片上限（压缩后每张约 100–300KB，4 张足够多数场景且 body 可控）。 */
 const MAX_ATTACHED_IMAGES = 4;
 
+/**
+ * 输入框提示文案：没有选中会话时不能再写「发送到当前会话」——此时输入是新建会话的入口，
+ * 文案必须说清这一点（Web 走查 #5）。
+ */
+function composerPlaceholder(hasSession: boolean, planMode: boolean): string {
+	if (planMode) return t("app.composerPlanPlaceholder");
+	return hasSession ? t("web.promptPlaceholder") : t("web.promptPlaceholderEmpty");
+}
+
 const BLUR_COLLAPSE_DELAY_MS = 250;
 
 export function WebComposer(props: {
@@ -57,6 +66,8 @@ export function WebComposer(props: {
 	onFocusChange?: (focused: boolean) => void;
 	onEngagedChange?: (engaged: boolean) => void;
 	hidden?: boolean;
+	/** 是否已选中会话（无会话时输入框是新建会话入口，提示文案不同）。 */
+	hasSession?: boolean;
 }) {
 	const [draft, setDraft] = useState("");
 	const [images, setImages] = useState<string[]>([]);
@@ -131,6 +142,7 @@ export function WebComposer(props: {
 	};
 
 	const collapsed = resolveComposerCollapsed({ mobileViewport, draft, imageCount: images.length, streaming: props.streaming, focused, busy, attachError, planMode: mode === "plan" });
+	const placeholder = composerPlaceholder(props.hasSession !== false, mode === "plan");
 	const collapsedBackendPicker = collapsed && Boolean(props.onBackendChange) && !props.backendLocked;
 	const suppressPointerFocus = mobileViewport ? (event: ReactPointerEvent<HTMLDivElement>) => event.preventDefault() : undefined;
 	const engaged = focused || draft !== "" || images.length > 0;
@@ -192,7 +204,7 @@ export function WebComposer(props: {
 									void addFiles(pasted);
 								}
 							}}
-							placeholder={mode === "plan" ? t("app.composerPlanPlaceholder") : t("web.promptPlaceholder")}
+							placeholder={placeholder}
 							disabled={props.disabled}
 							onKeyDown={(event) => {
 								if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
@@ -200,7 +212,7 @@ export function WebComposer(props: {
 									submit();
 								}
 							}}
-							aria-label={t("web.promptPlaceholder")}
+							aria-label={placeholder}
 						/>
 						{attachError ? <div className="px-3 text-micro text-danger">{t("web.imageAttachFailed")}</div> : null}
 						{collapsed ? (

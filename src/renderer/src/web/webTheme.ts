@@ -32,6 +32,18 @@ export function resolveWebTheme(pref: WebThemePreference, systemDark: boolean): 
 	return pref;
 }
 
+/**
+ * 三态循环的下一档：light → dark → system → …
+ *
+ * 从 system 出发时必须跳到「与当前系统解析结果相反」的那一档。若按字面写死 light，
+ * 系统本身是亮色时第一次点击毫无视觉变化，用户会以为按钮坏了。
+ */
+export function nextWebTheme(pref: WebThemePreference, resolved: ResolvedWebTheme): WebThemePreference {
+	if (pref === "light") return "dark";
+	if (pref === "dark") return "system";
+	return resolved === "dark" ? "light" : "dark";
+}
+
 export function applyWebTheme(theme: ResolvedWebTheme): void {
 	if (typeof document === "undefined") return;
 	// foundation 变量只在 dark 有覆盖集，light 显式写属性保持 DOM 状态可观察
