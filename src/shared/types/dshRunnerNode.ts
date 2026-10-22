@@ -10,6 +10,12 @@ export type DshRunnerNodeProbe = {
 /** 系统自动探测（忽略用户配置）。 */
 export type DshRunnerNodeSystemProbe = DshRunnerNodeProbe & {
 	source: Exclude<DshRunnerNodeSource, "configured" | "env" | "not-found">;
+	/**
+	 * PATH 命中是版本管理器垫片（mise/scoop/volta/chocolatey…）：能跑 `node -v`，
+	 * 但绝不能当 Windows Job runner 的 spawn 目标——垫片会再转一次真实 node，
+	 * runner 的 IPC 契约（fd3 ipc + fd4 control）过不去，run_code 会报清理失败。
+	 */
+	shimmed?: boolean;
 };
 
 /**
