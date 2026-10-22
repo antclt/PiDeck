@@ -284,6 +284,26 @@ export class UpdateService {
 		this.pushSnapshot();
 	}
 
+	/**
+	 * 用一次真实的 Pi CLI 版本检查结果覆盖快照里的 pi 节点，并立即推送。
+	 *
+	 * 为什么需要单独入口：pi 的更新检查有两条入口——后台每 2h 一轮的 checkNow，以及
+	 * 设置页的「检测 Pi 更新」（同时是应用内「更新 pi」完成后的复核）。后者不进本服务，
+	 * 不同步就会让侧栏设置按钮的圆点一直停在「pi 有新版本」，与设置页刚显示的
+	 * 「已是最新版本」自相矛盾（实测：应用内升到 1.4.0 后圆点要等下一轮 2h 检查才消失）。
+	 *
+	 * 调用方必须在真正跑过 `pi --version` 之后调用；这里只做状态收口，不再探测。
+	 */
+	applyPiCheckResult(result: PiUpdateCheckResult): void {
+		this.lastPi = {
+			currentVersion: result.currentVersion,
+			latestVersion: result.latestVersion,
+			hasUpdate: result.hasUpdate,
+			error: result.error,
+		};
+		this.pushSnapshot();
+	}
+
 	/** 当前快照（从持久化状态 + 最近一次检查/下载状态组装）。 */
 	getSnapshot(): AppUpdateStatusSnapshot {
 		const settings = this.deps.settingsStore.get();

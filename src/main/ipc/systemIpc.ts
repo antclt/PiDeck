@@ -298,6 +298,8 @@ export type SystemIpcDeps = {
 		notifySeen: (kind: "app" | "pi", version: string) => Promise<void>;
 		skipVersion: (version: string) => Promise<void>;
 		checkNow: () => Promise<void>;
+		/** 把一次真实的 Pi CLI 版本检查结果同步进后台快照（设置页检查/应用内更新后调用）。 */
+		applyPiCheckResult: (result: import("../../shared/types").PiUpdateCheckResult) => void;
 		downloadNow: () => Promise<void>;
 		installNow: () => void;
 		applyAutoDownloadPreference: () => void;
@@ -534,6 +536,15 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			error: status.error,
 			forceWslProbe,
 		});
+		// 探测到的版本与后台更新快照不一致 = 快照已过期（pi 被外部升级过）：主动补一轮检查，
+		// 否则侧栏设置按钮的「有新版本」圆点会一直停在已被超越的版本上，直到下一轮 2h 定时检查。
+		// 快照尚未建立（首启首查前）时跳过：启动调度自己会查，不必提前打一轮网络。
+		const snapshotPiVersion = updateService?.getSnapshot().piCli?.currentVersion;
+		if (updateService && status.installed && status.version && snapshotPiVersion && snapshotPiVersion !== status.version) {
+			void updateService.checkNow().catch((error: unknown) => {
+				appLogger.warn("pi", "Pi update snapshot refresh failed", { error: error instanceof Error ? error.message : String(error) });
+			});
+		}
 		return status;
 	});
 
@@ -1108,6 +1119,9 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	if (extensionManager) {
 		ipcMain.handle(ipcChannels.piUpdateCheck, async () => {
 			const result = await extensionManager.checkPiUpdate();
+			// 这次检查已经真跑过 `pi --version`：同步给后台快照，否则应用内「更新 pi」成功后
+			// 侧栏圆点仍停在「pi 有新版本」（与设置页刚显示的「已是最新版本」矛盾）。
+			updateService?.applyPiCheckResult(result);
 			void appLogger.info("pi", "Pi update check completed", { currentVersion: result.currentVersion, latestVersion: result.latestVersion, hasUpdate: result.hasUpdate, error: result.error });
 			return result;
 		});

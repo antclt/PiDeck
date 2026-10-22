@@ -266,6 +266,35 @@ test("checkNow records a no-update result, Pi result, and lastCheckAt", async (t
 	assert.equal(settings.get().updateLastCheckAt, snapshot.lastCheckAt);
 });
 
+test("applyPiCheckResult refreshes the pi node of the snapshot after an in-app pi upgrade", async (t) => {
+	// 回归：应用内「更新 pi」只跑设置页自己的检查（api.pi.checkUpdate），后台快照不知道
+	// 新版本已装好——侧栏设置按钮圆点会一直停在「pi 有新版本」，直到下一轮 2h 定时检查
+	// （实测：1.4.0 已装好、设置页显示无更新，圆点仍在）。
+	const updater = createFakeUpdater();
+	updater.checkImpl = async () => {
+		updater.emitChecking();
+		updater.emitNotAvailable();
+	};
+	const piCheck = async () => ({ currentVersion: "1.3.0", latestVersion: "1.4.0", hasUpdate: true });
+	const { service, snapshots } = createAutomaticService({ updater, checkPiUpdate: piCheck });
+	stopAfter(t, service);
+
+	await service.checkNow();
+	assert.equal(service.getSnapshot().piCli.hasUpdate, true);
+	assert.equal(service.getSnapshot().piCli.currentVersion, "1.3.0");
+
+	// 设置页刚跑过一轮真检查（升级后）：快照必须同刻跟上，不能等定时器。
+	const pushesBefore = snapshots.length;
+	service.applyPiCheckResult({ currentVersion: "1.4.0", latestVersion: "1.4.0", hasUpdate: false });
+	assert.ok(snapshots.length > pushesBefore, "applyPiCheckResult must push the new snapshot to the renderer");
+	const snapshot = snapshots.at(-1);
+	assert.equal(snapshot.piCli.currentVersion, "1.4.0");
+	assert.equal(snapshot.piCli.latestVersion, "1.4.0");
+	assert.equal(snapshot.piCli.hasUpdate, false);
+	// 快照里的已提示版本仍来自设置（不因同步结果被清掉）
+	assert.equal(snapshot.piCli.notifiedVersion, undefined);
+});
+
 test("direct updater rejection becomes a visible error state", async (t) => {
 	const updater = createFakeUpdater();
 	updater.checkImpl = async () => {

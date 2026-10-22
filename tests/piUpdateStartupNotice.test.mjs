@@ -86,3 +86,24 @@ test("Pi CLI update notice is anchored to its controls", () => {
 	assert.match(zh, /可使用上方的「更新 Pi」操作更新/);
 	assert.match(en, /Use Update Pi above to install it/);
 });
+
+test("pi version changes feed back into the background update snapshot (sidebar dot)", () => {
+	const systemIpc = readFileSync("src/main/ipc/systemIpc.ts", "utf8");
+	const updateService = readFileSync("src/main/update/UpdateService.ts", "utf8");
+
+	// 回归：后台快照每 2h 才刷一轮；应用内「更新 pi」成功后圆点仍停在
+	// 「pi 有新版本」（设置页已经显示「已是最新版本」，两处自相矛盾），要等下一轮检查才消失。
+	// 修复 = 两条真实探测链路都把结果写回快照：
+	// 1) 设置页的「检测 Pi 更新」（也是应用内更新完成后的复核）
+	assert.match(updateService, /applyPiCheckResult\(\s*result:\s*PiUpdateCheckResult\s*\)\s*:\s*void/);
+	const checkHandler = systemIpc.match(/ipcMain\.handle\(\s*ipcChannels\.piUpdateCheck[\s\S]*?\n\t\}\);/)?.[0] ?? "";
+	assert.ok(checkHandler, "piUpdateCheck handler must exist");
+	assert.match(checkHandler, /updateService\?\.applyPiCheckResult\(\s*result\s*\)/);
+
+	// 2) 环境检测真跑过 `pi --version`：探测到的版本与快照不一致 = 外部升级，补一轮检查
+	const checkPiHandler = systemIpc.match(/ipcMain\.handle\(\s*ipcChannels\.piCheck[\s\S]*?\n\t\}\);/)?.[0] ?? "";
+	assert.ok(checkPiHandler, "piCheck handler must exist");
+	assert.match(checkPiHandler, /getSnapshot\(\)\.piCli\?\.currentVersion/);
+	assert.match(checkPiHandler, /snapshotPiVersion\s*!==\s*status\.version/);
+	assert.match(checkPiHandler, /updateService\.checkNow\(\)/);
+});
