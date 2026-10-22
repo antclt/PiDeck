@@ -44,6 +44,7 @@ test("Web 选择器同样用保存名称显示，identity 信息在弹层行内�
 	const source = readFileSync("src/renderer/src/web/WebModelSheet.tsx", "utf8");
 	assert.match(source, /resolveModelDisplayName\(model\.modelName,\s*model\.modelId\)/);
 	assert.match(source, /const pillLabel\s*=\s*selectedName \?\? t\("web\.model"\);/);
-	assert.match(source, /const name = resolveModelDisplayName\(item\.name, item\.id\);/);
-	assert.match(source, /\{name\}[\s\S]{0,120}\{item\.id\}/);
+	// 窗口化后模型行拆成独立组件 ModelRow(props)，不再闭包捕获 item
+	assert.match(source, /const name = resolveModelDisplayName\(props\.item\.name, props\.item\.id\);/);
+	assert.match(source, /\{name\}[\s\S]{0,120}\{props\.item\.id\}/);
 });

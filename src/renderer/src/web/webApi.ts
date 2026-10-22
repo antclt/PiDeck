@@ -8,8 +8,8 @@
  * - 发送消息走 useChat（/api/chat 流式），不在此处重复实现
  */
 import type { UIMessage } from "ai";
-import type { AvailableModel, AgentBackend, ChatMessage, SessionCommandResult, SessionLaunchPreferences, SessionMessagePage, SessionRuntimeInfo, SessionRuntimeTarget, SessionTargetedValue, SessionTodoSnapshot, UpdateSessionRecordInput } from "../../../shared/types";
-import type { CommitEntry, GitBranchInfo, GitResourceGroups, ImageContent, PiExtensionSummary, PiSkillLocation, PiSkillSummary, PiSubagentEntry, YaoPromptCategory } from "../../../shared/types";
+import type { AvailableModel, AgentBackend, ChatMessage, SessionCommandResult, SessionLaunchPreferences, SessionMessagePage, SessionRuntimeInfo, SessionRuntimeTarget, SessionSearchResult, SessionTargetedValue, SessionTodoSnapshot, UpdateSessionRecordInput } from "../../../shared/types";
+import type { CommitEntry, GitBranchInfo, GitResourceGroups, ImageContent, PiExtensionSummary, PiSkillLocation, PiSkillSummary, PiSubagentEntry, YaoPromptCategory, ProviderUsageResult, UsageProbeBackend } from "../../../shared/types";
 import type { AgentUiResponse } from "../../../shared/types";
 import type { WebContextUsage, WebFileNodeLite, WebState } from "./webTypes";
 
@@ -176,6 +176,23 @@ export async function respondToUi(input: { sessionId: string; requestId: string;
 		body: JSON.stringify(input),
 	});
 	if (!res.ok) throw new Error(`ui-response ${res.status}`);
+}
+
+/**
+ * 会话内全文检索（跨全会话，不限已加载历史）：与桌面端 Ctrl+Shift+F 同源。
+ *
+ * 返回 `null` 表示「检索源不可用」（索引未就绪 / 后端不支持），调用方应回退本地已加载
+ * 搜索——这与桌面端 `sessions:search-in-session` 的 null 语义完全一致，绝不能把它当成
+ * 「没有匹配」展示。命中 `messageId` 是会话 JSONL 行 id，与 Web UIMessage.id 同源。
+ */
+export async function fetchSessionSearch(sessionId: string, query: string): Promise<SessionSearchResult | null> {
+	const trimmed = query.trim();
+	if (!trimmed) return null;
+	const params = new URLSearchParams({ q: trimmed });
+	const res = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/search?${params.toString()}`);
+	if (!res.ok) return null;
+	const body = (await res.json()) as { result?: SessionSearchResult | null };
+	return body.result ?? null;
 }
 
 export async function fetchMessagePage(sessionId: string, before?: number, pageSize?: number): Promise<SessionMessagePage> {
@@ -486,6 +503,19 @@ export function forkRuntimeSession(sessionId: string, target: SessionRuntimeTarg
 export async function fetchRuntimeContextUsage(sessionId: string, target: SessionRuntimeTarget): Promise<WebContextUsage> {
 	const usage = await callRuntimeCommand<WebContextUsage>(sessionId, target, "state");
 	return usage ?? {};
+}
+
+/** 供应商额度/余额用量（与桌面圆球面板同源，走主进程 ConfigManager 用量探针）。
+ *  该能力是用户显式开关的：未开启/供应商无可用端点时服务端也返回 success=false（恒 200），
+ *  因此失败不是错误——调用方按 result.success 决定渲染与否，不弹 toast。 */
+export async function fetchProviderUsage(provider: string, backend: UsageProbeBackend = "pi"): Promise<ProviderUsageResult> {
+	const params = new URLSearchParams();
+	if (backend === "dsh") params.set("backend", "dsh");
+	const query = params.toString();
+	const res = await apiFetch(`/api/usage/${encodeURIComponent(provider)}${query ? `?${query}` : ""}`);
+	if (!res.ok) return { success: false, provider, disabled: true };
+	const body = (await res.json()) as { result?: ProviderUsageResult };
+	return body.result ?? { success: false, provider, disabled: true };
 }
 
 /** P2：提示词库搜索（中文提示词精选）。 */

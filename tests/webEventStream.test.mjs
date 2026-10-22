@@ -70,10 +70,43 @@ test("thinking_delta/end produces reasoning block with start/delta/end", () => {
 		type: "message_update",
 		assistantMessageEvent: { type: "thinking_end", content: "思考中" },
 	});
-	// thinking_end 带 content 但本次事件无 delta：先补一段 reasoning-delta 再收尾
-	assert.equal(end[0].type, "reasoning-delta");
-	assert.equal(end[0].delta, "思考中");
-	assert.equal(end[1].type, "reasoning-end");
+	// 本块已由 thinking_delta 增量交付过全文：thinking_end 只收尾，不能再补 delta
+	// （补了会让客户端把同一段全文追加两次 → 思考内容整段翻倍）。
+	assert.equal(end.length, 1);
+	assert.equal(end[0].type, "reasoning-end");
+	assert.equal(end[0].id, d[0].id);
+});
+
+test("thinking_end supplies the only delta when no increment was ever sent", () => {
+	const adapter = new PiEventToUiMessageStream();
+
+	// pi 只给 thinking_end（content=完整思考）、块内此前没有任何 thinking_delta。
+	const frames = adapter.push({
+		type: "message_update",
+		assistantMessageEvent: { type: "thinking_end", content: "一次性思考" },
+	});
+	assert.equal(frames[0].type, "reasoning-start");
+	assert.equal(frames[1].type, "reasoning-delta");
+	assert.equal(frames[1].delta, "一次性思考");
+	assert.equal(frames[2].type, "reasoning-end");
+});
+
+test("consecutive reasoning blocks each get their own fallback window", () => {
+	const adapter = new PiEventToUiMessageStream();
+
+	// 第一块：有增量 → end 不补
+	adapter.push({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "A" } });
+	const first = adapter.push({ type: "message_update", assistantMessageEvent: { type: "thinking_end", content: "A" } });
+	assert.equal(first.length, 1);
+	assert.equal(first[0].type, "reasoning-end");
+
+	// 第二块：块 id 已重置，无增量 → end 必须补（否则前端空白）
+	const second = adapter.push({ type: "message_update", assistantMessageEvent: { type: "thinking_end", content: "B" } });
+	assert.equal(second[0].type, "reasoning-start");
+	assert.equal(second[1].type, "reasoning-delta");
+	assert.equal(second[1].delta, "B");
+	assert.equal(second[2].type, "reasoning-end");
+	assert.notEqual(second[0].id, first[0].id);
 });
 
 test("tool_execution_start/end produces tool-input-available and tool-output-available", () => {

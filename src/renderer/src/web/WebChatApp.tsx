@@ -38,10 +38,13 @@ import { fetchRuntimeContextUsage, setRuntimePermission } from "./webApi";
 import { sessionUiMessagesToMarkdown } from "./webMarkdown";
 import { removeMessageOptimistic, replaceMessageTextOptimistic } from "./webMessageOptimistic";
 import { WebSessionStrips } from "./WebSessionStrips";
+
+/** 搜索命中落在未加载历史里时，最多向前补拉多少页（每页一个历史窗口，约 9 轮）。 */
+const MAX_SEARCH_JUMP_PAGES = 5;
 import { WebFilePreview, type WebFilePreviewTarget } from "./WebFilePreview";
 import { WebSearchDialog } from "./WebSearchDialog";
 import { WebSkillsExtensionsDialog } from "./WebSkillsExtensionsDialog";
-import { applyWebTheme, readStoredWebTheme, resolveWebTheme, storeWebTheme, systemPrefersDark, type ResolvedWebTheme, type WebThemePreference } from "./webTheme";
+import { applyWebTheme, nextWebTheme, readStoredWebTheme, resolveWebTheme, storeWebTheme, systemPrefersDark, type ResolvedWebTheme, type WebThemePreference } from "./webTheme";
 import { registerWebServiceWorker, usePwaInstall } from "./webPwa";
 import { decideStreamRecovery } from "./webStreamRecovery";
 import { useWebHeaderAutoHide } from "./useWebHeaderAutoHide";
@@ -172,7 +175,8 @@ export function WebChatApp() {
 		return () => media.removeEventListener("change", onChange);
 	}, []);
 	const cycleTheme = () => {
-		const next: WebThemePreference = themePreference === "light" ? "dark" : themePreference === "dark" ? "system" : "light";
+		// system → 跳到与当前解析结果相反的一档：系统此时是亮色却切到 light，用户看不到任何变化。
+		const next: WebThemePreference = nextWebTheme(themePreference, resolvedTheme);
 		setThemePreference(next);
 		storeWebTheme(next);
 	};
@@ -300,6 +304,27 @@ export function WebChatApp() {
 
 	const scrollToMessage = (messageId: string) => {
 		document.getElementById(`web-msg-${messageId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+	};
+
+	/**
+	 * 搜索命中跳转：全会话检索的命中可能落在「还没加载的历史页」里，直接 scrollIntoView
+	 * 会静默失败（用户以为点了没反应）。这里按需向前翻页——最多补拉 MAX_SEARCH_JUMP_PAGES
+	 * 页，每页之间等一帧让 React 提交，命中出现即滚动；仍找不到就停在已加载的最早一条。
+	 */
+	const jumpToSearchHit = async (messageId: string) => {
+		if (!activeSessionId) return;
+		for (let page = 0; page <= MAX_SEARCH_JUMP_PAGES; page += 1) {
+			const target = document.getElementById(`web-msg-${messageId}`);
+			if (target) {
+				target.scrollIntoView({ behavior: "smooth", block: "start" });
+				return;
+			}
+			const meta = historyMetaRef.current[activeSessionId];
+			if (page === MAX_SEARCH_JUMP_PAGES || !meta || meta.nextBefore == null) return;
+			await loadOlderMessages();
+			// 等 React 提交这一页再检查（同帧内 DOM 还是旧的）
+			await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+		}
 	};
 
 	// 移动端侧栏边缘手势：从左缘 28px 内起手右滑 56px 开抽屉（横向位移占优，不干扰纵向滚动）
@@ -725,10 +750,11 @@ export function WebChatApp() {
 		}
 	};
 
-	const handleLoadMore = async () => {
-		if (!activeSessionId || streaming || loadingMore) return;
+	/** 向前翻一页历史（线索按钮与搜索跳转共用）；失败保持现状，返回是否真的加了页。 */
+	const loadOlderMessages = async (): Promise<boolean> => {
+		if (!activeSessionId || loadingMore) return false;
 		const meta = historyMetaRef.current[activeSessionId];
-		if (!meta || meta.nextBefore == null) return;
+		if (!meta || meta.nextBefore == null) return false;
 		setLoadingMore(true);
 		try {
 			const page = await fetchMessagePage(activeSessionId, meta.nextBefore);
@@ -741,11 +767,19 @@ export function WebChatApp() {
 			const merged = [...older, ...messagesBySessionRef.current[activeSessionId]];
 			messagesBySessionRef.current[activeSessionId] = merged;
 			setMessages(merged);
+			return older.length > 0;
 		} catch {
 			// 分页失败保持现状
+			return false;
 		} finally {
 			setLoadingMore(false);
 		}
+	};
+
+	const handleLoadMore = async () => {
+		// 流式期间不翻历史（与原先一致）：滚动锚点会跳，用户看不到自己在读的内容
+		if (!activeSessionId || streaming) return;
+		await loadOlderMessages();
 	};
 
 	// ── P1/P2/P3：会话、runtime 与消息操作（供 Header 溢出菜单 / 侧栏菜单 / 时间线 hover） ──
@@ -1099,6 +1133,10 @@ export function WebChatApp() {
 					onOpenSidebar={() => setMobileSidebarOpen(true)}
 					backend={activeSession?.backend}
 					contextUsage={contextUsage}
+					// 额度用量归属：优先 runtime 直报的供应商（跟随当次实际模型），退回会话记录的模型供应商；
+					// 后端按会话后端走，DSH 会话才会用 dsh 链的用量探针。
+					usageProvider={contextUsage?.provider ?? activeSession?.model?.provider}
+					usageBackend={activeSession?.backend === "dsh" ? "dsh" : "pi"}
 					permissionPreset={contextUsage?.permissionPreset ?? activeSession?.permissionPreset}
 					actions={{
 						onPermissionChange: activeSession?.backend === "dsh" ? (preset) => void handlePermissionChange(preset) : undefined,
@@ -1161,6 +1199,7 @@ export function WebChatApp() {
 				/>
 				<WebSessionStrips sessionId={activeSessionId} />
 				<WebComposer
+					hasSession={Boolean(activeSessionId)}
 					disabled={Boolean(creatingProjectId)}
 					streaming={combinedStreaming}
 					prefill={prefill ?? undefined}
@@ -1185,7 +1224,7 @@ export function WebChatApp() {
 			</main>
 			{/* S6.3：DSH 工具面板（仅 dsh 会话头部按钮触发） */}
 			{/* 第二批：会话内搜索（Ctrl+K）与技能/扩展面板 */}
-			<WebSearchDialog open={searchOpen} onOpenChange={setSearchOpen} messages={messages} onJump={scrollToMessage} />
+			<WebSearchDialog open={searchOpen} onOpenChange={setSearchOpen} sessionId={activeSessionId} messages={messages} onJump={jumpToSearchHit} />
 			<WebSkillsExtensionsDialog open={assetsOpen} onOpenChange={setAssetsOpen} />
 			{dshToolsOpen && activeSessionId && <WebDshToolsPanel sessionId={activeSessionId} onClose={() => setDshToolsOpen(false)} />}
 			{/* P3：工作区抽屉（Git 状态/diff + 文件浏览，projectId 来自活跃会话） */}

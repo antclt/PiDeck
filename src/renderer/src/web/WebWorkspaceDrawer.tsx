@@ -53,6 +53,15 @@ export function WebWorkspaceDrawer(props: { projectId: string; open: boolean; on
 
 type DiffPayload = { originalContent: string; modifiedContent: string } | null;
 
+/**
+ * 提交日期标签：CommitEntry.authorDate 已是毫秒（GitService 把 git 的秒级时间戳乘过 1000），
+ * 直接 new Date(ms)；非有限值不出标签，避免渲染成 NaN/1970。
+ */
+function commitDateLabel(authorDate: number): string {
+	if (!Number.isFinite(authorDate) || authorDate <= 0) return "";
+	return new Date(authorDate).toLocaleDateString();
+}
+
 function GitPanel(props: { projectId: string; active: boolean }) {
 	const [loading, setLoading] = useState(false);
 	const [branch, setBranch] = useState<GitBranchInfo | null>(null);
@@ -145,7 +154,7 @@ function GitPanel(props: { projectId: string; active: boolean }) {
 									<span className="min-w-0 flex-1 truncate text-caption text-foreground">{commit.message}</span>
 								</div>
 								<div className="text-micro text-muted-foreground">
-									{commit.authorName} · {new Date(commit.authorDate * 1000).toLocaleDateString()}
+									{commit.authorName} · {commitDateLabel(commit.authorDate)}
 								</div>
 							</li>
 						))}

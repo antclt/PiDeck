@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: a4eeca19017bdc53c6d59fcfb3b54aaf59bea0fb0226cdcca455b30f0859e782（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 8c8d86e46380047e41a339f0fcadb42ff0e38a826acf37c61a56657ee7a62e43（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5827,6 +5827,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"web.openProjects": "開啟專案列表",
 	"web.closeProjects": "關閉專案列表",
 	"web.deleteProject": "移除專案",
+	"web.deleteProjectConfirmTitle": "移除專案？",
 	"web.deleteProjectConfirm": "只移除專案列表記錄，不刪除專案檔案。確定繼續嗎？",
 	"web.projectPathPlaceholder": "輸入專案目錄路徑",
 	"web.createProject": "新增專案",
@@ -5840,6 +5841,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"web.connected": "已連線",
 	"web.connecting": "連線中…",
 	"web.promptPlaceholder": "傳送訊息到當前會話",
+	"web.promptPlaceholderEmpty": "輸入訊息即可新建會話，或從左側選擇專案、現有會話",
 	"web.composerHint": "Enter 傳送，Shift+Enter 換行",
 	"web.emptySelection": "直接輸入訊息即可自動新建會話開始對話；或從左側選擇專案、現有會話。",
 	"web.sendNoProject": "當前沒有可用專案，請先在左側新增一個專案目錄。",
@@ -6391,6 +6393,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"web.searchPlaceholder": "搜尋已載入的訊息…",
 	"web.searchEmpty": "沒有匹配的訊息",
 	"web.searchScopeHint": "僅搜尋已載入的訊息，載入更早訊息可擴大範圍",
+	"web.searchWholeSession": "搜尋整個會話，包含未載入的歷史",
+	"web.searching": "正在檢索…",
+	"web.searchHitCount": "共 {count} 條命中",
 	"web.shareReply": "分享回覆",
 	"web.shareCopied": "已複製到剪貼簿",
 	"web.subagentsStripTitle": "子代理",
