@@ -58,20 +58,33 @@ export function normalizeSelectionText(text: string): string | null {
 }
 
 /**
- * 选区端点是否落在「可弹浮出按钮」的正文面上。
+ * 允许弹出划词按钮的「回复正文」范围（白名单）。
  *
- * 判定规则（两端分别判，跨边界划选任一端命中排除区即不弹）：
+ * 只认助手回复的正文根节点：
+ * - `.execution-interim`：AnswerOutput（最终回答 / 中间回复 / live 正文）；
+ * - `.assistant-text`：AssistantText（历史消息的正文渲染）。
+ *
+ * 2026-10 用户反馈：侧栏、设置、用户气泡等**非回复区域**划选也会冒出翻译浮钮，而且这些位置
+ * 没有可用的点击上下文（出现了点不动）。旧实现是黑名单（任意非编辑面都允许），每新增一个面板
+ * 都自动符合条件；改为白名单后新增面板默认不弹，只有回复正文才提供划词翻译。
+ */
+export const SELECTION_TOOL_REPLY_SELECTOR = ".execution-interim, .assistant-text";
+
+/**
+ * 选区端点是否落在「可弹浮出按钮」的回复正文内。
+ *
+ * 判定规则（两端分别判，跨边界划选任一端不在回复正文内即不弹）：
+ * - 必须位于 SELECTION_TOOL_REPLY_SELECTOR 内（助手回复正文）；
  * - 工具自身 UI 内一律不算（[data-selection-tool-ui] 子树，含调用面板与浮出按钮）；
- * - 编辑面（input/textarea/select/option/contenteditable 宿主）不算；
- * - 其余文本面（会话时间线、Markdown、抽屉正文、设置说明…）算——「任意位置的划词」是产品目标，
- *   所以这里是黑名单而不是白名单，避免每新增一个面板都要补选择器。
+ * - 编辑面（input/textarea/select/option/contenteditable 宿主）不算。
  */
 export function isSelectionToolAnchorElement(element: Element | null): boolean {
 	if (!element) return false;
 	if (element.closest(SELECTION_TOOL_UI_SELECTOR)) return false;
 	if (element.closest(SELECTION_TOOL_EDITABLE_SELECTOR)) return false;
 	// 自身标签再判一次：即使选择器引擎/游离节点让 closest 没命中祖先，端点本身是输入框也绝不弹。
-	return !SELECTION_TOOL_EXCLUDED_TAGS.has(element.tagName.toUpperCase());
+	if (SELECTION_TOOL_EXCLUDED_TAGS.has(element.tagName.toUpperCase())) return false;
+	return Boolean(element.closest(SELECTION_TOOL_REPLY_SELECTOR));
 }
 
 /** 选区锚点矩形（fixed 定位用的视口坐标，不含 width/height 时由调用方换算）。 */
