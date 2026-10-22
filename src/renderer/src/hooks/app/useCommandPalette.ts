@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAtomValue, useStore } from "jotai";
-import { Bot, CircleStop, Clock, Fingerprint, Puzzle, RefreshCw, RotateCw, Settings2, SquarePen } from "lucide-react";
+import { Bot, CircleStop, Clock, Fingerprint, Puzzle, RefreshCw, RotateCw, Settings2, SquarePen, Star } from "lucide-react";
 import { buildSettingsCommands, type PaletteCommand } from "../../utils/commandPaletteCommands";
 import { markCommandPaletteOnboardingSeen } from "../../components/overlays/CommandPaletteOnboarding";
 import { openSettingsAtom } from "../../atoms/app-ui-atoms";
@@ -20,6 +20,8 @@ export interface CommandPaletteActions {
 	openAutomationPage: () => void;
 	/** 打开会话 Tab 栏里的「智能体」页面，同上。 */
 	openAgentMarketPage: () => void;
+	/** 打开会话 Tab 栏里的「收藏」页面，同上。 */
+	openFavoritesPage: () => void;
 }
 
 /**
@@ -75,7 +77,7 @@ export function useCommandPalette({ activeProjectId, currentSessionId, activeAge
 			run: () => store.set(openSettingsAtom, { tab: "common" }),
 		});
 
-		// 页面式工作区（定时任务 / 智能体）：侧栏入口可被外观设置→功能模块收起，
+		// 页面式工作区（定时任务 / 智能体 / 收藏）：侧栏入口可被外观设置→功能模块收起，
 		// 命令面板始终保留直达路径——隐藏后「找不回来」是最糟的结果。
 		commands.push({
 			id: "action:open-automation",
@@ -94,6 +96,15 @@ export function useCommandPalette({ activeProjectId, currentSessionId, activeAge
 			keywords: ["智能体", "agent", "agents", "角色", "agent market"],
 			icon: Bot,
 			run: () => actions.openAgentMarketPage(),
+		});
+		commands.push({
+			id: "action:open-favorites",
+			group: actionGroup,
+			title: t("command.actionOpenFavorites"),
+			subtitle: isModuleHidden(hiddenModules, "favorites") ? t("command.openHiddenPageHint") : undefined,
+			keywords: ["收藏", "favorite", "favorites", "bookmark", "收藏夹", "快照"],
+			icon: Star,
+			run: () => actions.openFavoritesPage(),
 		});
 
 		// 运行控制类命令只在有当前会话时才出现——没有目标时列出来只会点了没反应。

@@ -2075,6 +2075,14 @@ export function createPreviewApi(): PiDesktopApi {
 			cancelInvoke: async () => ({ ok: false }),
 			onInvokeEvent: () => () => {},
 		},
+		// 收藏：预览/Web 端没有 userData/favorites.json 落盘位置，列表恒空、写入抛错（不伪造成功）。
+		favorites: {
+			list: async () => [],
+			add: async () => {
+				throw new Error("preview stub");
+			},
+			remove: async () => false,
+		},
 		// 系统级划词浮窗：预览/Web 端没有独立窗口，全部 inert。
 		selectionTool: {
 			getState: async () => ({ visible: false }),

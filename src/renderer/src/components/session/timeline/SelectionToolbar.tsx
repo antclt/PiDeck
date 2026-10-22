@@ -1,8 +1,9 @@
 import { useAtomValue, useSetAtom } from "jotai";
 import { useCallback, useMemo, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { Languages, Quote } from "lucide-react";
-import { sessionDraftByIdAtom, setSessionDraftAtom, setSessionQuotesAtom } from "../../../atoms";
+import { Languages, Quote, Star } from "lucide-react";
+import { sessionDraftByIdAtom, sessionRecordByIdAtomFamily, setSessionDraftAtom, setSessionQuotesAtom } from "../../../atoms";
+import { useFavorites } from "../../../hooks/useFavorites";
 import { openSelectionInlineAtom } from "../../../atoms/agent-atoms";
 import { buildDraftWithAppendedQuote, buildQuoteToken, createQuoteId, extractQuoteTokens, pruneUnreferencedQuotes, type QuoteSnippet } from "../composer/quoteChip";
 import { computeToolbarPosition } from "./selectionToolbarPolicy";
@@ -11,14 +12,14 @@ import { t } from "../../../i18n";
 
 /**
  * 浮层尺寸估算（与 computeToolbarPosition 入参一致；真实宽度由 useTimelineSelection 的跟随循环
- * 逐帧读 offsetWidth 覆盖）。phase-2 增加「翻译」按钮后从 104 提到 200：
- * 中文两个动作约 150px、英文（Quote and ask / Translate）约 200px，取大值避免首帧贴边溢出。
+ * 逐帧读 offsetWidth 覆盖）。phase-2 增加「翻译」按钮后从 104 提到 200；收藏作为第三个动作
+ * 再加约 70px（中文「引用并提问 / 翻译 / 收藏所选」约 270px，英文更宽），取 300 避免首帧贴边溢出。
  */
-const TOOLBAR_WIDTH = 200;
+const TOOLBAR_WIDTH = 300;
 const TOOLBAR_HEIGHT = 28;
 
 /**
- * 时间线划选浮层：一个 pill 两个动作（phase-2 合并，解决「划词菜单与引用浮层冲突」）。
+ * 时间线划选浮层：一个 pill 三个动作（phase-2 合并，解决「划词菜单与引用浮层冲突」；收藏为第三项）。
  * 1. 引用并提问：快照登记进 session 域 atom，草稿末尾追加 #q<id> token（composer 内渲染为 ❝ 引用 chip），
  *    清除浏览器选区并聚焦本栏 composer。
  * 2. 翻译：把 { 原文, 选区矩形 } 写进 selectionInlineRequestAtom，由全局 SelectionToolHost 打开
@@ -31,6 +32,8 @@ export function SelectionToolbar(props: { quote: TimelineSelectionQuote | null; 
 	const setDraft = useSetAtom(setSessionDraftAtom);
 	const setQuotes = useSetAtom(setSessionQuotesAtom);
 	const openInline = useSetAtom(openSelectionInlineAtom);
+	const session = useAtomValue(sessionRecordByIdAtomFamily(props.sessionId));
+	const { addFavorite } = useFavorites();
 	const quote = props.quote;
 	const toolbarRef = props.toolbarRef;
 
@@ -74,6 +77,21 @@ export function SelectionToolbar(props: { quote: TimelineSelectionQuote | null; 
 		document.querySelector<HTMLElement>(".composer-box .tiptap-composer-host [contenteditable], .composer-box textarea")?.focus();
 	};
 
+	/** 收藏选中片段：快照写本机收藏（会话名/项目随快照存下），收起浮层与选区，不打断输入。 */
+	const handleFavorite = () => {
+		void addFavorite({
+			kind: "selection",
+			text: quote.text,
+			role: null,
+			sessionId: props.sessionId,
+			sessionTitle: session?.title ?? null,
+			projectId: session?.projectId ?? null,
+			messageId: quote.messageId ?? null,
+		});
+		window.getSelection()?.removeAllRanges();
+		props.onConsume();
+	};
+
 	const handleTranslate = () => {
 		// 先登记请求再收起浮层：宿主消费请求时选区快照可能已被 removeAllRanges 清掉，
 		// 所以文本与矩形都必须随请求带过去（不能依赖 window.getSelection() 现取）。
@@ -104,6 +122,11 @@ export function SelectionToolbar(props: { quote: TimelineSelectionQuote | null; 
 			<button type="button" data-quote-action="translate" onClick={handleTranslate} className="inline-flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-md px-1.5 transition-colors duration-fast hover:bg-bg-hover">
 				<Languages size={13} className="shrink-0 text-text-secondary" aria-hidden="true" />
 				<span className="whitespace-nowrap">{t("selectionTool.translate")}</span>
+			</button>
+			<span className="h-3.5 w-px shrink-0 bg-border-subtle" aria-hidden="true" />
+			<button type="button" data-quote-action="favorite" onClick={handleFavorite} className="inline-flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-md px-1.5 transition-colors duration-fast hover:bg-bg-hover">
+				<Star size={13} className="shrink-0 text-text-secondary" aria-hidden="true" />
+				<span className="whitespace-nowrap">{t("favorites.saveSelection")}</span>
 			</button>
 		</div>,
 		document.body,

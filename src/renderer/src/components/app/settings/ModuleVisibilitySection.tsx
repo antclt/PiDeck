@@ -37,6 +37,7 @@ const MODULE_LABEL_KEYS: Record<HideableModuleId, TranslationKey> = {
 	// 页面式工作区：标题与页面 Tab / 侧栏入口同源（automation.title / agentMarket.title）
 	automation: "automation.title",
 	agents: "agentMarket.title",
+	favorites: "favorites.title",
 };
 
 /** 每个模块隐藏后受影响的入口说明（行描述）。 */
@@ -56,6 +57,7 @@ const MODULE_DESC_KEYS: Record<HideableModuleId, TranslationKey> = {
 	respondingTips: "settings.modules.respondingTipsDesc",
 	automation: "settings.modules.automationDesc",
 	agents: "settings.modules.agentsDesc",
+	favorites: "settings.modules.favoritesDesc",
 };
 
 /**
@@ -64,8 +66,8 @@ const MODULE_DESC_KEYS: Record<HideableModuleId, TranslationKey> = {
  * 隐藏只收起 UI 入口，不清配置、不停后台功能，所以模块仍在运行/已启用时在标题旁挂
  * 「运行中 / 已启用」徽标——用户关掉入口后不至于忘了它还在跑（issue #248 维护者要求）。
  * 输入框底栏的入口（含模式选择器）归「输入框功能显示」分区，不列在这里。
- * 定时任务 / 智能体是会话 Tab 栏里的页面式工作区（不是设置页）：隐藏只摘掉侧栏与项目菜单入口，
- * 页面本身仍可经命令面板（Ctrl+P）打开，已建任务照常调度、智能体绑定照常生效。
+ * 定时任务 / 智能体 / 收藏是会话 Tab 栏里的页面式工作区（不是设置页）：隐藏只摘掉侧栏与项目菜单入口，
+ * 页面本身仍可经命令面板（Ctrl+P）打开，已建任务照常调度、智能体绑定照常生效、收藏快照照常留在本机。
  *
  * 活动状态取自各模块现成的数据源，不新增 IPC：
  * - 飞书：Bridge 连接态（useFeishuBridge 内部订阅 IPC 推送）
@@ -115,6 +117,7 @@ export const ModuleVisibilitySection = memo(function ModuleVisibilitySection(pro
 			case "hostplugins":
 			case "respondingTips":
 			case "agents":
+			case "favorites":
 				return null;
 		}
 	};

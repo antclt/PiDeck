@@ -40,6 +40,7 @@ import type { PromptSuggestionRunInput, PromptSuggestionRunResult } from "../sha
 import type { AgentChangedEvent, AgentInvokeEventPayload, AgentInvokeInput, AgentInvokeResult, AgentMarketSettings, AgentProfile, AgentProfileSnapshot, BindAgentSessionInput, CreateAgentProfileInput, UpdateAgentMarketSettingsInput, UpdateAgentProfileInput } from "../shared/types/agentProfile";
 import type { SelectionToolInsertInput, SelectionToolResizeInput, SelectionToolShowPayload, SelectionToolWindowState } from "../shared/types/selectionTool";
 import type { QuickMessagesSaveResult, QuickMessagesSnapshot } from "../shared/types/quickMessages";
+import type { AddFavoriteInput, FavoriteEntry } from "../shared/types/favorites";
 import type { NoticeHistoryFileEntry, NoticeHistoryRecordInput } from "../shared/types/noticeHistory";
 import type { ReplyActionRule, ReplyActionsSaveResult, ReplyActionsSnapshot } from "../shared/types/replyActions";
 import type {
@@ -1742,6 +1743,13 @@ const api = {
 		onInvokeEvent: (callback: (payload: AgentInvokeEventPayload) => void) => subscribe<AgentInvokeEventPayload>(ipcChannels.agentProfilesInvokeEvent, callback),
 		/** 绑定/解绑会话与智能体：绑定后该会话每次发送由主进程注入隐藏角色设定。 */
 		bindSession: (input: BindAgentSessionInput) => ipcRenderer.invoke(ipcChannels.agentProfilesBindSession, input) as Promise<AgentMarketSettings>,
+	},
+
+	// ── 收藏（整条回复 / 划选片段的本地快照；不写入会话文件） ──
+	favorites: {
+		list: () => ipcRenderer.invoke(ipcChannels.favoritesList) as Promise<FavoriteEntry[]>,
+		add: (input: AddFavoriteInput) => ipcRenderer.invoke(ipcChannels.favoritesAdd, input) as Promise<FavoriteEntry>,
+		remove: (favoriteId: string) => ipcRenderer.invoke(ipcChannels.favoritesRemove, favoriteId) as Promise<boolean>,
 	},
 
 	// ── 系统级划词浮窗（全局快捷键触发的独立窗口；与主窗口共用同一份 preload） ──

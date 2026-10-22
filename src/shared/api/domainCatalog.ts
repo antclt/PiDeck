@@ -4,8 +4,8 @@
  * 纯契约层：只描述「域 → 分组 / Manager / main 侧注册文件 / preload 命名空间 / 通道前缀」
  * 的静态映射，不 import 运行时代码。行数据由通道面探针推导（锚定数字见 TEST-PLAN §0），非手写臆测。
  * 守卫测试 tests/unifiedApiDomainCatalog.test.mjs
- * 校验：id 唯一且 kebab-case、61 行、每行 channelPrefix ⊆ shared/ipc.ts 实际 84 前缀、
- * 两表并集认领全部 84 前缀与 70 命名空间（F1-4/5/6）、红线行 aggregation === "redline"（F1-7）。
+ * 校验：id 唯一且 kebab-case、62 行、每行 channelPrefix ⊆ shared/ipc.ts 实际 85 前缀、
+ * 两表并集认领全部 85 前缀与 71 命名空间（F1-4/5/6）、红线行 aggregation === "redline"（F1-7）。
  * 2026-10-16 合并刷新：随 dev 演进补 acp/wechat/host-plugins/pideck-mcp/videogen/notice-history
  * 六行（+7 前缀 +6 命名空间，探针口径同 §0），sessions/config 收口组同步补新方法。
  *
@@ -85,6 +85,9 @@ export const DOMAIN_CATALOG = [
 	{ id: "skill-hub", group: "content", manager: "SkillHub 检索与安装", ipcFile: ["ipc/storeIpc.ts"], preloadNamespaces: ["skillHub"], channelPrefix: ["skill-hub"], aggregation: "aggregate" },
 	{ id: "content-store", group: "content", manager: "BuiltinContentUpdater（prompts-store/skills-store 两通道域共用同一更新器）", ipcFile: ["ipc/contentStoreIpc.ts"], preloadNamespaces: ["contentStore"], channelPrefix: ["prompts-store", "skills-store"], aggregation: "aggregate" },
 	{ id: "extensions", group: "content", manager: "ExtensionManager + BuiltInExtensionsUpdater", ipcFile: ["ipc/storeIpc.ts", "ipc/builtInExtensionIpc.ts"], preloadNamespaces: ["extensions"], channelPrefix: ["extensions"], aggregation: "aggregate" },
+	// 收藏：PiDeck 本地快照（<userData>/favorites.json），不动会话文件、不是 pi 能力，
+	// 因此按普通内容域聚合；正文只在收藏动作发生时由渲染层快照提交。
+	{ id: "favorites", group: "content", manager: "FavoritesStore（<userData>/favorites.json）", ipcFile: ["ipc/favoritesIpc.ts"], preloadNamespaces: ["favorites"], channelPrefix: ["favorites"], aggregation: "aggregate" },
 	{ id: "imagegen", group: "content", manager: "ImagegenService + 三个图存储 Store", ipcFile: ["ipc/imagegenIpc.ts"], preloadNamespaces: ["imagegen"], channelPrefix: ["imagegen"], aggregation: "aggregate" },
 	{ id: "videogen", group: "content", manager: "VideoJobRunner + IlinkClient + VideoJobStore/VideoBlobStore/VideoSessionStore/VideoGenConfigStore", ipcFile: ["ipc/videogenIpc.ts"], preloadNamespaces: ["videogen"], channelPrefix: ["videogen"], aggregation: "aggregate" },
 	// ── config ──────────────────────────────────────────────────────────────────

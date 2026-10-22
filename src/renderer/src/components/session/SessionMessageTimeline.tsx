@@ -13,6 +13,7 @@ import { liveThinkingIdBySessionIdAtomFamily, liveTextStreamingBySessionAtom, li
 import { writeClipboardImage } from "../../utils/clipboard";
 import { useTimelineSelection } from "../../hooks/useTimelineSelection";
 import { useMessageContextMenu } from "../../hooks/useMessageContextMenu";
+import { useFavorites } from "../../hooks/useFavorites";
 import { SelectionToolbar } from "./timeline/SelectionToolbar";
 import { MessageContextMenu } from "./timeline/MessageContextMenu";
 import { deriveTimelineRunActivity } from "./timeline/timelineRunActivity";
@@ -177,7 +178,22 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 	const { quote: selectionQuote, clear: clearSelectionQuote, toolbarRef: selectionToolbarRef } = useTimelineSelection(timelineRef);
 	// 消息右键菜单：复制来源（选区快照 / 命中消息 / live 正文回退）由 hook 解析，
 	// 这里只持有控制器并挂到消息列表容器上（消息、用户气泡、工具卡都在容器内）。
-	const messageContextMenu = useMessageContextMenu({ messages: activeMessages, scopeKey: sessionId });
+	const { favoritedMessageKeys, toggleMessageFavorite } = useFavorites();
+	// 收藏来源元信息：右键菜单每次打开时现取（favoriteContext），回合星标走 ref 读最新值——
+	// TurnRow 的自定义 memo 不比较回调引用，回调必须稳定，否则历史轮次会被整体重渲染。
+	const favoriteMetaRef = useRef({ sessionTitle: session?.title ?? null, projectId: session?.projectId ?? null });
+	favoriteMetaRef.current = { sessionTitle: session?.title ?? null, projectId: session?.projectId ?? null };
+	const favoriteContext = useMemo(() => ({ sessionId, sessionTitle: session?.title ?? null, projectId: session?.projectId ?? null }), [session?.projectId, session?.title, sessionId]);
+	const handleFavoriteReply = useCallback(
+		(text: string, messageId: string | null) => {
+			if (!sessionId) return;
+			const meta = favoriteMetaRef.current;
+			// 开关语义：这条回复已收藏则取消，否则新增（与右键菜单共用「会话 + 消息 id」身份）。
+			void toggleMessageFavorite({ kind: "message", text, role: "assistant", messageId, sessionId, sessionTitle: meta.sessionTitle, projectId: meta.projectId });
+		},
+		[sessionId, toggleMessageFavorite],
+	);
+	const messageContextMenu = useMessageContextMenu({ messages: activeMessages, scopeKey: sessionId, favoriteContext, favoritedMessageKeys });
 	const activeRuntimeState = runtime?.state;
 	const activeConversationStatus = modernSurfaceState.status;
 	// 只订 live id：思考正文由 ThinkingStep 叶子订阅，避免 50ms 戳醒整条 timeline。
@@ -921,6 +937,8 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 									onEditMessage={props.onEditMessage}
 									onDeleteMessage={props.onDeleteMessage}
 									onEnterMultiSelect={handleEnterMultiSelect}
+									onFavoriteReply={handleFavoriteReply}
+									favoritedMessageKeys={favoritedMessageKeys}
 								/>
 							);
 						}
@@ -1013,7 +1031,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 			{multiSelectOpen && <MultiSelectModal renderedRuns={reconciledRuns} onClose={() => setMultiSelectOpen(false)} onCopy={copySelectedMessages} />}
 
 			{/* 消息右键菜单：portal 到 body、fixed 定位在右键坐标（见 MessageContextMenu） */}
-			<MessageContextMenu state={messageContextMenu.state} onCopy={messageContextMenu.copy} onSelectAll={messageContextMenu.selectAll} onClose={messageContextMenu.close} />
+			<MessageContextMenu state={messageContextMenu.state} onCopy={messageContextMenu.copy} onSelectAll={messageContextMenu.selectAll} onFavorite={messageContextMenu.favorite} onClose={messageContextMenu.close} />
 
 			{/* 划选引用浮层：portal 到 body，fixed 定位；空会话起始页无消息不出现 */}
 			{!showSurfaceEmptyState && sessionId && <SelectionToolbar quote={selectionQuote} sessionId={sessionId} onConsume={clearSelectionQuote} toolbarRef={selectionToolbarRef} />}

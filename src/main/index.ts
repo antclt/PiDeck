@@ -17,11 +17,13 @@ import { registerAnnouncementIpc } from "./ipc/announcementIpc";
 import { CuaService } from "./cua/CuaService";
 import { AutomationStore } from "./automation/AutomationStore";
 import { AgentProfileStore } from "./agents/AgentProfileStore";
+import { FavoritesStore } from "./favorites/FavoritesStore";
 import { AgentInvokeService } from "./agents/AgentInvokeService";
 import { AutomationScheduler } from "./automation/AutomationScheduler";
 import { AutomationRunCoordinator } from "./automation/AutomationRunCoordinator";
 import { registerAutomationIpc } from "./ipc/automationIpc";
 import { registerAgentProfileIpc } from "./ipc/agentProfileIpc";
+import { registerFavoritesIpc } from "./ipc/favoritesIpc";
 import { registerAgentInvokeIpc } from "./ipc/agentInvokeIpc";
 import { registerSelectionToolIpc } from "./ipc/selectionToolIpc";
 import { SelectionToolService } from "./selection/SelectionToolService";
@@ -683,6 +685,8 @@ let piAuthService: PiAuthService | null = null;
 let enhancePromptService: EnhancePromptService | null = null;
 /** 智能体配置存储（<userData>/agent-profiles.json）；null = 尚未初始化。 */
 let agentProfileStore: AgentProfileStore | null = null;
+/** 收藏存储（<userData>/favorites.json）；null = 尚未初始化。 */
+let favoritesStore: FavoritesStore | null = null;
 /** 智能体一次性调用服务（划词工具 / 市场面板）：业务在 service，侧车进程在下面的 completion。 */
 let agentInvokeService: AgentInvokeService | null = null;
 /**
@@ -3033,6 +3037,8 @@ function registerIpc() {
 			},
 		});
 	}
+	// 收藏：整条回复 / 划选片段的本地快照（userData/favorites.json）。
+	if (favoritesStore) registerFavoritesIpc({ store: favoritesStore, appLogger });
 	registerAgentInvokeIpc(ipcMain, agentInvokeService);
 	// 系统级划词浮窗：状态/隐藏/「发送到 PiDeck」（文本插入主窗口当前会话输入框）。
 	registerSelectionToolIpc({
@@ -5634,7 +5640,10 @@ app
 		// 内置翻译智能体补种；与 sessionCatalog 并行加载，不额外拖慢启动。
 		agentProfileStore = new AgentProfileStore(join(app.getPath("userData"), "agent-profiles.json"));
 		const agentProfileStorePreload = agentProfileStore.load();
-		await Promise.all([sessionCatalog.load(), automationStorePreload, agentProfileStorePreload]);
+		// 收藏：本地快照（userData/favorites.json）。坏文件按空列表重建，不阻断启动。
+		favoritesStore = new FavoritesStore(join(app.getPath("userData"), "favorites.json"));
+		const favoritesStorePreload = favoritesStore.load();
+		await Promise.all([sessionCatalog.load(), automationStorePreload, agentProfileStorePreload, favoritesStorePreload]);
 		// 智能体一次性调用（划词工具 / 市场面板）：复用提示词增强侧车协议，但**独立实例**。
 		// 侧车进程常驻、首次调用才拉起（EnhancePromptService 的现有语义），启动期只做装配。
 		agentInvokeCompletionService = createCompletionHelperService("agent-invoke");

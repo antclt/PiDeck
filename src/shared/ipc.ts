@@ -245,6 +245,10 @@ export const ipcChannels = {
 	agentProfilesInvokeEvent: "agent-profiles:invoke-event",
 	/** 会话 ↔ 智能体绑定（「使用」新建会话时写入；解绑传 agentId=null）。 */
 	agentProfilesBindSession: "agent-profiles:bind-session",
+	/** 收藏（整条回复 / 划选片段快照）：本地 favorites.json，不写入会话文件。 */
+	favoritesList: "favorites:list",
+	favoritesAdd: "favorites:add",
+	favoritesRemove: "favorites:remove",
 	/** 系统级划词浮窗（全局快捷键触发）：可见性/隐藏/发送回主窗口/捕获推流。 */
 	selectionToolGetState: "selection-tool:get-state",
 	selectionToolHide: "selection-tool:hide",

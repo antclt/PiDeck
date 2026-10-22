@@ -1,6 +1,6 @@
 import { messageEntryId } from "../../../utils/sessionCommands";
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronUp, Clock, Share, SquarePen, Trash } from "lucide-react";
+import { ChevronUp, Clock, Share, SquarePen, Star, Trash } from "lucide-react";
 import { atom, useAtomValue, useSetAtom } from "jotai";
 import { selectAtom } from "jotai/utils";
 import type { AgentBackend, ChatMessage, ImageContent } from "../../../../../shared/types";
@@ -14,6 +14,7 @@ import { Collapsible, CollapsibleContent } from "../../ui-shadcn/collapsible";
 import { formatDuration } from "../TimelineFormat";
 import { LiveDuration } from "../LiveDuration";
 import { CopyMenu, stripMarkdown } from "../SurfaceComponents";
+import { favoriteMessageKey } from "../../favorites/favoriteIdentity";
 import { buildTurnDisplay, hasFoldableContent } from "../timeline/buildTurnDisplay";
 import { groupTurnProcess, lastProcessGroup } from "../timeline/groupTurnProcess";
 import { boundMountedSteps, TIMELINE_MOUNTED_STEP_LIMIT } from "../timeline/turnMountBudget";
@@ -98,6 +99,10 @@ export type TurnRowProps = {
 	onAutoCollapsed?: () => void;
 	/** 打开多选分享弹框 */
 	onEnterMultiSelect?: () => void;
+	/** 收藏/取消收藏本轮回复（正文为 Markdown 源码快照 + 该轮最终消息 id）；不传则不渲染星标按钮。 */
+	onFavoriteReply?: (text: string, messageId: string | null) => void;
+	/** 已收藏的「会话::消息」键集合：星标据此显示实心（已收藏）状态。 */
+	favoritedMessageKeys?: ReadonlySet<string>;
 };
 
 export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
@@ -294,6 +299,10 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 	const containsImageGen = assistantMessages.some((item) => Boolean(item.message.meta?.imageGen));
 	// 编辑目标与编辑初值同源：最后一条有可见正文的 assistant 消息，加载/保存/按钮显隐都指向它
 	const editableMessage = pickEditableAssistantMessage(assistantMessages);
+	// 收藏身份与右键菜单同源（会话 + 消息 id）：星标显示实心即表示这条回复已在收藏里，再点即取消。
+	const replyMessageId = editableMessage?.message.id ?? null;
+	const replyFavoriteKey = replyMessageId ? favoriteMessageKey(props.sessionId ?? null, replyMessageId) : null;
+	const replyFavorited = replyFavoriteKey ? (props.favoritedMessageKeys?.has(replyFavoriteKey) ?? false) : false;
 	// 本轮回答用的模型（逐轮展示）：取本轮最后一条带模型信息的 assistant 消息。
 	// 同一会话内用户会频繁换模型，只有逐轮记录才能看出哪段是谁答的；
 	// 旧数据/ACP 会话没有该字段时留空，行头不占位。
@@ -485,6 +494,22 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 						{mergedText && !editing && (
 							<>
 								{!containsImageGen && <CopyMenu text={stripMarkdown(mergedText)} markdown={mergedText} targetRef={rowRef} />}
+								{/* 收藏整轮回复：与复制同源（Markdown 源码），快照落本机收藏页；入口不依赖编辑权限。
+								    已收藏显示实心星（与右键菜单同一身份），再点即取消。 */}
+								{props.onFavoriteReply && (
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon-sm"
+										className="turn-row-action-btn size-7 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+										aria-pressed={replyFavorited}
+										onClick={() => props.onFavoriteReply?.(mergedText, replyMessageId)}
+										title={replyFavorited ? t("favorites.unsaveMessage") : t("favorites.saveMessage")}
+										aria-label={replyFavorited ? t("favorites.unsaveMessage") : t("favorites.saveMessage")}
+									>
+										<Star size={14} className={replyFavorited ? "fill-current" : undefined} />
+									</Button>
+								)}
 								<Button type="button" variant="ghost" size="icon-sm" className="turn-row-action-btn size-7 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground" onClick={props.onEnterMultiSelect} title={t("app.multiSelectEnter")}>
 									<Share size={14} />
 								</Button>
@@ -558,6 +583,8 @@ function turnRowPropsEqual(prev: TurnRowProps, next: TurnRowProps): boolean {
 		prev.isLatestRun === next.isLatestRun &&
 		prev.isLastAgentRun === next.isLastAgentRun &&
 		prev.autoCollapseTick === next.autoCollapseTick &&
+		// 收藏表变化才换引用（时间线 useMemo）：已收藏态变了星标要重绘，未变时保持记忆化。
+		prev.favoritedMessageKeys === next.favoritedMessageKeys &&
 		prev.onOpenFile === next.onOpenFile
 	);
 }

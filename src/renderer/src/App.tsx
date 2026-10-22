@@ -27,9 +27,10 @@ import {
 	ScrollText,
 	// 抽屉侧边任务 Tab 图标：不用 PanelRight——那是会话头部抽屉开关的图形，并排会认错
 	Rocket,
-	// 会话 Tab 栏里的页面式工作区 Tab 图标（定时任务 / 智能体）
+	// 会话 Tab 栏里的页面式工作区 Tab 图标（定时任务 / 智能体 / 收藏）
 	Clock,
 	Bot,
+	Star,
 } from "lucide-react";
 import { configureNoticeDefaults, showNotice, type NoticeKind } from "./utils/notice";
 import { copyTextWithCopiedNotice } from "./utils/clipboardNotice";
@@ -45,6 +46,7 @@ import {
 	scrollToLatestOnSendAtom,
 	hiddenModulesAtom,
 	openAgentMarketPageAtom,
+	openFavoritesPageAtom,
 	hiddenComposerFeaturesAtom,
 	imageGenConfigAtom,
 	enhanceModelAtom,
@@ -72,6 +74,8 @@ import { SettingsFeatureRoot } from "./components/app/SettingsFeatureRoot";
 import { hostPluginPanelAtom } from "./atoms/host-plugin-atoms";
 import { AutomationPage } from "./components/automation/AutomationPage";
 import { AgentMarketPage } from "./components/agents/AgentMarketPage";
+import { FavoritesPage } from "./components/favorites/FavoritesPage";
+import { sortWorkspacePageIds } from "./utils/workspacePageTabs";
 import { SelectionToolHost } from "./components/selectionTool/SelectionToolHost";
 import { useRename } from "./hooks/useRename";
 import { useProjectRuntimeCapabilities } from "./hooks/useRuntimeCapabilities";
@@ -280,6 +284,7 @@ export function App() {
 	const replaceProjectSessions = useSetAtom(replaceProjectSessionsAtom);
 	const openAutomationPage = useSetAtom(openAutomationPageAtom);
 	const openAgentMarketPage = useSetAtom(openAgentMarketPageAtom);
+	const openFavoritesPage = useSetAtom(openFavoritesPageAtom);
 	// 页面式工作区（定时任务 / 智能体）：Tab 列表与当前呈现页面；切会话只失活、关闭才卸载。
 	const openWorkspacePageIds = useAtomValue(openWorkspacePageIdsAtom);
 	const activeWorkspacePage = useAtomValue(activeWorkspacePageAtom);
@@ -2579,10 +2584,10 @@ export function App() {
 
 	// 会话 Tab 栏里的页面式工作区 Tab：标题固定走 i18n（不是会话、不参与自动会话标题），
 	// 激活态只由 activeWorkspacePage 决定；关闭即卸载页面（切会话只是失活）。
-	const workspacePageTabItems: WorkspacePageTabItem[] = openWorkspacePageIds.map((pageId) => ({
+	const workspacePageTabItems: WorkspacePageTabItem[] = sortWorkspacePageIds(openWorkspacePageIds).map((pageId) => ({
 		id: pageId,
-		title: t(pageId === "automation" ? "automation.title" : "agentMarket.title"),
-		icon: pageId === "automation" ? Clock : Bot,
+		title: t(pageId === "automation" ? "automation.title" : pageId === "agents" ? "agentMarket.title" : "favorites.title"),
+		icon: pageId === "automation" ? Clock : pageId === "agents" ? Bot : Star,
 		active: activeWorkspacePage === pageId,
 		onSelect: () => openWorkspacePage(pageId),
 		onClose: () => closeWorkspacePage(pageId),
@@ -2949,7 +2954,7 @@ export function App() {
 		currentSessionId,
 		activeAgentId,
 		hiddenModules: settings.hiddenModules ?? [],
-		actions: { selectProjectCommand, restartActiveAgent, closeAgent, runSessionControl, openAutomationPage: () => openAutomationPage(), openAgentMarketPage: () => openAgentMarketPage() },
+		actions: { selectProjectCommand, restartActiveAgent, closeAgent, runSessionControl, openAutomationPage: () => openAutomationPage(), openAgentMarketPage: () => openAgentMarketPage(), openFavoritesPage: () => openFavoritesPage() },
 	});
 
 	// 窗口缩放快捷键（Ctrl/Cmd+= / Ctrl/Cmd+-）由主进程直接改 zoomFactor 并落盘
@@ -3055,6 +3060,8 @@ export function App() {
 						}}
 					/>
 					<AgentMarketPage active={activeWorkspacePage === "agents"} onUseAgent={handleAgentUseAgent} />
+					{/* 收藏：整条回复 / 划选片段的本地快照，页面式 Tab（与智能体同一层级） */}
+					<FavoritesPage active={activeWorkspacePage === "favorites"} />
 				</div>
 			}
 			content={workbenchContentNode}

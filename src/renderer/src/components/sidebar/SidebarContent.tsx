@@ -25,6 +25,7 @@ import { UpdateDotHint } from "./UpdateDotHint";
 import { AnnouncementCenter } from "./AnnouncementCenter";
 import { AutomationDockButton } from "../automation/AutomationDockButton";
 import { AgentMarketDockButton } from "../agents/AgentMarketDockButton";
+import { FavoritesDockButton } from "./FavoritesDockButton";
 import { HostPluginDockButtons } from "../plugins/HostPluginDockButtons";
 import { MorphingSearch, type MorphingSearchItem } from "../motion/morphing-search";
 import { parseSidebarNavTab } from "../../utils/sidebarNavTab";
@@ -318,6 +319,8 @@ export function SidebarContent(props: SidebarContentProps) {
 					<AutomationDockButton />
 					{/* 智能体入口：紧随定时任务，打开会话 Tab 栏里的「智能体」页面 */}
 					<AgentMarketDockButton />
+					{/* 收藏入口：放在智能体下面，打开会话 Tab 栏里的「收藏」页面 */}
+					<FavoritesDockButton />
 					{/* 宿主插件面板入口：与定时任务同区，无已启用面板时组件自身不渲染 */}
 					<HostPluginDockButtons projectId={props.currentProjectId} sessionId={props.currentSessionId} />
 				</div>

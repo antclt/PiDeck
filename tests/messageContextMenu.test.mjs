@@ -116,7 +116,9 @@ test("timeline mounts the context menu on the message list wrapper", () => {
 	assert.match(timeline, /className="message-list[^"]*"[\s\S]{0,120}?onContextMenu=\{messageContextMenu\.handleContextMenu\}/);
 	assert.match(timeline, /<MessageContextMenu\s+state=\{messageContextMenu\.state\}/);
 	// 会话切换必须收起旧菜单（scopeKey 变化清状态），否则跨会话右键会复制到另一条会话的文本。
-	assert.match(timeline, /useMessageContextMenu\(\{\s*messages:\s*activeMessages,\s*scopeKey:\s*sessionId\s*\}\)/);
+	assert.match(timeline, /useMessageContextMenu\(\{\s*messages:\s*activeMessages,\s*scopeKey:\s*sessionId,\s*favoriteContext,\s*favoritedMessageKeys\s*\}\)/);
+	// 收藏来源元信息随 hook 选项下发：右键菜单里的「收藏这条回复/收藏所选」要带会话上下文。
+	assert.match(timeline, /const favoriteContext = useMemo\(\(\) => \(\{ sessionId,/);
 });
 
 test("selectors cover live body, message bodies and native editing controls", () => {

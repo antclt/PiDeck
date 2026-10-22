@@ -137,6 +137,9 @@ export const automationModuleHiddenAtom = atom((get) => isModuleHidden(get(hidde
 /** 智能体入口是否被隐藏：侧栏「智能体」入口；已保存的智能体与会话绑定照常生效。 */
 export const agentsModuleHiddenAtom = atom((get) => isModuleHidden(get(hiddenModulesAtom), "agents"));
 
+/** 收藏入口是否被隐藏：侧栏「收藏」入口；已收藏快照仍留在本机，命令面板仍可打开页面。 */
+export const favoritesModuleHiddenAtom = atom((get) => isModuleHidden(get(hiddenModulesAtom), "favorites"));
+
 /**
  * 发送消息后是否滚动到最新（设置项 scrollToLatestOnSend 的渲染层快照）。
  * App 在 settings 变化时写入；useSessionTimelineController 的发送定位 effect 在决策时刻
