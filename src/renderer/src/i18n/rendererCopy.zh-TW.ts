@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 8c8d86e46380047e41a339f0fcadb42ff0e38a826acf37c61a56657ee7a62e43（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 13a80213ba55a664469c3bc8928a26602a3f4b7d3acd90e6fba2e3c5ebdb16de（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -499,7 +499,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.compaction.manualHint": "也可在會話中手動點選壓縮按鈕",
 	"config.compaction.keepRecentTokensHint": "壓縮時保留最近對話的 token 數",
 	"config.compaction.keepRecentTokens": "保留最近 tokens",
-	"config.compaction.reserveTokensHint": "為模型回覆預留的 token 空間",
+	"config.compaction.reserveTokensHint": "剩餘上下文低於此值時自動壓縮（pi 1.4 起只決定壓縮時機，摘要用模型自身的輸出上限）",
 	"config.compaction.reserveTokens": "預留回覆 tokens",
 	"config.compaction.enabledOff": "已關閉",
 	"config.compaction.enabledOn": "已開啟",

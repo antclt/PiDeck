@@ -328,7 +328,7 @@ test("真实生成 catalog：全部条目带 type，且官方字段未被裁剪"
 		const type = entry.type ?? "omitted";
 		typeCounts[type] = (typeCounts[type] ?? 0) + 1;
 	}
-	// pi-ai 1.3.0 的 1714 条全部显式带 type；缺省（undefined）数量为 0。
+	// pi-ai 1.4.0 的 1713 条全部显式带 type；缺省（undefined）数量为 0。
 	assert.equal(typeCounts.omitted, undefined, "官方条目应全部显式带 type");
 	assert.ok(typeCounts.chat > 1000, `chat 条目异常：${typeCounts.chat}`);
 	assert.ok(typeCounts.image > 0, "应包含 image 条目");
@@ -385,6 +385,35 @@ test("真实生成 catalog：1.3.0 修复的思考档位与上下文窗口已随
 	assert.equal(mimo?.thinkingLevelMap?.minimal, null);
 	// #10840：openai-codex/gpt-6.1-sol 使用 500K 上下文窗口
 	assert.equal(lookupPiAiCatalogEntry(index, "openai-codex", "gpt-6.1-sol")?.contextWindow, 500000);
+});
+
+test("真实生成 catalog：1.4.0 的新增模型、xhigh 档与 classifier 图像输入已随目录同步", () => {
+	const index = getPiAiCatalogIndex();
+	// 新增模型：MiniMax-M3.1-Flash（minimax 与 minimax-cn 两套 provider）
+	const m31 = lookupPiAiCatalogEntry(index, "minimax", "MiniMax-M3.1-Flash");
+	assert.ok(m31, "新版目录应包含 MiniMax-M3.1-Flash");
+	assert.equal(m31.type, "chat");
+	assert.equal(m31.reasoning, true);
+	assert.ok(lookupPiAiCatalogEntry(index, "minimax-cn", "MiniMax-M3.1-Flash"), "minimax-cn 也应带上该模型");
+	// xai：grok-4.3 / grok-4.5 新增 xhigh 档（PiDeck 思考选择器直接读 thinkingLevelMap）
+	assert.equal(lookupPiAiCatalogEntry(index, "xai", "grok-4.3")?.thinkingLevelMap?.xhigh, "xhigh");
+	assert.equal(lookupPiAiCatalogEntry(index, "xai", "grok-4.5")?.thinkingLevelMap?.xhigh, "xhigh");
+	// classifier 拿到图像输入：input 含 image 才允许 models.classify() 收图
+	// （跨 VM 的数组不引用相等，先序列化再比）
+	assert.deepEqual(JSON.parse(JSON.stringify(lookupPiAiCatalogEntry(index, "typesafe", "jev-latest")?.input)), ["text", "image"]);
+	assert.deepEqual(JSON.parse(JSON.stringify(lookupPiAiCatalogEntry(index, "cloudflare-workers-ai", "@cf/cloudflare/clef")?.input)), ["text", "image"]);
+});
+
+test("真实生成 catalog：1.4.0 下线的模型不再出现在目录里", () => {
+	const index = getPiAiCatalogIndex();
+	// openai-codex 的 gpt-5.5 / gpt-5.3-codex-spark 对 ChatGPT 账号必然失败，1.4.0 已移除。
+	// 目录留着它们会让设置页提供根本跑不通的选项。
+	// 直接查索引而不是 lookup（后者有跨 provider 的中转站兜底，会命中 openai/azure 的同名模型）。
+	const codexIds = new Set((index.byProviderId.get("openai-codex") ?? new Map()).keys());
+	assert.equal(codexIds.has("gpt-5.5"), false);
+	assert.equal(codexIds.has("gpt-5.3-codex-spark"), false);
+	// 同名模型在其它 provider 下仍在：这是官方目录的事实，不是我们要隐藏的东西。
+	assert.ok(index.byProviderId.get("openai")?.has("gpt-5.5"));
 });
 
 test("readBuiltinPiAiCatalogVersion：仓库内置 manifest 返回 pi-ai 包版本", () => {

@@ -11,6 +11,7 @@ import { piRuntimeNodeBinDir, piRuntimePiBinDir } from "./piRuntimePaths";
 import { WSL_PI_NEGATIVE_CACHE_TTL_MS, WSL_PI_PROBE_TIMEOUT_MS, buildWslCommandMarker, buildWslPiExecArgs, buildWslPiProbeScript, isWslInteropPath, parseWslCommandMarker, parseWslPiProbeOutput, type WslPiProbeResult } from "../wsl/wslPiProbe";
 import { decodeWslOutput } from "../wsl/wslExe";
 import { buildPiProxyEnvPatch, PIDECK_PI_PROXY_SCOPE } from "../sessions/sessionProxyPolicy";
+import { stripBom } from "../config/piConfigFileStore";
 
 /**
  * 进程级 WSL pi 探测缓存。
@@ -815,7 +816,9 @@ export class PiLocator {
 
 	private isManagedInstallRoot(root: string): boolean {
 		try {
-			const marker = JSON.parse(readFileSync(join(root, MANAGED_INSTALL_MARKER), "utf8")) as Record<string, unknown>;
+			// BOM 必须先剥：Windows PowerShell 5.1 重写 managed-install.json 时会写 BOM。
+			// 裸 JSON.parse 会让官方安装被误判成 custom——SDK 入口找不到，提示词增强与智能体侧车跟着失效。
+			const marker = JSON.parse(stripBom(readFileSync(join(root, MANAGED_INSTALL_MARKER), "utf8"))) as Record<string, unknown>;
 			return marker.kind === "pi-managed-install" && marker.schemaVersion === 1 && marker.layout === "releases-v1";
 		} catch {
 			return false;

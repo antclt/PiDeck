@@ -494,7 +494,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.compaction.manualHint": "You can also compact manually from the session toolbar",
 	"config.compaction.keepRecentTokensHint": "Recent dialogue tokens kept after compaction",
 	"config.compaction.keepRecentTokens": "Keep recent tokens",
-	"config.compaction.reserveTokensHint": "Tokens reserved for the model reply",
+	"config.compaction.reserveTokensHint": "Auto-compact once the remaining context drops below this. Since pi 1.4 it only sets the trigger point; summaries use the model's own output limit",
 	"config.compaction.reserveTokens": "Reserve reply tokens",
 	"config.compaction.enabledOff": "Off",
 	"config.compaction.enabledOn": "On",

@@ -13,7 +13,7 @@ import { homedir } from "node:os";
 import type { McpConfigFile, McpConfigLayer, McpConfigLayerKind, McpConfigSnapshot, McpProbeResult, McpServerDefinition, McpServerListItem, McpServerTransport } from "../../shared/types/mcp";
 import { resolveExposureAlias, resolveExposureAliases } from "../../shared/mcpExposure";
 import { createProjectFileReadBoundary, resolveProjectFileReadPath, type ProjectFileReadBoundary } from "../files/projectFileAccess";
-import { revisionOf, writePiConfigFile } from "./piConfigFileStore";
+import { revisionOf, stripBom, writePiConfigFile } from "./piConfigFileStore";
 
 const MCP_DOCS_URL = "https://earendil-works.github.io/pi/docs/mcp";
 const HTTP_PROBE_TIMEOUT_MS = 8_000;
@@ -67,10 +67,18 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * 解析 mcp.json 原文。
+ *
+ * UTF-8 BOM 必须剥掉：Windows PowerShell 5.1 的 `Out-File` / `Set-Content` 默认写 BOM，
+ * 用户手改一次 mcp.json 就带上，裸 JSON.parse 会整文件解析失败。pi 1.4.0 起自己的
+ * mcp.json 读取也走 stripBom（#11191），两边口径必须一致——否则同一份文件 pi 能加载、
+ * PiDeck 报「配置损坏」并拦住保存与导入，用户被卡在中间且看不出原因。
+ */
 export function parseMcpConfigFile(raw: string): { file: McpConfigFile; error?: string } {
 	let parsed: unknown;
 	try {
-		parsed = JSON.parse(raw);
+		parsed = JSON.parse(stripBom(raw));
 	} catch (error) {
 		return { file: { mcpServers: {} }, error: error instanceof Error ? error.message : String(error) };
 	}

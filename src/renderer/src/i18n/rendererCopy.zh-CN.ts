@@ -492,7 +492,7 @@ export const zhCN = {
 	"config.compaction.manualHint": "也可在会话中手动点击压缩按钮",
 	"config.compaction.keepRecentTokensHint": "压缩时保留最近对话的 token 数",
 	"config.compaction.keepRecentTokens": "保留最近 tokens",
-	"config.compaction.reserveTokensHint": "为模型回复预留的 token 空间",
+	"config.compaction.reserveTokensHint": "剩余上下文低于此值时自动压缩（pi 1.4 起只决定压缩时机，摘要用模型自身的输出上限）",
 	"config.compaction.reserveTokens": "预留回复 tokens",
 	"config.compaction.enabledOff": "已关闭",
 	"config.compaction.enabledOn": "已开启",
