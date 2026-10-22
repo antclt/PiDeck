@@ -189,3 +189,19 @@ test("Baizhi requires a raw API key and binds it only to the fixed endpoint Auth
 	assert.deepEqual(plain(entry.base), baseBefore, "a second template must not reuse another credential");
 	assert.deepEqual(plain(buildCatalogDefinition(entry, [" "])), baseBefore, "the builder leaves blank credentials out; the required form field blocks connection");
 });
+
+test("Figma registers under an allow-listed DCR client name; other OAuth entries keep pi's default", () => {
+	const { MCP_DCR_CLIENT_NAME_OVERRIDES, buildCatalogBase } = loadTsCommonJs("src/renderer/src/config/mcpServiceCatalog.ts");
+	// 只登记实测被授权服务器白名单挡掉的服务（Figma 对 client_name 做校验，pi 403 / Claude Code 200）。
+	assert.deepEqual(plain(MCP_DCR_CLIENT_NAME_OVERRIDES), { figma: "Claude Code" });
+	assert.deepEqual(plain(buildCatalogBase(byId.figma)), { url: "https://mcp.figma.com/mcp", oauth: { clientName: "Claude Code" } });
+	// 覆盖值必须同时出现在模板保存与目录定义两条路径上，否则「从模板建」和「从代码建」行为不一致。
+	assert.deepEqual(plain(buildCatalogDefinition(byId.figma, [])), plain(buildCatalogBase(byId.figma)));
+	// 未登记的 OAuth 服务（实测 pi 动态注册均放行）不得被顺手加上 clientName。
+	for (const id of ["sentry", "supabase", "linear", "notion"]) {
+		assert.deepEqual(plain(buildCatalogBase(byId[id])), plain(byId[id].base), id);
+		assert.equal(Object.hasOwn(buildCatalogBase(byId[id]), "oauth"), false, id);
+	}
+	// 坑点必须在表单里可见：登记覆盖或带 authNoticeKey 的条目都要有文案 key。
+	assert.equal(byId.figma.authNoticeKey, "config.mcp.catalog.figmaAuthNotice");
+});

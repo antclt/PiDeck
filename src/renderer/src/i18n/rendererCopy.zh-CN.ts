@@ -2328,6 +2328,8 @@ export const zhCN = {
 	"config.mcp.catalog.credentialArgs": "凭据将以命令行参数 {{flag}} 传给服务进程。",
 	"config.mcp.catalog.credentialOptionalHint": "该服务不填密钥也可用（有额度限制）；填写则{{target}}",
 	"config.mcp.catalog.oauthHint": "该服务用 OAuth 授权：保存后在上方状态区点「登录」，浏览器完成授权，无需手填令牌。",
+	"config.mcp.catalog.oauthClientNameNotice": "已自动写入 OAuth 客户端名「{{name}}」（动态注册时发送）。若登录失败，先在列表里登出再重试。",
+	"config.mcp.catalog.figmaAuthNotice": "Figma 的动态客户端注册只放行白名单客户端（用默认名 pi 会返回 403 Forbidden）。这里已自动改用白名单客户端名注册；这是借用他人标识，Figma 收紧后会失效，届时改用 Figma 桌面版 MCP 服务（本机 127.0.0.1:3845/mcp）。",
 	"config.mcp.catalog.noAuthHint": "该服务无需认证，保存后即可使用。",
 	"config.mcp.catalog.configured": "已配置",
 	"config.mcp.catalog.aiSetup.title": "让 AI 帮你配",

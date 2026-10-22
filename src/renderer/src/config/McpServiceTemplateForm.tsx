@@ -6,7 +6,7 @@ import { Label } from "../components/ui-shadcn/label";
 import { t } from "../i18n";
 import { openDocsInSystemBrowser, SecretInput } from "./ConfigShared";
 import { isMcpServerName, uniqueServerName } from "./mcpForm";
-import { buildCatalogDefinition, catalogNeedsCredential, type McpCatalogCategory, type McpCatalogCredential, type McpServiceCatalogEntry } from "./mcpServiceCatalog";
+import { buildCatalogBase, buildCatalogDefinition, catalogNeedsCredential, type McpCatalogCategory, type McpCatalogCredential, type McpServiceCatalogEntry } from "./mcpServiceCatalog";
 import { MCP_BRAND_ICONS, McpBrandIconSvg } from "./mcpServiceBrandIcons";
 import type { SmartAddEntry } from "./McpSmartAdd";
 
@@ -33,6 +33,9 @@ export function McpServiceTemplateForm(props: { entry: McpServiceCatalogEntry; e
 	const [credentialErrors, setCredentialErrors] = useState<boolean[]>(() => credentialFields.map(() => false));
 	const needsCredential = catalogNeedsCredential(props.entry);
 	const hasCredentialInput = credentialFields.length > 0;
+	const clientNameValue = buildCatalogBase(props.entry).oauth?.clientName;
+	/** 目录条目覆盖的 DCR 客户端名（目前只有 Figma），仅用于展示。 */
+	const clientName = typeof clientNameValue === "string" ? clientNameValue : null;
 
 	const connect = async () => {
 		const trimmedName = name.trim();
@@ -117,6 +120,9 @@ export function McpServiceTemplateForm(props: { entry: McpServiceCatalogEntry; e
 			{hasCredentialInput ? <p className="text-micro text-muted-foreground">{t("config.mcp.template.plaintextNotice")}</p> : null}
 
 			{props.entry.auth === "oauth" ? <p className="text-micro text-muted-foreground">{t("config.mcp.catalog.oauthHint")}</p> : null}
+			{props.entry.authNoticeKey ? <p className="text-micro text-warning">{t(props.entry.authNoticeKey)}</p> : null}
+			{/* 覆盖了 DCR 客户端名的条目：把实际落盘值显式告知，避免「界面上看不到却生效」。 */}
+			{props.entry.auth === "oauth" && !props.entry.authNoticeKey && clientName ? <p className="text-micro text-muted-foreground">{t("config.mcp.catalog.oauthClientNameNotice", { name: clientName })}</p> : null}
 			{props.entry.auth === "none" ? <p className="text-micro text-muted-foreground">{t("config.mcp.catalog.noAuthHint")}</p> : null}
 
 			<div className="flex flex-wrap items-center gap-1.5">

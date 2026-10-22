@@ -58,6 +58,7 @@ export type McpCatalogTextKey =
 	| "config.mcp.catalog.braveSearchHint"
 	| "config.mcp.catalog.firecrawlHint"
 	| "config.mcp.catalog.figmaHint"
+	| "config.mcp.catalog.figmaAuthNotice"
 	| "config.mcp.catalog.larkHint"
 	| "config.mcp.catalog.dingtalkHint"
 	| "config.mcp.catalog.amapHint"
@@ -110,7 +111,30 @@ export type McpServiceCatalogEntry = {
 	credentials?: McpCatalogCredentialField[];
 	/** 无凭据时的完整定义（凭据由 credentials 声明在保存时注入）。 */
 	base: McpServerDefinition;
+	/**
+	 * 认证侧的坑与替代路径（保存前展示）。目前只用于「授权服务器只放行白名单客户端」的服务，
+	 * 例如 Figma 的动态客户端注册对 `client_name` 做白名单校验：pi 用默认名会被 403。
+	 */
+	authNoticeKey?: McpCatalogTextKey;
 };
+
+/**
+ * 动态客户端注册（DCR）不认 `pi`、必须借用已进白名单客户端名的服务。
+ * 2026-10 实测：Figma 的注册端点对 client_name 白名单校验，`pi` 403 / `Claude Code` 200；
+ * Sentry、Supabase、Linear、Notion、Context7、Exa 对 `pi` 均正常放行（无需覆盖）。
+ * 新增条目若登录报 403 Forbidden 且正文是裸文本，按同一方法（换 client_name 试注册）确认后再登记到这里。
+ */
+export const MCP_DCR_CLIENT_NAME_OVERRIDES: Readonly<Record<string, string>> = { figma: "Claude Code" };
+
+/**
+ * 目录条目 → 落盘定义：OAuth 服务的客户端名覆盖在此统一注入。
+ * 覆盖值是 pi 的 `oauth.clientName`（仅动态注册时发送），改回默认名需先 `pi mcp logout`。
+ */
+export function buildCatalogBase(entry: McpServiceCatalogEntry): McpServerDefinition {
+	const clientName = MCP_DCR_CLIENT_NAME_OVERRIDES[entry.id];
+	if (!clientName) return entry.base;
+	return { ...entry.base, oauth: { ...entry.base.oauth, clientName } };
+}
 
 export const MCP_SERVICE_CATALOG: readonly McpServiceCatalogEntry[] = [
 	{
@@ -406,6 +430,7 @@ export const MCP_SERVICE_CATALOG: readonly McpServiceCatalogEntry[] = [
 		docsUrl: "https://developers.figma.com/docs/figma-mcp-server/remote-server-installation",
 		auth: "oauth",
 		base: { url: "https://mcp.figma.com/mcp" },
+		authNoticeKey: "config.mcp.catalog.figmaAuthNotice",
 	},
 	{
 		id: "qcc",
@@ -438,7 +463,7 @@ function appendUrlParam(url: string, param: string, value: string): string {
  * header 默认写 `Bearer <key>`；声明 scheme 缺省的服务（腾讯文档、Exa）写裸值。
  */
 export function buildCatalogDefinition(entry: McpServiceCatalogEntry, values: readonly string[]): McpServerDefinition {
-	let definition = entry.base;
+	let definition = buildCatalogBase(entry);
 	(entry.credentials ?? []).forEach((field, index) => {
 		const value = (values[index] ?? "").trim();
 		if (!value) return;
