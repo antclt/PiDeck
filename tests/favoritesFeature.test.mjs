@@ -138,6 +138,9 @@ test("已收藏态与详情：星标/右键菜单识别已收藏并可取消，�
 	assert.match(favoritesWorkspace, /line-clamp-2/);
 	assert.match(zh, /"favorites\.detailTitle"/);
 	assert.match(en, /"favorites\.detailTitle"/);
+	// 关联会话找不到时的兜底文案：显示「无关联会话」，不是「未知会话」
+	assert.match(zh, /"favorites\.sourceUnknown": "无关联会话"/);
+	assert.match(en, /"favorites\.sourceUnknown": "No linked session"/);
 });
 
 test("数据链路：收藏写入本机 JSON，页面与入口共用同一 atom 与 IPC", () => {

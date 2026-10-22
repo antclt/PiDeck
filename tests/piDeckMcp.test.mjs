@@ -12,6 +12,7 @@ const { PiDeckMcpService } = loadTsCommonJs("src/main/mcp/PiDeckMcpService.ts");
 const { HostPluginSessions } = loadTsCommonJs("src/main/plugins/HostPluginSessions.ts");
 const { AgentProfileStore } = loadTsCommonJs("src/main/agents/AgentProfileStore.ts");
 const { AutomationStore } = loadTsCommonJs("src/main/automation/AutomationStore.ts");
+const { FavoritesStore } = loadTsCommonJs("src/main/favorites/FavoritesStore.ts");
 const { createDefaultAppSettings } = loadTsCommonJs("src/shared/types/settings.ts");
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
@@ -81,13 +82,22 @@ async function fixture(t, override = {}) {
 			return true;
 		},
 	};
+	// 真实 FavoritesStore（临时文件）：收藏快照、截断与排序都走生产实现。
+	const favoritesStore = new FavoritesStore(join(dir, "favorites.json"));
+	await favoritesStore.load();
+	const favorites = {
+		list: () => favoritesStore.list(),
+		get: (favoriteId) => favoritesStore.list().find((entry) => entry.id === favoriteId),
+		add: (input) => favoritesStore.add(input),
+		remove: (favoriteId) => favoritesStore.remove(favoriteId),
+	};
 	const configPath = join(dir, "mcp-host.json");
-	const service = new PiDeckMcpService({ configPath, projects: () => projects, sessions, agents, automation, settings: () => null, builtInExtensionsVersion: () => null, runtimes: () => [], abortRuntime: async () => ({ ok: true, value: undefined }), warn: () => undefined, ...override });
+	const service = new PiDeckMcpService({ configPath, projects: () => projects, sessions, agents, automation, favorites, settings: () => null, builtInExtensionsVersion: () => null, runtimes: () => [], abortRuntime: async () => ({ ok: true, value: undefined }), warn: () => undefined, ...override });
 	t.after(async () => {
 		await service.dispose();
 		await rm(dir, { recursive: true, force: true });
 	});
-	return { service, projects, configPath, sessions, agentStore, automationStore, dir };
+	return { service, projects, configPath, sessions, agentStore, automationStore, favoritesStore, dir };
 }
 
 async function connect(t, service) {
@@ -110,6 +120,7 @@ test("MCP is off by default, has no endpoint/credential and exports disabled con
 		allowControl: false,
 		allowAgentWrite: false,
 		allowAutomationWrite: false,
+		allowFavoritesWrite: false,
 		running: false,
 		projects: [
 			{ id: "p1", name: "Allowed" },
@@ -128,7 +139,7 @@ test("MCP is off by default, has no endpoint/credential and exports disabled con
 	assert.match(definition.url, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
 	assert.deepEqual(
 		(await client.listTools()).tools.map((v) => v.name),
-		["projects_list", "settings_get", "extensions_list", "runtime_status", "agents_list", "agents_get", "automation_tasks_list", "automation_tasks_get", "automation_runs_list", "sessions_list", "sessions_get", "sessions_search", "sessions_entries"],
+		["projects_list", "settings_get", "extensions_list", "runtime_status", "agents_list", "agents_get", "automation_tasks_list", "automation_tasks_get", "automation_runs_list", "favorites_list", "favorites_get", "sessions_list", "sessions_get", "sessions_search", "sessions_entries"],
 	);
 	for (const tool of (await client.listTools()).tools) assert.equal(tool.annotations.readOnlyHint, true);
 	// 写开关默认关：写工具不注册，客户端连看都看不到，而不是注册后拒绝。
@@ -409,7 +420,7 @@ test("disconnected requests keep their IO budget until settled, then release slo
 	await new Promise((r) => setImmediate(r));
 	const recovered = await list();
 	assert.equal(recovered.status, 200, "SDK shutdown must not strand completed request slots");
-	assert.equal((await recovered.json()).result.tools.length, 13);
+	assert.equal((await recovered.json()).result.tools.length, 15);
 });
 
 test("通配授权跟随项目列表：新增项目立即可读，已删除项目当场失效", async (t) => {
@@ -449,6 +460,7 @@ test("通配/写开关字段向后兼容，且 enabled 必须至少有一块可�
 	assert.equal(legacy.allowControl, false);
 	assert.equal(legacy.allowAgentWrite, false);
 	assert.equal(legacy.allowAutomationWrite, false);
+	assert.equal(legacy.allowFavoritesWrite, false);
 	assert.equal(legacy.projectIds[0], "p1");
 	// enabled 但既没白名单也不是通配：这份配置谁都不能读，必须 fail closed 而不是静默监听。
 	await assert.rejects(read(base), /config-read-failed/);
@@ -651,4 +663,52 @@ test("定时任务写工具默认不注册；打开后可 CRUD、立即运行与
 	assert.equal(denied.isError, true, "未授权项目不能创建任务");
 	assert.deepEqual((await client.callTool({ name: "automation_task_delete", arguments: { taskId } })).structuredContent.data, { taskId, deleted: true });
 	assert.equal((await client.callTool({ name: "automation_tasks_get", arguments: { projectId: "p1", taskId } })).isError, true);
+});
+
+test("收藏工具：默认只读；写开关打开后可存任意文本，未授权项目收藏不可见，关联会话失效降级为无标题", async (t) => {
+	const { service, favoritesStore } = await fixture(t);
+	await service.setAccess({ enabled: true, projectIds: ["p1"], allowControl: false });
+	const off = (await connect(t, service)).client;
+	const offNames = (await off.listTools()).tools.map((tool) => tool.name);
+	assert.ok(offNames.includes("favorites_list"));
+	assert.equal(offNames.includes("favorites_add"), false, "写开关关闭时收藏写工具不注册");
+	assert.equal((await service.getState()).allowFavoritesWrite, false);
+
+	// 未授权项目的收藏直接落盘（模拟其他入口写入）：MCP 列表必须过滤掉，不能借收藏绕过项目授权。
+	await favoritesStore.add({ kind: "message", text: "p2 的秘密", role: "assistant", sessionId: "s2", sessionTitle: "Private", projectId: "p2", messageId: "m2", model: null, partial: false });
+
+	await service.setAccess({ enabled: true, projectIds: ["p1"], allowControl: false, allowFavoritesWrite: true });
+	const { client } = await connect(t, service);
+	const names = (await client.listTools()).tools.map((tool) => tool.name);
+	for (const name of ["favorites_list", "favorites_get", "favorites_add", "favorites_remove"]) assert.ok(names.includes(name), name);
+
+	const arbitrary = await client.callTool({ name: "favorites_add", arguments: { text: "随手记下的一段文字" } });
+	assert.equal(arbitrary.isError, undefined);
+	assert.equal(arbitrary.structuredContent.data.kind, "selection");
+	assert.equal(arbitrary.structuredContent.data.sessionTitle, null, "没有关联会话时允许为空");
+
+	const linked = await client.callTool({ name: "favorites_add", arguments: { text: "整条回复", kind: "message", role: "assistant", projectId: "p1", sessionId: "s1", messageId: "m1" } });
+	assert.equal(linked.structuredContent.data.sessionTitle, "Find Me", "能解析的会话写入标题快照");
+
+	const dangling = await client.callTool({ name: "favorites_add", arguments: { text: "关联丢了", projectId: "p1", sessionId: "missing" } });
+	assert.equal(dangling.isError, undefined, "关联会话找不到不报错");
+	assert.equal(dangling.structuredContent.data.sessionTitle, null, "找不到的关联按无会话保存");
+
+	const listed = (await client.callTool({ name: "favorites_list" })).structuredContent.data;
+	assert.equal(
+		listed.some((entry) => entry.text === "p2 的秘密"),
+		false,
+		"未授权项目的收藏不可见",
+	);
+	assert.equal(listed.length, 3);
+	assert.equal((await client.callTool({ name: "favorites_list", arguments: { kind: "message", query: "整条" } })).structuredContent.data.length, 1);
+
+	const hiddenId = (await favoritesStore.list()).find((entry) => entry.projectId === "p2").id;
+	const hidden = await client.callTool({ name: "favorites_get", arguments: { favoriteId: hiddenId } });
+	assert.equal(JSON.parse(hidden.content[0].text).code, "favorite-not-found");
+
+	const denied = await client.callTool({ name: "favorites_add", arguments: { text: "x", projectId: "p2" } });
+	assert.equal(denied.isError, true, "未授权项目不能借收藏写工具落盘");
+
+	assert.deepEqual((await client.callTool({ name: "favorites_remove", arguments: { favoriteId: linked.structuredContent.data.id } })).structuredContent.data, { favoriteId: linked.structuredContent.data.id, deleted: true });
 });

@@ -3233,6 +3233,19 @@ function registerIpc() {
 				return automationRunCoordinator.abortRun(runId);
 			},
 		},
+		// 收藏：favoritesStore 在启动后段才装配，闭包在请求时求值；未就绪时读为空、写报 operation-failed。
+		favorites: {
+			list: () => favoritesStore?.list() ?? [],
+			get: (favoriteId) => favoritesStore?.list().find((entry) => entry.id === favoriteId),
+			add: async (input) => {
+				if (!favoritesStore) throw new Error("operation-failed");
+				return favoritesStore.add(input);
+			},
+			remove: async (favoriteId) => {
+				if (!favoritesStore) return false;
+				return favoritesStore.remove(favoriteId);
+			},
+		},
 		warn: mcpWarning,
 	});
 	const unregisterPiDeckMcp = registerPiDeckMcpIpc(piDeckMcp, () => mainWindow, mcpWarning);

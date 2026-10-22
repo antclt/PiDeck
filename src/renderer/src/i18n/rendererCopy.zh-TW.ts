@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 0501a6a261763f5513f1a0abaaa5fff88dcb6181d85575045f71cadffc3d0a36（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 0f5066a0332ffb1b36d52d8f0c09e13f6f04f0c79b30d8eb8d139a55446631bc（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -2240,6 +2240,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.mcp.pideck.automationWriteSection": "定時任務管理",
 	"config.mcp.pideck.allowAutomationWrite": "允許建立/編輯/刪除定時任務、立即執行與中止",
 	"config.mcp.pideck.allowAutomationWriteHint": "關閉時客戶端只能讀取已授權專案的任務與執行歷史。開啟後可建立、修改、刪除任務，立即執行（會真實啟動會話、消耗模型額度）或中止執行；任務提示詞隨任務詳情返回。",
+	"config.mcp.pideck.favoriteWriteSection": "收藏寫能力",
+	"config.mcp.pideck.allowFavoritesWrite": "允許新增/刪除本機收藏（含任意文本）",
+	"config.mcp.pideck.allowFavoritesWriteHint": "開啟後客戶端可把任意文本或訊息快照寫入 PiDeck 收藏；列表只返回未關聯專案或已授權專案的收藏，關聯會話找不到時顯示「無關聯會話」。",
 	"config.mcp.pideck.apply": "應用授權並更新令牌",
 	"config.mcp.pideck.enable": "授權並啟用本地服務",
 	"config.mcp.pideck.disable": "關閉服務並撤銷令牌",
@@ -6428,7 +6431,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"favorites.deleteBody": "該收藏會從本機刪除，無法恢復。",
 	"favorites.copy": "複製收藏",
 	"favorites.delete": "刪除收藏",
-	"favorites.sourceUnknown": "未知會話",
+	"favorites.sourceUnknown": "無關聯會話",
 	"favorites.unsaveMessage": "取消收藏這條回覆",
 	"favorites.unsaveUserMessage": "取消收藏這條訊息",
 	"favorites.detailTitle": "收藏詳情",

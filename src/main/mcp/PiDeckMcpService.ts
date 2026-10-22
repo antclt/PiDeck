@@ -5,6 +5,8 @@ import type { McpConfigFile } from "../../shared/types/mcp";
 import type { AgentProfile, BindAgentSessionInput, CreateAgentProfileInput } from "../../shared/types/agentProfile";
 import type { AutomationRun, AutomationTask, AutomationTaskSummary, CreateAutomationTaskInput, UpdateAutomationTaskInput } from "../../shared/types/automation";
 import type { SessionCommandResult, SessionRuntimeInfo, SessionRuntimeTarget } from "../../shared/types/session";
+import type { FavoriteEntry } from "../../shared/types/favorites";
+import type { NormalizedFavoriteInput } from "../favorites/favoriteInput";
 import type { AppSettings } from "../../shared/types/settings";
 import type { AgentProfilePatch } from "../agents/AgentProfileStore";
 import { emptyPiDeckMcpConfig, piDeckMcpAccessSchema, readPiDeckMcpConfig, writePiDeckMcpConfig, type PiDeckMcpConfig } from "../config/piDeckMcpConfig";
@@ -48,6 +50,16 @@ export class PiDeckMcpService {
 			 * 定时任务目录（项目作用域）。automation.json 在启动后段才装配，闭包在请求时求值；
 			 * 写工具是否注册由配置里的 allowAutomationWrite 决定。
 			 */
+			/**
+			 * 收藏（本机快照，宿主级）。读只在服务层按项目授权过滤后下发；
+			 * 写工具是否注册由配置里的 allowFavoritesWrite 决定。
+			 */
+			favorites: {
+				list: () => FavoriteEntry[];
+				get: (favoriteId: string) => FavoriteEntry | undefined;
+				add: (input: NormalizedFavoriteInput) => Promise<FavoriteEntry>;
+				remove: (favoriteId: string) => Promise<boolean>;
+			};
 			automation: {
 				listTasks: (projectId: string) => AutomationTaskSummary[];
 				getTask: (taskId: string) => AutomationTaskSummary | undefined;
@@ -90,6 +102,7 @@ export class PiDeckMcpService {
 			allowControl: this.config.allowControl,
 			allowAgentWrite: this.config.allowAgentWrite,
 			allowAutomationWrite: this.config.allowAutomationWrite,
+			allowFavoritesWrite: this.config.allowFavoritesWrite,
 			running: Boolean(this.endpoint),
 			endpoint: this.endpoint,
 			projects: this.deps.projects(),
@@ -193,6 +206,17 @@ export class PiDeckMcpService {
 					agentWriteEnabled: () => this.config.allowAgentWrite,
 					automation: this.deps.automation,
 					automationWriteEnabled: () => this.config.allowAutomationWrite,
+					// 收藏是本机快照：读接口在这里按项目授权过滤，工具层拿不到未授权项目的正文。
+					favorites: {
+						list: () => this.deps.favorites.list().filter((entry) => !entry.projectId || this.isProjectAuthorized(entry.projectId)),
+						get: (favoriteId) => {
+							const entry = this.deps.favorites.get(favoriteId);
+							return entry && (!entry.projectId || this.isProjectAuthorized(entry.projectId)) ? entry : undefined;
+						},
+						add: (input) => this.deps.favorites.add(input),
+						remove: (favoriteId) => this.deps.favorites.remove(favoriteId),
+					},
+					favoriteWriteEnabled: () => this.config.allowFavoritesWrite,
 					abort: async (target) => {
 						// 开关在请求开始后才被关掉时（工具已注册）也必须拒绝，所以每次调用都复查。
 						if (!this.config.allowControl) throw new Error("control-disabled");
@@ -225,6 +249,7 @@ export class PiDeckMcpService {
 		if (this.config.allowControl) capabilities.push("Runtime control: abort the response a running session is producing.");
 		if (this.config.allowAgentWrite) capabilities.push("Agent management: create/edit/delete agent presets and bind them to sessions (role prompts are write-only).");
 		if (this.config.allowAutomationWrite) capabilities.push("Scheduled-task management: create/edit/delete tasks, start or abort runs (runs consume model budget).");
+		if (this.config.allowFavoritesWrite) capabilities.push("Favorites: save arbitrary text or message snapshots and delete favorites (host-local snapshots).");
 		return { mcpServers: { pideck: { url: this.endpoint, headers: { Authorization: `Bearer ${this.config.token}` }, enabled: false, exposure: "codemode", description: capabilities.join(" ") } } };
 	}
 

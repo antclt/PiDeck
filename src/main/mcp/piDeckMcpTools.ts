@@ -16,6 +16,9 @@ import {
 	type CreateAgentProfileInput,
 } from "../../shared/types/agentProfile";
 import type { AutomationRun, AutomationSchedule, AutomationTask, AutomationTaskSummary, CreateAutomationTaskInput, UpdateAutomationTaskInput } from "../../shared/types/automation";
+import type { FavoriteEntry } from "../../shared/types/favorites";
+import { FAVORITE_TEXT_INPUT_MAX_CHARS } from "../../shared/types/favorites";
+import { parseAddFavoriteInput, type NormalizedFavoriteInput } from "../favorites/favoriteInput";
 import type { PiDeckMcpExtensionsView, PiDeckMcpProject, PiDeckMcpRuntimeView, PiDeckMcpSettingsView } from "../../shared/types/piDeckMcp";
 import type { AgentProfilePatch } from "../agents/AgentProfileStore";
 import { parseAutomationCron } from "../automation/automationCron";
@@ -74,6 +77,18 @@ export type PiDeckMcpToolDeps = {
 	};
 	/** 定时任务写开关当前是否打开；决定写工具是否注册，并在每次写入前复查。 */
 	automationWriteEnabled: () => boolean;
+	/**
+	 * 收藏（本机快照，宿主级）：读接口已由服务层按项目授权过滤；
+	 * 写工具只在 `favoriteWriteEnabled()` 为真时注册。
+	 */
+	favorites: {
+		list: () => FavoriteEntry[];
+		get: (favoriteId: string) => FavoriteEntry | undefined;
+		add: (input: NormalizedFavoriteInput) => Promise<FavoriteEntry>;
+		remove: (favoriteId: string) => Promise<boolean>;
+	};
+	/** 收藏写开关当前是否打开；决定写工具是否注册，并在每次写入前复查。 */
+	favoriteWriteEnabled: () => boolean;
 };
 const id = z
 	.string()
@@ -142,6 +157,8 @@ const SAFE_ERRORS = new Set([
 	"automation-write-disabled",
 	"automation-patch-empty",
 	"automation-invalid-schedule",
+	"favorite-not-found",
+	"favorite-write-disabled",
 ]);
 
 /** Each HTTP request owns a fresh stateless protocol server; the session reader is shared and bounded. */
@@ -159,6 +176,7 @@ export function createPiDeckMcpServer(deps: PiDeckMcpToolDeps): McpServer {
 				control ? "runtime_status reports which sessions are running right now; sessions_abort interrupts the response one of them is producing. The user can withdraw that ability at any time." : "No runtime control.",
 				"agents_list/agents_get describe the host's prompt presets by metadata only; their role prompts (systemPrompt) are never returned. Agent write tools exist only when the user enables agent management, and even then role prompts stay write-only.",
 				"automation_tasks_list/automation_tasks_get/automation_runs_list describe scheduled tasks inside authorized projects. Automation write tools exist only when the user enables scheduled-task management; automation_task_run_now starts a real agent session and consumes model budget.",
+				"favorites_list/favorites_get return host-local saved snapshots (whole replies or selected snippets) that are either unlinked or linked to an authorized project; favorite write tools exist only when the user enables favorite management, and arbitrary text can be saved with favorites_add.",
 				"No arbitrary files or network proxy. API v1.",
 			].join(" "),
 		},
@@ -170,8 +188,10 @@ export function createPiDeckMcpServer(deps: PiDeckMcpToolDeps): McpServer {
 	 */
 	function tool<S extends z.ZodRawShape>(name: string, description: string, shape: S, run: (args: z.output<z.ZodObject<S>>) => unknown | Promise<unknown>, options?: { write?: boolean }): void {
 		const schema = z.object(shape).strict();
-		// MCP clients may omit arguments for a zero-argument tool, not only send {}.
-		const inputSchema = Object.keys(shape).length ? schema : schema.optional();
+		// MCP clients may omit arguments for a zero-argument tool, not only send {}；
+		// 全部字段都可选的工具（如 favorites_list 的筛选参数）同样允许省略整个 arguments。
+		const allFieldsOptional = Object.keys(shape).length === 0 || Object.values(shape).every((field) => field.isOptional?.() === true);
+		const inputSchema = allFieldsOptional ? schema.optional() : schema;
 		server.registerTool(name, { description, inputSchema, annotations: { readOnlyHint: !options?.write, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async (input: unknown): Promise<CallToolResult> => {
 			try {
 				deps.authorize();
@@ -256,6 +276,26 @@ export function createPiDeckMcpServer(deps: PiDeckMcpToolDeps): McpServer {
 			return { runs: runs.map(buildPiDeckMcpAutomationRun) };
 		},
 	);
+	// 收藏（本机快照）：读工具始终可用；服务层已按项目授权过滤，未授权项目的收藏不会出现在列表里。
+	tool(
+		"favorites_list",
+		"List saved favorites on this machine, newest first. Favorites are whole replies or selected snippets saved by the user; entries linked to a project outside the authorized set are omitted. Session links that no longer resolve still return the saved text with sessionTitle=null.",
+		{ kind: z.enum(["message", "selection"]).optional(), query: z.string().trim().max(500).optional(), limit: z.number().int().min(1).max(200).optional() },
+		({ kind, query, limit }) => {
+			const keyword = query?.toLowerCase();
+			return deps.favorites
+				.list()
+				.filter((entry) => (kind === undefined ? true : entry.kind === kind))
+				.filter((entry) => !keyword || entry.text.toLowerCase().includes(keyword) || (entry.sessionTitle ?? "").toLowerCase().includes(keyword))
+				.sort((left, right) => right.createdAt - left.createdAt)
+				.slice(0, limit ?? 50);
+		},
+	);
+	tool("favorites_get", "Get one saved favorite by id (host-local snapshot).", { favoriteId: id }, ({ favoriteId }) => {
+		const entry = deps.favorites.get(favoriteId);
+		if (!entry) throw new Error("favorite-not-found");
+		return entry;
+	});
 	// 智能体写工具：开关关着时**不注册**（客户端看不到），并在每次写入前复查（请求期间被关掉也要拒）。
 	const agentWrite = deps.agentWriteEnabled();
 	if (agentWrite) {
@@ -484,6 +524,59 @@ export function createPiDeckMcpServer(deps: PiDeckMcpToolDeps): McpServer {
 				const aborted = await deps.automation.abortRun(runId);
 				deps.authorize(run.projectId);
 				return { runId, aborted };
+			},
+			{ write: true },
+		);
+	}
+	// 收藏写工具：与智能体/定时任务同一规则（开关关着不注册，写入前复查）。
+	const favoriteWrite = deps.favoriteWriteEnabled();
+	if (favoriteWrite) {
+		const assertFavoriteWrite = () => {
+			if (!deps.favoriteWriteEnabled()) throw new Error("favorite-write-disabled");
+		};
+		tool(
+			"favorites_add",
+			'Save arbitrary text (or a message snapshot) to PiDeck favorites. kind defaults to selection. sessionId/projectId are optional links: when both are provided and the session resolves inside an authorized project, the session title is snapshotted; when the link cannot be resolved the favorite is still saved with sessionTitle=null (the UI shows "no linked session").',
+			{
+				text: z.string().trim().min(1).max(FAVORITE_TEXT_INPUT_MAX_CHARS),
+				kind: z.enum(["message", "selection"]).optional(),
+				role: z.enum(["user", "assistant", "system"]).nullable().optional(),
+				sessionId: id.optional(),
+				projectId: id.optional(),
+				messageId: id.optional(),
+				model: id.optional(),
+				partial: z.boolean().optional(),
+			},
+			async (input) => {
+				assertFavoriteWrite();
+				if (input.projectId) deps.authorize(input.projectId);
+				let sessionTitle: string | null = null;
+				if (input.projectId && input.sessionId) {
+					// 关联会话找不到不是错误：收藏照存，只是会话标题为空（UI 显示「无关联会话」）。
+					// sessions.get 对不存在/不属于该项目一律抛 session-not-authorized，这里按「无关联」降级。
+					try {
+						sessionTitle = deps.sessions.get(context(input.projectId), input.sessionId).title ?? null;
+					} catch {
+						sessionTitle = null;
+					}
+				}
+				const parsed = parseAddFavoriteInput({ ...input, kind: input.kind ?? "selection", sessionTitle });
+				const entry = await deps.favorites.add(parsed);
+				return entry;
+			},
+			{ write: true },
+		);
+		tool(
+			"favorites_remove",
+			"Delete one favorite by id. Only favorites visible to this client (unlinked or authorized-project) can be removed.",
+			{ favoriteId: id },
+			async ({ favoriteId }) => {
+				assertFavoriteWrite();
+				const entry = deps.favorites.get(favoriteId);
+				if (!entry) throw new Error("favorite-not-found");
+				const deleted = await deps.favorites.remove(favoriteId);
+				if (!deleted) throw new Error("favorite-not-found");
+				return { favoriteId, deleted: true };
 			},
 			{ write: true },
 		);

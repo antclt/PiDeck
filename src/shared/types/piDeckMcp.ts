@@ -25,6 +25,11 @@ export type PiDeckMcpAccess = {
 	 * 任务属于具体项目，读写都按项目白名单校验；任务提示词随任务详情返回（项目范围内可见）。
 	 */
 	allowAutomationWrite: boolean;
+	/**
+	 * 收藏写能力开关（默认关）：开启后客户端可新增/删除本机收藏（含任意文本）。
+	 * 收藏是本机快照：列表只返回「未关联项目」或「已授权项目」的条目，避免借收藏绕过项目授权。
+	 */
+	allowFavoritesWrite: boolean;
 };
 export type PiDeckMcpProject = { id: string; name: string };
 export type PiDeckMcpState = PiDeckMcpAccess & {

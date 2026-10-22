@@ -21,7 +21,8 @@ export function PiDeckMcpPanel({ existingNames, disabled, onAdd }: { existingNam
 			host.allProjects !== host.state.allProjects ||
 			host.allowControl !== host.state.allowControl ||
 			host.allowAgentWrite !== (host.state.allowAgentWrite ?? false) ||
-			host.allowAutomationWrite !== (host.state.allowAutomationWrite ?? false));
+			host.allowAutomationWrite !== (host.state.allowAutomationWrite ?? false) ||
+			host.allowFavoritesWrite !== (host.state.allowFavoritesWrite ?? false));
 	// 「全选」只覆盖当前项目列表；要跟随今后新建的项目得用通配授权，而不是逐个勾。
 	const projectCount = host.state?.projects.length ?? 0;
 	const allSelected = projectCount > 0 && host.projectIds.length === projectCount;
@@ -94,6 +95,15 @@ export function PiDeckMcpPanel({ existingNames, disabled, onAdd }: { existingNam
 					<Label htmlFor={`${prefix}-automation-write`}>{t("config.mcp.pideck.allowAutomationWrite")}</Label>
 				</div>
 				<p className="text-micro text-muted-foreground">{t("config.mcp.pideck.allowAutomationWriteHint")}</p>
+			</fieldset>
+			{/* 收藏写能力：默认关；开启后可新增/删除本机收藏（含任意文本），读仍只返回无项目归属或已授权项目的条目 */}
+			<fieldset disabled={busy || !host.state} className="flex flex-col gap-2">
+				<legend className="mb-2 text-control font-medium">{t("config.mcp.pideck.favoriteWriteSection")}</legend>
+				<div className="flex shrink-0 items-center gap-2">
+					<Checkbox id={`${prefix}-favorite-write`} checked={host.allowFavoritesWrite} onCheckedChange={(checked) => host.setAllowFavoritesWrite(checked === true)} />
+					<Label htmlFor={`${prefix}-favorite-write`}>{t("config.mcp.pideck.allowFavoritesWrite")}</Label>
+				</div>
+				<p className="text-micro text-muted-foreground">{t("config.mcp.pideck.allowFavoritesWriteHint")}</p>
 			</fieldset>
 			<div className="flex flex-wrap gap-2">
 				<Button
