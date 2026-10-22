@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAtomValue, useStore } from "jotai";
-import { Bot, CircleStop, Clock, Fingerprint, Puzzle, RefreshCw, RotateCw, Settings2, SquarePen, Star } from "lucide-react";
+import { Bot, CircleStop, Clock, Fingerprint, Puzzle, RefreshCw, RotateCw, Settings2, SquarePen, Star, Wrench } from "lucide-react";
 import { buildSettingsCommands, type PaletteCommand } from "../../utils/commandPaletteCommands";
 import { markCommandPaletteOnboardingSeen } from "../../components/overlays/CommandPaletteOnboarding";
 import { openSettingsAtom } from "../../atoms/app-ui-atoms";
@@ -22,6 +22,8 @@ export interface CommandPaletteActions {
 	openAgentMarketPage: () => void;
 	/** 打开会话 Tab 栏里的「收藏」页面，同上。 */
 	openFavoritesPage: () => void;
+	/** 打开「Pi 环境检测 / 安装引导」弹窗（dev 传 previewSetup 可直接看未安装态的一键安装面板）。 */
+	openEnvironmentGuide: (options?: { previewSetup?: boolean }) => void;
 }
 
 /**
@@ -76,6 +78,29 @@ export function useCommandPalette({ activeProjectId, currentSessionId, activeAge
 			icon: Settings2,
 			run: () => store.set(openSettingsAtom, { tab: "common" }),
 		});
+
+		// Pi 环境检测：已装好 pi 的用户平时看不到这个弹窗，保留一个随时可打开的入口
+		// （换机器、给用户排查「为什么起不了会话」时都用得上）。
+		commands.push({
+			id: "action:pi-environment-guide",
+			group: actionGroup,
+			title: t("command.actionPiEnvironment"),
+			keywords: ["pi", "环境", "检测", "安装", "install", "environment", "node", "npm", "dsh"],
+			icon: Wrench,
+			run: () => actions.openEnvironmentGuide(),
+		});
+
+		// 开发专用：本机已装 pi 时也能看到未安装态的一键安装面板（不需要把 pi 从 PATH 里拿掉）。
+		if (import.meta.env.DEV) {
+			commands.push({
+				id: "action:pi-environment-guide-preview",
+				group: actionGroup,
+				title: t("command.actionPiEnvironmentPreview"),
+				keywords: ["pi", "预览", "preview", "安装引导", "环境检测"],
+				icon: Wrench,
+				run: () => actions.openEnvironmentGuide({ previewSetup: true }),
+			});
+		}
 
 		// 页面式工作区（定时任务 / 智能体 / 收藏）：侧栏入口可被外观设置→功能模块收起，
 		// 命令面板始终保留直达路径——隐藏后「找不回来」是最糟的结果。

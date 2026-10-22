@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: a16324a0ecb2ac3da80f97a92e6b1e7fb783d255051197244fc21eb65b2e97c5（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: a4eeca19017bdc53c6d59fcfb3b54aaf59bea0fb0226cdcca455b30f0859e782（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -1286,6 +1286,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"command.configRaw": "配置原始檔",
 	"command.actionNewSession": "新建會話",
 	"command.actionOpenSettings": "開啟設定",
+	"command.actionPiEnvironment": "Pi 環境檢測 / 安裝引導",
+	"command.actionPiEnvironmentPreview": "預覽 Pi 安裝引導（模擬未安裝）",
 	"command.actionRestartAgent": "重啟當前 Agent",
 	"command.actionRestartAgentDesc": "重啟程序並重載擴充套件；正在生成的回答會中斷",
 	"command.actionStopAgent": "關閉當前 Agent",
@@ -3849,6 +3851,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"environment.setupUseThisPath": "使用這份",
 	"environment.setupAdvancedTitle": "手動安裝 / 檢視檢測詳情",
 	"environment.setupAdvancedDesc": "一鍵安裝失敗時，可以在這裡手動執行安裝命令、檢視安裝輸出、檢測報錯和已搜尋的目錄。",
+	"environment.setupPreviewBanner": "預覽模式：模擬本機沒有 pi，展示一鍵安裝引導（不影響真實檢測結果）。",
 	// —— 不装 pi 的替代路径：DSH 内置运行时（需先下载 runtime；安装/修复都跳配置管理的 DSH 分页）——
 	"environment.dshTitle": "不裝 Pi 也能用：DSH 執行時",
 	"environment.dshDesc": "DSH 是 PiDeck 內建的另一套 Agent 執行時，裝上後可以直接新建會話，不需要 pi，也不需要 Node.js。需要先下載一次執行時。",

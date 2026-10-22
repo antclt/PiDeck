@@ -20,6 +20,8 @@ import { EnvironmentSetupPanel, type EnvironmentSetupPanelProps } from "./Enviro
 export function EnvironmentDialog(props: {
 	status: PiInstallStatus | null;
 	checking: boolean;
+	/** 开发预览：无视检测结果直接渲染未安装态的一键安装面板（本机已装 pi 时也能看引导效果） */
+	setupPreview?: boolean;
 	onClose: () => void;
 	onRecheck: () => void;
 	onOpenInstallDocs: () => void;
@@ -63,7 +65,7 @@ export function EnvironmentDialog(props: {
 	/** 重置 piEnvironmentChecked 标记，使下次启动重新触发环境检测 */
 	onClearCheckFlag?: () => void;
 }) {
-	const installed = props.status?.installed || props.customPathResult?.installed;
+	const installed = !props.setupPreview && (props.status?.installed || props.customPathResult?.installed);
 	const searchedDirs = props.status?.searchedDirs.slice(0, 16) ?? [];
 	const errorText = props.status?.error ?? props.customPathResult?.error;
 
@@ -124,32 +126,35 @@ export function EnvironmentDialog(props: {
 					)}
 
 					{!props.checking && !installed && (
-						<EnvironmentSetupPanel
-							guide={props.guide}
-							errorText={errorText}
-							searchedDirs={searchedDirs}
-							onOpenInstallDocs={props.onOpenInstallDocs}
-							onChooseInstallation={props.onChooseInstallation}
-							dsh={props.dsh}
-							manual={{
-								command: props.installCommand,
-								executing: props.installExecuting,
-								result: props.installResult,
-								completed: props.installCompleted,
-								onCommandChange: props.onInstallCommandChange,
-								onExec: props.onExecInstall,
-								onRestartApp: props.onRestartApp,
-							}}
-							customPath={{
-								value: props.customPath,
-								validating: props.customPathValidating,
-								result: props.customPathResult,
-								browsing: props.browsingPiPath,
-								onChange: props.onCustomPathChange,
-								onValidate: props.onValidateCustomPath,
-								onBrowse: props.onBrowsePiPath,
-							}}
-						/>
+						<>
+							{props.setupPreview && <p className="m-0 shrink-0 rounded-md border border-border-subtle bg-muted px-3 py-2 text-text-secondary text-caption">{t("environment.setupPreviewBanner")}</p>}
+							<EnvironmentSetupPanel
+								guide={props.guide}
+								errorText={errorText}
+								searchedDirs={searchedDirs}
+								onOpenInstallDocs={props.onOpenInstallDocs}
+								onChooseInstallation={props.onChooseInstallation}
+								dsh={props.dsh}
+								manual={{
+									command: props.installCommand,
+									executing: props.installExecuting,
+									result: props.installResult,
+									completed: props.installCompleted,
+									onCommandChange: props.onInstallCommandChange,
+									onExec: props.onExecInstall,
+									onRestartApp: props.onRestartApp,
+								}}
+								customPath={{
+									value: props.customPath,
+									validating: props.customPathValidating,
+									result: props.customPathResult,
+									browsing: props.browsingPiPath,
+									onChange: props.onCustomPathChange,
+									onValidate: props.onValidateCustomPath,
+									onBrowse: props.onBrowsePiPath,
+								}}
+							/>
+						</>
 					)}
 				</div>
 

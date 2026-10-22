@@ -1285,6 +1285,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"command.configRaw": "Raw config file",
 	"command.actionNewSession": "New session",
 	"command.actionOpenSettings": "Open settings",
+	"command.actionPiEnvironment": "Pi environment check / install guide",
+	"command.actionPiEnvironmentPreview": "Preview Pi install guide (simulate not installed)",
 	"command.actionRestartAgent": "Restart current agent",
 	"command.actionRestartAgentDesc": "Restarts the process and reloads extensions; an in-flight answer is interrupted",
 	"command.actionStopAgent": "Close current agent",
@@ -3857,6 +3859,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"environment.setupUseThisPath": "Use this one",
 	"environment.setupAdvancedTitle": "Manual install / detection details",
 	"environment.setupAdvancedDesc": "If one-click install fails, run the install command yourself here and inspect the output, the detection error and the folders that were searched.",
+	"environment.setupPreviewBanner": "Preview mode: shows the one-click install guide as if Pi were missing. Real detection results are untouched.",
 	// —— alternative to pi: the bundled DSH runtime (install once; install/repair open the DSH pane in settings) ——
 	"environment.dshTitle": "No Pi? Use the DSH runtime",
 	"environment.dshDesc": "DSH is a second agent runtime bundled with PiDeck. Once installed you can start sessions without pi — and without Node.js. The runtime itself needs to be downloaded once.",

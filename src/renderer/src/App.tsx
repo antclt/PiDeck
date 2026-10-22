@@ -2972,7 +2972,7 @@ export function App() {
 		currentSessionId,
 		activeAgentId,
 		hiddenModules: settings.hiddenModules ?? [],
-		actions: { selectProjectCommand, restartActiveAgent, closeAgent, runSessionControl, openAutomationPage: () => openAutomationPage(), openAgentMarketPage: () => openAgentMarketPage(), openFavoritesPage: () => openFavoritesPage() },
+		actions: { selectProjectCommand, restartActiveAgent, closeAgent, runSessionControl, openAutomationPage: () => openAutomationPage(), openAgentMarketPage: () => openAgentMarketPage(), openFavoritesPage: () => openFavoritesPage(), openEnvironmentGuide: piUpdate.openEnvironmentGuide },
 	});
 
 	// 窗口缩放快捷键（Ctrl/Cmd+= / Ctrl/Cmd+-）由主进程直接改 zoomFactor 并落盘
@@ -3555,6 +3555,7 @@ export function App() {
 							status={piStatus}
 							checking={piChecking}
 							guide={piGuide}
+							setupPreview={piUpdate.environmentSetupPreview}
 							dsh={{
 								state: dshRuntimeStatus.state,
 								runtimeVersion: dshRuntimeStatus.runtimeVersion,
@@ -3577,6 +3578,8 @@ export function App() {
 							}}
 							onClose={() => {
 								setEnvironmentDialog(false);
+								// 预览标记只在本次打开有效：下次（含启动检测）回到真实检测结果
+								piUpdate.setEnvironmentSetupPreview(false);
 								piUpdate.setCustomPathResult(null);
 								// 关闭时重置安装状态
 								piUpdate.setInstallResult(null);

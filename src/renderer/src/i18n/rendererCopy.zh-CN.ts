@@ -1279,6 +1279,8 @@ export const zhCN = {
 	"command.configRaw": "配置源文件",
 	"command.actionNewSession": "新建会话",
 	"command.actionOpenSettings": "打开设置",
+	"command.actionPiEnvironment": "Pi 环境检测 / 安装引导",
+	"command.actionPiEnvironmentPreview": "预览 Pi 安装引导（模拟未安装）",
 	"command.actionRestartAgent": "重启当前 Agent",
 	"command.actionRestartAgentDesc": "重启进程并重载扩展；正在生成的回答会中断",
 	"command.actionStopAgent": "关闭当前 Agent",
@@ -3842,6 +3844,7 @@ export const zhCN = {
 	"environment.setupUseThisPath": "使用这份",
 	"environment.setupAdvancedTitle": "手动安装 / 查看检测详情",
 	"environment.setupAdvancedDesc": "一键安装失败时，可以在这里手动执行安装命令、查看安装输出、检测报错和已搜索的目录。",
+	"environment.setupPreviewBanner": "预览模式：模拟本机没有 pi，展示一键安装引导（不影响真实检测结果）。",
 	// —— 不装 pi 的替代路径：DSH 内置运行时（需先下载 runtime；安装/修复都跳配置管理的 DSH 分页）——
 	"environment.dshTitle": "不装 Pi 也能用：DSH 运行时",
 	"environment.dshDesc": "DSH 是 PiDeck 内置的另一套 Agent 运行时，装上后可以直接新建会话，不需要 pi，也不需要 Node.js。需要先下载一次运行时。",
