@@ -5458,6 +5458,8 @@ app
 				if (!entry.filePath) return null;
 				return sessionMessageSearchInFile(entry.filePath, query);
 			},
+			// 供应商额度用量：与桌面圆球面板同一份 ConfigManager 探针（含凭据脱敏与「未开启」门控）。
+			fetchProviderUsage: (provider, backend) => configManager.fetchProviderUsage(provider, backend),
 			sendSessionPrompt: async (input) => {
 				const result = await sessionRuntimeCoordinator.send(input);
 				if (result.agentId) {

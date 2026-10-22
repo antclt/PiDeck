@@ -9,7 +9,7 @@
  */
 import type { UIMessage } from "ai";
 import type { AvailableModel, AgentBackend, ChatMessage, SessionCommandResult, SessionLaunchPreferences, SessionMessagePage, SessionRuntimeInfo, SessionRuntimeTarget, SessionSearchResult, SessionTargetedValue, SessionTodoSnapshot, UpdateSessionRecordInput } from "../../../shared/types";
-import type { CommitEntry, GitBranchInfo, GitResourceGroups, ImageContent, PiExtensionSummary, PiSkillLocation, PiSkillSummary, PiSubagentEntry, YaoPromptCategory } from "../../../shared/types";
+import type { CommitEntry, GitBranchInfo, GitResourceGroups, ImageContent, PiExtensionSummary, PiSkillLocation, PiSkillSummary, PiSubagentEntry, YaoPromptCategory, ProviderUsageResult, UsageProbeBackend } from "../../../shared/types";
 import type { AgentUiResponse } from "../../../shared/types";
 import type { WebContextUsage, WebFileNodeLite, WebState } from "./webTypes";
 
@@ -503,6 +503,19 @@ export function forkRuntimeSession(sessionId: string, target: SessionRuntimeTarg
 export async function fetchRuntimeContextUsage(sessionId: string, target: SessionRuntimeTarget): Promise<WebContextUsage> {
 	const usage = await callRuntimeCommand<WebContextUsage>(sessionId, target, "state");
 	return usage ?? {};
+}
+
+/** 供应商额度/余额用量（与桌面圆球面板同源，走主进程 ConfigManager 用量探针）。
+ *  该能力是用户显式开关的：未开启/供应商无可用端点时服务端也返回 success=false（恒 200），
+ *  因此失败不是错误——调用方按 result.success 决定渲染与否，不弹 toast。 */
+export async function fetchProviderUsage(provider: string, backend: UsageProbeBackend = "pi"): Promise<ProviderUsageResult> {
+	const params = new URLSearchParams();
+	if (backend === "dsh") params.set("backend", "dsh");
+	const query = params.toString();
+	const res = await apiFetch(`/api/usage/${encodeURIComponent(provider)}${query ? `?${query}` : ""}`);
+	if (!res.ok) return { success: false, provider, disabled: true };
+	const body = (await res.json()) as { result?: ProviderUsageResult };
+	return body.result ?? { success: false, provider, disabled: true };
 }
 
 /** P2：提示词库搜索（中文提示词精选）。 */

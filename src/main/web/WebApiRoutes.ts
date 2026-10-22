@@ -189,6 +189,28 @@ export class WebApiRoutes {
 			this.sendJson(response, { result });
 			return true;
 		}
+		// 供应商额度/余额用量（与桌面圆球面板同源）：usage probe 是用户显式开关的能力，
+		// 「未装配 / 未开启 / 供应商无端点」都是正常态而非故障——一律 200 + success=false，
+		// 前端据此不渲染额度区块（与桌面 ProviderUsageDetails 的 disabled 分支同语义）。
+		const usageMatch = url.pathname.match(/^\/api\/usage\/([^/]+)$/);
+		if (usageMatch && request.method === "GET") {
+			const provider = decodeURIComponent(usageMatch[1]).trim();
+			const backend = url.searchParams.get("backend") === "dsh" ? "dsh" : "pi";
+			const probe = this.deps.fetchProviderUsage;
+			if (!probe || !provider || provider.length > 128) {
+				this.sendJson(response, { result: { success: false, provider, disabled: true } });
+				return true;
+			}
+			let result;
+			try {
+				result = await probe(provider, backend);
+			} catch {
+				// 探针异常（网络/解析）按「不可用」降级，不把内部错误回给浏览器
+				result = { success: false, provider, disabled: true };
+			}
+			this.sendJson(response, { result });
+			return true;
+		}
 		const todoMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/todo$/);
 		if (todoMatch && request.method === "GET") {
 			if (!this.deps.listSessionTodo) {

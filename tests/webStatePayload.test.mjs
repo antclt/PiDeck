@@ -171,3 +171,82 @@ test("session search degrades to null instead of failing the request", async () 
 		},
 	);
 });
+
+// ── 供应商额度用量端点（Web 走查 m02502）────────────────────────────────────
+// 契约：恒 200 + `{ result }`；未装配 / 空 provider / 超长 provider / 探针抛错
+// 一律降级成 `success: false, disabled: true`（用量查询是用户显式开关的能力，
+// 「没开」必须与「查不到」区分开，且绝不能让 Web 端拿到内部错误文案）。
+async function withUsageServer(run, fetchProviderUsage) {
+	const { WebServiceManager } = loadTsCommonJs("src/main/web/WebServiceManager.ts", { globals: { fetch: globalThis.fetch } });
+	const manager = new WebServiceManager({
+		subscribePiEvents: () => () => undefined,
+		listProjects: () => [],
+		listCatalogSessions: async () => [],
+		listSessionRuntimes: () => [],
+		listPendingUiRequests: () => [],
+		fetchProviderUsage,
+	});
+	await manager.start("127.0.0.1", 0, false);
+	const baseUrl = `http://127.0.0.1:${manager.current.port}`;
+	try {
+		await run({ baseUrl });
+	} finally {
+		await manager.stop();
+	}
+}
+
+test("provider usage endpoint returns the probe result", async () => {
+	const calls = [];
+	await withUsageServer(
+		async ({ baseUrl }) => {
+			const res = await fetch(`${baseUrl}/api/usage/deepseek?backend=pi`);
+			assert.equal(res.status, 200);
+			const body = await res.json();
+			assert.equal(body.result.success, true);
+			assert.equal(body.result.kind, "balance");
+			assert.equal(body.result.balance.value, 12.34);
+			// 缺省 backend 按 pi 处理
+			const plain = await (await fetch(`${baseUrl}/api/usage/deepseek`)).json();
+			assert.equal(plain.result.success, true);
+		},
+		async (provider, backend) => {
+			calls.push([provider, backend]);
+			return { success: true, provider, kind: "balance", balance: { value: 12.34, currency: "CNY" }, at: 1 };
+		},
+	);
+	assert.deepEqual(calls, [
+		["deepseek", "pi"],
+		["deepseek", "pi"],
+	]);
+});
+
+test("provider usage degrades to a disabled result instead of failing", async () => {
+	await withUsageServer(
+		async ({ baseUrl }) => {
+			// 空 provider / 超长 provider 不打后端
+			const missing = await (await fetch(`${baseUrl}/api/usage/%20%20`)).json();
+			assert.equal(missing.result.success, false);
+			assert.equal(missing.result.disabled, true);
+			const tooLong = await (await fetch(`${baseUrl}/api/usage/${"x".repeat(200)}`)).json();
+			assert.equal(tooLong.result.disabled, true);
+			// 探针抛错仍是 200 + disabled（不可弹 toast 也不回内部错误）
+			const res = await fetch(`${baseUrl}/api/usage/boom`);
+			assert.equal(res.status, 200);
+			const body = await res.json();
+			assert.equal(body.result.success, false);
+			assert.equal(body.result.provider, "boom");
+			assert.equal(body.result.error, undefined);
+		},
+		async () => {
+			throw new Error("probe exploded");
+		},
+	);
+});
+
+test("provider usage stays disabled when the dependency is not wired", async () => {
+	await withUsageServer(async ({ baseUrl }) => {
+		const res = await fetch(`${baseUrl}/api/usage/deepseek`);
+		assert.equal(res.status, 200);
+		assert.equal((await res.json()).result.disabled, true);
+	}, undefined);
+});

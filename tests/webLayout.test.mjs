@@ -189,7 +189,7 @@ test("Web header context ring opens a usage sheet instead of being display-only"
 	assert.match(webHeader, /if \(props\.onClick\) \{[\s\S]*?<Button[^>]*onClick=\{props\.onClick\}/);
 	// 详情弹层走 WebBottomSheet，主体列总量/输入/输出并提供压缩入口。
 	assert.match(webHeader, /import \{ WebBottomSheet \} from "\.\/WebBottomSheet";/);
-	assert.match(webHeader, /<ContextUsageSheetBody usage=\{contextUsage\} onCompact=\{actions\?\.onCompact\}/);
+	assert.match(webHeader, /<ContextUsageSheetBody usage=\{contextUsage\} provider=\{usageProvider\} backend=\{usageBackend\} enabled=\{contextSheetOpen\} onCompact=\{actions\?\.onCompact\}/);
 	assert.match(webHeader, /web\.inputTokens/);
 	assert.match(webHeader, /web\.outputTokens/);
 });
@@ -355,4 +355,31 @@ test("Web search dialog queries the whole session through the backend", () => {
 	assert.match(webChatApp, /await loadOlderMessages\(\);/);
 	assert.match(webChatApp, /const MAX_SEARCH_JUMP_PAGES = 5;/);
 	assert.match(webChatApp, /<WebSearchDialog open=\{searchOpen\} onOpenChange=\{setSearchOpen\} sessionId=\{activeSessionId\}/);
+});
+
+test("Web context sheet shows provider quota usage next to the context numbers", () => {
+	// m02502：用户要的是「额度用量」，不是上下文——详情弹层在上下文数字之下追加
+	// 供应商额度区块；数据来自 /api/usage（Web 端自写 hook，不依赖桌面 jotai atoms）。
+	assert.match(webChatApp, /usageProvider=\{contextUsage\?\.provider \?\? activeSession\?\.model\?\.provider\}/);
+	assert.match(webChatApp, /usageBackend=\{activeSession\?\.backend === "dsh" \? "dsh" : "pi"\}/);
+	assert.match(webHeader, /<ContextUsageSheetBody usage=\{contextUsage\} provider=\{usageProvider\} backend=\{usageBackend\}/);
+	assert.match(webHeader, /function ProviderUsageBlock\(props: \{ provider\?: string; backend\?: UsageProbeBackend; enabled\?: boolean \}\)/);
+	assert.match(webHeader, /useWebProviderUsage\(props\.provider, props\.backend \?\? "pi", props\.enabled !== false && Boolean\(props\.provider\)\)/);
+	// 区块完全由 success 结果驱动：未装配/未开启/失败一律不渲染（降级为“没有额度区块”，不是报错）
+	assert.match(webHeader, /if \(!props\.provider \|\| !result\?\.success\) return null;/);
+	assert.match(webHeader, /data-testid="web-provider-usage"/);
+	// 与桌面 ProviderUsageDetails 同源的展示规则：走 providerUsageDisplay 的纯函数，不另起口径
+	assert.match(webHeader, /from "..\/utils\/providerUsageDisplay"/);
+	assert.match(webHeader, /USAGE_TONE_BAR_CLASS/);
+	assert.match(webHeader, /USAGE_TONE_TEXT_CLASS/);
+	assert.match(webHeader, /relativeTimeParts\(result\.at\)/);
+});
+
+test("Web usage rows are never rendered on germline-less providers", () => {
+	// 守卫边沿：不要把「余额为 0」当成「没有数据」（前者是真信号，红字显示）
+	assert.match(webHeader, /result\.balance\.value <= 0 \? USAGE_TONE_TEXT_CLASS\.empty : USAGE_TONE_TEXT_CLASS\.ok/);
+	// 紧凑 K/M 格式（q2 选型）：上下文数字不再用 toLocaleString 写满七位
+	assert.doesNotMatch(webHeader, /toLocaleString\(\)/);
+	assert.match(webHeader, /import \{ formatTokens \} from "..\/components\/session\/SessionContextMeter";/);
+	assert.match(webHeader, /\$\{formatTokens\(tokens\)\} \/ \$\{formatTokens\(window\)\}/);
 });
