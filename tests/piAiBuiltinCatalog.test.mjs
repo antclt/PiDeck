@@ -358,7 +358,7 @@ test("真实生成 catalog：0.85.0 的 qwen3.8-max 可供主进程读取", () =
 	assert.equal(entry.maxTokens, 131072);
 });
 
-test("真实生成 catalog：1.3.0 的 Haiku 5.5 可供聊天能力补全", () => {
+test("真实生成 catalog：Haiku 5.5 可供聊天能力补全（1.3.0 起存在）", () => {
 	const entry = lookupPiAiCatalogEntry(getPiAiCatalogIndex(), "anthropic", "claude-haiku-5-5");
 	assert.ok(entry, "新版目录应包含 claude-haiku-5-5");
 	assert.equal(entry.type, "chat");
@@ -367,13 +367,13 @@ test("真实生成 catalog：1.3.0 的 Haiku 5.5 可供聊天能力补全", () =
 	assert.ok(entry.maxTokens > 0);
 });
 
-test("真实生成 catalog：1.3.0 的 GPT-6 Luna 保留分类模型身份", () => {
+test("真实生成 catalog：GPT-6 Luna 保留分类模型身份（1.3.0 起存在）", () => {
 	const entry = getPiAiCatalogIndex().entries.find((model) => model.provider === "openai" && model.id === "gpt-6-luna");
 	assert.ok(entry, "新版目录应包含 gpt-6-luna");
 	assert.equal(entry.type, "classifier", "不能把分类模型伪装成聊天模型");
 });
 
-test("真实生成 catalog：1.3.0 修复的思考档位与上下文窗口已随目录同步", () => {
+test("真实生成 catalog：1.3.0 修复的思考档位与上下文窗口在 1.4.0 仍成立", () => {
 	const index = getPiAiCatalogIndex();
 	// #10753：Claude Haiku 5.5 / Opus 5 支持 off（1.2.0 目录里被标为 null = 不支持）
 	assert.equal(lookupPiAiCatalogEntry(index, "anthropic", "claude-haiku-5-5")?.thinkingLevelMap?.off, undefined);
