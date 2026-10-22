@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 861816f762caae2bd9bc70d76cea5cedb4ad956e3a9a0993739d012d0185bc8b（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: a29b7fce6d3b90234abe55dce2bd27286667abdbd4f259e9c2980adc20d9938c（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -3806,6 +3806,33 @@ export const zhTW: Record<TranslationKey, string> = {
 	"environment.guidePiNoNpm": "npm 尚未就緒，請先完成上一步。",
 	"environment.guideCompletedHint": "全部完成後重啟應用，讓新裝的環境對所有會話生效。",
 	"environment.guideRestartNow": "完成，重啟應用",
+	"environment.setupTitle": "一鍵安裝 Pi",
+	"environment.setupDesc": "點下面的按鈕，PiDeck 會自動完成檢測 Node.js、確認 npm、安裝 Pi 並重新檢測。優先使用系統裡已有的 Node.js 和 npm；只有系統完全沒有 Node.js 時，才會下載 PiDeck 內建的便攜版（裝在資料目錄，不改動系統環境）。",
+	"environment.setupNode": "Node.js",
+	"environment.setupNpm": "npm",
+	"environment.setupPi": "Pi CLI",
+	"environment.setupNodeSystem": "已檢測到系統 Node {version}",
+	"environment.setupNodePortable": "使用內建便攜 Node {version}",
+	"environment.setupNodeMissing": "未檢測到，將自動下載便攜版",
+	"environment.setupNodeUnsupported": "當前平臺無法自動安裝，需要手動安裝",
+	"environment.setupNpmFound": "npm {version} 可用",
+	"environment.setupNpmMissing": "未檢測到，安裝時自動處理",
+	"environment.setupPiMissing": "未安裝",
+	"environment.setupPiReady": "已安裝",
+	"environment.setupInstallAll": "一鍵安裝",
+	"environment.setupInstalling": "正在安裝…",
+	"environment.setupUseMirror": "使用國內映象源",
+	"environment.setupInstalledHint": "Pi 已安裝，正在重新檢測…",
+	"environment.setupErrorNodeUnsupported": "當前平臺不支援自動安裝 Node，請從官網下載安裝後點「重新檢測」。",
+	"environment.setupErrorNode": "下載或安裝 Node 失敗，請檢查網路後重試。",
+	"environment.setupErrorNpm": "沒有找到可用的 npm，請檢查 Node.js 安裝是否完整。",
+	"environment.setupErrorPi": "安裝 Pi 失敗，展開下面的「手動安裝」可以看到完整輸出。",
+	"environment.setupErrorUndetected": "安裝已完成，但檢測不到 pi 命令。常見原因是 npm 全域目錄不在 PATH 上：可以展開「我已經裝過 Pi」指定路徑，或在「手動安裝」裡檢視輸出。",
+	"environment.setupAlreadyTitle": "我已經裝過 Pi，但沒被檢測到",
+	"environment.setupAlreadyDesc": "常見於 nvm、mise、pnpm 等版本管理器環境。在終端執行 where pi（macOS/Linux 用 which pi），把輸出路徑貼上到下面即可，不需要重新安裝。",
+	"environment.setupUseThisPath": "使用這份",
+	"environment.setupAdvancedTitle": "手動安裝 / 檢視檢測詳情",
+	"environment.setupAdvancedDesc": "一鍵安裝失敗時，可以在這裡手動執行安裝命令、檢視安裝輸出、檢測報錯和已搜尋的目錄。",
 	// —— 检测到多个 pi 安装时的选择列表（含官方安装器、包管理器全局、PiDeck 便携副本）——
 	"environment.installsTitle": "檢測到 {count} 個 Pi 安裝",
 	"environment.installsDesc": "PiDeck 現在固定使用其中一個。想換成別的就選一個，之後啟動會話、更新 Pi、管理擴充套件都用它。",

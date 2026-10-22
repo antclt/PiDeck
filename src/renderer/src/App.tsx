@@ -739,14 +739,23 @@ export function App() {
 		api,
 	});
 	const { piStatus, piChecking, environmentDialog, setPiStatus, setEnvironmentDialog } = piUpdate;
-	// pi 环境引导（Node→npm→pi 三步）：弹窗打开时自动检测第一步，关闭时重置一次性状态。
-	// 依赖只取稳定的 checkNode（useCallback）；piGuide 对象每次渲染都是新引用，
-	// 直接依赖会因 checkNode 内部 setState → 重渲染 → effect 重跑而形成检测循环。
-	const piGuide = usePiEnvironmentGuide(api);
-	const { checkNode: checkGuideNode } = piGuide;
+	// pi 环境引导（检测 Node/npm → 一键安装 → 重新检测）：弹窗打开时自动刷新环境状态，关闭时重置一次性状态。
+	// 重新检测复用完整的环境检测（usePiUpdate），把 installed 回传给引导流程，
+	// 由它决定面板是否切到「检测通过」——只有一处检测口径，避免两套判定漂移。
+	const { checkPiInstall } = piUpdate;
+	const recheckPiForGuide = useCallback(async () => {
+		const status = await checkPiInstall("manual");
+		return Boolean(status?.installed);
+	}, [checkPiInstall]);
+	// 依赖只取稳定的 checkNode/checkNpmForGuide（useCallback）；piGuide 对象每次渲染都是新引用，
+	// 直接依赖会因内部 setState → 重渲染 → effect 重跑而形成检测循环。
+	const piGuide = usePiEnvironmentGuide(api, recheckPiForGuide);
+	const { checkNode: checkGuideNode, checkNpmForGuide: checkGuideNpm } = piGuide;
 	useEffect(() => {
-		if (environmentDialog) void checkGuideNode();
-	}, [environmentDialog, checkGuideNode]);
+		if (!environmentDialog) return;
+		void checkGuideNode();
+		void checkGuideNpm();
+	}, [environmentDialog, checkGuideNode, checkGuideNpm]);
 	// 抽屉宽度状态由 useWorkspacePanels 统一管理（全局 localStorage 持久化，键 pid:drawer-width），
 	// AppShell 拖拽提交经 setDrawerWidth 回写；此处不再持有独立 useState，避免双份状态漂移。
 	const drawerWidth = workspace.drawerWidth;
@@ -3528,9 +3537,9 @@ export function App() {
 								piUpdate.setNpmVersion(undefined);
 								piUpdate.setInstallResult(null);
 								piUpdate.setInstallCompleted(false);
-								piUpdate.setInstallUseMirror(false);
-								// 引导步骤在重新检测后需要刷新（安装结果可能已让环境就绪）
+								// 引导面板上的 Node/npm 状态同步刷新（一键安装可能刚补上便携 Node）
 								void piGuide.checkNode();
+								void piGuide.checkNpmForGuide();
 								piUpdate.checkPiInstall("manual");
 							}}
 							onOpenInstallDocs={() => api.app.openExternal("https://pi.dev/docs/latest/quickstart#install")}
@@ -3549,29 +3558,12 @@ export function App() {
 								piUpdate.setCustomPathResult(null);
 							}}
 							onValidateCustomPath={() => piUpdate.validateCustomPiPath({ closeDialogOnSuccess: true })}
-							npmAvailable={piUpdate.npmAvailable}
-							npmVersion={piUpdate.npmVersion}
-							npmChecking={piUpdate.npmChecking}
 							installCommand={piUpdate.installCommand}
-							installUseMirror={piUpdate.installUseMirror}
 							installExecuting={piUpdate.installExecuting}
 							installResult={piUpdate.installResult}
 							installCompleted={piUpdate.installCompleted}
-							onCheckNpm={piUpdate.checkNpm}
 							onInstallCommandChange={(cmd) => {
 								piUpdate.setInstallCommand(cmd);
-								piUpdate.setInstallResult(null);
-								piUpdate.setInstallCompleted(false);
-							}}
-							onToggleInstallMirror={() => {
-								piUpdate.setInstallUseMirror((prev) => {
-									if (prev) {
-										piUpdate.setInstallCommand((cmd) => cmd.replace(/\s+--registry=https:\/\/registry\.npmmirror\.com/g, ""));
-									} else {
-										piUpdate.setInstallCommand((cmd) => (cmd.includes("--registry=") ? cmd : cmd + " --registry=https://registry.npmmirror.com"));
-									}
-									return !prev;
-								});
 								piUpdate.setInstallResult(null);
 								piUpdate.setInstallCompleted(false);
 							}}

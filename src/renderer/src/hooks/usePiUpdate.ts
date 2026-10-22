@@ -197,6 +197,8 @@ export function usePiUpdate(options: UsePiUpdateOptions) {
 					if (canAutoClose) window.setTimeout(() => setEnvironmentDialog(false), 3000);
 				}
 				if (next.installed && source === "manual" && canAutoClose) window.setTimeout(() => setEnvironmentDialog(false), 3000);
+				// 回传给调用方（一键安装的「重新检测」步骤据此判定装完能不能看到 pi）。
+				return next;
 			} finally {
 				setPiChecking(false);
 			}
