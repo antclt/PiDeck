@@ -61,13 +61,38 @@
 | 默认模型改名（copilot `gpt-5.4` → `gpt-6.1-sol`、xiaomi `mimo-v2.5-pro` → `mimo-v2.6-pro`、nvidia `nemotron-3.5-super-vl-120b-a12b`） | PiDeck 不硬编码这些默认值（`grep` 全仓为 0），模型列表来自 catalog artifact + endpoint `/models` + `pi --list-models` | 无需改动 | `grep gpt-5.4` / `grep mimo-v2.5-pro` 为 0 | — |
 | `pi-tui` 1.3.0 → 1.4.0 | `dist/index.d.ts` 逐字节相同；其余变动在 `autocomplete` / `markdown` / `terminal` / `tui-alt-screen`。PiDeck 只用 pi-tui 的**图标资源**（`build/icon-pi-tui.png`），不 import 该包 | 无需改动 | `cmp` + `grep pi-tui src/` | — |
 
-**待真实回归**（本轮只做静态核对，未跑真实会话）：
+**真实回归（2026-10-26 已跑，`scripts/probe-pi-1.4-regression.mjs`）**
 
-- 截断响应恢复（#11227）：让一个响应在输出上限处被截断 → 恢复后继续对话不再 400；PiDeck 时间线只显示保留下来的条目、`context_edit` 不破坏编辑/删除/重发链路；
-- 恢复会话后扩展工具活跃性（#11062/#11075）：会话期间装的扩展工具在恢复后仍可用；PiDeck 的 `/reload` 与重启会话路径无回归；
-- 压缩摘要不再撞 output cap（#9512/#9075）：长思考模型手动压缩与自动压缩各一轮，`compaction_end` 正常收尾；
-- `/compact <instructions>` 在 split turn 上真的生效（#11058）；
-- 带 BOM 的 `mcp.json`：在真实 Windows 上让 PowerShell 5.1 重写一次，确认 PiDeck 的 MCP 页不再报损坏、可正常保存与导入（本轮只有单测覆盖）。
+机器判据脚本，可复跑；退出码 0 = 全通过。对 pi 1.4.0（本机 CLI）实跑结果 **6/6 通过**：
+
+| 项 | 判据 | 结果 |
+|---|---|---|
+| 扩展工具恢复（#11062/#11075） | 会话中途注册的扩展工具，`new_session` + `switch_session` 恢复后仍在 `activeTools` | ✅ |
+| 截断响应恢复（#11227） | 会话文件与投影上下文均无「孤儿 toolResult」（assistant toolCall 被排除时其 toolResult 必须同批排除） | ✅ |
+| `/compact <instructions>`（#11058） | 带 `customInstructions` 压缩后 `compaction_end` 无错误、会话文件写入 compaction 条目且带摘要文本 | ✅ |
+| 压缩不撞 output cap（#9512/#9075） | 压缩结束无 `token cap` 报错 | ✅ |
+| 恢复会话保留工具（#10785，1.3.0 遗留） | `switch_session` 前后 `activeTools` 集合一致 | ✅ |
+| `/share` 目标设置（1.3.0 遗留） | `sessionShareDestination` 取 `auto`/`gist`/`radius` 时会话均正常启动（`share` 是 TUI 内置命令，RPC `get_commands` 不返回，故不断言命令存在） | ✅ |
+| OpenCode 端点（1.3.0 遗留） | 内置 catalog 里 `opencode`/`opencode-go` 的 baseUrl host 为 `opencode.ai` 且路径含 `inference` | ✅ |
+
+复跑方式：
+
+```bash
+# 零成本项（不调模型）
+node scripts/probe-pi-1.4-regression.mjs --pi <pi 可执行文件>
+
+# 含真实模型调用（会消耗额度）；--auth-from 借真实凭据，--provider/--model-id 指定可用模型
+node scripts/probe-pi-1.4-regression.mjs --pi <pi> --live   --auth-from ~/.pi/agent --provider openrouter --model-id deepseek/deepseek-chat
+```
+
+脚本自带三个易踩的坑，已在注释里写明原因：`switch_session` 的参数名是 `sessionPath`；
+`agent_end` 之后 pi 还会跑压缩检查，必须等 `agent_settled` 才能发下一条 prompt；
+`prepareCompaction` 用 `keepRecentTokens` 从尾部找切点，会话不够大时会直接报
+"Nothing to compact"，故 live 用例在隔离 settings 里把该值调小。
+
+**仍需人工确认**（脚本无法覆盖）：带 BOM 的 `mcp.json` 在真实 Windows 上让 PowerShell 5.1
+重写一次后，PiDeck 的 MCP 页不再报损坏、可正常保存与导入（本轮只有单测覆盖）；
+以及 PiDeck 桌面端自身的 `/reload`、重启会话路径（探针直连 pi，不经 PiDeck 进程管理）。
 
 ## 1.3.0 审计矩阵（2026-10-16，npm 包完整 dist 与本机 1.2.0 逐文件 diff）
 
