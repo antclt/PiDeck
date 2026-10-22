@@ -265,9 +265,14 @@
   color: var(--color-danger);
 }
 .outline-hover.session-outline-pane {
-  right: 0;
+  /* 会话定位轴贴在消息区左缘：右侧留给滚动条，且远离输入框/滚动按钮所在右缘。
+     left: 0 + right: auto 抵消 .outline-hover 的贴右缘公式（含抽屉宽度偏移）。 */
+  left: 0;
+  right: auto;
   top: 150px;
   bottom: 24px;
+  /* 左侧刻度从容器左端开始排，预览卡向右展开 */
+  align-items: flex-start;
 }
 .outline-hover {
   position: absolute;
