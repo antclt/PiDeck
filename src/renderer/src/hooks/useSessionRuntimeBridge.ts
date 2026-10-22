@@ -11,6 +11,11 @@ import type { NoticeActions, NoticeKind } from "../utils/notice";
 
 type RuntimeBridgeCallbacks = {
 	onRuntimeCapabilityChanged?: (input: { sessionId: string; agentId: string; previous?: AgentRuntimeState; current: AgentRuntimeState; patch: AgentRuntimeState }) => void;
+	/**
+	 * 「停止响应较慢」提示上的恢复入口：由 App 装配到带确认的重启通道。
+	 * 桥自己不直接调 restartRuntime——终止进程是破坏性动作，必须过确认框。
+	 */
+	onRestartSessionRuntime?: (sessionId: string) => void;
 };
 
 export function useSessionRuntimeBridge(callbacks: RuntimeBridgeCallbacks = {}): void {
@@ -85,7 +90,17 @@ export function useSessionRuntimeBridge(callbacks: RuntimeBridgeCallbacks = {}):
 											onClick: () => store.set(openSettingsAtom, { pane: "config", tab: "dev", backendPane: "pi", configTab: "mcp" }),
 										},
 									}
-								: undefined;
+								: // 「停止响应较慢」：pi 被子进程堵住时 abort 永远不回包，只有重建运行时才停得下来。
+									// 会话身份取 envelope 的 sessionId；重启经回调交给 App（带确认），
+									// 桥不直接杀进程——误触一次就是丢一轮回答。
+									notice.action === "restartSessionRuntime" && event.sessionId
+									? {
+											action: {
+												label: t("notice.restartSessionRuntime"),
+												onClick: () => callbacksRef.current.onRestartSessionRuntime?.(event.sessionId),
+											},
+										}
+									: undefined;
 					showNotice(
 						text,
 						kind === "error" ? Number.POSITIVE_INFINITY : undefined,

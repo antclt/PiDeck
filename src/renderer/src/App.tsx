@@ -157,6 +157,7 @@ import {
 	upsertSessionAtom,
 	acpToolsAtom,
 	acpEnabledAtom,
+	sessionRuntimeByIdAtom,
 } from "./atoms";
 import { isSameSessionPath } from "./agentListDisplay";
 import { t } from "./i18n";
@@ -922,6 +923,21 @@ export function App() {
 	// 与 queue 同一所有权模式：records+runtime 双双消失才回收，引导页虚拟会话豁免。
 	useComposerStateSessionPrune(store);
 	useSessionRuntimeBridge({
+		// 「停止响应较慢」→ 重启会话：会杀掉当前 pi 进程重建（丢正在跑的那一轮），
+		// 因此走 overlays 确认框，和 Tab ⋯ 菜单的「重启进程」同一份文案与判定。
+		onRestartSessionRuntime: (sessionId) => {
+			const runtime = store.get(sessionRuntimeByIdAtom)[sessionId];
+			if (!runtime?.agentId) return;
+			overlays.showConfirm({
+				title: t("runControl.restartRunningTitle"),
+				message: t("runControl.restartRunningBody"),
+				confirmLabel: t("app.restart"),
+				onConfirm: () => {
+					overlays.clearConfirm();
+					void restartSessionAnyState(sessionId);
+				},
+			});
+		},
 		onRuntimeCapabilityChanged: ({ sessionId, previous, current, patch }) => {
 			if (previous?.isExecutingTool && !current.isExecutingTool && (patch.toolStateSequence == null || previous.toolStateSequence == null || patch.toolStateSequence >= previous.toolStateSequence) && queue.isSessionRuntimeBusy(sessionId)) {
 				void queue.flushQueuedSteerPrompts(sessionId);

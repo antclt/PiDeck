@@ -1362,6 +1362,9 @@ export const enUS: Record<TranslationKey, string> = {
 	"notice.extensionsDisabledFallback": "Extensions failed to load, so this run temporarily disables them (nothing was written to settings). Send this session's error details to the AI to troubleshoot.",
 	"notice.openDevExtensionsSettings": "Open settings",
 	"notice.openMcpSettings": "Open MCP settings",
+	// Action on the "stop is slow" toast: after two escalation rounds pi still does not answer
+	// (a child process holds the pipe), so only rebuilding the runtime can stop it.
+	"notice.restartSessionRuntime": "Restart session",
 	// Toast for a rejected DSH model preference (applyPreferences degradation, the "picked but not applied" half of issue #253):
 	// the host is the final arbiter of model/effort capabilities; PiDeck only informs and keeps the preference for a retry.
 	// No placeholders: the agentsNotice channel's t() has no params support (same as app.abortSlow);

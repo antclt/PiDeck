@@ -8,6 +8,7 @@ function harness() {
 	const timers = new Set();
 	const requests = [];
 	const notices = [];
+	const stillStreaming = [];
 	const warnings = [];
 	const load = createTsSandbox({
 		globals: {
@@ -32,6 +33,7 @@ function harness() {
 		logInfo: () => {},
 		logWarn: (message) => warnings.push(message),
 		emitAbortSlowNotice: (agentId) => notices.push(agentId),
+		noteStillStreamingAfterAbort: (agentId) => stillStreaming.push(agentId),
 	});
 	const begin = (hadActiveTool = true) => {
 		gate.seal("agent-a");
@@ -51,6 +53,7 @@ function harness() {
 		timers,
 		requests,
 		notices,
+		stillStreaming,
 		warnings,
 		begin,
 		fire,
@@ -143,6 +146,7 @@ test("slow-abort verification warns only when the original turn is still streami
 	await h.fire(4000);
 	assert.deepEqual(h.requests, ["get_state", "abort_bash", "get_state"]);
 	assert.deepEqual(h.notices, ["agent-a"]);
+	assert.deepEqual(h.stillStreaming, ["agent-a"], "pi 确认仍在流式时必须通知宿主纠正本地乐观 idle（Issue #371）");
 	assert.equal(h.timers.size, 0);
 });
 
@@ -188,4 +192,26 @@ test("failed abort without an executing tool retains the recovery escalation", a
 	await h.fire(1500);
 	assert.deepEqual(h.requests, ["get_state", "abort"]);
 	assert.equal(h.timers.size, 1);
+});
+
+// Issue #361：Windows 下 bash 子进程（MS Store shim/python3）持有 stdout 管道时 pi 读不到 stdin，
+// get_state 直接不回包。把它判成「已停」会让升级链在最该生效时收手——僵死必须等价于仍在运行。
+test("a get_state that never answers is escalated like a stuck run", async () => {
+	const h = harness();
+	h.begin(false);
+	h.handle(() => Promise.reject(new Error("get_state timeout")));
+	await h.fire(1500);
+	assert.deepEqual(h.requests, ["get_state", "abort_bash", "abort"], "僵死必须补发 abort_bash 与二次 abort");
+	assert.equal(h.timers.size, 1, "补刀后仍要进入验证窗口");
+	assert.deepEqual(h.notices, []);
+});
+
+test("a still-unanswering agent warns after the second attempt", async () => {
+	const h = harness();
+	h.begin(false);
+	h.handle(() => Promise.reject(new Error("get_state timeout")));
+	await h.fire(1500);
+	await h.fire(4000);
+	assert.deepEqual(h.notices, ["agent-a"], "二次中止后仍无响应必须让用户看到「停止慢」提示");
+	assert.equal(h.timers.size, 0);
 });
