@@ -38,6 +38,7 @@ import { WebBodyTooLargeError, WebInvalidJsonError, readJson as readJsonBody, se
 import { WebStaticAssets } from "./WebStaticAssets";
 import { WebApiRoutes } from "./WebApiRoutes";
 import { WebStateEventHub } from "./WebStateEventHub";
+import { toPublicSessions } from "./WebSessionProjection";
 import { openSessionStream, writeSessionStreamError } from "./WebSessionStream";
 import { WebTokenAuth, type WebTokenPolicy } from "./WebTokenAuth";
 import { WebEventStreamRouter, type AgentChannelEventSource, type PiEvent } from "./WebEventStream";
@@ -502,7 +503,9 @@ export class WebServiceManager {
 		const runtimes = this.deps.listSessionRuntimes();
 		return {
 			projects: this.deps.listProjects(),
-			sessions,
+			// 会话按 Web 可见字段投影：filePath/environment/dshSessionId/agentPreset/preview/
+			// messageCount 等桌面端专用字段不下发（实测占快照 ~99% 中的三成，Web 端零消费）。
+			sessions: toPublicSessions(sessions),
 			runtimes,
 			pendingUiRequests: this.deps.listPendingUiRequests(),
 		};

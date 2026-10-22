@@ -8,6 +8,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { extname } from "node:path";
+import { gzipSync } from "node:zlib";
 import { replaceExpandedRefBlocksWithLabels } from "../../shared/expandedRefBlocks";
 import { webEnUS } from "./WebI18n";
 
@@ -120,13 +121,59 @@ export function contentType(filePath: string): string {
 	}
 }
 
+/** 低于该体积不值得压：gzip 一次 ~6ms，小响应省下的字节换不回 CPU（实测 284KB 快照 level 6 ≈ 5.8ms → 70KB）。 */
+const GZIP_MIN_BYTES = 8 * 1024;
+/** 压缩级别：level 6 是压缩率与耗时的平衡点（level 9 只再省 1.7% 却慢 12%）。 */
+const GZIP_LEVEL = 6;
+
+/** 客户端声明的 accept-encoding 是否含 gzip（q=0 视为不接受）。 */
+function acceptsGzip(header: string | undefined): boolean {
+	if (!header) return false;
+	for (const part of header.split(",")) {
+		const [token, ...params] = part.trim().split(";");
+		if (token.trim().toLowerCase() !== "gzip") continue;
+		const q = params.map((item) => item.trim()).find((item) => item.startsWith("q="));
+		if (q && Number.parseFloat(q.slice(2)) === 0) return false;
+		return true;
+	}
+	return false;
+}
+
+/**
+ * JSON 响应出口。客户端接受 gzip 且载荷超过阈值时按 gzip 下发（局域网/外网访问下
+ * /api/state 与 /messages/page 可省 ~75% 流量）。压缩失败一律回退明文，不让客户端拿到坏流。
+ */
 export function sendJson(response: ServerResponse, body: unknown): void {
+	const payload = Buffer.from(serializePublicWebPayload(body), "utf8");
+	// 取请求头走 ServerResponse.req（node:http 的 OutgoingMessage 持有来源请求），
+	// 避免为压缩把 request 透传到每一个路由调用点。
+	const acceptEncoding = response.req?.headers["accept-encoding"];
+	if (payload.byteLength >= GZIP_MIN_BYTES && acceptsGzip(typeof acceptEncoding === "string" ? acceptEncoding : acceptEncoding?.[0])) {
+		let compressed: Buffer | undefined;
+		try {
+			compressed = gzipSync(payload, { level: GZIP_LEVEL });
+		} catch {
+			compressed = undefined;
+		}
+		if (compressed) {
+			response.writeHead(200, {
+				"content-type": "application/json; charset=utf-8",
+				"content-encoding": "gzip",
+				"cache-control": "no-store",
+				"access-control-allow-origin": "*",
+				vary: "accept-encoding",
+			});
+			response.end(compressed);
+			return;
+		}
+	}
 	response.writeHead(200, {
 		"content-type": "application/json; charset=utf-8",
 		"cache-control": "no-store",
 		"access-control-allow-origin": "*",
+		...(acceptEncoding ? { vary: "accept-encoding" } : {}),
 	});
-	response.end(serializePublicWebPayload(body));
+	response.end(payload);
 }
 
 export function sendError(response: ServerResponse, statusCode: number, code: string, error: string, params?: Record<string, string | number>): void {
