@@ -1,5 +1,20 @@
 import { createStreamGateState, isStreamGateSealed, noteAbortSettled, openStreamGateForNewRun, sealStreamGate, type StreamGateState } from "./streamGate";
 
+/**
+ * get_state 的三态结果。
+ *
+ * 为什么不能把「查询 reject/超时」当成「已停」：pi 被 bash 子进程（Windows 下 MS Store
+ * shim/python3 等会持有 stdout 管道）堵住时主线程不读 stdin，get_state 根本不会回包
+ * ——这正是「点了停止却停不下来」的现场。把它判成 idle 会让升级链在最该生效时收手。
+ */
+type StreamingProbe = "streaming" | "idle" | "unknown";
+
+/** 未经类型信任的 RPC 返回值：无回包 = unknown（僵死），其余按 isStreamingResponse 判。 */
+function probeStreaming(response: unknown): StreamingProbe {
+	if (response === undefined) return "unknown";
+	return isStreamingResponse(response) ? "streaming" : "idle";
+}
+
 /** abort 升级需要的最小 RPC 客户端形状（AgentManager 注入 runtime.process.client）。 */
 export interface AbortGateRpcClient {
 	request(payload: unknown, timeoutMs: number): Promise<unknown>;
@@ -11,6 +26,8 @@ export interface AbortGateHost {
 	logInfo(message: string, meta?: Record<string, unknown>): void;
 	logWarn(message: string, meta?: Record<string, unknown>): void;
 	emitAbortSlowNotice(agentId: string): void;
+	/** abort 升级确认 pi 仍在流式：宿主须撤掉本地的乐观 idle（Issue #371）。 */
+	noteStillStreamingAfterAbort(agentId: string): void;
 }
 
 /** 单次 abort 的身份；RPC 回包只可更新发起它的上下文，不能污染下一轮。 */
@@ -128,6 +145,8 @@ export class AbortStreamGateController {
 	 * 策略：
 	 * - bash 工具确实在执行 → 补 abort_bash（升级的本意：解卡被 bash 阻塞的 abort）；
 	 * - abort RPC 已失败/超时（pi 可能没收到）→ 补二次 abort；
+	 * - get_state 自身无响应（unknown）→ 与「仍在运行」同判：僵死的 pi 恰恰不回包，
+	 *   此时补 abort_bash + 二次 abort，否则永远等不到 settled；
 	 * - 其余（ack pending / acked 且无工具）→ 不补刀，等 pi 自然 settle。
 	 * - 仍卡死则通过 notice 明确告知用户（stop 慢是可见问题，不能只写日志）
 	 */
@@ -138,15 +157,27 @@ export class AbortStreamGateController {
 		try {
 			const response = await client.request({ type: "get_state" }, 5_000).catch(() => undefined);
 			// get_state/abort_bash 等 await 期间可能开始新回合或重建进程，旧查询没有补刀权限。
-			if (!this.isCurrentEscalation(agentId, escalation) || !isStreamingResponse(response)) return;
-			const shouldSendAbortBash = escalation.hadActiveTool;
-			const shouldResendAbort = escalation.failed;
+			if (!this.isCurrentEscalation(agentId, escalation)) return;
+			// 三态：无回包（僵死）不当「已停」，否则被子进程堵住的 pi 永远收不到升级命令。
+			const probe = probeStreaming(response);
+			if (probe === "idle") {
+				// pi 已确认空闲，升级目标达成：清掉上下文，否则它会一直把「可能仍在忙碌」
+				// 钉在本地判定上（sendPrompt 据此补 streamingBehavior，见 Issue #371）。
+				this.clearEscalation(agentId);
+				return;
+			}
+			const stuck = probe === "unknown";
+			if (stuck) {
+				this.host.logWarn("Abort escalation: get_state did not answer, treating agent as stuck", { agentId });
+			}
+			const shouldSendAbortBash = escalation.hadActiveTool || stuck;
+			const shouldResendAbort = escalation.failed || stuck;
 			if (!shouldSendAbortBash && !shouldResendAbort) {
 				// ack pending / acked 且无工具在跑：pi 正在按语义收敛到 idle，不补刀。
 				this.host.logInfo("Abort escalation skipped: abort RPC ack pending/acked, waiting for idle", { agentId, acked: escalation.acked });
 				return;
 			}
-			this.host.logWarn("Abort escalation: pi still streaming after abort", { agentId, abortBash: shouldSendAbortBash, resendAbort: shouldResendAbort });
+			this.host.logWarn("Abort escalation: pi still streaming after abort", { agentId, abortBash: shouldSendAbortBash, resendAbort: shouldResendAbort, stuck });
 			if (shouldSendAbortBash) {
 				await client.request({ type: "abort_bash" }, 5_000).catch(() => undefined);
 				if (!this.isCurrentEscalation(agentId, escalation)) return;
@@ -172,14 +203,24 @@ export class AbortStreamGateController {
 	/** 验证窗口结束后，仅对仍属于同一进程/同一次 abort 的 running 状态提示。 */
 	private async verifyStillRunning(agentId: string, escalation: AbortEscalationContext): Promise<void> {
 		if (!escalation.client || !this.isCurrentEscalation(agentId, escalation)) return;
+		let probe: StreamingProbe;
 		try {
-			const response = await escalation.client.request({ type: "get_state" }, 5_000);
-			if (!this.isCurrentEscalation(agentId, escalation) || !isStreamingResponse(response)) return;
-			this.host.logWarn("Abort escalation: still running after second attempt", { agentId });
-			this.host.emitAbortSlowNotice(agentId);
+			probe = probeStreaming(await escalation.client.request({ type: "get_state" }, 5_000));
 		} catch {
-			// 查询失败不等于仍在运行；进程退出由宿主生命周期处理。
+			// 二次中止后 get_state 仍无响应 = pi 彻底僵死：子进程持着管道、pi 读不到 stdin。
+			// 这是「停止不了」最需要用户介入的时刻，静默吞掉等于永久转圈。
+			probe = "unknown";
 		}
+		if (!this.isCurrentEscalation(agentId, escalation)) return;
+		if (probe === "idle") {
+			this.clearEscalation(agentId);
+			return;
+		}
+		this.host.logWarn("Abort escalation: still running after second attempt", { agentId, probe });
+		// pi 权威回复「仍在流式」：abort 超时后本地已被复位 idle，必须纠正后才发 notice，
+		// 否则用户看到空闲、发消息却被 pi 以忙碌拒收（Issue #371）。
+		this.host.noteStillStreamingAfterAbort(agentId);
+		this.host.emitAbortSlowNotice(agentId);
 	}
 
 	/** await 前后都核对上下文及客户端身份，不把上一轮结果移交给新进程。 */
@@ -203,6 +244,15 @@ export class AbortStreamGateController {
 	/** abort RPC 失败/超时（升级时允许补二次 abort）。 */
 	markAbortFailed(agentId: string, escalation: AbortEscalationContext): void {
 		if (this.isCurrentEscalation(agentId, escalation)) escalation.failed = true;
+	}
+
+	/**
+	 * abort 升级是否仍在进行（abort RPC 发出后、pi 未确认 idle 之前）。
+	 * 供发送链路判定「pi 可能仍在流式」：abort 超时后本地 tab 已被复位 idle，
+	 * 只信本地状态会漏传 streamingBehavior（Issue #371）。
+	 */
+	isEscalationPending(agentId: string): boolean {
+		return this.pendingEscalations.has(agentId);
 	}
 
 	/** settled/agent_start：当前 abort 结束，查询与验证定时器同时失效。 */

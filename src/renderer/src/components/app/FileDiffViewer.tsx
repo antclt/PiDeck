@@ -25,6 +25,13 @@ import { encodeHtmlPreviewUrl } from "../../../../shared/htmlPreview";
 
 type ViewMode = "view" | "diff";
 
+// md 预览的插件列表必须提为模块级常量：内联数组/箭头函数在 FileDiffViewer 每次
+// 重新渲染时生成新引用，MarkdownStream 的 memo（浅比较）随即失效 → 整篇重新
+// 走 marked+shiki 解析（分屏下与会话流式渲染抢主线程，2027-02 卡顿实测根因之一）。
+const FILE_PREVIEW_REMARK_PLUGINS = [remarkGfmNoSingleTilde];
+const FILE_PREVIEW_REHYPE_PLUGINS = [defaultRehypePlugins.raw, rehypeKatex];
+const noopOpenExternal = (): void => undefined;
+
 /** 把主进程的大文件错误码还原为用户可读文案，其它错误保留原始诊断。 */
 function fileLoadErrorMessage(error: unknown): string {
 	const raw = error instanceof Error ? error.message : String(error);
@@ -508,7 +515,7 @@ export function FileDiffViewer(props: {
 						   由 markdown-preview-chrome utility 提供（tailwind.css @utility，不再自建 parallel 样式）。 */}
 						{!isDiffMode && preview && isMarkdown && (
 							<div className="markdown-body markdown-preview-chrome h-full overflow-y-auto px-6 py-6 text-body text-text-primary font-sans">
-								<MarkdownStream text={content} onOpenExternal={() => undefined} remarkPlugins={[remarkGfmNoSingleTilde]} rehypePlugins={[defaultRehypePlugins.raw, rehypeKatex]} urlTransform={defaultUrlTransform} />
+								<MarkdownStream text={content} onOpenExternal={noopOpenExternal} remarkPlugins={FILE_PREVIEW_REMARK_PLUGINS} rehypePlugins={FILE_PREVIEW_REHYPE_PLUGINS} urlTransform={defaultUrlTransform} />
 							</div>
 						)}
 						{!isDiffMode && preview && isHtml && <HtmlPreview content={content} />}

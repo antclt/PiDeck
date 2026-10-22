@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 45f434b1d716f293e8ce8a1caa177cf1fa45bf2177e71bf330ea5d5821e8362c（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 861816f762caae2bd9bc70d76cea5cedb4ad956e3a9a0993739d012d0185bc8b（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -1335,6 +1335,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"notice.extensionsDisabledFallback": "擴充套件載入失敗，本次執行已臨時停用擴充套件（不會寫入設定）。可把本會話的錯誤詳情發給 AI 排查擴充套件問題。",
 	"notice.openDevExtensionsSettings": "去設定關閉",
 	"notice.openMcpSettings": "去 MCP 設定",
+	// 「停止响应较慢」toast 的动作按钮：abort 升级两轮后 pi 仍无响应（子进程持有管道）时，
+	// 只有重建运行时才停得下来，给直达入口而不是让用户自己在菜单里找重启。
+	"notice.restartSessionRuntime": "重啟會話",
 	// DSH 模型偏好被 host 拒绝的 toast（applyPreferences 降级路径，issue #253 的「选了但没生效」）：
 	// host 是模型/档位能力的最终裁决者，PiDeck 只能告知并保留偏好供重试。
 	// 注意：agentsNotice 通道的 t() 不支持占位符（与 app.abortSlow 等既有 key 同约定），

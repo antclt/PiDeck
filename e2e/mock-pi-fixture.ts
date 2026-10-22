@@ -157,6 +157,8 @@ export const test = base.extend<
 				JSON.stringify({
 					customPiPath: shimPath,
 					piEnvironmentChecked: true,
+					// 与 fixtures.ts 同一理由：缺省 system 会跟宿主语系变，中文文案断言在 en-US runner 必堵。
+					language: "zh-CN",
 					enableGitManagement: true,
 					dshHomeDir: join(userDataRoot, "dsh-home"),
 					...(seedSettings ?? {}),

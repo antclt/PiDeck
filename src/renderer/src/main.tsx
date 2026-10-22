@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import type { AppLogLevel } from "@shared/types";
+import { RENDERER_NOISE_KINDS, RendererNoiseAggregator, classifyRendererNoise, toRendererNoiseLog } from "@shared/rendererNoise";
 import { App } from "./App";
 import { AppErrorBoundary } from "./components/app/AppErrorBoundary";
 import { TooltipProvider } from "./components/ui-shadcn/tooltip";
@@ -12,6 +13,27 @@ import "./styles.css";
 
 function writeStartupLog(level: AppLogLevel, message: string, detail?: unknown) {
 	window.piDesktop?.app.rendererLog(level, "renderer", message, detail).catch(() => undefined);
+}
+
+/**
+ * 渲染层日志的唯一出口（issue #376）。
+ *
+ * 良性噪音（Chromium 的 ResizeObserver loop 通知）同时会命中 main 的 console-message 镜像，
+ * 那侧直接跳过，所以这里必须承担「按窗口折叠成一条 ×N 的 info」的职责；
+ * 非良性的真实异常首条即时按原级别上报，窗口内重复折叠成一条降档汇总，
+ * 既不让循环报错把「最近 7 天报错」统计灌满，也不延迟首条真实故障。
+ */
+const rendererNoise = new RendererNoiseAggregator();
+function writeRuntimeLog(key: string, level: AppLogLevel, message: string, detail?: unknown) {
+	const verdict = classifyRendererNoise(typeof detail === "object" && detail !== null && "message" in detail ? (detail as { message?: unknown }).message : message);
+	const meta = verdict.kind ? RENDERER_NOISE_KINDS[verdict.kind] : null;
+	// 良性按类别聚合（同类消息文案一致）；非良性按「来源 + 文案」聚合，
+	// 避免两条不同真实异常共用窗口时后者被整条吞掉。
+	const aggKey = meta ? meta.kind : `${key}|${message.slice(0, 120)}`;
+	for (const flush of rendererNoise.record(aggKey, meta?.level ?? level, meta?.message ?? message, { deferFirst: meta !== null, detail })) {
+		const log = toRendererNoiseLog(flush);
+		writeStartupLog(log.level, log.message, log.detail);
+	}
 }
 
 /** 将异常压缩成用户可读的短文案，避免 toast 被超长 stack 淹没。 */
@@ -36,7 +58,7 @@ console.error = (...args: unknown[]) => {
 	const now = Date.now();
 	if (now - lastUpdateDepthDiagnosticAt < 5000) return;
 	lastUpdateDepthDiagnosticAt = now;
-	writeStartupLog("error", "Renderer React update depth diagnostic", {
+	writeRuntimeLog("update-depth", "error", "Renderer React update depth diagnostic", {
 		message,
 		stack: new Error("React update depth diagnostic").stack,
 		url: window.location.href,
@@ -50,10 +72,10 @@ window.addEventListener("error", (event) => {
 	const isResourceError = event.target instanceof HTMLElement;
 	// ResizeObserver loop 警告是 Chromium 的良性通知（同一帧内 RO 回调又触发 resize），
 	// Streamdown 动画 + resizable panels 组合下常见：只记日志、不弹错误 toast。
-	// 日志降到 info：这条会进 EnvironmentDoctor 的「最近 7 天报错」统计，
-	// 用 error 级别会让良性噪音顶掉真正的失败信号。
-	const isBenignResizeObserverLoop = typeof event.message === "string" && event.message.includes("ResizeObserver loop");
-	writeStartupLog(isBenignResizeObserverLoop ? "info" : "error", "Renderer uncaught error", {
+	// 判定与聚合走 @shared/rendererNoise 的统一口径（main 侧 console-message 镜像会跳过良性事件，
+	// 避免同一事件双写），这里只负责把 toast 关掉。
+	const isBenignResizeObserverLoop = classifyRendererNoise(event.message).benign;
+	writeRuntimeLog("uncaught", isBenignResizeObserverLoop ? "info" : "error", "Renderer uncaught error", {
 		message: event.message,
 		filename: event.filename,
 		lineno: event.lineno,
@@ -71,7 +93,7 @@ window.addEventListener("error", (event) => {
 
 window.addEventListener("unhandledrejection", (event) => {
 	const reason = event.reason;
-	writeStartupLog("error", "Renderer unhandled rejection", {
+	writeRuntimeLog("unhandled-rejection", "error", "Renderer unhandled rejection", {
 		reason: reason instanceof Error ? (reason.stack ?? reason.message) : String(reason),
 	});
 	const message = formatRuntimeError(reason);

@@ -254,6 +254,14 @@ description: …
 - 逃生开关：`PIDECK_DEV_KEEP_HTTP_CACHE=1` 跳过清理（需要保留 dev 态登录态时）。手工排查用 `grep -rl <chunk后缀> node_modules/.vite/deps/_metadata.json` 与 `%APPDATA%/PiDeck-dev[-<branch>]/Cache/Cache_Data`：URL 里的 `?v=` 若与当前 metadata 的 browserHash 相同却找不到对应文件，即为陈旧缓存。
 - 时序是契约：清理必须 `await` 在 `loadURL` 之前，写在之后等于没清。守卫见 `tests/devRendererCache.test.mjs`。
 
+## 本地打包的 Electron 下载源（pack:dev / dist:* 走 npmmirror）
+
+- 现象：`npm run pack:dev` / `dist:fast` / `dist:win` 在 `packaging platform=win32` 后直接 `⨯ connect ETIMEDOUT 20.205.243.166:443`（该 IP 是 github.com），退出码 1，`release-dev/` 只剩 `builder-effective-config.yaml`。
+- 机理：Electron 二进制由 `@electron/get` 取，**zip 已在缓存也不等于离线可打包**——`validateArtifact` 每次都把 `SHASUMS256.txt` 以 `cacheMode: Bypass` 重新拉一遍（源码注释：Never use the cache for loading checksums），那一步同样走 github.com。国内直连 github.com 常只有 ~9KB/s，SHASUMS 请求超时 → retry 3 次 → ETIMEDOUT。CI 早已在 `.github/workflows/{release,build-dev}.yml` 的 win/linux 矩阵注入 `ELECTRON_MIRROR`，本地脚本此前没注入，于是只有本地踩坑。
+- 收口：`scripts/electronBuilderEnv.js`（`electronBuilderEnv()`）统一补齐 `ELECTRON_MIRROR` 与 `ELECTRON_BUILDER_BINARIES_MIRROR`，四个本地打包脚本（`pack-dev.js` / `dist-fast.js` / `dist-win.js` / `dist-dev.js`）的 `npx electron-builder` 调用必须传 `env:`。**已有配置优先**（含 `npm_config_*` 形态），显式设空字符串 = 走 GitHub 默认源（`mirrorVar` 用 `||` 取值，空串自动回落 BASE_URL），因此 CI 的 `ELECTRON_MIRROR: ""` 语义不变。
+- 判定：`npm run pack:dev` 日志出现 `• downloaded electron zip extracted successfully` 即通；守卫 `tests/electronBuilderEnv.test.mjs` 同时断言解析语义与「每个脚本真的把 env 传给子进程」（漏传 = 静默退回 GitHub）。
+- 手动逃生（不想改代码时）：`ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npx electron-builder --win --dir`；镜像目录形如 `/mirrors/electron/v43.4.0/`（带 `v`）。
+
 ## Tab 激活态语言（两种声明约定，2027-10 统一）
 
 改任何 tab/导航激活态前先对号，不要发明第三种：

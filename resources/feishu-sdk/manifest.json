@@ -1,8 +1,8 @@
 {
 	"version": "1.67.0",
 	"archive": "feishu-sdk-1.67.0.tar.gz",
-	"sha256": "ec0a6ca746634e5c527a1da23ead5c732e5fd02348a015e4233e2919a28b509d",
-	"bytes": 973519,
+	"sha256": "c8e8b038a4fd77d686ba2faf0083f2fcadb6d77ff00ed9b85d60042d7a799f17",
+	"bytes": 972789,
 	"packages": [
 		"@larksuiteoapi/node-sdk",
 		"@protobufjs/aspromise",

@@ -244,6 +244,7 @@ process.on("unhandledRejection", (reason) => {
 	console.error("Unhandled rejection:", reason);
 });
 import { ipcChannels } from "../shared/ipc";
+import { RendererNoiseAggregator, classifyRendererNoise, toRendererNoiseLog } from "../shared/rendererNoise";
 import { mainProcessT, normalizeMainProcessLocale, type MainProcessLocale, type MainProcessTranslationKey } from "../shared/i18n/mainProcessCopy";
 import { buildSessionOriginKey, canonicalizeSessionPath, toAbsoluteSessionPath } from "../shared/sessionIdentity";
 import type {
@@ -2484,19 +2485,25 @@ async function createWindow() {
 				void appLogger.warn("app", "Main window preload API check failed", error);
 			});
 	});
+	// 渲染层 console 噪音聚合（issue #376）：良性事件（ResizeObserver loop）由 renderer 自己的
+	// 全局处理器统一落盘，这里直接跳过——否则同一事件两条管道各写一遍。非良性首条即时写盘，
+	// 窗口内重复折叠成一条降档汇总（循环报错不再把「最近 7 天报错」统计灌满）。
+	const rendererConsoleNoise = new RendererNoiseAggregator();
 	mainWindow.webContents.on("console-message", (event) => {
 		if (!["warning", "error"].includes(event.level)) return;
+		// 良性噪音：renderer 的 window.onerror 已按同一聚合器写一条 ×N 的 info，此处不重复落盘。
+		if (classifyRendererNoise(event.message).benign) return;
 		// 渲染层 console 镜像只作排查线索，不参与健康统计：这里聚集的是第三方/框架的原始输出
 		// （KaTeX strict 警告、React 开发期提示等，实测 40k+ 行/天），按 error/warn 记会让
 		// EnvironmentDoctor 的「最近 7 天报错 / 警告明细」被噪音填满。降一档：error → warn、
 		// warning → info（仍按天写进日志文件，可检索）。真正的渲染层故障由 main.tsx 的
 		// rendererLog 显式上报（uncaught error / unhandled rejection），那条链路仍是 error。
-		void appLogger.log(event.level === "error" ? "warn" : "info", "app", "Main window renderer console error", {
-			level: event.level,
-			message: event.message,
-			line: event.lineNumber,
-			sourceId: event.sourceId,
-		});
+		const level: AppLogLevel = event.level === "error" ? "warn" : "info";
+		const detail = { level: event.level, message: event.message, line: event.lineNumber, sourceId: event.sourceId };
+		for (const flush of rendererConsoleNoise.record(`console|${event.level}|${event.message.slice(0, 120)}`, level, "Main window renderer console error", { detail })) {
+			const log = toRendererNoiseLog(flush);
+			void appLogger.log(log.level, "app", log.message, log.detail);
+		}
 	});
 
 	mainWindow.once("ready-to-show", showMainWindowOnce);
@@ -2511,6 +2518,13 @@ async function createWindow() {
 	// 注意：mainWindow 为模块级可空变量，此处用创建后的局部引用确保非空
 	const windowForState = createdWindow;
 	windowForState.on("close", () => quickTaskChrome.saveWorkbenchBoundsOnClose(windowForState));
+	// 聚合器无定时器：窗口销毁时补齐尾部计数（「刷了一路却一条没写」会丢诊断）
+	windowForState.on("closed", () => {
+		for (const flush of rendererConsoleNoise.flushAll()) {
+			const log = toRendererNoiseLog(flush);
+			void appLogger.log(log.level, "app", log.message, log.detail);
+		}
+	});
 
 	// 关闭窗口时根据设置决定：隐藏到托盘还是正常退出
 	mainWindow.on("close", (event) => {

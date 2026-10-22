@@ -34,6 +34,7 @@ import type {
 	SessionTodoSnapshot,
 } from "../../shared/types";
 import { ipcChannels } from "../../shared/ipc";
+import { parseBusySendDelivery } from "../../shared/busySendDelivery";
 import { extractPiToolTruncation } from "../../shared/formatToolDetail";
 import { COMPACT_CANCELLED_BY_OWNER, COMPACT_CANCELLED_BY_USER_ABORT, COMPACT_HOOK_REJECT_MAX_MS, COMPACT_OBSERVATION_MAX_AGE_MS, COMPACT_ROUTED_TO_OWNER, COMPACT_USER_ABORT_WINDOW_MS, COMPACT_WAIT_TIMEOUT } from "../../shared/compactFeedback";
 import { PiProcess } from "./PiProcess";
@@ -145,6 +146,16 @@ function readPromptDisposition(data: unknown): PromptDisposition | undefined {
 	if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
 	const disposition = Reflect.get(data, "disposition");
 	return disposition === "started" || disposition === "queued" || disposition === "handled" ? disposition : undefined;
+}
+
+/**
+ * pi 的忙碌拒收文案（Issue #371）：pi 侧 isStreaming 为 true 时，prompt 不带
+ * streamingBehavior 会被直接拒收。PiDeck 本地状态在 abort 超时后已复位 idle，
+ * 只有拿到这条错误才能确认 pi 的真实忙碌——据此补一次带 streamingBehavior 的重发。
+ * 与 src/main/ipc/gitIpc.ts 的 GIT_COMMIT_BUSY 判据同款。
+ */
+function isPiBusyRejection(message: string): boolean {
+	return /Agent is already processing/i.test(message);
 }
 
 /**
@@ -373,8 +384,15 @@ export class AgentManager {
 				i18nKey: "app.abortSlow",
 				kind: "warning",
 				duration: 6000,
+				// 僵死的 pi 只有重建进程才停得下来（子进程持管道场景 abort 永远不回包），
+				// 给直达动作而不是让用户在菜单里找；渲染层按 action id 解析成重启。
+				action: "restartSessionRuntime",
 			}),
+		noteStillStreamingAfterAbort: (agentId) => this.noteStillStreamingAfterAbort(agentId),
 	});
+
+	/** 连点退避窗口：覆盖上一次 abort 的 clear_queue(3s)+abort(10s) 链，窗口内只补发 abort RPC。 */
+	private static readonly ABORT_REPEAT_COOLDOWN_MS = 2000;
 
 	/** 流式性能计时（TTFT/总耗时/TPS，起点为请求发出时刻）收口在 MessagePerfTracker。 */
 	private readonly messagePerf = new MessagePerfTracker();
@@ -1972,7 +1990,10 @@ export class AgentManager {
 
 		// 判断 agent 是否已在忙碌中；运行中继续发送时必须带 streamingBehavior，
 		// 否则 pi RPC 会拒绝请求。该值也用于给用户消息打上投递语义标记。
-		const alreadyBusy = runtime.tab.status === "running";
+		// 除本地 tab 状态外并入 pi 侧权威信号（Issue #371）：abort RPC 超时后本地已被
+		// 复位 idle，而 pi 仍在流式，只信本地状态会漏传 streamingBehavior 被直接拒收。
+		const alreadyBusy = runtime.tab.status === "running" || this.piMightStillBeStreaming(input.agentId);
+
 		const statusBeforePrompt = runtime.tab.status;
 		const promptDeliveryBehavior = input.streamingBehavior ?? (alreadyBusy ? "steer" : undefined);
 
@@ -2051,10 +2072,32 @@ export class AgentManager {
 				rpcMs: Date.now() - rpcStartedAt,
 			});
 			if (!response.success) {
+				const rejectionText = response.error ?? "图片消息发送失败";
+				// 兜底重发（Issue #371）：本地判定空闲但 pi 实际仍在流式时，prompt 被
+				// "Agent is already processing" 拒收。用户点的是发送，不该收到 SDK 原文
+				// toast——按设置项 busySendDelivery 补一次带语义的 prompt（默认 steer）。
+				const busyRetryBehavior = !promptDeliveryBehavior && isPiBusyRejection(rejectionText) ? parseBusySendDelivery(this.settingsStore.get().busySendDelivery) : undefined;
+				let busyRetryResponse: RpcResponse | undefined;
+				if (busyRetryBehavior) {
+					const retryPayload = { ...requestPayload, streamingBehavior: busyRetryBehavior };
+					void this.appLogger?.warn("agent", "Prompt rejected as busy; retrying with streamingBehavior", {
+						agentId: input.agentId,
+						requestId: input.requestId,
+						streamingBehavior: busyRetryBehavior,
+					});
+					const retry = await runtime.process.client.request(retryPayload, this.settingsStore.get().rpcTimeout);
+					busyRetryResponse = retry;
+					if (retry.success) {
+						// 重发成功：用户消息已按队列语义投递，走与正常发送相同的收尾。
+						await this.settleAcceptedPrompt(input.agentId, runtime, agentMessage, retry.data, alreadyBusy);
+						return { accepted: true };
+					}
+				}
 				if (!alreadyBusy) this.messagePerf.discardInFlight(input.agentId);
 				// pi RPC 会把不支持图片、忙碌队列参数缺失等前置错误作为 success:false 返回；
 				// 必须显式显示出来，否则 UI 会停在"已发送但无响应"的状态。
-				const errorMessage = response.error ?? "图片消息发送失败";
+				// 忙碌拒收的重发也失败时，用重发的错误原文（更能反映 pi 当前状态）。
+				const errorMessage = busyRetryBehavior ? (busyRetryResponse?.error ?? rejectionText) : rejectionText;
 				runtime.tab.status = statusBeforePrompt === "running" ? "running" : "idle";
 				this.addLocalizedMessage(input.agentId, "error", "diagnostic.promptRejected", "消息发送失败。", { debugDetails: errorMessage });
 				// pi 侧前置校验拒绝（模型不支持图片/队列参数缺失等）：气泡只展示给用户，
@@ -2073,20 +2116,7 @@ export class AgentManager {
 				};
 			}
 
-			// prompt 被扩展命令 / input handler 消费（没有启动 agent run）时，必须另找
-			// 恢复 idle 的时机：永远不会等到 agent_end（见下方注释）。
-			// pi 0.99+ 直接读 disposition；老版本无此字段，退回发一次 get_commands 预检
-			//（历史上 prompt 之前发的就是它，此处只是搬到 prompt 之后、按需执行）。
-			const disposition = readPromptDisposition(response.data);
-			const consumedWithoutRun = disposition === "handled" ? true : disposition === undefined ? await this.promptMatchesRegisteredExtensionCommand(runtime, agentMessage) : false;
-			if (consumedWithoutRun) {
-				if (!alreadyBusy) this.messagePerf.discardInFlight(input.agentId);
-				// 机制：Pi 扩展命令可在 prompt 阶段直接执行并返回，不进入 agent run。
-				// 证据：@earendil-works/pi-coding-agent/dist/core/agent-session.js 中 AgentSession.prompt()
-				//      先调用 _tryExecuteExtensionCommand()；命中后 return，不再调用 _runAgentPrompt()。
-				// 推导：不能等 agent_end；只有 Pi get_state 明确报告无剩余工作时才恢复 idle。
-				this.scheduleIdleCheckAfterExtensionCommand(input.agentId);
-			}
+			await this.settleAcceptedPrompt(input.agentId, runtime, agentMessage, response.data, alreadyBusy);
 			return { accepted: true };
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error);
@@ -2218,6 +2248,23 @@ export class AgentManager {
 		const runtime = this.requireRuntime(agentId);
 		const runtimeProcess = runtime.process;
 		const runtimeIdentity = this.streamRuntimeTriple(agentId);
+
+		// 连点退避：上一次 abort 的 RPC 链（clear_queue 3s + abort 10s）仍在窗口内时不再重跑。
+		// 每次点击都完整重跑会把 RPC 管道堆满，pi 本来就收不到 stdin，重发只是雪上加霜；
+		// 但用户「再点一次」的意图要保留，所以只补发一条 abort RPC（幂等）并直接返回。
+		const previousAbortAt = this.lastAbortAtByAgent.get(agentId);
+		// 只在「上一次 abort 还没 settled」时退避：已 settled 后的点击属于新一轮，照常走完整链。
+		if (previousAbortAt !== undefined && this.abortGate.hasSettledFallback(agentId) && Date.now() - previousAbortAt < AgentManager.ABORT_REPEAT_COOLDOWN_MS) {
+			this.lastAbortAtByAgent.set(agentId, Date.now());
+			this.lastUserAbortAt.set(agentId, Date.now());
+			runtime.process.client.request({ type: "abort" }, 10_000).catch((error: unknown) => {
+				void this.appLogger?.warn("agent", "Repeat abort RPC failed", {
+					agentId,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			});
+			return;
+		}
 
 		// pi 在等待 extension_ui_response 时（如 ask_question），不发 abort 也能处理，
 		// 但必须解除 pending 请求的阻塞，否则 pi 不会继续读取 stdin 中的后续命令。
@@ -6041,6 +6088,54 @@ export class AgentManager {
 	/** 当前 generation 是否已封印，封印期间所有流式事件应丢弃。 */
 	private isAgentStreamSealed(agentId: string): boolean {
 		return this.abortGate.isSealed(agentId);
+	}
+
+	/**
+	 * prompt 被 pi 接受后的统一收尾（正常发送与忙碌拒收重发共用，Issue #371）。
+	 *
+	 * 扩展命令 / input handler 消费掉 prompt（没有启动 agent run）时必须另找恢复 idle 的
+	 * 时机：永远不会等到 agent_end。pi 0.99+ 直接读 disposition；老版本无此字段，退回发一次
+	 * get_commands 预检（历史上 prompt 之前发的就是它，此处只是搬到 prompt 之后、按需执行）。
+	 */
+	private async settleAcceptedPrompt(agentId: string, runtime: AgentRuntime, agentMessage: string, responseData: unknown, alreadyBusy: boolean): Promise<void> {
+		const disposition = readPromptDisposition(responseData);
+		const consumedWithoutRun = disposition === "handled" ? true : disposition === undefined ? await this.promptMatchesRegisteredExtensionCommand(runtime, agentMessage) : false;
+		if (!consumedWithoutRun) return;
+		if (!alreadyBusy) this.messagePerf.discardInFlight(agentId);
+		// 机制：Pi 扩展命令可在 prompt 阶段直接执行并返回，不进入 agent run。
+		// 证据：@earendil-works/pi-coding-agent/dist/core/agent-session.js 中 AgentSession.prompt()
+		//      先调用 _tryExecuteExtensionCommand()；命中后 return，不再调用 _runAgentPrompt()。
+		// 推导：不能等 agent_end；只有 Pi get_state 明确报告无剩余工作时才恢复 idle。
+		this.scheduleIdleCheckAfterExtensionCommand(agentId);
+	}
+
+	/**
+	 * pi 侧「可能仍在流式」的本地证据（Issue #371）。
+	 *
+	 * 本地 tab.status 是乐观状态：abort RPC 超时/升级未收敛时它已被复位 idle，而 pi 的
+	 * isStreaming 仍为 true。此时发 prompt 不带 streamingBehavior 会被 pi 直接拒收
+	 * （"Agent is already processing..."）。这里汇总同步可取的权威信号：
+	 * - streamingAgents：本地收到的流式事件仍在进行；
+	 * - recentlyAborted：abort 已发出但还未等来 agent_settled；
+	 * - abortGate.isEscalationPending：升级链已确认 pi 仍未停稳。
+	 * 宁可多带一次 streamingBehavior（pi 侧空闲时 steer 与直发等价），也不要被拒收。
+	 */
+	private piMightStillBeStreaming(agentId: string): boolean {
+		return this.streamingAgents.has(agentId) || this.recentlyAborted.has(agentId) || this.abortGate.isEscalationPending(agentId);
+	}
+
+	/**
+	 * abort 升级拿到 pi 权威回复「仍在流式」时调用（Issue #371）。
+	 * abort RPC 超时后 tab 已被乐观复位 idle，pi 却还在跑——把状态纠正回 running，
+	 * 让用户看得见忙碌（也能重新点停止），后续发送会自动带上 streamingBehavior。
+	 * 真正停下来时 agent_settled / markIdleIfPiReportsNoWork 会把它复位 idle。
+	 */
+	private noteStillStreamingAfterAbort(agentId: string): void {
+		const runtime = this.agents.get(agentId);
+		if (!runtime || runtime.tab.status === "closed" || runtime.tab.status === "error") return;
+		if (runtime.tab.status === "running") return;
+		runtime.tab.status = "running";
+		this.emitState();
 	}
 
 	/** agent 关闭/重建时清理 gate，避免泄漏到新生命周期。 */

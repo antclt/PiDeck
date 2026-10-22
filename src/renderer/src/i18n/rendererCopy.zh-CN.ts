@@ -1328,6 +1328,9 @@ export const zhCN = {
 	"notice.extensionsDisabledFallback": "扩展加载失败，本次运行已临时禁用扩展（不会写入设置）。可把本会话的错误详情发给 AI 排查扩展问题。",
 	"notice.openDevExtensionsSettings": "去设置关闭",
 	"notice.openMcpSettings": "去 MCP 设置",
+	// 「停止响应较慢」toast 的动作按钮：abort 升级两轮后 pi 仍无响应（子进程持有管道）时，
+	// 只有重建运行时才停得下来，给直达入口而不是让用户自己在菜单里找重启。
+	"notice.restartSessionRuntime": "重启会话",
 	// DSH 模型偏好被 host 拒绝的 toast（applyPreferences 降级路径，issue #253 的「选了但没生效」）：
 	// host 是模型/档位能力的最终裁决者，PiDeck 只能告知并保留偏好供重试。
 	// 注意：agentsNotice 通道的 t() 不支持占位符（与 app.abortSlow 等既有 key 同约定），

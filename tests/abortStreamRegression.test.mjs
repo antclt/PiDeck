@@ -78,3 +78,30 @@ test("abort failures surface to the user and escalate when pi keeps running", ()
 	assert.match(composer, /sessionCommand\.runtimeUnavailable/);
 	assert.match(runControl, /sessionCommand\.runtimeUnavailable/);
 });
+
+/**
+ * Issue #371：abort RPC 超时后 PiDeck 已把 tab 复位 idle，而 pi 仍在流式。
+ * 本地状态不可信，必须有「pi 权威忙碌」的纠偏与发送兜底，否则用户点发送只会收到
+ * pi 的 SDK 原文拒收 toast（同一 agent 会被连拒多次）。
+ */
+test("a stuck run is not reported idle: pi-authoritative signals reach the send path", () => {
+	const agentManager = readFileSync("src/main/pi/AgentManager.ts", "utf8");
+	const controller = readFileSync("src/main/pi/abortStreamGateController.ts", "utf8");
+
+	// 1) 发送前的忙碌判定必须并入 pi 侧权威信号，不能只看本地 tab.status
+	const busyLine = agentManager.match(/const alreadyBusy = [^;]+;/)?.[0] ?? "";
+	assert.match(busyLine, /piMightStillBeStreaming/, "alreadyBusy 必须并入 pi 权威信号");
+	assert.match(agentManager.match(/private piMightStillBeStreaming\(agentId: string\): boolean \{[\s\S]*?\n\t\}/)?.[0] ?? "", /streamingAgents\.has\(agentId\)[\s\S]*recentlyAborted\.has\(agentId\)[\s\S]*isEscalationPending\(agentId\)/);
+
+	// 2) 仍被拒收时按设置项补发一次带 streamingBehavior 的 prompt
+	assert.match(agentManager, /isPiBusyRejection/);
+	assert.match(agentManager, /Agent is already processing/i);
+	assert.match(agentManager, /parseBusySendDelivery\(this\.settingsStore\.get\(\)\.busySendDelivery\)/);
+	assert.match(agentManager, /streamingBehavior: busyRetryBehavior/);
+
+	// 3) 升级确认 pi 仍在流式时，宿主必须撤销本地的乐观 idle
+	const hostBlock = agentManager.match(/private readonly abortGate = new AbortStreamGateController\(\{[\s\S]*?\n\t\}\);/)?.[0] ?? "";
+	assert.match(hostBlock, /noteStillStreamingAfterAbort/);
+	assert.match(controller, /noteStillStreamingAfterAbort\(agentId: string\): void;/);
+	assert.match(controller, /isEscalationPending/);
+});

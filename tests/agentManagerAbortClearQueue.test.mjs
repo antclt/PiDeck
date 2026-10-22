@@ -172,6 +172,45 @@ test("a late clear_queue response restores withdrawn prompts without stopping th
 	assert.deepEqual(emits[0].payload.steering, ["已撤回消息"]);
 });
 
+/**
+ * Issue #361：僵死的 pi（子进程持有 stdout 管道）收不到 stdin，用户会连点停止。
+ * 每次点击都完整重跑 clear_queue(3s)+abort(10s) 只会把管道堆得更满，
+ * 但「再点一次」的意图必须保留 → 冷却内只补发一条 abort，不再重跑队列撤回链。
+ */
+test("连点停止在冷却窗口内只补发一条 abort，不重跑 clear_queue 链", async (t) => {
+	const queue = deferredQueue();
+	const requests = [];
+	const { manager } = createManager(async (payload) => {
+		requests.push(payload.type);
+		return payload.type === "clear_queue" ? queue.promise : { success: true };
+	});
+	t.after(() => manager.stopAll());
+	const pending = manager.abort("agent-1");
+	assert.deepEqual(requests, ["clear_queue"]);
+	await manager.abort("agent-1");
+	assert.deepEqual(requests, ["clear_queue", "abort"], "冷却窗口内只补发 abort，不重发 clear_queue");
+	queue.resolve({ success: true, data: { steering: [], followUp: [] } });
+	await pending;
+	await settleAbortTimers();
+});
+
+test("上一次 abort 已 settled 后的停止请求照常跑完整链路", async (t) => {
+	const requests = [];
+	const { manager } = createManager(async (payload) => {
+		requests.push(payload.type);
+		return { success: true, data: {} };
+	});
+	t.after(() => manager.stopAll());
+	await manager.abort("agent-1");
+	await settleAbortTimers();
+	// 流闸已解除（settled 兜底落地）：新的停止属于新一轮，必须重新撤回队列。
+	manager.abortGate.noteAbortSettled("agent-1");
+	requests.length = 0;
+	await manager.abort("agent-1");
+	assert.deepEqual(requests, ["clear_queue", "abort"], "已 settled 的会话不受连点退避影响");
+	await settleAbortTimers();
+});
+
 test("renderer 桥消费 agents:queue-cleared 并 append 写回输入框（不清空草稿）", () => {
 	const source = readFileSync(new URL("../src/renderer/src/hooks/useSessionRuntimeBridge.ts", import.meta.url), "utf8");
 	assert.match(source, /event\.sourceChannel === "agents:queue-cleared"/, "桥应识别 agents:queue-cleared 通道");

@@ -79,7 +79,7 @@ PiDeck 是一个开源的 pi Agent 桌面工作台（Electron + React），管�
     },
     "vertical": {
       "title": "PiDeck 文件引用技巧",
-      "desc": "一个 @ 符号，文件路径直接写进消息，Agent 拿着就能读源码。"
+      "desc": "一个 @ 符号，文件路径直接写进消息，Agent 拿着路径就能自己去看源码。"
     },
     "dynamic": "今日潜水日志：用一个 @ 符号替代手打路径，发现自己过去一周贴了三十多次路径。"
   }
