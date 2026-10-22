@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: a29b7fce6d3b90234abe55dce2bd27286667abdbd4f259e9c2980adc20d9938c（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: e31c5ecec40cd95b4b33d4aedea7be3b11890cab83cf97168bba85eee87dfe7e（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -1137,8 +1137,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"notify.extensionEntryTruncated": "內容過大，已省略詳情",
 	// 修改的文件横栏（会话级文件汇总）
 	// 轮末「修改的文件」chip 行（turn/TurnFileChanges）专用
-	"sessionFiles.openInDiffViewer": "在外部 diff 檢視器中開啟",
-	"sessionFiles.openFile": "開啟檔案",
+	"sessionFiles.openInDiffViewer": "在 diff 檢視器中開啟",
+	"sessionFiles.previewFile": "預覽開啟",
 	// 溢出：单行只放得下一部分，+N 就是被收起的那几个
 	"sessionFiles.moreChips": "+{count}",
 	"sessionFiles.moreChipsHint": "還有 {count} 個檔案，點選展開",

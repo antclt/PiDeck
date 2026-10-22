@@ -1134,8 +1134,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"notify.extensionEntryTruncated": "Content too large; details omitted",
 	// Turn-end "modified files" chip row (turn/TurnFileChanges)
 	// Composer-side files section content
-	"sessionFiles.openInDiffViewer": "Open in external diff viewer",
-	"sessionFiles.openFile": "Open file",
+	"sessionFiles.openInDiffViewer": "Open in diff viewer",
+	"sessionFiles.previewFile": "Preview file",
 	// Turn-end chip row overflow: one line can't fit them all, +N holds the rest
 	"sessionFiles.moreChips": "+{count}",
 	"sessionFiles.moreChipsHint": "{count} more files — click to expand",

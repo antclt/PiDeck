@@ -38,9 +38,12 @@ type FileEntry = { path: string; count: number; originalContent: string; content
  * 数据：collectRunFileChanges(run) 按 run 聚合 write/edit/create/patch，run 完成后
  * 内容不再变化（TurnRow 的 memo 深度比较保证历史轮不重渲染），因此天然固定。
  *
- * 交互（与用户确认）：
- * - 左键 chip = 打开该文件本体（复用 App 级 onOpenFile：图片预览 / md·html 中间栏 / 内置编辑器）；
- * - chip 右键菜单 = 「在 diff 查看器中打开」（复用 onDiffFile），diff 是二级需求不占 chip 内空间。
+ * 交互（用户调整：默认看 diff，打开文件本体降到右键）：
+ * - 左键 chip = 打开该文件的 diff（复用 onDiffFile）。轮末 chip 的默认意图是「这轮改了什么」，
+ *   diff 与文件本体都进中间栏 ContentHost，不额外占 chip 内空间；
+ * - chip 右键菜单 = 「在 diff 查看器中打开」+「预览打开」（复用 App 级 onOpenFile：
+ *   图片预览 / md·html 中间栏 / 内置编辑器）；
+ * - onDiffFile 未注入的宿主面左键退回打开文件本体——chip 不能变成看得见点不动的死按钮。
  *
  * 只在轮次结束（非流式）时渲染：流式中文件列表还在长，逐条冒出来会让正文区持续抖动。
  */
@@ -170,7 +173,12 @@ const FileChangeChip = memo(function FileChangeChip(props: { entry: FileEntry; o
 	const { entry } = props;
 	const fileName = entry.path.split(/[/\\]/).pop() || entry.path;
 	const delta = useMemo(() => fileChangeDelta(entry), [entry]);
-	const canDiff = Boolean(props.onDiffFile) && !props.noInteract;
+	// 主操作是 diff（默认意图：看这轮改了什么）；两个入口各自判可用性，
+	// 只接了 onOpenFile 的宿主面（onDiffFile 缺省）左键退回打开文件本体。
+	const canDiff = !props.noInteract && Boolean(props.onDiffFile);
+	const canOpen = !props.noInteract && Boolean(props.onOpenFile);
+	const handleOpenDiff = () => props.onDiffFile?.(entry.path, entry.originalContent, entry.content);
+	const handleOpenFile = () => props.onOpenFile?.(entry.path);
 
 	const chip = (
 		<button
@@ -178,10 +186,11 @@ const FileChangeChip = memo(function FileChangeChip(props: { entry: FileEntry; o
 			data-file-chip
 			// 测量层里的副本只用于量宽：不可聚焦、不响应指针，避免被 Tab 或误点中
 			tabIndex={props.noInteract ? -1 : undefined}
-			disabled={props.noInteract || !props.onOpenFile}
+			// 两个入口都不可用（或测量层副本）才置灰
+			disabled={!canDiff && !canOpen}
 			// title 给完整相对路径：chip 只显示文件名，同名文件（多个 index.ts）靠悬停区分
 			title={props.noInteract ? undefined : entry.path}
-			onClick={props.noInteract ? undefined : () => props.onOpenFile?.(entry.path)}
+			onClick={props.noInteract ? undefined : canDiff ? handleOpenDiff : handleOpenFile}
 			className="inline-flex min-w-0 max-w-[min(100%,280px)] shrink-0 cursor-pointer items-center gap-1.5 rounded-xs bg-[color:color-mix(in_srgb,var(--color-accent)_6%,transparent)] px-2 py-1 text-control font-medium text-text-secondary transition-colors duration-[120ms] hover:bg-[color:color-mix(in_srgb,var(--color-accent)_12%,transparent)] hover:text-text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:cursor-default disabled:opacity-70"
 		>
 			<FileTypeGlyph fileName={fileName} />
@@ -195,17 +204,16 @@ const FileChangeChip = memo(function FileChangeChip(props: { entry: FileEntry; o
 		</button>
 	);
 
-	// 没有 diff 入口时不套右键菜单：空菜单比没有菜单更糟
-	if (!canDiff) return chip;
+	// 两个入口都不可用时不套右键菜单：空菜单比没有菜单更糟（测量层副本也走这条）
+	if (!canDiff && !canOpen) return chip;
 
 	return (
 		<ContextMenu>
 			<ContextMenuTrigger asChild>{chip}</ContextMenuTrigger>
 			<ContextMenuContent className="min-w-40">
-				<ContextMenuItem onSelect={() => props.onOpenFile?.(entry.path)} disabled={!props.onOpenFile}>
-					{t("sessionFiles.openFile")}
-				</ContextMenuItem>
-				<ContextMenuItem onSelect={() => props.onDiffFile?.(entry.path, entry.originalContent, entry.content)}>{t("sessionFiles.openInDiffViewer")}</ContextMenuItem>
+				{/* 菜单顺序跟默认操作一致：diff 打头，预览（打开文件本体）是用户在右键里选的第二入口 */}
+				{canDiff && <ContextMenuItem onSelect={handleOpenDiff}>{t("sessionFiles.openInDiffViewer")}</ContextMenuItem>}
+				{canOpen && <ContextMenuItem onSelect={handleOpenFile}>{t("sessionFiles.previewFile")}</ContextMenuItem>}
 			</ContextMenuContent>
 		</ContextMenu>
 	);

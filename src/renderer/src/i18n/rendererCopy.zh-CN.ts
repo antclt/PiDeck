@@ -1130,8 +1130,8 @@ export const zhCN = {
 	"notify.extensionEntryTruncated": "内容过大，已省略详情",
 	// 修改的文件横栏（会话级文件汇总）
 	// 轮末「修改的文件」chip 行（turn/TurnFileChanges）专用
-	"sessionFiles.openInDiffViewer": "在外部 diff 查看器中打开",
-	"sessionFiles.openFile": "打开文件",
+	"sessionFiles.openInDiffViewer": "在 diff 查看器中打开",
+	"sessionFiles.previewFile": "预览打开",
 	// 溢出：单行只放得下一部分，+N 就是被收起的那几个
 	"sessionFiles.moreChips": "+{count}",
 	"sessionFiles.moreChipsHint": "还有 {count} 个文件，点击展开",
