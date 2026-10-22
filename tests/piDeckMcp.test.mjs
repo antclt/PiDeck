@@ -11,6 +11,7 @@ import test from "node:test";
 const { PiDeckMcpService } = loadTsCommonJs("src/main/mcp/PiDeckMcpService.ts");
 const { HostPluginSessions } = loadTsCommonJs("src/main/plugins/HostPluginSessions.ts");
 const { AgentProfileStore } = loadTsCommonJs("src/main/agents/AgentProfileStore.ts");
+const { AutomationStore } = loadTsCommonJs("src/main/automation/AutomationStore.ts");
 const { createDefaultAppSettings } = loadTsCommonJs("src/shared/types/settings.ts");
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
@@ -56,13 +57,37 @@ async function fixture(t, override = {}) {
 		delete: (agentId) => agentStore.delete(agentId),
 		bindSession: (input) => agentStore.bindSession(input),
 	};
+	// 真实 AutomationStore（临时文件）：任务 CRUD/运行历史走生产归一化；runNow/abortRun 用 store 的
+	// createRun/updateRun 模拟协调器，避免在 MCP 测试里装配整条会话运行时链。
+	const automationStore = new AutomationStore(join(dir, "automation.json"));
+	await automationStore.load();
+	const automation = {
+		listTasks: (projectId) => automationStore.getSnapshot().tasks.filter((task) => task.projectId === projectId),
+		getTask: (taskId) => automationStore.getSnapshot().tasks.find((task) => task.id === taskId),
+		listRuns: (projectId) => automationStore.listRuns().filter((run) => run.projectId === projectId),
+		getRun: (runId) => automationStore.getRun(runId),
+		createTask: (input) => automationStore.createTask(input),
+		updateTask: (taskId, patch) => automationStore.updateTask(taskId, patch),
+		deleteTask: (taskId) => automationStore.deleteTask(taskId),
+		runNow: async (taskId) => {
+			const task = automationStore.getTask(taskId);
+			if (!task) throw new Error("Automation task not found");
+			return automationStore.createRun({ task, trigger: "manual" });
+		},
+		abortRun: async (runId) => {
+			const run = automationStore.getRun(runId);
+			if (!run || run.status === "succeeded" || run.status === "failed" || run.status === "aborted") return false;
+			await automationStore.updateRun(runId, { status: "aborted", endedAt: Date.now(), durationMs: 0 });
+			return true;
+		},
+	};
 	const configPath = join(dir, "mcp-host.json");
-	const service = new PiDeckMcpService({ configPath, projects: () => projects, sessions, agents, settings: () => null, builtInExtensionsVersion: () => null, runtimes: () => [], abortRuntime: async () => ({ ok: true, value: undefined }), warn: () => undefined, ...override });
+	const service = new PiDeckMcpService({ configPath, projects: () => projects, sessions, agents, automation, settings: () => null, builtInExtensionsVersion: () => null, runtimes: () => [], abortRuntime: async () => ({ ok: true, value: undefined }), warn: () => undefined, ...override });
 	t.after(async () => {
 		await service.dispose();
 		await rm(dir, { recursive: true, force: true });
 	});
-	return { service, projects, configPath, sessions, agentStore, dir };
+	return { service, projects, configPath, sessions, agentStore, automationStore, dir };
 }
 
 async function connect(t, service) {
@@ -84,6 +109,7 @@ test("MCP is off by default, has no endpoint/credential and exports disabled con
 		allProjects: false,
 		allowControl: false,
 		allowAgentWrite: false,
+		allowAutomationWrite: false,
 		running: false,
 		projects: [
 			{ id: "p1", name: "Allowed" },
@@ -102,7 +128,7 @@ test("MCP is off by default, has no endpoint/credential and exports disabled con
 	assert.match(definition.url, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
 	assert.deepEqual(
 		(await client.listTools()).tools.map((v) => v.name),
-		["projects_list", "settings_get", "extensions_list", "runtime_status", "agents_list", "agents_get", "sessions_list", "sessions_get", "sessions_search", "sessions_entries"],
+		["projects_list", "settings_get", "extensions_list", "runtime_status", "agents_list", "agents_get", "automation_tasks_list", "automation_tasks_get", "automation_runs_list", "sessions_list", "sessions_get", "sessions_search", "sessions_entries"],
 	);
 	for (const tool of (await client.listTools()).tools) assert.equal(tool.annotations.readOnlyHint, true);
 	// 写开关默认关：写工具不注册，客户端连看都看不到，而不是注册后拒绝。
@@ -383,7 +409,7 @@ test("disconnected requests keep their IO budget until settled, then release slo
 	await new Promise((r) => setImmediate(r));
 	const recovered = await list();
 	assert.equal(recovered.status, 200, "SDK shutdown must not strand completed request slots");
-	assert.equal((await recovered.json()).result.tools.length, 10);
+	assert.equal((await recovered.json()).result.tools.length, 13);
 });
 
 test("通配授权跟随项目列表：新增项目立即可读，已删除项目当场失效", async (t) => {
@@ -422,6 +448,7 @@ test("通配/写开关字段向后兼容，且 enabled 必须至少有一块可�
 	assert.equal(legacy.allProjects, false);
 	assert.equal(legacy.allowControl, false);
 	assert.equal(legacy.allowAgentWrite, false);
+	assert.equal(legacy.allowAutomationWrite, false);
 	assert.equal(legacy.projectIds[0], "p1");
 	// enabled 但既没白名单也不是通配：这份配置谁都不能读，必须 fail closed 而不是静默监听。
 	await assert.rejects(read(base), /config-read-failed/);
@@ -557,4 +584,71 @@ test("智能体写工具默认不注册；打开后可创建/编辑/删除/绑�
 	const deleted = await client.callTool({ name: "agents_delete", arguments: { agentId } });
 	assert.deepEqual(deleted.structuredContent.data, { agentId, deleted: true });
 	assert.equal((await client.callTool({ name: "agents_get", arguments: { agentId } })).isError, true);
+});
+
+test("定时任务只读工具：按项目授权、列表不含 prompt、运行历史可查", async (t) => {
+	const { service, automationStore } = await fixture(t);
+	await service.setAccess({ enabled: true, projectIds: ["p1"], allowControl: false });
+	const { client } = await connect(t, service);
+	const now = Date.now();
+	const p1Task = await automationStore.createTask({ name: "巡检", projectId: "p1", prompt: "检查构建", schedule: { type: "cron", expression: "0 9 * * *" } }, now);
+	await automationStore.createTask({ name: "私有任务", projectId: "p2", prompt: "secret", schedule: { type: "manual" } }, now);
+	const list = (await client.callTool({ name: "automation_tasks_list", arguments: { projectId: "p1" } })).structuredContent.data.tasks;
+	assert.deepEqual(
+		list.map((task) => task.id),
+		[p1Task.id],
+		"只返回已授权项目的任务",
+	);
+	assert.equal(JSON.stringify(list).includes("检查构建"), false, "列表不含 prompt");
+	assert.equal(list[0].nextRunAt !== undefined, true, "cron 任务带下次运行时间");
+	const detail = (await client.callTool({ name: "automation_tasks_get", arguments: { projectId: "p1", taskId: p1Task.id } })).structuredContent.data;
+	assert.equal(detail.prompt, "检查构建", "详情在项目授权范围内返回 prompt");
+	assert.equal((await client.callTool({ name: "automation_tasks_get", arguments: { projectId: "p1", taskId: "missing" } })).isError, true);
+	await automationStore.createRun({ task: p1Task, trigger: "manual" });
+	const runs = (await client.callTool({ name: "automation_runs_list", arguments: { projectId: "p1" } })).structuredContent.data.runs;
+	assert.equal(runs.length, 1);
+	assert.equal(runs[0].taskId, p1Task.id);
+	assert.equal((await client.callTool({ name: "automation_tasks_list", arguments: { projectId: "p2" } })).isError, true, "未授权项目拒绝");
+});
+
+test("定时任务写工具默认不注册；打开后可 CRUD、立即运行与中止，且按项目授权", async (t) => {
+	const { service } = await fixture(t);
+	await service.setAccess({ enabled: true, projectIds: ["p1"], allowControl: false });
+	const off = (await connect(t, service)).client;
+	assert.equal(
+		(await off.listTools()).tools.some((tool) => tool.name === "automation_task_create"),
+		false,
+		"写开关关闭时工具不注册",
+	);
+	assert.equal((await service.getState()).allowAutomationWrite, false);
+
+	await service.setAccess({ enabled: true, projectIds: ["p1"], allowControl: false, allowAutomationWrite: true });
+	const { client } = await connect(t, service);
+	const names = (await client.listTools()).tools.map((tool) => tool.name);
+	for (const name of ["automation_task_create", "automation_task_update", "automation_task_delete", "automation_task_run_now", "automation_run_abort"]) assert.ok(names.includes(name), name);
+
+	const created = await client.callTool({ name: "automation_task_create", arguments: { projectId: "p1", name: "MCP 任务", prompt: "生成日报", schedule: { type: "manual" } } });
+	assert.equal(created.isError, undefined);
+	const taskId = created.structuredContent.data.id;
+	assert.equal(created.structuredContent.data.schedule.type, "manual");
+	const bad = await client.callTool({ name: "automation_task_create", arguments: { projectId: "p1", name: "坏 cron", prompt: "x", schedule: { type: "cron", expression: "bad" } } });
+	assert.equal(JSON.parse(bad.content[0].text).code, "automation-invalid-schedule");
+
+	const updated = await client.callTool({ name: "automation_task_update", arguments: { taskId, name: "改名任务", schedule: { type: "cron", expression: "0 9 * * *" } } });
+	assert.equal(updated.structuredContent.data.name, "改名任务");
+	assert.equal(updated.structuredContent.data.schedule.expression, "0 9 * * *");
+	const empty = await client.callTool({ name: "automation_task_update", arguments: { taskId } });
+	assert.equal(JSON.parse(empty.content[0].text).code, "automation-patch-empty");
+
+	const run = (await client.callTool({ name: "automation_task_run_now", arguments: { taskId } })).structuredContent.data;
+	assert.equal(run.taskId, taskId);
+	assert.equal(run.status, "queued");
+	const aborted = (await client.callTool({ name: "automation_run_abort", arguments: { runId: run.id } })).structuredContent.data;
+	assert.deepEqual(aborted, { runId: run.id, aborted: true });
+	assert.equal((await client.callTool({ name: "automation_run_abort", arguments: { runId: "missing" } })).isError, true);
+
+	const denied = await client.callTool({ name: "automation_task_create", arguments: { projectId: "p2", name: "x", prompt: "y", schedule: { type: "manual" } } });
+	assert.equal(denied.isError, true, "未授权项目不能创建任务");
+	assert.deepEqual((await client.callTool({ name: "automation_task_delete", arguments: { taskId } })).structuredContent.data, { taskId, deleted: true });
+	assert.equal((await client.callTool({ name: "automation_tasks_get", arguments: { projectId: "p1", taskId } })).isError, true);
 });

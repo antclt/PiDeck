@@ -3199,6 +3199,34 @@ function registerIpc() {
 				return agentProfileStore.bindSession(input);
 			},
 		},
+		// 定时任务：automationStore / runCoordinator 在启动后段才装配，闭包在请求时求值。
+		// 读接口按 projectId 过滤；写接口未就绪时统一报 operation-failed（工具层映射为安全错误码）。
+		automation: {
+			listTasks: (projectId) => automationStore?.getSnapshot().tasks.filter((task) => task.projectId === projectId) ?? [],
+			getTask: (taskId) => automationStore?.getSnapshot().tasks.find((task) => task.id === taskId),
+			listRuns: (projectId) => automationStore?.listRuns().filter((run) => run.projectId === projectId) ?? [],
+			getRun: (runId) => automationStore?.getRun(runId),
+			createTask: async (input) => {
+				if (!automationStore) throw new Error("operation-failed");
+				return automationStore.createTask(input);
+			},
+			updateTask: async (taskId, patch) => {
+				if (!automationStore) throw new Error("operation-failed");
+				return automationStore.updateTask(taskId, patch);
+			},
+			deleteTask: async (taskId) => {
+				if (!automationStore) throw new Error("operation-failed");
+				return automationStore.deleteTask(taskId);
+			},
+			runNow: async (taskId) => {
+				if (!automationRunCoordinator) throw new Error("operation-failed");
+				return automationRunCoordinator.runNow(taskId);
+			},
+			abortRun: async (runId) => {
+				if (!automationRunCoordinator) throw new Error("operation-failed");
+				return automationRunCoordinator.abortRun(runId);
+			},
+		},
 		warn: mcpWarning,
 	});
 	const unregisterPiDeckMcp = registerPiDeckMcpIpc(piDeckMcp, () => mainWindow, mcpWarning);

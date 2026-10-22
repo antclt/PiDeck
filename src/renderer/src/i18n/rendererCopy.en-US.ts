@@ -2217,7 +2217,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.mcp.template.configured": "Configured",
 	"config.mcp.template.recommended": "Recommended services",
 	"config.mcp.catalog.pideck": "PiDeck (local MCP service)",
-	"config.mcp.catalog.pideckHint": "Read authorized projects and sessions, host settings, built-in extension state and agent metadata; write capabilities need separate opt-in. Off by default; local access only.",
+	"config.mcp.catalog.pideckHint": "Read authorized projects and sessions, host settings, built-in extension state, agent metadata and project scheduled tasks with run history; write capabilities need separate opt-in. Off by default; local access only.",
 	"config.mcp.pideck.hint":
 		"Expose project listings, session metadata, title search, paginated history, a host settings summary, built-in extension state and agent metadata to pi and other MCP clients. Read-only by default; interrupting a response or managing agents requires an explicitly enabled write switch. No commands, session content mutations, arbitrary file access, tokens, proxy credentials, filesystem paths or agent role prompts.",
 	"config.mcp.pideck.warning": "Anyone holding the token can read all visible sessions in the selected projects, including future sessions. Content may contain secrets and may be sent to a model by the client. Authorize only necessary projects and do not share the connection configuration.",
@@ -2237,6 +2237,9 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.mcp.pideck.allowAgentWriteHint":
 		"When off, clients can only read agent metadata (name, description, category, …). When on, clients can create, edit and delete agents and bind sessions in authorized projects to them (same as the UI's Use action). Role prompts (systemPrompt) are write-only: no tool returns them, and model invocation is not exposed.",
 	"config.mcp.pideck.apply": "Apply access and rotate token",
+	"config.mcp.pideck.automationWriteSection": "Scheduled-task management",
+	"config.mcp.pideck.allowAutomationWrite": "Allow creating/editing/deleting scheduled tasks, starting and aborting runs",
+	"config.mcp.pideck.allowAutomationWriteHint": "When off, clients can only read tasks and run history in authorized projects. When on, clients can create, edit and delete tasks, start a run immediately (spawns a real session and consumes model budget) or abort a run; task prompts are returned with the task detail.",
 	"config.mcp.pideck.enable": "Authorize and enable local service",
 	"config.mcp.pideck.disable": "Stop service and revoke token",
 	"config.mcp.pideck.connectionHint":

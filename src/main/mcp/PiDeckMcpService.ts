@@ -2,7 +2,8 @@
 import { randomBytes } from "node:crypto";
 import type { PiDeckMcpAccess, PiDeckMcpProject, PiDeckMcpState } from "../../shared/types/piDeckMcp";
 import type { McpConfigFile } from "../../shared/types/mcp";
-import type { BindAgentSessionInput, CreateAgentProfileInput, AgentProfile } from "../../shared/types/agentProfile";
+import type { AgentProfile, BindAgentSessionInput, CreateAgentProfileInput } from "../../shared/types/agentProfile";
+import type { AutomationRun, AutomationTask, AutomationTaskSummary, CreateAutomationTaskInput, UpdateAutomationTaskInput } from "../../shared/types/automation";
 import type { SessionCommandResult, SessionRuntimeInfo, SessionRuntimeTarget } from "../../shared/types/session";
 import type { AppSettings } from "../../shared/types/settings";
 import type { AgentProfilePatch } from "../agents/AgentProfileStore";
@@ -43,6 +44,21 @@ export class PiDeckMcpService {
 				delete: (agentId: string) => Promise<boolean>;
 				bindSession: (input: BindAgentSessionInput) => Promise<unknown>;
 			};
+			/**
+			 * 定时任务目录（项目作用域）。automation.json 在启动后段才装配，闭包在请求时求值；
+			 * 写工具是否注册由配置里的 allowAutomationWrite 决定。
+			 */
+			automation: {
+				listTasks: (projectId: string) => AutomationTaskSummary[];
+				getTask: (taskId: string) => AutomationTaskSummary | undefined;
+				listRuns: (projectId: string) => AutomationRun[];
+				getRun: (runId: string) => AutomationRun | undefined;
+				createTask: (input: CreateAutomationTaskInput) => Promise<AutomationTask>;
+				updateTask: (taskId: string, patch: UpdateAutomationTaskInput) => Promise<AutomationTask>;
+				deleteTask: (taskId: string) => Promise<boolean>;
+				runNow: (taskId: string) => Promise<AutomationRun>;
+				abortRun: (runId: string) => Promise<boolean>;
+			};
 			warn: (code: string) => void;
 		},
 	) {
@@ -73,6 +89,7 @@ export class PiDeckMcpService {
 			allProjects: this.config.allProjects,
 			allowControl: this.config.allowControl,
 			allowAgentWrite: this.config.allowAgentWrite,
+			allowAutomationWrite: this.config.allowAutomationWrite,
 			running: Boolean(this.endpoint),
 			endpoint: this.endpoint,
 			projects: this.deps.projects(),
@@ -174,6 +191,8 @@ export class PiDeckMcpService {
 					controlEnabled: () => this.config.allowControl,
 					agents: this.deps.agents,
 					agentWriteEnabled: () => this.config.allowAgentWrite,
+					automation: this.deps.automation,
+					automationWriteEnabled: () => this.config.allowAutomationWrite,
 					abort: async (target) => {
 						// 开关在请求开始后才被关掉时（工具已注册）也必须拒绝，所以每次调用都复查。
 						if (!this.config.allowControl) throw new Error("control-disabled");
@@ -205,6 +224,7 @@ export class PiDeckMcpService {
 		const capabilities = ["Read-only access to explicitly authorized PiDeck projects and saved sessions."];
 		if (this.config.allowControl) capabilities.push("Runtime control: abort the response a running session is producing.");
 		if (this.config.allowAgentWrite) capabilities.push("Agent management: create/edit/delete agent presets and bind them to sessions (role prompts are write-only).");
+		if (this.config.allowAutomationWrite) capabilities.push("Scheduled-task management: create/edit/delete tasks, start or abort runs (runs consume model budget).");
 		return { mcpServers: { pideck: { url: this.endpoint, headers: { Authorization: `Bearer ${this.config.token}` }, enabled: false, exposure: "codemode", description: capabilities.join(" ") } } };
 	}
 

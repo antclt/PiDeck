@@ -5,7 +5,7 @@ import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const REPO_ROOT = resolve(import.meta.dirname, "..");
-const { buildPiDeckMcpAgentSummary, buildPiDeckMcpExtensionsView, buildPiDeckMcpSettingsView } = loadTsCommonJs(resolve(REPO_ROOT, "src/main/mcp/piDeckMcpViews.ts"));
+const { buildPiDeckMcpAgentSummary, buildPiDeckMcpAutomationRun, buildPiDeckMcpAutomationTaskDetail, buildPiDeckMcpAutomationTaskSummary, buildPiDeckMcpExtensionsView, buildPiDeckMcpSettingsView } = loadTsCommonJs(resolve(REPO_ROOT, "src/main/mcp/piDeckMcpViews.ts"));
 const { createDefaultAppSettings } = loadTsCommonJs(resolve(REPO_ROOT, "src/shared/types/settings.ts"));
 const { listActiveBuiltInExtensionPaths } = loadTsCommonJs(resolve(REPO_ROOT, "src/main/extensions/builtInExtensions.ts"));
 
@@ -160,4 +160,38 @@ test("agents 投影只输出元信息允许清单：systemPrompt 与路径不泄
 	assert.equal(bare.backend, null);
 	assert.equal(bare.lastUsedAt, null);
 	assert.equal(bare.builtin, false);
+});
+
+test("automation 投影：列表不含 prompt、详情带 prompt、run 截断 error 且不含 events", () => {
+	const task = {
+		id: "t1",
+		name: "巡检",
+		projectId: "p1",
+		prompt: `任务 ${SECRET}`,
+		schedule: { type: "cron", expression: "0 9 * * *" },
+		enabled: true,
+		backend: "pi",
+		model: { provider: "p", modelId: "m" },
+		thinkingLevel: "high",
+		mode: "plan",
+		permissionPreset: "full",
+		budget: { timeoutMs: 1000 },
+		createdAt: 1,
+		updatedAt: 2,
+		lastScheduledAt: 3,
+		nextRunAt: 4,
+	};
+	const summary = buildPiDeckMcpAutomationTaskSummary(task);
+	assert.equal("prompt" in summary, false, "列表投影不含 prompt");
+	assert.equal(JSON.stringify(summary).includes(SECRET), false);
+	assert.equal(summary.nextRunAt, 4);
+	assert.equal(summary.mode, "plan");
+	const detail = buildPiDeckMcpAutomationTaskDetail(task);
+	assert.equal(detail.prompt, `任务 ${SECRET}`, "详情在项目范围内带 prompt");
+	const run = { id: "r1", taskId: "t1", taskName: "巡检", projectId: "p1", trigger: "manual", status: "failed", queuedAt: 1, updatedAt: 2, inputTokens: 3, outputTokens: 4, costUsd: 0.5, stepCount: 5, error: "x".repeat(3000), events: [{ id: "e1", type: "failed", at: 2 }] };
+	const runView = buildPiDeckMcpAutomationRun(run);
+	assert.equal(runView.error.length, 2000, "error 截断到 2000 字符");
+	assert.equal("events" in runView, false, "events 明细不进 MCP");
+	assert.equal(runView.sessionId, null);
+	assert.equal(runView.durationMs, null);
 });

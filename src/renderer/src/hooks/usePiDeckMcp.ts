@@ -12,6 +12,8 @@ export function usePiDeckMcp() {
 	const [allowControl, setAllowControl] = useState(false);
 	// 智能体写能力草稿：与 allowControl 同一次 apply 提交，关闭时一并撤回。
 	const [allowAgentWrite, setAllowAgentWrite] = useState(false);
+	// 定时任务写能力草稿：同一套提交/撤回规则。
+	const [allowAutomationWrite, setAllowAutomationWrite] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const generation = useRef(0);
@@ -34,6 +36,7 @@ export function usePiDeckMcp() {
 			setAllProjects(result.value.allProjects);
 			setAllowControl(result.value.allowControl);
 			setAllowAgentWrite(result.value.allowAgentWrite);
+			setAllowAutomationWrite(result.value.allowAutomationWrite);
 			setError(result.value.error ?? null);
 		} catch {
 			if (generation.current === epoch) setError("operation-failed");
@@ -61,7 +64,7 @@ export function usePiDeckMcp() {
 			setError(null);
 			try {
 				// 关闭 = 撤回全部授权：写开关一并落回安全默认，重新启用时必须显式重选。
-				const result = await desktopApi.piDeckMcp.setAccess(enabled ? { enabled, projectIds, allProjects, allowControl, allowAgentWrite } : { enabled: false, projectIds: [], allProjects: false, allowControl: false, allowAgentWrite: false });
+				const result = await desktopApi.piDeckMcp.setAccess(enabled ? { enabled, projectIds, allProjects, allowControl, allowAgentWrite, allowAutomationWrite } : { enabled: false, projectIds: [], allProjects: false, allowControl: false, allowAgentWrite: false, allowAutomationWrite: false });
 				if (generation.current !== epoch) return;
 				if (result.ok) {
 					setState(result.value);
@@ -69,6 +72,7 @@ export function usePiDeckMcp() {
 					setAllProjects(result.value.allProjects);
 					setAllowControl(result.value.allowControl);
 					setAllowAgentWrite(result.value.allowAgentWrite);
+					setAllowAutomationWrite(result.value.allowAutomationWrite);
 				} else {
 					setError(result.code);
 					// Failure can have stopped the listener: never keep displaying stale running state.
@@ -84,7 +88,7 @@ export function usePiDeckMcp() {
 				}
 			}
 		},
-		[projectIds, allProjects, allowControl, allowAgentWrite],
+		[projectIds, allProjects, allowControl, allowAgentWrite, allowAutomationWrite],
 	);
 
 	/** Sensitive connection config lives only for this operation, not in component/atom state. */
@@ -114,5 +118,5 @@ export function usePiDeckMcp() {
 			}
 		}
 	}, []);
-	return { state, projectIds, setProjectIds, allProjects, setAllProjects, allowControl, setAllowControl, allowAgentWrite, setAllowAgentWrite, busy, error, refresh, apply, withConnection };
+	return { state, projectIds, setProjectIds, allProjects, setAllProjects, allowControl, setAllowControl, allowAgentWrite, setAllowAgentWrite, allowAutomationWrite, setAllowAutomationWrite, busy, error, refresh, apply, withConnection };
 }

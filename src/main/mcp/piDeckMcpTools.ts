@@ -15,10 +15,12 @@ import {
 	type BindAgentSessionInput,
 	type CreateAgentProfileInput,
 } from "../../shared/types/agentProfile";
+import type { AutomationRun, AutomationSchedule, AutomationTask, AutomationTaskSummary, CreateAutomationTaskInput, UpdateAutomationTaskInput } from "../../shared/types/automation";
 import type { PiDeckMcpExtensionsView, PiDeckMcpProject, PiDeckMcpRuntimeView, PiDeckMcpSettingsView } from "../../shared/types/piDeckMcp";
 import type { AgentProfilePatch } from "../agents/AgentProfileStore";
+import { parseAutomationCron } from "../automation/automationCron";
 import type { HostPluginSessions } from "../plugins/HostPluginSessions";
-import { buildPiDeckMcpAgentSummary } from "./piDeckMcpViews";
+import { buildPiDeckMcpAgentSummary, buildPiDeckMcpAutomationRun, buildPiDeckMcpAutomationTaskDetail, buildPiDeckMcpAutomationTaskSummary } from "./piDeckMcpViews";
 
 export type PiDeckMcpToolDeps = {
 	sessions: Pick<HostPluginSessions, "list" | "get" | "search" | "entries">;
@@ -55,6 +57,23 @@ export type PiDeckMcpToolDeps = {
 	};
 	/** 智能体写开关当前是否打开；决定写工具是否注册，并在每次写入前复查（关掉即拒）。 */
 	agentWriteEnabled: () => boolean;
+	/**
+	 * 定时任务目录（项目作用域；服务层按 task.projectId 复用项目授权）。
+	 * 读工具始终可用；写工具只在 `automationWriteEnabled()` 为真时注册。
+	 */
+	automation: {
+		listTasks: (projectId: string) => AutomationTaskSummary[];
+		getTask: (taskId: string) => AutomationTaskSummary | undefined;
+		listRuns: (projectId: string) => AutomationRun[];
+		getRun: (runId: string) => AutomationRun | undefined;
+		createTask: (input: CreateAutomationTaskInput) => Promise<AutomationTask>;
+		updateTask: (taskId: string, patch: UpdateAutomationTaskInput) => Promise<AutomationTask>;
+		deleteTask: (taskId: string) => Promise<boolean>;
+		runNow: (taskId: string) => Promise<AutomationRun>;
+		abortRun: (runId: string) => Promise<boolean>;
+	};
+	/** 定时任务写开关当前是否打开；决定写工具是否注册，并在每次写入前复查。 */
+	automationWriteEnabled: () => boolean;
 };
 const id = z
 	.string()
@@ -78,6 +97,30 @@ const agentModelRef = z
 		modelId: z.string().trim().min(1).max(200),
 	})
 	.strict();
+
+// ── 定时任务工具的参数（上限与 AutomationStore 归一化同口径）──
+const automationName = z.string().trim().min(1).max(120);
+const automationPrompt = z.string().trim().min(1).max(100_000);
+const automationSchedule = z.discriminatedUnion("type", [z.object({ type: z.literal("cron"), expression: z.string().trim().min(1).max(200) }).strict(), z.object({ type: z.literal("manual") }).strict()]);
+const automationBackend = z.enum(["pi", "dsh"]);
+const automationMode = z.enum(["normal", "plan", "goal"]);
+const automationThinkingLevel = z.string().trim().min(1).max(100);
+const automationPermissionPreset = z.string().trim().min(1).max(100);
+const automationBudget = z
+	.object({
+		timeoutMs: z
+			.number()
+			.int()
+			.min(10_000)
+			.max(7 * 24 * 60 * 60_000)
+			.nullable()
+			.optional(),
+		maxTokens: z.number().int().min(1).max(100_000_000).nullable().optional(),
+		maxCostUsd: z.number().min(0.000001).max(1_000_000).nullable().optional(),
+		maxSteps: z.number().int().min(1).max(100_000).nullable().optional(),
+	})
+	.strict();
+
 const SAFE_ERRORS = new Set([
 	"access-revoked",
 	"project-not-authorized",
@@ -94,6 +137,11 @@ const SAFE_ERRORS = new Set([
 	"agent-not-deletable",
 	"agent-write-disabled",
 	"agent-patch-empty",
+	"automation-task-not-found",
+	"automation-run-not-found",
+	"automation-write-disabled",
+	"automation-patch-empty",
+	"automation-invalid-schedule",
 ]);
 
 /** Each HTTP request owns a fresh stateless protocol server; the session reader is shared and bounded. */
@@ -110,6 +158,7 @@ export function createPiDeckMcpServer(deps: PiDeckMcpToolDeps): McpServer {
 				"settings_get/extensions_list describe the host itself and are not project-scoped; they never include credentials, tokens or filesystem paths.",
 				control ? "runtime_status reports which sessions are running right now; sessions_abort interrupts the response one of them is producing. The user can withdraw that ability at any time." : "No runtime control.",
 				"agents_list/agents_get describe the host's prompt presets by metadata only; their role prompts (systemPrompt) are never returned. Agent write tools exist only when the user enables agent management, and even then role prompts stay write-only.",
+				"automation_tasks_list/automation_tasks_get/automation_runs_list describe scheduled tasks inside authorized projects. Automation write tools exist only when the user enables scheduled-task management; automation_task_run_now starts a real agent session and consumes model budget.",
 				"No arbitrary files or network proxy. API v1.",
 			].join(" "),
 		},
@@ -177,6 +226,36 @@ export function createPiDeckMcpServer(deps: PiDeckMcpToolDeps): McpServer {
 		if (!agent) throw new Error("agent-not-found");
 		return buildPiDeckMcpAgentSummary(agent);
 	});
+
+	// 定时任务是项目作用域：读写都先过 projectId 授权；列表不含 prompt，详情才有（项目范围内可见）。
+	tool("automation_tasks_list", "List scheduled-task definitions in an authorized project. Metadata only: id, name, schedule, enabled, backend/model, budget and next run. Task prompts are excluded; use automation_tasks_get for one task.", { projectId: id }, ({ projectId }) => {
+		deps.authorize(projectId);
+		return { tasks: deps.automation.listTasks(projectId).map(buildPiDeckMcpAutomationTaskSummary) };
+	});
+	tool("automation_tasks_get", "Get one scheduled task in an authorized project, including its prompt. Use the id from automation_tasks_list.", { projectId: id, taskId: id }, ({ projectId, taskId }) => {
+		deps.authorize(projectId);
+		const task = deps.automation.getTask(taskId);
+		if (!task || task.projectId !== projectId) throw new Error("automation-task-not-found");
+		return buildPiDeckMcpAutomationTaskDetail(task);
+	});
+	tool(
+		"automation_runs_list",
+		"List recent runs of scheduled tasks in an authorized project, newest first. Includes status, trigger, timing, token/cost metrics and a bounded error string; run event details are not included.",
+		{ projectId: id, taskId: id.optional(), limit: z.number().int().min(1).max(100).optional() },
+		({ projectId, taskId, limit }) => {
+			deps.authorize(projectId);
+			if (taskId) {
+				const task = deps.automation.getTask(taskId);
+				if (!task || task.projectId !== projectId) throw new Error("automation-task-not-found");
+			}
+			const runs = deps.automation
+				.listRuns(projectId)
+				.filter((run) => taskId === undefined || run.taskId === taskId)
+				.sort((left, right) => right.queuedAt - left.queuedAt)
+				.slice(0, limit ?? 20);
+			return { runs: runs.map(buildPiDeckMcpAutomationRun) };
+		},
+	);
 	// 智能体写工具：开关关着时**不注册**（客户端看不到），并在每次写入前复查（请求期间被关掉也要拒）。
 	const agentWrite = deps.agentWriteEnabled();
 	if (agentWrite) {
@@ -265,6 +344,146 @@ export function createPiDeckMcpServer(deps: PiDeckMcpToolDeps): McpServer {
 				await deps.agents.bindSession({ sessionId, agentId });
 				deps.authorize(projectId);
 				return { projectId, sessionId, agentId };
+			},
+			{ write: true },
+		);
+	}
+	// 定时任务写工具：开关关着时不注册；立即运行会真的启动会话、消耗模型额度。
+	const automationWrite = deps.automationWriteEnabled();
+	if (automationWrite) {
+		const assertAutomationWrite = () => {
+			if (!deps.automationWriteEnabled()) throw new Error("automation-write-disabled");
+		};
+		const validateSchedule = (schedule: AutomationSchedule): AutomationSchedule => {
+			if (schedule.type === "cron") {
+				try {
+					parseAutomationCron(schedule.expression);
+				} catch {
+					throw new Error("automation-invalid-schedule");
+				}
+			}
+			return schedule;
+		};
+		tool(
+			"automation_task_create",
+			"Create a scheduled task in an authorized project. schedule is either {type:cron, expression} (five-field local-time cron) or {type:manual}; manual tasks run via automation_task_run_now. Budget fields are optional; omit for unlimited. The prompt is stored in PiDeck and returned by automation_tasks_get within the same authorized project.",
+			{
+				projectId: id,
+				name: automationName,
+				prompt: automationPrompt,
+				schedule: automationSchedule,
+				enabled: z.boolean().optional(),
+				backend: automationBackend.optional(),
+				model: agentModelRef.nullable().optional(),
+				thinkingLevel: automationThinkingLevel.optional(),
+				mode: automationMode.optional(),
+				permissionPreset: automationPermissionPreset.optional(),
+				budget: automationBudget.optional(),
+			},
+			async (input) => {
+				assertAutomationWrite();
+				deps.authorize(input.projectId);
+				validateSchedule(input.schedule);
+				const task = await deps.automation.createTask({
+					name: input.name,
+					projectId: input.projectId,
+					prompt: input.prompt,
+					schedule: input.schedule,
+					...(input.enabled === undefined ? {} : { enabled: input.enabled }),
+					...(input.backend === undefined ? {} : { backend: input.backend }),
+					...(input.model === undefined || input.model === null ? {} : { model: input.model }),
+					...(input.thinkingLevel === undefined ? {} : { thinkingLevel: input.thinkingLevel }),
+					...(input.mode === undefined ? {} : { mode: input.mode }),
+					...(input.permissionPreset === undefined ? {} : { permissionPreset: input.permissionPreset }),
+					...(input.budget === undefined ? {} : { budget: input.budget }),
+				});
+				deps.authorize(input.projectId);
+				return buildPiDeckMcpAutomationTaskDetail(task);
+			},
+			{ write: true },
+		);
+		tool(
+			"automation_task_update",
+			"Update a scheduled task in an authorized project. Omitted fields keep their value; prompt and schedule edits restart the scheduling window like the UI. Tasks cannot be moved to another project.",
+			{
+				taskId: id,
+				name: automationName.optional(),
+				prompt: automationPrompt.optional(),
+				schedule: automationSchedule.optional(),
+				enabled: z.boolean().optional(),
+				backend: automationBackend.optional(),
+				model: agentModelRef.optional(),
+				thinkingLevel: automationThinkingLevel.optional(),
+				mode: automationMode.optional(),
+				permissionPreset: automationPermissionPreset.optional(),
+				budget: automationBudget.optional(),
+			},
+			async (input) => {
+				assertAutomationWrite();
+				const current = deps.automation.getTask(input.taskId);
+				if (!current) throw new Error("automation-task-not-found");
+				deps.authorize(current.projectId);
+				const patch: UpdateAutomationTaskInput = {};
+				if (input.name !== undefined) patch.name = input.name;
+				if (input.prompt !== undefined) patch.prompt = input.prompt;
+				if (input.schedule !== undefined) patch.schedule = validateSchedule(input.schedule);
+				if (input.enabled !== undefined) patch.enabled = input.enabled;
+				if (input.backend !== undefined) patch.backend = input.backend;
+				if (input.model !== undefined) patch.model = input.model;
+				if (input.thinkingLevel !== undefined) patch.thinkingLevel = input.thinkingLevel;
+				if (input.mode !== undefined) patch.mode = input.mode;
+				if (input.permissionPreset !== undefined) patch.permissionPreset = input.permissionPreset;
+				if (input.budget !== undefined) patch.budget = input.budget;
+				if (Object.keys(patch).length === 0) throw new Error("automation-patch-empty");
+				const task = await deps.automation.updateTask(input.taskId, patch);
+				deps.authorize(current.projectId);
+				return buildPiDeckMcpAutomationTaskDetail(task);
+			},
+			{ write: true },
+		);
+		tool(
+			"automation_task_delete",
+			"Delete a scheduled task in an authorized project. Run history is kept.",
+			{ taskId: id },
+			async ({ taskId }) => {
+				assertAutomationWrite();
+				const current = deps.automation.getTask(taskId);
+				if (!current) throw new Error("automation-task-not-found");
+				deps.authorize(current.projectId);
+				const deleted = await deps.automation.deleteTask(taskId);
+				if (!deleted) throw new Error("automation-task-not-found");
+				deps.authorize(current.projectId);
+				return { taskId, deleted: true };
+			},
+			{ write: true },
+		);
+		tool(
+			"automation_task_run_now",
+			"Start a task immediately (trigger=manual). This spawns a real agent session and consumes model budget; the returned run carries status and metrics. Use automation_run_abort to stop it.",
+			{ taskId: id },
+			async ({ taskId }) => {
+				assertAutomationWrite();
+				const task = deps.automation.getTask(taskId);
+				if (!task) throw new Error("automation-task-not-found");
+				deps.authorize(task.projectId);
+				const run = await deps.automation.runNow(taskId);
+				deps.authorize(task.projectId);
+				return buildPiDeckMcpAutomationRun(run);
+			},
+			{ write: true },
+		);
+		tool(
+			"automation_run_abort",
+			"Abort a queued or running scheduled-task run. Returns aborted=false when the run already finished.",
+			{ runId: id },
+			async ({ runId }) => {
+				assertAutomationWrite();
+				const run = deps.automation.getRun(runId);
+				if (!run) throw new Error("automation-run-not-found");
+				deps.authorize(run.projectId);
+				const aborted = await deps.automation.abortRun(runId);
+				deps.authorize(run.projectId);
+				return { runId, aborted };
 			},
 			{ write: true },
 		);

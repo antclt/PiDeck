@@ -15,7 +15,13 @@ export function PiDeckMcpPanel({ existingNames, disabled, onAdd }: { existingNam
 	const [copied, setCopied] = useState(false);
 	const busy = disabled || host.busy;
 	const changed =
-		host.state && (host.projectIds.length !== host.state.projectIds.length || host.projectIds.some((id) => !host.state?.projectIds.includes(id)) || host.allProjects !== host.state.allProjects || host.allowControl !== host.state.allowControl || host.allowAgentWrite !== (host.state.allowAgentWrite ?? false));
+		host.state &&
+		(host.projectIds.length !== host.state.projectIds.length ||
+			host.projectIds.some((id) => !host.state?.projectIds.includes(id)) ||
+			host.allProjects !== host.state.allProjects ||
+			host.allowControl !== host.state.allowControl ||
+			host.allowAgentWrite !== (host.state.allowAgentWrite ?? false) ||
+			host.allowAutomationWrite !== (host.state.allowAutomationWrite ?? false));
 	// 「全选」只覆盖当前项目列表；要跟随今后新建的项目得用通配授权，而不是逐个勾。
 	const projectCount = host.state?.projects.length ?? 0;
 	const allSelected = projectCount > 0 && host.projectIds.length === projectCount;
@@ -79,6 +85,15 @@ export function PiDeckMcpPanel({ existingNames, disabled, onAdd }: { existingNam
 					<Label htmlFor={`${prefix}-agent-write`}>{t("config.mcp.pideck.allowAgentWrite")}</Label>
 				</div>
 				<p className="text-micro text-muted-foreground">{t("config.mcp.pideck.allowAgentWriteHint")}</p>
+			</fieldset>
+			{/* 定时任务写能力：默认关；读任务/运行历史按项目白名单，开启后可 CRUD、立即运行与中止 */}
+			<fieldset disabled={busy || !host.state} className="flex flex-col gap-2">
+				<legend className="mb-2 text-control font-medium">{t("config.mcp.pideck.automationWriteSection")}</legend>
+				<div className="flex shrink-0 items-center gap-2">
+					<Checkbox id={`${prefix}-automation-write`} checked={host.allowAutomationWrite} onCheckedChange={(checked) => host.setAllowAutomationWrite(checked === true)} />
+					<Label htmlFor={`${prefix}-automation-write`}>{t("config.mcp.pideck.allowAutomationWrite")}</Label>
+				</div>
+				<p className="text-micro text-muted-foreground">{t("config.mcp.pideck.allowAutomationWriteHint")}</p>
 			</fieldset>
 			<div className="flex flex-wrap gap-2">
 				<Button

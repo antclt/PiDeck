@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 2848e44f6a8ee5a59caa9bfaf837f769dcd38285f4f2740f604f91e730e88f85（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 6ef88268749a55e2ae1de0678655628b62104ec14be2dbd0948099f95ba4b7c1（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -2218,8 +2218,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.mcp.template.configured": "已配置",
 	"config.mcp.template.recommended": "推薦服務",
 	"config.mcp.catalog.pideck": "PiDeck（本地 MCP 服務）",
-	"config.mcp.catalog.pideckHint": "讀取已授權專案和會話、本機設定摘要與內建擴充套件狀態，以及智慧體元資訊；寫能力需單獨開啟。預設關閉，僅本機可訪問。",
-	"config.mcp.pideck.hint": "向 pi 和其他 MCP 客戶端開放專案列表、會話元資訊、標題搜尋、分頁歷史，以及本機設定摘要、內建擴充套件狀態與智慧體元資訊。預設只讀；只有顯式開啟寫開關後才允許中斷回答或管理智慧體。不會執行命令、修改會話內容、讀取任意檔案，也不輸出令牌、代理憑據、磁碟路徑或智慧體的角色設定。",
+	"config.mcp.catalog.pideckHint": "讀取已授權專案和會話、本機設定摘要與內建擴充套件狀態、智慧體元資訊，以及專案內定時任務與執行歷史；寫能力需單獨開啟。預設關閉，僅本機可訪問。",
+	"config.mcp.pideck.hint":
+		"向 pi 和其他 MCP 客戶端開放專案列表、會話元資訊、標題搜尋、分頁歷史，以及本機設定摘要、內建擴充套件狀態、智慧體元資訊與定時任務。預設只讀；只有顯式開啟寫開關後才允許中斷回答、管理智慧體或管理定時任務。不會執行命令、修改會話內容、讀取任意檔案，也不輸出令牌、代理憑據、磁碟路徑或智慧體的角色設定。",
 	"config.mcp.pideck.warning": "任何持有令牌的客戶端都能讀取所選專案的全部可見會話，包括今後新增的會話；內容可能含敏感資訊，也可能被客戶端傳送給模型。請僅授權必要專案，不要分享連線配置。",
 	"config.mcp.pideck.running": "服務執行中",
 	"config.mcp.pideck.stopped": "服務已關閉",
@@ -2236,6 +2237,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.mcp.pideck.allowAgentWrite": "允許建立/編輯/刪除智慧體並繫結會話",
 	"config.mcp.pideck.allowAgentWriteHint": "關閉時客戶端只能讀取智慧體元資訊（名稱/簡介/分類等）。開啟後可建立、修改、刪除智慧體，並把已授權專案的會話繫結到智慧體（等同介面的「使用」）；角色設定（systemPrompt）只寫不讀，任何工具都不會返回它，也不開放模型呼叫。",
 	"config.mcp.pideck.apply": "應用授權並更新令牌",
+	"config.mcp.pideck.automationWriteSection": "定時任務管理",
+	"config.mcp.pideck.allowAutomationWrite": "允許建立/編輯/刪除定時任務、立即執行與中止",
+	"config.mcp.pideck.allowAutomationWriteHint": "關閉時客戶端只能讀取已授權專案的任務與執行歷史。開啟後可建立、修改、刪除任務，立即執行（會真實啟動會話、消耗模型額度）或中止執行；任務提示詞隨任務詳情返回。",
 	"config.mcp.pideck.enable": "授權並啟用本地服務",
 	"config.mcp.pideck.disable": "關閉服務並撤銷令牌",
 	"config.mcp.pideck.connectionHint": "新增到當前 pi 配置後仍為停用，落到條目頁點「啟用」即可。複製配置含訪問令牌；其他客戶端請按其格式配置 HTTP URL 和 Authorization。修改授權或重新啟用會更新令牌，請重新複製並替換舊配置。不會覆蓋已有 pideck 條目。",
