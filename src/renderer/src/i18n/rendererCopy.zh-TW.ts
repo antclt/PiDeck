@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: b1d4460cef8aa82f329cd7f6393abe58b6191e63408ba36c013286da5a3cfc28（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: bd898409857759505671d7b90066f008135e2080fa173b351c8714e8da878a12（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -698,6 +698,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"git.unstageAll": "全部取消暫存",
 	"git.viewModeTree": "切換為樹形展示",
 	"git.viewModeFlat": "切換為平鋪列表",
+	"git.changesViewActions": "變更檢視操作",
 	"git.discard": "丟棄未暫存更改",
 	"git.discardChanges": "回滾更改",
 	"git.discardDirectory": "回滾目錄",
@@ -773,6 +774,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"git.initInBranchBar": "初始化倉庫",
 	"git.push": "推送",
 	"git.pull": "拉取",
+	"git.repoSyncActions": "倉庫同步操作",
 	"git.pushAhead": "推送（領先 {count} 個提交）",
 	"git.pullBehind": "拉取（落後 {count} 個提交）",
 	"git.pushFailed": "推送失敗",

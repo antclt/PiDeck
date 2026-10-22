@@ -1308,15 +1308,18 @@ export function GitPanel(props: GitPanelProps) {
 		};
 	}, [branchOpen, updateBranchDropdownPosition]);
 
-	// 变更区操作：多仓并进仓库行，避免每个仓再叠一层「更改」标题栏。
-	const changeToolbar = (
-		<>
-			{loading && <Loader2 size={14} className="animate-pideck-spin" aria-label={t("common.loading")} />}
+	// 面板操作按功能分两组：一列 6 个混排图标（视图切换 / 收起 / 展开 / 刷新 / 推送 / 拉取）看上去就是「一堆按钮」。
+	// - 视图组（树形切换、全部收起/展开）只作用于下方变更列表，留在「更改」标题栏；
+	// - 同步组（刷新、推送、拉取）作用在仓库/分支上（角标也是相对上游的差距），升到顶部仓库/分支栏与分支同一行。
+	// 按钮统一 size-6（24px）：顶部栏 py-1.5 + 24px = 36px，与 BRANCH_BAR_HEIGHT 的高度预算一致；
+	// 用 size-7 会把顶部栏撑到 40px，fitPaneHeights 少算 4px 后最后一个 pane 底部会被 overflow 裁掉。
+	const changesViewToolbar = (
+		<div role="group" aria-label={t("git.changesViewActions")} className="flex shrink-0 items-center gap-0.5">
 			<Button
 				type="button"
 				variant="ghost"
 				size="icon-sm"
-				className="size-7"
+				className="size-6"
 				aria-pressed={changesViewMode === "tree"}
 				title={changesViewMode === "tree" ? t("git.viewModeFlat") : t("git.viewModeTree")}
 				aria-label={changesViewMode === "tree" ? t("git.viewModeFlat") : t("git.viewModeTree")}
@@ -1325,17 +1328,23 @@ export function GitPanel(props: GitPanelProps) {
 				{/* 图标表示当前视图（与 aria-pressed 同义），title 表示点击后的动作 */}
 				{changesViewMode === "tree" ? <ListTree size={14} /> : <List size={14} />}
 			</Button>
-			<Button type="button" variant="ghost" size="icon-sm" className="size-7" title={t("drawer.collapseAllDirs")} aria-label={t("drawer.collapseAllDirs")} disabled={!canCollapseChangeDirs || allChangeDirsCollapsed} onClick={collapseAllChangeDirs}>
+			<Button type="button" variant="ghost" size="icon-sm" className="size-6" title={t("drawer.collapseAllDirs")} aria-label={t("drawer.collapseAllDirs")} disabled={!canCollapseChangeDirs || allChangeDirsCollapsed} onClick={collapseAllChangeDirs}>
 				<ChevronsDownUp size={14} />
 			</Button>
-			<Button type="button" variant="ghost" size="icon-sm" className="size-7" title={t("drawer.expandAllDirs")} aria-label={t("drawer.expandAllDirs")} disabled={!canCollapseChangeDirs || allChangeDirsExpanded} onClick={expandAllChangeDirs}>
+			<Button type="button" variant="ghost" size="icon-sm" className="size-6" title={t("drawer.expandAllDirs")} aria-label={t("drawer.expandAllDirs")} disabled={!canCollapseChangeDirs || allChangeDirsExpanded} onClick={expandAllChangeDirs}>
 				<ChevronsUpDown size={14} />
 			</Button>
+		</div>
+	);
+
+	const repoSyncToolbar = (
+		<div role="group" aria-label={t("git.repoSyncActions")} className="flex shrink-0 items-center gap-0.5">
+			{loading && <Loader2 size={14} className="animate-pideck-spin" aria-label={t("common.loading")} />}
 			<Button
 				type="button"
 				variant="ghost"
 				size="icon-sm"
-				className="size-7"
+				className="size-6"
 				title={t("common.refresh")}
 				aria-label={t("common.refresh")}
 				onClick={() => {
@@ -1347,7 +1356,7 @@ export function GitPanel(props: GitPanelProps) {
 			</Button>
 			{props.push && (
 				<div className="relative inline-flex items-center">
-					<Button type="button" variant="ghost" size="icon-sm" className="size-7" title={aheadBehind && aheadBehind.ahead > 0 ? t("git.pushAhead", { count: aheadBehind.ahead }) : t("git.push")} aria-label={t("git.push")} disabled={pushing || mutationRunningRef.current} onClick={() => void doPush()}>
+					<Button type="button" variant="ghost" size="icon-sm" className="size-6" title={aheadBehind && aheadBehind.ahead > 0 ? t("git.pushAhead", { count: aheadBehind.ahead }) : t("git.push")} aria-label={t("git.push")} disabled={pushing || mutationRunningRef.current} onClick={() => void doPush()}>
 						{pushing ? <Loader2 size={14} className="animate-pideck-spin" /> : <ArrowUpFromLine size={14} />}
 					</Button>
 					{/* 领先角标：本地上游提交数，提示需要推送。
@@ -1363,7 +1372,7 @@ export function GitPanel(props: GitPanelProps) {
 			)}
 			{props.pull && (
 				<div className="relative inline-flex items-center">
-					<Button type="button" variant="ghost" size="icon-sm" className="size-7" title={aheadBehind && aheadBehind.behind > 0 ? t("git.pullBehind", { count: aheadBehind.behind }) : t("git.pull")} aria-label={t("git.pull")} disabled={pulling || mutationRunningRef.current} onClick={() => void doPull()}>
+					<Button type="button" variant="ghost" size="icon-sm" className="size-6" title={aheadBehind && aheadBehind.behind > 0 ? t("git.pullBehind", { count: aheadBehind.behind }) : t("git.pull")} aria-label={t("git.pull")} disabled={pulling || mutationRunningRef.current} onClick={() => void doPull()}>
 						{pulling ? <Loader2 size={14} className="animate-pideck-spin" /> : <ArrowDownToLine size={14} />}
 					</Button>
 					{/* 落后角标：远程领先本地的提交数，提示需要拉取（颜色同领先角标，见上注释） */}
@@ -1377,7 +1386,7 @@ export function GitPanel(props: GitPanelProps) {
 					)}
 				</div>
 			)}
-		</>
+		</div>
 	);
 
 	return (
@@ -1385,7 +1394,7 @@ export function GitPanel(props: GitPanelProps) {
 			{layout !== "historyOnly" && (
 				<>
 					{/* 当前分支 + 切换下拉：无边框、宽度收窄，把空间留给仓库名和提交区。 */}
-					<div className={`flex shrink-0 items-center gap-1 border-b border-[var(--git-panel-border)] bg-[var(--git-panel-bg)] px-2${layout === "changesOnly" ? " py-0" : " py-1.5"}`} ref={branchBarRef}>
+					<div className={`flex shrink-0 items-center gap-1 border-b border-[var(--git-panel-border)] bg-[var(--git-panel-bg)] px-2${layout === "changesOnly" ? " py-1" : " py-1.5"}`} ref={branchBarRef}>
 						{layout === "changesOnly" && props.repositoryLabel && (
 							<div className="flex min-w-0 flex-1 items-center gap-1.5 text-xs font-semibold text-[var(--git-panel-fg)]" title={props.repositoryLabel}>
 								<FolderGit2 size={13} className="shrink-0 text-muted-foreground" />
@@ -1418,7 +1427,7 @@ export function GitPanel(props: GitPanelProps) {
 							<ChevronDown size={12} className={`shrink-0 text-muted-foreground transition-transform duration-fast${branchOpen ? " rotate-180" : ""}`} />
 						</Button>
 						{notAGitRepo && (
-							<Button type="button" variant="ghost" size="icon-sm" className="size-7 inline-grid size-7 place-items-center rounded-md border border-border text-muted-foreground hover:bg-accent hover:text-accent-foreground" title={t("git.initInBranchBar")} disabled={initializing} onClick={() => void doInitRepo()}>
+							<Button type="button" variant="ghost" size="icon-sm" className="inline-grid size-6 place-items-center rounded-md border border-border text-muted-foreground hover:bg-accent hover:text-accent-foreground" title={t("git.initInBranchBar")} disabled={initializing} onClick={() => void doInitRepo()}>
 								{initializing ? <Loader2 size={14} className="animate-pideck-spin" /> : <Plus size={14} />}
 							</Button>
 						)}
@@ -1489,7 +1498,16 @@ export function GitPanel(props: GitPanelProps) {
 								</div>,
 								document.body,
 							)}
-						{layout === "changesOnly" && <div className="ml-auto flex shrink-0 items-center gap-0.5">{changeToolbar}</div>}
+						{/* 顶部仓库/分支栏只放「作用在仓库上」的操作：同步组所有布局都在这里；多仓没有「更改」标题栏，视图组并进来后用竖线分组。 */}
+						<div className="ml-auto flex shrink-0 items-center gap-0.5">
+							{layout === "changesOnly" && (
+								<>
+									{changesViewToolbar}
+									<span aria-hidden="true" className="mx-0.5 h-4 w-px shrink-0 bg-[var(--git-panel-border)]" />
+								</>
+							)}
+							{repoSyncToolbar}
+						</div>
 					</div>
 					<section
 						id={`git-pane-${paneIdPrefix}-changes`}
@@ -1498,7 +1516,7 @@ export function GitPanel(props: GitPanelProps) {
 					>
 						{layout !== "changesOnly" && (
 							<PaneHeader id={`${paneIdPrefix}-changes`} title={t("git.changes")} open={paneState.open.changes} onToggle={() => togglePane("changes")}>
-								{changeToolbar}
+								{changesViewToolbar}
 							</PaneHeader>
 						)}
 						{(layout === "changesOnly" || paneState.open.changes) && (
