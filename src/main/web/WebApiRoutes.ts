@@ -168,6 +168,27 @@ export class WebApiRoutes {
 			this.sendJson(response, { subagents: await this.deps.listSessionSubagents(decodeURIComponent(subagentsMatch[1])) });
 			return true;
 		}
+		// 会话内全文检索（全会话，不限已加载历史）：与桌面端 Ctrl+Shift+F 同源。
+		// 未装配 / 索引未就绪一律 200 + `{ result: null }`，前端据此回退本地已加载搜索
+		// 并提示「仅搜索已加载消息」；不返回 503，避免前端把「可降级」当成错误弹 toast。
+		const sessionSearchMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/search$/);
+		if (sessionSearchMatch && request.method === "GET") {
+			const query = (url.searchParams.get("q") ?? "").trim();
+			const search = this.deps.searchSessionMessages;
+			if (!search || !query || query.length > 256) {
+				this.sendJson(response, { result: null });
+				return true;
+			}
+			let result = null;
+			try {
+				result = await search(decodeURIComponent(sessionSearchMatch[1]), query);
+			} catch {
+				// 检索失败按「不可用」降级（与索引未就绪同形态），不影响会话本身
+				result = null;
+			}
+			this.sendJson(response, { result });
+			return true;
+		}
 		const todoMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/todo$/);
 		if (todoMatch && request.method === "GET") {
 			if (!this.deps.listSessionTodo) {

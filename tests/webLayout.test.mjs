@@ -334,3 +334,25 @@ test("Web composer placeholder explains new-session mode when nothing is selecte
 	assert.match(webComposer, /aria-label=\{placeholder\}/);
 	assert.match(webChatApp, /hasSession=\{Boolean\(activeSessionId\)\}/);
 });
+
+// 回归（Web 走查 #13）：会话内搜索此前只扫已加载消息，大会话必然漏命中。
+// 契约：后端全会话检索优先；命中落在未加载历史时先补拉历史页再滚动；不可用回退本地。
+test("Web search dialog queries the whole session through the backend", () => {
+	const dialog = readFileSync("src/renderer/src/web/WebSearchDialog.tsx", "utf8");
+	const hook = readFileSync("src/renderer/src/web/useWebSessionSearch.ts", "utf8");
+	const webApi = readFileSync("src/renderer/src/web/webApi.ts", "utf8");
+	assert.match(webApi, /export async function fetchSessionSearch\(sessionId: string, query: string\): Promise<SessionSearchResult \| null>/);
+	assert.match(webApi, /`\/api\/sessions\/\$\{encodeURIComponent\(sessionId\)\}\/search\?\$\{params\.toString\(\)\}`/);
+	assert.match(hook, /export function useWebSessionSearch\(sessionId: string \| undefined, query: string, messages: UIMessage\[\], enabled: boolean\): WebSessionSearchState/);
+	assert.match(hook, /export const WEB_SEARCH_DEBOUNCE_MS = 250;/);
+	// 后端不可用时必须回退本地并标记 unavailable（不能显示成「没有命中」）
+	assert.match(hook, /if \(remoteResult === null\) \{/);
+	assert.match(hook, /unavailable: true/);
+	assert.match(dialog, /useWebSessionSearch\(sessionId, query, messages, open\)/);
+	assert.match(dialog, /unavailable \? t\("web\.searchScopeHint"\) : t\("web\.searchWholeSession"\)/);
+	// 命中落在未加载历史：先补拉历史页再滚动，否则点击静默无反应
+	assert.match(webChatApp, /const jumpToSearchHit = async \(messageId: string\) => \{/);
+	assert.match(webChatApp, /await loadOlderMessages\(\);/);
+	assert.match(webChatApp, /const MAX_SEARCH_JUMP_PAGES = 5;/);
+	assert.match(webChatApp, /<WebSearchDialog open=\{searchOpen\} onOpenChange=\{setSearchOpen\} sessionId=\{activeSessionId\}/);
+});

@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 778d8a86224dfd25f129026e5ed3547478b7fbc60716d5c55cba1e0cc618a188（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 26e4ae74c85147ddeeaf6978060cd3f41522fa2994ce5533f4d666c0c06d7205（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -6372,6 +6372,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"web.searchPlaceholder": "搜尋已載入的訊息…",
 	"web.searchEmpty": "沒有匹配的訊息",
 	"web.searchScopeHint": "僅搜尋已載入的訊息，載入更早訊息可擴大範圍",
+	"web.searchWholeSession": "搜尋整個會話，包含未載入的歷史",
+	"web.searching": "正在檢索…",
+	"web.searchHitCount": "共 {count} 條命中",
 	"web.shareReply": "分享回覆",
 	"web.shareCopied": "已複製到剪貼簿",
 	"web.subagentsStripTitle": "子代理",

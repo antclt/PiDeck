@@ -271,6 +271,7 @@ import type {
 	SessionRecord,
 	SessionCommandError,
 	SessionCommandResult,
+	SessionSearchResult,
 	SessionRuntimeEvent,
 	SessionRuntimeTarget,
 	SessionUiResponseInput,
@@ -563,6 +564,30 @@ function projectPathsForContentSearch(): string[] {
 		.list()
 		.filter((project) => project.environment !== "wsl")
 		.map((project) => project.path);
+}
+/**
+ * 会话内检索的一个会话实现（只扫给定会话文件、命中按时间线返回）：桌面 Ctrl+Shift+F
+ * （sessionIpc 的 sessionMessageSearch）与 Web 搜索弹层（WebServiceManager 的
+ * searchSessionMessages）共用同一份降级口径——未就绪先 warmup 再返回 null（渲染层显示
+ * 「索引准备中」，绝不让输入框等 boot），refresh 失败但索引仍可用时继续搜一次
+ * （transient 失败不该让本次检索静默无内容）。返回 null 恒表示「检索源不可用」。
+ */
+function sessionMessageSearchInFile(sessionPath: string, query: string): Promise<SessionSearchResult | null> {
+	// 先取本地快照：下面每处 await 之后 sidecar 都可能已被退出清理置空，逐次判空最稳。
+	const service = sessionIndexService;
+	if (!service) return Promise.resolve(null);
+	return (async () => {
+		const roots = await sessionScanner.resolveContentSearchRoots(projectPathsForContentSearch());
+		if (roots.length === 0) return null;
+		if (!service.isReady(roots)) {
+			service.warmup(roots);
+			return null;
+		}
+		const refreshed = await service.refresh(roots);
+		if (!refreshed.ok && !service.isReady(roots)) return null;
+		const result = await service.searchInSession(roots, sessionPath, query);
+		return result.ok ? result.value : null;
+	})();
 }
 let sessionScanner: SessionScanner;
 let sessionCatalog: SessionCatalog;
@@ -3632,20 +3657,9 @@ function registerIpc() {
 			return result.ok ? result.value : null;
 		},
 		// 会话内查找（Ctrl+Shift+F / 会话头部放大镜）：只扫一个会话文件、命中按时间线
-		// 返回。就绪判定与降级策略与跨会话搜索一致——未就绪先 warmup 再回 null，渲染层
-		// 显示「索引准备中」，绝不让输入框等 boot。
+		// 返回。降级口径收口在 sessionMessageSearchInFile（与 Web 搜索弹层共用）。
 		sessionMessageSearch: async (sessionPath, query) => {
-			if (!sessionIndexService) return null;
-			const roots = await sessionScanner.resolveContentSearchRoots(projectPathsForContentSearch());
-			if (roots.length === 0) return null;
-			if (!sessionIndexService.isReady(roots)) {
-				sessionIndexService.warmup(roots);
-				return null;
-			}
-			const refreshed = await sessionIndexService.refresh(roots);
-			if (!refreshed.ok && !sessionIndexService.isReady(roots)) return null;
-			const result = await sessionIndexService.searchInSession(roots, sessionPath, query);
-			return result.ok ? result.value : null;
+			return sessionMessageSearchInFile(sessionPath, query);
 		},
 		// C1：DSH 后端专用 IPC 依赖按后端分组（注册表化铺路；未来新增后端各自提供一份）
 		dshBackend: {
@@ -5417,6 +5431,32 @@ app
 				}
 				if (!entry?.filePath) return { messages: [], total: 0, nextBefore: null };
 				return agentManager.readSessionDisplayTurnPage(entry.filePath, sessionId, before, pageSize, undefined, { projectId: entry.projectId });
+			},
+			// 会话内全文检索（Web 搜索弹层）：与桌面 IPC sessions:search-in-session 同源口径——
+			// 入参是 SessionRecord.id，后端身份一律从 catalog 解析（Web 端传不了路径）；pi 走
+			// session-index sidecar（索引未就绪 → null，前端回退本地已加载搜索），DSH 走 host
+			// 历史投影后本地词元匹配。命中 id 是 JSONL 行 id，与 Web 消息 id 同源可直接锚定。
+			searchSessionMessages: async (sessionId, query) => {
+				const entry = sessionCatalog.get(sessionId);
+				if (!entry) return null;
+				if (entry.backend === "dsh") {
+					const dshSessionId = entry.dshSessionId;
+					const searcher = dshSessionId ? dshAgentManager : null;
+					if (!dshSessionId || !searcher) return null;
+					try {
+						const found = await searcher.searchSessionMessages(dshSessionId, query);
+						if (found.hitCount === 0) return { sessions: [], totalHitSessions: 0, truncated: false };
+						return {
+							sessions: [{ filePath: `dsh:${dshSessionId}`, updatedAtMs: entry.updatedAt, matches: found.matches, hitCount: found.hitCount }],
+							totalHitSessions: 1,
+							truncated: found.hitCount > found.matches.length,
+						};
+					} catch {
+						return null;
+					}
+				}
+				if (!entry.filePath) return null;
+				return sessionMessageSearchInFile(entry.filePath, query);
 			},
 			sendSessionPrompt: async (input) => {
 				const result = await sessionRuntimeCoordinator.send(input);

@@ -24,6 +24,7 @@ import type {
 	SessionRuntimeModelSelection,
 	SessionRuntimeReplacement,
 	SessionRuntimeTarget,
+	SessionSearchResult,
 	SessionSummary,
 	SessionTargetedValue,
 	SessionTodoSnapshot,
@@ -105,6 +106,13 @@ export type WebServiceDependencies = {
 		truncated: boolean;
 	}>;
 	readSessionMessagePage: (sessionId: string, before?: number, pageSize?: number) => Promise<SessionMessagePage>;
+	/**
+	 * 会话内全文检索（跨全会话，不限已加载历史）：与桌面端 Ctrl+Shift+F 同源，
+	 * 入参是 SessionRecord.id，主进程按 catalog 分派 pi（session-index sidecar）/
+	 * DSH（host 历史投影）。未装配或索引未就绪返回 null——渲染层据此回退本地已加载
+	 * 搜索，绝不把「读不到」显示成「没有匹配」。
+	 */
+	searchSessionMessages?: (sessionId: string, query: string) => Promise<SessionSearchResult | null>;
 	sendSessionPrompt: (input: SendSessionPromptInput) => Promise<SendSessionPromptResult>;
 	listSessionRuntimes: () => SessionRuntimeInfo[];
 	listSessionRuntimeModels: (target: SessionRuntimeTarget) => Promise<SessionCommandResult<SessionTargetedValue<AvailableModel[]>>>;

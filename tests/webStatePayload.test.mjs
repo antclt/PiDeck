@@ -108,3 +108,66 @@ test("gzip is skipped for small payloads and for q=0 clients", async () => {
 		{ sessionCount: 400 },
 	);
 });
+
+// ── 会话内全文检索端点（Web 走查 #13）────────────────────────────────────────
+// 契约：恒 200；未装配 / 空 query / 超长 query / 后端抛错 一律 `{ result: null }`
+// （前端据此回退本地已加载搜索，不能把「读不到」渲染成「没有命中」）。
+async function withSearchServer(run, searchSessionMessages) {
+	const { WebServiceManager } = loadTsCommonJs("src/main/web/WebServiceManager.ts", { globals: { fetch: globalThis.fetch } });
+	const manager = new WebServiceManager({
+		subscribePiEvents: () => () => undefined,
+		listProjects: () => [],
+		listCatalogSessions: async () => [],
+		listSessionRuntimes: () => [],
+		listPendingUiRequests: () => [],
+		searchSessionMessages,
+	});
+	await manager.start("127.0.0.1", 0, false);
+	const baseUrl = `http://127.0.0.1:${manager.current.port}`;
+	try {
+		await run({ baseUrl });
+	} finally {
+		await manager.stop();
+	}
+}
+
+test("session search endpoint returns backend hits for the whole session", async () => {
+	const calls = [];
+	await withSearchServer(
+		async ({ baseUrl }) => {
+			const res = await fetch(`${baseUrl}/api/sessions/session-1/search?q=needle`);
+			assert.equal(res.status, 200);
+			const body = await res.json();
+			assert.equal(body.result.sessions[0].matches[0].messageId, "line-42");
+			assert.equal(body.result.sessions[0].hitCount, 7);
+			assert.equal(body.result.totalHitSessions, 1);
+		},
+		async (sessionId, query) => {
+			calls.push([sessionId, query]);
+			return { sessions: [{ filePath: "C:/sessions/session-1.jsonl", updatedAtMs: 1, hitCount: 7, matches: [{ messageId: "line-42", role: "assistant", timestampMs: 2, snippet: "…needle…" }] }], totalHitSessions: 1, truncated: true };
+		},
+	);
+	assert.deepEqual(calls, [["session-1", "needle"]]);
+});
+
+test("session search degrades to null instead of failing the request", async () => {
+	let calls = 0;
+	await withSearchServer(
+		async ({ baseUrl }) => {
+			// 空 query / 超长 query 不打后端（避免无意义全量扫描）
+			const empty = await (await fetch(`${baseUrl}/api/sessions/session-1/search?q=%20%20`)).json();
+			assert.equal(empty.result, null);
+			const tooLong = await (await fetch(`${baseUrl}/api/sessions/session-1/search?q=${"x".repeat(300)}`)).json();
+			assert.equal(tooLong.result, null);
+			assert.equal(calls, 0);
+			// 后端抛错仍然是 200 + null（可降级，不是错误）
+			const res = await fetch(`${baseUrl}/api/sessions/session-1/search?q=boom`);
+			assert.equal(res.status, 200);
+			assert.equal((await res.json()).result, null);
+		},
+		async () => {
+			calls += 1;
+			throw new Error("index exploded");
+		},
+	);
+});
