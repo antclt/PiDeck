@@ -133,3 +133,55 @@ test("update only sets the fork marker when the patch explicitly requests it", a
 		await rm(dir, { recursive: true, force: true });
 	}
 });
+
+test("ensureRuntimeTarget inherits the source model into an already registered fork entry", async () => {
+	const { SessionCatalog } = loadCatalog();
+	const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-forked-inherit-"));
+	try {
+		const catalog = new SessionCatalog(join(dir, "sessions.json"));
+		await catalog.load();
+		// 后台扫描抢先登记了新 fork 文件：子会话 JSONL 没有新的 model_change，条目里没有 model。
+		const scanned = await catalog.ensureRuntimeTarget({
+			projectId: "project-1",
+			title: "Forked topic",
+			source: "pi",
+			environment: "native",
+			filePath: "C:/sessions/fork.jsonl",
+		});
+		assert.equal(scanned.model, undefined);
+		assert.equal(scanned.thinkingLevel, undefined);
+		// 命令层随后继承源会话偏好（issue #370）：缺模型时底栏显示「-」、激活不重放模型，
+		// pi fork 的静默回落就成了用户看不见的另一个模型。
+		const inherited = await catalog.ensureRuntimeTarget({
+			projectId: "project-1",
+			title: "Forked topic (fork)",
+			source: "pi",
+			environment: "native",
+			filePath: "C:/sessions/fork.jsonl",
+			forked: true,
+			model: { provider: "deepseek", modelId: "deepseek-v4.1-flash", modelName: "DeepSeek V4.1 Flash" },
+			thinkingLevel: "high",
+		});
+		// 沙箱对象跨 realm：逐字段比较，避免原型不同导致 deepStrictEqual 假红。
+		assert.equal(inherited.model.provider, "deepseek");
+		assert.equal(inherited.model.modelId, "deepseek-v4.1-flash");
+		assert.equal(inherited.model.modelName, "DeepSeek V4.1 Flash");
+		assert.equal(inherited.thinkingLevel, "high");
+		// 只补空值：子会话已有的显式选择不被命令层快照覆盖。
+		const kept = await catalog.ensureRuntimeTarget({
+			projectId: "project-1",
+			title: "Forked topic (fork)",
+			source: "pi",
+			environment: "native",
+			filePath: "C:/sessions/fork.jsonl",
+			forked: true,
+			model: { provider: "other", modelId: "other-model", modelName: "Other" },
+			thinkingLevel: "low",
+		});
+		assert.equal(kept.model.provider, "deepseek");
+		assert.equal(kept.model.modelId, "deepseek-v4.1-flash");
+		assert.equal(kept.thinkingLevel, "high");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});

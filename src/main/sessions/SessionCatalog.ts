@@ -748,6 +748,12 @@ export class SessionCatalog {
 				}
 				// fork 标记只增补不清空：同一文件可能先以普通扫描注册、后经 fork 注册逻辑走到这里。
 				if (input.forked) entry.forked = true;
+				// 模型/思考档位继承同样只补空值：fork 产物常被后台扫描抢先登记（扫描只能从 JSONL 回读，
+				// 子会话没有新的 model_change 就是空的），命令层带来的源会话选择必须补进去，否则
+				// 子会话没有 model → 底栏显示「-」、激活不重放模型，pi fork 的静默回落就成了用户
+				// 看不见的另一个模型（issue #370）。已有显式选择（用户选择器/扫描回读）不覆盖。
+				if (!entry.model && input.model) entry.model = cloneModelPreference(input.model);
+				if (!entry.thinkingLevel && input.thinkingLevel) entry.thinkingLevel = input.thinkingLevel;
 				entry.status = "active";
 				entry.updatedAt = now;
 			}
