@@ -1,4 +1,3 @@
-import { shell } from "electron";
 import { existsSync } from "node:fs";
 import { mkdir, open, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
@@ -8,6 +7,7 @@ import { createProjectFileReadBoundary, resolveProjectFileReadPath, resolveProje
 const TEMPLATE_META_MAX_BYTES = 64 * 1024;
 import { homedir } from "node:os";
 import { trashPath } from "../fs/trash";
+import { openSystemPath } from "../fs/openPath";
 import type { AppSettings, CreatePiPromptTemplateInput, PiPromptTemplateListResult, PiPromptTemplateSummary } from "../../shared/types";
 import { parseWslUncPath, toWindowsHostPath, type WslEnvironment } from "../wsl/WslPaths";
 import { projectResourceEnabled } from "../config/piResourceRules";
@@ -428,7 +428,7 @@ export class PromptManager {
 
 	async openFolder(): Promise<void> {
 		await mkdir(this.promptsDir, { recursive: true });
-		await shell.openPath(this.promptsDir);
+		await openSystemPath(this.promptsDir);
 	}
 
 	/**

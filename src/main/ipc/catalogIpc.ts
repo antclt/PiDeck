@@ -1,5 +1,6 @@
-import { ipcMain, shell } from "electron";
+import { ipcMain } from "electron";
 import { ipcChannels } from "../../shared/ipc";
+import { openSystemPath } from "../fs/openPath";
 import { CATALOG_UPDATE_ALLOWED_BRANCHES, CATALOG_UPDATE_DEFAULT_BRANCH, type PiAiCatalogUpdater } from "../pi/PiAiCatalogUpdater";
 
 /**
@@ -20,7 +21,7 @@ export function registerCatalogIpc(updater: PiAiCatalogUpdater): void {
 	ipcMain.handle(ipcChannels.catalogOpenFile, async () => {
 		const catalogPath = updater.resolveEffectiveCatalogPath();
 		if (!catalogPath) throw new Error("catalog artifact not found");
-		const error = await shell.openPath(catalogPath);
+		const error = await openSystemPath(catalogPath);
 		// Electron 通过返回字符串报告打开失败；显式抛出后前端才能提示路径不存在或系统无法打开。
 		if (error) throw new Error(error);
 	});

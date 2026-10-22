@@ -6,6 +6,7 @@ import { ipcChannels } from "../../shared/ipc";
 import type { FileManagerInfo, ProjectFileAccessScope } from "../../shared/types/project";
 import type { FileContentSearchResult, FileSearchResult } from "../../shared/types";
 import { detectFileManager, openFileManagerAt } from "../files/FileManager";
+import { openSystemPath } from "../fs/openPath";
 import type { FileIndexService } from "../files/FileIndexService";
 import { createProjectFileReadBoundary, resolveProjectFileReadPath, type ProjectFileReadBoundary } from "../files/projectFileAccess";
 import type { FileSystemService } from "../fs/FileSystemService";
@@ -165,7 +166,9 @@ export function registerFilesIpc({ fileSystemService, projectStore, settingsStor
 	ipcMain.handle(ipcChannels.filesOpen, async (_event, path: unknown, scope?: unknown) => {
 		const boundary = await resolveProjectReadBoundary(scope);
 		const readablePath = await resolveReadablePath(path, boundary);
-		const error = await shell.openPath(readablePath);
+		// 走受保护的统一入口：Linux 上 Electron 的 shell.openPath 永不 settle（issue #396），
+		// 直接 await 会让本 handler 不回包，渲染层收到 "reply was never sent"。
+		const error = await openSystemPath(readablePath);
 		// Electron 通过返回字符串报告打开失败；显式抛出后前端才能提示路径不存在或系统无法打开。
 		if (error) throw new Error(error);
 	});
@@ -199,7 +202,7 @@ export function registerFilesIpc({ fileSystemService, projectStore, settingsStor
 		// Linux 保留检测到的文件管理器直启（xdg-open 可能被 MIME 误路由到浏览器）。
 		const target = typeof path === "string" && path.trim() ? toWindowsPath(path) : homedir();
 		if (process.platform !== "linux") {
-			const error = await shell.openPath(target);
+			const error = await openSystemPath(target);
 			if (error) throw new Error(error);
 			return;
 		}

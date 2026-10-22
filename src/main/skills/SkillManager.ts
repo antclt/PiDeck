@@ -1,10 +1,11 @@
-import { app, shell } from "electron";
+import { app } from "electron";
 import { existsSync, type Dirent } from "node:fs";
 import { cp, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { trashPath } from "../fs/trash";
+import { openSystemPath } from "../fs/openPath";
 import type { AppSettings, CreatePiSkillInput, PiSkillListResult, PiSkillLocation, PiSkillSummary } from "../../shared/types";
 import type { WslEnvironment } from "../wsl/WslPaths";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
@@ -313,11 +314,11 @@ export class SkillManager {
 	async openFolder(skillPath?: string): Promise<void> {
 		if (!skillPath) {
 			await mkdir(this.locations[0].path, { recursive: true });
-			await shell.openPath(this.locations[0].path);
+			await openSystemPath(this.locations[0].path);
 			return;
 		}
 		const skill = await this.findByPath(skillPath);
-		await shell.openPath(skill.dir);
+		await openSystemPath(skill.dir);
 	}
 
 	/**

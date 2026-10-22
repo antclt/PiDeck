@@ -8,12 +8,13 @@
  * 默认关闭。开启后写入 userData/diagnostics/，quit 时必须 stop()。
  */
 
-import { app, shell } from "electron";
+import { app } from "electron";
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { startMemoryProfile, type MemoryProfileHandle } from "../memory/MemoryMonitor";
 import type { DiagnosticsEventTiming, DiagnosticsSnapshot } from "../../shared/types/diagnostics";
 import type { AppLogger } from "../logging/AppLogger";
+import { openSystemPath } from "../fs/openPath";
 
 const MAX_RECENT_TIMINGS = 80;
 const LAG_SAMPLE_MS = 1000;
@@ -139,7 +140,7 @@ export class DiagnosticsMonitor {
 	async openFolder(): Promise<void> {
 		const dir = join(app.getPath("userData"), "diagnostics");
 		await mkdir(dir, { recursive: true });
-		await shell.openPath(dir);
+		await openSystemPath(dir);
 	}
 
 	private startLagSampler(): void {

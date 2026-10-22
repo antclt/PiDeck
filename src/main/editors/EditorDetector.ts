@@ -2,7 +2,7 @@ import { access, readdir } from "node:fs/promises";
 import { basename, delimiter, dirname, extname, join } from "node:path";
 import { spawn } from "node:child_process";
 import { clearTimeout, setTimeout } from "node:timers";
-import { shell } from "electron";
+import { openSystemPath } from "../fs/openPath";
 import { SUPPORTED_EXTERNAL_EDITORS, createDefaultExternalEditorSettings, type AppSettings, type ExternalEditor, type ExternalEditorId, type ExternalEditorSettings } from "../../shared/types";
 
 type EditorCandidate = {
@@ -472,7 +472,8 @@ export async function openProjectInEditor(editor: ExternalEditor, projectPath: s
 				error,
 			});
 			// 部分 GUI 应用不适合 spawn 时,回退到系统打开路径,避免用户点击后无反馈。
-			const fallbackError = await shell.openPath(projectPath);
+			// 走受保护入口：Linux 上 shell.openPath 永不 settle，会让这个 Promise 永不结算（issue #396）。
+			const fallbackError = await openSystemPath(projectPath);
 			if (fallbackError) reject(error);
 			else resolve();
 		});

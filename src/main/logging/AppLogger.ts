@@ -1,8 +1,9 @@
-import { app, shell } from "electron";
+import { app } from "electron";
 import { appendFile, mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AppLogEntry, AppLogLevel, AppLogPage, AppLogQuery } from "../../shared/types";
 import { readTextBounded } from "../fs/boundedTextRead";
+import { openSystemPath } from "../fs/openPath";
 import { DEFAULT_PAGE_SIZE, LOG_FILE_PATTERN, MAX_FILE_LINES, filterLogFiles, queryLogLines, toAppLogPage } from "./logQuery";
 import { LogLineCache } from "./logLineCache";
 
@@ -156,7 +157,7 @@ export class AppLogger {
 
 	async openFolder() {
 		await mkdir(this.dir, { recursive: true });
-		await shell.openPath(this.dir);
+		await openSystemPath(this.dir);
 	}
 
 	private async writeEntry(entry: AppLogEntry) {

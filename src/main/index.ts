@@ -290,6 +290,7 @@ import { runUserDataNameMigration, recordUserDataNameMigrationNotice, type UserD
 import { shouldAutoRegisterForeignCwd } from "./projects/projectPathPolicy";
 import { defaultPathCheck } from "./projects/projectPresence";
 import { FileSystemService } from "./fs/FileSystemService";
+import { openSystemPath } from "./fs/openPath";
 import { AgentManager } from "./pi/AgentManager";
 import { PiProcess } from "./pi/PiProcess";
 import { getModelTraceServer, stopModelTraceServer } from "./pi/modelTrace/ModelTraceServer";
@@ -1804,10 +1805,10 @@ function refreshTrayContextMenu(): void {
 					focusMainWindow();
 				},
 				openDataDir: () => {
-					void shell.openPath(app.getPath("userData"));
+					void openSystemPath(app.getPath("userData"));
 				},
 				openLogsDir: () => {
-					void shell.openPath(join(app.getPath("userData"), "logs"));
+					void openSystemPath(join(app.getPath("userData"), "logs"));
 				},
 				restart: restartApp,
 				quit: () => {
@@ -3105,7 +3106,7 @@ function registerIpc() {
 				installer.unref();
 				return;
 			}
-			void shell.openPath(filePath);
+			void openSystemPath(filePath);
 		},
 		quitApp: () => {
 			isQuitting = true;
@@ -3980,7 +3981,7 @@ function registerIpc() {
 			// macOS 打开 dmg 让用户拖入 Applications；其他平台只定位文件，绝不自动运行未知安装包。
 			openManualInstaller: async (filePath: string) => {
 				if (process.platform === "darwin") {
-					const error = await shell.openPath(filePath);
+					const error = await openSystemPath(filePath);
 					if (error) throw new Error(error);
 					return;
 				}

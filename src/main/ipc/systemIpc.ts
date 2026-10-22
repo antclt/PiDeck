@@ -40,6 +40,7 @@ import type { RpcLogger } from "../logging/RpcLogger";
 import type { SessionRuntimeCoordinator } from "../sessions/SessionRuntimeCoordinator";
 import { resolveConfigProxyTarget } from "../sessions/sessionProxyPolicy";
 import { setConfiguredGitPath } from "../git/gitExecutable";
+import { openSystemPath } from "../fs/openPath";
 import { applyTrayLogoStyle, applyWindowLogoStyle } from "../appWindowLogo";
 import { syncTaskbarShortcutIcon } from "../appTaskbarIdentity";
 import { detectDshRunnerNode } from "../dsh/dshRunnerNode";
@@ -1542,7 +1543,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	// 会自动选择系统文件管理器（Windows 资源管理器 / macOS Finder / Linux xdg-open），
 	// 不手拼平台命令，避免 Windows 路径空格/分隔符问题。
 	ipcMain.handle(ipcChannels.appOpenDataDir, async (): Promise<{ ok: boolean; error?: string }> => {
-		const error = await shell.openPath(app.getPath("userData"));
+		const error = await openSystemPath(app.getPath("userData"));
 		return error ? { ok: false, error } : { ok: true };
 	});
 

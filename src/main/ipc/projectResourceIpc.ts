@@ -1,5 +1,6 @@
-import { ipcMain, shell } from "electron";
+import { ipcMain } from "electron";
 import { ipcChannels } from "../../shared/ipc";
+import { openSystemPath } from "../fs/openPath";
 import type { CreateProjectSkillInput, ProjectInheritedResourceToggleInput, ProjectResourceDirectoryKind } from "../../shared/types";
 import type { AppLogger } from "../logging/AppLogger";
 import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
@@ -50,7 +51,7 @@ export function registerProjectResourceIpc({ appLogger, projectResourceManager }
 			throw new Error("Invalid project resource directory input.");
 		}
 		const directory = await projectResourceManager.ensureResourceDirectory(projectId.trim(), kind);
-		const error = await shell.openPath(directory);
+		const error = await openSystemPath(directory);
 		if (error) throw new Error(error);
 	});
 	ipcMain.handle(ipcChannels.projectResourcesCreateSkill, async (_event, input: unknown) => {
