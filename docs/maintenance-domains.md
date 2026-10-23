@@ -176,6 +176,7 @@
 - **一条契约**：需要折叠成 chip 的东西，**落盘文本必须自带展示身份**（`<quoted_context label message_id>` / `<referenced_session name>` / `<skill name>` / `<prompt_template name>`）。展示侧只认块（`src/shared/expandedRefBlocks.ts`）与裸 token（`composer/chips.ts`）两种形态，不做「按正文反查名称」；旧消息没有块就显示全文，这是有意的兼容策略。
 - **保护区规则（2026-10 实测 bug 的结论）**：发送侧有三个展开器（引用 → 会话引用 → 提示词模板）。后一个不得改写前一个已生成的块，否则「引用里提到 `/commit`」会被替换成整份提交模板——落盘的引用原文被篡改，模型读到的历史与真实不符。判据集中在 `src/renderer/src/utils/protectedText.ts`（`computeProtectedRanges` / `replaceOutsideProtected`）。
 - **模板清单两个来源**：来源 A = `prompts:list`（`~/.pi/agent/prompts` + `<项目>/.pi/prompts`，带编辑元数据、离线可用）；来源 B = pi `get_commands` 的 `source: "prompt"` 条目 + 按 `sourceInfo.path` 读回的正文（覆盖 npm 包声明的 `pi.prompts`，例如 pi-subagents 的 `parallel-review`）。合并规则在 `src/renderer/src/utils/templateCatalog.ts`：**同名正文取 B**（B 是 pi 去重后的最终视图），A 的展示元数据保留。只缺 B 时 `/parallel-review` 会被原样发给 pi、由 pi 展开成无名字的正文，表现为「运行中有 chip、暂停/重载后整段展开」。
+- **参数既进正文、也要在块外留一份**：模板用 `$@`/`$1` 时，参数要按 pi 原位替换进正文（模型看到的形状与 pi 一致）；但整段正文会被折成 chip，所以**块外必须再追加一份用户原文**，否则用户发完看不到自己写的话（2026-10-21 实测）。没有占位符的模板本来就追加在块外（pi 在那种情况下会直接丢掉用户输入，PiDeck 不丢）。占位符目前只集中在包带模板（pi-subagents 6 个全是 `$@`），PiDeck 内置模板不用占位符。
 - **frontmatter 剥离照抄 pi**（`utils/frontmatter.ts`，对齐 `dist/utils/frontmatter.js`）：先 `stripBom` + 换行归一（`
 ` 与裸 `
 ` 都变 `

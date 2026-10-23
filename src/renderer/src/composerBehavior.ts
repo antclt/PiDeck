@@ -264,11 +264,12 @@ export function expandPromptTemplates(message: string, templates: PromptTemplate
 		const rest = message.slice(command.end, segmentEnd).trim();
 		const args = parseCommandArgs(rest);
 		const substituted = substituteArgs(content, args);
-		// 模板用了占位符 → 参数已经进了正文，不能再把原文追加一遍（否则模型看到两份）；
-		// 没用占位符 → 保留 PiDeck 的既有兜底：用户输入追加在块后，绝不丢字。
-		const consumed = substituted !== content;
+		// 参数替换照 pi：占位符位置填进参数（模型看到原位插入）。
+		// 但**块外仍留一份可见副本**：气泡会把整段模板正文折成 chip，只放在正文里的话，
+		// 用户自己写的话会跟着一起消失（2026-10-22 用户实测：发完看不到自己的指令）。
+		// 代价是模型侧多一次重复（用户参数通常很短），换来“我发的话一直看得见”。
 		expanded += formatPromptTemplateBlock(command.name, substituted);
-		if (!consumed && rest) expanded += "\n\n" + rest;
+		if (rest) expanded += "\n\n" + rest;
 	}
 	expanded += message.slice(cursor);
 	return {
