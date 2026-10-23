@@ -58,7 +58,7 @@ export function parseWallpaperEngineProject(id: string, raw: string): WallpaperE
 	if (!WALLPAPER_ENGINE_ID_RE.test(id)) return null;
 	let data: unknown;
 	try {
-		data = JSON.parse(raw.replace(/^\uFEFF/, ""));
+		data = JSON.parse(stripWallpaperEngineJsonNoise(raw));
 	} catch {
 		return null;
 	}
@@ -100,4 +100,12 @@ export function parseByteRange(header: string | null, size: number): { start: nu
 	const end = e === "" ? size - 1 : Number(e);
 	if (!Number.isFinite(start) || start >= size || !Number.isFinite(end) || end < start) return null;
 	return { start, end: Math.min(end, size - 1) };
+}
+
+/**
+ * 部分工坊条目的 project.json 头部带 UTF-8 BOM、尾部带 NUL 填充（编辑器/打包工具留下的），
+ * 直接 JSON.parse 会抛错导致条目被静默丢弃。只剥头部 BOM 与尾部 NUL/空白，不碰中间内容。
+ */
+export function stripWallpaperEngineJsonNoise(raw: string): string {
+	return raw.replace(/^\uFEFF/, "").replace(/[\0\s]+$/, "");
 }
