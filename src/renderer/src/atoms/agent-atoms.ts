@@ -1,18 +1,20 @@
 import { atom } from "jotai";
 import type { AgentMarketSettings, AgentProfile, AgentProfileSnapshot } from "../../../shared/types";
+import { sortAgentsForMarket } from "../components/agents/agentMarketFilters";
 import { closeWorkspacePageAtom, openWorkspacePageAtom, workspacePageTabStateAtom } from "./workspace-page-atoms";
 
 /** 主进程智能体快照（agents + settings + revision）。null = 尚未取到初始快照。 */
 export const agentProfileSnapshotAtom = atom<AgentProfileSnapshot | null>(null);
 
-/** 按展示顺序排序的智能体列表：内置在前（翻译默认第一个），其余按创建时间倒序。 */
+/**
+ * 按展示顺序排序的智能体列表：用户拖拽出的 agentOrder 优先，未自定义时内置在前
+ * （翻译默认第一个）、其余按创建时间倒序。排序规则只保留一份（agentMarketFilters），
+ * 避免市场页与 atom 各自维护一套导致卡片顺序与默认值不一致。
+ */
 export const agentProfilesAtom = atom<AgentProfile[]>((get) => {
 	const snapshot = get(agentProfileSnapshotAtom);
 	if (!snapshot) return [];
-	return [...snapshot.agents].sort((left, right) => {
-		if (Boolean(left.builtin) !== Boolean(right.builtin)) return left.builtin ? -1 : 1;
-		return right.createdAt - left.createdAt || left.name.localeCompare(right.name);
-	});
+	return sortAgentsForMarket(snapshot.agents, snapshot.agentOrder);
 });
 
 /** 市场全局设置（划词工具开关 + 默认智能体）；快照未到时的保守默认（与主进程缺省一致）。 */

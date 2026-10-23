@@ -72,7 +72,7 @@ export class AgentProfileStore {
 	}
 
 	getSnapshot(): AgentProfileSnapshot {
-		return cloneSerializable({ revision: this.state.revision, agents: this.state.agents, settings: this.state.settings });
+		return cloneSerializable({ revision: this.state.revision, agents: this.state.agents, settings: this.state.settings, agentOrder: this.state.agentOrder });
 	}
 
 	get(id: string): AgentProfile | undefined {
@@ -99,6 +99,8 @@ export class AgentProfileStore {
 		};
 		await this.mutate(() => {
 			this.state.agents.push(agent);
+			// 已有自定义顺序时把新智能体排到末尾：不插队，用户排好的位置不会因为新建而整体错位。
+			if (this.state.agentOrder.length > 0) this.state.agentOrder.push(agent.id);
 		});
 		return cloneSerializable(agent);
 	}
@@ -124,6 +126,8 @@ export class AgentProfileStore {
 		if (this.state.agents[index].builtin === true) return false;
 		await this.mutate(() => {
 			this.state.agents = this.state.agents.filter((candidate) => candidate.id !== id);
+			// 自定义展示顺序同样要剔除被删智能体，否则快照里会带着悬空 id，渲染层得每次自己过滤。
+			this.state.agentOrder = this.state.agentOrder.filter((candidateId) => candidateId !== id);
 			// 删除后默认划词智能体与会话绑定都可能悬空：同一次写入里清掉，避免渲染层拿到死链、
 			// 已绑定的会话每次发送都解析不到角色设定而静默退化。
 			const bindings = pruneAgentBindings(this.state.settings.sessionAgentBindings, id);
@@ -173,8 +177,33 @@ export class AgentProfileStore {
 		};
 		await this.mutate(() => {
 			this.state.agents.push(copy);
+			if (this.state.agentOrder.length > 0) this.state.agentOrder.push(copy.id);
 		});
 		return cloneSerializable(copy);
+	}
+
+	/**
+	 * 保存用户拖拽出的展示顺序（只存 id，空数组表示未自定义）。
+	 * - 只接受当前存在的 id：渲染层可能拿着已删除智能体的旧快照；
+	 * - 未列出的智能体按当前存储顺序追加到尾部：一次过期/不完整的载荷不会让它们从顺序里消失；
+	 * - 顺序没变时不推进 revision、不写盘、不发事件（拖回原位不该产生一次磁盘写入）。
+	 */
+	async reorder(ids: readonly string[]): Promise<string[]> {
+		const known = new Set(this.state.agents.map((agent) => agent.id));
+		const nextOrder: string[] = [];
+		const seen = new Set<string>();
+		for (const id of ids) {
+			if (typeof id !== "string" || !known.has(id) || seen.has(id)) continue;
+			seen.add(id);
+			nextOrder.push(id);
+		}
+		for (const agent of this.state.agents) if (!seen.has(agent.id)) nextOrder.push(agent.id);
+		const unchanged = nextOrder.length === this.state.agentOrder.length && nextOrder.every((id, index) => id === this.state.agentOrder[index]);
+		if (unchanged) return cloneSerializable(this.state.agentOrder);
+		await this.mutate(() => {
+			this.state.agentOrder = nextOrder;
+		});
+		return cloneSerializable(nextOrder);
 	}
 
 	async updateSettings(patch: UpdateAgentMarketSettingsInput): Promise<AgentMarketSettings> {

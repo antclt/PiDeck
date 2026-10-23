@@ -13,7 +13,7 @@ PiDeck 桌面能力面统一门面 `piDeckApi` 的契约文档。三层结构：
 
 ## 按域调用面
 
-域表（61 行，按 core / workspace / content / config / integration / shell 分组）：
+域表（65 行，按 core / workspace / content / config / integration / shell 分组）：
 
 | 域 | 分组 | 主进程归属 | IPC 注册文件 | preload 命名空间 | 通道前缀 | 聚合方式 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -51,6 +51,7 @@ PiDeck 桌面能力面统一门面 `piDeckApi` 的契约文档。三层结构：
 | `skill-hub` | content | SkillHub 检索与安装 | ipc/storeIpc.ts | `skillHub` | `skill-hub` | `aggregate` |
 | `content-store` | content | BuiltinContentUpdater（prompts-store/skills-store 两通道域共用同一更新器） | ipc/contentStoreIpc.ts | `contentStore` | `prompts-store`, `skills-store` | `aggregate` |
 | `extensions` | content | ExtensionManager + BuiltInExtensionsUpdater | ipc/storeIpc.ts, ipc/builtInExtensionIpc.ts | `extensions` | `extensions` | `aggregate` |
+| `favorites` | content | FavoritesStore（`<userData>/favorites.json` 本机快照；正文只在收藏动作发生时由渲染层提交，不动会话文件） | ipc/favoritesIpc.ts | `favorites` | `favorites` | `aggregate` |
 | `imagegen` | content | ImagegenService + 三个图存储 Store | ipc/imagegenIpc.ts | `imagegen` | `imagegen` | `aggregate` |
 | `videogen` | content | VideoJobRunner + IlinkClient + VideoJobStore/VideoBlobStore/VideoSessionStore/VideoGenConfigStore | ipc/videogenIpc.ts | `videogen` | `videogen` | `aggregate` |
 | `settings` | config | SettingsStore + VisionBridgeConfigManager | ipc/systemIpc.ts | `settings` | `settings` | `aggregate` |

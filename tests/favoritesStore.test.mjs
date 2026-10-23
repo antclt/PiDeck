@@ -87,7 +87,7 @@ test("超长正文截断并标记 truncated（收藏仍成功）", async () => {
 	});
 });
 
-test("load 归一化：丢弃坏条目、去重 id、按时间倒序", async () => {
+test("load 归一化：丢弃坏条目、去重 id、保留文件里的顺序", async () => {
 	await withStore(async (filePath) => {
 		const valid = (id, createdAt) => ({ id, createdAt, kind: "message", text: "内容 " + id });
 		const entries = [valid("a", 1), valid("a", 9), { id: "bad" }, { ...valid("b", 2), kind: "unknown" }, valid("c", 3)];
@@ -96,11 +96,12 @@ test("load 归一化：丢弃坏条目、去重 id、按时间倒序", async () 
 		const store = new FavoritesStore(filePath);
 		const loaded = await store.load();
 		const ids = [...loaded.map((entry) => entry.id)];
-		assert.deepEqual(ids, ["c", "a"], "重复 id 只留一条、坏条目与非法 kind 丢弃、按时间倒序");
+		// 不再按 createdAt 重排：文件顺序就是用户拖拽出来的偏好，重启时不能把它抹掉。
+		assert.deepEqual(ids, ["a", "c"], "重复 id 只留首次出现、坏条目与非法 kind 丢弃、顺序以文件为准");
 	});
 });
 
-test("load 按 FAVORITE_ENTRY_LIMIT 裁剪：保留最新的一批", async () => {
+test("load 按 FAVORITE_ENTRY_LIMIT 裁剪：保留排在前面的一批", async () => {
 	await withStore(async (filePath) => {
 		const valid = (id, createdAt) => ({ id, createdAt, kind: "message", text: "内容 " + id });
 		const entries = [];
@@ -110,7 +111,38 @@ test("load 按 FAVORITE_ENTRY_LIMIT 裁剪：保留最新的一批", async () =>
 		const store = new FavoritesStore(filePath);
 		const loaded = await store.load();
 		assert.equal(loaded.length, FAVORITE_ENTRY_LIMIT);
-		assert.equal(loaded[0].id, "bulk-" + (FAVORITE_ENTRY_LIMIT + 4), "最新的在最前");
-		assert.equal(loaded[loaded.length - 1].id, "bulk-5", "最旧的 5 条被裁掉");
+		assert.equal(loaded[0].id, "bulk-0", "头部（用户排在最前的）保留");
+		assert.equal(loaded[loaded.length - 1].id, "bulk-" + (FAVORITE_ENTRY_LIMIT - 1), "超出上限的尾部被裁掉");
+	});
+});
+
+test("reorder 落盘用户拖拽顺序：未列出的条目按原顺序追加", async () => {
+	await withStore(async (filePath) => {
+		const store = new FavoritesStore(filePath);
+		await store.load();
+		const a = await store.add(favoriteInput({ text: "a" }), 1_000);
+		const b = await store.add(favoriteInput({ text: "b" }), 2_000);
+		const c = await store.add(favoriteInput({ text: "c" }), 3_000);
+		// add 前插 → 当前列表是 [c, b, a]；只列出 a 和 c，模拟渲染层拿着部分顺序的载荷。
+		const next = await store.reorder([a.id, c.id]);
+		assert.deepEqual([...next.map((entry) => entry.id)], [a.id, c.id, b.id], "列出项按顺序前置，未列出的保持原序追加");
+		const persisted = JSON.parse(await readFile(filePath, "utf8"));
+		assert.deepEqual([...persisted.entries.map((entry) => entry.id)], [a.id, c.id, b.id], "顺序写进 favorites.json");
+
+		const reloaded = await new FavoritesStore(filePath).load();
+		assert.deepEqual([...reloaded.map((entry) => entry.id)], [a.id, c.id, b.id], "重启后顺序不回到按时间倒序");
+	});
+});
+
+test("reorder 忽略未知/重复 id，顺序未变时不写盘", async () => {
+	await withStore(async (filePath) => {
+		const store = new FavoritesStore(filePath);
+		await store.load();
+		const a = await store.add(favoriteInput({ text: "a" }), 1_000);
+		const b = await store.add(favoriteInput({ text: "b" }), 2_000);
+		const before = await readFile(filePath, "utf8");
+		const same = await store.reorder(["missing", b.id, b.id, a.id]);
+		assert.deepEqual([...same.map((entry) => entry.id)], [b.id, a.id], "未知 id 忽略、重复 id 只算一次");
+		assert.equal(await readFile(filePath, "utf8"), before, "顺序没变不重写文件（拖回原位不该落盘）");
 	});
 });

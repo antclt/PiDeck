@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: b95c74a4a242ed2ec696b9cdc0f48e48790570be9669204ccc8d000cf5579632（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 24a012d2017295d18d4596acf47253c76a60f2b4dbe39a8cec3e5541f3f51990（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -1322,6 +1322,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"common.confirm": "確認",
 	"common.copy": "複製",
 	"common.copied": "已複製",
+	"common.dragReorder": "拖動排序；聚焦手柄後可用 ↑/↓ 微調",
 	"copy.asText": "複製為文本",
 	"copy.asMarkdown": "複製為 Markdown",
 	"copy.asImage": "複製為圖片",
@@ -3193,6 +3194,13 @@ export const zhTW: Record<TranslationKey, string> = {
 	"editor.fileTooLarge": "檔案大小為 {size}MB，超過 {max}MB 限制，無法開啟編輯",
 	"editor.preview": "預覽",
 	"editor.source": "原始碼",
+	"editor.readOnlyBadge": "只讀",
+	"editor.readOnlyHint": "此檔案不在專案目錄內，按只讀方式開啟：可選中複製，不能編輯或儲存。若確實要改，點標題旁的「轉為可編輯」顯式解鎖，或用外部編輯器",
+	"editor.unlockEdit": "轉為可編輯",
+	"editor.unlockEditHint": "允許在該檔案上直接編輯並儲存（會寫入專案目錄之外的路徑）",
+	"editor.unlockEditTitle": "允許編輯專案外檔案？",
+	"editor.unlockEditBody": "檔案：{path}\n它不在任何專案目錄內。解鎖後自動儲存與 Ctrl+S 會直接寫入這個路徑，沒有版本控制也沒有撤銷以外的兜底。",
+	"editor.unlockEditConfirm": "允許編輯",
 	"editor.attachSelectionRange": "引用選中內容（第 {range} 行）",
 	"editor.diffTooLarge": "檔案過大，無法顯示差異對比",
 	"editor.diffTooLargeDetail": "舊檔案 {old} 行，新檔案 {new} 行，請使用 git diff 檢視",
@@ -6462,6 +6470,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"favorites.saveFailed": "收藏失敗，請重試",
 	"favorites.removed": "已取消收藏",
 	"favorites.removeFailed": "取消收藏失敗",
+	"favorites.reorderFailed": "調整收藏順序失敗，請重試",
 	"favorites.deleteTitle": "刪除這條收藏？",
 	"favorites.deleteBody": "該收藏會從本機刪除，無法恢復。",
 	"favorites.copy": "複製收藏",

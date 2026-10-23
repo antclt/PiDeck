@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { AddFavoriteInput, FavoriteEntry } from "../../../shared/types";
 import { favoriteEntriesAtom } from "../atoms/favorites-atoms";
 import { collectFavoritedMessageKeys, findMessageFavorite } from "../components/favorites/favoriteIdentity";
+import { applyFavoriteOrder } from "../components/favorites/favoriteFilters";
 import { desktopApi } from "../desktopApi";
 import { t } from "../i18n";
 import { showNotice } from "../utils/notice";
@@ -26,6 +27,11 @@ export type FavoriteActions = {
 	/** 收藏成功返回条目（入口用于判断是否要收起浮层），失败返回 null 并 toast。 */
 	addFavorite: (input: AddFavoriteInput) => Promise<FavoriteEntry | null>;
 	removeFavorite: (favoriteId: string) => Promise<boolean>;
+	/**
+	 * 拖拽排序：传入新的完整顺序（或被过滤视图下的可见顺序，隐藏条目会保持原槽位）。
+	 * 先乐观更新 atom 让卡片立即落位，再交给主进程落盘；失败回滚到主进程列表。
+	 */
+	reorderFavorites: (orderedIds: string[]) => Promise<void>;
 	/**
 	 * 整条消息收藏开关：同一条消息（sessionId + messageId）已有收藏则删除，否则新增。
 	 * 没有 messageId（live 流式正文）无法去重，退化为「只新增」。
@@ -90,6 +96,23 @@ export function useFavorites(): FavoriteActions {
 		[setEntries],
 	);
 
+	const reorderFavorites = useCallback(
+		async (orderedIds: string[]): Promise<void> => {
+			const current = entriesRef.current ?? [];
+			const next = applyFavoriteOrder(current, orderedIds);
+			// 乐观更新：松手后卡片立即按新顺序显示，不等 IPC 往返。
+			setEntries(next);
+			try {
+				// 主进程返回权威列表（可能已剔除并发删除的条目）；顺序写盘成功后再对齐一次。
+				setEntries(await desktopApi.favorites.reorder(next.map((entry) => entry.id)));
+			} catch {
+				showNotice(t("favorites.reorderFailed"), 2400, "error");
+				await refresh();
+			}
+		},
+		[refresh, setEntries],
+	);
+
 	const toggleMessageFavorite = useCallback(
 		async (input: AddFavoriteInput): Promise<boolean> => {
 			const existing = findMessageFavorite(entriesRef.current ?? [], input.sessionId ?? null, input.messageId ?? null);
@@ -99,5 +122,5 @@ export function useFavorites(): FavoriteActions {
 		[addFavorite, removeFavorite],
 	);
 
-	return { entries, favoritedMessageKeys, refresh, addFavorite, removeFavorite, toggleMessageFavorite };
+	return { entries, favoritedMessageKeys, refresh, addFavorite, removeFavorite, reorderFavorites, toggleMessageFavorite };
 }

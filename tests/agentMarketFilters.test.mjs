@@ -82,6 +82,35 @@ test("同一创建时间按名称稳定排序（刷新快照后卡片不跳位�
 	assert.deepEqual([...sortAgentsForMarket([beta, alpha]).map((agent) => agent.id)], ["alpha", "beta"]);
 });
 
+test("市场排序：自定义 agentOrder 优先，未列出的按默认权重追加", () => {
+	const sorted = sortAgentsForMarket([translateBuiltin, generalBuiltin, writingAgent, codingAgent], ["custom-writing", "builtin-general"]);
+	assert.deepEqual(
+		Array.from(sorted, (agent) => agent.id),
+		["custom-writing", "builtin-general", "builtin-translate", "custom-coding"],
+		"列出的按名次前置；未列出的内置翻译仍按默认权重排在最前，其余按创建时间倒序",
+	);
+});
+
+test("市场排序：空/缺失 agentOrder 完全等价于旧行为（没拖过就不改变顺序）", () => {
+	const base = Array.from(sortAgentsForMarket([translateBuiltin, generalBuiltin, writingAgent, codingAgent]), (agent) => agent.id);
+	assert.deepEqual(
+		Array.from(sortAgentsForMarket([translateBuiltin, generalBuiltin, writingAgent, codingAgent], []), (agent) => agent.id),
+		base,
+	);
+	assert.deepEqual(
+		Array.from(sortAgentsForMarket([translateBuiltin, generalBuiltin, writingAgent, codingAgent], null), (agent) => agent.id),
+		base,
+	);
+});
+
+test("市场排序：agentOrder 里的未知 id / 重复 id 不制造空位", () => {
+	const sorted = sortAgentsForMarket([generalBuiltin, writingAgent], ["missing", "custom-writing", "custom-writing"]);
+	assert.deepEqual(
+		Array.from(sorted, (agent) => agent.id),
+		["custom-writing", "builtin-general"],
+	);
+});
+
 test("划词默认智能体：配置值命中即用", () => {
 	const settings = { selectionToolEnabled: true, systemSelectionEnabled: true, selectionToolAgentId: "custom-coding", sessionAgentBindings: {} };
 	assert.equal(resolveDefaultSelectionAgent([translateBuiltin, codingAgent], settings)?.id, "custom-coding");
@@ -194,4 +223,19 @@ test("市场空态区分「还没有自定义智能体」与「没有匹配的�
 	const grid = readSource("src/renderer/src/components/agents/market/AgentMarketGrid.tsx");
 	assert.match(grid, /t\("agentMarket\.empty"\)/);
 	assert.match(grid, /t\("agentMarket\.noResults"\)/);
+});
+
+test("拖拽排序：展示顺序由快照 agentOrder 驱动，拖拽结果经 IPC 落盘", () => {
+	const atoms = readSource("src/renderer/src/atoms/agent-atoms.ts");
+	assert.match(atoms, /sortAgentsForMarket\(snapshot\.agents,\s*snapshot\.agentOrder\)/, "atom 必须用快照里的 agentOrder 排序（未自定义时才是默认权重）");
+	const workspace = readSource(WORKSPACE_PATH);
+	assert.match(workspace, /desktopApi\.agentProfiles\.reorder\(nextOrder\)/, "拖拽结果必须经 agent-profiles:reorder 落盘");
+	assert.match(workspace, /setSnapshot\(\(current\) => \(current \? \{ \.\.\.current, agentOrder: nextOrder \} : current\)\)/, "落盘前先乐观更新快照，卡片立即落位");
+	const grid = readSource("src/renderer/src/components/agents/market/AgentMarketGrid.tsx");
+	assert.match(grid, /useListReorder\(/, "网格必须启用通用列表重排接线");
+	assert.match(grid, /\{\.\.\.reorder\.containerProps\}/, "容器要挂 dragover/drop 处理器");
+	const card = readSource("src/renderer/src/components/agents/market/AgentMarketCard.tsx");
+	assert.match(card, /reorder\.gripProps/, "卡片必须有可拖拽手柄");
+	assert.match(card, /reorder\.register/, "卡片必须注册到重排容器（FLIP 与落点测量依赖它）");
+	assert.match(card, /reorder\.dropPosition/, "落点处必须渲染插入指示线");
 });

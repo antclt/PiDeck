@@ -1,6 +1,7 @@
-import { Bot, Copy, Pencil, Pin, RotateCcw, Trash2 } from "lucide-react";
+import { Bot, Copy, GripVertical, Pencil, Pin, RotateCcw, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentProfile } from "../../../../../shared/types/agentProfile";
+import type { ListReorderItemBinding } from "../../../hooks/useListReorder";
 import { t } from "../../../i18n";
 import { Badge } from "../../ui-shadcn/badge";
 import { Button } from "../../ui-shadcn/button";
@@ -19,6 +20,8 @@ interface AgentMarketCardProps {
 	onRequestDelete: (agent: AgentProfile) => void;
 	/** 「使用」正在建会话：按钮显示 loading，避免连点建出多个绑定会话。 */
 	usePending: boolean;
+	/** 拖拽重排接线（手柄/拖拽态/插入指示线），由 AgentMarketGrid 统一生成。 */
+	reorder: ListReorderItemBinding;
 }
 
 /**
@@ -28,12 +31,22 @@ interface AgentMarketCardProps {
  * 避免 button 套 button 的非法结构；悬停行默认 opacity-0，键盘 focus 时由
  * group-focus-within 显形，保证纯键盘也能操作。
  */
-export function AgentMarketCard({ agent, selectionDefault, active, onOpen, onUse, onEdit, onRequestDelete, usePending }: AgentMarketCardProps) {
+export function AgentMarketCard({ agent, selectionDefault, active, reorder, onOpen, onUse, onEdit, onRequestDelete, usePending }: AgentMarketCardProps) {
 	const actions = useAgentMarketActions();
 	const usage = agent.usageCount > 0 ? t("agentMarket.usage", { count: agent.usageCount }) : t("agentMarket.neverUsed");
 
 	return (
-		<article className={cn("group relative flex h-full flex-col gap-2 rounded-xl border border-border/50 bg-bg-panel/40 p-3 transition-colors hover:border-border hover:bg-bg-panel/70", active && "border-primary/40 bg-primary/5 hover:border-primary/40")}>
+		<article
+			ref={reorder.register}
+			className={cn(
+				"group relative flex h-full flex-col gap-2 rounded-xl border border-border/50 bg-bg-panel/40 p-3 transition-colors hover:border-border hover:bg-bg-panel/70",
+				active && "border-primary/40 bg-primary/5 hover:border-primary/40",
+				// 拖拽中的卡片只做半透明标记：真正的「拖到哪」由插入指示线回答。
+				reorder.dragging && "opacity-40",
+			)}
+		>
+			{/* 插入指示线：网格里插到卡片左侧/右侧（跨行落点也落在相邻卡片旁边）。 */}
+			{reorder.dropPosition && <span className={cn("pointer-events-none absolute inset-y-1 w-0.5 rounded-full bg-primary", reorder.dropPosition === "before" ? "-left-1" : "-right-1")} aria-hidden="true" />}
 			<button type="button" className="flex min-w-0 items-start gap-2.5 rounded-lg text-left focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none" title={t("agentMarket.detailTitle")} onClick={() => onOpen(agent)}>
 				<span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-bg-muted text-lg leading-none" aria-hidden="true">
 					{agent.icon ? agent.icon : <Bot className="size-4 text-muted-foreground" />}
@@ -63,6 +76,19 @@ export function AgentMarketCard({ agent, selectionDefault, active, onOpen, onUse
 			{/* mt-auto 把使用量/操作行吸到卡片底部：简介行数不同的卡片也在同一基线上对齐。 */}
 			<div className="relative mt-auto flex h-7 shrink-0 items-center">
 				<span className="absolute inset-y-0 left-0 flex max-w-full items-center truncate text-micro text-text-tertiary transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">{usage}</span>
+				{/* 手柄与操作行同处一条底行：悬停时使用量淡出、手柄在左侧显形，标题行与正文保持干净。 */}
+				<Button
+					type="button"
+					variant="ghost"
+					size="icon-xs"
+					className="absolute inset-y-0 left-0 h-6 cursor-grab text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 active:cursor-grabbing"
+					title={t("common.dragReorder")}
+					aria-label={t("common.dragReorder")}
+					{...reorder.gripProps}
+					onClick={(event) => event.stopPropagation()}
+				>
+					<GripVertical className="size-3.5" aria-hidden="true" />
+				</Button>
 				<div className="absolute inset-y-0 right-0 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
 					{/* 「使用」不再是调用面板：新建一个绑定该智能体的会话并收起市场，角色设定对时间线隐藏。title 里说明这一点。 */}
 					<Button type="button" size="xs" className="mr-0.5 h-6 px-2 text-xs" title={t("agentMarket.useInSessionHint")} loading={usePending} onClick={() => onUse(agent)}>

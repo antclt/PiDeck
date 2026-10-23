@@ -245,10 +245,13 @@ export const ipcChannels = {
 	agentProfilesInvokeEvent: "agent-profiles:invoke-event",
 	/** 会话 ↔ 智能体绑定（「使用」新建会话时写入；解绑传 agentId=null）。 */
 	agentProfilesBindSession: "agent-profiles:bind-session",
+	/** 拖拽排序：入参是完整 id 顺序，主进程剔除未知 id 后落盘。 */
+	agentProfilesReorder: "agent-profiles:reorder",
 	/** 收藏（整条回复 / 划选片段快照）：本地 favorites.json，不写入会话文件。 */
 	favoritesList: "favorites:list",
 	favoritesAdd: "favorites:add",
 	favoritesRemove: "favorites:remove",
+	favoritesReorder: "favorites:reorder",
 	/** 系统级划词浮窗（全局快捷键触发）：可见性/隐藏/发送回主窗口/捕获推流。 */
 	selectionToolGetState: "selection-tool:get-state",
 	selectionToolHide: "selection-tool:hide",

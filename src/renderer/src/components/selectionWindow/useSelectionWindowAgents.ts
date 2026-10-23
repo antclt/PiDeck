@@ -53,7 +53,7 @@ export function useSelectionWindowAgents(): SelectionWindowAgentsState {
 		};
 	}, [reloadToken]);
 
-	const agents = useMemo(() => (snapshot ? sortAgentsForMarket(snapshot.agents) : []), [snapshot]);
+	const agents = useMemo(() => (snapshot ? sortAgentsForMarket(snapshot.agents, snapshot.agentOrder) : []), [snapshot]);
 	const defaultAgent = useMemo(() => (snapshot ? resolveDefaultSelectionAgent(agents, snapshot.settings) : null), [agents, snapshot]);
 	return { agents, settings: snapshot?.settings ?? null, defaultAgent, refresh };
 }

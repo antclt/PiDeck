@@ -8,7 +8,7 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
  * - filterFavorites：搜索 + kind 筛选（页面本地过滤）。
  */
 const { favoriteMessageKey, collectFavoritedMessageKeys, findMessageFavorite } = loadTsCommonJs("src/renderer/src/components/favorites/favoriteIdentity.ts");
-const { filterFavorites } = loadTsCommonJs("src/renderer/src/components/favorites/favoriteFilters.ts");
+const { filterFavorites, applyFavoriteOrder } = loadTsCommonJs("src/renderer/src/components/favorites/favoriteFilters.ts");
 
 const entry = (overrides = {}) => ({
 	id: "f1",
@@ -53,4 +53,17 @@ test("filterFavorites：kind 筛选 + 正文/会话标题不区分大小写搜�
 	assert.deepEqual([...filterFavorites(entries, "剪贴板", "all").map((item) => item.id)], ["f2"]);
 	assert.deepEqual([...filterFavorites(entries, "会话一", "all").map((item) => item.id)], ["f1"]);
 	assert.deepEqual([...filterFavorites(entries, "不存在", "all")], []);
+});
+
+test("applyFavoriteOrder：可见条目按新顺序占位，被过滤隐藏的条目留在原位", () => {
+	const entries = [entry({ id: "a" }), entry({ id: "b" }), entry({ id: "c" }), entry({ id: "d" })];
+	// 搜索只命中 d 和 b：把 d 拖到 b 前面，隐藏的 a/c 不能被挤到末尾。
+	const next = applyFavoriteOrder(entries, ["d", "b"]);
+	assert.deepEqual([...next.map((item) => item.id)], ["a", "d", "c", "b"]);
+});
+
+test("applyFavoriteOrder：未知 id 忽略，空顺序不改动列表", () => {
+	const entries = [entry({ id: "a" }), entry({ id: "b" })];
+	assert.deepEqual([...applyFavoriteOrder(entries, ["missing"]).map((item) => item.id)], ["a", "b"]);
+	assert.deepEqual([...applyFavoriteOrder(entries, []).map((item) => item.id)], ["a", "b"]);
 });
