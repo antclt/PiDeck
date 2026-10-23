@@ -143,6 +143,11 @@ export class RewindCheckpointCoordinator {
 			this.recordHealth(root, null);
 			// 目录后来变成 git 仓库了（用户 git init / 切到别的项目）：清掉跳过标记恢复打点
 			this.noGitRetryAt.delete(root);
+			// 2027-02 接线（此前从未被调用，见 pruneCurrentFor 头注释）：打点成功后裁剪
+			// 本会话超限 refs。工具打点每 ≥8s 一次、prune 自身 60s 节流，长会话 refs
+			// 不再无界累积（DEFAULT_MAX_CHECKPOINTS=50 此前形同虚设，listCheckpoints
+			// 全量解析的延迟随会话时长线性劣化）。
+			this.pruneCurrentFor(root, sessionId);
 			// merge 冲突态降级快照：健康恢复但要留集，便于用户自查「为什么恢复后暂存区变了」。
 			if (result.indexTreeDegraded) {
 				this.host.logWarn("checkpoint index tree degraded (unmerged index), recorded HEAD tree instead", { agentId, toolName });
@@ -196,9 +201,8 @@ export class RewindCheckpointCoordinator {
 	 * 节流：每仓库至少间隔 PRUNE_CURRENT_MIN_INTERVAL_MS——prune 要全量扫 refs，
 	 * 不必跟着每次打点跑；60s 一次足够把超限部分削掉。
 	 *
-	 * 已知缺口（2027-02 拆分时记录）：本方法从未被接线（迁入前即如此），
-	 * 当前会话的 checkpoint 无裁剪路径，长会话 refs 会超 DEFAULT_MAX_CHECKPOINTS
-	 * 持续累积；接线属行为变更，留待单独修复决策。
+	 * 2027-02 起接线到 runCheckpoint 成功分支（此前从未被调用，长会话 refs 无界
+	 * 累积、DEFAULT_MAX_CHECKPOINTS 形同虚设）。
 	 */
 	pruneCurrentFor(root: string, sessionId: string): void {
 		const now = Date.now();
