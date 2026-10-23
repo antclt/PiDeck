@@ -502,8 +502,8 @@ export type AppSettings = {
 	 */
 	browserAgentEnabled: boolean;
 	/**
-	 * 浏览器 Agent 自动审批（免审批），默认 false（与 CUA 默认相反）。
-	 * 内置浏览器使用用户真实登录态，误点可能代表用户发帖/付款，因此默认逐次确认。
+	 * 浏览器 Agent 自动审批（免审批），默认 true（与 CUA 一致）。
+	 * 内置浏览器使用用户真实登录态，风险自担；关闭后每次写操作逐次确认。
 	 */
 	browserAgentAutoApprove: boolean;
 
@@ -1111,9 +1111,9 @@ export function createDefaultAppSettings(): AppSettings {
 		sessionStoreEnabled: true,
 		cuaEnabled: false,
 		cuaAutoApprove: true,
-		// 浏览器 Agent 默认关闭；写动作默认逐次审批（真实登录态，保守优先）。
+		// 浏览器 Agent 默认关闭；开启后写动作默认免审批（与 CUA 一致），可关闭改为逐次确认。
 		browserAgentEnabled: false,
-		browserAgentAutoApprove: false,
+		browserAgentAutoApprove: true,
 		favoriteModels: [],
 
 		// 字体配置：与 main SettingsStore 默认值保持一致，避免启动时闪烁

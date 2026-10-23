@@ -33,51 +33,52 @@ function seed(filePath, patch) {
 	writeFileSync(filePath, JSON.stringify({ installationType: "installed", chatContentWidthPct: 80, ...patch }));
 }
 
-test("shared defaults keep the browser agent off and approvals manual", () => {
+test("shared defaults keep the browser agent off but auto-approve writes once enabled", () => {
 	const settings = createDefaultAppSettings();
 	assert.equal(settings.browserAgentEnabled, false);
-	assert.equal(settings.browserAgentAutoApprove, false);
+	assert.equal(settings.browserAgentAutoApprove, true);
 });
 
 test("a fresh SettingsStore agrees with the shared defaults", async (t) => {
 	const { SettingsStore } = makeStore(t);
 	const store = new SettingsStore();
 	assert.equal(store.get().browserAgentEnabled, false);
-	assert.equal(store.get().browserAgentAutoApprove, false);
+	assert.equal(store.get().browserAgentAutoApprove, true);
 	await store.load();
 	assert.equal(store.get().browserAgentEnabled, false);
-	assert.equal(store.get().browserAgentAutoApprove, false);
+	assert.equal(store.get().browserAgentAutoApprove, true);
 });
 
-test("an explicit opt-in survives saving and reloading", async (t) => {
+test("an explicit opt-out of auto-approve survives saving and reloading", async (t) => {
 	const { SettingsStore, filePath } = makeStore(t);
-	seed(filePath, { browserAgentEnabled: true, browserAgentAutoApprove: true });
+	seed(filePath, { browserAgentEnabled: true, browserAgentAutoApprove: false });
 	const store = new SettingsStore();
 	await store.load();
 	assert.equal(store.get().browserAgentEnabled, true);
-	await store.update({ browserAgentEnabled: false });
-	assert.equal(JSON.parse(readFileSync(filePath, "utf8")).browserAgentEnabled, false);
+	assert.equal(store.get().browserAgentAutoApprove, false, "a saved opt-out must not be rewritten to the default");
+	await store.update({ browserAgentAutoApprove: true });
+	assert.equal(JSON.parse(readFileSync(filePath, "utf8")).browserAgentAutoApprove, true);
 	const reloaded = new SettingsStore();
 	await reloaded.load();
-	assert.equal(reloaded.get().browserAgentEnabled, false);
+	assert.equal(reloaded.get().browserAgentAutoApprove, true);
 });
 
-test("non-boolean IPC values never enable the browser agent or auto-approval", async (t) => {
+test("non-boolean IPC values never enable the browser agent and keep the auto-approve default", async (t) => {
 	const { SettingsStore } = makeStore(t);
 	const store = new SettingsStore();
 	await store.update({ browserAgentEnabled: "yes", browserAgentAutoApprove: 1 });
 	assert.equal(store.get().browserAgentEnabled, false);
-	assert.equal(store.get().browserAgentAutoApprove, false);
+	assert.equal(store.get().browserAgentAutoApprove, true);
 });
 
 test("preview, settings UI, anchors and i18n agree on the browser agent keys", () => {
 	const preview = readFileSync("src/renderer/src/previewApi.ts", "utf8");
 	assert.match(preview, /browserAgentEnabled\s*:\s*false\b/);
-	assert.match(preview, /browserAgentAutoApprove\s*:\s*false\b/);
+	assert.match(preview, /browserAgentAutoApprove\s*:\s*true\b/);
 
 	const commonTab = readFileSync("src/renderer/src/components/app/settings/CommonTab.tsx", "utf8");
 	assert.match(commonTab, /draft\.browserAgentEnabled\s*\?\?\s*false/);
-	assert.match(commonTab, /draft\.browserAgentAutoApprove\s*\?\?\s*false/);
+	assert.match(commonTab, /draft\.browserAgentAutoApprove\s*\?\?\s*true/);
 	assert.match(commonTab, /settings-section-common-browser-agent/);
 
 	const fieldAnchors = readFileSync("src/renderer/src/utils/settingsFieldAnchors.ts", "utf8");

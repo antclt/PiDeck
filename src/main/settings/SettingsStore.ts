@@ -285,9 +285,9 @@ Gitmoji 对应关系：
 	cuaAutoApprove: true,
 
 	// 浏览器 Agent 默认关闭：不注册 browser_* 工具，端点是否监听取决于 CUA 是否已开启。
-	// 自动审批默认关闭（与 CUA 相反）：内置浏览器带用户真实登录态，写动作默认逐次确认。
+	// 开启后写动作默认免审批（与 CUA 一致）；关闭自动审批后逐次确认。
 	browserAgentEnabled: false,
-	browserAgentAutoApprove: false,
+	browserAgentAutoApprove: true,
 
 	favoriteModels: [],
 	// 提供商与模型显示开关默认全显示：隐藏列表为空 = 不隐藏任何提供商/模型

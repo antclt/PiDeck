@@ -488,7 +488,7 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 					anchor="common-browser-agent-auto-approve"
 					title={t("settings.browserAgentAutoApprove")}
 					description={t("settings.browserAgentAutoApproveDesc")}
-					checked={draft.browserAgentAutoApprove ?? false}
+					checked={draft.browserAgentAutoApprove ?? true}
 					disabled={!draft.browserAgentEnabled}
 					dirty={isDirty("browserAgentAutoApprove")}
 					onChange={(checked) => updateDraft({ browserAgentAutoApprove: checked })}

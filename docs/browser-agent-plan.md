@@ -34,8 +34,8 @@
 1. **只走既有 MCP 通道**：挂在现有 `pideck-cua` 主进程内 MCP host 上，不新增 pi↔主进程通信通道（工具调用就是 pi 标准 `tool_call → tool_result`）。
 2. **不动 webPreferences**：不注入 preload、不放开 `allowpopups`、不改 `sandbox/contextIsolation/webSecurity`，沿用 `will-attach-webview` 现有档位（`src/main/index.ts:2166-2227`）。
 3. **URL 白名单单一事实源**：一切导航必须过 `isAllowedBrowserPanelUrl`（`src/main/browser/browserSecurity.ts:9-18`，仅 `about:blank`/http/https）。
-4. **页面内容是不可信数据**：快照文本只是数据，不能当指令；写动作必须过审批门（默认逐次确认）。
-5. **默认关闭**：`browserAgentEnabled=false`；写动作自动审批默认 `false`（与 CUA 的默认相反，因为浏览器分区里是用户真实登录态）。
+4. **页面内容是不可信数据**：快照文本只是数据，不能当指令；写动作必须过审批门（默认自动放行，可在设置里改为逐次确认）。
+5. **默认关闭**：`browserAgentEnabled=false`；写动作自动审批默认 `true`（与 CUA 一致——开启即不再逐次弹框；浏览器分区是用户真实登录态，可在设置里改回逐次确认）。
 6. **pi 的边界不越界**：PiDeck 只提供页面能力（快照/动作/截图），不做 agent 循环、不直连模型。
 
 ---
@@ -239,7 +239,7 @@ AX 树更接近 Playwright MCP 的快照质量，但要额外把 AX 节点映射
 | 字段 | 默认 | 说明 |
 |------|------|------|
 | `browserAgentEnabled` | `false` | 关闭时：不注册 `browser_*` 工具、不监听额外端点、不动 pi 配置（若 CUA 也未启用则整个 host 不启动） |
-| `browserAgentAutoApprove` | `false` | 写动作免审批；只读工具永远免审批。默认逐次确认——浏览器分区是用户真实登录态，误点可能代表用户发帖/付款 |
+| `browserAgentAutoApprove` | `true` | 写动作免审批；只读工具永远免审批。默认自动放行（与 CUA 一致），可关闭改为逐次确认——浏览器分区是用户真实登录态，误点可能代表用户发帖/付款 |
 
 三处默认值必须对齐：`shared/types/settings.ts`、`main/settings/SettingsStore.ts`、`renderer/src/previewApi.ts`（现有 `cuaEnabled` 即此写法）。
 
@@ -393,6 +393,7 @@ e2e（可选，T6 再做）：`npx playwright test e2e/browser-agent.spec.ts`（
 
 - 2026-10-23：立项；PoC 9/9 PASS；决策「主进程 CDP + 扩展既有 pideck-cua MCP host」；补 AGENTS 例外六待落条文。
 - 2026-10-23：T1–T5 落地（代码 + 29 个新单测 + 设置/文案），AGENTS 例外六已写入；T6 端到端 smoke 待做。
+- 2026-10-23 体验调整：`browserAgentAutoApprove` 默认改为 `true`（开启浏览器 Agent 即免逐次审批），设置页可改回逐次确认；对应文案、测试、文档同步。
 
 ---
 
