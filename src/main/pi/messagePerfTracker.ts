@@ -27,10 +27,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * pi 不暴露耗时字段，只能由本地事件时间戳推算。
  */
 export class MessagePerfTracker {
-	/** 进行中的计时器（per agent）。 */
-	private readonly perfByAgent = new Map<string, { startedAt: number; firstDeltaAt: number; firstTextAt: number }>();
+	/** 进行中的计时器（per agent）。agentStartAt/turnStartAt/messageStartAt 是阶段边界（首遇即记，0=未到）。 */
+	private readonly perfByAgent = new Map<string, { startedAt: number; firstDeltaAt: number; firstTextAt: number; agentStartAt: number; turnStartAt: number; messageStartAt: number }>();
 	/** sendPrompt 发出的请求时刻（毫秒），供首个 message_start 起表时优先使用（含排队时间）。 */
 	private readonly promptRequestedAtByAgent = new Map<string, number>();
+	/** 计时器创建前到达的 agent_start 时刻（per agent）：agent_start 先于 turn_start/message_start，
+	 * 起表时并入计时器；结算/作废/清理时必须一并清掉，否则串进下一轮的归因。 */
+	private readonly pendingAgentStartAtByAgent = new Map<string, number>();
 	/** 最近一次 assistant 回复的性能指标。 */
 	private readonly lastPerfByAgent = new Map<string, MessagePerfSnapshot>();
 	/** 会话内已结算的模型回复与派生任务性能区间（per agent）。 */
@@ -47,6 +50,32 @@ export class MessagePerfTracker {
 	/** 最近一次结算结果（getRuntimeState 合并展示用）。 */
 	getLast(agentId: string): MessagePerfSnapshot | undefined {
 		return this.lastPerfByAgent.get(agentId);
+	}
+
+	/**
+	 * agent_start 到达时刻：此时计时器多半还没建（turn_start/message_start 才起表），
+	 * 先挂 pending，ensureTimer 创建时并入——「请求发出 → agent_start」的间隔是 pi 内部
+	 * 排队/扩展钩子的耗时，归因日志（见 settle）需要这个边界。
+	 */
+	noteAgentStart(agentId: string, at = Date.now()): void {
+		const perf = this.perfByAgent.get(agentId);
+		if (perf) {
+			if (perf.agentStartAt === 0) perf.agentStartAt = at;
+			return;
+		}
+		if (!this.pendingAgentStartAtByAgent.has(agentId)) this.pendingAgentStartAtByAgent.set(agentId, at);
+	}
+
+	/** turn_start 到达时刻（调用方须在 ensureTimer 之后调用，直接写进已存在的计时器）。 */
+	noteTurnStart(agentId: string, at = Date.now()): void {
+		const perf = this.perfByAgent.get(agentId);
+		if (perf && perf.turnStartAt === 0) perf.turnStartAt = at;
+	}
+
+	/** message_start（assistant）到达时刻：与 noteTurnStart 同款，写已存在的计时器。 */
+	noteMessageStart(agentId: string, at = Date.now()): void {
+		const perf = this.perfByAgent.get(agentId);
+		if (perf && perf.messageStartAt === 0) perf.messageStartAt = at;
 	}
 
 	/**
@@ -81,10 +110,15 @@ export class MessagePerfTracker {
 		if (!this.perfByAgent.has(agentId)) {
 			const requestedAt = this.promptRequestedAtByAgent.get(agentId);
 			if (requestedAt !== undefined) this.promptRequestedAtByAgent.delete(agentId);
+			const agentStartAt = this.pendingAgentStartAtByAgent.get(agentId) ?? 0;
+			if (agentStartAt > 0) this.pendingAgentStartAtByAgent.delete(agentId);
 			this.perfByAgent.set(agentId, {
 				startedAt: requestedAt ?? Date.now(),
 				firstDeltaAt: 0,
 				firstTextAt: 0,
+				agentStartAt,
+				turnStartAt: 0,
+				messageStartAt: 0,
 			});
 		}
 	}
@@ -97,9 +131,11 @@ export class MessagePerfTracker {
 	 * - tps = output tokens ÷ 首 delta → 终态；endToEndTps = 同一 output tokens ÷ totalMs。
 	 * 无 text/thinking delta 时不估算流式速度；只要用量和总耗时有效，端到端速度仍可计算。
 	 */
-	settle(agentId: string, emit: (channel: string, payload: unknown) => void, message?: unknown): void {
+	settle(agentId: string, emit: (channel: string, payload: unknown) => void, message?: unknown, log?: (message: string, detail: Record<string, unknown>) => void): void {
 		const perf = this.perfByAgent.get(agentId);
 		this.perfByAgent.delete(agentId);
+		// 没建过计时器的 agent_start 残留（如 prompt 被扩展命令消费、未触发模型调用）一并清掉。
+		this.pendingAgentStartAtByAgent.delete(agentId);
 		if (!perf) return;
 		const now = Date.now();
 		const totalMs = now - perf.startedAt;
@@ -132,6 +168,17 @@ export class MessagePerfTracker {
 		const sessionTps = sessionPerf.sessionTps;
 		const sessionEndToEndTps = sessionPerf.sessionEndToEndTps;
 
+		// 归因日志：把「发送 → 首字」拆成 agent_start/turn_start/message_start/firstDelta 边界（均相对起点，
+		// 起点=请求发出时刻或续答 turn_start）。用户报「10 秒才思考」时一眼看出耗在 pi 内部还是供应商首包。
+		log?.("Model reply phase breakdown", {
+			agentId,
+			...(perf.agentStartAt > 0 ? { agentStartMs: perf.agentStartAt - perf.startedAt } : {}),
+			...(perf.turnStartAt > 0 ? { turnStartMs: perf.turnStartAt - perf.startedAt } : {}),
+			...(perf.messageStartAt > 0 ? { messageStartMs: perf.messageStartAt - perf.startedAt } : {}),
+			...(perf.firstDeltaAt > 0 ? { firstDeltaMs: perf.firstDeltaAt - perf.startedAt } : {}),
+			...(firstContentAt > 0 ? { ttftMs } : {}),
+			totalMs,
+		});
 		this.lastPerfByAgent.set(agentId, { ttftMs, totalMs, endToEndTps, tps, sessionTps, sessionEndToEndTps, at: now });
 		emit(ipcChannels.agentsRuntimeState, {
 			agentId,
@@ -229,6 +276,7 @@ export class MessagePerfTracker {
 	discardInFlight(agentId: string): void {
 		this.perfByAgent.delete(agentId);
 		this.promptRequestedAtByAgent.delete(agentId);
+		this.pendingAgentStartAtByAgent.delete(agentId);
 	}
 
 	/** agent 生命周期结束：进行中计时与最近指标一并清理（数值游标漏删 = 慢泄漏）。 */

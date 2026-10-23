@@ -12,18 +12,25 @@ function fixture() {
 	const { MessagePerfTracker } = loadTsCommonJs("src/main/pi/messagePerfTracker.ts", { globals: { Date: Clock } });
 	const tracker = new MessagePerfTracker();
 	const events = [];
+	const logs = [];
 	const at = (value, action) => {
 		time = value;
 		action?.();
 	};
-	const settle = (agentId, message) => tracker.settle(agentId, (channel, payload) => events.push({ channel, payload }), message);
+	const settle = (agentId, message) =>
+		tracker.settle(
+			agentId,
+			(channel, payload) => events.push({ channel, payload }),
+			message,
+			(message2, detail) => logs.push({ message: message2, detail }),
+		);
 	const reply = ({ agentId = "a", start = 1000, delta = 2000, end = 3000, usage = { output: 100 } } = {}) => {
 		at(start, () => tracker.ensureTimer(agentId));
 		if (delta !== null) at(delta, () => tracker.markFirstDelta(agentId));
 		at(end, () => settle(agentId, { usage }));
 		return tracker.getLast(agentId);
 	};
-	return { tracker, at, settle, reply, events };
+	return { tracker, at, settle, reply, events, logs };
 }
 
 test("reply pairs both TPS values with the same usage, independently of text-only TTFT", () => {
@@ -100,6 +107,37 @@ test("zero duration and duplicate settlement cannot produce infinite or repeated
 	assert.equal(result.endToEndTps, undefined);
 	f.settle("a", { usage: { output: 100 } });
 	assert.equal(f.events.length, 1);
+});
+
+test("phase breakdown attributes agent_start/turn_start/message_start/firstDelta offsets", () => {
+	const f = fixture();
+	f.tracker.notePromptRequested("a", 1000);
+	// agent_start 先于计时器创建（turn_start 才起表）：挂 pending，起表时并入
+	f.at(1500, () => f.tracker.noteAgentStart("a"));
+	f.at(2000, () => f.tracker.ensureTimer("a"));
+	f.at(2000, () => f.tracker.noteTurnStart("a"));
+	f.at(3000, () => f.tracker.noteMessageStart("a"));
+	f.at(6000, () => f.tracker.markFirstDelta("a"));
+	f.at(9000, () => f.settle("a", { usage: { output: 10 } }));
+	const entry = f.logs.at(-1);
+	assert.equal(entry.message, "Model reply phase breakdown");
+	// 起点被 notePromptRequested 固定在 1000：各边界偏移 = 边界时刻 − 起点
+	// （展开复制：tracker 经 vm 沙箱加载，detail 的原型域与测试字面量不同）
+	assert.deepEqual({ ...entry.detail }, { agentId: "a", agentStartMs: 500, turnStartMs: 1000, messageStartMs: 2000, firstDeltaMs: 5000, ttftMs: 5000, totalMs: 8000 });
+});
+
+test("discarded in-flight epoch leaves no stale agent_start for the next one", () => {
+	const f = fixture();
+	f.tracker.notePromptRequested("a", 1000);
+	f.at(1500, () => f.tracker.noteAgentStart("a"));
+	f.tracker.discardInFlight("a");
+	f.at(8000, () => f.tracker.ensureTimer("a"));
+	f.at(8200, () => f.tracker.markFirstDelta("a"));
+	f.at(9000, () => f.settle("a", { usage: { output: 10 } }));
+	const entry = f.logs.at(-1);
+	// 中止轮的 agent_start 不能串进下一轮的归因（相对偏移会变成负数/错值）
+	assert.equal(entry.detail.agentStartMs, undefined);
+	assert.equal(entry.detail.firstDeltaMs, 200);
 });
 
 test("agents have isolated timers and lifecycle cleanup removes cached metrics", () => {

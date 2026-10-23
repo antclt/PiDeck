@@ -4715,6 +4715,8 @@ export class AgentManager {
 		}
 
 		if (typed.type === "agent_start" && runtime) {
+			// 阶段归因：agent_start = pi 已接单开跑（此前间隔是 pi 内部排队/扩展钩子耗时）。
+			this.messagePerf.noteAgentStart(agentId);
 			// 首个 run 开始：此刻用户的触发消息已落盘，把启动期诊断（扩展回退/启动扩展报错）
 			// 按序写入时间线——位于用户消息之后、回答之前，避免插进历史轮次中间。
 			this.startupDiagnostics.markFirstRun(agentId);
@@ -4759,6 +4761,7 @@ export class AgentManager {
 			// Pi 在工具执行后、准备下一次模型调用前发 turn_start；message_start
 			// 可能等到 provider 首个事件才到，无法覆盖工具续答的首 token 等待。
 			this.messagePerf.ensureTimer(agentId);
+			this.messagePerf.noteTurnStart(agentId);
 		}
 
 		const startMessage = isRecord(typed.message) ? typed.message : undefined;
@@ -4775,6 +4778,7 @@ export class AgentManager {
 			// 性能计时起表（幂等：message_update start 先到则不重置）。
 			// 顶层 message_start 是 mock/pi 均走的确定路径，不能只依赖 delta 事件。
 			this.messagePerf.ensureTimer(agentId);
+			this.messagePerf.noteMessageStart(agentId);
 			// 顶层 message_start（mock/pi 均走此路径）：必须允许空骨架，否则
 			// text_delta 不再 upsert 时 History 无挂载点，Live 正文无处渲染。
 			this.upsertAssistantMessage(agentId, startMessage, "", { allowEmpty: true });
@@ -5074,7 +5078,12 @@ export class AgentManager {
 				this.activeAssistantMessageIds.delete(agentId);
 			}
 			// 结算性能指标（幂等：message_update done 先结算则 map 已删，直接返回）
-			this.messagePerf.settle(agentId, (channel, payload) => this.emit(channel, payload), messageEnd);
+			this.messagePerf.settle(
+				agentId,
+				(channel, payload) => this.emit(channel, payload),
+				messageEnd,
+				(message, detail) => void this.appLogger?.info("session-perf", message, detail),
+			);
 			// 终结 Live 正文通道（顶层 message_end 不经 handleAssistantMessageEvent）
 			this.streamingAgents.delete(agentId);
 			this.liveStream.finalizeText(agentId);
@@ -5256,7 +5265,12 @@ export class AgentManager {
 
 		if (eventType === "message_end" || eventType === "done" || eventType === "error") {
 			// 结算性能指标（TTFT/总耗时/TPS）并边沿推送渲染层
-			this.messagePerf.settle(agentId, (channel, payload) => this.emit(channel, payload), partialMessage);
+			this.messagePerf.settle(
+				agentId,
+				(channel, payload) => this.emit(channel, payload),
+				partialMessage,
+				(message, detail) => void this.appLogger?.info("session-perf", message, detail),
+			);
 			// 先写入 History thinking 并 flush，再发 done 清 live。
 			this.finalizeThinkingIntoMessage(agentId, partialMessage);
 			this.upsertAssistantMessage(agentId, partialMessage);

@@ -2440,6 +2440,8 @@ async function createWindow() {
 			url: mainWindow?.webContents.getURL(),
 		});
 	});
+	// 聚焦补热 standby：见 rearmStandbyAgentOnFocus 注释（节流 + ensure 幂等，热路径无感）。
+	mainWindow.on("focus", () => rearmStandbyAgentOnFocus());
 	mainWindow.webContents.on("did-finish-load", () => {
 		void appLogger.info("app", "Main window load finished", {
 			url: mainWindow?.webContents.getURL(),
@@ -2838,6 +2840,23 @@ function warmStandbyAgentAtStartup(): void {
 			error: error instanceof Error ? error.message : String(error),
 		});
 	}
+}
+
+// 聚焦补热节流状态：上次触发时刻（0=从未）。窗口每次聚焦都会喊一次，
+// 但补热本身只在池空/指纹过期时才真正 spawn（ensure 幂等），节流只为压日志噪音。
+let lastStandbyFocusRewarmAt = 0;
+const STANDBY_FOCUS_REWARM_INTERVAL_MS = 60_000;
+
+/**
+ * 窗口聚焦触发的 standby 补热（节流）：池条目 10min TTL 过期后，用户「离开一阵
+ * 再回来开新会话」要吃满一次 8~25s 冷启动；聚焦是「马上又要用」的强信号，趁用户
+ * 浏览/输入的空窗后台补一个待命进程。目标推断/让路判定复用启动期预热同一条路径。
+ */
+function rearmStandbyAgentOnFocus(): void {
+	const now = Date.now();
+	if (now - lastStandbyFocusRewarmAt < STANDBY_FOCUS_REWARM_INTERVAL_MS) return;
+	lastStandbyFocusRewarmAt = now;
+	warmStandbyAgentAtStartup();
 }
 
 /**
