@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { AgentPresetLogo, DshLogo } from "../components/session/SessionSourceBadge";
 import { DSH_PERMISSION_PRESETS } from "../components/session/DshPermissionMenu";
 import { ConfirmDialog } from "../components/ui-shadcn/ConfirmDialog";
+import { Collapsible, CollapsibleContent } from "../components/ui-shadcn/collapsible";
 import { CodeMirrorEditor } from "../components/app/CodeMirrorEditor";
 import { useSaveRegistry } from "../hooks/useSaveRegistry";
 import { DshSchemaForm, type DshNamespaceView } from "./DshSchemaForm";
@@ -940,11 +941,13 @@ function PluginCard(props: {
 				<span className="shrink-0 rounded-full border border-border-subtle px-2 py-0.5 text-micro text-muted-foreground">{props.ns.applies === "live" ? t("config.dsh.appliesLive") : t("config.dsh.appliesRestart")}</span>
 				<ChevronDown className={`size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 ${open ? "rotate-180" : ""}`} aria-hidden="true" />
 			</button>
-			{open && (
-				<div className="border-t border-border/40">
+			{/* 折叠体走共享折叠原语（真高度渐变 + exit 后卸载 + reduced-motion 回退）；
+			    display:contents 让根不生成盒子，折叠态零空档。 */}
+			<Collapsible open={open} className="contents">
+				<CollapsibleContent className="border-t border-border/40">
 					<DshSchemaForm namespace={props.ns} writable={props.writable} onSave={props.onSave} sectionApi={props.sectionApi} instanceKey={props.instanceKey} />
-				</div>
-			)}
+				</CollapsibleContent>
+			</Collapsible>
 		</div>
 	);
 }

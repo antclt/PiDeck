@@ -124,15 +124,19 @@ export function DshPluginSection() {
 					{t("common.refresh")}
 				</Button>
 			</div>
-			{showInstall && (
-				<InstallPluginForm
-					sessions={dshSessions.map((record) => ({ sessionId: record.dshSessionId as string, title: record.title }))}
-					onInstalled={() => {
-						setShowInstall(false);
-						void loadPlugins();
-					}}
-				/>
-			)}
+			{/* 安装表单开合走共享折叠原语：高度渐变而非瞬时挂载把插件列表瞬间顶开；
+			    display:contents 不生成盒子，section 的 grid gap 布局保持原样。 */}
+			<Collapsible open={showInstall} className="contents">
+				<CollapsibleContent>
+					<InstallPluginForm
+						sessions={dshSessions.map((record) => ({ sessionId: record.dshSessionId as string, title: record.title }))}
+						onInstalled={() => {
+							setShowInstall(false);
+							void loadPlugins();
+						}}
+					/>
+				</CollapsibleContent>
+			</Collapsible>
 			{dynamicPlugins.length === 0 ? (
 				<p className="text-micro text-muted-foreground">{t("config.dsh.dynamicPluginsEmpty")}</p>
 			) : (

@@ -21,6 +21,7 @@ import { Button } from "../components/ui-shadcn/button";
 import { Badge } from "../components/ui-shadcn/badge";
 import { Input } from "../components/ui-shadcn/input";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/ui-shadcn/dialog";
+import { Collapsible, CollapsibleContent } from "../components/ui-shadcn/collapsible";
 import { TOKENDANCE_APP_URL, TOKENDANCE_BASE_URL, TOKENDANCE_PROVIDER } from "../../../shared/tokendance";
 import type { ModelItem } from "./configTypes";
 
@@ -403,10 +404,13 @@ export function TokenDancePanel(props: TokenDancePanelProps) {
 				<span className="shrink-0 text-text-tertiary">{expanded ? <ChevronUp className="size-4" aria-hidden="true" /> : <ChevronDown className="size-4" aria-hidden="true" />}</span>
 			</button>
 
-			{expanded && (
-				<>
+			{/* 折叠详情走共享折叠原语（真高度渐变 + exit 后卸载 + reduced-motion 回退）；
+			    display:contents 让根不生成盒子，折叠态零空档；三段详情（优势/基址/提示）合一收进单个折叠体。 */}
+			<Collapsible open={expanded} className="contents">
+				{/* 不再挂 animate-in/fade-in：twMerge 会把 animate-* 判同组，保留会盖掉高度动画。 */}
+				<CollapsibleContent>
 					{/* 平台优势（聚合 + 特价 + 新用户体验额度）；详情给官网链接，由用户自行核对 */}
-					<ul className="mt-2 grid gap-1 text-xs text-text-secondary motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
+					<ul className="mt-2 grid gap-1 text-xs text-text-secondary">
 						<li className="flex items-start gap-1.5">
 							<span className="mt-0.5 shrink-0 text-[var(--color-accent)]">●</span>
 							{t("config.tokendance.advantageOne")}
@@ -447,8 +451,8 @@ export function TokenDancePanel(props: TokenDancePanelProps) {
 					</div>
 
 					<p className="mt-2 text-micro leading-relaxed text-text-tertiary">{t("config.tokendance.hint")}</p>
-				</>
-			)}
+				</CollapsibleContent>
+			</Collapsible>
 
 			<div className="mt-3 flex flex-wrap items-center gap-1.5">
 				<Button size="sm" variant={props.configured ? "outline" : "default"} onClick={() => void openSetup()} disabled={props.configured || installing} title={props.configured ? t("config.tokendance.alreadyConfiguredTitle") : undefined}>
