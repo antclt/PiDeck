@@ -1081,13 +1081,24 @@ export function WebChatApp() {
 			}
 		};
 		void load();
-		const timer = setInterval(load, streaming ? 1000 : 3000);
+		// 2027-02 性能审计治理：每次 load 都向 pi 子进程发 get_state + get_session_stats
+		// 两个 RPC（还叠加会话文件缓存命中率扫描）。原先流式 1s/空闲 3s 永续轮询，
+		// SSE 连通也不降档、页面隐藏也不停——生成期间对正在出 token 的 pi 稳定叠加
+		// 2 RPC/s，空闲时只要手机挂着会话页就 3s 一次永久打扰。现在：
+		// - document.hidden 跳过（回到前台由下一档补齐）；
+		// - 流式 1s 保留（圆环要跟手）但 SSE 连通时放宽到 3s（状态推送兜底可感知翻转）；
+		// - 空闲 3s → 10s（用量圆环不需要秒级新鲜度）。
+		const intervalMs = streaming ? (stateEventsConnected ? 3000 : 1000) : 10_000;
+		const timer = setInterval(() => {
+			if (document.hidden) return;
+			void load();
+		}, intervalMs);
 		return () => {
 			disposed = true;
 			clearInterval(timer);
 		};
 		// activeTarget 每次渲染都是新对象，改用稳定原始字段做依赖
-	}, [activeTarget?.sessionId, activeTarget?.agentId, activeTarget?.runtimeGeneration, streaming]);
+	}, [activeTarget?.sessionId, activeTarget?.agentId, activeTarget?.runtimeGeneration, streaming, stateEventsConnected]);
 
 	// 头部运行态：流式优先；否则用轮询到的 runtime 状态兜底
 	const headerStatus: WebHeaderStatus = (() => {
