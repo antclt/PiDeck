@@ -10,8 +10,8 @@ import test from "node:test";
  * 根因是 token 用错了面：ui-shadcn/tooltip.tsx 的 TooltipContent 是**反色面**
  * （bg-foreground + text-background）——浅色主题下近黑底（--color-text-primary #202124）、
  * 暗色主题下近白底（#ecece7）。在反色面上写 `text-muted-foreground`
- * （= --color-text-secondary：#4b5563 / #b8b8b2）等于拿「页面次要文字色」画反色面：
- *   - 浅色：#4b5563 on #202124 ≈ 2.0:1
+ * （= --color-text-secondary：#4a4a4a / #b8b8b2）等于拿「页面次要文字色」画反色面：
+ *   - 浅色：#4a4a4a on #202124 ≈ 2.0:1
  *   - 暗色：#b8b8b2 on #ecece7 ≈ 1.6:1
  * 两者都远低于 WCAG AA 4.5:1。正确写法是从反色面前景 token 派生：`text-background/75`
  * （与首行 text-background 同族，只降低不透明度），两种主题下都保持可读。

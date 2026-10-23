@@ -83,7 +83,7 @@ test("EditorWorkbenchTab 用富 Tooltip 显示 标题 + 完整路径", () => {
 test("面包屑工作区段用可见灰底 + 近正文色文字，与标题段拉开对比", () => {
 	const breadcrumb = sessionHeader.match(/\{projectName \? \(\s*<span[\s\S]*?\{projectName\}\s*<\/span>\s*\) : null\}/);
 	assert.ok(breadcrumb, "project breadcrumb segment should be discoverable");
-	// 2026-09 用户反馈「项目不够明显」：bg-muted(#f4f4f5) 在浅色主题的 bg-background(#ffffff)
+	// 2026-09 用户反馈「项目不够明显」：bg-muted(#f4f4f4) 在浅色主题的 bg-background(#ffffff)
 	// 上几乎不可见，改用 bg-accent(=--color-bg-active) 实底，明暗主题都能看见色块。
 	assert.match(breadcrumb[0], /bg-accent/);
 	assert.match(breadcrumb[0], /rounded/);

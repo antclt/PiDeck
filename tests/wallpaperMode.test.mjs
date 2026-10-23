@@ -19,7 +19,9 @@ test("wallpaper mode: background image reveals through translucent panels", () =
 	assert.match(css, /--app-bg-image: none;/);
 	assert.match(css, /body::before\s*\{[\s\S]*?background-image: var\(--app-bg-mask, none\), var\(--app-bg-image, none\);/);
 	assert.match(css, /--color-bg-popover: #ffffff;/);
-	assert.match(css, /--color-bg-popover: #171717;/);
+	// 暗色 popover 是相对浮层色（color-mix 提亮 5%，不透明）：graphite/sea-blue/warm-beige
+	// 皮肤不覆盖此 token，相对派生保证所有皮肤的菜单/弹窗都浮在内容之上。
+	assert.match(css, /--color-bg-popover:\s*color-mix\(in srgb, var\(--color-bg-panel\) 95%, white\);/);
 	assert.match(css, /:root\[data-bg-image="on"\] \.config-modal \.config-model-table,[\s\S]*?\.feedback-modal-shell \.feedback-actions[\s\S]*?\{\s*background:\s*transparent;/);
 	assert.match(css, /background: var\(--color-chat-muted-bg\);/);
 	assert.match(css, /background: var\(--color-chat-table-bg, var\(--color-bg-panel\)\);/);
