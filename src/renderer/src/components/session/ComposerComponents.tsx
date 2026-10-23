@@ -7,6 +7,7 @@ import { t, type TranslationKey } from "../../i18n";
 import type { PromptEnhanceView } from "../../hooks/usePromptEnhance";
 import { PromptEnhanceControls } from "./PromptEnhanceControls";
 import { Button } from "../ui-shadcn/button";
+import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "../ui-shadcn/command";
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
 import { cn } from "../../lib/utils";
@@ -148,15 +149,19 @@ export function ExtensionWidgetCard(props: {
 					<X size={12} strokeWidth={2} />
 				</button>
 			</div>
-			{expanded && (
-				<div className="extension-widget-card-content">
+			{/* 折叠体走共享折叠原语（真高度渐变 + exit 后卸载 + reduced-motion 回退）；
+			    contents 根不生成盒子；限高/间距样式留在 .extension-widget-card-content 上。
+			    overflow-y-auto 必须补在 utility 层：原语基底的 overflow-hidden 也在 utilities 层且
+			    会赢过 legacy 层 .extension-widget-card-content 的 overflow-y:auto，不补会让内部滚动失效。 */}
+			<Collapsible open={expanded} className="contents">
+				<CollapsibleContent className="extension-widget-card-content overflow-y-auto">
 					{props.lines.map((line, index) => (
 						<div key={index} className="extension-widget-card-line">
 							{renderWidgetLine(line)}
 						</div>
 					))}
-				</div>
-			)}
+				</CollapsibleContent>
+			</Collapsible>
 		</div>
 	);
 }

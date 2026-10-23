@@ -32,6 +32,7 @@ import { announcementExcerpt } from "../../utils/announcementExcerpt";
 import { showNotice } from "../../utils/notice";
 import { MarkdownStream } from "../session/MarkdownStream";
 import { Button } from "../ui-shadcn/button";
+import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "../ui-shadcn/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui-shadcn/tooltip";
 import { Drawer } from "../motion/drawer";
@@ -373,7 +374,15 @@ export function AnnouncementCenter() {
 										{t("announcements.section.read")}
 										<span className="text-muted-foreground/50">({readNotices.length})</span>
 									</Button>
-									{showRead && readNotices.map((item) => <AnnouncementCard key={item.id} item={item} unread={false} onViewDetail={viewDetail} />)}
+									{/* 已读归档开合走共享折叠原语（真高度渐变 + exit 后卸载 + reduced-motion 回退）；
+									    折叠体沿用 section 的 flex 列间距（gap-2.5），卡片间距不变。 */}
+									<Collapsible open={showRead} className="contents">
+										<CollapsibleContent className="flex flex-col gap-2.5">
+											{readNotices.map((item) => (
+												<AnnouncementCard key={item.id} item={item} unread={false} onViewDetail={viewDetail} />
+											))}
+										</CollapsibleContent>
+									</Collapsible>
 								</section>
 							)}
 						</>
