@@ -2,7 +2,7 @@
  * F3 · IPC 通道快照守卫（TEST-PLAN §F3，6 例，锚定数字见 TEST-PLAN §0）。
  *
  * src/shared/ipc.ts 的 ipcChannels 常量表是全部 IPC 通道的唯一来源；本测试把它的
- * 规模与形状锚定为快照（705 通道 / 88 前缀 / 排序摘要）。快照变更只允许显式发生
+ * 规模与形状锚定为快照（706 通道 / 88 前缀 / 排序摘要）。快照变更只允许显式发生
  * 且附领域正当理由——本轮（T4 契约层）任何快照红 = 违例。
  *
  * 2026-10-16 显式刷新（+4 通道，均附领域正当理由）：
@@ -21,6 +21,7 @@
  * 2026-10-23 刷新（+5）：favoritesList / favoritesAdd / favoritesRemove（收藏功能提交 f3075f08c 漏刷快照，
  *   favorites 前缀随入场 → 88）+ agentProfilesReorder / favoritesReorder（智能体与收藏列表拖拽排序，
  *   入参为完整 id 顺序，主进程剔除未知 id 后落盘）。
+ * 2026-10-24 刷新（+1）：favoritesRemoveMany（收藏批量删除：一次 IPC、一次写盘，未知 id 忽略）→ 706，前缀数不变。
  * 刷新方式：entries.map(([k, v]) => `${k}=${v}`).sort().join("\n") 重算 sha256，写入 CHANNEL_DIGEST。
  */
 import assert from "node:assert/strict";
@@ -28,19 +29,19 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const CHANNEL_TOTAL = 705;
+const CHANNEL_TOTAL = 706;
 const PREFIX_COUNT = 88;
-const CHANNEL_DIGEST = "12c31dd374636b13f50e9e6b335915cbb179b2cdabdf374e78c73d75f6269db0";
+const CHANNEL_DIGEST = "4a6da601fa759570e602ced7dac50bb0c91050632ff2c3e6b47dac624a509fc9";
 
 const ipcChannels = loadTsCommonJs("src/shared/ipc.ts").ipcChannels;
 const entries = Object.entries(ipcChannels);
 const values = entries.map(([, value]) => value);
 
-test("F3-1 通道常量总数 === 705", () => {
+test("F3-1 通道常量总数 === 706", () => {
 	assert.equal(entries.length, CHANNEL_TOTAL);
 });
 
-test("F3-2 通道值唯一数 === 705（无重复通道字符串）", () => {
+test("F3-2 通道值唯一数 === 706（无重复通道字符串）", () => {
 	assert.equal(new Set(values).size, CHANNEL_TOTAL);
 });
 

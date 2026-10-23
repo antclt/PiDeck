@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { closeFavoritesPageAtom, favoritesPageOpenAtom } from "../../atoms/favorites-atoms";
+import { closeFavoritesPageAtom, favoriteDetailOpenAtom, favoritesPageOpenAtom } from "../../atoms/favorites-atoms";
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
 import { FavoritesWorkspace } from "./FavoritesWorkspace";
@@ -13,17 +13,20 @@ import { FavoritesWorkspace } from "./FavoritesWorkspace";
  */
 export function FavoritesPage(props: { active: boolean }) {
 	const open = useAtomValue(favoritesPageOpenAtom);
+	const detailOpen = useAtomValue(favoriteDetailOpenAtom);
 	const close = useSetAtom(closeFavoritesPageAtom);
 
 	useEffect(() => {
 		if (!open || !props.active) return;
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.key !== "Escape" || event.defaultPrevented) return;
+			// 详情抽屉打开时 Esc 只关抽屉（抽屉自己的 window 监听负责），不连带关页面。
+			if (detailOpen) return;
 			close();
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [close, open, props.active]);
+	}, [close, detailOpen, open, props.active]);
 
 	if (!open) return null;
 

@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 9122fab3cd3eac79aa0f92ebfe6fadcb74d39e021a7240cc4cc71822b59b23e6（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 5636fba34d542a964c5f1a9a5c69e46e71d4af82d814bbea777284a06f8bcb8f（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -1537,6 +1537,12 @@ export const zhTW: Record<TranslationKey, string> = {
 	"common.save": "儲存",
 	"common.saving": "儲存中…",
 	"common.selectAll": "全選",
+	"common.selectedCount": "已選 {count} 項",
+	"common.bulkSelect": "批次",
+	"common.bulkSelectHint": "批次選擇後統一刪除",
+	"common.bulkSelection": "批次選擇",
+	"common.exitSelection": "退出批次",
+	"common.toggleSelection": "選擇此項",
 	"common.invertSelection": "反選",
 	"common.clearSelection": "清除選擇",
 	"common.show": "顯示",
@@ -6474,6 +6480,10 @@ export const zhTW: Record<TranslationKey, string> = {
 	"favorites.saveFailed": "收藏失敗，請重試",
 	"favorites.removed": "已取消收藏",
 	"favorites.removeFailed": "取消收藏失敗",
+	"favorites.batchDeleteTitle": "批次刪除收藏",
+	"favorites.batchDeleteBody": "確定刪除選中的 {count} 條收藏嗎？刪除後無法恢復。",
+	"favorites.batchRemoved": "已刪除 {count} 條收藏",
+	"favorites.batchRemoveFailed": "刪除收藏失敗，請重試",
 	"favorites.reorderFailed": "調整收藏順序失敗，請重試",
 	"favorites.deleteTitle": "刪除這條收藏？",
 	"favorites.deleteBody": "該收藏會從本機刪除，無法恢復。",
@@ -6509,6 +6519,10 @@ export const zhTW: Record<TranslationKey, string> = {
 	"agentMarket.created": "智慧體已建立",
 	"agentMarket.saved": "已儲存",
 	"agentMarket.deleted": "智慧體已刪除",
+	"agentMarket.bulkDeleteTitle": "批次刪除智慧體",
+	"agentMarket.bulkDeleteBody": "確定刪除選中的 {count} 個智慧體嗎？刪除後無法恢復。",
+	"agentMarket.batchDeleted": "已刪除 {count} 個智慧體",
+	"agentMarket.bulkDeletePartial": "已刪除 {count} 個，{failed} 個刪除失敗",
 	"agentMarket.duplicated": "已複製為「{name}」",
 	"agentMarket.builtinReset": "已恢復內建設定",
 	"agentMarket.builtinNoDelete": "內建智慧體不可刪除，可複製一份再修改",

@@ -125,17 +125,26 @@ test("已收藏态与详情：星标/右键菜单识别已收藏并可取消，�
 	assert.match(turnRow, /fill-current/);
 	assert.match(timeline, /favoritedMessageKeys=\{favoritedMessageKeys\}/);
 
-	// 详情：点卡片在右侧展开完整正文与元信息（不再只有 6 行摘要）
-	assert.match(favoritesWorkspace, /function FavoriteDetail/);
+	// 详情：点卡片弹出右侧抽屉（与公告中心同一套 beui Drawer）展示完整正文与元信息
+	assert.match(favoritesWorkspace, /function FavoriteDetailDrawer/);
+	assert.match(favoritesWorkspace, /createPortal\([\s\S]{0,4000}document\.body,/, "抽屉必须 portal 到 body，不能被页面 overlay 裁剪");
+	assert.match(favoritesWorkspace, /<Drawer[\s\S]{0,600}side="right"/);
+	assert.match(favoritesWorkspace, /z-\[var\(--z-drawer\)\]/, "抽屉层级用 --z-drawer（980），高于弹窗 950");
 	assert.match(favoritesWorkspace, /favorites\.detailTitle/);
 	assert.match(favoritesWorkspace, /favorites\.detailSession/);
 	assert.match(favoritesWorkspace, /favorites\.detailTime/);
 	assert.match(favoritesWorkspace, /role="button"/);
-	assert.match(favoritesWorkspace, /aria-pressed=\{props\.selected\}/);
 	// 详情正文按 Markdown 渲染（唯一引擎 MarkdownStream，与时间线同一插件管线）；列表摘要剥离 Markdown 并压到两行
 	assert.match(favoritesWorkspace, /<MarkdownStream text=\{entry\.text\} isStreaming=\{false\}/);
 	assert.match(favoritesWorkspace, /stripMarkdown\(entry\.text\)/);
 	assert.match(favoritesWorkspace, /line-clamp-2/);
+	// 批量删除：进入选择态 → 选中卡片 → 确认框 → 一次 IPC 落盘
+	assert.match(favoritesWorkspace, /removeFavorites/);
+	assert.match(favoritesWorkspace, /BulkSelectionBar/);
+	assert.match(favoritesWorkspace, /favorites\.batchDeleteTitle/);
+	assert.match(favoritesWorkspace, /favorites\.batchDeleteBody/);
+	assert.match(favoritesHook, /removeFavorites/);
+	assert.match(favoritesHook, /desktopApi\.favorites\.removeMany\(ids\)/);
 	assert.match(zh, /"favorites\.detailTitle"/);
 	assert.match(en, /"favorites\.detailTitle"/);
 	// 关联会话找不到时的兜底文案：显示「无关联会话」，不是「未知会话」

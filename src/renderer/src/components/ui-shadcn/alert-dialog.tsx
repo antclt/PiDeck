@@ -24,14 +24,17 @@ function AlertDialogOverlay({ className, ...props }: React.ComponentProps<typeof
 
 function AlertDialogContent({
 	className,
+	overlayClassName,
 	size = "default",
 	...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Content> & {
 	size?: "default" | "sm";
+	/** 背板额外类：抽屉内的确认框需要跟着抬层级（抽屉 980 > 弹窗 950）。 */
+	overlayClassName?: string;
 }) {
 	return (
 		<AlertDialogPortal>
-			<AlertDialogOverlay />
+			<AlertDialogOverlay className={overlayClassName} />
 			<AlertDialogPrimitive.Content
 				data-slot="alert-dialog-content"
 				data-size={size}

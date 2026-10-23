@@ -147,6 +147,23 @@ export class FavoritesStore {
 	}
 
 	/**
+	 * 批量删除：命中的 id 一次过滤、一次落盘（逐条 remove 会写 N 次文件）。
+	 * 未知 id 静默忽略——选区可能拿着稍早的快照；返回实际删除条数。
+	 */
+	async removeMany(ids: readonly string[]): Promise<number> {
+		const wanted = new Set(ids.filter((id) => typeof id === "string" && id.trim()));
+		if (wanted.size === 0) return 0;
+		const kept = this.state.entries.filter((entry) => !wanted.has(entry.id));
+		const removed = this.state.entries.length - kept.length;
+		if (removed > 0) {
+			await this.mutate(() => {
+				this.state.entries = kept;
+			});
+		}
+		return removed;
+	}
+
+	/**
 	 * 保存用户拖拽出的顺序：ids 里命中的条目按首次出现的位置前置，未列出的（旧快照 /
 	 * 拖拽期间新增）按当前顺序追加到尾，保证一次过期载荷不会让收藏从列表里消失。
 	 * 顺序没变时不写盘（拖回原位只是视觉动作）。

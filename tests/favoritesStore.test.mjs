@@ -146,3 +146,35 @@ test("reorder 忽略未知/重复 id，顺序未变时不写盘", async () => {
 		assert.equal(await readFile(filePath, "utf8"), before, "顺序没变不重写文件（拖回原位不该落盘）");
 	});
 });
+
+test("removeMany 一次落盘删除多条：未知 id 忽略、返回实际条数", async () => {
+	await withStore(async (filePath) => {
+		const store = new FavoritesStore(filePath);
+		await store.load();
+		const a = await store.add(favoriteInput({ text: "a" }), 1_000);
+		const b = await store.add(favoriteInput({ text: "b" }), 2_000);
+		const c = await store.add(favoriteInput({ text: "c" }), 3_000);
+
+		const removed = await store.removeMany([a.id, c.id, "missing-id"]);
+		assert.equal(removed, 2, "只统计真正命中的条目");
+		assert.deepEqual([...store.list().map((entry) => entry.id)], [b.id]);
+
+		const persisted = JSON.parse(await readFile(filePath, "utf8"));
+		assert.deepEqual([...persisted.entries.map((entry) => entry.id)], [b.id], "批量删除同步写进 favorites.json");
+
+		const reloaded = await new FavoritesStore(filePath).load();
+		assert.deepEqual([...reloaded.map((entry) => entry.id)], [b.id], "重启后不会复活");
+	});
+});
+
+test("removeMany 空载荷/全未命中不写盘、返回 0", async () => {
+	await withStore(async (filePath) => {
+		const store = new FavoritesStore(filePath);
+		await store.load();
+		await store.add(favoriteInput({ text: "a" }), 1_000);
+		const before = await readFile(filePath, "utf8");
+		assert.equal(await store.removeMany([]), 0);
+		assert.equal(await store.removeMany(["nope", "  "]), 0);
+		assert.equal(await readFile(filePath, "utf8"), before, "没有命中时不该重写文件");
+	});
+});

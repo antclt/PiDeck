@@ -2088,6 +2088,7 @@ export function createPreviewApi(): PiDesktopApi {
 				throw new Error("preview stub");
 			},
 			remove: async () => false,
+			removeMany: async () => 0,
 			// 列表恒空：排序无可命中的条目，与主进程「剔除未知 id」后的结果一致。
 			reorder: async () => [],
 		},

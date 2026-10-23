@@ -251,6 +251,7 @@ export const ipcChannels = {
 	favoritesList: "favorites:list",
 	favoritesAdd: "favorites:add",
 	favoritesRemove: "favorites:remove",
+	favoritesRemoveMany: "favorites:remove-many",
 	favoritesReorder: "favorites:reorder",
 	/** 系统级划词浮窗（全局快捷键触发）：可见性/隐藏/发送回主窗口/捕获推流。 */
 	selectionToolGetState: "selection-tool:get-state",

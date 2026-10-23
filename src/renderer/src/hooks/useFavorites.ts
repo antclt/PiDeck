@@ -27,6 +27,8 @@ export type FavoriteActions = {
 	/** 收藏成功返回条目（入口用于判断是否要收起浮层），失败返回 null 并 toast。 */
 	addFavorite: (input: AddFavoriteInput) => Promise<FavoriteEntry | null>;
 	removeFavorite: (favoriteId: string) => Promise<boolean>;
+	/** 批量删除：一次 IPC 落盘，返回实际删除条数（未知 id 忽略）；失败返回 0 并 toast。 */
+	removeFavorites: (favoriteIds: readonly string[]) => Promise<number>;
 	/**
 	 * 拖拽排序：传入新的完整顺序（或被过滤视图下的可见顺序，隐藏条目会保持原槽位）。
 	 * 先乐观更新 atom 让卡片立即落位，再交给主进程落盘；失败回滚到主进程列表。
@@ -96,6 +98,26 @@ export function useFavorites(): FavoriteActions {
 		[setEntries],
 	);
 
+	const removeFavorites = useCallback(
+		async (favoriteIds: readonly string[]): Promise<number> => {
+			const ids = [...new Set(favoriteIds)].filter((id) => typeof id === "string" && id.trim().length > 0);
+			if (ids.length === 0) return 0;
+			try {
+				const removed = await desktopApi.favorites.removeMany(ids);
+				const removedSet = new Set(ids);
+				// 即使主进程报告 0（都已被并发删掉）也从本地列表剔除：用户看到的选区就该消失。
+				// 这种情况不算失败，不弹错误提示——列表已经和磁盘一致了。
+				setEntries((current) => (current ?? []).filter((entry) => !removedSet.has(entry.id)));
+				if (removed > 0) showNotice(t("favorites.batchRemoved", { count: removed }), 1600);
+				return removed;
+			} catch {
+				showNotice(t("favorites.removeFailed"), 2400, "error");
+				return 0;
+			}
+		},
+		[setEntries],
+	);
+
 	const reorderFavorites = useCallback(
 		async (orderedIds: string[]): Promise<void> => {
 			const current = entriesRef.current ?? [];
@@ -122,5 +144,5 @@ export function useFavorites(): FavoriteActions {
 		[addFavorite, removeFavorite],
 	);
 
-	return { entries, favoritedMessageKeys, refresh, addFavorite, removeFavorite, reorderFavorites, toggleMessageFavorite };
+	return { entries, favoritedMessageKeys, refresh, addFavorite, removeFavorite, removeFavorites, reorderFavorites, toggleMessageFavorite };
 }

@@ -6,6 +6,8 @@ import { agentMarketSettingsAtom, agentProfileSnapshotAtom, agentProfilesAtom } 
 import { desktopApi } from "../../../desktopApi";
 import { t } from "../../../i18n";
 import { showNotice } from "../../../utils/notice";
+import { areAllSelected, pruneSelection, setSelectionFor, toggleSelection } from "../../../utils/selectionSet";
+import { BulkSelectionBar } from "../../common/BulkSelectionBar";
 import { Badge } from "../../ui-shadcn/badge";
 import { Button } from "../../ui-shadcn/button";
 import { ConfirmDialog } from "../../ui-shadcn/ConfirmDialog";
@@ -46,6 +48,9 @@ export function AgentMarketWorkspace({ initialEditingAgentId, onUseAgent, onClos
 	const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 	const [pendingDelete, setPendingDelete] = useState<AgentProfile | null>(null);
 	const [pendingUseAgentId, setPendingUseAgentId] = useState<string | null>(null);
+	const [selectionMode, setSelectionMode] = useState(false);
+	const [selected, setSelected] = useState<Set<string>>(() => new Set<string>());
+	const [pendingBulkDelete, setPendingBulkDelete] = useState(false);
 
 	const defaultSelection = resolveDefaultSelectionAgent(agents, settings);
 	// agents 已经在 atom 里按用户自定义顺序排好（agentProfilesAtom），这里只做搜索/分类收窄。
@@ -53,6 +58,8 @@ export function AgentMarketWorkspace({ initialEditingAgentId, onUseAgent, onClos
 	const agentOrderIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
 	const selectedAgent = selectedAgentId ? (agents.find((agent) => agent.id === selectedAgentId) ?? null) : null;
 	const editingAgent = route.kind === "editor" && route.agentId ? (agents.find((agent) => agent.id === route.agentId) ?? null) : null;
+	// 内置智能体不可删除：可选项只来自「可见且非内置」的卡片；全选也只作用于这一批。
+	const deletableVisibleIds = useMemo(() => visibleAgents.filter((agent) => !agent.builtin).map((agent) => agent.id), [visibleAgents]);
 
 	// 编辑目标被删除后路由悬空：退回列表，避免编辑器对着不存在的智能体继续编辑。
 	useEffect(() => {
@@ -66,6 +73,17 @@ export function AgentMarketWorkspace({ initialEditingAgentId, onUseAgent, onClos
 		if (agents.some((agent) => agent.id === selectedAgentId)) return;
 		setSelectedAgentId(null);
 	}, [agents, selectedAgentId]);
+
+	// 删除（单个或批量）后收缩选区；列表空了就退出批量态，避免停在无目标的空工具栏上。
+	useEffect(() => {
+		setSelected((current) =>
+			pruneSelection(
+				current,
+				agents.map((agent) => agent.id),
+			),
+		);
+		if (agents.length === 0) setSelectionMode(false);
+	}, [agents]);
 
 	const backToMarket = useCallback(() => {
 		setRoute({ kind: "market" });
@@ -122,6 +140,32 @@ export function AgentMarketWorkspace({ initialEditingAgentId, onUseAgent, onClos
 		[onClose, onUseAgent, pendingUseAgentId],
 	);
 
+	const exitSelection = useCallback(() => {
+		setSelectionMode(false);
+		setSelected(new Set<string>());
+	}, []);
+
+	const enterSelection = useCallback(() => {
+		setSelectedAgentId(null);
+		setSelectionMode(true);
+	}, []);
+
+	const toggleSelect = useCallback((agent: AgentProfile) => {
+		if (agent.builtin) return;
+		setSelected((current) => toggleSelection(current, agent.id));
+	}, []);
+
+	const toggleSelectAllVisible = useCallback(() => {
+		setSelected((current) => setSelectionFor(current, deletableVisibleIds, !areAllSelected(current, deletableVisibleIds)));
+	}, [deletableVisibleIds]);
+
+	const handleConfirmBulkDelete = async () => {
+		const targets = agents.filter((agent) => selected.has(agent.id));
+		setPendingBulkDelete(false);
+		exitSelection();
+		await actions.deleteAgents(targets);
+	};
+
 	const handleConfirmDelete = async () => {
 		const target = pendingDelete;
 		setPendingDelete(null);
@@ -134,8 +178,12 @@ export function AgentMarketWorkspace({ initialEditingAgentId, onUseAgent, onClos
 		<div className="flex min-h-0 flex-1 flex-col">
 			{route.kind === "market" ? (
 				<>
-					<AgentMarketHeader query={filter.query} onQueryChange={handleQueryChange} onCreate={() => setRoute({ kind: "editor", agentId: null })} />
-					<AgentMarketCategoryChips value={filter.category} onChange={handleCategoryChange} />
+					<AgentMarketHeader query={filter.query} onQueryChange={handleQueryChange} onCreate={() => setRoute({ kind: "editor", agentId: null })} onToggleSelection={agents.length > 0 ? () => (selectionMode ? exitSelection() : enterSelection()) : undefined} selectionMode={selectionMode} />
+					{selectionMode ? (
+						<BulkSelectionBar count={selected.size} allSelected={areAllSelected(selected, deletableVisibleIds)} onToggleAll={toggleSelectAllVisible} onExit={exitSelection} onRequestDelete={() => setPendingBulkDelete(true)} />
+					) : (
+						<AgentMarketCategoryChips value={filter.category} onChange={handleCategoryChange} />
+					)}
 					<div className="flex min-h-0 flex-1">
 						<div className="min-w-0 flex-1 overflow-y-auto px-5 py-3">
 							<AgentMarketGrid
@@ -151,6 +199,9 @@ export function AgentMarketWorkspace({ initialEditingAgentId, onUseAgent, onClos
 								onEdit={handleEdit}
 								onRequestDelete={setPendingDelete}
 								onCreate={() => setRoute({ kind: "editor", agentId: null })}
+								selectionMode={selectionMode}
+								selectedIds={selected}
+								onToggleSelect={toggleSelect}
 							/>
 						</div>
 						{selectedAgent && (
@@ -165,6 +216,7 @@ export function AgentMarketWorkspace({ initialEditingAgentId, onUseAgent, onClos
 				</>
 			)}
 
+			{pendingBulkDelete && <ConfirmDialog title={t("agentMarket.bulkDeleteTitle")} message={t("agentMarket.bulkDeleteBody", { count: selected.size })} confirmLabel={t("common.delete")} danger onCancel={() => setPendingBulkDelete(false)} onConfirm={() => void handleConfirmBulkDelete()} />}
 			{pendingDelete && <ConfirmDialog title={t("agentMarket.deleteConfirmTitle")} message={t("agentMarket.deleteConfirmBody", { name: pendingDelete.name })} confirmLabel={t("common.delete")} danger onCancel={() => setPendingDelete(null)} onConfirm={() => void handleConfirmDelete()} />}
 		</div>
 	);

@@ -23,6 +23,11 @@ interface AgentMarketGridProps {
 	onEdit: (agent: AgentProfile) => void;
 	onRequestDelete: (agent: AgentProfile) => void;
 	onCreate: () => void;
+	/** 批量删除模式：卡片变成选择目标，拖拽手柄收起。 */
+	selectionMode: boolean;
+	/** 已选中的智能体 id 集合。 */
+	selectedIds: ReadonlySet<string>;
+	onToggleSelect: (agent: AgentProfile) => void;
 }
 
 /**
@@ -30,7 +35,7 @@ interface AgentMarketGridProps {
  * 列宽用 auto-fill/minmax：市场现在是随会话列伸缩的页面（不再被 Dialog 限宽 960），
  * 详情面板展开后网格自动减少列数，不需要为「详情是否展开」写第二套断点。
  */
-export function AgentMarketGrid({ agents, orderIds, totalCount, selectionDefaultId, selectedAgentId, usePendingId, onReorder, onOpen, onUse, onEdit, onRequestDelete, onCreate }: AgentMarketGridProps) {
+export function AgentMarketGrid({ agents, orderIds, totalCount, selectionDefaultId, selectedAgentId, usePendingId, onReorder, onOpen, onUse, onEdit, onRequestDelete, onCreate, selectionMode, selectedIds, onToggleSelect }: AgentMarketGridProps) {
 	// 拖拽排序：可见卡片决定落点，orderIds（完整顺序）决定持久化结果——搜索/分类过滤时
 	// 隐藏的卡片在完整顺序里保持原位，不会被「只看得见的部分」洗牌。
 	const reorder = useListReorder({ keys: orderIds, visibleKeys: agents.map((agent) => agent.id), orientation: "grid", onReorder });
@@ -62,7 +67,21 @@ export function AgentMarketGrid({ agents, orderIds, totalCount, selectionDefault
 	return (
 		<div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-3" {...reorder.containerProps}>
 			{agents.map((agent) => (
-				<AgentMarketCard key={agent.id} agent={agent} selectionDefault={selectionDefaultId === agent.id} active={selectedAgentId === agent.id} usePending={usePendingId === agent.id} reorder={reorder.itemBinding(agent.id)} onOpen={onOpen} onUse={onUse} onEdit={onEdit} onRequestDelete={onRequestDelete} />
+				<AgentMarketCard
+					key={agent.id}
+					agent={agent}
+					selectionDefault={selectionDefaultId === agent.id}
+					active={selectedAgentId === agent.id}
+					usePending={usePendingId === agent.id}
+					reorder={reorder.itemBinding(agent.id)}
+					selectionMode={selectionMode}
+					checked={selectedIds.has(agent.id)}
+					onToggleSelect={onToggleSelect}
+					onOpen={onOpen}
+					onUse={onUse}
+					onEdit={onEdit}
+					onRequestDelete={onRequestDelete}
+				/>
 			))}
 		</div>
 	);

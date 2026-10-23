@@ -17,6 +17,7 @@
  *   同批合并 selectionTool.resize（划词浮窗折叠 / 展开高度上报）入场，命名空间数与数量锚点不变。
  * 2026-10-23 刷新：favorites 命名空间入场（收藏功能提交 f3075f08c 漏刷快照，73→74）；
  *   agentProfiles.reorder / favorites.reorder（智能体与收藏列表拖拽排序）各 +1 方法。
+ * 2026-10-24 刷新：favorites.removeMany（收藏批量删除，一次 IPC 一次写盘）+1 方法；命名空间数不变。
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -24,7 +25,7 @@ import { test } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const NS_LIST_SHA256 = "2b7ea69786b498fe4c29a38c12f0ecec9c5654ea07b2dc6be5b4f851e081f222";
-const FULL_METHODS_SHA256 = "45de4fd70945cee28b1109a9d7902e53c55895d86a1aad6a2cde194fbfad9903";
+const FULL_METHODS_SHA256 = "9ace5c571fbd23f58c5fd876de8914684733a8e2549b0cba8d200c3922b0bf82";
 const NAMESPACE_COUNT = 74;
 
 /** 捕获 preload 暴露的 piDesktop；null/undefined/形态不符时显式红并给诊断（F8-6 共用）。 */

@@ -25,12 +25,12 @@ function parseFavoriteId(value: unknown): string {
 }
 
 /**
- * 排序入参：完整 id 数组。上限与存储上限一致；未知/重复 id 交给 store 过滤
- * （渲染层可能拿着拖拽开始时的旧快照，其中包含刚被删除的收藏）。
+ * 批量 id 入参（批量删除 / 排序）：上限与存储上限一致；未知/重复 id 交给 store 过滤
+ * （渲染层可能拿着旧快照，其中包含刚被删除的收藏）。
  */
-function parseFavoriteOrder(value: unknown): string[] {
-	if (!Array.isArray(value)) throw new Error("Invalid favorite order");
-	if (value.length > FAVORITE_ENTRY_LIMIT) throw new Error("Favorite order is too long");
+function parseFavoriteIdList(value: unknown): string[] {
+	if (!Array.isArray(value)) throw new Error("Invalid favorite id list");
+	if (value.length > FAVORITE_ENTRY_LIMIT) throw new Error("Favorite id list is too long");
 	return value.map((entry) => parseFavoriteId(entry));
 }
 
@@ -57,8 +57,15 @@ export function registerFavoritesIpc(deps: FavoritesIpcDeps): () => void {
 		return removed;
 	});
 
+	ipcMain.handle(ipcChannels.favoritesRemoveMany, async (_event, favoriteIds: unknown): Promise<number> => {
+		const ids = parseFavoriteIdList(favoriteIds);
+		const removed = await store.removeMany(ids);
+		void appLogger.info(LOG_SCOPE, "Removed favorites", { requested: ids.length, removed });
+		return removed;
+	});
+
 	ipcMain.handle(ipcChannels.favoritesReorder, async (_event, favoriteIds: unknown): Promise<FavoriteEntry[]> => {
-		const order = parseFavoriteOrder(favoriteIds);
+		const order = parseFavoriteIdList(favoriteIds);
 		const entries = await store.reorder(order);
 		void appLogger.info(LOG_SCOPE, "Reordered favorites", { count: entries.length });
 		return entries;
@@ -68,6 +75,7 @@ export function registerFavoritesIpc(deps: FavoritesIpcDeps): () => void {
 		ipcMain.removeHandler(ipcChannels.favoritesList);
 		ipcMain.removeHandler(ipcChannels.favoritesAdd);
 		ipcMain.removeHandler(ipcChannels.favoritesRemove);
+		ipcMain.removeHandler(ipcChannels.favoritesRemoveMany);
 		ipcMain.removeHandler(ipcChannels.favoritesReorder);
 	};
 }

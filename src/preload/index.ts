@@ -1752,6 +1752,8 @@ const api = {
 		list: () => ipcRenderer.invoke(ipcChannels.favoritesList) as Promise<FavoriteEntry[]>,
 		add: (input: AddFavoriteInput) => ipcRenderer.invoke(ipcChannels.favoritesAdd, input) as Promise<FavoriteEntry>,
 		remove: (favoriteId: string) => ipcRenderer.invoke(ipcChannels.favoritesRemove, favoriteId) as Promise<boolean>,
+		/** 批量删除：一次写盘，返回实际删除条数（未知 id 忽略）。 */
+		removeMany: (favoriteIds: string[]) => ipcRenderer.invoke(ipcChannels.favoritesRemoveMany, favoriteIds) as Promise<number>,
 		/** 保存拖拽出的顺序（完整 id 数组）；返回主进程落地后的列表。 */
 		reorder: (favoriteIds: string[]) => ipcRenderer.invoke(ipcChannels.favoritesReorder, favoriteIds) as Promise<FavoriteEntry[]>,
 	},
