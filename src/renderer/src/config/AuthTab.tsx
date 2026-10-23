@@ -1,4 +1,5 @@
 import { Button } from "../components/ui-shadcn/button";
+import { Collapsible, CollapsibleContent } from "../components/ui-shadcn/collapsible";
 import { Separator } from "../components/ui-shadcn/separator";
 import { useCallback, useEffect, useState } from "react";
 import { ArrowUpDown, Check, ChevronDown, ChevronRight, Copy, ExternalLink, Eye, EyeOff, GripVertical, Trash2 } from "lucide-react";
@@ -365,73 +366,76 @@ export function AuthTab(props: {
 							className={`relative rounded-lg border border-border-subtle bg-bg-panel transition-[border-color,box-shadow,background-color,opacity] duration-150${providerReorder.draggingName === name ? " opacity-40 border-dashed" : ""}${isExpanded ? " border-[color-mix(in_srgb,var(--color-accent)_32%,var(--color-border-subtle))] shadow-[var(--shadow-border)]" : ""}`}
 							{...providerReorder.cardProps(name)}
 						>
-							{/* 插入指示线：拖拽落点在上下哪侧就画在卡片哪侧；加粗 + 发光，落点一眼可见 */}
-							{providerReorder.dropTarget?.name === name && <span className={`absolute ${providerReorder.dropTarget.position === "before" ? "top-0" : "bottom-0"} right-0 left-0 z-10 h-[3px] rounded-full bg-[color:var(--color-accent)] shadow-[0_0_8px_color-mix(in_srgb,var(--color-accent)_55%,transparent)]`} />}
-							<div data-provider-head="" className="flex cursor-pointer items-center gap-2.5 rounded-t-lg px-3.5 py-2 transition-colors duration-150 hover:bg-bg-hover" onClick={() => props.onToggleAuth(name)}>
-								{/* 拖拽手柄：draggable 只落在手柄上，避免抢整行点击展开；聚焦手柄后 ↑/↓ 也可微调（键盘接线在 hook 的 gripProps 里） */}
-								<Button variant="ghost" size="icon-sm" className="size-6 shrink-0 cursor-grab text-muted-foreground active:cursor-grabbing" title={t("config.dragProvider")} {...providerReorder.gripProps(name)} onClick={(event) => event.stopPropagation()}>
-									<GripVertical size={14} />
-								</Button>
-								{batchMode && (
-									<Label className="mr-2.5 inline-flex size-4 shrink-0 items-center justify-center" onClick={(e) => e.stopPropagation()}>
-										<Checkbox
-											checked={selectedAuths.has(name)}
-											onClick={(e) => e.stopPropagation()}
-											onCheckedChange={() => {
-												setSelectedAuths((prev) => {
-													const next = new Set(prev);
-													if (next.has(name)) next.delete(name);
-													else next.add(name);
-													return next;
-												});
-											}}
-										/>
-									</Label>
-								)}
-								<span className="text-control font-semibold text-text-primary">{name}</span>
-								<span className="min-w-0 flex-1 truncate font-mono text-xs text-text-tertiary">{auth.key ? `${auth.key.slice(0, 10)}••••••${auth.key.slice(-4)}` : t("config.authKeyPreviewEmpty")}</span>
-								{/* 用量徽章（与模型页同款）：只在已启用时显示数据，开关在右侧「用量查询」弹窗里。 */}
-								<span className="shrink-0" onClick={(event) => event.stopPropagation()}>
-									<ProviderUsageInline provider={name} variant="card" />
-								</span>
-								<div className="flex items-center gap-1">
-									<ProviderMigrationButton direction="pi-to-dsh" provider={name} />
-									{/* 用量查询配置（内置支持的供应商零配置自动生效，不渲染） */}
-									<UsageQueryEntryButton provider={name} onOpen={() => props.onOpenUsageProbeDialog(name)} />
-									{onToggleHiddenAuthProvider && (
+							{/* 折叠体走共享折叠原语（真高度渐变 + exit 后卸载 + reduced-motion 回退）；
+							    display:contents 让根不生成盒子，折叠态零空档、展开态布局与原来一致。 */}
+							<Collapsible open={isExpanded} className="contents">
+								{/* 插入指示线：拖拽落点在上下哪侧就画在卡片哪侧；加粗 + 发光，落点一眼可见 */}
+								{providerReorder.dropTarget?.name === name && <span className={`absolute ${providerReorder.dropTarget.position === "before" ? "top-0" : "bottom-0"} right-0 left-0 z-10 h-[3px] rounded-full bg-[color:var(--color-accent)] shadow-[0_0_8px_color-mix(in_srgb,var(--color-accent)_55%,transparent)]`} />}
+								<div data-provider-head="" className="flex cursor-pointer items-center gap-2.5 rounded-t-lg px-3.5 py-2 transition-colors duration-150 hover:bg-bg-hover" onClick={() => props.onToggleAuth(name)}>
+									{/* 拖拽手柄：draggable 只落在手柄上，避免抢整行点击展开；聚焦手柄后 ↑/↓ 也可微调（键盘接线在 hook 的 gripProps 里） */}
+									<Button variant="ghost" size="icon-sm" className="size-6 shrink-0 cursor-grab text-muted-foreground active:cursor-grabbing" title={t("config.dragProvider")} {...providerReorder.gripProps(name)} onClick={(event) => event.stopPropagation()}>
+										<GripVertical size={14} />
+									</Button>
+									{batchMode && (
+										<Label className="mr-2.5 inline-flex size-4 shrink-0 items-center justify-center" onClick={(e) => e.stopPropagation()}>
+											<Checkbox
+												checked={selectedAuths.has(name)}
+												onClick={(e) => e.stopPropagation()}
+												onCheckedChange={() => {
+													setSelectedAuths((prev) => {
+														const next = new Set(prev);
+														if (next.has(name)) next.delete(name);
+														else next.add(name);
+														return next;
+													});
+												}}
+											/>
+										</Label>
+									)}
+									<span className="text-control font-semibold text-text-primary">{name}</span>
+									<span className="min-w-0 flex-1 truncate font-mono text-xs text-text-tertiary">{auth.key ? `${auth.key.slice(0, 10)}••••••${auth.key.slice(-4)}` : t("config.authKeyPreviewEmpty")}</span>
+									{/* 用量徽章（与模型页同款）：只在已启用时显示数据，开关在右侧「用量查询」弹窗里。 */}
+									<span className="shrink-0" onClick={(event) => event.stopPropagation()}>
+										<ProviderUsageInline provider={name} variant="card" />
+									</span>
+									<div className="flex items-center gap-1">
+										<ProviderMigrationButton direction="pi-to-dsh" provider={name} />
+										{/* 用量查询配置（内置支持的供应商零配置自动生效，不渲染） */}
+										<UsageQueryEntryButton provider={name} onOpen={() => props.onOpenUsageProbeDialog(name)} />
+										{onToggleHiddenAuthProvider && (
+											<Button
+												variant="ghost"
+												size="icon-sm"
+												className="size-7"
+												onClick={(e) => {
+													e.stopPropagation();
+													onToggleHiddenAuthProvider(name);
+												}}
+												title={t("config.hideAuth")}
+											>
+												<EyeOff size={14} className="text-muted-foreground" />
+											</Button>
+										)}
+										{/* 删除是不可撤销动作，和上面的「隐藏/Migration/用量」用竖线隔开：
+									    图标按钮只有 4px gap 时，误点一次就删掉一组凭据。 */}
+										<Separator orientation="vertical" className="mx-0.5 h-4" />
 										<Button
 											variant="ghost"
 											size="icon-sm"
-											className="size-7"
+											className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
 											onClick={(e) => {
 												e.stopPropagation();
-												onToggleHiddenAuthProvider(name);
+												props.onDeleteAuth(name);
 											}}
-											title={t("config.hideAuth")}
+											title={t("common.delete")}
 										>
-											<EyeOff size={14} className="text-muted-foreground" />
+											<Trash2 size={14} />
 										</Button>
-									)}
-									{/* 删除是不可撤销动作，和上面的「隐藏/Migration/用量」用竖线隔开：
-									    图标按钮只有 4px gap 时，误点一次就删掉一组凭据。 */}
-									<Separator orientation="vertical" className="mx-0.5 h-4" />
-									<Button
-										variant="ghost"
-										size="icon-sm"
-										className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
-										onClick={(e) => {
-											e.stopPropagation();
-											props.onDeleteAuth(name);
-										}}
-										title={t("common.delete")}
-									>
-										<Trash2 size={14} />
-									</Button>
-									<span className="ml-1 text-control text-text-tertiary">{isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
+										<span className="ml-1 text-control text-text-tertiary">{isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
+									</div>
 								</div>
-							</div>
-							{isExpanded && (
-								<div className="mx-4 my-3.5 grid gap-2.5 rounded-lg border border-border-subtle bg-bg-panel p-3.5 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
+								{/* 不再挂 animate-in/fade-in：cn 的 twMerge 会把 animate-* 判同组，保留会盖掉高度动画。 */}
+								<CollapsibleContent className="mx-4 my-3.5 grid gap-2.5 rounded-lg border border-border-subtle bg-bg-panel p-3.5">
 									<div className="grid grid-cols-[90px_1fr] items-center gap-2.5">
 										<Label className="pl-0.5 text-left text-xs font-medium text-text-secondary">{t("config.field.type")}</Label>
 										<ConfigSelect value={auth.type ?? "api_key"} options={AUTH_TYPE_OPTIONS} onChange={(v) => props.onUpdate(name, "type", v)} />
@@ -440,8 +444,8 @@ export function AuthTab(props: {
 										<Label className="mb-1.5 block text-xs font-medium text-text-secondary">{t("config.field.apiKey")}</Label>
 										<SecretInput value={auth.key ?? ""} onChange={(v) => props.onUpdate(name, "key", v)} />
 									</div>
-								</div>
-							)}
+								</CollapsibleContent>
+							</Collapsible>
 						</div>
 					);
 				})}

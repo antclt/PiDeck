@@ -8,6 +8,7 @@ import { t, type TranslationKey } from "../i18n";
 import { showNotice } from "../utils/notice";
 import { Badge } from "../components/ui-shadcn/badge";
 import { Button } from "../components/ui-shadcn/button";
+import { Collapsible, CollapsibleContent } from "../components/ui-shadcn/collapsible";
 import { Input } from "../components/ui-shadcn/input";
 import { Pagination } from "../components/ui-shadcn/pagination";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui-shadcn/select";
@@ -407,25 +408,28 @@ export function PluginInventoryView() {
 						const detailId = `dsh-plugin-inventory-${entry.entryId}`;
 						return (
 							<li key={entry.entryId} className="overflow-hidden rounded-lg border border-border-subtle bg-bg-panel">
-								<button type="button" className="flex w-full items-center gap-2 px-3 py-2.5 text-left" aria-expanded={open} aria-controls={detailId} onClick={() => setExpandedId(open ? null : entry.entryId)}>
-									<span className="min-w-0 flex-1 truncate text-control font-semibold text-foreground" title={entry.moduleName}>
-										{title}
-									</span>
-									<OriginBadge origin={entry.origin} />
-									{entry.enabled ? (
-										<Badge variant="outline" className="shrink-0 border-emerald-300/70 bg-emerald-500/10 font-medium text-emerald-700 dark:border-emerald-700/70 dark:text-emerald-300">
-											{t("config.dsh.pluginEnabled")}
-										</Badge>
-									) : (
-										<Badge variant="outline" className="shrink-0 border-border-subtle text-muted-foreground">
-											{t("config.dsh.pluginDisabled")}
-										</Badge>
-									)}
-									<span className={`size-1.5 shrink-0 rounded-full ${phaseDotClass(entry.fiberPhase, entry.enabled)}`} role="img" aria-label={phaseLabel(entry.fiberPhase)} title={phaseLabel(entry.fiberPhase)} />
-									{open ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
-								</button>
-								{open && (
-									<div id={detailId} className="border-t border-border/40 px-3 py-2.5 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
+								{/* 折叠体走共享折叠原语；li 保持 <li>（不改列表语义），用 display:contents 包装层引入
+								    折叠上下文，不生成盒子 → 折叠态零空档、展开态布局与原来一致。 */}
+								<Collapsible open={open} className="contents">
+									<button type="button" className="flex w-full items-center gap-2 px-3 py-2.5 text-left" aria-expanded={open} aria-controls={detailId} onClick={() => setExpandedId(open ? null : entry.entryId)}>
+										<span className="min-w-0 flex-1 truncate text-control font-semibold text-foreground" title={entry.moduleName}>
+											{title}
+										</span>
+										<OriginBadge origin={entry.origin} />
+										{entry.enabled ? (
+											<Badge variant="outline" className="shrink-0 border-emerald-300/70 bg-emerald-500/10 font-medium text-emerald-700 dark:border-emerald-700/70 dark:text-emerald-300">
+												{t("config.dsh.pluginEnabled")}
+											</Badge>
+										) : (
+											<Badge variant="outline" className="shrink-0 border-border-subtle text-muted-foreground">
+												{t("config.dsh.pluginDisabled")}
+											</Badge>
+										)}
+										<span className={`size-1.5 shrink-0 rounded-full ${phaseDotClass(entry.fiberPhase, entry.enabled)}`} role="img" aria-label={phaseLabel(entry.fiberPhase)} title={phaseLabel(entry.fiberPhase)} />
+										{open ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
+									</button>
+									{/* id 保留：按钮的 aria-controls={detailId} 仍指向真实折叠体；不再挂 animate-in（会盖掉高度动画）。 */}
+									<CollapsibleContent id={detailId} className="border-t border-border/40 px-3 py-2.5">
 										<code className="block truncate font-mono text-micro text-text-secondary" title={entry.entryId}>
 											{entry.entryId}
 										</code>
@@ -461,8 +465,8 @@ export function PluginInventoryView() {
 												</Button>
 											</div>
 										)}
-									</div>
-								)}
+									</CollapsibleContent>
+								</Collapsible>
 							</li>
 						);
 					})}

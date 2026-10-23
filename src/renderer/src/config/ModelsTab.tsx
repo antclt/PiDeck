@@ -1,4 +1,5 @@
 import { Button } from "../components/ui-shadcn/button";
+import { Collapsible, CollapsibleContent } from "../components/ui-shadcn/collapsible";
 import { Separator } from "../components/ui-shadcn/separator";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUpDown, ChevronDown, ChevronRight, Copy, Eye, EyeOff, ExternalLink, GripVertical, SquarePen, Trash2, X } from "lucide-react";
@@ -453,111 +454,114 @@ export function ModelsTab(props: {
 								>
 									{/* 拖拽插入指示线：贴卡片内缘（卡片是 overflow-hidden，放到卡片外会被剪掉）；加粗 + 发光，落点一眼可见 */}
 									{providerReorder.dropTarget?.name === name && <span className={`absolute ${providerReorder.dropTarget.position === "before" ? "top-0" : "bottom-0"} right-0 left-0 z-10 h-[3px] rounded-full bg-[color:var(--color-accent)] shadow-[0_0_8px_color-mix(in_srgb,var(--color-accent)_55%,transparent)]`} />}
-									{/* 整行点击展开/收起；右侧操作区 stopPropagation，避免点复制/删除/用量配置时误折叠。 */}
-									<div data-provider-head="" className="flex cursor-pointer items-center justify-between px-3.5 py-2 transition-colors duration-150 hover:bg-bg-hover" onClick={() => props.onToggleProvider(name)}>
-										{batchMode && (
-											<Label className="mr-2.5 inline-flex size-4 shrink-0 items-center justify-center" onClick={(e) => e.stopPropagation()}>
-												<Checkbox
-													checked={selectedProviders.has(name)}
-													onClick={(e) => e.stopPropagation()}
-													onCheckedChange={() => {
-														setSelectedProviders((prev) => {
-															const next = new Set(prev);
-															if (next.has(name)) next.delete(name);
-															else next.add(name);
-															return next;
-														});
-													}}
-												/>
-											</Label>
-										)}
-										<div className="flex min-w-0 flex-1 items-center gap-2.5">
-											{/* 拖拽手柄：draggable 落在按钮上（Button 直接透传原生属性），只有按住手柄才能拖动，避免整行点击展开被拖拽抢掉；
+									{/* 折叠体走共享折叠原语（真高度渐变 + exit 后卸载 + reduced-motion 回退）；
+									    display:contents 让根不生成盒子，折叠态零空档、展开态布局与原来一致。 */}
+									<Collapsible open={isExpanded} className="contents">
+										{/* 整行点击展开/收起；右侧操作区 stopPropagation，避免点复制/删除/用量配置时误折叠。 */}
+										<div data-provider-head="" className="flex cursor-pointer items-center justify-between px-3.5 py-2 transition-colors duration-150 hover:bg-bg-hover" onClick={() => props.onToggleProvider(name)}>
+											{batchMode && (
+												<Label className="mr-2.5 inline-flex size-4 shrink-0 items-center justify-center" onClick={(e) => e.stopPropagation()}>
+													<Checkbox
+														checked={selectedProviders.has(name)}
+														onClick={(e) => e.stopPropagation()}
+														onCheckedChange={() => {
+															setSelectedProviders((prev) => {
+																const next = new Set(prev);
+																if (next.has(name)) next.delete(name);
+																else next.add(name);
+																return next;
+															});
+														}}
+													/>
+												</Label>
+											)}
+											<div className="flex min-w-0 flex-1 items-center gap-2.5">
+												{/* 拖拽手柄：draggable 落在按钮上（Button 直接透传原生属性），只有按住手柄才能拖动，避免整行点击展开被拖拽抢掉；
 											    聚焦手柄后 ↑/↓ 也可微调（上移/下移按钮的无障碍替代，键盘接线在 hook 的 gripProps 里） */}
-											<Button variant="ghost" size="icon-sm" className="size-6 shrink-0 cursor-grab text-muted-foreground active:cursor-grabbing" title={t("config.dragProvider")} {...providerReorder.gripProps(name)} onClick={(event) => event.stopPropagation()}>
-												<GripVertical size={14} />
-											</Button>
-											<span className="min-w-0 truncate text-control font-semibold text-text-primary">{name}</span>
-											{/* 折叠态把「N 模型」和用量收进标题行，避免底部再占一条 h-9 空行。用量拦截点击，避免点刷新时误折叠卡片。 */}
-											<span className="shrink-0 rounded-full border border-border-subtle px-1.5 py-px font-mono text-micro tabular-nums text-muted-foreground">{t("config.count.models", { count: provider.models.length })}</span>
-											<span onClick={(event) => event.stopPropagation()}>
-												<ProviderUsageInline provider={name} variant="card" />
-											</span>
+												<Button variant="ghost" size="icon-sm" className="size-6 shrink-0 cursor-grab text-muted-foreground active:cursor-grabbing" title={t("config.dragProvider")} {...providerReorder.gripProps(name)} onClick={(event) => event.stopPropagation()}>
+													<GripVertical size={14} />
+												</Button>
+												<span className="min-w-0 truncate text-control font-semibold text-text-primary">{name}</span>
+												{/* 折叠态把「N 模型」和用量收进标题行，避免底部再占一条 h-9 空行。用量拦截点击，避免点刷新时误折叠卡片。 */}
+												<span className="shrink-0 rounded-full border border-border-subtle px-1.5 py-px font-mono text-micro tabular-nums text-muted-foreground">{t("config.count.models", { count: provider.models.length })}</span>
+												<span onClick={(event) => event.stopPropagation()}>
+													<ProviderUsageInline provider={name} variant="card" />
+												</span>
+											</div>
+
+											<div className="flex shrink-0 items-center gap-1" onClick={(event) => event.stopPropagation()}>
+												<Button
+													variant="ghost"
+													size="icon-sm"
+													className="size-7"
+													onClick={(e) => {
+														e.stopPropagation();
+														props.onStartEditProvider(name);
+													}}
+													title={t("config.editProvider")}
+												>
+													<SquarePen size={14} />
+												</Button>
+												{/* 隐藏开关：眼睛按钮切换隐藏，隐藏后卡片移入底部「已隐藏」折叠区（模型选择器同步不显示） */}
+												<Button
+													variant="ghost"
+													size="icon-sm"
+													className="size-7"
+													onClick={(e) => {
+														e.stopPropagation();
+														props.onToggleHiddenProvider(name);
+													}}
+													title={t("config.hideProvider")}
+												>
+													<Eye size={14} />
+												</Button>
+												<ProviderMigrationButton direction="pi-to-dsh" provider={name} />
+												{/* 用量查询配置（内置支持的供应商零配置自动生效，不渲染；其余可配通用/New API 模板） */}
+												<UsageQueryEntryButton provider={name} onOpen={() => props.onOpenUsageProbeDialog(name)} />
+												<Button
+													variant="ghost"
+													size="icon-sm"
+													className="size-7"
+													onClick={(e) => {
+														e.stopPropagation();
+														props.onDuplicateProvider(name);
+													}}
+													title={t("config.duplicateProvider")}
+												>
+													<Copy size={14} />
+												</Button>
+												{/* 删除供应商会连带删掉整组模型与凭据，和「隐藏/复制」用竖线隔开（同认证页） */}
+												<Separator orientation="vertical" className="mx-0.5 h-4" />
+												<Button
+													variant="ghost"
+													size="icon-sm"
+													className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
+													onClick={(e) => {
+														e.stopPropagation();
+														props.onDeleteProvider(name);
+													}}
+													title={t("config.deleteProvider")}
+												>
+													<Trash2 size={14} />
+												</Button>
+												{/* 显式展开按钮：与整行点击共用 onToggleProvider；按钮自身 stopPropagation 避免冒泡双触发 */}
+												<Button
+													variant="ghost"
+													size="icon-sm"
+													className="size-7"
+													onClick={(e) => {
+														e.stopPropagation();
+														props.onToggleProvider(name);
+													}}
+													title={isExpanded ? t("config.providerCollapse") : t("config.providerExpand")}
+												>
+													{isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+												</Button>
+											</div>
 										</div>
 
-										<div className="flex shrink-0 items-center gap-1" onClick={(event) => event.stopPropagation()}>
-											<Button
-												variant="ghost"
-												size="icon-sm"
-												className="size-7"
-												onClick={(e) => {
-													e.stopPropagation();
-													props.onStartEditProvider(name);
-												}}
-												title={t("config.editProvider")}
-											>
-												<SquarePen size={14} />
-											</Button>
-											{/* 隐藏开关：眼睛按钮切换隐藏，隐藏后卡片移入底部「已隐藏」折叠区（模型选择器同步不显示） */}
-											<Button
-												variant="ghost"
-												size="icon-sm"
-												className="size-7"
-												onClick={(e) => {
-													e.stopPropagation();
-													props.onToggleHiddenProvider(name);
-												}}
-												title={t("config.hideProvider")}
-											>
-												<Eye size={14} />
-											</Button>
-											<ProviderMigrationButton direction="pi-to-dsh" provider={name} />
-											{/* 用量查询配置（内置支持的供应商零配置自动生效，不渲染；其余可配通用/New API 模板） */}
-											<UsageQueryEntryButton provider={name} onOpen={() => props.onOpenUsageProbeDialog(name)} />
-											<Button
-												variant="ghost"
-												size="icon-sm"
-												className="size-7"
-												onClick={(e) => {
-													e.stopPropagation();
-													props.onDuplicateProvider(name);
-												}}
-												title={t("config.duplicateProvider")}
-											>
-												<Copy size={14} />
-											</Button>
-											{/* 删除供应商会连带删掉整组模型与凭据，和「隐藏/复制」用竖线隔开（同认证页） */}
-											<Separator orientation="vertical" className="mx-0.5 h-4" />
-											<Button
-												variant="ghost"
-												size="icon-sm"
-												className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
-												onClick={(e) => {
-													e.stopPropagation();
-													props.onDeleteProvider(name);
-												}}
-												title={t("config.deleteProvider")}
-											>
-												<Trash2 size={14} />
-											</Button>
-											{/* 显式展开按钮：与整行点击共用 onToggleProvider；按钮自身 stopPropagation 避免冒泡双触发 */}
-											<Button
-												variant="ghost"
-												size="icon-sm"
-												className="size-7"
-												onClick={(e) => {
-													e.stopPropagation();
-													props.onToggleProvider(name);
-												}}
-												title={isExpanded ? t("config.providerCollapse") : t("config.providerExpand")}
-											>
-												{isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-											</Button>
-										</div>
-									</div>
-
-									{isExpanded && (
-										<div className="config-provider-body border-t border-border-subtle bg-bg-muted pt-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
+										{/* 不再挂 animate-in/fade-in：cn 的 twMerge 会把 animate-* 判同组，保留会盖掉高度动画。 */}
+										<CollapsibleContent className="config-provider-body border-t border-border-subtle bg-bg-muted pt-3">
 											<div className="config-provider-form mx-4 my-3.5 grid gap-2.5 rounded-lg border border-border-subtle bg-bg-panel p-3.5">
 												<ProviderConnectionForm
 													baseUrl={provider.baseUrl ?? ""}
@@ -774,8 +778,8 @@ export function ModelsTab(props: {
 													);
 												})()}
 											</div>
-										</div>
-									)}
+										</CollapsibleContent>
+									</Collapsible>
 								</div>
 							);
 						})}

@@ -1,5 +1,6 @@
 import { Button } from "../../ui-shadcn/button";
 import { Input } from "../../ui-shadcn/input";
+import { Collapsible, CollapsibleContent } from "../../ui-shadcn/collapsible";
 /**
  * ImTab — 外部连接配置选项卡
  *
@@ -507,91 +508,94 @@ function FeishuPane(_props: Props) {
 					const secretValue = revealedSecrets[bot.id];
 					return (
 						<div key={bot.id} className={`mb-2 overflow-hidden rounded-lg border border-border-subtle bg-bg-panel transition-[border-color,box-shadow,background-color] duration-fast config-im-bot-card${isThisConnected ? " border-[var(--color-accent)]/30" : ""}`}>
-							<div
-								className="flex cursor-pointer items-center gap-3 px-3.5 py-2.5 hover:bg-bg-hover config-im-bot-header"
-								/* 展开是进入 Bot 配置的唯一入口，键盘必须可达；全局 [role=button]:focus-visible 自动提供焦点环 */
-								role="button"
-								tabIndex={0}
-								aria-expanded={isExpanded}
-								onKeyDown={(e) => {
-									if (e.key === "Enter" || e.key === " ") {
-										e.preventDefault();
-										toggleBotExpanded();
-									}
-								}}
-								onClick={toggleBotExpanded}
-							>
-								<div className="min-w-0 flex-1">
-									<div className="truncate text-control font-semibold text-text-primary">
-										<span className="config-im-expand-caret">{isExpanded ? "▾" : "▸"}</span>
-										{bot.name}
-										{isThisConnected && <span className="config-im-connected-badge">{t("config.im.connected")}</span>}
+							{/* 折叠体走共享折叠原语；display:contents 不生成盒子，折叠态零空档。 */}
+							<Collapsible open={isExpanded} className="contents">
+								<div
+									className="flex cursor-pointer items-center gap-3 px-3.5 py-2.5 hover:bg-bg-hover config-im-bot-header"
+									/* 展开是进入 Bot 配置的唯一入口，键盘必须可达；全局 [role=button]:focus-visible 自动提供焦点环 */
+									role="button"
+									tabIndex={0}
+									aria-expanded={isExpanded}
+									onKeyDown={(e) => {
+										if (e.key === "Enter" || e.key === " ") {
+											e.preventDefault();
+											toggleBotExpanded();
+										}
+									}}
+									onClick={toggleBotExpanded}
+								>
+									<div className="min-w-0 flex-1">
+										<div className="truncate text-control font-semibold text-text-primary">
+											<span className="config-im-expand-caret">{isExpanded ? "▾" : "▸"}</span>
+											{bot.name}
+											{isThisConnected && <span className="config-im-connected-badge">{t("config.im.connected")}</span>}
+										</div>
+										<div className="text-micro text-text-tertiary">
+											{t("config.im.expandHint")} · {t("config.im.appId")}: {bot.appId.slice(0, 14)}… · {t("config.im.linkedAgentsCount", { count: botBindings.length })}
+										</div>
 									</div>
-									<div className="text-micro text-text-tertiary">
-										{t("config.im.expandHint")} · {t("config.im.appId")}: {bot.appId.slice(0, 14)}… · {t("config.im.linkedAgentsCount", { count: botBindings.length })}
-									</div>
-								</div>
-								<div className="flex shrink-0 gap-1.5" onClick={(e) => e.stopPropagation()}>
-									{isThisConnected ? (
+									<div className="flex shrink-0 gap-1.5" onClick={(e) => e.stopPropagation()}>
+										{isThisConnected ? (
+											<Button
+												variant="outline"
+												size="sm"
+												className="text-destructive"
+												disabled={connecting}
+												onClick={async () => {
+													setConnecting(true);
+													try {
+														await api?.disconnect?.();
+														await loadData();
+													} finally {
+														setConnecting(false);
+													}
+												}}
+											>
+												{connecting ? t("config.im.connecting") : t("config.im.disconnect")}
+											</Button>
+										) : (
+											<Button
+												variant="default"
+												size="sm"
+												disabled={connecting}
+												onClick={async () => {
+													setConnecting(true);
+													try {
+														await api?.connectByBot?.(bot.id);
+														await loadData();
+													} catch (e) {
+														console.error("[Feishu] Failed to connect saved Bot", e);
+														setError(t("config.im.connectFailed"));
+													} finally {
+														setConnecting(false);
+													}
+												}}
+											>
+												{connecting ? t("config.im.connecting") : t("config.im.connect")}
+											</Button>
+										)}
 										<Button
+											size="sm"
 											variant="outline"
-											size="sm"
-											className="text-destructive"
-											disabled={connecting}
-											onClick={async () => {
-												setConnecting(true);
-												try {
-													await api?.disconnect?.();
-													await loadData();
-												} finally {
-													setConnecting(false);
-												}
+											onClick={() => {
+												setExpandedBotIds((prev) => {
+													const next = new Set(prev);
+													if (next.has(bot.id)) next.delete(bot.id);
+													else next.add(bot.id);
+													return next;
+												});
 											}}
 										>
-											{connecting ? t("config.im.connecting") : t("config.im.disconnect")}
+											{isExpanded ? t("common.collapse") : t("common.details")}
 										</Button>
-									) : (
-										<Button
-											variant="default"
-											size="sm"
-											disabled={connecting}
-											onClick={async () => {
-												setConnecting(true);
-												try {
-													await api?.connectByBot?.(bot.id);
-													await loadData();
-												} catch (e) {
-													console.error("[Feishu] Failed to connect saved Bot", e);
-													setError(t("config.im.connectFailed"));
-												} finally {
-													setConnecting(false);
-												}
-											}}
-										>
-											{connecting ? t("config.im.connecting") : t("config.im.connect")}
+										<Button size="sm" variant="destructive" onClick={() => setDeleteConfirmBotId(bot.id)}>
+											{t("common.delete")}
 										</Button>
-									)}
-									<Button
-										size="sm"
-										variant="outline"
-										onClick={() => {
-											setExpandedBotIds((prev) => {
-												const next = new Set(prev);
-												if (next.has(bot.id)) next.delete(bot.id);
-												else next.add(bot.id);
-												return next;
-											});
-										}}
-									>
-										{isExpanded ? t("common.collapse") : t("common.details")}
-									</Button>
-									<Button size="sm" variant="destructive" onClick={() => setDeleteConfirmBotId(bot.id)}>
-										{t("common.delete")}
-									</Button>
+									</div>
 								</div>
-							</div>
-							{isExpanded && (
-								<div className="border-t border-border-subtle px-3.5 py-2.5 text-xs config-im-bot-details motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast" onClick={(e) => e.stopPropagation()}>
+								{/* 不再挂 animate-in/fade-in：twMerge 会把 animate-* 判同组，保留会盖掉高度动画。
+							    onClick 原样保留：站点点击不应冒泡到外层卡片。 */}
+								<CollapsibleContent className="border-t border-border-subtle px-3.5 py-2.5 text-xs config-im-bot-details" onClick={(e) => e.stopPropagation()}>
 									<div className="config-im-bot-detail-section">
 										<div className="config-im-section-title">{t("config.im.appCredentials")}</div>
 										<div className="config-im-credential-grid">
@@ -712,8 +716,8 @@ function FeishuPane(_props: Props) {
 											</div>
 										)}
 									</div>
-								</div>
-							)}
+								</CollapsibleContent>
+							</Collapsible>
 						</div>
 					);
 				})}
