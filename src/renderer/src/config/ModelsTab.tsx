@@ -347,9 +347,10 @@ export function ModelsTab(props: {
 						</div>
 					)}
 
-					{/* Provider 配置指南 */}
-					{showGuide && (
-						<div className="mb-4 rounded-md border border-border-subtle bg-bg-subtle p-4">
+					{/* Provider 配置指南：开合走共享折叠原语（真高度渐变 + exit 后卸载 + reduced-motion 回退）；
+					    display:contents 根不生成盒子，卡片样式移到折叠体本身。 */}
+					<Collapsible open={showGuide} className="contents">
+						<CollapsibleContent className="mb-4 rounded-md border border-border-subtle bg-bg-subtle p-4">
 							<div className="mb-2.5 flex items-center justify-between">
 								<strong className="text-sm text-text-primary">{t("config.providerGuideTitle")}</strong>
 								<Button variant="ghost" size="icon-sm" className="size-7" onClick={() => setShowGuide(false)}>
@@ -430,8 +431,8 @@ export function ModelsTab(props: {
 									</a>
 								</p>
 							</div>
-						</div>
-					)}
+						</CollapsibleContent>
+					</Collapsible>
 
 					<div className="flex flex-col gap-2.5">
 						{visibleProviderNames.map((name) => {

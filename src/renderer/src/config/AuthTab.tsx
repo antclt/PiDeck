@@ -196,9 +196,10 @@ export function AuthTab(props: {
 				</div>
 			)}
 
-			{/* 使用引导 */}
-			{showGuide && (
-				<div className="mb-4 rounded-md border border-border-subtle bg-bg-subtle p-4">
+			{/* 使用引导：开合走共享折叠原语（真高度渐变 + exit 后卸载 + reduced-motion 回退）；
+			    display:contents 根不生成盒子，卡片样式移到折叠体本身。 */}
+			<Collapsible open={showGuide} className="contents">
+				<CollapsibleContent className="mb-4 rounded-md border border-border-subtle bg-bg-subtle p-4">
 					<div className="mb-2.5 flex items-center justify-between">
 						<strong className="text-sm text-text-primary">{t("config.authGuideTitle")}</strong>
 						<Button variant="ghost" size="icon-sm" className="size-7" onClick={() => setShowGuide(false)}>
@@ -219,12 +220,13 @@ export function AuthTab(props: {
 							</a>
 						</p>
 					</div>
-				</div>
-			)}
+				</CollapsibleContent>
+			</Collapsible>
 
-			{/* 选择供应商弹窗 */}
-			{selectingProvider && (
-				<div className="mb-4 rounded-lg border border-border-default bg-bg-panel p-4 shadow-[0_4px_12px_color-mix(in_srgb,var(--color-text-primary)_8%,transparent)]">
+			{/* 选择供应商：开合走共享折叠原语（真高度渐变 + exit 后卸载 + reduced-motion 回退）；
+			    display:contents 根不生成盒子，卡片样式移到折叠体本身。 */}
+			<Collapsible open={selectingProvider} className="contents">
+				<CollapsibleContent className="mb-4 rounded-lg border border-border-default bg-bg-panel p-4 shadow-[0_4px_12px_color-mix(in_srgb,var(--color-text-primary)_8%,transparent)]">
 					<div className="mb-3 flex items-center justify-between border-b border-border-subtle pb-2.5">
 						<strong className="text-sm text-text-primary">{t("config.authSelectProvider")}</strong>
 						<Button variant="ghost" size="icon-sm" className="size-7" onClick={() => setSelectingProvider(false)}>
@@ -352,8 +354,8 @@ export function AuthTab(props: {
 							{t("common.cancel")}
 						</Button>
 					</div>
-				</div>
-			)}
+				</CollapsibleContent>
+			</Collapsible>
 
 			<div className="flex flex-col gap-2.5">
 				{visibleProviders.map((name) => {

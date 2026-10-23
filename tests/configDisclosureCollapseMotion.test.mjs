@@ -135,3 +135,23 @@ test("DshPluginSection 安装表单开合不再瞬时挂载", () => {
 	const source = read("config/DshPluginSection.tsx");
 	assert.doesNotMatch(source, /\{showInstall\s*&&\s*\(/, "安装表单必须常驻 CollapsibleContent 受控开合，不得回退条件挂载");
 });
+
+test("AuthTab 使用引导与选择供应商面板开合不再瞬时挂载", () => {
+	const source = read("config/AuthTab.tsx");
+	assert.doesNotMatch(source, /\{showGuide\s*&&\s*\(/, "使用引导是可再开的 disclosure，必须走折叠原语高度动画");
+	assert.doesNotMatch(source, /\{selectingProvider\s*&&\s*\(/, "选择供应商面板开合把整个供应商列表顶开/收拢，必须走高度动画");
+	assert.match(source, /<Collapsible\s+open=\{showGuide\}\s+className="contents">/);
+	assert.match(source, /<Collapsible\s+open=\{selectingProvider\}\s+className="contents">/);
+});
+
+test("ModelsTab Provider 配置指南开合不再瞬时挂载", () => {
+	const source = read("config/ModelsTab.tsx");
+	assert.doesNotMatch(source, /\{showGuide\s*&&\s*\(/, "配置指南是可再开的 disclosure，必须走折叠原语高度动画");
+	assert.match(source, /<Collapsible\s+open=\{showGuide\}\s+className="contents">/);
+});
+
+test("ImTab 添加 Bot 表单开合不再瞬时挂载", () => {
+	const source = read("components/app/settings/ImTab.tsx");
+	assert.doesNotMatch(source, /\{showAddForm\s*&&\s*\(/, "添加表单必须常驻 CollapsibleContent 受控开合，不得回退条件挂载");
+	assert.match(source, /<Collapsible\s+open=\{showAddForm\}\s+className="contents">/);
+});
