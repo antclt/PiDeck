@@ -48,3 +48,31 @@ test("unknown/extension tool falls back to name + arg summary", () => {
 	const phrase = loadPhrase("get_search_content", { query: "shadcn" });
 	assert.match(phrase.label, /get_search_content shadcn/);
 });
+
+// 2026-10 对齐 ZCode 过程行排版：短语拆成「动词 + 对象」两段——动词做工具行主标签
+// （界面字体），对象进等宽 chip 单行截断；label/loadingLabel 拼接格式保持不变。
+test("phrase splits into verb and object for the silent tool row", () => {
+	const read = loadPhrase("Read", { file_path: "src/main.ts" });
+	assert.equal(read.verb, "读取");
+	assert.equal(read.object, "main.ts");
+	assert.equal(read.label, "读取 main.ts");
+
+	const bash = loadPhrase("Bash", { command: "npm run build" });
+	assert.equal(bash.verb, "执行");
+	assert.equal(bash.object, "npm run build");
+	assert.equal(bash.label, "执行 npm run build");
+	assert.equal(bash.loadingLabel, "正在执行 npm run build...");
+});
+
+test("phrase without an object keeps label equal to the verb alone", () => {
+	const read = loadPhrase("Read", {});
+	assert.equal(read.object, undefined);
+	assert.equal(read.label, "读取文件");
+	assert.equal(read.loadingLabel, "正在读取文件...");
+});
+
+test("unknown tool verb falls back to the raw tool name", () => {
+	const phrase = loadPhrase("get_search_content", { query: "shadcn" });
+	assert.equal(phrase.verb, "get_search_content");
+	assert.equal(phrase.object, "shadcn");
+});
