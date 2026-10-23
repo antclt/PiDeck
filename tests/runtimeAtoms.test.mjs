@@ -61,6 +61,38 @@ test("agent inventory is a read-only projection of canonical Session runtimes", 
 	assert.equal(atoms.upsertAgentInventoryAtom, undefined);
 });
 
+test("runtime ui table keeps identity when non-ui events stream in (sidebar re-render guard)", () => {
+	// 场景（2027-02 性能审计）：会话曾有 ui-request（ask/widget 历史）后，
+	// 流式期间 50ms 节流的 sessions:messages flush / agents:runtime-state 轮询
+	// 都带 payload 进 applySessionRuntimeUiEvent，返回原引用却仍被整表写回，
+	// 侧栏五棵树的整表订阅者每秒全量重渲染数十次。
+	// 必须与下面的事件写入用同一次加载：loadTsCommonJs 每次调用是独立缓存，
+	// 两次加载 = 两份模块实例，读到的会是永远为空的另一张 UI 表。
+	const sessionAtoms = loadTsCommonJs("src/renderer/src/atoms/session-atoms.ts");
+	const store = createStore();
+	store.set(sessionAtoms.replaceProjectSessionsAtom, { projectId: "project-a", sessions: [session("session-a", "project-a")] });
+	store.set(sessionAtoms.replaceSessionRuntimesAtom, [runtime("session-a", "agent-a", "project-a", 1, "running")]);
+
+	// 建立一个 UI 条目（pending select 请求），使该会话进入「有 UI 历史」状态
+	store.set(sessionAtoms.applySessionRuntimeEventAtom, runtimeEvent("session-a", "agent-a", 1, "agents:ui-request", { method: "select", requestId: "req-1", title: "pick", options: ["A"] }));
+	const uiAtom = sessionAtoms.sessionRuntimeUiByIdAtom;
+	const withRequest = store.get(uiAtom);
+	assert.ok(withRequest["session-a"]?.requests?.["req-1"], "前置：UI 请求条目已建立");
+
+	// 流式/轮询类事件连发：UI 表引用不得变化（值未变，写回只会换 Record 身份）
+	store.set(sessionAtoms.applySessionRuntimeEventAtom, runtimeEvent("session-a", "agent-a", 1, "agents:runtime-state", { state: { isStreaming: true } }));
+	const afterStream = store.get(uiAtom);
+	assert.equal(afterStream, withRequest, "非 ui-request 事件不得触碰 UI 表身份");
+	store.set(sessionAtoms.applySessionRuntimeEventAtom, runtimeEvent("session-a", "agent-a", 1, "sessions:messages", { messages: [] }));
+	assert.equal(store.get(uiAtom), withRequest, "messages flush 同样不得触碰 UI 表身份");
+
+	// 真实 UI 变化必须照常生效（引用更新 + revision 推进）
+	store.set(sessionAtoms.applySessionRuntimeEventAtom, runtimeEvent("session-a", "agent-a", 1, "agents:ui-request", { method: "select", requestId: "req-1", completed: true, value: "a" }));
+	const afterComplete = store.get(uiAtom);
+	assert.notEqual(afterComplete, withRequest, "真实 UI 变化必须写回新表");
+	assert.equal(afterComplete["session-a"]?.requests?.["req-1"]?.status, "completed");
+});
+
 test("agent inventory keeps the same array when runtime identity is unchanged", () => {
 	const store = createStore();
 	store.set(atoms.replaceProjectSessionsAtom, {

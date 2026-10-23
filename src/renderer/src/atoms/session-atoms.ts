@@ -1475,8 +1475,14 @@ export const applySessionRuntimeEventAtom = atom(null, (get, set, event: Session
 		running: isSessionTurnRunning(nextRuntime.state, nextRuntime.status),
 	});
 	const terminalEnvelope = !bindingChanged && currentRuntime.status === "closed";
-	const nextUi = payload && !(terminalEnvelope && event.sourceChannel === "agents:ui-request") ? applySessionRuntimeUiEvent(get(sessionRuntimeUiByIdAtom)[event.sessionId], event, payload, bindingChanged) : undefined;
-	if (nextUi) {
+	const previousUi = get(sessionRuntimeUiByIdAtom)[event.sessionId];
+	const nextUi = payload && !(terminalEnvelope && event.sourceChannel === "agents:ui-request") ? applySessionRuntimeUiEvent(previousUi, event, payload, bindingChanged) : undefined;
+	// 与下方 runtimeUnchanged 同款治理（2027-02 性能审计）：applySessionRuntimeUiEvent 对
+	// 非 ui-request 事件（50ms 节流的 sessions:messages flush、agents:runtime-state 轮询）
+	// 返回原引用。旧代码只判 truthy 就整表 spread 写回——值没变也换 Record 身份，
+	// sessionRuntimeUiByIdAtom 的整表订阅者（侧栏五棵树）在流式期间每秒被全量重渲染
+	// 数十次。引用相等即跳写；真实 UI 变化必然返回新对象（revision 递增路径）。
+	if (nextUi && nextUi !== previousUi) {
 		set(sessionRuntimeUiByIdAtom, {
 			...get(sessionRuntimeUiByIdAtom),
 			[event.sessionId]: nextUi,
