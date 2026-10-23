@@ -1674,6 +1674,9 @@ export function createPreviewApi(): PiDesktopApi {
 					files: { "models.json": {}, "auth.json": {}, "settings.json": {}, "mcp.json": { mcpServers: {} } },
 				}),
 			import: async () => ({ valid: true }),
+			// 设计预览：外部 agent 发现无真实文件可扫，返回空结果（不触真实文件系统）
+			discoverExternalAgents: async () => ({ sources: [], providers: [] }),
+			resolveExternalAgentKey: async () => ({ ok: false, error: "preview" }),
 			fetchModels: async () => ({
 				success: true,
 				models: [
