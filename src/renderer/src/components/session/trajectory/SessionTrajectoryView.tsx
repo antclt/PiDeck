@@ -346,14 +346,30 @@ function TrajectoryOverview(props: { records: TrajectoryRecord[]; domainStart: n
 	const span = Math.max(props.domainEnd - props.domainStart, 1);
 	// 概览刻度按像素聚合：标记数服从面板宽度，记录再多也不线性增加 DOM。
 	const [trackWidth, setTrackWidth] = useState(600);
+	// 轨道几何缓存：拖选 pointermove 与滚轮缩放都是高频事件，每次读
+	// getBoundingClientRect 会在「React 写高亮 → 下一事件读 rect」之间强制同步
+	// 布局。拖选期间轨道几何不变（高亮是绝对定位覆盖层，不影响布局），
+	// pointerdown 时刷一次即可；尺寸变化由下方 ResizeObserver 兜底刷新。
+	const trackRectRef = useRef<{ left: number; width: number } | null>(null);
+	const refreshTrackRect = useCallback(() => {
+		const el = trackRef.current;
+		if (!el) return;
+		const rect = el.getBoundingClientRect();
+		trackRectRef.current = { left: rect.left, width: rect.width };
+	}, []);
 	useLayoutEffect(() => {
 		const el = trackRef.current;
 		if (!el) return;
 		setTrackWidth(el.clientWidth);
-		const observer = new ResizeObserver(() => setTrackWidth(el.clientWidth));
+		refreshTrackRect();
+		// 尺寸变化时轨道 left/width 都可能变：几何缓存随 ResizeObserver 一起刷新
+		const observer = new ResizeObserver(() => {
+			setTrackWidth(el.clientWidth);
+			refreshTrackRect();
+		});
 		observer.observe(el);
 		return () => observer.disconnect();
-	}, []);
+	}, [refreshTrackRect]);
 	const ticks = useMemo(() => bucketOverviewTicks(props.records, { lanes: LANE_ORDER, width: trackWidth, selectedId: props.selectedId }), [props.records, props.selectedId, trackWidth]);
 	useEffect(() => {
 		if (import.meta.env.DEV) DEV_METRICS.overviewTicks = ticks.length;
@@ -363,8 +379,8 @@ function TrajectoryOverview(props: { records: TrajectoryRecord[]; domainStart: n
 		(clientX: number): number => {
 			const el = trackRef.current;
 			if (!el) return props.domainStart;
-			const rect = el.getBoundingClientRect();
-			const ratio = rect.width <= 0 ? 0 : Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+			const cached = trackRectRef.current ?? el.getBoundingClientRect();
+			const ratio = cached.width <= 0 ? 0 : Math.min(1, Math.max(0, (clientX - cached.left) / cached.width));
 			return props.domainStart + ratio * span;
 		},
 		[props.domainStart, span],
@@ -372,6 +388,7 @@ function TrajectoryOverview(props: { records: TrajectoryRecord[]; domainStart: n
 
 	const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
 		if (event.button !== 0) return;
+		refreshTrackRect();
 		event.currentTarget.setPointerCapture(event.pointerId);
 		dragRef.current = { x: event.clientX, start: timeAt(event.clientX) };
 		setDraft(undefined);
@@ -437,6 +454,8 @@ function TrajectoryOverview(props: { records: TrajectoryRecord[]; domainStart: n
 	}, []);
 
 	const highlight = draft ?? props.range;
+	// 刻度悬停提示按 id 查记录：Map 化把渲染体从 O(ticks×records) 降到 O(ticks)
+	const recordsById = useMemo(() => new Map(props.records.map((record) => [record.id, record])), [props.records]);
 
 	return (
 		<div className="shrink-0 border-b border-border/60 px-3 py-2">
@@ -472,7 +491,7 @@ function TrajectoryOverview(props: { records: TrajectoryRecord[]; domainStart: n
 							{ticks
 								.filter((tick) => tick.lane === lane)
 								.map((tick) => {
-									const record = props.records.find((candidate) => candidate.id === tick.recordId);
+									const record = recordsById.get(tick.recordId);
 									return (
 										<button
 											key={`${tick.lane}:${tick.recordId}:${tick.startedAt}`}

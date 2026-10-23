@@ -22,8 +22,12 @@ export function useFileTreeStickyAppearance(panelRef: RefObject<HTMLDivElement |
 			});
 			const lastPinnedIndex = pinned.lastIndexOf(true);
 			for (const [index, row] of rows.entries()) {
-				row.dataset.fileStuck = String(pinned[index]);
-				row.dataset.fileStickyLast = String(index === lastPinnedIndex);
+				// 值未变化不写 dataset：attribute 写入每次都会触发样式失效与变更记录，
+				// 滚动帧里对全部行无条件写 = 持续无谓 DOM churn（行多时可测量）。
+				const stuck = String(pinned[index]);
+				const stickyLast = String(index === lastPinnedIndex);
+				if (row.dataset.fileStuck !== stuck) row.dataset.fileStuck = stuck;
+				if (row.dataset.fileStickyLast !== stickyLast) row.dataset.fileStickyLast = stickyLast;
 			}
 		};
 		const schedule = () => {

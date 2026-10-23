@@ -364,18 +364,33 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 	// Tab 超宽时用贯穿滚动：垂直滚轮（无 shift）在 tab 条上改为横向滚动，
 	// 否则 overflow-x-auto + [scrollbar-width:none] 下只用触控板横扭/shift+滚轮，
 	// 普通鼠标滚轮无法浏览溢出 Tab。这里显式取纵/横向量较大者重定向到 scrollLeft。
-	const handleTabsWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+	//
+	// 2027-02 修正：React onWheel 挂在根容器上是 passive 监听，preventDefault
+	// 实际无效（只打 "passive event listener" 告警，穿透语义与注释意图不符）。
+	// 改为原生非 passive 监听（与 SurfaceComponents 的会话区滚轮同款写法）。
+	// 边界读集中在写 scrollLeft 之前，避免同一次事件里读→写→读交错强制布局。
+	const handleTabsWheel = useCallback((event: WheelEvent) => {
 		const el = scrollRef.current;
 		if (!el) return;
 		// 仅在确有横向溢出时接管（未溢出时任何滚轮都无副作用）
-		if (el.scrollWidth <= el.clientWidth) return;
+		const scrollWidth = el.scrollWidth;
+		const clientWidth = el.clientWidth;
+		if (scrollWidth <= clientWidth) return;
 		const delta = Math.abs(event.deltaY) > Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
-		el.scrollLeft += delta;
+		const prevScrollLeft = el.scrollLeft;
+		el.scrollLeft = prevScrollLeft + delta;
 		// 已滚到横向边界时才让事件穿透（垂直滚动仍留个边角用）；否则吞掉避免页面晃动
-		if (event.deltaY && el.scrollLeft > 0 && el.scrollLeft < el.scrollWidth - el.clientWidth) {
+		if (event.deltaY && el.scrollLeft > 0 && el.scrollLeft < scrollWidth - clientWidth) {
 			event.preventDefault();
 		}
-	};
+	}, []);
+	useLayoutEffect(() => {
+		const el = scrollRef.current;
+		if (!el) return;
+		const handler = (event: WheelEvent) => handleTabsWheel(event);
+		el.addEventListener("wheel", handler, { passive: false });
+		return () => el.removeEventListener("wheel", handler);
+	}, [handleTabsWheel]);
 
 	// 下拉经 Portal 挂到 body；勿写 px-*（会盖掉自定义标题栏为窗口控件留的 padding-right）。
 	// 抽屉开关始终在本栏最右侧；打开抽屉后靠 CSS 取消窗口控件让位，避免按钮被空出一截。
@@ -396,7 +411,7 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 				</Button>
 			) : null}
 			<div className="relative flex min-w-0 flex-1 items-center">
-				<div ref={scrollRef} onWheel={handleTabsWheel} className="session-tabs-scroll relative flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none]">
+				<div ref={scrollRef} className="session-tabs-scroll relative flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none]">
 					{(() => {
 						// 分屏组：组内会话聚合渲染（组头胶囊 + 颜色标记）；收起时组内 Tab 隐藏
 						const hasSplitGroup = tabBarEntries.some((entry) => entry.kind === "split");
