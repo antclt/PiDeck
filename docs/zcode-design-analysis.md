@@ -1,6 +1,6 @@
 # ZCode 视觉质感分析与反哺计划
 
-> 状态：**Phase 1 已落地**（2026-10，d4e60c97c / 730579b0b / 6a45b179f）；**Phase 2 已落地**（2026-10，边框墨水化 + 圆角降档 + 语义色审计）；Phase 3 为候选方向，按「改到哪，旧迁新到哪」增量推进，不做 big-bang。
+> 状态：**Phase 1 已落地**（2026-10，d4e60c97c / 730579b0b / 6a45b179f）；**Phase 2 已落地**（2026-10，31792faf0，边框墨水化 + 圆角降档 + 语义色审计）；**Phase 3 已落地**（2026-10，忙碌色结论 + 阴影降档）；后续按「改到哪，旧迁新到哪」增量推进，不做 big-bang。
 > 分析来源：`zai-org/ZCode`（Apache-2.0，main 分支 2026-10 浅克隆）。核心文件：`DESIGN.md`（设计宪法）、`packages/ui/src/styles.css`（Zai Light/Dark 主题值）。
 
 ## 一、ZCode 质感的六个机制（带证据）
@@ -96,8 +96,25 @@ DESIGN.md「Elevation and Depth」：Base 无阴影（结构来自底色对比�
 
 全量扫描 80 处 success/warning 使用：全部绑定真实状态（安装成败、鉴权关闭警告、导入取消、日志级别、子代理状态），**无 ZCode 所禁的「借语义色让块更响」装饰性滥用**。唯一软性候选：`agentListDisplay.ts` 把 running/starting/pending/waiting（忙碌中）映射到 warning 黄点——「忙碌」不是警告，ZCode 口径下更该是中性活动色（info 或 primary）；但黄色=进行中是广泛惯例，改动影响全局状态点视觉，列为 Phase 3 候选待用户视觉确认后再动。
 
-## 五、Phase 3 候选（按增量纪律推进）
+## 五、Phase 3 变更明细（本次）
 
-1. **忙碌状态色**：`agentListDisplay.ts` 的 warning 黄点 → info/primary，需用户视觉确认。
-2. **阴影审计**：抽查 shadow-lg/shadow-2xl 使用是否符合「只给 overlay/toast」。
-3. **暗色 chat-muted-bg（#202020）与 panel（#1a1a1a）关系复核**：现在是 muted 比面板亮一档，方向正确，无需动。
+### 5.1 忙碌状态色：结论「保留不改」
+
+审计发现黄色=运行中是**文档化的用户约定**（agentListDisplay.ts：「用户语义：idle=蓝、starting/运行中=黄、error=红」；sessionStatusBadge.ts：「颜色语义与用户约定一致」），且三个状态映射器（agentListDisplay / sessionStatusBadge / subagentStatus）口径一致——这不是 ZCode 禁的装饰性借用，是显式产品决策，改了反而违背既有约定。黄色=进行中也是广泛惯例，保留。
+
+### 5.2 阴影克制降档（shadow-lg 只留给 toast）
+
+自研组件 7 处 shadow-lg → shadow-md（浮层/提示条/工具条均为 overlay 档，不是 toast）：
+
+- `overlays/AskPanelOverlay.tsx` 详情浮层 + 拖拽药丸 ×2
+- `selectionTool/SelectionInlineToolbar.tsx`、`selectionTool/SelectionToolHost.tsx` 划词浮层
+- `session/SessionFindOverlay.tsx` 会话内查找条
+- `session/SurfaceComponents.tsx` ctx 详情 tooltip
+- `sidebar/UpdateDotHint.tsx` 更新提示浮层
+- 另：`session/SessionSurfaceStage.tsx` FAB 删 hover:shadow-lg 升档（悬停加深投影属装饰）；`styles/surfaces.css` file-diff 图片预览 var(--shadow-lg)→md（内容深度靠底色对比，不靠投影）。
+
+保留例外：菜单/FAB/桌面悬浮球 shadow-md ✓、模态导入浮层与 Web 抽屉/bottom-sheet shadow-xl ✓（大 overlay）、vendored shadcn 原语（dialog/chart tooltip）不动（beUI 纪律：官方原版禁改）。自研组件现已零 shadow-lg。
+
+### 5.3 暗色 chat-muted-bg（#202020）与 panel（#1a1a1a）关系
+
+muted 比面板亮一档，方向正确，无需动。

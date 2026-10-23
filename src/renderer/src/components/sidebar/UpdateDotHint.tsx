@@ -96,7 +96,7 @@ export function UpdateDotHint(props: UpdateDotHintProps) {
 	if (!visible) return null;
 
 	return (
-		<div className="absolute bottom-full left-0 right-0 z-(--z-popover) mb-2 rounded-lg border bg-popover p-3 shadow-lg" role="note" aria-label={t("update.dotHintTitle")} onClick={close}>
+		<div className="absolute bottom-full left-0 right-0 z-(--z-popover) mb-2 rounded-lg border bg-popover p-3 shadow-md" role="note" aria-label={t("update.dotHintTitle")} onClick={close}>
 			{/* 指向设置按钮的小箭头：设置按钮是 dock 最左一项（相对行左缘约 24px） */}
 			<span className="absolute -bottom-1 left-6 size-2 rotate-45 border-b border-r bg-popover" aria-hidden="true" />
 			<p className="text-sm font-medium text-foreground">{t("update.dotHintTitle")}</p>

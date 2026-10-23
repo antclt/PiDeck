@@ -351,7 +351,7 @@ export function SessionStatus(props: {
 	return (
 		<Tooltip>
 			<TooltipTrigger asChild>{statusInner}</TooltipTrigger>
-			<TooltipContent side="bottom" align="end" sideOffset={8} arrowClassName="!bg-popover !fill-popover" className="ctx-detail-tooltip !w-auto min-w-64 max-w-[min(320px,calc(100vw-24px))] !rounded-md !border !border-border !bg-popover !px-3 !py-2.5 !text-popover-foreground !shadow-lg">
+			<TooltipContent side="bottom" align="end" sideOffset={8} arrowClassName="!bg-popover !fill-popover" className="ctx-detail-tooltip !w-auto min-w-64 max-w-[min(320px,calc(100vw-24px))] !rounded-md !border !border-border !bg-popover !px-3 !py-2.5 !text-popover-foreground !shadow-md">
 				<div className="grid gap-2.5">
 					<div className="flex items-center justify-between gap-4 border-b border-border/70 pb-2">
 						<span className="text-caption font-semibold text-popover-foreground">{t("ctx.detail.title")}</span>

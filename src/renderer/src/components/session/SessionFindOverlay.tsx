@@ -130,7 +130,7 @@ export function SessionFindOverlay(props: SessionFindOverlayProps) {
 
 	return createPortal(
 		<div
-			className="fixed z-40 flex max-w-[calc(100vw-24px)] shrink-0 flex-col overflow-hidden rounded-lg border border-border/60 bg-popover shadow-lg"
+			className="fixed z-40 flex max-w-[calc(100vw-24px)] shrink-0 flex-col overflow-hidden rounded-lg border border-border/60 bg-popover shadow-md"
 			style={positionStyle}
 			role="dialog"
 			aria-label={t("sessionFind.open")}

@@ -246,7 +246,7 @@ export function SelectionInlineToolbar({ anchorRect, sourceText, initialAgentId,
 			data-selection-tool-ui=""
 			role="dialog"
 			aria-label={t("selectionTool.windowTitle")}
-			className="fixed z-(--z-popover) flex flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg"
+			className="fixed z-(--z-popover) flex flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-md"
 			style={{ left: position.left, top: position.top, width: position.width }}
 		>
 			<div className="flex shrink-0 items-center gap-1 border-b border-border-subtle px-1.5 py-1">
