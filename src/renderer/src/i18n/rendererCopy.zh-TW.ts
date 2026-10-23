@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: bda39d3e7d35c286f420d182f37dded24368802469d860a2f9ce53825fd94c6e（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: c83e1ff9aece2bdab57d948e04e69aadb6544d3efc735b86362e192c1d04e89e（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -741,6 +741,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"session.leakedToolCall.title": "模型輸出異常：疑似未解析的工具呼叫原文（工具已正常執行）",
 	"session.leakedToolCall.expand": "展開原文",
 	"session.leakedToolCall.collapse": "收起原文",
+	"session.longAnswer.expand": "展開全文（約 {kb} KB）",
+	"session.longAnswer.collapse": "收起全文",
 	"session.relativeMinutes": "{count}分鐘",
 	"session.relativeHours": "{count}小時",
 	"session.relativeDays": "{count}天",

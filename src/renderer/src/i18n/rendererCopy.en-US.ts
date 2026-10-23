@@ -736,6 +736,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"session.leakedToolCall.title": "Model output anomaly: unparsed tool-call raw text (tools still executed normally)",
 	"session.leakedToolCall.expand": "Show raw text",
 	"session.leakedToolCall.collapse": "Hide raw text",
+	"session.longAnswer.expand": "Show full reply (~{kb} KB)",
+	"session.longAnswer.collapse": "Collapse full reply",
 	"session.relativeMinutes": "{count}m",
 	"session.relativeHours": "{count}h",
 	"session.relativeDays": "{count}d",

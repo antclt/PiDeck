@@ -734,6 +734,8 @@ export const zhCN = {
 	"session.leakedToolCall.title": "模型输出异常：疑似未解析的工具调用原文（工具已正常执行）",
 	"session.leakedToolCall.expand": "展开原文",
 	"session.leakedToolCall.collapse": "收起原文",
+	"session.longAnswer.expand": "展开全文（约 {kb} KB）",
+	"session.longAnswer.collapse": "收起全文",
 	"session.relativeMinutes": "{count}分钟",
 	"session.relativeHours": "{count}小时",
 	"session.relativeDays": "{count}天",
