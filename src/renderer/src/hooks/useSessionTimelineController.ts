@@ -408,6 +408,24 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 	const scrollAnchorFrameRef = useRef<number | undefined>(undefined);
 	const scrollSaveTimerRef = useRef<number | undefined>(undefined);
 
+	// 浏览钉行元素缓存（2027-02 性能审计）：measureBrowsePinViewportTop 走全子树
+	// 属性选择器（O(挂载子树)），而浏览态 ResizeObserver 在内容每次增高（流式正文、
+	// 图片加载、Markdown 轻量→全量）时都回调 pinBrowseRow——等于每帧一次全子树扫描。
+	// 钉行期间行元素不变，缓存后热路径只读两处 rect；行被卸载（折叠/扩窗重建/切会话）
+	// 时 isConnected 失效，自动回退一次重查。与 issue #400 的「可见行缓存」互补：
+	// 那是找新钉行（findBrowsePin），这是盯住已钉行，互不重叠。
+	const pinnedRowElRef = useRef<{ id: string; element: HTMLElement } | null>(null);
+	const measurePinnedRowTop = useCallback((timeline: HTMLElement, messageId: string): number | null => {
+		const cached = pinnedRowElRef.current;
+		if (cached && cached.id === messageId && cached.element.isConnected) {
+			return cached.element.getBoundingClientRect().top - timeline.getBoundingClientRect().top;
+		}
+		const element = timeline.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`) as HTMLElement | null;
+		if (!element) return null;
+		pinnedRowElRef.current = { id: messageId, element };
+		return element.getBoundingClientRect().top - timeline.getBoundingClientRect().top;
+	}, []);
+
 	/**
 	 * 计算当前视口锚点（纯读取，不落盘）。
 	 * 规则：在底部跟流 → null（切回继续跟底）；查看历史 → 记录
@@ -471,7 +489,8 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		// restoreAt / 扩窗补偿派发的 scroll：只更新冻住那一行的 expected，不改钉到新的第一可见行。
 		if (!isProgrammaticScrollActive(programmaticScrollGuardRef.current, performance.now()) && !autoScrollRef.current) {
 			if (browsePinFrozenRef.current && browsePinRef.current) {
-				const top = measureBrowsePinViewportTop(timelineRef.current, browsePinRef.current.messageId);
+				const pinnedTimeline = timelineRef.current;
+				const top = pinnedTimeline ? measurePinnedRowTop(pinnedTimeline, browsePinRef.current.messageId) : null;
 				browsePinRef.current = followBrowsePinAfterUserScroll(browsePinRef.current, top);
 			} else {
 				browsePinRef.current = findBrowsePin(timelineRef.current);
@@ -822,6 +841,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 	 */
 	const invalidateHistoryBrowsing = useCallback(() => {
 		browsePinRef.current = null;
+		pinnedRowElRef.current = null;
 		browsePinFrozenRef.current = false;
 		skipBrowsePinRef.current = false;
 		historyBrowseGenerationRef.current += 1;
@@ -911,6 +931,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		if (autoScroll) {
 			pendingExpandTurnsRef.current = 0;
 			browsePinRef.current = null;
+			pinnedRowElRef.current = null;
 			browsePinFrozenRef.current = false;
 			skipBrowsePinRef.current = false;
 			if (expandBatchFrameRef.current !== undefined) {
@@ -1063,7 +1084,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		const pin = browsePinRef.current;
 		const timeline = timelineRef.current;
 		if (!pin || !timeline) return;
-		const currentTop = measureBrowsePinViewportTop(timeline, pin.messageId);
+		const currentTop = measurePinnedRowTop(timeline, pin.messageId);
 		if (
 			!shouldCompensateBrowsePin({
 				following: autoScrollRef.current,
@@ -1075,7 +1096,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		}
 		if (currentTop === null) return;
 		pinViewportAfterPrepend(browsePinScrollTop(timeline.scrollTop, currentTop, pin.expectedViewportTop));
-		const after = measureBrowsePinViewportTop(timeline, pin.messageId);
+		const after = measurePinnedRowTop(timeline, pin.messageId);
 		if (after !== null) {
 			browsePinRef.current = { messageId: pin.messageId, expectedViewportTop: after };
 		}
