@@ -555,9 +555,14 @@ export function extractUserPrompts(messages: ReadonlyArray<{ role: string; text:
 /**
  * 合并「本次运行发送的」与「会话历史已有的」用户输入，供上下键历史导航。
  *
+ * 输出顺序 = 历史导航顺序：索引 0 最新，索引递增越旧（↑ 从 0 往下走）。
+ * 调用方（getPromptHistory）两个来源都已是最近在前：runtimePrompts 由
+ * recordPromptHistory 前置插入，sessionPrompts 来自 extractUserPrompts（同样最新在前）。
+ * 这里**不能再反转 sessionPrompts**：反转会把整段会话历史变成最旧在前，
+ * 表现为 ↑ 跳过最近消息直接回到会话第一条（2026-10 用户反馈）。
+ *
  * 规则：
- * - runtimePrompts 最新在前（recordPromptHistory 的存储顺序）；
- *   sessionPrompts 按时间正序传入，内部反转成最新在前；
+ * - 两段都按「最新在前」直接接续（runtime 段在前，即最近发送优先）；
  * - 全局去重：runtime 优先保留，session 中与已出现条目重复的跳过
  *   （激活前后重复发送同一条时不出现两条）；
  * - 截断到 limit 条（默认 50，与 recordPromptHistory 一致）。
@@ -565,7 +570,7 @@ export function extractUserPrompts(messages: ReadonlyArray<{ role: string; text:
 export function mergePromptHistory(runtimePrompts: readonly string[], sessionPrompts: readonly string[], limit = 50): string[] {
 	const seen = new Set<string>();
 	const merged: string[] = [];
-	for (const prompt of [...runtimePrompts, ...[...sessionPrompts].reverse()]) {
+	for (const prompt of [...runtimePrompts, ...sessionPrompts]) {
 		if (seen.has(prompt)) continue;
 		seen.add(prompt);
 		merged.push(prompt);
