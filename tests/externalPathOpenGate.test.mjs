@@ -109,3 +109,17 @@ test("目录与「文件管理器定位」不弹确认：门先 stat 定类，�
 	assert.ok(openBranch, "gate must have an explicit open branch");
 	assert.doesNotMatch(openBranch, /setPending\(/);
 });
+
+test("跨项目链接：落在另一个已打开项目内的文件按那个项目的写边界打开（可编辑可保存）", () => {
+	// 场景：会话属于项目 A，链接指向项目 B 的文件。此前一律按「项目外」只读打开，
+	// 编辑器能打字但永不保存、Ctrl+S 毫无反应（用户当成「预览转编辑没有自动保存」）。
+	// 项目 B 本来就有主进程认可的写边界，按它的 scope 打开与从 B 的文件抽屉打开同权限。
+	const ownerMatch = /const\s+owningProject\s*=\s*projects\.find\([^\n]*isFilePathInsideRoot\(externalPath,\s*project\.path\)\)/.exec(appSource)?.[0];
+	assert.ok(ownerMatch, "outside-project links must first look for an owning open project");
+	const branch = /if\s*\(owningProject\)\s*\{[\s\S]*?\n\t\t\t\}/.exec(appSource)?.[0];
+	assert.ok(branch, "owning project branch must exist");
+	assert.match(branch, /openSessionFilePath\(externalPath,\s*\{\s*line,\s*scope:\s*\{\s*projectId:\s*owningProject\.id\s*\}\s*\}\)/);
+	assert.doesNotMatch(branch, /readOnly/);
+	// 归属匹配必须在只读安全门之前：否则跨项目文件仍然先被当项目外只读打开
+	assert.ok(appSource.indexOf("owningProject") < appSource.indexOf("requestExternalPathOpen({"), "owning-project routing must run before the external gate");
+});

@@ -6,6 +6,7 @@ import { ArrowLeft, Maximize, Minimize2, Rows2, SquareSplitHorizontal, X, Eye, F
 import { Button } from "../ui-shadcn/button";
 import { cn } from "../../lib/utils";
 import { MarkdownStream } from "../session/MarkdownStream";
+import { ConfirmDialog } from "../ui-shadcn/ConfirmDialog";
 import { defaultUrlTransform } from "../session/MarkdownLinkCore";
 import { defaultRehypePlugins } from "streamdown";
 import rehypeKatex from "rehype-katex";
@@ -18,6 +19,7 @@ const CodeMirrorEditor = lazy(() => import("./CodeMirrorEditor").then((m) => ({ 
 // 移出首屏初始 chunk（约 -500KB 解析量），仅在用户打开 diff 时才拉取。
 const CodeDiffView = lazy(() => import("./CodeDiffView").then((m) => ({ default: m.CodeDiffView })));
 import { formatFilePathRef } from "../session/composer/chips";
+import { showNotice } from "../../utils/notice";
 
 import { isBinaryExtension, isImageFile, isPdfFile } from "../../utils/isTextFile";
 import { updateInstallPreflightTasksAtom } from "../../atoms/update-install-preflight";
@@ -77,6 +79,11 @@ export function FileDiffViewer(props: {
 	/** 读取文件的 Git HEAD 原始内容，供差异模式左侧基准列使用。 */
 	readOriginalContent?: (path: string) => Promise<string>;
 	saveContent?: (path: string, content: string, scope?: ProjectFileAccessScope) => Promise<void>;
+	/**
+	 * 只读 tab 的显式解锁：点击头部「转为可编辑」并二次确认后调用，宿主把该 tab
+	 * 的 allowSave 翻成 true，之后才挂自动保存与 Ctrl+S。
+	 */
+	onRequestEditable?: () => void;
 	/** HTML 文件点击预览时，切换到内置浏览器面板预览。 */
 	onPreviewHtml?: (filePath: string) => void;
 	theme?: "light" | "dark";
@@ -100,6 +107,8 @@ export function FileDiffViewer(props: {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [sideBySide, setSideBySide] = useState(props.displayMode !== "drawer");
+	// 「转为可编辑」二次确认：解锁后本 tab 就能自动保存/Ctrl+S，所以把后果（直接写这个路径）先摆给用户。
+	const [unlockConfirmOpen, setUnlockConfirmOpen] = useState(false);
 	// diff 模式为只读对比视图（第三方渲染库），无需编辑态切换
 	const [dirty, setDirty] = useState(false);
 	const [saving, setSaving] = useState(false);
@@ -111,6 +120,8 @@ export function FileDiffViewer(props: {
 	const contentRef = useRef(content);
 
 	const isDiffMode = props.mode === "diff";
+	// 只读查看：项目外文件经安全门打开时没有 saveContent（allowSave=false），编辑器只展示不可输入。
+	const readOnlyView = !isDiffMode && !props.saveContent;
 	const fileName = props.filePath.split(/[/\\]/).pop() ?? props.filePath;
 	const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
 	const isMarkdown = ext === "md" || ext === "mdx";
@@ -338,10 +349,15 @@ export function FileDiffViewer(props: {
 		(e: KeyboardEvent) => {
 			if ((e.ctrlKey || e.metaKey) && e.key === "s") {
 				e.preventDefault();
+				// 只读文件的 Ctrl+S 必须给个回话：否则用户只会看到按键毫无反应。
+				if (readOnlyView) {
+					showNotice(t("editor.readOnlyHint"));
+					return;
+				}
 				void saveNow();
 			}
 		},
-		[saveNow],
+		[readOnlyView, saveNow],
 	);
 
 	useEffect(() => {
@@ -445,6 +461,18 @@ export function FileDiffViewer(props: {
 					{fileName}
 					{dirty && t("editor.unsavedMarker")}
 				</span>
+				{/* 只读查看（项目外文件确认后打开）必须显式标出来：编辑器可选中/复制但不可输入，
+				    否则用户会在这里打了半天字才发现既没有自动保存、Ctrl+S 也没有任何反应。 */}
+				{readOnlyView && (
+					<span className="shrink-0 rounded border border-border-subtle px-1.5 py-0.5 text-caption text-muted-foreground" title={t("editor.readOnlyHint")}>
+						{t("editor.readOnlyBadge")}
+					</span>
+				)}
+				{readOnlyView && props.onRequestEditable && (
+					<Button variant="ghost" size="xs" className="shrink-0" title={t("editor.unlockEditHint")} onClick={() => setUnlockConfirmOpen(true)}>
+						{t("editor.unlockEdit")}
+					</Button>
+				)}
 				<div className="file-diff-header-actions">
 					{(isMarkdown || isHtml || isSvg) && !isDiffMode && !loading && !error && (
 						<Button
@@ -483,6 +511,18 @@ export function FileDiffViewer(props: {
 					</Button>
 				</div>
 			</div>
+			{readOnlyView && unlockConfirmOpen && props.onRequestEditable && (
+				<ConfirmDialog
+					title={t("editor.unlockEditTitle")}
+					message={t("editor.unlockEditBody", { path: props.filePath })}
+					confirmLabel={t("editor.unlockEditConfirm")}
+					onCancel={() => setUnlockConfirmOpen(false)}
+					onConfirm={() => {
+						setUnlockConfirmOpen(false);
+						props.onRequestEditable?.();
+					}}
+				/>
+			)}
 			<div className="file-diff-body">
 				{/* 加载态补 spinner，与 Git 树 ResourceRow 的 Loader2 动效同语言；外层 .file-diff-loading 是 grid 居中，内层用 inline-flex 排图标+文案 */}
 				{loading && (
@@ -538,7 +578,7 @@ export function FileDiffViewer(props: {
 										</div>
 									}
 								>
-									<CodeMirrorEditor value={content} language={language} readOnly={false} initialLine={props.initialLine} onChange={handleEditorChange} onAttachSelection={handleAttachSelection} />
+									<CodeMirrorEditor value={content} language={language} readOnly={readOnlyView} initialLine={props.initialLine} onChange={handleEditorChange} onAttachSelection={handleAttachSelection} />
 								</Suspense>
 							</div>
 						)}

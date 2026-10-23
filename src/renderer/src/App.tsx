@@ -1136,6 +1136,7 @@ export function App() {
 		closeEditorTab,
 		selectEditorTab,
 		promotePreviewEditorTab,
+		allowSaveEditorTab,
 		previewEditorTabId,
 		openFilePath,
 		viewFilePath,
@@ -1175,6 +1176,7 @@ export function App() {
 	const { openSessionFilePath, requestExternalPathOpen, externalPathOpenDialog, handleOpenLinkedFile, handleToolDrawerAction } = useSessionFileLinks({
 		activeAgent,
 		activeProject,
+		projects,
 		currentSessionId,
 		activeProjectId,
 		showToast,
@@ -3053,6 +3055,7 @@ export function App() {
 			readContent={readEditorFileContent}
 			readOriginalContent={readEditorOriginalContent}
 			saveContent={saveEditorFileContent}
+			onAllowSaveTab={allowSaveEditorTab}
 		/>
 	) : null;
 
