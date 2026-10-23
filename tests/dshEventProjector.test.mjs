@@ -1308,6 +1308,67 @@ test("parseDshInboxProjection：缺任一必填键返回 undefined（脏帧不�
 	assert.equal(parseDshInboxProjection("x"), undefined);
 });
 
+test("llm/retry 投影为自动重试状态卡（与 pi auto_retry 卡同键，2026-10 限流不可见反馈）", () => {
+	const retryEvent = (seq, retry, extra = {}) =>
+		event("llm/retry", seq, {
+			retryId: "chain-1",
+			turn: 1,
+			step: 1,
+			provider: "zai-coding-cn",
+			retry,
+			maxRetries: 5,
+			delayMs: 4000,
+			failure: { message: '429: {"code":"1302","message":"您的账户已达到速率限制"}', code: "RATE_LIMIT" },
+			...extra,
+		});
+	let p = projectDshEvent(undefined, retryEvent(10, 1), AGENT);
+	assert.equal(p.messages.length, 1, "一张重试卡");
+	const card = p.messages[0];
+	assert.equal(card.id, "dsh:retry:chain-1");
+	assert.equal(card.role, "system");
+	assert.equal(card.meta.status, "running");
+	assert.equal(card.meta.i18nKey, "diagnostic.retryScheduledAfterDelay");
+	assert.equal(card.meta.attempt, 1);
+	assert.equal(card.meta.maxAttempts, 5);
+	assert.equal(card.meta.delayMs, 4000);
+	assert.equal(card.meta.errorMessage, '429: {"code":"1302","message":"您的账户已达到速率限制"} (RATE_LIMIT)');
+	// 同一 retry 链：原地推进计数，不新增卡片
+	p = projectDshEvent(p, retryEvent(11, 2), AGENT);
+	assert.equal(p.messages.length, 1);
+	assert.equal(p.messages[0].meta.attempt, 2);
+	assert.equal(p.messages[0].meta.i18nParams.count, "2/5");
+	// 历史重放幂等：同链事件重放不产生第二张卡
+	p = projectDshEvent(p, retryEvent(10, 1), AGENT);
+	assert.equal(p.messages.length, 1);
+	assert.equal(p.messages[0].meta.attempt, 2, "重放旧计数不得回退当前卡");
+});
+
+test("llm/retry 卡收口：assistant 终态 → 成功（瞬态卡）；turn/end error → 失败卡", () => {
+	let p = projectDshEvent(
+			undefined,
+			event("llm/retry", 20, { retryId: "chain-2", retry: 1, maxRetries: 5, delayMs: 500, failure: { message: "boom", code: "SERVER" } }),
+			AGENT,
+		);
+	// 重试后的请求成功：assistant/message 终态结算为成功卡
+	p = projectDshEvent(p, event("assistant/message", 21, { turn: 1, step: 1, message: { role: "assistant", content: [{ type: "text", text: "ok" }] } }), AGENT);
+	assert.equal(p.messages.filter((m) => m.id === "dsh:retry:chain-2").length, 1);
+	assert.equal(p.messages[0].meta.status, "success");
+	assert.equal(p.messages[0].meta.i18nKey, "diagnostic.retrySucceeded");
+	assert.equal(p.openRetryCardIds.length, 0, "结算后不再有待收口卡");
+
+	// 重试耗尽：turn/end error 结算为失败卡（正文错误气泡照常另投影）
+	let q = projectDshEvent(
+			undefined,
+			event("llm/retry", 30, { retryId: "chain-3", retry: 5, maxRetries: 5, delayMs: 1000, failure: { message: "rate limited", code: "RATE_LIMIT" } }),
+			AGENT,
+	);
+	q = projectDshEvent(q, event("turn/end", 31, { turn: 1, reason: { kind: "error", error: { message: "429 too many requests", code: "RATE_LIMIT" } } }), AGENT);
+	const failed = q.messages.find((m) => m.id === "dsh:retry:chain-3");
+	assert.equal(failed.meta.status, "error");
+	assert.equal(failed.meta.i18nKey, "diagnostic.retryFailed");
+	assert.ok(q.messages.some((m) => m.role === "error"), "回合失败气泡仍照常投影");
+});
+
 test("parseDshInboxProjection：单项非法只跳过该项（id 非字符串无法操作）", () => {
 	const parsed = parseDshInboxProjection({
 		"next-turn": [{ id: "q1", content: [{ type: "text", text: "ok" }] }, { content: [] }, null, { id: "", content: [] }],
