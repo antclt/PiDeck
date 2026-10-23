@@ -219,7 +219,6 @@ src/
 | 宿主插件 | 与 pi 扩展是两套系统（`src/main/plugins/`，不依赖 pi 进程）；授权按内容 sha256 指纹不按版本，指纹变即重新授权；历史读取 64MiB/10 万条硬预算；改 API/权限面必须同步 `src/preload/hostPlugin.ts` + `docs/host-plugin-dev-guide.md` + 脚手架（生成物过同一套 manifest 校验）；`service.local` 只给「点名权」（命令/参数/端口在主进程适配器里，id 白名单 `src/shared/localServices.ts`）；内置示例 `resources/host-plugins/` 由 `seedBuiltin` 落位（内容没被手改过才随新版刷新，手改过的永不覆盖；`seeded` 的 id 拒绝卸载）；`.pideck-plugin` NDJSON 归档逐文件 sha256；GitHub 安装只走 `codeload.github.com` 的 tar.gz + 自写 tar 解析（`src/main/plugins/hostPluginGitHub.ts`），禁为不可信输入引入第三方解压依赖，三条安装路径共用 `HostPluginManager.installFiles` 同一套预算与信任判定；pi-context 适配器 seam 是 fail-closed 契约 | 宿主插件 |
 | Web 端流式链路 | 流式事件源必须按后端分别注入 `WebEventStreamRouter`：pi 走 `subscribePiEvents`，DSH 等非 pi 后端走 `subscribeAgentChannelEvents`（`DshChannelToPiEvents` 把通道载荷翻成 pi 事件形状，复用同一套 UIMessageStream 适配器）；漏挂的后端在 Web 端退化成「轮询 + 磁盘重拉」（输出慢、整轮无 finish 帧 → 察觉不到结束/停止）；回合边界只认 `turnEnded: true` | Web 端流式链路 |
 | i18n 文案 | 改任何 zh-CN 词典（rendererCopy / mainProcessCopy / WebI18n / FeishuI18n）后必须重跑 `node scripts/genZhTwCopy.mjs`；四份 `*.zh-TW.ts` 是生成物禁止手改（漏跑：先 typecheck 报 TS2739，改值不加键则由 `source-sha256` 指纹门禁拦下） | 繁体中文（zh-TW 四份词典 + locale 分支点） |
-| 会话定位轴（刻度条） | 最多 **30 条滑动窗口**（`windowRailItems`，跟随阅读位置），**禁止改回全量或均匀采样**——刻度可点就必须点得动；条数超 30 后纵向位置不再代表会话进度（要「进度感」只能改 Proma 式桶，属产品取舍）；未加载刻度必须可区分且补不到要提示，`loadMoreMessages` 有 in-flight 守卫，补页预算是墙钟时间盒不是页数；`preview-rail.tsx` 是 beUI 官方分叉，头注释 7 条差异在 `--overwrite` 后必须重施 | 会话定位轴（消息区刻度条 / outline rail） |
 | 发版 | CHANGELOG 中英一致 → sync-release-notes → sync-workflow-choices → 打包人工 smoke | docs/release-process.md |
 
 ## 协作流程
