@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 13a80213ba55a664469c3bc8928a26602a3f4b7d3acd90e6fba2e3c5ebdb16de（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: be23039f80796c7680a7117ee584617d68520c5622a6b787eabde28eb5534a05（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4139,6 +4139,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"outline.showAll": "顯示全部 {count} 條",
 	"outline.turnFallback": "第 {index} 輪",
 	"outline.title": "會話定位",
+	"outline.jumpUnreachable": "這條提問還在更早的歷史裡，繼續向上翻一會兒再點。",
 	"outline.trigger": "會話定位 · {count} 條",
 	"prompt.closeHint": "Esc 關閉",
 	"prompt.command.auth.description": "管理 OAuth 或 API key 認證",

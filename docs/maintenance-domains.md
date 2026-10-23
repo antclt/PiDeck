@@ -303,3 +303,23 @@ description: …
 - **停止的重复收口**：abort 先收一次，host 随后补发的 turn/end 会带同一份全文再收一次；翻译器用 `closedRunText` 忽略第二次，避免保活连接上重复上屏一条回复。
 - **状态推送**：通道事件同样触发 `scheduleStatePush()`（400ms 去抖），运行时忙闲翻转即时可达；5s tick 只兜不住事件流里的目录变更。
 - 回归集：`tests/webDshChannelStream.test.mjs`（翻译器 + 路由 + 契约）、`tests/webServiceDshStream.test.mjs`（真实 WebServiceManager + 真实 HTTP：帧序列 / 保活 / 状态推送）、`tests/webEventStream.test.mjs`、`tests/webExternalReplyMerger.test.mjs`。
+
+## 会话定位轴（消息区刻度条 / outline rail）
+
+**它是什么**：会话消息区一列 1px 横杠，一根 = 一个用户提问；悬停出预览卡，点击跳转。规划逻辑在 `src/renderer/src/components/session/timeline/outlineRailTicks.ts`（纯函数），渲染在 `SurfaceComponents.tsx` 的 `ConversationOutline` + beUI 的 `preview-rail.tsx`。
+
+**条数上限是 30，且是「滑动窗口」不是采样**（2026-10 用户反馈「旁边横条太多」）：
+
+- `windowRailItems(items, activeIndex)` 取以当前阅读位置为中心、最多 `RAIL_TICK_LIMIT = 30` 条的窗口。停在底部 = 「最新的 30 条」；往上翻窗口跟着上移。
+- **不要改回均匀采样**。三个真实实现调研过：Proma `scroll-minimap.tsx` 用 20 根**不可点的桶**（`MAX_BARS`，每桶 = `items.length/20` 条）纯粹当位置图；dsh `TurnNavigator.tsx` 与 vivid-layer Chat Minimap 都是「全部条目 + 内部滚动」。**没有一家把稀疏采样出来的条当成跳转按钮**——刻度可点就必须点得动，采样会留下点不动的假按钮。
+- 已知副作用：条数超 30 后，刻度的**纵向位置不再代表整段会话的进度**（当前刻度永远落在窗口中段）。要恢复「进度感」只能改成 Proma 的桶方案（条不可点 + 悬浮列表里跳转），这是产品取舍，不要单方面改回去。
+
+**间距与滚动**：`RAIL_TICK_MAX_SIZE = 14` / `RAIL_TICK_MIN_SIZE = 10`，按可用高度收缩到下限；连 `30 × 10 = 300px` 都放不下的极窄窗口（消息列 < ~474px，含高 `zoomFactor`）才退化为导轨内部滚动（两端 16px 渐隐 + 滚轮先滚导轨、到边界交还时间线）。**滚动分支是安全阀不是常规路径**，正常情况下 30 条永远放得下。
+
+**未加载刻度**：目录里有、消息还没加载的检查点（`outline-pending:<entryId>`）画淡一档（`opacity-60`，对齐 dsh 的 `markUnloaded`）。点它会走补页循环（`SessionSurfaceStage`）：每 60ms 轮询一次、最多 `RAIL_PENDING_MAX_ATTEMPTS = 10` 次；补不到要弹 `outline.jumpUnreachable`，**不许静默放弃**。
+
+**这里有个反直觉的坑**：`loadMoreMessages` 在上一页仍在飞时**直接 return**（`useSessionTimelineController` 的 in-flight 守卫），所以「10 次轮询」是**约 600ms 的墙钟时间盒，不是 10 页**。窗口内最靠前的几条仍可能补不到——写代码时别承诺「看得见就一定点得到」。
+
+**beUI 组件分叉纪律**：`preview-rail.tsx` 是官方 `@beui/preview-rail` 的本地分叉，头注释列了 7 条差异（滚动容器 / 两端渐隐 / 预览卡绝对定位 / 非 passive 滚轮 / `muted` / 自动跟随 / `min-h-80` 条件）。`npx shadcn add @beui/preview-rail --overwrite` 会整份覆盖，必须按头注释重新施加；`tests/outlineRailScroll.test.mjs` 的源码契约断言是那次覆盖的兜底（覆盖后会变红）。
+
+**回归集**：`tests/outlineRailTicks.test.mjs`（窗口/间距纯函数）、`tests/outlineRailScroll.test.mjs`（源码契约：滚动、渐隐、滚轮、`muted`、窗口按源下标截取）、`tests/outlineRailActive.test.mjs`（活动刻度解析）、`tests/sessionOutlineDirectory.test.mjs`（目录取数）。没有 e2e 覆盖（本机 seeded-项目 e2e 环境不可用）。

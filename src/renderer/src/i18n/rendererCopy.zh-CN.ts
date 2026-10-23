@@ -4132,6 +4132,7 @@ export const zhCN = {
 	"outline.showAll": "显示全部 {count} 条",
 	"outline.turnFallback": "第 {index} 轮",
 	"outline.title": "会话定位",
+	"outline.jumpUnreachable": "这条提问还在更早的历史里，继续向上翻一会儿再点。",
 	"outline.trigger": "会话定位 · {count} 条",
 	"prompt.closeHint": "Esc 关闭",
 	"prompt.command.auth.description": "管理 OAuth 或 API key 认证",

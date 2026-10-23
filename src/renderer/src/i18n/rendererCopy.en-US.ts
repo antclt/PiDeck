@@ -4147,6 +4147,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"outline.showAll": "Show all {count}",
 	"outline.turnFallback": "Turn {index}",
 	"outline.title": "Conversation Outline",
+	"outline.jumpUnreachable": "This prompt is still further back in the history — scroll up a bit more, then try again.",
 	"outline.trigger": "Conversation outline · {count}",
 	"prompt.closeHint": "Esc Close",
 	"prompt.command.auth.description": "Manage OAuth or API key authentication",
