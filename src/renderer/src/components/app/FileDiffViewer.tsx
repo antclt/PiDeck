@@ -8,7 +8,7 @@ import { cn } from "../../lib/utils";
 import { MarkdownStream } from "../session/MarkdownStream";
 import { ConfirmDialog } from "../ui-shadcn/ConfirmDialog";
 import { defaultUrlTransform } from "../session/MarkdownLinkCore";
-import { defaultRehypePlugins } from "streamdown";
+import { UNTRUSTED_MARKDOWN_REHYPE_PLUGINS } from "../session/markdownSanitize";
 import rehypeKatex from "rehype-katex";
 import { remarkGfmNoSingleTilde } from "../../utils/markdownPlugins";
 // CodeMirrorEditor 静态链上挂着整个 CodeMirror 6 全家桶（view/state/commands/
@@ -31,7 +31,8 @@ type ViewMode = "view" | "diff";
 // 重新渲染时生成新引用，MarkdownStream 的 memo（浅比较）随即失效 → 整篇重新
 // 走 marked+shiki 解析（分屏下与会话流式渲染抢主线程，2027-02 卡顿实测根因之一）。
 const FILE_PREVIEW_REMARK_PLUGINS = [remarkGfmNoSingleTilde];
-const FILE_PREVIEW_REHYPE_PLUGINS = [defaultRehypePlugins.raw, rehypeKatex];
+// 文件预览同样渲染不可信内容（模型写的 .md 就可能是当前打开的文件）：复用统一净化序列，KaTeX 产物在 sanitize 之后生成
+const FILE_PREVIEW_REHYPE_PLUGINS = [...UNTRUSTED_MARKDOWN_REHYPE_PLUGINS, rehypeKatex];
 const noopOpenExternal = (): void => undefined;
 
 /** 把主进程的大文件错误码还原为用户可读文案，其它错误保留原始诊断。 */

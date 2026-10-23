@@ -1,5 +1,5 @@
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
-import { Streamdown, defaultRehypePlugins, defaultRemarkPlugins, type Components } from "streamdown";
+import { Streamdown, defaultRemarkPlugins, type Components } from "streamdown";
 import { code } from "@streamdown/code";
 import { mermaid } from "@streamdown/mermaid";
 import { createMathPlugin } from "@streamdown/math";
@@ -13,6 +13,7 @@ import { markdownUrlTransform } from "./MarkdownLinkCore";
 import { remarkGfmNoSingleTilde, remarkRecoverLocalImages } from "../../utils/markdownPlugins";
 import { remarkInlineMathGuard } from "../../utils/markdownInlineMath";
 import { normalizeMathDelimiters } from "../../utils/normalizeMathDelimiters";
+import { UNTRUSTED_MARKDOWN_REHYPE_PLUGINS } from "./markdownSanitize";
 import { FormulaCopyLayer } from "./FormulaCopyLayer";
 import { useSmoothStream } from "../../utils/useSmoothStream";
 import { STREAM_LIGHT_MAX_CHARS, STREAM_UNFREEZABLE_MIN_CHARS, SETTLE_FULL_MAX_CHARS, shouldRenderStreamPlain, shouldKeepLightOnSettle } from "./markdownStreamPolicy";
@@ -84,7 +85,7 @@ const PlainStreamSplit = memo(function PlainStreamSplit(props: { text: string })
  * - 数学公式：@streamdown/math（KaTeX，$...$/$$...$$）
  * - mermaid 图表：@streamdown/mermaid（```mermaid 代码块 → 交互式 SVG + 全屏/缩放/下载控件）
  * - 表格：GFM + 内建复制/下载（CSV/TSV/Markdown）控件
- * - HTML 标签：默认 sanitize（未知标签剥属性保留文本）
+ * - HTML 标签：raw 渲染后走 markdownSanitize.ts 的白名单（未知标签剥掉、危险子树整棵丢弃）
  *
  * 有意保留的项目能力（streamdown 无对应内置或桌面语义不同）：
  * - a 仍走 MarkdownLink：file:// 本地路径可点击打开、外链经 onOpenExternal
@@ -208,7 +209,7 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 	// 流式中精简插件：gfm/codeMeta/linkifyPaths 与 math 等插件都留到静态渲染；
 	// 外部显式传入的插件（FileDiffViewer 等场景）不受流式精简影响。
 	const resolvedRemarkPlugins = isStreamingNow ? NO_STREAM_REMARK_PLUGINS : (props.remarkPlugins ?? [remarkGfmNoSingleTilde, remarkInlineMathGuard, remarkRecoverLocalImages, defaultRemarkPlugins.codeMeta, remarkLinkifyPaths]);
-	const resolvedRehypePlugins = isStreamingNow ? NO_STREAM_REHYPE_PLUGINS : (props.rehypePlugins ?? [defaultRehypePlugins.raw]);
+	const resolvedRehypePlugins = isStreamingNow ? NO_STREAM_REHYPE_PLUGINS : (props.rehypePlugins ?? UNTRUSTED_MARKDOWN_REHYPE_PLUGINS);
 	// 显式 Components 标注：让 a 的 props 走上下文类型推断（streamdown 的
 	// Components 是「具名槽位 | 索引签名」联合，直接内联会触发索引签名分支的类型不兼容）
 	// useMemo 依赖回调 props：回调引用变化时 components 重建，streamElement 随之重建，
