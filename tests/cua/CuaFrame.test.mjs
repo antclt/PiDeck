@@ -6,7 +6,8 @@ import { loadTsCommonJs } from "../helpers/loadTsCommonJs.mjs";
 // 的是二进制路径字符串，destructure 出 undefined，仅 captureScreen 不可用。
 const CuaFrame = loadTsCommonJs("src/main/cua/CuaFrame.ts");
 
-function makeElectronStub({ sources, calls }) {
+function makeElectronStub({ sources, calls, displays }) {
+	const screenDisplays = displays ?? [PRIMARY_DISPLAY];
 	return {
 		desktopCapturer: {
 			getSources: async (opts) => {
@@ -17,8 +18,16 @@ function makeElectronStub({ sources, calls }) {
 		nativeImage: {
 			createFromDataURL: () => ({ isEmpty: () => true }),
 		},
+		screen: {
+			getAllDisplays: () => screenDisplays,
+			getPrimaryDisplay: () => screenDisplays.find((display) => display.id === PRIMARY_DISPLAY.id) ?? screenDisplays[0],
+		},
 	};
 }
+
+const PRIMARY_DISPLAY = { id: 2919297941, label: "DELL U2720Q", bounds: { x: 0, y: 0, width: 1920, height: 1080 }, scaleFactor: 1 };
+// 副屏在左侧且 200%：DIP 原点 -1560 → 物理 -3120。
+const SECONDARY_DISPLAY = { id: 3094298054, label: "副屏", bounds: { x: -1560, y: 0, width: 1560, height: 1040 }, scaleFactor: 2 };
 
 function makeFakeImage({ width, height, resizedTo }) {
 	return {
@@ -38,9 +47,9 @@ function makeFakeImage({ width, height, resizedTo }) {
 	};
 }
 
-function loadFrameWithSources(sources, calls) {
+function loadFrameWithSources(sources, calls, displays) {
 	return loadTsCommonJs("src/main/cua/CuaFrame.ts", {
-		stubs: { electron: makeElectronStub({ sources, calls }) },
+		stubs: { electron: makeElectronStub({ sources, calls, displays }) },
 	});
 }
 
@@ -60,8 +69,9 @@ test("captureScreen requests a large thumbnail ceiling, never 1x1 (regression)",
 	const frame = await mod.captureScreen();
 	assert.strictEqual(calls.length, 1);
 	const requested = calls[0].thumbnailSize;
-	assert.ok(requested.width >= mod.DEFAULT_MAX_LONG_EDGE, `thumbnailSize must cover the output budget, got ${requested.width}x${requested.height}`);
-	assert.ok(requested.height >= mod.DEFAULT_MAX_LONG_EDGE);
+	// 请求体量 = 输出预算：既不会像 1x1 那样截成 1 像素，也不会像旧版 8192 那样
+	// 先把源放大到 8K 再缩回 1280（双重采样、更慢、更糊）。
+	assert.deepStrictEqual({ ...requested }, { width: mod.DEFAULT_MAX_LONG_EDGE, height: mod.DEFAULT_MAX_LONG_EDGE });
 
 	// 1280 long edge: 2560x1440 → 1280x720
 	assert.strictEqual(frame.width, 1280);
@@ -82,7 +92,54 @@ test("captureScreen skips resize when the source already fits the budget", async
 	assert.strictEqual(resizedTo.length, 0, "no redundant resize within budget");
 });
 
+test("captureScreen requests an explicit maxLongEdge budget instead of a fixed 8K ceiling", async () => {
+	const calls = [];
+	const mod = loadFrameWithSources([{ id: "screen:0:0", thumbnail: makeFakeImage({ width: 2560, height: 1440, resizedTo: [] }) }], calls);
+
+	await mod.captureScreen({ maxLongEdge: 640 });
+	assert.deepStrictEqual({ ...calls[0].thumbnailSize }, { width: 640, height: 640 });
+});
+
 test("captureScreen throws when the requested displayId is not found", async () => {
 	const mod = loadFrameWithSources([{ id: "screen:0:0", thumbnail: makeFakeImage({ width: 800, height: 600, resizedTo: [] }) }], []);
 	await assert.rejects(() => mod.captureScreen({ displayId: "screen:9:9" }), /Screen source not found/);
+});
+
+// 实机顺序：Electron 的 sources[0] 在本机是"副屏"，"omit for primary" 靠索引会截错屏。
+const PRIMARY_SOURCE = { id: "screen:1:0", display_id: String(PRIMARY_DISPLAY.id), thumbnail: makeFakeImage({ width: 1920, height: 1080, resizedTo: [] }) };
+const SECONDARY_SOURCE = { id: "screen:0:0", display_id: String(SECONDARY_DISPLAY.id), thumbnail: makeFakeImage({ width: 3120, height: 2080, resizedTo: [] }) };
+
+test("captureScreen without displayId captures the primary display, not sources[0]", async () => {
+	const calls = [];
+	const mod = loadFrameWithSources([SECONDARY_SOURCE, PRIMARY_SOURCE], calls, [PRIMARY_DISPLAY, SECONDARY_DISPLAY]);
+
+	const frame = await mod.captureScreen();
+	assert.strictEqual(frame.displayId, "screen:1:0");
+	assert.strictEqual(frame.screenDisplayId, String(PRIMARY_DISPLAY.id));
+	assert.strictEqual(frame.isPrimary, true);
+	assert.deepStrictEqual({ ...frame.screenRect }, { x: 0, y: 0, width: 1920, height: 1080 });
+	assert.strictEqual(frame.scaleFactor, 1);
+});
+
+test("captureScreen returns the physical rect of a 200% secondary display", async () => {
+	const calls = [];
+	const mod = loadFrameWithSources([SECONDARY_SOURCE, PRIMARY_SOURCE], calls, [PRIMARY_DISPLAY, SECONDARY_DISPLAY]);
+
+	const frame = await mod.captureScreen({ displayId: String(SECONDARY_DISPLAY.id) });
+	assert.strictEqual(frame.displayId, "screen:0:0");
+	assert.strictEqual(frame.isPrimary, false);
+	// DIP (-1560,0,1560x1040) @200% → 物理 (-3120,0,3120x2080)
+	assert.deepStrictEqual({ ...frame.screenRect }, { x: -3120, y: 0, width: 3120, height: 2080 });
+	assert.strictEqual(frame.scaleFactor, 2);
+	assert.strictEqual(frame.width, 1280);
+	assert.strictEqual(frame.height, 853);
+});
+
+test("captureScreen accepts a source id as displayId", async () => {
+	const calls = [];
+	const mod = loadFrameWithSources([SECONDARY_SOURCE, PRIMARY_SOURCE], calls, [PRIMARY_DISPLAY, SECONDARY_DISPLAY]);
+
+	const frame = await mod.captureScreen({ displayId: "screen:0:0" });
+	assert.strictEqual(frame.displayId, "screen:0:0");
+	assert.deepStrictEqual({ ...frame.screenRect }, { x: -3120, y: 0, width: 3120, height: 2080 });
 });
