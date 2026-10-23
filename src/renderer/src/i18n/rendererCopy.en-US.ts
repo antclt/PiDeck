@@ -4247,7 +4247,6 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.titleWithUpdate": "Settings (update available)",
 	"settings.searchPlaceholder": "Search settings",
 	"settings.searchHint": "Chinese, English or pinyin initials: dl → proxy, ylcx → usage. ↑↓ to select, Enter to jump",
-	"settings.searchPinyinHint": "Pinyin works too: dl → proxy, ylcx → usage",
 	"settings.searchNoResult": "No matching setting",
 	"settings.tabs.common": "General",
 	"settings.tabs.shortcuts": "Shortcuts",

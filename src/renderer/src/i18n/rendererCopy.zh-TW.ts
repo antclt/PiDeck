@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: c83e1ff9aece2bdab57d948e04e69aadb6544d3efc735b86362e192c1d04e89e（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: fede8107230d6f8377e5228920a88b683b9b4b1981607aff45c636a547c1373d（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4238,7 +4238,6 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.titleWithUpdate": "設定（有新版本可用）",
 	"settings.searchPlaceholder": "搜尋設定項",
 	"settings.searchHint": "支援中文、英文和拼音首字母：dl → 代理，ylcx → 用量查詢。↑↓ 選擇，Enter 跳轉",
-	"settings.searchPinyinHint": "可搜拼音：dl → 代理，ylcx → 用量查詢",
 	"settings.searchNoResult": "沒有匹配的設定項",
 	"settings.tabs.common": "常用設定",
 	"settings.tabs.shortcuts": "快捷鍵",

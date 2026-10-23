@@ -5,11 +5,11 @@ import { SETTINGS_TAB_IDS, SETTINGS_TAB_KEYWORDS, SETTINGS_TAB_LABEL_KEYS } from
 import type { SettingsSearchEntry } from "./settingsSearch";
 
 /**
- * 把「tab 本身 + 静态锚点清单」翻成侧栏搜索的条目表。
+ * 把「tab 本身 + 静态锚点清单」翻成设置搜索的条目表。
  *
  * 与命令面板（`utils/commandPaletteCommands.ts`）同源：两处都读 `SETTINGS_FIELD_ANCHORS`
- * 与 `SETTINGS_TAB_LABEL_KEYS`，所以侧栏搜到的名字与页面上那行标题、Ctrl+P 里的名字
- * 永远一致。区别只在入口：命令面板要记住 Ctrl+P，侧栏搜索框就摆在用户眼前。
+ * 与 `SETTINGS_TAB_LABEL_KEYS`，所以设置搜索命中的名字与页面上那行标题、Ctrl+P 里的名字
+ * 永远一致。区别只在入口：命令面板要记住 Ctrl+P，搜索框就摆在设置页内容区顶部。
  *
  * 两种粒度都出（与锚点清单的约定一致）：tab 级一条（带用户去整页），
  * 字段/分区级一条（滚到那一行并高亮）。隐藏模块的 tab 也照样出条目 ——
