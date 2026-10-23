@@ -263,4 +263,5 @@ DSH: src/main/dsh/hostEntry.ts          # 生成的 pideck-slash-bridge（agent/
 | 4 | DSH 命令执行后没有结果卡片（`command/run`、`command/done` 未投影） | 命令执行完时间线无反馈 | 纯展示层可补，未排期 |
 | 5 | Web / 飞书发送不经过前端展开 | 那边的 `/模板名` 永远没有 chip | 既有架构（展开只在桌面渲染层），未排期 |
 | 6 | `tests/composerPrewarmFocus.test.mjs` 红（缺 stub 模块） | 影响全量测试 | 基线 worktree 同样红，非本轮引入 |
+| 7 | 含占位符的模板（如 `parallel-review` 结尾的 `$@`）会把用户参数**填进**模板正文 → 参数随正文一起折进 chip，气泡里看不到用户自己写的话 | 用户发完看不到自己的指令（2026-10-21 用户实测反馈） | **待决策**：A 保持 pi 语义 + chip 可展开（推荐）；B 参数双写（正文替换 + 块外再留一份，模型会看到两遍）；C 退回旧行为（`$@` 裸露，不可取） |
 
