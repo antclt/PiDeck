@@ -26,7 +26,7 @@ export function WebDshToolsPanel(props: { sessionId: string; onClose: () => void
 	const [tab, setTab] = useState<"goals" | "subagents" | "skills" | "plugins">("goals");
 	return (
 		<Dialog open onOpenChange={(next) => !next && props.onClose()}>
-			<DialogContent showCloseButton className="sm:max-w-lg">
+			<DialogContent showCloseButton className="sm:max-w-lg [&>*]:min-w-0">
 				{/* tab 条横向可滚：4 个 tab 在窄屏放不下会溢出裁切（最后一个 tab 被裁掉），滚动保完整。 */}
 				<div className="flex gap-1 overflow-x-auto border-b border-border-subtle pb-2">
 					<Button variant={tab === "goals" ? "secondary" : "ghost"} size="sm" className="shrink-0 gap-1.5" onClick={() => setTab("goals")}>
