@@ -21,6 +21,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { PiMcpCli } from "../pi/piMcpCli";
 import { piChangelogService } from "../pi/PiChangelogService";
 import { validateMcpConfigFile } from "../config/mcpConfig";
+import { discoverExternalAgentProviders, resolveExternalAgentKey } from "../config/externalAgentDiscovery";
 import { PiResourceConfigService } from "../config/PiResourceConfigService";
 import { PiResourceStateStore } from "../config/PiResourceStateStore";
 import { tmpdir } from "node:os";
@@ -2118,6 +2119,25 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		}
 		void appLogger.info("config", "Config imported", { bytes: Buffer.byteLength(packageJson, "utf8"), valid: result.valid });
 		return result;
+	});
+	// 外部 agent 配置发现：只读扫描，入参无；key 只以掩码返回。
+	ipcMain.handle(ipcChannels.configDiscoverExternalAgents, async () => {
+		try {
+			return await discoverExternalAgentProviders();
+		} catch (error) {
+			// 单源失败已在模块内吸收；这里只兑底扫描器本身抛错，不影响其他 config 通道。
+			void appLogger.warn("config", "External agent discovery failed", { error: error instanceof Error ? error.message : String(error) });
+			return { sources: [], providers: [] };
+		}
+	});
+	// 导入确认后取真实 key：sourceId 白名单字符集校验（只允许 a-z0-9-: .），防止拼路径逃逸；
+	// 返回的 key 只出现在本次响应里，调用方（渲染层）立即写入未保存草稿。
+	ipcMain.handle(ipcChannels.configResolveExternalAgentKey, async (_event, sourceId: unknown) => {
+		if (typeof sourceId !== "string" || sourceId.length === 0 || sourceId.length > 80 || !/^[a-z0-9:.-]+$/.test(sourceId)) {
+			return { ok: false as const, error: "invalid source id" };
+		}
+		void appLogger.info("config", "External agent key resolved", { sourceId });
+		return resolveExternalAgentKey(sourceId);
 	});
 	ipcMain.handle(ipcChannels.configFetchModels, async (_event, payload: { baseUrl: string; apiKey: string; apiType?: string; headers?: Record<string, string>; proxyMode?: string }) => {
 		// proxyMode 白名单收窄（渲染层不可信），再解析成主进程代理策略。

@@ -527,6 +527,22 @@ test("win32 补丁：execFile（带 callback）与 exec 恒注入 windowsHide", 
 	assert.equal(calls[2][1][1].windowsHide, true);
 });
 
+test("CUI sidecar：版本管理器垫片一律忽略，退回 electron.exe + preload", () => {
+	// PATH 上的 mise/scoop 垫片能跑 node -v，但会转丢 runner 的 IPC 管道，
+	// 宿主判 “Windows Job runner exited with exit code 0 before proving its
+	// managed range empty”，PTC run_code 直接失败。宁可不改写。
+	configureDshRunnerNodeSidecar("C:\\Users\\t\\AppData\\Local\\mise\\shims\\node", "win32");
+	assert.equal(getDshRunnerNodeSidecar(), undefined);
+	configureDshRunnerNodeSidecar("C:\\Users\\t\\AppData\\Local\\mise\\shims\\node.exe", "win32");
+	assert.equal(getDshRunnerNodeSidecar(), undefined);
+	configureDshRunnerNodeSidecar("C:\\Users\\t\\scoop\\shims\\node.exe", "win32");
+	assert.equal(getDshRunnerNodeSidecar(), undefined);
+	configureDshRunnerNodeSidecar("C:\\Users\\t\\AppData\\Local\\mise\\installs\\node\\24.13.0\\node.exe", "win32");
+	assert.equal(getDshRunnerNodeSidecar(), "C:\\Users\\t\\AppData\\Local\\mise\\installs\\node\\24.13.0\\node.exe");
+	configureDshRunnerNodeSidecar(undefined);
+	assert.equal(getDshRunnerNodeSidecar(), undefined);
+});
+
 test("CUI sidecar：把 electron.exe runner 改写成 node.exe，且 windowsHide=true", () => {
 	installHostHiddenConsole("win32");
 	configureDshRunnerNodeSidecar("C:\\app\\resources\\dsh-runner-node\\node.exe");

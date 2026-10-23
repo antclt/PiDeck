@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 5636fba34d542a964c5f1a9a5c69e46e71d4af82d814bbea777284a06f8bcb8f（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: bda39d3e7d35c286f420d182f37dded24368802469d860a2f9ce53825fd94c6e（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -3054,9 +3054,10 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.migrate.okNoKey": "已遷移「{name}」（未找到可複製的金鑰，請到對端補填）",
 	"config.migrate.failed": "供應商遷移失敗",
 	// 模型配置导出/导入（Base64 传输）
-	"config.models.transfer.importButton": "匯入",
+	"config.models.transfer.discoverButton": "匯入本地其他工具配置",
 	"config.models.transfer.exportTitle": "匯出模型配置",
 	"config.models.transfer.importTitle": "匯入模型配置",
+	"config.models.transfer.discoverTitle": "匯入本地其他工具配置",
 	"config.models.transfer.selectedProviders": "將匯出 {count} 個供應商（含 API Key）",
 	"config.models.transfer.password": "加密密碼（可選）",
 	"config.models.transfer.passwordHint": "留空則不加密；加密後匯入時需輸入同一密碼",
@@ -3065,15 +3066,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.models.transfer.exportToFile": "匯出到檔案",
 	"config.models.transfer.copied": "已複製到剪貼簿",
 	"config.models.transfer.saved": "檔案已儲存",
-	"config.models.transfer.pasteLabel": "貼上 Base64 配置",
-	"config.models.transfer.pastePlaceholder": "貼上 base64 字串…",
-	"config.models.transfer.pickFile": "選擇檔案",
-	"config.models.transfer.parse": "解析",
 	"config.models.transfer.invalid": "無法解析：資料格式不正確",
-	"config.models.transfer.unsupportedVersion": "無法解析：不支援的版本",
-	"config.models.transfer.wrongKind": "無法解析：不是模型配置資料",
-	"config.models.transfer.needPassword": "該匯出已加密，請輸入密碼",
-	"config.models.transfer.wrongPassword": "密碼錯誤或資料損壞",
 	"config.models.transfer.selectProviders": "選擇要匯入的供應商",
 	"config.models.transfer.conflictWithLocal": "與本地同名",
 	"config.models.transfer.newProvider": "新增",
@@ -3093,6 +3086,27 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.models.transfer.applied": "已寫入未儲存更改，請檢查後點擊「儲存」",
 	"config.models.transfer.done": "完成",
 	"config.models.transfer.noProvidersSelected": "請至少勾選一個供應商",
+	"config.models.transfer.discoverHint": "自動掃描本機已安裝的 Claude Code、Codex、OpenCode、Gemini CLI、Qwen Code、Crush、Goose、Kimi Code、Kilo Code、MiniMax Code、ZCode、Qoder CN、OpenClaw 等工具的供應商配置。只讀取，不修改對方檔案；訂閱登入（OAuth）只能提示，無法匯出 API Key。",
+	"config.models.transfer.discoverScan": "重新掃描",
+	"config.models.transfer.discoverScanning": "掃描中…",
+	"config.models.transfer.discoverEmpty": "未發現可匯入的供應商配置",
+	"config.models.transfer.agent.claude-code": "Claude Code",
+	"config.models.transfer.agent.codex": "Codex",
+	"config.models.transfer.agent.opencode": "OpenCode",
+	"config.models.transfer.agent.gemini-cli": "Gemini CLI",
+	"config.models.transfer.agent.qwen-code": "Qwen Code",
+	"config.models.transfer.agent.crush": "Crush",
+	"config.models.transfer.agent.goose": "Goose",
+	"config.models.transfer.agent.kimi-code": "Kimi Code",
+	"config.models.transfer.agent.kilo-code": "Kilo Code",
+	"config.models.transfer.agent.minimax-code": "MiniMax Code",
+	"config.models.transfer.agent.zcode": "ZCode",
+	"config.models.transfer.agent.qoder-cn": "Qoder CN",
+	"config.models.transfer.agent.openclaw": "OpenClaw",
+	"config.models.transfer.discoverNoteSubscription": "訂閱登入（無 API Key 可匯出，僅供識別）",
+	"config.models.transfer.discoverNoteNoKey": "未檢測到 API Key（可能是本機閘道器佔位值，匯入後需自行填寫）",
+	"config.models.transfer.discoverSelectedCount": "已選 {count} 個供應商",
+	"config.models.transfer.discoverKeyFailed": "獲取 {id} 的 API Key 失敗：{reason}",
 	"config.deleteSkillConfirmTitle": "刪除 Skill",
 	"config.deleteSkillConfirmBody": "確認刪除「{name}」嗎？此操作會刪除本地 Skill 檔案，且不可撤銷。",
 	"config.deletePromptConfirmTitle": "刪除提示詞",
@@ -4156,6 +4170,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"outline.showAll": "顯示全部 {count} 條",
 	"outline.turnFallback": "第 {index} 輪",
 	"outline.title": "會話定位",
+	"outline.jumpUnreachable": "這條提問還在更早的歷史裡，繼續向上翻一會兒再點。",
 	"outline.trigger": "會話定位 · {count} 條",
 	"prompt.closeHint": "Esc 關閉",
 	"prompt.command.auth.description": "管理 OAuth 或 API key 認證",

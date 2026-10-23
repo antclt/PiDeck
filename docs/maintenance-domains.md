@@ -180,6 +180,7 @@
 - **一条契约**：需要折叠成 chip 的东西，**落盘文本必须自带展示身份**（`<quoted_context label message_id>` / `<referenced_session name>` / `<skill name>` / `<prompt_template name>`）。展示侧只认块（`src/shared/expandedRefBlocks.ts`）与裸 token（`composer/chips.ts`）两种形态，不做「按正文反查名称」；旧消息没有块就显示全文，这是有意的兼容策略。
 - **保护区规则（2026-10 实测 bug 的结论）**：发送侧有三个展开器（引用 → 会话引用 → 提示词模板）。后一个不得改写前一个已生成的块，否则「引用里提到 `/commit`」会被替换成整份提交模板——落盘的引用原文被篡改，模型读到的历史与真实不符。判据集中在 `src/renderer/src/utils/protectedText.ts`（`computeProtectedRanges` / `replaceOutsideProtected`）。
 - **模板清单两个来源**：来源 A = `prompts:list`（`~/.pi/agent/prompts` + `<项目>/.pi/prompts`，带编辑元数据、离线可用）；来源 B = pi `get_commands` 的 `source: "prompt"` 条目 + 按 `sourceInfo.path` 读回的正文（覆盖 npm 包声明的 `pi.prompts`，例如 pi-subagents 的 `parallel-review`）。合并规则在 `src/renderer/src/utils/templateCatalog.ts`：**同名正文取 B**（B 是 pi 去重后的最终视图），A 的展示元数据保留。只缺 B 时 `/parallel-review` 会被原样发给 pi、由 pi 展开成无名字的正文，表现为「运行中有 chip、暂停/重载后整段展开」。
+- **参数既进正文、也要在块外留一份**：模板用 `$@`/`$1` 时，参数要按 pi 原位替换进正文（模型看到的形状与 pi 一致）；但整段正文会被折成 chip，所以**块外必须再追加一份用户原文**，否则用户发完看不到自己写的话（2026-10-21 实测）。没有占位符的模板本来就追加在块外（pi 在那种情况下会直接丢掉用户输入，PiDeck 不丢）。占位符目前只集中在包带模板（pi-subagents 6 个全是 `$@`），PiDeck 内置模板不用占位符。
 - **frontmatter 剥离照抄 pi**（`utils/frontmatter.ts`，对齐 `dist/utils/frontmatter.js`）：先 `stripBom` + 换行归一（`
 ` 与裸 `
 ` 都变 `
@@ -307,3 +308,27 @@ description: …
 - **停止的重复收口**：abort 先收一次，host 随后补发的 turn/end 会带同一份全文再收一次；翻译器用 `closedRunText` 忽略第二次，避免保活连接上重复上屏一条回复。
 - **状态推送**：通道事件同样触发 `scheduleStatePush()`（400ms 去抖），运行时忙闲翻转即时可达；5s tick 只兜不住事件流里的目录变更。
 - 回归集：`tests/webDshChannelStream.test.mjs`（翻译器 + 路由 + 契约）、`tests/webServiceDshStream.test.mjs`（真实 WebServiceManager + 真实 HTTP：帧序列 / 保活 / 状态推送）、`tests/webEventStream.test.mjs`、`tests/webExternalReplyMerger.test.mjs`。
+
+## 会话定位轴（消息区刻度条 / outline rail）
+
+**它是什么**：会话消息区**右缘**一列 1px 横杠，一根 = 一个用户提问；悬停出预览卡，点击跳转。
+
+**位置与显隐是用户定的**：必须贴右缘（`right: 0`，预览卡向左展开 `previewSide="before"`），且**静默态整体不可见**——`.outline-hover.session-outline-pane > * { opacity: 0 }`，仅 `:hover` / `:focus-within` 时 `opacity: 1`（`focus-within` 兜键盘用户，不能只写 `:hover`）。历史上 commit `3303200ae` 把它挪到过左缘、并长期保持常显，2026-10 用户明确要求回到右侧 + 悬停才出现；守卫在 `tests/outlineDrawerOffset.test.mjs`。规划逻辑在 `src/renderer/src/components/session/timeline/outlineRailTicks.ts`（纯函数），渲染在 `SurfaceComponents.tsx` 的 `ConversationOutline` + beUI 的 `preview-rail.tsx`。
+
+**条数上限是 30，且是「滑动窗口」不是采样**（2026-10 用户反馈「旁边横条太多」）：
+
+- `windowRailItems(items, activeIndex)` 取以当前阅读位置为中心、最多 `RAIL_TICK_LIMIT = 30` 条的窗口。停在底部 = 「最新的 30 条」；往上翻窗口跟着上移。
+- **不要改回均匀采样**。三个真实实现调研过：Proma `scroll-minimap.tsx` 用 20 根**不可点的桶**（`MAX_BARS`，每桶 = `items.length/20` 条）纯粹当位置图；dsh `TurnNavigator.tsx` 与 vivid-layer Chat Minimap 都是「全部条目 + 内部滚动」。**没有一家把稀疏采样出来的条当成跳转按钮**——刻度可点就必须点得动，采样会留下点不动的假按钮。
+- 已知副作用：条数超 30 后，刻度的**纵向位置不再代表整段会话的进度**（当前刻度永远落在窗口中段）。要恢复「进度感」只能改成 Proma 的桶方案（条不可点 + 悬浮列表里跳转），这是产品取舍，不要单方面改回去。
+
+**间距**：`RAIL_TICK_MAX_SIZE = 14` / `RAIL_TICK_MIN_SIZE = 6`，按可用高度收缩到下限，**不做内部滚动**。30 × 6 = 180px 已覆盖「小窗口 + 终端坞 + 高缩放」，所以 2026-10 重构把早前那套滚动/两端渐隐/自动跟随/`railMaxHeight`/`onWheelFallback` 一并删了（上限 30 之后它只在极端窄高下才可能触发，纯属屎山）。**滚轮仍要转发**：导轨是时间线滚动视口的兄弟节点（绝对定位），不转发的话指针在刻度上滚动时间线不动——用容器上的原生非 passive 监听（React 的 `onWheel` 是 passive，`preventDefault` 会被忽略）。
+
+**显隐分工（用户明确要求）**：**导轨常显**，只有**预览卡**在悬停/固定/聚焦时才出现。实现上 `highlightedId`（含当前活动刻度）只驱动刻度缩放，预览卡必须挂 `displayedId`（`hoveredId ?? pinnedId ?? focusedId`）。这两个混用会让卡片在没有悬停时也常显在活动刻度上——2026-10 就是这么出的 bug，守卫在 `tests/outlineRailContract.test.mjs`。
+
+**未加载刻度**：目录里有、消息还没加载的检查点（`outline-pending:<entryId>`）画淡一档（`opacity-60`，对齐 dsh 的 `markUnloaded`）。点它会走补页循环（`SessionSurfaceStage`）：每 60ms 轮询一次、最多 `RAIL_PENDING_MAX_ATTEMPTS = 10` 次；补不到要弹 `outline.jumpUnreachable`，**不许静默放弃**。
+
+**这里有个反直觉的坑**：`loadMoreMessages` 在上一页仍在飞时**直接 return**（`useSessionTimelineController` 的 in-flight 守卫），所以「10 次轮询」是**约 600ms 的墙钟时间盒，不是 10 页**。窗口内最靠前的几条仍可能补不到——写代码时别承诺「看得见就一定点得到」。
+
+**beUI 组件分叉纪律**：`preview-rail.tsx` 是官方 `@beui/preview-rail` 的本地分叉，头注释列了 4 条差异（`muted` 淡显 / 预览卡只渲染一张 + 纯计算定位 / `resolveCardTop` 钳制 / 卡片位移过渡）。`npx shadcn add @beui/preview-rail --overwrite` 会整份覆盖，必须按头注释重新施加；`tests/outlineRailContract.test.mjs` 的源码契约断言是那次覆盖的兜底（覆盖后会变红）。
+
+**回归集**：`tests/outlineRailTicks.test.mjs`（窗口/间距纯函数）、`tests/outlineRailContract.test.mjs`（源码契约：预览卡触发条件、纯计算定位、`muted`、滚轮转发、窗口按源下标截取、已删滚动子系统不许长回来）、`tests/outlineRailActive.test.mjs`（活动刻度解析）、`tests/sessionOutlineDirectory.test.mjs`（目录取数）。没有 e2e 覆盖（本机 seeded-项目 e2e 环境不可用）。

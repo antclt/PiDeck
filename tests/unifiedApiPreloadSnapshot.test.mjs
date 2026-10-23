@@ -18,6 +18,8 @@
  * 2026-10-23 刷新：favorites 命名空间入场（收藏功能提交 f3075f08c 漏刷快照，73→74）；
  *   agentProfiles.reorder / favorites.reorder（智能体与收藏列表拖拽排序）各 +1 方法。
  * 2026-10-24 刷新：favorites.removeMany（收藏批量删除，一次 IPC 一次写盘）+1 方法；命名空间数不变。
+ * 2026-10-24 合并刷新：并入上游 26de030fc 的 config.discoverExternalAgents / resolveExternalAgentKey
+ *   （导入本机其他 Agent 供应商配置）；命名空间数与锚点数不变，仅方法清单摘要变化。
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -25,7 +27,7 @@ import { test } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const NS_LIST_SHA256 = "2b7ea69786b498fe4c29a38c12f0ecec9c5654ea07b2dc6be5b4f851e081f222";
-const FULL_METHODS_SHA256 = "9ace5c571fbd23f58c5fd876de8914684733a8e2549b0cba8d200c3922b0bf82";
+const FULL_METHODS_SHA256 = "ec8ed7c27697f3490c3b90f7da0b75d0d7c4a76090071c3d4391493cd5c1c4eb";
 const NAMESPACE_COUNT = 74;
 
 /** 捕获 preload 暴露的 piDesktop；null/undefined/形态不符时显式红并给诊断（F8-6 共用）。 */
@@ -67,9 +69,9 @@ test("F8-2 每命名空间排序方法清单摘要零漂移", () => {
 	assert.equal(sha256(methodLines.join(";")), FULL_METHODS_SHA256, "方法清单摘要漂移：任一命名空间的方法暴露面发生变化（A10 红线）");
 });
 
-test("F8-3 数量锚点：sessions 112 / config 48 / git 38 / app 32", () => {
+test("F8-3 数量锚点：sessions 112 / config 50 / git 38 / app 32", () => {
 	assert.equal(Object.keys(api.sessions).length, 112, "sessions 方法数漂移");
-	assert.equal(Object.keys(api.config).length, 48, "config 方法数漂移");
+	assert.equal(Object.keys(api.config).length, 50, "config 方法数漂移");
 	assert.equal(Object.keys(api.git).length, 38, "git 方法数漂移");
 	assert.equal(Object.keys(api.app).length, 32, "app 方法数漂移");
 });

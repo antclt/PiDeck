@@ -9,6 +9,10 @@ import { applyAppearanceWithTransition } from "./appearanceTransition";
 let injectedWallpaperTokens = new Set<string>();
 // 自定义外观主题（customThemeOverrides / customTheme 快照）已注入的 token 键：切换主题时先清后注，防残留
 let injectedCustomTokens = new Set<string>();
+// 壁纸模式最近一次注入的 token 值：applyCustomThemeTokens 会用自定义主题的不透明色覆盖
+// 同名 --color-bg-* 壁纸 token（设置弹窗预览/取消回滚都会调它），注入后据此恢复半透明，
+// 否则打开再关闭设置弹窗后面板变成不透明、盖住背景图（issue #398）。
+const injectedWallpaperValues = new Map<string, string>();
 
 /**
  * 自定义 token 注入（主题包快照 + 手写 overrides）：App 持久化应用与设置弹窗实时预览共用。
@@ -29,6 +33,8 @@ export function applyCustomThemeTokens(root: HTMLElement, settings: Pick<AppSett
 		root.style.setProperty(`--color-${k}`, v);
 		injectedCustomTokens.add(k);
 	}
+	// 壁纸开启时壁纸 token 必须压在自定义色之上（与 useAppAppearance 中「先自定义、后壁纸」的顺序一致）
+	for (const [k, v] of injectedWallpaperValues) root.style.setProperty(k, v);
 }
 
 /**
@@ -182,6 +188,7 @@ export function useAppAppearance({ settings, systemLanguage, settingsLoaded }: {
 			// 明暗（暗色启动后亮色坏、亮色启动后暗色坏，即主题互相「打架」的根因）。
 			for (const k of injectedWallpaperTokens) root.style.removeProperty(k);
 			injectedWallpaperTokens.clear();
+			injectedWallpaperValues.clear();
 			root.style.setProperty("--app-bg-image", `url("pideck-bg://local/${encodeURIComponent(settings.backgroundImage)}")`);
 			const alpha = Math.min(1, Math.max(0, 1 - settings.backgroundImageOpacity));
 			// 面板不透明度与遮罩同步并加 10% 基础偏移（面板更实一点，可读性更好）：
@@ -200,22 +207,27 @@ export function useAppAppearance({ settings, systemLanguage, settingsLoaded }: {
 			for (const k of BG_TOKENS) {
 				const v = cs.getPropertyValue(k).trim();
 				if (v) {
-					root.style.setProperty(k, `color-mix(in srgb, ${base} ${panelMix}%, transparent)`);
+					const wallpaperValue = `color-mix(in srgb, ${base} ${panelMix}%, transparent)`;
+					root.style.setProperty(k, wallpaperValue);
 					injectedWallpaperTokens.add(k);
+					injectedWallpaperValues.set(k, wallpaperValue);
 				}
 			}
 			// Select/Dropdown/Popover 会 portal 到 body，不能继承 DialogContent 的局部变量。
 			// 单独给浮层保留 92% 以上的底色，避免半透明面板 token 让菜单内容透出并误读为“透明坏了”。
 			const floatingMix = Math.max(92, Math.min(100, panelMix + 40));
-			root.style.setProperty("--color-bg-popover", `color-mix(in srgb, ${base} ${floatingMix}%, transparent)`);
+			const popoverValue = `color-mix(in srgb, ${base} ${floatingMix}%, transparent)`;
+			root.style.setProperty("--color-bg-popover", popoverValue);
 			root.style.setProperty("--wallpaper-floating-alpha", `${floatingMix}%`);
 			injectedWallpaperTokens.add("--color-bg-popover");
+			injectedWallpaperValues.set("--color-bg-popover", popoverValue);
 		} else {
 			root.style.removeProperty("--app-bg-image");
 			root.style.removeProperty("--app-bg-mask");
 			// 只清本 effect 注入过的壁纸 token，绝不误清皮肤设置的 bg 键
 			for (const k of injectedWallpaperTokens) root.style.removeProperty(k);
 			injectedWallpaperTokens.clear();
+			injectedWallpaperValues.clear();
 			root.style.removeProperty("--wallpaper-base");
 			root.style.removeProperty("--wallpaper-panel-alpha");
 			root.style.removeProperty("--wallpaper-floating-alpha");

@@ -60,3 +60,11 @@ test("插入全文：保留原换行风格，但去掉 BOM 与结束标记尾空
 	assert.equal(strip("---\nname: x\n---\n\n正文内容\n"), "正文内容\n");
 	assert.equal(strip("没有头"), "没有头");
 });
+
+test("没有 frontmatter 时正文不 trim（pi 实测：只有带 YAML 头的分支才 trim）", () => {
+	// 期望值来自 pi 1.4.0 dist/utils/frontmatter.js 的直接调用结果
+	assert.equal(stripFrontmatter("  正文前后有空白  "), "  正文前后有空白  ");
+	assert.equal(stripFrontmatter("---\na: 1\n正文没有闭合"), "---\na: 1\n正文没有闭合");
+	// 带 YAML 头时照 pi 的行为 trim
+	assert.equal(stripFrontmatter("---\na: 1\n---\n\n  正文  \n"), "正文");
+});

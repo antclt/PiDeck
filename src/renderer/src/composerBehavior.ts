@@ -264,11 +264,12 @@ export function expandPromptTemplates(message: string, templates: PromptTemplate
 		const rest = message.slice(command.end, segmentEnd).trim();
 		const args = parseCommandArgs(rest);
 		const substituted = substituteArgs(content, args);
-		// 模板用了占位符 → 参数已经进了正文，不能再把原文追加一遍（否则模型看到两份）；
-		// 没用占位符 → 保留 PiDeck 的既有兜底：用户输入追加在块后，绝不丢字。
-		const consumed = substituted !== content;
+		// 参数替换照 pi：占位符位置填进参数（模型看到原位插入）。
+		// 但**块外仍留一份可见副本**：气泡会把整段模板正文折成 chip，只放在正文里的话，
+		// 用户自己写的话会跟着一起消失（2026-10-22 用户实测：发完看不到自己的指令）。
+		// 代价是模型侧多一次重复（用户参数通常很短），换来“我发的话一直看得见”。
 		expanded += formatPromptTemplateBlock(command.name, substituted);
-		if (!consumed && rest) expanded += "\n\n" + rest;
+		if (rest) expanded += "\n\n" + rest;
 	}
 	expanded += message.slice(cursor);
 	return {
@@ -555,9 +556,14 @@ export function extractUserPrompts(messages: ReadonlyArray<{ role: string; text:
 /**
  * 合并「本次运行发送的」与「会话历史已有的」用户输入，供上下键历史导航。
  *
+ * 输出顺序 = 历史导航顺序：索引 0 最新，索引递增越旧（↑ 从 0 往下走）。
+ * 调用方（getPromptHistory）两个来源都已是最近在前：runtimePrompts 由
+ * recordPromptHistory 前置插入，sessionPrompts 来自 extractUserPrompts（同样最新在前）。
+ * 这里**不能再反转 sessionPrompts**：反转会把整段会话历史变成最旧在前，
+ * 表现为 ↑ 跳过最近消息直接回到会话第一条（2026-10 用户反馈）。
+ *
  * 规则：
- * - runtimePrompts 最新在前（recordPromptHistory 的存储顺序）；
- *   sessionPrompts 按时间正序传入，内部反转成最新在前；
+ * - 两段都按「最新在前」直接接续（runtime 段在前，即最近发送优先）；
  * - 全局去重：runtime 优先保留，session 中与已出现条目重复的跳过
  *   （激活前后重复发送同一条时不出现两条）；
  * - 截断到 limit 条（默认 50，与 recordPromptHistory 一致）。
@@ -565,7 +571,7 @@ export function extractUserPrompts(messages: ReadonlyArray<{ role: string; text:
 export function mergePromptHistory(runtimePrompts: readonly string[], sessionPrompts: readonly string[], limit = 50): string[] {
 	const seen = new Set<string>();
 	const merged: string[] = [];
-	for (const prompt of [...runtimePrompts, ...[...sessionPrompts].reverse()]) {
+	for (const prompt of [...runtimePrompts, ...sessionPrompts]) {
 		if (seen.has(prompt)) continue;
 		seen.add(prompt);
 		merged.push(prompt);

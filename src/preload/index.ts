@@ -1319,6 +1319,10 @@ const api = {
 		saveRaw: (fileName: string, rawJson: string) => ipcRenderer.invoke(ipcChannels.configSaveRaw, fileName, rawJson) as Promise<{ valid: boolean; error?: string }>,
 		export: () => ipcRenderer.invoke(ipcChannels.configExport) as Promise<string>,
 		import: (packageJson: string) => ipcRenderer.invoke(ipcChannels.configImport, packageJson) as Promise<{ valid: boolean; error?: string }>,
+		/** 只读扫描本机其他 agent（Claude Code/Codex/OpenCode/Gemini CLI）的供应商配置；API key 只以掩码返回 */
+		discoverExternalAgents: () => ipcRenderer.invoke(ipcChannels.configDiscoverExternalAgents) as Promise<import("../shared/types/externalAgentDiscovery").ExternalAgentDiscoveryResult>,
+		/** 外部 agent 导入确认后按 sourceId 取真实 API key（一次性响应；渲染层立即写进未保存草稿） */
+		resolveExternalAgentKey: (sourceId: string) => ipcRenderer.invoke(ipcChannels.configResolveExternalAgentKey, sourceId) as Promise<{ ok: true; apiKey?: string } | { ok: false; error: string }>,
 		/** 从 provider 的 baseUrl + apiKey 拉取可用模型列表；headers 允许 provider 自定义（含 User-Agent）；proxyMode=follow 跟随全局 / pi 走 PI 代理 / desktop 走桌面代理 / off 强制直连 */
 		fetchModels: (baseUrl: string, apiKey: string, apiType?: string, headers?: Record<string, string>, proxyMode?: "follow" | "pi" | "desktop" | "off") =>
 			ipcRenderer.invoke(ipcChannels.configFetchModels, { baseUrl, apiKey, apiType, headers, proxyMode }) as Promise<{

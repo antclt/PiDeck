@@ -34,12 +34,18 @@ export function extractFrontmatter(content: string): { yaml: string | null; body
 	if (endIndex === -1) return { yaml: null, body: normalized };
 	return {
 		yaml: normalized.slice(4, endIndex),
-		// endIndex + 4 跳过 "\n---"
-		body: normalized.slice(endIndex + 4),
+		// endIndex + 4 跳过 "\n---"；pi 只在这个分支 trim 正文（见下方 stripFrontmatter 注释）
+		body: normalized.slice(endIndex + 4).trim(),
 	};
 }
 
-/** pi 的 `stripFrontmatter`：剥掉 YAML 头并 `trim()` 正文。 */
+/**
+ * pi 的 `stripFrontmatter`：**原样返回** extract 出来的 body。
+ *
+ * 注意一个 pi 的细节（实测 1.4.0 dist 逐字对齐）：trim 只发生在「确实有 frontmatter」的分支里；
+ * 没有 frontmatter 时正文**不做 trim**（`"  正文  "` 会原样保留）。别在这里补 trim——
+ * 那会让纯正文模板的前后空白被静默吃掉，与 pi 展开的结果不一致。
+ */
 export function stripFrontmatter(content: string): string {
-	return extractFrontmatter(content).body.trim();
+	return extractFrontmatter(content).body;
 }
