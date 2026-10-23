@@ -430,7 +430,12 @@ export function ProjectTree(props: {
 					</div>
 				</div>
 			)}
-			<SidebarRemovalList remainingIds={props.controller.catalog.projects.map((project) => project.id)}>{workspaceProjects.map(renderProject)}</SidebarRemovalList>
+			{/* 项目顺序是用户拖拽决定的（唯一语义来源），因此开启 orderSensitive：
+			    拖拽重排与新增项目时，其余行播 0.16s 位移而不是瞬跳。会话列表不开启——
+			    它按 updatedAt 实时排序，顺序变化不是用户动作。 */}
+			<SidebarRemovalList orderSensitive remainingIds={props.controller.catalog.projects.map((project) => project.id)}>
+				{workspaceProjects.map(renderProject)}
+			</SidebarRemovalList>
 			{/* 无任何工作区项目（新用户只有内置 Chat）：显式渲染空态引导。
           此前该分组整体不渲染，用户不知道可以添加项目目录，误以为只能聊天（issue #149）。 */}
 			{workspaceProjects.length === 0 && (
