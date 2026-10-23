@@ -60,7 +60,7 @@ export function SessionActionsControl(props: { runControl?: SessionMenuRunContro
 					type="button"
 					variant="ghost"
 					size="icon-sm"
-					className="h-7 w-7 min-w-0 rounded-md rounded-r-none border-0 bg-transparent px-0 text-foreground/80 hover:bg-accent hover:text-foreground"
+					className="h-7 w-7 min-w-0 rounded-md rounded-r-none border-0 bg-transparent px-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
 					disabled={primaryDisabled}
 					title={primaryLabel}
 					aria-label={primaryLabel}
