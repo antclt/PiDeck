@@ -160,6 +160,20 @@ test("browser agent end-to-end: register, snapshot, click and wait over a real w
 		// 输入值经下一次快照回读（值真实落进了页面输入框）
 		const after = parseToolJson(await client.callTool({ name: "browser_snapshot", arguments: {} }));
 		expect(String(after.snapshot ?? "")).toContain("hello from agent");
+
+		// 8. 截图走 CDP 当前帧（quiet 窗口下 capturePage 兜底会是过期帧，CDP 路径必须胜出）
+		const shot = await client.callTool({ name: "browser_screenshot", arguments: {} });
+		const imagePart = shot.content?.find((part) => part.type === "image");
+		const shotMeta = JSON.parse(shot.content?.find((part) => part.type === "text")?.text ?? "{}") as Record<string, unknown>;
+		expect(imagePart?.data?.length ?? 0).toBeGreaterThan(1_000);
+		expect(shotMeta.ok).toBe(true);
+		expect(shotMeta.source).toBe("cdp");
+		expect(Number(shotMeta.width ?? 0)).toBeGreaterThan(0);
+		// 本页远低于像素预算，fullPage 不应触发 clip
+		const fullShot = await client.callTool({ name: "browser_screenshot", arguments: { fullPage: true } });
+		const fullMeta = JSON.parse(fullShot.content?.find((part) => part.type === "text")?.text ?? "{}") as Record<string, unknown>;
+		expect(fullMeta.ok).toBe(true);
+		expect(fullMeta.clipped ?? false).toBe(false);
 	} finally {
 		await client?.close().catch(() => {});
 		await new Promise<void>((resolve) => server.close(() => resolve()));
