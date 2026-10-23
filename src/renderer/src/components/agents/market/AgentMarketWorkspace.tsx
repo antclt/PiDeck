@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useAtomValue } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { ArrowLeft } from "lucide-react";
 import type { AgentProfile } from "../../../../../shared/types/agentProfile";
-import { agentMarketSettingsAtom, agentProfilesAtom } from "../../../atoms/agent-atoms";
+import { agentMarketSettingsAtom, agentProfileSnapshotAtom, agentProfilesAtom } from "../../../atoms/agent-atoms";
+import { desktopApi } from "../../../desktopApi";
 import { t } from "../../../i18n";
 import { showNotice } from "../../../utils/notice";
 import { Badge } from "../../ui-shadcn/badge";
 import { Button } from "../../ui-shadcn/button";
 import { ConfirmDialog } from "../../ui-shadcn/ConfirmDialog";
-import { EMPTY_AGENT_MARKET_FILTER, filterAgents, resolveDefaultSelectionAgent, sortAgentsForMarket, type AgentMarketCategoryFilter } from "../agentMarketFilters";
+import { EMPTY_AGENT_MARKET_FILTER, filterAgents, resolveDefaultSelectionAgent, type AgentMarketCategoryFilter } from "../agentMarketFilters";
 import { AgentMarketCategoryChips } from "./AgentMarketCategoryChips";
 import { AgentMarketDetail } from "./AgentMarketDetail";
 import { AgentMarketEditor } from "./AgentMarketEditor";
@@ -37,6 +38,7 @@ interface AgentMarketWorkspaceProps {
 export function AgentMarketWorkspace({ initialEditingAgentId, onUseAgent, onClose }: AgentMarketWorkspaceProps) {
 	const agents = useAtomValue(agentProfilesAtom);
 	const settings = useAtomValue(agentMarketSettingsAtom);
+	const setSnapshot = useSetAtom(agentProfileSnapshotAtom);
 	const actions = useAgentMarketActions();
 
 	const [route, setRoute] = useState<AgentMarketRoute>(() => (initialEditingAgentId ? { kind: "editor", agentId: initialEditingAgentId } : { kind: "market" }));
@@ -46,7 +48,9 @@ export function AgentMarketWorkspace({ initialEditingAgentId, onUseAgent, onClos
 	const [pendingUseAgentId, setPendingUseAgentId] = useState<string | null>(null);
 
 	const defaultSelection = resolveDefaultSelectionAgent(agents, settings);
-	const visibleAgents = useMemo(() => filterAgents(sortAgentsForMarket(agents), filter), [agents, filter]);
+	// agents 已经在 atom 里按用户自定义顺序排好（agentProfilesAtom），这里只做搜索/分类收窄。
+	const visibleAgents = useMemo(() => filterAgents(agents, filter), [agents, filter]);
+	const agentOrderIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
 	const selectedAgent = selectedAgentId ? (agents.find((agent) => agent.id === selectedAgentId) ?? null) : null;
 	const editingAgent = route.kind === "editor" && route.agentId ? (agents.find((agent) => agent.id === route.agentId) ?? null) : null;
 
@@ -78,6 +82,24 @@ export function AgentMarketWorkspace({ initialEditingAgentId, onUseAgent, onClos
 	const handleEdit = useCallback((agent: AgentProfile) => {
 		setRoute({ kind: "editor", agentId: agent.id });
 	}, []);
+
+	/**
+	 * 拖拽排序：先乐观更新快照里的 agentOrder（卡片立即落位），再让主进程落盘。
+	 * 失败时重拉快照回到权威顺序——拖拽是纯偏好动作，不弹 toast；
+	 * 成功路径靠主进程 agent-profiles:changed 再对齐一次（多窗口共享同一份顺序）。
+	 */
+	const handleReorder = useCallback(
+		(nextOrder: string[]) => {
+			setSnapshot((current) => (current ? { ...current, agentOrder: nextOrder } : current));
+			void desktopApi.agentProfiles.reorder(nextOrder).catch(() => {
+				void desktopApi.agentProfiles
+					.getSnapshot()
+					.then(setSnapshot)
+					.catch(() => undefined);
+			});
+		},
+		[setSnapshot],
+	);
 
 	/**
 	 * 「使用」：交给页面宿主建会话 + 绑定（主进程按绑定注入角色设定，时间线只显示用户输入）。
@@ -118,10 +140,12 @@ export function AgentMarketWorkspace({ initialEditingAgentId, onUseAgent, onClos
 						<div className="min-w-0 flex-1 overflow-y-auto px-5 py-3">
 							<AgentMarketGrid
 								agents={visibleAgents}
+								orderIds={agentOrderIds}
 								totalCount={agents.length}
 								selectionDefaultId={defaultSelection?.id ?? null}
 								selectedAgentId={selectedAgentId}
 								usePendingId={pendingUseAgentId}
+								onReorder={handleReorder}
 								onOpen={(agent) => setSelectedAgentId(agent.id)}
 								onUse={(agent) => void handleUse(agent)}
 								onEdit={handleEdit}

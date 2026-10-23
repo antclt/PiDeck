@@ -6,7 +6,7 @@
  */
 import { ipcMain } from "electron";
 import { ipcChannels } from "../../shared/ipc";
-import { FAVORITE_META_MAX_CHARS, type FavoriteEntry } from "../../shared/types";
+import { FAVORITE_ENTRY_LIMIT, FAVORITE_META_MAX_CHARS, type FavoriteEntry } from "../../shared/types";
 import type { FavoritesStore } from "../favorites/FavoritesStore";
 import { parseAddFavoriteInput } from "../favorites/favoriteInput";
 import type { AppLogger } from "../logging/AppLogger";
@@ -22,6 +22,16 @@ function parseFavoriteId(value: unknown): string {
 	const id = typeof value === "string" ? value.trim() : "";
 	if (!id || id.length > FAVORITE_META_MAX_CHARS) throw new Error("Invalid favorite id");
 	return id;
+}
+
+/**
+ * 排序入参：完整 id 数组。上限与存储上限一致；未知/重复 id 交给 store 过滤
+ * （渲染层可能拿着拖拽开始时的旧快照，其中包含刚被删除的收藏）。
+ */
+function parseFavoriteOrder(value: unknown): string[] {
+	if (!Array.isArray(value)) throw new Error("Invalid favorite order");
+	if (value.length > FAVORITE_ENTRY_LIMIT) throw new Error("Favorite order is too long");
+	return value.map((entry) => parseFavoriteId(entry));
 }
 
 /** 注册收藏 IPC；返回清理函数（卸载时摘掉全部 handler）。 */
@@ -47,9 +57,17 @@ export function registerFavoritesIpc(deps: FavoritesIpcDeps): () => void {
 		return removed;
 	});
 
+	ipcMain.handle(ipcChannels.favoritesReorder, async (_event, favoriteIds: unknown): Promise<FavoriteEntry[]> => {
+		const order = parseFavoriteOrder(favoriteIds);
+		const entries = await store.reorder(order);
+		void appLogger.info(LOG_SCOPE, "Reordered favorites", { count: entries.length });
+		return entries;
+	});
+
 	return () => {
 		ipcMain.removeHandler(ipcChannels.favoritesList);
 		ipcMain.removeHandler(ipcChannels.favoritesAdd);
 		ipcMain.removeHandler(ipcChannels.favoritesRemove);
+		ipcMain.removeHandler(ipcChannels.favoritesReorder);
 	};
 }

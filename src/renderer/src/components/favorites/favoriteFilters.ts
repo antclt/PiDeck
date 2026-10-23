@@ -16,3 +16,21 @@ export function filterFavorites(entries: readonly FavoriteEntry[], query: string
 		return (entry.sessionTitle ?? "").toLowerCase().includes(keyword);
 	});
 }
+
+/**
+ * 把拖拽后的可见顺序套回完整列表（纯函数）：可见条目按新顺序依次占据它们原本的槽位，
+ * 被搜索/筛选隐藏的条目留在原位不动。
+ *
+ * 为什么不让列表直接整体重排：收藏页搜索时只看得见一部分，若按「可见顺序 + 隐藏追加」重排，
+ * 隐藏条目会在用户搜索状态下被无声挪到末尾，清空搜索后顺序已经变了。
+ * 无过滤时可见顺序就是完整顺序，本函数等价于按 ids 重排。
+ */
+export function applyFavoriteOrder(entries: readonly FavoriteEntry[], orderedIds: readonly string[]): FavoriteEntry[] {
+	const byId = new Map(entries.map((entry) => [entry.id, entry]));
+	// 未知 id（已被并发删除）直接跳过：主进程列表才是权威，落盘时会把它们剔掉。
+	const ordered = orderedIds.map((id) => byId.get(id)).filter((entry): entry is FavoriteEntry => entry !== undefined);
+	if (ordered.length === 0) return [...entries];
+	const visibleIds = new Set(ordered.map((entry) => entry.id));
+	let cursor = 0;
+	return entries.map((entry) => (visibleIds.has(entry.id) ? (ordered[cursor++] as FavoriteEntry) : entry));
+}

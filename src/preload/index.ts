@@ -1743,6 +1743,8 @@ const api = {
 		onInvokeEvent: (callback: (payload: AgentInvokeEventPayload) => void) => subscribe<AgentInvokeEventPayload>(ipcChannels.agentProfilesInvokeEvent, callback),
 		/** 绑定/解绑会话与智能体：绑定后该会话每次发送由主进程注入隐藏角色设定。 */
 		bindSession: (input: BindAgentSessionInput) => ipcRenderer.invoke(ipcChannels.agentProfilesBindSession, input) as Promise<AgentMarketSettings>,
+		/** 保存拖拽出的展示顺序（完整 id 数组）；主进程剔除未知 id 后落盘并返回生效的顺序。 */
+		reorder: (agentIds: string[]) => ipcRenderer.invoke(ipcChannels.agentProfilesReorder, agentIds) as Promise<string[]>,
 	},
 
 	// ── 收藏（整条回复 / 划选片段的本地快照；不写入会话文件） ──
@@ -1750,6 +1752,8 @@ const api = {
 		list: () => ipcRenderer.invoke(ipcChannels.favoritesList) as Promise<FavoriteEntry[]>,
 		add: (input: AddFavoriteInput) => ipcRenderer.invoke(ipcChannels.favoritesAdd, input) as Promise<FavoriteEntry>,
 		remove: (favoriteId: string) => ipcRenderer.invoke(ipcChannels.favoritesRemove, favoriteId) as Promise<boolean>,
+		/** 保存拖拽出的顺序（完整 id 数组）；返回主进程落地后的列表。 */
+		reorder: (favoriteIds: string[]) => ipcRenderer.invoke(ipcChannels.favoritesReorder, favoriteIds) as Promise<FavoriteEntry[]>,
 	},
 
 	// ── 系统级划词浮窗（全局快捷键触发的独立窗口；与主窗口共用同一份 preload） ──

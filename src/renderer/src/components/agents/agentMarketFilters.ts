@@ -55,8 +55,34 @@ function compareAgentsForMarket(left: AgentProfile, right: AgentProfile): number
 	return right.createdAt - left.createdAt || left.name.localeCompare(right.name);
 }
 
-export function sortAgentsForMarket(agents: readonly AgentProfile[]): AgentProfile[] {
-	return [...agents].sort(compareAgentsForMarket);
+/** 顺序数组 → id → 名次（重复 id 取首次出现的位置，空串忽略；与 providerOrder.buildProviderRank 同规则）。 */
+function buildAgentRank(order?: readonly string[] | null): Map<string, number> {
+	const rank = new Map<string, number>();
+	if (!order) return rank;
+	for (const id of order) {
+		if (typeof id !== "string" || id.length === 0 || rank.has(id)) continue;
+		rank.set(id, rank.size);
+	}
+	return rank;
+}
+
+/**
+ * 市场排序：用户拖拽出的 agentOrder 优先。
+ * - order 为空/缺失 = 用户没排过：完全走默认权重（内置优先 + 创建时间倒序）；
+ * - 列出的按名次前置，未列出的按默认权重追加在后——新建的智能体会落在末尾，
+ *   不会因为自定义过顺序就凭空插到用户已排好的队伍中间。
+ */
+export function sortAgentsForMarket(agents: readonly AgentProfile[], order?: readonly string[] | null): AgentProfile[] {
+	const rank = buildAgentRank(order);
+	if (rank.size === 0) return [...agents].sort(compareAgentsForMarket);
+	return [...agents].sort((left, right) => {
+		const leftRank = rank.get(left.id);
+		const rightRank = rank.get(right.id);
+		if (leftRank === undefined && rightRank === undefined) return compareAgentsForMarket(left, right);
+		if (leftRank === undefined) return 1;
+		if (rightRank === undefined) return -1;
+		return leftRank - rightRank;
+	});
 }
 
 /**

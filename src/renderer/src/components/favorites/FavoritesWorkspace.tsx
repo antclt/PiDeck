@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bot, Copy, Loader2, Search, Star, TextQuote, Trash2, UserRound, X } from "lucide-react";
+import { Bot, Copy, GripVertical, Loader2, Search, Star, TextQuote, Trash2, UserRound, X } from "lucide-react";
 import type { FavoriteEntry, FavoriteRole } from "../../../../shared/types";
 import { useFavorites } from "../../hooks/useFavorites";
+import { useListReorder, type ListReorderItemBinding } from "../../hooks/useListReorder";
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
 import { writeClipboard } from "../../utils/clipboard";
@@ -37,13 +38,17 @@ function roleLabel(role: FavoriteRole): string {
  * 避免列表里出现 ## / 围栏等源码噪声。收藏时间精确到秒常显，hover 给相对时间。
  */
 export function FavoritesWorkspace() {
-	const { entries, removeFavorite } = useFavorites();
+	const { entries, removeFavorite, reorderFavorites } = useFavorites();
 	const [query, setQuery] = useState("");
 	const [filter, setFilter] = useState<FavoriteFilter>("all");
 	const [selectedId, setSelectedId] = useState<string | null>(null);
 	const [pendingDelete, setPendingDelete] = useState<FavoriteEntry | null>(null);
 
 	const visible = useMemo(() => filterFavorites(entries ?? [], query, filter), [entries, query, filter]);
+	// 拖拽排序：keys 用完整列表，落点用可见列表——搜索时隐藏的收藏在完整顺序里保持原槽位。
+	const allIds = useMemo(() => (entries ?? []).map((entry) => entry.id), [entries]);
+	const visibleIds = useMemo(() => visible.map((entry) => entry.id), [visible]);
+	const reorder = useListReorder({ keys: allIds, visibleKeys: visibleIds, orientation: "list", onReorder: (nextOrder) => void reorderFavorites(nextOrder) });
 	const selectedEntry = useMemo(() => (selectedId ? ((entries ?? []).find((entry) => entry.id === selectedId) ?? null) : null), [entries, selectedId]);
 	const hasQuery = query.trim().length > 0;
 
@@ -112,9 +117,9 @@ export function FavoritesWorkspace() {
 							{!hasQuery && <p className="max-w-[360px] text-xs leading-6 text-muted-foreground">{t("favorites.emptyHint")}</p>}
 						</div>
 					) : (
-						<div className="flex flex-col gap-1.5">
+						<div className="flex flex-col gap-1.5" {...reorder.containerProps}>
 							{visible.map((entry) => (
-								<FavoriteCard key={entry.id} entry={entry} selected={entry.id === selectedId} onSelect={(item) => setSelectedId((current) => (current === item.id ? null : item.id))} onCopy={(item) => void handleCopy(item)} onRequestDelete={requestDelete} />
+								<FavoriteCard key={entry.id} entry={entry} selected={entry.id === selectedId} reorder={reorder.itemBinding(entry.id)} onSelect={(item) => setSelectedId((current) => (current === item.id ? null : item.id))} onCopy={(item) => void handleCopy(item)} onRequestDelete={requestDelete} />
 							))}
 						</div>
 					)}
@@ -144,26 +149,49 @@ export function FavoritesWorkspace() {
  * 紧凑收藏行：单行元信息 + 两行摘要（约 72px）。
  * 摘要对「整条消息」先 stripMarkdown（列表里不该出现 ## / 围栏源码），详情里再按 Markdown 渲染。
  */
-function FavoriteCard(props: { entry: FavoriteEntry; selected: boolean; onSelect: (entry: FavoriteEntry) => void; onCopy: (entry: FavoriteEntry) => void; onRequestDelete: (entry: FavoriteEntry) => void }) {
+function FavoriteCard(props: { entry: FavoriteEntry; selected: boolean; reorder: ListReorderItemBinding; onSelect: (entry: FavoriteEntry) => void; onCopy: (entry: FavoriteEntry) => void; onRequestDelete: (entry: FavoriteEntry) => void }) {
 	const entry = props.entry;
 	const isSelection = entry.kind === "selection";
 	const KindIcon = isSelection ? TextQuote : entry.role === "user" ? UserRound : Bot;
 	const preview = useMemo(() => (isSelection ? entry.text : stripMarkdown(entry.text)), [entry.text, isSelection]);
 	return (
 		<article
+			ref={props.reorder.register}
 			role="button"
 			tabIndex={0}
 			aria-label={t("favorites.openDetail")}
 			aria-pressed={props.selected}
 			onClick={() => props.onSelect(entry)}
 			onKeyDown={(event) => {
+				// 卡片内还有手柄/复制/删除按钮：它们的 Enter/Space 表示自己的动作，不再冒泡成「打开详情」。
+				if (event.target !== event.currentTarget) return;
 				if (event.key !== "Enter" && event.key !== " ") return;
 				event.preventDefault();
 				props.onSelect(entry);
 			}}
-			className={cn("group flex cursor-pointer items-start gap-2.5 rounded-md border px-2.5 py-2 text-left transition-colors", props.selected ? "border-primary/40 bg-primary/5" : "border-border/50 hover:border-border hover:bg-muted/30")}
+			className={cn(
+				"group relative flex cursor-pointer items-start gap-2.5 rounded-md border px-2.5 py-2 text-left transition-colors",
+				props.selected ? "border-primary/40 bg-primary/5" : "border-border/50 hover:border-border hover:bg-muted/30",
+				// 拖拽中的卡片半透明：插入位置由指示线表达，不在拖拽影像里重复。
+				props.reorder.dragging && "opacity-40",
+			)}
 		>
-			<span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-muted/60 text-muted-foreground">
+			{/* 插入指示线：单列列表画在卡片上/下沿（与网格的竖线同一套落点语义）。 */}
+			{props.reorder.dropPosition && <span className={cn("pointer-events-none absolute -right-1 -left-1 h-0.5 rounded-full bg-primary", props.reorder.dropPosition === "before" ? "-top-1" : "-bottom-1")} aria-hidden="true" />}
+			{/* 手柄悬停时替换掉左侧类型图标（同位置同尺寸）：不额外占列宽，列表密度不变。 */}
+			<Button
+				type="button"
+				variant="ghost"
+				size="icon-sm"
+				className="absolute top-2 left-2.5 size-6 cursor-grab rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 active:cursor-grabbing"
+				title={t("common.dragReorder")}
+				aria-label={t("common.dragReorder")}
+				{...props.reorder.gripProps}
+				onClick={(event) => event.stopPropagation()}
+			>
+				<GripVertical className="size-3.5" aria-hidden="true" />
+			</Button>
+			<span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-muted/60 text-muted-foreground transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">
 				<KindIcon className="size-3.5" aria-hidden="true" />
 			</span>
 			<div className="min-w-0 flex-1">

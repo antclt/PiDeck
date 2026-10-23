@@ -9,7 +9,8 @@ import type { NormalizedFavoriteInput } from "./favoriteInput";
  *
  * 与 AgentProfileStore 同一套骨架（串行写队列 + 读盘归一化），差异是它只承载「快照」：
  * - 收藏的是正文快照而不是消息引用，会话删除/消息编辑都不影响已收藏内容；
- * - 读盘归一化丢弃坏条目、钳正文长度、按收藏时间倒序并裁到 FAVORITE_ENTRY_LIMIT；
+ * - 数组顺序就是用户看到的顺序（也是拖拽排序持久化的权威顺序）：新增前插，读盘保留文件里的条目顺序；
+ * - 读盘归一化丢弃坏条目、钳正文长度并裁到 FAVORITE_ENTRY_LIMIT；
  * - 坏文件（截断 / 手改坏）退化成空列表并立即写回，不让收藏功能拖垮启动。
  */
 const STORE_VERSION = 1;
@@ -65,7 +66,12 @@ function normalizeEntry(raw: unknown): FavoriteEntry | null {
 	};
 }
 
-/** 整文件归一化：丢弃坏条目、去重 id、按收藏时间倒序、裁到上限；返回 changed 供 load 决定是否写回。 */
+/**
+ * 整文件归一化：丢弃坏条目、去重 id（保留首次出现）、保留文件里的顺序、裁到上限。
+ * 不按 createdAt 重排：数组顺序是用户拖拽出来的偏好，重排会把用户刚排好的顺序在重启后抹掉；
+ * 旧版本写入的文件本来就是这个顺序（新增前插），所以迁移无需额外处理。
+ * 返回 changed 供 load 决定是否写回。
+ */
 function normalizeState(raw: unknown): { state: PersistedFavoriteState; changed: boolean } {
 	if (!isRecord(raw) || !Array.isArray(raw.entries)) return { state: { version: STORE_VERSION, entries: [] }, changed: true };
 	const seen = new Set<string>();
@@ -76,7 +82,6 @@ function normalizeState(raw: unknown): { state: PersistedFavoriteState; changed:
 		seen.add(entry.id);
 		entries.push(entry);
 	}
-	entries.sort((left, right) => right.createdAt - left.createdAt);
 	const trimmed = entries.slice(0, FAVORITE_ENTRY_LIMIT);
 	const changed = trimmed.length !== raw.entries.length || raw.version !== STORE_VERSION;
 	return { state: { version: STORE_VERSION, entries: trimmed }, changed };
@@ -139,6 +144,32 @@ export class FavoritesStore {
 			this.state.entries = this.state.entries.filter((entry) => entry.id !== id);
 		});
 		return true;
+	}
+
+	/**
+	 * 保存用户拖拽出的顺序：ids 里命中的条目按首次出现的位置前置，未列出的（旧快照 /
+	 * 拖拽期间新增）按当前顺序追加到尾，保证一次过期载荷不会让收藏从列表里消失。
+	 * 顺序没变时不写盘（拖回原位只是视觉动作）。
+	 */
+	async reorder(ids: readonly string[]): Promise<FavoriteEntry[]> {
+		const byId = new Map(this.state.entries.map((entry) => [entry.id, entry]));
+		const next: FavoriteEntry[] = [];
+		const seen = new Set<string>();
+		for (const id of ids) {
+			if (typeof id !== "string") continue;
+			const entry = byId.get(id);
+			if (!entry || seen.has(id)) continue;
+			seen.add(id);
+			next.push(entry);
+		}
+		for (const entry of this.state.entries) if (!seen.has(entry.id)) next.push(entry);
+		const unchanged = next.length === this.state.entries.length && next.every((entry, index) => entry.id === this.state.entries[index].id);
+		if (!unchanged) {
+			await this.mutate(() => {
+				this.state.entries = next;
+			});
+		}
+		return this.list();
 	}
 
 	/** 串行写盘：先同步改内存再入队，await 的 Promise 覆盖「已落盘」，并发调用不会旧快照覆盖新快照。 */

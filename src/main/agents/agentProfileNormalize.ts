@@ -57,6 +57,12 @@ export type PersistedAgentProfileState = {
 	revision: number;
 	settings: AgentMarketSettings;
 	agents: AgentProfile[];
+	/**
+	 * 用户拖拽出的展示顺序（只存 id）。空数组 = 未自定义 = 按默认规则排序。
+	 * 与 agents 分开存：agents 的数组顺序属于存储细节（新建推尾部），展示顺序是用户偏好，
+	 * 两者混在一起会让「导入/补种/迁移」意外改掉用户排好的顺序。
+	 */
+	agentOrder: string[];
 };
 
 /**
@@ -79,7 +85,7 @@ export type NormalizedAgentProfileContent = {
 
 export function createEmptyState(): PersistedAgentProfileState {
 	// sessionAgentBindings 是对象：必须每次新建，否则多个空状态会共享同一份绑定表。
-	return { version: SCHEMA_VERSION, revision: 0, settings: createDefaultSettings(), agents: [] };
+	return { version: SCHEMA_VERSION, revision: 0, settings: createDefaultSettings(), agents: [], agentOrder: [] };
 }
 
 function createDefaultSettings(): AgentMarketSettings {
@@ -109,8 +115,27 @@ export function normalizePersistedState(value: unknown, now: number): { state: P
 		// 设置里的默认智能体是否悬空要等种子补齐后由 resolveSelectionAgent 判定，这里只收敛形状。
 		settings: normalizeSettingsShape(record.settings),
 		agents,
+		agentOrder: normalizeAgentOrder(record.agentOrder, seen),
 	};
 	return { state, changed: canonicalJson(value) !== canonicalJson(state) };
+}
+
+/**
+ * 自定义展示顺序归一化：只留字符串、去重、剔除已不存在的 id（删除智能体后旧顺序会残留）。
+ * 顺序只是展示偏好，坏值不能让智能体本身失效，所以丢弃而不是抛错；返回空数组表示未自定义。
+ */
+export function normalizeAgentOrder(value: unknown, knownIds: ReadonlySet<string>): string[] {
+	if (!Array.isArray(value)) return [];
+	const order: string[] = [];
+	const seen = new Set<string>();
+	for (const entry of value) {
+		if (typeof entry !== "string") continue;
+		const id = clampText(entry.trim(), MAX_AGENT_ID_CHARS);
+		if (!id || !knownIds.has(id) || seen.has(id)) continue;
+		seen.add(id);
+		order.push(id);
+	}
+	return order;
 }
 
 function normalizePersistedAgent(value: unknown, now: number): AgentProfile | undefined {

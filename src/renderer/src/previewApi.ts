@@ -2045,6 +2045,7 @@ export function createPreviewApi(): PiDesktopApi {
 				revision: 0,
 				agents: [],
 				settings: { selectionToolEnabled: true, systemSelectionEnabled: false, selectionToolAgentId: null, sessionAgentBindings: {} },
+				agentOrder: [],
 			}),
 			create: async () => {
 				throw new Error("preview stub");
@@ -2070,6 +2071,8 @@ export function createPreviewApi(): PiDesktopApi {
 			}),
 			/** 会话绑定在预览/Web 端没有落盘位置，返回空绑定表（不报错，避免「使用」路径炸掉）。 */
 			bindSession: async () => ({ selectionToolEnabled: true, systemSelectionEnabled: false, selectionToolAgentId: null, sessionAgentBindings: {} }),
+			/** 排序在预览里没有落盘位置：原样回显，不报错（市场本身也是空态）。 */
+			reorder: async (agentIds) => agentIds,
 			onChanged: () => () => {},
 			invoke: async () => ({ ok: false as const, errorKind: "spawn-failed" as const, message: "unavailable" }),
 			cancelInvoke: async () => ({ ok: false }),
@@ -2082,6 +2085,8 @@ export function createPreviewApi(): PiDesktopApi {
 				throw new Error("preview stub");
 			},
 			remove: async () => false,
+			// 列表恒空：排序无可命中的条目，与主进程「剔除未知 id」后的结果一致。
+			reorder: async () => [],
 		},
 		// 系统级划词浮窗：预览/Web 端没有独立窗口，全部 inert。
 		selectionTool: {
