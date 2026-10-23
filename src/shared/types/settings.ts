@@ -186,6 +186,10 @@ export type AppSettings = {
 	backgroundImage: string;
 	/** 背景图可见度 0-1：0=背景色完全遮住图片，1=图片全显；面板/弹层会按语义分档透出 */
 	backgroundImageOpacity: number;
+	/** Wallpaper Engine 工坊目录（steamapps/workshop/content/431960），空串=未设置 */
+	weWorkshopDir: string;
+	/** 选中的 Wallpaper Engine 视频壁纸工坊 ID（纯数字），空串=不启用；与 backgroundImage 同时存在时视频优先 */
+	weWallpaperId: string;
 	/** 界面语言，system 跟随系统语言；pseudo 用于长文案布局压力测试 */
 	language: AppLanguageMode;
 	/** 启动时主窗口几何预设，默认 last（上次窗口位置和大小，读不到时顺延 maximized） */
@@ -1011,6 +1015,8 @@ export function createDefaultAppSettings(): AppSettings {
 		customThemeOverrides: {},
 		backgroundImage: "",
 		backgroundImageOpacity: 0.8,
+		weWorkshopDir: "",
+		weWallpaperId: "",
 		language: "system",
 		startupWindowMode: "last",
 		piEnvironmentChecked: false,

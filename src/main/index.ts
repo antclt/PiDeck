@@ -398,6 +398,7 @@ import { constrainWindowBoundsToWorkArea, type LastWindowBounds, MIN_WINDOW_HEIG
 import { applyE2EWindowPlacement, E2E_RENDERING_SWITCHES, resolveE2EWindowPlacement } from "./e2eWindowMode";
 import { createRendererCrashRecoveryGuard } from "./window/rendererCrashRecovery";
 import { registerBackgroundImageProtocol, registerBackgroundsIpc } from "./ipc/backgroundsIpc";
+import { registerWallpaperEngineIpc, registerWallpaperEngineProtocol } from "./ipc/wallpaperEngineIpc";
 import { registerThemesIpc } from "./ipc/themesIpc";
 import { registerHostPluginsIpc } from "./ipc/hostPluginsIpc";
 import { registerPiDeckMcpIpc } from "./ipc/piDeckMcpIpc";
@@ -3204,6 +3205,10 @@ function registerIpc() {
 	// 换肤背景图：协议服务 userData/backgrounds/，IPC 负责选图复制与删除
 	registerBackgroundImageProtocol();
 	registerBackgroundsIpc();
+	// Wallpaper Engine 视频壁纸：协议只服务设置里的工坊目录，IPC 只有选目录/列表/校验三条
+	const wallpaperEngineDeps = { getDir: () => settingsStore.get().weWorkshopDir ?? "" };
+	registerWallpaperEngineProtocol(wallpaperEngineDeps);
+	registerWallpaperEngineIpc(wallpaperEngineDeps);
 	registerThemesIpc();
 	// Desktop plugins run without AgentManager/RPC; failure leaves the rest of PiDeck untouched.
 	// 项目显示名闭包在面板挂载时才求值：此处 projectStore 尚未装配。
@@ -4413,6 +4418,8 @@ async function detectExternalEditorsOnFirstLaunch() {
 // 换肤背景图/宠物雪碧图/声音提醒/生图历史图片协议：自定义 scheme 必须在 ready 前注册特权声明（secure 以便渲染层 CSS/图片/音频引用）
 protocol.registerSchemesAsPrivileged([
 	{ scheme: "pideck-plugin", privileges: { secure: true, standard: true, supportFetchAPI: true, corsEnabled: false } },
+	// Wallpaper Engine 视频壁纸：stream:true 让 <video> 走 Range 流式读取，不整块进内存
+	{ scheme: "pideck-we", privileges: { secure: true, standard: true, corsEnabled: false, supportFetchAPI: true, stream: true } },
 	{ scheme: "pideck-bg", privileges: { secure: true, standard: true, corsEnabled: false, supportFetchAPI: true, stream: false } },
 	{ scheme: "pideck-pet", privileges: { secure: true, standard: true, corsEnabled: false, supportFetchAPI: true, stream: false } },
 	{ scheme: "pideck-sound", privileges: { secure: true, standard: true, corsEnabled: false, supportFetchAPI: true, stream: true } },

@@ -104,6 +104,8 @@ let previewSettings: AppSettings = {
 	customThemeOverrides: {},
 	backgroundImage: "",
 	backgroundImageOpacity: 0.8,
+	weWorkshopDir: "",
+	weWallpaperId: "",
 	language: "system",
 	startupWindowMode: "last",
 	piEnvironmentChecked: true,
@@ -604,6 +606,9 @@ export function createPreviewApi(): PiDesktopApi {
 			pickFiles: async () => [],
 			pickBackgroundImage: async () => "",
 			removeBackgroundImage: async () => undefined,
+			pickWallpaperEngineDir: async () => "",
+			listWallpaperEngine: async () => ({ dir: "", items: [], error: "no-dir" as const }),
+			selectWallpaperEngine: async () => null,
 		},
 		// 自定义主题预览桩：返回空列表与拒绝保存，预览壳没有真实 userData 目录
 		customThemes: {
