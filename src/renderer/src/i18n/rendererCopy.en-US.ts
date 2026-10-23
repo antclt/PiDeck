@@ -4719,6 +4719,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.wallpaperEngineChooseDir": "Choose workshop folder",
 	"settings.wallpaperEngineOff": "None",
 	"settings.wallpaperEngineEmpty": "No video wallpapers found in this folder",
+	"settings.wallpaperEngineUnsupported": "not supported on this device",
+	"settings.wallpaperEnginePlaybackFailed": "This video wallpaper can't play on this device (missing decoder?); showing its preview image, or no wallpaper if there is none",
 	"settings.wallpaperEngineUnreadable": "Cannot read this folder",
 	"settings.sectionCustomThemes": "Custom themes",
 	"settings.customThemesDesc": "A theme is a JSON file in the userData/custom-themes/ directory (whitelisted color tokens, light & dark). Create/edit here, or generate the AI guide and let an AI write one for you.",

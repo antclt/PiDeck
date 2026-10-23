@@ -4703,6 +4703,8 @@ export const zhCN = {
 	"settings.wallpaperEngineChooseDir": "选择工坊目录",
 	"settings.wallpaperEngineOff": "不使用",
 	"settings.wallpaperEngineEmpty": "该目录下没有可用的视频壁纸",
+	"settings.wallpaperEngineUnsupported": "此设备不支持播放",
+	"settings.wallpaperEnginePlaybackFailed": "视频壁纸无法在此设备上播放（可能缺少对应解码器），改为显示预览图；没有预览图时不显示壁纸",
 	"settings.wallpaperEngineUnreadable": "无法读取该目录",
 	"settings.sectionCustomThemes": "自定义主题",
 	"settings.customThemesDesc": "主题是 userData/custom-themes/ 目录下的 JSON 文件（token 白名单色板，亮暗双档）。可在此新建/编辑，或点「AI 开发指南」生成指南让 AI 帮你写。",

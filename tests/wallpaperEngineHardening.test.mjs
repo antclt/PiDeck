@@ -62,3 +62,42 @@ test("IPC: pick-dir and list go through the folder normalization", async () => {
 	assert.match(ipc, /return picked \? resolveWorkshopContentDir\(picked\) : ""/);
 	assert.match(ipc, /listWallpaperEngineItems\(await resolveWorkshopContentDir\(/);
 });
+
+test("codec probe: list-time playability from canPlayType (headless Electron answers recorded in codec-probe.log)", () => {
+	// 模拟无 GPU 的 Electron：mp4/webm 可播，quicktime 不可播
+	const answers = { "video/mp4": "maybe", "video/webm": "maybe", "video/quicktime": "" };
+	const canPlayType = (mime) => answers[mime] ?? "";
+	assert.equal(shared.wallpaperEnginePlayability("a.mp4", canPlayType), "maybe");
+	assert.equal(shared.wallpaperEnginePlayability("a.webm", canPlayType), "maybe");
+	assert.equal(shared.wallpaperEnginePlayability("a.mov", canPlayType), "unsupported");
+	assert.equal(
+		shared.wallpaperEnginePlayability("a.exe", () => "probably"),
+		"unsupported",
+	);
+	assert.equal(
+		shared.wallpaperEnginePlayability("a.mp4", () => "probably"),
+		"probably",
+	);
+});
+
+test("codec fallback: video error → preview image → no wallpaper", () => {
+	const videoWallpaper = loadTsCommonJs("src/renderer/src/hooks/appearance/videoWallpaper.ts");
+	assert.equal(videoWallpaper.videoWallpaperRender({ videoFailed: false, previewFailed: false }), "video");
+	assert.equal(videoWallpaper.videoWallpaperRender({ videoFailed: true, previewFailed: false }), "preview");
+	assert.equal(videoWallpaper.videoWallpaperRender({ videoFailed: true, previewFailed: true }), "none");
+});
+
+test("codec wiring: layer handles <video> error with a toast + preview, settings marks unsupported items", async () => {
+	const { readFileSync } = await import("node:fs");
+	const layer = readFileSync("src/renderer/src/components/app/wallpaper/WallpaperVideoLayer.tsx", "utf8");
+	assert.match(layer, /onError=\{\(\) => \{\s*setFailedSrc\(src\);\s*toast\.warning\(t\("settings\.wallpaperEnginePlaybackFailed"\)\);/);
+	assert.match(layer, /<img key=\{src\} src=\{wallpaperEnginePreviewUrl\(settings\.weWallpaperId\)\} alt="" onError=\{\(\) => setPreviewFailedSrc\(src\)\}/);
+	const section = readFileSync("src/renderer/src/components/app/settings/WallpaperEngineSection.tsx", "utf8");
+	assert.match(section, /wallpaperEnginePlayability\(item\.file, canPlayType\) === "unsupported"/);
+	assert.match(section, /t\("settings\.wallpaperEngineUnsupported"\)/);
+	for (const locale of ["zh-CN", "en-US", "zh-TW"]) {
+		const copy = readFileSync(`src/renderer/src/i18n/rendererCopy.${locale}.ts`, "utf8");
+		assert.match(copy, /"settings\.wallpaperEngineUnsupported":/, locale);
+		assert.match(copy, /"settings\.wallpaperEnginePlaybackFailed":/, locale);
+	}
+});
