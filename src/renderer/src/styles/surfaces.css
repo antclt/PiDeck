@@ -265,14 +265,22 @@
   color: var(--color-danger);
 }
 .outline-hover.session-outline-pane {
-  /* 会话定位轴贴在消息区左缘：右侧留给滚动条，且远离输入框/滚动按钮所在右缘。
-     left: 0 + right: auto 抵消 .outline-hover 的贴右缘公式（含抽屉宽度偏移）。 */
-  left: 0;
-  right: auto;
+  /* 会话定位轴贴在消息区右缘（原设计）：right: 0 抵消 .outline-hover 的抽屉宽度偏移公式，
+     刻度从右端开始排、预览卡向左展开（previewSide="before"）。 */
+  right: 0;
   top: 150px;
   bottom: 24px;
-  /* 左侧刻度从容器左端开始排，预览卡向右展开 */
-  align-items: flex-start;
+}
+/* 静默态不显示刻度：只有指针落在定位轴上（或键盘聚焦进来）才浮现。
+   用户反馈「不放鼠标上去它就在那儿占位」。opacity 不改布局，ResizeObserver
+   量到的可用高度不受影响；focus-within 保证键盘用户同样看得见。 */
+.outline-hover.session-outline-pane > * {
+  opacity: 0;
+  transition: opacity 160ms ease-out;
+}
+.outline-hover.session-outline-pane:hover > *,
+.outline-hover.session-outline-pane:focus-within > * {
+  opacity: 1;
 }
 .outline-hover {
   position: absolute;

@@ -307,7 +307,9 @@ description: …
 
 ## 会话定位轴（消息区刻度条 / outline rail）
 
-**它是什么**：会话消息区一列 1px 横杠，一根 = 一个用户提问；悬停出预览卡，点击跳转。规划逻辑在 `src/renderer/src/components/session/timeline/outlineRailTicks.ts`（纯函数），渲染在 `SurfaceComponents.tsx` 的 `ConversationOutline` + beUI 的 `preview-rail.tsx`。
+**它是什么**：会话消息区**右缘**一列 1px 横杠，一根 = 一个用户提问；悬停出预览卡，点击跳转。
+
+**位置与显隐是用户定的**：必须贴右缘（`right: 0`，预览卡向左展开 `previewSide="before"`），且**静默态整体不可见**——`.outline-hover.session-outline-pane > * { opacity: 0 }`，仅 `:hover` / `:focus-within` 时 `opacity: 1`（`focus-within` 兜键盘用户，不能只写 `:hover`）。历史上 commit `3303200ae` 把它挪到过左缘、并长期保持常显，2026-10 用户明确要求回到右侧 + 悬停才出现；守卫在 `tests/outlineDrawerOffset.test.mjs`。规划逻辑在 `src/renderer/src/components/session/timeline/outlineRailTicks.ts`（纯函数），渲染在 `SurfaceComponents.tsx` 的 `ConversationOutline` + beUI 的 `preview-rail.tsx`。
 
 **条数上限是 30，且是「滑动窗口」不是采样**（2026-10 用户反馈「旁边横条太多」）：
 

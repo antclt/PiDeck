@@ -1289,9 +1289,10 @@ export { DiagnosticMessageCard, RespondingIndicator, ThinkingBlock };
 export { MultiSelectModal };
 
 /**
- * 会话定位轴（beUI PreviewRail）：消息区左缘一列 1px 刻度，一根 = 一个用户检查点。
+ * 会话定位轴（beUI PreviewRail）：消息区右缘一列 1px 刻度，一根 = 一个用户检查点；
+ * 静默态整体不可见，指针移上去（或键盘聚焦）才浮现（见 surfaces.css 的 .session-outline-pane）。
  * hover 出预览卡、点击跳转；工具开关已上收会话 Tab 栏（SessionToolAction），
- * 此处不再承载其他入口；容器沿用 .outline-hover 的定位规则（session-outline-pane 贴左缘，有测试守护）。
+ * 此处不再承载其他入口；容器沿用 .outline-hover 的定位规则（session-outline-pane 贴右缘，有测试守护）。
  *
  * 条数与取哪几条：**最多 RAIL_TICK_LIMIT（30）条，以当前阅读位置为中心的滑动窗口**
  * （windowRailItems）。底部时是「最新的 30 条」，往上翻窗口跟着上移——用户反馈
@@ -1361,7 +1362,7 @@ function ConversationOutlineView(props: ConversationOutlineProps) {
 					itemSize={plan.itemSize}
 					railMaxHeight={plan.scrollable ? availableHeight : undefined}
 					onWheelFallback={props.onTimelineWheel}
-					previewSide="after"
+					previewSide="before"
 					activeId={visibleRailActiveId}
 					highlightActive={visibleRailActiveId !== undefined}
 					onItemSelect={(item) => {
@@ -1371,7 +1372,7 @@ function ConversationOutlineView(props: ConversationOutlineProps) {
 					/* 宽度对齐原触发按钮（30px），min-h-0 抵消组件自带的演示高度 */
 					className="pointer-events-auto min-h-0 w-[30px]"
 					railClassName="w-full content-center [&_[data-slot=preview-rail-item]]:w-full [&_[data-slot=preview-rail-item]]:justify-center [&_[data-slot=preview-rail-tick]]:h-px [&_[data-slot=preview-rail-tick]]:w-4 [&_[data-slot=preview-rail-tick]]:origin-center"
-					previewContainerClassName="inset-y-0 left-7 right-auto w-64"
+					previewContainerClassName="inset-y-0 right-7 left-auto w-64"
 					previewClassName="[&_[data-slot=preview-rail-card]]:h-20 [&_[data-slot=preview-rail-card]]:overflow-hidden [&_[data-slot=preview-rail-card]]:p-3 [&_[data-slot=preview-rail-title]]:line-clamp-1 [&_[data-slot=preview-rail-title]]:text-xs [&_[data-slot=preview-rail-title]]:leading-4 [&_[data-slot=preview-rail-description]]:line-clamp-1 [&_[data-slot=preview-rail-description]]:text-xs [&_[data-slot=preview-rail-description]]:leading-4"
 				/>
 			)}

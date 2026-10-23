@@ -393,7 +393,17 @@ export function PreviewRail({
 			{showPreview && displayedItem ? (
 				<div aria-hidden="true" className={cn("pointer-events-none absolute z-50", isHorizontal ? "top-1/2 left-1/2 h-5 max-w-full -translate-x-1/2 -translate-y-1/2" : previewSide === "before" ? "inset-y-0 right-16 left-4" : "inset-y-0 right-4 left-16", previewContainerClassName)}>
 					{/* 只渲染当前那一张卡，按刻度索引绝对定位（官方版为对齐渲染了 N 个占位格子）。 */}
-					<div ref={cardRef} style={isHorizontal ? { left: displayedIndex * itemSize + itemSize / 2 } : undefined} className={cn("absolute", isHorizontal ? "bottom-12 w-72 -translate-x-1/2" : cn("w-full max-w-sm", previewSide === "before" ? "right-0" : "left-0"), previewClassName)}>
+					<div
+						ref={cardRef}
+						style={isHorizontal ? { left: displayedIndex * itemSize + itemSize / 2 } : undefined}
+						className={cn(
+							"absolute",
+							// 预览卡在相邻刻度之间滑动时补一段过渡（官方版是瞬移）；减少动态偏好下关闭
+							!reduce && !isHorizontal && "transition-[top] duration-[140ms] ease-out",
+							isHorizontal ? "bottom-12 w-72 -translate-x-1/2" : cn("w-full max-w-sm", previewSide === "before" ? "right-0" : "left-0"),
+							previewClassName,
+						)}
+					>
 						<motion.div layoutId={`preview-rail-card-${uid}`} transition={reduce ? { duration: 0 } : SPRING_LAYOUT}>
 							<AnimatePresence mode="wait" initial={false}>
 								<motion.div
