@@ -5,7 +5,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { DSH_RUNNER_NODE_MAJOR, isDshRunnerNodeCompatible, pathLooksLikeOtherNodeMajor, nodePathCandidates, versionManagerNodeCandidates, parseNodeVersion, resolveConfiguredNodePath, detectDshRunnerNode, detectSystemNode, resolveDshRunnerNodePath, isNodeShimPath, isRunnableRunnerNode } = loadTsCommonJs("src/main/dsh/dshRunnerNode.ts");
+const { DSH_RUNNER_NODE_MAJOR, isDshRunnerNodeCompatible, pathLooksLikeOtherNodeMajor, nodePathCandidates, versionManagerNodeCandidates, parseNodeVersion, resolveConfiguredNodePath, detectDshRunnerNode, detectSystemNode, resolveDshRunnerNodePath, isNodeShimPath, isRunnableRunnerNode } =
+	loadTsCommonJs("src/main/dsh/dshRunnerNode.ts");
 
 /** 把一个真实 node 二进制放到任意路径（硬链接优先，跨卷退回复制）。 */
 async function plantNodeBinary(target) {
