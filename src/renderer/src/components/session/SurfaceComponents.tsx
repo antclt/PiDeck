@@ -3,6 +3,8 @@ import { messageEntryId } from "../../utils/sessionCommands";
 import { toBlob } from "html-to-image";
 import { writeClipboard, writeClipboardImage } from "../../utils/clipboard";
 import { MarkdownStream } from "./MarkdownStream";
+import { SettledLongAnswer } from "./SettledLongAnswer";
+import { shouldCollapseSettledText } from "./markdownStreamPolicy";
 import { PreviewRail, type PreviewRailItem } from "../motion/preview-rail";
 import { planRailTicks, windowRailItems } from "./timeline/outlineRailTicks";
 import { areOutlineRailItemsEqual, createOutlineItemIndex, resolveVisibleRailActiveId } from "./timeline/outlineRailActive";
@@ -600,7 +602,11 @@ export const AssistantText = memo(
 						})}
 					</div>
 				)}
-				<MarkdownStream text={cleanText} isStreaming={Boolean(props.isStreaming)} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />
+				{!props.isStreaming && shouldCollapseSettledText(cleanText.length) ? (
+					<SettledLongAnswer text={cleanText} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />
+				) : (
+					<MarkdownStream text={cleanText} isStreaming={Boolean(props.isStreaming)} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />
+				)}
 			</div>
 		);
 	},

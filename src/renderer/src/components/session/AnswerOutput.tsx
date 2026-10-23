@@ -1,13 +1,12 @@
-import { memo, useRef, useState } from "react";
+import { memo, useRef } from "react";
 import { useAtomValue } from "jotai";
 import { streamingTextBySessionIdAtomFamily } from "../../atoms/session-atoms";
-import { t } from "../../i18n";
 import { useHoldTextWhileSelecting } from "../../hooks/useHoldTextWhileSelecting";
 import { MarkdownStream } from "./MarkdownStream";
 import { RawToolCallFallback } from "./RawToolCallFallback";
+import { SettledLongAnswer } from "./SettledLongAnswer";
 import { cleanAnswerText } from "./timeline/answerText.ts";
 import { detectLeakedToolCallXml } from "./timeline/leakedToolCallText.ts";
-import { settledCollapsePreview, shouldCollapseSettledText } from "./markdownStreamPolicy";
 
 /**
  * 中间回答视觉档位。
@@ -68,38 +67,6 @@ export const AnswerOutput = memo(function AnswerOutput(props: {
 	return (
 		<div className={answerOutputClassName(props.variant ?? "process")} data-message-id={props.messageId} data-is-streaming="0" data-variant={props.variant ?? "process"} data-settle={props.settle ? "1" : undefined} style={{ display: props.hidden ? "none" : undefined }}>
 			{detectLeakedToolCallXml(cleanText) ? <RawToolCallFallback text={cleanText} messageId={props.messageId} /> : <SettledLongAnswer text={cleanText} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />}
-		</div>
-	);
-});
-
-/**
- * 超长 settled 正文的折叠渲染（阈值见 markdownStreamPolicy）：默认只渲染预览前缀，
- * 点「展开全文」才构建完整 markdown DOM（展开后仍受 SETTLE_FULL_MAX_CHARS 轻量插件
- * 上限约束）。目的：把单条巨型回复（100-200KB，数千段落）的常驻 DOM 封顶，
- * 避免长回合 settle 后滚动/布局全程卡顿、内存拖慢整机（2026-10 DSH 长回合事故）。
- * 收起可随时释放展开后的 DOM。泄漏工具调用原文不进这里（前置兜底已拦截）。
- */
-const SettledLongAnswer = memo(function SettledLongAnswer(props: { text: string; onOpenExternal: (url: string, forceSystem?: boolean) => void; onOpenFile?: (path: string, line?: number) => void }) {
-	const [expanded, setExpanded] = useState(false);
-	if (expanded) {
-		return (
-			<div>
-				<MarkdownStream text={props.text} isStreaming={false} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />
-				<button type="button" className="mt-1 cursor-pointer rounded-md px-2 py-1 text-caption text-muted-foreground transition-colors duration-fast hover:bg-[var(--color-bg-hover)] hover:text-foreground" onClick={() => setExpanded(false)}>
-					{t("session.longAnswer.collapse")}
-				</button>
-			</div>
-		);
-	}
-	if (!shouldCollapseSettledText(props.text.length)) {
-		return <MarkdownStream text={props.text} isStreaming={false} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />;
-	}
-	return (
-		<div data-long-answer-collapsed="1">
-			<MarkdownStream text={settledCollapsePreview(props.text)} isStreaming={false} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />
-			<button type="button" className="mt-1 cursor-pointer rounded-md px-2 py-1 text-caption text-muted-foreground transition-colors duration-fast hover:bg-[var(--color-bg-hover)] hover:text-foreground" onClick={() => setExpanded(true)}>
-				{t("session.longAnswer.expand", { kb: Math.round(props.text.length / 1024) })}
-			</button>
 		</div>
 	);
 });
