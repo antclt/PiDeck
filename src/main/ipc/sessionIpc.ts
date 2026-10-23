@@ -13,6 +13,7 @@ import { canonicalizeSessionPath } from "../../shared/sessionIdentity";
 import { createSessionModelPreference } from "../../shared/modelDisplayName";
 import { modelThinkingLevelOf } from "../../shared/modelThinkingLevels";
 import { readRuntimePromptTemplateBodies } from "../prompts/runtimeTemplateBodies";
+import { sessionFileExistsCached } from "../sessions/sessionFileLiveness";
 import { isDshAgentPresetLocked } from "../../shared/dshAgentPresetLock";
 import type {
 	AvailableModel,
@@ -803,7 +804,10 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				// 与 mergeScanned 清理闸（environment=wsl 跳过）同口径。
 				if (record.environment === "wsl") return true;
 				if (sessionRuntimeCoordinator.hasLiveRuntime(record.id)) return true;
-				return existsSync(record.filePath);
+				// TTL 缓存（2027-02 性能审计）：几百条记录逐条同步 stat 是每次 5-30ms 的
+				// 固定税（切项目/catalog 刷新都会重拉这条 handler）；存在性 2s 陈旧无害，
+				// 清理闸（mergeScanned）仍是权威。
+				return sessionFileExistsCached(record.filePath);
 			});
 
 		// 纯读路径：事件回调/订阅刷新专用，不再触发扫描（防止推送-拉取循环触发）
