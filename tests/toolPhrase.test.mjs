@@ -76,3 +76,42 @@ test("unknown tool verb falls back to the raw tool name", () => {
 	assert.equal(phrase.verb, "get_search_content");
 	assert.equal(phrase.object, "shadcn");
 });
+
+// 2026-10 全量本土化：内置短语表之外的常见 MCP/扩展工具名走关键词词典，
+// 过程行不再露出英文工具名（cua_*、browser_*、子代理、Git 等）。
+test("keyword dictionary localizes host MCP tool names (cua/browser)", () => {
+	const click = loadPhrase("cua_click", { x: 100, y: 200 });
+	assert.equal(click.verb, "点击");
+	assert.equal(click.object, undefined);
+	assert.equal(click.loadingLabel, "正在点击...");
+
+	const typed = loadPhrase("mcp__pideck-cua__cua_type", { text: "你好，世界" });
+	assert.equal(typed.verb, "输入");
+	assert.equal(typed.object, "你好，世界");
+
+	const nav = loadPhrase("browser_navigate", { url: "https://example.com/docs" });
+	assert.equal(nav.verb, "打开页面");
+	assert.equal(nav.object, "https://example.com/docs");
+
+	const shot = loadPhrase("browser_screenshot", {});
+	assert.equal(shot.verb, "截图");
+});
+
+test("keyword dictionary covers subagent and git tool families with order guard", () => {
+	const dispatch = loadPhrase("Agent", { prompt: "查一下路由" });
+	assert.equal(dispatch.verb, "派出子代理");
+	assert.equal(dispatch.object, "查一下路由");
+
+	const result = loadPhrase("get_subagent_result", { agent_id: "explore-1" });
+	assert.equal(result.verb, "领取子代理结果");
+
+	const git = loadPhrase("git_status", {});
+	assert.equal(git.verb, "Git 操作");
+	assert.equal(git.loadingLabel, "正在执行 Git...");
+});
+
+test("keyword dictionary keeps exact builtin branches winning over substring matches", () => {
+	// web_search 是内置精确分支（获取），不能被词典的 search 类键截胡
+	const web = loadPhrase("web_search", { query: "react 19" });
+	assert.equal(web.verb, "获取");
+});

@@ -57,8 +57,34 @@ function phraseFor(verb: string, object: string | undefined, loadingVerb: string
 }
 
 /**
+ * 常见工具动作关键词 → 中文动宾（按序子串匹配，命中即止）。
+ *
+ * 覆盖内置短语表之外的宿主 MCP 工具（pideck-cua 的 cua_*、browser_*）与常见第三方
+ * MCP/扩展工具名（`mcp__server__tool` 形态子串照常命中，无需去前缀）。
+ * 词序敏感：更具体的键必须排在会被它截胡的短键前面（subagent_result 先于 agent）。
+ * 新增宿主工具时在这里补一行即可让过程行本土化，避免回退到英文工具名。
+ */
+const KEYWORD_PHRASES: ReadonlyArray<readonly [keyword: string, verb: string, loadingVerb: string]> = [
+	["click", "点击", "正在点击"],
+	["press_key", "按键", "正在按键"],
+	["type", "输入", "正在输入"],
+	["navigate", "打开页面", "正在打开页面"],
+	["goto", "跳转", "正在跳转"],
+	["screenshot", "截图", "正在截图"],
+	["capture", "截屏", "正在截屏"],
+	["snapshot", "获取快照", "正在获取快照"],
+	["scroll", "滚动", "正在滚动"],
+	["wait", "等待", "正在等待"],
+	["list_windows", "列出窗口", "正在列出窗口"],
+	["state", "读取状态", "正在读取状态"],
+	["subagent_result", "领取子代理结果", "正在领取子代理结果"],
+	["agent", "派出子代理", "正在派出子代理"],
+	["git", "Git 操作", "正在执行 Git"],
+];
+
+/**
  * 根据工具名和输入参数生成语义化短语。
- * 内置工具走中文动宾短语；未知/扩展工具回退为 `工具名 参数摘要`。
+ * 内置工具走中文动宾短语；常见 MCP/扩展工具名走关键词词典；其余回退为 `工具名 参数摘要`。
  */
 export function getToolPhrase(toolName: string, input: Record<string, unknown> = {}): ToolPhrase {
 	const key = toolName.toLowerCase();
@@ -110,6 +136,15 @@ export function getToolPhrase(toolName: string, input: Record<string, unknown> =
 	// 图片/附件
 	if (key === "image" || key === "vision" || key.includes("image")) {
 		return phraseFor("查看图片", file, "正在查看图片");
+	}
+
+	// 关键词词典：常见 MCP/扩展工具动词本土化（cua_*、browser_*、子代理、Git 等）。
+	// 对象优先取可读字符串参数（输入文本/URL/查询词/选择器），其余进等宽 chip。
+	for (const [keyword, verb, loadingVerb] of KEYWORD_PHRASES) {
+		if (key.includes(keyword)) {
+			const param = firstString(input.text, input.url, input.query, input.prompt, input.selector, input.target, input.path, input.file_path, input.filePath, input.command, input.pattern);
+			return phraseFor(verb, param ? truncate(String(param), 60) : undefined, loadingVerb);
+		}
 	}
 
 	// 通用/扩展/MCP 工具：回退到「工具名 参数摘要」

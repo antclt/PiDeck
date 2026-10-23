@@ -91,7 +91,10 @@
    */
   /* 默认浅色外观以纯白为基底；灰色只用于控件表面、hover 和选中层级。 */
   --color-bg-app: #ffffff;
-  --color-bg-sidebar: #ffffff;
+  /* 主次分明（对齐 ZCode 排版）：chrome 退一档——侧栏/右抽屉用极浅灰底，
+     正文面板保持纯白，内容浮在 chrome 之上，焦点自然落在会话区。
+     皮肤（fresh-green 等）各自定制更深的 sidebar 分层，不受此处影响。 */
+  --color-bg-sidebar: #f7f7f7;
   --color-bg-panel: #ffffff;
   /* 浮层与普通面板分离：壁纸模式下普通面板可透图，但菜单必须保持稳定的不透明底。 */
   --color-bg-popover: #ffffff;
@@ -497,7 +500,9 @@
   color-scheme: dark;
   /* 暗色黑灰基底 + 中性灰默认主题；data-accent 可切换到彩色主题。 */
   --color-bg-app: #121212;
-  --color-bg-sidebar: #171717;
+  /* 主次分明：暗色方向反过来——chrome 更暗（#141414），正文面板 #171717 更亮，
+     深度序列 chrome < content < sticky（bg-app #121212），与浅色的白卡浮层同构。 */
+  --color-bg-sidebar: #141414;
   --color-bg-panel: #171717;
   --color-bg-popover: #171717;
   --color-bg-input: #171717;

@@ -13,8 +13,9 @@ function block(selector) {
 
 test("light theme background tokens are neutral (no green tint)", () => {
 	// 大面积背景为纯白基底（#113 中性化改版：灰只用于控件表面/hover/选中层级，均不得带色相）
+	// sidebar 刻意退一档（#f7f7f7，完全中性无色相）：主次分明——正文白卡浮在 chrome 上（见 tests/sidebarChromeHierarchy.test.mjs）
 	assert.match(block(":root"), /--color-bg-app:\s*#ffffff;/i);
-	assert.match(block(":root"), /--color-bg-sidebar:\s*#ffffff;/i);
+	assert.match(block(":root"), /--color-bg-sidebar:\s*#f7f7f7;/i);
 	assert.match(block(":root"), /--color-bg-panel:\s*#ffffff;/i);
 	assert.match(block(":root"), /--color-bg-muted:\s*#f4f4f5;/i);
 	assert.match(block(":root"), /--color-bg-hover:\s*#e5e7eb;/i);
