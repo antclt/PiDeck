@@ -17,6 +17,7 @@ import { CheckCircle2, ChevronDown, Circle, ListTodo, Sparkles } from "lucide-re
 import type { PiSubagentEntry, SessionTodoSnapshot } from "../../../shared/types";
 import { t, type TranslationKey } from "@/i18n";
 import { fetchSessionSubagents, fetchSessionTodo } from "./webApi";
+import { Collapsible, CollapsibleContent } from "@/components/ui-shadcn/collapsible";
 
 function useSessionActivity(sessionId: string | null) {
 	const [subagents, setSubagents] = useState<PiSubagentEntry[]>([]);
@@ -87,7 +88,11 @@ function StripShell({ icon, title, count, children }: { icon: React.ReactNode; t
 				<span className="rounded-full bg-bg-muted px-1.5 py-px text-micro leading-4 tabular-nums text-text-secondary">{count}</span>
 				<ChevronDown className={`ml-auto size-3.5 transition-transform ${open ? "" : "-rotate-90"}`} />
 			</button>
-			{open ? <div className="px-1 pt-0.5 pb-2">{children}</div> : null}
+			{/* 折叠体走共享折叠原语（真高度渐变 + exit 后卸载 + reduced-motion 回退）；
+			    display:contents 根不生成盒子，折叠态零空档；与桌面端 SessionTodoStrip/SessionSubagentsStrip 同一套。 */}
+			<Collapsible open={open} className="contents">
+				<CollapsibleContent className="px-1 pt-0.5 pb-2">{children}</CollapsibleContent>
+			</Collapsible>
 		</section>
 	);
 }
@@ -114,7 +119,12 @@ function WebSubagentsStrip({ subagents }: { subagents: PiSubagentEntry[] }) {
 									</button>
 								)}
 							</div>
-							{isOpen ? <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-bg-muted p-1.5 text-micro leading-relaxed text-text-secondary">{entry.error ?? entry.result}</pre> : null}
+							{/* 行详情走共享折叠原语（真高度渐变 + exit 后卸载）；与桌面端子代理行详情同一套。 */}
+							<Collapsible open={isOpen} className="contents">
+								<CollapsibleContent>
+									<pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-bg-muted p-1.5 text-micro leading-relaxed text-text-secondary">{entry.error ?? entry.result}</pre>
+								</CollapsibleContent>
+							</Collapsible>
 						</li>
 					);
 				})}
