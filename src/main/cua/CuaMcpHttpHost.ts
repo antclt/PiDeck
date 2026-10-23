@@ -20,7 +20,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import type { CuaEngine } from "./CuaEngine";
 import type { CuaGate } from "./CuaGate";
-import { createCuaMcpServer } from "./CuaMcpServer";
+import { createCuaMcpServer, type CuaMcpBrowserTools } from "./CuaMcpServer";
 
 export type CuaMcpHttpHostConfig = {
 	/** Port to listen on. 0 = auto-select. */
@@ -35,6 +35,10 @@ export type CuaMcpHttpHostConfig = {
 export type CuaMcpHttpHostDeps = {
 	engine: CuaEngine;
 	gate: CuaGate;
+	/** 能力开关：host 可能只为浏览器能力启动，此时不能注册 CUA 工具。 */
+	cuaEnabled?: () => boolean;
+	/** 浏览器工具组（开关 + controller）；未传 = 不注册 browser_*。 */
+	browser?: CuaMcpBrowserTools;
 	onLog?: (level: "info" | "error", message: string) => void;
 };
 
@@ -200,7 +204,7 @@ export class CuaMcpHttpHost {
 				if (sid) this.transports.delete(sid);
 			};
 
-			const server = createCuaMcpServer(this.deps.engine, this.deps.gate);
+			const server = createCuaMcpServer(this.deps.engine, this.deps.gate, { cuaEnabled: this.deps.cuaEnabled?.() ?? true, browser: this.deps.browser });
 			await server.connect(transport);
 			await transport.handleRequest(req, res, parsedBody);
 			return;

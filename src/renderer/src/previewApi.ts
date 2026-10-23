@@ -197,6 +197,9 @@ let previewSettings: AppSettings = {
 	// CUA 默认关闭：预览壳与主进程 SettingsStore 默认保持一致
 	cuaEnabled: false,
 	cuaAutoApprove: true,
+	// 浏览器 Agent 默认关闭 + 写动作默认逐次审批（与 SettingsStore 默认一致）
+	browserAgentEnabled: false,
+	browserAgentAutoApprove: false,
 	favoriteModels: [],
 	// 提供商与模型显示开关：与 SettingsStore 默认一致，预览壳默认全显示
 	hiddenProviders: [],

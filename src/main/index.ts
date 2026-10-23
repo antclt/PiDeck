@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, safeStorage, screen, session, shell, Tray, Notification } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, safeStorage, screen, session, shell, Tray, Notification, webContents } from "electron";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
@@ -15,6 +15,7 @@ import { registerHtmlPreviewProtocol } from "./htmlPreviewProtocol";
 import { AnnouncementService } from "./announcements/AnnouncementService";
 import { registerAnnouncementIpc } from "./ipc/announcementIpc";
 import { CuaService } from "./cua/CuaService";
+import { BrowserAgentService } from "./browser/BrowserAgentService";
 import { AutomationStore } from "./automation/AutomationStore";
 import { AgentProfileStore } from "./agents/AgentProfileStore";
 import { FavoritesStore } from "./favorites/FavoritesStore";
@@ -681,6 +682,8 @@ let soundAlertService: SoundAlertService | null = null;
 let announcementService: AnnouncementService | null = null;
 /** CUA（Computer Use Agent）服务；null = 未初始化 */
 let cuaService: CuaService | null = null;
+/** 浏览器 Agent 服务（内置 webview + CDP）；null = 未初始化 */
+let browserAgentService: BrowserAgentService | null = null;
 /** 定时任务与自动化服务；null = 未初始化 */
 let automationStore: AutomationStore | null = null;
 let automationScheduler: AutomationScheduler | null = null;
@@ -2241,6 +2244,10 @@ function configureBrowserPanelWebviewHost(window: BrowserWindow): void {
 			guest.close();
 			return;
 		}
+
+		// 浏览器 Agent 需要留住 guest 引用（快照/点击/截图）；
+		// 抽屉收起/全屏切换会销毁重建 guest，registry 允许重复登记并在 destroyed 时清理。
+		browserAgentService?.attachGuest(guest);
 
 		const blockUnsafeNavigation = (event: { url: string; preventDefault(): void }, phase: string) => {
 			if (isAllowedBrowserPanelUrl(event.url)) return;
@@ -4164,14 +4171,17 @@ function registerIpc() {
 		reactToPetSettings: async (prev, next) => {
 			await petSystem?.reactToSettings(prev, next);
 		},
-		// CUA 开关：开启时启动进程内 MCP 端点并写入 pi 的 mcp.json，关闭时停端点并注销。
+		// CUA / 浏览器 Agent 开关：任一能力启用时启动进程内 MCP 端点并写入 mcp.json，
+		// 两者都关时停端点并注销；gate 在 applySettings 内按能力分别开关（host 存活 ≠ 能力启用）。
 		reactToCuaSettings: async (prev, next) => {
-			if (!cuaService || prev.cuaEnabled === next.cuaEnabled) return;
-			if (next.cuaEnabled) {
-				await cuaService.start();
-			} else {
-				await cuaService.stop();
-			}
+			if (!cuaService) return;
+			const cuaChanged = prev.cuaEnabled !== next.cuaEnabled;
+			const browserChanged = prev.browserAgentEnabled !== next.browserAgentEnabled;
+			if (!cuaChanged && !browserChanged) return;
+			await cuaService.applySettings({
+				cuaEnabled: next.cuaEnabled,
+				browserAgentEnabled: next.browserAgentEnabled ?? false,
+			});
 		},
 		applyNativeThemeSource,
 		refreshTrayContextMenu,
@@ -6486,21 +6496,38 @@ app
 		// `pideck-cua` MCP（主进程内 StreamableHTTP 端点）调用。默认关闭（cuaEnabled=false）：
 		// 只有开启时才监听本地端点并写入 ~/.pi/agent/mcp.json，关闭时零副作用（不监听、不改 pi 配置）。
 		// 真实输入注入另有「每次操作审批门 + 全局/会话杀开关」双重兜底（见 cua/CuaGate.ts）。
+		// 浏览器 Agent：主进程 CDP 驱动内置 webview 的 browser_* 工具。
+		// 与 CUA 共用同一个 MCP host 与 mcp.json 条目，但开关、审批门、autoApprove 独立；
+		// 默认关闭，页面内容按不可信数据处理（docs/browser-agent-plan.md）。
+		browserAgentService = new BrowserAgentService({
+			listAllWebContents: () => webContents.getAllWebContents(),
+			isBrowserPanelGuest: (guest) => guest.session === session.fromPartition(BROWSER_PANEL_PARTITION),
+			getAutoApprove: () => settingsStore.get().browserAgentAutoApprove,
+		});
 		cuaService = new CuaService({
 			getMainWindow: () => mainWindow,
 			log: (domain, message, details) => void appLogger.info(domain, message, details),
 			// 免审批设置实时读取：改设置即时生效，无需重启 CUA 服务。
 			getAutoApprove: () => settingsStore.get().cuaAutoApprove,
+			browserAgent: browserAgentService,
 		});
-		if (settingsStore.get().cuaEnabled) {
-			void cuaService.start().catch((error) => {
-				void appLogger.warn("cua", "CUA service start failed", error);
+		// 启动时按真实开关决定 host 是否监听：任一能力启用即启动，两者都关则零副作用。
+		void cuaService
+			.applySettings({
+				cuaEnabled: settingsStore.get().cuaEnabled,
+				browserAgentEnabled: settingsStore.get().browserAgentEnabled ?? false,
+			})
+			.catch((error) => {
+				void appLogger.warn("cua", "CUA/browser agent service start failed", error);
 			});
-		}
 		quitCleanup.register("cua", async () => {
 			// runAll 会逐项 await：返回 dispose 的 Promise 保证退出前 host 关闭 + mcp.json 反注册完成（早前 `void` 掉 Promise，退出竞态）。
 			await cuaService?.dispose();
 			cuaService = null;
+		});
+		quitCleanup.register("browser-agent", () => {
+			browserAgentService?.dispose();
+			browserAgentService = null;
 		});
 
 		// 启动后异步检查 RPC 超时时间，如果小于 600 秒则自动修正为 600 秒

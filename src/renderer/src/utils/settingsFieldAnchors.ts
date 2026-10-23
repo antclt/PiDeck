@@ -351,6 +351,18 @@ const SETTINGS_ROW_ANCHORS = [
 	},
 	{
 		tab: "common",
+		slug: "common-browser-agent-enabled",
+		labelKey: "settings.browserAgentEnabled",
+		keywords: ["浏览器 agent", "内置浏览器", "网页操作", "browser agent", "browser automation"],
+	},
+	{
+		tab: "common",
+		slug: "common-browser-agent-auto-approve",
+		labelKey: "settings.browserAgentAutoApprove",
+		keywords: ["浏览器免审批", "网页自动点击", "browser auto approve"],
+	},
+	{
+		tab: "common",
 		slug: "common-prompt-suggestion-enabled",
 		labelKey: "settings.promptSuggestion.enabled",
 		keywords: ["输入预测", "下一句", "输入建议", "候选输入", "prompt suggestion", "prediction"],

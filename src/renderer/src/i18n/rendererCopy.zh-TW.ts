@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 4b09cc99c35f67fab09f03ed4f1a333f560051f7eb225188fb8b43d68000d8cf（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 883ec183c8de0d707d64ce3bfa99616b0aa667a8dd363359c51bf19f7cc3f391（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5074,6 +5074,17 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.cuaEnabledDesc": "開啟後在本地起一個僅迴環可達的 MCP 端點並註冊給 Pi；關閉時不監聽、不改動 Pi 配置。真實輸入始終受全域/會話殺開關保護，關閉自動審批後每次寫操作需確認。",
 	"settings.cuaAutoApprove": "CUA 免審批（自動放行）",
 	"settings.cuaAutoApproveDesc": "預設開啟：寫操作（點選、輸入、滾動）不再彈逐次審批框，直接執行；關閉後需逐次確認，全域與會話殺開關始終生效。Agent 將可在無人確認的情況下注入真實鍵鼠輸入，請自行評估風險。",
+	"settings.browserAgentSection": "瀏覽器 Agent（實驗性）",
+	"settings.browserAgentSectionDesc": "讓 pi 觀察並操作內建瀏覽器當前頁面：讀取可見元素快照、點選、輸入、滾動、跳轉。寫操作預設逐次確認；頁面內容按不可信資料對待。",
+	"settings.browserAgentEnabled": "啟用瀏覽器 Agent",
+	"settings.browserAgentEnabledDesc": "開啟後向 pi 暴露 browser_* 工具（與 CUA 共用本地 MCP 端點，需重啟 agent 會話才會看到新工具表）。寫操作仍受審批門保護。",
+	"settings.browserAgentAutoApprove": "瀏覽器操作免審批（自動放行）",
+	"settings.browserAgentAutoApproveDesc": "預設關閉：每次點選/輸入/滾動/跳轉都需確認。開啟後寫操作直接執行——內建瀏覽器帶你的真實登入態，誤操作可能代表你發帖或付款，風險自擔。",
+	"cua.action.browser_click": "瀏覽器點選",
+	"cua.action.browser_type": "瀏覽器輸入",
+	"cua.action.browser_press_key": "瀏覽器按鍵",
+	"cua.action.browser_navigate": "瀏覽器跳轉",
+	"cua.action.browser_scroll": "瀏覽器滾動",
 	"settings.workspaceContentOpenModeDesc": "從檔案樹或 Git 開啟內容時，預設在中間欄分屏，或佔滿中間欄。",
 	"settings.workspaceContentOpenMode.split": "預設分屏",
 	"settings.workspaceContentOpenMode.maximize": "預設佔滿中間欄",

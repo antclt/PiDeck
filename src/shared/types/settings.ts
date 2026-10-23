@@ -493,6 +493,20 @@ export type AppSettings = {
 	 */
 	cuaAutoApprove: boolean;
 
+	// ── 浏览器 Agent：让 Agent 观察并操作内置浏览器当前页面（browser-use） ──
+	/**
+	 * 是否启用内置浏览器 Agent 能力，默认 false。
+	 * 开启后 `browser_*` 工具注册到主进程 MCP host（与 CUA 共用端点与 mcp.json 条目）；
+	 * 关闭时不注册工具；若 CUA 也关闭则端点不监听、不改动 pi 配置。
+	 * 写动作默认逐次审批；只读工具（状态/快照/查找/等待）免审批。
+	 */
+	browserAgentEnabled: boolean;
+	/**
+	 * 浏览器 Agent 自动审批（免审批），默认 false（与 CUA 默认相反）。
+	 * 内置浏览器使用用户真实登录态，误点可能代表用户发帖/付款，因此默认逐次确认。
+	 */
+	browserAgentAutoApprove: boolean;
+
 	// ── 模型收藏：ModelPicker 中用 ☆ 标记，收藏的模型在列表中置顶 ──
 	/** 收藏的模型 ID 列表 */
 	favoriteModels: string[];
@@ -1097,6 +1111,9 @@ export function createDefaultAppSettings(): AppSettings {
 		sessionStoreEnabled: true,
 		cuaEnabled: false,
 		cuaAutoApprove: true,
+		// 浏览器 Agent 默认关闭；写动作默认逐次审批（真实登录态，保守优先）。
+		browserAgentEnabled: false,
+		browserAgentAutoApprove: false,
 		favoriteModels: [],
 
 		// 字体配置：与 main SettingsStore 默认值保持一致，避免启动时闪烁

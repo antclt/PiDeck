@@ -1736,7 +1736,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			await reactToPetSettings(prevSettings, settings);
 		}
 		// CUA 开关：开启时启动进程内 MCP 端点并写入 pi 的 mcp.json，关闭时停端点并注销。
-		if ("cuaEnabled" in patch && typeof reactToCuaSettings === "function") {
+		if (("cuaEnabled" in patch || "browserAgentEnabled" in patch) && typeof reactToCuaSettings === "function") {
 			await reactToCuaSettings(prevSettings, settings);
 		}
 		if ("desktopProxyEnabled" in patch || "desktopProxyUrl" in patch || "desktopProxyBypass" in patch) {

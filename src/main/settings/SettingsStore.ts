@@ -284,6 +284,11 @@ Gitmoji 对应关系：
 	// 自动审批默认开启；显式保存的 false 仍由 load 合并保留，不自动改写用户选择。
 	cuaAutoApprove: true,
 
+	// 浏览器 Agent 默认关闭：不注册 browser_* 工具，端点是否监听取决于 CUA 是否已开启。
+	// 自动审批默认关闭（与 CUA 相反）：内置浏览器带用户真实登录态，写动作默认逐次确认。
+	browserAgentEnabled: false,
+	browserAgentAutoApprove: false,
+
 	favoriteModels: [],
 	// 提供商与模型显示开关默认全显示：隐藏列表为空 = 不隐藏任何提供商/模型
 	hiddenProviders: [],
@@ -772,6 +777,13 @@ export class SettingsStore {
 		// 免审批开关同理：只接受布尔值（安全相关设置，非法值一律回退原值）。
 		if ("cuaAutoApprove" in safePatch && typeof safePatch.cuaAutoApprove !== "boolean") {
 			delete safePatch.cuaAutoApprove;
+		}
+		// 浏览器 Agent 开关与自动审批同样来自渲染层，安全相关：只接受布尔值。
+		if ("browserAgentEnabled" in safePatch && typeof safePatch.browserAgentEnabled !== "boolean") {
+			delete safePatch.browserAgentEnabled;
+		}
+		if ("browserAgentAutoApprove" in safePatch && typeof safePatch.browserAgentAutoApprove !== "boolean") {
+			delete safePatch.browserAgentAutoApprove;
 		}
 		if ("navigationMode" in safePatch && safePatch.navigationMode !== "tabs" && safePatch.navigationMode !== "simple") {
 			delete safePatch.navigationMode;
