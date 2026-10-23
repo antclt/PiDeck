@@ -4,6 +4,7 @@ import { ChevronDown, ChevronUp, Users } from "lucide-react";
 import { sessionRuntimeBySessionIdAtomFamily } from "../../atoms";
 import { t } from "../../i18n";
 import type { DshTeamMember, DshTeamState, DshTeamTask } from "../../../../shared/types/agent";
+import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
 import { ComposerWidgetFrame, useComposerWidgetCollapsed } from "./ComposerWidgetLayout";
 import { TEAM_WIDGET_KEY, readTeamCollapsedPreference, writeTeamCollapsedPreference } from "../../utils/sessionTeamCollapsePreference";
 
@@ -78,39 +79,43 @@ export function SessionTeamStrip(props: { sessionId: string }) {
 
 	return (
 		<ComposerWidgetFrame data-testid="session-team-strip" aria-label={t("sessionTeam.title")}>
-			<div className="flex h-9 w-full items-center gap-2.5 px-3">
-				<button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left" aria-expanded={!collapsed} onClick={handleToggleCollapsed}>
-					<Users size={14} aria-hidden="true" className="shrink-0 text-text-tertiary" />
-					<span className="shrink-0 text-control font-medium leading-6 text-foreground">{t("sessionTeam.title")}</span>
-					<span className="min-w-0 flex-1 truncate text-control leading-5 text-text-tertiary">{teamSummaryLabel(team)}</span>
-					<span className="shrink-0 text-text-tertiary" aria-hidden="true">
-						{collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-					</span>
-				</button>
-			</div>
-			{!collapsed && (
-				<div className="mb-2 flex max-h-[260px] flex-col gap-2 overflow-y-auto [contain:layout_paint] px-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-100 motion-reduce:animate-none">
-					{/* 与 todo 条同款 shrink-0 纪律：限高 flex 列 + 行 overflow-hidden 会清零
-					    min-height:auto，不锁行高整列会被线性压扁（2027-01 排版事故）。 */}
-					{team?.failure && <p className="shrink-0 rounded-md bg-[var(--color-danger)]/10 px-2 py-1 text-xs leading-5 text-[var(--color-danger)]">{t("sessionTeam.failure", { failure: team.failure })}</p>}
-					{members.map((member) => (
-						<div key={member.id} className="flex min-w-0 shrink-0 items-center gap-2.5 overflow-hidden text-control leading-5">
-							<span className={`size-1.5 shrink-0 rounded-full ${memberPhaseDotClass(member)}`} aria-hidden="true" />
-							<span className="min-w-0 shrink-0 truncate font-medium text-text-secondary">{member.name}</span>
-							<span className="min-w-0 flex-1 truncate text-xs text-text-tertiary">{memberPhaseLabel(member)}</span>
-						</div>
-					))}
-					{tasks.length > 0 && <p className="shrink-0 pt-1 text-xs font-medium uppercase tracking-wide text-text-tertiary">{t("sessionTeam.tasks")}</p>}
-					{tasks.length === 0 && members.length === 0 && <p className="shrink-0 text-control leading-5 text-text-tertiary">{t("sessionTeam.noTasks")}</p>}
-					{tasks.map((task) => (
-						<div key={task.id} className="flex min-w-0 shrink-0 items-center gap-2.5 overflow-hidden text-control leading-5">
-							<span className={`size-1.5 shrink-0 rounded-full transition-colors ${taskStatusDotClass(task)}`} aria-hidden="true" />
-							<span className="min-w-0 flex-1 truncate text-text-secondary">{task.subject}</span>
-							<span className="shrink-0 truncate text-xs text-text-tertiary">{task.ownerName ?? t("sessionTeam.unassigned")}</span>
-						</div>
-					))}
+			{/* 受控呈现：折叠偏好先落 localStorage 再走 composer 通道（见 handleToggleCollapsed），
+			    Radix 只承载高度动画，故不用 CollapsibleTrigger/onOpenChange 另持一份状态。 */}
+			<Collapsible open={!collapsed}>
+				<div className="flex h-9 w-full items-center gap-2.5 px-3">
+					<button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left" aria-expanded={!collapsed} onClick={handleToggleCollapsed}>
+						<Users size={14} aria-hidden="true" className="shrink-0 text-text-tertiary" />
+						<span className="shrink-0 text-control font-medium leading-6 text-foreground">{t("sessionTeam.title")}</span>
+						<span className="min-w-0 flex-1 truncate text-control leading-5 text-text-tertiary">{teamSummaryLabel(team)}</span>
+						<span className="shrink-0 text-text-tertiary" aria-hidden="true">
+							{collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+						</span>
+					</button>
 				</div>
-			)}
+				<CollapsibleContent>
+					<div className="mb-2 flex max-h-[260px] flex-col gap-2 overflow-y-auto [contain:layout_paint] px-3">
+						{/* 与 todo 条同款 shrink-0 纪律：限高 flex 列 + 行 overflow-hidden 会清零
+					    min-height:auto，不锁行高整列会被线性压扁（2027-01 排版事故）。 */}
+						{team?.failure && <p className="shrink-0 rounded-md bg-[var(--color-danger)]/10 px-2 py-1 text-xs leading-5 text-[var(--color-danger)]">{t("sessionTeam.failure", { failure: team.failure })}</p>}
+						{members.map((member) => (
+							<div key={member.id} className="flex min-w-0 shrink-0 items-center gap-2.5 overflow-hidden text-control leading-5">
+								<span className={`size-1.5 shrink-0 rounded-full ${memberPhaseDotClass(member)}`} aria-hidden="true" />
+								<span className="min-w-0 shrink-0 truncate font-medium text-text-secondary">{member.name}</span>
+								<span className="min-w-0 flex-1 truncate text-xs text-text-tertiary">{memberPhaseLabel(member)}</span>
+							</div>
+						))}
+						{tasks.length > 0 && <p className="shrink-0 pt-1 text-xs font-medium uppercase tracking-wide text-text-tertiary">{t("sessionTeam.tasks")}</p>}
+						{tasks.length === 0 && members.length === 0 && <p className="shrink-0 text-control leading-5 text-text-tertiary">{t("sessionTeam.noTasks")}</p>}
+						{tasks.map((task) => (
+							<div key={task.id} className="flex min-w-0 shrink-0 items-center gap-2.5 overflow-hidden text-control leading-5">
+								<span className={`size-1.5 shrink-0 rounded-full transition-colors ${taskStatusDotClass(task)}`} aria-hidden="true" />
+								<span className="min-w-0 flex-1 truncate text-text-secondary">{task.subject}</span>
+								<span className="shrink-0 truncate text-xs text-text-tertiary">{task.ownerName ?? t("sessionTeam.unassigned")}</span>
+							</div>
+						))}
+					</div>
+				</CollapsibleContent>
+			</Collapsible>
 		</ComposerWidgetFrame>
 	);
 }
