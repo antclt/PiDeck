@@ -1,6 +1,6 @@
 import { Component, Fragment, lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getDefaultStore, useAtom, useAtomValue } from "jotai";
-import { settingsFocusAtom, type SettingsPaneId, type SettingsTabId } from "../../atoms";
+import { settingsFocusAtom, type SettingsPaneId, type SettingsSectionId, type SettingsTabId } from "../../atoms";
 import { hasPendingUpdateAtom, updateStatusAtom } from "../../atoms/update-atoms";
 import { useSettingsFocus } from "./settings/useSettingsFocus.ts";
 import { Settings2, Network, Wrench, PawPrint, Bell, Trash2, Brush, Eye, ChartColumnBig, Activity, MessageSquare, ImageIcon, DatabaseBackup, Globe, FileCode2, GitBranch, Loader2, SlidersHorizontal, MonitorCog, Keyboard, TerminalSquare, X, Bot, Puzzle, Clapperboard } from "lucide-react";
@@ -18,6 +18,9 @@ import { useVisionBridgeDraft } from "./settings/visionDraft.ts";
 import { dirtySettingsTabIds, type SettingsUnsavedTabId } from "./settings/unsavedChangesSummary";
 import { computeDirtyFields } from "./settings/settingsDirtyFields.ts";
 import { SETTINGS_TAB_IDS, SETTINGS_TAB_LABEL_KEYS } from "./settings/settingsTabLayout";
+import { SettingsSearchBox } from "./settings/SettingsSearchBox";
+import { buildSettingsSearchEntries } from "./settings/settingsSearchEntries";
+import type { SettingsSearchEntry } from "./settings/settingsSearch";
 import { isSettingsTabHidden, resolveInitialSettingsTab, resolveVisibleSettingsTabs } from "./settings/settingsTabVisibility";
 import { showNotice } from "../../utils/notice";
 import { useGitModels } from "./settings/gitModels.ts";
@@ -604,6 +607,44 @@ function SettingsModalContent(props: SettingsModalProps) {
 		showNotice(t("settings.modules.revealedNotice", { tab: t(SETTINGS_TAB_LABEL_KEYS[activeTab]) }), undefined, "info");
 	}, [activeTab, hiddenModules, revealedTabs]);
 
+	// 侧栏搜索能搜到全部 tab 与设置项（含已隐藏模块的 tab）：条目现算不记忆——131 条、每条两次 t() 查表，
+	// 相比给 useMemo 挂语言依赖的出错风险（locale 可能在渲染后才加载完）不如直接重建。
+	const settingsSearchEntries = buildSettingsSearchEntries(t);
+	// 选中搜索结果：切到设置分区（可能在配置管理分区里搜的）→ 切 tab → 交 settingsFocusAtom 滚到锚点。
+	// 显式 setActiveTab 是必要的：仅靠 atom 时 useSettingsFocus 会走「tab 不一致→只切不滚」分支，
+	// 我们先把 tab 对上，让它的下一次 effect 直接去定位锚点。
+	const handleSettingsSearchPick = useCallback(
+		(entry: SettingsSearchEntry<SettingsTabId, SettingsSectionId>) => {
+			if (pane !== "settings") {
+				setPane("settings");
+				persistPane("settings");
+			}
+			setActiveTab(entry.tab);
+			persistTab(entry.tab);
+			getDefaultStore().set(settingsFocusAtom, { tab: entry.tab, section: entry.section });
+		},
+		[pane, persistPane, persistTab],
+	);
+
+	// 侧栏 tab 项：抽成变量而不是内联 map —— 它现在嵌在「搜索框 → TabsList」两层容器里，内联会形成 7 层缩进。
+	const settingsSidebarTabs = tabs.map((tab) => (
+		<Fragment key={tab.id}>
+			{/* 分组分割线（纯视觉）：竖排侧栏为横线；≤820px 横排时变竖线，
+	    与 surfaces.css 里 .settings-tabs 转横向布局的媒体查询同条件 */}
+			{tab.dividerBefore ? <div aria-hidden="true" className="my-1.5 h-px w-auto shrink-0 bg-border-subtle max-[820px]:mx-1 max-[820px]:my-0 max-[820px]:h-auto max-[820px]:w-px" /> : null}
+			<TabsTrigger value={tab.id} className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
+				<span className="settings-tab-icon">{tab.icon}</span>
+				<strong>{tab.label}</strong>
+				{/* 右侧状态点：更新亮点（仅 dev tab，app/pi/模型目录任一有更新）+ 未保存黄点。
+			两者可并存；均为装饰（aria-hidden），语义由 tab 内卡片文案承担。 */}
+				<div className="ml-auto flex items-center gap-1">
+					{tab.id === "dev" && hasPendingUpdate ? <span className="size-1.5 rounded-full bg-[var(--color-accent)]" aria-hidden="true" /> : null}
+					{dirtyTabIds.has(tab.id as SettingsUnsavedTabId) ? <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" /> : null}
+				</div>
+			</TabsTrigger>
+		</Fragment>
+	));
+
 	const hasDirtyChanges = dirtyFields.size > 0;
 	// 视觉桥/生图草稿有未保存改动时，头部保存/取消按钮同样点亮（与全局设置脏标记合并判定）
 	const hasAnyDirtyChanges = hasDirtyChanges || visionDraft.dirty || imageGenDirty || videoGenDirty || acpDirty;
@@ -734,25 +775,15 @@ function SettingsModalContent(props: SettingsModalProps) {
 							}}
 							className="settings-layout flex min-h-0 flex-1 flex-row gap-0 bg-transparent"
 						>
-							<TabsList className="settings-tabs flex min-h-0 shrink-0 flex-col items-stretch gap-2.5 overflow-auto border-0 border-r border-border rounded-none bg-transparent p-2.5 data-[orientation=vertical]:w-[196px]" aria-label={t("settings.title")}>
-								{tabs.map((tab) => (
-									<Fragment key={tab.id}>
-										{/* 分组分割线（纯视觉）：竖排侧栏为横线；≤820px 横排时变竖线，
-								    与 surfaces.css 里 .settings-tabs 转横向布局的媒体查询同条件 */}
-										{tab.dividerBefore ? <div aria-hidden="true" className="my-1.5 h-px w-auto shrink-0 bg-border-subtle max-[820px]:mx-1 max-[820px]:my-0 max-[820px]:h-auto max-[820px]:w-px" /> : null}
-										<TabsTrigger value={tab.id} className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
-											<span className="settings-tab-icon">{tab.icon}</span>
-											<strong>{tab.label}</strong>
-											{/* 右侧状态点：更新亮点（仅 dev tab，app/pi/模型目录任一有更新）+ 未保存黄点。
-										两者可并存；均为装饰（aria-hidden），语义由 tab 内卡片文案承担。 */}
-											<div className="ml-auto flex items-center gap-1">
-												{tab.id === "dev" && hasPendingUpdate ? <span className="size-1.5 rounded-full bg-[var(--color-accent)]" aria-hidden="true" /> : null}
-												{dirtyTabIds.has(tab.id as SettingsUnsavedTabId) ? <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" /> : null}
-											</div>
-										</TabsTrigger>
-									</Fragment>
-								))}
-							</TabsList>
+							{/* 侧栏 = 搜索框 + tab 列表：竖排时搜索框在顶部，横排（≤820px）时同样在上方，
+							    边框统一交给这层容器，.settings-tabs 自己的边框用 border-0 收掉（避免双线）。 */}
+							<div className="flex min-h-0 w-[196px] shrink-0 flex-col border-r border-border-subtle max-[820px]:w-full max-[820px]:border-r-0 max-[820px]:border-b">
+								<SettingsSearchBox entries={settingsSearchEntries} tabOrder={SETTINGS_TAB_IDS} onPick={handleSettingsSearchPick}>
+									<TabsList className="settings-tabs flex min-h-0 flex-1 flex-col items-stretch gap-2.5 overflow-auto border-0 rounded-none bg-transparent p-2.5" aria-label={t("settings.title")}>
+										{settingsSidebarTabs}
+									</TabsList>
+								</SettingsSearchBox>
+							</div>
 							{/* ── 常用设置 tab ── */}
 							{activeTab === "common" && (
 								<TabsContent value="common" className="settings-panel min-w-0">
