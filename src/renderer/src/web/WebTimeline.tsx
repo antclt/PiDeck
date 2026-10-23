@@ -174,7 +174,8 @@ function ActionButton(props: { label: string; onClick: () => void; danger?: bool
 		<button
 			type="button"
 			className={cn(
-				"inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_60%,transparent)] hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]",
+				// 触屏（pointer:coarse）放大到 36px：24px 图标钮在手机上误触率高（移动走查 #1）
+				"inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_60%,transparent)] hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)] pointer-coarse:size-9",
 				props.danger && "hover:text-danger",
 			)}
 			title={props.label}
@@ -200,7 +201,7 @@ export const WebThinkingBlock = memo(function WebThinkingBlock(props: {
 			<section className="w-full min-w-0 overflow-hidden rounded-md border-0">
 				<button
 					type="button"
-					className="relative flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md border-0 bg-transparent px-1 py-1 text-left text-control leading-5 text-text-secondary transition-[background-color,transform] duration-150 motion-reduce:transition-none hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)] active:scale-[0.99] focus-visible:-outline-offset-2 focus-visible:outline-2 [&_svg]:shrink-0"
+					className="relative flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md border-0 bg-transparent px-1 py-1 text-left text-control leading-5 text-text-secondary transition-[background-color,transform] duration-150 motion-reduce:transition-none hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)] active:scale-[0.99] focus-visible:-outline-offset-2 focus-visible:outline-2 [&_svg]:shrink-0 pointer-coarse:min-h-9"
 					onClick={() => setExpanded((value) => !value)}
 					aria-expanded={expanded}
 					title={expanded ? t("thinking.collapse") : t("thinking.expand")}
@@ -257,7 +258,7 @@ export const WebToolCard = memo(function WebToolCard(props: { part: WebToolPart 
 	return (
 		<TimelineMarker kind="tool" tone={error ? "error" : running ? "active" : "success"} contentClassName="pb-1">
 			<section className={cn("tool-card w-full min-w-0 overflow-hidden", running && "tone-running", error && "tone-error")} data-status={error ? "error" : running ? "running" : "done"} data-tool-name={toolName}>
-				<button type="button" className="relative flex min-h-7 w-full cursor-pointer items-center rounded-md px-1 py-1 text-left" onClick={() => hasBody && setExpanded((value) => !value)} aria-expanded={expanded}>
+				<button type="button" className="relative flex min-h-7 w-full cursor-pointer items-center rounded-md px-1 py-1 text-left pointer-coarse:min-h-9" onClick={() => hasBody && setExpanded((value) => !value)} aria-expanded={expanded}>
 					<span className="tool-card-trigger flex min-w-0 items-center gap-2 text-control leading-5 text-text-secondary">
 						<span className="tool-card-icon">
 							<Wrench size={14} aria-hidden="true" />
@@ -321,7 +322,7 @@ export const WebAssistantTurn = memo(function WebAssistantTurn(props: { turn: As
 				<div className="execution-fold" data-open={processOpen}>
 					<button
 						type="button"
-						className="inline-flex h-7 min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-control text-text-secondary transition-colors hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)] focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
+						className="inline-flex h-7 min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-control text-text-secondary transition-colors hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)] focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)] pointer-coarse:h-9"
 						onClick={() => setManualOpen(!processOpen)}
 						aria-expanded={processOpen}
 						title={processOpen ? t("common.collapse") : t("common.expand")}
@@ -457,7 +458,7 @@ function WebAskCard(props: { request: WebPendingUiRequest; busy: boolean; onResp
 								<button
 									key={q.id}
 									type="button"
-									className={cn("h-5 w-5 rounded text-xs", idx === batchTab ? "bg-primary text-primary-foreground font-semibold" : batchAnswers[q.id] !== undefined ? "bg-muted text-foreground" : "bg-muted/40 text-muted-foreground")}
+									className={cn("h-5 w-5 rounded text-xs pointer-coarse:size-8", idx === batchTab ? "bg-primary text-primary-foreground font-semibold" : batchAnswers[q.id] !== undefined ? "bg-muted text-foreground" : "bg-muted/40 text-muted-foreground")}
 									onClick={() => {
 										setBatchTab(idx);
 										setBatchInput("");

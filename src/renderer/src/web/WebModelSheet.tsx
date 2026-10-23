@@ -125,7 +125,7 @@ export function WebModelSelector(props: { model?: SessionModelPreference; models
 								type="button"
 								variant="ghost"
 								size="icon-sm"
-								className="shrink-0 text-muted-foreground hover:text-foreground"
+								className="shrink-0 text-muted-foreground hover:text-foreground pointer-coarse:size-9"
 								aria-label={props.refreshing ? t("app.modelPickerRefreshing") : t("app.modelPickerRefresh")}
 								title={props.refreshing ? t("app.modelPickerRefreshing") : t("app.modelPickerRefresh")}
 								disabled={props.refreshing}

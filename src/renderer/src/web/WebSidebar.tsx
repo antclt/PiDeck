@@ -93,7 +93,7 @@ function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: st
 				const runtime = runtimeFor(session.id);
 				return (
 					<div key={session.id} className={cn(sessionRowClass, "session-row group/session", session.id === activeSessionId && selectedRowClass)} title={session.title}>
-						<button type="button" className="flex min-w-0 flex-1 items-center gap-1.5" onClick={() => onSelect(session.id)}>
+						<button type="button" className="flex min-w-0 flex-1 items-center gap-1.5 pointer-coarse:min-h-10" onClick={() => onSelect(session.id)}>
 							{renderRuntimeStatusDot(runtime?.status)}
 							<div className="conversation-body min-w-0 flex-1">
 								<div className="conversation-title flex min-w-0 items-center gap-1.5">
@@ -108,7 +108,7 @@ function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: st
 						{onSessionAction ? (
 							<button
 								type="button"
-								className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted focus-visible:opacity-100 group-hover/session:opacity-100 [@media(hover:none)]:opacity-100"
+								className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted focus-visible:opacity-100 group-hover/session:opacity-100 [@media(hover:none)]:opacity-100 pointer-coarse:size-9 pointer-coarse:-my-1"
 								aria-label={t("web.sessionMenu")}
 								title={t("web.sessionMenu")}
 								onClick={() => setMenuSessionId(session.id)}
@@ -123,7 +123,7 @@ function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: st
 				<button
 					type="button"
 					ref={sentinelRef}
-					className="conversation session-row relative flex min-h-7 w-full items-center justify-start gap-1.5 rounded-md border border-transparent px-2 py-0 text-left text-caption text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+					className="conversation session-row relative flex min-h-7 w-full items-center justify-start gap-1.5 rounded-md border border-transparent px-2 py-0 text-left text-caption text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground pointer-coarse:min-h-9"
 					onClick={() => setRendered((current) => Math.min(sessions.length, current + SESSION_PAGE_STEP))}
 				>
 					{t("web.moreSessions", { count: hiddenCount })}
@@ -132,7 +132,7 @@ function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: st
 			{rendered > initialLimit && Number.isFinite(initialLimit) && (
 				<button
 					type="button"
-					className="conversation session-row relative flex min-h-7 w-full items-center justify-start gap-1.5 rounded-md border border-transparent px-2 py-0 text-left text-caption text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+					className="conversation session-row relative flex min-h-7 w-full items-center justify-start gap-1.5 rounded-md border border-transparent px-2 py-0 text-left text-caption text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground pointer-coarse:min-h-9"
 					onClick={() => setRendered(initialLimit)}
 				>
 					{t("common.collapse")}

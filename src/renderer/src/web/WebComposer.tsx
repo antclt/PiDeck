@@ -151,11 +151,11 @@ export function WebComposer(props: {
 	}, [engaged, props.onEngagedChange]);
 	const sendControls = (compact: boolean) =>
 		props.streaming ? (
-			<Button type="button" variant="destructive" size="sm" className="h-8 shrink-0" data-testid={compact ? "web-composer-stop-compact" : "web-composer-stop"} onClick={props.onStop}>
+			<Button type="button" variant="destructive" size="sm" className="h-8 shrink-0 pointer-coarse:h-10" data-testid={compact ? "web-composer-stop-compact" : "web-composer-stop"} onClick={props.onStop}>
 				{t("app.stop")}
 			</Button>
 		) : (
-			<Button type="submit" size="sm" className="h-8 shrink-0 whitespace-nowrap" data-testid={compact ? "web-composer-send-compact" : "web-composer-send"} disabled={props.disabled || busy || (!draft.trim() && images.length === 0)}>
+			<Button type="submit" size="sm" className="h-8 shrink-0 whitespace-nowrap pointer-coarse:h-10" data-testid={compact ? "web-composer-send-compact" : "web-composer-send"} disabled={props.disabled || busy || (!draft.trim() && images.length === 0)}>
 				{t("app.send")}
 			</Button>
 		);

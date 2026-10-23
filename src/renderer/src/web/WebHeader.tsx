@@ -98,7 +98,7 @@ export function WebHeader(props: {
 			<div className={cn("grid shrink-0 transition-[grid-template-rows] duration-[240ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none", props.headerHidden ? "grid-rows-[0fr]" : "grid-rows-[1fr]")}>
 				<div className={cn("min-h-0 overflow-hidden transition-opacity duration-[240ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none", props.headerHidden ? "opacity-0" : "opacity-100")} inert={Boolean(props.headerHidden)} aria-hidden={props.headerHidden || undefined}>
 					<header className="web-header flex min-w-0 items-center gap-2 border-b border-border/60 bg-background px-3 py-2">
-						<Button type="button" variant="ghost" size="icon" className="mobile-sidebar-toggle size-8 shrink-0" onClick={onOpenSidebar} aria-label={t("web.openProjects")} title={t("web.openProjects")}>
+						<Button type="button" variant="ghost" size="icon" className="mobile-sidebar-toggle size-8 shrink-0 pointer-coarse:size-9" onClick={onOpenSidebar} aria-label={t("web.openProjects")} title={t("web.openProjects")}>
 							<Menu className="size-4" aria-hidden="true" />
 						</Button>
 						<div className="web-title-block flex min-w-0 flex-1 flex-col gap-0.5">
@@ -133,7 +133,7 @@ export function WebHeader(props: {
 							{backend === "dsh" && actions?.onPermissionChange ? (
 								<DropdownMenu>
 									<DropdownMenuTrigger asChild>
-										<Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground" aria-label={t("web.permission")} title={`${t("web.permission")} · ${permissionLabel}`}>
+										<Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground pointer-coarse:size-9" aria-label={t("web.permission")} title={`${t("web.permission")} · ${permissionLabel}`}>
 											<PermissionIcon className="size-4" aria-hidden="true" />
 										</Button>
 									</DropdownMenuTrigger>
@@ -149,7 +149,7 @@ export function WebHeader(props: {
 							) : null}
 							{/* P3：工作区抽屉（Git / 文件）入口 */}
 							{actions?.onOpenWorkspace ? (
-								<Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground" onClick={actions.onOpenWorkspace} aria-label={t("web.workspaceDrawer")} title={t("web.workspaceDrawer")}>
+								<Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground pointer-coarse:size-9" onClick={actions.onOpenWorkspace} aria-label={t("web.workspaceDrawer")} title={t("web.workspaceDrawer")}>
 									<PanelRight className="size-4" aria-hidden="true" />
 								</Button>
 							) : null}
@@ -157,7 +157,7 @@ export function WebHeader(props: {
 							{actions && (actions.onRename || actions.onRestart || actions.onCompact || actions.onClone || actions.onCopyMarkdown || actions.onExportHtml || actions.onDuplicate || actions.onDelete || actions.onRefreshMessages) ? (
 								<DropdownMenu>
 									<DropdownMenuTrigger asChild>
-										<Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground" aria-label={t("web.sessionMenu")} title={t("web.sessionMenu")}>
+										<Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground pointer-coarse:size-9" aria-label={t("web.sessionMenu")} title={t("web.sessionMenu")}>
 											<MoreHorizontal className="size-4" aria-hidden="true" />
 										</Button>
 									</DropdownMenuTrigger>
@@ -227,7 +227,7 @@ export function WebHeader(props: {
 							{onOpenSearch || onCycleTheme || (canInstall && onInstall) || onOpenAssets ? (
 								<DropdownMenu>
 									<DropdownMenuTrigger asChild>
-										<Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground" aria-label={t("web.globalMenu")} title={t("web.globalMenu")}>
+										<Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground pointer-coarse:size-9" aria-label={t("web.globalMenu")} title={t("web.globalMenu")}>
 											<EllipsisVertical className="size-4" aria-hidden="true" />
 										</Button>
 									</DropdownMenuTrigger>
@@ -293,7 +293,7 @@ function ContextRing(props: { usage: WebContextUsage; onClick?: () => void }) {
 	// 无点击处理时保持纯展示；可点时套 ghost 图标钮（触区 16px→32px，对齐桌面 28px 圆形点击区）。
 	if (props.onClick) {
 		return (
-			<Button type="button" variant="ghost" size="icon" className="size-8 shrink-0" onClick={props.onClick} aria-label={tooltip} title={tooltip}>
+			<Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 pointer-coarse:size-9" onClick={props.onClick} aria-label={tooltip} title={tooltip}>
 				{ring}
 			</Button>
 		);

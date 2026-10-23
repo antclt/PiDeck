@@ -114,7 +114,7 @@ function WebSubagentsStrip({ subagents }: { subagents: PiSubagentEntry[] }) {
 								</span>
 								<span className={`shrink-0 text-micro ${SUB_STATUS_TONE[entry.status]}`}>{t(SUB_STATUS_LABEL[entry.status])}</span>
 								{(entry.result || entry.error) && (
-									<button type="button" aria-label={entry.description} onClick={() => setExpanded(isOpen ? null : entry.id)} className="shrink-0 rounded p-0.5 text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-secondary">
+									<button type="button" aria-label={entry.description} onClick={() => setExpanded(isOpen ? null : entry.id)} className="shrink-0 rounded p-0.5 text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-secondary pointer-coarse:p-1.5">
 										<ChevronDown className={`size-3 transition-transform ${isOpen ? "rotate-180" : ""}`} />
 									</button>
 								)}
