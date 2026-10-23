@@ -16,6 +16,7 @@ import { normalizeMathDelimiters } from "../../utils/normalizeMathDelimiters";
 import { UNTRUSTED_MARKDOWN_REHYPE_PLUGINS } from "./markdownSanitize";
 import { FormulaCopyLayer } from "./FormulaCopyLayer";
 import { useSmoothStream } from "../../utils/useSmoothStream";
+import { useDocumentTheme } from "../../hooks/useDocumentTheme";
 import { STREAM_LIGHT_MAX_CHARS, STREAM_UNFREEZABLE_MIN_CHARS, SETTLE_FULL_MAX_CHARS, shouldRenderStreamPlain, shouldKeepLightOnSettle } from "./markdownStreamPolicy";
 // 兼容导出：既有引用与源码契约测试从 MarkdownStream 读阈值常量
 export { STREAM_LIGHT_MAX_CHARS } from "./markdownStreamPolicy";
@@ -144,7 +145,9 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 	/** 是否禁用图表/代码高亮等重型渲染（静态小场景如更新日志可关以省内存） */
 	light?: boolean;
 }) {
-	const isDark = typeof document !== "undefined" && document.documentElement.dataset.theme === "dark";
+	// 订阅式读主题（2027-02 修正）：直读 dataset 拿不到切主题后的变化，mermaid
+	// 配置会保持旧明暗档直到下次无关重渲染。观察器见 hooks/useDocumentTheme。
+	const isDark = useDocumentTheme() === "dark";
 	// 逐字打字机：默认参数见 useSmoothStream（约 8ms / 每帧最多 6 字）。
 	const { displayedContent } = useSmoothStream({
 		content: props.text,
