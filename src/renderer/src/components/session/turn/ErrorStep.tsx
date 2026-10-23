@@ -6,6 +6,7 @@ import { Badge } from "../../ui-shadcn/badge";
 import { t, translateI18nDescriptor } from "../../../i18n";
 import { stripAnsi } from "../TimelineFormat";
 import { resolveStepDetail, StepTraceDetails } from "./StepTraceDetails";
+import { Collapsible, CollapsibleContent } from "../../ui-shadcn/collapsible";
 
 /**
  * 错误诊断过程行（run 内步骤，原位穿插）。
@@ -59,12 +60,14 @@ export const ErrorStep = memo(function ErrorStep(props: { group: ErrorGroupItem;
 							<div className="flex min-h-7 min-w-0 flex-[1_1_auto] cursor-default items-center gap-2 py-1 pr-0.5 pl-1 text-chat-row text-text-faint">{rowInner}</div>
 						)}
 					</div>
-					{/* 展开的错误详情："429 Too Many Requests …" 完整原文/栈帧 */}
-					{expanded && (
-						<div className="px-1 pb-1 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
+					{/* 展开的错误详情："429 Too Many Requests …" 完整原文/栈帧。
+					    折叠体走共享折叠原语：真高度渐变 + exit 后卸载；display:contents 根不生成盒子，折叠态零空档。
+					    不再挂 animate-in/fade-in：twMerge 会把 animate-* 判同组，保留会盖掉高度动画。 */}
+					<Collapsible open={expanded} className="contents">
+						<CollapsibleContent className="px-1 pb-1">
 							<StepTraceDetails message={props.group.message} />
-						</div>
-					)}
+						</CollapsibleContent>
+					</Collapsible>
 				</section>
 			</TimelineMarker>
 		</div>

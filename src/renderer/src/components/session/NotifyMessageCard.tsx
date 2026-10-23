@@ -6,6 +6,7 @@ import { formatTime, stripAnsi } from "./TimelineFormat";
 import { TimelineMarker } from "./TimelineMarker";
 import { SingleLinePreview } from "./SingleLinePreview";
 import { isNotifiableCustomType, parseNotifySummary, type NotifySummaryStatus } from "./notifySummary";
+import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
 
 /**
  * 状态 → 标题 i18n key。写成静态表而不是模板拼接：
@@ -57,12 +58,13 @@ export const NotifyMessageCard = memo(function NotifyMessageCard(props: { messag
 					<time className="ml-auto shrink-0 text-micro tabular-nums text-text-tertiary">{formatTime(props.message.timestamp)}</time>
 					{expanded ? <ChevronDown size={14} className="shrink-0 text-text-faint" aria-hidden="true" /> : <ChevronRight size={14} className="shrink-0 text-text-faint" aria-hidden="true" />}
 				</button>
-				{expanded ? (
-					<div className="border-t border-border-subtle px-2 py-1.5">
+				{/* 折叠体走共享折叠原语：真高度渐变 + exit 后卸载；display:contents 根不生成盒子，折叠态零空档。 */}
+				<Collapsible open={expanded} className="contents">
+					<CollapsibleContent className="border-t border-border-subtle px-2 py-1.5">
 						{/* 原文整体展示：解析只是「摘要」，不能被当成唯一事实来源 */}
 						<p className="m-0 whitespace-pre-wrap break-words text-caption leading-relaxed text-text-secondary">{stripAnsi(props.message.text ?? "")}</p>
-					</div>
-				) : null}
+					</CollapsibleContent>
+				</Collapsible>
 			</article>
 		</TimelineMarker>
 	);
