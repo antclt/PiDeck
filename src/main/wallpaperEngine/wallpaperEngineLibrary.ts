@@ -2,14 +2,7 @@ import { createReadStream } from "node:fs";
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
-import {
-	WALLPAPER_ENGINE_ID_RE,
-	parseByteRange,
-	parseWallpaperEngineProject,
-	wallpaperEngineVideoMime,
-	type WallpaperEngineItem,
-	type WallpaperEngineListResult,
-} from "../../shared/wallpaperEngine";
+import { WALLPAPER_ENGINE_ID_RE, parseByteRange, parseWallpaperEngineProject, wallpaperEngineVideoMime, type WallpaperEngineItem, type WallpaperEngineListResult } from "../../shared/wallpaperEngine";
 
 /** 单个工坊目录最多扫描的条目数：防止误选巨大目录时卡住主进程。 */
 const MAX_SCAN_ENTRIES = 2000;

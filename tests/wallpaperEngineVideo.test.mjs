@@ -146,7 +146,12 @@ async function loadAppearance() {
 }
 
 function fakeRoot() {
-	const sheet = new Map([["--color-bg-app", "#f5f5f5"], ["--color-bg-sidebar", "#eeeeee"], ["--color-bg-panel", "#ffffff"], ["--color-card", "#ffffff"]]);
+	const sheet = new Map([
+		["--color-bg-app", "#f5f5f5"],
+		["--color-bg-sidebar", "#eeeeee"],
+		["--color-bg-panel", "#ffffff"],
+		["--color-card", "#ffffff"],
+	]);
 	const inline = new Map();
 	const root = { dataset: {}, lang: "", style: { setProperty: (k, v) => inline.set(k, v), removeProperty: (k) => inline.delete(k), getPropertyValue: (k) => inline.get(k) ?? "" } };
 	globalThis.window = { matchMedia: () => ({ matches: false }), setTimeout, clearTimeout };
@@ -155,7 +160,21 @@ function fakeRoot() {
 	return root;
 }
 
-const settingsBase = { theme: "light", themeSkin: "classic-green", customThemeOverrides: {}, backgroundImage: "", backgroundImageOpacity: 0.8, weWorkshopDir: "", weWallpaperId: "", language: "zh-CN", fontSize: "md", fontFamilyBase: "system", fontFamilyBaseCustom: "", fontFamilyMono: "system", fontFamilyMonoCustom: "" };
+const settingsBase = {
+	theme: "light",
+	themeSkin: "classic-green",
+	customThemeOverrides: {},
+	backgroundImage: "",
+	backgroundImageOpacity: 0.8,
+	weWorkshopDir: "",
+	weWallpaperId: "",
+	language: "zh-CN",
+	fontSize: "md",
+	fontFamilyBase: "system",
+	fontFamilyBaseCustom: "",
+	fontFamilyMono: "system",
+	fontFamilyMonoCustom: "",
+};
 
 test("video wallpaper turns on wallpaper mode with the same panel opacity tier and no static image", async () => {
 	const mod = await loadAppearance();
