@@ -22,7 +22,6 @@
  */
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { StringDecoder } from "node:string_decoder";
 
 /** 四个服务共用的失败原因；新增原因必须同步各服务的公开结果类型。 */
 export type GoSidecarFailureReason = "binary-missing" | "boot-failed" | "timeout" | "protocol" | "request-failed" | "not-ready";
@@ -85,7 +84,7 @@ export type GoSidecarClientOptions = {
 	timeouts?: { boot?: number; request?: number };
 	logger?: GoSidecarLogger;
 	protocolVersion: number;
-	/** stdout 单行上限：防异常帧撑爆内存，按各服务响应规模设置。 */
+	/** stdout 单行上限（字节）：防异常帧撑爆内存，按各服务响应规模设置；UTF-8 下按字节比按字符更保守。 */
 	maxLineChars: number;
 	messages: GoSidecarMessages;
 	/** ready 帧通过协议校验后回调：各服务只在这里记日志/保存诊断字段。 */
@@ -146,8 +145,12 @@ export class GoSidecarClient {
 	private childKey: string | null = null;
 	private notifyReady: () => void = () => {};
 	private notifyDead: () => void = () => {};
-	private decoder = new StringDecoder("utf8");
-	private buffer = "";
+	/** 行泵分段缓冲（Buffer 版，见 consumeStdout 头注释）：已收未成行的字节段。 */
+	private lineChunks: Buffer[] = [];
+	/** 分段总字节数（溢出判定；按字节计，UTF-8 下比按字符更保守）。 */
+	private lineTotalBytes = 0;
+	/** 头块已扫过无 LF 的字节数：避免每个 chunk 重扫整块前缀。 */
+	private headSearchedBytes = 0;
 	private stderrTail: string[] = [];
 	private pending = new Map<number, PendingRequest>();
 	private nextId = 1;
@@ -227,8 +230,7 @@ export class GoSidecarClient {
 		this.childState = "booting";
 		this.stderrTail = [];
 		this.pending.clear();
-		this.buffer = "";
-		this.decoder = new StringDecoder("utf8");
+		this.resetLineBuffer();
 		this.attachChild(child);
 
 		const bootStartedAt = Date.now();
@@ -331,8 +333,7 @@ export class GoSidecarClient {
 		this.childKey = null;
 		this.childState = "dead";
 		this.lastReadyFrame = null;
-		this.buffer = "";
-		this.decoder = new StringDecoder("utf8");
+		this.resetLineBuffer();
 		this.notifyDead();
 		return child;
 	}
@@ -366,24 +367,84 @@ export class GoSidecarClient {
 	// 消息泵
 	// ------------------------------------------------------------------
 
+	/**
+	 * 行泵（Buffer 分段版，2027-02 性能审计）。
+	 *
+	 * 原实现 `buffer += chunk` 后立即 `indexOf("\n")`：V8 对 cons-string 的 indexOf
+	 * 要先整段扁平化，每个 data 事件都对已累积全长做一次拷贝+分配——单行响应成本
+	 * O(B²/chunkSize)。session-store 的 get-index 单行可达 ~25MB（条目表口径），
+	 * 按 64KB chunk 就是约 400 次全长扁平化，累计 GB 级 memcpy 全压在主进程。
+	 *
+	 * 分段后：LF（0x0A）按字节找，绝不出现在 UTF-8 多字节序列内部，跨 chunk 的
+	 * 多字节字符只随完整行一次性 toString，不丢字节。已扫过无 LF 的前缀不重扫
+	 *（headSearched 只对头块生效，其余块要么整块消费、要么是刚到的尾块）。
+	 */
 	private consumeStdout(chunk: Buffer): void {
-		this.buffer += this.decoder.write(chunk);
-		if (this.buffer.length > this.maxLineChars) {
-			const dropped = this.buffer.length;
-			this.buffer = "";
+		this.lineChunks.push(chunk);
+		this.lineTotalBytes += chunk.length;
+		if (this.lineTotalBytes > this.maxLineChars) {
+			const dropped = this.lineTotalBytes;
+			this.resetLineBuffer();
 			this.logger?.error(`${this.name} stdout 行缓冲溢出：丢弃 ${dropped} 字节`);
 			this.killChild("protocol");
 			this.settleAll("protocol", this.messages.responseOverflow);
 			return;
 		}
 		for (;;) {
-			const lf = this.buffer.indexOf("\n");
-			if (lf === -1) break;
-			const line = this.buffer.slice(0, lf);
-			this.buffer = this.buffer.slice(lf + 1);
-			if (!line.trim()) continue;
-			this.handleRecord(parseRecord(line), line);
+			// LF 只可能出现在头块（从已扫位置起）或刚追加的尾块：中间块在各自到达的
+			// 那一轮已整块扫过且无 LF（见方法头注释的不变式）。
+			const head = this.lineChunks[0];
+			const headLf = head ? head.indexOf(0x0a, this.headSearchedBytes) : -1;
+			if (headLf !== -1) {
+				const line = head.subarray(0, headLf);
+				const rest = head.subarray(headLf + 1);
+				this.lineTotalBytes -= headLf + 1;
+				if (rest.length > 0) {
+					this.lineChunks[0] = rest;
+					this.headSearchedBytes = 0;
+				} else {
+					this.lineChunks.shift();
+					this.headSearchedBytes = 0;
+				}
+				this.dispatchLine(line);
+				continue;
+			}
+			if (this.lineChunks.length > 1) {
+				const lastIdx = this.lineChunks.length - 1;
+				const last = this.lineChunks[lastIdx];
+				const lastLf = last.indexOf(0x0a);
+				if (lastLf !== -1) {
+					// 行跨多块：中间块按不变式整块 LF-free，直接 concat（每行一次拷贝，摊还 O(1)）
+					const parts = this.lineChunks.slice();
+					parts[lastIdx] = last.subarray(0, lastLf);
+					const line = parts.length === 1 ? parts[0] : Buffer.concat(parts);
+					this.lineTotalBytes -= line.length + 1;
+					const rest = last.subarray(lastLf + 1);
+					if (rest.length > 0) this.lineChunks = [rest];
+					else this.lineChunks = [];
+					this.headSearchedBytes = 0;
+					this.dispatchLine(line);
+					continue;
+				}
+			}
+			// 本轮无完整行：头块记录已扫边界，等下一 chunk
+			this.headSearchedBytes = head ? head.length : 0;
+			break;
 		}
+	}
+
+	/** 完整行 → 解析分发；空行跳过（与旧实现一致）。 */
+	private dispatchLine(line: Buffer): void {
+		const text = line.toString("utf8");
+		if (!text.trim()) return;
+		this.handleRecord(parseRecord(text), text);
+	}
+
+	/** 清空行缓冲分段（溢出/进程重建路径共用）。 */
+	private resetLineBuffer(): void {
+		this.lineChunks = [];
+		this.lineTotalBytes = 0;
+		this.headSearchedBytes = 0;
 	}
 
 	private consumeStderr(chunk: Buffer): void {
