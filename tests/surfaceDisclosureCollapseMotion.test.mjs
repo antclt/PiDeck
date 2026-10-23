@@ -79,6 +79,15 @@ for (const { path, root, required = [], forbidden = [] } of CASES) {
 	}
 }
 
+test("WorkspaceSurface 修改文件摘要卡折叠走共享折叠原语", () => {
+	const source = read("components/session/WorkspaceSurface.tsx");
+	assert.match(source, /import \{\s*Collapsible,\s*CollapsibleContent\s*\}\s*from "[^"]*ui-shadcn\/collapsible"/, "必须引入共享折叠原语");
+	// 受控开合：collapsed 归零时展开，语义与卡片头 aria-expanded={!collapsed} 对齐
+	assert.match(source, /<Collapsible\s+open=\{!collapsed\}\s+className="contents">/, "折叠根必须受控且不生成盒子");
+	assert.match(source, /<CollapsibleContent/, "文件列表必须包在 CollapsibleContent 里");
+	assert.doesNotMatch(source, /\{!collapsed\s*&&\s*\(/, "不得回退条件挂载（高度硬跳）");
+});
+
 test("TerminalDock 折叠刻意不迁折叠原语（xterm 容器生命周期）", () => {
 	assert.doesNotMatch(read("components/terminal/TerminalDock.tsx"), /ui-shadcn\/collapsible/, "终端面板折叠关平 xterm 挂载，不是布局折叠动画问题");
 });
