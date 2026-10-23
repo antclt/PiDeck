@@ -21,8 +21,8 @@
  * 「远端新增文件」（技能是文档不注入代码，允许新增；提示词同为内容也允许）。
  */
 
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { decodeAtomGitContentsBuffer, repoFileSourceEntries, type RepoFileSourceEntry } from "../update/atomGitContents";
 import type { UpdateSourceId } from "../../shared/types/settings";
@@ -55,6 +55,18 @@ export type BuiltinContentManifest = {
 
 export function sha256Of(content: Buffer | string): string {
 	return createHash("sha256").update(content).digest("hex");
+}
+
+/**
+ * 文件系统时间戳粒度保护窗口（毫秒）——与 builtInExtensionsManifest 同款：
+ * 刚写入的文件 mtime 可能仍在同一时钟刻度内（Windows 默认约 15.6ms），
+ * 「同刻度 + 等字节数」覆写用 stat 判据分辨不出。落窗内的一律不信任缓存、
+ * 重算一次且**不写入缓存**，避免窗口过期后同刻度覆写被旧条目命中。
+ */
+const FRESH_FILE_MTIME_GUARD_MS = 50;
+
+function isFreshFileMtime(mtimeMs: number): boolean {
+	return Date.now() - mtimeMs < FRESH_FILE_MTIME_GUARD_MS;
 }
 
 /** 源候选（atomgit OpenAPI / github raw）；形态与 update/atomGitContents 共用。 */
@@ -106,6 +118,19 @@ export class BuiltinContentUpdater {
 	private readonly branch: string;
 	private readonly source: () => UpdateSourceId;
 	private readonly onOverlayWritten?: () => void;
+	/**
+	 * 逐文件哈希记忆化（(size, mtimeMs) 判据，键为解析后的绝对路径）。
+	 *
+	 * 为什么需要（2027-02 性能审计补齐）：readVerifiedArtifact 会被 getStatus /
+	 * effectiveManifest / localFileShas / resolveEffectiveDir 反复调用——每次都对
+	 * builtin 与 overlay 两目录全量 readFileSync + sha256，内容 MB 级时是每次
+	 * 10-50ms 的同步 IO，直接把主进程事件循环堵住（打开提示词/技能商店整页卡）。
+	 * 同构问题在 builtInExtensionsManifest 已修（(size, mtimeMs) 判据），此处对齐。
+	 * 实例级而非模块级：提示词/技能各自实例化，目录互不相同，不共享缓存更不易串。
+	 */
+	private readonly verifiedFileHashCache = new Map<string, { size: number; mtimeMs: number; sha256: string }>();
+	/** 清单解析记忆化：manifest 自身 (size, mtimeMs) 未变则复用解析产物（省重读 + JSON.parse）。 */
+	private readonly verifiedManifestCache = new Map<string, { size: number; mtimeMs: number; manifest: BuiltinContentManifest | null }>();
 
 	constructor(options: BuiltinContentUpdaterOptions) {
 		this.userDataDir = options.userDataDir;
@@ -223,6 +248,7 @@ export class BuiltinContentUpdater {
 			const backupDir = this.resolveBackupDir();
 			rmSync(backupDir, { recursive: true, force: true });
 			renameSync(overlayDir, backupDir);
+			this.invalidateVerifiedCaches();
 			this.onOverlayWritten?.();
 			return { ok: true, updated: true, version: this.effectiveVersion() ?? undefined };
 		} catch (error) {
@@ -248,6 +274,7 @@ export class BuiltinContentUpdater {
 			const overlayDir = this.resolveOverlayDir();
 			rmSync(overlayDir, { recursive: true, force: true });
 			renameSync(backupDir, overlayDir);
+			this.invalidateVerifiedCaches();
 			this.onOverlayWritten?.();
 			return { ok: true, updated: true, version: this.readManifestFromDir(overlayDir)?.version ?? undefined };
 		} catch (error) {
@@ -321,20 +348,64 @@ export class BuiltinContentUpdater {
 	 * 读取某目录构成的有效 artifact：清单可解析 **且** 每个声明文件存在、
 	 * sha256 与 bytes 吻合。任何一项不符返回 null——覆盖层一旦被外部改动/截断，
 	 * 就自动退回内置版本而不是带病生效。
+	 *
+	 * 逐文件哈希与清单解析走实例级 memo（见 verifiedFileHashCache）：重复校验同一
+	 * 目录只付 stat 的代价，内容变化经 size/mtime 判据被发现后重算。
 	 */
 	private readVerifiedArtifact(dir: string): BuiltinContentManifest | null {
-		const manifest = this.readManifestFromDir(dir);
+		const manifest = this.memoizedManifestFromDir(dir);
 		if (!manifest) return null;
 		try {
 			for (const file of manifest.files) {
-				const content = readFileSync(join(dir, file.name));
-				if (content.byteLength !== file.bytes) return null;
-				if (sha256Of(content) !== file.sha256) return null;
+				const { size, sha256 } = this.memoizedFileSha256(resolve(join(dir, file.name)));
+				if (size !== file.bytes) return null;
+				if (sha256 !== file.sha256) return null;
 			}
 		} catch {
 			return null;
 		}
 		return manifest;
+	}
+
+	/** 读目录清单：manifest 文件 stat 未变则复用解析结果；新鲜 mtime 的结果不写缓存。 */
+	private memoizedManifestFromDir(dir: string): BuiltinContentManifest | null {
+		const manifestPath = resolve(join(dir, this.manifestFileName));
+		let stats;
+		try {
+			stats = statSync(manifestPath);
+		} catch {
+			// 清单缺失（覆盖层尚未建立/刚被删）与旧行为一致：当作没有清单
+			return null;
+		}
+		const cached = this.verifiedManifestCache.get(manifestPath);
+		if (cached && cached.size === stats.size && cached.mtimeMs === stats.mtimeMs && !isFreshFileMtime(stats.mtimeMs)) {
+			return cached.manifest;
+		}
+		const manifest = this.readManifestFromDir(dir);
+		if (!isFreshFileMtime(stats.mtimeMs)) {
+			this.verifiedManifestCache.set(manifestPath, { size: stats.size, mtimeMs: stats.mtimeMs, manifest });
+		}
+		return manifest;
+	}
+
+	/** 取文件大小与 sha256：stat 判据命中则复用缓存，否则读盘计算；新鲜 mtime 不落缓存。 */
+	private memoizedFileSha256(filePath: string): { size: number; sha256: string } {
+		const stats = statSync(filePath);
+		const cached = this.verifiedFileHashCache.get(filePath);
+		if (cached && cached.size === stats.size && cached.mtimeMs === stats.mtimeMs && !isFreshFileMtime(stats.mtimeMs)) {
+			return { size: stats.size, sha256: cached.sha256 };
+		}
+		const sha256 = sha256Of(readFileSync(filePath));
+		if (!isFreshFileMtime(stats.mtimeMs)) {
+			this.verifiedFileHashCache.set(filePath, { size: stats.size, mtimeMs: stats.mtimeMs, sha256 });
+		}
+		return { size: stats.size, sha256 };
+	}
+
+	/** 清空记忆化（覆盖层写盘/还原后调用；stat 判据本身已能发现变化，这里是显式兜底）。 */
+	private invalidateVerifiedCaches(): void {
+		this.verifiedFileHashCache.clear();
+		this.verifiedManifestCache.clear();
 	}
 
 	/** 当前生效的 artifact 清单（覆盖层有效优先，否则内置）。 */
@@ -440,6 +511,8 @@ export class BuiltinContentUpdater {
 			writeFileSync(join(tmpDir, this.manifestFileName), `${JSON.stringify(overlayManifest, null, 2)}\n`, "utf8");
 			if (!this.readVerifiedArtifact(tmpDir)) throw new Error("overlay failed verification after write");
 			this.swapOverlay(tmpDir);
+			// 覆盖层整目录换新：显式清缓存（新文件的 mtime 落在新鲜窗口内，memo 本来就不会命中，这里保证旧目录条目不残留）
+			this.invalidateVerifiedCaches();
 			return written.length;
 		} catch (error) {
 			rmSync(tmpDir, { recursive: true, force: true });
