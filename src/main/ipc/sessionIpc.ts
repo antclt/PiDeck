@@ -311,7 +311,8 @@ export type DshBackendIpcDeps = {
 	/** DSH 会话恢复（G14：目录按 manifest 移回 sessions 树，返回恢复路径、原 cwd 与标题）；未装配时抛错。 */
 	unarchiveDshSession?: (dshSessionId: string) => Promise<{ restoredPath: string; cwd: string; title?: string } | undefined>;
 	/** DSH 归档区会话清单（G14：恢复入口用；含标题，旧归档由日志折叠补全）；未装配时返回空列表。 */
-	listArchivedDshSessions?: () => Array<ArchivedDshSession>;
+	/** 2027-02 起为异步实现（归档标题折叠按目录让出，避免主进程整段阻塞）。 */
+	listArchivedDshSessions?: () => Array<ArchivedDshSession> | Promise<Array<ArchivedDshSession>>;
 	/** DSH 永久删除已归档会话（G14：归档目录移入系统回收站）；未装配时抛错。 */
 	deleteArchivedDshSession?: (dshSessionId: string) => Promise<boolean>;
 	/** DSH 动态插件清单（G13 深化）；未装配时返回空列表。 */
