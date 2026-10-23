@@ -146,21 +146,52 @@ export function resolveConfiguredNodePath(configuredPath?: string | null): strin
 	return typeof configuredPath === "string" ? configuredPath.trim() : "";
 }
 
-async function resolvePathLocation(platform: NodeJS.Platform = process.platform): Promise<string> {
+/**
+ * 版本管理器 / 包管理器放在 PATH 上的转发垫片目录（命中即不能当 runner）。
+ *
+ * 这些路径上的 `node` 只是几十字节的转发器：真跑起来它会再 CreateProcess 一次
+ * 真实 node.exe。Windows Job runner 靠 `stdio[3]=ipc` + 自定义 fd 4（control）
+ * 跟宿主通信，多一层转发后这两根管道全部断开——runner 会静默 0 退出、不发任何
+ * 直接结果，宿主于是判 `Windows Job runner exited with exit code 0 before proving
+ * its managed range empty`，run_code 直接失败（PTC worker-exit）。
+ *
+ * 统一把分隔符归一成 `\` 再匹配，Unix 的 `~/.local/share/mise/shims/node` 也覆盖。
+ */
+const NODE_SHIM_SEGMENTS = ["\\mise\\shims\\", "\\scoop\\shims\\", "\\volta\\bin\\", "\\fnm_multishells\\", "\\asdf\\shims\\", "\\.asdf\\shims\\", "\\node_modules\\.bin\\", "\\chocolatey\\bin\\", "\\windowsapps\\"];
+
+export function isNodeShimPath(candidate: string): boolean {
+	const normalized = candidate.trim().replace(/\//g, "\\").toLowerCase();
+	if (!normalized) return false;
+	return NODE_SHIM_SEGMENTS.some((segment) => normalized.includes(segment));
+}
+
+/**
+ * 能不能直接 spawn 成 runner：必须是真实 node 二进制。
+ * Windows 还要 `.exe`（`where node` 常见的第一行就是无扩展名的 bash 脚本垫片，
+ * CreateProcess 认它但 IPC 全丢）。
+ */
+export function isRunnableRunnerNode(candidate: string, platform: NodeJS.Platform = process.platform): boolean {
+	const normalized = candidate.trim();
+	if (!normalized) return false;
+	if (isNodeShimPath(normalized)) return false;
+	if (platform === "win32") return normalized.toLowerCase().endsWith(".exe");
+	return true;
+}
+
+/** `where node` / `which node` 的全部命中（顺序即 PATH 优先级），只保留真实存在的文件。 */
+async function resolvePathCandidates(platform: NodeJS.Platform = process.platform): Promise<string[]> {
 	try {
 		const command = platform === "win32" ? "where" : "which";
 		const { stdout } = await execFileAsync(command, ["node"], {
 			timeout: NODE_PROBE_TIMEOUT_MS,
 			windowsHide: true,
 		});
-		return (
-			stdout
-				.split(/\r?\n/)
-				.map((line) => line.trim())
-				.find(Boolean) ?? ""
-		);
+		return stdout
+			.split(/\r?\n/)
+			.map((line) => line.trim())
+			.filter((line) => line.length > 0 && existsSync(line));
 	} catch {
-		return "";
+		return [];
 	}
 }
 
@@ -172,8 +203,7 @@ async function probeExecutable(executable: string): Promise<DshRunnerNodeProbe |
 		});
 		const version = parseNodeVersion(stdout);
 		if (!version) return null;
-		const resolvedPath = executable === "node" ? (await resolvePathLocation()) || executable : executable;
-		return { resolvedPath, version };
+		return { resolvedPath: executable.trim(), version };
 	} catch {
 		return null;
 	}
@@ -184,21 +214,31 @@ export type DetectSystemNodeInput = {
 	env?: NodeJS.ProcessEnv;
 	/** 一键下载的专用副本（userData/dsh-runner-node/node.exe）。 */
 	sidecarPath?: string;
+	/** 测试注入：代替真实的 `where node` / `which node` 命中列表（单测没法改本机 PATH）。 */
+	pathHits?: string[];
 };
 
-/** 忽略用户配置：PATH → 专用 sidecar → 官方目录 / nvm/fnm/mise。 */
+/** 忽略用户配置：PATH 上的真 node → 专用 sidecar → 官方目录 / nvm/fnm/mise。 */
 export async function detectSystemNode(platformOrInput: NodeJS.Platform | DetectSystemNodeInput = process.platform, envArg?: NodeJS.ProcessEnv): Promise<DshRunnerNodeSystemProbe | null> {
 	const input: DetectSystemNodeInput = typeof platformOrInput === "string" ? { platform: platformOrInput, env: envArg } : platformOrInput;
 	const platform = input.platform ?? process.platform;
 	const env = input.env ?? process.env;
+	const pathHits = input.pathHits ?? (await resolvePathCandidates(platform));
 
-	const fromPath = await probeExecutable("node");
-	if (fromPath && isDshRunnerNodeCompatible(fromPath.version)) {
-		return { ...fromPath, source: "path" };
+	// PATH：只认真正的 node 二进制，垫片一律跳过（否则 runner IPC 断、run_code 必失败）。
+	let pathIncompatible: DshRunnerNodeSystemProbe | null = null;
+	for (const hit of pathHits) {
+		if (!isRunnableRunnerNode(hit, platform)) continue;
+		const probe = await probeExecutable(hit);
+		if (!probe) continue;
+		if (isDshRunnerNodeCompatible(probe.version)) {
+			return { ...probe, source: "path" };
+		}
+		pathIncompatible ??= { ...probe, source: "path" };
 	}
 
 	const sidecar = input.sidecarPath?.trim();
-	if (sidecar && existsSync(sidecar)) {
+	if (sidecar && existsSync(sidecar) && isRunnableRunnerNode(sidecar, platform)) {
 		const probe = await probeExecutable(sidecar);
 		if (probe && isDshRunnerNodeCompatible(probe.version)) {
 			return { ...probe, source: "sidecar" };
@@ -207,6 +247,7 @@ export async function detectSystemNode(platformOrInput: NodeJS.Platform | Detect
 
 	for (const candidate of nodePathCandidates(platform, env)) {
 		if (!existsSync(candidate)) continue;
+		if (!isRunnableRunnerNode(candidate, platform)) continue;
 		if (pathLooksLikeOtherNodeMajor(candidate)) continue;
 		const probe = await probeExecutable(candidate);
 		if (probe && isDshRunnerNodeCompatible(probe.version)) {
@@ -215,7 +256,13 @@ export async function detectSystemNode(platformOrInput: NodeJS.Platform | Detect
 	}
 
 	// 找到了但不兼容：仍返回 PATH 命中，让 UI 提示版本不对，并引导指定 24 或一键下载。
-	if (fromPath) return { ...fromPath, source: "path" };
+	if (pathIncompatible) return pathIncompatible;
+
+	// PATH 上只剩垫片：探出版本只为给 UI 解释原因，绝不拿去 spawn。
+	for (const hit of pathHits) {
+		const probe = await probeExecutable(hit);
+		if (probe) return { ...probe, source: "path", shimmed: true };
+	}
 	return null;
 }
 
@@ -227,10 +274,16 @@ export type DetectDshRunnerNodeInput = {
 	userDataPath?: string | null;
 	resourcesPath?: string | null;
 	appPath?: string | null;
+	/** 测试注入：代替真实的 `where node` / `which node` 命中列表。 */
+	pathHits?: string[];
 };
 
 function incompatibleError(version: string): string {
 	return `需要 Node ${DSH_RUNNER_NODE_MAJOR}.x（当前 ${version}）。PATH 上的 node 可以保持现状；请指定本机 Node ${DSH_RUNNER_NODE_MAJOR} 的路径，或一键下载仅给 PiDeck 用的副本。`;
+}
+
+function shimError(path: string, version: string): string {
+	return `这个 node（${path}${version ? `，${version}` : ""}）是版本管理器垫片，不能当 DSH 沙箱 runner：垫片会再转一次真实 node.exe，runner 的 IPC 通道中途断掉，run_code 就会报清理失败。请选真实二进制的绝对路径（如 …\\mise\\installs\\node\\${DSH_RUNNER_NODE_MAJOR}.x.y\\node.exe），或一键下载仅给 PiDeck 用的副本。`;
 }
 
 /**
@@ -245,7 +298,7 @@ export async function detectDshRunnerNode(input: DetectDshRunnerNodeInput = {}):
 		resourcesPath: input.resourcesPath ?? undefined,
 		appPath: input.appPath ?? undefined,
 	});
-	const system = await detectSystemNode({ platform, env, sidecarPath });
+	const system = await detectSystemNode({ platform, env, sidecarPath, pathHits: input.pathHits });
 	const envPath = resolveConfiguredNodePath(input.envPath);
 	if (envPath) {
 		if (!existsSync(envPath)) {
@@ -253,13 +306,14 @@ export async function detectDshRunnerNode(input: DetectDshRunnerNodeInput = {}):
 		}
 		const probe = await probeExecutable(envPath);
 		if (!probe) return notFound(`无法执行 ${envPath}`, system, envPath);
-		const compatible = isDshRunnerNodeCompatible(probe.version);
+		const shimmed = !isRunnableRunnerNode(envPath, platform);
+		const compatible = !shimmed && isDshRunnerNodeCompatible(probe.version);
 		return {
 			source: "env",
 			executable: envPath,
 			resolvedPath: probe.resolvedPath,
 			version: probe.version,
-			error: compatible ? null : incompatibleError(probe.version),
+			error: shimmed ? shimError(envPath, probe.version) : compatible ? null : incompatibleError(probe.version),
 			compatible,
 			system,
 		};
@@ -272,26 +326,28 @@ export async function detectDshRunnerNode(input: DetectDshRunnerNodeInput = {}):
 		}
 		const probe = await probeExecutable(configured);
 		if (!probe) return notFound(`无法执行配置的 Node 路径：${configured}`, system, configured);
-		const compatible = isDshRunnerNodeCompatible(probe.version);
+		const shimmed = !isRunnableRunnerNode(configured, platform);
+		const compatible = !shimmed && isDshRunnerNodeCompatible(probe.version);
 		return {
 			source: "configured",
 			executable: configured,
 			resolvedPath: probe.resolvedPath,
 			version: probe.version,
-			error: compatible ? null : incompatibleError(probe.version),
+			error: shimmed ? shimError(configured, probe.version) : compatible ? null : incompatibleError(probe.version),
 			compatible,
 			system,
 		};
 	}
 
 	if (system) {
-		const compatible = isDshRunnerNodeCompatible(system.version);
+		const shimmed = system.shimmed === true;
+		const compatible = !shimmed && isDshRunnerNodeCompatible(system.version);
 		return {
 			source: system.source,
 			executable: system.resolvedPath,
 			resolvedPath: system.resolvedPath,
 			version: system.version,
-			error: compatible ? null : incompatibleError(system.version),
+			error: shimmed ? shimError(system.resolvedPath, system.version) : compatible ? null : incompatibleError(system.version),
 			compatible,
 			system,
 		};
@@ -315,15 +371,18 @@ function notFound(error: string, system: DshRunnerNodeSystemProbe | null, execut
 /** host fork 用：只返回可 spawn 的兼容绝对路径。 */
 export async function resolveDshRunnerNodePath(input: DetectDshRunnerNodeInput = {}): Promise<string | undefined> {
 	if ((input.platform ?? process.platform) !== "win32") return undefined;
+	const platform = input.platform ?? process.platform;
 	const info = await detectDshRunnerNode(input);
 	if (info.compatible && info.resolvedPath) return info.resolvedPath;
-	// 手动路径/PATH 钉在 22/25 时，仍用自动探测到的 24 或 userData 专用副本。
-	if (info.system && isDshRunnerNodeCompatible(info.system.version) && info.system.resolvedPath) {
+	// 手动路径/PATH 钉在 22/25（或指到垫片）时，仍用自动探测到的 24 或 userData 专用副本。
+	if (info.system && info.system.shimmed !== true && isDshRunnerNodeCompatible(info.system.version) && info.system.resolvedPath) {
 		return info.system.resolvedPath;
 	}
+	// env 指到垫片时也别再回退到它，宁可走 userData 专用副本 / 旧 electron runner 备用路径。
+	const envPath = input.envPath && isRunnableRunnerNode(input.envPath, platform) ? input.envPath : undefined;
 	return resolveDshRunnerNodeSidecar({
-		platform: input.platform ?? process.platform,
-		envPath: input.envPath ?? undefined,
+		platform,
+		envPath,
 		userDataPath: input.userDataPath ?? undefined,
 		resourcesPath: input.resourcesPath ?? undefined,
 		appPath: input.appPath ?? undefined,

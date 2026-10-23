@@ -178,3 +178,15 @@ test("模块可隐藏：外观设置「功能模块」可收起收藏入口，�
 	assert.match(zh, /"settings\.modules\.favoritesDesc"/);
 	assert.match(en, /"settings\.modules\.favoritesDesc"/);
 });
+
+test("收藏拖拽排序：顺序即文件顺序，重排经 favorites:reorder 落盘", () => {
+	assert.match(ipc, /favoritesReorder:\s*"favorites:reorder"/);
+	assert.match(favoritesIpc, /ipcMain\.handle\(ipcChannels\.favoritesReorder/);
+	assert.match(preload, /reorder:\s*\(favoriteIds: string\[\]\) => ipcRenderer\.invoke\(ipcChannels\.favoritesReorder/, "preload 必须暴露 favorites.reorder");
+	// 数组顺序就是权威顺序：读盘不能再按 createdAt 重排，否则重启会抹掉用户拖出来的顺序。
+	assert.ok(!/entries\.sort\(/.test(store), "FavoritesStore 读盘不得按时间重排");
+	assert.match(store, /async reorder\(ids: readonly string\[\]\)/, "store 必须提供 reorder");
+	assert.match(favoritesWorkspace, /useListReorder\(/, "收藏列表必须启用通用列表重排");
+	assert.match(favoritesWorkspace, /reorder\.gripProps/, "收藏卡片必须有拖拽手柄");
+	assert.match(favoritesHook, /reorderFavorites/, "hook 必须暴露 reorderFavorites（乐观更新 + 失败回滚）");
+});

@@ -3,7 +3,7 @@ import type { FavoriteEntry } from "../../../shared/types";
 import { closeWorkspacePageAtom, openWorkspacePageAtom, workspacePageTabStateAtom } from "./workspace-page-atoms";
 
 /**
- * 收藏列表（本机快照，主进程按收藏时间倒序返回）；null = 尚未从主进程读到。
+ * 收藏列表（本机快照，顺序即主进程落盘的顺序：新增前插 + 用户拖拽排序）；null = 尚未从主进程读到。
  * 页面与各收藏入口共用这一个 atom：任意入口收藏/删除后列表立即同步，不用整页刷新。
  */
 export const favoriteEntriesAtom = atom<FavoriteEntry[] | null>(null);
