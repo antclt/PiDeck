@@ -4699,7 +4699,7 @@ export const zhCN = {
 	"settings.backgroundImageClear": "清除",
 	"settings.backgroundImageOpacity": "背景图透明度",
 	"settings.wallpaperEngine": "Wallpaper Engine 视频壁纸",
-	"settings.wallpaperEngineDesc": "选择 Steam 工坊目录（steamapps/workshop/content/431960），只列出视频类型壁纸；窗口失焦或最小化时自动暂停",
+	"settings.wallpaperEngineDesc": "选择 Steam 目录、steamapps 或工坊目录（会自动定位到 workshop/content/431960），只列出视频类型壁纸；窗口失焦或最小化时自动暂停",
 	"settings.wallpaperEngineChooseDir": "选择工坊目录",
 	"settings.wallpaperEngineOff": "不使用",
 	"settings.wallpaperEngineEmpty": "该目录下没有可用的视频壁纸",

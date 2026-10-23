@@ -2,7 +2,7 @@ import { createReadStream } from "node:fs";
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
-import { WALLPAPER_ENGINE_ID_RE, parseByteRange, parseWallpaperEngineProject, wallpaperEngineVideoMime, type WallpaperEngineItem, type WallpaperEngineListResult } from "../../shared/wallpaperEngine";
+import { WALLPAPER_ENGINE_ID_RE, parseByteRange, parseWallpaperEngineProject, wallpaperEngineDirCandidates, wallpaperEngineVideoMime, type WallpaperEngineItem, type WallpaperEngineListResult } from "../../shared/wallpaperEngine";
 
 /** 单个工坊目录最多扫描的条目数：防止误选巨大目录时卡住主进程。 */
 const MAX_SCAN_ENTRIES = 2000;
@@ -47,6 +47,21 @@ export async function listWallpaperEngineItems(dir: string): Promise<WallpaperEn
  * 把条目内相对文件解析成真实路径，并确认（含符号链接解析后）仍位于 <dir>/<id>/ 内。
  * 任何逃逸都返回 null。
  */
+/**
+ * 把用户手选的目录归一化到工坊内容目录（.../steamapps/workshop/content/431960）：
+ * 选 Steam 根、steamapps、workshop、workshop/content 都能命中；都不命中时原样返回（可能是自建的条目目录）。
+ */
+export async function resolveWorkshopContentDir(picked: string): Promise<string> {
+	for (const candidate of wallpaperEngineDirCandidates(picked, join)) {
+		try {
+			if ((await stat(candidate)).isDirectory()) return candidate;
+		} catch {
+			// 候选不存在：继续下一个
+		}
+	}
+	return picked;
+}
+
 export async function resolveInsideItem(dir: string, id: string, rel: string): Promise<string | null> {
 	try {
 		const root = await realpath(resolve(dir, id));

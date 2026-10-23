@@ -34,3 +34,31 @@ test("project.json with trailing NUL padding (and BOM) still parses and lists", 
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+test("picked folder is normalized from Steam root / steamapps / workshop / content to .../431960", async () => {
+	const root = mkdtempSync(join(tmpdir(), "we-steam-"));
+	try {
+		const content = join(root, "steamapps", "workshop", "content", "431960");
+		mkdirSync(join(content, "7"), { recursive: true });
+		writeFileSync(join(content, "7", "project.json"), JSON.stringify({ title: "T", type: "video", file: "a.mp4" }));
+		for (const picked of [root, join(root, "steamapps"), join(root, "steamapps", "workshop"), join(root, "steamapps", "workshop", "content"), content]) {
+			assert.equal(await lib.resolveWorkshopContentDir(picked), content, picked);
+		}
+		// 不相关目录原样返回（可能是自建条目目录）
+		const other = mkdtempSync(join(tmpdir(), "we-other-"));
+		assert.equal(await lib.resolveWorkshopContentDir(other), other);
+		rmSync(other, { recursive: true, force: true });
+		assert.equal(await lib.resolveWorkshopContentDir(""), "");
+		// 纯函数：候选顺序从深到浅，最后是原目录
+		assert.deepEqual(Array.from(shared.wallpaperEngineDirCandidates("/s", (...p) => p.join("/"))), ["/s/steamapps/workshop/content/431960", "/s/workshop/content/431960", "/s/content/431960", "/s/431960", "/s"]);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("IPC: pick-dir and list go through the folder normalization", async () => {
+	const { readFileSync } = await import("node:fs");
+	const ipc = readFileSync("src/main/ipc/wallpaperEngineIpc.ts", "utf8");
+	assert.match(ipc, /return picked \? resolveWorkshopContentDir\(picked\) : ""/);
+	assert.match(ipc, /listWallpaperEngineItems\(await resolveWorkshopContentDir\(/);
+});

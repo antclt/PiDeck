@@ -4715,7 +4715,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.backgroundImageClear": "Clear",
 	"settings.backgroundImageOpacity": "Background opacity",
 	"settings.wallpaperEngine": "Wallpaper Engine video wallpaper",
-	"settings.wallpaperEngineDesc": "Pick the Steam workshop folder (steamapps/workshop/content/431960). Only video wallpapers are listed; playback pauses when the window is unfocused or minimized",
+	"settings.wallpaperEngineDesc": "Pick your Steam folder, steamapps or the workshop folder (it is resolved to workshop/content/431960). Only video wallpapers are listed; playback pauses when the window is unfocused or minimized",
 	"settings.wallpaperEngineChooseDir": "Choose workshop folder",
 	"settings.wallpaperEngineOff": "None",
 	"settings.wallpaperEngineEmpty": "No video wallpapers found in this folder",

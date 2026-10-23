@@ -109,3 +109,15 @@ export function parseByteRange(header: string | null, size: number): { start: nu
 export function stripWallpaperEngineJsonNoise(raw: string): string {
 	return raw.replace(/^\uFEFF/, "").replace(/[\0\s]+$/, "");
 }
+
+/**
+ * 用户手选目录可能是 Steam 根、steamapps、workshop、workshop/content，或已经是 .../431960。
+ * 按从深到浅的顺序给出候选，调用方取第一个真实存在的目录；都不存在时回落到原目录。
+ * 只做路径拼接（不访问文件系统），便于单测；分隔符由调用方的 path.join 决定。
+ */
+export const WALLPAPER_ENGINE_APP_ID = "431960";
+export function wallpaperEngineDirCandidates(picked: string, join: (...parts: string[]) => string): string[] {
+	if (!picked) return [];
+	const id = WALLPAPER_ENGINE_APP_ID;
+	return [join(picked, "steamapps", "workshop", "content", id), join(picked, "workshop", "content", id), join(picked, "content", id), join(picked, id), picked];
+}
