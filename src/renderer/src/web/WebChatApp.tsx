@@ -367,8 +367,13 @@ export function WebChatApp() {
 	});
 	// 状态事件：/api/events 推送到达 → 复用轮询的 refresh 路径拉一次快照
 	// （去重/边沿检测只有一份实现）；连接断开时轮询自动回到高频节奏。
-	const stateRefreshRef = useRef<() => void>(() => {});
-	const stateEventsConnected = useWebStateEvents(() => stateRefreshRef.current());
+	const stateRefreshRef = useRef<((payload?: unknown) => void) | null>(null);
+	// SSE state 事件自带完整状态载荷：直接透传给 refresh 复用（省一次 /api/state 往返），
+	// 无载荷（畸形帧兜底）时 refresh 内部自行 fetchState。
+	const stateEventsConnected = useWebStateEvents((payload) => {
+		const refresh = stateRefreshRef.current;
+		if (refresh) void refresh(payload);
+	});
 	activeRuntimeRef.current = activeRuntime;
 
 	// 文件预览（第三批）：消息里的文件链接/strip 的 diff chip 都在此打开。项目信息走 ref
@@ -452,9 +457,11 @@ export function WebChatApp() {
 	// 低频轮询项目/会话/运行态（3s；useChat 负责消息流，不参与轮询）
 	useEffect(() => {
 		let disposed = false;
-		const refresh = async () => {
+		// payload：SSE state 事件的现成载荷（/api/state 同构），有则免一次拉取。
+		// 形状由服务端 serializePublicWebPayload 保证；这里只做最小字段防御（缺 runtimes 视为畸形，回退拉取）。
+		const refresh = async (payload?: unknown) => {
 			try {
-				const next = await fetchState();
+				const next = payload && typeof payload === "object" && Array.isArray((payload as { runtimes?: unknown }).runtimes) ? (payload as Awaited<ReturnType<typeof fetchState>>) : await fetchState();
 				if (disposed) return;
 				setState(next);
 				setConnected(true);
