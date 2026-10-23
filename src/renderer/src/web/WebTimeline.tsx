@@ -83,7 +83,7 @@ export const WebUserBubble = memo(function WebUserBubble(props: {
 				</div>
 			) : null}
 			{editing ? (
-				<div className="w-fit min-w-0 max-w-[min(82%,64ch)] rounded-2xl border border-primary/40 bg-muted/60 px-3.5 py-2.5">
+				<div className="w-fit min-w-0 max-w-[min(82%,64ch)] rounded-lg border border-primary/40 bg-muted/60 px-3.5 py-2.5">
 					<textarea
 						className="min-h-16 w-full resize-y rounded-md bg-transparent text-sm text-text-primary outline-none"
 						value={editDraft}
@@ -123,7 +123,7 @@ export const WebUserBubble = memo(function WebUserBubble(props: {
 			) : (
 				<>
 					{text.trim() ? (
-						<div className={cn("w-fit min-w-0 max-w-[min(82%,64ch)] rounded-2xl border border-border bg-muted/60 px-3.5 py-2.5 text-sm text-foreground [overflow-wrap:anywhere] break-words", props.flash && "web-msg-flash-ring")}>
+						<div className={cn("w-fit min-w-0 max-w-[min(82%,64ch)] rounded-lg border border-border bg-muted/60 px-3.5 py-2.5 text-sm text-foreground [overflow-wrap:anywhere] break-words", props.flash && "web-msg-flash-ring")}>
 							<div className="text-chat text-text-primary whitespace-pre-wrap break-words">{text}</div>
 						</div>
 					) : null}

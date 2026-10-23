@@ -26,8 +26,9 @@ test("light theme background tokens are neutral (no green tint)", () => {
 	assert.match(block(":root"), /--color-text-secondary:\s*#4a4a4a;/i);
 	assert.match(block(":root"), /--color-text-tertiary:\s*#666666;/i);
 	assert.match(block(":root"), /--color-text-faint:\s*#9a9a9a;/i);
-	// 边框也中性化（修复前 #e5e5df 系带黄绿调）
-	assert.match(block(":root"), /--color-border-subtle:\s*#e5e5e5;/i);
-	assert.match(block(":root"), /--color-border-default:\s*#dfdfdf;/i);
-	assert.match(block(":root"), /--color-border-strong:\s*#d7d7d7;/i);
+	// 边框也墨水化（ZCode 同法）：旧 #e5e5e5/#dfdfdf/#d7d7d7 换 rgba(13,13,13,alpha)，
+	// 叠在任何表面色相永远中性一致（见 docs/zcode-design-analysis.md）。
+	assert.match(block(":root"), /--color-border-subtle:\s*rgba\(13, 13, 13, 0\.1\);/i);
+	assert.match(block(":root"), /--color-border-default:\s*rgba\(13, 13, 13, 0\.13\);/i);
+	assert.match(block(":root"), /--color-border-strong:\s*rgba\(13, 13, 13, 0\.17\);/i);
 });

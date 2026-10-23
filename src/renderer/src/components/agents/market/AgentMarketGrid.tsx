@@ -44,7 +44,7 @@ export function AgentMarketGrid({ agents, orderIds, totalCount, selectionDefault
 		if (totalCount === 0) {
 			return (
 				<div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
-					<span className="flex size-12 items-center justify-center rounded-2xl bg-bg-muted text-muted-foreground">
+					<span className="flex size-12 items-center justify-center rounded-xl bg-bg-muted text-muted-foreground">
 						<Bot className="size-6" aria-hidden="true" />
 					</span>
 					<p className="text-sm font-medium text-foreground">{t("agentMarket.empty")}</p>

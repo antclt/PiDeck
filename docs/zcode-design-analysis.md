@@ -1,6 +1,6 @@
 # ZCode 视觉质感分析与反哺计划
 
-> 状态：**Phase 1 已落地**（2026-10，d4e60c97c / 730579b0b / 本次 token 调整）；Phase 2/3 为候选方向，按「改到哪，旧迁新到哪」增量推进，不做 big-bang。
+> 状态：**Phase 1 已落地**（2026-10，d4e60c97c / 730579b0b / 6a45b179f）；**Phase 2 已落地**（2026-10，边框墨水化 + 圆角降档 + 语义色审计）；Phase 3 为候选方向，按「改到哪，旧迁新到哪」增量推进，不做 big-bang。
 > 分析来源：`zai-org/ZCode`（Apache-2.0，main 分支 2026-10 浅克隆）。核心文件：`DESIGN.md`（设计宪法）、`packages/ui/src/styles.css`（Zai Light/Dark 主题值）。
 
 ## 一、ZCode 质感的六个机制（带证据）
@@ -50,14 +50,14 @@ DESIGN.md「Elevation and Depth」：Base 无阴影（结构来自底色对比�
 
 | 维度 | ZCode | PiDeck 现状 | 动作 |
 |---|---|---|---|
-| 中性灰色相 | 全部 R=G=B / 墨水 alpha | hover/active/文字带锌蓝调 | ✅ Phase 1 已改（本次） |
+| 中性灰色相 | 全部 R=G=B / 墨水 alpha | hover/active/文字带锌蓝调 | ✅ Phase 1 已改 |
 | 亮色 chrome 层次 | sidebar #f0f0f0 vs panel 白 | sidebar #f7f7f7（过弱） | ✅ Phase 1 已改 #f0f0f0 |
 | 暗色表面阶梯 | 每档 +0x0a | panel=popover=#171717 零步长 | ✅ Phase 1 已改（相对浮层色） |
-| 边框墨水化 | rgba(ink,0.1) 全站 | 不透明灰 hex | ⏳ Phase 2：改到哪旧迁新（边框 token 值换成 rgba 即可，消费方不变） |
-| 圆角纪律 | 嵌套递减 + 2xl 白名单 | 混用，部分组件按「感觉」 | ⏳ Phase 2：先盘点 rounded-2xl/full 使用面，立白名单 |
-| 阴影克制 | 四级阶梯 | 尚可，个别重投影 | ⏳ Phase 2：抽查 shadow-lg 使用 |
+| 边框墨水化 | rgba(ink,0.1) 全站 | 不透明灰 hex | ✅ Phase 2 已改（经典浅/暗色块；皮肤保留带色相边框作为身份色） |
+| 圆角纪律 | 嵌套递减 + 2xl 白名单 | 混用，部分组件按「感觉」 | ✅ Phase 2 已改（消息流卡片降档，白名单见下） |
+| 阴影克制 | 四级阶梯 | 尚可，个别重投影 | ⏳ Phase 3：抽查 shadow-lg 使用 |
 | 字号派生制 | --ui-font-size 四档 | 已有 --font-size-chat 派生制（过程层两档），接近 | 无需大动 |
-| 语义色借用 | 严令禁止 | 需抽查（success/warning 装饰性使用） | ⏳ Phase 3 |
+| 语义色借用 | 严令禁止 | 审计结论：无装饰性滥用，全部绑定真实状态 | ✅ Phase 2 已审计 |
 
 ## 三、Phase 1 变更明细（本次）
 
@@ -69,9 +69,35 @@ DESIGN.md「Elevation and Depth」：Base 无阴影（结构来自底色对比�
 
 对比度核算（themeContrast 矩阵实测全绿）：secondary #4a4a4a 白底 8.9:1；tertiary #666666 白底 5.7:1 / muted 底 5.2:1 / hover 底 4.5:1；faint #9a9a9a 白底 2.8:1（≥2.5 地板）。
 
-## 四、Phase 2/3 候选（按增量纪律推进）
+## 四、Phase 2 变更明细（本次）
 
-1. **边框墨水化**：`--color-border-*` 值换 `rgba(ink, 0.1/0.15)`（消费方零改动，效果全站生效）；暗色同步 `rgba(255,255,255,α)`。注意：涉及 `lightNeutralBackground` 钉值与 legacy CSS 里散落的硬编码边框。
-2. **圆角白名单**：盘点 `rounded-2xl`/`rounded-full`，列出保留例外（输入壳/toast/对话框），其余按嵌套层级降档。
-3. **语义色审计**：grep success/warning 装饰性使用（非状态语义处），换成 neutral 或身份色。
-4. **暗色 chat-muted-bg（#202020）与 panel（#1a1a1a）关系复核**：现在是 muted 比面板亮一档，方向正确，无需动。
+### 4.1 边框墨水化（foundation.css 经典浅/暗色块）
+
+- 浅色：`--color-border-subtle/default/strong` #e5e5e5/#dfdfdf/#d7d7d7 → `rgba(13,13,13, 0.10/0.13/0.17)`（白底上渲染 ≈ #e6e6e6/#dedede/#d5d5d5，视觉等值）。
+- 暗色：#262626/#2e2e2e/#3a3a3a → `rgba(255,255,255, 0.05/0.09/0.14)`（panel #1a1a1a 上 ≈ #262626/#2f2f2f/#383838）。
+- 机制收益：边框叠在任何表面（侧栏 #f0f0f0、壁纸半透明面板、皮肤色底）色相永远中性一致；暗色边框自动跟随底色形成正确亮度（与既有 `--shadow-border: rgba(255,255,255,0.08)` 同构）。
+- 皮肤（fresh-green/graphite/sea-blue/warm-beige）自带带色相边框，作为皮肤身份色保留不动。
+
+### 4.2 圆角白名单（嵌套递减纪律）
+
+消息流内容卡片从 rounded-2xl 降档（ZCode：内容卡跟父容器递减，2xl 只给壳）：
+
+- `agents/message-bubble.tsx` 气泡 2xl→lg；`agents/code-block.tsx` 代码块 2xl→md（气泡内再递减）；
+- `agents/todo-list.tsx` 卡片 2xl→lg、卡头按钮 →md；`agents/approval-card/index.tsx`、`agents/tool-approval.tsx` 审批卡 →lg；
+- `web/WebTimeline.tsx` 用户/助手气泡 ×2 →lg；`agents/market/AgentMarketGrid.tsx` 图标底板 →xl。
+
+**rounded-2xl 白名单**（新增组件不得随意用 2xl；「块大」不构成理由）：
+
+- 主输入壳：`agents/prompt-input.tsx`
+- 对话框/浮层壳：`web/WebBottomSheet.tsx`、`agents/chat-app.tsx`（面板根壳）
+- 浮层/动画层：`components/motion/*`（dock、preview-rail、animated-sidebar、shared-layout-bg——vendored 动效代码）
+
+### 4.3 语义色审计结论
+
+全量扫描 80 处 success/warning 使用：全部绑定真实状态（安装成败、鉴权关闭警告、导入取消、日志级别、子代理状态），**无 ZCode 所禁的「借语义色让块更响」装饰性滥用**。唯一软性候选：`agentListDisplay.ts` 把 running/starting/pending/waiting（忙碌中）映射到 warning 黄点——「忙碌」不是警告，ZCode 口径下更该是中性活动色（info 或 primary）；但黄色=进行中是广泛惯例，改动影响全局状态点视觉，列为 Phase 3 候选待用户视觉确认后再动。
+
+## 五、Phase 3 候选（按增量纪律推进）
+
+1. **忙碌状态色**：`agentListDisplay.ts` 的 warning 黄点 → info/primary，需用户视觉确认。
+2. **阴影审计**：抽查 shadow-lg/shadow-2xl 使用是否符合「只给 overlay/toast」。
+3. **暗色 chat-muted-bg（#202020）与 panel（#1a1a1a）关系复核**：现在是 muted 比面板亮一档，方向正确，无需动。

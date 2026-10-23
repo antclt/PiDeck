@@ -116,9 +116,13 @@
      不确定性；暗色由下方 dark 块显式覆盖。 */
   --color-text-faint: #9a9a9a;
   --color-text-inverse: #ffffff;
-  --color-border-subtle: #e5e5e5;
-  --color-border-default: #dfdfdf;
-  --color-border-strong: #d7d7d7;
+  /* 边框墨水化（ZCode 同法）：不透明灰线 → 墨水 alpha 罩染（rgba(13,13,13,x)）。
+     视觉等值换算（白底上）：0.10→#e6e6e6 / 0.13→#dedede / 0.17→#d5d5d5，对应旧
+     #e5e5e5/#dfdfdf/#d7d7d7。好处：叠在任何表面（侧栏 #f0f0f0、皮肤色底）色相永远
+     中性一致，hover/强调只需改 alpha 不需要另一块灰。皮肤保留自己的带色相边框（身份色）。 */
+  --color-border-subtle: rgba(13, 13, 13, 0.1);
+  --color-border-default: rgba(13, 13, 13, 0.13);
+  --color-border-strong: rgba(13, 13, 13, 0.17);
   /* 默认主题色：黑白灰；语义状态色（info/warning/danger）仍保留用于状态反馈。
      accent 取 shadcn zinc 的 primary 值（浅色近黑 zinc-900）：主按钮（保存/创建/导出/发送）
      呈现纯黑白底，与 secondary 灰底拉开层级；若用中灰（gray-500），default 与
@@ -530,8 +534,11 @@
      取 #a0a09a（比正文 tertiary 亮一档但仍低于 secondary，保持过程层语义）。 */
   --color-text-faint: #a0a09a;
   --color-text-inverse: #121212;
-  --color-border-subtle: #262626;
-  --color-border-default: #2e2e2e;
+  /* 边框墨水化：白墨水 alpha（暗色深度阶梯的另一半——ZCode 暗色边框是
+     rgba(255,255,255,0.1)，叠在更深底色上自动形成正确亮度）。
+     视觉等值换算（panel #1a1a1a 上）：0.05→#262626 / 0.09→#2f2f2f / 0.14→#383838。 */
+  --color-border-subtle: rgba(255, 255, 255, 0.05);
+  --color-border-default: rgba(255, 255, 255, 0.09);
   /* 暗色语法高亮（GitHub dark 系） */
   --code-keyword: #ff7b72;
   --code-string: #a5d6ff;
@@ -543,7 +550,7 @@
   --code-operator: #79c0ff;
   --code-property: #7ee787;
   --code-constant: #79c0ff;
-  --color-border-strong: #3a3a3a;
+  --color-border-strong: rgba(255, 255, 255, 0.14);
   /* 暗色 neutral accent = shadcn zinc 暗色 primary（近白 zinc-50）：主按钮暗色下呈白底黑字，
      与浅色主题互为反色；strong 为 hover/聚焦环的稍暗一档。 */
   --color-accent: #fafafa;
