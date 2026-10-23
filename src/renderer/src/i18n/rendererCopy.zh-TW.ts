@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 75d7c5f6a318ecc5a657a232d9f9dcb335816938262701f982ca5cd65214eab1（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 9122fab3cd3eac79aa0f92ebfe6fadcb74d39e021a7240cc4cc71822b59b23e6（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -3972,7 +3972,10 @@ export const zhTW: Record<TranslationKey, string> = {
 	"feedback.ai.sessionCreated": "已建立會話，提示詞已填入輸入框",
 	"feedback.ai.sessionCreateFailed": "建立會話失敗",
 	"feedback.ai.noProject": "當前沒有可用專案，無法新建會話",
-	"feedback.openIssueHint": "用系統瀏覽器開啟 GitHub Issue 預填頁（需登入 GitHub）",
+	"feedback.openIssueHint": "在系統瀏覽器開啟 GitHub Issue 預填頁：標題與簡述已填好，完整診斷報告會先複製到剪貼簿，貼上到正文即可（需登入 GitHub）",
+	"feedback.openIssueCopied": "已開啟 GitHub Issue，完整診斷報告已複製到剪貼簿，貼上到正文即可",
+	"feedback.openIssueCopyFailed": "已開啟 GitHub Issue；報告複製失敗，可在「匯出分享」頁手動複製",
+	"feedback.openIssueNoReport": "已開啟 GitHub Issue；想附帶完整診斷報告，請先回「環境診斷」頁生成報告",
 	"feedback.share.title": "匯出與分享",
 	"feedback.share.hint": "把診斷結果複製或匯出，發到 GitHub Issue、郵件或使用者群，方便支援者快速定位。",
 	"feedback.share.copyMarkdown": "複製 Markdown 報告",
