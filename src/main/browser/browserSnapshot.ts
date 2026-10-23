@@ -93,7 +93,8 @@ export function normalizeBrowserSnapshot(raw: unknown, options: { maxElements?: 
 	const totalElements = Math.max(elements.length, Math.floor(readFiniteNumber(record.totalElements, rawElements.length)));
 	return {
 		snapshotId: 0,
-		url: readString(record.url),
+		// url 是页面可控值（SPA 可塞 1MB hash）：不截断会击穿 24KB 文本预算（header 永远保留）。
+		url: truncateText(readString(record.url), 500),
 		title: truncateText(readString(record.title), 160),
 		viewport: readSize(record.viewport),
 		scroll: { x: readFiniteNumber(scroll.x, 0), y: readFiniteNumber(scroll.y, 0) },
@@ -133,7 +134,7 @@ export function formatBrowserSnapshot(snapshot: BrowserSnapshot): string {
 			if ([...kept, line].join("\n").length > SNAPSHOT_LIMITS.textChars - 40) break;
 			kept.push(line);
 		}
-		kept.push(`… (truncated by size; ${snapshot.elements.length} elements total in this snapshot)`);
+		kept.push(`… (truncated by size; showing first ${kept.length - header.length} of ${snapshot.totalElements} elements)`);
 		text = kept.join("\n");
 	}
 	return text;

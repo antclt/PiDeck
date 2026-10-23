@@ -203,11 +203,11 @@ export function registerBrowserTools(server: McpServer, deps: BrowserToolDeps): 
 	server.registerTool(
 		"browser_scroll",
 		{
-			description: "Scroll the page (mouse wheel) at an element ref or at the viewport center. Positive deltaY scrolls up, negative scrolls down (Windows wheel convention). Write action: may require approval.",
+			description: "Scroll the page (mouse wheel) at an element ref or at the viewport center. Positive deltaY scrolls down, negative scrolls up (standard wheel/WheelEvent convention; default 120 = one notch down). Write action: may require approval.",
 			inputSchema: {
 				ref: z.string().trim().min(1).max(40).optional().describe("Scroll at this element instead of the viewport center."),
 				deltaX: z.number().int().min(-2400).max(2400).optional().describe("Horizontal wheel delta."),
-				deltaY: z.number().int().min(-2400).max(2400).optional().describe("Vertical wheel delta (default -120 = one notch down)."),
+				deltaY: z.number().int().min(-2400).max(2400).optional().describe("Vertical wheel delta; positive scrolls down (default 120 = one notch down)."),
 				snapshotId,
 				sessionId,
 				agentId,

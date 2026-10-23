@@ -98,6 +98,11 @@ function makeGuest({ id, type = "webview", panel = true, url = `https://page-${i
 		getTitle() {
 			return this.title;
 		},
+		on(event, callback) {
+			const list = listeners.get(event) ?? [];
+			list.push(callback);
+			listeners.set(event, list);
+		},
 		once(event, callback) {
 			const list = listeners.get(event) ?? [];
 			list.push(callback);
@@ -114,6 +119,9 @@ function makeGuest({ id, type = "webview", panel = true, url = `https://page-${i
 			this.destroyed = true;
 			for (const callback of listeners.get("destroyed") ?? []) callback();
 			listeners.delete("destroyed");
+		},
+		emit(event) {
+			for (const callback of listeners.get(event) ?? []) callback();
 		},
 	};
 	return guest;
@@ -160,6 +168,24 @@ test("BrowserGuestRegistry attaches guests, resolves the latest, and cleans up o
 	assert.equal(registry.resolve().id, 1);
 	registry.detach(1);
 	assert.equal(registry.resolve(), null);
+	registry.dispose();
+});
+
+test("BrowserGuestRegistry reports navigation events and stops after detach", () => {
+	const navigated = [];
+	const registry = new BrowserGuestRegistry({
+		listAll: () => [],
+		isBrowserPanelGuest: (guest) => guest.panel === true,
+		onGuestNavigated: (guest) => navigated.push(guest.id),
+	});
+	const guest = makeGuest({ id: 9 });
+	registry.attach(guest);
+	guest.emit("did-navigate");
+	guest.emit("did-navigate-in-page");
+	assert.deepEqual(navigated, [9, 9], "both full navigations and SPA route changes are reported");
+	registry.detach(9);
+	guest.emit("did-navigate");
+	assert.deepEqual(navigated, [9, 9], "detached guests no longer report navigation");
 	registry.dispose();
 });
 

@@ -1,6 +1,6 @@
 # PiDeck 内置浏览器 Agent（Browser Agent）实现计划
 
-> 状态：**T1–T5 已实现**（2026-10-23；typecheck 0 错 + 29 个新单测全绿），T6 端到端 smoke 待做\
+> 状态：**T1–T6 已实现**（T1–T5 于 2026-10-23；2026-10-24 加固轮修复 4 个 P1 + 若干 P2 并新增 30 个单测；T6 核心链路端到端 smoke 落地为 `e2e/browser-agent.spec.ts`，真实 MCP 客户端 → host → webview → CDP 全链路）\
 > 基线：PiDeck v0.9.5，Electron ^43.4.0，Node 24，pi RPC 模式\
 > 关联：[docs/pideck-cua-implementation-plan.md](./pideck-cua-implementation-plan.md)（MCP 通道/审批门先例）、[docs/pideck-mcp.md](./pideck-mcp.md)（另一条对外 MCP API）、AGENTS.md「例外六」（已写入 2026-10-23，条文见 §9）\
 > 调研依据：2026-10-23 开源方案对照（§3.3）与独立 Electron PoC（§2）
@@ -394,6 +394,19 @@ e2e（可选，T6 再做）：`npx playwright test e2e/browser-agent.spec.ts`（
 - 2026-10-23：立项；PoC 9/9 PASS；决策「主进程 CDP + 扩展既有 pideck-cua MCP host」；补 AGENTS 例外六待落条文。
 - 2026-10-23：T1–T5 落地（代码 + 29 个新单测 + 设置/文案），AGENTS 例外六已写入；T6 端到端 smoke 待做。
 - 2026-10-23 体验调整：`browserAgentAutoApprove` 默认改为 `true`（开启浏览器 Agent 即免逐次审批），设置页可改回逐次确认；对应文案、测试、文档同步。
+- 2026-10-24 加固轮（全量评审后修复）：
+  - 快照脚本两段式（先纯读后纯写，消除 setAttribute 与 gBCR/getComputedStyle 交错引发的逐元素整页布局重算——复杂页面冻结数百 ms 的卡顿根因）+ rect 复用 + 无名布局容器不占 maxElements 预算 + 名称兜底改 textContent + opacity:0 祖先子树排除；
+  - CDP 租约改引用计数：并发工具调用共享租约、最后一个使用者才 detach（此前先进入者会在复用者运行中途 detach，可能发出 mousePressed 而缺失 mouseReleased）；guest 销毁独立错误码 browser_guest_gone；未知异常改 internal_error 不再误报 cdp_unavailable；
+  - ref 身份校验：resolveRef 结果与当前快照条目比对 tag/名称、ref 动作要求先有快照、guest 导航（含 SPA did-navigate-in-page）即失效 lastSnapshot、snapshotId 全局单调——防页面（不可信输入）搬运/自植 data-pideck-ref 把点击重定向到任意元素；
+  - fullPage 截图 16MP 像素预算：超长页 clip 到顶部区域并标 clipped（防主进程内存峰值/OOM）；
+  - waitFor 单租约轮询 + 页面内匹配（此前每 250ms 一次 attach/detach 且整页 innerText 回传主进程）；
+  - 滚轮方向修正：CDP/DOM 语义 deltaY 正=向下，工具描述与默认值（+120）同步修正；
+  - URL/标题在 targetInfo、快照归一化与审批 detail 处截断（防 SPA 超长 hash 撑爆工具输出与审批框）；降级输入 clear=false 改追加语义；审批详情元素名称解析链与快照对齐；
+  - 渲染层审批队列过期清理：主进程 30s 超时后自动出队死请求（点「允许」不再是静默无效操作）；设置页浏览器 Agent 分区过时注释修正。
+  - 测试：新增 tests/browser/{browserSnapshotScript,browserPageScripts,cdpSession}.test.mjs（页面脚本行为 + 注入表达式编译门 + 租约状态机）与控制器身份校验/waitFor 用例；浏览器域单测 29 → 59。
+  - 已知未做（低优先）：click 等动作的整动作级租约合并（现 ~4 次租约/动作，语义正确仅余开销）。
+- 2026-10-24 T6 核心链路 smoke：`e2e/browser-agent.spec.ts`——seed `browserAgentEnabled:true` 启动 host，经 mcp.json（临时 HOME 隔离）用真实 MCP 客户端验证：恰好 10 个 browser_* 工具（无 cua_* 泄漏）、真实页面快照 ref、CDP 点击（gate=auto_approve、非降级）、waitFor 页面内匹配、browser_type 回读。两次运行 9s 稳定通过。
+- 2026-10-24 T6 审批链路 smoke：`e2e/browser-agent-approval.spec.ts`——seed `browserAgentAutoApprove:false`，写动作阻塞等待、渲染层审批框呈现动作名与目标 URL、点「允许」后动作执行（gate=approved）且页面效果可 waitFor。与核心链路 spec 并行跑 17.6s 双绿。
 
 ---
 
@@ -414,4 +427,4 @@ e2e（可选，T6 再做）：`npx playwright test e2e/browser-agent.spec.ts`（
 4. `browser_evaluate` 按计划不提供；截图只读、不进 gate；
 5. `browser_wait_for` 用轮询 body 文本实现（不引入 MutationObserver）。
 
-待办（T6）：真实应用内 smoke（开启开关 → 重启 agent → snapshot/click/审批/截图 → 收起抽屉后回 `browser_not_open`）；与 MemoryMonitor 的 CDP 租约是否上收共享模块；mcp.json 条目命名债务。
+待办（T6 收尾）：审批对话框流程（关闭自动放行后的逐次确认）与收起抽屉后 `browser_not_open` 的 e2e 断言；与 MemoryMonitor 的 CDP 租约是否上收共享模块；mcp.json 条目命名债务。核心链路 smoke 已落地：`e2e/browser-agent.spec.ts`（MCP 客户端 → 条件注册工具表 → 真实 webview 快照/CDP 点击/输入/waitFor；mcp.json 经 e2e fixtures 的 HOME 重定向落在临时目录，不碰真实 `~/.pi`）。

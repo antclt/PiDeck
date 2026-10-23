@@ -42,6 +42,30 @@ function evaluateResult(value) {
 
 const RESOLVED = { found: true, visible: true, disabled: false, name: "Go", tag: "button", rect: { x: 100, y: 200, width: 40, height: 20 } };
 
+const SNAPSHOT_ELEMENT = { ref: "e1", role: "button", name: "Go", tag: "button" };
+
+// ref 动作现在要求先有快照（身份校验防页面搬运 data-pideck-ref）：按表达式区分返回。
+function makeSnapshotCdp(overrides = {}) {
+	const calls = [];
+	const resolved = overrides.resolved ?? RESOLVED;
+	return {
+		calls,
+		withGuest: async (guest, run) =>
+			run(async (method, params) => {
+				calls.push({ method, params });
+				if (method === "Runtime.evaluate") {
+					const expression = String(params?.expression ?? "");
+					if (expression.includes("collectBrowserSnapshotInPage")) {
+						return evaluateResult({ url: "https://example.com/", title: "Example", viewport: { width: 800, height: 600 }, elements: [SNAPSHOT_ELEMENT], totalElements: 1 });
+					}
+					if (expression.includes("data-pideck-ref")) return evaluateResult(resolved);
+					return evaluateResult(true);
+				}
+				return {};
+			}),
+	};
+}
+
 function makeController({ registry, cdp, gate = { check: async () => ({ allowed: true, reason: "auto_approve" }) } } = {}) {
 	return new BrowserController({
 		registry: registry ?? makeRegistry(makeGuest()),
@@ -98,18 +122,16 @@ test("stale refs, invisible elements and disabled elements are rejected before a
 });
 
 test("a denied approval gate stops the action and maps CUA reason to browser_disabled", async () => {
-	const cdp = makeCdp(() => evaluateResult(RESOLVED));
+	const cdp = makeSnapshotCdp();
 	const gate = { check: async () => ({ allowed: false, reason: "cua_disabled" }) };
 	const controller = makeController({ cdp, gate });
+	await controller.snapshot();
 	await rejectsWithCode(controller.click({ ref: "e1" }, META), "browser_disabled");
 	assert.equal(cdp.calls.filter((call) => call.method.startsWith("Input.")).length, 0, "no input when the gate denies");
 });
 
 test("click re-reads the rect after scrolling and dispatches a full mouse sequence", async () => {
-	const cdp = makeCdp((method) => {
-		if (method === "Runtime.evaluate") return evaluateResult(RESOLVED);
-		return {};
-	});
+	const cdp = makeSnapshotCdp();
 	const gate = {
 		check: async (action, sessionId, detail) => {
 			gateCalls.push({ action, sessionId, detail });
@@ -118,6 +140,7 @@ test("click re-reads the rect after scrolling and dispatches a full mouse sequen
 	};
 	const gateCalls = [];
 	const controller = makeController({ cdp, gate });
+	await controller.snapshot();
 	const result = await controller.click({ ref: "e1" }, { sessionId: "sess-9", agentId: "agent-1" });
 	assert.equal(result.gate, "auto_approve");
 	assert.equal(gateCalls[0].action, "browser_click");
@@ -134,11 +157,9 @@ test("click re-reads the rect after scrolling and dispatches a full mouse sequen
 });
 
 test("type focuses the element and inserts text; submit presses Enter", async () => {
-	const cdp = makeCdp((method) => {
-		if (method === "Runtime.evaluate") return evaluateResult(RESOLVED);
-		return {};
-	});
+	const cdp = makeSnapshotCdp();
 	const controller = makeController({ cdp });
+	await controller.snapshot();
 	await controller.type({ ref: "e1", text: "hello", clear: true, submit: true }, META);
 	const inserted = cdp.calls.filter((call) => call.method === "Input.insertText");
 	assert.equal(inserted.length, 1);
@@ -176,4 +197,69 @@ test("scroll falls back to executeJavaScript when CDP is busy and reports degrad
 	const controller = makeController({ cdp });
 	const result = await controller.scroll({ deltaY: -200 }, META);
 	assert.equal(result.degraded, true);
+});
+
+// ── ref 身份校验（防页面搬运 data-pideck-ref 重定向点击） ─────────────────────
+
+test("ref actions without a prior snapshot are rejected as stale_ref", async () => {
+	const cdp = makeCdp(() => evaluateResult(RESOLVED));
+	const controller = makeController({ cdp });
+	await rejectsWithCode(controller.click({ ref: "e1" }, META), "stale_ref");
+	assert.equal(cdp.calls.filter((call) => call.method.startsWith("Input.")).length, 0, "a planted attribute must not survive without a snapshot entry");
+});
+
+test("an element whose tag no longer matches the snapshot entry is rejected", async () => {
+	const cdp = makeSnapshotCdp({ resolved: { ...RESOLVED, tag: "a", name: "Go" } });
+	const controller = makeController({ cdp });
+	await controller.snapshot();
+	await rejectsWithCode(controller.click({ ref: "e1" }, META), "stale_ref");
+});
+
+test("an element whose name no longer matches the snapshot entry is rejected", async () => {
+	const cdp = makeSnapshotCdp({ resolved: { ...RESOLVED, name: "Transfer money now" } });
+	const controller = makeController({ cdp });
+	await controller.snapshot();
+	await rejectsWithCode(controller.click({ ref: "e1" }, META), "stale_ref");
+	assert.equal(cdp.calls.filter((call) => call.method.startsWith("Input.")).length, 0);
+});
+
+test("invalidateSnapshot drops ref identity so late write actions are rejected", async () => {
+	const cdp = makeSnapshotCdp();
+	const controller = makeController({ cdp });
+	await controller.snapshot();
+	controller.invalidateSnapshot();
+	await rejectsWithCode(controller.click({ ref: "e1" }, META), "stale_ref");
+});
+
+// ── waitFor 单租约轮询 ───────────────────────────────────────────────────────
+
+test("waitFor polls inside a single CDP lease and reports a match", async () => {
+	let withGuestCalls = 0;
+	let pollIndex = 0;
+	const answers = [false, false, true];
+	const cdp = {
+		withGuest: async (guest, run) => {
+			withGuestCalls += 1;
+			return run(async (method, params) => evaluateResult(answers[Math.min(pollIndex++, answers.length - 1)]));
+		},
+	};
+	const controller = makeController({ cdp });
+	const result = await controller.waitFor({ text: "ready", timeoutMs: 5000 });
+	assert.equal(result.matched, true);
+	assert.equal(withGuestCalls, 1, "the whole wait must reuse one CDP lease, not attach per poll");
+});
+
+test("waitFor degrades to executeJavaScript polling when CDP is busy", async () => {
+	const execCalls = [];
+	const guest = makeGuest({ executeJavaScript: async () => execCalls.push(1) >= 2 });
+	const cdp = {
+		withGuest: async () => {
+			throw new BrowserAgentError("cdp_busy", "debugger already attached");
+		},
+	};
+	const controller = makeController({ registry: makeRegistry(guest), cdp });
+	const result = await controller.waitFor({ text: "ready", timeoutMs: 5000 });
+	assert.equal(result.matched, true);
+	assert.equal(result.degraded, true);
+	assert.equal(execCalls.length, 2);
 });

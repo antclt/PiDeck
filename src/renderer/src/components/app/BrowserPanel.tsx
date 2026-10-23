@@ -290,6 +290,14 @@ export function BrowserPanel(props: {
 			if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(finalUrl)) {
 				finalUrl = `https://${finalUrl}`;
 			}
+			// 面板刚挂载、webview 未 dom-ready 时 loadUrl 会静默丢弃——用户敲的地址无声丢失。
+			// 复用外部导航的 pendingNavigate 队列：就绪后自动补导航（e2e 实测单次回车不可靠）。
+			const wv = webviewRef.current;
+			if (!wv?.isConnected || !webviewReadyRef.current) {
+				pendingNavigateUrl = finalUrl;
+				pendingNavigateListener?.();
+				return;
+			}
 			loadUrl(finalUrl);
 		},
 		[inputValue, loadUrl],

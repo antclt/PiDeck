@@ -2,7 +2,18 @@ import type { WebContents } from "electron";
 import type { CuaActionType, CuaGate } from "../cua/CuaGate";
 import { BrowserAgentError, browserAgentErrorCode, errorMessage, mapGateReason } from "./browserErrors";
 import { isAllowedBrowserPanelUrl } from "./browserSecurity";
-import { buildFallbackClickExpression, buildFallbackKeyExpression, buildFallbackScrollExpression, buildFallbackTypeExpression, buildFocusAndSelectExpression, buildFocusExpression, buildPageStateExpression, buildResolveRefExpression, buildScrollIntoViewExpression } from "./browserPageScripts";
+import {
+	buildFallbackClickExpression,
+	buildFallbackKeyExpression,
+	buildFallbackScrollExpression,
+	buildFallbackTypeExpression,
+	buildFocusAndSelectExpression,
+	buildFocusExpression,
+	buildPageStateExpression,
+	buildResolveRefExpression,
+	buildScrollIntoViewExpression,
+	buildWaitForTextExpression,
+} from "./browserPageScripts";
 import { formatBrowserSnapshot, normalizeBrowserSnapshot, SNAPSHOT_LIMITS, type BrowserSnapshot } from "./browserSnapshot";
 import { buildSnapshotExpression, type SnapshotScriptOptions } from "./browserSnapshotScript";
 import { captureBrowserScreenshot, type BrowserScreenshotRequest, type BrowserScreenshotResult } from "./browserScreenshot";
@@ -24,6 +35,9 @@ export type BrowserPageState = {
 	title: string;
 	viewport: BrowserViewport;
 	scroll: { x: number; y: number };
+	/** 整页滚动尺寸（CSS px），fullPage 截图的像素预算用。 */
+	scrollHeight: number;
+	scrollWidth: number;
 	devicePixelRatio: number;
 	iframeCount: number;
 };
@@ -76,6 +90,8 @@ export class BrowserController {
 				title: readString(record.title, target.title),
 				viewport: { width: readFiniteNumber(viewport.width, 0), height: readFiniteNumber(viewport.height, 0) },
 				scroll: { x: readFiniteNumber(scroll.x, 0), y: readFiniteNumber(scroll.y, 0) },
+				scrollHeight: Math.max(0, readFiniteNumber(record.scrollHeight, 0)),
+				scrollWidth: Math.max(0, readFiniteNumber(record.scrollWidth, 0)),
 				devicePixelRatio: readFiniteNumber(record.devicePixelRatio, 1),
 				iframeCount: Math.max(0, Math.floor(readFiniteNumber(record.iframeCount, 0))),
 			},
@@ -136,9 +152,10 @@ export class BrowserController {
 		this.assertSnapshotFresh(input.snapshotId);
 		const resolved = await this.resolveRef(target.guest, ref);
 		this.assertActionable(resolved, ref);
+		this.assertRefIdentity(resolved, ref);
 		const button = input.button ?? "left";
 		const clickCount = Math.round(clamp(input.clickCount ?? 1, 1, 3));
-		const gate = await this.approve("browser_click", meta, { url: target.url, title: target.title, ref, element: resolved.name, tag: resolved.tag, button, clickCount });
+		const gate = await this.approve("browser_click", meta, { url: truncateText(target.url, 200), title: truncateText(target.title, 80), ref, element: resolved.name, tag: resolved.tag, button, clickCount });
 		if (resolved.degraded) {
 			const clicked = await target.guest.executeJavaScript(buildFallbackClickExpression(ref), true);
 			if (clicked !== true) throw new BrowserAgentError("stale_ref", `元素引用 ${ref} 已失效，请重新调用 browser_snapshot`);
@@ -165,10 +182,11 @@ export class BrowserController {
 		this.assertSnapshotFresh(input.snapshotId);
 		const resolved = await this.resolveRef(target.guest, ref);
 		this.assertActionable(resolved, ref);
-		const gate = await this.approve("browser_type", meta, { url: target.url, ref, element: resolved.name, textPreview: truncateText(input.text, 200), textLength: input.text.length, clear: input.clear === true, submit: input.submit === true });
+		this.assertRefIdentity(resolved, ref);
+		const gate = await this.approve("browser_type", meta, { url: truncateText(target.url, 200), ref, element: resolved.name, textPreview: truncateText(input.text, 200), textLength: input.text.length, clear: input.clear === true, submit: input.submit === true });
 		if (resolved.degraded) {
 			if (input.clear) await target.guest.executeJavaScript(buildFocusAndSelectExpression(ref), true);
-			const typed = await target.guest.executeJavaScript(buildFallbackTypeExpression(ref, input.text), true);
+			const typed = await target.guest.executeJavaScript(buildFallbackTypeExpression(ref, input.text, input.clear === true), true);
 			if (typed !== true) throw new BrowserAgentError("stale_ref", `元素引用 ${ref} 已失效，请重新调用 browser_snapshot`);
 			if (input.submit) await target.guest.executeJavaScript(buildFallbackKeyExpression("Enter"), true);
 			return this.actionResult(target, gate, true, { ref, textLength: input.text.length });
@@ -187,7 +205,7 @@ export class BrowserController {
 		this.assertSnapshotFresh(input.snapshotId);
 		const keyDef = KEY_DEFS[input.key.trim().toLowerCase()];
 		if (!keyDef) throw new BrowserAgentError("unsupported_key", `不支持的按键：${input.key}（可用：${Object.keys(KEY_DEFS).join(", ")}）`);
-		const gate = await this.approve("browser_press_key", meta, { url: target.url, key: keyDef.key, modifiers: input.modifiers ?? [] });
+		const gate = await this.approve("browser_press_key", meta, { url: truncateText(target.url, 200), key: keyDef.key, modifiers: input.modifiers ?? [] });
 		await this.pressKeyInternal(target.guest, keyDef, input.modifiers ?? []);
 		return this.actionResult(target, gate, false, { key: keyDef.key });
 	}
@@ -196,7 +214,7 @@ export class BrowserController {
 		const target = this.requireTarget();
 		const url = input.url.trim();
 		if (!isAllowedBrowserPanelUrl(url)) throw new BrowserAgentError("url_not_allowed", "只允许 http/https（或 about:blank）");
-		const gate = await this.approve("browser_navigate", meta, { from: target.url, to: url });
+		const gate = await this.approve("browser_navigate", meta, { from: truncateText(target.url, 200), to: truncateText(url, 200) });
 		try {
 			await withTimeout(target.guest.loadURL(url), clamp(input.timeoutMs ?? 15_000, 1_000, 60_000), `导航超时：${url}`);
 		} catch (error) {
@@ -211,19 +229,21 @@ export class BrowserController {
 		const target = this.requireTarget();
 		this.assertSnapshotFresh(input.snapshotId);
 		const deltaX = Math.round(clamp(input.deltaX ?? 0, -2400, 2400));
-		const deltaY = Math.round(clamp(input.deltaY ?? -120, -2400, 2400));
+		// CDP/DOM 语义：deltaY 正值向下滚（与 WheelEvent 一致）。默认 +120 = 向下一个滚轮刻度。
+		const deltaY = Math.round(clamp(input.deltaY ?? 120, -2400, 2400));
 		let point = { x: 0, y: 0 };
 		let ref: string | undefined;
 		if (input.ref) {
 			ref = this.requireRef(input.ref);
 			const resolved = await this.resolveRef(target.guest, ref);
 			this.assertActionable(resolved, ref);
+			this.assertRefIdentity(resolved, ref);
 			point = { x: Math.round(resolved.rect.x + resolved.rect.width / 2), y: Math.round(resolved.rect.y + resolved.rect.height / 2) };
 		} else {
 			const state = await this.getState();
 			point = { x: Math.round(state.state.viewport.width / 2), y: Math.round(state.state.viewport.height / 2) };
 		}
-		const gate = await this.approve("browser_scroll", meta, { url: target.url, ref: ref ?? null, deltaX, deltaY });
+		const gate = await this.approve("browser_scroll", meta, { url: truncateText(target.url, 200), ref: ref ?? null, deltaX, deltaY });
 		try {
 			await this.deps.cdp.withGuest(target.guest, async (send) => {
 				await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: point.x, y: point.y, deltaX, deltaY, modifiers: 0 });
@@ -237,6 +257,9 @@ export class BrowserController {
 		}
 	}
 
+	/** fullPage 捕获的像素预算：超长页（无限滚动可达数万 px）全分辨率捕获+解码会瞬间吃掉上百 MB 主进程内存。 */
+	private static readonly MAX_CAPTURE_PIXELS = 16_000_000;
+
 	/** 截图：优先 CDP 当前帧，失败退 capturePage（可能过期，source 字段会标出来）。 */
 	async screenshot(input: { fullPage?: boolean; maxLongEdge?: number; quality?: number } = {}): Promise<BrowserScreenshotOutcome> {
 		const target = this.requireTarget();
@@ -246,6 +269,18 @@ export class BrowserController {
 			quality: Math.round(clamp(input.quality ?? 75, 1, 100)),
 			fullPage: input.fullPage === true,
 		};
+		if (request.fullPage) {
+			const dpr = Math.max(1, state.state.devicePixelRatio || 1);
+			const width = Math.max(1, state.state.viewport.width || 1, state.state.scrollWidth || 1);
+			const pageHeight = Math.max(state.state.viewport.height, state.state.scrollHeight);
+			const maxHeightCss = Math.floor(BrowserController.MAX_CAPTURE_PIXELS / (width * dpr));
+			if (pageHeight > maxHeightCss && maxHeightCss >= state.state.viewport.height) {
+				// 超预算：clip 到顶部 maxHeightCss 区域（CDP clip 为 CSS px），结果标 clipped 让模型知道不完整。
+				request.clip = { width: Math.max(1, state.state.viewport.width), height: maxHeightCss };
+			} else if (pageHeight > maxHeightCss) {
+				request.fullPage = false;
+			}
+		}
 		const capture = this.deps.capture ?? captureBrowserScreenshot;
 		let image: BrowserScreenshotResult;
 		try {
@@ -262,7 +297,7 @@ export class BrowserController {
 	}
 
 	/** 等待文本出现或固定时长（轮询页面文本，只读）。 */
-	async waitFor(input: { text?: string; timeMs?: number; timeoutMs?: number }): Promise<{ target: BrowserTargetInfo; matched: boolean; elapsedMs: number }> {
+	async waitFor(input: { text?: string; timeMs?: number; timeoutMs?: number }): Promise<{ target: BrowserTargetInfo; matched: boolean; elapsedMs: number; degraded?: boolean }> {
 		const target = this.requireTarget();
 		const startedAt = Date.now();
 		const timeoutMs = Math.round(clamp(input.timeoutMs ?? 10_000, 100, 30_000));
@@ -272,22 +307,47 @@ export class BrowserController {
 			await new Promise((resolve) => setTimeout(resolve, waitMs));
 			return { target: this.targetInfo(target), matched: true, elapsedMs: Date.now() - startedAt };
 		}
-		while (Date.now() - startedAt < timeoutMs) {
-			const { value } = await this.evaluateWithFallback(target.guest, 'document.body ? document.body.innerText : ""');
-			if (readString(value).includes(expected)) return { target: this.targetInfo(target), matched: true, elapsedMs: Date.now() - startedAt };
-			await new Promise((resolve) => setTimeout(resolve, 250));
+		// 单租约轮询：整个等待只占用一次 withGuest（一次 CDP attach/detach）。此前每 250ms 一轮
+		// attach/detach，30s 上限下最多 120 次调试器抖动，既浪费也与工具描述的「操作期间勿开 DevTools」相冲。
+		// 匹配在页面内完成，只回布尔（不把整页 innerText 每 250ms 拉回主进程序列化）。
+		const pollExpression = buildWaitForTextExpression(expected);
+		const poll = async (evaluate: () => Promise<unknown>): Promise<boolean> => {
+			while (Date.now() - startedAt < timeoutMs) {
+				// 表达式在页面内完成 includes，只回布尔。
+				if ((await evaluate()) === true) return true;
+				await new Promise((resolve) => setTimeout(resolve, 250));
+			}
+			return false;
+		};
+		try {
+			const matched = await this.deps.cdp.withGuest(target.guest, async (send) => poll(async () => readRuntimeValue(await send("Runtime.evaluate", { expression: pollExpression, returnByValue: true, awaitPromise: true }))));
+			return { target: this.targetInfo(target), matched, elapsedMs: Date.now() - startedAt };
+		} catch (error) {
+			const code = browserAgentErrorCode(error);
+			if (!code || !CDP_FALLBACK_CODES.has(code)) throw error;
+			// CDP 被占用（DevTools/内存探针）：整段降级 executeJavaScript 轮询，结果标 degraded。
+			const matched = await poll(() => target.guest.executeJavaScript(pollExpression, true));
+			return { target: this.targetInfo(target), matched, elapsedMs: Date.now() - startedAt, degraded: true };
 		}
-		return { target: this.targetInfo(target), matched: false, elapsedMs: Date.now() - startedAt };
+	}
+
+	/** 页面导航/面板关闭后调用：旧 ref 全部失效。lastSnapshot 含页面输入值等敏感文本，不留驻内存。 */
+	invalidateSnapshot(): void {
+		this.lastSnapshot = null;
 	}
 
 	private requireTarget(): BrowserGuestCandidate<WebContents> {
 		const target = this.deps.registry.resolve();
-		if (!target) throw new BrowserAgentError("browser_not_open", "内置浏览器没有打开的页面：请先打开浏览器面板并加载目标页面");
+		if (!target) {
+			this.lastSnapshot = null;
+			throw new BrowserAgentError("browser_not_open", "内置浏览器没有打开的页面：请先打开浏览器面板并加载目标页面");
+		}
 		return target;
 	}
 
 	private targetInfo(target: BrowserGuestCandidate<WebContents>): BrowserTargetInfo {
-		return { webContentsId: target.id, url: target.url, title: target.title };
+		// url/title 都是页面可控值：SPA 可以塞 1MB hash，截断防撑爆工具输出与审批详情。
+		return { webContentsId: target.id, url: truncateText(target.url, 500), title: truncateText(target.title, 160) };
 	}
 
 	private requireRef(ref: string): string {
@@ -303,15 +363,36 @@ export class BrowserController {
 		}
 	}
 
+	/**
+	 * ref 身份校验：data-pideck-ref 是页面内的可变属性，而页面是不可信输入——
+	 * 快照与动作之间隔着模型思考时间，恶意页面可以把属性搬到别的元素（把点击重定向到转账/删除按钮）。
+	 * 这里把 resolveRef 的结果与当前快照条目比对：无对应条目、tag 变化或名称明显变化都按 stale_ref 拒绝。
+	 * 名称比对用 40 字符前缀容忍（截断差异与轻微文案更新），宁可多一次重新快照也不放过换元素。
+	 */
+	private assertRefIdentity(resolved: ResolvedRef, ref: string): void {
+		const expected = this.lastSnapshot?.elements.find((element) => element.ref === ref);
+		if (!expected) throw new BrowserAgentError("stale_ref", `ref ${ref} 不在当前快照中，请先调用 browser_snapshot`);
+		if (expected.tag !== resolved.tag) throw new BrowserAgentError("stale_ref", `元素 ${ref} 的类型已变化（${expected.tag} → ${resolved.tag}），请重新快照`);
+		const expectedName = expected.name.trim();
+		const resolvedName = resolved.name.trim();
+		if (expectedName.length > 0 && resolvedName.length > 0) {
+			const head = Math.min(40, expectedName.length, resolvedName.length);
+			if (expectedName.slice(0, head) !== resolvedName.slice(0, head)) {
+				throw new BrowserAgentError("stale_ref", `元素 ${ref} 的名称已变化，页面可能已更新，请重新快照`);
+			}
+		}
+	}
+
 	private assertActionable(resolved: ResolvedRef, ref: string): void {
 		if (!resolved.visible) throw new BrowserAgentError("element_not_visible", `元素 ${ref} 当前不可见`);
 		if (resolved.disabled) throw new BrowserAgentError("element_disabled", `元素 ${ref} 处于禁用状态`);
 	}
 
 	private nextSnapshotId(target: BrowserGuestCandidate<WebContents>): number {
+		// 计数器全局单调不清零：guest 重建后从 1 重数会与旧代快照撞号，
+		// assertSnapshotFresh 会对跨代旧 id 放行（叠加页面自植 ref 属性即可指错元素）。
 		if (this.lastTargetId !== target.id) {
 			this.lastTargetId = target.id;
-			this.snapshotCounter = 0;
 			this.lastSnapshot = null;
 		}
 		this.snapshotCounter += 1;

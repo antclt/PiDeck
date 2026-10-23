@@ -16,15 +16,22 @@ export type BrowserGuestRegistryDeps = {
 	listAll: () => WebContents[];
 	/** 判定是否属于内置浏览器分区（生产传 session 身份比较；Electron 43 的 session.partition 是 undefined）。 */
 	isBrowserPanelGuest: (guest: WebContents) => boolean;
+	/**
+	 * 页面导航（含 SPA 的 did-navigate-in-page）后回调：controller 借此清 lastSnapshot，
+	 * 旧 ref 全部失效。ref 是 data-pideck-ref DOM 属性，页面是不可信输入——不监听导航的话，
+	 * 新页面可以自植属性让旧 ref 命中任意元素（把 agent 的点击重定向到转账/删除按钮）。
+	 */
+	onGuestNavigated?: (guest: WebContents) => void;
 };
 
 export class BrowserGuestRegistry {
 	private readonly guests = new Map<number, WebContents>();
 	private readonly cleanups = new Map<number, () => void>();
+	private readonly navigated = new Map<number, () => void>();
 
 	constructor(private readonly deps: BrowserGuestRegistryDeps) {}
 
-	/** did-attach-webview 时登记。重复登记同一 guest 直接忽略，避免重复挂 destroy 监听。 */
+	/** did-attach-webview 时登记。重复登记同一 guest 直接忽略，避免重复挂监听。 */
 	attach(guest: WebContents): void {
 		if (guest.isDestroyed() || this.guests.has(guest.id)) return;
 		this.guests.set(guest.id, guest);
@@ -34,6 +41,11 @@ export class BrowserGuestRegistry {
 		};
 		this.cleanups.set(guest.id, cleanup);
 		guest.once("destroyed", cleanup);
+		// 导航即失效：did-navigate 覆盖整页跳转，did-navigate-in-page 覆盖 SPA 路由/hash 变化。
+		const onNavigate = () => this.deps.onGuestNavigated?.(guest);
+		this.navigated.set(guest.id, onNavigate);
+		guest.on("did-navigate", onNavigate);
+		guest.on("did-navigate-in-page", onNavigate);
 	}
 
 	detach(id: number): void {
@@ -41,7 +53,13 @@ export class BrowserGuestRegistry {
 		if (!guest) return;
 		const cleanup = this.cleanups.get(id);
 		if (cleanup) guest.removeListener("destroyed", cleanup);
+		const onNavigate = this.navigated.get(id);
+		if (onNavigate) {
+			guest.removeListener("did-navigate", onNavigate);
+			guest.removeListener("did-navigate-in-page", onNavigate);
+		}
 		this.cleanups.delete(id);
+		this.navigated.delete(id);
 		this.guests.delete(id);
 	}
 

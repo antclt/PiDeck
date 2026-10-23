@@ -15,44 +15,68 @@ export type BrowserCdpSessionOptions = {
  *
  * 策略（docs/browser-agent-plan.md §8）：
  * - 每次动作 attach → 执行 → detach，把冲突窗口压到最小；
- * - 只 detach 自己 attach 的（owned 表），别人的 attach 一律不抢，回 cdp_busy；
+ * - 只 detach 自己 attach 的（租约表），别人的 attach 一律不抢，回 cdp_busy；
  * - attach 失败不重试，调用方可降级 executeJavaScript 并把 degraded 标记回给模型。
+ *
+ * 并发正确性（引用计数）：多个工具调用并发进入时（多 agent 会话共用同一 controller/cdp），
+ * 第一个进入者负责 attach，后来者复用同一租约；只有最后一个使用者结束才 detach。
+ * 此前按"谁 attach 谁 detach"结算，先进入者会在复用者运行中途 detach，
+ * 导致后者的 Input 序列断裂（mousePressed 发出而 mouseReleased 缺失）。
  */
+type CdpLease = { guest: WebContents; users: number };
+
 export class BrowserCdpSession {
-	private readonly owned = new Map<number, WebContents>();
+	private readonly leases = new Map<number, CdpLease>();
 
 	constructor(private readonly options: BrowserCdpSessionOptions = {}) {}
 
 	async withGuest<T>(guest: WebContents, run: (send: CdpSend) => Promise<T>): Promise<T> {
-		const alreadyAttached = guest.debugger.isAttached();
-		if (alreadyAttached && !this.owned.has(guest.id)) {
+		const existing = this.leases.get(guest.id);
+		if (existing) {
+			existing.users += 1;
+			try {
+				return await run(this.sender(guest));
+			} finally {
+				existing.users -= 1;
+				if (existing.users <= 0) this.release(existing);
+			}
+		}
+		if (guest.debugger.isAttached()) {
 			throw new BrowserAgentError("cdp_busy", "该页面已被其他调试器占用（DevTools 或内存探针），请关闭后重试");
 		}
-		if (!alreadyAttached) {
-			try {
-				guest.debugger.attach("1.3");
-			} catch (error) {
-				throw new BrowserAgentError("cdp_unavailable", errorMessage(error));
-			}
-			this.owned.set(guest.id, guest);
-		}
 		try {
-			return await run((method, params, sessionId) => this.command(guest, method, params, sessionId));
+			guest.debugger.attach("1.3");
+		} catch (error) {
+			throw new BrowserAgentError("cdp_unavailable", errorMessage(error));
+		}
+		const lease: CdpLease = { guest, users: 1 };
+		this.leases.set(guest.id, lease);
+		try {
+			return await run(this.sender(guest));
 		} finally {
-			// 只有本次 attach 的才 detach；复用别人租约时保持原状。
-			if (!alreadyAttached) this.release(guest);
+			lease.users -= 1;
+			if (lease.users <= 0) this.release(lease);
 		}
 	}
 
 	/** 应用退出/服务 dispose 时兜底释放，避免把 guest 锁在 attached 状态。 */
 	dispose(): void {
-		for (const guest of [...this.owned.values()]) this.release(guest);
+		for (const lease of [...this.leases.values()]) {
+			lease.users = 0;
+			this.release(lease);
+		}
 	}
 
-	private release(guest: WebContents): void {
-		if (!this.owned.delete(guest.id)) return;
+	private sender(guest: WebContents): CdpSend {
+		return (method, params, sessionId) => this.command(guest, method, params, sessionId);
+	}
+
+	private release(lease: CdpLease): void {
+		if (this.leases.get(lease.guest.id) !== lease) return;
+		if (lease.users > 0) return;
+		this.leases.delete(lease.guest.id);
 		try {
-			if (!guest.isDestroyed() && guest.debugger.isAttached()) guest.debugger.detach();
+			if (!lease.guest.isDestroyed() && lease.guest.debugger.isAttached()) lease.guest.debugger.detach();
 		} catch {
 			// best-effort：guest 已销毁或已被 DevTools 接管时 detach 会抛，忽略即可。
 		}
@@ -62,6 +86,7 @@ export class BrowserCdpSession {
 		const timeoutMs = this.options.commandTimeoutMs ?? 8000;
 		return new Promise<unknown>((resolve, reject) => {
 			const timer = setTimeout(() => {
+				// 超时≠取消：底层命令仍可能稍后落地（Input 事件延迟执行），调用方语义上按失败处理。
 				reject(new BrowserAgentError("cdp_timeout", `CDP ${method} 超时（${timeoutMs}ms）`));
 			}, timeoutMs);
 			guest.debugger.sendCommand(method, params, sessionId).then(
@@ -71,6 +96,11 @@ export class BrowserCdpSession {
 				},
 				(error) => {
 					clearTimeout(timer);
+					// guest 中途销毁是"页面没了"而不是"调试器被占"，单独定性避免模型误判重试方向。
+					if (guest.isDestroyed()) {
+						reject(new BrowserAgentError("browser_guest_gone", "浏览器页面已关闭"));
+						return;
+					}
 					reject(new BrowserAgentError("cdp_unavailable", errorMessage(error)));
 				},
 			);
