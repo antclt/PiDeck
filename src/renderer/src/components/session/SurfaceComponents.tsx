@@ -1300,8 +1300,8 @@ export { MultiSelectModal };
  * dsh 的全量可滚）。注意副作用：条数超 30 后纵向位置不再代表整段会话的进度。
  *
  * 高度自适应：容器被 .outline-hover 的 top/bottom 双向夹持出可用高度，间距按条数
- * 收缩到可点击下限；连 30 × 下限都放不下的极窄窗口（小窗口 + 终端坞 / 高缩放）
- * 才退化为导轨内部滚动 + 两端渐隐，滚到边界后滚轮交还时间线（planRailTicks.scrollable）。
+ * 收缩（14px → 最低 6px，30 × 6 = 180px 足够放下），不做内部滚动。
+ * 滚轮落在刻度上会转发给时间线（导轨是滚动视口的兄弟节点，不转发就滚不动）。
  */
 type ConversationOutlineProps = {
 	className?: string;
@@ -1320,6 +1320,24 @@ function ConversationOutlineView(props: ConversationOutlineProps) {
 	const [railActiveId, setRailActiveId] = useTimelineOutlineActiveId(props.timelineRef, props.items);
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [availableHeight, setAvailableHeight] = useState(0);
+	// 导轨是时间线滚动视口的兄弟节点，滚轮落在它上面不会带动时间线，必须显式转发。
+	// React 的 onWheel 是 passive（preventDefault 会被忽略并告警），这里注册原生非 passive 监听。
+	const forwardWheelRef = useRef(props.onTimelineWheel);
+	useLayoutEffect(() => {
+		forwardWheelRef.current = props.onTimelineWheel;
+	});
+	useLayoutEffect(() => {
+		const element = containerRef.current;
+		if (!element) return;
+		const onWheel = (event: WheelEvent) => {
+			const forward = forwardWheelRef.current;
+			if (!forward || event.deltaY === 0) return;
+			event.preventDefault();
+			forward(event.deltaY);
+		};
+		element.addEventListener("wheel", onWheel, { passive: false });
+		return () => element.removeEventListener("wheel", onWheel);
+	}, []);
 	// 容器高度由 top/bottom 夹持（不随内容变化），ResizeObserver 重测不会形成反馈环；
 	// 窗口缩放、--outline-top 变化都会反映为容器尺寸变化，统一在这里重算刻度规划。
 	useLayoutEffect(() => {
@@ -1360,8 +1378,6 @@ function ConversationOutlineView(props: ConversationOutlineProps) {
 					items={railItems}
 					label={t("outline.title")}
 					itemSize={plan.itemSize}
-					railMaxHeight={plan.scrollable ? availableHeight : undefined}
-					onWheelFallback={props.onTimelineWheel}
 					previewSide="before"
 					activeId={visibleRailActiveId}
 					highlightActive={visibleRailActiveId !== undefined}

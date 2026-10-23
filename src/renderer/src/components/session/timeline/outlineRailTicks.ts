@@ -11,14 +11,16 @@
  * RAIL_TICK_LIMIT 个检查点。窗口跟着滚动走——底部时是「最新的 30 条」，
  * 往上翻窗口上移，更早的提问进入窗口（上滑即显示更多）。
  *
- * 间距：能舒展就舒展（上限 14px），放不下就按条数收缩到可点击下限 10px；
- * 连上限条数 × 下限间距都放不下的极窄窗口（终端坞拉开 + 小窗口）才退化为导轨内部滚动。
+ * 间距：能舒展就舒展（上限 14px），放不下就按条数收缩，硬下限 6px——
+ * 30 条 × 6px = 180px，正常窗口（含小窗 + 终端坞 + 高缩放）都放得下，因此**不需要
+ * 导轨内部滚动**（2026-10 重构删掉了那一整套滚动/渐隐/跟随机制：上限 30 之后
+ * 它只在极端窄高下才可能触发，纯属屎山）。
  */
 
 /** 刻度间距上限（px）：与既有观感一致（每格 14px）。 */
 export const RAIL_TICK_MAX_SIZE = 14;
-/** 刻度间距下限（px）：同时是滚动档位的固定 pitch，保证刻度仍可 hover/点击。 */
-export const RAIL_TICK_MIN_SIZE = 10;
+/** 刻度间距下限（px）：再小就点不准，宁可让刻度密一点也不缩到不可点。 */
+export const RAIL_TICK_MIN_SIZE = 6;
 /** 刻度条数上限：滑动窗口大小（2026-10 用户反馈「旁边横条太多」）。 */
 export const RAIL_TICK_LIMIT = 30;
 /**
@@ -36,8 +38,6 @@ export type RailTickPlan<T> = {
 	items: T[];
 	/** 每格间距（px），同时用于刻度行高与预览卡对位。 */
 	itemSize: number;
-	/** 连上限条数都放不下：渲染层让导轨自身滚动。 */
-	scrollable: boolean;
 };
 
 /**
@@ -64,12 +64,11 @@ export function windowRailItems<T>(items: readonly T[], activeIndex: number, lim
 export function planRailTicks<T>(items: readonly T[], availableHeight: number): RailTickPlan<T> {
 	const visible = [...items];
 	const count = visible.length;
-	if (count === 0) return { items: visible, itemSize: RAIL_TICK_MAX_SIZE, scrollable: false };
-	if (availableHeight <= 0) return { items: visible, itemSize: RAIL_TICK_MAX_SIZE, scrollable: false };
+	if (count === 0) return { items: visible, itemSize: RAIL_TICK_MAX_SIZE };
+	if (availableHeight <= 0) return { items: visible, itemSize: RAIL_TICK_MAX_SIZE };
+	// 放得下就按上限间距舒展，放不下就按条数收缩，但不低于可点击下限
 	const fitted = Math.floor(availableHeight / count);
-	if (fitted >= RAIL_TICK_MAX_SIZE) return { items: visible, itemSize: RAIL_TICK_MAX_SIZE, scrollable: false };
-	if (fitted >= RAIL_TICK_MIN_SIZE) return { items: visible, itemSize: fitted, scrollable: false };
-	return { items: visible, itemSize: RAIL_TICK_MIN_SIZE, scrollable: true };
+	return { items: visible, itemSize: Math.max(RAIL_TICK_MIN_SIZE, Math.min(RAIL_TICK_MAX_SIZE, fitted)) };
 }
 
 export type OutlineRailItem = { id: string; role: string; title: string; time: string; entryId?: string; pending?: boolean };

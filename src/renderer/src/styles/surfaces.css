@@ -266,21 +266,11 @@
 }
 .outline-hover.session-outline-pane {
   /* 会话定位轴贴在消息区右缘（原设计）：right: 0 抵消 .outline-hover 的抽屉宽度偏移公式，
-     刻度从右端开始排、预览卡向左展开（previewSide="before"）。 */
+     刻度从右端开始排、预览卡向左展开（previewSide="before"）。
+     bottom 不再写死 24px——交给基础规则的 var(--outline-bottom)，
+     否则终端坞打开时定位轴会盖到终端上（该变量由 AppShell 按终端高度下发）。 */
   right: 0;
   top: 150px;
-  bottom: 24px;
-}
-/* 静默态不显示刻度：只有指针落在定位轴上（或键盘聚焦进来）才浮现。
-   用户反馈「不放鼠标上去它就在那儿占位」。opacity 不改布局，ResizeObserver
-   量到的可用高度不受影响；focus-within 保证键盘用户同样看得见。 */
-.outline-hover.session-outline-pane > * {
-  opacity: 0;
-  transition: opacity 160ms ease-out;
-}
-.outline-hover.session-outline-pane:hover > *,
-.outline-hover.session-outline-pane:focus-within > * {
-  opacity: 1;
 }
 .outline-hover {
   position: absolute;

@@ -317,12 +317,14 @@ description: …
 - **不要改回均匀采样**。三个真实实现调研过：Proma `scroll-minimap.tsx` 用 20 根**不可点的桶**（`MAX_BARS`，每桶 = `items.length/20` 条）纯粹当位置图；dsh `TurnNavigator.tsx` 与 vivid-layer Chat Minimap 都是「全部条目 + 内部滚动」。**没有一家把稀疏采样出来的条当成跳转按钮**——刻度可点就必须点得动，采样会留下点不动的假按钮。
 - 已知副作用：条数超 30 后，刻度的**纵向位置不再代表整段会话的进度**（当前刻度永远落在窗口中段）。要恢复「进度感」只能改成 Proma 的桶方案（条不可点 + 悬浮列表里跳转），这是产品取舍，不要单方面改回去。
 
-**间距与滚动**：`RAIL_TICK_MAX_SIZE = 14` / `RAIL_TICK_MIN_SIZE = 10`，按可用高度收缩到下限；连 `30 × 10 = 300px` 都放不下的极窄窗口（消息列 < ~474px，含高 `zoomFactor`）才退化为导轨内部滚动（两端 16px 渐隐 + 滚轮先滚导轨、到边界交还时间线）。**滚动分支是安全阀不是常规路径**，正常情况下 30 条永远放得下。
+**间距**：`RAIL_TICK_MAX_SIZE = 14` / `RAIL_TICK_MIN_SIZE = 6`，按可用高度收缩到下限，**不做内部滚动**。30 × 6 = 180px 已覆盖「小窗口 + 终端坞 + 高缩放」，所以 2026-10 重构把早前那套滚动/两端渐隐/自动跟随/`railMaxHeight`/`onWheelFallback` 一并删了（上限 30 之后它只在极端窄高下才可能触发，纯属屎山）。**滚轮仍要转发**：导轨是时间线滚动视口的兄弟节点（绝对定位），不转发的话指针在刻度上滚动时间线不动——用容器上的原生非 passive 监听（React 的 `onWheel` 是 passive，`preventDefault` 会被忽略）。
+
+**显隐分工（用户明确要求）**：**导轨常显**，只有**预览卡**在悬停/固定/聚焦时才出现。实现上 `highlightedId`（含当前活动刻度）只驱动刻度缩放，预览卡必须挂 `displayedId`（`hoveredId ?? pinnedId ?? focusedId`）。这两个混用会让卡片在没有悬停时也常显在活动刻度上——2026-10 就是这么出的 bug，守卫在 `tests/outlineRailContract.test.mjs`。
 
 **未加载刻度**：目录里有、消息还没加载的检查点（`outline-pending:<entryId>`）画淡一档（`opacity-60`，对齐 dsh 的 `markUnloaded`）。点它会走补页循环（`SessionSurfaceStage`）：每 60ms 轮询一次、最多 `RAIL_PENDING_MAX_ATTEMPTS = 10` 次；补不到要弹 `outline.jumpUnreachable`，**不许静默放弃**。
 
 **这里有个反直觉的坑**：`loadMoreMessages` 在上一页仍在飞时**直接 return**（`useSessionTimelineController` 的 in-flight 守卫），所以「10 次轮询」是**约 600ms 的墙钟时间盒，不是 10 页**。窗口内最靠前的几条仍可能补不到——写代码时别承诺「看得见就一定点得到」。
 
-**beUI 组件分叉纪律**：`preview-rail.tsx` 是官方 `@beui/preview-rail` 的本地分叉，头注释列了 7 条差异（滚动容器 / 两端渐隐 / 预览卡绝对定位 / 非 passive 滚轮 / `muted` / 自动跟随 / `min-h-80` 条件）。`npx shadcn add @beui/preview-rail --overwrite` 会整份覆盖，必须按头注释重新施加；`tests/outlineRailScroll.test.mjs` 的源码契约断言是那次覆盖的兜底（覆盖后会变红）。
+**beUI 组件分叉纪律**：`preview-rail.tsx` 是官方 `@beui/preview-rail` 的本地分叉，头注释列了 4 条差异（`muted` 淡显 / 预览卡只渲染一张 + 纯计算定位 / `resolveCardTop` 钳制 / 卡片位移过渡）。`npx shadcn add @beui/preview-rail --overwrite` 会整份覆盖，必须按头注释重新施加；`tests/outlineRailContract.test.mjs` 的源码契约断言是那次覆盖的兜底（覆盖后会变红）。
 
-**回归集**：`tests/outlineRailTicks.test.mjs`（窗口/间距纯函数）、`tests/outlineRailScroll.test.mjs`（源码契约：滚动、渐隐、滚轮、`muted`、窗口按源下标截取）、`tests/outlineRailActive.test.mjs`（活动刻度解析）、`tests/sessionOutlineDirectory.test.mjs`（目录取数）。没有 e2e 覆盖（本机 seeded-项目 e2e 环境不可用）。
+**回归集**：`tests/outlineRailTicks.test.mjs`（窗口/间距纯函数）、`tests/outlineRailContract.test.mjs`（源码契约：预览卡触发条件、纯计算定位、`muted`、滚轮转发、窗口按源下标截取、已删滚动子系统不许长回来）、`tests/outlineRailActive.test.mjs`（活动刻度解析）、`tests/sessionOutlineDirectory.test.mjs`（目录取数）。没有 e2e 覆盖（本机 seeded-项目 e2e 环境不可用）。

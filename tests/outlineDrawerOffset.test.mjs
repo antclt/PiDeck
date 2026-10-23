@@ -23,10 +23,14 @@ test("会话定位轴贴消息区右缘，不得改到左缘", () => {
 	assert.doesNotMatch(paneBlock, /align-items:\s*flex-start/);
 });
 
-test("定位轴静默态不可见，指针移入或键盘聚焦才浮现", () => {
-	// 用户反馈「没放鼠标上去它就显示、占地方」：rest 必须 opacity: 0
-	assert.match(styles, /\.outline-hover\.session-outline-pane\s*>\s*\*\s*\{[^}]*opacity:\s*0;/);
-	assert.match(styles, /\.outline-hover\.session-outline-pane:hover\s*>\s*\*[^{]*\{[^}]*opacity:\s*1;/);
-	// focus-within 兜住键盘用户：只用 :hover 会让键盘聚焦到不可见的刻度上
-	assert.match(styles, /\.outline-hover\.session-outline-pane:focus-within\s*>\s*\*[^{]*\{[^}]*opacity:\s*1;/);
+test("定位轴常显：不得给它加 opacity 静默态（要隐藏的是预览卡，不是导轨）", () => {
+	// 2026-10 用户澄清：导轨一直显示，只有预览卡悬停才出。
+	// 曾误把整条导轨做成 opacity:0 → 悬停才浮现，用户看到「横条消失」。
+	assert.doesNotMatch(styles, /\.outline-hover\.session-outline-pane\s*\{[^}]*opacity:\s*0/);
+	assert.doesNotMatch(styles, /\.outline-hover\.session-outline-pane\s*>\s*\*/);
+});
+
+test("定位轴的底边跟随 --outline-bottom（终端坞打开时让位）", () => {
+	// 写死 bottom: 24px 会让定位轴盖在终端上
+	assert.doesNotMatch(paneBlock, /bottom:\s*24px/);
 });

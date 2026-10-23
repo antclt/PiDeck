@@ -34,16 +34,23 @@ test("空间充裕：全量渲染，间距取上限", () => {
 	const plan = railTicks.planRailTicks(makeItems(20), 800);
 	assert.equal(plan.items.length, 20);
 	assert.equal(plan.itemSize, railTicks.RAIL_TICK_MAX_SIZE);
-	assert.equal(plan.scrollable, false);
 });
 
-test("放不下但可收缩：全量渲染，间距 = floor(可用高度 / 条数)", () => {
-	// 30 条 / 380px → fitted=12，落在 [MIN=10, MAX=14) 区间
+test("放不下就按条数收缩，间距 = floor(可用高度 / 条数)", () => {
+	// 30 条 / 380px → fitted=12，落在 [MIN=6, MAX=14) 区间
 	const plan = railTicks.planRailTicks(makeItems(30), 380);
 	assert.equal(plan.items.length, 30);
 	assert.equal(plan.itemSize, 12);
-	assert.equal(plan.scrollable, false);
 	assert.ok(plan.items.length * plan.itemSize <= 380);
+});
+
+test("再挤也不低于可点击下限（30 条 × 6px = 180px 覆盖极小窗口）", () => {
+	assert.equal(railTicks.RAIL_TICK_MIN_SIZE, 6);
+	// 30 条只给 120px → fitted=4，钳到下限 6
+	const plan = railTicks.planRailTicks(makeItems(30), 120);
+	assert.equal(plan.itemSize, 6);
+	// 小窗 + 终端坞（消息列约 194px）仍能一次放下 30 条
+	assert.ok(railTicks.RAIL_TICK_LIMIT * railTicks.RAIL_TICK_MIN_SIZE <= 194);
 });
 
 test("条数不超上限：原样返回（短会话完全不受窗口影响）", () => {
@@ -106,11 +113,4 @@ test("补页预算是个有限的时间盒（不是页数保证）", () => {
 	// 每次轮询 60ms；预算必须有限，否则补不到时会永远轮询下去
 	assert.ok(Number.isInteger(railTicks.RAIL_PENDING_MAX_ATTEMPTS));
 	assert.ok(railTicks.RAIL_PENDING_MAX_ATTEMPTS > 0 && railTicks.RAIL_PENDING_MAX_ATTEMPTS <= 20);
-});
-
-test("常规窗口下 30 条永远放得下：不出现滚动档位", () => {
-	// 30 条只要每格 ≥ 10px 就放得下（即可用高度 ≥ 300px）
-	assert.equal(railTicks.planRailTicks(makeItems(30), 554).scrollable, false);
-	assert.equal(railTicks.planRailTicks(makeItems(30), 300).scrollable, false);
-	assert.equal(railTicks.planRailTicks(makeItems(30), 299).scrollable, true);
 });
