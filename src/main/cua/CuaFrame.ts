@@ -73,11 +73,7 @@ function thumbnailRequestSize(maxLongEdge: number): number {
  * is the primary display (on this dev box the primary is second), so "primary"
  * is matched by `display_id` instead of by index.
  */
-export function selectScreenSource(
-	sources: readonly DesktopCapturerSource[],
-	selector: string | undefined,
-	displays: readonly CuaDisplayInfo[],
-): DesktopCapturerSource {
+export function selectScreenSource(sources: readonly DesktopCapturerSource[], selector: string | undefined, displays: readonly CuaDisplayInfo[]): DesktopCapturerSource {
 	const wanted = selector?.trim();
 	const primaryDisplay = displays.find((display) => display.isPrimary);
 

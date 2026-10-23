@@ -33,9 +33,9 @@ export function registerCuaTools(server: McpServer, engine: CuaEngine, gate: Cua
 		"cua_capture",
 		{
 			description:
-				"Capture one display and return a JPEG image. displayId comes from cua_get_state.displays (a displayId or sourceId) or is \"primary\". The response screenRect is that display in absolute click coordinates: x = screenRect.x + imageX * screenRect.width / width, y = screenRect.y + imageY * screenRect.height / height.",
+				'Capture one display and return a JPEG image. displayId comes from cua_get_state.displays (a displayId or sourceId) or is "primary". The response screenRect is that display in absolute click coordinates: x = screenRect.x + imageX * screenRect.width / width, y = screenRect.y + imageY * screenRect.height / height.',
 			inputSchema: {
-				displayId: z.string().optional().describe("Display to capture: a displayId or sourceId from cua_get_state.displays, or \"primary\". Omit for primary."),
+				displayId: z.string().optional().describe('Display to capture: a displayId or sourceId from cua_get_state.displays, or "primary". Omit for primary.'),
 				maxLongEdge: z.number().int().min(16).max(8192).default(1280).describe("Resize so the longer edge <= this (16-8192)."),
 				quality: z.number().int().min(1).max(100).default(75).describe("JPEG quality 1-100."),
 			},
