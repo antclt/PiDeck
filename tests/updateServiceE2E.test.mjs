@@ -523,9 +523,7 @@ test("catalog auto update re-derives the pending state when nothing could be wri
 		updater,
 		checkCatalogUpdate: async () => {
 			checks += 1;
-			return checks === 1
-				? { ok: true, remoteVersion: "1.2.0", localVersion: "1.0.4", hasUpdate: true }
-				: { ok: true, remoteVersion: "1.2.0", localVersion: "1.2.0", hasUpdate: false };
+			return checks === 1 ? { ok: true, remoteVersion: "1.2.0", localVersion: "1.0.4", hasUpdate: true } : { ok: true, remoteVersion: "1.2.0", localVersion: "1.2.0", hasUpdate: false };
 		},
 		// 远端不高于当前生效版本（例如另一实例刚更新过）：没实际落盘
 		updateCatalog: async () => ({ ok: true, updated: false, skipped: "already-latest", remoteVersion: "1.2.0", localVersion: "1.2.0" }),

@@ -48,7 +48,7 @@ export type CatalogUpdateResult =
 			remoteVersion?: string | null;
 			/** updated=false 时当前生效版本（覆盖层优先，否则内置） */
 			localVersion?: string | null;
-		}
+	  }
 	| { ok: false; code: CatalogUpdateFailCode; message: string };
 
 /** 「检查更新」结果：远端 manifest 比对当前生效版本。 */
@@ -60,5 +60,5 @@ export type CatalogCheckResult =
 			hasUpdate: boolean;
 			/** 本次结论来自哪条源；分支不可达时的 npm 回退版本可能与仓库预生成件不同 */
 			source?: CatalogCheckSourceId;
-		}
+	  }
 	| { ok: false; code: CatalogUpdateFailCode; message: string };

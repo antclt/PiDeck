@@ -71,6 +71,7 @@
     "runtime:check:boot": "node scripts/check-dsh-boot.mjs",
     "generate:pi-ai-catalog": "node scripts/generate-pi-ai-catalog.mjs",
     "check:pi-ai-catalog": "node scripts/generate-pi-ai-catalog.mjs --check",
+    "check:pi-ai-catalog-drift": "node scripts/check-pi-ai-catalog-drift.mjs",
     "generate:extensions-manifest": "node scripts/generate-extensions-manifest.mjs",
     "check:extensions-manifest": "node scripts/generate-extensions-manifest.mjs --check",
     "generate:prompts-manifest": "node scripts/generate-content-manifests.mjs --domain prompts",
