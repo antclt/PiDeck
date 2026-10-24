@@ -36,6 +36,29 @@ export function quickMessageHookHost() {
 			if (!sameDeps(slots[index]?.deps, deps)) slots[index] = { value: factory(), deps };
 			return slots[index].value;
 		},
+		useLayoutEffect(effect, deps) {
+			const index = cursor++;
+			if (!sameDeps(slots[index]?.deps, deps))
+				effects.push(() => {
+					slots[index]?.cleanup?.();
+					slots[index] = { cleanup: effect(), deps };
+				});
+		},
+		useId() {
+			const index = cursor++;
+			return (slots[index] ??= { value: `id-${index}` }).value;
+		},
+		// 模块级 createContext（如 removal/RemovalList 的 generation context）在 import 时
+		// 就会调用；沙箱只求值模块顶层、不渲染子组件，给个带 _currentValue 的壳即可。
+		createContext(defaultValue) {
+			return { _currentValue: defaultValue, Provider: "provider", Consumer: "consumer" };
+		},
+		useContext(context) {
+			return context?._currentValue;
+		},
+		forwardRef(render) {
+			return (props) => render(props, null);
+		},
 	};
 	return {
 		react,

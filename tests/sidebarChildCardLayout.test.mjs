@@ -21,7 +21,8 @@ const sessionView = readFileSync("src/renderer/src/components/session/SessionVie
 const sourceBadge = readFileSync("src/renderer/src/components/session/SessionSourceBadge.tsx", "utf8");
 
 test("sidebar child rows use shared official hover/active classes", () => {
-	assert.match(sessionTree, /hover:border-border-subtle hover:bg-muted\/60 hover:text-foreground/);
+	// 62b741a1e：浅色下 muted/60 反向变亮不可见，hover 底改用 --color-bg-hover。
+	assert.match(sessionTree, /hover:border-border-subtle hover:bg-bg-hover hover:text-foreground/);
 	// 选中态对标 dsh-web：只有叶子会话灰底，无 accent / 描边 / 阴影。
 	assert.match(sessionTree, /selectedRowClass = "active bg-bg-active text-foreground"/);
 	assert.doesNotMatch(sessionTree, /bg-accent\/20/);
@@ -29,7 +30,7 @@ test("sidebar child rows use shared official hover/active classes", () => {
 	assert.match(projectTree, /treeRowClass/);
 	assert.match(projectTree, /flex min-h-8 w-full/);
 	assert.match(projectTree, /project-fold grid size-6/);
-	assert.match(projectTree, /hover:border-border-subtle hover:bg-muted\/60 hover:text-foreground/);
+	assert.match(projectTree, /hover:border-border-subtle hover:bg-bg-hover hover:text-foreground/);
 	// 父项目行永不挂选中底，避免和当前会话双高亮。
 	assert.doesNotMatch(projectTree, /isCurrent && "active/);
 	assert.doesNotMatch(projectTree, /bg-accent\/20/);

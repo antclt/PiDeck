@@ -92,7 +92,9 @@ test("Web timeline groups assistant messages into collapsible execution folds", 
 	// 提升门控（流式不提升 final、liveTextId 常显）的行为回归在 webTimelineGrouping.test.mjs。
 	const webGrouping = readFileSync("src/renderer/src/web/webTimelineGrouping.ts", "utf8");
 	assert.match(webGrouping, /export function groupTimelineEntries[\s\S]*?messages: UIMessage\[\], options: \{ isStreaming\?: boolean \}/);
-	assert.match(webTimeline, /timelineEntries = useMemo\(\(\) => groupTimelineEntries\(messages, \{ isStreaming: props\.streaming \}\)/);
+	// 2027-02 前缀缓存：已完成回合按消息引用复用分组结果，每帧只重分组流式尾段。
+	assert.match(webTimeline, /const timelineEntries = useMemo<TimelineEntry\[\]>\(\(\) => \{/);
+	assert.match(webTimeline, /groupTimelineEntries\(messages\.slice\(consumed\), \{ isStreaming: props\.streaming \}\)/);
 	// 流式末段正文不提升：挂 liveTextId 容器外常显，容器内不双显（桌面 isComplete 门控）。
 	assert.match(webTimeline, /liveTextString !== undefined/);
 	assert.match(webTimeline, /segment\.id === turn\.liveTextId\) return null/);
@@ -242,7 +244,7 @@ test("External stream stays alive across turns; visibility gates the connection"
 	assert.match(webEventStream, /private replayRun\(/);
 	assert.match(webExternalStream, /es\.onopen[\s\S]*?mergerRef\.current\?\.reset\(\)/);
 	// 渲染层：流式标志贯通分组（末段正文挂 liveTextId 常显、不提升为 finalText）。
-	assert.match(webTimeline, /groupTimelineEntries\(messages, \{ isStreaming: props\.streaming \}\)/);
+	assert.match(webTimeline, /groupTimelineEntries\(messages\.slice\(consumed\), \{ isStreaming: props\.streaming \}\)/);
 });
 
 // 回归（Web 走查 #2）：上下文用量百分比必须走自适应精度。

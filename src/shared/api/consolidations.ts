@@ -135,7 +135,7 @@ export const SESSIONS_SUBDOMAINS = {
  * config-backup:* 与 configBackups 7 方法是独立命名空间（config-backup 行），不进本表。
  */
 export const CONFIG_SUBSTORES = {
-	models: ["fetchModels", "getModels", "saveModels", "onModelsVerifyResult"],
+	models: ["fetchModels", "getModels", "saveModels", "onModelsVerifyResult", "discoverExternalAgents", "resolveExternalAgentKey"],
 	auth: ["getAuth", "saveAuth"],
 	settings: ["getConfigDir", "getSettings", "saveSettings", "saveRaw"],
 	mcp: ["getMcp", "saveMcp", "probeMcp", "installMcpSetupSkill", "mcpListStatus", "mcpLogin", "mcpLogout", "onMcpLoginUrl"],

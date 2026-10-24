@@ -17,6 +17,21 @@ export function tab(id) {
 	return { id, agentId: "", ownerKey: "cwd:/project", title: id, cwd: "/project", shell: "bash", createdAt: 0 };
 }
 
+/**
+ * 与主进程 `terminalOwnerKeyFor` 同语义的归属比较：project 按 cwd（归一化分隔符/大小写），
+ * agent 按 agentId。替身靠它复现「换 owner 拿不到上个 owner 的标签」这个真实约束。
+ */
+function sameOwner(a, b) {
+	if (!a || !b || a.kind !== b.kind) return false;
+	if (a.kind === "agent") return a.agentId === b.agentId;
+	const normalize = (cwd) =>
+		String(cwd ?? "")
+			.replace(/[\\/]+/g, "/")
+			.replace(/^\/+|\/+$/g, "")
+			.toLowerCase();
+	return normalize(a.cwd) === normalize(b.cwd);
+}
+
 /** 仅替换外部能力，直接通过真实 TerminalDock 的公开按钮/事件验证状态流转。 */
 export function dockHarness(initialTabs = [tab("A"), tab("B")], settings = {}) {
 	const host = quickMessageHookHost();
@@ -37,9 +52,12 @@ export function dockHarness(initialTabs = [tab("A"), tab("B")], settings = {}) {
 	let closeCount = 0;
 	let clipboardOk = true;
 	let tree;
+	// 首次 render 的 target 就是「初始归属」：主进程按 owner 分桶，换 owner 后 ensure/list
+	// 看不到这批标签。替身不区分就会让旧标签在换 owner 后被重新认领（迟到失败误报）。
+	let homeTarget = null;
 	let create = async () => tab("C");
 	let close = async () => {};
-	let ensure = async () => initialTabs;
+	let ensure = async (target) => (sameOwner(target, homeTarget) ? initialTabs : []);
 	let input = async () => {};
 	let resize = async () => {};
 	const react = {
@@ -96,7 +114,7 @@ export function dockHarness(initialTabs = [tab("A"), tab("B")], settings = {}) {
 	}
 	const terminal = {
 		ensure: (...args) => ensure(...args),
-		list: async () => initialTabs,
+		list: async (target) => (sameOwner(target, homeTarget) ? initialTabs : []),
 		create: (...args) => create(...args),
 		close: (...args) => close(...args),
 		input: async (...args) => {
@@ -228,6 +246,7 @@ export function dockHarness(initialTabs = [tab("A"), tab("B")], settings = {}) {
 	}
 	function render(patch = {}) {
 		props = { ...props, ...patch };
+		homeTarget ??= props.target;
 		return host.render(() => {
 			tree = TerminalDock(props);
 			visit(tree, (node) => {
