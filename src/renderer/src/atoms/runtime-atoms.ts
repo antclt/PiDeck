@@ -1,7 +1,7 @@
 import { atom } from "jotai";
 import { atomFamily, selectAtom } from "jotai/utils";
 import type { AgentRuntimeState, AgentStatus, AgentTab } from "../../../shared/types";
-import { sessionRecordsAtom, sessionRuntimeByIdAtom } from "./session-atoms";
+import { sessionRecordsAtom, sessionRuntimeByIdAtom, type SessionRuntimeViewState } from "./session-atoms";
 import { sessionIdByRuntimeAgentIdAtomFamily } from "./session-selectors";
 import { sessionDisplayName } from "../utils/sessionDisplayName";
 
@@ -33,9 +33,43 @@ function areAgentTabsEqual(left: AgentTab[], right: AgentTab[]): boolean {
 	});
 }
 
+/**
+ * agentId → runtime 反向索引（2027-02 性能审计）。
+ *
+ * 原先 runtimeCapabilityByAgentId / runtimeCapabilitiesByProjectId 每次读都对
+ * Object.values(sessionRuntimeByIdAtom) 做线性 find，项目里 N 个 agent 各自订阅时
+ * 每次 runtime 事件就是 N×R 次扫描。索引按「runtime map 引用」缓存：该 map 只在
+ * 有 runtime 事件时才换引用，正常读取直接命中。
+ * 语义与 find 一致：同一 agentId 取插入序第一个（用 has 判断，不覆盖）。
+ */
+let runtimeIndexCache: { source: Record<string, SessionRuntimeViewState>; index: Map<string, SessionRuntimeViewState> } | null = null;
+
+function runtimeIndexByAgentId(runtimes: Record<string, SessionRuntimeViewState>): Map<string, SessionRuntimeViewState> {
+	if (runtimeIndexCache?.source === runtimes) return runtimeIndexCache.index;
+	const index = new Map<string, SessionRuntimeViewState>();
+	for (const runtime of Object.values(runtimes)) {
+		const agentId = runtime.agentId;
+		if (!agentId || index.has(agentId)) continue;
+		index.set(agentId, runtime);
+	}
+	runtimeIndexCache = { source: runtimes, index };
+	return index;
+}
+
+/**
+ * 库存列表缓存（2027-02）：输入（runtime map + 会话记录 map）引用未变时直接复用
+ * 上一次结果——下游 selectAtom(areAgentTabsEqual) 只能挡住重渲，挡不住这里的
+ * O(N log N) 建数组 + 每次 runtime 写入都分配全新 AgentTab 对象。
+ */
+let inventoryCache: { runtimes: object; records: object; tabs: AgentTab[] } | null = null;
+
 const agentInventorySourceAtom = atom((get) => {
 	const records = get(sessionRecordsAtom);
-	return Object.entries(get(sessionRuntimeByIdAtom))
+	const runtimes = get(sessionRuntimeByIdAtom);
+	if (inventoryCache && inventoryCache.runtimes === runtimes && inventoryCache.records === records) {
+		return inventoryCache.tabs;
+	}
+	const tabs = Object.entries(runtimes)
 		.filter(
 			(
 				entry,
@@ -78,6 +112,8 @@ const agentInventorySourceAtom = atom((get) => {
 				backend: runtime.backend ?? "pi",
 			};
 		});
+	inventoryCache = { runtimes, records, tabs };
+	return tabs;
 });
 
 // runtime 事件常带 updatedAt 新对象，但库存字段未变。selectAtom 保引用，
@@ -88,7 +124,7 @@ export const agentByIdAtomFamily = atomFamily((agentId: string) => atom((get) =>
 
 export const agentsByProjectIdAtomFamily = atomFamily((projectId: string) => atom((get) => get(agentInventoryAtom).filter((agent) => agent.projectId === projectId)));
 
-export const runtimeCapabilityByAgentIdAtomFamily = atomFamily((agentId: string) => atom((get) => Object.values(get(sessionRuntimeByIdAtom)).find((runtime) => runtime.agentId === agentId)?.state));
+export const runtimeCapabilityByAgentIdAtomFamily = atomFamily((agentId: string) => atom((get) => runtimeIndexByAgentId(get(sessionRuntimeByIdAtom)).get(agentId)?.state));
 
 /**
  * agent 退出（closed）时释放 agentId 维度 atomFamily 缓存：
@@ -113,7 +149,9 @@ export const runtimeCapabilitiesByProjectIdAtomFamily = atomFamily((projectId: s
 		Object.fromEntries(
 			get(agentsByProjectIdAtomFamily(projectId))
 				.map((agent) => {
-					const runtime = Object.values(get(sessionRuntimeByIdAtom)).find((candidate) => candidate.agentId === agent.id);
+					// 一次 get 内建好反查表（2027-02）：原先每个 agent 都 Object.values(...).find(...)，
+					// N 个 agent 就是 N×R 次扫描，且每次 runtime 事件都重算。
+					const runtime = runtimeIndexByAgentId(get(sessionRuntimeByIdAtom)).get(agent.id);
 					return [agent.id, runtime?.state] as const;
 				})
 				.filter((entry): entry is readonly [string, AgentRuntimeState] => Boolean(entry[1])),
