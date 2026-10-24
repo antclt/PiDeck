@@ -1123,6 +1123,136 @@ test("slideOut-only history keeps an entryId cursor so older pages stay reachabl
 	assert.equal(entry().history.nextBeforeEntryId, "e1");
 });
 
+test("prependSessionHistoryPageAtom caps runtime history prefix and advances cursor", () => {
+	const atoms = loadAtoms();
+	const store = createStore();
+	const entry = () => store.get(atoms.sessionMessagesCacheAtom)["session-a"];
+	const LIMIT = atoms.RUNTIME_HISTORY_PREFIX_MESSAGE_LIMIT;
+	const makeMessages = (count, tag, start) =>
+		Array.from({ length: count }, (_, i) => ({
+			id: `${tag}-${start + i}`,
+			role: "user",
+			text: `${tag}${start + i}`,
+			meta: { entryId: `${tag}${start + i}` },
+		}));
+
+	// runtime 条目：历史前缀差 1 条到上限（游标 = 保留段最旧文件下标）
+	store.set(atoms.cacheSessionMessagesAtom, {
+		sessionId: "session-a",
+		messages: [{ id: "w1", role: "user", text: "win", meta: { entryId: "we1" } }],
+		source: "runtime",
+		windowStart: LIMIT,
+		history: { messages: makeMessages(LIMIT - 1, "e", 0), nextBefore: 1, nextBeforeEntryId: "e0", version: "100:2000" },
+	});
+	assert.equal(entry().history.messages.length, LIMIT - 1);
+
+	// prepend 3 条更早页 → 溢出 2 → 只丢新页头部 2 条；游标 = 页最旧下标(-2) + 丢弃数(2) = 0，
+	// 锚点重算到保留段最旧条目 h-1
+	assert.equal(
+		store.set(atoms.prependSessionHistoryPageAtom, {
+			sessionId: "session-a",
+			expectedRevision: entry().revision,
+			before: 1,
+			page: {
+				messages: makeMessages(3, "h", -3),
+				total: LIMIT + 5,
+				nextBefore: -2,
+				nextBeforeEntryId: "h-3",
+				indexVersion: "100:2000",
+			},
+		}),
+		true,
+	);
+	assert.equal(entry().history.messages.length, LIMIT, "裁剪后不超过上限");
+	assert.equal(entry().history.messages[0].meta.entryId, "h-1", "新页头部两条被丢弃，第三条保留");
+	assert.equal(entry().history.nextBefore, -2 + 2, "部分丢弃：游标 = 页最旧下标 + 丢弃数");
+	assert.equal(entry().history.nextBeforeEntryId, "h-1", "锚点重算到保留段最旧条目");
+	assert.equal(entry().messages[0].id, "w1", "运行时窗口段不受影响");
+
+	// 整页丢弃：再 prepend 2 条更早页 → 溢出恰好等于整页，游标回退到请求游标，
+	// 下次重取同页（与 disk 路径同语义），锚点回到保留段头部
+	assert.equal(
+		store.set(atoms.prependSessionHistoryPageAtom, {
+			sessionId: "session-a",
+			expectedRevision: entry().revision,
+			before: 0,
+			page: {
+				messages: makeMessages(2, "g", -2),
+				total: LIMIT + 5,
+				nextBefore: -2,
+				nextBeforeEntryId: "g-2",
+				indexVersion: "100:2000",
+			},
+		}),
+		true,
+	);
+	assert.equal(entry().history.messages.length, LIMIT);
+	assert.equal(entry().history.nextBefore, 0, "整页丢弃：游标回到请求游标");
+	assert.equal(entry().history.messages[0].meta.entryId, "h-1", "新页整体丢弃，原前缀原样保留");
+	assert.equal(entry().history.nextBeforeEntryId, "h-1");
+});
+
+test("slideOut reconcile caps history prefix growth and advances cursor", () => {
+	const atoms = loadAtoms();
+	const store = createStore();
+	const entry = () => store.get(atoms.sessionMessagesCacheAtom)["session-a"];
+	const emit = (payload) =>
+		store.set(atoms.applySessionRuntimeEventAtom, {
+			sessionId: "session-a",
+			agentId: "agent-a",
+			runtimeGeneration: 1,
+			sourceChannel: "agents:message",
+			payload,
+		});
+	const LIMIT = atoms.RUNTIME_HISTORY_PREFIX_MESSAGE_LIMIT;
+	const makeMessages = (count, tag, start) =>
+		Array.from({ length: count }, (_, i) => ({
+			id: `${tag}-${start + i}`,
+			role: "user",
+			text: `${tag}${start + i}`,
+			meta: { entryId: `${tag}${start + i}` },
+		}));
+
+	// runtime 条目：前缀已到上限，游标 = 0（保留段最旧文件下标）
+	store.set(atoms.cacheSessionMessagesAtom, {
+		sessionId: "session-a",
+		messages: [{ id: "w1", role: "user", text: "win", meta: { entryId: "we1" } }],
+		source: "runtime",
+		windowStart: LIMIT,
+		history: { messages: makeMessages(LIMIT, "e", 0), nextBefore: 0, nextBeforeEntryId: "e0", version: "100:2000" },
+	});
+
+	// 窗口右移：slideOut 2 条滑入前缀尾部 → 前缀 LIMIT+2 → 超限 2 条从最旧端丢弃，
+	// 数值游标推进 0→2，锚点重算到新头部 e2
+	emit({
+		agentId: "agent-a",
+		windowStart: LIMIT + 3,
+		totalLength: LIMIT + 4,
+		fileVersion: "100:2000",
+		slideOut: [
+			{ id: "s1", role: "user", text: "sl1", meta: { entryId: "sl1" } },
+			{ id: "s2", role: "user", text: "sl2", meta: { entryId: "sl2" } },
+		],
+		messages: [
+			{ id: "w2", role: "user", text: "win2", meta: { entryId: "we2" } },
+			{ id: "w3", role: "user", text: "win3", meta: { entryId: "we3" } },
+		],
+	});
+	assert.equal(entry().history.messages.length, LIMIT, "slideOut 合入后仍不超过上限");
+	assert.equal(entry().history.messages[0].meta.entryId, "e2", "最旧两条溢出被丢弃");
+	assert.deepEqual(
+		[
+			...entry()
+				.history.messages.slice(-2)
+				.map((m) => m.meta.entryId),
+		],
+		["sl1", "sl2"],
+		"滑出轮接在保留段尾部",
+	);
+	assert.equal(entry().history.nextBefore, 2, "数值游标按丢弃量推进");
+	assert.equal(entry().history.nextBeforeEntryId, "e2", "锚点重算到保留段新头部");
+});
+
 test("prependSessionHistoryPageAtom guards revision and cursor continuity, dedupes against segment", () => {
 	const atoms = loadAtoms();
 	const store = createStore();
