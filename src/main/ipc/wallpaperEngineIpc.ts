@@ -1,7 +1,7 @@
 import { dialog, ipcMain, protocol } from "electron";
 import { ipcChannels } from "../../shared/ipc";
 import { WALLPAPER_ENGINE_ID_RE, WALLPAPER_ENGINE_PROTOCOL, type WallpaperEngineItem, type WallpaperEngineListResult } from "../../shared/wallpaperEngine";
-import { createWallpaperEngineHandler, listWallpaperEngineItems, readWallpaperEngineItem } from "../wallpaperEngine/wallpaperEngineLibrary";
+import { createWallpaperEngineHandler, listWallpaperEngineItems, readWallpaperEngineItem, resolveWorkshopContentDir } from "../wallpaperEngine/wallpaperEngineLibrary";
 
 interface WallpaperEngineDeps {
 	/** 当前设置中的工坊目录（steamapps/workshop/content/431960） */
@@ -19,11 +19,13 @@ export function registerWallpaperEngineProtocol(deps: WallpaperEngineDeps): void
  */
 export function registerWallpaperEngineIpc(deps: WallpaperEngineDeps): void {
 	ipcMain.handle(ipcChannels.wallpaperEnginePickDir, async (): Promise<string> => {
-		const result = await dialog.showOpenDialog({ title: "Wallpaper Engine workshop folder (431960)", properties: ["openDirectory"] });
-		return result.filePaths[0] ?? "";
+		const result = await dialog.showOpenDialog({ title: "Wallpaper Engine workshop folder (Steam folder, steamapps or content/431960)", properties: ["openDirectory"] });
+		const picked = result.filePaths[0] ?? "";
+		// 用户常选到 Steam 根或 steamapps：归一化后再存，协议处理器只认 .../431960
+		return picked ? resolveWorkshopContentDir(picked) : "";
 	});
 	ipcMain.handle(ipcChannels.wallpaperEngineList, async (_event, dir?: unknown): Promise<WallpaperEngineListResult> => {
-		return listWallpaperEngineItems(typeof dir === "string" ? dir : deps.getDir());
+		return listWallpaperEngineItems(await resolveWorkshopContentDir(typeof dir === "string" ? dir : deps.getDir()));
 	});
 	ipcMain.handle(ipcChannels.wallpaperEngineSelect, async (_event, dir: unknown, id: unknown): Promise<WallpaperEngineItem | null> => {
 		if (typeof dir !== "string" || typeof id !== "string" || !WALLPAPER_ENGINE_ID_RE.test(id)) return null;

@@ -13,3 +13,13 @@ export function isVideoWallpaperActive(settings: Pick<AppSettings, "weWorkshopDi
 export function shouldPlayVideoWallpaper(state: { hidden: boolean; focused: boolean }): boolean {
 	return !state.hidden && state.focused;
 }
+
+/**
+ * 视频解码失败后的回退：先退到工坊预览图（preview.jpg/gif），预览也加载失败则不显示壁纸。
+ * 典型场景：无 GPU 的 Linux/Electron 上 HEVC 视频无法解码，<video> 触发 error。
+ */
+export type VideoWallpaperRender = "video" | "preview" | "none";
+export function videoWallpaperRender(state: { videoFailed: boolean; previewFailed: boolean }): VideoWallpaperRender {
+	if (!state.videoFailed) return "video";
+	return state.previewFailed ? "none" : "preview";
+}

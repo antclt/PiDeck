@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: a44a8b5c249fb8fdf6620d35535c877701a163d3bf0964ef20a5140ef8cbdbdb（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 4444d62b528d79fedb518e21b482d286cb533181b7bc72f4a19324e50e0684d9（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4706,10 +4706,12 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.backgroundImageClear": "清除",
 	"settings.backgroundImageOpacity": "背景圖透明度",
 	"settings.wallpaperEngine": "Wallpaper Engine 影片桌布",
-	"settings.wallpaperEngineDesc": "選擇 Steam 工坊目錄（steamapps/workshop/content/431960），只列出影片型別桌布；視窗失焦或最小化時自動暫停",
+	"settings.wallpaperEngineDesc": "選擇 Steam 目錄、steamapps 或工坊目錄（會自動定位到 workshop/content/431960），只列出影片型別桌布；視窗失焦或最小化時自動暫停",
 	"settings.wallpaperEngineChooseDir": "選擇工坊目錄",
 	"settings.wallpaperEngineOff": "不使用",
 	"settings.wallpaperEngineEmpty": "該目錄下沒有可用的影片桌布",
+	"settings.wallpaperEngineUnsupported": "此裝置不支援播放",
+	"settings.wallpaperEnginePlaybackFailed": "影片桌布無法在此裝置上播放（可能缺少對應解碼器），改為顯示預覽圖；沒有預覽圖時不顯示桌布",
 	"settings.wallpaperEngineUnreadable": "無法讀取該目錄",
 	"settings.sectionCustomThemes": "自定義主題",
 	"settings.customThemesDesc": "主題是 userData/custom-themes/ 目錄下的 JSON 檔案（token 白名單色板，亮暗雙檔）。可在此新建/編輯，或點「AI 開發指南」生成指南讓 AI 幫你寫。",

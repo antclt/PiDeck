@@ -881,7 +881,8 @@ body::before {
   pointer-events: none;
   overflow: hidden;
 }
-.wallpaper-video-layer video {
+.wallpaper-video-layer video,
+.wallpaper-video-layer img {
   width: 100%;
   height: 100%;
   object-fit: cover;

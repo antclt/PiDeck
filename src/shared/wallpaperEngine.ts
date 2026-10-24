@@ -58,7 +58,7 @@ export function parseWallpaperEngineProject(id: string, raw: string): WallpaperE
 	if (!WALLPAPER_ENGINE_ID_RE.test(id)) return null;
 	let data: unknown;
 	try {
-		data = JSON.parse(raw.replace(/^\uFEFF/, ""));
+		data = JSON.parse(stripWallpaperEngineJsonNoise(raw));
 	} catch {
 		return null;
 	}
@@ -100,4 +100,39 @@ export function parseByteRange(header: string | null, size: number): { start: nu
 	const end = e === "" ? size - 1 : Number(e);
 	if (!Number.isFinite(start) || start >= size || !Number.isFinite(end) || end < start) return null;
 	return { start, end: Math.min(end, size - 1) };
+}
+
+/**
+ * 部分工坊条目的 project.json 头部带 UTF-8 BOM、尾部带 NUL 填充（编辑器/打包工具留下的），
+ * 直接 JSON.parse 会抛错导致条目被静默丢弃。只剥头部 BOM 与尾部 NUL/空白，不碰中间内容。
+ */
+export function stripWallpaperEngineJsonNoise(raw: string): string {
+	return raw.replace(/^\uFEFF/, "").replace(/[\0\s]+$/, "");
+}
+
+/**
+ * 用户手选目录可能是 Steam 根、steamapps、workshop、workshop/content，或已经是 .../431960。
+ * 按从深到浅的顺序给出候选，调用方取第一个真实存在的目录；都不存在时回落到原目录。
+ * 只做路径拼接（不访问文件系统），便于单测；分隔符由调用方的 path.join 决定。
+ */
+export const WALLPAPER_ENGINE_APP_ID = "431960";
+export function wallpaperEngineDirCandidates(picked: string, join: (...parts: string[]) => string): string[] {
+	if (!picked) return [];
+	const id = WALLPAPER_ENGINE_APP_ID;
+	return [join(picked, "steamapps", "workshop", "content", id), join(picked, "workshop", "content", id), join(picked, "content", id), join(picked, id), picked];
+}
+
+/** 列表阶段的可播判定结果；"maybe" 表示容器可播但编码要真正解码时才知道（例如 mp4 内的 HEVC 依赖硬件解码） */
+export type WallpaperEnginePlayability = "probably" | "maybe" | "unsupported";
+
+/**
+ * 用渲染层的 HTMLMediaElement.canPlayType 判定容器是否可播。
+ * 只按容器 MIME 判断：project.json 不含 codec 信息，mp4 内是否为 HEVC 要到播放时才知道，
+ * 因此还需配合 <video> error 回退（见 WallpaperVideoLayer）。
+ */
+export function wallpaperEnginePlayability(file: string, canPlayType: (mime: string) => string): WallpaperEnginePlayability {
+	const mime = wallpaperEngineVideoMime(file);
+	if (!mime) return "unsupported";
+	const answer = canPlayType(mime);
+	return answer === "probably" ? "probably" : answer === "maybe" ? "maybe" : "unsupported";
 }
