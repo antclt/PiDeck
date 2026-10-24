@@ -55,7 +55,7 @@ export const DiagnosticMessageCard = memo(function DiagnosticMessageCard(props: 
 			// 系统状态/自动重试/错误提示是独立卡片，不需要轨道归属关系
 			hideRail
 		>
-			<article className={`diagnostic-card w-full min-w-0 overflow-hidden rounded-md border border-border-subtle bg-[var(--color-chat-muted-bg)] tone-${tone}`} data-message-id={props.message.id} data-role={props.message.role}>
+			<article className={`diagnostic-card mb-4 w-full min-w-0 overflow-hidden rounded-md border border-border-subtle bg-[var(--color-chat-muted-bg)] tone-${tone}`} data-message-id={props.message.id} data-role={props.message.role}>
 				<div className="flex items-center gap-2 px-2 py-1.5 text-caption text-text-secondary">
 					<Icon size={14} aria-hidden="true" className={retryRunning ? "animate-pideck-spin" : undefined} />
 					<span className="font-semibold">{title}</span>
