@@ -283,7 +283,15 @@ export class XuePromptManager {
 				params.push(opts.category, opts.category);
 			}
 			const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-			const rows = db.exec(`SELECT slug, url, title, category, content, description FROM xueprompts ${whereClause} ORDER BY category, title`, params);
+			// 轻量投影（2027-02 性能审计）：覆盖层非空时原实现无条件下「全表 + content/description
+			// 两列 BLOB」（实测 4012 行 ≈94ms 取回 + 49ms 逐条 gunzip≈150ms 同步 CPU/次），
+			// 而纯浏览（带分页、无搜索词）只需要展示当前页的描述。此时代码先只取
+			// slug/url/title/category 做合并/过滤/排序/切片，再只为当前页条目回填描述。
+			// 有关键词（搜索要匹配正文与描述）或调用方要全量形态时仍取全列。
+			const keywordForQuery = opts?.search?.trim();
+			const lightProjection = Boolean(opts) && !keywordForQuery;
+			const columns = lightProjection ? "slug, url, title, category" : "slug, url, title, category, content, description";
+			const rows = db.exec(`SELECT ${columns} FROM xueprompts ${whereClause} ORDER BY category, title`, params);
 
 			// slug → 条目 合并表：overlay 优先（title/category 缺省时回退 db 同名值，
 			// 保证商店表格显示仍是友好中文标题而非文件名）
@@ -353,6 +361,8 @@ export class XuePromptManager {
 			const pageSize = Math.max(1, Math.min(100, opts.pageSize ?? 20));
 			const offset = (page - 1) * pageSize;
 			const prompts = all.slice(offset, offset + pageSize).map((e) => e.item);
+			// 轻量投影时描述还没取：只为当前页里「非覆盖层」的条目一次回填（≤pageSize 行）
+			if (lightProjection) this.backfillDescriptions(db, prompts);
 			return { categories: mergedCategories, prompts, repoPath: dbPath, dbState: "ready", total: all.length, page, pageSize };
 		} finally {
 			// 库实例由 getDb 的 (size,mtime) 缓存托管，不在这里关闭（2027-02 性能治理）
@@ -412,6 +422,30 @@ export class XuePromptManager {
 		const prompts: YaoPromptItem[] = (promptRows[0]?.values ?? []).map((row: unknown[]) => this.rowToYaoPromptItem(row));
 
 		return { categories, prompts, repoPath: dbPath, dbState: "ready", total, page, pageSize };
+	}
+
+	/**
+	 * 为当前页条目回填描述（2027-02 性能审计配套）。
+	 *
+	 * 轻量投影只取 slug/url/title/category，描述（gzip BLOB）留到切片后再按需解码：
+	 * 一页最多 20-100 行，用一条 IN 查询取回，替代原先「全表 4012 行 BLOB + 逐条 gunzip」。
+	 * 覆盖层条目自带明文描述，不查库。
+	 */
+	private backfillDescriptions(db: import("sql.js").Database, prompts: YaoPromptItem[]): void {
+		// 判据是「描述仍为空」而不是「不在覆盖层」：覆盖层 md 常常只有正文、没有 description
+		// frontmatter，此时语义上要回退库内描述（与重路径 base.rawDesc 回退一致）。
+		const wanted = prompts.filter((item) => item.description === "").map((item) => item.slug);
+		if (wanted.length === 0) return;
+		const placeholders = wanted.map(() => "?").join(",");
+		const rows = db.exec(`SELECT slug, description FROM xueprompts WHERE slug IN (${placeholders})`, wanted);
+		const descriptionBySlug = new Map<string, string>();
+		for (const row of rows[0]?.values ?? []) {
+			descriptionBySlug.set(String(row[0] ?? ""), row[1] ? this.blobToString(row[1]) : "");
+		}
+		for (const item of prompts) {
+			const description = descriptionBySlug.get(item.slug);
+			if (description !== undefined) item.description = description;
+		}
 	}
 
 	/**

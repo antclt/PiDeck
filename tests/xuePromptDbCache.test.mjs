@@ -109,3 +109,30 @@ test("categoriesOnly：只返回分类栏，不取条目（商店首开快路径
 		rmSync(root, { recursive: true, force: true });
 	}
 });
+
+test("覆盖层非空 + 分页浏览：当前页描述回填正确（轻量投影不取全表 BLOB）", async () => {
+	const root = mkdtempSync(join(tmpdir(), "pideck-xue-light-"));
+	const previousAppPath = appPathForTest;
+	try {
+		mkdirSync(join(root, "resources"), { recursive: true });
+		mkdirSync(join(root, "overlay"), { recursive: true });
+		const dbPath = join(root, "resources", "xueprompts.db");
+		await writeDb(dbPath, "标题一");
+		// 覆盖层存在 → 走合并分支（这是原先无条件下全表 BLOB 的分支）
+		writeFileSync(join(root, "overlay", "doc-summary.md"), "---\ntitle: 覆盖标题\n---\n\n覆盖正文\n", "utf8");
+		appPathForTest = root;
+		const manager = new XuePromptManager(root, () => join(root, "overlay"));
+
+		// 带分页、无搜索词 → 轻量投影路径
+		const page = await manager.list({ page: 1, pageSize: 10 });
+		assert.equal(page.prompts.length, 1);
+		assert.equal(page.prompts[0].title, "覆盖标题", "覆盖层条目优先");
+		assert.equal(page.prompts[0].description, "描述", "非覆盖层条目描述必须回填（库内原值）");
+		// 覆盖层 md 没有 category frontmatter → 回退 db 行里的 category 列原值
+		assert.equal(page.prompts[0].category, "writing");
+		assert.ok((page.total ?? 0) >= 1);
+	} finally {
+		appPathForTest = previousAppPath;
+		rmSync(root, { recursive: true, force: true });
+	}
+});
