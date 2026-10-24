@@ -454,17 +454,49 @@ export function WebChatApp() {
 			.catch(() => setModels([]));
 	}, []);
 
+	// 状态指纹（2027-02 性能治理）：SSE 断开兜底轮询的快档（流式 1s）里服务端每次
+	// 都构建全新对象，直接 setState 会让 WebSidebar（非 memo、吃整个 state）每秒
+	// 整列表重渲染——弱网手机端正是快档生效的时候。指纹覆盖全部 UI 可见字段
+	//（会话标题/状态/updatedAt/模型/权限、runtime 三元组+状态、项目名、pendingUi
+	// 清单），未变化则跳过 setState；SSE 推送路径同样受益。
+	const lastStateFingerprintRef = useRef<string | null>(null);
 	// 低频轮询项目/会话/运行态（3s；useChat 负责消息流，不参与轮询）
 	useEffect(() => {
 		let disposed = false;
+		const fingerprintOf = (state: Awaited<ReturnType<typeof fetchState>>): string =>
+			[
+				(state.projects ?? [])
+					.map((project) => project.id + ":" + project.name + ":" + (project.lastOpenedAt ?? 0) + ":" + (project.pinned ? 1 : 0))
+					.sort()
+					.join(","),
+				(state.sessions ?? [])
+					.map((session) => session.id + ":" + session.title + ":" + session.status + ":" + (session.updatedAt ?? 0) + ":" + (session.model?.modelId ?? "") + ":" + (session.thinkingLevel ?? "") + ":" + (session.permissionPreset ?? ""))
+					.sort()
+					.join(","),
+				(state.runtimes ?? [])
+					.map((runtime) => runtime.sessionId + ":" + runtime.agentId + ":" + runtime.status + ":" + (runtime.runtimeGeneration ?? ""))
+					.sort()
+					.join(","),
+				(state.pendingUiRequests ?? [])
+					.map((request) => request.sessionId + ":" + request.requestId)
+					.sort()
+					.join(","),
+			].join("|");
 		// payload：SSE state 事件的现成载荷（/api/state 同构），有则免一次拉取。
 		// 形状由服务端 serializePublicWebPayload 保证；这里只做最小字段防御（缺 runtimes 视为畸形，回退拉取）。
 		const refresh = async (payload?: unknown) => {
 			try {
 				const next = payload && typeof payload === "object" && Array.isArray((payload as { runtimes?: unknown }).runtimes) ? (payload as Awaited<ReturnType<typeof fetchState>>) : await fetchState();
 				if (disposed) return;
-				setState(next);
 				setConnected(true);
+				const fingerprint = fingerprintOf(next);
+				const unchanged = fingerprint === lastStateFingerprintRef.current;
+				lastStateFingerprintRef.current = fingerprint;
+				if (unchanged) {
+					// 内容未变：不 setState（免整树重渲染）；脱节追赶的输入（runtime 状态）也未变，直接返回
+					return;
+				}
+				setState(next);
 				// 脱节追赶：useChat 已回 ready 但 runtime 仍在跑（刷新/断网后本轮 SSE 已死，
 				// 恢复触发器只在 visibilitychange/online 时发）→ 借主轮询周期补拉磁盘快照，
 				// 防抖在 decideStreamRecovery 内，脱节后每 5s 最多追一次直到 runtime 空闲。
