@@ -4228,7 +4228,8 @@ export class AgentManager {
 		this.recentlyAborted.clear();
 		// 实时日志广播的节流定时器与聚合缓冲同步清理
 		this.rpcLiveTap.dispose();
-		this.emitState();
+		// 终态不走节流（trailing 可能迟到）：flush 后的清单就是退出时的权威快照
+		this.flushStateEmit();
 	}
 
 	/**
@@ -6283,7 +6284,45 @@ export class AgentManager {
 		return undefined;
 	}
 
+	/**
+	 * emitState 节流（2027-02 性能审计，leading+trailing 250ms）：调用点 50+ 个，
+	 * 含每个工具 start/end（每工具 2 次）——无节流时并行工具批每秒数十次全量
+	 * AgentTab[] 构建排序 + 渲染层 N 个 per-tab 信封 structured-clone 下发。
+	 * leading 保证状态翻转即时可见；突发合并为一次 trailing（≤250ms 迟到，
+	 * 对状态圆点/侧栏无感）。dispose 终态走 flushStateEmit 立即推。
+	 */
+	private static readonly STATE_EMIT_THROTTLE_MS = 250;
+	private stateEmitTimer: NodeJS.Timeout | null = null;
+	private stateEmitLastAt = 0;
+
 	private emitState() {
+		const now = Date.now();
+		const elapsed = now - this.stateEmitLastAt;
+		if (elapsed >= AgentManager.STATE_EMIT_THROTTLE_MS) {
+			this.stateEmitLastAt = now;
+			this.emitStateNow();
+			return;
+		}
+		if (this.stateEmitTimer !== null) return;
+		this.stateEmitTimer = setTimeout(() => {
+			this.stateEmitTimer = null;
+			this.stateEmitLastAt = Date.now();
+			this.emitStateNow();
+		}, AgentManager.STATE_EMIT_THROTTLE_MS - elapsed);
+		this.stateEmitTimer.unref?.();
+	}
+
+	/** 取消在途 trailing 并立即推一次终态（dispose 用：退出路径不等节流窗口）。 */
+	private flushStateEmit() {
+		if (this.stateEmitTimer !== null) {
+			clearTimeout(this.stateEmitTimer);
+			this.stateEmitTimer = null;
+		}
+		this.stateEmitLastAt = Date.now();
+		this.emitStateNow();
+	}
+
+	private emitStateNow() {
 		const tabs = this.list();
 		this.emit(ipcChannels.agentsState, tabs);
 		// 同步通知主进程内部状态订阅者（PetStateBridge），使宠物窗能拿到聚合状态。
