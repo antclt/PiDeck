@@ -1,5 +1,5 @@
 import { Activity, Bolt, CirclePlus, Clock, Folder, Globe, MessageSquare, Monitor, Moon, Search, Sun } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useReducer, useState, type ReactNode } from "react";
 import type { AgentBackend, AgentTab, AppThemeMode, ArchivedDshSession, ArchivedPiSession, Project, SessionRecord, SessionSummary, WorktreeEntry } from "../../../../shared/types";
 import { AgentContextMenu, DraftSessionContextMenu, ProjectContextMenu, SessionContextMenu, SessionManagerModal, SessionSourceFilterMenu, WorktreeCreateDialog } from "./SidebarParts";
 import { automationModuleHiddenAtom, sessionRecordToSummary } from "../../atoms";
@@ -29,7 +29,7 @@ import { FavoritesDockButton } from "./FavoritesDockButton";
 import { HostPluginDockButtons } from "../plugins/HostPluginDockButtons";
 import { MorphingSearch, type MorphingSearchItem } from "../motion/morphing-search";
 import { parseSidebarNavTab } from "../../utils/sidebarNavTab";
-import { pinyinKeys } from "../../utils/pinyinSearch";
+import { ensurePinyinTable, pinyinKeys } from "../../utils/pinyinSearch";
 import { displayProjectDirectoryName, isChatProject } from "../../rendererUtils";
 import { formatAccelerator } from "../../../../shared/shortcuts";
 import { desktopApi } from "../../desktopApi";
@@ -193,6 +193,22 @@ export function SidebarContent(props: SidebarContentProps) {
 	const menuAgentCanRpcLog = menuAgent !== undefined && getBoundSidebarRuntimeAgentByAgentId(controller.catalog, menuAgent.id) !== undefined;
 	// 顶部「搜索」菜单项控制 MorphingSearch 命令面板的展开状态。
 	const [searchOpen, setSearchOpen] = useState(false);
+	// 拼音字典按需装载：搜索面板打开才拉 26k 条字典 chunk（不进启动路径）。
+	// 就绪后 bump 一次渲染让 searchItems 重算出真实拼音键；未就绪期间面板退化为
+	// 子串/英文匹配，本地 chunk 毫秒级到位，体感无损。失败静默（只损失拼音通道）。
+	const [, bumpPinyinTable] = useReducer((tick: number) => tick + 1, 0);
+	useEffect(() => {
+		if (!searchOpen) return;
+		let cancelled = false;
+		ensurePinyinTable()
+			.then(() => {
+				if (!cancelled) bumpPinyinTable();
+			})
+			.catch(() => {});
+		return () => {
+			cancelled = true;
+		};
+	}, [searchOpen]);
 	// 生效快捷键绑定（用户设置可改），kbd 提示跟随真实键位；设置保存后自动刷新
 	const { bindings: shortcutBindings, platform } = useShortcutBindings();
 	const newSessionKbd = shortcutBindings ? formatAccelerator(shortcutBindings.openNewSession, platform) : "Ctrl+N";

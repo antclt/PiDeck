@@ -9,8 +9,16 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
  * 拼音首字母、多词 AND 都必须能搜到，且标题命中永远压过「关键词恰好含这几个字」。
  * e2e 负责验证接线（输入 → 切 tab → 滚到锚点），本文件只保证打分不会把该找的东西漏掉。
  */
-function loadSearch() {
-	return loadTsCommonJs("src/renderer/src/components/app/settings/settingsSearch.ts");
+// 拼音字典改为按需装载后，拼音通道只在表就绪后生效。settingsSearch 内部 require 的
+// pinyinSearch 与这里单独加载的实例不共享状态（loadTsCommonJs 每次调用都是新模块图），
+// 用 stubs 把已装载的实例注入，保证打分断言跑在真实字典上。
+const pinyinModule = loadTsCommonJs("src/renderer/src/utils/pinyinSearch.ts");
+await pinyinModule.ensurePinyinTable();
+
+async function loadSearch() {
+	return loadTsCommonJs("src/renderer/src/components/app/settings/settingsSearch.ts", {
+		stubs: { "../../../utils/pinyinSearch": pinyinModule },
+	});
 }
 
 const ENTRIES = [
@@ -33,57 +41,57 @@ function plain(value) {
 	return JSON.parse(JSON.stringify(value));
 }
 
-test("Chinese title match wins over keyword-only match", () => {
-	const search = loadSearch();
+test("Chinese title match wins over keyword-only match", async () => {
+	const search = await loadSearch();
 	const hits = search.searchSettingsEntries(ENTRIES, "终端", ORDER);
 	// 标题就叫「终端」的 tab 排在「终端字体」前，且只靠关键词含「终端」的条目（无）不出现在前面
 	assert.equal(hits[0].entry.id, "tab:terminal");
 	assert.deepEqual(plain(titles(hits)), ["终端", "终端字体"]);
 });
 
-test("pinyin initials and full pinyin both reach Chinese titles", () => {
-	const search = loadSearch();
+test("pinyin initials and full pinyin both reach Chinese titles", async () => {
+	const search = await loadSearch();
 	assert.deepEqual(plain(titles(search.searchSettingsEntries(ENTRIES, "ylcx", ORDER))), ["用量查询"]);
 	assert.deepEqual(plain(titles(search.searchSettingsEntries(ENTRIES, "daili", ORDER))), ["代理"]);
 	assert.deepEqual(plain(titles(search.searchSettingsEntries(ENTRIES, "zdt", ORDER))), ["终端字体"]);
 });
 
-test("English keywords are reachable case-insensitively", () => {
-	const search = loadSearch();
+test("English keywords are reachable case-insensitively", async () => {
+	const search = await loadSearch();
 	assert.deepEqual(plain(titles(search.searchSettingsEntries(ENTRIES, "GPG", ORDER))), ["提交签名"]);
 	assert.deepEqual(plain(titles(search.searchSettingsEntries(ENTRIES, "http proxy", ORDER))), ["代理"]);
 });
 
-test("multiple tokens are AND-ed", () => {
-	const search = loadSearch();
+test("multiple tokens are AND-ed", async () => {
+	const search = await loadSearch();
 	assert.deepEqual(plain(titles(search.searchSettingsEntries(ENTRIES, "终端 字体", ORDER))), ["终端字体"]);
 	assert.deepEqual(plain(titles(search.searchSettingsEntries(ENTRIES, "终端 git", ORDER))), []);
 });
 
-test("tab label brings the whole page in, below its own entries", () => {
-	const search = loadSearch();
+test("tab label brings the whole page in, below its own entries", async () => {
+	const search = await loadSearch();
 	const hits = search.searchSettingsEntries(ENTRIES, "用量统计", ORDER);
 	// 「用量统计」是 tab 名，不是条目名；靠 tabLabel 通道命中，用来「进那一页找找」。
 	assert.deepEqual(plain(titles(hits)), ["用量查询"]);
 	assert.ok(hits[0].score < 500, "tab-label channel must stay below title/keyword channels");
 });
 
-test("typing the whole name outranks a prefix of a longer name", () => {
-	const search = loadSearch();
+test("typing the whole name outranks a prefix of a longer name", async () => {
+	const search = await loadSearch();
 	// 「字体」整串相等命中 1000 分；「终端字体」只是包含命中 800 分
 	assert.deepEqual(plain(titles(search.searchSettingsEntries(ENTRIES, "字体", ORDER))), ["字体", "终端字体"]);
 	assert.deepEqual(plain(titles(search.searchSettingsEntries(ENTRIES, "终端字", ORDER))), ["终端字体"]);
 });
 
-test("blank query yields nothing and the limit is honoured", () => {
-	const search = loadSearch();
+test("blank query yields nothing and the limit is honoured", async () => {
+	const search = await loadSearch();
 	assert.deepEqual(plain(search.searchSettingsEntries(ENTRIES, "", ORDER)), []);
 	assert.deepEqual(plain(search.searchSettingsEntries(ENTRIES, "   ", ORDER)), []);
 	assert.equal(search.searchSettingsEntries(ENTRIES, "字", ORDER, 1).length, 1);
 });
 
-test("highlight segments follow the matched indices", () => {
-	const search = loadSearch();
+test("highlight segments follow the matched indices", async () => {
+	const search = await loadSearch();
 	assert.deepEqual(plain(search.splitHighlightedTitle("终端字体", [2, 3])), [
 		{ text: "终端", hit: false },
 		{ text: "字体", hit: true },

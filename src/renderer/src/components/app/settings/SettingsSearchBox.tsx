@@ -3,6 +3,7 @@ import { Search, X } from "lucide-react";
 import type { SettingsSectionId, SettingsTabId } from "../../../atoms";
 import { t } from "../../../i18n";
 import { cn } from "../../../lib/utils";
+import { ensurePinyinTable } from "../../../utils/pinyinSearch";
 import { Input } from "../../ui-shadcn/input";
 import { buildSettingsSearchEntries } from "./settingsSearchEntries";
 import { searchSettingsEntries, splitHighlightedTitle } from "./settingsSearch";
@@ -27,7 +28,22 @@ export function SettingsSearchBox(props: { entries: readonly SettingsSearchEntry
 	const listRef = useRef<HTMLUListElement | null>(null);
 	const query = props.query;
 	const searching = query.trim().length > 0;
-	const hits = useMemo(() => searchSettingsEntries(props.entries, query, props.tabOrder), [props.entries, props.tabOrder, query]);
+	// 拼音字典按需装载：设置弹窗挂载时才拉（字典不进启动 chunk）。就绪前 pinyin 通道
+	// 打 0 分，就绪后置位触发 hits 重算——用户从打开弹窗到输入第一个字之间的空档
+	// 足够本地 chunk 毫秒级到位。失败静默（只损失拼音通道）。
+	const [pinyinTableReady, setPinyinTableReady] = useState(false);
+	useEffect(() => {
+		let cancelled = false;
+		ensurePinyinTable()
+			.then(() => {
+				if (!cancelled) setPinyinTableReady(true);
+			})
+			.catch(() => {});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+	const hits = useMemo(() => searchSettingsEntries(props.entries, query, props.tabOrder), [props.entries, props.tabOrder, query, pinyinTableReady]);
 
 	// 查询变化后选中项回到第一条：否则「搜 A 时停在第 5 条，改成 B 还停在第 5 条」会误跳。
 	useEffect(() => {

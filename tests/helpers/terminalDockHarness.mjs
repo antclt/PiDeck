@@ -147,6 +147,28 @@ export function dockHarness(initialTabs = [tab("A"), tab("B")], settings = {}) {
 			"@xterm/addon-web-links": { WebLinksAddon: Addon },
 			"@xterm/addon-webgl": { WebglAddon: Addon },
 			"@xterm/xterm/css/xterm.css": {},
+			// xterm 已改为按需装载（不进启动 chunk），TerminalDock 只经 ./xtermModules 取模块值。
+			// 替身在这一层打桩：返回「同步 thenable」，让原有的同步渲染断言无需改成 async
+			// （真实实现是 Promise，这里只是把同一个结果提前到当前 tick 交付）。
+			"./xtermModules": {
+				loadXtermModules: () => {
+					const modules = {
+						Terminal: FakeTerminal,
+						FitAddon: Addon,
+						SearchAddon: Addon,
+						SerializeAddon: Addon,
+						Unicode11Addon: Addon,
+						WebLinksAddon: Addon,
+						WebglAddon: Addon,
+					};
+					return {
+						then(onFulfilled) {
+							onFulfilled(modules);
+							return { catch() {} };
+						},
+					};
+				},
+			},
 			"../../utils/openExternal": { openInSystemBrowser() {} },
 			"../../utils/notice": { showNotice: (...args) => notices.push(args) },
 			"../utils/notice": { showNotice: (...args) => notices.push(args) },

@@ -1,6 +1,11 @@
 import { fuzzyMatch } from "../../../utils/commandPaletteFuzzy";
 import { isPinyinQuery, matchPinyinText } from "../../../utils/pinyinSearch";
 
+// 拼音字典已改按需装载（不进启动 chunk）：调用方（SettingsSearchBox / 单测）在本模块
+// 打分前必须先 await ensurePinyinTable()，否则拼音通道打 0 分。这里透出同一个装载器，
+// 让「打分内核 + 它依赖的字典」保持同一入口，调用方不必再额外 import 第二个模块。
+export { ensurePinyinTable } from "../../../utils/pinyinSearch";
+
 /**
  * 设置页搜索的纯打分内核（无 React 依赖，`node --test` 可直接加载）。
  *
