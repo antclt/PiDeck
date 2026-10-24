@@ -1245,6 +1245,10 @@ export function WebChatApp() {
 	// 两边同时显示会出现「Network error + 正文在输出」的错乱观感。
 	const transportError = error && !externalStreaming && !liveMessage ? error.message : null;
 	const combinedStreaming = streaming || externalStreaming;
+	// 输入区的「回合占用」判定还要算上 runtime 仍在跑的情况（刷新页面/切后台回来后本端没在
+	// 拉流、pi 却还在生成）：此时发送必须走排队而不是直接派发——pi 会以 turnActive 拒收，
+	// 用户只会看到一条报错而消息丢失。时间线的流式指示仍只看 combinedStreaming。
+	const composerTurnBusy = combinedStreaming || activeRuntime?.status === "running" || activeRuntime?.status === "starting";
 	const composerHidden = resolveComposerHidden({ headerHidden, nearBottom, streaming: combinedStreaming, engaged: composerEngaged });
 
 	return (
@@ -1341,7 +1345,7 @@ export function WebChatApp() {
 				<WebComposer
 					hasSession={Boolean(activeSessionId)}
 					disabled={Boolean(creatingProjectId)}
-					streaming={combinedStreaming}
+					streaming={composerTurnBusy}
 					prefill={prefill ?? undefined}
 					onSend={handleSend}
 					onStop={handleStop}
