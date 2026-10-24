@@ -6,6 +6,7 @@ import { ArrowLeft, ArrowRight, PanelLeft } from "lucide-react";
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useAtomValue, useSetAtom, useStore } from "jotai";
 import { toggleThemeMode } from "./themeAppearance";
+import { DURATION_SLOW_MS, EASE_OUT_QUINT_CSS } from "./lib/motionTokens";
 import {
 	Code,
 	Activity,
@@ -2482,7 +2483,9 @@ export function App() {
 				{ opacity: 0, transform: "translateY(4px)" },
 				{ opacity: 1, transform: "none" },
 			],
-			{ duration: 160, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
+			// 切会话属面板级（tailwind.css 三档文档明确列了「切会话/抽屉」→ slow 320ms）；
+			// 曲线走 --ease-out-quint 的 JS 孪生（lib/motionTokens，与 CSS 侧同值互钉）
+			{ duration: DURATION_SLOW_MS, easing: EASE_OUT_QUINT_CSS },
 		);
 		return () => anim.cancel();
 	}, [currentSessionId, workspaceChrome.splitLayout, settings.navigationMode]);

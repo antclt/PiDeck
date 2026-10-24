@@ -91,6 +91,31 @@ test("modal 遮罩（dialog / alert-dialog overlay）同拍 duration-base", () =
 	}
 });
 
+test("JS 侧 token 孪生（lib/motionTokens）与 tailwind.css 互钉", () => {
+	const css = readFileSync("src/renderer/src/styles/tailwind.css", "utf8");
+	const tokens = readFileSync("src/renderer/src/lib/motionTokens.ts", "utf8");
+	assert.match(css, /--ease-out-quint:\s*cubic-bezier\(0\.22, 1, 0\.36, 1\);/, "tailwind 侧 quint 曲线被改动时必须同步 motionTokens 与全部消费点");
+	for (const [name, value] of [
+		["DURATION_FAST_MS", "120"],
+		["DURATION_BASE_MS", "200"],
+		["DURATION_SLOW_MS", "320"],
+	]) {
+		assert.match(tokens, new RegExp("export const " + name + " = " + value + ";"), name + " 必须与 @utility 三档同值");
+	}
+	assert.match(tokens, /EASE_OUT_QUINT_CSS = "cubic-bezier\(0\.22, 1, 0\.36, 1\)"/, "JS 孪生曲线必须与 --ease-out-quint 同值");
+});
+
+test("renderer .tsx 不散落 cubic-bezier 字面量（曲线统一走 token / var(--ease-out-quint)）", () => {
+	const offenders = [];
+	for (const path of listTsx()) {
+		// 白名单：web/ 自有体系、components/motion/（beUI 官方拷贝）
+		if (path.startsWith("src/renderer/src/web/") || path.includes("/components/motion/")) continue;
+		const source = readFileSync(path, "utf8");
+		if (source.includes("cubic-bezier(")) offenders.push(path);
+	}
+	assert.deepEqual(offenders, [], "曲线字面量必须换成 var(--ease-out-quint) 或 lib/motionTokens 的孪生常量");
+});
+
 test("三档时长 @utility 是唯一真源（tailwind.css）", () => {
 	const source = readFileSync("src/renderer/src/styles/tailwind.css", "utf8");
 	for (const [name, value] of [
