@@ -241,7 +241,7 @@ export function AuthTab(props: {
 								<button
 									key={provider.value}
 									type="button"
-									className={`group relative flex cursor-pointer flex-col items-start rounded-md border p-3 text-left text-xs transition-all duration-fast ${
+									className={`group relative flex cursor-pointer flex-col items-start rounded-md border p-3 text-left text-xs transition-[background-color,border-color,box-shadow] duration-fast ${
 										isSelected
 											? "border-[var(--color-accent)] bg-[color:color-mix(in_srgb,var(--color-accent)_12%,var(--color-bg-panel))] shadow-[0_0_0_1px_var(--color-accent)]"
 											: "border-border-subtle bg-bg-muted hover:border-[var(--color-accent)] hover:bg-[color:color-mix(in_srgb,var(--color-accent)_5%,var(--color-bg-panel))]"
@@ -279,7 +279,7 @@ export function AuthTab(props: {
 										<button
 											key={providerName}
 											type="button"
-											className={`group relative flex cursor-pointer flex-col items-start rounded-md border p-3 text-left text-xs transition-all duration-fast ${
+											className={`group relative flex cursor-pointer flex-col items-start rounded-md border p-3 text-left text-xs transition-[background-color,border-color,box-shadow] duration-fast ${
 												isSelected
 													? "border-[var(--color-accent)] bg-[color:color-mix(in_srgb,var(--color-accent)_12%,var(--color-bg-panel))] shadow-[0_0_0_1px_var(--color-accent)]"
 													: "border-border-subtle bg-bg-muted hover:border-[var(--color-accent)] hover:bg-[color:color-mix(in_srgb,var(--color-accent)_5%,var(--color-bg-panel))]"

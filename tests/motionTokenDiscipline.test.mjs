@@ -116,6 +116,18 @@ test("renderer .tsx 不散落 cubic-bezier 字面量（曲线统一走 token / v
 	assert.deepEqual(offenders, [], "曲线字面量必须换成 var(--ease-out-quint) 或 lib/motionTokens 的孪生常量");
 });
 
+test("renderer 不新增 transition-all（过渡只动实际会变的属性）", () => {
+	// 白名单：ui-shadcn 上游标准件（button/progress/switch 保持 shadcn 原版类，
+	// CLI 覆盖安装才不冲突）；web/ 自有体系
+	const allow = ["src/renderer/src/components/ui-shadcn/button.tsx", "src/renderer/src/components/ui-shadcn/progress.tsx", "src/renderer/src/components/ui-shadcn/switch.tsx"];
+	const offenders = [];
+	for (const path of listTsx()) {
+		if (path.startsWith("src/renderer/src/web/") || allow.includes(path)) continue;
+		if (readFileSync(path, "utf8").includes("transition-all")) offenders.push(path);
+	}
+	assert.deepEqual(offenders, [], "transition-all 会顺带动画无关属性（布局/阴影/尺寸），按实际变化的属性显式声明（transition-colors / transition-[width,...] 等）");
+});
+
 test("三档时长 @utility 是唯一真源（tailwind.css）", () => {
 	const source = readFileSync("src/renderer/src/styles/tailwind.css", "utf8");
 	for (const [name, value] of [
