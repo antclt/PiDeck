@@ -14,7 +14,7 @@ export function FavoritesDockButton() {
 	const hidden = useAtomValue(favoritesModuleHiddenAtom);
 	if (hidden) return null;
 	return (
-		<button type="button" className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-muted/60" aria-label={t("favorites.title")} title={t("favorites.title")} onClick={() => openFavoritesPage()}>
+		<button type="button" className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-bg-hover" aria-label={t("favorites.title")} title={t("favorites.title")} onClick={() => openFavoritesPage()}>
 			<Star className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 			<span className="min-w-0 flex-1 truncate font-medium">{t("favorites.title")}</span>
 		</button>

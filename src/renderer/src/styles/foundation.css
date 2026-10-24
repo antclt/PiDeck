@@ -101,10 +101,15 @@
   --color-bg-popover: #ffffff;
   --color-bg-input: #ffffff;
   /* 控件表面/hover/选中层：全部纯中性灰（R=G=B，无色相）——ZCode 质感的关键
-     是灰阶零色相噪声，色相只留给语义色与身份色（见 docs/zcode-design-analysis.md）。 */
+     是灰阶零色相噪声，色相只留给语义色与身份色（见 docs/zcode-design-analysis.md）。
+     交互阶梯对齐 ZCode 的「纸感」：侧栏 #f0f0f0 上 hover Δ6（#eaeaea）、选中 Δ12
+     （#e4e4e4，≈ZCode 选中墨量 4.7%）——选中感靠小步长，不靠深底；白面板上两档
+     相应为 Δ21/Δ27，仍清晰可辨。暗色阶梯保持更大步长不动（ZCode 暗色同理）。
+     注意：侧栏上的行/按钮 hover 必须用 bg-bg-hover；bg-muted 比 sidebar 还亮一档，
+     罩上去是反向变亮、视觉不可见（守卫见 tests/lightNeutralBackground.test.mjs）。 */
   --color-bg-muted: #f4f4f4;
-  --color-bg-hover: #e4e4e4;
-  --color-bg-active: #dcdcdc;
+  --color-bg-hover: #eaeaea;
+  --color-bg-active: #e4e4e4;
   --color-text-primary: #202124;
   /* 中性墨水（ZCode 同法）：secondary/tertiary 全纯灰零色相，去 slate 蓝调；
      深度保持可读——secondary 8.9:1 / tertiary 5.7:1（muted 弱底 5.2:1），均达 WCAG AA。 */

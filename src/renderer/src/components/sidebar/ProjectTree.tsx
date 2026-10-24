@@ -23,7 +23,7 @@ import { cn } from "../../lib/utils";
 /** 项目行只做容器：hover 浅灰，永不挂选中底。
  * 选中态只给叶子会话（对标 dsh-web：.sessionRow.selected = hover 灰，项目行无 selected）。 */
 // 根项目行保留折叠层级，但收窄左右留白，给窄侧栏中的目录名多留出可用宽度。
-const treeRowClass = "group conversation relative flex min-h-8 w-full items-center gap-1.5 rounded-lg border border-transparent px-1 py-0 text-body text-foreground shadow-none transition-[background-color,border-color,box-shadow] duration-base hover:border-border-subtle hover:bg-muted/60 hover:text-foreground";
+const treeRowClass = "group conversation relative flex min-h-8 w-full items-center gap-1.5 rounded-lg border border-transparent px-1 py-0 text-body text-foreground shadow-none transition-[background-color,border-color,box-shadow] duration-base hover:border-border-subtle hover:bg-bg-hover hover:text-foreground";
 
 /** 项目行右侧操作按钮的虚化模式：absolute 浮层，不参与布局（不挤压项目名文字），
  * 默认隐藏（pointer-events 一并关闭防误触），行 hover / 行内聚焦时显现。
@@ -137,7 +137,7 @@ export function ProjectTree(props: {
 				>
 					<button
 						type="button"
-						className={cn("project-fold grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground", collapsed && "folded")}
+						className={cn("project-fold grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-bg-hover hover:text-foreground", collapsed && "folded")}
 						title={collapsed ? t("app.projectExpand") : t("app.projectCollapse")}
 						aria-label={collapsed ? t("app.projectExpand") : t("app.projectCollapse")}
 						onClick={() => props.controller.toggleProject(project.id)}
@@ -307,7 +307,7 @@ export function ProjectTree(props: {
 						{/* 过滤历史记录：与工作区项目行 hover 按钮同款功能，聊天区标题栏常驻（用户反馈补齐） */}
 						<button
 							type="button"
-							className={cn("grid size-6 place-items-center rounded-md hover:bg-muted", sourceFilter !== null ? "text-primary" : "text-muted-foreground hover:text-foreground")}
+							className={cn("grid size-6 place-items-center rounded-md hover:bg-bg-hover", sourceFilter !== null ? "text-primary" : "text-muted-foreground hover:text-foreground")}
 							title={t("menu.filterSessions")}
 							aria-label={t("menu.filterSessions")}
 							onClick={(event) => props.controller.openSourceFilter(project.id, event.clientX, event.clientY)}
@@ -318,7 +318,7 @@ export function ProjectTree(props: {
 							type="button"
 							variant="ghost"
 							size="icon-xs"
-							className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+							className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-bg-hover hover:text-foreground"
 							aria-label={t("app.newNormalSession")}
 							title={t("app.newNormalSession")}
 							onClick={() => {
@@ -334,7 +334,7 @@ export function ProjectTree(props: {
 							type="button"
 							variant="ghost"
 							size="icon-xs"
-							className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+							className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-bg-hover hover:text-foreground"
 							title={collapsed ? t("app.projectExpand") : t("app.projectCollapse")}
 							aria-label={collapsed ? t("app.projectExpand") : t("app.projectCollapse")}
 							aria-expanded={!collapsed}
@@ -351,7 +351,7 @@ export function ProjectTree(props: {
 							type="button"
 							variant="ghost"
 							size="icon-xs"
-							className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+							className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-bg-hover hover:text-foreground"
 							aria-label={t("sidebar.moreActions")}
 							title={t("sidebar.moreActions")}
 							onClick={(event) => {
@@ -398,7 +398,7 @@ export function ProjectTree(props: {
 						<span className="text-caption font-medium text-muted-foreground">{t("app.sidebarProjects")}</span>
 						<div className="flex items-center gap-0.5">
 							{/* 添加项目是最常用入口，外露为显式「+」按钮 */}
-							<Button type="button" variant="ghost" size="icon-xs" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={t("app.addProject")} title={t("app.addProject")} onClick={() => void props.actions.projects.add()}>
+							<Button type="button" variant="ghost" size="icon-xs" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-bg-hover hover:text-foreground" aria-label={t("app.addProject")} title={t("app.addProject")} onClick={() => void props.actions.projects.add()}>
 								<Plus className="size-3.5" aria-hidden="true" />
 							</Button>
 							{/* 全部折叠/展开：批量收起所有工作区项目，批量展开/折叠入口外露（与聊天折叠同策略） */}
@@ -406,7 +406,7 @@ export function ProjectTree(props: {
 								type="button"
 								variant="ghost"
 								size="icon-xs"
-								className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+								className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-bg-hover hover:text-foreground"
 								title={anyWorkspaceExpanded ? t("app.projectCollapseAll") : t("app.projectExpandAll")}
 								aria-label={anyWorkspaceExpanded ? t("app.projectCollapseAll") : t("app.projectExpandAll")}
 								onClick={() => props.controller.toggleCollapseAllProjects()}
@@ -415,7 +415,7 @@ export function ProjectTree(props: {
 							</Button>
 							<DropdownMenu>
 								<DropdownMenuTrigger asChild>
-									<Button type="button" variant="ghost" size="icon-xs" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={t("sidebar.moreActions")} title={t("sidebar.moreActions")}>
+									<Button type="button" variant="ghost" size="icon-xs" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-bg-hover hover:text-foreground" aria-label={t("sidebar.moreActions")} title={t("sidebar.moreActions")}>
 										<Ellipsis size={14} aria-hidden="true" />
 									</Button>
 								</DropdownMenuTrigger>
@@ -444,7 +444,7 @@ export function ProjectTree(props: {
 						<span className="text-caption font-medium text-muted-foreground">{t("app.sidebarProjects")}</span>
 						<DropdownMenu>
 							<DropdownMenuTrigger asChild>
-								<Button type="button" variant="ghost" size="icon-xs" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={t("sidebar.moreActions")} title={t("sidebar.moreActions")}>
+								<Button type="button" variant="ghost" size="icon-xs" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-bg-hover hover:text-foreground" aria-label={t("sidebar.moreActions")} title={t("sidebar.moreActions")}>
 									<Ellipsis size={14} aria-hidden="true" />
 								</Button>
 							</DropdownMenuTrigger>

@@ -302,14 +302,14 @@ export function SidebarContent(props: SidebarContentProps) {
             搜索 → 打开 MorphingSearch 命令面板。把搜索从整行输入框收敛成单个动作项，
             消除与下方胶囊分段的样式重复。底部细分割线与下方分组区分，避免与分段栏粘连。 */}
 				<div className={cn("flex shrink-0 flex-col gap-0.5 pt-1 pb-2", !props.simple && "border-b border-border/40")}>
-					<button type="button" className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-muted/60" aria-label={t("app.newSession")} title={t("app.newSession")} onClick={() => props.onOpenNewSession?.()}>
+					<button type="button" className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-bg-hover" aria-label={t("app.newSession")} title={t("app.newSession")} onClick={() => props.onOpenNewSession?.()}>
 						<CirclePlus className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 						<span className="min-w-0 flex-1 truncate font-medium">{t("app.newSession")}</span>
 						{/* 快捷键默认隐藏，行 hover 时才淡入（无边框，弱化到只剩文字），避免常驻视觉噪音；
                 键位跟随设置页自定义（useShortcutBindings） */}
 						<kbd className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md px-1 text-micro text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">{newSessionKbd}</kbd>
 					</button>
-					<button type="button" className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-muted/60" aria-label={t("app.searchSessions")} title={t("app.searchSessions")} onClick={() => setSearchOpen(true)}>
+					<button type="button" className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-bg-hover" aria-label={t("app.searchSessions")} title={t("app.searchSessions")} onClick={() => setSearchOpen(true)}>
 						<Search className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 						<span className="min-w-0 flex-1 truncate font-medium">{t("app.searchSessions")}</span>
 						{/* 快捷键默认隐藏，行 hover 时才淡入；键位跟随设置页自定义（useShortcutBindings） */}
@@ -427,7 +427,7 @@ export function SidebarContent(props: SidebarContentProps) {
                   aria-label 保留更新文案，读屏与纯键盘用户不依赖视觉圆点。 */}
 								<Tooltip delayDuration={300}>
 									<TooltipTrigger asChild>
-										<Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={hasPendingUpdate ? t("settings.titleWithUpdate") : t("settings.title")} onClick={props.onOpenSettings}>
+										<Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-bg-hover hover:text-foreground" aria-label={hasPendingUpdate ? t("settings.titleWithUpdate") : t("settings.title")} onClick={props.onOpenSettings}>
 											<Bolt className="size-4" />
 										</Button>
 									</TooltipTrigger>
@@ -458,7 +458,7 @@ export function SidebarContent(props: SidebarContentProps) {
 							{/* 反馈入口：与设置/公告统一 styled Tooltip（原生 title 移除，防双弹）；aria-label 保留读屏契约 */}
 							<Tooltip delayDuration={300}>
 								<TooltipTrigger asChild>
-									<Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={t("feedback.title")} onClick={props.onOpenFeedback}>
+									<Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-bg-hover hover:text-foreground" aria-label={t("feedback.title")} onClick={props.onOpenFeedback}>
 										<MessageSquare className="size-4" />
 									</Button>
 								</TooltipTrigger>
@@ -471,7 +471,7 @@ export function SidebarContent(props: SidebarContentProps) {
 							{/* 主题切换：Tooltip 文案随当前模式变化（主题：X（点击切换）），与其它入口同一观感 */}
 							<Tooltip delayDuration={300}>
 								<TooltipTrigger asChild>
-									<Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={themeToggleTitle} onClick={props.onToggleTheme}>
+									<Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-bg-hover hover:text-foreground" aria-label={themeToggleTitle} onClick={props.onToggleTheme}>
 										<ThemeModeIcon className="size-4" />
 									</Button>
 								</TooltipTrigger>

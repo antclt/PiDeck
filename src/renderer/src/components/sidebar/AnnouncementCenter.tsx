@@ -283,7 +283,7 @@ export function AnnouncementCenter() {
 				<TooltipTrigger asChild>
 					<DialogTrigger asChild>
 						<div className="relative size-full">
-							<Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={unreadCount > 0 ? t("announcements.unreadAria", { count: String(unreadCount) }) : t("announcements.title")}>
+							<Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-bg-hover hover:text-foreground" aria-label={unreadCount > 0 ? t("announcements.unreadAria", { count: String(unreadCount) }) : t("announcements.title")}>
 								<Megaphone className="size-4" />
 							</Button>
 							{/* 未读圆点：与设置按钮更新角标同款式；仅 notice 计入（guide 常驻不打扰） */}
