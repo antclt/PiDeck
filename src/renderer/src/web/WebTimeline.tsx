@@ -45,9 +45,10 @@ import { uiMessageText, uiMessageImages } from "./webMessageParts";
 export { uiMessageText, uiMessageImages } from "./webMessageParts";
 
 // 分组纯函数已抽到 webTimelineGrouping（叶子模块，vm 沙箱单测可用）；re-export 保持既有导入路径不破
-import { groupTimelineEntries } from "./webTimelineGrouping";
+import { groupTimelineEntries, sliceEntriesToBoundary, turnPrefixBoundary, validTurnPrefix, type TurnPrefixCache } from "./webTimelineGrouping";
 import type { AssistantTurn, TimelineEntry, TurnSegment, WebToolPart } from "./webTimelineGrouping";
 export { groupTimelineEntries } from "./webTimelineGrouping";
+export { validTurnPrefix, turnPrefixBoundary, sliceEntriesToBoundary } from "./webTimelineGrouping";
 export type { AssistantTurn, TimelineEntry, TurnSegment, WebToolPart } from "./webTimelineGrouping";
 
 /** 用户消息右对齐气泡（结构与桌面 UserBubble 一致；P1/P2 增加图片与 hover 操作）。 */
@@ -695,7 +696,29 @@ export function WebTimeline(props: {
 	// 回合聚合：连续 assistant 消息合并成「过程组 + 常驻正文」（桌面 TurnRow 语义）。
 	// 流式中的末尾回合不提升 final（对齐桌面 isRunTail 门控，见 groupTimelineEntries 注释）。
 	// streaming 仅指「正在收流」，与 useChat 的 status 无关，由调用方在收流期间置真。
-	const timelineEntries = useMemo(() => groupTimelineEntries(messages, { isStreaming: props.streaming }), [messages, props.streaming]);
+	//
+	// 前缀缓存（2027-02 性能治理）：useChat 流式期每个 delta 重建整个 messages 数组，
+	// 全量重分组会铸造全新 turn 对象、memo(WebAssistantTurn) 对所有历史回合失效。
+	// 已完成回合按消息引用判据复用分组结果，每帧只对当前（流式尾）回合重分组。
+	const turnPrefixCacheRef = useRef<TurnPrefixCache | null>(null);
+	const timelineEntries = useMemo<TimelineEntry[]>(() => {
+		const cached = turnPrefixCacheRef.current ? validTurnPrefix(turnPrefixCacheRef.current, messages) : null;
+		const consumed = cached ? cached.consumed : 0;
+		const prefixEntries = cached ? cached.entries : [];
+		const suffixEntries = groupTimelineEntries(messages.slice(consumed), { isStreaming: props.streaming });
+		const entries = consumed === 0 ? suffixEntries : [...prefixEntries, ...suffixEntries];
+		// 回写缓存：覆盖到可缓存边界（流式中=当前回合起点，非流式=全量）。
+		// 裁剪出的前缀条目引用与 entries 共享——历史回合对象跨帧稳定，memo 才有效。
+		const boundary = turnPrefixBoundary(messages, props.streaming);
+		const prefix = boundary > consumed ? sliceEntriesToBoundary(entries, boundary) : null;
+		if (prefix && prefix.length > 0) {
+			turnPrefixCacheRef.current = { messages: messages.slice(0, boundary), entries: prefix, consumed: boundary };
+		} else if (!props.streaming) {
+			// 非流式但边界不可裁（异常形态）：直接缓存全量结果
+			turnPrefixCacheRef.current = { messages: [...messages], entries, consumed: messages.length };
+		}
+		return entries;
+	}, [messages, props.streaming]);
 	const lastEntryId = timelineEntries.length > 0 ? timelineEntries[timelineEntries.length - 1].id : "";
 
 	return (

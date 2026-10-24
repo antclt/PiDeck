@@ -12,6 +12,54 @@ import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
 
 const load = createTsSandbox();
 const { groupTimelineEntries } = load("src/renderer/src/web/webTimelineGrouping.ts");
+// ── 回合前缀缓存（2027-02 性能治理）：流式期每帧只重分组当前回合 ──────────────
+const { validTurnPrefix, turnPrefixBoundary, sliceEntriesToBoundary } = load("src/renderer/src/web/webTimelineGrouping.ts");
+
+test("前缀缓存：引用稳定命中；流式中边界=当前回合起点；失稳回退全量", () => {
+	const frame1 = [user("u1", "hi"), assistant("a1", [text("回答一")]), user("u2", "again"), assistant("a2", [text("正在打字…")])];
+	const entries1 = groupTimelineEntries(frame1, { isStreaming: true });
+	// 流式中可缓存边界 = u2 的下标（当前回合起点），不含 u2 气泡本身
+	const boundary = turnPrefixBoundary(frame1, true);
+	assert.equal(boundary, 2);
+	const prefix1 = sliceEntriesToBoundary(entries1, boundary);
+	assert.equal(prefix1.length, 2, "前缀 = u1 气泡 + 第一回合");
+	const cache = { messages: frame1.slice(0, boundary), entries: prefix1, consumed: boundary };
+
+	// 下一帧：流式尾消息对象重建，前缀引用稳定 → 命中
+	const evolvedTail = assistant("a2", [text("正在打字…更长")]);
+	const frame2 = [frame1[0], frame1[1], frame1[2], evolvedTail];
+	const hit = validTurnPrefix(cache, frame2);
+	assert.ok(hit, "前缀引用稳定必须命中");
+	assert.equal(hit.consumed, 2);
+
+	// 前缀失稳（u1 被编辑成新对象）：回退全量
+	const editedFrame = [user("u1", "编辑后"), frame1[1], frame1[2], evolvedTail];
+	assert.equal(validTurnPrefix(cache, editedFrame), null, "前缀失稳必须返回 null");
+
+	// 非流式：边界 = 全量
+	assert.equal(turnPrefixBoundary(frame2, false), 4);
+	// 空数组/无 user 前导：流式边界为 0（无可缓存前缀）
+	assert.equal(turnPrefixBoundary([assistant("a0", [text("x")])], true), 0);
+});
+
+test("前缀缓存的 suffix 重分组与全量分组结果一致（含 liveTextId 语义）", () => {
+	const frame = [user("u1", "hi"), assistant("a1", [text("回答一")]), user("u2", "again"), assistant("a2", [tool("t2"), text("流式正文")])];
+	const full = groupTimelineEntries(frame, { isStreaming: true });
+	const boundary = turnPrefixBoundary(frame, true);
+	const prefix = sliceEntriesToBoundary(full, boundary);
+	const suffix = groupTimelineEntries(frame.slice(boundary), { isStreaming: true });
+	const combined = [...prefix, ...suffix];
+	assert.equal(combined.length, full.length);
+	for (let i = 0; i < full.length; i += 1) {
+		assert.equal(combined[i].kind, full[i].kind);
+		assert.equal(combined[i].id, full[i].id);
+		if (full[i].kind === "turn" && combined[i].kind === "turn") {
+			assert.equal(combined[i].turn.finalText, full[i].turn.finalText);
+			assert.equal(combined[i].turn.liveTextId, full[i].turn.liveTextId);
+			assert.equal(combined[i].turn.segments.length, full[i].turn.segments.length);
+		}
+	}
+});
 
 const user = (id, text) => ({ id, role: "user", parts: [{ type: "text", text }] });
 const assistant = (id, parts) => ({ id, role: "assistant", parts });
