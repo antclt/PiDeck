@@ -3041,7 +3041,34 @@ export class AgentManager {
 		});
 	}
 
+	/**
+	 * 工具边沿的完整 runtime state 补发去抖（2027-02 性能审计）：每个工具
+	 * start/end 各触发一次 get_state + get_session_stats 双 RPC，并行工具批下
+	 * 每秒多次；而工具执行态本身已由 emitToolRuntimeTransition 同步轻补丁承载，
+	 * 完整状态的其余字段（模型/tokens/todo）在工具边沿之间不变。尾沿 300ms
+	 * 合并：突发收尾后补一次即可。立即路径（agent_end/settled/compaction/
+	 * publishRuntimeState）不受影响，且会自取消在途的去抖（避免重复推送）。
+	 */
+	private readonly toolEdgeStateTimers = new Map<string, NodeJS.Timeout>();
+
+	private scheduleToolEdgeRuntimeState(agentId: string): void {
+		const existing = this.toolEdgeStateTimers.get(agentId);
+		if (existing) clearTimeout(existing);
+		const timer = setTimeout(() => {
+			this.toolEdgeStateTimers.delete(agentId);
+			void this.emitRuntimeState(agentId);
+		}, 300);
+		timer.unref?.();
+		this.toolEdgeStateTimers.set(agentId, timer);
+	}
+
 	private async emitRuntimeState(agentId: string) {
+		// 立即全量推送让在途的工具边沿去抖失效（它要推的内容即将被更新鲜的覆盖）
+		const pending = this.toolEdgeStateTimers.get(agentId);
+		if (pending) {
+			clearTimeout(pending);
+			this.toolEdgeStateTimers.delete(agentId);
+		}
 		try {
 			const runtime = this.requireRuntime(agentId);
 			const process = runtime.process;
@@ -3654,6 +3681,13 @@ export class AgentManager {
 	private clearAgentState(agentId: string) {
 		// 双通道缓冲/基准/思考段随生命周期整体清理（stop/restart/closed 等非 done 终止路径，防键残留慢泄漏）
 		this.liveStream.clearAll(agentId);
+		// 工具边沿去抖在途定时器随生命周期取消（迟到触发会打到已清空的 runtime，虽然
+		// emitRuntimeState 内部有 requireRuntime 兜底，取消更干净）
+		const toolEdgeTimer = this.toolEdgeStateTimers.get(agentId);
+		if (toolEdgeTimer) {
+			clearTimeout(toolEdgeTimer);
+			this.toolEdgeStateTimers.delete(agentId);
+		}
 		this.streamingAgents.delete(agentId);
 		this.activeAssistantMessageIds.delete(agentId);
 		this.toolMessageIds.delete(agentId);
@@ -5111,7 +5145,8 @@ export class AgentManager {
 				this.emitState();
 			}
 			// 完整 runtime 信息异步补发；工具边沿已经同步推送，不依赖此请求的完成顺序。
-			void this.emitRuntimeState(agentId);
+			// 300ms 尾沿去抖：并行工具批的连发 start 合并为一次 get_state。
+			this.scheduleToolEdgeRuntimeState(agentId);
 		}
 
 		if (typed.type === "tool_execution_end") {
@@ -5156,7 +5191,8 @@ export class AgentManager {
 				this.emitState();
 			}
 			// 完整 runtime 信息异步补发；序号保证它不会倒灌旧工具状态。
-			void this.emitRuntimeState(agentId);
+			// 与 start 同一去抖：工具批全部结束后 300ms 补一次即可。
+			this.scheduleToolEdgeRuntimeState(agentId);
 		}
 
 		if (typed.type === "tool_execution_update") {
