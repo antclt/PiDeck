@@ -510,23 +510,63 @@ test("catalog auto update does not run when the check found nothing newer", asyn
 	assert.equal(calls, 0);
 });
 
-test("catalog auto update keeps the pending state when the updater reports no change", async (t) => {
+test("catalog auto update re-derives the pending state when nothing could be written", async (t) => {
 	const updater = createFakeUpdater();
 	updater.checkImpl = async () => {
 		updater.emitChecking();
 		updater.emitNotAvailable();
 	};
+	// 第一轮检查说「有 1.2.0」，更新却写不进去（分支件与本地同版 / 另一实例已更新）→
+	// 第二轮检查（自动重取）看到实际已是最新。
+	let checks = 0;
 	const { service, snapshots, logs } = createAutomaticService({
 		updater,
-		checkCatalogUpdate: detectedCatalogCheck(),
-		// 远端不高于当前生效版本（例如另一实例刚更新过）：没实际落盘就不能标记为已处理
-		updateCatalog: async () => ({ ok: true, updated: false }),
+		checkCatalogUpdate: async () => {
+			checks += 1;
+			return checks === 1
+				? { ok: true, remoteVersion: "1.2.0", localVersion: "1.0.4", hasUpdate: true }
+				: { ok: true, remoteVersion: "1.2.0", localVersion: "1.2.0", hasUpdate: false };
+		},
+		// 远端不高于当前生效版本（例如另一实例刚更新过）：没实际落盘
+		updateCatalog: async () => ({ ok: true, updated: false, skipped: "already-latest", remoteVersion: "1.2.0", localVersion: "1.2.0" }),
 	});
 	stopAfter(t, service);
 
 	await service.checkNow();
-	assert.equal(snapshots.at(-1).catalog.hasUpdate, true);
+	// 提示必须能被兑现或消失：否则就是用户报的「老提示有更新、点更新又说已是最新」
+	assert.equal(checks, 2);
+	assert.equal(snapshots.at(-1).catalog.hasUpdate, false);
 	assert.ok(logs.some(({ level, message }) => level === "info" && message.includes("no newer catalog")));
+});
+
+test("refreshCatalogSnapshot re-checks and pushes the new conclusion", async (t) => {
+	const updater = createFakeUpdater();
+	updater.checkImpl = async () => {
+		updater.emitChecking();
+		updater.emitNotAvailable();
+	};
+	// 设置页手动更新成功：目录已落地，下一次检查必然不再有更新。
+	const { service, snapshots, logs } = createAutomaticService({
+		updater,
+		checkCatalogUpdate: async () => ({ ok: true, remoteVersion: "1.2.0", localVersion: "1.2.0", hasUpdate: false }),
+		updateCatalog: async () => ({ ok: true, updated: false }),
+	});
+	stopAfter(t, service);
+
+	await service.refreshCatalogSnapshot();
+	// 手动路径不经过 checkNow，不回写快照的话提示与侧栏红点会留到下一轮（默认 2h）
+	assert.equal(snapshots.at(-1).catalog.hasUpdate, false);
+	assert.equal(snapshots.at(-1).catalog.latestVersion, "1.2.0");
+	assert.equal(logs.length, 0);
+});
+
+test("refreshCatalogSnapshot without an injected checker stays silent", async (t) => {
+	const updater = createFakeUpdater();
+	const { service, snapshots } = createAutomaticService({ updater });
+	stopAfter(t, service);
+
+	await service.refreshCatalogSnapshot();
+	assert.equal(snapshots.length, 0);
 });
 
 test("catalog auto update failure is logged and leaves the manual entry usable", async (t) => {

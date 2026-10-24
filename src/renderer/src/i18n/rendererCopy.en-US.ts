@@ -4866,6 +4866,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.catalogCheckAvailable": 'New version {remote} available (current {local}); click "Update to Latest"',
 	"settings.catalogUpdated": "Updated successfully; it takes effect on next use",
 	"settings.catalogAlreadyLatest": "Already up to date; nothing to update",
+	"settings.catalogRemoteBehind": "The catalog on the release branch is older than the one in use (branch {remote}, in use {local}); kept the current version",
 	"settings.catalogRestored": "Reverted to built-in catalog",
 	"settings.catalogRestorePrevOk": "Restored previous overlay",
 	"settings.catalogFailNetwork": "Network unavailable or download failed; check network/proxy and retry",

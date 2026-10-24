@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: f805ae73e6c5013753866c3d1574c808da9a7133e4e05335b2eec35ce5263688（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: a44a8b5c249fb8fdf6620d35535c877701a163d3bf0964ef20a5140ef8cbdbdb（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4853,6 +4853,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.catalogCheckAvailable": "發現新版本 {remote}（當前 {local}），點選「更新到最新」",
 	"settings.catalogUpdated": "更新成功，已在下次使用時生效",
 	"settings.catalogAlreadyLatest": "已是最新版本，無需更新",
+	"settings.catalogRemoteBehind": "發行分支上的目錄比當前使用的舊（分支 {remote}，當前 {local}），已保留當前版本",
 	"settings.catalogRestored": "已還原為內建目錄",
 	"settings.catalogRestorePrevOk": "已恢復上一個覆蓋版",
 	"settings.catalogFailNetwork": "網路不可用或下載失敗，請檢查網路/代理後重試",

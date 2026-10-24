@@ -4846,6 +4846,7 @@ export const zhCN = {
 	"settings.catalogCheckAvailable": "发现新版本 {remote}（当前 {local}），点击「更新到最新」",
 	"settings.catalogUpdated": "更新成功，已在下次使用时生效",
 	"settings.catalogAlreadyLatest": "已是最新版本，无需更新",
+	"settings.catalogRemoteBehind": "发行分支上的目录比当前使用的旧（分支 {remote}，当前 {local}），已保留当前版本",
 	"settings.catalogRestored": "已还原为内置目录",
 	"settings.catalogRestorePrevOk": "已恢复上一个覆盖版",
 	"settings.catalogFailNetwork": "网络不可用或下载失败，请检查网络/代理后重试",

@@ -4075,7 +4075,11 @@ function registerIpc() {
 		});
 	}
 	updateService.start();
-	registerCatalogIpc(catalogUpdater);
+	registerCatalogIpc(catalogUpdater, {
+		// 设置页手动更新/还原后立刻用同一条链路重取结论：否则「有新版本」提示与侧栏红点
+		// 要等到下一轮定时检查（默认 2h）才消失，用户看到的是「更新成功了但状态没变」。
+		onCatalogChanged: () => void updateService?.refreshCatalogSnapshot(),
+	});
 	// 快捷消息：唯一数据源是用户配置文件（可手工编辑），出厂清单来自随包资源文件。
 	// 两个路径只在此处解析，避免“读 A 写 B”的漂移（与 extensions 覆盖层同源的教训）。
 	const quickMessageStore = new QuickMessageStore({
