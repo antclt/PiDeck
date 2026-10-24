@@ -43,8 +43,9 @@ export function WebThinkingSelector(props: { level?: string; onChange: (level: s
 		<>
 			<Button type="button" variant="ghost" className="h-8 shrink-0 gap-1 px-1 text-caption text-muted-foreground hover:bg-muted/60 hover:text-foreground" aria-label={t("web.thinking")} title={t("web.thinkingSheetTitle")} onClick={() => setOpen(true)}>
 				<Brain className="size-4 shrink-0" aria-hidden="true" />
-				{/* 窄屏只显 Brain 图标：档位文字（如 max）会挤压发送按钮，宽屏再展开 */}
-				<span className="hidden min-w-0 truncate sm:inline">{webThinkingLabel(current)}</span>
+				{/* 档位标签驻留模型行（非操作行，不挤发送钮）：移动走查 #6——只显图标时
+				    用户看不到当前思考档位是关还是高；窄屏用 text-micro + 限宽，宽屏常规字号。 */}
+				<span className="min-w-0 max-w-10 truncate text-micro sm:max-w-none sm:text-caption">{webThinkingLabel(current)}</span>
 			</Button>
 			<WebBottomSheet open={open} onOpenChange={setOpen} title={t("web.thinkingSheetTitle")}>
 				<ul className="pb-[max(env(safe-area-inset-bottom),0.5rem)]">

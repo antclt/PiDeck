@@ -70,13 +70,15 @@ export function WebPromptPicker(props: { disabled?: boolean; onPick: (content: s
 	return (
 		<Popover open={open} onOpenChange={setOpen}>
 			<PopoverTrigger asChild>
-				<Button type="button" variant="ghost" size="sm" className="hidden h-8 w-8 shrink-0 p-0 text-muted-foreground sm:inline-flex" disabled={props.disabled} title={t("web.promptLibrary")} aria-label={t("web.promptLibrary")}>
-					{/* 纯图标触发器（与相邻 ImagePlus 同规格）。移动窄屏（<sm）隐藏：模型/思考/图片是核心，
-					   提示词库是增强，5 个元素在窄屏装不下会溢出把发送按钮挤折叠；宽屏再显示。 */}
+				<Button type="button" variant="ghost" size="sm" className="h-8 w-8 shrink-0 p-0 text-muted-foreground" disabled={props.disabled} title={t("web.promptLibrary")} aria-label={t("web.promptLibrary")}>
+					{/* 纯图标触发器（与相邻 ImagePlus 同规格）。移动走查 #6：操作行左侧本身横向可滚
+					    （overflow-x-auto），发送钮固定在滚区外不会被挤折叠，窄屏不再整钮隐藏——
+					    否则手机端提示词库完全不可达。 */}
 					<Sparkles className="size-4" aria-hidden="true" />
 				</Button>
 			</PopoverTrigger>
-			<PopoverContent align="start" className="w-96 p-0">
+			{/* 宽度自适应视口：w-96(384px) 在 390px 手机上贴边溢出，min() 收进视口内（移动走查 #6） */}
+			<PopoverContent align="start" className="w-[min(24rem,calc(100vw-1.5rem))] p-0">
 				<div className="flex items-center gap-2 border-b border-border px-2.5 py-2">
 					<Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
 					<Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("web.promptSearchPlaceholder")} className="h-7 border-0 shadow-none focus-visible:ring-0" />
