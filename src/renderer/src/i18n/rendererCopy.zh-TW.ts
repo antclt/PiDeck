@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: ef6a72ea2c0946d3539a1c7d789a41bc7d356022350612d36e7fea649dae1304（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: f805ae73e6c5013753866c3d1574c808da9a7133e4e05335b2eec35ce5263688（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5911,6 +5911,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"web.ungrouped": "未分組",
 	"web.ungroupedHint": "無法匹配到任何專案的會話（可能專案已被移除，或會話未歸屬專案）",
 	"web.scrollToBottom": "滾動到底部",
+	"web.queueRemove": "撤回這條排隊訊息",
+	"web.queueResume": "繼續傳送",
 	"web.streamFailed": "流式連線失敗",
 	"web.authExpired": "訪問令牌已失效，請從桌面端重新分享或掃碼開啟",
 	"web.authExpiredRetry": "重試",

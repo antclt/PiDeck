@@ -41,7 +41,7 @@ export function WebThinkingSelector(props: { level?: string; onChange: (level: s
 
 	return (
 		<>
-			<Button type="button" variant="ghost" className="h-8 shrink-0 gap-1 px-1 text-caption text-muted-foreground hover:bg-muted/60 hover:text-foreground" aria-label={t("web.thinking")} title={t("web.thinkingSheetTitle")} onClick={() => setOpen(true)}>
+			<Button type="button" variant="ghost" className="h-8 shrink-0 gap-1 px-1 text-caption text-muted-foreground hover:bg-muted/60 hover:text-foreground pointer-coarse:h-9" aria-label={t("web.thinking")} title={t("web.thinkingSheetTitle")} onClick={() => setOpen(true)}>
 				<Brain className="size-4 shrink-0" aria-hidden="true" />
 				{/* 档位标签驻留模型行（非操作行，不挤发送钮）：移动走查 #6——只显图标时
 				    用户看不到当前思考档位是关还是高；窄屏用 text-micro + 限宽，宽屏常规字号。 */}

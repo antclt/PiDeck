@@ -5927,6 +5927,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"web.ungrouped": "Ungrouped",
 	"web.ungroupedHint": "Sessions that don't match any project (the project may have been removed, or the session has no project)",
 	"web.scrollToBottom": "Scroll to bottom",
+	"web.queueRemove": "Remove queued message",
+	"web.queueResume": "Send now",
 	"web.streamFailed": "Stream failed",
 	"web.authExpired": "Access token expired. Re-share or scan a new QR from the desktop app.",
 	"web.authExpiredRetry": "Retry",

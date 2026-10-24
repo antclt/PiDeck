@@ -36,6 +36,7 @@ import { chatMessagesToUiMessages, createProject, createSession, deleteProject, 
 import { abortRuntime, cloneRuntime, compactRuntime, copySession, deleteSession, downloadSessionHtml, editRuntimeMessage, deleteRuntimeMessage, prepareResend, renameSession, restartRuntime, activateRuntime, forkRuntimeSession, getForkMessages } from "./webApi";
 import { fetchRuntimeContextUsage, setRuntimePermission } from "./webApi";
 import { dataUrlToFilePart } from "./webMessageParts";
+import { shouldFlushQueuedPrompt } from "./webQueueFlush";
 import { sessionUiMessagesToMarkdown } from "./webMarkdown";
 import { removeMessageOptimistic, replaceMessageTextOptimistic } from "./webMessageOptimistic";
 import { WebSessionStrips } from "./WebSessionStrips";
@@ -60,6 +61,16 @@ import type { WebProject, WebRuntime, WebState, WebContextUsage } from "./webTyp
 type HistoryMeta = {
 	total: number;
 	nextBefore: number | null;
+};
+
+/** 待发送队列项：回合进行中提交的消息暂存于此，本轮结束后按序投递。 */
+type WebQueuedPrompt = {
+	id: string;
+	text: string;
+	/** 图片 data URL（已压缩）；投递时转 file parts。 */
+	images: string[];
+	/** 计划模式等隐藏指令，随 body 透传后端。 */
+	agentMessage?: string;
 };
 
 export function WebChatApp() {
@@ -551,6 +562,9 @@ export function WebChatApp() {
 	// P0：停止 = 客户端断流 + 尽力打断 pi runtime（有 agent 时）。两者都发：
 	// stop() 只断 SSE，pi 会继续跑完；abortRuntime 才是真正的打断命令。
 	const handleStop = () => {
+		// 停止后不再自动投递排队消息（否则打断的下一秒就发出下一条，用户以为没停住）；
+		// 队列条上标「已暂停」，用户再次发送即可恢复。
+		if ((queuedBySession[activeSessionId] ?? []).length > 0) setQueuePausedBoth(true);
 		stop();
 		const runtime = activeSessionId ? runtimeFor(activeSessionId) : undefined;
 		if (runtime) {
@@ -570,6 +584,8 @@ export function WebChatApp() {
 	// 乐观气泡也不渲染缩略图（uiMessageImages 只认 file parts）。两处一并修正。
 	const handleSend = (text: string, images: string[], agentMessage?: string) => {
 		if (!text.trim() && images.length === 0) return;
+		// 用户主动发新消息 = 恢复自动投递（覆盖「停止后暂停」）
+		queuePausedRef.current = false;
 		if (!activeSessionId) {
 			void sendFromHome(text, images, agentMessage);
 			return;
@@ -577,6 +593,76 @@ export function WebChatApp() {
 		// agentMessage：计划模式等隐藏指令（复用桌面 composer 通道），随 body 透传后端
 		void sendMessage({ text, files: images.map(dataUrlToFilePart) }, { body: { ...(agentMessage ? { agentMessage } : {}) } });
 	};
+
+	// ── 排队消息（对齐桌面 followUp 队列语义）──────────────────────────────
+	// pi 在回合进行中拒绝新 prompt（turnActive），所以 Web 端在客户端暂存、等回合结束再投递。
+	// 队列按会话归属（切会话不丢），停止后暂停自动投递（避免「停止」后立刻又发出下一条）。
+	const [queuedBySession, setQueuedBySession] = useState<Record<string, WebQueuedPrompt[]>>({});
+	const queuePausedRef = useRef(false);
+	const [queuePaused, setQueuePaused] = useState(false);
+	const queueSeqRef = useRef(0);
+
+	const setQueuePausedBoth = (paused: boolean) => {
+		queuePausedRef.current = paused;
+		setQueuePaused(paused);
+	};
+
+	const handleQueue = (text: string, images: string[], agentMessage?: string) => {
+		const sessionId = activeSessionIdRef.current;
+		if (!sessionId) return;
+		if (!text.trim() && images.length === 0) return;
+		queueSeqRef.current += 1;
+		const item: WebQueuedPrompt = { id: `q-${Date.now()}-${queueSeqRef.current}`, text, images, agentMessage };
+		setQueuedBySession((current) => ({ ...current, [sessionId]: [...(current[sessionId] ?? []), item] }));
+		// 用户主动排队 = 解除暂停（他期待这些消息被发出）
+		setQueuePausedBoth(false);
+	};
+
+	const handleRemoveQueued = (id: string) => {
+		const sessionId = activeSessionIdRef.current;
+		if (!sessionId) return;
+		setQueuedBySession((current) => {
+			const next = (current[sessionId] ?? []).filter((item) => item.id !== id);
+			return { ...current, [sessionId]: next };
+		});
+	};
+
+	// 队列消费：本轮结束（无流式、runtime 不在跑、无挂起 Ask）后按序投递下一条。
+	// 只在当前会话消费（其他会话的队列休眠到切回去），与桌面「按会话归属」一致。
+	const queueFlushingRef = useRef(false);
+	useEffect(() => {
+		const sessionId = activeSessionId;
+		if (!sessionId) return;
+		const queueForSession = queuedBySession[sessionId] ?? [];
+		const flushable = shouldFlushQueuedPrompt({
+			streaming,
+			externalStreaming,
+			runtimeStatus: activeRuntime?.status,
+			// 挂起 Ask 时不自动发：用户正在回答提问，再叠一条消息会打乱对话
+			hasPendingUiRequest: (state.pendingUiRequests ?? []).some((item) => item.sessionId === sessionId),
+			paused: queuePausedRef.current,
+			queuedCount: queueForSession.length,
+			flushing: queueFlushingRef.current,
+		});
+		if (!flushable) return;
+		const next = queueForSession[0];
+		if (!next) return;
+		queueFlushingRef.current = true;
+		setQueuedBySession((current) => ({ ...current, [sessionId]: (current[sessionId] ?? []).slice(1) }));
+		void sendMessage({ text: next.text, files: next.images.map(dataUrlToFilePart) }, { body: { ...(next.agentMessage ? { agentMessage: next.agentMessage } : {}) } }).then(
+			() => {
+				queueFlushingRef.current = false;
+			},
+			(error: unknown) => {
+				queueFlushingRef.current = false;
+				// 投递失败（pi 拒收/断线）：把这一条放回队首并暂停，让用户看得见、可重试或撤回——
+				// 静默吞掉等于丢消息（队列条会直接从界面上消失）。
+				setQueuedBySession((current) => ({ ...current, [sessionId]: [next, ...(current[sessionId] ?? [])] }));
+				setQueuePausedBoth(true);
+				setCommandError(error instanceof Error ? error.message : String(error));
+			},
+		);
+	}, [activeSessionId, streaming, externalStreaming, activeRuntime?.status, state.pendingUiRequests, queuedBySession, sendMessage]);
 
 	// 草稿期后端切换：无会话 → 暂存随下次新建生效；有会话 → 仅「本页新建零消息草稿」可写
 	// catalog（历史/复制/克隆/fork 会话自带消息记录，切后端会让历史错位，一律拒绝）。
@@ -1274,6 +1360,11 @@ export function WebChatApp() {
 					}}
 					onEngagedChange={handleComposerEngagedChange}
 					hidden={composerHidden}
+					onQueue={handleQueue}
+					queued={(queuedBySession[activeSessionId] ?? []).map((item) => ({ id: item.id, text: item.text, imageCount: item.images.length }))}
+					onRemoveQueued={handleRemoveQueued}
+					queuePaused={queuePaused}
+					onResumeQueue={() => setQueuePausedBoth(false)}
 				/>
 			</main>
 			{/* S6.3：DSH 工具面板（仅 dsh 会话头部按钮触发） */}

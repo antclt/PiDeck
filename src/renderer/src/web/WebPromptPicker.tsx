@@ -70,7 +70,7 @@ export function WebPromptPicker(props: { disabled?: boolean; onPick: (content: s
 	return (
 		<Popover open={open} onOpenChange={setOpen}>
 			<PopoverTrigger asChild>
-				<Button type="button" variant="ghost" size="sm" className="h-8 w-8 shrink-0 p-0 text-muted-foreground" disabled={props.disabled} title={t("web.promptLibrary")} aria-label={t("web.promptLibrary")}>
+				<Button type="button" variant="ghost" size="sm" className="h-8 w-8 shrink-0 p-0 text-muted-foreground pointer-coarse:h-9 pointer-coarse:w-9" disabled={props.disabled} title={t("web.promptLibrary")} aria-label={t("web.promptLibrary")}>
 					{/* 纯图标触发器（与相邻 ImagePlus 同规格）。移动走查 #6：操作行左侧本身横向可滚
 					    （overflow-x-auto），发送钮固定在滚区外不会被挤折叠，窄屏不再整钮隐藏——
 					    否则手机端提示词库完全不可达。 */}
