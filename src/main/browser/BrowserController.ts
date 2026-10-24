@@ -3,10 +3,12 @@ import type { CuaActionType, CuaGate } from "../cua/CuaGate";
 import { BrowserAgentError, browserAgentErrorCode, errorMessage, mapGateReason } from "./browserErrors";
 import { isAllowedBrowserPanelUrl } from "./browserSecurity";
 import {
+	buildClearOverlaysExpression,
 	buildFallbackClickExpression,
 	buildFallbackKeyExpression,
 	buildFallbackScrollExpression,
 	buildFallbackTypeExpression,
+	buildFindHighlightExpression,
 	buildFocusAndSelectExpression,
 	buildFocusExpression,
 	buildHighlightExpression,
@@ -146,6 +148,14 @@ export class BrowserController {
 				return text.length > 0 && haystack.includes(text);
 			})
 			.map((element) => ({ ref: element.ref, role: element.role, name: element.name, disabled: element.disabled }));
+		// 匹配可视化：把命中的元素在页面上批量框出来（用户看到的「找到了哪些」）。纯视觉，失败不影响查找结果。
+		if (matches.length > 0) {
+			try {
+				await this.evaluateWithFallback(target.guest, buildFindHighlightExpression(matches.slice(0, 50).map((element) => element.ref)));
+			} catch {
+				// 高亮失败不影响查找。
+			}
+		}
 		return { target: this.targetInfo(target), snapshotId: snapshot.snapshotId, matches: matches.slice(0, 50) };
 	}
 
@@ -165,20 +175,33 @@ export class BrowserController {
 			if (clicked !== true) throw new BrowserAgentError("stale_ref", `元素引用 ${ref} 已失效，请重新调用 browser_snapshot`);
 			return this.actionResult(target, gate, true, { ref, degraded: true });
 		}
-		// rect 必须是点击时刻的视口坐标：先把元素滚到中央，再重新取一次。
-		await this.evaluate(target.guest, buildScrollIntoViewExpression(ref));
-		const rect = (await this.resolveRef(target.guest, ref)).rect;
-		await this.highlightRef(target.guest, ref, resolved.name);
-		const point = { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
-		await this.deps.cdp.withGuest(target.guest, async (send) => {
-			await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y, modifiers: modifierMask(input.modifiers) });
-			for (let index = 1; index <= clickCount; index += 1) {
-				const params = { x: point.x, y: point.y, button, buttons: buttonMask(button), clickCount: index, modifiers: modifierMask(input.modifiers) };
-				await send("Input.dispatchMouseEvent", { ...params, type: "mousePressed" });
-				await send("Input.dispatchMouseEvent", { ...params, type: "mouseReleased" });
-			}
-		});
-		return this.actionResult(target, gate, false, { ref, x: point.x, y: point.y, clickCount });
+		// 单租约执行段：滚动定位 → 重读 rect → 高亮 → Input 序列共用一次 CDP attach。
+		// 此前每步各开一次租约（一次 click 最多 5 次 attach/detach），既浪费也在间隙暴露给 DevTools 抢占，
+		// 动作中途被抢占会让 degraded 标志前后不一致；内嵌的 highlightRef/pressKeyInternal 经引用计数复用同一租约。
+		let point = { x: 0, y: 0 };
+		try {
+			await this.deps.cdp.withGuest(target.guest, async (send) => {
+				await this.evaluateVia(send, buildScrollIntoViewExpression(ref));
+				const rect = this.parseResolvedRef(await this.evaluateVia(send, buildResolveRefExpression(ref)), ref, false).rect;
+				await this.highlightRef(target.guest, ref, resolved.name);
+				point = { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
+				await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y, modifiers: modifierMask(input.modifiers) });
+				for (let index = 1; index <= clickCount; index += 1) {
+					const params = { x: point.x, y: point.y, button, buttons: buttonMask(button), clickCount: index, modifiers: modifierMask(input.modifiers) };
+					await send("Input.dispatchMouseEvent", { ...params, type: "mousePressed" });
+					await send("Input.dispatchMouseEvent", { ...params, type: "mouseReleased" });
+				}
+			});
+			return this.actionResult(target, gate, false, { ref, x: point.x, y: point.y, clickCount });
+		} catch (error) {
+			const code = browserAgentErrorCode(error);
+			if (!code || !CDP_FALLBACK_CODES.has(code)) throw error;
+			// 执行段 CDP 被占（解析与执行之间打开了 DevTools）：整段降级 DOM click。
+			await this.highlightRef(target.guest, ref, resolved.name);
+			const clicked = await target.guest.executeJavaScript(buildFallbackClickExpression(ref), true);
+			if (clicked !== true) throw new BrowserAgentError("stale_ref", `元素引用 ${ref} 已失效，请重新调用 browser_snapshot`);
+			return this.actionResult(target, gate, true, { ref, degraded: true });
+		}
 	}
 
 	async type(input: { ref: string; text: string; clear?: boolean; submit?: boolean; snapshotId?: number }, meta: BrowserActionMeta): Promise<BrowserActionResult> {
@@ -197,14 +220,27 @@ export class BrowserController {
 			if (input.submit) await target.guest.executeJavaScript(buildFallbackKeyExpression("Enter"), true);
 			return this.actionResult(target, gate, true, { ref, textLength: input.text.length });
 		}
-		await this.evaluate(target.guest, buildScrollIntoViewExpression(ref));
-		await this.highlightRef(target.guest, ref, resolved.name);
-		await this.evaluate(target.guest, input.clear ? buildFocusAndSelectExpression(ref) : buildFocusExpression(ref));
-		await this.deps.cdp.withGuest(target.guest, async (send) => {
-			await send("Input.insertText", { text: input.text });
-		});
-		if (input.submit) await this.pressKeyInternal(target.guest, KEY_DEFS.enter, []);
-		return this.actionResult(target, gate, false, { ref, textLength: input.text.length, submitted: input.submit === true });
+		// 单租约执行段（同 click）：滚动 → 高亮 → 聚焦 → 输入 → 回车共用一次 attach。
+		try {
+			await this.deps.cdp.withGuest(target.guest, async (send) => {
+				await this.evaluateVia(send, buildScrollIntoViewExpression(ref));
+				await this.highlightRef(target.guest, ref, resolved.name);
+				await this.evaluateVia(send, input.clear ? buildFocusAndSelectExpression(ref) : buildFocusExpression(ref));
+				await send("Input.insertText", { text: input.text });
+				if (input.submit) await this.pressKeyInternal(target.guest, KEY_DEFS.enter, []);
+			});
+			return this.actionResult(target, gate, false, { ref, textLength: input.text.length, submitted: input.submit === true });
+		} catch (error) {
+			const code = browserAgentErrorCode(error);
+			if (!code || !CDP_FALLBACK_CODES.has(code)) throw error;
+			// 执行段 CDP 被占：整段降级 executeJavaScript 输入。
+			await this.highlightRef(target.guest, ref, resolved.name);
+			if (input.clear) await target.guest.executeJavaScript(buildFocusAndSelectExpression(ref), true);
+			const typed = await target.guest.executeJavaScript(buildFallbackTypeExpression(ref, input.text, input.clear === true), true);
+			if (typed !== true) throw new BrowserAgentError("stale_ref", `元素引用 ${ref} 已失效，请重新调用 browser_snapshot`);
+			if (input.submit) await target.guest.executeJavaScript(buildFallbackKeyExpression("Enter"), true);
+			return this.actionResult(target, gate, true, { ref, textLength: input.text.length });
+		}
 	}
 
 	async pressKey(input: { key: string; modifiers?: string[]; snapshotId?: number }, meta: BrowserActionMeta): Promise<BrowserActionResult> {
@@ -294,7 +330,15 @@ export class BrowserController {
 		const capture = this.deps.capture ?? captureBrowserScreenshot;
 		let image: BrowserScreenshotResult;
 		try {
-			image = await this.deps.cdp.withGuest(target.guest, (send) => capture(target.guest, send, request, state.state.viewport, state.state.devicePixelRatio));
+			image = await this.deps.cdp.withGuest(target.guest, async (send) => {
+				// 先清可视化覆盖层：识别框/查找框/高亮框只服务用户，不该进入模型的截图视野。
+				try {
+					await this.evaluateVia(send, buildClearOverlaysExpression());
+				} catch {
+					// 清理失败只影响画面干净度，不阻断截图。
+				}
+				return capture(target.guest, send, request, state.state.viewport, state.state.devicePixelRatio);
+			});
 		} catch (error) {
 			const code = browserAgentErrorCode(error);
 			if (!code || !CDP_FALLBACK_CODES.has(code)) throw error;
@@ -423,6 +467,10 @@ export class BrowserController {
 
 	private async resolveRef(guest: WebContents, ref: string): Promise<ResolvedRef> {
 		const { value, degraded } = await this.evaluateWithFallback(guest, buildResolveRefExpression(ref));
+		return this.parseResolvedRef(value, ref, degraded);
+	}
+
+	private parseResolvedRef(value: unknown, ref: string, degraded: boolean): ResolvedRef {
 		if (!isRecord(value) || value.found !== true) throw new BrowserAgentError("stale_ref", `元素引用 ${ref} 已失效，请重新调用 browser_snapshot`);
 		const rect = isRecord(value.rect) ? value.rect : {};
 		return {
@@ -438,6 +486,11 @@ export class BrowserController {
 				height: readFiniteNumber(rect.height, 0),
 			},
 		};
+	}
+
+	/** 在已持有的 CDP 租约内执行页面表达式（复用租约，不再 attach/detach）。 */
+	private async evaluateVia(send: CdpSend, expression: string): Promise<unknown> {
+		return readRuntimeValue(await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }));
 	}
 
 	private async approve(action: CuaActionType, meta: BrowserActionMeta, detail: Record<string, unknown>): Promise<string> {

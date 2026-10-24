@@ -408,6 +408,7 @@ e2e（可选，T6 再做）：`npx playwright test e2e/browser-agent.spec.ts`（
 - 2026-10-24 T6 核心链路 smoke：`e2e/browser-agent.spec.ts`——seed `browserAgentEnabled:true` 启动 host，经 mcp.json（临时 HOME 隔离）用真实 MCP 客户端验证：恰好 10 个 browser_* 工具（无 cua_* 泄漏）、真实页面快照 ref、CDP 点击（gate=auto_approve、非降级）、waitFor 页面内匹配、browser_type 回读。两次运行 9s 稳定通过。
 - 2026-10-24 T6 审批链路 smoke：`e2e/browser-agent-approval.spec.ts`——seed `browserAgentAutoApprove:false`，写动作阻塞等待、渲染层审批框呈现动作名与目标 URL、点「允许」后动作执行（gate=approved）且页面效果可 waitFor。与核心链路 spec 并行跑 17.6s 双绿。
 - 2026-10-24 选取可视化（用户诉求「想要选取的那种效果」）：`browser_snapshot` 默认在页面上给本轮识别的元素画蓝色框 + ref 标签（约 2s 淡出，`overlay:false` 可关）；click/type/scroll 作用于 ref 前在页面上闪琥珀色高亮框 + 「ref · 名称」标签（best-effort，失败不阻断动作）。纯视觉、pointer-events:none，不进快照数据、不扩大工具面。
+- 2026-10-24 优化轮：click/type 执行段合并为单租约（滚动定位→重读 rect→高亮→Input 序列共用一次 CDP attach，一条 click 从最多 5 次 attach/detach 降到 2 次——解析 1 次 + 执行 1 次；内嵌 highlight/pressKey 经引用计数复用同一租约；执行段被 DevTools 抢占时整段降级，degraded 不再前后不一致）；`browser_find` 匹配项批量琥珀色高亮（单表达式完成，非逐个往返）；`browser_screenshot` 捕获前清除识别/查找/高亮覆盖层（辅助框只服务用户视野，不进模型截图）。
 
 ---
 

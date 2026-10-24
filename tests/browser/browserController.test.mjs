@@ -254,6 +254,53 @@ test("waitFor polls inside a single CDP lease and reports a match", async () => 
 	assert.equal(withGuestCalls, 1, "the whole wait must reuse one CDP lease, not attach per poll");
 });
 
+test("click execution runs inside a single CDP lease", async () => {
+	const base = makeSnapshotCdp();
+	let depth = 0;
+	let outerLeases = 0;
+	const innerWithGuest = base.withGuest;
+	base.withGuest = async (guest, run) => {
+		if (depth === 0) outerLeases += 1;
+		depth += 1;
+		try {
+			return await innerWithGuest(guest, run);
+		} finally {
+			depth -= 1;
+		}
+	};
+	const controller = makeController({ cdp: base });
+	await controller.snapshot();
+	await controller.click({ ref: "e1" }, META);
+	// snapshot 1 次 + click 解析 1 次 + 执行段 1 次（滚动/重读/高亮/Input 全部复用同一租约）。
+	// 重构前 click 一条链要 5 次独立 attach/detach，中途被 DevTools 抢占会让 degraded 前后不一致。
+	assert.equal(outerLeases, 3, `expected 3 outer leases (snapshot + resolve + execution), got ${outerLeases}`);
+});
+
+test("screenshot clears visualization overlays before capturing", async () => {
+	const cdp = makeCdp((method) => {
+		if (method === "Runtime.evaluate") return evaluateResult({ url: "https://example.com/", title: "t", viewport: { width: 100, height: 50 }, scroll: { x: 0, y: 0 }, devicePixelRatio: 1 });
+		return {};
+	});
+	const controller = makeController({ cdp });
+	await controller.screenshot();
+	assert.ok(
+		cdp.calls.some((call) => call.method === "Runtime.evaluate" && String(call.params?.expression ?? "").includes("__pideck_agent_boxes")),
+		"recognition/highlight overlays must be cleared before the capture",
+	);
+});
+
+test("find flashes the matched elements on the page", async () => {
+	const cdp = makeSnapshotCdp();
+	const controller = makeController({ cdp });
+	await controller.snapshot();
+	const result = await controller.find({ text: "go" });
+	assert.equal(result.matches.length, 1);
+	assert.ok(
+		cdp.calls.some((call) => call.method === "Runtime.evaluate" && String(call.params?.expression ?? "").includes("__pideck_agent_find")),
+		"find matches must be outlined on the page",
+	);
+});
+
 test("waitFor degrades to executeJavaScript polling when CDP is busy", async () => {
 	const execCalls = [];
 	const guest = makeGuest({ executeJavaScript: async () => execCalls.push(1) >= 2 });

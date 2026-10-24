@@ -22,6 +22,8 @@ test("every page expression compiles as JavaScript", () => {
 		["fallbackKey", ps.buildFallbackKeyExpression("Enter")],
 		["waitForText", ps.buildWaitForTextExpression('完成"报价')],
 		["highlight", ps.buildHighlightExpression("e7", "e7 · submit")],
+		["clearOverlays", ps.buildClearOverlaysExpression()],
+		["findHighlight", ps.buildFindHighlightExpression(["e1", "e3"])],
 		["snapshotExpr", buildSnapshotExpression({ maxElements: 50, includeBoxes: true })],
 	];
 	for (const [name, expression] of expressions) {
