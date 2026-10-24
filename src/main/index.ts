@@ -6287,10 +6287,15 @@ app
 		void wechatService.start().catch((error: unknown) => {
 			void appLogger?.warn("wechat", "WeChat bridge autostart failed", error);
 		});
-		// 配置备份（手动模式）：仅在备份目录为空（首次使用）时自动建一份 first-run，
-		// 之后不再自动备份。同步快，不挡首帧；失败仅记录，不阻断启动。
-		configBackupManager?.ensureInitialBackups();
 		await createWindow();
+		// 配置备份（手动模式）：仅在备份目录为空（首次使用）时自动建一份 first-run，
+		// 之后不再自动备份。2027-02 性能治理：list() 会对每个备份 JSON 全量解析（内嵌
+		// settings/models 原文，可达 MB 级），首启还要同步读 6 个配置文件——原先排在
+		// createWindow 之前的同步链上推迟首窗可见（注释自称"不挡首帧"与执行点矛盾）。
+		// 挪到窗口创建后执行，失败仅记录，不阻断启动。
+		setImmediate(() => {
+			configBackupManager?.ensureInitialBackups();
+		});
 		// Quick tasks should not wait for unrelated WSL/proxy startup probes. The controller
 		// retains validated intent until the renderer subscribes or requests its snapshot.
 		const coldStartTarget = extractFocusTargetFromArgv(process.argv);

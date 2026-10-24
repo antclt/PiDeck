@@ -1,5 +1,5 @@
 import { app, BrowserWindow, Menu } from "electron";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { mkdir, readFile, writeFile, copyFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ipcChannels } from "../../shared/ipc";
@@ -115,13 +115,27 @@ export function readBootPreferences() {
  * 映射：showThinking = !hideThinkingBlock
  * 若 pi agent 文件不存在或 hideThinkingBlock 未设置，返回 undefined。
  */
+/**
+ * (size, mtime) 结果缓存（2027-02 性能审计）：settingsStore.get() 全仓 200+ 调用点
+ * （每次 RPC 取 rpcTimeout、settings:get IPC、update 收尾……），原先每次都同步
+ * readFileSync + JSON.parse ~/.pi/agent/settings.json——Windows+杀软下每跳 0.1-0.5ms，
+ * 消息发送/spawn 密集期累积微卡顿。文件未变时结果必然一致，stat 判据复用。
+ */
+const piAgentShowThinkingCache = new Map<string, { size: number; mtimeMs: number; value: boolean | undefined }>();
+
 function readPiAgentShowThinking(): boolean | undefined {
 	try {
-		const agentRaw = readFileSync(piAgentSettingsPath(), "utf8");
-		const agentSettings = JSON.parse(agentRaw) as Record<string, unknown>;
-		if (typeof agentSettings.hideThinkingBlock === "boolean") {
-			return !agentSettings.hideThinkingBlock;
+		const path = piAgentSettingsPath();
+		const info = statSync(path);
+		const cached = piAgentShowThinkingCache.get(path);
+		if (cached && cached.size === info.size && cached.mtimeMs === info.mtimeMs) {
+			return cached.value;
 		}
+		const agentRaw = readFileSync(path, "utf8");
+		const agentSettings = JSON.parse(agentRaw) as Record<string, unknown>;
+		const value = typeof agentSettings.hideThinkingBlock === "boolean" ? !agentSettings.hideThinkingBlock : undefined;
+		piAgentShowThinkingCache.set(path, { size: info.size, mtimeMs: info.mtimeMs, value });
+		return value;
 	} catch {
 		// 文件不存在或解析失败，静默忽略
 	}
