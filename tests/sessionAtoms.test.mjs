@@ -217,6 +217,64 @@ test("message cache eviction releases the matching outline projection", () => {
 
 	assert.equal(atoms.outlineProjectionCache.getSessionOutlineProjection("session-a", first.outlineRevision), undefined);
 });
+
+test("estimateSessionCacheEntryBytes counts text, thinking, image base64 and history (utf-16 doubling)", () => {
+	const atoms = loadAtoms();
+	const message = (text, extras = {}) => ({ id: "m", agentId: "agent", role: "assistant", text, timestamp: 1, ...extras });
+	const base = [message("ab")];
+	// UTF-16 口径：字符数 × 2 + 每条固定开销 256（128 字符 × 2）
+	assert.equal(atoms.estimateSessionCacheEntryBytes(base), (128 + 2) * 2);
+	// thinking 与 images.data 都计入；图片 ref 形态按常量 64 字符计
+	const withExtras = [message("ab", { thinking: "cd" }), message("e", { images: [{ type: "image", data: "Zm9v" }, { type: "image" }] })];
+	assert.equal(atoms.estimateSessionCacheEntryBytes(withExtras), (128 + 2 + 2 + (128 + 1 + 4 + 64)) * 2);
+	// history 前缀并入估算
+	assert.equal(atoms.estimateSessionCacheEntryBytes(base, [message("xyz")]), (128 + 2 + (128 + 3)) * 2);
+});
+
+test("selectByteBudgetEvictions evicts oldest closed entries first and never touches open tabs", () => {
+	const atoms = loadAtoms();
+	const bytes = new Map([
+		["open-big", 90],
+		["closed-new", 40],
+		["closed-old", 40],
+	]);
+	const opened = new Set(["open-big"]);
+	// 布局 [...open, ...closed 新→旧]：尾部是 closed-old，预算 60 时先淘汰它
+	// （vm realm 数组与字面量数组原型不同，先展开为本 realm 数组再比）
+	const first = atoms.selectByteBudgetEvictions(["open-big", "closed-new", "closed-old"], bytes, opened, 60);
+	assert.deepEqual([...first.retained], ["open-big", "closed-new"]);
+	assert.deepEqual([...first.evicted], ["closed-old"]);
+	// 关闭条目合计 ≤ 预算：原样返回（内容一致即可）
+	const within = atoms.selectByteBudgetEvictions(["open-big", "closed-new"], bytes, opened, 60);
+	assert.deepEqual([...within.retained], ["open-big", "closed-new"]);
+	assert.deepEqual([...within.evicted], []);
+	// 打开中的条目无论多大都不淘汰（无条件保护语义），哪怕预算已被它单独击穿
+	const openOnly = atoms.selectByteBudgetEvictions(["open-big"], bytes, opened, 10);
+	assert.deepEqual([...openOnly.retained], ["open-big"]);
+	assert.deepEqual([...openOnly.evicted], []);
+});
+
+test("closed-tab cache entries over the byte budget are evicted oldest-first; open tabs survive", () => {
+	const atoms = loadAtoms();
+	const store = createStore();
+	// 单条 32Mi 字符文本 ≈ 估算 64MiB+256B，两条即击穿 64MiB 关闭条目预算
+	const bigText = "x".repeat(32 * 1024 * 1024);
+	store.set(atoms.cacheSessionMessagesAtom, {
+		sessionId: "session-closed",
+		messages: [chatMessage("m1", "assistant", bigText)],
+		source: "runtime",
+	});
+	store.set(atoms.sessionTabIdsAtom, ["session-open"]);
+	store.set(atoms.cacheSessionMessagesAtom, {
+		sessionId: "session-open",
+		messages: [chatMessage("m2", "assistant", bigText)],
+		source: "runtime",
+	});
+	const cache = store.get(atoms.sessionMessagesCacheAtom);
+	assert.equal(cache["session-closed"], undefined, "超预算的已关闭条目按最旧先淘汰");
+	assert.ok(cache["session-open"], "打开中的条目不受字节预算影响");
+	assert.ok(cache["session-open"].bytes > 64 * 1024 * 1024, "写入条目随重建刷新字节估算");
+});
 test("does not let a stale disk write clobber a live runtime cache", () => {
 	// A runtime→disk overwrite with fewer messages than currently cached is
 	// treated as stale (e.g. anonymous sessions where disk always returns []).

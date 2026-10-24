@@ -43,6 +43,72 @@ export function selectRetainedCacheEntryIds(lru: readonly string[], openedTabIds
 	return [...open, ...closed.slice(0, closedBudget)];
 }
 
+/**
+ * 已关闭 Tab 条目的合计字节预算（2026-10 内存轮）。
+ * 条目数有 LRU 上限、单条目消息数有 DISK_HISTORY_MESSAGE_LIMIT 封顶，但消息的
+ * **内容体积**没有界：大代码块/长思考/内联 base64 的会话单条目可达数十 MB，
+ * 8 条「浏览过又关掉」的会话就是数百 MB 常驻。已关闭的条目不值得为回切流畅性
+ * 全额保留——超预算按最旧先淘汰，切回时与 LRU 淘汰同路径重读盘（尾部 9 轮）。
+ * 只作用于已关闭 Tab 的条目：打开中的 Tab 保持无条件保护（上面 selectRetained 的
+ * 语义不变，挤掉正在看的会话会闪骨架屏）。
+ */
+export const SESSION_CACHE_CLOSED_ENTRY_BYTE_BUDGET = 64 * 1024 * 1024;
+
+/** 单条消息的固定开销估计（字符数口径）：id/agentId/meta/时间戳与对象头等，与内容无关。 */
+const CHAT_MESSAGE_FIXED_OVERHEAD_CHARS = 128;
+/** 图片 ref 形态（非 base64）的元数据量级估计（字符数）。 */
+const IMAGE_REF_OVERHEAD_CHARS = 64;
+
+/**
+ * 估算缓存条目的驻留字节量（UTF-16 口径：字符数 × 2，V8 两字节字符串上界）。
+ * 只数大字段（text/thinking/images.data），不做序列化——估算值只服务预算淘汰，
+ * 偏差一个量级不影响决策；length 读取是 O(1)，整遍扫描 O(消息数)，相对写入路径
+ * 既有的整缓存浅拷贝可忽略。
+ */
+export function estimateSessionCacheEntryBytes(messages: readonly ChatMessage[], history?: readonly ChatMessage[]): number {
+	let chars = 0;
+	const visit = (list: readonly ChatMessage[]) => {
+		for (const message of list) {
+			chars += CHAT_MESSAGE_FIXED_OVERHEAD_CHARS + message.text.length + (message.thinking?.length ?? 0);
+			// 图片：base64 data（正在生成/发送的临时形态）按字符串长度计；ref 形态
+			// 只有引用串（真实位图不在 JS 堆上），按常量量级计。
+			for (const image of message.images ?? []) {
+				chars += typeof image.data === "string" ? image.data.length : IMAGE_REF_OVERHEAD_CHARS;
+			}
+		}
+	};
+	visit(messages);
+	if (history) visit(history);
+	return chars * 2;
+}
+
+/**
+ * 已关闭 Tab 条目的字节预算裁剪：从 retainedIds 的最旧端（数组尾部，见
+ * selectRetainedCacheEntryIds 的 [...open, ...closed 新→旧] 布局）开始淘汰关闭条目，
+ * 直到关闭条目合计字节 ≤ budget。打开中的条目一律不淘汰。
+ * bytesById 缺条目按 0 计（调用方应先补算，见 cacheSessionMessagesAtom）。
+ */
+export function selectByteBudgetEvictions(retainedIds: readonly string[], bytesById: ReadonlyMap<string, number>, openedTabIds: ReadonlySet<string>, budget: number): { retained: string[]; evicted: string[] } {
+	let closedBytes = 0;
+	const closed = new Set<string>();
+	for (const id of retainedIds) {
+		if (openedTabIds.has(id)) continue;
+		closed.add(id);
+		closedBytes += bytesById.get(id) ?? 0;
+	}
+	if (closedBytes <= budget) return { retained: [...retainedIds], evicted: [] };
+	const evicted: string[] = [];
+	const retained = [...retainedIds];
+	for (let index = retained.length - 1; index >= 0 && closedBytes > budget; index -= 1) {
+		const id = retained[index];
+		if (!closed.has(id)) continue;
+		closedBytes -= bytesById.get(id) ?? 0;
+		evicted.push(id);
+		retained.splice(index, 1);
+	}
+	return { retained, evicted };
+}
+
 export type SessionRuntimeViewState = {
 	agentId?: string;
 	runtimeGeneration: number;
@@ -87,6 +153,11 @@ export type SessionMessageCacheEntry = {
 	revision: number;
 	source: "disk" | "runtime";
 	updatedAt: number;
+	/**
+	 * 条目驻留字节估算（estimateSessionCacheEntryBytes，写入时随条目重建刷新）。
+	 * 供已关闭 Tab 条目的字节预算淘汰用；本版本前写入的条目缺省，读取方需补算。
+	 */
+	bytes?: number;
 	/** Changes only when the user-message outline can change. */
 	outlineRevision?: number;
 	/** Last user-message index in messages (not the separate history prefix). */
@@ -600,6 +671,9 @@ export const cacheSessionMessagesAtom = atom(
 		const outlineLastUserIndex = outlineChanged ? findLastUserMessageIndex(input.messages) : (current?.outlineLastUserIndex ?? findLastUserMessageIndex(input.messages));
 		if (shouldReplaceOutlineProjection) releaseSessionOutlineProjection(input.sessionId);
 		const revision = input.source === "runtime" ? (current?.revision ?? 0) + 1 : (current?.revision ?? 0);
+		// runtime 窗口语义（2026-08 激活分页）：entry 每次整体重建，调用方必须显式给出
+		// windowStart/history（undefined = 清除，如版本失效丢前缀）；disk 来源无窗口概念。
+		const storedHistory = input.source === "runtime" ? input.history : undefined;
 		const nextCache = {
 			...cache,
 			[input.sessionId]: {
@@ -609,14 +683,14 @@ export const cacheSessionMessagesAtom = atom(
 				updatedAt: Date.now(),
 				outlineRevision,
 				outlineLastUserIndex,
+				// 条目驻留字节估算（2026-10 内存轮）：随本次重建刷新，供已关闭 Tab
+				// 条目的字节预算淘汰用（下方 selectByteBudgetEvictions）。
+				bytes: estimateSessionCacheEntryBytes(input.messages, storedHistory?.messages),
 				...(input.source === "disk" && input.page ? { page: input.page } : {}),
-				// runtime 窗口语义（2026-08 激活分页）：entry 每次整体重建，
-				// 调用方必须显式给出 windowStart/history（undefined = 清除，如版本失效丢前缀）；
-				// disk 来源无窗口概念，两字段缺省即不存在
 				...(input.source === "runtime"
 					? {
 							windowStart: input.windowStart && input.windowStart > 0 ? input.windowStart : undefined,
-							history: input.history,
+							history: storedHistory,
 							// 卡片数只在全量 flush 推导（增量 flush 不携带 → 保留旧值，合并偏移依赖它）
 							...(typeof input.cardCount === "number" ? { cardCount: input.cardCount } : {}),
 							// 未显式提供时保留旧值（增量 flush 不携带该字段，不应清掉有效游标）
@@ -629,7 +703,22 @@ export const cacheSessionMessagesAtom = atom(
 		// LRU 裁剪提保护：打开着 Tab 的会话（预览/常驻）优先保留，其余按最近写入补足名额。
 		// 打开中的会话若被挤出，切回时缓存条目消失 → 重读盘 + 闪「正在加载历史」骨架
 		// （生图等无 runtime 事件持续 touch 的会话最易中招，2026 用户反馈）。
-		const retainedIds = selectRetainedCacheEntryIds(lru, new Set(get(sessionTabIdsAtom)), SESSION_MESSAGE_CACHE_LIMIT);
+		const openedTabs = new Set(get(sessionTabIdsAtom));
+		let retainedIds = selectRetainedCacheEntryIds(lru, openedTabs, SESSION_MESSAGE_CACHE_LIMIT);
+		// 字节预算（closed-only，2026-10 内存轮）：条目数封顶不管内容体积，超预算的
+		// 已关闭条目按最旧先淘汰；旧形状条目（本版本前写入、无 bytes）在判定前补算
+		// （落成新对象，不原地改旧缓存里的引用）。
+		const bytesById = new Map<string, number>();
+		for (const id of retainedIds) {
+			const entry = nextCache[id];
+			if (!entry) continue;
+			if (entry.bytes === undefined) {
+				nextCache[id] = { ...entry, bytes: estimateSessionCacheEntryBytes(entry.messages, entry.history?.messages) };
+			}
+			bytesById.set(id, nextCache[id].bytes ?? 0);
+		}
+		const byteTrim = selectByteBudgetEvictions(retainedIds, bytesById, openedTabs, SESSION_CACHE_CLOSED_ENTRY_BYTE_BUDGET);
+		retainedIds = byteTrim.retained;
 		for (const cachedSessionId of Object.keys(nextCache)) {
 			if (!retainedIds.includes(cachedSessionId)) {
 				delete nextCache[cachedSessionId];
