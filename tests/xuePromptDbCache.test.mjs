@@ -1,0 +1,82 @@
+/**
+ * XuePromptManager 库实例缓存（2027-02 性能治理）。
+ *
+ * 契约：
+ * 1. 同一 db 文件（size/mtime 未变）重复查询复用同一个 sql.js 实例——不再每次
+ *    读整个 db 文件并重建库；
+ * 2. 库文件被替换（size/mtime 变）后自动重建，查询结果跟着变（不返回陈旧数据）。
+ *
+ * 读盘次数用 fs 核心模块补丁观测：loadTsCommonJs 转译出的 CJS 每次调用都经
+ * require("node:fs").readFileSync 属性访问，与测试侧 import 的是同一对象。
+ */
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import initSqlJs from "sql.js";
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
+
+// app.getAppPath() 决定 db 位置（非打包态 = <appPath>/resources/xueprompts.db），
+// 用可变引用让每个用例指向自己的临时目录。
+let appPathForTest = tmpdir();
+const { XuePromptManager } = loadTsCommonJs("src/main/prompts/XuePromptManager.ts", {
+	stubs: {
+		electron: { app: { isPackaged: false, getAppPath: () => appPathForTest } },
+		"../logging/sharedLogger": { getAppLogger: () => null },
+	},
+});
+
+/** 造一个最小 xueprompts.db：分类表 + 一行提示词。 */
+async function writeDb(path, title) {
+	const SQL = await initSqlJs();
+	const db = new SQL.Database();
+	db.run("CREATE TABLE xueprompt_categories (slug TEXT, name TEXT, count INTEGER)");
+	db.run("CREATE TABLE xueprompts (slug TEXT, url TEXT, title TEXT, category TEXT, content BLOB, description BLOB)");
+	db.run("INSERT INTO xueprompt_categories VALUES ('writing', '写作', 1)");
+	db.run("INSERT INTO xueprompts VALUES ('doc-summary', '', ?, 'writing', ?, ?)", [title, Buffer.from("内容"), Buffer.from("描述")]);
+	const bytes = db.export();
+	db.close();
+	writeFileSync(path, Buffer.from(bytes));
+}
+
+test("同库文件重复查询复用实例（不重复读盘），文件替换后自动重建", async () => {
+	const root = mkdtempSync(join(tmpdir(), "pideck-xue-dbcache-"));
+	const previousAppPath = appPathForTest;
+	try {
+		mkdirSync(join(root, "resources"), { recursive: true });
+		const dbPath = join(root, "resources", "xueprompts.db");
+		await writeDb(dbPath, "第一代标题");
+		appPathForTest = root;
+		const manager = new XuePromptManager(root);
+
+		const first = await manager.list({ page: 1, pageSize: 10 });
+		assert.equal(first.prompts.length, 1);
+		assert.equal(first.prompts[0].title, "第一代标题");
+
+		// 第二次查询与详情查询都不得再读库文件
+		const realRead = fs.readFileSync;
+		let dbReads = 0;
+		fs.readFileSync = (target, ...rest) => {
+			if (String(target) === dbPath) dbReads += 1;
+			return realRead(target, ...rest);
+		};
+		try {
+			await manager.list({ page: 1, pageSize: 10 });
+			await manager.detail("doc-summary");
+		} finally {
+			fs.readFileSync = realRead;
+		}
+		assert.equal(dbReads, 0, "缓存命中时不得重新读库文件");
+
+		// 换库（size/mtime 变）：自动重建并返回新内容
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		await writeDb(dbPath, "第二代标题完全不同长度");
+		const second = await manager.list({ page: 1, pageSize: 10 });
+		assert.equal(second.prompts[0].title, "第二代标题完全不同长度", "库文件替换后必须重建实例");
+	} finally {
+		appPathForTest = previousAppPath;
+		rmSync(root, { recursive: true, force: true });
+	}
+});

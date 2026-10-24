@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import { join } from "node:path";
 import { app } from "electron";
@@ -161,14 +161,43 @@ export class XuePromptManager {
 	/**
 	 * 延迟初始化 sql.js（WASM 只需加载一次）
 	 */
+	/**
+	 * 已打开的 sql.js 库实例缓存（2027-02 性能审计）。
+	 *
+	 * 原先每次 list()/detail() 都 readFileSync 整个 db（实测 4.34MB）+ 全量重建
+	 * sql.js 库（约 5-6ms），用完即 close。商店每次翻页、换分类、点预览都付一遍，
+	 * 且全在主进程同步路径上。库文件是不可变快照（远程下载/缓存替换走整文件替换），
+	 * 用 (size, mtimeMs) 判据复用实例：文件被换掉时自动重建并释放旧实例。
+	 * 只做 exec 只读查询，复用实例无状态污染风险（sql.js 单线程同步执行）。
+	 */
+	private dbCache: { key: string; db: import("sql.js").Database } | null = null;
+
+	/** 释放缓存的库实例（文件变化重建时 / 测试隔离用）。 */
+	releaseDbCache(): void {
+		const cached = this.dbCache;
+		this.dbCache = null;
+		if (!cached) return;
+		try {
+			cached.db.close();
+		} catch {
+			// 已关闭/内部状态异常：忽略，缓存已置空
+		}
+	}
+
 	private async getDb(dbPath: string = this.dbPath): Promise<import("sql.js").Database> {
 		const SQL = await this.initSql();
 
 		if (!existsSync(dbPath)) {
 			throw new Error(`XuePrompt 数据库不存在: ${dbPath}`);
 		}
+		const info = statSync(dbPath);
+		const key = `${dbPath}|${info.size}|${info.mtimeMs}`;
+		if (this.dbCache?.key === key) return this.dbCache.db;
+		this.releaseDbCache();
 		const buffer = readFileSync(dbPath);
-		return new SQL.Database(buffer);
+		const db = new SQL.Database(buffer);
+		this.dbCache = { key, db };
+		return db;
 	}
 
 	/**
@@ -207,9 +236,12 @@ export class XuePromptManager {
 		if (!dbPath) return this.emptyListResult(state);
 
 		// ── 通道 1：Go sidecar（常驻内存检索，支持中文搜索；失败自动降级）──
+		// 覆盖层只读一次（2027-02 性能治理）：原先 sidecar 分支与 sql.js 合并分支各读一遍
+		// （readdirSync + 逐 md readFileSync）。写盘后下一次请求自然重读，不引入缓存。
+		const overlay = this.readOverlayPrompts();
 		const xueIndex = this.deps.xueIndex;
 		if (xueIndex) {
-			const overlayEntries = this.overlayEntriesOf(this.readOverlayPrompts());
+			const overlayEntries = this.overlayEntriesOf(overlay);
 			const result = await xueIndex.list(dbPath, { category: opts?.category, search: opts?.search, page: opts?.page, pageSize: opts?.pageSize, overlay: overlayEntries });
 			if (result.ok) {
 				return { ...result.value, repoPath: dbPath, dbState: "ready" };
@@ -228,7 +260,6 @@ export class XuePromptManager {
 				count: Number(row[2] ?? 0),
 			}));
 
-			const overlay = this.readOverlayPrompts();
 			if (overlay.size === 0) {
 				return this.listFromDbOnly(db, categories, dbPath, opts);
 			}
@@ -315,7 +346,7 @@ export class XuePromptManager {
 			const prompts = all.slice(offset, offset + pageSize).map((e) => e.item);
 			return { categories: mergedCategories, prompts, repoPath: dbPath, dbState: "ready", total: all.length, page, pageSize };
 		} finally {
-			db.close();
+			// 库实例由 getDb 的 (size,mtime) 缓存托管，不在这里关闭（2027-02 性能治理）
 		}
 	}
 
@@ -426,7 +457,7 @@ export class XuePromptManager {
 				const dbRow = rows[0]?.values?.[0];
 				return this.overlayDetailOf(overlay, dbRow ? { title: String(dbRow[0] ?? ""), description: this.blobToString(dbRow[1]), url: String(dbRow[2] ?? "") } : null, slug);
 			} finally {
-				db.close();
+				// 库实例由 getDb 缓存托管（同上），不在这里关闭
 			}
 		}
 
@@ -463,7 +494,7 @@ export class XuePromptManager {
 				fullContent,
 			};
 		} finally {
-			db.close();
+			// 库实例由 getDb 的 (size,mtime) 缓存托管，不在这里关闭（2027-02 性能治理）
 		}
 	}
 
