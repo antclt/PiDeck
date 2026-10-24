@@ -88,6 +88,7 @@ export class PromptManager {
 	 * 内置推荐模板（builtin://，无磁盘文件）不可禁用。
 	 */
 	async toggle(filePath: string, enabled: boolean): Promise<PiPromptTemplateSummary> {
+		this.invalidateListCache();
 		const comparablePath = await this.resolveExistingGlobalPath(filePath);
 		const { templates } = await this.list();
 		const template = templates.find((item) => item.path === comparablePath);
@@ -95,6 +96,8 @@ export class PromptManager {
 		if (this.nativeToggle) {
 			const result = await this.nativeToggle(template.path, enabled);
 			if (!result.ok) throw new Error(this.translate("mainPrompt.toggleFailed", { error: result.error ?? "unknown" }));
+			// 变更后再失效：上面 list() 已把「改之前」的 enabled 写进缓存
+			this.invalidateListCache();
 			return { ...template, enabled };
 		}
 		if (this.settingsProvider && this.settingsPatcher) {
@@ -104,6 +107,7 @@ export class PromptManager {
 			if (!enabled) nextList.push(template.name);
 			await this.settingsPatcher({ disabledPrompts: nextList });
 		}
+		this.invalidateListCache();
 		return { ...template, enabled };
 	}
 
@@ -264,7 +268,25 @@ export class PromptManager {
 		return this.promptsDir;
 	}
 
+	/**
+	 * 全局模板列表缓存（2027-02 性能审计）。
+	 *
+	 * 切会话时 composer 会重拉模板表（useSessionComposerController.loadTemplates），
+	 * 设置页「提示词」tab 也各拉一次；list() 每次都要 realpath 边界 + 逐文件
+	 * open/读 64KB 头部/close（每模板 3 次 syscall）并把正文随摘要一起返回。
+	 * 模板目录由用户手工维护、变更频率极低：1.5s TTL + 本类所有写操作显式失效。
+	 */
+	private listCache: { at: number; value: PiPromptTemplateListResult } | null = null;
+	private static readonly LIST_CACHE_TTL_MS = 1_500;
+
+	/** 模板目录被本类改动后调用：下一次 list() 重新扫盘。 */
+	private invalidateListCache(): void {
+		this.listCache = null;
+	}
+
 	async list(): Promise<PiPromptTemplateListResult> {
+		const cached = this.listCache;
+		if (cached && Date.now() - cached.at < PromptManager.LIST_CACHE_TTL_MS) return cached.value;
 		const boundary = await this.globalBoundary();
 		const entries = await readdir(this.promptsDir).catch(() => []);
 		const templates: PiPromptTemplateSummary[] = [];
@@ -301,10 +323,13 @@ export class PromptManager {
 		// 按 name 排序
 		templates.sort((a, b) => a.name.localeCompare(b.name));
 
-		return { templates, globalDir: this.promptsDir };
+		const value = { templates, globalDir: this.promptsDir };
+		this.listCache = { at: Date.now(), value };
+		return value;
 	}
 
 	async create(input: CreatePiPromptTemplateInput): Promise<PiPromptTemplateSummary> {
+		this.invalidateListCache();
 		const name = this.normalizeName(input.name);
 		if (!name) throw new Error(this.translate("mainPrompt.nameRequiredDetailed"));
 		const description = input.description.trim();
@@ -327,6 +352,7 @@ export class PromptManager {
 	}
 
 	async delete(filePath: string): Promise<void> {
+		this.invalidateListCache();
 		const candidate = await this.resolveGlobalWritePath(filePath);
 		if (!existsSync(candidate)) throw new Error(this.translate("mainPrompt.fileNotFound"));
 		const safeFilePath = await this.resolveExistingGlobalPath(candidate);
@@ -442,6 +468,7 @@ export class PromptManager {
 	 * 保存模板内容
 	 */
 	async writeContent(filePath: string, content: string): Promise<void> {
+		this.invalidateListCache();
 		await writeFile(await this.resolveGlobalWritePath(filePath), content, "utf8");
 	}
 
@@ -470,6 +497,7 @@ export class PromptManager {
 
 	/** 重命名全局模板：将 <oldName>.md 重命名为 <newName>.md */
 	async rename(oldName: string, newName: string): Promise<PiPromptTemplateSummary> {
+		this.invalidateListCache();
 		const normalizedOld = this.normalizeName(oldName);
 		const normalizedNew = this.normalizeName(newName);
 		if (!normalizedOld || !normalizedNew) throw new Error(this.translate("mainPrompt.nameRequired"));
