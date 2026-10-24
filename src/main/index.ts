@@ -97,8 +97,10 @@ const e2eWindowPlacement = resolveE2EWindowPlacement(isE2E, process.env.PIDECK_E
 if (isE2E) {
 	// 屏幕外窗口会被 Windows 原生遮挡判定当成不可见 → 渲染/定时器节流，Playwright 点击与截图会卡住。
 	for (const switchName of E2E_RENDERING_SWITCHES) app.commandLine.appendSwitch(switchName);
-	app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
 }
+// disable-features 唯一拼装点（同名 switch 后值覆盖前值，禁在此之外再 append）：
+// 默认清单（音频服务进程内等）与 E2E 的渲染保活条目合并成单次写入。
+applyChromiumFeatureFlags(app.commandLine, isE2E ? ["CalculateNativeWinOcclusion"] : []);
 
 // 冷启动计时锚点（2026-10 流畅度审计）：里程碑在 whenReady 与 showMainWindowOnce 记录，
 // 日志对比 sinceModuleLoadMs / processUptimeMs 两个口径即可观测启动回归。
@@ -396,6 +398,7 @@ import { registerUsageStatsIpc } from "./ipc/usageStatsIpc";
 import { UsageStatsService } from "./usageStats/UsageStatsService";
 import { constrainWindowBoundsToWorkArea, type LastWindowBounds, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, readLastWindowBounds, saveLastWindowBounds } from "./windowState";
 import { applyE2EWindowPlacement, E2E_RENDERING_SWITCHES, resolveE2EWindowPlacement } from "./e2eWindowMode";
+import { applyChromiumFeatureFlags } from "./chromiumFeatureFlags";
 import { createRendererCrashRecoveryGuard } from "./window/rendererCrashRecovery";
 import { registerBackgroundImageProtocol, registerBackgroundsIpc } from "./ipc/backgroundsIpc";
 import { registerThemesIpc } from "./ipc/themesIpc";
