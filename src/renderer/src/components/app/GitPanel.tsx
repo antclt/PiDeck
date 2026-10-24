@@ -702,7 +702,10 @@ export function GitPanel(props: GitPanelProps) {
 			try {
 				const next = await getStatusRef.current(projectId);
 				if (request === statusRequestRef.current && projectId === projectIdRef.current && repoScopeKey === repoScopeKeyRef.current) {
-					setGroups(next);
+					// 内容未变保留原引用（2027-02 性能审计）：status 每次返回全新对象树，
+					// 直接 set 会让 FileTree（浅比较 memo）每 5 秒对整棵变更树全量
+					// reconcile——大仓（万级文件）零变化也一样。与上方 aheadBehind 同款门卫。
+					setGroups((current) => (deepEqual(current, next) ? current : next));
 					// 刷新成功说明当前目录可用，恢复仓库/工具标记（手动 git init 或安装 git 后自动恢复轮询）
 					setNotAGitRepo(false);
 					setGitNotInstalled(false);

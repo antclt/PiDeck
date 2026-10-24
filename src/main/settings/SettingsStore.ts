@@ -1,5 +1,5 @@
 import { app, BrowserWindow, Menu } from "electron";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { mkdir, readFile, writeFile, copyFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ipcChannels } from "../../shared/ipc";
@@ -115,13 +115,27 @@ export function readBootPreferences() {
  * 映射：showThinking = !hideThinkingBlock
  * 若 pi agent 文件不存在或 hideThinkingBlock 未设置，返回 undefined。
  */
+/**
+ * (size, mtime) 结果缓存（2027-02 性能审计）：settingsStore.get() 全仓 200+ 调用点
+ * （每次 RPC 取 rpcTimeout、settings:get IPC、update 收尾……），原先每次都同步
+ * readFileSync + JSON.parse ~/.pi/agent/settings.json——Windows+杀软下每跳 0.1-0.5ms，
+ * 消息发送/spawn 密集期累积微卡顿。文件未变时结果必然一致，stat 判据复用。
+ */
+const piAgentShowThinkingCache = new Map<string, { size: number; mtimeMs: number; value: boolean | undefined }>();
+
 function readPiAgentShowThinking(): boolean | undefined {
 	try {
-		const agentRaw = readFileSync(piAgentSettingsPath(), "utf8");
-		const agentSettings = JSON.parse(agentRaw) as Record<string, unknown>;
-		if (typeof agentSettings.hideThinkingBlock === "boolean") {
-			return !agentSettings.hideThinkingBlock;
+		const path = piAgentSettingsPath();
+		const info = statSync(path);
+		const cached = piAgentShowThinkingCache.get(path);
+		if (cached && cached.size === info.size && cached.mtimeMs === info.mtimeMs) {
+			return cached.value;
 		}
+		const agentRaw = readFileSync(path, "utf8");
+		const agentSettings = JSON.parse(agentRaw) as Record<string, unknown>;
+		const value = typeof agentSettings.hideThinkingBlock === "boolean" ? !agentSettings.hideThinkingBlock : undefined;
+		piAgentShowThinkingCache.set(path, { size: info.size, mtimeMs: info.mtimeMs, value });
+		return value;
 	} catch {
 		// 文件不存在或解析失败，静默忽略
 	}
@@ -1096,28 +1110,87 @@ export class SettingsStore {
 		}
 	}
 
-	private save(): Promise<void> {
+	/**
+	/**
+	 * 写盘尾随合并窗口（2027-02 性能审计）：面板宽度拖拽等高频 update（渲染层 160ms
+	 * 防抖之后仍可达每秒数轮）原先每次都全量 stringify + 写 tmp + 复制 .bak + rename
+	 * ≈ 3×文件体积/次——带 1.5MB 自定义 logo 的用户拖拽期间 ~18MB/s 持续写盘。
+	 *
+	 * 合并模型：单一在途窗口 + 等待者集合。窗口内的所有 update 共享一次 writeAtomic，
+	 * 每个调用者（await update()）在这次落盘完成后一起结算；窗口未到期时新到的 update
+	 * 只是标记「有新内容」并入同一窗口（窗口起点固定，最多 150ms 延迟）。退出路径经
+	 * quitCleanup 的 flushPendingSave 立即落盘。
+	 */
+	private static readonly SAVE_DEBOUNCE_MS = 150;
+	/** 有待落盘内容（窗口到期/flush 时据此决定是否真的写盘）。 */
+	private saveQueued = false;
+	private saveTimer: NodeJS.Timeout | null = null;
+	private saveWaiters: Array<() => void> = [];
+
+	/** 立即执行一轮「落盘在途内容并结算全部等待者」（窗口到期与 flush 共用）。 */
+	private firePendingSave(): void {
+		if (!this.saveQueued) return;
+		this.saveQueued = false;
+		const waiters = this.saveWaiters;
+		this.saveWaiters = [];
 		// 串行化：把每次写盘接到上一次之后，避免并发 update 的 writeFile 交叉撕裂
 		//（迁移钩子的 fire-and-forget save 与 IPC 快速连续 update 会并发触发）。
-		const run = this.saveChain.catch(() => undefined).then(() => this.writeAtomic());
+		const run = this.saveChain
+			.catch(() => undefined)
+			.then(() => this.writeAtomic())
+			.then(
+				() => {
+					for (const settle of waiters) settle();
+				},
+				() => {
+					for (const settle of waiters) settle();
+				},
+			);
 		this.saveChain = run;
-		return run;
 	}
 
-	/**
-	 * 原子写 settings.json：写 tmp 后 renameWithRetry 替换（Windows 杀软/索引器
-	 * 瞬态 EPERM/EBUSY 退避重试，见 utils/fsRetry）。
-	 * 替换前把当前版本复制为 .bak——load() 遇到主文件损坏时优先回退 .bak，
-	 * 避免全部用户设置静默回默认。首启无旧文件时复制失败静默忽略（无备份可做）。
-	 */
+	private save(): Promise<void> {
+		this.saveQueued = true;
+		if (this.saveTimer === null) {
+			const timer = setTimeout(() => {
+				this.saveTimer = null;
+				this.firePendingSave();
+			}, SettingsStore.SAVE_DEBOUNCE_MS);
+			this.saveTimer = timer;
+			timer.unref?.();
+		}
+		return new Promise<void>((resolve) => {
+			this.saveWaiters.push(resolve);
+		});
+	}
+
+	/** 立即落盘在途的合并窗口（quitCleanup 与备份/pre-restore 调用；无在途时等既有链收尾）。 */
+	flushPendingSave(): Promise<void> {
+		if (this.saveTimer !== null) {
+			clearTimeout(this.saveTimer);
+			this.saveTimer = null;
+			this.firePendingSave();
+		}
+		return this.saveChain.catch(() => undefined);
+	}
+
+	/** 上次成功落盘的序列化内容：.bak 只在内容真正变化时复制（去重高频写）。 */
+	private lastPersistedJson: string | null = null;
+
 	private async writeAtomic(): Promise<void> {
 		await mkdir(app.getPath("userData"), { recursive: true });
 		// showThinking 由 pi agent 的 hideThinkingBlock 决定，不持久化到桌面 settings.json
 		const { showThinking: _unused, ...persistable } = this.settings;
 		const tmpPath = `${this.filePath}.tmp`;
-		await writeFile(tmpPath, JSON.stringify(persistable, null, 2), "utf8");
-		await copyFile(this.filePath, `${this.filePath}.bak`).catch(() => undefined);
+		const json = JSON.stringify(persistable, null, 2);
+		await writeFile(tmpPath, json, "utf8");
+		// .bak 降频（2027-02 性能审计）：备份的语义是「上一次不同的好版本」——内容与上次
+		// 落盘一致时复制是纯浪费（原先每次 update 都 copyFile，3×写放大的三分之一）。
+		if (this.lastPersistedJson !== json) {
+			await copyFile(this.filePath, `${this.filePath}.bak`).catch(() => undefined);
+		}
 		await renameWithRetry(tmpPath, this.filePath);
+		this.lastPersistedJson = json;
 	}
 
 	/**

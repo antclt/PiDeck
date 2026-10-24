@@ -1,10 +1,11 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, safeStorage, screen, session, shell, Tray, Notification, webContents } from "electron";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
+import { renderDshSessionHtml as renderSessionHtmlForExport, sanitizeExportFileName } from "./dsh/dshSessionHtmlExport";
 import { release as osRelease } from "node:os";
 import { createWriteStream, existsSync } from "node:fs";
-import { copyFile, readFile, readdir, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { is } from "@electron-toolkit/utils";
 import { PetSystem, type PetSystemDeps } from "./pet";
 import { downgradeRunningStartedBefore, downgradeStaleRunning } from "./pi/derivedSubagents";
@@ -1384,7 +1385,22 @@ async function exportCatalogSessionHtml(sessionId: string): Promise<{ path: stri
 	if (!result || typeof result !== "object" || !("path" in result) || typeof result.path !== "string") {
 		throw new Error(mainCopy("session.exportFailed"));
 	}
-	return { path: result.path };
+	// pi 临时会话的 export_html 可能返回相对文件名（pi-session-*.html，落在 pi cwd=项目根）：
+	// 打包态主进程 cwd 是 exe 目录，消费端（Web 下载 / 桌面打开）直接用相对路径必然 ENOENT。
+	const rawPath = result.path;
+	const projectRoot = projectStore.get(entry.projectId)?.path ?? "";
+	const absolutePath = isAbsolute(rawPath) ? rawPath : join(projectRoot, rawPath);
+	if (existsSync(absolutePath)) return { path: absolutePath };
+	// pi 声明的导出文件不存在（部分 pi 版本在临时会话上不落盘，2026-10 Web 走查实测）：
+	// 回退 host 侧投影导出——复用 DSH 的自包含 HTML 渲染器（无外部依赖、离线可读），
+	// 落盘 userData/exports/，保证「导出 HTML」在任何 pi 行为下都成功。
+	const loadWindow = await agentManager.readSessionLoadWindow(entry.filePath, sessionId, { projectId: entry.projectId });
+	const html = renderSessionHtmlForExport(loadWindow.messages, { title: entry.title, cwd: projectRoot, exportedAt: Date.now() });
+	const exportDir = join(app.getPath("userData"), "exports");
+	await mkdir(exportDir, { recursive: true });
+	const outPath = join(exportDir, sanitizeExportFileName(entry.title || sessionId, sessionId));
+	await writeFile(outPath, html, "utf8");
+	return { path: outPath };
 }
 
 type AgentSessionReplacementResult = {
@@ -4317,6 +4333,8 @@ function registerIpc() {
 	registerBackupIpc({
 		configBackupManager: configBackupManager!,
 		appLogger,
+		// 备份/pre-restore 前落盘在途的设置写盘合并窗口（见 backupIpc 注释）
+		flushSettings: () => settingsStore.flushPendingSave(),
 		afterRestore: async () => {
 			// 恢复写回的是磁盘文件：pideck 设置需重新 load 进内存（其它 store 仍持旧值，
 			// UI 会提示重启生效）；pi 模型目录缓存刷新，避免恢复后仍用旧模型列表。
@@ -4488,6 +4506,9 @@ app
 			},
 		});
 		settingsStore = new SettingsStore();
+		// 设置写盘尾随合并的收尾（2027-02 性能治理）：退出时立即落盘在途的 150ms 合并窗口，
+		// 防止「改完设置立刻退出」丢失最后一笔（窗口 unref 不拖退出）。
+		quitCleanup.register("settings-flush", () => settingsStore.flushPendingSave());
 		// 安全管理：配置 owner + 策略快照写入（供 pi-deck-security-gate 扩展消费）
 		securityStore = new SecurityStore({
 			settingsStore,
@@ -5674,9 +5695,15 @@ app
 		refreshShortcutBindings(settingsStore.get());
 		// Logo 风格：启动时按已加载设置刷新窗口/Dock 图标（此后 settings:update 路径实时刷新）
 		applyWindowLogoStyle(settingsStore.get().logoStyle, () => mainWindow, settingsStore.get().logoCustomImage);
-		// 任务栏按钮的图标取开始菜单快捷方式的图标（窗口图标只是无身份注册时的兜底）：建窗前写好，
-		// 按钮首次出现就带当前 logo（createWindow 在本行之后调用）。
-		syncTaskbarShortcutIcon({ style: settingsStore.get().logoStyle, customLogoDataUrl: settingsStore.get().logoCustomImage });
+		// 任务栏按钮的图标取开始菜单快捷方式的图标（窗口图标只是无身份注册时的兜底）。
+		// 2027-02 性能治理：整段是同步递归扫开始菜单（上限 2000 个 .lnk）+ 逐个
+		// readShortcutLink，开发机上 50-300ms——原先在建窗前的同步链上直接推迟首窗可见。
+		// 改 setImmediate 与 createWindow 的加载阶段重叠：窗口加载本身数百 ms，按钮首次
+		// 出现的时点绝大多数仍在扫描完成之后；极端快加载下按钮先显示默认图标、扫描
+		// 完成后 Windows 自动刷新（每启动只扫一次，签名去重见 appTaskbarIdentity）。
+		setImmediate(() => {
+			syncTaskbarShortcutIcon({ style: settingsStore.get().logoStyle, customLogoDataUrl: settingsStore.get().logoCustomImage });
+		});
 		piModelCapabilityCache = new PiModelCapabilityCache({
 			// 模型能力水合分两档（详见 docs/pi-model-capability-plan.md）：
 			// - 快速档（默认，loadExtensions=false）：--no-extensions。实测 418 模型下
@@ -6260,10 +6287,15 @@ app
 		void wechatService.start().catch((error: unknown) => {
 			void appLogger?.warn("wechat", "WeChat bridge autostart failed", error);
 		});
-		// 配置备份（手动模式）：仅在备份目录为空（首次使用）时自动建一份 first-run，
-		// 之后不再自动备份。同步快，不挡首帧；失败仅记录，不阻断启动。
-		configBackupManager?.ensureInitialBackups();
 		await createWindow();
+		// 配置备份（手动模式）：仅在备份目录为空（首次使用）时自动建一份 first-run，
+		// 之后不再自动备份。2027-02 性能治理：list() 会对每个备份 JSON 全量解析（内嵌
+		// settings/models 原文，可达 MB 级），首启还要同步读 6 个配置文件——原先排在
+		// createWindow 之前的同步链上推迟首窗可见（注释自称"不挡首帧"与执行点矛盾）。
+		// 挪到窗口创建后执行，失败仅记录，不阻断启动。
+		setImmediate(() => {
+			configBackupManager?.ensureInitialBackups();
+		});
 		// Quick tasks should not wait for unrelated WSL/proxy startup probes. The controller
 		// retains validated intent until the renderer subscribes or requests its snapshot.
 		const coldStartTarget = extractFocusTargetFromArgv(process.argv);

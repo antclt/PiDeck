@@ -9,11 +9,14 @@
 export type SnapshotScriptOptions = {
 	maxElements: number;
 	includeBoxes: boolean;
+	/** 识别可视化：给本轮收录的元素画框 + ref 标签（默认开，纯视觉、自动淡出）。 */
+	renderOverlay: boolean;
 };
 
-export function collectBrowserSnapshotInPage(rawOptions: { maxElements?: unknown; includeBoxes?: unknown }): unknown {
+export function collectBrowserSnapshotInPage(rawOptions: { maxElements?: unknown; includeBoxes?: unknown; renderOverlay?: unknown }): unknown {
 	const maxElements = typeof rawOptions.maxElements === "number" && rawOptions.maxElements > 0 ? Math.floor(rawOptions.maxElements) : 200;
 	const includeBoxes = rawOptions.includeBoxes === true;
+	const renderOverlay = rawOptions.renderOverlay !== false;
 	const selector = "a[href], button, input:not([type='hidden']), textarea, select, summary, label, [role], [contenteditable=''], [contenteditable='true'], [onclick], [tabindex]:not([tabindex='-1'])";
 	const MAX_SCAN = 4000;
 	const MAX_ROOTS = 30;
@@ -153,6 +156,8 @@ export function collectBrowserSnapshotInPage(rawOptions: { maxElements?: unknown
 	// 两段式把布局重算摊平为一次，回归由 tests/browser/browserSnapshotScript.test.mjs 锁定。
 	const elements: Array<Record<string, unknown>> = [];
 	const refAssignments: Array<{ el: Element; ref: string }> = [];
+	// 覆盖层需要每个收录元素的 rect：与 includeBoxes 无关，读阶段顺带留存。
+	const boxRects: Array<{ ref: string; rect: { x: number; y: number; width: number; height: number } }> = [];
 	let visibleCount = 0;
 	for (const el of candidates) {
 		const rect = visibleRect(el);
@@ -175,8 +180,41 @@ export function collectBrowserSnapshotInPage(rawOptions: { maxElements?: unknown
 		if (includeBoxes) node.box = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
 		elements.push(node);
 		refAssignments.push({ el, ref });
+		boxRects.push({ ref, rect });
 	}
 	for (const { el, ref } of refAssignments) el.setAttribute("data-pideck-ref", ref);
+
+	// 识别可视化（用户侧的「选取效果」）：给本轮收录的元素画蓝色框 + ref 标签，约 2s 淡出。
+	// 纯视觉增强：pointer-events:none、不进快照数据；页面异常时静默跳过，绝不影响采集结果。
+	try {
+		const OVERLAY_ID = "__pideck_agent_boxes";
+		const previous = document.getElementById(OVERLAY_ID);
+		if (previous) previous.remove();
+		if (renderOverlay && boxRects.length > 0) {
+			const overlay = document.createElement("div");
+			overlay.id = OVERLAY_ID;
+			overlay.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483646;transition:opacity .4s ease 1.6s;opacity:1;";
+			for (const item of boxRects) {
+				const mark = document.createElement("div");
+				mark.style.cssText = "position:fixed;left:" + Math.round(item.rect.x) + "px;top:" + Math.round(item.rect.y) + "px;width:" + Math.round(item.rect.width) + "px;height:" + Math.round(item.rect.height) + "px;border:1px solid rgba(59,130,246,.85);border-radius:3px;";
+				const tag = document.createElement("span");
+				tag.textContent = item.ref;
+				tag.style.cssText = "position:absolute;top:-13px;left:-1px;padding:0 4px;border-radius:2px;background:rgba(59,130,246,.95);color:#fff;font:600 10px/13px ui-monospace,monospace;";
+				mark.appendChild(tag);
+				overlay.appendChild(mark);
+			}
+			(document.body || document.documentElement).appendChild(overlay);
+			setTimeout(() => {
+				overlay.style.opacity = "0";
+			}, 40);
+			setTimeout(() => {
+				const stale = document.getElementById(OVERLAY_ID);
+				if (stale) stale.remove();
+			}, 2300);
+		}
+	} catch {
+		// 可视化失败（怪异 DOM/CSP）不算快照失败。
+	}
 
 	return {
 		url: location.href,
@@ -193,6 +231,6 @@ export function collectBrowserSnapshotInPage(rawOptions: { maxElements?: unknown
 
 /** 生成可注入 Runtime.evaluate 的表达式（参数经 JSON 序列化，避免注入页面代码）。 */
 export function buildSnapshotExpression(options: SnapshotScriptOptions): string {
-	const payload = JSON.stringify({ maxElements: options.maxElements, includeBoxes: options.includeBoxes });
+	const payload = JSON.stringify({ maxElements: options.maxElements, includeBoxes: options.includeBoxes, renderOverlay: options.renderOverlay });
 	return `(${collectBrowserSnapshotInPage.toString()})(${payload})`;
 }

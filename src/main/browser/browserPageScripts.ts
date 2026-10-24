@@ -115,6 +115,74 @@ export function buildWaitForTextExpression(text: string): string {
 	return `!!(document.body && document.body.innerText.includes(${JSON.stringify(text)}))`;
 }
 
+/**
+ * 动作可视化：给 agent 正在操作的目标元素画琥珀色高亮框 + 「ref · 名称」标签，
+ * 约 1.5s 后淡出移除。纯视觉增强：pointer-events:none、best-effort（失败由调用方吞掉，
+ * 不影响动作本身）。用户由此能看到 agent「选取」了哪个元素（browser-use 式体验）。
+ */
+export function buildHighlightExpression(ref: string, label: string): string {
+	return `(() => {
+		const el = document.querySelector(${JSON.stringify(REF_SELECTOR(ref))});
+		if (!el) return false;
+		const id = "__pideck_agent_highlight";
+		const old = document.getElementById(id);
+		if (old) old.remove();
+		const rect = el.getBoundingClientRect();
+		const box = document.createElement("div");
+		box.id = id;
+		box.style.cssText = "position:fixed;left:" + (rect.x - 3) + "px;top:" + (rect.y - 3) + "px;width:" + (rect.width + 6) + "px;height:" + (rect.height + 6) + "px;border:2px solid #f59e0b;border-radius:4px;background:rgba(245,158,11,.14);box-shadow:0 0 0 3px rgba(245,158,11,.25);pointer-events:none;z-index:2147483647;transition:opacity .45s ease .95s;opacity:1;";
+		const tag = document.createElement("div");
+		tag.textContent = ${JSON.stringify(label)};
+		tag.style.cssText = "position:absolute;top:-20px;left:-2px;padding:1px 6px;border-radius:3px;background:#f59e0b;color:#1f2937;font:600 11px/1.5 ui-sans-serif,system-ui,sans-serif;white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis;";
+		box.appendChild(tag);
+		(document.body || document.documentElement).appendChild(box);
+		setTimeout(() => { box.style.opacity = "0"; }, 40);
+		setTimeout(() => { if (document.getElementById(id) === box) box.remove(); }, 1600);
+		return true;
+	})()`;
+}
+
+/** 清掉 agent 可视化覆盖层（识别框/查找框/高亮框）：截图前调用，避免辅助框进入模型视觉。 */
+export function buildClearOverlaysExpression(): string {
+	return `(() => { for (const id of ["__pideck_agent_boxes", "__pideck_agent_highlight", "__pideck_agent_find"]) { const node = document.getElementById(id); if (node) node.remove(); } return true; })()`;
+}
+
+/**
+ * browser_find 的匹配可视化：把命中的元素批量画琥珀色框 + ref 标签（一次表达式完成，
+ * 逐个高亮会是 N 次 CDP 往返）。纯视觉、pointer-events:none、自动淡出。
+ */
+export function buildFindHighlightExpression(refs: readonly string[]): string {
+	return `(() => {
+		const wanted = new Set(${JSON.stringify(refs)});
+		const id = "__pideck_agent_find";
+		const old = document.getElementById(id);
+		if (old) old.remove();
+		const overlay = document.createElement("div");
+		overlay.id = id;
+		overlay.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483646;transition:opacity .4s ease 1.8s;opacity:1;";
+		const marked = document.querySelectorAll("[data-pideck-ref]");
+		for (let i = 0; i < marked.length; i += 1) {
+			const el = marked[i];
+			const ref = el.getAttribute("data-pideck-ref");
+			if (!ref || !wanted.has(ref)) continue;
+			const rect = el.getBoundingClientRect();
+			const mark = document.createElement("div");
+			mark.style.cssText = "position:fixed;left:" + (rect.x - 2) + "px;top:" + (rect.y - 2) + "px;width:" + (rect.width + 4) + "px;height:" + (rect.height + 4) + "px;border:2px solid rgba(245,158,11,.9);border-radius:3px;";
+			const tag = document.createElement("span");
+			tag.textContent = ref;
+			tag.style.cssText = "position:absolute;top:-14px;left:-2px;padding:0 4px;border-radius:2px;background:rgba(245,158,11,.95);color:#1f2937;font:600 10px/13px ui-monospace,monospace;";
+			mark.appendChild(tag);
+			overlay.appendChild(mark);
+		}
+		if (overlay.childNodes.length > 0) {
+			(document.body || document.documentElement).appendChild(overlay);
+			setTimeout(() => { overlay.style.opacity = "0"; }, 40);
+			setTimeout(() => { const stale = document.getElementById(id); if (stale) stale.remove(); }, 2500);
+		}
+		return true;
+	})()`;
+}
+
 export function buildFallbackScrollExpression(deltaX: number, deltaY: number): string {
 	return `window.scrollBy(${JSON.stringify(deltaX)}, ${JSON.stringify(deltaY)}), true`;
 }

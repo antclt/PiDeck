@@ -264,16 +264,22 @@ export function TerminalDock(props: {
 		};
 	}, [props.terminal, markExited, acceptsTabEvent]);
 
+	// 2027-02 性能治理：xterm 实例生命周期只依赖 tab id（+折叠/内容就绪），
+	// 不再依赖 activeTab 对象身份——markExited 用 `{...tab, exited:true}` 换新对象
+	// 只为显示退出徽章，原先会连带整实例销毁重建（serialize 全部 scrollback + 新建
+	// WebGL 上下文 + 回放 ≤200K 字符），shell 一退出就闪一次。
+	const activeTabId = activeTab?.id;
+
 	useEffect(() => {
 		// 必须捕获本次 effect 对应的 tab id：cleanup 执行时 activeTab 已切换到新 tab，
 		// 读 activeTab.id 会把新 tab 的空内容写进旧 tab 的缓存槽。
-		const effectTabId = activeTab?.id;
+		const effectTabId = activeTabId;
 		xtermRef.current = null;
 		fitRef.current = null;
 		webglRef.current = null;
 		serializeRef.current = null;
 		ioRef.current = null;
-		if (collapsed || !contentReady || !activeTab || !containerRef.current) return;
+		if (collapsed || !contentReady || !effectTabId || !containerRef.current) return;
 
 		const { fontFamily, fontSize } = resolveTerminalFont(props.terminalSettings);
 		const terminal = new Terminal({
@@ -325,7 +331,11 @@ export function TerminalDock(props: {
 		xtermRef.current = terminal;
 		fitRef.current = fit;
 		// 首次 fit、容器/设置/高度变化共用同一实例边界，旧 xterm 的迟到失败不能干扰新面板。
-		const io = createTerminalDockIo(props.terminal, activeTab.id, () => xtermRef.current === terminal && ownsTab(activeTab.id) && !activeTab.exited);
+		// 注（2027-02 解耦 activeTab 身份后）：闭包捕获的 activeTab.exited 会停留在
+		// 创建时的值（markExited 不再触发本 effect 重建）——这不构成问题：主进程
+		// TerminalSessionManager 的 input/resize 对 exited tab 本就静默忽略，这里的
+		// exited 只是防反馈误报的早期闸，身份闸（xtermRef/ownsTab）才是权威。
+		const io = createTerminalDockIo(props.terminal, effectTabId, () => xtermRef.current === terminal && ownsTab(effectTabId) && !activeTab.exited);
 		ioRef.current = io;
 		let resizeFrame: number | null = null;
 		const dataDisposable = terminal.onData(io.input);
@@ -343,7 +353,7 @@ export function TerminalDock(props: {
 		const observer = new ResizeObserver(scheduleResize);
 		observer.observe(containerRef.current);
 		resize();
-		terminal.write(buffersRef.current[activeTab.id] ?? "", () => {
+		terminal.write(buffersRef.current[effectTabId] ?? "", () => {
 			terminal.scrollToBottom();
 			scheduleResize();
 		});
@@ -383,7 +393,7 @@ export function TerminalDock(props: {
 		};
 		// xtermTheme 刻意不在依赖里：改主题走下面的热更新 effect 更新 options，
 		// 否则每次换配色都会销毁重建终端、丢掉 scrollback 与光标位置。
-	}, [activeTab, collapsed, contentReady, props.terminal, ownsTab]);
+	}, [activeTabId, collapsed, contentReady, props.terminal, ownsTab]);
 
 	// 字体/光标/主题热更新：xterm 6.0 支持运行时改 options（实测生效），
 	// 无需销毁终端。改完必须 refit —— 字号变化会改变列数/行数，尺寸要同步给 PTY。
