@@ -80,3 +80,32 @@ test("同库文件重复查询复用实例（不重复读盘），文件替换�
 		rmSync(root, { recursive: true, force: true });
 	}
 });
+
+test("categoriesOnly：只返回分类栏，不取条目（商店首开快路径）", async () => {
+	const root = mkdtempSync(join(tmpdir(), "pideck-xue-catonly-"));
+	const previousAppPath = appPathForTest;
+	try {
+		mkdirSync(join(root, "resources"), { recursive: true });
+		const dbPath = join(root, "resources", "xueprompts.db");
+		await writeDb(dbPath, "标题");
+		appPathForTest = root;
+		const manager = new XuePromptManager(root);
+
+		const full = await manager.list({ page: 1, pageSize: 10 });
+		const categoryOnly = await manager.list({ categoriesOnly: true });
+		// 跨 vm realm 的数组原型不同，deepEqual 会误判：比长度即可
+		assert.equal(categoryOnly.prompts.length, 0, "分类快路径不得返回条目");
+		// 分类口径与带条目查询一致（同一 slug/name/count 集合）
+		const signature = (categories) =>
+			categories
+				.map((item) => `${item.slug}|${item.name}|${item.count}`)
+				.sort()
+				.join(",");
+		assert.equal(signature(categoryOnly.categories), signature(full.categories), "分类栏必须与全量查询一致");
+		assert.equal(categoryOnly.dbState, "ready");
+		assert.equal(categoryOnly.repoPath, dbPath);
+	} finally {
+		appPathForTest = previousAppPath;
+		rmSync(root, { recursive: true, force: true });
+	}
+});

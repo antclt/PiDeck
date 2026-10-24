@@ -231,9 +231,18 @@ export class XuePromptManager {
 	 * 传 opts 时支持分页查询：categories 始终返回全部分类，
 	 * prompts 按 category/search 过滤并分页，同时返回 total 总数。
 	 */
-	async list(opts?: { category?: string; search?: string; page?: number; pageSize?: number }): Promise<YaoPromptListResult> {
+	async list(opts?: { category?: string; search?: string; page?: number; pageSize?: number; categoriesOnly?: boolean }): Promise<YaoPromptListResult> {
 		const { path: dbPath, state } = await this.resolveDb();
 		if (!dbPath) return this.emptyListResult(state);
+
+		// ── 分类快路径（2027-02 性能审计）──
+		// 商店首次打开只为渲染分类 chip 调 list()（无参），原先走「无参 = 全量」：
+		// 主进程要把 4012 行连 description BLOB 全取回、逐条 gunzip 描述，再经 IPC
+		// 传一份 ≈0.9MB 的 JSON 给渲染层，而渲染层拿到后只留 categories。
+		// 这里直接只查分类表 + overlay 分类，条目一律不取。
+		if (opts?.categoriesOnly) {
+			return this.listCategoriesOnly(dbPath);
+		}
 
 		// ── 通道 1：Go sidecar（常驻内存检索，支持中文搜索；失败自动降级）──
 		// 覆盖层只读一次（2027-02 性能治理）：原先 sidecar 分支与 sql.js 合并分支各读一遍
@@ -403,6 +412,40 @@ export class XuePromptManager {
 		const prompts: YaoPromptItem[] = (promptRows[0]?.values ?? []).map((row: unknown[]) => this.rowToYaoPromptItem(row));
 
 		return { categories, prompts, repoPath: dbPath, dbState: "ready", total, page, pageSize };
+	}
+
+	/**
+	 * 只取分类栏（2027-02 性能审计）。
+	 *
+	 * 商店首次打开只需要 categories：这里只跑两条轻查询（分类表 + 按分类聚合计数），
+	 * 不取 content/description 两列 BLOB，因此不需要逐条 gunzip；overlay 引入的新分类
+	 * 用覆盖层自身条目补齐，与合并分支 mergeCategories 的重算口径一致。
+	 */
+	private async listCategoriesOnly(dbPath: string): Promise<YaoPromptListResult> {
+		const db = await this.getDb(dbPath);
+		const catRows = db.exec("SELECT slug, name, count FROM xueprompt_categories ORDER BY count DESC");
+		const categories: YaoPromptCategory[] = (catRows[0]?.values ?? []).map((row) => ({
+			slug: String(row[0] ?? ""),
+			name: String(row[1] ?? ""),
+			count: Number(row[2] ?? 0),
+		}));
+		const overlay = this.readOverlayPrompts();
+		if (overlay.size === 0) {
+			return { categories, prompts: [], repoPath: dbPath, dbState: "ready" };
+		}
+		// 按分类名聚合（只读 category 列，不碰 BLOB）：覆盖层条目可能改分类/新增分类
+		const grouped = db.exec("SELECT category, COUNT(*) FROM xueprompts GROUP BY category");
+		const visibleCategories: string[] = [];
+		for (const row of grouped[0]?.values ?? []) {
+			const name = String(row[0] ?? "");
+			const count = Number(row[1] ?? 0);
+			for (let index = 0; index < count; index += 1) visibleCategories.push(name);
+		}
+		for (const entry of overlay.values()) {
+			// 覆盖层条目可能改分类/新增分类：分类名直接进可见集合，交给 mergeCategories 统一重算
+			if (entry.category) visibleCategories.push(entry.category);
+		}
+		return { categories: this.mergeCategories(categories, visibleCategories), prompts: [], repoPath: dbPath, dbState: "ready" };
 	}
 
 	/**
