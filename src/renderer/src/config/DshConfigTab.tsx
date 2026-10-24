@@ -939,7 +939,7 @@ function PluginCard(props: {
 					{descriptionKey && <span className="mt-0.5 block truncate text-caption text-muted-foreground">{t(descriptionKey)}</span>}
 				</span>
 				<span className="shrink-0 rounded-full border border-border-subtle px-2 py-0.5 text-micro text-muted-foreground">{props.ns.applies === "live" ? t("config.dsh.appliesLive") : t("config.dsh.appliesRestart")}</span>
-				<ChevronDown className={`size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 ${open ? "rotate-180" : ""}`} aria-hidden="true" />
+				<ChevronDown className={`size-3.5 shrink-0 text-muted-foreground transition-transform duration-fast ${open ? "rotate-180" : ""}`} aria-hidden="true" />
 			</button>
 			{/* 折叠体走共享折叠原语（真高度渐变 + exit 后卸载 + reduced-motion 回退）；
 			    display:contents 让根不生成盒子，折叠态零空档。 */}

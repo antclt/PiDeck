@@ -670,7 +670,7 @@ function EnabledModelsInput(props: {
 			}}
 		>
 			<PopoverTrigger asChild>
-				<div className="flex min-h-[38px] w-full min-w-0 cursor-pointer flex-wrap items-center gap-1.5 rounded-sm border border-border-subtle bg-popover px-2.5 py-[5px] transition-colors duration-150 hover:border-border-strong">
+				<div className="flex min-h-[38px] w-full min-w-0 cursor-pointer flex-wrap items-center gap-1.5 rounded-sm border border-border-subtle bg-popover px-2.5 py-[5px] transition-colors duration-fast hover:border-border-strong">
 					{[...selected].map((fullKey) => (
 						<span
 							key={fullKey}
@@ -718,7 +718,7 @@ function EnabledModelsInput(props: {
 									heading={
 										<button
 											type="button"
-											className="flex w-full cursor-pointer items-center gap-2 border-0 bg-bg-hover px-3 py-2 text-left text-control font-medium text-text-primary transition-colors duration-100 before:mr-1 before:text-[9px] before:text-text-tertiary before:transition-transform before:duration-150 before:content-['▾'] hover:bg-bg-active"
+											className="flex w-full cursor-pointer items-center gap-2 border-0 bg-bg-hover px-3 py-2 text-left text-control font-medium text-text-primary transition-colors duration-fast before:mr-1 before:text-[9px] before:text-text-tertiary before:transition-transform before:duration-fast before:content-['▾'] hover:bg-bg-active"
 											onClick={() => {
 												setCollapsed((prev) => {
 													const next = new Set(prev);
@@ -737,7 +737,7 @@ function EnabledModelsInput(props: {
 										grouped[provider].map((m) => (
 											<CommandItem key={m.fullKey} value={m.fullKey} onSelect={() => toggleModel(m.fullKey)} className={`cursor-pointer gap-2 py-[7px] pr-3 pl-7 text-control text-text-primary ${selected.has(m.fullKey) ? "bg-[color:color-mix(in_srgb,var(--color-accent)_6%,var(--color-bg-panel))]" : ""}`}>
 												<span
-													className={`flex size-[18px] shrink-0 items-center justify-center rounded-xs border-[1.5px] border-border-strong text-[color:var(--color-accent)] transition-[border-color,background-color] duration-100${selected.has(m.fullKey) ? " border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-text-inverse)]" : ""}`}
+													className={`flex size-[18px] shrink-0 items-center justify-center rounded-xs border-[1.5px] border-border-strong text-[color:var(--color-accent)] transition-[border-color,background-color] duration-fast${selected.has(m.fullKey) ? " border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-text-inverse)]" : ""}`}
 												>
 													{selected.has(m.fullKey) && <Check size={12} />}
 												</span>

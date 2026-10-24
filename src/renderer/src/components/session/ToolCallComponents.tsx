@@ -365,7 +365,7 @@ export const ToolCard = memo(function ToolCard(props: {
 					{sticky.pinned && <ProcessEntryReturnToStart onClick={sticky.returnToStart} />}
 				</div>
 				{expanded && (
-					<div className="relative ml-5 mt-1 mb-2 rounded-b-sm border-l-2 border-border-subtle bg-transparent pl-3 animate-in fade-in duration-100 motion-reduce:animate-none">
+					<div className="relative ml-5 mt-1 mb-2 rounded-b-sm border-l-2 border-border-subtle bg-transparent pl-3 animate-in fade-in duration-fast motion-reduce:animate-none">
 						{isAskCard && askCard ? (
 							<div className="ask-question-card-tool-inner">
 								<div className="ask-question-card-title">

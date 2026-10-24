@@ -450,7 +450,7 @@ export function ModelsTab(props: {
 										providerCardRefs.current[name] = element;
 										providerReorder.registerCard(name, element);
 									}}
-									className={`config-provider-card relative overflow-hidden rounded-lg border border-border-subtle bg-bg-panel transition-[border-color,box-shadow,background-color,opacity] duration-150${providerReorder.draggingName === name ? " opacity-40 border-dashed" : ""}${isExpanded ? " border-[color-mix(in_srgb,var(--color-accent)_32%,var(--color-border-subtle))] shadow-[var(--shadow-border)] overflow-visible" : ""}${highlightProvider === name ? " ring-2 ring-[color:var(--color-accent)]" : ""}`}
+									className={`config-provider-card relative overflow-hidden rounded-lg border border-border-subtle bg-bg-panel transition-[border-color,box-shadow,background-color,opacity] duration-fast${providerReorder.draggingName === name ? " opacity-40 border-dashed" : ""}${isExpanded ? " border-[color-mix(in_srgb,var(--color-accent)_32%,var(--color-border-subtle))] shadow-[var(--shadow-border)] overflow-visible" : ""}${highlightProvider === name ? " ring-2 ring-[color:var(--color-accent)]" : ""}`}
 									{...providerReorder.cardProps(name)}
 								>
 									{/* 拖拽插入指示线：贴卡片内缘（卡片是 overflow-hidden，放到卡片外会被剪掉）；加粗 + 发光，落点一眼可见 */}
@@ -459,7 +459,7 @@ export function ModelsTab(props: {
 									    display:contents 让根不生成盒子，折叠态零空档、展开态布局与原来一致。 */}
 									<Collapsible open={isExpanded} className="contents">
 										{/* 整行点击展开/收起；右侧操作区 stopPropagation，避免点复制/删除/用量配置时误折叠。 */}
-										<div data-provider-head="" className="flex cursor-pointer items-center justify-between px-3.5 py-2 transition-colors duration-150 hover:bg-bg-hover" onClick={() => props.onToggleProvider(name)}>
+										<div data-provider-head="" className="flex cursor-pointer items-center justify-between px-3.5 py-2 transition-colors duration-fast hover:bg-bg-hover" onClick={() => props.onToggleProvider(name)}>
 											{batchMode && (
 												<Label className="mr-2.5 inline-flex size-4 shrink-0 items-center justify-center" onClick={(e) => e.stopPropagation()}>
 													<Checkbox
@@ -787,7 +787,7 @@ export function ModelsTab(props: {
 						{/* 已隐藏的供应商折叠区：眼睛按钮隐藏后移到这里，可展开恢复显示 */}
 						{hiddenProviderNames.length > 0 && (
 							<div className="overflow-hidden rounded-lg border border-border-subtle bg-bg-panel">
-								<button type="button" className="flex w-full cursor-pointer items-center gap-2 px-3.5 py-2 text-left transition-colors duration-150 hover:bg-bg-hover" onClick={() => setHiddenSectionOpen((prev) => !prev)}>
+								<button type="button" className="flex w-full cursor-pointer items-center gap-2 px-3.5 py-2 text-left transition-colors duration-fast hover:bg-bg-hover" onClick={() => setHiddenSectionOpen((prev) => !prev)}>
 									{hiddenSectionOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
 									<EyeOff size={14} className="text-muted-foreground" aria-hidden="true" />
 									<span className="text-control font-semibold text-text-primary">{t("config.hiddenProviders", { count: hiddenProviderNames.length })}</span>
