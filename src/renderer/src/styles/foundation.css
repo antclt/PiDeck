@@ -867,6 +867,25 @@ body::before {
   background-position: center, center;
   background-attachment: fixed, fixed;
 }
+/* Wallpaper Engine 视频壁纸层（WallpaperVideoLayer portal 到 body）：与 body::before 同层、
+   位于 #root 之下；遮罩复用 --app-bg-mask，面板透明度档位仍由壁纸 token 决定。 */
+.wallpaper-video-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.wallpaper-video-layer video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.wallpaper-video-mask {
+  position: absolute;
+  inset: 0;
+  background-image: var(--app-bg-mask, none);
+}
 #root {
   position: relative;
   z-index: 1;

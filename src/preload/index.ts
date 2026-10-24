@@ -19,6 +19,7 @@ import type { ImageBlobPayload, ImageGenConfigFile, ImageGenRequest, ImageGenRes
 import type { VideoGenConfigFile, VideoGenRequest, VideoGenSaveResult, VideoGenSubmitResult, VideoGenJobSnapshot } from "../shared/types/videogen";
 import type { CustomThemeListItem } from "../shared/customThemes";
 import type { CatalogCheckResult, CatalogUpdateResult, CatalogUpdateStatus } from "../shared/types/catalog";
+import type { WallpaperEngineItem, WallpaperEngineListResult } from "../shared/wallpaperEngine";
 import type { BuiltInExtensionsCheckResult, BuiltInExtensionsUpdateResult, BuiltInExtensionsUpdateStatus } from "../shared/types/extensionsUpdate";
 import type { BuiltinContentCheckResult, BuiltinContentUpdateResult, BuiltinContentUpdateStatus } from "../shared/types/contentUpdate";
 import type {
@@ -486,6 +487,10 @@ const api = {
 		pickBackgroundImage: () => ipcRenderer.invoke(ipcChannels.pickBackgroundImage) as Promise<string>,
 		/** 删除背景图文件（清空背景设置时调用） */
 		removeBackgroundImage: (name: string) => ipcRenderer.invoke(ipcChannels.removeBackgroundImage, name) as Promise<void>,
+		/** Wallpaper Engine 视频壁纸：选工坊目录 / 列出视频条目 / 校验选中条目（视频字节只走 pideck-we:// 协议） */
+		pickWallpaperEngineDir: () => ipcRenderer.invoke(ipcChannels.wallpaperEnginePickDir) as Promise<string>,
+		listWallpaperEngine: (dir?: string) => ipcRenderer.invoke(ipcChannels.wallpaperEngineList, dir) as Promise<WallpaperEngineListResult>,
+		selectWallpaperEngine: (dir: string, id: string) => ipcRenderer.invoke(ipcChannels.wallpaperEngineSelect, dir, id) as Promise<WallpaperEngineItem | null>,
 	},
 	customThemes: {
 		/** 列出自定义主题（内置示例 + 用户目录；dir 为存放目录，供指南/提示展示） */
