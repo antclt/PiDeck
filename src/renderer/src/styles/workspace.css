@@ -226,8 +226,8 @@
   margin-left: 8px;
   padding: 1px 6px;
   border-radius: var(--radius-full);
-  background: var(--color-success-soft, color-mix(in srgb, #22c55e 12%, transparent));
-  color: var(--color-success, #22c55e);
+  background: var(--color-success-soft);
+  color: var(--color-success);
   font-size: 11px;
   font-weight: 500;
   vertical-align: middle;

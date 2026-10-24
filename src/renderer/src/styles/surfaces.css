@@ -2588,10 +2588,10 @@ div.fixed.inset-0.z-50 {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background-color: var(--color-bg-app, #ffffff);
+  background-color: var(--color-bg-app);
   background-image: radial-gradient(
     900px 480px at 50% 0%,
-    color-mix(in srgb, var(--color-accent, #18181b) 5%, transparent),
+    color-mix(in srgb, var(--color-accent) 5%, transparent),
     transparent 65%
   );
 }
