@@ -71,7 +71,15 @@ test("pideck-we:// handler streams video with Range and refuses escapes", async 
 		L.item("222", { type: "scene", file: "scene.pkg" }, { "scene.pkg": "x" });
 		writeFileSync(join(L.dir, "secret.mp4"), "secret");
 		mkdirSync(join(L.dir, "333"));
-		symlinkSync(join(L.dir, "secret.mp4"), join(L.dir, "333", "link.mp4"));
+		// 符号链接在无开发者模式的 Windows 上创建会被拒（EPERM）：此时跳过逃逸断言（与
+		// projectFileAccess.test.mjs 的 skip 惯例一致），其余 Range/404/403 断言照常执行。
+		let symlinkReady = true;
+		try {
+			symlinkSync(join(L.dir, "secret.mp4"), join(L.dir, "333", "link.mp4"));
+		} catch (error) {
+			if (error instanceof Error && "code" in error && error.code === "EPERM") symlinkReady = false;
+			else throw error;
+		}
 		writeFileSync(join(L.dir, "333", "project.json"), JSON.stringify({ type: "video", file: "link.mp4" }));
 		const handle = lib.createWallpaperEngineHandler(() => L.dir);
 
@@ -92,7 +100,7 @@ test("pideck-we:// handler streams video with Range and refuses escapes", async 
 
 		assert.equal((await handle(new Request("pideck-we://preview/111"))).status, 200);
 		assert.equal((await handle(new Request("pideck-we://video/222"))).status, 404, "scene is not served");
-		assert.equal((await handle(new Request("pideck-we://video/333"))).status, 403, "symlink escape is refused");
+		if (symlinkReady) assert.equal((await handle(new Request("pideck-we://video/333"))).status, 403, "symlink escape is refused");
 		assert.equal((await handle(new Request("pideck-we://video/..%2F111"))).status, 403);
 		assert.equal((await handle(new Request("pideck-we://other/111"))).status, 403);
 		assert.equal((await lib.createWallpaperEngineHandler(() => "")(new Request("pideck-we://video/111"))).status, 404);
