@@ -1344,11 +1344,7 @@ test("llm/retry 投影为自动重试状态卡（与 pi auto_retry 卡同键，2
 });
 
 test("llm/retry 卡收口：assistant 终态 → 成功（瞬态卡）；turn/end error → 失败卡", () => {
-	let p = projectDshEvent(
-			undefined,
-			event("llm/retry", 20, { retryId: "chain-2", retry: 1, maxRetries: 5, delayMs: 500, failure: { message: "boom", code: "SERVER" } }),
-			AGENT,
-		);
+	let p = projectDshEvent(undefined, event("llm/retry", 20, { retryId: "chain-2", retry: 1, maxRetries: 5, delayMs: 500, failure: { message: "boom", code: "SERVER" } }), AGENT);
 	// 重试后的请求成功：assistant/message 终态结算为成功卡
 	p = projectDshEvent(p, event("assistant/message", 21, { turn: 1, step: 1, message: { role: "assistant", content: [{ type: "text", text: "ok" }] } }), AGENT);
 	assert.equal(p.messages.filter((m) => m.id === "dsh:retry:chain-2").length, 1);
@@ -1357,16 +1353,15 @@ test("llm/retry 卡收口：assistant 终态 → 成功（瞬态卡）；turn/en
 	assert.equal(p.openRetryCardIds.length, 0, "结算后不再有待收口卡");
 
 	// 重试耗尽：turn/end error 结算为失败卡（正文错误气泡照常另投影）
-	let q = projectDshEvent(
-			undefined,
-			event("llm/retry", 30, { retryId: "chain-3", retry: 5, maxRetries: 5, delayMs: 1000, failure: { message: "rate limited", code: "RATE_LIMIT" } }),
-			AGENT,
-	);
+	let q = projectDshEvent(undefined, event("llm/retry", 30, { retryId: "chain-3", retry: 5, maxRetries: 5, delayMs: 1000, failure: { message: "rate limited", code: "RATE_LIMIT" } }), AGENT);
 	q = projectDshEvent(q, event("turn/end", 31, { turn: 1, reason: { kind: "error", error: { message: "429 too many requests", code: "RATE_LIMIT" } } }), AGENT);
 	const failed = q.messages.find((m) => m.id === "dsh:retry:chain-3");
 	assert.equal(failed.meta.status, "error");
 	assert.equal(failed.meta.i18nKey, "diagnostic.retryFailed");
-	assert.ok(q.messages.some((m) => m.role === "error"), "回合失败气泡仍照常投影");
+	assert.ok(
+		q.messages.some((m) => m.role === "error"),
+		"回合失败气泡仍照常投影",
+	);
 });
 
 test("parseDshInboxProjection：单项非法只跳过该项（id 非字符串无法操作）", () => {
