@@ -5760,6 +5760,8 @@ app
 		// 内置翻译智能体补种；与 sessionCatalog 并行加载，不额外拖慢启动。
 		agentProfileStore = new AgentProfileStore(join(app.getPath("userData"), "agent-profiles.json"));
 		const agentProfileStorePreload = agentProfileStore.load();
+		// 一次性调用计数带 1s 落盘合并窗口（见 AgentProfileStore.recordUsage）：退出时收尾。
+		quitCleanup.register("agent-profile-store", () => agentProfileStore?.flushPendingUsage());
 		// 收藏：本地快照（userData/favorites.json）。坏文件按空列表重建，不阻断启动。
 		favoritesStore = new FavoritesStore(join(app.getPath("userData"), "favorites.json"));
 		const favoritesStorePreload = favoritesStore.load();

@@ -265,16 +265,55 @@ export class AgentProfileStore {
 	async recordUsage(id: string, now = Date.now()): Promise<void> {
 		const index = this.state.agents.findIndex((candidate) => candidate.id === id);
 		if (index < 0) return;
-		await this.mutate(() => {
-			const agent = this.state.agents[index];
-			agent.usageCount += 1;
-			agent.lastUsedAt = now;
-		});
+		// 计数不算「用户编辑」：内存态与 revision/事件立即更新（UI 排序即时可见），
+		// 落盘改为 1s 尾随合并（2027-02 性能审计）。原先每次划词/一次性调用都
+		// 全量 JSON.stringify + 重写 agent-profiles.json（含全部 systemPrompt），
+		// 高频使用时是纯写放大；计数丢失 1s 窗口无产品影响。
+		const agent = this.state.agents[index];
+		agent.usageCount += 1;
+		agent.lastUsedAt = now;
+		this.state.revision += 1;
+		this.emitChanged();
+		this.scheduleUsagePersist();
+	}
+
+	/** usage 计数的落盘合并窗口（毫秒）。 */
+	private static readonly USAGE_PERSIST_DEBOUNCE_MS = 1_000;
+	private usagePersistTimer: NodeJS.Timeout | null = null;
+	private usagePersistPending = false;
+
+	private scheduleUsagePersist(): void {
+		this.usagePersistPending = true;
+		if (this.usagePersistTimer !== null) return;
+		const timer = setTimeout(() => {
+			this.usagePersistTimer = null;
+			void this.flushPendingUsage();
+		}, AgentProfileStore.USAGE_PERSIST_DEBOUNCE_MS);
+		timer.unref?.();
+		this.usagePersistTimer = timer;
+	}
+
+	/** 立即落盘在途的 usage 计数（退出/普通编辑写盘前调用；无在途时 no-op）。 */
+	async flushPendingUsage(): Promise<void> {
+		if (this.usagePersistTimer !== null) {
+			clearTimeout(this.usagePersistTimer);
+			this.usagePersistTimer = null;
+		}
+		if (!this.usagePersistPending) return;
+		this.usagePersistPending = false;
+		await this.persist();
 	}
 
 	private async mutate(mutator: () => void): Promise<void> {
 		mutator();
 		this.state.revision += 1;
+		// 普通编辑立即落盘，但要先撤掉 usage 的合并窗口（快照本身就是最新状态，
+		// 留着定时器只会再写一遍同样的内容）。
+		if (this.usagePersistTimer !== null) {
+			clearTimeout(this.usagePersistTimer);
+			this.usagePersistTimer = null;
+		}
+		this.usagePersistPending = false;
 		await this.persist();
 		this.emitChanged();
 	}
