@@ -35,6 +35,7 @@ import { Input } from "@/components/ui-shadcn/input";
 import { chatMessagesToUiMessages, createProject, createSession, deleteProject, fetchMessagePage, fetchModels, fetchState, getWebAuthHeaders, respondToUi, setRuntimeModel, setRuntimeThinking, updateSessionRecord } from "./webApi";
 import { abortRuntime, cloneRuntime, compactRuntime, copySession, deleteSession, downloadSessionHtml, editRuntimeMessage, deleteRuntimeMessage, prepareResend, renameSession, restartRuntime, activateRuntime, forkRuntimeSession, getForkMessages } from "./webApi";
 import { fetchRuntimeContextUsage, setRuntimePermission } from "./webApi";
+import { dataUrlToFilePart } from "./webMessageParts";
 import { sessionUiMessagesToMarkdown } from "./webMarkdown";
 import { removeMessageOptimistic, replaceMessageTextOptimistic } from "./webMessageOptimistic";
 import { WebSessionStrips } from "./WebSessionStrips";
@@ -444,7 +445,7 @@ export function WebChatApp() {
 		if (!pending || pending.sessionId !== activeSessionId) return;
 		if (streaming) return; // 新实例就绪（空闲）后才投递
 		pendingSendRef.current = null;
-		void sendMessage({ text: pending.text }, { body: { images: pending.images ?? [], ...(pending.agentMessage ? { agentMessage: pending.agentMessage } : {}) } });
+		void sendMessage({ text: pending.text, files: pending.images?.map(dataUrlToFilePart) ?? [] }, { body: { ...(pending.agentMessage ? { agentMessage: pending.agentMessage } : {}) } });
 	}, [activeSessionId, streaming, sendMessage]);
 
 	// 模型列表是全局 pi 配置，草稿会话也需要先选模型再发送第一条消息。
@@ -564,6 +565,9 @@ export function WebChatApp() {
 	};
 
 	// P2：发送携带图片附件（data URL，已压缩）；首页直发走 pending 队列。
+	// 图片必须以 file parts 随 user 消息提交：服务端 /api/chat 只从消息 parts 提取图片
+	// （extractChatImages），旧的自定义 body.images 字段服务端不读——图片从未真正送达 pi，
+	// 乐观气泡也不渲染缩略图（uiMessageImages 只认 file parts）。两处一并修正。
 	const handleSend = (text: string, images: string[], agentMessage?: string) => {
 		if (!text.trim() && images.length === 0) return;
 		if (!activeSessionId) {
@@ -571,7 +575,7 @@ export function WebChatApp() {
 			return;
 		}
 		// agentMessage：计划模式等隐藏指令（复用桌面 composer 通道），随 body 透传后端
-		void sendMessage({ text }, { body: { images, ...(agentMessage ? { agentMessage } : {}) } });
+		void sendMessage({ text, files: images.map(dataUrlToFilePart) }, { body: { ...(agentMessage ? { agentMessage } : {}) } });
 	};
 
 	// 草稿期后端切换：无会话 → 暂存随下次新建生效；有会话 → 仅「本页新建零消息草稿」可写

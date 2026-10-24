@@ -227,6 +227,13 @@
     min-width: 36px;
     min-height: 36px;
   }
+  /* markdown 正文内渲染器自带的图标钮（streamdown 表格复制/下载/全屏、mermaid 工具条）：
+     库内按钮 26px 无触屏变体，统一在此放大。sanitize 保证正文里不会出现用户注入的
+     原生 button，命中面只有渲染器 chrome。 */
+  .web-app .markdown-body button {
+    min-width: 36px;
+    min-height: 36px;
+  }
 }
 
 /* 工具卡/思考块：对齐桌面「无框过程行」视觉（timeline.css 的原始意图）——

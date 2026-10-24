@@ -228,7 +228,7 @@ export const WebThinkingBlock = memo(function WebThinkingBlock(props: {
 						<div className="flex pb-1.5">
 							<button
 								type="button"
-								className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-micro text-text-tertiary transition-colors duration-150 hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_45%,transparent)] hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
+								className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-micro text-text-tertiary transition-colors duration-150 pointer-coarse:py-2 hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_45%,transparent)] hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
 								onClick={() => setExpanded(false)}
 							>
 								<ChevronUp size={12} aria-hidden="true" />
@@ -371,7 +371,7 @@ export const WebAssistantTurn = memo(function WebAssistantTurn(props: { turn: As
 							})}
 							<button
 								type="button"
-								className="mt-1 inline-flex items-center gap-1 self-start rounded-md px-1.5 py-0.5 text-micro text-text-tertiary transition-colors hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_45%,transparent)] hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
+								className="mt-1 inline-flex items-center gap-1 self-start rounded-md px-1.5 py-0.5 text-micro text-text-tertiary transition-colors hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_45%,transparent)] hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)] pointer-coarse:py-2"
 								onClick={() => setManualOpen(false)}
 							>
 								<ChevronUp size={12} aria-hidden="true" />

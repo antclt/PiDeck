@@ -25,3 +25,14 @@ export function uiMessageImages(message: UIMessage): string[] {
 	}
 	return urls;
 }
+
+/**
+ * 图片 data URL → AI SDK file part：图片附件必须以 file parts 随 user 消息提交——
+ * 服务端 /api/chat 只从消息 parts 提取图片（extractChatImages），uiMessageImages 也
+ * 只认 parts 渲染气泡缩略图。mediaType 从 data URL 前缀解析，失败按 png 兜底
+ * （webImageCompress 只产出 png/jpeg/webp）。
+ */
+export function dataUrlToFilePart(dataUrl: string): { type: "file"; mediaType: string; url: string } {
+	const mediaType = /^data:([^;]+)[;,]/.exec(dataUrl)?.[1] ?? "image/png";
+	return { type: "file", mediaType, url: dataUrl };
+}
