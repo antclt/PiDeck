@@ -389,6 +389,12 @@ const SETTINGS_ROW_ANCHORS = [
 	},
 	{
 		tab: "appearance",
+		slug: "appearance-wallpaper-engine",
+		labelKey: "settings.wallpaperEngine",
+		keywords: ["动态壁纸", "视频壁纸", "壁纸引擎", "wallpaper engine", "video wallpaper", "workshop"],
+	},
+	{
+		tab: "appearance",
 		slug: "appearance-font-size-per-area",
 		labelKey: "settings.fontSizePerArea",
 		keywords: ["分区字号", "分别设置字号", "字体大小", "per area font", "字号"],

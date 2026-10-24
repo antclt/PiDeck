@@ -244,6 +244,7 @@ import type {
 	FocusTargetPayload,
 } from "../../shared/types";
 import type { TerminalDockSettings } from "./components/terminal/TerminalDock";
+import { WallpaperVideoLayer } from "./components/app/wallpaper/WallpaperVideoLayer";
 
 export function App() {
 	if (missingElectronPreload) {
@@ -3212,6 +3213,7 @@ export function App() {
 		// 非会话静态区域使用当前焦点作为兜底；每个 SessionRuntimeInjector 会用本栏 cwd/project 覆盖。
 		<FileLinkBaseProvider baseDir={activeAgent?.cwd ?? activeProject?.path} projectId={activeProject?.id} projectRoot={activeProject?.path} sessionId={currentSessionId}>
 			<>
+				<WallpaperVideoLayer settings={settings} />
 				<AppBootstrap {...bootstrapProps} />
 				<AppShell
 					navigationChrome={

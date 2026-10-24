@@ -20,6 +20,8 @@
  * 2026-10-24 刷新：favorites.removeMany（收藏批量删除，一次 IPC 一次写盘）+1 方法；命名空间数不变。
  * 2026-10-24 合并刷新：并入上游 26de030fc 的 config.discoverExternalAgents / resolveExternalAgentKey
  *   （导入本机其他 Agent 供应商配置）；命名空间数与锚点数不变，仅方法清单摘要变化。
+ * 2026-10-23：dialog.pickWallpaperEngineDir / listWallpaperEngine / selectWallpaperEngine
+ *   （Wallpaper Engine 视频壁纸）各 +1 方法，命名空间数与数量锚点不变。
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -27,7 +29,7 @@ import { test } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const NS_LIST_SHA256 = "2b7ea69786b498fe4c29a38c12f0ecec9c5654ea07b2dc6be5b4f851e081f222";
-const FULL_METHODS_SHA256 = "ec8ed7c27697f3490c3b90f7da0b75d0d7c4a76090071c3d4391493cd5c1c4eb";
+const FULL_METHODS_SHA256 = "70b0c24948fac11bd575bda4cb193b857d6f5c819ca5248a718551463a2cf750";
 const NAMESPACE_COUNT = 74;
 
 /** 捕获 preload 暴露的 piDesktop；null/undefined/形态不符时显式红并给诊断（F8-6 共用）。 */

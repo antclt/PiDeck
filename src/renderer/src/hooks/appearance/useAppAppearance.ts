@@ -4,6 +4,7 @@ import { msUntilNextThemeBoundary, resolveAppColorScheme } from "../../../../sha
 import { ensureI18nLocale, isI18nLocaleLoaded, resolveLocale, setI18nLocale } from "../../i18n";
 import type { AppSettings } from "../../../../shared/types";
 import { applyAppearanceWithTransition } from "./appearanceTransition";
+import { isVideoWallpaperActive } from "./videoWallpaper";
 
 // 壁纸模式已注入的 token 键（effect 重跑/清除设置时需要跨运行保留，避免漏清）
 let injectedWallpaperTokens = new Set<string>();
@@ -180,8 +181,12 @@ export function useAppAppearance({ settings, systemLanguage, settingsLoaded }: {
 
 		// 2. 换肤背景图：遮罩同色渐变（浅白/暗黑）+ 壁纸模式 token 半透明注入。
 		//    存储语义=图片可见度（0=全遮，1=图全显）；滑块 80% → 遮罩 0.2 → 图 80% 透出。
+		// Wallpaper Engine 视频壁纸与静态图共用同一套壁纸模式（面板透明度档位/遮罩），
+		// 视频本身由 WallpaperVideoLayer 渲染；视频生效时不再挂静态图，避免两层同时解码。
+		const videoWallpaper = isVideoWallpaperActive(settings);
 		root.dataset.bgImage = settings.backgroundImage ? "on" : "off";
-		if (settings.backgroundImage) {
+		if (videoWallpaper) root.dataset.bgImage = "on";
+		if (settings.backgroundImage || videoWallpaper) {
 			// 采样前先摘掉上一轮注入的壁纸 token：inline style 在 cascade 上压过
 			// :root[data-theme="dark"] 样式表，不摘的话 getComputedStyle 读到的是
 			// 上一轮主题烤进的旧值，重注入又基于旧值——背景被永久焊死在注入时的
@@ -189,7 +194,8 @@ export function useAppAppearance({ settings, systemLanguage, settingsLoaded }: {
 			for (const k of injectedWallpaperTokens) root.style.removeProperty(k);
 			injectedWallpaperTokens.clear();
 			injectedWallpaperValues.clear();
-			root.style.setProperty("--app-bg-image", `url("pideck-bg://local/${encodeURIComponent(settings.backgroundImage)}")`);
+			if (settings.backgroundImage && !videoWallpaper) root.style.setProperty("--app-bg-image", `url("pideck-bg://local/${encodeURIComponent(settings.backgroundImage)}")`);
+			else root.style.removeProperty("--app-bg-image");
 			const alpha = Math.min(1, Math.max(0, 1 - settings.backgroundImageOpacity));
 			// 面板不透明度与遮罩同步并加 10% 基础偏移（面板更实一点，可读性更好）：
 			// 滑块 80% → 面板 30%；100% → 10%（图完整显示）；0% → 100%（纯色）
@@ -234,7 +240,7 @@ export function useAppAppearance({ settings, systemLanguage, settingsLoaded }: {
 		}
 		// resolvedTheme 必须进依赖：系统明暗翻转/时间边界到达时壁纸 inline token 要按新明暗重算，
 		// 否则上一主题烤进的 color-mix 基色焊死在 root.style 上压过样式表（issue #297）
-	}, [resolvedTheme, settings.themeSkin, settings.theme, settings.customTheme, settings.customThemeOverrides, settings.backgroundImage, settings.backgroundImageOpacity]);
+	}, [resolvedTheme, settings.themeSkin, settings.theme, settings.customTheme, settings.customThemeOverrides, settings.backgroundImage, settings.backgroundImageOpacity, settings.weWorkshopDir, settings.weWallpaperId]);
 
 	// 字号与命名字体预设由 data 属性选择 CSS token；只有 custom 字体需要注入用户输入。
 	useEffect(() => {

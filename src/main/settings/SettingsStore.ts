@@ -146,6 +146,8 @@ const defaultSettings: AppSettings = {
 	customThemeOverrides: {},
 	backgroundImage: "",
 	backgroundImageOpacity: 0.8,
+	weWorkshopDir: "",
+	weWallpaperId: "",
 	language: "system",
 	// 默认最大化：与历史 createWindow 在 ready-to-show 后 maximize() 的行为一致
 	// （1480×960 只是最大化前的兜底尺寸，不是最终展示态）
