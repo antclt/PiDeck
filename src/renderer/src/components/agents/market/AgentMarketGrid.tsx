@@ -4,6 +4,7 @@ import { useListReorder } from "../../../hooks/useListReorder";
 import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
 import { AgentMarketCard } from "./AgentMarketCard";
+import { RemovalList, RemovalRow } from "../../removal/RemovalList";
 
 interface AgentMarketGridProps {
 	/** 已过滤的智能体（顺序来自 atom 的展示排序）。 */
@@ -66,23 +67,29 @@ export function AgentMarketGrid({ agents, orderIds, totalCount, selectionDefault
 
 	return (
 		<div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-3" {...reorder.containerProps}>
-			{agents.map((agent) => (
-				<AgentMarketCard
-					key={agent.id}
-					agent={agent}
-					selectionDefault={selectionDefaultId === agent.id}
-					active={selectedAgentId === agent.id}
-					usePending={usePendingId === agent.id}
-					reorder={reorder.itemBinding(agent.id)}
-					selectionMode={selectionMode}
-					checked={selectedIds.has(agent.id)}
-					onToggleSelect={onToggleSelect}
-					onOpen={onOpen}
-					onUse={onUse}
-					onEdit={onEdit}
-					onRequestDelete={onRequestDelete}
-				/>
-			))}
+			{/* 删除淡出 + 网格位移收拢：remainingIds 用未过滤的 orderIds——搜索/分类隐藏的卡片
+			    不算删除（exit 时长为 0，瞬时让位），真实删除才淡出 100ms 并让兄弟卡片滑位。
+			    与 useListReorder 的拖拽 FLIP 互不干扰：重排不 bump 生成数。 */}
+			<RemovalList remainingIds={orderIds}>
+				{agents.map((agent) => (
+					<RemovalRow key={agent.id} itemId={agent.id}>
+						<AgentMarketCard
+							agent={agent}
+							selectionDefault={selectionDefaultId === agent.id}
+							active={selectedAgentId === agent.id}
+							usePending={usePendingId === agent.id}
+							reorder={reorder.itemBinding(agent.id)}
+							selectionMode={selectionMode}
+							checked={selectedIds.has(agent.id)}
+							onToggleSelect={onToggleSelect}
+							onOpen={onOpen}
+							onUse={onUse}
+							onEdit={onEdit}
+							onRequestDelete={onRequestDelete}
+						/>
+					</RemovalRow>
+				))}
+			</RemovalList>
 		</div>
 	);
 }

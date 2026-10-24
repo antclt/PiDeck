@@ -13,12 +13,14 @@ function load({ present = true, reduced = false } = {}) {
 			"motion/react": { motion: { div: "motion-div" }, useIsPresent: () => present, useReducedMotion: () => reduced, AnimatePresence: "presence", LayoutGroup: "layout-group" },
 			"../../lib/utils": { cn: (...args) => args.filter(Boolean).join(" ") },
 		},
-	})("src/renderer/src/components/sidebar/SidebarRemovalRow.tsx");
+	})("src/renderer/src/components/removal/RemovalList.tsx");
 	return { ...api, host };
 }
 
 function renderRow(options) {
-	return load(options).SidebarRemovalRow({ itemId: "row-a", children: "content" }).props;
+	// 2026-10 第二批：原语迁至 components/removal/RemovalList（导出名 RemovalRow/RemovalList），
+	// 侧栏旧名只作为薄包装 re-export 保留，行为断言全部指向共享模块。
+	return load(options).RemovalRow({ itemId: "row-a", children: "content" }).props;
 }
 
 test("real deletion fades briefly and shifts sibling positions without squeezing row height", () => {
@@ -52,8 +54,8 @@ test("retained exiting rows are inert and hidden from assistive navigation", () 
 });
 
 test("layout measurements are keyed only by real record removals, not ordinary rerenders or additions", () => {
-	const { host, SidebarRemovalList } = load();
-	const generation = (ids) => host.render(() => SidebarRemovalList({ remainingIds: ids, children: "rows" })).props.value;
+	const { host, RemovalList } = load();
+	const generation = (ids) => host.render(() => RemovalList({ remainingIds: ids, children: "rows" })).props.value;
 	assert.equal(generation(["a", "b"]), 0);
 	assert.equal(generation(["a", "b"]), 0);
 	assert.equal(generation(["b", "a"]), 0);
@@ -72,8 +74,8 @@ test("layout measurements are keyed only by real record removals, not ordinary r
  *   否则每次流式刷新都会整列重新测量。
  */
 test("orderSensitive 列表在重排与新增时 bump 布局生成数", () => {
-	const { host, SidebarRemovalList } = load();
-	const gen = (ids) => host.render(() => SidebarRemovalList({ remainingIds: ids, children: "rows", orderSensitive: true })).props.value;
+	const { host, RemovalList } = load();
+	const gen = (ids) => host.render(() => RemovalList({ remainingIds: ids, children: "rows", orderSensitive: true })).props.value;
 
 	assert.equal(gen(["a", "b"]), 0, "首帧不触发测量");
 	assert.equal(gen(["a", "b"]), 0, "顺序未变的重渲不触发测量");
@@ -84,16 +86,16 @@ test("orderSensitive 列表在重排与新增时 bump 布局生成数", () => {
 });
 
 test("移除与重排同时发生时只 bump 一次（removed || reordered）", () => {
-	const { host, SidebarRemovalList } = load();
-	const gen = (ids) => host.render(() => SidebarRemovalList({ remainingIds: ids, children: "rows", orderSensitive: true })).props.value;
+	const { host, RemovalList } = load();
+	const gen = (ids) => host.render(() => RemovalList({ remainingIds: ids, children: "rows", orderSensitive: true })).props.value;
 
 	assert.equal(gen(["a", "b", "c"]), 0);
 	assert.equal(gen(["a", "c"]), 1, "移除同时也改变了顺序签名，但只算一次结构变动");
 });
 
 test("orderSensitive 是显式 opt-in：默认列表（会话）不因重排测量", () => {
-	const { host, SidebarRemovalList } = load();
-	const gen = (ids) => host.render(() => SidebarRemovalList({ remainingIds: ids, children: "rows" })).props.value;
+	const { host, RemovalList } = load();
+	const gen = (ids) => host.render(() => RemovalList({ remainingIds: ids, children: "rows" })).props.value;
 
 	assert.equal(gen(["a", "b"]), 0);
 	assert.equal(gen(["b", "a"]), 0, "会话按 updatedAt 排序，顺序变化不是用户动作，不测量");

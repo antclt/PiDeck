@@ -14,6 +14,7 @@ import { openInSystemBrowser } from "../../utils/openExternal";
 import { formatFullDateTime, formatRelativeTime } from "../../utils/relativeTime";
 import { areAllSelected, pruneSelection, setSelectionFor, toggleSelection } from "../../utils/selectionSet";
 import { BulkSelectionBar } from "../common/BulkSelectionBar";
+import { RemovalList, RemovalRow } from "../removal/RemovalList";
 import { Drawer } from "../motion/drawer";
 import { MarkdownStream } from "../session/MarkdownStream";
 import { stripMarkdown } from "../session/SurfaceParts";
@@ -185,20 +186,26 @@ export function FavoritesWorkspace() {
 					</div>
 				) : (
 					<div className="flex flex-col gap-1.5" {...reorder.containerProps}>
-						{visible.map((entry) => (
-							<FavoriteCard
-								key={entry.id}
-								entry={entry}
-								active={entry.id === detailId}
-								selectionMode={selectionMode}
-								checked={selected.has(entry.id)}
-								reorder={reorder.itemBinding(entry.id)}
-								onOpen={(item) => setDetailId((current) => (current === item.id ? null : item.id))}
-								onToggleSelect={toggleSelect}
-								onCopy={(item) => void handleCopy(item)}
-								onRequestDelete={setPendingDelete}
-							/>
-						))}
+						{/* 删除淡出 + 列表位移收拢：remainingIds 用未过滤的 allIds——搜索/筛选隐藏的
+						    收藏不算删除（exit 时长为 0），真实删除（单删/批量删）才淡出并让下方行滑位。
+						    与 useListReorder 的拖拽 FLIP 互不干扰：重排不 bump 生成数。 */}
+						<RemovalList remainingIds={allIds}>
+							{visible.map((entry) => (
+								<RemovalRow key={entry.id} itemId={entry.id}>
+									<FavoriteCard
+										entry={entry}
+										active={entry.id === detailId}
+										selectionMode={selectionMode}
+										checked={selected.has(entry.id)}
+										reorder={reorder.itemBinding(entry.id)}
+										onOpen={(item) => setDetailId((current) => (current === item.id ? null : item.id))}
+										onToggleSelect={toggleSelect}
+										onCopy={(item) => void handleCopy(item)}
+										onRequestDelete={setPendingDelete}
+									/>
+								</RemovalRow>
+							))}
+						</RemovalList>
 					</div>
 				)}
 			</div>
