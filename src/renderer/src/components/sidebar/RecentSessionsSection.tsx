@@ -8,6 +8,7 @@ import { cn } from "../../lib/utils";
 import type { SidebarController } from "../../hooks/useSidebarController";
 import type { SidebarActions } from "./SidebarContent";
 import { Button } from "../ui-shadcn/button";
+import { RemovalList, RemovalRow } from "../removal/RemovalList";
 import { PendingAskBadge } from "./PendingAskBadge";
 import { AcpBackendMark, SessionBackendMark, SessionChannelMark, SessionSourceBadge, SideTaskMark } from "../session/SessionSourceBadge";
 import { SessionActivityIndicator } from "../session/SessionActivityIndicator";
@@ -82,9 +83,16 @@ export function RecentSessionsSection(props: { controller: SidebarController; ac
 					{shownCount}/{props.totalCount}
 				</span>
 			</div>
-			{props.rows.map((row) => (
-				<RecentSessionRowItem key={row.session.id} row={row} projectName={projectNamesById.get(row.projectId)} controller={props.controller} actions={props.actions} currentSessionId={props.currentSessionId} sessionRuntimeUiById={sessionRuntimeUiById} />
-			))}
+			{/* 删除会话/收起分页时行淡出 + 下方行滑位（与 SessionTree 同一原语）；「最近」按
+			    访问时间排序，顺序变化不是用户动作，不开 orderSensitive。收起分页一次移除多行
+			    也是用户动作，批量淡出 + 滑位正是想要的反馈。 */}
+			<RemovalList remainingIds={props.rows.map((row) => row.session.id)}>
+				{props.rows.map((row) => (
+					<RemovalRow key={row.session.id} itemId={row.session.id}>
+						<RecentSessionRowItem row={row} projectName={projectNamesById.get(row.projectId)} controller={props.controller} actions={props.actions} currentSessionId={props.currentSessionId} sessionRuntimeUiById={sessionRuntimeUiById} />
+					</RemovalRow>
+				))}
+			</RemovalList>
 			{/* 分页条：常驻在本区下缘（不跟随列表滚到底，用户要求「挂在下侧」）。
 			    sticky bottom-0：仍在内容流里（保留自身行位，最后一行不会被盖住），
 			    内容高过本区时自动粘在下缘。观感与项目页「查看更多 / 收起」完全一致——

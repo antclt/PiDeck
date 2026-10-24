@@ -20,6 +20,7 @@ import { useSessionActivityAt } from "../../hooks/sidebar/useSessionActivityCloc
 import { RECENT_SESSIONS_INITIAL_VISIBLE, collectActiveSessionRows, collectRecentActivityRows, growRecentVisible } from "./activitySessionsModel";
 import { RecentSessionsSection } from "./RecentSessionsSection";
 import { SidebarStatusDot } from "./SidebarStatusDot";
+import { RemovalList, RemovalRow } from "../removal/RemovalList";
 
 /** 活动页行样式：与 SessionTree 会话行同尺寸同圆角，但选中底不需要（活动页行不持久）。 */
 const activeRowClass =
@@ -121,78 +122,85 @@ export function ActiveSessionsTree(props: { controller: SidebarController; actio
 			{/* 上半：活动行。行数多时只滚这里，「最近会话」不会被挤下去。 */}
 			<div className="active-sessions-list flex min-h-0 flex-1 flex-col gap-0 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
 				{liveRows.length === 0 ? <div className="px-2 py-1.5 text-caption text-muted-foreground">{t("app.sidebarActiveEmpty")}</div> : null}
-				{liveRows.map(({ agent, projectId, record, sortAt }) => {
-					const sessionId = record?.id;
-					const selected = sessionId === props.currentSessionId;
-					const summary = record ? sessionRecordToSummary(record) : undefined;
-					const displayTitle = summary?.name || agent.title || t("common.untitled");
-					const project = controller.catalog.projects.find((p) => p.id === projectId);
-					const pendingAsk = hasPendingAskForSession(sessionId, sessionRuntimeUiById);
-					// 单击默认 preview；双击显式常驻（与 SessionTree 同一入口语义）。
-					const openSession = (tabMode?: "preview" | "permanent") => {
-						if (sessionId) void props.actions.sessions.open(projectId, sessionId, tabMode);
-					};
-					return (
-						<div
-							key={agent.id}
-							className="group/row relative mt-0.5 flex min-h-8 items-center"
-							onContextMenu={(event) => {
-								event.preventDefault();
-								void controller.openMenu({ kind: "agent", agentId: agent.id, x: event.clientX, y: event.clientY });
-							}}
-						>
-							<SessionHoverCard session={record ?? summary} title={displayTitle} projectName={project?.name} status={agent.status} disabled={Boolean(controller.menu)}>
-								<button
-									type="button"
-									className={cn(activeRowClass, selected && "bg-bg-active text-foreground")}
-									onClick={() => openSession()}
-									onDoubleClick={props.actions.sessions.simpleNavigation ? undefined : () => openSession("permanent")}
-									draggable={Boolean(sessionId)}
-									onDragStart={(event) => {
-										if (!sessionId) return;
-										event.dataTransfer.effectAllowed = "move";
-										event.dataTransfer.setData(SESSION_TAB_DRAG_MIME, sessionId);
-										event.dataTransfer.setData("text/plain", sessionId);
-										props.actions.sessions.beginDrag?.(sessionId);
-									}}
-									onDragEnd={() => props.actions.sessions.endDrag?.()}
-								>
-									{/* 终态（closed/detached/未知）不留空色点占位，见 SidebarStatusDot。 */}
-									<SidebarStatusDot status={agent.status} />
-									<div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7">
-										<div className="conversation-title flex min-w-0 items-center gap-1.5">
-											{/* 后端身份标放标题左侧（与顶部 Tab 一致，用户反馈原先在标题右侧）。 */}
-											{agent.backend === "acp" ? <AcpBackendMark acpToolId={record?.acpToolId} /> : <SessionBackendMark backend={agent.backend} />}
-											{/* 选中背景仍保留，聚焦行也允许 hover 查看完整标题 */}
-											<TitleScrollText text={displayTitle} className="font-medium" />
-											{/* 待确认标记：该会话正在等用户回答 ask，与项目行徽章共用同一组件 */}
-											{pendingAsk && <PendingAskBadge count={1} />}
-											{record?.sideTask && <SideTaskMark />}
-											{/* 相对时间常显：hover 时被右侧「⋯」浮层盖住（与历史会话行同一策略）。
-											   基准是计时点（用户输入 / turn 结束），不是每次写入都刷新的文件时间。 */}
-											<span className="shrink-0 text-micro tabular-nums text-muted-foreground group-hover/row:hidden">{formatRelativeTime(activityAt(sessionId, sortAt))}</span>
-										</div>
-									</div>
-								</button>
-							</SessionHoverCard>
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon-xs"
-								className={cn(rowMoreActionsClass, controller.menu?.kind === "agent" && controller.menu.agentId === agent.id && "pointer-events-auto opacity-100")}
-								aria-label={t("sidebar.moreActions")}
-								title={t("sidebar.moreActions")}
-								onClick={(event) => {
-									event.stopPropagation();
-									const rect = event.currentTarget.getBoundingClientRect();
-									void controller.openMenu({ kind: "agent", agentId: agent.id, x: rect.right, y: rect.bottom });
+				{/* 关闭/删除会话时行淡出 + 下方行滑位（与 SessionTree 同一原语）；活动行按
+				    最近活动排序，顺序随消息实时变化不是用户动作，不开顺序敏感测量——
+				    否则每次流式刷新都会让整列重新测量。remainingIds 只圈活动行：会话关闭
+				    离开活动区也算一次移除，淡出后自然出现在下方「最近会话」。 */}
+				<RemovalList remainingIds={liveRows.map((row) => row.agent.id)}>
+					{liveRows.map(({ agent, projectId, record, sortAt }) => {
+						const sessionId = record?.id;
+						const selected = sessionId === props.currentSessionId;
+						const summary = record ? sessionRecordToSummary(record) : undefined;
+						const displayTitle = summary?.name || agent.title || t("common.untitled");
+						const project = controller.catalog.projects.find((p) => p.id === projectId);
+						const pendingAsk = hasPendingAskForSession(sessionId, sessionRuntimeUiById);
+						// 单击默认 preview；双击显式常驻（与 SessionTree 同一入口语义）。
+						const openSession = (tabMode?: "preview" | "permanent") => {
+							if (sessionId) void props.actions.sessions.open(projectId, sessionId, tabMode);
+						};
+						return (
+							<RemovalRow
+								key={agent.id}
+								itemId={agent.id}
+								className="group/row relative mt-0.5 flex min-h-8 items-center"
+								onContextMenu={(event) => {
+									event.preventDefault();
+									void controller.openMenu({ kind: "agent", agentId: agent.id, x: event.clientX, y: event.clientY });
 								}}
 							>
-								<Ellipsis size={14} aria-hidden="true" />
-							</Button>
-						</div>
-					);
-				})}
+								<SessionHoverCard session={record ?? summary} title={displayTitle} projectName={project?.name} status={agent.status} disabled={Boolean(controller.menu)}>
+									<button
+										type="button"
+										className={cn(activeRowClass, selected && "bg-bg-active text-foreground")}
+										onClick={() => openSession()}
+										onDoubleClick={props.actions.sessions.simpleNavigation ? undefined : () => openSession("permanent")}
+										draggable={Boolean(sessionId)}
+										onDragStart={(event) => {
+											if (!sessionId) return;
+											event.dataTransfer.effectAllowed = "move";
+											event.dataTransfer.setData(SESSION_TAB_DRAG_MIME, sessionId);
+											event.dataTransfer.setData("text/plain", sessionId);
+											props.actions.sessions.beginDrag?.(sessionId);
+										}}
+										onDragEnd={() => props.actions.sessions.endDrag?.()}
+									>
+										{/* 终态（closed/detached/未知）不留空色点占位，见 SidebarStatusDot。 */}
+										<SidebarStatusDot status={agent.status} />
+										<div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7">
+											<div className="conversation-title flex min-w-0 items-center gap-1.5">
+												{/* 后端身份标放标题左侧（与顶部 Tab 一致，用户反馈原先在标题右侧）。 */}
+												{agent.backend === "acp" ? <AcpBackendMark acpToolId={record?.acpToolId} /> : <SessionBackendMark backend={agent.backend} />}
+												{/* 选中背景仍保留，聚焦行也允许 hover 查看完整标题 */}
+												<TitleScrollText text={displayTitle} className="font-medium" />
+												{/* 待确认标记：该会话正在等用户回答 ask，与项目行徽章共用同一组件 */}
+												{pendingAsk && <PendingAskBadge count={1} />}
+												{record?.sideTask && <SideTaskMark />}
+												{/* 相对时间常显：hover 时被右侧「⋯」浮层盖住（与历史会话行同一策略）。
+											   基准是计时点（用户输入 / turn 结束），不是每次写入都刷新的文件时间。 */}
+												<span className="shrink-0 text-micro tabular-nums text-muted-foreground group-hover/row:hidden">{formatRelativeTime(activityAt(sessionId, sortAt))}</span>
+											</div>
+										</div>
+									</button>
+								</SessionHoverCard>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon-xs"
+									className={cn(rowMoreActionsClass, controller.menu?.kind === "agent" && controller.menu.agentId === agent.id && "pointer-events-auto opacity-100")}
+									aria-label={t("sidebar.moreActions")}
+									title={t("sidebar.moreActions")}
+									onClick={(event) => {
+										event.stopPropagation();
+										const rect = event.currentTarget.getBoundingClientRect();
+										void controller.openMenu({ kind: "agent", agentId: agent.id, x: rect.right, y: rect.bottom });
+									}}
+								>
+									<Ellipsis size={14} aria-hidden="true" />
+								</Button>
+							</RemovalRow>
+						);
+					})}
+				</RemovalList>
 			</div>
 			{/* 下半：最近会话常驻面板下半部分，自带滚动（与上半各自独立）。 */}
 			{hasRecent && (

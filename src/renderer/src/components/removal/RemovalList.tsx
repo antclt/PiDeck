@@ -45,17 +45,20 @@ export function RemovalList(props: { remainingIds: readonly string[]; children: 
 }
 
 // popLayout 需要直接取得这一行的 DOM，才能一次性移出文档流而非逐帧改高度。
-export const RemovalRow = forwardRef<HTMLDivElement, { itemId: string; className?: string; children: ReactNode }>(function RemovalRow(props, ref) {
+// 透传原生 div 属性（onContextMenu 等）：消费方的行根事件搬进包装层时不需要另开洞；
+// 展开放在动画/在场语义之前，退出期的 inert / aria-hidden 永远胜出。
+export const RemovalRow = forwardRef<HTMLDivElement, { itemId: string; children: ReactNode } & Omit<React.ComponentProps<typeof motion.div>, "children">>(function RemovalRow({ itemId, children, ...rest }, ref) {
 	const present = useIsPresent();
 	const reduceMotion = useReducedMotion();
 	const generation = useContext(RemovalGeneration);
 	return (
 		<motion.div
 			ref={ref}
-			data-sidebar-removal-id={props.itemId}
+			{...rest}
+			data-sidebar-removal-id={itemId}
 			inert={!present}
 			aria-hidden={!present}
-			className={cn(props.className, !present && "pointer-events-none")}
+			className={cn(rest.className, !present && "pointer-events-none")}
 			initial={false}
 			layout="position"
 			layoutDependency={generation}
@@ -64,11 +67,11 @@ export const RemovalRow = forwardRef<HTMLDivElement, { itemId: string; className
 			variants={{
 				removed: (remainingIds: readonly string[]) => ({
 					opacity: 0,
-					transition: { duration: reduceMotion || remainingIds.includes(props.itemId) ? 0 : 0.1, ease: EASE_OUT },
+					transition: { duration: reduceMotion || remainingIds.includes(itemId) ? 0 : 0.1, ease: EASE_OUT },
 				}),
 			}}
 		>
-			{props.children}
+			{children}
 		</motion.div>
 	);
 });
