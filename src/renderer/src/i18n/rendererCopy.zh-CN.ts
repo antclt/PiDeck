@@ -827,6 +827,7 @@ export const zhCN = {
 	"markdown.imageRetry": "重试",
 	"app.imageRemove": "移除图片",
 	"app.imageTooLarge": "图片过大，最大支持 10MB",
+	"app.imageBudgetExceeded": "附件图片总量已达上限（{size}），请先发送或删除部分图片",
 	"app.imageUnsupported": "不支持的图片格式，请使用 PNG/JPEG/GIF/WebP",
 	"app.latestVersion": "当前已是最新版本",
 	"app.latestVersionNotice": "当前已是最新版本 v{version}。",

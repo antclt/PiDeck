@@ -829,6 +829,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"markdown.imageRetry": "Retry",
 	"app.imageRemove": "Remove image",
 	"app.imageTooLarge": "Image is too large. Maximum size is 10MB.",
+	"app.imageBudgetExceeded": "Attachment images reached the {size} limit. Send or remove some first.",
 	"app.imageUnsupported": "Unsupported image format. Use PNG/JPEG/GIF/WebP.",
 	"app.latestVersion": "You are on the latest version",
 	"app.latestVersionNotice": "You are on the latest version v{version}.",
