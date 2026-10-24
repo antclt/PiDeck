@@ -145,8 +145,12 @@ export class XuePromptDbStore {
 			if (this.now() - this.lastCheckedAt < this.checkTtlMs) {
 				return this.state.state === "ready" ? this.state : this.readyFromCache(cached);
 			}
-			const fresh = await this.refreshFromRemote(cached.path);
-			return fresh ?? this.readyFromCache(cached);
+			// TTL 过期：本地缓存立即可用，绝不为此阻塞调用方——断网时同步等远程检查会让
+			// 每次 list 都被「2 源 × 连接超时」拖 ~10s（2026-10 Web 走查实测 /api/prompts
+			// 逐次 10.6s，商店/移动端提示词库形似卡死）。远程检查转后台，成功换库经
+			// onStateChange 通知渲染层，下一次调用自然取到新缓存路径。
+			this.startCacheBackgroundRefresh(cached.path);
+			return this.readyFromCache(cached);
 		}
 		const repoPath = this.findRepoDb();
 		if (repoPath) {
@@ -231,12 +235,36 @@ export class XuePromptDbStore {
 			if (result) return this.readyFromCache(result);
 			return null; // 远程与缓存同版本，无需变更
 		} catch (error) {
+			// 失败同样推进 TTL 水位：TTL 是「检查频率上限」而非「成功频率上限」。
+			// 只在成功时更新会让断网环境的 lastCheckedAt 永不前进，每个请求都重付
+			// 全套远程探测成本（2 源 × 连接超时），见 runEnsureReady 注释。
+			this.lastCheckedAt = this.now();
 			this.log("xueprompts", "remote db refresh failed, keep local", {
 				path: localPath,
 				error: error instanceof Error ? error.message : String(error),
 			});
 			return null;
 		}
+	}
+
+	/**
+	 * 缓存态的后台远程检查（去重：同一窗口内并发的多个 list 只触发一次检查）。
+	 * 换库成功时 refreshFromRemote 内部经 readyFromCache → onStateChange 通知渲染层。
+	 */
+	private cacheRefresh: Promise<void> | null = null;
+	private startCacheBackgroundRefresh(localPath: string): void {
+		if (this.cacheRefresh) return;
+		this.cacheRefresh = this.refreshFromRemote(localPath)
+			.then(() => undefined)
+			.catch(() => {})
+			.finally(() => {
+				this.cacheRefresh = null;
+			});
+	}
+
+	/** 等待进行中的后台检查结束（测试用；无进行中的检查时立即返回）。 */
+	pendingBackgroundRefresh(): Promise<void> {
+		return this.cacheRefresh ?? Promise.resolve();
 	}
 
 	/**
