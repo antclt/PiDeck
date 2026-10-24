@@ -21,7 +21,15 @@ export interface StandbyPoolOptions {
 	now?: () => number;
 }
 
-export const STANDBY_TTL_MS = 10 * 60 * 1000;
+/**
+ * TTL 3 分钟（2026-10 内存轮从 10min 收紧）：一个待命 pi 进程是完整握手
+ * （扩展全载）的 node 进程，实测 RSS 与正式会话同量级（数百 MB）——是空闲期
+ * 最大的单点常驻。池要覆盖的消费窗口是「草稿创建/上一会话激活 → 用户打字 →
+ * 认领」，典型在秒级到一两分钟内；闲置超过 3 分钟仍未被认领的进程大概率
+ * 等不到消费（用户已离开），继续保温只是在给空闲 RSS 付费。过期后下一条
+ * 新会话回退普通 spawn（多付一次 8.5s 激活），功能无损。
+ */
+export const STANDBY_TTL_MS = 3 * 60 * 1000;
 
 export class StandbyAgentPool {
 	private entry: StandbyEntry | null = null;
