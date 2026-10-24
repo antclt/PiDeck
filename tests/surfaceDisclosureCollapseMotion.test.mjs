@@ -88,6 +88,16 @@ test("WorkspaceSurface 修改文件摘要卡折叠走共享折叠原语", () => 
 	assert.doesNotMatch(source, /\{!collapsed\s*&&\s*\(/, "不得回退条件挂载（高度硬跳）");
 });
 
+test("RewindCheckpointList 的 diff 预览开合走共享折叠原语", () => {
+	const source = read("components/session/RewindCheckpointList.tsx");
+	assert.match(source, /import \{\s*Collapsible,\s*CollapsibleContent\s*\}\s*from "[^"]*ui-shadcn\/collapsible"/, "必须引入共享折叠原语");
+	// open 由数据推导（diff 已加载或加载中），与行按钮 onToggleDiff 的取/清语义对齐
+	assert.match(source, /<Collapsible\s+open=\{diffVisible\}\s+className="contents">/, "折叠根必须受控且不生成盒子");
+	assert.doesNotMatch(source, /\{diffVisible\s*&&\s*\(/, "不得回退条件挂载（高度硬跳）");
+	// 限高滚动契约不被顺手改动
+	assert.match(source, /max-h-40 overflow-auto/, "diff 预览限高滚动契约保持原样");
+});
+
 test("TerminalDock 折叠刻意不迁折叠原语（xterm 容器生命周期）", () => {
 	assert.doesNotMatch(read("components/terminal/TerminalDock.tsx"), /ui-shadcn\/collapsible/, "终端面板折叠关平 xterm 挂载，不是布局折叠动画问题");
 });
