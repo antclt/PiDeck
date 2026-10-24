@@ -21,6 +21,7 @@ test("every page expression compiles as JavaScript", () => {
 		["fallbackScroll", ps.buildFallbackScrollExpression(-10, 240)],
 		["fallbackKey", ps.buildFallbackKeyExpression("Enter")],
 		["waitForText", ps.buildWaitForTextExpression('完成"报价')],
+		["highlight", ps.buildHighlightExpression("e7", "e7 · submit")],
 		["snapshotExpr", buildSnapshotExpression({ maxElements: 50, includeBoxes: true })],
 	];
 	for (const [name, expression] of expressions) {
@@ -35,6 +36,12 @@ test("fallback type expression honors clear semantics and escapes text", () => {
 	assert.ok(clearFalse.includes('el.value = false ? "x" : el.value + "x"'), "clear=false appends to the end");
 	const quoted = ps.buildFallbackTypeExpression("e1", 'a"b\\c', false);
 	assert.ok(quoted.includes(JSON.stringify('a"b\\c')), "text is JSON-escaped, never string-interpolated");
+});
+
+test("highlight expression escapes the label and embeds the ref selector", () => {
+	const expression = ps.buildHighlightExpression("e3", '提交"报价');
+	assert.ok(expression.includes(JSON.stringify('提交"报价')), "label is JSON-escaped, never string-interpolated");
+	assert.ok(expression.includes("data-pideck-ref"), "targets the ref attribute selector");
 });
 
 test("wait-for-text expression embeds the text as a JSON string", () => {

@@ -146,6 +146,11 @@ test("click re-reads the rect after scrolling and dispatches a full mouse sequen
 	assert.equal(gateCalls[0].action, "browser_click");
 	assert.equal(gateCalls[0].sessionId, "sess-9");
 	assert.equal(gateCalls[0].detail.ref, "e1");
+	// 动作可视化：点击前应在页面上短暂高亮目标元素（用户看到的「选取效果」）。
+	assert.ok(
+		cdp.calls.some((call) => call.method === "Runtime.evaluate" && String(call.params?.expression ?? "").includes("__pideck_agent_highlight")),
+		"click must flash a highlight on the target element",
+	);
 	const inputCalls = cdp.calls.filter((call) => call.method === "Input.dispatchMouseEvent");
 	assert.deepEqual(
 		inputCalls.map((call) => call.params.type),

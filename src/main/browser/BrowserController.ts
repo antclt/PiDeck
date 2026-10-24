@@ -9,6 +9,7 @@ import {
 	buildFallbackTypeExpression,
 	buildFocusAndSelectExpression,
 	buildFocusExpression,
+	buildHighlightExpression,
 	buildPageStateExpression,
 	buildResolveRefExpression,
 	buildScrollIntoViewExpression,
@@ -98,11 +99,13 @@ export class BrowserController {
 		};
 	}
 
-	async snapshot(options: { maxElements?: number; includeBoxes?: boolean } = {}): Promise<BrowserSnapshotResult> {
+	async snapshot(options: { maxElements?: number; includeBoxes?: boolean; overlay?: boolean } = {}): Promise<BrowserSnapshotResult> {
 		const target = this.requireTarget();
 		const scriptOptions: SnapshotScriptOptions = {
 			maxElements: clamp(options.maxElements ?? SNAPSHOT_LIMITS.maxElements, 1, SNAPSHOT_LIMITS.maxElements),
 			includeBoxes: options.includeBoxes ?? true,
+			// 识别可视化默认开：页面上框出本轮识别的元素 + ref 标签（用户可见的「选取效果」）。
+			renderOverlay: options.overlay !== false,
 		};
 		const { value, degraded } = await this.evaluateWithFallback(target.guest, buildSnapshotExpression(scriptOptions));
 		const snapshot = normalizeBrowserSnapshot(value, { maxElements: scriptOptions.maxElements });
@@ -157,6 +160,7 @@ export class BrowserController {
 		const clickCount = Math.round(clamp(input.clickCount ?? 1, 1, 3));
 		const gate = await this.approve("browser_click", meta, { url: truncateText(target.url, 200), title: truncateText(target.title, 80), ref, element: resolved.name, tag: resolved.tag, button, clickCount });
 		if (resolved.degraded) {
+			await this.highlightRef(target.guest, ref, resolved.name);
 			const clicked = await target.guest.executeJavaScript(buildFallbackClickExpression(ref), true);
 			if (clicked !== true) throw new BrowserAgentError("stale_ref", `元素引用 ${ref} 已失效，请重新调用 browser_snapshot`);
 			return this.actionResult(target, gate, true, { ref, degraded: true });
@@ -164,6 +168,7 @@ export class BrowserController {
 		// rect 必须是点击时刻的视口坐标：先把元素滚到中央，再重新取一次。
 		await this.evaluate(target.guest, buildScrollIntoViewExpression(ref));
 		const rect = (await this.resolveRef(target.guest, ref)).rect;
+		await this.highlightRef(target.guest, ref, resolved.name);
 		const point = { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
 		await this.deps.cdp.withGuest(target.guest, async (send) => {
 			await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y, modifiers: modifierMask(input.modifiers) });
@@ -185,6 +190,7 @@ export class BrowserController {
 		this.assertRefIdentity(resolved, ref);
 		const gate = await this.approve("browser_type", meta, { url: truncateText(target.url, 200), ref, element: resolved.name, textPreview: truncateText(input.text, 200), textLength: input.text.length, clear: input.clear === true, submit: input.submit === true });
 		if (resolved.degraded) {
+			await this.highlightRef(target.guest, ref, resolved.name);
 			if (input.clear) await target.guest.executeJavaScript(buildFocusAndSelectExpression(ref), true);
 			const typed = await target.guest.executeJavaScript(buildFallbackTypeExpression(ref, input.text, input.clear === true), true);
 			if (typed !== true) throw new BrowserAgentError("stale_ref", `元素引用 ${ref} 已失效，请重新调用 browser_snapshot`);
@@ -192,6 +198,7 @@ export class BrowserController {
 			return this.actionResult(target, gate, true, { ref, textLength: input.text.length });
 		}
 		await this.evaluate(target.guest, buildScrollIntoViewExpression(ref));
+		await this.highlightRef(target.guest, ref, resolved.name);
 		await this.evaluate(target.guest, input.clear ? buildFocusAndSelectExpression(ref) : buildFocusExpression(ref));
 		await this.deps.cdp.withGuest(target.guest, async (send) => {
 			await send("Input.insertText", { text: input.text });
@@ -233,17 +240,20 @@ export class BrowserController {
 		const deltaY = Math.round(clamp(input.deltaY ?? 120, -2400, 2400));
 		let point = { x: 0, y: 0 };
 		let ref: string | undefined;
+		let refName = "";
 		if (input.ref) {
 			ref = this.requireRef(input.ref);
 			const resolved = await this.resolveRef(target.guest, ref);
 			this.assertActionable(resolved, ref);
 			this.assertRefIdentity(resolved, ref);
+			refName = resolved.name;
 			point = { x: Math.round(resolved.rect.x + resolved.rect.width / 2), y: Math.round(resolved.rect.y + resolved.rect.height / 2) };
 		} else {
 			const state = await this.getState();
 			point = { x: Math.round(state.state.viewport.width / 2), y: Math.round(state.state.viewport.height / 2) };
 		}
 		const gate = await this.approve("browser_scroll", meta, { url: truncateText(target.url, 200), ref: ref ?? null, deltaX, deltaY });
+		if (ref) await this.highlightRef(target.guest, ref, refName);
 		try {
 			await this.deps.cdp.withGuest(target.guest, async (send) => {
 				await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: point.x, y: point.y, deltaX, deltaY, modifiers: 0 });
@@ -328,6 +338,18 @@ export class BrowserController {
 			// CDP 被占用（DevTools/内存探针）：整段降级 executeJavaScript 轮询，结果标 degraded。
 			const matched = await poll(() => target.guest.executeJavaScript(pollExpression, true));
 			return { target: this.targetInfo(target), matched, elapsedMs: Date.now() - startedAt, degraded: true };
+		}
+	}
+
+	/**
+	 * 动作可视化：在页面上短暂高亮 agent 正在操作的目标元素（琥珀色框 + ref·名称标签）。
+	 * 纯视觉、best-effort：页面 DOM 异常/CSP 限制时静默跳过，绝不阻断动作本身。
+	 */
+	private async highlightRef(guest: WebContents, ref: string, name: string): Promise<void> {
+		try {
+			await this.evaluateWithFallback(guest, buildHighlightExpression(ref, truncateText(`${ref} · ${name}`, 60)));
+		} catch {
+			// 高亮失败不影响动作。
 		}
 	}
 

@@ -47,13 +47,21 @@ class FakeElement {
 		this.events?.push("gBCR");
 		return this.rect;
 	}
+	appendChild(child) {
+		this.children = this.children ?? [];
+		this.children.push(child);
+		child.parentElement = this;
+	}
+	remove() {
+		if (this.parentElement?.children) this.parentElement.children = this.parentElement.children.filter((entry) => entry !== this);
+	}
 }
 class HTMLElement extends FakeElement {}
 class HTMLInputElement extends HTMLElement {}
 class HTMLTextAreaElement extends HTMLElement {}
 class HTMLSelectElement extends HTMLElement {}
 
-const domState = { elements: [], iframes: [] };
+const domState = { elements: [], iframes: [], created: [] };
 const windowStub = {
 	getComputedStyle: (element) => element.style,
 	innerWidth: 1280,
@@ -62,8 +70,16 @@ const windowStub = {
 	scrollY: 40,
 	devicePixelRatio: 1.5,
 };
+const documentRoot = new HTMLElement("html");
 const documentStub = {
 	title: "Test Page",
+	body: documentRoot,
+	documentElement: documentRoot,
+	createElement(tag) {
+		const node = new HTMLElement(tag);
+		domState.created.push(node);
+		return node;
+	},
 	querySelectorAll(selector) {
 		if (selector === "*") return [...domState.elements];
 		if (selector.includes("data-pideck-ref")) return domState.elements.filter((element) => element.hasAttribute("data-pideck-ref"));
@@ -92,6 +108,8 @@ function installDom(elements) {
 	const events = [];
 	for (const element of elements) element.events = events;
 	domState.elements = elements;
+	domState.created = [];
+	documentRoot.children = [];
 	return events;
 }
 
@@ -194,7 +212,23 @@ test("elements inside an opacity:0 ancestor are excluded", () => {
 });
 
 test("buildSnapshotExpression wraps the self-contained function with serialized options", () => {
-	const expression = buildSnapshotExpression({ maxElements: 12, includeBoxes: false });
+	const expression = buildSnapshotExpression({ maxElements: 12, includeBoxes: false, renderOverlay: true });
 	assert.match(expression, /^\(function collectBrowserSnapshotInPage\(/);
-	assert.ok(expression.endsWith(')({"maxElements":12,"includeBoxes":false})'), "options are JSON-serialized into the call");
+	assert.ok(expression.endsWith(')({"maxElements":12,"includeBoxes":false,"renderOverlay":true})'), "options are JSON-serialized into the call");
+});
+
+test("snapshot renders the recognition overlay with ref tags unless disabled", () => {
+	const elements = [new HTMLElement("button", { interactive: true, innerText: "按钮一" }), new HTMLElement("button", { interactive: true, innerText: "按钮二" })];
+	installDom(elements);
+
+	collectBrowserSnapshotInPage({ maxElements: 10, includeBoxes: false });
+	assert.ok(domState.created.length >= 3, "overlay container + one box per element were created");
+	const overlay = domState.created[0];
+	assert.ok(String(overlay.style.cssText ?? "").includes("pointer-events:none"), "overlay must not intercept input");
+	const tags = domState.created.filter((node) => node.textContent === "e1" || node.textContent === "e2");
+	assert.equal(tags.length, 2, "each recognized element gets a ref tag");
+
+	domState.created = [];
+	collectBrowserSnapshotInPage({ maxElements: 10, includeBoxes: false, renderOverlay: false });
+	assert.equal(domState.created.length, 0, "renderOverlay:false draws nothing");
 });

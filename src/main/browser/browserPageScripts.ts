@@ -115,6 +115,33 @@ export function buildWaitForTextExpression(text: string): string {
 	return `!!(document.body && document.body.innerText.includes(${JSON.stringify(text)}))`;
 }
 
+/**
+ * 动作可视化：给 agent 正在操作的目标元素画琥珀色高亮框 + 「ref · 名称」标签，
+ * 约 1.5s 后淡出移除。纯视觉增强：pointer-events:none、best-effort（失败由调用方吞掉，
+ * 不影响动作本身）。用户由此能看到 agent「选取」了哪个元素（browser-use 式体验）。
+ */
+export function buildHighlightExpression(ref: string, label: string): string {
+	return `(() => {
+		const el = document.querySelector(${JSON.stringify(REF_SELECTOR(ref))});
+		if (!el) return false;
+		const id = "__pideck_agent_highlight";
+		const old = document.getElementById(id);
+		if (old) old.remove();
+		const rect = el.getBoundingClientRect();
+		const box = document.createElement("div");
+		box.id = id;
+		box.style.cssText = "position:fixed;left:" + (rect.x - 3) + "px;top:" + (rect.y - 3) + "px;width:" + (rect.width + 6) + "px;height:" + (rect.height + 6) + "px;border:2px solid #f59e0b;border-radius:4px;background:rgba(245,158,11,.14);box-shadow:0 0 0 3px rgba(245,158,11,.25);pointer-events:none;z-index:2147483647;transition:opacity .45s ease .95s;opacity:1;";
+		const tag = document.createElement("div");
+		tag.textContent = ${JSON.stringify(label)};
+		tag.style.cssText = "position:absolute;top:-20px;left:-2px;padding:1px 6px;border-radius:3px;background:#f59e0b;color:#1f2937;font:600 11px/1.5 ui-sans-serif,system-ui,sans-serif;white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis;";
+		box.appendChild(tag);
+		(document.body || document.documentElement).appendChild(box);
+		setTimeout(() => { box.style.opacity = "0"; }, 40);
+		setTimeout(() => { if (document.getElementById(id) === box) box.remove(); }, 1600);
+		return true;
+	})()`;
+}
+
 export function buildFallbackScrollExpression(deltaX: number, deltaY: number): string {
 	return `window.scrollBy(${JSON.stringify(deltaX)}, ${JSON.stringify(deltaY)}), true`;
 }
