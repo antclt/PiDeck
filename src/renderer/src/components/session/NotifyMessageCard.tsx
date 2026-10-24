@@ -41,7 +41,7 @@ export const NotifyMessageCard = memo(function NotifyMessageCard(props: { messag
 
 	return (
 		<TimelineMarker kind="diagnostic" tone={tone}>
-			<article className="w-full min-w-0 overflow-hidden rounded-md border border-border-subtle bg-[var(--color-chat-muted-bg)]" data-message-id={props.message.id} data-role={props.message.role} data-custom-type={customType || undefined} data-notify-status={summary.status}>
+			<article className="mb-4 w-full min-w-0 overflow-hidden rounded-md border border-border-subtle bg-[var(--color-chat-muted-bg)]" data-message-id={props.message.id} data-role={props.message.role} data-custom-type={customType || undefined} data-notify-status={summary.status}>
 				{/* 整行可点：图标 + 标题 + 子代理名 + 折叠预览 + 时间 + chevron */}
 				<button
 					type="button"

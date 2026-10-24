@@ -26,7 +26,7 @@ export const ExtensionEntryCard = memo(function ExtensionEntryCard(props: { mess
 
 	return (
 		<TimelineMarker kind="diagnostic" tone="neutral">
-			<article className="w-full min-w-0 overflow-hidden rounded-md border border-border-subtle bg-[var(--color-chat-muted-bg)]" data-message-id={props.message.id} data-role={props.message.role} data-custom-type={customType || undefined}>
+			<article className="mb-4 w-full min-w-0 overflow-hidden rounded-md border border-border-subtle bg-[var(--color-chat-muted-bg)]" data-message-id={props.message.id} data-role={props.message.role} data-custom-type={customType || undefined}>
 				{/* 整行可点：图标 + 标题 + customType + 折叠预览 + 时间 + chevron */}
 				<button
 					type="button"

@@ -48,12 +48,24 @@ test("boundMountedSteps: 刚好等于预算时不做裁剪（保持原引用，�
 	assert.equal(windowed.items, source);
 });
 
-test("boundMountedSteps: 展开后返回全量且不改原数组", () => {
+test("boundMountedSteps: 每档只多挂一批，超出后走早退返回原引用", () => {
 	const source = items(500);
-	const windowed = boundMountedSteps(source, 120, true);
-	assert.equal(windowed.items, source);
-	assert.equal(windowed.hiddenCount, 0);
-	assert.equal(source.length, 500);
+	const tiers = [
+		[0, 120, 380],
+		[1, 240, 260],
+		[2, 360, 140],
+		[3, 480, 20],
+	];
+	for (const [batches, mounted, hidden] of tiers) {
+		const windowed = boundMountedSteps(source, 120, batches === 0 ? undefined : { anchor: 500, batches });
+		assert.equal(windowed.items.length, mounted);
+		assert.equal(windowed.hiddenCount, hidden);
+		assert.notEqual(windowed.items, source);
+	}
+	const full = boundMountedSteps(source, 120, { anchor: 500, batches: 4 });
+	assert.equal(full.items, source);
+	assert.equal(full.hiddenCount, 0);
+	assert.equal(source.length, 500, "不改原数组");
 });
 
 test("回归：单轮 123 个过程组 × 每组上限，必须被预算收敛到有限 DOM", () => {

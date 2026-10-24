@@ -259,11 +259,12 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 	const foldableItems = useMemo(() => displayItems.filter((item) => item.kind !== "final-answer"), [displayItems]);
 	const finalItems = useMemo(() => displayItems.filter((item) => item.kind === "final-answer"), [displayItems]);
 	// 单轮步骤挂载预算（2026-08 #213）：极端轮次（单轮上百个工具/思考条目）默认只挂尾部
-	// LIMIT 条，顶部给「显示更早 N 条步骤」入口——内容仍在 foldableItems 里，点开即全量挂载。
-	// 用 run.id 而非布尔量做「已展开」状态：换 run 自然重置，不需要额外 effect。
-	const [expandedStepsRunId, setExpandedStepsRunId] = useState<string | undefined>(undefined);
-	const stepsFullyExpanded = expandedStepsRunId === run.id;
-	const mountedSteps = useMemo(() => boundMountedSteps(foldableItems, TIMELINE_MOUNTED_STEP_LIMIT, stepsFullyExpanded), [foldableItems, stepsFullyExpanded]);
+	// LIMIT 条，顶部给「显示更早 N 条步骤」入口——每点一次把挂载下界向前挪一批（batches +1）。
+	// 下界锚在首次点击时的条目总数上：之后尾部追加新步骤不会把已展开的旧条目挤回去。
+	// 用 run.id 判定「已展开」状态：换 run 自然重置，不需要额外 effect。
+	const [expandedSteps, setExpandedSteps] = useState<{ runId: string; anchor: number; batches: number } | undefined>(undefined);
+	const stepExpansion = expandedSteps?.runId === run.id ? expandedSteps : undefined;
+	const mountedSteps = useMemo(() => boundMountedSteps(foldableItems, TIMELINE_MOUNTED_STEP_LIMIT, stepExpansion), [foldableItems, stepExpansion]);
 
 	/* ── 过程组模式（processGroupDisplay；关闭时走下面原有的扁平渲染） ──
 	 * 纯函数把扁平序列切成「中间回复 / 过程组 / 一级行」交替序列（见 timeline/groupTurnProcess.ts）。
@@ -384,11 +385,11 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 										<button
 											type="button"
 											className="mt-1 inline-flex h-[26px] items-center gap-2 self-start rounded-[var(--radius-md)] border border-border-subtle bg-[var(--color-chat-card-bg)] px-3 text-chat-detail font-medium text-text-secondary transition-colors hover:border-border-strong hover:bg-bg-hover hover:text-text-primary"
-											onClick={() => setExpandedStepsRunId(run.id)}
-											title={t("timeline.showEarlierSteps", { count: mountedSteps.hiddenCount })}
+											onClick={() => setExpandedSteps((prev) => (prev?.runId === run.id ? { ...prev, batches: prev.batches + 1 } : { runId: run.id, anchor: foldableItems.length, batches: 1 }))}
+											title={t("timeline.showEarlierSteps", { count: Math.min(TIMELINE_MOUNTED_STEP_LIMIT, mountedSteps.hiddenCount) })}
 										>
 											<ChevronUp size={12} aria-hidden="true" />
-											<span>{t("timeline.showEarlierSteps", { count: mountedSteps.hiddenCount })}</span>
+											<span>{t("timeline.showEarlierSteps", { count: Math.min(TIMELINE_MOUNTED_STEP_LIMIT, mountedSteps.hiddenCount) })}</span>
 										</button>
 									)}
 									{(stepsVisible || props.agentRunning === true) &&
