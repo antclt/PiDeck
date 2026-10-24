@@ -6,6 +6,7 @@ import { formatTime } from "./TimelineFormat";
 import { TimelineMarker } from "./TimelineMarker";
 import { SingleLinePreview } from "./SingleLinePreview";
 import { formatExtensionEntryFields } from "./extensionEntry";
+import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
 
 /**
  * ExtensionEntryCard — 扩展输出条目（pi appendEntry / type:"custom"）的时间线卡片。
@@ -25,7 +26,7 @@ export const ExtensionEntryCard = memo(function ExtensionEntryCard(props: { mess
 
 	return (
 		<TimelineMarker kind="diagnostic" tone="neutral">
-			<article className="w-full min-w-0 overflow-hidden rounded-md border border-border-subtle bg-[var(--color-chat-muted-bg)]" data-message-id={props.message.id} data-role={props.message.role} data-custom-type={customType || undefined}>
+			<article className="mb-4 w-full min-w-0 overflow-hidden rounded-md border border-border-subtle bg-[var(--color-chat-muted-bg)]" data-message-id={props.message.id} data-role={props.message.role} data-custom-type={customType || undefined}>
 				{/* 整行可点：图标 + 标题 + customType + 折叠预览 + 时间 + chevron */}
 				<button
 					type="button"
@@ -41,8 +42,9 @@ export const ExtensionEntryCard = memo(function ExtensionEntryCard(props: { mess
 					<time className="ml-auto shrink-0 text-micro tabular-nums text-text-tertiary">{formatTime(props.message.timestamp)}</time>
 					{expanded ? <ChevronDown size={14} className="shrink-0 text-text-faint" aria-hidden="true" /> : <ChevronRight size={14} className="shrink-0 text-text-faint" aria-hidden="true" />}
 				</button>
-				{expanded ? (
-					<div className="border-t border-border-subtle px-2 py-1.5">
+				{/* 折叠体走共享折叠原语：真高度渐变 + exit 后卸载；display:contents 根不生成盒子，折叠态零空档。 */}
+				<Collapsible open={expanded} className="contents">
+					<CollapsibleContent className="border-t border-border-subtle px-2 py-1.5">
 						{fields.length === 0 && !truncated ? <p className="m-0 text-caption text-text-tertiary">{t("notify.extensionEntryEmpty")}</p> : null}
 						{fields.map((field, index) => (
 							<div key={`${field.key}-${index}`} className="flex flex-col gap-0.5 py-0.5">
@@ -51,8 +53,8 @@ export const ExtensionEntryCard = memo(function ExtensionEntryCard(props: { mess
 							</div>
 						))}
 						{truncated ? <p className="m-0 pt-1 text-micro text-text-faint">{t("notify.extensionEntryTruncated")}</p> : null}
-					</div>
-				) : null}
+					</CollapsibleContent>
+				</Collapsible>
 			</article>
 		</TimelineMarker>
 	);

@@ -45,6 +45,10 @@ test("CUA MCP HTTP host exposes tools and denies writes without approval handler
 		const state = JSON.parse(stateResult.content[0].text);
 		assert.strictEqual(state.gateEnabled, true);
 		assert.ok(state.display.width > 0);
+		// 多显示器契约：节点宿主拿不到 electron screen（displays 退化空数组），但
+		// virtualDesktop 必须始终来自 Win32，模型才有绝对坐标的参照。
+		assert.ok(Array.isArray(state.displays), "displays must always be an array");
+		assert.ok(state.virtualDesktop.width > 0 && state.virtualDesktop.height > 0, "virtualDesktop must be reported");
 
 		// cua_click is a write action → no approval handler → denied (fail closed).
 		const clickResult = await client.callTool({

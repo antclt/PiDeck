@@ -34,23 +34,35 @@ test("extractUserPrompts: trims whitespace and respects limit", () => {
 	assert.deepEqual(hostArray(extractUserPrompts([], 2)), []);
 });
 
-test("mergePromptHistory: runtime prompts keep priority, session reversed and deduped", () => {
-	// runtime 最新在前（recordPromptHistory 存储顺序）；session 按时间正序传入，反转后接续
-	assert.deepEqual(hostArray(mergePromptHistory(["b", "a"], ["a", "c", "d"])), ["b", "a", "d", "c"]);
+test("mergePromptHistory: runtime prompts keep priority, session stays newest-first and deduped", () => {
+	// 两个来源都是最新在前（runtime 为 recordPromptHistory 存储顺序，session 为 extractUserPrompts 输出）
+	assert.deepEqual(hostArray(mergePromptHistory(["b", "a"], ["d", "c", "a"])), ["b", "a", "d", "c"]);
 });
 
 test("mergePromptHistory: covers unstarted agents (empty runtime) with session history", () => {
-	// 未启动的 Agent：无本次运行发送记录，历史完全来自会话消息
-	assert.deepEqual(hostArray(mergePromptHistory([], ["旧一", "旧二"])), ["旧二", "旧一"]);
+	// 未启动的 Agent：无本次运行发送记录，历史完全来自会话消息（最新在前）
+	assert.deepEqual(hostArray(mergePromptHistory([], ["旧二", "旧一"])), ["旧二", "旧一"]);
 });
 
 test("mergePromptHistory: dedupes across runtime and session, keeps runtime copy", () => {
-	assert.deepEqual(hostArray(mergePromptHistory(["x", "y"], ["y", "z", "x"])), ["x", "y", "z"]);
+	assert.deepEqual(hostArray(mergePromptHistory(["d", "c"], ["d", "c", "b", "a"])), ["d", "c", "b", "a"]);
 });
 
 test("mergePromptHistory: respects limit across both sources", () => {
-	// session 反转后最新在前：截断保留的应是各源里最新的条目
-	assert.deepEqual(hostArray(mergePromptHistory(["1", "2"], ["3", "4", "5"], 3)), ["1", "2", "5"]);
+	// 两段都最新在前：截断保留的应是各源里最新的条目
+	assert.deepEqual(hostArray(mergePromptHistory(["1", "2"], ["2", "1", "5", "4", "3"], 3)), ["1", "2", "5"]);
+});
+
+test("mergePromptHistory: 接 extractUserPrompts 输出后仍是最近在前（回归：↑ 不该跳回会话第一条）", () => {
+	const messages = [
+		{ role: "user", text: "第一条" },
+		{ role: "assistant", text: "回答" },
+		{ role: "user", text: "第二条" },
+		{ role: "user", text: "第三条" },
+	];
+	assert.deepEqual(hostArray(mergePromptHistory([], extractUserPrompts(messages))), ["第三条", "第二条", "第一条"]);
+	// 已启动且本次发过同一条时，runtime 段在前，不重复也不提前跳到旧消息
+	assert.deepEqual(hostArray(mergePromptHistory(["第三条"], extractUserPrompts(messages))), ["第三条", "第二条", "第一条"]);
 });
 
 test("promptHistoryRef 必须有会话级 LRU 上限（会话删除后发送历史无人清理，桌面进程长运行无界增长）", () => {

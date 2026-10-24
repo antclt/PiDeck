@@ -19,19 +19,28 @@ function AlertDialogPortal({ ...props }: React.ComponentProps<typeof AlertDialog
 }
 
 function AlertDialogOverlay({ className, ...props }: React.ComponentProps<typeof AlertDialogPrimitive.Overlay>) {
-	return <AlertDialogPrimitive.Overlay data-slot="alert-dialog-overlay" className={cn("fixed inset-0 z-(--z-dialog) bg-[var(--overlay-backdrop)] backdrop-blur-[2px] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0", className)} {...props} />;
+	return (
+		<AlertDialogPrimitive.Overlay
+			data-slot="alert-dialog-overlay"
+			className={cn("fixed inset-0 z-(--z-dialog) bg-[var(--overlay-backdrop)] backdrop-blur-[2px] duration-base data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0", className)}
+			{...props}
+		/>
+	);
 }
 
 function AlertDialogContent({
 	className,
+	overlayClassName,
 	size = "default",
 	...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Content> & {
 	size?: "default" | "sm";
+	/** 背板额外类：抽屉内的确认框需要跟着抬层级（抽屉 980 > 弹窗 950）。 */
+	overlayClassName?: string;
 }) {
 	return (
 		<AlertDialogPortal>
-			<AlertDialogOverlay />
+			<AlertDialogOverlay className={overlayClassName} />
 			<AlertDialogPrimitive.Content
 				data-slot="alert-dialog-content"
 				data-size={size}

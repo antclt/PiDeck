@@ -4,11 +4,16 @@ import { msUntilNextThemeBoundary, resolveAppColorScheme } from "../../../../sha
 import { ensureI18nLocale, isI18nLocaleLoaded, resolveLocale, setI18nLocale } from "../../i18n";
 import type { AppSettings } from "../../../../shared/types";
 import { applyAppearanceWithTransition } from "./appearanceTransition";
+import { isVideoWallpaperActive } from "./videoWallpaper";
 
 // 壁纸模式已注入的 token 键（effect 重跑/清除设置时需要跨运行保留，避免漏清）
 let injectedWallpaperTokens = new Set<string>();
 // 自定义外观主题（customThemeOverrides / customTheme 快照）已注入的 token 键：切换主题时先清后注，防残留
 let injectedCustomTokens = new Set<string>();
+// 壁纸模式最近一次注入的 token 值：applyCustomThemeTokens 会用自定义主题的不透明色覆盖
+// 同名 --color-bg-* 壁纸 token（设置弹窗预览/取消回滚都会调它），注入后据此恢复半透明，
+// 否则打开再关闭设置弹窗后面板变成不透明、盖住背景图（issue #398）。
+const injectedWallpaperValues = new Map<string, string>();
 
 /**
  * 自定义 token 注入（主题包快照 + 手写 overrides）：App 持久化应用与设置弹窗实时预览共用。
@@ -29,6 +34,8 @@ export function applyCustomThemeTokens(root: HTMLElement, settings: Pick<AppSett
 		root.style.setProperty(`--color-${k}`, v);
 		injectedCustomTokens.add(k);
 	}
+	// 壁纸开启时壁纸 token 必须压在自定义色之上（与 useAppAppearance 中「先自定义、后壁纸」的顺序一致）
+	for (const [k, v] of injectedWallpaperValues) root.style.setProperty(k, v);
 }
 
 /**
@@ -174,15 +181,21 @@ export function useAppAppearance({ settings, systemLanguage, settingsLoaded }: {
 
 		// 2. 换肤背景图：遮罩同色渐变（浅白/暗黑）+ 壁纸模式 token 半透明注入。
 		//    存储语义=图片可见度（0=全遮，1=图全显）；滑块 80% → 遮罩 0.2 → 图 80% 透出。
+		// Wallpaper Engine 视频壁纸与静态图共用同一套壁纸模式（面板透明度档位/遮罩），
+		// 视频本身由 WallpaperVideoLayer 渲染；视频生效时不再挂静态图，避免两层同时解码。
+		const videoWallpaper = isVideoWallpaperActive(settings);
 		root.dataset.bgImage = settings.backgroundImage ? "on" : "off";
-		if (settings.backgroundImage) {
+		if (videoWallpaper) root.dataset.bgImage = "on";
+		if (settings.backgroundImage || videoWallpaper) {
 			// 采样前先摘掉上一轮注入的壁纸 token：inline style 在 cascade 上压过
 			// :root[data-theme="dark"] 样式表，不摘的话 getComputedStyle 读到的是
 			// 上一轮主题烤进的旧值，重注入又基于旧值——背景被永久焊死在注入时的
 			// 明暗（暗色启动后亮色坏、亮色启动后暗色坏，即主题互相「打架」的根因）。
 			for (const k of injectedWallpaperTokens) root.style.removeProperty(k);
 			injectedWallpaperTokens.clear();
-			root.style.setProperty("--app-bg-image", `url("pideck-bg://local/${encodeURIComponent(settings.backgroundImage)}")`);
+			injectedWallpaperValues.clear();
+			if (settings.backgroundImage && !videoWallpaper) root.style.setProperty("--app-bg-image", `url("pideck-bg://local/${encodeURIComponent(settings.backgroundImage)}")`);
+			else root.style.removeProperty("--app-bg-image");
 			const alpha = Math.min(1, Math.max(0, 1 - settings.backgroundImageOpacity));
 			// 面板不透明度与遮罩同步并加 10% 基础偏移（面板更实一点，可读性更好）：
 			// 滑块 80% → 面板 30%；100% → 10%（图完整显示）；0% → 100%（纯色）
@@ -200,29 +213,34 @@ export function useAppAppearance({ settings, systemLanguage, settingsLoaded }: {
 			for (const k of BG_TOKENS) {
 				const v = cs.getPropertyValue(k).trim();
 				if (v) {
-					root.style.setProperty(k, `color-mix(in srgb, ${base} ${panelMix}%, transparent)`);
+					const wallpaperValue = `color-mix(in srgb, ${base} ${panelMix}%, transparent)`;
+					root.style.setProperty(k, wallpaperValue);
 					injectedWallpaperTokens.add(k);
+					injectedWallpaperValues.set(k, wallpaperValue);
 				}
 			}
 			// Select/Dropdown/Popover 会 portal 到 body，不能继承 DialogContent 的局部变量。
 			// 单独给浮层保留 92% 以上的底色，避免半透明面板 token 让菜单内容透出并误读为“透明坏了”。
 			const floatingMix = Math.max(92, Math.min(100, panelMix + 40));
-			root.style.setProperty("--color-bg-popover", `color-mix(in srgb, ${base} ${floatingMix}%, transparent)`);
+			const popoverValue = `color-mix(in srgb, ${base} ${floatingMix}%, transparent)`;
+			root.style.setProperty("--color-bg-popover", popoverValue);
 			root.style.setProperty("--wallpaper-floating-alpha", `${floatingMix}%`);
 			injectedWallpaperTokens.add("--color-bg-popover");
+			injectedWallpaperValues.set("--color-bg-popover", popoverValue);
 		} else {
 			root.style.removeProperty("--app-bg-image");
 			root.style.removeProperty("--app-bg-mask");
 			// 只清本 effect 注入过的壁纸 token，绝不误清皮肤设置的 bg 键
 			for (const k of injectedWallpaperTokens) root.style.removeProperty(k);
 			injectedWallpaperTokens.clear();
+			injectedWallpaperValues.clear();
 			root.style.removeProperty("--wallpaper-base");
 			root.style.removeProperty("--wallpaper-panel-alpha");
 			root.style.removeProperty("--wallpaper-floating-alpha");
 		}
 		// resolvedTheme 必须进依赖：系统明暗翻转/时间边界到达时壁纸 inline token 要按新明暗重算，
 		// 否则上一主题烤进的 color-mix 基色焊死在 root.style 上压过样式表（issue #297）
-	}, [resolvedTheme, settings.themeSkin, settings.theme, settings.customTheme, settings.customThemeOverrides, settings.backgroundImage, settings.backgroundImageOpacity]);
+	}, [resolvedTheme, settings.themeSkin, settings.theme, settings.customTheme, settings.customThemeOverrides, settings.backgroundImage, settings.backgroundImageOpacity, settings.weWorkshopDir, settings.weWallpaperId]);
 
 	// 字号与命名字体预设由 data 属性选择 CSS token；只有 custom 字体需要注入用户输入。
 	useEffect(() => {

@@ -69,7 +69,9 @@ test("session tab active background is instant (no shared-layout slide between t
 	const source = readFileSync("src/renderer/src/components/session/SessionTabsBar.tsx", "utf8");
 	// 用户明确要求去掉切 Tab 时「选中底色从旧 Tab 滑到新 Tab」的移动动画：栏内不再引入
 	// motion 共享投影（layoutId/layoutRoot），底色改为激活 Tab 自身的普通 span，切换瞬时出现。
-	assert.doesNotMatch(source, /from "motion\/react"/);
+	// 注意区分：单 Tab 自身的 layout="position"（关闭中间 Tab 后右侧 Tab 收拢，见
+	// sessionTabLayoutMotion.test.mjs）不是共享投影——底色仍长在各自 Tab 上、不会跨元素滑动，
+	// 所以这里禁止的是共享投影本身，而不是整体禁止 motion/react 导入。
 	assert.doesNotMatch(source, /layoutId=\{/);
 	assert.doesNotMatch(source, /layoutRoot/);
 	// 四种 Tab（会话 / 文件 / 插件伪 Tab / 页面式工作区伪 Tab）各自保留一处静态选中底色，且只在激活时渲染。

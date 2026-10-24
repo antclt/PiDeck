@@ -11,6 +11,7 @@ const {
 	SELECTION_TOOL_UI_SELECTOR,
 	SELECTION_TOOL_IGNORED_MOUSEUP_SELECTOR,
 	SELECTION_TOOL_EDITABLE_SELECTOR,
+	SELECTION_TOOL_REPLY_SELECTOR,
 	SELECTION_INLINE_WIDTH,
 	SELECTION_INLINE_MIN_WIDTH,
 	SELECTION_INLINE_MARGIN,
@@ -42,30 +43,37 @@ test("normalizeSelectionText trims, enforces the minimum length and caps oversiz
 });
 
 /** 假元素：只实现策略真正用到的 tagName + closest（测试不需要真 DOM）。 */
-function fakeAnchorElement({ tagName = "DIV", insideToolUi = false, insideEditable = false } = {}) {
+function fakeAnchorElement({ tagName = "DIV", insideToolUi = false, insideEditable = false, insideReply = false } = {}) {
 	return {
 		tagName,
 		closest(selector) {
 			if (selector === SELECTION_TOOL_UI_SELECTOR) return insideToolUi ? { tagName: "DIV" } : null;
 			if (selector === SELECTION_TOOL_EDITABLE_SELECTOR) return insideEditable ? { tagName: "DIV" } : null;
+			if (selector === SELECTION_TOOL_REPLY_SELECTOR) return insideReply ? { tagName: "DIV" } : null;
 			return null;
 		},
 	};
 }
 
-test("isSelectionToolAnchorElement accepts prose surfaces and rejects editable/tool-ui endpoints", () => {
+test("isSelectionToolAnchorElement only accepts assistant reply bodies", () => {
 	assert.equal(isSelectionToolAnchorElement(null), false);
-	// 正文面（时间线/Markdown/抽屉正文等）：允许
-	assert.equal(isSelectionToolAnchorElement(fakeAnchorElement()), true);
-	assert.equal(isSelectionToolAnchorElement(fakeAnchorElement({ tagName: "P" })), true);
-	// 编辑面：输入框/下拉/选项本身不允许
+	// 回复正文（最终回答 / 中间回复 / 历史正文）：允许
+	assert.equal(isSelectionToolAnchorElement(fakeAnchorElement({ insideReply: true })), true);
+	assert.equal(isSelectionToolAnchorElement(fakeAnchorElement({ tagName: "P", insideReply: true })), true);
+	// 非回复区域（侧栏 / 设置 / 用户气泡等纯文本面）：不再弹（2026-10 用户反馈）
+	assert.equal(isSelectionToolAnchorElement(fakeAnchorElement()), false);
+	assert.equal(isSelectionToolAnchorElement(fakeAnchorElement({ tagName: "P" })), false);
+	// 编辑面：输入框/下拉/选项本身不允许（即使在外面也不允许，回复内同样不允许）
 	for (const tagName of ["INPUT", "TEXTAREA", "SELECT", "OPTION"]) {
-		assert.equal(isSelectionToolAnchorElement(fakeAnchorElement({ tagName })), false, tagName);
+		assert.equal(isSelectionToolAnchorElement(fakeAnchorElement({ tagName, insideReply: true })), false, tagName);
 	}
 	// 祖先命中编辑面（contenteditable 编辑器内部）不允许
-	assert.equal(isSelectionToolAnchorElement(fakeAnchorElement({ insideEditable: true })), false);
+	assert.equal(isSelectionToolAnchorElement(fakeAnchorElement({ insideEditable: true, insideReply: true })), false);
 	// 工具自身 UI（浮出按钮/调用面板/结果区）不允许
-	assert.equal(isSelectionToolAnchorElement(fakeAnchorElement({ insideToolUi: true })), false);
+	assert.equal(isSelectionToolAnchorElement(fakeAnchorElement({ insideToolUi: true, insideReply: true })), false);
+	// 白名单必须覆盖两种助手正文根节点；新增回复渲染路径要同步这里
+	assert.match(SELECTION_TOOL_REPLY_SELECTOR, /\.execution-interim/);
+	assert.match(SELECTION_TOOL_REPLY_SELECTOR, /\.assistant-text/);
 	// 排除规则必须落在选择器上：contenteditable 宿主（composer）要被覆盖
 	assert.match(SELECTION_TOOL_EDITABLE_SELECTOR, /contenteditable/);
 	assert.match(SELECTION_TOOL_EDITABLE_SELECTOR, /textarea/);

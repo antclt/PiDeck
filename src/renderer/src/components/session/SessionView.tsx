@@ -1,5 +1,5 @@
 import { useAtomValue } from "jotai";
-import { useEffect, useRef, useState, type CSSProperties, type RefObject, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject, type ReactNode } from "react";
 import { type GroupImperativeHandle, type PanelImperativeHandle } from "react-resizable-panels";
 import { ResizablePanel, ResizablePanelGroup } from "../ui-shadcn/resizable";
 import type { ChatMessage, GitBranchInfo, ImageContent, TerminalTarget, TerminalThemeId } from "../../../../shared/types";
@@ -228,6 +228,59 @@ export function SessionView({
 	const askMaxHeight = `calc(100% - var(--session-timeline-min, ${TIMELINE_MIN_HEIGHT}px))`;
 	const composerMaxHeight = askPanelVisible ? "0px" : `min(${COMPOSER_MAX_HEIGHT}px, calc(100% - var(--session-timeline-min, ${TIMELINE_MIN_HEIGHT}px)))`;
 
+	// 时间线 props 稳定化（2027-02 性能审计）：这里原先每渲染新建对象 + 内联
+	// onOpenExternal 箭头，打穿 SessionMessageTimeline → TurnRow → MarkdownStream
+	// 的整条 memo 链——SessionView 任何无关重渲染（agent 状态、待办条、header 等）
+	// 都会让全部已挂载轮次的 settled 文本全量重解析（streamdown 只缓存 processor、
+	// 不缓存解析结果，重渲染 = 重新 parse + sanitize + 重建元素树）。
+	// 回调 useCallback、props 对象 useMemo 之后，链上 memo 才真正生效。
+	const handleOpenExternal = useCallback((url: string, forceSystem?: boolean) => api.app.openExternal(url, forceSystem), []);
+	const timelineInteractionProps = useMemo(
+		() => ({
+			instantSessionSwitch: paneServices.simpleNavigation,
+			hasProject,
+			onCreateSession: runCreateSessionDraft,
+			showThinking,
+			validCommandNames,
+			validFilePaths,
+			onPreviewImage,
+			onOpenExternal: handleOpenExternal,
+			onOpenFile,
+			onDiffFile,
+			onResendUserMessage,
+			onEditMessage,
+			onDeleteMessage,
+			onRemoveMessageImage,
+			onForkMessage,
+			onRewindToMessage,
+			forkingMessageId,
+			onToast,
+			onQuickPrompt,
+			replyActionsRef: setReplyActionsTarget,
+		}),
+		[
+			paneServices.simpleNavigation,
+			hasProject,
+			runCreateSessionDraft,
+			showThinking,
+			validCommandNames,
+			validFilePaths,
+			onPreviewImage,
+			handleOpenExternal,
+			onOpenFile,
+			onDiffFile,
+			onResendUserMessage,
+			onEditMessage,
+			onDeleteMessage,
+			onRemoveMessageImage,
+			onForkMessage,
+			onRewindToMessage,
+			forkingMessageId,
+			onToast,
+			onQuickPrompt,
+		],
+	);
+
 	// 终端 Panel 随 terminalOpen 动态挂载，约束注册有一帧延迟。
 	// 折叠/展开用稳态读数 + setLayout：差额全部给 timeline，输入栏不在 Group 里。
 	useEffect(() => {
@@ -284,34 +337,7 @@ export function SessionView({
 			>
 				<ResizablePanel id="timeline" minSize={timelineColumnMinSize} className="session-v-timeline flex min-h-0 flex-col" style={timelineColumnStyle}>
 					<div className="session-v-timeline-stage min-h-[var(--session-timeline-min,160px)] flex-1 overflow-hidden">
-						<SessionSurfaceStage
-							sessionId={sessionId}
-							sessionTimeline={sessionTimeline}
-							isRestarting={isRestarting}
-							isReloading={Boolean(runControl?.isReloading)}
-							timelineProps={{
-								instantSessionSwitch: paneServices.simpleNavigation,
-								hasProject,
-								onCreateSession: runCreateSessionDraft,
-								showThinking,
-								validCommandNames,
-								validFilePaths,
-								onPreviewImage,
-								onOpenExternal: (url: string, forceSystem?: boolean) => api.app.openExternal(url, forceSystem),
-								onOpenFile,
-								onDiffFile,
-								onResendUserMessage,
-								onEditMessage,
-								onDeleteMessage,
-								onRemoveMessageImage,
-								onForkMessage,
-								onRewindToMessage,
-								forkingMessageId,
-								onToast,
-								onQuickPrompt,
-								replyActionsRef: setReplyActionsTarget,
-							}}
-						/>
+						<SessionSurfaceStage sessionId={sessionId} sessionTimeline={sessionTimeline} isRestarting={isRestarting} isReloading={Boolean(runControl?.isReloading)} timelineProps={timelineInteractionProps} />
 					</div>
 					{/* 阻塞式 Ask 底栏（issue #230）：与输入框同级钉在对话区下方，
 					    不再随时间线滚动——用户上翻看历史时提问卡仍常驻可见，不必再往下找。

@@ -1,13 +1,15 @@
-// 模型配置导入整页面板：粘贴/选文件 → 解析（加密则输密码）→ 供应商勾选 → 同名冲突逐项处理 → 应用到未保存草稿。
-import { useMemo, useRef, useState } from "react";
-import { ArrowLeft } from "lucide-react";
+// 模型配置导入整页面板：进入即自动扫描本机其他 Agent 的供应商配置 → 勾选 → 同名冲突逐项处理 → 应用到未保存草稿。
+import { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, RefreshCw } from "lucide-react";
 import { Button } from "../components/ui-shadcn/button";
 import { Checkbox } from "../components/ui-shadcn/checkbox";
 import { Input } from "../components/ui-shadcn/input";
 import { Label } from "../components/ui-shadcn/label";
 import { t } from "../i18n";
 import type { ProviderConfig, ModelsFile } from "./configTypes";
-import { applyTransferToDraft, decodeModelsTransfer, maskSecret, planProviderMerge, type DecodeModelsTransferResult, type ProviderTransferDecision, type SideChoice } from "./modelsTransfer";
+import { applyTransferToDraft, maskSecret, planProviderMerge, type ProviderTransferDecision, type SideChoice } from "./modelsTransfer";
+import { desktopApi } from "../desktopApi";
+import type { ExternalAgentDiscoveryResult, ExternalAgentKind, ExternalAgentProviderFound } from "../../../shared/types/externalAgentDiscovery";
 
 interface ModelsImportPanelProps {
 	data: ModelsFile;
@@ -15,15 +17,26 @@ interface ModelsImportPanelProps {
 	onBack: () => void;
 }
 
-type ImportStep = "input" | "select" | "conflicts" | "done";
+type ImportStep = "discover" | "select" | "conflicts" | "done";
 
-const errorText = (error: Extract<DecodeModelsTransferResult, { ok: false }>["error"]): string => {
-	if (error === "encrypted-no-password") return t("config.models.transfer.needPassword");
-	if (error === "wrong-password") return t("config.models.transfer.wrongPassword");
-	if (error === "unsupported-version") return t("config.models.transfer.unsupportedVersion");
-	if (error === "wrong-kind") return t("config.models.transfer.wrongKind");
-	return t("config.models.transfer.invalid");
+const agentLabel = (agent: ExternalAgentKind): string => t(`config.models.transfer.agent.${agent}`);
+
+const discoverNoteText = (note: string | undefined): string | undefined => {
+	if (!note) return undefined;
+	if (note === "no-key") return t("config.models.transfer.discoverNoteNoKey");
+	if (note.startsWith("subscription")) return t("config.models.transfer.discoverNoteSubscription");
+	return undefined;
 };
+
+/** 发现条目 → pi ProviderConfig 草稿（api 协议与 baseUrl 直接映射；模型转成最小条目）。 */
+function foundToProviderConfig(found: ExternalAgentProviderFound, apiKey?: string): ProviderConfig {
+	return {
+		baseUrl: found.baseUrl,
+		api: found.apiType,
+		apiKey,
+		models: found.modelIds.map((id) => ({ id })),
+	};
+}
 
 function displayValue(field: string, value: unknown): string {
 	if (value === undefined) return "—";
@@ -36,17 +49,18 @@ function displayValue(field: string, value: unknown): string {
 }
 
 export function ModelsImportPanel(props: ModelsImportPanelProps) {
-	const [step, setStep] = useState<ImportStep>("input");
-	const [text, setText] = useState("");
-	const [password, setPassword] = useState("");
-	const [needsPassword, setNeedsPassword] = useState(false);
+	const [step, setStep] = useState<ImportStep>("discover");
 	const [error, setError] = useState<string | null>(null);
 	const [imported, setImported] = useState<Record<string, ProviderConfig> | null>(null);
 	const [selected, setSelected] = useState<Set<string>>(new Set());
 	const [modes, setModes] = useState<Record<string, "overwrite" | "merge">>({});
 	const [fieldChoices, setFieldChoices] = useState<Record<string, Record<string, SideChoice>>>({});
 	const [modelChoices, setModelChoices] = useState<Record<string, Record<string, SideChoice>>>({});
-	const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+	// 外部 Agent 发现：进入面板即扫描；结果只在本地 state，key 的真实值在进入 select 前才拉取。
+	const [scanning, setScanning] = useState(true);
+	const [discovered, setDiscovered] = useState<ExternalAgentDiscoveryResult | null>(null);
+	const [discoveredSelected, setDiscoveredSelected] = useState<Set<string>>(new Set());
 
 	// 勾选中且与本地同名的供应商 → 冲突处理视图
 	const conflictIds = useMemo(() => {
@@ -63,26 +77,53 @@ export function ModelsImportPanel(props: ModelsImportPanelProps) {
 		return out;
 	}, [conflictIds, imported, props.data.providers]);
 
-	const handleParse = async () => {
-		const result = await decodeModelsTransfer(text, password.trim() || undefined);
-		if (!result.ok) {
-			if (result.error === "encrypted-no-password") setNeedsPassword(true);
-			setError(errorText(result.error));
-			return;
-		}
-		setImported(result.providers);
-		setSelected(new Set(Object.keys(result.providers)));
+	const handleScan = async () => {
+		setScanning(true);
 		setError(null);
-		setStep("select");
+		try {
+			const result = await desktopApi.config.discoverExternalAgents();
+			setDiscovered(result);
+			setDiscoveredSelected(new Set(result.providers.filter((item) => (item.note !== undefined && item.note.startsWith("subscription") ? false : true)).map((item) => item.id)));
+		} catch (e) {
+			setError(e instanceof Error ? e.message : String(e));
+		} finally {
+			setScanning(false);
+		}
 	};
 
-	// 导入文件只应是小体积 base64 文本；限制 4MB 防误选大文件把渲染层堵死（自我 DoS 防护）。
-	const handleFile = async (file: File) => {
-		if (file.size > 4 * 1024 * 1024) {
-			setError(t("config.models.transfer.invalid"));
+	// 进入面板即扫描一次：读本机配置文件是只读小操作，省掉一次无意义的点击。
+	useEffect(() => {
+		void handleScan();
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- 首帧扫描一次，重扫走「重新扫描」按钮
+	}, []);
+
+	/** 外部 Agent 导入：勾选后先逐条拉真实 key（失败仅降级为无 key 供应商），再进入通用 select/conflicts 流程。 */
+	const handleApplyDiscovered = async () => {
+		if (!discovered) return;
+		if (discoveredSelected.size === 0) {
+			setError(t("config.models.transfer.noProvidersSelected"));
 			return;
 		}
-		setText(await file.text());
+		setScanning(true);
+		try {
+			const next: Record<string, ProviderConfig> = {};
+			for (const found of discovered.providers) {
+				if (!discoveredSelected.has(found.id)) continue;
+				let apiKey: string | undefined;
+				const res = await desktopApi.config.resolveExternalAgentKey(found.id);
+				if (res.ok) apiKey = res.apiKey;
+				else if (found.apiKeyMasked) setError(t("config.models.transfer.discoverKeyFailed", { id: found.providerName, reason: res.error }));
+				next[found.providerName] = foundToProviderConfig(found, apiKey);
+			}
+			setImported(next);
+			setSelected(new Set(Object.keys(next)));
+			setError(null);
+			setStep("select");
+		} catch (e) {
+			setError(e instanceof Error ? e.message : String(e));
+		} finally {
+			setScanning(false);
+		}
 	};
 
 	const goConflicts = () => {
@@ -138,31 +179,44 @@ export function ModelsImportPanel(props: ModelsImportPanelProps) {
 				<Button variant="ghost" size="icon-sm" onClick={props.onBack}>
 					<ArrowLeft size={16} />
 				</Button>
-				<span>{t("config.models.transfer.importTitle")}</span>
+				<span>{t("config.models.transfer.discoverTitle")}</span>
 			</div>
 			<div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-				{step === "input" && (
+				{step === "discover" && (
 					<div className="space-y-3">
-						<Label htmlFor="models-import-text">{t("config.models.transfer.pasteLabel")}</Label>
-						<Input id="models-import-text" value={text} onChange={(e) => setText(e.target.value)} placeholder={t("config.models.transfer.pastePlaceholder")} />
-						<Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
-							{t("config.models.transfer.pickFile")}
-						</Button>
-						<input
-							ref={fileInputRef}
-							type="file"
-							accept=".txt"
-							className="hidden"
-							onChange={(e) => {
-								const file = e.target.files?.[0];
-								if (file) void handleFile(file);
-								e.target.value = ""; // 重置以复选同一文件
-							}}
-						/>
-						{needsPassword && (
+						<div className="flex items-start justify-between gap-3">
+							<p className="text-sm text-text-tertiary">{t("config.models.transfer.discoverHint")}</p>
+							<Button variant="outline" size="sm" onClick={() => void handleScan()} disabled={scanning}>
+								<RefreshCw size={14} className="mr-1" />
+								{scanning ? t("config.models.transfer.discoverScanning") : t("config.models.transfer.discoverScan")}
+							</Button>
+						</div>
+						{discovered && discovered.providers.length === 0 && !scanning && <p className="text-sm text-text-tertiary">{t("config.models.transfer.discoverEmpty")}</p>}
+						{discovered && discovered.providers.length > 0 && (
 							<div className="space-y-1">
-								<Label htmlFor="models-import-password">{t("config.models.transfer.password")}</Label>
-								<Input id="models-import-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+								{discovered.providers.map((found) => {
+									const noteText = discoverNoteText(found.note);
+									return (
+										<label key={found.id} className="flex items-center gap-2 py-1">
+											<Checkbox
+												checked={discoveredSelected.has(found.id)}
+												onCheckedChange={() => {
+													const next = new Set(discoveredSelected);
+													if (next.has(found.id)) next.delete(found.id);
+													else next.add(found.id);
+													setDiscoveredSelected(next);
+												}}
+											/>
+											<span className="font-medium">{found.providerName}</span>
+											<span className="rounded-full border border-border-subtle px-1.5 py-px text-micro text-muted-foreground">{agentLabel(found.agent)}</span>
+											{found.apiKeyMasked ? <span className="font-mono text-xs text-text-tertiary">{found.apiKeyMasked}</span> : null}
+											{found.baseUrl ? <span className="min-w-0 flex-1 truncate text-xs text-text-tertiary">{found.baseUrl}</span> : null}
+											{props.data.providers[found.providerName] ? <span className="text-xs text-warning">{t("config.models.transfer.conflictWithLocal")}</span> : <span className="text-xs text-info">{t("config.models.transfer.newProvider")}</span>}
+											{noteText ? <span className="text-xs text-text-tertiary">{noteText}</span> : null}
+										</label>
+									);
+								})}
+								{discoveredSelected.size > 0 && <p className="text-xs text-text-tertiary">{t("config.models.transfer.discoverSelectedCount", { count: discoveredSelected.size })}</p>}
 							</div>
 						)}
 						{error && <p className="text-sm text-danger">{error}</p>}
@@ -270,9 +324,9 @@ export function ModelsImportPanel(props: ModelsImportPanelProps) {
 				{step === "done" && <p className="text-sm">{t("config.models.transfer.applied")}</p>}
 			</div>
 			<div className="flex shrink-0 items-center justify-end gap-2 border-t border-border-subtle px-5 py-3">
-				{step === "input" && (
-					<Button size="sm" onClick={handleParse} disabled={!text.trim()}>
-						{t("config.models.transfer.parse")}
+				{step === "discover" && (
+					<Button size="sm" onClick={() => void handleApplyDiscovered()} disabled={scanning || !discovered || discoveredSelected.size === 0}>
+						{t("config.models.transfer.next")}
 					</Button>
 				)}
 				{step === "select" && (

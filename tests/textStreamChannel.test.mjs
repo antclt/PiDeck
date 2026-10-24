@@ -19,7 +19,10 @@ test("main process: textEmitter tracks and pushes streaming text", () => {
 	assert.match(liveStream, /readonly textEmitter = new LatestByKeyEmitter/);
 	assert.match(batcher, /MESSAGE_FLUSH_INTERVAL_MS = 50/);
 	assert.match(liveStream, /this\.streamingText\.set\(agentId, nextText\)/);
-	assert.match(liveStream, /this\.textEmitter\.push\(agentId, stripAnsi\(nextText\)\)/);
+	// 2027-02 性能治理：ANSI 剥离挪到 emit（每 100ms flush 一次），delta 热路径推原文，
+	// 不再每个 delta 对全量累积文本跑正则（O(N²)/消息）。
+	assert.match(liveStream, /this\.textEmitter\.push\(agentId, nextText\)/);
+	assert.match(liveStream, /const text = stripAnsi\(rawText\)/, "strip 必须在 emitTextStreamNow 开口");
 
 	const cancelCount = agentManager.match(/this\.liveStream\.clearTextChannel\(agentId\)/g)?.length ?? 0;
 	assert.ok(cancelCount >= 4, "text channel must clear on end/settled/abort paths");
@@ -57,7 +60,8 @@ test("main process: message_end pushes final text with done flag", () => {
 	// 双通道推送已随 Live 流域迁入 LiveStreamChannel（Wave 3）；终态推送在 finalizeText。
 	const liveStream = readFileSync("src/main/pi/liveStreamChannel.ts", "utf8");
 	assert.match(liveStream, /this\.emitTextStreamNow\(agentId, finalText, true\)/);
-	assert.match(liveStream, /emitTextStreamNow\(agentId: string, text: string, done = false\)/);
+	// 2027-02 起 emit 开口改收 rawText、内部 strip（ANSI 剥离从 per-delta 挪到 emit）
+	assert.match(liveStream, /emitTextStreamNow\(agentId: string, rawText: string, done = false\)/);
 });
 
 test("renderer: streamingTextByIdAtom updates from agents:text-stream without runtime bump", () => {

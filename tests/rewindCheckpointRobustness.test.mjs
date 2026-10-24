@@ -39,11 +39,30 @@ function commitAll(git, msg) {
 	git(["commit", "-q", "-m", msg]);
 }
 
+/**
+ * 带重试的临时仓库删除：2027-02 起 runCheckpoint 成功后会异步触发 pruneCurrentFor
+ *（后台 git for-each-ref/update-ref），t.after 的 rmSync 可能与在途 git 子进程的
+ * 目录句柄竞争（Windows EPERM）。这与生产行为一致——后台裁剪本来就是 fire-and-forget；
+ * 清理侧按 Windows 惯例退避重试，而不是让用例闪烁。
+ */
+function rmRepoRetry(dir) {
+	for (let attempt = 0; attempt < 10; attempt += 1) {
+		try {
+			rmSync(dir, { recursive: true, force: true });
+			return;
+		} catch (error) {
+			if (attempt === 9) throw error;
+			const slept = Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+			void slept;
+		}
+	}
+}
+
 const cpId = (turn) => `turn-${UUID}-${turn}-${Date.now()}`;
 
 test("#372 用户 index 被锁（.git/index.lock 存在）时 checkpoint 仍应成功", async (t) => {
 	const { dir, git } = makeRepo();
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	t.after(() => rmRepoRetry(dir));
 
 	writeFileSync(join(dir, "a.txt"), "v1\n");
 	commitAll(git, "init");
@@ -71,7 +90,7 @@ test("#372 用户 index 被锁（.git/index.lock 存在）时 checkpoint 仍应�
 
 test("#372 未暂存的工作区修改不影响 index 树语义", async (t) => {
 	const { dir, git } = makeRepo();
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	t.after(() => rmRepoRetry(dir));
 
 	writeFileSync(join(dir, "a.txt"), "v1\n");
 	commitAll(git, "init");
@@ -108,7 +127,7 @@ const freshState = () => ({ lastAt: 0, inFlight: false, pending: false, timer: n
 test("#373 非 git 目录：首次失败说明原因，后续轮次不再刷屏", async (t) => {
 	// 普通临时目录，不 git init
 	const dir = mkdtempSync(join(tmpdir(), "rewind-nogit-"));
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	t.after(() => rmRepoRetry(dir));
 
 	const { coordinator, warns } = makeCoordinator(dir);
 
@@ -128,7 +147,7 @@ test("#373 非 git 目录：首次失败说明原因，后续轮次不再刷屏"
 
 test("#373 公开调度入口：同 root 的不同 agent 共享冷却，只告警一次", async (t) => {
 	const dir = mkdtempSync(join(tmpdir(), "rewind-schedule-"));
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	t.after(() => rmRepoRetry(dir));
 	let notify;
 	const warned = new Promise((resolve) => {
 		notify = resolve;
@@ -156,7 +175,7 @@ test("#373 公开调度入口：同 root 的不同 agent 共享冷却，只告�
 
 test("#373 冷却期结束后重新尝试，成功即恢复打点", async (t) => {
 	const { dir, git } = makeRepo();
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	t.after(() => rmRepoRetry(dir));
 
 	writeFileSync(join(dir, "a.txt"), "v1\n");
 	commitAll(git, "init");
@@ -176,7 +195,7 @@ test("#373 冷却期结束后重新尝试，成功即恢复打点", async (t) =>
 
 test("#372 多次 checkpoint 后用户暂存内容保持不变", async (t) => {
 	const { dir, git } = makeRepo();
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	t.after(() => rmRepoRetry(dir));
 
 	writeFileSync(join(dir, "a.txt"), "v1\n");
 	commitAll(git, "init");

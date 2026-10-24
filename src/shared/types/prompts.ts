@@ -112,6 +112,20 @@ export type YaoPromptDbState = "ready" | "missing" | "downloading" | "failed";
 /** db 就绪状态推送负载（main→renderer 事件与重试返回值共用；见 XuePromptDbStore）。 */
 export type YaoPromptDbSnapshot = { state: "ready"; path: string; sha256: string | null; source: "cache" | "repo" } | { state: "downloading"; receivedBytes: number; totalBytes: number | null } | { state: "failed"; message: string } | { state: "missing" };
 
+/**
+ * 商店列表查询参数（主/渲染共用）。
+ * categoriesOnly：只要分类栏数据。商店首次打开只为渲染分类 chip，却按「无参 = 全量」
+ * 把整库条目（实测 4012 条 ≈0.9MB JSON）拉一遍，主进程还要逐条 gunzip 描述——见
+ * XuePromptManager.list 的分类快路径。
+ */
+export type YaoPromptListOptions = {
+	category?: string;
+	search?: string;
+	page?: number;
+	pageSize?: number;
+	categoriesOnly?: boolean;
+};
+
 export type YaoPromptListResult = {
 	categories: YaoPromptCategory[];
 	prompts: YaoPromptItem[];

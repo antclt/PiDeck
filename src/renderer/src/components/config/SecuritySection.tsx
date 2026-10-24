@@ -20,6 +20,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useSt
 import { Loader2, Trash2 } from "lucide-react";
 import { createDefaultSecurityConfig, type SecurityAction, type SecurityConfig, type SecurityLevelConfig, type SecurityPathPolicy, type SecurityToolName } from "../../../../shared/types";
 import { Button } from "../ui-shadcn/button";
+import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
 import { Input } from "../ui-shadcn/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui-shadcn/select";
 import { Switch } from "../ui-shadcn/switch";
@@ -276,21 +277,23 @@ function SecurityLevelCard(props: {
 
 	return (
 		<div className="security-level-card rounded-md border border-border/60 bg-card">
-			<div className="flex items-center gap-2 px-3 py-2">
-				<button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={onToggle}>
-					<span className="truncate text-control font-semibold">{level.name}</span>
-					{level.builtin && <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">{t("security.builtinBadge")}</span>}
-					{!expanded && <span className="min-w-0 flex-1 truncate text-micro text-muted-foreground">{level.description || toolSummary}</span>}
-				</button>
-				{!level.builtin && (
-					<Button variant="ghost" size="icon-sm" className="size-6 text-muted-foreground hover:text-danger" aria-label={t("common.delete")} title={t("common.delete")} disabled={props.isOnlyBuiltin} onClick={props.onDelete}>
-						<Trash2 size={13} aria-hidden="true" />
-					</Button>
-				)}
-			</div>
+			{/* 折叠体走共享折叠原语（真高度渐变 + exit 后卸载 + reduced-motion 回退）；
+			    display:contents 让根不生成盒子，折叠态不会留下空档，展开态布局与原来一致。 */}
+			<Collapsible open={expanded} className="contents">
+				<div className="flex items-center gap-2 px-3 py-2">
+					<button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={onToggle}>
+						<span className="truncate text-control font-semibold">{level.name}</span>
+						{level.builtin && <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">{t("security.builtinBadge")}</span>}
+						{!expanded && <span className="min-w-0 flex-1 truncate text-micro text-muted-foreground">{level.description || toolSummary}</span>}
+					</button>
+					{!level.builtin && (
+						<Button variant="ghost" size="icon-sm" className="size-6 text-muted-foreground hover:text-danger" aria-label={t("common.delete")} title={t("common.delete")} disabled={props.isOnlyBuiltin} onClick={props.onDelete}>
+							<Trash2 size={13} aria-hidden="true" />
+						</Button>
+					)}
+				</div>
 
-			{expanded && (
-				<div className="flex flex-col gap-3 border-t border-border/40 px-3 py-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
+				<CollapsibleContent className="flex flex-col gap-3 border-t border-border/40 px-3 py-3">
 					<div className="grid grid-cols-2 gap-3">
 						<div className="flex flex-col gap-1">
 							<label className="text-micro text-muted-foreground">{t("security.levelName")}</label>
@@ -418,8 +421,8 @@ function SecurityLevelCard(props: {
 						<span className="text-control text-muted-foreground">{t("security.protectSensitiveTitle")}</span>
 						<Switch checked={level.protectSensitivePaths} onCheckedChange={(checked) => onChange({ protectSensitivePaths: checked })} />
 					</div>
-				</div>
-			)}
+				</CollapsibleContent>
+			</Collapsible>
 		</div>
 	);
 }

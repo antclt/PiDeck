@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { t } from "../../i18n";
-import { resolveFileLinkPath } from "../../utils/filePathLinks";
+import { resolveFileLinkPath, isFilePathInsideRoot } from "../../utils/filePathLinks";
 import type { SessionFileOpenContext } from "../../components/session/SessionPaneServices";
 import { useSessionFilePathOpener } from "../useSessionFilePathOpener";
 import { useExternalPathOpenGate } from "../useExternalPathOpenGate";
@@ -11,6 +11,8 @@ import type { WorkspaceDrawerPanel } from "../useWorkspacePanels";
 export interface SessionFileLinksDeps {
 	activeAgent: AgentTab | undefined;
 	activeProject: Project | undefined;
+	/** 全部已打开项目：项目外链接若落在另一个项目内，按那个项目的写边界打开 */
+	projects: readonly Project[];
 	currentSessionId: string | undefined;
 	activeProjectId: string | undefined;
 	showToast: (message: string, duration?: number) => void;
@@ -36,7 +38,7 @@ export interface SessionFileLinksDeps {
  * 3) handleOpenLinkedFile：会话内文件链接打开路由（项目内分级打开 / 项目外安全门）；
  * 4) handleToolDrawerAction：工具抽屉（files/git/browser）统一切换语义，浮动按钮与活动栏共用。
  */
-export function useSessionFileLinks({ activeAgent, activeProject, currentSessionId, activeProjectId, showToast, setPreviewImage, viewFilePath, workspace, gitDrawerDiff, closeGitDiff, refreshVisibleFiles, restoreExpandedDirs }: SessionFileLinksDeps) {
+export function useSessionFileLinks({ activeAgent, activeProject, projects, currentSessionId, activeProjectId, showToast, setPreviewImage, viewFilePath, workspace, gitDrawerDiff, closeGitDiff, refreshVisibleFiles, restoreExpandedDirs }: SessionFileLinksDeps) {
 	const openSessionFilePath = useSessionFilePathOpener({ onPreviewImage: setPreviewImage, viewFilePath });
 	const { requestExternalPathOpen, dialog: externalPathOpenDialog } = useExternalPathOpenGate();
 
@@ -71,6 +73,14 @@ export function useSessionFileLinks({ activeAgent, activeProject, currentSession
 				showToast(t("app.fileLinkCannotResolve", { path }));
 				return;
 			}
+			// 但落在「另一个已打开项目」里的文件不算任意路径：它本来就有主进程认可的写边界，
+			// 按那个项目的 scope 打开（可编辑可保存），否则换个会话看同一份文件就只能只读，
+			// 用户会以为「预览转编辑后不能保存」。
+			const owningProject = projects.find((project) => project.path && isFilePathInsideRoot(externalPath, project.path));
+			if (owningProject) {
+				await openSessionFilePath(externalPath, { line, scope: { projectId: owningProject.id } });
+				return;
+			}
 			await requestExternalPathOpen({
 				path: externalPath,
 				sessionId: context?.sessionId ?? currentSessionId,
@@ -79,7 +89,7 @@ export function useSessionFileLinks({ activeAgent, activeProject, currentSession
 				proceed: () => void openSessionFilePath(externalPath, { line, readOnly: true }),
 			});
 		},
-		[activeAgent?.cwd, activeProject?.id, activeProject?.path, currentSessionId, openSessionFilePath, requestExternalPathOpen, showToast, t],
+		[activeAgent?.cwd, activeProject?.id, activeProject?.path, projects, currentSessionId, openSessionFilePath, requestExternalPathOpen, showToast, t],
 	);
 
 	// 工具抽屉（files/git/browser）的统一切换语义：当前面板已展开 → 关闭；

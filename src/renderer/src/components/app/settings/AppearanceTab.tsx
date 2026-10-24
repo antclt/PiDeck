@@ -16,6 +16,7 @@ import { BrandingSection } from "./BrandingSection";
 import { ModuleVisibilitySection } from "./ModuleVisibilitySection";
 import { ComposerFeaturesSection } from "./ComposerFeaturesSection";
 import { CustomThemeSection } from "./CustomThemeSection";
+import { WallpaperEngineSection } from "./WallpaperEngineSection";
 import { Check, Minus, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -209,6 +210,19 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 							</Button>
 						) : null}
 					</div>
+				</SettingRow>
+				{/* Wallpaper Engine 视频壁纸：读取本机工坊目录，只列 type=video，生效时优先于静态背景图 */}
+				<SettingRow
+					anchor="appearance-wallpaper-engine"
+					title={
+						<>
+							<span>{t("settings.wallpaperEngine")}</span>
+							<DirtyMarker dirty={isDirty("weWorkshopDir") || isDirty("weWallpaperId")} label={t("settings.wallpaperEngine")} />
+						</>
+					}
+					description={t("settings.wallpaperEngineDesc")}
+				>
+					<WallpaperEngineSection draft={draft} updateDraft={updateDraft} />
 				</SettingRow>
 				<SettingRow anchor="appearance-background-image-opacity" title={<span>{t("settings.backgroundImageOpacity")}</span>}>
 					<div className="flex w-full items-center gap-2">
@@ -480,6 +494,16 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 						</SelectContent>
 					</Select>
 				</SettingRow>
+				{/* 发送后回底：默认开启（历史行为），关掉后上翻读历史时发送不会被拽回底部 */}
+				<SettingSwitchRow
+					anchor="appearance-scroll-on-send"
+					title={t("settings.scrollToLatestOnSend")}
+					description={t("settings.scrollToLatestOnSendDesc")}
+					checked={draft.scrollToLatestOnSend !== false}
+					dirty={isDirty("scrollToLatestOnSend")}
+					dirtyLabel={t("settings.scrollToLatestOnSend")}
+					onChange={(checked) => updateDraft({ scrollToLatestOnSend: checked })}
+				/>
 			</SettingsSection>
 
 			{/* 窗口样式 */}

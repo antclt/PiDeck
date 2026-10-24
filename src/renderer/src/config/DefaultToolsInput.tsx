@@ -43,7 +43,7 @@ export function DefaultToolsInput(props: {
 			}}
 		>
 			<PopoverTrigger asChild>
-				<div className="flex min-h-[38px] w-full min-w-0 cursor-pointer flex-wrap items-center gap-1.5 rounded-sm border border-border-subtle bg-popover px-2.5 py-[5px] transition-colors duration-150 hover:border-border-strong">
+				<div className="flex min-h-[38px] w-full min-w-0 cursor-pointer flex-wrap items-center gap-1.5 rounded-sm border border-border-subtle bg-popover px-2.5 py-[5px] transition-colors duration-fast hover:border-border-strong">
 					{effective.length === 0 ? (
 						<span className="text-xs leading-[18px] text-danger">{t("config.tools.allDisabled")}</span>
 					) : (
@@ -100,7 +100,7 @@ export function DefaultToolsInput(props: {
 											className={`cursor-pointer gap-2 py-[7px] pr-3 pl-7 text-control text-text-primary ${enabled ? "bg-[color:color-mix(in_srgb,var(--color-accent)_6%,var(--color-bg-panel))]" : ""}`}
 										>
 											<span
-												className={`flex size-[18px] shrink-0 items-center justify-center rounded-[4px] border-[1.5px] transition-[border-color,background-color] duration-100${enabled ? " border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-text-inverse)]" : " border-border-strong text-[color:var(--color-accent)]"}`}
+												className={`flex size-[18px] shrink-0 items-center justify-center rounded-[4px] border-[1.5px] transition-[border-color,background-color] duration-fast${enabled ? " border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-text-inverse)]" : " border-border-strong text-[color:var(--color-accent)]"}`}
 											>
 												{enabled && <Check size={12} />}
 											</span>

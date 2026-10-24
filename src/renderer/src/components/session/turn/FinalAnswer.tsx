@@ -164,7 +164,12 @@ function ImageGenMessage(props: { meta: ImageGenMeta; images?: ImageContent[]; o
 	return (
 		<div className="py-1">
 			<ImageGeneration status={status} prompt={props.meta.prompt} statusText={statusText} resolution={resolution} aspectRatio={aspectRatio} size="fluid" className="max-w-[300px]">
-				{status === "complete" && image && imageSrc ? <img src={imageSrc} alt="" className="cursor-zoom-in" onClick={() => props.onPreviewImage(image)} /> : undefined}
+				{status === "complete" && image && imageSrc ? (
+					// 懒加载 + 异步解码（2027-02 性能审计）：历史会话恢复时窗口内每条生图消息会并发拉全尺寸原图
+					// （pideck-img:// 单张上界 32MB）；对照组 MessageImage/MarkdownImage 均带 lazy+async，
+					// 这里此前是唯一裸挂 <img> 的路径。
+					<img src={imageSrc} alt="" loading="lazy" decoding="async" className="cursor-zoom-in" onClick={() => props.onPreviewImage(image)} />
+				) : null}
 			</ImageGeneration>
 			{status === "complete" && image && imageSrc ? (
 				<div className="mt-1 flex items-center">

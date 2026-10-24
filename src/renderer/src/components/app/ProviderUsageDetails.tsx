@@ -34,7 +34,7 @@ function UsageBarRow(props: {
 				{props.label}
 			</span>
 			<span className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-				<span className={`block h-full rounded-full transition-all ${USAGE_TONE_BAR_CLASS[tone]}`} style={{ width: `${pct ?? 0}%` }} />
+				<span className={`block h-full rounded-full transition-[width,background-color] duration-base ${USAGE_TONE_BAR_CLASS[tone]}`} style={{ width: `${pct ?? 0}%` }} />
 			</span>
 			<span className={`w-9 flex-none text-right font-mono text-caption font-semibold tabular-nums ${USAGE_TONE_TEXT_CLASS[tone]}`}>{pct != null ? `${pct}%` : t("sessionContext.usageUnknown")}</span>
 			{props.trailing && <span className="min-w-0 flex-none text-right font-mono text-micro text-text-tertiary">{props.trailing}</span>}

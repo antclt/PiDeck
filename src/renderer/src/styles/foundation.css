@@ -91,28 +91,43 @@
    */
   /* 默认浅色外观以纯白为基底；灰色只用于控件表面、hover 和选中层级。 */
   --color-bg-app: #ffffff;
-  --color-bg-sidebar: #ffffff;
+  /* 主次分明（对齐 ZCode 排版，docs/zcode-design-analysis.md）：chrome 退一档——
+     侧栏/右抽屉 #f0f0f0（ZCode sidebar 同值），正文面板保持纯白，
+     内容浮在 chrome 之上，焦点自然落在会话区。
+     皮肤（fresh-green 等）各自定制更深的 sidebar 分层，不受此处影响。 */
+  --color-bg-sidebar: #f0f0f0;
   --color-bg-panel: #ffffff;
   /* 浮层与普通面板分离：壁纸模式下普通面板可透图，但菜单必须保持稳定的不透明底。 */
   --color-bg-popover: #ffffff;
   --color-bg-input: #ffffff;
-  --color-bg-muted: #f4f4f5;
-  --color-bg-hover: #e5e7eb;
-  --color-bg-active: #dfe3e8;
+  /* 控件表面/hover/选中层：全部纯中性灰（R=G=B，无色相）——ZCode 质感的关键
+     是灰阶零色相噪声，色相只留给语义色与身份色（见 docs/zcode-design-analysis.md）。
+     交互阶梯对齐 ZCode 的「纸感」：侧栏 #f0f0f0 上 hover Δ6（#eaeaea）、选中 Δ12
+     （#e4e4e4，≈ZCode 选中墨量 4.7%）——选中感靠小步长，不靠深底；白面板上两档
+     相应为 Δ21/Δ27，仍清晰可辨。暗色阶梯保持更大步长不动（ZCode 暗色同理）。
+     注意：侧栏上的行/按钮 hover 必须用 bg-bg-hover；bg-muted 比 sidebar 还亮一档，
+     罩上去是反向变亮、视觉不可见（守卫见 tests/lightNeutralBackground.test.mjs）。 */
+  --color-bg-muted: #f4f4f4;
+  --color-bg-hover: #eaeaea;
+  --color-bg-active: #e4e4e4;
   --color-text-primary: #202124;
-  /* 灰阶加深一档：secondary/tertiary 在白底上对比不足是“发灰不亮”的主因之一，
-     secondary 7.56:1 / tertiary 5.37:1（muted 弱底 4.89:1），均达 WCAG AA。 */
-  --color-text-secondary: #4b5563;
-  --color-text-tertiary: #636b79;
-  /* 过程层文字（思考/工具调用）：比 tertiary 更浅，向背景混 35%——
+  /* 中性墨水（ZCode 同法）：secondary/tertiary 全纯灰零色相，去 slate 蓝调；
+     深度保持可读——secondary 8.9:1 / tertiary 5.7:1（muted 弱底 5.2:1），均达 WCAG AA。 */
+  --color-text-secondary: #4a4a4a;
+  --color-text-tertiary: #666666;
+  /* 过程层文字（思考/工具调用）：比 tertiary 更浅——
      与正文（primary）的差异主要由颜色承担，字重保持可读不降档。
-     亮色显式 #9fa3ac（tertiary 65% + 白 35% 的实测值），避免 color-mix 在
-     主题切换/变量解析时序上引入不确定性；暗色由下方 dark 块显式覆盖。 */
-  --color-text-faint: #9fa3ac;
+     亮色显式纯中性 #9a9a9a，避免 color-mix 在主题切换/变量解析时序上引入
+     不确定性；暗色由下方 dark 块显式覆盖。 */
+  --color-text-faint: #9a9a9a;
   --color-text-inverse: #ffffff;
-  --color-border-subtle: #e5e5e5;
-  --color-border-default: #dfdfdf;
-  --color-border-strong: #d7d7d7;
+  /* 边框墨水化（ZCode 同法）：不透明灰线 → 墨水 alpha 罩染（rgba(13,13,13,x)）。
+     视觉等值换算（白底上）：0.10→#e6e6e6 / 0.13→#dedede / 0.17→#d5d5d5，对应旧
+     #e5e5e5/#dfdfdf/#d7d7d7。好处：叠在任何表面（侧栏 #f0f0f0、皮肤色底）色相永远
+     中性一致，hover/强调只需改 alpha 不需要另一块灰。皮肤保留自己的带色相边框（身份色）。 */
+  --color-border-subtle: rgba(13, 13, 13, 0.1);
+  --color-border-default: rgba(13, 13, 13, 0.13);
+  --color-border-strong: rgba(13, 13, 13, 0.17);
   /* 默认主题色：黑白灰；语义状态色（info/warning/danger）仍保留用于状态反馈。
      accent 取 shadcn zinc 的 primary 值（浅色近黑 zinc-900）：主按钮（保存/创建/导出/发送）
      呈现纯黑白底，与 secondary 灰底拉开层级；若用中灰（gray-500），default 与
@@ -173,10 +188,10 @@
   --color-code-bg: #111418;
   --color-code-text: #d1d5db;
   --color-chat-card-bg: #fafafa;
-  --color-chat-muted-bg: #f4f4f5;
+  --color-chat-muted-bg: #f4f4f4;
   --color-chat-control-bg: #ffffff;
   --color-chat-table-bg: #ffffff;
-  --color-chat-link: #4b5563;
+  --color-chat-link: #4a4a4a;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -497,10 +512,19 @@
   color-scheme: dark;
   /* 暗色黑灰基底 + 中性灰默认主题；data-accent 可切换到彩色主题。 */
   --color-bg-app: #121212;
-  --color-bg-sidebar: #171717;
-  --color-bg-panel: #171717;
-  --color-bg-popover: #171717;
-  --color-bg-input: #171717;
+  /* 主次分明（对齐 ZCode 排版，docs/zcode-design-analysis.md）：暗色方向反过来——
+     chrome 更暗（#141414），正文面板 #1a1a1a 更亮，
+     深度序列 chrome < content < sticky（bg-app #121212），与浅色的白卡浮层同构。 */
+  --color-bg-sidebar: #141414;
+  --color-bg-panel: #1a1a1a;
+  /* 浮层提一档（ZCode 深度阶梯同构：panel #202020 → card/menu #2b2b2b）：popover 相对
+     panel 提亮 5%，菜单/弹窗永远浮在内容之上。用相对色而非写死 hex：graphite/sea-blue/
+     warm-beige 皮肤不覆盖 popover/input，继承此处的相对派生可自动获得正确的浮层方向
+     （写死 #242424 会让 panel 更亮的 graphite 出现「菜单比内容暗」的反向浮层）。 */
+  --color-bg-popover: color-mix(in srgb, var(--color-bg-panel) 95%, white);
+  /* 输入框贴平内容面（ZCode：inputs should feel calm and integrated, not glowing）：
+     相对引用让不覆盖此 token 的皮肤自动对齐自己的 panel。 */
+  --color-bg-input: var(--color-bg-panel);
   --color-bg-muted: #262626;
   --color-bg-hover: #262626;
   --color-bg-active: #333333;
@@ -515,8 +539,11 @@
      取 #a0a09a（比正文 tertiary 亮一档但仍低于 secondary，保持过程层语义）。 */
   --color-text-faint: #a0a09a;
   --color-text-inverse: #121212;
-  --color-border-subtle: #262626;
-  --color-border-default: #2e2e2e;
+  /* 边框墨水化：白墨水 alpha（暗色深度阶梯的另一半——ZCode 暗色边框是
+     rgba(255,255,255,0.1)，叠在更深底色上自动形成正确亮度）。
+     视觉等值换算（panel #1a1a1a 上）：0.05→#262626 / 0.09→#2f2f2f / 0.14→#383838。 */
+  --color-border-subtle: rgba(255, 255, 255, 0.05);
+  --color-border-default: rgba(255, 255, 255, 0.09);
   /* 暗色语法高亮（GitHub dark 系） */
   --code-keyword: #ff7b72;
   --code-string: #a5d6ff;
@@ -528,7 +555,7 @@
   --code-operator: #79c0ff;
   --code-property: #7ee787;
   --code-constant: #79c0ff;
-  --color-border-strong: #3a3a3a;
+  --color-border-strong: rgba(255, 255, 255, 0.14);
   /* 暗色 neutral accent = shadcn zinc 暗色 primary（近白 zinc-50）：主按钮暗色下呈白底黑字，
      与浅色主题互为反色；strong 为 hover/聚焦环的稍暗一档。 */
   --color-accent: #fafafa;
@@ -562,10 +589,10 @@
   --color-chip-session: #4ade80;
   --color-code-bg: #1a1a1a;
   --color-code-text: #d1d5db;
-  --color-chat-card-bg: #171717;
+  --color-chat-card-bg: #1a1a1a;
   --color-chat-muted-bg: #202020;
   --color-chat-control-bg: #171717;
-  --color-chat-table-bg: #171717;
+  --color-chat-table-bg: #1a1a1a;
   --color-chat-link: #d1d5db;
   --color-logo-green: #9ca3af;
   --color-logo-green-mid: #6b7280;
@@ -845,6 +872,26 @@ body::before {
   background-position: center, center;
   background-attachment: fixed, fixed;
 }
+/* Wallpaper Engine 视频壁纸层（WallpaperVideoLayer portal 到 body）：与 body::before 同层、
+   位于 #root 之下；遮罩复用 --app-bg-mask，面板透明度档位仍由壁纸 token 决定。 */
+.wallpaper-video-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.wallpaper-video-layer video,
+.wallpaper-video-layer img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.wallpaper-video-mask {
+  position: absolute;
+  inset: 0;
+  background-image: var(--app-bg-mask, none);
+}
 #root {
   position: relative;
   z-index: 1;
@@ -971,70 +1018,6 @@ select:focus-visible {
 .env-card > strong {
   color: var(--color-text-primary);
 }
-.env-inline-link {
-  color: var(--color-accent);
-  text-decoration: none;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.env-inline-link:hover {
-  text-decoration: underline;
-}
-.env-card > strong {
-  font-size: var(--font-size-control);
-}
-.env-card > small {
-  color: var(--color-text-secondary);
-  line-height: 1.55;
-  font-size: var(--font-size-caption);
-}
-.env-stepper {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-2);
-  padding: var(--space-2);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--color-bg-muted);
-}
-.env-step {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--color-text-tertiary);
-  font-size: var(--font-size-caption);
-}
-.env-step span {
-  width: 22px;
-  height: 22px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-pill);
-  background: var(--color-bg-panel);
-  color: var(--color-text-tertiary);
-  font-size: var(--font-size-micro);
-  font-weight: 700;
-}
-.env-step b {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 600;
-}
-.env-step.done,
-.env-step.active {
-  color: var(--color-text-primary);
-}
-.env-step.done span,
-.env-step.active span {
-  border-color: var(--color-accent);
-  background: var(--color-accent);
-  color: var(--color-text-inverse);
-}
-
 /* ── 加载状态卡片 ──────────────────────────────── */
 .env-loading-card {
   flex-direction: row;
@@ -1089,116 +1072,6 @@ select:focus-visible {
   font-size: var(--font-size-caption);
 }
 
-/* ── 错误详情卡片 ──────────────────────────────── */
-.env-error-card {
-  border-color: color-mix(
-    in srgb,
-    var(--color-danger) 24%,
-    var(--color-border-subtle)
-  );
-  background: var(--color-danger-soft);
-}
-.env-error-card strong {
-  color: var(--color-danger);
-}
-.env-error-pre {
-  margin: 4px 0 0;
-  padding: 10px 12px;
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-panel);
-  border: 1px solid
-    color-mix(in srgb, var(--color-danger) 24%, var(--color-border-subtle));
-  color: var(--color-danger);
-  font-size: var(--font-size-caption);
-  font-family: var(--font-family-mono);
-  overflow-x: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
-  line-height: 1.6;
-}
-
-/* ── 已搜索目录卡片 ────────────────────────────── */
-.env-dirs-list {
-  max-height: 150px;
-  overflow: auto;
-  margin: 4px 0 0;
-  padding-left: 18px;
-  scrollbar-gutter: stable;
-  font-size: var(--font-size-caption);
-  color: var(--color-text-secondary);
-}
-.env-dirs-list li {
-  margin: 3px 0;
-  word-break: break-all;
-}
-
-/* ── 终端参考命令 ──────────────────────────────── */
-.ref-commands {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.ref-command-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-panel);
-  font-size: var(--font-size-caption);
-}
-.ref-label {
-  flex-shrink: 0;
-  padding: 2px 6px;
-  border-radius: var(--radius-xs);
-  background: var(--color-info);
-  color: var(--color-text-inverse);
-  font-size: var(--font-size-micro);
-  font-weight: 600;
-}
-.ref-command-item code {
-  flex: 1;
-  font-size: var(--font-size-caption);
-  color: var(--color-text-primary);
-  word-break: break-all;
-  user-select: all;
-}
-
-/* ── 自定义路径输入行 ──────────────────────────── */
-.custom-path-input-row {
-  display: flex;
-  gap: 8px;
-}
-.custom-path-input-row input {
-  flex: 1;
-  padding: 7px 10px;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-control);
-  background: var(--color-bg-panel);
-  color: var(--color-text-primary);
-  outline: none;
-}
-.custom-path-input-row input:focus {
-  border-color: var(--color-accent);
-  box-shadow: var(--focus-ring);
-}
-
-/* ── 校验结果提示 ──────────────────────────────── */
-.custom-path-result {
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-control);
-}
-.custom-path-result.success {
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
-}
-.custom-path-result.error {
-  background: var(--color-danger-soft);
-  color: var(--color-danger);
-}
-
 /* ── footer ────────────────────────────────────── */
 .environment-footer {
   display: flex;
@@ -1227,281 +1100,6 @@ select:focus-visible {
 .environment-footer .env-clear-flag-btn:hover {
   background: var(--color-bg-hover);
   color: var(--color-text-primary);
-}
-
-/* ── npm 安装卡片 ────────────────────────────── */
-.env-npm-install-card {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.env-install-loading {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 0;
-}
-
-.env-install-npm-version {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: var(--radius-sm);
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
-  font-size: var(--font-size-caption);
-  font-family: var(--font-family-business);
-}
-
-.env-install-area {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.env-install-command-row {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.env-install-command-label {
-  font-size: var(--font-size-caption);
-  font-weight: 600;
-  color: var(--color-text-secondary);
-}
-
-.env-install-command-input {
-  width: 100%;
-  padding: 7px 10px;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-control);
-  font-family: var(--font-family-business);
-  background: var(--color-bg-panel);
-  color: var(--color-text-primary);
-  outline: none;
-}
-.env-install-command-input:focus {
-  border-color: var(--color-accent);
-  box-shadow: var(--focus-ring);
-}
-
-.env-install-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-/* 镜像切换按钮 */
-.env-mirror-btn {
-  border: 1px solid var(--color-border-subtle);
-  background: var(--color-bg-panel);
-  color: var(--color-text-primary);
-}
-.env-mirror-btn.active {
-  border-color: var(--color-accent);
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
-}
-
-.env-install-progress {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 0;
-}
-
-.env-install-success {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 12px;
-  border-radius: var(--radius-sm);
-  background: var(--color-accent-soft);
-}
-.env-install-success .env-success-icon {
-  flex-shrink: 0;
-}
-.env-install-success .env-success-info {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.env-install-success .env-success-info strong {
-  font-size: var(--font-size-control);
-  color: var(--color-accent);
-}
-.env-install-success .env-success-info small {
-  font-size: var(--font-size-caption);
-  color: var(--color-text-secondary);
-}
-
-.env-install-result {
-  padding: 10px 12px;
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-caption);
-}
-.env-install-result.success {
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
-}
-.env-install-result.error {
-  background: var(--color-danger-soft);
-  color: var(--color-danger);
-}
-.env-install-result strong {
-  display: block;
-  margin-bottom: 4px;
-  font-size: var(--font-size-control);
-}
-
-.env-install-output-pre {
-  max-height: 200px;
-  overflow: auto;
-  padding: 8px;
-  margin-top: 6px;
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-code);
-  font-size: var(--font-size-micro);
-  font-family: var(--font-family-business);
-  line-height: 1.4;
-  white-space: pre-wrap;
-  word-break: break-all;
-  color: var(--color-text-primary);
-}
-.env-install-stderr {
-  color: var(--color-danger);
-}
-
-.env-install-npm-missing {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 0;
-}
-.env-install-npm-missing strong {
-  color: var(--color-warning);
-}
-.env-install-npm-missing small {
-  color: var(--color-text-secondary);
-}
-
-/* ── pi 环境引导（Node→npm→pi 三步）─────────────────── */
-/* 置顶提示卡：已装 pi 直接配路径，视觉上用 accent 软底提醒但不抢错误/成功的语义色 */
-.env-already-installed-card {
-  border-color: color-mix(
-    in srgb,
-    var(--color-accent) 20%,
-    var(--color-border-subtle)
-  );
-  background: var(--color-accent-soft);
-}
-
-/* 引导面板容器 */
-.env-guide {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.env-guide > strong {
-  font-size: var(--font-size-control);
-}
-
-/* 单个步骤：完成态收窄为状态行；活跃态展示操作；未解锁态淡化 */
-.env-guide-step {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-panel);
-}
-.env-guide-step.locked {
-  opacity: 0.55;
-}
-.env-guide-step.done {
-  border-color: color-mix(
-    in srgb,
-    var(--color-accent) 24%,
-    var(--color-border-subtle)
-  );
-}
-.env-guide-step-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.env-guide-step-mark {
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-pill);
-  background: var(--color-bg-muted);
-  color: var(--color-text-tertiary);
-  font-size: var(--font-size-micro);
-  font-weight: 700;
-}
-.env-guide-step.done .env-guide-step-mark {
-  border-color: var(--color-accent);
-  background: var(--color-accent);
-  color: var(--color-text-inverse);
-}
-.env-guide-step-head b {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 600;
-  color: var(--color-text-primary);
-}
-.env-guide-step-state {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--color-text-secondary);
-}
-.env-guide-step-body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.env-guide-step-body > small {
-  color: var(--color-text-secondary);
-  line-height: 1.55;
-  font-size: var(--font-size-caption);
-}
-.env-guide-step-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-/* 引导内联结果（成功/失败摘要） */
-.env-guide-result {
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-caption);
-  line-height: 1.5;
-  word-break: break-word;
-}
-.env-guide-result.success {
-  border: 1px solid color-mix(in srgb, var(--color-accent) 24%, var(--color-border-subtle));
-  background: var(--color-accent-soft);
-  color: var(--color-text-primary);
-}
-.env-guide-result.error {
-  border: 1px solid color-mix(in srgb, var(--color-danger) 32%, var(--color-border-subtle));
-  background: color-mix(in srgb, var(--color-danger) 8%, transparent);
-  color: var(--color-danger);
 }
 
 .wechat-shell {

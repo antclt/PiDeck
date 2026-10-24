@@ -282,10 +282,10 @@ export function SelectionToolWindowView() {
 
 			{expanded ? (
 				<div className="flex min-h-0 flex-1 flex-col gap-2 px-2.5 pt-2">
-					{reasonHint ? <div className="shrink-0 rounded-md bg-warning/10 px-2 py-1 text-[11px] leading-relaxed text-warning">{reasonHint}</div> : null}
+					{reasonHint ? <div className="shrink-0 rounded-md bg-warning/10 px-2 py-1 text-micro leading-relaxed text-warning">{reasonHint}</div> : null}
 
 					{capturedText.trim() ? (
-						<div className="shrink-0 border-l-2 border-primary/25 pl-2 text-[11px] leading-relaxed text-muted-foreground">
+						<div className="shrink-0 border-l-2 border-primary/25 pl-2 text-micro leading-relaxed text-muted-foreground">
 							<div className="max-h-12 overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere]">{capturedText}</div>
 						</div>
 					) : (
@@ -301,7 +301,7 @@ export function SelectionToolWindowView() {
 					)}
 
 					<section className="flex min-h-0 flex-1 flex-col">
-						<div className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap pb-1 text-[13px] leading-relaxed [overflow-wrap:anywhere]">
+						<div className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap pb-1 text-control leading-relaxed [overflow-wrap:anywhere]">
 							{invokeState.phase === "starting" ? (
 								<span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
 									<Loader2 size={13} className="animate-pideck-spin" aria-hidden="true" />
@@ -329,17 +329,17 @@ export function SelectionToolWindowView() {
 								{running ? (
 									<>
 										<Loader2 size={11} className="shrink-0 animate-pideck-spin text-muted-foreground" aria-hidden="true" />
-										<span className="min-w-0 truncate text-[11px] text-muted-foreground">{action === "translate" ? t("selectionTool.translating") : t("agentInvoke.running")}</span>
+										<span className="min-w-0 truncate text-micro text-muted-foreground">{action === "translate" ? t("selectionTool.translating") : t("agentInvoke.running")}</span>
 										<span className="min-w-0 flex-1" />
-										<button type="button" className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent-soft hover:text-foreground" onClick={cancelInvoke}>
+										<button type="button" className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-micro text-muted-foreground transition-colors hover:bg-accent-soft hover:text-foreground" onClick={cancelInvoke}>
 											<Square size={10} aria-hidden="true" />
 											{t("agentInvoke.stop")}
 										</button>
 									</>
 								) : (
 									<>
-										<span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{invokeState.phase === "error" ? t("agentInvoke.errorTitle") : ""}</span>
-										<button type="button" className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent-soft hover:text-foreground" onClick={handleRun}>
+										<span className="min-w-0 flex-1 truncate text-micro text-muted-foreground">{invokeState.phase === "error" ? t("agentInvoke.errorTitle") : ""}</span>
+										<button type="button" className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-micro text-muted-foreground transition-colors hover:bg-accent-soft hover:text-foreground" onClick={handleRun}>
 											<RefreshCw size={10} aria-hidden="true" />
 											{t("agentInvoke.retry")}
 										</button>

@@ -2,6 +2,7 @@ import { atom } from "jotai";
 import { atomFamily } from "jotai/utils";
 import type { AgentUiRequest, AgentUiResponse } from "../../../shared/types";
 import { sessionMessageCacheBySessionIdAtomFamily } from "./session-atoms";
+import { registerSessionDisposalAtom } from "./session-family-registry";
 import { sessionRuntimeBySessionIdAtomFamily } from "./session-selectors";
 import { buildAskEcho, type AskEcho } from "../utils/askUi";
 
@@ -38,6 +39,22 @@ export const askEchoBySessionIdAtomFamily = atomFamily((sessionId: string) => at
  * 只服务 DSH 后端（pi 已有 _askCard 静态卡，双份会重复）；判据收在 atom 内部，
  * 调用点（SessionRuntimeInjector / AskPanelOverlay 的 responder.onAccepted）无须各自门控。
  */
+/**
+ * 清掉某会话的回显（2027-02）：回显条目携带整段回答文本，原先只 set 从不 delete，
+ * 一次运行内所有答过问的会话都会永久驻留。会话删除时调用。
+ */
+export const clearAskEchoForSessionAtom = atom(null, (get, set, sessionId: string) => {
+	// family 实例无论有没有回显都要释放（atomFamily 无自动 GC）
+	askEchoBySessionIdAtomFamily.remove(sessionId);
+	if (!(sessionId in get(askEchoBySessionAtom))) return;
+	const next = { ...get(askEchoBySessionAtom) };
+	delete next[sessionId];
+	set(askEchoBySessionAtom, next);
+});
+
+// 会话删除时由 removeSessionStateAtom 统一执行（经叶子登记表中转，避免循环 import）
+registerSessionDisposalAtom(clearAskEchoForSessionAtom);
+
 export const recordAskEchoAtom = atom(null, (get, set, input: { sessionId: string; request: AgentUiRequest; response: AgentUiResponse }) => {
 	const runtime = get(sessionRuntimeBySessionIdAtomFamily(input.sessionId));
 	if (!runtime?.agentId || runtime.backend !== "dsh") return;

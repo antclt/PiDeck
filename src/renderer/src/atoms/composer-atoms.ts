@@ -1,5 +1,6 @@
 import { atom } from "jotai";
 import { atomFamily, selectAtom } from "jotai/utils";
+import { registerSessionFamilyForDisposal } from "./session-family-registry";
 import type { ComposerAgentMode, ImageContent } from "../../../shared/types";
 import type { EnhanceModelSelection } from "../../../shared/enhanceModelPreference";
 import type { ModelPending } from "../utils/modelPendingDisplay";
@@ -83,12 +84,12 @@ const EMPTY_ATTACHMENTS: ImageContent[] = [];
 const EMPTY_PASTE_FILES: PastedTextFile[] = [];
 export const idleSessionSendState: SessionSendState = { status: "idle" };
 
-export const sessionDraftBySessionIdAtomFamily = atomFamily((sessionId: string) => selectAtom(sessionDraftByIdAtom, (byId) => byId[sessionId] ?? "", Object.is));
-export const sessionAttachmentsBySessionIdAtomFamily = atomFamily((sessionId: string) => selectAtom(sessionAttachmentsByIdAtom, (byId) => byId[sessionId] ?? EMPTY_ATTACHMENTS, Object.is));
-export const sessionPasteFilesBySessionIdAtomFamily = atomFamily((sessionId: string) => selectAtom(sessionPasteFilesByIdAtom, (byId) => byId[sessionId] ?? EMPTY_PASTE_FILES, Object.is));
-export const sessionQuotesBySessionIdAtomFamily = atomFamily((sessionId: string) => selectAtom(sessionQuotesByIdAtom, (byId) => byId[sessionId], Object.is));
-export const sessionComposerModeBySessionIdAtomFamily = atomFamily((sessionId: string) => selectAtom(sessionComposerModeByIdAtom, (byId) => byId[sessionId], Object.is));
-export const sessionSendStateBySessionIdAtomFamily = atomFamily((sessionId: string) => selectAtom(sessionSendStateByIdAtom, (byId) => byId[sessionId] ?? idleSessionSendState, Object.is));
+export const sessionDraftBySessionIdAtomFamily = registerSessionFamilyForDisposal(atomFamily((sessionId: string) => selectAtom(sessionDraftByIdAtom, (byId) => byId[sessionId] ?? "", Object.is)));
+export const sessionAttachmentsBySessionIdAtomFamily = registerSessionFamilyForDisposal(atomFamily((sessionId: string) => selectAtom(sessionAttachmentsByIdAtom, (byId) => byId[sessionId] ?? EMPTY_ATTACHMENTS, Object.is)));
+export const sessionPasteFilesBySessionIdAtomFamily = registerSessionFamilyForDisposal(atomFamily((sessionId: string) => selectAtom(sessionPasteFilesByIdAtom, (byId) => byId[sessionId] ?? EMPTY_PASTE_FILES, Object.is)));
+export const sessionQuotesBySessionIdAtomFamily = registerSessionFamilyForDisposal(atomFamily((sessionId: string) => selectAtom(sessionQuotesByIdAtom, (byId) => byId[sessionId], Object.is)));
+export const sessionComposerModeBySessionIdAtomFamily = registerSessionFamilyForDisposal(atomFamily((sessionId: string) => selectAtom(sessionComposerModeByIdAtom, (byId) => byId[sessionId], Object.is)));
+export const sessionSendStateBySessionIdAtomFamily = registerSessionFamilyForDisposal(atomFamily((sessionId: string) => selectAtom(sessionSendStateByIdAtom, (byId) => byId[sessionId] ?? idleSessionSendState, Object.is)));
 
 export const currentSessionDraftAtom = atom(
 	(get) => {

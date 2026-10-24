@@ -28,7 +28,7 @@ PiDeck 是 Electron 桌面应用，在多个项目目录间管理和运行 pi RP
 
 **例外三：standby 运行时池（预热 + 只读命令预览；「消费池进程」仍然只有「提前起进程」一个用途）**
 
-- 一次 pi RPC 激活约 8.5s（实测 ≈ node/pi boot 0.5s + 用户 npm 扩展 5s + 内置 16 个 TS 扩展 2.4s），全部发生在 spawn→握手段。池的用法：草稿创建/激活完成后 `AgentManager.ensureStandbyAgent(projectId)` 后台起一个完整握手的进程待命（`src/main/pi/StandbyAgentPool.ts`：单槽位、容量 1、10min TTL 自动回收）；新会话激活经 `SessionRuntimeCoordinator.claimStandbyAgent` 认领，认领后照常走 applyLatestPreferences/mergePendingPermissionSettings，模型与权限热更新语义不变。
+- 一次 pi RPC 激活约 8.5s（实测 ≈ node/pi boot 0.5s + 用户 npm 扩展 5s + 内置 16 个 TS 扩展 2.4s），全部发生在 spawn→握手段。池的用法：草稿创建/激活完成后 `AgentManager.ensureStandbyAgent(projectId)` 后台起一个完整握手的进程待命（`src/main/pi/StandbyAgentPool.ts`：单槽位、容量 1、3min TTL 自动回收——待命进程 RSS 数百 MB 是空闲期最大单点常驻，TTL 只需覆盖「打字→认领」窗口，2026-10 内存轮从 10min 收紧）；新会话激活经 `SessionRuntimeCoordinator.claimStandbyAgent` 认领，认领后照常走 applyLatestPreferences/mergePendingPermissionSettings，模型与权限热更新语义不变。
 - 只服务新会话（noSession/恢复历史会话不认领）；spawn 输入指纹（`src/main/pi/standbyFingerprint.ts`：扩展根/禁用集/offline/noExt/noSkills/customPiPath/WSL/代理/launchArgs）任一变化即丢弃回退普通 spawn，改设置无需重启池；信任走 `resolveTrustWithoutPrompt`，含资源未决策不池化（绝不后台弹 trust 弹窗）。
 - 已知限制：池化进程不带 PIDECK_SESSION_ID，安检门按默认档工作，per-session 安全覆盖对认领会话要重启才生效；池化 agent 对 agents:list/agent:state-changed 不可见。开关 `settings.standbyRuntimeEnabled`（默认开，开发者页可关）。启动耗时探针：`scripts/probePiStartup.mjs`（JITI_DEBUG=1 出逐模块 trace）。
 - 只读借用（Issue #316）：草稿会话斜杠命令预览 `AgentManager.draftCommands` 经 `StandbyAgentPool.peek(projectId)` 查同项目池进程的 `get_commands`（不认领、不消费、进程须 idle、指纹须新鲜）；链路 `sessions:draft-commands` IPC → 渲染层优先预览、空/失败回退本地技能/提示词发现；dsh/browser/preview 模式返回 null。
@@ -46,6 +46,14 @@ PiDeck 是 Electron 桌面应用，在多个项目目录间管理和运行 pi RP
 - 注入走 `INTERNAL_BUILT_IN_EXTENSIONS`（始终随 RPC 注入，`piRpcNoExtensions` 除外；不上设置页、不参与用户移除）。写入 `extensions-manifest.json`，热更新覆盖层按整份快照分发。
 - 宿主唯一入口：`sessions:runtime-reload-resources` → `SessionRuntimeCoordinator.reloadResources` → `AgentManager.reloadResources`。后者先 `get_state`/挂起 UI 请求校验 idle，再按 `sourceInfo.path` 确认命令来自 `pi-deck-runtime.ts`，最后直接发 RPC prompt；**禁止复用 `sendPrompt`**（它会在 RPC 前写乐观用户消息）。重载后重新 `get_commands` 返回新命令表，渲染层刷新 `/` 菜单与时间线命令 chip。
 - 扩展热重载与「运行控制工具条」都只对 pi 提供：running/compacting/有排队消息/挂起 Ask 时拒绝热重载；DSH（共享 host）与 ACP（外部 CLI）没有会话级 reload，头部工具条与重载菜单项一律不渲染，操作只走 Tab ⋯ / 右键菜单。扩展缺失、重载失败、命令未被 `handled` 都返回结构化错误 + toast，不影响会话本身；禁止扩展成通用命令执行桥。
+
+**例外六：本地 MCP 工具端点（`pideck-cua` host，只允许宿主能力的工具调用）**
+
+- 主进程内 StreamableHTTP MCP Server（127.0.0.1、每次启动随机 bearer token、写 `~/.pi/agent/mcp.json` 的 `pideck-cua` 条目）把宿主能力以工具形式暴露给 pi：CUA 桌面输入注入（`cua_*`）与内置浏览器操作（`browser_*`，`src/main/browser/`）。工具调用走 pi 标准 tool_call → tool_result JSON-RPC，不构成第二条 pi↔PiDeck 通道；审批经进程内 IPC（`cua:approval-*`）。
+- 能力各自有独立开关（`cuaEnabled` / `browserAgentEnabled`，默认都关）、独立 gate 实例与独立 autoApprove（浏览器默认自动放行，可关闭改为逐次确认）；host 只在任一能力启用时监听并写 mcp.json，两者都关时停监听并注销。工具按开关条件注册：只为已启用能力注册，**host 存活 ≠ 能力启用**。
+- 只读工具免审批；写工具 fail-closed（无 approval handler / 超时 / 拒绝即不执行）。页面与屏幕内容是不可信输入；工具输出不得包含凭据，日志不得写页面文本或截图内容。
+- 禁止扩展成通用宿主控制通道：不得暴露任意 JS 执行、文件系统、shell、任意 HTTP 代理、会话/模型控制；新增工具必须逐条列入本例外并说明审批归属。内置浏览器工具不得绕过 `isAllowedBrowserPanelUrl`、不得注入 preload / 放开 allowpopups、不得改 webview 安全档位。
+- 详见 `docs/browser-agent-plan.md`（工具面、快照契约、风险与合并门禁）。
 
 ## 目录结构与跨层契约
 
@@ -214,8 +222,9 @@ src/
 | 内置扩展热更新 | 判据是逐文件 sha256 不是版本号；覆盖层必须完整快照 + vendored 依赖；磁盘根统一走 `resolveBuiltInExtensionRoots()` | 内置扩展热更新 |
 | 生图存储 | **base64 不进 JSONL**（只存 ref）；读取永远有字节上界；`<img src>` 只走 `imageContentSrc()` | 生图会话存储 |
 | 智能体 / 划词工具 | 配置只落 `<userData>/agent-profiles.json`（内置 `builtin-translate` / `builtin-pideck-helper` / `builtin-pideck-diagnostic` / `builtin-pideck-plugin-dev` 只补种不覆盖用户编辑）；一次性调用 `agent-profiles:invoke` 的 systemPrompt 只能由主进程按 agentId 解析（渲染层禁传），侧车必须**独立实例**（单飞语义，共用会打断输入框增强）；「使用」= 会话绑定（`sessionAgentBindings`），每次发送由主进程注入隐藏 `agentMessage`（DSH 退化为可见前缀），时间线只显示用户输入，会话输入框上方常驻可展开的角色设定条（只读展示，不写会话文件）；「智能体」与「定时任务」都是**会话 Tab 栏里的页面式 Tab**（不是弹窗、不是会话 Tab：切会话只失活、关闭才卸载），标题固定走 i18n、不参与自动会话标题（普通会话标题仍由内置扩展按提示词模板生成）；划词设置只在设置页；划词浮钮 mousedown 必须 preventDefault，与时间线「引用并提问」浮层共存时只能有一个浮层（时间线浮层内提供翻译动作）；系统级划词目前隐藏且默认关闭（`SYSTEM_SELECTION_TOOL_ENABLED=false`、默认设置 false；设置页/快捷键页不展示；复制监听、原生捕获、快捷键全部不启动），恢复后才按“选区/复制即触发”启用； | 智能体与划词工具（agent-profiles.json + 一次性补全侧车 + 系统级划词浮窗） |
+| 内置浏览器 Agent | 只经 `pideck-cua` MCP host 暴露 `browser_*`（例外六）；页面文本不可信、写动作默认自动放行（可关闭改为逐次审批）；guest 不缓存（抽屉/全屏会重建）；CDP 被 DevTools/内存探针占用时降级并标 degraded；不注入 preload、不改 webview 安全档位 | docs/browser-agent-plan.md §7/§9/§12 |
 | 会话消息编辑/删除/重发 | 编辑/删除写 pi 原生 `context_edit`（原文不改写、费用不回退；被移出的条目界面直接不显示，原始文件仍保留）；重发仍用 `deleted` 墓碑截断分支；追加条目的 parentId 必须取当前 leaf，pi 活着禁改会话文件，三道闸不许放宽 | 会话消息编辑/删除/重发 |
-| Markdown 渲染 | 唯一引擎 MarkdownStream，禁止再引 marked/react-markdown；流式与 settle 是两条路径，**复现要看最终态** | 会话 Markdown 渲染管线 |
+| Markdown 渲染 | 唯一引擎 MarkdownStream，禁止再引 marked/react-markdown；流式与 settle 是两条路径，**复现要看最终态**；HTML 一律过 `markdownSanitize.ts`（raw→摘毒→sanitize，不开 harden），模型回复里的 `<style>` 会污染整页图标（#397） | 会话 Markdown 渲染管线 |
 | 宿主插件 | 与 pi 扩展是两套系统（`src/main/plugins/`，不依赖 pi 进程）；授权按内容 sha256 指纹不按版本，指纹变即重新授权；历史读取 64MiB/10 万条硬预算；改 API/权限面必须同步 `src/preload/hostPlugin.ts` + `docs/host-plugin-dev-guide.md` + 脚手架（生成物过同一套 manifest 校验）；`service.local` 只给「点名权」（命令/参数/端口在主进程适配器里，id 白名单 `src/shared/localServices.ts`）；内置示例 `resources/host-plugins/` 由 `seedBuiltin` 落位（内容没被手改过才随新版刷新，手改过的永不覆盖；`seeded` 的 id 拒绝卸载）；`.pideck-plugin` NDJSON 归档逐文件 sha256；GitHub 安装只走 `codeload.github.com` 的 tar.gz + 自写 tar 解析（`src/main/plugins/hostPluginGitHub.ts`），禁为不可信输入引入第三方解压依赖，三条安装路径共用 `HostPluginManager.installFiles` 同一套预算与信任判定；pi-context 适配器 seam 是 fail-closed 契约 | 宿主插件 |
 | Web 端流式链路 | 流式事件源必须按后端分别注入 `WebEventStreamRouter`：pi 走 `subscribePiEvents`，DSH 等非 pi 后端走 `subscribeAgentChannelEvents`（`DshChannelToPiEvents` 把通道载荷翻成 pi 事件形状，复用同一套 UIMessageStream 适配器）；漏挂的后端在 Web 端退化成「轮询 + 磁盘重拉」（输出慢、整轮无 finish 帧 → 察觉不到结束/停止）；回合边界只认 `turnEnded: true` | Web 端流式链路 |
 | i18n 文案 | 改任何 zh-CN 词典（rendererCopy / mainProcessCopy / WebI18n / FeishuI18n）后必须重跑 `node scripts/genZhTwCopy.mjs`；四份 `*.zh-TW.ts` 是生成物禁止手改（漏跑：先 typecheck 报 TS2739，改值不加键则由 `source-sha256` 指纹门禁拦下） | 繁体中文（zh-TW 四份词典 + locale 分支点） |

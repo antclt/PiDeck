@@ -9,6 +9,7 @@
  */
 import { useState } from "react";
 import { Button } from "../components/ui-shadcn/button";
+import { Collapsible, CollapsibleContent } from "../components/ui-shadcn/collapsible";
 import { Input } from "../components/ui-shadcn/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui-shadcn/select";
 import { ChevronDown, ChevronRight, Image as ImageIcon, Plus, Trash2 } from "lucide-react";
@@ -124,61 +125,63 @@ export function ModelsTable(props: {
 						const name = typeof model.name === "string" ? model.name : "";
 						return (
 							<div key={`${inherited ? "cat" : "row"}-${index}`} className="border-b border-border/40 last:border-b-0">
-								<div className="flex items-center gap-2 px-2.5 py-1.5">
-									{canEditRows ? (
-										<Button type="button" variant="ghost" size="icon-sm" className="size-6 shrink-0 text-muted-foreground" title={t("config.dsh.modelCapacity")} aria-label={t("config.dsh.modelCapacity")} disabled={!writable} onClick={() => setExpandedIndex(isOpen ? null : index)}>
-											{isOpen ? <ChevronDown className="size-3.5" aria-hidden="true" /> : <ChevronRight className="size-3.5" aria-hidden="true" />}
-										</Button>
-									) : (
-										<span className="size-6 shrink-0" aria-hidden="true" />
-									)}
-									{canEditRows ? (
-										<Input
-											size="sm"
-											className="min-w-0 flex-1 font-mono"
-											placeholder={t("config.dsh.modelIdPlaceholder")}
-											value={id}
-											disabled={!writable}
-											onChange={(event) => onUpdate(index, "id", event.target.value)}
-											onBlur={(event) => {
-												const trimmed = event.target.value.trim();
-												if (trimmed !== event.target.value) onUpdate(index, "id", trimmed);
-												props.onIdBlur?.(index, trimmed);
-											}}
-										/>
-									) : (
-										<span className="min-w-0 flex-1 truncate font-mono text-control text-foreground">{id}</span>
-									)}
-									{canEditRows ? (
-										<Input size="sm" className="min-w-0 flex-1" placeholder={t("config.dsh.modelNamePlaceholder")} value={name} disabled={!writable} onChange={(event) => onUpdate(index, "name", event.target.value)} />
-									) : name ? (
-										<span className="min-w-0 flex-1 truncate text-control text-muted-foreground">{name}</span>
-									) : (
-										<span className="min-w-0 flex-1" aria-hidden="true" />
-									)}
-									{/* 图片能力要在行上直接可见：用户反馈「配置里看不出模型支不支持图片」。 */}
-									{inputField && dshModalitySelection(model[inputField]) === "textImage" ? <ImageIcon className="size-3.5 shrink-0 text-muted-foreground" role="img" aria-label={t("config.dsh.inputModalityTextImage")} /> : null}
-									{canEditRows && (
-										<Button
-											type="button"
-											variant="ghost"
-											size="icon-sm"
-											className="size-7 shrink-0 text-muted-foreground hover:text-danger"
-											title={t("config.dsh.removeModel")}
-											aria-label={t("config.dsh.removeModel")}
-											disabled={!writable}
-											onClick={() => {
-												// 删除展开行时收拢展开态
-												if (expandedIndex === index) setExpandedIndex(null);
-												onRemove(index);
-											}}
-										>
-											<Trash2 className="size-3.5" aria-hidden="true" />
-										</Button>
-									)}
-								</div>
-								{isOpen && (
-									<div className="grid gap-2.5 border-t border-border/40 px-3 py-2.5 sm:grid-cols-2 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
+								{/* 折叠体走共享折叠原语；display:contents 不生成盒子，折叠态零空档。 */}
+								<Collapsible open={isOpen} className="contents">
+									<div className="flex items-center gap-2 px-2.5 py-1.5">
+										{canEditRows ? (
+											<Button type="button" variant="ghost" size="icon-sm" className="size-6 shrink-0 text-muted-foreground" title={t("config.dsh.modelCapacity")} aria-label={t("config.dsh.modelCapacity")} disabled={!writable} onClick={() => setExpandedIndex(isOpen ? null : index)}>
+												{isOpen ? <ChevronDown className="size-3.5" aria-hidden="true" /> : <ChevronRight className="size-3.5" aria-hidden="true" />}
+											</Button>
+										) : (
+											<span className="size-6 shrink-0" aria-hidden="true" />
+										)}
+										{canEditRows ? (
+											<Input
+												size="sm"
+												className="min-w-0 flex-1 font-mono"
+												placeholder={t("config.dsh.modelIdPlaceholder")}
+												value={id}
+												disabled={!writable}
+												onChange={(event) => onUpdate(index, "id", event.target.value)}
+												onBlur={(event) => {
+													const trimmed = event.target.value.trim();
+													if (trimmed !== event.target.value) onUpdate(index, "id", trimmed);
+													props.onIdBlur?.(index, trimmed);
+												}}
+											/>
+										) : (
+											<span className="min-w-0 flex-1 truncate font-mono text-control text-foreground">{id}</span>
+										)}
+										{canEditRows ? (
+											<Input size="sm" className="min-w-0 flex-1" placeholder={t("config.dsh.modelNamePlaceholder")} value={name} disabled={!writable} onChange={(event) => onUpdate(index, "name", event.target.value)} />
+										) : name ? (
+											<span className="min-w-0 flex-1 truncate text-control text-muted-foreground">{name}</span>
+										) : (
+											<span className="min-w-0 flex-1" aria-hidden="true" />
+										)}
+										{/* 图片能力要在行上直接可见：用户反馈「配置里看不出模型支不支持图片」。 */}
+										{inputField && dshModalitySelection(model[inputField]) === "textImage" ? <ImageIcon className="size-3.5 shrink-0 text-muted-foreground" role="img" aria-label={t("config.dsh.inputModalityTextImage")} /> : null}
+										{canEditRows && (
+											<Button
+												type="button"
+												variant="ghost"
+												size="icon-sm"
+												className="size-7 shrink-0 text-muted-foreground hover:text-danger"
+												title={t("config.dsh.removeModel")}
+												aria-label={t("config.dsh.removeModel")}
+												disabled={!writable}
+												onClick={() => {
+													// 删除展开行时收拢展开态
+													if (expandedIndex === index) setExpandedIndex(null);
+													onRemove(index);
+												}}
+											>
+												<Trash2 className="size-3.5" aria-hidden="true" />
+											</Button>
+										)}
+									</div>
+									{/* 不再挂 animate-in/fade-in：twMerge 会把 animate-* 判同组，保留会盖掉高度动画。 */}
+									<CollapsibleContent className="grid gap-2.5 border-t border-border/40 px-3 py-2.5 sm:grid-cols-2">
 										<label className="grid gap-1">
 											<span className="text-micro text-muted-foreground">{t("config.contextWindow")}</span>
 											<Input
@@ -227,8 +230,8 @@ export function ModelsTable(props: {
 												</Select>
 											</div>
 										) : null}
-									</div>
-								)}
+									</CollapsibleContent>
+								</Collapsible>
 							</div>
 						);
 					})}

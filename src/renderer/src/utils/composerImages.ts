@@ -5,6 +5,25 @@ export const COMPOSER_IMAGE_MAX_EDGE = 2000;
 export const COMPOSER_IMAGE_QUALITY = 0.86;
 export const COMPOSER_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
+/**
+ * 单会话附件栏 base64 总预算（内存优化 2026-12：附件栏此前无任何上限，多会话各囤
+ * 一批未发送的粘贴图会长期驻留渲染进程）。只在粘贴/拖入入口拦截并提示，
+ * 不静默截断；重发恢复/队列回填路径不经该入口，不受影响。
+ */
+export const COMPOSER_ATTACHMENT_BUDGET_BYTES = 32 * 1024 * 1024;
+
+/** base64 字符长度 → 原始字节数（预算用途；去掉尾部 padding 后按 3/4 折算）。 */
+export function base64DataBytes(data: string | undefined): number {
+	if (!data) return 0;
+	const effective = data.replace(/=+$/, "");
+	return Math.floor((effective.length * 3) / 4);
+}
+
+/** 附件列表当前持有的原始字节数（只计内联 base64；ref 形态在磁盘，不占渲染进程内存）。 */
+export function attachmentBytes(images: readonly Pick<ImageContent, "data">[]): number {
+	return images.reduce((sum, image) => sum + base64DataBytes(image.data), 0);
+}
+
 export type ComposerImageErrorCode = "too-large" | "unsupported" | "read-failed";
 
 export class ComposerImageError extends Error {

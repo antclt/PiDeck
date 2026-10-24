@@ -1,5 +1,5 @@
 import { app, BrowserWindow, Menu } from "electron";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { mkdir, readFile, writeFile, copyFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ipcChannels } from "../../shared/ipc";
@@ -115,13 +115,27 @@ export function readBootPreferences() {
  * 映射：showThinking = !hideThinkingBlock
  * 若 pi agent 文件不存在或 hideThinkingBlock 未设置，返回 undefined。
  */
+/**
+ * (size, mtime) 结果缓存（2027-02 性能审计）：settingsStore.get() 全仓 200+ 调用点
+ * （每次 RPC 取 rpcTimeout、settings:get IPC、update 收尾……），原先每次都同步
+ * readFileSync + JSON.parse ~/.pi/agent/settings.json——Windows+杀软下每跳 0.1-0.5ms，
+ * 消息发送/spawn 密集期累积微卡顿。文件未变时结果必然一致，stat 判据复用。
+ */
+const piAgentShowThinkingCache = new Map<string, { size: number; mtimeMs: number; value: boolean | undefined }>();
+
 function readPiAgentShowThinking(): boolean | undefined {
 	try {
-		const agentRaw = readFileSync(piAgentSettingsPath(), "utf8");
-		const agentSettings = JSON.parse(agentRaw) as Record<string, unknown>;
-		if (typeof agentSettings.hideThinkingBlock === "boolean") {
-			return !agentSettings.hideThinkingBlock;
+		const path = piAgentSettingsPath();
+		const info = statSync(path);
+		const cached = piAgentShowThinkingCache.get(path);
+		if (cached && cached.size === info.size && cached.mtimeMs === info.mtimeMs) {
+			return cached.value;
 		}
+		const agentRaw = readFileSync(path, "utf8");
+		const agentSettings = JSON.parse(agentRaw) as Record<string, unknown>;
+		const value = typeof agentSettings.hideThinkingBlock === "boolean" ? !agentSettings.hideThinkingBlock : undefined;
+		piAgentShowThinkingCache.set(path, { size: info.size, mtimeMs: info.mtimeMs, value });
+		return value;
 	} catch {
 		// 文件不存在或解析失败，静默忽略
 	}
@@ -146,6 +160,8 @@ const defaultSettings: AppSettings = {
 	customThemeOverrides: {},
 	backgroundImage: "",
 	backgroundImageOpacity: 0.8,
+	weWorkshopDir: "",
+	weWallpaperId: "",
 	language: "system",
 	// 默认最大化：与历史 createWindow 在 ready-to-show 后 maximize() 的行为一致
 	// （1480×960 只是最大化前的兜底尺寸，不是最终展示态）
@@ -241,6 +257,8 @@ Gitmoji 对应关系：
 	chatContentWidthPct: 80,
 	// 会话状态默认显示在输入框上方折叠条（另一选项：右侧边栏下半区）
 	sessionStatusPlacement: "composer",
+	// 发送后自动滚动到最新：默认开启（与历史行为一致），显式 false 才关闭
+	scrollToLatestOnSend: true,
 	// 会话 Tab 最大宽度默认 104px：与旧硬编码 max-w-[104px] 一致，迁移零回归。
 	navigationMode: "tabs",
 	sessionTabMaxWidth: SESSION_TAB_MAX_WIDTH_DEFAULT,
@@ -281,6 +299,11 @@ Gitmoji 对应关系：
 	cuaEnabled: false,
 	// 自动审批默认开启；显式保存的 false 仍由 load 合并保留，不自动改写用户选择。
 	cuaAutoApprove: true,
+
+	// 浏览器 Agent 默认关闭：不注册 browser_* 工具，端点是否监听取决于 CUA 是否已开启。
+	// 开启后写动作默认免审批（与 CUA 一致）；关闭自动审批后逐次确认。
+	browserAgentEnabled: false,
+	browserAgentAutoApprove: true,
 
 	favoriteModels: [],
 	// 提供商与模型显示开关默认全显示：隐藏列表为空 = 不隐藏任何提供商/模型
@@ -337,7 +360,10 @@ Gitmoji 对应关系：
 	customUpdateSourceUrl: "",
 
 	// ── Agent 后端：默认 pi（经典后端），用户可在设置中切换为 dsh ──
+	// defaultAgentBackendManual=false 时由 resolveAutoAgentBackend 按安装情况自动选择：
+	// 只装了 DSH runtime 而没有 pi → dsh，其余（只有 pi / 两者都有 / 都没有）→ pi。
 	defaultAgentBackend: "pi",
+	defaultAgentBackendManual: false,
 
 	// ── DSH 外部会话：默认启动时只读扫磁盘入侧栏（不 boot host）──
 	dshAutoImportSessions: true,
@@ -608,6 +634,8 @@ export class SettingsStore {
 			this.settings.enhanceIncludeContext = parsed.enhanceIncludeContext === true;
 			// 输入预测只有显式 false 才关闭：老设置缺字段按默认开启处理。
 			this.settings.promptSuggestionEnabled = parsed.promptSuggestionEnabled !== false;
+			// 发送后回底同规则：老 settings.json 缺字段 = 开启（保持现有行为，零迁移）。
+			this.settings.scrollToLatestOnSend = parsed.scrollToLatestOnSend !== false;
 			// 预测模型与增强模型同形态：脏值（缺字段/非字符串）一律回落 null = 跟随会话模型。
 			this.settings.promptSuggestionModel = normalizeEnhanceModel(this.settings.promptSuggestionModel);
 			// 隐藏模块来自旧 JSON 时可能是脏值（非数组/含空串与重复项）；统一清洗，缺字段回落空数组（全显示）。
@@ -749,6 +777,11 @@ export class SettingsStore {
 		if ("autoSessionTitle" in safePatch && typeof safePatch.autoSessionTitle !== "boolean") {
 			delete safePatch.autoSessionTitle;
 		}
+		// 「用户是否手动选过后端」是安全阀：非布尔值不能写进去，否则自动选择可能被意外锁死或反复改写。
+		// （后端枚举本身沿用既有写法不做白名单，避免与 AgentBackend 未来扩展不一致。）
+		if ("defaultAgentBackendManual" in safePatch && typeof safePatch.defaultAgentBackendManual !== "boolean") {
+			delete safePatch.defaultAgentBackendManual;
+		}
 		// TPS 模式只接受两个已知枚举；非法 IPC 入参保留原设置。
 		if ("tpsDisplayMode" in safePatch && safePatch.tpsDisplayMode !== "streaming" && safePatch.tpsDisplayMode !== "endToEnd") {
 			delete safePatch.tpsDisplayMode;
@@ -760,6 +793,13 @@ export class SettingsStore {
 		// 免审批开关同理：只接受布尔值（安全相关设置，非法值一律回退原值）。
 		if ("cuaAutoApprove" in safePatch && typeof safePatch.cuaAutoApprove !== "boolean") {
 			delete safePatch.cuaAutoApprove;
+		}
+		// 浏览器 Agent 开关与自动审批同样来自渲染层，安全相关：只接受布尔值。
+		if ("browserAgentEnabled" in safePatch && typeof safePatch.browserAgentEnabled !== "boolean") {
+			delete safePatch.browserAgentEnabled;
+		}
+		if ("browserAgentAutoApprove" in safePatch && typeof safePatch.browserAgentAutoApprove !== "boolean") {
+			delete safePatch.browserAgentAutoApprove;
 		}
 		if ("navigationMode" in safePatch && safePatch.navigationMode !== "tabs" && safePatch.navigationMode !== "simple") {
 			delete safePatch.navigationMode;
@@ -971,6 +1011,10 @@ export class SettingsStore {
 		if ("promptSuggestionEnabled" in safePatch && typeof safePatch.promptSuggestionEnabled !== "boolean") {
 			delete safePatch.promptSuggestionEnabled;
 		}
+		// 发送后回底开关同规则：只认布尔，脏值不落盘（缺失 = 保持当前值）。
+		if ("scrollToLatestOnSend" in safePatch && typeof safePatch.scrollToLatestOnSend !== "boolean") {
+			delete safePatch.scrollToLatestOnSend;
+		}
 		this.settings = { ...this.settings, ...safePatch };
 		// 生图字段来自渲染层，非法值丢掉，避免下次请求带坏 size/watermark。
 		if ("imageGenSize" in safePatch) {
@@ -1068,28 +1112,87 @@ export class SettingsStore {
 		}
 	}
 
-	private save(): Promise<void> {
+	/**
+	/**
+	 * 写盘尾随合并窗口（2027-02 性能审计）：面板宽度拖拽等高频 update（渲染层 160ms
+	 * 防抖之后仍可达每秒数轮）原先每次都全量 stringify + 写 tmp + 复制 .bak + rename
+	 * ≈ 3×文件体积/次——带 1.5MB 自定义 logo 的用户拖拽期间 ~18MB/s 持续写盘。
+	 *
+	 * 合并模型：单一在途窗口 + 等待者集合。窗口内的所有 update 共享一次 writeAtomic，
+	 * 每个调用者（await update()）在这次落盘完成后一起结算；窗口未到期时新到的 update
+	 * 只是标记「有新内容」并入同一窗口（窗口起点固定，最多 150ms 延迟）。退出路径经
+	 * quitCleanup 的 flushPendingSave 立即落盘。
+	 */
+	private static readonly SAVE_DEBOUNCE_MS = 150;
+	/** 有待落盘内容（窗口到期/flush 时据此决定是否真的写盘）。 */
+	private saveQueued = false;
+	private saveTimer: NodeJS.Timeout | null = null;
+	private saveWaiters: Array<() => void> = [];
+
+	/** 立即执行一轮「落盘在途内容并结算全部等待者」（窗口到期与 flush 共用）。 */
+	private firePendingSave(): void {
+		if (!this.saveQueued) return;
+		this.saveQueued = false;
+		const waiters = this.saveWaiters;
+		this.saveWaiters = [];
 		// 串行化：把每次写盘接到上一次之后，避免并发 update 的 writeFile 交叉撕裂
 		//（迁移钩子的 fire-and-forget save 与 IPC 快速连续 update 会并发触发）。
-		const run = this.saveChain.catch(() => undefined).then(() => this.writeAtomic());
+		const run = this.saveChain
+			.catch(() => undefined)
+			.then(() => this.writeAtomic())
+			.then(
+				() => {
+					for (const settle of waiters) settle();
+				},
+				() => {
+					for (const settle of waiters) settle();
+				},
+			);
 		this.saveChain = run;
-		return run;
 	}
 
-	/**
-	 * 原子写 settings.json：写 tmp 后 renameWithRetry 替换（Windows 杀软/索引器
-	 * 瞬态 EPERM/EBUSY 退避重试，见 utils/fsRetry）。
-	 * 替换前把当前版本复制为 .bak——load() 遇到主文件损坏时优先回退 .bak，
-	 * 避免全部用户设置静默回默认。首启无旧文件时复制失败静默忽略（无备份可做）。
-	 */
+	private save(): Promise<void> {
+		this.saveQueued = true;
+		if (this.saveTimer === null) {
+			const timer = setTimeout(() => {
+				this.saveTimer = null;
+				this.firePendingSave();
+			}, SettingsStore.SAVE_DEBOUNCE_MS);
+			this.saveTimer = timer;
+			timer.unref?.();
+		}
+		return new Promise<void>((resolve) => {
+			this.saveWaiters.push(resolve);
+		});
+	}
+
+	/** 立即落盘在途的合并窗口（quitCleanup 与备份/pre-restore 调用；无在途时等既有链收尾）。 */
+	flushPendingSave(): Promise<void> {
+		if (this.saveTimer !== null) {
+			clearTimeout(this.saveTimer);
+			this.saveTimer = null;
+			this.firePendingSave();
+		}
+		return this.saveChain.catch(() => undefined);
+	}
+
+	/** 上次成功落盘的序列化内容：.bak 只在内容真正变化时复制（去重高频写）。 */
+	private lastPersistedJson: string | null = null;
+
 	private async writeAtomic(): Promise<void> {
 		await mkdir(app.getPath("userData"), { recursive: true });
 		// showThinking 由 pi agent 的 hideThinkingBlock 决定，不持久化到桌面 settings.json
 		const { showThinking: _unused, ...persistable } = this.settings;
 		const tmpPath = `${this.filePath}.tmp`;
-		await writeFile(tmpPath, JSON.stringify(persistable, null, 2), "utf8");
-		await copyFile(this.filePath, `${this.filePath}.bak`).catch(() => undefined);
+		const json = JSON.stringify(persistable, null, 2);
+		await writeFile(tmpPath, json, "utf8");
+		// .bak 降频（2027-02 性能审计）：备份的语义是「上一次不同的好版本」——内容与上次
+		// 落盘一致时复制是纯浪费（原先每次 update 都 copyFile，3×写放大的三分之一）。
+		if (this.lastPersistedJson !== json) {
+			await copyFile(this.filePath, `${this.filePath}.bak`).catch(() => undefined);
+		}
 		await renameWithRetry(tmpPath, this.filePath);
+		this.lastPersistedJson = json;
 	}
 
 	/**

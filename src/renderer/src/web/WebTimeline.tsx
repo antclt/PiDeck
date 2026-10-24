@@ -45,9 +45,10 @@ import { uiMessageText, uiMessageImages } from "./webMessageParts";
 export { uiMessageText, uiMessageImages } from "./webMessageParts";
 
 // 分组纯函数已抽到 webTimelineGrouping（叶子模块，vm 沙箱单测可用）；re-export 保持既有导入路径不破
-import { groupTimelineEntries } from "./webTimelineGrouping";
+import { groupTimelineEntries, sliceEntriesToBoundary, turnPrefixBoundary, validTurnPrefix, type TurnPrefixCache } from "./webTimelineGrouping";
 import type { AssistantTurn, TimelineEntry, TurnSegment, WebToolPart } from "./webTimelineGrouping";
 export { groupTimelineEntries } from "./webTimelineGrouping";
+export { validTurnPrefix, turnPrefixBoundary, sliceEntriesToBoundary } from "./webTimelineGrouping";
 export type { AssistantTurn, TimelineEntry, TurnSegment, WebToolPart } from "./webTimelineGrouping";
 
 /** 用户消息右对齐气泡（结构与桌面 UserBubble 一致；P1/P2 增加图片与 hover 操作）。 */
@@ -83,7 +84,7 @@ export const WebUserBubble = memo(function WebUserBubble(props: {
 				</div>
 			) : null}
 			{editing ? (
-				<div className="w-fit min-w-0 max-w-[min(82%,64ch)] rounded-2xl border border-primary/40 bg-muted/60 px-3.5 py-2.5">
+				<div className="w-fit min-w-0 max-w-[min(82%,64ch)] rounded-lg border border-primary/40 bg-muted/60 px-3.5 py-2.5">
 					<textarea
 						className="min-h-16 w-full resize-y rounded-md bg-transparent text-sm text-text-primary outline-none"
 						value={editDraft}
@@ -123,7 +124,7 @@ export const WebUserBubble = memo(function WebUserBubble(props: {
 			) : (
 				<>
 					{text.trim() ? (
-						<div className={cn("w-fit min-w-0 max-w-[min(82%,64ch)] rounded-2xl border border-border bg-muted/60 px-3.5 py-2.5 text-sm text-foreground [overflow-wrap:anywhere] break-words", props.flash && "web-msg-flash-ring")}>
+						<div className={cn("w-fit min-w-0 max-w-[min(82%,64ch)] rounded-lg border border-border bg-muted/60 px-3.5 py-2.5 text-sm text-foreground [overflow-wrap:anywhere] break-words", props.flash && "web-msg-flash-ring")}>
 							<div className="text-chat text-text-primary whitespace-pre-wrap break-words">{text}</div>
 						</div>
 					) : null}
@@ -174,7 +175,8 @@ function ActionButton(props: { label: string; onClick: () => void; danger?: bool
 		<button
 			type="button"
 			className={cn(
-				"inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_60%,transparent)] hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]",
+				// 触屏（pointer:coarse）放大到 36px：24px 图标钮在手机上误触率高（移动走查 #1）
+				"inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_60%,transparent)] hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)] pointer-coarse:size-9",
 				props.danger && "hover:text-danger",
 			)}
 			title={props.label}
@@ -200,7 +202,7 @@ export const WebThinkingBlock = memo(function WebThinkingBlock(props: {
 			<section className="w-full min-w-0 overflow-hidden rounded-md border-0">
 				<button
 					type="button"
-					className="relative flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md border-0 bg-transparent px-1 py-1 text-left text-control leading-5 text-text-secondary transition-[background-color,transform] duration-150 motion-reduce:transition-none hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)] active:scale-[0.99] focus-visible:-outline-offset-2 focus-visible:outline-2 [&_svg]:shrink-0"
+					className="relative flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md border-0 bg-transparent px-1 py-1 text-left text-control leading-5 text-text-secondary transition-[background-color,transform] duration-150 motion-reduce:transition-none hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)] active:scale-[0.99] focus-visible:-outline-offset-2 focus-visible:outline-2 [&_svg]:shrink-0 pointer-coarse:min-h-9"
 					onClick={() => setExpanded((value) => !value)}
 					aria-expanded={expanded}
 					title={expanded ? t("thinking.collapse") : t("thinking.expand")}
@@ -226,7 +228,7 @@ export const WebThinkingBlock = memo(function WebThinkingBlock(props: {
 						<div className="flex pb-1.5">
 							<button
 								type="button"
-								className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-micro text-text-tertiary transition-colors duration-150 hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_45%,transparent)] hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
+								className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-micro text-text-tertiary transition-colors duration-150 pointer-coarse:py-2 hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_45%,transparent)] hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
 								onClick={() => setExpanded(false)}
 							>
 								<ChevronUp size={12} aria-hidden="true" />
@@ -257,7 +259,7 @@ export const WebToolCard = memo(function WebToolCard(props: { part: WebToolPart 
 	return (
 		<TimelineMarker kind="tool" tone={error ? "error" : running ? "active" : "success"} contentClassName="pb-1">
 			<section className={cn("tool-card w-full min-w-0 overflow-hidden", running && "tone-running", error && "tone-error")} data-status={error ? "error" : running ? "running" : "done"} data-tool-name={toolName}>
-				<button type="button" className="relative flex min-h-7 w-full cursor-pointer items-center rounded-md px-1 py-1 text-left" onClick={() => hasBody && setExpanded((value) => !value)} aria-expanded={expanded}>
+				<button type="button" className="relative flex min-h-7 w-full cursor-pointer items-center rounded-md px-1 py-1 text-left pointer-coarse:min-h-9" onClick={() => hasBody && setExpanded((value) => !value)} aria-expanded={expanded}>
 					<span className="tool-card-trigger flex min-w-0 items-center gap-2 text-control leading-5 text-text-secondary">
 						<span className="tool-card-icon">
 							<Wrench size={14} aria-hidden="true" />
@@ -321,7 +323,7 @@ export const WebAssistantTurn = memo(function WebAssistantTurn(props: { turn: As
 				<div className="execution-fold" data-open={processOpen}>
 					<button
 						type="button"
-						className="inline-flex h-7 min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-control text-text-secondary transition-colors hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)] focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
+						className="inline-flex h-7 min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-control text-text-secondary transition-colors hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)] focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)] pointer-coarse:h-9"
 						onClick={() => setManualOpen(!processOpen)}
 						aria-expanded={processOpen}
 						title={processOpen ? t("common.collapse") : t("common.expand")}
@@ -369,7 +371,7 @@ export const WebAssistantTurn = memo(function WebAssistantTurn(props: { turn: As
 							})}
 							<button
 								type="button"
-								className="mt-1 inline-flex items-center gap-1 self-start rounded-md px-1.5 py-0.5 text-micro text-text-tertiary transition-colors hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_45%,transparent)] hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
+								className="mt-1 inline-flex items-center gap-1 self-start rounded-md px-1.5 py-0.5 text-micro text-text-tertiary transition-colors hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_45%,transparent)] hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)] pointer-coarse:py-2"
 								onClick={() => setManualOpen(false)}
 							>
 								<ChevronUp size={12} aria-hidden="true" />
@@ -457,7 +459,7 @@ function WebAskCard(props: { request: WebPendingUiRequest; busy: boolean; onResp
 								<button
 									key={q.id}
 									type="button"
-									className={cn("h-5 w-5 rounded text-xs", idx === batchTab ? "bg-primary text-primary-foreground font-semibold" : batchAnswers[q.id] !== undefined ? "bg-muted text-foreground" : "bg-muted/40 text-muted-foreground")}
+									className={cn("h-5 w-5 rounded text-xs pointer-coarse:size-8", idx === batchTab ? "bg-primary text-primary-foreground font-semibold" : batchAnswers[q.id] !== undefined ? "bg-muted text-foreground" : "bg-muted/40 text-muted-foreground")}
 									onClick={() => {
 										setBatchTab(idx);
 										setBatchInput("");
@@ -694,7 +696,29 @@ export function WebTimeline(props: {
 	// 回合聚合：连续 assistant 消息合并成「过程组 + 常驻正文」（桌面 TurnRow 语义）。
 	// 流式中的末尾回合不提升 final（对齐桌面 isRunTail 门控，见 groupTimelineEntries 注释）。
 	// streaming 仅指「正在收流」，与 useChat 的 status 无关，由调用方在收流期间置真。
-	const timelineEntries = useMemo(() => groupTimelineEntries(messages, { isStreaming: props.streaming }), [messages, props.streaming]);
+	//
+	// 前缀缓存（2027-02 性能治理）：useChat 流式期每个 delta 重建整个 messages 数组，
+	// 全量重分组会铸造全新 turn 对象、memo(WebAssistantTurn) 对所有历史回合失效。
+	// 已完成回合按消息引用判据复用分组结果，每帧只对当前（流式尾）回合重分组。
+	const turnPrefixCacheRef = useRef<TurnPrefixCache | null>(null);
+	const timelineEntries = useMemo<TimelineEntry[]>(() => {
+		const cached = turnPrefixCacheRef.current ? validTurnPrefix(turnPrefixCacheRef.current, messages) : null;
+		const consumed = cached ? cached.consumed : 0;
+		const prefixEntries = cached ? cached.entries : [];
+		const suffixEntries = groupTimelineEntries(messages.slice(consumed), { isStreaming: props.streaming });
+		const entries = consumed === 0 ? suffixEntries : [...prefixEntries, ...suffixEntries];
+		// 回写缓存：覆盖到可缓存边界（流式中=当前回合起点，非流式=全量）。
+		// 裁剪出的前缀条目引用与 entries 共享——历史回合对象跨帧稳定，memo 才有效。
+		const boundary = turnPrefixBoundary(messages, props.streaming);
+		const prefix = boundary > consumed ? sliceEntriesToBoundary(entries, boundary) : null;
+		if (prefix && prefix.length > 0) {
+			turnPrefixCacheRef.current = { messages: messages.slice(0, boundary), entries: prefix, consumed: boundary };
+		} else if (!props.streaming) {
+			// 非流式但边界不可裁（异常形态）：直接缓存全量结果
+			turnPrefixCacheRef.current = { messages: [...messages], entries, consumed: messages.length };
+		}
+		return entries;
+	}, [messages, props.streaming]);
 	const lastEntryId = timelineEntries.length > 0 ? timelineEntries[timelineEntries.length - 1].id : "";
 
 	return (

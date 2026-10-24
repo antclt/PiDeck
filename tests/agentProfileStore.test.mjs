@@ -4,6 +4,24 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
+test("usage 计数落盘合并：窗口内多次 recordUsage 只写一轮盘，flush 后完整持久化（2027-02 写放大治理）", async () => {
+	await withStore(async ({ filePath }) => {
+		const store = new AgentProfileStore(filePath);
+		await store.load(1_000);
+		const created = await store.create({ name: "计数助手", systemPrompt: "设定", category: "writing" }, 2_000);
+		await store.flushPendingUsage();
+		const before = await readFile(filePath, "utf8");
+		// 合并窗口内连打 5 次计数：内存态立即可见，磁盘不动
+		for (let index = 0; index < 5; index += 1) {
+			await store.recordUsage(created.id, 3_000 + index);
+		}
+		assert.equal(store.getSnapshot().agents.find((agent) => agent.id === created.id).usageCount, 5, "内存态立即累加（UI 排序即时）");
+		assert.equal(await readFile(filePath, "utf8"), before, "窗口未到期不得写盘");
+		await store.flushPendingUsage();
+		const persisted = JSON.parse(await readFile(filePath, "utf8"));
+		assert.equal(persisted.agents.find((agent) => agent.id === created.id).usageCount, 5, "flush 后一次性落盘最终计数");
+	});
+});
 
 const { AgentProfileStore } = loadTsCommonJs("src/main/agents/AgentProfileStore.ts");
 const { BUILTIN_AGENT_SEED_CREATED_AT, getBuiltinSeed } = loadTsCommonJs("src/main/agents/builtinAgents.ts");
@@ -299,6 +317,9 @@ test("profile changes persist across store instances without duplicating the bui
 		const created = await first.create({ name: "写作助手", systemPrompt: "你是写作助手", category: "writing" }, 2_000);
 		await first.updateSettings({ selectionToolAgentId: created.id });
 		await first.recordUsage(created.id, 3_000);
+		// 2027-02 起 usage 计数带 1s 落盘合并窗口（写放大治理）：跨实例校验前先收尾，
+		// 生产路径由 quitCleanup("agent-profile-store") 与普通编辑 mutate() 负责 flush。
+		await first.flushPendingUsage();
 		const revision = first.getSnapshot().revision;
 
 		const second = new AgentProfileStore(filePath);
@@ -540,5 +561,62 @@ test("updateSettings ignores sessionAgentBindings and persists the new settings 
 		const reloaded = new AgentProfileStore(filePath);
 		const snapshot = await reloaded.load(2_000);
 		assert.deepEqual(plain(snapshot.settings), { selectionToolEnabled: false, systemSelectionEnabled: false, selectionToolAgentId: null, sessionAgentBindings: { "session-a": BUILTIN_TRANSLATE_AGENT_ID } });
+	});
+});
+
+test("reorder 持久化自定义顺序：未知/重复 id 忽略、顺序不变不写盘", async () => {
+	await withStore(async ({ filePath }) => {
+		const store = new AgentProfileStore(filePath);
+		const snapshot = await store.load(1_000);
+		const ids = Array.from(snapshot.agents, (agent) => agent.id);
+		const reversed = [...ids].reverse();
+
+		const next = await store.reorder(["missing", ...reversed, reversed[0]]);
+		assert.deepEqual(Array.from(next), reversed, "未知 id 忽略、重复 id 只算一次");
+		assert.deepEqual(Array.from(store.getSnapshot().agentOrder), reversed);
+		assert.deepEqual(plain(await readPersisted(filePath)).agentOrder, reversed, "顺序写进 agent-profiles.json");
+
+		const reloaded = await new AgentProfileStore(filePath).load(1_000);
+		assert.deepEqual(Array.from(reloaded.agentOrder), reversed, "重启后顺序不变");
+
+		// 顺序没变：不推进 revision、不重写文件（拖回原位是纯视觉动作）。
+		const revision = store.getSnapshot().revision;
+		const before = await readFile(filePath, "utf8");
+		await store.reorder(reversed);
+		assert.equal(store.getSnapshot().revision, revision);
+		assert.equal(await readFile(filePath, "utf8"), before);
+	});
+});
+
+test("reorder 之后新建/复制追加到末尾，删除从顺序里剔除", async () => {
+	await withStore(async ({ filePath }) => {
+		const store = new AgentProfileStore(filePath);
+		const snapshot = await store.load(1_000);
+		const ids = Array.from(snapshot.agents, (agent) => agent.id);
+		const custom = [ids[1], ids[0], ids[2], ids[3]];
+		await store.reorder(custom);
+
+		const created = await store.create({ name: "新智能体", description: "描述", systemPrompt: "设定", category: "general" }, 2_000);
+		assert.deepEqual(Array.from(store.getSnapshot().agentOrder), [...custom, created.id], "新建追加到尾部，不插进用户已排好的队伍");
+
+		const copy = await store.duplicate(created.id, 3_000);
+		assert.deepEqual(Array.from(store.getSnapshot().agentOrder), [...custom, created.id, copy.id]);
+
+		assert.equal(await store.delete(created.id), true);
+		assert.deepEqual(Array.from(store.getSnapshot().agentOrder), [...custom, copy.id], "删除同时剔除顺序里的 id");
+	});
+});
+
+test("load 剔除顺序里未知/重复的 id，缺失的智能体由排序策略补位", async () => {
+	await withStore(async ({ filePath }) => {
+		const store = new AgentProfileStore(filePath);
+		const snapshot = await store.load(1_000);
+		const ids = Array.from(snapshot.agents, (agent) => agent.id);
+		const persisted = await readPersisted(filePath);
+		persisted.agentOrder = ["missing", ids[2], ids[2], 42, ids[0]];
+		await writeFile(filePath, JSON.stringify(persisted), "utf8");
+
+		const reloaded = await new AgentProfileStore(filePath).load(2_000);
+		assert.deepEqual(Array.from(reloaded.agentOrder), [ids[2], ids[0]], "未知 id / 非字符串 / 重复项全部剔除");
 	});
 });

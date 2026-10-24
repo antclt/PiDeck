@@ -174,6 +174,49 @@ PiDeck 的设置页更新走主进程的 Node `execFile` + `PiLocator` 平台适
 - **提示里的路径不脱敏**（唯一的失败输出例外）：`--prefix` 要能直接粘贴执行，脱敏后的 `<user>` 在 shell/CMD 里都不是路径；该路径是 PiDeck 自己的 userData/pi-runtime 目录，不涉及用户数据。
 - **提示与代跑同源**：命令由 `npmGlobalInstallArgs` / `bunGlobalInstallArgs` 一处生成，避免「代跑加了 flag、提示里还是旧命令」的漂移。
 
+### 7）一键安装（2026-10，环境检测弹窗重做）
+
+旧弹窗把安装拆成 Node / npm / pi 三个子按钮，叠在 4 步 stepper（安装 Pi / 确认路径 / 验证权限 / 完成）下面：
+用户既不知道该先点哪个，也看不出点完会发生什么，「验证权限」甚至在流程里并不存在。现在未安装态只有一个主动作：
+
+- **面板**：`components/overlays/EnvironmentSetupPanel.tsx`。一张主卡（Node.js / npm / Pi CLI 三行状态 + 「一键安装」+ 镜像开关），
+  下挂两个默认收起的 Collapsible——「我已经装过 Pi，但没被检测到」（`where pi` + 路径输入 + 校验）与
+  「手动安装 / 查看检测详情」（可编辑命令 + 输出 + 检测报错 + 已搜索目录 + 安装文档）。
+  已安装态仍是「检测通过」卡 + 多份安装选择（`PiCommandSourcePanel`）。stepper 与旧 `env-guide-*` / `env-install-*` 样式一并删除。
+- **编排**：`renderer/src/utils/piOneClickInstall.ts` 的 `runPiOneClickInstall()`（纯函数，可单测）：
+  检测 Node → 确认 npm → 安装 pi → 重新检测。`renderer/src/hooks/usePiEnvironmentGuide.ts` 只把结果落进 React 状态。
+- **不用内置 node/npm 的底线**：系统 Node 或已装的便携副本任一可用就跳过下载；**只有系统完全没有 Node** 才下载便携副本；
+  系统有 Node 但 npm 缺失（精简安装/损坏）时，才补装一次便携 Node 并重试 npm。主进程的搜索目录本就把系统目录排在便携目录之前。
+- **安装命令**：仍走 `pi:runtime-pi-install`（主进程收紧通道，先真全局 `npm install -g`，布局性失败才回退 `--prefix <userData>/pi-runtime/pi-global`），
+  渲染层只传 `useMirror`；面板不拼命令，手动区执行的命令也是经同一 `pi:exec-install` 通道。
+- **重新检测**：复用 `usePiUpdate.checkPiInstall("manual")`（返回 `PiInstallStatus`），由 App 注入给引导 hook——
+  装完立即重跑完整环境检测，面板据 `installed` 切到「检测通过」，不再有「装完还要自己点重新检测」这一步。
+  检测口径只有一处，避免引导页与主流程各判一次。
+- **失败文案**：`node-unsupported` / `node-prepare` / `npm-missing` / `pi-install` / `pi-undetected` 映射成可执行的一句话；
+  `pi-undetected`（装完 PATH 里仍找不到 pi）直接提示去展开「我已经装过 Pi」指定路径或看手动输出。
+- **测试**：`tests/piOneClickInstall.test.mjs`（15 例：跳过/回退/失败分支、镜像透传、已有安装、重检失败、刚装完便携 Node 仍无 npm 不重复下载）、
+  `tests/dialogLinkMode.test.mjs`（nodejs.org 外链仍强制系统浏览器）、`tests/environmentDialogScroll.test.mjs`（限高滚动不回退）。
+
+### 8）不装 pi 的替代路径：DSH 运行时 + 默认后端自动选择（2026-10）
+
+环境检测弹窗原来只讲 pi，只装 DSH 的用户会被反复提示「没有 pi」，而且 DSH 装好也不会成为新会话的默认后端。现在：
+
+- **提示**：未安装态主卡下方是 `EnvironmentSetupPanel` 的 DSH 卡（`environment.dshTitle`），按 `dshRuntimeStatusAtom.state` 分派文案：
+  未装/损坏/版本不符只给「安装/重装 DSH 运行时」，已装且不是默认后端给「改用 DSH 后端」，已装且是默认只给「管理 DSH 运行时」。
+- **跳转**：安装/修复一律 `closeEnvironmentDialog()` + `store.set(openSettingsAtom, DSH_INSTALL_SETTINGS_TARGET)`
+  （`utils/dshRuntimeHint.ts` 的 `{ tab: "common", pane: "config", backendPane: "dsh" }`）——未装时这一页就是安装引导，已装时是版本/目录/卸载管理。
+  关窗在前，避免两层弹层叠压。
+- **自动默认后端**：`resolveAutoAgentBackend({ piInstalled, dshState })`（`shared/types/dshRuntime.ts`，纯函数）只有
+  `dshState === "installed" && !piInstalled` 才回 `"dsh"`，其余（含 checking/broken/outdated）一律 `"pi"`——与
+  `resolveEffectiveAgentBackend` 的回落口径一致，避免写了 dsh 又被运行时挡回 pi 来回抖动。
+  `renderer/src/hooks/useAutoDefaultAgentBackend.ts` 在 App 里装配：`piInstalled = piStatus ? piStatus.installed : Boolean(settings.piInstall)`
+  （检测未完成时用持久化缓存顶一下，避免启动瞬间误判成「只有 DSH」）。
+- **用户可改，且改了就不再被改写**：设置项 `defaultAgentBackendManual`（缺省 false = 自动）。设置页手选后端时同时置 true；
+  环境检测里点「改用 DSH 后端」也会置 true，并把 `piEnvironmentChecked` 置 true——只装 DSH 的用户不会每次启动都被弹「没有 pi」。
+  主进程 `SettingsStore.update` 只接受布尔值，非法入参丢弃（安全阀：否则自动选择可能被锁死）。
+- **测试**：`tests/dshRuntimeStatus.test.mjs`（`resolveAutoAgentBackend` 五组：只有 dsh / 都有 / 只有 pi / 都没有 / checking·broken·outdated 不算已装）、
+  `tests/autoDefaultAgentBackend.test.mjs`（默认 manual=false、老配置兼容、manual=true 落盘保留、非布尔入参不写盘、设置页与 App 接线契约）。
+
 ## 验证
 
 ```bash

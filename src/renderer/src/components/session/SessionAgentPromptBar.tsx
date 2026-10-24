@@ -4,6 +4,7 @@ import { Bot, ChevronDown, ChevronUp } from "lucide-react";
 import { agentMarketSettingsAtom, agentProfilesAtom } from "../../atoms/agent-atoms";
 import { t } from "../../i18n";
 import { resolveBoundSessionAgent } from "../../utils/sessionAgentBinding";
+import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
 
 interface SessionAgentPromptBarProps {
 	sessionId: string;
@@ -37,12 +38,14 @@ export function SessionAgentPromptBar({ sessionId }: SessionAgentPromptBarProps)
 					{expanded ? <ChevronUp className="size-3" aria-hidden="true" /> : <ChevronDown className="size-3" aria-hidden="true" />}
 				</span>
 			</button>
-			{expanded ? (
-				<div className="border-t border-border/40 px-3 py-2">
+			{/* 折叠体走共享折叠原语（真高度渐变 + exit 后卸载 + reduced-motion 回退）；
+			    display:contents 根不生成盒子，折叠态零空档。 */}
+			<Collapsible open={expanded} className="contents">
+				<CollapsibleContent className="border-t border-border/40 px-3 py-2">
 					<p className="mb-1.5 text-micro text-text-tertiary">{t("agentPromptBar.hint")}</p>
 					<pre className="max-h-40 overflow-y-auto rounded-md bg-bg-muted/40 p-2 font-mono text-micro leading-relaxed whitespace-pre-wrap break-words text-foreground/90">{agent.systemPrompt}</pre>
-				</div>
-			) : null}
+				</CollapsibleContent>
+			</Collapsible>
 		</div>
 	);
 }

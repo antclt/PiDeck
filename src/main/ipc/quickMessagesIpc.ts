@@ -5,8 +5,9 @@
  * 数据落在独立配置文件 userData/quick-messages.json（QuickMessageStore 读写），
  * 不走 settings.json —— 用户可以直接编辑这个文件，UI 只是它的一个编辑器。
  */
-import { ipcMain, shell } from "electron";
+import { ipcMain } from "electron";
 import { ipcChannels } from "../../shared/ipc";
+import { openSystemPath } from "../fs/openPath";
 import type { QuickMessagesSaveResult } from "../../shared/types/quickMessages";
 import type { QuickMessageStore } from "../quickmessages/QuickMessageStore";
 
@@ -28,7 +29,7 @@ export function registerQuickMessagesIpc(store: QuickMessageStore, log: (scope: 
 	// 否则 shell 会因为路径不存在而报错，用户看到的却是「按钮点了没反应」。
 	ipcMain.handle(ipcChannels.quickMessagesOpenFile, async () => {
 		await store.ensureFile();
-		const error = await shell.openPath(store.resolveFilePath());
+		const error = await openSystemPath(store.resolveFilePath());
 		// Electron 用返回字符串报告打开失败；显式抛出后前端才能提示路径或系统关联问题。
 		if (error) throw new Error(error);
 	});

@@ -245,6 +245,14 @@ export const ipcChannels = {
 	agentProfilesInvokeEvent: "agent-profiles:invoke-event",
 	/** 会话 ↔ 智能体绑定（「使用」新建会话时写入；解绑传 agentId=null）。 */
 	agentProfilesBindSession: "agent-profiles:bind-session",
+	/** 拖拽排序：入参是完整 id 顺序，主进程剔除未知 id 后落盘。 */
+	agentProfilesReorder: "agent-profiles:reorder",
+	/** 收藏（整条回复 / 划选片段快照）：本地 favorites.json，不写入会话文件。 */
+	favoritesList: "favorites:list",
+	favoritesAdd: "favorites:add",
+	favoritesRemove: "favorites:remove",
+	favoritesRemoveMany: "favorites:remove-many",
+	favoritesReorder: "favorites:reorder",
 	/** 系统级划词浮窗（全局快捷键触发）：可见性/隐藏/发送回主窗口/捕获推流。 */
 	selectionToolGetState: "selection-tool:get-state",
 	selectionToolHide: "selection-tool:hide",
@@ -726,6 +734,10 @@ export const ipcChannels = {
 	configSaveRaw: "config:save-raw",
 	configExport: "config:export",
 	configImport: "config:import",
+	/** 只读扫描本机其他 agent（Claude Code/Codex/OpenCode/Gemini CLI）的供应商配置，返回掩码候选 */
+	configDiscoverExternalAgents: "config:discover-external-agents",
+	/** 外部 agent 导入确认后按 sourceId 取真实 API key（一次性响应，不落日志） */
+	configResolveExternalAgentKey: "config:resolve-external-agent-key",
 	/** 从 provider 的 baseUrl + apiKey 拉取可用模型列表 */
 	configFetchModels: "config:fetch-models",
 	/** 取内置 TokenDance 模型目录（live fetch + userData 缓存；force=true 强制刷新） */
@@ -932,6 +944,12 @@ export const ipcChannels = {
 	pickBackgroundImage: "backgrounds:pick",
 	/** 删除背景图文件 */
 	removeBackgroundImage: "backgrounds:remove",
+	/** Wallpaper Engine 视频壁纸：选择工坊目录（返回路径，空串=取消） */
+	wallpaperEnginePickDir: "wallpaper-engine:pick-dir",
+	/** 列出工坊目录下的视频壁纸（只回元数据） */
+	wallpaperEngineList: "wallpaper-engine:list",
+	/** 校验并返回选中条目（非 video/不存在返回 null） */
+	wallpaperEngineSelect: "wallpaper-engine:select",
 
 	// ===== 自定义主题（userData/custom-themes/ 目录） =====
 	/** 列出主题：内置示例 + 用户目录（含解析失败条目的 parseError） */

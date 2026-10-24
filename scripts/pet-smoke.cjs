@@ -85,6 +85,11 @@ app.whenReady().then(async () => {
 				if (id === "../v8HeapLimits") {
 					return loadPureTsModule(path.join(__dirname, "../src/main/v8HeapLimits.ts"));
 				}
+				// 渲染层噪音判定/聚合（#376 让 PetWindow 的 console-message 与主窗口共用同一口径）：
+				// 纯函数 + type-only import，无运行时依赖，同样加载真实源码而不是 stub。
+				if (id === "../../shared/rendererNoise") {
+					return loadPureTsModule(path.join(__dirname, "../src/shared/rendererNoise.ts"));
+				}
 				if (id === "../logging/sharedLogger") return { getAppLogger: () => undefined };
 				if (id === "./petSpriteProtocol") return { PET_WINDOW_PARTITION: "persist:pet" };
 				throw new Error(`pet-smoke: unexpected require(${id})`);

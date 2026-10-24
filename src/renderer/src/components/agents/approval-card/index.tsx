@@ -235,7 +235,7 @@ export function ApprovalCard({
 	};
 
 	return (
-		<div data-state={status} aria-busy={busy} className={cn("w-full overflow-hidden rounded-2xl bg-muted p-4 text-sm", className)}>
+		<div data-state={status} aria-busy={busy} className={cn("w-full overflow-hidden rounded-lg bg-muted p-4 text-sm", className)}>
 			<div className="flex items-start gap-3">
 				<span aria-hidden="true" className={cn("grid size-5 shrink-0 place-items-center text-muted-foreground", getStatusClass(status))}>
 					{busy ? <LoaderCircle className={cn("size-4", !reduce && "animate-pideck-spin")} /> : interactive ? questionMode ? <CircleHelp className="size-4" /> : <MessageSquareText className="size-4" /> : status === "rejected" ? <X className="size-4" /> : <Check className="size-4" />}

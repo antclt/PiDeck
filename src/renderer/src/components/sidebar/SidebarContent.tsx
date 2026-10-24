@@ -1,8 +1,8 @@
 import { Activity, Bolt, CirclePlus, Clock, Folder, Globe, MessageSquare, Monitor, Moon, Search, Sun } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useReducer, useState, type ReactNode } from "react";
 import type { AgentBackend, AgentTab, AppThemeMode, ArchivedDshSession, ArchivedPiSession, Project, SessionRecord, SessionSummary, WorktreeEntry } from "../../../../shared/types";
 import { AgentContextMenu, DraftSessionContextMenu, ProjectContextMenu, SessionContextMenu, SessionManagerModal, SessionSourceFilterMenu, WorktreeCreateDialog } from "./SidebarParts";
-import { sessionRecordToSummary } from "../../atoms";
+import { automationModuleHiddenAtom, sessionRecordToSummary } from "../../atoms";
 import { hasPendingUpdateAtom, pendingAppUpdateAtom, pendingCatalogUpdateAtom, pendingPiUpdateAtom, updateStatusAtom } from "../../atoms/update-atoms";
 import { useAtomValue } from "jotai";
 import { isManagerSessionSummary, worktreeFamilyProjects } from "../../sessionManagerModel";
@@ -25,10 +25,11 @@ import { UpdateDotHint } from "./UpdateDotHint";
 import { AnnouncementCenter } from "./AnnouncementCenter";
 import { AutomationDockButton } from "../automation/AutomationDockButton";
 import { AgentMarketDockButton } from "../agents/AgentMarketDockButton";
+import { FavoritesDockButton } from "./FavoritesDockButton";
 import { HostPluginDockButtons } from "../plugins/HostPluginDockButtons";
 import { MorphingSearch, type MorphingSearchItem } from "../motion/morphing-search";
 import { parseSidebarNavTab } from "../../utils/sidebarNavTab";
-import { pinyinKeys } from "../../utils/pinyinSearch";
+import { ensurePinyinTable, pinyinKeys } from "../../utils/pinyinSearch";
 import { displayProjectDirectoryName, isChatProject } from "../../rendererUtils";
 import { formatAccelerator } from "../../../../shared/shortcuts";
 import { desktopApi } from "../../desktopApi";
@@ -165,6 +166,8 @@ export function SidebarContent(props: SidebarContentProps) {
 	const hasPendingCatalogUpdate = useAtomValue(pendingCatalogUpdateAtom);
 	const hasPendingUpdate = useAtomValue(hasPendingUpdateAtom);
 	const updateStatus = useAtomValue(updateStatusAtom);
+	// 功能模块隐藏「定时任务」时，项目菜单里的入口一并收起（侧栏入口见 AutomationDockButton）
+	const automationHidden = useAtomValue(automationModuleHiddenAtom);
 	// tooltip 清单条目：按「哪一类有更新」组装，让用户不用猜圆点指的是什么。
 	const updateItems = [
 		hasPendingAppUpdate && updateStatus?.app?.latestVersion ? t("update.dotMenuApp", { version: updateStatus.app.latestVersion }) : null,
@@ -190,6 +193,22 @@ export function SidebarContent(props: SidebarContentProps) {
 	const menuAgentCanRpcLog = menuAgent !== undefined && getBoundSidebarRuntimeAgentByAgentId(controller.catalog, menuAgent.id) !== undefined;
 	// 顶部「搜索」菜单项控制 MorphingSearch 命令面板的展开状态。
 	const [searchOpen, setSearchOpen] = useState(false);
+	// 拼音字典按需装载：搜索面板打开才拉 26k 条字典 chunk（不进启动路径）。
+	// 就绪后 bump 一次渲染让 searchItems 重算出真实拼音键；未就绪期间面板退化为
+	// 子串/英文匹配，本地 chunk 毫秒级到位，体感无损。失败静默（只损失拼音通道）。
+	const [, bumpPinyinTable] = useReducer((tick: number) => tick + 1, 0);
+	useEffect(() => {
+		if (!searchOpen) return;
+		let cancelled = false;
+		ensurePinyinTable()
+			.then(() => {
+				if (!cancelled) bumpPinyinTable();
+			})
+			.catch(() => {});
+		return () => {
+			cancelled = true;
+		};
+	}, [searchOpen]);
 	// 生效快捷键绑定（用户设置可改），kbd 提示跟随真实键位；设置保存后自动刷新
 	const { bindings: shortcutBindings, platform } = useShortcutBindings();
 	const newSessionKbd = shortcutBindings ? formatAccelerator(shortcutBindings.openNewSession, platform) : "Ctrl+N";
@@ -299,14 +318,14 @@ export function SidebarContent(props: SidebarContentProps) {
             搜索 → 打开 MorphingSearch 命令面板。把搜索从整行输入框收敛成单个动作项，
             消除与下方胶囊分段的样式重复。底部细分割线与下方分组区分，避免与分段栏粘连。 */}
 				<div className={cn("flex shrink-0 flex-col gap-0.5 pt-1 pb-2", !props.simple && "border-b border-border/40")}>
-					<button type="button" className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-muted/60" aria-label={t("app.newSession")} title={t("app.newSession")} onClick={() => props.onOpenNewSession?.()}>
+					<button type="button" className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-bg-hover" aria-label={t("app.newSession")} title={t("app.newSession")} onClick={() => props.onOpenNewSession?.()}>
 						<CirclePlus className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 						<span className="min-w-0 flex-1 truncate font-medium">{t("app.newSession")}</span>
 						{/* 快捷键默认隐藏，行 hover 时才淡入（无边框，弱化到只剩文字），避免常驻视觉噪音；
                 键位跟随设置页自定义（useShortcutBindings） */}
 						<kbd className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md px-1 text-micro text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">{newSessionKbd}</kbd>
 					</button>
-					<button type="button" className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-muted/60" aria-label={t("app.searchSessions")} title={t("app.searchSessions")} onClick={() => setSearchOpen(true)}>
+					<button type="button" className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-bg-hover" aria-label={t("app.searchSessions")} title={t("app.searchSessions")} onClick={() => setSearchOpen(true)}>
 						<Search className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 						<span className="min-w-0 flex-1 truncate font-medium">{t("app.searchSessions")}</span>
 						{/* 快捷键默认隐藏，行 hover 时才淡入；键位跟随设置页自定义（useShortcutBindings） */}
@@ -316,6 +335,8 @@ export function SidebarContent(props: SidebarContentProps) {
 					<AutomationDockButton />
 					{/* 智能体入口：紧随定时任务，打开会话 Tab 栏里的「智能体」页面 */}
 					<AgentMarketDockButton />
+					{/* 收藏入口：放在智能体下面，打开会话 Tab 栏里的「收藏」页面 */}
+					<FavoritesDockButton />
 					{/* 宿主插件面板入口：与定时任务同区，无已启用面板时组件自身不渲染 */}
 					<HostPluginDockButtons projectId={props.currentProjectId} sessionId={props.currentSessionId} />
 				</div>
@@ -422,7 +443,7 @@ export function SidebarContent(props: SidebarContentProps) {
                   aria-label 保留更新文案，读屏与纯键盘用户不依赖视觉圆点。 */}
 								<Tooltip delayDuration={300}>
 									<TooltipTrigger asChild>
-										<Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={hasPendingUpdate ? t("settings.titleWithUpdate") : t("settings.title")} onClick={props.onOpenSettings}>
+										<Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-bg-hover hover:text-foreground" aria-label={hasPendingUpdate ? t("settings.titleWithUpdate") : t("settings.title")} onClick={props.onOpenSettings}>
 											<Bolt className="size-4" />
 										</Button>
 									</TooltipTrigger>
@@ -453,7 +474,7 @@ export function SidebarContent(props: SidebarContentProps) {
 							{/* 反馈入口：与设置/公告统一 styled Tooltip（原生 title 移除，防双弹）；aria-label 保留读屏契约 */}
 							<Tooltip delayDuration={300}>
 								<TooltipTrigger asChild>
-									<Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={t("feedback.title")} onClick={props.onOpenFeedback}>
+									<Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-bg-hover hover:text-foreground" aria-label={t("feedback.title")} onClick={props.onOpenFeedback}>
 										<MessageSquare className="size-4" />
 									</Button>
 								</TooltipTrigger>
@@ -466,7 +487,7 @@ export function SidebarContent(props: SidebarContentProps) {
 							{/* 主题切换：Tooltip 文案随当前模式变化（主题：X（点击切换）），与其它入口同一观感 */}
 							<Tooltip delayDuration={300}>
 								<TooltipTrigger asChild>
-									<Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={themeToggleTitle} onClick={props.onToggleTheme}>
+									<Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-bg-hover hover:text-foreground" aria-label={themeToggleTitle} onClick={props.onToggleTheme}>
 										<ThemeModeIcon className="size-4" />
 									</Button>
 								</TooltipTrigger>
@@ -556,10 +577,14 @@ export function SidebarContent(props: SidebarContentProps) {
 						actions.projects.manageResources(menuProject);
 						controller.closeMenu();
 					}}
-					onManageAutomations={() => {
-						actions.projects.manageAutomations(menuProject.id);
-						controller.closeMenu();
-					}}
+					onManageAutomations={
+						automationHidden
+							? undefined
+							: () => {
+									actions.projects.manageAutomations(menuProject.id);
+									controller.closeMenu();
+								}
+					}
 					onManageSessions={() => {
 						controller.openSessionManager(menuProject.id);
 						controller.closeMenu();

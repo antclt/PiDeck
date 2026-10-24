@@ -14,6 +14,7 @@ import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
 import type { AppSettings } from "../../../shared/types/settings";
 import type { PiCommandInvocation, PiLocator } from "../PiLocator";
+import { stripBom } from "../../config/piConfigFileStore";
 import { piRuntimeNodeExePath } from "../runtimeNodeInstall";
 
 /** pi 包的 npm 包名；用于确认「往上找到的包根」确实是 pi 而不是同名目录。 */
@@ -136,7 +137,9 @@ export function resolveManagedPiSdkEntry(commandPath: string): string | undefine
 /** 标记文件合法性：kind/schemaVersion/layout 三个字段都必须是安装器写入的值。 */
 function isManagedInstallRoot(installRoot: string): boolean {
 	try {
-		const marker = JSON.parse(readFileSync(join(installRoot, MANAGED_INSTALL_MARKER), "utf8")) as { kind?: unknown; schemaVersion?: unknown; layout?: unknown };
+		// BOM 必须先剥：Windows PowerShell 5.1 重写 managed-install.json 时会写 BOM。
+		// 裸 JSON.parse 会让官方安装被误判成非 managed，`pi-auth` / `pi-enhance` 侧车解析不到 SDK 入口。
+		const marker = JSON.parse(stripBom(readFileSync(join(installRoot, MANAGED_INSTALL_MARKER), "utf8"))) as { kind?: unknown; schemaVersion?: unknown; layout?: unknown };
 		return marker.kind === "pi-managed-install" && marker.schemaVersion === 1 && marker.layout === "releases-v1";
 	} catch {
 		// 无标记/损坏 JSON：不是 managed 安装，交给其它解析路径。

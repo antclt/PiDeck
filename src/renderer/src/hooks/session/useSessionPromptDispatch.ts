@@ -61,7 +61,7 @@ export function useSessionPromptDispatch({ store, setSessionDraft, currentSessio
 	}, [currentSessionId, store]);
 
 	const dispatchPromptSnapshot = useCallback(
-		async (sessionId: string, message: string, images?: ImageContent[], streamingBehavior?: "steer" | "followUp", agentMode: ComposerAgentMode = "normal", templateDescription?: string) => {
+		async (sessionId: string, message: string, images?: ImageContent[], streamingBehavior?: "steer" | "followUp", agentMode: ComposerAgentMode = "normal", templateDescription?: string, options?: { requireAppliedModel?: boolean }) => {
 			// 排队投递与输入框同一套规则：DSH 拒绝 agentMessage，首次目标改写成 /goal。
 			const record = store.get(sessionRecordByIdAtomFamily(sessionId));
 			const isDsh = record?.backend === "dsh";
@@ -83,6 +83,8 @@ export function useSessionPromptDispatch({ store, setSessionDraft, currentSessio
 					...(submission.agentMessage ? { agentMessage: submission.agentMessage } : {}),
 					...(templateDescription ? { description: templateDescription } : {}),
 					...(streamingBehavior ? { streamingBehavior } : {}),
+					// fork 化重发/编辑：主进程发前核对运行时模型，不一致就拒绝而不是静默换模型发送。
+					...(options?.requireAppliedModel ? { requireAppliedModel: true } : {}),
 				});
 			} catch (error) {
 				// IPC/fetch 在请求发出后断开时无法判断主进程是否已经提交给 pi；按未知处理，
@@ -110,17 +112,15 @@ export function useSessionPromptDispatch({ store, setSessionDraft, currentSessio
 			sessionId: string,
 			message: string,
 			images?: ImageContent[],
-			streamingBehavior?: "steer" | "followUp",
-			agentMode: ComposerAgentMode = "normal",
-			/** prompt 模板匹配到的 description，作为元数据发给 pi agent 标识意图 */
-			templateDescription?: string,
+			/** 仅重发/编辑使用：要求「运行时模型 == 会话选择的模型」，否则拒绝发送（issue #370）。 */
+			options?: { requireAppliedModel?: boolean },
 		) => {
 			// 非队列入口：当前选中 agent 忙碌时按「忙碌时投递行为」设置决定投递语义
 			//（pi/dsh 统一；ACP 协议无 steer，resolve 内部恒收敛为 followUp）；空闲直发（undefined）。
 			// 客户端队列 drain 直接调用 dispatchPromptSnapshot，并显式指定其投递语义。
-			const behavior = streamingBehavior ?? resolveBusySendDelivery(sessionId === currentSessionId && isAgentCurrentlyBusy(), store.get(busySendDeliveryAtom), store.get(sessionRecordByIdAtomFamily(sessionId))?.backend);
+			const behavior = resolveBusySendDelivery(sessionId === currentSessionId && isAgentCurrentlyBusy(), store.get(busySendDeliveryAtom), store.get(sessionRecordByIdAtomFamily(sessionId))?.backend);
 			try {
-				await dispatchPromptSnapshot(sessionId, message, images, behavior, agentMode, templateDescription);
+				await dispatchPromptSnapshot(sessionId, message, images, behavior, "normal", undefined, options);
 				return true;
 			} catch (error) {
 				if (error instanceof PromptDeliveryUnknownError) {

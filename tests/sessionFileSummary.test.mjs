@@ -187,9 +187,15 @@ test("TurnFileChanges: renders per run, hidden while streaming, tolerates runs w
 	// 流式中返回 null：文件列表还在长，逐条冒出来会让正文区持续抖动
 	assert.match(chip, /if \(props\.streaming\) return null;/);
 	assert.match(chip, /if \(files\.length === 0\) return null;/);
-	// 左键开文件、右键菜单给 diff（与用户确认的交互契约）
-	assert.match(chip, /onClick=\{props\.noInteract \? undefined : \(\) => props\.onOpenFile\?\.\(entry\.path\)\}/);
-	assert.match(chip, /onDiffFile\?\.\(entry\.path, entry\.originalContent, entry\.content\)/);
+	// 左键默认开 diff、右键菜单给「预览打开」（用户调整后的交互契约）：
+	// 轮末 chip 的默认意图是「这轮改了什么」，打开文件本体降到右键二级入口。
+	assert.match(chip, /const canDiff = !props\.noInteract && Boolean\(props\.onDiffFile\)/, "diff 入口按是否注入 onDiffFile 判定");
+	assert.match(chip, /onClick=\{props\.noInteract \? undefined : canDiff \? handleOpenDiff : handleOpenFile\}/, "左键主操作是 diff；缺 onDiffFile 的宿主面退回打开文件，chip 不能变成死按钮");
+	assert.match(chip, /const handleOpenDiff = \(\) => props\.onDiffFile\?\.\(entry\.path, entry\.originalContent, entry\.content\)/, "diff 入口要带本轮 diff 内容（不是重新读盘）");
+	assert.match(chip, /const handleOpenFile = \(\) => props\.onOpenFile\?\.\(entry\.path\)/, "预览入口打开文件本体");
+	// 右键菜单仍提供「预览打开」（预览 tab / 图片预览），并按可用性渲染：空菜单比没有菜单更糟
+	assert.match(chip, /\{canOpen && <ContextMenuItem onSelect=\{handleOpenFile\}>\{t\("sessionFiles\.previewFile"\)\}<\/ContextMenuItem>\}/, "右键菜单必须有「预览打开」");
+	assert.match(chip, /if \(!canDiff && !canOpen\) return chip;/, "两个入口都不可用时不套空菜单");
 	// 修改次数与增删量都要展示
 	assert.match(chip, /entry\.count > 1/);
 	assert.match(chip, /fileChangeDelta\(entry\)/);
@@ -339,5 +345,7 @@ test("chip row overflow copy exists in all three locale dictionaries", () => {
 		// +N 是数字标识，三语同一个形态；提示文案才是翻译的
 		assert.match(copy, /"sessionFiles\.moreChips": "\+\{count\}"/, `${locale} 缺 moreChips`);
 		assert.match(copy, /"sessionFiles\.moreChipsHint": /, `${locale} 缺 moreChipsHint`);
+		// chip 右键菜单的「预览打开」三语都要有（默认点击改成 diff 后，预览只剩这个入口）
+		assert.match(copy, /"sessionFiles\.previewFile": /, `${locale} 缺 previewFile`);
 	}
 });

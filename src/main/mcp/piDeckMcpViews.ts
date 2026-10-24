@@ -7,7 +7,9 @@
  *    与调用方已经算好的运行时列表。
  */
 import { basename } from "node:path";
-import type { PiDeckMcpBuiltInExtension, PiDeckMcpExtensionsView, PiDeckMcpRuntimeView, PiDeckMcpSettingsView } from "../../shared/types/piDeckMcp";
+import type { AgentProfile } from "../../shared/types/agentProfile";
+import type { AutomationRun, AutomationTaskSummary } from "../../shared/types/automation";
+import type { PiDeckMcpAgentSummary, PiDeckMcpAutomationRunSummary, PiDeckMcpAutomationTaskDetail, PiDeckMcpAutomationTaskSummary, PiDeckMcpBuiltInExtension, PiDeckMcpExtensionsView, PiDeckMcpRuntimeView, PiDeckMcpSettingsView } from "../../shared/types/piDeckMcp";
 import type { AppSettings } from "../../shared/types/settings";
 import { BUILT_IN_EXTENSIONS, INTERNAL_BUILT_IN_EXTENSIONS } from "../extensions/builtInExtensions";
 
@@ -58,6 +60,85 @@ export function buildPiDeckMcpExtensionsView(input: { settings: AppSettings; bui
 		builtIn,
 		removedBuiltInExtensions: [...input.settings.removedBuiltInExtensions],
 		disabledExtensions: input.settings.disabledExtensions.map((entry) => ({ scope: entry.scope, source: entry.source })),
+	};
+}
+
+/**
+ * 单个智能体的元信息投影。
+ *
+ * 允许清单之外的字段一律不出去，尤其 **systemPrompt**（用户自写的角色设定）：
+ * 客户端按 id 使用即可，角色设定只在主进程内解析；也不带磁盘路径或绑定表。
+ * 新增 AgentProfile 字段默认不可见。
+ */
+export function buildPiDeckMcpAgentSummary(agent: AgentProfile): PiDeckMcpAgentSummary {
+	return {
+		id: agent.id,
+		name: agent.name,
+		description: agent.description,
+		icon: agent.icon,
+		category: agent.category,
+		builtin: agent.builtin === true,
+		model: agent.model ? { provider: agent.model.provider, modelId: agent.model.modelId } : null,
+		backend: agent.backend ?? null,
+		usageCount: agent.usageCount,
+		lastUsedAt: agent.lastUsedAt ?? null,
+		createdAt: agent.createdAt,
+		updatedAt: agent.updatedAt,
+	};
+}
+
+/**
+ * 定时任务元信息投影：列表用（不含 prompt，控制响应体积）。
+ * 任务属于具体项目，授权由服务层按 projectId 先行校验；这里只做形状收敛。
+ */
+export function buildPiDeckMcpAutomationTaskSummary(task: AutomationTaskSummary): PiDeckMcpAutomationTaskSummary {
+	return {
+		id: task.id,
+		name: task.name,
+		projectId: task.projectId,
+		schedule: task.schedule.type === "cron" ? { type: "cron", expression: task.schedule.expression } : { type: "manual" },
+		enabled: task.enabled,
+		backend: task.backend ?? null,
+		model: task.model ? { provider: task.model.provider, modelId: task.model.modelId } : null,
+		thinkingLevel: task.thinkingLevel ?? null,
+		mode: task.mode ?? null,
+		permissionPreset: task.permissionPreset ?? null,
+		budget: { ...task.budget },
+		createdAt: task.createdAt,
+		updatedAt: task.updatedAt,
+		lastScheduledAt: task.lastScheduledAt ?? null,
+		nextRunAt: task.nextRunAt ?? null,
+	};
+}
+
+/** 任务详情 = 元信息 + 提示词（项目授权范围内可见）。 */
+export function buildPiDeckMcpAutomationTaskDetail(task: AutomationTaskSummary): PiDeckMcpAutomationTaskDetail {
+	return { ...buildPiDeckMcpAutomationTaskSummary(task), prompt: task.prompt };
+}
+
+/** 运行结果投影：events 明细与堆栈不进 MCP；error 截断到 2000 字符。 */
+export function buildPiDeckMcpAutomationRun(run: AutomationRun): PiDeckMcpAutomationRunSummary {
+	return {
+		id: run.id,
+		taskId: run.taskId,
+		taskName: run.taskName,
+		projectId: run.projectId,
+		trigger: run.trigger,
+		status: run.status,
+		scheduledFor: run.scheduledFor ?? null,
+		sessionId: run.sessionId ?? null,
+		queuedAt: run.queuedAt,
+		startedAt: run.startedAt ?? null,
+		endedAt: run.endedAt ?? null,
+		durationMs: run.durationMs ?? null,
+		inputTokens: run.inputTokens,
+		outputTokens: run.outputTokens,
+		costUsd: run.costUsd,
+		stepCount: run.stepCount,
+		changedFiles: run.changedFiles ?? null,
+		error: run.error ? run.error.slice(0, 2000) : null,
+		skippedReason: run.skippedReason ?? null,
+		budgetReason: run.budgetReason ?? null,
 	};
 }
 

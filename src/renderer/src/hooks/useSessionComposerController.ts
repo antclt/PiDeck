@@ -75,7 +75,7 @@ import { desktopApi } from "../desktopApi";
 import { useAskPanel } from "./useAskPanel";
 import { formatBytes } from "../../../shared/formatBytes";
 import { t } from "../i18n";
-import { COMPOSER_IMAGE_MAX_BYTES, ComposerImageError, dataUrlToFile, getClipboardImageFiles, getDroppedImageFiles, imageMimeTypeFromPath, isImageFilePath, processComposerImageFile } from "../utils/composerImages";
+import { COMPOSER_ATTACHMENT_BUDGET_BYTES, COMPOSER_IMAGE_MAX_BYTES, ComposerImageError, attachmentBytes, base64DataBytes, dataUrlToFile, getClipboardImageFiles, getDroppedImageFiles, imageMimeTypeFromPath, isImageFilePath, processComposerImageFile } from "../utils/composerImages";
 import { PASTE_TO_FILE_MIN_CHARS } from "../rendererUtils";
 import { resolveBackendSwitchDefaults } from "../utils/backendSwitchDefaults";
 import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeAcpToolPreference, readWelcomeBackendPreference, readWelcomeDshModelPreference, readWelcomeModelPreference, resolveGuidePageBackend, WELCOME_BACKEND_KEY } from "../utils/chatSessionBootstrap";
@@ -1702,13 +1702,20 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			for (const file of imageFiles) {
 				try {
 					const image = await processComposerImageFile(file);
+					// 附件预算（内存优化 2026-12）：单会话 base64 总量封顶，拒绝发生在入口并提示，
+					// 不静默截断；重发恢复/队列回填不经此处，不受影响。逐张判定：小图仍可补进。
+					const currentBytes = attachmentBytes(store.get(sessionAttachmentsBySessionIdAtomFamily(sessionId)));
+					if (currentBytes + base64DataBytes(image.data) > COMPOSER_ATTACHMENT_BUDGET_BYTES) {
+						showNotice(t("app.imageBudgetExceeded", { size: formatBytes(COMPOSER_ATTACHMENT_BUDGET_BYTES) }), 3000);
+						continue;
+					}
 					setAttachments((current) => [...current, image]);
 				} catch (error) {
 					showNotice(composerImageNotice(error), 3000);
 				}
 			}
 		},
-		[setAttachments],
+		[sessionId, setAttachments, store],
 	);
 
 	/**

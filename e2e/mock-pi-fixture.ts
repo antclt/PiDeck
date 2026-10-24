@@ -44,6 +44,17 @@ function encodeSessionDir(cwd: string): string {
 	return `--${norm.replace(/^\//, "").replace(/\//g, "-")}--`;
 }
 
+/** 测试文件可通过 test.use({ seedFavorites }) 预置收藏（写入 <userData>/favorites.json）。 */
+export type SeedFavorite = {
+	id: string;
+	text: string;
+	kind?: "message" | "selection";
+	role?: "user" | "assistant" | "system" | null;
+	createdAt?: number;
+	sessionTitle?: string | null;
+	model?: string | null;
+};
+
 /** 测试文件可通过 test.use({ seedSettings }) 追加预置设置项（合并进 settings.json） */
 export type SeedSettings = Record<string, unknown>;
 
@@ -107,6 +118,7 @@ export const test = base.extend<
 	MockPiFixture & {
 		seedProjects: SeedProject[] | undefined;
 		seedFeishuBots: SeedFeishuBot[] | undefined;
+		seedFavorites: SeedFavorite[] | undefined;
 		seedSessionFiles: SeedSessionFile[] | undefined;
 		seedSettings: SeedSettings | undefined;
 		seedImageGenConfig: SeedImageGenConfig | undefined;
@@ -118,18 +130,20 @@ export const test = base.extend<
 	seedProjects: [undefined, { option: true }],
 	e2eWindowMode: ["quiet", { option: true }],
 	seedFeishuBots: [undefined, { option: true }],
+	seedFavorites: [undefined, { option: true }],
 	seedSessionFiles: [undefined, { option: true }],
 	seedSettings: [undefined, { option: true }],
 	seedImageGenConfig: [undefined, { option: true }],
 	// Exercise real startup intents with the same isolated profile and mock RPC backend.
 	launchArgs: [[], { option: true }],
 	mockSessionInProject: [false, { option: true }],
-	app: async ({ seedProjects, seedFeishuBots, seedSessionFiles, seedSettings, seedImageGenConfig, launchArgs, mockSessionInProject, e2eWindowMode }, use) => {
+	app: async ({ seedProjects, seedFeishuBots, seedFavorites, seedSessionFiles, seedSettings, seedImageGenConfig, launchArgs, mockSessionInProject, e2eWindowMode }, use) => {
 		// 先归一化（元组陷阱见 normalizeSeeds 注释）：非法值在启动 Electron 之前就报错，
 		// 避免用例因「种子项目凭空消失」在后面超时。
 		const projects = normalizeSeeds("seedProjects", seedProjects, "项目需含 id / name / path（用 makeSeedProject 生成）。");
 		const feishuBots = normalizeSeeds("seedFeishuBots", seedFeishuBots, "Bot 需含 id / name / appId。");
 		const sessionFiles = normalizeSeeds("seedSessionFiles", seedSessionFiles, "会话文件需含 projectPath / entries。");
+		const favorites = normalizeSeeds("seedFavorites", seedFavorites, "收藏需含 id / text。");
 		const userDataRoot = mkdtempSync(join(tmpdir(), "pideck-mockpi-"));
 		try {
 			// Windows 桌面端通过 cmd shim 调起自定义 pi（见 PiLocator.createInvocation），
@@ -157,6 +171,8 @@ export const test = base.extend<
 				JSON.stringify({
 					customPiPath: shimPath,
 					piEnvironmentChecked: true,
+					// 与 fixtures.ts 同一理由：缺省 system 会跟宿主语系变，中文文案断言在 en-US runner 必堵。
+					language: "zh-CN",
 					enableGitManagement: true,
 					dshHomeDir: join(userDataRoot, "dsh-home"),
 					...(seedSettings ?? {}),
@@ -179,6 +195,29 @@ export const test = base.extend<
 					),
 				);
 			}
+			// 可选：预置收藏（FavoritesStore 读 <userData>/favorites.json；数组顺序即展示顺序）。
+			if (favorites.length > 0) {
+				writeFileSync(
+					join(userDataRoot, "profile", "favorites.json"),
+					JSON.stringify({
+						version: 1,
+						entries: favorites.map((favorite, index) => ({
+							kind: "message",
+							role: "assistant",
+							createdAt: Date.now() - index * 60_000,
+							sessionTitle: null,
+							model: null,
+							sessionId: null,
+							projectId: null,
+							messageId: null,
+							partial: false,
+							truncated: false,
+							...favorite,
+						})),
+					}),
+				);
+			}
+
 			// 可选：预置飞书 Bot 配置（FeishuConfig 读 userData/pi-desktop/feishu.json）。
 			// appSecret 用 base64（encryptSecret 的简化格式），空串即可——e2e 不真连飞书。
 			if (feishuBots.length > 0) {

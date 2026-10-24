@@ -12,15 +12,24 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
-import type { ChatMessage } from "../../../shared/types";
+import type { ChatMessage, FavoriteRole } from "../../../shared/types";
+import { useFavorites } from "./useFavorites";
 import { t } from "../i18n";
 import { writeClipboard } from "../utils/clipboard";
 import { showNotice } from "../utils/notice";
 import { stripMarkdown } from "../components/session/SurfaceParts";
+import { favoriteMessageKey } from "../components/favorites/favoriteIdentity";
 import { CONTEXT_MENU_IGNORE_SELECTOR, LIVE_ANSWER_SELECTOR, MESSAGE_BODY_SELECTOR, cleanMessageCopyText, hasMessageContextMenuCopy, isPointInsideRects, planMessageContextMenu, type MessageContextMenuCopyKind } from "../components/session/timeline/messageContextMenuPolicy";
 
 // 复制来源类型与「一次只给一组复制项」的纯策略同源（单个真相源在 policy，避免类型与菜单项漂移）
 export type { MessageContextMenuCopyKind } from "../components/session/timeline/messageContextMenuPolicy";
+
+export type MessageFavoriteContext = {
+	/** 来源会话（收藏快照的元信息；会话标题用于收藏列表展示）。 */
+	sessionId: string | null;
+	sessionTitle: string | null;
+	projectId: string | null;
+};
 
 export type MessageContextMenuState = {
 	/** 右键坐标（视口坐标，供 fixed 定位的虚拟 Trigger 使用）。 */
@@ -34,6 +43,14 @@ export type MessageContextMenuState = {
 	liveText: string;
 	/** 命中可全选的正文宿主（live 正文 / markdown 正文 / 气泡 / 消息块锚点）。 */
 	canSelectAll: boolean;
+	/** 收藏用的来源消息元信息（命中消息才有 id/角色；live 正文没有 id）。 */
+	messageId: string | null;
+	messageRole: FavoriteRole | null;
+	messageModel: string | null;
+	/** 右键落在 live 流式正文内：收藏的是屏幕纯文本，需标记 partial。 */
+	partial: boolean;
+	/** 命中的整条消息是否已在收藏里：菜单项据此显示「收藏」还是「取消收藏」。 */
+	messageFavorited: boolean;
 };
 
 export type MessageContextMenuController = {
@@ -43,6 +60,8 @@ export type MessageContextMenuController = {
 	close: () => void;
 	copy: (kind: MessageContextMenuCopyKind) => void;
 	selectAll: () => void;
+	/** 收藏当前选区 / 命中的整条消息（消息快照走 Markdown 源码，live 正文按纯文本 + partial）。 */
+	favorite: (kind: "message" | "selection") => void;
 };
 
 /** 当前实时选区文本（折叠 / 无选区返回空串）。 */
@@ -79,8 +98,9 @@ function readSelectionSnapshotAtPointerDown(event: PointerEvent): string {
 	return selection.toString();
 }
 
-export function useMessageContextMenu(options: { messages: readonly ChatMessage[]; scopeKey: string }): MessageContextMenuController {
+export function useMessageContextMenu(options: { messages: readonly ChatMessage[]; scopeKey: string; favoriteContext?: MessageFavoriteContext; favoritedMessageKeys?: ReadonlySet<string> }): MessageContextMenuController {
 	const { messages, scopeKey } = options;
+	const { addFavorite, toggleMessageFavorite } = useFavorites();
 	const [state, setState] = useState<MessageContextMenuState | null>(null);
 	/** 右键按下时锁存的选区文本（见 readSelectionSnapshotAtPointerDown）。 */
 	const selectionSnapshotRef = useRef("");
@@ -145,9 +165,16 @@ export function useMessageContextMenu(options: { messages: readonly ChatMessage[
 				messageText: plan.messageText,
 				liveText: plan.liveText,
 				canSelectAll: Boolean(selectAllTargetRef.current),
+				messageId: message?.id ?? null,
+				// ChatRole 还含 error / toolResult 等非对话角色：收藏只认三种可读角色。
+				messageRole: message?.role === "user" || message?.role === "assistant" || message?.role === "system" ? message.role : null,
+				messageModel: message?.model ? `${message.model.provider}/${message.model.modelId}` : null,
+				partial: Boolean(liveHost),
+				// 已收藏态：只要这条消息（同会话 + messageId）在收藏表里，菜单就提供「取消收藏」。
+				messageFavorited: Boolean(message && options.favoritedMessageKeys?.has(favoriteMessageKey(options.favoriteContext?.sessionId ?? null, message.id) ?? "")),
 			});
 		},
-		[messages],
+		[messages, options.favoriteContext?.sessionId, options.favoritedMessageKeys],
 	);
 
 	/** 写剪贴板并给统一反馈：失败绝不报「已复制」（与 CopyMenu 同口径）。 */
@@ -191,5 +218,33 @@ export function useMessageContextMenu(options: { messages: readonly ChatMessage[
 		selection.addRange(range);
 	}, []);
 
-	return { state, handleContextMenu, close, copy, selectAll };
+	/**
+	 * 收藏：与复制共用同一份快照来源，但保留 Markdown 语法（复制为文本才 stripMarkdown）。
+	 * - 选区：纯文本快照；
+	 * - 命中消息：清理展示噪音后的 Markdown 源码；
+	 * - live 正文：只有屏幕纯文本（没有 markdown / messageId），标 partial。
+	 * 命中真实消息时是开关语义：已收藏就取消（同一条消息不会越点越多）。
+	 */
+	const favorite = useCallback(
+		(kind: "message" | "selection") => {
+			const current = stateRef.current;
+			if (!current) return;
+			const context = options.favoriteContext ?? { sessionId: null, sessionTitle: null, projectId: null };
+			const base = { sessionId: context.sessionId, sessionTitle: context.sessionTitle, projectId: context.projectId };
+			if (kind === "selection") {
+				if (!current.selectionText) return;
+				void addFavorite({ kind: "selection", text: current.selectionText, role: null, messageId: current.messageId, model: current.messageModel, ...base });
+				return;
+			}
+			const text = current.messageText ? cleanMessageCopyText(current.messageText) : current.liveText;
+			if (!text) return;
+			const input = { kind: "message" as const, text, role: current.messageText ? current.messageRole : "assistant", messageId: current.messageId, model: current.messageText ? current.messageModel : null, partial: current.partial, ...base };
+			// 真实消息（有 messageId）走开关；live 正文没有稳定身份，只能新增。
+			if (current.messageId) void toggleMessageFavorite(input);
+			else void addFavorite(input);
+		},
+		[addFavorite, options.favoriteContext, toggleMessageFavorite],
+	);
+
+	return { state, handleContextMenu, close, copy, selectAll, favorite };
 }

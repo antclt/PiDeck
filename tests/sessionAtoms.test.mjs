@@ -50,6 +50,9 @@ function loadAtoms() {
 	// session-atoms ⇄ composer-atoms 是模块级循环：双方都只在惰性 action 体内用对方导出。
 	// 先给 session-atoms 一个可后填的桥对象，两模块都编译完后再回填真实导出。
 	const composerExports = {};
+	// 会话级 atomFamily 释放登记表（2027-02）：两个 atoms 模块都 import 它，
+	// 手写映射必须显式提供，否则 require 会以 tests/ 为基准解析失败。
+	const familyRegistry = compileModule("src/renderer/src/atoms/session-family-registry.ts");
 	const sessions = compileModule("src/renderer/src/atoms/session-atoms.ts", {
 		"./recent-session-atoms": compileModule("src/renderer/src/atoms/recent-session-atoms.ts"),
 		"./composer-atoms": composerExports,
@@ -60,9 +63,11 @@ function loadAtoms() {
 		"./outlineProjectionCache": outlineProjectionCache,
 		"./sessionActivityAtoms": sessionActivityAtoms,
 		"../utils/sessionActivityClock": sessionActivityClock,
+		"./session-family-registry": familyRegistry,
 	});
 	const composer = compileModule("src/renderer/src/atoms/composer-atoms.ts", {
 		"./session-atoms": sessions,
+		"./session-family-registry": familyRegistry,
 	});
 	Object.assign(composerExports, composer);
 	return { ...sessions, ...composer, outlineProjectionCache, ...sessionActivityAtoms };
@@ -211,6 +216,64 @@ test("message cache eviction releases the matching outline projection", () => {
 	}
 
 	assert.equal(atoms.outlineProjectionCache.getSessionOutlineProjection("session-a", first.outlineRevision), undefined);
+});
+
+test("estimateSessionCacheEntryBytes counts text, thinking, image base64 and history (utf-16 doubling)", () => {
+	const atoms = loadAtoms();
+	const message = (text, extras = {}) => ({ id: "m", agentId: "agent", role: "assistant", text, timestamp: 1, ...extras });
+	const base = [message("ab")];
+	// UTF-16 口径：字符数 × 2 + 每条固定开销 256（128 字符 × 2）
+	assert.equal(atoms.estimateSessionCacheEntryBytes(base), (128 + 2) * 2);
+	// thinking 与 images.data 都计入；图片 ref 形态按常量 64 字符计
+	const withExtras = [message("ab", { thinking: "cd" }), message("e", { images: [{ type: "image", data: "Zm9v" }, { type: "image" }] })];
+	assert.equal(atoms.estimateSessionCacheEntryBytes(withExtras), (128 + 2 + 2 + (128 + 1 + 4 + 64)) * 2);
+	// history 前缀并入估算
+	assert.equal(atoms.estimateSessionCacheEntryBytes(base, [message("xyz")]), (128 + 2 + (128 + 3)) * 2);
+});
+
+test("selectByteBudgetEvictions evicts oldest closed entries first and never touches open tabs", () => {
+	const atoms = loadAtoms();
+	const bytes = new Map([
+		["open-big", 90],
+		["closed-new", 40],
+		["closed-old", 40],
+	]);
+	const opened = new Set(["open-big"]);
+	// 布局 [...open, ...closed 新→旧]：尾部是 closed-old，预算 60 时先淘汰它
+	// （vm realm 数组与字面量数组原型不同，先展开为本 realm 数组再比）
+	const first = atoms.selectByteBudgetEvictions(["open-big", "closed-new", "closed-old"], bytes, opened, 60);
+	assert.deepEqual([...first.retained], ["open-big", "closed-new"]);
+	assert.deepEqual([...first.evicted], ["closed-old"]);
+	// 关闭条目合计 ≤ 预算：原样返回（内容一致即可）
+	const within = atoms.selectByteBudgetEvictions(["open-big", "closed-new"], bytes, opened, 60);
+	assert.deepEqual([...within.retained], ["open-big", "closed-new"]);
+	assert.deepEqual([...within.evicted], []);
+	// 打开中的条目无论多大都不淘汰（无条件保护语义），哪怕预算已被它单独击穿
+	const openOnly = atoms.selectByteBudgetEvictions(["open-big"], bytes, opened, 10);
+	assert.deepEqual([...openOnly.retained], ["open-big"]);
+	assert.deepEqual([...openOnly.evicted], []);
+});
+
+test("closed-tab cache entries over the byte budget are evicted oldest-first; open tabs survive", () => {
+	const atoms = loadAtoms();
+	const store = createStore();
+	// 单条 32Mi 字符文本 ≈ 估算 64MiB+256B，两条即击穿 64MiB 关闭条目预算
+	const bigText = "x".repeat(32 * 1024 * 1024);
+	store.set(atoms.cacheSessionMessagesAtom, {
+		sessionId: "session-closed",
+		messages: [chatMessage("m1", "assistant", bigText)],
+		source: "runtime",
+	});
+	store.set(atoms.sessionTabIdsAtom, ["session-open"]);
+	store.set(atoms.cacheSessionMessagesAtom, {
+		sessionId: "session-open",
+		messages: [chatMessage("m2", "assistant", bigText)],
+		source: "runtime",
+	});
+	const cache = store.get(atoms.sessionMessagesCacheAtom);
+	assert.equal(cache["session-closed"], undefined, "超预算的已关闭条目按最旧先淘汰");
+	assert.ok(cache["session-open"], "打开中的条目不受字节预算影响");
+	assert.ok(cache["session-open"].bytes > 64 * 1024 * 1024, "写入条目随重建刷新字节估算");
 });
 test("does not let a stale disk write clobber a live runtime cache", () => {
 	// A runtime→disk overwrite with fewer messages than currently cached is
@@ -1121,6 +1184,136 @@ test("slideOut-only history keeps an entryId cursor so older pages stay reachabl
 	assert.deepEqual([...entry().history.messages.map((m) => m.meta.entryId)], ["e1", "e2", "e3", "e4"]);
 	assert.equal(entry().history.nextBefore, 0);
 	assert.equal(entry().history.nextBeforeEntryId, "e1");
+});
+
+test("prependSessionHistoryPageAtom caps runtime history prefix and advances cursor", () => {
+	const atoms = loadAtoms();
+	const store = createStore();
+	const entry = () => store.get(atoms.sessionMessagesCacheAtom)["session-a"];
+	const LIMIT = atoms.RUNTIME_HISTORY_PREFIX_MESSAGE_LIMIT;
+	const makeMessages = (count, tag, start) =>
+		Array.from({ length: count }, (_, i) => ({
+			id: `${tag}-${start + i}`,
+			role: "user",
+			text: `${tag}${start + i}`,
+			meta: { entryId: `${tag}${start + i}` },
+		}));
+
+	// runtime 条目：历史前缀差 1 条到上限（游标 = 保留段最旧文件下标）
+	store.set(atoms.cacheSessionMessagesAtom, {
+		sessionId: "session-a",
+		messages: [{ id: "w1", role: "user", text: "win", meta: { entryId: "we1" } }],
+		source: "runtime",
+		windowStart: LIMIT,
+		history: { messages: makeMessages(LIMIT - 1, "e", 0), nextBefore: 1, nextBeforeEntryId: "e0", version: "100:2000" },
+	});
+	assert.equal(entry().history.messages.length, LIMIT - 1);
+
+	// prepend 3 条更早页 → 溢出 2 → 只丢新页头部 2 条；游标 = 页最旧下标(-2) + 丢弃数(2) = 0，
+	// 锚点重算到保留段最旧条目 h-1
+	assert.equal(
+		store.set(atoms.prependSessionHistoryPageAtom, {
+			sessionId: "session-a",
+			expectedRevision: entry().revision,
+			before: 1,
+			page: {
+				messages: makeMessages(3, "h", -3),
+				total: LIMIT + 5,
+				nextBefore: -2,
+				nextBeforeEntryId: "h-3",
+				indexVersion: "100:2000",
+			},
+		}),
+		true,
+	);
+	assert.equal(entry().history.messages.length, LIMIT, "裁剪后不超过上限");
+	assert.equal(entry().history.messages[0].meta.entryId, "h-1", "新页头部两条被丢弃，第三条保留");
+	assert.equal(entry().history.nextBefore, -2 + 2, "部分丢弃：游标 = 页最旧下标 + 丢弃数");
+	assert.equal(entry().history.nextBeforeEntryId, "h-1", "锚点重算到保留段最旧条目");
+	assert.equal(entry().messages[0].id, "w1", "运行时窗口段不受影响");
+
+	// 整页丢弃：再 prepend 2 条更早页 → 溢出恰好等于整页，游标回退到请求游标，
+	// 下次重取同页（与 disk 路径同语义），锚点回到保留段头部
+	assert.equal(
+		store.set(atoms.prependSessionHistoryPageAtom, {
+			sessionId: "session-a",
+			expectedRevision: entry().revision,
+			before: 0,
+			page: {
+				messages: makeMessages(2, "g", -2),
+				total: LIMIT + 5,
+				nextBefore: -2,
+				nextBeforeEntryId: "g-2",
+				indexVersion: "100:2000",
+			},
+		}),
+		true,
+	);
+	assert.equal(entry().history.messages.length, LIMIT);
+	assert.equal(entry().history.nextBefore, 0, "整页丢弃：游标回到请求游标");
+	assert.equal(entry().history.messages[0].meta.entryId, "h-1", "新页整体丢弃，原前缀原样保留");
+	assert.equal(entry().history.nextBeforeEntryId, "h-1");
+});
+
+test("slideOut reconcile caps history prefix growth and advances cursor", () => {
+	const atoms = loadAtoms();
+	const store = createStore();
+	const entry = () => store.get(atoms.sessionMessagesCacheAtom)["session-a"];
+	const emit = (payload) =>
+		store.set(atoms.applySessionRuntimeEventAtom, {
+			sessionId: "session-a",
+			agentId: "agent-a",
+			runtimeGeneration: 1,
+			sourceChannel: "agents:message",
+			payload,
+		});
+	const LIMIT = atoms.RUNTIME_HISTORY_PREFIX_MESSAGE_LIMIT;
+	const makeMessages = (count, tag, start) =>
+		Array.from({ length: count }, (_, i) => ({
+			id: `${tag}-${start + i}`,
+			role: "user",
+			text: `${tag}${start + i}`,
+			meta: { entryId: `${tag}${start + i}` },
+		}));
+
+	// runtime 条目：前缀已到上限，游标 = 0（保留段最旧文件下标）
+	store.set(atoms.cacheSessionMessagesAtom, {
+		sessionId: "session-a",
+		messages: [{ id: "w1", role: "user", text: "win", meta: { entryId: "we1" } }],
+		source: "runtime",
+		windowStart: LIMIT,
+		history: { messages: makeMessages(LIMIT, "e", 0), nextBefore: 0, nextBeforeEntryId: "e0", version: "100:2000" },
+	});
+
+	// 窗口右移：slideOut 2 条滑入前缀尾部 → 前缀 LIMIT+2 → 超限 2 条从最旧端丢弃，
+	// 数值游标推进 0→2，锚点重算到新头部 e2
+	emit({
+		agentId: "agent-a",
+		windowStart: LIMIT + 3,
+		totalLength: LIMIT + 4,
+		fileVersion: "100:2000",
+		slideOut: [
+			{ id: "s1", role: "user", text: "sl1", meta: { entryId: "sl1" } },
+			{ id: "s2", role: "user", text: "sl2", meta: { entryId: "sl2" } },
+		],
+		messages: [
+			{ id: "w2", role: "user", text: "win2", meta: { entryId: "we2" } },
+			{ id: "w3", role: "user", text: "win3", meta: { entryId: "we3" } },
+		],
+	});
+	assert.equal(entry().history.messages.length, LIMIT, "slideOut 合入后仍不超过上限");
+	assert.equal(entry().history.messages[0].meta.entryId, "e2", "最旧两条溢出被丢弃");
+	assert.deepEqual(
+		[
+			...entry()
+				.history.messages.slice(-2)
+				.map((m) => m.meta.entryId),
+		],
+		["sl1", "sl2"],
+		"滑出轮接在保留段尾部",
+	);
+	assert.equal(entry().history.nextBefore, 2, "数值游标按丢弃量推进");
+	assert.equal(entry().history.nextBeforeEntryId, "e2", "锚点重算到保留段新头部");
 });
 
 test("prependSessionHistoryPageAtom guards revision and cursor continuity, dedupes against segment", () => {

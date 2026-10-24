@@ -368,6 +368,16 @@ test("parseMcpConfigFile rejects non-object mcpServers and keeps unknown top-lev
 	assert.equal(ok.file.futureKey, 1);
 });
 
+test("parseMcpConfigFile 容忍 UTF-8 BOM（Windows PowerShell 5.1 写出的 mcp.json）", () => {
+	// pi 1.4.0 起自己的 mcp.json 读取走 stripBom（#11191）。两边口径必须一致：
+	// 同一份带 BOM 的文件，pi 能加载而 PiDeck 报「配置损坏」会把用户卡死在保存/导入之前。
+	const raw = `\uFEFF${JSON.stringify({ mcpServers: { a: { command: "npx" } }, futureKey: 1 }, null, 2)}`;
+	const parsed = parseMcpConfigFile(raw);
+	assert.equal(parsed.error, undefined, `带 BOM 的 mcp.json 不应报解析错误：${parsed.error}`);
+	assert.equal(parsed.file.mcpServers.a.command, "npx");
+	assert.equal(parsed.file.futureKey, 1);
+});
+
 test("validateMcpConfigFile checks autoEnableCodemode, transport rules and namespace clashes", () => {
 	assert.match(validateMcpConfigFile({ autoEnableCodemode: "yes" }), /autoEnableCodemode/);
 	// pi 原生按有效分支判定：type 省略且同时有 command/url 时 url 分支优先（已验证）

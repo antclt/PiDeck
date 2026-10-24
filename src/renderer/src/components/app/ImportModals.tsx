@@ -6,6 +6,7 @@ import { Check, FolderOpen, RefreshCw, UploadCloud } from "lucide-react";
 import { t } from "../../i18n";
 import type { TranslationKey } from "../../i18n";
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
+import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
 import type {
 	CodexSessionSummary,
 	CodexImportReport,
@@ -248,7 +249,13 @@ export function CodexImportModal(props: {
 												{expanded ? t("codex.hideSubagents", { count: children.length }) : t("codex.showSubagents", { count: children.length })}
 											</Button>
 										)}
-										{expanded && children.length > 0 && <div className="codex-subagent-list">{children.map((child) => renderRow(child, "codex-session-row codex-subagent-row"))}</div>}
+										{/* 子代理分组开合走共享折叠原语（真高度渐变 + exit 后卸载 + reduced-motion 回退）；
+										    display:contents 根不生成盒子，折叠态零空档。 */}
+										<Collapsible open={expanded && children.length > 0} className="contents">
+											<CollapsibleContent>
+												<div className="codex-subagent-list">{children.map((child) => renderRow(child, "codex-session-row codex-subagent-row"))}</div>
+											</CollapsibleContent>
+										</Collapsible>
 									</div>
 								);
 							})}
@@ -257,12 +264,15 @@ export function CodexImportModal(props: {
 									<Button type="button" variant="ghost" size="sm" className="codex-subagent-toggle h-auto px-1.5 text-xs codex-orphan-subagents-title" onClick={() => setShowOrphanSubagents((current) => !current)}>
 										{t("codex.orphanSubagents", { count: grouped.orphanSubagents.length })}
 									</Button>
-									{showOrphanSubagents && (
-										<div className="codex-subagent-list">
-											{orphanWindow.visible.map((session) => renderRow(session, "codex-session-row codex-subagent-row"))}
-											<ImportListWindowFooter sentinelRef={orphanWindow.sentinelRef} visibleCount={orphanWindow.visibleCount} totalCount={orphanWindow.totalCount} hasMore={orphanWindow.hasMore} onLoadMore={orphanWindow.loadMore} />
-										</div>
-									)}
+									{/* 孤儿子代理开合走共享折叠原语；display:contents 根不生成盒子。 */}
+									<Collapsible open={showOrphanSubagents} className="contents">
+										<CollapsibleContent>
+											<div className="codex-subagent-list">
+												{orphanWindow.visible.map((session) => renderRow(session, "codex-session-row codex-subagent-row"))}
+												<ImportListWindowFooter sentinelRef={orphanWindow.sentinelRef} visibleCount={orphanWindow.visibleCount} totalCount={orphanWindow.totalCount} hasMore={orphanWindow.hasMore} onLoadMore={orphanWindow.loadMore} />
+											</div>
+										</CollapsibleContent>
+									</Collapsible>
 								</div>
 							)}
 							<ImportListWindowFooter sentinelRef={parentWindow.sentinelRef} visibleCount={parentWindow.visibleCount} totalCount={parentWindow.totalCount} hasMore={parentWindow.hasMore} onLoadMore={parentWindow.loadMore} />

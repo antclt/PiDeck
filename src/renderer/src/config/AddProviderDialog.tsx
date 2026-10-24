@@ -448,7 +448,7 @@ export function AddProviderDialog(props: {
 							<Input
 								value={name}
 								aria-label={t("config.addProviderName")}
-								className="h-8 min-w-0 rounded-sm border border-border-subtle bg-bg-panel px-3 font-mono text-control text-text-primary outline-none transition-[border-color,box-shadow,background-color] duration-150 focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
+								className="h-8 min-w-0 rounded-sm border border-border-subtle bg-bg-panel px-3 font-mono text-control text-text-primary outline-none transition-[border-color,box-shadow,background-color] duration-fast focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
 								placeholder={t("config.providerNamePlaceholder")}
 								autoFocus
 								onChange={(e) => setName(e.target.value)}

@@ -266,6 +266,35 @@ test("checkNow records a no-update result, Pi result, and lastCheckAt", async (t
 	assert.equal(settings.get().updateLastCheckAt, snapshot.lastCheckAt);
 });
 
+test("applyPiCheckResult refreshes the pi node of the snapshot after an in-app pi upgrade", async (t) => {
+	// 回归：应用内「更新 pi」只跑设置页自己的检查（api.pi.checkUpdate），后台快照不知道
+	// 新版本已装好——侧栏设置按钮圆点会一直停在「pi 有新版本」，直到下一轮 2h 定时检查
+	// （实测：1.4.0 已装好、设置页显示无更新，圆点仍在）。
+	const updater = createFakeUpdater();
+	updater.checkImpl = async () => {
+		updater.emitChecking();
+		updater.emitNotAvailable();
+	};
+	const piCheck = async () => ({ currentVersion: "1.3.0", latestVersion: "1.4.0", hasUpdate: true });
+	const { service, snapshots } = createAutomaticService({ updater, checkPiUpdate: piCheck });
+	stopAfter(t, service);
+
+	await service.checkNow();
+	assert.equal(service.getSnapshot().piCli.hasUpdate, true);
+	assert.equal(service.getSnapshot().piCli.currentVersion, "1.3.0");
+
+	// 设置页刚跑过一轮真检查（升级后）：快照必须同刻跟上，不能等定时器。
+	const pushesBefore = snapshots.length;
+	service.applyPiCheckResult({ currentVersion: "1.4.0", latestVersion: "1.4.0", hasUpdate: false });
+	assert.ok(snapshots.length > pushesBefore, "applyPiCheckResult must push the new snapshot to the renderer");
+	const snapshot = snapshots.at(-1);
+	assert.equal(snapshot.piCli.currentVersion, "1.4.0");
+	assert.equal(snapshot.piCli.latestVersion, "1.4.0");
+	assert.equal(snapshot.piCli.hasUpdate, false);
+	// 快照里的已提示版本仍来自设置（不因同步结果被清掉）
+	assert.equal(snapshot.piCli.notifiedVersion, undefined);
+});
+
 test("direct updater rejection becomes a visible error state", async (t) => {
 	const updater = createFakeUpdater();
 	updater.checkImpl = async () => {
@@ -481,23 +510,61 @@ test("catalog auto update does not run when the check found nothing newer", asyn
 	assert.equal(calls, 0);
 });
 
-test("catalog auto update keeps the pending state when the updater reports no change", async (t) => {
+test("catalog auto update re-derives the pending state when nothing could be written", async (t) => {
 	const updater = createFakeUpdater();
 	updater.checkImpl = async () => {
 		updater.emitChecking();
 		updater.emitNotAvailable();
 	};
+	// 第一轮检查说「有 1.2.0」，更新却写不进去（分支件与本地同版 / 另一实例已更新）→
+	// 第二轮检查（自动重取）看到实际已是最新。
+	let checks = 0;
 	const { service, snapshots, logs } = createAutomaticService({
 		updater,
-		checkCatalogUpdate: detectedCatalogCheck(),
-		// 远端不高于当前生效版本（例如另一实例刚更新过）：没实际落盘就不能标记为已处理
-		updateCatalog: async () => ({ ok: true, updated: false }),
+		checkCatalogUpdate: async () => {
+			checks += 1;
+			return checks === 1 ? { ok: true, remoteVersion: "1.2.0", localVersion: "1.0.4", hasUpdate: true } : { ok: true, remoteVersion: "1.2.0", localVersion: "1.2.0", hasUpdate: false };
+		},
+		// 远端不高于当前生效版本（例如另一实例刚更新过）：没实际落盘
+		updateCatalog: async () => ({ ok: true, updated: false, skipped: "already-latest", remoteVersion: "1.2.0", localVersion: "1.2.0" }),
 	});
 	stopAfter(t, service);
 
 	await service.checkNow();
-	assert.equal(snapshots.at(-1).catalog.hasUpdate, true);
+	// 提示必须能被兑现或消失：否则就是用户报的「老提示有更新、点更新又说已是最新」
+	assert.equal(checks, 2);
+	assert.equal(snapshots.at(-1).catalog.hasUpdate, false);
 	assert.ok(logs.some(({ level, message }) => level === "info" && message.includes("no newer catalog")));
+});
+
+test("refreshCatalogSnapshot re-checks and pushes the new conclusion", async (t) => {
+	const updater = createFakeUpdater();
+	updater.checkImpl = async () => {
+		updater.emitChecking();
+		updater.emitNotAvailable();
+	};
+	// 设置页手动更新成功：目录已落地，下一次检查必然不再有更新。
+	const { service, snapshots, logs } = createAutomaticService({
+		updater,
+		checkCatalogUpdate: async () => ({ ok: true, remoteVersion: "1.2.0", localVersion: "1.2.0", hasUpdate: false }),
+		updateCatalog: async () => ({ ok: true, updated: false }),
+	});
+	stopAfter(t, service);
+
+	await service.refreshCatalogSnapshot();
+	// 手动路径不经过 checkNow，不回写快照的话提示与侧栏红点会留到下一轮（默认 2h）
+	assert.equal(snapshots.at(-1).catalog.hasUpdate, false);
+	assert.equal(snapshots.at(-1).catalog.latestVersion, "1.2.0");
+	assert.equal(logs.length, 0);
+});
+
+test("refreshCatalogSnapshot without an injected checker stays silent", async (t) => {
+	const updater = createFakeUpdater();
+	const { service, snapshots } = createAutomaticService({ updater });
+	stopAfter(t, service);
+
+	await service.refreshCatalogSnapshot();
+	assert.equal(snapshots.length, 0);
 });
 
 test("catalog auto update failure is logged and leaves the manual entry usable", async (t) => {

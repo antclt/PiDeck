@@ -144,3 +144,64 @@ export function groupTimelineEntries(messages: UIMessage[], options: { isStreami
 	flush(!isStreaming);
 	return entries;
 }
+
+/* ── 回合前缀缓存（2027-02 性能治理，WebTimeline 流式分组只用尾部） ──────────────
+ *
+ * 背景：useChat 在流式期间每个 delta 重建整个 messages 数组，groupTimelineEntries
+ * 全量重跑会铸造全新 turn 对象，memo(WebAssistantTurn) 对所有历史回合失效——
+ * 长会话打字机期每帧 O(全部消息) 分组 + O(全部回合) 重渲染。消息数组的前缀部分
+ * 引用稳定（AI SDK 只重建流式尾消息），已完成回合的分组结果可以按引用判据复用。
+ *
+ * 边界安全性：缓存前缀必须结束在「回合边界」——即下一条消息是 user（或数组
+ * 末尾）。流式期边界取最后一条 user 消息下标（当前回合起点），收流后取全量。
+ */
+
+/** 前缀缓存：覆盖 messages[0..consumed) 的分组条目（consumed 落在回合边界上）。 */
+export type TurnPrefixCache = { messages: UIMessage[]; entries: TimelineEntry[]; consumed: number };
+
+/**
+ * 校验缓存前缀在当前 messages 上仍逐引用稳定（编辑/删除/重排会让引用变化）。
+ * 稳定返回缓存条目与消费数；失稳返回 null（调用方整段重算，行为退回全量分组）。
+ */
+export function validTurnPrefix(cache: TurnPrefixCache, messages: UIMessage[]): { entries: TimelineEntry[]; consumed: number } | null {
+	const limit = Math.min(messages.length, cache.messages.length, cache.consumed);
+	for (let index = 0; index < limit; index += 1) {
+		if (messages[index] !== cache.messages[index]) return null;
+	}
+	// messages 比缓存短（删除尾部）或前缀失稳都被上面的循环覆盖；
+	// 消费数超出当前长度（不可能稳定）同样判失稳。
+	if (cache.consumed > messages.length) return null;
+	return { entries: cache.entries, consumed: cache.consumed };
+}
+
+/**
+ * 可缓存边界：流式中 = 最后一条 user 消息下标（其后的当前回合每帧在变，不缓存）；
+ * 非流式 = 数组全长（本轮分组即终态，全部可缓存）。0 表示没有可缓存前缀。
+ */
+export function turnPrefixBoundary(messages: UIMessage[], isStreaming: boolean): number {
+	if (!isStreaming) return messages.length;
+	let lastUser = -1;
+	for (let index = 0; index < messages.length; index += 1) {
+		if (messages[index]?.role !== "assistant") lastUser = index;
+	}
+	return lastUser > 0 ? lastUser : 0;
+}
+
+/**
+ * 从全量 entries 裁出恰好覆盖 messages[0..boundary) 的前缀条目：自后向前按每条
+ * entry 覆盖的消息数（user=1、turn=messageIds.length）回退。边界不落在 entry 交界
+ * 上（不应发生——boundary 一定是回合边界）返回 null，调用方放弃本次缓存。
+ */
+export function sliceEntriesToBoundary(entries: TimelineEntry[], boundary: number): TimelineEntry[] | null {
+	if (boundary <= 0) return null;
+	let need = boundary;
+	let cut = entries.length;
+	while (need > 0 && cut > 0) {
+		const entry = entries[cut - 1];
+		if (!entry) return null;
+		need -= entry.kind === "user" ? 1 : entry.turn.messageIds.length;
+		cut -= 1;
+	}
+	if (need !== 0) return null;
+	return entries.slice(0, cut);
+}

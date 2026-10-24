@@ -48,6 +48,8 @@ function loadEditorDetector(fsStub, platform = "win32") {
 				};
 			}
 			if (name === "electron") return { shell: { openPath: async () => "" } };
+			// 打开目录统一入口（issue #396）：本测试不触达打开路径，noop stub。
+			if (name === "../fs/openPath") return { openSystemPath: async () => "" };
 			if (name === "../../shared/types") {
 				return {
 					SUPPORTED_EXTERNAL_EDITORS: [

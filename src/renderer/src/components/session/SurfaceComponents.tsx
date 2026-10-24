@@ -1,10 +1,12 @@
-import { Fragment, isValidElement, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject, type WheelEvent as ReactWheelEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { Fragment, isValidElement, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { messageEntryId } from "../../utils/sessionCommands";
 import { toBlob } from "html-to-image";
 import { writeClipboard, writeClipboardImage } from "../../utils/clipboard";
 import { MarkdownStream } from "./MarkdownStream";
+import { SettledLongAnswer } from "./SettledLongAnswer";
+import { shouldCollapseSettledText } from "./markdownStreamPolicy";
 import { PreviewRail, type PreviewRailItem } from "../motion/preview-rail";
-import { planRailTicks } from "./timeline/outlineRailTicks";
+import { planRailTicks, windowRailItems } from "./timeline/outlineRailTicks";
 import { areOutlineRailItemsEqual, createOutlineItemIndex, resolveVisibleRailActiveId } from "./timeline/outlineRailActive";
 import { useTimelineOutlineActiveId } from "./timeline/useTimelineOutlineActiveId";
 import { useAtomValue } from "jotai";
@@ -349,7 +351,7 @@ export function SessionStatus(props: {
 	return (
 		<Tooltip>
 			<TooltipTrigger asChild>{statusInner}</TooltipTrigger>
-			<TooltipContent side="bottom" align="end" sideOffset={8} arrowClassName="!bg-popover !fill-popover" className="ctx-detail-tooltip !w-auto min-w-64 max-w-[min(320px,calc(100vw-24px))] !rounded-md !border !border-border !bg-popover !px-3 !py-2.5 !text-popover-foreground !shadow-lg">
+			<TooltipContent side="bottom" align="end" sideOffset={8} arrowClassName="!bg-popover !fill-popover" className="ctx-detail-tooltip !w-auto min-w-64 max-w-[min(320px,calc(100vw-24px))] !rounded-md !border !border-border !bg-popover !px-3 !py-2.5 !text-popover-foreground !shadow-md">
 				<div className="grid gap-2.5">
 					<div className="flex items-center justify-between gap-4 border-b border-border/70 pb-2">
 						<span className="text-caption font-semibold text-popover-foreground">{t("ctx.detail.title")}</span>
@@ -600,7 +602,11 @@ export const AssistantText = memo(
 						})}
 					</div>
 				)}
-				<MarkdownStream text={cleanText} isStreaming={Boolean(props.isStreaming)} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />
+				{!props.isStreaming && shouldCollapseSettledText(cleanText.length) ? (
+					<SettledLongAnswer text={cleanText} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />
+				) : (
+					<MarkdownStream text={cleanText} isStreaming={Boolean(props.isStreaming)} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />
+				)}
 			</div>
 		);
 	},
@@ -856,7 +862,7 @@ export const UserBubble = memo(function UserBubble(props: {
 	return (
 		<article /* user-turn 为 e2e 选择器锚点 */
 			ref={rowRef}
-			className={`user-turn group/user mb-4 flex w-full min-w-0 max-w-full flex-col items-end ${props.fresh ? "user-turn--fresh animate-[message-enter_260ms_cubic-bezier(0.22,1,0.36,1)_both]" : ""}${props.topFresh ? " user-turn--top-fresh animate-[top-enter_280ms_cubic-bezier(0.22,1,0.36,1)_both]" : ""}`}
+			className={`user-turn group/user mb-4 flex w-full min-w-0 max-w-full flex-col items-end ${props.fresh ? "user-turn--fresh motion-safe:animate-[message-enter_260ms_var(--ease-out-quint)_both]" : ""}${props.topFresh ? " user-turn--top-fresh motion-safe:animate-[top-enter_280ms_var(--ease-out-quint)_both]" : ""}`}
 			data-message-id={message.id}
 		>
 			{message.images && message.images.length > 0 && (
@@ -1289,19 +1295,25 @@ export { DiagnosticMessageCard, RespondingIndicator, ThinkingBlock };
 export { MultiSelectModal };
 
 /**
- * 会话定位轴（beUI PreviewRail）：右缘一列 1px 刻度对应全部已加载的用户消息
- * （不再封顶 15 条——长会话此前「最上面的刻度不是第一条消息、很多消息没有刻度」），
- * hover 出预览卡、点击跳转。工具开关已上收会话 Tab 栏（SessionToolAction），
- * 此处不再承载其他入口；容器沿用 .outline-hover 的贴右缘偏移规则（有测试守护）。
+ * 会话定位轴（beUI PreviewRail）：消息区右缘一列 1px 刻度，一根 = 一个用户检查点；
+ * 静默态整体不可见，指针移上去（或键盘聚焦）才浮现（见 surfaces.css 的 .session-outline-pane）。
+ * hover 出预览卡、点击跳转；工具开关已上收会话 Tab 栏（SessionToolAction），
+ * 此处不再承载其他入口；容器沿用 .outline-hover 的定位规则（session-outline-pane 贴右缘，有测试守护）。
  *
- * 高度自适应：容器被 .outline-hover 的 top/bottom 双向夹持出可用高度，刻度间距
- * 按条数收缩；间距压到下限仍放不下时均匀抽稀，但首尾刻度强制保留（planRailTicks）。
+ * 条数与取哪几条：**最多 RAIL_TICK_LIMIT（30）条，以当前阅读位置为中心的滑动窗口**
+ * （windowRailItems）。底部时是「最新的 30 条」，往上翻窗口跟着上移——用户反馈
+ * 「旁边横条太多」后的取舍，见 outlineRailTicks.ts 头部注释（对比 Proma 的桶 /
+ * dsh 的全量可滚）。注意副作用：条数超 30 后纵向位置不再代表整段会话的进度。
+ *
+ * 高度自适应：容器被 .outline-hover 的 top/bottom 双向夹持出可用高度，间距按条数
+ * 收缩（14px → 最低 6px，30 × 6 = 180px 足够放下），不做内部滚动。
+ * 滚轮落在刻度上会转发给时间线（导轨是滚动视口的兄弟节点，不转发就滚不动）。
  */
 type ConversationOutlineProps = {
 	className?: string;
 	timelineRef?: RefObject<HTMLElement | null>;
 	onTimelineWheel?: (deltaY: number) => void;
-	items: Array<{ id: string; role: string; title: string; time: string }>;
+	items: Array<{ id: string; role: string; title: string; time: string; pending?: boolean }>;
 	onJump: (id: string) => void;
 };
 
@@ -1314,6 +1326,24 @@ function ConversationOutlineView(props: ConversationOutlineProps) {
 	const [railActiveId, setRailActiveId] = useTimelineOutlineActiveId(props.timelineRef, props.items);
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [availableHeight, setAvailableHeight] = useState(0);
+	// 导轨是时间线滚动视口的兄弟节点，滚轮落在它上面不会带动时间线，必须显式转发。
+	// React 的 onWheel 是 passive（preventDefault 会被忽略并告警），这里注册原生非 passive 监听。
+	const forwardWheelRef = useRef(props.onTimelineWheel);
+	useLayoutEffect(() => {
+		forwardWheelRef.current = props.onTimelineWheel;
+	});
+	useLayoutEffect(() => {
+		const element = containerRef.current;
+		if (!element) return;
+		const onWheel = (event: WheelEvent) => {
+			const forward = forwardWheelRef.current;
+			if (!forward || event.deltaY === 0) return;
+			event.preventDefault();
+			forward(event.deltaY);
+		};
+		element.addEventListener("wheel", onWheel, { passive: false });
+		return () => element.removeEventListener("wheel", onWheel);
+	}, []);
 	// 容器高度由 top/bottom 夹持（不随内容变化），ResizeObserver 重测不会形成反馈环；
 	// 窗口缩放、--outline-top 变化都会反映为容器尺寸变化，统一在这里重算刻度规划。
 	useLayoutEffect(() => {
@@ -1325,7 +1355,13 @@ function ConversationOutlineView(props: ConversationOutlineProps) {
 		observer.observe(element);
 		return () => observer.disconnect();
 	}, []);
-	const plan = useMemo(() => planRailTicks(props.items, availableHeight), [props.items, availableHeight]);
+	const outlineItemIndex = useMemo(() => createOutlineItemIndex(props.items), [props.items]);
+	// 滑动窗口：最多 RAIL_TICK_LIMIT 条，以当前阅读位置为中心。底部时就是「最新的 30 条」，
+	// 往上翻窗口跟着上移，更早的提问进入窗口（上滑即显示更多）。
+	// 先按源下标定位 active（窗口前后都用同一套源坐标），再截窗口、再规划间距。
+	const activeSourceIndex = railActiveId === undefined ? -1 : (outlineItemIndex.get(railActiveId) ?? -1);
+	const visibleItems = useMemo(() => windowRailItems(props.items, activeSourceIndex), [props.items, activeSourceIndex]);
+	const plan = useMemo(() => planRailTicks(visibleItems, availableHeight), [visibleItems, availableHeight]);
 	const railItems = useMemo<PreviewRailItem[]>(
 		() =>
 			plan.items.map((item) => ({
@@ -1333,23 +1369,15 @@ function ConversationOutlineView(props: ConversationOutlineProps) {
 				label: item.title,
 				ariaLabel: item.title,
 				description: item.time,
+				// 目录里有、还没加载的检查点：画淡一档，点之前就知道要补页
+				muted: item.pending === true,
 			})),
 		[plan.items],
 	);
-	const outlineItemIndex = useMemo(() => createOutlineItemIndex(props.items), [props.items]);
 	const visibleRailActiveId = useMemo(() => resolveVisibleRailActiveId(railActiveId, outlineItemIndex, plan.items), [railActiveId, outlineItemIndex, plan.items]);
 
-	const handleTimelineWheel = useCallback(
-		(event: ReactWheelEvent<HTMLDivElement>) => {
-			if (!props.onTimelineWheel || event.deltaY === 0) return;
-			event.preventDefault();
-			props.onTimelineWheel(event.deltaY);
-		},
-		[props.onTimelineWheel],
-	);
-
 	return (
-		<div ref={containerRef} onWheel={handleTimelineWheel} className={cn("outline-hover pointer-events-none", props.className)}>
+		<div ref={containerRef} className={cn("outline-hover pointer-events-none", props.className)}>
 			{railItems.length > 0 && (
 				<PreviewRail
 					orientation="vertical"

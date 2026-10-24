@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAtomValue, useStore } from "jotai";
-import { CircleStop, Fingerprint, Puzzle, RefreshCw, RotateCw, Settings2, SquarePen } from "lucide-react";
+import { Bot, CircleStop, Clock, Fingerprint, Puzzle, RefreshCw, RotateCw, Settings2, SquarePen, Star, Wrench } from "lucide-react";
 import { buildSettingsCommands, type PaletteCommand } from "../../utils/commandPaletteCommands";
 import { markCommandPaletteOnboardingSeen } from "../../components/overlays/CommandPaletteOnboarding";
 import { openSettingsAtom } from "../../atoms/app-ui-atoms";
 import { hostPluginCatalogAtom, hostPluginPanelAtom } from "../../atoms/host-plugin-atoms";
+import { isModuleHidden } from "../../../../shared/hiddenModules";
 import { copyTextWithCopiedNotice } from "../../utils/clipboardNotice";
 import { desktopApi as api } from "../../desktopApi";
 import { t } from "../../i18n";
@@ -15,6 +16,14 @@ export interface CommandPaletteActions {
 	restartActiveAgent: (agentId?: string) => Promise<void> | void;
 	closeAgent: (agentId: string) => Promise<void> | void;
 	runSessionControl: (sessionId: string, action: "reload") => Promise<void> | void;
+	/** 打开会话 Tab 栏里的「定时任务」页面（功能模块可隐藏侧栏入口，命令面板保留直达路径）。 */
+	openAutomationPage: () => void;
+	/** 打开会话 Tab 栏里的「智能体」页面，同上。 */
+	openAgentMarketPage: () => void;
+	/** 打开会话 Tab 栏里的「收藏」页面，同上。 */
+	openFavoritesPage: () => void;
+	/** 打开「Pi 环境检测 / 安装引导」弹窗（dev 传 previewSetup 可直接看未安装态的一键安装面板）。 */
+	openEnvironmentGuide: (options?: { previewSetup?: boolean }) => void;
 }
 
 /**
@@ -68,6 +77,59 @@ export function useCommandPalette({ activeProjectId, currentSessionId, activeAge
 			keywords: ["settings", "设置", "偏好", "preferences", "配置"],
 			icon: Settings2,
 			run: () => store.set(openSettingsAtom, { tab: "common" }),
+		});
+
+		// Pi 环境检测：已装好 pi 的用户平时看不到这个弹窗，保留一个随时可打开的入口
+		// （换机器、给用户排查「为什么起不了会话」时都用得上）。
+		commands.push({
+			id: "action:pi-environment-guide",
+			group: actionGroup,
+			title: t("command.actionPiEnvironment"),
+			keywords: ["pi", "环境", "检测", "安装", "install", "environment", "node", "npm", "dsh"],
+			icon: Wrench,
+			run: () => actions.openEnvironmentGuide(),
+		});
+
+		// 开发专用：本机已装 pi 时也能看到未安装态的一键安装面板（不需要把 pi 从 PATH 里拿掉）。
+		if (import.meta.env.DEV) {
+			commands.push({
+				id: "action:pi-environment-guide-preview",
+				group: actionGroup,
+				title: t("command.actionPiEnvironmentPreview"),
+				keywords: ["pi", "预览", "preview", "安装引导", "环境检测"],
+				icon: Wrench,
+				run: () => actions.openEnvironmentGuide({ previewSetup: true }),
+			});
+		}
+
+		// 页面式工作区（定时任务 / 智能体 / 收藏）：侧栏入口可被外观设置→功能模块收起，
+		// 命令面板始终保留直达路径——隐藏后「找不回来」是最糟的结果。
+		commands.push({
+			id: "action:open-automation",
+			group: actionGroup,
+			title: t("command.actionOpenAutomation"),
+			subtitle: isModuleHidden(hiddenModules, "automation") ? t("command.openHiddenPageHint") : undefined,
+			keywords: ["定时任务", "自动化", "automation", "cron", "schedule", "任务计划"],
+			icon: Clock,
+			run: () => actions.openAutomationPage(),
+		});
+		commands.push({
+			id: "action:open-agents",
+			group: actionGroup,
+			title: t("command.actionOpenAgents"),
+			subtitle: isModuleHidden(hiddenModules, "agents") ? t("command.openHiddenPageHint") : undefined,
+			keywords: ["智能体", "agent", "agents", "角色", "agent market"],
+			icon: Bot,
+			run: () => actions.openAgentMarketPage(),
+		});
+		commands.push({
+			id: "action:open-favorites",
+			group: actionGroup,
+			title: t("command.actionOpenFavorites"),
+			subtitle: isModuleHidden(hiddenModules, "favorites") ? t("command.openHiddenPageHint") : undefined,
+			keywords: ["收藏", "favorite", "favorites", "bookmark", "收藏夹", "快照"],
+			icon: Star,
+			run: () => actions.openFavoritesPage(),
 		});
 
 		// 运行控制类命令只在有当前会话时才出现——没有目标时列出来只会点了没反应。

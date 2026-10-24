@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { dataUrlToFile, imageMimeTypeFromPath, isImageFilePath } from "../src/renderer/src/utils/composerImages.ts";
+import { COMPOSER_ATTACHMENT_BUDGET_BYTES, attachmentBytes, base64DataBytes, dataUrlToFile, imageMimeTypeFromPath, isImageFilePath } from "../src/renderer/src/utils/composerImages.ts";
 
 /**
  * 会话附件两条修复的回归测试：
@@ -100,4 +100,26 @@ test("preload 暴露剪贴板位图读取（readImage，空图返回空串）", 
 	// Electron 38：preload 不得直连 clipboard，读取走主进程 sendSync。
 	assert.match(preload, /readImage: \(\) => clipboardSync\(ipcChannels\.clipboardReadImage, ""\)/);
 	assert.doesNotMatch(preload, /clipboard\.readImage\(\)/);
+});
+
+test("base64DataBytes/attachmentBytes：字符长度折算字节与求和（附件预算的判定基础）", () => {
+	assert.equal(base64DataBytes(undefined), 0);
+	assert.equal(base64DataBytes(""), 0);
+	// 4/3 字符 → 3 字节；预算用途允许 padding 误差
+	assert.equal(base64DataBytes("QUJD"), 3);
+	assert.equal(base64DataBytes("QQ=="), 1);
+	// 混合 ref（无 data）与内联形态：只计内联
+	assert.equal(attachmentBytes([{ data: "QUJD" }, { data: "QQ==" }]), 4);
+	assert.equal(attachmentBytes([{}, { data: "QUJD" }]), 3);
+	// 预算量级独立断言：32MiB
+	assert.equal(COMPOSER_ATTACHMENT_BUDGET_BYTES, 32 * 1024 * 1024);
+});
+
+test("附件预算在 addImageFiles 入口拦截（源码契约：不静默截断，逐张判定）", () => {
+	// 空白容忍：格式化改缩进不破坏断言
+	assert.match(controller, /COMPOSER_ATTACHMENT_BUDGET_BYTES/);
+	assert.match(controller, /attachmentBytes\(\s*store\.get\(sessionAttachmentsBySessionIdAtomFamily\(sessionId\)\)\s*\)/);
+	assert.match(controller, /app\.imageBudgetExceeded/);
+	// 拒绝后 continue（不中断循环：后续小图仍可补进），不是静默丢整批
+	assert.match(controller, /currentBytes \+ base64DataBytes\(image\.data\) > COMPOSER_ATTACHMENT_BUDGET_BYTES\)\s*\{[\s\S]*?continue;/);
 });

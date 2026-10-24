@@ -114,6 +114,18 @@
 
 /* ── dsh-web 结构精修（仅 Web 页）─────────────────────────────────────── */
 
+/* 键盘焦点环：Web 页大量交互是「图标按钮 + 自定义会话行」（原生 button 的
+   outline 被 shadcn button 的 outline-none 清掉，会话行又不是 button），
+   走查 14 实测图标按钮 focus 后 outlineStyle: none 且 boxShadow 透明，键盘用户
+   完全看不到落点。这里统一补一层 ring，视觉与桌面端 foundation 的中性环一致。 */
+.web-app button:focus-visible,
+.web-app [role="button"]:focus-visible,
+.web-app a:focus-visible,
+.web-app [tabindex]:focus-visible {
+  outline: 2px solid var(--color-text-primary);
+  outline-offset: 2px;
+}
+
 /* 侧栏：layer-2 表面 + 细边框；会话行 hover 用 interactive hover 面 */
 .web-app .chat-list-pane {
   background: var(--color-bg-sidebar);
@@ -208,6 +220,22 @@
   background-clip: content-box;
 }
 
+/* 代码块复制按钮：桌面 28px 在触屏上误触率高，触屏（pointer:coarse）放大到 36px
+   （移动走查 #5；类来自 timeline.css 的 .code-copy，只在 Web 作用域放大）。 */
+@media (pointer: coarse) {
+  .web-app .code-copy {
+    min-width: 36px;
+    min-height: 36px;
+  }
+  /* markdown 正文内渲染器自带的图标钮（streamdown 表格复制/下载/全屏、mermaid 工具条）：
+     库内按钮 26px 无触屏变体，统一在此放大。sanitize 保证正文里不会出现用户注入的
+     原生 button，命中面只有渲染器 chrome。 */
+  .web-app .markdown-body button {
+    min-width: 36px;
+    min-height: 36px;
+  }
+}
+
 /* 工具卡/思考块：对齐桌面「无框过程行」视觉（timeline.css 的原始意图）——
    身份靠图标色/状态色/扫光，展开靠左竖线，不画外框、不铺面板底。
    早期版本曾给它们加边框+面板底做成「卡片」，在窄屏上显得笨重松散，此处回收。 */
@@ -268,6 +296,19 @@
   flex: 1 1 0;
   min-width: 0;
   min-height: 0;
+}
+
+/* ── 移动端长内容换行（Web 走查 #4）─────────────────────────────────────
+   390px 视口下 .markdown-body 的有序/无序列表实测 scrollWidth 溢出容器（373 > 358）：
+   timeline.css 只给 .assistant-text 等节点声明了 overflow-wrap/word-break，列表项
+   自身仍是默认的 normal，长英文串/路径会把行盒顶宽。这里按 .web-app 作用域补齐，
+   不影响桌面端（桌面端列表宽裕，保持原排版）。 */
+.web-app .markdown-body ul,
+.web-app .markdown-body ol,
+.web-app .markdown-body li {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  min-width: 0;
 }
 
 /* Mobile starts with chat full-screen; the project tree is a temporary drawer. */

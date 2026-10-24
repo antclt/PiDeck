@@ -314,7 +314,8 @@ function DiscoveredSkillRow(props: {
 				</div>
 			</TableCell>
 			<TableCell className="w-2/5 whitespace-normal break-words text-caption leading-relaxed text-muted-foreground" title={item.description}>
-				<span className="block line-clamp-3">{item.description}</span>
+				{/* 不要再叠 block：Tailwind v4 里 .block 排在 .line-clamp-* 之后，会覆盖 -webkit-box 让截断失效。 */}
+				<span className="line-clamp-3">{item.description}</span>
 			</TableCell>
 			<TableCell className="text-right" />
 		</TableRow>
@@ -417,7 +418,7 @@ function SkillTableRow(props: {
 			    很高；描述列 w-2/5 占比 + 3 行截断，窗口拉小也不挤压成竖条。
 			    line-clamp 会改 display 为 -webkit-box，必须包一层 span 而不能直接放 td 上。 */}
 			<TableCell className="w-2/5 whitespace-normal break-words text-caption leading-relaxed text-muted-foreground" title={skill.description}>
-				<span className="block line-clamp-3">{skill.description || t("config.skillDescriptionMissing")}</span>
+				<span className="line-clamp-3">{skill.description || t("config.skillDescriptionMissing")}</span>
 			</TableCell>
 			<TableCell className="text-right">
 				<div className="flex justify-end gap-1">

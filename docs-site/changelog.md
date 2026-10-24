@@ -10,6 +10,27 @@ description: PiDeck 每个版本的发布记录：新功能、问题修复与体
 - [中文 CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.zh-CN.md)
 - [English CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.md)
 
+## v0.9.6
+
+发布时间：2026-10-24
+
+- 🚀 **内置浏览器 Agent：pi 能操作内置浏览器**
+- 🚀 **Wallpaper Engine 视频壁纸**
+- 🚀 **收藏：整条回复与划选片段**
+- 🚀 **PiDeck 的数据接入 MCP**
+- 🚀 **环境设置页重做**
+- 🚀 **模型配置一键导入**
+- 🚀 **设置页侧栏搜索**
+- 🚀 **会话定位轴重做**
+- 🚀 **DSH 自动重试可见**
+- 🚀 **Web 端：回合内排队发送与会话内搜索**
+- 🚀 **同步 pi 1.4.0**
+- 🚀 **Figma MCP OAuth 直连**
+- ✨ **时间线虚拟化：长会话滚动不再重扫全列表**
+- ✨ **一整轮内存收口**
+- ✨ **流式与 RPC 热路径**
+- ✨ **提示词库与技能商店更快**
+
 ## v0.9.5
 
 发布时间：2026-10-21

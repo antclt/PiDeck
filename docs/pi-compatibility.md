@@ -6,8 +6,8 @@
 
 ## 当前基线
 
-- 最近核对版本：`pi 1.3.0`（2026-10-15 发布；依据：npm 包 CHANGELOG + `npm pack` 完整包与本机 `1.2.0` 的 `dist` 逐文件 diff）
-- 核对方式：静态 diff + 源码核对。`dist/modes/rpc/rpc-types.js`、`dist/modes/rpc/rpc-mode.js`、`dist/core/package-manager.js` 与 1.2.0 **逐字节相同**；`dist/core/extensions/types.d.ts` 与 `@earendil-works/pi-tui@1.3.0` 的 `dist` 同样逐字节相同；`dist/index.js` / `index.d.ts` 只新增 `formatReadLineRange` 导出。**1.3.0 未在真实会话上跑回归**；本机 pi CLI 已升级到 1.3.0（2026-10-16 核对，RPC 会话与桥/扩展在本机实际使用中），1.2.0 的扩展 API 真实回归同样待做（见 1.2.0 矩阵的扩展 API 行与 1.3.0 矩阵末节）
+- 最近核对版本：`pi 1.4.0`（2026-10-21 发布；依据：npm 包 CHANGELOG + `npm pack` 完整包与 `1.3.0` 的 `dist` 逐文件 diff）
+- 核对方式：静态 diff + 源码核对。`dist/modes/rpc/rpc-types.js`、`rpc-mode.js`、`dist/core/extensions/types.d.ts`、`dist/index.js` / `index.d.ts`（`ModelRuntime` SDK 入口）、`dist/core/package-manager.js`、`settings-manager.js`、`settings-defaults.js`、`session-manager.js`（`CURRENT_SESSION_VERSION` 仍为 3）、`extensions/mcp/cli.js`、`schemas/settings.schema.json`、`@earendil-works/pi-tui@1.4.0` 的 `dist/index.d.ts` 与 1.3.0 **逐字节相同**；`dist/bundle/rpc-entry.js` 只换了 chunk 哈希，入口参数一致。**1.4.0 未在真实会话上跑回归**（见下方「待真实回归」）
 - PiDeck 通信方式：`pi --mode rpc`，stdio JSON-RPC
 - 本记录范围：Pi 后端（`src/main/pi/`）以及 PiDeck 对 Pi 配置/事件的适配
 - 不包含：DSH 后端工具（原持久 pwsh 工具已于 0.2.1 下线）、Electron 自带终端、PiDeck 自己的应用更新器
@@ -33,6 +33,66 @@
 真实冒烟证据（`scripts/smoke-pi-native-resources.mjs`，对 pi 0.99.2 与 1.0.0 各 19/19）：
 无白名单启动下，原生 `+/-` 规则真实控制技能/扩展加载、`-builtin:mcp` 生效、项目层覆盖生效、
 未信任项目不读项目配置、旧禁用记录迁移后 pi 真的不加载该资源。
+
+## 1.4.0 审计矩阵（2026-10-26，npm 包完整 dist 与 1.3.0 逐文件 diff）
+
+核对方式：`npm pack @earendil-works/pi-coding-agent@1.3.0` 与 `@1.4.0`，两边解包后对关键契约面逐个 `cmp`，非逐行人工阅读。
+
+| 上游变化 | PiDeck 处理 | 状态 | 代码/验证 | 移除条件 |
+|---|---|---|---|---|
+| RPC 命令面与事件面 | `rpc-types.js` / `rpc-types.d.ts` / `rpc-mode.js` / `rpc-mode.d.ts` 与 1.3.0 **逐字节相同** → 会话/模型/思考档/压缩/命令列表等边界无变化 | **已核对无变化** | 逐文件 `cmp` | — |
+| 扩展 API（`dist/core/extensions/types.d.ts`） | 与 1.3.0 **逐字节相同**；钩子名集合（`before_*` / `after_*` / `agent_*` / `turn_*`）diff 为空 | **已核对无变化** | `cmp` + 钩子名集合 diff | — |
+| `dist/index.js` / `index.d.ts`（`ModelRuntime` SDK 入口） | 与 1.3.0 **逐字节相同** → `pi-auth-host.mjs` / `pi-enhance-host.mjs` 的入口安全 | **已核对无变化** | `cmp` | — |
+| `package-manager.js` / `settings-manager.js` / `settings-defaults.js`（资源过滤与默认值） | 三个文件与 1.3.0 **逐字节相同** → 1.2.0 补的 `~` 归一仍是正确口径，原生资源投影无需再改 | **已核对无变化** | 逐文件 `cmp` | — |
+| 会话文件格式 | `session-manager.js` 与 1.3.0 **逐字节相同**，`CURRENT_SESSION_VERSION` 仍为 **3** | **已核对无变化** | `cmp` + 常量核对 | — |
+| `pi mcp list --json` CLI 输出 | `extensions/mcp/cli.js` 与 1.3.0 **逐字节相同** | **已核对无变化** | `cmp` | — |
+| **`mcp.json` 读取兼容 UTF-8 BOM**（#11191；`extensions/mcp/config.js` 改用 `stripBom`） | PiDeck 的 `parseMcpConfigFile` 仍是裸 `JSON.parse`：同一份带 BOM 的文件 pi 能加载、PiDeck 报「配置损坏」并拦住可视化保存与配置包导入。已改为先 `stripBom`，与 pi 同口径 | **本轮已适配** | `src/main/config/mcpConfig.ts`、`tests/mcpConfig.test.mjs`（BOM 用例） | 无 |
+| **`managed-install.json` 读取兼容 BOM**（同一根因；pi 1.4.0 的 `pi update` 不再因 BOM 报「Managed install marker is missing or invalid」） | `PiLocator.isManagedInstallRoot` 与 `piAuthHostLaunch.isManagedInstallRoot` 都是裸 `JSON.parse`：带 BOM 时官方安装被误判成 `custom`，`pi-auth` / `pi-enhance` 侧车解析不到 SDK 入口（提示词增强置灰、智能体不可用）。两处均改为先 `stripBom` | **本轮已适配** | `src/main/pi/PiLocator.ts`、`src/main/pi/auth/piAuthHostLaunch.ts`、`tests/piLocatorInstallations.test.mjs`、`tests/piAuthHostLaunch.test.mjs` | 无 |
+| **PiDeck 通用配置读取兼容 BOM**（非 1.4.0 引入，是账本既有 P1 待办的顺带收口） | `ConfigManager.readJsonFile` 读 `models.json` / `auth.json` / `settings.json` / `mcp.json` 是裸 `JSON.parse`；失败后 `parsed` 退回空对象——页面显示「配置是空的」，用户一点保存就把真配置写没。改为复用 `piConfigFileStore.stripBom` | **本轮已适配** | `src/main/config/ConfigManager.ts`、`tests/configReadBom.test.mjs`（新增；含「BOM 之外的损坏仍如实报诊断」反例） | 无 |
+| **`compaction.reserveTokens` 语义收窄**：摘要改用模型 output limit，该设置只决定「何时开始压缩」 | PiDeck 的滑条换算（`reserveTokens / contextWindow` 占比）本来就对应新语义，算法无需改；只有设置页提示文案仍写「为模型回复预留的 token 空间」，会误导用户以为它还在限制摘要长度。已改中英文案 | **本轮已适配** | `src/shared/compactionSlider.ts`（逻辑不变）、`rendererCopy.zh-CN.ts` / `en-US.ts` / 生成物 `zh-TW.ts`、`tests/compactionSliderSettings.test.mjs` | 无 |
+| `models.json` schema 新增 `default`（`contextWindow:128000` / `maxTokens:16384` / `input:["text"]` / `reasoning:false`），并新增 `ModelsJsonSchemas` 导出与 `docs/models-configuration.md` | 在整个 `dist`（含 `bundle/`）grep `Value.Default` **零命中**；`provider-composer.js` 本来就是 `?? 128000` / `?? 16384`。这些 `default` 只喂新生成的文档，运行时语义不变 → PiDeck 的模型编辑表单无需补默认值逻辑 | 无需改动 | `cmp` + 全仓 `Value.Default` 检索 + `provider-composer.js` 源码核对 | — |
+| provider 级 `compat` 现在也作用于 classifier（新增 `imageInput` / `sendImageOptInHeader`） | PiDeck 的 compat 编辑面用 `...props.compat` / `...(original.compat ?? {})` 展开合并，手写的未知子键（含这两个）原样保留，不会被表单抹掉 | 无需改动 | `src/renderer/src/config/ProviderConnectionForm.tsx`、`addProviderDraft.ts` 的 spread 语义 | — |
+| `before_provider_headers` 不再收到 OpenRouter / NVIDIA NIM / OpenCode 归因头（改由 pi-ai client identity 统一注入） | PiDeck 从未注册 `before_provider_headers` handler（`pi-deck-model-trace.ts` 只用 `before_provider_request`，且明确不采集请求头） | 无需改动 | `grep before_provider_headers` 只命中类型注释 | — |
+| 截断响应恢复：`_omitRecoveryAttempt` 改为从投影上下文里成对找 assistant + toolResult，用 `context_edit` 一并排除（#11227/#11233） | 会话文件仍只追加 `context_edit`（`replacement: null`），PiDeck 的 `sessionContextProjection` 已按 pi 语义应用 `context_edit`（排除即不显示、原条目保留）→ 无需适配；这是对「恢复后会话永久 400」的净修复 | 无需改动（观察项） | `src/main/pi/sessionContextProjection.ts` 的 `parseReplacement` / 投影应用 | — |
+| 恢复会话/`/tree` 后扩展工具活跃性（#11062/#11075）：按分支历史 `toolsAdded`/`toolsRemoved` 重放，未提及的扩展工具视为新注册并激活 | pi 内部装载逻辑；PiDeck 的 `promptLoadout` 只**读**系统消息重放当前装载用于 token 估算，不参与激活决策 | 无需改动（真实回归观察项） | `src/main/pi/promptLoadout.ts`（只读重放） | — |
+| 扩展可用 `@earendil-works/pi-ai/models` 子路径（#11156；`virtual-modules.js` + `loader.js` 新增该别名） | 纯增量：PiDeck 的 4 个内置扩展只 import `@earendil-works/pi-ai`（值）与 `@earendil-works/pi-ai/compat`（`completeSimple`），`compat.d.ts` 与 1.3.0 逐字节相同 | 无需改动 | `grep` 扩展 import 面 | — |
+| `pi-ai` 1.3.0 → 1.4.0 目录变化 | 见下方「pi-ai 升级记录」：1714 → **1713** 条（chat 1599 / classifier 51 / image 63）；`baseUrl` 与 `api` **零变化** → 用量探针 host 白名单与 `KNOWN_PROVIDER_ENDPOINTS` 均无需改 | **本轮已适配** | `package.json` / lock、`resources/pi-ai-catalog*.json`、`tests/piAiBuiltinCatalog.test.mjs`（新增 1.4.0 断言）、`tests/piAiCatalogPackaging.test.mjs` | 无 |
+| 其余 pi 运行时修复：`grep` 工具强制 `rg --no-config`（#11203）、Windows shell 探测（Store 别名 / PowerShell 不在 PATH / 非 `C:\Windows` 系统目录，#9504/#9501）、Copilot 大请求体 413 先压缩重试（#11016）、whitespace-only 工具输出不再让请求 400（#8720）、自动重试覆盖更多网关错误（#10920/#11057/#10996）、OpenAI Responses 缓存保留（#10940）、`/compact <instructions>` 在 split turn 生效（#11058）、HTML 导出 CJK 加粗、`@` 补全正则元字符、Rex terminal、`generateSummary` 忽略 `reserveTokens` 参数 | 均为 pi 进程内的请求构造 / 工具执行 / TUI 行为，RPC 事件形状与会话 JSONL 格式不变 | 无需改动 | `diff -rq` 文件清单 | — |
+| 默认模型改名（copilot `gpt-5.4` → `gpt-6.1-sol`、xiaomi `mimo-v2.5-pro` → `mimo-v2.6-pro`、nvidia `nemotron-3.5-super-vl-120b-a12b`） | PiDeck 不硬编码这些默认值（`grep` 全仓为 0），模型列表来自 catalog artifact + endpoint `/models` + `pi --list-models` | 无需改动 | `grep gpt-5.4` / `grep mimo-v2.5-pro` 为 0 | — |
+| `pi-tui` 1.3.0 → 1.4.0 | `dist/index.d.ts` 逐字节相同；其余变动在 `autocomplete` / `markdown` / `terminal` / `tui-alt-screen`。PiDeck 只用 pi-tui 的**图标资源**（`build/icon-pi-tui.png`），不 import 该包 | 无需改动 | `cmp` + `grep pi-tui src/` | — |
+
+**真实回归（2026-10-26 已跑，`scripts/probe-pi-1.4-regression.mjs`）**
+
+机器判据脚本，可复跑；退出码 0 = 全通过。对 pi 1.4.0（本机 CLI）实跑结果 **6/6 通过**：
+
+| 项 | 判据 | 结果 |
+|---|---|---|
+| 扩展工具恢复（#11062/#11075） | 会话中途注册的扩展工具，`new_session` + `switch_session` 恢复后仍在 `activeTools` | ✅ |
+| 截断响应恢复（#11227） | 会话文件与投影上下文均无「孤儿 toolResult」（assistant toolCall 被排除时其 toolResult 必须同批排除） | ✅ |
+| `/compact <instructions>`（#11058） | 带 `customInstructions` 压缩后 `compaction_end` 无错误、会话文件写入 compaction 条目且带摘要文本 | ✅ |
+| 压缩不撞 output cap（#9512/#9075） | 压缩结束无 `token cap` 报错 | ✅ |
+| 恢复会话保留工具（#10785，1.3.0 遗留） | `switch_session` 前后 `activeTools` 集合一致 | ✅ |
+| `/share` 目标设置（1.3.0 遗留） | `sessionShareDestination` 取 `auto`/`gist`/`radius` 时会话均正常启动（`share` 是 TUI 内置命令，RPC `get_commands` 不返回，故不断言命令存在） | ✅ |
+| OpenCode 端点（1.3.0 遗留） | 内置 catalog 里 `opencode`/`opencode-go` 的 baseUrl host 为 `opencode.ai` 且路径含 `inference` | ✅ |
+
+复跑方式：
+
+```bash
+# 零成本项（不调模型）
+node scripts/probe-pi-1.4-regression.mjs --pi <pi 可执行文件>
+
+# 含真实模型调用（会消耗额度）；--auth-from 借真实凭据，--provider/--model-id 指定可用模型
+node scripts/probe-pi-1.4-regression.mjs --pi <pi> --live   --auth-from ~/.pi/agent --provider openrouter --model-id deepseek/deepseek-chat
+```
+
+脚本自带三个易踩的坑，已在注释里写明原因：`switch_session` 的参数名是 `sessionPath`；
+`agent_end` 之后 pi 还会跑压缩检查，必须等 `agent_settled` 才能发下一条 prompt；
+`prepareCompaction` 用 `keepRecentTokens` 从尾部找切点，会话不够大时会直接报
+"Nothing to compact"，故 live 用例在隔离 settings 里把该值调小。
+
+**仍需人工确认**（脚本无法覆盖）：带 BOM 的 `mcp.json` 在真实 Windows 上让 PowerShell 5.1
+重写一次后，PiDeck 的 MCP 页不再报损坏、可正常保存与导入（本轮只有单测覆盖）；
+以及 PiDeck 桌面端自身的 `/reload`、重启会话路径（探针直连 pi，不经 PiDeck 进程管理）。
 
 ## 1.3.0 审计矩阵（2026-10-16，npm 包完整 dist 与本机 1.2.0 逐文件 diff）
 
@@ -282,7 +342,7 @@ PiDeck 曾内置 DSH 持久 pwsh 工具（`pwsh_persistent`，本地 file: 包 `
 - [ ] 更新完成后失效 `PiProcess.versionCache` 和 `ExtensionManager.piVersion`，并提示已有 Agent 需重启。
 - [ ] 评估 `pi update --self`，必要时按 Pi 版本门控。
 - [x] Pi 后端调用 `get_available_thinking_levels`，按 sessionId + agentId + runtimeGeneration 读取，旧 Pi 回退静态列表。
-- [ ] 统一 PiDeck JSON 读取入口，兼容 UTF-8 BOM。
+- [x] 统一 PiDeck JSON 读取入口，兼容 UTF-8 BOM（2026-10 随 pi 1.4.0 同步收口：`ConfigManager.readJsonFile` / `mcp.json` / `managed-install.json` 三处，见 1.4.0 矩阵）。
 - [x] PiDeck 主进程 catalog 已从精确锁定的构建期 `@earendil-works/pi-ai@0.85.0` 提取为静态资源；DSH adapter 继续使用其声明兼容的 `0.82.1`，不通过 overrides 强行升级。
 
 ## pi-ai 依赖边界
@@ -292,18 +352,18 @@ PiDeck 当前有三条不同的 pi-ai 使用路径，不能混为一谈：
 | 路径 | 实际使用 | 当前版本/职责 |
 |---|---|---|
 | Pi 后端运行时 | 外部 `pi --mode rpc` 进程内部使用用户安装的 Pi 自己携带的 pi-ai | PiDeck 不打包 Pi CLI，也不把自己的 pi-ai 注入 Pi 子进程；Pi 0.85.0 的 provider/thinking 逻辑由外部 Pi 自己负责 |
-| PiDeck 主进程 | 只读构建期生成的 `resources/pi-ai-catalog.json` 与 manifest | `@earendil-works/pi-ai@0.99.1` 是精确锁定的 `devDependency` 输入；构建脚本只提取 context/maxTokens/reasoning/input/name/thinkingLevelMap 等规格字段，运行时不加载 SDK |
+| PiDeck 主进程 | 只读构建期生成的 `resources/pi-ai-catalog.json` 与 manifest | `@earendil-works/pi-ai@1.4.0` 是精确锁定的 `devDependency` 输入；构建脚本只提取 context/maxTokens/reasoning/input/name/thinkingLevelMap 等规格字段，运行时不加载 SDK |
 | DSH host | `dsh-llm-pi-ai` 动态调用 `createModels`、catalog、`getSupportedThinkingLevels` 和 provider API | `dsh-llm-pi-ai` 声明 `^0.82.1`；lock 将其解析为嵌套的 `@earendil-works/pi-ai@0.82.1`。对 0.x semver 而言该范围为 `>=0.82.1 <0.83.0`，不包含 `0.85.0` |
 
 因此：
 
-- **仅升级 PiDeck 的构建期 `@earendil-works/pi-ai` 输入到 0.99.1，不会让 Pi 后端 runtime 变成 0.99.1**，也不会自动打开 Pi UI 的按模型过滤；
-- DSH adapter 在自己的依赖树中解析 `0.82.1`；PiDeck catalog artifact 的来源是 `0.99.1`，两者有意共存；
-- 不建议用 `overrides` 强行把 DSH 的 pi-ai 改成 0.99.1。应等待/推动 `dsh-llm-pi-ai` 发布声明兼容 0.99.x 后，再整体升级 DSH 相关包并做 host smoke、thinking effort、流式请求和 provider catalog 回归。
+- **仅升级 PiDeck 的构建期 `@earendil-works/pi-ai` 输入到 1.4.0，不会让 Pi 后端 runtime 变成 1.4.0**，也不会自动打开 Pi UI 的按模型过滤；
+- DSH adapter 在自己的依赖树中解析 `0.82.1`；PiDeck catalog artifact 的来源是 `1.4.0`，两者有意共存；
+- 不建议用 `overrides` 强行把 DSH 的 pi-ai 改成 1.4.0。应等待/推动 `dsh-llm-pi-ai` 发布声明兼容更新版本后，再整体升级 DSH 相关包并做 host smoke、thinking effort、流式请求和 provider catalog 回归。
 
 ### 是否打包进 PiDeck
 
-**PiDeck 主进程不再打包完整的 `@earendil-works/pi-ai@0.99.1` SDK；安装包只带静态 catalog artifact**：
+**PiDeck 主进程不再打包完整的 `@earendil-works/pi-ai@1.4.0` SDK；安装包只带静态 catalog artifact**：
 
 - `@earendil-works/pi-ai` 位于精确锁定的 `devDependencies`，`npm run build` 先运行 `scripts/generate-pi-ai-catalog.mjs`；
 - 生成器在使用默认来源目录（`node_modules`）时会校验本地安装版本与 `package.json` 精确锁定一致，不一致直接失败并提示 `npm ci`（防陈旧安装静默降级目录）；确需从未锁定来源生成时显式传 `--source-dir`；
@@ -316,7 +376,7 @@ PiDeck 当前有三条不同的 pi-ai 使用路径，不能混为一谈：
 
 这份 catalog artifact **不是 Pi 后端 runtime 使用的那一份**。PiDeck 通过 `PiLocator` 执行用户已经安装的 `pi` CLI；Pi CLI 自己携带/解析自己的 pi-ai。PiDeck 不打包 `pi-coding-agent`，也不把 catalog 来源版本注入外部 Pi 进程。
 
-升级记录：PiDeck 主进程 catalog artifact 的来源从 `0.84.4` 起，随上游 pi-ai 发布逐版跟进：`0.85.0` → `0.85.1` → `0.86.0` → `0.86.1` → `0.99.1`（2026-09；0.99.1 对应 42 个源 JSON、1592 条模型，含 OpenAI Codex 默认模型 gpt-6.1-sol）→ `1.0.4` → `1.2.0`（1649 条）→ `1.3.0`（2026-10-15，1714 条，chat 1614 / image 60 / classifier 40；随目录带入 MiMo 档位、Claude `off`、gpt-6.1-sol 500K 与 OpenCode 新端点）；DSH 仍保留 adapter 兼容的嵌套 `0.82.1`。catalog 与运行时的 Pi 版本解耦——补的是能力字段（contextWindow/maxTokens/thinkingLevelMap），权威闸门仍是 `pi --list-models` 与 RPC `set_model`。只有当 `@deepseek-ai/dsh-llm-pi-ai` 发布明确兼容 `@earendil-works/pi-ai 0.86.x` 的版本后，才升级 DSH adapter/runtime 依赖树，并完成 typecheck、catalog/迁移测试、DSH host smoke、thinking effort、流式请求和 provider catalog 回归。
+升级记录：PiDeck 主进程 catalog artifact 的来源从 `0.84.4` 起，随上游 pi-ai 发布逐版跟进：`0.85.0` → `0.85.1` → `0.86.0` → `0.86.1` → `0.99.1`（2026-09；0.99.1 对应 42 个源 JSON、1592 条模型，含 OpenAI Codex 默认模型 gpt-6.1-sol）→ `1.0.4` → `1.2.0`（1649 条）→ `1.3.0`（2026-10-15，1714 条，chat 1614 / image 60 / classifier 40；随目录带入 MiMo 档位、Claude `off`、gpt-6.1-sol 500K 与 OpenCode 新端点）→ `1.4.0`（2026-10-26，**1713 条**，chat 1599 / image 63 / classifier 51；相对 1.3.0 新增 59、移除 60、字段变更 185，**`baseUrl` 与 `api` 零变化**；带入 MiniMax-M3.1-Flash、xai `xhigh` 档、classifier 图像输入（`input` 含 `image`）、grok-4.3/4.5 `xhigh`，并移除 `openai-codex` 的 gpt-5.5 / gpt-5.3-codex-spark 与 copilot 的 claude-opus-4.7 / gemini-3.5/3.6-flash）；DSH 仍保留 adapter 兼容的嵌套 `0.82.1`。catalog 与运行时的 Pi 版本解耦——补的是能力字段（contextWindow/maxTokens/thinkingLevelMap），权威闸门仍是 `pi --list-models` 与 RPC `set_model`。只有当 `@deepseek-ai/dsh-llm-pi-ai` 发布明确兼容 `@earendil-works/pi-ai 0.86.x` 的版本后，才升级 DSH adapter/runtime 依赖树，并完成 typecheck、catalog/迁移测试、DSH host smoke、thinking effort、流式请求和 provider catalog 回归。
 
 ## 兼容代码移除规则
 

@@ -1,4 +1,5 @@
-export { captureScreen, frameToDataUrl, frameBase64Length, DEFAULT_MAX_LONG_EDGE, DEFAULT_QUALITY } from "./CuaFrame";
+export { captureScreen, frameToDataUrl, frameBase64Length, selectScreenSource, DEFAULT_MAX_LONG_EDGE, DEFAULT_QUALITY } from "./CuaFrame";
+export { listCuaDisplays, toCuaDisplays, toScreenRect, isPrimarySelector, type CuaDisplayInfo, type CuaScreenRect } from "./CuaDisplay";
 export {
 	enumerateWindows,
 	moveMouseAbsolute,

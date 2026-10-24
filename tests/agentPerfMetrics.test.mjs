@@ -12,9 +12,10 @@ const readTracker = () => readFileSync("src/main/pi/messagePerfTracker.ts", "utf
 
 test("AgentManager keeps per-agent streaming perf timers", () => {
 	const source = readTracker();
-	// 计时状态：sendPrompt 请求时刻起表（首个 message_start 消费），首 delta 记 firstDeltaAt，正文首 delta 记 firstTextAt
-	// 泛型参数可整体内联为一行，断言只锁字段名与类型语义。
-	assert.match(source, /perfByAgent = new Map<[\s\S]{0,20}?string,[\s\S]{0,20}?\{ startedAt: number; firstDeltaAt: number; firstTextAt: number \}[\s\S]{0,20}?>\(\)/);
+	// 计时状态：sendPrompt 请求时刻起表（首个 message_start 消费），首 delta 记 firstDeltaAt，正文首 delta 记 firstTextAt；
+	// agentStartAt/turnStartAt/messageStartAt 是阶段边界（归因日志用，首遇即记，0=未到）。
+	// 泛型参数可整体内联为一行，断言只锁字段名与类型语义（空白容忍，字段集变更须同步这里）。
+	assert.match(source, /perfByAgent = new Map<[\s\S]{0,20}?string,[\s\S]{0,20}?\{ startedAt: number; firstDeltaAt: number; firstTextAt: number; agentStartAt: number; turnStartAt: number; messageStartAt: number \}[\s\S]{0,20}?>\(\)/);
 	assert.match(source, /lastPerfByAgent = new Map<string, MessagePerfSnapshot>\(\)/);
 	// AgentManager 持有唯一实例（域收口后不再有散落 Map）
 	assert.match(readAgentManager(), /private readonly messagePerf = new MessagePerfTracker\(\);/);
@@ -58,10 +59,12 @@ test("message_end/done/error settles perf and pushes a runtime-state patch", () 
 	const agentManager = readAgentManager();
 	// 顶层 message_end（pi 实际走此路径，不经 message_update）也结算
 	assert.match(agentManager, /typed\.type === "message_end" &&/);
-	assert.match(agentManager, /this\.messagePerf\.settle\(agentId, \(channel, payload\) => this\.emit\(channel, payload\), messageEnd\);/);
+	// 第 4 参是归因日志回调（agentStart/turnStart/messageStart/firstDelta 边界，见 messagePerfTracker.settle）。
+	// 参数较长时 biome 会折行，正则按仓库规范空白容忍（\s*）。
+	assert.match(agentManager, /this\.messagePerf\.settle\(\s*agentId,\s*\(channel, payload\) => this\.emit\(channel, payload\),\s*messageEnd,\s*\(message, detail\) => void this\.appLogger\?\.info\("session-perf", message, detail\),?\s*\);/);
 	// message_update 终态（done/error）结算
 	assert.match(agentManager, /eventType === "message_end" \|\| eventType === "done" \|\| eventType === "error"/);
-	assert.match(agentManager, /this\.messagePerf\.settle\(agentId, \(channel, payload\) => this\.emit\(channel, payload\), partialMessage\);/);
+	assert.match(agentManager, /this\.messagePerf\.settle\(\s*agentId,\s*\(channel, payload\) => this\.emit\(channel, payload\),\s*partialMessage,\s*\(message, detail\) => void this\.appLogger\?\.info\("session-perf", message, detail\),?\s*\);/);
 	// 结算口径：ttft = 首字（正文首 delta 优先，无正文退回首 delta）− 请求发出时刻；
 	// total = 终态 − 请求发出时刻；tps = output tokens ÷ 生成期（首 delta → 终态）
 	const source = readTracker();

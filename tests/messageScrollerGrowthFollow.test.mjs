@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 import test from "node:test";
 
 const scrollerSource = readFileSync("src/renderer/src/components/agents/message-scroller.tsx", "utf8");
@@ -129,8 +130,14 @@ test("MessageScroller forwards restoreAt to timeline controller scroll api", () 
 test("timeline controller restores via engine restoreAt and keeps negative offset", () => {
 	const source = readFileSync("src/renderer/src/hooks/useSessionTimelineController.ts", "utf8");
 	// 保存锚点保留负偏移（视口顶部常被上一行底部占据，截断会导致恢复位置偏下）
-	assert.match(source, /offsetTop: rect\.top - viewportRect\.top,/);
-	assert.doesNotMatch(source, /offsetTop: Math\.max\(0, rect\.top - viewportRect\.top\)/);
+	// origin 真值：视口顶 = getBoundingClientRect().top + clientTop（IntersectionObserver 的
+	// root 相交矩形以 padding box 为界）。改回裸 viewportRect.top 或漏掉 clientTop 必须红。
+	assert.match(source, /function timelineViewportTop\(timeline: HTMLElement\): number \{/);
+	assert.match(source, /return timeline\.getBoundingClientRect\(\)\.top \+ clientTop;/);
+	assert.match(source, /offsetTop:\s*rect\.top\s*-\s*viewportTop\s*,/);
+	// 快路径（可见行集合）与回落路径（全量扫描）必须同基准，否则同一会话两次锚点算到不同的行。
+	assert.match(source, /expectedViewportTop:\s*rect\.top\s*-\s*viewportTop\s*,/);
+	assert.doesNotMatch(source, /offsetTop:\s*Math\.max\(\s*0\s*,\s*rect\.top\s*-\s*viewportTop\s*\)/);
 	// 恢复走引擎原子 API（引擎未挂上时回退原生定位）
 	assert.match(source, /api\?\.restoreAt/);
 	assert.match(source, /api\.restoreAt\(targetTop\)/);
@@ -208,4 +215,31 @@ test("stopReason flows from RPC message_end into ChatMessage", () => {
 	assert.match(projectorSource, /stopReason \? \{ stopReason \} : \{\}\)/);
 	// 渲染层判定行为（stop=final / toolUse 永不提升 / 无字段与 pending 回退）由
 	// tests/turnSegments.test.mjs 行为测试覆盖（20 用例），此处不再重复源码断言。
+});
+
+// ── 冷会话 entryId 导航（#401 复审 P0）──
+// 判据真值在 timelineRevealChannel（无依赖纯模块），宿主插件与时间线两端共用同一份：
+// 消息还没上屏时 targetIndex < 0 不能当成「目标不存在」，否则插件导航静默丢失。
+const revealChannel = loadTsCommonJs("src/renderer/src/hooks/timeline/timelineRevealChannel.ts");
+
+test("冷会话：目标不在已加载数据时必须挂起等待而不是放弃", () => {
+	const defer = (targetIndex, messageCount, surfaceLoading) => revealChannel.shouldDeferJumpUntilLoaded({ targetIndex, messageCount, surfaceLoading });
+	// 会话还没有任何消息投影（插件刚 selectSession）：等首批到达
+	assert.equal(defer(-1, 0, false), true);
+	// 首屏 / 补页在途：等加载完成
+	assert.equal(defer(-1, 12, true), true);
+	// 数据已就绪且目标确实不在其中：交回补页 / 放弃逻辑，不能无限挂起
+	assert.equal(defer(-1, 12, false), false);
+	// 命中已加载数据：不需要等
+	assert.equal(defer(7, 12, true), false);
+});
+
+test("reveal 事件在监听方晚挂载时会重派，超时仍优先", () => {
+	const plan = (input) => ({ ...revealChannel.planRevealAttempt(input) });
+	// 首次派发后仍没命中、未到重派间隔：先等
+	assert.deepEqual(plan({ found: false, eventDispatched: true, elapsedMs: 400, sinceDispatchMs: 300 }), { action: "wait", keepPolling: true });
+	// 超过重派间隔：再发一次（监听方此时可能才挂上）
+	assert.deepEqual(plan({ found: false, eventDispatched: true, elapsedMs: 1200, sinceDispatchMs: 1100 }), { action: "dispatch", keepPolling: true });
+	// 超时优先于重派
+	assert.deepEqual(plan({ found: false, eventDispatched: true, elapsedMs: 4000, sinceDispatchMs: 900 }), { action: "give-up", keepPolling: false });
 });

@@ -71,8 +71,11 @@ export const test = base.extend<AppFixture & { seedProjects: SeedProject[] | und
 		// 「Pi 环境检测」模态，Radix 会把主界面 aria-hidden → 所有 getByRole/toBeVisible 集体
 		// 失效（伪装成点击超时等业务失败，见 tab-context-menu.spec.ts 注释）。
 		// 要验证该弹窗自身的用例显式传 piEnvironmentChecked: false 覆盖。
+		// language 默认 zh-CN：settings.language 缺省是 "system"，会跟宿主语系走——本机 zh-CN
+		// 时弹中文、CI runner 是 en-US 就渲染 "Projects"，按中文文案定位的用例集体 30s 超时
+		// （2026-10 main 流水线实际红过）。要测语系切换的用例用 seedSettings 覆盖。
 		mkdirSync(join(userDataRoot, "profile"), { recursive: true });
-		writeFileSync(join(userDataRoot, "profile", "settings.json"), JSON.stringify({ piEnvironmentChecked: true, ...seedSettings }));
+		writeFileSync(join(userDataRoot, "profile", "settings.json"), JSON.stringify({ piEnvironmentChecked: true, language: "zh-CN", ...seedSettings }));
 		// 重定向 USERPROFILE 后，shell 文件夹解析要求配置目录骨架存在（见函数注释）；
 		// 骨架缺失会让主进程在 win32 上启动即崩，先补目录再 spawn。
 		if (process.platform === "win32") ensureWindowsProfileSkeleton(userDataRoot);

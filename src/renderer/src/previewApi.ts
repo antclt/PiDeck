@@ -104,6 +104,8 @@ let previewSettings: AppSettings = {
 	customThemeOverrides: {},
 	backgroundImage: "",
 	backgroundImageOpacity: 0.8,
+	weWorkshopDir: "",
+	weWallpaperId: "",
 	language: "system",
 	startupWindowMode: "last",
 	piEnvironmentChecked: true,
@@ -197,6 +199,9 @@ let previewSettings: AppSettings = {
 	// CUA 默认关闭：预览壳与主进程 SettingsStore 默认保持一致
 	cuaEnabled: false,
 	cuaAutoApprove: true,
+	// 浏览器 Agent 默认关闭 + 写动作默认免审批（与 SettingsStore 默认一致）
+	browserAgentEnabled: false,
+	browserAgentAutoApprove: true,
 	favoriteModels: [],
 	// 提供商与模型显示开关：与 SettingsStore 默认一致，预览壳默认全显示
 	hiddenProviders: [],
@@ -601,6 +606,9 @@ export function createPreviewApi(): PiDesktopApi {
 			pickFiles: async () => [],
 			pickBackgroundImage: async () => "",
 			removeBackgroundImage: async () => undefined,
+			pickWallpaperEngineDir: async () => "",
+			listWallpaperEngine: async () => ({ dir: "", items: [], error: "no-dir" as const }),
+			selectWallpaperEngine: async () => null,
 		},
 		// 自定义主题预览桩：返回空列表与拒绝保存，预览壳没有真实 userData 目录
 		customThemes: {
@@ -1674,6 +1682,9 @@ export function createPreviewApi(): PiDesktopApi {
 					files: { "models.json": {}, "auth.json": {}, "settings.json": {}, "mcp.json": { mcpServers: {} } },
 				}),
 			import: async () => ({ valid: true }),
+			// 设计预览：外部 agent 发现无真实文件可扫，返回空结果（不触真实文件系统）
+			discoverExternalAgents: async () => ({ sources: [], providers: [] }),
+			resolveExternalAgentKey: async () => ({ ok: false, error: "preview" }),
 			fetchModels: async () => ({
 				success: true,
 				models: [
@@ -2045,6 +2056,7 @@ export function createPreviewApi(): PiDesktopApi {
 				revision: 0,
 				agents: [],
 				settings: { selectionToolEnabled: true, systemSelectionEnabled: false, selectionToolAgentId: null, sessionAgentBindings: {} },
+				agentOrder: [],
 			}),
 			create: async () => {
 				throw new Error("preview stub");
@@ -2070,10 +2082,23 @@ export function createPreviewApi(): PiDesktopApi {
 			}),
 			/** 会话绑定在预览/Web 端没有落盘位置，返回空绑定表（不报错，避免「使用」路径炸掉）。 */
 			bindSession: async () => ({ selectionToolEnabled: true, systemSelectionEnabled: false, selectionToolAgentId: null, sessionAgentBindings: {} }),
+			/** 排序在预览里没有落盘位置：原样回显，不报错（市场本身也是空态）。 */
+			reorder: async (agentIds) => agentIds,
 			onChanged: () => () => {},
 			invoke: async () => ({ ok: false as const, errorKind: "spawn-failed" as const, message: "unavailable" }),
 			cancelInvoke: async () => ({ ok: false }),
 			onInvokeEvent: () => () => {},
+		},
+		// 收藏：预览/Web 端没有 userData/favorites.json 落盘位置，列表恒空、写入抛错（不伪造成功）。
+		favorites: {
+			list: async () => [],
+			add: async () => {
+				throw new Error("preview stub");
+			},
+			remove: async () => false,
+			removeMany: async () => 0,
+			// 列表恒空：排序无可命中的条目，与主进程「剔除未知 id」后的结果一致。
+			reorder: async () => [],
 		},
 		// 系统级划词浮窗：预览/Web 端没有独立窗口，全部 inert。
 		selectionTool: {

@@ -3,6 +3,7 @@ import { useAtom, useAtomValue } from "jotai";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronsDownUp, Folder, FolderTree, RefreshCw, X } from "lucide-react";
 import { Button } from "../ui-shadcn/button";
+import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
 import { FileSortControl } from "./FileSortControl";
 import { sortFileNodes, FILE_SORT_OPTIONS, FILE_SORT_DEFAULT_DIRECTION, type FileSortMode, type FileSortDirection } from "../../utils/fileTreeSort";
 import { compactMiddlePackages } from "../../utils/fileTreeCompact";
@@ -465,8 +466,10 @@ export function SessionFileSummary(props: {
 					{props.files.length} {t("app.files")}
 				</small>
 			</button>
-			{!collapsed && (
-				<>
+			{/* 折叠体走共享折叠原语（真高度渐变 + exit 后卸载 + reduced-motion 回退）；
+			    display:contents 根不生成盒子，折叠态零空档；列表与 +N 按钮合一收进单个折叠体。 */}
+			<Collapsible open={!collapsed} className="contents">
+				<CollapsibleContent>
 					<ul className="session-file-summary-list">
 						{visibleFiles.map((file) => {
 							const fileName = file.path.split(/[/\\]/).pop() ?? file.path;
@@ -484,8 +487,8 @@ export function SessionFileSummary(props: {
 							{fileListExpanded ? t("common.collapse") : t("drawer.moreFiles", { count: hiddenCount })}
 						</button>
 					)}
-				</>
-			)}
+				</CollapsibleContent>
+			</Collapsible>
 		</section>
 	);
 }

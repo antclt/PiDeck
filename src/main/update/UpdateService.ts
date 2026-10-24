@@ -284,6 +284,26 @@ export class UpdateService {
 		this.pushSnapshot();
 	}
 
+	/**
+	 * 用一次真实的 Pi CLI 版本检查结果覆盖快照里的 pi 节点，并立即推送。
+	 *
+	 * 为什么需要单独入口：pi 的更新检查有两条入口——后台每 2h 一轮的 checkNow，以及
+	 * 设置页的「检测 Pi 更新」（同时是应用内「更新 pi」完成后的复核）。后者不进本服务，
+	 * 不同步就会让侧栏设置按钮的圆点一直停在「pi 有新版本」，与设置页刚显示的
+	 * 「已是最新版本」自相矛盾（实测：应用内升到 1.4.0 后圆点要等下一轮 2h 检查才消失）。
+	 *
+	 * 调用方必须在真正跑过 `pi --version` 之后调用；这里只做状态收口，不再探测。
+	 */
+	applyPiCheckResult(result: PiUpdateCheckResult): void {
+		this.lastPi = {
+			currentVersion: result.currentVersion,
+			latestVersion: result.latestVersion,
+			hasUpdate: result.hasUpdate,
+			error: result.error,
+		};
+		this.pushSnapshot();
+	}
+
 	/** 当前快照（从持久化状态 + 最近一次检查/下载状态组装）。 */
 	getSnapshot(): AppUpdateStatusSnapshot {
 		const settings = this.deps.settingsStore.get();
@@ -489,8 +509,7 @@ export class UpdateService {
 	 *
 	 * 自动与手动共用 PiAiCatalogUpdater.update：下载双源兜底、manifest 校验不过不上盘、
 	 * 写覆盖层前备份上一版，所以「自动」只是省掉一次点击，不降低任何安全边界。
-	 * 失败或远端并不更新时保留「有更新」快照，用户仍可在设置页手动重试；
-	 * 成功则改写快照为已生效，避免设置页常驻一条已经处理掉的提示。
+	 * 失败时保留「有更新」快照（用户仍可在设置页手动重试）；成功则改写快照为已生效。
 	 */
 	private async autoApplyCatalogUpdate(): Promise<void> {
 		const checked = this.lastCatalog;
@@ -503,8 +522,11 @@ export class UpdateService {
 				return;
 			}
 			if (!applied.updated) {
-				// 远端不高于当前生效版本（例如另一实例刚更新过）：保留检查结果交给用户判断。
-				void this.deps.log?.("info", "Catalog auto update skipped: no newer catalog", { remote: checked.remoteVersion });
+				// 两条源都确认没有可写入的更新（远端不高于当前生效版本）：上一轮的「有更新」
+				// 已经不可兑现（检查走的源与能写入的源不一致，或另一实例刚更新过），
+				// 保留它只会让设置页常驻一条点了也只回「已是最新」的提示——改用同一链路重取结论。
+				void this.deps.log?.("info", "Catalog auto update skipped: no newer catalog", { remote: checked.remoteVersion, skipped: applied.skipped, remoteVersion: applied.remoteVersion, localVersion: applied.localVersion });
+				await this.refreshCatalogSnapshot();
 				return;
 			}
 			this.lastCatalog = { ok: true, remoteVersion: checked.remoteVersion, localVersion: checked.remoteVersion, hasUpdate: false };
@@ -513,6 +535,24 @@ export class UpdateService {
 			// 自动更新绝不能把后台检查变成失败：只记日志，快照保持「有更新」。
 			void this.deps.log?.("warn", "Catalog auto update failed", { error: toErrorMessage(error) });
 		}
+	}
+
+	/**
+	 * 用同一条检查链路重取目录结论并推送快照。
+	 *
+	 * 设置页的「更新到最新 / 还原 / 恢复上一个覆盖版」直接调 PiAiCatalogUpdater，
+	 * 不经过本服务；不回写快照的话，渲染层的「有新版本」提示与侧栏红点会一直留到下一轮
+	 * 定时检查（默认 2h），看上去就是「更新成功了但状态没变」。
+	 */
+	async refreshCatalogSnapshot(): Promise<void> {
+		if (!this.deps.checkCatalogUpdate) return;
+		try {
+			this.lastCatalog = await this.deps.checkCatalogUpdate();
+		} catch (error) {
+			void this.deps.log?.("warn", "Catalog update check failed", { error: toErrorMessage(error) });
+			return;
+		}
+		this.pushSnapshot();
 	}
 
 	private getAutoUpdater(): AutoUpdaterLike {

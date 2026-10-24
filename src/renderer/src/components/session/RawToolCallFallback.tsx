@@ -2,6 +2,7 @@ import { memo, useState } from "react";
 import { ChevronDown, ChevronRight, Unplug } from "lucide-react";
 import { t } from "../../i18n";
 import { TimelineMarker } from "./TimelineMarker";
+import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
 
 /**
  * RawToolCallFallback — 「疑似未解析工具调用原文」兜底卡片（issue #315）。
@@ -33,11 +34,14 @@ export const RawToolCallFallback = memo(function RawToolCallFallback(props: { te
 					<span className="shrink-0 text-text-faint">{lineCount}</span>
 					{expanded ? <ChevronDown className="size-3.5 shrink-0" aria-hidden="true" /> : <ChevronRight className="size-3.5 shrink-0" aria-hidden="true" />}
 				</button>
-				{expanded ? (
-					// 纯文本渲染：不走 markdown（吞标签/autolink 正是本卡片要避开的行为）。
-					// max-h 限高防超长原文撑爆时间线（资源边界规则）。
-					<pre className="m-0 max-h-96 overflow-auto border-t border-border-subtle px-3 py-2 text-caption text-text-secondary whitespace-pre-wrap break-all">{props.text}</pre>
-				) : null}
+				{/* 折叠体走共享折叠原语：真高度渐变 + exit 后卸载；display:contents 根不生成盒子，折叠态零空档。 */}
+				<Collapsible open={expanded} className="contents">
+					{/* 纯文本渲染：不走 markdown（吞标签/autolink 正是本卡片要避开的行为）。
+					    max-h 限高防超长原文撑爆时间线（资源边界规则）。 */}
+					<CollapsibleContent>
+						<pre className="m-0 max-h-96 overflow-auto border-t border-border-subtle px-3 py-2 text-caption text-text-secondary whitespace-pre-wrap break-all">{props.text}</pre>
+					</CollapsibleContent>
+				</Collapsible>
 			</article>
 		</TimelineMarker>
 	);

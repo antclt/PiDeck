@@ -1,10 +1,11 @@
-import { app, shell } from "electron";
+import { app } from "electron";
 import { existsSync, type Dirent } from "node:fs";
 import { cp, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { trashPath } from "../fs/trash";
+import { openSystemPath } from "../fs/openPath";
 import type { AppSettings, CreatePiSkillInput, PiSkillListResult, PiSkillLocation, PiSkillSummary } from "../../shared/types";
 import type { WslEnvironment } from "../wsl/WslPaths";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
@@ -14,6 +15,21 @@ const IMPORT_MAX_FILE_BYTES = 10 * 1024 * 1024;
 const IMPORT_MAX_TREE_BYTES = 50 * 1024 * 1024;
 const IMPORT_MAX_DEPTH = 32;
 const UNSAFE_IMPORT_TARGET = "Skill target is unavailable.";
+
+/**
+ * 技能目录递归扫描时跳过的条目（2027-02 性能审计）。
+ *
+ * 技能根是用户手工维护的目录，但用户常把整个仓库/工作副本放进去；node_modules、
+ * 各类构建产物与 .git 里永远不会有 SKILL.md，原实现却会一路递归到底——一次
+ * skills:list 就能扫出上千目录（实测本机 125 目录已需约 250 次 syscall）。
+ * 只跳过明确无关的产物目录与隐藏目录，不跳普通业务目录（技能可以嵌套）。
+ */
+const SKILL_WALK_SKIP_NAMES = new Set(["node_modules", "dist", "build", "out", "target", "coverage", "vendor", ".cache"]);
+
+/** 递归扫描是否跳过该目录项（隐藏目录 + 常见产物目录）。 */
+export function shouldSkipSkillWalkEntry(name: string): boolean {
+	return name.startsWith(".") || SKILL_WALK_SKIP_NAMES.has(name);
+}
 
 type ImportTreeState = { totalBytes: number };
 
@@ -112,7 +128,24 @@ export class SkillManager {
 		];
 	}
 
+	/**
+	 * 列表结果缓存（2027-02 性能审计）：list() 原先每次都对两个技能根做
+	 * mkdir → realpath → 递归 readdir → 逐个 readFile(SKILL.md 全文，只为 frontmatter)，
+	 * 本机 125 目录约 7-13ms、约 250 次 syscall；ComposerSkillPicker 打开、设置页打开、
+	 * 每次 toggle（前后各一次全扫）都会付。技能目录由用户手工维护、变更频率极低，
+	 * 用 1.5s TTL + 本类所有写操作显式失效：写后立刻列表一致，纯读路径几乎零成本。
+	 */
+	private listCache: { at: number; value: PiSkillListResult } | null = null;
+	private static readonly LIST_CACHE_TTL_MS = 1_500;
+
+	/** 技能根被本类改动后调用：下一次 list() 重新扫盘。 */
+	private invalidateListCache(): void {
+		this.listCache = null;
+	}
+
 	async list(): Promise<PiSkillListResult> {
+		const cached = this.listCache;
+		if (cached && Date.now() - cached.at < SkillManager.LIST_CACHE_TTL_MS) return cached.value;
 		const skills = (await Promise.all(this.locations.map((location) => this.scanLocation(location)))).flat();
 		// 按 name 去重，优先保留 pi-global 目录下的条目
 		// （避免 ~/.pi/agent/skills/ 和 ~/.agents/skills/ 不同步导致同名重复）
@@ -123,10 +156,13 @@ export class SkillManager {
 				seen.set(key, skill);
 			}
 		}
-		return { locations: this.locations, skills: Array.from(seen.values()) };
+		const value = { locations: this.locations, skills: Array.from(seen.values()) };
+		this.listCache = { at: Date.now(), value };
+		return value;
 	}
 
 	async create(input: CreatePiSkillInput): Promise<PiSkillSummary> {
+		this.invalidateListCache();
 		const location = this.requireLocation(input.locationId);
 		const name = this.normalizeSkillName(input.name);
 		const description = input.description.trim();
@@ -148,6 +184,7 @@ export class SkillManager {
 	 * unchanged, and a temporary sibling directory prevents partial installs.
 	 */
 	async importSkillDirectory(locationId: "pi-global" | "agents-global", sourceDirectory: string, targetName: string): Promise<void> {
+		this.invalidateListCache();
 		const location = this.requireLocation(locationId);
 		if (!targetName || this.normalizeSkillName(targetName) !== targetName || targetName.length > 64) {
 			throw new Error(this.translate("mainSkill.nameRequiredDetailed"));
@@ -269,12 +306,15 @@ export class SkillManager {
 	}
 
 	async toggle(skillPath: string, enabled: boolean): Promise<PiSkillSummary> {
+		this.invalidateListCache();
 		const skill = await this.findByPath(skillPath);
 		// 原生配置优先：迁移完成后弃用列表已清空，开关直接写 pi 原生过滤规则
 		// （`-<path>` 停用 / `+<path>` 启用），与 TUI 的 pi config 等价。
 		if (this.nativeToggle) {
 			const result = await this.nativeToggle(skill.path, enabled);
 			if (!result.ok) throw new Error(this.translate("mainSkill.toggleFailed", { error: result.error ?? "unknown" }));
+			// 变更后再次失效：toggle 内部 findByPath→list() 会把「改之前」的结果写进缓存
+			this.invalidateListCache();
 			return this.findByPath(skill.path);
 		}
 		// 兼容路径（原生服务未装配）：仍写 PiDeck 私有禁用列表。
@@ -287,6 +327,8 @@ export class SkillManager {
 			if (!enabled) nextList.push(skill.name);
 			await this.settingsPatcher({ disabledSkills: nextList });
 		}
+		// 同上：设置已变，缓存里是改之前的状态
+		this.invalidateListCache();
 		return this.findByPath(skill.path);
 	}
 
@@ -304,6 +346,7 @@ export class SkillManager {
 	}
 
 	async delete(skillPath: string): Promise<void> {
+		this.invalidateListCache();
 		const skill = await this.findByPath(skillPath);
 		// 目录型 skill 删除整个目录；根 markdown skill 仅删除单个 md 文件。
 		// 用户 skill 是内容资产：走系统回收站（可恢复）并记审计日志，拒绝 rm 硬删。
@@ -313,11 +356,11 @@ export class SkillManager {
 	async openFolder(skillPath?: string): Promise<void> {
 		if (!skillPath) {
 			await mkdir(this.locations[0].path, { recursive: true });
-			await shell.openPath(this.locations[0].path);
+			await openSystemPath(this.locations[0].path);
 			return;
 		}
 		const skill = await this.findByPath(skillPath);
-		await shell.openPath(skill.dir);
+		await openSystemPath(skill.dir);
 	}
 
 	/**
@@ -352,6 +395,8 @@ export class SkillManager {
 			if (wasUserOnly) {
 				await writeFile(targetPath, this.setFrontmatterBoolean(content, "disable-model-invocation", true), "utf8");
 			}
+			// 模板落盘同样是技能根变更：列表缓存必须失效（否则安装后 1.5s 内看不到）
+			this.invalidateListCache();
 			return { success: true, path: targetPath };
 		} catch (error) {
 			return { success: false, error: error instanceof Error ? error.message : String(error) };
@@ -428,6 +473,9 @@ export class SkillManager {
 		}
 		const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
 		for (const entry of entries) {
+			// 忽略开发产物与隐藏目录（2027-02 性能审计）：技能目录里的 node_modules / .git
+			// 会被原实现递归到底，一次列表就能扫出上千个目录（且永远不含 SKILL.md）。
+			if (shouldSkipSkillWalkEntry(entry.name)) continue;
 			const fullPath = join(dir, entry.name);
 			if ((await this.getEntryKind(fullPath, entry)) === "directory") {
 				await this.collectDirectorySkills(fullPath, location, out, nextAncestors);
@@ -517,6 +565,7 @@ export class SkillManager {
 	 *  markdown 技能的 skill.dir 是技能根目录（如 ~/.pi/agent/skills），绝不能当重命名
 	 *  目标，否则整个技能根目录会被改名搬走，其余技能全部从列表消失（数据丢失事故）。 */
 	async rename(skillPath: string, newName: string): Promise<PiSkillSummary> {
+		this.invalidateListCache();
 		const skill = await this.findByPath(skillPath);
 		const normalizedNew = this.normalizeSkillName(newName);
 		if (!normalizedNew) throw new Error(this.translate("mainSkill.nameRequired"));

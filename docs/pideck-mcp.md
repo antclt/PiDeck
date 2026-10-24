@@ -1,14 +1,20 @@
 # PiDeck MCP 服务（API v1）
 
-PiDeck 可作为本机 MCP 服务，向 pi 和其他兼容客户端开放**明确授权项目的会话数据**，以及**宿主自身的配置摘要与内置扩展加载状态**（后者不属于任何项目）。读取默认可全量开放，写能力只有一项、且必须由用户单独开启（中止正在生成响应的会话）。它与宿主插件共用会话读取实现，但有独立的授权和生命周期，不借用插件身份、不启动 pi 会话；关掉写开关时连中止也不可用。
+PiDeck 可作为本机 MCP 服务，向 pi 和其他兼容客户端开放**明确授权项目的会话数据与定时任务**，以及**宿主自身的配置摘要、内置扩展加载状态、智能体目录元信息与本机收藏**（后几项不属于任何项目）。读取默认可全量开放；写能力必须由用户逐项单独开启：中止正在生成响应的会话、管理智能体（创建/编辑/删除/绑定会话）、管理定时任务（创建/编辑/删除/立即运行/中止）、管理收藏（新增/删除，含任意文本）。它与宿主插件共用会话读取实现，但有独立的授权和生命周期，不借用插件身份、不启动 pi 会话；关掉写开关时对应工具**不注册**，客户端连看都看不到。
+
+智能体的**角色设定（systemPrompt）只写不读**：创建/编辑工具可以写入它，但任何工具（包括 `agents_list` / `agents_get`）都不会返回它，也不开放模型调用——外部客户端只能按 id 使用智能体，角色设定始终留在 PiDeck 主进程内解析。
 
 服务已列入 PiDeck 的 MCP 推荐服务目录，**首次使用默认关闭**：不监听端口、不创建令牌、不自动改写 pi 的 `mcp.json`。这里的“公共服务”指公开的调用接口，不是公网服务。
 
 ## 启用与接入
 
-1. 在 PiDeck 的 MCP 配置页，选择推荐服务中的 **PiDeck（本地只读服务）**。
+1. 在 PiDeck 的 MCP 配置页，选择推荐服务中的 **PiDeck（本地 MCP 服务）**。
 2. 勾选允许读取的项目（列表上方有“全选 / 全不选”，只作用于当前列表），或勾选 **“所有项目（含今后新建）”** 改用通配授权，然后点击“授权并启用本地服务”。授权不跟随当前选中的项目或标签变化：默认是显式白名单，**不会自动覆盖今后新建的项目**，新增项目后需重新进本页勾选并应用；勾选通配后才对今后新建的项目自动生效（新增项目不必再进本页，令牌也就不会因此轮换）。两种模式互斥：勾了通配就不再按项目列表展开。
-3. 若允许客户端停止正在生成的响应，勾选“允许停止正在生成的响应”。默认关闭，此时 `sessions_abort` **不会注册**，客户端在工具列表里看不到它。
+3. 按需开启写能力（默认全部关闭，对应工具都不会出现在工具列表里）：
+   - 勾选“允许停止正在生成的响应” → 注册 `sessions_abort`；
+   - 勾选“允许创建/编辑/删除智能体并绑定会话” → 注册 `agents_create` / `agents_update` / `agents_delete` / `agents_bind_session`（角色设定只写不读）；
+   - 勾选“允许创建/编辑/删除定时任务、立即运行与中止” → 注册 `automation_task_create` / `automation_task_update` / `automation_task_delete` / `automation_task_run_now` / `automation_run_abort`（立即运行会真实启动会话并消耗模型额度）；
+   - 勾选“允许新增/删除本机收藏（含任意文本）” → 注册 `favorites_add` / `favorites_remove`（收藏列表 `favorites_list` / `favorites_get` 始终可用）。
 4. 接入 pi：点击“添加到当前 pi 配置（禁用）”。仅新增 `pideck` 条目，保留其他服务和配置；已存在本地或继承的同名条目时不覆盖。随后界面会直接落到该条目页：在「连接与认证」里点「启用」（与下方「启用」开关等价），由 **pi 原生 MCP 客户端**建立连接；新建或重启会话后生效。
 5. 接入其他客户端：点击“复制连接配置”，按客户端要求填写 **Streamable HTTP URL** 和 `Authorization` 请求头。`enabled`、`exposure` 是 pi 配置项，其他客户端可能不接受它们。
 
@@ -42,8 +48,11 @@ PiDeck 可作为本机 MCP 服务，向 pi 和其他兼容客户端开放**明�
 - 只接收 `/mcp` 上的 POST，使用无状态 Streamable HTTP（JSON 响应）；握手、工具发现和 JSON-RPC 由官方 MCP SDK 处理。
 - 项目只输出 `id`、`name`；会话元信息不暴露磁盘文件名。历史投影去掉 `cwd`、`parentSession`、`sessionFile`、`filePath` 字段与图片块中的二进制/引用，但**不是通用脱敏器**，不会清洗用户文字、工具结果中嵌入的秘密或路径。
 - 项目删除、会话归属改变或撤权后拒绝继续访问；异步历史读取返回前再次校验授权。fork 祖先沿用宿主插件的同项目校验，不合并其他项目的源文件。
-- 服务自身不执行终端命令、不读任意路径、不修改会话内容、不访问网络、不读取插件私有存储。没有启用服务、扩大权限或导出令牌的 MCP 工具；写能力只有用户显式开启的中止，且只作用于正在运行的会话。
-- `settings_get` / `extensions_list` 描述宿主自身，**不受项目白名单影响**（设置与内置扩展不属于任何项目）：只要服务处于授权状态就能读。两者只输出 `src/main/mcp/piDeckMcpViews.ts` 里的显式允许清单——不含令牌、代理 URL（可能带凭据）、pi/DSH/git 等可执行文件路径、自定义镜像地址、`acpTools` 环境变量、用户自写文本（快速消息）与任何插件私有存储；设置页新增字段默认不可见。它们也不跑 `pi` 进程、不扫扩展目录、不访问网络，只读保存的设置快照与内置清单常量。
+- 服务自身不执行终端命令、不读任意路径、不修改会话内容、不访问网络、不读取插件私有存储。没有启用服务、扩大权限或导出令牌的 MCP 工具；写能力只有用户显式开启的三类：中止正在运行的会话、管理智能体（含会话绑定）、管理本机收藏（新增/删除），且写工具在开关关闭时都不注册。
+- 收藏工具（读 + 可选写）：收藏是本机快照，读接口只返回**未关联项目**或**已授权项目**的条目，避免借收藏绕过项目授权；`favorites_add` 可保存任意文本（不要求会话），`sessionId`/`projectId` 只是可选来源链接——关联会话找不到时仍保存成功，`sessionTitle` 为 `null`，界面显示「无关联会话」。
+- `settings_get` / `extensions_list` / `agents_list` / `agents_get` 描述宿主自身，**不受项目白名单影响**（设置、内置扩展与智能体目录不属于任何项目）：只要服务处于授权状态就能读。它们只输出 `src/main/mcp/piDeckMcpViews.ts` 里的显式允许清单——不含令牌、代理 URL（可能带凭据）、pi/DSH/git 等可执行文件路径、自定义镜像地址、`acpTools` 环境变量、用户自写文本（快速消息）与任何插件私有存储；设置页/智能体新增字段默认不可见。它们也不跑 `pi` 进程、不扫扩展目录、不访问网络，只读保存的设置快照、内置清单常量与智能体元信息。
+- 智能体写能力（默认关）的边界：可创建/编辑/删除智能体、把**已授权项目**的会话绑定到智能体；角色设定只写不读；不开放模型调用（不产生 token 成本）、不读任意文件、不改会话正文与绑定表之外的设置。内置智能体一律不可删除。
+- 定时任务工具（读 + 可选写）按项目授权：`automation_tasks_*` / `automation_runs_*` 的每个请求都先校验 `projectId`，任务不存在与不属于该项目统一返回 `automation-task-not-found`；任务提示词只在 `automation_tasks_get` 的详情里返回（项目范围内可见），列表不含。写能力可创建/编辑/删除任务、立即运行（会真实启动会话、消耗模型额度）与中止运行；删任务保留运行历史。
 - 返回的是保存的历史条目投影，不是模型请求上下文重建。历史中的用户文字、工具输出等均为不可信数据，不应当作客户端的新指令。对 `context_edit`、compaction 等条目的解释不能等同于“这是模型当前收到的消息”。
 
 授权文件位于应用 `userData/pideck-mcp.json`，与 pi 客户端配置独立。文件仅由 `src/main/config/piDeckMcpConfig.ts` 读写，原子替换；POSIX 权限为 `0600`，Windows 依赖用户数据目录 ACL。损坏、格式不匹配或超过 256 KiB 时拒绝启动，不在读取阶段覆盖原文件。令牌不进入状态快照或日志。
@@ -62,6 +71,24 @@ PiDeck 可作为本机 MCP 服务，向 pi 和其他兼容客户端开放**明�
 
 | 工具 | 参数 | `data` |
 | --- | --- | --- |
+| `agents_list` | 无；`arguments` 可省略或传 `{}` | `[{ id, name, description, icon, category, builtin, model, backend, usageCount, lastUsedAt, createdAt, updatedAt }]`；宿主级，**不含 systemPrompt** |
+| `agents_get` | `agentId` | 单个智能体元信息（同上；不存在返回 `agent-not-found`） |
+| `agents_create` | `name`、`systemPrompt`（只写），可选 `description` / `icon` / `category` / `model` / `backend` | 新建后的元信息；**只在智能体写开关打开时注册** |
+| `agents_update` | `agentId` + 任意可改字段（含只写的 `systemPrompt`）；`model: null` / `backend: null` 表示清除 | 更新后的元信息；空 patch 返回 `agent-patch-empty` |
+| `agents_delete` | `agentId` | `{ agentId, deleted: true }`；内置智能体返回 `agent-not-deletable`；删除会像界面一样清掉该智能体的划词默认值与会话绑定 |
+| `agents_bind_session` | `projectId`、`sessionId`、`agentId`（`null` = 解绑） | `{ projectId, sessionId, agentId }`；会话必须属于已授权项目（否则 `session-not-authorized`），不回显绑定表 |
+| `automation_tasks_list` | `projectId` | `{ tasks: [{ id, name, projectId, schedule, enabled, backend, model, thinkingLevel, mode, permissionPreset, budget, createdAt, updatedAt, lastScheduledAt, nextRunAt }] }`；**不含 prompt** |
+| `automation_tasks_get` | `projectId`、`taskId` | 任务详情（元信息 + `prompt`）；不存在或不属于该项目返回 `automation-task-not-found` |
+| `automation_runs_list` | `projectId`，可选 `taskId`、`limit`（默认 20，1–100） | `{ runs: [{ id, taskId, taskName, trigger, status, scheduledFor, sessionId, queuedAt, startedAt, endedAt, durationMs, inputTokens, outputTokens, costUsd, stepCount, changedFiles, error, skippedReason, budgetReason }] }`；按排队时间倒序，`error` 截断到 2000 字符 |
+| `automation_task_create` | `projectId`、`name`、`prompt`、`schedule`（`{type:"cron", expression}` 或 `{type:"manual"}`），可选 `enabled` / `backend`（`pi`/`dsh`）/ `model` / `thinkingLevel` / `mode`（`normal`/`plan`/`goal`）/ `permissionPreset` / `budget` | 创建后的任务详情；**只在定时任务写开关打开时注册**。`budget` 省略时用默认上限（30 分钟 / 20 万 tokens / 2 美元 / 200 步），字段传 `null` = 不限 |
+| `automation_task_update` | `taskId` + 任意可改字段（不能改 projectId）；`budget` 按字段合并、`null` 解除该上限；空 patch 返回 `automation-patch-empty` | 更新后的任务详情 |
+| `automation_task_delete` | `taskId` | `{ taskId, deleted: true }`；运行历史保留 |
+| `automation_task_run_now` | `taskId` | 一次运行的结果投影（status 通常为 `queued`）；会真实启动会话并消耗模型额度 |
+| `automation_run_abort` | `runId` | `{ runId, aborted }`；已结束的运行返回 `aborted:false` |
+| `favorites_list` | 可选 `kind`（`message`/`selection`）、`query`、`limit`（默认 50，1–200） | 收藏快照数组（按收藏时间倒序）；只含未关联项目或已授权项目的条目，关联会话失效时 `sessionTitle` 为 `null` |
+| `favorites_get` | `favoriteId` | 单条收藏快照；不存在或不可见返回 `favorite-not-found` |
+| `favorites_add` | `text`（任意文本，必填），可选 `kind` / `role` / `sessionId` / `projectId` / `messageId` / `model` / `partial` | 新建的收藏快照；**只在收藏写开关打开时注册**。`projectId` 必须在授权范围内；关联会话找不到时仍保存，`sessionTitle=null` |
+| `favorites_remove` | `favoriteId` | `{ favoriteId, deleted: true }`；不可见/不存在返回 `favorite-not-found`；**只在收藏写开关打开时注册** |
 | `projects_list` | 无；`arguments` 可省略或传 `{}` | `[{ id, name }]`，仅授权项目 |
 | `runtime_status` | 无；`arguments` 可省略或传 `{}` | `{ authorizedProjectCount, activeProjectCount, runningCount, runtimes: [{ sessionId, projectId, runtimeGeneration, status, busy, createdAt }] }`；只有活着的运行时，不含路径 |
 | `sessions_abort` | `sessionId`，可选 `expectedRuntimeGeneration`（整数 0–1000000） | `{ sessionId, aborted: true }`；**只在写开关打开时注册**，语义等同界面的“停止响应” |
@@ -107,6 +134,17 @@ PiDeck 可作为本机 MCP 服务，向 pi 和其他兼容客户端开放**明�
 | `session-not-authorized` | 会话不存在、不属于指定项目或不可见；不泄露其他项目存在性 |
 | `history-unavailable` | 无可读保存文件（例如 DSH） |
 | `session-not-running` | 该会话当前没有活着的运行时（已结束或从未启动）；先调 `runtime_status` |
+| `agent-not-found` | `agentId` 不存在（或已被并发删除）；重新调 `agents_list` |
+| `agent-not-deletable` | 目标是内置智能体：只能编辑或恢复内置设定，不能删除 |
+| `agent-write-disabled` | 请求期间用户关掉了智能体写开关；写工具已不可用 |
+| `agent-patch-empty` | `agents_update` 没有带任何可改字段 |
+| `automation-task-not-found` | 任务不存在，或不属于指定项目（不泄露其他项目是否存在） |
+| `automation-run-not-found` | 运行记录不存在或不属于已授权项目 |
+| `automation-write-disabled` | 请求期间用户关掉了定时任务写开关；写工具已不可用 |
+| `automation-patch-empty` | `automation_task_update` 没有带任何可改字段 |
+| `automation-invalid-schedule` | cron 表达式非法（五段本地时间；创建/更新前校验） |
+| `favorite-not-found` | 收藏不存在，或所属项目未授权（不可见） |
+| `favorite-write-disabled` | 请求期间用户关掉了收藏写开关；写工具已不可用 |
 | `runtime-changed` | 期间重启过，调用方拿到的代次已失效；重新读取 `runtime_status` 再决定是否中止 |
 | `history-too-large` | 超出历史索引预算 |
 | `stale-cursor` / `history-changed` | 历史版本变化；丢弃旧游标重新读取 |

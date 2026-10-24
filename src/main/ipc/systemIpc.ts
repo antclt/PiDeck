@@ -21,6 +21,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { PiMcpCli } from "../pi/piMcpCli";
 import { piChangelogService } from "../pi/PiChangelogService";
 import { validateMcpConfigFile } from "../config/mcpConfig";
+import { discoverExternalAgentProviders, resolveExternalAgentKey } from "../config/externalAgentDiscovery";
 import { PiResourceConfigService } from "../config/PiResourceConfigService";
 import { PiResourceStateStore } from "../config/PiResourceStateStore";
 import { tmpdir } from "node:os";
@@ -40,6 +41,7 @@ import type { RpcLogger } from "../logging/RpcLogger";
 import type { SessionRuntimeCoordinator } from "../sessions/SessionRuntimeCoordinator";
 import { resolveConfigProxyTarget } from "../sessions/sessionProxyPolicy";
 import { setConfiguredGitPath } from "../git/gitExecutable";
+import { openSystemPath } from "../fs/openPath";
 import { applyTrayLogoStyle, applyWindowLogoStyle } from "../appWindowLogo";
 import { syncTaskbarShortcutIcon } from "../appTaskbarIdentity";
 import { detectDshRunnerNode } from "../dsh/dshRunnerNode";
@@ -298,6 +300,8 @@ export type SystemIpcDeps = {
 		notifySeen: (kind: "app" | "pi", version: string) => Promise<void>;
 		skipVersion: (version: string) => Promise<void>;
 		checkNow: () => Promise<void>;
+		/** 把一次真实的 Pi CLI 版本检查结果同步进后台快照（设置页检查/应用内更新后调用）。 */
+		applyPiCheckResult: (result: import("../../shared/types").PiUpdateCheckResult) => void;
 		downloadNow: () => Promise<void>;
 		installNow: () => void;
 		applyAutoDownloadPreference: () => void;
@@ -534,6 +538,15 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			error: status.error,
 			forceWslProbe,
 		});
+		// 探测到的版本与后台更新快照不一致 = 快照已过期（pi 被外部升级过）：主动补一轮检查，
+		// 否则侧栏设置按钮的「有新版本」圆点会一直停在已被超越的版本上，直到下一轮 2h 定时检查。
+		// 快照尚未建立（首启首查前）时跳过：启动调度自己会查，不必提前打一轮网络。
+		const snapshotPiVersion = updateService?.getSnapshot().piCli?.currentVersion;
+		if (updateService && status.installed && status.version && snapshotPiVersion && snapshotPiVersion !== status.version) {
+			void updateService.checkNow().catch((error: unknown) => {
+				appLogger.warn("pi", "Pi update snapshot refresh failed", { error: error instanceof Error ? error.message : String(error) });
+			});
+		}
 		return status;
 	});
 
@@ -1108,6 +1121,9 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	if (extensionManager) {
 		ipcMain.handle(ipcChannels.piUpdateCheck, async () => {
 			const result = await extensionManager.checkPiUpdate();
+			// 这次检查已经真跑过 `pi --version`：同步给后台快照，否则应用内「更新 pi」成功后
+			// 侧栏圆点仍停在「pi 有新版本」（与设置页刚显示的「已是最新版本」矛盾）。
+			updateService?.applyPiCheckResult(result);
 			void appLogger.info("pi", "Pi update check completed", { currentVersion: result.currentVersion, latestVersion: result.latestVersion, hasUpdate: result.hasUpdate, error: result.error });
 			return result;
 		});
@@ -1528,7 +1544,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	// 会自动选择系统文件管理器（Windows 资源管理器 / macOS Finder / Linux xdg-open），
 	// 不手拼平台命令，避免 Windows 路径空格/分隔符问题。
 	ipcMain.handle(ipcChannels.appOpenDataDir, async (): Promise<{ ok: boolean; error?: string }> => {
-		const error = await shell.openPath(app.getPath("userData"));
+		const error = await openSystemPath(app.getPath("userData"));
 		return error ? { ok: false, error } : { ok: true };
 	});
 
@@ -1721,7 +1737,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			await reactToPetSettings(prevSettings, settings);
 		}
 		// CUA 开关：开启时启动进程内 MCP 端点并写入 pi 的 mcp.json，关闭时停端点并注销。
-		if ("cuaEnabled" in patch && typeof reactToCuaSettings === "function") {
+		if (("cuaEnabled" in patch || "browserAgentEnabled" in patch) && typeof reactToCuaSettings === "function") {
 			await reactToCuaSettings(prevSettings, settings);
 		}
 		if ("desktopProxyEnabled" in patch || "desktopProxyUrl" in patch || "desktopProxyBypass" in patch) {
@@ -2103,6 +2119,25 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		}
 		void appLogger.info("config", "Config imported", { bytes: Buffer.byteLength(packageJson, "utf8"), valid: result.valid });
 		return result;
+	});
+	// 外部 agent 配置发现：只读扫描，入参无；key 只以掩码返回。
+	ipcMain.handle(ipcChannels.configDiscoverExternalAgents, async () => {
+		try {
+			return await discoverExternalAgentProviders();
+		} catch (error) {
+			// 单源失败已在模块内吸收；这里只兑底扫描器本身抛错，不影响其他 config 通道。
+			void appLogger.warn("config", "External agent discovery failed", { error: error instanceof Error ? error.message : String(error) });
+			return { sources: [], providers: [] };
+		}
+	});
+	// 导入确认后取真实 key：sourceId 白名单字符集校验（只允许 a-z0-9-: .），防止拼路径逃逸；
+	// 返回的 key 只出现在本次响应里，调用方（渲染层）立即写入未保存草稿。
+	ipcMain.handle(ipcChannels.configResolveExternalAgentKey, async (_event, sourceId: unknown) => {
+		if (typeof sourceId !== "string" || sourceId.length === 0 || sourceId.length > 80 || !/^[a-z0-9:.-]+$/.test(sourceId)) {
+			return { ok: false as const, error: "invalid source id" };
+		}
+		void appLogger.info("config", "External agent key resolved", { sourceId });
+		return resolveExternalAgentKey(sourceId);
 	});
 	ipcMain.handle(ipcChannels.configFetchModels, async (_event, payload: { baseUrl: string; apiKey: string; apiType?: string; headers?: Record<string, string>; proxyMode?: string }) => {
 		// proxyMode 白名单收窄（渲染层不可信），再解析成主进程代理策略。

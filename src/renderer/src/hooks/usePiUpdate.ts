@@ -21,6 +21,11 @@ export function usePiUpdate(options: UsePiUpdateOptions) {
 	const [piStatus, setPiStatus] = useState<PiInstallStatus | null>(null);
 	const [piChecking, setPiChecking] = useState(false);
 	const [environmentDialog, setEnvironmentDialog] = useState(false);
+	/**
+	 * 「安装引导」预览：开发时本机 pi 已装好，但仍想看清未安装态长什么样。
+	 * 置 true 时弹窗无视检测结果直接渲染一键安装面板。只由开发入口打开，产品流程不会置位。
+	 */
+	const [environmentSetupPreview, setEnvironmentSetupPreview] = useState(false);
 	// 探测到的全部 pi 安装（含官方 managed 安装）。null = 尚未检测过。
 	// 只有一份时 UI 不需要选择；多份时必须让用户自己选（静默用其中一份是本次要修的坑）。
 	const [piInstallations, setPiInstallations] = useState<PiInstallation[] | null>(null);
@@ -174,7 +179,7 @@ export function usePiUpdate(options: UsePiUpdateOptions) {
 	);
 
 	const checkPiInstall = useCallback(
-		async (source: "startup" | "manual" = "manual") => {
+		async (source: "startup" | "manual" = "manual", runOptions?: { keepOpen?: boolean }) => {
 			setSettingsOpen(false);
 			setPiChecking(true);
 			setEnvironmentDialog(true);
@@ -194,14 +199,28 @@ export function usePiUpdate(options: UsePiUpdateOptions) {
 					// 但不能因此每次启动都强制弹一次（用户也可以从设置页随时切换）。
 					const marked = await api.settings.update({ piEnvironmentChecked: true });
 					setSettings(marked);
-					if (canAutoClose) window.setTimeout(() => setEnvironmentDialog(false), 3000);
+					if (canAutoClose && !runOptions?.keepOpen) window.setTimeout(() => setEnvironmentDialog(false), 3000);
 				}
-				if (next.installed && source === "manual" && canAutoClose) window.setTimeout(() => setEnvironmentDialog(false), 3000);
+				if (next.installed && source === "manual" && canAutoClose && !runOptions?.keepOpen) window.setTimeout(() => setEnvironmentDialog(false), 3000);
+				// 回传给调用方（一键安装的「重新检测」步骤据此判定装完能不能看到 pi）。
+				return next;
 			} finally {
 				setPiChecking(false);
 			}
 		},
 		[api, setPiStatus, setPiChecking, setSettings, setSettingsOpen, setEnvironmentDialog, persistPiInstall, loadPiInstallations],
+	);
+
+	/**
+	 * 手动打开「环境检测 / 安装引导」（命令面板、开发预览共用）。
+	 * previewSetup=true 时固定渲染未安装态的一键安装面板，用来在不拆 PATH 的情况下看效果。
+	 */
+	const openEnvironmentGuide = useCallback(
+		(options?: { previewSetup?: boolean }) => {
+			setEnvironmentSetupPreview(options?.previewSetup === true);
+			void checkPiInstall("manual", { keepOpen: options?.previewSetup === true });
+		},
+		[checkPiInstall],
 	);
 
 	const checkPiInstallInline = useCallback(async () => {
@@ -508,6 +527,9 @@ export function usePiUpdate(options: UsePiUpdateOptions) {
 		piCustomPaths,
 		environmentDialog,
 		setEnvironmentDialog,
+		environmentSetupPreview,
+		setEnvironmentSetupPreview,
+		openEnvironmentGuide,
 		piUpdating,
 		piUpdateChecking,
 		piUpdateCheck,

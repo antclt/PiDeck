@@ -45,3 +45,38 @@ test("searchWebMessages: 空查询或无命中返回空数组", () => {
 	assert.deepEqual(Array.from(searchWebMessages(messages, "")), []);
 	assert.deepEqual(Array.from(searchWebMessages(messages, "zzz")), []);
 });
+
+// ── 全会话检索（#13）：后端命中到弹层命中项的映射 ────────────────────────────
+const { remoteHitsFromResult } = loadTsCommonJs("src/renderer/src/web/useWebSessionSearch.ts", {
+	stubs: { react: { useEffect() {}, useMemo: (fn) => fn(), useRef: (value) => ({ current: value }), useState: (value) => [value, () => {}] } },
+});
+
+test("remoteHitsFromResult: 取第一个会话的命中并映射成弹层命中项", () => {
+	const result = {
+		sessions: [
+			{
+				filePath: "/x/session.jsonl",
+				updatedAtMs: 1,
+				hitCount: 3,
+				matches: [
+					{ messageId: "a1", role: "user", timestampMs: 1, snippet: "first" },
+					{ messageId: "a2", role: "assistant", timestampMs: 2, snippet: "second" },
+				],
+			},
+		],
+		totalHitSessions: 1,
+		truncated: false,
+	};
+	assert.deepEqual(
+		remoteHitsFromResult(result).map((hit) => JSON.parse(JSON.stringify(hit))),
+		[
+			{ id: "a1", role: "user", snippet: "first" },
+			{ id: "a2", role: "assistant", snippet: "second" },
+		],
+	);
+});
+
+test("remoteHitsFromResult: null（检索源不可用）返回空数组而不是抛错", () => {
+	assert.equal(remoteHitsFromResult(null).length, 0);
+	assert.equal(remoteHitsFromResult({ sessions: [], totalHitSessions: 0, truncated: false }).length, 0);
+});

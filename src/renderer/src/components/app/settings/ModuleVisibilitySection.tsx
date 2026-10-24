@@ -3,7 +3,7 @@ import { useAtomValue } from "jotai";
 import type { AppSettings } from "../../../../../shared/types";
 import { HIDEABLE_MODULE_IDS, isModuleHidden, toggleHiddenModule, type HideableModuleId } from "../../../../../shared/hiddenModules";
 import { t, type TranslationKey } from "../../../i18n";
-import { imageGenConfigAtom, videoGenConfigAtom, sessionRecordsAtom, sessionRuntimeByIdAtom } from "../../../atoms";
+import { automationActiveRunsAtom, imageGenConfigAtom, videoGenConfigAtom, sessionRecordsAtom, sessionRuntimeByIdAtom } from "../../../atoms";
 import { useFeishuBridge } from "../../../hooks/useFeishuBridge";
 import { Badge } from "../../ui-shadcn/badge";
 import { SettingsSection } from "./SettingsStorageTab";
@@ -34,6 +34,10 @@ const MODULE_LABEL_KEYS: Record<HideableModuleId, TranslationKey> = {
 	process: SETTINGS_TAB_LABEL_KEYS.process,
 	dsh: "settings.modules.dsh",
 	respondingTips: "settings.modules.respondingTips",
+	// 页面式工作区：标题与页面 Tab / 侧栏入口同源（automation.title / agentMarket.title）
+	automation: "automation.title",
+	agents: "agentMarket.title",
+	favorites: "favorites.title",
 };
 
 /** 每个模块隐藏后受影响的入口说明（行描述）。 */
@@ -51,6 +55,9 @@ const MODULE_DESC_KEYS: Record<HideableModuleId, TranslationKey> = {
 	process: "settings.modules.processDesc",
 	dsh: "settings.modules.dshDesc",
 	respondingTips: "settings.modules.respondingTipsDesc",
+	automation: "settings.modules.automationDesc",
+	agents: "settings.modules.agentsDesc",
+	favorites: "settings.modules.favoritesDesc",
 };
 
 /**
@@ -59,6 +66,9 @@ const MODULE_DESC_KEYS: Record<HideableModuleId, TranslationKey> = {
  * 隐藏只收起 UI 入口，不清配置、不停后台功能，所以模块仍在运行/已启用时在标题旁挂
  * 「运行中 / 已启用」徽标——用户关掉入口后不至于忘了它还在跑（issue #248 维护者要求）。
  * 输入框底栏的入口（含模式选择器）归「输入框功能显示」分区，不列在这里。
+ * 定时任务 / 智能体 / 收藏是会话 Tab 栏里的页面式工作区（不是设置页）：隐藏只摘掉侧栏与项目菜单入口，
+ * 页面本身仍可经命令面板（Ctrl+P）打开，已建任务照常调度、智能体绑定照常生效、收藏快照照常留在本机。
+ *
  * 活动状态取自各模块现成的数据源，不新增 IPC：
  * - 飞书：Bridge 连接态（useFeishuBridge 内部订阅 IPC 推送）
  * - DSH：有 backend=dsh 且 runtime 未关闭的会话
@@ -75,6 +85,8 @@ export const ModuleVisibilitySection = memo(function ModuleVisibilitySection(pro
 	const videoGenConfig = useAtomValue(videoGenConfigAtom);
 	const sessionRecords = useAtomValue(sessionRecordsAtom);
 	const runtimeById = useAtomValue(sessionRuntimeByIdAtom);
+	// 定时任务：有正在执行的任务时挂「运行中」徽标（隐藏入口后仍提醒它还在跑）
+	const activeRuns = useAtomValue(automationActiveRunsAtom);
 	// 会话目录里带 DSH 后端且进程未关闭的会话数：closed/detached 的不算「还在跑」
 	const dshActive = useMemo(() => Object.values(sessionRecords).some((record) => record.backend === "dsh" && runtimeById[record.id] !== undefined && runtimeById[record.id]?.status !== "closed" && runtimeById[record.id]?.status !== "detached"), [sessionRecords, runtimeById]);
 
@@ -97,11 +109,15 @@ export const ModuleVisibilitySection = memo(function ModuleVisibilitySection(pro
 			case "videogen":
 				// 与生图同口径：有配置过的供应商就标「已配置」（按需请求，无运行态）
 				return videoGenConfig.providers.length > 0 ? "settings.modules.statusConfigured" : null;
+			case "automation":
+				return activeRuns.length > 0 ? "settings.modules.statusRunning" : null;
 			case "usage":
 			case "process":
 			case "acp":
 			case "hostplugins":
 			case "respondingTips":
+			case "agents":
+			case "favorites":
 				return null;
 		}
 	};

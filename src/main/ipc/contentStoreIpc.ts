@@ -1,5 +1,6 @@
-import { ipcMain, shell } from "electron";
+import { ipcMain } from "electron";
 import { ipcChannels } from "../../shared/ipc";
+import { openSystemPath } from "../fs/openPath";
 import { BUILTIN_CONTENT_UPDATE_ALLOWED_BRANCHES, BUILTIN_CONTENT_UPDATE_DEFAULT_BRANCH, type BuiltinContentUpdater } from "../updates/builtinContentUpdater";
 import type { PromptStoreUpdater } from "../prompts/promptStoreUpdater";
 import type { SkillStoreUpdater } from "../skills/skillStoreUpdater";
@@ -34,7 +35,7 @@ export function registerContentStoreIpc(updater: PromptStoreUpdater | SkillStore
 	ipcMain.handle(channels.restorePrevious, () => updater.restorePrevious());
 	ipcMain.handle(channels.openDir, async () => {
 		// 打开当前生效目录（覆盖层优先，否则内置）：路径由主进程解析，渲染层不传路径。
-		const error = await shell.openPath(updater.resolveEffectiveDir());
+		const error = await openSystemPath(updater.resolveEffectiveDir());
 		if (error) throw new Error(error);
 	});
 }

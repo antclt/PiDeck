@@ -6,6 +6,7 @@ import { selectAtom } from "jotai/utils";
 import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
 
 const source = readFileSync("src/renderer/src/hooks/useSessionTimelineController.ts", "utf8");
+const visibleRowsSource = readFileSync("src/renderer/src/hooks/timeline/useVisibleTimelineRows.ts", "utf8");
 
 /**
  * 时间线控制器模块图。
@@ -116,13 +117,19 @@ test("anchor restoration preserves its effective tail window and expands only wh
 test("scroll events synchronously retain an anchor before a same-task session switch", () => {
 	// rAF remains the coalesced persistence path, but the last DOM snapshot must
 	// exist before React can commit a tab change and cancel the pending frame.
-	assert.match(source, /currentAnchorRef\.current = computeCurrentAnchor\(\);[\s\S]*?if \(scrollAnchorFrameRef\.current != null\) return;\s*scrollAnchorFrameRef\.current = requestAnimationFrame/);
+	assert.match(source, /currentAnchorRef\.current = computeCurrentAnchor\(visibleRows\);[\s\S]*?if \(scrollAnchorFrameRef\.current != null\) return;\s*scrollAnchorFrameRef\.current = requestAnimationFrame/);
+	// 同一 scroll 事件只读一次可见行：锚点与浏览钉共用快照，rAF 重算复用最近一份。
+	assert.match(source, /scrollVisibleRowsRef\.current = visibleRows;/);
+	assert.match(source, /currentAnchorRef\.current = computeCurrentAnchor\(scrollVisibleRowsRef\.current\);/);
 });
 
 test("scroll anchors prefer stable turn roots over collapsible execution children", () => {
 	// 工具卡/思考步骤会随执行过程自动收起卸载；优先 user / run 根节点才能在
 	// 切回时仍找到同一 messageId，而非退化到顶部。
-	assert.match(source, /"article\.user-turn\[data-message-id\], \.turn-row\[data-message-id\]"/);
+	// 选择器真值收敛在 useVisibleTimelineRows 的 ROOT_ROW_SELECTOR；控制器全量扫描直接引用它，
+	// 不再各抄一份字面量（快路径与回落路径漂移会让同一会话内两次锚点计算选中不同的行）。
+	assert.match(visibleRowsSource, /export const ROOT_ROW_SELECTOR = "article\.user-turn\[data-message-id\], \.turn-row\[data-message-id\]";/);
+	assert.match(source, /querySelectorAll<HTMLElement>\(\s*ROOT_ROW_SELECTOR\s*\)/);
 	assert.match(source, /if \(stableAnchor\) return stableAnchor;/);
 	assert.match(source, /return findAnchor\(timeline\.querySelectorAll<HTMLElement>\("\[data-message-id\]"\)\);/);
 });

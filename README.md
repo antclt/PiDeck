@@ -11,7 +11,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.9.5-blue)
+![Version](https://img.shields.io/badge/version-0.9.6-blue)
 
 国内 AtomGit 托管：https://atomgit.com/ayuayue/PiDeck
 <!-- 预留 AtomGit G-Star 徽章位（替换占位链接后启用）
@@ -101,24 +101,25 @@
 
 ## 📋 更新日志
 
-> **最新版本 v0.9.5**（2026-10-21）
+> **最新版本 v0.9.6**（2026-10-24）
 
-### v0.9.5 更新亮点
-- 🚀 **轨迹检查器重做：按轮折叠，长会话不再拖慢界面**
-- 🚀 **轨迹面板显示当轮真实的系统提示词与用量**
-- 🚀 **对话里的图片终于能看**
-- 🚀 **智能体：从弹窗变成市场，也变成页面 Tab**
-- 🚀 **应用内划词翻译**
-- 🚀 **输入预测：回合结束后直接给出下一句**
-- 🚀 **时间线右键复制与流式划选保持**
-- 🚀 **运行控制常驻会话头，`/reload` 热重载**
-- 🚀 **宿主插件：卡片行 + 从 GitHub 安装**
-- 🚀 **更新页按设备推荐安装包**
-- 🚀 **DSH：模型可声明图片输入，会话启动前就能读技能目录**
-- ✨ **冷启动的会话扫描快 38 倍**
-- ✨ **首屏少加载约 0.86MB**
-- ✨ **安装包小约 6.3MB**
-- ✨ **轮末「修改的文件」从常驻卡片改成每轮结尾的 chip 行**
+### v0.9.6 更新亮点
+- 🚀 **内置浏览器 Agent：pi 能操作内置浏览器**
+- 🚀 **Wallpaper Engine 视频壁纸**
+- 🚀 **收藏：整条回复与划选片段**
+- 🚀 **PiDeck 的数据接入 MCP**
+- 🚀 **环境设置页重做**
+- 🚀 **模型配置一键导入**
+- 🚀 **设置页侧栏搜索**
+- 🚀 **会话定位轴重做**
+- 🚀 **DSH 自动重试可见**
+- 🚀 **Web 端：回合内排队发送与会话内搜索**
+- 🚀 **同步 pi 1.4.0**
+- 🚀 **Figma MCP OAuth 直连**
+- ✨ **时间线虚拟化：长会话滚动不再重扫全列表**
+- ✨ **一整轮内存收口**
+- ✨ **流式与 RPC 热路径**
+- ✨ **提示词库与技能商店更快**
 
 [查看完整更新日志 →](CHANGELOG.zh-CN.md)
 

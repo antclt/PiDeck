@@ -102,22 +102,25 @@ CUA 以 **主进程内 MCP Server** 形式挂载到 pi：PiDeck 主进程用 `@m
 
 ### 4.2 工具清单
 
-#### `cua_capture` — 整屏截图
+#### `cua_capture` — 单屏截图
 ```json
 {
   "name": "cua_capture",
-  "description": "Capture the full screen and return a JPEG image.",
+  "description": "Capture one display and return a JPEG image. displayId comes from cua_get_state.displays (a displayId or sourceId) or is \"primary\". The response screenRect is that display in absolute click coordinates: x = screenRect.x + imageX * screenRect.width / width, y = screenRect.y + imageY * screenRect.height / height.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "displayId": { "type": "string", "description": "Optional display identifier; omit for primary." },
+      "displayId": { "type": "string", "description": "Display to capture: a displayId or sourceId from cua_get_state.displays, or \"primary\". Omit for primary." },
       "maxLongEdge": { "type": "integer", "default": 1280, "description": "Resize so the longer edge <= this." },
       "quality": { "type": "integer", "default": 75, "description": "JPEG quality 1-100." }
     }
   }
 }
 ```
-- 返回 `image_url`（base64 data URL）+ 元数据（width/height/displayId/timestampMs）。
+- 返回 `image_url`（base64 data URL）+ 元数据（width/height/displayId/**screenRect**/screenDisplayId/scaleFactor/isPrimary/timestampMs）。
+- **坐标契约**：`screenRect` 是该屏在绝对点击坐标空间（物理像素、可负）中的矩形；模型用它把截图像素换算成 `cua_click` 的坐标。没有这个字段时，200% 缩放的副屏截图是没法点的（图像被缩过，DIP≠物理，工具面里也没有别处能查到屏幕位置）。
+- `displayId` 省略 = **主屏**（按 `source.display_id === primaryDisplay.id` 匹配，不依赖 `sources[0]` 顺序——实测本机 `sources[0]` 是副屏）；也可传 source id（`screen:0:0`）或 Electron display id。
+- `thumbnailSize` 请求值 = `maxLongEdge`：Electron 的 thumbnail 会按请求框缩放（可放大），旧的 8192 上限等于每帧先放大到 8K 再缩回 1280，双重采样、更慢更糊。
 - 预算 ≤ 190KB base64；默认 1280 长边/quality 75 可在 2560×1440 场景下压到 ~100KB。
 
 #### `cua_list_windows` — 列出可见顶层窗口
@@ -192,7 +195,9 @@ CUA 以 **主进程内 MCP Server** 形式挂载到 pi：PiDeck 主进程用 `@m
 ```
 
 #### `cua_get_state` — 读取 CUA 状态
-只读，无需审批：返回当前 display 信息、杀开关状态、最近审批结果等。
+只读，无需审批：返回 `display`（主屏尺寸）、`displays[]`（每块屏的 displayId/label/isPrimary/scaleFactor/bounds，bounds 为绝对点击坐标即物理像素）、`virtualDesktop`（所有屏的并集矩形）、杀开关状态、最近审批结果等。
+
+> 多显示器：`cua_click`/`cua_scroll` 与 `cua_list_windows` 的 rect 都在**物理虚拟桌面**坐标（原点可能为负）。`display.bounds = DIP bounds × scaleFactor`，逐屏换算后与 `GetSystemMetrics(SM_X/Y/CX/CYVIRTUALSCREEN)` 严格对账（本机 100%+200% 双屏实测并集完全一致）。
 
 ---
 
@@ -297,10 +302,11 @@ pi 的 `pi-mcp-adapter` 以 HTTP transport 连接（原生支持 `url` 字段）
 - 待办：端到端实机验证（开启设置 → pi 列到 6 个 tool → 只读可用 → 写操作弹审批）。
 
 ### 二期项
-- 多显示器（VIRTUALDESK 跨虚拟桌面、多 source 映射）。
 - UIA 读树（Windows 侧 AX 等价物）。
 - 写类 tool 补齐 `agentId + runtimeGeneration`。
 - 清理冗余 `CuaApprovalServer.ts` 及其测试。
+
+> 多显示器已交付（原二期项）：`cua_get_state.displays` + `cua_capture.screenRect`。实测结论是注入链路（SendInput + `MOUSEEVENTF_VIRTUALDESK`）本来就在副屏可用、负坐标精确落点，缺的只是“看”——模型拿不到屏幕列表，也拿不到截图与绝对坐标的换算比例。
 
 ---
 
@@ -310,7 +316,7 @@ pi 的 `pi-mcp-adapter` 以 HTTP transport 连接（原生支持 `url` 字段）
 |------|------|------|
 | koffi 在 Electron 43 行为变化 | 高 | 持续跑 probe 单测，异常时退回 helper 进程 |
 | 审批弹窗被遮挡 | 高 | 审批 UI 使用系统 Notification + 主窗口强制置顶 |
-| 多显示器坐标系 | 中 | T6 处理；T1–T5 仅支持主屏 |
+| 多显示器坐标系 | 低 | 绝对坐标已是物理虚拟桌面；`cua_get_state.displays` 给每屏 rect，`cua_capture.screenRect` 给换算比例，DIP×scaleFactor 与 `GetSystemMetrics` 对账 |
 | UAC 应用无法点击 | 中 | 标记 `cua_not_foreground` 错误，二期评估 UIAccess |
 
 ---

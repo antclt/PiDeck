@@ -74,6 +74,9 @@ function timelineHarness() {
 			"../../hooks/useMessageContextMenu": { useMessageContextMenu: () => ({ state: null, handleContextMenu: () => {}, close: () => {}, copy: () => {}, selectAll: () => {} }) },
 			"./timeline/MessageContextMenu": {},
 			"../../hooks/useSessionVisionBridgeExpected": { useSessionVisionBridgeExpected: () => false },
+			// 收藏入口（useFavorites）会牵进 favorites-atoms → 真实 atoms 图（jotai atom），
+			// 与滚动重定位无关，这里只保留时间线读取的两个成员。
+			"../../hooks/useFavorites": { useFavorites: () => ({ favoritedMessageKeys: new Set(), toggleMessageFavorite: () => {} }) },
 			"../../hooks/useSessionTimelineController": {
 				canLoadSessionTimelineMore: () => true,
 				deriveSessionSurfaceRuntime: (_count, _load, _send, status) => ({ isLoading: false, isStarting: false, isBusy: status === "running", status }),

@@ -9,6 +9,7 @@ import { t, type TranslationKey } from "../../../i18n";
 import { compareStatusLetter, FileIcon, fileNameOnly, statusTone, Twistie } from "./GitResourceTree";
 import { GitCompactFilter, PaneHeader } from "./GitPanelControls";
 import { Button } from "../../ui-shadcn/button";
+import { Collapsible, CollapsibleContent } from "../../ui-shadcn/collapsible";
 
 export type GitGraphProps = {
 	/** 父 GitPanel 的唯一前缀，防止多仓同时挂载时重复 pane id。 */
@@ -707,39 +708,41 @@ export function SourceControlGraph(props: GitGraphProps) {
 								const isCurrent = commit.refNames.some((item) => item.includes("HEAD ->"));
 								return (
 									<div key={commit.hash} className="" role="listitem">
-										<button
-											type="button"
-											className={`git-history-row grid h-7 w-full cursor-pointer appearance-none grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-0 bg-transparent p-0 pr-2.5 pl-0.5 text-body leading-7 text-left text-inherit focus-visible:shadow-[inset_var(--focus-ring)] focus-visible:outline-none${isCurrent ? " current" : ""}${expanded ? " expanded" : ""}`}
-											aria-expanded={expanded}
-											aria-describedby={hover?.commit.hash === commit.hash ? "git-commit-hover" : undefined}
-											onClick={() => {
-												// 点击只展开文件列表；先取消 hover，避免按钮获得焦点后误显示提交详情。
-												dismissHover();
-												toggleCommit(commit.hash);
-											}}
-											onContextMenu={(event) => {
-												event.preventDefault();
-												setContextMenu({
-													x: event.clientX,
-													y: event.clientY,
-													commit,
-												});
-											}}
-											onMouseEnter={(event) => scheduleHover(commit, event.currentTarget)}
-											onMouseLeave={handleRowMouseLeave}
-										>
-											<GraphLanes row={row} current={isCurrent} />
-											<span className="flex min-w-0 items-baseline gap-2.5 overflow-hidden">
-												<span className="flex min-w-0 flex-[1_1_auto] items-center overflow-hidden whitespace-nowrap text-[var(--git-panel-fg)]">
-													<Twistie open={expanded} />
-													{commit.message}
+										{/* 折叠体走共享折叠原语；display:contents 不生成盒子，折叠态零空档。 */}
+										<Collapsible open={expanded} className="contents">
+											<button
+												type="button"
+												className={`git-history-row grid h-7 w-full cursor-pointer appearance-none grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-0 bg-transparent p-0 pr-2.5 pl-0.5 text-body leading-7 text-left text-inherit focus-visible:shadow-[inset_var(--focus-ring)] focus-visible:outline-none${isCurrent ? " current" : ""}${expanded ? " expanded" : ""}`}
+												aria-expanded={expanded}
+												aria-describedby={hover?.commit.hash === commit.hash ? "git-commit-hover" : undefined}
+												onClick={() => {
+													// 点击只展开文件列表；先取消 hover，避免按钮获得焦点后误显示提交详情。
+													dismissHover();
+													toggleCommit(commit.hash);
+												}}
+												onContextMenu={(event) => {
+													event.preventDefault();
+													setContextMenu({
+														x: event.clientX,
+														y: event.clientY,
+														commit,
+													});
+												}}
+												onMouseEnter={(event) => scheduleHover(commit, event.currentTarget)}
+												onMouseLeave={handleRowMouseLeave}
+											>
+												<GraphLanes row={row} current={isCurrent} />
+												<span className="flex min-w-0 items-baseline gap-2.5 overflow-hidden">
+													<span className="flex min-w-0 flex-[1_1_auto] items-center overflow-hidden whitespace-nowrap text-[var(--git-panel-fg)]">
+														<Twistie open={expanded} />
+														{commit.message}
+													</span>
+													<span className="min-w-[48px] flex-[0_1_78px] truncate text-xs text-[var(--git-desc-fg)]">{commit.authorName}</span>
 												</span>
-												<span className="min-w-[48px] flex-[0_1_78px] truncate text-xs text-[var(--git-desc-fg)]">{commit.authorName}</span>
-											</span>
-											{ref && <span className={`max-w-[108px] truncate rounded-full border border-current px-[7px] text-xs font-medium leading-[18px]${ref.kind === "branch" ? " text-[var(--git-modified)]" : " text-[var(--git-conflict)]"}`}>{ref.label}</span>}
-										</button>
-										{expanded && (
-											<div className="min-w-0 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
+												{ref && <span className={`max-w-[108px] truncate rounded-full border border-current px-[7px] text-xs font-medium leading-[18px]${ref.kind === "branch" ? " text-[var(--git-modified)]" : " text-[var(--git-conflict)]"}`}>{ref.label}</span>}
+											</button>
+											{/* 不再挂 animate-in/fade-in：twMerge 会把 animate-* 判同组，保留会盖掉高度动画。 */}
+											<CollapsibleContent className="min-w-0">
 												{detailState?.loading && (
 													<div className="grid min-h-[26px] grid-cols-[auto_minmax(0,1fr)_16px] items-center gap-2 px-2.5 pl-0.5 text-control leading-[26px] text-[var(--git-desc-fg)]">
 														<GraphContinuation row={row} />
@@ -763,8 +766,8 @@ export function SourceControlGraph(props: GitGraphProps) {
 												{commitFiles.map((file) => (
 													<CommitFileRow key={`${file.originalPath ?? ""}-${file.path}`} file={file} row={row} onOpen={() => props.onOpenCommitFileDiff(commit, file)} />
 												))}
-											</div>
-										)}
+											</CollapsibleContent>
+										</Collapsible>
 									</div>
 								);
 							})}

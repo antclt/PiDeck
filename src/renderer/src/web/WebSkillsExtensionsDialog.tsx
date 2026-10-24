@@ -60,7 +60,9 @@ export function WebSkillsExtensionsDialog({ open, onOpenChange }: { open: boolea
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="max-h-[80dvh] overflow-hidden sm:max-w-lg">
+			{/* [&>*]:min-w-0：DialogContent 是 grid，直接子项默认 min-width:auto，内部 p.truncate（nowrap）
+			    的 min-content 会把轨道顶宽溢出弹层右缘（移动走查 #2）；给子项归零后 truncate 正常收敛。 */}
+			<DialogContent className="max-h-[80dvh] overflow-hidden sm:max-w-lg [&>*]:min-w-0">
 				<DialogHeader>
 					<DialogTitle className="flex items-center gap-2">
 						<Puzzle className="size-4" />

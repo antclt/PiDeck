@@ -26,7 +26,7 @@ export function WebBranchBar(props: { sessions: WebSession[]; activeSessionId: s
 					) : null}
 					<button
 						type="button"
-						className={cn("max-w-44 truncate rounded-full px-2 py-0.5 text-micro transition-colors", session.id === props.activeSessionId ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground")}
+						className={cn("max-w-44 truncate rounded-full px-2 py-0.5 text-micro transition-colors pointer-coarse:px-2.5 pointer-coarse:py-1.5", session.id === props.activeSessionId ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground")}
 						title={session.title || t("common.untitled")}
 						onClick={() => props.onSelect(session.id)}
 					>

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
+import { gunzipSync } from "node:zlib";
 import { collectSdkClosure } from "../scripts/pack-feishu-sdk.mjs";
 
 /**
@@ -62,6 +63,26 @@ test("压缩包随包分发，且 sha256 与 manifest 一致", () => {
 	assert.equal(bytes.length, manifest.bytes);
 	assert.equal(createHash("sha256").update(bytes).digest("hex"), manifest.sha256);
 	assert.ok(bytes.length < 4 * 1024 * 1024, "压缩包体积异常，压缩链路可能失效");
+});
+
+test("压缩包条目不含墙钟元数据（mtime 归零，换机/重装 npm ci 后 sha256 不抖动）", () => {
+	// tar 7 的 portable 只对目录条目置 noMtime，文件条目默认嵌入 stat.mtime（Windows/Linux
+	// 各自一份），于是同一份 node_modules 内容在不同机器/重装后打包出不同 sha256。
+	// 跨 OS 的 mode 归一化仍依赖平台，所以 CI 不重打包比对，只锁死这一条：头里不许有 mtime。
+	const tar = gunzipSync(readFileSync(archivePath));
+	const mtimes = new Set();
+	let offset = 0;
+	let entries = 0;
+	while (offset + 512 <= tar.length) {
+		const header = tar.subarray(offset, offset + 512);
+		if (header.every((byte) => byte === 0)) break; // 归档结束的零块
+		mtimes.add(header.subarray(136, 148).toString("latin1"));
+		const size = Number.parseInt(header.subarray(124, 136).toString("latin1").trim() || "0", 8);
+		offset += 512 + Math.ceil(size / 512) * 512;
+		entries += 1;
+	}
+	assert.equal(entries, manifest.files, "tar 条目数与 manifest.files 不一致（目录 + 文件）");
+	assert.deepEqual([...mtimes], ["\0".repeat(12)], "tar 头里嵌入 mtime：产物跟着 node_modules 安装时间变，sha256 不可复现");
 });
 
 test("manifest 的包清单与 package-lock 闭包一致（SDK 升级未重打会被抓住）", () => {

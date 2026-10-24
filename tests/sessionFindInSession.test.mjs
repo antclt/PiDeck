@@ -152,7 +152,11 @@ test("渠道与契约接线：IPC 常量、preload 白名单、主进程 handler
 	// 短路：未装配 / 校验不过一律 null（渲染层据此显示不可用态）
 	assert.match(handler, /!searcher\s*\|\|\s*!entry\.filePath\s*\|\|\s*!isSessionSearchFilePath\(entry\.filePath\)\)\s*return null/);
 	const wiring = read("src/main/index.ts");
-	assert.match(wiring, /sessionMessageSearch: async \(sessionPath, query\) => \{[\s\S]{0,600}?sessionIndexService\.searchInSession\(roots, sessionPath, query\)/);
+	// 会话内检索的降级口径已抽成模块级 sessionMessageSearchInFile（桌面 IPC 与 Web 搜索弹层共用）：
+	// 装配点只转发，真正的 sidecar 调用在 helper 里。
+	assert.match(wiring, /sessionMessageSearch: async \(sessionPath, query\) => \{[\s\S]{0,200}?sessionMessageSearchInFile\(sessionPath, query\)/);
+	// helper 内先取 sessionIndexService 快照为 service，后续各步都走该局部变量（退出清理置空时不炸）
+	assert.match(wiring, /function sessionMessageSearchInFile\(sessionPath: string, query: string\): Promise<SessionSearchResult \| null> \{[\s\S]{0,1200}?service\.searchInSession\(roots, sessionPath, query\)/);
 	assert.match(wiring, /searchDshSessionMessages:\s*\(\s*dshSessionId,\s*query\s*\)\s*=>\s*dshAgentManager\.searchSessionMessages\(\s*dshSessionId,\s*query\s*\)/);
 	// 主进程快捷键分支 + 聚焦栏响应
 	assert.match(wiring, /isShortcutInput\("findInSession", input\)[\s\S]{0,200}?"findInSession"/);

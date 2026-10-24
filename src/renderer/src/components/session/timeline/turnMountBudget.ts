@@ -9,7 +9,7 @@
  *
  * 语义（与 turnRenderWindow 的「整轮保留」刻意不同，见下）：
  * - 默认只挂尾部 N 条步骤，顶部给「显示更早 N 条步骤」入口；
- * - 点开后本行全量挂载（内容从未丢失，只是默认不进 DOM）。
+ * - 每点一次「显示更早」多挂一批 N 条（extraBatches +1），不保留「一次全量」分支（内容从未丢失，只是默认不进 DOM）。
  *
  * 为什么这一层允许不整轮挂载：轮数窗口的完整性承诺是「不切开一个回答」——
  * 步骤条目本身是同一轮内的**过程**内容，且提供了显式展开入口，
@@ -53,18 +53,38 @@ export interface MountedStepsWindow<T> {
 }
 
 /**
+ * 「显示更早」的展开进度。锚点取首次点击那一刻的条目总数：之后无论尾部追加多少新条目，
+ * 挂载下界都不动，因此已经展开的旧步骤不会被新内容挤回折叠区（旧实现按 len-cap 从尾部切，
+ * 流式追加时窗口右移，用户正在看的最早一批会被卸载）。
+ */
+export interface MountedStepsExpansion {
+	/** 首次点击时的条目总数（下界原点）。 */
+	anchor: number;
+	/** 已展开的批次数：每加一档，下界再向前挪 limit 条。 */
+	batches: number;
+}
+
+/**
  * 按条目预算裁剪单轮步骤列表（纯函数，可单测）。
  *
- * 从尾部保留 limit 条：步骤是时序的，最新内容才是用户当下要看的；
- * 更早的步骤由调用方渲染「显示更早 N 条」入口，点击后以 showAll=true 重新调用。
+ * 默认从尾部保留 limit 条：步骤是时序的，最新内容才是用户当下要看的；
+ * 更早的步骤由调用方渲染「显示更早 N 条」入口，每点一次把 batches 加一，即下界向前挪一批。
+ * 这里刻意不保留「一次全量」的分支 —— 那是 2026-10 内存事故里唯一还能一次挂上千子树的路径。
  * limit <= 0 视为未启用预算（返回原列表）。
  */
-export function boundMountedSteps<T>(items: readonly T[], limit: number = TIMELINE_MOUNTED_STEP_LIMIT, showAll = false): MountedStepsWindow<T> {
-	if (showAll || limit <= 0 || items.length <= limit) {
-		return { items, hiddenCount: 0 };
+export function boundMountedSteps<T>(items: readonly T[], limit: number = TIMELINE_MOUNTED_STEP_LIMIT, expansion?: MountedStepsExpansion): MountedStepsWindow<T> {
+	if (limit <= 0) return { items, hiddenCount: 0 };
+	const safeLimit = Math.max(1, Math.trunc(limit));
+	// 非法批次数按「未展开」处理：NaN/Infinity 会让下界失效，等于重新打开全量路径。
+	const batches = expansion && Number.isFinite(expansion.batches) ? Math.max(0, Math.trunc(expansion.batches)) : 0;
+	if (batches <= 0) {
+		if (items.length <= safeLimit) return { items, hiddenCount: 0 };
+		const start = items.length - safeLimit;
+		return { items: items.slice(start), hiddenCount: start };
 	}
-	return {
-		items: items.slice(items.length - limit),
-		hiddenCount: items.length - limit,
-	};
+	const anchor = expansion && Number.isFinite(expansion.anchor) ? Math.max(0, Math.trunc(expansion.anchor)) : items.length;
+	// 下界 = 点击时的长度 - 已展开总条数；clamp 到 [0, len] 兜底条目被裁剪/重建的会话。
+	const start = Math.max(0, Math.min(anchor, items.length) - safeLimit * (batches + 1));
+	if (start <= 0) return { items, hiddenCount: 0 };
+	return { items: items.slice(start), hiddenCount: start };
 }

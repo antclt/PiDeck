@@ -145,16 +145,33 @@ export function mergeFileTreeChildren(nodes: FileTreeNode[], directoryPath: stri
  * 按路径从短到长补齐已展开目录，保证父目录先于子目录写入。
  * 单个目录失败（已删/无权限）跳过，不阻断整棵树。
  */
+/**
+ * 并发上限：展开恢复的目录一般 5-30 个，逐个串行 IPC 往返（每个又叠加主进程侧
+ * 一层 readdir + 探测）在慢盘上会累积成秒级。取 8 并发：既把往返摊平，又不会
+ * 在恢复瞬间打出上百个并发 listing。
+ */
+const HYDRATE_CONCURRENCY = 8;
+
 export async function hydrateExpandedFileTree(listDirectory: (directory: string) => Promise<FileTreeNode[]>, tree: FileTreeNode[], expandedDirs: Iterable<string>): Promise<FileTreeNode[]> {
 	const dirs = [...expandedDirs].sort((left, right) => left.length - right.length);
+	if (dirs.length === 0) return tree;
+	// 两阶段（2027-02 性能审计）：listing 只依赖磁盘路径、与已合并的树无关——
+	// 先按并发上限全部拉取，再按「路径短→长」顺序合并（父先子后只对合并顺序有要求）。
+	// 原先 fetch 与 merge 串在一个 for 循环里，N 个展开目录 = N 次串行 IPC 往返。
+	const listings = new Map<string, FileTreeNode[]>();
+	for (let start = 0; start < dirs.length; start += HYDRATE_CONCURRENCY) {
+		const batch = dirs.slice(start, start + HYDRATE_CONCURRENCY);
+		const settled = await Promise.allSettled(batch.map(async (directory) => ({ directory, children: await listDirectory(directory) })));
+		for (const result of settled) {
+			// 持久化里的展开路径可能已不存在；单个失败跳过，不阻断其余目录。
+			if (result.status === "fulfilled") listings.set(result.value.directory, result.value.children);
+		}
+	}
 	let next = tree;
 	for (const directory of dirs) {
-		try {
-			const children = await listDirectory(directory);
-			next = mergeFileTreeChildren(next, directory, children);
-		} catch {
-			// 持久化里的展开路径可能已不存在；忽略后展开态仍保留，下次刷新自然消失。
-		}
+		const children = listings.get(directory);
+		if (!children) continue;
+		next = mergeFileTreeChildren(next, directory, children);
 	}
 	return next;
 }

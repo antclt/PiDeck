@@ -61,6 +61,11 @@ function loadTerminalSessionManagerModule() {
 			if (name === "./terminalDataBatching") {
 				return loadTranspiledModule("src/main/terminal/terminalDataBatching.ts");
 			}
+			// 回放缓冲是纯函数模块（无自身 import）：与 dataBatching 同样就地解析，
+			// 否则落到 CJS require 会按 tests/ 目录解析成 MODULE_NOT_FOUND。
+			if (name === "./terminalReplayBuffer") {
+				return loadTranspiledModule("src/main/terminal/terminalReplayBuffer.ts");
+			}
 			return require(name);
 		},
 	};
@@ -144,6 +149,11 @@ function loadWithPty() {
 			}
 			if (name === "./terminalDataBatching") {
 				return loadTranspiledModule("src/main/terminal/terminalDataBatching.ts");
+			}
+			// 回放缓冲是纯函数模块（无自身 import）：与 dataBatching 同样就地解析，
+			// 否则落到 CJS require 会按 tests/ 目录解析成 MODULE_NOT_FOUND。
+			if (name === "./terminalReplayBuffer") {
+				return loadTranspiledModule("src/main/terminal/terminalReplayBuffer.ts");
 			}
 			return require(name);
 		},

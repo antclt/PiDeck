@@ -27,9 +27,10 @@ function ContextMenuContent({ className, ...props }: React.ComponentProps<typeof
 			<ContextMenuPrimitive.Content
 				data-slot="context-menu-content"
 				className={cn(
-					"z-(--z-popover) min-w-[8rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-[var(--shadow-popover)]",
-					"data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
-					"data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
+					"z-(--z-popover) min-w-[8rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-[var(--shadow-popover)] duration-base",
+					// 出场节奏与 dropdown-menu 完全一致（同族交互：右键 vs 点击）：base 200ms + ease-out-quint 进、ease-in 出
+					"data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 ease-out-quint",
+					"data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:ease-in",
 					"data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2",
 					className,
 				)}
@@ -54,7 +55,7 @@ function ContextMenuItem({
 			data-inset={inset}
 			data-variant={variant}
 			className={cn(
-				"relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-control outline-hidden transition-colors duration-100 focus:bg-accent-soft focus:text-foreground focus:shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-accent)_28%,transparent)]",
+				"relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-control outline-hidden transition-colors duration-fast focus:bg-accent-soft focus:text-foreground focus:shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-accent)_28%,transparent)]",
 				"data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
 				"data-[inset]:pl-8",
 				"data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive data-[variant=destructive]:focus:shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-danger)_30%,transparent)] dark:data-[variant=destructive]:focus:bg-destructive/20",
@@ -71,7 +72,7 @@ function ContextMenuCheckboxItem({ className, children, checked, ...props }: Rea
 		<ContextMenuPrimitive.CheckboxItem
 			data-slot="context-menu-checkbox-item"
 			className={cn(
-				"relative flex cursor-default select-none items-center gap-2 rounded-sm py-1.5 pr-2 pl-8 text-control outline-hidden transition-colors duration-100 focus:bg-accent-soft focus:text-foreground focus:shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-accent)_28%,transparent)]",
+				"relative flex cursor-default select-none items-center gap-2 rounded-sm py-1.5 pr-2 pl-8 text-control outline-hidden transition-colors duration-fast focus:bg-accent-soft focus:text-foreground focus:shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-accent)_28%,transparent)]",
 				"data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
 				className,
 			)}
@@ -93,7 +94,7 @@ function ContextMenuRadioItem({ className, children, ...props }: React.Component
 		<ContextMenuPrimitive.RadioItem
 			data-slot="context-menu-radio-item"
 			className={cn(
-				"relative flex cursor-default select-none items-center gap-2 rounded-sm py-1.5 pr-2 pl-8 text-control outline-hidden transition-colors duration-100 focus:bg-accent-soft focus:text-foreground focus:shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-accent)_28%,transparent)]",
+				"relative flex cursor-default select-none items-center gap-2 rounded-sm py-1.5 pr-2 pl-8 text-control outline-hidden transition-colors duration-fast focus:bg-accent-soft focus:text-foreground focus:shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-accent)_28%,transparent)]",
 				"data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
 				className,
 			)}
@@ -143,7 +144,7 @@ function ContextMenuSubTrigger({
 		<ContextMenuPrimitive.SubTrigger
 			data-slot="context-menu-sub-trigger"
 			data-inset={inset}
-			className={cn("flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-control outline-hidden transition-colors duration-100 focus:bg-accent-soft focus:text-foreground focus:shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-accent)_28%,transparent)]", "data-[inset]:pl-8", className)}
+			className={cn("flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-control outline-hidden transition-colors duration-fast focus:bg-accent-soft focus:text-foreground focus:shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-accent)_28%,transparent)]", "data-[inset]:pl-8", className)}
 			{...props}
 		>
 			{children}
@@ -156,7 +157,13 @@ function ContextMenuSubContent({ className, ...props }: React.ComponentProps<typ
 	return (
 		<ContextMenuPrimitive.SubContent
 			data-slot="context-menu-sub-content"
-			className={cn("z-(--z-popover) min-w-[8rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-[var(--shadow-popover)]", "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95", className)}
+			className={cn(
+				"z-(--z-popover) min-w-[8rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-[var(--shadow-popover)] duration-base",
+				// 出场节奏与 dropdown-menu / 主 content 一致（同族交互）
+				"data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 ease-out-quint",
+				"data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:ease-in",
+				className,
+			)}
 			{...props}
 		/>
 	);

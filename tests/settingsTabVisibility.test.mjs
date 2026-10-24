@@ -19,7 +19,8 @@ test("可隐藏 tab 都是真实存在的设置 tab；dsh / respondingTips 是�
 	for (const id of HIDEABLE_SETTINGS_TAB_IDS) {
 		assert.ok(SETTINGS_TAB_IDS.includes(id), `${id} 不是 SETTINGS_TAB_IDS 里的 tab`);
 	}
-	assert.deepEqual(plain(HIDEABLE_MODULE_IDS), [...plain(HIDEABLE_SETTINGS_TAB_IDS), "dsh", "respondingTips"]);
+	// automation / agents 是会话 Tab 栏里的页面式工作区（不是设置 tab），同属「只收起入口」语义
+	assert.deepEqual(plain(HIDEABLE_MODULE_IDS), [...plain(HIDEABLE_SETTINGS_TAB_IDS), "dsh", "respondingTips", "automation", "agents", "favorites"]);
 	// 应用基础项不可隐藏（外观放着开关本身，隐藏后无法找回）
 	for (const id of ["common", "appearance", "shortcuts", "notification", "proxy", "dev", "storage", "backup", "editors"]) {
 		assert.equal(HIDEABLE_SETTINGS_TAB_IDS.includes(id), false, `${id} 不应可隐藏`);

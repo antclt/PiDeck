@@ -19,6 +19,7 @@ import type { ImageBlobPayload, ImageGenConfigFile, ImageGenRequest, ImageGenRes
 import type { VideoGenConfigFile, VideoGenRequest, VideoGenSaveResult, VideoGenSubmitResult, VideoGenJobSnapshot } from "../shared/types/videogen";
 import type { CustomThemeListItem } from "../shared/customThemes";
 import type { CatalogCheckResult, CatalogUpdateResult, CatalogUpdateStatus } from "../shared/types/catalog";
+import type { WallpaperEngineItem, WallpaperEngineListResult } from "../shared/wallpaperEngine";
 import type { BuiltInExtensionsCheckResult, BuiltInExtensionsUpdateResult, BuiltInExtensionsUpdateStatus } from "../shared/types/extensionsUpdate";
 import type { BuiltinContentCheckResult, BuiltinContentUpdateResult, BuiltinContentUpdateStatus } from "../shared/types/contentUpdate";
 import type {
@@ -40,6 +41,7 @@ import type { PromptSuggestionRunInput, PromptSuggestionRunResult } from "../sha
 import type { AgentChangedEvent, AgentInvokeEventPayload, AgentInvokeInput, AgentInvokeResult, AgentMarketSettings, AgentProfile, AgentProfileSnapshot, BindAgentSessionInput, CreateAgentProfileInput, UpdateAgentMarketSettingsInput, UpdateAgentProfileInput } from "../shared/types/agentProfile";
 import type { SelectionToolInsertInput, SelectionToolResizeInput, SelectionToolShowPayload, SelectionToolWindowState } from "../shared/types/selectionTool";
 import type { QuickMessagesSaveResult, QuickMessagesSnapshot } from "../shared/types/quickMessages";
+import type { AddFavoriteInput, FavoriteEntry } from "../shared/types/favorites";
 import type { NoticeHistoryFileEntry, NoticeHistoryRecordInput } from "../shared/types/noticeHistory";
 import type { ReplyActionRule, ReplyActionsSaveResult, ReplyActionsSnapshot } from "../shared/types/replyActions";
 import type {
@@ -485,6 +487,10 @@ const api = {
 		pickBackgroundImage: () => ipcRenderer.invoke(ipcChannels.pickBackgroundImage) as Promise<string>,
 		/** 删除背景图文件（清空背景设置时调用） */
 		removeBackgroundImage: (name: string) => ipcRenderer.invoke(ipcChannels.removeBackgroundImage, name) as Promise<void>,
+		/** Wallpaper Engine 视频壁纸：选工坊目录 / 列出视频条目 / 校验选中条目（视频字节只走 pideck-we:// 协议） */
+		pickWallpaperEngineDir: () => ipcRenderer.invoke(ipcChannels.wallpaperEnginePickDir) as Promise<string>,
+		listWallpaperEngine: (dir?: string) => ipcRenderer.invoke(ipcChannels.wallpaperEngineList, dir) as Promise<WallpaperEngineListResult>,
+		selectWallpaperEngine: (dir: string, id: string) => ipcRenderer.invoke(ipcChannels.wallpaperEngineSelect, dir, id) as Promise<WallpaperEngineItem | null>,
 	},
 	customThemes: {
 		/** 列出自定义主题（内置示例 + 用户目录；dir 为存放目录，供指南/提示展示） */
@@ -1152,7 +1158,7 @@ const api = {
 		onInstallProgress: (callback: (progress: import("../shared/types").SkillHubInstallProgress) => void) => subscribe(ipcChannels.skillHubInstallProgress, callback),
 	},
 	yaoPrompts: {
-		list: (opts?: { category?: string; search?: string; page?: number; pageSize?: number }) => ipcRenderer.invoke(ipcChannels.yaoPromptsList, opts) as Promise<YaoPromptListResult>,
+		list: (opts?: { category?: string; search?: string; page?: number; pageSize?: number; categoriesOnly?: boolean }) => ipcRenderer.invoke(ipcChannels.yaoPromptsList, opts) as Promise<YaoPromptListResult>,
 		detail: (slug: string, category: string) => ipcRenderer.invoke(ipcChannels.yaoPromptsDetail, slug, category) as Promise<YaoPromptDetailResult>,
 		import: (slug: string, category: string, projectId?: string) => ipcRenderer.invoke(ipcChannels.yaoPromptsImport, slug, category, projectId) as Promise<PiPromptTemplateSummary>,
 		onDbStateChange: (callback: (state: YaoPromptDbSnapshot) => void) => subscribe(ipcChannels.yaoPromptsDbState, callback),
@@ -1318,6 +1324,10 @@ const api = {
 		saveRaw: (fileName: string, rawJson: string) => ipcRenderer.invoke(ipcChannels.configSaveRaw, fileName, rawJson) as Promise<{ valid: boolean; error?: string }>,
 		export: () => ipcRenderer.invoke(ipcChannels.configExport) as Promise<string>,
 		import: (packageJson: string) => ipcRenderer.invoke(ipcChannels.configImport, packageJson) as Promise<{ valid: boolean; error?: string }>,
+		/** 只读扫描本机其他 agent（Claude Code/Codex/OpenCode/Gemini CLI）的供应商配置；API key 只以掩码返回 */
+		discoverExternalAgents: () => ipcRenderer.invoke(ipcChannels.configDiscoverExternalAgents) as Promise<import("../shared/types/externalAgentDiscovery").ExternalAgentDiscoveryResult>,
+		/** 外部 agent 导入确认后按 sourceId 取真实 API key（一次性响应；渲染层立即写进未保存草稿） */
+		resolveExternalAgentKey: (sourceId: string) => ipcRenderer.invoke(ipcChannels.configResolveExternalAgentKey, sourceId) as Promise<{ ok: true; apiKey?: string } | { ok: false; error: string }>,
 		/** 从 provider 的 baseUrl + apiKey 拉取可用模型列表；headers 允许 provider 自定义（含 User-Agent）；proxyMode=follow 跟随全局 / pi 走 PI 代理 / desktop 走桌面代理 / off 强制直连 */
 		fetchModels: (baseUrl: string, apiKey: string, apiType?: string, headers?: Record<string, string>, proxyMode?: "follow" | "pi" | "desktop" | "off") =>
 			ipcRenderer.invoke(ipcChannels.configFetchModels, { baseUrl, apiKey, apiType, headers, proxyMode }) as Promise<{
@@ -1742,6 +1752,19 @@ const api = {
 		onInvokeEvent: (callback: (payload: AgentInvokeEventPayload) => void) => subscribe<AgentInvokeEventPayload>(ipcChannels.agentProfilesInvokeEvent, callback),
 		/** 绑定/解绑会话与智能体：绑定后该会话每次发送由主进程注入隐藏角色设定。 */
 		bindSession: (input: BindAgentSessionInput) => ipcRenderer.invoke(ipcChannels.agentProfilesBindSession, input) as Promise<AgentMarketSettings>,
+		/** 保存拖拽出的展示顺序（完整 id 数组）；主进程剔除未知 id 后落盘并返回生效的顺序。 */
+		reorder: (agentIds: string[]) => ipcRenderer.invoke(ipcChannels.agentProfilesReorder, agentIds) as Promise<string[]>,
+	},
+
+	// ── 收藏（整条回复 / 划选片段的本地快照；不写入会话文件） ──
+	favorites: {
+		list: () => ipcRenderer.invoke(ipcChannels.favoritesList) as Promise<FavoriteEntry[]>,
+		add: (input: AddFavoriteInput) => ipcRenderer.invoke(ipcChannels.favoritesAdd, input) as Promise<FavoriteEntry>,
+		remove: (favoriteId: string) => ipcRenderer.invoke(ipcChannels.favoritesRemove, favoriteId) as Promise<boolean>,
+		/** 批量删除：一次写盘，返回实际删除条数（未知 id 忽略）。 */
+		removeMany: (favoriteIds: string[]) => ipcRenderer.invoke(ipcChannels.favoritesRemoveMany, favoriteIds) as Promise<number>,
+		/** 保存拖拽出的顺序（完整 id 数组）；返回主进程落地后的列表。 */
+		reorder: (favoriteIds: string[]) => ipcRenderer.invoke(ipcChannels.favoritesReorder, favoriteIds) as Promise<FavoriteEntry[]>,
 	},
 
 	// ── 系统级划词浮窗（全局快捷键触发的独立窗口；与主窗口共用同一份 preload） ──

@@ -3,6 +3,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { is } from "@electron-toolkit/utils";
 import type { AppFontSizeMode, PetWindowCaps } from "../../shared/types";
+import type { AppLogLevel } from "../../shared/types";
+import { RendererNoiseAggregator, classifyRendererNoise, toRendererNoiseLog } from "../../shared/rendererNoise";
 import { PET_BASE_H, PET_BASE_W, clampToWorkArea, keepFeetCenter, petLayout, toNormalLayoutPosition, type Size2D } from "../../shared/petNotificationLayout";
 import { preparePreloadPath } from "../preloadPath";
 import { rendererHeapAdditionalArguments } from "../v8HeapLimits";
@@ -174,12 +176,25 @@ export class PetWindow {
 		this.win.webContents.on("render-process-gone", (_event, details) => {
 			getAppLogger()?.error("pet", "Pet renderer process gone", { reason: details.reason, exitCode: details.exitCode });
 		});
+		// 与主窗口同源口径（issue #376）：良性噪音跳过，非良性首条即时写、重复折叠成降档汇总。
+		const noise = new RendererNoiseAggregator();
 		this.win.webContents.on("console-message", (event) => {
 			if (!["warning", "error"].includes(event.level)) return;
-			getAppLogger()?.warn("pet", `Pet renderer ${event.level}: ${event.message}`, {
-				line: event.lineNumber,
-				sourceId: event.sourceId,
-			});
+			if (classifyRendererNoise(event.message).benign) return;
+			const level: AppLogLevel = event.level === "error" ? "warn" : "info";
+			const detail = { level: event.level, message: event.message, line: event.lineNumber, sourceId: event.sourceId };
+			for (const flush of noise.record(`pet-console|${event.level}|${event.message.slice(0, 120)}`, level, `Pet renderer ${event.level}: ${event.message}`, { detail })) {
+				const log = toRendererNoiseLog(flush);
+				getAppLogger()?.log(log.level, "pet", log.message, log.detail);
+			}
+		});
+		this.win.on("closed", () => {
+			const logger = getAppLogger();
+			if (!logger) return;
+			for (const flush of noise.flushAll()) {
+				const log = toRendererNoiseLog(flush);
+				void logger.log(log.level, "pet", log.message, log.detail);
+			}
 		});
 		this.win.webContents.once("did-finish-load", () => {
 			getAppLogger()?.info("pet", "Pet window loaded", { url: this.win!.webContents.getURL() });

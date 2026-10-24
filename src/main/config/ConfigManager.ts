@@ -17,7 +17,7 @@ import { credentialRefFor } from "../../shared/dshCredentialRef";
 import { normalizeDshDeepseekProvider } from "../../shared/dshProviderNames";
 import { parseProviderModelsResponse } from "./parseProviderModels";
 import { isSafeProviderName, piBuiltinSnapshotFromCatalog, resolvePiApiKey } from "./providerMigration";
-import { writePiConfigFile } from "./piConfigFileStore";
+import { stripBom, writePiConfigFile } from "./piConfigFileStore";
 import { mergeSettingsFormPayload } from "./settingsFormPayload";
 import { ensureTokendanceAttribution } from "./tokendanceAttribution";
 import { getAppLogger } from "../logging/sharedLogger";
@@ -469,7 +469,9 @@ export class ConfigManager {
 		try {
 			const raw = await readFile(filePath, "utf8");
 			try {
-				const parsed = JSON.parse(raw) as T;
+				// UTF-8 BOM 必须先剥：Windows PowerShell 5.1 保存会写 BOM，裸 JSON.parse 直接失败。
+				// 失败后 parsed 是空对象兜底，页面会显示「配置是空的」，用户一旦点保存就把真配置写没。
+				const parsed = JSON.parse(stripBom(raw)) as T;
 				return { raw, parsed };
 			} catch (error) {
 				// 配置 JSON 写错时，配置弹窗仍要能打开 Raw 页让用户修复；同时返回精确诊断用于 UI 提示。

@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { StringDecoder } from "node:string_decoder";
+import { createNdjsonLinePump } from "../ndjsonLinePump";
 import type { AcpIncomingRequest, AcpJsonRpcMessage, AcpRpcId, AcpRpcNotification, AcpRpcRequest } from "./acpProtocol";
 import { LARGE_NDJSON_LINE_PARSE_CHARS, MAX_NDJSON_LINE_BYTES } from "../ndjsonLineGuards";
 
@@ -58,9 +58,17 @@ const JSON_RPC_INTERNAL_ERROR = -32603;
  * 行缓冲护栏与大行延迟解析沿用 PiRpcClient 的实测结论（见该类注释）。
  */
 export class AcpConnection extends EventEmitter {
-	private buffer = "";
+	/**
+	 * 行泵（Buffer 分段版，2027-02 性能治理，与 PiRpcClient 共用 ndjsonLinePump）：
+	 * 字符串版每 data 事件对已累积全长做一次扁平化拷贝，大帧 O(B²/chunkSize)。
+	 * 溢出语义不变：先切行（完整合法行不受残端影响），再看剩余未成行缓冲。
+	 */
+	private readonly linePump = createNdjsonLinePump((line) => {
+		this.handleLine(line);
+		// 对应旧 drainLines 的 while(!this.closed)：handleLine 可能触发 close
+		return !this.closed;
+	});
 	private nextRequestId = 1;
-	private readonly decoder = new StringDecoder("utf8");
 	private readonly pending = new Map<number, PendingRequest>();
 	private readonly requestHandlers = new Map<string, AcpRequestHandler>();
 	private parseQueue: Promise<void> = Promise.resolve();
@@ -132,7 +140,7 @@ export class AcpConnection extends EventEmitter {
 	close(error?: Error): void {
 		if (this.closed) return;
 		this.closed = true;
-		this.buffer = "";
+		this.linePump.reset();
 		this.closeReason = error ?? null;
 		for (const [, pending] of this.pending) {
 			clearTimeout(pending.timer);
@@ -146,11 +154,8 @@ export class AcpConnection extends EventEmitter {
 	finish(error = new Error("ACP agent stdout ended")): void {
 		if (this.closed || this.finishing) return;
 		this.finishing = true;
-		this.buffer += this.decoder.end();
-		if (this.buffer.length > 0) {
-			this.handleLine(this.buffer.endsWith("\r") ? this.buffer.slice(0, -1) : this.buffer);
-			this.buffer = "";
-		}
+		// 残行（无 LF 结尾）也算一行；跨 chunk 多字节字符已在分段中保全
+		this.linePump.end();
 		if (this.queuedLines === 0) this.close(error);
 		else void this.parseQueue.then(() => this.close(error));
 	}
@@ -171,11 +176,10 @@ export class AcpConnection extends EventEmitter {
 
 	private consumeChunk(chunk: Buffer | string): void {
 		if (this.closed || this.finishing) return;
-		this.buffer += typeof chunk === "string" ? chunk : this.decoder.write(chunk);
-		// 一个 chunk 可以含很多合法行；先分帧，再限制剩余未完成行，不能整批丢弃。
-		this.drainLines();
-		const bytes = Buffer.byteLength(this.buffer, "utf8");
-		if (!this.closed && bytes > MAX_ACP_LINE_BYTES) this.lineOverflow(bytes);
+		// 一个 chunk 可以含很多合法行；先分帧（handleLine 可能触发 close，泵内会中止），
+		// 再限制剩余未完成行，不能整批丢弃。
+		this.linePump.push(chunk);
+		if (!this.closed && this.linePump.bufferedBytes > MAX_ACP_LINE_BYTES) this.lineOverflow(this.linePump.bufferedBytes);
 	}
 
 	private consumeEnd(): void {
@@ -186,17 +190,6 @@ export class AcpConnection extends EventEmitter {
 		const error = new Error(`ACP line buffer overflow: ${bytes} bytes exceeds ${MAX_ACP_LINE_BYTES} byte limit`);
 		this.emit("protocol-error", error.message);
 		this.close(error);
-	}
-
-	private drainLines(): void {
-		while (!this.closed) {
-			const newlineIndex = this.buffer.indexOf("\n");
-			if (newlineIndex === -1) return;
-			let line = this.buffer.slice(0, newlineIndex);
-			this.buffer = this.buffer.slice(newlineIndex + 1);
-			if (line.endsWith("\r")) line = line.slice(0, -1);
-			this.handleLine(line);
-		}
 	}
 
 	private handleLine(line: string): void {

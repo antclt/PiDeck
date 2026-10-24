@@ -10,6 +10,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { CuaEngine } from "./CuaEngine";
 import type { CuaGate } from "./CuaGate";
+import { tryListCuaDisplays } from "./CuaDisplay";
 import { captureScreen } from "./CuaFrame";
 
 /**
@@ -18,17 +19,23 @@ import { captureScreen } from "./CuaFrame";
  * Read-only tools (cua_capture / cua_list_windows / cua_get_state) do not pass
  * through the gate. Write tools (cua_click / cua_type / cua_scroll) route
  * through engine methods that check the gate (kill switch + approval).
+ *
+ * Coordinate contract: cua_click/cua_scroll take absolute physical pixels of
+ * the virtual desktop (origin may be negative). cua_get_state lists every
+ * display with that rect, and cua_capture echoes the captured display's rect so
+ * a screenshot pixel converts as rect.x + imageX * rect.width / width.
  */
 export function registerCuaTools(server: McpServer, engine: CuaEngine, gate: CuaGate): void {
 	// -------------------------------------------------------------------------
-	// cua_capture — full screen capture (read-only)
+	// cua_capture — single display capture (read-only)
 	// -------------------------------------------------------------------------
 	server.registerTool(
 		"cua_capture",
 		{
-			description: "Capture the full screen and return a JPEG image.",
+			description:
+				'Capture one display and return a JPEG image. displayId comes from cua_get_state.displays (a displayId or sourceId) or is "primary". The response screenRect is that display in absolute click coordinates: x = screenRect.x + imageX * screenRect.width / width, y = screenRect.y + imageY * screenRect.height / height.',
 			inputSchema: {
-				displayId: z.string().optional().describe("Optional display identifier; omit for primary."),
+				displayId: z.string().optional().describe('Display to capture: a displayId or sourceId from cua_get_state.displays, or "primary". Omit for primary.'),
 				maxLongEdge: z.number().int().min(16).max(8192).default(1280).describe("Resize so the longer edge <= this (16-8192)."),
 				quality: z.number().int().min(1).max(100).default(75).describe("JPEG quality 1-100."),
 			},
@@ -53,6 +60,10 @@ export function registerCuaTools(server: McpServer, engine: CuaEngine, gate: Cua
 							width: frame.width,
 							height: frame.height,
 							displayId: frame.displayId,
+							screenDisplayId: frame.screenDisplayId,
+							screenRect: frame.screenRect,
+							scaleFactor: frame.scaleFactor,
+							isPrimary: frame.isPrimary,
 							timestampMs: frame.timestampMs,
 							durationMs: frame.durationMs,
 							base64Length: frame.base64.length,
@@ -225,13 +236,17 @@ export function registerCuaTools(server: McpServer, engine: CuaEngine, gate: Cua
 	server.registerTool(
 		"cua_get_state",
 		{
-			description: "Read the current CUA state: display info, gate status, foreground window.",
+			description: "Read the current CUA state: all displays with their absolute rects, virtual desktop, gate status, foreground window.",
 			inputSchema: {
 				sessionId: z.string().optional().describe("PiDeck session ID to check session-level gate."),
 			},
 		},
 		async (args) => {
 			const display = engine.getDisplay();
+			// 多显示器：display 只描述主屏尺寸；displays/virtualDesktop 才是点击坐标空间。
+			// 非 Electron 宿主（node 测试/旧 stdio 服务）拿不到显示器列表，退化为空数组。
+			const displays = tryListCuaDisplays() ?? [];
+			const virtualDesktop = engine.getVirtualDesktop();
 			const fg = engine.getForegroundWindow();
 			const gateEnabled = gate.isEnabled();
 			const sessionEnabled = args.sessionId ? gate.isSessionEnabled(args.sessionId) : gateEnabled;
@@ -242,6 +257,8 @@ export function registerCuaTools(server: McpServer, engine: CuaEngine, gate: Cua
 						type: "text",
 						text: JSON.stringify({
 							display,
+							displays,
+							virtualDesktop,
 							gateEnabled,
 							sessionEnabled,
 							// 免审批状态一并上报：Agent/用户可据此判断是否还会弹审批框。

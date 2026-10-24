@@ -6,6 +6,7 @@ import { ArrowLeft, ArrowRight, PanelLeft } from "lucide-react";
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useAtomValue, useSetAtom, useStore } from "jotai";
 import { toggleThemeMode } from "./themeAppearance";
+import { DURATION_SLOW_MS, EASE_OUT_QUINT_CSS } from "./lib/motionTokens";
 import {
 	Code,
 	Activity,
@@ -27,12 +28,14 @@ import {
 	ScrollText,
 	// 抽屉侧边任务 Tab 图标：不用 PanelRight——那是会话头部抽屉开关的图形，并排会认错
 	Rocket,
-	// 会话 Tab 栏里的页面式工作区 Tab 图标（定时任务 / 智能体）
+	// 会话 Tab 栏里的页面式工作区 Tab 图标（定时任务 / 智能体 / 收藏）
 	Clock,
 	Bot,
+	Star,
 } from "lucide-react";
 import { configureNoticeDefaults, showNotice, type NoticeKind } from "./utils/notice";
 import { copyTextWithCopiedNotice } from "./utils/clipboardNotice";
+import { DSH_INSTALL_SETTINGS_TARGET } from "./utils/dshRuntimeHint";
 import { buildSettingsCommands, type PaletteCommand } from "./utils/commandPaletteCommands";
 import { CommandPalette } from "./components/overlays/CommandPalette";
 import { CommandPaletteOnboarding, markCommandPaletteOnboardingSeen } from "./components/overlays/CommandPaletteOnboarding";
@@ -42,7 +45,10 @@ import {
 	defaultAgentBackendAtom,
 	effectiveAgentBackendAtom,
 	busySendDeliveryAtom,
+	scrollToLatestOnSendAtom,
 	hiddenModulesAtom,
+	openAgentMarketPageAtom,
+	openFavoritesPageAtom,
 	hiddenComposerFeaturesAtom,
 	imageGenConfigAtom,
 	enhanceModelAtom,
@@ -70,6 +76,8 @@ import { SettingsFeatureRoot } from "./components/app/SettingsFeatureRoot";
 import { hostPluginPanelAtom } from "./atoms/host-plugin-atoms";
 import { AutomationPage } from "./components/automation/AutomationPage";
 import { AgentMarketPage } from "./components/agents/AgentMarketPage";
+import { FavoritesPage } from "./components/favorites/FavoritesPage";
+import { sortWorkspacePageIds } from "./utils/workspacePageTabs";
 import { SelectionToolHost } from "./components/selectionTool/SelectionToolHost";
 import { useRename } from "./hooks/useRename";
 import { useProjectRuntimeCapabilities } from "./hooks/useRuntimeCapabilities";
@@ -157,6 +165,7 @@ import {
 	upsertSessionAtom,
 	acpToolsAtom,
 	acpEnabledAtom,
+	sessionRuntimeByIdAtom,
 } from "./atoms";
 import { isSameSessionPath } from "./agentListDisplay";
 import { t } from "./i18n";
@@ -168,6 +177,7 @@ import { useResize } from "./hooks/useResize";
 import { ARCHIVED_SESSION_TOAST_MS, archivedSessionToastMessage, useSessionActions } from "./hooks/useSessionActions";
 import { useScratchPad } from "./hooks/useScratchPad";
 import { useDshRuntimeStatusSync } from "./hooks/useDshRuntimeStatusSync";
+import { useAutoDefaultAgentBackend } from "./hooks/useAutoDefaultAgentBackend";
 import { useDshRuntimeMigrationNotice } from "./hooks/useDshRuntimeMigrationNotice";
 import { useDshRuntimeInstallProgressSync } from "./hooks/useDshRuntimeInstallProgressSync";
 import { useWorktreeActions } from "./hooks/useWorktreeActions";
@@ -235,6 +245,7 @@ import type {
 	FocusTargetPayload,
 } from "../../shared/types";
 import type { TerminalDockSettings } from "./components/terminal/TerminalDock";
+import { WallpaperVideoLayer } from "./components/app/wallpaper/WallpaperVideoLayer";
 
 export function App() {
 	if (missingElectronPreload) {
@@ -276,6 +287,8 @@ export function App() {
 	const setCurrentSessionId = useSetAtom(currentSessionIdAtom);
 	const replaceProjectSessions = useSetAtom(replaceProjectSessionsAtom);
 	const openAutomationPage = useSetAtom(openAutomationPageAtom);
+	const openAgentMarketPage = useSetAtom(openAgentMarketPageAtom);
+	const openFavoritesPage = useSetAtom(openFavoritesPageAtom);
 	// 页面式工作区（定时任务 / 智能体）：Tab 列表与当前呈现页面；切会话只失活、关闭才卸载。
 	const openWorkspacePageIds = useAtomValue(openWorkspacePageIdsAtom);
 	const activeWorkspacePage = useAtomValue(activeWorkspacePageAtom);
@@ -697,6 +710,12 @@ export function App() {
 		setBusySendDelivery(settings.busySendDelivery);
 	}, [settings.busySendDelivery, setBusySendDelivery]);
 
+	// 「发送后自动回底」同步给时间线 controller（决策时刻读 atom，设置保存后下一次发送即生效）。
+	const setScrollToLatestOnSend = useSetAtom(scrollToLatestOnSendAtom);
+	useEffect(() => {
+		setScrollToLatestOnSend(settings.scrollToLatestOnSend !== false);
+	}, [settings.scrollToLatestOnSend, setScrollToLatestOnSend]);
+
 	// 隐藏的功能模块同步给不持有 settings props 的消费方（ConfigModal Pi/DSH 分页、composer 后端下拉），
 	// 与 defaultAgentBackend 同一模式。
 	const setHiddenModules = useSetAtom(hiddenModulesAtom);
@@ -738,14 +757,34 @@ export function App() {
 		api,
 	});
 	const { piStatus, piChecking, environmentDialog, setPiStatus, setEnvironmentDialog } = piUpdate;
-	// pi 环境引导（Node→npm→pi 三步）：弹窗打开时自动检测第一步，关闭时重置一次性状态。
-	// 依赖只取稳定的 checkNode（useCallback）；piGuide 对象每次渲染都是新引用，
-	// 直接依赖会因 checkNode 内部 setState → 重渲染 → effect 重跑而形成检测循环。
-	const piGuide = usePiEnvironmentGuide(api);
-	const { checkNode: checkGuideNode } = piGuide;
+	// pi 环境引导（检测 Node/npm → 一键安装 → 重新检测）：弹窗打开时自动刷新环境状态，关闭时重置一次性状态。
+	// 重新检测复用完整的环境检测（usePiUpdate），把 installed 回传给引导流程，
+	// 由它决定面板是否切到「检测通过」——只有一处检测口径，避免两套判定漂移。
+	const { checkPiInstall } = piUpdate;
+	const recheckPiForGuide = useCallback(async () => {
+		const status = await checkPiInstall("manual");
+		return Boolean(status?.installed);
+	}, [checkPiInstall]);
+	// 依赖只取稳定的 checkNode/checkNpmForGuide（useCallback）；piGuide 对象每次渲染都是新引用，
+	// 直接依赖会因内部 setState → 重渲染 → effect 重跑而形成检测循环。
+	const piGuide = usePiEnvironmentGuide(api, recheckPiForGuide);
+	const { checkNode: checkGuideNode, checkNpmForGuide: checkGuideNpm } = piGuide;
 	useEffect(() => {
-		if (environmentDialog) void checkGuideNode();
-	}, [environmentDialog, checkGuideNode]);
+		if (!environmentDialog) return;
+		void checkGuideNode();
+		void checkGuideNpm();
+	}, [environmentDialog, checkGuideNode, checkGuideNpm]);
+	// 默认后端自动选择：没有手动选过时，只装了 DSH runtime（没有 pi）就用 dsh，否则 pi。
+	// piInstalled 用实时检测优先、持久化缓存兜底：首次引导前 piStatus 还是 null。
+	const dshRuntimeStatus = useAtomValue(dshRuntimeStatusAtom);
+	useAutoDefaultAgentBackend({
+		api,
+		settings,
+		setSettings,
+		dshState: dshRuntimeStatus.state,
+		// 环境检测完成前用持久化缓存顶一下（缓存只说明上次装过 pi），避免启动瞬间因 piStatus 为空误判成「只有 DSH」。
+		piInstalled: piStatus ? piStatus.installed : Boolean(settings.piInstall),
+	});
 	// 抽屉宽度状态由 useWorkspacePanels 统一管理（全局 localStorage 持久化，键 pid:drawer-width），
 	// AppShell 拖拽提交经 setDrawerWidth 回写；此处不再持有独立 useState，避免双份状态漂移。
 	const drawerWidth = workspace.drawerWidth;
@@ -922,6 +961,21 @@ export function App() {
 	// 与 queue 同一所有权模式：records+runtime 双双消失才回收，引导页虚拟会话豁免。
 	useComposerStateSessionPrune(store);
 	useSessionRuntimeBridge({
+		// 「停止响应较慢」→ 重启会话：会杀掉当前 pi 进程重建（丢正在跑的那一轮），
+		// 因此走 overlays 确认框，和 Tab ⋯ 菜单的「重启进程」同一份文案与判定。
+		onRestartSessionRuntime: (sessionId) => {
+			const runtime = store.get(sessionRuntimeByIdAtom)[sessionId];
+			if (!runtime?.agentId) return;
+			overlays.showConfirm({
+				title: t("runControl.restartRunningTitle"),
+				message: t("runControl.restartRunningBody"),
+				confirmLabel: t("app.restart"),
+				onConfirm: () => {
+					overlays.clearConfirm();
+					void restartSessionAnyState(sessionId);
+				},
+			});
+		},
 		onRuntimeCapabilityChanged: ({ sessionId, previous, current, patch }) => {
 			if (previous?.isExecutingTool && !current.isExecutingTool && (patch.toolStateSequence == null || previous.toolStateSequence == null || patch.toolStateSequence >= previous.toolStateSequence) && queue.isSessionRuntimeBusy(sessionId)) {
 				void queue.flushQueuedSteerPrompts(sessionId);
@@ -1084,6 +1138,7 @@ export function App() {
 		closeEditorTab,
 		selectEditorTab,
 		promotePreviewEditorTab,
+		allowSaveEditorTab,
 		previewEditorTabId,
 		openFilePath,
 		viewFilePath,
@@ -1123,6 +1178,7 @@ export function App() {
 	const { openSessionFilePath, requestExternalPathOpen, externalPathOpenDialog, handleOpenLinkedFile, handleToolDrawerAction } = useSessionFileLinks({
 		activeAgent,
 		activeProject,
+		projects,
 		currentSessionId,
 		activeProjectId,
 		showToast,
@@ -1623,7 +1679,12 @@ export function App() {
 				}
 				if (!next.piEnvironmentChecked) {
 					// 首次检测延后一帧启动,先让主界面完成绘制,避免 packaged app 打开时出现几秒白屏。
-					window.setTimeout(() => void piUpdate.checkPiInstall("startup"), 300);
+					window.setTimeout(() => {
+						// 默认后端已是可用 DSH 时不再弹出「没有 pi」：只装 DSH 的用户不需要每次启动都被催装 pi。
+						// 探针可能还没落地（checking），那就照常检测——宁可多问一次，不能把真正缺后端的用户闷死。
+						if (next.defaultAgentBackend === "dsh" && store.get(dshRuntimeStatusAtom).state === "installed") return;
+						void piUpdate.checkPiInstall("startup");
+					}, 300);
 				}
 			})
 			.catch(() => {
@@ -2423,7 +2484,9 @@ export function App() {
 				{ opacity: 0, transform: "translateY(4px)" },
 				{ opacity: 1, transform: "none" },
 			],
-			{ duration: 160, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
+			// 切会话属面板级（tailwind.css 三档文档明确列了「切会话/抽屉」→ slow 320ms）；
+			// 曲线走 --ease-out-quint 的 JS 孪生（lib/motionTokens，与 CSS 侧同值互钉）
+			{ duration: DURATION_SLOW_MS, easing: EASE_OUT_QUINT_CSS },
 		);
 		return () => anim.cancel();
 	}, [currentSessionId, workspaceChrome.splitLayout, settings.navigationMode]);
@@ -2545,10 +2608,10 @@ export function App() {
 
 	// 会话 Tab 栏里的页面式工作区 Tab：标题固定走 i18n（不是会话、不参与自动会话标题），
 	// 激活态只由 activeWorkspacePage 决定；关闭即卸载页面（切会话只是失活）。
-	const workspacePageTabItems: WorkspacePageTabItem[] = openWorkspacePageIds.map((pageId) => ({
+	const workspacePageTabItems: WorkspacePageTabItem[] = sortWorkspacePageIds(openWorkspacePageIds).map((pageId) => ({
 		id: pageId,
-		title: t(pageId === "automation" ? "automation.title" : "agentMarket.title"),
-		icon: pageId === "automation" ? Clock : Bot,
+		title: t(pageId === "automation" ? "automation.title" : pageId === "agents" ? "agentMarket.title" : "favorites.title"),
+		icon: pageId === "automation" ? Clock : pageId === "agents" ? Bot : Star,
 		active: activeWorkspacePage === pageId,
 		onSelect: () => openWorkspacePage(pageId),
 		onClose: () => closeWorkspacePage(pageId),
@@ -2915,7 +2978,7 @@ export function App() {
 		currentSessionId,
 		activeAgentId,
 		hiddenModules: settings.hiddenModules ?? [],
-		actions: { selectProjectCommand, restartActiveAgent, closeAgent, runSessionControl },
+		actions: { selectProjectCommand, restartActiveAgent, closeAgent, runSessionControl, openAutomationPage: () => openAutomationPage(), openAgentMarketPage: () => openAgentMarketPage(), openFavoritesPage: () => openFavoritesPage(), openEnvironmentGuide: piUpdate.openEnvironmentGuide },
 	});
 
 	// 窗口缩放快捷键（Ctrl/Cmd+= / Ctrl/Cmd+-）由主进程直接改 zoomFactor 并落盘
@@ -2996,6 +3059,7 @@ export function App() {
 			readContent={readEditorFileContent}
 			readOriginalContent={readEditorOriginalContent}
 			saveContent={saveEditorFileContent}
+			onAllowSaveTab={allowSaveEditorTab}
 		/>
 	) : null;
 
@@ -3021,6 +3085,8 @@ export function App() {
 						}}
 					/>
 					<AgentMarketPage active={activeWorkspacePage === "agents"} onUseAgent={handleAgentUseAgent} />
+					{/* 收藏：整条回复 / 划选片段的本地快照，页面式 Tab（与智能体同一层级） */}
+					<FavoritesPage active={activeWorkspacePage === "favorites"} />
 				</div>
 			}
 			content={workbenchContentNode}
@@ -3150,6 +3216,7 @@ export function App() {
 		// 非会话静态区域使用当前焦点作为兜底；每个 SessionRuntimeInjector 会用本栏 cwd/project 覆盖。
 		<FileLinkBaseProvider baseDir={activeAgent?.cwd ?? activeProject?.path} projectId={activeProject?.id} projectRoot={activeProject?.path} sessionId={currentSessionId}>
 			<>
+				<WallpaperVideoLayer settings={settings} />
 				<AppBootstrap {...bootstrapProps} />
 				<AppShell
 					navigationChrome={
@@ -3496,8 +3563,31 @@ export function App() {
 							status={piStatus}
 							checking={piChecking}
 							guide={piGuide}
+							setupPreview={piUpdate.environmentSetupPreview}
+							dsh={{
+								state: dshRuntimeStatus.state,
+								runtimeVersion: dshRuntimeStatus.runtimeVersion,
+								isDefault: settings.defaultAgentBackend === "dsh",
+								onOpenInstall: () => {
+									// 安装/修复入口就是配置管理 → DSH 分页（未装时那页即安装引导），关窗避免两层弹层叠压
+									setEnvironmentDialog(false);
+									store.set(openSettingsAtom, DSH_INSTALL_SETTINGS_TARGET);
+								},
+								onUseAsDefault: () => {
+									void (async () => {
+										// 手动选择：置 manual 后自动选择不再改写；同时标记 pi 环境已确认，
+										// 否则只装 DSH 的用户每次启动都会被打一次「没有 pi」。
+										const next = await api.settings.update({ defaultAgentBackend: "dsh", defaultAgentBackendManual: true, piEnvironmentChecked: true });
+										setSettings(next);
+										setEnvironmentDialog(false);
+										showToast(t("environment.dshSwitched"));
+									})();
+								},
+							}}
 							onClose={() => {
 								setEnvironmentDialog(false);
+								// 预览标记只在本次打开有效：下次（含启动检测）回到真实检测结果
+								piUpdate.setEnvironmentSetupPreview(false);
 								piUpdate.setCustomPathResult(null);
 								// 关闭时重置安装状态
 								piUpdate.setInstallResult(null);
@@ -3512,9 +3602,9 @@ export function App() {
 								piUpdate.setNpmVersion(undefined);
 								piUpdate.setInstallResult(null);
 								piUpdate.setInstallCompleted(false);
-								piUpdate.setInstallUseMirror(false);
-								// 引导步骤在重新检测后需要刷新（安装结果可能已让环境就绪）
+								// 引导面板上的 Node/npm 状态同步刷新（一键安装可能刚补上便携 Node）
 								void piGuide.checkNode();
+								void piGuide.checkNpmForGuide();
 								piUpdate.checkPiInstall("manual");
 							}}
 							onOpenInstallDocs={() => api.app.openExternal("https://pi.dev/docs/latest/quickstart#install")}
@@ -3533,29 +3623,12 @@ export function App() {
 								piUpdate.setCustomPathResult(null);
 							}}
 							onValidateCustomPath={() => piUpdate.validateCustomPiPath({ closeDialogOnSuccess: true })}
-							npmAvailable={piUpdate.npmAvailable}
-							npmVersion={piUpdate.npmVersion}
-							npmChecking={piUpdate.npmChecking}
 							installCommand={piUpdate.installCommand}
-							installUseMirror={piUpdate.installUseMirror}
 							installExecuting={piUpdate.installExecuting}
 							installResult={piUpdate.installResult}
 							installCompleted={piUpdate.installCompleted}
-							onCheckNpm={piUpdate.checkNpm}
 							onInstallCommandChange={(cmd) => {
 								piUpdate.setInstallCommand(cmd);
-								piUpdate.setInstallResult(null);
-								piUpdate.setInstallCompleted(false);
-							}}
-							onToggleInstallMirror={() => {
-								piUpdate.setInstallUseMirror((prev) => {
-									if (prev) {
-										piUpdate.setInstallCommand((cmd) => cmd.replace(/\s+--registry=https:\/\/registry\.npmmirror\.com/g, ""));
-									} else {
-										piUpdate.setInstallCommand((cmd) => (cmd.includes("--registry=") ? cmd : cmd + " --registry=https://registry.npmmirror.com"));
-									}
-									return !prev;
-								});
 								piUpdate.setInstallResult(null);
 								piUpdate.setInstallCompleted(false);
 							}}

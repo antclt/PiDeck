@@ -81,6 +81,9 @@ export type WebContextUsage = {
 	 *  头部盾牌图标以它为准；会话记录里的 permissionPreset 只做无 runtime 时兜底——
 	 *  乐观切换会被 /api/state 轮询冲掉，单信会话记录会让图标切完又弹回去。 */
 	permissionPreset?: string;
+	/** 当前模型的供应商名（runtime state 直出，AgentManager 由 model.provider 归一）。
+	 *  头部额度区块靠它查用量探针；会话记录的 model.provider 只在无 runtime 时兜底。 */
+	provider?: string;
 };
 
 /** 文件抽屉节点（P3）：后端已剥离绝对路径，只留项目内相对信息。 */

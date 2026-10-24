@@ -10,6 +10,7 @@ import { useSessionSubagents } from "../../hooks/useSessionSubagents";
 import { Button } from "../ui-shadcn/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
 import { MarkdownStream } from "./MarkdownStream";
+import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
 import { ComposerWidgetFrame, useComposerWidgetCollapsed } from "./ComposerWidgetLayout";
 import { isFailureSubagentStatus, isSubagentRunLost, subagentIconKind, subagentStatusLabelSuffix } from "./subagentStatus";
 
@@ -152,38 +153,40 @@ export const PiSubagentEntryRow = (props: {
 				{entry.tokens != null && entry.tokens > 0 && <span className="shrink-0 tabular-nums text-xs text-text-tertiary">{entry.tokens.toLocaleString()} tk</span>}
 				<ChevronDown size={13} className={`shrink-0 text-text-tertiary transition-transform ${collapsed ? "" : "rotate-180"}`} aria-hidden="true" />
 			</button>
-			{!collapsed && (
-				<div className="flex flex-col gap-1.5 px-2 pb-2 pl-9 text-xs leading-5 text-text-secondary motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
-					{/* 元信息行：本地化状态徽标 + 起止时间与量化指标 */}
-					<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-text-tertiary">
-						<span className={`rounded px-1.5 py-0.5 text-micro font-medium ${subagentStatusBadgeClass(effectiveStatus)}`}>{t(lost ? "sessionSubagents.status.lost" : `sessionSubagents.status.${subagentStatusLabelSuffix(effectiveStatus)}`)}</span>
-						{entry.toolUses != null && entry.toolUses > 0 && <span>{t("sessionSubagents.detailToolUses", { count: entry.toolUses })}</span>}
-						{entry.tokens != null && entry.tokens > 0 && <span>{t("sessionSubagents.detailTokens", { count: entry.tokens.toLocaleString() })}</span>}
-						{entry.startedAt != null && <span>{t("sessionSubagents.detailStartedAt", { time: new Date(entry.startedAt).toLocaleTimeString() })}</span>}
-						{entry.completedAt != null && <span>{t("sessionSubagents.detailCompletedAt", { time: new Date(entry.completedAt).toLocaleTimeString() })}</span>}
-					</div>
-					{lost && <p className="rounded border border-danger/30 bg-danger-soft px-2 py-1.5 text-danger">{t("sessionSubagents.lostHint")}</p>}
-					{entry.description && <p className="whitespace-pre-wrap break-words">{entry.description}</p>}
-					{entry.error && <div className="whitespace-pre-wrap break-words rounded border border-danger/30 bg-danger-soft px-2 py-1.5 text-danger">{entry.error}</div>}
-					{entry.result && <div className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded bg-muted/50 px-2 py-1.5">{entry.result}</div>}
-					{(entry.childSessionId || hasLongText) && (
-						<div className="flex flex-wrap items-center gap-2 pt-0.5">
-							{entry.childSessionId && props.onOpenChildSession && (
-								<Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-xs text-text-secondary hover:text-foreground" onClick={() => props.onOpenChildSession?.(entry.childSessionId ?? "")}>
-									<ExternalLink size={12} />
-									{t("sessionSubagents.openChildSession")}
-								</Button>
-							)}
-							{hasLongText && (
-								<Button variant="ghost" size="sm" className="h-6 gap-1 px-2 text-xs text-text-secondary hover:text-foreground" onClick={() => setResultDialogOpen(true)}>
-									<FileText size={12} />
-									{t("sessionSubagents.viewFullResult")}
-								</Button>
-							)}
+			<Collapsible open={!collapsed}>
+				<CollapsibleContent>
+					<div className="flex flex-col gap-1.5 px-2 pb-2 pl-9 text-xs leading-5 text-text-secondary">
+						{/* 元信息行：本地化状态徽标 + 起止时间与量化指标 */}
+						<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-text-tertiary">
+							<span className={`rounded px-1.5 py-0.5 text-micro font-medium ${subagentStatusBadgeClass(effectiveStatus)}`}>{t(lost ? "sessionSubagents.status.lost" : `sessionSubagents.status.${subagentStatusLabelSuffix(effectiveStatus)}`)}</span>
+							{entry.toolUses != null && entry.toolUses > 0 && <span>{t("sessionSubagents.detailToolUses", { count: entry.toolUses })}</span>}
+							{entry.tokens != null && entry.tokens > 0 && <span>{t("sessionSubagents.detailTokens", { count: entry.tokens.toLocaleString() })}</span>}
+							{entry.startedAt != null && <span>{t("sessionSubagents.detailStartedAt", { time: new Date(entry.startedAt).toLocaleTimeString() })}</span>}
+							{entry.completedAt != null && <span>{t("sessionSubagents.detailCompletedAt", { time: new Date(entry.completedAt).toLocaleTimeString() })}</span>}
 						</div>
-					)}
-				</div>
-			)}
+						{lost && <p className="rounded border border-danger/30 bg-danger-soft px-2 py-1.5 text-danger">{t("sessionSubagents.lostHint")}</p>}
+						{entry.description && <p className="whitespace-pre-wrap break-words">{entry.description}</p>}
+						{entry.error && <div className="whitespace-pre-wrap break-words rounded border border-danger/30 bg-danger-soft px-2 py-1.5 text-danger">{entry.error}</div>}
+						{entry.result && <div className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded bg-muted/50 px-2 py-1.5">{entry.result}</div>}
+						{(entry.childSessionId || hasLongText) && (
+							<div className="flex flex-wrap items-center gap-2 pt-0.5">
+								{entry.childSessionId && props.onOpenChildSession && (
+									<Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-xs text-text-secondary hover:text-foreground" onClick={() => props.onOpenChildSession?.(entry.childSessionId ?? "")}>
+										<ExternalLink size={12} />
+										{t("sessionSubagents.openChildSession")}
+									</Button>
+								)}
+								{hasLongText && (
+									<Button variant="ghost" size="sm" className="h-6 gap-1 px-2 text-xs text-text-secondary hover:text-foreground" onClick={() => setResultDialogOpen(true)}>
+										<FileText size={12} />
+										{t("sessionSubagents.viewFullResult")}
+									</Button>
+								)}
+							</div>
+						)}
+					</div>
+				</CollapsibleContent>
+			</Collapsible>
 			{/* 完整结果 Dialog：长结果/无子会话文件时的完整终态文本与元信息 */}
 			{hasLongText && (
 				<Dialog open={resultDialogOpen} onOpenChange={setResultDialogOpen}>
@@ -312,25 +315,27 @@ export const DshSubagentEntryRow = (props: { agentId: string; entry: DshSubagent
 				<span className="shrink-0 text-micro text-text-tertiary">{entry.mode === "continuable" ? t("dshTools.subagentContinuable") : t("dshTools.subagentOneShot")}</span>
 				<ChevronDown size={13} className={`shrink-0 text-text-tertiary transition-transform ${collapsed ? "" : "rotate-180"}`} aria-hidden="true" />
 			</button>
-			{!collapsed && (
-				<div className="flex max-h-56 flex-col gap-1 overflow-y-auto border-t border-border-subtle px-2 py-1.5">
-					{transcriptLoading && (
-						<p className="flex items-center gap-1.5 px-1 text-xs text-text-tertiary">
-							<Loader2 size={13} className="animate-pideck-spin" aria-hidden="true" />
-							{t("dshTools.loading")}
-						</p>
-					)}
-					{!transcriptLoading && transcriptError && <p className="px-1 text-xs text-[var(--color-danger)]">{t("dshTools.subagentTranscriptError")}</p>}
-					{!transcriptLoading && !transcriptError && (transcript?.length ?? 0) === 0 && <p className="px-1 text-xs text-text-tertiary">{t("dshTools.subagentTranscriptEmpty")}</p>}
-					{!transcriptLoading &&
-						transcript?.map((message, index) => (
-							<div key={index} className={`flex flex-col gap-0.5 rounded-md px-2 py-1 ${message.role === "user" ? "bg-accent/30" : "bg-bg-panel"}`}>
-								<span className="text-micro text-text-tertiary">{message.role === "user" ? t("dshTools.roleUser") : t("dshTools.roleAssistant")}</span>
-								<span className="whitespace-pre-wrap break-words text-xs text-foreground">{message.text || "…"}</span>
-							</div>
-						))}
-				</div>
-			)}
+			<Collapsible open={!collapsed}>
+				<CollapsibleContent>
+					<div className="flex max-h-56 flex-col gap-1 overflow-y-auto border-t border-border-subtle px-2 py-1.5">
+						{transcriptLoading && (
+							<p className="flex items-center gap-1.5 px-1 text-xs text-text-tertiary">
+								<Loader2 size={13} className="animate-pideck-spin" aria-hidden="true" />
+								{t("dshTools.loading")}
+							</p>
+						)}
+						{!transcriptLoading && transcriptError && <p className="px-1 text-xs text-[var(--color-danger)]">{t("dshTools.subagentTranscriptError")}</p>}
+						{!transcriptLoading && !transcriptError && (transcript?.length ?? 0) === 0 && <p className="px-1 text-xs text-text-tertiary">{t("dshTools.subagentTranscriptEmpty")}</p>}
+						{!transcriptLoading &&
+							transcript?.map((message, index) => (
+								<div key={index} className={`flex flex-col gap-0.5 rounded-md px-2 py-1 ${message.role === "user" ? "bg-accent/30" : "bg-bg-panel"}`}>
+									<span className="text-micro text-text-tertiary">{message.role === "user" ? t("dshTools.roleUser") : t("dshTools.roleAssistant")}</span>
+									<span className="whitespace-pre-wrap break-words text-xs text-foreground">{message.text || "…"}</span>
+								</div>
+							))}
+					</div>
+				</CollapsibleContent>
+			</Collapsible>
 		</li>
 	);
 };
@@ -389,31 +394,32 @@ export function SessionSubagentsStrip(props: {
 
 	return (
 		<ComposerWidgetFrame data-testid="session-subagents-strip" aria-label={t("sessionSubagents.title")}>
-			<div className="flex h-9 w-full items-center gap-2.5 px-3">
-				<button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left" aria-expanded={!collapsed} onClick={toggleCollapsed}>
-					<Bot size={14} aria-hidden="true" className="shrink-0 text-text-tertiary" />
-					<span className="shrink-0 text-control font-medium leading-6 text-foreground">{t("sessionSubagents.title")}</span>
-					{/* 运行中计数徽标 + 状态灯：dsh-web 的 agent 状态灯语义 */}
-					{running > 0 && (
-						<span className="inline-flex shrink-0 items-center gap-1.5 rounded bg-warning/15 px-1.5 py-0.5 text-micro leading-none font-medium text-warning">
-							<span className="size-1.5 rounded-full bg-current animate-pulse" aria-hidden="true" />
-							{running}
+			{/* 受控呈现：折叠状态归 composer 通道单一持有，Radix 只承载高度动画（同 todo/team 条取舍）。 */}
+			<Collapsible open={!collapsed}>
+				<div className="flex h-9 w-full items-center gap-2.5 px-3">
+					<button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left" aria-expanded={!collapsed} onClick={toggleCollapsed}>
+						<Bot size={14} aria-hidden="true" className="shrink-0 text-text-tertiary" />
+						<span className="shrink-0 text-control font-medium leading-6 text-foreground">{t("sessionSubagents.title")}</span>
+						{/* 运行中计数徽标 + 状态灯：dsh-web 的 agent 状态灯语义 */}
+						{running > 0 && (
+							<span className="inline-flex shrink-0 items-center gap-1.5 rounded bg-warning/15 px-1.5 py-0.5 text-micro leading-none font-medium text-warning">
+								<span className="size-1.5 rounded-full bg-current animate-pulse" aria-hidden="true" />
+								{running}
+							</span>
+						)}
+						<span className="min-w-0 flex-1" />
+						<span className="shrink-0 text-text-tertiary" aria-hidden="true">
+							{collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
 						</span>
-					)}
-					<span className="min-w-0 flex-1" />
-					<span className="shrink-0 text-text-tertiary" aria-hidden="true">
-						{collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-					</span>
-				</button>
-			</div>
-			{!collapsed && (
-				<>
-					<ul className="mb-2 flex max-h-[240px] flex-col gap-1 overflow-y-auto [contain:layout_paint] [scrollbar-gutter:stable] px-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-100 motion-reduce:animate-none">
+					</button>
+				</div>
+				<CollapsibleContent>
+					<ul className="mb-2 flex max-h-[240px] flex-col gap-1 overflow-y-auto [contain:layout_paint] [scrollbar-gutter:stable] px-3">
 						{isDsh ? dshEntries.map((entry) => <DshSubagentEntryRow key={entry.id} agentId={agentId ?? ""} entry={entry} />) : piEntries.map((entry) => <PiSubagentEntryRow key={entry.id} entry={entry} sessionId={props.sessionId} onOpenChildSession={props.onOpenChildSession} />)}
 					</ul>
 					{hasAcpEntries && <p className="-mt-1 px-3 pb-2 text-micro leading-4 text-text-tertiary">{t("sessionSubagents.acpDelegateHint")}</p>}
-				</>
-			)}
+				</CollapsibleContent>
+			</Collapsible>
 		</ComposerWidgetFrame>
 	);
 }

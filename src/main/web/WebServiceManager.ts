@@ -11,6 +11,8 @@ import type {
 	ImageContent,
 	PiCommand,
 	Project,
+	ProviderUsageResult,
+	UsageProbeBackend,
 	RewindCheckpointPage,
 	RewindCheckpointPageParams,
 	RewindRestoreResult,
@@ -24,6 +26,7 @@ import type {
 	SessionRuntimeModelSelection,
 	SessionRuntimeReplacement,
 	SessionRuntimeTarget,
+	SessionSearchResult,
 	SessionSummary,
 	SessionTargetedValue,
 	SessionTodoSnapshot,
@@ -38,6 +41,7 @@ import { WebBodyTooLargeError, WebInvalidJsonError, readJson as readJsonBody, se
 import { WebStaticAssets } from "./WebStaticAssets";
 import { WebApiRoutes } from "./WebApiRoutes";
 import { WebStateEventHub } from "./WebStateEventHub";
+import { toPublicSessions } from "./WebSessionProjection";
 import { openSessionStream, writeSessionStreamError } from "./WebSessionStream";
 import { WebTokenAuth, type WebTokenPolicy } from "./WebTokenAuth";
 import { WebEventStreamRouter, type AgentChannelEventSource, type PiEvent } from "./WebEventStream";
@@ -104,6 +108,20 @@ export type WebServiceDependencies = {
 		truncated: boolean;
 	}>;
 	readSessionMessagePage: (sessionId: string, before?: number, pageSize?: number) => Promise<SessionMessagePage>;
+	/**
+	 * 会话内全文检索（跨全会话，不限已加载历史）：与桌面端 Ctrl+Shift+F 同源，
+	 * 入参是 SessionRecord.id，主进程按 catalog 分派 pi（session-index sidecar）/
+	 * DSH（host 历史投影）。未装配或索引未就绪返回 null——渲染层据此回退本地已加载
+	 * 搜索，绝不把「读不到」显示成「没有匹配」。
+	 */
+	searchSessionMessages?: (sessionId: string, query: string) => Promise<SessionSearchResult | null>;
+	/**
+	 * 供应商额度/余额用量查询（与桌面端圆球面板同源，走 ConfigManager 的用量探针）：
+	 * backend 决定配置与凭据链路（pi 用 $PI_HOME，dsh 用 $DSH_HOME）。
+	 * 未装配 / 用户未开启用量查询 / 供应商无可用端点 → 返回结构化失败结果（success=false），
+	 * 渲染层据此不渲染额度区块；抛异常由路由层兜底成 disabled 结果，不向浏览器暴露内部错误。
+	 */
+	fetchProviderUsage?: (provider: string, backend: UsageProbeBackend) => Promise<ProviderUsageResult>;
 	sendSessionPrompt: (input: SendSessionPromptInput) => Promise<SendSessionPromptResult>;
 	listSessionRuntimes: () => SessionRuntimeInfo[];
 	listSessionRuntimeModels: (target: SessionRuntimeTarget) => Promise<SessionCommandResult<SessionTargetedValue<AvailableModel[]>>>;
@@ -200,7 +218,7 @@ export class WebServiceManager {
 		this.tokenAuth = new WebTokenAuth({ persistToken: deps.persistToken, onChange: () => this.onTokenChanged() });
 		this.staticAssets = new WebStaticAssets({ devRendererUrl: deps.devRendererUrl });
 		this.eventStreamRouter = new WebEventStreamRouter((agentId) => this.deps.getSessionIdForAgent(agentId));
-		this.stateHub = new WebStateEventHub({ loadState: () => this.getState() });
+		this.stateHub = new WebStateEventHub({ loadState: () => this.getState(), stateRevision: () => this.stateRevision() });
 		this.apiRoutes = new WebApiRoutes({
 			deps,
 			sendJson: (response, body) => this.sendJson(response, body),
@@ -494,6 +512,18 @@ export class WebServiceManager {
 		return Number.isFinite(value) ? value : undefined;
 	}
 
+	/**
+	 * 状态推送的廉价版本键（2027-02 性能审计，见 WebStateEventHub.push）：
+	 * 只聚合 runtimes 身份/状态/代数与 pendingUi 摘要——pi 事件能驱动的变化面。
+	 * catalog/项目列表的变更频率低且不由 pi 事件驱动，交给 5s tick 的全量比对，
+	 * 不为它们把 catalog 克隆拉进这条每 delta 都可能触发的路径。
+	 */
+	private stateRevision(): string {
+		const runtimes = this.deps.listSessionRuntimes();
+		const pending = this.deps.listPendingUiRequests();
+		return `${runtimes.map((entry) => `${entry.sessionId}:${entry.agentId}:${entry.status}:${entry.runtimeGeneration ?? ""}`).join(";")}#${pending.length}:${pending.map((entry) => `${entry.sessionId}:${entry.requestId}`).join(",")}`;
+	}
+
 	private async getState() {
 		// messagesBySession 已移除（P0：轮询全量消息是纯浪费，React A2 从不消费；
 		// LAN Web 全量 UI 改为按 runtime 拉 GET /api/sessions/:id/messages，A1 兜底页
@@ -502,7 +532,9 @@ export class WebServiceManager {
 		const runtimes = this.deps.listSessionRuntimes();
 		return {
 			projects: this.deps.listProjects(),
-			sessions,
+			// 会话按 Web 可见字段投影：filePath/environment/dshSessionId/agentPreset/preview/
+			// messageCount 等桌面端专用字段不下发（实测占快照 ~99% 中的三成，Web 端零消费）。
+			sessions: toPublicSessions(sessions),
 			runtimes,
 			pendingUiRequests: this.deps.listPendingUiRequests(),
 		};

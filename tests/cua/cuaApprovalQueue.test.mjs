@@ -40,3 +40,34 @@ test("dequeue removes only the head", () => {
 	);
 	assert.strictEqual(queue.peekApproval([]), undefined);
 });
+
+test("expireApprovals drops only the expired prefix and keeps fresh entries", () => {
+	const now = 100_000;
+	const entries = [
+		{ requestId: "old1", timestampMs: now - 31_000 },
+		{ requestId: "old2", timestampMs: now - 30_001 },
+		{ requestId: "alive1", timestampMs: now - 29_000 },
+		{ requestId: "alive2", timestampMs: now - 1_000 },
+	];
+	const next = queue.expireApprovals(entries, now);
+	assert.deepStrictEqual(
+		next.map((item) => item.requestId),
+		["alive1", "alive2"],
+		"only the expired prefix is removed (entries are ordered by timestamp)",
+	);
+});
+
+test("expireApprovals returns empty for an all-expired queue and keeps an all-fresh one", () => {
+	const now = 100_000;
+	// 沙箱模块返回的是 vm realm 的数组，map 回宿主 realm 再比较（跨 realm deepStrictEqual 失配）。
+	assert.deepStrictEqual(
+		Array.from(queue.expireApprovals([{ requestId: "x", timestampMs: now - 60_000 }], now), (item) => item.requestId),
+		[],
+	);
+	const fresh = [{ requestId: "y", timestampMs: now }];
+	assert.deepStrictEqual(
+		Array.from(queue.expireApprovals(fresh, now), (item) => item.requestId),
+		["y"],
+		"fresh head is kept",
+	);
+});

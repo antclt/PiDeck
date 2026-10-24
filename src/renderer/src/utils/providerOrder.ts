@@ -1,3 +1,5 @@
+import { moveKeyByStep, moveKeyRelative, neighborKey } from "./listReorder";
+
 /**
  * 供应商卡片自定义顺序（settings.providerOrder / dshProviderOrder）的纯函数。
  *
@@ -80,25 +82,15 @@ export function buildProviderOrderScope(groups: readonly (readonly string[])[], 
  * - ↑ 键：anchor = 可见列表里的上一个供应商，position = "before"；
  * - ↓ 键：anchor = 可见列表里的下一个供应商，position = "after"。
  * 无位移（同名、元素不存在）时返回原序副本，调用方可据此跳过持久化。
+ * 位移算法与智能体/收藏列表共用 `listReorder.ts` 的实现，这里只保留供应商语义的入口名。
  */
 export function moveProviderRelative(names: readonly string[], fromKey: string, anchorKey: string, position: "before" | "after"): string[] {
-	const current = [...names];
-	const fromIndex = current.indexOf(fromKey);
-	if (fromIndex < 0 || fromKey === anchorKey || current.indexOf(anchorKey) < 0) return current;
-	current.splice(fromIndex, 1);
-	// 先摘除再定位：锚点在摘除后可能前移一位，必须重新取索引。
-	const insertAt = current.indexOf(anchorKey) + (position === "after" ? 1 : 0);
-	current.splice(insertAt, 0, fromKey);
-	return current;
+	return moveKeyRelative(names, fromKey, anchorKey, position);
 }
 
 /** 可见列表里 key 的上一个（delta=-1）或下一个（delta=1）供应商；越界返回 null */
 export function neighborProvider(visibleNames: readonly string[], key: string, delta: -1 | 1): string | null {
-	const index = visibleNames.indexOf(key);
-	if (index < 0) return null;
-	const target = index + delta;
-	if (target < 0 || target >= visibleNames.length) return null;
-	return visibleNames[target] ?? null;
+	return neighborKey(visibleNames, key, delta);
 }
 
 /**
@@ -106,7 +98,5 @@ export function neighborProvider(visibleNames: readonly string[], key: string, d
  * 返回 null 表示已经在边界（调用方应保持原序，不要写盘）。
  */
 export function moveProviderByStep(fullNames: readonly string[], visibleNames: readonly string[], key: string, delta: -1 | 1): string[] | null {
-	const anchor = neighborProvider(visibleNames, key, delta);
-	if (!anchor) return null;
-	return moveProviderRelative(fullNames, key, anchor, delta < 0 ? "before" : "after");
+	return moveKeyByStep(fullNames, visibleNames, key, delta);
 }

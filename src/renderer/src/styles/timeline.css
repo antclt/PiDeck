@@ -1767,7 +1767,9 @@
 .detail-drawer {
   position: relative;
   grid-column: 5;
-  background: var(--color-bg-panel);
+  /* 主次分明：右抽屉与左侧栏同一 chrome 底（--color-bg-sidebar），与正文面板拉开一档，
+     两侧 chrome 对称退后、会话区浮在最上层；皮肤色板里 sidebar 本就比 panel 深一档。 */
+  background: var(--color-bg-sidebar);
   min-width: 0;
   /* Grid item 默认 min-height:auto 会被深层文件树内容撑开，导致内部 .files-panel 的 overflow 无法形成滚动区。 */
   min-height: 0;

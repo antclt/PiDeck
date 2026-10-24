@@ -55,7 +55,7 @@ export const DiagnosticMessageCard = memo(function DiagnosticMessageCard(props: 
 			// 系统状态/自动重试/错误提示是独立卡片，不需要轨道归属关系
 			hideRail
 		>
-			<article className={`diagnostic-card w-full min-w-0 overflow-hidden rounded-md border border-border-subtle bg-[var(--color-chat-muted-bg)] tone-${tone}`} data-message-id={props.message.id} data-role={props.message.role}>
+			<article className={`diagnostic-card mb-4 w-full min-w-0 overflow-hidden rounded-md border border-border-subtle bg-[var(--color-chat-muted-bg)] tone-${tone}`} data-message-id={props.message.id} data-role={props.message.role}>
 				<div className="flex items-center gap-2 px-2 py-1.5 text-caption text-text-secondary">
 					<Icon size={14} aria-hidden="true" className={retryRunning ? "animate-pideck-spin" : undefined} />
 					<span className="font-semibold">{title}</span>
@@ -159,7 +159,7 @@ export const ThinkingBlock = memo(
 						{sticky.pinned && <ProcessEntryReturnToStart onClick={sticky.returnToStart} />}
 					</div>
 					{expanded && (
-						<div className="relative ml-5 mt-1 mb-2 rounded-b-sm border-l-2 border-border-subtle bg-transparent pl-3 animate-in fade-in duration-100 motion-reduce:animate-none">
+						<div className="relative ml-5 mt-1 mb-2 rounded-b-sm border-l-2 border-border-subtle bg-transparent pl-3 animate-in fade-in duration-fast motion-reduce:animate-none">
 							<div className="markdown-body px-0 pt-1 pb-1 text-text-tertiary">
 								<MarkdownStream text={props.text} isStreaming={props.isStreaming} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />
 							</div>

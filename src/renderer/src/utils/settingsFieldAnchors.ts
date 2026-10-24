@@ -351,6 +351,18 @@ const SETTINGS_ROW_ANCHORS = [
 	},
 	{
 		tab: "common",
+		slug: "common-browser-agent-enabled",
+		labelKey: "settings.browserAgentEnabled",
+		keywords: ["浏览器 agent", "内置浏览器", "网页操作", "browser agent", "browser automation"],
+	},
+	{
+		tab: "common",
+		slug: "common-browser-agent-auto-approve",
+		labelKey: "settings.browserAgentAutoApprove",
+		keywords: ["浏览器免审批", "网页自动点击", "browser auto approve"],
+	},
+	{
+		tab: "common",
 		slug: "common-prompt-suggestion-enabled",
 		labelKey: "settings.promptSuggestion.enabled",
 		keywords: ["输入预测", "下一句", "输入建议", "候选输入", "prompt suggestion", "prediction"],
@@ -377,6 +389,12 @@ const SETTINGS_ROW_ANCHORS = [
 	},
 	{
 		tab: "appearance",
+		slug: "appearance-wallpaper-engine",
+		labelKey: "settings.wallpaperEngine",
+		keywords: ["动态壁纸", "视频壁纸", "壁纸引擎", "wallpaper engine", "video wallpaper", "workshop"],
+	},
+	{
+		tab: "appearance",
 		slug: "appearance-font-size-per-area",
 		labelKey: "settings.fontSizePerArea",
 		keywords: ["分区字号", "分别设置字号", "字体大小", "per area font", "字号"],
@@ -386,6 +404,12 @@ const SETTINGS_ROW_ANCHORS = [
 		slug: "appearance-content-width",
 		labelKey: "settings.contentWidthPct",
 		keywords: ["内容宽度", "聊天区宽度", "content width", "宽度占比"],
+	},
+	{
+		tab: "appearance",
+		slug: "appearance-scroll-on-send",
+		labelKey: "settings.scrollToLatestOnSend",
+		keywords: ["发送后滚动", "自动滚动", "回到底部", "滚动到最新", "scroll to bottom", "auto scroll", "send scroll"],
 	},
 	{
 		tab: "appearance",
@@ -403,7 +427,7 @@ const SETTINGS_ROW_ANCHORS = [
 		tab: "appearance",
 		slug: "appearance-modules",
 		labelKey: "settings.modules.title",
-		keywords: ["隐藏模块", "功能模块", "隐藏", "显示模块", "hide", "modules", "收起", "dsh", "飞书", "桌宠", "生图", "功能提示", "响应提示", "tips"],
+		keywords: ["隐藏模块", "功能模块", "隐藏", "显示模块", "hide", "modules", "收起", "dsh", "飞书", "桌宠", "生图", "功能提示", "响应提示", "tips", "定时任务", "智能体", "automation", "agents"],
 	},
 
 	// ── Git ──────────────────────────────────────────────────────────

@@ -15,6 +15,8 @@ export type AgentMarketActions = {
 	createAgent: (input: CreateAgentProfileInput) => Promise<AgentProfile | null>;
 	updateAgent: (agentId: string, patch: UpdateAgentProfileInput) => Promise<AgentProfile | null>;
 	deleteAgent: (agent: AgentProfile) => Promise<boolean>;
+	/** 批量删除：内置条目被过滤掉，返回实际删除条数。 */
+	deleteAgents: (agents: readonly AgentProfile[]) => Promise<number>;
 	duplicateAgent: (agent: AgentProfile) => Promise<AgentProfile | null>;
 	resetBuiltinAgent: (agent: AgentProfile) => Promise<AgentProfile | null>;
 	setSelectionDefault: (agent: AgentProfile) => Promise<boolean>;
@@ -91,6 +93,35 @@ export function useAgentMarketActions(): AgentMarketActions {
 		[refreshSnapshot],
 	);
 
+	/**
+	 * 批量删除：逐条删（主进程没有批量接口，单个 delete 的语义就是「不存在或内置 → false」），
+	 * 最后只重拉一次快照。内置条目在调用前就被过滤掉——批量框里点不到它们，
+	 * 这里再兜一层，避免把「删了 0 条」误报成成功。
+	 */
+	const deleteAgents = useCallback(
+		async (agents: readonly AgentProfile[]): Promise<number> => {
+			const targets = agents.filter((agent) => !agent.builtin);
+			if (targets.length === 0) {
+				showNotice(t("agentMarket.builtinNoDelete"), 3000, "warning");
+				return 0;
+			}
+			let removed = 0;
+			let failed = 0;
+			for (const agent of targets) {
+				try {
+					if (await desktopApi.agentProfiles.remove(agent.id)) removed += 1;
+				} catch {
+					failed += 1;
+				}
+			}
+			await refreshSnapshot();
+			if (failed > 0) showNotice(t("agentMarket.bulkDeletePartial", { count: removed, failed }), 3200, "warning");
+			else if (removed > 0) showNotice(t("agentMarket.batchDeleted", { count: removed }), 2200);
+			return removed;
+		},
+		[refreshSnapshot],
+	);
+
 	const duplicateAgent = useCallback(
 		async (agent: AgentProfile) => {
 			try {
@@ -136,5 +167,5 @@ export function useAgentMarketActions(): AgentMarketActions {
 		[refreshSnapshot],
 	);
 
-	return { createAgent, updateAgent, deleteAgent, duplicateAgent, resetBuiltinAgent, setSelectionDefault };
+	return { createAgent, updateAgent, deleteAgent, deleteAgents, duplicateAgent, resetBuiltinAgent, setSelectionDefault };
 }

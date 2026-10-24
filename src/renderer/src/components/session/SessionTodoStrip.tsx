@@ -4,6 +4,7 @@ import { ChevronDown, ChevronUp, ListChecks, X } from "lucide-react";
 import { sessionRuntimeBySessionIdAtomFamily, sessionRuntimeUiBySessionIdAtomFamily } from "../../atoms";
 import { t } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
+import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
 import { isCoherentComposerRuntimeUi, type RuntimeHandle } from "./ComposerRuntimeIntegrations";
 import { ComposerWidgetFrame, useComposerWidgetCollapsed } from "./ComposerWidgetLayout";
 import { parseAgentTodoItems, runtimeTodosToItems, sessionTodoSnapshotToItems, stripPiDeckTodoWidgetMetadata, type AgentTodoItem } from "./agentTodoParser";
@@ -259,27 +260,32 @@ export function SessionTodoStrip(props: { sessionId: string }) {
 
 	return (
 		<ComposerWidgetFrame data-testid="session-todo-strip" aria-label={t("sessionTodo.title")}>
-			<div className="flex h-9 w-full items-center gap-2.5 px-3">
-				<button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left" aria-expanded={!collapsed} onClick={toggleCollapsed}>
-					<ListChecks size={14} aria-hidden="true" className="shrink-0 text-text-tertiary" />
-					<span className="shrink-0 text-control font-medium leading-6 text-foreground">{t("sessionTodo.title")}</span>
-					<span className="min-w-0 flex-1 truncate text-control leading-5 text-text-tertiary">{progressLabel(items)}</span>
-					<span className="shrink-0 text-text-tertiary" aria-hidden="true">
-						{collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-					</span>
-				</button>
-				<Button variant="ghost" size="icon-xs" className="size-7 shrink-0 rounded-full text-text-tertiary hover:bg-muted/70 hover:text-foreground" aria-label={t("sessionTodo.dismiss")} title={t("sessionTodo.dismiss")} onClick={dismissVisibleWidgets}>
-					<X size={14} aria-hidden="true" />
-				</Button>
-			</div>
-			{!collapsed && (
-				<ul className="mb-2 flex max-h-[180px] flex-col gap-2 overflow-y-auto [contain:layout_paint] px-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-100 motion-reduce:animate-none">
-					{/* 行的 overflow-hidden / shrink-0 约束见 TodoItemRow */}
-					{items.map((item) => (
-						<TodoItemRow key={item.id} item={item} />
-					))}
-				</ul>
-			)}
+			{/* 受控呈现：折叠状态仍归 composer 通道（useComposerWidgetCollapsed）单一持有。
+			    刻意不用 CollapsibleTrigger——本行右侧并列 dismiss 按钮，trigger 包住整行会把
+			    它变成嵌套交互元素；aria-expanded/onClick 按既有契约显式接在按钮上。 */}
+			<Collapsible open={!collapsed}>
+				<div className="flex h-9 w-full items-center gap-2.5 px-3">
+					<button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left" aria-expanded={!collapsed} onClick={toggleCollapsed}>
+						<ListChecks size={14} aria-hidden="true" className="shrink-0 text-text-tertiary" />
+						<span className="shrink-0 text-control font-medium leading-6 text-foreground">{t("sessionTodo.title")}</span>
+						<span className="min-w-0 flex-1 truncate text-control leading-5 text-text-tertiary">{progressLabel(items)}</span>
+						<span className="shrink-0 text-text-tertiary" aria-hidden="true">
+							{collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+						</span>
+					</button>
+					<Button variant="ghost" size="icon-xs" className="size-7 shrink-0 rounded-full text-text-tertiary hover:bg-muted/70 hover:text-foreground" aria-label={t("sessionTodo.dismiss")} title={t("sessionTodo.dismiss")} onClick={dismissVisibleWidgets}>
+						<X size={14} aria-hidden="true" />
+					</Button>
+				</div>
+				<CollapsibleContent>
+					{/* 限高 flex 列：行的 overflow-hidden 必须配 shrink-0（见 TodoItemRow），否则条目溢出时整列被线性压扁且不出现滚动条。 */}
+					<ul className="mb-2 flex max-h-[180px] flex-col gap-2 overflow-y-auto [contain:layout_paint] px-3">
+						{items.map((item) => (
+							<TodoItemRow key={item.id} item={item} />
+						))}
+					</ul>
+				</CollapsibleContent>
+			</Collapsible>
 		</ComposerWidgetFrame>
 	);
 }

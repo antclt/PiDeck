@@ -13,6 +13,7 @@ import { t } from "../../i18n";
 import type { ModelTraceLogData } from "../../../../shared/types/rpcLog";
 import { parseModelTracePayload, summarizeTraceMessage, type TraceBlock, type TraceMessage } from "../../utils/modelTraceParse";
 import { Button } from "../ui-shadcn/button";
+import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
 import { copyTextWithCopiedNotice } from "../../utils/clipboardNotice";
 
 /** 块级内容最大高度：超长内容保持完整可滚，不截断文本本身 */
@@ -69,8 +70,10 @@ function TraceBlockView({ block }: { block: TraceBlock }) {
 /** 消息行：默认折叠为一行摘要（角色 + 摘要 + 字符数），点击展开完整块内容 */
 function TraceMessageRow({ message, index }: { message: TraceMessage; index: number }) {
 	const [open, setOpen] = useState(false);
+	// 折叠体走共享折叠原语：真高度渐变而非高度硬跳（同 composer 折叠条），reduced-motion 自动回退。
+	// 外层直接当 Collapsible 根（仍渲染 div），DOM 层级不变，不引入多余盒模型。
 	return (
-		<div className="border-b border-border/40 last:border-b-0">
+		<Collapsible open={open} className="border-b border-border/40 last:border-b-0">
 			<button type="button" className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-accent-soft" onClick={() => setOpen((value) => !value)}>
 				<span className="shrink-0 tabular-nums text-micro text-muted-foreground/60">{index + 1}</span>
 				{open ? <ChevronDown className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" /> : <ChevronRight className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />}
@@ -78,29 +81,28 @@ function TraceMessageRow({ message, index }: { message: TraceMessage; index: num
 				<span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{summarizeTraceMessage(message)}</span>
 				<span className="shrink-0 tabular-nums text-micro text-muted-foreground/60">{t("rpc.traceChars", { n: message.chars })}</span>
 			</button>
-			{open && (
-				<div className="flex flex-col gap-2 px-2 pb-2 pl-9 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
-					{message.blocks.map((block, blockIndex) => (
-						<TraceBlockView key={blockIndex} block={block} />
-					))}
-				</div>
-			)}
-		</div>
+			{/* 不再挂 animate-in/fade-in：cn 的 twMerge 会把 animate-* 判同组，保留会盖掉原语的高度动画。 */}
+			<CollapsibleContent className="flex flex-col gap-2 px-2 pb-2 pl-9">
+				{message.blocks.map((block, blockIndex) => (
+					<TraceBlockView key={blockIndex} block={block} />
+				))}
+			</CollapsibleContent>
+		</Collapsible>
 	);
 }
 
 /** 可折叠区段头（系统提示词 / 工具定义 / 原始 JSON 共用） */
 function SectionHeader({ icon, label, meta, open, onToggle, children }: { icon: ReactNode; label: string; meta?: string; open: boolean; onToggle: () => void; children?: ReactNode }) {
 	return (
-		<div className="border-b border-border/40 last:border-b-0">
+		<Collapsible open={open} className="border-b border-border/40 last:border-b-0">
 			<button type="button" className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-accent-soft" onClick={onToggle}>
 				{open ? <ChevronDown className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" /> : <ChevronRight className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />}
 				{icon}
 				<span className="text-xs font-medium">{label}</span>
 				{meta ? <span className="min-w-0 flex-1 truncate text-micro text-muted-foreground/70">{meta}</span> : <span className="flex-1" />}
 			</button>
-			{open && <div className="motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">{children}</div>}
-		</div>
+			<CollapsibleContent>{children}</CollapsibleContent>
+		</Collapsible>
 	);
 }
 

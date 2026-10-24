@@ -10,6 +10,9 @@ import test from "node:test";
 
 const { PiDeckMcpService } = loadTsCommonJs("src/main/mcp/PiDeckMcpService.ts");
 const { HostPluginSessions } = loadTsCommonJs("src/main/plugins/HostPluginSessions.ts");
+const { AgentProfileStore } = loadTsCommonJs("src/main/agents/AgentProfileStore.ts");
+const { AutomationStore } = loadTsCommonJs("src/main/automation/AutomationStore.ts");
+const { FavoritesStore } = loadTsCommonJs("src/main/favorites/FavoritesStore.ts");
 const { createDefaultAppSettings } = loadTsCommonJs("src/shared/types/settings.ts");
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
@@ -44,13 +47,57 @@ async function fixture(t, override = {}) {
 		{ id: "p1", name: "Allowed" },
 		{ id: "p2", name: "Private" },
 	];
+	// 真实 AgentProfileStore（临时文件）：内置种子、长度归一、绑定清理都走生产实现，而不是假桩。
+	const agentStore = new AgentProfileStore(join(dir, "agent-profiles.json"));
+	await agentStore.load();
+	const agents = {
+		list: () => agentStore.list(),
+		get: (agentId) => agentStore.get(agentId),
+		create: (input) => agentStore.create(input),
+		update: (agentId, patch) => agentStore.update(agentId, patch),
+		delete: (agentId) => agentStore.delete(agentId),
+		bindSession: (input) => agentStore.bindSession(input),
+	};
+	// 真实 AutomationStore（临时文件）：任务 CRUD/运行历史走生产归一化；runNow/abortRun 用 store 的
+	// createRun/updateRun 模拟协调器，避免在 MCP 测试里装配整条会话运行时链。
+	const automationStore = new AutomationStore(join(dir, "automation.json"));
+	await automationStore.load();
+	const automation = {
+		listTasks: (projectId) => automationStore.getSnapshot().tasks.filter((task) => task.projectId === projectId),
+		getTask: (taskId) => automationStore.getSnapshot().tasks.find((task) => task.id === taskId),
+		listRuns: (projectId) => automationStore.listRuns().filter((run) => run.projectId === projectId),
+		getRun: (runId) => automationStore.getRun(runId),
+		createTask: (input) => automationStore.createTask(input),
+		updateTask: (taskId, patch) => automationStore.updateTask(taskId, patch),
+		deleteTask: (taskId) => automationStore.deleteTask(taskId),
+		runNow: async (taskId) => {
+			const task = automationStore.getTask(taskId);
+			if (!task) throw new Error("Automation task not found");
+			return automationStore.createRun({ task, trigger: "manual" });
+		},
+		abortRun: async (runId) => {
+			const run = automationStore.getRun(runId);
+			if (!run || run.status === "succeeded" || run.status === "failed" || run.status === "aborted") return false;
+			await automationStore.updateRun(runId, { status: "aborted", endedAt: Date.now(), durationMs: 0 });
+			return true;
+		},
+	};
+	// 真实 FavoritesStore（临时文件）：收藏快照、截断与排序都走生产实现。
+	const favoritesStore = new FavoritesStore(join(dir, "favorites.json"));
+	await favoritesStore.load();
+	const favorites = {
+		list: () => favoritesStore.list(),
+		get: (favoriteId) => favoritesStore.list().find((entry) => entry.id === favoriteId),
+		add: (input) => favoritesStore.add(input),
+		remove: (favoriteId) => favoritesStore.remove(favoriteId),
+	};
 	const configPath = join(dir, "mcp-host.json");
-	const service = new PiDeckMcpService({ configPath, projects: () => projects, sessions, settings: () => null, builtInExtensionsVersion: () => null, runtimes: () => [], abortRuntime: async () => ({ ok: true, value: undefined }), warn: () => undefined, ...override });
+	const service = new PiDeckMcpService({ configPath, projects: () => projects, sessions, agents, automation, favorites, settings: () => null, builtInExtensionsVersion: () => null, runtimes: () => [], abortRuntime: async () => ({ ok: true, value: undefined }), warn: () => undefined, ...override });
 	t.after(async () => {
 		await service.dispose();
 		await rm(dir, { recursive: true, force: true });
 	});
-	return { service, projects, configPath, sessions, dir };
+	return { service, projects, configPath, sessions, agentStore, automationStore, favoritesStore, dir };
 }
 
 async function connect(t, service) {
@@ -71,6 +118,9 @@ test("MCP is off by default, has no endpoint/credential and exports disabled con
 		// 旧配置文件没有这两个字段，默认值必须让升级后的行为原样延续：显式白名单 + 无写能力。
 		allProjects: false,
 		allowControl: false,
+		allowAgentWrite: false,
+		allowAutomationWrite: false,
+		allowFavoritesWrite: false,
 		running: false,
 		projects: [
 			{ id: "p1", name: "Allowed" },
@@ -89,7 +139,7 @@ test("MCP is off by default, has no endpoint/credential and exports disabled con
 	assert.match(definition.url, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
 	assert.deepEqual(
 		(await client.listTools()).tools.map((v) => v.name),
-		["projects_list", "settings_get", "extensions_list", "runtime_status", "sessions_list", "sessions_get", "sessions_search", "sessions_entries"],
+		["projects_list", "settings_get", "extensions_list", "runtime_status", "agents_list", "agents_get", "automation_tasks_list", "automation_tasks_get", "automation_runs_list", "favorites_list", "favorites_get", "sessions_list", "sessions_get", "sessions_search", "sessions_entries"],
 	);
 	for (const tool of (await client.listTools()).tools) assert.equal(tool.annotations.readOnlyHint, true);
 	// 写开关默认关：写工具不注册，客户端连看都看不到，而不是注册后拒绝。
@@ -370,7 +420,7 @@ test("disconnected requests keep their IO budget until settled, then release slo
 	await new Promise((r) => setImmediate(r));
 	const recovered = await list();
 	assert.equal(recovered.status, 200, "SDK shutdown must not strand completed request slots");
-	assert.equal((await recovered.json()).result.tools.length, 8);
+	assert.equal((await recovered.json()).result.tools.length, 15);
 });
 
 test("通配授权跟随项目列表：新增项目立即可读，已删除项目当场失效", async (t) => {
@@ -408,6 +458,9 @@ test("通配/写开关字段向后兼容，且 enabled 必须至少有一块可�
 	const legacy = await read({ version: 1, enabled: true, projectIds: ["p1"], port: 41234, token: "a".repeat(64) });
 	assert.equal(legacy.allProjects, false);
 	assert.equal(legacy.allowControl, false);
+	assert.equal(legacy.allowAgentWrite, false);
+	assert.equal(legacy.allowAutomationWrite, false);
+	assert.equal(legacy.allowFavoritesWrite, false);
 	assert.equal(legacy.projectIds[0], "p1");
 	// enabled 但既没白名单也不是通配：这份配置谁都不能读，必须 fail closed 而不是静默监听。
 	await assert.rejects(read(base), /config-read-failed/);
@@ -469,4 +522,193 @@ test("写开关只在打开时注册 sessions_abort；中断按代次校验，�
 	assert.equal((await call("sessions_abort", { sessionId: "s2" })).isError, true);
 	assert.equal((await call("sessions_abort", { sessionId: "s1", expectedRuntimeGeneration: generation })).isError, undefined);
 	assert.deepEqual(aborted, [{ sessionId: "s1", agentId: "a1", runtimeGeneration: 3 }]);
+});
+
+test("智能体只读工具：宿主级、只出元信息，systemPrompt 永不返回", async (t) => {
+	const { service, agentStore } = await fixture(t);
+	await service.setAccess({ enabled: true, projectIds: ["p1"], allowControl: false });
+	const { client } = await connect(t, service);
+	const builtin = agentStore.get("builtin-translate");
+	assert.ok(builtin && builtin.systemPrompt.length > 0, "内置翻译智能体必须存在且带角色设定");
+	const tools = (await client.listTools()).tools;
+	for (const name of ["agents_list", "agents_get"]) assert.equal(tools.find((tool) => tool.name === name)?.annotations.readOnlyHint, true, `${name} 是只读工具`);
+	const list = (await client.callTool({ name: "agents_list" })).structuredContent.data;
+	// 内置种子（翻译/小助手/诊断/插件开发）都在；智能体是宿主级，不需要项目白名单。
+	assert.ok(list.length >= 4, "内置智能体应全部出现在元信息列表里");
+	const translate = list.find((agent) => agent.id === "builtin-translate");
+	assert.equal(translate.builtin, true);
+	assert.equal(translate.name, builtin.name);
+	const serialized = JSON.stringify(list);
+	assert.equal(serialized.includes("systemPrompt"), false, "元信息投影不得出现 systemPrompt 键");
+	assert.equal(serialized.includes(builtin.systemPrompt.slice(0, 24)), false, "角色设定正文不得经只读工具外泄");
+	const missing = await client.callTool({ name: "agents_get", arguments: { agentId: "missing-agent" } });
+	assert.equal(missing.isError, true);
+	assert.equal(JSON.parse(missing.content[0].text).code, "agent-not-found");
+});
+
+test("智能体写工具默认不注册；打开后可创建/编辑/删除/绑定，角色设定只写不读", async (t) => {
+	const { service } = await fixture(t);
+	await service.setAccess({ enabled: true, projectIds: ["p1"], allowControl: false });
+	const off = (await connect(t, service)).client;
+	assert.equal(
+		(await off.listTools()).tools.some((tool) => tool.name === "agents_create"),
+		false,
+		"写开关关闭时工具不注册",
+	);
+	assert.equal((await service.getState()).allowAgentWrite, false);
+
+	await service.setAccess({ enabled: true, projectIds: ["p1"], allowControl: false, allowAgentWrite: true });
+	assert.equal((await service.getState()).allowAgentWrite, true);
+	const { client } = await connect(t, service);
+	const tools = (await client.listTools()).tools;
+	for (const name of ["agents_create", "agents_update", "agents_delete", "agents_bind_session"]) {
+		const write = tools.find((tool) => tool.name === name);
+		assert.ok(write, `${name} 应随写开关注册`);
+		assert.equal(write.annotations.readOnlyHint, false, "写工具不能被标成只读");
+		assert.equal(write.annotations.destructiveHint, false);
+	}
+
+	const created = await client.callTool({ name: "agents_create", arguments: { name: "MCP 角色", systemPrompt: "只写不读的角色设定", category: "coding" } });
+	assert.equal(created.isError, undefined);
+	assert.equal(JSON.stringify(created).includes("只写不读的角色设定"), false, "写入的角色设定不得回显");
+	const agentId = created.structuredContent.data.id;
+	assert.equal(created.structuredContent.data.name, "MCP 角色");
+	assert.equal(created.structuredContent.data.category, "coding");
+
+	const updated = await client.callTool({ name: "agents_update", arguments: { agentId, name: "改名", systemPrompt: "新的角色设定" } });
+	assert.equal(updated.structuredContent.data.name, "改名");
+	assert.equal(JSON.stringify(updated).includes("新的角色设定"), false, "更新角色设定同样不回显");
+	const empty = await client.callTool({ name: "agents_update", arguments: { agentId } });
+	assert.equal(JSON.parse(empty.content[0].text).code, "agent-patch-empty");
+
+	// 绑定会话：会话必须属于已授权项目（s1 → p1），未授权项目 / 会话不存在 / 智能体不存在都要拒绝。
+	const bound = await client.callTool({ name: "agents_bind_session", arguments: { projectId: "p1", sessionId: "s1", agentId } });
+	assert.equal(bound.isError, undefined);
+	assert.deepEqual(bound.structuredContent.data, { projectId: "p1", sessionId: "s1", agentId });
+	assert.equal((await client.callTool({ name: "agents_bind_session", arguments: { projectId: "p2", sessionId: "s2", agentId } })).isError, true);
+	assert.equal((await client.callTool({ name: "agents_bind_session", arguments: { projectId: "p1", sessionId: "missing", agentId } })).isError, true);
+	assert.equal((await client.callTool({ name: "agents_bind_session", arguments: { projectId: "p1", sessionId: "s1", agentId: "missing-agent" } })).isError, true);
+	assert.equal((await client.callTool({ name: "agents_bind_session", arguments: { projectId: "p1", sessionId: "s1", agentId: null } })).isError, undefined, "agentId=null 解绑");
+
+	// 内置不可删；自建可删，删完 agents_get 返回 agent-not-found。
+	const builtinDelete = await client.callTool({ name: "agents_delete", arguments: { agentId: "builtin-translate" } });
+	assert.equal(JSON.parse(builtinDelete.content[0].text).code, "agent-not-deletable");
+	const deleted = await client.callTool({ name: "agents_delete", arguments: { agentId } });
+	assert.deepEqual(deleted.structuredContent.data, { agentId, deleted: true });
+	assert.equal((await client.callTool({ name: "agents_get", arguments: { agentId } })).isError, true);
+});
+
+test("定时任务只读工具：按项目授权、列表不含 prompt、运行历史可查", async (t) => {
+	const { service, automationStore } = await fixture(t);
+	await service.setAccess({ enabled: true, projectIds: ["p1"], allowControl: false });
+	const { client } = await connect(t, service);
+	const now = Date.now();
+	const p1Task = await automationStore.createTask({ name: "巡检", projectId: "p1", prompt: "检查构建", schedule: { type: "cron", expression: "0 9 * * *" } }, now);
+	await automationStore.createTask({ name: "私有任务", projectId: "p2", prompt: "secret", schedule: { type: "manual" } }, now);
+	const list = (await client.callTool({ name: "automation_tasks_list", arguments: { projectId: "p1" } })).structuredContent.data.tasks;
+	assert.deepEqual(
+		list.map((task) => task.id),
+		[p1Task.id],
+		"只返回已授权项目的任务",
+	);
+	assert.equal(JSON.stringify(list).includes("检查构建"), false, "列表不含 prompt");
+	assert.equal(list[0].nextRunAt !== undefined, true, "cron 任务带下次运行时间");
+	const detail = (await client.callTool({ name: "automation_tasks_get", arguments: { projectId: "p1", taskId: p1Task.id } })).structuredContent.data;
+	assert.equal(detail.prompt, "检查构建", "详情在项目授权范围内返回 prompt");
+	assert.equal((await client.callTool({ name: "automation_tasks_get", arguments: { projectId: "p1", taskId: "missing" } })).isError, true);
+	await automationStore.createRun({ task: p1Task, trigger: "manual" });
+	const runs = (await client.callTool({ name: "automation_runs_list", arguments: { projectId: "p1" } })).structuredContent.data.runs;
+	assert.equal(runs.length, 1);
+	assert.equal(runs[0].taskId, p1Task.id);
+	assert.equal((await client.callTool({ name: "automation_tasks_list", arguments: { projectId: "p2" } })).isError, true, "未授权项目拒绝");
+});
+
+test("定时任务写工具默认不注册；打开后可 CRUD、立即运行与中止，且按项目授权", async (t) => {
+	const { service } = await fixture(t);
+	await service.setAccess({ enabled: true, projectIds: ["p1"], allowControl: false });
+	const off = (await connect(t, service)).client;
+	assert.equal(
+		(await off.listTools()).tools.some((tool) => tool.name === "automation_task_create"),
+		false,
+		"写开关关闭时工具不注册",
+	);
+	assert.equal((await service.getState()).allowAutomationWrite, false);
+
+	await service.setAccess({ enabled: true, projectIds: ["p1"], allowControl: false, allowAutomationWrite: true });
+	const { client } = await connect(t, service);
+	const names = (await client.listTools()).tools.map((tool) => tool.name);
+	for (const name of ["automation_task_create", "automation_task_update", "automation_task_delete", "automation_task_run_now", "automation_run_abort"]) assert.ok(names.includes(name), name);
+
+	const created = await client.callTool({ name: "automation_task_create", arguments: { projectId: "p1", name: "MCP 任务", prompt: "生成日报", schedule: { type: "manual" } } });
+	assert.equal(created.isError, undefined);
+	const taskId = created.structuredContent.data.id;
+	assert.equal(created.structuredContent.data.schedule.type, "manual");
+	const bad = await client.callTool({ name: "automation_task_create", arguments: { projectId: "p1", name: "坏 cron", prompt: "x", schedule: { type: "cron", expression: "bad" } } });
+	assert.equal(JSON.parse(bad.content[0].text).code, "automation-invalid-schedule");
+
+	const updated = await client.callTool({ name: "automation_task_update", arguments: { taskId, name: "改名任务", schedule: { type: "cron", expression: "0 9 * * *" } } });
+	assert.equal(updated.structuredContent.data.name, "改名任务");
+	assert.equal(updated.structuredContent.data.schedule.expression, "0 9 * * *");
+	const empty = await client.callTool({ name: "automation_task_update", arguments: { taskId } });
+	assert.equal(JSON.parse(empty.content[0].text).code, "automation-patch-empty");
+
+	const run = (await client.callTool({ name: "automation_task_run_now", arguments: { taskId } })).structuredContent.data;
+	assert.equal(run.taskId, taskId);
+	assert.equal(run.status, "queued");
+	const aborted = (await client.callTool({ name: "automation_run_abort", arguments: { runId: run.id } })).structuredContent.data;
+	assert.deepEqual(aborted, { runId: run.id, aborted: true });
+	assert.equal((await client.callTool({ name: "automation_run_abort", arguments: { runId: "missing" } })).isError, true);
+
+	const denied = await client.callTool({ name: "automation_task_create", arguments: { projectId: "p2", name: "x", prompt: "y", schedule: { type: "manual" } } });
+	assert.equal(denied.isError, true, "未授权项目不能创建任务");
+	assert.deepEqual((await client.callTool({ name: "automation_task_delete", arguments: { taskId } })).structuredContent.data, { taskId, deleted: true });
+	assert.equal((await client.callTool({ name: "automation_tasks_get", arguments: { projectId: "p1", taskId } })).isError, true);
+});
+
+test("收藏工具：默认只读；写开关打开后可存任意文本，未授权项目收藏不可见，关联会话失效降级为无标题", async (t) => {
+	const { service, favoritesStore } = await fixture(t);
+	await service.setAccess({ enabled: true, projectIds: ["p1"], allowControl: false });
+	const off = (await connect(t, service)).client;
+	const offNames = (await off.listTools()).tools.map((tool) => tool.name);
+	assert.ok(offNames.includes("favorites_list"));
+	assert.equal(offNames.includes("favorites_add"), false, "写开关关闭时收藏写工具不注册");
+	assert.equal((await service.getState()).allowFavoritesWrite, false);
+
+	// 未授权项目的收藏直接落盘（模拟其他入口写入）：MCP 列表必须过滤掉，不能借收藏绕过项目授权。
+	await favoritesStore.add({ kind: "message", text: "p2 的秘密", role: "assistant", sessionId: "s2", sessionTitle: "Private", projectId: "p2", messageId: "m2", model: null, partial: false });
+
+	await service.setAccess({ enabled: true, projectIds: ["p1"], allowControl: false, allowFavoritesWrite: true });
+	const { client } = await connect(t, service);
+	const names = (await client.listTools()).tools.map((tool) => tool.name);
+	for (const name of ["favorites_list", "favorites_get", "favorites_add", "favorites_remove"]) assert.ok(names.includes(name), name);
+
+	const arbitrary = await client.callTool({ name: "favorites_add", arguments: { text: "随手记下的一段文字" } });
+	assert.equal(arbitrary.isError, undefined);
+	assert.equal(arbitrary.structuredContent.data.kind, "selection");
+	assert.equal(arbitrary.structuredContent.data.sessionTitle, null, "没有关联会话时允许为空");
+
+	const linked = await client.callTool({ name: "favorites_add", arguments: { text: "整条回复", kind: "message", role: "assistant", projectId: "p1", sessionId: "s1", messageId: "m1" } });
+	assert.equal(linked.structuredContent.data.sessionTitle, "Find Me", "能解析的会话写入标题快照");
+
+	const dangling = await client.callTool({ name: "favorites_add", arguments: { text: "关联丢了", projectId: "p1", sessionId: "missing" } });
+	assert.equal(dangling.isError, undefined, "关联会话找不到不报错");
+	assert.equal(dangling.structuredContent.data.sessionTitle, null, "找不到的关联按无会话保存");
+
+	const listed = (await client.callTool({ name: "favorites_list" })).structuredContent.data;
+	assert.equal(
+		listed.some((entry) => entry.text === "p2 的秘密"),
+		false,
+		"未授权项目的收藏不可见",
+	);
+	assert.equal(listed.length, 3);
+	assert.equal((await client.callTool({ name: "favorites_list", arguments: { kind: "message", query: "整条" } })).structuredContent.data.length, 1);
+
+	const hiddenId = (await favoritesStore.list()).find((entry) => entry.projectId === "p2").id;
+	const hidden = await client.callTool({ name: "favorites_get", arguments: { favoriteId: hiddenId } });
+	assert.equal(JSON.parse(hidden.content[0].text).code, "favorite-not-found");
+
+	const denied = await client.callTool({ name: "favorites_add", arguments: { text: "x", projectId: "p2" } });
+	assert.equal(denied.isError, true, "未授权项目不能借收藏写工具落盘");
+
+	assert.deepEqual((await client.callTool({ name: "favorites_remove", arguments: { favoriteId: linked.structuredContent.data.id } })).structuredContent.data, { favoriteId: linked.structuredContent.data.id, deleted: true });
 });

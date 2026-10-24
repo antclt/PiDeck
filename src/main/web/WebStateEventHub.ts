@@ -21,7 +21,17 @@ export class WebStateEventHub {
 	/** 低频兜底 tick：捕捉不经 pi 事件的目录变更（桌面端改名/删除/导入）。 */
 	private stateTickTimer: ReturnType<typeof setInterval> | null = null;
 
-	constructor(private readonly deps: { loadState: () => Promise<unknown> }) {}
+	constructor(private readonly deps: { loadState: () => Promise<unknown>; stateRevision?: () => string }) {}
+
+	/**
+	 * 廉价版本键（2027-02 性能审计）：流式期间每条 delta 都会 schedule 一次 400ms
+	 * 去抖推送，而 runtime status/generation 并不随 delta 变化——此前每次都要构建
+	 * 整快照 + ~100KB JSON 序列化，只为字符串比对出「无变化」（纯浪费占绝大多数）。
+	 * 键 = runtimes 身份/状态/代数 + pendingUi 摘要（这些正是 pi 事件能驱动的变化面）；
+	 * catalog/项目变更不随 pi 事件变化，由 5s tick 的全量比对兜底，不进键。
+	 * 键未变时直接跳过构建；force（新连接首推）不受此门。
+	 */
+	public lastStateRevision: string | null = null;
 
 	/**
 	 * /api/events SSE：把项目/会话/运行态快照推给 Web 端，替代 1s/3s 轮询。
@@ -99,6 +109,10 @@ export class WebStateEventHub {
 	 */
 	async push(targetClients: Array<{ writeRaw: (wire: string) => boolean }> = [...this.stateEventClients], force = false): Promise<void> {
 		if (targetClients.length === 0) return;
+		const revision = this.deps.stateRevision?.();
+		if (!force && revision !== undefined && this.lastStateRevision !== null && revision === this.lastStateRevision && this.lastStatePushJson !== null) {
+			return;
+		}
 		let json: string;
 		try {
 			json = serializePublicWebPayload(await this.deps.loadState());
@@ -106,8 +120,13 @@ export class WebStateEventHub {
 			// 快照构建失败不广播（订阅者保留旧状态，兑底 tick / 轮询会重试）
 			return;
 		}
-		if (!force && json === this.lastStatePushJson) return;
+		if (!force && json === this.lastStatePushJson) {
+			// 内容未变也要推进版本键：真实变化曾发生过又回到同键（罕见），键与 json 对齐防漏推
+			this.lastStateRevision = revision ?? this.lastStateRevision;
+			return;
+		}
 		this.lastStatePushJson = json;
+		this.lastStateRevision = revision ?? this.lastStateRevision;
 		const wire = `event: state\ndata: ${json}\n\n`;
 		for (const client of targetClients) {
 			if (!client.writeRaw(wire)) this.stateEventClients.delete(client);
@@ -133,6 +152,7 @@ export class WebStateEventHub {
 		}
 		this.stateEventClients.clear();
 		this.lastStatePushJson = null;
+		this.lastStateRevision = null;
 	}
 
 	/** 5s 兜底 tick：捕捉不经 pi 事件的目录变更（桌面端改名/删除/导入等）。 */
