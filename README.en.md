@@ -11,7 +11,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.9.5-blue)
+![Version](https://img.shields.io/badge/version-0.9.6-blue)
 
 <!-- star-history:start -->
 <picture>
@@ -81,24 +81,25 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.9.5** (2026-10-21)
+> **Latest: v0.9.6** (2026-10-24)
 
-### v0.9.5 Release Highlights
-- 🚀 **Trajectory inspector rebuilt: folded by turn, long sessions stay responsive**
-- 🚀 **The trajectory shows the real system prompt and usage for each turn**
-- 🚀 **Images in conversations finally render**
-- 🚀 **Agents: from a modal to a marketplace, and to a page tab**
-- 🚀 **In-app selection translation**
-- 🚀 **Input prediction: the next sentence, right after a turn ends**
-- 🚀 **Timeline right-click copy, and the selection survives streaming**
-- 🚀 **Runtime controls pinned in the session header, plus `/reload`**
-- 🚀 **Host plugins: card rows and install from GitHub**
-- 🚀 **The update page recommends the right installer for your device**
-- 🚀 **DSH: models can declare image input, and skills are readable before a session starts**
-- ✨ **Cold-start session scanning is 38× faster**
-- ✨ **About 0.86MB less on first paint**
-- ✨ **About 6.3MB smaller installer**
-- ✨ **End-of-turn "modified files": from a persistent card to a chip row**
+### v0.9.6 Release Highlights
+- 🚀 **Built-in browser agent: pi can drive the built-in browser**
+- 🚀 **Wallpaper Engine video wallpapers**
+- 🚀 **Favorites: whole replies and selected snippets**
+- 🚀 **PiDeck data over MCP**
+- 🚀 **Environment setup page rebuilt**
+- 🚀 **One-click model config import**
+- 🚀 **Settings sidebar search**
+- 🚀 **Session outline rail rebuilt**
+- 🚀 **DSH auto-retries made visible**
+- 🚀 **Web: in-turn queued sends and in-session search**
+- 🚀 **Synced with pi 1.4.0**
+- 🚀 **Figma MCP OAuth direct connect**
+- ✨ **Timeline virtualization: long sessions stop rescanning the whole list**
+- ✨ **A full pass of memory work**
+- ✨ **Streaming and RPC hot paths**
+- ✨ **Faster prompt library and skill store**
 
 [View Full Changelog →](CHANGELOG.md)
 
