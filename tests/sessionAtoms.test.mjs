@@ -50,6 +50,9 @@ function loadAtoms() {
 	// session-atoms ⇄ composer-atoms 是模块级循环：双方都只在惰性 action 体内用对方导出。
 	// 先给 session-atoms 一个可后填的桥对象，两模块都编译完后再回填真实导出。
 	const composerExports = {};
+	// 会话级 atomFamily 释放登记表（2027-02）：两个 atoms 模块都 import 它，
+	// 手写映射必须显式提供，否则 require 会以 tests/ 为基准解析失败。
+	const familyRegistry = compileModule("src/renderer/src/atoms/session-family-registry.ts");
 	const sessions = compileModule("src/renderer/src/atoms/session-atoms.ts", {
 		"./recent-session-atoms": compileModule("src/renderer/src/atoms/recent-session-atoms.ts"),
 		"./composer-atoms": composerExports,
@@ -60,9 +63,11 @@ function loadAtoms() {
 		"./outlineProjectionCache": outlineProjectionCache,
 		"./sessionActivityAtoms": sessionActivityAtoms,
 		"../utils/sessionActivityClock": sessionActivityClock,
+		"./session-family-registry": familyRegistry,
 	});
 	const composer = compileModule("src/renderer/src/atoms/composer-atoms.ts", {
 		"./session-atoms": sessions,
+		"./session-family-registry": familyRegistry,
 	});
 	Object.assign(composerExports, composer);
 	return { ...sessions, ...composer, outlineProjectionCache, ...sessionActivityAtoms };
