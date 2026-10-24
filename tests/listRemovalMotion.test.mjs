@@ -59,3 +59,10 @@ test("收藏列表：删除淡出 + 列表位移收拢", () => {
 	assert.match(source, /<RemovalList\s+remainingIds=\{allIds\}>/, "remainingIds 必须来自未过滤的完整顺序");
 	assert.match(source, /<RemovalRow\s+key=\{entry\.id\}\s+itemId=\{entry\.id\}>/, "卡片必须逐个包在 RemovalRow 里（key 上移到包装层）");
 });
+
+test("终端 Tab：关闭播淡出+位移收拢（与会话 Tab 同一原语）", () => {
+	const source = read("components/terminal/TerminalDock.tsx");
+	assert.match(source, /import \{ RemovalList, RemovalRow \} from "\.\.\/removal\/RemovalList"/);
+	assert.match(source, /<RemovalList\s+remainingIds=\{tabs\.map\(\(tab\) => tab\.id\)\}>/, "remainingIds 必须来自当前 tabs 本身（关闭即移除）");
+	assert.match(source, /<RemovalRow\s+key=\{tab\.id\}\s+itemId=\{tab\.id\}/, "Tab 必须逐个包在 RemovalRow 里");
+});

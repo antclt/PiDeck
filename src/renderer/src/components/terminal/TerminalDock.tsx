@@ -13,6 +13,7 @@ import { writeClipboard } from "../../utils/clipboard";
 import { ChevronDown, ChevronUp, MoreHorizontal, Plus, X } from "lucide-react";
 import { ConfirmDialog } from "../ui-shadcn/ConfirmDialog";
 import { Button } from "../ui-shadcn/button";
+import { RemovalList, RemovalRow } from "../removal/RemovalList";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui-shadcn/popover";
 import type { PiDesktopApi } from "../../../../preload";
 import type { TerminalShell, TerminalTarget } from "../../../../shared/types";
@@ -457,37 +458,41 @@ export function TerminalDock(props: {
 			    所以左侧整体包一层无 overflow 的容器，选择器独立于 tabs 滚动域之外 */}
 				<div className="flex min-w-0 items-center">
 					<div className="terminal-tabs flex min-w-0 items-center gap-0.5 overflow-hidden">
-						{tabs.map((tab) => (
-							<div key={tab.id} className={`terminal-tab inline-flex max-w-[9rem] items-center gap-0.5 rounded-md px-0.5 pl-2${tab.id === activeTab?.id ? " active" : ""}`}>
-								<Button
-									variant="ghost"
-									size="sm"
-									className="terminal-tab-label h-auto min-w-0 flex-1 justify-start truncate px-2 py-0.5 max-w-[6.5rem] min-w-0 flex-1 truncate text-left"
-									onClick={() => {
-										setActiveTabId(tab.id);
-										props.onCollapsedChange(false);
-										focusTerminalSoon();
-									}}
-									title={tab.cwd}
-								>
-									{tab.title}
-									{tab.exited ? ` · ${t("terminal.exited")}` : ""}
-								</Button>
-								<Button
-									type="button"
-									variant="ghost"
-									size="icon-xs"
-									className="terminal-tab-close size-5 grid size-5 shrink-0 place-items-center rounded-sm opacity-60"
-									onClick={(event) => {
-										event.stopPropagation();
-										void closeTab(tab);
-									}}
-									title={t("terminal.closeCurrent")}
-								>
-									<X size={12} />
-								</Button>
-							</div>
-						))}
+						{/* 关闭 Tab 淡出 + 剩余 Tab 位移收拢（与会话 Tab 同一原语/同一手感，545161b35）；
+						    新建 Tab 不播入场（initial={false}），与侧栏/Tab 栏取舍一致。 */}
+						<RemovalList remainingIds={tabs.map((tab) => tab.id)}>
+							{tabs.map((tab) => (
+								<RemovalRow key={tab.id} itemId={tab.id} className={`terminal-tab inline-flex max-w-[9rem] items-center gap-0.5 rounded-md px-0.5 pl-2${tab.id === activeTab?.id ? " active" : ""}`}>
+									<Button
+										variant="ghost"
+										size="sm"
+										className="terminal-tab-label h-auto min-w-0 flex-1 justify-start truncate px-2 py-0.5 max-w-[6.5rem] min-w-0 flex-1 truncate text-left"
+										onClick={() => {
+											setActiveTabId(tab.id);
+											props.onCollapsedChange(false);
+											focusTerminalSoon();
+										}}
+										title={tab.cwd}
+									>
+										{tab.title}
+										{tab.exited ? ` · ${t("terminal.exited")}` : ""}
+									</Button>
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon-xs"
+										className="terminal-tab-close size-5 grid size-5 shrink-0 place-items-center rounded-sm opacity-60"
+										onClick={(event) => {
+											event.stopPropagation();
+											void closeTab(tab);
+										}}
+										title={t("terminal.closeCurrent")}
+									>
+										<X size={12} />
+									</Button>
+								</RemovalRow>
+							))}
+						</RemovalList>
 						<Button type="button" variant="ghost" size="icon-xs" className="terminal-icon-btn size-6 inline-grid size-6 shrink-0 place-items-center rounded-md" onClick={() => void addTab()} title={t("terminal.new")} disabled={loading || !contentReady}>
 							<Plus size={14} />
 						</Button>
