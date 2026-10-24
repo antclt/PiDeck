@@ -1,6 +1,6 @@
 # ZCode 视觉质感分析与反哺计划
 
-> 状态：**Phase 1 已落地**（2026-10，d4e60c97c / 730579b0b / 6a45b179f）；**Phase 2 已落地**（2026-10，31792faf0，边框墨水化 + 圆角降档 + 语义色审计）；**Phase 3 已落地**（2026-10，忙碌色结论 + 阴影降档）；后续按「改到哪，旧迁新到哪」增量推进，不做 big-bang。
+> 状态：**Phase 1 已落地**（2026-10，d4e60c97c / 730579b0b / 6a45b179f）；**Phase 2 已落地**（2026-10，31792faf0，边框墨水化 + 圆角降档 + 语义色审计）；**Phase 3 已落地**（2026-10，25e4e7284，忙碌色结论 + 阴影降档）；**Phase 4 已落地**（2026-10，字号/等宽纪律 + 守卫测试）；后续按「改到哪，旧迁新到哪」增量推进，不做 big-bang。
 > 分析来源：`zai-org/ZCode`（Apache-2.0，main 分支 2026-10 浅克隆）。核心文件：`DESIGN.md`（设计宪法）、`packages/ui/src/styles.css`（Zai Light/Dark 主题值）。
 
 ## 一、ZCode 质感的六个机制（带证据）
@@ -118,3 +118,20 @@ DESIGN.md「Elevation and Depth」：Base 无阴影（结构来自底色对比�
 ### 5.3 暗色 chat-muted-bg（#202020）与 panel（#1a1a1a）关系
 
 muted 比面板亮一档，方向正确，无需动。
+
+## 六、Phase 4 变更明细（字号/等宽纪律）
+
+### 6.1 任意字号归位语义类（16 处）
+
+- `text-[11px]` → `text-micro`：SelectionToolWindowView ×5、HostPluginRow ×4、TipTapComposer kbd、SelectionToolWindowView reasonHint 等；`text-[13px]` → `text-control`：SelectionInlineToolbar 选区原文、SelectionToolWindowView 结果区；`text-[10px]` → `text-micro`：DshAgentPresetControl 预设 chip（+1px，换来随「界面字号」缩放）；`text-[18px]` → `text-brand`：AppParts/WebBrandLockup 品牌字。
+- 保留例外：`text-[9px]` ×4（GitPanel ahead/behind 计数 ×2、SessionSourceBadge、SettingsTab 折叠箭头）——徽标计数器低于 token 下限的刻意微型排版；`text-[40px]` App.tsx 空态 hero 大标题——展示型排版不参与 UI 阶梯。
+- 收益：这些文本现在随「界面字号」设置缩放（原来任意 px 完全不缩放， Accessibility 缺口）。
+
+### 6.2 等宽纪律
+
+- 修复 SelectionInlineToolbar 译文结果继承容器 `font-mono`（自然语言禁等宽，源码视图保持 mono 正确）。
+- 抽查 ModelsTab/McpTab/AuthTab 等设置页 font-mono 使用：均为模型 ID/URL/env 键/路径，合规。
+
+### 6.3 守卫测试
+
+`tests/fontSizeDiscipline.test.mjs`（3 项）：① 自研组件任意字号扫描（空白容忍正则，9px 徽标与 ≥20px hero 豁免，ui-shadcn/motion 免检）；② foundation 字号阶梯 token 存在性；③ 划词工具条译文 font-sans 钉。

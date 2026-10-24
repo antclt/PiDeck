@@ -279,7 +279,7 @@ export function SelectionInlineToolbar({ anchorRect, sourceText, initialAgentId,
 
 			{trimmedSource ? (
 				<div className="flex min-h-0 flex-1 flex-col">
-					<div className="max-h-[40vh] min-h-[52px] overflow-y-auto whitespace-pre-wrap px-2.5 py-2 text-[13px] leading-relaxed font-mono [overflow-wrap:anywhere]">
+					<div className="max-h-[40vh] min-h-[52px] overflow-y-auto whitespace-pre-wrap px-2.5 py-2 text-control leading-relaxed font-mono [overflow-wrap:anywhere]">
 						{state.phase === "starting" ? (
 							<span className="inline-flex items-center gap-1.5 font-sans text-muted-foreground">
 								<Loader2 size={13} className="animate-pideck-spin" aria-hidden="true" />
@@ -288,7 +288,7 @@ export function SelectionInlineToolbar({ anchorRect, sourceText, initialAgentId,
 						) : state.phase === "error" ? (
 							<span className="font-sans text-destructive">{state.errorText}</span>
 						) : hasResult ? (
-							<span>{state.text}</span>
+							<span className="font-sans">{state.text}</span>
 						) : (
 							<span className="font-sans text-muted-foreground">{selectedAgent ? t("agentInvoke.emptyResult") : t("agentInvoke.selectAgent")}</span>
 						)}

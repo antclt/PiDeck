@@ -167,7 +167,7 @@ export function BrandLockup() {
 			    自定义图没有动画可播，不拦点击：让它和字标一样冒泡到 AboutPopover 触发器（点图=打开关于），与动画 logo 的「点击只播动画」语义不冲突。 */}
 			{showLogo && (customLogo ? <img src={customLogo} alt="" className="size-[18px] shrink-0 object-contain" /> : logoStyle === "pi-tui" ? <PiTuiLogoCanvas size={18} playOnClick /> : <PiLogoCanvas size={18} playOnClick />)}
 			<span className="flex min-w-0 flex-col justify-center gap-1">
-				<TextShimmer as="span" enabled={shimmerOn} className="brand-wordmark truncate text-[18px] font-[PiDeckDepartureMono] font-bold leading-none">
+				<TextShimmer as="span" enabled={shimmerOn} className="brand-wordmark truncate text-brand font-[PiDeckDepartureMono] font-bold leading-none">
 					{displayName}
 				</TextShimmer>
 				{branch && <span className="truncate text-control font-medium leading-none text-muted-foreground">{branch}</span>}
