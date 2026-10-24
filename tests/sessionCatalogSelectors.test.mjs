@@ -37,6 +37,9 @@ function loadAtoms() {
 	// session-atoms ⇄ composer-atoms 是模块级循环：双方都只在惰性 action 体内用对方导出。
 	// 先给 session-atoms 一个可后填的桥对象，两模块都编译完后再回填真实导出。
 	const composerExports = {};
+	// 会话级 atomFamily 释放登记表（2027-02）：各 atoms 模块都 import 它，
+	// 这个手写映射必须显式提供，否则 require 会以 tests/ 为基准解析失败。
+	const familyRegistry = compileModule("src/renderer/src/atoms/session-family-registry.ts");
 	// 侧栏计时点：session-atoms 在回合边界推进它（见 utils/sessionActivityClock.ts）。
 	const sessionActivityClock = compileModule("src/renderer/src/utils/sessionActivityClock.ts");
 	const sessionActivityAtoms = compileModule("src/renderer/src/atoms/sessionActivityAtoms.ts", {
@@ -52,9 +55,11 @@ function loadAtoms() {
 		"./outlineProjectionCache": compileModule("src/renderer/src/atoms/outlineProjectionCache.ts"),
 		"./sessionActivityAtoms": sessionActivityAtoms,
 		"../utils/sessionActivityClock": sessionActivityClock,
+		"./session-family-registry": familyRegistry,
 	});
 	const composer = compileModule("src/renderer/src/atoms/composer-atoms.ts", {
 		"./session-atoms": sessions,
+		"./session-family-registry": familyRegistry,
 	});
 	Object.assign(composerExports, composer);
 	const selectors = compileModule("src/renderer/src/atoms/session-selectors.ts", {
@@ -63,6 +68,7 @@ function loadAtoms() {
 		"../utils/sessionDisplayName": { sessionDisplayName: (title) => title },
 		// 可显示判据与显示管线同源（纯函数，无依赖），按真实实现加载。
 		"../utils/sessionRecordDisplay": compileModule("src/renderer/src/utils/sessionRecordDisplay.ts"),
+		"./session-family-registry": familyRegistry,
 	});
 	return { ...sessions, ...selectors };
 }

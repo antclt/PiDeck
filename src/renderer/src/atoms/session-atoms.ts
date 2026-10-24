@@ -1,6 +1,7 @@
 import { touchRecentSessionAtom, forgetRecentSessionAtom } from "./recent-session-atoms";
 import { advanceSessionActivityAnchorAtom, forgetSessionActivityAnchorAtom } from "./sessionActivityAtoms";
 import { sessionSendStateByIdAtom, setSessionSendStateAtom } from "./composer-atoms";
+import { getSessionDisposalAtoms, removeRegisteredSessionFamilies } from "./session-family-registry";
 import { atom } from "jotai";
 import type { Getter, Setter } from "jotai";
 import { atomFamily, selectAtom } from "jotai/utils";
@@ -1702,6 +1703,13 @@ export const removeSessionStateAtom = atom(null, (get, set, sessionId: string) =
 	liveTextActiveBySessionAtom.remove(sessionId);
 	liveThinkingStreamingBySessionAtom.remove(sessionId);
 	// atomFamily 无自动 GC：会话删除时必须同步 remove 各 family 实例，否则长期泄漏（2026-10）。
+	// 2027-02：除本文件内的 family 外，composer 六件套 / 命令表 / outline / runtime UI /
+	// 侧栏状态等跨模块 family 通过登记表统一释放（原先 15 个 family 完全没有释放路径）。
+	removeRegisteredSessionFamilies(sessionId);
+	// 数据不在 atomFamily 里的模块（如 DSH 提问回显）经登记表提供清理写 atom
+	for (const disposalAtom of getSessionDisposalAtoms()) {
+		set(disposalAtom as Parameters<typeof set>[0], sessionId);
+	}
 	liveThinkingIdBySessionIdAtomFamily.remove(sessionId);
 	newTurnCollapseTickBySessionIdAtomFamily.remove(sessionId);
 	sendPinAnimatingBySessionIdAtomFamily.remove(sessionId);

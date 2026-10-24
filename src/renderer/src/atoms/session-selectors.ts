@@ -1,5 +1,6 @@
 import { atom } from "jotai";
 import { atomFamily, selectAtom } from "jotai/utils";
+import { registerSessionFamilyForDisposal } from "./session-family-registry";
 import type { SessionRecord, SessionSummary } from "../../../shared/types";
 import { sessionDisplayName } from "../utils/sessionDisplayName";
 import { isDisplayableSessionRecord } from "../utils/sessionRecordDisplay";
@@ -45,9 +46,9 @@ export function sessionRecordToSummary(session: SessionRecord): SessionSummary |
 }
 
 /** 仅通知本栏焦点进入/离开，其他栏之间的焦点切换不唤醒非聚焦栏。 */
-export const sessionFocusedByIdAtomFamily = atomFamily((sessionId: string) => selectAtom(currentSessionIdAtom, (focusedId) => focusedId === sessionId, Object.is));
+export const sessionFocusedByIdAtomFamily = registerSessionFamilyForDisposal(atomFamily((sessionId: string) => selectAtom(currentSessionIdAtom, (focusedId) => focusedId === sessionId, Object.is)));
 
-export const sessionRecordByIdAtomFamily = atomFamily((sessionId: string) => atom((get) => get(sessionRecordsAtom)[sessionId]));
+export const sessionRecordByIdAtomFamily = registerSessionFamilyForDisposal(atomFamily((sessionId: string) => atom((get) => get(sessionRecordsAtom)[sessionId])));
 
 export const sessionRecordsByProjectIdAtomFamily = atomFamily((projectId: string) =>
 	atom((get) => {
@@ -120,7 +121,7 @@ export const sessionSummariesByProjectIdAtomFamily = atomFamily((projectId: stri
 	}),
 );
 
-export const sessionRuntimeBySessionIdAtomFamily = atomFamily((sessionId: string) => atom((get) => get(sessionRuntimeByIdAtom)[sessionId]));
+export const sessionRuntimeBySessionIdAtomFamily = registerSessionFamilyForDisposal(atomFamily((sessionId: string) => atom((get) => get(sessionRuntimeByIdAtom)[sessionId])));
 
 // A moved runtime can leave an older Session projection behind; the newest binding wins.
 export const sessionIdByRuntimeAgentIdAtomFamily = atomFamily((agentId: string) =>
@@ -140,6 +141,6 @@ export const sessionIdByRuntimeAgentIdAtomFamily = atomFamily((agentId: string) 
  * 都会整体重建，但其它会话条目的引用不变 → 本会话订阅者不会因为别的会话推帧而重渲
  * （AGENTS.md「多实例必须按 session 订阅」）。
  */
-export const sessionRuntimeUiBySessionIdAtomFamily = atomFamily((sessionId: string) => selectAtom(sessionRuntimeUiByIdAtom, (map) => map[sessionId], Object.is));
+export const sessionRuntimeUiBySessionIdAtomFamily = registerSessionFamilyForDisposal(atomFamily((sessionId: string) => selectAtom(sessionRuntimeUiByIdAtom, (map) => map[sessionId], Object.is)));
 
-export const sessionHistoryMutationOverlayBySessionIdAtomFamily = atomFamily((sessionId: string) => atom((get) => get(sessionHistoryMutationOverlayByIdAtom)[sessionId]));
+export const sessionHistoryMutationOverlayBySessionIdAtomFamily = registerSessionFamilyForDisposal(atomFamily((sessionId: string) => atom((get) => get(sessionHistoryMutationOverlayByIdAtom)[sessionId])));

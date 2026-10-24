@@ -1,5 +1,6 @@
 import { atom } from "jotai";
 import { atomFamily } from "jotai/utils";
+import { registerSessionFamilyForDisposal } from "./session-family-registry";
 
 /**
  * 右侧边栏「会话状态」面板的跨组件状态。
@@ -13,4 +14,4 @@ import { atomFamily } from "jotai/utils";
  */
 export const rightSidebarStatusSessionIdAtom = atom<string | null>(null);
 
-export const sessionStatusInSidebarAtomFamily = atomFamily((sessionId: string) => atom((get) => get(rightSidebarStatusSessionIdAtom) === sessionId));
+export const sessionStatusInSidebarAtomFamily = registerSessionFamilyForDisposal(atomFamily((sessionId: string) => atom((get) => get(rightSidebarStatusSessionIdAtom) === sessionId)));

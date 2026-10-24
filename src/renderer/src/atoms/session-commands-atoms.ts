@@ -1,5 +1,6 @@
 import { atom } from "jotai";
 import { atomFamily } from "jotai/utils";
+import { registerSessionFamilyForDisposal } from "./session-family-registry";
 import type { PiCommand } from "../../../shared/types";
 
 /**
@@ -9,7 +10,7 @@ import type { PiCommand } from "../../../shared/types";
  * 分屏两栏各自读写自己的键，互不串扰（旧实现是 App 级单份 state，非聚焦栏会拿到
  * 聚焦会话的命令表，导致另一栏的命令 chip 渲染错乱/丢失）。
  */
-export const sessionCommandsAtomFamily = atomFamily((sessionId: string) => atom<PiCommand[]>([]));
+export const sessionCommandsAtomFamily = registerSessionFamilyForDisposal(atomFamily((sessionId: string) => atom<PiCommand[]>([])));
 
 /**
  * runtime 命令表的刷新信号：热重载 `/reload` 后扩展/技能/提示词可能变化，但
