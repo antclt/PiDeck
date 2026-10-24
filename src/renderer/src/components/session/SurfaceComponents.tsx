@@ -862,7 +862,7 @@ export const UserBubble = memo(function UserBubble(props: {
 	return (
 		<article /* user-turn 为 e2e 选择器锚点 */
 			ref={rowRef}
-			className={`user-turn group/user mb-4 flex w-full min-w-0 max-w-full flex-col items-end ${props.fresh ? "user-turn--fresh animate-[message-enter_260ms_var(--ease-out-quint)_both]" : ""}${props.topFresh ? " user-turn--top-fresh animate-[top-enter_280ms_var(--ease-out-quint)_both]" : ""}`}
+			className={`user-turn group/user mb-4 flex w-full min-w-0 max-w-full flex-col items-end ${props.fresh ? "user-turn--fresh motion-safe:animate-[message-enter_260ms_var(--ease-out-quint)_both]" : ""}${props.topFresh ? " user-turn--top-fresh motion-safe:animate-[top-enter_280ms_var(--ease-out-quint)_both]" : ""}`}
 			data-message-id={message.id}
 		>
 			{message.images && message.images.length > 0 && (

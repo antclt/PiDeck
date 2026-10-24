@@ -128,6 +128,21 @@ test("renderer 不新增 transition-all（过渡只动实际会变的属性）",
 	assert.deepEqual(offenders, [], "transition-all 会顺带动画无关属性（布局/阴影/尺寸），按实际变化的属性显式声明（transition-colors / transition-[width,...] 等）");
 });
 
+test("任意值动画必须 motion-safe 前缀（tw-animate 的自动降级罩不到 animate-[...]）", () => {
+	const offenders = [];
+	for (const path of listTsx()) {
+		if (path.startsWith("src/renderer/src/web/")) continue;
+		for (const line of readFileSync(path, "utf8").split("\n")) {
+			// 命中 animate-[ 且同一行没有 motion-safe: 前缀形态（任意值动画不走
+			// tw-animate 的 prefers-reduced-motion 自动关闭，必须显式前缀）
+			if (/animate-\[/.test(line) && !/motion-safe:animate-\[/.test(line)) {
+				offenders.push(path + ":" + line.trim().slice(0, 80));
+			}
+		}
+	}
+	assert.deepEqual(offenders, [], "任意值动画（animate-[...]）必须 motion-safe: 前缀，reduced-motion 下静态呈现");
+});
+
 test("三档时长 @utility 是唯一真源（tailwind.css）", () => {
 	const source = readFileSync("src/renderer/src/styles/tailwind.css", "utf8");
 	for (const [name, value] of [
