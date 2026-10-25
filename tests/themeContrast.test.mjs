@@ -40,11 +40,12 @@ function resolve(tokens, name, seen = new Set()) {
 	if (raw === undefined) throw new Error(`token not found: --${name}`);
 	// `color-mix(in srgb, var(--x) N%, white)` 相对派生色（暗色 popover 浮层）：
 	// 按同口径 sRGB 直混；oklab 写法也近似为 sRGB——色阶差在一档透明度内，不影响阈值判定。
-	const mix = raw.match(/^color-mix\(in (?:srgb|oklab),\s*var\(--([a-z0-9-]+)\)\s*([\d.]+)%,\s*(#[0-9a-fA-F]{3,8}|white|black)\)$/);
+	// 第二操作数也允许 var(--y)（会话画布 --color-bg-page = panel/sidebar 派生）。
+	const mix = raw.match(/^color-mix\(in (?:srgb|oklab),\s*var\(--([a-z0-9-]+)\)\s*([\d.]+)%,\s*(#[0-9a-fA-F]{3,8}|white|black|var\(--([a-z0-9-]+)\))\)$/);
 	if (mix) {
 		if (seen.has(mix[1])) throw new Error(`circular var ref: --${mix[1]}`);
 		seen.add(mix[1]);
-		const tint = mix[3] === "white" ? "#ffffff" : mix[3] === "black" ? "#000000" : mix[3];
+		const tint = mix[4] ? resolve(tokens, mix[4], seen) : mix[3] === "white" ? "#ffffff" : mix[3] === "black" ? "#000000" : mix[3];
 		return blend(resolve(tokens, mix[1], seen), tint, Number(mix[2]) / 100);
 	}
 	const varRef = raw.match(/^var\(\s*--([a-z0-9-]+)\s*(?:,\s*([^)]+))?\)$/);
@@ -130,8 +131,9 @@ const PALETTES = [
 	]),
 ];
 
-/** 面色集合：正文会真实落在这些底上（列表 hover/active 也是完整文字底）。 */
-const FACES = ["bg-app", "bg-panel", "bg-sidebar", "bg-popover", "bg-input", "bg-muted", "bg-hover", "bg-active"];
+/** 面色集合：正文会真实落在这些底上（列表 hover/active 也是完整文字底）。
+ * bg-page 是会话画布档：时间线正文/输入区占应用户最长阅读时间的底，必须进矩阵。 */
+const FACES = ["bg-app", "bg-panel", "bg-page", "bg-sidebar", "bg-popover", "bg-input", "bg-muted", "bg-hover", "bg-active"];
 
 /**
  * 对比度契约矩阵。[textToken, faceToken, 阈值, 用途说明]

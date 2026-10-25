@@ -49,6 +49,11 @@
   /* 应用域 token（旧 CSS 继续用） */
   --color-bg-app: var(--color-bg-app);
   --color-bg-panel: var(--color-bg-panel);
+  /* 会话画布档（ZCode page）：chat-pane/会话头部铺这一档，白卡浮其上（foundation 同名 token） */
+  --color-bg-page: var(--color-bg-page);
+  /* 墨水罩染弱表面：行内代码/引用/卡头/徽标底（详见 foundation.css 同名 token 注释） */
+  --color-surface-ink-subtle: var(--color-surface-ink-subtle);
+  --color-surface-ink: var(--color-surface-ink);
   --color-bg-sidebar: var(--color-bg-sidebar);
   --color-sidebar: var(--color-bg-sidebar);
   --color-sidebar-foreground: var(--color-text-primary);

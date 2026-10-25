@@ -1,6 +1,6 @@
 # ZCode 视觉质感分析与反哺计划
 
-> 状态：**Phase 1 已落地**（2026-10，d4e60c97c / 730579b0b / 6a45b179f）；**Phase 2 已落地**（2026-10，31792faf0，边框墨水化 + 圆角降档 + 语义色审计）；**Phase 3 已落地**（2026-10，25e4e7284，忙碌色结论 + 阴影降档）；**Phase 4 已落地**（2026-10，字号/等宽纪律 + 守卫测试）；后续按「改到哪，旧迁新到哪」增量推进，不做 big-bang。
+> 状态：**Phase 1 已落地**（2026-10，d4e60c97c / 730579b0b / 6a45b179f）；**Phase 2 已落地**（2026-10，31792faf0，边框墨水化 + 圆角降档 + 语义色审计）；**Phase 3 已落地**（2026-10，25e4e7284，忙碌色结论 + 阴影降档）；**Phase 4 已落地**（2026-10，字号/等宽纪律 + 守卫测试）；**Phase 5 已落地**（2026-10，会话页画布档 + 白卡模型 + 墨水罩染表面，见 §七）；后续按「改到哪，旧迁新到哪」增量推进，不做 big-bang。
 > 分析来源：`zai-org/ZCode`（Apache-2.0，main 分支 2026-10 浅克隆）。核心文件：`DESIGN.md`（设计宪法）、`packages/ui/src/styles.css`（Zai Light/Dark 主题值）。
 
 ## 一、ZCode 质感的六个机制（带证据）
@@ -135,3 +135,38 @@ muted 比面板亮一档，方向正确，无需动。
 ### 6.3 守卫测试
 
 `tests/fontSizeDiscipline.test.mjs`（3 项）：① 自研组件任意字号扫描（空白容忍正则，9px 徽标与 ≥20px hero 豁免，ui-shadcn/motion 免检）；② foundation 字号阶梯 token 存在性；③ 划词工具条译文 font-sans 钉。
+
+## 七、Phase 5 变更明细（会话页画布档 + 白卡模型 + 墨水罩染表面）
+
+用户反馈两个问题：会话页背景太白；灰色背景块太多、主题被拆碎缺乏一体性。根因：会话正文面板是纯白（`--color-bg-panel`），而时间线里的气泡/过程卡/行内代码/引用/代码块各自配了一块**互不成阶**的不透明灰（用户气泡 #EBEBEB、过程条 #FAFAFA、行内码 #F4F4F4、引用 #F0F2F4 还带锌蓝调）——六档散灰直接贴在白底上，就是「碎成小块」的来源。暗色侧整页同底、卡片提亮，本就一体，不动。
+
+### 7.1 画布档（`--color-bg-page`，ZCode page 机制）
+
+- 浅色 `:root`：`color-mix(panel 55%, sidebar)`，经典值 = #f8f8f8（恰为 Zai Light page 同值）；由 panel/sidebar **派生**而非写死——四套皮肤与自定义主题不覆盖它时自动落在自己的 panel/sidebar 之间，方向恒对。
+- 暗色：`= var(--color-bg-panel)`（暗色画布维持整页同底，var 引用让皮肤暗色 panel 覆盖自动传导）。
+- 应用面：`chat-pane`（AppShell `bg-bg-panel → bg-bg-page`）、`.chat-header`（自铺白条改 `bg-transparent` 透出画布，避免顶部色阶断层）；壁纸模式 `BG_TOKENS`（useAppAppearance）补 `--color-bg-page`，与 panel 同批转半透明。
+
+### 7.2 白卡模型（浅色会话卡一律白）
+
+ZCode Light 的 panel/card/popover 同为 #ffffff，分层靠浮在 page 上——PiDeck 会话区的「块」收敛到同一档：
+
+- `--color-chat-card-bg` #fafafa→#ffffff、`--color-chat-muted-bg` #f4f4f4→#ffffff（浅色；暗色保持 #1a1a1a/#202020 原阶梯）。过程组折叠条、诊断卡、代码块、表格、Extension/Notify 卡全部经 token 自动变白卡。
+- 用户气泡新增专属 token `--color-chat-bubble-bg`：浅色 = panel（白卡，替代旧 accent 4%+muted 的 #EBEBEB 灰板）；暗色 = 旧公式 color-mix(accent 4%, muted)（#2E2E2E 提亮卡，维持既有层级）。
+- 输入框（composer-box = bg-card 白 + 边框 + shadow-composer-lifted）与用户气泡/代码块同一「白卡」语言，上下呼应。
+
+### 7.3 墨水罩染弱表面（`--color-surface-ink*`）
+
+新增两个从 text-primary 派生的半透明 token（明暗自动取正确方向，暗色即白墨水提亮）：
+
+- `--color-surface-ink-subtle`（3%）：引用块、代码块/表格头部条、表格斑马纹——替代旧的 accent-soft 55% 混面板（带锌蓝调，中性纪律破口）与 panel/muted 混色（白卡化后混成纯白失去分层）。
+- `--color-surface-ink`（5%）：行内代码、过程组图标底/统计徽标、代码块语言 pill、轮次模型 chip（TurnRow 旧 `bg-muted/60` 在画布上只剩 Δ2 几乎不可见）。
+
+### 7.4 落地后的浅色阶梯（截图像素实测）
+
+sidebar #F0F0F0 → 画布 #F8F8F8 → 罩染弱表面 #F1F1F1（3% 落画布）/ #EDEDED（5% 落画布）→ 白卡 #FFFFFF → 卡上罩染 #F4F4F4。从六档散灰收敛为「一画布 + 一罩染机制 + 一白卡档」；暗色全部维持原值（气泡 #2E2E2E、行内码 #262626、引用白墨水 3%）。
+
+### 7.5 守卫与巡检
+
+- `tests/darkFixedChatColors.test.mjs`：浅色 chat token 钉值更新为白卡；新增 bg-page/bubble/surface-ink 派生关系钉；表格头部/表头断言从 color-mix 换 surface-ink。
+- `tests/themeContrast.test.mjs`：`resolve()` 支持 `color-mix(var(--a) N%, var(--b))` 双 var 派生；FACES 补 `bg-page`（会话正文最长阅读底进矩阵）。
+- `e2e/visual-tune-session.spec.ts`：会话区明暗截图巡检（手动跑，不进门禁），输出 test-results/visual-tune/。
