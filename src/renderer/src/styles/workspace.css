@@ -722,11 +722,13 @@ html[data-theme="dark"] .scratch-pad-md mark {
 
 .git-panel {
   --git-ui-font: var(--font-family-base);
-  --git-panel-bg: var(--color-bg-panel);
+  /* 抽屉 chrome 档（=侧栏 #f0f0f0，与左栏对称）：面板各分区退到 chrome，
+     输入框/提交框保持 panel 白卡浮在 chrome 上；暗色随 sidebar token 自动取 #141414。 */
+  --git-panel-bg: var(--color-bg-sidebar);
   --git-panel-fg: var(--color-text-primary);
   --git-panel-border: var(--color-border-subtle);
-  --git-panel-hover: color-mix(in srgb, var(--color-text-primary) 6%, var(--color-bg-panel));
-  --git-panel-active: color-mix(in srgb, var(--color-text-primary) 10%, var(--color-bg-panel));
+  --git-panel-hover: color-mix(in srgb, var(--color-text-primary) 6%, var(--color-bg-sidebar));
+  --git-panel-active: color-mix(in srgb, var(--color-text-primary) 10%, var(--color-bg-sidebar));
   --git-input-bg: var(--color-bg-panel);
   --git-input-border: var(--color-border-strong);
   --git-action-bg: var(--color-accent);

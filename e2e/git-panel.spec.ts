@@ -37,10 +37,10 @@ test("git panel: status -> diff -> stage -> commit", async ({ window }) => {
 
 	// 侧栏分段(56469f95)后默认停在「聊天」分段，工作区项目行在「项目」分段下，先切换
 	await window.getByRole("tab", { name: "项目" }).click();
-	// 选中种子项目（项目行显示目录 basename），并在该项目下新建会话草案
+	// 选中种子项目（项目行显示项目 name，非路径 basename），并在该项目下新建会话草案
 	// （头部抽屉开关只在有会话视图时渲染；注意「新建 Agent」图标每个项目行都有，
 	//  必须限定在目标项目行内点击，否则会落到聊天项目上）
-	const projectRow = window.locator(".conversation", { hasText: "pideck-seed-git-repo" }).first();
+	const projectRow = window.locator(".conversation", { hasText: "GitE2E" }).first();
 	await projectRow.click();
 	await projectRow.getByTitle("普通会话").first().click();
 	await expect(window.locator(".composer .rich-input")).toHaveAttribute("contenteditable", "true", { timeout: 15_000 });
@@ -49,9 +49,10 @@ test("git panel: status -> diff -> stage -> commit", async ({ window }) => {
 	await window.locator(".header-drawer-toggle").first().click();
 	await expect(window.locator(".detail-drawer")).toHaveAttribute("data-open", "true", { timeout: 5000 });
 	await window.locator('[data-testid="drawer-rail-git"]').click();
-	// GitPanel 新组件（bg-background）与旧 GitDrawerHost 都带 .git-panel class，
-	// 用 .bg-background 精确定位新面板（detail-drawer git tab 渲染的是它）。
-	const panel = window.locator(".git-panel.bg-background");
+	// GitPanel 新组件（带 aria-label）与旧 GitDrawerHost 都带 .git-panel class，
+	// 用 aria-label 精确定位新面板；根底色已改 bg-bg-sidebar（抽屉 chrome 档），
+	// 不再用 bg 类区分新旧。
+	const panel = window.locator(".git-panel[aria-label]");
 	await expect(panel).toBeVisible({ timeout: 15_000 });
 	// 分支标签反映真实仓库状态
 	await expect(panel.locator(".git-branch-label")).toHaveText("main", { timeout: 15_000 });

@@ -74,9 +74,11 @@ function fileRowStyle(depth: number): CSSProperties {
 /* 树行用原生 button，不用 shadcn Button：后者基类强制子 SVG size-4，
    会压掉 Seti --file-type-icon-size 与 lucide size，靠 ! 反压是补丁。
    2027-01：hover 高亮加与侧栏行同款的过渡动画（transition-[background-color,
-   border-color,box-shadow] duration-base），移入文件列表时背景平滑渐变而非瞬切。 */
+   border-color,box-shadow] duration-base），移入文件列表时背景平滑渐变而非瞬切。
+   hover 用 bg-bg-hover 而非 bg-muted：抽屉底是 chrome 档（=sidebar #f0f0f0），
+   muted #f4f4f4 比它还亮，悬停反向变亮不可见（同 foundation 侧栏行纪律）。 */
 const FILE_ROW_BUTTON_CLASS =
-	"file-node-row flex h-[28px] min-h-0 w-full items-center justify-start gap-1.5 rounded-sm border-0 bg-transparent py-0 text-left text-body font-normal text-foreground transition-[background-color,border-color,box-shadow] duration-base hover:bg-muted active:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset relative";
+	"file-node-row flex h-[28px] min-h-0 w-full items-center justify-start gap-1.5 rounded-sm border-0 bg-transparent py-0 text-left text-body font-normal text-foreground transition-[background-color,border-color,box-shadow] duration-base hover:bg-bg-hover active:bg-bg-active focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset relative";
 
 /**
  * 行分发器：文件走轻量 FileRow，目录走 DirectoryRow（各自 memo）。

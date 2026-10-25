@@ -68,5 +68,7 @@ test("file rows animate their hover highlight like sidebar rows", () => {
 	const surface = readFileSync("src/renderer/src/components/session/FileTreeRows.tsx", "utf8");
 	// 行必须是块级 flex：inline-flex 会在 block 容器里多出 5px 行盒空隙（行距 33px），
 	// 相邻行的引导线会裂成一段一段，所以这里连 display 一起锁死。
-	assert.match(surface, /file-node-row flex h-\[28px\][\s\S]*?transition-\[background-color,border-color,box-shadow\] duration-base[\s\S]*?hover:bg-muted/);
+	// hover 用 bg-bg-hover（2026-10 抽屉 chrome 档）：bg-muted 比 chrome 底还亮，
+	// 悬停反向变亮不可见（同 foundation 侧栏行纪律，见 tests/lightNeutralBackground.test.mjs）。
+	assert.match(surface, /file-node-row flex h-\[28px\][\s\S]*?transition-\[background-color,border-color,box-shadow\] duration-base[\s\S]*?hover:bg-bg-hover/);
 });
