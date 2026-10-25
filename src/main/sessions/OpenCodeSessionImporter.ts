@@ -9,36 +9,12 @@ import { defaultSessionImportCopy, type SessionImportCopy } from "./SessionImpor
 import { normalizeImportedToolArguments } from "./importToolArguments";
 import { readImportMetaHead } from "./importMetaHead";
 import { IMPORTED_SKIP_PART_TYPES, importedAttachmentPlaceholder, importedContentHasToolCall, importedUnknownBlockAsText, normalizeImportedStopReason, safeIsoTimestamp, tryImportedImageBlock } from "./importNormalize";
+import { estimateSessionSize, parseJson, readOpenCodeV2Sessions, type OpenCodeMessage, type OpenCodePart, type ParsedOpenCodeSession } from "./openCodeV2Source";
 
 // 集中式库文件的扫描预算：全库物化（messages+parts）内存约为磁盘体积的若干倍，
 // 超过此值时 scan/import 直接报结构化错误而非把主进程推向堆 abort（不可 catch 的闪退）。
 // 512MB 覆盖正常长期使用；触顶属异常巨型库，错误消息会提示用户另寻导入途径。
 const MAX_SOURCE_DB_BYTES = 512 * 1024 * 1024;
-
-type OpenCodeMessage = {
-	id: string;
-	time_created: number;
-	time_updated: number;
-	data: Record<string, any>;
-	parts: OpenCodePart[];
-};
-
-type OpenCodePart = {
-	id: string;
-	message_id: string;
-	time_created: number;
-	time_updated: number;
-	data: Record<string, any>;
-};
-
-type ParsedOpenCodeSession = {
-	meta: Record<string, any>;
-	messages: OpenCodeMessage[];
-	sourcePath: string;
-	/** OpenCode 所有历史在同一个 DB 中，列表里展示单会话内容估算大小，而不是整个数据库大小。 */
-	sourceSize: number;
-	sourceMtime: number;
-};
 
 export class OpenCodeSessionImporter {
 	private readonly openCodeDb = join(app.getPath("home"), ".local", "share", "opencode", "opencode.db");
@@ -288,8 +264,24 @@ export class OpenCodeSessionImporter {
 		const normalizedProject = this.normalize(projectPath);
 		const db = new DatabaseSync(this.openCodeDb, { readOnly: true });
 		try {
-			const sessions = db
-				.prepare(`
+			// 2.x 起新会话只写 session_v2/session_message，v1 三表停写（#410）；且全新 2.x 安装可能根本不建
+			// v1 表。两条源按表存在性合并，缺表当空列表而不是整扫描报错。
+			const tables = new Set((db.prepare("select name from sqlite_master where type = 'table'").all() as Array<Record<string, unknown>>).map((row) => String(row.name)));
+			const parsed: ParsedOpenCodeSession[] = [];
+			if (tables.has("session") && tables.has("message") && tables.has("part")) {
+				parsed.push(...this.readV1Sessions(db, normalizedProject, info.mtimeMs));
+			}
+			parsed.push(...readOpenCodeV2Sessions({ db, normalizedProject, dbPath: this.openCodeDb, mtimeMs: info.mtimeMs, tables }));
+			// 同 id 同时出现在两代表（rename 迁移线的边缘情形）以 v2 为准：v2 后入 Map 覆盖
+			return [...new Map(parsed.map((session) => [String(session.meta.id), session])).values()];
+		} finally {
+			db.close();
+		}
+	}
+
+	private readV1Sessions(db: DatabaseSync, normalizedProject: string, mtimeMs: number): ParsedOpenCodeSession[] {
+		const sessions = db
+			.prepare(`
 				select s.*, p.worktree
 				from session s
 				join project p on p.id = s.project_id
@@ -298,57 +290,37 @@ export class OpenCodeSessionImporter {
 				   or lower(replace(s.directory, '\\', '/')) like lower(? || '/%')
 				order by s.time_updated desc
 			`)
-				.all(normalizedProject, normalizedProject, normalizedProject) as Array<Record<string, any>>;
+			.all(normalizedProject, normalizedProject, normalizedProject) as Array<Record<string, any>>;
 
-			return sessions.map((session) => {
-				const messages = db.prepare("select id, time_created, time_updated, data from message where session_id = ? order by time_created asc").all(session.id) as Array<Record<string, any>>;
-				const parts = db.prepare("select id, message_id, session_id, time_created, time_updated, data from part where session_id = ? order by time_created asc").all(session.id) as Array<Record<string, any>>;
-				const partsByMessage = new Map<string, OpenCodePart[]>();
-				for (const part of parts) {
-					const parsedPart = { ...part, data: this.parseJson(part.data) } as OpenCodePart;
-					const current = partsByMessage.get(parsedPart.message_id) ?? [];
-					current.push(parsedPart);
-					partsByMessage.set(parsedPart.message_id, current);
-				}
-				const parsedMessages = messages.map((message) => ({
-					id: String(message.id),
-					time_created: Number(message.time_created),
-					time_updated: Number(message.time_updated),
-					data: this.parseJson(message.data),
-					parts: partsByMessage.get(String(message.id)) ?? [],
-				}));
-				return {
-					meta: session,
-					messages: parsedMessages,
-					sourcePath: `${this.openCodeDb}#${session.id}`,
-					sourceSize: this.estimateSessionSize(session, parsedMessages),
-					sourceMtime: info.mtimeMs,
-				};
-			});
-		} finally {
-			db.close();
-		}
-	}
-
-	private parseJson(value: unknown) {
-		if (typeof value !== "string") return value && typeof value === "object" ? (value as Record<string, any>) : {};
-		try {
-			return JSON.parse(value);
-		} catch {
-			return {};
-		}
-	}
-
-	private estimateSessionSize(meta: Record<string, any>, messages: OpenCodeMessage[]) {
-		// 逐条累加而非整包 stringify：估算语义不变，瞬时峰值从「整会话字符串」降到「单条消息字符串」。
-		// 口径与旧公式有常数级偏差，存量已导入会话会一次性显示 outdated（重新导入即刷新，无数据风险）
-		let total = Buffer.byteLength(JSON.stringify(meta), "utf8");
-		for (const message of messages) total += Buffer.byteLength(JSON.stringify(message), "utf8");
-		return total;
+		return sessions.map((session) => {
+			const messages = db.prepare("select id, time_created, time_updated, data from message where session_id = ? order by time_created asc").all(session.id) as Array<Record<string, any>>;
+			const parts = db.prepare("select id, message_id, session_id, time_created, time_updated, data from part where session_id = ? order by time_created asc").all(session.id) as Array<Record<string, any>>;
+			const partsByMessage = new Map<string, OpenCodePart[]>();
+			for (const part of parts) {
+				const parsedPart = { ...part, data: parseJson(part.data) } as OpenCodePart;
+				const current = partsByMessage.get(parsedPart.message_id) ?? [];
+				current.push(parsedPart);
+				partsByMessage.set(parsedPart.message_id, current);
+			}
+			const parsedMessages = messages.map((message) => ({
+				id: String(message.id),
+				time_created: Number(message.time_created),
+				time_updated: Number(message.time_updated),
+				data: parseJson(message.data),
+				parts: partsByMessage.get(String(message.id)) ?? [],
+			}));
+			return {
+				meta: session,
+				messages: parsedMessages,
+				sourcePath: `${this.openCodeDb}#${session.id}`,
+				sourceSize: estimateSessionSize(session, parsedMessages),
+				sourceMtime: mtimeMs,
+			};
+		});
 	}
 
 	private parseModel(value: unknown) {
-		if (typeof value === "string") return this.parseJson(value);
+		if (typeof value === "string") return parseJson(value);
 		return value && typeof value === "object" ? (value as Record<string, any>) : {};
 	}
 
