@@ -1,6 +1,6 @@
 # ZCode 视觉质感分析与反哺计划
 
-> 状态：**Phase 1 已落地**（2026-10，d4e60c97c / 730579b0b / 6a45b179f）；**Phase 2 已落地**（2026-10，31792faf0，边框墨水化 + 圆角降档 + 语义色审计）；**Phase 3 已落地**（2026-10，25e4e7284，忙碌色结论 + 阴影降档）；**Phase 4 已落地**（2026-10，字号/等宽纪律 + 守卫测试）；**Phase 5 已落地**（2026-10，会话页画布档 + 白卡模型 + 墨水罩染表面，见 §七）；**Phase 6 已落地**（2026-10，右抽屉表面定版：白面板维持 + 工具 pill 降档，chrome 实验经用户裁决回退，见 §八）；后续按「改到哪，旧迁新到哪」增量推进，不做 big-bang。
+> 状态：**Phase 1 已落地**（2026-10，d4e60c97c / 730579b0b / 6a45b179f）；**Phase 2 已落地**（2026-10，31792faf0，边框墨水化 + 圆角降档 + 语义色审计）；**Phase 3 已落地**（2026-10，25e4e7284，忙碌色结论 + 阴影降档）；**Phase 4 已落地**（2026-10，字号/等宽纪律 + 守卫测试）；**Phase 5 已落地**（2026-10，会话页画布档 + 白卡模型 + 墨水罩染表面，见 §七）；**Phase 6 已落地**（2026-10，右抽屉表面定版：白面板维持 + 工具 pill 降档，chrome 实验经用户裁决回退，见 §八）；**Phase 7 已落地**（2026-10，排版对齐：标题压平 + 行内码缩档 + 按钮紧凑，见 §九）；后续按「改到哪，旧迁新到哪」增量推进，不做 big-bang。
 > 分析来源：`zai-org/ZCode`（Apache-2.0，main 分支 2026-10 浅克隆）。核心文件：`DESIGN.md`（设计宪法）、`packages/ui/src/styles.css`（Zai Light/Dark 主题值）。
 
 ## 一、ZCode 质感的六个机制（带证据）
@@ -183,3 +183,14 @@ sidebar #F0F0F0 → 画布 #F8F8F8 → 罩染弱表面 #F1F1F1（3% 落画布）
 - 壁纸模式不受影响：BG_TOKENS 与 utilities 层透明化覆盖均按 token 名生效，回退后照常。
 - 弹窗审计结论不变：设置/配置管理/公告中心为「白弹窗 + 45% 遮罩 + 灰导航/白内容」结构，无散灰断阶，不动。
 - 既有红记录（非本批回归，未顺手修）：drawer.spec.ts / browser-tabs.spec.ts 断言 browser tab 默认在 rail 可见，与 pinnedPanels 重构后的现实不符。
+
+## 九、Phase 7 变更明细（排版对齐：标题压平 + 行内码缩档 + 按钮紧凑）
+
+真值来源：`zai-org/ZCode` 的 `DESIGN.md` 与 `packages/ui/src/styles.css`（2026-10 经 web 通道重新核对全文）。核心结论：字号派生制 PiDeck 已对齐（14 基准 ± 档、h-6~9 控件高、4/8/12/16 间距节奏全同构），**差距集中在三处**：
+
+- **Markdown 标题刻度压平**：ZCode「标题不比正文响」——h1 只 +4px（ratio 1.29@14 基准）、h2 只 +2px、h3 起同字号纯靠字重（h3/h4 semibold、h5 medium、h6 normal）。PiDeck 旧 1.5/1.28/1.12/1.08em 在 16px 正文下 h1 冲到 24px（ratio 1.5），比 ZCode 响一截。改为 **1.3/1.15/1.06/1.03em**（≈+4.8/+2.4/+1/+0.5px），双轨同步（timeline.css `.markdown-body h*` + streamdownChrome.css `heading-*`），守卫钉值更新（streamdownRenderer）。
+- **行内代码缩一档**：ZCode inline code = ui-sm（−2 档，12px@14 基准）；PiDeck 行内码原继承正文字号，等宽字面面积大、成行内最响元素。`.markdown-body :not(pre) > code` 加 `font-size: 0.875em`（16→14px，恰 −2 档）。
+- **按钮默认档紧凑化**：ZCode button default = `h-8 px-3 py-1.5`（shadcn 原版 h-9 px-4 在其上显松）；PiDeck ui-shadcn button default 从 `h-9 px-4` 改 `h-8 px-3 py-1.5`，弹窗主操作密度提升。sm 档（h-8 px-3）保持不变，两档视觉等高、sm 保留 gap-1.5 图标行语义。
+- 核对后**不动**的：滚动条（ZCode 全局药丸滚动条 vs PiDeck `scrollbar-width: thin` 标准方案——foundation 有明确事故注记「Chromium 121+ 声明 scrollbar-width 后忽略 webkit 伪元素」，不回退）；菜单行字号（shadcn text-sm=14px 已等于 ZCode ui-base）；行高/段距/间距节奏（已同构）；tracking（ZCode 0.09em 仅限 9-10px 大写等宽标签，PiDeck 现有 0.03em lang chip 足够）。
+- 巡检：mock-pi 新增 `HDEMO` 标题演示消息（只增分支不影响既有用例），visual-tune-session 消息序列加入 HDEMO 验证标题刻度。
+- 既有红记录（改动文件回退到基线复跑核实，非本批回归）：settings.spec「appearance theme switch」在关闭弹窗一步失败、ask-ui「多 pending」卡 `.session-tab[aria-selected]` 选择器。

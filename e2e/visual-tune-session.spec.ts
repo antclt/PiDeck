@@ -31,6 +31,7 @@ async function runSession(window: Page, baseName: string) {
 
 	await send(composer, window, "TOOL THINK 过程层巡检", "流式渲染验证完成");
 	await send(composer, window, "MDEMO 渲染元素巡检", "渲染元素巡检");
+	await send(composer, window, "HDEMO 标题刻度巡检", "标题压平后的行内代码");
 	await window.waitForTimeout(600);
 	await shot(window, baseName);
 }
