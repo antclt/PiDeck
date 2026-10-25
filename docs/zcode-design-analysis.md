@@ -1,6 +1,6 @@
 # ZCode 视觉质感分析与反哺计划
 
-> 状态：**Phase 1 已落地**（2026-10，d4e60c97c / 730579b0b / 6a45b179f）；**Phase 2 已落地**（2026-10，31792faf0，边框墨水化 + 圆角降档 + 语义色审计）；**Phase 3 已落地**（2026-10，25e4e7284，忙碌色结论 + 阴影降档）；**Phase 4 已落地**（2026-10，字号/等宽纪律 + 守卫测试）；**Phase 5 已落地**（2026-10，会话页画布档 + 白卡模型 + 墨水罩染表面，见 §七）；**Phase 6 已落地**（2026-10，右抽屉表面定版：白面板维持 + 工具 pill 降档，chrome 实验经用户裁决回退，见 §八）；**Phase 7 已落地**（2026-10，排版对齐：标题压平 + 行内码缩档 + 按钮紧凑，见 §九）；**Phase 8 已落地**（2026-10，过程层去阴影——运行态洗底/占位卡/折叠条/气泡投影移除 + Git 摘要按钮 ghost，见 §十）；**Phase 9 已落地**（2026-10，右抽屉画布提亮半档 --color-bg-page-raised，见 §十一）；**Phase 10 已落地**（2026-10，顶栏统一画布档消除三白拼接，见 §十二）；后续按「改到哪，旧迁新到哪」增量推进，不做 big-bang。
+> 状态：**Phase 1 已落地**（2026-10，d4e60c97c / 730579b0b / 6a45b179f）；**Phase 2 已落地**（2026-10，31792faf0，边框墨水化 + 圆角降档 + 语义色审计）；**Phase 3 已落地**（2026-10，25e4e7284，忙碌色结论 + 阴影降档）；**Phase 4 已落地**（2026-10，字号/等宽纪律 + 守卫测试）；**Phase 5 已落地**（2026-10，会话页画布档 + 白卡模型 + 墨水罩染表面，见 §七）；**Phase 6 已落地**（2026-10，右抽屉表面定版：白面板维持 + 工具 pill 降档，chrome 实验经用户裁决回退，见 §八）；**Phase 7 已落地**（2026-10，排版对齐：标题压平 + 行内码缩档 + 按钮紧凑，见 §九）；**Phase 8 已落地**（2026-10，过程层去阴影——运行态洗底/占位卡/折叠条/气泡投影移除 + Git 摘要按钮 ghost，见 §十）；**Phase 9 已落地**（2026-10，右抽屉画布提亮半档 --color-bg-page-raised，见 §十一）；**Phase 10 已落地**（2026-10，顶栏统一画布档消除三白拼接，见 §十二）；**Phase 11 已落地**（2026-10，思考强度渐变滑条，见 §十三）；后续按「改到哪，旧迁新到哪」增量推进，不做 big-bang。
 > 分析来源：`zai-org/ZCode`（Apache-2.0，main 分支 2026-10 浅克隆）。核心文件：`DESIGN.md`（设计宪法）、`packages/ui/src/styles.css`（Zai Light/Dark 主题值）。
 
 ## 一、ZCode 质感的六个机制（带证据）
@@ -225,3 +225,24 @@ Phase 9 后用户指出右上角仍有色差（截图：窗口控制条/抽屉 r
 - 守卫：customTitlebarChrome 钉值 bg-bg-panel→bg-bg-page 同步。
 - 既有红记录（改动文件临时还原到基线复跑核实，非本批回归）：tab-context-menu 两条（右键菜单缺「重命名」、tab 数 1≠2）。
 - 本阶段最终浅色阶梯：侧栏 #F0F0F0 → 顶栏/正文 #F8F8F8 → 右抽屉 #FBFBFB → 白卡 #FFFFFF；暗色抽屉/顶栏随 token 坍缩为 panel 档不变。
+
+## 十三、Phase 11 变更明细（思考强度滑条：ZCode 渐变强度条同构）
+
+用户希望引入 ZCode 的「思考强度」渐变滑条组件。调研结论：ZCode 本地克隆为空壳、GitHub 上该 UI 不在可整编位置（composer-toolbar-layout 只有契约文档），且 PiDeck 已有 CLI 安装的 shadcn Slider/Popover 原语——按仓库纪律**用原语复刻**而非拷源码（beUI：安装走 CLI，视觉走语义 token）。
+
+- **形态替换**：`ThinkingLevelDropdown` 从「radio 单选菜单」改为「渐变强度条」——头行（思考强度 + 当前档位 + Ctrl+T kbd 提示）、整条常驻绿→蓝渐变轨道（success→info 语义 token，白 thumb 投影浮起，星尘装饰 aria-hidden）、档位刻度标签行（兼作点击入口，当前档位加粗高亮）、当前档位说明行。当前值靠 thumb 位置 + 标签高亮表达（ZCode 同款），不靠填充差。
+- **离散吸附**：Slider step=1、min/max=档位下标——模型只认 off…max 枚举；键盘方向键在滑条上原生平移档位。
+- **壳从 DropdownMenu 换成 Popover**：Radix Menu 劫持方向键（typeahead/导航），滑条键盘操作会被吞；Popover 不拦截。open/onOpenChange 契约不变（ComposerPickerHost 无感）。
+- **快捷键提示**：复用 useShortcutBindings + formatAccelerator("cycleThinking")——PiDeck 本就有同款 Ctrl+T（循环思考档位）全局键，kbd 芯片跟随用户自定义键位。
+- **token 驱动**：渐变用 success/info 语义 token（AA 合规的深档在浅色下偏沉稳、暗色 400 档自然鲜亮），皮肤自动跟随；白 thumb 为刻意的浮起身份。
+- i18n：新增 thinking.pickerIntensityLabel/pickerIntensityAria（zh-CN/en-US/zh-TW 生成）；契约测试重写为「渲染捕获桩」模式（组件含 hooks 不可当普通函数调用，SSR + 桩捕获 props 断言交互）。
+- 既有红记录：dsh-models.spec / visual-session.spec 的 `.thinking-picker` 对话框选择器早已失效（旧 ThinkingPicker 弹框在更早重构中移除，单测有「不再导出」守卫），非本批回归。
+
+### 13.1 交互模型修正（滑条不再触发关闭）
+
+首版把滑条 onValueChange 直连 onPick——拖拽中每过一档就 applyThinking→onApplied→onClose，弹层在第一档就消失（用户反馈「点击/拉取/滚动都触发关闭」；e2e 探针实证：滚轮本就不关，拖拽第一档即关）。修正为 ZCode 同款「调整保持打开」模型：
+
+- **预览/提交分离**：拖拽（onValueChange）只更新本地预览（draftIndexRef 真值源 + state 驱动渲染），松手（onPointerUp）或 Enter/空格才提交；头行/说明/刻度高亮实时跟随预览档位，触发按钮保持已应用值。lastCommittedRef 挡掉提交→应用异步窗口内的重复 RPC。
+- **keepOpen 语义**：applyThinking 增加 opts.keepOpen——滑条/刻度点选保持弹层打开（调档后可继续微调，ZCode 同款），Ctrl+T 循环等走默认关闭。关闭只走点外/Esc/再点触发器。
+- **草稿路径刷新**：无 record 的引导页把档位写 localStorage，keepOpen 下没有关闭重挂载来重读——useSessionPreferenceState 增加 welcomePreferenceVersion 版本戳，bump 强制底栏重读（运行中会话走 record upsert 天然刷新）。
+- e2e 交互矩阵实证：滚轮✓不关、拖拽✓应用+保持打开+标签同步（off→xhigh/max）、刻度点击✓、thumb 原地点击✓跳过 RPC、Esc✓关闭。

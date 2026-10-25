@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 4444d62b528d79fedb518e21b482d286cb533181b7bc72f4a19324e50e0684d9（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 0afb55bbb6dc4ae828a9af6c0945960d877613f1576881a38f2ecc3eec11a2cb（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -1208,6 +1208,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"app.archMismatchAction": "前往下載 arm64 版",
 	"app.archMismatchDismiss": "不再提示",
 	"app.thinkingPickerTitle": "選擇思考級別",
+	"thinking.pickerIntensityLabel": "思考強度",
+	"thinking.pickerIntensityAria": "思考強度滑條，方向鍵切換檔位",
 	"app.thinkingPickerHint": "某些模型可能不支援所有級別，系統會自動調整為支援的最接近級別",
 	"app.thinkingPickerUnsupported": "當前模型未提供可用的思考檔位，無法切換。",
 	"app.thinkingSwitchFailed": "切換思考級別失敗：{error}",

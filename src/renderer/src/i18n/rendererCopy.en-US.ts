@@ -1207,6 +1207,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"app.archMismatchAction": "Get the arm64 build",
 	"app.archMismatchDismiss": "Don't remind again",
 	"app.thinkingPickerTitle": "Select thinking level",
+	"thinking.pickerIntensityLabel": "Thinking intensity",
+	"thinking.pickerIntensityAria": "Thinking intensity slider, arrow keys to change level",
 	"app.thinkingPickerHint": "Some models may not support all levels. The system will automatically adjust to the closest supported level",
 	"app.thinkingPickerUnsupported": "The current model did not provide any available thinking levels and cannot be changed.",
 	"app.thinkingSwitchFailed": "Failed to change thinking level: {error}",

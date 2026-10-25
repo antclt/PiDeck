@@ -1201,6 +1201,8 @@ export const zhCN = {
 	"app.archMismatchAction": "前往下载 arm64 版",
 	"app.archMismatchDismiss": "不再提示",
 	"app.thinkingPickerTitle": "选择思考级别",
+	"thinking.pickerIntensityLabel": "思考强度",
+	"thinking.pickerIntensityAria": "思考强度滑条，方向键切换档位",
 	"app.thinkingPickerHint": "某些模型可能不支持所有级别，系统会自动调整为支持的最接近级别",
 	"app.thinkingPickerUnsupported": "当前模型未提供可用的思考档位，无法切换。",
 	"app.thinkingSwitchFailed": "切换思考级别失败：{error}",

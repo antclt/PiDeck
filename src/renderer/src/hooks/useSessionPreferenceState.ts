@@ -59,6 +59,10 @@ export function useSessionPreferenceState(options: {
 	const [favoritesLoaded, setFavoritesLoaded] = useState(false);
 	/** 最近使用的供应商（最新在前）：模型选择器按此优先排列供应商分组。 */
 	const [recentProviders, setRecentProviders] = useState<string[]>([]);
+	/* 引导页偏好版本戳：滑条 keepOpen 后 localStorage 不会触发重渲染，
+	   点选档位/模型后 bump 一次，让 currentThinkingLevel/currentModel 重读最新偏好。 */
+	const [welcomePreferenceVersion, setWelcomePreferenceVersion] = useState(0);
+	const bumpWelcomePreference = () => setWelcomePreferenceVersion((v) => v + 1);
 	/** Pi 供应商自定义顺序（模型页拖拽/上移下移写入）：模型选择器严格按此排列分组。 */
 	const [providerOrder, setProviderOrder] = useState<string[]>([]);
 	/** DSH 供应商自定义顺序（与 Pi 侧分开存放，避免两套配置互相污染）。 */
@@ -232,6 +236,8 @@ export function useSessionPreferenceState(options: {
 	// 才依次回退「当前模型的每模型默认」→ settings.defaultThinkingLevel → 模型自身 defaultEffort。
 	// 每模型默认必须按当前展示的模型查（用户可在引导页改选模型）：createDraft 也按
 	// 最终生效的模型查同一张表，次序一致才能保证「显示的就是创建时套用的」。
+	// welcomePreferenceVersion 仅作重渲染信号（滑条 keepOpen 后强制重读 localStorage）
+	void welcomePreferenceVersion;
 	const welcomeThinking = !record ? readWelcomeThinkingPreference()?.thinkingLevel : undefined;
 	const perModelThinkingDefault = modelThinkingLevelOfMap(options.modelThinkingLevels, resolvedLiveModel.provider, resolvedLiveModel.modelId);
 	const currentThinkingLevel = resolveComposerThinkingLevel({
@@ -292,6 +298,7 @@ export function useSessionPreferenceState(options: {
 		currentModel: resolvedLiveModel,
 		thinkingLevels,
 		currentThinkingLevel,
+		bumpWelcomePreference,
 		favoriteModels,
 		favoritesLoaded,
 		recentProviders,

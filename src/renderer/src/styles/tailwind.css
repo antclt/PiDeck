@@ -352,6 +352,27 @@
   }
 }
 
+/* ── 思考强度滑条（ZCode 渐变强度条同构，ModelThinkingChip）──────────────
+ * 冷→暖隐喻左弱右强：success（绿）起步、info（蓝）到顶，语义 token 随皮肤/明暗。
+ * 轨道整条常驻鲜明渐变（ZCode 同款：当前值靠 thumb 位置+档位标签高亮表达，不靠填充差）；
+ * Range 透明。白 thumb 带投影浮在渐变上。工具类 bg-muted/bg-primary 与本类同层
+ * （utilities），双类选择器特异性 (0,2,0) > (0,1,0) 恒胜出。 */
+@layer utilities {
+  .thinking-intensity-slider [data-slot="slider-track"] {
+    background-color: var(--color-info);
+    background-image: linear-gradient(90deg, var(--color-success), var(--color-info));
+  }
+  .thinking-intensity-slider [data-slot="slider-range"] {
+    background-color: transparent;
+    background-image: none;
+  }
+  .thinking-intensity-slider [data-slot="slider-thumb"] {
+    border: 2px solid #ffffff;
+    background-color: #ffffff;
+    box-shadow: 0 1px 4px rgba(9, 9, 11, 0.28);
+  }
+}
+
 /* ── 思考扫光动画（deepseek-harness ReasoningRow 同款）─────────────────
  * 折叠态思考单行的「流式光带」：仅思考仍在流式（running）时存在，结束后消失，
  * 与状态完全同步，避免旧跑马灯「思考结束还在滚」的问题。 */
