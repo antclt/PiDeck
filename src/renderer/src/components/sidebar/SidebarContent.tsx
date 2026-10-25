@@ -382,15 +382,15 @@ export function SidebarContent(props: SidebarContentProps) {
 						variant="pill"
 					>
 						<TabsList className="w-full rounded-full bg-muted/70 p-0.5 [&>div]:min-w-0 [&>div]:flex-1">
-							<TabsTrigger value="active" className={cn("w-full min-w-0 gap-1.5 overflow-hidden px-2 py-1.5 text-xs", controller.navTab === "active" && "text-foreground")} indicatorClassName="bg-background shadow-sm dark:bg-bg-active">
+							<TabsTrigger value="active" className={cn("w-full min-w-0 gap-1.5 overflow-hidden px-2 py-1.5 text-xs", controller.navTab === "active" && "text-foreground")} indicatorClassName="bg-bg-active">
 								<Activity className="size-3.5 shrink-0" aria-hidden="true" />
 								<span className="truncate">{t("app.sidebarActive")}</span>
 							</TabsTrigger>
-							<TabsTrigger value="chats" className={cn("w-full min-w-0 gap-1.5 overflow-hidden px-2 py-1.5 text-xs", controller.navTab === "chats" && "text-foreground")} indicatorClassName="bg-background shadow-sm dark:bg-bg-active">
+							<TabsTrigger value="chats" className={cn("w-full min-w-0 gap-1.5 overflow-hidden px-2 py-1.5 text-xs", controller.navTab === "chats" && "text-foreground")} indicatorClassName="bg-bg-active">
 								<MessageSquare className="size-3.5 shrink-0" aria-hidden="true" />
 								<span className="truncate">{t("app.sidebarChats")}</span>
 							</TabsTrigger>
-							<TabsTrigger value="projects" className={cn("w-full min-w-0 gap-1.5 overflow-hidden px-2 py-1.5 text-xs", controller.navTab === "projects" && "text-foreground")} indicatorClassName="bg-background shadow-sm dark:bg-bg-active">
+							<TabsTrigger value="projects" className={cn("w-full min-w-0 gap-1.5 overflow-hidden px-2 py-1.5 text-xs", controller.navTab === "projects" && "text-foreground")} indicatorClassName="bg-bg-active">
 								<Folder className="size-3.5 shrink-0" aria-hidden="true" />
 								<span className="truncate">{t("app.sidebarProjects")}</span>
 							</TabsTrigger>

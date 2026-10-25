@@ -262,3 +262,11 @@ Phase 9 后用户指出右上角仍有色差（截图：窗口控制条/抽屉 r
 - `.execution-summary-icon`：去 border + surface-ink 底 → 裸图标（22px 网格保留对齐），与展开后过程行图标同语言。
 - `.execution-summary-stat`：去 border + surface-ink 底 → 裸等宽统计数字；`is-warning`/`is-danger` 语义档保留各自色底（语义状态非灰底）。
 - 既有红记录（改动文件临时还原基线复跑核实）：process-group-display「同行文本共基线」NaN 测量失败，与本批无关。
+
+### 13.4 侧栏两处白 chip 降档（分段 Tab 指示条 + 查看更多行）
+
+用户截图圈出侧栏两处过白：①「活动/聊天/项目」分段控件的选中指示条（`indicatorClassName="bg-background shadow-sm"` = 纯白，在 #f0f0f0 侧栏上 Δ15）；②「查看更多 N」行呈 #FCFCFC 白 pill（= bg-background/80 叠加值，来源是 beUI Button 组件层默认皮，styles/ 无静态规则、DOM 类列表也无 bg 类——e2e 规则遍历 + 内联强制透明实验定位）。修法：
+
+- 分段 Tab 指示条：`bg-background shadow-sm dark:bg-bg-active` → **`bg-bg-active`**（明暗统一 #e4e4e4 档）——与选中会话行（bg-active，像素实测同为 #E4E4E4）同一选中语言，正合 foundation「侧栏选中 Δ12 ≈ ZCode 选中墨量 4.7%」纪律；暗色不变。
+- 查看更多/收起/agent-more 行：utilities 层加 `.chat-list-pane .session-more-btn/.session-more-row/.agent-more-row { background-color: transparent }`（双类 (0,2,0) 压过组件层默认皮），侧栏行回归「裸行 + hover 才 bg-bg-hover」纪律；壁纸模式语义不变。
+- e2e 探针实证：查看更多 computed bg 白→透明；选中会话行 #E4E4E4 保持。

@@ -357,6 +357,18 @@
  * 轨道整条常驻鲜明渐变（ZCode 同款：当前值靠 thumb 位置+档位标签高亮表达，不靠填充差）；
  * Range 透明。白 thumb 带投影浮在渐变上。工具类 bg-muted/bg-primary 与本类同层
  * （utilities），双类选择器特异性 (0,2,0) > (0,1,0) 恒胜出。 */
+/* ── 侧栏「查看更多/收起」行去白底 ────────────────────────────
+ * beUI Button 在侧栏上会呈现 panel 白底（来源未经 styles/ 静态规则，疑似组件层默认皮），
+ * 在 #f0f0f0 侧栏上是 Δ15 的亮白 pill；侧栏行的纪律是裸行 + hover 才 bg-bg-hover。
+ * .chat-list-pane 双类选择器 (0,2,0) 压过组件层 (0,1,0)；壁纸模式本就透明，语义不变。 */
+@layer utilities {
+  .chat-list-pane .session-more-btn,
+  .chat-list-pane .session-more-row,
+  .chat-list-pane .agent-more-row {
+    background-color: transparent;
+  }
+}
+
 @layer utilities {
   .thinking-intensity-slider [data-slot="slider-track"] {
     background-color: var(--color-info);
