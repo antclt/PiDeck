@@ -475,7 +475,7 @@ export function WebChatApp() {
 	// 低频轮询项目/会话/运行态（3s；useChat 负责消息流，不参与轮询）
 	useEffect(() => {
 		let disposed = false;
-		const fingerprintOf = (state: Awaited<ReturnType<typeof fetchState>>): string =>
+		const fingerprintOf = (state: NonNullable<Awaited<ReturnType<typeof fetchState>>>): string =>
 			[
 				(state.projects ?? [])
 					.map((project) => project.id + ":" + project.name + ":" + (project.lastOpenedAt ?? 0) + ":" + (project.pinned ? 1 : 0))
@@ -498,8 +498,9 @@ export function WebChatApp() {
 		// 形状由服务端 serializePublicWebPayload 保证；这里只做最小字段防御（缺 runtimes 视为畸形，回退拉取）。
 		const refresh = async (payload?: unknown) => {
 			try {
-				const next = payload && typeof payload === "object" && Array.isArray((payload as { runtimes?: unknown }).runtimes) ? (payload as Awaited<ReturnType<typeof fetchState>>) : await fetchState();
-				if (disposed) return;
+				const next = payload && typeof payload === "object" && Array.isArray((payload as { runtimes?: unknown }).runtimes) ? (payload as NonNullable<Awaited<ReturnType<typeof fetchState>>>) : await fetchState();
+				// null = 304 未变化：直接结束（连指纹比较都省了，state 引用保持不变）
+				if (disposed || next === null) return;
 				setConnected(true);
 				const fingerprint = fingerprintOf(next);
 				const unchanged = fingerprint === lastStateFingerprintRef.current;
@@ -851,7 +852,9 @@ export function WebChatApp() {
 
 	const refreshNow = async () => {
 		try {
-			setState(await fetchState());
+			const next = await fetchState();
+			// null = 304 未变化：保持现有 state 引用，避免无谓重渲染与下游 memo 失效
+			if (next) setState(next);
 			setConnected(true);
 		} catch {
 			setConnected(false);

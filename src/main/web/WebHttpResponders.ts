@@ -143,7 +143,7 @@ function acceptsGzip(header: string | undefined): boolean {
  * JSON 响应出口。客户端接受 gzip 且载荷超过阈值时按 gzip 下发（局域网/外网访问下
  * /api/state 与 /messages/page 可省 ~75% 流量）。压缩失败一律回退明文，不让客户端拿到坏流。
  */
-export function sendJson(response: ServerResponse, body: unknown): void {
+export function sendJson(response: ServerResponse, body: unknown, extraHeaders: Record<string, string> = {}): void {
 	const payload = Buffer.from(serializePublicWebPayload(body), "utf8");
 	// 取请求头走 ServerResponse.req（node:http 的 OutgoingMessage 持有来源请求），
 	// 避免为压缩把 request 透传到每一个路由调用点。
@@ -162,6 +162,7 @@ export function sendJson(response: ServerResponse, body: unknown): void {
 				"cache-control": "no-store",
 				"access-control-allow-origin": "*",
 				vary: "accept-encoding",
+				...extraHeaders,
 			});
 			response.end(compressed);
 			return;
@@ -172,6 +173,7 @@ export function sendJson(response: ServerResponse, body: unknown): void {
 		"cache-control": "no-store",
 		"access-control-allow-origin": "*",
 		...(acceptEncoding ? { vary: "accept-encoding" } : {}),
+		...extraHeaders,
 	});
 	response.end(payload);
 }

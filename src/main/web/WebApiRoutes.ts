@@ -8,6 +8,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AgentRuntimeState, CreateAnonymousSessionInput, CreateSessionDraftInput, ImageContent, SendSessionPromptInput, SessionRuntimeTarget, SessionUiResponseInput, UpdateSessionRecordInput } from "../../shared/types";
 import { readBoundedFile } from "./WebHttpResponders";
+import { ifNoneMatchHits, stateEtag } from "./WebStateEtag";
 import type { WebServiceDependencies } from "./WebServiceManager";
 
 const CHAT_IMAGE_MAX_COUNT = 4;
@@ -42,11 +43,12 @@ export function extractChatImages(parts: Array<{ type?: string; mediaType?: stri
 /** 路由需要宿主提供的能力面（manager 用薄箭头函数适配；private 成员不进接口）。 */
 export type WebApiRoutesPort = {
 	deps: WebServiceDependencies;
-	sendJson: (response: ServerResponse, body: unknown) => void;
+	sendJson: (response: ServerResponse, body: unknown, extraHeaders?: Record<string, string>) => void;
 	sendError: (response: ServerResponse, statusCode: number, code: string, error: string, params?: Record<string, string | number>) => void;
 	sendNoContent: (response: ServerResponse) => void;
 	readJson: <T>(request: IncomingMessage, maxBytes?: number) => Promise<T>;
-	getState: () => Promise<unknown>;
+	/** /api/state 载荷：这里只声明 ETag 需要的字段面，具体结构由装配层决定。 */
+	getState: () => Promise<{ projects?: unknown[]; sessions?: unknown[]; runtimes?: unknown[]; pendingUiRequests?: unknown[] }>;
 	queryNumber: (url: URL, key: string) => number | undefined;
 	runtimeAgentIdForSession: (sessionId: string) => string | undefined;
 	runtimeTargetForSession: (sessionId: string) => SessionRuntimeTarget | undefined;
@@ -86,7 +88,16 @@ export class WebApiRoutes {
 
 	async handle(url: URL, request: IncomingMessage, response: ServerResponse): Promise<boolean> {
 		if (url.pathname === "/api/state") {
-			this.sendJson(response, await this.getState());
+			const state = await this.getState();
+			// 条件请求：载荷含全部会话投影（500+ 条约 228KB），而轮询窗口内目录多半没变。
+			// 未变化时回 304，客户端保留原状态——空闲流量从每 10s 228KB 降到几十字节。
+			const etag = stateEtag(state);
+			if (ifNoneMatchHits(request.headers["if-none-match"], etag)) {
+				response.writeHead(304, { etag, "cache-control": "no-store" });
+				response.end();
+				return true;
+			}
+			this.sendJson(response, state, { etag });
 			return true;
 		}
 		if (url.pathname === "/api/ui-response" && request.method === "POST") {
