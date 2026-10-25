@@ -62,7 +62,7 @@ export function AppHeader({ simple = false, useNativeTitleBar, platform, toggleA
 		<>
 			<div className="window-drag-layer" aria-hidden="true" />
 			{showWinWindowControls ? (
-				<div className={cn("window-controls", simple ? "bg-(--simple-shell-surface)" : "bg-bg-panel workspace-titlebar:border-b workspace-titlebar:border-border/40")} aria-label={t("app.windowControls")}>
+				<div className={cn("window-controls", simple ? "bg-(--simple-shell-surface)" : "bg-bg-page workspace-titlebar:border-b workspace-titlebar:border-border/40")} aria-label={t("app.windowControls")}>
 					<button
 						type="button"
 						className={`window-control pin${windowAlwaysOnTop ? " active" : ""}`}

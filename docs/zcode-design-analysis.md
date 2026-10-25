@@ -1,6 +1,6 @@
 # ZCode 视觉质感分析与反哺计划
 
-> 状态：**Phase 1 已落地**（2026-10，d4e60c97c / 730579b0b / 6a45b179f）；**Phase 2 已落地**（2026-10，31792faf0，边框墨水化 + 圆角降档 + 语义色审计）；**Phase 3 已落地**（2026-10，25e4e7284，忙碌色结论 + 阴影降档）；**Phase 4 已落地**（2026-10，字号/等宽纪律 + 守卫测试）；后续按「改到哪，旧迁新到哪」增量推进，不做 big-bang。
+> 状态：**Phase 1 已落地**（2026-10，d4e60c97c / 730579b0b / 6a45b179f）；**Phase 2 已落地**（2026-10，31792faf0，边框墨水化 + 圆角降档 + 语义色审计）；**Phase 3 已落地**（2026-10，25e4e7284，忙碌色结论 + 阴影降档）；**Phase 4 已落地**（2026-10，字号/等宽纪律 + 守卫测试）；**Phase 5 已落地**（2026-10，会话页画布档 + 白卡模型 + 墨水罩染表面，见 §七）；**Phase 6 已落地**（2026-10，右抽屉表面定版：白面板维持 + 工具 pill 降档，chrome 实验经用户裁决回退，见 §八）；**Phase 7 已落地**（2026-10，排版对齐：标题压平 + 行内码缩档 + 按钮紧凑，见 §九）；**Phase 8 已落地**（2026-10，过程层去阴影——运行态洗底/占位卡/折叠条/气泡投影移除 + Git 摘要按钮 ghost，见 §十）；**Phase 9 已落地**（2026-10，右抽屉画布提亮半档 --color-bg-page-raised，见 §十一）；**Phase 10 已落地**（2026-10，顶栏统一画布档消除三白拼接，见 §十二）；**Phase 11 已落地**（2026-10，思考强度渐变滑条，见 §十三）；后续按「改到哪，旧迁新到哪」增量推进，不做 big-bang。
 > 分析来源：`zai-org/ZCode`（Apache-2.0，main 分支 2026-10 浅克隆）。核心文件：`DESIGN.md`（设计宪法）、`packages/ui/src/styles.css`（Zai Light/Dark 主题值）。
 
 ## 一、ZCode 质感的六个机制（带证据）
@@ -135,3 +135,146 @@ muted 比面板亮一档，方向正确，无需动。
 ### 6.3 守卫测试
 
 `tests/fontSizeDiscipline.test.mjs`（3 项）：① 自研组件任意字号扫描（空白容忍正则，9px 徽标与 ≥20px hero 豁免，ui-shadcn/motion 免检）；② foundation 字号阶梯 token 存在性；③ 划词工具条译文 font-sans 钉。
+
+## 七、Phase 5 变更明细（会话页画布档 + 白卡模型 + 墨水罩染表面）
+
+用户反馈两个问题：会话页背景太白；灰色背景块太多、主题被拆碎缺乏一体性。根因：会话正文面板是纯白（`--color-bg-panel`），而时间线里的气泡/过程卡/行内代码/引用/代码块各自配了一块**互不成阶**的不透明灰（用户气泡 #EBEBEB、过程条 #FAFAFA、行内码 #F4F4F4、引用 #F0F2F4 还带锌蓝调）——六档散灰直接贴在白底上，就是「碎成小块」的来源。暗色侧整页同底、卡片提亮，本就一体，不动。
+
+### 7.1 画布档（`--color-bg-page`，ZCode page 机制）
+
+- 浅色 `:root`：`color-mix(panel 55%, sidebar)`，经典值 = #f8f8f8（恰为 Zai Light page 同值）；由 panel/sidebar **派生**而非写死——四套皮肤与自定义主题不覆盖它时自动落在自己的 panel/sidebar 之间，方向恒对。
+- 暗色：`= var(--color-bg-panel)`（暗色画布维持整页同底，var 引用让皮肤暗色 panel 覆盖自动传导）。
+- 应用面：`chat-pane`（AppShell `bg-bg-panel → bg-bg-page`）、`.chat-header`（自铺白条改 `bg-transparent` 透出画布，避免顶部色阶断层）；壁纸模式 `BG_TOKENS`（useAppAppearance）补 `--color-bg-page`，与 panel 同批转半透明。
+
+### 7.2 白卡模型（浅色会话卡一律白）
+
+ZCode Light 的 panel/card/popover 同为 #ffffff，分层靠浮在 page 上——PiDeck 会话区的「块」收敛到同一档：
+
+- `--color-chat-card-bg` #fafafa→#ffffff、`--color-chat-muted-bg` #f4f4f4→#ffffff（浅色；暗色保持 #1a1a1a/#202020 原阶梯）。过程组折叠条、诊断卡、代码块、表格、Extension/Notify 卡全部经 token 自动变白卡。
+- 用户气泡新增专属 token `--color-chat-bubble-bg`：浅色 = panel（白卡，替代旧 accent 4%+muted 的 #EBEBEB 灰板）；暗色 = 旧公式 color-mix(accent 4%, muted)（#2E2E2E 提亮卡，维持既有层级）。
+- 输入框（composer-box = bg-card 白 + 边框 + shadow-composer-lifted）与用户气泡/代码块同一「白卡」语言，上下呼应。
+
+### 7.3 墨水罩染弱表面（`--color-surface-ink*`）
+
+新增两个从 text-primary 派生的半透明 token（明暗自动取正确方向，暗色即白墨水提亮）：
+
+- `--color-surface-ink-subtle`（3%）：引用块、代码块/表格头部条、表格斑马纹——替代旧的 accent-soft 55% 混面板（带锌蓝调，中性纪律破口）与 panel/muted 混色（白卡化后混成纯白失去分层）。
+- `--color-surface-ink`（5%）：行内代码、过程组图标底/统计徽标、代码块语言 pill、轮次模型 chip（TurnRow 旧 `bg-muted/60` 在画布上只剩 Δ2 几乎不可见）。
+
+### 7.4 落地后的浅色阶梯（截图像素实测）
+
+sidebar #F0F0F0 → 画布 #F8F8F8 → 罩染弱表面 #F1F1F1（3% 落画布）/ #EDEDED（5% 落画布）→ 白卡 #FFFFFF → 卡上罩染 #F4F4F4。从六档散灰收敛为「一画布 + 一罩染机制 + 一白卡档」；暗色全部维持原值（气泡 #2E2E2E、行内码 #262626、引用白墨水 3%）。
+
+### 7.5 守卫与巡检
+
+- `tests/darkFixedChatColors.test.mjs`：浅色 chat token 钉值更新为白卡；新增 bg-page/bubble/surface-ink 派生关系钉；表格头部/表头断言从 color-mix 换 surface-ink。
+- `tests/themeContrast.test.mjs`：`resolve()` 支持 `color-mix(var(--a) N%, var(--b))` 双 var 派生；FACES 补 `bg-page`（会话正文最长阅读底进矩阵）。
+- `e2e/visual-tune-session.spec.ts`：会话区明暗截图巡检（手动跑，不进门禁），输出 test-results/visual-tune/。
+
+## 八、Phase 6 变更明细（右抽屉表面定版：chrome 实验回退 + 工具 pill 降档）
+
+全区域审计（`e2e/visual-tune-surfaces.spec.ts`，明暗 × 文件树/Git/浏览器/设置/配置/公告）曾把右抽屉统一退到 chrome 档（=sidebar #f0f0f0）求左右对称；**用户裁决回退**（2026-10）：抽屉是内容型工具面，白面板上无色阶噪声更符合预期，粘性目录行/吸顶工具行的白底在灰面板上反而变成补丁、「乱七八糟」。最终态：
+
+- **右抽屉维持白面板**（bg-background / --color-bg-panel）：抽屉根（.detail-drawer）、活动栏（.drawer-activity-rail）、会话历史顶栏（.drawer-header）、文件树吸顶工具行、GitPanel 根与 `--git-panel-bg/hover/active`（workspace.css）、`.browser-panel`（surfaces.css）全部回退原值。
+- **会话画布档不受影响**：chat-pane 仍铺 `--color-bg-page`（#f8f8f8）。最终三段 = 侧栏 #F0F0F0 | 会话 #F8F8F8 | 右抽屉 #FFFFFF——轻微不对称是用户接受的取舍。
+- **工具按钮常驻灰 pill 降档**（本轮唯一保留的新改动方向：灰底别太深）：文件树工具行的切换态 pill（折叠包/搜索激活，`bg-accent` #e4e4e4 Δ27 偏深且常驻可见）降为 `bg-muted`（#f4f4f4 Δ11）；hover 反馈维持全局 ghost 行为不变。
+- 文件树行/文件搜索行 hover 回退 `bg-muted`（白底上轻档可见；chrome 实验期的 bg-bg-hover 深档一并回退）。
+- `drawerCompositorAnimation` 钉值回退 hover:bg-muted；foundation `--color-bg-sidebar` 注释同步（右抽屉不再声明为 chrome 档）。
+- 壁纸模式不受影响：BG_TOKENS 与 utilities 层透明化覆盖均按 token 名生效，回退后照常。
+- 弹窗审计结论不变：设置/配置管理/公告中心为「白弹窗 + 45% 遮罩 + 灰导航/白内容」结构，无散灰断阶，不动。
+- 既有红记录（非本批回归，未顺手修）：drawer.spec.ts / browser-tabs.spec.ts 断言 browser tab 默认在 rail 可见，与 pinnedPanels 重构后的现实不符。
+
+## 九、Phase 7 变更明细（排版对齐：标题压平 + 行内码缩档 + 按钮紧凑）
+
+真值来源：`zai-org/ZCode` 的 `DESIGN.md` 与 `packages/ui/src/styles.css`（2026-10 经 web 通道重新核对全文）。核心结论：字号派生制 PiDeck 已对齐（14 基准 ± 档、h-6~9 控件高、4/8/12/16 间距节奏全同构），**差距集中在三处**：
+
+- **Markdown 标题刻度压平**：ZCode「标题不比正文响」——h1 只 +4px（ratio 1.29@14 基准）、h2 只 +2px、h3 起同字号纯靠字重（h3/h4 semibold、h5 medium、h6 normal）。PiDeck 旧 1.5/1.28/1.12/1.08em 在 16px 正文下 h1 冲到 24px（ratio 1.5），比 ZCode 响一截。改为 **1.3/1.15/1.06/1.03em**（≈+4.8/+2.4/+1/+0.5px），双轨同步（timeline.css `.markdown-body h*` + streamdownChrome.css `heading-*`），守卫钉值更新（streamdownRenderer）。
+- **行内代码缩一档**：ZCode inline code = ui-sm（−2 档，12px@14 基准）；PiDeck 行内码原继承正文字号，等宽字面面积大、成行内最响元素。`.markdown-body :not(pre) > code` 加 `font-size: 0.875em`（16→14px，恰 −2 档）。
+- **按钮默认档紧凑化**：ZCode button default = `h-8 px-3 py-1.5`（shadcn 原版 h-9 px-4 在其上显松）；PiDeck ui-shadcn button default 从 `h-9 px-4` 改 `h-8 px-3 py-1.5`，弹窗主操作密度提升。sm 档（h-8 px-3）保持不变，两档视觉等高、sm 保留 gap-1.5 图标行语义。
+- 核对后**不动**的：滚动条（ZCode 全局药丸滚动条 vs PiDeck `scrollbar-width: thin` 标准方案——foundation 有明确事故注记「Chromium 121+ 声明 scrollbar-width 后忽略 webkit 伪元素」，不回退）；菜单行字号（shadcn text-sm=14px 已等于 ZCode ui-base）；行高/段距/间距节奏（已同构）；tracking（ZCode 0.09em 仅限 9-10px 大写等宽标签，PiDeck 现有 0.03em lang chip 足够）。
+- 巡检：mock-pi 新增 `HDEMO` 标题演示消息（只增分支不影响既有用例），visual-tune-session 消息序列加入 HDEMO 验证标题刻度。
+- 既有红记录（改动文件回退到基线复跑核实，非本批回归）：settings.spec「appearance theme switch」在关闭弹窗一步失败、ask-ui「多 pending」卡 `.session-tab[aria-selected]` 选择器。
+
+## 十、Phase 8 变更明细（过程层去阴影：淡如 ZCode、回复凸显）
+
+用户反馈：表格/工具调用/思考带「灰色阴影条」，过程层应像 ZCode 一样淡、回复明显；Git 摘要生成按钮背景不佳。computed-style 全量枚举 + 运行态截图定位后五处收口：
+
+- **移除 `turn-row--running::before` 呼吸洗底**（accent 3% × 2.2s 呼吸动画，inset -6/-8px 的大片洗底即「灰色阴影条」本体）及 `turn-running-breathe` keyframes——运行感由图标 pulse/扫光单独承担，过程行运行中也保持无框无底。ZCode 过程层无任何整片运行底色。
+- **`.tool-activity-card` 运行占位卡去阴影/渐变**：`0 4px 14px accent 8%` 投影 + accent 8% 渐变底 + accent 32% 边框 → 白卡（panel）+ border-subtle 混 accent 22% 一缕身份色 + `box-shadow: none`；入场/扫光动画保留。
+- **`.execution-summary-toggle:hover` 去投影**（0 3px 12px 7%）：hover 只变色/边框，ZCode hover 纪律。
+- **`.user-turn-bubble` 去常驻投影**（0 2px 8px 5% 及 hover 4px 12px 一并移除）：深度靠底色对比 + 边框；全时间线唯一保留浮起阴影的是底部输入框（--shadow-composer-lifted）。
+- **Git 摘要生成按钮 outline → ghost**：去边框/白底/shadow-xs，辅助动作退为图标级，与主「提交」按钮主次分明。
+- 表格核实无 box-shadow（streamdownChrome 两处均 none），用户感知的表格阴影即运行态洗底/卡片投影的组合，随上列移除一并消失；落定态 computed 枚举确认时间线阴影仅剩输入框（在时间线外）。
+
+## 十一、Phase 9 变更明细（右抽屉画布提亮半档：与正文区分又不刺眼）
+
+Phase 8 后用户反馈：右抽屉纯白（bg-background）比正文画布 #f8f8f8 亮一档「太白」；完全对齐画布后又裁决「别太一致，稍微白一点有区分」。最终引入 **`--color-bg-page-raised`（画布提亮半档）**：
+
+- 定义：`color-mix(in srgb, var(--color-bg-page) 55%, var(--color-bg-panel))`——经典浅色 #fbfbfb（正文 Δ3 / 纯白 Δ4），由 page/panel 派生：暗色 page=panel 自动坍缩为同值（暗色本就整页同底无需区分），皮肤自动落在自身两档之间，壁纸模式两 token 同批注入半透明自动跟随。
+- 应用面（Phase 8 的 chrome 实验面逐点换成 raised，替代原 bg-background）：`.detail-drawer` 根、`.drawer-activity-rail`、`.drawer-header`、文件树吸顶工具行与粘性目录行（粘性行必须不透明，否则滚动内容透出）、GitPanel 根 + `--git-panel-bg/hover/active`、`.browser-panel`。白卡（Git 提交/筛选输入框、浏览器地址栏、会话历史卡、GitGraph 浮层）保持 panel 纯白，在 raised 上浮起 Δ4。
+- 像素实测阶梯：侧栏 #F0F0F0 → 正文 #F8F8F8 → 抽屉 #FBFBFB → 白卡 #FFFFFF；暗色抽屉=panel 不变。
+- 与 Phase 6 的关系：当时的教训不是「抽屉不能退档」而是「不能退到 sidebar chrome 档（Δ8 过深）且半途而废留白条补丁」；raised 只退半档且粘性行/工具行全部同批换色，无补丁。
+
+## 十二、Phase 10 变更明细（顶栏统一画布档：消除三白拼接）
+
+Phase 9 后用户指出右上角仍有色差（截图：窗口控制条/抽屉 rail/文件工具条交界）。像素+elementFromPoint 探针定位：顶条横贯全窗，由三块底色拼成——session-tabs-bar `bg-background/80`（≈#FEFEFE）、抽屉自身让位区（透明→透出 raised #FBFBFB）、window-controls `bg-bg-panel`（纯白 #FFF）。三种白并排即「色差」。
+
+- **顶栏整条统一画布档 #F8F8F8**：session-tabs-bar（`/80` 半透明白→实色 bg-bg-page）、抽屉让位区（透明→bg-bg-page）、window-controls（bg-bg-panel→bg-bg-page）。落位后顶栏与正文画布连成一体（ZCode 顶栏=page 档同构），抽屉内容区保持 raised #FBFBFB 半档浮起，层次读法=「顶栏 chrome 融入内容 + 抽屉稍白卡片」。
+- 悬浮 X 角标（drawer-rail-remove）bg-background → bg-bg-page-raised，与 rail 同底。
+- 壁纸模式不受影响：utilities 层对 session-tabs-bar/window-controls 的透明化覆盖按类名继续生效；simple 外壳走自己的 --simple-shell-surface 不变。
+- 守卫：customTitlebarChrome 钉值 bg-bg-panel→bg-bg-page 同步。
+- 既有红记录（改动文件临时还原到基线复跑核实，非本批回归）：tab-context-menu 两条（右键菜单缺「重命名」、tab 数 1≠2）。
+- 本阶段最终浅色阶梯：侧栏 #F0F0F0 → 顶栏/正文 #F8F8F8 → 右抽屉 #FBFBFB → 白卡 #FFFFFF；暗色抽屉/顶栏随 token 坍缩为 panel 档不变。
+
+## 十三、Phase 11 变更明细（思考强度滑条：ZCode 渐变强度条同构）
+
+用户希望引入 ZCode 的「思考强度」渐变滑条组件。调研结论：ZCode 本地克隆为空壳、GitHub 上该 UI 不在可整编位置（composer-toolbar-layout 只有契约文档），且 PiDeck 已有 CLI 安装的 shadcn Slider/Popover 原语——按仓库纪律**用原语复刻**而非拷源码（beUI：安装走 CLI，视觉走语义 token）。
+
+- **形态替换**：`ThinkingLevelDropdown` 从「radio 单选菜单」改为「渐变强度条」——头行（思考强度 + 当前档位 + Ctrl+T kbd 提示）、整条常驻绿→蓝渐变轨道（success→info 语义 token，白 thumb 投影浮起，星尘装饰 aria-hidden）、档位刻度标签行（兼作点击入口，当前档位加粗高亮）、当前档位说明行。当前值靠 thumb 位置 + 标签高亮表达（ZCode 同款），不靠填充差。
+- **离散吸附**：Slider step=1、min/max=档位下标——模型只认 off…max 枚举；键盘方向键在滑条上原生平移档位。
+- **壳从 DropdownMenu 换成 Popover**：Radix Menu 劫持方向键（typeahead/导航），滑条键盘操作会被吞；Popover 不拦截。open/onOpenChange 契约不变（ComposerPickerHost 无感）。
+- **快捷键提示**：复用 useShortcutBindings + formatAccelerator("cycleThinking")——PiDeck 本就有同款 Ctrl+T（循环思考档位）全局键，kbd 芯片跟随用户自定义键位。
+- **token 驱动**：渐变用 success/info 语义 token（AA 合规的深档在浅色下偏沉稳、暗色 400 档自然鲜亮），皮肤自动跟随；白 thumb 为刻意的浮起身份。
+- i18n：新增 thinking.pickerIntensityLabel/pickerIntensityAria（zh-CN/en-US/zh-TW 生成）；契约测试重写为「渲染捕获桩」模式（组件含 hooks 不可当普通函数调用，SSR + 桩捕获 props 断言交互）。
+- 既有红记录：dsh-models.spec / visual-session.spec 的 `.thinking-picker` 对话框选择器早已失效（旧 ThinkingPicker 弹框在更早重构中移除，单测有「不再导出」守卫），非本批回归。
+
+### 13.1 交互模型修正（滑条不再触发关闭）
+
+首版把滑条 onValueChange 直连 onPick——拖拽中每过一档就 applyThinking→onApplied→onClose，弹层在第一档就消失（用户反馈「点击/拉取/滚动都触发关闭」；e2e 探针实证：滚轮本就不关，拖拽第一档即关）。修正为 ZCode 同款「调整保持打开」模型：
+
+- **预览/提交分离**：拖拽（onValueChange）只更新本地预览（draftIndexRef 真值源 + state 驱动渲染），松手（onPointerUp）或 Enter/空格才提交；头行/说明/刻度高亮实时跟随预览档位，触发按钮保持已应用值。lastCommittedRef 挡掉提交→应用异步窗口内的重复 RPC。
+- **keepOpen 语义**：applyThinking 增加 opts.keepOpen——滑条/刻度点选保持弹层打开（调档后可继续微调，ZCode 同款），Ctrl+T 循环等走默认关闭。关闭只走点外/Esc/再点触发器。
+- **草稿路径刷新**：无 record 的引导页把档位写 localStorage，keepOpen 下没有关闭重挂载来重读——useSessionPreferenceState 增加 welcomePreferenceVersion 版本戳，bump 强制底栏重读（运行中会话走 record upsert 天然刷新）。
+- e2e 交互矩阵实证：滚轮✓不关、拖拽✓应用+保持打开+标签同步（off→xhigh/max）、刻度点击✓、thumb 原地点击✓跳过 RPC、Esc✓关闭。
+
+### 13.2 过程行灰底 chip 去底（时间线碎条治理）
+
+用户截图反馈过程层「灰色背景条多、影响质感」：真实会话每轮 6-10 条工具行，命令/路径预览 chip（5% 墨水底）连成片，把时间线切成碎条。ZCode 工具行的命令即裸等宽暗字。两处去底：
+
+- 工具行作用对象预览（ToolCallComponents）：`5% 墨水 chip` → 裸 `font-mono text-text-faint`（比 tertiary 再淡一档，过程层退后）；行 tooltip 仍承接全文。toolCallComponents 钉值同步（doesNotMatch 旧 bg）。
+- 轮次模型徽章（TurnRow `data-turn-model`）：`bg-surface-ink chip` → 裸等宽 tertiary 暗字；等宽字体仍与耗时读数区分。
+- 保留的：散文行内代码（surface-ink 5%，GitHub 惯例的代码 affordance）、`.tool-card-kind` 工具身份色 chip（语义身份非灰底）、执行过程折叠条（白卡）。
+
+### 13.3 执行过程胶囊条内灰底盒去底
+
+用户继续反馈「执行过程显示块里好几个 logo 带灰色背景」。像素采样其截图定位：胶囊条（execution-summary-toggle）内部前导图标盒 + 两个统计 chip 都是 5% 墨水底的小灰盒，一条 bar 上连着三个。两处去底：
+
+- `.execution-summary-icon`：去 border + surface-ink 底 → 裸图标（22px 网格保留对齐），与展开后过程行图标同语言。
+- `.execution-summary-stat`：去 border + surface-ink 底 → 裸等宽统计数字；`is-warning`/`is-danger` 语义档保留各自色底（语义状态非灰底）。
+- 既有红记录（改动文件临时还原基线复跑核实）：process-group-display「同行文本共基线」NaN 测量失败，与本批无关。
+
+### 13.4 侧栏两处白 chip 降档（分段 Tab 指示条 + 查看更多行）
+
+用户截图圈出侧栏两处过白：①「活动/聊天/项目」分段控件的选中指示条（`indicatorClassName="bg-background shadow-sm"` = 纯白，在 #f0f0f0 侧栏上 Δ15）；②「查看更多 N」行呈 #FCFCFC 白 pill（= bg-background/80 叠加值，来源是 beUI Button 组件层默认皮，styles/ 无静态规则、DOM 类列表也无 bg 类——e2e 规则遍历 + 内联强制透明实验定位）。修法：
+
+- 分段 Tab 指示条：`bg-background shadow-sm dark:bg-bg-active` → **`bg-bg-active`**（明暗统一 #e4e4e4 档）——与选中会话行（bg-active，像素实测同为 #E4E4E4）同一选中语言，正合 foundation「侧栏选中 Δ12 ≈ ZCode 选中墨量 4.7%」纪律；暗色不变。
+- 查看更多/收起/agent-more 行：utilities 层加 `.chat-list-pane .session-more-btn/.session-more-row/.agent-more-row { background-color: transparent }`（双类 (0,2,0) 压过组件层默认皮），侧栏行回归「裸行 + hover 才 bg-bg-hover」纪律；壁纸模式语义不变。
+- e2e 探针实证：查看更多 computed bg 白→透明；选中会话行 #E4E4E4 保持。
+
+### 13.5 Git 摘要钮与提交钮成组统一
+
+用户反馈「提交摘要按钮和生成摘要不统一」：AI 摘要钮（ghost 裸图标 28px）与「提交」主按钮（实心 32px）并排，高度与形态都割裂。统一为：摘要钮 outline 白卡 + `size-8`（32px 与提交钮同高，shadow-none），与上方提交信息框（白卡+边框）同一语言；两钮 gap 1.5 成一组，主次分明（辅助=outline 图标、主动作=primary）。
+
+### 13.6 Git 面板分支筛选触发器去白底
+
+用户反馈「源代码管理图」区头的「全部」分支筛选钮突出：shadcn SelectTrigger 基类自带 `bg-bg-input`（白底）+ `shadow-xs`，GitCompactFilter 只覆盖了 border 色——白 chip 浮在 chrome 面板头上。触发器补 `bg-transparent shadow-none`，回归「裸触发器 + hover 才浮起」的筛选钮语言（与文件树/Git 各区头一致）；两个 GitCompactFilter 实例（分支筛选/多仓库切换）同批生效。

@@ -397,7 +397,7 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 	// --session-tab-max-*：外观设置可调的 Tab 宽度上限，徽标 Tab 额外加 28px（见 shared/sessionTabWidth.ts）。
 	return (
 		<div
-			className={cn("session-tabs-bar flex h-10 shrink-0 items-center gap-1 overflow-x-clip border-b border-border/40 bg-background/80 pl-[max(0.5rem,var(--session-tabs-left-inset,0.5rem))]", props.simple && "simple-session-header h-12 border-0 bg-transparent [--session-tabs-left-inset:16px]")}
+			className={cn("session-tabs-bar flex h-10 shrink-0 items-center gap-1 overflow-x-clip border-b border-border/40 bg-bg-page pl-[max(0.5rem,var(--session-tabs-left-inset,0.5rem))]", props.simple && "simple-session-header h-12 border-0 bg-transparent [--session-tabs-left-inset:16px]")}
 			style={
 				{
 					"--session-tab-max-w": `${tabMaxWidth}px`,

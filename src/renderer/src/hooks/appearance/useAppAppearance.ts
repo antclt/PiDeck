@@ -159,6 +159,8 @@ export function useAppAppearance({ settings, systemLanguage, settingsLoaded }: {
 			"--color-bg-app",
 			"--color-bg-sidebar",
 			"--color-bg-panel",
+			// 会话画布档：壁纸下与 panel 同批转半透明，侧栏/会话区/抽屉透出的图保持同档
+			"--color-bg-page",
 			"--color-bg-input",
 			"--color-bg-muted",
 			"--color-bg-hover",

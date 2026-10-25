@@ -1295,7 +1295,7 @@ export { DiagnosticMessageCard, RespondingIndicator, ThinkingBlock };
 export { MultiSelectModal };
 
 /**
- * 会话定位轴（beUI PreviewRail）：消息区右缘一列 1px 刻度，一根 = 一个用户检查点；
+ * 会话定位轴（beUI PreviewRail）：消息区右缘一列 2px 刻度，一根 = 一个用户检查点；
  * 静默态整体不可见，指针移上去（或键盘聚焦）才浮现（见 surfaces.css 的 .session-outline-pane）。
  * hover 出预览卡、点击跳转；工具开关已上收会话 Tab 栏（SessionToolAction），
  * 此处不再承载其他入口；容器沿用 .outline-hover 的定位规则（session-outline-pane 贴右缘，有测试守护）。
@@ -1393,7 +1393,7 @@ function ConversationOutlineView(props: ConversationOutlineProps) {
 					}}
 					/* 宽度对齐原触发按钮（30px），min-h-0 抵消组件自带的演示高度 */
 					className="pointer-events-auto min-h-0 w-[30px]"
-					railClassName="w-full content-center [&_[data-slot=preview-rail-item]]:w-full [&_[data-slot=preview-rail-item]]:justify-center [&_[data-slot=preview-rail-tick]]:h-px [&_[data-slot=preview-rail-tick]]:w-4 [&_[data-slot=preview-rail-tick]]:origin-center"
+					railClassName="w-full content-center [&_[data-slot=preview-rail-item]]:w-full [&_[data-slot=preview-rail-item]]:justify-center [&_[data-slot=preview-rail-tick]]:h-0.5 [&_[data-slot=preview-rail-tick]]:w-4 [&_[data-slot=preview-rail-tick]]:origin-center"
 					previewContainerClassName="inset-y-0 right-7 left-auto w-64"
 					previewClassName="[&_[data-slot=preview-rail-card]]:h-20 [&_[data-slot=preview-rail-card]]:overflow-hidden [&_[data-slot=preview-rail-card]]:p-3 [&_[data-slot=preview-rail-title]]:line-clamp-1 [&_[data-slot=preview-rail-title]]:text-xs [&_[data-slot=preview-rail-title]]:leading-4 [&_[data-slot=preview-rail-description]]:line-clamp-1 [&_[data-slot=preview-rail-description]]:text-xs [&_[data-slot=preview-rail-description]]:leading-4"
 				/>

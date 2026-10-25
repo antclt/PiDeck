@@ -142,6 +142,8 @@ export type SidebarContentProps = {
 	creatingWorktree?: boolean;
 	/** 正在删除的 worktree 路径集合（透传给 WorktreeTree 驱动淡出动画）。 */
 	removingWorktreePaths?: ReadonlySet<string>;
+	/** 「聊天」「项目」分组标题栏在列表滚动时冻结在顶部（settings.sidebarStickyGroupHeaders）。 */
+	stickyGroupHeaders?: boolean;
 	isLanWeb?: boolean;
 	chrome?: ReactNode;
 	/** 「新建会话」：打开初始引导页（居中输入框 + 项目下拉切换），由 App 提供。 */
@@ -382,15 +384,15 @@ export function SidebarContent(props: SidebarContentProps) {
 						variant="pill"
 					>
 						<TabsList className="w-full rounded-full bg-muted/70 p-0.5 [&>div]:min-w-0 [&>div]:flex-1">
-							<TabsTrigger value="active" className={cn("w-full min-w-0 gap-1.5 overflow-hidden px-2 py-1.5 text-xs", controller.navTab === "active" && "text-foreground")} indicatorClassName="bg-background shadow-sm dark:bg-bg-active">
+							<TabsTrigger value="active" className={cn("w-full min-w-0 gap-1.5 overflow-hidden px-2 py-1.5 text-xs", controller.navTab === "active" && "text-foreground")} indicatorClassName="bg-bg-active">
 								<Activity className="size-3.5 shrink-0" aria-hidden="true" />
 								<span className="truncate">{t("app.sidebarActive")}</span>
 							</TabsTrigger>
-							<TabsTrigger value="chats" className={cn("w-full min-w-0 gap-1.5 overflow-hidden px-2 py-1.5 text-xs", controller.navTab === "chats" && "text-foreground")} indicatorClassName="bg-background shadow-sm dark:bg-bg-active">
+							<TabsTrigger value="chats" className={cn("w-full min-w-0 gap-1.5 overflow-hidden px-2 py-1.5 text-xs", controller.navTab === "chats" && "text-foreground")} indicatorClassName="bg-bg-active">
 								<MessageSquare className="size-3.5 shrink-0" aria-hidden="true" />
 								<span className="truncate">{t("app.sidebarChats")}</span>
 							</TabsTrigger>
-							<TabsTrigger value="projects" className={cn("w-full min-w-0 gap-1.5 overflow-hidden px-2 py-1.5 text-xs", controller.navTab === "projects" && "text-foreground")} indicatorClassName="bg-background shadow-sm dark:bg-bg-active">
+							<TabsTrigger value="projects" className={cn("w-full min-w-0 gap-1.5 overflow-hidden px-2 py-1.5 text-xs", controller.navTab === "projects" && "text-foreground")} indicatorClassName="bg-bg-active">
 								<Folder className="size-3.5 shrink-0" aria-hidden="true" />
 								<span className="truncate">{t("app.sidebarProjects")}</span>
 							</TabsTrigger>
@@ -421,7 +423,17 @@ export function SidebarContent(props: SidebarContentProps) {
 				{/* 单一滚动区承载项目与展开内容，避免项目导航/详情双滚动和重复标题。
             scrollbar-gutter: stable：滚动条出现/消失时列表宽度不跳变（与抽屉一致）。 */}
 				<section className="conversation-list min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
-					<ProjectTree simple={props.simple} controller={controller} actions={actions} currentProjectId={currentRootProject?.id} currentSessionId={props.currentSessionId} worktreesByProject={props.worktreesByProject} branchByProject={props.branchByProject} removingWorktreePaths={props.removingWorktreePaths} />
+					<ProjectTree
+						simple={props.simple}
+						controller={controller}
+						actions={actions}
+						currentProjectId={currentRootProject?.id}
+						currentSessionId={props.currentSessionId}
+						worktreesByProject={props.worktreesByProject}
+						branchByProject={props.branchByProject}
+						removingWorktreePaths={props.removingWorktreePaths}
+						stickyGroupHeaders={props.stickyGroupHeaders}
+					/>
 				</section>
 			</div>
 			{/* 底栏 dock（beUI Dock）：设置/公告/反馈/主题切换收进浮动卡片，铺满底栏宽度

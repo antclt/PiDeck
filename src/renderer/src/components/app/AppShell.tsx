@@ -451,7 +451,7 @@ export function AppShell(props: AppShellProps) {
 				<ResizablePanel id="chat" minSize={360} className="shell-panel-chat">
 					<main
 						ref={chatPaneRef}
-						className={cn("chat-pane bg-bg-panel", props.navigationChrome && "rounded-tl-[18px]")}
+						className={cn("chat-pane bg-bg-page", props.navigationChrome && "rounded-tl-[18px]")}
 						style={
 							{
 								"--terminal-row-h": `${terminalRowHeight}px`,

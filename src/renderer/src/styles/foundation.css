@@ -92,11 +92,23 @@
   /* 默认浅色外观以纯白为基底；灰色只用于控件表面、hover 和选中层级。 */
   --color-bg-app: #ffffff;
   /* 主次分明（对齐 ZCode 排版，docs/zcode-design-analysis.md）：chrome 退一档——
-     侧栏/右抽屉 #f0f0f0（ZCode sidebar 同值），正文面板保持纯白，
+     侧栏 #f0f0f0（ZCode sidebar 同值），正文面板保持纯白，
      内容浮在 chrome 之上，焦点自然落在会话区。
+     右抽屉曾试过同步退 chrome 档，用户裁决回退白面板（2026-10，docs §八）：
+     抽屉是内容型工具面，白底 + 轻灰 pill 更符合预期，灰底别太深。
      皮肤（fresh-green 等）各自定制更深的 sidebar 分层，不受此处影响。 */
   --color-bg-sidebar: #f0f0f0;
   --color-bg-panel: #ffffff;
+  /* 会话内容画布（ZCode 页面档 page #f8f8f8）：介于 sidebar 与 panel 之间的「纸面」，
+     会话时间线/输入区铺这一档，白卡（用户气泡/代码块/表格/输入框）浮在其上——
+     解决「正文面板纯白太刺眼」与「灰块直接贴在白底上碎成小块」两个问题。
+     由 panel/sidebar 派生而非写死 hex：皮肤与自定义主题不覆盖它时，自动落在
+     自己的 panel 与 sidebar 之间，方向永远正确（经典浅色 = #f8f8f8，恰为 ZCode 同值）。 */
+  --color-bg-page: color-mix(in srgb, var(--color-bg-panel) 55%, var(--color-bg-sidebar));
+  /* 画布提亮半档（右抽屉用）：比正文画布稍白一点做区域区分，又不至于纯白刺眼
+     （经典值 #fbfbfb，正文 Δ3 / 纯白 Δ4）。由 page/panel 派生：暗色 page=panel
+     时自动坍缩为同值（暗色无需区分），皮肤自动落在自身两档之间。 */
+  --color-bg-page-raised: color-mix(in srgb, var(--color-bg-page) 55%, var(--color-bg-panel));
   /* 浮层与普通面板分离：壁纸模式下普通面板可透图，但菜单必须保持稳定的不透明底。 */
   --color-bg-popover: #ffffff;
   --color-bg-input: #ffffff;
@@ -128,6 +140,12 @@
   --color-border-subtle: rgba(13, 13, 13, 0.1);
   --color-border-default: rgba(13, 13, 13, 0.13);
   --color-border-strong: rgba(13, 13, 13, 0.17);
+  /* 墨水罩染弱表面（ZCode surface 机制）：行内代码 / 引用块 / 代码块与表格的头部条 /
+     徽标底共用这一档，替代以前各配一块不透明灰（#f4f4f4/#fafafa/带蓝调的 #f0f2f4 混杂）。
+     从 text-primary 派生：明暗与皮肤自动取正确方向（暗色是白墨水提亮），画布/白卡上
+     各自渲染出正确步长，不再需要按底色手工配灰。subtle=3% 大块弱表面，5%=小徽标/行内码。 */
+  --color-surface-ink-subtle: color-mix(in srgb, var(--color-text-primary) 3%, transparent);
+  --color-surface-ink: color-mix(in srgb, var(--color-text-primary) 5%, transparent);
   /* 默认主题色：黑白灰；语义状态色（info/warning/danger）仍保留用于状态反馈。
      accent 取 shadcn zinc 的 primary 值（浅色近黑 zinc-900）：主按钮（保存/创建/导出/发送）
      呈现纯黑白底，与 secondary 灰底拉开层级；若用中灰（gray-500），default 与
@@ -187,9 +205,15 @@
   --color-chip-session: #166534;
   --color-code-bg: #111418;
   --color-code-text: #d1d5db;
-  --color-chat-card-bg: #fafafa;
-  --color-chat-muted-bg: #f4f4f4;
+  /* 会话区「卡片」一律白卡（ZCode Light：panel/card/popover 同为 #ffffff，靠浮在
+     #f8f8f8 画布上分层）——过程组折叠条/诊断卡/代码块/表格不再各持一档灰
+     （旧 #fafafa/#f4f4f4 在白底上是六档散灰的来源）。暗色侧保持原阶梯不变。 */
+  --color-chat-card-bg: #ffffff;
+  --color-chat-muted-bg: #ffffff;
   --color-chat-control-bg: #ffffff;
+  /* 用户气泡是「白卡」不是灰块：浅色=panel 白卡浮在画布上；暗色由 dark 块覆盖为
+     accent 4% + muted 的提亮卡（#2f2f2f 浮在 #1a1a1a 上，维持既有暗色层级）。 */
+  --color-chat-bubble-bg: var(--color-bg-panel);
   --color-chat-table-bg: #ffffff;
   --color-chat-link: #4a4a4a;
   --space-1: 4px;
@@ -517,6 +541,9 @@
      深度序列 chrome < content < sticky（bg-app #121212），与浅色的白卡浮层同构。 */
   --color-bg-sidebar: #141414;
   --color-bg-panel: #1a1a1a;
+  /* 暗色画布 = panel：暗色一体性本就成立（整页同底、卡片提亮浮起），
+     画布不单独退档；var 引用让皮肤暗色块的 panel 覆盖自动传导进来。 */
+  --color-bg-page: var(--color-bg-panel);
   /* 浮层提一档（ZCode 深度阶梯同构：panel #202020 → card/menu #2b2b2b）：popover 相对
      panel 提亮 5%，菜单/弹窗永远浮在内容之上。用相对色而非写死 hex：graphite/sea-blue/
      warm-beige 皮肤不覆盖 popover/input，继承此处的相对派生可自动获得正确的浮层方向
@@ -592,6 +619,9 @@
   --color-chat-card-bg: #1a1a1a;
   --color-chat-muted-bg: #202020;
   --color-chat-control-bg: #171717;
+  /* 暗色用户气泡保持既有「提亮卡」：accent 4% + muted ≈ #2f2f2f，
+     与画布 #1a1a1a 拉开 Δ21，白卡模型的暗色对应物（card 浮于 page）。 */
+  --color-chat-bubble-bg: color-mix(in srgb, var(--color-accent) 4%, var(--color-bg-muted));
   --color-chat-table-bg: #1a1a1a;
   --color-chat-link: #d1d5db;
   --color-logo-green: #9ca3af;

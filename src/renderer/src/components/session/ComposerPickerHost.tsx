@@ -51,7 +51,16 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
 	});
 
 	const thinkingControl = (
-		<ThinkingLevelDropdown current={preference.currentThinkingLevel} levels={preference.thinkingLevels} open={props.picker === "thinking"} onOpenChange={(open) => (open ? props.onOpenThinking() : props.onClose())} disabled={props.thinkingDisabled} onPick={(level) => void preference.applyThinking(level)} />
+		<ThinkingLevelDropdown
+			current={preference.currentThinkingLevel}
+			levels={preference.thinkingLevels}
+			open={props.picker === "thinking"}
+			onOpenChange={(open) => (open ? props.onOpenThinking() : props.onClose())}
+			disabled={props.thinkingDisabled}
+			// keepOpen：滑条拖拽/刻度点选保持弹层打开（ZCode 强度条交互——调档后可继续微调），
+			// 关闭只走点外/Esc/再点触发器；Ctrl+T 快捷键循环走 applyThinking 默认关闭（弹层本就未开）。
+			onPick={(level) => void preference.applyThinking(level, { keepOpen: true })}
+		/>
 	);
 
 	return (

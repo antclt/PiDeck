@@ -55,11 +55,23 @@ function apiFetch(input: string, init?: RequestInit): Promise<Response> {
 	});
 }
 
-/** 轮询 /api/state 拿项目/会话/运行态（低频兜底，主数据流走 useChat）。 */
-export async function fetchState(): Promise<WebState> {
-	const res = await apiFetch("/api/state");
+/**
+ * 轮询 /api/state 拿项目/会话/运行态（低频兜底，主数据流走 useChat）。
+ *
+ * 条件请求：服务端给 ETag，未变化时回 304。返回 null 表示「和上次一样」，
+ * 调用方直接保持现有 state（不 setState → 不重建会话数组、不触发下游重算）。
+ * 载荷含全部会话投影（500+ 条约 228KB），这一步把空闲轮询的流量降到几十字节。
+ */
+let lastStateEtag: string | null = null;
+export async function fetchState(): Promise<WebState | null> {
+	const res = await apiFetch("/api/state", {
+		headers: lastStateEtag ? { "if-none-match": lastStateEtag } : undefined,
+	});
+	if (res.status === 304) return null;
 	if (!res.ok) throw new Error(`state ${res.status}`);
-	return res.json();
+	const etag = res.headers.get("etag");
+	lastStateEtag = etag ?? null;
+	return (await res.json()) as WebState;
 }
 
 /** 从 Web 端注册一个本地项目路径，返回项目记录。 */

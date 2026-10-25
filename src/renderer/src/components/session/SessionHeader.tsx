@@ -110,8 +110,10 @@ export function SessionHeader(props: SessionHeaderProps) {
 			ref={props.headerRef}
 			role="banner"
 			/* 普通模式：分屏 pane 的会话身份行（Tab 已外置）。
-         底部分隔线去掉：分屏身份标题下再叠一条线过于碎。 */
-			className="chat-header grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 bg-background px-3 py-1"
+         底部分隔线去掉：分屏身份标题下再叠一条线过于碎。
+         底色透明：直接透出 chat-pane 的画布档（--color-bg-page），
+         不再自铺 bg-background 白条——画布退档后白条会在会话页顶部形成色阶断层。 */
+			className="chat-header grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 bg-transparent px-3 py-1"
 		>
 			<div className="flex min-w-0 items-center gap-1.5">
 				{props.onExitSplit ? (

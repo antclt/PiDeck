@@ -1393,7 +1393,7 @@ export function GitPanel(props: GitPanelProps) {
 	);
 
 	return (
-		<div ref={panelRef} data-pane-animating={paneAnimating || undefined} className={`git-panel flex min-h-0 flex-col overflow-hidden bg-background text-foreground${layout === "full" ? " h-full" : ""}`} aria-label={t("git.sourceControl")}>
+		<div ref={panelRef} data-pane-animating={paneAnimating || undefined} className={`git-panel flex min-h-0 flex-col overflow-hidden bg-bg-page-raised text-foreground${layout === "full" ? " h-full" : ""}`} aria-label={t("git.sourceControl")}>
 			{layout !== "historyOnly" && (
 				<>
 					{/* 当前分支 + 切换下拉：无边框、宽度收窄，把空间留给仓库名和提交区。 */}
@@ -1566,12 +1566,14 @@ export function GitPanel(props: GitPanelProps) {
 												</ContextMenuItem>
 											</ContextMenuContent>
 										</ContextMenu>
-										<div className="flex items-stretch gap-2">
+										<div className="flex items-stretch gap-1.5">
+											{/* AI 摘要钮与「提交」同组同高（32px）：outline 白卡与上方提交框同语言，
+											早前 ghost 裸图标与实心主按钮并排显得割裂（用户反馈不统一） */}
 											<Button
 												type="button"
 												variant="outline"
-												size="icon-sm"
-												className="min-w-8 text-text-secondary hover:text-text-primary"
+												size="icon"
+												className="size-8 shrink-0 text-text-secondary shadow-none hover:text-text-primary"
 												title={commitGenLoading ? t("git.generateCommitMessageProgress") : t("git.generateCommitMessage")}
 												aria-label={t("git.generateCommitMessage")}
 												disabled={commitGenLoading || mutating}

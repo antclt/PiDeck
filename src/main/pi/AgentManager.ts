@@ -1965,7 +1965,11 @@ export class AgentManager {
 		const runtime = this.requireRuntime(input.agentId);
 		const trimmed = input.message.trim();
 		const hasImages = input.images && input.images.length > 0;
-		const agentMessage = input.agentMessage?.trim() || trimmed || "Describe this image.";
+		// 纯图片发送（无文字）时 message 就是空字符串：pi 会把空文本与图片一起写进用户
+		// 消息，各 provider 自行丢弃空 text block（anthropic / openai 均按 text.trim()
+		// 过滤），模型只看到图片。禁止注入 "Describe this image." 之类的兜底文案
+		// （Issue #404）——那是用户没写过的指令，会让模型改按「描述图片」回答。
+		const agentMessage = input.agentMessage?.trim() || trimmed;
 		// 允许只有图片没有文字的情况发送
 		if (!trimmed && !hasImages) {
 			return {

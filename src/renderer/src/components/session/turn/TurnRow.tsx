@@ -543,11 +543,10 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 						{showTurnModel && turnModel && (
 							/* 本轮实际使用的模型（provider + modelId）跟在耗时后面：同一会话内用户会频繁换模型，
 							   只在输入框显示当前模型不足以回看历史轮；流式中不显示，回复结束才落定。
-							   做成小标签而不是同号纯文本：左边耗时是读数（text-body + 等宽数字），
-							   模型名是名字，同色同号时两段会连成一句「2m18s global:xxx」读不断。
-							   模型名长短不一（如 global:deepseek-v4.1-flash），限宽截断 + title 给全量 provider/model，
-							   不让长名字把行末撑开或换行。 */
-							<span className="ml-1 min-w-0 max-w-[16rem] truncate rounded-sm bg-muted/60 px-1.5 py-0.5 text-chat-detail font-medium leading-none text-muted-foreground" title={`${turnModel.provider}/${turnModel.modelId}`} data-turn-model={turnModel.modelId}>
+							   保留等宽字体与限宽截断以区别于耗时读数（text-body + 等宽数字），但去掉灰底
+							   ——每轮都有的元信息 chip 会给时间线添碎（2026-10 去底，ZCode 模型名即裸暗字）。
+							   title 给全量 provider/model。 */
+							<span className="ml-1 min-w-0 max-w-[16rem] truncate font-mono text-chat-detail leading-none text-text-tertiary" title={`${turnModel.provider}/${turnModel.modelId}`} data-turn-model={turnModel.modelId}>
 								{turnModel.modelId}
 							</span>
 						)}

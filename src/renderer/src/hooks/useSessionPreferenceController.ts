@@ -66,7 +66,8 @@ export type SessionPreferenceController = {
 	canClearModel: boolean;
 	clearModel: () => Promise<void>;
 	/** 选择器选中：应用思考档位 */
-	applyThinking: (level: string) => Promise<void>;
+	/** keepOpen：滑条/刻度点选时保持弹层打开（ZCode 强度条交互），Ctrl+T 循环等走默认关闭。 */
+	applyThinking: (level: string, opts?: { keepOpen?: boolean }) => Promise<void>;
 	/** 快捷键：收藏内环绕切换模型 */
 	cycleModel: (direction?: CycleDirection) => Promise<void>;
 	/** 快捷键：当前模型可用档位内环绕切换思考强度 */
@@ -337,7 +338,8 @@ export function useSessionPreferenceController(options: {
 		}
 	}
 
-	async function applyThinking(level: string) {
+	async function applyThinking(level: string, opts?: { keepOpen?: boolean }) {
+		const keepOpen = opts?.keepOpen ?? false;
 		// 引导页只有 renderer-only 虚拟会话，尚无 catalog record 可更新。先保存本次
 		// 显式选择，底栏关闭选择器后立即从同一偏好重绘；首次发送创建真实会话时再带入。
 		if (!record) {
@@ -346,7 +348,9 @@ export function useSessionPreferenceController(options: {
 			} catch {
 				// localStorage 不可用时静默；首次创建会话会回退到配置默认档位。
 			}
-			onApplied();
+			// keepOpen（滑条）下没有关闭重挂载来重读 localStorage，bump 版本戳强制底栏刷新
+			if (keepOpen) state.bumpWelcomePreference();
+			if (!keepOpen) onApplied();
 			return;
 		}
 		const handle = currentHandle();
@@ -376,7 +380,7 @@ export function useSessionPreferenceController(options: {
 				});
 				if (isCurrent()) state.upsertSession(updated);
 			}
-			if (isCurrent()) onApplied();
+			if (isCurrent() && !keepOpen) onApplied();
 		} catch (error) {
 			if (!isCurrent()) return;
 			// 附带 debugDetails：DSH setThinking 的 selectModel 被 host 拒绝（如当前模型
@@ -566,7 +570,7 @@ export function useSessionPreferenceController(options: {
 		applyModel: (model) => applyModelRef.current(model),
 		canClearModel,
 		clearModel,
-		applyThinking: (level) => applyThinkingRef.current(level),
+		applyThinking: (level, opts) => applyThinkingRef.current(level, opts),
 		cycleModel,
 		cycleThinking,
 		restartTarget: restartIntentRef.current?.isCurrent() ? restartTarget : null,

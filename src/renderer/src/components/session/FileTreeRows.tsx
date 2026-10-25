@@ -74,7 +74,9 @@ function fileRowStyle(depth: number): CSSProperties {
 /* 树行用原生 button，不用 shadcn Button：后者基类强制子 SVG size-4，
    会压掉 Seti --file-type-icon-size 与 lucide size，靠 ! 反压是补丁。
    2027-01：hover 高亮加与侧栏行同款的过渡动画（transition-[background-color,
-   border-color,box-shadow] duration-base），移入文件列表时背景平滑渐变而非瞬切。 */
+   border-color,box-shadow] duration-base），移入文件列表时背景平滑渐变而非瞬切。
+   hover 用 bg-muted（白面板上 Δ11 轻档）：抽屉底是白面板，更深的 hover 档
+   （#eaeaea/#e4e4e4）偏重，用户裁决工具面灰底一律取轻（2026-10）。 */
 const FILE_ROW_BUTTON_CLASS =
 	"file-node-row flex h-[28px] min-h-0 w-full items-center justify-start gap-1.5 rounded-sm border-0 bg-transparent py-0 text-left text-body font-normal text-foreground transition-[background-color,border-color,box-shadow] duration-base hover:bg-muted active:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset relative";
 
@@ -209,7 +211,7 @@ const DirectoryRow = memo(function DirectoryRow(props: FileTreeRowProps) {
 				<CollapsibleTrigger asChild>
 					<button
 						type="button"
-						className={cn("directory group", FILE_ROW_BUTTON_CLASS, "rounded-none", stickyRow && "sticky z-10 bg-background data-[file-sticky-last=true]:shadow-sm", isDragOver && "bg-muted ring-1 ring-border")}
+						className={cn("directory group", FILE_ROW_BUTTON_CLASS, "rounded-none", stickyRow && "sticky z-10 bg-bg-page-raised data-[file-sticky-last=true]:shadow-sm", isDragOver && "bg-muted ring-1 ring-border")}
 						data-file-sticky-level={stickyRow ? depth : undefined}
 						style={stickyRow ? { ...rowStyle, top: `${FILE_TOOLBAR_HEIGHT_PX + depth * FILE_ROW_HEIGHT_PX}px` } : rowStyle}
 						title={gitStatusLabel ? `${node.relativePath}\n${gitStatusLabel}` : node.relativePath}

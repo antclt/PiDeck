@@ -558,7 +558,24 @@ function startStream(userText, options = {}) {
 								"",
 								"$$\\int_0^1 x^2 \\, dx = \\frac{1}{3}$$",
 							].join("\n")
-						: `Mock 回复：「${userText.slice(0, 40)}」流式渲染验证完成。`;
+						: userText.includes("HDEMO")
+							? [
+									"# 一级标题：标题不比正文响",
+									"",
+									"二级与三级标题靠字重分层，不靠字号：",
+									"",
+									"## 二级标题：+2px 刻度",
+									"",
+									"### 三级标题：同字号 semibold",
+									"",
+									"#### 四级标题：同字号 semibold",
+									"",
+									"正文段落：验证标题压平后的行内代码 `typecheck` 缩档与正文 16px 的比例关系。",
+									"",
+									"- 列表项一",
+									"- 列表项二",
+								].join("\n")
+							: `Mock 回复：「${userText.slice(0, 40)}」流式渲染验证完成。`;
 	const chunkCount = slow ? 18 : burst ? 24 : 12;
 	const per = Math.max(1, Math.ceil(reply.length / chunkCount));
 	streamChunks = [];
