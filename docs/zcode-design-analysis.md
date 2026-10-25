@@ -246,3 +246,19 @@ Phase 9 后用户指出右上角仍有色差（截图：窗口控制条/抽屉 r
 - **keepOpen 语义**：applyThinking 增加 opts.keepOpen——滑条/刻度点选保持弹层打开（调档后可继续微调，ZCode 同款），Ctrl+T 循环等走默认关闭。关闭只走点外/Esc/再点触发器。
 - **草稿路径刷新**：无 record 的引导页把档位写 localStorage，keepOpen 下没有关闭重挂载来重读——useSessionPreferenceState 增加 welcomePreferenceVersion 版本戳，bump 强制底栏重读（运行中会话走 record upsert 天然刷新）。
 - e2e 交互矩阵实证：滚轮✓不关、拖拽✓应用+保持打开+标签同步（off→xhigh/max）、刻度点击✓、thumb 原地点击✓跳过 RPC、Esc✓关闭。
+
+### 13.2 过程行灰底 chip 去底（时间线碎条治理）
+
+用户截图反馈过程层「灰色背景条多、影响质感」：真实会话每轮 6-10 条工具行，命令/路径预览 chip（5% 墨水底）连成片，把时间线切成碎条。ZCode 工具行的命令即裸等宽暗字。两处去底：
+
+- 工具行作用对象预览（ToolCallComponents）：`5% 墨水 chip` → 裸 `font-mono text-text-faint`（比 tertiary 再淡一档，过程层退后）；行 tooltip 仍承接全文。toolCallComponents 钉值同步（doesNotMatch 旧 bg）。
+- 轮次模型徽章（TurnRow `data-turn-model`）：`bg-surface-ink chip` → 裸等宽 tertiary 暗字；等宽字体仍与耗时读数区分。
+- 保留的：散文行内代码（surface-ink 5%，GitHub 惯例的代码 affordance）、`.tool-card-kind` 工具身份色 chip（语义身份非灰底）、执行过程折叠条（白卡）。
+
+### 13.3 执行过程胶囊条内灰底盒去底
+
+用户继续反馈「执行过程显示块里好几个 logo 带灰色背景」。像素采样其截图定位：胶囊条（execution-summary-toggle）内部前导图标盒 + 两个统计 chip 都是 5% 墨水底的小灰盒，一条 bar 上连着三个。两处去底：
+
+- `.execution-summary-icon`：去 border + surface-ink 底 → 裸图标（22px 网格保留对齐），与展开后过程行图标同语言。
+- `.execution-summary-stat`：去 border + surface-ink 底 → 裸等宽统计数字；`is-warning`/`is-danger` 语义档保留各自色底（语义状态非灰底）。
+- 既有红记录（改动文件临时还原基线复跑核实）：process-group-display「同行文本共基线」NaN 测量失败，与本批无关。

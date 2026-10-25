@@ -171,8 +171,9 @@ test("tool card keeps status pills only for non-default states; done rows go sil
 test("tool trigger shows verb label with mono object chip; details move to row tooltip", () => {
 	// 主标签走 toolPhrase 的动词（不再直接渲染原始工具名）
 	assert.match(toolCalls, /isAskCard \? t\("ask\.toolName"\) : phrase\.verb/);
-	// chip：等宽 + 极浅底 + 单行截断，内容是作用对象（缺省回退 subtitle）
-	assert.match(toolCalls, /min-w-0 flex-\[0_1_auto\] truncate rounded-\[var\(--radius-xs\)\] bg-\[color:color-mix\(in_srgb,var\(--color-text-primary\)_5%,transparent\)\] px-1\.5 font-mono text-chat-detail text-text-tertiary/);
+	// 作用对象：裸等宽暗字（2026-10 去灰底——每轮命令 chip 的成片灰底把时间线切碎，ZCode 同款裸字），单行截断
+	assert.match(toolCalls, /min-w-0 flex-\[0_1_auto\] truncate font-mono text-chat-detail text-text-faint/);
+	assert.doesNotMatch(toolCalls, /bg-\[color:color-mix\(in_srgb,var\(--color-text-primary\)_5%,transparent\)\]/);
 	assert.match(toolCalls, /title=\{phrase\.object \|\| subtitle\}/);
 	// 行 tooltip 承接撤下的信息：工具名 + 参数摘要 + 完成耗时
 	assert.match(toolCalls, /const rowTitleParts = \[isSkillRead \? `skill:\$\{skillName\}` : toolName, subtitle\]\.filter\(Boolean\);/);

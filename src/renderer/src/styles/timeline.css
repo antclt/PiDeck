@@ -194,9 +194,7 @@
   width: 22px;
   height: 22px;
   place-items: center;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: 6px;
-  background: var(--color-surface-ink);
+  /* 裸图标（2026-10 去灰底盒）：胶囊条里不再有实心小盒，与展开后的过程行图标同语言 */
   color: var(--color-text-tertiary);
 }
 .execution-summary-chevron {
@@ -231,10 +229,8 @@
   flex-shrink: 0;
   align-items: center;
   gap: 3px;
-  padding: 1px 5px;
-  border: 1px solid color-mix(in srgb, var(--color-border-subtle) 82%, transparent);
-  border-radius: 6px;
-  background: var(--color-surface-ink);
+  /* 裸数字/图标（2026-10 去灰底）：胶囊条里 icon 盒+统计 chip 曾有 5% 墨水底，
+     一条 bar 上连着三个灰盒很碎；中性统计退为裸字，警告/危险档保留语义色底。 */
   color: var(--color-text-tertiary);
   font-size: var(--font-size-chat-detail);
   line-height: var(--line-height-chat-detail);

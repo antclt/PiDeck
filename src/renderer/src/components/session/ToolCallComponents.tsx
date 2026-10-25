@@ -354,9 +354,10 @@ export const ToolCard = memo(function ToolCard(props: {
 									| {askCard.question}
 								</span>
 							) : !isSkillRead && (phrase.object || subtitle) ? (
-								// 作用对象预览 chip（学 ZCode）：等宽 + 极浅底 + 单行截断；
-								// 长命令/路径的完整内容在行 tooltip 里，chip 只做扫读锚点。
-								<span className="min-w-0 flex-[0_1_auto] truncate rounded-[var(--radius-xs)] bg-[color:color-mix(in_srgb,var(--color-text-primary)_5%,transparent)] px-1.5 font-mono text-chat-detail text-text-tertiary" title={phrase.object || subtitle}>
+								// 作用对象预览（ZCode 工具行同款）：裸等宽暗字，无底色——过程行每轮
+								// 都有命令/路径，成片的灰底 chip 会把时间线切成碎条（2026-10 去底）。
+								// 长命令/路径的完整内容在行 tooltip 里，文本只做扫读锚点。
+								<span className="min-w-0 flex-[0_1_auto] truncate font-mono text-chat-detail text-text-faint" title={phrase.object || subtitle}>
 									{phrase.object || subtitle}
 								</span>
 							) : null}
