@@ -1566,12 +1566,14 @@ export function GitPanel(props: GitPanelProps) {
 												</ContextMenuItem>
 											</ContextMenuContent>
 										</ContextMenu>
-										<div className="flex items-stretch gap-2">
+										<div className="flex items-stretch gap-1.5">
+											{/* AI 摘要钮与「提交」同组同高（32px）：outline 白卡与上方提交框同语言，
+											早前 ghost 裸图标与实心主按钮并排显得割裂（用户反馈不统一） */}
 											<Button
 												type="button"
-												variant="ghost"
-												size="icon-sm"
-												className="min-w-8 text-text-secondary hover:text-text-primary"
+												variant="outline"
+												size="icon"
+												className="size-8 shrink-0 text-text-secondary shadow-none hover:text-text-primary"
 												title={commitGenLoading ? t("git.generateCommitMessageProgress") : t("git.generateCommitMessage")}
 												aria-label={t("git.generateCommitMessage")}
 												disabled={commitGenLoading || mutating}

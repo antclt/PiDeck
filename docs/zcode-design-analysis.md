@@ -270,3 +270,7 @@ Phase 9 后用户指出右上角仍有色差（截图：窗口控制条/抽屉 r
 - 分段 Tab 指示条：`bg-background shadow-sm dark:bg-bg-active` → **`bg-bg-active`**（明暗统一 #e4e4e4 档）——与选中会话行（bg-active，像素实测同为 #E4E4E4）同一选中语言，正合 foundation「侧栏选中 Δ12 ≈ ZCode 选中墨量 4.7%」纪律；暗色不变。
 - 查看更多/收起/agent-more 行：utilities 层加 `.chat-list-pane .session-more-btn/.session-more-row/.agent-more-row { background-color: transparent }`（双类 (0,2,0) 压过组件层默认皮），侧栏行回归「裸行 + hover 才 bg-bg-hover」纪律；壁纸模式语义不变。
 - e2e 探针实证：查看更多 computed bg 白→透明；选中会话行 #E4E4E4 保持。
+
+### 13.5 Git 摘要钮与提交钮成组统一
+
+用户反馈「提交摘要按钮和生成摘要不统一」：AI 摘要钮（ghost 裸图标 28px）与「提交」主按钮（实心 32px）并排，高度与形态都割裂。统一为：摘要钮 outline 白卡 + `size-8`（32px 与提交钮同高，shadow-none），与上方提交信息框（白卡+边框）同一语言；两钮 gap 1.5 成一组，主次分明（辅助=outline 图标、主动作=primary）。
