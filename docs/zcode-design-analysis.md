@@ -1,6 +1,6 @@
 # ZCode 视觉质感分析与反哺计划
 
-> 状态：**Phase 1 已落地**（2026-10，d4e60c97c / 730579b0b / 6a45b179f）；**Phase 2 已落地**（2026-10，31792faf0，边框墨水化 + 圆角降档 + 语义色审计）；**Phase 3 已落地**（2026-10，25e4e7284，忙碌色结论 + 阴影降档）；**Phase 4 已落地**（2026-10，字号/等宽纪律 + 守卫测试）；**Phase 5 已落地**（2026-10，会话页画布档 + 白卡模型 + 墨水罩染表面，见 §七）；**Phase 6 已落地**（2026-10，右抽屉 chrome 档对称，见 §八）；后续按「改到哪，旧迁新到哪」增量推进，不做 big-bang。
+> 状态：**Phase 1 已落地**（2026-10，d4e60c97c / 730579b0b / 6a45b179f）；**Phase 2 已落地**（2026-10，31792faf0，边框墨水化 + 圆角降档 + 语义色审计）；**Phase 3 已落地**（2026-10，25e4e7284，忙碌色结论 + 阴影降档）；**Phase 4 已落地**（2026-10，字号/等宽纪律 + 守卫测试）；**Phase 5 已落地**（2026-10，会话页画布档 + 白卡模型 + 墨水罩染表面，见 §七）；**Phase 6 已落地**（2026-10，右抽屉表面定版：白面板维持 + 工具 pill 降档，chrome 实验经用户裁决回退，见 §八）；后续按「改到哪，旧迁新到哪」增量推进，不做 big-bang。
 > 分析来源：`zai-org/ZCode`（Apache-2.0，main 分支 2026-10 浅克隆）。核心文件：`DESIGN.md`（设计宪法）、`packages/ui/src/styles.css`（Zai Light/Dark 主题值）。
 
 ## 一、ZCode 质感的六个机制（带证据）
@@ -171,13 +171,15 @@ sidebar #F0F0F0 → 画布 #F8F8F8 → 罩染弱表面 #F1F1F1（3% 落画布）
 - `tests/themeContrast.test.mjs`：`resolve()` 支持 `color-mix(var(--a) N%, var(--b))` 双 var 派生；FACES 补 `bg-page`（会话正文最长阅读底进矩阵）。
 - `e2e/visual-tune-session.spec.ts`：会话区明暗截图巡检（手动跑，不进门禁），输出 test-results/visual-tune/。
 
-## 八、Phase 6 变更明细（右抽屉 chrome 档对称）
+## 八、Phase 6 变更明细（右抽屉表面定版：chrome 实验回退 + 工具 pill 降档）
 
-全区域审计（`e2e/visual-tune-surfaces.spec.ts`，明暗 × 文件树/Git/浏览器/设置/配置/公告）发现：会话页落画布档后，右抽屉整体仍是纯白（`bg-background`），比会话画布 #f8f8f8 还亮一档，亮度左→右递增、左右不对称；而 foundation 注释明写设计意图「侧栏/右抽屉 #f0f0f0 同为 chrome 档」。暗色侧抽屉=bg-app 本就近似对称，问题集中在浅色。
+全区域审计（`e2e/visual-tune-surfaces.spec.ts`，明暗 × 文件树/Git/浏览器/设置/配置/公告）曾把右抽屉统一退到 chrome 档（=sidebar #f0f0f0）求左右对称；**用户裁决回退**（2026-10）：抽屉是内容型工具面，白面板上无色阶噪声更符合预期，粘性目录行/吸顶工具行的白底在灰面板上反而变成补丁、「乱七八糟」。最终态：
 
-- **抽屉统一 chrome 档（=sidebar token，浅 #f0f0f0 / 暗 #141414，皮肤自动跟随）**：`.detail-drawer` 根、`.drawer-activity-rail`、`.drawer-header`（会话历史顶栏）、文件树吸顶工具行（WorkspaceSurface）、GitPanel 根 + `--git-panel-bg/hover/active`（workspace.css token 块）、`.browser-panel`（surfaces.css）。落地后三段结构：左 #F0F0F0 | 会话画布 #F8F8F8 | 右 #F0F0F0（像素实测），暗色 #141414 | #1A1A1A | #141414。
-- **白卡浮 chrome**：Git 提交输入框（--git-input-bg=panel）、浏览器地址栏（bg-bg-input）、会话历史卡（bg-panel）维持白卡，与白卡模型同构；浏览器 webview 视口自带白底，形成「chrome 灰 + 视口白」经典结构。
-- **hover 纪律修正**：文件树行/文件搜索行 hover 从 `bg-muted`（#f4f4f4，比 chrome 还亮=反向变亮不可见）改为 `bg-bg-hover`/`active:bg-bg-active`——与 foundation 侧栏行纪律一致（tests/lightNeutralBackground 同源规则）；`drawerCompositorAnimation` 钉值同步。
-- 壁纸模式：`--color-bg-sidebar` 本就在 BG_TOKENS，抽屉随注入转半透明；utilities 层既有 chrome 透明化覆盖（drawer-rail/git-panel/browser-panel/drawer-header）特异性更高继续生效。
-- 弹窗审计结论：设置/配置管理/公告中心为「白弹窗 + 45% 遮罩 + 灰导航/白内容」结构，无散灰断阶，不动。
+- **右抽屉维持白面板**（bg-background / --color-bg-panel）：抽屉根（.detail-drawer）、活动栏（.drawer-activity-rail）、会话历史顶栏（.drawer-header）、文件树吸顶工具行、GitPanel 根与 `--git-panel-bg/hover/active`（workspace.css）、`.browser-panel`（surfaces.css）全部回退原值。
+- **会话画布档不受影响**：chat-pane 仍铺 `--color-bg-page`（#f8f8f8）。最终三段 = 侧栏 #F0F0F0 | 会话 #F8F8F8 | 右抽屉 #FFFFFF——轻微不对称是用户接受的取舍。
+- **工具按钮常驻灰 pill 降档**（本轮唯一保留的新改动方向：灰底别太深）：文件树工具行的切换态 pill（折叠包/搜索激活，`bg-accent` #e4e4e4 Δ27 偏深且常驻可见）降为 `bg-muted`（#f4f4f4 Δ11）；hover 反馈维持全局 ghost 行为不变。
+- 文件树行/文件搜索行 hover 回退 `bg-muted`（白底上轻档可见；chrome 实验期的 bg-bg-hover 深档一并回退）。
+- `drawerCompositorAnimation` 钉值回退 hover:bg-muted；foundation `--color-bg-sidebar` 注释同步（右抽屉不再声明为 chrome 档）。
+- 壁纸模式不受影响：BG_TOKENS 与 utilities 层透明化覆盖均按 token 名生效，回退后照常。
+- 弹窗审计结论不变：设置/配置管理/公告中心为「白弹窗 + 45% 遮罩 + 灰导航/白内容」结构，无散灰断阶，不动。
 - 既有红记录（非本批回归，未顺手修）：drawer.spec.ts / browser-tabs.spec.ts 断言 browser tab 默认在 rail 可见，与 pinnedPanels 重构后的现实不符。

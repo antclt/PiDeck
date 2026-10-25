@@ -92,8 +92,10 @@
   /* 默认浅色外观以纯白为基底；灰色只用于控件表面、hover 和选中层级。 */
   --color-bg-app: #ffffff;
   /* 主次分明（对齐 ZCode 排版，docs/zcode-design-analysis.md）：chrome 退一档——
-     侧栏/右抽屉 #f0f0f0（ZCode sidebar 同值），正文面板保持纯白，
+     侧栏 #f0f0f0（ZCode sidebar 同值），正文面板保持纯白，
      内容浮在 chrome 之上，焦点自然落在会话区。
+     右抽屉曾试过同步退 chrome 档，用户裁决回退白面板（2026-10，docs §八）：
+     抽屉是内容型工具面，白底 + 轻灰 pill 更符合预期，灰底别太深。
      皮肤（fresh-green 等）各自定制更深的 sidebar 分层，不受此处影响。 */
   --color-bg-sidebar: #f0f0f0;
   --color-bg-panel: #ffffff;

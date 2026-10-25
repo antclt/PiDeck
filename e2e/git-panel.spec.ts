@@ -50,8 +50,7 @@ test("git panel: status -> diff -> stage -> commit", async ({ window }) => {
 	await expect(window.locator(".detail-drawer")).toHaveAttribute("data-open", "true", { timeout: 5000 });
 	await window.locator('[data-testid="drawer-rail-git"]').click();
 	// GitPanel 新组件（带 aria-label）与旧 GitDrawerHost 都带 .git-panel class，
-	// 用 aria-label 精确定位新面板；根底色已改 bg-bg-sidebar（抽屉 chrome 档），
-	// 不再用 bg 类区分新旧。
+	// 用 aria-label 精确定位新面板（旧壳无 aria-label），不用 bg 类区分新旧。
 	const panel = window.locator(".git-panel[aria-label]");
 	await expect(panel).toBeVisible({ timeout: 15_000 });
 	// 分支标签反映真实仓库状态

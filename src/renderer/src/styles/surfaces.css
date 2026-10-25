@@ -324,9 +324,7 @@
   flex-direction: column;
   height: 100%;
   overflow: hidden;
-  /* 抽屉 chrome 档（=侧栏 #f0f0f0）：浏览器 chrome（标签条/地址栏行）与文件/Git 面板同底；
-     webview 内容区自带白底，形成「chrome 灰 + 视口白」的经典浏览器结构。 */
-  background: var(--color-bg-sidebar);
+  background: var(--color-bg-panel);
 }
 
 /* 标签栏：tab 自身外观走 Tailwind（对齐中间栏文件 tab），此处只保留原生关闭钮 */

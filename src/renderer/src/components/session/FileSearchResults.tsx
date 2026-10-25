@@ -125,7 +125,7 @@ function FileContentRow(props: { hit: FileContentSearchHit; onViewFile?: (path: 
 	return (
 		<button
 			type="button"
-			className="file-node-row flex w-full flex-col items-start gap-0.5 rounded-sm border-0 bg-transparent px-2 py-1 text-left text-body font-normal text-foreground transition-[background-color] duration-base hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
+			className="file-node-row flex w-full flex-col items-start gap-0.5 rounded-sm border-0 bg-transparent px-2 py-1 text-left text-body font-normal text-foreground transition-[background-color] duration-base hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
 			title={`${hit.relativePath}:${hit.line}`}
 			onClick={() => props.onViewFile?.(hit.path)}
 			onDoubleClick={(event) => {
@@ -166,7 +166,7 @@ function FileSearchRow(props: { item: FileSearchResult; matchIndex: number; matc
 		<button
 			type="button"
 			className={cn(
-				"file-node-row inline-flex h-[28px] w-full items-center justify-start gap-1.5 rounded-sm border-0 bg-transparent px-2 py-0 text-left text-body font-normal text-foreground transition-[background-color] duration-base hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
+				"file-node-row inline-flex h-[28px] w-full items-center justify-start gap-1.5 rounded-sm border-0 bg-transparent px-2 py-0 text-left text-body font-normal text-foreground transition-[background-color] duration-base hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
 			)}
 			title={item.relativePath}
 			onClick={() => props.onViewFile?.(item.path)}

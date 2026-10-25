@@ -83,7 +83,7 @@ export function DrawerContent(props: {
 		<>
 			{/* 文件抽屉：去掉「文件 + ×」顶栏，关闭改走右侧 rail；会话历史仍保留顶栏。 */}
 			{props.panel !== "files" && title && (
-				<div className="drawer-header flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border/40 bg-bg-sidebar px-3">
+				<div className="drawer-header flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border/40 bg-background px-3">
 					<strong className="truncate text-sm font-semibold text-foreground">{title}</strong>
 					<div className="drawer-header-actions flex shrink-0 items-center gap-1">
 						<Button type="button" variant="ghost" size="icon-sm" className="inline-grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground" title={t("drawer.closePanel")} aria-label={t("drawer.closePanel")} onClick={props.onClose}>
@@ -284,9 +284,8 @@ function FilesPanel(props: {
 			onKeyDown={handlePanelKeyDown}
 			onContextMenu={handlePanelContextMenu}
 		>
-			{/* 工具行贴顶，目录紧接其下；无外圈留白，避免滚动文件名从吸顶区上沿露出。
-			    bg-bg-sidebar：吸顶工具行随抽屉 chrome 档，滚动内容从底下穿过时无白色补丁。 */}
-			<div data-file-tree-toolbar="" className="panel-action-row flex h-7 min-w-0 shrink-0 items-center justify-end gap-1 border-b border-border/40 bg-bg-sidebar px-2 text-xs text-muted-foreground sticky top-0 z-20">
+			{/* 工具行贴顶，目录紧接其下；无外圈留白，避免滚动文件名从吸顶区上沿露出。 */}
+			<div data-file-tree-toolbar="" className="panel-action-row flex h-7 min-w-0 shrink-0 items-center justify-end gap-1 border-b border-border/40 bg-background px-2 text-xs text-muted-foreground sticky top-0 z-20">
 				<div className="panel-action-buttons flex min-w-0 items-center gap-0.5">
 					{/* 文件树排序：方向切换与维度选择合并在一个图标菜单内（默认按名称·升序） */}
 					<FileSortControl sortMode={sortMode} sortDirection={sortDirection} onSortModeChange={setSortMode} onToggleDirection={() => setSortDirection((d) => (d === "asc" ? "desc" : "asc"))} />
@@ -295,7 +294,7 @@ function FilesPanel(props: {
 						type="button"
 						variant="ghost"
 						size="icon-sm"
-						className={cn("icon-only inline-grid size-6 place-items-center rounded-md", compactPackages ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground")}
+						className={cn("icon-only inline-grid size-6 place-items-center rounded-md", compactPackages ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground")}
 						onClick={() => setCompactPackages((v) => !v)}
 						title={t("drawer.compactPackages")}
 						aria-label={t("drawer.compactPackages")}
@@ -309,7 +308,7 @@ function FilesPanel(props: {
 							type="button"
 							variant="ghost"
 							size="icon-sm"
-							className={cn("icon-only inline-grid size-6 place-items-center rounded-md", searchOpen ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground")}
+							className={cn("icon-only inline-grid size-6 place-items-center rounded-md", searchOpen ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground")}
 							onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
 							title={t("drawer.fileSearch")}
 							aria-label={t("drawer.fileSearch")}
