@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 0afb55bbb6dc4ae828a9af6c0945960d877613f1576881a38f2ecc3eec11a2cb（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 2ec743f5e677548f55535b893c5fca3212ae2e83e506cbe0774d444a06d5b9c4（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4679,6 +4679,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.sectionEditors": "外部編輯器",
 	"settings.scrollToLatestOnSend": "傳送訊息後自動滾動到最新",
 	"settings.scrollToLatestOnSendDesc": "預設開啟。關閉後傳送時保持當前滾動位置：上翻看歷史時不會被拽回底部；停在底部時仍會跟隨新回覆增長。",
+	"settings.sidebarStickyGroupHeaders": "側欄分組標題欄凍結",
+	"settings.sidebarStickyGroupHeadersDesc": "開啟後，側欄「聊天」「專案」分組標題欄在列表滾動時固定在頂部，不隨內容滾走。",
 	"settings.contentWidthPct": "聊天內容寬度",
 	"settings.contentWidthPctDesc": "訊息、輸入框與待發送共用同一寬度。100% 接近全寬（仍留 12px 邊距）。",
 	"settings.sessionStatusPlacement": "會話狀態位置",
