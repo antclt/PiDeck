@@ -274,3 +274,7 @@ Phase 9 后用户指出右上角仍有色差（截图：窗口控制条/抽屉 r
 ### 13.5 Git 摘要钮与提交钮成组统一
 
 用户反馈「提交摘要按钮和生成摘要不统一」：AI 摘要钮（ghost 裸图标 28px）与「提交」主按钮（实心 32px）并排，高度与形态都割裂。统一为：摘要钮 outline 白卡 + `size-8`（32px 与提交钮同高，shadow-none），与上方提交信息框（白卡+边框）同一语言；两钮 gap 1.5 成一组，主次分明（辅助=outline 图标、主动作=primary）。
+
+### 13.6 Git 面板分支筛选触发器去白底
+
+用户反馈「源代码管理图」区头的「全部」分支筛选钮突出：shadcn SelectTrigger 基类自带 `bg-bg-input`（白底）+ `shadow-xs`，GitCompactFilter 只覆盖了 border 色——白 chip 浮在 chrome 面板头上。触发器补 `bg-transparent shadow-none`，回归「裸触发器 + hover 才浮起」的筛选钮语言（与文件树/Git 各区头一致）；两个 GitCompactFilter 实例（分支筛选/多仓库切换）同批生效。
