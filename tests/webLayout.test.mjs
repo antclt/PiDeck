@@ -279,16 +279,21 @@ test("Web destructive confirmations both use AlertDialog, never window.confirm",
 	assert.match(webChatApp, /AlertDialog open=\{deleteConfirmId != null\}/);
 });
 
-// 回归（Web 走查 #8）：侧栏「更多会话」此前一次渲染 407 行（258ms、DOM 4363 节点）。
-// 改成首屏窗口 + 滚动/点击增量，避免大 catalog 打开即卡顿。
-test("Web sidebar renders session rows through an incremental window", () => {
+// 回归（Web 走查 #8 → 2026-10 修正）：侧栏「更多会话」一度一次渲染 407 行（258ms、DOM 4363 节点），
+// 改成首屏窗口后又走了另一头——IntersectionObserver 哨兵在移动端抽屉首次布局就命中 rootMargin，
+// 展开大项目被连续补页（实测「聊天」115 条展开即 57 行），体感等同「一打开全都在」。
+// 现在语义对齐桌面端「最近会话」：首页 10 条 + 显式「查看更多（剩余 N）」每页 +20 + 「收起」，
+// 不随滚动自动加载；分页窗口由 webSidebarPaging 纯函数计算（见 webSidebarPaging.test.mjs）。
+test("Web sidebar renders session rows through an explicit paged window", () => {
 	assert.doesNotMatch(webSidebar, /const visible = showAll \? sessions : sessions\.slice\(0, 5\);/, "one-shot full render is the regression");
-	assert.match(webSidebar, /const SESSION_PAGE_STEP = 50;/);
-	assert.match(webSidebar, /const COLLAPSED_SESSION_LIMIT = 5;/);
-	assert.match(webSidebar, /const visible = sessions\.slice\(0, Math\.min\(rendered, sessions\.length\)\);/);
-	// 哨兵既是 IntersectionObserver 目标又是按钮：观察器不可用时仍能手动加载
-	assert.match(webSidebar, /new IntersectionObserver\(/);
-	assert.match(webSidebar, /ref=\{sentinelRef\}/);
+	// 首页 10 条来自纯策略模块，组件不再自己存 5/50 常量
+	assert.match(webSidebar, /import \{[^}]*resolveSidebarWindow[^}]*\} from "\.\/webSidebarPaging";/);
+	assert.match(webSidebar, /const window_ = resolveSidebarWindow\(\{ total: sessions\.length, requested, searching \}\);/);
+	assert.match(webSidebar, /onClick=\{\(\) => setRequested\(growSidebarWindow\(window_\.visibleCount\)\)\}/);
+	assert.match(webSidebar, /data-testid="web-sidebar-collapse-sessions"/);
+	// 自动补页是本次要修掉的行为：哨兵观察器不许再出现在侧栏会话列表里
+	assert.doesNotMatch(webSidebar, /new IntersectionObserver\(/, "sidebar must not auto-load pages on scroll");
+	assert.doesNotMatch(webSidebar, /sentinelRef/);
 	assert.doesNotMatch(webSidebar, /showAll=\{/, "expanded-session set state is gone; the window owns paging now");
 });
 
