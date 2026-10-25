@@ -81,7 +81,7 @@ export function WorkspaceDrawerHost(props: WorkspaceDrawerHostProps) {
 						    （壁纸模式窗口控件背景透明，重叠会叠出更深的双线）。
 						    原生标题栏下 --window-drag-height 为 0，元素不占高也不画线；simple 模式
 						    没有 40px 标题栏行，同样不画线（见 styles/tailwind.css 的 workspace-titlebar）。 */}
-						<div aria-hidden="true" className="h-[var(--window-drag-height)] shrink-0 workspace-titlebar:mr-[var(--window-controls-width)] workspace-titlebar:border-b workspace-titlebar:border-border/40" />
+						<div aria-hidden="true" className="h-[var(--window-drag-height)] shrink-0 bg-bg-page workspace-titlebar:mr-[var(--window-controls-width)] workspace-titlebar:border-b workspace-titlebar:border-border/40" />
 						<div className="drawer-content-frame flex min-h-0 flex-1 flex-col overflow-hidden">
 							{open && props.rail}
 							{rendered}

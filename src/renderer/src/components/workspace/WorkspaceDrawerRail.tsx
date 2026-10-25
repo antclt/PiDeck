@@ -63,7 +63,7 @@ export function WorkspaceDrawerRail(props: { actions: WorkspaceDrawerRailAction[
 								variant="ghost"
 								size="icon"
 								className={cn(
-									"drawer-rail-remove absolute -top-1 -right-1 z-10 size-4 rounded-full border border-border/60 bg-background p-0 text-muted-foreground shadow-sm transition-opacity hover:bg-bg-hover hover:text-text-primary focus-visible:opacity-100",
+									"drawer-rail-remove absolute -top-1 -right-1 z-10 size-4 rounded-full border border-border/60 bg-bg-page-raised p-0 text-muted-foreground shadow-sm transition-opacity hover:bg-bg-hover hover:text-text-primary focus-visible:opacity-100",
 									action.active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
 								)}
 								title={t("drawer.removePanel", { label: action.label })}

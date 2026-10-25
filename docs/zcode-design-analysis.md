@@ -1,6 +1,6 @@
 # ZCode 视觉质感分析与反哺计划
 
-> 状态：**Phase 1 已落地**（2026-10，d4e60c97c / 730579b0b / 6a45b179f）；**Phase 2 已落地**（2026-10，31792faf0，边框墨水化 + 圆角降档 + 语义色审计）；**Phase 3 已落地**（2026-10，25e4e7284，忙碌色结论 + 阴影降档）；**Phase 4 已落地**（2026-10，字号/等宽纪律 + 守卫测试）；**Phase 5 已落地**（2026-10，会话页画布档 + 白卡模型 + 墨水罩染表面，见 §七）；**Phase 6 已落地**（2026-10，右抽屉表面定版：白面板维持 + 工具 pill 降档，chrome 实验经用户裁决回退，见 §八）；**Phase 7 已落地**（2026-10，排版对齐：标题压平 + 行内码缩档 + 按钮紧凑，见 §九）；**Phase 8 已落地**（2026-10，过程层去阴影——运行态洗底/占位卡/折叠条/气泡投影移除 + Git 摘要按钮 ghost，见 §十）；**Phase 9 已落地**（2026-10，右抽屉画布提亮半档 --color-bg-page-raised，见 §十一）；后续按「改到哪，旧迁新到哪」增量推进，不做 big-bang。
+> 状态：**Phase 1 已落地**（2026-10，d4e60c97c / 730579b0b / 6a45b179f）；**Phase 2 已落地**（2026-10，31792faf0，边框墨水化 + 圆角降档 + 语义色审计）；**Phase 3 已落地**（2026-10，25e4e7284，忙碌色结论 + 阴影降档）；**Phase 4 已落地**（2026-10，字号/等宽纪律 + 守卫测试）；**Phase 5 已落地**（2026-10，会话页画布档 + 白卡模型 + 墨水罩染表面，见 §七）；**Phase 6 已落地**（2026-10，右抽屉表面定版：白面板维持 + 工具 pill 降档，chrome 实验经用户裁决回退，见 §八）；**Phase 7 已落地**（2026-10，排版对齐：标题压平 + 行内码缩档 + 按钮紧凑，见 §九）；**Phase 8 已落地**（2026-10，过程层去阴影——运行态洗底/占位卡/折叠条/气泡投影移除 + Git 摘要按钮 ghost，见 §十）；**Phase 9 已落地**（2026-10，右抽屉画布提亮半档 --color-bg-page-raised，见 §十一）；**Phase 10 已落地**（2026-10，顶栏统一画布档消除三白拼接，见 §十二）；后续按「改到哪，旧迁新到哪」增量推进，不做 big-bang。
 > 分析来源：`zai-org/ZCode`（Apache-2.0，main 分支 2026-10 浅克隆）。核心文件：`DESIGN.md`（设计宪法）、`packages/ui/src/styles.css`（Zai Light/Dark 主题值）。
 
 ## 一、ZCode 质感的六个机制（带证据）
@@ -214,3 +214,14 @@ Phase 8 后用户反馈：右抽屉纯白（bg-background）比正文画布 #f8f
 - 应用面（Phase 8 的 chrome 实验面逐点换成 raised，替代原 bg-background）：`.detail-drawer` 根、`.drawer-activity-rail`、`.drawer-header`、文件树吸顶工具行与粘性目录行（粘性行必须不透明，否则滚动内容透出）、GitPanel 根 + `--git-panel-bg/hover/active`、`.browser-panel`。白卡（Git 提交/筛选输入框、浏览器地址栏、会话历史卡、GitGraph 浮层）保持 panel 纯白，在 raised 上浮起 Δ4。
 - 像素实测阶梯：侧栏 #F0F0F0 → 正文 #F8F8F8 → 抽屉 #FBFBFB → 白卡 #FFFFFF；暗色抽屉=panel 不变。
 - 与 Phase 6 的关系：当时的教训不是「抽屉不能退档」而是「不能退到 sidebar chrome 档（Δ8 过深）且半途而废留白条补丁」；raised 只退半档且粘性行/工具行全部同批换色，无补丁。
+
+## 十二、Phase 10 变更明细（顶栏统一画布档：消除三白拼接）
+
+Phase 9 后用户指出右上角仍有色差（截图：窗口控制条/抽屉 rail/文件工具条交界）。像素+elementFromPoint 探针定位：顶条横贯全窗，由三块底色拼成——session-tabs-bar `bg-background/80`（≈#FEFEFE）、抽屉自身让位区（透明→透出 raised #FBFBFB）、window-controls `bg-bg-panel`（纯白 #FFF）。三种白并排即「色差」。
+
+- **顶栏整条统一画布档 #F8F8F8**：session-tabs-bar（`/80` 半透明白→实色 bg-bg-page）、抽屉让位区（透明→bg-bg-page）、window-controls（bg-bg-panel→bg-bg-page）。落位后顶栏与正文画布连成一体（ZCode 顶栏=page 档同构），抽屉内容区保持 raised #FBFBFB 半档浮起，层次读法=「顶栏 chrome 融入内容 + 抽屉稍白卡片」。
+- 悬浮 X 角标（drawer-rail-remove）bg-background → bg-bg-page-raised，与 rail 同底。
+- 壁纸模式不受影响：utilities 层对 session-tabs-bar/window-controls 的透明化覆盖按类名继续生效；simple 外壳走自己的 --simple-shell-surface 不变。
+- 守卫：customTitlebarChrome 钉值 bg-bg-panel→bg-bg-page 同步。
+- 既有红记录（改动文件临时还原到基线复跑核实，非本批回归）：tab-context-menu 两条（右键菜单缺「重命名」、tab 数 1≠2）。
+- 本阶段最终浅色阶梯：侧栏 #F0F0F0 → 顶栏/正文 #F8F8F8 → 右抽屉 #FBFBFB → 白卡 #FFFFFF；暗色抽屉/顶栏随 token 坍缩为 panel 档不变。
