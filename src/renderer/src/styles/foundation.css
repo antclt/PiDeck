@@ -105,6 +105,10 @@
      由 panel/sidebar 派生而非写死 hex：皮肤与自定义主题不覆盖它时，自动落在
      自己的 panel 与 sidebar 之间，方向永远正确（经典浅色 = #f8f8f8，恰为 ZCode 同值）。 */
   --color-bg-page: color-mix(in srgb, var(--color-bg-panel) 55%, var(--color-bg-sidebar));
+  /* 画布提亮半档（右抽屉用）：比正文画布稍白一点做区域区分，又不至于纯白刺眼
+     （经典值 #fbfbfb，正文 Δ3 / 纯白 Δ4）。由 page/panel 派生：暗色 page=panel
+     时自动坍缩为同值（暗色无需区分），皮肤自动落在自身两档之间。 */
+  --color-bg-page-raised: color-mix(in srgb, var(--color-bg-page) 55%, var(--color-bg-panel));
   /* 浮层与普通面板分离：壁纸模式下普通面板可透图，但菜单必须保持稳定的不透明底。 */
   --color-bg-popover: #ffffff;
   --color-bg-input: #ffffff;

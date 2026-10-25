@@ -1393,7 +1393,7 @@ export function GitPanel(props: GitPanelProps) {
 	);
 
 	return (
-		<div ref={panelRef} data-pane-animating={paneAnimating || undefined} className={`git-panel flex min-h-0 flex-col overflow-hidden bg-background text-foreground${layout === "full" ? " h-full" : ""}`} aria-label={t("git.sourceControl")}>
+		<div ref={panelRef} data-pane-animating={paneAnimating || undefined} className={`git-panel flex min-h-0 flex-col overflow-hidden bg-bg-page-raised text-foreground${layout === "full" ? " h-full" : ""}`} aria-label={t("git.sourceControl")}>
 			{layout !== "historyOnly" && (
 				<>
 					{/* 当前分支 + 切换下拉：无边框、宽度收窄，把空间留给仓库名和提交区。 */}
@@ -1569,7 +1569,7 @@ export function GitPanel(props: GitPanelProps) {
 										<div className="flex items-stretch gap-2">
 											<Button
 												type="button"
-												variant="outline"
+												variant="ghost"
 												size="icon-sm"
 												className="min-w-8 text-text-secondary hover:text-text-primary"
 												title={commitGenLoading ? t("git.generateCommitMessageProgress") : t("git.generateCommitMessage")}

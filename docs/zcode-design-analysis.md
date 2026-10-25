@@ -1,6 +1,6 @@
 # ZCode 视觉质感分析与反哺计划
 
-> 状态：**Phase 1 已落地**（2026-10，d4e60c97c / 730579b0b / 6a45b179f）；**Phase 2 已落地**（2026-10，31792faf0，边框墨水化 + 圆角降档 + 语义色审计）；**Phase 3 已落地**（2026-10，25e4e7284，忙碌色结论 + 阴影降档）；**Phase 4 已落地**（2026-10，字号/等宽纪律 + 守卫测试）；**Phase 5 已落地**（2026-10，会话页画布档 + 白卡模型 + 墨水罩染表面，见 §七）；**Phase 6 已落地**（2026-10，右抽屉表面定版：白面板维持 + 工具 pill 降档，chrome 实验经用户裁决回退，见 §八）；**Phase 7 已落地**（2026-10，排版对齐：标题压平 + 行内码缩档 + 按钮紧凑，见 §九）；后续按「改到哪，旧迁新到哪」增量推进，不做 big-bang。
+> 状态：**Phase 1 已落地**（2026-10，d4e60c97c / 730579b0b / 6a45b179f）；**Phase 2 已落地**（2026-10，31792faf0，边框墨水化 + 圆角降档 + 语义色审计）；**Phase 3 已落地**（2026-10，25e4e7284，忙碌色结论 + 阴影降档）；**Phase 4 已落地**（2026-10，字号/等宽纪律 + 守卫测试）；**Phase 5 已落地**（2026-10，会话页画布档 + 白卡模型 + 墨水罩染表面，见 §七）；**Phase 6 已落地**（2026-10，右抽屉表面定版：白面板维持 + 工具 pill 降档，chrome 实验经用户裁决回退，见 §八）；**Phase 7 已落地**（2026-10，排版对齐：标题压平 + 行内码缩档 + 按钮紧凑，见 §九）；**Phase 8 已落地**（2026-10，过程层去阴影——运行态洗底/占位卡/折叠条/气泡投影移除 + Git 摘要按钮 ghost，见 §十）；**Phase 9 已落地**（2026-10，右抽屉画布提亮半档 --color-bg-page-raised，见 §十一）；后续按「改到哪，旧迁新到哪」增量推进，不做 big-bang。
 > 分析来源：`zai-org/ZCode`（Apache-2.0，main 分支 2026-10 浅克隆）。核心文件：`DESIGN.md`（设计宪法）、`packages/ui/src/styles.css`（Zai Light/Dark 主题值）。
 
 ## 一、ZCode 质感的六个机制（带证据）
@@ -194,3 +194,23 @@ sidebar #F0F0F0 → 画布 #F8F8F8 → 罩染弱表面 #F1F1F1（3% 落画布）
 - 核对后**不动**的：滚动条（ZCode 全局药丸滚动条 vs PiDeck `scrollbar-width: thin` 标准方案——foundation 有明确事故注记「Chromium 121+ 声明 scrollbar-width 后忽略 webkit 伪元素」，不回退）；菜单行字号（shadcn text-sm=14px 已等于 ZCode ui-base）；行高/段距/间距节奏（已同构）；tracking（ZCode 0.09em 仅限 9-10px 大写等宽标签，PiDeck 现有 0.03em lang chip 足够）。
 - 巡检：mock-pi 新增 `HDEMO` 标题演示消息（只增分支不影响既有用例），visual-tune-session 消息序列加入 HDEMO 验证标题刻度。
 - 既有红记录（改动文件回退到基线复跑核实，非本批回归）：settings.spec「appearance theme switch」在关闭弹窗一步失败、ask-ui「多 pending」卡 `.session-tab[aria-selected]` 选择器。
+
+## 十、Phase 8 变更明细（过程层去阴影：淡如 ZCode、回复凸显）
+
+用户反馈：表格/工具调用/思考带「灰色阴影条」，过程层应像 ZCode 一样淡、回复明显；Git 摘要生成按钮背景不佳。computed-style 全量枚举 + 运行态截图定位后五处收口：
+
+- **移除 `turn-row--running::before` 呼吸洗底**（accent 3% × 2.2s 呼吸动画，inset -6/-8px 的大片洗底即「灰色阴影条」本体）及 `turn-running-breathe` keyframes——运行感由图标 pulse/扫光单独承担，过程行运行中也保持无框无底。ZCode 过程层无任何整片运行底色。
+- **`.tool-activity-card` 运行占位卡去阴影/渐变**：`0 4px 14px accent 8%` 投影 + accent 8% 渐变底 + accent 32% 边框 → 白卡（panel）+ border-subtle 混 accent 22% 一缕身份色 + `box-shadow: none`；入场/扫光动画保留。
+- **`.execution-summary-toggle:hover` 去投影**（0 3px 12px 7%）：hover 只变色/边框，ZCode hover 纪律。
+- **`.user-turn-bubble` 去常驻投影**（0 2px 8px 5% 及 hover 4px 12px 一并移除）：深度靠底色对比 + 边框；全时间线唯一保留浮起阴影的是底部输入框（--shadow-composer-lifted）。
+- **Git 摘要生成按钮 outline → ghost**：去边框/白底/shadow-xs，辅助动作退为图标级，与主「提交」按钮主次分明。
+- 表格核实无 box-shadow（streamdownChrome 两处均 none），用户感知的表格阴影即运行态洗底/卡片投影的组合，随上列移除一并消失；落定态 computed 枚举确认时间线阴影仅剩输入框（在时间线外）。
+
+## 十一、Phase 9 变更明细（右抽屉画布提亮半档：与正文区分又不刺眼）
+
+Phase 8 后用户反馈：右抽屉纯白（bg-background）比正文画布 #f8f8f8 亮一档「太白」；完全对齐画布后又裁决「别太一致，稍微白一点有区分」。最终引入 **`--color-bg-page-raised`（画布提亮半档）**：
+
+- 定义：`color-mix(in srgb, var(--color-bg-page) 55%, var(--color-bg-panel))`——经典浅色 #fbfbfb（正文 Δ3 / 纯白 Δ4），由 page/panel 派生：暗色 page=panel 自动坍缩为同值（暗色本就整页同底无需区分），皮肤自动落在自身两档之间，壁纸模式两 token 同批注入半透明自动跟随。
+- 应用面（Phase 8 的 chrome 实验面逐点换成 raised，替代原 bg-background）：`.detail-drawer` 根、`.drawer-activity-rail`、`.drawer-header`、文件树吸顶工具行与粘性目录行（粘性行必须不透明，否则滚动内容透出）、GitPanel 根 + `--git-panel-bg/hover/active`、`.browser-panel`。白卡（Git 提交/筛选输入框、浏览器地址栏、会话历史卡、GitGraph 浮层）保持 panel 纯白，在 raised 上浮起 Δ4。
+- 像素实测阶梯：侧栏 #F0F0F0 → 正文 #F8F8F8 → 抽屉 #FBFBFB → 白卡 #FFFFFF；暗色抽屉=panel 不变。
+- 与 Phase 6 的关系：当时的教训不是「抽屉不能退档」而是「不能退到 sidebar chrome 档（Δ8 过深）且半途而废留白条补丁」；raised 只退半档且粘性行/工具行全部同批换色，无补丁。

@@ -69,7 +69,7 @@ export function WorkspaceDrawerHost(props: WorkspaceDrawerHostProps) {
 	const rendered = visiblePanel ? props.renderPanel(visiblePanel) : null;
 	return (
 		<>
-			<aside className={props.className ?? "detail-drawer flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background"} data-open={open} data-rendered={Boolean(visiblePanel)} data-pinned={Boolean(props.pinned)} style={props.style}>
+			<aside className={props.className ?? "detail-drawer flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-bg-page-raised"} data-open={open} data-rendered={Boolean(visiblePanel)} data-pinned={Boolean(props.pinned)} style={props.style}>
 				{visiblePanel && (
 					<>
 						{/* 自定义标题栏：为右上角 fixed 的窗口控件让出 var(--window-drag-height) 顶部条。

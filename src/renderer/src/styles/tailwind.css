@@ -51,6 +51,8 @@
   --color-bg-panel: var(--color-bg-panel);
   /* 会话画布档（ZCode page）：chat-pane/会话头部铺这一档，白卡浮其上（foundation 同名 token） */
   --color-bg-page: var(--color-bg-page);
+  /* 画布提亮半档：右抽屉用，比正文稍白做区分（foundation 同名 token） */
+  --color-bg-page-raised: var(--color-bg-page-raised);
   /* 墨水罩染弱表面：行内代码/引用/卡头/徽标底（详见 foundation.css 同名 token 注释） */
   --color-surface-ink-subtle: var(--color-surface-ink-subtle);
   --color-surface-ink: var(--color-surface-ink);

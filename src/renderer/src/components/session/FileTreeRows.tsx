@@ -211,7 +211,7 @@ const DirectoryRow = memo(function DirectoryRow(props: FileTreeRowProps) {
 				<CollapsibleTrigger asChild>
 					<button
 						type="button"
-						className={cn("directory group", FILE_ROW_BUTTON_CLASS, "rounded-none", stickyRow && "sticky z-10 bg-background data-[file-sticky-last=true]:shadow-sm", isDragOver && "bg-muted ring-1 ring-border")}
+						className={cn("directory group", FILE_ROW_BUTTON_CLASS, "rounded-none", stickyRow && "sticky z-10 bg-bg-page-raised data-[file-sticky-last=true]:shadow-sm", isDragOver && "bg-muted ring-1 ring-border")}
 						data-file-sticky-level={stickyRow ? depth : undefined}
 						style={stickyRow ? { ...rowStyle, top: `${FILE_TOOLBAR_HEIGHT_PX + depth * FILE_ROW_HEIGHT_PX}px` } : rowStyle}
 						title={gitStatusLabel ? `${node.relativePath}\n${gitStatusLabel}` : node.relativePath}
