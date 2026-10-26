@@ -19,6 +19,10 @@
  * - 代码（code / inlineCode）与数学（math / inlineMath）：必须保持原文；
  * - 作者显式转义的 `\[`：作者不想要链接。
  *
+ * 另外：作者手写的盘符路径（`[a](C:/x/y.md)`）解析能成功、不会走恢复路径，但 href 保持
+ * 裸盘符会被 sanitize 剥掉。这类 link 节点也在本插件里统一改写成 file://，
+ * 与恢复出的链接、remarkLinkifyPaths 生成的链接同一口径。
+ *
  * 修好的 url 用目标原文（不带 file://）：MarkdownLink 认本地路径形态，点击走
  * onOpenFile 文件门控；与 remarkLinkifyPaths 生成的 file:// 链接殊途同归。
  */
@@ -84,6 +88,28 @@ function findLabelEnd(text: string, from: number): number | null {
 	return null;
 }
 
+/** 盘符开头的 link 目标：sanitize 会把 `C:` 当成未知协议 `c:` 而剥掉 href。 */
+const WINDOWS_DRIVE_TARGET = /^[a-zA-Z]:[\\/]/;
+
+/**
+ * 把盘符路径的 link 目标统一改成 file:// 形式。
+ * 为什么必须改：rehype-sanitize 的协议白名单只看 URL 首段冒号前的部分，`C:/...` 会被
+ * 当成未知协议 `c:` 而剥掉 href，渲染出没有 href 的 <a>（点不动、无右键菜单）。
+ * 统一到 file:// 后与 remarkLinkifyPaths、以及本插件恢复出的链接同一个口径。
+ *
+ * 先解码再编码：mdast 的 url 是作者书写的原文，可能已含百分号编码（作者手写 `%20`），
+ * 直接 encodeURIComponent 会二次编码（`%20` → `%2520`）。解码失败时（非法序列）保持原样。
+ */
+function toFileLinkUrl(url: string): string {
+	let decoded = url;
+	try {
+		decoded = decodeURIComponent(url);
+	} catch {
+		// 含非法百分号序列：按原样编码，不猜测作者意图
+	}
+	return encodeFileLinkTarget(decoded);
+}
+
 /**
  * 单个 text 节点内的恢复处理：把 `[text](带空格目标)` 切成普通文本 + link 节点。
  * 与 MarkdownLinkCore 的 __segs 整体替换模式一致——父节点消费 __segs 后整体替换，
@@ -136,8 +162,16 @@ export const remarkRecoverInlineLinks = () => {
 		const visit = (node: MdNode) => {
 			if (!node || typeof node !== "object") return;
 			const type: string = node.type;
-			// 已经是链接 / 代码 / 数学内容的不动：链接是作者显式声明的，代码必须保持原文
-			if (type === "link" || type === "code" || type === "inlineCode" || type === "math" || type === "inlineMath") return;
+			if (type === "link") {
+				// 作者手写的盘符路径（解析能成功、不走恢复路径）同样需要改成 file://，
+				// 否则 sanitize 会按未知协议剥掉 href（同一症状、不同入口）。
+				if (typeof node.url === "string" && WINDOWS_DRIVE_TARGET.test(node.url)) {
+					node.url = toFileLinkUrl(node.url);
+				}
+				return;
+			}
+			// 代码 / 数学内容不动：必须保持原文
+			if (type === "code" || type === "inlineCode" || type === "math" || type === "inlineMath") return;
 			if (type === "text" && typeof node.value === "string") {
 				// 只识别作者显式转义的 `\[`：源文里该 text 节点起始处是反斜杠，说明作者
 				// 不想要链接。不用「整段原文与节点值逐字相等」去判断——CommonMark 会在节点值
