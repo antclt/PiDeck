@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 2ec743f5e677548f55535b893c5fca3212ae2e83e506cbe0774d444a06d5b9c4（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 83f1878285c681863154fb2a95d64ce09f5669b6a62fbd42724409f076de5d86（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -829,6 +829,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"app.visionRequestItem": "圖片 #{index} · {duration}{tokens}{status}",
 	"app.imagePreviewClose": "關閉圖片預覽",
 	"app.imagePreviewAlt": "圖片預覽",
+	"app.imageZoomIn": "放大",
+	"app.imageZoomOut": "縮小",
+	"app.imageZoomReset": "縮放 {percent}%，點選重置為適配視窗",
 	"markdown.imageLoadFailed": "圖片載入失敗",
 	"markdown.imageOpen": "預覽圖片",
 	"markdown.imageRetry": "重試",
