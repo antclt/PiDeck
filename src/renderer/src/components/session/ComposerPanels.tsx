@@ -46,8 +46,10 @@ export function ComposerAttachmentBar(props: {
 				return (
 					<div key={index} className="image-preview-item">
 						<img src={src} alt={t("app.imageAlt", { index: index + 1 })} onClick={() => props.onPreview(image)} style={{ cursor: "pointer" }} />
-						<Button variant="ghost" size="icon" className="image-remove-btn" aria-label={t("app.imageRemove")} title={t("app.imageRemove")} onClick={() => props.onRemove(index)}>
-							<X size={12} strokeWidth={2.4} aria-hidden="true" />
+						{/* 缩略图只有 64px：删除钮用 20px 圆点（size-5 + 12px 字形），
+						   size="icon" 的 size-9 会盖掉 legacy 宽度，必须在这里用 utility 收窄 */}
+						<Button variant="ghost" size="icon" className="image-remove-btn size-5 rounded-full" aria-label={t("app.imageRemove")} title={t("app.imageRemove")} onClick={() => props.onRemove(index)}>
+							<X size={12} strokeWidth={2.4} className="size-3" aria-hidden="true" />
 						</Button>
 					</div>
 				);
