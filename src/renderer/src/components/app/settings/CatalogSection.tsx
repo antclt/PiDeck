@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAtomValue } from "jotai";
-import { t } from "../../../i18n";
+import { getI18nLocale, t } from "../../../i18n";
 import { desktopApi } from "../../../desktopApi";
 import { updateStatusAtom } from "../../../atoms/update-atoms";
 import { Button } from "../../ui-shadcn/button";
@@ -64,7 +64,8 @@ export function CatalogSection(props: { updateSource?: UpdateSourceId; customUpd
 						remote: catalogSnapshot.latestVersion ?? "—",
 					})
 				: null,
-		[catalogSnapshot],
+		// t() 读模块级 locale 且不订阅变化：locale 必须进依赖，否则切语言后这句提示停在旧语言。
+		[catalogSnapshot, getI18nLocale()],
 	);
 	// 当前目录更新源的展示名：与应用更新同源，直接复用同一份清单与 label。
 	const catalogSourceLabel = useMemo(() => {
@@ -73,7 +74,7 @@ export function CatalogSection(props: { updateSource?: UpdateSourceId; customUpd
 		if (source === "atomgit") return t("settings.updateSourceAtomGit");
 		const mirror = UPDATE_SOURCE_MIRRORS.find((m) => m.id === source);
 		return mirror ? mirror.host : t("settings.updateSourceAtomGit");
-	}, [props.updateSource]);
+	}, [props.updateSource, getI18nLocale()]);
 
 	const refresh = useCallback(() => {
 		desktopApi.catalog

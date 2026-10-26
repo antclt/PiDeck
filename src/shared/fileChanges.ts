@@ -97,9 +97,21 @@ function getToolEditDiff(args: Record<string, unknown>): { oldText: string; newT
 
 const ANSI_RE = /\x1b\[[0-9;]*[a-zA-Z]/g;
 
-export function stripAnsi(text: string): string {
-	return text.replace(ANSI_RE, "");
+export function createTextTransformCache(transform: (text: string) => string, limit = 256, maxInput = 64 * 1024): (text: string) => string {
+	const cache = new Map<string, string>();
+	return (text: string) => {
+		const cached = cache.get(text);
+		if (cached !== undefined) return cached;
+		const value = transform(text);
+		if (text.length <= maxInput) {
+			if (cache.size >= limit) cache.clear();
+			cache.set(text, value);
+		}
+		return value;
+	};
 }
+
+export const stripAnsi = createTextTransformCache((text: string) => text.replace(ANSI_RE, ""));
 
 /**
  * 文件修改类工具名（write / edit / create / patch）：产出 diff 目标的工具集合。

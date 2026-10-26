@@ -697,6 +697,12 @@ export function SourceControlGraph(props: GitGraphProps) {
 							<div className="text-control font-medium text-[var(--git-desc-fg)]">{t("git.noCommits")}</div>
 						</div>
 					)}
+					{/* scroll-ok: bounded —— 提交列表是受控分页：初始 30 条，底部「加载更多」每次 +30，
+					     行数由用户点击增长而非随数据自动增长。真正需要它时（点几十次、几百行）得先设计
+					     无限滚动，那不是接一个虚拟栈能解决的；虚拟化还会破坏 role="list" 的树语义
+					     （中间多一层内容盒，listitem 的 owner 变了）。
+					     标记必须写在容器这一行**之上**：守卫只向上找 14 行，写在下面会静默失效
+					     （容器落进基线兜底，于是「判过了」和「没人判」长得一样）。 */}
 					{commits.length > 0 && (
 						<div className="min-h-0 flex-1 overflow-auto overscroll-contain [scrollbar-gutter:stable]" role="list" onScroll={dismissHover}>
 							{graphRows.map((row) => {

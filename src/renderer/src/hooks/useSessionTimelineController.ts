@@ -389,10 +389,17 @@ export type SessionTimelineController = {
 	 */
 	isSurfaceLoading: boolean;
 	/**
-	 * 恢复锚点 / 挂起跳转在途时为 true：这两条路径按 [data-message-id] 查 DOM，
-	 * 虚拟区外的行不在 DOM 里 —— 期间必须整表真实渲染。
+	/**
+	 * 需要「整表真实渲染」的时机（三处，同一套机制）：
+	 * 1. 恢复锚点 / 挂起跳转在途 —— 这两条路径按 [data-message-id] 查 DOM；
+	 * 2. 顶部插入（扩窗 / 数据翻页）在途 —— 插入会把视口里的行推走、被虚拟化卸载，
+	 *    之后 pinBrowseRow 拿不到 currentTop，补不了位移（用户看到内容跳一下）；
+	 * 3. 多选导出（渲染层自己的 state，不在这里）。
+	 * 虚拟区外的行不在 DOM 里，上述场景必须整表挂载。
 	 */
 	navBlockingVirtualization: boolean;
+	/** 顶部插入收尾：渲染层做完 pin 补偿后调用，解除整表渲染。 */
+	endPrependSolid: () => void;
 	/** 本栏粘住的空会话：预热写 filePath/dshSessionId 后仍不闪历史骨架。 */
 	knownEmpty: boolean;
 	/**
@@ -748,8 +755,51 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 	/** Anchor snapshot is frozen for one session-switch restoration attempt. */
 	const [restoreAnchor, setRestoreAnchor] = useState<SessionScrollAnchor | undefined>(() => sessionAnchorSnapshot);
 	const [restorePhase, setRestorePhase] = useState<"pending" | "complete">("pending");
+	/**
+	 * 顶部插入（扩窗 / 数据翻页）在途：期间整表真实渲染，与锚点恢复同一套机制。
+	 *
+	 * 为什么必须这样：插入把视口里的那一轮整体推走，虚拟化会顺手把它卸载；之后
+	 * pinBrowseRow 读到 currentTop === null 就再也补不了位移 —— 用户看到的是「点一下
+	 * 显示更早，内容整体跳一下」。整表挂载期间 DOM 稳定，按行补偿照常工作。
+	 * e2e/timeline-virtualization.spec.ts 的「showing earlier turns keeps the pinned row
+	 * at the same viewport offset」就是这条的回归锁（2026-10 复审抓到的真回归）。
+	 *
+	 * 用超时兜底：分页失败 / 没有新内容时也必须解除，否则整表一直挂着。
+	 */
+	const [prependSolid, setPrependSolid] = useState(false);
+	const prependSolidTimeoutRef = useRef<number | undefined>(undefined);
 	// 与 autoScroll 初始值保持一致（有锚点的会话首帧即不跟底），避免首帧 ref/state 不一致
 	const autoScrollRef = useRef(autoScroll);
+	/** 顶部插入期间开整表渲染；插入被消费（pin 补偿做完）或超时后关。 */
+	const beginPrependSolid = useCallback(() => {
+		setPrependSolid(true);
+		if (prependSolidTimeoutRef.current !== undefined) window.clearTimeout(prependSolidTimeoutRef.current);
+		// 1.5s 兜底：请求失败、或这一页恰好没有新轮次时不会有「消费」事件，必须自己解除。
+		prependSolidTimeoutRef.current = window.setTimeout(() => {
+			prependSolidTimeoutRef.current = undefined;
+			setPrependSolid(false);
+		}, 1500);
+	}, []);
+	const endPrependSolid = useCallback(() => {
+		if (prependSolidTimeoutRef.current !== undefined) {
+			window.clearTimeout(prependSolidTimeoutRef.current);
+			prependSolidTimeoutRef.current = undefined;
+		}
+		// 推迟一帧：pin 补偿写在 useLayoutEffect 里，同帧关掉会让 React 立刻把行换回虚拟行，
+		// 补偿结果随之作废（切回虚拟行会重新挂载不同 DOM）。
+		window.requestAnimationFrame(() => setPrependSolid(false));
+	}, []);
+	// 卸载时清掉兜底定时器：会话切走/面板关闭后它还会 fire 一次 setState（React 18 静默忽略，
+	// 但那是「靠框架宽容活着」，不是我们想要的状态机）。
+	useEffect(
+		() => () => {
+			if (prependSolidTimeoutRef.current !== undefined) {
+				window.clearTimeout(prependSolidTimeoutRef.current);
+				prependSolidTimeoutRef.current = undefined;
+			}
+		},
+		[],
+	);
 	const programmaticScrollGuardRef = useRef(createProgrammaticScrollGuard());
 	/**
 	 * 历史浏览代数：回底/切会话时递增。在途历史分页与扩窗任务捕获发起时代数，
@@ -957,11 +1007,13 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 			}
 			if (turns <= 0) return;
 			pendingExpandTurnsRef.current += turns;
+			// 顶部插入要来了：期间整表真实渲染，否则插入后 pin 的行已被虚拟化卸载、补不了位移。
+			beginPrependSolid();
 			if (expandBatchFrameRef.current === undefined) {
 				expandBatchFrameRef.current = window.requestAnimationFrame(consumeExpandBatch);
 			}
 		},
-		[consumeExpandBatch, escapeAutoScroll],
+		[beginPrependSolid, consumeExpandBatch, escapeAutoScroll],
 	);
 	// 单栏无 key 复用：切会话时取消上一会话未完成的扩窗任务。窗口值本身由
 	// restoreAnchor 的快照在 render 阶段初始化，不能在此处无条件重置为 3 轮。
@@ -1292,6 +1344,8 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 			const requestOwnerKey = ownerKey;
 			const timeline = timelineRef.current;
 			if (source === "scroll") captureBrowsePin(true);
+			// 同上：翻页会在顶部插入，期间必须能按行测到 pin（整表渲染）。
+			beginPrependSolid();
 			if (timeline && ownerKeyRef.current === requestOwnerKey) {
 				loadMoreAnchorRef.current = {
 					ownerKey: requestOwnerKey,
@@ -1412,7 +1466,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 				return;
 			}
 		},
-		[cachedEntry?.revision, captureBrowsePin, diskPage, expandWindowBatched, historyHasMore, isLoadingMessagePage, messages, options.sessionId, ownerKey, prependHistoryPage, prependMessagePage, runtimeHistory],
+		[beginPrependSolid, cachedEntry?.revision, captureBrowsePin, diskPage, expandWindowBatched, historyHasMore, isLoadingMessagePage, messages, options.sessionId, ownerKey, prependHistoryPage, prependMessagePage, runtimeHistory],
 	);
 
 	// ── 回底清理临时历史（2026-11 轮次模型）──
@@ -1787,6 +1841,8 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		if (anchor.value.preserveAtTop) {
 			pinBrowseRow();
 			loadMoreAnchorRef.current = undefined;
+			// 插入已被消费：解除整表渲染（推迟一帧，让这次补偿先落定）。
+			endPrependSolid();
 			return;
 		}
 		const heightDelta = timeline.scrollHeight - anchor.value.height;
@@ -1798,7 +1854,8 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		}
 		pinViewportAfterPrepend(nextScrollTop);
 		loadMoreAnchorRef.current = undefined;
-	}, [controllerEnabled, markProgrammaticScroll, ownerKey, pinBrowseRow, pinViewportAfterPrepend, visibleMessages.length]);
+		endPrependSolid();
+	}, [controllerEnabled, endPrependSolid, markProgrammaticScroll, ownerKey, pinBrowseRow, pinViewportAfterPrepend, visibleMessages.length]);
 
 	// 浏览态内容后增高（历史 Markdown 轻量→全量、图片、mermaid）：扩窗那一帧的补偿不够，
 	// 按钉住的行继续补漂移。跟随时不碰——吸底引擎负责下方增长。
@@ -1921,7 +1978,9 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		expandWindow,
 		windowExpandableRef,
 		isSurfaceLoading,
-		navBlockingVirtualization: restorePhase !== "complete" || pendingJump !== undefined,
+		navBlockingVirtualization: restorePhase !== "complete" || pendingJump !== undefined || prependSolid,
+		/** 顶部插入（扩窗/翻页）收尾通知：渲染层的 pin 补偿做完后调用，解除整表渲染。 */
+		endPrependSolid,
 		knownEmpty,
 		reloadFromDisk,
 		startDshHostAndReload,

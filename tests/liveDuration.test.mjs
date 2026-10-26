@@ -61,12 +61,14 @@ test("LiveDuration: live tick only while streaming, fixed after end", () => {
 
 test("three duration call sites reuse LiveDuration", () => {
 	const turnRow = readFileSync("src/renderer/src/components/session/turn/TurnRow.tsx", "utf8");
+	// 轮尾「耗时 + 模型」那一行 2026-10 抽成 TurnRowActions：LiveDuration 的调用点随之内移。
+	const actions = readFileSync("src/renderer/src/components/session/turn/TurnRowActions.tsx", "utf8");
 	const toolCard = readFileSync("src/renderer/src/components/session/ToolCallComponents.tsx", "utf8");
 	const thinking = readFileSync("src/renderer/src/components/session/TimelineEventCards.tsx", "utf8");
 	// TurnRow run 耗时：流式中实时（agentRunning 驱动，不依赖 endedAt）、结束截止。
 	// 起点为 effectiveStart（run.startedAt + askWaitMs，询问等待不计数）。
-	assert.match(turnRow, /<LiveDuration[\s\S]*?startedAt=\{effectiveStart\}/);
-	assert.match(turnRow, /isRunLive \?/);
+	assert.match(actions, /<LiveDuration[\s\S]*?startedAt=\{props\.effectiveStart\}/);
+	assert.match(actions, /props\.isRunLive \?/);
 	// ThinkingBlock 思考耗时（新架构在 TimelineEventCards.tsx）
 	assert.match(thinking, /<LiveDuration[\s\S]*?startedAt=\{props\.startedAt\}/);
 	// 思考流式中即带「思考了」前缀（结束时不蹦文案）

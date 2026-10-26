@@ -19,17 +19,17 @@
 
 | 事实 | 位置 |
 |---|---|
-| `body` 禁止滚动 | `src/renderer/src/styles/foundation.css:825-827` `body { margin: 0; overflow: hidden; }` |
-| 根容器固定视口高且裁剪 | `src/renderer/src/web/WebChatApp.tsx:1017` `flex h-[100dvh] w-full overflow-hidden` |
-| 聊天主区唯一滚动容器是时间线（侧栏抽屉另有 `.conversation-list` 滚动容器，见 `WebSidebar.tsx`） | `src/renderer/src/web/WebTimeline.tsx:658` `message-timeline h-full min-h-0 flex-1 overflow-y-auto` |
-| 顶栏是普通 flex 子项，无 sticky、无随滚动位移 | `WebChatApp.tsx:1034` 直接渲染 `<WebHeader>`；`WebHeader.tsx:73` `header` 无 `sticky` |
+| `body` 禁止滚动 | `src/renderer/src/styles/foundation.css` `body { margin: 0; overflow: hidden; }` |
+| 根容器固定视口高且裁剪 | `src/renderer/src/web/WebChatApp.tsx` `flex h-[100dvh] w-full overflow-hidden` |
+| 聊天主区唯一滚动容器是时间线（侧栏抽屉另有 `.conversation-list` 滚动容器，见 `WebSidebar.tsx`） | `src/renderer/src/web/WebTimeline.tsx` `message-timeline h-full min-h-0 flex-1 overflow-y-auto` |
+| 顶栏是普通 flex 子项，无 sticky、无随滚动位移 | `WebChatApp.tsx` 直接渲染 `<WebHeader>`；`WebHeader.tsx` `header` 无 `sticky` |
 | 无任何滚动方向检测 | `grep -rn "lastScrollTop\|scrollDirection\|hideOnScroll\|scrollingDown" src/renderer/src/web/` 无命中 |
-| 输入区三段常驻 | `src/renderer/src/web/WebComposer.tsx:145`（操作行）、`:181`（模型行），与 textarea 纵向堆叠 |
-| 三段行容器均无 `justify-between` | `WebComposer.tsx:108`（图片预览行）、`:145`（操作行）、`:181`（模型行） |
-| 移动端生效最小高度 96px | `src/renderer/src/web/web.css:340-342`（`@media (max-width: 760px)`）`.app.wechat-shell .composer-box { min-height: 6rem; }`。该文件在 `web-main.tsx:11` 是**未分层** import，unlayered 声明压过所有 layer，所以这一条盖住组件上的 `min-h-[7rem]` |
-| 组件自带最小高度 112px | `src/renderer/src/web/WebComposer.tsx:106` `composer-box ... min-h-[7rem]`：桌面端生效（与下一行同值），移动端被上一行覆盖 |
-| 桌面基线最小高度 | `src/renderer/src/styles/timeline.css:1245-1247` `.composer-box { min-height: 112px; }` |
-| 键盘压缩视口 | `src/renderer/web.html:6` `interactive-widget=resizes-content` |
+| 输入区三段常驻 | `src/renderer/src/web/WebComposer.tsx`（操作行）、`:181`（模型行），与 textarea 纵向堆叠 |
+| 三段行容器均无 `justify-between` | `WebComposer.tsx`（图片预览行）、`:145`（操作行）、`:181`（模型行） |
+| 移动端生效最小高度 96px | `src/renderer/src/web/web.css`（`@media (max-width: 760px)`）`.app.wechat-shell .composer-box { min-height: 6rem; }`。该文件在 `web-main.tsx` 是**未分层** import，unlayered 声明压过所有 layer，所以这一条盖住组件上的 `min-h-[7rem]` |
+| 组件自带最小高度 112px | `src/renderer/src/web/WebComposer.tsx` `composer-box ... min-h-[7rem]`：桌面端生效（与下一行同值），移动端被上一行覆盖 |
+| 桌面基线最小高度 | `src/renderer/src/styles/timeline.css` 的 `.composer-box { min-height: 112px; }`（行号不写死：`grep -n 'min-height: 112px' src/renderer/src/styles/timeline.css` 现查） |
+| 键盘压缩视口 | `src/renderer/web.html` `interactive-widget=resizes-content` |
 
 ## 根因
 
@@ -43,7 +43,7 @@ Chrome Android 的地址栏（top controls）只跟随**根滚动器**的滚动�
 
 ### 2. 顶栏不隐藏
 
-`WebHeader` 没有随滚动收起的实现。唯一挂在 `main` 上的触摸监听（`WebChatApp.tsx:277-293`）服务于侧栏抽屉手势，不涉及头部。
+`WebHeader` 没有随滚动收起的实现。唯一挂在 `main` 上的触摸监听（`WebChatApp.tsx`）服务于侧栏抽屉手势，不涉及头部。
 
 ### 3. 输入区过高
 
@@ -67,7 +67,7 @@ Chrome Android 的地址栏（top controls）只跟随**根滚动器**的滚动�
 
 ## 非目标
 
-- **不把滚动容器提升到根**（方案 D）。收益与方案 B 相同（≈ +56px 地址栏），但要重写 `timelineRef` 周边的全部逻辑：`stickToBottom`（`WebTimeline.tsx:625-643`）、scroll anchoring 依赖、`scrollToMessage`（`WebChatApp.tsx:271`）的 `scrollIntoView`、`scroll-mt-24` 预留高度、搜索跳转。长会话与流式滚动最易回归，收益不抵风险。
+- **不把滚动容器提升到根**（方案 D）。收益与方案 B 相同（≈ +56px 地址栏），但要重写 `timelineRef` 周边的全部逻辑：`stickToBottom`（`WebTimeline.tsx`）、scroll anchoring 依赖、`scrollToMessage`（`WebChatApp.tsx`）的 `scrollIntoView`、`scroll-mt-24` 预留高度、搜索跳转。长会话与流式滚动最易回归，收益不抵风险。
 - 不改桌面端 `App.tsx` / `ComposerArea`。
 - 不改 Web 服务端的任何逻辑（`src/main/web/`）。
 - 不做地址栏相关代码改动。地址栏是浏览器行为，代码侧只能通过方案 D 影响，已否决。
@@ -104,10 +104,10 @@ resolveHeaderHidden(previous: boolean, input): boolean
 
 **接线**：
 
-- `WebTimeline` 新增可选 prop `onScrollTopChange?: (scrollTop: number, delta: number) => void`，在既有 `updateScrollState`（`WebTimeline.tsx:622-630`）里顺带调用。不新增事件监听器。
+- `WebTimeline` 新增可选 prop `onScrollTopChange?: (scrollTop: number, delta: number) => void`，在既有 `updateScrollState`（`WebTimeline.tsx`）里顺带调用。不新增事件监听器。
 - `WebChatApp` 持有 `headerHidden` 状态与 `forceReveal` 计数，把 `headerHidden` 传给 `WebHeader`。
 - `WebHeader` 外层加一个 slot：`grid grid-rows-[1fr] transition-[grid-template-rows] duration-200`，收起时 `grid-rows-[0fr]`，内层 `min-h-0 overflow-hidden`。用 `fr` 过渡而不是 `max-height`，因为顶栏真实高度依赖标题换行，`max-height` 需要一个拍脑袋的上限。
-- `scroll-mt-24`（`WebTimeline.tsx:689`）在顶栏收起时失去意义。改为由 `WebChatApp` 通过 CSS 变量注入 `--web-scroll-mt`，收起时 0、展开时 96px。`scrollToMessage` 用 `scrollIntoView`，依赖 `scroll-margin-top`，改变量即可，不必改跳转逻辑。
+- `scroll-mt-24`（`WebTimeline.tsx`）在顶栏收起时失去意义。改为由 `WebChatApp` 通过 CSS 变量注入 `--web-scroll-mt`，收起时 0、展开时 96px。`scrollToMessage` 用 `scrollIntoView`，依赖 `scroll-margin-top`，改变量即可，不必改跳转逻辑。
 - **收起态必须不可聚焦**：`grid-rows-[0fr]` + `overflow-hidden` 只裁剪，不改变可聚焦性——收起后顶栏里的会话菜单、溢出菜单、上下文环仍能被 Tab 聚焦，焦点会进入视觉上不存在的区域。收起时给 slot 内层加 `inert`（React 19 原生支持该属性）或 `visibility: hidden`，展开时移除。仓库已有同类修复先例（`b539f520`「模态 Escape 与键盘可达性修复」）。单测需覆盖「收起 → 内层元素不可聚焦」。
 
 **流式期间**：自动贴底算程序化滚动，**不参与方向判定**——用户没滑屏，顶栏就不动。判定用两层：`programmaticScrollRef`（每次 `scrollTo` 前标记）+「跟底模式下正向位移一律视为自动跟随」（滚动事件可能晚于下一次 `scrollTo` 到达，单次标记挡不住）。用户自己上滑即离开跟底，之后的方向判定恢复正常。
@@ -116,7 +116,7 @@ resolveHeaderHidden(previous: boolean, input): boolean
 
 **折叠条件**（`WebComposer` 内计算）：`draft === "" && images.length === 0 && !streaming && !focused`。
 
-折叠态渲染：只保留 textarea 与发送按钮，隐藏操作行（`:145`）与模型行（`:181`）；`composer-box` 的最小高度改由组件按状态控制——折叠 `min-h-14`（56px）、展开 `min-h-[7rem]`（112px）。`WebComposer.tsx:106` 已硬编码 `min-h-[7rem]`，必须改成条件类，只改 CSS 不够（见下节）。
+折叠态渲染：只保留 textarea 与发送按钮，隐藏操作行（`:145`）与模型行（`:181`）；`composer-box` 的最小高度改由组件按状态控制——折叠 `min-h-14`（56px）、展开 `min-h-[7rem]`（112px）。`WebComposer.tsx` 已硬编码 `min-h-[7rem]`，必须改成条件类，只改 CSS 不够（见下节）。
 
 展开触发：textarea 聚焦、有草稿、有图片、`streaming` 为真。
 
@@ -126,12 +126,12 @@ resolveHeaderHidden(previous: boolean, input): boolean
 
 ### 移动端 min-height 的处理
 
-`web.css` 在 `web-main.tsx:11` 是**未分层** import，因此 `web.css:340-342` 的 `.app.wechat-shell .composer-box { min-height: 6rem; }` 压过所有 layer（含 utilities；见 `src/renderer/src/styles.css:1-27` 的 cascade 契约，其中第 2 条踩坑记录正是「旧规则保持 unlayered 则永远压过 utilities」）。两处都要改，缺一处 C1 就失效：
+`web.css` 在 `web-main.tsx` 是**未分层** import，因此 `web.css` 的 `.app.wechat-shell .composer-box { min-height: 6rem; }` 压过所有 layer（含 utilities；见 `src/renderer/src/styles.css` 的 cascade 契约，其中第 2 条踩坑记录正是「旧规则保持 unlayered 则永远压过 utilities」）。两处都要改，缺一处 C1 就失效：
 
-1. `web.css:340-342` 的 `min-height: 6rem` → `min-height: 0`，解除 96px 下限。
-2. `WebComposer.tsx:106` 的 `min-h-[7rem]`（112px）→ 条件类 `min-h-14` / `min-h-[7rem]`。**只做第 1 步时，折叠态会被这条 utility 撑到 112px**，收益从 ≈90px 掉到 ≈46px。
+1. `web.css` 的 `min-height: 6rem` → `min-height: 0`，解除 96px 下限。
+2. `WebComposer.tsx` 的 `min-h-[7rem]`（112px）→ 条件类 `min-h-14` / `min-h-[7rem]`。**只做第 1 步时，折叠态会被这条 utility 撑到 112px**，收益从 ≈90px 掉到 ≈46px。
 
-判定状态：**实测**（`web.css` 未被 `@layer` 包裹；`styles.css:1-27` 明确记录 unlayered 旧规则会压过 utilities）。
+判定状态：**实测**（`web.css` 未被 `@layer` 包裹；`styles.css` 明确记录 unlayered 旧规则会压过 utilities）。
 
 ## 影响文件
 
@@ -155,11 +155,11 @@ resolveHeaderHidden(previous: boolean, input): boolean
 
 | 用例 | 影响 |
 |---|---|
-| `e2e/web-mobile-ui.spec.ts:49` | 断言工具行内模型 pill 与发送按钮同排、同高 32px、同中心线。C1 折叠后模型 pill 不可见 → **必须改为先聚焦 textarea 再断言**，或改为断言展开态 |
-| `e2e/web-service.spec.ts:138` | 只断言无横向溢出，不受影响 |
+| `e2e/web-mobile-ui.spec.ts` | 断言工具行内模型 pill 与发送按钮同排、同高 32px、同中心线。C1 折叠后模型 pill 不可见 → **必须改为先聚焦 textarea 再断言**，或改为断言展开态 |
+| `e2e/web-service.spec.ts` | 只断言无横向溢出，不受影响 |
 | `e2e/web-visual-snapshot.spec.ts` | 截图基线 `e2e/.snapshots/web-mobile-*.png` 会因高度变化失配，需重新生成 |
 
-**已发现的既有缺陷（与本次改动无关）**：`e2e/web-mobile-ui.spec.ts:74` 的定位器 `.composer-box div.items-center.justify-between` 在当前 `dev` 上匹配不到任何元素——`913288cf`（2026-10-07「手机 Web 端交互与渲染优化」）把工具行的 `justify-between` 删掉了，`WebComposer.tsx` 里三个行容器（`:108`、`:145`、`:181`）都不含该类。同一文件 `:103`、`:130` 复用同一类名，一并失效。该用例会在 `await expect(toolbar).toBeVisible()` 处超时失败。
+**已发现的既有缺陷（与本次改动无关）**：`e2e/web-mobile-ui.spec.ts` 的定位器 `.composer-box div.items-center.justify-between` 在当前 `dev` 上匹配不到任何元素——`913288cf`（2026-10-07「手机 Web 端交互与渲染优化」）把工具行的 `justify-between` 删掉了，`WebComposer.tsx` 里三个行容器（`:108`、`:145`、`:181`）都不含该类。同一文件 `:103`、`:130` 复用同一类名，一并失效。该用例会在 `await expect(toolbar).toBeVisible()` 处超时失败。
 
 判定状态：**静态推断**（逐层比对选择器与源码，未运行 e2e，本机缺 `node_modules`）。实施前应先修这条定位器，否则无法用 e2e 验证本次改动。
 
@@ -172,7 +172,7 @@ resolveHeaderHidden(previous: boolean, input): boolean
 1. 修 `e2e/web-mobile-ui.spec.ts` 的失效定位器，确认该用例在改动前为绿（手动跑，非 CI）。
 2. 纯函数 `headerAutoHide.ts` + 单测。不接线，零行为变化。
 3. B 接线：`WebTimeline` 回调 → `WebChatApp` 状态 → `WebHeader` slot（含收起态 `inert`）。桌面端人工确认无变化。
-4. C1：`WebComposer` 折叠 + `WebComposer.tsx:106` 的 `min-h-[7rem]` 改条件类 + `web.css:340-342` min-height 改 0（三处同改，漏任一处折叠失效）。
+4. C1：`WebComposer` 折叠 + `WebComposer.tsx` 的 `min-h-[7rem]` 改条件类 + `web.css` min-height 改 0（三处同改，漏任一处折叠失效）。
 5. 更新 e2e 断言与截图基线，并量折叠态 `composer-box` 实际高度。
 
 ## 风险与未确定项
@@ -185,13 +185,13 @@ resolveHeaderHidden(previous: boolean, input): boolean
 | 顶栏收起态仍可 Tab 聚焦 | **已识别**。必须加 `inert` 或 `visibility: hidden`，否则是可访问性回归 |
 | C2（常驻单行 + BottomSheet）是否值得 | **暂不实施**。C1 已确认，C2 的「收益不受焦点状态影响」不构成实施理由 |
 | iOS Safari 表现 | **未验证**。`interactive-widget` 只有 Chromium 支持，iOS 的键盘处理走 `dvh` 自身；`grid-template-rows` 的 `fr` 过渡在旧版 Safari 的插值支持未确认，必要时降级为 `max-height` 过渡 |
-| 顶栏收起时用户是否失去会话状态可见性 | 未评估。运行态指示器（`WebHeader.tsx:86-88`）会随顶栏一起消失。可选缓解：收起时在时间线顶部保留 2px 状态色条，成本低但需要设计确认 |
-| 长时间流式输出时顶栏常驻收起 | 属期望行为，但未在真机确认不会与 `scrollToBottom` 按钮（`WebTimeline.tsx:737`）视觉冲突 |
+| 顶栏收起时用户是否失去会话状态可见性 | 未评估。运行态指示器（`WebHeader.tsx`）会随顶栏一起消失。可选缓解：收起时在时间线顶部保留 2px 状态色条，成本低但需要设计确认 |
+| 长时间流式输出时顶栏常驻收起 | 属期望行为，但未在真机确认不会与 `scrollToBottom` 按钮（`WebTimeline.tsx`）视觉冲突 |
 
 ## 参考
 
 - 移动端既有实现：`0729a984`（可用性与监控面板）、`3b492e01`（composer 工具行与头部布局对齐）、`326d85a3`（覆盖层系统返回）
-- cascade 层序契约：`src/renderer/src/styles.css:1-27`
+- cascade 层序契约：`src/renderer/src/styles.css`
 
 ## 实施结果（已落地）
 

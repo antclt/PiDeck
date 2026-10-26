@@ -122,7 +122,9 @@ test("file changes render as a per-turn chip row at the end of each turn", () =>
 	// 而组件顺序可能完全正确）。
 	assert.match(turnRow, /<TurnFileChanges run=\{run\}/);
 	assert.ok(turnRow.indexOf("<TurnFileChanges") > turnRow.indexOf("{finalItems.map"), "chip row must render after the final answer");
-	assert.ok(turnRow.indexOf("<TurnFileChanges") < turnRow.indexOf("{((mergedText && !editing) || showDuration || showTurnModel) && ("), "chip row must render before the action bar");
+	// 操作栏 2026-10 抽成 TurnRowActions：位置锚点换成组件调用本身。
+	// 断言语义不变（chip 行在操作栏之前），只是不再依赖那段被搬走的内联条件表达式。
+	assert.ok(turnRow.indexOf("<TurnFileChanges") < turnRow.indexOf("<TurnRowActions"), "chip row must render before the action bar");
 
 	// 组件本体：Proma 形态（虚线分隔 + chip 横排），但左对齐要按 PiDeck 自己的基准
 	const chip = readFileSync("src/renderer/src/components/session/turn/TurnFileChanges.tsx", "utf8");

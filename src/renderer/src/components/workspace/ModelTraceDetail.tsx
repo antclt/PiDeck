@@ -7,7 +7,7 @@
  * utils/modelTraceParse）；摘要指标（model/provider/bytes/duration）来自条目 data，
  * 不重复解析。
  */
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, Copy, FileJson, ImageIcon, Sparkles, Wrench } from "lucide-react";
 import { t } from "../../i18n";
 import type { ModelTraceLogData } from "../../../../shared/types/rpcLog";
@@ -15,6 +15,7 @@ import { parseModelTracePayload, summarizeTraceMessage, type TraceBlock, type Tr
 import { Button } from "../ui-shadcn/button";
 import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
 import { copyTextWithCopiedNotice } from "../../utils/clipboardNotice";
+import { VirtualStack } from "../ui-shadcn/virtual-stack";
 
 /** 块级内容最大高度：超长内容保持完整可滚，不截断文本本身 */
 const BLOCK_MAX_H = "max-h-64";
@@ -109,6 +110,9 @@ function SectionHeader({ icon, label, meta, open, onToggle, children }: { icon: 
 export function ModelTraceDetail({ payloadJson, summary }: { payloadJson: string; summary: ModelTraceLogData }) {
 	const [systemOpen, setSystemOpen] = useState(false);
 	const [toolsOpen, setToolsOpen] = useState(false);
+	// 系统提示词分段的滚动窗交给 VirtualStack 自己驱动：ref 必须真的接到那个 div 上，
+	// 否则虚拟器拿不到 scrollElement，视口高度恒 0、一行都不渲染（2026-10 审查抓到）。
+	const segmentListRef = useRef<HTMLDivElement | null>(null);
 	const [rawOpen, setRawOpen] = useState(false);
 	// 解析失败（截断/畸形）时降级：不渲染残缺结构化视图，直接显示原始 JSON
 	const view = useMemo(() => parseModelTracePayload(payloadJson), [payloadJson]);
@@ -150,12 +154,18 @@ export function ModelTraceDetail({ payloadJson, summary }: { payloadJson: string
 							onToggle={() => setSystemOpen((value) => !value)}
 						>
 							<div className="flex flex-col">
-								<div className="max-h-72 overflow-y-auto px-3 py-2">
-									{view.system.segments.map((segment, index) => (
-										<p key={index} className="whitespace-pre-wrap break-words text-xs leading-relaxed">
-											{segment}
-										</p>
-									))}
+								{/*
+									 系统提示词分段列表：段数随供应商/工具定义增长（几十到上百段），
+									 而外层是 `max-h-72` 的限高窗——正是「行数随数据无限增长 + 有滚动视口」
+									 的形态，接虚拟栈。
+
+									 行高方差很大（每段是 whitespace-pre-wrap 的正文），所以必须靠 measureElement
+									 实测而不是估值；VirtualStack 的默认行为就是实测。
+
+									 短列表（≤ minRows，这里给的 8 段）时 VirtualStack 直出 Fragment，DOM 与接入前逐字一致。
+									*/}
+								<div ref={segmentListRef} className="max-h-72 overflow-y-auto px-3 py-2">
+									<VirtualStack scrollRef={segmentListRef} items={view.system.segments} getKey={(_segment, index) => String(index)} estimateHeight={28} minRows={8} renderItem={(segment) => <p className="whitespace-pre-wrap break-words text-xs leading-relaxed">{segment}</p>} rowClassName="pb-1" />
 								</div>
 								<div className="flex justify-end border-t border-border/40 px-2 py-1">
 									<Button type="button" variant="ghost" size="sm" className="h-6 gap-1 px-2 text-micro" onClick={() => void copyTextWithCopiedNotice(view.system!.text)}>
@@ -170,7 +180,11 @@ export function ModelTraceDetail({ payloadJson, summary }: { payloadJson: string
 					{/* 消息流：完整对话轨迹（用户/助手/工具调用与结果/思考块） */}
 					<div className="flex items-center gap-2 border-b border-border/40 bg-muted/30 px-2 py-1 text-xs font-medium">{t("rpc.traceMessages")}</div>
 					{view.messages.map((message, index) => (
-						<TraceMessageRow key={index} message={message} index={index} />
+						// key 不能用下标：切换 trace 目标时同位置的展开态会挂到另一条消息上。
+						// 指纹用「下标 + 角色 + 字符数」——不要用 summarizeTraceMessage：它对整段正文跑正则，
+						// 行内还要再算一次，等于每次渲染两遍全量替换。缺口：同位置、同角色、同字符数但内容
+						// 不同时仍会复用展开态——payload 固定，这里接受。
+						<TraceMessageRow key={`${index}:${message.role}:${message.chars}`} message={message} index={index} />
 					))}
 
 					{/* 工具定义：请求携带的工具表，默认折叠 */}
@@ -191,6 +205,7 @@ export function ModelTraceDetail({ payloadJson, summary }: { payloadJson: string
 
 			{/* 原始 JSON 兜底：结构化视图覆盖不了的细节（新增供应商字段/解析失败）从这里看 */}
 			<SectionHeader icon={<FileJson className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />} label={t("rpc.traceRawJson")} open={rawOpen} onToggle={() => setRawOpen((value) => !value)}>
+				{/* scroll-ok: text —— 单一文本块（原始 JSON 全文），没有「行列表」可虚拟化；整段给浏览器原生滚动 */}
 				<pre className="rpc-log-detail max-h-72 overflow-auto">{payloadJson}</pre>
 			</SectionHeader>
 		</div>

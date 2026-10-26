@@ -172,6 +172,8 @@ export function FavoritesWorkspace() {
 				</div>
 			)}
 
+			{/* scroll-ok: flip —— 行是 RemovalRow（删除淡出 + 列表收拢 FLIP），外层还有 reorder 的拖拽排序。
+			     虚拟化会把离屏行卸载，淡出没有锚点、拖拽命中区也不连续，需先给退场动画设计离场占位行。 */}
 			<div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
 				{entries === null ? (
 					<div className="flex items-center justify-center gap-2 py-16 text-xs text-muted-foreground">

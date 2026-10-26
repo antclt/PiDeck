@@ -8,6 +8,7 @@ import { resolveSessionFindAnchor, type SessionFindAnchor } from "./sessionFindA
 import { formatAbsoluteTime, formatRelativeTime } from "../../utils/relativeTime";
 import { Button } from "../ui-shadcn/button";
 import { Input } from "../ui-shadcn/input";
+import { VirtualStack } from "../ui-shadcn/virtual-stack";
 
 /** 浮层宽度：够放下「片段 + 角色/时间」，又不遮住会话正文的中间区域。 */
 const FIND_PANEL_WIDTH = 420;
@@ -116,11 +117,27 @@ export function SessionFindOverlay(props: SessionFindOverlayProps) {
 	}, []);
 
 	// 活动行滚动进视野（长结果列表里键盘导航必须能看见当前项）
+	//
+	// 虚拟化后必须分两步：离屏行**根本没挂载**，`querySelector` 直接返回 null，
+	// 于是「按上下键切换命中项」会静默失去滚动——列表不动、高亮项在屏幕外，
+	// 用户以为键盘坏了。这是分支树踩过的同一个坑。
+	// 顺序是先让虚拟器把目标行拉进视口（它会同步更新 translateY），下一帧才挂载出 DOM，
+	// 那时再 scrollIntoView 做精确对齐（block: "nearest" 只在真的超出时才动）。
+	const virtualizerRef = useRef<{ scrollToIndex: (index: number, options?: { align?: "start" | "center" | "end" | "auto" }) => void } | null>(null);
 	useEffect(() => {
 		const container = listRef.current;
 		if (!container) return;
+		virtualizerRef.current?.scrollToIndex(activeIndex, { align: "auto" });
 		const row = container.querySelector<HTMLElement>(`[data-find-index="${activeIndex}"]`);
-		row?.scrollIntoView({ block: "nearest" });
+		if (row) {
+			row.scrollIntoView({ block: "nearest" });
+			return;
+		}
+		// 首次切到离屏项：等虚拟器挂载该行后再对齐一次。
+		const frame = requestAnimationFrame(() => {
+			container.querySelector<HTMLElement>(`[data-find-index="${activeIndex}"]`)?.scrollIntoView({ block: "nearest" });
+		});
+		return () => cancelAnimationFrame(frame);
 	}, [activeIndex]);
 
 	const positionStyle = { top: anchorBox.top, right: anchorBox.right, width: FIND_PANEL_WIDTH };
@@ -177,19 +194,31 @@ export function SessionFindOverlay(props: SessionFindOverlayProps) {
 					{matches.length === 0 ? (
 						<p className="shrink-0 px-3 py-2 text-xs text-muted-foreground">{isSearching ? t("sessionFind.searching") : unavailable ? t("sessionFind.unavailable") : t("sessionFind.noResults")}</p>
 					) : (
-						matches.map((match, index) => (
-							// key 不能只用 messageId：同一条消息的多个文本块各算一次命中，会撞 key
-							<button key={`${match.messageId}-${index}`} type="button" data-find-index={index} className={`flex shrink-0 flex-col gap-0.5 border-b border-border/20 px-3 py-1.5 text-left text-xs hover:bg-accent/40${index === activeIndex ? " bg-accent/60" : ""}`} onClick={() => jumpTo(index)}>
-								<span className="flex items-center gap-1.5 text-micro text-muted-foreground">
-									<span className="shrink-0">{match.role === "user" ? t("sessionFind.roleUser") : t("sessionFind.roleAssistant")}</span>
-									{/* 时间是用户定位「哪一轮」的线索；条目 id 是内部标识，露出来只是噪音 */}
-									<span className="shrink-0 tabular-nums" title={formatAbsoluteTime(match.timestampMs)}>
-										{formatRelativeTime(match.timestampMs)}
+						<VirtualStack
+							items={matches}
+							scrollRef={listRef}
+							virtualizerRef={virtualizerRef}
+							estimateHeight={44}
+							minRows={12}
+							rowClassName=""
+							// 虚拟行是 div：列表语义靠 role 补，与轨迹视图 / 待办条同一口径。
+							containerProps={{ role: "list" }}
+							rowProps={() => ({ role: "listitem" })}
+							getKey={(match, index) => `${match.messageId}-${index}`}
+							renderItem={(match, index) => (
+								// key 不能只用 messageId：同一条消息的多个文本块各算一次命中，会撞 key
+								<button type="button" data-find-index={index} className={`flex w-full shrink-0 flex-col gap-0.5 border-b border-border/20 px-3 py-1.5 text-left text-xs hover:bg-accent/40${index === activeIndex ? " bg-accent/60" : ""}`} onClick={() => jumpTo(index)}>
+									<span className="flex items-center gap-1.5 text-micro text-muted-foreground">
+										<span className="shrink-0">{match.role === "user" ? t("sessionFind.roleUser") : t("sessionFind.roleAssistant")}</span>
+										{/* 时间是用户定位「哪一轮」的线索；条目 id 是内部标识，露出来只是噪音 */}
+										<span className="shrink-0 tabular-nums" title={formatAbsoluteTime(match.timestampMs)}>
+											{formatRelativeTime(match.timestampMs)}
+										</span>
 									</span>
-								</span>
-								<span className="line-clamp-2 break-words">{match.snippet}</span>
-							</button>
-						))
+									<span className="line-clamp-2 break-words">{match.snippet}</span>
+								</button>
+							)}
+						/>
 					)}
 				</div>
 			)}

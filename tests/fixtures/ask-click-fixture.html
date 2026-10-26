@@ -2,8 +2,8 @@
 <!--
   Ask 选择框「点击被吞」反馈循环夹具（diagnosing-bugs Phase 1）。
   目的：在真实 Chromium（Electron）里复刻 ask 选项按钮的 DOM 类名链、
-  关键 CSS 规则（verbatim 抄自 src/renderer/src/styles/timeline.css:985-1018,1105-1110,1134-1138）
-  与 SessionRuntimeUiOverlay.tsx:426-434 的守卫+切换逻辑，用 sendInputEvent
+  关键 CSS 规则（verbatim 抄自 src/renderer/src/styles/timeline.css）
+  与 SessionRuntimeUiOverlay.tsx 的守卫+切换逻辑，用 sendInputEvent
   走真实输入管线测量「点击被 hasTextSelection() 守卫吞掉」的条件。
   边界说明：色值 token 为近似兜底（仅影响外观，不影响事件/选区语义）；
   Tailwind utility（flex/grid 类）未编译，布局用最小 shim 复刻两列网格。
@@ -88,7 +88,7 @@
 <body>
   <div id="stage">
     <!-- 复刻 ApprovalCard > 选项网格 > 选项按钮 的 DOM 链（类名与
-         SessionRuntimeUiOverlay.tsx:441-452 / approval-card.tsx 保持一致语义） -->
+         SessionRuntimeUiOverlay.tsx / approval-card.tsx 保持一致语义） -->
     <div class="ask-inline-bar ask-inline-bar--active" id="ask-card">
       <div id="question-title">问题标题文本用于划选测问</div>
       <div class="grid" id="options">
@@ -144,7 +144,7 @@
     window.__state.selectionSnapshot = selection;
   }
 
-  // 与 SessionRuntimeUiOverlay.tsx:426-434 multi_select onClick 相同的守卫+切换语义
+  // 与 SessionRuntimeUiOverlay.tsx multi_select onClick 相同的守卫+切换语义
   for (const id of ["opt-0", "opt-1"]) {
     const btn = document.getElementById(id);
     btn.addEventListener("click", () => {
