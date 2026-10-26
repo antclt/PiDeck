@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 2ec743f5e677548f55535b893c5fca3212ae2e83e506cbe0774d444a06d5b9c4（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 5ff6d96c71e5d5e5da67489e4741a5f8fd457efddd253dc05608d5225c8bcad0（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -3059,19 +3059,28 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.migrate.okNoKey": "已遷移「{name}」（未找到可複製的金鑰，請到對端補填）",
 	"config.migrate.failed": "供應商遷移失敗",
 	// 模型配置导出/导入（Base64 传输）
-	"config.models.transfer.discoverButton": "匯入本地其他工具配置",
 	"config.models.transfer.exportTitle": "匯出模型配置",
+	"config.models.transfer.importButton": "匯入",
 	"config.models.transfer.importTitle": "匯入模型配置",
-	"config.models.transfer.discoverTitle": "匯入本地其他工具配置",
+	"config.models.transfer.tabPaste": "貼上 / 選擇檔案",
+	"config.models.transfer.tabDiscover": "匯入本地其他工具配置",
 	"config.models.transfer.selectedProviders": "將匯出 {count} 個供應商（含 API Key）",
 	"config.models.transfer.password": "加密密碼（可選）",
 	"config.models.transfer.passwordHint": "留空則不加密；加密後匯入時需輸入同一密碼",
+	"config.models.transfer.pasteLabel": "貼上 Base64 配置",
+	"config.models.transfer.pastePlaceholder": "貼上 base64 字串…",
+	"config.models.transfer.pickFile": "選擇檔案",
+	"config.models.transfer.parse": "解析",
+	"config.models.transfer.needPassword": "該匯出已加密，請輸入密碼",
+	"config.models.transfer.wrongPassword": "密碼錯誤或資料損壞",
 	"config.models.transfer.noEncryptHint": "未加密的匯出僅作編碼、不構成保護，任何拿到字串的人都能讀出全部內容（含 API Key）",
 	"config.models.transfer.exportToClipboard": "匯出到剪貼簿",
 	"config.models.transfer.exportToFile": "匯出到檔案",
 	"config.models.transfer.copied": "已複製到剪貼簿",
 	"config.models.transfer.saved": "檔案已儲存",
 	"config.models.transfer.invalid": "無法解析：資料格式不正確",
+	"config.models.transfer.unsupportedVersion": "無法解析：不支援的版本",
+	"config.models.transfer.wrongKind": "無法解析：不是模型配置資料",
 	"config.models.transfer.selectProviders": "選擇要匯入的供應商",
 	"config.models.transfer.conflictWithLocal": "與本地同名",
 	"config.models.transfer.newProvider": "新增",
