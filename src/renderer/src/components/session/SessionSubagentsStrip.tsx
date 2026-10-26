@@ -1,5 +1,5 @@
 import { useAtomValue } from "jotai";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Ban, Bot, ChevronDown, ChevronUp, CornerUpRight, ExternalLink, FileText, Loader2, Square, X } from "lucide-react";
 import { sessionRuntimeBySessionIdAtomFamily } from "../../atoms";
 import { desktopApi } from "../../desktopApi";
@@ -8,6 +8,7 @@ import { replaceExpandedRefBlocksWithLabels } from "./composer/quoteChip";
 import type { PiSubagentEntry } from "../../../../shared/types";
 import { useSessionSubagents } from "../../hooks/useSessionSubagents";
 import { Button } from "../ui-shadcn/button";
+import { VirtualStack, VIRTUAL_STACK_MIN_ROWS } from "../ui-shadcn/virtual-stack";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
 import { MarkdownStream } from "./MarkdownStream";
 import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
@@ -92,11 +93,14 @@ function formatDuration(ms: number): string {
 /** 单条 pi 子代理：点击行展开详情（描述 / 错误 / 结果预览 / 元信息 / 打开子会话）。 */
 export const PiSubagentEntryRow = (props: {
 	entry: PiSubagentEntry;
+	/** 行标签：短列表路径给 li（父是 ul），虚拟化路径给 div（父是 div[data-index]，li 在那里非法）。 */
+	as?: "li" | "div";
 	/** 所属会话：打开结果 Dialog 时从会话文件 record 拉取全文 */
 	sessionId: string;
 	onOpenChildSession?: (sessionId: string) => void;
 }) => {
-	const { entry } = props;
+	const { entry, as } = props;
+	const RowTag = as ?? "li";
 	const now = Date.now();
 	// 失联判定：runner 进程已死但记录仍是 running/queued（父进程换代/被杀后
 	// 永远等不到终态写盘）时，按「已停止」呈现——否则条目永远亮着「运行中」，
@@ -142,7 +146,7 @@ export const PiSubagentEntryRow = (props: {
 	const duration = entry.completedAt && entry.startedAt ? formatDuration(entry.completedAt - entry.startedAt) : entry.startedAt && (isActive || lost) ? formatDuration(now - entry.startedAt) : null;
 
 	return (
-		<li className={`rounded ${isActive ? "bg-muted/40" : ""}`}>
+		<RowTag className={`rounded ${isActive ? "bg-muted/40" : ""}`}>
 			<button type="button" className="flex min-w-0 w-full items-center gap-2 rounded px-2 py-1.5 text-left text-control leading-5 transition-colors hover:bg-muted/60" aria-expanded={!collapsed} onClick={toggleCollapsed}>
 				<span className="grid size-5 shrink-0 place-items-center">
 					<SubagentStatusIcon status={effectiveStatus} />
@@ -217,7 +221,7 @@ export const PiSubagentEntryRow = (props: {
 					</DialogContent>
 				</Dialog>
 			)}
-		</li>
+		</RowTag>
 	);
 };
 
@@ -269,8 +273,9 @@ function useDshSubagents(agentId: string | undefined): DshSubagentEntry[] {
 }
 
 /** 单条 DSH 子代理：点击行展开只读 transcript（readDshSubagentHistory）。 */
-export const DshSubagentEntryRow = (props: { agentId: string; entry: DshSubagentEntry }) => {
-	const { entry } = props;
+export const DshSubagentEntryRow = (props: { agentId: string; entry: DshSubagentEntry /** 行标签：同 PiSubagentEntryRow。 */; as?: "li" | "div" }) => {
+	const { entry, as } = props;
+	const RowTag = as ?? "li";
 	const { collapsed, toggleCollapsed } = useComposerWidgetCollapsed(`dsh-subagent:${entry.id}`, true);
 	const [transcript, setTranscript] = useState<Array<{ role: string; text: string }> | null>(null);
 	const [transcriptLoading, setTranscriptLoading] = useState(false);
@@ -301,7 +306,7 @@ export const DshSubagentEntryRow = (props: { agentId: string; entry: DshSubagent
 	}, [collapsed, entry.id, props.agentId, toggleCollapsed]);
 
 	return (
-		<li className="rounded hover:bg-muted/40">
+		<RowTag className="rounded hover:bg-muted/40">
 			<button type="button" className="flex min-w-0 w-full items-center gap-2 rounded px-2 py-1.5 text-left text-control leading-5 transition-colors hover:bg-muted/60" aria-expanded={!collapsed} onClick={() => void toggle()}>
 				<span className="grid size-5 shrink-0 place-items-center">{entry.activity === "running" ? <Loader2 size={14} className="animate-pideck-spin text-[var(--color-accent)]" /> : <span className="size-2 rounded-full bg-muted-foreground/60" aria-hidden="true" />}</span>
 				<span className="min-w-0 flex-1 truncate font-medium text-foreground">{entry.label ?? entry.id}</span>
@@ -328,7 +333,8 @@ export const DshSubagentEntryRow = (props: { agentId: string; entry: DshSubagent
 						{!transcriptLoading && !transcriptError && (transcript?.length ?? 0) === 0 && <p className="px-1 text-xs text-text-tertiary">{t("dshTools.subagentTranscriptEmpty")}</p>}
 						{!transcriptLoading &&
 							transcript?.map((message, index) => (
-								<div key={index} className={`flex flex-col gap-0.5 rounded-md px-2 py-1 ${message.role === "user" ? "bg-accent/30" : "bg-bg-panel"}`}>
+								// key 用内容指纹而不是下标：同位置的两条消息内容不同时，下标 key 会让 React 复用到上一份 DOM。
+								<div key={`${index}:${message.role}:${message.text.length}`} className={`flex flex-col gap-0.5 rounded-md px-2 py-1 ${message.role === "user" ? "bg-accent/30" : "bg-bg-panel"}`}>
 									<span className="text-micro text-text-tertiary">{message.role === "user" ? t("dshTools.roleUser") : t("dshTools.roleAssistant")}</span>
 									<span className="whitespace-pre-wrap break-words text-xs text-foreground">{message.text || "…"}</span>
 								</div>
@@ -336,7 +342,7 @@ export const DshSubagentEntryRow = (props: { agentId: string; entry: DshSubagent
 					</div>
 				</CollapsibleContent>
 			</Collapsible>
-		</li>
+		</RowTag>
 	);
 };
 
@@ -388,6 +394,21 @@ export function SessionSubagentsStrip(props: {
 	const { collapsed, toggleCollapsed } = useComposerWidgetCollapsed(`subagents:${props.sessionId}`, true);
 	const { isDsh, agentId, piEntries, dshEntries, total, running, hasAcpEntries } = useSessionSubagentList(props.sessionId);
 
+	// 两种后端的行压成同一条扁平行序列：虚拟栈只吃扁平数组，而 isDsh 决定的是「每行画什么」，
+	// 不是「有几行列表」。两个后端互斥，合并后顺序与原 map 一致。
+	type StripRow = { kind: "dsh"; id: string; entry: DshSubagentEntry } | { kind: "pi"; id: string; entry: PiSubagentEntry };
+	const rows = useMemo<StripRow[]>(() => (isDsh ? dshEntries.map((entry) => ({ kind: "dsh" as const, id: entry.id, entry })) : piEntries.map((entry) => ({ kind: "pi" as const, id: entry.id, entry }))), [isDsh, dshEntries, piEntries]);
+	// 与虚拟栈内部的判定同值：只决定容器要不要保留 flex/gap 行距（虚拟行是 absolute，不参与 flex）。
+	const virtualizeRows = rows.length > VIRTUAL_STACK_MIN_ROWS;
+	const listRef = useRef<(HTMLUListElement & HTMLDivElement) | null>(null);
+	// 行组件自己带 key：短列表路径不再套一层外层 li —— 行根就是 li 时再包一层会变成
+	// 非法的 li > li（轨迹视图在 2026-10 恰好从相反方向修过同一个错，别再来一遍）。
+	const renderRow = (row: StripRow, as: "li" | "div") => (row.kind === "dsh" ? <DshSubagentEntryRow key={row.id} as={as} agentId={agentId ?? ""} entry={row.entry} /> : <PiSubagentEntryRow key={row.id} as={as} entry={row.entry} sessionId={props.sessionId} onOpenChildSession={props.onOpenChildSession} />);
+	// 虚拟化分支的行是 div[data-index] 的子节点：ul > div 是非法 HTML，列表语义也丢。
+	// 两条路径各用合法标签（同 SessionTodoStrip）：短列表 ul > li，虚拟化 div[role=list] > div[role=listitem]。
+	const ListTag: "ul" | "div" = virtualizeRows ? "div" : "ul";
+	const ItemTag: "li" | "div" = virtualizeRows ? "div" : "li";
+
 	// 无子代理：不渲染（「有那个显示那个」）。pi 空态细分（插件未装等）在展开
 	// 列表内用现有文案表达，折叠卡本身不常显空条
 	if (total === 0) return null;
@@ -414,9 +435,27 @@ export function SessionSubagentsStrip(props: {
 					</button>
 				</div>
 				<CollapsibleContent>
-					<ul className="mb-2 flex max-h-[240px] flex-col gap-1 overflow-y-auto [contain:layout_paint] [scrollbar-gutter:stable] px-3">
-						{isDsh ? dshEntries.map((entry) => <DshSubagentEntryRow key={entry.id} agentId={agentId ?? ""} entry={entry} />) : piEntries.map((entry) => <PiSubagentEntryRow key={entry.id} entry={entry} sessionId={props.sessionId} onOpenChildSession={props.onOpenChildSession} />)}
-					</ul>
+					<ListTag ref={listRef} className={`mb-2 ${virtualizeRows ? "" : "flex flex-col gap-1 "}max-h-[240px] overflow-y-auto [contain:layout_paint] [scrollbar-gutter:stable] px-3`}>
+						{virtualizeRows ? (
+							<VirtualStack
+								items={rows}
+								getKey={(row) => row.id}
+								scrollRef={listRef}
+								minRows={VIRTUAL_STACK_MIN_ROWS}
+								// 单行 = 图标 + 名称 + 状态 + 一行摘要，约 40px；实测随即覆盖。
+								estimateHeight={40}
+								// 虚拟行不参与 flex，原 gap-1（4px）改由行自带下边距提供。
+								rowClassName="pb-1"
+								// 行是 div：列表语义靠 role 补。role 挂在虚拟栈的内容盒上（containerProps），
+								// 不在外层容器上——中间夹着栈自己的内容盒，挂外面等于跨了一层，与轨迹视图两种写法。
+								containerProps={{ role: "list" }}
+								rowProps={() => ({ role: "listitem" })}
+								renderItem={(row) => renderRow(row, ItemTag)}
+							/>
+						) : (
+							rows.map((row) => renderRow(row, "li"))
+						)}
+					</ListTag>
 					{hasAcpEntries && <p className="-mt-1 px-3 pb-2 text-micro leading-4 text-text-tertiary">{t("sessionSubagents.acpDelegateHint")}</p>}
 				</CollapsibleContent>
 			</Collapsible>

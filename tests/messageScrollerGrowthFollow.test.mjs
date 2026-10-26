@@ -151,10 +151,13 @@ test("turn-window expansion pins the visible row instead of native scrollTop", (
 	const timelineSource = readFileSync("src/renderer/src/components/session/SessionMessageTimeline.tsx", "utf8");
 	const controllerSource = readFileSync("src/renderer/src/hooks/useSessionTimelineController.ts", "utf8");
 	// 扩窗补偿走 pinBrowseRow（钉正在看的那一轮），不再用整页高度差写原生 scrollTop。
+	// 补偿之后还要通知 controller 解除「整表渲染」（endPrependSolid）：扩窗在顶部插入轮次，
+	// 虚拟化会顺手卸载视口里被推走的那一行，之后 pin 拿不到 currentTop 就补不了位移。
 	assert.match(timelineSource, /pinBrowseRow\(\)/);
 	assert.doesNotMatch(timelineSource, /restoreTimelineAnchor\(timeline\.scrollTop, nextHeight - prev\.height\)/);
 	assert.doesNotMatch(timelineSource, /timeline\.scrollTop = nextTop/);
-	assert.match(timelineSource, /\[displayRuns, followingForTurnWindow, pinBrowseRow, turnWindowActive, turnWindowTurns\]/);
+	assert.match(timelineSource, /endPrependSolid\(\)/);
+	assert.match(timelineSource, /\[displayRuns, endPrependSolid, followingForTurnWindow, pinBrowseRow, turnWindowActive, turnWindowTurns\]/);
 	assert.match(controllerSource, /api\.restoreAt\(nextTop\)/);
 	assert.match(controllerSource, /scrollerScrollApiRef\.current\?\.stopScroll\(\)/);
 	assert.match(controllerSource, /browsePinScrollTop/);

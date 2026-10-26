@@ -138,6 +138,7 @@ function lastToolDetail(members: readonly TurnProcessEntry[]): string | undefine
 export const ProcessGroupStep = memo(function ProcessGroupStep(props: ProcessGroupStepProps) {
 	// 组体 id 走 useId：同页多组共存时 aria-controls 不会串。
 	const bodyId = useId();
+
 	// 与 TurnRow 的 expandedSteps 同款模式：存展开下界的原点与批次数，而不是布尔量。
 	// 下界锚在首次点击时的成员总数上：之后追加新成员不会把已展开的旧成员挤回去；
 	// 组 id 变化时判定自动回到未展开（state 里保留的旧值不会误匹配）。

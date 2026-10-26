@@ -405,13 +405,23 @@
      语义名分离便于按组件收尾，不必重复定义 keyframes。 */
   --animate-tool-sweep: thinking-sweep 2.6s ease-out infinite;
 
+  /* 扫光动画只允许动 transform。
+   *
+   * 原来是 `left: -300px → 100%`：`left` 是**布局属性**，每一帧都触发一次 layout。
+   * 这条动画同时挂在三个地方（SingleLinePreview / TimelineEventCards / ToolCallComponents
+   * 的「运行中」扫光），2.6s 无限循环——也就是说流式输出期间主线程上一直有布局在跑，
+   * 而它跟 DOM 量、跟虚拟化都无关：把行数从 59 砍到 16 也削不掉它。
+   *
+   * 位移量取 100vw 而不是 100%：光带宽度固定 300px，`100%` 的百分比基准是**元素自身**
+   * （300px），不是容器宽度；100vw 保证光带能完整移出任何宽度的容器（视口比容器宽时
+   * 会多走一段，但那一段在容器外不可见，无视觉影响）。 */
   @keyframes thinking-sweep {
     0% {
-      left: -300px;
+      transform: translateX(-300px);
     }
     90%,
     100% {
-      left: 100%;
+      transform: translateX(100vw);
     }
   }
 }

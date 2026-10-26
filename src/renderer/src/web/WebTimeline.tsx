@@ -207,7 +207,7 @@ export const WebThinkingBlock = memo(function WebThinkingBlock(props: {
 					aria-expanded={expanded}
 					title={expanded ? t("thinking.collapse") : t("thinking.expand")}
 				>
-					{props.running && <span aria-hidden className="pointer-events-none absolute inset-y-0 left-[-300px] w-[300px] animate-thinking-sweep motion-reduce:animate-none bg-[linear-gradient(90deg,transparent,color-mix(in_srgb,var(--color-bg-app)_55%,transparent),transparent)]" />}
+					{props.running && <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-[300px] animate-thinking-sweep motion-reduce:animate-none bg-[linear-gradient(90deg,transparent,color-mix(in_srgb,var(--color-bg-app)_55%,transparent),transparent)]" />}
 					<Brain size={16} className="thinking-row-icon" />
 					<span className="shrink-0 font-mono text-caption tabular-nums text-text-secondary">{t("thinking.title")}</span>
 					{expanded ? <ChevronDown size={14} className="shrink-0 text-text-tertiary" aria-hidden="true" /> : <ChevronRight size={14} className="shrink-0 text-text-tertiary" aria-hidden="true" />}

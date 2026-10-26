@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { classNameValue, findCappedListTag, stripCodeComments } from "./_sourceContract.mjs";
 
 /**
  * composer 卡片列「只有一条滚轮」的契约断言。
@@ -36,9 +37,10 @@ test("卡片列容器保留 overscroll-contain（滚轮总责任只在它身上�
 for (const [file, cap] of CLAMPED_LISTS) {
 	test(`${file} 的限高列表（${cap.replace(/\\|\[|\]/g, "")}）不带 overscroll-contain`, () => {
 		const source = sessionComponent(file);
-		const list = source.match(new RegExp(`<[a-z]+\\s+className="[^"]*${cap}[^"]*"`));
-		assert.ok(list, `${file} 应有一个带 ${cap} 的限高列表`);
-		assert.doesNotMatch(list[0], /overscroll-contain/, "限高列表带 overscroll-contain 会把滚轮吞在自身：内容不足其 max-height 时外层卡片列完全滚不动");
+		const plainCap = cap.replace(/\\/g, "");
+		const listTag = findCappedListTag(stripCodeComments(source), plainCap);
+		assert.ok(listTag, `${file} 应有一个带 ${cap} 的限高列表（上限必须写在 className 里，塞进别的属性或注释不算）`);
+		assert.ok(!classNameValue(listTag).includes("overscroll-contain"), "限高列表带 overscroll-contain 会把滚轮吞在自身：内容不足其 max-height 时外层卡片列完全滚不动");
 	});
 }
 

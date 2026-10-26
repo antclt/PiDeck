@@ -454,11 +454,9 @@ export function UsageProbeConfigDialog(props: {
 		}
 	};
 
-	const testSummary = useMemo(() => {
-		if (!testResult) return "";
-		if (!testResult.success) return testResult.error ?? t("config.usageProbe.testFailed");
-		return formatUsageBadgeText(testResult) ?? t("config.usageProbe.testSuccess");
-	}, [testResult]);
+	// 不用 useMemo：兜底文案走 t()，而 t() 读模块级 locale 且不订阅变化——
+	// 挂在依赖 [testResult] 的 memo 里，切语言后这句提示会停在旧语言。
+	const testSummary = !testResult ? "" : !testResult.success ? (testResult.error ?? t("config.usageProbe.testFailed")) : (formatUsageBadgeText(testResult) ?? t("config.usageProbe.testSuccess"));
 
 	// 当前选中类别的说明文案（内置/套餐/订阅 = 无字段说明；通用/NewAPI = 表单区上方提示）。
 	const hintKey = currentTemplate ? CATEGORY_HINT_KEY[currentTemplate.category] : null;

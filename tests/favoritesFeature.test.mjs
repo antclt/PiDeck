@@ -27,6 +27,9 @@ const contextHook = read("src/renderer/src/hooks/useMessageContextMenu.ts");
 const contextMenu = read("src/renderer/src/components/session/timeline/MessageContextMenu.tsx");
 const selectionToolbar = read("src/renderer/src/components/session/timeline/SelectionToolbar.tsx");
 const turnRow = read("src/renderer/src/components/session/turn/TurnRow.tsx");
+// 行动作条 2026-10 从 TurnRow 抽成独立组件（TurnRow 越过单文件红线，必须拆分）；
+// 收藏按钮随之内移，断言跟着「按钮实际写在哪」走，不再钉在宿主文件上。
+const turnRowActions = read("src/renderer/src/components/session/turn/TurnRowActions.tsx");
 const timeline = read("src/renderer/src/components/session/SessionMessageTimeline.tsx");
 const zh = read("src/renderer/src/i18n/rendererCopy.zh-CN.ts");
 const en = read("src/renderer/src/i18n/rendererCopy.en-US.ts");
@@ -99,7 +102,7 @@ test("两条收藏入口：消息右键菜单 + 划选浮层 + 回合动作条�
 	assert.match(selectionToolbar, /data-quote-action="favorite"/);
 	assert.match(selectionToolbar, /useFavorites\(\)/);
 	assert.match(turnRow, /onFavoriteReply\?: \(text: string, messageId: string \| null\) => void/);
-	assert.match(turnRow, /props\.onFavoriteReply\?\.\(mergedText, replyMessageId\)/);
+	assert.match(turnRowActions, /props\.onFavoriteReply\?\.\(props\.mergedText, props\.replyMessageId\)/);
 	assert.match(timeline, /onFavoriteReply=\{handleFavoriteReply\}/);
 	assert.match(timeline, /favoriteContext/);
 });
@@ -121,8 +124,8 @@ test("已收藏态与详情：星标/右键菜单识别已收藏并可取消，�
 	assert.match(contextMenu, /state\.messageFavorited \? t\("favorites\.unsaveMessage"\)/);
 
 	// 回合星标：实心星 + aria-pressed 表示已收藏，再点取消
-	assert.match(turnRow, /aria-pressed=\{replyFavorited\}/);
-	assert.match(turnRow, /fill-current/);
+	assert.match(turnRowActions, /aria-pressed=\{props\.replyFavorited\}/);
+	assert.match(turnRowActions, /fill-current/);
 	assert.match(timeline, /favoritedMessageKeys=\{favoritedMessageKeys\}/);
 
 	// 详情：点卡片弹出右侧抽屉（与公告中心同一套 beui Drawer）展示完整正文与元信息

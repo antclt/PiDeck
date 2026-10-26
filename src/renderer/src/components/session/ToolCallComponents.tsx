@@ -329,7 +329,7 @@ export const ToolCard = memo(function ToolCard(props: {
 					{/* 工具运行中整行扫光（dsh-web command-row-sweep 同款，与思考扫光同 keyframes）。
 					    status === "running" 才挂载：stopped/error/done 立即消失（stopped 由 props.stopped 短路）；
 					    pointer-events-none 不挡 trigger 点击展开 */}
-					{status === "running" && <span aria-hidden className="pointer-events-none absolute inset-y-0 left-[-300px] w-[300px] animate-tool-sweep motion-reduce:animate-none bg-[linear-gradient(90deg,transparent,color-mix(in_srgb,var(--color-bg-app)_55%,transparent),transparent)]" />}
+					{status === "running" && <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-[300px] animate-tool-sweep motion-reduce:animate-none bg-[linear-gradient(90deg,transparent,color-mix(in_srgb,var(--color-bg-app)_55%,transparent),transparent)]" />}
 					<button type="button" className="flex min-h-7 min-w-0 flex-[1_1_auto] cursor-pointer items-center gap-2 border-0 bg-transparent py-1 pr-0.5 pl-1 text-left text-chat-row text-text-faint focus-visible:-outline-offset-2 focus-visible:outline-2" onClick={toggleExpanded} aria-expanded={expanded} title={rowTitle}>
 						<span className="tool-card-icon inline-flex shrink-0 items-center justify-center">{isSkillRead ? <Brain size={16} /> : isAskCard ? <MessageCircle size={16} /> : toolIcon(toolName)}</span>
 						{/* 文本段：动词标签（14px）与等宽 chip 预览（12px）必须共基线，否则等宽详情

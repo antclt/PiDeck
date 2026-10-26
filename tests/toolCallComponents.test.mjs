@@ -87,7 +87,7 @@ test("edit/write diff cards expose an accessible open-file action", () => {
 	assert.match(toolCalls, /onClick=\{\(\) => props\.onOpenFile\?\.\(diffTarget\.path\)\}/);
 	assert.match(toolCalls, /onOpenFile=\{props\.onOpenFile\}/);
 	assert.match(readFileSync("src/renderer/src/components/session/turn/ToolStep.tsx", "utf8"), /onOpenFile=\{props\.onOpenFile\}/);
-	assert.match(readFileSync("src/renderer/src/components/session/turn/TurnRow.tsx", "utf8"), /<ToolStep[\s\S]*?onOpenFile=\{props\.onOpenFile\}/);
+	assert.match(readFileSync("src/renderer/src/components/session/turn/TurnStepRow.tsx", "utf8"), /<ToolStep[\s\S]*?onOpenFile=\{props\.onOpenFile\}/);
 	assert.match(readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8"), /"tool\.openFile": "打开文件"/);
 	assert.match(readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8"), /"tool\.openFile": "Open file"/);
 	// 每个分屏栏在 injector 绑定自己的 runtime cwd/project；App 只消费这份上下文。
