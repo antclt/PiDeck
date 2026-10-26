@@ -12,6 +12,9 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const { visibleAssistantText, pickEditableAssistantMessage } = loadTsCommonJs("src/renderer/src/components/session/timeline/editableAnswerTarget.ts");
 const turnRowSource = readFileSync("src/renderer/src/components/session/turn/TurnRow.tsx", "utf8");
+// 操作栏（复制/收藏/编辑/删除/耗时）2026-10 抽成 TurnRowActions：
+// 「按钮长什么样」搬走了，「门槛与编辑目标同源」仍由 TurnRow 把关。
+const actionsSource = readFileSync("src/renderer/src/components/session/turn/TurnRowActions.tsx", "utf8");
 
 function assistantMessage(id, text) {
 	return { kind: "message", message: { id, role: "assistant", text, entryId: `entry-${id}` } };
@@ -61,10 +64,14 @@ test("issue #310 源码契约：TurnRow 编辑初值不得来自 mergedText，�
 	assert.match(saveEditBlock, /props\.onEditMessage\(\s*editableMessage\.message,\s*editText\s*\)/);
 	assert.doesNotMatch(saveEditBlock, /assistantMessages\.at\(-1\)/);
 	// 编辑按钮显隐门槛与编辑目标同源（delete 仍按末条删整轮，不在此约束内）
-	const editGate = turnRowSource.slice(turnRowSource.indexOf('t("app.multiSelectEnter")'), turnRowSource.indexOf('t("common.edit")'));
+	// 编辑门槛由 TurnRow 计算后以 onStartEdit 传给操作栏：门槛表达式必须与编辑目标同源
+	// （editableMessage），不能退回「末条 assistant 消息」——那是 issue #310 的原始病症。
+	// 起点锚 onStartEdit={! ：TurnRow 里 FinalAnswer 也有同名 prop（onStartEdit={startEditing}），
+	// 只写 onStartEdit={ 会从常驻区开始切，覆盖面变成一大段无关代码。
+	const editGate = turnRowSource.slice(turnRowSource.indexOf("onStartEdit={!"), turnRowSource.indexOf("onDeleteReply={"));
 	assert.ok(editGate.length > 0, "edit button gate must exist");
 	assert.match(editGate, /editableMessage\?\.message\.id/);
 	assert.doesNotMatch(editGate, /assistantMessages\.at\(-1\)/);
 	// mergedText 保留给复制入口（复制整轮输出是合理功能，不随编辑修复收紧）
-	assert.match(turnRowSource, /markdown=\{mergedText\}/);
+	assert.match(actionsSource, /markdown=\{props\.mergedText\}/);
 });

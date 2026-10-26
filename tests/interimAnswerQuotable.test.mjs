@@ -10,6 +10,8 @@ import { readFileSync } from "node:fs";
 const answerOutputSource = readFileSync("src/renderer/src/components/session/AnswerOutput.tsx", "utf8");
 const interimAnswerSource = readFileSync("src/renderer/src/components/session/turn/InterimAnswer.tsx", "utf8");
 const turnRowSource = readFileSync("src/renderer/src/components/session/turn/TurnRow.tsx", "utf8");
+// 折叠栏的单行渲染已抽到 TurnStepRow（2026-10 拆件）：interim 分支在那儿。
+const stepRowSource = readFileSync("src/renderer/src/components/session/turn/TurnStepRow.tsx", "utf8");
 const processFoldSource = readFileSync("src/renderer/src/components/session/turn/ProcessFold.tsx", "utf8");
 const timelineEventCardsSource = readFileSync("src/renderer/src/components/session/TimelineEventCards.tsx", "utf8");
 const policySource = readFileSync("src/renderer/src/components/session/timeline/selectionToolbarPolicy.ts", "utf8");
@@ -39,8 +41,12 @@ test("InterimAnswer forwards messageId to AnswerOutput", () => {
 });
 
 test("TurnRow flat mode passes message id to settled interim answers", () => {
-	const interimBranch = turnRowSource.slice(turnRowSource.indexOf('item.kind === "interim-answer"'), turnRowSource.indexOf("<FinalAnswer"));
-	assert.ok(interimBranch.length > 0, "interim branch must exist");
+	// 切片范围：从 interim 分支起点到「非 process-entry 直接返回」那一行为止。
+	// 不切到文件末尾——那样只要文件里任何位置出现 messageId={item.id} 就会假绿。
+	const start = stepRowSource.indexOf('item.kind === "interim-answer"');
+	const end = stepRowSource.indexOf('if (item.kind !== "process-entry")');
+	assert.ok(start >= 0 && end > start, "interim branch must exist and end before the process-entry guard");
+	const interimBranch = stepRowSource.slice(start, end);
 	assert.match(interimBranch, /messageId=\{item\.id\}/);
 });
 

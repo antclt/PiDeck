@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Copy } from "lucide-react";
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
 import { Button } from "./button";
+import { VirtualStack, VIRTUAL_STACK_MIN_ROWS } from "./virtual-stack";
 
 type StackFrame = {
 	raw: string;
@@ -37,6 +38,8 @@ export function StackTrace(props: { trace: string; defaultOpen?: boolean; onOpen
 		const lines = props.trace.split(/\r?\n/).filter(Boolean);
 		return lines.slice(1).map(parseFrame);
 	}, [props.trace]);
+	// 帧数随调用链深度增长（长异步链可上百帧），限高窗里只挂视口附近的行。
+	const framesRef = useRef<HTMLDivElement | null>(null);
 	const firstLine = props.trace.split(/\r?\n/, 1)[0] || props.trace;
 	const errorMatch = firstLine.match(/^([\w.]+Error|Error|Exception):?\s*(.*)$/);
 	const errorType = errorMatch?.[1] ?? "Error";
@@ -66,20 +69,28 @@ export function StackTrace(props: { trace: string; defaultOpen?: boolean; onOpen
 			</div>
 			{open ? (
 				<div className="border-t border-border-subtle bg-bg-muted p-1">
-					<div className="flex max-h-[280px] flex-col overflow-auto font-mono text-micro leading-relaxed">
+					<div ref={framesRef} className="flex max-h-[280px] flex-col overflow-auto font-mono text-micro leading-relaxed">
 						{frames.length > 0 ? (
-							frames.map((frame, index) => (
-								<div key={`${frame.raw}:${index}`} className={cn("flex min-w-0 gap-2 px-2 py-1", frame.internal && "text-text-tertiary/55")}>
-									<span className="select-none text-text-tertiary/55">{index + 1}</span>
-									{frame.path && props.onOpenFile ? (
-										<button type="button" className="min-w-0 truncate text-left text-text-secondary underline decoration-border-subtle underline-offset-2 hover:text-foreground" onClick={() => props.onOpenFile?.(frame.path ?? "")}>
-											{frame.raw}
-										</button>
-									) : (
-										<span className="min-w-0 break-all">{frame.raw}</span>
-									)}
-								</div>
-							))
+							<VirtualStack
+								items={frames}
+								getKey={(frame, index) => `${frame.raw}:${index}`}
+								scrollRef={framesRef}
+								minRows={VIRTUAL_STACK_MIN_ROWS}
+								// 单帧 = 一行等宽文本，行高约 20px。
+								estimateHeight={20}
+								renderItem={(frame, index) => (
+									<div className={cn("flex min-w-0 gap-2 px-2 py-1", frame.internal && "text-text-tertiary/55")}>
+										<span className="select-none text-text-tertiary/55">{index + 1}</span>
+										{frame.path && props.onOpenFile ? (
+											<button type="button" className="min-w-0 truncate text-left text-text-secondary underline decoration-border-subtle underline-offset-2 hover:text-foreground" onClick={() => props.onOpenFile?.(frame.path ?? "")}>
+												{frame.raw}
+											</button>
+										) : (
+											<span className="min-w-0 break-all">{frame.raw}</span>
+										)}
+									</div>
+								)}
+							/>
 						) : (
 							<pre className="m-0 whitespace-pre-wrap break-words px-2 py-1 text-text-secondary">{props.trace}</pre>
 						)}

@@ -26,7 +26,6 @@ import { isRetryStatusMessage } from "./timelineFailureNotice";
 // Button 收口状态（P0）：本文件按钮全部保留原生——
 // thinking-card-trigger 是折叠触发器 + 内容排版容器（内部 span/small/em 结构）。
 // 迁移路径见 P2 CSS 收口。
-// 迁移路径见 P2 CSS 收口。
 
 function getDiagnosticTone(message: ChatMessage): "error" | "warning" | "success" | "info" {
 	if (message.role === "error") return "error";
@@ -130,7 +129,7 @@ export const ThinkingBlock = memo(
 						>
 							{/* 流式思考中整行扫光（dsh-web reasoning-row-sweep 同款）。
 				    预览嵌在同一行里，不再给 SingleLinePreview 第二道光带，避免叠扫。 */}
-							{props.isStreaming && <span aria-hidden className="pointer-events-none absolute inset-y-0 left-[-300px] w-[300px] animate-thinking-sweep motion-reduce:animate-none bg-[linear-gradient(90deg,transparent,color-mix(in_srgb,var(--color-bg-app)_55%,transparent),transparent)]" />}
+							{props.isStreaming && <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-[300px] animate-thinking-sweep motion-reduce:animate-none bg-[linear-gradient(90deg,transparent,color-mix(in_srgb,var(--color-bg-app)_55%,transparent),transparent)]" />}
 							<Brain size={16} className="thinking-row-icon shrink-0" aria-hidden="true" />
 							{/* 文本段：「思考了 Xs」（14px）与折叠预览（12px 等宽）必须共基线，否则预览
 						    比左侧文本高约 3px（原理解释见 RowText）。chevron 是盒子，self-center。 */}

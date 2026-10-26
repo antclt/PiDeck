@@ -6,6 +6,7 @@ import { desktopApi } from "../../desktopApi";
 import { t } from "../../i18n";
 import { showNotice } from "../../utils/notice";
 import { Button } from "../ui-shadcn/button";
+import { VirtualStack, VIRTUAL_STACK_MIN_ROWS } from "../ui-shadcn/virtual-stack";
 import { ComposerWidgetFrame } from "./ComposerWidgetLayout";
 
 /**
@@ -26,6 +27,14 @@ export function SessionQueuedMessagesStrip(props: { sessionId: string }) {
 	const agentId = runtime?.agentId;
 	const queued = runtime?.backend === "dsh" ? runtime.state?.queuedMessages : undefined;
 	const items = queued && queued.length > 0 ? queued : undefined;
+	// 排队行数随消息增长；超过虚拟化门槛时只挂视口附近的行（通用件见 ui-shadcn/virtual-stack.tsx）。
+	const listRef = useRef<(HTMLUListElement & HTMLDivElement) | null>(null);
+	const virtualizeRows = (items?.length ?? 0) > VIRTUAL_STACK_MIN_ROWS;
+	// 虚拟化分支的行是 `<div data-index>` 的子节点，此时 `<li>` 的父元素不再是 `ul/ol`
+	// （非法 HTML，列表语义也丢失）。两条路径各用合法标签：短列表保持 `ul > li` 不变，
+	// 虚拟化走 `div[role=list] > div[role=listitem]`。
+	const ListTag: "ul" | "div" = virtualizeRows ? "div" : "ul";
+	const ItemTag: "li" | "div" = virtualizeRows ? "div" : "li";
 
 	const cancel = useCallback(
 		async (itemId: string) => {
@@ -57,29 +66,37 @@ export function SessionQueuedMessagesStrip(props: { sessionId: string }) {
 			</div>
 			{/* 限高滚动列表：行必须 shrink-0——overflow-hidden 行在 flex 列里 min-height
 			    被清零会触发整体压扁（见 AGENTS.md 待办条排版事故），先例 SessionTodoStrip。 */}
-			<ul className="max-h-44 overflow-y-auto">
-				{items.map((item) => (
-					<li key={item.id} className="flex shrink-0 items-center gap-2.5 px-3 py-1.5">
-						<span className="shrink-0 rounded bg-bg-active px-1.5 text-micro leading-5 text-text-tertiary">{item.target === "next-turn" ? t("sessionQueue.targetNextTurn") : t("sessionQueue.targetNextStep")}</span>
-						<span className="min-w-0 flex-1 truncate text-control leading-5 text-text-secondary" title={item.text}>
-							{item.text || t("sessionQueue.emptyText")}
-						</span>
-						<Button
-							variant="ghost"
-							size="icon-xs"
-							className="size-7 shrink-0 rounded-full text-text-tertiary hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
-							aria-label={t("sessionQueue.cancel")}
-							title={t("sessionQueue.cancel")}
-							disabled={busyId === item.id}
-							onClick={() => {
-								void cancel(item.id);
-							}}
-						>
-							<X size={14} aria-hidden="true" />
-						</Button>
-					</li>
-				))}
-			</ul>
+			<ListTag ref={listRef} role={virtualizeRows ? "list" : undefined} className="max-h-44 overflow-y-auto">
+				<VirtualStack
+					items={items ?? []}
+					getKey={(item) => item.id}
+					scrollRef={listRef}
+					minRows={VIRTUAL_STACK_MIN_ROWS}
+					// 单行 = 徽标 + 一行文案，py-1.5 上下各 6px，合计 32 上下。
+					estimateHeight={34}
+					renderItem={(item) => (
+						<ItemTag role={ItemTag === "div" ? "listitem" : undefined} className="flex shrink-0 items-center gap-2.5 px-3 py-1.5">
+							<span className="shrink-0 rounded bg-bg-active px-1.5 text-micro leading-5 text-text-tertiary">{item.target === "next-turn" ? t("sessionQueue.targetNextTurn") : t("sessionQueue.targetNextStep")}</span>
+							<span className="min-w-0 flex-1 truncate text-control leading-5 text-text-secondary" title={item.text}>
+								{item.text || t("sessionQueue.emptyText")}
+							</span>
+							<Button
+								variant="ghost"
+								size="icon-xs"
+								className="size-7 shrink-0 rounded-full text-text-tertiary hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
+								aria-label={t("sessionQueue.cancel")}
+								title={t("sessionQueue.cancel")}
+								disabled={busyId === item.id}
+								onClick={() => {
+									void cancel(item.id);
+								}}
+							>
+								<X size={14} aria-hidden="true" />
+							</Button>
+						</ItemTag>
+					)}
+				/>
+			</ListTag>
 		</ComposerWidgetFrame>
 	);
 }

@@ -77,6 +77,9 @@ export function FileSearchResults(props: {
 					<X size={13} />
 				</Button>
 			</div>
+			{/* scroll-ok: nested —— 这个滚动窗里是**两段异质列表**：文件名字结果 + 正文命中分区
+			     （FileContentSection 自带 header 与自己的 hits 数组）。要虚拟化必须先把两段摊平成
+			     一个行序列，否则虚拟器算的高度只是其中一段、与容器 scrollHeight 不一致，滚动位置会错。 */}
 			<div className="file-search-list min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
 				{trimmed.length === 0 ? (
 					<div className="px-3 py-6 text-center text-xs text-muted-foreground">{t("drawer.fileSearchEmptyHint")}</div>

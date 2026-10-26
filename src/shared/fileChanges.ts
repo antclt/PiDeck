@@ -80,6 +80,25 @@ function getToolEditDiff(args: Record<string, unknown>): { oldText: string; newT
 }
 
 /**
+ * 纯函数结果缓存（v0.9.7 渲染虚拟化补丁，#406）：同输入直接返回上次结果，条目到上限整表清空，
+ * 超过 maxInput 的输入不缓存（防长正文撑爆）。本模块原有的 stripAnsi 缓存包装在 dev 侧
+ * stripAnsi 迁往 shared/ansiText.ts 时一并让位——这里只保留通用 helper，
+ * 供 renderer 的 cleanAnswerText 等多趟正则变换使用（见 timeline/answerText.ts）。
+ */
+export function createTextTransformCache(transform: (text: string) => string, limit = 256, maxInput = 64 * 1024): (text: string) => string {
+	const cache = new Map<string, string>();
+	return (text: string) => {
+		const cached = cache.get(text);
+		if (cached !== undefined) return cached;
+		const value = transform(text);
+		if (text.length <= maxInput) {
+			if (cache.size >= limit) cache.clear();
+			cache.set(text, value);
+		}
+		return value;
+	};
+}
+/**
  * 文件修改类工具名（write / edit / create / patch）：产出 diff 目标的工具集合。
  *
  * 单一口径：聚合侧（getToolDiffTarget）与读取侧的「预判要不要把这一行读进内存」

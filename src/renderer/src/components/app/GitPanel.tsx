@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { VirtualStack } from "../ui-shadcn/virtual-stack";
 import { createPortal } from "react-dom";
 import { useAtom, useSetAtom } from "jotai";
 import { ArrowDownToLine, ArrowUpFromLine, Check, CheckCircle2, ChevronDown, ChevronsDownUp, ChevronsUpDown, ClipboardPaste, FileCode2, FolderGit2, GitBranch, List, ListTree, Loader2, Plus, RefreshCw, RotateCcw, Sparkles, TriangleAlert } from "lucide-react";
@@ -1597,6 +1598,8 @@ export function GitPanel(props: GitPanelProps) {
 									</div>
 								)}
 
+								{/* scroll-ok: nested —— 里面是 FileTree（目录→文件两层嵌套，展开态决定行数）与 ResourceGroup。
+								    扁平化会破坏目录层级语义与折叠定位，需先做「树→扁平行」的通用件，未验证不改。 */}
 								<div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
 									{groups.merge.length > 0 && (
 										<ResourceGroup title={t("git.mergeChanges")} count={groups.merge.length} open={resourceOpen.merge} onToggle={() => toggleResource("merge")}>
@@ -1813,6 +1816,8 @@ function CompareChanges(props: {
 	onSelectHistoryRepo?: (path: string) => void;
 }) {
 	const [base, setBase] = useState("");
+	// 对比结果列表的滚动窗：交给 VirtualStack 复用（它要拿它当 getScrollElement）。
+	const compareScrollRef = useRef<HTMLDivElement>(null);
 	const [target, setTarget] = useState("");
 	const [result, setResult] = useState<BranchDiffResult | null>(null);
 	const [loading, setLoading] = useState(false);
@@ -1862,6 +1867,7 @@ function CompareChanges(props: {
 			<PaneHeader id={`${props.paneIdPrefix}-compare`} title={t("git.compareChanges")} count={result?.files.length} open={props.open} onToggle={props.onToggle}>
 				{props.historyRepoOptions && props.historyRepoOptions.length > 1 && props.onSelectHistoryRepo && <GitCompactFilter value={props.historyRepoPath ?? ""} ariaLabel={t("git.switchRepository")} options={props.historyRepoOptions} onChange={props.onSelectHistoryRepo} compact className="max-w-[8.5rem]" />}
 			</PaneHeader>
+			{/* scroll-ok: nested —— 一个滚动窗里两段：上方 base/head 选择控件 + 下方改动文件列表。虚拟器只算得出其中一段的高度，跟容器 scrollHeight 对不上，滚动位置会错。 */}
 			{props.open && (
 				<div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
 					<div className="git-compare-controls">
@@ -1911,10 +1917,13 @@ function CompareChanges(props: {
 									count: result.files.length,
 								})}
 							</div>
-							<div className="min-h-0 flex-1 overflow-auto overscroll-contain">
-								{result.files.map((file) => (
-									<ResourceRow key={file.path} status={0 as GitStatus} letter="" path={file.path} compareStatus={file.status} />
-								))}
+							{/*
+							     对比结果文件列表：行数 = 两次提交/分支之间改动的文件数，大重构可以上百个，
+							     而外层是 flex 填充的滚动窗 —— 正是「行数随数据增长 + 有视口」。
+							     行高固定（ResourceRow 是单行 22px 级），measureElement 实测后基本不抖动。
+							*/}
+							<div ref={compareScrollRef} className="min-h-0 flex-1 overflow-auto overscroll-contain">
+								<VirtualStack items={result.files} scrollRef={compareScrollRef} getKey={(file) => file.path} estimateHeight={22} renderItem={(file) => <ResourceRow status={0 as GitStatus} letter="" path={file.path} compareStatus={file.status} />} />
 							</div>
 						</>
 					)}

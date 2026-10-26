@@ -151,7 +151,7 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 	// 订阅式读主题（2027-02 修正）：直读 dataset 拿不到切主题后的变化，mermaid
 	// 配置会保持旧明暗档直到下次无关重渲染。观察器见 hooks/useDocumentTheme。
 	const isDark = useDocumentTheme() === "dark";
-	// 逐字打字机：默认参数见 useSmoothStream（约 8ms / 每帧最多 6 字）。
+	// 逐字打字机：默认参数见 useSmoothStream（16ms / 每帧最多 10 字；长文本按长度再降频）。
 	const { displayedContent } = useSmoothStream({
 		content: props.text,
 		isStreaming: Boolean(props.isStreaming),

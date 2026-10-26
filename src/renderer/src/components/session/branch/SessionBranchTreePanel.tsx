@@ -9,6 +9,7 @@ import { desktopApi } from "../../../desktopApi";
 import { t } from "../../../i18n";
 import { buildBranchRows, childRowId, collectAllIds, collectRunIds, defaultCollapsedIds, indentUnits, MAX_INDENT_DEPTH, moveRowFocus, prepareTree, rowHasDisclosure } from "./branchTreeView";
 import type { BranchRow } from "./branchTreeView";
+import { VirtualStack, VIRTUAL_STACK_MIN_ROWS } from "../../ui-shadcn/virtual-stack";
 
 /**
  * 右侧抽屉「分支」面板：会话条目树（pi /tree 的桌面只读版）。
@@ -97,6 +98,27 @@ export function SessionBranchTreePanel(props: { forkAtEntry: (entryId: string, f
 
 	const rows = useMemo(() => (tree ? buildBranchRows(tree, { collapsedIds, expandedRuns }) : []), [tree, collapsedIds, expandedRuns]);
 
+	// 虚拟化后离屏行不挂载：按 id 直接 .focus() 会静默变成 no-op（焦点停在原行，focusedRowId 却已前进，
+	// 表现为「按了没反应，再按跳两行」；Home/End 直指首尾行，长树里必在视口外 → 永久失效）。
+	// 所以统一走这里：拿不到节点就先 scrollToIndex 把目标行拉进视口，下一帧再 focus。
+	const virtualizerRef = useRef<{ scrollToIndex: (index: number, options?: { align?: "start" | "center" | "end" | "auto" }) => void } | null>(null);
+	const focusRow = useCallback(
+		(id: string) => {
+			const existing = rowRefs.current.get(id);
+			if (existing) {
+				existing.focus();
+				return;
+			}
+			const index = rows.findIndex((row) => row.node.id === id);
+			if (index < 0) return;
+			virtualizerRef.current?.scrollToIndex(index, { align: "center" });
+			requestAnimationFrame(() => rowRefs.current.get(id)?.focus());
+		},
+		[rows],
+	);
+	// 分支树的滚动窗：虚拟栈复用它当视口（分支可上千行，全量挂载时 DOM 量正比于分支数）。
+	const listRef = useRef<HTMLDivElement | null>(null);
+
 	// 每次拿到新树重置视图状态：默认展开活动路径，助手/工具步骤折叠成段。
 	useEffect(() => {
 		if (!tree) {
@@ -156,7 +178,7 @@ export function SessionBranchTreePanel(props: { forkAtEntry: (entryId: string, f
 				event.preventDefault();
 				const nextId = moveRowFocus(rows, row.node.id, event.key);
 				setFocusedRowId(nextId);
-				rowRefs.current.get(nextId)?.focus();
+				focusRow(nextId);
 				return;
 			}
 			if (event.key === "ArrowRight") {
@@ -172,7 +194,7 @@ export function SessionBranchTreePanel(props: { forkAtEntry: (entryId: string, f
 				const child = childRowId(rows, row.node.id);
 				if (child) {
 					setFocusedRowId(child);
-					rowRefs.current.get(child)?.focus();
+					focusRow(child);
 				}
 				return;
 			}
@@ -185,7 +207,7 @@ export function SessionBranchTreePanel(props: { forkAtEntry: (entryId: string, f
 				const parent = row.parentRowId;
 				if (parent) {
 					setFocusedRowId(parent);
-					rowRefs.current.get(parent)?.focus();
+					focusRow(parent);
 				}
 				return;
 			}
@@ -195,7 +217,9 @@ export function SessionBranchTreePanel(props: { forkAtEntry: (entryId: string, f
 				else toggleNode(row.tail.id);
 			}
 		},
-		[rows, expandRun, toggleNode],
+		// focusRow 必须进依赖：它内部走 virtualizerRef.current.scrollToIndex + 下一帧 focus，
+		// 漏掉时依赖契约不成立（当前两者都随 rows 重建所以还没出错，但这是运气不是设计）。
+		[rows, expandRun, toggleNode, focusRow],
 	);
 
 	// 「看全部」= 展开所有步骤段 + 展开所有子树；「看骨架」= 只留锚点行 + 收起废弃分支。
@@ -326,16 +350,30 @@ export function SessionBranchTreePanel(props: { forkAtEntry: (entryId: string, f
 					</button>
 				</span>
 			</div>
-			<div className="min-h-0 flex-1 overflow-auto overscroll-contain px-2 pb-2">
+			<div ref={listRef} className="min-h-0 flex-1 overflow-auto overscroll-contain px-2 pb-2">
 				{state.kind === "loading" ? <p className="px-1 py-2 text-xs text-text-secondary">{t("session.branchTree.loading")}</p> : null}
 				{state.kind === "empty" ? <BranchTreeEmpty text={t("session.branchTree.empty")} /> : null}
 				{state.kind === "error" ? <p className="px-1 py-2 text-xs text-destructive">{t("session.branchTree.loadFailed", { error: state.message })}</p> : null}
 				{/* 行宽用 min-w-full 而不是 w-max：w-max 会让长预览把行撑出抽屉宽度（truncate 失效、只能横向滚动），
 				    深缩进由 MAX_INDENT_DEPTH 封顶 + ⋮ 提示处理，不需要横向撑开。 */}
 				{state.kind === "tree" && tree ? (
-					<div className="min-w-full" role="tree" aria-label={t("session.branchTree.title")}>
-						{rows.map(renderRow)}
-					</div>
+					// rows 本来就是**扁平行**（buildBranchRows 已经把树压平、折叠态在数组里），
+					// 所以直接交给虚拟栈：键盘导航与 moveRowFocus 全部基于 rows 数组，不看 DOM，
+					// 虚拟化只影响「挂多少行」，不影响可达性逻辑。
+					<VirtualStack
+						items={rows}
+						getKey={(item) => item.node.id}
+						scrollRef={listRef}
+						minRows={VIRTUAL_STACK_MIN_ROWS}
+						// 单行 = 图标 + 单行标签，py-0.5 上下各 2px，约 26px。
+						estimateHeight={26}
+						// treeitem 必须有 role="tree" 祖先，否则 AT 不按树处理（aria-level / aria-selected 失效）。
+						// min-w-full 与基线那层 div 一致：让 role="tree" 容器至少撑满滚动窗宽度，
+						// 否则 hover 背景与截断宽度会收缩。
+						containerProps={{ role: "tree", "aria-label": t("session.branchTree.title"), className: "min-w-full" }}
+						virtualizerRef={virtualizerRef}
+						renderItem={(item) => renderRow(item)}
+					/>
 				) : null}
 			</div>
 			<div className="shrink-0 border-t border-border px-3 py-1.5 text-micro leading-4 text-text-tertiary">{t("session.branchTree.hint")}</div>
