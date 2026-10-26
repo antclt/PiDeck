@@ -1,8 +1,12 @@
-import { mkdir, readdir, stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { readImportMetaHead } from "./importMetaHead";
 import { assertSourceWithinRoot } from "./importPathGuard";
 import { readSessionSourceHead } from "./sessionSourceHead";
+import { ensureProjectSessionDir, getProjectSessionDir, normalizePath, readRecord, safePathToken } from "./importShared";
+
+// 共用工具实现统一在 importShared；仍从本模块转出，保持既有调用点不变。
+export { ensureProjectSessionDir, getProjectSessionDir, normalizePath, readRecord, safePathToken };
 
 /** Cursor JSONL 行结构不固定，统一按 unknown 读取后再逐字段收窄。 */
 export type CursorRecord = Record<string, unknown>;
@@ -37,17 +41,6 @@ export function readNumber(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-export function readRecord(value: unknown): Record<string, unknown> {
-	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-
-export function normalizePath(path?: string): string {
-	return String(path ?? "")
-		.replace(/\\/g, "/")
-		.replace(/\/+$/, "")
-		.toLowerCase();
-}
-
 /**
  * 项目路径 → Cursor `~/.cursor/projects/<slug>` 目录名。
  * Windows：`F:\PiDeck` → `f-PiDeck`（盘符小写，冒号丢掉，分隔符变 `-`）。
@@ -63,17 +56,6 @@ export function encodeCursorProjectSlug(projectPath: string): string {
 
 export function getCursorProjectDir(root: string, projectPath: string): string {
 	return join(root, encodeCursorProjectSlug(projectPath));
-}
-
-export function safePathToken(path: string): string {
-	const normalized = path.replace(/\\/g, "/");
-	const win = normalized.match(/^([A-Za-z]):\/(.+)$/);
-	if (win) return `--${win[1]}--${win[2].replace(/\//g, "-")}--`;
-	return `--${normalized.replace(/^\//, "").replace(/\//g, "-")}--`;
-}
-
-export function getProjectSessionDir(piRoot: string, projectPath: string): string {
-	return join(piRoot, safePathToken(projectPath));
 }
 
 export function getCursorTargetPath(piRoot: string, projectPath: string, session: ParsedCursorSession): string {
@@ -237,10 +219,4 @@ export async function readCursorSessionHead(root: string, filePath: string): Pro
 /** 读取导入产物头部的 import 标记（有界读头部，不再整读会话文件——见 importMetaHead）。 */
 export async function readCursorImportMeta(targetPath: string): Promise<CursorImportMeta | undefined> {
 	return readImportMetaHead(targetPath, "cursor_import");
-}
-
-export async function ensureProjectSessionDir(piRoot: string, projectPath: string) {
-	const dir = getProjectSessionDir(piRoot, projectPath);
-	await mkdir(dir, { recursive: true });
-	return dir;
 }

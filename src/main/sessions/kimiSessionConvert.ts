@@ -3,6 +3,10 @@ import type { SessionImportCopy } from "./SessionImportCopy";
 import { importedContentHasToolCall, importedUnknownBlockAsText, normalizeImportedStopReason, safeIsoTimestamp } from "./importNormalize";
 import { normalizeImportedToolArguments } from "./importToolArguments";
 import { asArray, readNumber, readRecord, readString, type KimiRecord, type ParsedKimiSession } from "./kimiSessionSource";
+import { cleanImportTitle as cleanKimiTitle, zeroUsage } from "./importShared";
+
+// 标题清洗与 usage 占位实现统一在 importShared；仍从本模块转出旧名字。
+export { cleanKimiTitle, zeroUsage };
 
 export type ConvertedKimiSession = {
 	/** 转换结果元数据；`raw` 仅在内存模式（scan 摘要）下由调用方拼装 */
@@ -122,17 +126,6 @@ export async function collectKimiAppendedKeys(entries: Iterable<KimiRecord> | As
 	return keys;
 }
 
-export function zeroUsage() {
-	return {
-		input: 0,
-		output: 0,
-		cacheRead: 0,
-		cacheWrite: 0,
-		totalTokens: 0,
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-	};
-}
-
 /** Kimi usage 四字段 → pi usage 形状；缺省时全零（与 zeroUsage 同口径）。 */
 export function kimiUsageToPi(usage: NormalizedKimiMessage["usage"]) {
 	if (!usage) return zeroUsage();
@@ -151,12 +144,6 @@ function extractPiText(content: PiContent[]): string {
 		.map((item) => readString(item.text) || readString(item.thinking) || readString(item.name))
 		.filter(Boolean)
 		.join(" ");
-}
-
-export function cleanKimiTitle(value?: string): string {
-	const text = value?.replace(/\s+/g, " ").trim();
-	if (!text || /^untitled$/i.test(text)) return "";
-	return text.length > 40 ? `${text.slice(0, 40)}...` : text;
 }
 
 function makeId(sessionId: string, sequence: number): string {

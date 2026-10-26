@@ -5,6 +5,8 @@ import ts from "typescript";
 import vm from "node:vm";
 import { buildTurnDisplay, hasFoldableContent } from "../src/renderer/src/components/session/timeline/buildTurnDisplay.ts";
 import { buildProcessSummary } from "../src/renderer/src/components/session/timeline/segmentSummary.ts";
+// 沙箱里的 AppUtils 依赖 shared/ansiText 的真实现（不在这里复制正则）。
+import { stripAnsiCsi } from "../src/shared/ansiText.ts";
 
 /**
  * 一轮回答（agent-run）扁平展示序列测试。
@@ -207,6 +209,7 @@ function loadAppUtils() {
 		location: { href: "file:///Users/test/app" },
 		require: (id) => {
 			if (id === "../session/composer/chips") return { formatFilePathRef: (p) => p };
+			if (id.endsWith("shared/ansiText")) return { stripAnsiCsi };
 			if (id === "../session/timelineFailureNotice") {
 				// 重试状态消息判定：与生产实现同口径（diagnostic.retry* i18nKey 集合）
 				const RETRY_KEYS = new Set(["diagnostic.retryScheduled", "diagnostic.retryScheduledAfterDelay", "diagnostic.retrySucceeded", "diagnostic.retryFailed"]);

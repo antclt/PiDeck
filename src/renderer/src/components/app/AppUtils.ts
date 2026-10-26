@@ -9,6 +9,11 @@ import { isRetryStatusMessage } from "../session/timelineFailureNotice";
 import { t, type TranslationKey } from "../../i18n";
 import { formatFilePathRef } from "../session/composer/chips";
 import { replaceExpandedRefBlocksWithLabels } from "../session/composer/quoteChip";
+// ANSI 净化与工具参数解析的唯一实现在 shared/；本文件只转出旧名字，避免调用点大面积改动。
+import { stripAnsiCsi as stripAnsi } from "../../../../shared/ansiText";
+
+export { stripAnsi };
+export { parseToolArgs } from "../../../../shared/toolArgs";
 
 /* ── 文件树拖拽负载 ── */
 
@@ -75,12 +80,6 @@ export function fileNodeDragPayloadToRef(payload: FileNodeDragPayload): string {
 }
 
 /* ── ANSI 清理 ── */
-
-const ANSI_RE = /\x1b\[[0-9;]*[a-zA-Z]/g;
-
-export function stripAnsi(text: string): string {
-	return text.replace(ANSI_RE, "");
-}
 
 export function stripThinkingTags(text: string): string {
 	return text.replace(/<thinking>[\s\S]*?<\/thinking>/gi, "").trim();
@@ -1099,27 +1098,6 @@ export function buildSuggestionItems(prompt: string, cursor: number, commands: P
 			}));
 	}
 	return [];
-}
-
-/* ── 工具参数解析 ── */
-
-export function parseToolArgs(value: unknown): Record<string, unknown> | undefined {
-	if (!value) return undefined;
-	if (typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
-	if (typeof value !== "string" || !value.trim()) return undefined;
-	try {
-		let parsed = JSON.parse(value) as unknown;
-		if (typeof parsed === "string" && parsed.trim()) {
-			try {
-				parsed = JSON.parse(parsed);
-			} catch {
-				return undefined;
-			}
-		}
-		return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : undefined;
-	} catch {
-		return undefined;
-	}
 }
 
 export function getToolFilePath(args: unknown): string | undefined {

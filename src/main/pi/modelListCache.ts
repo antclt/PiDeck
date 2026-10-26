@@ -30,6 +30,7 @@ import { join } from "node:path";
 import { stat } from "node:fs/promises";
 import type { AvailableModel, ModelListFailReason, ModelListReport } from "../../shared/types";
 import type { PiLocator } from "./PiLocator";
+import { stripAnsiCsi as stripAnsi } from "../../shared/ansiText";
 import type { SettingsStore } from "../settings/SettingsStore";
 
 /** 本地 models.json 读取面：只依赖 parsed（+解析诊断），避免反向依赖 ConfigManager 实现。
@@ -115,10 +116,6 @@ export function isWafBlockedSignal(message: string): boolean {
 
 function isYesNo(token: string): boolean {
 	return /^(yes|no)$/i.test(token);
-}
-
-function stripAnsi(text: string): string {
-	return text.replace(/\x1B\[[0-9;]*[A-Za-z]/g, "");
 }
 
 /**
