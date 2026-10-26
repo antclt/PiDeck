@@ -2,7 +2,7 @@
 
 PiDeck 的开发规则入口。每次会话注入，只放**铁律 + 路由**；细节按「改动前先读」到 `docs/` 取。
 维护纪律：新增规则先问「是否每次会话都适用」——否则写进 docs 并在路由表加一行；每条规则必须可判定（触发条件 + 动作 + 验证方式）；失效引用当次删除。本文件上限 **120 行 / 8KB**。
-本项目只维护根这一份 `AGENTS.md`，不在子目录生成规则文件；规则冲突时以本文件与代码实际类型/API 为准。
+本项目只维护根这一份 `AGENTS.md`，不在子目录生成规则文件；`~/.pi/agent/AGENTS.md` 的通用规则（中文、先读后改、最小改动、专用工具优先）仍然生效，冲突时以本文件为准；与代码实际类型/API 冲突时以代码为准。
 
 ## 项目
 
@@ -21,6 +21,8 @@ PiDeck 是 Electron 桌面应用：在多个项目目录间管理和运行 AI Ag
 | 全量单测（仅跨域大改 / 合并前） | `npm test` |
 | 单测串行（排查并发干扰） | `npm run test:serial` |
 | 格式化 | `npm run format`（CI 用 `npm run check:format`） |
+| 本地启动 | `npm run dev` |
+| 构建 | 只跑改动涉及的子构建；**禁止全量 `npm run build`**（含 4 个 Go sidecar、packages/catalog/SDK、runtime 打包、vite），除非用户明确要求 |
 | E2E（窗口默认屏幕外、不打扰；需要看窗口设 `PIDECK_E2E_WINDOW_MODE=visible`） | `npx playwright test e2e/<相关>.spec.ts` |
 
 - **门禁**：合并前 `typecheck` + 改动涉及的针对性测试全绿；纯 UI 样式微调至少 typecheck。禁止「先合再修」。
@@ -28,8 +30,8 @@ PiDeck 是 Electron 桌面应用：在多个项目目录间管理和运行 AI Ag
 
 ## 铁律
 
-1. **不加第二条 pi↔PiDeck 通道。** 六类宿主侧车（auth、模型快照、standby 池、一次性补全、`/reload` 扩展、`pideck-cua` MCP）各只允许一种用途，**禁止扩成通用桥**；新增工具/通道先改 `docs/host-boundaries.md` 再改代码。
-2. **不改写 pi 会话文件。** 编辑/删除走 pi 原生 `context_edit`，重发用 `deleted` 墓碑；pi 活着时禁止直接改会话 JSONL。
+1. **不加第二条 pi↔PiDeck 通道。** 六类宿主通道（认证、模型快照、standby 池、一次性补全、`/reload` 扩展、`pideck-cua` MCP）各只允许一种用途，**禁止扩成通用桥**；新增工具/通道先改 `docs/host-boundaries.md` 再改代码。
+2. **不改写 pi 正在使用的会话文件。** 编辑/删除走 `context_edit`，重发用 `deleted` 墓碑；导入/迁移走专用写入路径，不直接改 pi 活着的 JSONL。
 3. **新 IPC 三处同步**：`src/shared/ipc.ts` 通道常量 → `src/main/ipc/*Ipc.ts` handler → `src/preload/index.ts` 转发，漏一处运行时 undefined。
 4. **`shared/` 是纯契约层**：只被依赖，不反向 import 任何运行时层；类型按域放 `shared/types/`，IPC 名只在 `shared/ipc.ts`。
 5. **原生模块禁止顶层静态 import**（koffi / node-pty）：必须在专属模块内 `createRequire` 惰性加载 + try/catch 降级，否则跨 arch 打包后缺二进制启动即崩。
@@ -44,12 +46,12 @@ PiDeck 是 Electron 桌面应用：在多个项目目录间管理和运行 AI Ag
 | 改动涉及 | 先读 |
 |---|---|
 | `resources/*.mjs`、`resources/extensions/**`、`src/main/pi/**`、MCP host、spawn 侧车 | `docs/host-boundaries.md` |
-| 窗口 / webview / preload / 打包 / 原生模块 / 跨平台路径 | `docs/electron-playbook.md` |
-| `src/main/index.ts`、`src/main/ipc/**`、`src/shared/**`、会话链路（`SessionRuntimeCoordinator`/`SessionScanner`）、renderer 状态、新增领域模块、文件拆分 | `docs/architecture.md` |
+| 窗口 / webview / preload / 打包 / 原生模块 / 跨平台路径 / git 子进程 / 终端（node-pty） | `docs/electron-playbook.md` |
+| `src/main/index.ts`、`src/main/ipc/**`、`src/shared/**`、会话链路（`SessionRuntimeCoordinator`/`SessionScanner`）、renderer 组件逻辑与状态、新增领域模块、文件拆分 | `docs/architecture.md` |
 | 写代码/写测试/补注释、改错误处理、动安全边界、改持久化/设置、i18n | `docs/engineering-standards.md` |
 | CSS / Tailwind / shadcn / beUI / 布局 | `docs/ui-and-css.md` |
 | Go sidecar、商店、搜索、会话存储、插件、公告、发版 | `docs/maintenance-domains.md`（先看顶部速查表） |
-| 大文件域迁移 / 文件拆分 | `docs/*-split-plan.md`（方法见 `docs/architecture.md` §长期重构纪律） |
+| 大文件域迁移 / 文件拆分 | `docs/main-index-split-plan.md`、`docs/app-tsx-split-plan.md`、`docs/agent-manager-split-plan.md`（方法见 `docs/architecture.md` §长期重构纪律） |
 | pi 发新版 / 上游语义对齐 | `.pi/skills/pideck-pi-version-sync/`、`.pi/skills/pideck-upstream-parity-review/` |
 
 ## 协作
