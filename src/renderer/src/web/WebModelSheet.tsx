@@ -100,7 +100,7 @@ export function WebModelSelector(props: { model?: SessionModelPreference; models
 			<Button
 				type="button"
 				variant="ghost"
-				className="h-8 max-w-[30vw] shrink-0 justify-start gap-1 px-1 text-caption text-muted-foreground hover:bg-muted/60 hover:text-foreground sm:max-w-[220px]"
+				className="h-8 max-w-[30vw] shrink-0 justify-start gap-1 px-1 text-caption text-muted-foreground hover:bg-muted/60 hover:text-foreground pointer-coarse:h-9 sm:max-w-[220px]"
 				aria-label={t("web.model")}
 				title={selectedName ? `${selectedName} · ${model?.provider ?? ""}/${model?.modelId ?? ""}` : t("web.model")}
 				onClick={() => {
@@ -125,7 +125,7 @@ export function WebModelSelector(props: { model?: SessionModelPreference; models
 								type="button"
 								variant="ghost"
 								size="icon-sm"
-								className="shrink-0 text-muted-foreground hover:text-foreground"
+								className="shrink-0 text-muted-foreground hover:text-foreground pointer-coarse:size-9"
 								aria-label={props.refreshing ? t("app.modelPickerRefreshing") : t("app.modelPickerRefresh")}
 								title={props.refreshing ? t("app.modelPickerRefreshing") : t("app.modelPickerRefresh")}
 								disabled={props.refreshing}

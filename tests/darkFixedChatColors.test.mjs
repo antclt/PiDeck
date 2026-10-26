@@ -13,13 +13,23 @@ function block(selector) {
 }
 
 test("fixed light chat/table colors are tokenized for dark mode", () => {
-	// 暖白基底：浅色卡片近白底，暗色对齐暖黑系
-	assert.match(block(":root"), /--color-chat-card-bg:\s*#fafafa;/i);
-	assert.match(block(":root"), /--color-chat-muted-bg:\s*#f4f4f5;/i);
+	// 白卡模型（ZCode page #f8f8f8 + 白卡）：浅色会话卡一律纯白，靠浮在画布上分层；
+	// 暗色对齐暖黑系保持原有阶梯（card=panel 档、muted 提亮一档）。
+	assert.match(block(":root"), /--color-chat-card-bg:\s*#ffffff;/i);
+	assert.match(block(":root"), /--color-chat-muted-bg:\s*#ffffff;/i);
 	assert.match(block(":root"), /--color-chat-table-bg:\s*#ffffff;/i);
-	assert.match(block(':root[data-theme="dark"]'), /--color-chat-card-bg:\s*#171717;/i);
+	assert.match(block(':root[data-theme="dark"]'), /--color-chat-card-bg:\s*#1a1a1a;/i);
 	assert.match(block(':root[data-theme="dark"]'), /--color-chat-muted-bg:\s*#202020;/i);
-	assert.match(block(':root[data-theme="dark"]'), /--color-chat-table-bg:\s*#171717;/i);
+	assert.match(block(':root[data-theme="dark"]'), /--color-chat-table-bg:\s*#1a1a1a;/i);
+	// 会话画布档：浅色由 panel/sidebar 派生（经典值 #f8f8f8），暗色=panel 维持整页同底
+	assert.match(block(":root"), /--color-bg-page:\s*color-mix\(in srgb, var\(--color-bg-panel\) 55%, var\(--color-bg-sidebar\)\);/);
+	assert.match(block(':root[data-theme="dark"]'), /--color-bg-page:\s*var\(--color-bg-panel\);/);
+	// 用户气泡走专属 token：浅色白卡 / 暗色 accent 4%+muted 提亮卡，禁止写死 hex
+	assert.match(block(":root"), /--color-chat-bubble-bg:\s*var\(--color-bg-panel\);/);
+	assert.match(block(':root[data-theme="dark"]'), /--color-chat-bubble-bg:\s*color-mix\(in srgb, var\(--color-accent\) 4%, var\(--color-bg-muted\)\);/);
+	// 墨水罩染弱表面：明暗都从 text-primary 派生（暗色自动变白墨水提亮方向）
+	assert.match(block(":root"), /--color-surface-ink-subtle:\s*color-mix\(in srgb, var\(--color-text-primary\) 3%, transparent\);/);
+	assert.match(block(":root"), /--color-surface-ink:\s*color-mix\(in srgb, var\(--color-text-primary\) 5%, transparent\);/);
 
 	assert.match(block(".diagnostic-card"), /background:\s*var\(--color-chat-muted-bg\);/);
 	// 用户气泡规则在 #113 会话动画改版中重新引入；要求只使用语义 token（color-mix + var），
@@ -33,10 +43,10 @@ test("fixed light chat/table colors are tokenized for dark mode", () => {
 		assert.doesNotMatch(body, /#[0-9a-f]{3,8}\b/i, "user-turn-bubble must not hardcode hex colors");
 		assert.match(body, /var\(--color-/, "user-turn-bubble must use semantic tokens");
 	}
-	// 表格 wrapper 是「单卡片」皮（边框/圆角/底色）：工具栏（first-child）在卡片底色上
-	// 半透明浮现，滚动区（last-child）透明，表头承载唯一视觉表面；一律语义 token（color-mix + var）。
-	assert.match(block('[data-streamdown="table-wrapper"] > div:first-child'), /color-mix\(in srgb, var\(--color-/);
+	// 表格 wrapper 是「单卡片」皮（边框/圆角/底色）：工具栏（first-child）与表头都是
+	// 墨水罩染弱表面（var(--color-surface-ink*)），滚动区（last-child）透明；一律语义 token。
+	assert.match(block('[data-streamdown="table-wrapper"] > div:first-child'), /background:\s*var\(--color-surface-ink-subtle\);/);
 	assert.match(block('[data-streamdown="table-wrapper"] > div:last-child'), /background:\s*transparent;/);
 	assert.match(block('[data-streamdown="table"]'), /background:\s*var\(--color-chat-table-bg(?:,\s*var\(--color-bg-panel\))?\);/);
-	assert.match(block('[data-streamdown="table-wrapper"] thead'), /color-mix\(in srgb, var\(--color-/);
+	assert.match(block('[data-streamdown="table-wrapper"] thead'), /background:\s*var\(--color-surface-ink-subtle\);/);
 });

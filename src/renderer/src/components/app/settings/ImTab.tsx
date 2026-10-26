@@ -415,8 +415,10 @@ function FeishuPane(_props: Props) {
 					</div>
 				</div>
 
-				{showAddForm && (
-					<div className="config-im-form">
+				{/* 添加 Bot 表单开合走共享折叠原语（真高度渐变 + exit 后卸载 + reduced-motion 回退）；
+				    display:contents 根不生成盒子，样式类留在折叠体本身。 */}
+				<Collapsible open={showAddForm} className="contents">
+					<CollapsibleContent className="config-im-form">
 						<div className="config-field">
 							<Label>{t("config.im.appId")}</Label>
 							<Input
@@ -484,8 +486,8 @@ function FeishuPane(_props: Props) {
 								</>
 							)}
 						</div>
-					</div>
-				)}
+					</CollapsibleContent>
+				</Collapsible>
 
 				{bots.length === 0 && !showAddForm && <div className="py-12 text-center text-control text-text-tertiary">{t("config.im.noBotConfig")}</div>}
 

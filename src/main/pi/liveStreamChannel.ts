@@ -6,7 +6,7 @@ import { stripAnsi } from "./agentUtils";
 /**
  * Live 双通道（thinking / 正文）流式状态机（AgentManager 拆分 Wave 3）。
  *
- * 职责：拥有流式缓冲、节流发射器（LatestByKeyEmitter，50ms）、增量推送基准
+ * 职责：拥有流式缓冲、节流发射器（LatestByKeyEmitter，100ms）、增量推送基准
  * （lastSent*ByAgent / *PushCountByAgent）与思考段（thinkingSegmentByAgent）生命周期。
  * 消息列表（this.messages）的装配与骨架挂载仍归 AgentManager——本通道只管
  * 「live 累积 → 渲染层直通通道」，终态落盘由 AgentManager 的 finalize/upsert 完成
@@ -55,10 +55,17 @@ export class LiveStreamChannel {
 
 	// ── 正文通道 ───────────────────────────────────────────────
 
-	/** text_delta：累积后经 textEmitter（50ms）推送，不增长 messages。 */
+	/**
+	 * text_delta：累积后经 textEmitter（100ms）推送，不增长 messages。
+	 *
+	 * 2027-02 性能审计：这里推**原文**，ANSI 剥离挪到 emitTextStreamNow（每 100ms
+	 * flush 一次才 strip）——原先每个 delta 都对全量累积文本跑正则（节流器只限 IPC
+	 * 发射频率，限不住这次全文扫描），O(N²)/消息；挪到 flush 后成本按 delta 率降一个
+	 * 数量级，且 stripAnsi 的 ESC 快速路径让无 ANSI 的正文几乎零成本。
+	 */
 	accumulateText(agentId: string, nextText: string) {
 		this.streamingText.set(agentId, nextText);
-		this.textEmitter.push(agentId, stripAnsi(nextText));
+		this.textEmitter.push(agentId, nextText);
 	}
 
 	getText(agentId: string): string | undefined {
@@ -92,7 +99,9 @@ export class LiveStreamChannel {
 	 * 顺带同步 isStreaming 补丁：text_delta 走独立通道后不再触发 flushMessageEmit，
 	 * 若仍只在 flush 里推 patch，渲染层拿不到 isStreaming=true，气泡不会渲染。
 	 */
-	emitTextStreamNow(agentId: string, text: string, done = false) {
+	emitTextStreamNow(agentId: string, rawText: string, done = false) {
+		// ANSI 剥离开口在 emit：flush 每 100ms 一次，不再每个 delta 全文扫描（见 accumulateText 注释）
+		const text = stripAnsi(rawText);
 		const lastSent = this.lastSentTextByAgent.get(agentId) ?? "";
 		const pushCount = (this.textPushCountByAgent.get(agentId) ?? 0) + 1;
 		const sendFull = !text.startsWith(lastSent) || pushCount >= 50;
@@ -137,13 +146,16 @@ export class LiveStreamChannel {
 		return this.thinkingSegmentByAgent.has(agentId);
 	}
 
-	/** thinking_delta：确保段存在 → 累积 → 经 thinkingEmitter（50ms）推送。 */
+	/**
+	 * thinking_delta：确保段存在 → 累积 → 经 thinkingEmitter（100ms）推送。
+	 * 与正文通道同策略：推原文，strip 挪到 emitThinkingNow（每 100ms 一次）。
+	 */
 	pushThinkingDelta(agentId: string, delta: string) {
 		this.ensureThinkingSegment(agentId);
 		const prev = this.streamingThinking.get(agentId) ?? "";
 		const next = prev + delta;
 		this.streamingThinking.set(agentId, next);
-		this.thinkingEmitter.push(agentId, stripAnsi(next));
+		this.thinkingEmitter.push(agentId, next);
 	}
 
 	/** 首 thinking_delta：铸造与 History 相同的稳定段 id（msg-thinking-${assistantMessageId}）。 */
@@ -178,7 +190,7 @@ export class LiveStreamChannel {
 		this.thinkingSegmentByAgent.set(agentId, segment);
 		const text = this.streamingThinking.get(agentId) ?? "";
 		this.thinkingEmitter.flush(agentId);
-		this.emitThinkingNow(agentId, stripAnsi(text));
+		this.emitThinkingNow(agentId, text);
 	}
 
 	/** 重载后身份重定向：把段的 assistantMessageId 从 fromId 改到 toId（仅当匹配；fromId 可为 undefined，等价无操作）。 */
@@ -220,9 +232,11 @@ export class LiveStreamChannel {
 	}
 
 	/** 节流推送 live 思考（done=false）；无段身份时丢弃。 */
-	emitThinkingNow(agentId: string, text: string) {
+	emitThinkingNow(agentId: string, rawText: string) {
 		const segment = this.thinkingSegmentByAgent.get(agentId);
 		if (!segment) return;
+		// 与正文通道同策略：ANSI 剥离只在 emit（每 100ms 一次）发生
+		const text = stripAnsi(rawText);
 		// 增量推送（同正文通道治理）：只发上次快照之后的新字符；非 append
 		// （重置/ANSI 变化）或距上次快照超过 50 次推送（≈2.5s）时补一次全量，
 		// 兜底渲染层 HMR/晚绑定丢失的增量。

@@ -14,6 +14,7 @@
  */
 import { atom, type Getter } from "jotai";
 import { atomFamily } from "jotai/utils";
+import { registerSessionFamilyForDisposal } from "./session-family-registry";
 import type { ChatMessage } from "../../../shared/types";
 import type { SessionModifiedFile } from "../components/app/AppParts";
 import { buildOutline, getToolChangedLineCount, getToolFilePath, getToolNewContent } from "../components/app/AppUtils";
@@ -136,9 +137,11 @@ export const outlineItemsAtom = createOutlineItemsAtom((get) => {
 });
 
 /** 每个分屏会话自己的大纲条目，避免依赖当前聚焦会话。 */
-export const outlineItemsBySessionIdAtomFamily = atomFamily((sessionId: string) =>
-	createOutlineItemsAtom((get) => ({
-		sessionId,
-		entry: get(sessionMessagesCacheAtom)[sessionId],
-	})),
+export const outlineItemsBySessionIdAtomFamily = registerSessionFamilyForDisposal(
+	atomFamily((sessionId: string) =>
+		createOutlineItemsAtom((get) => ({
+			sessionId,
+			entry: get(sessionMessagesCacheAtom)[sessionId],
+		})),
+	),
 );

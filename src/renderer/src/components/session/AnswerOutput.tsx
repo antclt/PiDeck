@@ -4,6 +4,7 @@ import { streamingTextBySessionIdAtomFamily } from "../../atoms/session-atoms";
 import { useHoldTextWhileSelecting } from "../../hooks/useHoldTextWhileSelecting";
 import { MarkdownStream } from "./MarkdownStream";
 import { RawToolCallFallback } from "./RawToolCallFallback";
+import { SettledLongAnswer } from "./SettledLongAnswer";
 import { cleanAnswerText } from "./timeline/answerText.ts";
 import { detectLeakedToolCallXml } from "./timeline/leakedToolCallText.ts";
 
@@ -65,7 +66,7 @@ export const AnswerOutput = memo(function AnswerOutput(props: {
 	// 兜底（issue #315）：服务端漏出的工具调用协议原文不走 markdown，折叠展示。
 	return (
 		<div className={answerOutputClassName(props.variant ?? "process")} data-message-id={props.messageId} data-is-streaming="0" data-variant={props.variant ?? "process"} data-settle={props.settle ? "1" : undefined} style={{ display: props.hidden ? "none" : undefined }}>
-			{detectLeakedToolCallXml(cleanText) ? <RawToolCallFallback text={cleanText} messageId={props.messageId} /> : <MarkdownStream text={cleanText} isStreaming={false} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />}
+			{detectLeakedToolCallXml(cleanText) ? <RawToolCallFallback text={cleanText} messageId={props.messageId} /> : <SettledLongAnswer text={cleanText} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />}
 		</div>
 	);
 });

@@ -25,6 +25,10 @@ import test from "node:test";
  * - ImTab 的 `aria-expanded={isExpanded}`（modalKeyboardAccess.test.mjs）
  * - DshPluginSection 的 `aria-controls={detailId}` / `id={detailId}` 配对
  *
+ * 第三批（同日补漏）：TokenDancePanel 展开详情、DshConfigTab PluginCard、
+ * DshProviderCards CustomSettings（「自定义设置」折叠区）、DshPluginSection 安装表单——
+ * 前两个走 contents 包装形态；后两个文件本就在清单里，补钉各自的瞬时挂载不得复活。
+ *
  * 正则一律用 \s* 容忍换行缩进，格式化不应打红本契约。
  */
 
@@ -34,7 +38,18 @@ const read = (path) => readFileSync(`src/renderer/src/${path}`, "utf8");
 const DIRECT_SWAP = ["components/workspace/ModelTraceDetail.tsx"];
 
 /** 外层保留（ref / 拖拽 / <li> 语义），内部加 display:contents 包装层。 */
-const CONTENTS_WRAPPED = ["components/config/SecuritySection.tsx", "config/ModelsTab.tsx", "config/AuthTab.tsx", "config/DshProviderCards.tsx", "config/DshModelsTable.tsx", "config/DshPluginSection.tsx", "components/app/settings/ImTab.tsx", "components/app/git/GitGraph.tsx"];
+const CONTENTS_WRAPPED = [
+	"components/config/SecuritySection.tsx",
+	"config/ModelsTab.tsx",
+	"config/AuthTab.tsx",
+	"config/DshProviderCards.tsx",
+	"config/DshModelsTable.tsx",
+	"config/DshPluginSection.tsx",
+	"components/app/settings/ImTab.tsx",
+	"components/app/git/GitGraph.tsx",
+	"config/TokenDancePanel.tsx",
+	"config/DshConfigTab.tsx",
+];
 
 const ALL = [...DIRECT_SWAP, ...CONTENTS_WRAPPED];
 
@@ -90,4 +105,53 @@ test("ProxyTab 的表格行刻意不迁移（包装 div 会破坏表格结构）
 	const source = read("components/app/settings/ProxyTab.tsx");
 	// TableRow 是 <tr>：塞 <div> 进表格会破坏语义与列宽计算，故保留纯淡入
 	assert.doesNotMatch(source, /<Collapsible/, "表格行不应引入 Collapsible 包装（会生成 div 嵌套在表格里）");
+});
+
+test("LogViewer 的表格行同 ProxyTab 刻意不迁移", () => {
+	const source = read("components/app/settings/LogViewer.tsx");
+	assert.doesNotMatch(source, /<Collapsible/, "展开行是 <TableRow>：塞 <div> 进表格会破坏语义与列宽计算");
+});
+
+test("TokenDancePanel 展开详情不再瞬时挂载", () => {
+	const source = read("config/TokenDancePanel.tsx");
+	assert.doesNotMatch(source, /\{expanded\s*&&\s*\(/, "详情块必须常驻 CollapsibleContent 受控开合，不得回退条件挂载");
+	// 对外契约：整行标题的 aria-expanded 是既有可访问性承诺，迁移不得顺手删
+	assert.match(source, /aria-expanded=\{expanded\}/, "标题行必须继续声明 aria-expanded");
+});
+
+test("DshConfigTab PluginCard 展开区不再瞬时挂载", () => {
+	const source = read("config/DshConfigTab.tsx");
+	assert.doesNotMatch(source, /\{open\s*&&\s*\(/, "插件卡详情必须走 CollapsibleContent 高度动画，不得回退条件挂载");
+	assert.match(source, /<CollapsibleContent\s+className="border-t border-border\/40"/, "分隔线样式必须留在折叠体本身");
+});
+
+test("DshProviderCards CustomSettings 折叠区不再瞬时挂载", () => {
+	const source = read("config/DshProviderCards.tsx");
+	assert.doesNotMatch(source, /\{open\s*&&\s*<div/, "「自定义设置」折叠区必须走 CollapsibleContent 高度动画");
+	assert.match(source, /<CollapsibleContent\s+className="grid gap-2\.5 border-t border-border\/40 px-3 py-2\.5"/, "网格布局与分隔线必须留在折叠体本身");
+});
+
+test("DshPluginSection 安装表单开合不再瞬时挂载", () => {
+	const source = read("config/DshPluginSection.tsx");
+	assert.doesNotMatch(source, /\{showInstall\s*&&\s*\(/, "安装表单必须常驻 CollapsibleContent 受控开合，不得回退条件挂载");
+});
+
+test("AuthTab 使用引导与选择供应商面板开合不再瞬时挂载", () => {
+	const source = read("config/AuthTab.tsx");
+	assert.doesNotMatch(source, /\{showGuide\s*&&\s*\(/, "使用引导是可再开的 disclosure，必须走折叠原语高度动画");
+	assert.doesNotMatch(source, /\{selectingProvider\s*&&\s*\(/, "选择供应商面板开合把整个供应商列表顶开/收拢，必须走高度动画");
+	assert.match(source, /<Collapsible\s+open=\{showGuide\}\s+className="contents">/);
+	assert.match(source, /<Collapsible\s+open=\{selectingProvider\}\s+className="contents">/);
+});
+
+test("ModelsTab Provider 配置指南开合不再瞬时挂载", () => {
+	const source = read("config/ModelsTab.tsx");
+	assert.doesNotMatch(source, /\{showGuide\s*&&\s*\(/, "配置指南是可再开的 disclosure，必须走折叠原语高度动画");
+	assert.match(source, /<Collapsible\s+open=\{showGuide\}\s+className="contents">/);
+});
+
+test("ImTab 添加 Bot 表单开合不再瞬时挂载", () => {
+	const source = read("components/app/settings/ImTab.tsx");
+	assert.doesNotMatch(source, /\{showAddForm\s*&&\s*\(/, "添加表单必须常驻 CollapsibleContent 受控开合，不得回退条件挂载");
+	assert.match(source, /<Collapsible\s+open=\{showAddForm\}\s+className="contents">/);
 });

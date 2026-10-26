@@ -90,7 +90,7 @@ function presetUpdateErrorMessage(error: unknown): string {
  *  不覆盖的话 10px 字旁边会撑出 10px 横向内边距。
  *  min-w-0：embedded 时胶囊落在 .chat-header-actions 内，legacy 规则给那里的 button
  *  加了 min-width:60px（topbar 快捷钮定制），会把胶囊撑成固定宽度。 */
-const PRESET_CHIP_BASE = "h-[18px] min-w-0 shrink-0 gap-1 rounded-full border px-1.5 has-[>svg]:px-1.5 text-[10px] font-semibold leading-none";
+const PRESET_CHIP_BASE = "h-[18px] min-w-0 shrink-0 gap-1 rounded-full border px-1.5 has-[>svg]:px-1.5 text-micro font-semibold leading-none";
 
 export function DshAgentPresetControl(props: { sessionId: string; disabled?: boolean }) {
 	const record = useAtomValue(sessionRecordByIdAtomFamily(props.sessionId));

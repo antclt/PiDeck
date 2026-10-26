@@ -225,3 +225,30 @@ test("扫描读取上界契约：readFileHead 句柄定位读 + 常量上界", (
 	assert.ok(!listScan.includes('readFile(fullPath, "utf8")'), "list() 全局扫描不得全量读文件");
 	assert.ok(!projectScan.slice(0, 2500).includes('readFile(fullPath, "utf8")'), "listByProject() 项目扫描不得全量读文件");
 });
+
+test("list() 结果缓存：TTL 内复用同一结果对象，写操作后立刻失效（2027-02 性能治理）", async () => {
+	const home = await mkdtemp(join(tmpdir(), "pideck-prompt-cache-"));
+	try {
+		const { PromptManager } = loadTsCommonJs("src/main/prompts/PromptManager.ts");
+		const promptsDir = join(home, ".pi", "agent", "prompts");
+		await mkdir(promptsDir, { recursive: true });
+		await writeFile(join(promptsDir, "alpha.md"), "---\ndescription: 甲\n---\n\n正文", "utf8");
+		const manager = new PromptManager(home);
+		const first = await manager.list();
+		assert.equal(first.templates.length, 1);
+		const second = await manager.list();
+		assert.ok(second === first, "TTL 内必须复用同一结果（不重新逐文件读头部）");
+
+		// 写操作（新建模板）后必须立刻可见
+		await manager.create({ name: "beta", description: "乙" });
+		const afterCreate = await manager.list();
+		assert.notEqual(afterCreate, first, "写操作必须让缓存失效");
+		assert.equal(
+			afterCreate.templates.some((template) => template.name === "beta"),
+			true,
+			"新建模板立即可见",
+		);
+	} finally {
+		await rm(home, { recursive: true, force: true });
+	}
+});

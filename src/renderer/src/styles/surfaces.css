@@ -324,7 +324,8 @@
   flex-direction: column;
   height: 100%;
   overflow: hidden;
-  background: var(--color-bg-panel);
+  /* 抽屉画布提亮半档（比正文稍白做区分）：chrome 与文件/Git 面板同档，视口白底成「卡」 */
+  background: var(--color-bg-page-raised);
 }
 
 /* 标签栏：tab 自身外观走 Tailwind（对齐中间栏文件 tab），此处只保留原生关闭钮 */
@@ -1798,13 +1799,12 @@
   object-fit: cover;
 }
 
+/* 尺寸（size-5）与圆角（rounded-full）由调用点的 Tailwind utility 决定：
+   utility 层高于 legacy，这里再写 width/height/border-radius 只会变成死规则。 */
 .image-remove-btn {
   position: absolute;
   top: 2px;
   right: 2px;
-  width: 20px;
-  height: 20px;
-  border-radius: var(--radius-pill);
   background: var(--image-thumbnail-remove-bg);
   color: var(--color-text-inverse);
   border: none;
@@ -2550,7 +2550,7 @@ div.fixed.inset-0.z-50 {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-md);
   border-radius: var(--radius-md);
 }
 .file-diff-pdf-preview {
@@ -2588,10 +2588,10 @@ div.fixed.inset-0.z-50 {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background-color: var(--color-bg-app, #ffffff);
+  background-color: var(--color-bg-app);
   background-image: radial-gradient(
     900px 480px at 50% 0%,
-    color-mix(in srgb, var(--color-accent, #18181b) 5%, transparent),
+    color-mix(in srgb, var(--color-accent) 5%, transparent),
     transparent 65%
   );
 }
@@ -2603,7 +2603,7 @@ div.fixed.inset-0.z-50 {
   text-align: center;
   border-radius: var(--radius-lg, 10px);
   background: var(--color-bg-panel, #ffffff);
-  border: 1px solid var(--color-border-default, #dfdfdf);
+  border: 1px solid var(--color-border-default, rgba(13, 13, 13, 0.13));
   box-shadow: var(--shadow-modal, 0 10px 15px -3px rgba(9, 9, 11, 0.1));
   animation: error-boundary-rise 0.25s ease-out both;
 }
@@ -2650,7 +2650,7 @@ div.fixed.inset-0.z-50 {
   max-width: 420px;
   font-size: 13.5px;
   line-height: 1.7;
-  color: var(--color-text-secondary, #4b5563);
+  color: var(--color-text-secondary, #4a4a4a);
   font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
   word-break: break-all;
 }
@@ -2660,14 +2660,14 @@ div.fixed.inset-0.z-50 {
   max-width: 440px;
   text-align: left;
   border-radius: var(--radius-sm, 6px);
-  background: var(--color-bg-muted, #f4f4f5);
-  border: 1px solid var(--color-border-subtle, #e5e5e5);
+  background: var(--color-bg-muted, #f4f4f4);
+  border: 1px solid var(--color-border-subtle, rgba(13, 13, 13, 0.1));
 }
 .app-error-boundary-stack summary {
   padding: 10px 14px;
   font-size: 12px;
   font-weight: 500;
-  color: var(--color-text-secondary, #4b5563);
+  color: var(--color-text-secondary, #4a4a4a);
   cursor: pointer;
   user-select: none;
   list-style: none;
@@ -2693,7 +2693,7 @@ div.fixed.inset-0.z-50 {
   margin: 0;
   padding: 12px 14px;
   overflow: auto;
-  border-top: 1px solid var(--color-border-subtle, #e5e5e5);
+  border-top: 1px solid var(--color-border-subtle, rgba(13, 13, 13, 0.1));
   font-size: 11.5px;
   line-height: 1.6;
   color: var(--color-danger, #b42318);

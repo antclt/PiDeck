@@ -20,7 +20,9 @@ const buttonVariants = cva(
 				link: "text-primary underline-offset-4 hover:underline",
 			},
 			size: {
-				default: "h-9 px-4 py-2 has-[>svg]:px-3",
+				/* 默认档对齐 ZCode button.tsx（h-8 px-3 py-1.5）：弹窗主操作更紧凑；
+				   旧 shadcn 原版 h-9 px-4 在中文短标签下四周空隙偏大，密度感弱。 */
+				default: "h-8 px-3 py-1.5 has-[>svg]:px-2.5",
 				xs: "h-6 gap-1 rounded-md px-2 text-xs has-[>svg]:px-1.5 [&_svg:not([class*='size-'])]:size-3",
 				sm: "h-8 gap-1.5 rounded-md px-3 has-[>svg]:px-2.5",
 				lg: "h-10 rounded-md px-6 has-[>svg]:px-4",

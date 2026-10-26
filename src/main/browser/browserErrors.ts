@@ -22,6 +22,7 @@ export const BROWSER_AGENT_ERROR_CODES = [
 	"approval_timeout",
 	"approval_denied",
 	"invalid_input",
+	"internal_error",
 ] as const;
 
 export type BrowserAgentErrorCode = (typeof BROWSER_AGENT_ERROR_CODES)[number];
@@ -45,10 +46,14 @@ export function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
-/** 把任意异常收敛成模型可见的 { code, message }，不泄漏栈、路径或页面内容。 */
+/**
+ * 把任意异常收敛成模型可见的 { code, message }，不泄漏栈、路径或页面内容。
+ * 未知异常（controller 内部 bug、guest 销毁竞态等）用 internal_error：此前误报成
+ * cdp_unavailable 会让模型以为是 DevTools 占用而盲目重试。
+ */
 export function toBrowserErrorPayload(error: unknown): { code: string; message: string } {
 	if (isBrowserAgentError(error)) return { code: error.code, message: error.message };
-	return { code: "cdp_unavailable", message: errorMessage(error) };
+	return { code: "internal_error", message: errorMessage(error) };
 }
 
 /**

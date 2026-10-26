@@ -26,9 +26,10 @@ import { useSessionActivityAt } from "../../hooks/sidebar/useSessionActivityCloc
 /** 与 ProjectTree.treeRowClass 同尺寸同圆角：分层后 utility 生效，必须「新学旧」对齐项目行，
  * 不能再用 min-h-11/rounded-xl（会明显高于/圆于项目行）。 */
 const sessionRowClass =
-	"group/resource conversation agent-row relative flex min-h-8 w-full items-center gap-1.5 rounded-lg border border-transparent px-2 py-0 text-left text-body text-foreground shadow-none transition-[background-color,border-color,box-shadow] duration-base hover:border-border-subtle hover:bg-muted/60 hover:text-foreground focus-visible:bg-muted/70 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset";
+	"group/resource conversation agent-row relative flex min-h-8 w-full items-center gap-1.5 rounded-lg border border-transparent px-2 py-0 text-left text-body text-foreground shadow-none transition-[background-color,border-color,box-shadow] duration-base hover:border-border-subtle hover:bg-bg-hover hover:text-foreground focus-visible:bg-bg-hover focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset";
 
-/** 叶子选中态：灰底、无描边。比 hover（muted/60）再用 active 面深一档，否则白底上几乎看不见。 */
+/** 叶子选中态：灰底、无描边。比 hover（bg-hover，侧栏上 Δ6）再用 active 面深一档
+ * （Δ12，≈ ZCode 选中墨量，见 docs/zcode-design-analysis.md）：选中感靠小步长，不靠深底。 */
 const selectedRowClass = "active bg-bg-active text-foreground";
 
 /** 行右侧「更多操作（三个点）」按钮：absolute 浮层，不参与布局（不挤压标题文字），

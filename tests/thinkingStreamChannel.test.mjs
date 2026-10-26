@@ -42,7 +42,8 @@ test("main process: emitThinkingNow sends delta for appends, full text for reset
 });
 
 test("main process: emitTextStreamNow sends delta for appends, full text for resets/snapshots", () => {
-	const idx = liveStream.indexOf("emitTextStreamNow(agentId: string, text: string, done = false");
+	// 2027-02 起 emit 开口改收 rawText、内部 stripAnsi（ANSI 剥离从 per-delta 挪到 emit）
+	const idx = liveStream.indexOf("emitTextStreamNow(agentId: string, rawText: string, done = false");
 	const block = liveStream.slice(idx, idx + 1000);
 	assert.match(block, /delta: text\.slice\(lastSent\.length\)/);
 	assert.match(block, /lastSentTextByAgent/);

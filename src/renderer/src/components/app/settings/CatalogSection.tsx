@@ -175,7 +175,13 @@ export function CatalogSection(props: { updateSource?: UpdateSourceId; customUpd
 							() => desktopApi.catalog.updateFromGithub("main"),
 							(result) => {
 								const r = result as CatalogUpdateResult;
-								return r.ok && r.updated ? t("settings.catalogUpdated") : t("settings.catalogAlreadyLatest");
+								if (r.ok && r.updated) return t("settings.catalogUpdated");
+								// 分支预生成件比本地旧（仓库目录没跟上 npm 发布）：说清是谁落后，
+								// 否则用户看到的是「提示可更新 → 点更新 → 已是最新」这种自我矛盾的循环。
+								if (r.ok && r.skipped === "remote-behind") {
+									return t("settings.catalogRemoteBehind", { remote: r.remoteVersion ?? "—", local: r.localVersion ?? "—" });
+								}
+								return t("settings.catalogAlreadyLatest");
 							},
 						)
 					}

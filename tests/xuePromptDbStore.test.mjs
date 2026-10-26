@@ -120,12 +120,19 @@ test("TTL 内二次 ensureReady 零网络；TTL 过期且 sha 同版本 → 只�
 	assert.equal(again.state, "ready");
 	assert.equal(router.calls.length, fetchesAfterFirst);
 
-	// TTL 过期 + sha 一致：只多一次 sha 请求（首轮下载 1 次 + 过期重查 1 次），无 db 下载
+	// TTL 过期 + sha 一致：ensureReady 立即返回缓存（不再被远程检查阻塞），
+	// sha 重查在后台进行——落定后总计 2 次 sha 请求（首轮下载 1 + 过期重查 1），无 db 下载
 	advance(60_000);
 	const refreshed = await store.ensureReady();
 	assert.equal(refreshed.state, "ready");
+	await store.pendingBackgroundRefresh();
 	assert.equal(router.shaFetchCount(), 2);
 	assert.equal(router.dbFetchCount(), 1);
+	// 后台检查完成后 TTL 水位已推进，紧接的调用零网络
+	const fetchesAfterBg = router.calls.length;
+	const third = await store.ensureReady();
+	assert.equal(third.state, "ready");
+	assert.equal(router.calls.length, fetchesAfterBg);
 });
 
 test("sha 变化：下载新版本落新文件、旧版本被清理", async (t) => {
@@ -146,10 +153,14 @@ test("sha 变化：下载新版本落新文件、旧版本被清理", async (t) 
 
 	currentDb = dbV2;
 	advance(60_000);
+	// 换库检查已转后台：本次调用立即返回旧缓存，后台落盘后下一次调用取到新缓存
 	const second = await store.ensureReady();
 	assert.equal(second.state, "ready");
-	assert.ok(second.path.includes(sha256Hex(dbV2).slice(0, 16)));
-	assert.notEqual(second.path, first.path);
+	await store.pendingBackgroundRefresh();
+	const third = await store.ensureReady();
+	assert.equal(third.state, "ready");
+	assert.ok(third.path.includes(sha256Hex(dbV2).slice(0, 16)));
+	assert.notEqual(third.path, first.path);
 	// 旧版本文件被清理，缓存目录只剩当前版本
 	const files = readdirSync(join(root, "xue")).filter((n) => n.endsWith(".db"));
 	assert.deepEqual(files, [`xueprompts-${sha256Hex(dbV2).slice(0, 16)}.db`]);
@@ -221,10 +232,17 @@ test("已有缓存时网络全败：继续用缓存不降级", async (t) => {
 
 	upstreamOk = false;
 	advance(60_000);
+	// 断网：ensureReady 立即返回缓存（不被 2 源 × 连接超时阻塞），后台检查失败保持缓存
 	const state = await store.ensureReady();
 	assert.equal(state.state, "ready");
 	assert.equal(state.source, "cache");
 	assert.ok(existsSync(state.path));
+	await store.pendingBackgroundRefresh();
+	// 失败推进 TTL 水位：窗口内再次调用零网络（回归锚点：此前每个请求都重付全套探测）
+	const fetchesAfterFailure = router.calls.length;
+	const again = await store.ensureReady();
+	assert.equal(again.state, "ready");
+	assert.equal(router.calls.length, fetchesAfterFailure);
 });
 
 test("body 停滞：按停滞上限结束并释放连接，换源后仍能装成（不永久挂着）", async (t) => {

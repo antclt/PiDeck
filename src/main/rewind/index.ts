@@ -38,8 +38,6 @@ export {
 } from "./checkpointConstants.ts";
 export {
 	shouldIgnoreForSnapshot,
-	isLargeFile,
-	isLargeDirectory,
 	normalizeGitPath,
 	isPathWithin,
 	isPathWithinAny,

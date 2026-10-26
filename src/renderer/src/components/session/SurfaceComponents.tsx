@@ -3,6 +3,8 @@ import { messageEntryId } from "../../utils/sessionCommands";
 import { toBlob } from "html-to-image";
 import { writeClipboard, writeClipboardImage } from "../../utils/clipboard";
 import { MarkdownStream } from "./MarkdownStream";
+import { SettledLongAnswer } from "./SettledLongAnswer";
+import { shouldCollapseSettledText } from "./markdownStreamPolicy";
 import { PreviewRail, type PreviewRailItem } from "../motion/preview-rail";
 import { planRailTicks, windowRailItems } from "./timeline/outlineRailTicks";
 import { areOutlineRailItemsEqual, createOutlineItemIndex, resolveVisibleRailActiveId } from "./timeline/outlineRailActive";
@@ -349,7 +351,7 @@ export function SessionStatus(props: {
 	return (
 		<Tooltip>
 			<TooltipTrigger asChild>{statusInner}</TooltipTrigger>
-			<TooltipContent side="bottom" align="end" sideOffset={8} arrowClassName="!bg-popover !fill-popover" className="ctx-detail-tooltip !w-auto min-w-64 max-w-[min(320px,calc(100vw-24px))] !rounded-md !border !border-border !bg-popover !px-3 !py-2.5 !text-popover-foreground !shadow-lg">
+			<TooltipContent side="bottom" align="end" sideOffset={8} arrowClassName="!bg-popover !fill-popover" className="ctx-detail-tooltip !w-auto min-w-64 max-w-[min(320px,calc(100vw-24px))] !rounded-md !border !border-border !bg-popover !px-3 !py-2.5 !text-popover-foreground !shadow-md">
 				<div className="grid gap-2.5">
 					<div className="flex items-center justify-between gap-4 border-b border-border/70 pb-2">
 						<span className="text-caption font-semibold text-popover-foreground">{t("ctx.detail.title")}</span>
@@ -600,7 +602,11 @@ export const AssistantText = memo(
 						})}
 					</div>
 				)}
-				<MarkdownStream text={cleanText} isStreaming={Boolean(props.isStreaming)} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />
+				{!props.isStreaming && shouldCollapseSettledText(cleanText.length) ? (
+					<SettledLongAnswer text={cleanText} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />
+				) : (
+					<MarkdownStream text={cleanText} isStreaming={Boolean(props.isStreaming)} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />
+				)}
 			</div>
 		);
 	},
@@ -856,7 +862,7 @@ export const UserBubble = memo(function UserBubble(props: {
 	return (
 		<article /* user-turn 为 e2e 选择器锚点 */
 			ref={rowRef}
-			className={`user-turn group/user mb-4 flex w-full min-w-0 max-w-full flex-col items-end ${props.fresh ? "user-turn--fresh animate-[message-enter_260ms_cubic-bezier(0.22,1,0.36,1)_both]" : ""}${props.topFresh ? " user-turn--top-fresh animate-[top-enter_280ms_cubic-bezier(0.22,1,0.36,1)_both]" : ""}`}
+			className={`user-turn group/user mb-4 flex w-full min-w-0 max-w-full flex-col items-end ${props.fresh ? "user-turn--fresh motion-safe:animate-[message-enter_260ms_var(--ease-out-quint)_both]" : ""}${props.topFresh ? " user-turn--top-fresh motion-safe:animate-[top-enter_280ms_var(--ease-out-quint)_both]" : ""}`}
 			data-message-id={message.id}
 		>
 			{message.images && message.images.length > 0 && (
@@ -1289,7 +1295,7 @@ export { DiagnosticMessageCard, RespondingIndicator, ThinkingBlock };
 export { MultiSelectModal };
 
 /**
- * 会话定位轴（beUI PreviewRail）：消息区右缘一列 1px 刻度，一根 = 一个用户检查点；
+ * 会话定位轴（beUI PreviewRail）：消息区右缘一列 2px 刻度，一根 = 一个用户检查点；
  * 静默态整体不可见，指针移上去（或键盘聚焦）才浮现（见 surfaces.css 的 .session-outline-pane）。
  * hover 出预览卡、点击跳转；工具开关已上收会话 Tab 栏（SessionToolAction），
  * 此处不再承载其他入口；容器沿用 .outline-hover 的定位规则（session-outline-pane 贴右缘，有测试守护）。
@@ -1387,7 +1393,7 @@ function ConversationOutlineView(props: ConversationOutlineProps) {
 					}}
 					/* 宽度对齐原触发按钮（30px），min-h-0 抵消组件自带的演示高度 */
 					className="pointer-events-auto min-h-0 w-[30px]"
-					railClassName="w-full content-center [&_[data-slot=preview-rail-item]]:w-full [&_[data-slot=preview-rail-item]]:justify-center [&_[data-slot=preview-rail-tick]]:h-px [&_[data-slot=preview-rail-tick]]:w-4 [&_[data-slot=preview-rail-tick]]:origin-center"
+					railClassName="w-full content-center [&_[data-slot=preview-rail-item]]:w-full [&_[data-slot=preview-rail-item]]:justify-center [&_[data-slot=preview-rail-tick]]:h-0.5 [&_[data-slot=preview-rail-tick]]:w-4 [&_[data-slot=preview-rail-tick]]:origin-center"
 					previewContainerClassName="inset-y-0 right-7 left-auto w-64"
 					previewClassName="[&_[data-slot=preview-rail-card]]:h-20 [&_[data-slot=preview-rail-card]]:overflow-hidden [&_[data-slot=preview-rail-card]]:p-3 [&_[data-slot=preview-rail-title]]:line-clamp-1 [&_[data-slot=preview-rail-title]]:text-xs [&_[data-slot=preview-rail-title]]:leading-4 [&_[data-slot=preview-rail-description]]:line-clamp-1 [&_[data-slot=preview-rail-description]]:text-xs [&_[data-slot=preview-rail-description]]:leading-4"
 				/>

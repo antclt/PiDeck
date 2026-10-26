@@ -218,7 +218,7 @@ export class WebServiceManager {
 		this.tokenAuth = new WebTokenAuth({ persistToken: deps.persistToken, onChange: () => this.onTokenChanged() });
 		this.staticAssets = new WebStaticAssets({ devRendererUrl: deps.devRendererUrl });
 		this.eventStreamRouter = new WebEventStreamRouter((agentId) => this.deps.getSessionIdForAgent(agentId));
-		this.stateHub = new WebStateEventHub({ loadState: () => this.getState() });
+		this.stateHub = new WebStateEventHub({ loadState: () => this.getState(), stateRevision: () => this.stateRevision() });
 		this.apiRoutes = new WebApiRoutes({
 			deps,
 			sendJson: (response, body) => this.sendJson(response, body),
@@ -510,6 +510,18 @@ export class WebServiceManager {
 		if (raw === null || raw === "") return undefined;
 		const value = Number(raw);
 		return Number.isFinite(value) ? value : undefined;
+	}
+
+	/**
+	 * 状态推送的廉价版本键（2027-02 性能审计，见 WebStateEventHub.push）：
+	 * 只聚合 runtimes 身份/状态/代数与 pendingUi 摘要——pi 事件能驱动的变化面。
+	 * catalog/项目列表的变更频率低且不由 pi 事件驱动，交给 5s tick 的全量比对，
+	 * 不为它们把 catalog 克隆拉进这条每 delta 都可能触发的路径。
+	 */
+	private stateRevision(): string {
+		const runtimes = this.deps.listSessionRuntimes();
+		const pending = this.deps.listPendingUiRequests();
+		return `${runtimes.map((entry) => `${entry.sessionId}:${entry.agentId}:${entry.status}:${entry.runtimeGeneration ?? ""}`).join(";")}#${pending.length}:${pending.map((entry) => `${entry.sessionId}:${entry.requestId}`).join(",")}`;
 	}
 
 	private async getState() {

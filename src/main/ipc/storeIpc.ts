@@ -533,6 +533,8 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 				search?: string;
 				page?: number;
 				pageSize?: number;
+				/** 只要分类栏（商店首开），主进程走分类快路径，不返回条目 */
+				categoriesOnly?: boolean;
 			},
 		) => {
 			try {

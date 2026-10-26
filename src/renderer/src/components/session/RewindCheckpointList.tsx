@@ -12,6 +12,7 @@ import { ConfirmDialog } from "../ui-shadcn/ConfirmDialog";
 import { Badge } from "../ui-shadcn/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui-shadcn/tooltip";
+import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
 import type { RewindCheckpointHealth, RewindCheckpointSummary, RewindCheckpointTrigger, RewindRestoreScope } from "../../../../shared/types";
 
 /** trigger → i18n key（before-restore 含连字符，key 用 camelCase）。 */
@@ -377,8 +378,11 @@ function CheckpointRow(props: {
 					</DropdownMenu>
 				</div>
 			</div>
-			{diffVisible && (
-				<div className="mt-1.5 max-h-40 overflow-auto rounded-md bg-muted/40 px-2 py-1.5 font-mono text-micro leading-4 text-text-secondary">
+			{/* diff 预览开合走共享折叠原语（真高度渐变 + exit 后卸载 + reduced-motion 回退）；
+			    display:contents 根不生成盒子；限高滚动样式留在折叠体本身。
+			    open 由「diff 已加载或加载中」推导，与行按钮 onToggleDiff 的取/清语义对齐。 */}
+			<Collapsible open={diffVisible} className="contents">
+				<CollapsibleContent className="mt-1.5 max-h-40 overflow-auto rounded-md bg-muted/40 px-2 py-1.5 font-mono text-micro leading-4 text-text-secondary">
 					{props.diffLoading ? (
 						<span className="inline-flex items-center gap-1">
 							<Loader2 size={10} className="animate-pideck-spin" aria-hidden="true" />
@@ -389,8 +393,8 @@ function CheckpointRow(props: {
 					) : (
 						<span>{t("rewind.diffEmpty")}</span>
 					)}
-				</div>
-			)}
+				</CollapsibleContent>
+			</Collapsible>
 		</div>
 	);
 }

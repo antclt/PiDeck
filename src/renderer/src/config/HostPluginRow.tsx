@@ -39,10 +39,10 @@ export function HostPluginRow({ plugin, busy, onToggle, onRemove, onOpenPanel }:
 			<div className="flex min-w-0 flex-1 flex-col gap-1.5">
 				<div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
 					<span className="truncate text-sm font-medium text-foreground">{manifest.name}</span>
-					<span className="font-mono text-[11px] text-muted-foreground">
+					<span className="font-mono text-micro text-muted-foreground">
 						{manifest.id} · v{manifest.version}
 					</span>
-					<Badge variant="outline" className="gap-1 py-0 text-[11px] font-normal text-muted-foreground">
+					<Badge variant="outline" className="gap-1 py-0 text-micro font-normal text-muted-foreground">
 						<span className={`size-1.5 rounded-full ${status.dot}`} aria-hidden="true" />
 						{status.label}
 					</Badge>
@@ -55,12 +55,12 @@ export function HostPluginRow({ plugin, busy, onToggle, onRemove, onOpenPanel }:
 				{/* 只列能力名，不展开每一项目的地：同意前必须看清的地址、端口与风险提示都在授权弹窗里。 */}
 				<div className="flex flex-wrap items-center gap-1">
 					{manifest.permissions.map((permission) => (
-						<Badge key={permission} variant="secondary" className="px-1.5 py-0 text-[11px] font-normal text-muted-foreground">
+						<Badge key={permission} variant="secondary" className="px-1.5 py-0 text-micro font-normal text-muted-foreground">
 							{t(HOST_PLUGIN_PERMISSION_CHIP_KEYS[permission])}
 						</Badge>
 					))}
 					{!manifest.permissions.includes("sessions.read") && (
-						<Badge variant="secondary" className="px-1.5 py-0 text-[11px] font-normal text-muted-foreground">
+						<Badge variant="secondary" className="px-1.5 py-0 text-micro font-normal text-muted-foreground">
 							{t("hostPlugins.chipNoSessionsRead")}
 						</Badge>
 					)}

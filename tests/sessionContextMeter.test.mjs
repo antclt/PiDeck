@@ -242,10 +242,21 @@ test("bottom bar keeps model and thinking together with independent one-click en
 	assert.match(chip, /onClick=\{props\.onPickModel\}/);
 	assert.match(chip, /aria-hidden="true">\s*·\s*<\/span>/);
 	assert.match(chip, /\{props\.thinkingControl\}/);
-	assert.match(chip, /<DropdownMenuRadioGroup\s/);
+	// 思考强度选择器重做（7f1436a58）：壳从 DropdownMenu 换成受控 Popover（Radix Menu 劫持
+	// 方向键、滑条键盘不可达），档位为渐变强度条离散吸附（step=1）+ 刻度标签行兼点选入口。
+	// 提交时机：onOpenChange 必须走本地 handleOpenChange（关闭时统一提交），
+	// 不能把 props.onOpenChange 直连——那样选择期间的每次变更都会立刻回写底栏。
+	assert.match(chip, /<Popover\s+open=\{props\.open\} onOpenChange=\{handleOpenChange\}>/);
+	assert.match(chip, /const handleOpenChange = \(next: boolean\) => \{/);
+	// 中途不得提交：onPick 只在 handleOpenChange 的关闭分支出现一次。
+	assert.equal((chip.match(/props\.onPick\(/g) ?? []).length, 1);
+	assert.match(chip, /<Slider\s/);
+	assert.match(chip, /step=\{1\}/);
+	assert.match(chip, /data-tick-value=\{level\.value\}/);
 	assert.match(host, /<ThinkingLevelDropdown\s/);
 	assert.doesNotMatch(host, /<ThinkingPicker\s/);
-	assert.doesNotMatch(chip, /drillIn|Popover|CommandPickerDialog/);
+	// drill-in / CommandPickerDialog 二级导航不再回归；Popover 是新壳的合法载体，不在禁列。
+	assert.doesNotMatch(chip, /drillIn|CommandPickerDialog/);
 	// 旧的分离按钮（绿色思考、斜体模型）不再存在
 	assert.doesNotMatch(source, /composer-bar-btn model flex h-7/);
 	assert.doesNotMatch(source, /composer-bar-btn thinking h-7 max-w-\[10rem\]/);

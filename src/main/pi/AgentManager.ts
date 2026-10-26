@@ -1965,7 +1965,11 @@ export class AgentManager {
 		const runtime = this.requireRuntime(input.agentId);
 		const trimmed = input.message.trim();
 		const hasImages = input.images && input.images.length > 0;
-		const agentMessage = input.agentMessage?.trim() || trimmed || "Describe this image.";
+		// 纯图片发送（无文字）时 message 就是空字符串：pi 会把空文本与图片一起写进用户
+		// 消息，各 provider 自行丢弃空 text block（anthropic / openai 均按 text.trim()
+		// 过滤），模型只看到图片。禁止注入 "Describe this image." 之类的兜底文案
+		// （Issue #404）——那是用户没写过的指令，会让模型改按「描述图片」回答。
+		const agentMessage = input.agentMessage?.trim() || trimmed;
 		// 允许只有图片没有文字的情况发送
 		if (!trimmed && !hasImages) {
 			return {
@@ -3041,7 +3045,34 @@ export class AgentManager {
 		});
 	}
 
+	/**
+	 * 工具边沿的完整 runtime state 补发去抖（2027-02 性能审计）：每个工具
+	 * start/end 各触发一次 get_state + get_session_stats 双 RPC，并行工具批下
+	 * 每秒多次；而工具执行态本身已由 emitToolRuntimeTransition 同步轻补丁承载，
+	 * 完整状态的其余字段（模型/tokens/todo）在工具边沿之间不变。尾沿 300ms
+	 * 合并：突发收尾后补一次即可。立即路径（agent_end/settled/compaction/
+	 * publishRuntimeState）不受影响，且会自取消在途的去抖（避免重复推送）。
+	 */
+	private readonly toolEdgeStateTimers = new Map<string, NodeJS.Timeout>();
+
+	private scheduleToolEdgeRuntimeState(agentId: string): void {
+		const existing = this.toolEdgeStateTimers.get(agentId);
+		if (existing) clearTimeout(existing);
+		const timer = setTimeout(() => {
+			this.toolEdgeStateTimers.delete(agentId);
+			void this.emitRuntimeState(agentId);
+		}, 300);
+		timer.unref?.();
+		this.toolEdgeStateTimers.set(agentId, timer);
+	}
+
 	private async emitRuntimeState(agentId: string) {
+		// 立即全量推送让在途的工具边沿去抖失效（它要推的内容即将被更新鲜的覆盖）
+		const pending = this.toolEdgeStateTimers.get(agentId);
+		if (pending) {
+			clearTimeout(pending);
+			this.toolEdgeStateTimers.delete(agentId);
+		}
 		try {
 			const runtime = this.requireRuntime(agentId);
 			const process = runtime.process;
@@ -3654,6 +3685,13 @@ export class AgentManager {
 	private clearAgentState(agentId: string) {
 		// 双通道缓冲/基准/思考段随生命周期整体清理（stop/restart/closed 等非 done 终止路径，防键残留慢泄漏）
 		this.liveStream.clearAll(agentId);
+		// 工具边沿去抖在途定时器随生命周期取消（迟到触发会打到已清空的 runtime，虽然
+		// emitRuntimeState 内部有 requireRuntime 兜底，取消更干净）
+		const toolEdgeTimer = this.toolEdgeStateTimers.get(agentId);
+		if (toolEdgeTimer) {
+			clearTimeout(toolEdgeTimer);
+			this.toolEdgeStateTimers.delete(agentId);
+		}
 		this.streamingAgents.delete(agentId);
 		this.activeAssistantMessageIds.delete(agentId);
 		this.toolMessageIds.delete(agentId);
@@ -4228,7 +4266,8 @@ export class AgentManager {
 		this.recentlyAborted.clear();
 		// 实时日志广播的节流定时器与聚合缓冲同步清理
 		this.rpcLiveTap.dispose();
-		this.emitState();
+		// 终态不走节流（trailing 可能迟到）：flush 后的清单就是退出时的权威快照
+		this.flushStateEmit();
 	}
 
 	/**
@@ -4715,6 +4754,8 @@ export class AgentManager {
 		}
 
 		if (typed.type === "agent_start" && runtime) {
+			// 阶段归因：agent_start = pi 已接单开跑（此前间隔是 pi 内部排队/扩展钩子耗时）。
+			this.messagePerf.noteAgentStart(agentId);
 			// 首个 run 开始：此刻用户的触发消息已落盘，把启动期诊断（扩展回退/启动扩展报错）
 			// 按序写入时间线——位于用户消息之后、回答之前，避免插进历史轮次中间。
 			this.startupDiagnostics.markFirstRun(agentId);
@@ -4759,6 +4800,7 @@ export class AgentManager {
 			// Pi 在工具执行后、准备下一次模型调用前发 turn_start；message_start
 			// 可能等到 provider 首个事件才到，无法覆盖工具续答的首 token 等待。
 			this.messagePerf.ensureTimer(agentId);
+			this.messagePerf.noteTurnStart(agentId);
 		}
 
 		const startMessage = isRecord(typed.message) ? typed.message : undefined;
@@ -4775,6 +4817,7 @@ export class AgentManager {
 			// 性能计时起表（幂等：message_update start 先到则不重置）。
 			// 顶层 message_start 是 mock/pi 均走的确定路径，不能只依赖 delta 事件。
 			this.messagePerf.ensureTimer(agentId);
+			this.messagePerf.noteMessageStart(agentId);
 			// 顶层 message_start（mock/pi 均走此路径）：必须允许空骨架，否则
 			// text_delta 不再 upsert 时 History 无挂载点，Live 正文无处渲染。
 			this.upsertAssistantMessage(agentId, startMessage, "", { allowEmpty: true });
@@ -5074,7 +5117,12 @@ export class AgentManager {
 				this.activeAssistantMessageIds.delete(agentId);
 			}
 			// 结算性能指标（幂等：message_update done 先结算则 map 已删，直接返回）
-			this.messagePerf.settle(agentId, (channel, payload) => this.emit(channel, payload), messageEnd);
+			this.messagePerf.settle(
+				agentId,
+				(channel, payload) => this.emit(channel, payload),
+				messageEnd,
+				(message, detail) => void this.appLogger?.info("session-perf", message, detail),
+			);
 			// 终结 Live 正文通道（顶层 message_end 不经 handleAssistantMessageEvent）
 			this.streamingAgents.delete(agentId);
 			this.liveStream.finalizeText(agentId);
@@ -5101,7 +5149,8 @@ export class AgentManager {
 				this.emitState();
 			}
 			// 完整 runtime 信息异步补发；工具边沿已经同步推送，不依赖此请求的完成顺序。
-			void this.emitRuntimeState(agentId);
+			// 300ms 尾沿去抖：并行工具批的连发 start 合并为一次 get_state。
+			this.scheduleToolEdgeRuntimeState(agentId);
 		}
 
 		if (typed.type === "tool_execution_end") {
@@ -5146,7 +5195,8 @@ export class AgentManager {
 				this.emitState();
 			}
 			// 完整 runtime 信息异步补发；序号保证它不会倒灌旧工具状态。
-			void this.emitRuntimeState(agentId);
+			// 与 start 同一去抖：工具批全部结束后 300ms 补一次即可。
+			this.scheduleToolEdgeRuntimeState(agentId);
 		}
 
 		if (typed.type === "tool_execution_update") {
@@ -5256,7 +5306,12 @@ export class AgentManager {
 
 		if (eventType === "message_end" || eventType === "done" || eventType === "error") {
 			// 结算性能指标（TTFT/总耗时/TPS）并边沿推送渲染层
-			this.messagePerf.settle(agentId, (channel, payload) => this.emit(channel, payload), partialMessage);
+			this.messagePerf.settle(
+				agentId,
+				(channel, payload) => this.emit(channel, payload),
+				partialMessage,
+				(message, detail) => void this.appLogger?.info("session-perf", message, detail),
+			);
 			// 先写入 History thinking 并 flush，再发 done 清 live。
 			this.finalizeThinkingIntoMessage(agentId, partialMessage);
 			this.upsertAssistantMessage(agentId, partialMessage);
@@ -6269,7 +6324,45 @@ export class AgentManager {
 		return undefined;
 	}
 
+	/**
+	 * emitState 节流（2027-02 性能审计，leading+trailing 250ms）：调用点 50+ 个，
+	 * 含每个工具 start/end（每工具 2 次）——无节流时并行工具批每秒数十次全量
+	 * AgentTab[] 构建排序 + 渲染层 N 个 per-tab 信封 structured-clone 下发。
+	 * leading 保证状态翻转即时可见；突发合并为一次 trailing（≤250ms 迟到，
+	 * 对状态圆点/侧栏无感）。dispose 终态走 flushStateEmit 立即推。
+	 */
+	private static readonly STATE_EMIT_THROTTLE_MS = 250;
+	private stateEmitTimer: NodeJS.Timeout | null = null;
+	private stateEmitLastAt = 0;
+
 	private emitState() {
+		const now = Date.now();
+		const elapsed = now - this.stateEmitLastAt;
+		if (elapsed >= AgentManager.STATE_EMIT_THROTTLE_MS) {
+			this.stateEmitLastAt = now;
+			this.emitStateNow();
+			return;
+		}
+		if (this.stateEmitTimer !== null) return;
+		this.stateEmitTimer = setTimeout(() => {
+			this.stateEmitTimer = null;
+			this.stateEmitLastAt = Date.now();
+			this.emitStateNow();
+		}, AgentManager.STATE_EMIT_THROTTLE_MS - elapsed);
+		this.stateEmitTimer.unref?.();
+	}
+
+	/** 取消在途 trailing 并立即推一次终态（dispose 用：退出路径不等节流窗口）。 */
+	private flushStateEmit() {
+		if (this.stateEmitTimer !== null) {
+			clearTimeout(this.stateEmitTimer);
+			this.stateEmitTimer = null;
+		}
+		this.stateEmitLastAt = Date.now();
+		this.emitStateNow();
+	}
+
+	private emitStateNow() {
 		const tabs = this.list();
 		this.emit(ipcChannels.agentsState, tabs);
 		// 同步通知主进程内部状态订阅者（PetStateBridge），使宠物窗能拿到聚合状态。

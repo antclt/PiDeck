@@ -16,6 +16,7 @@ import { Input } from "@/components/ui-shadcn/input";
 import { t } from "@/i18n";
 import { WebBrandLockup } from "./WebBrandLockup";
 import { WebBottomSheet } from "./WebBottomSheet";
+import { WEB_SIDEBAR_INITIAL_VISIBLE, growSidebarWindow, resolveSidebarWindow } from "./webSidebarPaging";
 import { cn } from "@/lib/utils";
 import { sessionStatusDotClass } from "@/agentListDisplay";
 import { SessionBackendMark } from "@/components/session/SessionSourceBadge";
@@ -42,43 +43,25 @@ function matchesSearch(value: string, search: string): boolean {
 	return !search || value.toLowerCase().includes(search.toLowerCase());
 }
 
-/** 折叠态每个项目先渲染的会话条数。 */
-const COLLAPSED_SESSION_LIMIT = 5;
-/** 每次增量加载的会话条数：数百条会话一次全渲染会造出 4000+ 节点，滚动到底再补。 */
-const SESSION_PAGE_STEP = 50;
-
 /** 会话行可执行的操作（P1；由 WebChatApp 提供实现）。 */
 export type WebSessionRowAction = "rename" | "duplicate" | "export" | "delete";
 
 /**
- * 项目会话列表：初始只渲染一个窗口（默认 5 条），滚动到末尾自动追加 50 条。
+ * 项目会话列表：显式分页（首页 10 条，点「查看更多（剩余 N）」每页 +20，可「收起」回首页）。
  *
- * 为什么不做一次性全展开：单项目 400 条会话会造出 4000+ DOM 节点（实测 258ms 卡顿），
- * 而用户一屏只看得到十几条。哨兵同时是按钮——IntersectionObserver 不可用时仍可手动展开。
+ * 语义对齐桌面端「最近会话」：不随滚动自动加载。早先的 IntersectionObserver 哨兵在移动端
+ * 抽屉首次布局时就会命中 rootMargin，展开一个大项目会被连续补页成几十上百行（实测「聊天」
+ * 115 条展开即 57 行），体感等同「一次性全加载」，既慢又丢掉了「先看最近一页」的信息层级。
+ * 单项目 400+ 条会话若全渲染会造 4000+ DOM 节点（实测 258ms 卡顿），分页同时守住渲染成本。
  */
-function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: string) => WebRuntime | undefined; activeSessionId: string; initialLimit: number; onSelect: (sessionId: string) => void; onSessionAction?: (action: WebSessionRowAction, sessionId: string) => void }) {
-	const { sessions, runtimeFor, activeSessionId, initialLimit, onSelect, onSessionAction } = props;
-	const [rendered, setRendered] = useState(initialLimit);
-	// 折叠/展开语义反转（进入或退出搜索）时回到初始窗口；sessions 不作为依赖——
-	// 父级每次 render 都会 filter 出新数组，否则增量加载会被无限重置。
-	useEffect(() => setRendered(initialLimit), [initialLimit]);
-	const sentinelRef = useRef<HTMLButtonElement | null>(null);
-	const visible = sessions.slice(0, Math.min(rendered, sessions.length));
-	const hiddenCount = sessions.length - visible.length;
-	useEffect(() => {
-		if (hiddenCount <= 0) return;
-		const sentinel = sentinelRef.current;
-		if (!sentinel || typeof IntersectionObserver === "undefined") return;
-		const observer = new IntersectionObserver(
-			(entries) => {
-				if (!entries.some((entry) => entry.isIntersecting)) return;
-				setRendered((current) => Math.min(sessions.length, current + SESSION_PAGE_STEP));
-			},
-			{ rootMargin: "160px 0px" },
-		);
-		observer.observe(sentinel);
-		return () => observer.disconnect();
-	}, [hiddenCount, sessions.length]);
+function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: string) => WebRuntime | undefined; activeSessionId: string; searching: boolean; onSelect: (sessionId: string) => void; onSessionAction?: (action: WebSessionRowAction, sessionId: string) => void }) {
+	const { sessions, runtimeFor, activeSessionId, searching, onSelect, onSessionAction } = props;
+	// requested 是「用户点了几次查看更多」的累计目标条数；进入/退出搜索时回到首页。
+	const [requested, setRequested] = useState(WEB_SIDEBAR_INITIAL_VISIBLE);
+	useEffect(() => setRequested(WEB_SIDEBAR_INITIAL_VISIBLE), [searching]);
+	const window_ = resolveSidebarWindow({ total: sessions.length, requested, searching });
+	const visible = sessions.slice(0, window_.visibleCount);
+	const hiddenCount = window_.remaining;
 	// 会话操作面板：移动端底部滑出、桌面居中卡片（WebBottomSheet 两形态），
 	// 替代 DropdownMenu——触屏无 hover 看不见触发钮，且菜单会从侧栏右缘弹出遮挡聊天区。
 	const [menuSessionId, setMenuSessionId] = useState<string | null>(null);
@@ -93,7 +76,7 @@ function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: st
 				const runtime = runtimeFor(session.id);
 				return (
 					<div key={session.id} className={cn(sessionRowClass, "session-row group/session", session.id === activeSessionId && selectedRowClass)} title={session.title}>
-						<button type="button" className="flex min-w-0 flex-1 items-center gap-1.5" onClick={() => onSelect(session.id)}>
+						<button type="button" className="flex min-w-0 flex-1 items-center gap-1.5 pointer-coarse:min-h-10" onClick={() => onSelect(session.id)}>
 							{renderRuntimeStatusDot(runtime?.status)}
 							<div className="conversation-body min-w-0 flex-1">
 								<div className="conversation-title flex min-w-0 items-center gap-1.5">
@@ -108,7 +91,7 @@ function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: st
 						{onSessionAction ? (
 							<button
 								type="button"
-								className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted focus-visible:opacity-100 group-hover/session:opacity-100 [@media(hover:none)]:opacity-100"
+								className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted focus-visible:opacity-100 group-hover/session:opacity-100 [@media(hover:none)]:opacity-100 pointer-coarse:size-9 pointer-coarse:-my-1"
 								aria-label={t("web.sessionMenu")}
 								title={t("web.sessionMenu")}
 								onClick={() => setMenuSessionId(session.id)}
@@ -122,18 +105,19 @@ function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: st
 			{hiddenCount > 0 && (
 				<button
 					type="button"
-					ref={sentinelRef}
-					className="conversation session-row relative flex min-h-7 w-full items-center justify-start gap-1.5 rounded-md border border-transparent px-2 py-0 text-left text-caption text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-					onClick={() => setRendered((current) => Math.min(sessions.length, current + SESSION_PAGE_STEP))}
+					data-testid="web-sidebar-load-more"
+					className="conversation session-row relative flex min-h-7 w-full items-center justify-start gap-1.5 rounded-md border border-transparent px-2 py-0 text-left text-caption text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground pointer-coarse:min-h-9"
+					onClick={() => setRequested(growSidebarWindow(window_.visibleCount))}
 				>
 					{t("web.moreSessions", { count: hiddenCount })}
 				</button>
 			)}
-			{rendered > initialLimit && Number.isFinite(initialLimit) && (
+			{window_.canCollapse && (
 				<button
 					type="button"
-					className="conversation session-row relative flex min-h-7 w-full items-center justify-start gap-1.5 rounded-md border border-transparent px-2 py-0 text-left text-caption text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-					onClick={() => setRendered(initialLimit)}
+					data-testid="web-sidebar-collapse-sessions"
+					className="conversation session-row relative flex min-h-7 w-full items-center justify-start gap-1.5 rounded-md border border-transparent px-2 py-0 text-left text-caption text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground pointer-coarse:min-h-9"
+					onClick={() => setRequested(WEB_SIDEBAR_INITIAL_VISIBLE)}
 				>
 					{t("common.collapse")}
 				</button>
@@ -222,9 +206,8 @@ export function WebSidebar(props: {
 	const searching = search.trim().length > 0;
 	const projectIds = useMemo(() => new Set(state.projects.map((project) => project.id)), [state.projects]);
 	const ungroupedSessions = useMemo(() => sortedSessions.filter((session) => !projectIds.has(session.projectId) && matchesSearch(session.title || session.id, search.trim())), [sortedSessions, projectIds, search]);
-	// 搜索态需要一次看到全部命中结果（命中集合通常很小，且用户预期「搜到即列出」）；
-	// 非搜索态只渲染初始窗口，其余靠滚动/点击增量加载。
-	const sessionLimit = searching ? Number.POSITIVE_INFINITY : COLLAPSED_SESSION_LIMIT;
+	// 搜索态一次看到全部命中（命中集合通常很小，用户预期「搜到即列出」）；
+	// 非搜索态按显式分页（首页 10 条 + 「查看更多」），语义见 webSidebarPaging。
 
 	const submitProject = async () => {
 		const path = projectPath.trim();
@@ -332,11 +315,11 @@ export function WebSidebar(props: {
 											</div>
 										</button>
 										<div className="project-row-actions flex shrink-0 items-center gap-0.5">
-											<Button type="button" variant="ghost" size="icon" className="project-action size-7" disabled={Boolean(creatingProjectId)} title={t("app.newSession")} aria-label={t("app.newSession")} onClick={() => props.onCreateSession(project.id)}>
+											<Button type="button" variant="ghost" size="icon" className="project-action size-7 pointer-coarse:size-9" disabled={Boolean(creatingProjectId)} title={t("app.newSession")} aria-label={t("app.newSession")} onClick={() => props.onCreateSession(project.id)}>
 												{creating ? <span className="size-3 animate-pideck-spin rounded-full border border-current border-t-transparent" aria-hidden="true" /> : <Plus className="size-3.5" aria-hidden="true" />}
 											</Button>
 											{project.kind !== "chat" && (
-												<Button type="button" variant="ghost" size="icon" className="project-action size-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" title={t("web.deleteProject")} aria-label={t("web.deleteProject")} onClick={() => requestDelete(project)}>
+												<Button type="button" variant="ghost" size="icon" className="project-action size-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive pointer-coarse:size-9" title={t("web.deleteProject")} aria-label={t("web.deleteProject")} onClick={() => requestDelete(project)}>
 													<Trash2 className="size-3.5" aria-hidden="true" />
 												</Button>
 											)}
@@ -344,7 +327,7 @@ export function WebSidebar(props: {
 									</div>
 									{expanded && (
 										<div className="project-children mt-2 flex flex-col gap-2 px-1 pb-1">
-											<SessionRows sessions={projectSessions} runtimeFor={runtimeFor} activeSessionId={activeSessionId} initialLimit={sessionLimit} onSelect={props.onSelectSession} onSessionAction={props.onSessionAction} />
+											<SessionRows sessions={projectSessions} runtimeFor={runtimeFor} activeSessionId={activeSessionId} searching={searching} onSelect={props.onSelectSession} onSessionAction={props.onSessionAction} />
 											{projectSessions.length === 0 && <div className="px-6 py-1 text-caption text-muted-foreground">{t("web.noSessions")}</div>}
 										</div>
 									)}
@@ -366,7 +349,7 @@ export function WebSidebar(props: {
 									</div>
 								</div>
 								<div className="project-children mt-2 flex flex-col gap-2 px-1 pb-1">
-									<SessionRows sessions={ungroupedSessions} runtimeFor={runtimeFor} activeSessionId={activeSessionId} initialLimit={sessionLimit} onSelect={props.onSelectSession} onSessionAction={props.onSessionAction} />
+									<SessionRows sessions={ungroupedSessions} runtimeFor={runtimeFor} activeSessionId={activeSessionId} searching={searching} onSelect={props.onSelectSession} onSessionAction={props.onSessionAction} />
 								</div>
 							</div>
 						)}

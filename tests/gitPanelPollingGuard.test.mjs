@@ -123,14 +123,16 @@ test("远程角标计时器不依赖每次 render 新建的 fetch 包装器", ()
 });
 
 test("仅非 silent 的 refresh 成功路径才会 fetch 远程", () => {
-	const successBlock = source.slice(source.indexOf("setGroups(next);"));
+	// 成功分支改用函数式 setGroups（未变则保留原引用），锚点随之更新。
+	const successBlock = source.slice(source.indexOf("setGroups((current) =>"));
 	const afterGroups = successBlock.slice(0, successBlock.indexOf("} catch (caught)"));
 	assert.match(afterGroups, /if \(!silent\) void refreshAheadBehind\(\);/);
 });
 
 test("refresh 成功路径清除仓库/工具标记（git init 或安装 git 后自动恢复轮询）", () => {
-	// setGroups(next) 之后紧接着清除两个标记
-	const successBlock = source.slice(source.indexOf("setGroups(next);"));
+	// 成功分支 setGroups 之后紧接着清除两个标记
+	// 成功分支改用函数式 setGroups（未变则保留原引用），锚点随之更新。
+	const successBlock = source.slice(source.indexOf("setGroups((current) =>"));
 	const afterGroups = successBlock.slice(0, successBlock.indexOf("} catch (caught)"));
 	assert.match(afterGroups, /setNotAGitRepo\(false\);/);
 	assert.match(afterGroups, /setGitNotInstalled\(false\);/);

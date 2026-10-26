@@ -37,7 +37,7 @@ export function WorkspaceDrawerRail(props: { actions: WorkspaceDrawerRailAction[
 	// 不钉住 tab，漏掉 active 会让面板内容看起来「没有归属 tab」（2026-10 用户反馈）。
 	const visibleActions = props.actions.filter((action) => (action.pinned ?? false) || !action.canRemove || action.active);
 	return (
-		<div className="drawer-activity-rail flex h-10 shrink-0 items-center gap-1 border-b border-border/40 bg-background px-2" role="tablist" aria-orientation="horizontal">
+		<div className="drawer-activity-rail flex h-10 shrink-0 items-center gap-1 border-b border-border/40 bg-bg-page-raised px-2" role="tablist" aria-orientation="horizontal">
 			{visibleActions.map((action) => (
 				<Fragment key={action.id}>
 					{/* group 容器：X 角标相对 tab 定位，悬停/聚焦时显现，活动 tab 常驻 */}
@@ -63,7 +63,7 @@ export function WorkspaceDrawerRail(props: { actions: WorkspaceDrawerRailAction[
 								variant="ghost"
 								size="icon"
 								className={cn(
-									"drawer-rail-remove absolute -top-1 -right-1 z-10 size-4 rounded-full border border-border/60 bg-background p-0 text-muted-foreground shadow-sm transition-opacity hover:bg-bg-hover hover:text-text-primary focus-visible:opacity-100",
+									"drawer-rail-remove absolute -top-1 -right-1 z-10 size-4 rounded-full border border-border/60 bg-bg-page-raised p-0 text-muted-foreground shadow-sm transition-opacity hover:bg-bg-hover hover:text-text-primary focus-visible:opacity-100",
 									action.active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
 								)}
 								title={t("drawer.removePanel", { label: action.label })}

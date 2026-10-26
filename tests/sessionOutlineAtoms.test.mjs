@@ -8,6 +8,12 @@ import { atom, createStore } from "jotai/vanilla";
 
 const nodeRequire = createRequire(import.meta.url);
 
+let sharedFamilyRegistry = null;
+function getSharedFamilyRegistry() {
+	sharedFamilyRegistry ??= compileModule("src/renderer/src/atoms/session-family-registry.ts");
+	return sharedFamilyRegistry;
+}
+
 function compileModule(filePath, imports = {}) {
 	const output = ts.transpileModule(readFileSync(filePath, "utf8"), {
 		compilerOptions: {
@@ -18,7 +24,9 @@ function compileModule(filePath, imports = {}) {
 		fileName: filePath,
 	}).outputText;
 	const module = { exports: {} };
-	const localRequire = (specifier) => imports[specifier] ?? nodeRequire(specifier);
+	// 会话级 atomFamily 释放登记表（2027-02）：被编译的 atoms 模块都 import 它，
+	// 手写映射不会预先列出，这里按需惰性编译同一实例（否则 require 以 tests/ 为基准解析失败）。
+	const localRequire = (specifier) => imports[specifier] ?? (specifier === "./session-family-registry" ? getSharedFamilyRegistry() : nodeRequire(specifier));
 	vm.runInNewContext(
 		output,
 		{

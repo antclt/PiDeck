@@ -65,7 +65,7 @@ export type SessionPreferenceController = {
 	/** 仅清除引导页 / 未启动草稿的预选，不向运行中 Agent 发送空模型。 */
 	canClearModel: boolean;
 	clearModel: () => Promise<void>;
-	/** 选择器选中：应用思考档位 */
+	/** 选择器选中：应用思考档位（仅在选择器关闭时调用；Ctrl+T 循环共用同一链路） */
 	applyThinking: (level: string) => Promise<void>;
 	/** 快捷键：收藏内环绕切换模型 */
 	cycleModel: (direction?: CycleDirection) => Promise<void>;
@@ -337,15 +337,18 @@ export function useSessionPreferenceController(options: {
 		}
 	}
 
+	/** 应用思考档位：**唯一调用点是选择器关闭时**（滑条/刻度/方向键全程只改弹层预览），
+	 *  以及 Ctrl+T 快捷键循环。底栏文字因此只在关闭后变一次，不会因档位名字长短而漂移。 */
 	async function applyThinking(level: string) {
 		// 引导页只有 renderer-only 虚拟会话，尚无 catalog record 可更新。先保存本次
-		// 显式选择，底栏关闭选择器后立即从同一偏好重绘；首次发送创建真实会话时再带入。
+		// 显式选择，再 bump 版本戳让底栏重读 localStorage（开关弹层不会重挂载底栏）。
 		if (!record) {
 			try {
 				localStorage.setItem(WELCOME_THINKING_KEY, level);
 			} catch {
 				// localStorage 不可用时静默；首次创建会话会回退到配置默认档位。
 			}
+			state.bumpWelcomePreference();
 			onApplied();
 			return;
 		}

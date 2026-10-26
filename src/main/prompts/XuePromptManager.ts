@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import { join } from "node:path";
 import { app } from "electron";
@@ -161,14 +161,43 @@ export class XuePromptManager {
 	/**
 	 * 延迟初始化 sql.js（WASM 只需加载一次）
 	 */
+	/**
+	 * 已打开的 sql.js 库实例缓存（2027-02 性能审计）。
+	 *
+	 * 原先每次 list()/detail() 都 readFileSync 整个 db（实测 4.34MB）+ 全量重建
+	 * sql.js 库（约 5-6ms），用完即 close。商店每次翻页、换分类、点预览都付一遍，
+	 * 且全在主进程同步路径上。库文件是不可变快照（远程下载/缓存替换走整文件替换），
+	 * 用 (size, mtimeMs) 判据复用实例：文件被换掉时自动重建并释放旧实例。
+	 * 只做 exec 只读查询，复用实例无状态污染风险（sql.js 单线程同步执行）。
+	 */
+	private dbCache: { key: string; db: import("sql.js").Database } | null = null;
+
+	/** 释放缓存的库实例（文件变化重建时 / 测试隔离用）。 */
+	releaseDbCache(): void {
+		const cached = this.dbCache;
+		this.dbCache = null;
+		if (!cached) return;
+		try {
+			cached.db.close();
+		} catch {
+			// 已关闭/内部状态异常：忽略，缓存已置空
+		}
+	}
+
 	private async getDb(dbPath: string = this.dbPath): Promise<import("sql.js").Database> {
 		const SQL = await this.initSql();
 
 		if (!existsSync(dbPath)) {
 			throw new Error(`XuePrompt 数据库不存在: ${dbPath}`);
 		}
+		const info = statSync(dbPath);
+		const key = `${dbPath}|${info.size}|${info.mtimeMs}`;
+		if (this.dbCache?.key === key) return this.dbCache.db;
+		this.releaseDbCache();
 		const buffer = readFileSync(dbPath);
-		return new SQL.Database(buffer);
+		const db = new SQL.Database(buffer);
+		this.dbCache = { key, db };
+		return db;
 	}
 
 	/**
@@ -202,14 +231,26 @@ export class XuePromptManager {
 	 * 传 opts 时支持分页查询：categories 始终返回全部分类，
 	 * prompts 按 category/search 过滤并分页，同时返回 total 总数。
 	 */
-	async list(opts?: { category?: string; search?: string; page?: number; pageSize?: number }): Promise<YaoPromptListResult> {
+	async list(opts?: { category?: string; search?: string; page?: number; pageSize?: number; categoriesOnly?: boolean }): Promise<YaoPromptListResult> {
 		const { path: dbPath, state } = await this.resolveDb();
 		if (!dbPath) return this.emptyListResult(state);
 
+		// ── 分类快路径（2027-02 性能审计）──
+		// 商店首次打开只为渲染分类 chip 调 list()（无参），原先走「无参 = 全量」：
+		// 主进程要把 4012 行连 description BLOB 全取回、逐条 gunzip 描述，再经 IPC
+		// 传一份 ≈0.9MB 的 JSON 给渲染层，而渲染层拿到后只留 categories。
+		// 这里直接只查分类表 + overlay 分类，条目一律不取。
+		if (opts?.categoriesOnly) {
+			return this.listCategoriesOnly(dbPath);
+		}
+
 		// ── 通道 1：Go sidecar（常驻内存检索，支持中文搜索；失败自动降级）──
+		// 覆盖层只读一次（2027-02 性能治理）：原先 sidecar 分支与 sql.js 合并分支各读一遍
+		// （readdirSync + 逐 md readFileSync）。写盘后下一次请求自然重读，不引入缓存。
+		const overlay = this.readOverlayPrompts();
 		const xueIndex = this.deps.xueIndex;
 		if (xueIndex) {
-			const overlayEntries = this.overlayEntriesOf(this.readOverlayPrompts());
+			const overlayEntries = this.overlayEntriesOf(overlay);
 			const result = await xueIndex.list(dbPath, { category: opts?.category, search: opts?.search, page: opts?.page, pageSize: opts?.pageSize, overlay: overlayEntries });
 			if (result.ok) {
 				return { ...result.value, repoPath: dbPath, dbState: "ready" };
@@ -228,7 +269,6 @@ export class XuePromptManager {
 				count: Number(row[2] ?? 0),
 			}));
 
-			const overlay = this.readOverlayPrompts();
 			if (overlay.size === 0) {
 				return this.listFromDbOnly(db, categories, dbPath, opts);
 			}
@@ -243,7 +283,15 @@ export class XuePromptManager {
 				params.push(opts.category, opts.category);
 			}
 			const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-			const rows = db.exec(`SELECT slug, url, title, category, content, description FROM xueprompts ${whereClause} ORDER BY category, title`, params);
+			// 轻量投影（2027-02 性能审计）：覆盖层非空时原实现无条件下「全表 + content/description
+			// 两列 BLOB」（实测 4012 行 ≈94ms 取回 + 49ms 逐条 gunzip≈150ms 同步 CPU/次），
+			// 而纯浏览（带分页、无搜索词）只需要展示当前页的描述。此时代码先只取
+			// slug/url/title/category 做合并/过滤/排序/切片，再只为当前页条目回填描述。
+			// 有关键词（搜索要匹配正文与描述）或调用方要全量形态时仍取全列。
+			const keywordForQuery = opts?.search?.trim();
+			const lightProjection = Boolean(opts) && !keywordForQuery;
+			const columns = lightProjection ? "slug, url, title, category" : "slug, url, title, category, content, description";
+			const rows = db.exec(`SELECT ${columns} FROM xueprompts ${whereClause} ORDER BY category, title`, params);
 
 			// slug → 条目 合并表：overlay 优先（title/category 缺省时回退 db 同名值，
 			// 保证商店表格显示仍是友好中文标题而非文件名）
@@ -313,9 +361,11 @@ export class XuePromptManager {
 			const pageSize = Math.max(1, Math.min(100, opts.pageSize ?? 20));
 			const offset = (page - 1) * pageSize;
 			const prompts = all.slice(offset, offset + pageSize).map((e) => e.item);
+			// 轻量投影时描述还没取：只为当前页里「非覆盖层」的条目一次回填（≤pageSize 行）
+			if (lightProjection) this.backfillDescriptions(db, prompts);
 			return { categories: mergedCategories, prompts, repoPath: dbPath, dbState: "ready", total: all.length, page, pageSize };
 		} finally {
-			db.close();
+			// 库实例由 getDb 的 (size,mtime) 缓存托管，不在这里关闭（2027-02 性能治理）
 		}
 	}
 
@@ -375,6 +425,64 @@ export class XuePromptManager {
 	}
 
 	/**
+	 * 为当前页条目回填描述（2027-02 性能审计配套）。
+	 *
+	 * 轻量投影只取 slug/url/title/category，描述（gzip BLOB）留到切片后再按需解码：
+	 * 一页最多 20-100 行，用一条 IN 查询取回，替代原先「全表 4012 行 BLOB + 逐条 gunzip」。
+	 * 覆盖层条目自带明文描述，不查库。
+	 */
+	private backfillDescriptions(db: import("sql.js").Database, prompts: YaoPromptItem[]): void {
+		// 判据是「描述仍为空」而不是「不在覆盖层」：覆盖层 md 常常只有正文、没有 description
+		// frontmatter，此时语义上要回退库内描述（与重路径 base.rawDesc 回退一致）。
+		const wanted = prompts.filter((item) => item.description === "").map((item) => item.slug);
+		if (wanted.length === 0) return;
+		const placeholders = wanted.map(() => "?").join(",");
+		const rows = db.exec(`SELECT slug, description FROM xueprompts WHERE slug IN (${placeholders})`, wanted);
+		const descriptionBySlug = new Map<string, string>();
+		for (const row of rows[0]?.values ?? []) {
+			descriptionBySlug.set(String(row[0] ?? ""), row[1] ? this.blobToString(row[1]) : "");
+		}
+		for (const item of prompts) {
+			const description = descriptionBySlug.get(item.slug);
+			if (description !== undefined) item.description = description;
+		}
+	}
+
+	/**
+	 * 只取分类栏（2027-02 性能审计）。
+	 *
+	 * 商店首次打开只需要 categories：这里只跑两条轻查询（分类表 + 按分类聚合计数），
+	 * 不取 content/description 两列 BLOB，因此不需要逐条 gunzip；overlay 引入的新分类
+	 * 用覆盖层自身条目补齐，与合并分支 mergeCategories 的重算口径一致。
+	 */
+	private async listCategoriesOnly(dbPath: string): Promise<YaoPromptListResult> {
+		const db = await this.getDb(dbPath);
+		const catRows = db.exec("SELECT slug, name, count FROM xueprompt_categories ORDER BY count DESC");
+		const categories: YaoPromptCategory[] = (catRows[0]?.values ?? []).map((row) => ({
+			slug: String(row[0] ?? ""),
+			name: String(row[1] ?? ""),
+			count: Number(row[2] ?? 0),
+		}));
+		const overlay = this.readOverlayPrompts();
+		if (overlay.size === 0) {
+			return { categories, prompts: [], repoPath: dbPath, dbState: "ready" };
+		}
+		// 按分类名聚合（只读 category 列，不碰 BLOB）：覆盖层条目可能改分类/新增分类
+		const grouped = db.exec("SELECT category, COUNT(*) FROM xueprompts GROUP BY category");
+		const visibleCategories: string[] = [];
+		for (const row of grouped[0]?.values ?? []) {
+			const name = String(row[0] ?? "");
+			const count = Number(row[1] ?? 0);
+			for (let index = 0; index < count; index += 1) visibleCategories.push(name);
+		}
+		for (const entry of overlay.values()) {
+			// 覆盖层条目可能改分类/新增分类：分类名直接进可见集合，交给 mergeCategories 统一重算
+			if (entry.category) visibleCategories.push(entry.category);
+		}
+		return { categories: this.mergeCategories(categories, visibleCategories), prompts: [], repoPath: dbPath, dbState: "ready" };
+	}
+
+	/**
 	 * 合并分类栏：保留 db 全部分类，叠加覆盖层引入的新分类；
 	 * count 用覆盖层可见分类重算（覆盖不改变条数，新增分类才计入）。
 	 */
@@ -426,7 +534,7 @@ export class XuePromptManager {
 				const dbRow = rows[0]?.values?.[0];
 				return this.overlayDetailOf(overlay, dbRow ? { title: String(dbRow[0] ?? ""), description: this.blobToString(dbRow[1]), url: String(dbRow[2] ?? "") } : null, slug);
 			} finally {
-				db.close();
+				// 库实例由 getDb 缓存托管（同上），不在这里关闭
 			}
 		}
 
@@ -463,7 +571,7 @@ export class XuePromptManager {
 				fullContent,
 			};
 		} finally {
-			db.close();
+			// 库实例由 getDb 的 (size,mtime) 缓存托管，不在这里关闭（2027-02 性能治理）
 		}
 	}
 

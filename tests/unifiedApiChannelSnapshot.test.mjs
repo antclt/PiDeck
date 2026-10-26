@@ -2,7 +2,7 @@
  * F3 · IPC 通道快照守卫（TEST-PLAN §F3，6 例，锚定数字见 TEST-PLAN §0）。
  *
  * src/shared/ipc.ts 的 ipcChannels 常量表是全部 IPC 通道的唯一来源；本测试把它的
- * 规模与形状锚定为快照（708 通道 / 88 前缀 / 排序摘要）。快照变更只允许显式发生
+ * 规模与形状锚定为快照（711 通道 / 89 前缀 / 排序摘要）。快照变更只允许显式发生
  * 且附领域正当理由——本轮（T4 契约层）任何快照红 = 违例。
  *
  * 2026-10-16 显式刷新（+4 通道，均附领域正当理由）：
@@ -24,6 +24,8 @@
  * 2026-10-24 刷新（+1）：favoritesRemoveMany（收藏批量删除：一次 IPC、一次写盘，未知 id 忽略）→ 706，前缀数不变。
  * 2026-10-24 合并刷新：并入上游 26de030fc 的 configDiscoverExternalAgents / configResolveExternalAgentKey
  *   （导入本机其他 Agent 工具的供应商配置，origin 707）+ 本地 favoritesRemoveMany → 708，前缀数仍 88。
+ * 2026-10-23 刷新（+3）：wallpaperEnginePickDir / wallpaperEngineList / wallpaperEngineSelect
+ *   （Wallpaper Engine 视频壁纸：选工坊目录 / 列出视频条目 / 校验选中条目），新增 wallpaper-engine 前缀 → 711 / 89。
  * 刷新方式：entries.map(([k, v]) => `${k}=${v}`).sort().join("\n") 重算 sha256，写入 CHANNEL_DIGEST。
  */
 import assert from "node:assert/strict";
@@ -31,19 +33,19 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const CHANNEL_TOTAL = 708;
-const PREFIX_COUNT = 88;
-const CHANNEL_DIGEST = "4724b66bf5ae8d95e75fe90694275fa3ea74aff1be7fe2c39c61a70b6bd344b1";
+const CHANNEL_TOTAL = 711;
+const PREFIX_COUNT = 89;
+const CHANNEL_DIGEST = "154e63a7ad3e884a7a25077a757723eb7f461d73f08f153bd122bf64ebc4301c";
 
 const ipcChannels = loadTsCommonJs("src/shared/ipc.ts").ipcChannels;
 const entries = Object.entries(ipcChannels);
 const values = entries.map(([, value]) => value);
 
-test("F3-1 通道常量总数 === 708", () => {
+test("F3-1 通道常量总数 === 711", () => {
 	assert.equal(entries.length, CHANNEL_TOTAL);
 });
 
-test("F3-2 通道值唯一数 === 708（无重复通道字符串）", () => {
+test("F3-2 通道值唯一数 === 711（无重复通道字符串）", () => {
 	assert.equal(new Set(values).size, CHANNEL_TOTAL);
 });
 
@@ -70,7 +72,7 @@ test("F3-5 锚点抽查：appGetChannel=update:get-channel、sessionsRuntimeEven
 	assert.equal(countByPrefix("enhance"), 3);
 });
 
-test("F3-6 通道域前缀种类 === 88", () => {
+test("F3-6 通道域前缀种类 === 89", () => {
 	const prefixes = new Set(values.map((value) => value.split(":")[0]));
 	assert.equal(prefixes.size, PREFIX_COUNT);
 });

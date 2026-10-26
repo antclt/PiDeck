@@ -259,11 +259,12 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 	const foldableItems = useMemo(() => displayItems.filter((item) => item.kind !== "final-answer"), [displayItems]);
 	const finalItems = useMemo(() => displayItems.filter((item) => item.kind === "final-answer"), [displayItems]);
 	// 单轮步骤挂载预算（2026-08 #213）：极端轮次（单轮上百个工具/思考条目）默认只挂尾部
-	// LIMIT 条，顶部给「显示更早 N 条步骤」入口——内容仍在 foldableItems 里，点开即全量挂载。
-	// 用 run.id 而非布尔量做「已展开」状态：换 run 自然重置，不需要额外 effect。
-	const [expandedStepsRunId, setExpandedStepsRunId] = useState<string | undefined>(undefined);
-	const stepsFullyExpanded = expandedStepsRunId === run.id;
-	const mountedSteps = useMemo(() => boundMountedSteps(foldableItems, TIMELINE_MOUNTED_STEP_LIMIT, stepsFullyExpanded), [foldableItems, stepsFullyExpanded]);
+	// LIMIT 条，顶部给「显示更早 N 条步骤」入口——每点一次把挂载下界向前挪一批（batches +1）。
+	// 下界锚在首次点击时的条目总数上：之后尾部追加新步骤不会把已展开的旧条目挤回去。
+	// 用 run.id 判定「已展开」状态：换 run 自然重置，不需要额外 effect。
+	const [expandedSteps, setExpandedSteps] = useState<{ runId: string; anchor: number; batches: number } | undefined>(undefined);
+	const stepExpansion = expandedSteps?.runId === run.id ? expandedSteps : undefined;
+	const mountedSteps = useMemo(() => boundMountedSteps(foldableItems, TIMELINE_MOUNTED_STEP_LIMIT, stepExpansion), [foldableItems, stepExpansion]);
 
 	/* ── 过程组模式（processGroupDisplay；关闭时走下面原有的扁平渲染） ──
 	 * 纯函数把扁平序列切成「中间回复 / 过程组 / 一级行」交替序列（见 timeline/groupTurnProcess.ts）。
@@ -384,11 +385,11 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 										<button
 											type="button"
 											className="mt-1 inline-flex h-[26px] items-center gap-2 self-start rounded-[var(--radius-md)] border border-border-subtle bg-[var(--color-chat-card-bg)] px-3 text-chat-detail font-medium text-text-secondary transition-colors hover:border-border-strong hover:bg-bg-hover hover:text-text-primary"
-											onClick={() => setExpandedStepsRunId(run.id)}
-											title={t("timeline.showEarlierSteps", { count: mountedSteps.hiddenCount })}
+											onClick={() => setExpandedSteps((prev) => (prev?.runId === run.id ? { ...prev, batches: prev.batches + 1 } : { runId: run.id, anchor: foldableItems.length, batches: 1 }))}
+											title={t("timeline.showEarlierSteps", { count: Math.min(TIMELINE_MOUNTED_STEP_LIMIT, mountedSteps.hiddenCount) })}
 										>
 											<ChevronUp size={12} aria-hidden="true" />
-											<span>{t("timeline.showEarlierSteps", { count: mountedSteps.hiddenCount })}</span>
+											<span>{t("timeline.showEarlierSteps", { count: Math.min(TIMELINE_MOUNTED_STEP_LIMIT, mountedSteps.hiddenCount) })}</span>
 										</button>
 									)}
 									{(stepsVisible || props.agentRunning === true) &&
@@ -542,11 +543,10 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 						{showTurnModel && turnModel && (
 							/* 本轮实际使用的模型（provider + modelId）跟在耗时后面：同一会话内用户会频繁换模型，
 							   只在输入框显示当前模型不足以回看历史轮；流式中不显示，回复结束才落定。
-							   做成小标签而不是同号纯文本：左边耗时是读数（text-body + 等宽数字），
-							   模型名是名字，同色同号时两段会连成一句「2m18s global:xxx」读不断。
-							   模型名长短不一（如 global:deepseek-v4.1-flash），限宽截断 + title 给全量 provider/model，
-							   不让长名字把行末撑开或换行。 */
-							<span className="ml-1 min-w-0 max-w-[16rem] truncate rounded-sm bg-muted/60 px-1.5 py-0.5 text-chat-detail font-medium leading-none text-muted-foreground" title={`${turnModel.provider}/${turnModel.modelId}`} data-turn-model={turnModel.modelId}>
+							   保留等宽字体与限宽截断以区别于耗时读数（text-body + 等宽数字），但去掉灰底
+							   ——每轮都有的元信息 chip 会给时间线添碎（2026-10 去底，ZCode 模型名即裸暗字）。
+							   title 给全量 provider/model。 */
+							<span className="ml-1 min-w-0 max-w-[16rem] truncate font-mono text-chat-detail leading-none text-text-tertiary" title={`${turnModel.provider}/${turnModel.modelId}`} data-turn-model={turnModel.modelId}>
 								{turnModel.modelId}
 							</span>
 						)}

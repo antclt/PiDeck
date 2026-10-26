@@ -11,7 +11,7 @@
  * - 「测试」成功即写缓存（三处展示立刻热更）；「保存」按 provider 合并写 usage-probes.json。
  * - 无字段级自定义：脚本/JSON 编辑不开放（用户和我们都不需要）。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { AlertCircle, Bot, Eye, EyeOff, Loader2 } from "lucide-react";
 import { t } from "../i18n";
@@ -235,6 +235,18 @@ export function UsageProbeConfigDialog(props: {
 		};
 	}, [props.open, props.provider, props.backend]);
 
+	// 「保存成功 → 600ms 后自动关闭」的待执行 timer（卸载/手动关闭必须撤销）。
+	const closeTimerRef = useRef<number | null>(null);
+	useEffect(
+		() => () => {
+			if (closeTimerRef.current !== null) {
+				window.clearTimeout(closeTimerRef.current);
+				closeTimerRef.current = null;
+			}
+		},
+		[],
+	);
+
 	// 关闭时重置瞬时状态（每次打开重新加载，弹窗不跨会话保留草稿）。
 	const resetInstant = useCallback(() => {
 		setTestState("idle");
@@ -246,6 +258,11 @@ export function UsageProbeConfigDialog(props: {
 		setShowToken(false);
 	}, []);
 	const handleClose = useCallback(() => {
+		// 手动关闭要先撤掉「保存成功后自动关闭」的待执行 timer（见保存分支）
+		if (closeTimerRef.current !== null) {
+			window.clearTimeout(closeTimerRef.current);
+			closeTimerRef.current = null;
+		}
 		resetInstant();
 		props.onClose();
 	}, [props.onClose, resetInstant]);
@@ -391,7 +408,14 @@ export function UsageProbeConfigDialog(props: {
 				// 不回读会停在「未启用」直到重开应用）；三处消费随即重查出新配置的效果。
 				invalidateAll();
 				void refreshProviderState(props.provider, props.backend);
-				window.setTimeout(handleClose, 600);
+				// 600ms 后自动关闭只是「保存成功」的视觉收尾（2027-02）：timer 必须可取消，
+				// 否则用户在窗口期内自行关闭/宿主窗口先关，回调仍会再跑一次 resetInstant + onClose，
+				// 造成重复关闭（可能连带关掉宿主设置窗口）。
+				if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+				closeTimerRef.current = window.setTimeout(() => {
+					closeTimerRef.current = null;
+					handleClose();
+				}, 600);
 			} else {
 				setSaveState("error");
 				setSaveError(result.error ?? t("config.usageProbe.saveFailed"));

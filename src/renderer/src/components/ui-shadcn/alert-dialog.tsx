@@ -19,7 +19,13 @@ function AlertDialogPortal({ ...props }: React.ComponentProps<typeof AlertDialog
 }
 
 function AlertDialogOverlay({ className, ...props }: React.ComponentProps<typeof AlertDialogPrimitive.Overlay>) {
-	return <AlertDialogPrimitive.Overlay data-slot="alert-dialog-overlay" className={cn("fixed inset-0 z-(--z-dialog) bg-[var(--overlay-backdrop)] backdrop-blur-[2px] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0", className)} {...props} />;
+	return (
+		<AlertDialogPrimitive.Overlay
+			data-slot="alert-dialog-overlay"
+			className={cn("fixed inset-0 z-(--z-dialog) bg-[var(--overlay-backdrop)] backdrop-blur-[2px] duration-base data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0", className)}
+			{...props}
+		/>
+	);
 }
 
 function AlertDialogContent({

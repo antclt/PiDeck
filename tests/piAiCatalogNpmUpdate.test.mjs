@@ -377,3 +377,68 @@ test("catalog: 分支源全挂时回退 npm latest", async () => {
 		cleanup(dir);
 	}
 });
+
+/**
+ * 组合 fetch 替身：分支源给指定 artifact，npm registry/jsDelivr 给指定版本。
+ * 用于验证「检查走的源」与「能写入的源」必须能互相兑现（否则设置页会常驻
+ * 一条点了只回「已是最新」的提示）。
+ */
+function makeBranchPlusNpmFetch(artifact, npmVersion) {
+	const branchFetch = makeBranchFetch(artifact.catalogText, artifact.manifestText);
+	const npmFetch = makeNpmFetch(npmVersion, ["demo.json"]);
+	return async (url) => {
+		if (url.endsWith("pi-ai-catalog.manifest.json") || url.endsWith("pi-ai-catalog.json")) return branchFetch(url);
+		return npmFetch(url);
+	};
+}
+
+test("catalog:update 分支件不比本地新时继续用 npm 兑现（检查说可更新 → 更新必须能装上）", async () => {
+	const dir = tempDir();
+	try {
+		// 发布分支的预生成件还停在 0.9.0（目录没跟上 npm 发布），npm latest 已是 9.9.9：
+		// 单看分支源会回「已是最新」，但检查侧走 npm 回退会报「有更新」——两条路必须一致。
+		const fetchImpl = makeBranchPlusNpmFetch(generateArtifact("0.9.0"), "9.9.9");
+		const updater = new PiAiCatalogUpdater({ userDataDir: dir, fetchImpl, timeoutMs: 200 });
+		const result = await updater.update("main");
+		assert.equal(result.ok, true);
+		assert.equal(result.updated, true, "分支件不新不代表没更新，要继续用 npm 生成源兑现");
+		assert.equal(updater.getStatus().overlay?.packageVersion, "9.9.9");
+	} finally {
+		cleanup(dir);
+	}
+});
+
+test("catalog:update 两个源都不比本地新时返回 skipped=remote-behind 并带上两端版本", async () => {
+	const dir = tempDir();
+	try {
+		// 分支件与 npm latest 都停在 0.9.0（低于内置 1.4.0）：不该报错，也不该谎称「已是最新」。
+		const fetchImpl = makeBranchPlusNpmFetch(generateArtifact("0.9.0"), "0.9.0");
+		const updater = new PiAiCatalogUpdater({ userDataDir: dir, fetchImpl, timeoutMs: 200 });
+		const result = await updater.update("main");
+		assert.equal(result.ok, true);
+		assert.equal(result.updated, false);
+		assert.equal(result.skipped, "remote-behind", "远端更旧要能和「同版」区分开，UI 文案才说得清谁落后");
+		assert.equal(result.remoteVersion, "0.9.0");
+		assert.ok(result.localVersion, "要带上当前生效版本供 UI 展示");
+		assert.equal(existsSync(join(dir, "pi-ai-catalog.json")), false, "不得降级覆盖");
+	} finally {
+		cleanup(dir);
+	}
+});
+
+test("catalog:checkRemote 走 npm 回退时标出 source=npm（更新侧按同一条链路兑现）", async () => {
+	const dir = tempDir();
+	try {
+		const updater = new PiAiCatalogUpdater({
+			userDataDir: dir,
+			fetchImpl: makeNpmFetch("9.9.9", ["demo.json"]),
+			timeoutMs: 200,
+		});
+		const checked = await updater.checkRemote("main");
+		assert.equal(checked.ok, true);
+		assert.equal(checked.hasUpdate, true);
+		assert.equal(checked.source, "npm", "检查走的是回退源，update 必须也允许走它");
+	} finally {
+		cleanup(dir);
+	}
+});

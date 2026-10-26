@@ -132,7 +132,12 @@ test("弹窗保存后回读状态表（徽章的开关态/间隔来自状态表�
 	const dialog = readFileSync("src/renderer/src/config/UsageProbeConfigDialog.tsx", "utf8");
 	assert.match(dialog, /useRefreshProviderUsageState/);
 	// 保存成功分支里必须同时「清缓存 + 回读状态」。
-	const successBlock = dialog.match(/if \(result\.ok\) \{[\s\S]*?window\.setTimeout\(handleClose, 600\);/)?.[0] ?? "";
+	// 2027-02 起自动关闭改用可撤销 timer（closeTimerRef），契约改为匹配该收尾语句；
+	// 空白容忍，避免格式化改缩进误红。
+	const successBlock = dialog.match(/if \(result\.ok\) \{[\s\S]*?closeTimerRef\.current = window\.setTimeout\(/)?.[0] ?? "";
 	assert.match(successBlock, /invalidateAll\(\);/);
 	assert.match(successBlock, /void refreshProviderState\(props\.provider, props\.backend\);/);
+	// timer 必须可撤销（卸载/手动关闭），否则重复 onClose
+	assert.match(dialog, /closeTimerRef/);
+	assert.match(dialog, /window\.clearTimeout\(closeTimerRef\.current\)/);
 });

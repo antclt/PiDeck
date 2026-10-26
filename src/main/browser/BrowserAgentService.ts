@@ -31,7 +31,12 @@ export class BrowserAgentService {
 	readonly controller: BrowserController;
 
 	constructor(deps: BrowserAgentServiceDeps) {
-		this.registry = new BrowserGuestRegistry({ listAll: deps.listAllWebContents, isBrowserPanelGuest: deps.isBrowserPanelGuest });
+		this.registry = new BrowserGuestRegistry({
+			listAll: deps.listAllWebContents,
+			isBrowserPanelGuest: deps.isBrowserPanelGuest,
+			// 页面导航（含 SPA 路由）→ 旧 ref 全部失效；页面不可信，不能靠页面自觉清理 data-pideck-ref。
+			onGuestNavigated: () => this.controller?.invalidateSnapshot(),
+		});
 		this.gate = new CuaGate({ enabled: false, autoApprove: deps.getAutoApprove });
 		this.controller = new BrowserController({
 			registry: this.registry,

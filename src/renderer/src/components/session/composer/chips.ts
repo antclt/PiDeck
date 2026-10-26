@@ -65,9 +65,6 @@ export function isDirectoryFileChip(raw: string): boolean {
 	return /[/\\]$/.test(body);
 }
 
-/** @deprecated 兼容旧名；新代码用 ComposerChip */
-export type RichInputChip = ComposerChip;
-
 /** 提取文本中所有 URL 区间，后续 chip 解析跳过这些区间。 */
 function findUrlSpans(text: string): { start: number; end: number }[] {
 	const urlRe = /https?:\/\/\S+/g;

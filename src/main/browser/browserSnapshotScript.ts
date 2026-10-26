@@ -9,20 +9,25 @@
 export type SnapshotScriptOptions = {
 	maxElements: number;
 	includeBoxes: boolean;
+	/** 识别可视化：给本轮收录的元素画框 + ref 标签（默认开，纯视觉、自动淡出）。 */
+	renderOverlay: boolean;
 };
 
-export function collectBrowserSnapshotInPage(rawOptions: { maxElements?: unknown; includeBoxes?: unknown }): unknown {
+export function collectBrowserSnapshotInPage(rawOptions: { maxElements?: unknown; includeBoxes?: unknown; renderOverlay?: unknown }): unknown {
 	const maxElements = typeof rawOptions.maxElements === "number" && rawOptions.maxElements > 0 ? Math.floor(rawOptions.maxElements) : 200;
 	const includeBoxes = rawOptions.includeBoxes === true;
+	const renderOverlay = rawOptions.renderOverlay !== false;
 	const selector = "a[href], button, input:not([type='hidden']), textarea, select, summary, label, [role], [contenteditable=''], [contenteditable='true'], [onclick], [tabindex]:not([tabindex='-1'])";
 	const MAX_SCAN = 4000;
 	const MAX_ROOTS = 30;
 
-	const isVisible = (el: Element): boolean => {
+	// 可见性判断同时把 rect 带出来：后续 box 直接复用，不再为同一次快照二次 gBCR。
+	const visibleRect = (el: Element): { x: number; y: number; width: number; height: number } | null => {
 		const style = window.getComputedStyle(el);
-		if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
+		if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return null;
 		const rect = el.getBoundingClientRect();
-		return rect.width > 0 && rect.height > 0;
+		if (rect.width <= 0 || rect.height <= 0) return null;
+		return rect;
 	};
 
 	const roleOf = (el: Element): string => {
@@ -65,7 +70,8 @@ export function collectBrowserSnapshotInPage(rawOptions: { maxElements?: unknown
 		if (title && title.trim()) return title;
 		const alt = el.getAttribute("alt");
 		if (alt && alt.trim()) return alt;
-		if (el instanceof HTMLElement) return el.innerText || el.textContent || "";
+		// 容器兜底用 textContent：innerText 会强制 layout 并序列化整棵子树（一个 role="main" 就是整页正文）。
+		// textContent 不触发 layout；代价是可能带上隐藏文本，名字随后截断，可接受。
 		return el.textContent || "";
 	};
 
@@ -78,6 +84,39 @@ export function collectBrowserSnapshotInPage(rawOptions: { maxElements?: unknown
 		if (el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) return el.value;
 		if (el instanceof HTMLElement && el.isContentEditable) return el.innerText;
 		return "";
+	};
+
+	// 无障碍名缺失的纯布局容器不进快照：它们的"名字"只能是整棵子树文本，
+	// 挤占 maxElements 预算（深层按钮被 truncate 掉）还产生一堆压缩正文行。
+	const CONTAINER_ROLES = new Set(["presentation", "none", "generic", "main", "banner", "region", "complementary", "contentinfo", "form", "navigation", "article", "section", "group", "toolbar", "menubar", "menu", "directory", "feed", "document", "application", "search"]);
+	const hasExplicitName = (el: Element): boolean => {
+		const ariaLabel = el.getAttribute("aria-label");
+		if (ariaLabel && ariaLabel.trim()) return true;
+		if (el.getAttribute("aria-labelledby")) return true;
+		if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
+			const labels = el.labels;
+			if (labels && labels.length > 0) return true;
+		}
+		const placeholder = el.getAttribute("placeholder");
+		if (placeholder && placeholder.trim()) return true;
+		const title = el.getAttribute("title");
+		if (title && title.trim()) return true;
+		return false;
+	};
+
+	// 元素自身 opacity/display/visibility 检查覆盖不了祖先链：opacity:0 的子树里
+	// 子元素自身 computed opacity=1 且 rect 非零，用户看不见却能被快照/点击（视觉欺骗面）。
+	// 只对准备收录的元素走（≤maxElements × 24 跳上限），保持纯读不破坏两段式。
+	const hiddenByAncestor = (el: Element): boolean => {
+		let node = el.parentElement;
+		let hops = 0;
+		while (node && hops < 24) {
+			const style = window.getComputedStyle(node);
+			if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return true;
+			node = node.parentElement;
+			hops += 1;
+		}
+		return false;
 	};
 
 	// 收集 document + 开放 shadow root：closed shadow root 无法访问，v1 明确不支持。
@@ -111,18 +150,27 @@ export function collectBrowserSnapshotInPage(rawOptions: { maxElements?: unknown
 		}
 	}
 
+	// 两段式（性能关键）：先纯读（可见性/rect/名称/值），再纯写（批量 setAttribute）。
+	// 读写交错时每个 setAttribute 都会弄脏样式，下一轮 getComputedStyle/getBoundingClientRect
+	// 被迫整页重算——maxElements=200 就是 200 次强制布局，复杂页面会冻结数百毫秒（用户感知为卡顿）。
+	// 两段式把布局重算摊平为一次，回归由 tests/browser/browserSnapshotScript.test.mjs 锁定。
 	const elements: Array<Record<string, unknown>> = [];
+	const refAssignments: Array<{ el: Element; ref: string }> = [];
+	// 覆盖层需要每个收录元素的 rect：与 includeBoxes 无关，读阶段顺带留存。
+	const boxRects: Array<{ ref: string; rect: { x: number; y: number; width: number; height: number } }> = [];
 	let visibleCount = 0;
 	for (const el of candidates) {
-		if (!isVisible(el)) continue;
+		const rect = visibleRect(el);
+		if (!rect) continue;
+		const role = roleOf(el);
+		if (!hasExplicitName(el) && CONTAINER_ROLES.has(role)) continue;
 		visibleCount += 1;
 		if (elements.length >= maxElements) continue;
+		if (hiddenByAncestor(el)) continue;
 		const ref = `e${elements.length + 1}`;
-		el.setAttribute("data-pideck-ref", ref);
-		const rect = el.getBoundingClientRect();
 		const node: Record<string, unknown> = {
 			ref,
-			role: roleOf(el),
+			role,
 			name: nameOf(el).slice(0, 200),
 			tag: el.tagName.toLowerCase(),
 		};
@@ -131,6 +179,41 @@ export function collectBrowserSnapshotInPage(rawOptions: { maxElements?: unknown
 		if (el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true") node.disabled = true;
 		if (includeBoxes) node.box = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
 		elements.push(node);
+		refAssignments.push({ el, ref });
+		boxRects.push({ ref, rect });
+	}
+	for (const { el, ref } of refAssignments) el.setAttribute("data-pideck-ref", ref);
+
+	// 识别可视化（用户侧的「选取效果」）：给本轮收录的元素画蓝色框 + ref 标签，约 2s 淡出。
+	// 纯视觉增强：pointer-events:none、不进快照数据；页面异常时静默跳过，绝不影响采集结果。
+	try {
+		const OVERLAY_ID = "__pideck_agent_boxes";
+		const previous = document.getElementById(OVERLAY_ID);
+		if (previous) previous.remove();
+		if (renderOverlay && boxRects.length > 0) {
+			const overlay = document.createElement("div");
+			overlay.id = OVERLAY_ID;
+			overlay.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483646;transition:opacity .4s ease 1.6s;opacity:1;";
+			for (const item of boxRects) {
+				const mark = document.createElement("div");
+				mark.style.cssText = "position:fixed;left:" + Math.round(item.rect.x) + "px;top:" + Math.round(item.rect.y) + "px;width:" + Math.round(item.rect.width) + "px;height:" + Math.round(item.rect.height) + "px;border:1px solid rgba(59,130,246,.85);border-radius:3px;";
+				const tag = document.createElement("span");
+				tag.textContent = item.ref;
+				tag.style.cssText = "position:absolute;top:-13px;left:-1px;padding:0 4px;border-radius:2px;background:rgba(59,130,246,.95);color:#fff;font:600 10px/13px ui-monospace,monospace;";
+				mark.appendChild(tag);
+				overlay.appendChild(mark);
+			}
+			(document.body || document.documentElement).appendChild(overlay);
+			setTimeout(() => {
+				overlay.style.opacity = "0";
+			}, 40);
+			setTimeout(() => {
+				const stale = document.getElementById(OVERLAY_ID);
+				if (stale) stale.remove();
+			}, 2300);
+		}
+	} catch {
+		// 可视化失败（怪异 DOM/CSP）不算快照失败。
 	}
 
 	return {
@@ -148,6 +231,6 @@ export function collectBrowserSnapshotInPage(rawOptions: { maxElements?: unknown
 
 /** 生成可注入 Runtime.evaluate 的表达式（参数经 JSON 序列化，避免注入页面代码）。 */
 export function buildSnapshotExpression(options: SnapshotScriptOptions): string {
-	const payload = JSON.stringify({ maxElements: options.maxElements, includeBoxes: options.includeBoxes });
+	const payload = JSON.stringify({ maxElements: options.maxElements, includeBoxes: options.includeBoxes, renderOverlay: options.renderOverlay });
 	return `(${collectBrowserSnapshotInPage.toString()})(${payload})`;
 }

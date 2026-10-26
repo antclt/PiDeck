@@ -3,7 +3,7 @@ import { MousePointer2 } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
 import { ApprovalCard } from "../ui-shadcn/approval-card";
-import { dequeueApproval, enqueueApproval, peekApproval } from "../../utils/cuaApprovalQueue";
+import { APPROVAL_TTL_MS, dequeueApproval, enqueueApproval, expireApprovals, peekApproval } from "../../utils/cuaApprovalQueue";
 
 const ACTION_LABEL_KEYS: Record<string, TranslationKey> = {
 	click: "cua.action.click",
@@ -139,6 +139,17 @@ export function useCuaApproval() {
 		});
 		return unsubscribe;
 	}, []);
+
+	// 主进程 30s 超时后审批已被拒绝，队列里过期条目再点「允许」只是无效操作——
+	// 按队首剩余存活时间定时清理（+250ms 宽限，避免与用户正在进行的点击竞速）。
+	useEffect(() => {
+		if (queue.length === 0) return;
+		const remaining = APPROVAL_TTL_MS - (Date.now() - queue[0].timestampMs);
+		const timer = setTimeout(() => {
+			setQueue((prev) => expireApprovals(prev, Date.now()));
+		}, Math.max(0, remaining) + 250);
+		return () => clearTimeout(timer);
+	}, [queue]);
 
 	const respond = useCallback(
 		async (allowed: boolean) => {

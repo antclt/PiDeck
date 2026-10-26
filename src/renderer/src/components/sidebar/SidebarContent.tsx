@@ -1,5 +1,5 @@
 import { Activity, Bolt, CirclePlus, Clock, Folder, Globe, MessageSquare, Monitor, Moon, Search, Sun } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useReducer, useState, type ReactNode } from "react";
 import type { AgentBackend, AgentTab, AppThemeMode, ArchivedDshSession, ArchivedPiSession, Project, SessionRecord, SessionSummary, WorktreeEntry } from "../../../../shared/types";
 import { AgentContextMenu, DraftSessionContextMenu, ProjectContextMenu, SessionContextMenu, SessionManagerModal, SessionSourceFilterMenu, WorktreeCreateDialog } from "./SidebarParts";
 import { automationModuleHiddenAtom, sessionRecordToSummary } from "../../atoms";
@@ -29,7 +29,7 @@ import { FavoritesDockButton } from "./FavoritesDockButton";
 import { HostPluginDockButtons } from "../plugins/HostPluginDockButtons";
 import { MorphingSearch, type MorphingSearchItem } from "../motion/morphing-search";
 import { parseSidebarNavTab } from "../../utils/sidebarNavTab";
-import { pinyinKeys } from "../../utils/pinyinSearch";
+import { ensurePinyinTable, pinyinKeys } from "../../utils/pinyinSearch";
 import { displayProjectDirectoryName, isChatProject } from "../../rendererUtils";
 import { formatAccelerator } from "../../../../shared/shortcuts";
 import { desktopApi } from "../../desktopApi";
@@ -142,6 +142,8 @@ export type SidebarContentProps = {
 	creatingWorktree?: boolean;
 	/** 正在删除的 worktree 路径集合（透传给 WorktreeTree 驱动淡出动画）。 */
 	removingWorktreePaths?: ReadonlySet<string>;
+	/** 「聊天」「项目」分组标题栏在列表滚动时冻结在顶部（settings.sidebarStickyGroupHeaders）。 */
+	stickyGroupHeaders?: boolean;
 	isLanWeb?: boolean;
 	chrome?: ReactNode;
 	/** 「新建会话」：打开初始引导页（居中输入框 + 项目下拉切换），由 App 提供。 */
@@ -193,6 +195,22 @@ export function SidebarContent(props: SidebarContentProps) {
 	const menuAgentCanRpcLog = menuAgent !== undefined && getBoundSidebarRuntimeAgentByAgentId(controller.catalog, menuAgent.id) !== undefined;
 	// 顶部「搜索」菜单项控制 MorphingSearch 命令面板的展开状态。
 	const [searchOpen, setSearchOpen] = useState(false);
+	// 拼音字典按需装载：搜索面板打开才拉 26k 条字典 chunk（不进启动路径）。
+	// 就绪后 bump 一次渲染让 searchItems 重算出真实拼音键；未就绪期间面板退化为
+	// 子串/英文匹配，本地 chunk 毫秒级到位，体感无损。失败静默（只损失拼音通道）。
+	const [, bumpPinyinTable] = useReducer((tick: number) => tick + 1, 0);
+	useEffect(() => {
+		if (!searchOpen) return;
+		let cancelled = false;
+		ensurePinyinTable()
+			.then(() => {
+				if (!cancelled) bumpPinyinTable();
+			})
+			.catch(() => {});
+		return () => {
+			cancelled = true;
+		};
+	}, [searchOpen]);
 	// 生效快捷键绑定（用户设置可改），kbd 提示跟随真实键位；设置保存后自动刷新
 	const { bindings: shortcutBindings, platform } = useShortcutBindings();
 	const newSessionKbd = shortcutBindings ? formatAccelerator(shortcutBindings.openNewSession, platform) : "Ctrl+N";
@@ -302,14 +320,14 @@ export function SidebarContent(props: SidebarContentProps) {
             搜索 → 打开 MorphingSearch 命令面板。把搜索从整行输入框收敛成单个动作项，
             消除与下方胶囊分段的样式重复。底部细分割线与下方分组区分，避免与分段栏粘连。 */}
 				<div className={cn("flex shrink-0 flex-col gap-0.5 pt-1 pb-2", !props.simple && "border-b border-border/40")}>
-					<button type="button" className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-muted/60" aria-label={t("app.newSession")} title={t("app.newSession")} onClick={() => props.onOpenNewSession?.()}>
+					<button type="button" className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-bg-hover" aria-label={t("app.newSession")} title={t("app.newSession")} onClick={() => props.onOpenNewSession?.()}>
 						<CirclePlus className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 						<span className="min-w-0 flex-1 truncate font-medium">{t("app.newSession")}</span>
 						{/* 快捷键默认隐藏，行 hover 时才淡入（无边框，弱化到只剩文字），避免常驻视觉噪音；
                 键位跟随设置页自定义（useShortcutBindings） */}
 						<kbd className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md px-1 text-micro text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">{newSessionKbd}</kbd>
 					</button>
-					<button type="button" className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-muted/60" aria-label={t("app.searchSessions")} title={t("app.searchSessions")} onClick={() => setSearchOpen(true)}>
+					<button type="button" className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-bg-hover" aria-label={t("app.searchSessions")} title={t("app.searchSessions")} onClick={() => setSearchOpen(true)}>
 						<Search className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 						<span className="min-w-0 flex-1 truncate font-medium">{t("app.searchSessions")}</span>
 						{/* 快捷键默认隐藏，行 hover 时才淡入；键位跟随设置页自定义（useShortcutBindings） */}
@@ -366,15 +384,15 @@ export function SidebarContent(props: SidebarContentProps) {
 						variant="pill"
 					>
 						<TabsList className="w-full rounded-full bg-muted/70 p-0.5 [&>div]:min-w-0 [&>div]:flex-1">
-							<TabsTrigger value="active" className={cn("w-full min-w-0 gap-1.5 overflow-hidden px-2 py-1.5 text-xs", controller.navTab === "active" && "text-foreground")} indicatorClassName="bg-background shadow-sm dark:bg-bg-active">
+							<TabsTrigger value="active" className={cn("w-full min-w-0 gap-1.5 overflow-hidden px-2 py-1.5 text-xs", controller.navTab === "active" && "text-foreground")} indicatorClassName="bg-bg-active">
 								<Activity className="size-3.5 shrink-0" aria-hidden="true" />
 								<span className="truncate">{t("app.sidebarActive")}</span>
 							</TabsTrigger>
-							<TabsTrigger value="chats" className={cn("w-full min-w-0 gap-1.5 overflow-hidden px-2 py-1.5 text-xs", controller.navTab === "chats" && "text-foreground")} indicatorClassName="bg-background shadow-sm dark:bg-bg-active">
+							<TabsTrigger value="chats" className={cn("w-full min-w-0 gap-1.5 overflow-hidden px-2 py-1.5 text-xs", controller.navTab === "chats" && "text-foreground")} indicatorClassName="bg-bg-active">
 								<MessageSquare className="size-3.5 shrink-0" aria-hidden="true" />
 								<span className="truncate">{t("app.sidebarChats")}</span>
 							</TabsTrigger>
-							<TabsTrigger value="projects" className={cn("w-full min-w-0 gap-1.5 overflow-hidden px-2 py-1.5 text-xs", controller.navTab === "projects" && "text-foreground")} indicatorClassName="bg-background shadow-sm dark:bg-bg-active">
+							<TabsTrigger value="projects" className={cn("w-full min-w-0 gap-1.5 overflow-hidden px-2 py-1.5 text-xs", controller.navTab === "projects" && "text-foreground")} indicatorClassName="bg-bg-active">
 								<Folder className="size-3.5 shrink-0" aria-hidden="true" />
 								<span className="truncate">{t("app.sidebarProjects")}</span>
 							</TabsTrigger>
@@ -405,7 +423,17 @@ export function SidebarContent(props: SidebarContentProps) {
 				{/* 单一滚动区承载项目与展开内容，避免项目导航/详情双滚动和重复标题。
             scrollbar-gutter: stable：滚动条出现/消失时列表宽度不跳变（与抽屉一致）。 */}
 				<section className="conversation-list min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
-					<ProjectTree simple={props.simple} controller={controller} actions={actions} currentProjectId={currentRootProject?.id} currentSessionId={props.currentSessionId} worktreesByProject={props.worktreesByProject} branchByProject={props.branchByProject} removingWorktreePaths={props.removingWorktreePaths} />
+					<ProjectTree
+						simple={props.simple}
+						controller={controller}
+						actions={actions}
+						currentProjectId={currentRootProject?.id}
+						currentSessionId={props.currentSessionId}
+						worktreesByProject={props.worktreesByProject}
+						branchByProject={props.branchByProject}
+						removingWorktreePaths={props.removingWorktreePaths}
+						stickyGroupHeaders={props.stickyGroupHeaders}
+					/>
 				</section>
 			</div>
 			{/* 底栏 dock（beUI Dock）：设置/公告/反馈/主题切换收进浮动卡片，铺满底栏宽度
@@ -427,7 +455,7 @@ export function SidebarContent(props: SidebarContentProps) {
                   aria-label 保留更新文案，读屏与纯键盘用户不依赖视觉圆点。 */}
 								<Tooltip delayDuration={300}>
 									<TooltipTrigger asChild>
-										<Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={hasPendingUpdate ? t("settings.titleWithUpdate") : t("settings.title")} onClick={props.onOpenSettings}>
+										<Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-bg-hover hover:text-foreground" aria-label={hasPendingUpdate ? t("settings.titleWithUpdate") : t("settings.title")} onClick={props.onOpenSettings}>
 											<Bolt className="size-4" />
 										</Button>
 									</TooltipTrigger>
@@ -458,7 +486,7 @@ export function SidebarContent(props: SidebarContentProps) {
 							{/* 反馈入口：与设置/公告统一 styled Tooltip（原生 title 移除，防双弹）；aria-label 保留读屏契约 */}
 							<Tooltip delayDuration={300}>
 								<TooltipTrigger asChild>
-									<Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={t("feedback.title")} onClick={props.onOpenFeedback}>
+									<Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-bg-hover hover:text-foreground" aria-label={t("feedback.title")} onClick={props.onOpenFeedback}>
 										<MessageSquare className="size-4" />
 									</Button>
 								</TooltipTrigger>
@@ -471,7 +499,7 @@ export function SidebarContent(props: SidebarContentProps) {
 							{/* 主题切换：Tooltip 文案随当前模式变化（主题：X（点击切换）），与其它入口同一观感 */}
 							<Tooltip delayDuration={300}>
 								<TooltipTrigger asChild>
-									<Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={themeToggleTitle} onClick={props.onToggleTheme}>
+									<Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-bg-hover hover:text-foreground" aria-label={themeToggleTitle} onClick={props.onToggleTheme}>
 										<ThemeModeIcon className="size-4" />
 									</Button>
 								</TooltipTrigger>

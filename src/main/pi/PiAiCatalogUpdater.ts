@@ -130,6 +130,17 @@ function sourceStatusFromDir(dir: string): CatalogArtifactSourceStatus | null {
 	return sourceStatusFromFiles(join(dir, PI_AI_CATALOG_FILE_NAME), join(dir, PI_AI_CATALOG_MANIFEST_FILE_NAME));
 }
 
+/**
+ * 「没写入」时的附加语义：把「远端与当前一致」和「远端比当前旧」区分开。
+ *
+ * 发布分支的预生成件若没跟上 npm（目录同步滞后），分支源会一直返「不写入」，
+ * 而 npm 回退源又报「有更新」——两者叠在一起时用户看到的就是「说可更新 → 点更新 →
+ * 已是最新」。带上 skipped/远端与本地版本，UI 才能说清到底谁落后。
+ */
+function skippedResult(comparison: number, remoteVersion: string | null, localVersion: string | null): { skipped: "already-latest" | "remote-behind"; remoteVersion: string | null; localVersion: string | null } {
+	return { skipped: comparison < 0 ? "remote-behind" : "already-latest", remoteVersion, localVersion };
+}
+
 export type PiAiCatalogUpdaterOptions = {
 	userDataDir: string;
 	/** 网络实现注入（单测）；默认 globalThis.fetch */
@@ -213,14 +224,23 @@ export class PiAiCatalogUpdater {
 
 	/**
 	 * 更新到最新：主源走仓库分支预生成件（直连或经 GitHub 镜像代理，单文件下载，
-	 * 国内比 npm 生成路径稳定），分支全挂时回退到 npm latest 生成。
+	 * 国内比 npm 生成路径稳定），分支不可用或分支件不比本地新时再试 npm latest 生成。
 	 * 流程：分支下载 → 校验 → 版本防降级 → 备份当前覆盖 → 原子替换 → 失效索引缓存。
-	 * 返回 { ok: true, updated }：updated=false 表示已是最新（未覆盖写）。
+	 * 返回 { ok: true, updated }：updated=false 表示没有可写入的更新（skipped 说明原因）。
+	 *
+	 * 「分支件不新」也要继续试 npm：checkRemote 在分支不可达时用 npm 回退给出「有更新」，
+	 * 两条路必须能互相兑现，否则设置页会常驻一条点了只回「已是最新」的提示。
 	 */
 	async update(branch?: string): Promise<CatalogUpdateResult> {
 		const branchResult = await this.updateFromBranch(branch ?? this.branch);
-		if (branchResult.ok) return branchResult;
+		// 分支源已真正写入：其他源不可能再给出更新，直接返回。
+		if (branchResult.ok && branchResult.updated) return branchResult;
 		const npmResult = await this.tryUpdateFromNpmLatest();
+		// 分支源没写时两种情形：
+		// - 分支源结论可用（updated=false，远端不高于本地）：npm 真的写进去了才算更新，
+		//   否则分支结论更有诊断价值（能说清是仓库目录落后，而不是「已是最新」）；
+		// - 分支源失败：与历史行为一致，优先用 npm 结果，再按 code 归类失败。
+		if (branchResult.ok) return npmResult?.ok && npmResult.updated ? npmResult : branchResult;
 		if (npmResult) return npmResult;
 		// 两个源都失败时，分支源的校验/格式失败比 network 更有诊断价值：
 		// validation = 数据被篡改或损坏；incompatible = 远端格式高于当前版本，需先升级 PiDeck
@@ -243,8 +263,11 @@ export class PiAiCatalogUpdater {
 			if (!version) return null;
 			const current = this.getEffectiveVersion();
 			// 防降级：npm latest 不高于当前生效版本时，不覆盖（远端分支可能更旧）。
-			if (current && compareSemver(version, current) <= 0) {
-				return { ok: true, updated: false };
+			if (current) {
+				const comparison = compareSemver(version, current);
+				if (comparison <= 0) {
+					return { ok: true, updated: false, ...skippedResult(comparison, version, current) };
+				}
 			}
 			const files = await this.fetchNpmCatalogDataFiles(version);
 			if (files.length === 0) return null;
@@ -297,8 +320,11 @@ export class PiAiCatalogUpdater {
 	 */
 	private writeWithVersionGuard(catalogRaw: string, manifestRaw: string, newVersion: string | null): CatalogUpdateResult {
 		const current = this.getEffectiveVersion();
-		if (current && newVersion && compareSemver(newVersion, current) <= 0) {
-			return { ok: true, updated: false };
+		if (current && newVersion) {
+			const comparison = compareSemver(newVersion, current);
+			if (comparison <= 0) {
+				return { ok: true, updated: false, ...skippedResult(comparison, newVersion, current) };
+			}
 		}
 		try {
 			this.writeOverlayAtomically(catalogRaw, manifestRaw);
@@ -406,12 +432,14 @@ export class PiAiCatalogUpdater {
 	 */
 	async checkRemote(branch?: string): Promise<CatalogCheckResult> {
 		const branchResult = await this.checkRemoteFromBranch(branch ?? this.branch);
-		if (branchResult.ok) return branchResult;
+		if (branchResult.ok) return { ...branchResult, source: "branch" };
 		const npmVersion = await this.resolveNpmLatestVersion();
 		if (npmVersion) {
 			const localVersion = this.getEffectiveVersion();
 			const hasUpdate = localVersion ? compareSemver(npmVersion, localVersion) > 0 : true;
-			return { ok: true, remoteVersion: npmVersion, localVersion, hasUpdate };
+			// 回退源的版本与分支预生成件可能不同（仓库目录同步滞后时 npm 更新）：
+			// 标出 source，update 侧会按同一条源兑现，避免「说可更新又答已是最新」。
+			return { ok: true, remoteVersion: npmVersion, localVersion, hasUpdate, source: "npm" };
 		}
 		return branchResult;
 	}

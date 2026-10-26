@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
-import { StringDecoder } from "node:string_decoder";
 import { LARGE_NDJSON_LINE_PARSE_CHARS, MAX_NDJSON_LINE_BYTES } from "../ndjsonLineGuards";
+import { createNdjsonLinePump } from "../ndjsonLinePump";
 
 export type RpcResponse = {
 	id?: string;
@@ -25,8 +25,16 @@ export const LARGE_RPC_LINE_PARSE_CHARS = LARGE_NDJSON_LINE_PARSE_CHARS;
 export const MAX_RPC_LINE_BYTES = MAX_NDJSON_LINE_BYTES;
 
 export class PiRpcClient extends EventEmitter {
-	private buffer = "";
-	private readonly decoder = new StringDecoder("utf8");
+	/**
+	 * 行泵（Buffer 分段版，2027-02 性能治理）：字符串版 `buffer += chunk` 后立即
+	 * indexOf("\n") 会让每个 data 事件对已累积全长做一次扁平化拷贝——pi 的大
+	 * tool_result / get_entries 帧（上限 8MiB）按 64KB chunk 就是百余次全长拷贝。
+	 * 溢出语义不变：剩余未成行缓冲超过 MAX_RPC_LINE_BYTES 仍按协议错误丢弃上报。
+	 */
+	private readonly linePump = createNdjsonLinePump((line) => {
+		this.handleLine(line);
+		return true;
+	});
 	private readonly pending = new Map<string, PendingRequest>();
 	/** 大行按到达顺序排队，保证同一 client 的 response/event 不乱序。 */
 	private parseQueue: Promise<void> = Promise.resolve();
@@ -108,37 +116,20 @@ export class PiRpcClient extends EventEmitter {
 	}
 
 	private consumeChunk(chunk: Buffer | string) {
-		this.buffer += typeof chunk === "string" ? chunk : this.decoder.write(chunk);
-		// 行缓冲硬上限：超限说明 stdout 已被无换行的失控输出污染，继续累积只会 OOM。
+		// 先切行再判剩余未成行缓冲（完整合法行不受残端失控影响）；
+		// 剩余超上限 = stdout 已被无换行的失控输出污染，继续累积只会 OOM——
 		// 丢弃整段缓冲并按协议错误上报（AgentManager 会转 agentsLog + appLogger），
 		// 进程随后由启动失败/退出路径回收。
-		if (this.buffer.length > MAX_RPC_LINE_BYTES) {
-			const droppedBytes = this.buffer.length;
-			this.buffer = "";
+		this.linePump.push(chunk);
+		if (!this.closed && this.linePump.bufferedBytes > MAX_RPC_LINE_BYTES) {
+			const droppedBytes = this.linePump.reset();
 			this.emit("protocol-error", `rpc line buffer overflow: dropped ${droppedBytes} bytes without newline`);
-			return;
 		}
-		this.drainLines();
 	}
 
 	private consumeEnd() {
-		this.buffer += this.decoder.end();
-		if (this.buffer.length > 0) {
-			this.handleLine(this.buffer.endsWith("\r") ? this.buffer.slice(0, -1) : this.buffer);
-			this.buffer = "";
-		}
-	}
-
-	private drainLines() {
-		while (true) {
-			const newlineIndex = this.buffer.indexOf("\n");
-			if (newlineIndex === -1) return;
-
-			let line = this.buffer.slice(0, newlineIndex);
-			this.buffer = this.buffer.slice(newlineIndex + 1);
-			if (line.endsWith("\r")) line = line.slice(0, -1);
-			this.handleLine(line);
-		}
+		// 残行（无 LF 结尾）也算一行；跨 chunk 多字节字符已在分段中保全
+		this.linePump.end();
 	}
 
 	private handleLine(line: string) {

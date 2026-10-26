@@ -15,7 +15,7 @@ export function WebBrandLockup() {
 	return (
 		<div className="brand-lockup flex h-9 min-w-0 items-center gap-2.5" aria-label="PiDeck">
 			{logoStyle === "pi-tui" ? <PiTuiLogoCanvas size={18} playOnClick /> : <PiLogoCanvas size={18} playOnClick />}
-			<span className="brand-wordmark translate-x-0.5 truncate text-[18px] font-[PiDeckDepartureMono] font-normal uppercase leading-none text-zinc-950 dark:text-white" aria-hidden="true">
+			<span className="brand-wordmark translate-x-0.5 truncate text-brand font-[PiDeckDepartureMono] font-normal uppercase leading-none text-zinc-950 dark:text-white" aria-hidden="true">
 				PiDeck
 			</span>
 		</div>

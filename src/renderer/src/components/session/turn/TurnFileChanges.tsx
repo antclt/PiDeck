@@ -1,4 +1,4 @@
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, FileText } from "lucide-react";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "../../ui-shadcn/context-menu";
 import { collectRunFileChanges, fileChangeDelta } from "../TimelineFormat";
@@ -16,6 +16,26 @@ const ROW_COLLAPSED = `${ROW_BASE} flex-nowrap`;
 const ROW_EXPANDED = `${ROW_BASE} flex-wrap`;
 
 type FileEntry = { path: string; count: number; originalContent: string; content: string };
+
+/**
+ * ref 回调：挂载时接管 node 并观测尺寸（挂载即量一次），卸载时断开观测并清空 nodeRef。
+ *
+ * 为什么不写在 useLayoutEffect 里：量宽的触发条件必须覆盖「DOM 从无到有」这个转换，
+ * 而 effect 的依赖数组要靠人手工列出所有能改变 DOM 存在性的 props/state，漏一项就永久宕机。
+ * 见组件内 attachRow 的注释（2027-03 实际踩到：流式结束那次转换没被依赖捕获）。
+ */
+function attachMeasured(node: HTMLDivElement | null, nodeRef: { current: HTMLDivElement | null }, observerRef: { current: ResizeObserver | null }, measure: () => void) {
+	observerRef.current?.disconnect();
+	observerRef.current = null;
+	nodeRef.current = node;
+	if (!node) return;
+	if (typeof ResizeObserver !== "undefined") {
+		const observer = new ResizeObserver(() => measure());
+		observer.observe(node);
+		observerRef.current = observer;
+	}
+	measure();
+}
 
 /**
  * 轮末「修改的文件」chip 行（形态参考同级项目 Proma 的 TurnFileChangesSummary）。
@@ -64,42 +84,48 @@ export const TurnFileChanges = memo(function TurnFileChanges(props: {
 
 	const toggle = useCallback(() => setExpanded((previous) => !previous), []);
 
-	// 量宽 → fitOneRow。
-	// 关键：折叠态只渲染了 visibleCount 个 chip，所以**不能**从可见行里量宽度
-	// （否则量到的永远只是当前已显示的那几个，装箱会锁死在首帧结果）。
-	// 从不可见测量层（里面渲染了全部 chip）量，再从可见行取可用宽度。
-	// ResizeObserver 盯可见行，覆盖分屏拖动 / 窗口缩放 / 内容宽度设置变化。
-	useLayoutEffect(() => {
-		if (expanded) return undefined;
+	/**
+	 * 量宽 → fitOneRow。
+	 *
+	 * 关键：折叠态只渲染了 visibleCount 个 chip，所以**不能**从可见行里量宽度
+	 * （否则量到的永远只是当前已显示的那几个，装箱会锁死在首帧结果）。
+	 * 从不可见探测层（里面渲染了全部 chip）量，再从可见行取可用宽度。
+	 */
+	const recompute = useCallback(() => {
 		const row = rowRef.current;
 		const probe = probeRef.current;
-		if (!row || !probe) return undefined;
+		if (!row || !probe) return;
+		const chips = Array.from(probe.querySelectorAll<HTMLElement>("[data-file-chip]"));
+		if (chips.length === 0) {
+			setVisibleCount(0);
+			return;
+		}
+		const widths = chips.map((chip) => chip.getBoundingClientRect().width);
+		// 可用宽度取行容器的内容宽（本行无 padding，clientWidth 即内容宽）。
+		const available = row.clientWidth;
+		// 「更多」按钮宽度随剩余数量单调递增（+3 比 +12 窄）。fitOneRow 会迭代收敛，
+		// 但不能用「当前已渲染按钮的实测宽度」：首帧该按钮尚未挂载（量不到），
+		// 且按钮一旦挂载，它显示的是上一轮算出的剩余数，不是本轮要算的那个。
+		// 所以直接按剩余数反算上界：overhead = px-2(16) + border(2) + gap-1(4) + chevron(13)，
+		// 数字位宽按 text-control（13px, font-semibold）保守取 0.62em/字符，含 '+' 共 digits+1 位。
+		// 宁可少放一个 chip（多一个进 +N），也不可溢出容器。
+		const digitCharWidth = 13 * 0.62;
+		const moreWidthFor = (remaining: number) => 35 + (String(remaining).length + 1) * digitCharWidth;
+		setVisibleCount(fitOneRow(widths, CHIP_GAP, available, moreWidthFor));
+	}, []);
 
-		const recompute = () => {
-			const chips = Array.from(probe.querySelectorAll<HTMLElement>("[data-file-chip]"));
-			if (chips.length === 0) {
-				setVisibleCount(0);
-				return;
-			}
-			const widths = chips.map((chip) => chip.getBoundingClientRect().width);
-			// 可用宽度取行容器的内容宽（本行无 padding，clientWidth 即内容宽）。
-			const available = row.clientWidth;
-			// 「更多」按钮宽度随剩余数量单调递增（+3 比 +12 窄）。fitOneRow 会迭代收敛，
-			// 但不能用「当前已渲染按钮的实测宽度」：首帧该按钮尚未挂载（量不到），
-			// 且按钮一旦挂载，它显示的是上一轮算出的剩余数，不是本轮要算的那个。
-			// 所以直接按剩余数反算上界：overhead = px-2(16) + border(2) + gap-1(4) + chevron(13)，
-			// 数字位宽按 text-control（13px, font-semibold）保守取 0.62em/字符，含 '+' 共 digits+1 位。
-			// 宁可少放一个 chip（多一个进 +N），也不可溢出容器。
-			const digitCharWidth = 13 * 0.62;
-			const moreWidthFor = (remaining: number) => 35 + (String(remaining).length + 1) * digitCharWidth;
-			setVisibleCount(fitOneRow(widths, CHIP_GAP, available, moreWidthFor));
-		};
-
-		recompute();
-		const observer = new ResizeObserver(recompute);
-		observer.observe(row);
-		return () => observer.disconnect();
-	}, [files.length, expanded]);
+	// 量宽由 DOM 生命周期驱动（ref 回调挂载即量 + ResizeObserver 跟尺寸），
+	// 而不是 useLayoutEffect 的依赖数组。理由（2027-03 用户反馈的 bug）：
+	// 本组件在流式中 return null（DOM 不存在），轮结束才挂载。依赖数组必须手工列举
+	// 「哪些变化会让 DOM 出现」——漏一项（当时漏的就是流式结束）就让 visibleCount 永远
+	// 停在 null，折叠态按「全显示」渲染整行 chip，溢出到右侧被 .message-timeline 的
+	// overflow-x:hidden 裁掉：用户看到「轮结束后不自动折叠」，切走会话（重新挂载）才恢复。
+	// ref 回路上没有可漏的依赖，也顺手覆盖了「files 长度不变但 chip 变宽」（换文件名）。
+	const rowObserverRef = useRef<ResizeObserver | null>(null);
+	const probeObserverRef = useRef<ResizeObserver | null>(null);
+	const attachRow = useCallback((node: HTMLDivElement | null) => attachMeasured(node, rowRef, rowObserverRef, recompute), [recompute]);
+	// 探测层也要观测：只盯可见行会漏掉「chip 数量不变但文件名变长 / 字体加载完成改了字宽」
+	const attachProbe = useCallback((node: HTMLDivElement | null) => attachMeasured(node, probeRef, probeObserverRef, recompute), [recompute]);
 
 	if (props.streaming) return null;
 	if (files.length === 0) return null;
@@ -112,7 +138,7 @@ export const TurnFileChanges = memo(function TurnFileChanges(props: {
 			{/* 虚线分隔：Proma 的 border-t-2 border-dashed。用 2px 是为了在 1px 边框体系里
 			    一眼看出「这是分隔，不是卡片边界」。 */}
 			<div className="border-t-2 border-dashed border-border-subtle pt-3">
-				<div ref={rowRef} className={expanded ? ROW_EXPANDED : ROW_COLLAPSED}>
+				<div ref={attachRow} className={expanded ? ROW_EXPANDED : ROW_COLLAPSED}>
 					{shown.map((entry) => (
 						<FileChangeChip key={entry.path} entry={entry} onOpenFile={props.onOpenFile} onDiffFile={props.onDiffFile} />
 					))}
@@ -124,7 +150,7 @@ export const TurnFileChanges = memo(function TurnFileChanges(props: {
 							onClick={toggle}
 							aria-expanded={expanded}
 							title={expanded ? t("common.collapse") : t("sessionFiles.moreChipsHint", { count: hiddenCount })}
-							className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-xs border border-dashed border-border-strong px-2 py-1 text-control font-semibold text-text-tertiary tabular-nums transition-colors duration-[120ms] hover:border-solid hover:border-text-tertiary hover:bg-bg-muted hover:text-text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+							className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-xs border border-dashed border-border-strong px-2 py-1 text-control font-semibold text-text-tertiary tabular-nums transition-colors duration-fast hover:border-solid hover:border-text-tertiary hover:bg-bg-muted hover:text-text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 							data-testid="turn-file-changes-more"
 						>
 							{expanded ? (
@@ -149,7 +175,7 @@ export const TurnFileChanges = memo(function TurnFileChanges(props: {
 			    注意：w-max（max-content）尺寸计算时百分比 max-width 按 CSS 规范视为 none，
 			    测出的宽度可能大于可见行里被 280px 截断后的真实宽度——这种偏差只会让装箱偏保守
 			    （少放一个进 +N），不会溢出，所以接受。 */}
-			<div ref={probeRef} aria-hidden="true" className="pointer-events-none invisible absolute left-0 top-0 -z-10 flex w-max gap-1.5">
+			<div ref={attachProbe} aria-hidden="true" className="pointer-events-none invisible absolute left-0 top-0 -z-10 flex w-max gap-1.5">
 				{files.map((entry) => (
 					<FileChangeChip key={entry.path} entry={entry} noInteract />
 				))}
@@ -191,7 +217,7 @@ const FileChangeChip = memo(function FileChangeChip(props: { entry: FileEntry; o
 			// title 给完整相对路径：chip 只显示文件名，同名文件（多个 index.ts）靠悬停区分
 			title={props.noInteract ? undefined : entry.path}
 			onClick={props.noInteract ? undefined : canDiff ? handleOpenDiff : handleOpenFile}
-			className="inline-flex min-w-0 max-w-[min(100%,280px)] shrink-0 cursor-pointer items-center gap-1.5 rounded-xs bg-[color:color-mix(in_srgb,var(--color-accent)_6%,transparent)] px-2 py-1 text-control font-medium text-text-secondary transition-colors duration-[120ms] hover:bg-[color:color-mix(in_srgb,var(--color-accent)_12%,transparent)] hover:text-text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:cursor-default disabled:opacity-70"
+			className="inline-flex min-w-0 max-w-[min(100%,280px)] shrink-0 cursor-pointer items-center gap-1.5 rounded-xs bg-[color:color-mix(in_srgb,var(--color-accent)_6%,transparent)] px-2 py-1 text-control font-medium text-text-secondary transition-colors duration-fast hover:bg-[color:color-mix(in_srgb,var(--color-accent)_12%,transparent)] hover:text-text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:cursor-default disabled:opacity-70"
 		>
 			<FileTypeGlyph fileName={fileName} />
 			<span className="min-w-0 truncate">{fileName}</span>

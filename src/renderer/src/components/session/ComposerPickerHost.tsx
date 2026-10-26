@@ -51,7 +51,16 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
 	});
 
 	const thinkingControl = (
-		<ThinkingLevelDropdown current={preference.currentThinkingLevel} levels={preference.thinkingLevels} open={props.picker === "thinking"} onOpenChange={(open) => (open ? props.onOpenThinking() : props.onClose())} disabled={props.thinkingDisabled} onPick={(level) => void preference.applyThinking(level)} />
+		<ThinkingLevelDropdown
+			current={preference.currentThinkingLevel}
+			levels={preference.thinkingLevels}
+			open={props.picker === "thinking"}
+			onOpenChange={(open) => (open ? props.onOpenThinking() : props.onClose())}
+			disabled={props.thinkingDisabled}
+			// 滑条/刻度只改弹层内预览，组件在「关闭」这一刻才回调 onPick（一次一条命令）：
+			// 底栏触发器始终显示已应用档位，不因 off→minimal→medium 字母长度变化而漂移。
+			onPick={(level) => void preference.applyThinking(level)}
+		/>
 	);
 
 	return (

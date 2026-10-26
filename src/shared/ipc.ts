@@ -944,6 +944,12 @@ export const ipcChannels = {
 	pickBackgroundImage: "backgrounds:pick",
 	/** 删除背景图文件 */
 	removeBackgroundImage: "backgrounds:remove",
+	/** Wallpaper Engine 视频壁纸：选择工坊目录（返回路径，空串=取消） */
+	wallpaperEnginePickDir: "wallpaper-engine:pick-dir",
+	/** 列出工坊目录下的视频壁纸（只回元数据） */
+	wallpaperEngineList: "wallpaper-engine:list",
+	/** 校验并返回选中条目（非 video/不存在返回 null） */
+	wallpaperEngineSelect: "wallpaper-engine:select",
 
 	// ===== 自定义主题（userData/custom-themes/ 目录） =====
 	/** 列出主题：内置示例 + 用户目录（含解析失败条目的 parseError） */

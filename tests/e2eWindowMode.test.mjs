@@ -79,7 +79,9 @@ test("wiring: main process applies the plan to the main window and disables thro
 	assert.match(main, /resolveE2EWindowPlacement\(\s*isE2E\s*,\s*process\.env\.PIDECK_E2E_WINDOW_MODE\s*\)/);
 	assert.match(main, /applyE2EWindowPlacement\(createdWindow, e2eWindowPlacement\)/);
 	assert.match(main, /for \(const switchName of E2E_RENDERING_SWITCHES\) app\.commandLine\.appendSwitch\(switchName\);/);
-	assert.match(main, /app\.commandLine\.appendSwitch\("disable-features", "CalculateNativeWinOcclusion"\)/);
+	// disable-features 收敛到 src/main/chromiumFeatureFlags.ts 单点拼装（同名 switch 后值覆盖前值），
+	// 这里只核对 E2E 把遮挡判定条目交给了那个入口；合并行为由 chromiumFeatureFlags.test.mjs 覆盖。
+	assert.match(main, /applyChromiumFeatureFlags\(\s*app\.commandLine\s*,\s*isE2E \? \["CalculateNativeWinOcclusion"\] : \[\]\s*\)/);
 	// 屏幕外窗口不节流：webPreferences 只允许 E2E 分支关掉 backgroundThrottling
 	assert.match(main, /\.\.\.\(isE2E \? \{ backgroundThrottling: false \} : \{\}\)/);
 	// 必须设置在 showInactive 之前（窗口显示后再挪位置会闪一下到前台）

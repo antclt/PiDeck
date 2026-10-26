@@ -3,6 +3,7 @@ import { Search, X } from "lucide-react";
 import type { SettingsSectionId, SettingsTabId } from "../../../atoms";
 import { t } from "../../../i18n";
 import { cn } from "../../../lib/utils";
+import { ensurePinyinTable } from "../../../utils/pinyinSearch";
 import { Input } from "../../ui-shadcn/input";
 import { buildSettingsSearchEntries } from "./settingsSearchEntries";
 import { searchSettingsEntries, splitHighlightedTitle } from "./settingsSearch";
@@ -10,22 +11,39 @@ import { searchSettingsEntries, splitHighlightedTitle } from "./settingsSearch";
 type SettingsSearchEntryItem = ReturnType<typeof buildSettingsSearchEntries>[number];
 
 /**
- * 设置侧栏搜索框：输入即搜全部 tab 与设置项（中文 / 英文 / 拼音首字母），
- * 选中后由调用方跳到对应 tab 并滚到锚点。
+ * 设置页搜索：工具条挂在**内容列顶部**（侧栏只有 196px，提示文案与结果行在窄列里
+ * 必然换行截断——首版放侧栏顶部的方案因此废弃），输入即搜全部 tab 与设置项
+ * （中文 / 英文 / 拼音首字母），结果直接替换内容区，选中后由调用方跳 tab 并滚到锚点。
  *
- * 为什么是「替换 tab 列表」而不是下拉浮层：侧栏只有 196px 宽，浮层会盖住内容区，
- * 而设置页本身没有别的操作用得上这块空间；直接占据同一列，用户看得到「搜到了多少条」，
- * 也不会因为浮层层级与弹窗滚动容器打架。
+ * 为什么是「替换内容区」而不是下拉浮层：浮层要和弹窗滚动容器、层级与焦点圈打架；
+ * 替换内容区给结果全宽的舒适行（标题 + tab 面包屑同一行），侧栏 tab 导航保持可见，
+ * 用户随时能直接点 tab 离开搜索。设置草稿在 SettingsModal 层持有，内容被结果
+ * 暂时替换不丢数据（tab 内容本来就按 activeTab 条件挂载）。
  *
- * 搜索态下 tab 列表直接卸载、换成结果列表（而不是用 `hidden` 隐藏）：Tailwind 的 `flex`
- * 会盖过 `hidden` 属性的 `display:none`，藏不住；Tabs 自身仍在，清空搜索后列表回来照旧。
+ * 查询态由调用方持有（受控）：弹窗壳要在 Esc 时先清搜索再关弹窗，见 DialogContent
+ * 的 onEscapeKeyDown。
  */
-export function SettingsSearchBox(props: { entries: readonly SettingsSearchEntryItem[]; tabOrder: readonly SettingsTabId[]; onPick: (entry: SettingsSearchEntryItem) => void; children: ReactNode }) {
-	const [query, setQuery] = useState("");
+export function SettingsSearchBox(props: { entries: readonly SettingsSearchEntryItem[]; tabOrder: readonly SettingsTabId[]; query: string; onQueryChange: (query: string) => void; onPick: (entry: SettingsSearchEntryItem) => void; children: ReactNode }) {
 	const [activeIndex, setActiveIndex] = useState(0);
 	const listRef = useRef<HTMLUListElement | null>(null);
+	const query = props.query;
 	const searching = query.trim().length > 0;
-	const hits = useMemo(() => searchSettingsEntries(props.entries, query, props.tabOrder), [props.entries, props.tabOrder, query]);
+	// 拼音字典按需装载：设置弹窗挂载时才拉（字典不进启动 chunk）。就绪前 pinyin 通道
+	// 打 0 分，就绪后置位触发 hits 重算——用户从打开弹窗到输入第一个字之间的空档
+	// 足够本地 chunk 毫秒级到位。失败静默（只损失拼音通道）。
+	const [pinyinTableReady, setPinyinTableReady] = useState(false);
+	useEffect(() => {
+		let cancelled = false;
+		ensurePinyinTable()
+			.then(() => {
+				if (!cancelled) setPinyinTableReady(true);
+			})
+			.catch(() => {});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+	const hits = useMemo(() => searchSettingsEntries(props.entries, query, props.tabOrder), [props.entries, props.tabOrder, query, pinyinTableReady]);
 
 	// 查询变化后选中项回到第一条：否则「搜 A 时停在第 5 条，改成 B 还停在第 5 条」会误跳。
 	useEffect(() => {
@@ -36,21 +54,18 @@ export function SettingsSearchBox(props: { entries: readonly SettingsSearchEntry
 	useEffect(() => {
 		if (!searching) return;
 		const list = listRef.current;
-		const active = list?.querySelector<HTMLElement>(`[data-index="${activeIndex}"]`);
+		const active = list?.querySelector<HTMLElement>('[data-index="' + activeIndex + '"]');
 		active?.scrollIntoView({ block: "nearest" });
 	}, [activeIndex, searching]);
 
 	const pick = (entry: SettingsSearchEntryItem) => {
 		props.onPick(entry);
-		setQuery("");
+		props.onQueryChange("");
 	};
 
 	const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-		if (event.key === "Escape") {
-			// 设置弹窗的 Esc 是「关闭弹窗」（全局既有行为，Radix 在 document 捕获阶段拦下，
-			// 组件内 stopPropagation 挡不住），所以这里不抢 Esc，清空只走右侧的清除按钮。
-			return;
-		}
+		// Esc 不在这里处理：Radix 在 document 捕获阶段先收到（组件内 stopPropagation 挡不住），
+		// 由弹窗壳的 onEscapeKeyDown 统一拦截——搜索中清搜索，否则关弹窗。
 		if (!searching || hits.length === 0) return;
 		if (event.key === "ArrowDown") {
 			event.preventDefault();
@@ -66,15 +81,16 @@ export function SettingsSearchBox(props: { entries: readonly SettingsSearchEntry
 	};
 
 	return (
-		<>
-			<div className="shrink-0 px-2.5 pt-2.5">
-				<div className="relative">
-					<Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+		<div className="flex min-h-0 min-w-0 flex-1 flex-col">
+			{/* 搜索工具条：内容列顶部，宽度足够让提示文案单行放下（truncate 兜底更窄的窗口）；
+			    完整说明与键盘操作复用 settings.searchHint（也是输入框的 title 悬停提示）。 */}
+			<div className="flex shrink-0 items-center gap-3 border-b border-border-subtle px-4 py-2 max-[820px]:px-3">
+				<div className="relative w-full max-w-[420px]">
+					<Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
 					<Input
-						size="sm"
 						type="search"
 						value={query}
-						onChange={(event) => setQuery(event.target.value)}
+						onChange={(event) => props.onQueryChange(event.target.value)}
 						onKeyDown={handleKeyDown}
 						placeholder={t("settings.searchPlaceholder")}
 						aria-label={t("settings.searchPlaceholder")}
@@ -83,34 +99,33 @@ export function SettingsSearchBox(props: { entries: readonly SettingsSearchEntry
 						aria-expanded={searching}
 						aria-controls={searching ? "settings-search-results" : undefined}
 						aria-autocomplete="list"
-						aria-activedescendant={searching && hits.length > 0 ? `settings-search-option-${activeIndex}` : undefined}
-						className="pl-8 pr-7 text-control [&::-webkit-search-cancel-button]:hidden"
+						aria-activedescendant={searching && hits.length > 0 ? "settings-search-option-" + activeIndex : undefined}
+						className="pl-9 pr-8 text-control [&::-webkit-search-cancel-button]:hidden"
 					/>
 					{query ? (
-						<button type="button" onClick={() => setQuery("")} aria-label={t("common.clear")} title={t("common.clear")} className="absolute right-2 top-1/2 grid size-4 -translate-y-1/2 cursor-pointer place-items-center rounded-sm text-muted-foreground transition-colors hover:text-foreground">
+						<button type="button" onClick={() => props.onQueryChange("")} aria-label={t("common.clear")} title={t("common.clear")} className="absolute right-2 top-1/2 grid size-4 -translate-y-1/2 cursor-pointer place-items-center rounded-sm text-muted-foreground transition-colors hover:text-foreground">
 							<X className="size-3.5" aria-hidden="true" />
 						</button>
 					) : null}
-					{/* 常驻提示（最多两行）：这列只有 196px，两行是「说得清楚」与「不把 tab 列表顶下去」的折中；
-					    完整说明（↑↓/Enter/Esc）留在 title 里。 */}
-					<p className="mt-1 line-clamp-2 px-1 text-caption leading-snug text-muted-foreground">{t("settings.searchPinyinHint")}</p>
 				</div>
+				{/* 提示文案常驻一行：中文/英文/拼音 + 键盘操作；窗口不够宽时收起（说明仍在输入框 title 里） */}
+				<p className="min-w-0 flex-1 truncate text-caption text-muted-foreground max-[820px]:hidden">{t("settings.searchHint")}</p>
 			</div>
 			{searching ? (
-				<ul ref={listRef} id="settings-search-results" role="listbox" aria-label={t("settings.searchPlaceholder")} className="min-h-0 flex-1 overflow-y-auto p-1.5">
-					{hits.length === 0 ? <li className="px-2 py-3 text-caption text-muted-foreground">{t("settings.searchNoResult")}</li> : null}
+				<ul ref={listRef} id="settings-search-results" role="listbox" aria-label={t("settings.searchPlaceholder")} className="min-h-0 flex-1 overflow-y-auto p-2">
+					{hits.length === 0 ? <li className="px-3 py-6 text-center text-caption text-muted-foreground">{t("settings.searchNoResult")}</li> : null}
 					{hits.map((hit, index) => (
 						<li
 							key={hit.entry.id}
-							id={`settings-search-option-${index}`}
+							id={"settings-search-option-" + index}
 							data-index={index}
 							role="option"
 							aria-selected={index === activeIndex}
 							onMouseEnter={() => setActiveIndex(index)}
 							onClick={() => pick(hit.entry)}
-							className={cn("flex cursor-pointer flex-col gap-0.5 rounded-md px-2 py-1.5", index === activeIndex ? "bg-accent text-accent-foreground" : "text-foreground")}
+							className={cn("flex cursor-pointer items-baseline gap-3 rounded-md px-3 py-2", index === activeIndex ? "bg-accent text-accent-foreground" : "text-foreground")}
 						>
-							<span className="block truncate text-control">
+							<span className="min-w-0 flex-1 text-control">
 								{splitHighlightedTitle(hit.entry.title, hit.titleIndices).map((segment, segmentIndex) =>
 									segment.hit ? (
 										<mark key={segmentIndex} className="bg-transparent font-semibold text-primary">
@@ -121,13 +136,15 @@ export function SettingsSearchBox(props: { entries: readonly SettingsSearchEntry
 									),
 								)}
 							</span>
-							<span className="block truncate text-caption text-muted-foreground">{hit.entry.title === hit.entry.tabLabel ? null : hit.entry.tabLabel}</span>
+							{/* tab 面包屑：结果可能来自任何 tab，右侧标注归属；active 行的字色遵守
+							    「--color-accent 是面不是字」，用 accent-foreground 的降透明度。 */}
+							<span className={cn("shrink-0 text-caption", index === activeIndex ? "text-accent-foreground/75" : "text-muted-foreground")}>{hit.entry.title === hit.entry.tabLabel ? null : hit.entry.tabLabel}</span>
 						</li>
 					))}
 				</ul>
 			) : (
 				<div className="flex min-h-0 flex-1 flex-col">{props.children}</div>
 			)}
-		</>
+		</div>
 	);
 }

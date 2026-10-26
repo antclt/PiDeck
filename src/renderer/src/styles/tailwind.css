@@ -49,6 +49,13 @@
   /* 应用域 token（旧 CSS 继续用） */
   --color-bg-app: var(--color-bg-app);
   --color-bg-panel: var(--color-bg-panel);
+  /* 会话画布档（ZCode page）：chat-pane/会话头部铺这一档，白卡浮其上（foundation 同名 token） */
+  --color-bg-page: var(--color-bg-page);
+  /* 画布提亮半档：右抽屉用，比正文稍白做区分（foundation 同名 token） */
+  --color-bg-page-raised: var(--color-bg-page-raised);
+  /* 墨水罩染弱表面：行内代码/引用/卡头/徽标底（详见 foundation.css 同名 token 注释） */
+  --color-surface-ink-subtle: var(--color-surface-ink-subtle);
+  --color-surface-ink: var(--color-surface-ink);
   --color-bg-sidebar: var(--color-bg-sidebar);
   --color-sidebar: var(--color-bg-sidebar);
   --color-sidebar-foreground: var(--color-text-primary);
@@ -342,6 +349,49 @@
   :root[data-bg-image="on"] .user-turn-bubble,
   :root[data-bg-image="on"] .tool-card {
     background: transparent;
+  }
+}
+
+/* ── 思考强度滑条（ZCode 渐变强度条同构，ModelThinkingChip）──────────────
+ * 冷→暖隐喻左弱右强：success（绿）起步、info（蓝）到顶，语义 token 随皮肤/明暗。
+ * 填充只走到 thumb（未选段保持中性灰轨），与 ZCode 一致：颜色即进度。
+ * 渐变铺在 Range 上但按轨道全宽计算（background-size 跟随 --thinking-progress），
+ * 同一档位无论轨道多宽都取到同一段色标，拖动时颜色随填充展开而不被压缩。
+ * 工具类 bg-muted/bg-primary 与本类同层（utilities），
+ * 双类选择器特异性 (0,2,0) > (0,1,0) 恒胜出。 */
+/* ── 侧栏「查看更多/收起」行去白底 ────────────────────────────
+ * beUI Button 在侧栏上会呈现 panel 白底（来源未经 styles/ 静态规则，疑似组件层默认皮），
+ * 在 #f0f0f0 侧栏上是 Δ15 的亮白 pill；侧栏行的纪律是裸行 + hover 才 bg-bg-hover。
+ * .chat-list-pane 双类选择器 (0,2,0) 压过组件层 (0,1,0)；壁纸模式本就透明，语义不变。 */
+@layer utilities {
+  .chat-list-pane .session-more-btn,
+  .chat-list-pane .session-more-row,
+  .chat-list-pane .agent-more-row {
+    background-color: transparent;
+  }
+}
+
+@layer utilities {
+  .thinking-intensity-slider [data-slot="slider-track"] {
+    /* 未选段用「选中层」中性灰而不是 bg-muted：浅色下 muted(#f4f4f4) 浮在白弹层上几乎不可见，
+       灰轨必须能读出「还剩多少」，否则填充色失去对比对象。 */
+    background-color: var(--color-bg-active);
+    background-image: none;
+  }
+  .thinking-intensity-slider [data-slot="slider-range"] {
+    background-color: var(--color-success);
+    background-image: linear-gradient(90deg, var(--color-success), var(--color-info));
+    /* 渐变按「整条轨道」铺色：宽度放大到 100% / 进度，可见窗口始终对应
+       [0, 当前值] 这段真实色标；progress 由组件用内联变量给出。
+       max() 兜底 progress=0（除零会使整条声明失效）。 */
+    background-size: calc(100% / max(var(--thinking-progress, 1), 0.001)) 100%;
+    background-position: left center;
+    background-repeat: no-repeat;
+  }
+  .thinking-intensity-slider [data-slot="slider-thumb"] {
+    border: 2px solid #ffffff;
+    background-color: #ffffff;
+    box-shadow: 0 1px 4px rgba(9, 9, 11, 0.28);
   }
 }
 

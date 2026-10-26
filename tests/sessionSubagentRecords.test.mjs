@@ -19,6 +19,37 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const { SessionHistoryReader } = loadTsCommonJs("src/main/pi/SessionHistoryReader.ts");
 
+const T0 = "2026-08-02T11:46:21.399Z";
+test("readDerivedSubagentEntries：(size,mtime) 结果缓存——文件未变不重扫，追加后失效（2027-02 性能治理）", async (t) => {
+	const dir = mkdtempSync(join(tmpdir(), "pideck-derived-cache-"));
+	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	const filePath = join(dir, "session.jsonl");
+	const subagentCall = (id, agent) =>
+		JSON.stringify({
+			type: "message",
+			id,
+			parentId: null,
+			timestamp: T0,
+			message: { role: "assistant", content: [{ type: "toolCall", id: `call-${id}`, name: "subagent", arguments: { agent, task: "t" } }] },
+		});
+	writeSession(filePath, `${subagentCall("c1", "researcher")}\n`);
+	const reader = createReader();
+
+	const first = await reader.readDerivedSubagentEntries(filePath);
+	assert.equal(first.length, 1, "前置：推导出一个 running 子代理");
+
+	// 文件未动（size/mtime 不变）：缓存必须命中（判据契约，与 displayIndex/summaryCache
+	// 同款——流式追加必然同时改变 size 与 mtime，判据足够发现变化）。
+	const second = await reader.readDerivedSubagentEntries(filePath);
+	assert.ok(second === first, "size/mtime 未变必须返回缓存的原数组引用（不重扫）");
+
+	// 追加一条新派发：文件变化（size/mtime 变）→ 失效重扫，结果更新
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	writeSession(filePath, `${subagentCall("c1", "researcher")}\n${subagentCall("c2", "coder")}\n`);
+	const third = await reader.readDerivedSubagentEntries(filePath);
+	assert.equal(third.length, 2, "文件追加后缓存失效，重扫得到两个子代理");
+});
+
 function createReader() {
 	return new SessionHistoryReader({
 		toHostPath: (sessionPath) => sessionPath,

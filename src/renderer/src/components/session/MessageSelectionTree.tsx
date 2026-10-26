@@ -35,7 +35,7 @@ export function MessageSelectionTree(props: { items: RenderMessage[]; selectedId
 							<div
 								role="button"
 								tabIndex={0}
-								className="flex cursor-pointer select-none items-center gap-2.5 border-b border-border-subtle px-2.5 py-2 text-control transition-[background] duration-100 hover:bg-bg-hover focus-visible:bg-bg-hover focus-visible:outline-none"
+								className="flex cursor-pointer select-none items-center gap-2.5 border-b border-border-subtle px-2.5 py-2 text-control transition-[background] duration-fast hover:bg-bg-hover focus-visible:bg-bg-hover focus-visible:outline-none"
 								onClick={() => props.onToggleRun(item)}
 								onKeyDown={(event) => {
 									if (event.key === "Enter" || event.key === " ") {
@@ -77,7 +77,7 @@ export function MessageSelectionTree(props: { items: RenderMessage[]; selectedId
 /** 单条可勾选消息行（用户消息 / run 内 assistant 消息共用）。 */
 function MessageRow(props: { checked: boolean; onToggle: () => void; text: string; icon: React.ReactNode }) {
 	return (
-		<Label className="flex cursor-pointer items-center gap-2.5 rounded-md border border-transparent px-2.5 py-2 leading-relaxed font-normal text-control transition-[background,border-color] duration-100 hover:border-border-subtle hover:bg-bg-hover">
+		<Label className="flex cursor-pointer items-center gap-2.5 rounded-md border border-transparent px-2.5 py-2 leading-relaxed font-normal text-control transition-[background,border-color] duration-fast hover:border-border-subtle hover:bg-bg-hover">
 			<Checkbox checked={props.checked} className="m-0 shrink-0" onCheckedChange={() => props.onToggle()} />
 			{props.icon}
 			<span className="min-w-0 flex-1 truncate text-text-primary">{props.text}</span>

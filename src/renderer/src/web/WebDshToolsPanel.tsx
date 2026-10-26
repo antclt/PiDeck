@@ -16,6 +16,7 @@ import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { showNotice } from "@/utils/notice";
 import { Button } from "@/components/ui-shadcn/button";
+import { Collapsible, CollapsibleContent } from "@/components/ui-shadcn/collapsible";
 import { Dialog, DialogContent } from "@/components/ui-shadcn/dialog";
 import { Input } from "@/components/ui-shadcn/input";
 import { Textarea } from "@/components/ui-shadcn/textarea";
@@ -25,7 +26,7 @@ export function WebDshToolsPanel(props: { sessionId: string; onClose: () => void
 	const [tab, setTab] = useState<"goals" | "subagents" | "skills" | "plugins">("goals");
 	return (
 		<Dialog open onOpenChange={(next) => !next && props.onClose()}>
-			<DialogContent showCloseButton className="sm:max-w-lg">
+			<DialogContent showCloseButton className="sm:max-w-lg [&>*]:min-w-0">
 				{/* tab 条横向可滚：4 个 tab 在窄屏放不下会溢出裁切（最后一个 tab 被裁掉），滚动保完整。 */}
 				<div className="flex gap-1 overflow-x-auto border-b border-border-subtle pb-2">
 					<Button variant={tab === "goals" ? "secondary" : "ghost"} size="sm" className="shrink-0 gap-1.5" onClick={() => setTab("goals")}>
@@ -322,8 +323,10 @@ function PluginsTab(props: { sessionId: string }) {
 					{t("config.dsh.installPlugin")}
 				</Button>
 			</div>
-			{showInstall && (
-				<div className="flex flex-col gap-1.5 rounded-lg border border-border-subtle bg-bg-panel/60 p-2">
+			{/* 安装表单开合走共享折叠原语：高度渐变而非瞬时挂载把插件列表瞬间顶开；
+			    display:contents 根不生成盒子，容器 gap 布局保持原样（与桌面端 DshPluginSection 同一套）。 */}
+			<Collapsible open={showInstall} className="contents">
+				<CollapsibleContent className="flex flex-col gap-1.5 rounded-lg border border-border-subtle bg-bg-panel/60 p-2">
 					<Input value={form.idPrefix} onChange={(event) => setForm({ ...form, idPrefix: event.target.value })} placeholder={t("config.dsh.pluginIdPrefix")} className="h-8 text-caption" />
 					<Input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder={t("config.dsh.pluginName")} className="h-8 text-caption" />
 					<Input value={form.purpose} onChange={(event) => setForm({ ...form, purpose: event.target.value })} placeholder={t("config.dsh.pluginPurpose")} className="h-8 text-caption" />
@@ -332,8 +335,8 @@ function PluginsTab(props: { sessionId: string }) {
 					<Button type="button" size="sm" className="self-end" disabled={busy} onClick={submitInstall}>
 						{t("config.dsh.installPlugin")}
 					</Button>
-				</div>
-			)}
+				</CollapsibleContent>
+			</Collapsible>
 			{dynamic.length === 0 && <p className="px-1 text-caption text-text-secondary">{t("config.dsh.dynamicPluginsEmpty")}</p>}
 			{dynamic.map((plugin) => (
 				<div key={plugin.pluginId} className="flex flex-col gap-1 rounded-lg border border-border-subtle bg-bg-panel/60 px-3 py-2">

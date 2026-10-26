@@ -11,7 +11,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.9.5-blue)
+![Version](https://img.shields.io/badge/version-0.9.7-blue)
 
 <!-- star-history:start -->
 <picture>
@@ -81,24 +81,16 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.9.5** (2026-10-21)
+> **Latest: v0.9.7** (2026-10-26)
 
-### v0.9.5 Release Highlights
-- 🚀 **Trajectory inspector rebuilt: folded by turn, long sessions stay responsive**
-- 🚀 **The trajectory shows the real system prompt and usage for each turn**
-- 🚀 **Images in conversations finally render**
-- 🚀 **Agents: from a modal to a marketplace, and to a page tab**
-- 🚀 **In-app selection translation**
-- 🚀 **Input prediction: the next sentence, right after a turn ends**
-- 🚀 **Timeline right-click copy, and the selection survives streaming**
-- 🚀 **Runtime controls pinned in the session header, plus `/reload`**
-- 🚀 **Host plugins: card rows and install from GitHub**
-- 🚀 **The update page recommends the right installer for your device**
-- 🚀 **DSH: models can declare image input, and skills are readable before a session starts**
-- ✨ **Cold-start session scanning is 38× faster**
-- ✨ **About 0.86MB less on first paint**
-- ✨ **About 6.3MB smaller installer**
-- ✨ **End-of-turn "modified files": from a persistent card to a chip row**
+### v0.9.7 Release Highlights
+- 🚀 **Thinking-intensity picker rebuilt: ZCode-style gradient intensity bar**
+- 🚀 **Sidebar sticky group headers switch**
+- 🚀 **Web: explicit paging for the sidebar session list**
+- ✨ **A visual pass aligning the UI with ZCode**
+- ✨ **Web: conditional requests for /api/state**
+- ✨ **Image-only sends silently injected an English prompt (#404)**
+- ✨ **OpenCode 2.x sessions unrecognized on import (#410)**
 
 [View Full Changelog →](CHANGELOG.md)
 

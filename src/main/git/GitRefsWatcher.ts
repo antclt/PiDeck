@@ -2,6 +2,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { AppLogger } from "../logging/AppLogger";
 import { resolveGitToplevel } from "./gitRun";
+import { parseWslUncPath } from "../wsl/WslPaths.ts";
 
 /**
  * Git refs 变化检测（主进程侧）。
@@ -68,6 +69,8 @@ export type GitRefsWatcherDeps = {
 	/** 定时器注入点（测试用假定时器手动推进），默认真实 setInterval。 */
 	setTimer?: (handler: () => void, intervalMs: number) => unknown;
 	clearTimer?: (timer: unknown) => void;
+	/** 平台注入点（默认 process.platform）：WSL UNC 豁免只在 win32 生效，测试可跨平台注入。 */
+	platform?: NodeJS.Platform;
 };
 
 type RepoWatch = {
@@ -254,6 +257,20 @@ function buildWatchId(projectId: string, repoPath: string): string {
 }
 
 /**
+ * 是否应拒绝该仓库进入 refs 轮询（纯函数，可单测）。
+ *
+ * WSL UNC 路径（\\wsl.localhost\<distro>\... / \\wsl$\...）每轮采样要打 9P 文件系统：
+ * statSync / readFileSync 的同步往返典型 1-30ms（发行版忙时更高），一次 tick 同步遍历
+ * 多个仓库可阻塞主进程几十至几百 ms，且每 1.5s 周期性发生——表现为开着 WSL 项目的
+ * Git 面板时全局 UI 周期性卡顿尖峰。与 file-index 的 WSL 豁免同口径（filesIpc 的
+ * indexRootsFor 对 WSL 直接返回空）：refs 推送只是加速手段，拒绝订阅后渲染层仍有
+ * 5s git status / ahead-behind 轮询兜底，仅放弃 1.5s 档的即时性。
+ */
+export function shouldSkipRefsPolling(repoPath: string, platform: NodeJS.Platform = process.platform): boolean {
+	return platform === "win32" && parseWslUncPath(repoPath) !== null;
+}
+
+/**
  * 轮询键规范化：同一仓库的不同书写（结尾分隔符、Windows 盘符/大小写）必须归到同一份轮询，
  * 否则项目根与 toplevel 写法不一致时会各起一份。仅用于去重比对，不用于目录访问。
  */
@@ -274,6 +291,7 @@ export class GitRefsWatcher {
 	private readonly resolveRepoRootFn: (cwd: string) => Promise<string | null>;
 	private readonly setTimer: (handler: () => void, intervalMs: number) => unknown;
 	private readonly clearTimer: (timer: unknown) => void;
+	private readonly platform: NodeJS.Platform;
 	private readonly listeners = new Set<(watchId: string) => void>();
 	/** 仓库条目：键是解析后的 toplevel（同一仓库的多个项目根共用一份）。 */
 	private readonly repos = new Map<string, RepoWatch>();
@@ -292,6 +310,7 @@ export class GitRefsWatcher {
 		this.resolveRepoRootFn = deps.resolveRepoRoot ?? resolveGitToplevel;
 		this.setTimer = deps.setTimer ?? ((handler, intervalMs) => setInterval(handler, intervalMs));
 		this.clearTimer = deps.clearTimer ?? ((timer) => clearInterval(timer as NodeJS.Timeout));
+		this.platform = deps.platform ?? process.platform;
 	}
 
 	/** 订阅「某个仓库的 refs 变化」；返回退订函数。通知 payload 是 watchId，便于渲染层过滤自己的仓库。 */
@@ -321,6 +340,10 @@ export class GitRefsWatcher {
 	 */
 	acquire(projectId: string, repoPath: string): string {
 		const watchId = buildWatchId(projectId, repoPath);
+		// WSL UNC：每轮同步采样要打 9P（见 shouldSkipRefsPolling），不登记也不起轮询。
+		// 仍返回 watchId 维持 IPC 契约（acquire 恒返回 id）；release 对未知 id 静默忽略，
+		// 退订路径天然安全。重复 acquire 同样走到这里直接返回，不会产生半登记状态。
+		if (shouldSkipRefsPolling(repoPath, this.platform)) return watchId;
 		const repoKey = this.bindings.get(watchId);
 		if (repoKey !== undefined) {
 			const registered = this.repos.get(repoKey);

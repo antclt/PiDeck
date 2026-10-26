@@ -220,6 +220,22 @@
   background-clip: content-box;
 }
 
+/* 代码块复制按钮：桌面 28px 在触屏上误触率高，触屏（pointer:coarse）放大到 36px
+   （移动走查 #5；类来自 timeline.css 的 .code-copy，只在 Web 作用域放大）。 */
+@media (pointer: coarse) {
+  .web-app .code-copy {
+    min-width: 36px;
+    min-height: 36px;
+  }
+  /* markdown 正文内渲染器自带的图标钮（streamdown 表格复制/下载/全屏、mermaid 工具条）：
+     库内按钮 26px 无触屏变体，统一在此放大。sanitize 保证正文里不会出现用户注入的
+     原生 button，命中面只有渲染器 chrome。 */
+  .web-app .markdown-body button {
+    min-width: 36px;
+    min-height: 36px;
+  }
+}
+
 /* 工具卡/思考块：对齐桌面「无框过程行」视觉（timeline.css 的原始意图）——
    身份靠图标色/状态色/扫光，展开靠左竖线，不画外框、不铺面板底。
    早期版本曾给它们加边框+面板底做成「卡片」，在窄屏上显得笨重松散，此处回收。 */

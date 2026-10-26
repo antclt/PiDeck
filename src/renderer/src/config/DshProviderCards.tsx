@@ -241,7 +241,11 @@ function CustomSettings(props: { label: ReactNode; children: ReactNode }) {
 				{open ? <ChevronDown className="size-3.5 text-muted-foreground" aria-hidden="true" /> : <ChevronRight className="size-3.5 text-muted-foreground" aria-hidden="true" />}
 				{props.label}
 			</button>
-			{open && <div className="grid gap-2.5 border-t border-border/40 px-3 py-2.5">{props.children}</div>}
+			{/* 折叠体走共享折叠原语（真高度渐变 + exit 后卸载 + reduced-motion 回退）；
+			    display:contents 让根不生成盒子，折叠态零空档。 */}
+			<Collapsible open={open} className="contents">
+				<CollapsibleContent className="grid gap-2.5 border-t border-border/40 px-3 py-2.5">{props.children}</CollapsibleContent>
+			</Collapsible>
 		</div>
 	);
 }

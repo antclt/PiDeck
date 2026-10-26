@@ -1,4 +1,5 @@
 import { mkdirSync, existsSync, readFileSync, writeFileSync, rmSync, renameSync, readdirSync, copyFileSync } from "node:fs";
+import { readdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
@@ -19,7 +20,7 @@ import { credentialValueFromDocument, isValidCredentialRef } from "./dshCredenti
 import { workspaceDirFor, findDshSessionDir, dshSessionFilePath } from "./dshSessionPath";
 import { toWindowsHostPath, type WslEnvironment } from "../wsl/WslPaths";
 import { migrateLegacyPideckDshFiles, pideckArchivePath, pideckDshHome, pideckHostLockPath } from "./pideckDshHome";
-import { foldSessionTitleFromDir, listForeignSessionsFromDisk, scanDshSessionHeaders } from "./dshForeignSessionScan";
+import { foldSessionTitleFromDir, listForeignSessionsFromDiskAsync, scanDshSessionHeadersAsync } from "./dshForeignSessionScan";
 import { externalHostHolderPid, resolveDshHomeSharing } from "./dshHomeSharing";
 import type { DshHomeSharingState } from "../../shared/types/dshHome";
 import { PIDECK_PLUGIN_BRIDGE_PATH } from "./pideckPluginBridge";
@@ -624,36 +625,43 @@ export class DshHost {
 	 * 会话日志前缀只读折叠补全（与外部会话导入同源策略）。
 	 * manifest 缺失/损坏的目录跳过（无 manifest 不视为 PiDeck 归档）。
 	 */
-	listArchivedSessions(): Array<import("../../shared/types").ArchivedDshSession> {
+	/**
+	 * 2027-02 性能审计改异步：旧归档缺标题时逐目录读 256KiB 日志前缀 + zstd 同步解压，
+	 * 归档条目多时同步实现把主进程事件循环堵数百 ms（打开归档管理页整窗卡）。
+	 * 现在每个归档目录处理前让出一轮事件循环；目录遍历走 fs/promises。
+	 */
+	async listArchivedSessions(): Promise<Array<import("../../shared/types").ArchivedDshSession>> {
 		const archiveRoot = pideckArchivePath(this.getHomeDir());
 		if (!existsSync(archiveRoot)) return [];
-		return readdirSync(archiveRoot, { withFileTypes: true })
-			.filter((item) => item.isDirectory())
-			.map((item): import("../../shared/types").ArchivedDshSession | undefined => {
-				const manifestPath = join(archiveRoot, item.name, "pideck-manifest.json");
-				try {
-					const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
-						dshSessionId?: unknown;
-						cwd?: unknown;
-						archivedAt?: unknown;
-						title?: unknown;
-					};
-					const dshSessionId = typeof manifest.dshSessionId === "string" ? manifest.dshSessionId : item.name;
-					// manifest 携带的标题优先（G14+ 归档时刻写入）；旧归档缺省时
-					// 从归档目录的日志前缀折叠，避免归档区只能显示裸 host id。
-					const manifestTitle = typeof manifest.title === "string" && manifest.title.trim() ? manifest.title.trim() : undefined;
-					const title = manifestTitle ?? foldSessionTitleFromDir(join(archiveRoot, item.name));
-					return {
-						dshSessionId,
-						cwd: typeof manifest.cwd === "string" ? manifest.cwd : "",
-						archivedAt: typeof manifest.archivedAt === "number" ? manifest.archivedAt : 0,
-						...(title ? { title } : {}),
-					};
-				} catch {
-					return undefined;
-				}
-			})
-			.filter((item): item is import("../../shared/types").ArchivedDshSession => Boolean(item));
+		const entries = await readdir(archiveRoot, { withFileTypes: true });
+		const listed: Array<import("../../shared/types").ArchivedDshSession> = [];
+		for (const item of entries) {
+			if (!item.isDirectory()) continue;
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			const manifestPath = join(archiveRoot, item.name, "pideck-manifest.json");
+			try {
+				const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+					dshSessionId?: unknown;
+					cwd?: unknown;
+					archivedAt?: unknown;
+					title?: unknown;
+				};
+				const dshSessionId = typeof manifest.dshSessionId === "string" ? manifest.dshSessionId : item.name;
+				// manifest 携带的标题优先（G14+ 归档时刻写入）；旧归档缺省时
+				// 从归档目录的日志前缀折叠，避免归档区只能显示裸 host id。
+				const manifestTitle = typeof manifest.title === "string" && manifest.title.trim() ? manifest.title.trim() : undefined;
+				const title = manifestTitle ?? foldSessionTitleFromDir(join(archiveRoot, item.name));
+				listed.push({
+					dshSessionId,
+					cwd: typeof manifest.cwd === "string" ? manifest.cwd : "",
+					archivedAt: typeof manifest.archivedAt === "number" ? manifest.archivedAt : 0,
+					...(title ? { title } : {}),
+				});
+			} catch {
+				// manifest 缺失/损坏的目录跳过（无 manifest 不视为 PiDeck 归档）
+			}
+		}
+		return listed;
 	}
 
 	/**
@@ -838,7 +846,8 @@ export class DshHost {
 	 * 只读扫 DSH_HOME/sessions，不启动 host——配置页概览不能为了数孤儿去抢 dsh-web。
 	 */
 	async listSessionIds(): Promise<string[]> {
-		return scanDshSessionHeaders(this.getHomeDir()).map((header) => header.id);
+		// 异步切片版（2027-02 性能审计）：同步整段扫会冻结事件循环数百 ms~秒级
+		return (await scanDshSessionHeadersAsync(this.getHomeDir())).map((header) => header.id);
 	}
 
 	/**
@@ -853,7 +862,8 @@ export class DshHost {
 			updatedAt?: number;
 		}>
 	> {
-		return listForeignSessionsFromDisk(this.getHomeDir());
+		// 异步切片版：冷会话折叠（256KiB 前缀 + zstd 解压）按会话让出，不再整段阻塞主进程
+		return listForeignSessionsFromDiskAsync(this.getHomeDir());
 	}
 
 	/**

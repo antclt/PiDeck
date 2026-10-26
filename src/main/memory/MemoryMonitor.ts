@@ -138,7 +138,8 @@ async function workerMetrics(wc: WebContents): Promise<{
 	}
 }
 
-/** 主进程采样行：process.memoryUsage 的 heapUsed 即主进程 V8 堆。 */
+/** 主进程采样行：process.memoryUsage 的 heapUsed 即主进程 V8 堆；heapTotal/external/arrayBuffers
+ *  2026-12 内存排查补采——heapTotal 与 heapUsed 的差值是「committed 不还 OS」的直接证据。 */
 function mainProcessRow(ts: number): ProfileRowData {
 	const m = process.memoryUsage();
 	return {
@@ -160,6 +161,9 @@ function mainProcessRow(ts: number): ProfileRowData {
 		workerCount: null,
 		workerJSHeapKB: null,
 		streaming: null,
+		heapTotalKB: Math.round(m.heapTotal / 1024),
+		externalKB: Math.round(m.external / 1024),
+		arrayBuffersKB: Math.round(m.arrayBuffers / 1024),
 	};
 }
 
@@ -202,6 +206,9 @@ async function collectSnapshot(streamingProbe?: () => boolean): Promise<ProfileR
 			workerCount: null,
 			workerJSHeapKB: null,
 			streaming: null,
+			heapTotalKB: null,
+			externalKB: null,
+			arrayBuffersKB: null,
 		});
 	}
 
@@ -254,6 +261,9 @@ async function collectSnapshot(streamingProbe?: () => boolean): Promise<ProfileR
 						workerCount,
 						workerJSHeapKB,
 						streaming,
+						heapTotalKB: null,
+						externalKB: null,
+						arrayBuffersKB: null,
 					});
 				}
 			} catch {

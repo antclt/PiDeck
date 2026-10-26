@@ -12,8 +12,15 @@
 import { useEffect, useRef, useState } from "react";
 import { getWebToken } from "./webApi";
 
-/** 状态推送订阅：onChange 在服务端确认状态变化时被调（已服务端去抖，客户端不再防抖）。 */
-export function useWebStateEvents(onChange: () => void): boolean {
+/**
+ * 状态推送订阅：onChange 在服务端确认状态变化时被调（已服务端去抖，客户端不再防抖）。
+ *
+ * 2027-02 起 onChange 携带服务端已构建好的状态载荷（SSE data 就是 /api/state 同构
+ * JSON，见 serializePublicWebPayload）：此前客户端收到事件后丢弃 data 再 GET
+ * /api/state 拉一遍——每次真实状态变化服务端构建+序列化两次、网络传输两份
+ * ~100KB。直接 parse data 复用载荷，parse 失败（畸形帧）回退无参调用走原刷新。
+ */
+export function useWebStateEvents(onChange: (payload?: unknown) => void): boolean {
 	const [connected, setConnected] = useState(false);
 	const onChangeRef = useRef(onChange);
 	onChangeRef.current = onChange;
@@ -25,8 +32,18 @@ export function useWebStateEvents(onChange: () => void): boolean {
 		es.onopen = () => setConnected(true);
 		es.addEventListener("state", (event) => {
 			setConnected(true);
-			// 服务端仅在快照与上次广播不同才推；无需客户端比对，直接触发一次刷新。
-			if ((event as MessageEvent<string>).data) onChangeRef.current();
+			// 服务端仅在快照与上次广播不同才推；data 就是完整状态（/api/state 同构），
+			// 优先直接复用，畸形帧回退无参刷新（fetchState 兜底）。
+			const data = (event as MessageEvent<string>).data;
+			if (!data) {
+				onChangeRef.current();
+				return;
+			}
+			try {
+				onChangeRef.current(JSON.parse(data));
+			} catch {
+				onChangeRef.current();
+			}
 		});
 		es.onerror = () => setConnected(false); // 自动重连由浏览器负责
 		return () => es.close();

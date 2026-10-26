@@ -10,7 +10,7 @@ import test from "node:test";
  * 根因是 token 语义被用反：tailwind.css 把 Tailwind 主题里的 --color-accent 映射到
  * --color-bg-active（悬停浅「面」色，与 shadcn 官方 accent 语义一致）。因此
  * `text-accent` 生成的是 color: var(--color-bg-active)，与 `hover:bg-accent` 的底色
- * 同值 —— 亮色（#dfe3e8 文字 / #dfe3e8 底）与暗色（#333 文字 / #333 底）下都表现为
+ * 同值 —— 亮色（#dcdcdc 文字 / #dcdcdc 底）与暗色（#333 文字 / #333 底）下都表现为
  * 「悬停后变色块、文字看不见」。面上的正文色必须用 text-accent-foreground
  * （= --color-text-primary）。
  *

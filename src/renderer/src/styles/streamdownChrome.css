@@ -33,17 +33,20 @@
 .markdown-body :is(.space-y-4) > [data-streamdown^="heading-"]:first-child {
   margin-top: 0;
 }
+/* 标题刻度压平（ZCode：标题不比正文响——h1 只 +4/h2 只 +2，h3 起同字号靠字重分层）：
+   旧 1.5/1.28/1.12/1.08em 在 16px 正文下 h1 冲到 24px，比 ZCode 的 +4px 比例响一截；
+   1.3/1.15/1.06/1.03em 对应 +4.8/+2.4/+1/+0.5px，层级感保留、密度与安定感提升。 */
 .markdown-body [data-streamdown="heading-1"] {
-  font-size: 1.5em;
+  font-size: 1.3em;
 }
 .markdown-body [data-streamdown="heading-2"] {
-  font-size: 1.28em;
+  font-size: 1.15em;
 }
 .markdown-body [data-streamdown="heading-3"] {
-  font-size: 1.12em;
+  font-size: 1.06em;
 }
 .markdown-body [data-streamdown="heading-4"] {
-  font-size: 1.08em;
+  font-size: 1.03em;
 }
 .markdown-body [data-streamdown="heading-5"] {
   font-size: 1em;
@@ -130,7 +133,10 @@
   border: 0;
   border-bottom: 1px solid var(--color-border-subtle);
   border-radius: 0;
-  background: color-mix(in srgb, var(--color-bg-panel) 78%, var(--color-chat-muted-bg));
+  /* 卡片头部条 = 墨水罩染弱表面（与引用/表头同档）：卡身已是白卡，
+     旧的 panel/muted 混色在浅色会混成纯白失去分层；墨水罩染在白卡上
+     渲染 #f8f8f8 档，方向跨明暗恒对。 */
+  background: var(--color-surface-ink-subtle);
   color: var(--color-text-tertiary);
   font: 500 var(--text-micro) / 1.4 var(--font-family-sans);
 }
@@ -139,7 +145,7 @@
   margin-left: 0;
   padding: 0.1rem 0.45rem;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--color-bg-hover) 80%, transparent);
+  background: var(--color-surface-ink);
   font-family: var(--font-family-mono);
   font-size: var(--text-micro);
   letter-spacing: 0.03em;
@@ -278,7 +284,8 @@
   border: 0;
   border-bottom: 1px solid var(--color-border-subtle);
   border-radius: 12px 12px 0 0;
-  background: color-mix(in srgb, var(--color-bg-panel) 78%, var(--color-chat-muted-bg));
+  /* 与代码块头部条同档：墨水罩染弱表面（卡身白卡，头部轻退一档） */
+  background: var(--color-surface-ink-subtle);
   /* 不用 opacity 做整条半隐：opacity<1 会建立层叠上下文，鼠标移出顶栏后
      打开的下拉菜单被压到表格内容下面（字重叠）；半隐改由按钮自身承担。 */
 }
@@ -345,7 +352,7 @@
 }
 
 [data-streamdown="table-wrapper"] thead {
-  background: color-mix(in srgb, var(--color-chat-muted-bg) 70%, var(--color-bg-panel));
+  background: var(--color-surface-ink-subtle);
 }
 
 [data-streamdown="table-wrapper"] th,
@@ -367,5 +374,5 @@
 }
 
 [data-streamdown="table-body"] tr:nth-child(even) td {
-  background: color-mix(in srgb, var(--color-bg-muted) 65%, transparent);
+  background: var(--color-surface-ink-subtle);
 }

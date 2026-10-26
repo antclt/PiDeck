@@ -62,6 +62,19 @@ export function useListReorder(options: UseListReorderOptions): { containerProps
 	const rectsBeforeReorder = useRef(new Map<string, DOMRect>());
 	const flipPending = useRef(false);
 	const dragGhostRef = useRef<HTMLDivElement | null>(null);
+	// dragover 以鼠标回报率触发（高回报鼠标 125-1000Hz），每次全量读条目 rect 是
+	// O(可见条目)/事件；指示线移动后的下一事件还会强制一次全列表 reflow。
+	// preventDefault/dropEffect 必须同步留在事件里（浏览器契约），几何解析合并到
+	// 每帧一次：事件只记录最新指针位置，rAF 里统一测量 + 判定（同帧多事件只测一次）。
+	const dragOverFrameRef = useRef<number | null>(null);
+	const dragOverPointRef = useRef<{ x: number; y: number } | null>(null);
+	const cancelDragOverFrame = useCallback(() => {
+		if (dragOverFrameRef.current !== null) {
+			cancelAnimationFrame(dragOverFrameRef.current);
+			dragOverFrameRef.current = null;
+		}
+		dragOverPointRef.current = null;
+	}, []);
 	// 每次渲染同步最新入参：事件回调只读这里，避免把 keys/visibleKeys 塞进依赖数组。
 	const latest = useRef(options);
 	latest.current = options;
@@ -96,13 +109,14 @@ export function useListReorder(options: UseListReorderOptions): { containerProps
 	);
 
 	const resetDrag = useCallback(() => {
+		cancelDragOverFrame();
 		draggingKeyRef.current = null;
 		dropTargetRef.current = null;
 		setDraggingKey(null);
 		setDropTarget(null);
 		dragGhostRef.current?.remove();
 		dragGhostRef.current = null;
-	}, []);
+	}, [cancelDragOverFrame]);
 
 	const commitReorder = useCallback((nextOrder: string[] | null) => {
 		if (!nextOrder) return;
@@ -138,13 +152,23 @@ export function useListReorder(options: UseListReorderOptions): { containerProps
 			if (!draggingKeyRef.current) return;
 			event.preventDefault();
 			event.dataTransfer.dropEffect = "move";
-			const next = resolveTarget(event);
-			if (dropTargetRef.current?.key === next?.key && dropTargetRef.current?.position === next?.position) return;
-			dropTargetRef.current = next;
-			setDropTarget(next);
+			dragOverPointRef.current = { x: event.clientX, y: event.clientY };
+			if (dragOverFrameRef.current !== null) return;
+			dragOverFrameRef.current = requestAnimationFrame(() => {
+				dragOverFrameRef.current = null;
+				const point = dragOverPointRef.current;
+				if (!point || !draggingKeyRef.current) return;
+				const next = resolveReorderDropTarget(readItemRects(), point, latest.current.orientation);
+				const resolved = !next || next.key === draggingKeyRef.current ? null : next;
+				if (dropTargetRef.current?.key === resolved?.key && dropTargetRef.current?.position === resolved?.position) return;
+				dropTargetRef.current = resolved;
+				setDropTarget(resolved);
+			});
 		},
-		[resolveTarget],
+		[readItemRects],
 	);
+	// 拖拽结束/组件卸载时取消在帧回调：迟到的判定不得再写状态。
+	useEffect(() => cancelDragOverFrame, [cancelDragOverFrame]);
 
 	const handleContainerDragLeave = useCallback((event: DragEvent<HTMLElement>) => {
 		const related = event.relatedTarget;

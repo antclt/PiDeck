@@ -577,3 +577,31 @@ test("toplevel 解析复用收口：execGit + toHostGitOutputPath（WSL 路径�
 	assert.match(watcherSource, /const\s+DEFAULT_RESOLVE_TIMEOUT_MS\s*=\s*8000\s*;/, "默认 watchdog 8s（远小于 WSL 60s 下限）");
 	assert.match(watcherSource, /this\.resolveTimeoutMs = deps\.resolveTimeoutMs \?\? DEFAULT_RESOLVE_TIMEOUT_MS\s*;/, "watchdog 上限必须可由测试注入");
 });
+
+test("WSL UNC 路径拒绝进入轮询（同步采样打 9P 会周期性阻塞主进程）", async () => {
+	// platform 注入 win32：CI 三平台都能验证该豁免（真实只在 Windows 生效）
+	const { watcher, timers, warnings } = createWatcher({ platform: "win32" });
+	const wslPath = String.raw`\\wsl.localhost\Ubuntu\home\user\repo`;
+	const id = watcher.acquire("p1", wslPath);
+	assert.equal(typeof id, "string", "IPC 契约：acquire 恒返回 watchId");
+	await flushResolution();
+	assert.equal(watcher.activeRepoCount, 0, "UNC 路径不得登记轮询");
+	assert.equal(watcher.pendingRepoCount, 0, "也不得进入解析中登记（连 toplevel 子进程都不用起）");
+	assert.equal(timers.live().length, 0, "不得启动轮询定时器");
+	// 退订未知 id 必须静默安全（渲染层卸载照常调用）
+	watcher.release(id);
+	assert.equal(watcher.activeRepoCount, 0);
+	assert.equal(warnings.length, 0, "拒绝订阅不是错误，不写 warn");
+
+	// 旧式 \\wsl$ 形态同样豁免
+	watcher.release(watcher.acquire("p1", String.raw`\\wsl$\Debian\srv`));
+	await flushResolution();
+	assert.equal(watcher.activeRepoCount, 0);
+
+	// 对照：普通盘符路径不受影响
+	const plain = createRepo();
+	watcher.acquire("p2", plain.root);
+	await flushResolution();
+	assert.equal(watcher.activeRepoCount, 1, "普通路径照常登记");
+	assert.equal(timers.live().length, 1);
+});

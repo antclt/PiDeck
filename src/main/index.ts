@@ -1,10 +1,11 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, safeStorage, screen, session, shell, Tray, Notification, webContents } from "electron";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
+import { renderDshSessionHtml as renderSessionHtmlForExport, sanitizeExportFileName } from "./dsh/dshSessionHtmlExport";
 import { release as osRelease } from "node:os";
 import { createWriteStream, existsSync } from "node:fs";
-import { copyFile, readFile, readdir, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { is } from "@electron-toolkit/utils";
 import { PetSystem, type PetSystemDeps } from "./pet";
 import { downgradeRunningStartedBefore, downgradeStaleRunning } from "./pi/derivedSubagents";
@@ -97,8 +98,10 @@ const e2eWindowPlacement = resolveE2EWindowPlacement(isE2E, process.env.PIDECK_E
 if (isE2E) {
 	// 屏幕外窗口会被 Windows 原生遮挡判定当成不可见 → 渲染/定时器节流，Playwright 点击与截图会卡住。
 	for (const switchName of E2E_RENDERING_SWITCHES) app.commandLine.appendSwitch(switchName);
-	app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
 }
+// disable-features 唯一拼装点（同名 switch 后值覆盖前值，禁在此之外再 append）：
+// 默认清单（音频服务进程内等）与 E2E 的渲染保活条目合并成单次写入。
+applyChromiumFeatureFlags(app.commandLine, isE2E ? ["CalculateNativeWinOcclusion"] : []);
 
 // 冷启动计时锚点（2026-10 流畅度审计）：里程碑在 whenReady 与 showMainWindowOnce 记录，
 // 日志对比 sinceModuleLoadMs / processUptimeMs 两个口径即可观测启动回归。
@@ -399,8 +402,10 @@ import { registerUsageStatsIpc } from "./ipc/usageStatsIpc";
 import { UsageStatsService } from "./usageStats/UsageStatsService";
 import { constrainWindowBoundsToWorkArea, type LastWindowBounds, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, readLastWindowBounds, saveLastWindowBounds } from "./windowState";
 import { applyE2EWindowPlacement, E2E_RENDERING_SWITCHES, resolveE2EWindowPlacement } from "./e2eWindowMode";
+import { applyChromiumFeatureFlags } from "./chromiumFeatureFlags";
 import { createRendererCrashRecoveryGuard } from "./window/rendererCrashRecovery";
 import { registerBackgroundImageProtocol, registerBackgroundsIpc } from "./ipc/backgroundsIpc";
+import { registerWallpaperEngineIpc, registerWallpaperEngineProtocol } from "./ipc/wallpaperEngineIpc";
 import { registerThemesIpc } from "./ipc/themesIpc";
 import { registerHostPluginsIpc } from "./ipc/hostPluginsIpc";
 import { registerPiDeckMcpIpc } from "./ipc/piDeckMcpIpc";
@@ -1384,7 +1389,22 @@ async function exportCatalogSessionHtml(sessionId: string): Promise<{ path: stri
 	if (!result || typeof result !== "object" || !("path" in result) || typeof result.path !== "string") {
 		throw new Error(mainCopy("session.exportFailed"));
 	}
-	return { path: result.path };
+	// pi 临时会话的 export_html 可能返回相对文件名（pi-session-*.html，落在 pi cwd=项目根）：
+	// 打包态主进程 cwd 是 exe 目录，消费端（Web 下载 / 桌面打开）直接用相对路径必然 ENOENT。
+	const rawPath = result.path;
+	const projectRoot = projectStore.get(entry.projectId)?.path ?? "";
+	const absolutePath = isAbsolute(rawPath) ? rawPath : join(projectRoot, rawPath);
+	if (existsSync(absolutePath)) return { path: absolutePath };
+	// pi 声明的导出文件不存在（部分 pi 版本在临时会话上不落盘，2026-10 Web 走查实测）：
+	// 回退 host 侧投影导出——复用 DSH 的自包含 HTML 渲染器（无外部依赖、离线可读），
+	// 落盘 userData/exports/，保证「导出 HTML」在任何 pi 行为下都成功。
+	const loadWindow = await agentManager.readSessionLoadWindow(entry.filePath, sessionId, { projectId: entry.projectId });
+	const html = renderSessionHtmlForExport(loadWindow.messages, { title: entry.title, cwd: projectRoot, exportedAt: Date.now() });
+	const exportDir = join(app.getPath("userData"), "exports");
+	await mkdir(exportDir, { recursive: true });
+	const outPath = join(exportDir, sanitizeExportFileName(entry.title || sessionId, sessionId));
+	await writeFile(outPath, html, "utf8");
+	return { path: outPath };
 }
 
 type AgentSessionReplacementResult = {
@@ -2443,6 +2463,8 @@ async function createWindow() {
 			url: mainWindow?.webContents.getURL(),
 		});
 	});
+	// 聚焦补热 standby：见 rearmStandbyAgentOnFocus 注释（节流 + ensure 幂等，热路径无感）。
+	mainWindow.on("focus", () => rearmStandbyAgentOnFocus());
 	mainWindow.webContents.on("did-finish-load", () => {
 		void appLogger.info("app", "Main window load finished", {
 			url: mainWindow?.webContents.getURL(),
@@ -2843,6 +2865,23 @@ function warmStandbyAgentAtStartup(): void {
 	}
 }
 
+// 聚焦补热节流状态：上次触发时刻（0=从未）。窗口每次聚焦都会喊一次，
+// 但补热本身只在池空/指纹过期时才真正 spawn（ensure 幂等），节流只为压日志噪音。
+let lastStandbyFocusRewarmAt = 0;
+const STANDBY_FOCUS_REWARM_INTERVAL_MS = 60_000;
+
+/**
+ * 窗口聚焦触发的 standby 补热（节流）：池条目 10min TTL 过期后，用户「离开一阵
+ * 再回来开新会话」要吃满一次 8~25s 冷启动；聚焦是「马上又要用」的强信号，趁用户
+ * 浏览/输入的空窗后台补一个待命进程。目标推断/让路判定复用启动期预热同一条路径。
+ */
+function rearmStandbyAgentOnFocus(): void {
+	const now = Date.now();
+	if (now - lastStandbyFocusRewarmAt < STANDBY_FOCUS_REWARM_INTERVAL_MS) return;
+	lastStandbyFocusRewarmAt = now;
+	warmStandbyAgentAtStartup();
+}
+
 /**
  * DSH host 手动停止（用户显式动作，IPC dsh:stop-host）：
  * 1. 先写 settings.dshManualStopped = true 再停——顺序保证「停止意图」优先落地：
@@ -3188,6 +3227,10 @@ function registerIpc() {
 	// 换肤背景图：协议服务 userData/backgrounds/，IPC 负责选图复制与删除
 	registerBackgroundImageProtocol();
 	registerBackgroundsIpc();
+	// Wallpaper Engine 视频壁纸：协议只服务设置里的工坊目录，IPC 只有选目录/列表/校验三条
+	const wallpaperEngineDeps = { getDir: () => settingsStore.get().weWorkshopDir ?? "" };
+	registerWallpaperEngineProtocol(wallpaperEngineDeps);
+	registerWallpaperEngineIpc(wallpaperEngineDeps);
 	registerThemesIpc();
 	// Desktop plugins run without AgentManager/RPC; failure leaves the rest of PiDeck untouched.
 	// 项目显示名闭包在面板挂载时才求值：此处 projectStore 尚未装配。
@@ -4037,7 +4080,11 @@ function registerIpc() {
 		});
 	}
 	updateService.start();
-	registerCatalogIpc(catalogUpdater);
+	registerCatalogIpc(catalogUpdater, {
+		// 设置页手动更新/还原后立刻用同一条链路重取结论：否则「有新版本」提示与侧栏红点
+		// 要等到下一轮定时检查（默认 2h）才消失，用户看到的是「更新成功了但状态没变」。
+		onCatalogChanged: () => void updateService?.refreshCatalogSnapshot(),
+	});
 	// 快捷消息：唯一数据源是用户配置文件（可手工编辑），出厂清单来自随包资源文件。
 	// 两个路径只在此处解析，避免“读 A 写 B”的漂移（与 extensions 覆盖层同源的教训）。
 	const quickMessageStore = new QuickMessageStore({
@@ -4300,6 +4347,8 @@ function registerIpc() {
 	registerBackupIpc({
 		configBackupManager: configBackupManager!,
 		appLogger,
+		// 备份/pre-restore 前落盘在途的设置写盘合并窗口（见 backupIpc 注释）
+		flushSettings: () => settingsStore.flushPendingSave(),
 		afterRestore: async () => {
 			// 恢复写回的是磁盘文件：pideck 设置需重新 load 进内存（其它 store 仍持旧值，
 			// UI 会提示重启生效）；pi 模型目录缓存刷新，避免恢复后仍用旧模型列表。
@@ -4399,6 +4448,8 @@ async function detectExternalEditorsOnFirstLaunch() {
 // 换肤背景图/宠物雪碧图/声音提醒/生图历史图片协议：自定义 scheme 必须在 ready 前注册特权声明（secure 以便渲染层 CSS/图片/音频引用）
 protocol.registerSchemesAsPrivileged([
 	{ scheme: "pideck-plugin", privileges: { secure: true, standard: true, supportFetchAPI: true, corsEnabled: false } },
+	// Wallpaper Engine 视频壁纸：stream:true 让 <video> 走 Range 流式读取，不整块进内存
+	{ scheme: "pideck-we", privileges: { secure: true, standard: true, corsEnabled: false, supportFetchAPI: true, stream: true } },
 	{ scheme: "pideck-bg", privileges: { secure: true, standard: true, corsEnabled: false, supportFetchAPI: true, stream: false } },
 	{ scheme: "pideck-pet", privileges: { secure: true, standard: true, corsEnabled: false, supportFetchAPI: true, stream: false } },
 	{ scheme: "pideck-sound", privileges: { secure: true, standard: true, corsEnabled: false, supportFetchAPI: true, stream: true } },
@@ -4471,6 +4522,9 @@ app
 			},
 		});
 		settingsStore = new SettingsStore();
+		// 设置写盘尾随合并的收尾（2027-02 性能治理）：退出时立即落盘在途的 150ms 合并窗口，
+		// 防止「改完设置立刻退出」丢失最后一笔（窗口 unref 不拖退出）。
+		quitCleanup.register("settings-flush", () => settingsStore.flushPendingSave());
 		// 安全管理：配置 owner + 策略快照写入（供 pi-deck-security-gate 扩展消费）
 		securityStore = new SecurityStore({
 			settingsStore,
@@ -5686,9 +5740,15 @@ app
 		refreshShortcutBindings(settingsStore.get());
 		// Logo 风格：启动时按已加载设置刷新窗口/Dock 图标（此后 settings:update 路径实时刷新）
 		applyWindowLogoStyle(settingsStore.get().logoStyle, () => mainWindow, settingsStore.get().logoCustomImage);
-		// 任务栏按钮的图标取开始菜单快捷方式的图标（窗口图标只是无身份注册时的兜底）：建窗前写好，
-		// 按钮首次出现就带当前 logo（createWindow 在本行之后调用）。
-		syncTaskbarShortcutIcon({ style: settingsStore.get().logoStyle, customLogoDataUrl: settingsStore.get().logoCustomImage });
+		// 任务栏按钮的图标取开始菜单快捷方式的图标（窗口图标只是无身份注册时的兜底）。
+		// 2027-02 性能治理：整段是同步递归扫开始菜单（上限 2000 个 .lnk）+ 逐个
+		// readShortcutLink，开发机上 50-300ms——原先在建窗前的同步链上直接推迟首窗可见。
+		// 改 setImmediate 与 createWindow 的加载阶段重叠：窗口加载本身数百 ms，按钮首次
+		// 出现的时点绝大多数仍在扫描完成之后；极端快加载下按钮先显示默认图标、扫描
+		// 完成后 Windows 自动刷新（每启动只扫一次，签名去重见 appTaskbarIdentity）。
+		setImmediate(() => {
+			syncTaskbarShortcutIcon({ style: settingsStore.get().logoStyle, customLogoDataUrl: settingsStore.get().logoCustomImage });
+		});
 		piModelCapabilityCache = new PiModelCapabilityCache({
 			// 模型能力水合分两档（详见 docs/pi-model-capability-plan.md）：
 			// - 快速档（默认，loadExtensions=false）：--no-extensions。实测 418 模型下
@@ -5745,6 +5805,8 @@ app
 		// 内置翻译智能体补种；与 sessionCatalog 并行加载，不额外拖慢启动。
 		agentProfileStore = new AgentProfileStore(join(app.getPath("userData"), "agent-profiles.json"));
 		const agentProfileStorePreload = agentProfileStore.load();
+		// 一次性调用计数带 1s 落盘合并窗口（见 AgentProfileStore.recordUsage）：退出时收尾。
+		quitCleanup.register("agent-profile-store", () => agentProfileStore?.flushPendingUsage());
 		// 收藏：本地快照（userData/favorites.json）。坏文件按空列表重建，不阻断启动。
 		favoritesStore = new FavoritesStore(join(app.getPath("userData"), "favorites.json"));
 		const favoritesStorePreload = favoritesStore.load();
@@ -6284,10 +6346,15 @@ app
 		void wechatService.start().catch((error: unknown) => {
 			void appLogger?.warn("wechat", "WeChat bridge autostart failed", error);
 		});
-		// 配置备份（手动模式）：仅在备份目录为空（首次使用）时自动建一份 first-run，
-		// 之后不再自动备份。同步快，不挡首帧；失败仅记录，不阻断启动。
-		configBackupManager?.ensureInitialBackups();
 		await createWindow();
+		// 配置备份（手动模式）：仅在备份目录为空（首次使用）时自动建一份 first-run，
+		// 之后不再自动备份。2027-02 性能治理：list() 会对每个备份 JSON 全量解析（内嵌
+		// settings/models 原文，可达 MB 级），首启还要同步读 6 个配置文件——原先排在
+		// createWindow 之前的同步链上推迟首窗可见（注释自称"不挡首帧"与执行点矛盾）。
+		// 挪到窗口创建后执行，失败仅记录，不阻断启动。
+		setImmediate(() => {
+			configBackupManager?.ensureInitialBackups();
+		});
 		// Quick tasks should not wait for unrelated WSL/proxy startup probes. The controller
 		// retains validated intent until the renderer subscribes or requests its snapshot.
 		const coldStartTarget = extractFocusTargetFromArgv(process.argv);

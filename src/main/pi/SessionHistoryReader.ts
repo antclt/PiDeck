@@ -723,6 +723,8 @@ export class SessionHistoryReader {
 	private static readonly INDEX_PARSE_YIELD_EVERY = 400;
 	/** 完整消息文本 LRU 缓存（「查看完整输出」按需读取结果）：键 `${sessionPath}#${messageId}`。 */
 	private readonly fullTextCache = new Map<string, string>();
+	/** 推导型子代理条目的 (size, mtime) 结果缓存（readDerivedSubagentEntries 全量扫的去重，见方法注释）。 */
+	private readonly derivedSubagentCache = new Map<string, { size: number; mtimeMs: number; entries: PiSubagentEntry[] }>();
 	/** 已驻留完整文本的总字节数（字节预算 LRU 淘汰用，命中刷新不增减）。 */
 	private fullTextCacheBytes = 0;
 	private static readonly FULL_TEXT_CACHE_LIMIT = 200;
@@ -2379,6 +2381,31 @@ export class SessionHistoryReader {
 	 * JSON.parse，纯 record 会话的扫描成本接近纯文本搜索。损坏行忽略。
 	 */
 	async readDerivedSubagentEntries(sessionPath: string): Promise<PiSubagentEntry[]> {
+		// (size, mtime) 结果缓存（2027-02 性能审计）：这是「全量扫」语义（插件不落
+		// customType，无法定向读），Web 端 strips 每 5s 轮询 /subagents、桌面端同路径
+		// 叠加——大会话（几十~几百 MB）空闲期也会每 5s 整文件读盘一次。文件未追加
+		//（size/mtime 未变）时结果必然一致，直接复用；流式期间文件持续追加会自然
+		// 失效重扫（与 displayIndex/summaryCache 同款判据）。
+		const cacheKey = this.deps.toHostPath(sessionPath);
+		let stats: { size: number; mtimeMs: number } | null = null;
+		try {
+			const info = await stat(cacheKey);
+			stats = { size: info.size, mtimeMs: info.mtimeMs };
+		} catch {
+			stats = null;
+		}
+		if (stats) {
+			const cached = this.derivedSubagentCache.get(cacheKey);
+			if (cached && cached.size === stats.size && cached.mtimeMs === stats.mtimeMs) {
+				return cached.entries;
+			}
+		}
+		const entries = await this.readDerivedSubagentEntriesUncached(sessionPath);
+		if (stats) this.derivedSubagentCache.set(cacheKey, { ...stats, entries });
+		return entries;
+	}
+
+	private async readDerivedSubagentEntriesUncached(sessionPath: string): Promise<PiSubagentEntry[]> {
 		const hostPath = this.deps.toHostPath(sessionPath);
 		const rawEntries: unknown[] = [];
 		try {

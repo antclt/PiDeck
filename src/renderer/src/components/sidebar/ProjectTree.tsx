@@ -23,7 +23,7 @@ import { cn } from "../../lib/utils";
 /** 项目行只做容器：hover 浅灰，永不挂选中底。
  * 选中态只给叶子会话（对标 dsh-web：.sessionRow.selected = hover 灰，项目行无 selected）。 */
 // 根项目行保留折叠层级，但收窄左右留白，给窄侧栏中的目录名多留出可用宽度。
-const treeRowClass = "group conversation relative flex min-h-8 w-full items-center gap-1.5 rounded-lg border border-transparent px-1 py-0 text-body text-foreground shadow-none transition-[background-color,border-color,box-shadow] duration-base hover:border-border-subtle hover:bg-muted/60 hover:text-foreground";
+const treeRowClass = "group conversation relative flex min-h-8 w-full items-center gap-1.5 rounded-lg border border-transparent px-1 py-0 text-body text-foreground shadow-none transition-[background-color,border-color,box-shadow] duration-base hover:border-border-subtle hover:bg-bg-hover hover:text-foreground";
 
 /** 项目行右侧操作按钮的虚化模式：absolute 浮层，不参与布局（不挤压项目名文字），
  * 默认隐藏（pointer-events 一并关闭防误触），行 hover / 行内聚焦时显现。
@@ -35,6 +35,11 @@ const treeRowClass = "group conversation relative flex min-h-8 w-full items-cent
  * 2027-01 用户反馈：整行淡出到透明会导致标题不可读，必须点击激活才能看到文字；
  * 压缩+截断只损失尾部文字，不影响辨认。 */
 const dimmedActionsClass = "pointer-events-none absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100";
+
+/** 分组标题栏冻结（settings.sidebarStickyGroupHeaders）：列表滚动时标题粘在滚动区顶部
+ * （滚动容器是 SidebarContent 的 .conversation-list）。行从标题下方穿过时用 bg-sidebar
+ * 遮底 + z-10 抬层，pt-1 给粘住后的顶边留呼吸感；关闭时保持历史行为随列表滚走。 */
+const stickyGroupHeaderClass = "sticky top-0 z-10 bg-sidebar pt-1";
 
 function matchesProject(project: Project, search: string, controller: SidebarController) {
 	if (!search) return true;
@@ -71,8 +76,13 @@ export function ProjectTree(props: {
 	branchByProject?: Readonly<Record<string, string | null | undefined>>;
 	/** 正在删除的 worktree 路径集合（透传给 WorktreeTree 驱动淡出动画）。 */
 	removingWorktreePaths?: ReadonlySet<string>;
+	/** 「聊天」「项目」分组标题栏在列表滚动时冻结（sticky）在滚动区顶部（settings.sidebarStickyGroupHeaders）。 */
+	stickyGroupHeaders?: boolean;
 }) {
 	const sessionRuntimeUiById = useAtomValue(sessionRuntimeUiByIdAtom);
+	// 冻结标题只在常规模式生效：simple 壳侧栏背景是 --simple-shell-surface，
+	// 遮底用的 bg-sidebar 会在该模式下露出色差，直接不启用。
+	const stickyHeader = !props.simple && props.stickyGroupHeaders === true;
 	const rootProjects = props.controller.catalog.projects.filter((project) => !project.worktreeParentId && matchesProject(project, props.controller.search.trim(), props.controller));
 	// 项目拖拽不再要求静止长按：原生 HTML5 拖拽自带 ~4px 启动阈值，天然区分点按与拖动
 	//（2027-03 用户反馈「拖动行为不好用」：旧逻辑要先静止长按 350ms 才变 draggable，
@@ -137,7 +147,7 @@ export function ProjectTree(props: {
 				>
 					<button
 						type="button"
-						className={cn("project-fold grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground", collapsed && "folded")}
+						className={cn("project-fold grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-bg-hover hover:text-foreground", collapsed && "folded")}
 						title={collapsed ? t("app.projectExpand") : t("app.projectCollapse")}
 						aria-label={collapsed ? t("app.projectExpand") : t("app.projectCollapse")}
 						onClick={() => props.controller.toggleProject(project.id)}
@@ -292,7 +302,7 @@ export function ProjectTree(props: {
             + 「⋯ 更多操作」（完整项目菜单，新建/定位/会话管理/目录设置）。
             新建与折叠都是最常用入口，直接外露；其余操作收进完整菜单。 */}
 				<div
-					className="flex items-center justify-between px-1 pb-1"
+					className={cn("flex items-center justify-between px-1 pb-1", stickyHeader && stickyGroupHeaderClass)}
 					// 右键与「⋯」同款完整项目菜单：让 Chat 项目行获得与工作区项目一致的操作入口
 					onContextMenu={(event) => {
 						event.preventDefault();
@@ -307,7 +317,7 @@ export function ProjectTree(props: {
 						{/* 过滤历史记录：与工作区项目行 hover 按钮同款功能，聊天区标题栏常驻（用户反馈补齐） */}
 						<button
 							type="button"
-							className={cn("grid size-6 place-items-center rounded-md hover:bg-muted", sourceFilter !== null ? "text-primary" : "text-muted-foreground hover:text-foreground")}
+							className={cn("grid size-6 place-items-center rounded-md hover:bg-bg-hover", sourceFilter !== null ? "text-primary" : "text-muted-foreground hover:text-foreground")}
 							title={t("menu.filterSessions")}
 							aria-label={t("menu.filterSessions")}
 							onClick={(event) => props.controller.openSourceFilter(project.id, event.clientX, event.clientY)}
@@ -318,7 +328,7 @@ export function ProjectTree(props: {
 							type="button"
 							variant="ghost"
 							size="icon-xs"
-							className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+							className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-bg-hover hover:text-foreground"
 							aria-label={t("app.newNormalSession")}
 							title={t("app.newNormalSession")}
 							onClick={() => {
@@ -334,7 +344,7 @@ export function ProjectTree(props: {
 							type="button"
 							variant="ghost"
 							size="icon-xs"
-							className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+							className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-bg-hover hover:text-foreground"
 							title={collapsed ? t("app.projectExpand") : t("app.projectCollapse")}
 							aria-label={collapsed ? t("app.projectExpand") : t("app.projectCollapse")}
 							aria-expanded={!collapsed}
@@ -351,7 +361,7 @@ export function ProjectTree(props: {
 							type="button"
 							variant="ghost"
 							size="icon-xs"
-							className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+							className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-bg-hover hover:text-foreground"
 							aria-label={t("sidebar.moreActions")}
 							title={t("sidebar.moreActions")}
 							onClick={(event) => {
@@ -394,11 +404,11 @@ export function ProjectTree(props: {
 				<div>
 					{/* 分组标题栏：左侧「项目」标题，右侧 = 「+ 添加项目」+ 全部折叠/展开（高频操作外露）
             + 「⋯ 更多操作」。目录存在性重扫属于低频维护动作，收进菜单避免挤占窄侧栏。 */}
-					<div className="flex items-center justify-between px-1 pb-1">
+					<div className={cn("flex items-center justify-between px-1 pb-1", stickyHeader && stickyGroupHeaderClass)}>
 						<span className="text-caption font-medium text-muted-foreground">{t("app.sidebarProjects")}</span>
 						<div className="flex items-center gap-0.5">
 							{/* 添加项目是最常用入口，外露为显式「+」按钮 */}
-							<Button type="button" variant="ghost" size="icon-xs" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={t("app.addProject")} title={t("app.addProject")} onClick={() => void props.actions.projects.add()}>
+							<Button type="button" variant="ghost" size="icon-xs" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-bg-hover hover:text-foreground" aria-label={t("app.addProject")} title={t("app.addProject")} onClick={() => void props.actions.projects.add()}>
 								<Plus className="size-3.5" aria-hidden="true" />
 							</Button>
 							{/* 全部折叠/展开：批量收起所有工作区项目，批量展开/折叠入口外露（与聊天折叠同策略） */}
@@ -406,7 +416,7 @@ export function ProjectTree(props: {
 								type="button"
 								variant="ghost"
 								size="icon-xs"
-								className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+								className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-bg-hover hover:text-foreground"
 								title={anyWorkspaceExpanded ? t("app.projectCollapseAll") : t("app.projectExpandAll")}
 								aria-label={anyWorkspaceExpanded ? t("app.projectCollapseAll") : t("app.projectExpandAll")}
 								onClick={() => props.controller.toggleCollapseAllProjects()}
@@ -415,7 +425,7 @@ export function ProjectTree(props: {
 							</Button>
 							<DropdownMenu>
 								<DropdownMenuTrigger asChild>
-									<Button type="button" variant="ghost" size="icon-xs" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={t("sidebar.moreActions")} title={t("sidebar.moreActions")}>
+									<Button type="button" variant="ghost" size="icon-xs" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-bg-hover hover:text-foreground" aria-label={t("sidebar.moreActions")} title={t("sidebar.moreActions")}>
 										<Ellipsis size={14} aria-hidden="true" />
 									</Button>
 								</DropdownMenuTrigger>
@@ -444,7 +454,7 @@ export function ProjectTree(props: {
 						<span className="text-caption font-medium text-muted-foreground">{t("app.sidebarProjects")}</span>
 						<DropdownMenu>
 							<DropdownMenuTrigger asChild>
-								<Button type="button" variant="ghost" size="icon-xs" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={t("sidebar.moreActions")} title={t("sidebar.moreActions")}>
+								<Button type="button" variant="ghost" size="icon-xs" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-bg-hover hover:text-foreground" aria-label={t("sidebar.moreActions")} title={t("sidebar.moreActions")}>
 									<Ellipsis size={14} aria-hidden="true" />
 								</Button>
 							</DropdownMenuTrigger>

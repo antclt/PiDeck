@@ -21,7 +21,6 @@ import { sessionRuntimeBySessionIdAtomFamily } from "../../atoms/session-selecto
 import { useAskPanel } from "../../hooks/useAskPanel";
 import { queueDrainSuppressedByIdAtom } from "../../atoms/composer-atoms";
 import { isSessionRuntimeBusy } from "../../hooks/useSessionTimelineController";
-import { ExtensionWidgetCard } from "./ComposerParts";
 import { ComposerWidgetFrame, useComposerWidgetCollapsed } from "./ComposerWidgetLayout";
 
 export function ComposerAttachmentBar(props: {
@@ -46,8 +45,10 @@ export function ComposerAttachmentBar(props: {
 				return (
 					<div key={index} className="image-preview-item">
 						<img src={src} alt={t("app.imageAlt", { index: index + 1 })} onClick={() => props.onPreview(image)} style={{ cursor: "pointer" }} />
-						<Button variant="ghost" size="icon" className="image-remove-btn" aria-label={t("app.imageRemove")} title={t("app.imageRemove")} onClick={() => props.onRemove(index)}>
-							<X size={12} strokeWidth={2.4} aria-hidden="true" />
+						{/* 缩略图只有 64px：删除钮用 20px 圆点（size-5 + 12px 字形），
+						   size="icon" 的 size-9 会盖掉 legacy 宽度，必须在这里用 utility 收窄 */}
+						<Button variant="ghost" size="icon" className="image-remove-btn size-5 rounded-full" aria-label={t("app.imageRemove")} title={t("app.imageRemove")} onClick={() => props.onRemove(index)}>
+							<X size={12} strokeWidth={2.4} className="size-3" aria-hidden="true" />
 						</Button>
 					</div>
 				);
@@ -106,27 +107,6 @@ export function ComposerAttachmentBar(props: {
 	);
 }
 
-export function ExtensionWidgetPanel(props: {
-	widgets?: Record<string, string[]>;
-	sessionId?: string;
-	/** @deprecated A8 compatibility for the pre-leaf App call site. */
-	sessionKey?: string;
-	dismissedKeys: string[];
-	collapsed: boolean;
-	onDismiss: (widgetKey: string) => void;
-}) {
-	const sessionId = props.sessionId ?? props.sessionKey;
-	if (!sessionId || !props.widgets || !Object.keys(props.widgets).length) return null;
-	return (
-		<div className="extension-widgets-container w-full">
-			{!props.collapsed &&
-				Object.entries(props.widgets)
-					.filter(([widgetKey]) => !props.dismissedKeys.includes(widgetKey))
-					.map(([widgetKey, lines]) => <ExtensionWidgetCard key={widgetKey} widgetKey={widgetKey} lines={lines} sessionIdOrPath={sessionId} onClose={() => props.onDismiss(widgetKey)} />)}
-		</div>
-	);
-}
-
 function QueueStatusGlyph(props: { status: QueuedPromptSnapshot["status"] }) {
 	const status = props.status ?? "pending";
 	if (status === "sending") {
@@ -174,7 +154,7 @@ function QueuedPromptRow(props: {
 	const actionClass = "size-7 rounded-full text-text-tertiary hover:bg-muted/70 hover:text-foreground";
 
 	return (
-		<li className={`queued-row flex h-9 min-h-9 shrink-0 items-center gap-2.5 border-transparent px-3 transition-[border-color,background-color] duration-100 ${status} queued-behavior-${props.prompt.behavior}`} title={rowTitle}>
+		<li className={`queued-row flex h-9 min-h-9 shrink-0 items-center gap-2.5 border-transparent px-3 transition-[border-color,background-color] duration-fast ${status} queued-behavior-${props.prompt.behavior}`} title={rowTitle}>
 			{props.showQueueGlyph ? <ListOrdered size={14} aria-hidden="true" className="shrink-0 text-text-tertiary" /> : <QueueStatusGlyph status={status} />}
 			<span className="min-w-0 flex-1 truncate text-control leading-5 text-text-secondary">{previewText}</span>
 			{props.prompt.images?.length ? <span className="shrink-0 font-mono text-micro leading-none text-text-tertiary">{t("app.queuedImageCount", { count: String(props.prompt.images.length) })}</span> : null}
@@ -241,8 +221,6 @@ export function QueuedPromptPanel(props: {
 	trackRef: RefObject<HTMLElement | null>;
 	sessionId?: string;
 	prompts: QueuedPromptSnapshot[];
-	/** @deprecated 独立卡展示全部排队项并由 180px 列表滚动；保留以免调用点同步炸掉。 */
-	visiblePrompts: QueuedPromptSnapshot[];
 	onRetract: (sessionId: string, prompt: QueuedPromptSnapshot) => void;
 	onDiscard: (sessionId: string, promptId: string) => void;
 	onChangeBehavior: (sessionId: string, promptId: string, behavior: "steer" | "followUp") => void;
@@ -374,7 +352,9 @@ export function ComposerSendControls(props: {
 			<Button
 				variant="default"
 				size="icon-sm"
-				className="composer-send-primary size-7 rounded-l-md bg-[var(--color-accent)] px-0 text-[var(--color-text-inverse)] shadow-none hover:bg-[color:color-mix(in_srgb,var(--color-accent)_88%,black)] disabled:opacity-40"
+				/* 停止态切 danger 红（用户约定：停止是「打断」动作，红色可打断感）；
+				   发送态维持主题色 accent。hover 同一配方（88% 混黑加深），只换基色。 */
+				className={`composer-send-primary size-7 rounded-l-md px-0 text-[var(--color-text-inverse)] shadow-none disabled:opacity-40 ${primaryStops ? "bg-[var(--color-danger)] hover:bg-[color:color-mix(in_srgb,var(--color-danger)_88%,black)]" : "bg-[var(--color-accent)] hover:bg-[color:color-mix(in_srgb,var(--color-accent)_88%,black)]"}`}
 				aria-label={label}
 				title={label}
 				disabled={disabled}
@@ -388,7 +368,8 @@ export function ComposerSendControls(props: {
 						<Button
 							variant="default"
 							size="icon-sm"
-							className="h-7 rounded-r-md bg-[var(--color-accent)] px-1.5 text-[var(--color-text-inverse)] shadow-none hover:bg-[color:color-mix(in_srgb,var(--color-accent)_88%,black)] disabled:opacity-40"
+							/* caret 与主钮同色（停止态一起切红，按钮组不裂成红黑两截）；停止态下 caret 必 disabled */
+							className={`h-7 rounded-r-md px-1.5 text-[var(--color-text-inverse)] shadow-none disabled:opacity-40 ${primaryStops ? "bg-[var(--color-danger)] hover:bg-[color:color-mix(in_srgb,var(--color-danger)_88%,black)]" : "bg-[var(--color-accent)] hover:bg-[color:color-mix(in_srgb,var(--color-accent)_88%,black)]"}`}
 							aria-label={t("app.sendBehaviorTitle")}
 							title={t("app.sendBehaviorTitle")}
 							disabled={splitDisabled}

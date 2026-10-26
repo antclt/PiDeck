@@ -3,7 +3,7 @@ import { BrowserAgentError, errorMessage } from "./browserErrors";
 import type { CdpSend } from "./cdpSession";
 import { isRecord, readString } from "./valueRead";
 
-export type BrowserScreenshotRequest = { maxLongEdge: number; quality: number; fullPage: boolean };
+export type BrowserScreenshotRequest = { maxLongEdge: number; quality: number; fullPage: boolean; clip?: { width: number; height: number } };
 
 export type BrowserScreenshotResult = {
 	base64: string;
@@ -15,6 +15,8 @@ export type BrowserScreenshotResult = {
 	scaleFactor: number;
 	/** cdp = 当前帧；capturePage = 兜底（窗口不可见时可能是过期合成帧）。 */
 	source: "cdp" | "capturePage";
+	/** true = 整页超出像素预算被 clip 截断（只含顶部区域），模型不应假设看到了全页。 */
+	clipped?: boolean;
 };
 
 /**
@@ -27,8 +29,10 @@ export type BrowserScreenshotResult = {
 export async function captureBrowserScreenshot(guest: WebContents, send: CdpSend, request: BrowserScreenshotRequest, viewport: { width: number; height: number }, scaleFactor: number): Promise<BrowserScreenshotResult> {
 	let buffer: Buffer | null = null;
 	let source: "cdp" | "capturePage" = "cdp";
+	// clip（CSS px）：fullPage 超出像素预算时由 controller 计算并传入，捕获范围封顶在顶部区域。
+	const clipParams = request.clip ? { clip: { x: 0, y: 0, width: request.clip.width, height: request.clip.height, scale: 1 } } : {};
 	try {
-		const result = await send("Page.captureScreenshot", { format: "jpeg", quality: request.quality, captureBeyondViewport: request.fullPage });
+		const result = await send("Page.captureScreenshot", { format: "jpeg", quality: request.quality, captureBeyondViewport: request.fullPage || Boolean(request.clip), ...clipParams });
 		const data = isRecord(result) ? readString(result.data) : "";
 		if (!data) throw new Error("empty screenshot payload");
 		buffer = Buffer.from(data, "base64");
@@ -64,5 +68,6 @@ export async function captureBrowserScreenshot(guest: WebContents, send: CdpSend
 		cssHeight: viewport.height,
 		scaleFactor,
 		source,
+		clipped: Boolean(request.clip) || undefined,
 	};
 }

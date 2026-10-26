@@ -1,12 +1,17 @@
 import { fuzzyMatch } from "../../../utils/commandPaletteFuzzy";
 import { isPinyinQuery, matchPinyinText } from "../../../utils/pinyinSearch";
 
+// 拼音字典已改按需装载（不进启动 chunk）：调用方（SettingsSearchBox / 单测）在本模块
+// 打分前必须先 await ensurePinyinTable()，否则拼音通道打 0 分。这里透出同一个装载器，
+// 让「打分内核 + 它依赖的字典」保持同一入口，调用方不必再额外 import 第二个模块。
+export { ensurePinyinTable } from "../../../utils/pinyinSearch";
+
 /**
- * 设置页侧栏搜索的纯打分内核（无 React 依赖，`node --test` 可直接加载）。
+ * 设置页搜索的纯打分内核（无 React 依赖，`node --test` 可直接加载）。
  *
  * 为什么要有它：命令面板（Ctrl+P）早就能搜到具体设置项，但那条路径没有任何可见提示，
  * 大多数用户只会打开设置页一页页翻（67 个 tab 子文件、几百行设置），找不到就以为没这个功能。
- * 侧栏搜索把同一份锚点清单（settingsFieldAnchors + 各 tab 本身）做成可见入口。
+ * 设置搜索把同一份锚点清单（settingsFieldAnchors + 各 tab 本身）做成可见入口。
  *
  * 三条打分通道，权重按「用户输入的确定性」排序：
  *   1. 标题子串 —— 用户照着页面上的名字打，最可信（整串相等 > 前缀 > 出现在中间）；
@@ -59,7 +64,7 @@ const TAB_LABEL_EXACT = 300;
 const TAB_LABEL_CONTAINS = 220;
 const TAB_LABEL_PINYIN_BASE = 200;
 
-/** 空查询不返回任何结果：侧栏搜索框空着时应显示 tab 列表，而不是一堆条目。 */
+/** 空查询不返回任何结果：搜索框空着时应显示 tab 内容，而不是一堆条目。 */
 export const SETTINGS_SEARCH_MIN_QUERY_LENGTH = 1;
 
 /** 单段文本的打分：子串三档 + 拼音 + 模糊，取最高。 */
