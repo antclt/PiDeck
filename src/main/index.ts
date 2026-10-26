@@ -304,6 +304,9 @@ import { PiModelCapabilityCache, watchPiConfigDirectory } from "./pi/PiModelCapa
 import { isDefaultAgentTitle } from "./pi/agentUtils";
 import { CompositeAgentGateway } from "./agents/CompositeAgentGateway";
 import { AcpAgentManager } from "./acp/AcpAgentManager";
+import { AcpSessionArchive } from "./acp/AcpSessionArchive";
+import { acpMessagePage } from "./acp/acpMessagePage";
+import { findSessionMatches } from "./sessions/sessionFindMatches";
 import { registerAcpIpc } from "./ipc/acpIpc";
 import { DshHost, resolveDshHomeDir } from "./dsh/DshHost";
 import { DshPluginInstallService } from "./dsh/DshPluginInstallService";
@@ -3811,7 +3814,9 @@ function registerIpc() {
 			// 打开 DSH 历史会话时补录 catalog 模型（host 投影冷读，不激活）：catalog 缺 model
 			// 时底栏会回退全局部署默认，看起来像「别的会话的模型也被改了」。
 			readDshSessionModel: (dshSessionId) => dshAgentManager.readSessionModelSelection(dshSessionId),
-			readAcpMessages: (acpSessionId) => acpAgentManager.readMessagesByAcpSessionId(acpSessionId),
+			// ACP 异步读口：runtime 投影 → 内存快照 → 磁盘归档逐级回退（sessionIpc 的
+			// readAcpMessages 依赖已按 Promise 契约声明）。归档读失败内部降级空数组。
+			readAcpMessages: (acpSessionId) => acpAgentManager.readMessagesWithArchive(acpSessionId),
 			readDshProcessEvents: (agentId, dshSessionId) => dshAgentManager.readProcessEvents(agentId, dshSessionId),
 			readSessionFacts: (sessionPath) => agentManager.readSessionFacts(sessionPath),
 			readSessionOutline: (sessionPath, limit) => agentManager.readSessionOutline(sessionPath, limit),
@@ -5505,6 +5510,13 @@ app
 					const page = await dshAgentManager.readHistoryPage(entry.dshSessionId, undefined, { maxMessages: 1000 });
 					return { messages: page.messages, total: page.total, windowStart: 0, truncated: false };
 				}
+				// ACP 会话同样没有 pi 会话文件：历史来自运行时投影 / 内存快照 / deck 侧归档
+				// （readMessagesWithArchive 异步读口）。没有 acpSessionId（草稿）或归档为空时
+				// 退化成空窗口，与分页接口同源（acpMessagePage 按轮次切片）。
+				if (entry?.backend === "acp" && entry.acpSessionId) {
+					const messages = await acpAgentManager.readMessagesWithArchive(entry.acpSessionId);
+					return { messages, total: messages.length, windowStart: 0, truncated: false };
+				}
 				if (!entry?.filePath) return { messages: [], total: 0, windowStart: 0, truncated: false };
 				// 有界加载窗口（9 轮 + 条目预算），不是全量历史：全量下发在大会话上会同时顶爆
 				// 主进程与渲染层（#213）。更早历史请走分页接口（Web：/messages/page）。
@@ -5517,6 +5529,10 @@ app
 				// （游标 = 事件 seq），与 pi 的磁盘分页同形状（messages/total/nextBefore）。
 				if (entry?.backend === "dsh" && entry.dshSessionId && dshAgentManager) {
 					return dshAgentManager.readHistoryPage(entry.dshSessionId, before, { turnCount: pageSize });
+				}
+				// ACP 分页：归档/投影消息按轮次切片（与桌面 IPC sessions:catalog-read-message-page 同源）。
+				if (entry?.backend === "acp" && entry.acpSessionId) {
+					return acpMessagePage(await acpAgentManager.readMessagesWithArchive(entry.acpSessionId), before, pageSize);
 				}
 				if (!entry?.filePath) return { messages: [], total: 0, nextBefore: null };
 				return agentManager.readSessionDisplayTurnPage(entry.filePath, sessionId, before, pageSize, undefined, { projectId: entry.projectId });
@@ -5537,6 +5553,24 @@ app
 						if (found.hitCount === 0) return { sessions: [], totalHitSessions: 0, truncated: false };
 						return {
 							sessions: [{ filePath: `dsh:${dshSessionId}`, updatedAtMs: entry.updatedAt, matches: found.matches, hitCount: found.hitCount }],
+							totalHitSessions: 1,
+							truncated: found.hitCount > found.matches.length,
+						};
+					} catch {
+						return null;
+					}
+				}
+				// ACP：没有 pi JSONL，历史来自运行时投影 / 内存快照 / deck 侧归档（异步读口）。
+				// 匹配规则与桌面 IPC 的 ACP 分支同源（findSessionMatches），命中 id 是投影消息 id。
+				if (entry.backend === "acp") {
+					const acpSessionId = entry.acpSessionId;
+					if (!acpSessionId) return null;
+					try {
+						const messages = await acpAgentManager.readMessagesWithArchive(acpSessionId);
+						const found = findSessionMatches(messages, query);
+						if (found.hitCount === 0) return { sessions: [], totalHitSessions: 0, truncated: false };
+						return {
+							sessions: [{ filePath: `acp:${acpSessionId}`, updatedAtMs: entry.updatedAt, matches: found.matches, hitCount: found.hitCount }],
 							totalHitSessions: 1,
 							truncated: found.hitCount > found.matches.length,
 						};
@@ -6064,8 +6098,14 @@ app
 					});
 			},
 			logger: appLogger,
+			// 会话归档：投影消息按 acpSessionId 落到 userData/acp-sessions（sha1 文件名 + 原子写）。
+			// 为什么需要：ACP 历史此前只在 CLI 侧 + 内存快照（重启即空），CLI 存档被清
+			// （换机器 / 清 ~/.codebuddy）后历史就永久丢了，会话内查找也没有检索源。
+			// 写时机在 manager 内固定为「回合结算 + stop()/stopAll()」，失败只记日志。
+			archive: new AcpSessionArchive({ userDataDir: app.getPath("userData"), logger: appLogger }),
 		});
 		quitCleanup.register("acp", async () => {
+			// stopAll → stop(agent) → 归档写盘（await 到底）：退出前这份快照必须落地。
 			await acpAgentManager?.stopAll();
 		});
 		compositeAgentGateway = new CompositeAgentGateway([agentManager, dshAgentManager, acpAgentManager]);

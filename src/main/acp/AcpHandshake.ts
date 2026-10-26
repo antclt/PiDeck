@@ -106,9 +106,10 @@ export async function performAcpHandshake(runtime: AcpAgentRuntime, resumeSessio
 		}
 	} else if (resumeSessionId) {
 		// CLI 无 loadSession 能力:只能 session/new 新建(agent 侧上下文必然是空的),
-		// 但显示层不能整段抹掉——与 load 失败回退同一处理,用本进程内快照播种投影
-		// 保住连续性(重启按钮/重新激活都走这里)。播种消息 agent 侧并不存在,
-		// 仅显示层连续;无快照(应用重启后)保持空,与重启后本就为空的显示一致。
+		// 但显示层不能整段抹掉——与 load 失败回退同一处理,用内存快照播种投影
+		// 保住连续性(重启按钮/重新激活都走这里)。播种消息 agent 侧并不存在,仅显示层连续。
+		// 无快照才保持空:应用重启后 AcpAgentManager 会先把 userData/acp-sessions 的归档
+		// 回灌进快照存储(#415),所以这里通常已经有内容,不再是「重启后必然空白」。
 		seedProjectionFromSnapshot(runtime, deps, resumeSessionId);
 	}
 	if (!setup?.sessionId) {

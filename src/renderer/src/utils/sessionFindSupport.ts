@@ -10,11 +10,14 @@ import type { SessionRecord } from "../../../shared/types";
  *   也不挂入口（否则放大镜悬在欢迎页上）；
  * - DSH：没有 pi JSONL，检索走 host 历史投影——草稿还没建 host 会话（dshSessionId
  *   缺省）同样没有内容可查；
- * - ACP/生图等其他后端没有可检索的历史源，不挂入口。
+ * - ACP：没有 pi JSONL，检索源是 deck 侧归档（userData/acp-sessions）+ 运行时投影——
+ *   草稿还没握过手（acpSessionId 缺省）时归档文件尚不存在，不挂入口；
+ * - 生图/生视频等其他后端没有可检索的会话正文，不挂入口。
  */
-export function supportsSessionFind(record: Pick<SessionRecord, "backend" | "filePath" | "dshSessionId"> | undefined): boolean {
+export function supportsSessionFind(record: Pick<SessionRecord, "backend" | "filePath" | "dshSessionId" | "acpSessionId"> | undefined): boolean {
 	if (!record) return false;
 	if (!record.backend || record.backend === "pi") return Boolean(record.filePath);
 	if (record.backend === "dsh") return Boolean(record.dshSessionId);
+	if (record.backend === "acp") return Boolean(record.acpSessionId);
 	return false;
 }
