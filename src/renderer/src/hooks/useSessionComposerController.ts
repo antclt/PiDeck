@@ -1613,7 +1613,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 					setSelectedSuggestionIndex((index) => Math.max(index - 1, 0));
 					return;
 				}
-				if (event.key === "Enter") {
+				// Tab 与 Enter 同义：采纳菜单高亮项（补全习惯对齐 zcode/codex 等终端交互）。
+				// 修饰键组合不拦：Shift+Tab 等仍走默认焦点切换。
+				if (event.key === "Enter" || (event.key === "Tab" && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey)) {
 					// IME 合成中的回车属于输入法确认候选，不能拿去选建议项
 					if (isComposingKeyboardEvent(event)) return;
 					event.preventDefault();

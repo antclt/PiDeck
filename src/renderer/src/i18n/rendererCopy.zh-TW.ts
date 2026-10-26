@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 35a55f189d1b6d369250d6c5cb487b6e8b8ccdcab8aa743b56316bc9979c5755（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 553847aabc48e6222633669b56b76ae9e87bdaaa0463d017e60ea5b6e0a0a3ff（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4222,7 +4222,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"prompt.command.share.description": "上傳為 GitHub Gist 私密連結",
 	"prompt.command.tree.description": "會話樹導航，跳轉到任意節點",
 	"prompt.commands": "命令",
-	"prompt.confirmHint": "Enter 確認",
+	"prompt.confirmHint": "Enter/Tab 確認",
 	"prompt.files": "檔案",
 	"prompt.sessions": "會話",
 	"prompt.selectHint": "↑↓ 選擇",
@@ -6869,7 +6869,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"sidebar.remoteEnroll.resolve": "解析並確認",
 	"sidebar.remoteEnroll.loading": "正在讀取主機列表…",
 	"sidebar.remoteEnroll.loadFailed": "無法讀取主機列表：{code}",
-	"sidebar.remoteEnroll.featureDisabled": "遠端功能未啟用：開發構建需要設定 PIDECK_REMOTE_EXPERIMENTAL=1。",
+	"sidebar.remoteEnroll.featureDisabled": "遠端功能未啟用：穩定版暫未開放遠端開發，請使用開發版（PiDeck Dev）。",
 	"sidebar.remoteEnroll.needsRepair": "遠端主機儲存需要修復，請先在裝置設定裡完成修復。",
 	"sidebar.remoteEnroll.noHost": "沒有已驗證且未停用的主機。先在裝置設定裡新增主機並完成指紋確認。",
 	"sidebar.remoteEnroll.openDeviceSettings": "去裝置設定",
