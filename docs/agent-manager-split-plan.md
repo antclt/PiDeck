@@ -1,6 +1,6 @@
 # AgentManager 拆分计划
 
-> 状态：**主体完成（Wave 1–4 全部落地）**。基线 commit `ef049e045`，AgentManager.ts 6756→5543 行（红线 400/600 的 11 倍→9 倍）。
+> 状态：**主体完成（Wave 1–4 全部落地）**。基线 commit `ef049e045`，AgentManager.ts 6756 → 5543 行。2026-10-26 核对：已回涨到 **6439 行**；后续按 `docs/architecture.md`「存量巨文件不得净增长」执行，新增状态机域必须直接建协作者模块。
 > 长期目标：AgentManager 只保留「编排 + agents map 所有权」，各状态机域收口为协作者模块。
 
 ## 拆分纪律

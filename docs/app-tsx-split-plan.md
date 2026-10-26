@@ -1,6 +1,6 @@
 # App.tsx 拆分计划（P1）
 
-> 状态：**主体完成**（Wave 1–3 已落地，未提交）。基线 commit `a3da1d90c`，App.tsx 4297 → 3092 行（-28%）。剩 JSX 装配拆分另立计划。
+> 状态：**主体完成**（Wave 1–3 已落地）。基线 commit `a3da1d90c`，App.tsx 4297 → 3092 行。2026-10-26 核对：已回涨到 **3722 行**，剩 JSX 装配拆分仍未做；后续按 `docs/architecture.md`「存量巨文件不得净增长」执行。
 > 目标：把域逻辑按 owner 迁出主文件（hooks/atoms/工厂函数），App.tsx 收敛为装配层。
 > 原则：每步后 typecheck + 相关契约测试全绿；**不**做 big-bang；行为零变化（纯搬迁 + 必要 deps 修正）。
 

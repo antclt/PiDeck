@@ -2,7 +2,7 @@
 
 > 状态：**T1–T6 已实现**（T1–T5 于 2026-10-23；2026-10-24 加固轮修复 4 个 P1 + 若干 P2 并新增 30 个单测；T6 核心链路端到端 smoke 落地为 `e2e/browser-agent.spec.ts`，真实 MCP 客户端 → host → webview → CDP 全链路）\
 > 基线：PiDeck v0.9.5，Electron ^43.4.0，Node 24，pi RPC 模式\
-> 关联：[docs/pideck-cua-implementation-plan.md](./pideck-cua-implementation-plan.md)（MCP 通道/审批门先例）、[docs/pideck-mcp.md](./pideck-mcp.md)（另一条对外 MCP API）、AGENTS.md「例外六」（已写入 2026-10-23，条文见 §9）\
+> 关联：[docs/pideck-cua-implementation-plan.md](./pideck-cua-implementation-plan.md)（MCP 通道/审批门先例）、[docs/pideck-mcp.md](./pideck-mcp.md)（另一条对外 MCP API）、[docs/host-boundaries.md](./host-boundaries.md) §例外六（2026-10 从 AGENTS.md 迁入，条文见 §9）\
 > 调研依据：2026-10-23 开源方案对照（§3.3）与独立 Electron PoC（§2）
 
 ---
@@ -156,7 +156,7 @@ pi agent ── tool_call(browser_snapshot / browser_click …) ──> pi MCP c
 | `src/renderer/src/previewApi.ts` | 修改 | 预览默认值（198-199 旁） | +2 |
 | `src/renderer/src/i18n/rendererCopy.zh-CN.ts` + `en-US.ts` | 修改 | 设置文案 + `cua.action.browser_*` 审批文案；改完必须 `node scripts/genZhTwCopy.mjs` | +12 |
 | `src/renderer/src/components/overlays/CuaApprovalDialog.tsx` | 修改 | `ACTION_LABEL_KEYS` 增浏览器动作；只读分支扩展（8-15、44） | +6 |
-| `AGENTS.md` | 修改 | 新增「例外六：本地 MCP 工具端点」（条文见 §9） | 文档 |
+| `AGENTS.md` | 修改 | 新增「例外六：本地 MCP 工具端点」（条文后迁入 `docs/host-boundaries.md` §例外六） | 文档 |
 
 **不需要改**：`preload`、`shared/ipc.ts`（工具由 pi 调用、审批复用 `cua:approval-*`，不新增 API 域，避开 unified-api 命名空间约束）。
 
@@ -276,7 +276,9 @@ v1 策略（最小改动）：
 
 ---
 
-## 9. AGENTS.md 例外六条文（已写入 2026-10-23）
+## 9. MCP 工具端点条文（现行版见 `docs/host-boundaries.md` §例外六）
+
+> 2026-10 迁移：AGENTS.md 拆分后，本条文由 [host-boundaries.md](./host-boundaries.md) 承接；下面保留当时的决策记录。
 
 > 现状：AGENTS.md 五条例外里**没有 MCP 工具端点**，CUA 本身已是未登记例外；再加 browser 会把口子翻倍。
 
