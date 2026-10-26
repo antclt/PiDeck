@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: ab78ec4602cb5b96512ca65a357286c4129640a80b46ebcbb87f4b0bcd92f1fd（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 35a55f189d1b6d369250d6c5cb487b6e8b8ccdcab8aa743b56316bc9979c5755（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -3434,6 +3434,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.modelDisplayName": "名稱",
 	"config.modelId": "ID",
 	"config.modelList": "模型列表",
+	"config.modelsTable.loadMore": "繼續載入（已顯示 {shown} / {total}）",
+	"config.modelsTable.showAll": "顯示全部 {count} 條",
 	"config.modelSpecAutoFilled": "已按模型能力目錄填充 {model} 的規格",
 	"config.modelSpecUnmatched": "未在模型能力目錄中找到 {model}，容量已留空、思考檔位按預設開放",
 	"config.modelUserAgent": "User-Agent",

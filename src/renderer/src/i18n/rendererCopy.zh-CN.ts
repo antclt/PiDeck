@@ -3427,6 +3427,8 @@ export const zhCN = {
 	"config.modelDisplayName": "名称",
 	"config.modelId": "ID",
 	"config.modelList": "模型列表",
+	"config.modelsTable.loadMore": "继续加载（已显示 {shown} / {total}）",
+	"config.modelsTable.showAll": "显示全部 {count} 条",
 	"config.modelSpecAutoFilled": "已按模型能力目录填充 {model} 的规格",
 	"config.modelSpecUnmatched": "未在模型能力目录中找到 {model}，容量已留空、思考档位按默认开放",
 	"config.modelUserAgent": "User-Agent",

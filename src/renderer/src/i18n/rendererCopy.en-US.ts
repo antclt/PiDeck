@@ -3445,6 +3445,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.modelDisplayName": "Name",
 	"config.modelId": "ID",
 	"config.modelList": "Model list",
+	"config.modelsTable.loadMore": "Load more (showing {shown} of {total})",
+	"config.modelsTable.showAll": "Show all {count}",
 	"config.modelSpecAutoFilled": "Auto-filled specs for {model} from the model capability catalog",
 	"config.modelSpecUnmatched": "{model} not found in the model capability catalog; capacity left empty and thinking levels left at the default open set",
 	"config.modelUserAgent": "User-Agent",
