@@ -33,7 +33,7 @@ import type {
 	SessionRuntimeModelSelection,
 	SessionTodoSnapshot,
 } from "../../shared/types";
-import { ipcChannels } from "../../shared/ipc";
+import { agentEventTags, ipcChannels } from "../../shared/ipc";
 import { parseBusySendDelivery } from "../../shared/busySendDelivery";
 import { extractPiToolTruncation } from "../../shared/formatToolDetail";
 import { COMPACT_CANCELLED_BY_OWNER, COMPACT_CANCELLED_BY_USER_ABORT, COMPACT_HOOK_REJECT_MAX_MS, COMPACT_OBSERVATION_MAX_AGE_MS, COMPACT_ROUTED_TO_OWNER, COMPACT_USER_ABORT_WINDOW_MS, COMPACT_WAIT_TIMEOUT } from "../../shared/compactFeedback";
@@ -378,7 +378,7 @@ export class AgentManager {
 		logInfo: (message, meta) => void this.appLogger?.info("agent", message, meta),
 		logWarn: (message, meta) => void this.appLogger?.warn("agent", message, meta),
 		emitAbortSlowNotice: (agentId) =>
-			this.emit(ipcChannels.agentsNotice, {
+			this.emit(agentEventTags.agentsNotice, {
 				agentId,
 				message: "停止响应较慢，可尝试重启会话",
 				i18nKey: "app.abortSlow",
@@ -520,13 +520,13 @@ export class AgentManager {
 			computeDisplayWindowStart: (messages) => this.computeDisplayWindowStart(messages),
 			computeWindowStartFilePos: (agentId, messages, windowStart) => this.computeWindowStartFilePos(agentId, messages, windowStart),
 			sessionFileVersion: (agentId) => this.sessionFileVersionByAgent.get(agentId),
-			emitMessageFlush: (payload) => this.emit(ipcChannels.agentsMessage, payload),
+			emitMessageFlush: (payload) => this.emit(agentEventTags.agentsMessage, payload),
 			emitStreamingStatePatch: (agentId) => this.emitStreamingStatePatch(agentId),
 		});
 		// 启动期诊断队列（Wave 4A）：宿主回调只暴露时间线写入/toast/设置读取/warn 日志。
 		this.startupDiagnostics = new StartupDiagnosticsQueue({
 			addLocalizedMessage: (agentId, role, i18nKey, fallbackText, options) => this.addLocalizedMessage(agentId, role, i18nKey, fallbackText, options),
-			emitNotice: (payload) => this.emit(ipcChannels.agentsNotice, payload),
+			emitNotice: (payload) => this.emit(agentEventTags.agentsNotice, payload),
 			isNoExtensionsSetting: () => Boolean(this.settingsStore.get().piRpcNoExtensions),
 		});
 		// 项目信任闸（Wave 4C）：宿主回调只暴露配置读写/日志/WSL 环境/窗口获取。
@@ -538,7 +538,7 @@ export class AgentManager {
 		});
 		// 扩展 UI 请求闸（Wave 4B）：宿主回调只暴露事件广播/runtime 访问/abort 标记。
 		this.uiGate = new ExtensionUiGate({
-			emitUiRequest: (payload) => this.emit(ipcChannels.agentsUiRequest, payload),
+			emitUiRequest: (payload) => this.emit(agentEventTags.agentsUiRequest, payload),
 			getRuntimeTab: (agentId) => this.agents.get(agentId)?.tab,
 			getClient: (agentId) => this.agents.get(agentId)?.process.client,
 			markAbortedDuringAsk: (agentId) => this.abortedDuringAsk.add(agentId),
@@ -889,7 +889,7 @@ export class AgentManager {
 			// 全局 toast：本次运行每个扩展只弹一次（连续新建会话/进程重连不刷屏）。
 			if (this.mcpThirdPartyNoticesSent.has(hit.source)) continue;
 			this.mcpThirdPartyNoticesSent.add(hit.source);
-			this.emit(ipcChannels.agentsNotice, {
+			this.emit(agentEventTags.agentsNotice, {
 				agentId,
 				message: hasEnabledServer ? `你的 MCP 由 ${hit.source} 接管，PiDeck 里配置的服务器不会被本会话加载。` : `${hit.source} 会接管 MCP（当前未配置服务器，暂无影响）；之后在 PiDeck 配的 MCP 不会生效。`,
 				i18nKey: hasEnabledServer ? "notice.mcpThirdParty.takeoverActive" : "notice.mcpThirdParty.takeoverIdle",
@@ -2352,7 +2352,7 @@ export class AgentManager {
 		runtime.tab.status = "idle";
 		// 停止反馈改 toast，不再写入会话时间线：
 		// 1) 系统状态卡片太抢眼；2) 插在 assistant 中间会打断 agent-run 分组，放大“消息串台”体感。
-		this.emit(ipcChannels.agentsNotice, {
+		this.emit(agentEventTags.agentsNotice, {
 			agentId,
 			message: "已请求停止当前响应",
 			i18nKey: "app.abortRequested",
@@ -3035,7 +3035,7 @@ export class AgentManager {
 		this.toolStateSequenceByAgent.set(agentId, toolStateSequence);
 		// 工具边沿直接从原始 pi 事件发出，不等待 get_state/get_session_stats。
 		// 这样即使工具极快完成或完整状态请求乱序，renderer 仍能稳定看到 true → false。
-		this.emit(ipcChannels.agentsRuntimeState, {
+		this.emit(agentEventTags.agentsRuntimeState, {
 			agentId,
 			state: {
 				isExecutingTool,
@@ -3086,7 +3086,7 @@ export class AgentManager {
 			state.isExecutingTool = !!this.toolExecutingByAgent.get(agentId);
 			state.executingToolName = this.toolExecutingByAgent.get(agentId) ?? undefined;
 			state.toolStateSequence = latestToolSequence;
-			this.emit(ipcChannels.agentsRuntimeState, { agentId, state });
+			this.emit(agentEventTags.agentsRuntimeState, { agentId, state });
 		} catch {
 			// 运行态刷新失败不影响主流程；下一次轮询或事件会继续同步。
 		}
@@ -4296,14 +4296,14 @@ export class AgentManager {
 			}
 		});
 		piProcess.on("stderr", (text) =>
-			this.emit(ipcChannels.agentsLog, {
+			this.emit(agentEventTags.agentsLog, {
 				agentId,
 				...this.streamRuntimeTriple(agentId),
 				text,
 			}),
 		);
 		piProcess.on("protocol-error", (line) => {
-			this.emit(ipcChannels.agentsLog, {
+			this.emit(agentEventTags.agentsLog, {
 				agentId,
 				...this.streamRuntimeTriple(agentId),
 				text: `Protocol error: ${line}`,
@@ -4787,7 +4787,7 @@ export class AgentManager {
 			this.emitToolRuntimeTransition(agentId, false);
 			this.emitStreamingStatePatch(agentId);
 			// 新一轮丢掉上一轮 held live 槽，避免旧正文串到本轮。
-			this.emit(ipcChannels.agentsTextStream, {
+			this.emit(agentEventTags.agentsTextStream, {
 				agentId,
 				...this.streamRuntimeTriple(agentId),
 				text: "",
@@ -6204,7 +6204,7 @@ export class AgentManager {
 
 	/** 轻量 runtime 状态补丁：只同步本地流式标志与工具执行状态，不发 RPC。 */
 	private emitStreamingStatePatch(agentId: string) {
-		this.emit(ipcChannels.agentsRuntimeState, {
+		this.emit(agentEventTags.agentsRuntimeState, {
 			agentId,
 			state: {
 				isStreaming: this.streamingAgents.has(agentId),
@@ -6220,7 +6220,7 @@ export class AgentManager {
 	 * error 终态被清理，先发轻量 patch 让 renderer 在清理前记住它，圆环才能继续提供压缩入口。
 	 */
 	private emitContextOverflowState(agentId: string, contextOverflow: boolean) {
-		this.emit(ipcChannels.agentsRuntimeState, {
+		this.emit(agentEventTags.agentsRuntimeState, {
 			agentId,
 			state: { contextOverflow },
 		});
@@ -6231,7 +6231,7 @@ export class AgentManager {
 		this.agentTurnActiveById.set(agentId, isTurnActive);
 		// agent_start/agent_end are protocol edges, so publish immediately instead
 		// of waiting for the next asynchronous get_state snapshot.
-		this.emit(ipcChannels.agentsRuntimeState, {
+		this.emit(agentEventTags.agentsRuntimeState, {
 			agentId,
 			state: { isTurnActive },
 		});
@@ -6364,7 +6364,7 @@ export class AgentManager {
 
 	private emitStateNow() {
 		const tabs = this.list();
-		this.emit(ipcChannels.agentsState, tabs);
+		this.emit(agentEventTags.agentsState, tabs);
 		// 同步通知主进程内部状态订阅者（PetStateBridge），使宠物窗能拿到聚合状态。
 		// 设计文档原拟用 ipcMain.on("agents:state") 桥接是错的：webContents.send 是
 		// 主进程→渲染层单向通道，ipcMain 收不到主进程自己发出的消息，故改用本钩子。

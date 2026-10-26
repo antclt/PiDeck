@@ -20,7 +20,7 @@
  *   - agents:message：{ messages: ChatMessage[] }，工具卡是 role:"tool" 且带
  *     meta.{toolCallId,toolName,status,args,fullText,detailText}
  */
-import { ipcChannels } from "../../shared/ipc";
+import { agentEventTags } from "../../shared/ipc";
 import type { PiEvent } from "./WebEventStream";
 
 /** 只关当前 text/reasoning 块（不结束整条流）的 pi 事件。 */
@@ -92,9 +92,9 @@ export class DshChannelToPiEvents {
 	/** 翻译一个 DSH 通道事件为 0..n 个 pi 事件。 */
 	push(channel: string, payload: unknown): PiEvent[] {
 		if (!isRecord(payload)) return [];
-		if (channel === ipcChannels.agentsTextStream) return this.pushText(payload);
-		if (channel === ipcChannels.agentsThinking) return this.pushThinking(payload);
-		if (channel === ipcChannels.agentsMessage) return this.pushMessages(payload);
+		if (channel === agentEventTags.agentsTextStream) return this.pushText(payload);
+		if (channel === agentEventTags.agentsThinking) return this.pushThinking(payload);
+		if (channel === agentEventTags.agentsMessage) return this.pushMessages(payload);
 		return [];
 	}
 

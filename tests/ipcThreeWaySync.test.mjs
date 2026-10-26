@@ -11,8 +11,10 @@ import test from "node:test";
  * 2) preload 运行时可达性：preload 白名单引用的通道必须在 main 侧某处出现
  *    （handle/on/send/push 任一形态——含窗口型注册如 FloatingController、
  *    事件推流如 TerminalSessionManager 的 emit）。
- * 3) 字面量旁路：main/preload 里形如 "domain:action" 的通道字面量必须走 ipcChannels 常量
- *    （集中注册的硬约束，防散落字符串与拼写漂移）。
+ * 3) 字面量旁路：main/preload 里形如 "domain:action" 的通道字面量必须走常量
+ *    （集中注册的硬约束，防散落字符串与拼写漂移）。常量表有两张：
+ *    `ipcChannels`（真通道）与 `agentEventTags`（Agent 内部事件标签），两者都算常量引用；
+ *    两张表各自的边界由 scripts/check-ipc-wiring.mjs 校验。
  * 解析用空白容忍正则（AGENTS：源码扫描契约测试必须空白容忍）。
  */
 const shared = readFileSync(join(import.meta.dirname, "..", "src", "shared", "ipc.ts"), "utf8");
@@ -41,9 +43,9 @@ function refsOf(files) {
 	const set = new Set();
 	for (const file of files) {
 		const text = stripComments(readFileSync(file, "utf8"));
-		for (const m of text.matchAll(/ipcChannels\.([A-Za-z0-9]+)/g)) set.add(m[1]);
+		for (const m of text.matchAll(/(?:ipcChannels|agentEventTags)\.([A-Za-z0-9]+)/g)) set.add(m[1]);
 		// 局部别名（如 pet/index.ts 的 `const C = ipcChannels`）等价于常量引用
-		for (const m of text.matchAll(/const ([A-Za-z0-9_$]+)(?::\s*typeof\s+ipcChannels)?\s*=\s*ipcChannels\b/g)) {
+		for (const m of text.matchAll(/const ([A-Za-z0-9_$]+)(?::\s*typeof\s+(?:ipcChannels|agentEventTags))?\s*=\s*(?:ipcChannels|agentEventTags)\b/g)) {
 			const alias = m[1];
 			for (const a of text.matchAll(new RegExp(`${alias}\\.([A-Za-z0-9]+)`, "g"))) set.add(a[1]);
 		}

@@ -8,7 +8,7 @@
  * 发布通道（emit/emitRuntimeState）与外部回调（标题/配置）经 host 回到 manager，
  * 保证 agentsState/agentsRuntimeState 仍由 manager 统一编排。
  */
-import { ipcChannels } from "../../shared/ipc";
+import { agentEventTags } from "../../shared/ipc";
 import type { AgentTab } from "../../shared/types/agent";
 import type { AcpConfigOption, AcpRpcNotification, AcpSessionUpdate } from "./acpProtocol";
 import type { AcpAgentRuntime } from "./acpAgentRuntime";
@@ -149,7 +149,7 @@ export class AcpUpdatePipeline {
 			runtime.flushTimer = null;
 			runtime.flushPending = false;
 		}
-		this.host.emit(ipcChannels.agentsMessage, {
+		this.host.emit(agentEventTags.agentsMessage, {
 			agentId: runtime.tab.id,
 			deckSessionId: runtime.tab.deckSessionId,
 			messages: runtime.projection.messages,

@@ -2,7 +2,7 @@ import { ipcMain, Menu, type BrowserWindow, type MenuItemConstructorOptions } fr
 import type { AgentManager } from "../pi/AgentManager";
 import type { SettingsStore } from "../settings/SettingsStore";
 import { DEFAULT_PET_SCALE, type AgentTab, type AgentUiRequest, type AppSettings, type PetManifest, type PetNotification } from "../../shared/types";
-import { ipcChannels } from "../../shared/ipc";
+import { agentEventTags, ipcChannels } from "../../shared/ipc";
 import { NOTIFICATION_DURATION_MS, effectiveUIFontSize } from "../../shared/petNotificationLayout";
 import { EMPTY_NOTIFICATION_QUEUE, nextNotificationQueueState, onNotificationTimerElapse, type NotificationQueueState } from "./notificationQueue";
 import { PetWindow, detectPetWindowCaps } from "./PetWindow";
@@ -83,7 +83,7 @@ export class PetSystem {
 		this.bridge.attach(this.deps.agentManager);
 		// 等待操作：复用主进程输出订阅，只消费已规范化的 agents:ui-request（set/delete pending 由 AgentManager 保证）
 		this.offOutput = this.deps.agentManager.onOutput((channel, payload) => {
-			if (channel !== ipcChannels.agentsUiRequest || !payload || typeof payload !== "object") return;
+			if (channel !== agentEventTags.agentsUiRequest || !payload || typeof payload !== "object") return;
 			this.bridge.updateUIRequest(payload as AgentUiRequest);
 		});
 		// 已完成：AgentManager 确认成功 settled 后回调（abort/重试/压缩不触发）

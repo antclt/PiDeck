@@ -6,7 +6,7 @@
 import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { dialog, ipcMain, type BrowserWindow } from "electron";
-import { ipcChannels } from "../../shared/ipc";
+import { agentEventTags, ipcChannels } from "../../shared/ipc";
 import { isDshPermissionPreset } from "../../shared/types/agent";
 import { isRewindRestoreScope } from "../../shared/types/rewind";
 import { canonicalizeSessionPath } from "../../shared/sessionIdentity";
@@ -771,7 +771,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			const bindings = sessionRuntimeCoordinator.attachCatalogRuntimes(visibleRecords);
 			for (const binding of bindings) {
 				const tab = agentManager.list().find((candidate) => candidate.id === binding.agentId);
-				if (tab) emitSessionRuntimeEvent(tab.id, ipcChannels.agentsState, tab);
+				if (tab) emitSessionRuntimeEvent(tab.id, agentEventTags.agentsState, tab);
 			}
 			return visibleRecords;
 		};
@@ -1783,7 +1783,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			const result = await sessionRuntimeCoordinator.send(promptInput);
 			if (result.agentId) {
 				const tab = agentManager.list().find((candidate) => candidate.id === result.agentId);
-				if (tab) emitSessionRuntimeEvent(tab.id, ipcChannels.agentsState, tab);
+				if (tab) emitSessionRuntimeEvent(tab.id, agentEventTags.agentsState, tab);
 			}
 			// 消息被接受才记「最后一次使用」（选而未发不算）：写入 desktop settings.lastUsedModel，
 			// 新会话默认解析（launchDefaults）以它优先。fire-and-forget，不阻塞发送响应。

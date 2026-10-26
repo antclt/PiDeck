@@ -10,7 +10,7 @@
  * 由 agent CLI 自行持久化;重启恢复靠 acpSessionId + session/load 重放。
  */
 import { randomUUID } from "node:crypto";
-import { ipcChannels } from "../../shared/ipc";
+import { agentEventTags } from "../../shared/ipc";
 import type { AcpAgentInfo, AcpToolConfig } from "../../shared/types/acp";
 import type { AgentGatewayCapability, AgentRuntimeState, AgentStatus, AgentTab, AvailableModel, CreateAgentInput } from "../../shared/types/agent";
 import type { ChatMessage, SendPromptInput, SendPromptResult, SessionUiResponseInput } from "../../shared/types/session";
@@ -149,7 +149,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 		// ACP v1 无改名请求;标题由 agent 侧 session_info_update 维护,这里只改本地 tab。
 		const runtime = this.requireRuntime(agentId);
 		runtime.tab = { ...runtime.tab, title: name };
-		this.emit(ipcChannels.agentsState, this.list());
+		this.emit(agentEventTags.agentsState, this.list());
 		return { ...runtime.tab };
 	}
 
@@ -253,7 +253,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 			agentInfo: { capabilities: { loadSession: false, agentThought: false, sessionList: false, promptImage: false }, protocolVersion: ACP_PROTOCOL_VERSION },
 			status: "starting",
 			turnActive: false,
-			permissions: new AcpPermissionRequests(conn, (event) => this.emit(ipcChannels.agentsUiRequest, { agentId, ...event }), this.deps.permissionTimeoutMs),
+			permissions: new AcpPermissionRequests(conn, (event) => this.emit(agentEventTags.agentsUiRequest, { agentId, ...event }), this.deps.permissionTimeoutMs),
 			cancelling: false,
 			cancelReason: null,
 			reloading: false,
@@ -265,7 +265,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 			escalatedStop: null,
 		};
 		this.runtimes.set(agentId, runtime);
-		this.emit(ipcChannels.agentsState, this.list());
+		this.emit(agentEventTags.agentsState, this.list());
 
 		try {
 			await performAcpHandshake(runtime, input.acpSessionId, cwd, spawnFailure, {
@@ -278,7 +278,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 		} catch (error) {
 			this.runtimes.delete(agentId);
 			this.killProcess(runtime);
-			this.emit(ipcChannels.agentsState, this.list());
+			this.emit(agentEventTags.agentsState, this.list());
 			const thrown = error instanceof Error ? error : new Error(String(error));
 			// AUTH_REQUIRED / CLI 未安装(ENOENT) / 握手超时：附描述符再抛，
 			// coordinator 透传为本地化引导 toast（不命中的错误原样透出原文）。
@@ -290,7 +290,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 		if (runtime.title && runtime.tab.deckSessionId) this.deps.onTitleChanged?.(runtime.tab.deckSessionId, runtime.title);
 		runtime.status = "idle";
 		runtime.tab.status = "idle";
-		this.emit(ipcChannels.agentsState, this.list());
+		this.emit(agentEventTags.agentsState, this.list());
 		this.emitRuntimeState(agentId);
 		// load 重放/新建即回显:attach 会话历史立即可见。
 		this.updates.flushMessages(runtime, true);
@@ -317,7 +317,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 					runtime.projection = settleAcpTurn(runtime.projection, "error");
 					this.failPendingPermissions(runtime);
 					this.updates.flushMessages(runtime, true);
-					this.emit(ipcChannels.agentsState, this.list());
+					this.emit(agentEventTags.agentsState, this.list());
 					this.emitRuntimeState(runtime.tab.id);
 					if (error) this.deps.logger?.warn("acp", `[${runtime.tool.name}] connection closed: ${error.message}`);
 				})
@@ -347,7 +347,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 		runtime.escalatedStop = null;
 		runtime.status = "running";
 		runtime.tab.status = "running";
-		this.emit(ipcChannels.agentsState, this.list());
+		this.emit(agentEventTags.agentsState, this.list());
 		this.emitRuntimeState(input.agentId);
 		// 先 flush 用户气泡再走物化链:base64→ref 可能慢,不等它,渲染层立即看到本条消息;
 		// 物化完成后下一次 flush 把快照里的 base64 换成 ref(内存形态不违反「base64 不进存储」契约)。
@@ -402,7 +402,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 				runtime.tab.status = "idle";
 			}
 			this.updates.flushMessages(runtime, true);
-			this.emit(ipcChannels.agentsState, this.list());
+			this.emit(agentEventTags.agentsState, this.list());
 			this.emitRuntimeState(input.agentId);
 			const message = error instanceof Error ? error.message : String(error);
 			const hasOutput = hasTurnOutput(runtime.projection.messages, seededIndex);
@@ -422,7 +422,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 			runtime.tab.status = "idle";
 		}
 		this.updates.flushMessages(runtime, true);
-		this.emit(ipcChannels.agentsState, this.list());
+		this.emit(agentEventTags.agentsState, this.list());
 		this.emitRuntimeState(input.agentId);
 		// 成功结算 ≠ 有可见输出：部分 CLI 因自身事件流竞态会正常回 end_turn 却漏掉全部
 		// session/update（OpenCode 1.15.4 /event 订阅竞态实测：消息已被处理但 client 一无所获，
@@ -470,9 +470,9 @@ export class AcpAgentManager implements SessionAgentGateway {
 		// 删除前先推一次终态:stop()/abort 升级强杀都走这里,渲染层需要 closed 事件把
 		// 会话从 running 收口(删除后的 list() 不再含该 agent,不会产生逐 agent 事件;
 		// 用户主动停止另有 coordinator 的 detach 事件,此推送与其幂等)。
-		this.emit(ipcChannels.agentsState, this.list());
+		this.emit(agentEventTags.agentsState, this.list());
 		this.runtimes.delete(agentId);
-		this.emit(ipcChannels.agentsState, this.list());
+		this.emit(agentEventTags.agentsState, this.list());
 	}
 
 	async stopAll(): Promise<void> {
@@ -545,8 +545,8 @@ export class AcpAgentManager implements SessionAgentGateway {
 		const runtime = this.runtimes.get(agentId);
 		if (!runtime) return;
 		// runtime state 与 agentsState 同步推送：渲染层底栏状态依赖两个通道。
-		this.emit(ipcChannels.agentsState, this.list());
-		this.emit(ipcChannels.agentsRuntimeState, { agentId, state: buildAgentRuntimeState(runtime) });
+		this.emit(agentEventTags.agentsState, this.list());
+		this.emit(agentEventTags.agentsRuntimeState, { agentId, state: buildAgentRuntimeState(runtime) });
 	}
 
 	/** 连接关闭/stop 时撤销全部审批；RPC 回包与 timer 清理由权限 owner 配对。 */

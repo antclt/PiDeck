@@ -15,7 +15,7 @@ test("abort feedback is toast-only and seals stream generation", () => {
 
 	// 1) 停止反馈不得再 addMessage 系统卡片
 	assert.doesNotMatch(agentManager, /addMessage\(agentId,\s*"system",\s*"已请求停止当前响应"/);
-	assert.match(agentManager, /ipcChannels\.agentsNotice/);
+	assert.match(agentManager, /agentEventTags\.agentsNotice/);
 	assert.match(ipc, /agentsNotice:\s*"agents:notice"/);
 
 	// 2) abort 必须封印 stream generation，并走 settled 协同解封

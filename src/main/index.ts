@@ -249,7 +249,7 @@ process.on("unhandledRejection", (reason) => {
 	void appLogger?.error("process", "Unhandled rejection", reason);
 	console.error("Unhandled rejection:", reason);
 });
-import { ipcChannels } from "../shared/ipc";
+import { agentEventTags, ipcChannels } from "../shared/ipc";
 import { RendererNoiseAggregator, classifyRendererNoise, toRendererNoiseLog } from "../shared/rendererNoise";
 import { mainProcessT, normalizeMainProcessLocale, type MainProcessLocale, type MainProcessTranslationKey } from "../shared/i18n/mainProcessCopy";
 import { buildSessionOriginKey, canonicalizeSessionPath, toAbsoluteSessionPath } from "../shared/sessionIdentity";
@@ -960,7 +960,7 @@ function emitSessionActivationFailed(sessionId: string): void {
 		sessionId,
 		agentId: "",
 		runtimeGeneration: sessionRuntimeCoordinator.currentRuntimeGeneration(sessionId),
-		sourceChannel: ipcChannels.agentsState,
+		sourceChannel: agentEventTags.agentsState,
 		payload: { status: "error" },
 	});
 }
@@ -989,7 +989,7 @@ function emitAgentsNotice(payload: { message: string; i18nKey: string; i18nParam
 		sessionId: payload.sessionId ?? "",
 		agentId: "system",
 		runtimeGeneration: 0,
-		sourceChannel: ipcChannels.agentsNotice,
+		sourceChannel: agentEventTags.agentsNotice,
 		payload: {
 			message: payload.message,
 			i18nKey: payload.i18nKey,
@@ -1253,13 +1253,13 @@ function emitReplacementState(binding: SessionRuntimeBinding, includeMessages: b
 	// 2027-03 审计发现 B；`findRuntimeTab` 里保留了 composite 未装配时的 pi 回退。
 	const tab = findRuntimeTab(binding.agentId);
 	if (!tab) return;
-	emitSessionRuntimeEvent(binding.agentId, ipcChannels.agentsState, tab);
+	emitSessionRuntimeEvent(binding.agentId, agentEventTags.agentsState, tab);
 	if (includeMessages) {
 		// 与 flush 同一窗口协议：只下发显示窗口段 + windowStart/totalLength/fileVersion，
 		// 渲染层合并逻辑一处生效（窗口前历史由 disk 轮次分页 prepend）；
 		// ACP/DSH 无窗口实现时为全量（live 列表有界，协议兼容：无 windowStart = 全窗口）。
 		const messageWindow = compositeAgentGateway?.getMessageWindow(binding.agentId) ?? agentManager.getMessageWindow(binding.agentId);
-		emitSessionRuntimeEvent(binding.agentId, ipcChannels.agentsMessage, {
+		emitSessionRuntimeEvent(binding.agentId, agentEventTags.agentsMessage, {
 			agentId: binding.agentId,
 			...messageWindow,
 		});
@@ -1283,7 +1283,7 @@ function emitSessionActivating(sessionId: string): void {
 		sessionId,
 		agentId: "",
 		runtimeGeneration: sessionRuntimeCoordinator.currentRuntimeGeneration(sessionId),
-		sourceChannel: ipcChannels.agentsState,
+		sourceChannel: agentEventTags.agentsState,
 		payload: { status: "starting" },
 	});
 }
@@ -1647,7 +1647,7 @@ const imSessionRuntimeBindings: SessionRuntimeBindingGateway = {
 				debugDetails: `Activated runtime not found: ${activated.value.agentId}`,
 			});
 		tab.runtimeGeneration = activated.value.runtimeGeneration;
-		emitSessionRuntimeEvent(tab.id, ipcChannels.agentsState, tab);
+		emitSessionRuntimeEvent(tab.id, agentEventTags.agentsState, tab);
 		return tab;
 	},
 	async bindRuntime(input) {
@@ -1716,7 +1716,7 @@ const imSessionRuntimeBindings: SessionRuntimeBindingGateway = {
 		);
 		const runtimeGeneration = sessionRuntimeCoordinator.bindExistingAgent(sessionId, input.agent.id);
 		input.agent.runtimeGeneration = runtimeGeneration;
-		emitSessionRuntimeEvent(input.agent.id, ipcChannels.agentsState, input.agent);
+		emitSessionRuntimeEvent(input.agent.id, agentEventTags.agentsState, input.agent);
 		return { sessionId };
 	},
 	async sendPrompt(input) {
@@ -5430,7 +5430,7 @@ app
 				const bindings = sessionRuntimeCoordinator.attachCatalogRuntimes(records);
 				for (const binding of bindings) {
 					const tab = agentManager.list().find((candidate) => candidate.id === binding.agentId);
-					if (tab) emitSessionRuntimeEvent(tab.id, ipcChannels.agentsState, tab);
+					if (tab) emitSessionRuntimeEvent(tab.id, agentEventTags.agentsState, tab);
 				}
 				return records;
 			},
@@ -5553,7 +5553,7 @@ app
 				const result = await sessionRuntimeCoordinator.send(input);
 				if (result.agentId) {
 					const tab = agentManager.list().find((candidate) => candidate.id === result.agentId);
-					if (tab) emitSessionRuntimeEvent(tab.id, ipcChannels.agentsState, tab);
+					if (tab) emitSessionRuntimeEvent(tab.id, agentEventTags.agentsState, tab);
 				}
 				return result;
 			},
@@ -6197,7 +6197,7 @@ app
 				});
 		});
 		compositeAgentGateway.onOutput((sourceChannel, payload) => {
-			if (sourceChannel === ipcChannels.agentsState && Array.isArray(payload)) {
+			if (sourceChannel === agentEventTags.agentsState && Array.isArray(payload)) {
 				for (const tab of payload) {
 					if (tab && typeof tab === "object" && typeof tab.id === "string") {
 						emitSessionRuntimeEvent(tab.id, sourceChannel, tab);
@@ -6209,7 +6209,7 @@ app
 				const agentId = (payload as { agentId?: unknown }).agentId;
 				if (typeof agentId !== "string") return;
 				const forwarded = emitSessionRuntimeEvent(agentId, sourceChannel, payload);
-				if (!forwarded && sourceChannel === ipcChannels.agentsUiRequest) {
+				if (!forwarded && sourceChannel === agentEventTags.agentsUiRequest) {
 					cancelUnboundUiRequest(payload);
 				}
 			}
