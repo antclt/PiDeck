@@ -1,6 +1,7 @@
 import type { PiDesktopApi } from "../../../../preload";
 import { t } from "../../i18n";
 import { showNotice } from "../../utils/notice";
+import { isRemoteTerminalError, remoteTerminalErrorMessage } from "../../utils/remoteTerminalErrors";
 
 export type TerminalDockIo = {
 	input: (data: string) => void;
@@ -25,7 +26,9 @@ export function createTerminalDockIo(terminal: PiDesktopApi["terminal"], tabId: 
 			// 按键和拖动可连续触发大量 IPC：同一失败阶段各报一次，成功后才允许再次反馈。
 			failures.add(operation);
 			const key = operation === "input" ? "terminal.inputFailed" : "terminal.resizeFailed";
-			showNotice(`${t(key)}: ${error instanceof Error ? error.message : String(error)}`, 4000, "error");
+			// 远端终端的拒绝是稳定码（SSH_*/REMOTE_*）：走同一份远端文案映射，不把原始诊断丢给用户。
+			const detail = isRemoteTerminalError(error) ? remoteTerminalErrorMessage(error) : error instanceof Error ? error.message : String(error);
+			showNotice(`${t(key)}: ${detail}`, 4000, "error");
 		}
 	}
 

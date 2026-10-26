@@ -94,6 +94,18 @@ test("persisted DSH session edit/resend: legacy catalog path (fork migration ski
 	expectPath(resolve("delete", { persisted: true, isDshSession: true }), { path: "catalog", live: true });
 });
 
+test("persisted remote SSH session edit/resend: catalog remote-writer path (fork only accepts user entries)", () => {
+	// 远端会话文件在主机上，RemoteSessionHistoryWriter 原地追加 context_edit 并做外部改动检测；
+	// pi 的 fork RPC 只接受 user 条目，而编辑目标是 assistant 回复 → 远端绝不能走 fork-mutation
+	// （否则 REMOTE_SESSION_REPLACEMENT_RPC_FAILED）。delete 同样是 catalog。
+	expectPath(resolve("edit", { persisted: true, isRemoteSession: true }), { path: "catalog", live: true });
+	expectPath(resolve("resend", { persisted: true, isRemoteSession: true }), { path: "catalog", live: true });
+	expectPath(resolve("edit", { live: false, persisted: true, isRemoteSession: true }), { path: "catalog", live: false });
+	expectPath(resolve("delete", { persisted: true, isRemoteSession: true }), { path: "catalog", live: true });
+	// DSH + remote 同时命中时仍以 catalog 收敛（两者都走文件路径）。
+	expectPath(resolve("edit", { persisted: true, isDshSession: true, isRemoteSession: true }), { path: "catalog", live: true });
+});
+
 test("resend rollback hint only for definite send failure (not unknown delivery)", () => {
 	const { shouldShowResendRollbackHint } = policy;
 	// 确定失败：历史已截断但没发出去 → 必须补状态说明（时间线变短有解释、有备份可重试）

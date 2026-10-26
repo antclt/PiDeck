@@ -7,6 +7,7 @@ import { rendererHeapAdditionalArguments } from "../v8HeapLimits";
 import { readElectronChromiumSandboxPreference } from "../settings/SettingsStore";
 import type { SettingsStore } from "../settings/SettingsStore";
 import { resolveAppColorScheme } from "../../shared/themeSchedule";
+import { isLocalProject } from "../../shared/projectLocation";
 import type { AgentManager } from "../pi/AgentManager";
 import type { ProjectStore } from "../projects/ProjectStore";
 import { getAppLogger } from "../logging/sharedLogger";
@@ -163,7 +164,12 @@ export class MiniOverlayWindow {
 			activeCount: openTabs.length,
 			activeSessions: [...openTabs.filter((t) => t.status === "running").sort(byRecency), ...openTabs.filter((t) => t.status !== "running").sort(byRecency)].map(toSessionRef),
 			recentSessions: openTabs.sort(byRecency).slice(0, 5).map(toSessionRef),
-			projects: this.deps.projectStore.list().map((p) => ({ id: p.id, name: p.name, path: p.path })),
+			// 小窗的「切换项目」只列本机目录：远端项目没有可交给本机 fs 的 path（见 shared/types/project.ts），
+			// 而 MiniOverlayState.projects 的契约就是 { id, name, path }。远端会话仍可从 activeSessions 进入。
+			projects: this.deps.projectStore
+				.list()
+				.filter(isLocalProject)
+				.map((p) => ({ id: p.id, name: p.name, path: p.path })),
 			// 浮窗与主窗口共用渲染层 i18n：显式 zh-TW 下发繁体；system/pseudo 等沿用历史行为（zh-CN）。
 			locale: settings.language === "zh-TW" ? "zh-TW" : settings.language === "en-US" ? "en-US" : "zh-CN",
 		};

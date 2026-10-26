@@ -13,7 +13,8 @@ type TabScope = {
 	terminal: PiDesktopApi["terminal"];
 	pendingCreates: number;
 	hydrating: boolean;
-	pendingExits: Map<string, number | undefined>;
+	/** 快照前先到的退出事件：远端终端的退出码 + 稳定原因码都要留住（见 TerminalTab.exitReason）。 */
+	pendingExits: Map<string, { exitCode?: number; reason?: string }>;
 	closeWhenEmpty: boolean;
 };
 
@@ -38,9 +39,9 @@ function stripReplayBuffer(tab: TerminalTab): TerminalTab {
 /** IPC 快照可能早于退出事件；按 tab ID 合并早到的退出状态，含正常退出码 0。 */
 function applyPendingExit(scope: TabScope, tab: TerminalTab): TerminalTab {
 	if (!scope.pendingExits.has(tab.id)) return tab;
-	const exitCode = scope.pendingExits.get(tab.id);
+	const pending = scope.pendingExits.get(tab.id);
 	scope.pendingExits.delete(tab.id);
-	return { ...tab, exited: true, exitCode };
+	return { ...tab, exited: true, exitCode: pending?.exitCode, ...(pending?.reason === undefined ? {} : { exitReason: pending.reason }) };
 }
 
 /** 报错保留原因，并说明是创建还是关闭失败；不伪装成已成功完成。 */
@@ -61,7 +62,8 @@ export function useTerminalDockTabs(options: TerminalDockTabsOptions) {
 	const [confirmCloseAllOpen, setConfirmCloseAllOpen] = useState(false);
 	const pendingCloseAllRef = useRef<TerminalTab[] | null>(null);
 	const { target, terminal, enabled } = options;
-	const targetKey = target.kind === "agent" ? JSON.stringify([target.kind, target.sessionId, target.agentId, target.runtimeGeneration]) : JSON.stringify([target.kind, target.projectId, target.cwd]);
+	// 项目目标没有 cwd（远端项目没有本机路径）：按项目身份键控，切项目即视为新面板。
+	const targetKey = target.kind === "agent" ? JSON.stringify([target.kind, target.sessionId, target.agentId, target.runtimeGeneration]) : JSON.stringify([target.kind, target.projectId]);
 
 	// 同步更新快照：不能等 React 下一次 render，两个 IPC 可在同一渲染批次内完成。
 	const commit = useCallback((next: TabState) => {
@@ -155,16 +157,19 @@ export function useTerminalDockTabs(options: TerminalDockTabsOptions) {
 	);
 
 	const markExited = useCallback(
-		(tabId: string, exitCode?: number) => {
+		(tabId: string, exitCode?: number, reason?: string) => {
 			const scope = scopeRef.current;
 			if (!scope?.active) return;
 			const current = stateRef.current;
 			if (!current.tabs.some((tab) => tab.id === tabId)) {
 				// 极短命 shell 可先退出再返回 create/ensure；只在未结算窗口暂存，不能串到下一次创建。
-				if (scope.hydrating || scope.pendingCreates > 0) scope.pendingExits.set(tabId, exitCode);
+				if (scope.hydrating || scope.pendingCreates > 0) scope.pendingExits.set(tabId, { exitCode, ...(reason === undefined ? {} : { reason }) });
 				return;
 			}
-			commit({ ...current, tabs: current.tabs.map((tab) => (tab.id === tabId ? { ...tab, exited: true, exitCode } : tab)) });
+			// exitReason 只来自远端终端的稳定码（本机退出没有 reason）：保留在 tab 状态里，
+			// 切回该标签时仍能显示「为什么断」而不只是退出码。
+			const exitPatch = { exited: true, exitCode, ...(reason === undefined ? {} : { exitReason: reason }) };
+			commit({ ...current, tabs: current.tabs.map((tab) => (tab.id === tabId ? { ...tab, ...exitPatch } : tab)) });
 		},
 		[commit],
 	);

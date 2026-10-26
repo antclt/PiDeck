@@ -1,10 +1,10 @@
 import type { PiDesktopApi } from "../../preload";
-import { createDefaultExternalEditorSettings, createDefaultSecurityConfig, createDefaultSoundAlertSettings, DEFAULT_PET_SCALE, DEFAULT_TOAST_DURATION_MS, emptyRemoteAccessState } from "../../shared/types";
+import { createDefaultExternalEditorSettings, createDefaultSecurityConfig, createDefaultSoundAlertSettings, DEFAULT_PET_SCALE, DEFAULT_TOAST_DURATION_MS, emptyRemoteAccessState, terminalOwnerKeyFor } from "../../shared/types";
 import { DEFAULT_VOICE_TRANSCRIPTION_CONFIG } from "../../shared/voiceTranscriptionConfig";
 import { EMPTY_VIDEO_GEN_CONFIG } from "../../shared/videoGenConfig";
 import { SESSION_TAB_MAX_WIDTH_DEFAULT } from "../../shared/sessionTabWidth";
 import { ACP_TOOL_PRESETS } from "../../shared/acpToolPresets";
-import type { AppSettings, FileTreeNode, Project, SessionRecord, SessionSummary, TerminalDataEvent, TerminalExitEvent, TerminalTab } from "../../shared/types";
+import type { AppSettings, FileTreeNode, LocalProject, Project, SessionRecord, SessionSummary, TerminalDataEvent, TerminalExitEvent, TerminalShell, TerminalTab, TerminalTarget } from "../../shared/types";
 import type { ResourceImportKind } from "../../shared/types/resourceImport";
 import type { ReplyActionRule } from "../../shared/types/replyActions";
 import { t } from "./i18n";
@@ -19,7 +19,7 @@ const PREVIEW_REPLY_ACTIONS: readonly ReplyActionRule[] = [
 	{ text: "重试", triggers: [{ kind: "onFailure" }] },
 ];
 
-const projects: Project[] = [
+const projects: LocalProject[] = [
 	{
 		id: "builtin-chat",
 		name: "Chat",
@@ -260,16 +260,15 @@ export function createPreviewApi(): PiDesktopApi {
 		writeImage: async () => false,
 		writeText: async () => false,
 	};
-	const createTerminalTab = async (agentId: string, shell?: string, cwd?: string) => {
+	const createTerminalTab = async (target: TerminalTarget, shell?: TerminalShell) => {
 		const shellName = shell ?? "powershell";
 		const displayName = shellName === "git-bash" ? "Git Bash" : shellName === "bash" ? "bash" : shellName === "cmd" ? "cmd" : "PowerShell";
 		const tab: TerminalTab = {
 			id: `preview-terminal-${terminalTabs.length + 1}`,
-			agentId,
-			ownerKey: `agent:${agentId}`,
+			agentId: target.kind === "agent" ? target.agentId : "",
+			ownerKey: terminalOwnerKeyFor(target),
 			title: `${displayName} ${terminalTabs.length + 1}`,
-			cwd: "C:/Users/14012/preview-project",
-			shell: "powershell",
+			shell: shellName,
 			createdAt: Date.now(),
 		};
 		terminalTabs.push(tab);
@@ -459,6 +458,57 @@ export function createPreviewApi(): PiDesktopApi {
 			chooseExecutable: async () => null,
 			openProject: async () => undefined,
 		},
+		remoteHosts: {
+			// 预览模式没有主进程，也没有远端主机库：返回空目录而非报错，让列表页在静态预览下可渲染。
+			// 连接类方法一律报「功能未启用」——预览环境不存在真实 SSH，静默假装成功会误导 UI。
+			list: async () => ({ ok: true as const, status: "ready" as const, hosts: [] }),
+			connect: async (hostId) => ({ ok: false as const, hostId, code: "REMOTE_FEATURE_DISABLED" }),
+			disconnect: async (hostId) => ({ ok: false as const, hostId, code: "REMOTE_FEATURE_DISABLED" }),
+			diagnostics: async (hostId) => ({ ok: false as const, hostId, code: "REMOTE_FEATURE_DISABLED" }),
+			scanConfig: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			add: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			onStateChange: () => () => undefined,
+			diagnoseRepair: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			runRepair: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			answerRepair: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			onRepairConfirm: () => () => undefined,
+			enrollProject: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			answerProjectEnroll: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			onProjectEnrollConfirm: () => () => undefined,
+			answerProjectCreate: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			onProjectCreateConfirm: () => () => undefined,
+			listProject: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			readProjectFile: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			downloadProjectFile: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			uploadProjectFiles: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			uploadProjectFilesFromPaths: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			openProjectText: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			saveProjectText: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			statProjectEntry: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			createProjectFile: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			createProjectDirectory: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			renameProjectEntry: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			deleteProjectEntry: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			listProjectTrash: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			restoreProjectTrash: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			pruneProjectTrash: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			searchProject: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			rootStatus: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+		},
+		remoteSessions: {
+			scan: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			register: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			title: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+		},
+		remoteTrust: {
+			// 预览模式没有主进程、也没有主机 pin 事实：清单返回空表而非报错（静态预览下提示条/清单
+			// 仍可渲染成「未决策」），写操作一律报「功能未启用」——静默假装成功会误导 UI。
+			list: async () => ({ ok: true as const, entries: [] }),
+			set: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			clear: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+		},
+		// 预览模式没有主进程/远端 runtime：目录探测只报稳定码，不伪造模型列表。
+		probeRemoteModels: async () => ({ ok: false as const, code: "REMOTE_MODEL_PROBE_UNAVAILABLE" }),
 		projects: {
 			list: async () => projects,
 			add: async () => projects[0],
@@ -638,6 +688,8 @@ export function createPreviewApi(): PiDesktopApi {
 			readDshSubagentHistory: async () => ({ messages: [], hasMore: false }),
 			listSessionSubagents: async () => [],
 			listSessionTodo: async () => undefined,
+			// 预览 iframe 没有 runtime 也没有本机目录：与真实通道同形状的恒失败报告。
+			listModels: async () => ({ models: [], ok: false, reason: "cli-failed" as const, version: null, detail: "", source: "none" as const, at: Date.now() }),
 			listDshSkills: async () => [],
 			listDshOrphans: async () => [],
 			listDshForeignSessions: async () => [],
@@ -736,8 +788,11 @@ export function createPreviewApi(): PiDesktopApi {
 			deleteRecord: async () => true,
 			archiveRecord: async () => true,
 			unarchiveRecord: async () => true,
+			unarchiveRemoteRecord: async () => true,
 			listArchived: async () => [],
 			deleteArchivedRecord: async () => true,
+			deleteArchivedRemoteRecord: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			answerDeleteArchivedRemoteRecord: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
 			copyRecord: async (sessionId) => ({
 				cancelled: false,
 				targetSessionId: `${sessionId}:copy`,
@@ -992,6 +1047,27 @@ export function createPreviewApi(): PiDesktopApi {
 			import: async () => ({ results: [], imported: 0, failed: 0 }),
 		},
 		git: {
+			cancelRemoteReads: async () => {},
+			remoteSnapshot: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
+			remoteRepos: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
+			createRemoteBranch: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
+			switchRemoteBranch: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
+			discardRemote: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
+			recoveryList: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
+			recoveryRestore: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
+			recoveryDrop: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
+			syncFacts: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
+			fetchRemote: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
+			pushRemote: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
+			pullRemote: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
+			remoteLog: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
+			remoteCommitDetail: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
+			remoteRefs: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
+			remoteRefFileDiff: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
+			remoteCompare: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
+			initRemote: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
+			mutateRemoteIndex: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
+			commitRemote: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
 			listRepos: async () => [],
 			branches: async () => ({ current: "main", branches: ["main", "dev"] }),
 			checkout: async (_projectId, branch) => ({
@@ -1006,7 +1082,8 @@ export function createPreviewApi(): PiDesktopApi {
 			originalContent: async () => "",
 			worktreeList: async () => [],
 			worktreeCreate: async (_projectId, branchName) => ({
-				path: `/tmp/worktree/${branchName}`,
+				target: { projectId: `preview-worktree-${branchName}`, relativePath: "" },
+				displayPath: `/tmp/worktree/${branchName}`,
 				branch: branchName,
 			}),
 			worktreeRemove: async () => true,
@@ -1779,20 +1856,21 @@ export function createPreviewApi(): PiDesktopApi {
 			onChanged: () => () => {},
 		},
 		terminal: {
-			// 预览模式只按归属键过滤：agent 目标用 agentId，project 目标用项目 id
-			list: async (target) => terminalTabs.filter((tab) => tab.agentId === (target.kind === "agent" ? target.agentId : target.projectId)),
+			// 预览模式使用与主进程相同的 agent/project owner key
+			list: async (target) => terminalTabs.filter((tab) => tab.ownerKey === terminalOwnerKeyFor(target)),
 			ensure: async (target) => {
-				const key = target.kind === "agent" ? target.agentId : target.projectId;
-				const existing = terminalTabs.filter((tab) => tab.agentId === key);
+				const ownerKey = terminalOwnerKeyFor(target);
+				const existing = terminalTabs.filter((tab) => tab.ownerKey === ownerKey);
 				if (existing.length > 0) return existing;
-				return [await createTerminalTab(key)];
+				return [await createTerminalTab(target)];
 			},
-			create: (target) => createTerminalTab(target.kind === "agent" ? target.agentId : target.projectId),
+			create: (target, shell) => createTerminalTab(target, shell),
 			input: async (tabId, data) => {
 				for (const listener of terminalDataListeners) {
 					listener({ tabId, data });
 				}
 			},
+			acknowledge: async () => undefined,
 			resize: async () => undefined,
 			close: async (tabId) => {
 				const index = terminalTabs.findIndex((tab) => tab.id === tabId);

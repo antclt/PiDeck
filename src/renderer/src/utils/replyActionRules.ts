@@ -51,7 +51,7 @@ export function replySignalsForMessages(messages: readonly ChatMessage[]): Reply
 	return null;
 }
 
-/** 剥离围栏代码块与行内代码——与 commitIntentSuggestions 同判据：代码里的词不代表意图。 */
+/** 剥离围栏代码块与行内代码：代码里出现的词不代表用户意图。 */
 function stripCode(text: string): string {
 	return text.replace(/```[\s\S]*?```/g, " ").replace(/`[^`\n]*`/g, " ");
 }

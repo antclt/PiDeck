@@ -9,6 +9,15 @@ export const mainProcessZhCN = {
 	"diagnostic.processReconnectFailed": "Agent 进程意外退出，自动重连失败",
 	"diagnostic.runtimeError": "Agent 运行时发生错误。",
 	"diagnostic.agentStartFailed": "Pi RPC 启动失败。",
+	// 远端 pi 探测三个稳定码（P4.1）的用户可读版：都是「该主机环境没准备好」，必须给出可执行的下一步，
+	// 否则用户只看到一个裸码（来源见 main/remote/RemotePiDiscovery.ts 的 REMOTE_PI_DISCOVERY_CODES）。
+	"remote.piPathInvalid": "远端 pi 路径无效：登录 shell 解析出的 pi 入口不是可执行文件。请在该主机上确认 pi 已安装、且能从登录 shell 直接调用。",
+	"remote.piNodePathInvalid": "远端 node 路径无效：解析出的 node 解释器不可执行。请检查该主机的 node（含 nvm 等版本管理器）在登录 shell 中是否可用。",
+	"remote.piShellPathUnreadable": "读不到远端登录 shell 的 PATH（shell 配置读取失败）。请检查该主机的 shell 配置文件与权限。",
+	"remote.piNotFound": "该主机上找不到 pi（登录 shell 的 PATH 里没有，也没有已知安装位置）。请在该主机安装 pi，或确认登录 shell 里能直接调用 pi。",
+	"remote.piTooOld": "该主机的 pi 版本低于 PiDeck 支持的下限。请升级该主机的 pi 后重试。",
+	"remote.piVersionUnreadable": "读不到该主机 pi 的版本（命令没有返回可解析的版本号）。请在该主机手动执行 pi --version 确认。",
+	"remote.piVersionUnverified": "该主机 pi 的版本号无法核验（返回内容与预期形态不符）。请手动确认该主机的 pi 版本。",
 	// 两种成因：回退只作用于本次运行（不写入设置），设置开关则是每个新会话都会复现的持续成因。
 	"diagnostic.extensionsDisabledFallback": "扩展加载失败，本次运行已临时禁用扩展（不写入设置，「禁用扩展启动」开关保持原样），下次启动会重新尝试加载扩展。可在本会话把下面的错误信息发给 AI，协助排查扩展问题。",
 	"diagnostic.extensionsDisabledBySetting": "本次启动未加载任何扩展：设置 → 开发设置 的「禁用扩展启动」处于开启状态，todo/plan/ask 等扩展能力不可用。如非排查扩展问题需要，请关闭该开关后重启会话。",
@@ -96,8 +105,15 @@ export const mainProcessZhCN = {
 	"session.fileNotFound": "会话文件不存在，请刷新会话列表后重试。",
 	"session.copyDshUnsupported": "DSH 历史会话暂不支持直接复制，请打开会话后使用运行中 Agent 的「复制会话」。",
 	"session.exportFailed": "会话导出失败，请重试。",
+	// 远端会话导出（只读远端 + 本机写文件）：页脚与「上限命中」提示都由装配注入，模块内不硬编码文案。
+	"session.exportRemoteFooter": "由 PiDeck 导出（SSH 远端会话，历史按窗口分页读取）",
+	"session.exportRemotePartialNotice": "这是部分历史：远端会话按 128 KiB 窗口分页读取，本次导出已达上限（最多 {pages} 页 / {messages} 条消息），更早的消息未包含。需要完整历史请在该远端主机上导出。",
 	"session.inUseDeleteBlocked": "会话“{title}”正在使用中，请先关闭 Agent 后再删除。",
 	"session.stopBeforeDelete": "请先停止会话运行实例，再删除会话。",
+	// P4.5b：远端归档/取消归档要移动的是**那台机器上**的文件，而运行中的远端 pi 正在追加写它。
+	// 必须给出可执行下一步（先停 Agent），而不是只报一个码。
+	"session.remoteArchiveStopFirst": "该会话正在运行：请先停止它的 Agent（关闭 Agent）再归档，移动正被远端 pi 写入的会话文件会破坏历史。",
+	"session.remoteUnarchiveStopFirst": "该会话正在运行：请先停止它的 Agent（关闭 Agent）再恢复归档。",
 	"session.deleteFileBusy": "会话文件仍被占用，请先停止该会话后重试。",
 	"session.invalidArchivePath": "无效的归档会话路径。",
 	"session.newTitle": "新会话",
@@ -295,6 +311,13 @@ export const mainProcessEnUS: Record<MainProcessTranslationKey, string> = {
 	"diagnostic.processReconnectFailed": "The Agent process exited unexpectedly and could not reconnect",
 	"diagnostic.runtimeError": "The Agent runtime encountered an error.",
 	"diagnostic.agentStartFailed": "Pi RPC failed to start.",
+	"remote.piPathInvalid": "Remote pi path is invalid: the pi entry resolved from the login shell is not executable. Make sure pi is installed on that host and callable from a login shell.",
+	"remote.piNodePathInvalid": "Remote node path is invalid: the resolved node interpreter is not executable. Check that node (including nvm-style version managers) is available in the host login shell.",
+	"remote.piShellPathUnreadable": "Could not read the remote login shell PATH (shell config unreadable). Check the host shell config files and permissions.",
+	"remote.piNotFound": "pi was not found on that host (not on the login shell PATH and no known install location). Install pi there, or make sure it is callable from a login shell.",
+	"remote.piTooOld": "The pi version on that host is below the minimum PiDeck supports. Upgrade pi on that host and retry.",
+	"remote.piVersionUnreadable": "Could not read the pi version on that host (no parseable version in the output). Run pi --version on that host to check.",
+	"remote.piVersionUnverified": "The pi version on that host could not be verified (output shape differs from the expected form). Confirm the pi version manually.",
 	"diagnostic.extensionsDisabledFallback":
 		"Extensions failed to load, so extensions are disabled for this run only (nothing was written to settings — the “Disable extensions on start” switch stays as it is). Extensions will load again on the next start. Paste the error details below into this chat and ask the AI to help diagnose them.",
 	"diagnostic.extensionsDisabledBySetting": "No extension was loaded this run: “Disable extensions on start” is still enabled in Settings → Developer settings, so todo/plan/ask and other extension capabilities are unavailable. Turn that switch off and restart the session unless you are debugging extensions.",
@@ -382,8 +405,12 @@ export const mainProcessEnUS: Record<MainProcessTranslationKey, string> = {
 	"session.fileNotFound": "The session file no longer exists. Refresh the session list and try again.",
 	"session.copyDshUnsupported": 'DSH history sessions cannot be copied directly yet; open the session and use "Copy session" from the running agent\'s menu.',
 	"session.exportFailed": "Failed to export the session. Try again.",
+	"session.exportRemoteFooter": "Exported from PiDeck (SSH remote session, history read in bounded windows)",
+	"session.exportRemotePartialNotice": "Partial history: a remote session is read page by page in 128 KiB windows and this export hit the limit ({pages} pages / {messages} messages), so earlier messages are not included. Export on the remote host for the full history.",
 	"session.inUseDeleteBlocked": 'Session "{title}" is in use. Close its Agent before deleting it.',
 	"session.stopBeforeDelete": "Stop the session runtime before deleting the session.",
+	"session.remoteArchiveStopFirst": "This session is running: stop its Agent first, then archive — moving a file that the remote pi is still writing to would corrupt the history.",
+	"session.remoteUnarchiveStopFirst": "This session is running: stop its Agent first, then restore it from the archive.",
 	"session.deleteFileBusy": "The session file is still in use. Stop that session and try again.",
 	"session.invalidArchivePath": "Invalid archived session path.",
 	"session.newTitle": "New session",

@@ -5,6 +5,7 @@ import type { BusySendDelivery } from "../busySendDelivery";
 import type { SessionStatusPlacement } from "../sessionStatusPlacement";
 import { SESSION_TAB_MAX_WIDTH_DEFAULT } from "../sessionTabWidth";
 import { createDefaultExternalEditorSettings, type ExternalEditorSettings } from "./project";
+import type { RemoteProjectTrustRecord } from "./remoteTrust";
 import type { SecurityConfig } from "./security";
 import type { CustomThemeSnapshot } from "../customThemes";
 import { createDefaultSoundAlertSettings, type SoundAlertSettings } from "./soundAlert";
@@ -854,6 +855,20 @@ export type AppSettings = {
 	dshManualStopped?: boolean;
 
 	/**
+	 * 远端项目 trust 决策表（P4.4b）：每条记录 = 「某主机的某个远端项目根」被信任/拒绝过。
+	 *
+	 * 为什么放 settings.json：随配置备份一起走，与远端 pin（`ssh-host-keys/`）分开——pin 是密码学事实，
+	 * 决策是用户意图，两者生命周期不同（主机退役时决策随主机清理，见 `RemoteProjectTrustService.forgetHost`）。
+	 * key 用 `RemoteTrustKey.remoteTrustKey()` 的产物，三样材料（hostId / endpoint 身份 / 规范项目根）
+	 * 任一变化都会换 key，所以旧决策不会被自动继承（fail-closed，见 `docs/remote-trust-plan.md` §2）。
+	 *
+	 * 缺省/旧文件缺这一段 = 空表（自然兼容）；非数组或字段畸形的条目在读取时被丢弃。
+	 * **写入只走远端 trust 域**（`remote:trust-set` / `remote:trust-clear` → `SettingsStore.replaceRemoteProjectTrust`），
+	 * 渲染层的通用 `settings:update` 不得携带这一段（否则等于绕过 trust 域的边界校验）。
+	 */
+	remoteProjectTrust?: RemoteProjectTrustRecord[];
+
+	/**
 	 * DSH agent-team 实验预设（默认关）：开启后 DSH host 组合追加官方
 	 * @deepseek-ai/dsh-experimental-agent-team-profile（启用 Team 域 spawn_teammate
 	 * 等工具，并禁用 subagent/subagent_fork 工具——同一组合层后行覆盖先行）。
@@ -884,6 +899,18 @@ export type AppSettings = {
 	 * 删除工具后旧会话靠 acpSessionId 只读降级。缺省 undefined = 空表（无 ACP 工具）。
 	 */
 	acpTools?: AcpToolConfig[];
+	/**
+	 * ACP 回合 stall 静默判定阈值（ms）：回合内无任何 session/update、无挂起审批且无在途
+	 * 工具调用的全静默超过该值，先补发 session/cancel 再升级强杀。缺省 undefined = 代码内
+	 * 默认 90_000（acpTurnWatchdog.PROMPT_STALL_TIMEOUT_MS）。变更后新回合生效，不需要重启。
+	 */
+	acpPromptStallTimeoutMs?: number;
+	/**
+	 * ACP session/prompt 回合兑底超时（ms）：单回合硬上限，与是否持续产出无关，超时补发
+	 * session/cancel 收口。缺省 undefined = 代码内默认 600_000（AcpAgentManager.PROMPT_TURN_TIMEOUT_MS）。
+	 * 复杂任务单回合可超 10 分钟时按需调大。变更后新回合生效，不需要重启。
+	 */
+	acpPromptTurnTimeoutMs?: number;
 };
 
 /**

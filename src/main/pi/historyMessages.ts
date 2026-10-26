@@ -1,4 +1,5 @@
 import type { ChatMessage } from "../../shared/types";
+import { stripAnsiCsi as stripAnsi } from "../../shared/ansiText";
 import { stoppedMessageFingerprint, type RetainedMessageIdentity } from "./stoppedMessageIdentity";
 
 /**
@@ -13,10 +14,6 @@ import { stoppedMessageFingerprint, type RetainedMessageIdentity } from "./stopp
  * - user/assistant/system/error：role + text + thinking + 图片签名
  *   （图片签名 = mimeType + data 长度 + 首尾采样，避免大 base64 全量参与比较）。
  */
-function stripAnsi(text: string): string {
-	return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
-}
-
 function imageSignature(message: ChatMessage): string {
 	const images = message.images ?? [];
 	if (images.length === 0) return "";

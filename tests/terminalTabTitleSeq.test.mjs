@@ -31,16 +31,24 @@ function loadManager() {
 	return load("src/main/terminal/TerminalSessionManager.ts").TerminalSessionManager;
 }
 
+/**
+ * 合并后的 ctor 是 (getAgentCwd, emit, projectStore, getSettings)：项目 cwd 由 projectStore
+ * 按 projectId 解析（渲染层不再传路径），目标身份是 { kind: "project", projectId }。
+ */
 function newManager() {
 	const TerminalSessionManager = loadManager();
 	return new TerminalSessionManager(
-		() => "C:\\proj", // getCwd（agent 目标用）
+		() => "C:\\proj", // getAgentCwd（agent 目标用）
 		() => {}, // emit：batcher/exit 推送的空替身
+		{
+			// 项目夹具：完整 ProjectMetadata + path（isLocalProject 只认 locator 判定，这里没有 locator）
+			get: (projectId) => ({ id: projectId, name: `proj ${projectId}`, path: `C:\\${projectId}`, lastOpenedAt: 0 }),
+		},
 		() => ({}), // getSettings：无 WSL
 	);
 }
 
-const projectTarget = { kind: "project", cwd: "C:\\proj" };
+const projectTarget = { kind: "project", projectId: "p1" };
 
 test("标题序号单调递增：关闭一个 tab 后新建不与存活 tab 撞名", () => {
 	const manager = newManager();
@@ -79,12 +87,12 @@ test("closeAgent 清理 agent 桶序号：agent 重启后终端从 1 重新编�
 
 test("不同归属键的序号互不影响", () => {
 	const manager = newManager();
-	const projA = manager.create({ kind: "project", cwd: "C:\\proj" }, "pwsh");
-	const projB = manager.create({ kind: "project", cwd: "C:\\other" }, "pwsh");
+	const projA = manager.create({ kind: "project", projectId: "p1" }, "pwsh");
+	const projB = manager.create({ kind: "project", projectId: "p2" }, "pwsh");
 	assert.equal(projA.title, "pwsh 1");
 	assert.equal(projB.title, "pwsh 1", "每个归属键独立计数");
 
-	// 归一化后同目录（大小写/分隔符混写）仍是同一个桶
-	const projA2 = manager.create({ kind: "project", cwd: "c:\\PROJ/" }, "pwsh");
-	assert.equal(projA2.title, "pwsh 2", "同目录不同写法归一化后共享同一序号计数");
+	// 归属键是 projectId（dev 契约：ownerKey = project:${projectId}），同一项目重复创建仍共享同一计数
+	const projA2 = manager.create({ kind: "project", projectId: "p1" }, "pwsh");
+	assert.equal(projA2.title, "pwsh 2", "同项目共享同一序号计数");
 });

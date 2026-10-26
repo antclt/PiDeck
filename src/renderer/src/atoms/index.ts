@@ -14,6 +14,7 @@ export * from "./acp-atoms";
 export * from "./rpc-log-atoms";
 export * from "./announcement-atoms";
 export * from "./automation-atoms";
+export * from "./remote-trust-atoms";
 export * from "./agent-atoms";
 export * from "./favorites-atoms";
 export * from "./workspace-page-atoms";

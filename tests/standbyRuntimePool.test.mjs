@@ -213,6 +213,9 @@ function createClaimHarness(options = {}) {
 	const calls = { create: 0, claim: 0, claimInputs: [], ensureStandby: [], stop: [], attach: [], publish: 0 };
 	const catalog = {
 		get: (sessionId) => (sessionId === entry.id ? { ...entry } : undefined),
+		// 合并后的 activate 链路先读 locator 判「runtime 在哪台机器上」（dev 的远端运行时路由）；
+		// 这个 harness 的条目没有 locator ⇒ 本机草稿，与合并前行为一致。
+		getLocator: (sessionId) => (sessionId === entry.id ? entry.locator : undefined),
 		getRecord: (sessionId) => (sessionId === entry.id ? { ...entry, preview: "", messageCount: 0 } : undefined),
 		update: async (_sessionId, patch) => {
 			Object.assign(entry, patch);

@@ -1,35 +1,14 @@
-import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
+import path from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
-import ts from "typescript";
-import vm from "node:vm";
-
-const require = createRequire(import.meta.url);
-
-function transpile(filePath) {
-	return ts.transpileModule(readFileSync(filePath, "utf8"), {
-		compilerOptions: {
-			module: ts.ModuleKind.CommonJS,
-			target: ts.ScriptTarget.ES2022,
-		},
-	}).outputText;
-}
-
-function loadWslPaths() {
-	const sandbox = { exports: {}, require };
-	vm.runInNewContext(transpile("src/main/wsl/WslPaths.ts"), sandbox, { filename: "WslPaths.ts" });
-	return sandbox.exports;
-}
+import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
 
 /**
  * 沙箱加载 PiProcess：mock spawn 以捕获传入子进程的环境变量，mock locator 让 resolveCommand
  * 返回 "wsl://" 触发 WSL 分支，其余依赖（fs/extensions/logging）给最小桩，避免触碰真实文件系统。
  */
 function loadPiProcess(versionResult = { output: "0.82.1\n" }, options = { parkedExtensions: [] }) {
-	const wslPaths = loadWslPaths();
 	/** piExtensionFilter 收到的目录，用于验证 denied trust 不触碰项目资源。 */
 	const parkedDirectories = [];
 	/** spawn 收到的 env/args/windowsHide；mockSpawn 被调用时写入 */
@@ -74,76 +53,62 @@ function loadPiProcess(versionResult = { output: "0.82.1\n" }, options = { parke
 		// piLocator.test.mjs 覆盖，这里只用于驱动 PiProcess 的「超预算时跳过注入」分支。
 		resolveArgCharBudget: () => 26000,
 	};
-	const sandbox = {
-		Buffer,
-		console: { log() {}, warn() {}, error() {} },
-		exports: {},
-		process: { ...process, platform: "win32" },
-		require: (id) => {
-			if (id === "node:child_process") {
-				return {
-					spawn: mockSpawn,
-					// ensureVersionCheck 异步探针：返回 0.82.1（≥ 白名单版本门槛 0.60），
-					// 避免低版本触发白名单降级分支影响注入断言
-					execFile: (_cmd, _args, _opts, cb) => {
-						if (typeof cb !== "function") return;
-						queueMicrotask(() => {
-							if (versionResult.error) cb(versionResult.error, "");
-							else cb(null, versionResult.output);
-						});
-					},
-				};
-			}
-			if (id === "node:events") return require("node:events");
-			if (id === "node:os") return { homedir: () => "C:\\Users\\tester" };
-			if (id === "node:path") return require("node:path").win32;
-			if (id === "./PiRpcClient") return { PiRpcClient: MockRpcClient };
-			if (id === "./PiLocator") return { PiLocator: class {} };
-			if (id === "./piExtensionFilter") {
-				return {
-					parkBlockedExtensionsInDir: (directory) => {
-						parkedDirectories.push(directory);
-						return options.parkedExtensions;
-					},
-					unparkBlockedExtensions: () => {
-						unparkCalls += 1;
-					},
-				};
-			}
-			if (id === "../wsl/WslPaths") return wslPaths;
-			// PiProcess 的 spawn 失败归因模块：vm 沙箱按 tests/ 相对路径解析，需显式登记。
-			if (id === "./piSpawnFailure") return require("../src/main/pi/piSpawnFailure.ts");
-			// killProcessTree（stop() 在 Windows 上的整树强杀）：PiProcess 一直直接 import
-			// gitProcess，但本文件没跟上登记 → 整个文件报 MODULE_NOT_FOUND（既有缺口，与本次改动无关）。
-			if (id === "../git/gitProcess") return require("../src/main/git/gitProcess.ts");
-			if (id === "../extensions/builtInExtensions") {
+	const load = createTsSandbox({
+		stubs: {
+			"node:child_process": {
+				spawn: mockSpawn,
+				// ensureVersionCheck 异步探针：返回 0.82.1（≥ 白名单版本门槛 0.60），
+				// 避免低版本触发白名单降级分支影响注入断言
+				execFile: (_cmd, _args, _opts, cb) => {
+					if (typeof cb !== "function") return;
+					queueMicrotask(() => {
+						if (versionResult.error) cb(versionResult.error, "");
+						else cb(null, versionResult.output);
+					});
+				},
+			},
+			// 模拟 Windows 用户 home：停放扩展目录的断言（C:\\Users\\tester\.pi\agent\extensions）建在它上面。
+			"node:os": { homedir: () => "C:\\Users\\tester" },
+			// 本文件整个都在 Windows 语义下跑（路径拼接/盘符），所以 node:path 给 win32 实现。
+			"node:path": path.win32,
+			"./PiRpcClient": { PiRpcClient: MockRpcClient },
+			"./PiLocator": { PiLocator: class {} },
+			// 扩展停放/还原的行为替身：记录停放目录，并按用例返回预设的停放项。
+			"./piExtensionFilter": {
+				parkBlockedExtensionsInDir: (directory) => {
+					parkedDirectories.push(directory);
+					return options.parkedExtensions;
+				},
+				unparkBlockedExtensions: () => {
+					unparkCalls += 1;
+				},
+			},
+			"../extensions/builtInExtensions": {
 				// 真实语义（非 no-op）：noExtensions 或空列表原样返回，否则追加 --extension <path>。
-				// 曾是 (args) => args 的 no-op，掩盖了内置扩展注入；A5 契约测试要求真实行为。
-				return {
-					appendBuiltInExtensionArgs: (args, extensionPaths, options = {}) => {
-						if (options.noExtensions || !extensionPaths || extensionPaths.length === 0) return [...args];
-						const next = [...args];
-						for (const extensionPath of extensionPaths) {
-							const trimmed = extensionPath?.trim();
-							if (trimmed) next.push("--extension", trimmed);
-						}
-						return next;
-					},
-				};
-			}
-			if (id === "../extensions/extensionVersionGate") {
-				return loadTsCommonJs("src/main/extensions/extensionVersionGate.ts");
-			}
-			if (id === "../logging/sharedLogger") return { getAppLogger: () => undefined };
-			if (id === "../sessions/sessionProxyPolicy") {
-				return { applyPiProxyMode: (env) => env };
-			}
-			return require(id);
+				appendBuiltInExtensionArgs: (args, extensionPaths, options = {}) => {
+					if (options.noExtensions || !extensionPaths || extensionPaths.length === 0) return [...args];
+					const next = [...args];
+					for (const extensionPath of extensionPaths) {
+						const trimmed = extensionPath?.trim();
+						if (trimmed) next.push("--extension", trimmed);
+					}
+					return next;
+				},
+			},
+			// 日志共享实例未注册时 getAppLogger 返回 undefined，PiProcess 埋点静默跳过。
+			"../logging/sharedLogger": { getAppLogger: () => undefined },
+			"../sessions/sessionProxyPolicy": { applyPiProxyMode: (env) => env },
 		},
-	};
-	vm.runInNewContext(transpile("src/main/pi/PiProcess.ts"), sandbox, { filename: "PiProcess.ts" });
+		// 本文件整篇都是 Windows 场景（cmd.exe 隐藏控制台开关、盘符/UNC 转换）。
+		globals: {
+			console: { log() {}, warn() {}, error() {} },
+			process: { ...process, platform: "win32" },
+		},
+	});
+	// 未打桩的相对 import（LocalPiRuntimeLauncher、PiSpawnHandle、PiRpcClient 的同层依赖、
+	// piSpawnFailure、WslPaths、extensionVersionGate、gitProcess…）由加载器按**源文件目录**解析。
 	return {
-		PiProcess: sandbox.exports.PiProcess,
+		PiProcess: load("src/main/pi/PiProcess.ts").PiProcess,
 		mockLocator,
 		getCaptured: () => captured,
 		getParkedDirectories: () => parkedDirectories,
@@ -206,6 +171,44 @@ test("无禁用技能（resolver 返回 null）时不注入 --no-skills/--skill"
 	assert.ok(captured?.args, "spawn 应被调用");
 	assert.ok(!captured.args.includes("--no-skills"), "无禁用项时不应注入 --no-skills");
 	assert.ok(!captured.args.includes("--skill"), "无禁用项时不应注入 --skill");
+});
+
+test("resolver failure before spawn restores temporarily parked extensions", async () => {
+	// 回归：内置扩展 resolver 在 spawn 前抛错时，已停放的 codeisland 必须还原，
+	// 否则一次失败的启动会让扩展永久消失（exit 回调不会触发）。
+	const parked = [
+		{
+			dir: "C:\\Users\\tester\\.pi\\agent\\extensions",
+			name: "codeisland.ts",
+			originalPath: "C:\\Users\\tester\\.pi\\agent\\extensions\\codeisland.ts",
+			parkedPath: "C:\\Users\\tester\\.pi\\agent\\extensions\\codeisland.ts.pideck-disabled",
+		},
+	];
+	const { PiProcess, mockLocator, getCaptured, getUnparkCalls } = loadPiProcess({ output: "0.82.1\n" }, { parkedExtensions: parked });
+	const proc = new PiProcess("C:\\proj", { wslEnabled: true, wslDistro: "Ubuntu-24.04", wslUser: "root" }, mockLocator, {
+		resolveBuiltInExtensionPaths: () => {
+			throw new Error("resolver failed");
+		},
+	});
+	await assert.rejects(proc.start(undefined, undefined, true), /resolver failed/);
+	assert.equal(getCaptured(), null);
+	assert.equal(getUnparkCalls(), 1);
+});
+
+test("--no-approve 让内置扩展 resolver 排除项目层，且不触碰项目扩展目录", async () => {
+	// 拒绝 trust 时只允许访问全局扩展目录；内置扩展注入也必须按 includeProjectResources=false 取。
+	const { PiProcess, mockLocator, getCaptured, getParkedDirectories } = loadPiProcess();
+	const observed = [];
+	const proc = new PiProcess("C:\\proj", { wslEnabled: true, wslDistro: "Ubuntu-24.04", wslUser: "root" }, mockLocator, {
+		resolveBuiltInExtensionPaths: (_settings, includeProjectResources) => {
+			observed.push(includeProjectResources);
+			return [];
+		},
+	});
+	await proc.start(undefined, "no-approve", true);
+	assert.ok(getCaptured()?.args?.includes("--no-approve"));
+	assert.deepEqual(getParkedDirectories(), ["C:\\Users\\tester\\.pi\\agent\\extensions"]);
+	assert.deepEqual(observed, [false]);
 });
 
 test("拒绝 trust 时版本探测失败会阻止 spawn", async () => {

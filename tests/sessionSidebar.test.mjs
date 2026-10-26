@@ -209,8 +209,14 @@ test("session context menu exposes archive and restores refresh the manager proj
 	assert.match(components, /onSelect=\{props\.onArchiveSession\}/);
 	assert.match(content, /actions\.sessions\.archive\(menu\.projectId, menuSession\)/);
 	assert.match(content, /actions\.sessions\.unarchive\(archived, managerProject\.id\)/);
-	assert.match(app, /unarchiveSidebarSession\(archivedPath: string, projectId = activeProjectId\)/);
-	assert.match(appWiring, /unarchiveSidebarSession\(archived\.filePath, projectId\)/);
+	// 恢复入口现在收**归档条目**（不是裸路径）：远端归档没有本机路径，必须由条目里的
+	// `archivedRemoteSessionId` 决定走哪条通道（`restoreArchivedPiSession` 是唯一分流点）。
+	// 归档/删除族已迁至 hooks/sidebar/useSidebarArchiveActions.ts（域 owner），App 只保留 action port
+	// 接线；恢复实现可落在 hook（dev 结构）或 App 包装，但形状必须是「收条目 + 经唯一分流点」。
+	const archiveSource = `${app}\n${appWiring}`;
+	assert.match(archiveSource, /unarchiveSidebarSession\(archived: ArchivedPiSession, projectId = activeProjectId\)/);
+	assert.match(archiveSource, /restoreArchivedPiSession\(archived, api\.sessions\)/);
+	assert.match(appWiring, /await unarchiveSidebarSession\(archived, projectId\)/);
 	assert.match(app, /archivedSessionToastMessage\(session\)/);
 	assert.match(app, /ARCHIVED_SESSION_TOAST_MS/);
 });
@@ -359,9 +365,12 @@ test("Projects section header provides batch collapse and refresh-all actions", 
 	assert.match(projectTree, /anyWorkspaceExpanded/);
 	assert.match(projectTree, /title=\{anyWorkspaceExpanded \? t\("app\.projectCollapseAll"\) : t\("app\.projectExpandAll"\)\}/);
 	assert.match(projectTree, /<ChevronsDownUp size=\{14\} aria-hidden="true" \/>/);
-	// 显式「+ 添加项目」按钮外露（最常用入口）
-	assert.match(projectTree, /aria-label=\{t\("app\.addProject"\)\}/);
+	// 显式「+ 添加项目」按钮外露（最常用入口）：本地/远端两个真实入口收进同一个菜单触发器，
+	// 触发器仍带「添加项目」的 aria-label（已抽到 AddProjectMenu），侧栏仍经 action port 回调本地添加。
+	assert.match(projectTree, /<AddProjectMenu onAddLocal=\{\(\) => void props\.actions\.projects\.add\(\)\} \/>/);
 	assert.match(projectTree, /void props\.actions\.projects\.add\(\)/);
+	const addProjectMenu = readFileSync("src/renderer/src/components/sidebar/AddProjectMenu.tsx", "utf8");
+	assert.match(addProjectMenu, /aria-label=\{t\("app\.addProject"\)\}/);
 	// 目录存在性重扫是低频维护动作：放入 ⋯ 菜单，并经窄 action port 回到 App/hook。
 	assert.match(projectTree, /<DropdownMenuItem onSelect=\{\(\) => void props\.actions\.projects\.refreshAll\(\)\}>/);
 	assert.match(projectTree, /t\("app\.projectRefreshAll"\)/);
@@ -398,7 +407,8 @@ test("ProjectTree shows the project directory name like the dev reference", () =
 	assert.match(projectTree, /import \{ displayProjectDirectoryName, isChatProject \} from "\.\.\/\.\.\/rendererUtils"/);
 	assert.match(projectTree, /const projectDirectoryName = displayProjectDirectoryName\(project\)/);
 	assert.match(rendererUtils, /export function displayProjectDirectoryName\(project: Project\)/);
-	assert.match(rendererUtils, /project\.path\.replace\(/);
+	// 显示名解析按 location 取路径：本机用 project.path，远端用 locator.remotePath（远端没有本机 path）。
+	assert.match(rendererUtils, /isLocalProject\(project\) \? project\.path : project\.locator\.remotePath/);
 	// 悬浮路径气泡已移除（仅能展示不能复制，且 bug 多）；项目行直接渲染目录名。
 	assert.doesNotMatch(projectTree, /<PathTooltip/);
 	assert.doesNotMatch(projectTree, /PathTooltip/);

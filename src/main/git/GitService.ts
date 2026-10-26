@@ -6,9 +6,10 @@ import { REF_BASE } from "../rewind/checkpointConstants";
 import type { RunGitOptions } from "./gitProcess";
 import { execGit, GitOutputOverflowError, runGitCommand } from "./gitRun";
 import { resolveWslGitTarget, toHostGitOutputPath } from "./gitWsl";
-import type { GitBranchInfo, CommitDetail, CommitEntry, GitRef, BranchDiffResult, GitChangedFile, GitFileStatus, GitCommitFileDiff, GitResourceGroupType, GitWorkspaceFileDiff, GitAheadBehind } from "../../shared/types";
+import { parsePorcelainStatus } from "./gitStatusParser";
+import type { GitBranchInfo, CommitEntry, GitRef, GitFileStatus, GitResourceGroupType, GitAheadBehind } from "../../shared/types";
 import { GitStatus } from "../../shared/types";
-import type { GitResource, GitResourceGroups } from "../../shared/types";
+import type { LocalGitBranchDiffResult, LocalGitChangedFile, LocalGitCommitDetail, LocalGitCommitFileDiff, LocalGitResource, LocalGitResourceGroups, LocalGitWorkspaceFileDiff, LocalGitDiscardResource } from "./localGitTypes";
 
 const GIT_MUTATION_TIMEOUT_MS = 30_000;
 
@@ -51,12 +52,12 @@ export class GitService {
 	}
 
 	/** 只缓存轻量 commit 元数据/文件清单；正文永不缓存，且 LRU 总预算不超过 2MB。 */
-	private readonly commitDetailCache = new Map<string, { detail: CommitDetail; bytes: number }>();
+	private readonly commitDetailCache = new Map<string, { detail: LocalGitCommitDetail; bytes: number }>();
 	private readonly commitDetailCacheLimit = 16;
 	private readonly commitDetailCacheByteLimit = 2 * 1024 * 1024;
 	private commitDetailCacheBytes = 0;
 
-	private estimateCommitDetailBytes(detail: CommitDetail): number {
+	private estimateCommitDetailBytes(detail: LocalGitCommitDetail): number {
 		const commit = detail.commit;
 		const text = [commit.hash, commit.shortHash, commit.authorName, commit.authorEmail, commit.message, commit.fullMessage ?? "", ...commit.parents, ...commit.refNames];
 		for (const file of detail.files) text.push(file.path, file.originalPath ?? "");
@@ -64,7 +65,7 @@ export class GitService {
 		return text.reduce((total, value) => total + value.length * 2, 0) + detail.files.length * 64;
 	}
 
-	private readCommitDetailCache(key: string): CommitDetail | undefined {
+	private readCommitDetailCache(key: string): LocalGitCommitDetail | undefined {
 		const cached = this.commitDetailCache.get(key);
 		if (!cached) return undefined;
 		this.commitDetailCache.delete(key);
@@ -72,7 +73,7 @@ export class GitService {
 		return cached.detail;
 	}
 
-	private writeCommitDetailCache(key: string, detail: CommitDetail): void {
+	private writeCommitDetailCache(key: string, detail: LocalGitCommitDetail): void {
 		const bytes = this.estimateCommitDetailBytes(detail);
 		if (bytes > this.commitDetailCacheByteLimit) return;
 		const previous = this.commitDetailCache.get(key);
@@ -112,6 +113,10 @@ export class GitService {
 		} catch {
 			return false;
 		}
+	}
+
+	async init(cwd: string): Promise<void> {
+		await this.git(["init"], { cwd, timeoutMs: GIT_MUTATION_TIMEOUT_MS });
 	}
 
 	async getBranches(cwd: string): Promise<GitBranchInfo> {
@@ -197,7 +202,7 @@ export class GitService {
 	}
 
 	private async getStatusContext(cwd: string): Promise<{
-		groups: GitResourceGroups;
+		groups: LocalGitResourceGroups;
 		repoRoot: string;
 		inputProjectRoot: string;
 		projectRoot: string;
@@ -228,7 +233,7 @@ export class GitService {
 				},
 			];
 		});
-		const groups: GitResourceGroups = { merge: [], index: [], workingTree: [], untracked: [] };
+		const groups: LocalGitResourceGroups = { merge: [], index: [], workingTree: [], untracked: [] };
 		for (const resource of resources) {
 			if (resource.status === GitStatus.UNTRACKED) groups.untracked.push(resource);
 			else if (resource.status === GitStatus.INDEX_MODIFIED || resource.status === GitStatus.INDEX_ADDED || resource.status === GitStatus.INDEX_DELETED || resource.status === GitStatus.INDEX_RENAMED || resource.status === GitStatus.INDEX_COPIED || resource.status === GitStatus.INDEX_TYPE_CHANGED)
@@ -250,7 +255,7 @@ export class GitService {
 
 	/** 获取 Git 工作区状态（VS Code 风格分组）。
 	 * 非 Git 仓库和 Git 未安装的错误向上抛出，让渲染层展示初始化提示或安装引导。 */
-	async getStatus(cwd: string): Promise<GitResourceGroups> {
+	async getStatus(cwd: string): Promise<LocalGitResourceGroups> {
 		try {
 			return (await this.getStatusContext(cwd)).groups;
 		} catch (err) {
@@ -269,7 +274,7 @@ export class GitService {
 	 * 该方法只在点击资源行时执行，并先用最新 status 验证资源仍属于请求组；
 	 * 主进程同时按编辑器文件上限拒绝大对象，避免 renderer 和 Monaco 获得超大字符串。
 	 */
-	async getWorkspaceFileDiff(cwd: string, group: GitResourceGroupType, filePath: string, maxBytes: number): Promise<GitWorkspaceFileDiff | null> {
+	async getWorkspaceFileDiff(cwd: string, group: GitResourceGroupType, filePath: string, maxBytes: number): Promise<LocalGitWorkspaceFileDiff | null> {
 		try {
 			if (group !== "merge" && group !== "index" && group !== "workingTree" && group !== "untracked") {
 				return null;
@@ -494,7 +499,7 @@ export class GitService {
 	 * 对比两个分支，返回变更文件列表 + ahead/behind 计数。
 	 * 复刻 VS Code 的 diffBetween()——使用三点语法 ... 做 symmetric difference。
 	 */
-	async compareBranches(cwd: string, base: string, target: string): Promise<BranchDiffResult> {
+	async compareBranches(cwd: string, base: string, target: string): Promise<LocalGitBranchDiffResult> {
 		try {
 			const [baseHash, targetHash] = await Promise.all([this.resolveCommitHash(cwd, base), this.resolveCommitHash(cwd, target)]);
 			if (!baseHash || !targetHash) return { files: [], ahead: 0, behind: 0 };
@@ -540,7 +545,7 @@ export class GitService {
 	 * Merge commit 与 VS Code SCM History 一样只比较第一父提交；根提交通过
 	 * diff-tree --root 与空树比较，避免为根提交伪造不存在的 parent ref。
 	 */
-	async getCommitDetail(cwd: string, ref: string): Promise<CommitDetail | null> {
+	async getCommitDetail(cwd: string, ref: string): Promise<LocalGitCommitDetail | null> {
 		const COMMIT_FORMAT = "%H%n%aN%n%aE%n%at%n%ct%n%P%n%D%n%B";
 		try {
 			// Graph 已提供完整 SHA 时直接使用；其他 renderer ref 必须先安全解析，不能进入 git 选项区。
@@ -576,7 +581,7 @@ export class GitService {
 	 * 文件路径必须先命中 getCommitDetail 返回的变更列表，避免调用方读取该提交中的任意路径；
 	 * 根提交使用 Git 空树作为父版本，新增和删除文件缺失的一侧自然返回空内容。
 	 */
-	async getCommitFileDiff(cwd: string, ref: string, filePath: string, originalPath?: string, maxBytes = 5 * 1024 * 1024): Promise<GitCommitFileDiff | null> {
+	async getCommitFileDiff(cwd: string, ref: string, filePath: string, originalPath?: string, maxBytes = 5 * 1024 * 1024): Promise<LocalGitCommitFileDiff | null> {
 		try {
 			const detail = await this.getCommitDetail(cwd, ref);
 			if (!detail) return null;
@@ -725,7 +730,7 @@ export class GitService {
 	 * 先用一次状态快照校验分组和路径，再合并 tracked restore；未跟踪文件逐个进回收站，
 	 * 这样既保持单文件回滚语义，也避免渲染层并发发送多个相互覆盖的 Git 操作。
 	 */
-	async discardFiles(cwd: string, resources: Array<{ group: "workingTree" | "untracked"; path: string }>): Promise<void> {
+	async discardFiles(cwd: string, resources: LocalGitDiscardResource[]): Promise<void> {
 		if (resources.length === 0) return;
 		const { groups, repoRoot } = await this.getStatusContext(cwd);
 		const samePath = (left: string, right: string) => (process.platform === "win32" ? left.toLocaleLowerCase() === right.toLocaleLowerCase() : left === right);
@@ -980,8 +985,8 @@ function parseRefs(data: string): GitRef[] {
 	return refs;
 }
 
-function parseDiffNameStatus(raw: string): GitChangedFile[] {
-	const files: GitChangedFile[] = [];
+function parseDiffNameStatus(raw: string): LocalGitChangedFile[] {
+	const files: LocalGitChangedFile[] = [];
 	const fields = raw.split("\0");
 	for (let index = 0; index < fields.length - 1; ) {
 		const statusToken = fields[index++] ?? "";
@@ -998,85 +1003,4 @@ function parseDiffNameStatus(raw: string): GitChangedFile[] {
 		});
 	}
 	return files;
-}
-
-/**
- * 解析 git status --porcelain -z 输出，映射为 VS Code Status 枚举。
- * 复刻 VS Code repository.ts Resource 类的状态分类逻辑。
- */
-function parsePorcelainStatus(raw: string): GitResource[] {
-	const result: GitResource[] = [];
-	const fields = raw.split("\0").filter(Boolean);
-
-	for (let index = 0; index < fields.length; ) {
-		const line = fields[index++]!;
-		if (line.length < 3) continue;
-
-		const x = line[0]!; // index status
-		const y = line[1]!; // working tree status
-		const filePath = line.slice(3);
-		// porcelain -z 的 rename/copy 顺序是“当前路径\0原路径\0”，与普通可读格式相反。
-		const oldPath = x === "R" || x === "C" || y === "R" || y === "C" ? fields[index++] : undefined;
-		const push = (status: GitStatus, letter: string, includeOldPath = false) => {
-			result.push({
-				path: filePath,
-				status,
-				letter,
-				...(includeOldPath && oldPath ? { oldPath } : {}),
-			});
-		};
-
-		// 未解决冲突是一条独立资源，不能再同时拆入 index/workingTree。
-		if (x === "U" && y === "U") {
-			push(GitStatus.BOTH_MODIFIED, "!");
-			continue;
-		}
-		if (x === "A" && y === "A") {
-			push(GitStatus.BOTH_ADDED, "!");
-			continue;
-		}
-		if (x === "D" && y === "D") {
-			push(GitStatus.BOTH_DELETED, "!");
-			continue;
-		}
-		if (x === "A" && y === "U") {
-			push(GitStatus.ADDED_BY_US, "!");
-			continue;
-		}
-		if (x === "U" && y === "A") {
-			push(GitStatus.ADDED_BY_THEM, "!");
-			continue;
-		}
-		if (x === "D" && y === "U") {
-			push(GitStatus.DELETED_BY_US, "!");
-			continue;
-		}
-		if (x === "U" && y === "D") {
-			push(GitStatus.DELETED_BY_THEM, "!");
-			continue;
-		}
-		if (x === "?" && y === "?") {
-			push(GitStatus.UNTRACKED, "U");
-			continue;
-		}
-		if (x === "!" && y === "!") {
-			push(GitStatus.IGNORED, "I");
-			continue;
-		}
-
-		// X 与 Y 必须分别生成资源：同一文件可以同时含“已暂存”和“未暂存”修改。
-		if (x === "M") push(GitStatus.INDEX_MODIFIED, "M");
-		else if (x === "A") push(GitStatus.INDEX_ADDED, "A");
-		else if (x === "D") push(GitStatus.INDEX_DELETED, "D");
-		else if (x === "R") push(GitStatus.INDEX_RENAMED, "R", true);
-		else if (x === "C") push(GitStatus.INDEX_COPIED, "C", true);
-		else if (x === "T") push(GitStatus.INDEX_TYPE_CHANGED, "T");
-
-		if (y === "M") push(GitStatus.MODIFIED, "M");
-		else if (y === "D") push(GitStatus.DELETED, "D");
-		else if (y === "R" || y === "C") push(GitStatus.INTENT_TO_RENAME, "R", true);
-		else if (y === "T") push(GitStatus.TYPE_CHANGED, "T");
-	}
-
-	return result;
 }

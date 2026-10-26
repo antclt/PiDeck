@@ -10,7 +10,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { open, readFile, stat } from "node:fs/promises";
-import type { CommitEntry, FileTreeNode, GitBranchInfo, GitResourceGroups, GitWorkspaceFileDiff, PiExtensionListResult, PiExtensionSummary, PiSkillListResult, PiSkillSummary, Project, YaoPromptDetailResult, YaoPromptListResult } from "../../shared/types";
+import type { CommitEntry, FileTreeNode, GitBranchInfo, PiExtensionListResult, PiExtensionSummary, PiSkillListResult, PiSkillSummary, Project, YaoPromptDetailResult, YaoPromptListResult } from "../../shared/types";
+// GitService 是本地实现：它返回的是「文件系统绑定」形状（绝对路径，没有渲染层的 ProjectFileTarget），
+// 由 gitIpc 在 IPC 边界装饰成 shared 的 GitResource/Target。Web 路由同样直接吃本地形状——
+// 这里不能声明成 GitResourceGroups，否则类型在说谎（运行时根本没有 target/displayPath）。
+import type { LocalGitResourceGroups, LocalGitWorkspaceFileDiff } from "../git/localGitTypes";
 import { assertProjectFileReadPath, FILE_OUTSIDE_PROJECT_ERROR } from "../files/projectFileAccess";
 
 export type WebWorkspaceRoutesDeps = {
@@ -20,8 +24,8 @@ export type WebWorkspaceRoutesDeps = {
 	git?: {
 		isGitRepo: (cwd: string) => Promise<boolean>;
 		getBranches: (cwd: string) => Promise<GitBranchInfo>;
-		getStatus: (cwd: string) => Promise<GitResourceGroups>;
-		getWorkspaceFileDiff: (cwd: string, group: "merge" | "index" | "workingTree" | "untracked", filePath: string, maxBytes: number) => Promise<GitWorkspaceFileDiff | null>;
+		getStatus: (cwd: string) => Promise<LocalGitResourceGroups>;
+		getWorkspaceFileDiff: (cwd: string, group: "merge" | "index" | "workingTree" | "untracked", filePath: string, maxBytes: number) => Promise<LocalGitWorkspaceFileDiff | null>;
 		getCommitLog: (cwd: string, options?: { maxEntries?: number }) => Promise<CommitEntry[]>;
 	};
 	/** 文件树能力（FileSystemService 注入；缺省时 files 路由返回 503）。 */

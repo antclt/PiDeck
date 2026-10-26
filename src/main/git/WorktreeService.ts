@@ -4,7 +4,7 @@ import { trashPath } from "../fs/trash";
 import { execGit } from "./gitRun";
 import { resolveWslGitTarget, toHostGitOutputPath, type WslGitTarget } from "./gitWsl";
 import { worktreeSlugify } from "../../shared/worktreeSlug";
-import type { WorktreeEntry } from "../../shared/types";
+import type { LocalWorktreeEntry } from "./localGitTypes";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 
 type WorktreeCopy = (key: MainProcessTranslationKey, params?: Record<string, string | number>) => string;
@@ -28,7 +28,7 @@ export class WorktreeService {
 	 * 会作为普通条目出现在列表中；若不排除，用户误点删除会整目录 rm -rf（曾导致
 	 * 主工作区 40G 数据丢失）。
 	 */
-	async list(projectPath: string): Promise<WorktreeEntry[]> {
+	async list(projectPath: string): Promise<LocalWorktreeEntry[]> {
 		try {
 			// WSL 项目：git 在发行版内执行，porcelain 里的路径是 Linux 形态 → 回译成宿主形态。
 			const target = resolveWslGitTarget(projectPath);
@@ -170,13 +170,13 @@ export class WorktreeService {
 	 * 过滤掉主工作区（rootPath，由 getMainWorktree 推导的仓库根），只返回其他 worktree。
 	 * WSL 项目下 porcelain 里的路径是发行版内的 Linux 路径，先回译成宿主形态再比较/返回。
 	 */
-	private parseWorktreeList(stdout: string, rootPath: string, target: WslGitTarget | null): WorktreeEntry[] {
-		const entries: WorktreeEntry[] = [];
+	private parseWorktreeList(stdout: string, rootPath: string, target: WslGitTarget | null): LocalWorktreeEntry[] {
+		const entries: LocalWorktreeEntry[] = [];
 		// 规范化路径用于比较（Windows 忽略大小写）
 		const normalizedRoot = this.canonicalSync(rootPath);
 
 		const lines = stdout.split(/\r?\n/);
-		let current: Partial<WorktreeEntry> | null = null;
+		let current: Partial<LocalWorktreeEntry> | null = null;
 
 		for (const line of lines) {
 			const trimmed = line.trim();

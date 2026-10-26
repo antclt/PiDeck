@@ -22,13 +22,9 @@ import type { ChatMessage } from "../../../../../shared/types";
 import type { TurnDisplayItem } from "./types";
 // 显式 .ts 扩展名兼容 Node type stripping 直接加载的单测。
 import { cleanAnswerText } from "./answerText.ts";
+import { stripAnsiCsi as stripAnsi } from "../../../../../shared/ansiText.ts";
 
-/* 思考步骤只去控制码，不应用正文的思考标签过滤。 */
-const ANSI_RE = /\x1b\[[0-9;]*[a-zA-Z]/g;
-
-function stripAnsi(text: string): string {
-	return text.replace(ANSI_RE, "");
-}
+/* 思考步骤只去控制码，不应用正文的思考标签过滤（下面 stripAnsi 即该口径）。 */
 
 /** 重试状态消息判定（内联副本）：与 timelineFailureNotice.RETRY_STATUS_KEYS 同口径。
  * 本模块被 node 单测直接加载，不能引入带 React/i18n 依赖的运行时模块。 */

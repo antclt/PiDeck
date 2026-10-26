@@ -4,7 +4,7 @@ import { Button } from "../../ui-shadcn/button";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "../../ui-shadcn/context-menu";
 import { getFileIconColor, getFileIconSeti } from "../../../fileIcons";
 import { t } from "../../../i18n";
-import { GitStatus, type GitFileStatus, type GitResource, type GitResourceGroupType } from "../../../../../shared/types";
+import { GitStatus, type GitDiscardResource, type GitFileStatus, type GitResource, type GitResourceGroupType, type ProjectFileTarget } from "../../../../../shared/types";
 import { buildChangeTreeRows, toRelativeChangePath, type GitChangeViewMode } from "./changeTree";
 
 /** 树形视图每级缩进（px）；与文件抽屉的树保持同一节奏 */
@@ -13,7 +13,6 @@ export const CHANGE_TREE_INDENT_PX = 14;
 const FILE_ROW_BASE_PADDING = 12;
 /** 目录行的基准左内边距，与扁平视图的 px-2 保持一致 */
 const DIR_ROW_BASE_PADDING = 8;
-
 export function fileNameOnly(path: string): string {
 	return path.split(/[/\\]/).pop() ?? path;
 }
@@ -65,20 +64,26 @@ export function getCollapsibleChangeDirs(resources: GitResource[], projectRoot?:
 export const FileTree = memo(function FileTree(props: {
 	resources: GitResource[];
 	groupType: GitResourceGroupType;
-	stageFile?: (path: string) => void;
+	/** A read-only capability omits mutation controls instead of rendering no-op actions. */
+	readOnly?: boolean;
+	/** Managed remote index capability: no directory, discard or delete actions even if callbacks exist. */
+	indexActionsOnly?: boolean;
+	stageFile?: (target: ProjectFileTarget) => void;
 	/** 目录级暂存只传当前目录资源，避免影响其他目录。 */
-	stageDir?: (paths: string[]) => void;
-	unstageFile?: (path: string) => void;
-	discardFile?: (path: string, group: "workingTree" | "untracked") => void;
+	stageDir?: (targets: ProjectFileTarget[]) => void;
+	unstageFile?: (target: ProjectFileTarget) => void;
+	discardFile?: (target: ProjectFileTarget, group: "workingTree" | "untracked") => void;
 	/** 目录级回滚携带资源组，主进程可在一次状态快照中安全处理混合资源。 */
-	discardDir?: (resources: Array<{ path: string; group: "workingTree" | "untracked" }>, label: string) => void;
+	discardDir?: (resources: GitDiscardResource[], label: string) => void;
 	/** 右键菜单“删除文件”入口；未提供时不启用右键菜单 */
-	deleteFile?: (path: string) => void;
+	deleteFile?: (target: ProjectFileTarget) => void;
 	/** 行内“打开文件”按钮：打开编辑器而非 diff 视图 */
-	onOpenFile?: (path: string) => void;
+	onOpenFile?: (target: ProjectFileTarget) => void;
+	/** 已暂存文件路径集合：Changes 组中这些文件不再显示 stage/rollback 按钮（VS Code 语义） */
+	stagedPaths?: ReadonlySet<string>;
 	mutating: boolean;
-	onOpenWorkspaceFileDiff: (group: GitResourceGroupType, path: string) => void;
-	/** 项目根目录路径，用于显示相对路径 */
+	onOpenWorkspaceFileDiff: (group: GitResourceGroupType, target: ProjectFileTarget) => void;
+	/** 项目根目录路径，用于 flatten 时把绝对路径显示成相对路径（远端资源已是相对 path） */
 	projectRoot?: string;
 	/** 受控：已折叠目录集合（与父级「收起/展开全部」共享） */
 	collapsedDirs: Set<string>;
@@ -104,34 +109,38 @@ export const FileTree = memo(function FileTree(props: {
 			disabled?: boolean;
 			run: () => void;
 		}> = [];
-		if (props.groupType === "index") {
+		// 远端 index-only 能力只给「取消暂存」，不给目录/丢弃/删除动作；readOnly 连动作用都不给。
+		if (!props.readOnly && props.groupType === "index" && (!props.indexActionsOnly || props.unstageFile)) {
 			actions.push({
 				label: t("git.unstage"),
 				kind: "unstage",
 				disabled: props.mutating,
-				run: () => props.unstageFile?.(r.path),
+				run: () => props.unstageFile?.(r.target),
 			});
-		} else if (props.groupType === "workingTree" || props.groupType === "untracked") {
-			// Changes 组只含工作区侧资源（见 collectUnstagedResources），每行都能再次暂存/回滚
-			actions.push({
-				label: t("git.stage"),
-				kind: "stage",
-				disabled: props.mutating,
-				run: () => props.stageFile?.(r.path),
-			});
-			// 回滚：tracked 走 git restore，untracked 走回收站删除
-			actions.push({
-				label: t("git.discardChanges"),
-				kind: "discard",
-				disabled: props.mutating,
-				run: () => props.discardFile?.(r.path, r.status === GitStatus.UNTRACKED ? "untracked" : "workingTree"),
-			});
+		} else if (!props.readOnly && (!props.indexActionsOnly || props.stageFile) && (props.groupType === "workingTree" || props.groupType === "untracked")) {
+			// 已暂存文件在 Changes 组仅保留打开按钮，暂存/回滚归 Staged 组（VS Code 语义）
+			if (!props.stagedPaths?.has(r.path)) {
+				actions.push({
+					label: t("git.stage"),
+					kind: "stage",
+					disabled: props.mutating,
+					run: () => props.stageFile?.(r.target),
+				});
+				// 回滚：tracked 走 git restore，untracked 走回收站删除
+				if (!props.indexActionsOnly)
+					actions.push({
+						label: t("git.discardChanges"),
+						kind: "discard",
+						disabled: props.mutating,
+						run: () => props.discardFile?.(r.target, r.status === GitStatus.UNTRACKED ? "untracked" : "workingTree"),
+					});
+			}
 		}
 		if (props.onOpenFile) {
 			actions.push({
 				label: t("common.open"),
 				kind: "open",
-				run: () => props.onOpenFile?.(r.path),
+				run: () => props.onOpenFile?.(r.target),
 			});
 		}
 		return (
@@ -139,18 +148,19 @@ export const FileTree = memo(function FileTree(props: {
 				key={r.path}
 				status={r.status}
 				letter={r.letter}
-				path={r.path}
+				path={r.displayPath || r.path}
+				target={r.target}
 				indent={depth * CHANGE_TREE_INDENT_PX}
 				onOpen={() =>
 					props.onOpenWorkspaceFileDiff(
 						// Changes 组只含工作区侧资源（workingTree + untracked，见 collectUnstagedResources）：
 						// 未跟踪文件按实际状态传 untracked，否则服务端在 workingTree 组找不到而打不开
 						props.groupType === "workingTree" && r.status === GitStatus.UNTRACKED ? "untracked" : props.groupType,
-						r.path,
+						r.target,
 					)
 				}
 				actions={actions}
-				deleteFile={props.deleteFile ? (path) => props.deleteFile?.(path) : undefined}
+				deleteFile={!props.readOnly && !props.indexActionsOnly && props.deleteFile ? (target) => props.deleteFile?.(target) : undefined}
 			/>
 		);
 	};
@@ -160,10 +170,12 @@ export const FileTree = memo(function FileTree(props: {
 	 * 目录级操作只作用于传入的资源（树形视图传整棵子树），不影响其他目录。
 	 */
 	const renderDirHeader = (dir: string, label: string, dirResources: GitResource[], depth: number) => {
-		const discardable = dirResources
+		// 已暂存文件在 Changes 组不再提供目录级暂存（VS Code 语义）：目录按钮与行内按钮同一判据。
+		const stageable = dirResources.filter((resource) => !props.stagedPaths?.has(resource.path));
+		const discardable = stageable
 			.filter((resource) => resource.status === GitStatus.UNTRACKED || props.groupType === "workingTree")
 			.map((resource) => ({
-				path: resource.path,
+				target: resource.target,
 				group: resource.status === GitStatus.UNTRACKED ? ("untracked" as const) : ("workingTree" as const),
 			}));
 		return (
@@ -188,7 +200,7 @@ export const FileTree = memo(function FileTree(props: {
 					{label}
 				</span>
 				<span className="ml-auto flex items-center gap-0.5">
-					{props.stageDir && dirResources.length > 0 && (
+					{!props.readOnly && !props.indexActionsOnly && props.stageDir && stageable.length > 0 && (
 						<Button
 							type="button"
 							variant="ghost"
@@ -199,13 +211,13 @@ export const FileTree = memo(function FileTree(props: {
 							disabled={props.mutating}
 							onClick={(event) => {
 								event.stopPropagation();
-								props.stageDir?.(dirResources.map((resource) => resource.path));
+								props.stageDir?.(stageable.map((resource) => resource.target));
 							}}
 						>
 							<Plus size={13} aria-hidden="true" />
 						</Button>
 					)}
-					{props.discardDir && discardable.length > 0 && (
+					{!props.readOnly && !props.indexActionsOnly && props.discardDir && discardable.length > 0 && (
 						<Button
 							type="button"
 							variant="ghost"
@@ -338,6 +350,7 @@ export function ResourceRow(props: {
 	status: GitStatus;
 	letter: string;
 	path: string;
+	target?: ProjectFileTarget;
 	compareStatus?: GitFileStatus;
 	actions?: Array<{
 		label: string;
@@ -346,7 +359,7 @@ export function ResourceRow(props: {
 		run: () => void;
 	}>;
 	/** 右键菜单“删除文件”入口；未提供时不启用右键菜单（compare 只读列表） */
-	deleteFile?: (path: string) => void;
+	deleteFile?: (target: ProjectFileTarget) => void;
 	onOpen?: () => void | Promise<void>;
 	/** 树形视图缩进（px），叠加在基准左内边距之上 */
 	indent?: number;
@@ -417,13 +430,14 @@ export function ResourceRow(props: {
 	);
 	// 右键删除仅对变更列表启用：包一层 ContextMenu，删除后由父级弹确认框；
 	// 回滚已移到行内按钮（add/rollback/openfile），compare 只读列表不启用右键
-	if (!props.deleteFile) return row;
+	if (!props.deleteFile || !props.target) return row;
+	const target = props.target;
 	return (
 		<ContextMenu>
 			<ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
 			<ContextMenuContent alignOffset={-4}>
 				{props.deleteFile && (
-					<ContextMenuItem variant="destructive" className="gap-2 text-control" onSelect={() => props.deleteFile?.(props.path)}>
+					<ContextMenuItem variant="destructive" className="gap-2 text-control" onSelect={() => props.deleteFile?.(target)}>
 						<Trash2 size={14} aria-hidden="true" />
 						{t("git.deleteFile")}
 					</ContextMenuItem>

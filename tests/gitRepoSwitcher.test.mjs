@@ -35,10 +35,10 @@ test("each repository panel keeps its Git operations and branch state bound to i
 	assert.match(host, /function createScopedGitApi/);
 	assert.match(host, /gitApi\.status\(id, repoPath\)/);
 	assert.match(host, /gitInfoByRepoPath/);
-	assert.match(host, /gitApi\s*\.checkout\(projectId, branch, repoPath\)/);
-	assert.match(host, /repoScopeKey=\{repoPath \?\? projectRoot\}/);
-	assert.match(host, /onOpenWorkspaceFileDiff\(group, path, repoPath\)/);
-	assert.match(host, /onOpenCommitFileDiff\(commit, file, repoPath\)/);
+	assert.match(host, /gitApi\s*\.checkout\(projectId, branch, repo\.target\)/);
+	assert.match(host, /repoScopeKey=\{repoKey \?\? ""\}/);
+	assert.match(host, /onOpenWorkspaceFileDiff\(group, target, repoTarget\)/);
+	assert.match(host, /onOpenCommitFileDiff\(commit, file, repoTarget\)/);
 });
 
 test("multi-repository panes share one Graph/Compare and only stack change lists", () => {
@@ -70,9 +70,9 @@ test("multi-repository panes have isolated persisted state and unique pane ids",
 });
 
 test("directory actions stage and discard only their grouped resource paths", () => {
-	assert.match(resourceTree, /stageDir\?: \(paths: string\[\]\) => void/);
-	assert.match(resourceTree, /discardDir\?: \(resources: Array/);
-	assert.match(resourceTree, /props\.stageDir\?\.\(dirResources\.map\(\(resource\) => resource\.path\)\)/);
+	assert.match(resourceTree, /stageDir\?: \(targets: ProjectFileTarget\[\]\) => void/);
+	assert.match(resourceTree, /discardDir\?: \(resources: GitDiscardResource\[\], label: string\) => void/);
+	assert.match(resourceTree, /props\.stageDir\?\.\(stageable\.map/);
 	assert.match(resourceTree, /props\.discardDir\?\.\(discardable, dir \|\| "\/"\)/);
 	assert.match(panel, /setDirectoryDiscardTarget\(\{ resources, label \}\)/);
 	assert.match(panel, /props\.discardFiles\(props\.projectId, target\.resources\)/);
@@ -83,15 +83,15 @@ test("directory actions stage and discard only their grouped resource paths", ()
 	assert.match(gitService, /"git:discard-files"/);
 });
 
-test("git IPC and preload accept an optional repoPath without changing init/worktree roots", () => {
+test("Git IPC and preload use repository targets without changing init/worktree roots", () => {
 	assert.match(ipc, /gitListRepos: "git:list-repos"/);
 	assert.match(preload, /listRepos:/);
-	assert.match(preload, /branches: \(projectId: string, repoPath\?: string\)/);
+	assert.match(preload, /branches: \(projectId: string, repoPath\?: ProjectFileTarget\)/);
+	assert.match(gitIpc, /gitBackendRouter\.forProject\(projectId\)\.listRepositories\(\{ projectId, relativePath: "" \}\)/);
+	// repo cwd 仍经统一解析：preload 传 ProjectFileTarget，主进程在 backend 边界解析成本机 cwd。
 	assert.match(gitIpc, /resolveGitCwd/);
-	assert.match(gitIpc, /listGitRepos\(projectHostPath\(project\)\)/);
-	// git init 收口到 gitRun.execGit（按 cwd 分派宿主 git / WSL 发行版内 git，见 issue #295）；
+	// git init 收口到 gitService.init(context.projectRoot)（backend 已解析出项目根）；
 	// root 仍是项目宿主路径、不随 repoPath 变；windowsHide/wsl.exe 细节由执行层统一处理。
-	assert.match(gitIpc, /import \{ execGit \} from "\.\.\/git\/gitRun"/);
-	assert.match(gitIpc, /execGit\(\s*\["init"\],\s*\{\s*cwd:\s*projectHostPath\(project\)\s*\}\s*\)/);
-	assert.match(gitIpc, /worktreeService\.list\(projectHostPath\(project\)\)/);
+	assert.match(gitIpc, /await gitService\.init\(context\.projectRoot\)/);
+	assert.match(gitIpc, /worktreeService\.list\(repository\.projectRoot\)/);
 });

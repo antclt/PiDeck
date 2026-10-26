@@ -7,10 +7,11 @@ import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
 import { FileSortControl } from "./FileSortControl";
 import { sortFileNodes, FILE_SORT_OPTIONS, FILE_SORT_DEFAULT_DIRECTION, type FileSortMode, type FileSortDirection } from "../../utils/fileTreeSort";
 import { compactMiddlePackages } from "../../utils/fileTreeCompact";
+import { fileTreeNodeKey } from "../../utils/fileTreeLazy";
 import { compactMiddlePackagesAtom, activeEditorFileAtom } from "../../atoms/app-ui-atoms";
 import { t } from "../../i18n";
 import type { WorkspaceDrawerPanel } from "../../hooks/useWorkspacePanels";
-import type { FileTreeNode, Project, SessionSummary } from "../../../../shared/types";
+import type { FileTreeNode, Project, ProjectFileTarget, SessionSummary } from "../../../../shared/types";
 import { FileSearch, Search } from "lucide-react";
 import { useFileSearch } from "../../hooks/useFileSearch";
 import { useFileTreeStickyAppearance } from "../../hooks/files/useFileTreeStickyAppearance";
@@ -66,9 +67,9 @@ export function DrawerContent(props: {
 	onCopySession: (session: SessionSummary) => void | Promise<void>;
 	onExportSession: (session: SessionSummary) => void | Promise<void>;
 	onDeleteSession: (session: SessionSummary) => void | Promise<void>;
-	onOpenFile?: (path: string) => void;
+	onOpenFile?: (path: string | ProjectFileTarget) => void;
 	/** 单击默认预览；第二参 permanent = 双击常驻 */
-	onViewFile?: (path: string, openMode?: "preview" | "permanent") => void;
+	onViewFile?: (path: string | ProjectFileTarget, openMode?: "preview" | "permanent") => void;
 	/** 项目根目录：面板空白处拖入/粘贴/右键的落点 */
 	projectRoot?: string;
 	/** 从 OS 拖入文件到目录或面板空白区域（复制） */
@@ -129,9 +130,9 @@ function FilesPanel(props: {
 	/** 收起文件树中所有已展开的目录，清空 expandedDirs。 */
 	onCollapseAll?: () => void;
 	onOpenFolder?: () => void;
-	onOpenFile?: (path: string) => void;
+	onOpenFile?: (path: string | ProjectFileTarget) => void;
 	/** 单击默认预览；第二参 permanent = 双击常驻 */
-	onViewFile?: (path: string, openMode?: "preview" | "permanent") => void;
+	onViewFile?: (path: string | ProjectFileTarget, openMode?: "preview" | "permanent") => void;
 	/** 项目根目录：面板空白处拖入/粘贴/右键的落点 */
 	projectRoot?: string;
 	/** 从 OS 拖入文件到目录或面板空白区域（复制） */
@@ -197,8 +198,8 @@ function FilesPanel(props: {
 	latestPropsRef.current = props;
 	const stableToggleDirectory = useCallback((path: string) => latestPropsRef.current.onToggleDirectory(path), []);
 	const stableFileContextMenu = useCallback((node: FileTreeNode, x: number, y: number) => latestPropsRef.current.onFileContextMenu(node, x, y), []);
-	const stableOpenFile = useCallback((path: string) => latestPropsRef.current.onOpenFile?.(path), []);
-	const stableViewFile = useCallback((path: string, openMode?: "preview" | "permanent") => latestPropsRef.current.onViewFile?.(path, openMode), []);
+	const stableOpenFile = useCallback((path: string | ProjectFileTarget) => latestPropsRef.current.onOpenFile?.(path), []);
+	const stableViewFile = useCallback((path: string | ProjectFileTarget, openMode?: "preview" | "permanent") => latestPropsRef.current.onViewFile?.(path, openMode), []);
 	const stableDropFiles = useCallback((targetDir: string, files: FileList) => latestPropsRef.current.onDropFiles?.(targetDir, files), []);
 	const stableMoveFiles = useCallback((sourcePaths: string[], targetDir: string) => latestPropsRef.current.onMoveFiles?.(sourcePaths, targetDir), []);
 	// 文件树渲染预算：首屏只挂一批，滚动到列表底部再追加。否则展开一个 2000 项目录
@@ -370,7 +371,7 @@ function FilesPanel(props: {
 				<>
 					{rootWindow.visible.map((node) => (
 						<FileTreeNodeRow
-							key={node.path}
+							key={fileTreeNodeKey(node)}
 							node={node}
 							depth={0}
 							expandedDirs={props.expandedDirs}
@@ -412,7 +413,7 @@ function loadFileListExpanded(sessionKey: string | null): boolean {
 
 export function SessionFileSummary(props: {
 	files: SessionModifiedFile[];
-	onOpenFile?: (path: string) => void;
+	onOpenFile?: (path: string | ProjectFileTarget) => void;
 	onDiffFile?: DiffFileHandler;
 	/** sessionIdOrPath: 会话唯一标识(如 sessionPath),用于按 agent/session 隔离折叠状态。
 	 *  组件卸载后再次挂载相同标识时,恢复之前保存的折叠偏好。 */

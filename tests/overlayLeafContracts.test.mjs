@@ -51,13 +51,8 @@ test("dialog onOpenChange handlers invoke onClose instead of returning the callb
 	}
 });
 
-test("async leaf controllers protect deferred results and update subscriptions clean up", () => {
-	const imports = read("hooks/useImportController.ts");
+test("background update watch keeps a single snapshot subscription and cleans it up on unmount", () => {
 	const updateWatch = read("hooks/useBackgroundUpdateWatch.ts");
-	assert.match(imports, /mounted\.current = true/);
-	assert.match(imports, /mounted\.current = false/);
-	assert.match(imports, /requestSequence/);
-	assert.match(imports, /sequence\.current \+= 1/);
 	// 更新状态来自主进程单一快照流；卸载时必须退订，避免重复 toast 和 atom 更新。
 	assert.match(updateWatch, /api\.app\.getUpdateStatus\(\)/);
 	assert.match(updateWatch, /const unsubscribe = api\.app\.onUpdateStatus\(/);
@@ -170,94 +165,9 @@ test("runtime responder rolls back when binding changes after claim", async () =
 	assert.equal(rolledBack, 1);
 });
 
-function createHookHarness() {
-	const refs = [];
-	const states = [];
-	let cursor = 0;
-	let effects = [];
-	let result;
-	const react = {
-		useRef(initial) {
-			const index = cursor++;
-			refs[index] ??= { current: initial };
-			return refs[index];
-		},
-		useState(initial) {
-			const index = cursor++;
-			states[index] ??= typeof initial === "function" ? initial() : initial;
-			return [
-				states[index],
-				(next) => {
-					states[index] = typeof next === "function" ? next(states[index]) : next;
-				},
-			];
-		},
-		useCallback(fn) {
-			cursor++;
-			return fn;
-		},
-		useEffect(fn) {
-			cursor++;
-			effects.push(fn);
-		},
-	};
-	const hooks = compile("hooks/useImportController.ts", { react });
-	return {
-		render(options) {
-			cursor = 0;
-			effects = [];
-			result = hooks.useImportController(options);
-			return { result, effects };
-		},
-		state: states,
-	};
-}
-
-function deferred() {
-	let resolve;
-	const promise = new Promise((value) => {
-		resolve = value;
-	});
-	return { promise, resolve };
-}
-
 async function flushAsync() {
 	for (let index = 0; index < 5; index += 1) await Promise.resolve();
 }
-
-test("import controller effect replay restores mounted state and rejects a deferred result after project null", async () => {
-	const scans = [];
-	const harness = createHookHarness();
-	const options = (projectId) => ({
-		projectId,
-		scan: async (id) => {
-			const item = deferred();
-			scans.push({ id, ...item });
-			return item.promise;
-		},
-		importSelected: async () => ({ ok: true }),
-	});
-	const first = harness.render(options("project-a"));
-	const firstCleanups = first.effects.map((setup) => setup()).filter(Boolean);
-	assert.equal(scans.length, 1);
-	firstCleanups.forEach((cleanup) => cleanup());
-	first.effects.forEach((setup) => setup());
-	assert.equal(scans.length, 2);
-	scans[0].resolve([{ sourcePath: "stale-a" }]);
-	scans[1].resolve([{ sourcePath: "fresh-a" }]);
-	await flushAsync();
-	assert.deepEqual(harness.render(options("project-a")).result.sessions, [{ sourcePath: "fresh-a" }]);
-
-	const old = harness.render(options("project-a"));
-	const oldCleanups = old.effects.map((setup) => setup()).filter(Boolean);
-	assert.equal(scans.length, 3);
-	oldCleanups.forEach((cleanup) => cleanup());
-	const closed = harness.render(options(null));
-	closed.effects.forEach((setup) => setup());
-	scans[2].resolve([{ sourcePath: "must-not-appear" }]);
-	await flushAsync();
-	assert.equal(harness.render(options(null)).result.sessions.length, 0);
-});
 
 test("background updater UI is snapshot-driven and installation remains user-confirmed", () => {
 	const updateWatch = read("hooks/useBackgroundUpdateWatch.ts");

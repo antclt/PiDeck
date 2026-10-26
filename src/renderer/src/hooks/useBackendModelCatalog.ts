@@ -11,6 +11,8 @@ const EMPTY_MODELS: AvailableModel[] = [];
 type CatalogResult = {
 	backend?: AgentBackend;
 	projectId?: string;
+	/** 路由键：模型目录按会话取（远端会话由它自己那台远端 pi 回答），换了会话就不能复用。 */
+	sessionId: string;
 	report: ModelListReport;
 };
 
@@ -49,6 +51,10 @@ export function useBackendModelCatalog(options: { sessionId: string; backend?: A
 			setRefreshing(force);
 			setLoading(!force);
 			// DSH 目录是 host 数据结构（无 CLI 失败概念），构造一个恒成功的报告即可。
+			// pi 走会话级通道（sessions:list-models）：主进程按会话 location 分流，
+			// 远端会话由它自己那台远端 pi 回答 get_available_models。
+			// 不用 projects:list-models-report 的原因：那条永远回答本机目录，
+			// 远端会话选中后 set_model 必 Model not found（旧行为）。
 			const loader =
 				options.backend === "dsh"
 					? desktopApi.sessions.listDshModels().then(
@@ -62,11 +68,11 @@ export function useBackendModelCatalog(options: { sessionId: string; backend?: A
 								at: Date.now(),
 							}),
 						)
-					: desktopApi.projects.listModelsReport(options.projectId, force);
+					: desktopApi.sessions.listModels(options.sessionId, force, options.projectId);
 			void loader
 				.then((next) => {
 					if (sequence !== sequenceRef.current) return;
-					setCatalog({ backend: options.backend, projectId: options.projectId, report: next });
+					setCatalog({ backend: options.backend, projectId: options.projectId, sessionId: options.sessionId, report: next });
 					setLoading(false);
 					setRefreshing(false);
 				})
@@ -83,6 +89,7 @@ export function useBackendModelCatalog(options: { sessionId: string; backend?: A
 					setCatalog({
 						backend: options.backend,
 						projectId: options.projectId,
+						sessionId: options.sessionId,
 						report: {
 							models: [],
 							ok: false,
@@ -98,7 +105,7 @@ export function useBackendModelCatalog(options: { sessionId: string; backend?: A
 					showNotice(dshStopped ? t("app.modelListFailDshStopped") : rawDetail, 4000);
 				});
 		},
-		[options.enabled, options.backend, options.projectId],
+		[options.enabled, options.backend, options.projectId, options.sessionId],
 	);
 
 	useEffect(() => {
@@ -116,6 +123,6 @@ export function useBackendModelCatalog(options: { sessionId: string; backend?: A
 
 	// Filter during render, not in an effect: consumers use report.ok to invalidate
 	// welcome preferences, so even the first render must reject another source's data.
-	const report = catalog?.backend === options.backend && catalog?.projectId === options.projectId ? (catalog?.report ?? null) : null;
+	const report = catalog?.backend === options.backend && catalog?.projectId === options.projectId && catalog?.sessionId === options.sessionId ? (catalog?.report ?? null) : null;
 	return { models: report?.models ?? EMPTY_MODELS, report, loading: options.enabled && loading, refreshing: options.enabled && refreshing, reload: load };
 }

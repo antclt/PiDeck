@@ -9,12 +9,25 @@ const projectTree = readFileSync("src/renderer/src/components/sidebar/ProjectTre
 
 function loadModel() {
 	const source = readFileSync("src/renderer/src/components/sidebar/workspaceTreeModel.ts", "utf8");
+	const locationSource = readFileSync("src/shared/projectLocation.ts", "utf8");
 	const module = { exports: {} };
+	const locationModule = { exports: {} };
+	const sandbox = {
+		module,
+		exports: module.exports,
+		require: (name) => {
+			if (name === "../../../../shared/projectLocation") {
+				vm.runInNewContext(ts.transpileModule(locationSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { module: locationModule, exports: locationModule.exports }, { filename: "projectLocation.ts" });
+				return locationModule.exports;
+			}
+			throw new Error(`unexpected require in workspaceTreeModel: ${name}`);
+		},
+	};
 	vm.runInNewContext(
 		ts.transpileModule(source, {
 			compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 		}).outputText,
-		{ module, exports: module.exports },
+		sandbox,
 		{ filename: "workspaceTreeModel.ts" },
 	);
 	return module.exports;
@@ -39,11 +52,12 @@ test("collapsed worktrees do not mount a nested SessionTree", () => {
 	assert.doesNotMatch(worktree, /visibleChildCount=\{expanded \? Number\.MAX_SAFE_INTEGER : 3\}/);
 });
 
-test("worktree model deduplicates Windows path variants and keeps the project binding", () => {
+test("worktree model merges rows by project target and keeps the project binding", () => {
 	const { mergeWorkspaceTreeRows } = loadModel();
 	const childProject = { id: "child-1", name: "T6", path: "c:/repo/T6", lastOpenedAt: 1 };
-	const rows = mergeWorkspaceTreeRows([{ path: "C:\\\\repo\\\\T6", branch: "refs/heads/pideck/T6" }], [childProject]);
+	const rows = mergeWorkspaceTreeRows([{ target: { projectId: "child-1", relativePath: "" }, displayPath: "C:\\\\repo\\\\T6", branch: "refs/heads/pideck/T6" }], [childProject]);
 	assert.equal(rows.length, 1);
+	assert.equal(rows[0].key, "child-1");
 	assert.equal(rows[0].project.id, "child-1");
 	assert.equal(rows[0].branch, "T6");
 });

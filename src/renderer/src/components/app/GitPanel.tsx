@@ -11,7 +11,7 @@ import { dismissNotice, showNotice, type NoticeId } from "../../utils/notice";
 import { writeClipboard } from "../../utils/clipboard";
 import { htmlToPlainText, readClipboardHtmlConsistent, readClipboardText } from "../../utils/clipboard";
 import { deepEqual } from "../../utils/deepEqual";
-import type { BranchDiffResult, CommitDetail, CommitEntry, GitAheadBehind, GitChangedFile, GitDiscardResource, GitResourceGroupType, GitResourceGroups } from "../../../../shared/types";
+import type { BranchDiffResult, CommitDetail, CommitEntry, GitAheadBehind, GitChangedFile, GitDiscardResource, GitResource, GitResourceGroupType, GitResourceGroups, ProjectFileTarget } from "../../../../shared/types";
 import { GitStatus } from "../../../../shared/types";
 import { EMPTY_GIT_COMMIT_COMPOSER, gitCommitComposerByScopeAtom, gitCommitScopeKey, openSettingsAtom, patchGitCommitComposer, type GitCommitComposerState } from "../../atoms";
 import { t } from "../../i18n";
@@ -76,7 +76,7 @@ function finishCommitGen(scopeKey: string, patch: Partial<GitCommitComposerState
 
 type GitPanelProps = {
 	projectId: string;
-	/** 项目根目录路径，用于将绝对路径转为相对路径显示 */
+	/** 项目根目录路径，用于把绝对路径显示成相对路径（远端资源已给出相对 path，可不传） */
 	projectRoot?: string;
 	/**
 	 * 当前操作的仓库身份。多仓切换时 projectId 不变，用此项让 status/mutation 序号失效并清空面板。
@@ -99,14 +99,14 @@ type GitPanelProps = {
 	commitCount: (projectId: string, options?: { ref?: string; allBranches?: boolean }) => Promise<number>;
 	commitDetail: (projectId: string, ref: string) => Promise<CommitDetail | null>;
 	onOpenCommitFileDiff: (commit: CommitEntry, file: GitChangedFile) => void | Promise<void>;
-	onOpenWorkspaceFileDiff: (group: GitResourceGroupType, path: string) => void | Promise<void>;
+	onOpenWorkspaceFileDiff: (group: GitResourceGroupType, target: ProjectFileTarget) => void | Promise<void>;
 	/** 行内“打开文件”按钮：在编辑器面板打开该文件 */
-	onOpenFile?: (path: string) => void;
+	onOpenFile?: (target: ProjectFileTarget) => void;
 	branchCompare: (projectId: string, base: string, target: string) => Promise<BranchDiffResult>;
 	getStatus: (projectId: string) => Promise<GitResourceGroups>;
-	stageFiles: (projectId: string, paths: string[]) => Promise<void>;
-	unstageFiles: (projectId: string, paths: string[]) => Promise<void>;
-	discardFile: (projectId: string, group: "workingTree" | "untracked", path: string) => Promise<void>;
+	stageFiles: (projectId: string, targets: ProjectFileTarget[]) => Promise<void>;
+	unstageFiles: (projectId: string, targets: ProjectFileTarget[]) => Promise<void>;
+	discardFile: (projectId: string, group: "workingTree" | "untracked", target: ProjectFileTarget) => Promise<void>;
 	/** 目录级批量回滚；主进程在同一状态快照中校验路径，避免逐文件 IPC 竞态。 */
 	discardFiles: (projectId: string, resources: GitDiscardResource[]) => Promise<void>;
 	commit: (projectId: string, message: string) => Promise<void>;
@@ -141,7 +141,7 @@ type GitPanelProps = {
 	/** refs 变化推送订阅（返回值退订）；payload 为 watchId */
 	onRefsChanged?: (listener: (watchId: string) => void) => () => void;
 	/** 从磁盘删除变更文件（移入回收站） */
-	deleteFiles?: (projectId: string, paths: string[]) => Promise<void>;
+	deleteFiles?: (projectId: string, targets: ProjectFileTarget[]) => Promise<void>;
 };
 
 type PaneId = "changes" | "graph" | "compare";
@@ -525,14 +525,14 @@ export function GitPanel(props: GitPanelProps) {
 	const [showSmartCommitPrompt, setShowSmartCommitPrompt] = useState(false);
 	const [discardTarget, setDiscardTarget] = useState<{
 		group: "workingTree" | "untracked";
-		path: string;
+		target: ProjectFileTarget;
 	} | null>(null);
 	const [directoryDiscardTarget, setDirectoryDiscardTarget] = useState<{
 		resources: GitDiscardResource[];
 		label: string;
 	} | null>(null);
 	/** 右键“删除文件”确认目标 */
-	const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+	const [deleteTarget, setDeleteTarget] = useState<ProjectFileTarget | null>(null);
 	/** 当前分支相对上游的提交差距：ahead 显示在 push、behind 显示在 pull */
 	const [aheadBehind, setAheadBehind] = useState<GitAheadBehind | null>(null);
 	const [resourceOpen, setResourceOpen] = useState({
@@ -978,31 +978,31 @@ export function GitPanel(props: GitPanelProps) {
 	const actRef = useRef(act);
 	actRef.current = act;
 	const stageFile = useCallback(
-		(path: string) => {
-			void actRef.current(() => props.stageFiles(props.projectId, [path]));
+		(target: ProjectFileTarget) => {
+			void actRef.current(() => props.stageFiles(props.projectId, [target]));
 		},
 		[props.projectId, props.stageFiles],
 	);
 	const stageFiles = useCallback(
-		(paths: string[]) => {
-			void actRef.current(() => props.stageFiles(props.projectId, paths));
+		(targets: ProjectFileTarget[]) => {
+			void actRef.current(() => props.stageFiles(props.projectId, targets));
 		},
 		[props.projectId, props.stageFiles],
 	);
 	const unstageFile = useCallback(
-		(path: string) => {
-			void actRef.current(() => props.unstageFiles(props.projectId, [path]));
+		(target: ProjectFileTarget) => {
+			void actRef.current(() => props.unstageFiles(props.projectId, [target]));
 		},
 		[props.projectId, props.unstageFiles],
 	);
-	const discardFile = useCallback((path: string, group: "workingTree" | "untracked") => {
-		setDiscardTarget({ group, path });
+	const discardFile = useCallback((target: ProjectFileTarget, group: "workingTree" | "untracked") => {
+		setDiscardTarget({ group, target });
 	}, []);
-	const discardDir = useCallback((resources: Array<{ path: string; group: "workingTree" | "untracked" }>, label: string) => {
+	const discardDir = useCallback((resources: GitDiscardResource[], label: string) => {
 		setDirectoryDiscardTarget({ resources, label });
 	}, []);
-	const deleteFile = useCallback((path: string) => {
-		setDeleteTarget(path);
+	const deleteFile = useCallback((target: ProjectFileTarget) => {
+		setDeleteTarget(target);
 	}, []);
 
 	const runCommit = async (stageAll: boolean) => {
@@ -1015,7 +1015,7 @@ export function GitPanel(props: GitPanelProps) {
 		setError(null);
 		try {
 			if (stageAll) {
-				const paths = workingChanges.map((resource) => resource.path);
+				const paths = workingChanges.map((resource) => resource.target);
 				if (paths.length > 0) await props.stageFiles(projectId, paths);
 			}
 			await props.commit(projectId, message);
@@ -1072,7 +1072,7 @@ export function GitPanel(props: GitPanelProps) {
 		const target = discardTarget;
 		if (!target) return;
 		setDiscardTarget(null);
-		void act(() => props.discardFile(props.projectId, target.group, target.path));
+		void act(() => props.discardFile(props.projectId, target.group, target.target));
 	};
 
 	const confirmDirectoryDiscard = () => {
@@ -1084,12 +1084,11 @@ export function GitPanel(props: GitPanelProps) {
 
 	/** 右键菜单“删除文件”确认：移入回收站，可恢复 */
 	const confirmDelete = () => {
-		const path = deleteTarget;
-		// 先取局部引用再收窄：TS 不保留对 props 属性在闭包内的收窄
+		const target = deleteTarget;
 		const deleteFiles = props.deleteFiles;
-		if (!path || !deleteFiles) return;
+		if (!target || !deleteFiles) return;
 		setDeleteTarget(null);
-		void act(() => deleteFiles(props.projectId, [path]));
+		void act(() => deleteFiles(props.projectId, [target]));
 	};
 
 	/**
@@ -1614,7 +1613,7 @@ export function GitPanel(props: GitPanelProps) {
 												act(() =>
 													props.unstageFiles(
 														props.projectId,
-														groups.index.map((resource) => resource.path),
+														groups.index.map((resource) => resource.target),
 													),
 												)
 											}
@@ -1646,7 +1645,7 @@ export function GitPanel(props: GitPanelProps) {
 												act(() =>
 													props.stageFiles(
 														props.projectId,
-														workingChanges.map((resource) => resource.path),
+														workingChanges.map((resource) => resource.target),
 													),
 												)
 											}
@@ -1729,10 +1728,10 @@ export function GitPanel(props: GitPanelProps) {
 						message={
 							discardTarget.group === "untracked"
 								? t("git.discardUntrackedConfirmMessage", {
-										path: fileNameOnly(discardTarget.path),
+										path: fileNameOnly(discardTarget.target.relativePath),
 									})
 								: t("git.discardConfirmMessage", {
-										path: fileNameOnly(discardTarget.path),
+										path: fileNameOnly(discardTarget.target.relativePath),
 									})
 						}
 						danger
@@ -1765,7 +1764,7 @@ export function GitPanel(props: GitPanelProps) {
 					<ConfirmDialog
 						title={t("git.deleteFileConfirmTitle")}
 						message={t("git.deleteFileConfirmMessage", {
-							path: fileNameOnly(deleteTarget),
+							path: fileNameOnly(deleteTarget.relativePath),
 						})}
 						danger
 						confirmLabel={t("common.delete")}

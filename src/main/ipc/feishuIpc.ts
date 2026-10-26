@@ -9,6 +9,7 @@ import type { AgentManager } from "../pi/AgentManager";
 import type { ProjectStore } from "../projects/ProjectStore";
 import type { SessionRuntimeCoordinator } from "../sessions/SessionRuntimeCoordinator";
 import { ipcChannels } from "../../shared/ipc";
+import { isLocalProject } from "../../shared/projectLocation";
 import { getAppLogger } from "../logging/sharedLogger";
 
 /**
@@ -67,7 +68,8 @@ export function registerFeishuIpc(deps: FeishuIpcDeps): void {
 				botConfig,
 				deps.agentManager,
 				() => deps.getMainWindow(),
-				() => deps.projectStore.list(),
+				// 飞书 Bridge 只在本机项目上建会话：远端项目没有可交给本机 node:fs 的 cwd。
+				() => deps.projectStore.list().filter(isLocalProject),
 				deps.feishuSessionRuntimeBindings,
 				appSecret,
 				deps.getCurrentLocale(),
@@ -112,7 +114,8 @@ export function registerFeishuIpc(deps: FeishuIpcDeps): void {
 				},
 				deps.agentManager,
 				() => deps.getMainWindow(),
-				() => deps.projectStore.list(),
+				// 飞书 Bridge 只在本机项目上建会话：远端项目没有可交给本机 node:fs 的 cwd。
+				() => deps.projectStore.list().filter(isLocalProject),
 				deps.feishuSessionRuntimeBindings,
 				plainAppSecret,
 				deps.getCurrentLocale(),
@@ -245,7 +248,8 @@ export function registerFeishuIpc(deps: FeishuIpcDeps): void {
 			},
 			deps.agentManager,
 			() => deps.getMainWindow(),
-			() => deps.projectStore.list(),
+			// 飞书 Bridge 只在本机项目上建会话：远端项目没有可交给本机 node:fs 的 cwd。
+			() => deps.projectStore.list().filter(isLocalProject),
 			deps.feishuSessionRuntimeBindings,
 			undefined,
 			deps.getCurrentLocale(),
@@ -299,7 +303,8 @@ export function registerFeishuIpc(deps: FeishuIpcDeps): void {
 				botConfig,
 				deps.agentManager,
 				() => deps.getMainWindow(),
-				() => deps.projectStore.list(),
+				// 飞书 Bridge 只在本机项目上建会话：远端项目没有可交给本机 node:fs 的 cwd。
+				() => deps.projectStore.list().filter(isLocalProject),
 				deps.feishuSessionRuntimeBindings,
 				undefined,
 				deps.getCurrentLocale(),

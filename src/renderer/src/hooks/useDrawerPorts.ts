@@ -1,12 +1,17 @@
+import type { Project, ProjectFileAccessScope, ProjectFileTarget } from "../../../shared/types";
 import { useMemo } from "react";
+import type { EditorTabOpenMode } from "../utils/editorTabs";
 import type { WorkspaceDrawerPanel } from "./useWorkspacePanels";
 import type { SessionFilterPill } from "../sessionFilterPills";
 import { openGitFileInEditor } from "../utils/gitFileOpen";
 import type { RpcLogEntry } from "../../../shared/types/rpcLog";
 import type { DrawerBrowserPort, DrawerChromePort, DrawerFilesPort, DrawerGitPort, DrawerRpcLogPort } from "../components/workspace/DrawerSurface";
 
-/** useFileEditor 返回的原始开 Tab 函数（openGitFileInEditor 的 openTab 参数签名） */
-type OpenEditorTabFn = Parameters<typeof openGitFileInEditor>[1];
+/**
+ * useFileEditor 返回的原始开 Tab 函数：本地文件是 string，远端/项目文件是 ProjectFileTarget。
+ * 与 useFileEditor 的 openEditorTab 签名保持一致，避免在抽屉边界把 target 降级成裸路径。
+ */
+type OpenEditorTabFn = (path: string | ProjectFileTarget, mode: "view" | "diff", originalContent?: string, modifiedContent?: string, allowSave?: boolean, tabKey?: string, label?: string, preserveDrawer?: boolean, openMode?: EditorTabOpenMode, initialLine?: number, fileAccessScope?: ProjectFileAccessScope) => void;
 
 /** Git port 的直通字段：类型直接取自 DrawerGitPort，避免两处漂移 */
 type GitPortInput = Pick<DrawerGitPort, "enableGitManagement" | "activeProjectId" | "gitDiffDisplayMode" | "openCommitFileDiff" | "openWorkspaceFileDiff" | "toggleGitDiffDisplayMode" | "closeGitDiff" | "gitApi" | "gitInfo" | "switchBranch" | "createBranch">;
@@ -45,6 +50,8 @@ type FilesPortInput = Pick<
 >;
 
 interface UseDrawerPortsInput extends GitPortInput, FilesPortInput {
+	/** 当前项目：远端项目在文件抽屉里改用 RemoteProjectPanel（由 files port 下传） */
+	activeProject?: Project;
 	// Workspace actions
 	openDrawer: (panel: WorkspaceDrawerPanel) => void;
 	closeDrawer: () => void;
@@ -111,6 +118,7 @@ export function useDrawerPorts(input: UseDrawerPortsInput) {
 		};
 
 		const files: DrawerFilesPort = {
+			activeProject: input.activeProject,
 			sessionsProject: input.sessionsProject,
 			sessionsProjectId: input.sessionsProjectId,
 			files: input.files,
@@ -134,8 +142,16 @@ export function useDrawerPorts(input: UseDrawerPortsInput) {
 			viewFilePath: input.viewFilePath,
 			openFilePath: input.openFilePath,
 			// 包装为单参：以可编辑模式在中间栏打开文件（Git 行内“打开文件”按钮）。
-			// 先清 Git Diff 再开 Tab 的顺序契约见 utils/gitFileOpen.ts。
-			openEditorTab: (path: string) => openGitFileInEditor(input.dismissGitDiff, input.openEditorTab, path),
+			// 先清 Git Diff 再开 Tab 的顺序契约见 utils/gitFileOpen.ts；远端 target 原样下传，
+			// 不降级成相对路径（主进程要靠 projectId + relativePath 定位远端文件）。
+			openEditorTab: (path) => {
+				if (typeof path === "string") {
+					openGitFileInEditor(input.dismissGitDiff, input.openEditorTab, path);
+					return;
+				}
+				input.dismissGitDiff();
+				input.openEditorTab(path, "view", undefined, undefined, true, undefined, undefined, false, "permanent");
+			},
 			api: input.api,
 			t: input.t,
 			projectRoot: input.projectRoot,
@@ -148,6 +164,7 @@ export function useDrawerPorts(input: UseDrawerPortsInput) {
 	}, [
 		input.enableGitManagement,
 		input.activeProjectId,
+		input.activeProject,
 		input.gitDiffDisplayMode,
 		input.openCommitFileDiff,
 		input.openWorkspaceFileDiff,

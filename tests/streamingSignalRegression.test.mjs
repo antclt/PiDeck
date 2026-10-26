@@ -37,7 +37,7 @@ test("streaming signal: text_delta sets isStreaming locally, flush pushes lightw
 	assert.match(agentManager, /private emitStreamingStatePatch\(agentId: string\)/);
 	assert.match(agentManager, /isStreaming: this\.streamingAgents\.has\(agentId\)/);
 	assert.match(agentManager, /emitStreamingStatePatch\(agentId\)/);
-	assert.match(agentManager, /ipcChannels\.agentsRuntimeState/);
+	assert.match(agentManager, /agentEventTags\.agentsRuntimeState/);
 });
 
 test("renderer uses Controls isStreaming for live run marking", () => {

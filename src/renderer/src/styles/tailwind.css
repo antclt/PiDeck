@@ -354,9 +354,11 @@
 
 /* ── 思考强度滑条（ZCode 渐变强度条同构，ModelThinkingChip）──────────────
  * 冷→暖隐喻左弱右强：success（绿）起步、info（蓝）到顶，语义 token 随皮肤/明暗。
- * 轨道整条常驻鲜明渐变（ZCode 同款：当前值靠 thumb 位置+档位标签高亮表达，不靠填充差）；
- * Range 透明。白 thumb 带投影浮在渐变上。工具类 bg-muted/bg-primary 与本类同层
- * （utilities），双类选择器特异性 (0,2,0) > (0,1,0) 恒胜出。 */
+ * 填充只走到 thumb（未选段保持中性灰轨），与 ZCode 一致：颜色即进度。
+ * 渐变铺在 Range 上但按轨道全宽计算（background-size 跟随 --thinking-progress），
+ * 同一档位无论轨道多宽都取到同一段色标，拖动时颜色随填充展开而不被压缩。
+ * 工具类 bg-muted/bg-primary 与本类同层（utilities），
+ * 双类选择器特异性 (0,2,0) > (0,1,0) 恒胜出。 */
 /* ── 侧栏「查看更多/收起」行去白底 ────────────────────────────
  * beUI Button 在侧栏上会呈现 panel 白底（来源未经 styles/ 静态规则，疑似组件层默认皮），
  * 在 #f0f0f0 侧栏上是 Δ15 的亮白 pill；侧栏行的纪律是裸行 + hover 才 bg-bg-hover。
@@ -371,12 +373,20 @@
 
 @layer utilities {
   .thinking-intensity-slider [data-slot="slider-track"] {
-    background-color: var(--color-info);
-    background-image: linear-gradient(90deg, var(--color-success), var(--color-info));
+    /* 未选段用「选中层」中性灰而不是 bg-muted：浅色下 muted(#f4f4f4) 浮在白弹层上几乎不可见，
+       灰轨必须能读出「还剩多少」，否则填充色失去对比对象。 */
+    background-color: var(--color-bg-active);
+    background-image: none;
   }
   .thinking-intensity-slider [data-slot="slider-range"] {
-    background-color: transparent;
-    background-image: none;
+    background-color: var(--color-success);
+    background-image: linear-gradient(90deg, var(--color-success), var(--color-info));
+    /* 渐变按「整条轨道」铺色：宽度放大到 100% / 进度，可见窗口始终对应
+       [0, 当前值] 这段真实色标；progress 由组件用内联变量给出。
+       max() 兜底 progress=0（除零会使整条声明失效）。 */
+    background-size: calc(100% / max(var(--thinking-progress, 1), 0.001)) 100%;
+    background-position: left center;
+    background-repeat: no-repeat;
   }
   .thinking-intensity-slider [data-slot="slider-thumb"] {
     border: 2px solid #ffffff;

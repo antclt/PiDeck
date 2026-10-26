@@ -1,25 +1,52 @@
-export type Project = {
+import type { SessionEnvironment } from "./session";
+
+export type ProjectLocation = { kind: "local"; environment: SessionEnvironment; wslDistro?: string } | { kind: "ssh"; hostId: string };
+
+export type ProjectLocator = { kind: "local"; environment: SessionEnvironment; localPath: string; wslDistro?: string } | { kind: "ssh"; hostId: string; remotePath: string };
+
+export type ProjectFileTarget = {
+	projectId: string;
+	/** Slash-separated path relative to the project root; the empty string denotes the root. */
+	relativePath: string;
+};
+
+export type LegacyProjectLocationFields = {
+	path: string;
+	environment?: "windows" | "wsl";
+	wslDistro?: string;
+};
+
+export type ProjectMetadata = {
 	id: string;
 	name: string;
-	path: string;
 	lastOpenedAt: number;
 	pinned?: boolean;
 	sortOrder?: number;
-	kind?: "chat";
-	/** 是否启用 git worktree 工作区模式，开启后侧栏显示分支子项 */
-	worktreeEnabled?: boolean;
-	/** 如果是 worktree 子项目，指向父项目的 id */
-	worktreeParentId?: string;
-	/** 项目所属环境：windows 或 wsl。缺省视为 windows（兼容旧数据）。 */
-	environment?: "windows" | "wsl";
-	/**
-	 * 项目目录在磁盘上不存在（被删除/移动/未挂载）。列表保留记录并标记，
-	 * 由用户决定手动移除或恢复目录——不自动删除：网络盘/WSL/移动盘短暂
-	 * 不可达时自动移除会误删项目关联（2026-08 用户反馈「目录删了项目列表
-	 * 还有残留」）。
-	 */
+	/** 项目目录在磁盘上不存在（被删除/移动/未挂载）。列表保留记录并标记。 */
 	missing?: boolean;
 };
+
+export type LocalProject = ProjectMetadata & {
+	kind?: "chat";
+	path: string;
+	worktreeEnabled?: boolean;
+	worktreeParentId?: string;
+	wslDistro?: string;
+	environment?: "windows" | "wsl";
+};
+
+export type RemoteProject = ProjectMetadata & {
+	kind?: never;
+	/** 远端位置：只有 hostId 与远端路径，没有可交给本机 `node:fs` 的 `path`。 */
+	locator: Extract<ProjectLocator, { kind: "ssh" }>;
+	path?: never;
+	environment?: never;
+	wslDistro?: never;
+	worktreeEnabled?: never;
+	worktreeParentId?: never;
+};
+
+export type Project = LocalProject | RemoteProject;
 
 /**
  * 渲染层读取项目文件时携带的最小授权上下文。

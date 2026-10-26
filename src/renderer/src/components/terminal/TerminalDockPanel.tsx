@@ -4,7 +4,7 @@ import { SessionRuntimeDock } from "../session/SessionRuntimeDock";
 import { TerminalDock, type TerminalDockSettings } from "./TerminalDock";
 import type { TerminalThemeId } from "../../../../shared/types";
 import type { PiDesktopApi } from "../../../../preload";
-import type { TerminalTarget } from "../../../../shared/types";
+import type { Project, TerminalTarget } from "../../../../shared/types";
 import { TERMINAL_HEIGHT_MIN, applyTerminalPanelResize } from "../../terminalDockState";
 
 /** 终端分屏面板的固定约束（px），会话视图与引导页两条路径共用同一组值 */
@@ -14,6 +14,8 @@ export const TERMINAL_PANEL_MIN_SIZE = 120;
 export type TerminalDockPanelProps = {
 	/** agent 或 project 终端目标；未解析时组件渲染 null（与 SessionRuntimeDock 同契约） */
 	target?: TerminalTarget;
+	/** 可选的 target 项目记录：project 终端用它判定远端外观（SSH tab 建立前） */
+	targetProject?: Project;
 	open: boolean;
 	closing: boolean;
 	collapsed: boolean;
@@ -105,6 +107,7 @@ export function TerminalDockPanel(props: TerminalDockPanelProps) {
 				<SessionRuntimeDock
 					key={props.ownerKey}
 					target={props.target}
+					targetProject={props.targetProject}
 					mounted
 					open={props.open}
 					closing={props.closing}

@@ -1,4 +1,4 @@
-import { ipcChannels } from "../../shared/ipc";
+import { agentEventTags } from "../../shared/ipc";
 import { calculateTokensPerSecond, calculateSessionTokensPerSecond, type TaskPerfSpan } from "../../shared/tps";
 
 /** 最近一次 assistant 回复及会话级性能指标（结算后保留，供 getRuntimeState 合并展示）。 */
@@ -180,7 +180,7 @@ export class MessagePerfTracker {
 			totalMs,
 		});
 		this.lastPerfByAgent.set(agentId, { ttftMs, totalMs, endToEndTps, tps, sessionTps, sessionEndToEndTps, at: now });
-		emit(ipcChannels.agentsRuntimeState, {
+		emit(agentEventTags.agentsRuntimeState, {
 			agentId,
 			state: { ttftMs, totalMs, endToEndTps, tps, sessionTps, sessionEndToEndTps, perfAt: now },
 		});
@@ -245,7 +245,7 @@ export class MessagePerfTracker {
 	recordSubagentTask(agentId: string, task: { id?: string; startedAt: number; completedAt: number; tokens: number; firstDeltaAt?: number }, emit?: (channel: string, payload: unknown) => void): void {
 		if (!this.upsertSpan(agentId, task)) return;
 		const updated = this.refreshSessionPerf(agentId);
-		emit?.(ipcChannels.agentsRuntimeState, { agentId, state: this.sessionStatePatch(updated) });
+		emit?.(agentEventTags.agentsRuntimeState, { agentId, state: this.sessionStatePatch(updated) });
 	}
 
 	/**
@@ -260,7 +260,7 @@ export class MessagePerfTracker {
 		}
 		if (!modified) return;
 		const updated = this.refreshSessionPerf(agentId);
-		emit?.(ipcChannels.agentsRuntimeState, { agentId, state: this.sessionStatePatch(updated) });
+		emit?.(agentEventTags.agentsRuntimeState, { agentId, state: this.sessionStatePatch(updated) });
 	}
 
 	/** 获取某 agent 会话已记录的所有性能区间 */

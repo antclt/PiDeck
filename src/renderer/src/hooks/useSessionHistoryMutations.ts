@@ -44,6 +44,8 @@ export interface SessionHistoryMutationsDeps {
 	isImageGenSession?: (sessionId: string) => boolean;
 	/** DSH 会话判定：fork 化重发/编辑只服务 pi 后端，DSH 维持 legacy 路径。 */
 	isDshSession?: (sessionId: string) => boolean;
+	/** 远端 SSH 会话判定：编辑/重发仍走 catalog（主机上的会话文件原地改写），不 fork。 */
+	isRemoteSession?: (sessionId: string) => boolean;
 	/** 目标消息是否是会话最后一条用户消息：决定 fork 后旧会话隐藏（替换）还是保留可见（分支）。 */
 	isLastUserMessage?: (sessionId: string, message: ChatMessage) => boolean;
 	/** 生图重发：把失败消息的提示词（+参考图）放回输入框供一键重试，代替对不存在的 pi 文件做截断。 */
@@ -54,7 +56,10 @@ export interface SessionHistoryMutationsDeps {
  * pi 历史消息改写：编辑/重发走 fork 化重试（fork 到目标 entry → 子会话立即重发，旧分支
  * 完整保留在原文件，旧会话记录打 supersededBy 从列表隐藏）；删除仍走文件墓碑（无 runtime
  * 直接改 JSONL，有 runtime 先停再改）。DSH 不迁移（策略层返回 catalog legacy，且入口按
- * backend 隐藏）。匿名会话无文件：编辑/删除明确不支持，重发退化为重新提交。
+ * backend 隐藏）。**远端 SSH 会话也不迁移**：会话文件在主机上，编辑/重发走 catalog →
+ * RemoteSessionHistoryWriter 原地改写与外部改动冲突检测；pi 的 fork RPC 只接受 user 条目，
+ * 编辑目标（assistant 回复）走 fork 化会被 pi 拒绝。匿名会话无文件：编辑/删除明确不支持，
+ * 重发退化为重新提交。
  */
 export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
 	const setOverlay = useSetAtom(setSessionHistoryMutationOverlayAtom);
@@ -285,6 +290,8 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
 				live: latest.isSessionRuntimeLive(sessionId),
 				persisted: latest.hasPersistedSessionFile(sessionId),
 				isDshSession: latest.isDshSession?.(sessionId),
+				// 远端会话的编辑必须走 catalog：pi 的 fork 只接受 user 条目，编辑目标是 assistant 回复。
+				isRemoteSession: latest.isRemoteSession?.(sessionId) === true,
 			});
 			if (path.path === "unsupported-anonymous") {
 				latest.showToast(t("message.anonymousEditUnsupported"), 4000);
@@ -393,6 +400,8 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
 				isImageGenSession: latest.isImageGenSession?.(sessionId),
 				// DSH 兜底：正常 UI 已按 backend 隐藏重发入口，这里仅防御冷 DSH 误入
 				isDshSession: latest.isDshSession?.(sessionId),
+				// 远端会话重发改写主机上的会话文件（远端 writer），不做 pi fork。
+				isRemoteSession: latest.isRemoteSession?.(sessionId) === true,
 			});
 			// 匿名重发：没有文件可截断旧轮次（prepareRuntimeResend 必然报 “Session not
 			// persisted”），直接把原消息文本重新提交（submitPromptSnapshot 会自动激活
@@ -493,6 +502,14 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
 			// state 只负责呈现；首次 await 前同步加锁，覆盖冷启动、锚点解析和同一轮重复点击。
 			forkingRef.current = true;
 			setForkingMessageId(busyKey);
+			// fork 是「慢 + 多步 + 易失败」的用户动作（冷会话要先激活远端 runtime 8–16s）。
+			// 缺轨迹时只能靠 240s 后的 e2e 超时反推，实测把一次 1ms 的确定性拒绝误诊成「挂起」一整天。
+			// 里程碑进 renderer:log info、失败进 warn，与主进程 Session fork * 日志配对使用。
+			const forkStartedAt = Date.now();
+			const forkLog = (level: "info" | "warn", message: string, detail?: Record<string, unknown>) => {
+				void window.piDesktop?.app.rendererLog?.(level, "session", message, { sessionId, ...detail }).catch(() => undefined);
+			};
+			forkLog("info", "Fork started", { entryOrMessage: typeof entryOrMessage === "string" ? entryOrMessage : entryOrMessage.id });
 			try {
 				let target = latest.getRuntimeTargetForSession(sessionId);
 				if (!target) {
@@ -503,14 +520,17 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
 						agentId: activated.agentId,
 						runtimeGeneration: activated.runtimeGeneration,
 					};
+					forkLog("info", "Fork runtime activated", { agentId: target.agentId, runtimeGeneration: target.runtimeGeneration, elapsedMs: Date.now() - forkStartedAt });
 				}
 				const entryId = typeof entryOrMessage === "string" ? entryOrMessage : await resolveForkEntryId(entryOrMessage, target);
 				if (!entryId) {
 					latest.showToast(t("app.forkMissingEntryId"), 4000);
 					return;
 				}
+				forkLog("info", "Fork entry resolved", { entryId, elapsedMs: Date.now() - forkStartedAt });
 				showOverlay(sessionId, "forking");
 				const result = requireSessionCommand(await api.sessions.forkRuntimeSession(target, entryId));
+				forkLog("info", "Fork rpc returned", { entryId, cancelled: result.cancelled === true, targetSessionId: result.targetSessionId ?? null, elapsedMs: Date.now() - forkStartedAt });
 				if (result.cancelled) {
 					latest.showToast(t("app.forkCancelled"), 3500);
 					return;
@@ -521,7 +541,9 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
 				const { draft: promptText, quotes } = rehydrateDraftFromMessage(rawPromptText);
 				const projectId = latest.resolveProjectId(sessionId);
 				const targetSessionId = result.targetSessionId;
+				forkLog("info", "Fork rebind started", { targetSessionId: targetSessionId ?? null, projectId: projectId ?? null });
 				await latest.openReplacedRuntimeSession(projectId, targetSessionId);
+				forkLog("info", "Fork rebind completed", { targetSessionId: targetSessionId ?? null, elapsedMs: Date.now() - forkStartedAt });
 				const draftTarget = targetSessionId ?? sessionId;
 				if (targetSessionId) latest.setCurrentSessionIdRef(targetSessionId);
 				if (quotes.length > 0) {
@@ -539,6 +561,7 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
 				latest.showToast(t("app.forkDone"), 3500);
 			} catch (error) {
 				const msg = error instanceof Error ? error.message : String(error);
+				forkLog("warn", "Fork failed", { error: msg, elapsedMs: Date.now() - forkStartedAt });
 				latest.showToast(t("app.forkFailed", { error: latest.translateAgentErrorMessage(msg) }), 5000);
 			} finally {
 				forkingRef.current = false;

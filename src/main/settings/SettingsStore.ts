@@ -38,6 +38,7 @@ import { sanitizeAcpTools } from "../acp/acpToolConfig";
 import { normalizeFontSizeMode, normalizeOptionalFontSizeMode } from "../../shared/fontSize";
 import { clampSessionTabMaxWidth, SESSION_TAB_MAX_WIDTH_DEFAULT } from "../../shared/sessionTabWidth";
 import { getAppLogger } from "../logging/sharedLogger";
+import { normalizeRemoteProjectTrustRecords } from "../remote/RemoteProjectTrust";
 import { setConfiguredGitPath } from "../git/gitExecutable";
 import { renameWithRetry } from "../utils/fsRetry";
 
@@ -386,6 +387,10 @@ Gitmoji 对应关系：
 	piRpcNoExtensions: false,
 	piRpcNoSkills: false,
 
+	// ── 远端项目 trust（P4.4b）：决策表存在这里，随配置备份一起走 ──
+	// 缺省空表 = 未决策任何远端项目 ⇒ 远端 spawn 不传任何 trust flag（与历史行为逐字一致）。
+	remoteProjectTrust: [],
+
 	// 字体配置：默认使用系统字体；用户可通过自定义字体设置修改。
 	// 出厂默认取 "default" 档：与 CSS token 基线（:root 无覆盖时）一致，
 	// 避免「默认」档位名与实际出厂外观错位（旧默认 medium 比 default 大一档）。
@@ -474,6 +479,16 @@ function clampToastDurationMs(value: unknown): number {
 	if (value === TOAST_DURATION_STICKY_MS) return TOAST_DURATION_STICKY_MS;
 	if (typeof value !== "number" || !Number.isFinite(value) || value < 1000 || value > 60000) return DEFAULT_TOAST_DURATION_MS;
 	return value;
+}
+
+/**
+ * ACP 超时口径清洗：只接受正整数毫秒（上限 24h）；其余（脏数据/越界/负数/浮点）返回
+ * undefined 回落代码内默认（stall 90s / turn 10min），不落盘脏值去骗看门狗。
+ */
+function sanitizeOptionalPositiveIntMs(value: unknown): number | undefined {
+	if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+	const n = Math.floor(value);
+	return n > 0 && n <= 86_400_000 ? n : undefined;
 }
 
 export class SettingsStore {
@@ -586,6 +601,9 @@ export class SettingsStore {
 			this.settings.acpEnabled = parsed.acpEnabled === true;
 			// ACP 工具登记表：手改 settings.json 的脏条目在加载边界归一，不等到首次 update。
 			this.settings.acpTools = sanitizeAcpTools(parsed.acpTools);
+			// ACP 超时口径：正整数毫秒；脏值丢弃回落代码内默认（stall 90s / turn 10min）。
+			this.settings.acpPromptStallTimeoutMs = sanitizeOptionalPositiveIntMs(parsed.acpPromptStallTimeoutMs);
+			this.settings.acpPromptTurnTimeoutMs = sanitizeOptionalPositiveIntMs(parsed.acpPromptTurnTimeoutMs);
 			// 字号档位：旧版本有 5 档（多一个已删除的 "default"），现在是 4 档（紧凑/中/大/特大）。
 			// 刻意不做迁移框架——任何不在档位表里的历史值一律落到「中」，旧用户升级后自动等于中；
 			// 同时避免 UI 下拉读到未知值时变成空白。null（跟随全局）必须保持 null。
@@ -650,6 +668,9 @@ export class SettingsStore {
 			this.settings.hiddenComposerFeatures = normalizeHiddenComposerFeatures(parsed.hiddenComposerFeatures);
 			// 兼容迁移：模式选择器开关原在「功能模块」（hiddenModules）里，现归「输入框功能显示」。
 			this.migrateRemovedComposerModesToggle();
+			// 远端 trust 决策表来自旧 JSON 时可能是脏值（非数组 / 字段畸形 / key 与零件不自洽）：
+			// 逐条严格解码后丢弃脏条目。缺这一段 = 空表（未决策过），不做任何迁移。
+			this.settings.remoteProjectTrust = normalizeRemoteProjectTrustRecords(parsed.remoteProjectTrust);
 		}
 		// showThinking 不再作为可持久化的独立配置项，完全跟随 pi agent 的 hideThinkingBlock。
 		// 启动时重新读取以确保每次启动都使用最新值，而非缓存的 defaultSettings。
@@ -757,7 +778,9 @@ export class SettingsStore {
 
 	async update(patch: Partial<AppSettings>) {
 		// showThinking 完全由 pi agent 的 hideThinkingBlock 控制，不允许通过桌面设置修改
-		const { showThinking: _, ...safePatch } = patch;
+		// remoteProjectTrust 同属「不能让通用设置补丁碰」的一段：它决定远端项目 `.pi` 资源是否执行，
+		// 写入必须走远端 trust 域（它持有 pin 事实与 key 计算），见 replaceRemoteProjectTrust。
+		const { showThinking: _, remoteProjectTrust: __, ...safePatch } = patch;
 		// 按供应商/模型代理白名单变更时做规范化（去重去空白），避免非法值写入磁盘。
 		if ("piProxyProviders" in safePatch) {
 			safePatch.piProxyProviders = normalizeProxyList(safePatch.piProxyProviders);
@@ -861,6 +884,18 @@ export class SettingsStore {
 		}
 		if ("acpTools" in safePatch) {
 			safePatch.acpTools = sanitizeAcpTools(safePatch.acpTools);
+		}
+		// ACP 超时口径来自渲染层/手改，入参不可信：非法值删键不落盘（保留既有合法值或回落默认），
+		// 合法值 floor 成整数——同一口径在加载边界与写入边界都归一，避免两条路径漂移。
+		if ("acpPromptStallTimeoutMs" in safePatch) {
+			const stallMs = sanitizeOptionalPositiveIntMs(safePatch.acpPromptStallTimeoutMs);
+			if (stallMs === undefined) delete safePatch.acpPromptStallTimeoutMs;
+			else safePatch.acpPromptStallTimeoutMs = stallMs;
+		}
+		if ("acpPromptTurnTimeoutMs" in safePatch) {
+			const turnMs = sanitizeOptionalPositiveIntMs(safePatch.acpPromptTurnTimeoutMs);
+			if (turnMs === undefined) delete safePatch.acpPromptTurnTimeoutMs;
+			else safePatch.acpPromptTurnTimeoutMs = turnMs;
 		}
 		// 更新源 id 归一化（只允许已知枚举：atomgit 第一首选，github 官方；其余历史值回退 atomgit）。
 		if ("updateSource" in safePatch) {
@@ -1069,6 +1104,19 @@ export class SettingsStore {
 		// 只记变更的 key 列表，不记值——避免 proxyUrl 等敏感内容落盘；值变更回查用 save 前的内存态
 		void getAppLogger()?.info("settings", "Settings updated", { keys: Object.keys(safePatch) });
 		return this.get();
+	}
+
+	/**
+	 * 整体替换远端项目 trust 决策表（P4.4b）。
+	 *
+	 * 为什么单开一个入口、而不是让通用 `update()` 接这一段：trust 记录决定「远端项目的 `.pi` 资源是否执行」，
+	 * 其写入必须由持有 pin 事实的一方（`RemoteProjectTrustService`）按 trust key 生产；把这一段暴露给通用
+	 * `settings:update` 通道，等于把「用一条渲染层构造的记录换掉整张表」变成可能。这里仍做严格解码归一化
+	 * （只信形状，不信来源），并立即落盘（决策要跨重启、撤销要马上生效）。
+	 */
+	async replaceRemoteProjectTrust(records: unknown): Promise<void> {
+		this.settings.remoteProjectTrust = normalizeRemoteProjectTrustRecords(records);
+		await this.save();
 	}
 
 	/** 规范化按供应商代理白名单：去重、去空白、过滤非字符串。 */

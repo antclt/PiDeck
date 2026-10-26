@@ -1,4 +1,82 @@
 export const ipcChannels = {
+	remoteHostsList: "remote:hosts-list",
+	/** 连接一台已 pin 的主机（会启动真实 SSH；失败返回稳定码）。 */
+	remoteHostConnect: "remote:connect",
+	/** 断开一台主机的实时会话（不忘记已验证的 bootstrap）。 */
+	remoteHostDisconnect: "remote:disconnect",
+	/** 读取某主机的脱敏诊断历史（只读，不启动任何进程）。 */
+	remoteHostDiagnostics: "remote:diagnostics",
+	/** 扫描 ~/.ssh/config 列出可添加的候选（只读；不联网、不改动任何配置）。 */
+	remoteHostScanConfig: "remote:scan-config",
+	/** 添加主机：建立 draft、完成首次 host key 信任（TOFU）并落盘 pin，返回 verified。 */
+	remoteHostAdd: "remote:add",
+	/** 主进程 → 渲染层：主机连接状态变化推送（connect 返回之后的迁移也在此到达）。 */
+	remoteHostStateChanged: "remote:state-changed",
+	/** 只读：诊断 needs-repair 的原因与合法动作（不写任何东西）。 */
+	remoteHostRepairDiagnose: "remote:repair-diagnose",
+	/** 发起修复：校验后推送确认请求（推送走 remoteHostRepairConfirm）。 */
+	remoteHostRepairRun: "remote:repair-run",
+	/** 回答修复确认（只能回答 main 签发的 requestId）。 */
+	remoteHostRepairAnswer: "remote:repair-answer",
+	/** 主进程 → 渲染层：修复确认请求推送。 */
+	remoteHostRepairConfirm: "remote:repair-confirm",
+	/** 登记远端目录为持久项目：canonical 化并推送确认（不写任何东西）。 */
+	remoteProjectEnroll: "remote:project-enroll",
+	/** 回答登记确认；批准后才写 ProjectStore。 */
+	remoteProjectAnswer: "remote:project-answer",
+	/** 主进程 → 渲染层：项目登记确认请求推送。 */
+	remoteProjectEnrollConfirm: "remote:project-enroll-confirm",
+	/** 按 projectId 列目录（相对路径；根为空串）。 */
+	remoteProjectList: "remote:project-list",
+	/** 按 projectId 读文件（相对路径）。 */
+	remoteProjectRead: "remote:project-read",
+	/** 把远端项目里的一个文件下载到本机（主进程弹保存对话框；字节数受远端读上限约束）。 */
+	remoteProjectDownload: "remote:project-download",
+	/** 把本机文件上传到远端项目的当前目录（主进程弹选择对话框；stdin 分块写，支持二进制）。 */
+	remoteProjectUpload: "remote:project-upload",
+	/** 同上，但本机路径由拖放给出（主进程逐条校验是常规文件，不弹对话框）。 */
+	remoteProjectUploadPaths: "remote:project-upload-paths",
+	/** 已有远端文本文件编辑：main持有版本，保存必须携带打开时签发的令牌。 */
+	remoteProjectTextOpen: "remote:project-text-open",
+	remoteProjectTextSave: "remote:project-text-save",
+	/** 远端文件管理（Phase 5 文件面）：entry-stat 签发 rename/delete 的一次性 entry 令牌。 */
+	remoteProjectEntryStat: "remote:project-entry-stat",
+	/** 新建 0 字节文件（create-only；目标已存在返回稳定码）。 */
+	remoteProjectFileCreate: "remote:project-file-create",
+	/** 新建单层空目录（create-only；不递归创建父链）。 */
+	remoteProjectDirectoryCreate: "remote:project-directory-create",
+	/** 项目根内重命名/移动（create-only；不覆盖已有目标）。 */
+	remoteProjectEntryRename: "remote:project-entry-rename",
+	/** 删除到项目内 .pideck-trash（可还原；不是 unlink）。 */
+	remoteProjectEntryDelete: "remote:project-entry-delete",
+	/** 列出项目内回收站（有界；只读，不创建回收站目录）。 */
+	remoteProjectTrashList: "remote:project-trash-list",
+	/** 还原回收站条目到 manifest 记录的原路径（目标必须不存在）。 */
+	remoteProjectTrashRestore: "remote:project-trash-restore",
+	/** 永久删除回收站条目（显式确认即授权；invalid 条目永不自动删除）。 */
+	remoteProjectTrashPrune: "remote:project-trash-prune",
+	/** 回答「新建空远端项目」确认；创建/复核/登记全部在批准后由 main 完成。 */
+	remoteProjectCreateAnswer: "remote:project-create-answer",
+	/** 主进程 → 渲染层：「新建空远端项目」确认请求推送（与既有目录登记确认分开）。 */
+	remoteProjectCreateConfirm: "remote:project-create-confirm",
+	/** 按 projectId 在项目内做**文件名**搜索（不含内容搜索）；query 在 main 边界重新校验。 */
+	remoteProjectSearch: "remote:project-search",
+	/** 项目已确认 root 的最近一次复核结果（只读、不建会话、无 helper 请求）。 */
+	remoteProjectRootStatus: "remote:project-root-status",
+	/** 列出远端主机上的会话文件（只读、有界；不含正文）。 */
+	remoteSessionScan: "remote:remote-session-scan",
+	/** 按需解析一条远端会话的标题（有界头读；只读、不写 catalog）。 */
+	remoteSessionTitle: "remote:remote-session-title",
+	/** 把一条远端会话幂等登记进本地 catalog。 */
+	remoteSessionRegister: "remote:remote-session-register",
+	/** 远端项目 trust：列清单（主机 label + 项目根 + 状态；不含任何 pin 材料）。 */
+	remoteTrustList: "remote:trust-list",
+	/** 远端项目 trust：记录一条决策（approve/deny）。 */
+	remoteTrustSet: "remote:trust-set",
+	/** 远端项目 trust：撤销某 (hostId, 规范项目根) 的决策（含已作废的那条）。 */
+	remoteTrustClear: "remote:trust-clear",
+	// 远端 Pi 运行时的模型目录（host 级只读探测；渲染层只传 hostId，main 自己找 live agent）。
+	remotePiModels: "remote:pi-models",
 	projectsList: "projects:list",
 	projectsAdd: "projects:add",
 	// 文件夹右键菜单直达：按路径添加项目（渲染层确认后调用；projectsAdd 走系统目录选择框）
@@ -118,10 +196,25 @@ export const ipcChannels = {
 	sessionsCatalogArchive: "sessions:catalog-archive",
 	/** 恢复归档会话：移回原路径并重新入目录 */
 	sessionsCatalogUnarchive: "sessions:catalog-unarchive",
+	/**
+	 * 恢复**远端**归档会话（P4.5b）：入参是本机 catalog 会话 id，不是路径。
+	 * 远端文件没有本机归档路径，所以不能沿用 `sessions:catalog-unarchive` 的路径契约；
+	 * 恢复目标（归档前/后的远端绝对路径）由本机归档索引给出。
+	 */
+	sessionsCatalogUnarchiveRemote: "sessions:catalog-unarchive-remote",
 	/** 列出已归档会话摘要（恢复 UI 用） */
 	sessionsCatalogListArchived: "sessions:catalog-list-archived",
 	/** 永久删除已归档会话：归档区文件移入系统回收站并从索引移除（区别于恢复）。 */
 	sessionsCatalogDeleteArchived: "sessions:catalog-delete-archived",
+	/**
+	 * 远端归档会话「永久删除」的**请求**（Phase 5 必须）：入参只有本机 catalog 会话 id——
+	 * 远端路径永远不从渲染层传（main 只认本机归档索引）。main 校验运行态/索引后签发一次性
+	 * 确认 requestId（PendingConfirmationBroker，sender 绑定、60s 过期、消费一次即失效），
+	 * 本通道不执行任何远端命令。
+	 */
+	sessionsCatalogDeleteArchivedRemote: "sessions:catalog-delete-archived-remote",
+	/** 回答上一条一次性确认：requestId + approve/deny；仅 approve 才执行有界远端 rm 与索引清理。 */
+	sessionsCatalogAnswerDeleteArchivedRemote: "sessions:catalog-answer-delete-archived-remote",
 	sessionsCatalogReadMessages: "sessions:catalog-read-messages",
 	sessionsCatalogReadMessagePage: "sessions:catalog-read-message-page",
 	/** 会话 JSONL 过程事件（session/model/thinking/custom/compaction），供轨迹复盘，不进聊天时间线。 */
@@ -132,6 +225,13 @@ export const ipcChannels = {
 	/** 会话级文件修改汇总：从会话文件全量显示消息聚合 write/edit/create/patch。 */
 	/** 会话级 todo 快照：从会话文件 pi-deck-todo custom 条目重建最新计划。 */
 	sessionsListSessionTodo: "sessions:list-session-todo",
+	/**
+	 * 会话级模型目录（按 location 分流）：远端会话由该会话的远端 pi 进程回答
+	 * `get_available_models`，本机会话走 projects:list-models-report 同一套本机解析。
+	 * 与 projects:list-models-report 的区别：那条永远回答本机目录，给远端会话选模型
+	 * 必然 Model not found。
+	 */
+	sessionsListModels: "sessions:list-models",
 	/** DSH 会话轨迹系统提示（request/header 事件的 EpochHeader.system；非 DSH/无数据返回 undefined）。 */
 	sessionsCatalogReadReferenceMessages: "sessions:catalog-read-reference-messages",
 	/** 按需读取单条消息完整文本（工具结果截断后的「查看完整输出」入口）。 */
@@ -508,6 +608,30 @@ export const ipcChannels = {
 	gitCommitFileDiff: "git:commit-file-diff",
 	gitDiffFileBetween: "git:diff-file-between",
 	gitStatus: "git:status",
+	/** SSH root repository facts plus SCM groups; writes/history/sync remain capability-blocked. */
+	gitRemoteSnapshot: "git:remote-snapshot",
+	/** G5d: bounded repository discovery under the project root (no token, read only). */
+	gitRemoteRepos: "git:remote-repos",
+	gitRemoteMutateIndex: "git:remote-mutate-index",
+	gitRemoteCommit: "git:remote-commit",
+	gitRemoteLog: "git:remote-log",
+	gitRemoteCommitDetail: "git:remote-commit-detail",
+	gitRemoteRefs: "git:remote-refs",
+	gitRemoteRefFileDiff: "git:remote-ref-file-diff",
+	gitRemoteCompare: "git:remote-compare",
+	/** Explicit init at the project root; no token because there is no confirmed repository state to bind. */
+	gitRemoteInit: "git:remote-init",
+	gitRemoteCreateBranch: "git:remote-create-branch",
+	gitRemoteSwitchBranch: "git:remote-switch-branch",
+	gitRemoteDiscard: "git:remote-discard",
+	gitRemoteRecoveryList: "git:remote-recovery-list",
+	gitRemoteRecoveryRestore: "git:remote-recovery-restore",
+	gitRemoteRecoveryDrop: "git:remote-recovery-drop",
+	gitRemoteSyncFacts: "git:remote-sync-facts",
+	gitRemoteFetch: "git:remote-fetch",
+	gitRemotePush: "git:remote-push",
+	gitRemotePull: "git:remote-pull",
+	gitRemoteCancelReads: "git:remote-cancel-reads",
 	gitWorkspaceFileDiff: "git:workspace-file-diff",
 	gitStage: "git:stage",
 	gitUnstage: "git:unstage",
@@ -665,31 +789,13 @@ export const ipcChannels = {
 	/** 读取主窗口当前是否置顶（渲染层初始化置顶按钮态用，避免硬编码 false） */
 	appWindowIsAlwaysOnTop: "app:window-is-always-on-top",
 	appWindowClose: "app:window-close",
-	agentsRuntimeState: "agents:runtime-state",
-	agentsState: "agents:state",
 	projectsListModels: "projects:list-models",
 	/** 模型列表诊断报告：模型数组 + 失败原因分类（版本过低/配置损坏/pi 未安装），
 	 *  供模型选择器在列表为空时给出差异化引导；force=true 时绕过缓存重新 fork。 */
 	projectsListModelsReport: "projects:list-models-report",
 	/** 模型规格查询：pi-ai 内置目录按模型 id 精确匹配，中转站通用 */
 	projectsGetModelSpec: "projects:get-model-spec",
-	agentsMessage: "agents:message",
-	agentsLog: "agents:log",
 
-	/** 流式思考内容更新，agent 忙碌时实时推送当前思考文本 */
-	agentsThinking: "agents:thinking",
-
-	/** 流式正文内容更新，agent 忙碌时实时推送累积正文（阶段1：独立于 messages 数组） */
-	agentsTextStream: "agents:text-stream",
-
-	/**
-	 * 主进程 → 渲染进程的轻量 toast 通知（如 abort 已请求停止）。
-	 * 避免把瞬时状态反馈写成会话时间线里的系统卡片。
-	 */
-	agentsNotice: "agents:notice",
-
-	/** Agent Extension UI 协议：主进程 → 渲染进程，推送扩展的 UI 请求（select/confirm/input/editor） */
-	agentsUiRequest: "agents:ui-request",
 	/** 项目信任确认：主进程 → 渲染进程，启动 Agent 前请求用户对含 .pi 资源的项目做信任决策 */
 	projectsTrustRequest: "projects:trust-request",
 	/** 项目信任确认：渲染进程 → 主进程，回传用户的信任选择（trust-remember/trust-session/deny） */
@@ -822,6 +928,8 @@ export const ipcChannels = {
 	terminalEnsure: "terminal:ensure",
 	terminalCreate: "terminal:create",
 	terminalInput: "terminal:input",
+	/** Acknowledge one bounded SSH output packet after rendering or buffering. */
+	terminalAcknowledge: "terminal:acknowledge",
 	terminalResize: "terminal:resize",
 	terminalClose: "terminal:close",
 	terminalData: "terminal:data",
@@ -1225,4 +1333,32 @@ export const ipcChannels = {
 	acpSessionConfigSet: "acp:session-config-set",
 	/** 主→渲染：configOptions 变更（set 响应/config_option_update 通知）。 */
 	acpSessionConfigChanged: "acp:session-config-changed",
+} as const;
+
+/**
+ * Agent 事件标签（**不是 IPC 通道**）。
+ *
+ * 这些名字是 AgentManager / AcpAgentManager / DshAgentManager 对宿主 `emit()` 的第一个参数：
+ * 主进程的 `emitSessionRuntimeEvent(agentId, sourceChannel, payload)` 把它们聚合成唯一一条
+ * `ipcChannels.sessionsRuntimeEvent` 再推给渲染层。
+ *
+ * 为什么不能混进 `ipcChannels`：铁律「新 IPC 三处同步」的口径是「主进程注册 + preload 转发」，
+ * 而这 8 个两边都不出现。混放会让任何机械校验要么误报、要么被迫开白名单，规则就退化成靠人记。
+ * - 新增 `ipcChannels` 条目 → 必须主进程注册 + preload 转发（`npm run check:ipc-wiring`）；
+ * - 新增 `agentEventTags` 条目 → 只在主进程内部流转，preload 不得出现（同一条校验）。
+ */
+export const agentEventTags = {
+	/** 运行态快照（底栏状态 / 上下文仪表数据源） */
+	agentsRuntimeState: "agents:runtime-state",
+	agentsState: "agents:state",
+	agentsMessage: "agents:message",
+	agentsLog: "agents:log",
+	/** 流式思考内容更新，agent 忙碌时实时推送当前思考文本 */
+	agentsThinking: "agents:thinking",
+	/** 流式正文内容更新，agent 忙碌时实时推送累积正文（阶段1：独立于 messages 数组） */
+	agentsTextStream: "agents:text-stream",
+	/** 主进程 → 渲染进程的轻量 toast 通知（如 abort 已请求停止）；避免把瞬时状态反馈写成会话时间线里的系统卡片 */
+	agentsNotice: "agents:notice",
+	/** Agent Extension UI 协议：主进程 → 渲染进程，推送扩展的 UI 请求（select/confirm/input/editor） */
+	agentsUiRequest: "agents:ui-request",
 } as const;

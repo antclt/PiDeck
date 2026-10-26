@@ -18,8 +18,10 @@ import type {
 	SessionOutlineSnapshot,
 	I18nParams,
 	ImageContent,
-	SessionMessageImageTarget,
+	LocalProject,
 	Project,
+	RemoteProject,
+	RewindCheckpointHealth,
 	RewindCheckpointPage,
 	RewindCheckpointPageParams,
 	RewindRestoreResult,
@@ -29,15 +31,20 @@ import type {
 	PiCommand,
 	SessionEnvironment,
 	SessionBranchTree,
+	SessionMessageImageTarget,
 	SessionMessagePage,
 	SessionRuntimeModelSelection,
 	SessionTodoSnapshot,
 } from "../../shared/types";
-import { ipcChannels } from "../../shared/ipc";
+import { agentEventTags, ipcChannels } from "../../shared/ipc";
+import { isLocalProject, isRemoteProject } from "../../shared/projectLocation";
+import { collectSessionFileChanges } from "../../shared/fileChanges";
 import { parseBusySendDelivery } from "../../shared/busySendDelivery";
 import { extractPiToolTruncation } from "../../shared/formatToolDetail";
 import { COMPACT_CANCELLED_BY_OWNER, COMPACT_CANCELLED_BY_USER_ABORT, COMPACT_HOOK_REJECT_MAX_MS, COMPACT_OBSERVATION_MAX_AGE_MS, COMPACT_ROUTED_TO_OWNER, COMPACT_USER_ABORT_WINDOW_MS, COMPACT_WAIT_TIMEOUT } from "../../shared/compactFeedback";
-import { PiProcess } from "./PiProcess";
+import { SessionLocatorRouter } from "../sessions/SessionLocatorRouter";
+import { PiProcess, type WhitelistSkip } from "./PiProcess";
+import { resolveWhitelistSkipCopy } from "./whitelistSkipNotice";
 import { APP_DISPLAY_NAME } from "../utils/appBrand";
 import { isMainWindowFocused, shouldAlertNow } from "../notifications/alertFocusGate";
 import { buildToastXml, notificationLaunchUrl, resolveNotificationLogoUri } from "../notifications/notificationToast";
@@ -48,6 +55,7 @@ import { parseAvailableThinkingLevelsResponse } from "./thinkingLevels";
 import { listActiveBuiltInExtensionPaths } from "../extensions/builtInExtensions";
 import { createPiProcessExtensionResolvers } from "../extensions/piProcessExtensionResolvers";
 import { piVersionAtLeast } from "../extensions/extensionVersionGate";
+import { PI_DECK_MODE_MARKER_EXTENSIONS } from "../../shared/composerModeMarkers";
 import { resolveLoadableExtensionPaths } from "../extensions/enabledExtensionResolver";
 import { collectEntryRendererTypes } from "./extensionEntryRendererScan";
 import { resolveBuiltInExtensionsOverlayDir } from "../extensions/builtInExtensions";
@@ -66,13 +74,18 @@ import { formatExtensionErrorReason } from "./extensionError";
 import type { RpcResponse } from "./PiRpcClient";
 import { formatBashToolMessage } from "./bashResult";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
+import { remotePiDiscoveryCopyKey } from "../remote/remotePiDiscoveryCopy";
 import { mergeHistoryWithPreservedMessages, stabilizeProjectedIdsFromIdentities, stabilizeReloadedMessageIds } from "./historyMessages";
 import { buildAgentSessionKey, toAbsoluteSessionPath, type AgentSessionIdentityDefaults } from "./agentSessionIdentity";
+import type { PiRuntimeLauncher, RemoteSshPiRuntimeLaunchPlan } from "./PiSpawnHandle";
+import { REMOTE_RUNTIME_CODES, type RemoteRuntimePort } from "./remoteRuntimePort";
+import type { RemoteSessionRegistration } from "../sessions/SessionCatalog";
 import { SessionFileEditor, type SessionEntryTarget, type SessionFileRef } from "./SessionFileEditor";
 import { SessionHistoryReader, boundTurnWindowStart } from "./SessionHistoryReader";
 import { createTrajectoryFactsReader, type TrajectoryFactsReader } from "../sessions/trajectoryFactsReader";
 import { scanJsonlLines } from "../sessions/jsonlLineStream";
 import { estimateMessagesPayloadBytes } from "./messagePayloadSize";
+import { bindRemoteUserMessageTimestamp } from "./remoteMessageTimestamp";
 import { StoppedMessageIdentityCache } from "./stoppedMessageIdentity";
 import { currentIndexTree, diffCheckpoints, loadAllCheckpoints, loadCheckpointFromRef, MUTATING_TOOLS, restoreCheckpoint as applyCheckpointRestore, toCheckpointSummary } from "../rewind/index.ts";
 import { AgentMessageProjector, buildActiveBranchEntryIds as buildActiveBranchEntryIdsForDisplay } from "./AgentMessageProjector";
@@ -164,7 +177,11 @@ function isPiBusyRejection(message: string): boolean {
  */
 export type AutomaticTitleSource = "auto" | "fallback";
 
+/** 会话身份 key 只读这些字段（与 `buildAgentSessionKey` 的入参同域；`sessionKeyFor` 追加远端主机限定）。 */
+type AgentSessionKeyInput = Pick<CreateAgentInput, "projectId" | "sessionPath" | "environment" | "source" | "wslDistro" | "wslUser" | "importedSourceId">;
+
 export class AgentManager {
+	private readonly sessionLocatorRouter = new SessionLocatorRouter();
 	/** 本网关的运行时后端身份：pi。 */
 	readonly backend: AgentBackend = "pi";
 	/** pi 后端支持全部可选能力。 */
@@ -378,7 +395,7 @@ export class AgentManager {
 		logInfo: (message, meta) => void this.appLogger?.info("agent", message, meta),
 		logWarn: (message, meta) => void this.appLogger?.warn("agent", message, meta),
 		emitAbortSlowNotice: (agentId) =>
-			this.emit(ipcChannels.agentsNotice, {
+			this.emit(agentEventTags.agentsNotice, {
 				agentId,
 				message: "停止响应较慢，可尝试重启会话",
 				i18nKey: "app.abortSlow",
@@ -509,6 +526,14 @@ export class AgentManager {
 		 */
 		private readonly resolveModelInCatalog?: (provider: string, modelId: string) => Promise<boolean>,
 		/**
+		 * 远端运行时端口（Phase 4 P4.2 产品路由）。
+		 *
+		 * **缺省 = 本机产品**：没有端口时远端项目仍然 `UNSUPPORTED_PROJECT_LOCATION`
+		 * （fail-closed，绝不静默把远端 cwd 当本机路径去起 pi）。装配处只在开发实验门禁下
+		 * 注入它，且端口本身还会在门禁关闭时以 `REMOTE_FEATURE_DISABLED` 拒绝。
+		 */
+		private readonly remoteRuntime?: RemoteRuntimePort,
+		/**
 		 * 第三方接管型 MCP 扩展列表（计划 M5b）。由 main/index.ts 注入 ExtensionManager.list()
 		 * 的轻量查询（缓存优先）；缺省 = 不检测（测试/预览环境）。
 		 */
@@ -520,13 +545,13 @@ export class AgentManager {
 			computeDisplayWindowStart: (messages) => this.computeDisplayWindowStart(messages),
 			computeWindowStartFilePos: (agentId, messages, windowStart) => this.computeWindowStartFilePos(agentId, messages, windowStart),
 			sessionFileVersion: (agentId) => this.sessionFileVersionByAgent.get(agentId),
-			emitMessageFlush: (payload) => this.emit(ipcChannels.agentsMessage, payload),
+			emitMessageFlush: (payload) => this.emit(agentEventTags.agentsMessage, payload),
 			emitStreamingStatePatch: (agentId) => this.emitStreamingStatePatch(agentId),
 		});
 		// 启动期诊断队列（Wave 4A）：宿主回调只暴露时间线写入/toast/设置读取/warn 日志。
 		this.startupDiagnostics = new StartupDiagnosticsQueue({
 			addLocalizedMessage: (agentId, role, i18nKey, fallbackText, options) => this.addLocalizedMessage(agentId, role, i18nKey, fallbackText, options),
-			emitNotice: (payload) => this.emit(ipcChannels.agentsNotice, payload),
+			emitNotice: (payload) => this.emit(agentEventTags.agentsNotice, payload),
 			isNoExtensionsSetting: () => Boolean(this.settingsStore.get().piRpcNoExtensions),
 		});
 		// 项目信任闸（Wave 4C）：宿主回调只暴露配置读写/日志/WSL 环境/窗口获取。
@@ -538,7 +563,7 @@ export class AgentManager {
 		});
 		// 扩展 UI 请求闸（Wave 4B）：宿主回调只暴露事件广播/runtime 访问/abort 标记。
 		this.uiGate = new ExtensionUiGate({
-			emitUiRequest: (payload) => this.emit(ipcChannels.agentsUiRequest, payload),
+			emitUiRequest: (payload) => this.emit(agentEventTags.agentsUiRequest, payload),
 			getRuntimeTab: (agentId) => this.agents.get(agentId)?.tab,
 			getClient: (agentId) => this.agents.get(agentId)?.process.client,
 			markAbortedDuringAsk: (agentId) => this.abortedDuringAsk.add(agentId),
@@ -575,6 +600,15 @@ export class AgentManager {
 		});
 	}
 
+	/**
+	 * 已准备好的远端启动计划（agentId → 计划 + 配对启动器）。
+	 *
+	 * 为什么按 agentId 存在 AgentManager 而不是写进 tab：plan 带着 nonce 与远端路径，是**运行时事实**
+	 * 而不是会话身份，而 tab 是 shared 契约（本批不改 shared）。`createRemoteUnlocked` 写入、
+	 * `spawnAndGetState` 消费、`clearAgentState` 随生命周期清理（agentId 每次 spawn 都是新 UUID）。
+	 */
+	private readonly remoteLaunchByAgent = new Map<string, { plan: RemoteSshPiRuntimeLaunchPlan; launcher: PiRuntimeLauncher }>();
+
 	/** Wave 2：注入 session-store 条目表读取器（未注入/返回 null 时读者回退 TS 逐行解析）。 */
 	setSessionStoreIndexReader(reader: ((hostPath: string, version: { size: number; mtimeMs: number }) => Promise<unknown>) | null): void {
 		this.sessionStoreIndexReader = reader ?? undefined;
@@ -606,12 +640,21 @@ export class AgentManager {
 	 * 安全管理：确保策略快照已落盘（小 JSON 写，等完成后启动，保证扩展首次拦截即可读到）。
 	 * settingsOverride 仅用于本次 spawn（如扩展加载失败后强制 --no-extensions），不改持久设置。
 	 *
-	 * `agentId` 可选：提供时同时注册模型快照会话，把
-	 * `PIDECK_MODEL_TRACE_URL` / `PIDECK_MODEL_TRACE_TOKEN` 注入 pi 子进程环境。
-	 * 不提供（如临时会话）则不注册 —— 扩展在该进程里静默不工作。
+	 * `agentId` 可选：提供时同时注册 GUI 扩展桥会话（§9.2）与模型快照会话，把
+	 * `PIDECK_BRIDGE_URL` / `PIDECK_BRIDGE_TOKEN` / `PIDECK_MODEL_TRACE_URL` / `PIDECK_MODEL_TRACE_TOKEN`
+	 * 注入 pi 子进程环境。不提供（如临时会话）则不注册 —— 桥与模型快照在该进程里静默不工作。
+	 *
+	 * `remoteLaunch` = 远端运行时（Phase 4 P4.2）：只带 plan + launcher，本地专属准备**一律不注入**。
+	 * 自带一份而不复用下面这些选项，是因为它们全是本机语义：扩展/技能/提示词白名单要去项目目录里
+	 * 扫文件、安全快照与 trust flag 要写/读本机 userData、会话文件预检要读本机 JSONL —— 而远端进程
+	 * 跑在另一台机器上（`PiProcess.start` 的远端分支也不消费这些选项，参数与 cwd 全来自 plan）。
 	 */
-	private createPiProcess(cwd: string, sessionPath?: string, securitySessionKey?: string, settingsOverride?: Partial<Pick<AppSettings, "piRpcNoExtensions" | "piRpcNoSkills" | "removedBuiltInExtensions">>, agentId?: string): PiProcess {
+	private createPiProcess(cwd: string, sessionPath?: string, securitySessionKey?: string, settingsOverride?: Partial<Pick<AppSettings, "piRpcNoExtensions" | "piRpcNoSkills" | "removedBuiltInExtensions">>, agentId?: string, remoteLaunch?: { plan: RemoteSshPiRuntimeLaunchPlan; launcher: PiRuntimeLauncher }): PiProcess {
 		const settings = settingsOverride ? { ...this.settingsStore.get(), ...settingsOverride } : this.settingsStore.get();
+		if (remoteLaunch) {
+			// cwd 只进诊断（远端诊断的 cwd 本来就来自 plan），本地读者看到的是远端项目根。
+			return new PiProcess(cwd, settings, undefined, { runtimePlan: remoteLaunch.plan, runtimeLauncher: remoteLaunch.launcher });
+		}
 		if (this.securityStore) {
 			void this.securityStore.ensureSnapshotWritten();
 		}
@@ -743,7 +786,11 @@ export class AgentManager {
 					// 没有这个显式判据时，spawn 失败只能靠错误文本里的 ENOENT 兜底识别，容易被改写漏掉。
 					spawnFailed: diag?.spawnFailed === true,
 				};
-				if (!shouldRetryWithoutExtensions(fallbackInput)) {
+				// 远端运行时没有「PiDeck 内置扩展注入」这件事：参数由 plan 决定（`buildRemotePiArgs` 只产出
+				// 基础参数与 `--session`），`--no-extensions` 不在其中 —— 回退重拉会用同一套参数再失败一次，
+				// 既丢了首次诊断，又把「远端启动失败」误报成扩展问题。远端扩展属 P4.4。
+				const remoteRuntime = this.isRemoteRuntime(this.agents.get(agentId)?.tab.projectId ?? "");
+				if (remoteRuntime || !shouldRetryWithoutExtensions(fallbackInput)) {
 					// 不回退也要把原因写清楚，否则用户会以为「说好的自动禁用扩展」失效了。
 					void this.appLogger?.warn("agent", "Pi start failed; extension fallback skipped", {
 						agentId,
@@ -752,7 +799,8 @@ export class AgentManager {
 						spawnFailed: diag?.spawnFailed === true,
 						cwdMissing: diag?.cwdMissing === true,
 						processStillRunning: fallbackInput.processStillRunning,
-						reason: describeExtensionFallbackSkip(fallbackInput),
+						remote: remoteRuntime,
+						reason: remoteRuntime ? "remote runtime: extension fallback is a local-only concept" : describeExtensionFallbackSkip(fallbackInput),
 					});
 					throw firstError;
 				}
@@ -805,11 +853,17 @@ export class AgentManager {
 		const existing = runtime?.process;
 		// 只复用 createUnlocked 预置、从未 start 的占位进程（diagnostics 仍为 null）。
 		// 已退出的旧进程不能复用：再 attach 会叠监听，reattach 必须换新实例。
+		// 远端运行时：计划与启动器是 createRemoteUnlocked 准备并经 remoteLaunchByAgent 登记的，
+		// 这里只取出来交给 createPiProcess（它据此走 PiProcess 的远端分支）。
+		const remoteLaunch = this.remoteLaunchByAgent.get(agentId);
+		// 远端 runtime 没有计划 = 准备阶段就失败了（那种 tab 的进程只是错误卡宿主）：绝不让它掉进
+		// 本地分支去用远端 cwd 起本机 pi（那是本批最不能出现的静默行为）。
+		if (!remoteLaunch && this.isRemoteRuntime(runtime?.tab.projectId ?? "")) throw new Error(REMOTE_RUNTIME_CODES.unavailable);
 		let process: PiProcess;
 		if (!settingsOverride && existing && !existing.isRunning() && existing.getDiagnostics() === null) {
 			process = existing;
 		} else {
-			process = this.createPiProcess(options.projectPath, options.sessionPath, options.deckSessionId, settingsOverride, agentId);
+			process = this.createPiProcess(options.projectPath, options.sessionPath, options.deckSessionId, settingsOverride, agentId, remoteLaunch);
 		}
 		if (runtime) runtime.process = process;
 		process.on("version-check", (payload) => {
@@ -889,7 +943,7 @@ export class AgentManager {
 			// 全局 toast：本次运行每个扩展只弹一次（连续新建会话/进程重连不刷屏）。
 			if (this.mcpThirdPartyNoticesSent.has(hit.source)) continue;
 			this.mcpThirdPartyNoticesSent.add(hit.source);
-			this.emit(ipcChannels.agentsNotice, {
+			this.emit(agentEventTags.agentsNotice, {
 				agentId,
 				message: hasEnabledServer ? `你的 MCP 由 ${hit.source} 接管，PiDeck 里配置的服务器不会被本会话加载。` : `${hit.source} 会接管 MCP（当前未配置服务器，暂无影响）；之后在 PiDeck 配的 MCP 不会生效。`,
 				i18nKey: hasEnabledServer ? "notice.mcpThirdParty.takeoverActive" : "notice.mcpThirdParty.takeoverIdle",
@@ -902,6 +956,29 @@ export class AgentManager {
 		}
 	}
 
+	/**
+	 * 某类白名单（扩展/技能/提示词）因超出启动参数预算被跳过：本次「禁用」不生效，必须显式说明。
+	 * 与扩展回退同一条启动期诊断链路：首个 run 前暂存，首个 agent_start 后落到时间线正确位置。
+	 */
+	private notifyWhitelistSkipped(agentId: string, entries: readonly WhitelistSkip[]): void {
+		for (const entry of entries) {
+			const copy = resolveWhitelistSkipCopy(entry);
+			void this.appLogger?.warn("agent", "Whitelist skipped: too many entries for launch args", {
+				agentId,
+				kind: entry.kind,
+				count: entry.count,
+				estimatedChars: entry.chars,
+				budget: entry.budget,
+			});
+			this.startupDiagnostics.queueStartupDiagnostic(agentId, {
+				role: "system",
+				i18nKey: copy.i18nKey,
+				fallbackText: copy.fallbackText,
+				options: { params: { count: entry.count, budget: entry.budget } },
+			});
+		}
+	}
+
 	/** Windows 主进程文件操作必须使用可由 host 访问的路径。 */
 	private toSessionHostPath(sessionPath: string): string {
 		return this.wslEnvironment ? toWindowsHostPath(sessionPath, this.wslEnvironment) : sessionPath;
@@ -910,6 +987,106 @@ export class AgentManager {
 	/** Pi/RPC/session identity 在 WSL 模式下始终使用 Linux 逻辑路径。 */
 	private toSessionProtocolPath(sessionPath: string): string {
 		return this.wslEnvironment ? toWslLinuxPath(sessionPath, this.wslEnvironment) : sessionPath;
+	}
+
+	/**
+	 * 会话模型目录分流用的窄接口：该 agent 是否跑在远端主机上。
+	 * 与 isRemoteRuntime 同一判据（项目 locator），只是把「按 agentId 问」暴露给 IPC 层——
+	 * 模型选择器只有 agentId，没有 projectId，不能自己推。
+	 */
+	isRemoteAgent(agentId: string): boolean {
+		return this.isRemoteRuntime(this.agents.get(agentId)?.tab.projectId ?? "");
+	}
+
+	/**
+	 * 同上，但按项目问：给「没有会话身份的入口」（小窗新建、自动化任务编辑器、引导页草稿）
+	 * 判远端用。没有这个，这些入口的模型选择器会默默给出本机目录，而它们最终仍会落到远端会话上。
+	 */
+	isRemoteProject(projectId: string): boolean {
+		return this.isRemoteRuntime(projectId);
+	}
+
+	/**
+	 * 这条 runtime 是否跑在远端主机上。
+	 *
+	 * 判据只看项目 locator（远端项目的 cwd 与会话文件都在那台机器上），不另存标记：远端身份在
+	 * AgentManager 里没有第二个来源，所有本机路径消费者都必须先问这一个问题。
+	 */
+	private isRemoteRuntime(projectId: string): boolean {
+		const project = this.getProject(projectId);
+		return project !== undefined && isRemoteProject(project);
+	}
+
+	/**
+	 * 本地专属操作的守卫：远端 runtime 的 cwd / 会话文件都在那台机器上，本机 fs/git/终端拿到它们
+	 * 只会得到「看起来能用、其实指到别的东西」的结果。
+	 *
+	 * 为什么抛稳定码而不是返回空：调用方（终端、git、会话文件读写）没有「远端」这一维，静默返回空
+	 * 会把「不支持」伪装成「这里没有东西」——用户以为没有快照、没有历史。
+	 */
+	private assertLocalRuntimeOperation(runtime: AgentRuntime, operation: string): void {
+		if (!this.isRemoteRuntime(runtime.tab.projectId)) return;
+		void this.appLogger?.warn("agent", "Local-only operation refused for a remote runtime", {
+			agentId: runtime.tab.id,
+			projectId: runtime.tab.projectId,
+			operation,
+		});
+		throw new Error(REMOTE_RUNTIME_CODES.localOperationUnsupported);
+	}
+
+	/**
+	 * 会话身份默认值：远端会话**不套 WSL**。
+	 *
+	 * 远端路径不是 WSL 路径（没有 /mnt 映射，也不随本机 WSL 设置变化）。套上 wsl 身份会有两个后果：
+	 * 同一远端会话在「本机 WSL 开/关」两种设置下得到两把 key（重复 runtime），且远端路径被交给
+	 * WSL 路径转换（`\\wsl$\…`）后落进本机文件操作。
+	 */
+	private sessionIdentityDefaultsFor(project: Project | undefined): AgentSessionIdentityDefaults {
+		return project && isRemoteProject(project) ? { environment: "native" } : this.getAgentSessionIdentityDefaults();
+	}
+
+	/**
+	 * 会话身份 key（AgentManager 内部的运行时去重键）。
+	 *
+	 * 远端会话额外带上 hostId：`buildSessionOriginKey` 的身份是「路径 + 来源 + 本机环境」，而
+	 * **同一路径在两台不同主机上是两个不同的会话**。没有 hostId，第二台主机的会话会直接顶掉
+	 * 第一台的 runtime（`findRuntimeBySessionKey` 只比这个 key）。
+	 */
+	private sessionKeyFor(input: AgentSessionKeyInput, defaults: AgentSessionIdentityDefaults): string | undefined {
+		const base = buildAgentSessionKey(input, defaults);
+		if (!base) return undefined;
+		const project = this.getProject(input.projectId);
+		return project && isRemoteProject(project) ? `remote:${project.locator.hostId}:${base}` : base;
+	}
+
+	/**
+	 * 登记远端会话的 catalog 身份（P4.2 收口）：把 pi 上报的远端会话文件交给端口，折成 ssh locator
+	 * （hostId + 相对会话根的 remoteSessionId + remotePath）并写进 catalog。
+	 *
+	 * 为什么只能在这里登记：远端会话文件是 pi 自己选好并在握手 `get_state` 里上报的，PiDeck 创建之前
+	 * 根本不知道它叫什么 —— **这是与本地流程的本质差别**（本地会话身份在创建之前就由 catalog 定好）。
+	 * 会话根解析与 catalog 写入都只允许有一份实现（scanner / `SessionCatalog.ensureRemoteSession`）。
+	 *
+	 * 失败一律抛出，由调用方落进与「pi 起不来」同一条错误卡路径：端口没有这个能力（旧装配/替身）时给
+	 * 既有稳定码 fail-closed，**绝不**写一条带本机 filePath 的伪记录，也绝不静默当成登记成功。
+	 */
+	private async registerRemoteSessionIdentity(project: RemoteProject, remotePath: string): Promise<RemoteSessionRegistration> {
+		const port = this.remoteRuntime;
+		if (!port || typeof port.registerRemoteSession !== "function") throw new Error(REMOTE_RUNTIME_CODES.catalogIdentityUnsupported);
+		return port.registerRemoteSession({ hostId: project.locator.hostId, projectId: project.id, remotePath });
+	}
+
+	/**
+	 * pi 上报的会话文件路径 → 写入 tab 的值。
+	 *
+	 * 远端会话的会话文件在远端，**不得**用本机规则归一化：`toAbsoluteSessionPath` 在 Windows 上
+	 * 不把 `/home/u/…` 当绝对路径，会把它拼到盘符后面再改成分隔符（远端只剩一条正确形状：
+	 * pi 报回来的那条）。
+	 */
+	private reportSessionPathFromPi(reported: string | undefined, projectId: string, environment: SessionEnvironment, fallbackBase: string): string | undefined {
+		if (reported === undefined) return undefined;
+		if (this.isRemoteRuntime(projectId)) return reported;
+		return this.normalizeSessionPathFromPi(reported, fallbackBase, environment);
 	}
 
 	/**
@@ -949,6 +1126,9 @@ export class AgentManager {
 		if (!this.settingsStore.get().standbyRuntimeEnabled) return;
 		const project = this.getProject(projectId);
 		if (!project) return;
+		// 远端项目走远端运行时，没有本机 cwd 可池化（与 createStandbyAgent 同一判据）；
+		// 不在这里拦住的话，computeStandbyFingerprintFor 会拿到一个没有 path 的项目。
+		if (!isLocalProject(project)) return;
 		const fingerprint = this.computeStandbyFingerprintFor(project);
 		const pooled = this.standbyPool.peek(projectId);
 		if (pooled && pooled.fingerprint === fingerprint) return;
@@ -1017,6 +1197,7 @@ export class AgentManager {
 		if (!this.settingsStore.get().standbyRuntimeEnabled || input.noSession) return null;
 		const project = this.getProject(input.projectId);
 		if (!project) return null;
+		if (!isLocalProject(project)) return null;
 		const proxyMode = this.resolveSessionProxy?.(input.sessionId);
 		if (proxyMode === "on" || proxyMode === "off") return null;
 		if (this.isFeishuSession?.(input.sessionId) === true) return null;
@@ -1067,6 +1248,12 @@ export class AgentManager {
 				this.standbyWarmup.settle(null);
 				return;
 			}
+			// 池化 = 本机 spawn：远端项目的 pi 进程走远端运行时，没有本机 cwd 可传，也不该本机预热。
+			// 与「项目不存在」同样要唤醒等待者，否则等 claim 的会话会白等到超时才回退。
+			if (!isLocalProject(project)) {
+				this.standbyWarmup.settle(null);
+				return;
+			}
 			// 需要用户交互决策信任的项目不做后台池化（绝不后台弹窗）。
 			if ((await this.projectTrust.resolveTrustWithoutPrompt(project)) === null) {
 				this.standbyWarmup.settle(null);
@@ -1110,6 +1297,8 @@ export class AgentManager {
 		if (!this.settingsStore.get().standbyRuntimeEnabled) return null;
 		const project = this.getProject(projectId);
 		if (!project) return null;
+		// standby 池服务的是一次本机 spawn 的 pi 进程：远端项目没有本机 cwd，也从不入池。
+		if (!isLocalProject(project)) return null;
 		const entry = this.standbyPool.peek(projectId);
 		if (!entry || entry.fingerprint !== this.computeStandbyFingerprintFor(project)) return null;
 		const runtime = this.agents.get(entry.agentId);
@@ -1131,7 +1320,7 @@ export class AgentManager {
 	 * claim 时不一致即废弃池化进程回退正常创建——这就是「改设置/扩展后何时生效」的答案：
 	 * 已在跑的会话照旧（本来就是），下一个 spawn（含新预热）自动用新值。
 	 */
-	private computeStandbyFingerprintFor(project: Project): string {
+	private computeStandbyFingerprintFor(project: LocalProject): string {
 		const settings = this.settingsStore.get();
 		const modelTrace = getModelTraceServer();
 		return computeStandbyFingerprint({
@@ -1168,6 +1357,26 @@ export class AgentManager {
 			if (runtime.tab.projectId === projectId && runtime.process.isRunning()) return true;
 		}
 		return false;
+	}
+
+	/**
+	 * 远端模型目录探测（Phase 5 row 819）的窄接口：只回答「这些远端项目里是否已有一台存活的远端 runtime」，
+	 * 命中时只给 agentId。
+	 *
+	 * 为什么不直接把 runtime 暴露给探测服务：agentId 是本次进程内 RPC 的唯一句柄，探测服务只需要把它交给
+	 * 已有 getAvailableModels；项目集合由 main 从 ProjectStore 解析，渲染层没有任何输入能选择 runtime。
+	 * 判据与进程监控一致（process.isRunning），并且必须仍是远端项目，避免把本机 runtime 当成远端答案。
+	 */
+	findLiveRemoteAgentId(projectIds: readonly string[]): string | undefined {
+		if (projectIds.length === 0) return undefined;
+		const candidates = new Set(projectIds);
+		for (const [agentId, runtime] of this.agents) {
+			if (!candidates.has(runtime.tab.projectId)) continue;
+			if (!runtime.process.isRunning()) continue;
+			if (!this.isRemoteRuntime(runtime.tab.projectId)) continue;
+			return agentId;
+		}
+		return undefined;
 	}
 
 	/**
@@ -1402,13 +1611,29 @@ export class AgentManager {
 		this.addMessage(agentId, "assistant", assistantText);
 	}
 
+	/**
+	 * Agent 的工作目录。
+	 *
+	 * 消费方全是本机实现（终端 node-pty 的 cwd、飞书文件发送的路径解析）：远端会话必须在此
+	 * fail-closed，绝不把远端项目根交给本机 shell。
+	 */
 	getCwd(agentId: string) {
-		return this.requireRuntime(agentId).tab.cwd;
+		const runtime = this.requireRuntime(agentId);
+		this.assertLocalRuntimeOperation(runtime, "cwd");
+		return runtime.tab.cwd;
 	}
 
 	async loadMessages(agentId: string, skipEntries = false, earlyMessagesPromise?: Promise<RpcResponse>, options?: { preserveMessagesAfter?: number }) {
 		const t0 = Date.now();
 		const runtime = this.requireRuntime(agentId);
+		// 远端会话的会话文件在远端：**本地历史读取不参与**。本机 reader 要么读到本机同名路径、
+		// 要么 ENOENT 后把会话标成加载失败（用户看到一张凭空的错误卡）。
+		// 也不用 `get_messages` 顶替：它会把整段历史打成单行 JSON，PiRpcClient 在 stdout 回调里
+		// 同步 JSON.parse 会冻住主进程（见下一条注释），远端历史窗口读取属下一批。
+		if (this.isRemoteRuntime(runtime.tab.projectId)) {
+			return this.messages.get(agentId) ?? [];
+		}
+
 		const process = runtime.process;
 		const { deckSessionId, sessionPath } = runtime.tab;
 		// create() 起步的后台历史加载先于协调器 bind 启动：捕获到的 runtimeGeneration 是
@@ -1666,8 +1891,20 @@ export class AgentManager {
 	}
 
 	async create(rawInput: CreateAgentInput) {
-		const input = rawInput.sessionPath ? { ...rawInput, sessionPath: this.toSessionProtocolPath(rawInput.sessionPath) } : rawInput;
-		const sessionKey = buildAgentSessionKey(input, this.getAgentSessionIdentityDefaults());
+		const project = this.getProject(rawInput.projectId);
+		const remote = project !== undefined && isRemoteProject(project);
+		// 远端会话身份不套 WSL（理由见 sessionIdentityDefaultsFor）：在这里归一化，让
+		// 「身份 key / creatingSessionAgents 去重 / tab 字段」三处从同一个输入出发。
+		let input = remote ? { ...rawInput, environment: "native" as const, wslDistro: undefined, wslUser: undefined } : rawInput;
+		if (rawInput.sessionLocator) {
+			const sessionPath = this.sessionLocatorRouter.resolveFilePath(rawInput.sessionLocator);
+			if (!sessionPath) throw new Error("SESSION_LOCATOR_FILE_REQUIRED");
+			input = { ...input, sessionPath: remote ? sessionPath : this.toSessionProtocolPath(sessionPath) };
+		} else if (rawInput.sessionPath) {
+			// 远端会话文件是那台机器上的绝对 POSIX 路径：不得过本机 WSL 转换（\\wsl$ 形状不是远端路径）。
+			input = { ...input, sessionPath: remote ? rawInput.sessionPath : this.toSessionProtocolPath(rawInput.sessionPath) };
+		}
+		const sessionKey = this.sessionKeyFor(input, this.sessionIdentityDefaultsFor(project));
 		if (!sessionKey) return this.createUnlocked(input);
 
 		const existingForSession = this.findRuntimeBySessionKey(sessionKey);
@@ -1721,7 +1958,7 @@ export class AgentManager {
 		const defaults = this.getAgentSessionIdentityDefaults();
 		return [...this.agents.values()].find(
 			(runtime) =>
-				buildAgentSessionKey(
+				this.sessionKeyFor(
 					{
 						projectId: runtime.tab.projectId,
 						sessionPath: runtime.tab.sessionPath,
@@ -1734,6 +1971,251 @@ export class AgentManager {
 					defaults,
 				) === sessionKey,
 		);
+	}
+
+	/**
+	 * 远端项目的会话创建（Phase 4 P4.2 产品路由）。
+	 *
+	 * 与 `createUnlocked` 走**同一条**流水线（会话身份 key、既有 runtime 复用、tab、事件桥、
+	 * agents.set、emitState、握手），分叉只有两处：
+	 * 1. 「进程从哪里起来」：plan + launcher 全部来自装配注入的远端运行时端口；
+	 * 2. 「哪些本机步骤不参与」：项目 trust 预检、会话文件修复、会话路径归一化、本地历史读取。
+	 *
+	 * 为什么第 2 条是硬要求：`locator.remotePath` 与 pi 报回来的会话文件都在那台机器上。把它们
+	 * 当本机路径处理**不会报错**（stat 到本机同名路径，或 ENOENT 被吞掉），只会静默落到完全
+	 * 不同的东西上 —— 这是 Phase 4 最贵的失败形态。
+	 */
+	private async createRemoteUnlocked(input: CreateAgentInput, project: RemoteProject): Promise<AgentTab> {
+		const t0 = Date.now();
+		// 端口缺省 = 正式包 / 未注入：远端项目在这里**没有**本机回退。用既有稳定码拒绝
+		// （与「非本地项目不得当本机路径」同一个码：语义都是「这个位置在这里跑不了」）。
+		if (!this.remoteRuntime) throw new Error("UNSUPPORTED_PROJECT_LOCATION");
+		// 远端会话的 catalog 身份（P4.2 收口）：身份就在端口上（见 registerRemoteSession：scanner 的
+		// 会话根解析 + `SessionCatalog.ensureRemoteSession` 这一条正门）。端口没有这个能力（旧装配 /
+		// 测试替身）时与以前同一个稳定码 fail-closed——这条判据刻意留在 prepare 之前：能拒绝就不要
+		// 先拉起一个远端进程，更不写一条带本机 filePath 的伪记录。
+		if (input.deckSessionId && typeof this.remoteRuntime.registerRemoteSession !== "function") throw new Error(REMOTE_RUNTIME_CODES.catalogIdentityUnsupported);
+
+		const hostId = project.locator.hostId;
+		const remoteCwd = project.locator.remotePath;
+		// 远端会话身份**不套 WSL**（见 sessionIdentityDefaultsFor）；create() 已对远端输入归一化，
+		// 这里再钉一次，保证 tab 字段与身份 key 同源。
+		const sessionIdentityDefaults: AgentSessionIdentityDefaults = { environment: "native" };
+		const sessionEnvironment: SessionEnvironment = "native";
+		const id = randomUUID();
+		void this.appLogger?.info("agent", "Agent create requested", {
+			agentId: id,
+			projectId: input.projectId,
+			hostId,
+			remoteCwd,
+			sessionPath: input.sessionPath,
+			title: input.title,
+			location: "remote",
+		});
+		const existingForSessionKey = this.sessionKeyFor({ ...input, environment: sessionEnvironment, wslDistro: undefined, wslUser: undefined }, sessionIdentityDefaults);
+		const existingForSession = existingForSessionKey ? this.findRuntimeBySessionKey(existingForSessionKey) : undefined;
+		if (existingForSession) {
+			void this.appLogger?.info("agent", "Agent create reused existing session", {
+				agentId: existingForSession.tab.id,
+				hostId,
+				sessionPath: input.sessionPath,
+			});
+			return existingForSession.tab;
+		}
+
+		const tab: AgentTab = {
+			id,
+			projectId: project.id,
+			// 远端项目根：任何本机消费者（git/终端/会话文件读写）必须先过 isRemoteRuntime/isLocalProject。
+			cwd: remoteCwd,
+			title: input.title || `${project.name} agent`,
+			status: "starting",
+			deckSessionId: input.deckSessionId,
+			sessionPath: input.sessionPath,
+			sessionEnvironment,
+			sessionSource: input.source ?? "pi",
+			// 这条路径的 runtimePlan.kind 恒为 "remote-ssh"（launch.plan 由 buildRemotePiRuntimePlan 构造）。
+			// 本字段（P4.2 起的字段名）现在只表示「这条会话的远端项目 trust 由 PiDeck 的决策表管理」，
+			// 因此是渲染层「要不要显示 trust 条」的判据；四种展示态由决策表合成。
+			// 具体传什么 flag 不在这里决定：远端运行时端口每次 prepare 现读决策（P4.4b），未决策就一个都不传。
+			// 本机/WSL 分支不写这个字段。
+			remoteTrustUnhandled: true,
+			// 不写 wslDistro/wslUser/importedSourceId：它们是本机（WSL/导入器）身份，远端会话没有这些维度。
+			noSession: input.noSession,
+			createdAt: Date.now(),
+		};
+
+		const t1 = Date.now();
+		let launch: { plan: RemoteSshPiRuntimeLaunchPlan; launcher: PiRuntimeLauncher };
+		try {
+			// 远端安全门读的是快照文件：先把本机快照落盘（幂等），否则首次 spawn 会因「读不到字节」
+			// 把安全门从注入面拿掉（安全等级随后失效，但 UI 会如实隐藏）。
+			await this.securityStore?.ensureSnapshotWritten();
+			// 远端事实（解释器 / pi 入口 / runner 路径）先取，再在构造点验 plan 形状：
+			// 门禁关闭/服务没建起来 → REMOTE_RUNTIME_UNAVAILABLE；主机没就绪 → SSH_HOST_NOT_READY；
+			// pi 探测失败 → REMOTE_PI_*；本机路径混进 plan → REMOTE_RUNTIME_PATH_INVALID。
+			const prepared = await this.remoteRuntime.prepare({
+				hostId,
+				remoteCwd,
+				...(input.sessionPath === undefined ? {} : { sessionFile: input.sessionPath }),
+				...(input.noSession ? { noSession: true } : {}),
+				// 与本地 `securitySessionId: securitySessionKey ?? sessionPath` 同一取值：扩展只用它查
+				// sessionLevels 字典，从不 fs 打开；远端历史会话没有 deckSessionId 时用远端会话文件路径。
+				...(input.deckSessionId === undefined && input.sessionPath === undefined ? {} : { sessionId: input.deckSessionId ?? input.sessionPath }),
+			});
+			const { plan } = prepared;
+			// 注入面跟着 tab 走（agents:state → 渲染层能力门）：UI 只认“实际注入了什么”，不认“应该能”。
+			tab.remoteExtensions = prepared.extensions;
+			launch = { plan, launcher: this.remoteRuntime.createLauncher() };
+			// 远端 plan 的 args 是「这次到底用什么会话文件起的 pi」的唯一权威记录（runner 的 plan 走 stdin，
+			// lease 里也没有 argv）——排「重启后是否真的接回同一会话」这类问题时，只看 app 日志就能定案。
+			void this.appLogger?.info("agent", "Remote pi runtime plan prepared", { agentId: id, hostId, args: plan.args.join(" "), extensions: prepared.extensions.applied.join(",") || prepared.extensions.reason || "none" });
+		} catch (error) {
+			// 准备失败走**与本地「pi 起不来」同一条**错误卡路径：调用方（协调器/渲染层）看到的是会话
+			// 启动失败 + 稳定码，而不是「会话正常起来了但什么都没发生」——更绝不允许回退本机 pi。
+			tab.status = "error";
+			const rawMessage = error instanceof Error ? error.message : String(error);
+			void this.appLogger?.error("agent", "Remote agent prepare failed", {
+				agentId: id,
+				projectId: project.id,
+				hostId,
+				remoteCwd,
+				error: rawMessage,
+			});
+			// 诊断占位进程：这一步没有任何可运行的远端计划（这正是失败原因），所以它只是一个**错误卡宿主**
+			// ——不注入任何本地专属准备、从未也绝不会被 start()（见 spawnAndGetState 的远端守卫）。
+			this.agents.set(id, { tab, process: new PiProcess(remoteCwd, this.settingsStore.get()) });
+			this.messages.set(id, []);
+			// 远端环境没准备好（pi/node/shell PATH 三类）时说清具体原因与下一步，而不是只丢一个稳定码。
+			const discoveryKey = remotePiDiscoveryCopyKey(rawMessage);
+			this.addLocalizedMessage(id, "error", discoveryKey ?? "diagnostic.agentStartFailed", discoveryKey ? this.translate(discoveryKey) : "Pi RPC 启动失败。", {
+				debugDetails: this.buildStartupFailureMessage(rawMessage, null),
+			});
+			this.emitState();
+			return tab;
+		}
+		this.remoteLaunchByAgent.set(id, launch);
+		const t2 = Date.now();
+
+		void this.appLogger?.info("agent", "Agent pi process start", { agentId: id, location: "remote", hostId });
+		// 与本地一致：spawn 前异步刷新模型列表缓存。它是本机 pi 目录的刷新，不吃本次的远端 cwd；
+		// 远端 pi 自己的模型目录属 P4.3。
+		this.onBeforeAgentSpawn?.();
+		this.agents.set(id, { tab, process: this.createPiProcess(remoteCwd, input.sessionPath, undefined, undefined, id, launch) });
+		this.messages.set(id, []);
+		this.emitState();
+
+		let handshake: Awaited<ReturnType<AgentManager["handshakePiProcess"]>>;
+		try {
+			handshake = await this.handshakePiProcess(id, {
+				// 远端项目根：`projectPath` 的消费者只有日志与生命周期事件归属，不是本机文件路径。
+				projectPath: remoteCwd,
+				sessionPath: input.sessionPath,
+				deckSessionId: input.deckSessionId,
+				// 远端 trust 不在这里传（也不再需要本机那套 override 参数）：决策由远端运行时端口在
+				// prepare 时按 trust key 现读，未决策 ⇒ plan 里不出现任何 trust flag。
+				noSession: input.noSession,
+				onExit: (payload) => this.handleCreateProcessExit(id, tab, payload),
+			});
+		} catch (error) {
+			tab.status = "error";
+			const rawMessage = error instanceof Error ? error.message : String(error);
+			const failedProcess = this.agents.get(id)?.process;
+			void this.appLogger?.error("agent", "Agent pi process start threw", {
+				agentId: id,
+				projectId: project.id,
+				hostId,
+				remoteCwd,
+				error: rawMessage,
+				diagnostics: failedProcess?.getDiagnostics(),
+			});
+			this.addLocalizedMessage(id, "error", "diagnostic.agentStartFailed", "Pi RPC 启动失败。", {
+				debugDetails: this.buildStartupFailureMessage(rawMessage, failedProcess?.getDiagnostics() ?? null),
+			});
+			this.emitState();
+			return tab;
+		}
+		const { process, fallbackFromExtensions } = handshake;
+		const t3 = Date.now();
+		const diag = process.getDiagnostics();
+		void this.appLogger?.info("agent", "Pi process spawned", {
+			agentId: id,
+			location: "remote",
+			hostId,
+			prepareMs: t1 - t0,
+			launchPrepareMs: t2 - t1,
+			spawnCallMs: t3 - t2,
+			command: diag?.command,
+			args: diag?.args?.join(" "),
+			cwd: diag?.cwd,
+			fallbackFromExtensions,
+		});
+		// 白名单因条数过多被跳过：远端 plan 不带白名单注入，所以这里只做形状对齐（当前恒空）。
+		if (diag?.whitelistSkipped && diag.whitelistSkipped.length > 0) {
+			this.notifyWhitelistSkipped(id, diag.whitelistSkipped);
+		}
+
+		try {
+			void this.appLogger?.info("agent", "Agent get_state request completed", { agentId: id, location: "remote" });
+			const state = handshake.state;
+			const t4 = Date.now();
+			void this.appLogger?.info("agent", "Agent get_state completed", {
+				agentId: id,
+				stateMs: t4 - t3,
+				totalSinceCreateMs: t4 - t0,
+			});
+			const data = state.data as { sessionId?: string; sessionFile?: string; sessionName?: string } | undefined;
+			tab.sessionId = data?.sessionId;
+			// pi 报回来的会话文件在远端：**原样采用**（不得用本机规则归一化），它唯一的用途是
+			// 下一次 spawn（restart）用 `--session <远端路径>` 重开同一会话。
+			tab.sessionPath = data?.sessionFile ?? input.sessionPath;
+			// catalog 身份登记（P4.2 收口）：会话文件是 pi 自己选好并在握手 `get_state` 里上报的，
+			// PiDeck 创建之前根本不知道它叫什么 —— 所以登记必然晚于 runtime 起来，**这是与本地流程的
+			// 本质差别**（本地会话身份在创建之前就由 catalog 定好）。
+			if (input.deckSessionId && tab.sessionPath) {
+				const registration = await this.registerRemoteSessionIdentity(project, tab.sessionPath);
+				const locator = registration.record.locator;
+				// record 就是这条远端会话的 catalog 身份；tab 仍说「远端路径」这一种语言
+				// （ssh locator 的 remotePath），不因登记退化成一条本机 filePath。
+				if (locator?.kind === "ssh") tab.sessionPath = locator.remotePath;
+			}
+			const piSessionName = data?.sessionName && !looksLikePiSessionFileStem(data.sessionName) ? data.sessionName : undefined;
+			tab.title = input.title || piSessionName || (input.sessionPath ? this.translate("session.historyTitle", { project: project.name }) : `${project.name} agent`);
+			tab.status = "idle";
+			// 远端历史不在本机（本批）：**不加载**。本机 reader 读不到远端文件；pi 的 get_messages
+			// 会把整段历史打成单行 JSON 冻住主进程（见 loadMessages 的注释），也不是退路。
+			// 远端历史窗口读取属下一批（`RemoteWorkspaceReader` 有界窗口）。
+			this.recordTiming("agent.create", t0, {
+				agentId: id,
+				location: "remote",
+				historyLoading: "unsupported",
+				fallbackFromExtensions,
+			});
+			void this.appLogger?.info("agent", "Agent create completed", {
+				agentId: id,
+				hostId,
+				totalMs: Date.now() - t0,
+				historyLoading: "unsupported",
+				fallbackFromExtensions,
+			});
+		} catch (error) {
+			tab.status = "error";
+			const rawMessage = error instanceof Error ? error.message : String(error);
+			const failedProcess = this.agents.get(id)?.process;
+			void this.appLogger?.error("agent", "Agent create failed", {
+				agentId: id,
+				projectId: project.id,
+				hostId,
+				sessionPath: input.sessionPath,
+				error: rawMessage,
+			});
+			this.addLocalizedMessage(id, "error", "diagnostic.agentStartFailed", "Pi RPC 启动失败。", {
+				debugDetails: this.buildStartupFailureMessage(rawMessage, failedProcess?.getDiagnostics() ?? null),
+			});
+		}
+
+		this.emitState();
+		return tab;
 	}
 
 	/**
@@ -1751,6 +2233,11 @@ export class AgentManager {
 		const t0 = Date.now();
 		const project = this.getProject(input.projectId);
 		if (!project) throw new Error(`Project not found: ${input.projectId}`);
+		// 远端项目（Phase 4 P4.2）：cwd 在远端，走独立的远端分支；没有注入远端运行时端口时
+		// 分支内直接 fail-closed（UNSUPPORTED_PROJECT_LOCATION），绝不拿远端 cwd 去起本机 pi。
+		// 放在资源迁移之前：迁移读的是本机项目目录上的旧禁用记录，远端项目没有本机目录。
+		if (isRemoteProject(project)) return this.createRemoteUnlocked(input, project);
+		// 走到这里 project 已窄化为 LocalProject（远端已在上一行分工，其它位置类型由编译器点名）。
 		// 先迁移该项目作用域的旧禁用记录；失败不阻塞启动（迁移内部已记录，且旧记录会被保留）。
 		await this.resourceMigrationGate?.(project.id).catch(() => undefined);
 
@@ -1764,7 +2251,7 @@ export class AgentManager {
 			sessionPath: input.sessionPath,
 			title: input.title,
 		});
-		const existingForSessionKey = buildAgentSessionKey(input, sessionIdentityDefaults);
+		const existingForSessionKey = this.sessionKeyFor(input, sessionIdentityDefaults);
 		const existingForSession = existingForSessionKey ? this.findRuntimeBySessionKey(existingForSessionKey) : undefined;
 		if (existingForSession) {
 			void this.appLogger?.info("agent", "Agent create reused existing session", {
@@ -1955,10 +2442,44 @@ export class AgentManager {
 		const state = await runtime.process.client.request({ type: "get_state" }, 10_000).catch(() => ({ data: undefined }));
 		const data = state.data as { sessionId?: string; sessionFile?: string; sessionName?: string } | undefined;
 		runtime.tab.sessionId = data?.sessionId ?? runtime.tab.sessionId;
-		runtime.tab.sessionPath = this.normalizeSessionPathFromPi(data?.sessionFile ?? runtime.tab.sessionPath, this.getProject(runtime.tab.projectId)?.path ?? runtime.tab.cwd, runtime.tab.sessionEnvironment ?? "native");
+		runtime.tab.sessionPath = this.reportSessionPathFromPi(data?.sessionFile ?? runtime.tab.sessionPath, runtime.tab.projectId, runtime.tab.sessionEnvironment ?? "native", this.getProject(runtime.tab.projectId)?.path ?? runtime.tab.cwd);
 		this.applyRuntimeTitle(agentId, data?.sessionName || runtime.tab.title, false);
 		this.emitState();
 		return runtime.tab;
+	}
+
+	/**
+	 * 发送边界的隐藏标记守卫（P4.4 扩展面）。
+	 *
+	 * plan/goal 的实现载体是 `agentMessage` 里的隐藏标记：远端没注入对应扩展时没人识别它，
+	 * 标记会**原样进 prompt** 且只读工具集不生效——比“入口消失”更糟（用户以为模式生效了）。
+	 * 所以这里做一道与 UI 无关的兜底：`applied` 里没有该扩展 ⇒ 退回用户可见原文。
+	 *
+	 * 只对“已上报注入面”的会话生效（远端）；本机/DSH 的 `remoteExtensions` 是 undefined，行为不变。
+	 */
+	/**
+	 * 解析实际发给 pi 的 prompt 文本（远端扩展降级 / 智能体隐藏通道 / 纯图片发送共用的唯一入口）。
+	 *
+	 * 优先级：智能体隐藏通道 agentMessage > 用户输入；两者都空时（纯图片发送，Issue #404）
+	 * 保持空串——禁止注入 "Describe this image." 之类的兜底文案，那是用户没写过的指令。
+	 */
+	private resolveSendAgentMessage(runtime: AgentRuntime, input: SendPromptInput): string {
+		const fallback = input.message.trim();
+		const raw = input.agentMessage?.trim() || fallback;
+		const extensions = runtime.tab.remoteExtensions;
+		if (extensions === undefined) return raw;
+		const applied = new Set(extensions.applied);
+		for (const entry of PI_DECK_MODE_MARKER_EXTENSIONS) {
+			if (!raw.includes(entry.marker) || applied.has(entry.extension)) continue;
+			void this.appLogger?.warn("agent", "Dropped composer mode marker: extension not injected", {
+				agentId: runtime.tab.id,
+				mode: entry.mode,
+				extension: entry.extension,
+				applied: extensions.applied,
+			});
+			return fallback || raw;
+		}
+		return raw;
 	}
 
 	async sendPrompt(input: SendPromptInput): Promise<SendPromptResult> {
@@ -1969,7 +2490,7 @@ export class AgentManager {
 		// 消息，各 provider 自行丢弃空 text block（anthropic / openai 均按 text.trim()
 		// 过滤），模型只看到图片。禁止注入 "Describe this image." 之类的兜底文案
 		// （Issue #404）——那是用户没写过的指令，会让模型改按「描述图片」回答。
-		const agentMessage = input.agentMessage?.trim() || trimmed;
+		const agentMessage = this.resolveSendAgentMessage(runtime, input);
 		// 允许只有图片没有文字的情况发送
 		if (!trimmed && !hasImages) {
 			return {
@@ -2352,7 +2873,7 @@ export class AgentManager {
 		runtime.tab.status = "idle";
 		// 停止反馈改 toast，不再写入会话时间线：
 		// 1) 系统状态卡片太抢眼；2) 插在 assistant 中间会打断 agent-run 分组，放大“消息串台”体感。
-		this.emit(ipcChannels.agentsNotice, {
+		this.emit(agentEventTags.agentsNotice, {
 			agentId,
 			message: "已请求停止当前响应",
 			i18nKey: "app.abortRequested",
@@ -2800,10 +3321,32 @@ export class AgentManager {
 
 		const project = this.getProject(runtime.tab.projectId);
 		if (!project) throw new Error("Project not found");
+		// 远端会话同样支持自动重连：launch 计划在 create 时就登记进了 `remoteLaunchByAgent`，握手直接复用它
+		// （远端没有计划时 `handshakePiProcess` 会抛 `REMOTE_RUNTIME_UNAVAILABLE`——绝不会掉进本机 pi）。
+		// 与本地只差两处语义，见下方 `isRemote` 分叉：路径不归一化、历史不加载。
+		const isRemote = !isLocalProject(project);
+		// 远端重连必须**用当前会话文件重新 prepare 计划**：create 时那份计划没有 `--session`（那时 pi 还没
+		// 报出会话文件），直接拿 map 里的旧计划重拉会开出**新会话**而不是接回原会话。`restart` 同样走这条。
+		if (isRemote) {
+			const hostId = isRemoteProject(project) ? project.locator.hostId : undefined;
+			const remoteRuntime = this.remoteRuntime;
+			if (!hostId || !remoteRuntime) throw new Error(REMOTE_RUNTIME_CODES.unavailable);
+			const prepared = await remoteRuntime.prepare({
+				hostId,
+				remoteCwd: runtime.tab.cwd,
+				sessionFile: sessionPath,
+				// 与 create 同一取值顺序（与本地 securitySessionId 同源）；重连也可能拿到新的会话文件。
+				...(runtime.tab.deckSessionId === undefined && sessionPath.length === 0 ? {} : { sessionId: runtime.tab.deckSessionId ?? sessionPath }),
+			});
+			// 重连可能换主机环境（版本/快照），注入面随之更新；UI 必须跟着变，不能留旧的能力门。
+			runtime.tab.remoteExtensions = prepared.extensions;
+			this.remoteLaunchByAgent.set(agentId, { plan: prepared.plan, launcher: remoteRuntime.createLauncher() });
+		}
 
 		void this.appLogger?.info("agent", "Reattaching process", {
 			agentId,
 			sessionPath,
+			location: isRemote ? "remote" : "local",
 		});
 		const { deckSessionId, runtimeGeneration } = runtime.tab;
 		const assertCurrentRuntime = (process: PiProcess) => {
@@ -2816,7 +3359,9 @@ export class AgentManager {
 		};
 
 		const handshake = await this.handshakePiProcess(agentId, {
-			projectPath: project.path,
+			// 远端：`projectPath` 的消费者只有日志与生命周期事件归属，不是本机文件路径——create 同样
+			// 传远端 cwd（`project.path` 在远端项目上不存在，也不再能靠 `isLocalProject` 收窄）。
+			projectPath: isRemote ? runtime.tab.cwd : project.path,
 			sessionPath,
 			deckSessionId: runtime.tab.deckSessionId,
 			onExit: (payload) => this.handleReattachProcessExit(agentId, runtime, payload),
@@ -2836,7 +3381,9 @@ export class AgentManager {
 			const stateResponse = handshake.state;
 			const data = stateResponse.data as { sessionId?: string; sessionFile?: string; sessionName?: string } | undefined;
 			runtime.tab.sessionId = data?.sessionId ?? runtime.tab.sessionId;
-			runtime.tab.sessionPath = this.normalizeSessionPathFromPi(data?.sessionFile ?? sessionPath, project.path, runtime.tab.sessionEnvironment ?? "native");
+			// 远端：pi 报回来的会话文件是**远端路径**，原样采用（create 路径同样如此）——用本机规则归一化
+			// 会把它改成本机风格路径，下一次 spawn 的 `--session` 就找不到文件了。
+			runtime.tab.sessionPath = isRemote ? (data?.sessionFile ?? sessionPath) : this.normalizeSessionPathFromPi(data?.sessionFile ?? sessionPath, project.path, runtime.tab.sessionEnvironment ?? "native");
 			runtime.tab.status = "idle";
 			// 进程退出型压缩可能来不及发 compaction_end；重连成功即表示 Pi 已可继续接收消息。
 			this.rpcCompactingAgents.delete(agentId);
@@ -2847,8 +3394,10 @@ export class AgentManager {
 			// 如果有旧的 pending abort 标记，清理掉
 			this.abortedDuringAsk.delete(agentId);
 
-			// 重连期间用户可能已发送消息（乐观上屏）：必须保护，否则替换投影时未落盘消息丢失
-			await this.loadMessages(agentId, false, undefined, { preserveMessagesAfter: Date.now() }).catch(() => undefined);
+			// 重连期间用户可能已发送消息（乐观上屏）：必须保护，否则替换投影时未落盘消息丢失。
+			// 远端跳过：本批不加载远端历史（create 同标 `historyLoading: "unsupported"`），且本机 reader
+			// 读不到远端文件——拉一次只会白跑并可能把空页写进缓存。
+			if (!isRemote) await this.loadMessages(agentId, false, undefined, { preserveMessagesAfter: Date.now() }).catch(() => undefined);
 			assertCurrentRuntime(process);
 			this.startupDiagnostics.notifyExtensionsDisabled(agentId, {
 				fallbackFromExtensions: handshake.fallbackFromExtensions,
@@ -2901,12 +3450,14 @@ export class AgentManager {
 		const process = runtime.process;
 		const { deckSessionId, runtimeGeneration, sessionPath } = runtime.tab;
 		// 文件统计（读会话 + 逐行 parse）与两个 RPC 并行：总耗时 = max(RPC, 文件)，
-		// 且文件结果带 (size, mtimeMs) 缓存，会话未变化时零 IO 零 parse
+		// 且文件结果带 (size, mtimeMs) 缓存，会话未变化时零 IO 零 parse。
+		// 远端会话文件不在本机：跳过文件统计（此方法在轮询路径上，不能把远端路径交给本机 reader）。
+		const localSessionPath = this.isRemoteRuntime(runtime.tab.projectId) ? undefined : runtime.tab.sessionPath;
 		const [stateResponse, statsResponse, fileHitStats] = await Promise.all([
 			process.client.request({ type: "get_state" }, this.rpcTimeoutMs).catch(() => ({ data: undefined })),
 			process.client.request({ type: "get_session_stats" }).catch(() => ({ data: undefined })),
-			sessionPath
-				? this.getSessionCacheHitStats(sessionPath)
+			localSessionPath
+				? this.getSessionCacheHitStats(localSessionPath)
 				: Promise.resolve<CacheHitStats>({
 						latest: undefined,
 						average: undefined,
@@ -3035,7 +3586,7 @@ export class AgentManager {
 		this.toolStateSequenceByAgent.set(agentId, toolStateSequence);
 		// 工具边沿直接从原始 pi 事件发出，不等待 get_state/get_session_stats。
 		// 这样即使工具极快完成或完整状态请求乱序，renderer 仍能稳定看到 true → false。
-		this.emit(ipcChannels.agentsRuntimeState, {
+		this.emit(agentEventTags.agentsRuntimeState, {
 			agentId,
 			state: {
 				isExecutingTool,
@@ -3086,7 +3637,7 @@ export class AgentManager {
 			state.isExecutingTool = !!this.toolExecutingByAgent.get(agentId);
 			state.executingToolName = this.toolExecutingByAgent.get(agentId) ?? undefined;
 			state.toolStateSequence = latestToolSequence;
-			this.emit(ipcChannels.agentsRuntimeState, { agentId, state });
+			this.emit(agentEventTags.agentsRuntimeState, { agentId, state });
 		} catch {
 			// 运行态刷新失败不影响主流程；下一次轮询或事件会继续同步。
 		}
@@ -3399,6 +3950,8 @@ export class AgentManager {
 		const startTime = Date.now();
 		await this.ensureAgentIdle(agentId);
 		const runtime = this.requireRuntime(agentId);
+		// 编辑/删除/重发/重载都直接改本机会话文件（SessionFileEditor）：远端会话的会话文件不在本机。
+		this.assertLocalRuntimeOperation(runtime, "editMessage");
 		const sessionPath = runtime.tab.sessionPath;
 		if (!sessionPath) throw new Error("Session not persisted");
 
@@ -3423,6 +3976,7 @@ export class AgentManager {
 		const startTime = Date.now();
 		await this.ensureAgentIdle(agentId);
 		const runtime = this.requireRuntime(agentId);
+		this.assertLocalRuntimeOperation(runtime, "deleteMessage");
 		const sessionPath = runtime.tab.sessionPath;
 		if (!sessionPath) throw new Error("Session not persisted");
 
@@ -3486,6 +4040,7 @@ export class AgentManager {
 		const startTime = Date.now();
 		await this.ensureAgentIdle(agentId);
 		const runtime = this.requireRuntime(agentId);
+		this.assertLocalRuntimeOperation(runtime, "prepareResendFromMessage");
 		const sessionPath = runtime.tab.sessionPath;
 		if (!sessionPath) throw new Error("Session not persisted");
 		// 缓存命中时先校验角色（重发仅限用户消息）；缓存未命中时由 SessionFileEditor 的 inputRole 校验兜底
@@ -3517,6 +4072,7 @@ export class AgentManager {
 	async reload(agentId: string) {
 		await this.ensureAgentIdle(agentId);
 		const runtime = this.requireRuntime(agentId);
+		this.assertLocalRuntimeOperation(runtime, "reload");
 		const sessionPath = runtime.tab.sessionPath;
 		if (!sessionPath) throw new Error("Session not persisted");
 		const file = this.createSessionFileRef(runtime, sessionPath);
@@ -3714,6 +4270,9 @@ export class AgentManager {
 		this.lastAbortAtByAgent.delete(agentId);
 		this.uiGate.clearAgent(agentId);
 		this.startupHandshakeAgents.delete(agentId);
+		// 远端启动计划（含 nonce/远端路径）随生命周期释放：它是本次 spawn 的运行时事实，
+		// 留下来只会在下次同 agentId（不会发生）或内存排查时误导。
+		this.remoteLaunchByAgent.delete(agentId);
 		// 启动期诊断与首 run 标记随生命周期清理：重启/关闭后新 runtime 重新队列
 		this.startupDiagnostics.clear(agentId);
 		this.clearStreamGate(agentId);
@@ -3736,8 +4295,12 @@ export class AgentManager {
 	 * 不能凭 UI 的过期 ID 盲改正文（歧义/未落盘一律拒绝）。
 	 */
 	private captureRuntimeMessageIdentities(agentId: string): void {
-		const sessionPath = this.agents.get(agentId)?.tab.sessionPath;
+		const runtime = this.agents.get(agentId);
+		const sessionPath = runtime?.tab.sessionPath;
 		if (!sessionPath) return;
+		// 远端会话不参与：这份摘要是给「按本机会话文件定位消息」用的，而远端会话不读本机文件
+		// （loadMessages 对远端直接返回内存消息），留着只会拿一堆用不上的键。
+		if (runtime && this.isRemoteRuntime(runtime.tab.projectId)) return;
 		this.stoppedMessageIdentities.capture(this.toSessionHostPath(sessionPath), this.messages.get(agentId) ?? []);
 	}
 
@@ -3761,7 +4324,7 @@ export class AgentManager {
 					},
 					this.rpcTimeoutMs,
 				);
-				sessionPath = this.normalizeSessionPathFromPi((state.data as { sessionFile?: string } | undefined)?.sessionFile ?? undefined, this.getProject(runtime.tab.projectId)?.path ?? runtime.tab.cwd, environment ?? "native");
+				sessionPath = this.reportSessionPathFromPi((state.data as { sessionFile?: string } | undefined)?.sessionFile ?? undefined, runtime.tab.projectId, environment ?? "native", this.getProject(runtime.tab.projectId)?.path ?? runtime.tab.cwd);
 			} catch {
 				// 获取失败时继续用 undefined，create 会启动新 session
 			}
@@ -3839,6 +4402,7 @@ export class AgentManager {
 	private async withTemporarySession<T>(projectId: string, sessionPath: string, run: (process: PiProcess) => Promise<T>): Promise<T> {
 		const project = this.getProject(projectId);
 		if (!project) throw new Error(`Project not found: ${projectId}`);
+		if (!isLocalProject(project)) throw new Error("UNSUPPORTED_PROJECT_LOCATION");
 		const trustOverride = await this.projectTrust.ensureProjectTrust(project);
 		const process = this.createPiProcess(project.path, sessionPath);
 		await process.start(sessionPath, trustOverride);
@@ -3858,17 +4422,78 @@ export class AgentManager {
 	}
 
 	async forkSession(agentId: string, entryId: string) {
-		const runtime = this.requireRuntime(agentId);
-		const response = await runtime.process.client.request({ type: "fork", entryId }, 120_000);
-		await this.refreshRuntimeAfterSessionReplacement(agentId);
-		return response.data;
+		return this.replaceLiveSession(agentId, { type: "fork", entryId });
 	}
 
 	async cloneSession(agentId: string) {
+		return this.replaceLiveSession(agentId, { type: "clone" });
+	}
+
+	/** pi owns the new file; only a successful, non-cancelled RPC may replace identity. */
+	private async replaceLiveSession(agentId: string, command: { type: "fork"; entryId: string } | { type: "clone" }) {
 		const runtime = this.requireRuntime(agentId);
-		const response = await runtime.process.client.request({ type: "clone" }, 120_000);
-		await this.refreshRuntimeAfterSessionReplacement(agentId);
-		return response.data;
+		const remote = this.isRemoteRuntime(runtime.tab.projectId);
+		if (remote && typeof this.remoteRuntime?.registerRemoteSession !== "function") throw new Error(REMOTE_RUNTIME_CODES.catalogIdentityUnsupported);
+		const originPath = runtime.tab.sessionPath;
+		const originPiId = runtime.tab.sessionId;
+		if (remote) {
+			// A lost response can follow a completed fork. Until pi confirms rejection
+			// or cancellation, the cached origin path cannot prove runtime identity.
+			runtime.tab.sessionPath = undefined;
+			runtime.tab.sessionId = undefined;
+		}
+		// 远端 fork 走 SSH helper 通道：RPC 卡住时只会静静等到 120s 超时再抛，中间零日志，
+		// 现场表现为「点了 Fork 没反应」（2026-10 真机复现，渲染层 240s 后才发现）。
+		// 这里把耗时与失败原因记下来，才能区分「RPC 从未返回」与「返回了但不是成功帧」。
+		const rpcStartedAt = Date.now();
+		let response: RpcResponse;
+		try {
+			response = await runtime.process.client.request(command, 120_000);
+		} catch (error) {
+			void this.appLogger?.warn("agent", "Session replacement RPC failed", {
+				agentId,
+				remote,
+				command: command.type,
+				elapsedMs: Date.now() - rpcStartedAt,
+				error: error instanceof Error ? error.message : String(error),
+			});
+			throw error;
+		}
+		const rpcMs = Date.now() - rpcStartedAt;
+		const data: unknown = response.data;
+		const cancelled = data && typeof data === "object" && "cancelled" in data && data.cancelled === true;
+		if (response.success === false) {
+			if (remote) {
+				// A negative response can also follow a failed post-fork rebind. Restore
+				// only if a fresh state read proves origin; never trust the cached path.
+				const fresh = await runtime.process.client.request({ type: "get_state" }, this.rpcTimeoutMs).catch(() => undefined);
+				const state: unknown = fresh?.data;
+				if (state && typeof state === "object" && "sessionFile" in state && typeof state.sessionFile === "string") {
+					runtime.tab.sessionPath = state.sessionFile;
+					if ("sessionId" in state && typeof state.sessionId === "string") runtime.tab.sessionId = state.sessionId;
+				}
+				if (runtime.tab.sessionPath !== originPath) this.clearReplacedMessageWindow(agentId);
+			}
+			void this.appLogger?.warn("agent", "Session replacement rejected by pi", { agentId, remote, command: command.type, rpcMs, error: response.error ?? null });
+			throw new Error(remote ? "REMOTE_SESSION_REPLACEMENT_RPC_FAILED" : (response.error ?? "Session replacement RPC failed"));
+		}
+		if (cancelled) {
+			if (remote) {
+				runtime.tab.sessionPath = originPath;
+				runtime.tab.sessionId = originPiId;
+			}
+			return data;
+		}
+		const targetSessionId = await this.refreshRuntimeAfterSessionReplacement(agentId, remote);
+		if (remote) {
+			// 远端 fork 的会话文件是**懒创建**的：pi 立刻把 `get_state.sessionFile` 换成新路径，但文件要等这条会话
+			// 首次追加消息才落盘（2026-10-12 协议级真机探针：fork 成功后 `ls` 无新文件，连 `set_session_name` 成功也不落盘）。
+			// 所以「换绑后远端还没有这份文件」是**正常语义**、不是失败。这条布尔判据让真机排查一眼分清两种情形：
+			// true ⇒ pi 报的仍是原文件（那才是 PiDeck 身份推导的问题）；false ⇒ pi 报了新路径（符合懒创建语义）。
+			// 只记布尔、不记路径（脱敏纪律）。
+			void this.appLogger?.info("agent", "Remote session replacement reported file", { agentId, sameFileAsBefore: runtime.tab.sessionPath === originPath, rpcMs });
+		}
+		return targetSessionId ? { ...(data && typeof data === "object" && !Array.isArray(data) ? data : {}), targetSessionId } : data;
 	}
 
 	async switchSession(agentId: string, sessionPath: string) {
@@ -3878,19 +4503,53 @@ export class AgentManager {
 		return response.data;
 	}
 
-	private async refreshRuntimeAfterSessionReplacement(agentId: string) {
+	/** Discard origin's projection/version before exposing a different remote file. */
+	private clearReplacedMessageWindow(agentId: string): void {
+		this.messages.set(agentId, []);
+		// 消息 flush 域（脏标记/窗口游标/待发滑出/节流定时器）在 dev 侧已迁到 MessageEmitBatcher：
+		// 换绑会话文件后必须整域丢弃，否则待发的旧文件轮次会随下一帧发给渲染层。
+		this.messageEmit.clearAll(agentId);
+		this.messageHeadOffsetByAgent.delete(agentId);
+		this.sessionFileVersionByAgent.delete(agentId);
+	}
+
+	private async refreshRuntimeAfterSessionReplacement(agentId: string, registerRemoteReplacement = false): Promise<string | undefined> {
+		// The marker and message window belong to the old file, not the RPC result.
 		// A status marker belongs to the pre-replacement session/runtime and must not
 		// authorize a delayed session_info event for the newly bound catalog record.
 		this.uiGate.clearAutomaticTitle(agentId);
 		const runtime = this.requireRuntime(agentId);
-		const stateResponse = await runtime.process.client.request({ type: "get_state" }, this.rpcTimeoutMs).catch(() => ({ data: undefined }));
-		const state = stateResponse.data as { sessionFile?: string; sessionName?: string } | undefined;
-		if (state?.sessionFile) {
-			runtime.tab.sessionPath = this.normalizeSessionPathFromPi(state.sessionFile, this.getProject(runtime.tab.projectId)?.path ?? runtime.tab.cwd, runtime.tab.sessionEnvironment ?? "native") ?? runtime.tab.sessionPath;
+		if (registerRemoteReplacement) {
+			// RPC has already switched pi. If get_state fails, the old cached path is
+			// NOT evidence that pi still owns origin: leave identity unknown/fail-closed.
+			runtime.tab.sessionPath = undefined;
+			runtime.tab.sessionId = undefined;
+			this.clearReplacedMessageWindow(agentId);
+			const response = await runtime.process.client.request({ type: "get_state" }, this.rpcTimeoutMs);
+			const state: unknown = response.data;
+			if (!state || typeof state !== "object" || !("sessionFile" in state) || typeof state.sessionFile !== "string" || !state.sessionFile) throw new Error(REMOTE_RUNTIME_CODES.locatorUnresolved);
+			runtime.tab.sessionPath = state.sessionFile;
+			if ("sessionId" in state && typeof state.sessionId === "string") runtime.tab.sessionId = state.sessionId;
+			const project = this.getProject(runtime.tab.projectId);
+			if (!project || !isRemoteProject(project)) throw new Error(REMOTE_RUNTIME_CODES.locatorUnresolved);
+			const registration = await this.registerRemoteSessionIdentity(project, state.sessionFile);
+			const locator = registration.record.locator;
+			if (locator?.kind !== "ssh" || locator.hostId !== project.locator.hostId || locator.remotePath !== state.sessionFile) throw new Error(REMOTE_RUNTIME_CODES.locatorUnresolved);
+			// Remote history is read by the existing bounded reader, never local fs or
+			// unbounded get_messages. Do not relabel origin's runtime tail as the fork.
+			this.emitState();
+			return registration.record.id;
 		}
-		// 重新附加后恢复：保留附加期间用户发送/流式中的消息，避免投影替换吞掉乐观消息
+		const stateResponse = await runtime.process.client.request({ type: "get_state" }, this.rpcTimeoutMs).catch(() => ({ data: undefined }));
+		const state = stateResponse.data as { sessionId?: string; sessionFile?: string; sessionName?: string } | undefined;
+		if (state?.sessionFile) {
+			runtime.tab.sessionPath = this.reportSessionPathFromPi(state.sessionFile, runtime.tab.projectId, runtime.tab.sessionEnvironment ?? "native", this.getProject(runtime.tab.projectId)?.path ?? runtime.tab.cwd) ?? runtime.tab.sessionPath;
+		}
+		if (state?.sessionId) runtime.tab.sessionId = state.sessionId;
+		// Preserve optimistic/in-flight messages during the local history projection.
 		await this.loadMessages(agentId, false, undefined, { preserveMessagesAfter: Date.now() }).catch(() => undefined);
 		this.emitState();
+		return undefined;
 	}
 
 	async getCommands(agentId: string) {
@@ -3969,6 +4628,8 @@ export class AgentManager {
 	 */
 	async listCheckpoints(agentId: string, params?: RewindCheckpointPageParams): Promise<RewindCheckpointPage> {
 		const runtime = this.requireRuntime(agentId);
+		// checkpoint 是本机仓库里的 git ref（refs/pi-checkpoints）：远端 cwd 不能交给本机 git。
+		this.assertLocalRuntimeOperation(runtime, "listCheckpoints");
 		const root = this.rewindHostRoot(runtime.tab.cwd, runtime.tab.wslDistro);
 		const checkpoints = await loadAllCheckpoints(root, runtime.tab.sessionId);
 		const all = checkpoints.map(toCheckpointSummary).sort((a, b) => b.timestamp - a.timestamp);
@@ -3994,6 +4655,7 @@ export class AgentManager {
 	/** checkpoint 与当前 index 树的 diff 摘要（回退预览：「回到这里会改哪些文件」）。 */
 	async getCheckpointDiff(agentId: string, checkpointId: string): Promise<string> {
 		const runtime = this.requireRuntime(agentId);
+		this.assertLocalRuntimeOperation(runtime, "getCheckpointDiff");
 		const root = this.rewindHostRoot(runtime.tab.cwd, runtime.tab.wslDistro);
 		const cp = await loadCheckpointFromRef(root, checkpointId);
 		if (!cp) throw new Error(`Checkpoint not found: ${checkpointId}`);
@@ -4011,6 +4673,8 @@ export class AgentManager {
 	 */
 	async restoreCheckpoint(agentId: string, checkpointId: string, scope: RewindRestoreScope): Promise<RewindRestoreResult> {
 		const runtime = this.requireRuntime(agentId);
+		// 回退会**写文件**（reset + safeClean）：远端路径绝不能进本机 git。
+		this.assertLocalRuntimeOperation(runtime, "restoreCheckpoint");
 		const root = this.rewindHostRoot(runtime.tab.cwd, runtime.tab.wslDistro);
 		const cp = await loadCheckpointFromRef(root, checkpointId);
 		if (!cp) throw new Error(`Checkpoint not found: ${checkpointId}`);
@@ -4296,14 +4960,14 @@ export class AgentManager {
 			}
 		});
 		piProcess.on("stderr", (text) =>
-			this.emit(ipcChannels.agentsLog, {
+			this.emit(agentEventTags.agentsLog, {
 				agentId,
 				...this.streamRuntimeTriple(agentId),
 				text,
 			}),
 		);
 		piProcess.on("protocol-error", (line) => {
-			this.emit(ipcChannels.agentsLog, {
+			this.emit(agentEventTags.agentsLog, {
 				agentId,
 				...this.streamRuntimeTriple(agentId),
 				text: `Protocol error: ${line}`,
@@ -4772,7 +5436,8 @@ export class AgentManager {
 			this.rewindCheckpoints.bumpTurn(agentId);
 			// 首轮 run 顺带清理非活跃会话的 checkpoint（fire-and-forget，
 			// keep 集合含当前会话，并发会话不误删；节流见方法内注释）。
-			if (runtime.tab.cwd && runtime.tab.sessionId) {
+			// 远端 cwd：本机 git 清理不参与（root 是远端路径，本机不存在这个仓库）。
+			if (runtime.tab.cwd && runtime.tab.sessionId && !this.isRemoteRuntime(runtime.tab.projectId)) {
 				this.rewindCheckpoints.pruneOldSessionsFor(this.rewindHostRoot(runtime.tab.cwd, runtime.tab.wslDistro), runtime.tab.sessionId);
 			}
 			runtime.tab.status = "running";
@@ -4787,7 +5452,7 @@ export class AgentManager {
 			this.emitToolRuntimeTransition(agentId, false);
 			this.emitStreamingStatePatch(agentId);
 			// 新一轮丢掉上一轮 held live 槽，避免旧正文串到本轮。
-			this.emit(ipcChannels.agentsTextStream, {
+			this.emit(agentEventTags.agentsTextStream, {
 				agentId,
 				...this.streamRuntimeTriple(agentId),
 				text: "",
@@ -4804,6 +5469,14 @@ export class AgentManager {
 		}
 
 		const startMessage = isRecord(typed.message) ? typed.message : undefined;
+		if (typed.type === "message_start" && startMessage?.role === "user" && typeof startMessage.timestamp === "number" && Number.isFinite(startMessage.timestamp) && runtime && this.isRemoteRuntime(runtime.tab.projectId)) {
+			const messages = this.messages.get(agentId) ?? [];
+			const index = bindRemoteUserMessageTimestamp(messages, this.messageProjector.convert("_viewer", [startMessage])[0]);
+			if (index !== undefined) {
+				this.markMessagesDirtyFrom(agentId, index);
+				this.scheduleMessageEmit(agentId);
+			}
+		}
 		if (typed.type === "message_start" && startMessage?.role === "assistant") {
 			// abort 封印后的残留 assistant 事件应丢弃，防止误重新激活流式状态。
 			// stop()/关闭路径已 agents.delete + clearStreamGate（封印随之删除），
@@ -5162,7 +5835,9 @@ export class AgentManager {
 			// 文件类工具执行完成 → 异步自动打点（快照包含该工具改动后的状态）。
 			// 检查点创建不阻塞工具结果推送（fire-and-forget，失败只记日志）。
 			const endedToolName = typeof typed.toolName === "string" ? typed.toolName : "";
-			if (MUTATING_TOOLS.has(endedToolName)) {
+			// 远端 cwd：checkpoint ref 在本机仓库里，远端会话的打点必须跳过（本机 git 只会
+			// stat 到同名路径，远端 rewind 属后续批次）。
+			if (MUTATING_TOOLS.has(endedToolName) && !this.isRemoteRuntime(runtime.tab.projectId)) {
 				this.rewindCheckpoints.scheduleToolCheckpoint(agentId, endedToolName, this.rewindCheckpoints.turnCounter(agentId));
 			}
 			if (endedToolName === "Agent" || endedToolName === "subagent" || endedToolName === "acp_delegate") {
@@ -5483,6 +6158,12 @@ export class AgentManager {
 		}
 
 		this.messages.set(agentId, list);
+		// 远端事件时间与远端 JSONL 同源，保留作停止后的身份核对；不能拿本机时间跨时钟匹配。
+		const runtime = this.agents.get(agentId);
+		if (runtime && this.isRemoteRuntime(runtime.tab.projectId) && isRecord(partialMessage) && typeof partialMessage.timestamp === "number" && Number.isFinite(partialMessage.timestamp)) {
+			const message = list.find((candidate) => candidate.id === messageId);
+			if (message) message.meta = { ...message.meta, persistedTimestamp: partialMessage.timestamp };
+		}
 		// upsertAssistantMessage 被 text_start/end 等路径调用，走节流合并；
 		// message_end 等终态调用方会在调用后显式 flush，保证最终状态及时。
 		this.scheduleMessageEmit(agentId);
@@ -5933,6 +6614,17 @@ export class AgentManager {
 	}
 
 	/**
+	 * 远端历史消息投影（远端分页读到的原始 pi 消息 → 渲染层消息）。
+	 *
+	 * 必须走与本地历史**同一条**投影管线：远端会话若自建一份投影，工具卡/thinking/生图元数据/停止态
+	 * 的形状迟早与本地漂移，渲染层就成了「两条渲染链」。agentId 用 `_viewer`，与本地磁盘历史页一致
+	 * （历史页没有运行时身份）。
+	 */
+	projectRemoteHistoryMessages(rawMessages: unknown[], activeEntryIds?: string[]): ChatMessage[] {
+		return this.convertAgentMessages("_viewer", rawMessages, activeEntryIds);
+	}
+
+	/**
 	 * The bundled ask_question extension wraps batch questions in one input request
 	 * because Pi RPC dialogs are otherwise strictly sequential. Validate the shape
 	 * before forwarding it so malformed extension data falls back to normal input.
@@ -6204,7 +6896,7 @@ export class AgentManager {
 
 	/** 轻量 runtime 状态补丁：只同步本地流式标志与工具执行状态，不发 RPC。 */
 	private emitStreamingStatePatch(agentId: string) {
-		this.emit(ipcChannels.agentsRuntimeState, {
+		this.emit(agentEventTags.agentsRuntimeState, {
 			agentId,
 			state: {
 				isStreaming: this.streamingAgents.has(agentId),
@@ -6220,7 +6912,7 @@ export class AgentManager {
 	 * error 终态被清理，先发轻量 patch 让 renderer 在清理前记住它，圆环才能继续提供压缩入口。
 	 */
 	private emitContextOverflowState(agentId: string, contextOverflow: boolean) {
-		this.emit(ipcChannels.agentsRuntimeState, {
+		this.emit(agentEventTags.agentsRuntimeState, {
 			agentId,
 			state: { contextOverflow },
 		});
@@ -6231,7 +6923,7 @@ export class AgentManager {
 		this.agentTurnActiveById.set(agentId, isTurnActive);
 		// agent_start/agent_end are protocol edges, so publish immediately instead
 		// of waiting for the next asynchronous get_state snapshot.
-		this.emit(ipcChannels.agentsRuntimeState, {
+		this.emit(agentEventTags.agentsRuntimeState, {
 			agentId,
 			state: { isTurnActive },
 		});
@@ -6364,7 +7056,7 @@ export class AgentManager {
 
 	private emitStateNow() {
 		const tabs = this.list();
-		this.emit(ipcChannels.agentsState, tabs);
+		this.emit(agentEventTags.agentsState, tabs);
 		// 同步通知主进程内部状态订阅者（PetStateBridge），使宠物窗能拿到聚合状态。
 		// 设计文档原拟用 ipcMain.on("agents:state") 桥接是错的：webContents.send 是
 		// 主进程→渲染层单向通道，ipcMain 收不到主进程自己发出的消息，故改用本钩子。

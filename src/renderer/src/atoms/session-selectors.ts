@@ -13,10 +13,14 @@ export function sessionRecordToSummary(session: SessionRecord): SessionSummary |
 	// （getSummaryKey 对空串归一化为 undefined），不会与其他会话折叠成一行；
 	// 右键菜单按 hasFilePath 隐藏「复制路径/打开文件」类文件操作。
 	// 判据与侧栏收集模型共用（utils/sessionRecordDisplay），两处不再各写一份。
+	// SSH 会话同样没有本机文件；用稳定 session id 展示，不可把 remotePath 塞进 filePath 来绕过过滤。
+	// ssh locator 的可显示判定已收口进 isDisplayableSessionRecord（活动列表/最近列表共用同一判据）。
 	if (!isDisplayableSessionRecord(session)) return undefined;
 	return {
 		id: session.id,
 		filePath: session.filePath ?? "",
+		// 管理列表与移除动作依赖 SSH 身份；摘要不能丢掉 locator 后伪装成本机无文件草稿。
+		locator: session.locator,
 		// 会话归属项目 id：会话管理弹窗 worktree 家族聚合后按它打工作区标签。
 		projectId: session.projectId,
 		projectPath: session.projectPath,
@@ -142,5 +146,29 @@ export const sessionIdByRuntimeAgentIdAtomFamily = atomFamily((agentId: string) 
  * （AGENTS.md「多实例必须按 session 订阅」）。
  */
 export const sessionRuntimeUiBySessionIdAtomFamily = registerSessionFamilyForDisposal(atomFamily((sessionId: string) => selectAtom(sessionRuntimeUiByIdAtom, (map) => map[sessionId], Object.is)));
+
+/**
+ * 这条会话是否要显示远端 trust 条（`RemoteSessionTrustNotice` 的渲染判据）。
+ *
+ * 标记来自主进程：远端会话（`runtimePlan.kind === "remote-ssh"` 那条路）的 tab 带
+ * `remoteTrustUnhandled: true`，经 agents:state 事件透传到 SessionRuntimeViewState。
+ * 本机/WSL/DSH/生图会话、以及旧 main 或旧 payload 缺字段的情况一律为 false——
+ * 消费端据此不渲染提示、也不报错（契约上该字段可选）。
+ *
+ * 注意它只是「要不要渲染」：四种展示态（未决策 / 已信任 / 已拒绝 / 因 endpoint 变更作废）由决策表
+ * 合成，见 `remote-trust-atoms.ts` 的 `sessionRemoteTrustStateAtomFamily`。
+ */
+export const sessionRemoteTrustUnhandledAtomFamily = atomFamily((sessionId: string) => atom((get) => get(sessionRuntimeByIdAtom)[sessionId]?.remoteTrustUnhandled === true));
+
+/**
+ * 这条会话实际注入的内置扩展（undefined = 本机会话 / 旧 main / 尚未 spawn）。
+ *
+ * 能力门的唯一输入：**不要**用「项目是远端」或「后端是 pi」推断 plan/goal 可用——那正是
+ * 「入口在、语义不生效」的来源。
+ */
+export const sessionRemoteExtensionsAtomFamily = atomFamily((sessionId: string) => atom((get) => get(sessionRuntimeByIdAtom)[sessionId]?.remoteExtensions));
+
+/** 这条会话是否属于 SSH 远端项目（能力门/安全控件的分支判据；会话记录是唯一来源）。 */
+export const sessionIsRemoteAtomFamily = atomFamily((sessionId: string) => atom((get) => get(sessionRecordsAtom)[sessionId]?.locator?.kind === "ssh"));
 
 export const sessionHistoryMutationOverlayBySessionIdAtomFamily = registerSessionFamilyForDisposal(atomFamily((sessionId: string) => atom((get) => get(sessionHistoryMutationOverlayByIdAtom)[sessionId])));

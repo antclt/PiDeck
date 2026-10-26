@@ -41,6 +41,8 @@ const timeline = compile("src/renderer/src/hooks/useSessionTimelineController.ts
 	// 两个都必须在 stub 表里：缺失时 loader 回落到以 tests/ 为基准的 nodeRequire，解析 .ts 必失败。
 	"../i18n": { t: (key) => key },
 	"../utils/sessionHistoryAvailability": compile("src/renderer/src/utils/sessionHistoryAvailability.ts"),
+	// 磁盘页游标归一（dev 引入）：纯函数，无内部 import，直接编译真模块。
+	"../utils/sessionDiskPageCursor": compile("src/renderer/src/utils/sessionDiskPageCursor.ts"),
 	"./timeline/autoExpandThreshold": { TURN_WINDOW_AUTO_EXPAND_THRESHOLD: 120, resolveAutoExpandThreshold: (h) => Math.max(120, Math.round(h * 0.4)) },
 	"./timeline/scrollHistoryPolicy": {},
 	// programmaticScrollGuard 是纯模块（无内部 import），直接编译真模块；缺这一条时 loader 会

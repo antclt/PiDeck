@@ -5,8 +5,9 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui-shadc
 import { FileTreeIndentGuides } from "./FileTreeIndentGuides";
 import { getFileIconSeti, getFileIconColor, getFileTypeLabel } from "../../fileIcons";
 import { writeFileNodeDragPayload } from "../app/AppUtils";
+import { fileTreeNodeKey } from "../../utils/fileTreeLazy";
 import { t } from "../../i18n";
-import type { FileTreeNode } from "../../../../shared/types";
+import type { FileTreeNode, ProjectFileTarget } from "../../../../shared/types";
 import { useLazyListWindow } from "../../hooks/useLazyListWindow";
 import { FILE_TREE_RENDER_BATCH } from "../../utils/fileTreeRenderBudget";
 import { fileTreeGitStatusClass, fileTreeGitStatusLabelKey, type FileTreeGitStatusHit } from "../../utils/fileTreeGitStatus";
@@ -48,9 +49,10 @@ type FileTreeRowProps = {
 	activeEditorFile: string | null;
 	onToggleDirectory: (path: string) => void;
 	onFileContextMenu: (node: FileTreeNode, x: number, y: number) => void;
-	onOpenFile?: (path: string) => void;
+	// 远端节点没有本机 path：打开目标类型放宽到 ProjectFileTarget（远端凭据）。
+	onOpenFile?: (target: string | ProjectFileTarget) => void;
 	/** 单击默认预览；第二参 permanent = 双击常驻 */
-	onViewFile?: (path: string, openMode?: "preview" | "permanent") => void;
+	onViewFile?: (target: string | ProjectFileTarget, openMode?: "preview" | "permanent") => void;
 	/** 拖入文件（仅目录节点使用） */
 	onDropFiles?: (targetDir: string, files: FileList) => void;
 	/** 内部拖拽移动文件/目录 */
@@ -92,11 +94,14 @@ export const FileTreeNodeRow = memo(function FileTreeNodeRow(props: FileTreeRowP
 
 const FileRow = memo(function FileRow(props: FileTreeRowProps) {
 	const { node, depth } = props;
-	const isActiveFile = props.activeEditorFile === node.path;
+	// 远端节点的 path 可能缺失：活跃文件按相对路径比较（tab.filePath 对远端就是 relativePath），
+	// 点击目标回落到 node.target（远端 FileTreeNode 的打开凭据）。
+	const fileActionTarget = node.target ?? node.path;
+	const isActiveFile = props.activeEditorFile === (node.path ?? node.relativePath);
 	const typeLabel = getFileTypeLabel(node.name);
 	const rowStyle = fileRowStyle(depth);
 	// Git 着色查表：文件行取自身状态；直接父目录实色、更远祖先由档位决定洗淡。
-	const gitStatus = props.gitStatusOf?.(node.path);
+	const gitStatus = props.gitStatusOf?.(node.path ?? node.relativePath);
 	// 活跃编辑器行的选中高亮优先：不叠加着色类，避免 git 色压掉选中态。
 	const gitStatusClass = isActiveFile ? undefined : fileTreeGitStatusClass(gitStatus);
 	// 文字替代通道：颜色是唯一信号时色弱用户无从判断，title / aria-label 里带上状态名。
@@ -125,10 +130,12 @@ const FileRow = memo(function FileRow(props: FileTreeRowProps) {
 				aria-label={gitStatusLabel ? `${node.name} · ${gitStatusLabel}` : undefined}
 				draggable
 				onDragStart={handleDragStart}
-				onClick={() => props.onViewFile?.(node.path)}
+				onClick={() => {
+					if (fileActionTarget !== undefined) props.onViewFile?.(fileActionTarget);
+				}}
 				onDoubleClick={(event) => {
 					event.preventDefault();
-					props.onViewFile?.(node.path, "permanent");
+					if (fileActionTarget !== undefined) props.onViewFile?.(fileActionTarget, "permanent");
 				}}
 				onContextMenu={menu}
 			>
@@ -145,7 +152,9 @@ const FileRow = memo(function FileRow(props: FileTreeRowProps) {
 
 const DirectoryRow = memo(function DirectoryRow(props: FileTreeRowProps) {
 	const { node, depth, expandedDirs } = props;
-	const expanded = expandedDirs.has(node.path);
+	// 展开键统一走 fileTreeNodeKey：远端节点没有本机 path，仍能按 target 稳定折叠。
+	const nodeKey = fileTreeNodeKey(node);
+	const expanded = expandedDirs.has(nodeKey);
 	const rowStyle = fileRowStyle(depth);
 	const menu = (event: ReactMouseEvent) => {
 		event.preventDefault();
@@ -164,9 +173,9 @@ const DirectoryRow = memo(function DirectoryRow(props: FileTreeRowProps) {
 			event.preventDefault();
 			event.stopPropagation();
 			event.dataTransfer.dropEffect = "move";
-			props.onDragOverDirChange(node.path);
+			props.onDragOverDirChange(nodeKey);
 		},
-		[node.path, props.onDragOverDirChange],
+		[nodeKey, props.onDragOverDirChange],
 	);
 	const handleDragLeave = useCallback(() => {
 		props.onDragOverDirChange(null);
@@ -179,21 +188,21 @@ const DirectoryRow = memo(function DirectoryRow(props: FileTreeRowProps) {
 			// 内部拖拽移动：优先检查 pi-file-path
 			const sourcePath = event.dataTransfer.getData("text/pi-file-path");
 			if (sourcePath) {
-				if (sourcePath !== node.path && props.onMoveFiles) {
-					props.onMoveFiles([sourcePath], node.path);
+				if (sourcePath !== nodeKey && props.onMoveFiles) {
+					props.onMoveFiles([sourcePath], nodeKey);
 				}
 				return;
 			}
 			// 外部 OS 文件拖入：复制到目标目录
 			if (event.dataTransfer.files.length > 0 && props.onDropFiles) {
-				props.onDropFiles(node.path, event.dataTransfer.files);
+				props.onDropFiles(nodeKey, event.dataTransfer.files);
 			}
 		},
-		[node.path, props.onDropFiles, props.onMoveFiles, props.onDragOverDirChange],
+		[nodeKey, props.onDropFiles, props.onMoveFiles, props.onDragOverDirChange],
 	);
-	const isDragOver = props.dragOverDir === node.path;
+	const isDragOver = props.dragOverDir === nodeKey;
 	// Git 着色查表：目录行取子树聚合状态（直接父目录实色、更远祖先洗淡）。
-	const gitStatus = props.gitStatusOf?.(node.path);
+	const gitStatus = props.gitStatusOf?.(nodeKey);
 	const gitStatusClass = fileTreeGitStatusClass(gitStatus);
 	const gitStatusLabelKey = fileTreeGitStatusLabelKey(gitStatus?.status);
 	const gitStatusLabel = gitStatusLabelKey ? t(gitStatusLabelKey) : "";
@@ -204,10 +213,10 @@ const DirectoryRow = memo(function DirectoryRow(props: FileTreeRowProps) {
 	   吸顶行之间也会露出滚动内容。 */
 	const stickyRow = depth < FILE_STICKY_MAX_LEVELS;
 	// 子项增量渲染窗口：目录一次展开几千项时先挂一批，滚到底再追加（每个目录独立窗口）。
-	const childWindow = useLazyListWindow<FileTreeNode>(node.children ?? EMPTY_FILE_TREE_CHILDREN, { pageSize: FILE_TREE_RENDER_BATCH, scrollRef: props.scrollRef, resetKey: node.path });
+	const childWindow = useLazyListWindow<FileTreeNode>(node.children ?? EMPTY_FILE_TREE_CHILDREN, { pageSize: FILE_TREE_RENDER_BATCH, scrollRef: props.scrollRef, resetKey: nodeKey });
 	return (
 		<div className="file-node">
-			<Collapsible open={expanded} onOpenChange={() => props.onToggleDirectory(node.path)}>
+			<Collapsible open={expanded} onOpenChange={() => props.onToggleDirectory(nodeKey)}>
 				<CollapsibleTrigger asChild>
 					<button
 						type="button"
@@ -258,7 +267,7 @@ const DirectoryRow = memo(function DirectoryRow(props: FileTreeRowProps) {
 						<div className="file-children">
 							{childWindow.visible.map((child) => (
 								<FileTreeNodeRow
-									key={child.path}
+									key={fileTreeNodeKey(child)}
 									node={child}
 									depth={depth + 1}
 									expandedDirs={expandedDirs}

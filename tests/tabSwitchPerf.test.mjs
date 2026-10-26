@@ -17,10 +17,11 @@ test("tab switch does not refresh the project file tree or git branches", () => 
 	// 文件抽屉走 loadProjectFileTree（根层 maxDepth 0）；切会话不得把 currentSessionId 绑进扫盘。
 	// （文件树加载已迁入 useProjectFileTreeController，断言跟随迁移。）
 	assert.match(fileTreeControllerSource, /loadProjectFileTree\(/);
-	// 对象实参可能被格式化到多行：用 \s* 容忍。
+	// 对象实参可能被格式化到多行：用 \s* 容忍。根层 list 仍以 projectId 字符串调用（ProjectFileTarget
+	// 由 App 的 files facade 在远端项目分支使用；合并后文件树 owner 是 controller）。
 	assert.match(fileTreeControllerSource, /api\.files\.list\(\s*projectId,\s*\{\s*maxDepth: 0\s*\}\)/);
 	assert.match(appSource, /api\.git\.branches\(activeProjectId\)/);
-	assert.match(appSource, /\}, \[activeProjectId\]\);/);
+	assert.match(appSource, /\}, \[activeProjectId, activeProjectIsRemote\]\);/);
 	assert.doesNotMatch(appSource, /api\.git\.branches\(activeProjectId\)[\s\S]{0,400}\}, \[activeProjectId, currentSessionId/);
 });
 

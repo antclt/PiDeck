@@ -8,7 +8,6 @@ const typescript = require("typescript");
 
 const host = readFileSync("src/renderer/src/components/workspace/WorkspaceDrawerHost.tsx", "utf8");
 const hook = readFileSync("src/renderer/src/hooks/useWorkspacePanels.ts", "utf8");
-const editor = readFileSync("src/renderer/src/components/workspace/EditorSurface.tsx", "utf8");
 const browser = readFileSync("src/renderer/src/components/workspace/BrowserSurface.tsx", "utf8");
 const external = readFileSync("src/renderer/src/components/workspace/ExternalEditorOverlay.tsx", "utf8");
 

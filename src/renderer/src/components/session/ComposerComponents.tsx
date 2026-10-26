@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
 import { AnimatePresence } from "motion/react";
 import { useAtomValue } from "jotai";
-import { dshModuleHiddenAtom, imageGenModuleHiddenAtom, videoGenModuleHiddenAtom, acpEnabledAtom, acpToolsAtom } from "../../atoms";
+import { dshModuleHiddenAtom, imageGenModuleHiddenAtom, videoGenModuleHiddenAtom, acpEnabledAtom, acpToolsAtom, sessionIsRemoteAtomFamily, sessionRemoteExtensionsAtomFamily } from "../../atoms";
 import { AlertCircle, BrainCircuit, Check, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, CornerDownLeft, Eye, EyeOff, FileText, GitBranch, ImageIcon, LayoutGrid, ListChecks, Loader2, Paperclip, RefreshCw, Settings2, Sparkles, Star, Target, X, Zap } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
 import type { PromptEnhanceView } from "../../hooks/usePromptEnhance";
@@ -557,6 +557,8 @@ export function ComposerBottomBar(props: {
 		value: props.composerAgentMode,
 		disabled: props.disabled,
 		onChange: props.onChangeMode,
+		isRemoteSession: useAtomValue(sessionIsRemoteAtomFamily(props.sessionId)),
+		remoteExtensions: useAtomValue(sessionRemoteExtensionsAtomFamily(props.sessionId)),
 	});
 	// 模式入口 = 「+」菜单分组：只列计划/目标，普通模式不作为可选项（普通 = 不在任何特殊模式）。
 	// visibleModes 为空（生图/生视频会话、legacy 锁定、ACP 或 plan+goal 扩展都关）时整个分组不渲染。
@@ -851,6 +853,7 @@ const MODEL_LIST_FAILURE_REASON_TEXT: Record<ModelListFailReason, TranslationKey
 	"cli-failed": "app.modelListFailCliFailed",
 	"waf-blocked": "app.modelListFailWafBlocked",
 	"dsh-host-stopped": "app.modelListFailDshStopped",
+	"remote-inactive": "app.modelListFailRemoteInactive",
 	empty: "app.modelListFailEmpty",
 };
 

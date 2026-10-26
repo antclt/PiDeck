@@ -24,6 +24,8 @@ function renderComposer(run, options = {}) {
 		stubs: {
 			jotai: {
 				useAtomValue: () => ({}),
+				// ComposerArea 的 runtime 快照写回走 useSetAtom（稳定 setter）；本测试只验证布局与投递位置。
+				useSetAtom: () => () => {},
 				// ComposerArea 的加载链拉进了 atoms/dsh-atoms.ts（模块顶层 atom() 建原子），
 				// stub 需给一个可调用形式，返回对象字面量即可（useAtomValue 已被拦截，不会真正读它）。
 				atom: (initial) => ({ init: initial }),

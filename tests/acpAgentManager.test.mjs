@@ -1191,3 +1191,276 @@ test("sendPrompt 派发失败:撤回刚落的用户条目（不留没有回复�
 	const flushed = events.messages.at(-1);
 	assert.equal(flushed.messages.filter((message) => message.role === "user").length, 0, "派发失败且 agent 未产出时必须撤回");
 });
+
+test("stall 看门狗:在途工具调用期间不判静默(等待工具是合法状态),工具收口后恢复判静默", async (t) => {
+	let promptSeen = false;
+	const { manager, createAgent, lastProc } = harness(
+		t,
+		{
+			handler: (frame, { writeFromCli }) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+				if (frame.method === "session/new") return { sessionId: "sess-tool-stall" };
+				if (frame.method === "session/prompt") {
+					promptSeen = true;
+					// 长命令形态(npm install/构建/测试):tool_call 开始后到 completed 之间无任何流式输出
+					writeFromCli({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "sess-tool-stall", update: { sessionUpdate: "tool_call", toolCallId: "tc-1", status: "pending" } } });
+					return undefined;
+				}
+				return {};
+			},
+		},
+		{ promptStallTimeoutMs: 80, abortEscalationMs: 50 },
+	);
+	const tab = await createAgent();
+	const sendPromise = manager.sendPrompt({ agentId: tab.id, message: "long running tool" });
+	await waitFor(() => promptSeen, "prompt dispatched");
+	await sleep(260); // 全静默远超阈值:在途工具调用豁免,不得 cancel/强杀
+	assert.equal(lastProc().methodFrames("session/cancel").length, 0, "在途工具调用期间不得发 stall cancel");
+	assert.equal(lastProc().proc.exitCode, null, "在途工具调用期间不得强杀进程");
+	// 工具收口(终态出集)后全静默:静默基准已随 update 刷新,阈值重新起算,看门狗恢复开火
+	lastProc().writeFromCli({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "sess-tool-stall", update: { sessionUpdate: "tool_call_update", toolCallId: "tc-1", status: "completed" } } });
+	await waitFor(() => lastProc().proc.exitCode === 0, "tool completed then stall force kill");
+	const stallCancels = lastProc()
+		.methodFrames("session/cancel")
+		.filter((frame) => frame.params?.reason === "stall");
+	assert.equal(stallCancels.length, 1, "工具收口后的新静默仍要被看门狗抓到");
+	const result = await sendPromise;
+	assert.equal(result.accepted, false);
+	assert.equal(result.i18nKey, "acp.stallForceStopped");
+});
+
+test("stall 看门狗:省略 status 的 tool_call_update(工具流式输出)不清除在途豁免", async (t) => {
+	let promptSeen = false;
+	const { manager, createAgent, lastProc } = harness(
+		t,
+		{
+			handler: (frame, { writeFromCli }) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+				if (frame.method === "session/new") return { sessionId: "sess-tool-content" };
+				if (frame.method === "session/prompt") {
+					promptSeen = true;
+					writeFromCli({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "sess-tool-content", update: { sessionUpdate: "tool_call", toolCallId: "tc-1", status: "in_progress" } } });
+					return undefined;
+				}
+				return {};
+			},
+		},
+		{ promptStallTimeoutMs: 80, abortEscalationMs: 50 },
+	);
+	const tab = await createAgent();
+	const sendPromise = manager.sendPrompt({ agentId: tab.id, message: "npm install" });
+	await waitFor(() => promptSeen, "prompt dispatched");
+	// 只带 content、省略 status 的补丁帧（ACP 规范：除 toolCallId 外字段全可选，工具流式输出就是这样）。
+	// 它不代表工具收口，不得清除在途豁免。
+	lastProc().writeFromCli({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "sess-tool-content", update: { sessionUpdate: "tool_call_update", toolCallId: "tc-1", content: [{ type: "content", content: { type: "text", text: "added 120 packages" } }] } } });
+	await sleep(260); // 补丁帧之后全静默：豁免必须还在，不得 cancel/强杀
+	assert.equal(lastProc().methodFrames("session/cancel").length, 0, "省略 status 的 tool_call_update 不得清除在途豁免");
+	assert.equal(lastProc().proc.exitCode, null, "省略 status 的 tool_call_update 后不得强杀进程");
+	// 显式终态才出集：静默重新起算，看门狗恢复开火。
+	lastProc().writeFromCli({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "sess-tool-content", update: { sessionUpdate: "tool_call_update", toolCallId: "tc-1", status: "completed" } } });
+	await waitFor(() => lastProc().proc.exitCode === 0, "terminal status then stall force kill");
+	const result = await sendPromise;
+	assert.equal(result.accepted, false);
+	assert.equal(result.i18nKey, "acp.stallForceStopped");
+});
+
+test("stall 看门狗:settings 读口实时生效(readAcpTimeoutSettings,变更后新回合即用,无需重启)", async (t) => {
+	let promptSeen = false;
+	const { manager, createAgent, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+				if (frame.method === "session/new") return { sessionId: "sess-stall-settings" };
+				if (frame.method === "session/prompt") {
+					promptSeen = true;
+					return undefined;
+				}
+				return {};
+			},
+		},
+		// 不注入静态测试字段,只给 settings 读口:证明布防路径真的走到 settings 口径
+		{ readAcpTimeoutSettings: () => ({ promptStallTimeoutMs: 80 }) },
+	);
+	const tab = await createAgent();
+	const sendPromise = manager.sendPrompt({ agentId: tab.id, message: "silent hang" });
+	await waitFor(() => promptSeen, "prompt dispatched");
+	await waitFor(
+		() =>
+			lastProc()
+				.methodFrames("session/cancel")
+				.some((frame) => frame.params?.reason === "stall"),
+		"stall cancel via settings",
+	);
+	const result = await sendPromise;
+	assert.equal(result.accepted, false);
+	assert.equal(result.i18nKey, "acp.stallForceStopped");
+});
+
+test("session/prompt 兑底超时:settings 读口生效(readAcpTimeoutSettings.promptTurnTimeoutMs)", async (t) => {
+	let promptSeen = false;
+	const { manager, createAgent, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+				if (frame.method === "session/new") return { sessionId: "sess-turn-timeout-settings" };
+				if (frame.method === "session/prompt") {
+					promptSeen = true;
+					return undefined;
+				}
+				return {};
+			},
+		},
+		{ readAcpTimeoutSettings: () => ({ promptTurnTimeoutMs: 40 }) },
+	);
+	const tab = await createAgent();
+	const result = await manager.sendPrompt({ agentId: tab.id, message: "hang" });
+	await waitFor(() => promptSeen, "prompt dispatched");
+	assert.equal(result.accepted, false);
+	assert.match(result.error, /ACP request timed out after 40ms: session\/prompt/);
+	await waitFor(() => lastProc().methodFrames("session/cancel").length === 1);
+	assert.equal(lastProc().methodFrames("session/cancel")[0].params.reason, "turn_timeout");
+});
+
+// ── #415 MVP：deck 侧归档（userData/acp-sessions）接线 ─────────────────────────
+// 归档的三件事必须在 manager 生命周期里正确定位：
+// 1) create 带 acpSessionId 且内存快照为空 → 握手**之前**回灌快照（seedMessages 读它）；
+// 2) 回合结算后落盘（拿 settle 后的投影），不是 80ms flush；
+// 3) IPC/Web 读口 miss 时回退归档（同步读口保持只覆盖内存）。
+
+/** 建一个临时 userData 根 + 归档实例（真实 fs，不 mock）。 */
+async function tempArchiveHarness(t) {
+	const { mkdtemp, rm } = await import("node:fs/promises");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const { AcpSessionArchive } = loadTsCommonJs("src/main/acp/AcpSessionArchive.ts");
+	const root = await mkdtemp(join(tmpdir(), "pideck-acp-archive-wiring-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	return new AcpSessionArchive({ userDataDir: root });
+}
+
+/** 上一代进程留下的归档消息（重启后内存快照为空，只有它在）。 */
+function archivedMessages(texts) {
+	return texts.map((text, index) => ({
+		id: `acp:archived-${index + 1}`,
+		agentId: "acp:previous-process",
+		role: index === 0 ? "user" : "assistant",
+		text,
+		timestamp: 1_700_000_000_000 + index,
+	}));
+}
+
+test("归档恢复:create 带 acpSessionId 且内存快照为空时从归档回灌(握手 seedMessages 之前)", async (t) => {
+	const archive = await tempArchiveHarness(t);
+	await archive.save("sess-archived", archivedMessages(["持久化的提问", "持久化的回答"]));
+	// 记录 create 期间的归档写入：握手（load 重放/回灌）完成后要立刻留一份副本，不等回合结算。
+	const persistedDuringCreate = [];
+	const archiveSpy = {
+		read: (id) => archive.read(id),
+		enqueueSave: (id, messages) => {
+			persistedDuringCreate.push((messages ?? []).map((entry) => entry.text).join("|"));
+			return archive.enqueueSave(id, messages);
+		},
+	};
+	const { manager, events } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: false } };
+				if (frame.method === "session/new") return { sessionId: "sess-archived" };
+				return {};
+			},
+		},
+		{ archive: archiveSpy },
+	);
+	const tab = await manager.create({ projectId: "p1", title: "t", deckSessionId: "deck-archived", backend: "acp", agentPreset: "gemini", acpSessionId: "sess-archived" });
+	assert.equal(tab.status, "idle");
+	// 回灌若晚于握手，seedMessages 读到空数组，create 末尾的全量 flush 就只有空投影。
+	// 这里断言 create 返回时时间线已经带着归档历史（无 loadSession 能力的 CLI 只能播种）。
+	const flushed = events.messages.at(-1);
+	assert.equal(flushed?.agentId, tab.id);
+	assert.equal((flushed.messages ?? []).map((entry) => entry.text).join("|"), "持久化的提问|持久化的回答");
+	// 内存快照同源（重入会话不再空白）
+	assert.equal(manager.readMessagesByAcpSessionId("sess-archived").length, 2);
+	assert.equal((await manager.readMessagesWithArchive("sess-archived")).length, 2);
+	// create 末尾的持久化：写的是回灌后的投影（不是空投影，也不是内存快照的旧引用）
+	assert.equal(persistedDuringCreate.at(-1), "持久化的提问|持久化的回答", "create 完成即留归档副本");
+});
+
+test("回合结算后落盘:归档文件出现,内容 = settle 后的投影消息", async (t) => {
+	const archive = await tempArchiveHarness(t);
+	const { manager, events, createAgent } = harness(
+		t,
+		{
+			handler: (frame, { writeFromCli }) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+				if (frame.method === "session/new") return { sessionId: "sess-persist" };
+				if (frame.method === "session/prompt") {
+					writeFromCli({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "sess-persist", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "存进归档的回答" } } } });
+					return { stopReason: "end_turn" };
+				}
+				return {};
+			},
+		},
+		{ archive },
+	);
+	const tab = await createAgent();
+	// 新会话 create 时投影为空（归档里也没有它）：空快照不得凭空造一份空归档
+	assert.equal((await archive.read("sess-persist")).length, 0, "空投影不在 create 时写盘");
+	const result = await manager.sendPrompt({ agentId: tab.id, message: "写进归档的提问" });
+	assert.equal(result.accepted, true);
+	await waitFor(() => (events.messages.at(-1)?.messages ?? []).length >= 2, "turn flushed");
+	// 结算点写盘是 await 的：sendPrompt 返回时归档文件已经在盘上（崩在下一回合前也不丢）
+	const persisted = await archive.read("sess-persist");
+	assert.ok(persisted.length >= 2, `归档应含 user+assistant（实际 ${persisted.length}）`);
+	assert.equal(persisted.filter((entry) => entry.role === "user")[0]?.text, "写进归档的提问");
+	assert.equal(persisted.filter((entry) => entry.role === "assistant").at(-1)?.text, "存进归档的回答");
+	// 归档内容必须与投影逐条对齐（写的是 settle 后的投影，不是中间态）
+	const projected = manager.readMessages(tab.id);
+	assert.equal(persisted.map((entry) => entry.id).join(","), projected.map((entry) => entry.id).join(","));
+	// 异步读口内存优先：runtime 在场时不需要碰磁盘
+	assert.equal((await manager.readMessagesWithArchive("sess-persist")).map((entry) => entry.id).join(","), projected.map((entry) => entry.id).join(","));
+});
+
+test("异步读口 readMessagesWithArchive:内存 miss 时回退归档(同步读口只覆盖内存)", async (t) => {
+	const archive = await tempArchiveHarness(t);
+	await archive.save("sess-disk-only", archivedMessages(["只有磁盘上有的提问", "只有磁盘上有的回答"]));
+	const { manager } = harness(t, { handler: () => undefined }, { archive });
+	// 同步读口是既有内存契约：没有 runtime/快照就是空（历史用例按同步断言）
+	assert.equal(manager.readMessagesByAcpSessionId("sess-disk-only").length, 0);
+	// 异步读口（sessionIpc/Web 的读路径）回退归档
+	const restored = await manager.readMessagesWithArchive("sess-disk-only");
+	assert.equal(restored.map((entry) => entry.text).join("|"), "只有磁盘上有的提问|只有磁盘上有的回答");
+	// 未归档过的会话仍是空，不抛
+	assert.equal((await manager.readMessagesWithArchive("sess-never")).length, 0);
+});
+
+test("归档回灌不按 400 条内存快照裁剪:重开长会话拿到完整归档(时间线/分页/会话内查找都不被截断)", async (t) => {
+	const archive = await tempArchiveHarness(t);
+	// 500 条 > MESSAGE_SNAPSHOT_LIMIT(400)：走 set() 回灌会丢掉前 100 条
+	const longHistory = archivedMessages(Array.from({ length: 500 }, (_, index) => `历史消息 ${index + 1}`));
+	await archive.save("sess-long", longHistory);
+	const { manager } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: false } };
+				if (frame.method === "session/new") return { sessionId: "sess-long" };
+				return {};
+			},
+		},
+		{ archive },
+	);
+	const tab = await manager.create({ projectId: "p1", title: "t", deckSessionId: "deck-long", backend: "acp", agentPreset: "gemini", acpSessionId: "sess-long" });
+	const projected = manager.readMessages(tab.id);
+	assert.equal(projected.length, 500, "回灌必须完整（不能被 400 条流式上限裁掉前 100 条）");
+	assert.equal(projected[0].text, "历史消息 1");
+	assert.equal(projected.at(-1).text, "历史消息 500");
+	// runtime 在场时异步读口走投影，同样是完整历史
+	assert.equal((await manager.readMessagesWithArchive("sess-long")).length, 500);
+	// stop 之后 runtime 消失：异步读口要拿归档（完整）而不是 ≤400 条的内存快照
+	await manager.stop(tab.id);
+	assert.equal(manager.readMessagesByAcpSessionId("sess-long").length, 400, "同步读口仍然是内存快照契约（≤400）");
+	assert.equal((await manager.readMessagesWithArchive("sess-long")).length, 500, "异步读口归档优先：分页与会话内查找要能看到完整历史");
+});

@@ -2,7 +2,8 @@ import { ARCHIVED_SESSION_TOAST_MS, archivedSessionToastMessage } from "../useSe
 import { isSameSessionPath } from "../../agentListDisplay";
 import { desktopApi as api } from "../../desktopApi";
 import { t } from "../../i18n";
-import type { SessionSummary } from "../../../../shared/types";
+import type { ArchivedPiSession, SessionSummary } from "../../../../shared/types";
+import { restoreArchivedPiSession } from "../../utils/sessionArchiveActions";
 import type { NoticeKind } from "../../utils/notice";
 
 /** 确认弹窗的最小切片（宿主 overlays 只需要这两个方法） */
@@ -69,9 +70,11 @@ export function useSidebarArchiveActions({ activeProjectId, showToast, overlays,
 		await refreshProjectSessions(projectId);
 	}
 
-	/** 恢复归档会话：文件移回原路径并重新扫描 */
-	async function unarchiveSidebarSession(archivedPath: string, projectId = activeProjectId) {
-		await api.sessions.unarchiveRecord(archivedPath);
+	/** 恢复归档会话：本机按归档路径移回，远端按 catalog id 派发（身份绝不相互回退） */
+	async function unarchiveSidebarSession(archived: ArchivedPiSession, projectId = activeProjectId) {
+		await restoreArchivedPiSession(archived, api.sessions);
+		// 恢复成功对用户是同一件事（本机按归档路径移回 / 远端按 catalog id 派发只在实现上不同），
+		// 不另造文案键：合并后词典里没有 remote 专用键，用既有的 app.sessionRestored。
 		showToast(t("app.sessionRestored"), 2200);
 		// 归档管理弹窗可以从非当前项目打开；必须刷新弹窗所属项目，否则文件已恢复但侧栏仍沿用旧目录快照。
 		if (projectId) await refreshProjectSessions(projectId);

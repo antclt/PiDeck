@@ -4,7 +4,7 @@
  * 解析 src/preload/index.ts 源码（注释与字符串骨架化 + 花括号深度扫描，空白容忍）
  * 提取 sessions/config 命名空间方法全集，并与 electron stub 捕获的实际暴露面交叉印证；
  * 核对 T4 落盘的 SESSIONS_SUBDOMAINS/CONFIG_SUBSTORES（consolidations.ts）：
- * 四组并集≡112 全集（§0 锚）、两两互斥（A14）、DSH 归属按 PLAN.md S5 裁定、
+ * 四组并集≡116 全集（§0 锚）、两两互斥（A14）、DSH 归属按 PLAN.md S5 裁定、
  * config 十组≡50 全集与方法族口径（FIND-4：ConfigManager 单类按语义分组）、
  * facadeTypes.ts 视图成员与映射常量同源；坏 fixture 对校验函数有分辨力（防恒真）。
  * 映射数据与裁定不符时用例如实红（走返工流程），本测试不改动任何 src/ 数据。
@@ -24,9 +24,14 @@ const FACADE_SOURCE = readFileSync("src/shared/api/facadeTypes.ts", "utf8");
  * 变更史：2026-10-19 下线 GUI 扩展桥的 sendBridgeEvent / requestBridgeResync（112→111）；
  * 2027-02 下线会话级文件清单 IPC listSessionFileChanges（→110），同批把一直漏分组、
  * 但确实存在于 preload 的 draftPromptTemplates / listRuntimePromptTemplates 补进 runtime 组
- * （基线因此长期存在「四组总和 111 vs preload 113」的偏差，本测试此前一直是红的）→112。
+ * （基线因此长期存在「四组总和 111 vs preload 113」的偏差，本测试此前一直是红的）→112；
+ * 2026-10-20 远端集成合并：远端通道面（remote* / git:remote-* / 远端会话归档）重新入场，
+ * 并把一直漏分组的 listModels / readOutline / readOutlineTitle 补进 runtime 组 → 118。
+ * 2026-10-24 第四轮追赶 origin/dev（274 提交）：上游下线 readOutlineTitle 与
+ * readDshSystemPrompt（轨迹事实/索引 preview 取代）→ sessions 116；config 48→50
+ * （外部 Agent 供应商导入两法）。
  */
-const SESSIONS_METHOD_TOTAL = 112;
+const SESSIONS_METHOD_TOTAL = 116;
 const CONFIG_METHOD_TOTAL = 50;
 const SESSIONS_GROUP_KEYS = ["catalog", "import", "rewind", "runtime"];
 const CONFIG_GROUP_KEYS = ["auth", "maintenance", "mcp", "models", "resources", "settings", "tokendance", "trust", "usageProbes", "vision"];
@@ -182,10 +187,10 @@ test("F5-1 SESSIONS_SUBDOMAINS 组键集恰为 catalog/runtime/import/rewind 四
 	assert.deepEqual(validateGroupingStructure(SESSIONS, SESSIONS_GROUP_KEYS), []);
 });
 
-test("F5-2 四组并集 ≡ preload sessions 命名空间 112 方法全集（无丢失无新增，§0 锚）", () => {
+test("F5-2 四组并集 ≡ preload sessions 命名空间 116 方法全集（无丢失无新增，§0 锚）", () => {
 	assert.equal(sessionsNames.length, SESSIONS_METHOD_TOTAL, `源码解析得 ${sessionsNames.length} 个方法`);
 	assert.deepEqual(diffGroups(SESSIONS, sessionsNames), { missing: [], extra: [] });
-	assert.equal(Object.values(SESSIONS).flat().length, SESSIONS_METHOD_TOTAL, "四组方法数之和 = 114");
+	assert.equal(Object.values(SESSIONS).flat().length, SESSIONS_METHOD_TOTAL, "四组方法数之和 = 116");
 });
 
 test("F5-3 四组两两互斥（A14）", () => {
@@ -223,7 +228,7 @@ test("F5-5 facadeTypes 视图成员与映射常量同源（源码契约，空白
 	);
 });
 
-test("F5-6 fixture 工厂按组 pick：输出键并集 ≡ 114 方法全集（SubPick 缺席静默语义）", () => {
+test("F5-6 fixture 工厂按组 pick：输出键并集 ≡ 116 方法全集（SubPick 缺席静默语义）", () => {
 	let counter = 0;
 	const fixture = {};
 	for (const name of sessionsNames) fixture[name] = () => counter++;

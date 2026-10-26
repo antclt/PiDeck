@@ -85,7 +85,7 @@ test("IPC channel wiring for agents:text-stream", () => {
 	assert.match(ipc, /agentsTextStream: "agents:text-stream"/);
 
 	const agentManager = readFileSync("src/main/pi/AgentManager.ts", "utf8");
-	assert.match(agentManager, /ipcChannels\.agentsTextStream/);
+	assert.match(agentManager, /agentEventTags\.agentsTextStream/);
 });
 
 test("UI: AnswerOutput live path; TurnRow does not subscribe streaming atom", () => {

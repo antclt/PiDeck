@@ -339,6 +339,27 @@ test("chip row collapses to one line and expands in place", () => {
 	assert.doesNotMatch(source, /Popover|createPortal/, "expansion stays inline (no popover layer)");
 });
 
+test("chip row measures on DOM attach, not via a hand-maintained effect dep list", () => {
+	const source = readFileSync("src/renderer/src/components/session/turn/TurnFileChanges.tsx", "utf8");
+	// 回归（2027-03 用户反馈）：「轮结束后不自动折叠，切走会话再回来才恢复」。
+	// 当时量宽写在 useLayoutEffect + 依赖 [files.length, expanded] 里：本组件流式中 return null，
+	// 轮结束（streaming true→false）才挂 DOM，但那次翻转没改任何依赖 → effect 不重跑 →
+	// visibleCount 永远停在 null → 折叠态按「全显示」渲染整行 chip，溢出右侧被
+	// .message-timeline 的 overflow-x:hidden 裁掉（连 +N 都不显示）。
+	// 结构契约：量宽只能由 DOM 生命周期（ref 回调 + ResizeObserver）驱动，
+	// 不存在「必须手工列全」的依赖数组这个可漏项。
+	assert.doesNotMatch(source.match(/^import .*$/m)?.[0] ?? "", /useLayoutEffect/, "量宽不得回到 useLayoutEffect + 依赖数组（那正是漏掉流式结束翻转的原因）");
+	assert.doesNotMatch(source, /useLayoutEffect\(\)/, "理由同上：不靠 effect 依赖数组驱动量宽（注释里提到旧写法不算）");
+	assert.match(source, /const recompute = useCallback\(/, "装箱计算收敛成一个稳定回调");
+	assert.match(source, /ref=\{attachRow\}/, "可见行挂 ref 回调：节点出现就量（不依赖任何 prop/state 变化）");
+	assert.match(source, /ref=\{attachProbe\}/, "探测层同样挂 ref 回调");
+	assert.match(source, /attachMeasured\(node, rowRef, rowObserverRef, recompute\)/, "行的量宽走统一挂载入口");
+	assert.match(source, /attachMeasured\(node, probeRef, probeObserverRef, recompute\)/, "探测层也要观测：只盯可见行会漏掉「chip 数量不变但文件名变长 / 字体加载」");
+	assert.match(source, /observer\.observe\(node\)/, "挂载后由 ResizeObserver 继续跟踪尺寸变化");
+	// 首帧（visibleCount === null）按全显示渲染只是 commit 内的过渡态，量完必须收敛
+	assert.match(source, /const shown = visibleCount === null \|\| expanded \? files : files\.slice\(0, visibleCount\);/, "null 是过渡态，量到值后必须按 visibleCount 截断");
+});
+
 test("chip row overflow copy exists in all three locale dictionaries", () => {
 	for (const locale of ["zh-CN", "zh-TW", "en-US"]) {
 		const copy = readFileSync(`src/renderer/src/i18n/rendererCopy.${locale}.ts`, "utf8");
