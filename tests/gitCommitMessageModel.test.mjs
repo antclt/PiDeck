@@ -61,8 +61,10 @@ test("Shared model picker keeps one model line and supports collapse and selecte
 	assert.match(commandPicker, /aria-expanded=\{expanded\}/);
 	assert.match(composerComponents, /value=\{currentModelKey\}/);
 	assert.match(composerComponents, /value: props\.composerAgentMode/);
-	// 思考级别就地下拉（1ab977969）后受控值移至 ModelThinkingChip，模型选择器仍单行受控
-	assert.match(modelThinkingChip, /DropdownMenuRadioGroup value=\{props\.current\}/);
+	// 思考级别就地下拉（1ab977969）后受控值移至 ModelThinkingChip，模型选择器仍单行受控；
+	// 强度选择器重做（7f1436a58）后壳换成受控 Popover + 渐变强度条，受控档位仍由
+	// ModelThinkingChip 从 props.current 解析（clamp 回退），本断言只锁控制权归属不锁壳。
+	assert.match(modelThinkingChip, /clampThinkingLevelToAllowed\(props\.current, levels\)/);
 	assert.match(commandPicker, /search\.trim\(\) \? <CommandEmpty/);
 	assert.match(commandPicker, /scrollIntoView\(\{ block: \"center\" \}\)/);
 	// 启动配置选择统一由输入框底栏（ComposerArea/ComposerBottomBar）承担：
