@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { dshUiVisibilityFor, resolveEffectiveAgentBackend, dshSendBlockReason, isDshRuntimeVersionMismatch } = loadTsCommonJs("src/shared/types/dshRuntime.ts");
+const { dshUiVisibilityFor, resolveEffectiveAgentBackend, resolveAutoAgentBackend, dshSendBlockReason, isDshRuntimeVersionMismatch } = loadTsCommonJs("src/shared/types/dshRuntime.ts");
 
 const { probeBundledDshRuntime, dshRuntimeStateFromProbe, DshRuntimeStatusService } = loadTsCommonJs("src/main/dsh/runtime/DshRuntimeStatus.ts");
 
@@ -248,6 +248,17 @@ test("状态服务：声明版本读不到时不判不一致（退回旧行为�
 	const status = service.getStatus();
 	assert.equal(status.state, "installed");
 	assert.equal(status.declaredRuntimeVersion, undefined);
+});
+
+test("resolveAutoAgentBackend：只有可用 DSH 运行时且没有 pi 时才自动选 dsh，其余一律 pi", () => {
+	assert.equal(resolveAutoAgentBackend({ piInstalled: false, dshState: "installed" }), "dsh", "只有 dsh → dsh");
+	assert.equal(resolveAutoAgentBackend({ piInstalled: true, dshState: "installed" }), "pi", "都有 → pi（pi 优先）");
+	assert.equal(resolveAutoAgentBackend({ piInstalled: true, dshState: "notInstalled" }), "pi", "只有 pi → pi");
+	assert.equal(resolveAutoAgentBackend({ piInstalled: false, dshState: "notInstalled" }), "pi", "都没有 → pi（由环境弹窗兜底）");
+	// 探测未完成/损坏/版本不符都不算可用：自动写 dsh 会被 resolveEffectiveAgentBackend 打回 pi，来回抖动。
+	for (const state of ["checking", "broken", "outdated"]) {
+		assert.equal(resolveAutoAgentBackend({ piInstalled: false, dshState: state }), "pi", `${state} 不算已安装`);
+	}
 });
 
 test("outdated 时 canCreateDshSession=false、resolveAppRoot 不交付锚点（host 不得启动）", () => {

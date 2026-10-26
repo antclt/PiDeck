@@ -15,9 +15,15 @@ export type BackupIpcDeps = {
 	appLogger: AppLogger;
 	/** 恢复成功后执行（装配层注入：settingsStore.load() + refreshPiModelCatalogs()）。 */
 	afterRestore?: () => Promise<void>;
+	/**
+	 * 备份/恢复前落盘在途的设置写（2027-02 性能治理）：settings.json 带 150ms
+	 * 尾随合并窗口，手动备份与 pre-restore 保护快照必须先 flush，否则可能
+	 * 抓到窗口前的旧一代内容。
+	 */
+	flushSettings?: () => Promise<void>;
 };
 
-export function registerBackupIpc({ configBackupManager, appLogger, afterRestore }: BackupIpcDeps): void {
+export function registerBackupIpc({ configBackupManager, appLogger, afterRestore, flushSettings }: BackupIpcDeps): void {
 	/** id 入参校验：必须为本应用命名的备份文件名（backup-<时间戳>[-序号].json；ConfigBackupManager 内还会做路径逃逸检查）。 */
 	const requireBackupId = (value: unknown): string => {
 		if (typeof value !== "string" || !/^backup-[0-9]+(?:-[0-9]+)?\.json$/.test(value)) {
@@ -62,6 +68,7 @@ export function registerBackupIpc({ configBackupManager, appLogger, afterRestore
 	ipcMain.handle(ipcChannels.configBackupCreate, async (_event, _reason: unknown) => {
 		// 渲染层不可信：手动备份固定 reason=manual（first-run/upgrade/on-save/pre-restore
 		// 均为主进程内部触发，不接受渲染层指定）。
+		await flushSettings?.().catch(() => undefined);
 		const safeReason: ConfigBackupReason = "manual";
 		const result = configBackupManager.create(safeReason);
 		if (result.ok) {
@@ -77,6 +84,8 @@ export function registerBackupIpc({ configBackupManager, appLogger, afterRestore
 	});
 
 	ipcMain.handle(ipcChannels.configBackupRestore, async (_event, id: unknown, files: unknown) => {
+		// pre-restore 保护备份要捕获「当前这一代」内容：先落盘在途的设置合并窗口
+		await flushSettings?.().catch(() => undefined);
 		const result = configBackupManager.restore(requireBackupId(id), requireRestoreFiles(files));
 		if (result.ok) {
 			// 恢复写回的是磁盘文件；pi 目录刷新（模型目录缓存）与 pideck 设置重载

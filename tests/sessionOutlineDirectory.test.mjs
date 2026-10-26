@@ -118,23 +118,11 @@ test("超预算保留首个与最近项，并标记 truncated", async () => {
 	assert.equal(snapshot.entries[4].entryId, "u11", "最近检查点必须保留");
 });
 
-test("标题按需读一行并截到 80 字", async () => {
-	const longText = `这是很长的提问${"啊".repeat(200)}`;
-	const file = writeSession([entry("session", "s1", undefined, { cwd: "/repo" }), userEntry("u1", "s1", longText)]);
-	const title = await makeReader().readSessionOutlineTitle(file, "u1");
-	assert.ok(title);
-	assert.ok(title.length <= 81, `标题过长：${title.length}`);
-	assert.match(title, /^这是很长的提问/);
-	assert.equal(await makeReader().readSessionOutlineTitle(file, "missing"), undefined);
-});
-
 test("通道、handler、preload 三处同步", () => {
 	const ipc = readFileSync("src/shared/ipc.ts", "utf8");
 	const handler = readFileSync("src/main/ipc/sessionIpc.ts", "utf8");
 	const preload = readFileSync("src/preload/index.ts", "utf8");
 	assert.match(ipc, /sessionsCatalogReadOutline:\s*"sessions:catalog-read-outline"/);
-	assert.match(ipc, /sessionsCatalogReadOutlineTitle:\s*"sessions:catalog-read-outline-title"/);
 	assert.match(handler, /ipcMain\.handle\(\s*ipcChannels\.sessionsCatalogReadOutline,/);
 	assert.match(preload, /readOutline:\s*\(/);
-	assert.match(preload, /readOutlineTitle:\s*\(/);
 });

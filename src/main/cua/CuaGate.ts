@@ -17,7 +17,20 @@
  * (fail closed). Read-only actions never reach the gate.
  */
 
-export type CuaActionType = "click" | "type" | "scroll" | "capture" | "list_windows" | "get_state";
+export type CuaActionType =
+	| "click"
+	| "type"
+	| "scroll"
+	| "capture"
+	| "list_windows"
+	| "get_state"
+	// 内置浏览器 Agent（browser_*）：与 CUA 共用同一套 fail-closed 审批语义，
+	// 但由独立 gate 实例与独立开关控制（见 docs/browser-agent-plan.md §7）。
+	| "browser_click"
+	| "browser_type"
+	| "browser_press_key"
+	| "browser_navigate"
+	| "browser_scroll";
 
 export type CuaGateDecision = {
 	allowed: boolean;
@@ -72,6 +85,10 @@ export type CuaGateConfig = {
 };
 
 const READONLY_ACTIONS: ReadonlySet<CuaActionType> = new Set(["capture", "list_windows", "get_state"]);
+
+export function isReadOnlyCuaAction(action: CuaActionType): boolean {
+	return READONLY_ACTIONS.has(action);
+}
 
 export class CuaGate {
 	private config: CuaGateConfig;

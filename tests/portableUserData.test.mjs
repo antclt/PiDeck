@@ -64,10 +64,20 @@ test("主进程正式版先跑 userData 更名迁移，再走 resolveAppUserData
 	// 契约：打包态（含 dev 通道安装包）与便携版都经 resolveAppUserDataDir 判定
 	assert.match(src, /resolveAppUserDataDir\(\{\s*explicitDir:\s*gatedExplicitUserDataDir,/);
 	assert.match(src, /isPackaged:\s*app\.isPackaged,/);
-	// 契约：启动顺序（IPC 注册→飞书注册→备份→建窗）。中段用房泛匹配：dev 在两条注册之间
-	// 新增了 registerAllDomains / selectionToolWindow.warmUp，之后又插了 wechatService 装配，
-	// 逐行枚举跟不上演进；这里只锁「顺序与终点」。
-	assert.match(src, /registerIpc\(\);[\s\S]*?registerFeishuIpc\(\{[\s\S]*?\}\);[\s\S]*?configBackupManager\?\.ensureInitialBackups\(\);[\s\S]*?await createWindow\(\);/m);
+	// 契约：启动顺序（IPC 注册→飞书注册→建窗→首启备份）。中间可插入其他装配（统一接口聚合层、
+	// 微信桥、划词浮窗预热等），所以按标记位置比较先后，不用跨大段代码的单一正则（2026-10 多次误红）。
+	// 2027-02 性能治理：ensureInitialBackups 的全量 JSON 解析移到 createWindow 之后的 setImmediate，
+	// 不再挡首帧（见 src/main/index.ts 就近注释），因此备份排在建窗之后。
+	const startupOrder = ["registerIpc();", "registerFeishuIpc({", "await createWindow();", "configBackupManager?.ensureInitialBackups();"].map((marker) => src.indexOf(marker));
+	assert.ok(
+		startupOrder.every((index) => index > 0),
+		"启动关键步骤必须都存在",
+	);
+	assert.deepEqual(
+		[...startupOrder].sort((a, b) => a - b),
+		startupOrder,
+		"启动顺序必须是 IPC 注册 → 飞书注册 → 建窗 → 首启备份",
+	);
 	assert.match(src, /Application startup failed/);
 	assert.match(src, /showErrorBox/);
 });

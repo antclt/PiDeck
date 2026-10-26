@@ -34,6 +34,8 @@ function loadSkillManagerModule() {
 			// 删除统一入口：测试环境无回收站，noop stub（本测试不触达删除路径）
 			if (id === "../fs/trash") return { trashPath: async () => {} };
 			if (id === "../logging/sharedLogger") return { getAppLogger: () => null };
+			// 打开目录统一入口（issue #396）：本测试不触达打开路径，noop stub。
+			if (id === "../fs/openPath") return { openSystemPath: async () => "" };
 			return require(id);
 		},
 	};
@@ -400,6 +402,40 @@ test("toggle 同步持久化 PiDeck settings 禁用列表（白名单模式依�
 		assert.doesNotMatch(readFileSync(target, "utf8"), /disable-model-invocation: true/);
 		const afterEnable = await manager.list();
 		assert.equal(afterEnable.skills.find((s) => s.path === target).enabled, true);
+	});
+});
+
+test("list() 结果缓存：1.5s 内重复读复用同一结果，写操作后立刻失效（2027-02 性能治理）", async () => {
+	await withTemporaryHome(async (home) => {
+		const { SkillManager, shouldSkipSkillWalkEntry } = loadSkillManagerModule();
+		const manager = new SkillManager(home);
+		const target = join(home, ".pi", "agent", "skills", "cached-skill", "SKILL.md");
+		await createSkillFile(target, "Cached-Skill");
+
+		const first = await manager.list();
+		assert.equal(
+			first.skills.some((skill) => skill.path === target),
+			true,
+		);
+		const second = await manager.list();
+		assert.ok(second === first, "TTL 内必须复用同一结果对象（不重新扫盘）");
+
+		// 写操作后立即失效：新建技能下一次 list 必须能看见
+		await manager.create({ locationId: "pi-global", name: "New-Skill", description: "新技能" });
+		const afterCreate = await manager.list();
+		assert.notEqual(afterCreate, first, "写操作必须让缓存失效");
+		// create 会把名字规范化为小写 kebab（normalizeSkillName）
+		assert.equal(
+			afterCreate.skills.some((skill) => skill.name === "new-skill"),
+			true,
+			"新建的技能立即可见",
+		);
+
+		// 递归扫描忽略开发产物与隐藏目录
+		assert.equal(shouldSkipSkillWalkEntry("node_modules"), true);
+		assert.equal(shouldSkipSkillWalkEntry(".git"), true);
+		assert.equal(shouldSkipSkillWalkEntry("dist"), true);
+		assert.equal(shouldSkipSkillWalkEntry("my-skill"), false, "普通业务目录不得跳过（技能可以嵌套）");
 	});
 });
 

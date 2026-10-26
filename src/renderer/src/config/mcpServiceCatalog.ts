@@ -112,6 +112,24 @@ export type McpServiceCatalogEntry = {
 	base: McpServerDefinition;
 };
 
+/**
+ * 动态客户端注册（DCR）不认 `pi`、必须借用已进白名单客户端名的服务。
+ * 2026-10 实测：Figma 的注册端点对 client_name 白名单校验，`pi` 403 / `Claude Code` 200；
+ * Sentry、Supabase、Linear、Notion、Context7、Exa 对 `pi` 均正常放行（无需覆盖）。
+ * 新增条目若登录报 403 Forbidden 且正文是裸文本，按同一方法（换 client_name 试注册）确认后再登记到这里。
+ */
+export const MCP_DCR_CLIENT_NAME_OVERRIDES: Readonly<Record<string, string>> = { figma: "Claude Code" };
+
+/**
+ * 目录条目 → 落盘定义：OAuth 服务的客户端名覆盖在此统一注入。
+ * 覆盖值是 pi 的 `oauth.clientName`（仅动态注册时发送），改回默认名需先 `pi mcp logout`。
+ */
+export function buildCatalogBase(entry: McpServiceCatalogEntry): McpServerDefinition {
+	const clientName = MCP_DCR_CLIENT_NAME_OVERRIDES[entry.id];
+	if (!clientName) return entry.base;
+	return { ...entry.base, oauth: { ...entry.base.oauth, clientName } };
+}
+
 export const MCP_SERVICE_CATALOG: readonly McpServiceCatalogEntry[] = [
 	{
 		id: "pideck",
@@ -438,7 +456,7 @@ function appendUrlParam(url: string, param: string, value: string): string {
  * header 默认写 `Bearer <key>`；声明 scheme 缺省的服务（腾讯文档、Exa）写裸值。
  */
 export function buildCatalogDefinition(entry: McpServiceCatalogEntry, values: readonly string[]): McpServerDefinition {
-	let definition = entry.base;
+	let definition = buildCatalogBase(entry);
 	(entry.credentials ?? []).forEach((field, index) => {
 		const value = (values[index] ?? "").trim();
 		if (!value) return;

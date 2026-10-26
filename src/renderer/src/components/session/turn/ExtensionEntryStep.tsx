@@ -5,6 +5,7 @@ import { t } from "../../../i18n";
 import { SingleLinePreview } from "../SingleLinePreview";
 import { formatTime } from "../TimelineFormat";
 import { formatExtensionEntryFields } from "../extensionEntry";
+import { Collapsible, CollapsibleContent } from "../../ui-shadcn/collapsible";
 
 /**
  * ExtensionEntryStep — 过程组内的扩展输出成员行。
@@ -50,8 +51,9 @@ function ExtensionEntryRow(props: { message: ChatMessage }) {
 					{expanded ? <ChevronDown size={14} strokeWidth={2.4} aria-hidden="true" /> : <ChevronRight size={14} strokeWidth={2.4} aria-hidden="true" />}
 				</span>
 			</button>
-			{expanded ? (
-				<div className="ml-6 flex flex-col border-l border-border-subtle pl-2">
+			{/* 折叠体走共享折叠原语：真高度渐变 + exit 后卸载；display:contents 根不生成盒子，折叠态零空档。 */}
+			<Collapsible open={expanded} className="contents">
+				<CollapsibleContent className="ml-6 flex flex-col border-l border-border-subtle pl-2">
 					{fields.length === 0 && !truncated ? <p className="m-0 py-1 text-chat-detail text-text-tertiary">{t("notify.extensionEntryEmpty")}</p> : null}
 					{fields.map((field, index) => (
 						<div key={`${field.key}-${index}`} className="flex shrink-0 flex-col gap-0.5 py-1">
@@ -60,8 +62,8 @@ function ExtensionEntryRow(props: { message: ChatMessage }) {
 						</div>
 					))}
 					{truncated ? <p className="m-0 pb-1 text-micro text-text-faint">{t("notify.extensionEntryTruncated")}</p> : null}
-				</div>
-			) : null}
+				</CollapsibleContent>
+			</Collapsible>
 		</div>
 	);
 }

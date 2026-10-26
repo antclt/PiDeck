@@ -10,6 +10,7 @@ import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from ".
 import { SectionHeading } from "../../components/ui-shadcn/section-heading";
 import { X, Copy, RefreshCw, FileDown, PackageOpen, Sparkles, MonitorCheck, Bug, Loader2, MessageSquarePlus } from "lucide-react";
 import type { HealthStatus } from "../../../../shared/types";
+import { buildFeedbackIssueUrl } from "./issueUrl";
 import { summarizeChecks } from "./reportFormat";
 import { useFeedbackReport, type HealthCheckState } from "./useFeedbackReport";
 import type { AppInfo, Project } from "../../../../shared/types";
@@ -57,10 +58,20 @@ export function FeedbackDialog({ open, project, appInfo, onClose, onToast, onOpe
 
 	const summary = useMemo(() => (feedback.report ? summarizeChecks(feedback.report.checks) : null), [feedback.report]);
 
-	if (!open) return null;
+	// GitHub 对超长查询串直接拒绝（"Whoa there! Your request URL is too long."，issue #397）：
+	// URL 只带标题 + 简述 + 环境摘要，完整报告交给剪贴板（见 handleOpenIssue）。
+	const issue = useMemo(
+		() =>
+			buildFeedbackIssueUrl({
+				title: `${t("feedback.issueTitle")}${feedback.context.description.trim().split("\n")[0].slice(0, 60) || t("feedback.issueTitleEmpty")}`,
+				description: feedback.context.description,
+				steps: feedback.context.steps,
+				report: feedback.report,
+			}),
+		[feedback.context.description, feedback.context.steps, feedback.report],
+	);
 
-	const issueTitle = `${t("feedback.issueTitle")}${feedback.context.description.trim().split("\n")[0].slice(0, 60) || t("feedback.issueTitleEmpty")}`;
-	const githubUrl = `https://github.com/ayuayue/PiDeck/issues/new?title=${encodeURIComponent(issueTitle)}&body=${encodeURIComponent(feedback.text)}`;
+	if (!open) return null;
 
 	const handleCopy = async () => {
 		const ok = await feedback.copyText();
@@ -89,10 +100,17 @@ export function FeedbackDialog({ open, project, appInfo, onClose, onToast, onOpe
 		if (ok) onClose();
 	};
 
-	/** 直接用系统浏览器打开 GitHub Issue 预填页（issue 页需要登录/富文本，不适合内置浏览器）。 */
-	const handleOpenIssue = () => {
+	/**
+	 * 直接用系统浏览器打开 GitHub Issue 预填页（issue 页需要登录/富文本，不适合内置浏览器）。
+	 * 顺序固定「先复制、后打开」：完整诊断报告（体检项 + 最近报错日志）走剪贴板，
+	 * 用户在新 Issue 正文里 Ctrl+V 即可粘上，URL 因此不需要塞全文（issue #397）。
+	 */
+	const handleOpenIssue = async () => {
 		if (!onOpenExternal) return;
-		onOpenExternal(githubUrl);
+		// 没跑过体检就没有可复制的报告：照常打开，提示用户先诊断再附报告
+		const copied = feedback.report ? await feedback.copyMarkdown().catch(() => false) : false;
+		onOpenExternal(issue.url);
+		onToast(!feedback.report ? t("feedback.openIssueNoReport") : copied ? t("feedback.openIssueCopied") : t("feedback.openIssueCopyFailed"));
 	};
 
 	const handleExport = async (kind: "md" | "zip") => {

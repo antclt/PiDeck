@@ -24,7 +24,9 @@ function stripComments(value) {
 test("WebGL 渲染器在 terminal.open() 之后才装配（activate 需要挂到 DOM 的终端）", () => {
 	const code = stripComments(source);
 	const openIndex = code.indexOf("terminal.open(");
-	const webglIndex = code.indexOf("new WebglAddon(");
+	// 装配语句形态：xterm 主库与 addon 经 loadXtermModules 惰性装载（dev 拆包），
+	// 所以构造点写的是 `new modules.WebglAddon(`；两种写法都算装配。
+	const webglIndex = code.search(/new\s+(?:modules\.)?WebglAddon\s*\(/);
 	assert.ok(openIndex >= 0, "必须仍然调用 terminal.open()");
 	assert.ok(webglIndex >= 0, "必须仍然装配 WebglAddon（GPU 渲染是默认路径）");
 	assert.ok(webglIndex > openIndex, "WebglAddon 必须在 terminal.open() 之后装配，否则 activate 的 throw 逃出 try/catch 并崩 renderer");
@@ -32,7 +34,7 @@ test("WebGL 渲染器在 terminal.open() 之后才装配（activate 需要挂到
 
 test("WebglAddon 装配被 try/catch 包住，取不到 WebGL2 时静默回退 DOM 渲染器", () => {
 	const code = stripComments(source);
-	const webglIndex = code.indexOf("new WebglAddon(");
+	const webglIndex = code.search(/new\s+(?:modules\.)?WebglAddon\s*\(/);
 	const tryIndex = code.lastIndexOf("try {", webglIndex);
 	assert.ok(tryIndex >= 0, "装配点之前必须有 try 块");
 	// try 块必须真的包含装配语句：取 try 起点到装配点之间不含 catch/finally 即说明没被提前关闭。

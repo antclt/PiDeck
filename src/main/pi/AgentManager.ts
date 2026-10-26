@@ -39,6 +39,7 @@ import type {
 import { ipcChannels } from "../../shared/ipc";
 import { isLocalProject, isRemoteProject } from "../../shared/projectLocation";
 import { collectSessionFileChanges } from "../../shared/fileChanges";
+import { parseBusySendDelivery } from "../../shared/busySendDelivery";
 import { extractPiToolTruncation } from "../../shared/formatToolDetail";
 import { COMPACT_CANCELLED_BY_OWNER, COMPACT_CANCELLED_BY_USER_ABORT, COMPACT_HOOK_REJECT_MAX_MS, COMPACT_OBSERVATION_MAX_AGE_MS, COMPACT_ROUTED_TO_OWNER, COMPACT_USER_ABORT_WINDOW_MS, COMPACT_WAIT_TIMEOUT } from "../../shared/compactFeedback";
 import { SessionLocatorRouter } from "../sessions/SessionLocatorRouter";
@@ -158,6 +159,16 @@ function readPromptDisposition(data: unknown): PromptDisposition | undefined {
 	if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
 	const disposition = Reflect.get(data, "disposition");
 	return disposition === "started" || disposition === "queued" || disposition === "handled" ? disposition : undefined;
+}
+
+/**
+ * pi 的忙碌拒收文案（Issue #371）：pi 侧 isStreaming 为 true 时，prompt 不带
+ * streamingBehavior 会被直接拒收。PiDeck 本地状态在 abort 超时后已复位 idle，
+ * 只有拿到这条错误才能确认 pi 的真实忙碌——据此补一次带 streamingBehavior 的重发。
+ * 与 src/main/ipc/gitIpc.ts 的 GIT_COMMIT_BUSY 判据同款。
+ */
+function isPiBusyRejection(message: string): boolean {
+	return /Agent is already processing/i.test(message);
 }
 
 /**
@@ -390,8 +401,15 @@ export class AgentManager {
 				i18nKey: "app.abortSlow",
 				kind: "warning",
 				duration: 6000,
+				// 僵死的 pi 只有重建进程才停得下来（子进程持管道场景 abort 永远不回包），
+				// 给直达动作而不是让用户在菜单里找；渲染层按 action id 解析成重启。
+				action: "restartSessionRuntime",
 			}),
+		noteStillStreamingAfterAbort: (agentId) => this.noteStillStreamingAfterAbort(agentId),
 	});
+
+	/** 连点退避窗口：覆盖上一次 abort 的 clear_queue(3s)+abort(10s) 链，窗口内只补发 abort RPC。 */
+	private static readonly ABORT_REPEAT_COOLDOWN_MS = 2000;
 
 	/** 流式性能计时（TTFT/总耗时/TPS，起点为请求发出时刻）收口在 MessagePerfTracker。 */
 	private readonly messagePerf = new MessagePerfTracker();
@@ -1512,11 +1530,6 @@ export class AgentManager {
 		return this.sessionHistoryReader.readSessionOutline(sessionPath, limit);
 	}
 
-	/** 导轨单项标题：按需读一行（≤1MiB），返回 80 字以内展示文本。 */
-	async readSessionOutlineTitle(sessionPath: string, entryId: string): Promise<string | undefined> {
-		return this.sessionHistoryReader.readSessionOutlineTitle(sessionPath, entryId);
-	}
-
 	/** 轮次维度显示分页：pageSize 复用为轮次数（readSessionDisplayTurnPage 内部夹紧上限） */
 	async readSessionDisplayTurnPage(sessionPath: string, agentId = "_viewer", before?: number, turnCount?: number, beforeEntryId?: string, options?: { projectId?: string }): Promise<SessionMessagePage> {
 		const page = await this.sessionHistoryReader.readSessionDisplayTurnPage(sessionPath, agentId, before, turnCount, beforeEntryId, { entryRendererTypes: this.resolveEntryRendererTypesForProject(options?.projectId) });
@@ -2444,9 +2457,15 @@ export class AgentManager {
 	 *
 	 * 只对“已上报注入面”的会话生效（远端）；本机/DSH 的 `remoteExtensions` 是 undefined，行为不变。
 	 */
+	/**
+	 * 解析实际发给 pi 的 prompt 文本（远端扩展降级 / 智能体隐藏通道 / 纯图片发送共用的唯一入口）。
+	 *
+	 * 优先级：智能体隐藏通道 agentMessage > 用户输入；两者都空时（纯图片发送，Issue #404）
+	 * 保持空串——禁止注入 "Describe this image." 之类的兜底文案，那是用户没写过的指令。
+	 */
 	private resolveSendAgentMessage(runtime: AgentRuntime, input: SendPromptInput): string {
 		const fallback = input.message.trim();
-		const raw = input.agentMessage?.trim() || fallback || "Describe this image.";
+		const raw = input.agentMessage?.trim() || fallback;
 		const extensions = runtime.tab.remoteExtensions;
 		if (extensions === undefined) return raw;
 		const applied = new Set(extensions.applied);
@@ -2467,6 +2486,10 @@ export class AgentManager {
 		const runtime = this.requireRuntime(input.agentId);
 		const trimmed = input.message.trim();
 		const hasImages = input.images && input.images.length > 0;
+		// 纯图片发送（无文字）时 message 就是空字符串：pi 会把空文本与图片一起写进用户
+		// 消息，各 provider 自行丢弃空 text block（anthropic / openai 均按 text.trim()
+		// 过滤），模型只看到图片。禁止注入 "Describe this image." 之类的兜底文案
+		// （Issue #404）——那是用户没写过的指令，会让模型改按「描述图片」回答。
 		const agentMessage = this.resolveSendAgentMessage(runtime, input);
 		// 允许只有图片没有文字的情况发送
 		if (!trimmed && !hasImages) {
@@ -2492,7 +2515,10 @@ export class AgentManager {
 
 		// 判断 agent 是否已在忙碌中；运行中继续发送时必须带 streamingBehavior，
 		// 否则 pi RPC 会拒绝请求。该值也用于给用户消息打上投递语义标记。
-		const alreadyBusy = runtime.tab.status === "running";
+		// 除本地 tab 状态外并入 pi 侧权威信号（Issue #371）：abort RPC 超时后本地已被
+		// 复位 idle，而 pi 仍在流式，只信本地状态会漏传 streamingBehavior 被直接拒收。
+		const alreadyBusy = runtime.tab.status === "running" || this.piMightStillBeStreaming(input.agentId);
+
 		const statusBeforePrompt = runtime.tab.status;
 		const promptDeliveryBehavior = input.streamingBehavior ?? (alreadyBusy ? "steer" : undefined);
 
@@ -2571,10 +2597,32 @@ export class AgentManager {
 				rpcMs: Date.now() - rpcStartedAt,
 			});
 			if (!response.success) {
+				const rejectionText = response.error ?? "图片消息发送失败";
+				// 兜底重发（Issue #371）：本地判定空闲但 pi 实际仍在流式时，prompt 被
+				// "Agent is already processing" 拒收。用户点的是发送，不该收到 SDK 原文
+				// toast——按设置项 busySendDelivery 补一次带语义的 prompt（默认 steer）。
+				const busyRetryBehavior = !promptDeliveryBehavior && isPiBusyRejection(rejectionText) ? parseBusySendDelivery(this.settingsStore.get().busySendDelivery) : undefined;
+				let busyRetryResponse: RpcResponse | undefined;
+				if (busyRetryBehavior) {
+					const retryPayload = { ...requestPayload, streamingBehavior: busyRetryBehavior };
+					void this.appLogger?.warn("agent", "Prompt rejected as busy; retrying with streamingBehavior", {
+						agentId: input.agentId,
+						requestId: input.requestId,
+						streamingBehavior: busyRetryBehavior,
+					});
+					const retry = await runtime.process.client.request(retryPayload, this.settingsStore.get().rpcTimeout);
+					busyRetryResponse = retry;
+					if (retry.success) {
+						// 重发成功：用户消息已按队列语义投递，走与正常发送相同的收尾。
+						await this.settleAcceptedPrompt(input.agentId, runtime, agentMessage, retry.data, alreadyBusy);
+						return { accepted: true };
+					}
+				}
 				if (!alreadyBusy) this.messagePerf.discardInFlight(input.agentId);
 				// pi RPC 会把不支持图片、忙碌队列参数缺失等前置错误作为 success:false 返回；
 				// 必须显式显示出来，否则 UI 会停在"已发送但无响应"的状态。
-				const errorMessage = response.error ?? "图片消息发送失败";
+				// 忙碌拒收的重发也失败时，用重发的错误原文（更能反映 pi 当前状态）。
+				const errorMessage = busyRetryBehavior ? (busyRetryResponse?.error ?? rejectionText) : rejectionText;
 				runtime.tab.status = statusBeforePrompt === "running" ? "running" : "idle";
 				this.addLocalizedMessage(input.agentId, "error", "diagnostic.promptRejected", "消息发送失败。", { debugDetails: errorMessage });
 				// pi 侧前置校验拒绝（模型不支持图片/队列参数缺失等）：气泡只展示给用户，
@@ -2593,20 +2641,7 @@ export class AgentManager {
 				};
 			}
 
-			// prompt 被扩展命令 / input handler 消费（没有启动 agent run）时，必须另找
-			// 恢复 idle 的时机：永远不会等到 agent_end（见下方注释）。
-			// pi 0.99+ 直接读 disposition；老版本无此字段，退回发一次 get_commands 预检
-			//（历史上 prompt 之前发的就是它，此处只是搬到 prompt 之后、按需执行）。
-			const disposition = readPromptDisposition(response.data);
-			const consumedWithoutRun = disposition === "handled" ? true : disposition === undefined ? await this.promptMatchesRegisteredExtensionCommand(runtime, agentMessage) : false;
-			if (consumedWithoutRun) {
-				if (!alreadyBusy) this.messagePerf.discardInFlight(input.agentId);
-				// 机制：Pi 扩展命令可在 prompt 阶段直接执行并返回，不进入 agent run。
-				// 证据：@earendil-works/pi-coding-agent/dist/core/agent-session.js 中 AgentSession.prompt()
-				//      先调用 _tryExecuteExtensionCommand()；命中后 return，不再调用 _runAgentPrompt()。
-				// 推导：不能等 agent_end；只有 Pi get_state 明确报告无剩余工作时才恢复 idle。
-				this.scheduleIdleCheckAfterExtensionCommand(input.agentId);
-			}
+			await this.settleAcceptedPrompt(input.agentId, runtime, agentMessage, response.data, alreadyBusy);
 			return { accepted: true };
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error);
@@ -2738,6 +2773,23 @@ export class AgentManager {
 		const runtime = this.requireRuntime(agentId);
 		const runtimeProcess = runtime.process;
 		const runtimeIdentity = this.streamRuntimeTriple(agentId);
+
+		// 连点退避：上一次 abort 的 RPC 链（clear_queue 3s + abort 10s）仍在窗口内时不再重跑。
+		// 每次点击都完整重跑会把 RPC 管道堆满，pi 本来就收不到 stdin，重发只是雪上加霜；
+		// 但用户「再点一次」的意图要保留，所以只补发一条 abort RPC（幂等）并直接返回。
+		const previousAbortAt = this.lastAbortAtByAgent.get(agentId);
+		// 只在「上一次 abort 还没 settled」时退避：已 settled 后的点击属于新一轮，照常走完整链。
+		if (previousAbortAt !== undefined && this.abortGate.hasSettledFallback(agentId) && Date.now() - previousAbortAt < AgentManager.ABORT_REPEAT_COOLDOWN_MS) {
+			this.lastAbortAtByAgent.set(agentId, Date.now());
+			this.lastUserAbortAt.set(agentId, Date.now());
+			runtime.process.client.request({ type: "abort" }, 10_000).catch((error: unknown) => {
+				void this.appLogger?.warn("agent", "Repeat abort RPC failed", {
+					agentId,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			});
+			return;
+		}
 
 		// pi 在等待 extension_ui_response 时（如 ask_question），不发 abort 也能处理，
 		// 但必须解除 pending 请求的阻塞，否则 pi 不会继续读取 stdin 中的后续命令。
@@ -3544,7 +3596,34 @@ export class AgentManager {
 		});
 	}
 
+	/**
+	 * 工具边沿的完整 runtime state 补发去抖（2027-02 性能审计）：每个工具
+	 * start/end 各触发一次 get_state + get_session_stats 双 RPC，并行工具批下
+	 * 每秒多次；而工具执行态本身已由 emitToolRuntimeTransition 同步轻补丁承载，
+	 * 完整状态的其余字段（模型/tokens/todo）在工具边沿之间不变。尾沿 300ms
+	 * 合并：突发收尾后补一次即可。立即路径（agent_end/settled/compaction/
+	 * publishRuntimeState）不受影响，且会自取消在途的去抖（避免重复推送）。
+	 */
+	private readonly toolEdgeStateTimers = new Map<string, NodeJS.Timeout>();
+
+	private scheduleToolEdgeRuntimeState(agentId: string): void {
+		const existing = this.toolEdgeStateTimers.get(agentId);
+		if (existing) clearTimeout(existing);
+		const timer = setTimeout(() => {
+			this.toolEdgeStateTimers.delete(agentId);
+			void this.emitRuntimeState(agentId);
+		}, 300);
+		timer.unref?.();
+		this.toolEdgeStateTimers.set(agentId, timer);
+	}
+
 	private async emitRuntimeState(agentId: string) {
+		// 立即全量推送让在途的工具边沿去抖失效（它要推的内容即将被更新鲜的覆盖）
+		const pending = this.toolEdgeStateTimers.get(agentId);
+		if (pending) {
+			clearTimeout(pending);
+			this.toolEdgeStateTimers.delete(agentId);
+		}
 		try {
 			const runtime = this.requireRuntime(agentId);
 			const process = runtime.process;
@@ -4162,6 +4241,13 @@ export class AgentManager {
 	private clearAgentState(agentId: string) {
 		// 双通道缓冲/基准/思考段随生命周期整体清理（stop/restart/closed 等非 done 终止路径，防键残留慢泄漏）
 		this.liveStream.clearAll(agentId);
+		// 工具边沿去抖在途定时器随生命周期取消（迟到触发会打到已清空的 runtime，虽然
+		// emitRuntimeState 内部有 requireRuntime 兜底，取消更干净）
+		const toolEdgeTimer = this.toolEdgeStateTimers.get(agentId);
+		if (toolEdgeTimer) {
+			clearTimeout(toolEdgeTimer);
+			this.toolEdgeStateTimers.delete(agentId);
+		}
 		this.streamingAgents.delete(agentId);
 		this.activeAssistantMessageIds.delete(agentId);
 		this.toolMessageIds.delete(agentId);
@@ -4844,7 +4930,8 @@ export class AgentManager {
 		this.recentlyAborted.clear();
 		// 实时日志广播的节流定时器与聚合缓冲同步清理
 		this.rpcLiveTap.dispose();
-		this.emitState();
+		// 终态不走节流（trailing 可能迟到）：flush 后的清单就是退出时的权威快照
+		this.flushStateEmit();
 	}
 
 	/**
@@ -5331,6 +5418,8 @@ export class AgentManager {
 		}
 
 		if (typed.type === "agent_start" && runtime) {
+			// 阶段归因：agent_start = pi 已接单开跑（此前间隔是 pi 内部排队/扩展钩子耗时）。
+			this.messagePerf.noteAgentStart(agentId);
 			// 首个 run 开始：此刻用户的触发消息已落盘，把启动期诊断（扩展回退/启动扩展报错）
 			// 按序写入时间线——位于用户消息之后、回答之前，避免插进历史轮次中间。
 			this.startupDiagnostics.markFirstRun(agentId);
@@ -5376,6 +5465,7 @@ export class AgentManager {
 			// Pi 在工具执行后、准备下一次模型调用前发 turn_start；message_start
 			// 可能等到 provider 首个事件才到，无法覆盖工具续答的首 token 等待。
 			this.messagePerf.ensureTimer(agentId);
+			this.messagePerf.noteTurnStart(agentId);
 		}
 
 		const startMessage = isRecord(typed.message) ? typed.message : undefined;
@@ -5400,6 +5490,7 @@ export class AgentManager {
 			// 性能计时起表（幂等：message_update start 先到则不重置）。
 			// 顶层 message_start 是 mock/pi 均走的确定路径，不能只依赖 delta 事件。
 			this.messagePerf.ensureTimer(agentId);
+			this.messagePerf.noteMessageStart(agentId);
 			// 顶层 message_start（mock/pi 均走此路径）：必须允许空骨架，否则
 			// text_delta 不再 upsert 时 History 无挂载点，Live 正文无处渲染。
 			this.upsertAssistantMessage(agentId, startMessage, "", { allowEmpty: true });
@@ -5699,7 +5790,12 @@ export class AgentManager {
 				this.activeAssistantMessageIds.delete(agentId);
 			}
 			// 结算性能指标（幂等：message_update done 先结算则 map 已删，直接返回）
-			this.messagePerf.settle(agentId, (channel, payload) => this.emit(channel, payload), messageEnd);
+			this.messagePerf.settle(
+				agentId,
+				(channel, payload) => this.emit(channel, payload),
+				messageEnd,
+				(message, detail) => void this.appLogger?.info("session-perf", message, detail),
+			);
 			// 终结 Live 正文通道（顶层 message_end 不经 handleAssistantMessageEvent）
 			this.streamingAgents.delete(agentId);
 			this.liveStream.finalizeText(agentId);
@@ -5726,7 +5822,8 @@ export class AgentManager {
 				this.emitState();
 			}
 			// 完整 runtime 信息异步补发；工具边沿已经同步推送，不依赖此请求的完成顺序。
-			void this.emitRuntimeState(agentId);
+			// 300ms 尾沿去抖：并行工具批的连发 start 合并为一次 get_state。
+			this.scheduleToolEdgeRuntimeState(agentId);
 		}
 
 		if (typed.type === "tool_execution_end") {
@@ -5773,7 +5870,8 @@ export class AgentManager {
 				this.emitState();
 			}
 			// 完整 runtime 信息异步补发；序号保证它不会倒灌旧工具状态。
-			void this.emitRuntimeState(agentId);
+			// 与 start 同一去抖：工具批全部结束后 300ms 补一次即可。
+			this.scheduleToolEdgeRuntimeState(agentId);
 		}
 
 		if (typed.type === "tool_execution_update") {
@@ -5883,7 +5981,12 @@ export class AgentManager {
 
 		if (eventType === "message_end" || eventType === "done" || eventType === "error") {
 			// 结算性能指标（TTFT/总耗时/TPS）并边沿推送渲染层
-			this.messagePerf.settle(agentId, (channel, payload) => this.emit(channel, payload), partialMessage);
+			this.messagePerf.settle(
+				agentId,
+				(channel, payload) => this.emit(channel, payload),
+				partialMessage,
+				(message, detail) => void this.appLogger?.info("session-perf", message, detail),
+			);
 			// 先写入 History thinking 并 flush，再发 done 清 live。
 			this.finalizeThinkingIntoMessage(agentId, partialMessage);
 			this.upsertAssistantMessage(agentId, partialMessage);
@@ -6734,6 +6837,54 @@ export class AgentManager {
 		return this.abortGate.isSealed(agentId);
 	}
 
+	/**
+	 * prompt 被 pi 接受后的统一收尾（正常发送与忙碌拒收重发共用，Issue #371）。
+	 *
+	 * 扩展命令 / input handler 消费掉 prompt（没有启动 agent run）时必须另找恢复 idle 的
+	 * 时机：永远不会等到 agent_end。pi 0.99+ 直接读 disposition；老版本无此字段，退回发一次
+	 * get_commands 预检（历史上 prompt 之前发的就是它，此处只是搬到 prompt 之后、按需执行）。
+	 */
+	private async settleAcceptedPrompt(agentId: string, runtime: AgentRuntime, agentMessage: string, responseData: unknown, alreadyBusy: boolean): Promise<void> {
+		const disposition = readPromptDisposition(responseData);
+		const consumedWithoutRun = disposition === "handled" ? true : disposition === undefined ? await this.promptMatchesRegisteredExtensionCommand(runtime, agentMessage) : false;
+		if (!consumedWithoutRun) return;
+		if (!alreadyBusy) this.messagePerf.discardInFlight(agentId);
+		// 机制：Pi 扩展命令可在 prompt 阶段直接执行并返回，不进入 agent run。
+		// 证据：@earendil-works/pi-coding-agent/dist/core/agent-session.js 中 AgentSession.prompt()
+		//      先调用 _tryExecuteExtensionCommand()；命中后 return，不再调用 _runAgentPrompt()。
+		// 推导：不能等 agent_end；只有 Pi get_state 明确报告无剩余工作时才恢复 idle。
+		this.scheduleIdleCheckAfterExtensionCommand(agentId);
+	}
+
+	/**
+	 * pi 侧「可能仍在流式」的本地证据（Issue #371）。
+	 *
+	 * 本地 tab.status 是乐观状态：abort RPC 超时/升级未收敛时它已被复位 idle，而 pi 的
+	 * isStreaming 仍为 true。此时发 prompt 不带 streamingBehavior 会被 pi 直接拒收
+	 * （"Agent is already processing..."）。这里汇总同步可取的权威信号：
+	 * - streamingAgents：本地收到的流式事件仍在进行；
+	 * - recentlyAborted：abort 已发出但还未等来 agent_settled；
+	 * - abortGate.isEscalationPending：升级链已确认 pi 仍未停稳。
+	 * 宁可多带一次 streamingBehavior（pi 侧空闲时 steer 与直发等价），也不要被拒收。
+	 */
+	private piMightStillBeStreaming(agentId: string): boolean {
+		return this.streamingAgents.has(agentId) || this.recentlyAborted.has(agentId) || this.abortGate.isEscalationPending(agentId);
+	}
+
+	/**
+	 * abort 升级拿到 pi 权威回复「仍在流式」时调用（Issue #371）。
+	 * abort RPC 超时后 tab 已被乐观复位 idle，pi 却还在跑——把状态纠正回 running，
+	 * 让用户看得见忙碌（也能重新点停止），后续发送会自动带上 streamingBehavior。
+	 * 真正停下来时 agent_settled / markIdleIfPiReportsNoWork 会把它复位 idle。
+	 */
+	private noteStillStreamingAfterAbort(agentId: string): void {
+		const runtime = this.agents.get(agentId);
+		if (!runtime || runtime.tab.status === "closed" || runtime.tab.status === "error") return;
+		if (runtime.tab.status === "running") return;
+		runtime.tab.status = "running";
+		this.emitState();
+	}
+
 	/** agent 关闭/重建时清理 gate，避免泄漏到新生命周期。 */
 	private clearStreamGate(agentId: string) {
 		// 流闸/兜底定时器/升级上下文统一清；thinkingEmitter 与消息 flush 属跨域编排，仍在此清
@@ -6865,7 +7016,45 @@ export class AgentManager {
 		return undefined;
 	}
 
+	/**
+	 * emitState 节流（2027-02 性能审计，leading+trailing 250ms）：调用点 50+ 个，
+	 * 含每个工具 start/end（每工具 2 次）——无节流时并行工具批每秒数十次全量
+	 * AgentTab[] 构建排序 + 渲染层 N 个 per-tab 信封 structured-clone 下发。
+	 * leading 保证状态翻转即时可见；突发合并为一次 trailing（≤250ms 迟到，
+	 * 对状态圆点/侧栏无感）。dispose 终态走 flushStateEmit 立即推。
+	 */
+	private static readonly STATE_EMIT_THROTTLE_MS = 250;
+	private stateEmitTimer: NodeJS.Timeout | null = null;
+	private stateEmitLastAt = 0;
+
 	private emitState() {
+		const now = Date.now();
+		const elapsed = now - this.stateEmitLastAt;
+		if (elapsed >= AgentManager.STATE_EMIT_THROTTLE_MS) {
+			this.stateEmitLastAt = now;
+			this.emitStateNow();
+			return;
+		}
+		if (this.stateEmitTimer !== null) return;
+		this.stateEmitTimer = setTimeout(() => {
+			this.stateEmitTimer = null;
+			this.stateEmitLastAt = Date.now();
+			this.emitStateNow();
+		}, AgentManager.STATE_EMIT_THROTTLE_MS - elapsed);
+		this.stateEmitTimer.unref?.();
+	}
+
+	/** 取消在途 trailing 并立即推一次终态（dispose 用：退出路径不等节流窗口）。 */
+	private flushStateEmit() {
+		if (this.stateEmitTimer !== null) {
+			clearTimeout(this.stateEmitTimer);
+			this.stateEmitTimer = null;
+		}
+		this.stateEmitLastAt = Date.now();
+		this.emitStateNow();
+	}
+
+	private emitStateNow() {
 		const tabs = this.list();
 		this.emit(ipcChannels.agentsState, tabs);
 		// 同步通知主进程内部状态订阅者（PetStateBridge），使宠物窗能拿到聚合状态。

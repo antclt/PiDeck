@@ -139,7 +139,7 @@ export function DshRuntimeSection({ status, onOpenFolder }: { status: DshRuntime
 							</div>
 							{/* 卸载没有可换算的百分比，只显示不确定进度条。 */}
 							<div className="h-1.5 w-full overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={uninstalling ? undefined : percent} aria-valuemin={0} aria-valuemax={100}>
-								<div className="h-full rounded-full bg-primary transition-[width] duration-200" style={{ width: `${uninstalling ? 40 : Math.max(0, Math.min(100, percent))}%` }} />
+								<div className="h-full rounded-full bg-primary transition-[width] duration-base" style={{ width: `${uninstalling ? 40 : Math.max(0, Math.min(100, percent))}%` }} />
 							</div>
 						</div>
 					) : null}
@@ -179,7 +179,7 @@ export function DshRuntimeSection({ status, onOpenFolder }: { status: DshRuntime
 							{uninstalling ? t("dsh.runtime.phase.uninstalling") : phaseLabel}
 						</div>
 						<div className="h-1.5 w-full overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={uninstalling ? undefined : percent} aria-valuemin={0} aria-valuemax={100}>
-							<div className="h-full rounded-full bg-primary transition-[width] duration-200" style={{ width: `${uninstalling ? 40 : Math.max(0, Math.min(100, percent))}%` }} />
+							<div className="h-full rounded-full bg-primary transition-[width] duration-base" style={{ width: `${uninstalling ? 40 : Math.max(0, Math.min(100, percent))}%` }} />
 						</div>
 					</div>
 				) : (

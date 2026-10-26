@@ -1,3 +1,5 @@
+import type { VisibleTimelineRow } from "./useVisibleTimelineRows";
+
 /**
  * 浏览历史时的视口钉行（纯函数，无 React/DOM）。
  *
@@ -16,6 +18,16 @@ export type BrowsePin = {
 	/** 钉住的行顶边相对视口顶的偏移（可负：行顶在视口上方）。 */
 	expectedViewportTop: number;
 };
+
+/**
+ * 可见行里第一条「底部仍压着视口顶边」的轮根（bottom >= 1 才没被视口顶切掉）。
+ *
+ * computeCurrentAnchor 与 findBrowsePin 的快路径共用这一份判据：各抄一份时，
+ * 「>= 1」或轮根条件一旦漂移，锚点与浏览钉会选中不同的行。
+ */
+export function pickVisibleRootRow(rows: readonly VisibleTimelineRow[]): VisibleTimelineRow | null {
+	return rows.find((row) => row.bottom >= 1 && row.isRootRow) ?? null;
+}
 
 /** 行相对视口多走了多少：正值 = 行在屏幕上被推下去（上方长高）。 */
 export function browsePinDrift(currentViewportTop: number, expectedViewportTop: number): number {

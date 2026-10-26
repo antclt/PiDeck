@@ -1,6 +1,7 @@
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import type * as childProcessModule from "node:child_process";
+import { isRunnableRunnerNode } from "./dshRunnerNode";
 
 /**
  * 拿 child_process 的真实 CJS exports 对象。
@@ -63,8 +64,17 @@ let runnerPolicyLogged = false;
 let dshRunnerNodeSidecarPath: string | undefined;
 
 /** 由 hostEntry 在补丁安装前写入（来自 fork env `PIDECK_DSH_RUNNER_NODE`）。 */
-export function configureDshRunnerNodeSidecar(path: string | undefined): void {
-	dshRunnerNodeSidecarPath = path?.trim() ? path.trim() : undefined;
+export function configureDshRunnerNodeSidecar(path: string | undefined, platform: NodeJS.Platform = process.platform): void {
+	const candidate = path?.trim() ?? "";
+	// 垫片（mise/scoop/volta/chocolatey…）会再转一次真实 node，把 runner 的 IPC
+	// （fd3 ipc + fd4 control）转丢，宿主判 “Windows Job runner exited with exit
+	// code 0 before proving its managed range empty”，PTC run_code 全废。
+	// 拿不到真二进制时宁可退回 electron.exe + preload 旧路径（最多闪一下窗）。
+	const runnable = candidate.length > 0 && isRunnableRunnerNode(candidate, platform);
+	if (candidate.length > 0 && !runnable) {
+		console.error(`[dsh-sidecar] 忽略不可 spawn 的 runner node（垫片/非 .exe）：${candidate}`);
+	}
+	dshRunnerNodeSidecarPath = runnable ? candidate : undefined;
 	runnerPolicyLogged = false;
 }
 

@@ -8,6 +8,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AgentRuntimeState, CreateAnonymousSessionInput, CreateSessionDraftInput, ImageContent, SendSessionPromptInput, SessionRuntimeTarget, SessionUiResponseInput, UpdateSessionRecordInput } from "../../shared/types";
 import { readBoundedFile } from "./WebHttpResponders";
+import { ifNoneMatchHits, stateEtag } from "./WebStateEtag";
 import type { WebServiceDependencies } from "./WebServiceManager";
 
 const CHAT_IMAGE_MAX_COUNT = 4;
@@ -42,11 +43,12 @@ export function extractChatImages(parts: Array<{ type?: string; mediaType?: stri
 /** 路由需要宿主提供的能力面（manager 用薄箭头函数适配；private 成员不进接口）。 */
 export type WebApiRoutesPort = {
 	deps: WebServiceDependencies;
-	sendJson: (response: ServerResponse, body: unknown) => void;
+	sendJson: (response: ServerResponse, body: unknown, extraHeaders?: Record<string, string>) => void;
 	sendError: (response: ServerResponse, statusCode: number, code: string, error: string, params?: Record<string, string | number>) => void;
 	sendNoContent: (response: ServerResponse) => void;
 	readJson: <T>(request: IncomingMessage, maxBytes?: number) => Promise<T>;
-	getState: () => Promise<unknown>;
+	/** /api/state 载荷：这里只声明 ETag 需要的字段面，具体结构由装配层决定。 */
+	getState: () => Promise<{ projects?: unknown[]; sessions?: unknown[]; runtimes?: unknown[]; pendingUiRequests?: unknown[] }>;
 	queryNumber: (url: URL, key: string) => number | undefined;
 	runtimeAgentIdForSession: (sessionId: string) => string | undefined;
 	runtimeTargetForSession: (sessionId: string) => SessionRuntimeTarget | undefined;
@@ -86,7 +88,16 @@ export class WebApiRoutes {
 
 	async handle(url: URL, request: IncomingMessage, response: ServerResponse): Promise<boolean> {
 		if (url.pathname === "/api/state") {
-			this.sendJson(response, await this.getState());
+			const state = await this.getState();
+			// 条件请求：载荷含全部会话投影（500+ 条约 228KB），而轮询窗口内目录多半没变。
+			// 未变化时回 304，客户端保留原状态——空闲流量从每 10s 228KB 降到几十字节。
+			const etag = stateEtag(state);
+			if (ifNoneMatchHits(request.headers["if-none-match"], etag)) {
+				response.writeHead(304, { etag, "cache-control": "no-store" });
+				response.end();
+				return true;
+			}
+			this.sendJson(response, state, { etag });
 			return true;
 		}
 		if (url.pathname === "/api/ui-response" && request.method === "POST") {
@@ -166,6 +177,49 @@ export class WebApiRoutes {
 				return true;
 			}
 			this.sendJson(response, { subagents: await this.deps.listSessionSubagents(decodeURIComponent(subagentsMatch[1])) });
+			return true;
+		}
+		// 会话内全文检索（全会话，不限已加载历史）：与桌面端 Ctrl+Shift+F 同源。
+		// 未装配 / 索引未就绪一律 200 + `{ result: null }`，前端据此回退本地已加载搜索
+		// 并提示「仅搜索已加载消息」；不返回 503，避免前端把「可降级」当成错误弹 toast。
+		const sessionSearchMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/search$/);
+		if (sessionSearchMatch && request.method === "GET") {
+			const query = (url.searchParams.get("q") ?? "").trim();
+			const search = this.deps.searchSessionMessages;
+			if (!search || !query || query.length > 256) {
+				this.sendJson(response, { result: null });
+				return true;
+			}
+			let result = null;
+			try {
+				result = await search(decodeURIComponent(sessionSearchMatch[1]), query);
+			} catch {
+				// 检索失败按「不可用」降级（与索引未就绪同形态），不影响会话本身
+				result = null;
+			}
+			this.sendJson(response, { result });
+			return true;
+		}
+		// 供应商额度/余额用量（与桌面圆球面板同源）：usage probe 是用户显式开关的能力，
+		// 「未装配 / 未开启 / 供应商无端点」都是正常态而非故障——一律 200 + success=false，
+		// 前端据此不渲染额度区块（与桌面 ProviderUsageDetails 的 disabled 分支同语义）。
+		const usageMatch = url.pathname.match(/^\/api\/usage\/([^/]+)$/);
+		if (usageMatch && request.method === "GET") {
+			const provider = decodeURIComponent(usageMatch[1]).trim();
+			const backend = url.searchParams.get("backend") === "dsh" ? "dsh" : "pi";
+			const probe = this.deps.fetchProviderUsage;
+			if (!probe || !provider || provider.length > 128) {
+				this.sendJson(response, { result: { success: false, provider, disabled: true } });
+				return true;
+			}
+			let result;
+			try {
+				result = await probe(provider, backend);
+			} catch {
+				// 探针异常（网络/解析）按「不可用」降级，不把内部错误回给浏览器
+				result = { success: false, provider, disabled: true };
+			}
+			this.sendJson(response, { result });
 			return true;
 		}
 		const todoMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/todo$/);

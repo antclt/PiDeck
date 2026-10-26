@@ -134,12 +134,13 @@ test("thinking and tool logos keep a distinct color even on the default zinc the
 	assert.doesNotMatch(toolCalls, /className="tool-card-icon[^"\n]*text-text-tertiary/);
 });
 
-// 状态徽章（借鉴 AI Elements Tool 的 getStatusBadge）：running/error/done 三态
-// 图标+文案 pill，不再只有 running 有视觉反馈、error 只是灰字。
-test("tool card renders tri-state status badges with icons and i18n labels", () => {
+// 状态徽章（2026-10 对齐 ZCode 静默完成态）：running/stopped/error 保留 pill 一眼可辨；
+// 普通完成不再渲染徽章——「无状态即成功」，完成行回归安静的一行灰（此前常驻绿色
+// 「完成」徽章让整屏过程行比正文还吵）。ask_question 已回答保留低强调绿色 pill。
+test("tool card keeps status pills only for non-default states; done rows go silent", () => {
 	// 三态共用 shadcn Badge 组件
 	assert.match(toolCalls, /import \{ Badge \} from "\.\.\/ui-shadcn\/badge"/);
-	// running：outline + 琥珀色警示位 + spinner（随 trigger 行紧凑化收紧内边距）
+	// running：outline + 琥珀色警示位（随 trigger 行紧凑化收紧内边距）
 	// 徽章字号走会话正文轨道（text-chat-detail = 正文 −4px，默认档仍是 11px）
 	assert.match(toolCalls, /variant="outline" className="gap-1 border-warning\/40 px-1 py-0 text-chat-detail text-warning"/);
 	assert.match(toolCalls, /t\("tool\.statusRunning"\)/);
@@ -147,19 +148,37 @@ test("tool card renders tri-state status badges with icons and i18n labels", () 
 	assert.match(toolCalls, /variant="outline" className="gap-1 border-danger\/40 bg-danger-soft px-1 py-0 text-chat-detail text-danger"/);
 	assert.match(toolCalls, /<CircleX size=\{9\}/);
 	assert.match(toolCalls, /t\("tool\.statusError"\)/);
-	// done：soft 绿 outline（success-soft 底 + success 字 + 描边）+ CircleCheck 图标；
-	// 完成是正向终态，与 running 琥珀、error soft 红构成三色语义（用户反馈：完成也显示灰的）。
-	// ask_question 已回答时文案替换为「已回答」，同样走绿色。
+	// ask_question 已回答：保留 soft 绿低强调确认（「等待 → 已回答」的跃迁对它有信息量）
 	assert.match(toolCalls, /variant="outline" className="gap-1 border-success\/40 bg-success-soft px-1 py-0 text-chat-detail text-success"/);
+	assert.match(toolCalls, /t\("ask\.answered"\)/);
+	// 普通完成静默：分支收尾返回 null，不再渲染绿色「完成」pill
+	assert.match(toolCalls, /return null;\s*\}\)\(\);/);
+	assert.doesNotMatch(toolCalls, /t\("tool\.statusDone"\)/);
+	assert.doesNotMatch(toolCalls, /<CircleCheck/);
 	assert.doesNotMatch(toolCalls, /variant="secondary" className="gap-1 px-1 py-0 text-chat-detail"/);
-	assert.match(toolCalls, /<CircleCheck size=\{9\}/);
-	assert.match(toolCalls, /askCard\?\.answered \? t\("ask\.answered"\) : t\("tool\.statusDone"\)/);
-	// 重试行保持同一套三态语言：running 琥珀 / failed soft 红 / 成功 soft 绿，
-	// 不允许残留旧的灰色完成徽章（两处徽章改一处漏一处会被这条兜住）。
+	// 重试行保持三态徽章语言不变：running 琥珀 / failed soft 红 / 成功 soft 绿
+	// （重试是值得注意的异常事件，成功态对它有信息量，不随工具行静默化收窄）。
 	assert.match(retryStep, /variant="outline" className="gap-1 border-warning\/40 px-1 py-0 text-chat-detail text-warning"/);
 	assert.match(retryStep, /variant="outline" className="gap-1 border-danger\/40 bg-danger-soft px-1 py-0 text-chat-detail text-danger"/);
 	assert.match(retryStep, /variant="outline" className="gap-1 border-success\/40 bg-success-soft px-1 py-0 text-chat-detail text-success"/);
 	assert.doesNotMatch(retryStep, /variant="secondary"/);
 	// 旧实现「完成后不显示状态」的空文案分支已移除
 	assert.doesNotMatch(toolCalls, /statusLabel/);
+});
+
+// 2026-10 对齐 ZCode 过程行排版：主标签 = 语义动词，作用对象进等宽 chip 单行截断，
+// 原始工具名/完整参数/完成耗时撤到行 tooltip——行内只留扫读锚点，细节 hover 可达。
+test("tool trigger shows verb label with mono object chip; details move to row tooltip", () => {
+	// 主标签走 toolPhrase 的动词（不再直接渲染原始工具名）
+	assert.match(toolCalls, /isAskCard \? t\("ask\.toolName"\) : phrase\.verb/);
+	// 作用对象：裸等宽暗字（2026-10 去灰底——每轮命令 chip 的成片灰底把时间线切碎，ZCode 同款裸字），单行截断
+	assert.match(toolCalls, /min-w-0 flex-\[0_1_auto\] truncate font-mono text-chat-detail text-text-faint/);
+	assert.doesNotMatch(toolCalls, /bg-\[color:color-mix\(in_srgb,var\(--color-text-primary\)_5%,transparent\)\]/);
+	assert.match(toolCalls, /title=\{phrase\.object \|\| subtitle\}/);
+	// 行 tooltip 承接撤下的信息：工具名 + 参数摘要 + 完成耗时
+	assert.match(toolCalls, /const rowTitleParts = \[isSkillRead \? `skill:\$\{skillName\}` : toolName, subtitle\]\.filter\(Boolean\);/);
+	assert.match(toolCalls, /t\("tool\.durationTitle"\)\} \$\{formatDuration\(durationMs\)\}/);
+	// 耗时只在 running 有行内意义（活秒表）；完成后的秒数不再常驻行内
+	assert.match(toolCalls, /\{status === "running" && \(\s*<span className="shrink-0 text-chat-detail tabular-nums text-text-tertiary"/);
+	assert.doesNotMatch(toolCalls, /formatDuration\(durationMs \?\? 0\)/);
 });

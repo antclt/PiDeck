@@ -187,6 +187,10 @@ export type AppSettings = {
 	backgroundImage: string;
 	/** 背景图可见度 0-1：0=背景色完全遮住图片，1=图片全显；面板/弹层会按语义分档透出 */
 	backgroundImageOpacity: number;
+	/** Wallpaper Engine 工坊目录（steamapps/workshop/content/431960），空串=未设置 */
+	weWorkshopDir: string;
+	/** 选中的 Wallpaper Engine 视频壁纸工坊 ID（纯数字），空串=不启用；与 backgroundImage 同时存在时视频优先 */
+	weWallpaperId: string;
 	/** 界面语言，system 跟随系统语言；pseudo 用于长文案布局压力测试 */
 	language: AppLanguageMode;
 	/** 启动时主窗口几何预设，默认 last（上次窗口位置和大小，读不到时顺延 maximized） */
@@ -407,6 +411,12 @@ export type AppSettings = {
 	 */
 	sessionStatusPlacement: SessionStatusPlacement;
 	/**
+	 * 发送消息后是否把时间线滚动到最新（缺省开启；显式 false 才关闭）。
+	 * 关闭后发送不动视口：用户上翻读历史时不会被拽回底部；停在底部时仍由跟底引擎跟随新回复。
+	 * 消费方是 useSessionTimelineController 的发送定位 effect（决策时刻读 atom 镜像）。
+	 */
+	scrollToLatestOnSend?: boolean;
+	/**
 	 * 会话 Tab 最大宽度（px，80–400，默认 104=旧硬编码值）。仅封顶不设下限宽度：
 	 * Tab 按内容收缩（w-fit），短标题的 Tab 不受影响；有前置徽标时上限另加
 	 * SESSION_TAB_BADGE_EXTRA_WIDTH（28px，旧 132px 差值）。外观设置滑杆可调。
@@ -487,6 +497,20 @@ export type AppSettings = {
 	 * 全局/会话杀开关仍然生效（关掉 CUA 仍一律拒绝）。风险自担型开关。
 	 */
 	cuaAutoApprove: boolean;
+
+	// ── 浏览器 Agent：让 Agent 观察并操作内置浏览器当前页面（browser-use） ──
+	/**
+	 * 是否启用内置浏览器 Agent 能力，默认 false。
+	 * 开启后 `browser_*` 工具注册到主进程 MCP host（与 CUA 共用端点与 mcp.json 条目）；
+	 * 关闭时不注册工具；若 CUA 也关闭则端点不监听、不改动 pi 配置。
+	 * 写动作默认逐次审批；只读工具（状态/快照/查找/等待）免审批。
+	 */
+	browserAgentEnabled: boolean;
+	/**
+	 * 浏览器 Agent 自动审批（免审批），默认 true（与 CUA 一致）。
+	 * 内置浏览器使用用户真实登录态，风险自担；关闭后每次写操作逐次确认。
+	 */
+	browserAgentAutoApprove: boolean;
 
 	// ── 模型收藏：ModelPicker 中用 ☆ 标记，收藏的模型在列表中置顶 ──
 	/** 收藏的模型 ID 列表 */
@@ -656,6 +680,14 @@ export type AppSettings = {
 	 * 缺省 "pi"（2026-12 兼容期调整：默认回归 pi，用户可在设置中切换为 dsh）。
 	 */
 	defaultAgentBackend: AgentBackend;
+	/**
+	 * 用户是否手动指定过默认后端（设置页选中 pi/dsh 即置 true）。
+	 *
+	 * 缺省 false = 自动：只装了 DSH runtime 而没有 pi 时用 dsh，其余情况用 pi
+	 * （见 resolveAutoAgentBackend）。一旦用户自己选过，自动逻辑不再改写，
+	 * 否则「我明明选了 pi，装个 DSH 就被改掉」会让人无法信任这个设置。
+	 */
+	defaultAgentBackendManual?: boolean;
 
 	// ── Agent 启动诊断/加速（开发设置） ──
 	/**
@@ -700,6 +732,11 @@ export type AppSettings = {
 	 * 在展示时安全忽略，避免修改 pi 会话文件或把短生命周期 agentId 持久化。
 	 */
 	pinnedSessionIds?: string[];
+	/**
+	 * 侧栏「聊天」「项目」分组标题栏在列表滚动时冻结（sticky）在滚动区顶部。
+	 * 可选以兼容旧 settings.json；缺省视为关闭（历史行为：标题随列表滚走）。
+	 */
+	sidebarStickyGroupHeaders?: boolean;
 
 	/**
 	 * 项目会话列表排序模式（2027-03 开放排序规则）：updatedAt=最近活跃（历史默认）、
@@ -986,6 +1023,7 @@ export function createDefaultAppSettings(): AppSettings {
 		showNativeMenu: false,
 		sendShortcut: "enter-send",
 		defaultAgentBackend: "pi",
+		defaultAgentBackendManual: false,
 		theme: "system",
 		themeScheduleLightStart: "07:00",
 		themeScheduleDarkStart: "19:00",
@@ -997,6 +1035,8 @@ export function createDefaultAppSettings(): AppSettings {
 		customThemeOverrides: {},
 		backgroundImage: "",
 		backgroundImageOpacity: 0.8,
+		weWorkshopDir: "",
+		weWallpaperId: "",
 		language: "system",
 		startupWindowMode: "last",
 		piEnvironmentChecked: false,
@@ -1068,6 +1108,7 @@ export function createDefaultAppSettings(): AppSettings {
 		contentMaxWidth: 1800,
 		chatContentWidthPct: 80,
 		sessionStatusPlacement: "composer",
+		scrollToLatestOnSend: true,
 		navigationMode: "tabs",
 		sessionTabMaxWidth: SESSION_TAB_MAX_WIDTH_DEFAULT,
 		maxEditorFileSizeMB: 5,
@@ -1096,6 +1137,9 @@ export function createDefaultAppSettings(): AppSettings {
 		sessionStoreEnabled: true,
 		cuaEnabled: false,
 		cuaAutoApprove: true,
+		// 浏览器 Agent 默认关闭；开启后写动作默认免审批（与 CUA 一致），可关闭改为逐次确认。
+		browserAgentEnabled: false,
+		browserAgentAutoApprove: true,
 		favoriteModels: [],
 
 		// 字体配置：与 main SettingsStore 默认值保持一致，避免启动时闪烁

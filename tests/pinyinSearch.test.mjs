@@ -7,7 +7,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { pinyinKeys, matchPinyin, matchPinyinText, isPinyinQuery, PINYIN_SCORES } = loadTsCommonJs("src/renderer/src/utils/pinyinSearch.ts");
+const { pinyinKeys, ensurePinyinTable, matchPinyin, matchPinyinText, isPinyinQuery, PINYIN_SCORES } = loadTsCommonJs("src/renderer/src/utils/pinyinSearch.ts");
+// 字典已改为按需装载（不进启动 chunk）：同步契约只在表就绪后成立，测试先装载再断言。
+await ensurePinyinTable();
 const SEP = "\u0000";
 
 test("pinyinKeys 逐字给首字母集合与默认全拼", () => {

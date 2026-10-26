@@ -25,12 +25,12 @@ test("config diagnostic docs link forces system browser", () => {
 });
 
 test("environment dialog nodejs link forces system browser in dialog implementations", () => {
-	// OverlayComponents 版是 EnvironmentDialog 唯一实现（含 pi 环境三步引导）；
-	// AppParts 现在只 re-export，不再持实现。两处 nodejs.org 外链都必须 forceSystem。
+	// OverlayComponents 版是 EnvironmentDialog 唯一实现；未安装态的 Node.js 外链现在在
+	// EnvironmentSetupPanel（一键安装面板）里，必须保留 forceSystem（Dialog 下内置浏览器不可见）。
 	const overlay = readFileSync("src/renderer/src/components/overlays/OverlayComponents.tsx", "utf8");
-	assert.match(overlay, /window\.piDesktop\.app\.openExternal\(\s*"https:\/\/nodejs\.org\/zh-cn\/download\/",\s*true\s*\)/);
-	const guide = readFileSync("src/renderer/src/components/overlays/EnvironmentGuidePanel.tsx", "utf8");
-	assert.match(guide, /openExternal\("https:\/\/nodejs\.org\/zh-cn\/download\/", true\)/);
+	assert.doesNotMatch(overlay, /window\.open\(/);
+	const setup = readFileSync("src/renderer/src/components/overlays/EnvironmentSetupPanel.tsx", "utf8");
+	assert.match(setup, /openExternal\(\s*"https:\/\/nodejs\.org\/zh-cn\/download\/",\s*true\s*\)/);
 });
 
 test("settings web service link forces system browser", () => {

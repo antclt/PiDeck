@@ -128,6 +128,26 @@ test("resolvePiAuthHostLaunch: 官方 managed 安装按 install/current-version 
 	});
 });
 
+test("resolvePiAuthHostLaunch: managed-install.json 带 BOM 时仍走官方 managed 布局", () => {
+	withTempDir((dir) => {
+		const appPath = writeAppDir(dir);
+		const agentDir = join(dir, ".pi", "agent");
+		const installRoot = writeManagedInstall(agentDir, { versions: ["1.2.3"], currentVersion: "1.2.3" });
+		// PowerShell 5.1 重写标记文件会带 BOM；误判为非 managed 会让侧车找不到 SDK 入口。
+		writeFileSync(join(installRoot, "managed-install.json"), `\uFEFF${JSON.stringify({ kind: "pi-managed-install", schemaVersion: 1, layout: "releases-v1" })}`);
+		const launch = resolvePiAuthHostLaunch({
+			settings: { ...BASE_SETTINGS, customPiPath: join(agentDir, "bin", "pi.cmd") },
+			locator: fakeLocator({ command: join(agentDir, "bin", "pi.cmd"), windowsLaunch: { channel: "cmd-shim", reason: "unrecognized" } }),
+			userDataPath: join(dir, "userData"),
+			appPath,
+			resourcesPath: join(dir, "unused"),
+			isPackaged: false,
+		});
+		assert.equal(launch.ok, true, `带 BOM 的标记文件应仍能解析 SDK 入口：${launch.error}`);
+		assert.equal(launch.sdkEntry, join(installRoot, "releases", "1.2.3", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js"));
+	});
+});
+
 test("resolvePiAuthHostLaunch: current-version 缺失时退到 releases 下版本号最大的完整 release", () => {
 	withTempDir((dir) => {
 		const appPath = writeAppDir(dir);

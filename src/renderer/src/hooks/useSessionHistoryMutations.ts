@@ -32,7 +32,7 @@ export interface SessionHistoryMutationsDeps {
 	clearConfirm: () => void;
 	showToast: (message: string, duration?: number, kind?: NoticeKind) => void;
 	translateAgentErrorMessage: (message: string) => string;
-	submitPromptSnapshot: (sessionId: string, message: string, images?: ImageContent[]) => Promise<boolean | "unknown">;
+	submitPromptSnapshot: (sessionId: string, message: string, images?: ImageContent[], options?: { requireAppliedModel?: boolean }) => Promise<boolean | "unknown">;
 	openReplacedRuntimeSession: (projectId: string | undefined, targetSessionId: string | undefined) => Promise<void>;
 	setPromptForAgent: (sessionId: string, text: string) => void;
 	setCurrentSessionIdRef: (sessionId: string) => void;
@@ -268,7 +268,7 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
 			// 都不发引用重建（rehydrateDraftFromMessage）：fork 的上下文已在子会话前缀里，
 			// 原样重发才是同一上下文。
 			const promptText = kind === "edit" && newText !== undefined ? newText : typeof result.text === "string" && result.text.length > 0 ? result.text : (message.text ?? "");
-			const delivered = await depsRef.current.submitPromptSnapshot(targetSessionId ?? sessionId, promptText, message.images);
+			const delivered = await depsRef.current.submitPromptSnapshot(targetSessionId ?? sessionId, promptText, message.images, { requireAppliedModel: true });
 			if (shouldShowResendRollbackHint(delivered)) {
 				// 发送失败：旧分支无恙（无需回滚提示），但列表已切到子会话且没有新轮次，
 				// 不说明会像「重发/编辑坏了」。

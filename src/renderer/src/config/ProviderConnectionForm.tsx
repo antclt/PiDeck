@@ -139,7 +139,7 @@ export function ProviderConnectionForm(props: {
 				<div className="config-test-controls">
 					<Input
 						value={props.testModelId}
-						className="h-8 min-w-0 rounded-sm border border-border-subtle bg-bg-panel px-3 text-control text-text-primary outline-none transition-[border-color,box-shadow,background-color] duration-150 focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
+						className="h-8 min-w-0 rounded-sm border border-border-subtle bg-bg-panel px-3 text-control text-text-primary outline-none transition-[border-color,box-shadow,background-color] duration-fast focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
 						onChange={(e) => props.onChangeTestModelId(e.target.value)}
 						placeholder={props.firstModelId ?? t("config.testModelPlaceholder")}
 					/>

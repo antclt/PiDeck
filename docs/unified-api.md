@@ -11,10 +11,11 @@ PiDeck 桌面能力面统一门面 `piDeckApi` 的契约文档。三层结构：
 - 2026-10-17 快照刷新：files:search-content（工作区文件内容检索，file-index sidecar）入场，通道 677→678；2026-10-18 再刷新：sessions:search-in-session（会话内查找）入场，通道 678→679，sessions 111→112；preload 方法清单摘要同步重算（命名空间/方法数锚点不变）。
 - 2026-10-18 远端合并刷新：远端开发面入场（SSH 主机/项目/文件/会话/信任/模型探测、远端 Git 读写、远端终端 ACK），通道 679→743、前缀 84→85、命名空间 70→74、sessions 112→115；目录补 `remote` 域行，现为 62 域 + 11 导入器。
 - 2026-10-16 合并刷新：随 dev 演进（ACP 全渠道、微信渠道、宿主插件、pideck-mcp、生视频、公告历史等）补 6 域行，目录现为 61 域 + 11 导入器。
+- 2026-10-24 第四轮追赶 origin/dev（274 提交）：并入上游域行与新方法，通道 768→777、前缀 88→90、命名空间 77→78、sessions 118→116（下线 readOutlineTitle / readDshSystemPrompt）、config 48→50（外部 Agent 供应商导入），目录现为 66 域 + 11 导入器。
 
 ## 按域调用面
 
-域表（65 行，按 core / workspace / content / config / integration / shell 分组）：
+域表（66 行，按 core / workspace / content / config / integration / shell 分组）：
 
 | 域 | 分组 | 主进程归属 | IPC 注册文件 | preload 命名空间 | 通道前缀 | 聚合方式 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -52,6 +53,7 @@ PiDeck 桌面能力面统一门面 `piDeckApi` 的契约文档。三层结构：
 | `skill-hub` | content | SkillHub 检索与安装 | ipc/storeIpc.ts | `skillHub` | `skill-hub` | `aggregate` |
 | `content-store` | content | BuiltinContentUpdater（prompts-store/skills-store 两通道域共用同一更新器） | ipc/contentStoreIpc.ts | `contentStore` | `prompts-store`, `skills-store` | `aggregate` |
 | `extensions` | content | ExtensionManager + BuiltInExtensionsUpdater | ipc/storeIpc.ts, ipc/builtInExtensionIpc.ts | `extensions` | `extensions` | `aggregate` |
+| `favorites` | content | FavoritesStore（`<userData>/favorites.json` 本机快照；正文只在收藏动作发生时由渲染层提交，不动会话文件） | ipc/favoritesIpc.ts | `favorites` | `favorites` | `aggregate` |
 | `imagegen` | content | ImagegenService + 三个图存储 Store | ipc/imagegenIpc.ts | `imagegen` | `imagegen` | `aggregate` |
 | `videogen` | content | VideoJobRunner + IlinkClient + VideoJobStore/VideoBlobStore/VideoSessionStore/VideoGenConfigStore | ipc/videogenIpc.ts | `videogen` | `videogen` | `aggregate` |
 | `settings` | config | SettingsStore + VisionBridgeConfigManager | ipc/systemIpc.ts | `settings` | `settings` | `aggregate` |

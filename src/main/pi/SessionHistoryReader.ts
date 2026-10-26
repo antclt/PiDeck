@@ -723,6 +723,8 @@ export class SessionHistoryReader {
 	private static readonly INDEX_PARSE_YIELD_EVERY = 400;
 	/** 完整消息文本 LRU 缓存（「查看完整输出」按需读取结果）：键 `${sessionPath}#${messageId}`。 */
 	private readonly fullTextCache = new Map<string, string>();
+	/** 推导型子代理条目的 (size, mtime) 结果缓存（readDerivedSubagentEntries 全量扫的去重，见方法注释）。 */
+	private readonly derivedSubagentCache = new Map<string, { size: number; mtimeMs: number; entries: PiSubagentEntry[] }>();
 	/** 已驻留完整文本的总字节数（字节预算 LRU 淘汰用，命中刷新不增减）。 */
 	private fullTextCacheBytes = 0;
 	private static readonly FULL_TEXT_CACHE_LIMIT = 200;
@@ -733,8 +735,6 @@ export class SessionHistoryReader {
 	private static readonly FULL_TEXT_CACHE_MAX_BYTES = 32 * 1024 * 1024;
 	/** 导轨目录上限：单次响应 10,000 项（2MiB 载荷的保守对应值）。 */
 	static readonly MAX_OUTLINE_ENTRIES = 10_000;
-	/** 单项标题读取上限：超过就只显示时间/序号占位。 */
-	static readonly MAX_OUTLINE_TITLE_BYTES = 1024 * 1024;
 	/** 标题展示长度（与 chip 标题同口径）。 */
 	static readonly OUTLINE_TITLE_CHARS = 80;
 	/**
@@ -843,19 +843,6 @@ export class SessionHistoryReader {
 		if (all.length <= limit) return { entries: all, total: all.length, truncated: false };
 		// 保留首个 + 最近 (limit-1) 个：会话开头的问题与当下的上下文同样重要。
 		return { entries: [all[0], ...all.slice(all.length - (limit - 1))], total: all.length, truncated: true };
-	}
-
-	/** 单个检查点的标题正文（按需读一行，≤1MiB；返回有效展示文本前 80 字）。 */
-	async readSessionOutlineTitle(sessionPath: string, entryId: string): Promise<string | undefined> {
-		const index = await this.getSessionDisplayIndex(sessionPath);
-		const replacement = index.contextEdits.replacementText.get(entryId);
-		if (replacement) return clipOutlineTitle(replacement);
-		const entry = index.activeMessageEntries.find((candidate) => candidate.id === entryId);
-		if (!entry || entry.oversized || entry.byteLength > SessionHistoryReader.MAX_OUTLINE_TITLE_BYTES) return undefined;
-		const [line] = await this.readIndexedLines(index.hostPath, [{ ...entry, hasMessage: true } satisfies SessionDisplayEntry]);
-		if (!line) return undefined;
-		const preview = extractMessagePreviewFromLine(line);
-		return preview ? clipOutlineTitle(preview) : undefined;
 	}
 
 	/** 读指定条目正文（复用索引读取的并发/字节预算与 fork 来源配对）。 */
@@ -2394,6 +2381,31 @@ export class SessionHistoryReader {
 	 * JSON.parse，纯 record 会话的扫描成本接近纯文本搜索。损坏行忽略。
 	 */
 	async readDerivedSubagentEntries(sessionPath: string): Promise<PiSubagentEntry[]> {
+		// (size, mtime) 结果缓存（2027-02 性能审计）：这是「全量扫」语义（插件不落
+		// customType，无法定向读），Web 端 strips 每 5s 轮询 /subagents、桌面端同路径
+		// 叠加——大会话（几十~几百 MB）空闲期也会每 5s 整文件读盘一次。文件未追加
+		//（size/mtime 未变）时结果必然一致，直接复用；流式期间文件持续追加会自然
+		// 失效重扫（与 displayIndex/summaryCache 同款判据）。
+		const cacheKey = this.deps.toHostPath(sessionPath);
+		let stats: { size: number; mtimeMs: number } | null = null;
+		try {
+			const info = await stat(cacheKey);
+			stats = { size: info.size, mtimeMs: info.mtimeMs };
+		} catch {
+			stats = null;
+		}
+		if (stats) {
+			const cached = this.derivedSubagentCache.get(cacheKey);
+			if (cached && cached.size === stats.size && cached.mtimeMs === stats.mtimeMs) {
+				return cached.entries;
+			}
+		}
+		const entries = await this.readDerivedSubagentEntriesUncached(sessionPath);
+		if (stats) this.derivedSubagentCache.set(cacheKey, { ...stats, entries });
+		return entries;
+	}
+
+	private async readDerivedSubagentEntriesUncached(sessionPath: string): Promise<PiSubagentEntry[]> {
 		const hostPath = this.deps.toHostPath(sessionPath);
 		const rawEntries: unknown[] = [];
 		try {
@@ -2502,13 +2514,8 @@ function extractEntryResultText(message: unknown): string {
 	return "";
 }
 
-/** 索引预览 → 导轨卡片文本：压空白 + 截 80 字（与标题同口径）。 */
+/** 索引预览 → 导轨卡片文本：压空白 + 截 80 字（卡片只有一行，全文留在账本/时间线里）。 */
 function clipOutlinePreview(text: string): string {
-	return clipOutlineTitle(text);
-}
-
-/** 单行预览收敛成导轨标题：压空白 + 截 80 字。 */
-function clipOutlineTitle(text: string): string {
 	const compact = text.replace(/\s+/g, " ").trim();
 	return compact.length > SessionHistoryReader.OUTLINE_TITLE_CHARS ? `${compact.slice(0, SessionHistoryReader.OUTLINE_TITLE_CHARS)}…` : compact;
 }

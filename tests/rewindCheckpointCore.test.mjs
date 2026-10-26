@@ -30,7 +30,7 @@ const UUID_C = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 function makeRepo() {
 	const dir = mkdtempSync(join(tmpdir(), "rewind-test-"));
 	const git = (args) => execFileSync("git", args, { cwd: dir, stdio: "pipe" });
-	git(["init", "-q"]);
+	git(["init", "-q", "-b", "main"]); // 显式指定分支名：不依赖本机 init.defaultBranch（CI 与本机的默认值不同）
 	git(["config", "user.name", "test"]);
 	git(["config", "user.email", "test@example.com"]);
 	// autocrlf=false：保证工作区字节 = 提交字节（见文件头注释）。
@@ -607,7 +607,7 @@ test("预算未超时无跳过（正常小仓库行为不变）", async (t) => {
 // index 树记为 HEAD 树（恢复时把冲突态 index 重置回 HEAD），快照不中断。
 // ---------------------------------------------------------------------------
 
-/** 构造 merge 冲突仓库：master 与 side 分支改同一文件后 merge，index 进入 unmerged。 */
+/** 构造 merge 冲突仓库：main 与 side 分支改同一文件后 merge，index 进入 unmerged。 */
 function makeConflictRepo() {
 	const { dir, git } = makeRepo();
 	writeFileSync(join(dir, "f.txt"), "base\n");
@@ -615,9 +615,9 @@ function makeConflictRepo() {
 	git(["checkout", "-q", "-b", "side"]);
 	writeFileSync(join(dir, "f.txt"), "side\n");
 	commitAll(git, "side");
-	git(["checkout", "-q", "master"]);
+	git(["checkout", "-q", "main"]);
 	writeFileSync(join(dir, "f.txt"), "master\n");
-	commitAll(git, "master");
+	commitAll(git, "main");
 	try {
 		git(["merge", "side"]);
 	} catch {

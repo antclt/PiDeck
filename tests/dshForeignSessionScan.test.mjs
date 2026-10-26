@@ -96,6 +96,45 @@ test("parseProjectionTitles reads official session_projcache title.val rows", ()
 	assert.equal(titleFromProjectionRecord({ rows: { title: { val: 12 } } }), undefined);
 });
 
+test("异步版与同步版结果一致，且每个会话目录处理前让出事件循环（主进程防冻结契约）", async () => {
+	const home = mkdtempSync(join(tmpdir(), "pideck-dsh-async-scan-"));
+	try {
+		// 三个 workspace × 各两个会话：足够触发多次让出
+		for (const [index, cwd] of ["D:\\ws-a", "D:\\ws-b", "D:\\ws-c"].entries()) {
+			writeSession(home, cwd, `session-a-${index}`);
+			writeSession(home, cwd, `session-b-${index}`, { origin: "subagent" });
+		}
+		const { scanDshSessionHeadersAsync, listForeignSessionsFromDiskAsync } = loadTsCommonJs("src/main/dsh/dshForeignSessionScan.ts");
+		// setImmediate 回调计数：让出契约 = 扫描期间事件循环真的转过轮
+		let immediateTicks = 0;
+		const tickCounter = setImmediate(function count() {
+			immediateTicks += 1;
+			if (immediateTicks < 200) setImmediate(count);
+		});
+		const asyncHeaders = await scanDshSessionHeadersAsync(home);
+		clearImmediate(tickCounter);
+		const syncHeaders = scanDshSessionHeaders(home);
+		assert.equal(asyncHeaders.length, syncHeaders.length, "异步版不得丢会话");
+		// vm realm 数组原型不同，不能用 deepEqual 直接比较，join 成字符串断言
+		assert.equal(
+			asyncHeaders
+				.map((h) => h.id)
+				.sort()
+				.join(","),
+			syncHeaders
+				.map((h) => h.id)
+				.sort()
+				.join(","),
+			"异步版与同步版 id 集合一致",
+		);
+		const items = await listForeignSessionsFromDiskAsync(home);
+		assert.equal(items.length, 3, "根会话过滤在异步版同样生效（subagent 剔除）");
+		assert.ok(immediateTicks > 0, "扫描期间事件循环应有机会运转（让出契约，防主进程冻结）");
+	} finally {
+		rmSync(home, { recursive: true, force: true });
+	}
+});
+
 test("listForeignSessionsFromDisk returns root sessions and skips subagents", () => {
 	const home = mkdtempSync(join(tmpdir(), "pideck-dsh-foreign-scan-"));
 	try {

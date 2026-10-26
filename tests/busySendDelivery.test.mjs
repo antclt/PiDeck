@@ -61,6 +61,7 @@ describe("busy send delivery decision points", () => {
 	const composer = readFileSync("src/renderer/src/hooks/useSessionComposerController.ts", "utf8");
 	const appSource = readFileSync("src/renderer/src/App.tsx", "utf8");
 	const promptDispatchSource = readFileSync("src/renderer/src/hooks/session/useSessionPromptDispatch.ts", "utf8");
+	const historyMutationsSource = readFileSync("src/renderer/src/hooks/useSessionHistoryMutations.ts", "utf8");
 
 	test("composer 发送入口消费 resolveBusySendDelivery，不再按后端分叉", () => {
 		assert.ok(composer.includes("resolveBusySendDelivery(isBusy"));
@@ -77,5 +78,11 @@ describe("busy send delivery decision points", () => {
 		assert.doesNotMatch(appSource, /backend === "dsh"\s*\?\s*"followUp"\s*:\s*"steer"/);
 		// atom 与 settings 同步，设置保存后无需重挂载会话
 		assert.match(appSource, /setBusySendDelivery\(settings\.busySendDelivery\)/);
+	});
+
+	test("fork 化重发/编辑把 requireAppliedModel 透传给 sendPrompt（issue #370）", () => {
+		// 两个坑：一是重发/编辑忘了带标记（核对根本不跑），二是带了却没写进 IPC 载荷。
+		assert.match(historyMutationsSource, /requireAppliedModel:\s*true/);
+		assert.match(promptDispatchSource, /options\?\.requireAppliedModel\s*\?\s*\{\s*requireAppliedModel:\s*true\s*\}\s*:\s*\{\s*\}/);
 	});
 });

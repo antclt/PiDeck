@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent } from "react";
 import { isRemoteProject } from "../../../../shared/projectLocation";
-import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import { SearchAddon } from "@xterm/addon-search";
-import { SerializeAddon } from "@xterm/addon-serialize";
-import { Unicode11Addon } from "@xterm/addon-unicode11";
-import { WebLinksAddon } from "@xterm/addon-web-links";
-import { WebglAddon } from "@xterm/addon-webgl";
+// xterm 主库 + addon 按需装载（首次创建终端实例才加载，不进启动 chunk）；
+// 这里只引类型供 ref 声明，值统一经 loadXtermModules 取。
+import type { Terminal } from "@xterm/xterm";
+import type { FitAddon } from "@xterm/addon-fit";
+import type { SerializeAddon } from "@xterm/addon-serialize";
+import type { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
+import { loadXtermModules, type XtermModules } from "./xtermModules";
 import { openInSystemBrowser } from "../../utils/openExternal";
 import { remoteTerminalErrorMessage } from "../../utils/remoteTerminalErrors";
 import { showNotice } from "../../utils/notice";
@@ -15,6 +15,7 @@ import { writeClipboard } from "../../utils/clipboard";
 import { ChevronDown, ChevronUp, MoreHorizontal, Plus, X } from "lucide-react";
 import { ConfirmDialog } from "../ui-shadcn/ConfirmDialog";
 import { Button } from "../ui-shadcn/button";
+import { RemovalList, RemovalRow } from "../removal/RemovalList";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui-shadcn/popover";
 import type { PiDesktopApi } from "../../../../preload";
 import { terminalOwnerKeyFor } from "../../../../shared/types/terminal";
@@ -302,19 +303,51 @@ export function TerminalDock(props: {
 		};
 	}, [props.terminal, markExited, acceptsTabEvent]);
 
+	// 2027-02 性能治理：xterm 实例生命周期只依赖 tab id（+折叠/内容就绪），
+	// 不再依赖 activeTab 对象身份——markExited 用 `{...tab, exited:true}` 换新对象
+	// 只为显示退出徽章，原先会连带整实例销毁重建（serialize 全部 scrollback + 新建
+	// WebGL 上下文 + 回放 ≤200K 字符），shell 一退出就闪一次。
+	const activeTabId = activeTab?.id;
+
 	useEffect(() => {
 		// 必须捕获本次 effect 对应的 tab id：cleanup 执行时 activeTab 已切换到新 tab，
 		// 读 activeTab.id 会把新 tab 的空内容写进旧 tab 的缓存槽。
-		const effectTabId = activeTab?.id;
+		const effectTabId = activeTabId;
 		xtermRef.current = null;
 		fitRef.current = null;
 		webglRef.current = null;
 		serializeRef.current = null;
 		ioRef.current = null;
-		if (collapsed || !contentReady || !activeTab || !containerRef.current) return;
+		if (collapsed || !contentReady || !effectTabId || !containerRef.current) return;
 
+		// xterm 模块按需装载（不进启动 chunk）：装载是异步的，完成前本次 effect 可能已
+		// 失效（切 tab/折叠/关面板），用 cancelled 丢弃迟到结果；清理函数只在实例真正
+		// 创建后才挂接，未创建就清理时没有可回放内容也无实例要销毁。
+		let cancelled = false;
+		let sessionCleanup: (() => void) | null = null;
+		void loadXtermModules()
+			.then((modules) => {
+				if (cancelled) return;
+				sessionCleanup = createTerminalSession(modules, effectTabId);
+			})
+			.catch((error) => {
+				// 装载失败（chunk 损坏/磁盘异常）：面板停留在占位态，不崩 UI；下次重建可重试。
+				console.warn("[TerminalDock] xterm modules unavailable, terminal stays idle", error);
+			});
+		return () => {
+			cancelled = true;
+			sessionCleanup?.();
+		};
+		// xtermTheme 刻意不在依赖里：改主题走下面的热更新 effect 更新 options，
+		// 否则每次换配色都会销毁重建终端、丢掉 scrollback 与光标位置。
+	}, [activeTabId, collapsed, contentReady, props.terminal, ownsTab]);
+
+	/** 创建 xterm 实例并接线（xterm 模块装载完成后由初始化 effect 调用），返回清理函数。 */
+	function createTerminalSession(modules: XtermModules, effectTabId: string): () => void {
+		const container = containerRef.current;
+		if (!container) return () => {};
 		const { fontFamily, fontSize } = resolveTerminalFont(props.terminalSettings);
-		const terminal = new Terminal({
+		const terminal = new modules.Terminal({
 			fontFamily,
 			fontSize,
 			// scrollback 刻意不进依赖数组：xterm 缩小 scrollback 会立即丢弃历史且不可恢复
@@ -328,35 +361,35 @@ export function TerminalDock(props: {
 			allowProposedApi: true,
 			theme: xtermTheme,
 		});
-		const fit = new FitAddon();
+		const fit = new modules.FitAddon();
 		terminal.loadAddon(fit);
 		// 渲染器顺序：先 WebGL2（GPU 渲染，大输出量下比 DOM 渲染器流畅得多），
 		// 再搜索/回放序列化/Unicode 宽度，最后链接点击。
 		// allowTransparency 不设置：PiDeck 走 CSS 层透明（实测 WebGL 下与 DOM 渲染器逐像素一致），
 		// 再开 xterm 自己的透明通道是重复实现。
-		// WebGL 渲染器在 terminal.open() 之后装配（见下方 attachWebglRenderer）：
-		// WebglAddon 的 activate() 要等终端挂到 DOM 才跑，而 activate 内部 new 渲染器时
-		// 若拿不到 WebGL2 会同步 throw —— 那个 throw 发生在 xterm 的事件派发里，
-		// 外层 try/catch 包不住，会变成未捕获异常（实测：--disable-gpu 下 renderer 崩在
-		// commitPassiveMountEffect）。因此装配点必须跟着 open() 一起纳入受控范围。
+		// WebGL 渲染器在 terminal.open() 之后装配（见下方）：WebglAddon 的 activate() 要等
+		// 终端挂到 DOM 才跑，而 activate 内部 new 渲染器时若拿不到 WebGL2 会同步 throw——
+		// 那个 throw 发生在 xterm 的事件派发里，外层 try/catch 包不住，会变成未捕获异常
+		// （实测：--disable-gpu 下 renderer 崩在 commitPassiveMountEffect）。因此装配点
+		// 必须跟着 open() 一起纳入受控范围（装配语句用 modules.WebglAddon，值走惰性模块）。
 		// SearchAddon 已装配（后续搜索栏 UI 直接可用），本组件暂不持引用
-		terminal.loadAddon(new SearchAddon());
-		const serialize = new SerializeAddon();
+		terminal.loadAddon(new modules.SearchAddon());
+		const serialize = new modules.SerializeAddon();
 		terminal.loadAddon(serialize);
 		serializeRef.current = serialize;
-		const unicode11 = new Unicode11Addon();
+		const unicode11 = new modules.Unicode11Addon();
 		terminal.loadAddon(unicode11);
 		terminal.unicode.activeVersion = "11";
 		// 终端内 URL 可点：交给系统浏览器，与消息区链接策略一致（#115 U3）
-		terminal.loadAddon(new WebLinksAddon((_event, uri) => openInSystemBrowser(uri)));
-		terminal.open(containerRef.current);
+		terminal.loadAddon(new modules.WebLinksAddon((_event, uri) => openInSystemBrowser(uri)));
+		terminal.open(container);
 		xtermRef.current = terminal;
 		fitRef.current = fit;
 		// WebGL 只在 open() 之后装配：activate() 需要挂到 DOM 的终端才有 renderer，
 		// 且它在拿不到 WebGL2 时同步 throw（见上方注释）。这里整体 try/catch，
 		// 任何失败都只是留在 xterm 内置 DOM 渲染器上——产品路径本就依赖这条降级。
 		try {
-			const webgl = new WebglAddon();
+			const webgl = new modules.WebglAddon();
 			// WebGL 上下文可能因 OOM / 系统休眠被浏览器回收；丢失时 dispose 回退 DOM 渲染器，
 			// 终端本身不受影响（官方 README 推荐的兜底方式）。
 			webgl.onContextLoss(() => {
@@ -373,7 +406,11 @@ export function TerminalDock(props: {
 			console.warn("[TerminalDock] WebGL renderer unavailable, falling back to DOM renderer", error);
 		}
 		// 首次 fit、容器/设置/高度变化共用同一实例边界，旧 xterm 的迟到失败不能干扰新面板。
-		const io = createTerminalDockIo(props.terminal, activeTab.id, () => xtermRef.current === terminal && ownsTab(activeTab.id) && !activeTab.exited);
+		// 注（2027-02 解耦 activeTab 身份后）：闭包捕获的 activeTab.exited 会停留在
+		// 创建时的值（markExited 不再触发本 effect 重建）——这不构成问题：主进程
+		// TerminalSessionManager 的 input/resize 对 exited tab 本就静默忽略，这里的
+		// exited 只是防反馈误报的早期闸，身份闸（xtermRef/ownsTab）才是权威。
+		const io = createTerminalDockIo(props.terminal, effectTabId, () => xtermRef.current === terminal && ownsTab(effectTabId) && !activeTab.exited);
 		ioRef.current = io;
 		let resizeFrame: number | null = null;
 		const dataDisposable = terminal.onData(io.input);
@@ -389,9 +426,9 @@ export function TerminalDock(props: {
 			});
 		};
 		const observer = new ResizeObserver(scheduleResize);
-		observer.observe(containerRef.current);
+		observer.observe(container);
 		resize();
-		terminal.write(buffersRef.current[activeTab.id] ?? "", () => {
+		terminal.write(buffersRef.current[effectTabId] ?? "", () => {
 			terminal.scrollToBottom();
 			scheduleResize();
 		});
@@ -429,9 +466,7 @@ export function TerminalDock(props: {
 				serializeRef.current = null;
 			}
 		};
-		// xtermTheme 刻意不在依赖里：改主题走下面的热更新 effect 更新 options，
-		// 否则每次换配色都会销毁重建终端、丢掉 scrollback 与光标位置。
-	}, [activeTab, collapsed, contentReady, props.terminal, ownsTab]);
+	}
 
 	// 字体/光标/主题热更新：xterm 6.0 支持运行时改 options（实测生效），
 	// 无需销毁终端。改完必须 refit —— 字号变化会改变列数/行数，尺寸要同步给 PTY。
@@ -508,36 +543,40 @@ export function TerminalDock(props: {
 			    所以左侧整体包一层无 overflow 的容器，选择器独立于 tabs 滚动域之外 */}
 				<div className="flex min-w-0 items-center">
 					<div className="terminal-tabs flex min-w-0 items-center gap-0.5 overflow-hidden">
-						{tabs.map((tab) => (
-							<div key={tab.id} className={`terminal-tab inline-flex max-w-[9rem] items-center gap-0.5 rounded-md px-0.5 pl-2${tab.id === activeTab?.id ? " active" : ""}`}>
-								<Button
-									variant="ghost"
-									size="sm"
-									className="terminal-tab-label h-auto min-w-0 flex-1 justify-start truncate px-2 py-0.5 max-w-[6.5rem] min-w-0 flex-1 truncate text-left"
-									onClick={() => {
-										setActiveTabId(tab.id);
-										props.onCollapsedChange(false);
-										focusTerminalSoon();
-									}}
-								>
-									{tab.title}
-									{tab.exited ? ` · ${t("terminal.exited")}` : ""}
-								</Button>
-								<Button
-									type="button"
-									variant="ghost"
-									size="icon-xs"
-									className="terminal-tab-close size-5 grid size-5 shrink-0 place-items-center rounded-sm opacity-60"
-									onClick={(event) => {
-										event.stopPropagation();
-										void closeTab(tab);
-									}}
-									title={t("terminal.closeCurrent")}
-								>
-									<X size={12} />
-								</Button>
-							</div>
-						))}
+						{/* 关闭 Tab 淡出 + 剩余 Tab 位移收拢（与会话 Tab 同一原语/同一手感，545161b35）；
+						    新建 Tab 不播入场（initial={false}），与侧栏/Tab 栏取舍一致。 */}
+						<RemovalList remainingIds={tabs.map((tab) => tab.id)}>
+							{tabs.map((tab) => (
+								<RemovalRow key={tab.id} itemId={tab.id} className={`terminal-tab inline-flex max-w-[9rem] items-center gap-0.5 rounded-md px-0.5 pl-2${tab.id === activeTab?.id ? " active" : ""}`}>
+									<Button
+										variant="ghost"
+										size="sm"
+										className="terminal-tab-label h-auto min-w-0 flex-1 justify-start truncate px-2 py-0.5 max-w-[6.5rem] min-w-0 flex-1 truncate text-left"
+										onClick={() => {
+											setActiveTabId(tab.id);
+											props.onCollapsedChange(false);
+											focusTerminalSoon();
+										}}
+									>
+										{tab.title}
+										{tab.exited ? ` · ${t("terminal.exited")}` : ""}
+									</Button>
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon-xs"
+										className="terminal-tab-close size-5 grid size-5 shrink-0 place-items-center rounded-sm opacity-60"
+										onClick={(event) => {
+											event.stopPropagation();
+											void closeTab(tab);
+										}}
+										title={t("terminal.closeCurrent")}
+									>
+										<X size={12} />
+									</Button>
+								</RemovalRow>
+							))}
+						</RemovalList>
 						<Button type="button" variant="ghost" size="icon-xs" className="terminal-icon-btn size-6 inline-grid size-6 shrink-0 place-items-center rounded-md" onClick={() => void addTab()} title={t("terminal.new")} disabled={loading || !contentReady}>
 							<Plus size={14} />
 						</Button>

@@ -105,6 +105,8 @@ export type AgentProfileSnapshot = {
 	revision: number;
 	agents: AgentProfile[];
 	settings: AgentMarketSettings;
+	/** 用户拖拽出的展示顺序（只存 id）；空数组 = 未自定义 = 按默认规则排序。 */
+	agentOrder: string[];
 };
 
 export type CreateAgentProfileInput = {

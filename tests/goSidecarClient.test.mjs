@@ -87,6 +87,44 @@ async function bootAndSend(client, latest) {
 }
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
+test("行泵分段正确性：跨 chunk 的多字节字符、跨多块的行、块边界上的 LF（2027-02 Buffer 化回归）", async () => {
+	const { client, latest } = createClient();
+	const ready = client.ensureReady("key", []);
+	await tick();
+	latest().emitLine({ type: "ready", protocolVersion: 1 });
+	await ready;
+	const pending = client.request({ cmd: "do", value: 1 });
+	await tick();
+	const command = latest().commands()[0];
+
+	// 构造一行响应：JSON 里带中日韩 + emoji（多字节），故意按 7 字节一块切开，
+	// 保证多字节序列与 LF 都可能落在任意块边界上；旧字符串实现在这种切法下
+	// 靠 StringDecoder 保全字节，Buffer 版必须同样保全（按字节找 LF 不破坏 UTF-8）。
+	const payload = { type: "response", id: command.id, ok: true, result: { text: "中文日本語한국어🚀emoji、混合 tail" } };
+	const frame = Buffer.from(`${JSON.stringify(payload)}\n`, "utf8");
+	for (let offset = 0; offset < frame.length; offset += 7) {
+		latest().child.stdout.write(frame.subarray(offset, Math.min(offset + 7, frame.length)));
+	}
+	// vm realm 对象原型不同：JSON 比较内容（仓库测试惯例）
+	assert.equal(JSON.stringify((await pending).value), JSON.stringify({ text: "中文日本語한국어🚀emoji、混合 tail" }));
+
+	// 连续多行粘在一个 chunk、末行无 LF（半行留待下一 chunk）：
+	// 第二条完整行先结算，半行等到补齐后才结算——分段泵不得丢行或串行。
+	const pending2 = client.request({ cmd: "do", value: 2 });
+	await tick();
+	const command2 = latest().commands().at(-1);
+	const line2 = JSON.stringify({ type: "response", id: command2.id, ok: true, result: 2 });
+	const line3 = JSON.stringify({ type: "response", id: 999, ok: true, result: 3 });
+	latest().child.stdout.write(Buffer.from(`${line2}\n${line3}`, "utf8"));
+	const settled2 = await pending2;
+	assert.equal(settled2.value, 2);
+	// id 999 无 pending：只验证泵继续工作（补 LF 后再发一条正常请求能结算）
+	const pending4 = client.request({ cmd: "do", value: 4 });
+	await tick();
+	const command4 = latest().commands().at(-1);
+	latest().child.stdout.write(Buffer.from(`\n${JSON.stringify({ type: "response", id: command4.id, ok: true, result: 4 })}\n`, "utf8"));
+	assert.equal((await pending4).value, 4);
+});
 
 test("请求 id 配对：正常响应回传 result，非法行忽略后仍能结算", async () => {
 	const { client, latest } = createClient();

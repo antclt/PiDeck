@@ -35,13 +35,18 @@ import { Input } from "@/components/ui-shadcn/input";
 import { chatMessagesToUiMessages, createProject, createSession, deleteProject, fetchMessagePage, fetchModels, fetchState, getWebAuthHeaders, respondToUi, setRuntimeModel, setRuntimeThinking, updateSessionRecord } from "./webApi";
 import { abortRuntime, cloneRuntime, compactRuntime, copySession, deleteSession, downloadSessionHtml, editRuntimeMessage, deleteRuntimeMessage, prepareResend, renameSession, restartRuntime, activateRuntime, forkRuntimeSession, getForkMessages } from "./webApi";
 import { fetchRuntimeContextUsage, setRuntimePermission } from "./webApi";
+import { dataUrlToFilePart } from "./webMessageParts";
+import { shouldFlushQueuedPrompt } from "./webQueueFlush";
 import { sessionUiMessagesToMarkdown } from "./webMarkdown";
 import { removeMessageOptimistic, replaceMessageTextOptimistic } from "./webMessageOptimistic";
 import { WebSessionStrips } from "./WebSessionStrips";
+
+/** 搜索命中落在未加载历史里时，最多向前补拉多少页（每页一个历史窗口，约 9 轮）。 */
+const MAX_SEARCH_JUMP_PAGES = 5;
 import { WebFilePreview, type WebFilePreviewTarget } from "./WebFilePreview";
 import { WebSearchDialog } from "./WebSearchDialog";
 import { WebSkillsExtensionsDialog } from "./WebSkillsExtensionsDialog";
-import { applyWebTheme, readStoredWebTheme, resolveWebTheme, storeWebTheme, systemPrefersDark, type ResolvedWebTheme, type WebThemePreference } from "./webTheme";
+import { applyWebTheme, nextWebTheme, readStoredWebTheme, resolveWebTheme, storeWebTheme, systemPrefersDark, type ResolvedWebTheme, type WebThemePreference } from "./webTheme";
 import { registerWebServiceWorker, usePwaInstall } from "./webPwa";
 import { decideStreamRecovery } from "./webStreamRecovery";
 import { useWebHeaderAutoHide } from "./useWebHeaderAutoHide";
@@ -56,6 +61,16 @@ import type { WebProject, WebRuntime, WebState, WebContextUsage } from "./webTyp
 type HistoryMeta = {
 	total: number;
 	nextBefore: number | null;
+};
+
+/** 待发送队列项：回合进行中提交的消息暂存于此，本轮结束后按序投递。 */
+type WebQueuedPrompt = {
+	id: string;
+	text: string;
+	/** 图片 data URL（已压缩）；投递时转 file parts。 */
+	images: string[];
+	/** 计划模式等隐藏指令，随 body 透传后端。 */
+	agentMessage?: string;
 };
 
 export function WebChatApp() {
@@ -172,7 +187,8 @@ export function WebChatApp() {
 		return () => media.removeEventListener("change", onChange);
 	}, []);
 	const cycleTheme = () => {
-		const next: WebThemePreference = themePreference === "light" ? "dark" : themePreference === "dark" ? "system" : "light";
+		// system → 跳到与当前解析结果相反的一档：系统此时是亮色却切到 light，用户看不到任何变化。
+		const next: WebThemePreference = nextWebTheme(themePreference, resolvedTheme);
 		setThemePreference(next);
 		storeWebTheme(next);
 	};
@@ -302,6 +318,27 @@ export function WebChatApp() {
 		document.getElementById(`web-msg-${messageId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
 	};
 
+	/**
+	 * 搜索命中跳转：全会话检索的命中可能落在「还没加载的历史页」里，直接 scrollIntoView
+	 * 会静默失败（用户以为点了没反应）。这里按需向前翻页——最多补拉 MAX_SEARCH_JUMP_PAGES
+	 * 页，每页之间等一帧让 React 提交，命中出现即滚动；仍找不到就停在已加载的最早一条。
+	 */
+	const jumpToSearchHit = async (messageId: string) => {
+		if (!activeSessionId) return;
+		for (let page = 0; page <= MAX_SEARCH_JUMP_PAGES; page += 1) {
+			const target = document.getElementById(`web-msg-${messageId}`);
+			if (target) {
+				target.scrollIntoView({ behavior: "smooth", block: "start" });
+				return;
+			}
+			const meta = historyMetaRef.current[activeSessionId];
+			if (page === MAX_SEARCH_JUMP_PAGES || !meta || meta.nextBefore == null) return;
+			await loadOlderMessages();
+			// 等 React 提交这一页再检查（同帧内 DOM 还是旧的）
+			await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+		}
+	};
+
 	// 移动端侧栏边缘手势：从左缘 28px 内起手右滑 56px 开抽屉（横向位移占优，不干扰纵向滚动）
 	const edgeSwipeRef = useRef<{ x: number; y: number } | null>(null);
 	const onMainTouchStart = (event: React.TouchEvent<HTMLElement>) => {
@@ -342,8 +379,13 @@ export function WebChatApp() {
 	});
 	// 状态事件：/api/events 推送到达 → 复用轮询的 refresh 路径拉一次快照
 	// （去重/边沿检测只有一份实现）；连接断开时轮询自动回到高频节奏。
-	const stateRefreshRef = useRef<() => void>(() => {});
-	const stateEventsConnected = useWebStateEvents(() => stateRefreshRef.current());
+	const stateRefreshRef = useRef<((payload?: unknown) => void) | null>(null);
+	// SSE state 事件自带完整状态载荷：直接透传给 refresh 复用（省一次 /api/state 往返），
+	// 无载荷（畸形帧兜底）时 refresh 内部自行 fetchState。
+	const stateEventsConnected = useWebStateEvents((payload) => {
+		const refresh = stateRefreshRef.current;
+		if (refresh) void refresh(payload);
+	});
 	activeRuntimeRef.current = activeRuntime;
 
 	// 文件预览（第三批）：消息里的文件链接/strip 的 diff chip 都在此打开。项目信息走 ref
@@ -414,7 +456,7 @@ export function WebChatApp() {
 		if (!pending || pending.sessionId !== activeSessionId) return;
 		if (streaming) return; // 新实例就绪（空闲）后才投递
 		pendingSendRef.current = null;
-		void sendMessage({ text: pending.text }, { body: { images: pending.images ?? [], ...(pending.agentMessage ? { agentMessage: pending.agentMessage } : {}) } });
+		void sendMessage({ text: pending.text, files: pending.images?.map(dataUrlToFilePart) ?? [] }, { body: { ...(pending.agentMessage ? { agentMessage: pending.agentMessage } : {}) } });
 	}, [activeSessionId, streaming, sendMessage]);
 
 	// 模型列表是全局 pi 配置，草稿会话也需要先选模型再发送第一条消息。
@@ -424,15 +466,50 @@ export function WebChatApp() {
 			.catch(() => setModels([]));
 	}, []);
 
+	// 状态指纹（2027-02 性能治理）：SSE 断开兜底轮询的快档（流式 1s）里服务端每次
+	// 都构建全新对象，直接 setState 会让 WebSidebar（非 memo、吃整个 state）每秒
+	// 整列表重渲染——弱网手机端正是快档生效的时候。指纹覆盖全部 UI 可见字段
+	//（会话标题/状态/updatedAt/模型/权限、runtime 三元组+状态、项目名、pendingUi
+	// 清单），未变化则跳过 setState；SSE 推送路径同样受益。
+	const lastStateFingerprintRef = useRef<string | null>(null);
 	// 低频轮询项目/会话/运行态（3s；useChat 负责消息流，不参与轮询）
 	useEffect(() => {
 		let disposed = false;
-		const refresh = async () => {
+		const fingerprintOf = (state: NonNullable<Awaited<ReturnType<typeof fetchState>>>): string =>
+			[
+				(state.projects ?? [])
+					.map((project) => project.id + ":" + project.name + ":" + (project.lastOpenedAt ?? 0) + ":" + (project.pinned ? 1 : 0))
+					.sort()
+					.join(","),
+				(state.sessions ?? [])
+					.map((session) => session.id + ":" + session.title + ":" + session.status + ":" + (session.updatedAt ?? 0) + ":" + (session.model?.modelId ?? "") + ":" + (session.thinkingLevel ?? "") + ":" + (session.permissionPreset ?? ""))
+					.sort()
+					.join(","),
+				(state.runtimes ?? [])
+					.map((runtime) => runtime.sessionId + ":" + runtime.agentId + ":" + runtime.status + ":" + (runtime.runtimeGeneration ?? ""))
+					.sort()
+					.join(","),
+				(state.pendingUiRequests ?? [])
+					.map((request) => request.sessionId + ":" + request.requestId)
+					.sort()
+					.join(","),
+			].join("|");
+		// payload：SSE state 事件的现成载荷（/api/state 同构），有则免一次拉取。
+		// 形状由服务端 serializePublicWebPayload 保证；这里只做最小字段防御（缺 runtimes 视为畸形，回退拉取）。
+		const refresh = async (payload?: unknown) => {
 			try {
-				const next = await fetchState();
-				if (disposed) return;
-				setState(next);
+				const next = payload && typeof payload === "object" && Array.isArray((payload as { runtimes?: unknown }).runtimes) ? (payload as NonNullable<Awaited<ReturnType<typeof fetchState>>>) : await fetchState();
+				// null = 304 未变化：直接结束（连指纹比较都省了，state 引用保持不变）
+				if (disposed || next === null) return;
 				setConnected(true);
+				const fingerprint = fingerprintOf(next);
+				const unchanged = fingerprint === lastStateFingerprintRef.current;
+				lastStateFingerprintRef.current = fingerprint;
+				if (unchanged) {
+					// 内容未变：不 setState（免整树重渲染）；脱节追赶的输入（runtime 状态）也未变，直接返回
+					return;
+				}
+				setState(next);
 				// 脱节追赶：useChat 已回 ready 但 runtime 仍在跑（刷新/断网后本轮 SSE 已死，
 				// 恢复触发器只在 visibilitychange/online 时发）→ 借主轮询周期补拉磁盘快照，
 				// 防抖在 decideStreamRecovery 内，脱节后每 5s 最多追一次直到 runtime 空闲。
@@ -486,6 +563,9 @@ export function WebChatApp() {
 	// P0：停止 = 客户端断流 + 尽力打断 pi runtime（有 agent 时）。两者都发：
 	// stop() 只断 SSE，pi 会继续跑完；abortRuntime 才是真正的打断命令。
 	const handleStop = () => {
+		// 停止后不再自动投递排队消息（否则打断的下一秒就发出下一条，用户以为没停住）；
+		// 队列条上标「已暂停」，用户再次发送即可恢复。
+		if ((queuedBySession[activeSessionId] ?? []).length > 0) setQueuePausedBoth(true);
 		stop();
 		const runtime = activeSessionId ? runtimeFor(activeSessionId) : undefined;
 		if (runtime) {
@@ -500,15 +580,90 @@ export function WebChatApp() {
 	};
 
 	// P2：发送携带图片附件（data URL，已压缩）；首页直发走 pending 队列。
+	// 图片必须以 file parts 随 user 消息提交：服务端 /api/chat 只从消息 parts 提取图片
+	// （extractChatImages），旧的自定义 body.images 字段服务端不读——图片从未真正送达 pi，
+	// 乐观气泡也不渲染缩略图（uiMessageImages 只认 file parts）。两处一并修正。
 	const handleSend = (text: string, images: string[], agentMessage?: string) => {
 		if (!text.trim() && images.length === 0) return;
+		// 用户主动发新消息 = 恢复自动投递（覆盖「停止后暂停」）
+		queuePausedRef.current = false;
 		if (!activeSessionId) {
 			void sendFromHome(text, images, agentMessage);
 			return;
 		}
 		// agentMessage：计划模式等隐藏指令（复用桌面 composer 通道），随 body 透传后端
-		void sendMessage({ text }, { body: { images, ...(agentMessage ? { agentMessage } : {}) } });
+		void sendMessage({ text, files: images.map(dataUrlToFilePart) }, { body: { ...(agentMessage ? { agentMessage } : {}) } });
 	};
+
+	// ── 排队消息（对齐桌面 followUp 队列语义）──────────────────────────────
+	// pi 在回合进行中拒绝新 prompt（turnActive），所以 Web 端在客户端暂存、等回合结束再投递。
+	// 队列按会话归属（切会话不丢），停止后暂停自动投递（避免「停止」后立刻又发出下一条）。
+	const [queuedBySession, setQueuedBySession] = useState<Record<string, WebQueuedPrompt[]>>({});
+	const queuePausedRef = useRef(false);
+	const [queuePaused, setQueuePaused] = useState(false);
+	const queueSeqRef = useRef(0);
+
+	const setQueuePausedBoth = (paused: boolean) => {
+		queuePausedRef.current = paused;
+		setQueuePaused(paused);
+	};
+
+	const handleQueue = (text: string, images: string[], agentMessage?: string) => {
+		const sessionId = activeSessionIdRef.current;
+		if (!sessionId) return;
+		if (!text.trim() && images.length === 0) return;
+		queueSeqRef.current += 1;
+		const item: WebQueuedPrompt = { id: `q-${Date.now()}-${queueSeqRef.current}`, text, images, agentMessage };
+		setQueuedBySession((current) => ({ ...current, [sessionId]: [...(current[sessionId] ?? []), item] }));
+		// 用户主动排队 = 解除暂停（他期待这些消息被发出）
+		setQueuePausedBoth(false);
+	};
+
+	const handleRemoveQueued = (id: string) => {
+		const sessionId = activeSessionIdRef.current;
+		if (!sessionId) return;
+		setQueuedBySession((current) => {
+			const next = (current[sessionId] ?? []).filter((item) => item.id !== id);
+			return { ...current, [sessionId]: next };
+		});
+	};
+
+	// 队列消费：本轮结束（无流式、runtime 不在跑、无挂起 Ask）后按序投递下一条。
+	// 只在当前会话消费（其他会话的队列休眠到切回去），与桌面「按会话归属」一致。
+	const queueFlushingRef = useRef(false);
+	useEffect(() => {
+		const sessionId = activeSessionId;
+		if (!sessionId) return;
+		const queueForSession = queuedBySession[sessionId] ?? [];
+		const flushable = shouldFlushQueuedPrompt({
+			streaming,
+			externalStreaming,
+			runtimeStatus: activeRuntime?.status,
+			// 挂起 Ask 时不自动发：用户正在回答提问，再叠一条消息会打乱对话
+			hasPendingUiRequest: (state.pendingUiRequests ?? []).some((item) => item.sessionId === sessionId),
+			paused: queuePausedRef.current,
+			queuedCount: queueForSession.length,
+			flushing: queueFlushingRef.current,
+		});
+		if (!flushable) return;
+		const next = queueForSession[0];
+		if (!next) return;
+		queueFlushingRef.current = true;
+		setQueuedBySession((current) => ({ ...current, [sessionId]: (current[sessionId] ?? []).slice(1) }));
+		void sendMessage({ text: next.text, files: next.images.map(dataUrlToFilePart) }, { body: { ...(next.agentMessage ? { agentMessage: next.agentMessage } : {}) } }).then(
+			() => {
+				queueFlushingRef.current = false;
+			},
+			(error: unknown) => {
+				queueFlushingRef.current = false;
+				// 投递失败（pi 拒收/断线）：把这一条放回队首并暂停，让用户看得见、可重试或撤回——
+				// 静默吞掉等于丢消息（队列条会直接从界面上消失）。
+				setQueuedBySession((current) => ({ ...current, [sessionId]: [next, ...(current[sessionId] ?? [])] }));
+				setQueuePausedBoth(true);
+				setCommandError(error instanceof Error ? error.message : String(error));
+			},
+		);
+	}, [activeSessionId, streaming, externalStreaming, activeRuntime?.status, state.pendingUiRequests, queuedBySession, sendMessage]);
 
 	// 草稿期后端切换：无会话 → 暂存随下次新建生效；有会话 → 仅「本页新建零消息草稿」可写
 	// catalog（历史/复制/克隆/fork 会话自带消息记录，切后端会让历史错位，一律拒绝）。
@@ -697,7 +852,9 @@ export function WebChatApp() {
 
 	const refreshNow = async () => {
 		try {
-			setState(await fetchState());
+			const next = await fetchState();
+			// null = 304 未变化：保持现有 state 引用，避免无谓重渲染与下游 memo 失效
+			if (next) setState(next);
 			setConnected(true);
 		} catch {
 			setConnected(false);
@@ -725,10 +882,11 @@ export function WebChatApp() {
 		}
 	};
 
-	const handleLoadMore = async () => {
-		if (!activeSessionId || streaming || loadingMore) return;
+	/** 向前翻一页历史（线索按钮与搜索跳转共用）；失败保持现状，返回是否真的加了页。 */
+	const loadOlderMessages = async (): Promise<boolean> => {
+		if (!activeSessionId || loadingMore) return false;
 		const meta = historyMetaRef.current[activeSessionId];
-		if (!meta || meta.nextBefore == null) return;
+		if (!meta || meta.nextBefore == null) return false;
 		setLoadingMore(true);
 		try {
 			const page = await fetchMessagePage(activeSessionId, meta.nextBefore);
@@ -741,11 +899,19 @@ export function WebChatApp() {
 			const merged = [...older, ...messagesBySessionRef.current[activeSessionId]];
 			messagesBySessionRef.current[activeSessionId] = merged;
 			setMessages(merged);
+			return older.length > 0;
 		} catch {
 			// 分页失败保持现状
+			return false;
 		} finally {
 			setLoadingMore(false);
 		}
+	};
+
+	const handleLoadMore = async () => {
+		// 流式期间不翻历史（与原先一致）：滚动锚点会跳，用户看不到自己在读的内容
+		if (!activeSessionId || streaming) return;
+		await loadOlderMessages();
 	};
 
 	// ── P1/P2/P3：会话、runtime 与消息操作（供 Header 溢出菜单 / 侧栏菜单 / 时间线 hover） ──
@@ -1040,13 +1206,24 @@ export function WebChatApp() {
 			}
 		};
 		void load();
-		const timer = setInterval(load, streaming ? 1000 : 3000);
+		// 2027-02 性能审计治理：每次 load 都向 pi 子进程发 get_state + get_session_stats
+		// 两个 RPC（还叠加会话文件缓存命中率扫描）。原先流式 1s/空闲 3s 永续轮询，
+		// SSE 连通也不降档、页面隐藏也不停——生成期间对正在出 token 的 pi 稳定叠加
+		// 2 RPC/s，空闲时只要手机挂着会话页就 3s 一次永久打扰。现在：
+		// - document.hidden 跳过（回到前台由下一档补齐）；
+		// - 流式 1s 保留（圆环要跟手）但 SSE 连通时放宽到 3s（状态推送兜底可感知翻转）；
+		// - 空闲 3s → 10s（用量圆环不需要秒级新鲜度）。
+		const intervalMs = streaming ? (stateEventsConnected ? 3000 : 1000) : 10_000;
+		const timer = setInterval(() => {
+			if (document.hidden) return;
+			void load();
+		}, intervalMs);
 		return () => {
 			disposed = true;
 			clearInterval(timer);
 		};
 		// activeTarget 每次渲染都是新对象，改用稳定原始字段做依赖
-	}, [activeTarget?.sessionId, activeTarget?.agentId, activeTarget?.runtimeGeneration, streaming]);
+	}, [activeTarget?.sessionId, activeTarget?.agentId, activeTarget?.runtimeGeneration, streaming, stateEventsConnected]);
 
 	// 头部运行态：流式优先；否则用轮询到的 runtime 状态兜底
 	const headerStatus: WebHeaderStatus = (() => {
@@ -1071,6 +1248,10 @@ export function WebChatApp() {
 	// 两边同时显示会出现「Network error + 正文在输出」的错乱观感。
 	const transportError = error && !externalStreaming && !liveMessage ? error.message : null;
 	const combinedStreaming = streaming || externalStreaming;
+	// 输入区的「回合占用」判定还要算上 runtime 仍在跑的情况（刷新页面/切后台回来后本端没在
+	// 拉流、pi 却还在生成）：此时发送必须走排队而不是直接派发——pi 会以 turnActive 拒收，
+	// 用户只会看到一条报错而消息丢失。时间线的流式指示仍只看 combinedStreaming。
+	const composerTurnBusy = combinedStreaming || activeRuntime?.status === "running" || activeRuntime?.status === "starting";
 	const composerHidden = resolveComposerHidden({ headerHidden, nearBottom, streaming: combinedStreaming, engaged: composerEngaged });
 
 	return (
@@ -1099,6 +1280,10 @@ export function WebChatApp() {
 					onOpenSidebar={() => setMobileSidebarOpen(true)}
 					backend={activeSession?.backend}
 					contextUsage={contextUsage}
+					// 额度用量归属：优先 runtime 直报的供应商（跟随当次实际模型），退回会话记录的模型供应商；
+					// 后端按会话后端走，DSH 会话才会用 dsh 链的用量探针。
+					usageProvider={contextUsage?.provider ?? activeSession?.model?.provider}
+					usageBackend={activeSession?.backend === "dsh" ? "dsh" : "pi"}
 					permissionPreset={contextUsage?.permissionPreset ?? activeSession?.permissionPreset}
 					actions={{
 						onPermissionChange: activeSession?.backend === "dsh" ? (preset) => void handlePermissionChange(preset) : undefined,
@@ -1161,8 +1346,9 @@ export function WebChatApp() {
 				/>
 				<WebSessionStrips sessionId={activeSessionId} />
 				<WebComposer
+					hasSession={Boolean(activeSessionId)}
 					disabled={Boolean(creatingProjectId)}
-					streaming={combinedStreaming}
+					streaming={composerTurnBusy}
 					prefill={prefill ?? undefined}
 					onSend={handleSend}
 					onStop={handleStop}
@@ -1181,11 +1367,16 @@ export function WebChatApp() {
 					}}
 					onEngagedChange={handleComposerEngagedChange}
 					hidden={composerHidden}
+					onQueue={handleQueue}
+					queued={(queuedBySession[activeSessionId] ?? []).map((item) => ({ id: item.id, text: item.text, imageCount: item.images.length }))}
+					onRemoveQueued={handleRemoveQueued}
+					queuePaused={queuePaused}
+					onResumeQueue={() => setQueuePausedBoth(false)}
 				/>
 			</main>
 			{/* S6.3：DSH 工具面板（仅 dsh 会话头部按钮触发） */}
 			{/* 第二批：会话内搜索（Ctrl+K）与技能/扩展面板 */}
-			<WebSearchDialog open={searchOpen} onOpenChange={setSearchOpen} messages={messages} onJump={scrollToMessage} />
+			<WebSearchDialog open={searchOpen} onOpenChange={setSearchOpen} sessionId={activeSessionId} messages={messages} onJump={jumpToSearchHit} />
 			<WebSkillsExtensionsDialog open={assetsOpen} onOpenChange={setAssetsOpen} />
 			{dshToolsOpen && activeSessionId && <WebDshToolsPanel sessionId={activeSessionId} onClose={() => setDshToolsOpen(false)} />}
 			{/* P3：工作区抽屉（Git 状态/diff + 文件浏览，projectId 来自活跃会话） */}

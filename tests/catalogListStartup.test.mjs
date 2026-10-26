@@ -25,7 +25,9 @@ test("cached catalog branch is sorted by recency and filters dead file links", (
 	const handler = sessionIpc.slice(sessionIpc.indexOf("ipcChannels.sessionsCatalogList"), sessionIpc.indexOf("ipcChannels.sessionsCatalogCreateDraft"));
 	assert.match(handler, /\.sort\(\s*\(left,\s*right\)\s*=>\s*right\.updatedAt\s*-\s*left\.updatedAt\s*\)/);
 	assert.match(handler, /record\.backend\s*===\s*"dsh"/);
-	assert.match(handler, /existsSync\(record\.filePath\)/);
+	// 2027-02 起死链判定走 TTL 缓存（sessionFileExistsCached，见 sessionFileLiveness.ts）：
+	// 几百条记录逐条同步 stat 是每次 5-30ms 的固定税，存在性 2s 陈旧无害。
+	assert.match(handler, /sessionFileExistsCached\(record\.filePath\)/);
 	assert.match(handler, /startsWith\("\\\\\\\\"\)/);
 });
 
@@ -36,7 +38,8 @@ test("dead file link filter exempts sessions with a live runtime", () => {
 	// 另建会话留下孤儿空闲 Agent。与 mergeScanned 的 liveness 豁免同口径：
 	// hasLiveRuntime 命中的记录必须保留，且判定顺序在 existsSync 之前。
 	const handler = sessionIpc.slice(sessionIpc.indexOf("ipcChannels.sessionsCatalogList"), sessionIpc.indexOf("ipcChannels.sessionsCatalogCreateDraft"));
-	assert.match(handler, /if\s*\(\s*sessionRuntimeCoordinator\.hasLiveRuntime\(record\.id\)\s*\)\s*return true;\s*return existsSync\(record\.filePath\);/);
+	// 空白容忍：hasLiveRuntime 与存在性判定之间允许注释（2027-02 加缓存说明）
+	assert.match(handler, /if\s*\(\s*sessionRuntimeCoordinator\.hasLiveRuntime\(record\.id\)\s*\)\s*return true;[\s\S]*?return sessionFileExistsCached\(record\.filePath\);/);
 });
 
 test("dead file link filter exempts wsl sessions whose filePath is a Linux path", () => {
@@ -48,7 +51,7 @@ test("dead file link filter exempts wsl sessions whose filePath is a Linux path"
 	const handler = sessionIpc.slice(sessionIpc.indexOf("ipcChannels.sessionsCatalogList"), sessionIpc.indexOf("ipcChannels.sessionsCatalogCreateDraft"));
 	assert.match(handler, /if\s*\(\s*record\.environment\s*===\s*"wsl"\s*\)\s*return true;/);
 	const filterBlock = handler.slice(handler.indexOf(".filter((record) => {"), handler.indexOf("if (options?.scan === false)"));
-	assert.match(filterBlock, /environment\s*===\s*"wsl"[\s\S]*return\s+existsSync\(record\.filePath\)/, "wsl 豁免必须在 existsSync 判定之前，否则恒 false 的宿主探测仍会滤掉 WSL 会话");
+	assert.match(filterBlock, /environment\s*===\s*"wsl"[\s\S]*return\s+sessionFileExistsCached\(record\.filePath\)/, "wsl 豁免必须在存在性判定之前，否则恒 false 的宿主探测仍会滤掉 WSL 会话");
 });
 
 test("catalog list scan does not parse JSONL bodies", () => {

@@ -68,7 +68,8 @@ test("project-scoped open/show operations resolve the registered project boundar
 		assert.match(block, /resolveProjectReadBoundary\(scope\)/);
 		assert.match(block, /resolveReadablePath\(input, boundary\)/);
 	}
-	assert.match(openBlock[0], /shell\.openPath\(readablePath\)/);
+	// issue #396：Linux 上 shell.openPath 永不 settle，handler 必须走受保护的统一入口。
+	assert.match(openBlock[0], /openSystemPath\s*\(\s*readablePath\s*\)/);
 	assert.match(showBlock[0], /shell\.showItemInFolder\(readablePath\)/);
 });
 

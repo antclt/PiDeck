@@ -8,10 +8,19 @@
 
 /** 浮窗尺寸（主进程建窗与渲染层折叠/展开共用；避免两处魔法数字漂移）。 */
 export const SELECTION_TOOL_WINDOW_WIDTH = 440;
+/** 折叠态宽度：只放智能体 + 翻译/问答 + 关闭，避免 Magpie 式浮条被工具栏撑成一条长表单。 */
+export const SELECTION_TOOL_WINDOW_COLLAPSED_WIDTH = 360;
 /** 折叠态：只露出顶部操作栏，Magpie 式浮条。 */
 export const SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT = 46;
 /** 展开态：操作栏 + 原文 + 结果面板。 */
 export const SELECTION_TOOL_WINDOW_EXPANDED_HEIGHT = 280;
+
+/**
+ * 系统级划词暂时下线开关：代码与 IPC 保留，但默认不启动（复制监听、原生捕获、
+ * 全局快捷键、浮窗预热全部跳过），设置页与快捷键页也不展示入口。
+ * 恢复时改回 true，并同步 DEFAULT_AGENT_MARKET_SETTINGS.systemSelectionEnabled。
+ */
+export const SYSTEM_SELECTION_TOOL_ENABLED = false;
 
 /** 浮窗渲染层请求调整窗口尺寸（折叠条 ↔ 结果面板）。 */
 export type SelectionToolResizeInput = { width: number; height: number };

@@ -11,7 +11,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.9.1-blue)
+![Version](https://img.shields.io/badge/version-0.9.7-blue)
 
 <!-- star-history:start -->
 <picture>
@@ -81,25 +81,16 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.9.1** (2026-10-18)
+> **Latest: v0.9.7** (2026-10-26)
 
-### v0.9.1 Release Highlights
-- 🚀 **WeChat (ilink) support: a second IM channel on your phone**
-- 🚀 **Cross-session body search, not just titles**
-- 🚀 **Find in session (Ctrl/Cmd+Shift+F)**
-- 🚀 **Pinyin search for session titles and the file drawer**
-- 🚀 **Search file contents from the file drawer**
-- 🚀 **Side tasks: a second session that stays out of the tab bar**
-- 🚀 **Session-level average TPS**
-- 🚀 **Web on mobile: give the portrait screen back to content**
-- 🚀 **ACP tools available on stable builds**
-- 🚀 **Synced with pi 1.3.0**
-- 🚀 **DSH runtime upgraded to 0.2.1**
-- 🚀 **Prompt library as a remote asset, with millisecond search**
-- ✨ **On-disk session index on by default**
-- ✨ **Extension list prewarmed on first screen**
-- ✨ **Goal mode stops re-injecting the full objective every turn**
-- ✨ **List ordering is drag-only**
+### v0.9.7 Release Highlights
+- 🚀 **Thinking-intensity picker rebuilt: ZCode-style gradient intensity bar**
+- 🚀 **Sidebar sticky group headers switch**
+- 🚀 **Web: explicit paging for the sidebar session list**
+- ✨ **A visual pass aligning the UI with ZCode**
+- ✨ **Web: conditional requests for /api/state**
+- ✨ **Image-only sends silently injected an English prompt (#404)**
+- ✨ **OpenCode 2.x sessions unrecognized on import (#410)**
 
 [View Full Changelog →](CHANGELOG.md)
 

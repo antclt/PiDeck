@@ -15,7 +15,7 @@ test("设置弹窗内容区可滚动（pane Tabs 高度链回归）", async ({ w
 
 	// 切到「视觉桥」tab 并等待懒加载内容出现（懒加载失败 fallback 只有 loading 占位）
 	await modal.getByText("视觉桥").click();
-	await expect(modal.getByText("启用视觉桥")).toBeVisible({ timeout: 15_000 });
+	await expect(modal.getByText("启用视觉桥", { exact: true })).toBeVisible({ timeout: 15_000 });
 
 	// 从内容滚动容器向上遍历高度链，检查每一层是否有明确约束
 	const info = await window.evaluate(() => {

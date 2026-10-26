@@ -174,7 +174,7 @@ function QueuedPromptRow(props: {
 	const actionClass = "size-7 rounded-full text-text-tertiary hover:bg-muted/70 hover:text-foreground";
 
 	return (
-		<li className={`queued-row flex h-9 min-h-9 shrink-0 items-center gap-2.5 border-transparent px-3 transition-[border-color,background-color] duration-100 ${status} queued-behavior-${props.prompt.behavior}`} title={rowTitle}>
+		<li className={`queued-row flex h-9 min-h-9 shrink-0 items-center gap-2.5 border-transparent px-3 transition-[border-color,background-color] duration-fast ${status} queued-behavior-${props.prompt.behavior}`} title={rowTitle}>
 			{props.showQueueGlyph ? <ListOrdered size={14} aria-hidden="true" className="shrink-0 text-text-tertiary" /> : <QueueStatusGlyph status={status} />}
 			<span className="min-w-0 flex-1 truncate text-control leading-5 text-text-secondary">{previewText}</span>
 			{props.prompt.images?.length ? <span className="shrink-0 font-mono text-micro leading-none text-text-tertiary">{t("app.queuedImageCount", { count: String(props.prompt.images.length) })}</span> : null}
@@ -374,7 +374,9 @@ export function ComposerSendControls(props: {
 			<Button
 				variant="default"
 				size="icon-sm"
-				className="composer-send-primary size-7 rounded-l-md bg-[var(--color-accent)] px-0 text-[var(--color-text-inverse)] shadow-none hover:bg-[color:color-mix(in_srgb,var(--color-accent)_88%,black)] disabled:opacity-40"
+				/* 停止态切 danger 红（用户约定：停止是「打断」动作，红色可打断感）；
+				   发送态维持主题色 accent。hover 同一配方（88% 混黑加深），只换基色。 */
+				className={`composer-send-primary size-7 rounded-l-md px-0 text-[var(--color-text-inverse)] shadow-none disabled:opacity-40 ${primaryStops ? "bg-[var(--color-danger)] hover:bg-[color:color-mix(in_srgb,var(--color-danger)_88%,black)]" : "bg-[var(--color-accent)] hover:bg-[color:color-mix(in_srgb,var(--color-accent)_88%,black)]"}`}
 				aria-label={label}
 				title={label}
 				disabled={disabled}
@@ -388,7 +390,8 @@ export function ComposerSendControls(props: {
 						<Button
 							variant="default"
 							size="icon-sm"
-							className="h-7 rounded-r-md bg-[var(--color-accent)] px-1.5 text-[var(--color-text-inverse)] shadow-none hover:bg-[color:color-mix(in_srgb,var(--color-accent)_88%,black)] disabled:opacity-40"
+							/* caret 与主钮同色（停止态一起切红，按钮组不裂成红黑两截）；停止态下 caret 必 disabled */
+							className={`h-7 rounded-r-md px-1.5 text-[var(--color-text-inverse)] shadow-none disabled:opacity-40 ${primaryStops ? "bg-[var(--color-danger)] hover:bg-[color:color-mix(in_srgb,var(--color-danger)_88%,black)]" : "bg-[var(--color-accent)] hover:bg-[color:color-mix(in_srgb,var(--color-accent)_88%,black)]"}`}
 							aria-label={t("app.sendBehaviorTitle")}
 							title={t("app.sendBehaviorTitle")}
 							disabled={splitDisabled}

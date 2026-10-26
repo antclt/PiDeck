@@ -102,7 +102,7 @@ export function ToolApproval({ tool, title = "Allow this tool to run?", descript
 	}, [setOpen, status]);
 
 	return (
-		<div data-state={status} aria-busy={busy} className={cn("w-full overflow-hidden rounded-2xl border border-border/60 bg-muted/20 text-sm", className)}>
+		<div data-state={status} aria-busy={busy} className={cn("w-full overflow-hidden rounded-lg border border-border/60 bg-muted/20 text-sm", className)}>
 			<div className="flex items-start gap-3 p-4">
 				<span aria-hidden="true" className={cn("mt-0.5 grid size-8 shrink-0 place-items-center rounded-xl border border-border/60 bg-background text-muted-foreground", error && "text-destructive")}>
 					{busy ? <LoaderCircle className={cn("size-4", !reduce && "animate-pideck-spin")} /> : error ? <CircleAlert className="size-4" /> : status === "denied" ? <X className="size-4" /> : status === "approved" || status === "complete" ? <Check className="size-4" /> : <ShieldCheck className="size-4" />}

@@ -18,7 +18,7 @@ function copyItemLabel(kind: MessageContextMenuCopyKind): string {
 	return t("copy.asText");
 }
 
-export function MessageContextMenu(props: { state: MessageContextMenuState | null; onCopy: (kind: MessageContextMenuCopyKind) => void; onSelectAll: () => void; onClose: () => void }) {
+export function MessageContextMenu(props: { state: MessageContextMenuState | null; onCopy: (kind: MessageContextMenuCopyKind) => void; onSelectAll: () => void; onFavorite: (kind: "message" | "selection") => void; onClose: () => void }) {
 	const state = props.state;
 	if (!state) return null;
 	const copyKinds = planMessageContextMenuCopyKinds(state);
@@ -58,6 +58,16 @@ export function MessageContextMenu(props: { state: MessageContextMenuState | nul
 						{copyItemLabel(kind)}
 					</DropdownMenuItem>
 				))}
+				{/* 收藏与复制同源、措辞分开：选区叫「收藏所选」，整条消息按角色区分回复/消息。
+				    与复制项之间加分隔线，避免菜单读起来像一排同义动作。 */}
+				{copyKinds.length > 0 && (state.selectionText || state.messageText || state.liveText) ? <DropdownMenuSeparator /> : null}
+				{state.selectionText && <DropdownMenuItem onSelect={() => props.onFavorite("selection")}>{t("favorites.saveSelection")}</DropdownMenuItem>}
+				{(state.messageText || state.liveText) && (
+					<DropdownMenuItem onSelect={() => props.onFavorite("message")}>
+						{/* 已收藏态取反：同一条消息只保留一条收藏，菜单项直接提供「取消收藏」。 */}
+						{state.messageRole === "user" ? (state.messageFavorited ? t("favorites.unsaveUserMessage") : t("favorites.saveUserMessage")) : state.messageFavorited ? t("favorites.unsaveMessage") : t("favorites.saveMessage")}
+					</DropdownMenuItem>
+				)}
 				{state.canSelectAll && copyKinds.length > 0 && <DropdownMenuSeparator />}
 				{state.canSelectAll && <DropdownMenuItem onSelect={props.onSelectAll}>{t("common.selectAll")}</DropdownMenuItem>}
 			</DropdownMenuContent>

@@ -51,6 +51,9 @@ export function PiCommandSourcePanel(props: PiCommandSourcePanelProps) {
 	const [editingDraft, setEditingDraft] = useState("");
 	const { detected, userAdded } = groupInstallations(installations);
 	const hasNewest = installations.some((item) => item.isNewest);
+	// 设置页里安装可能有十几份（nvm/mise/pnpm 各自的 shim 都算）：限高滚动，别把整页顶下去。
+	// 子项带 shrink-0：限高 flex 列里子项默认会被压缩。
+	const listClass = variant === "settings" ? "m-0 flex max-h-64 list-none flex-col gap-1 overflow-y-auto p-0 pr-1" : "m-0 flex list-none flex-col gap-1 p-0";
 
 	const submitAdd = async () => {
 		const value = draftPath.trim();
@@ -123,7 +126,7 @@ export function PiCommandSourcePanel(props: PiCommandSourcePanelProps) {
 
 			{/* 自动检测到的安装 */}
 			{variant === "settings" && detected.length > 0 && <small className="text-text-tertiary text-caption">{t("environment.installsAutoDetected")}</small>}
-			<ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+			<ul className={listClass}>
 				{detected.map((installation) => (
 					<InstallationRow key={installation.path} installation={installation} applyingPath={props.applyingPath} onChoose={props.onChoose} onUpdateCustomPath={props.onUpdateCustomPath} onRemoveCustomPath={props.onRemoveCustomPath} variant={variant} hasNewest={hasNewest} />
 				))}
@@ -131,7 +134,7 @@ export function PiCommandSourcePanel(props: PiCommandSourcePanelProps) {
 
 			{/* 用户自己添加的路径 */}
 			{variant === "settings" && userAdded.length > 0 && <small className="text-text-tertiary text-caption">{t("environment.installsUserAdded")}</small>}
-			<ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+			<ul className={listClass}>
 				{userAdded.map((installation) => (
 					<InstallationRow
 						key={installation.path}
@@ -221,49 +224,54 @@ function InstallationRow(props: InstallationRowProps) {
 	}
 
 	return (
-		<li className="flex items-start justify-between gap-3 rounded-md border border-border-subtle bg-bg-panel px-3 py-2">
-			<div className="min-w-0 flex flex-col gap-0.5">
-				<div className="flex flex-wrap items-center gap-2">
-					<span className={compact ? "text-text-secondary text-caption" : "text-text-secondary text-control"}>{t(piInstallationSourceKey(installation.source))}</span>
-					{/* 只显示一个徽章（当前使用 > 终端默认 > 较新），版本「较旧」的提示另算 */}
+		<li className="flex shrink-0 items-center gap-3 rounded-md border border-border-subtle bg-bg-panel px-2.5 py-1.5">
+			<div className="flex min-w-0 flex-1 flex-col gap-0.5">
+				<div className="flex min-w-0 items-center gap-1.5">
+					{/* 路径是主角：单行截断，完整值进 title，不让它把卡片撑高 */}
+					<code className="min-w-0 flex-1 truncate font-mono text-text-primary text-caption" title={installation.path}>
+						{installation.path}
+					</code>
+					{/* 只显示一个徽章（当前使用 > 终端默认 > 较新） */}
 					{badgeKey && (
-						<span className="inline-flex items-center gap-1 rounded-sm bg-accent-soft px-1.5 py-0.5 text-text-primary text-caption">
+						<span className="inline-flex shrink-0 items-center gap-1 rounded-sm bg-accent-soft px-1.5 py-0.5 text-text-primary text-caption">
 							{badge === "active" && <Check size={11} strokeWidth={3} aria-hidden="true" />}
 							{t(badgeKey)}
 						</span>
 					)}
-					{versionNoteKey && <span className="text-text-tertiary text-caption">{t(versionNoteKey)}</span>}
-					{installation.missing && <span className="text-danger text-caption">{t("environment.installMissing")}</span>}
+					{installation.missing && <span className="shrink-0 text-danger text-caption">{t("environment.installMissing")}</span>}
 				</div>
-				<code className={compact ? "truncate font-mono text-text-primary text-caption" : "truncate font-mono text-text-primary text-control"} title={installation.path}>
-					{installation.path}
-				</code>
-				<small className="text-text-tertiary text-caption">
-					{installation.version ? `v${installation.version}` : t(versionKey ?? "environment.installVersionUnknown")}
-					{installation.managedRoot ? ` · ${installation.managedRoot}` : ""}
-				</small>
+				{/* 来源 / 版本 / 版本提示挤在同一行：以前各占一行，四份安装就占满一整屏 */}
+				<div className="flex min-w-0 items-center gap-1.5 text-text-tertiary text-caption">
+					<span className="truncate">{t(piInstallationSourceKey(installation.source))}</span>
+					<span className="shrink-0" aria-hidden="true">
+						·
+					</span>
+					<span className="shrink-0">{installation.version ? `v${installation.version}` : t(versionKey ?? "environment.installVersionUnknown")}</span>
+					{versionNoteKey && <span className="shrink-0">· {t(versionNoteKey)}</span>}
+					{installation.managedRoot && <span className="truncate">· {installation.managedRoot}</span>}
+				</div>
 			</div>
 
-			<div className="flex shrink-0 flex-col items-end gap-1.5 self-center">
+			<div className="flex shrink-0 items-center gap-1">
 				{actions.canUse && (
-					<Button variant="secondary" size="sm" className="h-auto px-3 py-1.5 shadow-none" onClick={() => props.onChoose(installation.path)} disabled={applying || installation.missing}>
+					<Button variant="secondary" size="sm" className="h-auto shrink-0 px-2.5 py-1 shadow-none" onClick={() => props.onChoose(installation.path)} disabled={applying || installation.missing}>
 						{applying ? t("environment.installsApplying") : t("environment.installsUse")}
 					</Button>
 				)}
 				{/* 编辑/移除只对「我添加的」开放：自动发现的项是系统事实，不给改 */}
 				{actions.canEdit && props.onStartEditing && !compact && (
-					<div className="flex items-center gap-1">
-						<Button variant="ghost" size="sm" className="h-auto gap-1 px-2 py-1 text-text-secondary shadow-none" onClick={props.onStartEditing}>
+					<>
+						<Button variant="ghost" size="sm" className="h-auto gap-1 px-1.5 py-1 text-text-secondary text-caption shadow-none" onClick={props.onStartEditing} aria-label={t("environment.installsEdit")} title={t("environment.installsEdit")}>
 							<Pencil size={13} strokeWidth={2} aria-hidden="true" />
 							{t("environment.installsEdit")}
 						</Button>
 						{props.onRemoveCustomPath && (
-							<Button variant="ghost" size="sm" className="h-auto gap-1 px-2 py-1 text-text-secondary shadow-none" onClick={() => void props.onRemoveCustomPath?.(installation.path)}>
+							<Button variant="ghost" size="sm" className="h-auto gap-1 px-1.5 py-1 text-text-secondary text-caption shadow-none" onClick={() => void props.onRemoveCustomPath?.(installation.path)} aria-label={t("environment.installsRemove")} title={t("environment.installsRemove")}>
 								<Trash2 size={13} strokeWidth={2} aria-hidden="true" />
 								{t("environment.installsRemove")}
 							</Button>
 						)}
-					</div>
+					</>
 				)}
 			</div>
 		</li>

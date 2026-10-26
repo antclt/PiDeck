@@ -14,6 +14,7 @@ import { canonicalizeSessionPath } from "../../shared/sessionIdentity";
 import { createSessionModelPreference } from "../../shared/modelDisplayName";
 import { modelThinkingLevelOf } from "../../shared/modelThinkingLevels";
 import { readRuntimePromptTemplateBodies } from "../prompts/runtimeTemplateBodies";
+import { sessionFileExistsCached } from "../sessions/sessionFileLiveness";
 import { isDshAgentPresetLocked } from "../../shared/dshAgentPresetLock";
 import type {
 	AvailableModel,
@@ -308,9 +309,7 @@ export type DshBackendIpcDeps = {
 	readSessionFacts?: (sessionPath: string) => Promise<import("../../shared/types/trajectory").SessionFactsResult>;
 	/** 用户检查点目录（导轨）：pi 索引派生；缺省返回空目录。 */
 	readSessionOutline?: (sessionPath: string, limit?: number) => Promise<import("../../shared/types/outline").SessionOutlineSnapshot>;
-	readSessionOutlineTitle?: (sessionPath: string, entryId: string) => Promise<string | undefined>;
 	/** DSH 轨迹系统提示（运行时会话读投影缓存；历史会话从 host history 折叠 request/header；未装配返回 undefined）。 */
-	readDshSystemPrompt?: (agentId: string | undefined, dshSessionId: string | undefined) => Promise<string | undefined>;
 	/** DSH 「查看完整输出」（工具结果全文随投影消息存 meta.fullText）；未装配时抛错。 */
 	readDshMessageFullText?: (agentId: string, messageId: string) => Promise<{ text: string }>;
 	/** DSH 会话文件路径推导（按 catalog entry 的 dshSessionId + cwd）；未装配/不可推导返回 undefined。 */
@@ -368,7 +367,8 @@ export type DshBackendIpcDeps = {
 	/** DSH 会话恢复（G14：目录按 manifest 移回 sessions 树，返回恢复路径、原 cwd 与标题）；未装配时抛错。 */
 	unarchiveDshSession?: (dshSessionId: string) => Promise<{ restoredPath: string; cwd: string; title?: string } | undefined>;
 	/** DSH 归档区会话清单（G14：恢复入口用；含标题，旧归档由日志折叠补全）；未装配时返回空列表。 */
-	listArchivedDshSessions?: () => Array<ArchivedDshSession>;
+	/** 2027-02 起为异步实现（归档标题折叠按目录让出，避免主进程整段阻塞）。 */
+	listArchivedDshSessions?: () => Array<ArchivedDshSession> | Promise<Array<ArchivedDshSession>>;
 	/** DSH 永久删除已归档会话（G14：归档目录移入系统回收站）；未装配时抛错。 */
 	deleteArchivedDshSession?: (dshSessionId: string) => Promise<boolean>;
 	/** DSH 动态插件清单（G13 深化）；未装配时返回空列表。 */
@@ -643,8 +643,6 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		readDshProcessEvents,
 		readSessionFacts,
 		readSessionOutline,
-		readSessionOutlineTitle,
-		readDshSystemPrompt,
 		readDshMessageFullText,
 		resolveDshSessionFilePath,
 		searchDshSessions,
@@ -944,7 +942,10 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				// 与 mergeScanned 清理闸（environment=wsl 跳过）同口径。
 				if (record.environment === "wsl") return true;
 				if (sessionRuntimeCoordinator.hasLiveRuntime(record.id)) return true;
-				return existsSync(record.filePath);
+				// TTL 缓存（2027-02 性能审计）：几百条记录逐条同步 stat 是每次 5-30ms 的
+				// 固定税（切项目/catalog 刷新都会重拉这条 handler）；存在性 2s 陈旧无害，
+				// 清理闸（mergeScanned）仍是权威。
+				return sessionFileExistsCached(record.filePath);
 			});
 
 		// 纯读路径：事件回调/订阅刷新专用，不再触发扫描（防止推送-拉取循环触发）
@@ -1715,26 +1716,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		const bounded = typeof limit === "number" && Number.isFinite(limit) ? Math.min(Math.max(Math.floor(limit), 1), 10_000) : undefined;
 		return readSessionOutline(entry.filePath, bounded);
 	});
-	// 导轨单项标题：按需读一行；entryId 必须是会话内条目，空/超长直接拒绝。
-	ipcMain.handle(ipcChannels.sessionsCatalogReadOutlineTitle, async (_event, sessionId: unknown, entryId: unknown): Promise<string | undefined> => {
-		if (typeof sessionId !== "string" || !sessionId.trim()) return undefined;
-		if (typeof entryId !== "string" || !entryId.trim() || entryId.length > 200) return undefined;
-		const entry = sessionCatalog.get(sessionId);
-		if (!entry?.filePath || !readSessionOutlineTitle) return undefined;
-		return readSessionOutlineTitle(entry.filePath, entryId);
-	});
-	ipcMain.handle(ipcChannels.sessionsCatalogReadDshSystemPrompt, async (_event, sessionId: string): Promise<string | undefined> => {
-		if (typeof sessionId !== "string" || !sessionId.trim()) return undefined;
-		const entry = sessionCatalog.get(sessionId);
-		// DSH 会话的系统提示由 harness 在请求时组装（persona + sections），PiDeck
-		// 只能从 request/header 事件取；运行时会话读投影缓存，历史会话从 host history
-		// 折叠（未装配/无数据返回 undefined，轨迹不展示，不阻断）。
-		if (entry?.backend === "dsh" && readDshSystemPrompt) {
-			const target = sessionRuntimeCoordinator.getTarget(sessionId);
-			return readDshSystemPrompt(target?.agentId, entry.dshSessionId);
-		}
-		return undefined;
-	});
+	// 边界校验 + 本地会话文件存在性判定：远端/DSH 会话没有本机文件，直接返回空（引用面板不展示）。
 	ipcMain.handle(ipcChannels.sessionsCatalogReadReferenceMessages, async (_event, rawSessionId: unknown) => {
 		const sessionId = parseSessionId(rawSessionId);
 		const filePath = localSessionFilePath(sessionId);

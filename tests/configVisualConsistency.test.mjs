@@ -117,7 +117,10 @@ test("skill table uses real aligned columns, not a colSpan card", () => {
 	// 压到接近 0 成竖条）+ 长描述 3 行截断（line-clamp 包在内部 span 上，
 	// 避免 display:-webkit-box 破坏 table-cell 布局），title 悬浮看全文
 	assert.match(skillTableRow, /<TableCell className="w-2\/5 whitespace-normal break-words/);
-	assert.match(skillTableRow, /<span className="block line-clamp-3">/);
+	// 不能再叠 block：Tailwind v4 里 .block 排在 .line-clamp-* 之后，display:block 会覆盖
+	// -webkit-box 让截断静默失效（2027-02 智能体卡片同源问题）。
+	assert.match(skillTableRow, /<span className="line-clamp-3">/);
+	assert.doesNotMatch(skillTableRow, /className="[^"]*\bblock\b[^"]*line-clamp-/);
 	assert.match(skillTableRow, /<TableCell className="text-right">/);
 	// 操作按钮直接放在 TableCell 内，不再包一层可点击的卡片 button。
 	assert.doesNotMatch(skillTableRow, /<button[\s\S]*skill-rename-inline[\s\S]*<Button/);

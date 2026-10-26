@@ -87,6 +87,29 @@ export function toSessionRuntimeTarget(sessionId: string, runtime: { agentId?: s
 	};
 }
 
+/**
+ * toSessionRuntimeTarget 的「标量入参」版本（2027-02 性能治理）：
+ * 订阅方只想在换 runtime（agentId/generation）时重拉命令表，不该依赖整个
+ * runtime 对象——该对象每个 runtime 事件都会重建（updatedAt 每次变），
+ * 按对象身份做 effect 依赖等于「任意状态推送都重拉一次 IPC」。
+ */
+export function toRuntimeCommandTarget(sessionId: string, agentId: string | undefined, runtimeGeneration: number | undefined): SessionRuntimeTarget | undefined {
+	return toSessionRuntimeTarget(sessionId, { agentId, runtimeGeneration });
+}
+
+/** 命令表内容等价（名字+描述+来源）：用于写回 atom 前保留原引用，免下游无谓重建。 */
+export function sameCommands(left: readonly { name: string; description?: string; source?: string }[], right: readonly { name: string; description?: string; source?: string }[]): boolean {
+	if (left === right) return true;
+	if (left.length !== right.length) return false;
+	for (let index = 0; index < left.length; index += 1) {
+		const a = left[index];
+		const b = right[index];
+		if (!a || !b) return false;
+		if (a.name !== b.name || a.description !== b.description || a.source !== b.source) return false;
+	}
+	return true;
+}
+
 // ── 会话运行控制策略（全状态可操作）──
 //
 // 产品规则：任意状态的会话都必须能操作运行控制，不为「没进程」「进程死了」

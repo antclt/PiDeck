@@ -366,7 +366,10 @@ export function registerFeishuIpc(deps: FeishuIpcDeps): void {
 		if (!target) {
 			return { success: false, message: feishuT(deps.getCurrentLocale(), "session.runtimeUnavailable") };
 		}
-		const tab = deps.agentManager.list().find((item) => item.id === target.agentId);
+		// 会话后端不止 pi：DSH/ACP 的 tab 不在 pi 的 AgentManager 里。这里必须走网关的
+		// 统一查找（桥接侧分发同样用它），否则「输入框飞书图标 → 选择 Bot」在
+		// dsh:session-* 会话上恒定报「当前会话运行时不可用」且不留日志。
+		const tab = deps.feishuSessionRuntimeBindings.findRuntimeAgent(target.agentId);
 		if (!tab) {
 			return { success: false, message: feishuT(deps.getCurrentLocale(), "session.runtimeUnavailable") };
 		}

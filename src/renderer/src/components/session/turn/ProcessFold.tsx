@@ -42,11 +42,15 @@ export type ProcessFoldProps = {
 };
 
 export const ProcessFold = memo(function ProcessFold(props: ProcessFoldProps) {
-	// 与 TurnRow 既有模式一致：用「已展开的那一批」而不是布尔量，换 run 自然重置，无需额外 effect。
-	const [expandedNodesId, setExpandedNodesId] = useState<string | undefined>(undefined);
-	const mounted = useMemo(() => boundMountedSteps(props.nodes, PROCESS_FOLD_NODE_LIMIT, expandedNodesId !== undefined), [props.nodes, expandedNodesId]);
+	// 本组件由 TurnRow 按 run 挂载（SessionMessageTimeline.tsx 的 renderRunItem 的 key={item.id}），换 run 必重挂，
+	// 所以不像 TurnRow/ProcessGroupStep 那样存 id 判定：只记「展开下界」的原点与批次数。
+	// 下界锚在首次点击时的节点总数上：之后尾部追加新节点不会把已展开的旧节点挤回去。
+	// VirtualRunList 的 solid↔虚拟切换（多选/导出/恢复锚点）会按行重建，同一 run 的展开进度随之重置
+	// （#401 known limitation 2，不是本次改动引入的）。
+	const [nodeExpansion, setNodeExpansion] = useState<{ anchor: number; batches: number } | undefined>(undefined);
+	const mounted = useMemo(() => boundMountedSteps(props.nodes, PROCESS_FOLD_NODE_LIMIT, nodeExpansion), [props.nodes, nodeExpansion]);
 	// 只有本轮仍在跑、且**最后一个节点就是这个组**时它才算「运行中」（决定 shimmer 与「正在…」文案）。
-	// 用**节点 id** 而不是数组下标判定：下面渲染的是尾部切片 `mounted.items`，
+	// 用**节点 id** 而不是数组下标判定：下面渲染的是下界切片 `mounted.items`，
 	// 下标在裁剪后与 `props.nodes` 不对应，按下标比较会把「运行中」标到错误的组上。
 	// 尾部判定不能用「最后一个组」（2026-08 审计修复）：尾部一旦追加中间回复 / 重试 / 错误行，
 	// 说明那个组已经跑完，继续挂 shimmer 报「正在…」就是在撒谎。
@@ -90,11 +94,11 @@ export const ProcessFold = memo(function ProcessFold(props: ProcessFoldProps) {
 				<button
 					type="button"
 					className="mt-1 inline-flex h-[26px] items-center gap-2 self-start rounded-[var(--radius-md)] border border-border-subtle bg-[var(--color-chat-card-bg)] px-3 text-chat-detail font-medium text-text-secondary transition-colors hover:border-border-strong hover:bg-bg-hover hover:text-text-primary"
-					onClick={() => setExpandedNodesId("all")}
-					title={t("timeline.showEarlierSteps", { count: mounted.hiddenCount })}
+					onClick={() => setNodeExpansion((prev) => (prev ? { anchor: prev.anchor, batches: prev.batches + 1 } : { anchor: props.nodes.length, batches: 1 }))}
+					title={t("timeline.showEarlierSteps", { count: Math.min(PROCESS_FOLD_NODE_LIMIT, mounted.hiddenCount) })}
 				>
 					<ChevronUp size={12} aria-hidden="true" />
-					<span>{t("timeline.showEarlierSteps", { count: mounted.hiddenCount })}</span>
+					<span>{t("timeline.showEarlierSteps", { count: Math.min(PROCESS_FOLD_NODE_LIMIT, mounted.hiddenCount) })}</span>
 				</button>
 			)}
 			{mounted.items.map((node) => (

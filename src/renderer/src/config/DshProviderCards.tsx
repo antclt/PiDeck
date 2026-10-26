@@ -16,6 +16,7 @@ import { writeClipboard } from "../utils/clipboard";
 import { UsageQueryEntryButton } from "../components/app/UsageQueryEntryButton";
 import { ProviderUsageInline } from "../components/app/ProviderUsageInline";
 import { Button } from "../components/ui-shadcn/button";
+import { Collapsible, CollapsibleContent } from "../components/ui-shadcn/collapsible";
 import { Input } from "../components/ui-shadcn/input";
 import { isDshDeepseekProfileVisibleField, isDshPiAiCustomRoute, isDshPiAiProfileVisibleField } from "./dshFieldLabels";
 import { DshSchemaField, type DshNamespaceView } from "./DshSchemaForm";
@@ -240,7 +241,11 @@ function CustomSettings(props: { label: ReactNode; children: ReactNode }) {
 				{open ? <ChevronDown className="size-3.5 text-muted-foreground" aria-hidden="true" /> : <ChevronRight className="size-3.5 text-muted-foreground" aria-hidden="true" />}
 				{props.label}
 			</button>
-			{open && <div className="grid gap-2.5 border-t border-border/40 px-3 py-2.5">{props.children}</div>}
+			{/* 折叠体走共享折叠原语（真高度渐变 + exit 后卸载 + reduced-motion 回退）；
+			    display:contents 让根不生成盒子，折叠态零空档。 */}
+			<Collapsible open={open} className="contents">
+				<CollapsibleContent className="grid gap-2.5 border-t border-border/40 px-3 py-2.5">{props.children}</CollapsibleContent>
+			</Collapsible>
 		</div>
 	);
 }
@@ -570,40 +575,42 @@ export function PiAiProvidersCard(props: {
 					const modelCount = models.length > 0 ? models.length : (providerCatalog?.length ?? 0);
 					return (
 						<div key={entry.key} ref={(element) => providerReorder.registerCard(entry.key, element)} className={`relative rounded-md border border-border-subtle bg-bg-panel${providerReorder.draggingName === entry.key ? " opacity-40 border-dashed" : ""}`} {...providerReorder.cardProps(entry.key)}>
-							{/* 拖拽插入指示线：贴卡片内缘；加粗 + 发光，落点一眼可见 */}
-							{providerReorder.dropTarget?.name === entry.key && <span className={`absolute ${providerReorder.dropTarget.position === "before" ? "top-0" : "bottom-0"} right-0 left-0 z-10 h-[3px] rounded-full bg-[color:var(--color-accent)] shadow-[0_0_8px_color-mix(in_srgb,var(--color-accent)_55%,transparent)]`} />}
-							<ProviderRowHead
-								leading={
-									<>
-										{/* 拖拽手柄：只有按住手柄才能拖动，避免与行内点击折叠抢手势；聚焦手柄后 ↑/↓ 也可微调（键盘接线在 hook 的 gripProps 里） */}
-										<Button type="button" variant="ghost" size="icon-sm" className="size-6 shrink-0 cursor-grab text-muted-foreground active:cursor-grabbing" title={t("config.dragProvider")} {...providerReorder.gripProps(entry.key)}>
-											<GripVertical className="size-3.5" aria-hidden="true" />
-										</Button>
-									</>
-								}
-								title={entry.key}
-								badges={[t("config.dsh.modelsCount", { count: modelCount })]}
-								keyDot={<KeyStatusDot state={ops.credentials[keyRef]} />}
-								extraActions={
-									<>
-										{/* 用量徽章常驻（DSH 链路 backend=dsh）：与模型/认证页同款，开关即「是否启用用量查询」 */}
-										<span className="shrink-0" onClick={(event) => event.stopPropagation()}>
-											<ProviderUsageInline provider={entry.key} variant="card" backend="dsh" />
-										</span>
-										{/* 用量查询配置（内置支持的供应商零配置自动生效，不渲染；DSH 链路 backend=dsh） */}
-										<UsageQueryEntryButton provider={entry.key} backend="dsh" className="size-7 shrink-0 text-muted-foreground hover:text-foreground" onOpen={() => props.onOpenUsageProbeDialog(entry.key)} />
-										<ProviderMigrationButton direction="dsh-to-pi" provider={entry.key} onMigrated={props.onMigrated} />
-									</>
-								}
-								isOpen={isOpen}
-								onToggle={() => setExpanded((prev) => ({ ...prev, [entry.key]: !prev[entry.key] }))}
-								onRemove={() => removeProvider(entry.key)}
-								removeDisabled={!writable}
-								removeTitle={t("config.dsh.removeProvider")}
-							/>
+							{/* 折叠体走共享折叠原语；display:contents 不生成盒子，折叠态零空档。 */}
+							<Collapsible open={isOpen} className="contents">
+								{/* 拖拽插入指示线：贴卡片内缘；加粗 + 发光，落点一眼可见 */}
+								{providerReorder.dropTarget?.name === entry.key && <span className={`absolute ${providerReorder.dropTarget.position === "before" ? "top-0" : "bottom-0"} right-0 left-0 z-10 h-[3px] rounded-full bg-[color:var(--color-accent)] shadow-[0_0_8px_color-mix(in_srgb,var(--color-accent)_55%,transparent)]`} />}
+								<ProviderRowHead
+									leading={
+										<>
+											{/* 拖拽手柄：只有按住手柄才能拖动，避免与行内点击折叠抢手势；聚焦手柄后 ↑/↓ 也可微调（键盘接线在 hook 的 gripProps 里） */}
+											<Button type="button" variant="ghost" size="icon-sm" className="size-6 shrink-0 cursor-grab text-muted-foreground active:cursor-grabbing" title={t("config.dragProvider")} {...providerReorder.gripProps(entry.key)}>
+												<GripVertical className="size-3.5" aria-hidden="true" />
+											</Button>
+										</>
+									}
+									title={entry.key}
+									badges={[t("config.dsh.modelsCount", { count: modelCount })]}
+									keyDot={<KeyStatusDot state={ops.credentials[keyRef]} />}
+									extraActions={
+										<>
+											{/* 用量徽章常驻（DSH 链路 backend=dsh）：与模型/认证页同款，开关即「是否启用用量查询」 */}
+											<span className="shrink-0" onClick={(event) => event.stopPropagation()}>
+												<ProviderUsageInline provider={entry.key} variant="card" backend="dsh" />
+											</span>
+											{/* 用量查询配置（内置支持的供应商零配置自动生效，不渲染；DSH 链路 backend=dsh） */}
+											<UsageQueryEntryButton provider={entry.key} backend="dsh" className="size-7 shrink-0 text-muted-foreground hover:text-foreground" onOpen={() => props.onOpenUsageProbeDialog(entry.key)} />
+											<ProviderMigrationButton direction="dsh-to-pi" provider={entry.key} onMigrated={props.onMigrated} />
+										</>
+									}
+									isOpen={isOpen}
+									onToggle={() => setExpanded((prev) => ({ ...prev, [entry.key]: !prev[entry.key] }))}
+									onRemove={() => removeProvider(entry.key)}
+									removeDisabled={!writable}
+									removeTitle={t("config.dsh.removeProvider")}
+								/>
 
-							{isOpen && (
-								<div className="grid gap-3 border-t border-border/40 px-3 py-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
+								{/* 不再挂 animate-in/fade-in：twMerge 会把 animate-* 判同组，保留会盖掉高度动画。 */}
+								<CollapsibleContent className="grid gap-3 border-t border-border/40 px-3 py-3">
 									<ApiKeyField ref={keyRef} value={keyDrafts[entry.key] ?? ""} onChange={(next) => setKeyDrafts((prev) => ({ ...prev, [entry.key]: next }))} ops={ops} />
 									<CustomSettings label={t("config.dsh.customSettings")}>
 										<p className="text-micro text-muted-foreground">{t("config.dsh.customSettingsHint")}</p>
@@ -615,8 +622,8 @@ export function PiAiProvidersCard(props: {
 										<DshHeadersEditor value={readHeaders(entry.key, entryValue(entry.key, ["headers"]))} writable={writable && !saving} onChange={(next) => updateHeaders(entry.key, next)} />
 									</CustomSettings>
 									<DshModelsEditor models={models} savedModels={savedModels} catalog={providerCatalog} writable={writable} providerKey={entry.key} settingsNs={namespace.ns} baseURL={baseURL} api={api} apiKeyDraft={keyDrafts[entry.key]} onChange={(nextModels) => setProviderModels(entry.key, nextModels)} />
-								</div>
-							)}
+								</CollapsibleContent>
+							</Collapsible>
 						</div>
 					);
 				})}
@@ -817,27 +824,29 @@ export function DeepseekRouteCard(props: {
 			</div>
 			<div className="grid gap-2 p-4">
 				<div className="rounded-md border border-border-subtle bg-bg-panel">
-					<ProviderRowHead
-						title={namespace.ns === "llm-deepseek" ? t("config.dsh.deepseekOfficial") : namespace.ns}
-						badges={[t("config.dsh.modelsCount", { count: modelOverride ? models.length : directCatalog.length })]}
-						keyDot={<KeyStatusDot state={ops.credentials[keyRef]} />}
-						extraActions={
-							<>
-								{/* 用量徽章常驻（DSH 官方 DeepSeek）：provider 名归一为 deepseek，与卡片/选择器同缓存 key */}
-								<span className="shrink-0" onClick={(event) => event.stopPropagation()}>
-									<ProviderUsageInline provider="deepseek" variant="card" backend="dsh" />
-								</span>
-								{/* 用量查询配置（内置支持的供应商零配置自动生效，不渲染；DSH 官方 DeepSeek） */}
-								<UsageQueryEntryButton provider="deepseek" backend="dsh" className="size-7 shrink-0 text-muted-foreground hover:text-foreground" onOpen={() => props.onOpenUsageProbeDialog("deepseek")} />
-								<ProviderMigrationButton direction="dsh-to-pi" provider="deepseek" onMigrated={props.onMigrated} />
-							</>
-						}
-						isOpen={open}
-						onToggle={() => setOpen((prev) => !prev)}
-					/>
+					{/* 折叠体走共享折叠原语；display:contents 不生成盒子，折叠态零空档。 */}
+					<Collapsible open={open} className="contents">
+						<ProviderRowHead
+							title={namespace.ns === "llm-deepseek" ? t("config.dsh.deepseekOfficial") : namespace.ns}
+							badges={[t("config.dsh.modelsCount", { count: modelOverride ? models.length : directCatalog.length })]}
+							keyDot={<KeyStatusDot state={ops.credentials[keyRef]} />}
+							extraActions={
+								<>
+									{/* 用量徽章常驻（DSH 官方 DeepSeek）：provider 名归一为 deepseek，与卡片/选择器同缓存 key */}
+									<span className="shrink-0" onClick={(event) => event.stopPropagation()}>
+										<ProviderUsageInline provider="deepseek" variant="card" backend="dsh" />
+									</span>
+									{/* 用量查询配置（内置支持的供应商零配置自动生效，不渲染；DSH 官方 DeepSeek） */}
+									<UsageQueryEntryButton provider="deepseek" backend="dsh" className="size-7 shrink-0 text-muted-foreground hover:text-foreground" onOpen={() => props.onOpenUsageProbeDialog("deepseek")} />
+									<ProviderMigrationButton direction="dsh-to-pi" provider="deepseek" onMigrated={props.onMigrated} />
+								</>
+							}
+							isOpen={open}
+							onToggle={() => setOpen((prev) => !prev)}
+						/>
 
-					{open && (
-						<div className="grid gap-3 border-t border-border/40 px-3 py-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
+						{/* 不再挂 animate-in/fade-in：twMerge 会把 animate-* 判同组，保留会盖掉高度动画。 */}
+						<CollapsibleContent className="grid gap-3 border-t border-border/40 px-3 py-3">
 							<ApiKeyField ref={keyRef} value={keyDraft} onChange={setKeyDraft} ops={ops} />
 							<CustomSettings label={t("config.dsh.customSettings")}>
 								<p className="text-micro text-muted-foreground">{t("config.dsh.customSettingsHint")}</p>
@@ -862,8 +871,8 @@ export function DeepseekRouteCard(props: {
 								defaultMaxTokens={defaultMaxTokens}
 								onChange={setModels}
 							/>
-						</div>
-					)}
+						</CollapsibleContent>
+					</Collapsible>
 				</div>
 			</div>
 		</div>

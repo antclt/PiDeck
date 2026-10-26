@@ -229,7 +229,7 @@ export function AskPanelOverlay() {
 			}
 		>
 			{expanded && (
-				<div className="ask-panel-detail mb-2 flex h-[min(48vh,400px)] w-[min(560px,calc(100vw-2rem))] animate-in fade-in-0 zoom-in-95 duration-base flex-col overflow-hidden rounded-xl border bg-popover shadow-lg">
+				<div className="ask-panel-detail mb-2 flex h-[min(48vh,400px)] w-[min(560px,calc(100vw-2rem))] animate-in fade-in-0 zoom-in-95 duration-base flex-col overflow-hidden rounded-xl border bg-popover shadow-md">
 					{/* 详情头部：标题 + 问题摘要 + 运行状态 + 最小化（仅收起详情，会话继续运行） */}
 					<div className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
 						<MessageSquarePlus size={14} className="text-muted-foreground" aria-hidden="true" />
@@ -306,7 +306,7 @@ export function AskPanelOverlay() {
 			)}
 			{/* 胶囊本体：状态点 + 摘要 + 关闭 + 展开指示；整条可拖拽（touch-none 避免触屏滚动抢占指针） */}
 			<button
-				className="ask-panel-pill flex h-9 max-w-[min(340px,calc(100vw-2rem))] cursor-grab touch-none items-center gap-2 rounded-full border bg-popover pl-2.5 pr-1 shadow-lg hover:bg-accent-soft active:cursor-grabbing"
+				className="ask-panel-pill flex h-9 max-w-[min(340px,calc(100vw-2rem))] cursor-grab touch-none items-center gap-2 rounded-full border bg-popover pl-2.5 pr-1 shadow-md hover:bg-accent-soft active:cursor-grabbing"
 				aria-label={t("askPanel.title")}
 				aria-expanded={expanded}
 				onPointerDown={handlePointerDown}

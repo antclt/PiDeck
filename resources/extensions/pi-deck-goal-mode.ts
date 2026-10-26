@@ -81,10 +81,11 @@ export default function piDeckGoalModeExtension(pi: ExtensionAPI): void {
 	/** 上一次落盘的目标全文：目标在 run 内不变，每轮只追加轮次（issue #366）。 */
 	let persistedObjective = "";
 
-	function persistState(): void {
+	function persistState(force = false): void {
 		// 32 轮上限，若每轮都写完整 state，历史里会堆 32 份目标原文（本机实测每条约 2000 字）。
 		// 目标只在变化时落盘，其余轮次省略 objective 字段；session_start 回溯最近一条带目标的记录。
-		const objectiveChanged = state.objective !== persistedObjective;
+		// force：清除目标时必须落 objective:""，否则回溯会穿透到旧目标、重启后复活（issue #395）。
+		const objectiveChanged = force || state.objective !== persistedObjective;
 		persistedObjective = state.objective;
 		const entry: Partial<GoalModeState> = { ...state };
 		if (!objectiveChanged) delete entry.objective;
@@ -186,7 +187,9 @@ export default function piDeckGoalModeExtension(pi: ExtensionAPI): void {
 					maxGoalRounds: DEFAULT_MAX_ROUNDS,
 				};
 				updateWidget(ctx);
-				persistState();
+				// 清空的 objective 也必须落盘：否则「目标没变」判据会让这条记录省略 objective，
+				// 会话里读不出「已清除」，重启回溯时穿透到更早的目标（issue #395）。
+				persistState(true);
 				ctx.ui.notify("PiDeck 目标已清除。", "info");
 				return;
 			}
@@ -335,9 +338,19 @@ export default function piDeckGoalModeExtension(pi: ExtensionAPI): void {
 		const goalEntries = entries.filter((entry: { type: string; customType?: string }) =>
 			entry.type === "custom" && entry.customType === GOAL_ENTRY_TYPE) as Array<{ data?: Partial<GoalModeState> }>;
 		const latest = goalEntries[goalEntries.length - 1];
-		// 目标全文只在变化时落盘（issue #366），往回找最近一条带 objective 的记录。
-		const lastWithObjective = [...goalEntries].reverse().find((entry) => typeof entry.data?.objective === "string");
-		const objective = lastWithObjective?.data?.objective ?? "";
+		// 目标全文只在变化时落盘（issue #366），从尾部往回找最近一条带 objective 的记录。
+		// 遇 enabled:false 立即截断：那是 clear / 完成留下的记录，语义是「到此为止」。
+		// 不截断就会穿透到更早的目标——历史里旧版 clear 不写 objective 字段，
+		// 表现为「清除后重启旧目标复活」（issue #395）。
+		let objective = "";
+		for (let i = goalEntries.length - 1; i >= 0; i--) {
+			const entry = goalEntries[i];
+			if (entry.data?.enabled === false) break;
+			if (typeof entry.data?.objective === "string") {
+				objective = entry.data.objective;
+				break;
+			}
+		}
 		if (objective) {
 			// 跨会话不自动续轮：恢复为 paused，避免打开历史会话就立刻烧一轮模型。
 			state = {
@@ -348,6 +361,9 @@ export default function piDeckGoalModeExtension(pi: ExtensionAPI): void {
 				maxGoalRounds: latest.data.maxGoalRounds || DEFAULT_MAX_ROUNDS,
 				blockReason: latest.data.blockReason,
 			};
+			// 恢复出来的目标必须同步 persistedObjective：否则下一次 clear 会误判「目标没变」
+			// 而省略 objective，清除记不下来，再重启又回溯到旧目标（issue #395）。
+			persistedObjective = objective;
 		} else {
 			state = {
 				enabled: false,

@@ -56,6 +56,14 @@ export class CuaEngine {
 		return getPrimaryDisplay();
 	}
 
+	/**
+	 * Virtual desktop bounds covering every monitor, in absolute physical pixels.
+	 * This is the space cua_click / cua_list_windows rects live in.
+	 */
+	getVirtualDesktop(): { x: number; y: number; width: number; height: number } {
+		return getVirtualDisplay();
+	}
+
 	getForegroundWindow(): OcclusionInfo | undefined {
 		const analyzed = analyzeWindows();
 		return analyzed.find((info) => info.window.isForeground);

@@ -21,6 +21,12 @@ export const piDeckMcpAccessSchema = z
 		// 而新构建必须能直接读旧文件——加字段+默认值就能同时做到。
 		allProjects: z.boolean().default(false),
 		allowControl: z.boolean().default(false),
+		// 智能体写能力同样默认关：旧文件缺字段时行为原样延续（只读会话 + 智能体只读）。
+		allowAgentWrite: z.boolean().default(false),
+		// 定时任务写能力默认关；读（任务/运行历史）仍按项目白名单放行。
+		allowAutomationWrite: z.boolean().default(false),
+		// 收藏写能力默认关；读收藏只返回无项目归属或已授权项目的条目。
+		allowFavoritesWrite: z.boolean().default(false),
 	})
 	.strict();
 const storedSchema = piDeckMcpAccessSchema
@@ -31,7 +37,7 @@ const storedSchema = piDeckMcpAccessSchema
 	})
 	.strict();
 export type PiDeckMcpConfig = z.infer<typeof storedSchema>;
-export const emptyPiDeckMcpConfig = (): PiDeckMcpConfig => ({ version: 1, enabled: false, projectIds: [], allProjects: false, allowControl: false, port: 0, token: "" });
+export const emptyPiDeckMcpConfig = (): PiDeckMcpConfig => ({ version: 1, enabled: false, projectIds: [], allProjects: false, allowControl: false, allowAgentWrite: false, allowAutomationWrite: false, allowFavoritesWrite: false, port: 0, token: "" });
 
 /** Corrupt/oversized files fail closed; absence alone means first-run defaults. */
 export async function readPiDeckMcpConfig(path: string): Promise<PiDeckMcpConfig> {

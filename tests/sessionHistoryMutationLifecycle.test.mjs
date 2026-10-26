@@ -153,7 +153,7 @@ for (const kind of ["resend", "edit"]) {
 		);
 		assert.deepEqual(
 			h.calls.find(([operation]) => operation === "send"),
-			["send", "fork-source-a", kind === "edit" ? "edited text" : message.text, message.images],
+			["send", "fork-source-a", kind === "edit" ? "edited text" : message.text, message.images, { requireAppliedModel: true }],
 		);
 		assert.deepEqual(h.overlays, [
 			{ sessionId: "source-a", kind: kind === "edit" ? "editing" : "resending" },

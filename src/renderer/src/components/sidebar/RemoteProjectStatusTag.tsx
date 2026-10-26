@@ -17,7 +17,7 @@ export function RemoteProjectStatusTag(props: { projectId: string }) {
 	// 有稳定码就给码作为排查 hint；没有就只说「需处理」。
 	const hint = status.code === null ? t("sidebar.remoteProject.needsAttentionHint") : t("sidebar.remoteProject.needsAttentionHintCode", { code: status.code });
 	return (
-		<span data-testid="remote-project-needs-attention" className="flex shrink-0 items-center gap-0.5 rounded bg-warning/15 px-1 text-[10px] font-medium leading-4 text-warning" title={hint}>
+		<span data-testid="remote-project-needs-attention" className="flex shrink-0 items-center gap-0.5 rounded bg-warning/15 px-1 text-micro font-medium leading-4 text-warning" title={hint}>
 			<AlertTriangle className="size-3 shrink-0" aria-hidden="true" />
 			{t("sidebar.remoteProject.needsAttention")}
 		</span>

@@ -1,7 +1,7 @@
 import { Check, ChevronDown, Copy, Globe, Loader2, Play, RefreshCw, Send, Square, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { AGENT_INVOKE_TEXT_MAX_CHARS, AGENT_TRANSLATE_TARGETS, type AgentInvokeAction, type AgentTranslateTarget } from "../../../../shared/types/agentProfile";
-import { SELECTION_TOOL_TEXT_MAX_CHARS, SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT, SELECTION_TOOL_WINDOW_EXPANDED_HEIGHT, SELECTION_TOOL_WINDOW_WIDTH, type SelectionToolShowPayload } from "../../../../shared/types/selectionTool";
+import { SELECTION_TOOL_TEXT_MAX_CHARS, SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT, SELECTION_TOOL_WINDOW_COLLAPSED_WIDTH, SELECTION_TOOL_WINDOW_EXPANDED_HEIGHT, SELECTION_TOOL_WINDOW_WIDTH, type SelectionToolShowPayload } from "../../../../shared/types/selectionTool";
 import { desktopApi } from "../../desktopApi";
 import { t, type TranslationKey } from "../../i18n";
 import { cn } from "../../lib/utils";
@@ -119,7 +119,12 @@ export function SelectionToolWindowView() {
 
 	// 折叠条/展开面板切换窗口尺寸（主进程 setContentSize）；首次挂载也同步一次，避免 280 残影。
 	useEffect(() => {
-		void desktopApi.selectionTool.resize({ width: SELECTION_TOOL_WINDOW_WIDTH, height: expanded ? SELECTION_TOOL_WINDOW_EXPANDED_HEIGHT : SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT }).catch(() => undefined);
+		void desktopApi.selectionTool
+			.resize({
+				width: expanded ? SELECTION_TOOL_WINDOW_WIDTH : SELECTION_TOOL_WINDOW_COLLAPSED_WIDTH,
+				height: expanded ? SELECTION_TOOL_WINDOW_EXPANDED_HEIGHT : SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT,
+			})
+			.catch(() => undefined);
 		// capture.id 也参与：连续两次空捕获时 expanded 可能同为 true，主进程 show 已重置折叠尺寸，
 		// 必须重新请求一次展开尺寸，否则内容会被裁在折叠栏高度里。
 	}, [capture?.id, expanded]);
@@ -234,50 +239,53 @@ export function SelectionToolWindowView() {
 	}, [handleHide, insertableText, inserting]);
 
 	return (
-		<div role="dialog" aria-label={t("selectionTool.windowTitle")} className="flex h-full w-full flex-col overflow-hidden rounded-[14px] border border-border/70 bg-popover/95 text-popover-foreground shadow-[0_18px_50px_-14px_rgba(0,0,0,0.5)] backdrop-blur-xl">
-			{/* 一条操作栏：智能体 / 动作 / 目标语言 / 复制·发送·关闭。留白是拖拽把手。 */}
-			<header className={expanded ? "flex h-11 shrink-0 items-center gap-1.5 border-b border-border-subtle/70 px-2 [-webkit-app-region:drag]" : "flex h-full shrink-0 items-center gap-1.5 px-2 [-webkit-app-region:drag]"}>
-				<div className="min-w-0 [-webkit-app-region:no-drag]">
-					<AgentInvokeAgentPicker agents={agents} selected={selectedAgent} onSelect={handleAgentSelect} />
+		<div role="dialog" aria-label={t("selectionTool.windowTitle")} className="flex h-full w-full flex-col overflow-hidden rounded-[12px] border border-border/80 bg-popover text-popover-foreground shadow-[0_16px_40px_-16px_rgba(0,0,0,0.55)]">
+			{/* 折叠条只留智能体 / 翻译·问答 / 关闭；目标语言与复制·发送在展开面板里。 */}
+			<header className={expanded ? "flex h-11 shrink-0 items-center gap-1.5 border-b border-border-subtle/70 px-2 [-webkit-app-region:drag]" : "flex h-full shrink-0 items-center gap-2 px-2.5 [-webkit-app-region:drag]"}>
+				<div className="min-w-0 shrink-0 [-webkit-app-region:no-drag]">
+					<AgentInvokeAgentPicker agents={agents} selected={selectedAgent} onSelect={handleAgentSelect} compact={!expanded} />
 				</div>
-				<div className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-muted/55 p-0.5 [-webkit-app-region:no-drag]" role="group" aria-label={t("agentInvoke.title")}>
+				<span className="h-3.5 w-px shrink-0 bg-border/70" aria-hidden="true" />
+				<div className="flex min-w-0 shrink-0 items-center gap-1 [-webkit-app-region:no-drag]" role="group" aria-label={t("agentInvoke.title")}>
 					{INVOKE_ACTIONS.map((candidate) => (
 						<button
 							key={candidate}
 							type="button"
 							aria-pressed={action === candidate}
 							onClick={() => handleActionChange(candidate)}
-							className={cn("rounded-md px-2 py-1 text-xs font-medium transition-colors", action === candidate ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+							className={cn("rounded-md px-2 py-1 text-xs font-medium transition-colors", action === candidate ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent-soft hover:text-foreground")}
 						>
 							{t(ACTION_LABEL_KEYS[candidate])}
 						</button>
 					))}
 				</div>
-				{action === "translate" ? (
+				{expanded && action === "translate" ? (
 					<div className="[-webkit-app-region:no-drag]">
 						<TargetLanguagePicker value={targetLanguage} onChange={handleTargetChange} />
 					</div>
 				) : null}
 				<span className="min-w-0 flex-1" />
-				<div className="flex shrink-0 items-center gap-0.5 [-webkit-app-region:no-drag]">
-					<button type="button" className={ICON_BUTTON} aria-label={t("selectionTool.copy")} title={t("selectionTool.copy")} disabled={!hasResult} onClick={handleCopy}>
-						<Copy size={14} aria-hidden="true" />
-					</button>
-					<button type="button" className={ICON_BUTTON} aria-label={t("selectionTool.insertToMain")} title={t("selectionTool.insertToMain")} disabled={!insertableText || inserting} onClick={handleInsert}>
-						{inserting ? <Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" /> : <Send size={14} aria-hidden="true" />}
-					</button>
-					<button type="button" className={ICON_BUTTON} aria-label={t("selectionTool.hide")} title={t("selectionTool.hide")} onClick={handleHide}>
-						<X size={14} aria-hidden="true" />
-					</button>
-				</div>
+				{expanded ? (
+					<div className="flex shrink-0 items-center gap-0.5 [-webkit-app-region:no-drag]">
+						<button type="button" className={ICON_BUTTON} aria-label={t("selectionTool.copy")} title={t("selectionTool.copy")} disabled={!hasResult} onClick={handleCopy}>
+							<Copy size={13} aria-hidden="true" />
+						</button>
+						<button type="button" className={ICON_BUTTON} aria-label={t("selectionTool.insertToMain")} title={t("selectionTool.insertToMain")} disabled={!insertableText || inserting} onClick={handleInsert}>
+							{inserting ? <Loader2 size={13} className="animate-pideck-spin" aria-hidden="true" /> : <Send size={13} aria-hidden="true" />}
+						</button>
+					</div>
+				) : null}
+				<button type="button" className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent-soft hover:text-foreground [-webkit-app-region:no-drag]" aria-label={t("selectionTool.hide")} title={t("selectionTool.hide")} onClick={handleHide}>
+					<X size={13} aria-hidden="true" />
+				</button>
 			</header>
 
 			{expanded ? (
 				<div className="flex min-h-0 flex-1 flex-col gap-2 px-2.5 pt-2">
-					{reasonHint ? <div className="shrink-0 rounded-md bg-warning/10 px-2 py-1 text-[11px] leading-relaxed text-warning">{reasonHint}</div> : null}
+					{reasonHint ? <div className="shrink-0 rounded-md bg-warning/10 px-2 py-1 text-micro leading-relaxed text-warning">{reasonHint}</div> : null}
 
 					{capturedText.trim() ? (
-						<div className="shrink-0 border-l-2 border-primary/25 pl-2 text-[11px] leading-relaxed text-muted-foreground">
+						<div className="shrink-0 border-l-2 border-primary/25 pl-2 text-micro leading-relaxed text-muted-foreground">
 							<div className="max-h-12 overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere]">{capturedText}</div>
 						</div>
 					) : (
@@ -293,7 +301,7 @@ export function SelectionToolWindowView() {
 					)}
 
 					<section className="flex min-h-0 flex-1 flex-col">
-						<div className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap pb-1 text-[13px] leading-relaxed [overflow-wrap:anywhere]">
+						<div className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap pb-1 text-control leading-relaxed [overflow-wrap:anywhere]">
 							{invokeState.phase === "starting" ? (
 								<span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
 									<Loader2 size={13} className="animate-pideck-spin" aria-hidden="true" />
@@ -321,17 +329,17 @@ export function SelectionToolWindowView() {
 								{running ? (
 									<>
 										<Loader2 size={11} className="shrink-0 animate-pideck-spin text-muted-foreground" aria-hidden="true" />
-										<span className="min-w-0 truncate text-[11px] text-muted-foreground">{action === "translate" ? t("selectionTool.translating") : t("agentInvoke.running")}</span>
+										<span className="min-w-0 truncate text-micro text-muted-foreground">{action === "translate" ? t("selectionTool.translating") : t("agentInvoke.running")}</span>
 										<span className="min-w-0 flex-1" />
-										<button type="button" className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent-soft hover:text-foreground" onClick={cancelInvoke}>
+										<button type="button" className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-micro text-muted-foreground transition-colors hover:bg-accent-soft hover:text-foreground" onClick={cancelInvoke}>
 											<Square size={10} aria-hidden="true" />
 											{t("agentInvoke.stop")}
 										</button>
 									</>
 								) : (
 									<>
-										<span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{invokeState.phase === "error" ? t("agentInvoke.errorTitle") : ""}</span>
-										<button type="button" className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent-soft hover:text-foreground" onClick={handleRun}>
+										<span className="min-w-0 flex-1 truncate text-micro text-muted-foreground">{invokeState.phase === "error" ? t("agentInvoke.errorTitle") : ""}</span>
+										<button type="button" className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-micro text-muted-foreground transition-colors hover:bg-accent-soft hover:text-foreground" onClick={handleRun}>
 											<RefreshCw size={10} aria-hidden="true" />
 											{t("agentInvoke.retry")}
 										</button>

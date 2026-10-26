@@ -34,12 +34,13 @@ test("会话 Tab 栏渲染页面式工作区 Tab（可选中/可关闭，不参�
 	assert.doesNotMatch(pageTabComponent, /draggable|onDragStart|data-session-id/, "页面 Tab 不得参与会话拖拽/会话身份");
 });
 
-test("App 把两个页面挂进会话 Tab 栏，并用当前页面决定会话选中态", () => {
-	assert.match(app, /const workspacePageTabItems: WorkspacePageTabItem\[\] = openWorkspacePageIds\.map/, "App 必须从页面 Tab 状态装配 Tab 项");
+test("App 把三个页面挂进会话 Tab 栏，并用当前页面决定会话选中态", () => {
+	assert.match(app, /const workspacePageTabItems: WorkspacePageTabItem\[\] = sortWorkspacePageIds\(openWorkspacePageIds\)\.map/, "App 必须从页面 Tab 状态装配 Tab 项（固定展示顺序）");
 	assert.match(app, /pageTabs=\{workspacePageTabItems\}/, "App 必须把页面 Tab 传给 SessionTabsBar");
 	assert.match(app, /currentSessionId=\{activeWorkspacePage \|\| hostPluginPageTab \? undefined : currentSessionId\}/, "页面打开时会话 Tab 不得显示选中态");
 	assert.match(app, /<AutomationPage\s+active=\{activeWorkspacePage === "automation"\}/, "定时任务页面必须按激活态挂载");
 	assert.match(app, /<AgentMarketPage active=\{activeWorkspacePage === "agents"\}/, "智能体页面必须按激活态挂载");
+	assert.match(app, /<FavoritesPage active=\{activeWorkspacePage === "favorites"\}/, "收藏页面必须按激活态挂载");
 });
 
 test("页面不是会话 Tab：不进 sessionTabIds，切会话只失活、关闭才卸载", () => {
@@ -53,7 +54,9 @@ test("页面不是会话 Tab：不进 sessionTabIds，切会话只失活、关�
 });
 
 test("页面标题固定走 i18n：智能体市场已改名「智能体」，不参与自动会话标题", () => {
-	assert.match(app, /title: t\(pageId === "automation" \? "automation\.title" : "agentMarket\.title"\)/);
+	assert.match(app, /title: t\(pageId === "automation" \? "automation\.title" : pageId === "agents" \? "agentMarket\.title" : "favorites\.title"\)/);
+	assert.match(zh, /"favorites\.title": "收藏"/);
+	assert.match(en, /"favorites\.title": "Favorites"/);
 	assert.match(zh, /"automation\.title": "定时任务"/);
 	assert.match(zh, /"agentMarket\.title": "智能体"/);
 	assert.match(en, /"agentMarket\.title": "Agents"/);

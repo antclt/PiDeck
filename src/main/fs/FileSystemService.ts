@@ -74,6 +74,20 @@ export class FileSystemService {
 				}
 			}),
 		);
+		// 预取「未递归目录」的可展开探测（2027-02 性能审计，并行化）：原先在下面循环里
+		// 逐目录 await directoryHasVisibleChildren（各一次 readdir），几百个子目录的层级
+		// 在 HDD/杀毒实时扫描/网络盘上 = 数百次串行往返（单次展开数百 ms~秒级）。
+		// 探测之间无依赖，与 stats 同批并发；循环里的读取只是拿已就绪的结果。
+		const expandableByPath = new Map<string, boolean>();
+		if (depth >= maxDepth) {
+			const probes = await Promise.all(entries.filter((entry) => !ignored.has(entry.name) && entry.isDirectory()).map((entry) => this.directoryHasVisibleChildren(join(current, entry.name), ignored)));
+			let probeIndex = 0;
+			for (const entry of entries) {
+				if (ignored.has(entry.name) || !entry.isDirectory()) continue;
+				expandableByPath.set(join(current, entry.name), probes[probeIndex] ?? false);
+				probeIndex += 1;
+			}
+		}
 		const nodes: FileTreeNode[] = [];
 
 		for (let i = 0; i < entries.length; i++) {
@@ -98,7 +112,7 @@ export class FileSystemService {
 					// 未递归时 children 为 undefined，省略该字段；已递归的空目录是 []。
 					// 渲染层用「有没有 children 数组」区分未加载 vs 已加载空目录。
 					...(children ? { children } : {}),
-					hasChildren: canRecurse ? (children?.length ?? 0) > 0 : await this.directoryHasVisibleChildren(absolutePath, ignored),
+					hasChildren: canRecurse ? (children?.length ?? 0) > 0 : (expandableByPath.get(absolutePath) ?? false),
 				});
 			} else if (entry.isFile()) {
 				nodes.push({

@@ -10,8 +10,15 @@ import { isRoleMessageRole } from "./sessionEntryIds";
 
 export { looksLikePiSessionFileStem } from "../../shared/sessionIdentity";
 
-/** 去除 ANSI 转义码，用于清洗 thinking 中的终端颜色控制序列。 */
+/**
+ * 去除 ANSI 转义码，用于清洗 thinking 中的终端颜色控制序列。
+ *
+ * 快速路径（2027-02 性能审计）：绝大多数模型正文根本不含 ESC 字符，先做单字符
+ * includes 扫描（memchr 级，远快于正则）命中即返回原引用——此前流式通道每个 delta
+ * 都对全量累积文本跑正则 replace（O(N²)/消息的扫描 + 分配），长回复时主进程持续承压。
+ */
 export function stripAnsi(text: string): string {
+	if (!text.includes("\u001b")) return text;
 	return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
 }
 

@@ -384,14 +384,22 @@ test("pane terminal resolves agent target from its own runtime and project fallb
 	assert.equal(resolvePaneTerminal({ sessionId: "session-5", runtime: undefined }), undefined);
 });
 
-test("appendTerminalReplayBuffer 追加并按 200K 上界截尾", () => {
-	const { appendTerminalReplayBuffer, TERMINAL_REPLAY_MAX_CHARS } = loadTerminalDockStateModule();
+test("appendTerminalReplayBuffer 追加并按 200K 上界截尾（滞回窗口内不截）", () => {
+	const { appendTerminalReplayBuffer, TERMINAL_REPLAY_MAX_CHARS, TERMINAL_REPLAY_TRIM_HYSTERESIS } = loadTerminalDockStateModule();
 	assert.equal(TERMINAL_REPLAY_MAX_CHARS, 200_000);
+	assert.equal(typeof TERMINAL_REPLAY_TRIM_HYSTERESIS, "number");
+	assert.ok(TERMINAL_REPLAY_TRIM_HYSTERESIS > 0, "滞回窗口必须是正数，否则退化成每事件截尾");
 	assert.equal(appendTerminalReplayBuffer("", "abc"), "abc");
 	assert.equal(appendTerminalReplayBuffer("ab", "cd"), "abcd");
 
-	// 超限：只保留最近 200K 字符，且尾部完整（exit 文案不能被截掉）
-	const capped = appendTerminalReplayBuffer("x".repeat(250_000), "tail");
+	// 未超过「上限 + 滞回窗口」：直接返回拼接结果（cons-string，不触发扁平化拷贝）。
+	// 这是 2027-02 性能修复的行为变化：贴线截尾会让超过 200K 后的**每个**数据事件
+	// 都 slice 一次 200K（V8 扁平化 + 整段拷贝），高吞吐终端输出每秒十几 MB 压渲染线程。
+	const withinHysteresis = appendTerminalReplayBuffer("x".repeat(250_000), "tail");
+	assert.equal(withinHysteresis.length, 250_004, "滞回窗口内不截尾");
+
+	// 超过「上限 + 滞回窗口」：截到最近 200K，且尾部完整（exit 文案不能被截掉）
+	const capped = appendTerminalReplayBuffer("x".repeat(TERMINAL_REPLAY_MAX_CHARS + TERMINAL_REPLAY_TRIM_HYSTERESIS), "tail");
 	assert.equal(capped.length, 200_000);
 	assert.ok(capped.endsWith("tail"));
 

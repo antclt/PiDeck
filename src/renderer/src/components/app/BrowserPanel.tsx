@@ -54,11 +54,10 @@ export function isExpectedNavigationAbort(error: unknown): boolean {
  * 这里用模块级状态保存轻量 tab 元数据，避免切换容器时丢 URL/标题/设备模式。
  * 真正的 WebContents 仍随组件挂载重建，避免同时运行两个 webview 实例。
  */
-export const moduleState: { tabs: TabEntry[]; activeTabId: string | null; device: DeviceType; navigateKey: number } = {
+export const moduleState: { tabs: TabEntry[]; activeTabId: string | null; device: DeviceType } = {
 	tabs: [],
 	activeTabId: null,
 	device: "pc",
-	navigateKey: 0,
 };
 
 function ensureInitialTab() {
@@ -92,7 +91,6 @@ export function navigateTo(url: string) {
 	// 初始 title 留空，tab 渲染 fallback 到 url，等 page-title-updated 更新真实标题
 	moduleState.tabs.push({ id, title: "", url });
 	moduleState.activeTabId = id;
-	moduleState.navigateKey += 1;
 	// 直接设 pendingUrl，面板挂载时会消费（监听器未注册时 URL 留存，挂载后立即补消费）
 	pendingNavigateUrl = url;
 	pendingNavigateListener?.();
@@ -290,6 +288,14 @@ export function BrowserPanel(props: {
 			if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(finalUrl)) {
 				finalUrl = `https://${finalUrl}`;
 			}
+			// 面板刚挂载、webview 未 dom-ready 时 loadUrl 会静默丢弃——用户敲的地址无声丢失。
+			// 复用外部导航的 pendingNavigate 队列：就绪后自动补导航（e2e 实测单次回车不可靠）。
+			const wv = webviewRef.current;
+			if (!wv?.isConnected || !webviewReadyRef.current) {
+				pendingNavigateUrl = finalUrl;
+				pendingNavigateListener?.();
+				return;
+			}
 			loadUrl(finalUrl);
 		},
 		[inputValue, loadUrl],
@@ -324,7 +330,6 @@ export function BrowserPanel(props: {
 			retryTimer = 0;
 			if (!alive || !pendingNavigateUrl) return;
 			const url = pendingNavigateUrl;
-			moduleState.navigateKey = 0;
 			const wv = webviewRef.current;
 			// 必须先确认 DOM 连接和 dom-ready，再调用 isLoading；否则 Electron 会同步抛错。
 			// 未就绪或加载中时保留 URL，等事件唤醒或重试后再消费，不能静默丢请求。
@@ -364,7 +369,6 @@ export function BrowserPanel(props: {
 				// onClose 语义 = 关闭整个浏览器面板：抽屉模式收起侧边栏，全屏模式退出全屏并收起侧边栏。
 				moduleState.tabs = [];
 				moduleState.activeTabId = null;
-				moduleState.navigateKey = 0;
 				pendingNavigateUrl = null;
 				setTabs([]);
 				setActiveTabId(null);

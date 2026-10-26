@@ -1,4 +1,13 @@
 "use client";
+// beui.dev/components/motion/preview-rail
+//
+// PiDeck 本地扩展（仅 4 条；`npx shadcn add @beui/preview-rail --overwrite` 会整份覆盖，
+// 覆盖后照此重施即可，tests/outlineRailContract.test.mjs 会在覆盖后变红报警）：
+// 1. `muted`：未加载目标的刻度淡一档（对齐 dsh TurnNavigator 的 markUnloaded）；
+// 2. 预览卡只渲染一张、按刻度算 top 绝对定位（官方版为对齐渲染了 N 个占位格子，DOM 减半）；
+// 3. 预览卡垂直位置用纯计算 + 钳制（`resolveCardTop`），不量 DOM——本组件在 PiDeck 的
+//    挂载点传了 `min-h-0`，导轨高度恰好等于 `条数 × itemSize`，与卡片容器高度一致；
+// 4. 预览卡在相邻刻度间移动补 140ms 过渡（官方版瞬移），减少动态偏好下关闭。
 
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type MouseEvent, type PointerEvent, type ReactNode, useCallback, useId, useRef, useState } from "react";
@@ -13,6 +22,8 @@ export interface PreviewRailItem {
 	label: string;
 	ariaLabel?: string;
 	description?: ReactNode;
+	/** [PiDeck local] 目标尚未加载（点击需先补页）：刻度淡一档，避免误当成「点了立刻跳」。 */
+	muted?: boolean;
 	href?: string;
 	target?: "_blank" | "_self" | "_parent" | "_top";
 	rel?: string;
@@ -36,6 +47,19 @@ export interface PreviewRailProps {
 	railClassName?: string;
 	previewContainerClassName?: string;
 	previewClassName?: string;
+}
+
+/** 预览卡高度（px）：PiDeck 会话定位轴传的卡片类是 `h-20`，两者必须一致（有测试兜底）。 */
+const PREVIEW_CARD_HEIGHT_PX = 80;
+
+/**
+ * [PiDeck local] 预览卡垂直位置：以所属刻度中心对齐卡片中心，再夹在导轨高度内。
+ * 导轨高度 = `count × itemSize`（调用方传 `min-h-0`），所以是纯计算，不需要量 DOM。
+ */
+function resolveCardTop(index: number, itemSize: number, count: number): number {
+	const maxTop = Math.max(0, count * itemSize - PREVIEW_CARD_HEIGHT_PX);
+	const centered = index * itemSize + itemSize / 2 - PREVIEW_CARD_HEIGHT_PX / 2;
+	return Math.max(0, Math.min(maxTop, centered));
 }
 
 function DefaultPreview({ item }: { item: PreviewRailItem }) {
@@ -97,7 +121,11 @@ export function PreviewRail({
 	const selectedId = items.some((item) => item.id === requestedActiveId) ? requestedActiveId : (items[0]?.id ?? "");
 	const displayedId = hoveredId ?? pinnedId ?? focusedId ?? "";
 	const highlightedId = displayedId || (highlightActive ? selectedId : "");
+	// 刻度缩放跟「高亮项」（悬停/固定/聚焦，没有才是当前活动项）；预览卡只跟「真正指向的那一项」。
+	// 两者混用会让卡片在没有悬停时也常显在活动刻度上（2026-10 用户反馈）。
 	const displayedIndex = items.findIndex((item) => item.id === highlightedId);
+	const previewIndex = displayedId ? items.findIndex((item) => item.id === displayedId) : -1;
+	const previewItem = previewIndex >= 0 ? items[previewIndex] : undefined;
 	const rowTemplate = items.length ? `repeat(${items.length}, ${itemSize}px)` : undefined;
 	const isHorizontal = orientation === "horizontal";
 
@@ -148,7 +176,7 @@ export function PreviewRail({
 						</>
 					);
 
-					const sharedClassName = cn("relative flex text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background", isHorizontal ? "h-12 w-6 items-end justify-center" : "h-6 w-12 items-center");
+					const sharedClassName = cn("relative flex text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background", isHorizontal ? "h-12 w-6 items-end justify-center" : "h-6 w-12 items-center", item.muted && "opacity-60");
 					const sharedStyle = isHorizontal ? { width: itemSize } : { height: itemSize };
 					const handlePointerEnter = (event: PointerEvent<HTMLElement>) => {
 						if (hover.enter(event)) setHoveredId(item.id);
@@ -228,48 +256,41 @@ export function PreviewRail({
 				})}
 			</nav>
 
-			{showPreview ? (
-				<div
-					aria-hidden="true"
-					style={isHorizontal ? { gridTemplateColumns: rowTemplate } : { gridTemplateRows: rowTemplate }}
-					className={cn("pointer-events-none absolute z-50 grid", isHorizontal ? "top-1/2 left-1/2 h-5 w-fit max-w-full -translate-x-1/2 -translate-y-1/2 justify-center" : previewSide === "before" ? "inset-y-0 right-16 left-4 content-center" : "inset-y-0 right-4 left-16 content-center", previewContainerClassName)}
-				>
-					{items.map((item) => (
-						<div key={item.id} style={isHorizontal ? { width: itemSize } : { height: itemSize }} className={cn("relative flex items-center", isHorizontal ? "justify-center" : undefined)}>
-							{item.id === displayedId ? (
-								<div className={cn(isHorizontal ? "absolute bottom-12 left-1/2 w-72 -translate-x-1/2" : cn("w-full max-w-sm", previewSide === "before" && "ml-auto"), previewClassName)}>
-									<motion.div layoutId={`preview-rail-card-${uid}`} transition={reduce ? { duration: 0 } : SPRING_LAYOUT}>
-										<AnimatePresence mode="wait" initial={false}>
-											<motion.div
-												key={item.id}
-												initial={reduce ? { opacity: 0 } : { opacity: 0, y: 4, filter: "blur(6px)" }}
-												animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, filter: "blur(0px)" }}
-												exit={
-													reduce
-														? { opacity: 0 }
-														: {
-																opacity: 0,
-																y: -2,
-																filter: "blur(4px)",
-																transition: {
-																	duration: 0.12,
-																	ease: EASE_OUT,
-																},
-															}
+			{showPreview && previewItem ? (
+				<div aria-hidden="true" className={cn("pointer-events-none absolute z-50", isHorizontal ? "top-1/2 left-1/2 h-5 max-w-full -translate-x-1/2 -translate-y-1/2" : previewSide === "before" ? "inset-y-0 right-16 left-4" : "inset-y-0 right-4 left-16", previewContainerClassName)}>
+					<div
+						style={isHorizontal ? { left: previewIndex * itemSize + itemSize / 2 } : { top: `${resolveCardTop(previewIndex, itemSize, items.length)}px` }}
+						className={cn("absolute", !reduce && !isHorizontal && "transition-[top] duration-[140ms] ease-out", isHorizontal ? "bottom-12 w-72 -translate-x-1/2" : cn("w-full max-w-sm", previewSide === "before" ? "right-0" : "left-0"), previewClassName)}
+					>
+						<motion.div layoutId={`preview-rail-card-${uid}`} transition={reduce ? { duration: 0 } : SPRING_LAYOUT}>
+							<AnimatePresence mode="wait" initial={false}>
+								<motion.div
+									key={previewItem.id}
+									initial={reduce ? { opacity: 0 } : { opacity: 0, y: 4, filter: "blur(6px)" }}
+									animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, filter: "blur(0px)" }}
+									exit={
+										reduce
+											? { opacity: 0 }
+											: {
+													opacity: 0,
+													y: -2,
+													filter: "blur(4px)",
+													transition: {
+														duration: 0.12,
+														ease: EASE_OUT,
+													},
 												}
-												transition={{
-													duration: reduce ? 0 : 0.18,
-													ease: EASE_OUT,
-												}}
-											>
-												{renderPreview ? renderPreview(item) : <DefaultPreview item={item} />}
-											</motion.div>
-										</AnimatePresence>
-									</motion.div>
-								</div>
-							) : null}
-						</div>
-					))}
+									}
+									transition={{
+										duration: reduce ? 0 : 0.18,
+										ease: EASE_OUT,
+									}}
+								>
+									{renderPreview ? renderPreview(previewItem) : <DefaultPreview item={previewItem} />}
+								</motion.div>
+							</AnimatePresence>
+						</motion.div>
+					</div>
 				</div>
 			) : null}
 

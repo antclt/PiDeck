@@ -24,7 +24,8 @@ function elementForNode(node: Node | null): Element | null {
 }
 
 /**
- * 全局划词监听：在应用任意正文面划选后产出「文本 + 选区矩形」快照，供浮出按钮定位。
+ * 全局划词监听：只在**助手回复正文**（selectionToolPolicy 的 SELECTION_TOOL_REPLY_SELECTOR）内划选时
+ * 产出「文本 + 选区矩形」快照，供浮出按钮定位；侧栏/设置/用户气泡等非回复区域不弹（2026-10 用户反馈）。
  *
  * 生命周期：selectionToolEnabled=false（设置里关掉）时不注册任何监听，并清空残留快照；
  * 打开时注册、卸载时成对移除（mouseup/keyup/selectionchange/scroll/resize）。

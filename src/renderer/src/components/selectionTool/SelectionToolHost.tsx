@@ -125,7 +125,7 @@ export function SelectionToolHost({ onSendToSession }: SelectionToolHostProps) {
 								onMouseDown={(event) => event.preventDefault()}
 								onClick={openToolbarFromSelection}
 								aria-label={toolbarTitle}
-								className="inline-flex h-[30px] items-center gap-1.5 rounded-full border border-border bg-popover px-3 text-xs font-medium text-popover-foreground shadow-lg transition-colors hover:bg-accent-soft"
+								className="inline-flex h-[30px] items-center gap-1.5 rounded-full border border-border bg-popover px-3 text-xs font-medium text-popover-foreground shadow-md transition-colors hover:bg-accent-soft"
 							>
 								{defaultAgent?.icon ? (
 									<span className="text-sm leading-none" aria-hidden="true">

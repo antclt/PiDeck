@@ -232,7 +232,13 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 					description={t("settings.defaultAgentBackendDesc")}
 					alignEnd={false}
 				>
-					<Select value={draft.defaultAgentBackend} onValueChange={(value) => updateDraft({ defaultAgentBackend: value as AppSettings["defaultAgentBackend"] })}>
+					<Select
+						value={draft.defaultAgentBackend}
+						onValueChange={(value) =>
+							// 手动选择即接管：置 manual 后自动选择（只有 DSH 时默认 dsh）不再改写用户的选择。
+							updateDraft({ defaultAgentBackend: value as AppSettings["defaultAgentBackend"], defaultAgentBackendManual: true })
+						}
+					>
 						<SelectTrigger className="w-full">
 							<SelectValue />
 						</SelectTrigger>
@@ -472,6 +478,21 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 				<SettingSwitchRow anchor="common-cua-enabled" title={t("settings.cuaEnabled")} description={t("settings.cuaEnabledDesc")} checked={draft.cuaEnabled ?? false} dirty={isDirty("cuaEnabled")} onChange={(checked) => updateDraft({ cuaEnabled: checked })} />
 				{/* 免审批：依赖 CUA 主开关，主开关关闭时置灰；只绕过审批对话框，杀开关仍生效 */}
 				<SettingSwitchRow anchor="common-cua-auto-approve" title={t("settings.cuaAutoApprove")} description={t("settings.cuaAutoApproveDesc")} checked={draft.cuaAutoApprove ?? true} disabled={!draft.cuaEnabled} dirty={isDirty("cuaAutoApprove")} onChange={(checked) => updateDraft({ cuaAutoApprove: checked })} />
+			</SettingsSection>
+
+			{/* 浏览器 Agent（实验性）：与 CUA 共用本地 MCP 端点，向 pi 暴露 browser_* 工具；写操作默认自动放行，可关闭免审批改为逐次确认（内置浏览器带真实登录态，风险自担）。 */}
+			<SettingsSection id="settings-section-common-browser-agent" title={t("settings.browserAgentSection")} description={t("settings.browserAgentSectionDesc")}>
+				<SettingSwitchRow anchor="common-browser-agent-enabled" title={t("settings.browserAgentEnabled")} description={t("settings.browserAgentEnabledDesc")} checked={draft.browserAgentEnabled ?? false} dirty={isDirty("browserAgentEnabled")} onChange={(checked) => updateDraft({ browserAgentEnabled: checked })} />
+				{/* 免审批：依赖浏览器 Agent 主开关，主开关关闭时置灰；全局/会话审批门仍生效 */}
+				<SettingSwitchRow
+					anchor="common-browser-agent-auto-approve"
+					title={t("settings.browserAgentAutoApprove")}
+					description={t("settings.browserAgentAutoApproveDesc")}
+					checked={draft.browserAgentAutoApprove ?? true}
+					disabled={!draft.browserAgentEnabled}
+					dirty={isDirty("browserAgentAutoApprove")}
+					onChange={(checked) => updateDraft({ browserAgentAutoApprove: checked })}
+				/>
 			</SettingsSection>
 
 			{/* 文件资源管理器集成：注册「用 PiDeck 打开」右键菜单（目录与空白处），

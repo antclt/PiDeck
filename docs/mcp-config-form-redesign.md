@@ -84,7 +84,16 @@
 
 - 自定义入口继续接受 HTTP(S) URL、命令行和 JSON 配置片段；完整 Pi MCP 能力可通过 JSON 或源文件编辑。
 - `auth.provider` 只在全局 HTTP 服务的高级区域可设置，复用 Pi 模型供应商凭据；项目配置不能指定它。
-- OAuth 客户端参数（`clientId`、`clientSecret` 等）不进入普通表单。通过 JSON 或源文件导入时保留原值。
+- OAuth 客户端参数（`clientId`、`clientSecret` 等）不进入普通表单。通过 JSON 或源文件导入时保留原值。例外是 `oauth.clientName`：授权服务器对动态注册做客户端白名单校验的服务（目前只有 Figma，见下节）由目录条目自动写入，模板表单只读展示实际值。
+
+## 动态客户端注册白名单（Figma）
+
+Figma 的注册端点 `https://api.figma.com/v1/oauth/mcp/register` 对 `client_name` 做白名单校验，未收录的客户端直接回裸文本 `Forbidden`（连 JSON 错误都不是），pi 侧表现为 `OAuth dynamic client registration failed with status 403: Forbidden`。2026-10 实测：`pi` / `Cursor` / `VS Code` / 随机名 → 403；`Claude Code` / `Codex` / `Claude Desktop` / `JetBrains Junie` → 200。
+
+- 登记点：`mcpServiceCatalog.ts` 的 `MCP_DCR_CLIENT_NAME_OVERRIDES`（`figma: "Claude Code"`），由 `buildCatalogBase` 注入 `oauth.clientName`，`buildCatalogDefinition` 与模板保存共用同一条路径。
+- 表单**不展示**任何提示文案（用户看这些只会烦）：覆盖值静默生效，排查入口在本文与代码注释。
+- 已保存过的 figma 条目不会自动改：`pi mcp logout figma` 后删掉条目重加（或手改 `mcp.json` 加 `oauth.clientName`）再登录。
+- 其余 OAuth 目录条目（Sentry / Supabase / Linear / Notion / Context7 / Exa）实测 `client_name: pi` 均放行（201/200），**不要**顺手加 clientName 覆盖；新增条目登录报 403 且正文是裸文本时，按同一方法换名试注册确认后再登记。
 - 独立 `pi mcp list` 状态不等同于正在运行会话的实时状态。
 
 ## 密钥存储说明（对用户如实告知）

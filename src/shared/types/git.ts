@@ -233,7 +233,7 @@ export type CommitEntry = {
 	message: string; // 提交信息首行（subject）
 	authorName: string;
 	authorEmail: string;
-	authorDate: number; // unix timestamp
+	authorDate: number; // unix timestamp (ms)：GitService 已把 git 的秒级时间戳乘 1000，消费方直接用 new Date(ms)
 	parents: string[]; // 父提交 hash 列表
 	refNames: string[]; // 关联的 ref 名称（如 HEAD -> main, origin/main）
 	/** git log --graph 输出的 ASCII 图谱行（等宽字体渲染即得分支图） */

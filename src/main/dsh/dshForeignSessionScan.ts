@@ -1,4 +1,5 @@
 import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { zstdDecompressSync } from "node:zlib";
 import type { DshForeignSessionItem } from "./dshForeignSync";
@@ -109,6 +110,49 @@ export function scanDshSessionHeaders(dshHome: string, options: { foldTitle?: Fo
 	return found;
 }
 
+/**
+ * 让出主进程事件循环：磁盘扫描按「一个会话目录」切片，扫描期间任何 IPC /
+ * 定时器 / 流式转发都能插进来。同步版整段扫描在大会话目录（数百会话 ×
+ * 64KiB 读 + 冷会话 256KiB 前缀 + zstd 同步解压）上是一次数百 ms 到秒级的
+ * 事件循环冻结，表现为启动后整窗间歇性无响应（2027-02 性能审计）。
+ * 单会话切片本身仍有界（≤256KiB 读 + 单帧解压），不需要更细的切分。
+ */
+function yieldToEventLoop(): Promise<void> {
+	return new Promise((resolve) => setImmediate(resolve));
+}
+
+/**
+ * scanDshSessionHeaders 的异步版（推荐主进程 IPC / 启动路径使用）：
+ * 目录遍历走 fs/promises，每个会话目录处理前让出一轮事件循环。
+ * 单会话读取逻辑与同步版完全共用（readSessionHeader），行为零分叉。
+ */
+export async function scanDshSessionHeadersAsync(dshHome: string, options: { foldTitle?: FoldTitleOption } = {}): Promise<ScannedDshSessionHeader[]> {
+	const sessionsRoot = join(dshHome, "sessions");
+	if (!existsSync(sessionsRoot)) return [];
+	let workspaceDirs: string[];
+	try {
+		workspaceDirs = (await readdir(sessionsRoot, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+	} catch {
+		return [];
+	}
+	const found: ScannedDshSessionHeader[] = [];
+	for (const workspaceDir of workspaceDirs) {
+		const workspacePath = join(sessionsRoot, workspaceDir);
+		let sessionDirs: string[];
+		try {
+			sessionDirs = (await readdir(workspacePath, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+		} catch {
+			continue;
+		}
+		for (const sessionDir of sessionDirs) {
+			await yieldToEventLoop();
+			const header = readSessionHeader(join(workspacePath, sessionDir), options.foldTitle);
+			if (header) found.push(header);
+		}
+	}
+	return found;
+}
+
 /** 外部根会话清单：磁盘扫描 + 根会话过滤 + 投影缓存标题 + 日志折叠补全。 */
 export function listForeignSessionsFromDisk(dshHome: string): DshForeignSessionItem[] {
 	const titles = readSessionProjectionTitles(dshHome);
@@ -128,6 +172,22 @@ export function listForeignSessionsFromDisk(dshHome: string): DshForeignSessionI
 				updatedAt: header.updatedAt,
 			};
 		});
+}
+
+/** listForeignSessionsFromDisk 的异步版：扫描主体按会话切片让出（见 scanDshSessionHeadersAsync）。 */
+export async function listForeignSessionsFromDiskAsync(dshHome: string): Promise<DshForeignSessionItem[]> {
+	const titles = readSessionProjectionTitles(dshHome);
+	const headers = await scanDshSessionHeadersAsync(dshHome, { foldTitle: (sessionId) => !titles.has(sessionId) });
+	return headers.filter(isForeignRootSession).map((header) => {
+		const title = titles.get(header.id) ?? header.loggedTitle;
+		return {
+			dshSessionId: header.id,
+			...(header.cwd ? { cwd: header.cwd } : {}),
+			...(title ? { title } : {}),
+			...(header.agentPreset ? { agentPreset: header.agentPreset } : {}),
+			updatedAt: header.updatedAt,
+		};
+	});
 }
 
 /**

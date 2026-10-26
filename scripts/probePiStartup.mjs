@@ -1,7 +1,13 @@
 // P0 诊断探针：分段测量 pi RPC 冷启动耗时（spawn → get_state 就绪）。
 // 用法: node scripts/probePiStartup.mjs [iterations]
-// 输出三种配置各 N 次的分段计时：node+pi 模块图（--version）、pi 核心 RPC 引导（--no-extensions）、全量扩展。
+// 输出四种配置各 N 次的分段计时：node+pi 模块图（--version）、pi 核心 RPC 引导（--no-extensions）、
+// 自动发现（不 -e 我们的扩展——量化 pi 扫用户扩展目录/npm 包树的成本）、全量（发现 + 内置扩展 -e）。
 // 目的：定位「激活 8.4s」的构成，为 standby 池与独立优化提供数据。
+//
+// ⚠️ 归因教训（2026-10-24 实测纠偏）：「全量」档包含自动发现，不能把 full−core 当作扩展成本——
+// 本机 ~/.pi/agent/npm/node_modules 有 334 个包（用户 7 个 pi 扩展的传递依赖），
+// pi 的发现要吃 ~4.5s（空载）~10s+（高负载），而 15 个内置 .ts 扩展本身只有 ~0.5-1.1s
+// （jiti 编译缓存命中时 ~0.6s）。要砍大头得治发现路径（精简用户扩展/上游优化），不是内置扩展。
 import { spawn } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -92,6 +98,8 @@ const extFiles = readdirSync(EXT_DIR)
 	.map((f) => path.join(EXT_DIR, f));
 const baseArgs = ["--mode", "rpc", "--no-themes", "--offline"];
 const coreArgs = [...baseArgs, "--no-extensions", "--no-skills"];
+// 发现档：不开 --no-extensions/--no-skills、不 -e 我们的扩展——纯量化 pi 的用户扩展/npm 包树发现成本。
+const discoveryArgs = [...baseArgs];
 const fullArgs = [...baseArgs, ...extFiles.flatMap((f) => ["-e", f])];
 
 const mode = process.argv[3] || "summary";
@@ -107,8 +115,10 @@ if (mode === "each") {
 	for (let i = 0; i < ITER; i++) {
 		const versionMs = await probeVersion();
 		const core = await probeRpc(coreArgs, "core ");
+		const discovery = await probeRpc(discoveryArgs, "discovery ");
 		const full = await probeRpc(fullArgs, "full ");
-		const fmt = (r) => (r.error ? `ERROR(${r.error})` : `pid+${r.pidMs}ms ready+${r.firstLineMs}ms`);
-		console.log(`#${i + 1} --version=${versionMs}ms | core: ${fmt(core)} | full: ${fmt(full)} | extDelta=${core.error || full.error ? "?" : full.firstLineMs - core.firstLineMs}ms`);
+		const fmt = (r) => (r.error ? `ERROR(${r.error})` : `ready+${r.firstLineMs}ms`);
+		const delta = (a, b) => (a.error || b.error ? "?" : `${a.firstLineMs - b.firstLineMs}ms`);
+		console.log(`#${i + 1} --version=${versionMs}ms | core: ${fmt(core)} | discovery: ${fmt(discovery)} (+${delta(discovery, core)}) | full: ${fmt(full)} (ext+${delta(full, discovery)})`);
 	}
 }

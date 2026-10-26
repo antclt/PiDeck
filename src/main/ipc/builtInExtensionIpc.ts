@@ -1,5 +1,6 @@
-import { ipcMain, shell } from "electron";
+import { ipcMain } from "electron";
 import { ipcChannels } from "../../shared/ipc";
+import { openSystemPath } from "../fs/openPath";
 import { BUILT_IN_EXTENSIONS_UPDATE_ALLOWED_BRANCHES, BUILT_IN_EXTENSIONS_UPDATE_DEFAULT_BRANCH, type BuiltInExtensionsUpdater } from "../extensions/builtInExtensionsUpdater";
 
 /**
@@ -23,7 +24,7 @@ export function registerBuiltInExtensionIpc(updater: BuiltInExtensionsUpdater): 
 	ipcMain.handle(ipcChannels.extensionsBuiltInUpdateRestorePrevious, () => updater.restorePrevious());
 	// 打开当前生效的扩展目录（覆盖层优先，否则内置）：路径由主进程解析，渲染层不传路径。
 	ipcMain.handle(ipcChannels.extensionsBuiltInOpenDir, async () => {
-		const error = await shell.openPath(updater.resolveEffectiveExtensionsDir());
+		const error = await openSystemPath(updater.resolveEffectiveExtensionsDir());
 		// Electron 用返回字符串报告打开失败；显式抛出后前端才能提示路径不存在或系统无法打开。
 		if (error) throw new Error(error);
 	});

@@ -69,7 +69,9 @@ export function YaoPromptTab(props: { onImported?: () => void; projectId?: strin
 		setInitialLoading(true);
 		setError(null);
 		try {
-			const [result, installed] = await Promise.all([desktopApi.yaoPrompts.list(), getInstalledPromptNames(props.projectId)]);
+			// 只要分类栏（2027-02）：原先无参 list() 会触发「全量」形态——主进程逐条读
+			// description BLOB 并 gunzip，再经 IPC 传 ≈0.9MB JSON，而这里只用 categories。
+			const [result, installed] = await Promise.all([desktopApi.yaoPrompts.list({ categoriesOnly: true }), getInstalledPromptNames(props.projectId)]);
 			setData(result);
 			if (result.dbState) setDbSnapshot((previous) => (previous?.state === "ready" ? previous : ({ state: result.dbState } as YaoPromptDbSnapshot)));
 			setInstalledNames(installed);

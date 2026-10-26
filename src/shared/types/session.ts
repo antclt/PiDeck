@@ -512,6 +512,13 @@ export type SendPromptResult = { accepted: true } | ({ accepted: false; error: s
 export type SendSessionPromptInput = Omit<SendPromptInput, "agentId"> & {
 	sessionId: string;
 	requestId: string;
+	/**
+	 * 发送前核对「运行时真的在用会话选择的模型」，不一致就拒绝本次发送。
+	 * 只给 fork 化重发/编辑用：这两个动作的前提是「在用户看到的那个模型上重试」，
+	 * pi 找不到 fork 恢复的模型时会静默回落到默认模型（issue #370）；普通发送沿用
+	 * 2026-09 的降级策略（模型偏好失效只提示、不阻断）。
+	 */
+	requireAppliedModel?: boolean;
 };
 
 export type SendSessionPromptResult = SendPromptResult & {

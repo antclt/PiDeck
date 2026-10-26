@@ -68,7 +68,7 @@ export const TipTapComposer = forwardRef<HTMLDivElement, TipTapComposerProps>(fu
 							<div className="pointer-events-none absolute inset-x-3 top-[10px] flex items-start gap-2 text-text-faint" style={{ fontSize: "var(--font-size-input)", lineHeight: "var(--line-height-input)" }} aria-hidden="true">
 								<span className="min-w-0 truncate">{props.suggestion}</span>
 								{/* 键帽比文案深一档：ghost 句子要「轻」，但 Tab 提示必须读得清（faint 再叠 opacity 会糊）。 */}
-								<kbd className="mt-[3px] shrink-0 rounded border border-border-subtle px-1 text-[11px] leading-4 text-text-tertiary opacity-80">Tab</kbd>
+								<kbd className="mt-[3px] shrink-0 rounded border border-border-subtle px-1 text-micro leading-4 text-text-tertiary opacity-80">Tab</kbd>
 							</div>
 						) : null
 					}

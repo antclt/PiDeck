@@ -66,15 +66,15 @@ function shouldInclude(relativePath) {
 	return true;
 }
 
-export async function packFeishuSdk({ checkOnly = false } = {}) {
+export async function packFeishuSdk({ checkOnly = false, outDir = OUT_DIR } = {}) {
 	const lock = JSON.parse(readFileSync(join(ROOT, "package-lock.json"), "utf8"));
 	const packages = collectSdkClosure(lock);
 	const sdkVersion = lock.packages[`node_modules/${SDK_NAME}`]?.version;
 	if (!sdkVersion) throw new Error(`package-lock.json 里找不到 ${SDK_NAME}`);
 
 	const archiveName = `feishu-sdk-${sdkVersion}.tar.gz`;
-	const archivePath = join(OUT_DIR, archiveName);
-	const manifestPath = join(OUT_DIR, "manifest.json");
+	const archivePath = join(outDir, archiveName);
+	const manifestPath = join(outDir, "manifest.json");
 
 	if (checkOnly) {
 		if (!existsSync(archivePath) || !existsSync(manifestPath)) throw new Error(`缺少飞书 SDK 产物：${archivePath}`);
@@ -85,7 +85,7 @@ export async function packFeishuSdk({ checkOnly = false } = {}) {
 		return { archivePath, manifest, checked: true };
 	}
 
-	await mkdir(OUT_DIR, { recursive: true });
+	await mkdir(outDir, { recursive: true });
 	await rm(archivePath, { force: true });
 
 	// 包目录本身（按 install 布局：node_modules/<name>），只保留运行时文件。
@@ -96,6 +96,9 @@ export async function packFeishuSdk({ checkOnly = false } = {}) {
 			gzip: { level: 9 },
 			cwd: ROOT,
 			file: archivePath,
+			// portable 只对目录条目置 noMtime，文件条目仍会嵌 stat.mtime → 换机器/重跑
+			// npm ci 后 sha256 变一次，产物不可复现。配合 gzip 的 MTIME 归零才能稳定。
+			noMtime: true,
 			portable: true,
 			prefix: "",
 			filter: (path) => {

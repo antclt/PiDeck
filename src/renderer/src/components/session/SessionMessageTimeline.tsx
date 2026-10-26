@@ -2,6 +2,7 @@ import { useAtomValue } from "jotai";
 import { selectAtom } from "jotai/utils";
 import { useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type { ComponentProps, ReactNode, Ref, RefObject } from "react";
 import type { ChatMessage, ImageContent } from "../../../../shared/types";
 import { MarkdownStream } from "./MarkdownStream";
@@ -13,6 +14,7 @@ import { liveThinkingIdBySessionIdAtomFamily, liveTextStreamingBySessionAtom, li
 import { writeClipboardImage } from "../../utils/clipboard";
 import { useTimelineSelection } from "../../hooks/useTimelineSelection";
 import { useMessageContextMenu } from "../../hooks/useMessageContextMenu";
+import { useFavorites } from "../../hooks/useFavorites";
 import { SelectionToolbar } from "./timeline/SelectionToolbar";
 import { MessageContextMenu } from "./timeline/MessageContextMenu";
 import { deriveTimelineRunActivity } from "./timeline/timelineRunActivity";
@@ -32,7 +34,10 @@ import { injectAskEchoMessage } from "../../utils/askUi";
 import { resolveFreshTailIds } from "../../lib/pinTurnScroll";
 import { chatContentWidthStyle } from "./chatContentWidth";
 import { useSessionVisionBridgeExpected } from "../../hooks/useSessionVisionBridgeExpected";
-import { selectTimelineTurnWindow, shouldWindowTimelineTurns, TIMELINE_MOUNTED_TURN_LIMIT, countAgentRunItems } from "./timeline/turnRenderWindow";
+import { countAgentRunItems, selectTimelineTurnWindow, shouldWindowTimelineTurns, TIMELINE_MOUNTED_TURN_LIMIT } from "./timeline/turnRenderWindow";
+import { VirtualRunList } from "./timeline/VirtualRunList";
+import { isRenderableRunItem } from "./timeline/virtualTimelinePolicy";
+import { REVEAL_TIMELINE_ENTRY_EVENT, REVEAL_TIMELINE_ENTRY_TIMEOUT_MS } from "../../hooks/timeline/timelineRevealChannel";
 
 type TurnRowProps = ComponentProps<typeof TurnRow>;
 type UserBubbleProps = ComponentProps<typeof UserBubble>;
@@ -177,7 +182,22 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 	const { quote: selectionQuote, clear: clearSelectionQuote, toolbarRef: selectionToolbarRef } = useTimelineSelection(timelineRef);
 	// 消息右键菜单：复制来源（选区快照 / 命中消息 / live 正文回退）由 hook 解析，
 	// 这里只持有控制器并挂到消息列表容器上（消息、用户气泡、工具卡都在容器内）。
-	const messageContextMenu = useMessageContextMenu({ messages: activeMessages, scopeKey: sessionId });
+	const { favoritedMessageKeys, toggleMessageFavorite } = useFavorites();
+	// 收藏来源元信息：右键菜单每次打开时现取（favoriteContext），回合星标走 ref 读最新值——
+	// TurnRow 的自定义 memo 不比较回调引用，回调必须稳定，否则历史轮次会被整体重渲染。
+	const favoriteMetaRef = useRef({ sessionTitle: session?.title ?? null, projectId: session?.projectId ?? null });
+	favoriteMetaRef.current = { sessionTitle: session?.title ?? null, projectId: session?.projectId ?? null };
+	const favoriteContext = useMemo(() => ({ sessionId, sessionTitle: session?.title ?? null, projectId: session?.projectId ?? null }), [session?.projectId, session?.title, sessionId]);
+	const handleFavoriteReply = useCallback(
+		(text: string, messageId: string | null) => {
+			if (!sessionId) return;
+			const meta = favoriteMetaRef.current;
+			// 开关语义：这条回复已收藏则取消，否则新增（与右键菜单共用「会话 + 消息 id」身份）。
+			void toggleMessageFavorite({ kind: "message", text, role: "assistant", messageId, sessionId, sessionTitle: meta.sessionTitle, projectId: meta.projectId });
+		},
+		[sessionId, toggleMessageFavorite],
+	);
+	const messageContextMenu = useMessageContextMenu({ messages: activeMessages, scopeKey: sessionId, favoriteContext, favoritedMessageKeys });
 	const activeRuntimeState = runtime?.state;
 	const activeConversationStatus = modernSurfaceState.status;
 	// 只订 live id：思考正文由 ThinkingStep 叶子订阅，避免 50ms 戳醒整条 timeline。
@@ -203,10 +223,22 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 	// 只对「时间线尾部新增」的消息播放一次入场动画：历史加载/分页前插不算，
 	// 避免整屏消息同时闪烁。乐观上屏的用户消息与流式替换后的权威消息都会触发。
 	const [multiSelectOpen, setMultiSelectOpen] = useState(false);
+	// 多选期间 VirtualRunList 用全量 reconciledRuns 渲染（导出需要窗口外的 DOM）。关闭后若立刻
+	// 缩回 turn 窗口，用户在多选时滚到的「窗口外那一轮」会从 DOM 消失，锚点补偿找不到行，
+	// 视口被 clamp 回尾部（#401 复审实测的 P1）。所以关闭后保留全量渲染，直到回到底部
+	// （此时锚点必然落在尾部窗口内）；虚拟化仍生效，常驻 DOM 不涨。
+	const [retainFullRuns, setRetainFullRuns] = useState(false);
+	// 导出图片需要「窗口外选中的行也在 DOM」：只在点「复制为图片」时临时整表真实渲染，
+	// 导出后立刻恢复虚拟化。多选打开期间保持虚拟化——否则长历史点开多选就是一次全量挂载
+	// （#213 形态，终审 P1）。
+	const [multiSelectExporting, setMultiSelectExporting] = useState(false);
 	// 2026-08 perf：TurnRow 的 memo 浅比较依赖 props 引用稳定。内联箭头会在每次
 	// 时间线渲染创建新函数 → 所有 TurnRow 的 memo 失效 → 滚动/流式时全量重渲染
 	// （longtask 归因：index.js::check/anon 在每个长任务里占 50ms+）。
-	const handleEnterMultiSelect = useCallback(() => setMultiSelectOpen(true), []);
+	const handleEnterMultiSelect = useCallback(() => {
+		setRetainFullRuns(true);
+		setMultiSelectOpen(true);
+	}, []);
 	const [freshMessageIds, setFreshMessageIds] = useState<ReadonlySet<string>>(() => new Set());
 	const seenTailMessageIdRef = useRef<string | undefined>(undefined);
 	const freshTimersRef = useRef<Map<string, number>>(new Map());
@@ -255,6 +287,13 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 		wasRuntimeBusyRef.current = isRuntimeBusy;
 		seenTailMessageIdRef.current = undefined;
 		setFreshMessageIds(new Set());
+		// retain 是「关闭多选后不缩窗」的会话内状态：切会话必须复位，否则新会话的窗口裁剪
+		// 会对整个会话永久失效（#401 终审 P1）。
+		setRetainFullRuns(false);
+		// 多选状态同样是「本会话」的：不复位时新会话的 runs 会直接吃全量 reconciledRuns
+		// （跳过 turn 窗口裁剪），旧多选面板还会把候选换成新会话消息（#401 复审 P1）。
+		setMultiSelectOpen(false);
+		setMultiSelectExporting(false);
 		for (const timer of freshTimersRef.current.values()) window.clearTimeout(timer);
 		freshTimersRef.current.clear();
 		prevDisplayRunsIdsRef.current = undefined;
@@ -409,6 +448,10 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 	const followingForTurnWindow = controller.autoScroll;
 	const turnWindowTurns = followingForTurnWindow ? TIMELINE_MOUNTED_TURN_LIMIT : controller.scrolledWindowTurns;
 	const displayRuns = useMemo(() => selectTimelineTurnWindow(reconciledRuns, turnWindowTurns), [reconciledRuns, turnWindowTurns]);
+	useEffect(() => {
+		// 多选关闭且回到底部后才允许缩回 turn 窗口：回底时锚点必在尾部窗口内，缩回不会丢行。
+		if (!multiSelectOpen && followingForTurnWindow) setRetainFullRuns(false);
+	}, [followingForTurnWindow, multiSelectOpen]);
 	// 身份判定（2026-08 perf）：位置判定（index / displayRuns.length）随滚动窗口切片
 	// 变化会让窗口内所有 TurnRow 的位置相关 props 一起翻转 → memo 全部失效 →
 	// 滚动 + 流式推送叠加时全量重渲染，单帧超 50ms 形成 longtask（实测归因）。
@@ -548,7 +591,9 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 		return clearIdle;
 	}, [hasLiveRuntime, isRuntimeBusy, runtime?.agentId, runtime?.runtimeGeneration, sessionId]);
 
-	const turnWindowActive = shouldWindowTimelineTurns(countAgentRunItems(reconciledRuns), turnWindowTurns);
+	// 轮数集中算一次供窗口判定用：reconciledRuns 在流式期间每帧重建，memo 只保证同一次渲染内不重复计数。
+	const agentRunCount = useMemo(() => countAgentRunItems(reconciledRuns), [reconciledRuns]);
+	const turnWindowActive = shouldWindowTimelineTurns(agentRunCount, turnWindowTurns);
 	// 方案 C（2026-12）渐进扩展：把「窗口是否仍可扩展」同步给 controller 的滚动监听——
 	// 接近窗口顶部且还有未挂载的已加载数据时，先自动扩窗口（本地 DOM，无网络往返），
 	// 而不是一次性把整个历史窗口挂出来导致滚动条骤变。渲染期写 ref，
@@ -639,6 +684,16 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 	async function copySelectedMessages(selectedIds: Set<string>, kind: "text" | "markdown" | "image") {
 		if (kind === "image") {
 			try {
+				// flushSync 同步提交 solid 全量渲染：createRoot 的渲染可被切片，rAF 两帧不保证已提交
+				// （终审 P2）。提交后再等一帧让浏览器完成布局；timer 兜底「窗口最小化时 rAF 暂停」。
+				flushSync(() => setMultiSelectExporting(true));
+				await new Promise<void>((resolve) => {
+					const timer = window.setTimeout(resolve, 32);
+					requestAnimationFrame(() => {
+						window.clearTimeout(timer);
+						resolve();
+					});
+				});
 				const { toBlob } = await import("html-to-image");
 				const source = timelineRef.current?.querySelector(".message-list") as HTMLElement | null;
 				if (!source) throw new Error("Timeline capture target is missing");
@@ -647,7 +702,9 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 				const clone = source.cloneNode(true) as HTMLElement;
 				for (const item of Array.from(clone.children)) {
 					if (!(item instanceof HTMLElement)) continue;
-					const id = item.dataset.messageId;
+					// 虚拟化的包装 div 没有 data-message-id：唯一 id 落在 data-solid-run-id / data-virtual-run-id 上。
+					// 只认 dataset.messageId 会把包装层全部判成「未选中」删掉，导出空白图。
+					const id = item.dataset.messageId ?? item.dataset.solidRunId ?? item.dataset.virtualRunId;
 					if (!id || !captureIds.has(id)) item.remove();
 				}
 				clone.classList.add("multi-select-image-export");
@@ -672,6 +729,8 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 			} catch (error) {
 				props.onToast(t("copy.failed"));
 				void window.piDesktop?.app.rendererLog("warn", "clipboard", "copy selected messages as image failed", error).catch(() => undefined);
+			} finally {
+				setMultiSelectExporting(false);
 			}
 			setMultiSelectOpen(false);
 			return;
@@ -699,6 +758,163 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 		props.onToast(kind === "text" ? t("copy.asTextCopied") : t("copy.asMarkdownCopied"));
 		setMultiSelectOpen(false);
 	}
+
+	// 虚拟化的两个判定函数必须是稳定引用：内联箭头每帧换引用，VirtualRunList 里 split 的
+	// useMemo 会恒失效（每帧 O(n) 重算）。
+	const virtualRunId = useCallback((item: RenderMessage) => renderMessageId(item) ?? "", []);
+	const isAgentRunItem = useCallback((item: RenderMessage) => item.kind === "agent-run", []);
+	// 与 renderRunItem 首行、VirtualRunList 的 entries 共用同一份「是否产出 DOM」判据：
+	// 判定放宽会为空行多吃一条行距，收紧会把卡片从虚拟区静默丢掉（#401 评审）。
+	const isRenderableItem = useCallback((item: RenderMessage) => isRenderableRunItem(item), []);
+	// 恢复锚点 / 挂起跳转在途：这两条路径按 [data-message-id] 查 DOM，虚拟区外的行不在 DOM 里。
+	// 交给 VirtualRunList 的 solid 模式（同一组件内整表真实渲染），不换组件类型 ——
+	// 换类型会整棵卸载，heightsRef 的高度缓存丢失，恢复完成后按估值重排会跳位。
+	const navBlocked = props.controller.navBlockingVirtualization;
+	// 宿主插件按 entryId 导航：目标轮可能在虚拟区外（没有 DOM）。hook 派发渲染层事件，
+	// 这里转给 controller.jumpToMessage——它会挂起 pendingJump 并整表真实渲染后精确落位。
+	// 事件带 sessionId：插件刚 selectSession 时本组件可能还挂在旧会话，先存下来等切到位再跳。
+	const revealRequestRef = useRef<{ entryId: string; sessionId: string; at: number } | null>(null);
+	const controllerRef = useRef(props.controller);
+	controllerRef.current = props.controller;
+	useEffect(() => {
+		// 单测的极简 window 只有定时器（没有 addEventListener）：没有监听能力时直接跳过。
+		// 生产（Electron 渲染进程）一定有；不要在测试沙箱里造事件系统来迁就一个 effect。
+		if (typeof window === "undefined" || typeof window.addEventListener !== "function") return;
+		const handleReveal = (event: Event) => {
+			const detail = (event as CustomEvent<{ entryId?: string; sessionId?: string }>).detail;
+			if (!detail?.entryId) return;
+			if (detail.sessionId && detail.sessionId !== sessionId) {
+				revealRequestRef.current = { entryId: detail.entryId, sessionId: detail.sessionId ?? "", at: Date.now() };
+				return;
+			}
+			revealRequestRef.current = null;
+			controllerRef.current.jumpToMessage(detail.entryId);
+		};
+		window.addEventListener(REVEAL_TIMELINE_ENTRY_EVENT, handleReveal);
+		// 事件只派发一次，不会自己追到新会话：切到位后重放一次。
+		const pending = revealRequestRef.current;
+		if (pending) {
+			revealRequestRef.current = null;
+			// 过期请求丢弃：用户之后手动切到目标会话时，不该被几秒前的插件导航拽走并高亮。
+			if (pending.sessionId === sessionId && Date.now() - pending.at <= REVEAL_TIMELINE_ENTRY_TIMEOUT_MS) controllerRef.current.jumpToMessage(pending.entryId);
+		}
+		return () => window.removeEventListener(REVEAL_TIMELINE_ENTRY_EVENT, handleReveal);
+	}, [sessionId]);
+
+	const renderRunItem = (item: RenderMessage): ReactNode => {
+		// 判定与 VirtualRunList 的 entries 同源（virtualTimelinePolicy.isRenderableRunItem）：
+		// 虚拟区只为可渲染条目建包装 div，两边口径必须一致。
+		if (!isRenderableItem(item)) return null;
+		if (item.kind === "agent-run") {
+			// Only an active model turn keeps its latest run live. Context
+			// compaction happens after agent_end, so it must not fold the answer.
+			// 2026-08 perf：身份判定（run id），不用 index/length——滚动窗口切片变化
+			// 不翻转位置 props，memo 保持生效。busy 仍按「最后一条显示条目」判定
+			// （用户发送后激活等待期不把已完成回答当 live，见组件内注释）。
+			const isRunStreaming = isTurnRunning && item.id === lastDisplayedItemId;
+			return (
+				<TurnRow
+					key={item.id}
+					run={item}
+					sessionId={sessionId}
+					// 行头署名与后端一致：DSH 会话的回复标 dsh，而非 pi
+					backend={session?.backend ?? "pi"}
+					// ACP 会话的回复行头用工具自己的品牌 logo（分不清是哪个 CLI 就失去署名意义）
+					acpToolId={session?.acpToolId}
+					fresh={freshMessageIds.has(item.id)}
+					topFresh={topFreshIds.has(item.id)}
+					onPreviewImage={props.onPreviewImage}
+					showThinking={props.showThinking}
+					isStreaming={isRunStreaming}
+					// 始终下发 live id（按 message id 命中）；勿绑 isRunStreaming，
+					// 否则流结束而 History 未到时会提前卸思考步导致 remount dump。
+					liveThinkingId={liveThinkingId}
+					isRuntimeBusy={isRuntimeBusy}
+					agentRunning={isRunStreaming}
+					isLatestRun={item.id === lastDisplayedItemId}
+					isLastAgentRun={item.id === latestAgentRunId}
+					autoCollapseTick={item.id === latestAgentRunId ? latestTurnAutoCollapseTick : 0}
+					onOpenExternal={props.onOpenExternal}
+					onOpenFile={props.onOpenFile}
+					onDiffFile={props.onDiffFile}
+					onEditMessage={props.onEditMessage}
+					onDeleteMessage={props.onDeleteMessage}
+					onEnterMultiSelect={handleEnterMultiSelect}
+					onFavoriteReply={handleFavoriteReply}
+					favoritedMessageKeys={favoritedMessageKeys}
+				/>
+			);
+		}
+		if (item.kind !== "message") return null;
+		const message = item.message;
+		if (message.role === "user") {
+			return (
+				<UserBubble
+					key={message.id}
+					message={message}
+					onRemoveMessageImage={props.onRemoveMessageImage}
+					fresh={freshMessageIds.has(message.id)}
+					topFresh={topFreshIds.has(message.id)}
+					onPreviewImage={props.onPreviewImage}
+					onOpenFile={props.onOpenFile}
+					onResendUserMessage={props.onResendUserMessage}
+					onEditMessage={props.onEditMessage}
+					onDeleteMessage={props.onDeleteMessage}
+					onForkMessage={props.onForkMessage}
+					onRewindToMessage={props.onRewindToMessage}
+					forking={props.forkingMessageId === message.id}
+					agentRunning={isRuntimeBusy}
+					isLastUserMessage={message.id === lastUserMessageId}
+					showResendButton={resendableMessageIds.has(message.id)}
+					validCommandNames={props.validCommandNames}
+					validFilePaths={props.validFilePaths}
+					onEnterMultiSelect={handleEnterMultiSelect}
+					// 生图参考图永远不触发视觉桥（参考图直接进供应商 API）
+					visionBridgeExpected={imageGenUserMessageIds.has(message.id) ? false : visionBridgeExpected}
+				/>
+			);
+		}
+		if (message.role === "error") {
+			// 失败类消息与 toast 并存渲染诊断卡片：toast 即时提醒，卡片留痕可排查。
+			return <DiagnosticMessageCard key={message.id} message={message} />;
+		}
+		if (message.role === "system") {
+			const meta = message.meta && typeof message.meta === "object" ? (message.meta as { type?: string }) : undefined;
+			if (meta?.type === "askQuestion") {
+				// Pending extension UI is rendered once in the timeline footer.
+				// Legacy in-memory messages may still contain this placeholder.
+				return null;
+			}
+			// 扩展输出条目（pi appendEntry / type:"custom"）：主进程读侧投影的可见性补齐卡，
+			// 不是回合边界，只让 /btw 这类扩展输出到达用户（issue #285）。
+			if (meta?.type === "customEntry") {
+				return <ExtensionEntryCard key={message.id} message={message} />;
+			}
+			// 扩展 custom 消息（pi custom_message 条目）：只有面向用户的通知类白名单
+			// 才渲染成卡片（如子代理后台任务完成），其余（display:false 的内部上下文
+			// 注入）保持不可见——但它们仍是回合边界（见 AppUtils 的 customMessage 分支）。
+			if (meta?.type === "customMessage") {
+				return shouldRenderNotifyCard(message) ? <NotifyMessageCard key={message.id} message={message} /> : null;
+			}
+			// 压缩摘要卡片已按产品决策下线（与 dsh 后端行为对齐）：
+			// 压缩进行态由 RespondingIndicator「正在压缩」承担，压缩完成后
+			// 时间线直接呈现保留消息。pi 投影出的 compaction system 消息
+			// 仍会进入时间线数据（主进程继续维护），这里仅不渲染。
+			if (meta?.type === "compaction") {
+				return null;
+			}
+			// 重试成功卡是瞬态卡：连续重试每个周期各留一张，堆成一排「自动重试成功」很难看
+			// （用户反馈）。成功由 toast 即时报告，这里不渲染。
+			// 自动重试状态卡（含运行中/失败）已收进所属 agent-run 内部作为过程行
+			// （groupToolMessages 的 retry-group 分支 → TurnRow RetryStep），
+			// 留痕职责由过程行承担，不再在时间线顶层渲染独立大卡片——
+			// 旧形态与工具时间线割裂且插在工具与后续回答之间（顺序错乱根因）。
+			if (isRetryStatusMessage(message)) return null;
+			// 系统诊断渲染卡片留痕（与 toast 并存，见 timelineFailureNotice）。
+			return <DiagnosticMessageCard key={message.id} message={message} />;
+		}
+		return null;
+	};
 
 	return (
 		<MessageScroller
@@ -885,115 +1101,20 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
             （见 turnRenderWindow），上滚放开。分页仍做数据窗口治理。 */}
 			{hasActiveConversation && !isConversationLoading && activeMessages.length > 0 && (
 				<div className="message-list min-w-0 w-full mx-auto transition-opacity duration-fast" onContextMenu={messageContextMenu.handleContextMenu}>
-					{displayRuns.map((item, index) => {
-						if (item.kind === "agent-run") {
-							// Only an active model turn keeps its latest run live. Context
-							// compaction happens after agent_end, so it must not fold the answer.
-							// 2026-08 perf：身份判定（run id），不用 index/length——滚动窗口切片变化
-							// 不翻转位置 props，memo 保持生效。busy 仍按「最后一条显示条目」判定
-							// （用户发送后激活等待期不把已完成回答当 live，见组件内注释）。
-							const isRunStreaming = isTurnRunning && item.id === lastDisplayedItemId;
-							return (
-								<TurnRow
-									key={item.id}
-									run={item}
-									sessionId={sessionId}
-									// 行头署名与后端一致：DSH 会话的回复标 dsh，而非 pi
-									backend={session?.backend ?? "pi"}
-									// ACP 会话的回复行头用工具自己的品牌 logo（分不清是哪个 CLI 就失去署名意义）
-									acpToolId={session?.acpToolId}
-									fresh={freshMessageIds.has(item.id)}
-									topFresh={topFreshIds.has(item.id)}
-									onPreviewImage={props.onPreviewImage}
-									showThinking={props.showThinking}
-									isStreaming={isRunStreaming}
-									// 始终下发 live id（按 message id 命中）；勿绑 isRunStreaming，
-									// 否则流结束而 History 未到时会提前卸思考步导致 remount dump。
-									liveThinkingId={liveThinkingId}
-									isRuntimeBusy={isRuntimeBusy}
-									agentRunning={isRunStreaming}
-									isLatestRun={item.id === lastDisplayedItemId}
-									isLastAgentRun={item.id === latestAgentRunId}
-									autoCollapseTick={item.id === latestAgentRunId ? latestTurnAutoCollapseTick : 0}
-									onOpenExternal={props.onOpenExternal}
-									onOpenFile={props.onOpenFile}
-									onDiffFile={props.onDiffFile}
-									onEditMessage={props.onEditMessage}
-									onDeleteMessage={props.onDeleteMessage}
-									onEnterMultiSelect={handleEnterMultiSelect}
-								/>
-							);
-						}
-						if (item.kind !== "message") return null;
-						const message = item.message;
-						if (message.role === "user") {
-							return (
-								<UserBubble
-									key={message.id}
-									message={message}
-									onRemoveMessageImage={props.onRemoveMessageImage}
-									fresh={freshMessageIds.has(message.id)}
-									topFresh={topFreshIds.has(message.id)}
-									onPreviewImage={props.onPreviewImage}
-									onOpenFile={props.onOpenFile}
-									onResendUserMessage={props.onResendUserMessage}
-									onEditMessage={props.onEditMessage}
-									onDeleteMessage={props.onDeleteMessage}
-									onForkMessage={props.onForkMessage}
-									onRewindToMessage={props.onRewindToMessage}
-									forking={props.forkingMessageId === message.id}
-									agentRunning={isRuntimeBusy}
-									isLastUserMessage={message.id === lastUserMessageId}
-									showResendButton={resendableMessageIds.has(message.id)}
-									validCommandNames={props.validCommandNames}
-									validFilePaths={props.validFilePaths}
-									onEnterMultiSelect={handleEnterMultiSelect}
-									// 生图参考图永远不触发视觉桥（参考图直接进供应商 API）
-									visionBridgeExpected={imageGenUserMessageIds.has(message.id) ? false : visionBridgeExpected}
-								/>
-							);
-						}
-						if (message.role === "error") {
-							// 失败类消息与 toast 并存渲染诊断卡片：toast 即时提醒，卡片留痕可排查。
-							return <DiagnosticMessageCard key={message.id} message={message} />;
-						}
-						if (message.role === "system") {
-							const meta = message.meta && typeof message.meta === "object" ? (message.meta as { type?: string }) : undefined;
-							if (meta?.type === "askQuestion") {
-								// Pending extension UI is rendered once in the timeline footer.
-								// Legacy in-memory messages may still contain this placeholder.
-								return null;
-							}
-							// 扩展输出条目（pi appendEntry / type:"custom"）：主进程读侧投影的可见性补齐卡，
-							// 不是回合边界，只让 /btw 这类扩展输出到达用户（issue #285）。
-							if (meta?.type === "customEntry") {
-								return <ExtensionEntryCard key={message.id} message={message} />;
-							}
-							// 扩展 custom 消息（pi custom_message 条目）：只有面向用户的通知类白名单
-							// 才渲染成卡片（如子代理后台任务完成），其余（display:false 的内部上下文
-							// 注入）保持不可见——但它们仍是回合边界（见 AppUtils 的 customMessage 分支）。
-							if (meta?.type === "customMessage") {
-								return shouldRenderNotifyCard(message) ? <NotifyMessageCard key={message.id} message={message} /> : null;
-							}
-							// 压缩摘要卡片已按产品决策下线（与 dsh 后端行为对齐）：
-							// 压缩进行态由 RespondingIndicator「正在压缩」承担，压缩完成后
-							// 时间线直接呈现保留消息。pi 投影出的 compaction system 消息
-							// 仍会进入时间线数据（主进程继续维护），这里仅不渲染。
-							if (meta?.type === "compaction") {
-								return null;
-							}
-							// 重试成功卡是瞬态卡：连续重试每个周期各留一张，堆成一排「自动重试成功」很难看
-							// （用户反馈）。成功由 toast 即时报告，这里不渲染。
-							// 自动重试状态卡（含运行中/失败）已收进所属 agent-run 内部作为过程行
-							// （groupToolMessages 的 retry-group 分支 → TurnRow RetryStep），
-							// 留痕职责由过程行承担，不再在时间线顶层渲染独立大卡片——
-							// 旧形态与工具时间线割裂且插在工具与后续回答之间（顺序错乱根因）。
-							if (isRetryStatusMessage(message)) return null;
-							// 系统诊断渲染卡片留痕（与 toast 并存，见 timelineFailureNotice）。
-							return <DiagnosticMessageCard key={message.id} message={message} />;
-						}
-						return null;
-					})}
+					{/* 阈值在 VirtualRunList 内部判：父层切组件类型会在 8→9 轮时整表卸载（#401 评审） */}
+					{/* 多选导出按 DOM 克隆整表，而 MultiSelectModal 的候选是全量 reconciledRuns：
+					    期间必须把「窗口裁剪后的 displayRuns」换成全量，否则窗口外选中的消息没有 DOM，
+					    clone 过滤会把它当未选中删掉（导出缺内容）。关闭后保留全量渲染，直到回底或重新开多选。 */}
+					<VirtualRunList
+						runs={multiSelectOpen || retainFullRuns ? reconciledRuns : displayRuns}
+						scrollRef={timelineRef}
+						renderRun={renderRunItem}
+						getRunId={virtualRunId}
+						isAgentRun={isAgentRunItem}
+						isRenderable={isRenderableItem}
+						solid={navBlocked || multiSelectExporting}
+						onBeforeScrollCorrection={controller.markProgrammaticScroll}
+					/>
 
 					{hasActiveConversation && !cancellingUi && isRuntimeBusy && (
 						<RespondingIndicator isCompacting={isCompacting} isStarting={activeConversationStatus === "starting"} isExecutingTool={activeRuntimeState?.isExecutingTool} executingToolName={activeRuntimeState?.executingToolName} liveTextStreaming={liveTextStreaming} liveThinkingStreaming={liveThinkingStreaming} />
@@ -1013,7 +1134,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 			{multiSelectOpen && <MultiSelectModal renderedRuns={reconciledRuns} onClose={() => setMultiSelectOpen(false)} onCopy={copySelectedMessages} />}
 
 			{/* 消息右键菜单：portal 到 body、fixed 定位在右键坐标（见 MessageContextMenu） */}
-			<MessageContextMenu state={messageContextMenu.state} onCopy={messageContextMenu.copy} onSelectAll={messageContextMenu.selectAll} onClose={messageContextMenu.close} />
+			<MessageContextMenu state={messageContextMenu.state} onCopy={messageContextMenu.copy} onSelectAll={messageContextMenu.selectAll} onFavorite={messageContextMenu.favorite} onClose={messageContextMenu.close} />
 
 			{/* 划选引用浮层：portal 到 body，fixed 定位；空会话起始页无消息不出现 */}
 			{!showSurfaceEmptyState && sessionId && <SelectionToolbar quote={selectionQuote} sessionId={sessionId} onConsume={clearSelectionQuote} toolbarRef={selectionToolbarRef} />}

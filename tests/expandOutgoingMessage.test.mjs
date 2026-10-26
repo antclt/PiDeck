@@ -145,12 +145,13 @@ test("保留命令与保护区可共存：块内不动、块外让路/展开", (
 	assert.ok(out.includes("REVIEW-TEMPLATE-BODY"));
 });
 
-test("参数替换：$@ 模板把用户输入放进正文，不再重复追加（对齐 pi）", () => {
+test("参数替换：$@ 填进正文原位，且块外仍留可见副本（气泡折成 chip 后用户还看得见）", () => {
 	const { expandPromptTemplates } = composerBehavior();
 	const out = expandPromptTemplates("/pr 重构 高优先", [{ name: "pr", description: "", content: "Focus:\n\n$@\n\nDone" }]).message;
-	assert.ok(out.includes("Focus:\n\n重构 高优先\n\nDone"), `正文必须带参数，实际: ${JSON.stringify(out)}`);
-	// 参数只出现一次（不能既进正文又追加在块后）
-	assert.equal(out.split("重构").length - 1, 1);
+	assert.ok(out.includes("Focus:\n\n重构 高优先\n\nDone"), `正文必须带参数（模型看到原位插入），实际: ${JSON.stringify(out)}`);
+	// 块外副本：模板正文会被折成 chip，只放在正文里的话用户发完就看不见自己的话
+	assert.ok(out.includes("</prompt_template>\n\n重构 高优先"), `块外必须有可见副本，实际: ${JSON.stringify(out.slice(-60))}`);
+	assert.equal(out.split("重构").length - 1, 2, "正文一份 + 块外一份");
 });
 
 test("参数替换：$1 位置参数进正文", () => {

@@ -295,3 +295,47 @@ CDP 直连实测；`npm run pack:dev` 的 win-unpacked 产物同法验证。
 
 - `npm run typecheck` = **0**；`npm run check:format` = 0（3748 文件）。
 - `npm run test:serial`：13510 例 / 13210 pass / **22 fail** / 278 skip；失败集合与 §10.5 **完全一致**（仍是那 13 个已记录基线文件），零新增。
+
+---
+
+## 12. 第四轮同步（2026-10-24，dev → 274 提交）
+
+> 第二轮（§10）落地后 dev 又推进 274 个提交（775 文件 / +45688 −5288）。本轮规模回到首次合并量级，但**远端地基零竞争**这一性质再次成立。
+
+### 12.1 规模与冲突
+
+- 落后 `origin/dev` **274 个提交**；`git diff --name-only 61b8db978..origin/dev | grep -i remote` **为空**——dev 这 274 个提交一个远端文件都没动。冲突全部来自我们顺带改过的共享汇聚点。
+- `git merge-tree` 预演判定 **36 文件冲突**（与实跑一致）：主进程 6、渲染层 11、i18n 2、生成物 2、测试 15。
+
+### 12.2 解决原则（沿用 §2/§10.2，本轮补充）
+
+1. **本仓语义先于 dev 写法**：`removingWorktreeProjectIds`（按 ProjectId 索引，远端工作区必需）压过 dev 的 `removingWorktreePaths`；`AddProjectMenu`（含远端 SSH 登记入口）压过 dev 的裸「+」按钮；`fileTarget`/`ProjectFileTarget` 签名压过 dev 的纯 path 签名。
+2. **dev 新架构必须落地**：`loadXtermModules` 惰性装载（xterm 不进启动 chunk）、`RemovalList/RemovalRow` 关闭动画、`stickyGroupHeaders` 冻结标题、`estimateSessionCacheEntryBytes` 已关闭 Tab 字节预算、`onRequestEditable` 只读解锁、`openSystemPath`（issue #396）、`parseBusySendDelivery`。
+3. **两边都要的合并**：`resolveLocalImageRoots` 同时保留「桌面白名单」（dev）与「过滤远端项目」（本仓）；`filesIpc` 的 `filesOpenFileManager`/`browserOpenExternal` 归 `filesSystemIpc.ts`（本仓拆分），`openSystemPath` 修复同步到该文件；`configFetchModels` 保留 `rejectRemotePiConfigTarget` + dev 新增的外部 agent 发现两法。
+4. **生成物只走脚本**：两份 `*.zh-TW.ts` 先取 dev 侧基线，再 `node scripts/genZhTwCopy.mjs` 整体重算（7106 / 287 条）。
+
+### 12.3 合并专属修复（本轮）
+
+- `AgentManager.resolveSendAgentMessage`：dev 的 Issue #404（纯图片发送不得注入 "Describe this image."）与本仓的智能体隐藏通道/远端模式标记在同一个表达式上冲突。改为保留 `resolveSendAgentMessage` 单一入口，去掉兜底文案并补注释；`tests/agentManagerImageOnlyPrompt.test.mjs` 四条用例全绿。
+- `TerminalSessionManager`：dev 的 `Pty` 类型别名与本仓的 `IPty` 冲突，取 `IPty`（本仓 import 形态）+ dev 的 `TerminalReplayBuffer`；dev 的 `terminalOwnerKeyFor` 本地实现已被本仓移到 `shared/types/terminal.ts`，本地副本删除。
+- `sessionIpc`：dev 已下线 `readOutlineTitle` / `readDshSystemPrompt`（轨迹事实/索引 preview 取代），本仓的两个 handler 一并删除；`sessionsCatalogReadReferenceMessages` 保留本仓的 `localSessionFilePath` 存在性判定（远端/DSH 无本机文件返回空）。
+- `src/main/index.ts`：dev 新增的 `import { webContents }` 与首行 electron 具名导入重复（TS2300），删除；`exportCatalogSessionHtml` 的回退分支用 `filePath`（已判空）而非可选的 `entry.filePath`。
+- `SessionDock`：dev 给终端 Tab 加了 `title={tab.cwd}`，但本仓的 `TerminalTab` 已删 `cwd` 字段（项目位置模型），移除该 title。
+- `SidebarComponents`：归档行的远端删除 UI 块与 dev 的 `transition-all → transition-colors` 清理合并时产生重复闭合标签，已修正并统一走 `transition-colors`（`motionTokenDiscipline` 红线）。
+- `fileTreeLazy`：dev 的两阶段并发 listing 用 `directory: string`，本仓 `listDirectory` 收 `ProjectFileTarget`；改为 listing 前用 `findDirectoryNodeByPath(tree, directory)?.target ?? directory` 解析目标。
+- `destructiveMenuIcons`：合并残留重复声明 `const actionsSrc`（SyntaxError），删一条。
+- `terminalWebglFallback`：断言从 `new WebglAddon(` 放宽为 `new (modules.)?WebglAddon(`——dev 已把 xterm 改为惰性装载，装配语义不变。
+- `remoteHistoryCursorContract`：测试夹具的 `messages` 用 `{ role, content }` 旧形状，dev 新增的 `estimateSessionCacheEntryBytes` 读 `text.length` 直接抛错；夹具改成完整 `ChatMessage`。
+- 样式纪律（dev 新增守卫）：`RemoteProjectStatusTag` / `RemoteSessionsSection` 的 `text-[10px]`/`text-[11px]` 改语义字号 `text-micro`；侧栏 `hover:bg-muted` 改 `bg-bg-hover`（浅色下 bg-muted 比侧栏还亮）；`AddProjectMenu` 的裸「+」按钮已随 AddProjectMenu 恢复为菜单。
+
+### 12.4 快照锚点刷新
+
+- unifiedApi 通道：768→**777** 通道 / 88→**90** 前缀 / digest `8f96a116…`。
+- preload：77→**78** 命名空间 / sessions 118→**116**（dev 下线两法）/ config 48→**50** / git **59** / app **32**；NS_LIST `13596fcb…`、FULL_METHODS `ec0ee302…`。
+- DOMAIN_CATALOG：65→**66** 行（`docs/unified-api.md` 表格行数同步）。
+
+### 12.5 门禁结果
+
+- `npm run typecheck` = **0**；`npm run check:format` = 0（3925 文件）。
+- `npm run test:serial`：14136 例 / 13838 pass / **20 fail** / 278 skip；失败集合用 `git worktree add` 在改动前基线 `c4cb00ffe` 复跑同一批 12 个文件得到**完全相同的 20 fail**，即全部是 §7 已记录的既有红灯，**零合并专属失败**。
+- 依赖同步：本工作区 `node_modules` 早于合并，缺 `@tanstack/react-virtual`，且 `@earendil-works/pi-ai` / `pi-telemetry` 停留在 1.3.0（dev 已锁 1.4.0）。按并行纪律**不跑 `npm install`**（会重建 `.bin` 打断他人），从同版本兄弟工作区 `F:/PiDeck` 复制这三个包；`piAiCatalog*` 三条守卫因此从红转绿。

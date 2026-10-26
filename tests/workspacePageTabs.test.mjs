@@ -8,7 +8,7 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
  * - 切到会话只失活（Tab 保留），关闭才移除并回到会话；
  * - 纯函数必须可离开 React 单测（AGENTS.md「纯策略可单测」）。
  */
-const { EMPTY_WORKSPACE_PAGE_TAB_STATE, closeWorkspacePage, deactivateWorkspacePage, isWorkspacePageId, openWorkspacePage } = loadTsCommonJs("src/renderer/src/utils/workspacePageTabs.ts");
+const { EMPTY_WORKSPACE_PAGE_TAB_STATE, closeWorkspacePage, deactivateWorkspacePage, isWorkspacePageId, openWorkspacePage, sortWorkspacePageIds } = loadTsCommonJs("src/renderer/src/utils/workspacePageTabs.ts");
 
 test("打开页面：登记 Tab 并激活", () => {
 	const state = openWorkspacePage(EMPTY_WORKSPACE_PAGE_TAB_STATE, "automation");
@@ -56,9 +56,16 @@ test("关闭未打开的页面是 no-op（保持引用）", () => {
 	assert.equal(closeWorkspacePage(state, "automation"), state);
 });
 
-test("isWorkspacePageId 只认两个页面 id", () => {
+test("isWorkspacePageId 只认三个页面 id", () => {
 	assert.equal(isWorkspacePageId("automation"), true);
 	assert.equal(isWorkspacePageId("agents"), true);
+	assert.equal(isWorkspacePageId("favorites"), true);
 	assert.equal(isWorkspacePageId("session"), false);
 	assert.equal(isWorkspacePageId(null), false);
+});
+
+test("sortWorkspacePageIds 固定展示顺序：定时任务 → 智能体 → 收藏（与打开顺序无关）", () => {
+	assert.deepEqual([...sortWorkspacePageIds(["favorites", "agents", "automation"])], ["automation", "agents", "favorites"]);
+	assert.deepEqual([...sortWorkspacePageIds(["favorites", "agents"])], ["agents", "favorites"]);
+	assert.deepEqual([...sortWorkspacePageIds([])], []);
 });

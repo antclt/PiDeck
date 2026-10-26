@@ -3,18 +3,16 @@
  *
  * 数据自持（与 PromptEnhanceSettingsSection / VoiceTranscriptionSettingsSection 同模式）：
  * 不进 CommonTab 草稿，改一项即时写 agent-profiles.json 的市场设置并回写快照 atom，
- * AppBootstrap 的 useAgentProfileSync 也会在 changed 事件后重拉，浮钮与系统浮窗随之生效。
+ * AppBootstrap 的 useAgentProfileSync 也会在 changed 事件后重拉，浮钮随之生效。
  *
- * 系统级划词快捷键展示只读：真正的键位在「快捷键」tab（shared/shortcuts 注册表唯一来源），
- * 这里只把当前生效值写出来，避免出现第二份可编辑的快捷键状态。
+ * 系统级划词暂时隐藏：本区只保留应用内划词开关、默认智能体与智能体管理。
  */
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useId, useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { agentProfileSnapshotAtom, agentProfilesAtom, agentMarketSettingsAtom, openAgentMarketPageAtom } from "../../../atoms";
 import { settingsOpenAtom } from "../../../atoms";
 import { desktopApi } from "../../../desktopApi";
 import { t } from "../../../i18n";
-import { formatAccelerator, resolveShortcutBindings } from "../../../../../shared/shortcuts";
 import { BUILTIN_TRANSLATE_AGENT_ID, type AgentMarketSettings } from "../../../../../shared/types/agentProfile";
 import { Button } from "../../ui-shadcn/button";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "../../ui-shadcn/select";
@@ -33,58 +31,16 @@ export function SelectionToolSettingsSection() {
 	const openMarketPage = useSetAtom(openAgentMarketPageAtom);
 	const setSettingsOpen = useSetAtom(settingsOpenAtom);
 	const enableId = useId();
-	const systemId = useId();
 	const [saving, setSaving] = useState(false);
-	const [accelerator, setAccelerator] = useState("");
-	/** 系统级快捷键是否真的注册成功；null = 尚未查询（旧版本主进程没有该字段时也不误报）。 */
-	const [shortcutRegistered, setShortcutRegistered] = useState<boolean | null>(null);
-
-	// 快捷键只读展示：按键位存在 settings.json 的 shortcuts 覆盖里，挂载时取一次当前生效值。
-	useEffect(() => {
-		let cancelled = false;
-		void desktopApi.settings
-			.get()
-			.then((appSettings) => {
-				if (cancelled) return;
-				// platform 只影响修饰键显示（Cmd/Ctrl）；渲染层用 UA 判定即可，与快捷键匹配无关。
-				const platform = navigator.userAgent.includes("Macintosh") ? "darwin" : "linux";
-				const bindings = resolveShortcutBindings(appSettings.shortcuts ?? {}, platform);
-				setAccelerator(formatAccelerator(bindings.openSelectionTool, platform));
-			})
-			.catch(() => undefined);
-		return () => {
-			cancelled = true;
-		};
-	}, []);
-
-	const refreshShortcutState = useCallback(() => {
-		void desktopApi.selectionTool
-			.getState()
-			.then((state) => {
-				setShortcutRegistered(typeof state.shortcutRegistered === "boolean" ? state.shortcutRegistered : null);
-			})
-			.catch(() => setShortcutRegistered(null));
-	}, []);
-
-	// 设置页挂载/系统级开关变化后查询一次：冲突（被其他应用/另一个 PiDeck 实例占用）
-	// 必须在 UI 里明说，不能只写日志让用户以为「系统级划词只在本应用生效」。
-	useEffect(() => {
-		refreshShortcutState();
-		// 主进程在窗口 focus 时会重试注册；回到前台后刷新警告，冲突解除时立即消失。
-		const onFocus = () => refreshShortcutState();
-		window.addEventListener("focus", onFocus);
-		return () => window.removeEventListener("focus", onFocus);
-	}, [refreshShortcutState]);
 
 	const persist = useCallback(
-		async (patch: Partial<Pick<AgentMarketSettings, "selectionToolEnabled" | "systemSelectionEnabled" | "selectionToolAgentId">>) => {
+		async (patch: Partial<Pick<AgentMarketSettings, "selectionToolEnabled" | "selectionToolAgentId">>) => {
 			if (saving) return;
 			setSaving(true);
 			try {
 				const saved = await desktopApi.agentProfiles.updateSettings(patch);
 				// changed 事件会触发 refetch；这里先写回本地快照让开关/下拉立即响应。
 				setSnapshot((current) => (current ? { ...current, settings: saved } : current));
-				if (patch.systemSelectionEnabled !== undefined) refreshShortcutState();
 			} catch {
 				// 失败回读权威快照（UI 回到真实状态），并保留 toast 级别的可见反馈由调用方补。
 				const fresh = await desktopApi.agentProfiles.getSnapshot().catch(() => null);
@@ -93,7 +49,7 @@ export function SelectionToolSettingsSection() {
 				setSaving(false);
 			}
 		},
-		[refreshShortcutState, saving, setSnapshot],
+		[saving, setSnapshot],
 	);
 
 	const defaultAgentValue = settings.selectionToolAgentId ?? DEFAULT_AGENT_SENTINEL;
@@ -103,19 +59,6 @@ export function SelectionToolSettingsSection() {
 		<SettingsSection id="settings-section-common-selection-tool" title={t("settings.selectionTool.title")} description={t("settings.selectionTool.description")}>
 			<SettingRow anchor="common-selection-tool-enabled" title={<label htmlFor={enableId}>{t("settings.selectionTool.enabled")}</label>} description={t("settings.selectionTool.enabledHint")}>
 				<Switch id={enableId} checked={settings.selectionToolEnabled} disabled={saving || !snapshot} onCheckedChange={(checked) => void persist({ selectionToolEnabled: checked })} />
-			</SettingRow>
-
-			<SettingRow anchor="common-selection-tool-system" title={<label htmlFor={systemId}>{t("settings.selectionTool.systemEnabled")}</label>} description={t("settings.selectionTool.systemEnabledHint")}>
-				<Switch id={systemId} checked={settings.systemSelectionEnabled} disabled={saving || !snapshot} onCheckedChange={(checked) => void persist({ systemSelectionEnabled: checked })} />
-			</SettingRow>
-			{settings.systemSelectionEnabled && shortcutRegistered === false ? (
-				<p className="px-1 pb-1 text-xs leading-relaxed text-destructive" role="status">
-					{t("settings.selectionTool.shortcutConflict", { accelerator: accelerator || "—" })}
-				</p>
-			) : null}
-
-			<SettingRow title={<span>{t("settings.selectionTool.hotkeyLabel")}</span>} description={t("settings.selectionTool.hotkeyHint", { accelerator: accelerator || "" })}>
-				<kbd className="rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs text-foreground">{accelerator || "—"}</kbd>
 			</SettingRow>
 
 			<SettingRow anchor="common-selection-tool-agent" title={<span>{t("settings.selectionTool.defaultAgent")}</span>} description={t("settings.selectionTool.defaultAgentHint")}>

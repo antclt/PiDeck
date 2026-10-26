@@ -1,6 +1,7 @@
 import { touchRecentSessionAtom, forgetRecentSessionAtom } from "./recent-session-atoms";
 import { advanceSessionActivityAnchorAtom, forgetSessionActivityAnchorAtom } from "./sessionActivityAtoms";
 import { sessionSendStateByIdAtom, setSessionSendStateAtom } from "./composer-atoms";
+import { getSessionDisposalAtoms, removeRegisteredSessionFamilies } from "./session-family-registry";
 import { atom } from "jotai";
 import type { Getter, Setter } from "jotai";
 import { atomFamily, selectAtom } from "jotai/utils";
@@ -59,6 +60,72 @@ export function readRemoteExtensions(value: unknown): RemoteSessionExtensions | 
 	}
 	const reason = typeof record.reason === "string" ? REMOTE_EXTENSION_REASONS.find((known) => known === record.reason) : undefined;
 	return { applied, ...(reason === undefined ? {} : { reason }), ...(typeof record.detail === "string" && record.detail.length <= 128 ? { detail: record.detail } : {}) };
+}
+
+/**
+ * 已关闭 Tab 条目的合计字节预算（2026-10 内存轮）。
+ * 条目数有 LRU 上限、单条目消息数有 DISK_HISTORY_MESSAGE_LIMIT 封顶，但消息的
+ * **内容体积**没有界：大代码块/长思考/内联 base64 的会话单条目可达数十 MB，
+ * 8 条「浏览过又关掉」的会话就是数百 MB 常驻。已关闭的条目不值得为回切流畅性
+ * 全额保留——超预算按最旧先淘汰，切回时与 LRU 淘汰同路径重读盘（尾部 9 轮）。
+ * 只作用于已关闭 Tab 的条目：打开中的 Tab 保持无条件保护（上面 selectRetained 的
+ * 语义不变，挤掉正在看的会话会闪骨架屏）。
+ */
+export const SESSION_CACHE_CLOSED_ENTRY_BYTE_BUDGET = 64 * 1024 * 1024;
+
+/** 单条消息的固定开销估计（字符数口径）：id/agentId/meta/时间戳与对象头等，与内容无关。 */
+const CHAT_MESSAGE_FIXED_OVERHEAD_CHARS = 128;
+/** 图片 ref 形态（非 base64）的元数据量级估计（字符数）。 */
+const IMAGE_REF_OVERHEAD_CHARS = 64;
+
+/**
+ * 估算缓存条目的驻留字节量（UTF-16 口径：字符数 × 2，V8 两字节字符串上界）。
+ * 只数大字段（text/thinking/images.data），不做序列化——估算值只服务预算淘汰，
+ * 偏差一个量级不影响决策；length 读取是 O(1)，整遍扫描 O(消息数)，相对写入路径
+ * 既有的整缓存浅拷贝可忽略。
+ */
+export function estimateSessionCacheEntryBytes(messages: readonly ChatMessage[], history?: readonly ChatMessage[]): number {
+	let chars = 0;
+	const visit = (list: readonly ChatMessage[]) => {
+		for (const message of list) {
+			chars += CHAT_MESSAGE_FIXED_OVERHEAD_CHARS + message.text.length + (message.thinking?.length ?? 0);
+			// 图片：base64 data（正在生成/发送的临时形态）按字符串长度计；ref 形态
+			// 只有引用串（真实位图不在 JS 堆上），按常量量级计。
+			for (const image of message.images ?? []) {
+				chars += typeof image.data === "string" ? image.data.length : IMAGE_REF_OVERHEAD_CHARS;
+			}
+		}
+	};
+	visit(messages);
+	if (history) visit(history);
+	return chars * 2;
+}
+
+/**
+ * 已关闭 Tab 条目的字节预算裁剪：从 retainedIds 的最旧端（数组尾部，见
+ * selectRetainedCacheEntryIds 的 [...open, ...closed 新→旧] 布局）开始淘汰关闭条目，
+ * 直到关闭条目合计字节 ≤ budget。打开中的条目一律不淘汰。
+ * bytesById 缺条目按 0 计（调用方应先补算，见 cacheSessionMessagesAtom）。
+ */
+export function selectByteBudgetEvictions(retainedIds: readonly string[], bytesById: ReadonlyMap<string, number>, openedTabIds: ReadonlySet<string>, budget: number): { retained: string[]; evicted: string[] } {
+	let closedBytes = 0;
+	const closed = new Set<string>();
+	for (const id of retainedIds) {
+		if (openedTabIds.has(id)) continue;
+		closed.add(id);
+		closedBytes += bytesById.get(id) ?? 0;
+	}
+	if (closedBytes <= budget) return { retained: [...retainedIds], evicted: [] };
+	const evicted: string[] = [];
+	const retained = [...retainedIds];
+	for (let index = retained.length - 1; index >= 0 && closedBytes > budget; index -= 1) {
+		const id = retained[index];
+		if (!closed.has(id)) continue;
+		closedBytes -= bytesById.get(id) ?? 0;
+		evicted.push(id);
+		retained.splice(index, 1);
+	}
+	return { retained, evicted };
 }
 
 export type SessionRuntimeViewState = {
@@ -120,6 +187,11 @@ export type SessionMessageCacheEntry = {
 	// 游标语义与本地**不同**（远端是字节偏移，本地是活动分支消息下标），因此不能走本地那套数值算术。
 	source: "disk" | "runtime" | "remote";
 	updatedAt: number;
+	/**
+	 * 条目驻留字节估算（estimateSessionCacheEntryBytes，写入时随条目重建刷新）。
+	 * 供已关闭 Tab 条目的字节预算淘汰用；本版本前写入的条目缺省，读取方需补算。
+	 */
+	bytes?: number;
 	/** Changes only when the user-message outline can change. */
 	outlineRevision?: number;
 	/** Last user-message index in messages (not the separate history prefix). */
@@ -643,6 +715,9 @@ export const cacheSessionMessagesAtom = atom(
 		const outlineLastUserIndex = outlineChanged ? findLastUserMessageIndex(input.messages) : (current?.outlineLastUserIndex ?? findLastUserMessageIndex(input.messages));
 		if (shouldReplaceOutlineProjection) releaseSessionOutlineProjection(input.sessionId);
 		const revision = input.source === "runtime" ? (current?.revision ?? 0) + 1 : (current?.revision ?? 0);
+		// runtime 窗口语义（2026-08 激活分页）：entry 每次整体重建，调用方必须显式给出
+		// windowStart/history（undefined = 清除，如版本失效丢前缀）；disk 来源无窗口概念。
+		const storedHistory = input.source === "runtime" ? input.history : undefined;
 		const nextCache = {
 			...cache,
 			[input.sessionId]: {
@@ -652,14 +727,16 @@ export const cacheSessionMessagesAtom = atom(
 				updatedAt: Date.now(),
 				outlineRevision,
 				outlineLastUserIndex,
+				// 条目驻留字节估算（2026-10 内存轮）：随本次重建刷新，供已关闭 Tab
+				// 条目的字节预算淘汰用（下方 selectByteBudgetEvictions）。
+				bytes: estimateSessionCacheEntryBytes(input.messages, storedHistory?.messages),
+				// page 只属于 disk/remote 来源（runtime 窗口走下方 windowStart/history）；
+				// historySource 已把远端 disk 改写成 "remote"，不能再用 input.source 判。
 				...(historySource !== "runtime" && input.page ? { page: input.page } : {}),
-				// runtime 窗口语义（2026-08 激活分页）：entry 每次整体重建，
-				// 调用方必须显式给出 windowStart/history（undefined = 清除，如版本失效丢前缀）；
-				// disk 来源无窗口概念，两字段缺省即不存在
 				...(input.source === "runtime"
 					? {
 							windowStart: input.windowStart && input.windowStart > 0 ? input.windowStart : undefined,
-							history: input.history,
+							history: storedHistory,
 							// 卡片数只在全量 flush 推导（增量 flush 不携带 → 保留旧值，合并偏移依赖它）
 							...(typeof input.cardCount === "number" ? { cardCount: input.cardCount } : {}),
 							// 未显式提供时保留旧值（增量 flush 不携带该字段，不应清掉有效游标）
@@ -672,7 +749,22 @@ export const cacheSessionMessagesAtom = atom(
 		// LRU 裁剪提保护：打开着 Tab 的会话（预览/常驻）优先保留，其余按最近写入补足名额。
 		// 打开中的会话若被挤出，切回时缓存条目消失 → 重读盘 + 闪「正在加载历史」骨架
 		// （生图等无 runtime 事件持续 touch 的会话最易中招，2026 用户反馈）。
-		const retainedIds = selectRetainedCacheEntryIds(lru, new Set(get(sessionTabIdsAtom)), SESSION_MESSAGE_CACHE_LIMIT);
+		const openedTabs = new Set(get(sessionTabIdsAtom));
+		let retainedIds = selectRetainedCacheEntryIds(lru, openedTabs, SESSION_MESSAGE_CACHE_LIMIT);
+		// 字节预算（closed-only，2026-10 内存轮）：条目数封顶不管内容体积，超预算的
+		// 已关闭条目按最旧先淘汰；旧形状条目（本版本前写入、无 bytes）在判定前补算
+		// （落成新对象，不原地改旧缓存里的引用）。
+		const bytesById = new Map<string, number>();
+		for (const id of retainedIds) {
+			const entry = nextCache[id];
+			if (!entry) continue;
+			if (entry.bytes === undefined) {
+				nextCache[id] = { ...entry, bytes: estimateSessionCacheEntryBytes(entry.messages, entry.history?.messages) };
+			}
+			bytesById.set(id, nextCache[id].bytes ?? 0);
+		}
+		const byteTrim = selectByteBudgetEvictions(retainedIds, bytesById, openedTabs, SESSION_CACHE_CLOSED_ENTRY_BYTE_BUDGET);
+		retainedIds = byteTrim.retained;
 		for (const cachedSessionId of Object.keys(nextCache)) {
 			if (!retainedIds.includes(cachedSessionId)) {
 				delete nextCache[cachedSessionId];
@@ -693,6 +785,24 @@ export const cacheSessionMessagesAtom = atom(
  * DOM 窗口由 turnRenderWindow 独立控制（TIMELINE_MOUNTED_TURN_LIMIT），此处只管数据层封顶。
  */
 export const DISK_HISTORY_MESSAGE_LIMIT = 2400;
+
+/**
+ * runtime 会话历史前缀（history.messages）的条数驻留上限，与 disk 路径同预算（2026-12
+ * 内存排查根因 E：上翻页合并 merged=[...fresh,...base] 与 slideOut 长期累积均无上界，
+ * 用户停在中途不回底时 clearSessionHistory 不会触发，前缀在 atom 缓存里无限增长）。
+ * 超限同样从最旧端丢弃并校正续页游标：被丢段可经「显示更早」按新游标重新拉回，
+ * 不产生永久丢失；两条翻页路径（disk / runtime）从此对称。
+ */
+export const RUNTIME_HISTORY_PREFIX_MESSAGE_LIMIT = DISK_HISTORY_MESSAGE_LIMIT;
+
+/** 前缀最旧条目的 entryId（主进程缓存优先续页锚点）；整段无 entryId 时返回 undefined。 */
+function firstHistoryEntryId(messages: ChatMessage[]): string | undefined {
+	for (const message of messages) {
+		const entryId = message.meta?.entryId;
+		if (typeof entryId === "string" && entryId) return entryId;
+	}
+	return undefined;
+}
 
 export const prependSessionMessagePageAtom = atom(
 	null,
@@ -833,8 +943,14 @@ function reconcileHistoryPrefix(history: SessionMessageCacheEntry["history"], se
 	const prefixMessages = (history?.messages ?? []).filter((message) => !dropKeys.has(messageEntryKey(message)));
 	const messages = [...prefixMessages, ...slideMessages];
 	if (messages.length === 0) return undefined;
+	// 条数封顶（RUNTIME_HISTORY_PREFIX_MESSAGE_LIMIT）：slideOut 随窗口右移长期累积会把
+	// 前缀推过上限——用户停在中途不上滑时 clearSessionHistory 不会触发，这里是唯一维护点。
+	// 从最旧端丢弃：数值游标按丢弃量推进（前缀下标连续），entryId 锚点重算到保留段
+	// 最旧条目，保证被丢段仍可经「显示更早」重新翻页拉回。
+	const overflow = messages.length - RUNTIME_HISTORY_PREFIX_MESSAGE_LIMIT;
+	const cappedMessages = overflow > 0 ? messages.slice(overflow) : messages;
 	// 无滑出轮且前缀未被触碰：保留原对象引用，避免无谓的 atom 更新
-	if (slideMessages.length === 0 && messages.length === (history?.messages.length ?? 0)) {
+	if (slideMessages.length === 0 && cappedMessages.length === (history?.messages.length ?? 0)) {
 		return history;
 	}
 	// 仅 slideOut 重建前缀时，游标不是 null：下一页应从 slideOut 最旧消息继续向上翻。
@@ -846,11 +962,16 @@ function reconcileHistoryPrefix(history: SessionMessageCacheEntry["history"], se
 		const slideAnchorEntryId = slideAnchor?.meta?.entryId;
 		if (typeof slideAnchorEntryId === "string") nextBeforeEntryId = slideAnchorEntryId;
 	}
+	if (overflow > 0) {
+		// 封顶丢弃后锚点必须重算：旧锚点指向被丢段时，缓存优先路径会从过期锚点继续翻页；
+		// 保留段无 entryId 时退回旧锚点，维持 historyHasMore 的可见性。
+		nextBeforeEntryId = firstHistoryEntryId(cappedMessages) ?? history?.nextBeforeEntryId;
+	}
 	return {
-		nextBefore: history?.nextBefore ?? null,
+		nextBefore: overflow > 0 && typeof history?.nextBefore === "number" ? history.nextBefore + overflow : (history?.nextBefore ?? null),
 		...(nextBeforeEntryId !== undefined ? { nextBeforeEntryId } : {}),
 		version: history?.version ?? fileVersion,
-		messages,
+		messages: cappedMessages,
 	};
 }
 
@@ -914,6 +1035,24 @@ export const prependSessionHistoryPageAtom = atom(
 		const baseKeys = new Set(baseMessages.map(messageEntryKey));
 		const freshMessages = pageMessages.filter((message) => !baseKeys.has(messageEntryKey(message)));
 		const merged = [...freshMessages, ...baseMessages];
+		// 条数封顶（RUNTIME_HISTORY_PREFIX_MESSAGE_LIMIT）：语义与 disk 路径的
+		// prependSessionMessagePageAtom 一致——只允许丢新页头部（base 是用户已翻到的
+		// 历史段不能截断）；整页丢弃时数值游标回退到请求游标（下次重取同页），部分丢弃时
+		// 按页内连续下标推进 dropCount；entryId 锚点一律重算到保留段最旧条目。
+		const overflow = merged.length - RUNTIME_HISTORY_PREFIX_MESSAGE_LIMIT;
+		let cappedMessages = merged;
+		let nextBefore: number | null = input.page.nextBefore;
+		let nextBeforeEntryId: string | undefined = input.page.nextBeforeEntryId || undefined;
+		if (overflow > 0 && freshMessages.length > 0) {
+			const dropCount = Math.min(overflow, freshMessages.length);
+			cappedMessages = merged.slice(dropCount);
+			if (dropCount >= freshMessages.length) {
+				nextBefore = input.before ?? null;
+			} else if (input.page.nextBefore !== null) {
+				nextBefore = input.page.nextBefore + dropCount;
+			}
+			nextBeforeEntryId = firstHistoryEntryId(cappedMessages);
+		}
 		releaseSessionOutlineProjection(input.sessionId);
 
 		set(sessionMessagesCacheAtom, {
@@ -921,11 +1060,11 @@ export const prependSessionHistoryPageAtom = atom(
 			[input.sessionId]: {
 				...current,
 				history:
-					merged.length > 0 || input.page.nextBefore !== null
+					cappedMessages.length > 0 || nextBefore !== null
 						? {
-								messages: merged,
-								nextBefore: input.page.nextBefore,
-								...(input.page.nextBeforeEntryId ? { nextBeforeEntryId: input.page.nextBeforeEntryId } : {}),
+								messages: cappedMessages,
+								nextBefore,
+								...(nextBeforeEntryId !== undefined ? { nextBeforeEntryId } : {}),
 								version: input.page.indexVersion ?? current.history?.version,
 							}
 						: undefined,
@@ -1529,8 +1668,14 @@ export const applySessionRuntimeEventAtom = atom(null, (get, set, event: Session
 		running: isSessionTurnRunning(nextRuntime.state, nextRuntime.status),
 	});
 	const terminalEnvelope = !bindingChanged && currentRuntime.status === "closed";
-	const nextUi = payload && !(terminalEnvelope && event.sourceChannel === "agents:ui-request") ? applySessionRuntimeUiEvent(get(sessionRuntimeUiByIdAtom)[event.sessionId], event, payload, bindingChanged) : undefined;
-	if (nextUi) {
+	const previousUi = get(sessionRuntimeUiByIdAtom)[event.sessionId];
+	const nextUi = payload && !(terminalEnvelope && event.sourceChannel === "agents:ui-request") ? applySessionRuntimeUiEvent(previousUi, event, payload, bindingChanged) : undefined;
+	// 与下方 runtimeUnchanged 同款治理（2027-02 性能审计）：applySessionRuntimeUiEvent 对
+	// 非 ui-request 事件（50ms 节流的 sessions:messages flush、agents:runtime-state 轮询）
+	// 返回原引用。旧代码只判 truthy 就整表 spread 写回——值没变也换 Record 身份，
+	// sessionRuntimeUiByIdAtom 的整表订阅者（侧栏五棵树）在流式期间每秒被全量重渲染
+	// 数十次。引用相等即跳写；真实 UI 变化必然返回新对象（revision 递增路径）。
+	if (nextUi && nextUi !== previousUi) {
 		set(sessionRuntimeUiByIdAtom, {
 			...get(sessionRuntimeUiByIdAtom),
 			[event.sessionId]: nextUi,
@@ -1713,6 +1858,13 @@ export const removeSessionStateAtom = atom(null, (get, set, sessionId: string) =
 	liveTextActiveBySessionAtom.remove(sessionId);
 	liveThinkingStreamingBySessionAtom.remove(sessionId);
 	// atomFamily 无自动 GC：会话删除时必须同步 remove 各 family 实例，否则长期泄漏（2026-10）。
+	// 2027-02：除本文件内的 family 外，composer 六件套 / 命令表 / outline / runtime UI /
+	// 侧栏状态等跨模块 family 通过登记表统一释放（原先 15 个 family 完全没有释放路径）。
+	removeRegisteredSessionFamilies(sessionId);
+	// 数据不在 atomFamily 里的模块（如 DSH 提问回显）经登记表提供清理写 atom
+	for (const disposalAtom of getSessionDisposalAtoms()) {
+		set(disposalAtom as Parameters<typeof set>[0], sessionId);
+	}
 	liveThinkingIdBySessionIdAtomFamily.remove(sessionId);
 	newTurnCollapseTickBySessionIdAtomFamily.remove(sessionId);
 	sendPinAnimatingBySessionIdAtomFamily.remove(sessionId);

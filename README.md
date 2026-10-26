@@ -11,7 +11,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.9.1-blue)
+![Version](https://img.shields.io/badge/version-0.9.7-blue)
 
 国内 AtomGit 托管：https://atomgit.com/ayuayue/PiDeck
 <!-- 预留 AtomGit G-Star 徽章位（替换占位链接后启用）
@@ -101,25 +101,16 @@
 
 ## 📋 更新日志
 
-> **最新版本 v0.9.1**（2026-10-18）
+> **最新版本 v0.9.7**（2026-10-26）
 
-### v0.9.1 更新亮点
-- 🚀 **微信（ilink）接入：手机上的第二个 IM 渠道**
-- 🚀 **跨会话正文搜索：不再只搜标题**
-- 🚀 **会话内查找（Ctrl/Cmd+Shift+F）**
-- 🚀 **拼音检索：会话标题与文件抽屉**
-- 🚀 **文件抽屉按正文搜索**
-- 🚀 **侧边任务：不占标签栏的第二条会话**
-- 🚀 **会话平均 TPS**
-- 🚀 **Web 移动端：把竖屏空间还给内容**
-- 🚀 **ACP 工具对正式渠道开放**
-- 🚀 **同步 pi 1.3.0**
-- 🚀 **DSH 运行时升级到 0.2.1**
-- 🚀 **提示词库改为远程资产 + 毫秒级检索**
-- ✨ **会话索引落盘默认开启**
-- ✨ **扩展清单首屏预热**
-- ✨ **目标模式不再每轮重复灌目标全文**
-- ✨ **列表排序统一为拖拽**
+### v0.9.7 更新亮点
+- 🚀 **思考强度选择器重做：ZCode 同款渐变强度条**
+- 🚀 **侧栏分组标题栏冻结开关**
+- 🚀 **Web 端：侧栏会话列表显式分页**
+- ✨ **界面对齐 ZCode 的一轮视觉收口**
+- ✨ **Web 端：/api/state 条件请求**
+- ✨ **纯图片发送被静默注入英文提示词 (#404)**
+- ✨ **OpenCode 2.x 会话导入不识别 (#410)**
 
 [查看完整更新日志 →](CHANGELOG.zh-CN.md)
 

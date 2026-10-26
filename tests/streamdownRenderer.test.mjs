@@ -61,7 +61,9 @@ test("streamdown chat prose density overrides official space-y-4 / heading scale
 	// 2026 排版优化（beui 流式观感）：段距 0.55em→0.7em、行高 1.5→1.6、列表/标题留白微增。
 	assert.match(streamdownChrome, /margin-block-end:\s*0\.7em/);
 	assert.match(streamdownChrome, /\.markdown-body :is\(\.space-y-4\) > \[data-streamdown\^="heading-"\]/);
-	assert.match(streamdownChrome, /\[data-streamdown="heading-1"\][\s\S]*?font-size:\s*1\.5em/);
+	// 标题刻度压平（ZCode：h1 只 +4/h2 只 +2，h3 起同字号靠字重分层，2026-10 Phase 7）
+	assert.match(streamdownChrome, /\[data-streamdown="heading-1"\][\s\S]*?font-size:\s*1\.3em/);
+	assert.match(streamdownChrome, /\[data-streamdown="heading-2"\][\s\S]*?font-size:\s*1\.15em/);
 	assert.match(streamdownChrome, /list-style-position:\s*outside/);
 	const foundation = readFileSync("src/renderer/src/styles/foundation.css", "utf8");
 	assert.match(foundation, /--line-height-chat:\s*1\.6/);
@@ -220,7 +222,8 @@ test("streaming overlong guard: plain-text fallback above STREAM_LIGHT_MAX_CHARS
 	// 只挂静态会让中文货币文本流式中被 KaTeX 渲染、settle 后变回原文（可见闪变）；
 	// 只挂流式则静态渲染丢失判别（2026-10 issue 357）
 	assert.match(stream, /import \{ remarkInlineMathGuard \} from "\.\.\/\.\.\/utils\/markdownInlineMath"/);
-	// 远端合并给流式集合补了 remarkRecoverLocalImages（带空格的本地图片路径在流式中也要还原）。
+	// 流式集合可随场景增补（如 remarkRecoverLocalImages：带空格的本地图片路径在流式中就要成图），
+	// 但行内公式判别必须始终在首位，且不能退化成空列表。
 	assert.match(stream, /NO_STREAM_REMARK_PLUGINS:[\s\S]{0,200}?= \[remarkInlineMathGuard[,\]]/);
 	assert.match(stream, /remarkGfmNoSingleTilde,\s*remarkInlineMathGuard/);
 });

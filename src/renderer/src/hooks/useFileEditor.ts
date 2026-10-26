@@ -107,6 +107,8 @@ export interface UseFileEditorOutput {
 	selectEditorTab: (tabId: string) => void;
 	/** 双击预览 Tab → 常驻 */
 	promotePreviewEditorTab: (tabId: string) => void;
+	/** 只读 tab（项目外文件）由用户显式「转为可编辑」后补上保存能力 */
+	allowSaveEditorTab: (tabId: string) => void;
 	/** VS Code 式预览 Tab id（斜体）；至多一个 */
 	previewEditorTabId: string | null;
 	openFilePath: (path: string | ProjectFileTarget) => void;
@@ -276,6 +278,18 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
 		},
 		[],
 	);
+
+	/**
+	 * 只读 tab「转为可编辑」：只读用 allowSave=false 表达，这里只在用户显式确认后
+	 * 把它翻成 true，FileDiffViewer 才会挂上自动保存与 Ctrl+S。
+	 * 只改目标 tab，不碰 scope——项目外文件仍然没有 projectId 边界，与打开时一致。
+	 */
+	const allowSaveEditorTab = useCallback((tabId: string) => {
+		const prev = editorTabsRef.current;
+		const target = prev.find((tab) => tab.id === tabId);
+		if (!target || target.allowSave) return;
+		setEditorTabs(prev.map((tab) => (tab.id === tabId ? { ...tab, allowSave: true } : tab)));
+	}, []);
 
 	const closeEditorTab = useCallback(
 		(tabId: string) => {
@@ -477,6 +491,7 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
 		closeEditorTab,
 		selectEditorTab,
 		promotePreviewEditorTab,
+		allowSaveEditorTab,
 		previewEditorTabId,
 		openFilePath,
 		viewFilePath,

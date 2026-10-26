@@ -390,10 +390,6 @@ export class DshAgentManager implements SessionAgentGateway {
 				if (runtime.projection.todos !== undefined) runtime.todos = runtime.projection.todos;
 				// 尾页 projections baseline 兜底：底层完整折叠不受事件窗口截断影响
 				this.applyHistoryProjectionBaseline(runtime, history.result.value.projections);
-				// 轨迹系统提示随历史重放恢复（V4 system/message，兼容旧请求头）
-				if (runtime.projection.systemPrompt !== undefined) {
-					runtime.systemPrompt = runtime.projection.systemPrompt;
-				}
 			}
 		}
 		// attach 初值：list 的 projections.values 携带 host 折叠好的 contextPressure /
@@ -781,8 +777,6 @@ export class DshAgentManager implements SessionAgentGateway {
 			if (projection.todos !== undefined) runtime.todos = projection.todos;
 			// 尾页 projections baseline：断连窗口内可能缺 todo 事件帧，baseline 完整兜底
 			this.applyHistoryProjectionBaseline(runtime, history.result.value.projections);
-			// 系统提示随补帧同步（request/header 事件可能落在断连窗口内）
-			if (projection.systemPrompt !== undefined) runtime.systemPrompt = projection.systemPrompt;
 			// 断连窗口内的过程事件（modelChange/权限/plan/压缩）一并补账
 			runtime.processEvents = collectDshProcessEvents(runtime.processEvents, freshEvents);
 			this.emitMessages(runtime);
@@ -843,10 +837,6 @@ export class DshAgentManager implements SessionAgentGateway {
 					if (runtime.projection.todos !== undefined) runtime.todos = runtime.projection.todos;
 					// 尾页 projections baseline 兜底（新 host 的 registry 折叠与窗口无关）
 					this.applyHistoryProjectionBaseline(runtime, history.result.value.projections);
-					// 系统提示随恢复重放补齐（host 崩溃窗口内的 request/header 事件）
-					if (runtime.projection.systemPrompt !== undefined) {
-						runtime.systemPrompt = runtime.projection.systemPrompt;
-					}
 					// 过程事件随恢复重放补齐（host 崩溃窗口内的 modelChange/权限/plan 记录）
 					runtime.processEvents = collectDshProcessEvents(
 						runtime.processEvents,
@@ -1097,33 +1087,6 @@ export class DshAgentManager implements SessionAgentGateway {
 			return { events: collectDshProcessEvents([], events, { fromStart }).sort((left, right) => left.timestamp - right.timestamp), fromStart };
 		} catch {
 			return { events: [], fromStart: true, unavailable: true };
-		}
-	}
-
-	/**
-	 * 轨迹系统提示（V4 system/message，兼容旧版 request/header）：
-	 * - 运行时会话：mux 实时 + attach/backfill 重放收集的投影缓存；
-	 * - 历史（未激活）会话：从 host history 尾部折叠系统提示事件，
-	 *   失败/无 host 时返回 undefined（不阻断轨迹展示）。
-	 */
-	async readSystemPrompt(agentId: string | undefined, dshSessionId: string | undefined): Promise<string | undefined> {
-		if (agentId) {
-			const runtime = this.runtimes.get(agentId);
-			if (runtime?.systemPrompt !== undefined) return runtime.systemPrompt;
-		}
-		if (!dshSessionId) return undefined;
-		try {
-			const client = await this.ensureClient();
-			const page = await this.historyPage(dshSessionId, { maxMessages: 1000 });
-			if (!page.result.ok) return undefined;
-			const events = (page.result.value.events ?? []).map((entry) => entry.event).filter((event): event is NonNullable<typeof event> => Boolean(event));
-			let projection = projectDshEvent(undefined, undefined, `dsh:${dshSessionId}`);
-			for (const event of events) {
-				projection = projectDshEvent(projection, event, `dsh:${dshSessionId}`);
-			}
-			return projection.systemPrompt;
-		} catch {
-			return undefined;
 		}
 	}
 
@@ -2644,7 +2607,6 @@ export class DshAgentManager implements SessionAgentGateway {
 			if (p.model) runtime.model = p.model;
 			if (p.contextWindow !== undefined) runtime.contextWindow = p.contextWindow;
 			if (p.usage) runtime.usage = p.usage;
-			if (p.systemPrompt !== undefined) runtime.systemPrompt = p.systemPrompt;
 			if ((event as { type?: string } | undefined)?.type === "goal/change") runtime.goal = p.goal;
 			if (p.permissionPreset !== undefined) runtime.permissionPreset = p.permissionPreset;
 			runtime.planModeActive = p.planModeActive;
@@ -2819,8 +2781,6 @@ type DshAgentRuntime = {
 	sessionStats?: DshSessionStatsProjection;
 	/** host 侧排队消息（inbox 投影；空数组 = 无排队）。见 parseDshInboxProjection。 */
 	queuedMessages?: DshQueuedMessage[];
-	/** DSH 当轮真实系统提示（system/message 投影；attach/backfill 重放与 mux 实时双来源）。 */
-	systemPrompt?: string;
 	/**
 	 * 上下文占用投影（host contextPressure 单元）：provider 上报的最新请求大小 +
 	 * 下一条请求的估算成本 + 路由容量。mux session/projection 帧与 attach 初值双来源，

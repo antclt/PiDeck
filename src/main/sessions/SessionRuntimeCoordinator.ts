@@ -1390,6 +1390,30 @@ export class SessionRuntimeCoordinator {
 		}
 	}
 
+	/**
+	 * fork 化重发/编辑前的模型核对（issue #370）：pi 的 /fork 按旧分支的 model_change 恢复模型，
+	 * 模型被删除或改名时它只在进程内部记录回落（RPC 不暴露 modelFallbackMessage），
+	 * applyPreferences 也只能提示「偏好失效」后继续。不核对就会「用户以为在 A 模型上重发，
+	 * 请求实际打到默认供应商的模型」。只对显式要求核对的重发生效（普通发送沿用 2026-09 的
+	 * 降级不阻断策略）；读不到运行态时放行，核对本身不能变成新的阻塞点。
+	 */
+	private async runtimeModelMismatch(sessionId: string, agentId: string): Promise<{ expected: string; actual: string } | undefined> {
+		const entry = this.catalog.get(sessionId);
+		const expected = entry?.model;
+		if (!entry || !expected?.provider || !expected.modelId) return undefined;
+		// DSH/ACP 的模型由各自 host 管，catalog 里的 model 不代表运行时选择，只核对 pi。
+		if (entry.backend === "dsh" || entry.backend === "acp") return undefined;
+		let actual: SessionRuntimeModelSelection | undefined;
+		try {
+			actual = await this.agents.getRuntimeModelThinkingState?.(agentId);
+		} catch {
+			return undefined;
+		}
+		if (!actual?.provider || !actual.modelId) return undefined;
+		if (actual.provider === expected.provider && actual.modelId === expected.modelId) return undefined;
+		return { expected: `${expected.provider}/${expected.modelId}`, actual: `${actual.provider}/${actual.modelId}` };
+	}
+
 	private async sendOnce(input: SendSessionPromptInput): Promise<SendSessionPromptResult> {
 		const pipelineStartedAt = Date.now();
 		void this.logger?.info("session-perf", "Prompt pipeline started", {
@@ -1425,6 +1449,31 @@ export class SessionRuntimeCoordinator {
 		try {
 			if (!this.isCurrentDispatchLease(lease)) {
 				return this.unknownDelivery(input, "Session runtime binding changed before prompt dispatch");
+			}
+
+			// 重发/编辑：核对运行时真的在用会话选择的模型。不一致说明 fork 恢复的模型已不可用、
+			// pi 已静默回落到其他模型——宁可拒绝并说清期望/实际，也不拿别的模型执行用户请求。
+			// 不在这重试 setModel：激活阶段已重放过偏好，模型确实不存在时重试也不会成功。
+			if (input.requireAppliedModel) {
+				const mismatch = await this.runtimeModelMismatch(input.sessionId, lease.agentId);
+				// 核对期间绑定可能被替换/停止：此时一个 token 都没发出去，按 rejected 而不是 unknown 结算。
+				if (!this.isCurrentDispatchLease(lease)) {
+					return this.rejected(input, "Session runtime binding changed before prompt dispatch");
+				}
+				if (mismatch) {
+					void this.logger?.warn("session-runtime", "Refused prompt dispatch: runtime model differs from session selection", {
+						sessionId: input.sessionId,
+						requestId: input.requestId,
+						agentId: lease.agentId,
+						expected: mismatch.expected,
+						actual: mismatch.actual,
+					});
+					return this.rejected(input, `Session model unavailable: expected ${mismatch.expected}, runtime is ${mismatch.actual}`, {
+						i18nKey: "diagnostic.promptModelMismatch",
+						i18nParams: { expected: mismatch.expected, actual: mismatch.actual },
+						debugDetails: `expected ${mismatch.expected}, actual ${mismatch.actual}`,
+					});
+				}
 			}
 
 			let result: SendPromptResult;

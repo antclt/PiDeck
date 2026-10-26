@@ -370,12 +370,13 @@ test("isPackageSource / isExactEntryFor pure helpers", () => {
 	assert.equal(isPackageSource("npm:foo"), true);
 	assert.equal(isPackageSource("git:github.com/a/b"), true);
 	assert.equal(isPackageSource("github:x/y"), true);
-	assert.equal(isPackageSource("my-local-ext"), false);
-	// dev 把判据统一到 shared/piPackageSource：本地目录形式的包（盘符/UNC/POSIX 绝对/显式相对）
-	// 也算包源（`pi install ./pkg` 后 settings.json 里就是裸路径），不再是「只有协议前缀」。
-	assert.equal(isPackageSource("/abs/path.ts"), true);
+	// 路径型 source 也是包：`pi install ./pkg` / 盘符 / UNC 装进来的本地目录包，
+	// settings.json 里存裸路径（2026-10 shared/piPackageSource 统一判据后归为 packages 条目）。
+	assert.equal(isPackageSource("/abs/pkg"), true);
 	assert.equal(isPackageSource("C:\\pkg"), true);
 	assert.equal(isPackageSource("./pkg"), true);
+	// 裸文件名仍是 ~/.pi/agent/extensions 下自动发现的本地文件扩展（卸载=删文件），不是包。
+	assert.equal(isPackageSource("my-local-ext"), false);
 	assert.equal(isExactEntryFor("-/a/b.ts", "/a/b.ts"), true);
 	assert.equal(isExactEntryFor("+/a/b.ts", "/a/b.ts"), true);
 	assert.equal(isExactEntryFor("/a/b.ts", "/a/b.ts"), true);

@@ -1,5 +1,5 @@
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
-import { Streamdown, defaultRehypePlugins, defaultRemarkPlugins, type Components } from "streamdown";
+import { Streamdown, defaultRemarkPlugins, type Components } from "streamdown";
 import { code } from "@streamdown/code";
 import { mermaid } from "@streamdown/mermaid";
 import { createMathPlugin } from "@streamdown/math";
@@ -11,10 +11,13 @@ import { MarkdownImageGroupProvider, imageCountInChildren } from "./MarkdownImag
 import { localImageUrl } from "../../../../shared/localImage";
 import { markdownUrlTransform } from "./MarkdownLinkCore";
 import { remarkGfmNoSingleTilde, remarkRecoverLocalImages } from "../../utils/markdownPlugins";
+import { remarkRecoverInlineLinks } from "../../utils/markdownRecoverInlineLinks";
 import { remarkInlineMathGuard } from "../../utils/markdownInlineMath";
 import { normalizeMathDelimiters } from "../../utils/normalizeMathDelimiters";
+import { UNTRUSTED_MARKDOWN_REHYPE_PLUGINS } from "./markdownSanitize";
 import { FormulaCopyLayer } from "./FormulaCopyLayer";
 import { useSmoothStream } from "../../utils/useSmoothStream";
+import { useDocumentTheme } from "../../hooks/useDocumentTheme";
 import { STREAM_LIGHT_MAX_CHARS, STREAM_UNFREEZABLE_MIN_CHARS, SETTLE_FULL_MAX_CHARS, shouldRenderStreamPlain, shouldKeepLightOnSettle } from "./markdownStreamPolicy";
 // 兼容导出：既有引用与源码契约测试从 MarkdownStream 读阈值常量
 export { STREAM_LIGHT_MAX_CHARS } from "./markdownStreamPolicy";
@@ -37,7 +40,9 @@ const mathPlugin = createMathPlugin({ singleDollarTextMath: true });
 // 流式中被 KaTeX 渲染、settle 后变回原文，出现可见闪变。
 // remarkRecoverLocalImages 必须同时在流式集合里：带空格的本地图片路径在流式中
 // 就是一行原始 `![..](..)` 文本，settle 后才变图的话等于「图晚一拍出现」。
-const NO_STREAM_REMARK_PLUGINS: Parameters<typeof Streamdown>[0]["remarkPlugins"] = [remarkInlineMathGuard, remarkRecoverLocalImages];
+// remarkRecoverInlineLinks 同理：带空格本地路径的 `[text](path)` 链接在流式中同样是
+// 一行原始语法，晚一拍出现会让链接文字「先散架后合拢」，用户感知是文字在抖。
+const NO_STREAM_REMARK_PLUGINS: Parameters<typeof Streamdown>[0]["remarkPlugins"] = [remarkInlineMathGuard, remarkRecoverLocalImages, remarkRecoverInlineLinks];
 const NO_STREAM_REHYPE_PLUGINS: Parameters<typeof Streamdown>[0]["rehypePlugins"] = [];
 
 /**
@@ -84,7 +89,7 @@ const PlainStreamSplit = memo(function PlainStreamSplit(props: { text: string })
  * - 数学公式：@streamdown/math（KaTeX，$...$/$$...$$）
  * - mermaid 图表：@streamdown/mermaid（```mermaid 代码块 → 交互式 SVG + 全屏/缩放/下载控件）
  * - 表格：GFM + 内建复制/下载（CSV/TSV/Markdown）控件
- * - HTML 标签：默认 sanitize（未知标签剥属性保留文本）
+ * - HTML 标签：raw 渲染后走 markdownSanitize.ts 的白名单（未知标签剥掉、危险子树整棵丢弃）
  *
  * 有意保留的项目能力（streamdown 无对应内置或桌面语义不同）：
  * - a 仍走 MarkdownLink：file:// 本地路径可点击打开、外链经 onOpenExternal
@@ -143,7 +148,9 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 	/** 是否禁用图表/代码高亮等重型渲染（静态小场景如更新日志可关以省内存） */
 	light?: boolean;
 }) {
-	const isDark = typeof document !== "undefined" && document.documentElement.dataset.theme === "dark";
+	// 订阅式读主题（2027-02 修正）：直读 dataset 拿不到切主题后的变化，mermaid
+	// 配置会保持旧明暗档直到下次无关重渲染。观察器见 hooks/useDocumentTheme。
+	const isDark = useDocumentTheme() === "dark";
 	// 逐字打字机：默认参数见 useSmoothStream（约 8ms / 每帧最多 6 字）。
 	const { displayedContent } = useSmoothStream({
 		content: props.text,
@@ -159,7 +166,9 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 	// 流结束 isStreaming 变 false 后，全量渲染（高亮/mermaid/表格/元素树）是一次
 	// 实测 70-100ms 的同步长任务：若发生在用户滚动/交互期间会造成可见卡顿与滚动跳动。
 	// 因此 settle 后先保持流式末帧的轻量渲染，requestIdleCallback 空闲时再切全量
-	// （timeout 兜底防永久延迟）；静态场景（从未流式，如 FileDiffViewer）不延迟。
+	// （timeout 兜底防永久延迟）。静态场景（从未流式，如 FileDiffViewer）分屏打开时，旁边
+	// 常是正在流式渲染的会话：小文档立即全量无可感卡顿；大文档（>40K）同样走 idle
+	// 调度，避免 shiki 全量高亮与会话流式渲染抢主线程（2027-02 分屏卡顿修复）。
 	const wasStreamingRef = useRef(false);
 	const [settleFull, setSettleFull] = useState(false);
 	const effectiveLight = props.light || isStreamingNow || !settleFull || shouldKeepLightOnSettle(props.text.length);
@@ -171,11 +180,16 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 			return;
 		}
 		if (!wasStreamingRef.current) {
-			// 静态场景（从未流式）：立即全量，不延迟
-			setSettleFull(true);
-			return;
+			// 静态场景（从未流式）：小文档（≤40K）立即全量；大文档首帧先轻量渲染，
+			// 空闲再补全量高亮（与流式 settle 同款调度）。首帧轻量期间 frozenSplit
+			// 走冻结切分渲染，文本立即可读可滚，不是白屏。
+			if (displayText.length <= STREAM_LIGHT_MAX_CHARS) {
+				setSettleFull(true);
+				return;
+			}
+		} else {
+			wasStreamingRef.current = false;
 		}
-		wasStreamingRef.current = false;
 		const schedule = () => setSettleFull(true);
 		const id = typeof window.requestIdleCallback === "function" ? window.requestIdleCallback(schedule, { timeout: 1500 }) : window.setTimeout(schedule, 50);
 		return () => {
@@ -200,8 +214,8 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 	const streamPlain = (isStreamingNow && displayText.length > STREAM_LIGHT_MAX_CHARS) || (frozenSplit !== undefined && frozenSplit.prefixEnd === 0 && displayText.length > STREAM_UNFREEZABLE_MIN_CHARS);
 	// 流式中精简插件：gfm/codeMeta/linkifyPaths 与 math 等插件都留到静态渲染；
 	// 外部显式传入的插件（FileDiffViewer 等场景）不受流式精简影响。
-	const resolvedRemarkPlugins = isStreamingNow ? NO_STREAM_REMARK_PLUGINS : (props.remarkPlugins ?? [remarkGfmNoSingleTilde, remarkInlineMathGuard, remarkRecoverLocalImages, defaultRemarkPlugins.codeMeta, remarkLinkifyPaths]);
-	const resolvedRehypePlugins = isStreamingNow ? NO_STREAM_REHYPE_PLUGINS : (props.rehypePlugins ?? [defaultRehypePlugins.raw]);
+	const resolvedRemarkPlugins = isStreamingNow ? NO_STREAM_REMARK_PLUGINS : (props.remarkPlugins ?? [remarkGfmNoSingleTilde, remarkInlineMathGuard, remarkRecoverLocalImages, remarkRecoverInlineLinks, defaultRemarkPlugins.codeMeta, remarkLinkifyPaths]);
+	const resolvedRehypePlugins = isStreamingNow ? NO_STREAM_REHYPE_PLUGINS : (props.rehypePlugins ?? UNTRUSTED_MARKDOWN_REHYPE_PLUGINS);
 	// 显式 Components 标注：让 a 的 props 走上下文类型推断（streamdown 的
 	// Components 是「具名槽位 | 索引签名」联合，直接内联会触发索引签名分支的类型不兼容）
 	// useMemo 依赖回调 props：回调引用变化时 components 重建，streamElement 随之重建，

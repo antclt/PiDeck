@@ -1,10 +1,11 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, safeStorage, screen, session, shell, Tray, Notification } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, safeStorage, screen, session, shell, Tray, Notification, webContents } from "electron";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
+import { renderDshSessionHtml as renderSessionHtmlForExport, sanitizeExportFileName } from "./dsh/dshSessionHtmlExport";
 import { release as osRelease } from "node:os";
 import { createWriteStream, existsSync } from "node:fs";
-import { copyFile, readFile, readdir, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { is } from "@electron-toolkit/utils";
 import { PetSystem, type PetSystemDeps } from "./pet";
 import { downgradeRunningStartedBefore, downgradeStaleRunning } from "./pi/derivedSubagents";
@@ -15,19 +16,24 @@ import { registerHtmlPreviewProtocol } from "./htmlPreviewProtocol";
 import { AnnouncementService } from "./announcements/AnnouncementService";
 import { registerAnnouncementIpc } from "./ipc/announcementIpc";
 import { CuaService } from "./cua/CuaService";
+import { BrowserAgentService } from "./browser/BrowserAgentService";
 import { AutomationStore } from "./automation/AutomationStore";
 import { AgentProfileStore } from "./agents/AgentProfileStore";
+import { FavoritesStore } from "./favorites/FavoritesStore";
 import { AgentInvokeService } from "./agents/AgentInvokeService";
 import { AutomationScheduler } from "./automation/AutomationScheduler";
 import { AutomationRunCoordinator } from "./automation/AutomationRunCoordinator";
 import { registerAutomationIpc } from "./ipc/automationIpc";
 import { registerAgentProfileIpc } from "./ipc/agentProfileIpc";
+import { registerFavoritesIpc } from "./ipc/favoritesIpc";
 import { registerAgentInvokeIpc } from "./ipc/agentInvokeIpc";
 import { registerSelectionToolIpc } from "./ipc/selectionToolIpc";
 import { SelectionToolService } from "./selection/SelectionToolService";
 import { SelectionToolWindow } from "./selection/SelectionToolWindow";
 import { ClipboardSelectionWatcher } from "./selection/clipboardSelectionWatcher";
+import { WindowsSelectionCapture } from "./selection/windowsSelectionCapture";
 import { resolveShortcutBindings } from "../shared/shortcuts";
+import { SYSTEM_SELECTION_TOOL_ENABLED } from "../shared/types/selectionTool";
 import { registerFeishuIpc } from "./ipc/feishuIpc";
 import { registerWeChatIpc } from "./ipc/wechatIpc";
 import { applyLinuxDisplayBackendWorkaround, isUsingLinuxXWaylandWorkaround } from "./linuxDisplayBackend";
@@ -93,8 +99,10 @@ const e2eWindowPlacement = resolveE2EWindowPlacement(isE2E, process.env.PIDECK_E
 if (isE2E) {
 	// 屏幕外窗口会被 Windows 原生遮挡判定当成不可见 → 渲染/定时器节流，Playwright 点击与截图会卡住。
 	for (const switchName of E2E_RENDERING_SWITCHES) app.commandLine.appendSwitch(switchName);
-	app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
 }
+// disable-features 唯一拼装点（同名 switch 后值覆盖前值，禁在此之外再 append）：
+// 默认清单（音频服务进程内等）与 E2E 的渲染保活条目合并成单次写入。
+applyChromiumFeatureFlags(app.commandLine, isE2E ? ["CalculateNativeWinOcclusion"] : []);
 
 // 冷启动计时锚点（2026-10 流畅度审计）：里程碑在 whenReady 与 showMainWindowOnce 记录，
 // 日志对比 sinceModuleLoadMs / processUptimeMs 两个口径即可观测启动回归。
@@ -243,6 +251,7 @@ process.on("unhandledRejection", (reason) => {
 	console.error("Unhandled rejection:", reason);
 });
 import { ipcChannels } from "../shared/ipc";
+import { RendererNoiseAggregator, classifyRendererNoise, toRendererNoiseLog } from "../shared/rendererNoise";
 import { mainProcessT, normalizeMainProcessLocale, type MainProcessLocale, type MainProcessTranslationKey } from "../shared/i18n/mainProcessCopy";
 import { buildSessionOriginKey, canonicalizeSessionPath, toAbsoluteSessionPath } from "../shared/sessionIdentity";
 import type {
@@ -269,6 +278,7 @@ import type {
 	SessionRecord,
 	SessionCommandError,
 	SessionCommandResult,
+	SessionSearchResult,
 	SessionRuntimeEvent,
 	SessionRuntimeTarget,
 	SessionUiResponseInput,
@@ -287,6 +297,7 @@ import { runUserDataNameMigration, recordUserDataNameMigrationNotice, type UserD
 import { shouldAutoRegisterForeignCwd } from "./projects/projectPathPolicy";
 import { defaultPathCheck } from "./projects/projectPresence";
 import { FileSystemService } from "./fs/FileSystemService";
+import { openSystemPath } from "./fs/openPath";
 import { AgentManager } from "./pi/AgentManager";
 import { createRemoteRuntimePort } from "./pi/remoteRuntimePort";
 import { PiProcess } from "./pi/PiProcess";
@@ -364,7 +375,6 @@ import type { RemoteTerminalSessionManager } from "./terminal/RemoteTerminalSess
 import { TokendancePaymentStore } from "./config/tokendancePayment";
 import { usageProbeRequest } from "./config/usageProbeTransport";
 import { TOKENDANCE_PROVIDER } from "../shared/tokendance";
-import { webContents } from "electron";
 import { TerminalSessionManager } from "./terminal/TerminalSessionManager";
 import { startTrayRegistrationVerify, type TrayRegistrationVerify } from "./tray/trayRegistrationVerify";
 import { buildTrayMenuTemplate, TRAY_RECENT_PROJECTS_LIMIT } from "./tray/trayMenuTemplate";
@@ -420,8 +430,10 @@ import { registerUsageStatsIpc } from "./ipc/usageStatsIpc";
 import { UsageStatsService } from "./usageStats/UsageStatsService";
 import { constrainWindowBoundsToWorkArea, type LastWindowBounds, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, readLastWindowBounds, saveLastWindowBounds } from "./windowState";
 import { applyE2EWindowPlacement, E2E_RENDERING_SWITCHES, resolveE2EWindowPlacement } from "./e2eWindowMode";
+import { applyChromiumFeatureFlags } from "./chromiumFeatureFlags";
 import { createRendererCrashRecoveryGuard } from "./window/rendererCrashRecovery";
 import { registerBackgroundImageProtocol, registerBackgroundsIpc } from "./ipc/backgroundsIpc";
+import { registerWallpaperEngineIpc, registerWallpaperEngineProtocol } from "./ipc/wallpaperEngineIpc";
 import { registerThemesIpc } from "./ipc/themesIpc";
 import { registerHostPluginsIpc } from "./ipc/hostPluginsIpc";
 import { registerPiDeckMcpIpc } from "./ipc/piDeckMcpIpc";
@@ -598,6 +610,30 @@ function projectPathsForContentSearch(): string[] {
 			.map((project) => project.path)
 	);
 }
+/**
+ * 会话内检索的一个会话实现（只扫给定会话文件、命中按时间线返回）：桌面 Ctrl+Shift+F
+ * （sessionIpc 的 sessionMessageSearch）与 Web 搜索弹层（WebServiceManager 的
+ * searchSessionMessages）共用同一份降级口径——未就绪先 warmup 再返回 null（渲染层显示
+ * 「索引准备中」，绝不让输入框等 boot），refresh 失败但索引仍可用时继续搜一次
+ * （transient 失败不该让本次检索静默无内容）。返回 null 恒表示「检索源不可用」。
+ */
+function sessionMessageSearchInFile(sessionPath: string, query: string): Promise<SessionSearchResult | null> {
+	// 先取本地快照：下面每处 await 之后 sidecar 都可能已被退出清理置空，逐次判空最稳。
+	const service = sessionIndexService;
+	if (!service) return Promise.resolve(null);
+	return (async () => {
+		const roots = await sessionScanner.resolveContentSearchRoots(projectPathsForContentSearch());
+		if (roots.length === 0) return null;
+		if (!service.isReady(roots)) {
+			service.warmup(roots);
+			return null;
+		}
+		const refreshed = await service.refresh(roots);
+		if (!refreshed.ok && !service.isReady(roots)) return null;
+		const result = await service.searchInSession(roots, sessionPath, query);
+		return result.ok ? result.value : null;
+	})();
+}
 let sessionScanner: SessionScanner;
 let sessionCatalog: SessionCatalog;
 let sessionRuntimeCoordinator: SessionRuntimeCoordinator;
@@ -713,6 +749,8 @@ let soundAlertService: SoundAlertService | null = null;
 let announcementService: AnnouncementService | null = null;
 /** CUA（Computer Use Agent）服务；null = 未初始化 */
 let cuaService: CuaService | null = null;
+/** 浏览器 Agent 服务（内置 webview + CDP）；null = 未初始化 */
+let browserAgentService: BrowserAgentService | null = null;
 /** 定时任务与自动化服务；null = 未初始化 */
 let automationStore: AutomationStore | null = null;
 let automationScheduler: AutomationScheduler | null = null;
@@ -743,6 +781,8 @@ let piAuthService: PiAuthService | null = null;
 let enhancePromptService: EnhancePromptService | null = null;
 /** 智能体配置存储（<userData>/agent-profiles.json）；null = 尚未初始化。 */
 let agentProfileStore: AgentProfileStore | null = null;
+/** 收藏存储（<userData>/favorites.json）；null = 尚未初始化。 */
+let favoritesStore: FavoritesStore | null = null;
 /** 智能体一次性调用服务（划词工具 / 市场面板）：业务在 service，侧车进程在下面的 completion。 */
 let agentInvokeService: AgentInvokeService | null = null;
 /**
@@ -762,6 +802,8 @@ let selectionToolWindow: SelectionToolWindow | null = null;
 let selectionToolService: SelectionToolService | null = null;
 /** 复制即触发监听：系统级划词开启时轮询外部剪贴板变更（不依赖快捷键）。 */
 let selectionClipboardWatcher: ClipboardSelectionWatcher | null = null;
+/** Windows 原生划词：鼠标手势 + UIAutomation 读选区，不依赖复制/快捷键。 */
+let windowsSelectionCapture: WindowsSelectionCapture | null = null;
 
 /**
  * 最近一次系统级划词快捷键冲突（accelerator）与已提示值。
@@ -805,9 +847,19 @@ function flushSelectionShortcutConflictNotice(): void {
 function syncSelectionToolShortcut(): void {
 	const service = selectionToolService;
 	if (!service) return;
+	if (!SYSTEM_SELECTION_TOOL_ENABLED) {
+		// 系统级划词暂时隐藏：不清持久化设置，但一切入口（快捷键/复制监听/原生捕获）都不启动。
+		selectionClipboardWatcher?.setEnabled(false);
+		windowsSelectionCapture?.setEnabled(false);
+		service.unregisterShortcut();
+		clearSelectionShortcutConflict();
+		return;
+	}
 	const systemEnabled = agentProfileStore?.getSnapshot().settings.systemSelectionEnabled === true;
 	// 复制即触发与快捷键解耦：快捷键被其它实例占用时，复制文本仍然可以自动弹窗。
 	selectionClipboardWatcher?.setEnabled(systemEnabled);
+	// Windows 优先用原生选区读取（Magpie 同款 UIA），复制监听只做 UIA 读不到时的兜底。
+	windowsSelectionCapture?.setEnabled(systemEnabled);
 	if (!systemEnabled) {
 		service.unregisterShortcut();
 		clearSelectionShortcutConflict();
@@ -1408,7 +1460,22 @@ async function exportCatalogSessionHtml(sessionId: string): Promise<{ path: stri
 	if (!result || typeof result !== "object" || !("path" in result) || typeof result.path !== "string") {
 		throw new Error(mainCopy("session.exportFailed"));
 	}
-	return { path: result.path };
+	// pi 临时会话的 export_html 可能返回相对文件名（pi-session-*.html，落在 pi cwd=项目根）：
+	// 打包态主进程 cwd 是 exe 目录，消费端（Web 下载 / 桌面打开）直接用相对路径必然 ENOENT。
+	const rawPath = result.path;
+	const projectRoot = projectStore.get(entry.projectId)?.path ?? "";
+	const absolutePath = isAbsolute(rawPath) ? rawPath : join(projectRoot, rawPath);
+	if (existsSync(absolutePath)) return { path: absolutePath };
+	// pi 声明的导出文件不存在（部分 pi 版本在临时会话上不落盘，2026-10 Web 走查实测）：
+	// 回退 host 侧投影导出——复用 DSH 的自包含 HTML 渲染器（无外部依赖、离线可读），
+	// 落盘 userData/exports/，保证「导出 HTML」在任何 pi 行为下都成功。
+	const loadWindow = await agentManager.readSessionLoadWindow(filePath, sessionId, { projectId: entry.projectId });
+	const html = renderSessionHtmlForExport(loadWindow.messages, { title: entry.title, cwd: projectRoot, exportedAt: Date.now() });
+	const exportDir = join(app.getPath("userData"), "exports");
+	await mkdir(exportDir, { recursive: true });
+	const outPath = join(exportDir, sanitizeExportFileName(entry.title || sessionId, sessionId));
+	await writeFile(outPath, html, "utf8");
+	return { path: outPath };
 }
 
 type AgentSessionReplacementResult = {
@@ -1896,10 +1963,10 @@ function refreshTrayContextMenu(): void {
 					focusMainWindow();
 				},
 				openDataDir: () => {
-					void shell.openPath(app.getPath("userData"));
+					void openSystemPath(app.getPath("userData"));
 				},
 				openLogsDir: () => {
-					void shell.openPath(join(app.getPath("userData"), "logs"));
+					void openSystemPath(join(app.getPath("userData"), "logs"));
 				},
 				restart: restartApp,
 				quit: () => {
@@ -2308,6 +2375,10 @@ function configureBrowserPanelWebviewHost(window: BrowserWindow): void {
 			return;
 		}
 
+		// 浏览器 Agent 需要留住 guest 引用（快照/点击/截图）；
+		// 抽屉收起/全屏切换会销毁重建 guest，registry 允许重复登记并在 destroyed 时清理。
+		browserAgentService?.attachGuest(guest);
+
 		const blockUnsafeNavigation = (event: { url: string; preventDefault(): void }, phase: string) => {
 			if (isAllowedBrowserPanelUrl(event.url)) return;
 			event.preventDefault();
@@ -2499,6 +2570,8 @@ async function createWindow() {
 			url: mainWindow?.webContents.getURL(),
 		});
 	});
+	// 聚焦补热 standby：见 rearmStandbyAgentOnFocus 注释（节流 + ensure 幂等，热路径无感）。
+	mainWindow.on("focus", () => rearmStandbyAgentOnFocus());
 	mainWindow.webContents.on("did-finish-load", () => {
 		void appLogger.info("app", "Main window load finished", {
 			url: mainWindow?.webContents.getURL(),
@@ -2581,19 +2654,25 @@ async function createWindow() {
 				void appLogger.warn("app", "Main window preload API check failed", error);
 			});
 	});
+	// 渲染层 console 噪音聚合（issue #376）：良性事件（ResizeObserver loop）由 renderer 自己的
+	// 全局处理器统一落盘，这里直接跳过——否则同一事件两条管道各写一遍。非良性首条即时写盘，
+	// 窗口内重复折叠成一条降档汇总（循环报错不再把「最近 7 天报错」统计灌满）。
+	const rendererConsoleNoise = new RendererNoiseAggregator();
 	mainWindow.webContents.on("console-message", (event) => {
 		if (!["warning", "error"].includes(event.level)) return;
+		// 良性噪音：renderer 的 window.onerror 已按同一聚合器写一条 ×N 的 info，此处不重复落盘。
+		if (classifyRendererNoise(event.message).benign) return;
 		// 渲染层 console 镜像只作排查线索，不参与健康统计：这里聚集的是第三方/框架的原始输出
 		// （KaTeX strict 警告、React 开发期提示等，实测 40k+ 行/天），按 error/warn 记会让
 		// EnvironmentDoctor 的「最近 7 天报错 / 警告明细」被噪音填满。降一档：error → warn、
 		// warning → info（仍按天写进日志文件，可检索）。真正的渲染层故障由 main.tsx 的
 		// rendererLog 显式上报（uncaught error / unhandled rejection），那条链路仍是 error。
-		void appLogger.log(event.level === "error" ? "warn" : "info", "app", "Main window renderer console error", {
-			level: event.level,
-			message: event.message,
-			line: event.lineNumber,
-			sourceId: event.sourceId,
-		});
+		const level: AppLogLevel = event.level === "error" ? "warn" : "info";
+		const detail = { level: event.level, message: event.message, line: event.lineNumber, sourceId: event.sourceId };
+		for (const flush of rendererConsoleNoise.record(`console|${event.level}|${event.message.slice(0, 120)}`, level, "Main window renderer console error", { detail })) {
+			const log = toRendererNoiseLog(flush);
+			void appLogger.log(log.level, "app", log.message, log.detail);
+		}
 	});
 
 	mainWindow.once("ready-to-show", showMainWindowOnce);
@@ -2608,6 +2687,13 @@ async function createWindow() {
 	// 注意：mainWindow 为模块级可空变量，此处用创建后的局部引用确保非空
 	const windowForState = createdWindow;
 	windowForState.on("close", () => quickTaskChrome.saveWorkbenchBoundsOnClose(windowForState));
+	// 聚合器无定时器：窗口销毁时补齐尾部计数（「刷了一路却一条没写」会丢诊断）
+	windowForState.on("closed", () => {
+		for (const flush of rendererConsoleNoise.flushAll()) {
+			const log = toRendererNoiseLog(flush);
+			void appLogger.log(log.level, "app", log.message, log.detail);
+		}
+	});
 
 	// 关闭窗口时根据设置决定：隐藏到托盘还是正常退出
 	mainWindow.on("close", (event) => {
@@ -2884,6 +2970,23 @@ function warmStandbyAgentAtStartup(): void {
 			error: error instanceof Error ? error.message : String(error),
 		});
 	}
+}
+
+// 聚焦补热节流状态：上次触发时刻（0=从未）。窗口每次聚焦都会喊一次，
+// 但补热本身只在池空/指纹过期时才真正 spawn（ensure 幂等），节流只为压日志噪音。
+let lastStandbyFocusRewarmAt = 0;
+const STANDBY_FOCUS_REWARM_INTERVAL_MS = 60_000;
+
+/**
+ * 窗口聚焦触发的 standby 补热（节流）：池条目 10min TTL 过期后，用户「离开一阵
+ * 再回来开新会话」要吃满一次 8~25s 冷启动；聚焦是「马上又要用」的强信号，趁用户
+ * 浏览/输入的空窗后台补一个待命进程。目标推断/让路判定复用启动期预热同一条路径。
+ */
+function rearmStandbyAgentOnFocus(): void {
+	const now = Date.now();
+	if (now - lastStandbyFocusRewarmAt < STANDBY_FOCUS_REWARM_INTERVAL_MS) return;
+	lastStandbyFocusRewarmAt = now;
+	warmStandbyAgentAtStartup();
 }
 
 /**
@@ -3291,6 +3394,8 @@ function registerIpc() {
 			},
 		});
 	}
+	// 收藏：整条回复 / 划选片段的本地快照（userData/favorites.json）。
+	if (favoritesStore) registerFavoritesIpc({ store: favoritesStore, appLogger });
 	registerAgentInvokeIpc(ipcMain, agentInvokeService);
 	// 系统级划词浮窗：状态/隐藏/「发送到 PiDeck」（文本插入主窗口当前会话输入框）。
 	registerSelectionToolIpc({
@@ -3357,7 +3462,7 @@ function registerIpc() {
 				installer.unref();
 				return;
 			}
-			void shell.openPath(filePath);
+			void openSystemPath(filePath);
 		},
 		quitApp: () => {
 			isQuitting = true;
@@ -3404,6 +3509,10 @@ function registerIpc() {
 	// 换肤背景图：协议服务 userData/backgrounds/，IPC 负责选图复制与删除
 	registerBackgroundImageProtocol();
 	registerBackgroundsIpc();
+	// Wallpaper Engine 视频壁纸：协议只服务设置里的工坊目录，IPC 只有选目录/列表/校验三条
+	const wallpaperEngineDeps = { getDir: () => settingsStore.get().weWorkshopDir ?? "" };
+	registerWallpaperEngineProtocol(wallpaperEngineDeps);
+	registerWallpaperEngineIpc(wallpaperEngineDeps);
 	registerThemesIpc();
 	// Desktop plugins run without AgentManager/RPC; failure leaves the rest of PiDeck untouched.
 	// 项目显示名闭包在面板挂载时才求值：此处 projectStore 尚未装配。
@@ -3435,6 +3544,69 @@ function registerIpc() {
 		// 与 settings 同样不假设装配顺序。
 		runtimes: () => sessionRuntimeCoordinator.listRuntimes(),
 		abortRuntime: (target) => sessionRuntimeCoordinator.abortRuntime(target),
+		// 智能体目录：agentProfileStore 在启动后段（见下方 load 段）才装配，闭包在请求时求值。
+		// 未就绪时读返回空列表/undefined，写统一报 operation-failed（工具层映射为安全错误码）。
+		agents: {
+			list: () => agentProfileStore?.list() ?? [],
+			get: (agentId) => agentProfileStore?.get(agentId),
+			create: async (input) => {
+				if (!agentProfileStore) throw new Error("operation-failed");
+				return agentProfileStore.create(input);
+			},
+			update: async (agentId, patch) => {
+				if (!agentProfileStore) throw new Error("operation-failed");
+				return agentProfileStore.update(agentId, patch);
+			},
+			delete: async (agentId) => {
+				if (!agentProfileStore) throw new Error("operation-failed");
+				return agentProfileStore.delete(agentId);
+			},
+			bindSession: async (input) => {
+				if (!agentProfileStore) throw new Error("operation-failed");
+				return agentProfileStore.bindSession(input);
+			},
+		},
+		// 定时任务：automationStore / runCoordinator 在启动后段才装配，闭包在请求时求值。
+		// 读接口按 projectId 过滤；写接口未就绪时统一报 operation-failed（工具层映射为安全错误码）。
+		automation: {
+			listTasks: (projectId) => automationStore?.getSnapshot().tasks.filter((task) => task.projectId === projectId) ?? [],
+			getTask: (taskId) => automationStore?.getSnapshot().tasks.find((task) => task.id === taskId),
+			listRuns: (projectId) => automationStore?.listRuns().filter((run) => run.projectId === projectId) ?? [],
+			getRun: (runId) => automationStore?.getRun(runId),
+			createTask: async (input) => {
+				if (!automationStore) throw new Error("operation-failed");
+				return automationStore.createTask(input);
+			},
+			updateTask: async (taskId, patch) => {
+				if (!automationStore) throw new Error("operation-failed");
+				return automationStore.updateTask(taskId, patch);
+			},
+			deleteTask: async (taskId) => {
+				if (!automationStore) throw new Error("operation-failed");
+				return automationStore.deleteTask(taskId);
+			},
+			runNow: async (taskId) => {
+				if (!automationRunCoordinator) throw new Error("operation-failed");
+				return automationRunCoordinator.runNow(taskId);
+			},
+			abortRun: async (runId) => {
+				if (!automationRunCoordinator) throw new Error("operation-failed");
+				return automationRunCoordinator.abortRun(runId);
+			},
+		},
+		// 收藏：favoritesStore 在启动后段才装配，闭包在请求时求值；未就绪时读为空、写报 operation-failed。
+		favorites: {
+			list: () => favoritesStore?.list() ?? [],
+			get: (favoriteId) => favoritesStore?.list().find((entry) => entry.id === favoriteId),
+			add: async (input) => {
+				if (!favoritesStore) throw new Error("operation-failed");
+				return favoritesStore.add(input);
+			},
+			remove: async (favoriteId) => {
+				if (!favoritesStore) return false;
+				return favoritesStore.remove(favoriteId);
+			},
+		},
 		warn: mcpWarning,
 	});
 	const unregisterPiDeckMcp = registerPiDeckMcpIpc(piDeckMcp, () => mainWindow, mcpWarning);
@@ -3591,8 +3763,14 @@ function registerIpc() {
 	// 不该被消息内容当图床读（取舍见 docs/markdown-image-rendering-plan.md）。
 	// 远端项目没有本机 path（只有 locator）：它们不属于本机图片白名单，必须过滤掉，
 	// 否则 map 会产出 undefined 并让整个协议白名单失效。
+	// 对话内本地图的白名单根。除了项目/运行时目录，还包含**桌面**：人和 agent 都习惯把
+	// 截图、设计稿放在桌面（2026-10-21 实测：会话里 `~/Desktop/PiDeck-Settings-*/x.png`
+	// 全被判 403，因为桌面不在白名单）。用 `app.getPath("desktop")` 而不是拼 home/Desktop：
+	// 它跟随用户重定向（OneDrive/自定义位置），路径不存在时 realpath 失败会退回原值，
+	// 目录里也不可能有能读到的文件，不会放宽真实边界。
 	const resolveLocalImageRoots = () => [
 		app.getPath("userData"),
+		app.getPath("desktop"),
 		join(app.getPath("temp"), "pideck-shots"),
 		projectStore.getChatProjectPath(),
 		...projectStore
@@ -4040,20 +4218,9 @@ function registerIpc() {
 			return result.ok ? result.value : null;
 		},
 		// 会话内查找（Ctrl+Shift+F / 会话头部放大镜）：只扫一个会话文件、命中按时间线
-		// 返回。就绪判定与降级策略与跨会话搜索一致——未就绪先 warmup 再回 null，渲染层
-		// 显示「索引准备中」，绝不让输入框等 boot。
+		// 返回。降级口径收口在 sessionMessageSearchInFile（与 Web 搜索弹层共用）。
 		sessionMessageSearch: async (sessionPath, query) => {
-			if (!sessionIndexService) return null;
-			const roots = await sessionScanner.resolveContentSearchRoots(projectPathsForContentSearch());
-			if (roots.length === 0) return null;
-			if (!sessionIndexService.isReady(roots)) {
-				sessionIndexService.warmup(roots);
-				return null;
-			}
-			const refreshed = await sessionIndexService.refresh(roots);
-			if (!refreshed.ok && !sessionIndexService.isReady(roots)) return null;
-			const result = await sessionIndexService.searchInSession(roots, sessionPath, query);
-			return result.ok ? result.value : null;
+			return sessionMessageSearchInFile(sessionPath, query);
 		},
 		// C1：DSH 后端专用 IPC 依赖按后端分组（注册表化铺路；未来新增后端各自提供一份）
 		dshBackend: {
@@ -4134,8 +4301,6 @@ function registerIpc() {
 			readDshProcessEvents: (agentId, dshSessionId) => dshAgentManager.readProcessEvents(agentId, dshSessionId),
 			readSessionFacts: (sessionPath) => agentManager.readSessionFacts(sessionPath),
 			readSessionOutline: (sessionPath, limit) => agentManager.readSessionOutline(sessionPath, limit),
-			readSessionOutlineTitle: (sessionPath, entryId) => agentManager.readSessionOutlineTitle(sessionPath, entryId),
-			readDshSystemPrompt: (agentId, dshSessionId) => dshAgentManager.readSystemPrompt(agentId, dshSessionId),
 			readDshMessageFullText: (agentId, messageId) => dshAgentManager.readMessageFullText(agentId, messageId),
 			resolveDshSessionFilePath: async (sessionId) => {
 				// F5：DSH 会话没有 pi 会话文件，「复制会话文件路径」按 catalog 的
@@ -4374,7 +4539,7 @@ function registerIpc() {
 			// macOS 打开 dmg 让用户拖入 Applications；其他平台只定位文件，绝不自动运行未知安装包。
 			openManualInstaller: async (filePath: string) => {
 				if (process.platform === "darwin") {
-					const error = await shell.openPath(filePath);
+					const error = await openSystemPath(filePath);
 					if (error) throw new Error(error);
 					return;
 				}
@@ -4399,7 +4564,11 @@ function registerIpc() {
 		});
 	}
 	updateService.start();
-	registerCatalogIpc(catalogUpdater);
+	registerCatalogIpc(catalogUpdater, {
+		// 设置页手动更新/还原后立刻用同一条链路重取结论：否则「有新版本」提示与侧栏红点
+		// 要等到下一轮定时检查（默认 2h）才消失，用户看到的是「更新成功了但状态没变」。
+		onCatalogChanged: () => void updateService?.refreshCatalogSnapshot(),
+	});
 	// 快捷消息：唯一数据源是用户配置文件（可手工编辑），出厂清单来自随包资源文件。
 	// 两个路径只在此处解析，避免“读 A 写 B”的漂移（与 extensions 覆盖层同源的教训）。
 	const quickMessageStore = new QuickMessageStore({
@@ -4558,14 +4727,17 @@ function registerIpc() {
 		reactToPetSettings: async (prev, next) => {
 			await petSystem?.reactToSettings(prev, next);
 		},
-		// CUA 开关：开启时启动进程内 MCP 端点并写入 pi 的 mcp.json，关闭时停端点并注销。
+		// CUA / 浏览器 Agent 开关：任一能力启用时启动进程内 MCP 端点并写入 mcp.json，
+		// 两者都关时停端点并注销；gate 在 applySettings 内按能力分别开关（host 存活 ≠ 能力启用）。
 		reactToCuaSettings: async (prev, next) => {
-			if (!cuaService || prev.cuaEnabled === next.cuaEnabled) return;
-			if (next.cuaEnabled) {
-				await cuaService.start();
-			} else {
-				await cuaService.stop();
-			}
+			if (!cuaService) return;
+			const cuaChanged = prev.cuaEnabled !== next.cuaEnabled;
+			const browserChanged = prev.browserAgentEnabled !== next.browserAgentEnabled;
+			if (!cuaChanged && !browserChanged) return;
+			await cuaService.applySettings({
+				cuaEnabled: next.cuaEnabled,
+				browserAgentEnabled: next.browserAgentEnabled ?? false,
+			});
 		},
 		applyNativeThemeSource,
 		refreshTrayContextMenu,
@@ -4682,6 +4854,8 @@ function registerIpc() {
 	registerBackupIpc({
 		configBackupManager: configBackupManager!,
 		appLogger,
+		// 备份/pre-restore 前落盘在途的设置写盘合并窗口（见 backupIpc 注释）
+		flushSettings: () => settingsStore.flushPendingSave(),
 		afterRestore: async () => {
 			// 恢复写回的是磁盘文件：pideck 设置需重新 load 进内存（其它 store 仍持旧值，
 			// UI 会提示重启生效）；pi 模型目录缓存刷新，避免恢复后仍用旧模型列表。
@@ -4792,6 +4966,8 @@ async function detectExternalEditorsOnFirstLaunch() {
 // 换肤背景图/宠物雪碧图/声音提醒/生图历史图片协议：自定义 scheme 必须在 ready 前注册特权声明（secure 以便渲染层 CSS/图片/音频引用）
 protocol.registerSchemesAsPrivileged([
 	{ scheme: "pideck-plugin", privileges: { secure: true, standard: true, supportFetchAPI: true, corsEnabled: false } },
+	// Wallpaper Engine 视频壁纸：stream:true 让 <video> 走 Range 流式读取，不整块进内存
+	{ scheme: "pideck-we", privileges: { secure: true, standard: true, corsEnabled: false, supportFetchAPI: true, stream: true } },
 	{ scheme: "pideck-bg", privileges: { secure: true, standard: true, corsEnabled: false, supportFetchAPI: true, stream: false } },
 	{ scheme: "pideck-pet", privileges: { secure: true, standard: true, corsEnabled: false, supportFetchAPI: true, stream: false } },
 	{ scheme: "pideck-sound", privileges: { secure: true, standard: true, corsEnabled: false, supportFetchAPI: true, stream: true } },
@@ -4867,6 +5043,9 @@ app
 			},
 		});
 		settingsStore = new SettingsStore();
+		// 设置写盘尾随合并的收尾（2027-02 性能治理）：退出时立即落盘在途的 150ms 合并窗口，
+		// 防止「改完设置立刻退出」丢失最后一笔（窗口 unref 不拖退出）。
+		quitCleanup.register("settings-flush", () => settingsStore.flushPendingSave());
 		// 安全管理：配置 owner + 策略快照写入（供 pi-deck-security-gate 扩展消费）
 		securityStore = new SecurityStore({
 			settingsStore,
@@ -5899,6 +6078,34 @@ app
 				if (!entry?.filePath) return { messages: [], total: 0, nextBefore: null };
 				return agentManager.readSessionDisplayTurnPage(entry.filePath, sessionId, before, pageSize, undefined, { projectId: entry.projectId });
 			},
+			// 会话内全文检索（Web 搜索弹层）：与桌面 IPC sessions:search-in-session 同源口径——
+			// 入参是 SessionRecord.id，后端身份一律从 catalog 解析（Web 端传不了路径）；pi 走
+			// session-index sidecar（索引未就绪 → null，前端回退本地已加载搜索），DSH 走 host
+			// 历史投影后本地词元匹配。命中 id 是 JSONL 行 id，与 Web 消息 id 同源可直接锚定。
+			searchSessionMessages: async (sessionId, query) => {
+				const entry = sessionCatalog.get(sessionId);
+				if (!entry) return null;
+				if (entry.backend === "dsh") {
+					const dshSessionId = entry.dshSessionId;
+					const searcher = dshSessionId ? dshAgentManager : null;
+					if (!dshSessionId || !searcher) return null;
+					try {
+						const found = await searcher.searchSessionMessages(dshSessionId, query);
+						if (found.hitCount === 0) return { sessions: [], totalHitSessions: 0, truncated: false };
+						return {
+							sessions: [{ filePath: `dsh:${dshSessionId}`, updatedAtMs: entry.updatedAt, matches: found.matches, hitCount: found.hitCount }],
+							totalHitSessions: 1,
+							truncated: found.hitCount > found.matches.length,
+						};
+					} catch {
+						return null;
+					}
+				}
+				if (!entry.filePath) return null;
+				return sessionMessageSearchInFile(entry.filePath, query);
+			},
+			// 供应商额度用量：与桌面圆球面板同一份 ConfigManager 探针（含凭据脱敏与「未开启」门控）。
+			fetchProviderUsage: (provider, backend) => configManager.fetchProviderUsage(provider, backend),
 			sendSessionPrompt: async (input) => {
 				const result = await sessionRuntimeCoordinator.send(input);
 				if (result.agentId) {
@@ -6057,9 +6264,15 @@ app
 		refreshShortcutBindings(settingsStore.get());
 		// Logo 风格：启动时按已加载设置刷新窗口/Dock 图标（此后 settings:update 路径实时刷新）
 		applyWindowLogoStyle(settingsStore.get().logoStyle, () => mainWindow, settingsStore.get().logoCustomImage);
-		// 任务栏按钮的图标取开始菜单快捷方式的图标（窗口图标只是无身份注册时的兜底）：建窗前写好，
-		// 按钮首次出现就带当前 logo（createWindow 在本行之后调用）。
-		syncTaskbarShortcutIcon({ style: settingsStore.get().logoStyle, customLogoDataUrl: settingsStore.get().logoCustomImage });
+		// 任务栏按钮的图标取开始菜单快捷方式的图标（窗口图标只是无身份注册时的兜底）。
+		// 2027-02 性能治理：整段是同步递归扫开始菜单（上限 2000 个 .lnk）+ 逐个
+		// readShortcutLink，开发机上 50-300ms——原先在建窗前的同步链上直接推迟首窗可见。
+		// 改 setImmediate 与 createWindow 的加载阶段重叠：窗口加载本身数百 ms，按钮首次
+		// 出现的时点绝大多数仍在扫描完成之后；极端快加载下按钮先显示默认图标、扫描
+		// 完成后 Windows 自动刷新（每启动只扫一次，签名去重见 appTaskbarIdentity）。
+		setImmediate(() => {
+			syncTaskbarShortcutIcon({ style: settingsStore.get().logoStyle, customLogoDataUrl: settingsStore.get().logoCustomImage });
+		});
 		piModelCapabilityCache = new PiModelCapabilityCache({
 			// 模型能力水合分两档（详见 docs/pi-model-capability-plan.md）：
 			// - 快速档（默认，loadExtensions=false）：--no-extensions。实测 418 模型下
@@ -6118,7 +6331,12 @@ app
 		// 内置翻译智能体补种；与 sessionCatalog 并行加载，不额外拖慢启动。
 		agentProfileStore = new AgentProfileStore(join(app.getPath("userData"), "agent-profiles.json"));
 		const agentProfileStorePreload = agentProfileStore.load();
-		await Promise.all([sessionCatalog.load(), automationStorePreload, agentProfileStorePreload]);
+		// 一次性调用计数带 1s 落盘合并窗口（见 AgentProfileStore.recordUsage）：退出时收尾。
+		quitCleanup.register("agent-profile-store", () => agentProfileStore?.flushPendingUsage());
+		// 收藏：本地快照（userData/favorites.json）。坏文件按空列表重建，不阻断启动。
+		favoritesStore = new FavoritesStore(join(app.getPath("userData"), "favorites.json"));
+		const favoritesStorePreload = favoritesStore.load();
+		await Promise.all([sessionCatalog.load(), automationStorePreload, agentProfileStorePreload, favoritesStorePreload]);
 		// 智能体一次性调用（划词工具 / 市场面板）：复用提示词增强侧车协议，但**独立实例**。
 		// 侧车进程常驻、首次调用才拉起（EnhancePromptService 的现有语义），启动期只做装配。
 		agentInvokeCompletionService = createCompletionHelperService("agent-invoke");
@@ -6160,11 +6378,24 @@ app
 			},
 			logger: { warn: (message, detail) => void appLogger.warn("selection-tool", message, detail) },
 		});
+		// Windows 原生划词：拖选/双击后直接 UIA 读选区；读不到时才靠上面的剪贴板兜底。
+		windowsSelectionCapture = new WindowsSelectionCapture({
+			onSelection: ({ text }) => {
+				selectionClipboardWatcher?.suppressFor(2500);
+				void selectionToolService?.showText(text);
+			},
+			logger: {
+				info: (message, detail) => void appLogger.info("selection-tool", message, detail),
+				warn: (message, detail) => void appLogger.warn("selection-tool", message, detail),
+			},
+		});
 		// 预热放在 registerIpc 之后（见下方 assemble 段）：浮窗加载即会 settings.get / agentProfiles.getSnapshot，
 		// 提前 warmUp 会让首帧拿到「服务未就绪」的拒绝（只是闪一下默认主题，但没必要）。
 		quitCleanup.register("selection-tool", () => {
 			selectionClipboardWatcher?.dispose();
 			selectionClipboardWatcher = null;
+			windowsSelectionCapture?.dispose();
+			windowsSelectionCapture = null;
 			selectionToolService?.dispose();
 		});
 		// 市场设置的「系统级划词」开关保存后即时生效（不必重启应用）。
@@ -6612,9 +6843,8 @@ app
 				void appLogger?.warn("app", "Model trace endpoint startup failed", error);
 			});
 		registerIpc();
-		// 系统级划词浮窗预热：必须在 registerIpc 之后——浮窗加载即会 settings.get /
-		// agentProfiles.getSnapshot，提前预热会让首帧读到「服务未就绪」的拒绝。
-		void selectionToolWindow?.warmUp().catch(() => undefined);
+		// 系统级划词浮窗预热：功能隐藏期间连窗口都不加载，避免白占一个渲染进程。
+		if (SYSTEM_SELECTION_TOOL_ENABLED) void selectionToolWindow?.warmUp().catch(() => undefined);
 		// 统一接口聚合层：注册全部域与导入器并冻结（deps 缺省在 domainAssembly.ts 收集，FIND-5）
 		registerAllDomains();
 		registerFeishuIpc({
@@ -6657,10 +6887,15 @@ app
 		void wechatService.start().catch((error: unknown) => {
 			void appLogger?.warn("wechat", "WeChat bridge autostart failed", error);
 		});
-		// 配置备份（手动模式）：仅在备份目录为空（首次使用）时自动建一份 first-run，
-		// 之后不再自动备份。同步快，不挡首帧；失败仅记录，不阻断启动。
-		configBackupManager?.ensureInitialBackups();
 		await createWindow();
+		// 配置备份（手动模式）：仅在备份目录为空（首次使用）时自动建一份 first-run，
+		// 之后不再自动备份。2027-02 性能治理：list() 会对每个备份 JSON 全量解析（内嵌
+		// settings/models 原文，可达 MB 级），首启还要同步读 6 个配置文件——原先排在
+		// createWindow 之前的同步链上推迟首窗可见（注释自称"不挡首帧"与执行点矛盾）。
+		// 挪到窗口创建后执行，失败仅记录，不阻断启动。
+		setImmediate(() => {
+			configBackupManager?.ensureInitialBackups();
+		});
 		// Quick tasks should not wait for unrelated WSL/proxy startup probes. The controller
 		// retains validated intent until the renderer subscribes or requests its snapshot.
 		const coldStartTarget = extractFocusTargetFromArgv(process.argv);
@@ -6918,21 +7153,38 @@ app
 		// `pideck-cua` MCP（主进程内 StreamableHTTP 端点）调用。默认关闭（cuaEnabled=false）：
 		// 只有开启时才监听本地端点并写入 ~/.pi/agent/mcp.json，关闭时零副作用（不监听、不改 pi 配置）。
 		// 真实输入注入另有「每次操作审批门 + 全局/会话杀开关」双重兜底（见 cua/CuaGate.ts）。
+		// 浏览器 Agent：主进程 CDP 驱动内置 webview 的 browser_* 工具。
+		// 与 CUA 共用同一个 MCP host 与 mcp.json 条目，但开关、审批门、autoApprove 独立；
+		// 默认关闭，页面内容按不可信数据处理（docs/browser-agent-plan.md）。
+		browserAgentService = new BrowserAgentService({
+			listAllWebContents: () => webContents.getAllWebContents(),
+			isBrowserPanelGuest: (guest) => guest.session === session.fromPartition(BROWSER_PANEL_PARTITION),
+			getAutoApprove: () => settingsStore.get().browserAgentAutoApprove,
+		});
 		cuaService = new CuaService({
 			getMainWindow: () => mainWindow,
 			log: (domain, message, details) => void appLogger.info(domain, message, details),
 			// 免审批设置实时读取：改设置即时生效，无需重启 CUA 服务。
 			getAutoApprove: () => settingsStore.get().cuaAutoApprove,
+			browserAgent: browserAgentService,
 		});
-		if (settingsStore.get().cuaEnabled) {
-			void cuaService.start().catch((error) => {
-				void appLogger.warn("cua", "CUA service start failed", error);
+		// 启动时按真实开关决定 host 是否监听：任一能力启用即启动，两者都关则零副作用。
+		void cuaService
+			.applySettings({
+				cuaEnabled: settingsStore.get().cuaEnabled,
+				browserAgentEnabled: settingsStore.get().browserAgentEnabled ?? false,
+			})
+			.catch((error) => {
+				void appLogger.warn("cua", "CUA/browser agent service start failed", error);
 			});
-		}
 		quitCleanup.register("cua", async () => {
 			// runAll 会逐项 await：返回 dispose 的 Promise 保证退出前 host 关闭 + mcp.json 反注册完成（早前 `void` 掉 Promise，退出竞态）。
 			await cuaService?.dispose();
 			cuaService = null;
+		});
+		quitCleanup.register("browser-agent", () => {
+			browserAgentService?.dispose();
+			browserAgentService = null;
 		});
 
 		// 启动后异步检查 RPC 超时时间，如果小于 600 秒则自动修正为 600 秒

@@ -37,8 +37,6 @@ const INLINE_BOX_BORDER_BG = ["border-[var(--color-border-subtle)]", "bg-[var(--
 const INLINE_BOX_COPIED_BORDER_BG = ["border-[var(--color-success)]", "bg-[var(--color-success-soft)]"];
 const INLINE_BOX_CLASS = ["inline-block", "cursor-pointer", "rounded-xs", "border", "px-[5px]", "py-[1px]", "transition-colors", "hover:border-[var(--color-accent)]", ...INLINE_BOX_BORDER_BG];
 
-let listenersInitialized = false;
-
 /** 复制 LaTeX 源码（KaTeX MathML annotation），返回是否成功。 */
 function copyTexFrom(root: Element): Promise<boolean> {
 	const tex = root.querySelector('.katex-mathml annotation[encoding="application/x-tex"]')?.textContent?.trim() ?? "";
@@ -125,12 +123,37 @@ function ensureFormulaButtons(root: Element) {
 	if (root.classList.contains("math-display")) attachBlockButton(root as HTMLElement);
 }
 
+/** 当前挂载的 FormulaCopyLayer 数量：全部卸载后断开观察，避免全应用常驻空转。 */
+let layerMountCount = 0;
+/** 本帧待补齐的子树（合并同帧多次 DOM 增删，流式 tick 下只扫一遍）。 */
+const pendingRoots = new Set<Element>();
+let pendingFrame: number | null = null;
+let bodyObserver: MutationObserver | null = null;
+
+function flushFormulaRoots() {
+	pendingFrame = null;
+	const roots = [...pendingRoots];
+	pendingRoots.clear();
+	for (const root of roots) {
+		// 节点可能已被后续 React 提交移除：跳过（其公式随之销毁，无需挂载）。
+		if (!root.isConnected) continue;
+		ensureFormulaButtons(root);
+	}
+}
+
+function scheduleFormulaRoot(root: Element) {
+	pendingRoots.add(root);
+	if (pendingFrame !== null) return;
+	pendingFrame = window.requestAnimationFrame(flushFormulaRoots);
+}
+
 function initFormulaButtons() {
-	if (listenersInitialized || !(typeof document !== "undefined")) return;
-	listenersInitialized = true;
+	if (!(typeof document !== "undefined")) return;
+	layerMountCount += 1;
+	if (bodyObserver) return;
 	// 初始补齐一次（页面已有渲染完成的公式），之后观察流式重渲染增量补齐
 	ensureFormulaButtons(document.body);
-	const observer = new MutationObserver((mutations) => {
+	bodyObserver = new MutationObserver((mutations) => {
 		for (const mutation of mutations) {
 			if (mutation.type !== "childList") continue;
 			for (const node of mutation.addedNodes) {
@@ -140,11 +163,24 @@ function initFormulaButtons() {
 				// 先短路判断节点自身/子树是否带 .katex/.math-display 再进扫描，
 				// 避免每次 tick 对无关子树跑完整挂载逻辑。
 				const hasMath = node.matches?.(".katex, .math-display") || Boolean(node.querySelector?.(".katex, .math-display"));
-				if (hasMath) ensureFormulaButtons(node);
+				if (hasMath) scheduleFormulaRoot(node);
 			}
 		}
 	});
-	observer.observe(document.body, { childList: true, subtree: true });
+	bodyObserver.observe(document.body, { childList: true, subtree: true });
+}
+
+/** 卸载一个挂载者：最后一个卸载时断开观察并丢弃本帧待办（2027-02 性能治理）。 */
+function releaseFormulaButtons() {
+	layerMountCount = Math.max(0, layerMountCount - 1);
+	if (layerMountCount > 0) return;
+	bodyObserver?.disconnect();
+	bodyObserver = null;
+	if (pendingFrame !== null) {
+		window.cancelAnimationFrame(pendingFrame);
+		pendingFrame = null;
+	}
+	pendingRoots.clear();
 }
 
 /** 公式复制层：挂在 MarkdownStream 内，不渲染任何 DOM。
@@ -153,6 +189,10 @@ function initFormulaButtons() {
 export function FormulaCopyLayer() {
 	useEffect(() => {
 		initFormulaButtons();
+		// 2027-02：观察者按挂载者计数复用，最后一个卸载时断开——原先
+		// document.body 上的 subtree MutationObserver 永不 disconnect，
+		// 侧栏/文件树/流式的任何 DOM 增删都常驻进入回调。
+		return () => releaseFormulaButtons();
 	}, []);
 	return null;
 }

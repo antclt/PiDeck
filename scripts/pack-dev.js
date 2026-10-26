@@ -15,6 +15,7 @@
 const { execSync } = require("node:child_process");
 const path = require("node:path");
 const fs = require("node:fs");
+const { electronBuilderEnv } = require("./electronBuilderEnv.js");
 
 const root = path.resolve(__dirname, "..");
 
@@ -30,7 +31,7 @@ console.log(`[1/2] 打包代码（build 内置 runtime:pack + runtime:check）�
 execSync("npm run build", { cwd: root, stdio: "inherit", shell: true });
 
 console.log(`\n[2/2] electron-builder --win ${formats} → ${DEV_OUTPUT_DIR}/ …`);
-execSync(`npx electron-builder --win ${formats} --config.directories.output=${DEV_OUTPUT_DIR}`, { cwd: root, stdio: "inherit", shell: true });
+execSync(`npx electron-builder --win ${formats} --config.directories.output=${DEV_OUTPUT_DIR}`, { cwd: root, stdio: "inherit", shell: true, env: electronBuilderEnv() });
 
 const outDir = path.join(root, DEV_OUTPUT_DIR);
 console.log(`\n✅ 打包完成，产物在 ${DEV_OUTPUT_DIR}/`);

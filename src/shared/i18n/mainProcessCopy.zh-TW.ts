@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 26514420f1f5cb88483f8996114427ca00e39c0d88d69b945e8d98ba0c0d85f6（来自 src/shared/i18n/mainProcessCopy.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 866316a8b961cba20cca6d3b56b81afdbf628babf2ef09c1407fc193e475f1af（来自 src/shared/i18n/mainProcessCopy.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import type { MainProcessTranslationKey } from "./mainProcessCopy";
 
@@ -30,6 +30,7 @@ export const mainProcessZhTW: Record<MainProcessTranslationKey, string> = {
 	"diagnostic.agentStopped": "Agent 程序已停止，請重啟 Agent 後重試",
 	"diagnostic.messageRequired": "訊息不能為空",
 	"diagnostic.promptRejected": "訊息傳送失敗。",
+	"diagnostic.promptModelMismatch": "會話選擇的模型 {expected} 當前不可用，已阻止本次傳送（執行時實際使用 {actual}）。請先在模型選擇器裡重新選擇該會話的模型。",
 	"diagnostic.promptDeliveryUnknown": "訊息接收結果未知。請先檢查當前會話，避免重複傳送；必要時重啟 Agent。",
 	"diagnostic.commandFailed": "命令執行失敗。",
 	"diagnostic.commandCancelled": "命令已取消",

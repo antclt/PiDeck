@@ -89,6 +89,37 @@ test("hydrateExpandedFileTree loads shorter parent paths first", async () => {
 	assert.equal(hydrated[0].children[0].children[0].name, "Button.tsx");
 });
 
+test("hydrateExpandedFileTree 并发拉取但按父先子后合并（2027-02 性能治理）", async () => {
+	let inFlight = 0;
+	let maxInFlight = 0;
+	const resolveOrder = [];
+	const tree = [dir("src", "/p/src")];
+	const expanded = [];
+	// 构造 12 个目录：/p/src 与 /p/src/d1..d11（全部以 /p/src 为父）
+	for (let index = 1; index <= 11; index += 1) expanded.push(`/p/src/d${index}`);
+	expanded.unshift("/p/src");
+	const hydrated = await hydrateExpandedFileTree(
+		async (directory) => {
+			inFlight += 1;
+			maxInFlight = Math.max(maxInFlight, inFlight);
+			await new Promise((resolve) => setImmediate(resolve));
+			resolveOrder.push(directory);
+			inFlight -= 1;
+			if (directory === "/p/src") return expanded.slice(1).map((path) => dir(path.slice("/p/src/".length), path));
+			return [file("f.ts", `${directory}/f.ts`)];
+		},
+		tree,
+		expanded,
+	);
+	assert.ok(maxInFlight > 1, `listing 必须并发（实际最大并发 ${maxInFlight}）`);
+	assert.ok(maxInFlight <= 8, `并发不得超过上限 8（实际 ${maxInFlight}）`);
+	// 合并仍父先子后：每个 dN 的子项都并进去了
+	for (let index = 1; index <= 11; index += 1) {
+		const parent = hydrated[0].children.find((node) => node.type === "directory" && node.path === `/p/src/d${index}`);
+		assert.equal(parent?.children?.[0]?.name, "f.ts", `d${index} 的子项应已合并`);
+	}
+});
+
 test("findDirectoryNodeByRelativePath finds unexpanded directory", () => {
 	const tree = [dir("src", "/p/src"), file("README.md", "/p/README.md")];
 	assert.equal(findDirectoryNodeByRelativePath(tree, "src")?.path, "/p/src");

@@ -22,7 +22,7 @@ export function AddProjectMenu(props: { onAddLocal: () => void; labeled?: boolea
 			{t("app.addProject")}
 		</Button>
 	) : (
-		<Button type="button" variant="ghost" size="icon-xs" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={t("app.addProject")} title={t("app.addProject")}>
+		<Button type="button" variant="ghost" size="icon-xs" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-bg-hover hover:text-foreground" aria-label={t("app.addProject")} title={t("app.addProject")}>
 			<Plus className="size-3.5" aria-hidden="true" />
 		</Button>
 	);

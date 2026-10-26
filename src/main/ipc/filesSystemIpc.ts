@@ -1,9 +1,10 @@
-import { app, dialog, ipcMain, shell } from "electron";
+import { app, dialog, ipcMain } from "electron";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { FileManagerInfo } from "../../shared/types/project";
 import { ipcChannels } from "../../shared/ipc";
 import { detectFileManager, openFileManagerAt } from "../files/FileManager";
+import { openSystemPath } from "../fs/openPath";
 import type { SettingsStore } from "../settings/SettingsStore";
 import { parseWslUncPath, toWindowsHostPath } from "../wsl/WslPaths";
 
@@ -43,7 +44,8 @@ export function registerFilesSystemIpc({ settingsStore, openExternalUrl }: Files
 		if (typeof path !== "string" || path.length > 32_768) throw new Error("Invalid file manager path");
 		const target = path.trim() ? toWindowsPath(path) : homedir();
 		if (process.platform !== "linux") {
-			const error = await shell.openPath(target);
+			// 走受保护的统一入口：Linux 上 Electron 的 shell.openPath 永不 settle（issue #396）。
+			const error = await openSystemPath(target);
 			if (error) throw new Error(error);
 			return;
 		}

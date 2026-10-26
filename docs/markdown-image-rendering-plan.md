@@ -171,7 +171,7 @@ dsh 参照文件（需要复核时直接读）：`packages/client/ui-primitives/
 | `src/shared/localImage.ts` | 协议名/体积上限/MIME 白名单/URL 生成与解析（主进程与渲染层唯一来源） |
 | `src/main/media/localImageAccess.ts` | 纯判定：形态闸 400、边界闸 403、体积闸 413、`isInsideRoot` |
 | `src/main/media/LocalImageProtocol.ts` | `protocol.handle` 注册、realpath 逃逸复检、响应头（`no-store`/`nosniff`/CSP sandbox） |
-| `src/main/index.ts` | scheme 特权声明 + ready 后注册 + 白名单根（userData / `<tmp>/pideck-shots` / 聊天工作区 / 全部项目路径） |
+| `src/main/index.ts` | scheme 特权声明 + ready 后注册 + 白名单根（userData / 桌面 / `<tmp>/pideck-shots` / 聊天工作区 / 全部项目路径） |
 | `src/renderer/index.html` | CSP `img-src` 增 `pideck-file:` |
 | `src/renderer/src/components/session/markdownImageSrc.ts` | 目标 → URL 的解析规则（盘符/`file://`/相对 cwd/百分号解码/UNC 与 `~` 降级） |
 | `src/renderer/src/components/session/MarkdownImage.tsx` | 懒加载、限高 420px、点击放大、失败降级「失败文案 · alt/原路径」 |

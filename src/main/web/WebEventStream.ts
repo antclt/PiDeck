@@ -62,6 +62,15 @@ export type PiEvent = {
 export class PiEventToUiMessageStream {
 	private textBlockId: string | null = null;
 	private reasoningBlockId: string | null = null;
+	/**
+	 * 当前 reasoning 块是否已发过增量 delta。
+	 *
+	 * pi 的 thinking_end 只带 content（完整思考）不带 delta，而块内此前已由
+	 * thinking_delta 增量交付过全文；只看本事件的 delta 会让兜底分支把全文再发一遍，
+	 * 客户端按 text += delta 追加 → 思考内容整段翻倍。因此 blockId 铸造时清零、
+	 * 每发一条 reasoning-delta 置位，thinking_end 的兜底仅在从未发过增量时补。
+	 */
+	private reasoningDeltaSent = false;
 	private currentMessageId: string | null = null;
 	private finished = false;
 	/** 已发送过 tool-input 帧的 toolCallId（防重发：message 层 toolcall_start 与顶层 tool_execution_start 双路径去重） */
@@ -160,14 +169,18 @@ export class PiEventToUiMessageStream {
 			const finalContent = eventType === "thinking_end" ? String(ev.content ?? "") : "";
 			if (!this.reasoningBlockId) {
 				this.reasoningBlockId = `reasoning_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+				this.reasoningDeltaSent = false;
 				frames.push({ type: "reasoning-start", id: this.reasoningBlockId });
 			}
 			if (eventType === "thinking_delta" && delta) {
+				this.reasoningDeltaSent = true;
 				frames.push({ type: "reasoning-delta", id: this.reasoningBlockId, delta });
 			}
 			if (eventType === "thinking_end") {
-				// 兜底：若 content 提供了完整文本而之前没有增量，补一段 delta，避免前端空白。
-				if (finalContent && !delta) {
+				// 兜底：本块从未发过增量（pi 只给了 content）时才补一段 delta，避免前端空白。
+				// 已发过增量再补会让客户端把同一段全文追加两次（思考内容翻倍）。
+				if (finalContent && !delta && !this.reasoningDeltaSent) {
+					this.reasoningDeltaSent = true;
 					frames.push({ type: "reasoning-delta", id: this.reasoningBlockId, delta: finalContent });
 				}
 				frames.push({ type: "reasoning-end", id: this.reasoningBlockId });

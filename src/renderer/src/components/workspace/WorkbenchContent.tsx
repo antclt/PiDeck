@@ -39,6 +39,8 @@ export type WorkbenchContentProps = {
 	editorMode: WorkspaceContentOpenMode;
 	onToggleEditorMode?: () => void;
 	onCloseEditor: () => void;
+	/** 只读 tab（项目外文件）确认后解锁编辑：宿主把该 tab 的 allowSave 翻成 true。 */
+	onAllowSaveTab?: (tabId: string) => void;
 	readContent: (path: string | ProjectFileTarget, maxBytes?: number, scope?: ProjectFileAccessScope) => Promise<string>;
 	readOriginalContent: (target?: ProjectFileTarget) => Promise<string>;
 	saveContent: (path: string | ProjectFileTarget, content: string, scope?: ProjectFileAccessScope) => Promise<void>;
@@ -75,6 +77,7 @@ export function WorkbenchContent(props: WorkbenchContentProps) {
 						readContent={props.readContent}
 						readOriginalContent={props.readOriginalContent}
 						saveContent={tab.allowSave ? props.saveContent : undefined}
+						onRequestEditable={tab.allowSave || !props.onAllowSaveTab ? undefined : () => props.onAllowSaveTab?.(tab.id)}
 						theme={props.theme}
 						maxFileSizeMB={props.maxFileSizeMB}
 						chromeTabsExternal

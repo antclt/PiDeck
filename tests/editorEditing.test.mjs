@@ -4,9 +4,15 @@ import test from "node:test";
 
 test("FileDiffViewer: view mode is editable, diff mode is read-only render", () => {
 	const viewer = readFileSync("src/renderer/src/components/app/FileDiffViewer.tsx", "utf8");
-	// view 模式：CodeMirror 编辑器可编辑（readOnly=false），源码即编辑，无独立编辑按钮
+	// view 模式：有 saveContent 时可编辑（源码即编辑），无独立编辑按钮；
+	// 项目外文件（allowSave=false → saveContent 缺失）必须真的只读，不能“能打字但永不保存”。
 	assert.match(viewer, /<CodeMirrorEditor/);
-	assert.match(viewer, /readOnly=\{false\}/);
+	assert.match(viewer, /const readOnlyView = !isDiffMode && !props\.saveContent/);
+	assert.match(viewer, /readOnly=\{readOnlyView\}/);
+	assert.doesNotMatch(viewer, /readOnly=\{false\}/);
+	// 只读要显式可见（头部“只读”徽标 + 说明），Ctrl+S 也要给回话而不是静默无反应
+	assert.match(viewer, /editor\.readOnlyBadge/);
+	assert.match(viewer, /if \(readOnlyView\) \{\n\s*showNotice\(t\("editor\.readOnlyHint"\)\);/);
 	// diff 模式：只读差异对比视图（CodeDiffView），不再有编辑态切换/编辑按钮
 	assert.match(viewer, /<CodeDiffView/);
 	assert.doesNotMatch(viewer, /Edit3/);
@@ -16,6 +22,34 @@ test("FileDiffViewer: view mode is editable, diff mode is read-only render", () 
 	assert.match(viewer, /const defaultPreview = !isDiffMode && \(isMarkdown \|\| isHtml \|\| isSvg\)/);
 	assert.match(viewer, /useState\(defaultPreview\)/);
 	assert.match(viewer, /setPreview\(defaultPreview\)/);
+});
+
+test("FileDiffViewer: read-only tab can only be unlocked through an explicit confirm", () => {
+	const viewer = readFileSync("src/renderer/src/components/app/FileDiffViewer.tsx", "utf8");
+	const hook = readFileSync("src/renderer/src/hooks/useFileEditor.ts", "utf8");
+	const workbench = readFileSync("src/renderer/src/components/workspace/WorkbenchContent.tsx", "utf8");
+	const app = readFileSync("src/renderer/src/App.tsx", "utf8");
+
+	// 只读 tab 的解锁入口只在「真的只读且宿主提供了解锁能力」时渲染
+	assert.match(viewer, /onRequestEditable\?:\s*\(\)\s*=>\s*void/);
+	assert.match(viewer, /readOnlyView && props\.onRequestEditable &&/);
+	// 解锁必须先二次确认，且确认文案要写明会直接写入该路径
+	assert.match(viewer, /unlockConfirmOpen && props\.onRequestEditable &&/);
+	assert.match(viewer, /<ConfirmDialog/);
+	assert.match(viewer, /t\("editor\.unlockEditTitle"\)/);
+	assert.match(viewer, /t\("editor\.unlockEditBody",\s*\{\s*path: props\.filePath\s*\}\)/);
+	assert.match(viewer, /t\("editor\.unlockEditConfirm"\)/);
+	// 确认后只调宿主回调，不允许 FileDiffViewer 自己伪造保存能力
+	assert.match(viewer, /props\.onRequestEditable\?\.\(\)/);
+
+	// 宿主侧只翻目标 tab 的 allowSave，不偷偷给项目外路径补 scope（否则等于把写权限放宽到任意路径）
+	assert.match(hook, /const allowSaveEditorTab = useCallback\(\(tabId: string\) => \{/);
+	assert.match(hook, /setEditorTabs\(prev\.map\(\(tab\) => \(tab\.id === tabId \? \{ \.\.\.tab, allowSave: true \} : tab\)\)\)/);
+	assert.match(hook, /allowSaveEditorTab,/);
+	// 接线：只有 allowSave=false 的 tab 才拿得到解锁回调
+	assert.match(workbench, /onRequestEditable=\{tab\.allowSave \|\| !props\.onAllowSaveTab \? undefined :/);
+	assert.match(workbench, /props\.onAllowSaveTab\?\.\(tab\.id\)/);
+	assert.match(app, /onAllowSaveTab=\{allowSaveEditorTab\}/);
 });
 
 test("FileDiffViewer: debounced auto-save with Ctrl+S immediate save", () => {

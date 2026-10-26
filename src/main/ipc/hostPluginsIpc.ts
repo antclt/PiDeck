@@ -8,6 +8,7 @@ import { downloadGitHubPlugin } from "../plugins/hostPluginGitHub";
 import { isLocalServiceId } from "../../shared/localServices";
 import { createHostPluginScaffold } from "../plugins/hostPluginScaffold";
 import { parsePluginContext } from "../plugins/hostPluginPolicy";
+import { openSystemPath } from "../fs/openPath";
 import { getAppLogger } from "../logging/sharedLogger";
 
 export function registerHostPluginsIpc(service: HostPluginService, getWindow: () => BrowserWindow | null): () => void {
@@ -117,7 +118,7 @@ export function registerHostPluginsIpc(service: HostPluginService, getWindow: ()
 	ipcMain.handle(ipcChannels.hostPluginsOpenDirectory, (event) =>
 		result(async () => {
 			trustedWindow(event);
-			if (await shell.openPath(service.manager.directory)) throw new Error("open-directory-failed");
+			if (await openSystemPath(service.manager.directory)) throw new Error("open-directory-failed");
 		}),
 	);
 	ipcMain.handle(ipcChannels.hostPluginsMount, (event, input: unknown) =>

@@ -59,7 +59,7 @@ export function WebBottomSheet(props: { open: boolean; onOpenChange: (open: bool
 					{props.title ? (
 						<div className="flex items-center justify-between gap-2 px-4 pt-2 pb-1">
 							<span className="min-w-0 truncate text-sm font-semibold text-foreground">{props.title}</span>
-							<button type="button" aria-label={t("common.close")} className="shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" onClick={() => onOpenChange(false)}>
+							<button type="button" aria-label={t("common.close")} className="shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground pointer-coarse:p-2.5" onClick={() => onOpenChange(false)}>
 								<X className="size-4" aria-hidden="true" />
 							</button>
 						</div>

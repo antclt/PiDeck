@@ -108,9 +108,13 @@ test("TerminalSessionManager keeps data-before-exit ordering and disposes on clo
 	assert.ok(closeBlock, "close 块应可被发现");
 	assert.ok(closeBlock[0].indexOf("batcher.flush()") < closeBlock[0].indexOf("pty.kill()"), "close 必须先 flush 再 kill");
 
-	// 渲染层回放缓冲上界与主进程常量必须同步为 200_000
+	// 渲染层回放缓冲上界与主进程常量必须同步为 200_000。
+	// 2027-02 重构：主进程回放缓冲收口到 terminalReplayBuffer.ts（分段存储），
+	// 上界常量随之迁移；管理器必须经该模块追加（不得回退成单字符串拼接）。
 	const manager = readFileSync("src/main/terminal/TerminalSessionManager.ts", "utf8");
-	assert.match(manager, /MAX_TERMINAL_REPLAY_BUFFER = 200_000/);
+	assert.match(manager, /appendTerminalReplay\(runtime\.buffer, data\)/, "onData 必须经分段缓冲追加");
+	const replayModule = readFileSync("src/main/terminal/terminalReplayBuffer.ts", "utf8");
+	assert.match(replayModule, /MAX_TERMINAL_REPLAY_BUFFER = 200_000/);
 	const dockState = readFileSync("src/renderer/src/terminalDockState.ts", "utf8");
 	assert.match(dockState, /TERMINAL_REPLAY_MAX_CHARS = 200_000/);
 });

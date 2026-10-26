@@ -1,6 +1,6 @@
 # 对话内 chip 渲染统一重构计划（引用 / 会话 / 技能 / 提示词模板 / 文件）
 
-状态：**W1–W5 已落地**（2026-10-20，W4 按「与 pi 的资源类型对齐」执行、视觉零变化），CI 接入未做。
+状态：**W1–W5 已落地**（2026-10-20，W4 按「与 pi 的资源类型对齐」执行、视觉零变化），CI 接入未做。2026-10-21 追加 §10 所有权矩阵、§11 与 pi/DSH 的对齐账本、§12 已知缺口台账（供日后回顾）。
 落地记录见 §9；常驻维护要点已并入 `docs/maintenance-domains.md`「用户消息 chip 与自包含块」。
 起点：`docs/maintenance-domains.md`「用户消息 chip 与自包含块」相关小节；现场问题见 §1.2。
 目标：把「输入框 chip → 落盘 → 时间线 chip」这条链路的**五种结构**收敛成**一条契约、一条发送管线、一个清单来源**，同时修掉两个已被复现的展开越界 bug。
@@ -186,3 +186,82 @@ expandOutgoingMessage(rawDraft, ctx) -> { text, meta }
 | W5 | `maintenance-domains.md` 新增常驻小节；本文件状态收敛 | — |
 
 附带修复：`resolveSessionReferences` 的替换改用函数形式，会话正文里的 `$&`/`$'` 不再被当成替换模式（原来会吃掉内容）。
+
+---
+
+## 10. 谁在展开：chip 所有权矩阵（2026-10-21 调研）
+
+**判据一句话**：chip 能不能还原，只看落盘的文本里有没有「自带名字的块」或「原始 token」。
+**不是**「谁展开决定有没有 chip」——pi 展开技能会写 `<skill name location>`，照样有 chip；
+pi 展开提示词模板只写正文（丢名字），才没有 chip。
+
+| 类型 | pi 后端谁展开 | DSH 后端谁展开 | 落盘形态 | chip 依据 | PiDeck 的工作 |
+|---|---|---|---|---|---|
+| `@文件` | 无人展开 | 无人展开 | `@路径` 原文 | 文本 + 文件白名单 | 无（原文即身份） |
+| `❝引用` | **PiDeck** | **PiDeck** | `<quoted_context label message_id>` | 块 | 展开 + 块格式 + 解析 |
+| `&会话` | **PiDeck** | **PiDeck** | `<referenced_session name>` | 块 | 同上 |
+| `/模板`（自建，来源 A） | **PiDeck** | **PiDeck** | `<prompt_template name>` | 块 | 同上 |
+| `/模板`（包带，来源 B，如 `parallel-review`） | **PiDeck**（改造前是 pi → 丢名字） | 不存在（DSH 不加载 pi 包） | `<prompt_template name>` | 块 | 读正文 + 本地展开（本轮核心） |
+| `/skill:名字` | **pi**（`_expandSkillCommand`） | 不支持（DSH 手势不认 `:`） | `<skill name location>` | 块 | 只解析展示 |
+| `/技能裸名`（`/cv-writer`） | pi 不认（裸名属模板命名空间） | **DSH host**（`SKILL_GESTURE` 注入消息） | 用户消息原文 `/cv-writer` | 命令白名单 | 白名单（`getCommands` 别名的修复点） |
+| `/plan` 等扩展命令 | pi 执行（不落消息） | DSH 执行（pre-step reject） | 无 | 无 | 只做拦截/让路 |
+| 桌面命令（`/new` `/login` …） | **PiDeck** | **PiDeck** | 无（不进模型） | 无 | `classifyComposerSlashCommand` |
+| 目标轮次消息 | — | DSH 注入 `<goal_round>`，`source.kind="goal"` | 投影器过滤，不进时间线 | 不显示 | 无 |
+
+三条由此得出的结论：
+
+1. **引用 / 会话引用 / 模板这三类只有 PiDeck 展开**——没有我们的工作，它们在重载后就是裸 XML。
+2. **包带模板必须抢在 pi 前面展开**：pi 会展开但丢名字，这正是「运行中 chip、暂停后变全文」的根因。
+3. **技能不需要我们展开**：pi 的块自带名字，DSH 的技能内容根本不进时间线（`source.kind="skill-invocation"` 被过滤）。
+
+## 11. 与 pi / DSH 的对齐账本
+
+### 已对齐（有代码与测试盯住）
+
+| 项 | 对齐对象 | 落地位置 |
+|---|---|---|
+| 模板清单来源 | pi `get_commands`（`source="prompt"` + `sourceInfo.path`） | `main/prompts/runtimeTemplateBodies.ts` |
+| 同名优先级 / 禁用不加载 | pi `resourcePrecedenceRank` + `dedupePrompts` 先到先得 | `utils/templateCatalog.assembleTemplates` |
+| 参数替换 | pi `parseCommandArgs` / `substituteArgs` | `utils/templateArgs.ts` |
+| frontmatter 剥离 | pi `extractFrontmatter` / `stripFrontmatter`（BOM / 换行归一 / `\n---` / trim） | `utils/frontmatter.ts` |
+| 压缩 / fork / clone | pi 原生 RPC（`type:"compact"` / `"fork"` / `"clone"`） | `main/pi/AgentManager` |
+| 编辑/删除消息 | pi `ContextEditEntry`（`targetId` + `replacement.content\|null`） | `main/pi/SessionFileEditor` |
+| 技能调用语法 | pi `/skill:名字`；DSH 裸 `/名字`（`SKILL_GESTURE`） | `composerBehavior.toSkillInvocationToken` |
+
+### 有意不同（不是漏学，写清理由）
+
+| 差异 | pi 的行为 | 我们的选择 | 理由 |
+|---|---|---|---|
+| 命令位置 | 只认消息**开头**的 `/命令` | 任意空白后的 `/名称` 都认 | 输入框里常有多段并写；同时用保护区避免改写引用正文 |
+| 无占位符的参数 | 直接丢弃用户输入 | 追加在块后 | 丢字比位置不完美更危险 |
+| 模板展开结果 | 纯正文（名字丢失） | `<prompt_template name>` 块 | 否则重载后无法还原 chip |
+| 命令让路 | 不需要（pi 的扩展命令先执行） | 保留集避免本地展开抢占后端命令 | DSH 的 slash 桥只认 `/` 开头，被换掉就永不执行 |
+| 引用块内容 | pi 无此概念 | 块内只读（保护区） | 引用正文被改写 = 篡改历史 |
+
+### 复核入口（下次对账直接看这几处）
+
+```
+pi:  dist/core/prompt-templates.js      # expandPromptTemplate / _expandSkillCommand / substituteArgs
+     dist/core/resource-loader.js       # resourcePrecedenceRank / dedupePrompts / loadPromptTemplates
+     dist/utils/frontmatter.js          # stripBom / extractFrontmatter / stripFrontmatter
+     dist/modes/rpc/rpc-mode.js         # get_commands（只报 extension / prompt / skill，不报 builtin）
+     dist/core/slash-commands.js        # BUILTIN_SLASH_COMMANDS（24 条，RPC 不执行）
+DSH: src/main/dsh/hostEntry.ts          # 生成的 pideck-slash-bridge（agent/pre-step → commands.execute）
+     packages/skill/tool-skill/src/index.ts   # SKILL_GESTURE 与 skill-invocation 注入
+     packages/skill/skill/src/index.ts        # renderSkillContent（<skill_content>）
+     packages/goal/command-goal/src/index.ts  # /goal 的命令文法（clear/edit/pause/resume）
+     packages/goal/goal-round-driver/src/prompt.ts  # <goal_round> 每轮注入
+```
+
+## 12. 已知缺口台账（记录，不代表要修）
+
+| # | 现象 | 影响 | 结论 / 入口 |
+|---|---|---|---|
+| 1 | DSH 技能可能被同名提示词模板抢走（`/cv-writer` 被展开成块 → DSH 看不到手势） | 技能静默不执行，无提示 | **暂不修**：PiDeck 技能清单与 DSH 不同源（DSH 有 `~/.dsh/skills`、项目 `.dsh/skills`），直接复用会既漏又误伤；要做先加 DSH 技能清单桥 |
+| 2 | pi 内置命令手敲无反应（`thinking` `scoped-models` `import` `bug` `changelog` `trust` `quit` 等） | 被模型当问题回答 | **暂不修**：这些命令 RPC 根本不报，菜单里不可发现；只有手敲才踩。要做是「手敲到 pi 内置命令时提示桌面不支持」 |
+| 3 | 技能「插入全文」只贴正文，不含 `<skill name location>` 与相对路径说明 | 模型拿不到技能名/位置/相对路径提示 | 属**主动选择**（按钮语义是"插入文字"）；可改文案或去掉入口 |
+| 4 | DSH 命令执行后没有结果卡片（`command/run`、`command/done` 未投影） | 命令执行完时间线无反馈 | 纯展示层可补，未排期 |
+| 5 | Web / 飞书发送不经过前端展开 | 那边的 `/模板名` 永远没有 chip | 既有架构（展开只在桌面渲染层），未排期 |
+| 6 | `tests/composerPrewarmFocus.test.mjs` 红（缺 stub 模块） | 影响全量测试 | 基线 worktree 同样红，非本轮引入 |
+| 7 | 含占位符的模板（如 `parallel-review` 结尾的 `$@`）会把用户参数**填进**模板正文 → 参数随正文一起折进 chip，气泡里看不到用户自己写的话 | 用户发完看不到自己的指令（2026-10-21 实测反馈） | **已修（选 B）**：正文原位替换（与 pi 等价）+ **块外始终再留一份可见副本**（`if (rest) expanded += "\n\n" + rest`）。代价是模型侧多一次重复（用户参数通常很短）。实测占位符只集中在包带模板（pi-subagents 6 个模板全是 `$@`），PiDeck 内置 13 个模板都不用占位符，所以日常 `/commit` `/review` 不受影响 |
+

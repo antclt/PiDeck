@@ -5,8 +5,9 @@ import { selectAtom } from "jotai/utils";
 import type { SessionTimelineController } from "../../hooks/useSessionTimelineController";
 import type { SessionMessageTimelineProps } from "./SessionMessageTimeline";
 import { SessionMessageTimeline } from "./SessionMessageTimeline";
+import { showNotice } from "../../utils/notice";
 import { outlineItemsBySessionIdAtomFamily, sessionHistoryMutationOverlayBySessionIdAtomFamily } from "../../atoms";
-import { isPendingRailItemId, mergeOutlineRailItems, pendingEntryIdOf } from "./timeline/outlineRailTicks";
+import { isPendingRailItemId, mergeOutlineRailItems, pendingEntryIdOf, RAIL_PENDING_MAX_ATTEMPTS } from "./timeline/outlineRailTicks";
 import { useSessionOutlineDirectory } from "../../hooks/useSessionOutlineDirectory";
 import { formatTime, summarizeMessage } from "../app/AppUtils";
 import { replaceExpandedRefBlocksWithLabels } from "../../../../shared/expandedRefBlocks";
@@ -63,7 +64,7 @@ export function SessionSurfaceStage(props: { sessionId: string; sessionTimeline:
 		},
 		[sessionTimeline],
 	);
-	// 补页循环：每轮等已加载条数变化再决定继续；最多 7 次请求，到目标即停。
+	// 补页循环：每轮等已加载条数变化再决定继续；到目标即停，上限覆盖整个刻度窗口。
 	useEffect(() => {
 		if (!pendingEntryId) return;
 		const loaded = outlineItems.find((item) => item.entryId === pendingEntryId);
@@ -72,8 +73,11 @@ export function SessionSurfaceStage(props: { sessionId: string; sessionTimeline:
 			sessionTimeline.jumpToMessage(loaded.id);
 			return;
 		}
-		if (pendingAttempts >= 7) {
+		if (pendingAttempts >= RAIL_PENDING_MAX_ATTEMPTS) {
+			// 补页预算用尽：必须给反馈。静默放弃会让「点了刻度没反应」变成无解释的黑洞
+			// （导轨现在最多 30 条、覆盖整个会话，靠前的刻度天然可能超出补页预算）。
 			setPendingEntryId(undefined);
+			showNotice(t("outline.jumpUnreachable"), 6000, "info");
 			return;
 		}
 		const timer = setTimeout(() => {
@@ -104,7 +108,7 @@ export function SessionSurfaceStage(props: { sessionId: string; sessionTimeline:
 							// 稳定 DOM 锚点：e2e 用它守卫组内滚轮不会幽灵解锁外层；
 							// 按钮仍须暴露给辅助技术，不得把父层标成 aria-hidden。
 							data-scroll-to-bottom=""
-							className="pointer-events-auto absolute left-1/2 bottom-1.5 size-8 -translate-x-1/2 border border-border-strong bg-bg-panel text-text-secondary shadow-md backdrop-blur-sm transition-[background-color,color,border-color,box-shadow] hover:border-accent hover:bg-bg-hover hover:text-foreground hover:shadow-lg"
+							className="pointer-events-auto absolute left-1/2 bottom-1.5 size-8 -translate-x-1/2 border border-border-strong bg-bg-panel text-text-secondary shadow-md backdrop-blur-sm transition-[background-color,color,border-color,box-shadow] hover:border-accent hover:bg-bg-hover hover:text-foreground"
 							onClick={sessionTimeline.scrollToBottom}
 							title={t("app.scrollToBottom")}
 							aria-label={t("app.scrollToBottom")}

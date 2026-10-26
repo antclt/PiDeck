@@ -209,7 +209,7 @@ export function TodoList({ items, title = t("app.todoListTitle"), open, defaultO
 	}, [itemCount, reduce]);
 
 	return (
-		<section aria-label={t("app.todoListAriaLabel")} className={cn("w-full overflow-hidden rounded-2xl border border-border/70", className)}>
+		<section aria-label={t("app.todoListAriaLabel")} className={cn("w-full overflow-hidden rounded-lg border border-border/70", className)}>
 			<button
 				id={triggerId}
 				type="button"
@@ -217,7 +217,7 @@ export function TodoList({ items, title = t("app.todoListTitle"), open, defaultO
 				aria-controls={contentId}
 				onClick={() => setOpen(!currentOpen)}
 				className={cn(
-					"group flex w-full items-center rounded-2xl text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+					"group flex w-full items-center rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
 					// 官方默认 h-11/gap-2.5/px-3.5；compact 收紧为 h-9，其中 pr-8 为宿主层
 					// 关闭按钮预留右上角空间（叠放的 X 不盖住折叠 chevron），默认分支不生效
 					compact ? "h-9 gap-2 pl-3 pr-8" : "h-11 gap-2.5 px-3.5",

@@ -1,6 +1,6 @@
 import { messageEntryId } from "../../../utils/sessionCommands";
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronUp, Clock, Share, SquarePen, Trash } from "lucide-react";
+import { ChevronUp, Clock, Share, SquarePen, Star, Trash } from "lucide-react";
 import { atom, useAtomValue, useSetAtom } from "jotai";
 import { selectAtom } from "jotai/utils";
 import type { AgentBackend, ChatMessage, ImageContent } from "../../../../../shared/types";
@@ -14,6 +14,7 @@ import { Collapsible, CollapsibleContent } from "../../ui-shadcn/collapsible";
 import { formatDuration } from "../TimelineFormat";
 import { LiveDuration } from "../LiveDuration";
 import { CopyMenu, stripMarkdown } from "../SurfaceComponents";
+import { favoriteMessageKey } from "../../favorites/favoriteIdentity";
 import { buildTurnDisplay, hasFoldableContent } from "../timeline/buildTurnDisplay";
 import { groupTurnProcess, lastProcessGroup } from "../timeline/groupTurnProcess";
 import { boundMountedSteps, TIMELINE_MOUNTED_STEP_LIMIT } from "../timeline/turnMountBudget";
@@ -98,6 +99,10 @@ export type TurnRowProps = {
 	onAutoCollapsed?: () => void;
 	/** 打开多选分享弹框 */
 	onEnterMultiSelect?: () => void;
+	/** 收藏/取消收藏本轮回复（正文为 Markdown 源码快照 + 该轮最终消息 id）；不传则不渲染星标按钮。 */
+	onFavoriteReply?: (text: string, messageId: string | null) => void;
+	/** 已收藏的「会话::消息」键集合：星标据此显示实心（已收藏）状态。 */
+	favoritedMessageKeys?: ReadonlySet<string>;
 };
 
 export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
@@ -254,11 +259,12 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 	const foldableItems = useMemo(() => displayItems.filter((item) => item.kind !== "final-answer"), [displayItems]);
 	const finalItems = useMemo(() => displayItems.filter((item) => item.kind === "final-answer"), [displayItems]);
 	// 单轮步骤挂载预算（2026-08 #213）：极端轮次（单轮上百个工具/思考条目）默认只挂尾部
-	// LIMIT 条，顶部给「显示更早 N 条步骤」入口——内容仍在 foldableItems 里，点开即全量挂载。
-	// 用 run.id 而非布尔量做「已展开」状态：换 run 自然重置，不需要额外 effect。
-	const [expandedStepsRunId, setExpandedStepsRunId] = useState<string | undefined>(undefined);
-	const stepsFullyExpanded = expandedStepsRunId === run.id;
-	const mountedSteps = useMemo(() => boundMountedSteps(foldableItems, TIMELINE_MOUNTED_STEP_LIMIT, stepsFullyExpanded), [foldableItems, stepsFullyExpanded]);
+	// LIMIT 条，顶部给「显示更早 N 条步骤」入口——每点一次把挂载下界向前挪一批（batches +1）。
+	// 下界锚在首次点击时的条目总数上：之后尾部追加新步骤不会把已展开的旧条目挤回去。
+	// 用 run.id 判定「已展开」状态：换 run 自然重置，不需要额外 effect。
+	const [expandedSteps, setExpandedSteps] = useState<{ runId: string; anchor: number; batches: number } | undefined>(undefined);
+	const stepExpansion = expandedSteps?.runId === run.id ? expandedSteps : undefined;
+	const mountedSteps = useMemo(() => boundMountedSteps(foldableItems, TIMELINE_MOUNTED_STEP_LIMIT, stepExpansion), [foldableItems, stepExpansion]);
 
 	/* ── 过程组模式（processGroupDisplay；关闭时走下面原有的扁平渲染） ──
 	 * 纯函数把扁平序列切成「中间回复 / 过程组 / 一级行」交替序列（见 timeline/groupTurnProcess.ts）。
@@ -294,6 +300,10 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 	const containsImageGen = assistantMessages.some((item) => Boolean(item.message.meta?.imageGen));
 	// 编辑目标与编辑初值同源：最后一条有可见正文的 assistant 消息，加载/保存/按钮显隐都指向它
 	const editableMessage = pickEditableAssistantMessage(assistantMessages);
+	// 收藏身份与右键菜单同源（会话 + 消息 id）：星标显示实心即表示这条回复已在收藏里，再点即取消。
+	const replyMessageId = editableMessage?.message.id ?? null;
+	const replyFavoriteKey = replyMessageId ? favoriteMessageKey(props.sessionId ?? null, replyMessageId) : null;
+	const replyFavorited = replyFavoriteKey ? (props.favoritedMessageKeys?.has(replyFavoriteKey) ?? false) : false;
 	// 本轮回答用的模型（逐轮展示）：取本轮最后一条带模型信息的 assistant 消息。
 	// 同一会话内用户会频繁换模型，只有逐轮记录才能看出哪段是谁答的；
 	// 旧数据/ACP 会话没有该字段时留空，行头不占位。
@@ -375,11 +385,11 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 										<button
 											type="button"
 											className="mt-1 inline-flex h-[26px] items-center gap-2 self-start rounded-[var(--radius-md)] border border-border-subtle bg-[var(--color-chat-card-bg)] px-3 text-chat-detail font-medium text-text-secondary transition-colors hover:border-border-strong hover:bg-bg-hover hover:text-text-primary"
-											onClick={() => setExpandedStepsRunId(run.id)}
-											title={t("timeline.showEarlierSteps", { count: mountedSteps.hiddenCount })}
+											onClick={() => setExpandedSteps((prev) => (prev?.runId === run.id ? { ...prev, batches: prev.batches + 1 } : { runId: run.id, anchor: foldableItems.length, batches: 1 }))}
+											title={t("timeline.showEarlierSteps", { count: Math.min(TIMELINE_MOUNTED_STEP_LIMIT, mountedSteps.hiddenCount) })}
 										>
 											<ChevronUp size={12} aria-hidden="true" />
-											<span>{t("timeline.showEarlierSteps", { count: mountedSteps.hiddenCount })}</span>
+											<span>{t("timeline.showEarlierSteps", { count: Math.min(TIMELINE_MOUNTED_STEP_LIMIT, mountedSteps.hiddenCount) })}</span>
 										</button>
 									)}
 									{(stepsVisible || props.agentRunning === true) &&
@@ -485,6 +495,22 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 						{mergedText && !editing && (
 							<>
 								{!containsImageGen && <CopyMenu text={stripMarkdown(mergedText)} markdown={mergedText} targetRef={rowRef} />}
+								{/* 收藏整轮回复：与复制同源（Markdown 源码），快照落本机收藏页；入口不依赖编辑权限。
+								    已收藏显示实心星（与右键菜单同一身份），再点即取消。 */}
+								{props.onFavoriteReply && (
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon-sm"
+										className="turn-row-action-btn size-7 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+										aria-pressed={replyFavorited}
+										onClick={() => props.onFavoriteReply?.(mergedText, replyMessageId)}
+										title={replyFavorited ? t("favorites.unsaveMessage") : t("favorites.saveMessage")}
+										aria-label={replyFavorited ? t("favorites.unsaveMessage") : t("favorites.saveMessage")}
+									>
+										<Star size={14} className={replyFavorited ? "fill-current" : undefined} />
+									</Button>
+								)}
 								<Button type="button" variant="ghost" size="icon-sm" className="turn-row-action-btn size-7 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground" onClick={props.onEnterMultiSelect} title={t("app.multiSelectEnter")}>
 									<Share size={14} />
 								</Button>
@@ -517,11 +543,10 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 						{showTurnModel && turnModel && (
 							/* 本轮实际使用的模型（provider + modelId）跟在耗时后面：同一会话内用户会频繁换模型，
 							   只在输入框显示当前模型不足以回看历史轮；流式中不显示，回复结束才落定。
-							   做成小标签而不是同号纯文本：左边耗时是读数（text-body + 等宽数字），
-							   模型名是名字，同色同号时两段会连成一句「2m18s global:xxx」读不断。
-							   模型名长短不一（如 global:deepseek-v4.1-flash），限宽截断 + title 给全量 provider/model，
-							   不让长名字把行末撑开或换行。 */
-							<span className="ml-1 min-w-0 max-w-[16rem] truncate rounded-sm bg-muted/60 px-1.5 py-0.5 text-chat-detail font-medium leading-none text-muted-foreground" title={`${turnModel.provider}/${turnModel.modelId}`} data-turn-model={turnModel.modelId}>
+							   保留等宽字体与限宽截断以区别于耗时读数（text-body + 等宽数字），但去掉灰底
+							   ——每轮都有的元信息 chip 会给时间线添碎（2026-10 去底，ZCode 模型名即裸暗字）。
+							   title 给全量 provider/model。 */
+							<span className="ml-1 min-w-0 max-w-[16rem] truncate font-mono text-chat-detail leading-none text-text-tertiary" title={`${turnModel.provider}/${turnModel.modelId}`} data-turn-model={turnModel.modelId}>
 								{turnModel.modelId}
 							</span>
 						)}
@@ -558,6 +583,8 @@ function turnRowPropsEqual(prev: TurnRowProps, next: TurnRowProps): boolean {
 		prev.isLatestRun === next.isLatestRun &&
 		prev.isLastAgentRun === next.isLastAgentRun &&
 		prev.autoCollapseTick === next.autoCollapseTick &&
+		// 收藏表变化才换引用（时间线 useMemo）：已收藏态变了星标要重绘，未变时保持记忆化。
+		prev.favoritedMessageKeys === next.favoritedMessageKeys &&
 		prev.onOpenFile === next.onOpenFile
 	);
 }

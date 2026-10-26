@@ -1,4 +1,4 @@
-import { Bot, Plus, Search } from "lucide-react";
+import { Bot, ListChecks, Plus, Search } from "lucide-react";
 import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
 import { Input } from "../../ui-shadcn/input";
@@ -7,6 +7,9 @@ interface AgentMarketHeaderProps {
 	query: string;
 	onQueryChange: (query: string) => void;
 	onCreate: () => void;
+	/** 批量删除模式开关；为空时不渲染入口（例如还没有任何智能体）。 */
+	onToggleSelection?: () => void;
+	selectionMode?: boolean;
 }
 
 /**
@@ -14,7 +17,7 @@ interface AgentMarketHeaderProps {
  * 页面是会话 Tab 栏里的页面 Tab，关闭由 Tab 负责，头部不再放关闭按钮；
  * 划词工具设置搬到 PiDeck 设置页，这里不再有设置入口。
  */
-export function AgentMarketHeader({ query, onQueryChange, onCreate }: AgentMarketHeaderProps) {
+export function AgentMarketHeader({ query, onQueryChange, onCreate, onToggleSelection, selectionMode = false }: AgentMarketHeaderProps) {
 	return (
 		<header className="flex shrink-0 flex-col gap-3 border-b border-border/40 px-5 py-3">
 			<div className="flex items-start justify-between gap-4">
@@ -28,6 +31,12 @@ export function AgentMarketHeader({ query, onQueryChange, onCreate }: AgentMarke
 					<p className="mt-1 truncate text-xs text-muted-foreground">{t("agentMarket.subtitle")}</p>
 				</div>
 				<div className="flex shrink-0 items-center gap-1.5">
+					{onToggleSelection && (
+						<Button type="button" variant={selectionMode ? "secondary" : "outline"} size="sm" className="h-8 gap-1.5 text-xs" aria-pressed={selectionMode} title={t("common.bulkSelectHint")} onClick={onToggleSelection}>
+							<ListChecks className="size-3.5" aria-hidden="true" />
+							{t("common.bulkSelect")}
+						</Button>
+					)}
 					<Button type="button" size="sm" className="h-8 gap-1.5 text-xs" onClick={onCreate}>
 						<Plus className="size-3.5" aria-hidden="true" />
 						{t("agentMarket.create")}

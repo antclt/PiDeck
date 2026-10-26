@@ -69,6 +69,9 @@ export type DshProjection = {
 	turnEnded: boolean;
 	/** 本条事件是否改变消息数组（调用方据此 flush）。 */
 	messagesChanged: boolean;
+	/** 未收口的 llm/retry 重试状态卡 id（同一 retry 链一张卡，assistant 终态/回合收场时
+	 *  批量结算为成功/失败，见 settleOpenRetryCards）。undefined = 无进行中的重试。 */
+	openRetryCardIds?: string[];
 };
 
 const TOOL_RESULT_MAX_CHARS = 2000;
@@ -758,6 +761,59 @@ export function projectDshEvent(
 			next.stateChanged = true;
 			break;
 		}
+		case "llm/retry": {
+			// DSH 内置 llm-retry 插件（retryableCodes 默认含 RATE_LIMIT/SERVER/TIMEOUT/
+			// TRANSPORT/EMPTY_RESPONSE）会在 host 侧自动重试瞬态失败，但重试过程此前
+			// 只进轨迹账本、聊天时间线完全不显示——限流（如 429 code 1302）连续失败时
+			// 用户看到的是「没重试直接失败」（2026-10 用户反馈）。这里把 llm/retry 投影成
+			// 与 pi auto_retry 同款的重试状态卡：meta.i18nKey 复用 diagnostic.retryScheduled*
+			// 四键，渲染层 isRetryStatusMessage/RetryStep（倒计时/计数）直接可用，无需新 UI。
+			// 同一 retry 链（retryId 稳定）只挂一张卡，后续 retry N/M 原地更新——与 pi 侧
+			// upsertRetryStatusMessage 的「进行中的卡只推进不新建」同语义。
+			const retry = typeof data.retry === "number" ? data.retry : undefined;
+			if (retry === undefined) break;
+			const retryId = typeof data.retryId === "string" && data.retryId !== "" ? data.retryId : String(seq);
+			const maxRetries = typeof data.maxRetries === "number" ? data.maxRetries : undefined;
+			const delayMs = typeof data.delayMs === "number" ? data.delayMs : 0;
+			const failureDetail = retryFailureDetail(data.failure);
+			const cardId = `dsh:retry:${retryId}`;
+			const countText = maxRetries !== undefined ? `${retry}/${maxRetries}` : String(retry);
+			const delaySeconds = Math.ceil(delayMs / 1000);
+			const retryCard: ChatMessage = {
+				id: cardId,
+				agentId,
+				role: "system",
+				text: `正在自动重试 ${countText}`,
+				timestamp: eventTime(event.time),
+				meta: {
+					status: "running",
+					attempt: retry,
+					maxAttempts: maxRetries ?? 0,
+					delayMs,
+					errorMessage: failureDetail ?? "",
+					i18nKey: delayMs > 0 ? "diagnostic.retryScheduledAfterDelay" : "diagnostic.retryScheduled",
+					i18nParams: { attempt: retry, count: countText, delaySeconds },
+					...(failureDetail ? { debugDetails: failureDetail } : {}),
+				},
+			};
+			const cardIndex = next.messages.findIndex((candidate) => candidate.id === cardId);
+			if (cardIndex >= 0) {
+				// follow snapshot 会重放 journal 尾部：旧计数的 llm/retry 不能把当前卡回退
+				// 到更早的 N/M（计数只前进，与 appendMessageOnce 的重放幂等诉求同源）。
+				const existingAttempt = typeof next.messages[cardIndex].meta?.attempt === "number" ? next.messages[cardIndex].meta.attempt : 0;
+				if (retry >= existingAttempt) {
+					const messages = [...next.messages];
+					messages[cardIndex] = retryCard;
+					next.messages = messages;
+					next.messagesChanged = true;
+				}
+			} else {
+				next.messages = appendMessageOnce(next.messages, retryCard);
+				next.openRetryCardIds = [...(base.openRetryCardIds ?? []), cardId];
+				next.messagesChanged = true;
+			}
+			break;
+		}
 		case "todo/write": {
 			// 官方 @deepseek-ai/dsh-tool-todo 的持久化快照（整表 last-wins）：
 			// 不进消息时间线（避免与工具卡重复），只折叠成「当前计划」供 todo 条展示。
@@ -852,6 +908,20 @@ export function projectDshEvent(
 			break;
 	}
 	// 流式骨架（Live 挂载点）：首个正文/思考增量出现时，把 pendingAssistant 以空文本
+	// llm/retry 重试状态卡收口：重试后的请求拿到 assistant 终态（本步成功）→ 成功卡；
+	// 回合以错误收场（重试耗尽/最终失败）→ 失败卡；回合非错误收口（正常结束/停止）
+	// 视为最终成功——正在等待的卡不能永远挂在「重试中」（渲染层成功卡是瞬态卡，
+	// 见 isTransientRetryCard，不会在时间线堆积）。结算只认本回合事件流，历史重放
+	// 按相同顺序得到相同结果（幂等）。
+	if ((base.openRetryCardIds?.length ?? 0) > 0) {
+		const reasonKind = type === "turn/end" ? ((data.reason ?? {}) as { kind?: string }).kind : undefined;
+		if (type === "assistant/message" || (type === "turn/end" && reasonKind !== "error")) {
+			settleOpenRetryCards(next, "success");
+		} else if (type === "turn/end" && reasonKind === "error" && !opts?.skipErrorTurnEnd) {
+			settleOpenRetryCards(next, "error");
+		}
+	}
+
 	// 骨架消息入列。渲染层 buildTurnDisplay 对空文本 assistant 生成 interim-answer
 	// 挂载点，Live 思考（msg-thinking-<骨架 id>）与 Live 正文（会话级流式槽）都挂它；
 	// 终态 assistant/message 再原位更新为完整内容（同 id，不 remount）。
@@ -880,4 +950,40 @@ export function projectDshEvent(
 
 function eventTime(time: unknown): number {
 	return typeof time === "number" ? time : Date.now();
+}
+
+/** llm/retry.data.failure 的诊断文本：`message (code)` 形态（两者任一缺失取另一者）。 */
+function retryFailureDetail(failure: unknown): string | undefined {
+	if (!isRecord(failure)) return undefined;
+	const message = typeof failure.message === "string" ? failure.message : undefined;
+	const code = typeof failure.code === "string" ? failure.code : undefined;
+	if (message && code) return `${message} (${code})`;
+	return message ?? code;
+}
+
+/**
+ * 批量结算未收口的重试状态卡（openRetryCardIds）：改写 status/i18nKey/text，
+ * 文案键与 pi 侧 auto_retry 卡共用（diagnostic.retrySucceeded / retryFailed），
+ * i18nParams/attempt 等元数据保留（渲染层 RetryStep 读取计数与倒计时）。
+ */
+function settleOpenRetryCards(next: DshProjection, status: "success" | "error"): void {
+	const ids = new Set(next.openRetryCardIds ?? []);
+	if (ids.size === 0) return;
+	next.messages = next.messages.map((message) => {
+		if (!ids.has(message.id) || message.role !== "system") return message;
+		const attempt = typeof message.meta?.attempt === "number" ? message.meta.attempt : 0;
+		const maxAttempts = typeof message.meta?.maxAttempts === "number" ? message.meta.maxAttempts : 0;
+		const countText = maxAttempts > 0 ? `${attempt}/${maxAttempts}` : String(attempt || 1);
+		return {
+			...message,
+			text: status === "success" ? `自动重试成功，共重试 ${attempt} 次` : `自动重试失败，已重试 ${countText} 次`,
+			meta: {
+				...message.meta,
+				status,
+				i18nKey: status === "success" ? "diagnostic.retrySucceeded" : "diagnostic.retryFailed",
+			},
+		};
+	});
+	next.openRetryCardIds = [];
+	next.messagesChanged = true;
 }

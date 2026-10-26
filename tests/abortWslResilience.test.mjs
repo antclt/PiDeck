@@ -22,10 +22,16 @@ test("abort escalation is ack-aware and never double-aborts a winding-down pi", 
 	assert.match(agentManager, /this\.abortGate\.markAbortAcked\(agentId,\s*escalation\);/);
 	assert.match(agentManager, /this\.abortGate\.markAbortFailed\(agentId,\s*escalation\);/);
 
-	// 2) 升级判定必须按 ack/工具状态分派，而不是无条件补刀
-	assert.match(controller, /const\s+shouldSendAbortBash\s*=\s*escalation\.hadActiveTool;/);
-	assert.match(controller, /const\s+shouldResendAbort\s*=\s*escalation\.failed;/);
+	// 2) 升级判定必须按 ack/工具状态分派，而不是无条件补刀。
+	// 唯一例外是「get_state 不回包」的僵死态（Issue #361）：子进程持有管道时 pi 读不到 stdin，
+	// 此时若当「已停」处理，升级链会在最该生效的时候收手，用户只能看着命令继续跑。
+	assert.match(controller, /const\s+shouldSendAbortBash\s*=\s*escalation\.hadActiveTool \|\| stuck;/);
+	assert.match(controller, /const\s+shouldResendAbort\s*=\s*escalation\.failed \|\| stuck;/);
 	assert.match(controller, /if \(!shouldSendAbortBash && !shouldResendAbort\) \{[\s\S]*?Abort escalation skipped/);
+	// 僵死判据必须存在且显式：只有 probe=unknown 才放宽，不能退化成无条件补刀。
+	assert.match(controller, /const\s+stuck\s*=\s*probe === "unknown";/);
+	// idle 判据必须仍在（清升级上下文是 Issue #371 的附加动作，判据本身不能丢）
+	assert.match(controller, /if\s*\(probe\s*===\s*"idle"\)\s*\{[\s\S]*?clearEscalation\(agentId\)[\s\S]*?return;/);
 
 	// 3) abort_bash 只在有工具执行时发送；二次 abort 只在 RPC 失败/超时时补发
 	const escalateBlock = controller.match(/private async escalateIfStillRunning\(agentId: string\): Promise<void> \{[\s\S]*?\n\t\}/)?.[0] ?? "";

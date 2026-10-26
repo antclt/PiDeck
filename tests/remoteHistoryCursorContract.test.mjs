@@ -28,7 +28,7 @@ function seedPage(store, record) {
 	store.set(atoms.sessionRecordsAtom, { [SESSION_ID]: record });
 	store.set(atoms.cacheSessionMessagesAtom, {
 		sessionId: SESSION_ID,
-		messages: [{ role: "user", content: "hi" }],
+		messages: [{ id: "m1", agentId: "agent-1", role: "user", text: "hi", timestamp: 1 }],
 		source: "disk",
 		expectedRevision: 0,
 		page: { total: 1, nextBefore: 4242 },

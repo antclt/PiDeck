@@ -73,7 +73,8 @@ export const DOMAIN_CATALOG = [
 	{ id: "shell-menu", group: "workspace", manager: "Shell 上下文菜单", ipcFile: ["ipc/shellMenuIpc.ts"], preloadNamespaces: ["shellMenu"], channelPrefix: ["shell-menu"], aggregation: "aggregate" },
 	// 裁决：pickBackgroundImage/removeBackgroundImage 的值域是 backgrounds:*（backgroundsIpc.ts），
 	// dialog:pick-files 在 filesIpc.ts，两者同由 dialog 命名空间消费，故 backgrounds 前缀归本行。
-	{ id: "dialog", group: "workspace", manager: "系统文件选择器（无独立 Manager，dialog 命名空间消费）", ipcFile: ["ipc/filesIpc.ts", "ipc/backgroundsIpc.ts"], preloadNamespaces: ["dialog"], channelPrefix: ["dialog", "backgrounds"], aggregation: "aggregate" },
+	// wallpaper-engine:*（选工坊目录/列表/校验）同属壁纸选择、同由 dialog 命名空间消费，一并归本行。
+	{ id: "dialog", group: "workspace", manager: "系统文件选择器（无独立 Manager，dialog 命名空间消费）", ipcFile: ["ipc/filesIpc.ts", "ipc/backgroundsIpc.ts", "ipc/wallpaperEngineIpc.ts"], preloadNamespaces: ["dialog"], channelPrefix: ["dialog", "backgrounds", "wallpaper-engine"], aggregation: "aggregate" },
 	{ id: "reply-actions", group: "workspace", manager: "快捷回复动作", ipcFile: ["ipc/replyActionsIpc.ts"], preloadNamespaces: ["replyActions"], channelPrefix: ["reply-actions"], aggregation: "aggregate" },
 	// ── content ─────────────────────────────────────────────────────────────────
 	{ id: "prompts", group: "content", manager: "PromptManager + XuePromptManager", ipcFile: ["ipc/storeIpc.ts"], preloadNamespaces: ["prompts"], channelPrefix: ["prompts"], aggregation: "aggregate" },
@@ -87,6 +88,9 @@ export const DOMAIN_CATALOG = [
 	{ id: "skill-hub", group: "content", manager: "SkillHub 检索与安装", ipcFile: ["ipc/storeIpc.ts"], preloadNamespaces: ["skillHub"], channelPrefix: ["skill-hub"], aggregation: "aggregate" },
 	{ id: "content-store", group: "content", manager: "BuiltinContentUpdater（prompts-store/skills-store 两通道域共用同一更新器）", ipcFile: ["ipc/contentStoreIpc.ts"], preloadNamespaces: ["contentStore"], channelPrefix: ["prompts-store", "skills-store"], aggregation: "aggregate" },
 	{ id: "extensions", group: "content", manager: "ExtensionManager + BuiltInExtensionsUpdater", ipcFile: ["ipc/storeIpc.ts", "ipc/builtInExtensionIpc.ts"], preloadNamespaces: ["extensions"], channelPrefix: ["extensions"], aggregation: "aggregate" },
+	// 收藏：PiDeck 本地快照（<userData>/favorites.json），不动会话文件、不是 pi 能力，
+	// 因此按普通内容域聚合；正文只在收藏动作发生时由渲染层快照提交。
+	{ id: "favorites", group: "content", manager: "FavoritesStore（<userData>/favorites.json）", ipcFile: ["ipc/favoritesIpc.ts"], preloadNamespaces: ["favorites"], channelPrefix: ["favorites"], aggregation: "aggregate" },
 	{ id: "imagegen", group: "content", manager: "ImagegenService + 三个图存储 Store", ipcFile: ["ipc/imagegenIpc.ts"], preloadNamespaces: ["imagegen"], channelPrefix: ["imagegen"], aggregation: "aggregate" },
 	{ id: "videogen", group: "content", manager: "VideoJobRunner + IlinkClient + VideoJobStore/VideoBlobStore/VideoSessionStore/VideoGenConfigStore", ipcFile: ["ipc/videogenIpc.ts"], preloadNamespaces: ["videogen"], channelPrefix: ["videogen"], aggregation: "aggregate" },
 	// ── config ──────────────────────────────────────────────────────────────────

@@ -205,6 +205,46 @@ describe("Git panel VS Code Source Control contract", () => {
 		assert.match(cssRule("\\.git-commit-hover-avatar"), /font-family:\s*var\(--git-ui-font\)/);
 	});
 
+	test("groups panel actions by function and lifts repository sync into the branch bar", () => {
+		// 一列 6 个混排图标（视图切换 / 全部收起 / 全部展开 / 刷新 / 推送 / 拉取）挤在「更改」标题栏里分不清主次：
+		// 视图组只作用于下方变更列表，留在标题栏；同步组作用在仓库/分支上，升到顶部仓库/分支栏与分支同一行。
+		assert.doesNotMatch(panel, /const\s+changeToolbar\s*=/);
+		const viewStart = panel.indexOf("const changesViewToolbar = (");
+		const syncStart = panel.indexOf("const repoSyncToolbar = (");
+		const bodyStart = panel.indexOf("\n\treturn (", syncStart);
+		assert.ok(viewStart > 0 && syncStart > viewStart && bodyStart > syncStart, "两组工具栏必须在组件 return 之前定义");
+		const viewGroup = panel.slice(viewStart, syncStart);
+		const syncGroup = panel.slice(syncStart, bodyStart);
+		// 视图组：树形/平铺切换 + 全部收起/展开；不得混进同步动作
+		assert.match(viewGroup, /changesViewMode\s*===\s*"tree"\s*\?/);
+		assert.match(viewGroup, /ChevronsDownUp/);
+		assert.match(viewGroup, /ChevronsUpDown/);
+		assert.doesNotMatch(viewGroup, /RefreshCw|ArrowUpFromLine|ArrowDownToLine|Loader2/);
+		// 同步组：刷新 / 推送 / 拉取（含 ahead·behind 角标与 loading 指示）；不得混进视图动作
+		assert.match(syncGroup, /RefreshCw/);
+		assert.match(syncGroup, /ArrowUpFromLine/);
+		assert.match(syncGroup, /ArrowDownToLine/);
+		assert.match(syncGroup, /\{\s*loading\s*&&\s*<Loader2/);
+		assert.doesNotMatch(syncGroup, /ChevronsDownUp|ChevronsUpDown|ListTree/);
+		// 「更改」标题栏只拿视图组；同步组挂在顶部仓库/分支栏（branchBarRef 那个 div 内，与布局无关）
+		const changesHeader = sourceBetween("<PaneHeader id={`${paneIdPrefix}-changes`}", "</PaneHeader>");
+		assert.match(changesHeader, /changesViewToolbar/);
+		assert.doesNotMatch(changesHeader, /repoSyncToolbar|t\("git\.push"\)|t\("common\.refresh"\)/);
+		const branchBar = sourceBetween("ref={branchBarRef}>", "<section");
+		assert.match(branchBar, /repoSyncToolbar/);
+		// 多仓没有「更改」标题栏：视图组并进顶部栏，并用 1px 竖线与同步组分隔
+		assert.match(branchBar, /layout\s*===\s*"changesOnly"\s*&&[\s\S]{0,200}?changesViewToolbar[\s\S]{0,200}?h-4 w-px/);
+		// 顶部栏几何：py-1.5 + 24px 图标按钮 = 36px（BRANCH_BAR_HEIGHT）；size-7 会撑到 40px、顶穿 pane 高度预算
+		assert.match(panel, /const BRANCH_BAR_HEIGHT = 36/);
+		assert.doesNotMatch(`${viewGroup}${syncGroup}`, /className="size-7"/);
+		assert.match(viewGroup, /className="size-6"/);
+		// 分组语义：role="group" 必须带 i18n 名字，否则读屏只念「组」
+		assert.match(panel, /role="group"\s+aria-label=\{t\("git\.changesViewActions"\)\}/);
+		assert.match(panel, /role="group"\s+aria-label=\{t\("git\.repoSyncActions"\)\}/);
+		assert.match(i18n, /"git\.changesViewActions"/);
+		assert.match(i18n, /"git\.repoSyncActions"/);
+	});
+
 	test("runs silent refreshes without overlapping slow status requests", () => {
 		assert.match(panel, /const statusRunningRequestRef = useRef<\{\s*projectId: string;\s*repoScopeKey: string;\s*request: number;\s*\} \| null>\(null\)/);
 		assert.match(panel, /statusRunningRequestRef\.current\?\.projectId === props\.projectId/);

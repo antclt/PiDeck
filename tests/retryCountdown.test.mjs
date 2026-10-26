@@ -59,6 +59,8 @@ async function countdownHarness({ now: initialNow = 10000, locale = "zh-CN" } = 
 			"lucide-react": { ChevronDown: "chevron-down", ChevronRight: "chevron-right", CircleCheck: "circle-check", CircleX: "circle-x", RefreshCw: "refresh" },
 			"../TimelineMarker": { TimelineMarker: "timeline-marker" },
 			"../../ui-shadcn/badge": { Badge: "badge" },
+			// 折叠原语只关心受控开合的子树，stub 成占位标签即可（不执行 Radix 逻辑）。
+			"../../ui-shadcn/collapsible": { Collapsible: "collapsible", CollapsibleContent: "collapsible-content" },
 			"../TimelineFormat": { stripAnsi: (text) => text },
 			"./StepTraceDetails": { resolveStepDetail: () => "", StepTraceDetails: () => null },
 		},

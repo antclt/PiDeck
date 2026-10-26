@@ -3,7 +3,7 @@ import { MousePointer2 } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
 import { ApprovalCard } from "../ui-shadcn/approval-card";
-import { dequeueApproval, enqueueApproval, peekApproval } from "../../utils/cuaApprovalQueue";
+import { APPROVAL_TTL_MS, dequeueApproval, enqueueApproval, expireApprovals, peekApproval } from "../../utils/cuaApprovalQueue";
 
 const ACTION_LABEL_KEYS: Record<string, TranslationKey> = {
 	click: "cua.action.click",
@@ -12,7 +12,20 @@ const ACTION_LABEL_KEYS: Record<string, TranslationKey> = {
 	capture: "cua.action.capture",
 	list_windows: "cua.action.list_windows",
 	get_state: "cua.action.get_state",
+	browser_click: "cua.action.browser_click",
+	browser_type: "cua.action.browser_type",
+	browser_press_key: "cua.action.browser_press_key",
+	browser_navigate: "cua.action.browser_navigate",
+	browser_scroll: "cua.action.browser_scroll",
 };
+
+/**
+ * 只读动作：CUA 的取屏/列窗/查状态，以及浏览器 Agent 的读取类动作（快照/查找/等待/截图）。
+ *
+ * 主进程按动作类型决定是否发起审批，只读动作本不该走到这里；渲染层再兜一道，
+ * 万一路径变化把只读动作送进审批队列，也能直接放行而不是卡住整条 FIFO。
+ */
+const READONLY_ACTIONS = new Set(["capture", "list_windows", "get_state", "browser_state", "browser_snapshot", "browser_find", "browser_wait_for", "browser_screenshot"]);
 
 export type CuaApprovalPayload = {
 	requestId: string;
@@ -41,7 +54,7 @@ export function CuaApprovalDialog(props: { request: CuaApprovalPayload | null; p
 
 	const actionKey = ACTION_LABEL_KEYS[request.action];
 	const actionLabel = actionKey ? t(actionKey) : request.action;
-	const isReadonly = request.action === "capture" || request.action === "list_windows" || request.action === "get_state";
+	const isReadonly = READONLY_ACTIONS.has(request.action);
 
 	// Read-only actions should never trigger approval, but if they do, auto-allow.
 	if (isReadonly) {
@@ -126,6 +139,17 @@ export function useCuaApproval() {
 		});
 		return unsubscribe;
 	}, []);
+
+	// 主进程 30s 超时后审批已被拒绝，队列里过期条目再点「允许」只是无效操作——
+	// 按队首剩余存活时间定时清理（+250ms 宽限，避免与用户正在进行的点击竞速）。
+	useEffect(() => {
+		if (queue.length === 0) return;
+		const remaining = APPROVAL_TTL_MS - (Date.now() - queue[0].timestampMs);
+		const timer = setTimeout(() => {
+			setQueue((prev) => expireApprovals(prev, Date.now()));
+		}, Math.max(0, remaining) + 250);
+		return () => clearTimeout(timer);
+	}, [queue]);
 
 	const respond = useCallback(
 		async (allowed: boolean) => {

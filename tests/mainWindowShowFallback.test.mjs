@@ -30,8 +30,13 @@ test("main window records renderer load diagnostics", () => {
 	// 渲染层 console 镜像降档（issue 357 类）：error→warn、warning→info，
 	// 不让第三方/框架噪音进 EnvironmentDoctor 的「最近 7 天报错」统计；
 	// 真正的渲染层故障仍由 rendererLog（uncaught error）按 error 上报
-	assert.match(source, /appLogger\.log\(event\.level === "error" \? "warn" : "info"/);
-	assert.doesNotMatch(source, /appLogger\.warn\("app", "Main window renderer console error"/);
+	assert.match(source, /const level: AppLogLevel = event\.level === "error" \? "warn" : "info"/);
+	assert.doesNotMatch(source, /appLogger\.log\(event\.level === "error" \? "warn" : "info", "app", "Main window renderer console error"/);
+	// issue #376：console-message 镜像必须跳过良性噪音（ResizeObserver loop），
+	// 否则它与 renderer 的 window.onerror 双写，500+ 行/天顶掉真实报错统计
+	assert.match(source, /classifyRendererNoise\(event\.message\)\.benign/);
+	assert.match(source, /new RendererNoiseAggregator\(\)/);
+	assert.match(source, /toRendererNoiseLog\(flush\)/);
 });
 
 test("linux display workaround opens the main window without hidden pre-map", () => {

@@ -25,6 +25,7 @@ const { execSync } = require("node:child_process");
 const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
+const { electronBuilderEnv } = require("./electronBuilderEnv.js");
 
 const root = path.resolve(__dirname, "..");
 
@@ -81,6 +82,7 @@ function run(args) {
 			cwd: root,
 			stdio: "inherit",
 			shell: true,
+			env: electronBuilderEnv(),
 		});
 	} finally {
 		fs.rmSync(configPath, { force: true });

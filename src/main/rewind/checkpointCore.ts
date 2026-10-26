@@ -20,7 +20,6 @@
  */
 
 import { copyFile, mkdtemp, rm, stat } from "node:fs/promises";
-import { statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -85,7 +84,7 @@ interface StatusSnapshot {
 	untrackedFiles: string[];
 	/** 未跟踪文件里进 index 快照的（排除大文件） */
 	untrackedFilesForIndex: string[];
-	/** 未跟踪文件尺寸（statSync 结果，字节；总预算过滤复用，避免二次 stat） */
+	/** 未跟踪文件尺寸（stat 结果，字节；总预算过滤复用，避免二次 stat） */
 	untrackedSizes: Map<string, number>;
 	/** 未跟踪目录 */
 	untrackedDirs: string[];
@@ -131,9 +130,12 @@ async function captureStatusSnapshot(root: string): Promise<StatusSnapshot> {
 			const raw = normalizeGitPath(entry.slice(sp + 1));
 			if (!raw || shouldIgnoreForSnapshot(raw)) continue;
 
-			let st: ReturnType<typeof statSync> | null = null;
+			// 异步 stat（2027-02 性能审计）：这是 checkpoint 创建路径上唯一的同步 IO——
+			// agent 施工期间每 ≥8s 打点一次，WSL 项目的 root 是 UNC 形态，同步 statSync
+			// 每次跨 9P（毫秒级），几百个未跟踪文件即数百毫秒主线程阻塞。
+			let st: Awaited<ReturnType<typeof stat>> | null = null;
 			try {
-				st = statSync(join(root, raw));
+				st = await stat(join(root, raw));
 			} catch {
 				// 目录可能刚被外部删除，按不存在处理。
 			}

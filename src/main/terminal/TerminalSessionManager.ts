@@ -9,6 +9,7 @@ import { isLocalProject } from "../../shared/projectLocation";
 import type { ProjectStore } from "../projects/ProjectStore";
 import { LocalTerminalSessionLauncher, getTerminalShellCandidates, type TerminalWslSettings } from "./TerminalSessionLauncher";
 import { createTerminalDataBatcher, type TerminalDataBatcher } from "./terminalDataBatching";
+import { appendTerminalReplay, createTerminalReplayBuffer, terminalReplayText, type TerminalReplayBuffer } from "./terminalReplayBuffer";
 
 export { getTerminalShellCandidates };
 
@@ -20,14 +21,13 @@ const log = (msg: string) => {
 type TerminalRuntime = {
 	tab: TerminalTab;
 	pty: IPty;
-	/** 主进程回放缓冲（切回时重建 xterm 用），有 200K 字符上限 */
-	buffer: string;
+	/** 主进程回放缓冲（切回时重建 xterm 用），分段存储 + 200K 字符上限（见 terminalReplayBuffer） */
+	buffer: TerminalReplayBuffer;
 	/** PTY 输出合批器：16ms 内的小 chunk 合成一次 IPC emit，exit/close 前必须 flush 保序 */
 	batcher: TerminalDataBatcher;
 };
 
 type Emit = (channel: string, payload: unknown) => void;
-const MAX_TERMINAL_REPLAY_BUFFER = 200_000;
 export function isAgentOwnerKey(ownerKey: string): boolean {
 	return ownerKey.startsWith("agent:");
 }
@@ -127,7 +127,7 @@ export class TerminalSessionManager {
 		const runtime: TerminalRuntime = {
 			tab,
 			pty: spawned.pty,
-			buffer: "",
+			buffer: createTerminalReplayBuffer(),
 			batcher: createTerminalDataBatcher((data) => {
 				this.emit(ipcChannels.terminalData, { tabId: id, data });
 			}),
@@ -234,7 +234,8 @@ export class TerminalSessionManager {
 	private snapshot(runtime: TerminalRuntime): TerminalTab {
 		return {
 			...runtime.tab,
-			buffer: runtime.buffer,
+			// 分段缓冲只在快照时 join 一次（列表/切回是低频操作，不在追加热路径上）
+			buffer: terminalReplayText(runtime.buffer),
 			// 前台进程名：渲染层在「关闭确认=running」时据此判断是否有任务在跑。
 			// node-pty 的 process 在 shell 空闲时就是 shell 自己的名字，非默认 shell 即视为有进程。
 			frontProcess: runtime.pty.process,
@@ -244,10 +245,9 @@ export class TerminalSessionManager {
 	private appendBuffer(runtime: TerminalRuntime, data: string) {
 		// Renderer 会在切换项目/agent 时卸载 TerminalDock；主进程保留有限回放，
 		// 切回来才能重建 xterm scrollback，同时用字符上限避免长期终端占用过多内存。
-		runtime.buffer = `${runtime.buffer}${data}`;
-		if (runtime.buffer.length > MAX_TERMINAL_REPLAY_BUFFER) {
-			runtime.buffer = runtime.buffer.slice(-MAX_TERMINAL_REPLAY_BUFFER);
-		}
+		// 分段追加（O(1) 摊还）代替单字符串拼接+截断：后者在上限附近每个 chunk 都要
+		// 整段拷贝 200K，高吞吐输出时每秒几十 MB 的无谓拷贝全部压在主进程事件循环上。
+		appendTerminalReplay(runtime.buffer, data);
 	}
 
 	private displayShell(shell: TerminalShell) {

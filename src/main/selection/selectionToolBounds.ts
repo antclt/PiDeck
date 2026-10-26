@@ -19,6 +19,7 @@ export const SELECTION_TOOL_SCREEN_MARGIN = 8;
 // 尺寸的唯一来源在 shared/types/selectionTool；这里 re-export 供窗口与旧测试继续使用。
 export {
 	SELECTION_TOOL_WINDOW_COLLAPSED_HEIGHT,
+	SELECTION_TOOL_WINDOW_COLLAPSED_WIDTH,
 	SELECTION_TOOL_WINDOW_EXPANDED_HEIGHT,
 	SELECTION_TOOL_WINDOW_WIDTH,
 } from "../../shared/types/selectionTool";

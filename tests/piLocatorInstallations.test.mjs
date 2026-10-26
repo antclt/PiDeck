@@ -142,6 +142,24 @@ test("官方安装被标为 managed，包管理器全局那份被标为 package-
 	}
 });
 
+test("managed-install.json 带 UTF-8 BOM 时仍归为 managed（PowerShell 5.1 重写标记文件）", async () => {
+	const harness = createHarness({});
+	try {
+		const managed = writeManagedInstall(harness.home);
+		// 模拟 PowerShell 5.1 的 Out-File / Set-Content 重写：内容不变，开头多出 BOM。
+		const markerPath = join(harness.home, ".pi", "agent", "install", "managed-install.json");
+		writeFileSync(markerPath, `\uFEFF${JSON.stringify(MANAGED_MARKER)}`, "utf8");
+		const { PiLocator } = harness.locatorModule;
+		const installations = await new PiLocator().listInstallations("", false, "", "");
+		const entry = installations.find((item) => item.path === managed);
+		// 误判为 custom 会让 SDK 入口解析不到，提示词增强 / 智能体侧车跟着失效。
+		assert.equal(entry?.source, "managed", "带 BOM 的标记文件不应把官方安装降级成 custom");
+		assert.equal(entry?.managedRoot, join(harness.home, ".pi", "agent", "install"));
+	} finally {
+		harness.cleanup();
+	}
+});
+
 test("入口是 ~/.local/bin 里指向官方启动器的软链时，只列一条且归为 managed", async (t) => {
 	const harness = createHarness({});
 	try {

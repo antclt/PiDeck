@@ -1,4 +1,6 @@
 /** PiDeck's optional, local-only MCP host. Management is desktop-only, never an MCP tool. */
+import type { AgentModelRef, AgentProfileBackend, AgentProfileCategory } from "./agentProfile";
+import type { AutomationRunStatus, AutomationRunTrigger, AutomationSchedule, AutomationTask, AutomationTaskMode, NormalizedAutomationBudget } from "./automation";
 import type { McpConfigFile } from "./mcp";
 import type { AppSettings } from "./settings";
 
@@ -13,6 +15,21 @@ export type PiDeckMcpAccess = {
 	allProjects: boolean;
 	/** 写能力开关（默认关）：开启后客户端可中断进行中的回答（当前仅 sessions_abort）。 */
 	allowControl: boolean;
+	/**
+	 * 智能体写能力开关（默认关）：开启后客户端可创建/编辑/删除智能体、绑定会话与智能体。
+	 * 角色设定（systemPrompt）是**只写不读**：创建/编辑可传，但任何工具都不返回它。
+	 */
+	allowAgentWrite: boolean;
+	/**
+	 * 定时任务写能力开关（默认关）：开启后客户端可创建/编辑/删除任务、立即运行、中止运行。
+	 * 任务属于具体项目，读写都按项目白名单校验；任务提示词随任务详情返回（项目范围内可见）。
+	 */
+	allowAutomationWrite: boolean;
+	/**
+	 * 收藏写能力开关（默认关）：开启后客户端可新增/删除本机收藏（含任意文本）。
+	 * 收藏是本机快照：列表只返回「未关联项目」或「已授权项目」的条目，避免借收藏绕过项目授权。
+	 */
+	allowFavoritesWrite: boolean;
 };
 export type PiDeckMcpProject = { id: string; name: string };
 export type PiDeckMcpState = PiDeckMcpAccess & {
@@ -91,6 +108,81 @@ export type PiDeckMcpRuntimeView = {
 	activeProjectCount: number;
 	/** 已授权项目数（通配模式下随项目增删变化） */
 	authorizedProjectCount: number;
+};
+
+/**
+ * 宿主级智能体元信息投影（与项目白名单无关）。
+ * **刻意不含 systemPrompt**：角色设定只写不读，留在主进程内解析；
+ * 只输出显式允许清单，不含文件路径、会话绑定表等私有状态。
+ */
+export type PiDeckMcpAgentSummary = {
+	id: string;
+	name: string;
+	description: string;
+	icon: string;
+	category: AgentProfileCategory;
+	/** 内置智能体（可编辑、不可删除） */
+	builtin: boolean;
+	/** 首选模型；null = 跟随会话/设置链 */
+	model: AgentModelRef | null;
+	/** 「使用」新建会话时的后端；null = 跟随设置默认 */
+	backend: AgentProfileBackend | null;
+	usageCount: number;
+	lastUsedAt: number | null;
+	createdAt: number;
+	updatedAt: number;
+};
+
+/**
+ * 定时任务元信息（项目作用域）：不含任务提示词，列表用它控制体积；
+ * 详情 `PiDeckMcpAutomationTaskDetail` 才带 prompt。
+ */
+export type PiDeckMcpAutomationTaskSummary = {
+	id: string;
+	name: string;
+	projectId: string;
+	schedule: AutomationSchedule;
+	enabled: boolean;
+	backend: AutomationTask["backend"] | null;
+	model: AgentModelRef | null;
+	thinkingLevel: string | null;
+	mode: AutomationTaskMode | null;
+	permissionPreset: string | null;
+	budget: NormalizedAutomationBudget;
+	createdAt: number;
+	updatedAt: number;
+	lastScheduledAt: number | null;
+	nextRunAt: number | null;
+};
+
+export type PiDeckMcpAutomationTaskDetail = PiDeckMcpAutomationTaskSummary & {
+	/** 任务提示词（用户自写文本，只在已授权项目范围内返回）。 */
+	prompt: string;
+};
+
+/** 一次运行的结果投影：不含 events 明细（体积大、对客户端决策无用）。 */
+export type PiDeckMcpAutomationRunSummary = {
+	id: string;
+	taskId: string;
+	taskName: string;
+	projectId: string;
+	trigger: AutomationRunTrigger;
+	status: AutomationRunStatus;
+	scheduledFor: number | null;
+	sessionId: string | null;
+	queuedAt: number;
+	startedAt: number | null;
+	endedAt: number | null;
+	durationMs: number | null;
+	inputTokens: number;
+	outputTokens: number;
+	costUsd: number;
+	stepCount: number;
+	changedFiles: number | null;
+	/** 截断到 2000 字符，避免把超长堆栈整段塞进 MCP 响应。 */
+	error: string | null;
+	skippedReason: string | null;
+	budgetReason: string | null;
 };
 
 export type PiDeckMcpResult<T> = { ok: true; value: T } | { ok: false; code: string };

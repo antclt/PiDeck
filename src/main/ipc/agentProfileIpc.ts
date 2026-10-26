@@ -38,6 +38,8 @@ const LOG_SCOPE = "agent-profiles";
 
 /** id 上限：uuid 与内置 id 都远小于它，超长只可能是脏数据（也挡住把超长串塞进日志）。 */
 const MAX_AGENT_ID_CHARS = 200;
+/** 排序载荷上限：仅作为防御性护栏（真实智能体数量远小于它）。 */
+const MAX_AGENT_ORDER_ENTRIES = 5_000;
 
 /**
  * 注册智能体 IPC。
@@ -114,6 +116,15 @@ export function registerAgentProfileIpc(deps: AgentProfileIpcDeps): () => void {
 		});
 	});
 
+	ipcMain.handle(ipcChannels.agentProfilesReorder, async (_event, agentIds: unknown): Promise<string[]> => {
+		const order = parseAgentOrder(agentIds);
+		return runWithLog(appLogger, "reorder agent profiles", { count: order.length }, async () => {
+			const nextOrder = await store.reorder(order);
+			void appLogger.info(LOG_SCOPE, "Reordered agent profiles", { count: nextOrder.length });
+			return nextOrder;
+		});
+	});
+
 	ipcMain.handle(ipcChannels.agentProfilesUpdateSettings, async (_event, patch: unknown): Promise<AgentMarketSettings> => {
 		const parsed = parseSettingsPatch(patch);
 		return runWithLog(appLogger, "update agent market settings", { keys: Object.keys(parsed) }, async () => {
@@ -136,6 +147,7 @@ export function registerAgentProfileIpc(deps: AgentProfileIpcDeps): () => void {
 		ipcMain.removeHandler(ipcChannels.agentProfilesDuplicate);
 		ipcMain.removeHandler(ipcChannels.agentProfilesUpdateSettings);
 		ipcMain.removeHandler(ipcChannels.agentProfilesBindSession);
+		ipcMain.removeHandler(ipcChannels.agentProfilesReorder);
 	};
 }
 
@@ -154,6 +166,16 @@ function parseAgentId(value: unknown): string {
 	const id = value.trim();
 	if (!id || id.length > MAX_AGENT_ID_CHARS) throw new Error("Invalid agent id");
 	return id;
+}
+
+/**
+ * 排序入参：完整 id 数组。未知/重复 id 不在这里拦，交给 store 按当前状态过滤——
+ * 渲染层可能拿着拖拽开始时的旧快照，其中存在刚刚被删除的智能体 id。
+ */
+function parseAgentOrder(value: unknown): string[] {
+	if (!Array.isArray(value)) throw new Error("Invalid agent order");
+	if (value.length > MAX_AGENT_ORDER_ENTRIES) throw new Error("Agent order is too long");
+	return value.map((entry) => parseAgentId(entry));
 }
 
 function parseRequiredText(value: unknown, label: string, maxLength: number): string {

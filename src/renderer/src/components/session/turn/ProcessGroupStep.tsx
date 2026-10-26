@@ -129,11 +129,12 @@ function lastToolLoadingLabel(members: readonly TurnProcessEntry[]): string | un
 export const ProcessGroupStep = memo(function ProcessGroupStep(props: ProcessGroupStepProps) {
 	// 组体 id 走 useId：同页多组共存时 aria-controls 不会串。
 	const bodyId = useId();
-	// 与 TurnRow 的 expandedStepsRunId 同款模式：存「已全量展开的组 id」而不是布尔量，
-	// 换组（React key 变化或 id 不同）自然重置，不需要额外 effect。
-	const [expandedGroupId, setExpandedGroupId] = useState<string | undefined>(undefined);
-	const showAll = expandedGroupId === props.group.id;
-	const mounted = useMemo(() => boundMountedSteps(props.group.members, PROCESS_GROUP_MEMBER_LIMIT, showAll), [props.group.members, showAll]);
+	// 与 TurnRow 的 expandedSteps 同款模式：存展开下界的原点与批次数，而不是布尔量。
+	// 下界锚在首次点击时的成员总数上：之后追加新成员不会把已展开的旧成员挤回去；
+	// 组 id 变化时判定自动回到未展开（state 里保留的旧值不会误匹配）。
+	const [expandedMembers, setExpandedMembers] = useState<{ groupId: string; anchor: number; batches: number } | undefined>(undefined);
+	const memberExpansion = expandedMembers?.groupId === props.group.id ? expandedMembers : undefined;
+	const mounted = useMemo(() => boundMountedSteps(props.group.members, PROCESS_GROUP_MEMBER_LIMIT, memberExpansion), [props.group.members, memberExpansion]);
 	// ── 组体内部滚轮跟底 ──
 	// 组体被 max-h 钳住后，外层时间线不再随成员增加而增高，新成员只落在**内部**滚动容器下方；
 	// 外层引擎的 ResizeObserver 因此收不到增长通知，内层必须自己跟底（否则滚珠停在上面）。
@@ -285,11 +286,11 @@ export const ProcessGroupStep = memo(function ProcessGroupStep(props: ProcessGro
 										<button
 											type="button"
 											className="mt-1 inline-flex h-[26px] shrink-0 items-center gap-2 self-start rounded-[var(--radius-md)] border border-border-subtle bg-[var(--color-chat-card-bg)] px-3 text-chat-detail font-medium text-text-secondary transition-colors hover:border-border-strong hover:bg-bg-hover hover:text-text-primary"
-											onClick={() => setExpandedGroupId(props.group.id)}
-											title={t("timeline.showEarlierSteps", { count: mounted.hiddenCount })}
+											onClick={() => setExpandedMembers((prev) => (prev?.groupId === props.group.id ? { ...prev, batches: prev.batches + 1 } : { groupId: props.group.id, anchor: props.group.members.length, batches: 1 }))}
+											title={t("timeline.showEarlierSteps", { count: Math.min(PROCESS_GROUP_MEMBER_LIMIT, mounted.hiddenCount) })}
 										>
 											<ChevronUp size={12} aria-hidden="true" />
-											<span>{t("timeline.showEarlierSteps", { count: mounted.hiddenCount })}</span>
+											<span>{t("timeline.showEarlierSteps", { count: Math.min(PROCESS_GROUP_MEMBER_LIMIT, mounted.hiddenCount) })}</span>
 										</button>
 									)}
 									{mounted.items.map((entry) => (

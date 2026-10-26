@@ -53,6 +53,15 @@ export function WebWorkspaceDrawer(props: { projectId: string; open: boolean; on
 
 type DiffPayload = { originalContent: string; modifiedContent: string } | null;
 
+/**
+ * 提交日期标签：CommitEntry.authorDate 已是毫秒（GitService 把 git 的秒级时间戳乘过 1000），
+ * 直接 new Date(ms)；非有限值不出标签，避免渲染成 NaN/1970。
+ */
+function commitDateLabel(authorDate: number): string {
+	if (!Number.isFinite(authorDate) || authorDate <= 0) return "";
+	return new Date(authorDate).toLocaleDateString();
+}
+
 function GitPanel(props: { projectId: string; active: boolean }) {
 	const [loading, setLoading] = useState(false);
 	const [branch, setBranch] = useState<GitBranchInfo | null>(null);
@@ -145,7 +154,7 @@ function GitPanel(props: { projectId: string; active: boolean }) {
 									<span className="min-w-0 flex-1 truncate text-caption text-foreground">{commit.message}</span>
 								</div>
 								<div className="text-micro text-muted-foreground">
-									{commit.authorName} · {new Date(commit.authorDate * 1000).toLocaleDateString()}
+									{commit.authorName} · {commitDateLabel(commit.authorDate)}
 								</div>
 							</li>
 						))}
@@ -175,7 +184,11 @@ function ResourceGroupList(props: {
 			<ul className="flex flex-col gap-0.5">
 				{props.resources.slice(0, 30).map((resource) => (
 					<li key={`${resource.path}:${resource.letter}`}>
-						<button type="button" className={cn("flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-caption transition-colors hover:bg-muted/60", props.diffPath === resource.path && "bg-muted")} onClick={() => props.onOpenDiff(props.group, resource.path)}>
+						<button
+							type="button"
+							className={cn("flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-caption transition-colors hover:bg-muted/60 pointer-coarse:min-h-9 pointer-coarse:py-1.5", props.diffPath === resource.path && "bg-muted")}
+							onClick={() => props.onOpenDiff(props.group, resource.path)}
+						>
 							<code className={cn("w-4 shrink-0 text-center text-micro font-semibold", resource.letter === "D" ? "text-danger" : resource.letter === "A" ? "text-success" : "text-warning")}>{resource.letter}</code>
 							<span className="min-w-0 flex-1 truncate text-foreground">{resource.path.split(/[\\/]/).pop()}</span>
 							<span className="max-w-32 shrink-0 truncate text-micro text-muted-foreground">{resource.path}</span>
@@ -239,13 +252,13 @@ function FilesPanel(props: { projectId: string; active: boolean; onOpenFile: (pa
 		<div className="flex flex-col gap-2">
 			{/* 面包屑导航：项目根 / 一级 / … */}
 			<div className="flex min-w-0 flex-wrap items-center gap-0.5 text-caption">
-				<button type="button" className="rounded px-1 py-0.5 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground" onClick={() => setDir("")}>
+				<button type="button" className="rounded px-1 py-0.5 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground pointer-coarse:py-1.5" onClick={() => setDir("")}>
 					{t("web.filesTab")}
 				</button>
 				{crumbs.map((crumb, index) => (
 					<span key={`${crumb}-${index}`} className="flex min-w-0 items-center gap-0.5">
 						<ChevronRight className="size-3 shrink-0 text-muted-foreground/60" aria-hidden="true" />
-						<button type="button" className="max-w-32 truncate rounded px-1 py-0.5 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground" onClick={() => setDir(crumbs.slice(0, index + 1).join("/"))}>
+						<button type="button" className="max-w-32 truncate rounded px-1 py-0.5 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground pointer-coarse:py-1.5" onClick={() => setDir(crumbs.slice(0, index + 1).join("/"))}>
 							{crumb}
 						</button>
 					</span>
@@ -259,7 +272,7 @@ function FilesPanel(props: { projectId: string; active: boolean; onOpenFile: (pa
 				<ul className="flex flex-col gap-0.5">
 					{nodes.map((node) => (
 						<li key={node.relativePath}>
-							<button type="button" className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-caption transition-colors hover:bg-muted/60" onClick={() => (node.type === "directory" ? setDir(node.relativePath) : props.onOpenFile(node.relativePath))}>
+							<button type="button" className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-caption transition-colors hover:bg-muted/60 pointer-coarse:min-h-9 pointer-coarse:py-1.5" onClick={() => (node.type === "directory" ? setDir(node.relativePath) : props.onOpenFile(node.relativePath))}>
 								{node.type === "directory" ? <Folder className="size-3.5 shrink-0 text-primary/70" aria-hidden="true" /> : <FileText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
 								<span className="min-w-0 flex-1 truncate text-foreground">{node.name}</span>
 							</button>

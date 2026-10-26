@@ -44,6 +44,9 @@ function createHarness() {
 	const appendedEntries = [];
 	const sentMessages = [];
 
+	// 模拟重启：session_start 读到的历史条目（默认就是本次追加的条目）
+	let entrySource = null;
+
 	const api = {
 		on(event, handler) {
 			handlers.set(event, handler);
@@ -72,7 +75,7 @@ function createHarness() {
 		},
 		sessionManager: {
 			getEntries() {
-				return [...appendedEntries];
+				return entrySource ? [...entrySource] : [...appendedEntries];
 			},
 		},
 	};
@@ -99,6 +102,16 @@ function createHarness() {
 		},
 		async runSessionStart() {
 			return handlers.get("session_start")({}, context);
+		},
+		setEntrySource(entries) {
+			entrySource = entries.map((entry) => ({ ...entry, data: { ...entry.data } }));
+		},
+		/** 用给定条目模拟「重启后打开同一会话」：新扩展实例读取这些历史条目恢复状态。 */
+		async restartWith(entries) {
+			const next = createHarness();
+			next.setEntrySource(entries);
+			await next.runSessionStart();
+			return next;
 		},
 	};
 }
@@ -188,4 +201,59 @@ test("session_start 能回溯到更早带 objective 的记录（issue #366）", 
 	const lines = [...harness.widgets.values()][0];
 	assert.equal(lines?.[0], "paused · 1/32");
 	assert.equal(lines?.[1], "把测试跑绿");
+});
+
+test("clear 后退出再启动，旧目标不再复活（issue #395 复现路径）", async () => {
+	// 复现步骤：目标模式下跑一轮 → 退出 PiDeck 重启（恢复为 paused）→ /goal clear → 再重启。
+	// 关键在「重启后 clear」：重载后 persistedObjective 是模块初值 ""，
+	// 旧判据 "" !== "" 为假 → 省略 objective 字段 → 会话里没有「已清除」的记录。
+	const harness = createHarness();
+	await harness.runInput(`${marker}\n目标 A`);
+	await harness.runBeforeAgentStart({ systemPromptOptions: { sections: {} } });
+	await harness.runAgentEnd([assistantMessage("还在推进")]);
+
+	const restored = await harness.restartWith(harness.appendedEntries);
+	assert.equal([...restored.widgets.values()][0]?.[1], "目标 A", "前置：重启后目标被恢复出来");
+
+	await restored.runCommand("clear");
+	assert.equal(restored.widgets.size, 0, "clear 后状态条立即消失");
+	const cleared = restored.appendedEntries.at(-1);
+	assert.equal(cleared.data.enabled, false);
+	assert.equal(cleared.data.objective, "", 'clear 必须落 objective:""，否则重启回溯会穿透到旧目标');
+
+	const restarted = await restored.restartWith(restored.appendedEntries);
+	assert.equal(restarted.widgets.size, 0, "清除过的目标不得在重启后复活");
+});
+
+test("历史里的旧 clear 条目（不写 objective）也能截断回溯（issue #395 存量数据）", async () => {
+	// 旧版 clear 落的是 { enabled:false, phase:"paused" } 且不带 objective 字段；
+	// 回溯必须从尾部起、遇 enabled:false 立即停，不能穿透到更早的目标。
+	const legacyEntries = [
+		{ type: "custom", customType: "pi-deck-goal-mode", data: { enabled: true, phase: "active", objective: "旧目标", roundsStarted: 0, maxGoalRounds: 32 } },
+		{ type: "custom", customType: "pi-deck-goal-mode", data: { enabled: true, phase: "active", roundsStarted: 1, maxGoalRounds: 32 } },
+		{ type: "custom", customType: "pi-deck-goal-mode", data: { enabled: false, phase: "paused", roundsStarted: 2, maxGoalRounds: 32 } },
+	];
+	const restarted = await createHarness().restartWith(legacyEntries);
+	assert.equal(restarted.widgets.size, 0, "旧 clear 记录必须截断回溯，旧目标不得复活");
+
+	// 同一判据对「完成」同样成立：complete 也是 enabled:false。
+	const completed = await createHarness().restartWith([legacyEntries[0], { type: "custom", customType: "pi-deck-goal-mode", data: { enabled: false, phase: "complete", roundsStarted: 3, maxGoalRounds: 32 } }]);
+	assert.equal(completed.widgets.size, 0, "已完成的目标不得在重启后回到 paused");
+});
+
+test("恢复出的目标会同步 persistedObjective，恢复后 clear 仍可落盘（issue #395）", async () => {
+	const harness = createHarness();
+	await harness.runInput(`${marker}\n目标 A`);
+	await harness.runBeforeAgentStart({ systemPromptOptions: { sections: {} } });
+	await harness.runAgentEnd([assistantMessage("还在推进")]);
+
+	// 重启恢复为 paused，随后在同一实例里 clear。
+	const restarted = await harness.restartWith(harness.appendedEntries);
+	assert.equal([...restarted.widgets.values()][0]?.[1], "目标 A");
+	await restarted.runCommand("clear");
+
+	const cleared = restarted.appendedEntries.at(-1);
+	assert.equal(cleared.data.objective, "", '恢复后 clear 也必须落 objective:""');
+	const again = await restarted.restartWith(restarted.appendedEntries);
+	assert.equal(again.widgets.size, 0, "恢复→clear→再重启：目标不得复活");
 });

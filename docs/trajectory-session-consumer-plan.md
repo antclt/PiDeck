@@ -300,7 +300,7 @@ S1 落地时增加 `scripts/probeTrajectoryRead.mjs`（当前尚不存在），�
 >
 > **S1 落地记录（2026-10-20）**：`scripts/probeTrajectoryRead.mjs` 在真实会话上测得——0.4MB / 1 份 29.8KB 提示词：索引 3.1–3.5ms、冷读 1.9–2.2ms（正文 1 次）、热读 0.1–0.2ms（正文 0 次）、version 稳定；2.2MB / 856 条目旧会话：索引 15.6ms、冷读 1.9ms、正文 0 次（该会话无系统条目）。收益来自「不再扫文件」而非微优化；旧全文件扫描 38.8MB / 116.9ms 的路径现在只在未注入索引读取器时启用。
 >
-> 已知未覆盖：① 降级路径缺故障注入用例（`readSessionFacts` 缺失才回退旧扫描）；② DSH 运行时（已激活）会话仍默认 `fromStart: true`，宿主 attach 是否回放到会话开头由后续阶段核实；③ `sessions:catalog-read-dsh-system-prompt` 与 `sessions:catalog-read-outline-title` 已无轨迹消费者（后者被索引 preview 取代），删除留给收口阶段一并做。
+> 已知未覆盖：① 降级路径缺故障注入用例（`readSessionFacts` 缺失才回退旧扫描）；② DSH 运行时（已激活）会话仍默认 `fromStart: true`，宿主 attach 是否回放到会话开头由后续阶段核实；③ 已下线 `sessions:catalog-read-dsh-system-prompt` 与 `sessions:catalog-read-outline-title`（前者被提示词快照事实取代、后者被索引 preview 取代）：通道常量、handler、依赖注入、preload/preview/browser 入口、`DshAgentManager.readSystemPrompt`（含 `runtime.systemPrompt` 缓存字段）、`readSessionOutlineTitle` 成套删除，快照锚点同步 700 通道 / sessions 112。
 
 各阶段是可独立验证/回滚的交付单元；S1 契约改动必须把主进程、preload 与 renderer 成套交付/回滚。sidecar 降级沿用已有开关，迁移期旧入口按 §3.5 受控启用与移除，不新增永久备用扫描系统。只提交本任务改动，提交与推送按当前用户授权和仓库协作规则执行。
 

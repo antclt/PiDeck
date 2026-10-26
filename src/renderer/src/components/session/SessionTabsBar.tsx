@@ -5,7 +5,10 @@ import { sessionRecordByIdAtomFamily, sessionRuntimeBySessionIdAtomFamily, sessi
 import { t } from "../../i18n";
 import { displayProjectDirectoryName } from "../../rendererUtils";
 import { copyTextWithCopiedNotice } from "../../utils/clipboardNotice";
+import { motion, useReducedMotion } from "motion/react";
 import { AnimatedBadge } from "../motion/animated-badge";
+import { EASE_OUT } from "../../lib/ease";
+import { resolveTabLayoutGeneration } from "../../utils/sessionTabMotion";
 import { sessionStatusBadge } from "../../utils/sessionStatusBadge";
 import { canRunSessionAction, type SessionReloadMode, type SessionRunAction, type SessionRunCapabilities, type SessionRunControlView } from "../../utils/sessionCommands";
 import { sessionDisplayName } from "../../utils/sessionDisplayName";
@@ -23,7 +26,7 @@ import { SessionActivityIndicator } from "./SessionActivityIndicator";
 import { TAB_CLOSE_BUTTON_CLASS } from "../../utils/tabCloseButton";
 
 import { SESSION_TAB_DRAG_MIME } from "../../utils/sessionSplitEdge";
-import { buildSessionTabBarEntries } from "../../utils/sessionTabGroups";
+import { buildSessionTabBarEntries, flattenSessionTabBarEntries } from "../../utils/sessionTabGroups";
 import { SESSION_TAB_BADGE_EXTRA_WIDTH } from "../../../../shared/sessionTabWidth";
 
 /**
@@ -256,6 +259,18 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 		[props.splitGroupIds, tabs, pinnedTabs, sessionRecords, projectsById],
 	);
 
+	// —— 关 Tab 后剩余 Tab 收拢 ——
+	// 生成数只在 Tab 集合变化时 +1（见 resolveTabLayoutGeneration）：其余渲染里
+	// layoutDependency 不变，motion 不再重新测量，避免状态徽章刷新拖慢整条 Tab 栏。
+	// 显示顺序复用 flattenSessionTabBarEntries（与 Ctrl+Tab 循环同源），不再手写一遍展开逻辑。
+	const tabLayoutIds = useMemo(() => flattenSessionTabBarEntries(tabBarEntries), [tabBarEntries]);
+	const tabLayoutRef = useRef<{ ids: readonly string[]; generation: number } | null>(null);
+	const tabLayoutGeneration = resolveTabLayoutGeneration(tabLayoutRef.current?.ids ?? null, tabLayoutIds, tabLayoutRef.current?.generation ?? 0);
+	useLayoutEffect(() => {
+		tabLayoutRef.current = { ids: tabLayoutIds, generation: tabLayoutGeneration };
+	}, [tabLayoutIds, tabLayoutGeneration]);
+	const reduceMotion = useReducedMotion();
+
 	// —— 滚动容器 ref（拖拽排序与新建菜单共用）——
 	const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -349,25 +364,40 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 	// Tab 超宽时用贯穿滚动：垂直滚轮（无 shift）在 tab 条上改为横向滚动，
 	// 否则 overflow-x-auto + [scrollbar-width:none] 下只用触控板横扭/shift+滚轮，
 	// 普通鼠标滚轮无法浏览溢出 Tab。这里显式取纵/横向量较大者重定向到 scrollLeft。
-	const handleTabsWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+	//
+	// 2027-02 修正：React onWheel 挂在根容器上是 passive 监听，preventDefault
+	// 实际无效（只打 "passive event listener" 告警，穿透语义与注释意图不符）。
+	// 改为原生非 passive 监听（与 SurfaceComponents 的会话区滚轮同款写法）。
+	// 边界读集中在写 scrollLeft 之前，避免同一次事件里读→写→读交错强制布局。
+	const handleTabsWheel = useCallback((event: WheelEvent) => {
 		const el = scrollRef.current;
 		if (!el) return;
 		// 仅在确有横向溢出时接管（未溢出时任何滚轮都无副作用）
-		if (el.scrollWidth <= el.clientWidth) return;
+		const scrollWidth = el.scrollWidth;
+		const clientWidth = el.clientWidth;
+		if (scrollWidth <= clientWidth) return;
 		const delta = Math.abs(event.deltaY) > Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
-		el.scrollLeft += delta;
+		const prevScrollLeft = el.scrollLeft;
+		el.scrollLeft = prevScrollLeft + delta;
 		// 已滚到横向边界时才让事件穿透（垂直滚动仍留个边角用）；否则吞掉避免页面晃动
-		if (event.deltaY && el.scrollLeft > 0 && el.scrollLeft < el.scrollWidth - el.clientWidth) {
+		if (event.deltaY && el.scrollLeft > 0 && el.scrollLeft < scrollWidth - clientWidth) {
 			event.preventDefault();
 		}
-	};
+	}, []);
+	useLayoutEffect(() => {
+		const el = scrollRef.current;
+		if (!el) return;
+		const handler = (event: WheelEvent) => handleTabsWheel(event);
+		el.addEventListener("wheel", handler, { passive: false });
+		return () => el.removeEventListener("wheel", handler);
+	}, [handleTabsWheel]);
 
 	// 下拉经 Portal 挂到 body；勿写 px-*（会盖掉自定义标题栏为窗口控件留的 padding-right）。
 	// 抽屉开关始终在本栏最右侧；打开抽屉后靠 CSS 取消窗口控件让位，避免按钮被空出一截。
 	// --session-tab-max-*：外观设置可调的 Tab 宽度上限，徽标 Tab 额外加 28px（见 shared/sessionTabWidth.ts）。
 	return (
 		<div
-			className={cn("session-tabs-bar flex h-10 shrink-0 items-center gap-1 overflow-x-clip border-b border-border/40 bg-background/80 pl-[max(0.5rem,var(--session-tabs-left-inset,0.5rem))]", props.simple && "simple-session-header h-12 border-0 bg-transparent [--session-tabs-left-inset:16px]")}
+			className={cn("session-tabs-bar flex h-10 shrink-0 items-center gap-1 overflow-x-clip border-b border-border/40 bg-bg-page pl-[max(0.5rem,var(--session-tabs-left-inset,0.5rem))]", props.simple && "simple-session-header h-12 border-0 bg-transparent [--session-tabs-left-inset:16px]")}
 			style={
 				{
 					"--session-tab-max-w": `${tabMaxWidth}px`,
@@ -381,51 +411,54 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 				</Button>
 			) : null}
 			<div className="relative flex min-w-0 flex-1 items-center">
-				<div ref={scrollRef} onWheel={handleTabsWheel} className="session-tabs-scroll relative flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none]">
+				<div ref={scrollRef} className="session-tabs-scroll relative flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none]">
 					{(() => {
 						// 分屏组：组内会话聚合渲染（组头胶囊 + 颜色标记）；收起时组内 Tab 隐藏
 						const hasSplitGroup = tabBarEntries.some((entry) => entry.kind === "split");
 						const groupCollapsed = hasSplitGroup && Boolean(props.splitGroupCollapsed);
+						// 包装层只负责布局位移：关闭中间 Tab 后右侧 Tab 播 0.16s 收拢，而不是瞬移。
+						// layoutDependency 用集合生成数（见 resolveTabLayoutGeneration）：状态徽章/标题刷新不触发重测。
 						const renderTab = (sessionId: string) => (
-							<SessionTab
-								simple={props.simple}
-								key={sessionId}
-								sessionId={sessionId}
-								active={sessionId === currentSessionId}
-								pinned={pinnedTabs.includes(sessionId)}
-								preview={sessionId === previewTabId}
-								dragging={draggingId === sessionId}
-								// 指示线插在目标 Tab 的边缘：before=左缘，after=右缘
-								indicator={dragIndicator && dragIndicator.targetId === sessionId ? dragIndicator.position : null}
-								// 运行中反馈徽章只对当前会话有意义（作用于其绑定的 Agent 运行时），非当前 Tab 不显示；
-								// 运行控制菜单项已上收右上角 ⋯ 菜单，Tab 只保留转动态展示
-								isStopping={sessionId === currentSessionId ? props.runControl?.isStopping : undefined}
-								isRestarting={sessionId === currentSessionId ? props.runControl?.isRestarting : undefined}
-								isReloading={sessionId === currentSessionId ? props.runControl?.isReloading : undefined}
-								onSelect={props.onSelect}
-								onPromotePreview={props.onPromotePreview}
-								onClose={props.onClose}
-								onCloseOthers={props.onCloseOthers}
-								onCloseAll={props.onCloseAll}
-								onTogglePin={props.onTogglePin}
-								// 右键菜单的「会话操作」组（重命名/复制/导出/路径/打开）：按本 Tab 的 sessionId 现取，
-								// 后台 Tab 也能操作；工厂与 ⋯ 菜单 sessionActions 同源（App 同一装配）。
-								sessionActions={props.contextSessionActions?.(sessionId)}
-								// 运行控制组：按被右键 Tab 现算能力，后台 Tab 的停止/重启/重载也走这里。
-								runControl={props.contextRunControl?.(sessionId)}
-								onDragStart={(event) => {
-									dragSourceRef.current = sessionId;
-									dragTargetRef.current = null;
-									setDraggingId(sessionId);
-									props.onDragSessionChange?.(sessionId);
-									event.dataTransfer.effectAllowed = "move";
-									event.dataTransfer.setData(SESSION_TAB_DRAG_MIME, sessionId);
-									event.dataTransfer.setData("text/plain", sessionId);
-								}}
-								onDragOver={(event) => handleDragOver(event, sessionId)}
-								onDrop={handleDrop}
-								onDragEnd={handleDragEnd}
-							/>
+							<motion.div key={sessionId} layout="position" layoutDependency={tabLayoutGeneration} transition={{ layout: { duration: reduceMotion ? 0 : 0.16, ease: EASE_OUT } }} className="flex shrink-0">
+								<SessionTab
+									simple={props.simple}
+									sessionId={sessionId}
+									active={sessionId === currentSessionId}
+									pinned={pinnedTabs.includes(sessionId)}
+									preview={sessionId === previewTabId}
+									dragging={draggingId === sessionId}
+									// 指示线插在目标 Tab 的边缘：before=左缘，after=右缘
+									indicator={dragIndicator && dragIndicator.targetId === sessionId ? dragIndicator.position : null}
+									// 运行中反馈徽章只对当前会话有意义（作用于其绑定的 Agent 运行时），非当前 Tab 不显示；
+									// 运行控制菜单项已上收右上角 ⋯ 菜单，Tab 只保留转动态展示
+									isStopping={sessionId === currentSessionId ? props.runControl?.isStopping : undefined}
+									isRestarting={sessionId === currentSessionId ? props.runControl?.isRestarting : undefined}
+									isReloading={sessionId === currentSessionId ? props.runControl?.isReloading : undefined}
+									onSelect={props.onSelect}
+									onPromotePreview={props.onPromotePreview}
+									onClose={props.onClose}
+									onCloseOthers={props.onCloseOthers}
+									onCloseAll={props.onCloseAll}
+									onTogglePin={props.onTogglePin}
+									// 右键菜单的「会话操作」组（重命名/复制/导出/路径/打开）：按本 Tab 的 sessionId 现取，
+									// 后台 Tab 也能操作；工厂与 ⋯ 菜单 sessionActions 同源（App 同一装配）。
+									sessionActions={props.contextSessionActions?.(sessionId)}
+									// 运行控制组：按被右键 Tab 现算能力，后台 Tab 的停止/重启/重载也走这里。
+									runControl={props.contextRunControl?.(sessionId)}
+									onDragStart={(event) => {
+										dragSourceRef.current = sessionId;
+										dragTargetRef.current = null;
+										setDraggingId(sessionId);
+										props.onDragSessionChange?.(sessionId);
+										event.dataTransfer.effectAllowed = "move";
+										event.dataTransfer.setData(SESSION_TAB_DRAG_MIME, sessionId);
+										event.dataTransfer.setData("text/plain", sessionId);
+									}}
+									onDragOver={(event) => handleDragOver(event, sessionId)}
+									onDrop={handleDrop}
+									onDragEnd={handleDragEnd}
+								/>
+							</motion.div>
 						);
 						if (props.simple)
 							return (

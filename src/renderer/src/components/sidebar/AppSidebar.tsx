@@ -20,8 +20,10 @@ interface AppSidebarProps {
 	worktreesByProject: Record<string, WorktreeEntry[]>;
 	branchByProject: Record<string, string | null>;
 	creatingWorktree: boolean;
-	/** Child projects currently being removed. */
+	/** Child projects currently being removed（远端工作区按 ProjectId 索引，dev 的纯 path 版本不适用）。 */
 	removingWorktreeProjectIds: ReadonlySet<string>;
+	/** 「聊天」「项目」分组标题栏在列表滚动时冻结在顶部（settings.sidebarStickyGroupHeaders）。 */
+	stickyGroupHeaders?: boolean;
 	isLanWeb: boolean;
 	/** 「新建会话」：打开初始引导页（居中输入框 + 项目下拉切换），由 App 提供。 */
 	onOpenNewSession: () => void;
@@ -104,6 +106,7 @@ export function AppSidebar(props: AppSidebarProps) {
 				branchByProject={props.branchByProject}
 				creatingWorktree={props.creatingWorktree}
 				removingWorktreeProjectIds={props.removingWorktreeProjectIds}
+				stickyGroupHeaders={props.stickyGroupHeaders}
 				isLanWeb={props.isLanWeb}
 				onOpenNewSession={props.onOpenNewSession}
 				chrome={

@@ -143,7 +143,7 @@ test("DshHost.listArchivedSessions：返回归档清单（id/cwd/archivedAt/标�
 		// 一个无 manifest 的目录（不属于 PiDeck 归档，应被跳过）
 		mkdirSync(join(home, ".pideck", "archive", "not-a-pideck-archive"), { recursive: true });
 
-		const listed = host.listArchivedSessions();
+		const listed = await host.listArchivedSessions();
 		assert.equal(listed.length, 2);
 		const byId = new Map(listed.map((item) => [item.dshSessionId, item]));
 		assert.equal(byId.get("session-a").cwd, cwd);
@@ -156,11 +156,11 @@ test("DshHost.listArchivedSessions：返回归档清单（id/cwd/archivedAt/标�
 	}
 });
 
-test("DshHost.listArchivedSessions：无归档区时返回空数组", () => {
+test("DshHost.listArchivedSessions：无归档区时返回空数组", async () => {
 	const { host, home } = makeHost();
 	try {
 		// 注意：vm realm 数组原型不同，不能用 deepEqual 直接比较空数组，按 length 断言
-		assert.equal(host.listArchivedSessions().length, 0);
+		assert.equal((await host.listArchivedSessions()).length, 0);
 	} finally {
 		rmSync(home, { recursive: true, force: true });
 	}
@@ -213,7 +213,7 @@ test("DshHost.deleteArchivedSession：删除归档目录并返回 true（走注�
 		assert.ok(trashed[0].endsWith(join(".pideck", "archive", sessionId)), `回收站应收到归档目录: ${trashed[0]}`);
 		assert.ok(!existsSync(join(home, ".pideck", "archive", sessionId)), "归档目录应已移入回收站");
 		// 删除后归档清单不再包含它
-		assert.equal(host.listArchivedSessions().length, 0, "删除后归档清单应为空");
+		assert.equal((await host.listArchivedSessions()).length, 0, "删除后归档清单应为空");
 	} finally {
 		rmSync(home, { recursive: true, force: true });
 	}

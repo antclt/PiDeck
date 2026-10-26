@@ -8,13 +8,15 @@
  * 交互：点击项目行 = 展开/收起；点击项目行内的 "+" = 新建会话（POST /api/sessions）；
  * 点击会话行 = 打开会话（切 activeSessionId）。
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Download, FolderPlus, GitFork, MoreVertical, Pencil, Play, Plus, Search, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui-shadcn/button";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui-shadcn/alert-dialog";
 import { Input } from "@/components/ui-shadcn/input";
 import { t } from "@/i18n";
 import { WebBrandLockup } from "./WebBrandLockup";
 import { WebBottomSheet } from "./WebBottomSheet";
+import { WEB_SIDEBAR_INITIAL_VISIBLE, growSidebarWindow, resolveSidebarWindow } from "./webSidebarPaging";
 import { cn } from "@/lib/utils";
 import { sessionStatusDotClass } from "@/agentListDisplay";
 import { SessionBackendMark } from "@/components/session/SessionSourceBadge";
@@ -41,16 +43,25 @@ function matchesSearch(value: string, search: string): boolean {
 	return !search || value.toLowerCase().includes(search.toLowerCase());
 }
 
-const UNGROUPED_GROUP_KEY = "__web_ungrouped__";
-
 /** 会话行可执行的操作（P1；由 WebChatApp 提供实现）。 */
 export type WebSessionRowAction = "rename" | "duplicate" | "export" | "delete";
 
-/** 项目会话列表的会话行 + 「更多会话」折叠按钮。 */
-function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: string) => WebRuntime | undefined; activeSessionId: string; showAll: boolean; onToggleShowAll: () => void; onSelect: (sessionId: string) => void; onSessionAction?: (action: WebSessionRowAction, sessionId: string) => void }) {
-	const { sessions, runtimeFor, activeSessionId, showAll, onToggleShowAll, onSelect, onSessionAction } = props;
-	const visible = showAll ? sessions : sessions.slice(0, 5);
-	const hiddenCount = sessions.length - visible.length;
+/**
+ * 项目会话列表：显式分页（首页 10 条，点「查看更多（剩余 N）」每页 +20，可「收起」回首页）。
+ *
+ * 语义对齐桌面端「最近会话」：不随滚动自动加载。早先的 IntersectionObserver 哨兵在移动端
+ * 抽屉首次布局时就会命中 rootMargin，展开一个大项目会被连续补页成几十上百行（实测「聊天」
+ * 115 条展开即 57 行），体感等同「一次性全加载」，既慢又丢掉了「先看最近一页」的信息层级。
+ * 单项目 400+ 条会话若全渲染会造 4000+ DOM 节点（实测 258ms 卡顿），分页同时守住渲染成本。
+ */
+function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: string) => WebRuntime | undefined; activeSessionId: string; searching: boolean; onSelect: (sessionId: string) => void; onSessionAction?: (action: WebSessionRowAction, sessionId: string) => void }) {
+	const { sessions, runtimeFor, activeSessionId, searching, onSelect, onSessionAction } = props;
+	// requested 是「用户点了几次查看更多」的累计目标条数；进入/退出搜索时回到首页。
+	const [requested, setRequested] = useState(WEB_SIDEBAR_INITIAL_VISIBLE);
+	useEffect(() => setRequested(WEB_SIDEBAR_INITIAL_VISIBLE), [searching]);
+	const window_ = resolveSidebarWindow({ total: sessions.length, requested, searching });
+	const visible = sessions.slice(0, window_.visibleCount);
+	const hiddenCount = window_.remaining;
 	// 会话操作面板：移动端底部滑出、桌面居中卡片（WebBottomSheet 两形态），
 	// 替代 DropdownMenu——触屏无 hover 看不见触发钮，且菜单会从侧栏右缘弹出遮挡聊天区。
 	const [menuSessionId, setMenuSessionId] = useState<string | null>(null);
@@ -65,7 +76,7 @@ function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: st
 				const runtime = runtimeFor(session.id);
 				return (
 					<div key={session.id} className={cn(sessionRowClass, "session-row group/session", session.id === activeSessionId && selectedRowClass)} title={session.title}>
-						<button type="button" className="flex min-w-0 flex-1 items-center gap-1.5" onClick={() => onSelect(session.id)}>
+						<button type="button" className="flex min-w-0 flex-1 items-center gap-1.5 pointer-coarse:min-h-10" onClick={() => onSelect(session.id)}>
 							{renderRuntimeStatusDot(runtime?.status)}
 							<div className="conversation-body min-w-0 flex-1">
 								<div className="conversation-title flex min-w-0 items-center gap-1.5">
@@ -80,7 +91,7 @@ function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: st
 						{onSessionAction ? (
 							<button
 								type="button"
-								className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted focus-visible:opacity-100 group-hover/session:opacity-100 [@media(hover:none)]:opacity-100"
+								className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted focus-visible:opacity-100 group-hover/session:opacity-100 [@media(hover:none)]:opacity-100 pointer-coarse:size-9 pointer-coarse:-my-1"
 								aria-label={t("web.sessionMenu")}
 								title={t("web.sessionMenu")}
 								onClick={() => setMenuSessionId(session.id)}
@@ -92,8 +103,23 @@ function SessionRows(props: { sessions: WebSession[]; runtimeFor: (sessionId: st
 				);
 			})}
 			{hiddenCount > 0 && (
-				<button type="button" className="conversation session-row relative flex min-h-7 w-full items-center justify-start gap-1.5 rounded-md border border-transparent px-2 py-0 text-left text-caption text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground" onClick={onToggleShowAll}>
-					{showAll ? t("common.collapse") : t("web.moreSessions", { count: hiddenCount })}
+				<button
+					type="button"
+					data-testid="web-sidebar-load-more"
+					className="conversation session-row relative flex min-h-7 w-full items-center justify-start gap-1.5 rounded-md border border-transparent px-2 py-0 text-left text-caption text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground pointer-coarse:min-h-9"
+					onClick={() => setRequested(growSidebarWindow(window_.visibleCount))}
+				>
+					{t("web.moreSessions", { count: hiddenCount })}
+				</button>
+			)}
+			{window_.canCollapse && (
+				<button
+					type="button"
+					data-testid="web-sidebar-collapse-sessions"
+					className="conversation session-row relative flex min-h-7 w-full items-center justify-start gap-1.5 rounded-md border border-transparent px-2 py-0 text-left text-caption text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground pointer-coarse:min-h-9"
+					onClick={() => setRequested(WEB_SIDEBAR_INITIAL_VISIBLE)}
+				>
+					{t("common.collapse")}
 				</button>
 			)}
 			{/* 会话操作面板：跨端 BottomSheet，大触控行，不被侧栏右缘裁剪 */}
@@ -154,8 +180,6 @@ export function WebSidebar(props: {
 	const { state, activeSessionId, creatingProjectId, connected, mobileOpen } = props;
 	const [search, setSearch] = useState("");
 	const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set());
-	// 会话数超过上限时展开的项目（默认每个项目只展示最近 N 条，点「更多」展开全部）
-	const [expandedSessionProjects, setExpandedSessionProjects] = useState<Set<string>>(() => new Set());
 	const [addingProject, setAddingProject] = useState(false);
 	const [projectPath, setProjectPath] = useState("");
 	const [projectBusy, setProjectBusy] = useState(false);
@@ -177,22 +201,13 @@ export function WebSidebar(props: {
 	/** 会话按最近活动时间降序（最新在上） */
 	const sortedSessions = useMemo(() => [...state.sessions].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0)), [state.sessions]);
 
-	const toggleSessionExpand = (projectId: string) => {
-		setExpandedSessionProjects((current) => {
-			const next = new Set(current);
-			if (next.has(projectId)) next.delete(projectId);
-			else next.add(projectId);
-			return next;
-		});
-	};
-
 	// 未分组会话 = projectId 不匹配任何已登记项目的 catalog 记录（孤儿/项目被删等）。
 	// 兜底分组始终可见，不会被项目折叠状态吞掉；搜索时仍按标题过滤。
 	const searching = search.trim().length > 0;
 	const projectIds = useMemo(() => new Set(state.projects.map((project) => project.id)), [state.projects]);
 	const ungroupedSessions = useMemo(() => sortedSessions.filter((session) => !projectIds.has(session.projectId) && matchesSearch(session.title || session.id, search.trim())), [sortedSessions, projectIds, search]);
-	const showAllUngrouped = searching || expandedSessionProjects.has(UNGROUPED_GROUP_KEY);
-	const toggleUngroupedExpand = () => toggleSessionExpand(UNGROUPED_GROUP_KEY);
+	// 搜索态一次看到全部命中（命中集合通常很小，用户预期「搜到即列出」）；
+	// 非搜索态按显式分页（首页 10 条 + 「查看更多」），语义见 webSidebarPaging。
 
 	const submitProject = async () => {
 		const path = projectPath.trim();
@@ -210,9 +225,17 @@ export function WebSidebar(props: {
 		}
 	};
 
-	const requestDelete = async (project: WebProject) => {
+	// 移除项目与删除会话同为不可恢复操作：走与会话删除一致的 AlertDialog，
+	// 不用原生 confirm 弹窗（无样式，且移动端会打断手势）。
+	const [pendingDeleteProject, setPendingDeleteProject] = useState<WebProject | null>(null);
+	const requestDelete = (project: WebProject) => {
 		if (project.kind === "chat") return;
-		if (typeof window !== "undefined" && !window.confirm(t("web.deleteProjectConfirm"))) return;
+		setPendingDeleteProject(project);
+	};
+	const confirmDeleteProject = async () => {
+		const project = pendingDeleteProject;
+		if (!project) return;
+		setPendingDeleteProject(null);
 		await props.onDeleteProject(project.id);
 	};
 
@@ -274,7 +297,6 @@ export function WebSidebar(props: {
 						{sortedProjects.map((project) => {
 							const projectSessions = sortedSessions.filter((session) => session.projectId === project.id).filter((session) => matchesSearch(session.title || session.id, search.trim()));
 							const expanded = searching || expandedProjects.has(project.id);
-							const showAllSessions = searching || expandedSessionProjects.has(project.id);
 							const projectName = displayProjectName(project);
 							const creating = creatingProjectId === project.id;
 							return (
@@ -293,11 +315,11 @@ export function WebSidebar(props: {
 											</div>
 										</button>
 										<div className="project-row-actions flex shrink-0 items-center gap-0.5">
-											<Button type="button" variant="ghost" size="icon" className="project-action size-7" disabled={Boolean(creatingProjectId)} title={t("app.newSession")} aria-label={t("app.newSession")} onClick={() => props.onCreateSession(project.id)}>
+											<Button type="button" variant="ghost" size="icon" className="project-action size-7 pointer-coarse:size-9" disabled={Boolean(creatingProjectId)} title={t("app.newSession")} aria-label={t("app.newSession")} onClick={() => props.onCreateSession(project.id)}>
 												{creating ? <span className="size-3 animate-pideck-spin rounded-full border border-current border-t-transparent" aria-hidden="true" /> : <Plus className="size-3.5" aria-hidden="true" />}
 											</Button>
 											{project.kind !== "chat" && (
-												<Button type="button" variant="ghost" size="icon" className="project-action size-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" title={t("web.deleteProject")} aria-label={t("web.deleteProject")} onClick={() => void requestDelete(project)}>
+												<Button type="button" variant="ghost" size="icon" className="project-action size-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive pointer-coarse:size-9" title={t("web.deleteProject")} aria-label={t("web.deleteProject")} onClick={() => requestDelete(project)}>
 													<Trash2 className="size-3.5" aria-hidden="true" />
 												</Button>
 											)}
@@ -305,7 +327,7 @@ export function WebSidebar(props: {
 									</div>
 									{expanded && (
 										<div className="project-children mt-2 flex flex-col gap-2 px-1 pb-1">
-											<SessionRows sessions={projectSessions} runtimeFor={runtimeFor} activeSessionId={activeSessionId} showAll={showAllSessions} onToggleShowAll={() => toggleSessionExpand(project.id)} onSelect={props.onSelectSession} onSessionAction={props.onSessionAction} />
+											<SessionRows sessions={projectSessions} runtimeFor={runtimeFor} activeSessionId={activeSessionId} searching={searching} onSelect={props.onSelectSession} onSessionAction={props.onSessionAction} />
 											{projectSessions.length === 0 && <div className="px-6 py-1 text-caption text-muted-foreground">{t("web.noSessions")}</div>}
 										</div>
 									)}
@@ -327,12 +349,26 @@ export function WebSidebar(props: {
 									</div>
 								</div>
 								<div className="project-children mt-2 flex flex-col gap-2 px-1 pb-1">
-									<SessionRows sessions={ungroupedSessions} runtimeFor={runtimeFor} activeSessionId={activeSessionId} showAll={showAllUngrouped} onToggleShowAll={() => toggleUngroupedExpand()} onSelect={props.onSelectSession} onSessionAction={props.onSessionAction} />
+									<SessionRows sessions={ungroupedSessions} runtimeFor={runtimeFor} activeSessionId={activeSessionId} searching={searching} onSelect={props.onSelectSession} onSessionAction={props.onSessionAction} />
 								</div>
 							</div>
 						)}
 						{state.projects.length === 0 && ungroupedSessions.length === 0 && <div className="px-2 py-3 text-caption text-muted-foreground">{t("app.emptyNoProject")}</div>}
 					</div>
+					<AlertDialog open={pendingDeleteProject != null} onOpenChange={(open) => !open && setPendingDeleteProject(null)}>
+						<AlertDialogContent>
+							<AlertDialogHeader>
+								<AlertDialogTitle>{t("web.deleteProjectConfirmTitle")}</AlertDialogTitle>
+								<AlertDialogDescription>{t("web.deleteProjectConfirm")}</AlertDialogDescription>
+							</AlertDialogHeader>
+							<AlertDialogFooter>
+								<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+								<AlertDialogAction className="bg-danger text-danger-foreground hover:bg-danger/90" onClick={() => void confirmDeleteProject()}>
+									{t("web.deleteProject")}
+								</AlertDialogAction>
+							</AlertDialogFooter>
+						</AlertDialogContent>
+					</AlertDialog>
 				</div>
 				{/* 底栏连接状态 */}
 				<div className="toolbar-actions sidebar-bottom-actions flex shrink-0 items-center gap-0.5 border-t border-border px-1.5 py-1">

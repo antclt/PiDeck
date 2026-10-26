@@ -69,7 +69,7 @@ export function WorkspaceDrawerHost(props: WorkspaceDrawerHostProps) {
 	const rendered = visiblePanel ? props.renderPanel(visiblePanel) : null;
 	return (
 		<>
-			<aside className={props.className ?? "detail-drawer flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background"} data-open={open} data-rendered={Boolean(visiblePanel)} data-pinned={Boolean(props.pinned)} style={props.style}>
+			<aside className={props.className ?? "detail-drawer flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-bg-page-raised"} data-open={open} data-rendered={Boolean(visiblePanel)} data-pinned={Boolean(props.pinned)} style={props.style}>
 				{visiblePanel && (
 					<>
 						{/* 自定义标题栏：为右上角 fixed 的窗口控件让出 var(--window-drag-height) 顶部条。
@@ -81,7 +81,7 @@ export function WorkspaceDrawerHost(props: WorkspaceDrawerHostProps) {
 						    （壁纸模式窗口控件背景透明，重叠会叠出更深的双线）。
 						    原生标题栏下 --window-drag-height 为 0，元素不占高也不画线；simple 模式
 						    没有 40px 标题栏行，同样不画线（见 styles/tailwind.css 的 workspace-titlebar）。 */}
-						<div aria-hidden="true" className="h-[var(--window-drag-height)] shrink-0 workspace-titlebar:mr-[var(--window-controls-width)] workspace-titlebar:border-b workspace-titlebar:border-border/40" />
+						<div aria-hidden="true" className="h-[var(--window-drag-height)] shrink-0 bg-bg-page workspace-titlebar:mr-[var(--window-controls-width)] workspace-titlebar:border-b workspace-titlebar:border-border/40" />
 						<div className="drawer-content-frame flex min-h-0 flex-1 flex-col overflow-hidden">
 							{open && props.rail}
 							{rendered}

@@ -300,6 +300,64 @@ test("rejects an empty prompt before activating a runtime", async () => {
 	assert.equal(harness.calls.send, 0);
 });
 
+// issue #370：pi 的 /fork 按旧分支 model_change 恢复模型，模型被删除/改名时只静默回落到默认模型。
+// 重发/编辑带着「在用户看到的模型上重试」的前置，必须核对而不是拿别的模型跑一圈。
+const FALLBACK_ENTRY = { model: { provider: "deepseek", modelId: "deepseek-v4.1-flash", modelName: "DeepSeek V4.1 Flash" } };
+const FALLBACK_RUNTIME = { provider: "HaoHao-GLM", modelId: "glm-5.3-flash", modelName: "GLM 5.3 Flash" };
+
+test("resend verification rejects the prompt when the runtime fell back to another model", async () => {
+	const { SessionRuntimeCoordinator } = loadCoordinator();
+	const harness = createHarness({ entry: FALLBACK_ENTRY, modelThinkingState: FALLBACK_RUNTIME });
+	const coordinator = new SessionRuntimeCoordinator(harness.catalog, harness.agents, harness.sender);
+
+	const result = await coordinator.send(prompt({ requireAppliedModel: true }));
+
+	assert.equal(result.accepted, false);
+	assert.equal(result.delivery, "rejected");
+	assert.equal(result.i18nKey, "diagnostic.promptModelMismatch");
+	// 沙箱对象跨 realm：逐字段比较，避免原型不同导致 deepStrictEqual 假红。
+	assert.equal(result.i18nParams.expected, "deepseek/deepseek-v4.1-flash");
+	assert.equal(result.i18nParams.actual, "HaoHao-GLM/glm-5.3-flash");
+	// 拒绝发生在派发前：一个 token 都不能发给回落模型。
+	assert.equal(harness.calls.send, 0);
+});
+
+test("normal sends keep the 2026-09 downgrade policy instead of verifying the model", async () => {
+	const { SessionRuntimeCoordinator } = loadCoordinator();
+	const harness = createHarness({ entry: FALLBACK_ENTRY, modelThinkingState: FALLBACK_RUNTIME });
+	const coordinator = new SessionRuntimeCoordinator(harness.catalog, harness.agents, harness.sender);
+
+	const result = await coordinator.send(prompt());
+
+	assert.equal(result.accepted, true);
+	assert.equal(harness.calls.send, 1);
+});
+
+test("resend verification passes when the runtime model matches the session selection", async () => {
+	const { SessionRuntimeCoordinator } = loadCoordinator();
+	const harness = createHarness({ entry: FALLBACK_ENTRY, modelThinkingState: { provider: "deepseek", modelId: "deepseek-v4.1-flash", modelName: "DeepSeek V4.1 Flash" } });
+	const coordinator = new SessionRuntimeCoordinator(harness.catalog, harness.agents, harness.sender);
+
+	const result = await coordinator.send(prompt({ requireAppliedModel: true }));
+
+	assert.equal(result.accepted, true);
+	assert.equal(harness.calls.send, 1);
+});
+
+test("resend verification stays fail-open when the session has no model or the runtime cannot report it", async () => {
+	const { SessionRuntimeCoordinator } = loadCoordinator();
+	const noPreference = createHarness({ modelThinkingState: FALLBACK_RUNTIME });
+	const noPreferenceResult = await new SessionRuntimeCoordinator(noPreference.catalog, noPreference.agents, noPreference.sender).send(prompt({ requireAppliedModel: true }));
+	assert.equal(noPreferenceResult.accepted, true);
+	assert.equal(noPreference.calls.send, 1);
+
+	// 旧网关 / RPC 读不到运行态：核对本身不能变成新的阻塞点。
+	const noRuntimeState = createHarness({ entry: FALLBACK_ENTRY });
+	const noRuntimeStateResult = await new SessionRuntimeCoordinator(noRuntimeState.catalog, noRuntimeState.agents, noRuntimeState.sender).send(prompt({ requestId: "request-2", requireAppliedModel: true }));
+	assert.equal(noRuntimeStateResult.accepted, true);
+	assert.equal(noRuntimeState.calls.send, 1);
+});
+
 test("session security override key = catalog session id, distinct from sessionPath", async () => {
 	// 回归：UI 保存安全等级覆盖用 SessionRecord.id（UUID），主进程必须注入同一个 key
 	// 给 PIDECK_SESSION_ID，否则安全门扩展在 sessionLevels 里永远查不到覆盖，回落全局默认。

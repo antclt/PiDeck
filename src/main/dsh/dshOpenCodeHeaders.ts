@@ -47,12 +47,33 @@ function isAppliedAuthResult(value: unknown): value is AppliedAuthResult {
 }
 
 /**
+ * pi-ai 1.4.0 起自行注入 `x-opencode-session`，但只按主机名匹配（不校验协议），
+ * 于是 `file://opencode.ai/...` 这类非 OpenCode 路由也会带出会话 ID。
+ * 非 OpenCode 路由上，把与我们本层注入值完全一致的键剔除；用户显式配置的其它值保持原样。
+ */
+function stripLeakedOpenCodeHeaders(headers: ProviderHeaders, sessionId?: string): ProviderHeaders | undefined {
+	const leaked: string[] = [];
+	for (const [name, value] of Object.entries(headers)) {
+		const lower = name.toLowerCase();
+		const ours = lower === "x-opencode-client" ? "pideck" : lower === "x-opencode-session" ? sessionId : undefined;
+		if (ours !== undefined && value === ours) leaked.push(name);
+	}
+	if (leaked.length === 0) return undefined;
+	const next: ProviderHeaders = { ...headers };
+	for (const name of leaked) delete next[name];
+	return next;
+}
+
+/**
  * 在 pi-ai 完成鉴权后、调用供应商前补头。
  * public transformHeaders 拿不到鉴权后的目标地址；这里必须以最终 requestModel 判断，
  * 避免把 OpenCode 元数据发送给已被鉴权切换到其它地址的别名路由，同时保留已合并的显式头。
  */
 function decorateAppliedAuth(result: AppliedAuthResult): AppliedAuthResult {
-	if (!isOpenCodeRoute(result.requestModel)) return result;
+	if (!isOpenCodeRoute(result.requestModel)) {
+		const headers = stripLeakedOpenCodeHeaders(result.requestOptions.headers ?? {}, result.requestOptions.sessionId);
+		return headers === undefined ? result : { ...result, requestOptions: { ...result.requestOptions, headers } };
+	}
 	return {
 		...result,
 		requestOptions: {

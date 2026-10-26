@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "version": "1.0.1",
-  "bundleSha256": "30a961dc3c0ba8964d652626806fe3e4c0ed7b3d2386baf4fefce7a9ff985c63",
+  "bundleSha256": "abcfc3dee4b3826fb523ea2dbdf0b65c5f8a25745853e3cb7471e5bf2302ddd7",
   "fileCount": 16,
   "files": [
     {
@@ -11,8 +11,8 @@
     },
     {
       "name": "pi-deck-goal-mode.ts",
-      "sha256": "4f2bc59491c995da9ab60824d19f9ba9da3d399013e7c09a63f48c843eca3c9b",
-      "bytes": 14096
+      "sha256": "575c434dba46b40fe5e92fe9907c80e84ae539e9fc2c762a9defab1dd84cb7fb",
+      "bytes": 15079
     },
     {
       "name": "pi-deck-model-trace.ts",

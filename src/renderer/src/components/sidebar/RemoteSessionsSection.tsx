@@ -65,26 +65,26 @@ function RemoteSessionRow(props: { entry: RemoteSessionEntryView; title: RemoteS
 	// 与「暂定」分开、不合并成一个词：两个标记可以同时出现。
 	const tailDegraded = isTitleTailDegraded(title);
 	return (
-		<li data-remote-session-id={entry.remoteSessionId} className="shrink-0 rounded-md px-1 py-1 hover:bg-muted/60">
+		<li data-remote-session-id={entry.remoteSessionId} className="shrink-0 rounded-md px-1 py-1 hover:bg-bg-hover">
 			<div className="flex items-center gap-1.5">
 				{title.status === "loading" ? <Loader2 className="size-3 shrink-0 animate-pideck-spin text-muted-foreground" aria-label={t("sidebar.remoteSessions.titleParsing")} /> : <FileText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
 				<span data-testid="remote-session-title" className="min-w-0 flex-1 truncate text-label" title={tailDegraded ? t("sidebar.remoteSessions.tailDegradedHint") : tentative ? t("sidebar.remoteSessions.tentativeHint") : displayTitle}>
 					{displayTitle}
 				</span>
 				{tentative ? (
-					<span data-testid="remote-session-tentative" className="shrink-0 rounded bg-muted px-1 text-[10px] leading-4 text-muted-foreground">
+					<span data-testid="remote-session-tentative" className="shrink-0 rounded bg-muted px-1 text-micro leading-4 text-muted-foreground">
 						{t("sidebar.remoteSessions.tentative")}
 					</span>
 				) : null}
 				{/* 降级标记：比「暂定」更轻（同色系更淡、无背景），只说明「这次没读到文件尾」，不是错误。 */}
 				{tailDegraded ? (
-					<span data-testid="remote-session-tail-degraded" className="shrink-0 rounded px-1 text-[10px] leading-4 text-muted-foreground/70">
+					<span data-testid="remote-session-tail-degraded" className="shrink-0 rounded px-1 text-micro leading-4 text-muted-foreground/70">
 						{t("sidebar.remoteSessions.tailDegraded")}
 					</span>
 				) : null}
 				{/* 「已导入」是状态标记，不夺走入口：登记是幂等的，再次点它必须能给出 created=false 的区分回执。 */}
 				{props.imported ? (
-					<span className="flex shrink-0 items-center gap-0.5 text-[10px] leading-4 text-muted-foreground">
+					<span className="flex shrink-0 items-center gap-0.5 text-micro leading-4 text-muted-foreground">
 						<Check className="size-3" aria-hidden="true" />
 						{t("sidebar.remoteSessions.importedTag")}
 					</span>
@@ -94,7 +94,7 @@ function RemoteSessionRow(props: { entry: RemoteSessionEntryView; title: RemoteS
 					variant="ghost"
 					size="icon-xs"
 					data-testid="remote-session-import"
-					className="size-6 shrink-0 text-muted-foreground hover:bg-muted hover:text-foreground"
+					className="size-6 shrink-0 text-muted-foreground hover:bg-bg-hover hover:text-foreground"
 					disabled={props.busy || props.importing}
 					title={props.importing ? t("sidebar.remoteSessions.importing") : t("sidebar.remoteSessions.import")}
 					aria-label={props.importing ? t("sidebar.remoteSessions.importing") : t("sidebar.remoteSessions.import")}
@@ -103,7 +103,7 @@ function RemoteSessionRow(props: { entry: RemoteSessionEntryView; title: RemoteS
 					{props.importing ? <Loader2 className="size-3 animate-pideck-spin" /> : <ArrowDownToLine className="size-3" />}
 				</Button>
 			</div>
-			<div className="flex items-center gap-2 pl-5 text-[10px] leading-4 text-muted-foreground">
+			<div className="flex items-center gap-2 pl-5 text-micro leading-4 text-muted-foreground">
 				<span>{formatSize(entry.size)}</span>
 				<span>{formatI18nDateTime(entry.mtimeMs)}</span>
 			</div>
@@ -132,7 +132,7 @@ export function RemoteSessionsSection(props: { hostId: string; importedRemoteSes
 					variant="ghost"
 					size="icon-xs"
 					data-testid="remote-sessions-scan"
-					className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+					className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-bg-hover hover:text-foreground"
 					title={scanLabel}
 					aria-label={scanLabel}
 					disabled={scanning || importing}
@@ -142,20 +142,20 @@ export function RemoteSessionsSection(props: { hostId: string; importedRemoteSes
 				</Button>
 			</div>
 			{/* 三态分开：没扫过 / 加载中 / 失败 / 空 / 有结果 各自一句，不能共用。 */}
-			{state.phase === "idle" ? <p className="px-1 py-1 text-[11px] leading-4 text-muted-foreground">{t("sidebar.remoteSessions.idleHint")}</p> : null}
+			{state.phase === "idle" ? <p className="px-1 py-1 text-micro leading-4 text-muted-foreground">{t("sidebar.remoteSessions.idleHint")}</p> : null}
 			{scanning ? (
-				<p className="flex items-center gap-1 px-1 py-1 text-[11px] leading-4 text-muted-foreground">
+				<p className="flex items-center gap-1 px-1 py-1 text-micro leading-4 text-muted-foreground">
 					<Loader2 className="size-3 animate-pideck-spin" aria-hidden="true" />
 					{t("sidebar.remoteSessions.scanning")}
 				</p>
 			) : null}
 			{state.phase === "error" ? (
-				<p className="flex items-start gap-1 px-1 py-1 text-[11px] leading-4 text-muted-foreground">
+				<p className="flex items-start gap-1 px-1 py-1 text-micro leading-4 text-muted-foreground">
 					<AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
 					{scanErrorText(state.errorCode)}
 				</p>
 			) : null}
-			{state.phase === "empty" ? <p className="px-1 py-1 text-[11px] leading-4 text-muted-foreground">{t("sidebar.remoteSessions.empty")}</p> : null}
+			{state.phase === "empty" ? <p className="px-1 py-1 text-micro leading-4 text-muted-foreground">{t("sidebar.remoteSessions.empty")}</p> : null}
 			{state.phase === "entries" ? (
 				<ul className="mt-0.5 flex flex-col gap-0.5">
 					{state.entries.map((entry) => (
@@ -174,7 +174,7 @@ export function RemoteSessionsSection(props: { hostId: string; importedRemoteSes
 			) : null}
 			{/* 登记反馈：created=true/false 与失败都必须显式出现，不能只活在一次点击里。 */}
 			{sessions.feedback !== null ? (
-				<p data-testid="remote-sessions-feedback" className="px-1 py-1 text-[11px] leading-4 text-muted-foreground">
+				<p data-testid="remote-sessions-feedback" className="px-1 py-1 text-micro leading-4 text-muted-foreground">
 					{importFeedbackText(sessions.feedback)}
 				</p>
 			) : null}

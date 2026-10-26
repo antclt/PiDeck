@@ -37,14 +37,27 @@ export const TERMINAL_HEIGHT_MIN = 120;
 export const TERMINAL_REPLAY_MAX_CHARS = 200_000;
 
 /**
+ * 截断滞回窗口（字符数）：超过「上限 + 窗口」才真正截尾。
+ *
+ * 为什么不贴线截尾：slice 会把 V8 的 cons-string 整段扁平化 + 拷贝，缓冲一旦
+ * 超过 200K，**每个**数据事件（合批后最快 ~60/s）都要拷一次 200K——高吞吐终端
+ * 输出时每秒十几 MB 的拷贝全部压在渲染线程上，表现为盯着终端看大输出时整窗掉帧。
+ * 留出滞回窗口后截尾频率降为「每凑满窗口宽度的新数据一次」，常驻内存上界只多
+ * 一个窗口宽度（200K + 128K ≈ 328K 字符，对目的只是封顶内存的上限无实质影响）。
+ */
+export const TERMINAL_REPLAY_TRIM_HYSTERESIS = 128_000;
+
+/**
  * 渲染层回放缓冲追加（纯函数，可单测）：xterm 实例在切 tab / 折叠 / 主题切换时
  * 销毁重建，buffersRef 是重建时的回放源。按字符上限截尾——重建后回放最近
  * 200K 字符（约 2500 行，xterm scrollback 5000 行本来就装不下更早的内容，
  * 且主进程 ensure() 快照同样只给最近 200K，行为两侧一致）。
+ * 截尾带滞回窗口（见 TERMINAL_REPLAY_TRIM_HYSTERESIS），未超「上限 + 窗口」时
+ * 直接返回拼接结果（cons-string，O(1)，不触发扁平化）。
  */
 export function appendTerminalReplayBuffer(current: string, data: string): string {
 	const next = current + data;
-	return next.length > TERMINAL_REPLAY_MAX_CHARS ? next.slice(next.length - TERMINAL_REPLAY_MAX_CHARS) : next;
+	return next.length > TERMINAL_REPLAY_MAX_CHARS + TERMINAL_REPLAY_TRIM_HYSTERESIS ? next.slice(next.length - TERMINAL_REPLAY_MAX_CHARS) : next;
 }
 
 export function terminalOwnerKey(owner: TerminalDockOwner): string {

@@ -8,6 +8,7 @@ import { ConfirmDialog } from "../ui-shadcn/ConfirmDialog";
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
 import { Input } from "../ui-shadcn/input";
 import { PathTooltip } from "../ui-shadcn/PathTooltip";
+import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
 import { t } from "../../i18n";
 import { showNotice } from "../../utils/notice";
 import type { Project, SessionSummary } from "../../../../shared/types";
@@ -187,27 +188,32 @@ export function SessionsPanel(props: {
 								</button>
 							</div>
 						)}
-						{isExpanded &&
-							children?.map((child) => (
-								<div key={child.filePath} className="session-card session-card-child">
-									<div className="session-card-display">
-										<PathTooltip content={`${child.name || t("common.untitled")}\n${child.filePath}`}>
-											<button className="session-card-inner" onClick={() => props.onOpen(child)}>
-												<div className="session-card-title">
-													<strong>{child.name || t("common.untitled")}</strong>
-													<SessionSourceBadge label={t("drawer.subagentSession")} source="codex" />
-													<small>
-														{new Date(child.updatedAt).toLocaleString()} ·{" "}
-														{t("drawer.sessionMessages", {
-															count: child.messageCount,
-														})}
-													</small>
-												</div>
-											</button>
-										</PathTooltip>
+						{/* 子会话列表走共享折叠原语（真高度渐变 + exit 后卸载 + reduced-motion 回退）；
+						    display:contents 根不生成盒子，折叠态零空档。 */}
+						<Collapsible open={isExpanded} className="contents">
+							<CollapsibleContent>
+								{children?.map((child) => (
+									<div key={child.filePath} className="session-card session-card-child">
+										<div className="session-card-display">
+											<PathTooltip content={`${child.name || t("common.untitled")}\n${child.filePath}`}>
+												<button className="session-card-inner" onClick={() => props.onOpen(child)}>
+													<div className="session-card-title">
+														<strong>{child.name || t("common.untitled")}</strong>
+														<SessionSourceBadge label={t("drawer.subagentSession")} source="codex" />
+														<small>
+															{new Date(child.updatedAt).toLocaleString()} ·{" "}
+															{t("drawer.sessionMessages", {
+																count: child.messageCount,
+															})}
+														</small>
+													</div>
+												</button>
+											</PathTooltip>
+										</div>
 									</div>
-								</div>
-							))}
+								))}
+							</CollapsibleContent>
+						</Collapsible>
 					</div>
 				);
 			})}

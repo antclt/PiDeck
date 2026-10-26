@@ -194,7 +194,9 @@ test("titlebar bottom rule stays continuous across drawer and window controls", 
 	const tailwind = readFileSync("src/renderer/src/styles/tailwind.css", "utf8");
 	assert.match(tailwind, /@custom-variant workspace-titlebar[\s\S]{0,400}?custom-titlebar-enabled:not\(\.quick-task-shell\):not\(\.simple-shell\)/);
 	// 普通工作台的窗口控件容器补同色底边线，线因此穿到窗口右缘；控件盒尺寸/命中区不变。
-	assert.match(header, /bg-bg-panel workspace-titlebar:border-b workspace-titlebar:border-border\/40/);
+	// 底色 bg-bg-page（2026-10 顶栏统一画布档）：白条压在抽屉 raised 半档上是色差，
+	// 顶栏（tabs bar/让位区/控件条）整条 #f8f8f8，抽屉内容区再半档浮起。
+	assert.match(header, /bg-bg-page workspace-titlebar:border-b workspace-titlebar:border-border\/40/);
 });
 
 test("streamdown code-block and table chrome share utilities-layer card skin", () => {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { atom, useAtomValue, useSetAtom, useStore } from "jotai";
 import { toast } from "sonner";
 import { latestUserMessageId, SendScrollPositioner } from "./timeline/sendScroll";
+import { ROOT_ROW_SELECTOR, useVisibleTimelineRows, type VisibleTimelineRow } from "./timeline/useVisibleTimelineRows";
 import { selectAtom } from "jotai/utils";
 import { desktopApi } from "../desktopApi";
 import type { AgentRuntimeState, ChatMessage, SessionMessagePage, SessionRecord } from "../../../shared/types";
@@ -19,6 +20,7 @@ import {
 	sessionRecordByIdAtomFamily,
 	saveSessionScrollAnchorAtom,
 	sessionScrollAnchorByIdAtom,
+	scrollToLatestOnSendAtom,
 	sessionSendStateByIdAtom,
 	sendPinAnimatingByIdAtom,
 	setSessionMessageLoadStateAtom,
@@ -31,9 +33,10 @@ import type { MessageScrollerScrollApi } from "../components/agents/message-scro
 import { TURN_WINDOW_AUTO_EXPAND_THRESHOLD, resolveAutoExpandThreshold } from "./timeline/autoExpandThreshold";
 import { shouldAutoExpandRenderWindow, shouldApplyDelayedHistoryResult } from "./timeline/scrollHistoryPolicy";
 import { beginProgrammaticScroll, clearProgrammaticScroll, createProgrammaticScrollGuard, finishProgrammaticScrollFrame, isProgrammaticScrollActive } from "./timeline/programmaticScrollGuard";
-import { browsePinScrollTop, followBrowsePinAfterUserScroll, shouldCompensateBrowsePin, type BrowsePin } from "./timeline/browsePin";
+import { browsePinScrollTop, followBrowsePinAfterUserScroll, pickVisibleRootRow, shouldCompensateBrowsePin, type BrowsePin } from "./timeline/browsePin";
 import { countUserTurns, TIMELINE_MOUNTED_TURN_LIMIT, TIMELINE_SCROLLED_TURN_LIMIT, TIMELINE_WINDOW_EXPAND_STEP } from "../components/session/timeline/turnRenderWindow";
 import { estimateJumpExpandTurns, resolveJumpFallbackEntry, resolveJumpPendingAction } from "../components/session/timeline/jumpWindowPolicy";
+import { shouldDeferJumpUntilLoaded } from "./timeline/timelineRevealChannel";
 import { resolveJumpMessageIndex, resolveJumpScrollTarget } from "../components/session/timeline/jumpTarget";
 
 /** 滚动接近顶部自动加载历史的阈值（px，2026-11 轮次模型）：
@@ -113,33 +116,50 @@ export function isTimelineAtBottom(scrollTop: number, scrollHeight: number, clie
 export function restoreTimelineAnchor(previousTop: number, heightDelta: number): number {
 	return previousTop + heightDelta;
 }
-
-const BROWSE_PIN_ROW_SELECTOR = "article.user-turn[data-message-id], .turn-row[data-message-id]";
+/**
+ * 视口顶基准（相对 page）：IO 的 root 相交矩形以 padding box 为界（不含 border），
+ * 快路径 origin 也加了 clientTop；全量回落与 pin 测量必须同基准，否则一旦
+ * .message-timeline 加 border，两条路径会差一个 border 宽度（#401 终审 P2）。
+ */
+function timelineViewportTop(timeline: HTMLElement): number {
+	// clientTop 在真实 DOM 里一定是数字；替身/异常节点缺失时按 0 处理，避免 NaN 毒化整个锚点。
+	const clientTop = Number.isFinite(timeline.clientTop) ? timeline.clientTop : 0;
+	return timeline.getBoundingClientRect().top + clientTop;
+}
 
 /** 钉行相对视口顶的偏移；行未挂载时返回 null。 */
 export function measureBrowsePinViewportTop(timeline: HTMLElement | null, messageId: string): number | null {
 	if (!timeline || !messageId) return null;
 	const el = timeline.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`) as HTMLElement | null;
 	if (!el) return null;
-	return el.getBoundingClientRect().top - timeline.getBoundingClientRect().top;
+	return el.getBoundingClientRect().top - timelineViewportTop(timeline);
 }
 
 /**
- * 视口里第一条完整轮根节点（user-turn / turn-row）。
+ * 视口里第一条底部仍在视口内的轮根节点（user-turn / turn-row）；不要求整行都在视口里。
  * 浏览钉行用：即使物理上仍接近底部（短 3 轮窗口）也要能钉住，所以不走 isTimelineAtBottom。
  */
-export function findBrowsePin(timeline: HTMLElement | null): BrowsePin | null {
+export function findBrowsePin(timeline: HTMLElement | null, visibleRows?: readonly VisibleTimelineRow[]): BrowsePin | null {
 	if (!timeline) return null;
-	const viewportRect = timeline.getBoundingClientRect();
-	const rows = timeline.querySelectorAll<HTMLElement>(BROWSE_PIN_ROW_SELECTOR);
+	// 快路径：可见行已按 top 升序，取第一条还没被视口顶切掉的行即可。
+	// 命中轮根才走快路径；可见集合里没有轮根（长回答内部、只有子元素）时必须回落到
+	// 下面的全量遍历 —— 原实现会继续找「视口下方最近的轮根」，直接 return null 会丢 pin
+	// 导致插页后位置漂移（2026-10-23 评审实测回归）。
+	if (visibleRows && visibleRows.length > 0) {
+		// 与原逻辑一致：findBrowsePin 只认轮根，不做卡类降级（降级是 computeCurrentAnchor 的两级策略）
+		const row = pickVisibleRootRow(visibleRows);
+		if (row) return { messageId: row.id, expectedViewportTop: row.top };
+	}
+	const viewportTop = timelineViewportTop(timeline);
+	const rows = timeline.querySelectorAll<HTMLElement>(ROOT_ROW_SELECTOR);
 	for (const row of rows) {
 		const rect = row.getBoundingClientRect();
-		if (rect.bottom < viewportRect.top + 1) continue;
+		if (rect.bottom < viewportTop + 1) continue;
 		const messageId = row.dataset.messageId ?? "";
 		if (!messageId) continue;
 		return {
 			messageId,
-			expectedViewportTop: rect.top - viewportRect.top,
+			expectedViewportTop: rect.top - viewportTop,
 		};
 	}
 	return null;
@@ -371,6 +391,11 @@ export type SessionTimelineController = {
 	 * SessionView 用它在历史会话加载期仍挂底部 composer，避免 1 面板 Group 吃到 2 值布局缓存。
 	 */
 	isSurfaceLoading: boolean;
+	/**
+	 * 恢复锚点 / 挂起跳转在途时为 true：这两条路径按 [data-message-id] 查 DOM，
+	 * 虚拟区外的行不在 DOM 里 —— 期间必须整表真实渲染。
+	 */
+	navBlockingVirtualization: boolean;
 	/** 本栏粘住的空会话：预热写 filePath/dshSessionId 后仍不闪历史骨架。 */
 	knownEmpty: boolean;
 	/**
@@ -408,7 +433,27 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 	/** 与锚点一起保存：DOM 裁剪窗口是阅读位置的一部分，而非瞬时 UI 状态。 */
 	const renderedWindowTurnsRef = useRef(TIMELINE_SCROLLED_TURN_LIMIT);
 	const scrollAnchorFrameRef = useRef<number | undefined>(undefined);
+	/** 最近一次 scroll 事件的可见行快照：rAF 里的锚点重算复用它，不再读第二遍布局。 */
+	const scrollVisibleRowsRef = useRef<readonly VisibleTimelineRow[]>([]);
 	const scrollSaveTimerRef = useRef<number | undefined>(undefined);
+
+	// 浏览钉行元素缓存（2027-02 性能审计）：measureBrowsePinViewportTop 走全子树
+	// 属性选择器（O(挂载子树)），而浏览态 ResizeObserver 在内容每次增高（流式正文、
+	// 图片加载、Markdown 轻量→全量）时都回调 pinBrowseRow——等于每帧一次全子树扫描。
+	// 钉行期间行元素不变，缓存后热路径只读两处 rect；行被卸载（折叠/扩窗重建/切会话）
+	// 时 isConnected 失效，自动回退一次重查。与 issue #400 的「可见行缓存」互补：
+	// 那是找新钉行（findBrowsePin），这是盯住已钉行，互不重叠。
+	const pinnedRowElRef = useRef<{ id: string; element: HTMLElement } | null>(null);
+	const measurePinnedRowTop = useCallback((timeline: HTMLElement, messageId: string): number | null => {
+		const cached = pinnedRowElRef.current;
+		if (cached && cached.id === messageId && cached.element.isConnected) {
+			return cached.element.getBoundingClientRect().top - timeline.getBoundingClientRect().top;
+		}
+		const element = timeline.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`) as HTMLElement | null;
+		if (!element) return null;
+		pinnedRowElRef.current = { id: messageId, element };
+		return element.getBoundingClientRect().top - timeline.getBoundingClientRect().top;
+	}, []);
 
 	/**
 	 * 计算当前视口锚点（纯读取，不落盘）。
@@ -417,17 +462,44 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 	 * 优先选 user-turn / turn-row 根节点：工具卡、思考步骤等嵌套 data-message-id
 	 * 会在执行过程自动收起时卸载；把它们作为锚点会使切回只能降级到顶部。
 	 */
-	const computeCurrentAnchor = useCallback((): SessionScrollAnchor | null => {
+	// 视口内的行（O(视口)）：滚动热路径只读这一份缓存，不再全量遍历 DOM
+	const { readVisibleRows } = useVisibleTimelineRows(timelineRef);
+	const readVisibleRowsRef = useRef<() => VisibleTimelineRow[]>(() => []);
+	useEffect(() => {
+		readVisibleRowsRef.current = readVisibleRows;
+	}, [readVisibleRows]);
+
+	/**
+	 * @param visibleRowsArg 本次 scroll 事件已读好的可见行快照。undefined = 自己读一次；
+	 *   同一事件里锚点与浏览钉共用一份，避免每帧两次 O(视口) 布局读取。
+	 */
+	const computeCurrentAnchor = useCallback((visibleRowsArg?: readonly VisibleTimelineRow[]): SessionScrollAnchor | null => {
 		const timeline = timelineRef.current;
 		if (!timeline) return null;
 		if (isTimelineAtBottom(timeline.scrollTop, timeline.scrollHeight, timeline.clientHeight)) {
 			return null;
 		}
-		const viewportRect = timeline.getBoundingClientRect();
+		// 快路径：只对视口内的行取布局（O(视口)）。原来这里要跑两轮 querySelectorAll +
+		// 每行 getBoundingClientRect，窗口越大越慢——「越滚越慢」的直接来源。
+		const visibleRows = visibleRowsArg ?? readVisibleRowsRef.current();
+		// 只有「视口内有轮根」才走快路径。没有轮根时必须回落到下面的全量扫描：
+		// 原实现是在**全文档**里找第一条底部进入视口的轮根（可能在视口下方）；
+		// 直接降级到视口内的任意非轮根行（系统消息、日期分隔）会改变锚点语义，
+		// 且这类行更容易被窗口裁剪，恢复时只能降级到顶部（评审 d#1）。
+		const anchorRow = pickVisibleRootRow(visibleRows);
+		if (anchorRow) {
+			return {
+				messageId: anchorRow.id,
+				offsetTop: anchorRow.top,
+				windowTurns: renderedWindowTurnsRef.current,
+				savedAt: Date.now(),
+			};
+		}
+		const viewportTop = timelineViewportTop(timeline);
 		const findAnchor = (rows: NodeListOf<HTMLElement>): SessionScrollAnchor | null => {
 			for (const row of rows) {
 				const rect = row.getBoundingClientRect();
-				if (rect.bottom < viewportRect.top + 1) continue;
+				if (rect.bottom < viewportTop + 1) continue;
 				const messageId = row.dataset.messageId ?? "";
 				if (!messageId) continue;
 				return {
@@ -435,7 +507,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 					// 保留负偏移：视口顶部常被上一行底部占据（行顶在视口上方），
 					// 截断为 0 会导致恢复时把行顶对齐视口顶、整体位置偏下（高大行偏差明显）。
 					// 恢复侧 scrollTop = max(0, elTop - offsetTop) 已兜底负值。
-					offsetTop: rect.top - viewportRect.top,
+					offsetTop: rect.top - viewportTop,
 					// 当前轮次窗口必须随锚点保存。切回时只恢复 scrollTop 而不先挂回这些
 					// turn，会导致 querySelector 找不到锚点并错误降级到底部。
 					windowTurns: renderedWindowTurnsRef.current,
@@ -444,7 +516,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 			}
 			return null;
 		};
-		const stableAnchor = findAnchor(timeline.querySelectorAll<HTMLElement>("article.user-turn[data-message-id], .turn-row[data-message-id]"));
+		const stableAnchor = findAnchor(timeline.querySelectorAll<HTMLElement>(ROOT_ROW_SELECTOR));
 		if (stableAnchor) return stableAnchor;
 		// 诊断卡等没有稳定轮根节点时仍可恢复，避免空会话/特殊事件完全失去锚点。
 		return findAnchor(timeline.querySelectorAll<HTMLElement>("[data-message-id]"));
@@ -469,14 +541,22 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		// next animation frame. Capture the old DOM while the scroll event still
 		// owns it; the layout-effect cleanup must never inspect post-switch nodes.
 		// The rAF below still coalesces the settled position and atom persistence.
-		currentAnchorRef.current = computeCurrentAnchor();
+		// 同一 scroll 事件只读一次可见行：锚点与浏览钉共用这份快照，rAF 里的
+		// 第二次锚点计算也复用它，不再重复读布局。
+		// 贴底跟流时 computeCurrentAnchor 直接返回 null，此时不读缓存——流式输出的
+		// 每个 scroll 都不能为一份用不上的快照付 O(视口) 的布局读取。
+		const timeline = timelineRef.current;
+		const visibleRows = timeline && !isTimelineAtBottom(timeline.scrollTop, timeline.scrollHeight, timeline.clientHeight) ? readVisibleRowsRef.current() : [];
+		scrollVisibleRowsRef.current = visibleRows;
+		currentAnchorRef.current = computeCurrentAnchor(visibleRows);
 		// restoreAt / 扩窗补偿派发的 scroll：只更新冻住那一行的 expected，不改钉到新的第一可见行。
 		if (!isProgrammaticScrollActive(programmaticScrollGuardRef.current, performance.now()) && !autoScrollRef.current) {
 			if (browsePinFrozenRef.current && browsePinRef.current) {
-				const top = measureBrowsePinViewportTop(timelineRef.current, browsePinRef.current.messageId);
+				const pinnedTimeline = timelineRef.current;
+				const top = pinnedTimeline ? measurePinnedRowTop(pinnedTimeline, browsePinRef.current.messageId) : null;
 				browsePinRef.current = followBrowsePinAfterUserScroll(browsePinRef.current, top);
 			} else {
-				browsePinRef.current = findBrowsePin(timelineRef.current);
+				browsePinRef.current = findBrowsePin(timelineRef.current, visibleRows);
 			}
 		}
 		if (scrollAnchorFrameRef.current != null) return;
@@ -484,7 +564,11 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 			scrollAnchorFrameRef.current = undefined;
 			// 回调执行时若已切走（ownerKeyRef 已更新），丢弃——旧会话状态由 cleanup 落盘。
 			if (ownerKeyRef.current !== sessionId) return;
-			currentAnchorRef.current = computeCurrentAnchor();
+			// 快照是 scroll 事件那一刻的几何；rAF 在本帧提交 / 流式增量之后才跑，行高与
+			// 插入位置可能已经变了 —— 直接复用会把过期坐标写成锚点（切回会话时位置偏）。
+			// 这里重读当前可见行；事件内「锚点 + 浏览钉共用一份快照」的优化仍然保留。
+			scrollVisibleRowsRef.current = readVisibleRowsRef.current();
+			currentAnchorRef.current = computeCurrentAnchor(scrollVisibleRowsRef.current);
 			// 节流写 atom：只排一个 timer，期间连续滚动不重复写；
 			// 内容未变时 atom 侧跳过（引用稳定，订阅者零重渲染）。
 			if (scrollSaveTimerRef.current != null) return;
@@ -763,7 +847,10 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 	const effectiveWindowTurns = autoScroll ? TIMELINE_MOUNTED_TURN_LIMIT : scrolledWindowTurns;
 	/** 保存旧 owner 时不能读已经指向新会话的 render ref，故保留最后一次 layout 提交值。 */
 	const ownerWindowTurnsRef = useRef(new Map<string, number>());
-	renderedWindowTurnsRef.current = effectiveWindowTurns;
+	// owner 切换的 render 里 DOM 还是旧会话；此时把 ref 改成新会话的窗口，
+	// cleanup 保存旧会话锚点就会带错窗口（实测 9 → 3，切回只挂 3 轮，虚拟区锚点行不在 DOM）。
+	// 只在 owner 已同步时更新：ref 的语义是「当前 DOM 会话实际渲染的窗口」。
+	if (viewStateOwnerKey === ownerKey) renderedWindowTurnsRef.current = effectiveWindowTurns;
 
 	// React re-renders this owner before committing children, so the target
 	// session's follow mode and turn window reach MessageScroller atomically.
@@ -824,6 +911,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 	 */
 	const invalidateHistoryBrowsing = useCallback(() => {
 		browsePinRef.current = null;
+		pinnedRowElRef.current = null;
 		browsePinFrozenRef.current = false;
 		skipBrowsePinRef.current = false;
 		historyBrowseGenerationRef.current += 1;
@@ -864,7 +952,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		(turns = TIMELINE_WINDOW_EXPAND_STEP) => {
 			escapeAutoScroll();
 			if (!skipBrowsePinRef.current && !autoScrollRef.current) {
-				const next = findBrowsePin(timelineRef.current);
+				const next = findBrowsePin(timelineRef.current, readVisibleRowsRef.current());
 				if (next) {
 					browsePinRef.current = next;
 					browsePinFrozenRef.current = true;
@@ -898,7 +986,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 			// 按钮点击表现为无反应（2026-02 修复）。escapeAutoScroll 同时 stopScroll。
 			escapeAutoScroll();
 			if (!skipBrowsePinRef.current && !autoScrollRef.current) {
-				const next = findBrowsePin(timelineRef.current);
+				const next = findBrowsePin(timelineRef.current, readVisibleRowsRef.current());
 				if (next) {
 					browsePinRef.current = next;
 					browsePinFrozenRef.current = true;
@@ -913,6 +1001,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		if (autoScroll) {
 			pendingExpandTurnsRef.current = 0;
 			browsePinRef.current = null;
+			pinnedRowElRef.current = null;
 			browsePinFrozenRef.current = false;
 			skipBrowsePinRef.current = false;
 			if (expandBatchFrameRef.current !== undefined) {
@@ -1050,7 +1139,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 
 	const captureBrowsePin = useCallback((freeze: boolean) => {
 		if (skipBrowsePinRef.current || autoScrollRef.current) return;
-		const next = findBrowsePin(timelineRef.current);
+		const next = findBrowsePin(timelineRef.current, readVisibleRowsRef.current());
 		if (!next) return;
 		browsePinRef.current = next;
 		if (freeze) browsePinFrozenRef.current = true;
@@ -1065,7 +1154,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		const pin = browsePinRef.current;
 		const timeline = timelineRef.current;
 		if (!pin || !timeline) return;
-		const currentTop = measureBrowsePinViewportTop(timeline, pin.messageId);
+		const currentTop = measurePinnedRowTop(timeline, pin.messageId);
 		if (
 			!shouldCompensateBrowsePin({
 				following: autoScrollRef.current,
@@ -1077,7 +1166,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		}
 		if (currentTop === null) return;
 		pinViewportAfterPrepend(browsePinScrollTop(timeline.scrollTop, currentTop, pin.expectedViewportTop));
-		const after = measureBrowsePinViewportTop(timeline, pin.messageId);
+		const after = measurePinnedRowTop(timeline, pin.messageId);
 		if (after !== null) {
 			browsePinRef.current = { messageId: pin.messageId, expectedViewportTop: after };
 		}
@@ -1116,6 +1205,15 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		const baseline = sendMessageBaselineRef.current;
 		sendMessageBaselineRef.current = { ownerKey, messageId: sendMessageId };
 		if (!baseline || baseline.ownerKey !== ownerKey) return;
+		// 用户关掉「发送消息后自动滚动到最新」：发送不动视口，也不登记挂起定位。
+		// baseline 仍照常推进（上面已写），否则重新打开开关后会把这条旧发送误判成新消息再拽一次。
+		// 停在底部时仍由跟底引擎按内容增长跟随新回复——这里只禁止「发送那一刻的强制定位」。
+		// 沙箱兜底：部分单测整体 stub ../atoms（见下方 sendState 同款处理），缺该 atom 时按默认「开启」。
+		if (scrollToLatestOnSendAtom != null && store.get(scrollToLatestOnSendAtom) === false) {
+			pendingSendScrollRef.current = undefined;
+			positionedSendMessageRef.current = sendMessageId;
+			return;
+		}
 		const changed = Boolean(sendMessageId) && baseline.messageId !== sendMessageId;
 		// 发送态用于区分「用户提交」和「读盘/投影填充历史」：部分单测沙箱会整体 stub
 		// ../atoms 后单独加载真实模块，缺这个 atom 时按「无在途发送」处理（生产恒存在）。
@@ -1415,7 +1513,10 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 			// 再由下面的 pendingJump 重试循环完成落位。
 			if (index >= 0) requestTimelineReveal(targetNodeId);
 			const hasMorePages = diskPage ? diskPage.nextBefore !== null : historyHasMore;
-			if (index < 0 && !hasMorePages) return;
+			// 冷会话（消息还没上屏 / 首屏仍在加载）里 index<0 不等于「目标不存在」：挂起跳转，
+			// 等数据到达后由 pendingJump effect 落位。旧实现这里直接 return，宿主插件按 entryId
+			// 导航到尚未加载完消息的会话时静默失效（#401 复审 P0）。
+			if (index < 0 && !hasMorePages && !shouldDeferJumpUntilLoaded({ targetIndex: index, messageCount: combinedMessages.length, surfaceLoading: isSurfaceLoading })) return;
 			// 目标可能在贴底 turn 窗口外（先取消跟随以展开挂载），也可能在尚未加载的
 			// 历史页里：挂起跳转，由 pendingJump effect 按策略补页/扩窗直到完成。
 			setShowScrollToBottom(true);
@@ -1430,7 +1531,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 				value: { messageId, expandAttempts: 0, loadAttempts: 0, nonce: jumpNonceRef.current },
 			});
 		},
-		[clearTimelineReveal, combinedMessages, diskPage, escapeAutoScroll, expandWindowBatched, highlightMessage, historyHasMore, ownerKey, requestTimelineReveal, scrollJumpTargetIntoView],
+		[clearTimelineReveal, combinedMessages, diskPage, escapeAutoScroll, expandWindowBatched, highlightMessage, historyHasMore, isSurfaceLoading, ownerKey, requestTimelineReveal, scrollJumpTargetIntoView],
 	);
 
 	/**
@@ -1509,9 +1610,13 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 			if (sessionId && sessionId !== LEGACY_OWNER_KEY) {
 				const anchor = currentAnchorRef.current;
 				const windowTurns = ownerWindowTurnsRef.current.get(sessionId);
+				// 锚点自带「滚动那一刻」的窗口（computeCurrentAnchor 写入）。切走瞬间，回底 effect
+				// 可能已先把 scrolledWindowTurns 复位成 3 并覆盖 map；再拿 map 覆盖锚点会让切回
+				// 只挂 3 轮——用户原来读的那一行不在 DOM，虚拟区恢复落位直接失效（#401 实测）。
+				const restoredAnchor = anchor && anchor.windowTurns === undefined && windowTurns !== undefined ? { ...anchor, windowTurns } : anchor;
 				saveScrollAnchor({
 					sessionId,
-					anchor: anchor && windowTurns !== undefined ? { ...anchor, windowTurns } : anchor,
+					anchor: restoredAnchor,
 				});
 				ownerWindowTurnsRef.current.delete(sessionId);
 			}
@@ -1741,6 +1846,10 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		// give-up 保留旧行为兜底：目标已不在数据（压缩清理/删除）时不无限扩窗（2026-08 黑屏治理）。
 		const stillInData = targetIndex >= 0;
 		const hasMorePages = diskPage ? diskPage.nextBefore !== null : historyHasMore;
+		// 冷会话等待：目标还没进数据，但消息尚未上屏（首批未到 / 首屏加载中）。
+		// 这不是「目标不存在」—— give-up 会误报「跳转失败」并把插件导航丢掉（#401 复审 P0）。
+		// effect 依赖 combinedMessages：数据到达后自动重跑并落位。
+		if (!stillInData && shouldDeferJumpUntilLoaded({ targetIndex, messageCount: combinedMessages.length, surfaceLoading: isSurfaceLoading })) return;
 		const action = resolveJumpPendingAction({
 			targetInLoadedData: stillInData,
 			hasMorePages,
@@ -1780,7 +1889,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 			return;
 		}
 		expandWindow(action.turns);
-	}, [clearTimelineReveal, combinedMessages, controllerEnabled, diskPage, expandWindow, findFallbackJumpRow, highlightMessage, historyHasMore, isLoadingMessagePage, loadMoreMessages, ownerKey, pendingJump, scrollJumpTargetIntoView, scrolledWindowTurns]);
+	}, [clearTimelineReveal, combinedMessages, controllerEnabled, diskPage, expandWindow, findFallbackJumpRow, highlightMessage, historyHasMore, isLoadingMessagePage, isSurfaceLoading, loadMoreMessages, ownerKey, pendingJump, scrollJumpTargetIntoView, scrolledWindowTurns]);
 
 	return {
 		timelineRef,
@@ -1815,6 +1924,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		expandWindow,
 		windowExpandableRef,
 		isSurfaceLoading,
+		navBlockingVirtualization: restorePhase !== "complete" || pendingJump !== undefined,
 		knownEmpty,
 		reloadFromDisk,
 		startDshHostAndReload,

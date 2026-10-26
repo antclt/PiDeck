@@ -155,7 +155,7 @@
 - **应用内划词**：document 级 mouseup/keyup 捕获选区快照；**浮钮 mousedown 必须 preventDefault**，否则按下瞬间浏览器清掉选区；跳过 `INPUT/TEXTAREA/SELECT/contenteditable` 与 `[data-selection-tool-ui]` 子树。结果**在划词工具栏里内联输出**（紧凑工具栏 ~400px，打开即自动翻译，无「开始」按钮），不是弹窗。默认智能体 `settings.selectionToolAgentId` 悬空时主进程归一化清空、渲染层回退内置翻译官（`builtin-translate`）。
 - **与时间线「引用并提问」浮层共存**：会话消息里划选时，时间线自带的胶囊浮层渲染两个动作（`data-quote-action="quote"` / `"translate"`）；它可见期间（`quoteToolbarVisibleAtom`）全局划词浮钮不再出现，翻译动作写 `openSelectionInlineAtom({text, rect})` 由 `SelectionToolHost` 打开内联工具栏——同一时刻只有一个浮层。e2e 点击必须命中 `[data-quote-action="quote"]` 而不是容器中心。
 - **复制/菜单不算划词**：全局监听在 `pointerdown`（工具 UI 自身除外）先清快照，`copy` 事件也清；mouseup 在 Radix portal/菜单、引用浮层、任意 `button` 上不重新评估选区。否则「右键 → 复制」会让引用浮层让位、菜单 mouseup 又被当成新手势，复制 toast 后重新冒出翻译浮钮（2026-10 用户反馈）。策略集中在 `selectionToolPolicy.ts` 的 `SELECTION_TOOL_IGNORED_MOUSEUP_SELECTOR`，回归见 `tests/selectionToolPolicy.test.mjs`。
-- **系统级划词 = 复制即触发**（其他应用也能用）：主进程 `ClipboardSelectionWatcher` 轮询剪贴板纯文本，变化即把文本交给 `SelectionToolService.showText`，在光标附近只弹出折叠操作栏（不自动调用模型）；点「翻译/问答」后才展开结果并请求智能体；`systemSelectionEnabled` 控制 start/stop，**自己的任一窗口有焦点时跳过**（应用内复制/浮窗自己复制不重复弹），取词模拟复制期间 `suppressFor(2500)` 抑制哨兵与恢复内容；空/过短忽略、超长按 `SELECTION_TOOL_TEXT_MAX_CHARS` 截断。**快捷键是备用入口**：`shared/shortcuts.ts` 的 `openSelectionTool`（默认 Ctrl/Cmd+Shift+X）仍是唯一 `globalShortcut` 注册，`syncSelectionToolShortcut()` 在启动、设置保存、市场设置变更时同步——关开关立即注销、改键先释放旧键。**注册失败必须可见**：`SelectionToolWindowState` 带 `shortcutRegistered/shortcut`，设置页在系统级开关下显示占用警告且说明复制触发不受影响；主进程同时发一次 toast，并在 `browser-window-focus` 时重试（dev 与安装版同时跑时，后启动者会因快捷键被先启动者占用而失败——实测日志里的 `Global shortcut registration rejected: Ctrl+Shift+X`）。快捷键取词 `systemSelectionReader.ts`：保存剪贴板 → 写唯一哨兵 → 平台模拟复制（win32 CUA SendInput / macOS osascript / Linux X11 xdotool）→ 轮询 → 恢复；失败返回 structured reason 绝不抛。浮窗 `SelectionToolWindow`（宽 440、折叠 46 / 展开 280，无边框透明置顶、独立 `selection-tool.html`、复用主 preload）等加载完成再推 `selection-tool:captured`；`showInactive` 不抢目标应用焦点，未点击时 30s 自动收起，点击获得焦点后失焦即藏；展开/折叠经 `selection-tool:resize` 调整窗口并夹回工作区。**视觉对齐应用内划词/Magpie**：顶部一条操作栏（智能体 / 翻译·问答 / 目标语言下拉 / 复制·发送·关闭），正文只留原文引用与结果，不再有一排语言 chip、嵌套表单和「开始」按钮；「发送到 PiDeck」经 `selection-tool:insert-to-main` 插入主窗口当前会话输入框。
+- **系统级划词默认隐藏/关闭**：`SYSTEM_SELECTION_TOOL_ENABLED=false`，`DEFAULT_AGENT_MARKET_SETTINGS.systemSelectionEnabled=false`；设置页不渲染系统级开关/快捷键/冲突提示，快捷键页隐藏 `openSelectionTool` 行；复制监听、Windows 原生捕获与 `globalShortcut` 全部不启动，浮窗也不预热。恢复时把开关改 true 并补回设置入口。**恢复后的设计 = 选区/复制即触发**（其他应用也能用）：Windows 优先 `WindowsSelectionCapture`：PowerShell 常驻进程轮询鼠标左键，拖选（位移 >6px）或双击后沿鼠标点父链查 UIAutomation TextPattern 选区，直接读文本（不读写剪贴板、不模拟按键；UIAutomationClient 是系统程序集，不需要额外 DLL；实现取舍对齐 Magpie 的 WH_MOUSE_LL + UIAutomationCore，但用轮询代替低级钩子）；读不到时由 `ClipboardSelectionWatcher` 轮询剪贴板兜底，变化即把文本交给 `SelectionToolService.showText`，在光标附近只弹出折叠操作栏（不自动调用模型）；点「翻译/问答」后才展开结果并请求智能体；Windows 原生捕获触发时 `suppressFor(2500)` 抑制复制兜底；`systemSelectionEnabled` 控制 start/stop，**自己的任一窗口有焦点时跳过**（应用内复制/浮窗自己复制不重复弹），取词模拟复制期间 `suppressFor(2500)` 抑制哨兵与恢复内容；空/过短忽略、超长按 `SELECTION_TOOL_TEXT_MAX_CHARS` 截断。**快捷键是备用入口**：`shared/shortcuts.ts` 的 `openSelectionTool`（默认 Ctrl/Cmd+Shift+X）仍是唯一 `globalShortcut` 注册，`syncSelectionToolShortcut()` 在启动、设置保存、市场设置变更时同步——关开关立即注销、改键先释放旧键。**注册失败必须可见**：`SelectionToolWindowState` 带 `shortcutRegistered/shortcut`，设置页在系统级开关下显示占用警告且说明复制触发不受影响；主进程同时发一次 toast，并在 `browser-window-focus` 时重试（dev 与安装版同时跑时，后启动者会因快捷键被先启动者占用而失败——实测日志里的 `Global shortcut registration rejected: Ctrl+Shift+X`）。快捷键取词 `systemSelectionReader.ts`：保存剪贴板 → 写唯一哨兵 → 平台模拟复制（win32 CUA SendInput / macOS osascript / Linux X11 xdotool）→ 轮询 → 恢复；失败返回 structured reason 绝不抛。浮窗 `SelectionToolWindow`（折叠 360×46 / 展开 440×280，无边框透明置顶、独立 `selection-tool.html`、复用主 preload）等加载完成再推 `selection-tool:captured`；`showInactive` 不抢目标应用焦点，未点击时 30s 自动收起，点击获得焦点后失焦即藏；展开/折叠经 `selection-tool:resize` 调整窗口并夹回工作区。**视觉对齐应用内划词/Magpie**：折叠态一条 360px 操作栏只留智能体 / 翻译·问答 / 关闭，展开后才出现目标语言与复制·发送；正文只留原文引用与结果，不再有一排语言 chip、嵌套表单和「开始」按钮；「发送到 PiDeck」经 `selection-tool:insert-to-main` 插入主窗口当前会话输入框。macOS 原生选中捕获需要 CGEventTap + Accessibility（AX）helper 与「辅助功能/输入监控」授权（Magpie `macos.rs` 的做法）；当前未内置该 helper，macOS 仍走复制触发与快捷键兜底。
 - i18n：文案键分 `agentMarket.*` / `agentInvoke.*` / `selectionTool.*` / `settings.selectionTool.*` 四组，zh-CN + en-US 同步、改完跑 `node scripts/genZhTwCopy.mjs`（生成物禁止手改）。
 
 
@@ -166,19 +166,27 @@
 - **流式与 settle 是两条渲染路径**：流式期间不跑 remark 插件（`NO_STREAM_REMARK_PLUGINS`），只做 marked 核心解析；`isStreaming` 转 false 后先保持轻量渲染，`requestIdleCallback` 空闲才切全量（高亮/mermaid/表格）。所以在流式输出里看不到的问题，很可能在 settle 后才暴露——**复现问题要看最终态，别只盯流式过程**。
 - **mdast 插件用「临时属性 + 父节点整体替换 children」协议时，必须补回 `last → text.length` 的尾段**。`MarkdownLinkCore.ts` 的 `remarkLinkifyPaths` 把裸路径文本节点拆成 `[text, link, …]` 写进 `node.__segs`，父节点随后整体替换原文本节点；漏掉尾段，路径之后的全部正文（含 mdast 里同一 text 节点携带的换行后续行）会整段消失——用户看到的现象是「/ 后面的文本不显示、后一行整行不见」。
 - **事故教训（2026-09-23，用户报「斜杠后文本不显示」）**：尾段回填在 `fb6b5667`（feat(markdown): 文件链接存在性校验，失效路径降级纯文本）把 `while` 改成 `for-of` 时被丢掉；表格 cell / API 路径场景下一个 text 节点几乎必以路径结尾，而日常只在段中命中路径，样例永远测不出来。用真实会话 jsonl 实测：91 条回复 47 条丢文本。判据是解析产物可见文本与原文一致，而不是「链接能点」。
-- **streamdown 内部会跑 `rehype-sanitize`（defaultSchema）+ `rehype-harden`**：非白名单属性会被静默剥掉——实测 `{src, alt, data-md-image-count}` 过一遍只剩 `{alt}`（2026-10-20）。所以**不要用 HTML 属性给自定义组件传上下文**（用 React context）；图片/链接的最终 URL 是 sanitize 之后由 `urlTransform` 重新写入的，改 URL 规则时别只看 mdast。
+- **HTML 净化只有一条路：`components/session/markdownSanitize.ts` 的 `UNTRUSTED_MARKDOWN_REHYPE_PLUGINS`**（raw → 摘危险子树 → `rehype-sanitize` 白名单）。会话正文与文件预览（`FileDiffViewer`）都挂这一份，**新增 HTML 能力 = 同时改白名单 + `tests/markdownHtmlSanitize.test.mjs`**；不要给 MarkdownStream 传只含 `raw` 的插件数组。
+- **事故（2026-10，issue #397）：只挂 `rehype-raw` 不挂 sanitize 会把模型输出的 HTML 原样注入应用 DOM**。AI 画图/写 HTML 常带 `<style>svg{width:100%}</style>`，style 元素一进 DOM 就是全局 CSS——标题栏与时间线所有 lucide 图标一起被放大，**切到别的会话（消息卸载）才恢复**；同一条路径还放行了 `<iframe>`、`onerror=`、`javascript:` 链接。「切换会话就自愈」这类现象先怀疑消息内的全局 CSS。
+- **sanitize schema 的三处本应用定制**（改之前先读注释）：① `href` 放行 `tel`/`file`/`pideck-file`；② `src` **不做**协议白名单——本地图地址（`C:\x.png`、`./out/a.png`、`pideck-file:`）要先经 `resolveMarkdownImageSrc`，按 http(s) 过滤会把本地图全清空；③ 内联 SVG 只放行几何/描边属性（`SVG_TAGS` + `SVG_ATTRIBUTES`），不含 `<style>`/`<image>`/`<foreignObject>`/事件属性。
+- **`harden` 故意不启用**：它会把被拦的链接/图片替换成英文「[blocked]」文案并重写树，`pideck-file:` 本地图与 `file://` 本地链接会被一起打死；URL 安全由 `markdownUrlTransform` / `resolveMarkdownImageSrc` 统一负责。KaTeX / mermaid 的 rehype 产物在 sanitize **之后**生成，扩展插件要追加在净化序列尾部（见 `FileDiffViewer` 的 `rehypeKatex`）。
+- **不要用 HTML 属性给自定义组件传上下文**（用 React context）：非白名单属性会被 sanitize 静默剥掉（2026-10-20 实测 `{src, alt, data-md-image-count}` 只剩 `{alt}`）；`src` 现在免协议校验，但新增 `data-*` 仍要先进 schema 才留得住。
 - **回归测试必须跑真实层级**：表格行（cell 内 text）、跨换行正文（`\n` 之后仍是同一个 text 节点）、inline code `__fileLink` 分支、路径正好在末尾（不留空 text 节点）。写法见 `tests/markdownPathTailTruncation.test.mjs`（unified + remark-parse 二次解析对比可见文本，不依赖 cwd/真实项目）。
 - **考古别只看最近几笔提交**：渲染丢文本这类回归可能潜伏数周，用 `git log --oneline -- <文件>` / `git log -S <片段>` 回到底，确认是「谁引入、为什么当时测不出」，再把这两件事写进注释与测试。
 
 ## 用户消息 chip 与自包含块（引用 / 会话 / 技能 / 提示词模板 / 文件）
 
+- **完整账本**：谁在展开（pi / DSH / PiDeck 的所有权矩阵）、与上游的对齐清单与「有意不同」的理由、已知缺口台账，见 `docs/chip-rendering-refactor-plan.md` §10–§12。本节只放每次改代码前必须知道的硬约束。
 - **一条契约**：需要折叠成 chip 的东西，**落盘文本必须自带展示身份**（`<quoted_context label message_id>` / `<referenced_session name>` / `<skill name>` / `<prompt_template name>`）。展示侧只认块（`src/shared/expandedRefBlocks.ts`）与裸 token（`composer/chips.ts`）两种形态，不做「按正文反查名称」；旧消息没有块就显示全文，这是有意的兼容策略。
 - **保护区规则（2026-10 实测 bug 的结论）**：发送侧有三个展开器（引用 → 会话引用 → 提示词模板）。后一个不得改写前一个已生成的块，否则「引用里提到 `/commit`」会被替换成整份提交模板——落盘的引用原文被篡改，模型读到的历史与真实不符。判据集中在 `src/renderer/src/utils/protectedText.ts`（`computeProtectedRanges` / `replaceOutsideProtected`）。
 - **模板清单两个来源**：来源 A = `prompts:list`（`~/.pi/agent/prompts` + `<项目>/.pi/prompts`，带编辑元数据、离线可用）；来源 B = pi `get_commands` 的 `source: "prompt"` 条目 + 按 `sourceInfo.path` 读回的正文（覆盖 npm 包声明的 `pi.prompts`，例如 pi-subagents 的 `parallel-review`）。合并规则在 `src/renderer/src/utils/templateCatalog.ts`：**同名正文取 B**（B 是 pi 去重后的最终视图），A 的展示元数据保留。只缺 B 时 `/parallel-review` 会被原样发给 pi、由 pi 展开成无名字的正文，表现为「运行中有 chip、暂停/重载后整段展开」。
+- **参数既进正文、也要在块外留一份**：模板用 `$@`/`$1` 时，参数要按 pi 原位替换进正文（模型看到的形状与 pi 一致）；但整段正文会被折成 chip，所以**块外必须再追加一份用户原文**，否则用户发完看不到自己写的话（2026-10-21 实测）。没有占位符的模板本来就追加在块外（pi 在那种情况下会直接丢掉用户输入，PiDeck 不丢）。占位符目前只集中在包带模板（pi-subagents 6 个全是 `$@`），PiDeck 内置模板不用占位符。
 - **frontmatter 剥离照抄 pi**（`utils/frontmatter.ts`，对齐 `dist/utils/frontmatter.js`）：先 `stripBom` + 换行归一（`
-` 与裸 `` 都变 `
+` 与裸 `
+` 都变 `
 `）→ 从下标 3 找**第一个** `
----` 作结束标记（所以 `--- ` 带尾空格也能剥）→ 正文 `trim()`。**三条缺一条就漏**：Windows 编辑器存的模板常带 BOM 或裸 ``，旧正则直接匹配失败，`---
+---` 作结束标记（所以 `--- ` 带尾空格也能剥）→ 正文 `trim()`。**三条缺一条就漏**：Windows 编辑器存的模板常带 BOM 或裸 `
+`，旧正则直接匹配失败，`---
 description: …
 ---` 就漏进消息（2026-10 实测）。「一键插入全文」走 `stripMarkdownFrontmatter`，保留文件原换行风格（CRLF 还是 CRLF），只额外容忍 BOM 与结束标记尾空格。
 - **模板参数替换照抄 pi**：`utils/templateArgs.ts` 逐条移植 pi 的 `parseCommandArgs` / `substituteArgs`（`$1` `$@` `$ARGUMENTS` `${N:-默认}` `${@:-默认}` `${@:N}` `${@:N:L}`；bash 切词支持引号；只替换模板串、参数内容不二次展开）。pi 的语义是「参数只进占位符，模板没占位符就丢弃用户输入」，PiDeck 保留一层兜底：**模板没有占位符时把用户输入追加在块后**（绝不丢字），有占位符时按 pi 把参数放进正文且不再追加。参数区间以「下一个命令 / 引用块起点 / 消息末尾」为界，不会吞掉相邻命令或引用块。
@@ -188,6 +196,7 @@ description: …
   - 因此展开前必须避让「后端已接管的命令」：`utils/reservedCommandNames.ts` 把 `source !== "prompt" && source !== "builtin"` 的命令名（pi 的 extension/skill、DSH 的 host 命令、ACP 命令）列为保留集，`expandPromptTemplates` 命中即原样保留。`builtin` 不保留：桌面内置命令由 `classifyComposerSlashCommand` 接管，未接管的本来就只是文本，否则用户建 `/export` 模板会失效。
 - **DSH 的 `/goal` 语义（读官方实现，不改）**：`packages/goal/command-goal` 把 objective 存进 goal 域（`ctx.goals.create`），命令本身不产生模型消息；之后**每一轮**由 `goal-round-driver` 发一条新的用户消息 `<goal_round>Objective: "…" Round: n/N …</goal_round>`，带 `source: { kind: "goal" }`。PiDeck 的投影器只认 `source.kind === "user"`（`dshEventProjector.ts` 的 `user/message` 分支），所以目标轮次**不进时间线**。结论：目标文本每轮重复是 DSH 的设计，若目标里含模板正文就随轮次重复——**属后端语义，PiDeck 不改**（不跳过 `/goal` 包装、不拆分消息），chip 只负责把所见文本渲染成标签。
 - **同名模板以项目为准（照抄 pi 的规则，不是自创）**：pi 的资源路径按 `resourcePrecedenceRank` 升序加载——project = 0 < user/global = 2 < package = 4 < builtin = 5，`dedupePrompts` 按名字去重且**先加载者胜**；被禁用的模板根本不会被加载。`assembleTemplates`（`utils/templateCatalog.ts`）复刻这三条：先剔除 `enabled === false`（项目禁用 → 回落到全局那份，而不是直接消失）→ 项目在前全局在后 → 按名去重留第一个。以前是「数组最后一个胜」的隐式约定，既与 pi 相反，也靠顺序巧合才碰对。
+- **已知缺口（记账，未修）：DSH 的技能可能被同名提示词模板抢走**。DSH 的技能不是命令表里的命令，而是扫用户消息里的 `(^|\s)/名字` 手势（`dsh` 的 `tool-skill` 里 `SKILL_GESTURE`），而 PiDeck 的保留集只收 DSH 的**命令**名。若同一项目里既有 DSH 技能 `cv-writer`、又有同名 PiDeck 模板，`/cv-writer` 会被本地展开成块 → DSH 看不到手势 → 技能静默不执行。**为什么先不修**：PiDeck 的技能清单（`~/.pi/agent/skills` + `~/.agents/skills`）与 DSH 的不同源（DSH 还有 `~/.dsh/skills`、项目 `.dsh/skills`），直接拿去当保留集会两头错——漏掉 DSH 独有技能、又误占只属于 pi 的技能名。要做对需先给 DSH 加一个技能清单桥（照 `pideckCommandsBridge` 的形态），再只对 DSH 会话使用真实清单。
 - **保留名的副作用（须知）**：后端命令优先意味着**同名提示词模板永远不展开**。例如装了本仓库内置扩展时 `/plan` `/goal` `/todo` `/todos` `/reload` 归扩展所有；DSH 会话里 `/permission` `/plan` `/compact` `/help` `/goal` `/subagent` `/feedback` 归 host 所有。想用同名模板只能改名或停用对应扩展。
 - **补拉只针对「可能存在的模板」**：`needsTemplateRefetch`（同文件）返回 false 的三种情况——不是 `/名称`、当前表里已有、名字属于保留集（保留名永远不会出现在模板表里，否则每发一次 `/permission` 都白跑三趟 IPC）。
 - **DSH 的命令表此前拿不到**：`DshAgentManager` 只实现了 `listCommands`，但网关按能力名调 `getCommands` → `TypeError` → 命令白名单恒空（历史 `/命令` 不出 chip、`/` 菜单只剩静态建议）。已补同名别名，并在 `tests/dshAgentManager.test.mjs` 加了「声明即实现」断言。
@@ -211,11 +220,11 @@ description: …
 - **URL 白名单**：`markdownUrlTransform` 放行 `file://` 与 http(s)，`data:` 被 `defaultUrlTransform` 清空 ⇒ **不能内联 base64**，本地图必须先落盘成文件。`![](C:\a.png)` 这类盘符写法被当作「本地路径」原样塞进 `src`（`C:` 被 Chromium 当 scheme）⇒ 静默破图；只有 `file:///C:/...` 成立。
 - **dev 态直接不可用**：dev 渲染层页源是 `http://localhost`，Chromium 拒绝 `file://` 子资源 ⇒ 同一段 Markdown 在 dev 里是白图、打包版才显示。改这块必须同时验 dev 与打包两种加载方式。
 - **取舍结论（2026-10 讨论，暂不实现）**：①不做「消息内 ref 存储」——那等于改会话格式与跨层契约，收益不匹配；②优先「协议直读」：新增只读协议服务白名单根目录，替换裸 `file://`；③「渲染期复制缓存 + LRU」只在「temp 被清后历史白图」成为真实抱怨时再加，且只能以**缓存**身份存在（可淘汰、可回源），不做权威存储。
-- **白名单根**：项目目录 + `<userData>` + **专属 temp 子目录**（如 `<tmp>/pideck-shots`），不放行整个 `%TEMP%`（临时解压/安装器写入的图不可信，且 temp 随时被清理）。协议必须做路径规范化 + 逃逸检查，与 `webSecurity: true` 下的既有文件读取口径一致。
+- **白名单根**：项目目录 + `<userData>` + **桌面** + **专属 temp 子目录**（如 `<tmp>/pideck-shots`），不放行整个 `%TEMP%`（临时解压/安装器写入的图不可信，且 temp 随时被清理）。桌面必须用 `app.getPath("desktop")`（跟随 OneDrive/自定义重定向，别拼 `home/Desktop`）：2026-10-21 实测会话里 `~/Desktop/PiDeck-Settings-*/x.png` 全被判 403、降级成「图片加载失败 · 路径」——人和 agent 最常把截图/设计稿放桌面。协议必须做路径规范化 + 逃逸检查，与 `webSecurity: true` 下的既有文件读取口径一致。
 - **路径规范化要与协议同步做**：盘符/绝对路径按本地路径处理、相对路径按会话 cwd 解析，否则模型默认写法（`C:\…`、`./out/chart.png`）仍然破图。失败兜底 UI 至少给 alt + 原路径 + 可点击打开，比任何视觉打磨都省排查时间。
 - **工具结果里的 image block 目前不可见**：交互动线只渲染类别文案「已读取图片」（`src/renderer/src/components/session/timeline/toolCategory.ts`），主进程 `AgentManager` 的 `formatToolDetail` / `extractToolResultText` 只产出文本；assistant 消息里的 image block 在 `src/main/pi/messageContent.ts` 的 `extractMessageText` 被 `if (type === "image") continue` 丢弃。做可视化等于改工具投影契约（消息带 `images` 或写 blob 存 ref），**单独立 issue**，别混进渲染层改动。
 - **边界**：PiDeck 不提供「截图/贴图到会话」的工具 API——agent 行为归 pi；PiDeck 的职责只有「任何指向本地图片的 Markdown 都能稳定渲染」。
-- **已落地（2026-10，阶段 1+2）**：本地图不再走裸 `file://`，统一 `pideck-file://local/?path=<绝对路径>`（`src/shared/localImage.ts` 是线格式唯一来源）。白名单根 = userData + `<tmp>/pideck-shots` + 聊天工作区 + 全部项目路径；**realpath 后复检**（防符号链接逃逸）、≤32MiB、`no-store` + `nosniff` + CSP sandbox，判定在 `src/main/media/localImageAccess.ts`（纯函数、可单测）。不要退回 `file://`：dev 页源是 `http://localhost`，Chromium 直接拒 `file://` 子资源，等于同一段 Markdown 在 dev 白图。
+- **已落地（2026-10，阶段 1+2）**：本地图不再走裸 `file://`，统一 `pideck-file://local/?path=<绝对路径>`（`src/shared/localImage.ts` 是线格式唯一来源）。白名单根 = userData + 桌面 + `<tmp>/pideck-shots` + 聊天工作区 + 全部项目路径；**realpath 后复检**（防符号链接逃逸）、≤32MiB、`no-store` + `nosniff` + CSP sandbox，判定在 `src/main/media/localImageAccess.ts`（纯函数、可单测）。不要退回 `file://`：dev 页源是 `http://localhost`，Chromium 直接拒 `file://` 子资源，等于同一段 Markdown 在 dev 白图。
 - **渲染侧硬约束**：Markdown 图片唯一入口是 `MarkdownImage`（`MarkdownStream` 的 `components.img` 注入）——单图 `block` + `max-width:min(100%,640px)` + `max-height:360px`；同段 ≥2 张切 96px 瓷砖（张数由 `p` 组件数出来经 context 下发，**不要改回 HTML 属性**：`rehype-sanitize` 会剥掉非白名单属性）；懒加载、点击放大、失败降级成「失败文案 · alt/原路径」+ 重试，**任何分支都不得产出空 `src` 的白图**。图片动作（复制/保存）走 `MarkdownImageActions`（`fetch(src)` 取字节，**CSP `connect-src` 必须含 `pideck-file:`**，否则本地图保存无反应）。预览浮层唯一实现是 `ImageLightbox`（`ImagePreviewModal` 只剩“注入复制/保存动作条”的薄壳，Markdown 图与附件图共用）。`remarkRecoverLocalImages` 只在「段落仅一个未转义 text 节点 + `/`、`./`、盘符前缀 + 图片扩展名 + 路径含空格」时动手，放宽它会改写正文里的语法示例。
 - **两个真机坑（2026-10-19 dev 实例 smoke 暴露，单测看不见）**：① Windows `app.getPath("temp")` 返回 **8.3 短名**（`C:\Users\ADMINI~1\…`），消息里是长名 → 白名单比较字面不等，白名单内的图全判 403；必须用 `realpath.native`（`main/media/nativeRealpath.ts`），**普通 `fs.realpath` 不展开中间段短名**。② `mdast-util-to-hast` 把反斜杠编码成 `%5C`（`C:\Users\a` → `C:%5CUsers%5Ca`），图片目标必须先百分号解码再判盘符/协议，否则被当未知协议丢弃、图静默变 alt。**测试要喂 hast 形态的 src**，只测 mdast url 会漏掉这两层。
 - **后续计划**：阶段 3（工具结果 image block 可视化）**探针已完成**（2026-10-19）：pi 的 `toolResult.content` 确实带 `{type:"image", data:<base64>, mimeType}`，且 base64 直接内联写进 pi 的会话文件 ⇒ 可行；但当前决定**只记账不实施**。真要做时：main 侧读时投影成 blob ref（**不把 base64 塞进消息对象、不改写 pi 会话文件**），约束与范围见 `docs/markdown-image-rendering-plan.md` 阶段 3。设计参照 dsh 的“双通道”（进会话的图入库做 ref，被引用的图借看）；白名单与上限是 PiDeck 自建（dsh 靠 fs sandbox，PiDeck 没有那一层）。
@@ -249,6 +258,14 @@ description: …
 - 收口：`src/main/devRendererCache.ts` + `src/main/index.ts` 的 `createWindow`，仅在 dev（`shouldUseDevRendererUrl()`）加载 renderer 前 `await` 清一次默认 session 的 HTTP 缓存与 JS 编译缓存；清理失败只记日志，不挡窗口创建。打包态零影响。
 - 逃生开关：`PIDECK_DEV_KEEP_HTTP_CACHE=1` 跳过清理（需要保留 dev 态登录态时）。手工排查用 `grep -rl <chunk后缀> node_modules/.vite/deps/_metadata.json` 与 `%APPDATA%/PiDeck-dev[-<branch>]/Cache/Cache_Data`：URL 里的 `?v=` 若与当前 metadata 的 browserHash 相同却找不到对应文件，即为陈旧缓存。
 - 时序是契约：清理必须 `await` 在 `loadURL` 之前，写在之后等于没清。守卫见 `tests/devRendererCache.test.mjs`。
+
+## 本地打包的 Electron 下载源（pack:dev / dist:* 走 npmmirror）
+
+- 现象：`npm run pack:dev` / `dist:fast` / `dist:win` 在 `packaging platform=win32` 后直接 `⨯ connect ETIMEDOUT 20.205.243.166:443`（该 IP 是 github.com），退出码 1，`release-dev/` 只剩 `builder-effective-config.yaml`。
+- 机理：Electron 二进制由 `@electron/get` 取，**zip 已在缓存也不等于离线可打包**——`validateArtifact` 每次都把 `SHASUMS256.txt` 以 `cacheMode: Bypass` 重新拉一遍（源码注释：Never use the cache for loading checksums），那一步同样走 github.com。国内直连 github.com 常只有 ~9KB/s，SHASUMS 请求超时 → retry 3 次 → ETIMEDOUT。CI 早已在 `.github/workflows/{release,build-dev}.yml` 的 win/linux 矩阵注入 `ELECTRON_MIRROR`，本地脚本此前没注入，于是只有本地踩坑。
+- 收口：`scripts/electronBuilderEnv.js`（`electronBuilderEnv()`）统一补齐 `ELECTRON_MIRROR` 与 `ELECTRON_BUILDER_BINARIES_MIRROR`，四个本地打包脚本（`pack-dev.js` / `dist-fast.js` / `dist-win.js` / `dist-dev.js`）的 `npx electron-builder` 调用必须传 `env:`。**已有配置优先**（含 `npm_config_*` 形态），显式设空字符串 = 走 GitHub 默认源（`mirrorVar` 用 `||` 取值，空串自动回落 BASE_URL），因此 CI 的 `ELECTRON_MIRROR: ""` 语义不变。
+- 判定：`npm run pack:dev` 日志出现 `• downloaded electron zip extracted successfully` 即通；守卫 `tests/electronBuilderEnv.test.mjs` 同时断言解析语义与「每个脚本真的把 env 传给子进程」（漏传 = 静默退回 GitHub）。
+- 手动逃生（不想改代码时）：`ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npx electron-builder --win --dir`；镜像目录形如 `/mirrors/electron/v43.4.0/`（带 `v`）。
 
 ## Tab 激活态语言（两种声明约定，2027-10 统一）
 
@@ -291,3 +308,27 @@ description: …
 - **停止的重复收口**：abort 先收一次，host 随后补发的 turn/end 会带同一份全文再收一次；翻译器用 `closedRunText` 忽略第二次，避免保活连接上重复上屏一条回复。
 - **状态推送**：通道事件同样触发 `scheduleStatePush()`（400ms 去抖），运行时忙闲翻转即时可达；5s tick 只兜不住事件流里的目录变更。
 - 回归集：`tests/webDshChannelStream.test.mjs`（翻译器 + 路由 + 契约）、`tests/webServiceDshStream.test.mjs`（真实 WebServiceManager + 真实 HTTP：帧序列 / 保活 / 状态推送）、`tests/webEventStream.test.mjs`、`tests/webExternalReplyMerger.test.mjs`。
+
+## 会话定位轴（消息区刻度条 / outline rail）
+
+**它是什么**：会话消息区**右缘**一列 1px 横杠，一根 = 一个用户提问；悬停出预览卡，点击跳转。
+
+**位置与显隐是用户定的**：必须贴右缘（`right: 0`，预览卡向左展开 `previewSide="before"`），且**静默态整体不可见**——`.outline-hover.session-outline-pane > * { opacity: 0 }`，仅 `:hover` / `:focus-within` 时 `opacity: 1`（`focus-within` 兜键盘用户，不能只写 `:hover`）。历史上 commit `3303200ae` 把它挪到过左缘、并长期保持常显，2026-10 用户明确要求回到右侧 + 悬停才出现；守卫在 `tests/outlineDrawerOffset.test.mjs`。规划逻辑在 `src/renderer/src/components/session/timeline/outlineRailTicks.ts`（纯函数），渲染在 `SurfaceComponents.tsx` 的 `ConversationOutline` + beUI 的 `preview-rail.tsx`。
+
+**条数上限是 30，且是「滑动窗口」不是采样**（2026-10 用户反馈「旁边横条太多」）：
+
+- `windowRailItems(items, activeIndex)` 取以当前阅读位置为中心、最多 `RAIL_TICK_LIMIT = 30` 条的窗口。停在底部 = 「最新的 30 条」；往上翻窗口跟着上移。
+- **不要改回均匀采样**。三个真实实现调研过：Proma `scroll-minimap.tsx` 用 20 根**不可点的桶**（`MAX_BARS`，每桶 = `items.length/20` 条）纯粹当位置图；dsh `TurnNavigator.tsx` 与 vivid-layer Chat Minimap 都是「全部条目 + 内部滚动」。**没有一家把稀疏采样出来的条当成跳转按钮**——刻度可点就必须点得动，采样会留下点不动的假按钮。
+- 已知副作用：条数超 30 后，刻度的**纵向位置不再代表整段会话的进度**（当前刻度永远落在窗口中段）。要恢复「进度感」只能改成 Proma 的桶方案（条不可点 + 悬浮列表里跳转），这是产品取舍，不要单方面改回去。
+
+**间距**：`RAIL_TICK_MAX_SIZE = 14` / `RAIL_TICK_MIN_SIZE = 6`，按可用高度收缩到下限，**不做内部滚动**。30 × 6 = 180px 已覆盖「小窗口 + 终端坞 + 高缩放」，所以 2026-10 重构把早前那套滚动/两端渐隐/自动跟随/`railMaxHeight`/`onWheelFallback` 一并删了（上限 30 之后它只在极端窄高下才可能触发，纯属屎山）。**滚轮仍要转发**：导轨是时间线滚动视口的兄弟节点（绝对定位），不转发的话指针在刻度上滚动时间线不动——用容器上的原生非 passive 监听（React 的 `onWheel` 是 passive，`preventDefault` 会被忽略）。
+
+**显隐分工（用户明确要求）**：**导轨常显**，只有**预览卡**在悬停/固定/聚焦时才出现。实现上 `highlightedId`（含当前活动刻度）只驱动刻度缩放，预览卡必须挂 `displayedId`（`hoveredId ?? pinnedId ?? focusedId`）。这两个混用会让卡片在没有悬停时也常显在活动刻度上——2026-10 就是这么出的 bug，守卫在 `tests/outlineRailContract.test.mjs`。
+
+**未加载刻度**：目录里有、消息还没加载的检查点（`outline-pending:<entryId>`）画淡一档（`opacity-60`，对齐 dsh 的 `markUnloaded`）。点它会走补页循环（`SessionSurfaceStage`）：每 60ms 轮询一次、最多 `RAIL_PENDING_MAX_ATTEMPTS = 10` 次；补不到要弹 `outline.jumpUnreachable`，**不许静默放弃**。
+
+**这里有个反直觉的坑**：`loadMoreMessages` 在上一页仍在飞时**直接 return**（`useSessionTimelineController` 的 in-flight 守卫），所以「10 次轮询」是**约 600ms 的墙钟时间盒，不是 10 页**。窗口内最靠前的几条仍可能补不到——写代码时别承诺「看得见就一定点得到」。
+
+**beUI 组件分叉纪律**：`preview-rail.tsx` 是官方 `@beui/preview-rail` 的本地分叉，头注释列了 4 条差异（`muted` 淡显 / 预览卡只渲染一张 + 纯计算定位 / `resolveCardTop` 钳制 / 卡片位移过渡）。`npx shadcn add @beui/preview-rail --overwrite` 会整份覆盖，必须按头注释重新施加；`tests/outlineRailContract.test.mjs` 的源码契约断言是那次覆盖的兜底（覆盖后会变红）。
+
+**回归集**：`tests/outlineRailTicks.test.mjs`（窗口/间距纯函数）、`tests/outlineRailContract.test.mjs`（源码契约：预览卡触发条件、纯计算定位、`muted`、滚轮转发、窗口按源下标截取、已删滚动子系统不许长回来）、`tests/outlineRailActive.test.mjs`（活动刻度解析）、`tests/sessionOutlineDirectory.test.mjs`（目录取数）。没有 e2e 覆盖（本机 seeded-项目 e2e 环境不可用）。

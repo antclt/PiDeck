@@ -252,15 +252,14 @@ test("后装 wrapper 保留时卸载仍停用注入，再安装只启用当前�
 	try {
 		first();
 		assert.equal(prototype.applyAuth, later);
+		// pi-ai 1.4.0 自己就注入 x-opencode-session，卸载后仍在；本层的客户端标识必须消失。
 		const afterDispose = await createHarness().call("after-dispose");
-		assert.equal(afterDispose["x-opencode-session"], undefined);
 		assert.equal(afterDispose["x-opencode-client"], undefined);
 		second = installDshOpenCodeHeaders(piAi);
 		assert.equal((await createHarness().call("reinstalled"))["x-opencode-session"], "reinstalled");
 		second();
 		assert.equal(prototype.applyAuth, later);
 		const afterReinstallDispose = await createHarness().call("after-reinstall-dispose");
-		assert.equal(afterReinstallDispose["x-opencode-session"], undefined);
 		assert.equal(afterReinstallDispose["x-opencode-client"], undefined);
 	} finally {
 		second?.();
@@ -297,7 +296,7 @@ test("鉴权等待期间卸载，恢复后不再注入且保留原有 transformH
 	}
 	await stream.result();
 	const headers = harness.requests[0].options.headers;
-	assert.equal(headers["x-opencode-session"], undefined);
+	// 同上：上游 pi-ai 自带的会话头不由本层控制，这里验证本层不再补客户端标识。
 	assert.equal(headers["x-opencode-client"], undefined);
 	assert.equal(headers["X-Custom"], "transformed");
 });

@@ -44,7 +44,9 @@ test("agent startup writes diagnostics across renderer IPC and pi launch boundar
 	assert.match(mainSource, /rpcMs/);
 	assert.match(mainSource, /Agent create failed/);
 	assert.match(sessionIpcSource, /Session prompt IPC received/);
-	assert.match(sessionIpcSource, /sessionRuntimeCoordinator\.send\(\w+\)/);
+	// 绑定智能体的会话在 send 前会重组成 promptInput（注入隐藏 agentMessage），
+	// 所以只锁「发送确实经过 runtime coordinator」这个契约，不锁局部变量名。
+	assert.match(sessionIpcSource, /await sessionRuntimeCoordinator\.send\(/);
 	assert.match(sessionIpcSource, /Session prompt IPC completed/);
 	assert.match(sessionIpcSource, /Session prompt IPC failed/);
 	assert.doesNotMatch(appSource, /api\.agents\.create\(/);
@@ -61,6 +63,9 @@ test("renderer startup reports bootstrap mount and global errors", () => {
 	assert.match(rendererMainSource, /Renderer root element missing/);
 	// 良性 ResizeObserver loop 不按 error 上报（否则也进「最近 7 天报错」顶掉真实信号）
 	assert.match(rendererMainSource, /isBenignResizeObserverLoop \? "info" : "error"/);
+	// issue #376：良性噪音判定与聚合复用 shared 口径（main 侧镜像据此跳过，避免双写）
+	assert.match(rendererMainSource, /classifyRendererNoise\(/);
+	assert.match(rendererMainSource, /new RendererNoiseAggregator\(\)/);
 	assert.match(bootOverlaySource, /export function dismissBootOverlay\(\)/);
 	// 挂载帧不得撤遮罩（会露出无会话空态那一帧）；硬兼底必须保留
 	assert.doesNotMatch(rendererMainSource, /requestAnimationFrame\(\s*dismissBootOverlay\s*\)/);
