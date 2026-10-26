@@ -56,6 +56,21 @@ test("git panel: status -> diff -> stage -> commit", async ({ window }) => {
 	// 分支标签反映真实仓库状态
 	await expect(panel.locator(".git-branch-label")).toHaveText("main", { timeout: 15_000 });
 
+	// 面板头的紧凑下拉（分支筛选 chip）必须整个落在 32px 标题栏内。
+	// 回归：基类 data-[size=default]:h-9（36px）特定性压过 h-6，chip 被撑到 36px，
+	// 上下各溢 2px 并盖过标题栏下边线。
+	const chipFit = await panel.evaluate((root) => {
+		const trigger = root.querySelector('[data-slot="select-trigger"]');
+		const header = trigger?.parentElement?.parentElement ?? null;
+		if (!trigger || !header) return null;
+		const triggerRect = trigger.getBoundingClientRect();
+		const headerRect = header.getBoundingClientRect();
+		return { triggerHeight: triggerRect.height, headerHeight: headerRect.height, overflowBottom: triggerRect.bottom - headerRect.bottom };
+	});
+	expect(chipFit).not.toBeNull();
+	expect(chipFit!.overflowBottom).toBeLessThanOrEqual(0);
+	expect(chipFit!.triggerHeight).toBeLessThanOrEqual(chipFit!.headerHeight - 4);
+
 	// 制造一处工作区改动并刷新状态
 	appendFileSync(join(repoDir, "a.txt"), "changed by e2e\n");
 	// 刷新按钮在顶部仓库/分支栏的「同步组」里（aria-label="刷新"）；旧的 #git-pane-changes id
