@@ -18,10 +18,10 @@ import { UNTRUSTED_MARKDOWN_REHYPE_PLUGINS } from "./markdownSanitize";
 import { FormulaCopyLayer } from "./FormulaCopyLayer";
 import { useSmoothStream } from "../../utils/useSmoothStream";
 import { useDocumentTheme } from "../../hooks/useDocumentTheme";
-import { STREAM_LIGHT_MAX_CHARS, STREAM_UNFREEZABLE_MIN_CHARS, SETTLE_FULL_MAX_CHARS, shouldRenderStreamPlain, shouldKeepLightOnSettle } from "./markdownStreamPolicy";
+import { STREAM_LIGHT_MAX_CHARS, STREAM_UNFREEZABLE_MIN_CHARS, SETTLE_FULL_MAX_CHARS, SETTLED_CHUNK_CHARS, shouldRenderStreamPlain, shouldKeepLightOnSettle } from "./markdownStreamPolicy";
 // 兼容导出：既有引用与源码契约测试从 MarkdownStream 读阈值常量
 export { STREAM_LIGHT_MAX_CHARS } from "./markdownStreamPolicy";
-import { IncrementalMarkdownFrontier, UNSTABLE_TAIL_BLOCKS } from "./markdown/incrementalMarkdown";
+import { IncrementalMarkdownFrontier, splitMarkdownChunks, UNSTABLE_TAIL_BLOCKS } from "./markdown/incrementalMarkdown";
 
 /**
  * 数学公式插件（KaTeX）。@streamdown/math 默认 singleDollarTextMath: false，
@@ -212,6 +212,32 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 	//    重渲染（大代码块流式输出时 GC 追不上，原生内存实测 200-450MB/min 爬升），
 	//    同样回退纯文本，settle 后一次全量渲染。
 	const streamPlain = (isStreamingNow && displayText.length > STREAM_LIGHT_MAX_CHARS) || (frozenSplit !== undefined && frozenSplit.prefixEnd === 0 && displayText.length > STREAM_UNFREEZABLE_MIN_CHARS);
+	// ── settled 长文渐进分块（2026-10-27「展开全文」秒级冻结事故）──
+	// >40K 的 settled 文本本来走「单次全量 Streamdown」（frozenSplit 因超长为 undefined），
+	// 205KB 一次 commit 是秒级冻结。改为按顶层块切成 ≈32K 的组：首组同步出（秒开开头），
+	// 其余组 rIC 每次挂一组（每次 commit 几毫秒），总 DOM 与不分块时完全一致。
+	// 已挂块经 FrozenMarkdownChunk memo（key 钉 index+start），后续挂载零重解析。
+	const settledChunks = useMemo(() => {
+		if (props.light || isStreamingNow || streamPlain || displayText.length <= STREAM_LIGHT_MAX_CHARS) return undefined;
+		return splitMarkdownChunks(displayText, SETTLED_CHUNK_CHARS);
+	}, [props.light, isStreamingNow, streamPlain, displayText]);
+	const [mountedChunkCount, setMountedChunkCount] = useState(1);
+	useEffect(() => {
+		setMountedChunkCount(1);
+	}, [settledChunks]);
+	useEffect(() => {
+		if (!settledChunks || mountedChunkCount >= settledChunks.length) return;
+		let cancelled = false;
+		const schedule = typeof window.requestIdleCallback === "function" ? (callback: () => void) => window.requestIdleCallback(callback, { timeout: 400 }) : (callback: () => void) => window.setTimeout(callback, 32);
+		const cancel = typeof window.cancelIdleCallback === "function" ? (handle: number) => window.cancelIdleCallback(handle) : (handle: number) => window.clearTimeout(handle);
+		const handle = schedule(() => {
+			if (!cancelled) setMountedChunkCount((current) => Math.min(current + 1, settledChunks.length));
+		});
+		return () => {
+			cancelled = true;
+			cancel(handle);
+		};
+	}, [settledChunks, mountedChunkCount]);
 	// 流式中精简插件：gfm/codeMeta/linkifyPaths 与 math 等插件都留到静态渲染；
 	// 外部显式传入的插件（FileDiffViewer 等场景）不受流式精简影响。
 	const resolvedRemarkPlugins = isStreamingNow ? NO_STREAM_REMARK_PLUGINS : (props.remarkPlugins ?? [remarkGfmNoSingleTilde, remarkInlineMathGuard, remarkRecoverLocalImages, remarkRecoverInlineLinks, defaultRemarkPlugins.codeMeta, remarkLinkifyPaths]);
@@ -291,6 +317,17 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 			// 冻结/活动两段拆分：每帧 layout 成本 ≤4K 字符，不随全文增长。
 			return <PlainStreamSplit text={displayText} />;
 		}
+		// settled 长文：渐进分块挂载（frozen=0——data-md-frozen 归零是 e2e 判定
+		// 「全量渲染已提交」的语义，流式冻结路径专属，settled 块不冒充）。
+		if (settledChunks) {
+			return (
+				<Fragment>
+					{settledChunks.slice(0, mountedChunkCount).map((chunk, index) => (
+						<FrozenMarkdownChunk key={`${index}:${chunk.start}`} text={chunk.text} pipe={pipe} />
+					))}
+				</Fragment>
+			);
+		}
 		// settle 后整篇一次渲染：自愈跨冻结边界的链接/脚注/表格，并恢复高亮插件。
 		if (!frozenSplit || frozenSplit.prefixEnd === 0) {
 			return (
@@ -306,7 +343,7 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 				<FrozenMarkdownChunk key={`${frozenSplit.generation}:${frozenSplit.prefixEnd}`} text={frozenSplit.tail} pipe={pipe} />
 			</Fragment>
 		);
-	}, [displayText, frozenSplit, pipe, streamPlain]);
+	}, [displayText, frozenSplit, pipe, streamPlain, settledChunks, mountedChunkCount]);
 	return (
 		<Fragment>
 			{streamElement}
