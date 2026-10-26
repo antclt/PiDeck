@@ -199,9 +199,17 @@ test("已退出的进程再 stop：立即 resolve，不补发信号", async () =
 	assert.deepEqual(scheduled, []);
 });
 
-/** 假 child 测不到真实信号与退出码语义，这两条用**真实子进程**（node 自己）跑。 */
+/** 假 child 测不到真实信号与退出码语义，这两条用**真实子进程**（node 自己）跑。
+ *
+ * 真实子进程必须把 `windowsVerbatimArguments` 关掉：PLAN 里的 `true` 是 Windows npm cmd-shim 形态
+ * （由 cmd.exe 拼整条命令行，见 LocalPiRuntimeLauncher 文件头注释），此时 Node 不再给 argv 加引号；
+ * 直接 exec node 时 `-e "setTimeout(() => …, 20)"` 会被按空格拆成多个 argv，node 拿到残缺脚本
+ * 语法错误直接 exit 1（本机 Windows 实测：verbatim=true → code 1 / false → code 7）。
+ * POSIX 下该字段被 Node 忽略，保持同一份 plan 形状即可。 */
+const REAL_CHILD_PLAN = { ...PLAN, command: process.execPath, cwd: process.cwd(), env: process.env, windowsVerbatimArguments: false };
+
 test("真实子进程：退出码原样上报，且已经退出的进程 stop 不补发信号", async () => {
-	const handle = await makeLauncher().launch({ ...PLAN, command: process.execPath, args: ["-e", "setTimeout(() => process.exit(7), 20)"], cwd: process.cwd(), env: process.env });
+	const handle = await makeLauncher().launch({ ...REAL_CHILD_PLAN, args: ["-e", "setTimeout(() => process.exit(7), 20)"] });
 	const exit = await new Promise((resolve) => handle.onExit(resolve));
 	assert.equal(exit.code, 7);
 	assert.equal(exit.signal, null);
@@ -209,7 +217,7 @@ test("真实子进程：退出码原样上报，且已经退出的进程 stop �
 });
 
 test("真实子进程：stop 真的把进程收掉（SIGTERM），不会悬挂", async () => {
-	const handle = await makeLauncher().launch({ ...PLAN, command: process.execPath, args: ["-e", "setInterval(() => {}, 1000)"], cwd: process.cwd(), env: process.env });
+	const handle = await makeLauncher().launch({ ...REAL_CHILD_PLAN, args: ["-e", "setInterval(() => {}, 1000)"] });
 	const pid = handle.pid;
 	assert.equal(typeof pid, "number");
 	const exited = new Promise((resolve) => handle.onExit(resolve));

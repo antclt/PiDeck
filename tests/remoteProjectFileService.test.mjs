@@ -9,8 +9,16 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const execute = promisify(execFile);
 const { createRemoteProjectFileService } = loadTsCommonJs("src/main/remote/RemoteProjectFileService.ts");
+const POSIX = process.platform === "linux";
 
-test("UTF-8 BOM is preserved as text rather than silently discarded by decoding", async (t) => {
+/**
+ * 这条 BOM 用例走的也是远端文本链路，而它是一条 Linux 远端命令：buildRemoteProjectFileCommand 只接受
+ * POSIX 绝对路径与 `<node>/node` 解释器，脚本本身还依赖 /proc/self/fd、Linux 的 O_NOFOLLOW 与
+ * `process.platform === "linux"` 守卫。Windows 上夹具连命令都构造不出来（REMOTE_FILE_PATH_INVALID），
+ * macOS 上命令能构造但脚本以 REMOTE_FILE_PLATFORM_UNSUPPORTED 拒绝，所以与下面 21 条用例一样跳过；
+ * Linux 上这条断言仍会执行。
+ */
+test("UTF-8 BOM is preserved as text rather than silently discarded by decoding", { skip: !POSIX }, async (t) => {
 	const content = "\ufeffexport const value = 1;\n";
 	const f = await fixture(t, { content });
 	const doc = await f.open();
@@ -18,7 +26,6 @@ test("UTF-8 BOM is preserved as text rather than silently discarded by decoding"
 	await f.save(doc.version, doc.content + "// edited\n");
 	assert.equal(await readFile(f.path, "utf8"), content + "// edited\n");
 });
-const POSIX = process.platform === "linux";
 
 async function fixture(t, { content = "original\n", mode = 0o600, before, afterRenameContent } = {}) {
 	const root = await mkdtemp(join(tmpdir(), "pideck-remote-file-"));

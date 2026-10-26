@@ -463,7 +463,11 @@ runnerTest("an init frame at or past the cap fails closed", async (t) => {
 	assert.equal(existsSync(fixture.sentinel), false, "nothing may have been spawned");
 });
 
-runnerTest("an init frame that ends without its terminator fails closed", async (t) => {
+// The init frame names the remote cwd/argv, so win32 cannot even build the fixture frame: the contract
+// refuses a drive-letter path (isRemoteRunnerAbsolutePath) before the runner starts, and the frozen runner
+// itself refuses to start on win32 (the last test). This case drives that runner, so it is POSIX-only like
+// every other group/signal case in this file.
+posixTest("an init frame that ends without its terminator fails closed", async (t) => {
 	const fixture = createFixture(t);
 	const session = startRunner(t, { home: fixture.home });
 	// A well-formed frame - minus the newline that would have ended it. EOF is the only thing that can follow.

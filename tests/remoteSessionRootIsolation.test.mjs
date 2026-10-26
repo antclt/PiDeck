@@ -8,8 +8,11 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
  * F4 independent verification of the remote session root (task-27, J2).
  *
  * Three things must stay true while a custom sessionDir is supported:
- * 1. the frozen helper protocol is untouched - version, the digest of the exact uploaded bytes, and the
- *    operation vocabulary (a new helper method would be a protocol change, which J2 forbids);
+ * 1. the frozen helper protocol stays pinned - version, the digest of the exact uploaded bytes, and the
+ *    operation vocabulary. The J2 freeze was taken at helper build 1.6.0; the merged dev-sync branch then
+ *    advanced the helper deliberately through builds 1.7.0-1.21.2 (Git, terminal and config batches), so
+ *    this pin tracks the current build: any byte change has to move the module's version/digest and the
+ *    literals below in the same commit;
  * 2. the root stays derived from the remote home through the port, never from a local path, and a home that
  *    is not an absolute POSIX path still fails closed before any frame;
  * 3. every consumer (scan / title / register) agrees on that one root - including the configuration probe,
@@ -25,33 +28,68 @@ const { REMOTE_HELPER_ENTRY_VERSION, REMOTE_HELPER_ENTRY_SHA256, REMOTE_HELPER_I
 const HOST_ID = "6f1d2c3b-4a59-4e8d-9f70-1a2b3c4d5e6f";
 const HOME = "/home/dev";
 const CONTROL = String.fromCharCode(0);
-const FROZEN_HELPER_SHA256 = "66b041d2675f9276f0ea03a29ed0f3d34a261fc2184546cb95c6928ca4fc538f";
+/** Current frozen build (helper 1.21.2); it was 1.6.0 when the J2 feature was verified. */
+const FROZEN_HELPER_SHA256 = "957cb0346a420bf9e875ba9031ce3b82991d4326be53959add774f8df102b872";
 const CONFIG_ROOT = HOME + "/.pi/agent";
 const CONFIG_PATH = "settings.json";
 const DEFAULT_ROOT = HOME + "/.pi/agent/sessions";
 const SETTINGS_READ_CEILING = 65536;
+/** The frozen helper's advertised vocabulary (build 1.21.2); the session-root code may use the fs batch only. */
+const FROZEN_CAPABILITIES = [
+	"echo",
+	"fs.stat",
+	"fs.list",
+	"fs.read",
+	"fs.searchNames",
+	"git.status",
+	"git.workspaceDiff",
+	"git.stage",
+	"git.unstage",
+	"git.commit",
+	"git.log",
+	"git.commitDetail",
+	"git.refs",
+	"git.refFileDiff",
+	"git.compare",
+	"git.createBranch",
+	"git.switchBranch",
+	"git.discard",
+	"git.recoveryList",
+	"git.recoveryRestore",
+	"git.recoveryDrop",
+	"git.syncFacts",
+	"git.fetch",
+	"git.push",
+	"git.pull",
+	"git.init",
+	"git.repos",
+	"terminal.prepare",
+	"config.read",
+	"config.patch",
+];
 
-test("the helper protocol is byte-for-byte the frozen 1.6.0 artifact", () => {
-	assert.equal(REMOTE_HELPER_ENTRY_VERSION, "1.6.0", "the helper version must not move for J2");
+test("the helper protocol is byte-for-byte the frozen 1.21.2 artifact", () => {
+	assert.equal(REMOTE_HELPER_ENTRY_VERSION, "1.21.2", "the helper version must match the frozen artifact");
 	assert.equal(REMOTE_HELPER_ENTRY_SHA256, FROZEN_HELPER_SHA256, "the declared digest must stay the frozen one");
 	const recomputed = createHash("sha256").update(Buffer.from(REMOTE_HELPER_INLINE_SOURCE, "utf8")).digest("hex");
 	assert.equal(recomputed, REMOTE_HELPER_ENTRY_SHA256, "the uploaded body must hash to the declared digest");
 	assert.equal(recomputed, FROZEN_HELPER_SHA256, "the uploaded body must still be the frozen artifact");
 });
 
-test("the helper loads exactly two builtins and exposes exactly the frozen operations", () => {
+test("the frozen helper body loads exactly three builtins and exposes exactly the frozen operations", () => {
 	const body = REMOTE_HELPER_INLINE_SOURCE;
 	const builtins = Array.from(body.matchAll(/getBuiltinModule\("([^"]+)"\)/g), (match) => match[1]).sort();
-	assert.deepEqual(builtins, ["node:fs", "node:path"], "no third builtin may be loaded");
+	// node:crypto arrived with the config scope the merged branch ships; the entry still loads no package.
+	assert.deepEqual(builtins, ["node:crypto", "node:fs", "node:path"], "the body may load no fourth builtin");
 	const capabilities = /const CAPABILITIES = \[([^\]]*)\]/.exec(body);
 	assert.ok(capabilities !== null, "the capability list must stay declarative");
 	assert.deepEqual(
 		capabilities[1].split(",").map((part) => part.trim().replace(/^"|"$/g, "")),
-		["echo", "fs.stat", "fs.list", "fs.read", "fs.searchNames"],
-		"the read-only vocabulary is frozen; J2 must resolve the session root with these primitives only",
+		FROZEN_CAPABILITIES,
+		"the advertised vocabulary is frozen; the session-root code resolves roots with the fs primitives only",
 	);
 	for (const method of Array.from(body.matchAll(/frame\.method === "([^"]+)"/g), (match) => match[1])) {
-		assert.ok(["hello", "echo", "cancel", "fs.stat", "fs.list", "fs.read", "fs.searchNames"].includes(method), "unexpected protocol method " + method);
+		assert.ok(["hello", "cancel", ...FROZEN_CAPABILITIES].includes(method), "unexpected protocol method " + method);
 	}
 });
 

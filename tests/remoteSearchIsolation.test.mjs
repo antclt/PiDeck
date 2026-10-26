@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import test, { after } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
+import { fileSymlinkSkipReason } from "./helpers/symlinkSupport.mjs";
 import { materializeRemoteHelperArtifacts } from "./helpers/remoteHelperArtifacts.mjs";
 
 /*
@@ -108,7 +109,11 @@ writeFileSync(join(ROOT, "match-here.txt"), "root file\n");
 writeFileSync(join(ROOT, "sub", "inner-match.txt"), "inner file\n");
 // Windows cannot infer a link type, so both shapes are spelled out; a junction needs no privilege.
 symlinkSync(OUTSIDE_DIR, join(ROOT, "out-dir"), process.platform === "win32" ? "junction" : "dir");
-symlinkSync(join(OUTSIDE_DIR, "secret-match.txt"), join(ROOT, "out-file"), process.platform === "win32" ? "file" : undefined);
+// Windows 上文件符号链接需要管理员/开发者模式：造不出来时不能假装通过，只能跳过依赖它的用例。
+const fileSymlinkSkip = fileSymlinkSkipReason();
+if (fileSymlinkSkip === undefined) {
+	symlinkSync(join(OUTSIDE_DIR, "secret-match.txt"), join(ROOT, "out-file"), process.platform === "win32" ? "file" : undefined);
+}
 symlinkSync(join(ROOT, "sub"), join(ROOT, "link-to-sub"), process.platform === "win32" ? "junction" : "dir");
 
 /** A depth chain: dirs d1..d16, each holding one matching file at its own depth. */
@@ -363,7 +368,7 @@ test("a host-only helper refuses search with PATH_OUTSIDE_ROOT and starts no tra
 	}
 });
 
-test("symlinks are never followed by search, and are reported as other", async () => {
+test("symlinks are never followed by search, and are reported as other", { skip: fileSymlinkSkip }, async () => {
 	const helper = startHelper({ root: ROOT });
 	try {
 		// The links are named for "out", the real files for "match": two queries keep the link assertions out of

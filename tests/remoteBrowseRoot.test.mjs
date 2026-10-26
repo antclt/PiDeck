@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -52,13 +52,19 @@ test("paths that must never reach the remote shell are refused before quoting", 
 	);
 });
 
-test("the probe resolves a real directory, and tells 'missing' apart from 'not a directory'", (t) => {
+// 这条用例把生产探针命令真的交给本机 POSIX shell 执行，并依赖两点本机能力，Windows 都不具备：
+// 1) /bin/sh + GNU readlink -f（exit 3/5 的语义来自它），Windows 没有 /bin/sh；
+// 2) 普通进程可创建目录符号链接，Windows 非管理员/未开开发者模式下 symlinkSync 直接 EPERM。
+// 所以只在没有 POSIX shell 的 Windows 上跳过；POSIX（Linux/macOS）开发机与 CI 仍会跑这条断言。
+// 夹具本身已去掉 POSIX 的 mkdir 可执行文件，改用 node:fs 的 mkdirSync（Windows 也能建目录）。
+test("the probe resolves a real directory, and tells 'missing' apart from 'not a directory'", { skip: process.platform === "win32" ? "Windows 没有 /bin/sh + GNU readlink -f，且非特权进程无法创建目录符号链接；该探针只能在 POSIX 上真实执行" : false }, (t) => {
 	const base = mkdtempSync(join(tmpdir(), "pideck-root-probe-"));
 	t.after(() => rmSync(base, { recursive: true, force: true }));
 	const real = join(base, "real");
 	const file = join(base, "a-file");
 	const link = join(base, "link-to-real");
-	execFileSync("mkdir", [real]);
+	// 夹具只用 node:fs：Windows 没有 POSIX 的 mkdir 可执行文件（此前在这里 ENOENT）。
+	mkdirSync(real);
 	writeFileSync(file, "x");
 	symlinkSync(real, link, "dir");
 

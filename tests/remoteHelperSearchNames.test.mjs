@@ -8,9 +8,10 @@ import test, { after } from "node:test";
 import { pathToFileURL } from "node:url";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 import { materializeRemoteHelperArtifacts } from "./helpers/remoteHelperArtifacts.mjs";
+import { fileSymlinkSkipReason } from "./helpers/symlinkSupport.mjs";
 
 /*
- * Protocol proof for the bounded filename search (fs.searchNames, helper build 1.6.0). Every case below
+ * Protocol proof for the bounded filename search (fs.searchNames, helper build 1.21.2). Every case below
  * drives the *frozen* helper body as a real child process with a real --root and the production
  * RemoteControlClient, because the promises this method makes are promises about the filesystem: that a
  * link is never followed out of the root, that a ceiling stops the walk instead of the tree being walked
@@ -52,6 +53,13 @@ const CONTRACT_SOURCE = "src/main/remote/RemoteHelperContract.ts";
 /** Every test drives a real child process, so each one carries a hard deadline of its own. */
 const searchTest = (name, fn, timeoutMs = TEST_TIMEOUT_MS) => test(name, { timeout: timeoutMs }, fn);
 
+/**
+ * 需要夹具里真实「文件符号链接」才能证明「搜索从不跟随链接」的用例：Windows 非管理员且未开开发者模式时
+ * symlinkSync(..., "file") 直接 EPERM（目录 junction 能建，文件链接不能），这条断言不能被桩替代。
+ * 能造文件链接的机器（POSIX 以及开了开发者模式的 Windows）照常跑；造不出链接的机器显式 skip。
+ */
+const linkSearchTest = (name, fn, timeoutMs = TEST_TIMEOUT_MS) => test(name, { timeout: timeoutMs, skip: fileSymlinkSkipReason() }, fn);
+
 /** Production objects live in another VM realm, so deep comparisons are normalised through JSON. */
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
@@ -86,6 +94,13 @@ async function rejection(promise, label) {
 		return error;
 	}
 	throw new Error(label + " answered a result where a refusal was expected");
+}
+
+/** The capability list the frozen body declares; the body cannot import the contract, so it repeats it. */
+function frozenCapabilities() {
+	const match = /const CAPABILITIES = \[([^\]]*)\]/.exec(REMOTE_HELPER_INLINE_SOURCE);
+	assert.ok(match, "the frozen body must declare its capability list");
+	return match[1].split(",").map((part) => part.trim().replace(/^"|"$/g, ""));
 }
 
 /** Field names of one contract type, read out of the contract source: the wire shape is asserted exactly. */
@@ -222,8 +237,12 @@ async function search(session, params) {
 }
 
 searchTest("the contract and the frozen source declare the same search op and the same ceilings", () => {
-	// The frozen body cannot import the contract, so its literals are compared here, byte for byte.
-	assert.deepEqual(Array.from(REMOTE_HELPER_CAPABILITIES), ["echo", "fs.stat", "fs.list", "fs.read", "fs.searchNames"]);
+	// The frozen body cannot import the contract, so its capability literal is compared here entry for entry.
+	// The helper has grown past the fs batch (Git/config/terminal batches, builds 1.7.0-1.21.2), so this is a
+	// parity check of the two declarations rather than a copy of the list; searchNames must be in both.
+	const frozen = frozenCapabilities();
+	assert.deepEqual(Array.from(REMOTE_HELPER_CAPABILITIES), frozen);
+	assert.ok(frozen.includes(REMOTE_HELPER_METHOD_FS_SEARCH_NAMES), "searchNames must be an advertised capability");
 	assert.equal(REMOTE_HELPER_METHOD_FS_SEARCH_NAMES, "fs.searchNames");
 	assert.ok(REMOTE_HELPER_INLINE_SOURCE.includes('"' + REMOTE_HELPER_METHOD_FS_SEARCH_NAMES + '"'), "the method must be dispatched in the frozen body");
 	for (const capability of REMOTE_HELPER_CAPABILITIES) assert.ok(REMOTE_HELPER_INLINE_SOURCE.includes('"' + capability + '"'), capability + " must be advertised by hello");
@@ -263,7 +282,7 @@ function createMatchFixture(t) {
 	return { base, root, outside };
 }
 
-searchTest("searchNames matches basenames case-insensitively, lists directories, and never follows a link", async (t) => {
+linkSearchTest("searchNames matches basenames case-insensitively, lists directories, and never follows a link", async (t) => {
 	const fixture = createMatchFixture(t);
 	const session = startHelper(t, { root: fixture.root });
 	const answer = await search(session, { path: ".", query: "txt" });
@@ -308,7 +327,7 @@ searchTest("searchNames matches basenames case-insensitively, lists directories,
 	assert.equal(session.lines.length, session.frames.length, "every stdout line is a protocol frame");
 });
 
-searchTest("searchNames matches directory names too and stays relative to the directory it was given", async (t) => {
+linkSearchTest("searchNames matches directory names too and stays relative to the directory it was given", async (t) => {
 	const fixture = createMatchFixture(t);
 	const session = startHelper(t, { root: fixture.root });
 
@@ -435,7 +454,7 @@ searchTest(
 	60_000,
 );
 
-searchTest("an unusable query is refused as QUERY_INVALID before any filesystem access", async (t) => {
+linkSearchTest("an unusable query is refused as QUERY_INVALID before any filesystem access", async (t) => {
 	const fixture = createMatchFixture(t);
 	const session = startHelper(t, { root: fixture.root });
 	const refusals = [
@@ -465,7 +484,7 @@ searchTest("an unusable query is refused as QUERY_INVALID before any filesystem 
 	);
 });
 
-searchTest("searchNames keeps the path rules and the root confinement of the rest of the batch", async (t) => {
+linkSearchTest("searchNames keeps the path rules and the root confinement of the rest of the batch", async (t) => {
 	const fixture = createMatchFixture(t);
 	const session = startHelper(t, { root: fixture.root });
 	const cases = [

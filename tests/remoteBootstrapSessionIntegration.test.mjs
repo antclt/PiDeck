@@ -15,6 +15,7 @@ const HOST_ID = "a252b70c-ea1d-4612-90b6-af78d299894f";
 const NONCE = "noncevalue0123456789";
 const ALIAS = `pideck-${HOST_ID}`;
 const CONNECTION = { executable: "/usr/bin/ssh", args: ["-o", `HostKeyAlias=${ALIAS}`], env: {}, destination: "10.81.2.15", openSshVersion: "OpenSSH_9.5p1" };
+const WINDOWS = process.platform === "win32";
 
 /** Wrap the real entry stdout in the same line/subscription shape as SshProcessLauncher. */
 function entryHandle(child, onReady) {
@@ -62,7 +63,14 @@ function entryHandle(child, onReady) {
 	};
 }
 
-test("real frozen entry reaches finalized after snapshot upload through the production coordinator", { timeout: 20_000 }, async (t) => {
+/*
+ * This case runs the real frozen bootstrap entry *as* the remote host, so the entry resolves its deploy root
+ * from the remote HOME (node:path) and main only admits a POSIX absolute deployRoot - a remote host is POSIX.
+ * On a Windows machine HOME is a drive path, so the entry's correct ready frame is refused as
+ * BOOTSTRAP_READY_INVALID before anything can be uploaded; the child-process end-to-end therefore runs on
+ * POSIX, where this case still executes unchanged.
+ */
+test("real frozen entry reaches finalized after snapshot upload through the production coordinator", { timeout: 20_000, skip: WINDOWS ? "the remote HOME is a POSIX path: on win32 HOME is a drive path and the ready frame's deployRoot is refused" : false }, async (t) => {
 	const home = await mkdtemp(join(tmpdir(), "pideck-bootstrap-e2e-"));
 	t.after(() => rm(home, { recursive: true, force: true }));
 	const manifest = frozenHelperBundleManifest();

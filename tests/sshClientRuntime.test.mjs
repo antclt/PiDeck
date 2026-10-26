@@ -163,7 +163,8 @@ test("a capable POSIX client is discovered and accepted", async (t) => {
 	assert.ok(client.env.HOME !== undefined, "POSIX 客户端需要 HOME 才能读 ~/.ssh/config");
 });
 
-test("discovery fails closed with a stable code instead of falling back to an unverified client", async () => {
+test("discovery fails closed with a stable code instead of falling back to an unverified client", async (t) => {
+	if (process.platform === "win32") return t.skip("POSIX-only discovery: Windows 走 resolveWindowsSshPath，平台拒绝由下一条用例断言");
 	// 候选全不可用时必须抛稳定码，绝不能「找不到就随便用一个」。
 	await assert.rejects(() => resolvePosixSshClient({ candidates: ["/nonexistent/ssh"] }), /SSH_CLIENT_MISSING/);
 	// 存在但不是 OpenSSH 客户端的二进制：由既有的 `ssh -V` 自检拦下。

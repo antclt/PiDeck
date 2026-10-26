@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
+import { fileSymlinkSkipReason } from "./helpers/symlinkSupport.mjs";
 
 /*
  * End-to-end seam proof for the remote read-only workspace chain (plan §7.1 / §168, phase 3).
@@ -387,11 +388,14 @@ function startHelper(t, root) {
 /** Every test drives a real child process, so each one carries a hard deadline of its own. */
 const seamTest = (name, fn) => test(name, { timeout: TEST_TIMEOUT_MS }, fn);
 
+/** 需要真实「文件符号链接」夹具的用例：平台造不出文件链接时跳过（见 tests/helpers/symlinkSupport.mjs）。 */
+const linkSeamTest = (name, fn) => test(name, { timeout: TEST_TIMEOUT_MS, skip: fileSymlinkSkipReason() }, fn);
+
 /** The wire shapes of the request and response frames, read from the contract the two sides share. */
 const REQUEST_FIELDS = contractTypeFields("RemoteHelperRequestFrame");
 const RESPONSE_FIELDS = contractTypeFields("RemoteHelperResponseFrame");
 
-seamTest("the frozen helper's hello frame is the handshake the connection layer waits for", async (t) => {
+linkSeamTest("the frozen helper's hello frame is the handshake the connection layer waits for", async (t) => {
 	const fixture = createWorkspaceFixture(t);
 	const helper = startHelper(t, fixture.root);
 
@@ -534,7 +538,7 @@ seamTest("the upload plan's finalize frames match the manifest, the contract and
 	);
 });
 
-seamTest("a file larger than one chunk comes back byte for byte through the real helper", async (t) => {
+linkSeamTest("a file larger than one chunk comes back byte for byte through the real helper", async (t) => {
 	const fixture = createWorkspaceFixture(t);
 	const content = patternBytes(OVERSIZE_BYTES);
 	writeFileSync(join(fixture.root, "big.bin"), content);
@@ -580,7 +584,7 @@ seamTest("a file larger than one chunk comes back byte for byte through the real
 	assert.equal(statSync(join(fixture.root, "big.bin")).mtimeMs, truthStat.mtimeMs);
 });
 
-seamTest("list matches the directory on disk and stat classifies file, directory and link", async (t) => {
+linkSeamTest("list matches the directory on disk and stat classifies file, directory and link", async (t) => {
 	const fixture = createWorkspaceFixture(t);
 	const helper = startHelper(t, fixture.root);
 
@@ -646,7 +650,7 @@ seamTest("list matches the directory on disk and stat classifies file, directory
 	for (const code of helper.wireCodes()) assert.ok(REMOTE_HELPER_ERROR_CODES.includes(code), `${code} is not in the contract's closed vocabulary`);
 });
 
-seamTest("a path outside the root converges on PATH_OUTSIDE_ROOT at every layer", async (t) => {
+linkSeamTest("a path outside the root converges on PATH_OUTSIDE_ROOT at every layer", async (t) => {
 	const fixture = createWorkspaceFixture(t);
 	const helper = startHelper(t, fixture.root);
 	const outsidePath = "../outside/secret.txt";
@@ -696,7 +700,7 @@ seamTest("a path outside the root converges on PATH_OUTSIDE_ROOT at every layer"
 	}
 });
 
-seamTest("an aborted call withdraws the very request the client minted", async (t) => {
+linkSeamTest("an aborted call withdraws the very request the client minted", async (t) => {
 	const fixture = createWorkspaceFixture(t);
 	const helper = startHelper(t, fixture.root);
 	const controller = new AbortController();
@@ -754,7 +758,7 @@ function createSearchFixture(t) {
 	return { base, root, outside };
 }
 
-seamTest("fs.searchNames walks a real tree within its ceilings and its containment rules", async (t) => {
+linkSeamTest("fs.searchNames walks a real tree within its ceilings and its containment rules", async (t) => {
 	const fixture = createSearchFixture(t);
 	const helper = startHelper(t, fixture.root);
 	const search = (params) => guard(helper.port.request(HOST_ID, REMOTE_HELPER_METHOD_FS_SEARCH_NAMES, params, {}), "fs.searchNames " + JSON.stringify(params));

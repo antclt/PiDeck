@@ -6,6 +6,30 @@ import ts from "typescript";
 
 const projectSync = readFileSync("src/renderer/src/hooks/useProjectSync.ts", "utf8");
 
+/**
+ * `useProjectSync` 现在会做项目位置窄化（`Project` 是 local/ssh 判别联合）。这里把**真实**
+ * 契约模块在同款沙箱里转译加载，而不是在测试里复制一份 `isLocalProject`/`isRemoteProject`——
+ * 复制品会与 `src/shared/projectLocation.ts` 漂移，且判据本身就是被测对象的一部分。
+ * 该模块只有 `import type`，转译后不产生任何运行时依赖。
+ */
+function loadProjectLocation() {
+	const source = readFileSync("src/shared/projectLocation.ts", "utf8");
+	const output = ts.transpileModule(source, {
+		compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+	}).outputText;
+	const module = { exports: {} };
+	vm.runInNewContext(output, {
+		module,
+		exports: module.exports,
+		require(request) {
+			throw new Error(`Unexpected runtime import in projectLocation: ${request}`);
+		},
+	});
+	return module.exports;
+}
+
+const projectLocation = loadProjectLocation();
+
 function createDeferred() {
 	let resolve;
 	let reject;
@@ -63,6 +87,9 @@ function createHookForRuntimeTest() {
 								}
 							: undefined,
 				};
+			}
+			if (request === "../../../shared/projectLocation") {
+				return projectLocation;
 			}
 			if (request === "../utils/catalogLoadWatchdog") {
 				// 看门狗兜底：测试不驱动定时器，只提供空实现（schedule 静默、cancel 幂等）。

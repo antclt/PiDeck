@@ -112,3 +112,20 @@ FF 之后回退 = revert commit 或 reset。10-19 已经做过一次「FF 到集
 ```powershell
 $env:NODE_OPTIONS=""; $env:ELECTRON_RUN_AS_NODE=""
 ```
+
+## 6. 测试清账（2026-10-26 晚）
+
+合并后第一轮全量串行：**13,810 pass / 44 fail / 286 skip**。44 条全部归因并修完，第二轮：**13,848 pass / 0 fail / 316 skip**（14,164 例，21.3 min，exit 0）。skip +30 是新增的平台能力守卫（POSIX / 开发者模式 Windows 上仍会跑）。
+
+| 类别 | 条数 | 修法 | 文件 |
+|---|---:|---|---|
+| 测试初始化缺口 | 8 | `SessionCatalog` 新增 `shared/projectLocation` 导入，vm 沙箱未放行 → 在同款沙箱里转译加载**真实**契约模块 | sessionCatalogCommand |
+| 平台能力（文件符号链接需管理员/开发者模式） | 21 | 新增 `tests/helpers/symlinkSupport.mjs` 探针；夹具用例改 `link*` 包装器带 skip 理由 | remoteHelperEntry(13)、remoteWorkspaceEndToEnd(6)、remoteSearchIsolation(1)、remoteHelperSearchNames(4) |
+| 源码重构跟随 | 2 | porcelain 解析迁到 `gitStatusParser.ts` → 断言目标跟随（正则不变） | fileIcons |
+| 夹具形状 | 2 | 真实子进程不能复用 cmd-shim 的 `windowsVerbatimArguments: true`；`mkdir` 二进制换 `mkdirSync` | piRuntimeLauncher、remoteBrowseRoot |
+| 平台门禁缺失 | 6 | 补齐同文件既有守卫：POSIX-only 探针/runner、Linux-only 远端命令、win32 下 POSIX deployRoot | sshClientRuntime、remoteRunnerEntry、remoteProjectFileService、remoteGitRecovery、remoteBootstrapSessionIntegration、remoteBrowseRoot |
+| 协议 pin 过期 | 2 | helper 1.6.0 → 1.21.2：SHA、版本、builtins(3)、能力表(30) 同步；digest 仍双重校验 | remoteSessionRootIsolation |
+| 契约快照过期 | 1 | 能力表改「契约 == 冻结 body 自声明」双向精确 parity（字面量 pin 保留在上一行文件） | remoteHelperSearchNames |
+
+纪律：**未改任何 `src/` 生产代码**，未放宽断言、未删用例；无法在本机复现能力的用例显式 skip 并写明理由。
+

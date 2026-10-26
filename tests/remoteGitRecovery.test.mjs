@@ -84,7 +84,9 @@ test("restoring puts the discarded bytes back and leaves nothing else changed", 
 	assertNoLeftovers(f);
 });
 
-test("an untracked file comes back from the recovery store, and the parent directory must still exist", async (t) => {
+// 与本文件其余 8 条一致：helper 的 git 写/恢复通道只支持 Linux（src/main/remote/RemoteGitReadSource.ts:502
+// 非 linux 一律抛 GIT_PLATFORM_UNSUPPORTED），所以平台门禁用 fixture 共享的 options；Linux 上仍全量执行。
+test("an untracked file comes back from the recovery store, and the parent directory must still exist", options, async (t) => {
 	const f = fixture(t);
 	baseline(f);
 	writeFileSync(join(f.root, "note.txt"), "note to keep\n");

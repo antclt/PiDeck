@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
+import { fileSymlinkSkipReason } from "./helpers/symlinkSupport.mjs";
 
 /*
  * Integration proof for the frozen remote helper (plan §7.1). The helper is a real child process
@@ -83,6 +84,10 @@ const CONTRACT_SOURCE = "src/main/remote/RemoteHelperContract.ts";
 
 /** Every test drives real child processes, so each one carries a hard deadline of its own. */
 const helperTest = (name, fn, timeoutMs = TEST_TIMEOUT_MS) => test(name, { timeout: timeoutMs }, fn);
+
+/** 需要真实「文件符号链接」夹具的用例：平台造不出文件链接时跳过（见 tests/helpers/symlinkSupport.mjs）。
+ *  目录 junction 不需要特权，所以只跳过依赖文件链接的这批，其余 helper 用例照常跑。 */
+const linkHelperTest = (name, fn, timeoutMs = TEST_TIMEOUT_MS) => test(name, { timeout: timeoutMs, skip: fileSymlinkSkipReason() }, fn);
 
 /**
  * The entry nearly every test starts: the frozen bytes written under the file name the deploy bundle
@@ -773,7 +778,7 @@ helperTest("a --root that is present but unusable fails closed before it serves 
 	assert.equal((await call(working, REMOTE_HELPER_METHOD_HELLO)).protocolVersion, REMOTE_HELPER_PROTOCOL_VERSION);
 });
 
-helperTest("a root that is itself a link is canonicalized once at startup", async (t) => {
+linkHelperTest("a root that is itself a link is canonicalized once at startup", async (t) => {
 	const fixture = createFsFixture(t);
 	const linked = join(fixture.base, "linked-root");
 	symlinkSync(fixture.root, linked, process.platform === "win32" ? "junction" : "dir");
@@ -785,7 +790,7 @@ helperTest("a root that is itself a link is canonicalized once at startup", asyn
 	await expectRefusal(session, REMOTE_HELPER_METHOD_FS_STAT, { path: "../outside/secret.txt" }, "PATH_OUTSIDE_ROOT");
 });
 
-helperTest("fs.stat classifies entries with lstat semantics", async (t) => {
+linkHelperTest("fs.stat classifies entries with lstat semantics", async (t) => {
 	const fixture = createFsFixture(t);
 	// The root is passed through argv, so a scan that missed the flag would leave the whole read-only batch
 	// answering PATH_OUTSIDE_ROOT instead of serving the tree.
@@ -816,7 +821,7 @@ helperTest("fs.stat classifies entries with lstat semantics", async (t) => {
 	assert.equal(session.stderr(), "");
 });
 
-helperTest("fs.stat classifies the entry itself and refuses a path that walks through a link", async (t) => {
+linkHelperTest("fs.stat classifies the entry itself and refuses a path that walks through a link", async (t) => {
 	const fixture = createFsFixture(t);
 	const session = startHelper(t, { root: fixture.root });
 	// The three kinds the contract declares, unchanged by the walk: a regular file, a real directory (the
@@ -840,7 +845,7 @@ helperTest("fs.stat classifies the entry itself and refuses a path that walks th
 	assert.equal(session.stderr(), "");
 });
 
-helperTest("fs.list answers name-sorted entries and never follows a link", async (t) => {
+linkHelperTest("fs.list answers name-sorted entries and never follows a link", async (t) => {
 	const fixture = createFsFixture(t);
 	const session = startHelper(t, { root: fixture.root });
 	const listing = plain(await call(session, REMOTE_HELPER_METHOD_FS_LIST, { path: "." }));
@@ -900,7 +905,7 @@ helperTest("fs.list answers name-sorted entries and never follows a link", async
 	assert.equal(session.stderr(), "");
 });
 
-helperTest("fs.list refuses a request path that walks through a link and still classifies link entries as other", async (t) => {
+linkHelperTest("fs.list refuses a request path that walks through a link and still classifies link entries as other", async (t) => {
 	const fixture = createFsFixture(t);
 	// A real directory that is only reachable by walking through the fixture's inside-link, so the refusal
 	// below cannot be confused with a path that simply does not exist.
@@ -929,7 +934,7 @@ helperTest("fs.list refuses a request path that walks through a link and still c
 	assert.equal(session.stderr(), "");
 });
 
-helperTest("fs.read returns one bounded chunk and reports EOF honestly", async (t) => {
+linkHelperTest("fs.read returns one bounded chunk and reports EOF honestly", async (t) => {
 	const fixture = createFsFixture(t);
 	const session = startHelper(t, { root: fixture.root });
 	const first = await call(session, REMOTE_HELPER_METHOD_FS_READ, { path: "alpha.txt", offset: 0, bytes: 5 });
@@ -986,7 +991,7 @@ helperTest("fs.read returns one bounded chunk and reports EOF honestly", async (
 	assert.equal(session.stderr(), "");
 });
 
-helperTest(
+linkHelperTest(
 	"fs.read reassembles a file larger than one chunk with every frame inside the cap",
 	async (t) => {
 		const fixture = createFsFixture(t);
@@ -1029,7 +1034,7 @@ helperTest(
 	60_000,
 );
 
-helperTest("every path that could leave the root is refused without reading the target", async (t) => {
+linkHelperTest("every path that could leave the root is refused without reading the target", async (t) => {
 	const fixture = createFsFixture(t);
 	const session = startHelper(t, { root: fixture.root });
 	const cases = [
@@ -1074,7 +1079,7 @@ helperTest("every path that could leave the root is refused without reading the 
 	assert.equal((await call(session, REMOTE_HELPER_METHOD_FS_STAT, { path: "alpha.txt" })).kind, "file");
 });
 
-helperTest(
+linkHelperTest(
 	"fs.list serves a directory at the entry cap and refuses one above it",
 	async (t) => {
 		const fixture = createFsFixture(t);
@@ -1098,7 +1103,7 @@ helperTest(
 	60_000,
 );
 
-helperTest("a file that changes while it is being read still settles", async (t) => {
+linkHelperTest("a file that changes while it is being read still settles", async (t) => {
 	const fixture = createFsFixture(t);
 	const session = startHelper(t, { root: fixture.root });
 	const target = join(fixture.root, "alpha.txt");
@@ -1117,7 +1122,7 @@ helperTest("a file that changes while it is being read still settles", async (t)
 	assert.equal(session.stderr(), "");
 });
 
-helperTest("a link whose target is gone is a link for stat and a link for read, never a missing file", async (t) => {
+linkHelperTest("a link whose target is gone is a link for stat and a link for read, never a missing file", async (t) => {
 	const fixture = createFsFixture(t);
 	const session = startHelper(t, { root: fixture.root });
 	// The fixture's inside-link points at root/sub. Removing that directory is what a checkout or a cleanup
@@ -1141,7 +1146,7 @@ helperTest("a link whose target is gone is a link for stat and a link for read, 
 	assert.equal(session.stderr(), "");
 });
 
-helperTest("fs.read refuses every link instead of resolving it", async (t) => {
+linkHelperTest("fs.read refuses every link instead of resolving it", async (t) => {
 	const fixture = createFsFixture(t);
 	const session = startHelper(t, { root: fixture.root });
 	/**
@@ -1199,7 +1204,7 @@ helperTest("fs.read refuses every link instead of resolving it", async (t) => {
 	assert.equal(session.stderr(), "");
 });
 
-helperTest("the read-only methods run inline and never take an echo slot", async (t) => {
+linkHelperTest("the read-only methods run inline and never take an echo slot", async (t) => {
 	const fixture = createFsFixture(t);
 	const session = startHelper(t, { root: fixture.root });
 	// Every slot is held by a slow echo: a stat that queued behind them would answer only after the hold.
@@ -1529,7 +1534,7 @@ helperTest("hello reports the canonical root, resolving a symlinked root to its 
 	const linkParent = mkdtempSync(join(tmpdir(), "pideck-helper-link-"));
 	t.after(() => rmSync(linkParent, { recursive: true, force: true }));
 	const linkedRoot = join(linkParent, "root-link");
-	symlinkSync(realRoot, linkedRoot, "dir");
+	symlinkSync(realRoot, linkedRoot, process.platform === "win32" ? "junction" : "dir");
 
 	const session = startHelper(t, { root: linkedRoot });
 	const result = plain(await guard(session.client.request(REMOTE_HELPER_METHOD_HELLO), "hello"));
