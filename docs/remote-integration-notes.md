@@ -339,3 +339,43 @@ CDP 直连实测；`npm run pack:dev` 的 win-unpacked 产物同法验证。
 - `npm run typecheck` = **0**；`npm run check:format` = 0（3925 文件）。
 - `npm run test:serial`：14136 例 / 13838 pass / **20 fail** / 278 skip；失败集合用 `git worktree add` 在改动前基线 `c4cb00ffe` 复跑同一批 12 个文件得到**完全相同的 20 fail**，即全部是 §7 已记录的既有红灯，**零合并专属失败**。
 - 依赖同步：本工作区 `node_modules` 早于合并，缺 `@tanstack/react-virtual`，且 `@earendil-works/pi-ai` / `pi-telemetry` 停留在 1.3.0（dev 已锁 1.4.0）。按并行纪律**不跑 `npm install`**（会重建 `.bin` 打断他人），从同版本兄弟工作区 `F:/PiDeck` 复制这三个包；`piAiCatalog*` 三条守卫因此从红转绿。
+
+---
+
+## 13. 第五轮同步（2026-10-26，dev → 2 + 4 提交）
+
+> §12 合并完成后 dev 继续推进，分两批：死代码清理 2 提交（76 文件）、ACP 回合超时配置 4 提交（8 文件）。
+> 两批 `grep -i remote` 均为 0 —— dev 依旧没有碰任何一个远端文件。
+
+### 13.1 死代码清理（04f69e007 + 8bdc948ac，76 文件）
+
+`04f69e007` 是 dev 第一次系统性删「只被测试引用的僵尸模块」（新增 `scripts/find-dead-code.mjs` 探针），一次删掉 42 个源文件 + 4 个守护测试。与本仓的唯一真实碰撞：
+
+- **`sessionContextProjection.ts`（合并专属修复）**：dev 判定「只被测试引用」并删除，但本仓 `RemoteSessionHistoryReader` 用它做远端时间线的 `context_edit` 投影（§8.3 保持的产品语义：远端 edit/delete 必须在时间线可见且 entryId 对齐）。**恢复该模块与其 25 例守卫测试**，实现原样不动。
+- 其余被删文件逐个 grep 本仓 import，无第二个真实依赖（`types`/`checkbox`/`select` 这类通用 basename 的命中是误报），`typecheck` = 0 亦为证。
+- 两处 modify/delete 冲突 `GitRepoSwitcher.tsx` / `EditorSurface.tsx`：本仓对它们的改动（`relativePath`、`ProjectFileTarget` 签名）全落在死代码上，本仓同样零引用 ⇒ **取 dev 的删除**。
+- `8bdc948ac`（轮末文件 chip 行溢出修复）与本仓无交集，直接并入。
+
+### 13.2 ACP 回合超时配置（13dbd4d99 + 7ab95596a，8 文件）
+
+`src/shared/types/settings.ts` / `SettingsStore.ts` / `main/index.ts` 是本仓也在改的汇聚点，但 dev 这批只**新增**字段（ACP 回合超时与在途工具豁免），自动合并无冲突。`acp*` + `*settings*` 共 258 例全绿。
+
+### 13.3 门禁结果
+
+- `npm run typecheck` = **0**；`npm run check:format` = 0（3890 文件）。
+- `npm run test:serial`：14136 例 / 13838 pass / **20 fail** / 278 skip；失败集合与 §12.5 **逐文件完全一致**（12 个既有红灯文件），零合并专属失败。
+- 与 §12 的差别仅在例数（+3，来自恢复的 `sessionContextProjection` 守卫测试）。
+
+### 13.4 沉淀：dev 删「僵尸模块」时的核对动作
+
+dev 后续还会继续跑 `scripts/find-dead-code.mjs`。每次同步后用下面这条命令核对「dev 删掉的模块里有没有本仓真实依赖」，比逐个 typecheck 报错再回补更早：
+
+```bash
+for f in $(git diff --name-status <old-dev-head>..origin/dev | grep '^D' | awk '{print $2}' | grep -E '\.tsx?$'); do
+  base=$(basename "$f" | sed -E 's/\.tsx?$//')
+  n=$(grep -rn "from \"[^\"]*/$base\"" src/ | grep -vc "^$f:")
+  [ "$n" -gt 0 ] && echo "USED: $f ($n)"
+done
+```
+
+命中通用 basename（`types` / `select` / `utils`）的是误报，以 `npm run typecheck` 为准。
