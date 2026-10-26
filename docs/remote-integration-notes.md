@@ -379,3 +379,44 @@ done
 ```
 
 命中通用 basename（`types` / `select` / `utils`）的是误报，以 `npm run typecheck` 为准。
+
+---
+
+## 14. 第六轮同步（2026-10-26 续，dev → agentEventTags / ACP 归档 / 两道新门禁）
+
+> §13 之后 dev 连续推进 14 个提交，分三批：IPC 标签拆分 + ACP 归档检索 + 新门禁（8 提交，47 文件）、ACP 视觉桥指示（2 提交，3 文件）、其余 merge 提交。三批 `grep -i remote` 均为 0。
+
+### 14.1 agentEventTags 拆分（130821332）
+
+dev 把 8 个「只在主进程内部流转」的 `agents:*` 事件标签从 `ipcChannels` 拆到新常量 `agentEventTags`，新增 `scripts/check-ipc-wiring.mjs` 机械校验「主进程 emit + preload 转发」两处齐备。
+
+- 影响本仓：3 个文件的 import 冲突（DshAgentManager / AgentManager / sessionIpc）。全部保留本仓额外 import（`projectLocation` / `fileChanges`）并取 dev 的 `agentEventTags`。
+- 核对过本仓没有任何 `ipcChannels.agentsState|agentsMessage|agentsThinking|agentsTextStream|agentsNotice|agentsUiRequest|agentsRuntimeState|agentsLog` 旧名引用（`agentsRpcLog` 仍在 `ipcChannels`，是 preload 面）。
+- 快照刷新：703→**769** 通道（dev 703 + 本仓 66 远端通道）、前缀 89→**90**、digest `d5fd02cc…`；`npm run check:ipc-wiring` 独立复核 769 一致。
+
+### 14.2 sessionIpc 消息分页顺序（合并专属）
+
+dev 把 `readAcpMessages` 改成异步（`await`），与本节一直守着的**先后顺序**落在同一段代码上：本仓的远端 locator 分流必须排在 `localSessionFilePath()` 之前（否则 ssh 条目在那里抛稳定码，远端分支变死代码——§8 记录过这个 bug）。合并结果顺序：
+
+```
+远端 locator 分流 → acp（await）→ dsh → imagegen/videogen → 本地磁盘
+```
+
+### 14.3 新门禁 scripts/check-test-shape.mjs
+
+dev 新增「禁止新增只读源码、零运行时验证的测试」增量门禁，基线 `scripts/testShapeBaseline.json` 是存量快照。
+
+- 本仓 6 个既有远端守卫（`remoteIpcRouteOrder` / `remoteProjectIpc` / `remoteSessionWiring` / `remoteSessionMessageMutationUi` / `remoteSessionMessageMutationUi` / `terminalWebglFallback` / `piProcessErrorSafety`）被判定为「新增」，因为它们不在 dev 基线里。按 dev 脚本自述（基线不要求迁移存量测试）用 `--update` 刷新：390 / 1645，新增 0。
+- 同时剔除 3 条失效条目（`composerTrigger` / `editorTabs` / `sessionScannerWslMaxBuffer`——这三个测试现在会加载生产模块，已不算 sourceOnly）。
+
+### 14.4 其余两批
+
+- ACP 会话归档与检索、投影时序切段、回合超时口径（a301452c9，含 `AcpSessionArchive.ts` / `sessionFindMatches.ts` / `turnSegments`）；`acp*` + `*settings*` 258 例、sessionFind / ipcThreeWaySync / ipcDeadChannelConstants 等 85 例全绿。
+- ACP 视觉桥指示（a9049e77b）：`useSessionVisionBridgeExpected` + `modelImageCapability` 各 3 行，与本仓无交集。
+- `tests/feishuSessionRuntimeBinding.test.mjs` 被 dev 的 console 静音修复（438ad51a7）**转绿**——§7 里的这条既有红灯可以划掉了。
+
+### 14.5 门禁结果
+
+- `npm run typecheck` = **0**；`npm run check:format` = 0（3890 文件）。
+- `npm run check:ipc-wiring` = ok（769 通道 / 8 标签，无重复）；`npm run check:test-shape` = 新增 0。
+- `npm run test:serial`：14164 例 / 13866 pass / **20 fail** / 278 skip。失败集合与 §13 一致（12 个既有红灯文件，其中 feishu 已转绿），另有 1 例 `sessionRuntimeIdAlias` 是 Windows 临时目录 `ENOTEMPTY` 清理竞态（单跑 4 次全绿），零合并专属失败。
