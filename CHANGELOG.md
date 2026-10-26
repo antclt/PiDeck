@@ -1,3 +1,29 @@
+## v0.9.7 (2026-10-26)
+
+The through-line of this release is a visual consolidation aligned with ZCode: the session page settles into a three-layer surface model with typography, shadows and control backgrounds aligned item by item; the thinking-intensity picker is rebuilt as a gradient intensity bar; and the Web gains explicit sidebar paging plus conditional requests, keeping large workspaces light.
+
+### 🚀 New Features
+- **Thinking-intensity picker rebuilt: ZCode-style gradient intensity bar** — Intensity levels move from discrete buttons to a gradient intensity bar: the slider snaps to discrete levels, the popover stays open while adjusting so you can try levels back to back, and the tap/drag accidentally dismissing the popover is fixed along the way.
+- **Sidebar sticky group headers switch** — When the sidebar session list scrolls, group headers can stay pinned at the top instead of scrolling away, so you always know which group you are in on long lists; on by default and can be turned off in Settings (#408).
+- **Web: explicit paging for the sidebar session list** — First page of 10 + "show more (N left)" at 20 per page + collapse, matching the desktop behavior; the scroll sentinel that kept fetching more pages on first layout is gone — previously expanding one big project could instantly stack 57 rows.
+
+### ✨ Improvements
+- **A visual pass aligning the UI with ZCode** — The session page settles into a three-layer surface model (canvas tier + white card + ink tint), collapsing six scattered light-theme grays into one canvas, one card and one tint; Markdown headings flatten (h1 1.5→1.3em etc.), inline code steps down a size, and default button heights align with ZCode; the process layer drops its shadows, the right drawer returns to a white panel, and the three white mixes of the top bar (tab strip / drawer spacer / window controls) converge to one canvas tier; gray-background chips across the process layer — tool-row commands, model badges and stat chips — all strip to bare text, and the sidebar's segmented-tab indicator and "show more" row return to the selected/bare-row discipline; the Git panel's AI summary button joins the "commit" primary button as one group (outline white card, equal 32px height) and the branch filter trigger loses its white background back to a bare trigger; the composer stop button switches to danger red so interrupting reads as interruptible; and the session outline rail's ticks thicken from 1px to 2px.
+- **Web: conditional requests for /api/state** — The server attaches an ETag to session state and returns 304 when the directory is unchanged, so the client no longer re-downloads the 94KB gzipped full session projection or rebuilds the array that would trigger downstream re-computation.
+
+### 🐛 Fixes
+- **Image-only sends silently injected an English prompt (#404)** — Sending an image with no text used to auto-inject "Describe this image." as the prompt; empty text + images now go to pi as-is so the model sees only the image, and the composer placeholder is the whole send semantic.
+- **OpenCode 2.x sessions unrecognized on import (#410)** — OpenCode 2.x's session_v2 / session_message format is normalized into the import list, so migrating from newer OpenCode no longer misses sessions.
+- **Inline links with spaced local paths rendered as raw syntax (#409)** — A space in the path made Markdown inline links fall apart into raw text; spaced paths now render as clickable links.
+
+### 🙏 Thanks
+
+Thanks to **lamugu** for the sidebar sticky group headers switch (#408) and the fix for inline links with spaced local paths (#409).
+
+Thanks to **MrSpeaker10969** for reporting image-only sends being injected with a prompt (#404), and to **Linecos** for reporting OpenCode 2.x import incompatibility (#410).
+
+Special thanks to **罪**, **橙子** and **微时** for providing the model service used in our software development 🎉
+
 ## v0.9.6 (2026-10-24)
 
 The through-line of this release is lightness and steadiness: timeline virtualization plus a full pass of memory work tames long-session scrolling, idle residency and startup payload (the main startup chunk drops from 5.5MB to 3.7MB, with idle heavyweights such as the audio utility and standby processes reined in one by one); the built-in browser agent lets pi operate pages directly; Wallpaper Engine video wallpapers, favorites and PiDeck data over MCP all land here; and the Web gets a repair pass from image attachments to touch targets.

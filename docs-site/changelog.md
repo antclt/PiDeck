@@ -10,6 +10,18 @@ description: PiDeck 每个版本的发布记录：新功能、问题修复与体
 - [中文 CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.zh-CN.md)
 - [English CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.md)
 
+## v0.9.7
+
+发布时间：2026-10-26
+
+- 🚀 **思考强度选择器重做：ZCode 同款渐变强度条**
+- 🚀 **侧栏分组标题栏冻结开关**
+- 🚀 **Web 端：侧栏会话列表显式分页**
+- ✨ **界面对齐 ZCode 的一轮视觉收口**
+- ✨ **Web 端：/api/state 条件请求**
+- ✨ **纯图片发送被静默注入英文提示词 (#404)**
+- ✨ **OpenCode 2.x 会话导入不识别 (#410)**
+
 ## v0.9.6
 
 发布时间：2026-10-24

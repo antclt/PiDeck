@@ -11,7 +11,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.9.6-blue)
+![Version](https://img.shields.io/badge/version-0.9.7-blue)
 
 <!-- star-history:start -->
 <picture>
@@ -81,25 +81,16 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.9.6** (2026-10-24)
+> **Latest: v0.9.7** (2026-10-26)
 
-### v0.9.6 Release Highlights
-- 🚀 **Built-in browser agent: pi can drive the built-in browser**
-- 🚀 **Wallpaper Engine video wallpapers**
-- 🚀 **Favorites: whole replies and selected snippets**
-- 🚀 **PiDeck data over MCP**
-- 🚀 **Environment setup page rebuilt**
-- 🚀 **One-click model config import**
-- 🚀 **Settings sidebar search**
-- 🚀 **Session outline rail rebuilt**
-- 🚀 **DSH auto-retries made visible**
-- 🚀 **Web: in-turn queued sends and in-session search**
-- 🚀 **Synced with pi 1.4.0**
-- 🚀 **Figma MCP OAuth direct connect**
-- ✨ **Timeline virtualization: long sessions stop rescanning the whole list**
-- ✨ **A full pass of memory work**
-- ✨ **Streaming and RPC hot paths**
-- ✨ **Faster prompt library and skill store**
+### v0.9.7 Release Highlights
+- 🚀 **Thinking-intensity picker rebuilt: ZCode-style gradient intensity bar**
+- 🚀 **Sidebar sticky group headers switch**
+- 🚀 **Web: explicit paging for the sidebar session list**
+- ✨ **A visual pass aligning the UI with ZCode**
+- ✨ **Web: conditional requests for /api/state**
+- ✨ **Image-only sends silently injected an English prompt (#404)**
+- ✨ **OpenCode 2.x sessions unrecognized on import (#410)**
 
 [View Full Changelog →](CHANGELOG.md)
 

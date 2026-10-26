@@ -11,7 +11,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.9.6-blue)
+![Version](https://img.shields.io/badge/version-0.9.7-blue)
 
 国内 AtomGit 托管：https://atomgit.com/ayuayue/PiDeck
 <!-- 预留 AtomGit G-Star 徽章位（替换占位链接后启用）
@@ -101,25 +101,16 @@
 
 ## 📋 更新日志
 
-> **最新版本 v0.9.6**（2026-10-24）
+> **最新版本 v0.9.7**（2026-10-26）
 
-### v0.9.6 更新亮点
-- 🚀 **内置浏览器 Agent：pi 能操作内置浏览器**
-- 🚀 **Wallpaper Engine 视频壁纸**
-- 🚀 **收藏：整条回复与划选片段**
-- 🚀 **PiDeck 的数据接入 MCP**
-- 🚀 **环境设置页重做**
-- 🚀 **模型配置一键导入**
-- 🚀 **设置页侧栏搜索**
-- 🚀 **会话定位轴重做**
-- 🚀 **DSH 自动重试可见**
-- 🚀 **Web 端：回合内排队发送与会话内搜索**
-- 🚀 **同步 pi 1.4.0**
-- 🚀 **Figma MCP OAuth 直连**
-- ✨ **时间线虚拟化：长会话滚动不再重扫全列表**
-- ✨ **一整轮内存收口**
-- ✨ **流式与 RPC 热路径**
-- ✨ **提示词库与技能商店更快**
+### v0.9.7 更新亮点
+- 🚀 **思考强度选择器重做：ZCode 同款渐变强度条**
+- 🚀 **侧栏分组标题栏冻结开关**
+- 🚀 **Web 端：侧栏会话列表显式分页**
+- ✨ **界面对齐 ZCode 的一轮视觉收口**
+- ✨ **Web 端：/api/state 条件请求**
+- ✨ **纯图片发送被静默注入英文提示词 (#404)**
+- ✨ **OpenCode 2.x 会话导入不识别 (#410)**
 
 [查看完整更新日志 →](CHANGELOG.zh-CN.md)
 
