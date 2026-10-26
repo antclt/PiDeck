@@ -11,6 +11,7 @@ import {
 	type ToolDetailStatus,
 } from "../../shared/formatToolDetail";
 import { extractMessageText } from "./messageContent";
+import { stripAnsiCsi as stripAnsi } from "../../shared/ansiText";
 import { chatUsageFromPiUsage } from "./messageUsage";
 import { asRecord } from "./agentUtils";
 import { isRoleMessageRole, takeActiveEntryId } from "./sessionEntryIds";
@@ -19,10 +20,6 @@ export type AgentMessageProjectorDeps = {
 	translate: (key: MainProcessTranslationKey, params?: Record<string, string | number>) => string;
 	isAskAborted: (agentId: string) => boolean;
 };
-
-function stripAnsi(text: string): string {
-	return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
-}
 
 export function buildActiveBranchEntryIds(entries: Array<{ id: string; parentId: string | null; type?: string; message?: { role?: string } }>, leafId: string): string[] {
 	const entryById = new Map<string, { id: string; parentId: string | null; type?: string; message?: { role?: string } }>();

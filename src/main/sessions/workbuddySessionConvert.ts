@@ -2,6 +2,10 @@ import { createHash, randomUUID } from "node:crypto";
 import type { SessionImportCopy } from "./SessionImportCopy";
 import { importedContentHasToolCall, normalizeImportedStopReason, safeIsoTimestamp } from "./importNormalize";
 import { asArray, parseWorkBuddyArguments, readNumber, readRecord, readString, readWorkBuddyModel, stripInjectedContext, type ParsedWorkBuddySession, type WorkBuddyRecord } from "./workbuddySessionSource";
+import { cleanImportTitle as cleanWorkBuddyTitle, zeroUsage } from "./importShared";
+
+// 标题清洗与 usage 占位实现统一在 importShared；仍从本模块转出旧名字。
+export { cleanWorkBuddyTitle, zeroUsage };
 
 export type ConvertedWorkBuddySession = {
 	/** 转换结果元数据；`raw` 仅在内存模式（scan 摘要）下由调用方拼装 */
@@ -36,17 +40,6 @@ export async function convertWorkBuddySession(input: ConvertWorkBuddyInput): Pro
 }
 
 type PiContent = Record<string, unknown>;
-
-export function zeroUsage() {
-	return {
-		input: 0,
-		output: 0,
-		cacheRead: 0,
-		cacheWrite: 0,
-		totalTokens: 0,
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-	};
-}
 
 function pickText(content: unknown, type: string): string {
 	return asArray(content)
@@ -89,12 +82,6 @@ function extractPiText(content: PiContent[]): string {
 		.map((item) => readString(item.text) || readString(item.thinking) || readString(item.name))
 		.filter(Boolean)
 		.join(" ");
-}
-
-export function cleanWorkBuddyTitle(value?: string): string {
-	const text = value?.replace(/\s+/g, " ").trim();
-	if (!text || /^untitled$/i.test(text)) return "";
-	return text.length > 40 ? `${text.slice(0, 40)}...` : text;
 }
 
 function makeId(sessionId: string, sequence: number): string {

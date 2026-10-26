@@ -21,7 +21,6 @@ import { sessionRuntimeBySessionIdAtomFamily } from "../../atoms/session-selecto
 import { useAskPanel } from "../../hooks/useAskPanel";
 import { queueDrainSuppressedByIdAtom } from "../../atoms/composer-atoms";
 import { isSessionRuntimeBusy } from "../../hooks/useSessionTimelineController";
-import { ExtensionWidgetCard } from "./ComposerParts";
 import { ComposerWidgetFrame, useComposerWidgetCollapsed } from "./ComposerWidgetLayout";
 
 export function ComposerAttachmentBar(props: {
@@ -104,27 +103,6 @@ export function ComposerAttachmentBar(props: {
 					{t("app.clearImages")}
 				</Button>
 			)}
-		</div>
-	);
-}
-
-export function ExtensionWidgetPanel(props: {
-	widgets?: Record<string, string[]>;
-	sessionId?: string;
-	/** @deprecated A8 compatibility for the pre-leaf App call site. */
-	sessionKey?: string;
-	dismissedKeys: string[];
-	collapsed: boolean;
-	onDismiss: (widgetKey: string) => void;
-}) {
-	const sessionId = props.sessionId ?? props.sessionKey;
-	if (!sessionId || !props.widgets || !Object.keys(props.widgets).length) return null;
-	return (
-		<div className="extension-widgets-container w-full">
-			{!props.collapsed &&
-				Object.entries(props.widgets)
-					.filter(([widgetKey]) => !props.dismissedKeys.includes(widgetKey))
-					.map(([widgetKey, lines]) => <ExtensionWidgetCard key={widgetKey} widgetKey={widgetKey} lines={lines} sessionIdOrPath={sessionId} onClose={() => props.onDismiss(widgetKey)} />)}
 		</div>
 	);
 }
@@ -243,8 +221,6 @@ export function QueuedPromptPanel(props: {
 	trackRef: RefObject<HTMLElement | null>;
 	sessionId?: string;
 	prompts: QueuedPromptSnapshot[];
-	/** @deprecated 独立卡展示全部排队项并由 180px 列表滚动；保留以免调用点同步炸掉。 */
-	visiblePrompts: QueuedPromptSnapshot[];
 	onRetract: (sessionId: string, prompt: QueuedPromptSnapshot) => void;
 	onDiscard: (sessionId: string, promptId: string) => void;
 	onChangeBehavior: (sessionId: string, promptId: string, behavior: "steer" | "followUp") => void;

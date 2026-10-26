@@ -3,7 +3,7 @@
  * 依赖方向：types/chips ← TipTap 实现 ← TipTapComposer；controller 只依赖契约与 caretCoords。
  */
 
-export type { ComposerChip, RichInputChip } from "./chips";
+export type { ComposerChip } from "./chips";
 export {
 	formatFilePathRef,
 	parseRichInputChips,

@@ -1,8 +1,11 @@
-import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { readImportMetaHead } from "./importMetaHead";
 import { assertSourceWithinRoot } from "./importPathGuard";
 import { readSessionSourceHead, readJsonlObjects } from "./sessionSourceHead";
+import { ensureProjectSessionDir, getProjectSessionDir, normalizePath, readRecord, safePathToken } from "./importShared";
+
+// 共用工具实现统一在 importShared；仍从本模块转出，保持既有调用点不变。
+export { ensureProjectSessionDir, getProjectSessionDir, normalizePath, readRecord, safePathToken };
 
 /** Kimi Code 的 wire.jsonl / session_index.jsonl 行结构不固定，统一按 unknown 读取后再逐字段收窄。 */
 export type KimiRecord = Record<string, unknown>;
@@ -53,28 +56,6 @@ export function readString(value: unknown): string {
 
 export function readNumber(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-export function readRecord(value: unknown): Record<string, unknown> {
-	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-
-export function normalizePath(path?: string): string {
-	return String(path ?? "")
-		.replace(/\\/g, "/")
-		.replace(/\/+$/, "")
-		.toLowerCase();
-}
-
-export function safePathToken(path: string): string {
-	const normalized = path.replace(/\\/g, "/");
-	const win = normalized.match(/^([A-Za-z]):\/(.+)$/);
-	if (win) return `--${win[1]}--${win[2].replace(/\//g, "-")}--`;
-	return `--${normalized.replace(/^\//, "").replace(/\//g, "-")}--`;
-}
-
-export function getProjectSessionDir(piRoot: string, projectPath: string): string {
-	return join(piRoot, safePathToken(projectPath));
 }
 
 export function getKimiTargetPath(piRoot: string, projectPath: string, session: ParsedKimiSession): string {
@@ -219,10 +200,4 @@ export async function* readKimiWireObjects(filePath: string): AsyncGenerator<Kim
 /** 读取导入产物头部的 import 标记（有界读头部，不再整读会话文件——见 importMetaHead）。 */
 export async function readKimiImportMeta(targetPath: string): Promise<KimiImportMeta | undefined> {
 	return readImportMetaHead(targetPath, "kimi_import");
-}
-
-export async function ensureProjectSessionDir(piRoot: string, projectPath: string) {
-	const dir = getProjectSessionDir(piRoot, projectPath);
-	await mkdir(dir, { recursive: true });
-	return dir;
 }
