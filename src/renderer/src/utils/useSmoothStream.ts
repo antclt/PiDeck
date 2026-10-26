@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { classifySmoothStreamChange } from "./smoothStreamContent";
+import { classifySmoothStreamChange, pushGraphemes } from "./smoothStreamContent";
 
 /**
  * useSmoothStream —— 把「后端一次性到达的一大段文本」摊成逐字显示。
@@ -107,10 +107,21 @@ export function useSmoothStream({ content, isStreaming, disabled = false, minDel
 			return;
 		}
 
+		// 流已结束（isStreaming=false）：不进打字机。同一提交里「收口」effect 会把全文
+		// 直接 dump，且 settled 展示只读 props.text（MarkdownStream），displayedContent
+		// 根本不参与——这里入队是纯浪费；更糟的是大 delta（点「展开全文」把预览一次性
+		// 换成 205KB 全文）segmentText 出十几万 grapheme，曾经 spread 进 push 直接爆栈
+		// （RangeError: Maximum call stack size exceeded，2026-10-27 事故）。
+		if (streamDoneRef.current) {
+			prevContentRef.current = newContent;
+			return;
+		}
+
 		const change = classifySmoothStreamChange(prevContent, displayedRef.current, newContent);
 		if (change.kind === "append") {
 			const chars = segmentText(change.delta);
-			chunkQueueRef.current.push(...chars);
+			// 入队必须走 pushGraphemes：流式期一次异常大的 flush 同样会撑爆 spread 实参上限。
+			pushGraphemes(chunkQueueRef.current, chars);
 			// 空转停帧后新 delta 到达：重启打字机
 			if (!rafRef.current) renderLoopRef.current(performance.now());
 		} else if (change.kind === "rewind") {
