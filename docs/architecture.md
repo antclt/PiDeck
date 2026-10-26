@@ -49,6 +49,13 @@ src/
 
 漏任一处 → 运行时 undefined。新增域时开新 `*Ipc.ts`，不要继续往 `sessionIpc.ts` / `systemIpc.ts` 里堆。
 
+**别把 Agent 事件名加进 `ipcChannels`**：`src/shared/ipc.ts` 有两张语义不同的表。
+`agentEventTags`（`agents:state` / `agents:message` / `agents:text-stream` 等 8 个）是
+`AgentManager` / `AcpAgentManager` / `DshAgentManager` 调 `emit()` 的第一个参数，只由
+`emitSessionRuntimeEvent()` 聚合成单通道 `sessionsRuntimeEvent` 出去，**preload 里不存在**。
+混进 `ipcChannels` 会让「三处同步」失去机械可判定性（要么误报，要么开白名单）。
+`npm run check:ipc-wiring` 校验这两条边界（CI 已接入）：通道必须主进程 + preload 齐备，事件标签只准在主进程。
+
 ## 文件体量（增量门禁，防回流）
 
 存量现实（2026-10 核对）：`main/index.ts` 6724 行、`AgentManager.ts` 6439、`App.tsx` 3722，全仓 **86 个文件 >600 行**；三份拆分计划落地后都出现回涨。

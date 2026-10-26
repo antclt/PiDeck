@@ -26,7 +26,7 @@ test("activateRuntime 入口：激活前发合成 starting（hasLiveRuntime 守�
 });
 
 test("emitSessionActivating：session 级合成 envelope（agents:state + starting + 当前代数）", () => {
-	assert.match(mainIndex, /function emitSessionActivating\(sessionId: string\): void \{[\s\S]*?sourceChannel: ipcChannels\.agentsState,[\s\S]*?payload: \{ status: "starting" \},[\s\S]*?\}/, "合成事件必须走 agents:state 通道带 starting 载荷（渲染层 agents:state 分支才能吃到）");
+	assert.match(mainIndex, /function emitSessionActivating\(sessionId: string\): void \{[\s\S]*?sourceChannel: agentEventTags\.agentsState,[\s\S]*?payload: \{ status: "starting" \},[\s\S]*?\}/, "合成事件必须走 agents:state 通道带 starting 载荷（渲染层 agents:state 分支才能吃到）");
 	assert.match(mainIndex, /runtimeGeneration: sessionRuntimeCoordinator\.currentRuntimeGeneration\(sessionId\),/, "代数必须取 bind 前当前值（压住旧 runtime 迟到事件）");
 	assert.match(coordinator, /currentRuntimeGeneration\(sessionId: string\): number \{\s*return this\.generationBySession\.get\(sessionId\) \?\? 0;/, "coordinator 必须公开 bind 前代数读取");
 });

@@ -17,7 +17,7 @@ import test from "node:test";
  * 通道选择（有事实依据）：不能用会话内系统消息，因为 DSH 的 runtime.messages
  * 是 host projection 的整段替换（DshAgentManager 里 5 处 `runtime.messages =
  * projection.messages`），本地注入的消息下一次投影就被冲掉。因此走
- * ipcChannels.agentsNotice（渲染层 useSessionRuntimeBridge → showNotice）。
+ * agentEventTags.agentsNotice（渲染层 useSessionRuntimeBridge → showNotice）。
  */
 
 const dshManager = readFileSync("src/main/dsh/DshAgentManager.ts", "utf8");
@@ -33,9 +33,9 @@ test("DSH 实现 notifyModelPreferenceIgnored（模型偏好落不下去时提�
 test("DSH 的提示走 agentsNotice（而不是会话内消息）", () => {
 	// 会话内消息会被 projection 整段替换冲掉（5 处 runtime.messages = projection.messages），
 	// 因此提示必须走 toast 通道。
-	assert.match(dshManager, /ipcChannels\.agentsNotice/, "DSH 未使用 agentsNotice：本地注入的消息会被 host projection 覆盖");
+	assert.match(dshManager, /agentEventTags\.agentsNotice/, "DSH 未使用 agentsNotice：本地注入的消息会被 host projection 覆盖");
 	const notifyBlock = dshManager.slice(dshManager.indexOf("notifyModelPreferenceIgnored"));
-	assert.match(notifyBlock.slice(0, 900), /ipcChannels\.agentsNotice/);
+	assert.match(notifyBlock.slice(0, 900), /agentEventTags\.agentsNotice/);
 	assert.match(notifyBlock.slice(0, 900), /agentId/);
 });
 

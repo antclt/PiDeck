@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
-const { ipcChannels } = loadTsCommonJs("src/shared/ipc.ts");
+const { agentEventTags } = loadTsCommonJs("src/shared/ipc.ts");
 const { AgentManager } = loadTsCommonJs("src/main/pi/AgentManager.ts");
 
 /**
@@ -92,7 +92,7 @@ test("sendPrompt 在存在 pending UI 请求时应自动取消 Ask，解除底�
 	assert.equal(cancelRaw.value, null, "取消响应 value 应为 null");
 
 	// 2. 应向渲染层广播 agentsUiRequest 取消事件
-	const uiCancelEvent = emitted.find((e) => e.channel === ipcChannels.agentsUiRequest && e.args[0]?.agentId === "agent-1" && e.args[0]?.requestId === "req-ask-1");
+	const uiCancelEvent = emitted.find((e) => e.channel === agentEventTags.agentsUiRequest && e.args[0]?.agentId === "agent-1" && e.args[0]?.requestId === "req-ask-1");
 	assert.ok(uiCancelEvent, "应向渲染层广播 agentsUiRequest 取消事件");
 	assert.equal(uiCancelEvent.args[0].completed, true);
 	assert.equal(uiCancelEvent.args[0].cancelled, true);

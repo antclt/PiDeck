@@ -15,9 +15,9 @@ test("已删除无任何 handler/preload 引用的死通道常量", () => {
 // 黑名单只防三个已删常量复活；本检查防「新增通道漏三处同步」——AGENTS.md 硬规则：
 // 通道常量、main handler、preload 白名单三处同步，漏一处运行时 undefined。
 // 「有主」判定宽进：属性访问（ipcChannels.xxx / .xxx）或字面量值任一出现在
-// src/ 或 tests/ 即算消费。EventEmitter 域事件复用（AgentManager this.emit
-// (ipcChannels.agentsMessage)）、双 preload（hostPlugin.ts）、域内注册（pet/）
-// 全都经属性访问命中，无需豁免清单。
+// src/ 或 tests/ 即算消费。双 preload（hostPlugin.ts）、域内注册（pet/）都经属性
+// 访问命中，无需豁免清单；AgentEmitter 域事件已拆到 agentEventTags（同一文件、
+// 同样按属性访问命中），不混进「通道必须三处同步」的校验面。
 function collectSourceChunks() {
 	const chunks = [];
 	const walk = (dir) => {

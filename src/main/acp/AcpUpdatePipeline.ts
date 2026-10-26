@@ -8,7 +8,7 @@
  * 发布通道（emit/emitRuntimeState）与外部回调（标题/配置）经 host 回到 manager，
  * 保证 agentsState/agentsRuntimeState 仍由 manager 统一编排。
  */
-import { ipcChannels } from "../../shared/ipc";
+import { agentEventTags } from "../../shared/ipc";
 import type { AgentTab } from "../../shared/types/agent";
 import type { AcpConfigOption, AcpRpcNotification, AcpSessionUpdate, AcpToolCallUpdate } from "./acpProtocol";
 import type { AcpAgentRuntime } from "./acpAgentRuntime";
@@ -152,7 +152,7 @@ export class AcpUpdatePipeline {
 			runtime.flushTimer = null;
 			runtime.flushPending = false;
 		}
-		this.host.emit(ipcChannels.agentsMessage, {
+		this.host.emit(agentEventTags.agentsMessage, {
 			agentId: runtime.tab.id,
 			deckSessionId: runtime.tab.deckSessionId,
 			messages: runtime.projection.messages,
@@ -168,18 +168,29 @@ export class AcpUpdatePipeline {
 
 /**
  * 在途工具调用集合维护（stall 看门狗的豁免依据）：tool_call 开始入集；tool_call_update
- * 的 pending/in_progress 再入集（容忍重复帧），其余状态（completed 及未来可能的 failed）
- * 一律按终态出集——宁可提前解除豁免（回落全静默判定），也不让脏帧把豁免永久挂住。
+ * 的 pending/in_progress 再入集（容忍重复帧），显式终态（completed/failed 及后续新枚举）
+ * 出集——宁可提前解除豁免（回落全静默判定），也不让脏帧把豁免永久挂住。
+ *
+ * 省略 status 的 tool_call_update 必须保持原成员资格：ACP 规范里除 toolCallId 外字段
+ * 全可选，工具流式输出就是「只带 content、不带 status」的补丁帧。把它当终态处理会让
+ * 「先刷一段正文、随后长时间静默」的长命令重新被 stall 看门狗误杀（正是 #411 的形态）。
+ * 真悬死（工具永不报终态）仍由回合兑底超时收口，不会永久豁免。
  * toolCallId 非法直接忽略（同投影器口径）；幂等无副作用，回合收口点统一 clear。
  */
 function trackInFlightToolCall(runtime: AcpAgentRuntime, update: AcpSessionUpdate): void {
 	if (update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update") return;
 	const toolCallId = (update as AcpToolCallUpdate).toolCallId;
 	if (typeof toolCallId !== "string" || !toolCallId) return;
-	const status = (update as AcpToolCallUpdate).status;
-	if (update.sessionUpdate === "tool_call_update" && status !== "pending" && status !== "in_progress") {
-		runtime.inFlightToolCalls.delete(toolCallId);
+	if (update.sessionUpdate === "tool_call") {
+		runtime.inFlightToolCalls.add(toolCallId);
 		return;
 	}
-	runtime.inFlightToolCalls.add(toolCallId);
+	const status = (update as AcpToolCallUpdate).status;
+	// undefined/null 都是「本次补丁没说生命周期」：不动集合（见上方注释）。
+	if (status == null) return;
+	if (status === "pending" || status === "in_progress") {
+		runtime.inFlightToolCalls.add(toolCallId);
+		return;
+	}
+	runtime.inFlightToolCalls.delete(toolCallId);
 }

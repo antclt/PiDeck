@@ -80,8 +80,8 @@ test("emitAgentsNotice 汇聚点必须走 sessionsRuntimeEvent envelope（渲染
 	// 渲染层 useSessionRuntimeBridge 只消费 runtime envelope（sourceChannel=agents:notice），
 	// 裸 webContents.send(agentsNotice) 是死流量（与 AgentManager DIRECT_EMIT_CHANNELS 同规则）。
 	assert.match(helper, /sendSessionRuntimeEnvelope\(/);
-	assert.match(helper, /ipcChannels\.agentsNotice/);
-	assert.match(helper, /sourceChannel: ipcChannels\.agentsNotice/);
+	assert.match(helper, /agentEventTags\.agentsNotice/);
+	assert.match(helper, /sourceChannel: agentEventTags\.agentsNotice/);
 });
 
 test("rename 失败时条目标题保持未加后缀的原名（权威名以文件为准）", () => {

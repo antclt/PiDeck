@@ -1,4 +1,4 @@
-import { ipcChannels } from "../../shared/ipc";
+import { agentEventTags } from "../../shared/ipc";
 import type { ThinkingUpdate } from "../../shared/types";
 import { LatestByKeyEmitter } from "./LatestByKeyEmitter";
 import { stripAnsi } from "./agentUtils";
@@ -124,7 +124,7 @@ export class LiveStreamChannel {
 			this.lastSentTextByAgent.delete(agentId);
 			this.textPushCountByAgent.delete(agentId);
 		}
-		this.host.emit(ipcChannels.agentsTextStream, payload);
+		this.host.emit(agentEventTags.agentsTextStream, payload);
 		this.host.onTextStreamPushed(agentId);
 	}
 
@@ -225,7 +225,7 @@ export class LiveStreamChannel {
 				endedAt: segment.endedAt > 0 ? segment.endedAt : Date.now(),
 				done: true,
 			};
-			this.host.emit(ipcChannels.agentsThinking, update);
+			this.host.emit(agentEventTags.agentsThinking, update);
 		}
 		this.streamingThinking.delete(agentId);
 		this.thinkingSegmentByAgent.delete(agentId);
@@ -253,7 +253,7 @@ export class LiveStreamChannel {
 		};
 		this.lastSentThinkingByAgent.set(agentId, text);
 		this.thinkingPushCountByAgent.set(agentId, sendFull ? 0 : pushCount);
-		this.host.emit(ipcChannels.agentsThinking, update);
+		this.host.emit(agentEventTags.agentsThinking, update);
 	}
 
 	// ── 生命周期清理 ───────────────────────────────────────────

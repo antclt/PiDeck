@@ -392,3 +392,96 @@ test("rollbackAcpUserPrompt drops the seeded message only when nothing was produ
 	untouched = rollbackAcpUserPrompt(untouched, -1);
 	assert.equal(untouched.messages.length, 1);
 });
+
+/**
+ * Issue #413：ACP 回合的最终结果文本被渲染在「执行过程」工具卡上方，与实际时序相反。
+ * CLI 侧 wire 顺序已实测正确（tool_call → tool_call_update completed → thought chunks →
+ * final message chunks）；投影层原先无条件并回 activeAssistantIndex 指向的 assistant——
+ * 那是回合内第一条（思考流建出的），工具卡追加在它后面，最终文本再并回时就被渲染到
+ * 工具卡上方。判据必须收紧为「目标 assistant 仍是 messages 末条才并回」，否则末尾新开一段。
+ */
+test("final text after a tool card opens a new assistant bubble below the tool", () => {
+	let state = step(initialAcpProjection(), { sessionUpdate: "user_message_chunk", content: { type: "text", text: "帮我检查" } });
+	state = step(state, { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "让我先检查一下…" } });
+	assert.equal(state.activeAssistantIndex, 1, "思考流建出本回合第一条 assistant 并成为活动段");
+	state = step(state, { sessionUpdate: "tool_call", toolCallId: "tc-A", title: "Read file", kind: "read", status: "pending" });
+	state = step(state, { sessionUpdate: "tool_call_update", toolCallId: "tc-A", status: "completed", content: [{ type: "text", text: "file body" }] });
+	state = step(state, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "检查结果：全部 PASS。" } });
+	assert.deepEqual([...state.messages.map((message) => message.role)], ["user", "assistant", "tool", "assistant"], "最终正文必须落在工具卡下方的新气泡，而不是并回工具卡上方的旧 assistant");
+	assert.equal(state.messages[1].thinking, "让我先检查一下…");
+	assert.equal(state.messages[1].text, "");
+	// 切段旧段收口为 toolUse（中间回复），不是 stop：渲染层只把 stop 当「回合已收尾」，
+	// 标 stop 会在工具卡到达时把同一用户回合拆成多个 agent-run（DSH 2026-09-17 同款回归）；
+	// stop/aborted/error 只能由 settleAcpTurn 产出（回合真终态）。
+	assert.equal(state.messages[1].stopReason, "toolUse", "旧流式段必须收口为中间回复，不能永远停在 pending，也不能冒充回合终态");
+	assert.equal(state.messages[2].meta.toolName, "Read file");
+	assert.equal(state.messages[3].text, "检查结果：全部 PASS。");
+	assert.equal(state.messages[3].thinking, undefined);
+	assert.equal(state.messages[3].stopReason, "pending", "新段仍是流式态，等 settleAcpTurn 收口");
+	assert.equal(state.activeAssistantIndex, 3);
+	assert.deepEqual([...state.lastTouched], [3], "新开消息时 lastTouched 指向新下标，图片物化只看新段");
+	// 结算只收口活动段（settleAcpTurn 维持原语义）；旧段已在切段时收口
+	state = settleAcpTurn(state, "end_turn");
+	assert.equal(state.messages[3].stopReason, "stop");
+	// settle 只收口活动段（最后一段）；被工具卡隔断的旧段保持 toolUse，不被误标成回合终态。
+	assert.equal(state.messages[1].stopReason, "toolUse");
+	assert.equal(state.activeAssistantIndex, undefined);
+});
+
+test("assistant text split by a tool call becomes two bubbles and keeps streaming into the newest", () => {
+	let state = appendAcpUserPrompt(initialAcpProjection(), "run it", null, AGENT);
+	state = step(state, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "先看一下" } });
+	state = step(state, { sessionUpdate: "tool_call", toolCallId: "tc-1", title: "bash", status: "in_progress" });
+	state = step(state, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "结果：" } });
+	state = step(state, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "PASS" } });
+	assert.deepEqual([...state.messages.map((message) => message.role)], ["user", "assistant", "tool", "assistant"]);
+	assert.equal(state.messages[1].text, "先看一下");
+	assert.equal(state.messages[1].stopReason, "toolUse", "切段旧段是中间回复（toolUse），stop 只能由 settleAcpTurn 产出");
+	assert.equal(state.messages[3].text, "结果：PASS", "切段后的连续 chunk 仍并回同一段");
+	assert.equal(state.activeAssistantIndex, 3);
+});
+
+test("thought chunks after a tool card also open a new bubble (same order-first rule)", () => {
+	let state = step(initialAcpProjection(), { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "plan" } });
+	state = step(state, { sessionUpdate: "tool_call", toolCallId: "tc-2", title: "bash", status: "completed" });
+	state = step(state, { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "now verify" } });
+	assert.deepEqual([...state.messages.map((message) => message.role)], ["assistant", "tool", "assistant"], "工具卡之后的思考块同样新开一段：时序优先于合并");
+	assert.equal(state.messages[0].thinking, "plan");
+	assert.equal(state.messages[0].stopReason, "toolUse", "工具卡之后的思考段同样按中间回复收口");
+	assert.equal(state.messages[2].thinking, "now verify");
+	assert.equal(state.messages[2].text, "");
+	assert.equal(state.messages[2].stopReason, "pending");
+});
+
+test("splitting after a tool card does not overturn an aborted segment", () => {
+	let state = appendAcpUserPrompt(initialAcpProjection(), "stop please", null, AGENT);
+	state = step(state, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "partial" } });
+	state = settleAcpTurn(state, "cancelled");
+	assert.equal(state.messages[1].stopReason, "aborted");
+	// 迟到 chunk：末尾仍是该 assistant，并回同一气泡但不得把 aborted 翻回 pending
+	state = step(state, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: " tail" } });
+	assert.equal(state.messages[1].text, "partial tail");
+	assert.equal(state.messages[1].stopReason, "aborted");
+	// 工具卡把旧段与本段隔开：新开一段时旧段仍是 aborted，不能被收口成 stop
+	state = step(state, { sessionUpdate: "tool_call", toolCallId: "tc-3", title: "bash", status: "completed" });
+	state = step(state, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "after abort" } });
+	assert.equal(state.messages.length, 4);
+	assert.equal(state.messages[1].stopReason, "aborted", "aborted 是终态，切段收口不得改写");
+	assert.equal(state.messages[3].text, "after abort");
+	assert.equal(state.messages[3].stopReason, "pending");
+});
+
+test("prompt response between tool and final chunks still splits correctly", () => {
+	// opencode 实测：session/prompt 响应可能先于末尾 chunk 到达。工具卡已把旧段隔开，
+	// settle 只收口活动段；末尾 chunk 到达时末尾是工具卡，必须在它之后新开一段。
+	let state = appendAcpUserPrompt(initialAcpProjection(), "检查", null, AGENT);
+	state = step(state, { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "先看看" } });
+	state = step(state, { sessionUpdate: "tool_call", toolCallId: "tc-4", title: "bash", status: "completed" });
+	state = settleAcpTurn(state, "end_turn");
+	assert.equal(state.messages[1].stopReason, "stop");
+	assert.equal(state.activeAssistantIndex, undefined);
+	state = step(state, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "全部 PASS。" } });
+	assert.deepEqual([...state.messages.map((message) => message.role)], ["user", "assistant", "tool", "assistant"]);
+	assert.equal(state.messages[3].text, "全部 PASS。");
+	assert.equal(state.messages[3].stopReason, "pending");
+});

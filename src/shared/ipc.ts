@@ -789,31 +789,13 @@ export const ipcChannels = {
 	/** 读取主窗口当前是否置顶（渲染层初始化置顶按钮态用，避免硬编码 false） */
 	appWindowIsAlwaysOnTop: "app:window-is-always-on-top",
 	appWindowClose: "app:window-close",
-	agentsRuntimeState: "agents:runtime-state",
-	agentsState: "agents:state",
 	projectsListModels: "projects:list-models",
 	/** 模型列表诊断报告：模型数组 + 失败原因分类（版本过低/配置损坏/pi 未安装），
 	 *  供模型选择器在列表为空时给出差异化引导；force=true 时绕过缓存重新 fork。 */
 	projectsListModelsReport: "projects:list-models-report",
 	/** 模型规格查询：pi-ai 内置目录按模型 id 精确匹配，中转站通用 */
 	projectsGetModelSpec: "projects:get-model-spec",
-	agentsMessage: "agents:message",
-	agentsLog: "agents:log",
 
-	/** 流式思考内容更新，agent 忙碌时实时推送当前思考文本 */
-	agentsThinking: "agents:thinking",
-
-	/** 流式正文内容更新，agent 忙碌时实时推送累积正文（阶段1：独立于 messages 数组） */
-	agentsTextStream: "agents:text-stream",
-
-	/**
-	 * 主进程 → 渲染进程的轻量 toast 通知（如 abort 已请求停止）。
-	 * 避免把瞬时状态反馈写成会话时间线里的系统卡片。
-	 */
-	agentsNotice: "agents:notice",
-
-	/** Agent Extension UI 协议：主进程 → 渲染进程，推送扩展的 UI 请求（select/confirm/input/editor） */
-	agentsUiRequest: "agents:ui-request",
 	/** 项目信任确认：主进程 → 渲染进程，启动 Agent 前请求用户对含 .pi 资源的项目做信任决策 */
 	projectsTrustRequest: "projects:trust-request",
 	/** 项目信任确认：渲染进程 → 主进程，回传用户的信任选择（trust-remember/trust-session/deny） */
@@ -1351,4 +1333,32 @@ export const ipcChannels = {
 	acpSessionConfigSet: "acp:session-config-set",
 	/** 主→渲染：configOptions 变更（set 响应/config_option_update 通知）。 */
 	acpSessionConfigChanged: "acp:session-config-changed",
+} as const;
+
+/**
+ * Agent 事件标签（**不是 IPC 通道**）。
+ *
+ * 这些名字是 AgentManager / AcpAgentManager / DshAgentManager 对宿主 `emit()` 的第一个参数：
+ * 主进程的 `emitSessionRuntimeEvent(agentId, sourceChannel, payload)` 把它们聚合成唯一一条
+ * `ipcChannels.sessionsRuntimeEvent` 再推给渲染层。
+ *
+ * 为什么不能混进 `ipcChannels`：铁律「新 IPC 三处同步」的口径是「主进程注册 + preload 转发」，
+ * 而这 8 个两边都不出现。混放会让任何机械校验要么误报、要么被迫开白名单，规则就退化成靠人记。
+ * - 新增 `ipcChannels` 条目 → 必须主进程注册 + preload 转发（`npm run check:ipc-wiring`）；
+ * - 新增 `agentEventTags` 条目 → 只在主进程内部流转，preload 不得出现（同一条校验）。
+ */
+export const agentEventTags = {
+	/** 运行态快照（底栏状态 / 上下文仪表数据源） */
+	agentsRuntimeState: "agents:runtime-state",
+	agentsState: "agents:state",
+	agentsMessage: "agents:message",
+	agentsLog: "agents:log",
+	/** 流式思考内容更新，agent 忙碌时实时推送当前思考文本 */
+	agentsThinking: "agents:thinking",
+	/** 流式正文内容更新，agent 忙碌时实时推送累积正文（阶段1：独立于 messages 数组） */
+	agentsTextStream: "agents:text-stream",
+	/** 主进程 → 渲染进程的轻量 toast 通知（如 abort 已请求停止）；避免把瞬时状态反馈写成会话时间线里的系统卡片 */
+	agentsNotice: "agents:notice",
+	/** Agent Extension UI 协议：主进程 → 渲染进程，推送扩展的 UI 请求（select/confirm/input/editor） */
+	agentsUiRequest: "agents:ui-request",
 } as const;

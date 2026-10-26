@@ -6,7 +6,7 @@
 import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { dialog, ipcMain, type BrowserWindow, type WebContents } from "electron";
-import { ipcChannels } from "../../shared/ipc";
+import { agentEventTags, ipcChannels } from "../../shared/ipc";
 import { isLocalProject } from "../../shared/projectLocation";
 import { isDshPermissionPreset } from "../../shared/types/agent";
 import { isRewindRestoreScope } from "../../shared/types/rewind";
@@ -57,6 +57,7 @@ import { dshRuntimeMissingPageFor } from "../dsh/dshRuntimeMissing";
 import { dshSessionModelPatch } from "../dsh/dshSessionModelSync";
 import { missingSessionFilePage } from "../sessions/sessionFileMissingPage";
 import { isSessionSearchFilePath } from "../sessions/sessionSearchPath";
+import { findSessionMatches } from "../sessions/sessionFindMatches";
 import { validateNpmSpec } from "../dsh/dshPluginNpmRunner";
 import { validateSearchKeyword } from "../dsh/dshPluginMarket";
 import { downgradeRunningStartedBefore, downgradeStaleRunning } from "../pi/derivedSubagents";
@@ -301,8 +302,11 @@ export type DshBackendIpcDeps = {
 	 * 用途：打开历史会话读历史时把 host 真值补录回 catalog（底栏模型显示，见 dshSessionModelSync）。
 	 */
 	readDshSessionModel?: (dshSessionId: string) => Promise<{ provider: string; model: string; reasoningEffort?: string } | undefined>;
-	/** ACP 会话消息回读（运行时内存投影；未激活返回空数组）；未装配时返回空数组。 */
-	readAcpMessages?: (acpSessionId: string) => import("../../shared/types").ChatMessage[];
+	/**
+	 * ACP 会话消息回读（异步读口）：运行时投影 → 内存快照 → deck 侧归档（userData/acp-sessions）
+	 * 逐级回退；未装配时返回空数组。归档读失败内部降级为空，永不抛。
+	 */
+	readAcpMessages?: (acpSessionId: string) => Promise<import("../../shared/types").ChatMessage[]>;
 	/** DSH 轨迹过程事件（运行时会话按 mux/重放收集；历史会话从 host history 推导；未装配时返回空数组）。 */
 	readDshProcessEvents?: (agentId: string | undefined, dshSessionId: string | undefined) => Promise<{ events: import("../../shared/types/trajectory").SessionProcessEvent[]; fromStart: boolean; unavailable?: boolean }>;
 	/** pi 轨迹事实（索引候选 + 小批读取 + 内容版本缓存）；缺省时回退旧的全文件扫描。 */
@@ -838,10 +842,39 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		}
 	};
 
+	/**
+	 * ACP 会话内查找：历史来自运行时投影 + deck 侧归档（readAcpMessages 异步读口），
+	 * 匹配复用与 pi/DSH 同一套词元规则（findSessionMatches，见 sessions/sessionFindMatches）。
+	 * 信封形状与 DSH 分支一致——浮层只读 sessions[0].matches / hitCount，形状一致才能
+	 * 共用 hook 与浮层。filePath 给 `acp:<acpSessionId>`：ACP 没有 pi JSONL，这个标识只
+	 * 用于排查，不参与跳转（命中 id 就是投影消息 id，jumpToMessage 直接按 id 定位）。
+	 * 无 acpSessionId（草稿还没握过手）或未装配读口返回 null（渲染层显示「暂时读不到」）；
+	 * 有会话但归档/投影为空时返回空命中（「没有匹配」）。
+	 */
+	const searchAcpSessionInSession = async (entry: SessionCatalogEntry, query: string): Promise<SessionSearchResult | null> => {
+		const reader = readAcpMessages;
+		const acpSessionId = entry.acpSessionId;
+		if (!reader || !acpSessionId) return null;
+		try {
+			const found = findSessionMatches(await reader(acpSessionId), query);
+			if (found.hitCount === 0) return { sessions: [], totalHitSessions: 0, truncated: false };
+			return {
+				sessions: [{ filePath: `acp:${acpSessionId}`, updatedAtMs: entry.updatedAt, matches: found.matches, hitCount: found.hitCount }],
+				totalHitSessions: 1,
+				truncated: found.hitCount > found.matches.length,
+			};
+		} catch (error) {
+			void appLogger.warn("session", "ACP in-session search failed", { sessionId: entry.id, acpSessionId, error: error instanceof Error ? error.message : String(error) });
+			return null;
+		}
+	};
+
 	// 会话内查找（Ctrl/Cmd+Shift+F）：入参是 **SessionRecord.id**（不是路径）。
 	// 路径/后端身份一律由主进程从 catalog 解析，渲染层传什么路径都不生效：
 	// - pi：sidecar 只索引会话文件（.jsonl），路径再兜一道 isSessionSearchFilePath；
-	// - DSH：没有 pi JSONL，整段 host 历史投影后本地匹配（命中 id = 投影消息 id）。
+	// - DSH：没有 pi JSONL，整段 host 历史投影后本地匹配（命中 id = 投影消息 id）；
+	// - ACP：没有 pi JSONL，运行时投影/内存快照/deck 侧归档任一可用即可匹配
+	//   （命中 id 同样是投影消息 id）。
 	// 命中按时间线顺序返回（上一条/下一条导航）；未装配/后端不可用返回 null
 	// （渲染层显示「暂时读不到」而不是「没有匹配」）。
 	ipcMain.handle(ipcChannels.sessionsSearchInSession, async (_event, sessionId: unknown, query: unknown) => {
@@ -851,6 +884,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		const entry = sessionCatalog.get(sessionId.trim());
 		if (!entry) return null;
 		if (entry.backend === "dsh") return searchDshSessionInSession(entry, trimmed);
+		if (entry.backend === "acp") return searchAcpSessionInSession(entry, trimmed);
 		const searcher = deps.sessionMessageSearch;
 		// 路径必须像会话文件（无歧义绝对路径 + .jsonl）：sidecar 只索引真实会话文件，
 		// 这里再兜一道，避免把任意路径透传给子进程。判定收口在 sessionSearchPath，
@@ -909,7 +943,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			const bindings = sessionRuntimeCoordinator.attachCatalogRuntimes(visibleRecords);
 			for (const binding of bindings) {
 				const tab = agentManager.list().find((candidate) => candidate.id === binding.agentId);
-				if (tab) emitSessionRuntimeEvent(tab.id, ipcChannels.agentsState, tab);
+				if (tab) emitSessionRuntimeEvent(tab.id, agentEventTags.agentsState, tab);
 			}
 			return visibleRecords;
 		};
@@ -1451,10 +1485,10 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			void backfillDshSessionModel(sessionId);
 			return page.messages;
 		}
-		// ACP 会话历史只活在 agent 侧 + 运行时内存投影(load 重放):无 runtime
-		// (未激活/已停止)时返回空数组,渲染层显示起始页;激活后 load 重放补全。
+		// ACP 会话历史:agent 侧 load 重放(权威) + 运行时内存投影 + deck 侧归档(重启/换机后
+		// 的唯一来源)。无 runtime 时读归档,仍是空才返回空数组(渲染层显示起始页)。
 		if (entry?.backend === "acp") {
-			return readAcpMessages ? readAcpMessages(entry.acpSessionId ?? "") : [];
+			return readAcpMessages ? await readAcpMessages(entry.acpSessionId ?? "") : [];
 		}
 		if (entry?.backend === "imagegen") {
 			// imagegen 后端会话：历史独立存 ImageSessionStore，不走 pi 文件
@@ -1570,7 +1604,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				throw error;
 			}
 		}
-		if (entry?.backend === "acp") return acpMessagePage(readAcpMessages?.(entry.acpSessionId ?? "") ?? [], before, pageSize);
+		if (entry?.backend === "acp") return acpMessagePage((await readAcpMessages?.(entry.acpSessionId ?? "")) ?? [], before, pageSize);
 		// 顺序要求（2026-10 修复）：本机路径解析必须在远端分流之后 —— ssh 条目的 filePath 在规范化时
 		// 已被清空，一旦远端分支被挪到它后面就会变成不可达的死代码。合并后本机路径就是 dev 的
 		// `entry.filePath`（不再额外调 localSessionFilePath：它对 ssh 抛稳定码，且夹具无需提供该端口）。
@@ -2138,7 +2172,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			const result = await sessionRuntimeCoordinator.send(promptInput);
 			if (result.agentId) {
 				const tab = agentManager.list().find((candidate) => candidate.id === result.agentId);
-				if (tab) emitSessionRuntimeEvent(tab.id, ipcChannels.agentsState, tab);
+				if (tab) emitSessionRuntimeEvent(tab.id, agentEventTags.agentsState, tab);
 			}
 			// 消息被接受才记「最后一次使用」（选而未发不算）：写入 desktop settings.lastUsedModel，
 			// 新会话默认解析（launchDefaults）以它优先。fire-and-forget，不阻塞发送响应。

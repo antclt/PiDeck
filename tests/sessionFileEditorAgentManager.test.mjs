@@ -87,7 +87,7 @@ function loadAgentManager() {
 						Notification: { isSupported: () => false },
 					};
 				}
-				if (specifier === "../../shared/ipc") return { ipcChannels: {} };
+				if (specifier === "../../shared/ipc") return { agentEventTags: {}, ipcChannels: {} };
 				if (specifier === "./PiProcess") return { PiProcess: class {} };
 				if (specifier === "./bashResult") return { formatBashToolMessage: () => "" };
 				if (specifier === "./messageContent") return { extractMessageText: () => "" };

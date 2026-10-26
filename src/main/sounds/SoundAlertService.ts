@@ -6,7 +6,7 @@
  * 是否向主窗口推送 `sounds:play`。播放本身在渲染层（HTMLAudioElement），
  * 主进程只做「事件判定 + 设置门控」，与 PetStateBridge 的分工保持一致。
  */
-import { ipcChannels } from "../../shared/ipc";
+import { agentEventTags, ipcChannels } from "../../shared/ipc";
 import type { SoundAlertKind } from "../../shared/types/soundAlert";
 import type { AgentManager } from "../pi/AgentManager";
 import type { SettingsStore } from "../settings/SettingsStore";
@@ -47,7 +47,7 @@ export class SoundAlertService {
 		});
 		// waiting：复用主进程输出订阅，只消费已规范化的 agents:ui-request
 		this.offOutput = this.deps.agentManager.onOutput((channel, payload) => {
-			if (channel !== ipcChannels.agentsUiRequest || !payload || typeof payload !== "object") return;
+			if (channel !== agentEventTags.agentsUiRequest || !payload || typeof payload !== "object") return;
 			const event = trackUiRequest(this.state, payload as Parameters<typeof trackUiRequest>[1], Date.now());
 			if (event) this.maybePlay(event.kind, event.title);
 		});

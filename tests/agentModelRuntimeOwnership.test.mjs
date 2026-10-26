@@ -5,7 +5,7 @@ import { deferred, plain } from "./helpers/sessionRunControlHarness.mjs";
 
 const { AgentManager } = loadTsCommonJs("src/main/pi/AgentManager.ts");
 const { SessionRuntimeCoordinator } = loadTsCommonJs("src/main/sessions/SessionRuntimeCoordinator.ts");
-const { ipcChannels } = loadTsCommonJs("src/shared/ipc.ts");
+const { agentEventTags } = loadTsCommonJs("src/shared/ipc.ts");
 const AGENT_ID = "model-owner";
 const SESSION_ID = "session-a";
 const modelState = { model: { provider: "provider-a", id: "model-a", name: "Source model" }, thinkingLevel: "high" };
@@ -49,7 +49,7 @@ function harness({ waitAt, failure, state = modelState } = {}) {
 	// Coordinator 的完整运行态推送也会读取文件统计；本 harness 只使用内存快照。
 	manager.getSessionCacheHitStats = async () => ({ sampleCount: 0 });
 	manager.onOutput((channel) => {
-		if (channel === ipcChannels.agentsState) events.push(channel);
+		if (channel === agentEventTags.agentsState) events.push(channel);
 	});
 	return { manager, runtime, process, entered, release, requests, events, warnings };
 }
@@ -221,7 +221,7 @@ for (const status of ["idle", "running"]) {
 		assert.equal(before.contextPercent, 27);
 		const snapshots = [];
 		h.manager.onOutput((channel, payload) => {
-			if (channel === ipcChannels.agentsRuntimeState) snapshots.push(plain(payload));
+			if (channel === agentEventTags.agentsRuntimeState) snapshots.push(plain(payload));
 		});
 
 		const result = await h.coordinator.setRuntimeModel(h.target, "provider-a", "model-a");
