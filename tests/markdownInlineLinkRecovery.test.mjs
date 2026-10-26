@@ -37,6 +37,13 @@ function decodeLink(url) {
 	}
 }
 
+function linksOf(node, found = []) {
+	if (!node || typeof node !== "object") return found;
+	if (node.type === "link" && typeof node.url === "string") found.push(node.url);
+	if (Array.isArray(node.children)) for (const child of node.children) linksOf(child, found);
+	return found;
+}
+
 function collectLinks(node, found = []) {
 	if (!node || typeof node !== "object") return found;
 	if (node.type === "link") found.push({ url: decodeLink(node.url), text: (node.children ?? []).map((c) => c.value ?? "").join("") });
@@ -169,4 +176,40 @@ test("label 与目标之间夹空格的写法：CommonMark 也不认，保持原
 
 test("目标含尖括号/换行：按规范不构成目标，保持原样", () => {
 	assert.deepEqual(collectLinks(run("[x](C:/Program Files/<a> b.md)")), []);
+});
+
+/* ---------- C. 手写盘符路径：改写为 file://（sanitize 只放行白名单协议） ---------- */
+
+test("手写盘符路径的 link 统一改写成 file:// 形式", () => {
+	// 不带空格的盘符写法能被 CommonMark 正常解析，不走恢复路径；
+	// 但裸 `C:/` 会被 rehype-sanitize 当成未知协议 `c:` 剥掉 href（渲染出没有 href 的 <a>）。
+	const cases = [
+		["正斜杠", "[a](C:/Users/x/a.md)", "C:/Users/x/a.md"],
+		["小写盘符", "[a](c:/Users/x/a.md)", "c:/Users/x/a.md"],
+		["反斜杠", String.raw`[a](C:\Users\x\a.md)`, String.raw`C:\Users\x\a.md`],
+		["已编码空格", "[a](C:/Users/x/a%20b.md)", "C:/Users/x/a b.md"],
+	];
+	for (const [name, md, expected] of cases) {
+		assert.deepEqual(collectLinks(run(md)), [{ url: expected, text: "a" }], name);
+	}
+	// 实际产出的 url 必须是 file:// 形式（sanitize 白名单里才有 file）
+	const raw = linksOf(run("[a](C:/Users/x/a.md)"));
+	assert.ok(raw[0]?.startsWith("file://"), `期望 file:// 形式，实际 ${raw[0]}`);
+});
+
+test("非盘符形态不受改写影响（相对/POSIX/波浪号/UNC/已 file://）", () => {
+	const cases = [
+		["相对", "[a](./docs/a.md)", "./docs/a.md"],
+		["POSIX", "[a](/home/u/a.md)", "/home/u/a.md"],
+		["波浪号", "[a](~/a.md)", "~/a.md"],
+		// UNC 在 markdown 源里反斜杠本身是转义符，`\\` 解析后就是一字符 `\`；
+		// 这里只断言「不被改写成 file://」（UNC 不含冒号，sanitize 本来就能放行）。
+		["UNC", String.raw`[a](\\server\share\a.md)`, String.raw`\server\share\a.md`],
+	];
+	for (const [name, md, expected] of cases) {
+		assert.deepEqual(collectLinks(run(md)), [{ url: expected, text: "a" }], name);
+	}
+	// 已经是 file:// 的不重复改写
+	const already = linksOf(run("[a](file:///C:/Users/x/a.md)"));
+	assert.deepEqual(already, ["file:///C:/Users/x/a.md"]);
 });

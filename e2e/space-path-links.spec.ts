@@ -26,6 +26,14 @@ const unpaired = forward.replace("(x86)", "(x86");
 
 const assistantText = ["产物清单（括号成对 + 空格）：", `[README.md](${forward}) — 结构化属性`, "不成对括号形态：", `[README.md](${unpaired}) — 说明文字`].join("\n\n");
 
+// 不带空格的盘符路径：CommonMark 能正常解析、不走恢复路径，但裸 `C:/` 会被
+// rehype-sanitize 当成未知协议 `c:` 剥掉 href（同症状、不同入口）。
+const noSpaceDir = mkdtempSync(join(tmpdir(), "pideck-nospacepath-"));
+const noSpaceFile = join(noSpaceDir, "README.md");
+writeFileSync(noSpaceFile, "# README\n\nno-space-path marker-ok\n");
+const noSpaceForward = noSpaceFile.replace(/\\/g, "/");
+const assistantTextWithNoSpace = `${assistantText}\n\n盘符路径（不带空格）：\n\n[README.md](${noSpaceForward})`;
+
 test.use({
 	seedProjects: [{ id: "p-space", name: "spacepath", path: spaceDir }],
 	seedSessionFiles: [
@@ -53,7 +61,7 @@ test.use({
 					id: "m2",
 					parentId: "m1",
 					timestamp: new Date(Date.now() - 58_000).toISOString(),
-					message: { role: "assistant", content: [{ type: "text", text: assistantText }] },
+					message: { role: "assistant", content: [{ type: "text", text: assistantTextWithNoSpace }] },
 				},
 			],
 		},
@@ -99,4 +107,13 @@ test("带空格本地路径渲染成可点击链接，且不残留原始语法",
 	const stage = window.locator(".workbench-stage-split").first();
 	await expect(stage).toBeVisible({ timeout: 15_000 });
 	await expect(stage).toContainText("space-path marker-ok", { timeout: 10_000 });
+
+	// 不带空格的盘符路径（解析能成功、不走恢复路径）同样必须是文件链接：
+	// 裸 `C:/` 会被 rehype-sanitize 当成未知协议 `c:` 剥掉 href，渲染出没有 href 的死 <a>。
+	const noSpaceLink = timeline.getByRole("link", { name: "README.md" }).last();
+	const noSpaceHref = (await noSpaceLink.getAttribute("href")) ?? "";
+	expect(noSpaceHref.startsWith("file://")).toBe(true);
+	expect(((await noSpaceLink.getAttribute("class")) ?? "").includes("cursor-pointer")).toBe(true);
+	await noSpaceLink.click();
+	await expect(stage).toContainText("no-space-path marker-ok", { timeout: 10_000 });
 });
