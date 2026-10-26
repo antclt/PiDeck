@@ -38,6 +38,11 @@ test("本地 models.json 的 input 勾选覆盖 CLI images 列", () => {
 
 test("视觉桥 UI：原生看图 / DSH 不显示转换中，未知目录保持静默", () => {
 	assert.equal(resolveVisionBridgeExpected({ backend: "dsh", modelSupportsImages: true }), false);
+	// ACP 会话：视觉桥是 pi 扩展，ACP 会话不会执行；原图经 acpPromptBlocks 直发 CLI，
+	// 能不能看图由 CLI 侧模型自己决定，转换动画只会误导。目录解析中（null）也不例外。
+	assert.equal(resolveVisionBridgeExpected({ backend: "acp", modelSupportsImages: false }), false);
+	assert.equal(resolveVisionBridgeExpected({ backend: "acp", modelSupportsImages: true }), false);
+	assert.equal(resolveVisionBridgeExpected({ backend: "acp", modelSupportsImages: null }), false);
 	assert.equal(resolveVisionBridgeExpected({ backend: "pi", modelSupportsImages: true }), false);
 	assert.equal(resolveVisionBridgeExpected({ backend: "pi", modelSupportsImages: null }), null);
 	assert.equal(resolveVisionBridgeExpected({ backend: "pi", modelSupportsImages: false }), true);
