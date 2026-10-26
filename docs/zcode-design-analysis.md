@@ -230,7 +230,7 @@ Phase 9 后用户指出右上角仍有色差（截图：窗口控制条/抽屉 r
 
 用户希望引入 ZCode 的「思考强度」渐变滑条组件。调研结论：ZCode 本地克隆为空壳、GitHub 上该 UI 不在可整编位置（composer-toolbar-layout 只有契约文档），且 PiDeck 已有 CLI 安装的 shadcn Slider/Popover 原语——按仓库纪律**用原语复刻**而非拷源码（beUI：安装走 CLI，视觉走语义 token）。
 
-- **形态替换**：`ThinkingLevelDropdown` 从「radio 单选菜单」改为「渐变强度条」——头行（思考强度 + 当前档位 + Ctrl+T kbd 提示）、整条常驻绿→蓝渐变轨道（success→info 语义 token，白 thumb 投影浮起，星尘装饰 aria-hidden）、档位刻度标签行（兼作点击入口，当前档位加粗高亮）、当前档位说明行。当前值靠 thumb 位置 + 标签高亮表达（ZCode 同款），不靠填充差。
+- **形态替换**：`ThinkingLevelDropdown` 从「radio 单选菜单」改为「渐变强度条」——头行（思考强度 + 当前档位 + Ctrl+T kbd 提示）、绿→蓝渐变填充轨道（success→info 语义 token，只填到 thumb，未选段中性灰轨；白 thumb 投影浮起，星尘装饰 aria-hidden）、档位刻度标签行（兼作点击入口，当前档位加粗高亮）。颜色即进度（2026-10 第二轮：原「整条常驻渐变」改为按进度显色 + 轨道加粗到 10px）。
 - **离散吸附**：Slider step=1、min/max=档位下标——模型只认 off…max 枚举；键盘方向键在滑条上原生平移档位。
 - **壳从 DropdownMenu 换成 Popover**：Radix Menu 劫持方向键（typeahead/导航），滑条键盘操作会被吞；Popover 不拦截。open/onOpenChange 契约不变（ComposerPickerHost 无感）。
 - **快捷键提示**：复用 useShortcutBindings + formatAccelerator("cycleThinking")——PiDeck 本就有同款 Ctrl+T（循环思考档位）全局键，kbd 芯片跟随用户自定义键位。
@@ -242,10 +242,10 @@ Phase 9 后用户指出右上角仍有色差（截图：窗口控制条/抽屉 r
 
 首版把滑条 onValueChange 直连 onPick——拖拽中每过一档就 applyThinking→onApplied→onClose，弹层在第一档就消失（用户反馈「点击/拉取/滚动都触发关闭」；e2e 探针实证：滚轮本就不关，拖拽第一档即关）。修正为 ZCode 同款「调整保持打开」模型：
 
-- **预览/提交分离**：拖拽（onValueChange）只更新本地预览（draftIndexRef 真值源 + state 驱动渲染），松手（onPointerUp）或 Enter/空格才提交；头行/说明/刻度高亮实时跟随预览档位，触发按钮保持已应用值。lastCommittedRef 挡掉提交→应用异步窗口内的重复 RPC。
-- **keepOpen 语义**：applyThinking 增加 opts.keepOpen——滑条/刻度点选保持弹层打开（调档后可继续微调，ZCode 同款），Ctrl+T 循环等走默认关闭。关闭只走点外/Esc/再点触发器。
-- **草稿路径刷新**：无 record 的引导页把档位写 localStorage，keepOpen 下没有关闭重挂载来重读——useSessionPreferenceState 增加 welcomePreferenceVersion 版本戳，bump 强制底栏重读（运行中会话走 record upsert 天然刷新）。
-- e2e 交互矩阵实证：滚轮✓不关、拖拽✓应用+保持打开+标签同步（off→xhigh/max）、刻度点击✓、thumb 原地点击✓跳过 RPC、Esc✓关闭。
+- **预览/提交分离**：拖拽（onValueChange）只更新本地预览（draftIndexRef 真值源 + state 驱动渲染）；头行/刻度高亮实时跟随预览档位，触发按钮保持已应用值。
+- **提交时机定版（2027-02 第二轮）**：**退出选择（关闭弹层）是唯一提交点**——拖拽/点刻度/方向键全程只改本地 draft，关闭时才发一次 onPick。原因：底栏触发器显示的是已应用档位，而 off/minimal/medium/high/xhigh/max 字母长度差异大，选择期间实时回写会让底栏宽度反复漂移；同时中途每过一档就发 setRuntimeThinking 会堆一串无效 RPC。`keepOpen` 选项随之删除（applyThinking 只剩一个参数），Enter/空格 = 确认并关闭；`appliedIndexRef` 挡掉「打开又原样关闭」的空提交。
+- **草稿路径刷新**：无 record 的引导页把档位写 localStorage 后 bump welcomePreferenceVersion 强制底栏重读（关闭弹层不会重挂载底栏）。
+- e2e 交互矩阵实证：滚轮✓不关、拖拽✓保持打开（关闭时才应用）、刻度点击✓、Esc✓关闭并提交。
 
 ### 13.2 过程行灰底 chip 去底（时间线碎条治理）
 

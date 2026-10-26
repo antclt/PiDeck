@@ -393,3 +393,21 @@ test("a current restart failure is visible and releases the confirmation lock", 
 	await (await offerRestart(h)).confirmRestart();
 	assert.deepEqual(h.calls.restarts, ["agent-a"]);
 });
+
+/**
+ * 思考档位提交时机（2027-02 用户反馈）：选择期间只预览，退出选择才发命令。
+ * 旧实现 onPick 接 keepOpen，滑条每过一档就发一条 setRuntimeThinking——底栏文字
+ * 随 off/minimal/…/max 字母长度来回漂移，还会堆一串无效 RPC。
+ */
+test("thinking selection is committed once per closed picker, not per intermediate change", async () => {
+	const h = harness();
+	const controller = h.render();
+	// 控制器不再暴露 keepOpen：applyThinking 只有一个参数，选中即提交一次。
+	await controller.applyThinking("medium");
+	assert.deepEqual(
+		h.calls.commands.filter(([kind]) => kind === "thinking"),
+		[["thinking", { sessionId: SOURCE, agentId: "agent-a", runtimeGeneration: 1 }, "medium"]],
+	);
+	// 同一次选择只发一条命令（不是「先 low 再 medium 再 high」的三条）
+	assert.equal(h.calls.commands.filter(([kind]) => kind === "thinking").length, 1);
+});

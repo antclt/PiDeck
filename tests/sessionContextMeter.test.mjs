@@ -244,7 +244,12 @@ test("bottom bar keeps model and thinking together with independent one-click en
 	assert.match(chip, /\{props\.thinkingControl\}/);
 	// 思考强度选择器重做（7f1436a58）：壳从 DropdownMenu 换成受控 Popover（Radix Menu 劫持
 	// 方向键、滑条键盘不可达），档位为渐变强度条离散吸附（step=1）+ 刻度标签行兼点选入口。
-	assert.match(chip, /<Popover\s+open=\{props\.open\} onOpenChange=\{props\.onOpenChange\}>/);
+	// 提交时机：onOpenChange 必须走本地 handleOpenChange（关闭时统一提交），
+	// 不能把 props.onOpenChange 直连——那样选择期间的每次变更都会立刻回写底栏。
+	assert.match(chip, /<Popover\s+open=\{props\.open\} onOpenChange=\{handleOpenChange\}>/);
+	assert.match(chip, /const handleOpenChange = \(next: boolean\) => \{/);
+	// 中途不得提交：onPick 只在 handleOpenChange 的关闭分支出现一次。
+	assert.equal((chip.match(/props\.onPick\(/g) ?? []).length, 1);
 	assert.match(chip, /<Slider\s/);
 	assert.match(chip, /step=\{1\}/);
 	assert.match(chip, /data-tick-value=\{level\.value\}/);
