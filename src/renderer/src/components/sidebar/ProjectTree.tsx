@@ -418,10 +418,14 @@ export function ProjectTree(props: {
 
 	const projectsSection = (
 		<section aria-label={t("app.sidebarProjects")} role="tree">
+			{/* 分组标题栏：左侧「项目」标题，右侧 = 「+ 添加项目」+ 全部折叠/展开（高频操作外露）
+            + 「⋯ 更多操作」。目录存在性重扫属于低频维护动作，收进菜单避免挤占窄侧栏。
+            开启冻结时给这层纯逻辑包裹加 display:contents：它不生成盒子，里面的标题栏
+            就直接成为 section 的子元素，sticky 的包含块从「只有标题栏高度的包裹 div」变成
+            「跨越全部内容的 section」。否则包含块在滚动一开始就到头，sticky 永远不生效
+            （项目区标题不冻结、聊天区标题正常，就是这个原因）。 */}
 			{workspaceProjects.length > 0 && (
-				<div>
-					{/* 分组标题栏：左侧「项目」标题，右侧 = 「+ 添加项目」+ 全部折叠/展开（高频操作外露）
-            + 「⋯ 更多操作」。目录存在性重扫属于低频维护动作，收进菜单避免挤占窄侧栏。 */}
+				<div className={cn(stickyHeader && "contents")}>
 					<div className={cn("flex items-center justify-between px-1 pb-1", stickyHeader && stickyGroupHeaderClass)}>
 						<span className="text-caption font-medium text-muted-foreground">{t("app.sidebarProjects")}</span>
 						<div className="flex items-center gap-0.5">

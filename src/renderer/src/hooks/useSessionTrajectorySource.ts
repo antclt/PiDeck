@@ -18,6 +18,52 @@ const EMPTY_RECORD_ATOM = atom<SessionRecord | undefined>(undefined);
 const EMPTY_RUNTIME_ATOM = atom<SessionRuntimeViewState | undefined>(undefined);
 
 /**
+ * 轨迹事实预热缓存（模块级，按会话 id，LRU 限量）。
+ *
+ * 为什么要有：面板挂载后才发 IPC，抽屉打开的第一帧必然只有消息、没有过程轨
+ * （用户看到的就是「过程又空着」）。会话聚焦时先读一次存进来，抽屉一打开就能直接画。
+ * 只存成功结果（暂时读不到 / 读取失败不入缓存），命中后仍由面板自己的 effect 刷新。
+ */
+const PROCESS_FACTS_CACHE_LIMIT = 8;
+const processFactsCache = new Map<string, { events: SessionProcessEvent[]; coverage: SessionFactsCoverage }>();
+const processFactsInflight = new Set<string>();
+
+function rememberProcessFacts(sessionId: string, events: SessionProcessEvent[], coverage: SessionFactsCoverage): void {
+	processFactsCache.delete(sessionId);
+	processFactsCache.set(sessionId, { events, coverage });
+	for (const key of processFactsCache.keys()) {
+		if (processFactsCache.size <= PROCESS_FACTS_CACHE_LIMIT) break;
+		processFactsCache.delete(key);
+	}
+}
+
+/** 预热一次会话事实：已有缓存或已在路上直接返回（不重复发 IPC）。 */
+export function prefetchSessionProcessFacts(sessionId: string | undefined): void {
+	if (!sessionId || processFactsCache.has(sessionId) || processFactsInflight.has(sessionId)) return;
+	processFactsInflight.add(sessionId);
+	void desktopApi.sessions
+		.readProcessEvents(sessionId)
+		.then((result) => {
+			// 兼容旧形状（数组）与「后端暂时不可用」：两者都不是事实，不入缓存。
+			if (Array.isArray(result) || result.coverage.reason === "unavailable") return;
+			rememberProcessFacts(sessionId, result.events, result.coverage);
+		})
+		.catch(() => {
+			// 预热失败不影响面板：打开抽屉时会自己再读并重试。
+		})
+		.finally(() => {
+			processFactsInflight.delete(sessionId);
+		});
+}
+
+/** 会话视图挂载即预热轨迹事实，让「轨迹」抽屉点开就有过程轨。 */
+export function useSessionProcessFactsPrefetch(sessionId: string | undefined): void {
+	useEffect(() => {
+		prefetchSessionProcessFacts(sessionId);
+	}, [sessionId]);
+}
+
+/**
  * 轨迹抽屉的数据源：只订本会话 cache family，把 runtime 历史前缀与窗口段拼成一条账本。
  * 翻页写回同一 atom，时间线与抽屉共享已加载历史，不另开 IPC 通道。
  */
@@ -32,14 +78,19 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 	const prependMessagePage = useSetAtom(prependSessionMessagePageAtom);
 	const prependHistoryPage = useSetAtom(prependSessionHistoryPageAtom);
 	const [isLoadingMore, setIsLoadingMore] = useState(false);
-	const [processEvents, setProcessEvents] = useState<SessionProcessEvent[]>([]);
+	// 初值取预热缓存：抽屉第一次渲染就带过程轨，不在挂载后的往返里空一帧。
+	const [processEvents, setProcessEvents] = useState<SessionProcessEvent[]>(() => (sessionId ? (processFactsCache.get(sessionId)?.events ?? []) : []));
 	// 事实覆盖范围：预算/祖先/窗口缺失时账本要能说明「没读到」而不是「没有」。
-	const [processCoverage, setProcessCoverage] = useState<SessionFactsCoverage | undefined>(undefined);
+	const [processCoverage, setProcessCoverage] = useState<SessionFactsCoverage | undefined>(() => (sessionId ? processFactsCache.get(sessionId)?.coverage : undefined));
 	const [modelTraces, setModelTraces] = useState<TrajectoryModelTraceSummary[]>([]);
 	const loadSequenceRef = useRef(0);
 	const processSequenceRef = useRef(0);
 	const traceSequenceRef = useRef(0);
 	const processVersionRef = useRef<string | undefined>(undefined);
+	// 同会话上一次成功的事实：一次瞬时「读不到」不能把已显示的过程轨清空。
+	const lastGoodProcessEventsRef = useRef<{ sessionId: string; events: SessionProcessEvent[] } | undefined>(undefined);
+	/** 已用预热缓存铺底过的会话：同一会话的后续重跑不再铺底，避免把新事实回退成旧缓存。 */
+	const seededSessionRef = useRef<string | undefined>(undefined);
 
 	// 事实刷新的触发条件：只认「回合边界 / 压缩状态 / 运行代次」这类语义事件。
 	// 为什么不再挂 cachedEntry.revision/updatedAt：它们随 token flush（~20 次/秒）变化，
@@ -53,7 +104,17 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 			setProcessEvents([]);
 			setProcessCoverage(undefined);
 			processVersionRef.current = undefined;
+			lastGoodProcessEventsRef.current = undefined;
 			return;
+		}
+		// 切会话：先用预热缓存同步铺底，再发真实请求刷新。
+		if (seededSessionRef.current !== sessionId) {
+			seededSessionRef.current = sessionId;
+			const cached = processFactsCache.get(sessionId);
+			setProcessEvents(cached?.events ?? []);
+			setProcessCoverage(cached?.coverage);
+			lastGoodProcessEventsRef.current = cached ? { sessionId, events: cached.events } : undefined;
+			processVersionRef.current = undefined;
 		}
 		let disposed = false;
 		let inflight = false;
@@ -80,9 +141,19 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 					// 兼容旧形状（数组）：主进程/预加载任一未更新时不能把事件变成 undefined。
 					const events = Array.isArray(result) ? result : (result?.events ?? []);
 					const version = Array.isArray(result) ? "" : (result?.version ?? "");
-					setProcessEvents((previous) => (processVersionRef.current === version ? previous : events));
+					// 「后端暂时不可用」不是「没有事实」：保留同会话上一次成功的事实（不把已显示的过程轨
+					// 清空到下一次成功为止），否则一次瞬时失败就把「过程」轨静默抹掉。
+					const unavailable = !Array.isArray(result) && result?.coverage.reason === "unavailable";
+					if (unavailable && lastGoodProcessEventsRef.current?.sessionId === sessionId) {
+						setProcessEvents(lastGoodProcessEventsRef.current.events);
+					} else {
+						setProcessEvents((previous) => (processVersionRef.current === version ? previous : events));
+						if (!unavailable) lastGoodProcessEventsRef.current = { sessionId, events };
+					}
 					processVersionRef.current = version;
 					setProcessCoverage(Array.isArray(result) ? undefined : result?.coverage);
+					// 成功结果进预热缓存：下次打开抽屉（会话再次聚焦）第一帧就有过程轨。
+					if (!Array.isArray(result) && !unavailable && result.coverage) rememberProcessFacts(sessionId, events, result.coverage);
 					// 后端未就绪：稍后自动重试，避免「DSH host 还在启动，轨迹永远空白」。
 					if (!Array.isArray(result) && result?.coverage.reason === "unavailable" && retries < 12) {
 						retries += 1;

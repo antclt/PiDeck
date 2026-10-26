@@ -81,6 +81,10 @@ it("契约字段与三处默认值/接线齐全（防半截实现）", () => {
 	assert.match(projectTree, /stickyGroupHeaders\?:\s*boolean/, "ProjectTree 接收 stickyGroupHeaders prop");
 	assert.match(projectTree, /sticky\s+top-0/, "标题栏冻结用 sticky top-0 实现");
 	assert.match(projectTree, /bg-sidebar/, "冻结标题栏必须遮底，行从字下穿过时不可读");
+	// 项目区标题栏外有一层纯逻辑包裹 div：开启冻结时必须 display:contents 让它不生成盒子，
+	// 否则 sticky 的包含块只剩标题栏自身高度、滚动一开始就到底，永远粘不住
+	// （2026-10 实测：聊天区冻结、项目区不冻结）。
+	assert.match(projectTree, /<div className=\{cn\(stickyHeader && "contents"\)\}>/, "项目区包裹层开启冻结时须 display:contents（sticky 包含块必须是滚动容器方向上的祖先）");
 
 	const app = read("src/renderer/src/App.tsx");
 	assert.match(app, /stickyGroupHeaders=\{settings\.sidebarStickyGroupHeaders\s*===\s*true\}/, "App 按 === true 收窄传递（缺省 = 关闭）");
