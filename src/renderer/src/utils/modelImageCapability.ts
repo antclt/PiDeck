@@ -47,7 +47,11 @@ export function modelSupportsNativeImages(models: ListedModel[], current: { prov
  * - null：pi 模型目录还没解析完，不能先乐观显示转换中
  */
 export function resolveVisionBridgeExpected(input: { backend?: string; modelSupportsImages: boolean | null }): boolean | null {
-	if (input.backend === "dsh") return false;
+	// DSH 不跑 pi 扩展。ACP 同理：视觉桥（pi 扩展）在 ACP 会话不会执行，原图经
+	// acpPromptBlocks 直发 CLI，能不能看图由 CLI 侧模型自己决定；目录里查不到 ACP
+	// 后端模型不代表它不会看图（如 CodeBuddy 的 DeepSeek V4.1 Flash，模型表声明 image），
+	// 转换动画只会误导（2026-10 用户实测：ACP+DS4.1Flash 发图闪「视觉桥转换中」）。
+	if (input.backend === "dsh" || input.backend === "acp") return false;
 	if (input.modelSupportsImages === true) return false;
 	if (input.modelSupportsImages === null) return null;
 	return true;

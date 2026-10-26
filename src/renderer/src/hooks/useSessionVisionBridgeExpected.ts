@@ -20,7 +20,8 @@ export function useSessionVisionBridgeExpected(sessionId: string, hasUserImages:
 	const [fetched, setFetched] = useState<{ key: string; supports: boolean } | null>(null);
 
 	useEffect(() => {
-		if (!hasUserImages || backend === "dsh") return;
+		// ACP 会话视觉桥（pi 扩展）不会运行，无需拉模型目录
+		if (!hasUserImages || backend === "dsh" || backend === "acp") return;
 		let cancelled = false;
 		const listed = desktopApi.projects.listModels(session?.projectId).catch(() => []);
 		const localFile = desktopApi.config
