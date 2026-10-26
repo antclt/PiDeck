@@ -10,8 +10,11 @@
  *   不保证 agent 回显,OpenCode 等根本不发),回放的 chunk 再按 localUserEchoes 前缀去重,
  *   未命中则视为历史/注入消息并回——规范一次只携带一个 content block,同一 prompt 的
  *   文本+图片分多条 update,必须并回最后一条 user 消息;收口上一轮 assistant 回放。
- * - agent_message_chunk / agent_thought_chunk:聚合进「当前回合」的一条 assistant
- *   流式消息;thoughtChunk 写 thinking 字段(渲染层思考折叠块)。
+ * - agent_message_chunk / agent_thought_chunk:聚合进「当前回合」的 assistant 流式消息;
+ *   thoughtChunk 写 thinking 字段(渲染层思考折叠块)。聚合只发生在「目标 assistant 仍是
+ *   messages 末条」时:工具卡会把一条回复切成多段气泡,渲染顺序必须与到达顺序一致(#413)。
+ *   被切段的旧段收口为 stopReason="toolUse"(中间回复):stop/aborted/error 只能由
+ *   settleAcpTurn 写入(回合真终态),切段写 stop 会让渲染层误判回合已收尾。
  * - tool_call/tool_call_update:role="tool" 卡片按 toolCallId 原位应用字段补丁，
  *   省略字段不覆盖，content/locations 出现则整表替换。
  * - plan:整表 last-wins 归一化为 TodoItem[](AgentRuntimeState.todos 同源)。
@@ -214,20 +217,39 @@ export function projectAcpSessionUpdate(state: AcpProjectionState, update: AcpSe
 			// 按 text 为空就丢弃会让生成结果整条消失，所以「无文本但有图」也要建消息／并入。
 			const image = !isThought && content?.type === "image" && typeof content.data === "string" && typeof content.mimeType === "string" ? { type: "image" as const, mimeType: content.mimeType, data: content.data } : undefined;
 			if (!text && !image) return state;
-			// 指针已清但末尾仍是本回合的 assistant 消息：响应先于末尾 chunk 到达，并回它
-			const activeIndex = state.activeAssistantIndex ?? trailingAssistantIndex(state.messages);
-			const active = activeIndex !== undefined ? state.messages[activeIndex] : undefined;
-			if (active && active.role === "assistant" && activeIndex !== undefined) {
-				const merged: ChatMessage = isThought ? { ...active, thinking: (active.thinking ?? "") + text, thinkingStartedAt: active.thinkingStartedAt ?? active.timestamp } : { ...active, text: active.text + text, ...(image ? { images: [...(active.images ?? []), image] } : {}) };
+			// 并回目标：活动指针优先；指针已清（settleAcpTurn 先收口）时回退到末尾 assistant——
+			// session/prompt 响应可能先于末尾 chunk 到达（opencode 实测），此时目标本来就是末条。
+			const targetIndex = state.activeAssistantIndex ?? trailingAssistantIndex(state.messages);
+			const target = targetIndex !== undefined ? state.messages[targetIndex] : undefined;
+			// #413 时序判据：目标 assistant 仍是 messages 末条才并回（正常流式行为不变）。
+			// 思考流先建出本回合第一条 assistant，工具卡随后追加在它后面；最终正文到达时若还
+			// 并回指针指向的旧消息，文本就会被渲染到工具卡上方，与 wire 到达顺序相反。
+			// 目标不是末条 → 旧段已被工具卡/用户消息隔开，必须在末尾新开一段。
+			if (targetIndex !== undefined && target !== undefined && target.role === "assistant" && targetIndex === state.messages.length - 1) {
+				const merged: ChatMessage = isThought ? { ...target, thinking: (target.thinking ?? "") + text, thinkingStartedAt: target.thinkingStartedAt ?? target.timestamp } : { ...target, text: target.text + text, ...(image ? { images: [...(target.images ?? []), image] } : {}) };
 				// 并回「已 settle 的末尾消息」说明该回合其实还在续写：恢复流式态，等真正结束时再 settle；
 				// aborted/error 是终态，不因迟到 chunk 翻案。
 				const continued: ChatMessage = state.activeAssistantIndex === undefined && merged.stopReason !== "pending" && merged.stopReason !== "aborted" && merged.stopReason !== "error" ? { ...merged, stopReason: "pending" } : merged;
 				next.messages = [...state.messages];
-				next.messages[activeIndex] = continued;
-				// 迟到的尾部续写后指针回到该消息：后续 tool 卡后的正文沿用同一约定并入同一气泡。
-				next.activeAssistantIndex = activeIndex;
-				next.lastTouched = [activeIndex];
+				next.messages[targetIndex] = continued;
+				next.activeAssistantIndex = targetIndex;
+				next.lastTouched = [targetIndex];
 			} else {
+				// 切段收口：旧段已不在流式中（被工具卡/用户消息隔断），留在 pending 会让渲染层
+				// 一直画进行中光标。收口值必须是 "toolUse"（中间回复），不能是 "stop"：
+				// 渲染层 AppUtils.hasFinishedTurnInRun 只把 stop 当「回合已收尾」，切段标 stop 会在
+				// 工具卡到达时把同一用户回合 flush 成多个 agent-run（头像/时间/执行过程 chip 重复），
+				// 旧段还会被 buildTurnDisplay 提升为常驻「最终回答」——DSH 2026-09-17 同款回归
+				// （见 dshEventProjector.ts 的 stopReason 归一化注释）。toolUse 的契约含义就是
+				// 「中间回复（工具调用回合）」（shared/types/session.ts）。
+				// 只有 settleAcpTurn 能产出 stop/aborted/error（回合真终态）：aborted/error 是终态，
+				// 迟到 chunk 不得翻案，这里只在旧段仍 pending 时收口。
+				const previousIndex = state.activeAssistantIndex;
+				const previous = previousIndex !== undefined ? state.messages[previousIndex] : undefined;
+				const messages = [...state.messages];
+				if (previousIndex !== undefined && previous !== undefined && previous.role === "assistant" && previous.stopReason === "pending") {
+					messages[previousIndex] = { ...previous, stopReason: "toolUse" };
+				}
 				const created: ChatMessage = {
 					id: nextMessageId(),
 					agentId,
@@ -236,10 +258,12 @@ export function projectAcpSessionUpdate(state: AcpProjectionState, update: AcpSe
 					...(image ? { images: [image] } : {}),
 					...(isThought ? { thinking: text, thinkingStartedAt: Date.now() } : {}),
 					timestamp: Date.now(),
+					// 新段从流式态开始，回合结算（settleAcpTurn）再改写为真实终态。
 					stopReason: "pending",
 				};
-				next.messages = [...state.messages, created];
-				const createdIndex = next.messages.length - 1;
+				messages.push(created);
+				const createdIndex = messages.length - 1;
+				next.messages = messages;
 				next.activeAssistantIndex = createdIndex;
 				next.lastTouched = [createdIndex];
 			}

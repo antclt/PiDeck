@@ -266,8 +266,11 @@ test("入口判据：pi 已落盘、DSH 已建 host 会话才支持会话内查�
 	assert.equal(supportsSessionFind({ backend: "dsh", dshSessionId: "dsh-1" }), true);
 	// DSH 草稿还没建 host 会话：没有可检索内容，不挂入口
 	assert.equal(supportsSessionFind({ backend: "dsh", dshSessionId: undefined, filePath: "C:/s/a.jsonl" }), false);
-	// ACP/生图没有可检索历史源，挂上去只会永远「没有匹配」
-	assert.equal(supportsSessionFind({ backend: "acp", filePath: "C:/s/a.jsonl", acpSessionId: "a1" }), false);
+	// ACP 没有 pi JSONL，检索源是 deck 侧归档（userData/acp-sessions）+ 运行时投影：
+	// 已握手（有 acpSessionId）才支持；草稿还没握手 → 没有归档可查，不挂入口
+	assert.equal(supportsSessionFind({ backend: "acp", filePath: "C:/s/a.jsonl", acpSessionId: "a1" }), true);
+	assert.equal(supportsSessionFind({ backend: "acp", filePath: undefined, acpSessionId: undefined }), false);
+	// 生图/生视频没有可检索正文，挂上去只会永远「没有匹配」
 	assert.equal(supportsSessionFind({ backend: "imagegen", filePath: "C:/s/a.jsonl" }), false);
 	// pi 草稿还没落盘
 	assert.equal(supportsSessionFind({ backend: "pi", filePath: undefined }), false);
