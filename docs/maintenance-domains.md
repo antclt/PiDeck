@@ -39,6 +39,7 @@
 - 完成状态存于各新根的 `user-data-name-migration.json`（`userDataMigrationState.ts`）：目录、列出的持久化配置路径和适用会话修复全部成功后才原子发布；绑定迁移版本、旧/新根、会话根与平台。命中有效记录后跳过扫描；没有记录的存量用户继续补修，读写失败或会话目录冲突不发布新完成记录、下次重试。根改名失败用旧根，根已改名后的补修失败继续用新根；会话目录两代并存时保留两边、不合并。此记录只证明本条迁移链，不代表飞书子目录/Bot 格式/凭据及其它迁移已验收；完整登记及当前验收状态见 [UD-001](data-migrations.md#ud-001本次补齐的完成状态)。
 - 飞书子目录由 `pi-desktop/` 整体迁到 `feishu/`，保留密文和绑定；路径在实际读写时解析，不在模块导入时缓存，避免早于 `app.setPath`。环境导入兼容两种子目录。改名失败继续旧目录并重试；两代目录并存时使用新目录，但不覆盖、删除或自动合并旧数据。
 - `appBrand.initializeAppBrand` 在 ready 前保留历史运行时名供 Electron 初始化 Linux/macOS 密钥环，ready 时恢复品牌；不能提前改加密身份，否则既有 safeStorage 密文/Cookie 无法使用原密钥。Windows AUMID、macOS bundle ID 和旧 localStorage key 保持兼容身份；旧名只用于兼容，不作为新的安装包或数据目录名。
+- 构建身份与「更新通道」正交（2026-10）：通道（`__PIDECK_DEV_BUILD__`）决定跟踪哪条发布线；构建来源（`__PIDECK_RELEASE_BUILD__` + 打包态，`src/main/buildIdentity.ts` → `update:get-channel` 的 `buildOrigin`）决定界面是否标「本地构建」。本机 `pack:dev` / `pack` / `dist:*` 直跑一律 local-package（版本号抄 package.json，与发布版同号，必须标出来）；只有三个发布 workflow 显式注入 `PIDECK_RELEASE_BUILD=1` 才是 release。缺省 local 是安全方向（漏标只让发布包多一个徽章，反向会让本机包冒充发布版）；`tests/releaseWorkflowBuildOrigin.test.mjs` 守接线，`tests/buildOrigin.test.mjs` 守三态判定。不把来源做成运行期环境变量（发布包里环境不存在且可伪造），也不改 `app.getVersion()`（会污染 updater 比较、`latest*.yml`、产物名与 userData 目录）。
 - 更新缓存新写入使用 `pideck-updater`，旧缓存可重建，保留不删除。验证入口：`tests/appBrand*.test.mjs`、`tests/*UserData*.test.mjs`、`tests/userData*.test.mjs`、`tests/feishuConfigDirectory.test.mjs`、`tests/feishuSecretStorage.test.mjs`、`tests/channelDataImport.test.mjs`；真实安装与系统密钥环仍需按平台 smoke。
 
 ## README 与官网共用图片（docs/images 单一数据源）

@@ -5048,6 +5048,10 @@ export const zhCN = {
 	"settings.portableUpdateOpenRelease": "前往 GitHub 下 portable",
 	"settings.updateGithubFailHint": "官方 GitHub 直连失败时，可在下方「更新源」切换到国内镜像。",
 	"settings.updateUpToDate": "已是最新版本",
+	// 构建来源（与更新通道正交，2026-10）：本机打包/源码运行的版本号抄 package.json，
+	// 与发布版同号，「已是最新」只比版本字符串——不标出来会被误认为官方发布版。
+	"settings.buildOriginLocal": "本地构建",
+	"settings.buildOriginLocalHint": "本机构建：版本号取自 package.json，「已是最新」只表示版本字符串与最新发布版相同。",
 	"settings.updateErrorDetail": "更新失败：{error}",
 	"settings.checkUpdateRetry": "重试检测",
 	"app.updateCardVersion": "PiDeck v{version}",

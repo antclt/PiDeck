@@ -64,6 +64,7 @@ import { registerDataEnvIpc } from "./ipc/dataEnvIpc";
 import { ChannelSwitchService } from "./update/ChannelSwitchService";
 import { registerChannelSwitchIpc } from "./ipc/channelSwitchIpc";
 import { resolveUpdateChannel } from "./update/channelIdentity";
+import { resolveBuildOrigin } from "./buildIdentity";
 import { APP_DEEP_LINK_SCHEME } from "./utils/deepLinkScheme";
 import { APP_DISPLAY_NAME, initializeAppBrand } from "./utils/appBrand";
 import { migrateDevUserData } from "./projects/devUserDataMigration";
@@ -5069,6 +5070,13 @@ app
 		void appLogger.info("app", "Cold start milestone: app ready", {
 			sinceModuleLoadMs: Date.now() - bootAnchorMs,
 			processUptimeMs: Math.round(process.uptime() * 1000),
+		});
+		// 构建身份（通道 + 来源）：支持排障时一眼看出这个包是本机打包还是发布产物。
+		// 与更新界面的「本地构建」徽章同源（systemIpc 的 update:get-channel）。
+		void appLogger.info("app", "Build identity", {
+			channel: updateChannel,
+			buildOrigin: resolveBuildOrigin(),
+			packaged: app.isPackaged,
 		});
 		// userData 更名迁移（pi-desktop → PiDeck）在 setPath 前同步执行，当时还没有日志器；
 		// 结果在此补记，失败/回退路径必须可从日志诊断。

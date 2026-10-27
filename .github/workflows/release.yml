@@ -283,6 +283,9 @@ jobs:
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 发布产物标记：注入后 __PIDECK_RELEASE_BUILD__ 为 true → 构建来源判定 release
+          # （src/main/buildIdentity.ts）。少了它，发布包会在设置页显示「本地构建」。
+          PIDECK_RELEASE_BUILD: "1"
           # GitHub Releases occasionally returns 504 for Electron/electron-builder binaries;
           # use a stable mirror for CI downloads while keeping publishing on GitHub Releases.
           # macOS DMG packaging needs dmgbuild bundles that can be missing from npmmirror,

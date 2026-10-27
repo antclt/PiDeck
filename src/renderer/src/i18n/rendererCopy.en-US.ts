@@ -5069,6 +5069,10 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.portableUpdateOpenRelease": "Open GitHub for portable build",
 	"settings.updateGithubFailHint": "If GitHub is unreachable, switch Update source below to a mirror.",
 	"settings.updateUpToDate": "Up to date",
+	// Build origin (orthogonal to the update channel, 2026-10): locally built packages reuse
+	// package.json's version, so "up to date" only compares version strings.
+	"settings.buildOriginLocal": "Local build",
+	"settings.buildOriginLocalHint": 'Locally built: the version comes from package.json, so "up to date" only means the version string matches the latest release.',
 	"settings.updateErrorDetail": "Update failed: {error}",
 	"settings.checkUpdateRetry": "Retry Check",
 	"app.updateCardVersion": "PiDeck v{version}",

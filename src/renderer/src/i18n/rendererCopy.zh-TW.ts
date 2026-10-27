@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: ab78ec4602cb5b96512ca65a357286c4129640a80b46ebcbb87f4b0bcd92f1fd（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 8c30c59c2595ef821fdc39d4b1390f43344059c6c140063a2579df907ba2f339（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5055,6 +5055,10 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.portableUpdateOpenRelease": "前往 GitHub 下 portable",
 	"settings.updateGithubFailHint": "官方 GitHub 直連失敗時，可在下方「更新源」切換到國內映象。",
 	"settings.updateUpToDate": "已是最新版本",
+	// 构建来源（与更新通道正交，2026-10）：本机打包/源码运行的版本号抄 package.json，
+	// 与发布版同号，「已是最新」只比版本字符串——不标出来会被误认为官方发布版。
+	"settings.buildOriginLocal": "本地構建",
+	"settings.buildOriginLocalHint": "本機構建：版本號取自 package.json，「已是最新」只表示版本字串與最新發布版相同。",
 	"settings.updateErrorDetail": "更新失敗：{error}",
 	"settings.checkUpdateRetry": "重試檢測",
 	"app.updateCardVersion": "PiDeck v{version}",
