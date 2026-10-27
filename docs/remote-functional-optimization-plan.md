@@ -315,6 +315,23 @@ PIDECK_E2E_REMOTE_HOST=… PIDECK_E2E_REMOTE_USER=… PIDECK_E2E_REMOTE_FINGERPR
 - 扫描的 13.3 s 里约 5.8 s 是**切 root 重建 helper 会话**的固定成本（与 F3 的 warm 数值同量级），与 F4 无关：F4 省掉的是「每文件一次 RTT」。消除这次固定成本属于 root/会话模型，超出本轮范围。
 - 本轮真机没有覆盖：F2 的故障注入（满载 + 重复 cancel + 慢读）、打包产物（`npm run pack`）路径、macOS 客户端、A/B 项目交替与 Git/终端场景（被上面的旧 spec 冲突挡住）。
 
+### 移交：既有 acceptance spec 的「登记后」断言迁移（独立任务）
+
+加主机步骤已在本轮修好并真机验证（见上两节）；**登记远端项目之后的断言仍停在旧 UI**，随并行进行中的远端 UI 改版一并迁移，不要在验收收尾里臆造。现状（按源码核对）：
+
+| 位置 | 旧断言 | 当前产品 |
+| --- | --- | --- |
+| `e2e/remoteHostAcceptance.spec.ts` 的 `enrollRemoteProject`、`e2e/remoteSessionAcceptance.spec.ts` 的 `enrollRemoteProjectInSidebar` | `#remote-enroll-path` 输入框 + 「解析并确认」+ 「确认远端项目目录」+ 「已添加远端项目」 | `RemoteProjectEnrollDialog` 自 `09610d120` 起是**两态面板**：`remote-enroll-mode-existing` / `remote-enroll-mode-create`、主机下拉 `remote-enroll-host`、existing 模式用 `RemoteDirectoryPicker` 选目录、create 模式用远程目录选择器 + `remote-enroll-leaf`；提交按钮文案走 `sidebar.remoteEnroll.resolve` |
+| 两份 spec 的中栏断言 `getByText("远端项目", { exact: true })` | 登记后面板标题是「远端项目」+ 文件工具栏 | `59a1fb351` 起远端项目空态复用本地输入页：中栏是输入框 + 「浏览远端文件」入口，没有该标题 |
+| 其后依赖「登记后直接看到文件页」的步骤（文件管理/代码编辑/Git 抽屉等 helper） | 假定文件页已就位 | 需要显式点「浏览远端文件」（或对应的 `data-testid`）再进入文件面 |
+
+迁移要求：
+
+- 只把**过期的 UI 入口**换成当前产品入口，业务断言（文件内容、Git 字节不变、会话归属、会话列表等）逐项保留，不删不降级。
+- 加主机那一段（落盘 pin、导入面板展开、「保存|添加并连接」、模态进度框）已经修好，不要回退成本轮之前的写法。
+- 改完必须跑：`node --test tests/remoteAcceptanceSpecGuard.test.mjs`（**带**主机凭据，或至少保证错误指纹反向控制在有凭据的环境执行一次）、`e2e/remoteHostAcceptance.spec.ts` 与 `e2e/remoteSessionAcceptance.spec.ts` 全量；`out/` 需要先用 `npx electron-vite build` 重建（`--user-data-dir` 里的界面必须与 `src/renderer` 一致）。
+- 主机参数仍只从 `PIDECK_E2E_REMOTE_HOST/USER/FINGERPRINT/PORT` 读，仓库里不得出现真实值。
+
 ### 本轮改动文件
 
 - main（16）：`RemoteHostConnectionService`、`RemoteBootstrapSession`、`RemoteBootstrapDeployment`、`RemoteBootstrapTransfer`、`RemoteBootstrapContract`、`RemoteExtensionDeployment`、`RemoteControlClient`、`SshProcessLauncher`、`SshClientRuntime`、`RemoteHostConnectionTypes`、`RemoteHelperContract`、`RemoteHelperEntry`、`RemoteWorkspaceReader`、`RemoteProjectFileUpload`、`SshConnectionAttempt`、`sessions/RemoteSessionScanner`。
