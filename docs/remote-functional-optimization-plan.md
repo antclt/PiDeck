@@ -296,6 +296,25 @@ node --test tests/remoteLatencyBaseline.test.mjs
 - 2000 文件的旧行为没有实跑（2000/4×100 ms ≈ 50 s，不值得占用测试时长）：它由同一份 200 文件夹具逐条循环实测后，按「每文件一次往返、并发 4」外推；请求数一栏两种口径都是实测。
 - 这些数字只证明「注入 100 ms 下的工作量与同条件耗时」，不代表任何真实网络；真机耗时与 RTT 仍属 §7.2 未验证项。
 
+### 真机 F5（Windows 客户端 → Linux 6.8 主机，单次 42 s）
+
+主机参数只从环境变量读（仓库里没有真实主机/指纹字面量）：
+
+```sh
+PIDECK_E2E_REMOTE_HOST=… PIDECK_E2E_REMOTE_USER=… PIDECK_E2E_REMOTE_FINGERPRINT=… PIDECK_E2E_REMOTE_PORT=22   npx playwright test e2e/remoteFunctionalAcceptance.spec.ts
+```
+
+| 场景 | 观察到的产品结果 | 独立证据 |
+| --- | --- | --- |
+| F1 冷部署中取消 → 立即重试 | 取消后主进程 connect 以 `SSH_HOST_DISCONNECTED` 结算，用时 **327 ms**（会话预算 300 s）；重试完成一次真实冷部署并 ready | 取消时远端已有 `.staging-*`（入口已持锁）；取消后 `bundles/` 无本版本 sha、staging 清空、`.deploy*.lock` 无残留、`node` 入口进程 0 |
+| F3 断开 → 重连 | ready，用时 **5.77 s**；`bundles/` 集合前后完全相同（2 个），无 staging | 复用命中不新增内容寻址目录 ⇒ 没有第二次上传 |
+| F4 会话整表扫描 | 1530 条（1500 夹具 + 30 真实会话）全部出现在结果里，用时 **13.3 s** | 与远端 `ls` 的夹具条数核对；逐条 fixture id 命中 |
+
+- **驱动方式**：这份 spec 走产品自己的 preload IPC（`remoteHosts.add/connect/disconnect`、`remoteSessions.scan`），不点设置页——本机 `out/renderer` 是早于本轮 renderer 改动的构建产物（只重建了 main+preload），用点击驱动会把「界面版本」混进结论；设置页点击路径仍由既有两份 acceptance spec 负责。
+- **已知测试合同冲突（与本轮无关，需独立处理）**：`e2e/remoteHostAcceptance.spec.ts` 与 `e2e/remoteSessionAcceptance.spec.ts` 的「加主机」步骤仍在等「确认主机指纹」弹框并点「指纹正确，信任」，而产品自 `74682ad72` 起改为「添加即验证 + 立即连接」（首次信任在主进程完成，不再弹框）。两份 spec 必然停在那一步；本轮不改它们（存量测试合同冲突单独开任务重写），真机证据由上面的新 spec 提供。
+- 扫描的 13.3 s 里约 5.8 s 是**切 root 重建 helper 会话**的固定成本（与 F3 的 warm 数值同量级），与 F4 无关：F4 省掉的是「每文件一次 RTT」。消除这次固定成本属于 root/会话模型，超出本轮范围。
+- 本轮真机没有覆盖：F2 的故障注入（满载 + 重复 cancel + 慢读）、打包产物（`npm run pack`）路径、macOS 客户端、A/B 项目交替与 Git/终端场景（被上面的旧 spec 冲突挡住）。
+
 ### 本轮改动文件
 
 - main（16）：`RemoteHostConnectionService`、`RemoteBootstrapSession`、`RemoteBootstrapDeployment`、`RemoteBootstrapTransfer`、`RemoteBootstrapContract`、`RemoteExtensionDeployment`、`RemoteControlClient`、`SshProcessLauncher`、`SshClientRuntime`、`RemoteHostConnectionTypes`、`RemoteHelperContract`、`RemoteHelperEntry`、`RemoteWorkspaceReader`、`RemoteProjectFileUpload`、`SshConnectionAttempt`、`sessions/RemoteSessionScanner`。
@@ -309,15 +328,17 @@ node --test tests/remoteLatencyBaseline.test.mjs
 | `npm run typecheck` | 通过（`tsc --noEmit` 无输出）。运行期间工作区有并行 agent 的 renderer/i18n 改动，它们落地后本项才变成全绿；本任务未触碰那些文件。 |
 | `node --test <16 个定向文件>` | 279 tests / 276 pass / 0 fail / 3 skipped（跳过项是既有的平台跳过：POSIX 专用 bootstrap 集成）。 |
 | `node --test --test-concurrency=4 <184 个 remote*/ssh* 测试文件>` | 1977 tests / 1703 pass / 0 fail / 274 skipped（跳过项全部为既有平台/环境跳过）。 |
+| `npx playwright test e2e/remoteFunctionalAcceptance.spec.ts`（真机，见下） | **1 passed（42.4 s）**：F1 取消 327 ms / 重试冷部署、F3 复用 5.77 s 且 bundle 集合不变、F4 1530 条 13.3 s。 |
 | `biome format`（本任务文件） | 无差异。 |
 
 ## 7.2 未验证 / 待真机确认
 
-以下全部**未验证**，不作为发布证据：
+已在本轮真机验证（见 §7.1「真机 F5」）：部署中取消 → 立即重试、复用命中不重传、1500+ 条会话整表扫描、取消后进程/staging/锁的独立检查。仍未验证：
 
-1. §4 F5 的六类真机场景一项未跑：真实 SSH/Electron 下的「部署中取消→立即重试」、A/B 项目交替、普通请求满载 + 重复 cancel + 慢读、写已执行但回执丢失、pi runtime 意外退出恢复、退出/断开 + 终端。
-2. 100 ms **注入** RTT 的离线前后对比已在 §7.1「F0 基线」完成（请求数与同条件墙钟），但没有真实网络/真实主机的 RTT 与 2000 会话列表实测。
-3. 取消后「独立检查本 run 的进程/staging/锁」只在离线 transport 上验证，未在真实主机上观察。
-4. 慢 Writable 下的真实内存峰值未压测；本轮只证明字节预算与等待者释放（有界性），没有曲线数据。
-5. 未运行 `npm run build` / `npm run pack` / 任何 E2E；未做 Windows→Linux、Linux→Linux、macOS 任一组真机矩阵。
-6. helper 1.22.0 与 bootstrap 入口的变更没有在真实远端 Node 上运行过（真实冻结入口是在本机 Node 子进程里跑的，POSIX 主机行为仍以历史证据为准）。
+1. F5 中其余场景：A/B 项目交替与配置/会话根的 root 切换、文件/Git 写已执行但回执丢失、pi runtime 意外退出恢复、退出/断开后的终端进程——既有 `remoteHostAcceptance` / `remoteSessionAcceptance` 被 §7.1 记录的旧 pin 弹框步骤挡住，本轮未跑通。
+2. 100 ms **注入** RTT 的离线前后对比已完成（§7.1「F0 基线」），但没有真实广域网的 RTT 与 2000 会话列表实测。
+3. 打包产物（`npm run pack`）下的远端链路未跑；本轮真机用的是 `npm run build:main` 的未打包产物。
+4. 慢 Writable 下的真实内存峰值未压测；只有字节预算与等待者释放（有界性）证明。
+5. macOS 客户端仍未验证；本轮矩阵是 Windows 客户端 → Linux 主机。
+6. 旧 helper（< 1.22.0）只在握手诊断层面覆盖（`SSH_HELPER_CAPABILITY_MISSING_FS_STAT_MANY`），没有真机旧版本对照。
+7. **独立处理项**：两份既有 acceptance spec 的「确认主机指纹」步骤与新加主机交互不一致（产品 `74682ad72` 起首次信任在主进程内完成）。修它们需要重写这两份 spec 的加主机步骤，属独立任务，不能混进本轮的“优化”里。
