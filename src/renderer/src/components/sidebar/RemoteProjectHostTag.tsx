@@ -20,7 +20,7 @@ const TONE_COPY: Record<RemoteHostConnectionTone, TranslationKey> = {
  * 语义边界：这里只表示**主机连接**，不表示 Agent 是否在跑（后者仍是行内的运行指示）；主机 ready
  * 不代表每条会话 runtime 都 ready，两者不合并。
  */
-export function RemoteProjectHostTag(props: { hostId: string }) {
+export function RemoteProjectHostTag(props: { hostId: string; testId?: string; className?: string }) {
 	const index = useAtomValue(remoteHostIdentityIndexAtom);
 	const identity = index[props.hostId];
 	// 目录还没到（首次挂载/功能未启用）时不占位，也不编一个「未知主机」闪一下；状态推送先到则只画点。
@@ -31,7 +31,7 @@ export function RemoteProjectHostTag(props: { hostId: string }) {
 	const stateLabel = t(TONE_COPY[tone]);
 	const hint = t("sidebar.remoteProject.connectionHint", { host: accessibleHost, state: stateLabel });
 	return (
-		<span role="img" aria-label={hint} title={hint} data-testid="remote-project-host" data-tone={tone} className="ml-1 flex min-w-0 max-w-[9.5rem] shrink items-center gap-1 text-micro text-muted-foreground">
+		<span role="img" aria-label={hint} title={hint} data-testid={props.testId ?? "remote-project-host"} data-tone={tone} className={cn("ml-1 flex min-w-0 max-w-[9.5rem] shrink items-center gap-1 text-micro text-muted-foreground", props.className)}>
 			{host.length > 0 ? (
 				<span aria-hidden="true" className="min-w-0 truncate">
 					{host}

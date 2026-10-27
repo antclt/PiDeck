@@ -7,10 +7,12 @@ import { sessionRecordByIdAtomFamily, sessionRuntimeBySessionIdAtomFamily, sessi
 import { isUserFacingSessionStart } from "../../hooks/useSessionTimelineController";
 import { t } from "../../i18n";
 import { displayProjectDirectoryName } from "../../rendererUtils";
+import { isRemoteProject } from "../../../../shared/projectLocation";
 import { supportsSessionFind } from "../../utils/sessionFindSupport";
 import { Button } from "../ui-shadcn/button";
 import { DshAgentPresetControl } from "./DshAgentPresetControl";
 import { DshAgentToolsPanel } from "./DshAgentToolsPanel";
+import { RemoteProjectHostTag } from "../sidebar/RemoteProjectHostTag";
 import { SessionActionsControl } from "./SessionActionsControl";
 import type { SessionMenuModel, SessionMenuRunControl } from "./SessionActionsMenu";
 
@@ -143,6 +145,8 @@ export function SessionHeader(props: SessionHeaderProps) {
 						{projectName}
 					</span>
 				) : null}
+				{/* 远端会话也标出主机与连接状态：切到会话页后仍知道它跑在哪台机器上。 */}
+				{project !== undefined && isRemoteProject(project) ? <RemoteProjectHostTag hostId={project.locator.hostId} testId="session-remote-host" className="max-w-32" /> : null}
 				{projectName && title ? (
 					<span className="shrink-0 text-caption text-muted-foreground/70" aria-hidden="true">
 						/
