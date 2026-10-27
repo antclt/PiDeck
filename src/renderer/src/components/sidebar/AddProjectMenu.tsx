@@ -2,6 +2,7 @@ import { FolderPlus, Plus, Server } from "lucide-react";
 import { useSetAtom } from "jotai";
 import { remoteEnrollDialogOpenAtom } from "../../atoms/remote-project-atoms";
 import { useRemoteFeatureAvailable } from "../../hooks/useRemoteFeatureAvailable";
+import { isRemoteEntryVisible } from "../../hooks/remoteFeatureVisibility";
 import { t } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
@@ -39,7 +40,7 @@ export function AddProjectMenu(props: { onAddLocal: () => void; labeled?: boolea
 					<FolderPlus className="size-3.5" aria-hidden="true" />
 					{t("sidebar.addProjectLocal")}
 				</DropdownMenuItem>
-				{remoteAvailable !== false && (
+				{isRemoteEntryVisible(remoteAvailable) && (
 					<DropdownMenuItem onSelect={() => setRemoteOpen(true)}>
 						<Server className="size-3.5" aria-hidden="true" />
 						{t("sidebar.addProjectRemote")}

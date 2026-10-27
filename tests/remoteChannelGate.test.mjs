@@ -1,13 +1,13 @@
 // tests/remoteChannelGate.test.mjs
 // 远端能力的通道门禁（2026-10-27 用户裁定：只在 dev 通道提供，正式包不启用也不暴露入口）。
-// 三个环节都要钉住，缺一条就会漏：
-//   1. 判据本身（isDevChannelBuild 的真值表）——写错方向等于正式包带远端、或 dev 包静默没有远端；
-//   2. 主进程装配接线（index.ts 的开关 + systemIpc 上报给渲染层的 devBuild）；
-//   3. 渲染层入口（侧栏「+ → 远端（SSH）…」与设置「连接」tab）按同一判据不渲染。
+// 只做行为断言：判据按真模块跑真值表，渲染层的取舍在真布局上跑真函数——
+// 不靠「源码里长什么样」来验证，搬迁/改名/换实现不会误红，写错行为不会误绿。
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
+
+const VISIBILITY_MODULE = "src/renderer/src/hooks/remoteFeatureVisibility.ts";
 
 function devChannelBuild(packaged, devBuild) {
 	const load = createTsSandbox({ globals: { __PIDECK_DEV_BUILD__: devBuild }, stubs: { electron: { app: { isPackaged: packaged } } } });
@@ -24,28 +24,30 @@ test("远端门禁判据：未打包运行与 dev 通道包为真，stable 通�
 	assert.equal(devChannelBuild(true, false), false, "stable 通道安装包必须关");
 });
 
-test("主进程与渲染层读同一个判据：index.ts 的开关、systemIpc 上报的 devBuild", () => {
-	const main = readFileSync("src/main/index.ts", "utf8");
-	const systemIpc = readFileSync("src/main/ipc/systemIpc.ts", "utf8");
-	const channelIdentity = readFileSync("src/main/update/channelIdentity.ts", "utf8");
-	assert.match(main, /const remoteExperimentEnabled = isDevChannelBuild\(\);/);
-	assert.match(main, /import \{[^}]*isDevChannelBuild[^}]*\} from "\.\/update\/channelIdentity";/);
-	// 渲染层门禁的唯一数据来源：update:get-channel 的 devBuild 必须就是同一个函数。
-	assert.match(systemIpc, /devBuild: isDevChannelBuild\(\)/);
-	assert.match(channelIdentity, /export function isDevChannelBuild\(\): boolean \{\s*return !app\.isPackaged \|\| __PIDECK_DEV_BUILD__;/);
+test("入口可见性：只有明确拿到 devBuild=false 才隐藏", () => {
+	const { isRemoteEntryVisible } = loadTsCommonJs(VISIBILITY_MODULE);
+	assert.equal(isRemoteEntryVisible(false), false, "正式包不暴露入口");
+	assert.equal(isRemoteEntryVisible(true), true, "dev 通道照常");
+	// undefined = update:get-channel 还没回来：先照常渲染，等真值到达再收口，否则 dev 通道会闪。
+	assert.equal(isRemoteEntryVisible(undefined), true, "通道信息未到不先藏入口");
 });
 
-test("渲染层入口按通道门禁渲染：侧栏「+」的远端项与设置「连接」tab", () => {
-	const hook = readFileSync("src/renderer/src/hooks/useRemoteFeatureAvailable.ts", "utf8");
-	assert.match(hook, /return useAtomValue\(updateChannelInfoAtom\)\?\.devBuild;/, "入口判据必须直接用 devBuild，不得另造一份判定");
+test("设置页布局：正式包把「连接」tab 整条剔除，dev 与未知状态原样返回", () => {
+	const { applyRemoteGateToSettingsLayout } = loadTsCommonJs(VISIBILITY_MODULE);
+	const { SETTINGS_TAB_LAYOUT } = loadTsCommonJs("src/renderer/src/components/app/settings/settingsTabLayout.ts");
+	const ids = (layout) => layout.map((entry) => entry.id);
 
-	const addProjectMenu = readFileSync("src/renderer/src/components/sidebar/AddProjectMenu.tsx", "utf8");
-	assert.match(addProjectMenu, /const remoteAvailable = useRemoteFeatureAvailable\(\);/);
-	assert.match(addProjectMenu, /\{remoteAvailable !== false && \([\s\S]{0,200}?setRemoteOpen\(true\)/, "远端菜单项必须受通道门禁包裹");
+	// 真布局里必须还有「连接」这项，否则下面的剔除断言会空转通过（tab 改名后这里先红）。
+	assert.ok(ids(SETTINGS_TAB_LAYOUT).includes("connections"), "SETTINGS_TAB_LAYOUT 应含 connections tab");
 
-	const settingsModal = readFileSync("src/renderer/src/components/app/SettingsModal.tsx", "utf8");
-	assert.match(settingsModal, /SETTINGS_TAB_LAYOUT\.filter\(\(entry\) => entry\.id !== "connections"\)/, "正式包必须把「连接」tab 从布局里拿掉");
-	assert.match(settingsModal, /resolveVisibleSettingsTabs\(hiddenModules, revealedTabs, settingsLayout\)/);
-	assert.match(settingsModal, /entry\.tab !== "connections" \|\| remoteAvailable !== false/, "搜索结果不得再给出打不开的「连接」tab");
-	assert.match(settingsModal, /activeTab === "connections" && remoteAvailable !== false/, "门禁关闭时不渲染连接 tab 内容");
+	assert.deepEqual(
+		ids(applyRemoteGateToSettingsLayout(SETTINGS_TAB_LAYOUT, false)),
+		ids(SETTINGS_TAB_LAYOUT).filter((id) => id !== "connections"),
+		"正式包：只少「连接」，其余顺序不变",
+	);
+	assert.equal(applyRemoteGateToSettingsLayout(SETTINGS_TAB_LAYOUT, true), SETTINGS_TAB_LAYOUT, "dev 通道原样返回（不重建数组，避免每次渲染都换引用）");
+	assert.equal(applyRemoteGateToSettingsLayout(SETTINGS_TAB_LAYOUT, undefined), SETTINGS_TAB_LAYOUT, "通道信息未到时不改布局");
+
+	// 分组分割线是布局的一部分：剔除中间项后，后续项自带的分割线标记必须保留。
+	assert.deepEqual(applyRemoteGateToSettingsLayout([{ id: "common" }, { id: "connections", dividerBefore: true }, { id: "git", dividerBefore: true }], false), [{ id: "common" }, { id: "git", dividerBefore: true }], "剔除后保留其余条目的 dividerBefore");
 });
