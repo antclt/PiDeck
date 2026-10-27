@@ -6202,6 +6202,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"session.trajectory.loadOlder": "Load older",
 	"session.trajectory.loadingOlder": "Loading…",
 	"session.trajectory.runtime": "Latest reply metrics",
+	"session.trajectory.field.provider": "Provider",
 	"session.trajectory.lane.input": "Input",
 	"session.trajectory.lane.model": "Model",
 	"session.trajectory.lane.tools": "Tools",

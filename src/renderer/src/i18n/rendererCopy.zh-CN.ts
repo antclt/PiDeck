@@ -6183,6 +6183,7 @@ export const zhCN = {
 	"session.trajectory.loadOlder": "加载更早记录",
 	"session.trajectory.loadingOlder": "正在加载…",
 	"session.trajectory.runtime": "最近一次回复指标",
+	"session.trajectory.field.provider": "供应商",
 	"session.trajectory.lane.input": "输入",
 	"session.trajectory.lane.model": "模型",
 	"session.trajectory.lane.tools": "工具",

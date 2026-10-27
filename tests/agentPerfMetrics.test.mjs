@@ -62,6 +62,8 @@ test("message_end/done/error settles perf and pushes a runtime-state patch", () 
 	// 第 4 参是归因日志回调（agentStart/turnStart/messageStart/firstDelta 边界，见 messagePerfTracker.settle）。
 	// 参数较长时 biome 会折行，正则按仓库规范空白容忍（\s*）。
 	assert.match(agentManager, /this\.messagePerf\.settle\(\s*agentId,\s*\(channel, payload\) => this\.emit\(channel, payload\),\s*messageEnd,\s*\(message, detail\) => void this\.appLogger\?\.info\("session-perf", message, detail\),?\s*\);/);
+	// settle 自身从 AgentManager 的最近快照取模型事实（不新增调用参数，见 messagePerfTracker.settle）。
+	assert.match(agentManager, /this\.messagePerf\.bindRuntimeModelSource\(\(agentId\) => this\.lastRuntimeStateByAgent\.get\(agentId\)\);/);
 	// message_update 终态（done/error）结算
 	assert.match(agentManager, /eventType === "message_end" \|\| eventType === "done" \|\| eventType === "error"/);
 	assert.match(agentManager, /this\.messagePerf\.settle\(\s*agentId,\s*\(channel, payload\) => this\.emit\(channel, payload\),\s*partialMessage,\s*\(message, detail\) => void this\.appLogger\?\.info\("session-perf", message, detail\),?\s*\);/);
@@ -75,6 +77,9 @@ test("message_end/done/error settles perf and pushes a runtime-state patch", () 
 	assert.match(settle, /const streamingMs = perf\.firstDeltaAt > 0 \? now - perf\.firstDeltaAt : undefined;/);
 	assert.match(settle, /calculateTokensPerSecond\(outputTokens, streamingMs\)/);
 	assert.match(settle, /calculateTokensPerSecond\(outputTokens, totalMs\)/);
+	// 模型事实不新增调用参数：settle 自身读 AgentManager 的最近快照（流式热路径不能等 RPC）。
+	assert.match(readAgentManager(), /this\.messagePerf\.bindRuntimeModelSource\(/);
+	assert.match(readTracker(), /this\.readRuntimeModel\?\.\(agentId\)/);
 	// 结算结果本地缓存 + 边沿推送（不触发 get_state/get_session_stats RPC）
 	assert.match(settle, /lastPerfByAgent\.set\(agentId,\s*\{[^}]*ttftMs[^}]*totalMs[^}]*endToEndTps[^}]*tps[^}]*sessionTps[^}]*sessionEndToEndTps[^}]*at:\s*now\s*\}\)/);
 	assert.match(settle, /state:\s*\{[^}]*ttftMs[^}]*totalMs[^}]*endToEndTps[^}]*tps[^}]*sessionTps[^}]*sessionEndToEndTps[^}]*perfAt:\s*now\s*\}/);
