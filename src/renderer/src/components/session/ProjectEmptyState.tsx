@@ -29,6 +29,8 @@ export function ProjectEmptyState(props: {
 	onAddProject: () => void;
 	onSelectProject: (projectId: string) => void;
 	onOpenTerminal?: () => void;
+	/** 远端空态的一键起会话；由 App 注入（与项目行「+」同一条 createDraft 链路）。 */
+	onCreateSession?: (projectId: string) => void;
 }) {
 	// 远端登记弹框由 App 统一挂载，这里只打开开关（与侧栏「+」同一条路径）。
 	const setRemoteEnrollOpen = useSetAtom(remoteEnrollDialogOpenAtom);
@@ -59,9 +61,10 @@ export function ProjectEmptyState(props: {
 	// 空），发送时按选中项目创建；下拉列表 = 已加入的全部项目（含内置 Chat）。
 	//
 	// 远端项目没有本机路径：使用同源远端目录/文本编辑宿主，各本机IPC仍按locator拒绝。
-	// 会话创建仍由项目行入口负责，不把无会话引导页当成本机项目。
-	if (isRemoteProject(props.activeProject)) {
-		return <RemoteProjectPanel projectId={props.activeProject.id} projectName={props.activeProject.name} onOpenTerminal={props.onOpenTerminal} />;
+	// 无会话空态先给「新建会话」主入口（与项目行「+」同一条 createDraft），文件浏览仍在本页。
+	const remoteProject = props.activeProject;
+	if (isRemoteProject(remoteProject)) {
+		return <RemoteProjectPanel projectId={remoteProject.id} projectName={remoteProject.name} onOpenTerminal={props.onOpenTerminal} onCreateSession={props.onCreateSession === undefined ? undefined : () => props.onCreateSession?.(remoteProject.id)} />;
 	}
 
 	return (

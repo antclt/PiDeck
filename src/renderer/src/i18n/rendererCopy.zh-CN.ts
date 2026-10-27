@@ -4359,6 +4359,7 @@ export const zhCN = {
 	"settings.connections.repair.hint.manual": "需要人工检查文件后处理。",
 	"project.remote.title": "远端项目",
 	"project.remote.badge": "远端",
+	"project.remote.newSession": "新建会话",
 	"project.remote.unsupported": "远端项目暂不支持此操作（属于后续阶段）。",
 	"project.remote.connectFirst": "主机未连接：请先在设置页连接这台主机。",
 	"project.remote.notConnectedHint": "远端读取需要一条已连接的会话。请先在「设置 → 连接」连接这台主机。",
