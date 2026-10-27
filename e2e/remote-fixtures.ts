@@ -415,11 +415,10 @@ export async function dismissRemoteConnectionProgress(window: Page): Promise<voi
 				.isVisible()
 				.catch(() => false))
 		) {
-			// 「完成」在已就绪态可靠关闭；仍可见再试「关闭」。
-			// 嵌套在设置弹窗里时命中测试可能被外层遮罩抢走，直接派发 click 给按钮本身。
+			// 「完成」是就绪态的主关闭按钮；仍可见时再试「关闭」。
 			await buttons
 				.first()
-				.dispatchEvent("click")
+				.click({ timeout: 3_000 })
 				.catch(() => undefined);
 			await window.waitForTimeout(100);
 			if (
@@ -430,10 +429,52 @@ export async function dismissRemoteConnectionProgress(window: Page): Promise<voi
 			)
 				await buttons
 					.last()
-					.dispatchEvent("click")
+					.click({ timeout: 3_000 })
 					.catch(() => undefined);
 		}
 		await window.waitForTimeout(250);
+	}
+}
+
+/**
+ * 在当前打开的远端目录浏览器里导航到绝对路径。选取即「当前目录」，没有单独的确认按钮；
+ * 隐藏目录（.pideck-e2e-*）需要先打开「显示隐藏目录」。
+ */
+export async function chooseRemoteDirectory(window: Page, targetPath: string): Promise<void> {
+	const picker = window.getByTestId("remote-directory-picker").last();
+	await expect(picker).toBeVisible({ timeout: 30_000 });
+	const currentPath = async () => (await picker.getAttribute("data-current-path")) ?? "";
+	await expect.poll(currentPath, { timeout: 30_000 }).not.toBe("");
+	let current = await currentPath();
+	const target = targetPath.replace(/\/+$/, "");
+	const hiddenToggle = picker.getByRole("button", { name: "显示隐藏目录" });
+	const showHiddenIfNeeded = async (segment: string) => {
+		if (!segment.startsWith(".")) return;
+		if ((await hiddenToggle.getAttribute("aria-pressed")) !== "true") await hiddenToggle.click();
+	};
+	if (target !== current && !target.startsWith(current === "/" ? "/" : current + "/")) {
+		const parent = picker.getByRole("button", { name: "上一级" });
+		for (let step = 0; step < 32 && current !== "/"; step += 1) {
+			await parent.click();
+			await expect.poll(currentPath, { timeout: 30_000 }).not.toBe(current);
+			current = await currentPath();
+		}
+	}
+	const rest =
+		target === current
+			? []
+			: target
+					.slice(current === "/" ? 1 : current.length + 1)
+					.split("/")
+					.filter(Boolean);
+	for (const segment of rest) {
+		await showHiddenIfNeeded(segment);
+		const entry = picker.getByRole("button", { name: segment, exact: true }).first();
+		await expect(entry).toBeVisible({ timeout: 30_000 });
+		await entry.click();
+		const expected = current === "/" ? "/" + segment : current + "/" + segment;
+		await expect.poll(currentPath, { timeout: 30_000 }).toBe(expected);
+		current = expected;
 	}
 }
 

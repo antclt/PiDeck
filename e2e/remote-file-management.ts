@@ -1,5 +1,5 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { runRemoteCommand, remoteProjectRow, openRemoteProjectFiles, type RemoteAcceptanceCredentials, type RemoteAcceptanceTimeouts } from "./remote-fixtures";
+import { chooseRemoteDirectory, runRemoteCommand, remoteProjectRow, openRemoteProjectFiles, type RemoteAcceptanceCredentials, type RemoteAcceptanceTimeouts } from "./remote-fixtures";
 
 const q = (value: string): string => "'" + value.replace(/'/g, "'\\''") + "'";
 
@@ -74,7 +74,8 @@ export async function createEmptyRemoteProjectInSidebar(window: Page, projectPat
 	const enrollDialog = window.locator('[role="dialog"]').filter({ hasText: "添加远端项目" });
 	await expect(enrollDialog).toBeVisible();
 	await enrollDialog.getByTestId("remote-enroll-mode-create").check();
-	await enrollDialog.locator("#remote-enroll-path").fill(projectPath);
+	await chooseRemoteDirectory(window, projectPath.slice(0, projectPath.lastIndexOf("/")));
+	await enrollDialog.locator("#remote-enroll-leaf").fill(projectPath.split("/").at(-1) ?? "");
 	await enrollDialog.getByRole("button", { name: "解析并确认" }).click();
 	const confirmDialog = window.locator('[role="dialog"]').filter({ hasText: "新建空远端项目目录" });
 	await expect(confirmDialog).toBeVisible({ timeout: limits.helperMs });

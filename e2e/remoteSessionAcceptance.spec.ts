@@ -30,6 +30,7 @@ import {
 	createRemoteSessionInProject,
 	matchesRemoteFingerprint,
 	readPinnedHostKeyFingerprint,
+	chooseRemoteDirectory,
 	readRemoteAcceptanceCredentials,
 	readRemoteAcceptanceTimeouts,
 	remoteProjectRow,
@@ -246,7 +247,7 @@ async function enrollRemoteProjectInSidebar(window: Page, projectPath: string, l
 	const enrollDialog = window.locator('[role="dialog"]').filter({ hasText: "添加远端项目" });
 	await expect(enrollDialog).toBeVisible();
 	await expect(enrollDialog.locator("#remote-enroll-host")).not.toBeEmpty();
-	await enrollDialog.locator("#remote-enroll-path").fill(projectPath);
+	await chooseRemoteDirectory(window, projectPath);
 	await enrollDialog.getByRole("button", { name: "解析并确认" }).click();
 	const confirmDialog = window.locator('[role="dialog"]').filter({ hasText: "确认远端项目目录" });
 	await expect(confirmDialog).toBeVisible({ timeout: limits.helperMs });

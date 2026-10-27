@@ -1,7 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import { encodePiSessionDirectory } from "../src/main/remote/remoteSessionProjectMatch";
 import { join } from "node:path";
-import { REMOTE_ACCEPTANCE_ENV, REMOTE_APP_DATA_DIR_NAME, attachRemoteDiagnostics, matchesRemoteFingerprint, readPinnedHostKeyFingerprint, readRemoteAcceptanceCredentials, readRemoteAcceptanceTimeouts, runRemoteCommand, test } from "./remote-fixtures";
+import { REMOTE_ACCEPTANCE_ENV, REMOTE_APP_DATA_DIR_NAME, attachRemoteDiagnostics, chooseRemoteDirectory, matchesRemoteFingerprint, readPinnedHostKeyFingerprint, readRemoteAcceptanceCredentials, readRemoteAcceptanceTimeouts, runRemoteCommand, test } from "./remote-fixtures";
 
 /**
  * 远端主机功能级验收（task-25 / J1）：在真实 Electron 里跑通「加主机 → 连接 → 登记远端项目 →
@@ -49,7 +49,7 @@ async function enrollRemoteProject(window: Page, remotePath: string): Promise<vo
 	await expect(enrollDialog).toBeVisible();
 	// 主机下拉由 hook 自动选中第一台可用主机；这个 profile 只有一台，断言它确实有值。
 	await expect(enrollDialog.locator("#remote-enroll-host")).not.toBeEmpty();
-	await enrollDialog.locator("#remote-enroll-path").fill(remotePath);
+	await chooseRemoteDirectory(window, remotePath);
 	await enrollDialog.getByRole("button", { name: "解析并确认" }).click();
 	// canonical 确认阶段：展示的是主进程解析出的、真正会被 confinement 的路径。
 	const confirmDialog = window.locator('[role="dialog"]').filter({ hasText: "确认远端项目目录" });
