@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { desktopApi } from "../../../desktopApi";
 import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
 import { AddHostDialog } from "./AddHostDialog";
+import { RemoteConnectionProgressDialog } from "./RemoteConnectionProgressDialog";
 import { RepairPanel } from "./RepairPanel";
 import { RemoteProjectTrustPanel } from "./RemoteProjectTrustPanel";
 import { SettingsSection } from "./SettingsStorageTab";
@@ -28,6 +29,10 @@ export function ConnectionsTab() {
 	const [message, setMessage] = useState<string | null>(null);
 	const [diagnostics, setDiagnostics] = useState<Record<string, RemoteHostDiagnosticEntry[]>>({});
 	const [adding, setAdding] = useState(false);
+	/** 当前正在展示进度的那次连接；errorCode 只来自这次 connect 的结果。 */
+	const [progress, setProgress] = useState<{ hostId: string; label: string; errorCode: string | null } | null>(null);
+	/** 取消/重试会换代：旧 connect 的迟到结果不得回写新一次的状态。 */
+	const attemptRef = useRef(0);
 
 	/**
 	 * 订阅连接状态推送。
@@ -61,11 +66,15 @@ export function ConnectionsTab() {
 	}, [refresh]);
 
 	/** 连接/断开共用一条路径：置忙 → 调用 → 用稳定码或状态回填 → 清忙。 */
-	const toggle = useCallback(async (hostId: string, connect: boolean) => {
+	const toggle = useCallback(async (hostId: string, connect: boolean, label?: string) => {
+		const attempt = ++attemptRef.current;
 		setBusy((current) => ({ ...current, [hostId]: true }));
+		if (connect) setProgress({ hostId, label: label ?? hostId, errorCode: null });
 		try {
 			if (connect) {
 				const result = await desktopApi.remoteHosts.connect(hostId);
+				// 取消/重试已换代：这次 attempt 的迟到结果整体丢弃。
+				if (attemptRef.current !== attempt) return;
 				if (result.ok) {
 					setStates((current) => ({ ...current, [hostId]: result.state }));
 					setMessage(null);
@@ -73,9 +82,11 @@ export function ConnectionsTab() {
 					// 失败不猜状态：显示稳定码，具体原因去诊断里看。
 					setMessage(t("settings.connections.connectFailed", { code: result.code }));
 					setStates((current) => ({ ...current, [hostId]: "offline" }));
+					setProgress((current) => (current?.hostId === hostId ? { ...current, errorCode: result.code } : current));
 				}
 			} else {
 				const result = await desktopApi.remoteHosts.disconnect(hostId);
+				if (attemptRef.current !== attempt) return;
 				if (result.ok) {
 					setStates((current) => ({ ...current, [hostId]: "disconnected" }));
 					setMessage(null);
@@ -84,10 +95,13 @@ export function ConnectionsTab() {
 				}
 			}
 		} finally {
-			setBusy((current) => ({ ...current, [hostId]: false }));
-			// 诊断随开关一起刷新，用户失败后立刻能看到阶段停在哪儿。
-			const result = await desktopApi.remoteHosts.diagnostics(hostId);
-			if (result.ok) setDiagnostics((current) => ({ ...current, [hostId]: result.entries }));
+			// 被取消/重试取代的那次 attempt 不再回写忙碌与诊断。
+			if (attemptRef.current === attempt) {
+				setBusy((current) => ({ ...current, [hostId]: false }));
+				// 诊断随开关一起刷新，用户失败后立刻能看到阶段停在哪儿。
+				const result = await desktopApi.remoteHosts.diagnostics(hostId);
+				if (result.ok) setDiagnostics((current) => ({ ...current, [hostId]: result.entries }));
+			}
 		}
 	}, []);
 
@@ -110,7 +124,7 @@ export function ConnectionsTab() {
 							<div key={host.id} className="flex flex-col gap-2 rounded-lg border border-border-subtle px-3 py-2">
 								<div className="flex items-center gap-3">
 									{/* 开关语义：「连上」是唯一目标状态，中间态与失败态都如实显示，不假装成功。 */}
-									<Button variant={connected ? "secondary" : "default"} size="sm" disabled={pending || !connectable} onClick={() => void toggle(host.id, !connected)} aria-label={connected ? t("settings.connections.disconnect") : t("settings.connections.connect")}>
+									<Button variant={connected ? "secondary" : "default"} size="sm" disabled={pending || !connectable} onClick={() => void toggle(host.id, !connected, host.label)} aria-label={connected ? t("settings.connections.disconnect") : t("settings.connections.connect")}>
 										{connected ? t("settings.connections.disconnect") : t("settings.connections.connect")}
 									</Button>
 									<div className="flex min-w-0 flex-col">
@@ -158,13 +172,27 @@ export function ConnectionsTab() {
 			{adding ? (
 				<AddHostDialog
 					onClose={() => setAdding(false)}
-					onSubmitted={(hostId) => {
+					onSubmitted={(hostId, label) => {
 						// 添加即已验证（首次信任在主进程内完成）：关框、刷新列表，并直接把这条新主机连上——
 						// 用户的下一步永远是「连上它」，多一次点击只是仪式。
 						setAdding(false);
 						void refresh();
-						void toggle(hostId, true);
+						void toggle(hostId, true, label);
 					}}
+				/>
+			) : null}
+			{/* 连接进度：添加/连接后立即出现；阶段来自诊断历史，状态来自 main 推送。 */}
+			{progress !== null ? (
+				<RemoteConnectionProgressDialog
+					open
+					hostId={progress.hostId}
+					hostLabel={progress.label}
+					state={states[progress.hostId]}
+					errorCode={progress.errorCode}
+					busy={busy[progress.hostId] === true}
+					onCancel={() => void toggle(progress.hostId, false, progress.label)}
+					onRetry={() => void toggle(progress.hostId, true, progress.label)}
+					onClose={() => setProgress(null)}
 				/>
 			) : null}
 		</div>
