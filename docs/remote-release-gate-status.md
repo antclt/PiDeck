@@ -49,6 +49,7 @@
 | remote config backend Batch B | 设置页 target selector + 远端 models/settings 面板（secret 徽标、显式 patch、冲突/未确认状态、禁用项文案） | ✅ 已交付（作者态 e2e 挂在文件管理用例，真机门禁见下） |
 | release evidence | `npm run pack` 资源检查、packaged/开发态门禁口径、长稳+真实慢链路、独立复核 | 🟡 pack 0 且资源/冻结源码检查通过；长稳（Linux 客户端）与人工独立复核待排 |
 | remote model catalog（行 819） | 目标 host live pi runtime 的可用模型探测 + 脱敏模型目录（provider 测试 v1） | ✅ 已交付（c6956d613；Windows 84/WSL 55 targeted；真机产品路步骤通过；逐供应商合成探测/用量仍 deferred） |
+| remote functional optimization F1–F4 | 连接/部署取消贯通、取消去重与写侧字节预算、bootstrap 复用已安装 bundle（helper 1.22.0）、会话元数据 `fs.statMany` 批量化 | 🟡 **离线已验证，真机未跑**：183 个 remote*/ssh* 测试文件 = 1972 项 / 1698 通过 / 0 失败 / 274 既有跳过；typecheck 通过；无真实 SSH/Electron e2e、无 100ms RTT 对比。证据与未验证项见 [remote-functional-optimization-plan.md](remote-functional-optimization-plan.md) §7.1–§7.2 |
 | 最终门禁（13 项真机） | G1–G5e + 文件管理（含远端配置 e2e）+ 终端 + 远端会话产品路（含归档/永久删除 + 模型目录 e2e） | ✅ **13 passed（12.4m）**，`CLEANUP_OK`；配置 e2e：host target → 脱敏读取 → 非密钥 patch → SSH 落盘核验 → 还原；产品路 e2e：live runtime → 设置 → 模型 → ssh target → 非空 provider 目录 |
 | 最终全量回归 | 工作树 vs 干净 HEAD `a52eb53ea` | ✅ 8507 项 / 8205 通过 / 30 败 / 272 skip，**失败集合完全一致（零新增）** |
 | 最终打包 | `npm run pack` + 产物冻结源码标记检查（含 config.mjs/1.21.2、模型目录） | ✅ pack 0；app.asar 命中 `config.read`/`config.patch`/`CONFIG_RESULT_UNCONFIRMED`/`remote:pi-models`/`REMOTE_MODEL_PROBE_NO_RUNTIME`/`remoteModel.deferredNote` 与既有终端/Git 标记 |

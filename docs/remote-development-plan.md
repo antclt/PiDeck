@@ -189,6 +189,14 @@ Electron main
 - 「上传便携 Node」曾与「要求用户预装」比较过：本机 `runtimeNodeInstall` 已有 pinned Node 归档（当前 24.13.0）+ sha256 固化 + tar 解压的完整先例，bootstrap/scp/manifest 通道也天然可复用，能力上可行且不构成协议变更。v1 暂不做的取舍是首次连接时长与远端磁盘占用（解压后百 MB 级），以及把 bootstrap 传输面保持在最小；准入失败时 probe 返回结构化诊断与对应 LTS 的安装指引（含 nvm/asdf 绝对路径配置提示）。若「远端必须预装 Node」成为主要落地反馈，后续按同一 bootstrap/manifest 机制补自动安装，不破坏本节其余约束。
 - 远端 Pi 使用 system installation：探测 `pi --version` 和 RPC capability，低于 PiDeck 声明的最小兼容版本时阻止启动并给出升级命令；PiDeck 不静默安装或升级远端 Pi。
 
+> **2026-11 追加（bootstrap 握手增量：复用已安装 bundle；helper 1.22.0）**
+>
+> - **复用检查（F3）**：每次 bootstrap 在 `ready` 之后、**任何上传之前**，先发一轮只读声明帧（`finalize-begin` + `finalize-file`\* + `finalize-verify`）。冻结入口——不是被验证的 bundle 本身——按本地 manifest 逐文件复核已激活的 `<target>/<bundleSha256>`：目录 real/非链接/0700/owner，每个文件常规/非链接/owner/mode/size/sha256，且没有未声明的多余文件。
+> - 三种回答：`{op:"verified", active, files}` → 已验证，main 不启动 scp；`{op:"verify-miss", reason:"absent"}` → 目录不存在，入口**重置声明**并在同一会话上继续原有 staging→scp→finalize（`finalize-begin` 可以再发一轮）；`{op:"verify-miss", reason:"conflict"}` → 已存在但不一致，main **fail-closed**（`BOOTSTRAP_ACTIVE_CONFLICT`），绝不覆盖或用一次上传“修复”可疑目录。
+> - `verified` 与 `finalized` 的 `active/files` 用同一闭集校验（`./<target 目录>/<sha256>`、文件数与声明一致）；主机 pin/route/revision/Node 门控一步不跳；CAS 与锁语义不变。取消语义：verify 轮未提交任何东西，取消即 `BOOTSTRAP_ABORTED`；commit 发出后仍只能报 `BOOTSTRAP_FINALIZE_UNCONFIRMED`。
+> - inline bootstrap 源码 sha256 = `1194899dc81a57da866d37d5fc7c682abacc8987d89e40a8a9b05b7a34933fb6`（16,455 字符），由 `tests/remoteBootstrapContract.test.mjs` 逐字节 pin。
+> - **helper 1.22.0（`fs.statMany`）**：新增批量元数据方法，`{ paths: string[1..64] }` → `{ entries: [{ path, kind, bytes, mtimeMs }] }`，按请求顺序回显 `path`；每条路径复用 `fs.stat` 的 lexical/realpath/no-follow 判定，**任何一条不可用则整批拒绝**（与 N 次单条调用等价，不返回部分列表）。`fs.stat` 原样保留；helper 不接管候选选择、预算、排序或归属——那些仍在会话扫描器里。方法进入 hello capabilities，没有新增错误码。helper.mjs 42,258 字符 sha256 `2f773369…`，六 artifact 与 entry 全部重钉。
+
 ## 5. 身份与持久化模型
 
 ### 5.1 执行位置
