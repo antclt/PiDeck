@@ -29,6 +29,9 @@ test("SSH config import fills the form instead of submitting silently", () => {
 test("WSL routes to the existing local-environment setting; Docker stays unavailable", () => {
 	// WSL 不是远端主机：入口真实存在，但落地是「设置 → 开发」里的发行版/用户配置。
 	assert.match(dialog, /onClick=\{\(\) => setKind\("wsl"\)\}/);
+	// 只有 Windows 才展示 WSL 页（其它平台没有这个设置分区）。
+	assert.match(dialog, /const wslSupported = detectRendererPlatform\(\) === "win32"/);
+	assert.match(dialog, /\{wslSupported \? \(/);
 	assert.match(dialog, /openSettings\(\{ tab: "dev" \}\)/);
 	assert.match(dialog, /add\.wsl\.hint/);
 	assert.match(dialog, /add\.wsl\.openSettings/);

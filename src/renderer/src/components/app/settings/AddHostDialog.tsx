@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSetAtom } from "jotai";
 import { Box, ChevronDown, FileCode, Server, TerminalSquare } from "lucide-react";
 import { openSettingsAtom } from "../../../atoms";
+import { detectRendererPlatform } from "../../../lib/detectRendererPlatform";
 import { desktopApi } from "../../../desktopApi";
 import { t } from "../../../i18n";
 import { cn } from "../../../lib/utils";
@@ -137,6 +138,8 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 	const previewPort = form.port.trim() || "22";
 	const preview = kind === "wsl" ? t("settings.connections.add.wsl.preview") : previewHost.length === 0 ? t("settings.connections.add.previewPlaceholder") : `${previewUser.length > 0 ? `${previewUser}@` : ""}${previewHost}:${previewPort}`;
 	const kindLabel = kind === "ssh" ? t("settings.connections.add.kind.ssh") : t("settings.connections.add.kind.wsl");
+	// WSL 只有 Windows 宿主才有：其它平台不渲染这一页，避免深链到不存在的设置分区（与 ZCode buildAvailableKinds 同判据）。
+	const wslSupported = detectRendererPlatform() === "win32";
 
 	/** WSL 是本地环境而不是远端主机：这里只负责把用户送到真正能配置它的地方。 */
 	const openWslSettings = useCallback(() => {
@@ -167,10 +170,12 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 							<Server className="size-3.5" aria-hidden="true" />
 							{t("settings.connections.add.kind.ssh")}
 						</button>
-						<button type="button" aria-pressed={kind === "wsl"} className={cn("inline-flex min-h-8 items-center gap-1.5 border-l border-input px-3 text-body", kind === "wsl" ? "bg-accent font-medium text-accent-foreground" : "text-muted-foreground hover:bg-bg-hover")} onClick={() => setKind("wsl")}>
-							<TerminalSquare className="size-3.5" aria-hidden="true" />
-							{t("settings.connections.add.kind.wsl")}
-						</button>
+						{wslSupported ? (
+							<button type="button" aria-pressed={kind === "wsl"} className={cn("inline-flex min-h-8 items-center gap-1.5 border-l border-input px-3 text-body", kind === "wsl" ? "bg-accent font-medium text-accent-foreground" : "text-muted-foreground hover:bg-bg-hover")} onClick={() => setKind("wsl")}>
+								<TerminalSquare className="size-3.5" aria-hidden="true" />
+								{t("settings.connections.add.kind.wsl")}
+							</button>
+						) : null}
 						<button
 							type="button"
 							aria-pressed="false"
