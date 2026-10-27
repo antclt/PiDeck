@@ -21,7 +21,7 @@ import { SingleLinePreview } from "./SingleLinePreview";
 import { RowText } from "./RowText";
 import { deriveRespondingKind, type RespondingKind } from "./timeline/respondingKind";
 import type { RetryProgress } from "./timeline/retryProgress";
-import { CONTEXT_PRESSURE_PERCENT, elapsedClockText, retryCountdownSeconds } from "./timeline/statusFacts";
+import { CONTEXT_PRESSURE_PERCENT, retryCountdownSeconds } from "./timeline/statusFacts";
 import { getToolPhrase } from "./timeline/toolPhrase";
 import { isRetryStatusMessage } from "./timelineFailureNotice";
 
@@ -239,52 +239,66 @@ function retryingPhrases(attempt: number | undefined, maxAttempts: number | unde
 	return [t("agent.loading.retryingCount", { attempt, max: maxAttempts })];
 }
 
-/** 状态条每秒自刷新（只用于尾部读秒；叶子组件局部 state，不触及父级）。 */
-function useNowTick(intervalMs = 1000): number {
+/** 状态条每秒自刷新（只给重试倒计时用；`enabled=false` 时不装定时器）。 */
+function useNowTick(enabled: boolean, intervalMs = 1000): number {
 	const [now, setNow] = useState(() => Date.now());
 	useEffect(() => {
+		if (!enabled) return;
+		setNow(Date.now());
 		const timer = window.setInterval(() => setNow(Date.now()), intervalMs);
 		return () => window.clearInterval(timer);
-	}, [intervalMs]);
+	}, [enabled, intervalMs]);
 	return now;
 }
 
 /**
- * 状态条尾部的事实后缀：重试倒计时 / 本轮步数 / 上下文压力 / 本轮秒表。
+ * 状态条尾部的事实后缀：重试倒计时 / 本轮步数 / 上下文压力。
  *
- * 单独成叶子组件是有意为之：它每秒自刷新，父级（ReasoningText + 功能提示轮播）
- * 每秒零重渲染——流式正文 50ms 刷新与读秒互不干扰。后缀全是可测量的量，
+ * 单独成叶子组件是有意为之：倒计时每秒变了它才重渲染，父级（ReasoningText +
+ * 功能提示轮播）不受影响——流式正文 50ms 刷新与读秒互不干扰。后缀全是可测量的量，
  * 不参与状态判定（无数据就不渲染某一段，不补味）。
+ *
+ * 不再带本轮已用时间：TurnRow 末尾已有唯一的实时耗时（LiveDuration），就在状态条
+ * 上方一行，再读一遍就是把同一个数字显示两次，而且口径还不同（见 statusFacts 注释）。
  *
  * `aria-hidden`：ReasoningText 已经用 `role="status" aria-live="polite"` 播报当前
  * 状态短语；读秒每秒变化，若也进无障碍树就是每秒打断一次屏幕阅读器。
+ *
+ * 每个指标配一句 `title` 解释（用户不知道那个数字数的是什么），悬停才出现，
+ * 不占行宽；顺序与可见文字一致，一眼对得上。文案本身写清单位（"工具调用 13 次"），
+ * 不用「第 13 步」这种听起来像计划进度的说法——它只是个计数。
  */
-function StatusSuffix(props: { kind: RespondingKind; retry?: RetryProgress; toolSteps?: number; contextPercent?: number | null; turnStartedAt?: number }) {
-	const now = useNowTick();
+function StatusSuffix(props: { kind: RespondingKind; retry?: RetryProgress; toolSteps?: number; contextPercent?: number | null }) {
+	const retryAtMs = props.retry?.retryAtMs;
+	const now = useNowTick(retryAtMs !== undefined);
 	const parts: string[] = [];
+	const hints: string[] = [];
 
 	// 倒计时到 0 就不再显示：那一下重试已经在飞了，“0 秒后”是句废话。
-	const countdown = retryCountdownSeconds(props.retry?.retryAtMs, now);
-	if (countdown !== undefined && countdown > 0) parts.push(t("agent.loading.retryIn", { seconds: countdown }));
+	const countdown = retryCountdownSeconds(retryAtMs, now);
+	if (countdown !== undefined && countdown > 0) {
+		parts.push(t("agent.loading.retryIn", { seconds: countdown }));
+		hints.push(t("agent.loading.hint.retryIn", { seconds: countdown }));
+	}
 
 	// 步数只在「工具链 / 等工具下一步 / 空窗」三个场景有意义：模型正在写答案、
-	// 正在预热、正在压缩时，步数是噪音。
+	// 正在预热、正在压缩时，工具调用数是噪音。
 	const steps = props.toolSteps ?? 0;
 	if (steps > 0 && (props.kind === "executing" || props.kind === "thinking" || props.kind === "waiting")) {
 		parts.push(t("agent.loading.stepCount", { step: steps }));
+		hints.push(t("agent.loading.hint.stepCount", { step: steps }));
 	}
 
 	const contextPercent = props.contextPercent;
 	if (typeof contextPercent === "number" && Number.isFinite(contextPercent) && contextPercent >= CONTEXT_PRESSURE_PERCENT) {
-		parts.push(t("agent.loading.contextUsage", { percent: Math.round(contextPercent) }));
+		const percent = Math.round(contextPercent);
+		parts.push(t("agent.loading.contextUsage", { percent }));
+		hints.push(t("agent.loading.hint.contextUsage", { percent }));
 	}
-
-	const startedAt = props.turnStartedAt;
-	if (typeof startedAt === "number" && Number.isFinite(startedAt)) parts.push(elapsedClockText(now - startedAt));
 
 	if (parts.length === 0) return null;
 	return (
-		<span className="responding-suffix" aria-hidden="true">
+		<span className="responding-suffix" aria-hidden="true" title={hints.join("\n")}>
 			{`· ${parts.join(" · ")}`}
 		</span>
 	);
@@ -302,8 +316,6 @@ export function RespondingIndicator(props: {
 	toolSteps?: number;
 	/** 上下文占用百分比（runtime.contextPercent；达阈值才展示） */
 	contextPercent?: number | null;
-	/** 本轮起点（最后一条用户消息时间；缺失则不读秒） */
-	turnStartedAt?: number;
 }) {
 	const retry = props.retry;
 	// 判定抽到 deriveRespondingKind：pi / DSH 共用，状态条跟「此刻有没有字/工具」对齐。
@@ -339,7 +351,7 @@ export function RespondingIndicator(props: {
 				indicator={<Loader variant="dot-matrix" size={18} speed={1.1} label={t("agent.loading.aria")} />}
 				// 字号用官方默认（text-sm）：实测语义 token 缩放的观感不如官方字阶，保持官方原样
 			/>
-			<StatusSuffix kind={kind} retry={retry} toolSteps={props.toolSteps} contextPercent={props.contextPercent} turnStartedAt={props.turnStartedAt} />
+			<StatusSuffix kind={kind} retry={retry} toolSteps={props.toolSteps} contextPercent={props.contextPercent} />
 			{/* 功能提示轮播：等待期是用户的注意力空档，用它曝光「没有可见入口」的能力
 			    （命令面板、划选引用、排队发送…）。内容与收录规则见 RespondingTips.tsx / sessionFeatureTips.ts。 */}
 			<RespondingTips />

@@ -1456,6 +1456,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"sessionRef.insertAll": "Reference All ({count})",
 	"sessionRef.insertSelected": "Reference Selected ({count})",
 	"sessionRef.loadError": "Load failed",
+	"sessionRef.truncated": "Session reference truncated: kept the latest {kept} messages and dropped {dropped} older ones (over the reference context budget).",
+	"sessionRef.truncatedNote": "[PiDeck] Session reference truncated: the {kept} most recent messages follow; {dropped} earlier ones were dropped to stay within the context budget.",
 	"app.shareAsImage": "Share as Image",
 	"app.promptTemplatePickerTitle": "Prompt Templates",
 	"app.pickerInsertSendHint": "Click to insert the command into the input; press Enter to send",
@@ -5820,8 +5822,12 @@ export const enUS: Record<TranslationKey, string> = {
 	"agent.loading.retrying": "Retrying",
 	"agent.loading.retryingCount": "Retrying {attempt}/{max}",
 	"agent.loading.retryIn": "in {seconds}s",
-	"agent.loading.stepCount": "step {step}",
+	"agent.loading.stepCount": "{step} tool calls",
 	"agent.loading.contextUsage": "context {percent}%",
+	// Inline hints for the status-bar facts (hover title): "step 13" alone is a riddle
+	"agent.loading.hint.retryIn": "in {seconds}s: countdown to the next automatic retry",
+	"agent.loading.hint.stepCount": "{step} tool calls completed this turn: tool results only, thinking and reply excluded, previous turns not counted",
+	"agent.loading.hint.contextUsage": "context {percent}%: share of the context window used by this turn, flagged from 80%",
 	"agent.loading.waiting": "Processing",
 	"agent.loading.aria": "Agent is working",
 	// Feature tips rotating next to the streaming status line (sessionFeatureTips.ts, entries verified in code)
