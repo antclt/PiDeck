@@ -4408,6 +4408,7 @@ export const zhCN = {
 	"settings.remoteTrust.revoke": "撤销",
 	"settings.remoteTrust.actionFailed": "操作失败：{code}",
 	"settings.connections.connectFailed": "连接失败：{code}",
+	"settings.connections.lastFailure": "上次连接失败：{code}",
 	"settings.connections.disconnectFailed": "断开失败：{code}",
 	"settings.connections.disabledTag": "已禁用",
 	"settings.connections.unverifiedTag": "未验证",

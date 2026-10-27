@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 87585244bd5c65eb7777e7f80b3612e6c0896ea43f9d52079f76c43a15565f48（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 0bd5b80d569a69bc391d6470761630307cd2ac5c1fc8973c3da75e49931a9bb9（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4415,6 +4415,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.remoteTrust.revoke": "撤銷",
 	"settings.remoteTrust.actionFailed": "操作失敗：{code}",
 	"settings.connections.connectFailed": "連線失敗：{code}",
+	"settings.connections.lastFailure": "上次連線失敗：{code}",
 	"settings.connections.disconnectFailed": "斷開失敗：{code}",
 	"settings.connections.disabledTag": "已停用",
 	"settings.connections.unverifiedTag": "未驗證",

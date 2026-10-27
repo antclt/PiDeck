@@ -4425,6 +4425,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.remoteTrust.revoke": "Revoke",
 	"settings.remoteTrust.actionFailed": "Action failed: {code}",
 	"settings.connections.connectFailed": "Connection failed: {code}",
+	"settings.connections.lastFailure": "Last connection failed: {code}",
 	"settings.connections.disconnectFailed": "Disconnect failed: {code}",
 	"settings.connections.disabledTag": "Disabled",
 	"settings.connections.unverifiedTag": "Unverified",

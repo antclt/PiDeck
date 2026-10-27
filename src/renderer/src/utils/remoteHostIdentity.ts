@@ -97,6 +97,16 @@ export function resolveRemoteHostConnectionTone(state: RemoteHostConnectionState
 	}
 }
 
+/**
+ * 状态点配色（单一来源）。侧栏项目行与设置页主机列表共用，避免两处对「失败」用不同颜色。
+ * 连接中不用圆点：黄色圆点在会话行已表示「Agent 在跑」，这里改用转圈（见两处消费端）。
+ */
+export const REMOTE_HOST_TONE_DOT_CLASS: Record<Exclude<RemoteHostConnectionTone, "connecting">, string> = {
+	online: "bg-success",
+	offline: "bg-muted-foreground/45",
+	error: "bg-destructive",
+};
+
 /** 目录与状态合并：目录缺这台主机时也保留状态，避免先到的推送被后到的列表覆盖掉。 */
 export function mergeRemoteHostIdentity(index: RemoteHostIdentityIndex, directory: Record<string, RemoteHostIdentity>): RemoteHostIdentityIndex {
 	const next: RemoteHostIdentityIndex = {};

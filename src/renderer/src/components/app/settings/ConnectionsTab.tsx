@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { LoaderCircle } from "lucide-react";
 import { desktopApi } from "../../../desktopApi";
 import { t } from "../../../i18n";
+import { cn } from "../../../lib/utils";
+import { REMOTE_HOST_TONE_DOT_CLASS, resolveRemoteHostConnectionTone } from "../../../utils/remoteHostIdentity";
 import { Button } from "../../ui-shadcn/button";
 import { AddHostDialog } from "./AddHostDialog";
 import { RemoteConnectionProgressDialog } from "./RemoteConnectionProgressDialog";
@@ -31,6 +34,8 @@ export function ConnectionsTab() {
 	const [adding, setAdding] = useState(false);
 	/** 当前正在展示进度的那次连接；errorCode 只来自这次 connect 的结果。 */
 	const [progress, setProgress] = useState<{ hostId: string; label: string; errorCode: string | null } | null>(null);
+	/** 每台主机最近一次 connect 的稳定失败码；成功后清除，用于行内重试。 */
+	const [failures, setFailures] = useState<Record<string, string>>({});
 	/** 取消/重试会换代：旧 connect 的迟到结果不得回写新一次的状态。 */
 	const attemptRef = useRef(0);
 
@@ -78,11 +83,18 @@ export function ConnectionsTab() {
 				if (result.ok) {
 					setStates((current) => ({ ...current, [hostId]: result.state }));
 					setMessage(null);
+					setFailures((current) => {
+						if (!(hostId in current)) return current;
+						const next = { ...current };
+						delete next[hostId];
+						return next;
+					});
 				} else {
 					// 失败不猜状态：显示稳定码，具体原因去诊断里看。
 					setMessage(t("settings.connections.connectFailed", { code: result.code }));
 					setStates((current) => ({ ...current, [hostId]: "offline" }));
 					setProgress((current) => (current?.hostId === hostId ? { ...current, errorCode: result.code } : current));
+					setFailures((current) => ({ ...current, [hostId]: result.code }));
 				}
 			} else {
 				const result = await desktopApi.remoteHosts.disconnect(hostId);
@@ -90,6 +102,12 @@ export function ConnectionsTab() {
 				if (result.ok) {
 					setStates((current) => ({ ...current, [hostId]: "disconnected" }));
 					setMessage(null);
+					setFailures((current) => {
+						if (!(hostId in current)) return current;
+						const next = { ...current };
+						delete next[hostId];
+						return next;
+					});
 				} else {
 					setMessage(t("settings.connections.disconnectFailed", { code: result.code }));
 				}
@@ -114,6 +132,7 @@ export function ConnectionsTab() {
 					{hosts.length === 0 ? <p className="px-1 py-3 text-body text-muted-foreground">{t("settings.connections.empty")}</p> : null}
 					{hosts.map((host) => {
 						const state = states[host.id] ?? (host.disabled ? "offline" : "disconnected");
+						const tone = resolveRemoteHostConnectionTone(state);
 						const connected = state === "ready" || state === "degraded";
 						const pending = busy[host.id] === true;
 						// 未验证的主机没有信任锚，连接必然在路由校验处失败（SSH_HOST_NOT_READY）。
@@ -129,8 +148,11 @@ export function ConnectionsTab() {
 									</Button>
 									<div className="flex min-w-0 flex-col">
 										<strong className="truncate text-body font-semibold text-foreground">{host.label}</strong>
-										<span className="truncate text-label text-muted-foreground">
-											{host.sshHost} · {t(`settings.connections.state.${state}`)}
+										<span className="flex min-w-0 items-center gap-1.5 text-label text-muted-foreground">
+											{tone === "connecting" ? <LoaderCircle className="size-2.5 shrink-0 animate-pideck-spin text-warning motion-reduce:animate-none" aria-hidden="true" /> : <span className={cn("size-2 shrink-0 rounded-full", REMOTE_HOST_TONE_DOT_CLASS[tone])} aria-hidden="true" />}
+											<span className="truncate">
+												{host.sshHost} · {t(`settings.connections.state.${state}`)}
+											</span>
 										</span>
 									</div>
 									{/* 未验证 / 已禁用是持久属性，和连接状态分开显示，避免被当成「连接失败」。 */}
@@ -139,6 +161,15 @@ export function ConnectionsTab() {
 										{host.verified ? null : <span className="text-label text-muted-foreground">{t("settings.connections.unverifiedTag")}</span>}
 									</div>
 								</div>
+								{/* 行内失败 + 重试：关闭进度框后仍能直接知道上次卡在哪，不用再开一次对话框。 */}
+								{failures[host.id] !== undefined ? (
+									<div className="flex items-center gap-2 text-label text-warning">
+										<span className="min-w-0 truncate">{t("settings.connections.lastFailure", { code: failures[host.id] })}</span>
+										<Button variant="ghost" size="sm" className="shrink-0" disabled={pending || !connectable} onClick={() => void toggle(host.id, true, host.label)}>
+											{t("common.retry")}
+										</Button>
+									</div>
+								) : null}
 								{/* 诊断只在有内容且非空时展示：连上时它通常只有几行阶段记录。 */}
 								{(diagnostics[host.id] ?? []).length > 0 ? (
 									<details className="text-label text-muted-foreground">

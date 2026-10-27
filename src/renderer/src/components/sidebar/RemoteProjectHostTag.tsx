@@ -3,7 +3,7 @@ import { LoaderCircle } from "lucide-react";
 import { remoteHostIdentityIndexAtom } from "../../atoms/remote-host-atoms";
 import { t, type TranslationKey } from "../../i18n";
 import { cn } from "../../lib/utils";
-import { resolveRemoteHostConnectionTone, type RemoteHostConnectionTone } from "../../utils/remoteHostIdentity";
+import { REMOTE_HOST_TONE_DOT_CLASS, resolveRemoteHostConnectionTone, type RemoteHostConnectionTone } from "../../utils/remoteHostIdentity";
 
 /** 状态点文案：与 `resolveRemoteHostConnectionTone` 的四个语义一一对应。 */
 const TONE_COPY: Record<RemoteHostConnectionTone, TranslationKey> = {
@@ -11,13 +11,6 @@ const TONE_COPY: Record<RemoteHostConnectionTone, TranslationKey> = {
 	connecting: "sidebar.remoteProject.connection.connecting",
 	offline: "sidebar.remoteProject.connection.offline",
 	error: "sidebar.remoteProject.connection.error",
-};
-
-/** 圆点颜色：绿=可用、灰=未连接、红=需要处理；连接中改用转圈，避免「黄点=在跑」与 Agent 状态混淆。 */
-const TONE_DOT: Record<Exclude<RemoteHostConnectionTone, "connecting">, string> = {
-	online: "bg-success",
-	offline: "bg-muted-foreground/45",
-	error: "bg-destructive",
 };
 
 /**
@@ -44,11 +37,7 @@ export function RemoteProjectHostTag(props: { hostId: string }) {
 					{host}
 				</span>
 			) : null}
-			{tone === "connecting" ? (
-				<LoaderCircle aria-hidden="true" className="size-2.5 shrink-0 animate-pideck-spin text-warning" />
-			) : (
-				<span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", TONE_DOT[tone])} />
-			)}
+			{tone === "connecting" ? <LoaderCircle aria-hidden="true" className="size-2.5 shrink-0 animate-pideck-spin text-warning" /> : <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", REMOTE_HOST_TONE_DOT_CLASS[tone])} />}
 		</span>
 	);
 }
