@@ -341,4 +341,6 @@ PIDECK_E2E_REMOTE_HOST=… PIDECK_E2E_REMOTE_USER=… PIDECK_E2E_REMOTE_FINGERPR
 4. 慢 Writable 下的真实内存峰值未压测；只有字节预算与等待者释放（有界性）证明。
 5. macOS 客户端仍未验证；本轮矩阵是 Windows 客户端 → Linux 主机。
 6. 旧 helper（< 1.22.0）只在握手诊断层面覆盖（`SSH_HELPER_CAPABILITY_MISSING_FS_STAT_MANY`），没有真机旧版本对照。
-7. **独立处理项**：两份既有 acceptance spec 的「确认主机指纹」步骤与新加主机交互不一致（产品 `74682ad72` 起首次信任在主进程内完成）。修它们需要重写这两份 spec 的加主机步骤，属独立任务，不能混进本轮的“优化”里。
+7. **既有 acceptance spec 的合同漂移（分两批）**：
+   - 已修（本轮）：加主机步骤对上当前产品——不再等已取消的「确认主机指纹」弹框，改为断言**落盘**的 `verifiedEndpoint.hostKeyFingerprints[0]`；`1dd8ceb7e` 起候选列表默认收起，先展开「从 SSH config 导入」；提交按钮改为「保存|添加并连接」；就绪后先关掉模态进度框再断言行状态。`remoteHostAcceptance` 已能跑到「登记远端项目」之后的步骤。
+   - 未修（独立任务）：`59a1fb351`（远端项目空态复用本地输入页并锁定 pi）之后，中栏不再渲染「远端项目」标题与文件工具栏；两份 spec 里 `getByText("远端项目")` 及其后依赖「登记后直接看到文件页」的断言仍需随该轮 UI 更新（可能需要在登记后点「浏览远端文件」）。这段属于该 UI 改动的配套迁移，不能由本轮验收收尾顺手臆造。

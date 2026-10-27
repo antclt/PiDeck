@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import { encodePiSessionDirectory } from "../src/main/remote/remoteSessionProjectMatch";
-import { REMOTE_ACCEPTANCE_ENV, attachRemoteDiagnostics, matchesRemoteFingerprint, readRemoteAcceptanceCredentials, readRemoteAcceptanceTimeouts, runRemoteCommand, test } from "./remote-fixtures";
+import { join } from "node:path";
+import { REMOTE_ACCEPTANCE_ENV, REMOTE_APP_DATA_DIR_NAME, attachRemoteDiagnostics, matchesRemoteFingerprint, readPinnedHostKeyFingerprint, readRemoteAcceptanceCredentials, readRemoteAcceptanceTimeouts, runRemoteCommand, test } from "./remote-fixtures";
 
 /**
  * 远端主机功能级验收（task-25 / J1）：在真实 Electron 里跑通「加主机 → 连接 → 登记远端项目 →
@@ -107,7 +108,7 @@ test.describe("远端主机功能级验收（真机）", () => {
 	// 无凭据整体 skip：在 fixture setup 之前生效，所以既不会建临时 userData，也不会启动 Electron。
 	test.skip(credentials === undefined, HELP_TEXT);
 
-	test("加主机 pin → 连接 ready → 登记两个远端项目 → 远端会话 列表/标题/导入 → 项目级 root 状态", async ({ remoteWindow }) => {
+	test("加主机 pin → 连接 ready → 登记两个远端项目 → 远端会话 列表/标题/导入 → 项目级 root 状态", async ({ remoteWindow, remoteUserDataRoot }) => {
 		// 真机 bootstrap + 多次 helper root 切换 + 两侧项目复核：给足预算；超时是失败，不是挂起。
 		test.setTimeout(900_000);
 		const creds = credentials;
@@ -173,22 +174,35 @@ test.describe("远端主机功能级验收（真机）", () => {
 				// 候选来自真实 ~/.ssh/config：按 user@host 精确匹配，不依赖别名怎么起。
 				// 同一条 ssh config 可能对同一台主机给出多条别名（IP 别名与短名别名指向同一个 HostName），
 				// 所以断言「至少一条」再取第一条，而不是断言恰好一条。
+				// 面板自 1dd8ceb7e 起默认收起「从 SSH config 导入」列表：先展开再挑候选；
+				// 提交入口也在同一次改造里从「保存」变成「添加并连接」。
+				const importToggle = addDialog.getByRole("button", { name: "从 SSH config 导入" });
+				if ((await importToggle.count()) > 0 && (await importToggle.getAttribute("aria-expanded")) !== "true") await importToggle.click();
 				const candidate = addDialog.getByRole("button", { name: new RegExp(creds.user + "@" + creds.host.replace(/\./g, "\\.")) });
-				expect(await candidate.count(), "ssh config 里需要至少一条 " + creds.user + "@" + creds.host + " 候选").toBeGreaterThan(0);
+				await expect(candidate.first(), "ssh config 里需要至少一条 " + creds.user + "@" + creds.host + " 候选").toBeVisible({ timeout: 30_000 });
 				await candidate.first().click();
-				await addDialog.getByRole("button", { name: "保存", exact: true }).click();
-				// pin 流程：主进程推送真实 host key，界面必须原样展示；期望指纹必须命中它。
-				const pinDialog = window.locator('[role="dialog"]').filter({ hasText: "确认主机指纹" });
-				await expect(pinDialog).toBeVisible({ timeout: timeouts.connectMs });
-				const observed = await pinDialog.locator("li.select-all.break-all.font-mono").allTextContents();
-				expect(observed.length, "pin 弹框必须列出至少一个主机密钥指纹").toBeGreaterThan(0);
-				expect(matchesRemoteFingerprint(creds.fingerprint, observed), "pin 弹框展示的指纹必须命中 " + REMOTE_ACCEPTANCE_ENV.fingerprint + "（期望 " + creds.fingerprint + "，实到 " + observed.join(" | ") + "）").toBe(true);
-				await pinDialog.getByRole("button", { name: "指纹正确，信任" }).click();
-				await expect(pinDialog).toHaveCount(0);
+				await addDialog
+					.getByRole("button", { name: /^(保存|添加并连接)$/ })
+					.first()
+					.click();
+				// 指纹：产品自 74682ad72 起在主进程内完成首次信任（TOFU），不再弹「确认主机指纹」；验收要证的仍是
+				// 「产品为这台主机钉住的是期望的那把钥匙」，改成读它实际落盘的 pin（后续 StrictHostKeyChecking 用的就是它）。
+				const pinDeadline = Date.now() + 30_000;
+				let pinned: string | undefined;
+				while (Date.now() < pinDeadline && pinned === undefined) {
+					pinned = readPinnedHostKeyFingerprint(join(remoteUserDataRoot, REMOTE_APP_DATA_DIR_NAME), creds.host);
+					if (pinned === undefined) await window.waitForTimeout(200);
+				}
+				expect(matchesRemoteFingerprint(creds.fingerprint, pinned === undefined ? [] : [pinned]), "落盘 pin 的主机指纹必须命中 " + REMOTE_ACCEPTANCE_ENV.fingerprint + "（期望 " + creds.fingerprint + "，实到 " + String(pinned) + "）").toBe(true);
 			});
 
-			await test.step('连接到达 "ready"：bootstrap 完成后行状态是「已连接」，开关翻成「断开」', async () => {
-				await window.getByRole("button", { name: "连接", exact: true }).first().click();
+			await test.step('连接到达 "ready"：保存后产品自动连接，行状态是「已连接」，开关翻成「断开」', async () => {
+				// 保存后产品直接开始连接并弹进度框（阶段轨）+ 连接就绪后标题变「{host} 已连接」。
+				// 先把进度框关掉，否则它是模态的，设置页的行与开关不可交互。旧构建无此弹框，容忍两种形态。
+				const progress = window.getByRole("dialog", { name: /已连接$/ });
+				await expect(progress, "连接就绪后的进度框必须出现").toBeVisible({ timeout: timeouts.helperMs });
+				const done = progress.getByRole("button", { name: /^(完成|关闭)$/ }).first();
+				if ((await done.count()) > 0) await done.click();
 				await expect(window.getByText("已连接").first()).toBeVisible({ timeout: timeouts.helperMs });
 				await expect(window.getByRole("button", { name: "断开", exact: true }).first()).toBeVisible();
 				await window.locator(".settings-modal").getByRole("button", { name: "关闭" }).first().click();

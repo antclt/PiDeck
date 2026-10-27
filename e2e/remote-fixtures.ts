@@ -1,6 +1,6 @@
 import { _electron as electron, expect, test as base, type ElectronApplication, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -20,6 +20,12 @@ import { promisify } from "node:util";
  */
 
 /** 凭据与超时环境变量的唯一出处：spec、fixture 与守卫测试都从这里取名字。 */
+/**
+ * 应用真实 userData 在隔离根下的子目录名。fixture 用它给 Electron 传 `--user-data-dir`/`PIDECK_E2E_USER_DATA_DIR`，
+ * 断言（例如读落盘 pin）也必须用同一个名字，否则读的是隔离根本身而不是应用的 userData。
+ */
+export const REMOTE_APP_DATA_DIR_NAME = "profile";
+
 export const REMOTE_ACCEPTANCE_ENV = {
 	host: "PIDECK_E2E_REMOTE_HOST",
 	user: "PIDECK_E2E_REMOTE_USER",
@@ -53,11 +59,45 @@ export function normalizeRemoteFingerprint(value: string): string {
 	return FINGERPRINT.test(normalized) ? normalized : "";
 }
 
-/** 期望指纹是否命中界面上真实展示的指纹集合（逐项归一化比较）。 */
+/** 期望指纹是否命中真实展示、或产品实际落盘的指纹集合（逐项归一化比较）。 */
 export function matchesRemoteFingerprint(expected: string, observed: readonly string[]): boolean {
 	const normalized = normalizeRemoteFingerprint(expected);
 	if (normalized === "") return false;
 	return observed.some((value) => normalizeRemoteFingerprint(value) === normalized);
+}
+
+/**
+ * 读回产品为某台主机**实际落盘**的主机密钥指纹（隔离 userData 里的 `remote-hosts.json`）。
+ *
+ * 为什么不再从界面读：首次信任自 74682ad72 起在主进程内完成（TOFU），设置页不再弹「确认主机指纹」，
+ * 界面也就没有可读的指纹文本。但验收要证的仍是同一件事——产品为这台主机钉住的是**期望的那把钥匙**；
+ * 而落盘值正是它此后用 `StrictHostKeyChecking=yes` 强制执行的那一个，比读界面文本更强。
+ *
+ * `userDataRoot` 是应用真实的 userData 目录（隔离根下的 `profile/`），不是 fixture 的隔离根。
+ * 只读不写；文件不在、快照不是已知形状、主机不存在、或指纹字段不合法时返回 undefined（调用方据此失败）。
+ */
+export function readPinnedHostKeyFingerprint(userDataRoot: string, sshHost: string): string | undefined {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(readFileSync(join(userDataRoot, "remote-hosts.json"), "utf8"));
+	} catch {
+		return undefined;
+	}
+	if (typeof parsed !== "object" || parsed === null) return undefined;
+	const profiles = (parsed as { profiles?: unknown }).profiles;
+	if (!Array.isArray(profiles)) return undefined;
+	for (const entry of profiles) {
+		if (typeof entry !== "object" || entry === null) continue;
+		const profile = entry as { sshHost?: unknown; verifiedEndpoint?: unknown };
+		if (profile.sshHost !== sshHost) continue;
+		const endpoint = profile.verifiedEndpoint;
+		if (typeof endpoint !== "object" || endpoint === null) continue;
+		const fingerprints = (endpoint as { hostKeyFingerprints?: unknown }).hostKeyFingerprints;
+		if (!Array.isArray(fingerprints) || fingerprints.length !== 1) continue;
+		const value = fingerprints[0];
+		if (typeof value === "string" && value.length > 0) return value;
+	}
+	return undefined;
 }
 
 function readPositiveInt(value: string | undefined, fallback: number): number {
@@ -142,7 +182,7 @@ export const test = base.extend<RemoteAppFixture & { remoteCredentials: RemoteAc
 		// 依赖 remoteCredentials：无凭据时该 fixture 已被 skip，这里根本不会执行（也就不会启动 Electron）。
 		const entry = join(repoRoot, "out", "main", "index.js");
 		if (!existsSync(entry)) throw new Error("out/main/index.js 不存在：先跑 npm run build:fast（e2e 不负责构建）");
-		const profileDir = join(remoteUserDataRoot, "profile");
+		const profileDir = join(remoteUserDataRoot, REMOTE_APP_DATA_DIR_NAME);
 		mkdirSync(profileDir, { recursive: true });
 		// 语言固定 zh-CN，e2e 的按钮/标签选择器才与字典一致（不受宿主机系统语言影响）。
 		// piEnvironmentChecked 预置 true：开发机普遍有多份 pi 安装，全新 profile 首启会弹出「Pi 环境检测」模态，

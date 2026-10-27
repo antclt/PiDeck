@@ -137,7 +137,14 @@ test("every acceptance step asserts something, and the whole flow is covered", (
 
 /* 3. Real runs: the point of an acceptance spec is that it can fail. */
 
-/** All error messages in a Playwright JSON report, wherever the reporter nested them. */
+/**
+ * All error messages in a Playwright JSON report, wherever the reporter nested them.
+ *
+ * A failure can surface as `results[].errors[].message` (with a `location`), as `results[].error.message`
+ * (with a `stack`) or on a failed step; spec/test nodes are the only ones that carry a `title`, so titles
+ * are the one thing excluded here. Looking only for location-less messages silently missed every real
+ * acceptance failure — the wrong-fingerprint control then "failed" with an empty message list.
+ */
 function errorMessages(report) {
 	const messages = [];
 	const walk = (node) => {
@@ -146,8 +153,8 @@ function errorMessages(report) {
 			for (const item of node) walk(item);
 			return;
 		}
-		if (typeof node.message === "string" && node.location === undefined && node.title === undefined) messages.push(node.message);
-		for (const key of ["suites", "specs", "tests", "results", "errors"]) if (node[key] !== undefined) walk(node[key]);
+		if (typeof node.message === "string" && node.title === undefined) messages.push(node.message);
+		for (const key of ["suites", "specs", "tests", "results", "errors", "steps", "error"]) if (node[key] !== undefined) walk(node[key]);
 	};
 	walk(report);
 	return messages;
