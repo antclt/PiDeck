@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: d1121fdddc373e7f860d0c4682cba4114a3a81cbc8622772a8e623f75ba69cf1（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: a69673fb9d6c56fd2a60156fa571e5271bcc226db1a59268dc9085958829c1f4（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -3416,7 +3416,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.builtInExtDesc.pi-deck-model-trace": "模型請求快照：把 Pi 實際發給供應商的請求體（系統提示詞/上下文訊息/工具表）記入 RPC 日誌的「模型」檢視，排查「模型到底收到了什麼」；快照只存本機，超限自動截斷。",
 	"config.builtInExtDesc.pi-deck-nul-redirect-fix": "NUL 重定向修復：bash 執行前把「> nul」等 Windows 重定向改寫為 /dev/null，避免 Git Bash 產生刪不掉的 nul 檔案。",
 	"config.builtInExtDesc.pi-deck-plan-mode": "計劃模式：先以只讀工具集產出編號計劃，經你選擇執行/停留/修改後再恢復寫工具，[DONE:n] 標記驅動進度展示。",
-	"config.builtInExtDesc.pi-deck-retry-no-body": "瞬態錯誤重試增強：識別閘道器空響應、中文「服務暫時不可用」、stream_read_error 等 Pi 重試名單外的瞬態故障並改寫，觸發自動重試。",
+	"config.builtInExtDesc.pi-deck-retry-no-body": "瞬態錯誤重試增強：識別閘道器空響應、中文「服務暫時不可用」、stream_read_error、Cloudflare Tunnel 530 等 Pi 重試名單外的瞬態故障並改寫，觸發自動重試。",
 	"config.builtInExtDesc.pi-deck-security-gate": "安全門：按會話安全等級策略攔截工具呼叫——危險 bash 命令彈窗確認或直接拒絕；策略快照熱更新，無需重啟。",
 	"config.builtInExtDesc.pi-deck-session-title": "會話標題生成：首輪結束後用獨立最小上下文非同步生成簡短標題，不修改主對話與會話記錄。",
 	"config.builtInExtDesc.pi-deck-subagents": "子代理狀態橋接：訂閱 pi-subagents / acp_delegate 委託鏈的生命週期事件，把各子代理的執行狀態與結果快照推給桌面端子代理面板展示（本身不派發子代理）。",

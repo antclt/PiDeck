@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "version": "1.0.1",
-  "bundleSha256": "abcfc3dee4b3826fb523ea2dbdf0b65c5f8a25745853e3cb7471e5bf2302ddd7",
+  "version": "1.0.2",
+  "bundleSha256": "96de79177db8550d93b0ad62c90c65fbc7c28ace604180c57a5ae55dc44f7981",
   "fileCount": 16,
   "files": [
     {
@@ -36,8 +36,8 @@
     },
     {
       "name": "pi-deck-retry-no-body.ts",
-      "sha256": "0e2edc4dc4ff1b32c3a1f553362804d8ae8d60657f741d011b6e94642cf4ccae",
-      "bytes": 15606
+      "sha256": "d18f7500846d5d3a6189018d459561b8bbca0b6a41be9a05be2206a78d572fb7",
+      "bytes": 19421
     },
     {
       "name": "pi-deck-runtime.ts",

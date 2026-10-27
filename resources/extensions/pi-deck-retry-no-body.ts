@@ -17,6 +17,11 @@
  *   2. `模型服务暂时不可用，请稍后重试` —— 中文文案，名单里一个词都命中不了。
  *   3. `stream_read_error` / `unexpected EOF` / HTTP2 `GOAWAY` —— 传输层瞬态错误，
  *      同样不在名单里。
+ *   4. `juzi-r4: The host is configured as a Cloudflare Tunnel, but Cloudflare is
+ *      currently unable to reach it.`（HTTP 530）—— 边缘层/隧道回源故障：文案是
+ *      全英文但一个名单关键词都没有，530 也不在名单（只列 429/500/502/503/504/524），
+ *      会话直接失败停止。
+ *   5. Cloudflare 520-527 等边缘层 5xx —— 同样是服务端瞬态，pi 名单未列。
  *
  * 方案：本扩展在 `message_end` 事件里拦截 assistant 错误消息，识别上述瞬态故障，
  * 把 `errorMessage` 改写成既命中 pi 重试名单、又不触发 pi 上下文溢出误判的文本。
@@ -125,6 +130,67 @@ const TRANSIENT_TRANSPORT_PATTERNS: RegExp[] = [
 ];
 
 /**
+ * 边缘层 / 隧道类故障（Cloudflare Tunnel、Argo 隧道、CDN 回源不通）。
+ *
+ * 实测原文（juzi 网关，HTTP 530）：
+ * ```text
+ * 530: {"code":null,"message":"juzi-r4: The host is configured as a Cloudflare
+ * Tunnel, but Cloudflare is currently unable to reach it.","param":null,"type":"api_error"}
+ * ```
+ * 「Cloudflare 连不上隧道后面的宿主机」本质是连接层瞬态，重发即成功；但文案里
+ * 没有任何 pi 重试名单的关键词（`unable to reach it` 不在名单），530 也不在名单，
+ * 于是会话直接失败停止。
+ *
+ * 判定只锚定「隧道/回源不可达」这一确定性特征，不宽泛匹配 `cloudflare`——
+ * 后者出现在 WAF 拦截（403 challenge）文案里，重试必然复现。
+ */
+const TRANSIENT_EDGE_PATTERNS: RegExp[] = [
+	/cloudflare\s+tunnel/i,
+	/\bargo\s+tunnel\b/i,
+	// `... unable to reach it` / `cannot reach the origin` —— 隧道回源不通的通用表述
+	/\b(?:unable|not\s+able|can(?:'|no)t|couldn'?t)\s+to\s+reach\s+(?:it\b|the\s+(?:host|origin|server|upstream))/i,
+	// Cloudflare 错误页编号：1033 Argo Tunnel error、1035（隧道/回源握手失败）
+	/\berror\s*(?:code\s*)?10(?:33|35)\b/i,
+	// 回源不可达短语（Cloudflare 52x 文案的主体）
+	/\b(?:origin|web\s+server|upstream)\b[\s\S]{0,80}?(?:unreachable|is\s+down|has\s+been\s+down|refused\s+(?:the\s+)?connection|handshake\s+failed)/i,
+];
+
+/**
+ * 状态码位上下文前缀：`HTTP/1.1 530`、`status 530`、`status_code: 530`、`error: 530`
+ * 或字符串开头。
+ *
+ * 只认这些位置，避免把正文/JSON 里的普通数字（`usage: 512`、ID、毫秒数）
+ * 当成状态码而误判为可重试。
+ */
+const STATUS_CONTEXT_PREFIX =
+	"(?:^|\\bhttps?\\/[\\d.]+\\s+|\\b(?:status(?:\\s*code)?|code|error)\\b[\\s:=#-]{0,3})";
+
+/**
+ * pi 重试名单外的 5xx 服务端状态码。
+ *
+ * pi 的 `isRetryableAssistantError` 只列 429/500/502/503/504/524，其余同族状态码全是
+ * 服务端/边缘层瞬态：Cloudflare 520（回源空响应）、521（源站拒绝连接）、
+ * 522（连接源站超时）、523（源站不可达）、525-527（TLS 握手失败）、529（过载）、
+ * 530（隧道回源失败）。这些状态码重发即可能成功，不重试则整个会话失败停止。
+ *
+ * 刻意不含 51x（510 Not Extended / 511 Network Authentication Required）：两者都
+ * 要先改配置才能成功，而 `512 tokens`、`511 ms` 这类正文数字很容易误命中——宁可漏判。
+ */
+const RETRYABLE_SERVER_STATUS_PATTERN = new RegExp(
+	`${STATUS_CONTEXT_PREFIX}(5(?:0\\d|2\\d|3\\d|99))(?![0-9])`,
+	"i",
+);
+
+/**
+ * 5xx 中的确定性错误：501 Not Implemented（接口不支持该用法）、
+ * 505 HTTP Version Not Supported。重试一百次也是同样的结果。
+ */
+const NON_RETRYABLE_SERVER_STATUS_PATTERN = new RegExp(
+	`${STATUS_CONTEXT_PREFIX}(?:501|505)(?![0-9])`,
+	"i",
+);
+
+/**
  * pi 已能自行重试的信号。
  *
  * 若原文已含这些锚点（如 `429: {...中文...}`、`503: {...}`），pi 的重试判定本就
@@ -141,14 +207,17 @@ const ALREADY_RETRYABLE_SIGNALS: RegExp[] = [
 /**
  * 判断错误信息是否为「应重试但 pi 识别不了」的瞬态故障。
  *
- * 覆盖两类 pi 名单漏掉的瞬态故障：
+ * 覆盖 pi 名单漏掉的瞬态故障：
  * 1. 本地化（中文）文案 —— 中转网关常把上游故障翻译成中文，
  *    其中没有一个词落在 pi 的全英文重试名单里。
  * 2. 传输层错误 —— `stream_read_error` / `unexpected EOF` / HTTP2 `GOAWAY` 等。
+ * 3. 边缘层/隧道回源故障 —— Cloudflare Tunnel「unable to reach it」、Argo 1033 等。
+ * 4. 名单外的 5xx 状态码 —— 520-527/529/530/531…（pi 只列 500/502/503/504/524）。
  *
  * 排除原则（宁可漏判，不可误判）：
  * - 额度/鉴权/模型不存在/请求构造错误 → 重试无意义（黑名单优先）
  * - 带 4xx 状态码 → 服务端明确拒绝，重试必然复现（如 403 region 限制）
+ * - 501/505 → 确定性错误，重试必然复现
  * - 已含 pi 重试锚点的文案 → 交给 pi，扩展不改写
  * - 用户主动中止（`Request was aborted` / `Operation aborted`）→ **不重试**。
  *   这是刻意排除的：abort 通常是用户点了停止，自动重发会让已停止的会话"复活"。
@@ -160,11 +229,14 @@ export function isTransientError(errorMessage: string): boolean {
 	if (!errorMessage) return false;
 	if (NON_RETRYABLE_LOCALIZED_PATTERNS.some((p) => p.test(errorMessage))) return false;
 	if (NON_RETRYABLE_HTTP_STATUS_PATTERN.test(errorMessage)) return false;
+	if (NON_RETRYABLE_SERVER_STATUS_PATTERN.test(errorMessage)) return false;
 	if (ALREADY_RETRYABLE_SIGNALS.some((p) => p.test(errorMessage))) return false;
 	return (
 		TRANSIENT_OVERLOAD_PATTERNS.some((p) => p.test(errorMessage)) ||
 		TRANSIENT_UPSTREAM_PATTERNS.some((p) => p.test(errorMessage)) ||
-		TRANSIENT_TRANSPORT_PATTERNS.some((p) => p.test(errorMessage))
+		TRANSIENT_TRANSPORT_PATTERNS.some((p) => p.test(errorMessage)) ||
+		TRANSIENT_EDGE_PATTERNS.some((p) => p.test(errorMessage)) ||
+		RETRYABLE_SERVER_STATUS_PATTERN.test(errorMessage)
 	);
 }
 
