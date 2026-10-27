@@ -53,7 +53,8 @@ export function assertListablePath(value: unknown): asserts value is string {
 
 /** Resolve `$HOME` on the remote side (canonicalized) for the picker's default directory. */
 export function buildReadHomeCommand(): string {
-	return 'target=$(readlink -f -- "$HOME") || exit 3; [ -n "$target" ] || exit 4; [ -d "$target" ] || exit 5; printf \'%s\n\' "$target"';
+	// 命令经 SSH argv 发送，不能含真实换行/NUL（SshVerifiedConnection 会拒绝）；\n 必须是 printf 的转义。
+	return 'target=$(readlink -f -- "$HOME") || exit 3; [ -n "$target" ] || exit 4; [ -d "$target" ] || exit 5; printf \'%s\\n\' "$target"';
 }
 
 /**
@@ -67,19 +68,8 @@ export function buildReadHomeCommand(): string {
  */
 export function buildListDirectoriesCommand(path: string): string {
 	assertListablePath(path);
-	return [
-		`cd ${quotePosixArgument(path)} || exit 3`,
-		"i=0",
-		"for entry in .[!.]* ..?* *; do",
-		'  [ -e "$entry" ] || [ -L "$entry" ] || continue',
-		'  [ -d "$entry" ] || continue',
-		'  if [ -L "$entry" ]; then kind=L; else kind=D; fi',
-		`  printf '%s\0%s\0' "$kind" "$entry"`,
-		"  i=$((i+1))",
-		`  [ "$i" -ge ${REMOTE_LIST_DIRS_LIMIT} ] && break`,
-		"done",
-		"exit 0",
-	].join("\n");
+	// 单行：SSH 命令校验拒绝换行；NUL 分隔符必须是 printf 的 \0 转义，而不是 JS 字符串里的真实 NUL。
+	return `cd ${quotePosixArgument(path)} || exit 3; i=0; for entry in .[!.]* ..?* *; do [ -e "$entry" ] || [ -L "$entry" ] || continue; [ -d "$entry" ] || continue; if [ -L "$entry" ]; then kind=L; else kind=D; fi; printf '%s\\0%s\\0' "$kind" "$entry"; i=$((i+1)); [ "$i" -ge ${REMOTE_LIST_DIRS_LIMIT} ] && break; done; exit 0`;
 }
 
 /** Reject a home path the remote reported: absolute, non-root, bounded and traversal-free. */

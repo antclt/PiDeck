@@ -3,7 +3,7 @@ import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 // 目录浏览是只读探针：不允许变成 helper 的 root 逃逸口，也不把文件内容/大小带回来。
-const { REMOTE_LIST_DIRS_LIMIT, assertListablePath, buildListDirectoriesCommand, parseDirectoryListing, readRemoteHome } = loadTsCommonJs("src/main/remote/RemoteDirectoryListing.ts");
+const { REMOTE_LIST_DIRS_LIMIT, assertListablePath, buildListDirectoriesCommand, buildReadHomeCommand, parseDirectoryListing, readRemoteHome } = loadTsCommonJs("src/main/remote/RemoteDirectoryListing.ts");
 
 test("listing paths allow root but reject traversal, trailing separators and control bytes", () => {
 	for (const value of ["/", "/srv", "/srv/app", "/home/user/my project"]) assert.doesNotThrow(() => assertListablePath(value), value);
@@ -17,16 +17,23 @@ test("the remote command only lists directories and caps the result", () => {
 	assert.match(command, new RegExp(`-ge ${REMOTE_LIST_DIRS_LIMIT}`));
 	// 不读取内容、不列文件详情。
 	assert.doesNotMatch(command, /\b(cat|head|ls -l|stat)\b/);
+	// SSH argv 校验拒绝真实换行/NUL；printf 必须收到反斜杠转义。
+	for (const probe of [command, buildReadHomeCommand()]) assert.doesNotMatch(probe, /[\u0000\n\r]/);
+	assert.match(command, /printf '%s\\0%s\\0'/);
+	assert.match(buildReadHomeCommand(), /printf '%s\\n'/);
 });
 
 test("NUL stream parses directories and symlinks, sorted", () => {
 	const parsed = parseDirectoryListing("D\u0000src\u0000L\u0000current\u0000D\u0000app\u0000");
 	assert.equal(parsed.malformed, false);
-	assert.equal(JSON.stringify(parsed.entries), JSON.stringify([
-		{ name: "app", isSymlink: false },
-		{ name: "current", isSymlink: true },
-		{ name: "src", isSymlink: false },
-	]));
+	assert.equal(
+		JSON.stringify(parsed.entries),
+		JSON.stringify([
+			{ name: "app", isSymlink: false },
+			{ name: "current", isSymlink: true },
+			{ name: "src", isSymlink: false },
+		]),
+	);
 });
 
 test("malformed streams are refused and unsafe names are skipped", () => {
