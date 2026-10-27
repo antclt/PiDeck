@@ -5961,6 +5961,13 @@ export const zhCN = {
 	"branch.childrenTitle": "子分支",
 	// 远端会话 trust（P4.2 如实告知 → P4.4b 可决策）：四态 + 决策动作。
 	// 状态以 PiDeck 自己的决策存储为准（远端 pi 没有 project_trust 事件可消费），文案里不出现任何指纹/摘要。
+	"session.remoteConnection.offline": "远端主机已断开",
+	"session.remoteConnection.error": "远端主机连接异常",
+	"session.remoteConnection.connecting": "正在重连远端主机…",
+	"session.remoteConnection.hint": "当前会话的远端读取或发送可能失败；重新连接主机后再试。",
+	"session.remoteConnection.reconnect": "重新连接",
+	"session.remoteConnection.reconnecting": "连接中…",
+	"session.remoteConnection.reconnectFailed": "重连失败：{code}",
 	"session.remoteTrust.title": "远端项目资源未加载",
 	"session.remoteTrust.hint": "远端项目目录里的 .pi 资源（扩展、技能、提示词、项目设置）不会被加载：需要先决定是否信任这个项目。决定只影响下一次启动。",
 	"session.remoteTrust.approved.title": "已信任远端项目",

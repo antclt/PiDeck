@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 963bd663bef5af1c17837a4aa689f51f383f7e3902f9f9cf643f3bb8a68bcd83（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 85a78df24b4b5891eb623fe34ed57e5cbb37ea8ba12d27382a74d3abd6c3608b（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5968,6 +5968,13 @@ export const zhTW: Record<TranslationKey, string> = {
 	"branch.childrenTitle": "子分支",
 	// 远端会话 trust（P4.2 如实告知 → P4.4b 可决策）：四态 + 决策动作。
 	// 状态以 PiDeck 自己的决策存储为准（远端 pi 没有 project_trust 事件可消费），文案里不出现任何指纹/摘要。
+	"session.remoteConnection.offline": "遠端主機已斷開",
+	"session.remoteConnection.error": "遠端主機連線異常",
+	"session.remoteConnection.connecting": "正在重連遠端主機…",
+	"session.remoteConnection.hint": "當前會話的遠端讀取或傳送可能失敗；重新連線主機後再試。",
+	"session.remoteConnection.reconnect": "重新連線",
+	"session.remoteConnection.reconnecting": "連線中…",
+	"session.remoteConnection.reconnectFailed": "重連失敗：{code}",
 	"session.remoteTrust.title": "遠端專案資源未載入",
 	"session.remoteTrust.hint": "遠端專案目錄裡的 .pi 資源（擴充套件、技能、提示詞、專案設定）不會被載入：需要先決定是否信任這個專案。決定只影響下一次啟動。",
 	"session.remoteTrust.approved.title": "已信任遠端專案",

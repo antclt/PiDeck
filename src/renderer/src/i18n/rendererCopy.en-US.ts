@@ -5979,6 +5979,13 @@ export const enUS: Record<TranslationKey, string> = {
 	// Remote session trust (P4.2 notice → P4.4b decision): four states + actions.
 	// The authoritative state is PiDeck's own decision store (the remote pi has no project_trust event to consume);
 	// no fingerprint or digest ever appears in this copy.
+	"session.remoteConnection.offline": "Remote host disconnected",
+	"session.remoteConnection.error": "Remote host connection issue",
+	"session.remoteConnection.connecting": "Reconnecting to the remote host…",
+	"session.remoteConnection.hint": "Remote reads or sends in this session may fail. Reconnect the host and retry.",
+	"session.remoteConnection.reconnect": "Reconnect",
+	"session.remoteConnection.reconnecting": "Connecting…",
+	"session.remoteConnection.reconnectFailed": "Reconnect failed: {code}",
 	"session.remoteTrust.title": "Remote project resources not loaded",
 	"session.remoteTrust.hint": "The remote project's .pi resources (extensions, skills, prompts, project settings) are not loaded until you decide whether to trust this project. The decision applies to the next start.",
 	"session.remoteTrust.approved.title": "Remote project trusted",
