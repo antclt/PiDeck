@@ -4,7 +4,6 @@ import { desktopApi } from "../../../desktopApi";
 import { t, type TranslationKey } from "../../../i18n";
 import { cn } from "../../../lib/utils";
 import { Button } from "../../ui-shadcn/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../ui-shadcn/dialog";
 import type { RemoteHostConnectionState, RemoteHostDiagnosticEntry } from "../../../../../shared/types/remoteHost";
 import { isRemoteConnectionInFlight, resolveRemoteConnectionProgress, type RemoteConnectionStepStatus } from "./remoteConnectionProgressState";
 
@@ -32,6 +31,10 @@ const STEP_TONE: Record<RemoteConnectionStepStatus, string> = {
 /**
  * 连接进度对话框（对应 ZCode 的 connecting step）。
  *
+ * 不套 Radix Dialog、也不 portal：它嵌在设置 Dialog 里打开，Radix Presence 的退出动画在离屏窗口里
+ * 可能等不到 animationend，portal 会在设置关闭后留下点不到的“僵尸”遮罩。这里直接渲染在设置树内，
+ * 随设置卸载；fixed 覆盖设置面板，Escape、背景点击与按钮共用同一条 onClose。
+ *
  * 数据来源只有主进程：状态走 `onStateChange` 推送（由设置页持有），诊断走只读
  * `remoteHosts.diagnostics`。诊断本身不发请求、不启动 SSH，因此这里可以在连接期间轮询；
  * 连接结束后停止。
@@ -42,11 +45,13 @@ const STEP_TONE: Record<RemoteConnectionStepStatus, string> = {
 export function RemoteConnectionProgressDialog(props: { open: boolean; hostId: string; hostLabel: string; state: RemoteHostConnectionState | undefined; errorCode: string | null; busy: boolean; onCancel: () => void; onRetry: () => void; onClose: () => void }) {
 	const [entries, setEntries] = useState<RemoteHostDiagnosticEntry[]>([]);
 	const [cancelled, setCancelled] = useState(false);
-
+	/** 父层状态偶发未及时清空时的本地兜底：用户点完成/关闭后先立即隐藏。 */
+	const [dismissed, setDismissed] = useState(false);
 	// 每次针对新的主机/新的尝试重新取诊断，旧主机的阶段不能留在新对话框里。
 	useEffect(() => {
 		setEntries([]);
 		setCancelled(false);
+		setDismissed(false);
 	}, [props.hostId, props.open]);
 
 	const polling = props.open && (props.busy || isRemoteConnectionInFlight(props.state));
@@ -95,23 +100,34 @@ export function RemoteConnectionProgressDialog(props: { open: boolean; hostId: s
 		setCancelled(true);
 		props.onCancel();
 	}, [props]);
+	const close = useCallback(() => {
+		setDismissed(true);
+		props.onClose();
+	}, [props]);
+
+	useEffect(() => {
+		if (!props.open || dismissed) return;
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") close();
+		};
+		window.addEventListener("keydown", onKeyDown);
+		return () => window.removeEventListener("keydown", onKeyDown);
+	}, [props.open, dismissed, close]);
+
+	if (!props.open || dismissed) return null;
 
 	return (
-		<Dialog
-			open={props.open}
-			onOpenChange={(open) => {
-				if (!open) props.onClose();
-			}}
-		>
-			<DialogContent className="max-w-md">
-				<DialogHeader>
-					<div className="flex flex-wrap items-center gap-2">
-						<DialogTitle>{title}</DialogTitle>
-						{progress.phase === "running" ? <LoaderCircle className="size-4 animate-pideck-spin text-warning" aria-hidden="true" /> : null}
-						{progress.phase === "ready" ? <span className="size-2 rounded-full bg-success" aria-hidden="true" /> : null}
-					</div>
-					<DialogDescription className="text-pretty text-label text-muted-foreground">{description}</DialogDescription>
-				</DialogHeader>
+		<div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+			<div className="absolute inset-0 bg-[var(--overlay-backdrop)] backdrop-blur-[2px]" aria-hidden="true" onClick={close} />
+			<div role="dialog" aria-modal="true" aria-labelledby="remote-connection-progress-title" className="relative z-10 flex w-full max-w-md flex-col gap-4 rounded-xl border border-border-subtle bg-bg-panel p-6 shadow-[var(--shadow-popover)]">
+				<div className="flex flex-wrap items-center gap-2">
+					<h2 id="remote-connection-progress-title" className="text-title font-semibold text-foreground">
+						{title}
+					</h2>
+					{progress.phase === "running" ? <LoaderCircle className="size-4 animate-pideck-spin text-warning" aria-hidden="true" /> : null}
+					{progress.phase === "ready" ? <span className="size-2 rounded-full bg-success" aria-hidden="true" /> : null}
+				</div>
+				<p className="text-pretty text-label text-muted-foreground">{description}</p>
 
 				{/* 阶段轨：完成/进行中/待办/失败四态；失败停在具体一步，不整列变红。 */}
 				<ol aria-live="polite" className="flex flex-col gap-2">
@@ -127,19 +143,19 @@ export function RemoteConnectionProgressDialog(props: { open: boolean; hostId: s
 					})}
 				</ol>
 
-				<DialogFooter className="items-center justify-end gap-2">
+				<div className="flex items-center justify-end gap-2">
 					{progress.phase === "running" || starting ? (
 						<>
 							<Button variant="ghost" disabled={props.busy} onClick={cancel}>
 								{t("settings.connections.progress.cancel")}
 							</Button>
-							<Button variant="ghost" onClick={props.onClose}>
+							<Button variant="ghost" onClick={close}>
 								{t("settings.connections.progress.hide")}
 							</Button>
 						</>
 					) : progress.phase === "failed" || showCancelled ? (
 						<>
-							<Button variant="ghost" onClick={props.onClose}>
+							<Button variant="ghost" onClick={close}>
 								{t("settings.connections.progress.close")}
 							</Button>
 							<Button disabled={props.busy} onClick={props.onRetry}>
@@ -147,10 +163,10 @@ export function RemoteConnectionProgressDialog(props: { open: boolean; hostId: s
 							</Button>
 						</>
 					) : (
-						<Button onClick={props.onClose}>{t("settings.connections.progress.doneAction")}</Button>
+						<Button onClick={close}>{t("settings.connections.progress.doneAction")}</Button>
 					)}
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
+				</div>
+			</div>
+		</div>
 	);
 }

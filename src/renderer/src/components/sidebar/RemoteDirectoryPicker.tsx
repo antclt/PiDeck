@@ -82,7 +82,7 @@ export function RemoteDirectoryPicker(props: { hostId: string; value: string; on
 					: t("sidebar.remoteEnroll.dirFailed", { code: errorCode });
 
 	return (
-		<div data-testid="remote-directory-picker" className="flex flex-col gap-1.5 rounded-lg border border-border-subtle bg-bg-panel p-2">
+		<div data-testid="remote-directory-picker" data-current-path={current} className="flex flex-col gap-1.5 rounded-lg border border-border-subtle bg-bg-panel p-2">
 			<div className="flex min-w-0 items-center gap-1">
 				<Button type="button" variant="ghost" size="icon-xs" className="shrink-0" aria-label={t("sidebar.remoteEnroll.dirParent")} title={t("sidebar.remoteEnroll.dirParent")} disabled={props.disabled || loading || current === "" || current === "/"} onClick={() => void load(remoteParentPath(current))}>
 					<ChevronLeft className="size-3.5" aria-hidden="true" />
