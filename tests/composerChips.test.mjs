@@ -39,7 +39,13 @@ test("stripChipDisplayPrefix is kind-aware and never eats label-leading / & ❝"
 test("formatFileChipLabel shows the file name only, full path stays in raw/title", () => {
 	assert.equal(formatFileChipLabel("src/session/SurfaceComponents.tsx"), "SurfaceComponents.tsx");
 	assert.equal(formatFileChipLabel("C:\\Users\\me\\a.png"), "a.png");
-	assert.equal(formatFileChipLabel("C:/Program Files/"), "Program Files");
+	// 目录引用保留尾斜杠：chip 右内边距会吃掉贴着边缘的最后一个字（用户现场 @assets/products/ 的 s）。
+	// 用斜杠代替，名字完整可见，同时仍是「目录」而非文件。
+	assert.equal(formatFileChipLabel("C:/Program Files/"), "Program Files/");
+	assert.equal(formatFileChipLabel("assets/products/"), "products/");
+	assert.equal(formatFileChipLabel("assets/products"), "products");
+	// 只有分隔符（根目录）时不拼 basename，原样返回
+	assert.equal(formatFileChipLabel("/"), "/");
 });
 
 test('isDirectoryFileChip distinguishes @dir/ and @"dir with space/"', () => {
@@ -158,7 +164,7 @@ test("unquoted spaced absolute path supports backslashes and dir suffix", () => 
 	const dir = parseRichInputChips("@C:/Program Files/");
 	assertJsonEqual(
 		dir.map((c) => ({ raw: c.raw, label: c.label })),
-		[{ raw: "@C:/Program Files/", label: "Program Files" }],
+		[{ raw: "@C:/Program Files/", label: "Program Files/" }],
 	);
 });
 
