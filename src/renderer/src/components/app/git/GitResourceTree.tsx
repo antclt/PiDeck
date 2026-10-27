@@ -3,16 +3,20 @@ import { ChevronDown, FileText, Loader2, Minus, Plus, RotateCcw, Trash2 } from "
 import { Button } from "../../ui-shadcn/button";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "../../ui-shadcn/context-menu";
 import { getFileIconColor, getFileIconSeti } from "../../../fileIcons";
+import { cn } from "../../../lib/utils";
 import { t } from "../../../i18n";
 import { GitStatus, type GitDiscardResource, type GitFileStatus, type GitResource, type GitResourceGroupType, type ProjectFileTarget } from "../../../../../shared/types";
 import { buildChangeTreeRows, toRelativeChangePath, type GitChangeViewMode } from "./changeTree";
 
-/** 树形视图每级缩进（px）；与文件抽屉的树保持同一节奏 */
-export const CHANGE_TREE_INDENT_PX = 14;
-/** 文件行的基准左内边距，与扁平视图的 pl-3 保持一致 */
-const FILE_ROW_BASE_PADDING = 12;
-/** 目录行的基准左内边距，与扁平视图的 px-2 保持一致 */
-const DIR_ROW_BASE_PADDING = 8;
+/*
+ * 变更列表与文件抽屉（FileTreeRows）共用的行规格：行高 28px、字号 text-body、
+ * 左内边距 --space-2 + depth × 8px、图标槽 24px、twistie 槽 16px。
+ * 两个面板在右抽屉用同一套节奏，切 tab 时行距/缩进/图标列都不会跳动。
+ */
+/** 树形视图每级缩进（px）：与文件抽屉的 depth × 8px 同值 */
+export const CHANGE_TREE_INDENT_PX = 8;
+/** 文件行与目录行共用的基准左内边距（--space-2） */
+const CHANGE_ROW_BASE_PADDING = 8;
 export function fileNameOnly(path: string): string {
 	return path.split(/[/\\]/).pop() ?? path;
 }
@@ -181,8 +185,8 @@ export const FileTree = memo(function FileTree(props: {
 		return (
 			<div
 				key={dir || "root"}
-				className="group/dir flex cursor-pointer items-center gap-1 rounded-xs px-2 py-[3px] select-none hover:bg-[var(--git-panel-hover)] focus-visible:shadow-[inset_var(--focus-ring)] focus-visible:outline-none"
-				style={{ paddingLeft: DIR_ROW_BASE_PADDING + depth * CHANGE_TREE_INDENT_PX }}
+				className="group/dir flex h-7 cursor-pointer items-center gap-1.5 rounded-sm pr-2 text-body select-none transition-[background-color,border-color,box-shadow] duration-base hover:bg-muted focus-visible:shadow-[inset_var(--focus-ring)] focus-visible:outline-none"
+				style={{ paddingLeft: CHANGE_ROW_BASE_PADDING + depth * CHANGE_TREE_INDENT_PX }}
 				/* 折叠是目录展开的唯一入口，键盘必须可达（GitGraph 行同款 inset 焦点环） */
 				role="button"
 				tabIndex={0}
@@ -195,8 +199,11 @@ export const FileTree = memo(function FileTree(props: {
 				}}
 				onClick={() => props.onToggleDir(dir)}
 			>
-				<ChevronDown size={12} className={`shrink-0 text-text-tertiary transition-transform duration-fast${props.collapsedDirs.has(dir) ? " -rotate-90" : " rotate-0"}`} />
-				<span className="min-w-0 flex-1 truncate text-xs text-text-secondary" title={dir || "/"}>
+				{/* twistie 槽宽 16px + 3px 视觉偏移：与文件抽屉的目录行同一列 */}
+				<span aria-hidden="true" className="inline-flex h-full w-4 shrink-0 translate-x-[3px] items-center justify-center">
+					<ChevronDown size={14} strokeWidth={2} className={`shrink-0 text-text-tertiary transition-transform duration-fast${props.collapsedDirs.has(dir) ? " -rotate-90" : " rotate-0"}`} />
+				</span>
+				<span className="min-w-0 flex-1 truncate font-semibold text-[var(--git-panel-fg)]" title={dir || "/"}>
 					{label}
 				</span>
 				<span className="ml-auto flex items-center gap-0.5">
@@ -316,15 +323,23 @@ export function compareStatusLetter(status: GitFileStatus): string {
 	}
 }
 
-export function FileIcon({ name }: { name: string }) {
+/** 图标槽 24px（与文件抽屉 --file-type-icon-size 同值）：className 可覆盖尺寸/右距（cn 同组后者胜） */
+export function FileIcon({ name, className }: { name: string; className?: string }) {
 	try {
 		const { svg, colorName } = getFileIconSeti(name);
-		return <span aria-hidden="true" className="mr-1.5 inline-flex size-5 shrink-0 items-center justify-center [&_svg]:size-full [&_svg]:fill-current" style={{ color: getFileIconColor(colorName) }} dangerouslySetInnerHTML={{ __html: svg }} />;
+		return (
+			<span
+				aria-hidden="true"
+				className={cn("mr-1.5 inline-flex size-5 shrink-0 items-center justify-center [&_svg]:size-full [&_svg]:fill-current", className)}
+				style={{ color: getFileIconColor(colorName) }}
+				dangerouslySetInnerHTML={{ __html: svg }}
+			/>
+		);
 	} catch {
 		// 未知类型兜底：FileText 线性图标（16px，与 Seti 图标同槽位）而非空透明方块——
 		// 空方块在非代码文件密集的目录里像图标加载失败。
 		return (
-			<span aria-hidden="true" className="mr-1.5 inline-flex size-5 shrink-0 items-center justify-center text-[var(--git-desc-fg)] [&_svg]:size-4">
+			<span aria-hidden="true" className={cn("mr-1.5 inline-flex size-5 shrink-0 items-center justify-center text-[var(--git-desc-fg)] [&_svg]:size-4", className)}>
 				<FileText />
 			</span>
 		);
@@ -368,13 +383,13 @@ export function ResourceRow(props: {
 	const name = fileNameOnly(props.path);
 	const tone = props.compareStatus ? statusTone(props.compareStatus, true) : statusTone(props.status);
 	const letter = props.compareStatus ? compareStatusLetter(props.compareStatus) : props.letter;
-	const rowPadding = { paddingLeft: FILE_ROW_BASE_PADDING + (props.indent ?? 0) };
+	const rowPadding = { paddingLeft: CHANGE_ROW_BASE_PADDING + (props.indent ?? 0) };
 	const row = (
-		<div className={`group git-resource-row flex h-[26px] items-center pr-[7px] text-body leading-[26px] hover:bg-[var(--git-panel-hover)] focus-within:bg-[var(--git-panel-hover)] ${tone}`} title={props.path}>
+		<div className={`group git-resource-row flex h-7 items-center gap-1.5 rounded-sm pr-2 text-body transition-[background-color,border-color,box-shadow] duration-base hover:bg-muted focus-within:bg-muted ${tone}`} title={props.path}>
 			{props.onOpen ? (
 				<button
 					type="button"
-					className="git-resource-open flex h-[26px] min-w-0 flex-1 cursor-pointer appearance-none items-center border-0 bg-transparent p-0 text-left font-inherit focus-visible:shadow-[inset_var(--focus-ring)] focus-visible:outline-none disabled:cursor-progress disabled:opacity-70"
+					className="git-resource-open flex h-full min-w-0 flex-1 cursor-pointer appearance-none items-center gap-1.5 border-0 bg-transparent p-0 text-left font-inherit focus-visible:shadow-[inset_var(--focus-ring)] focus-visible:outline-none disabled:cursor-progress disabled:opacity-70"
 					style={rowPadding}
 					aria-label={t("git.openWorkspaceDiff", { path: props.path })}
 					aria-busy={opening}
@@ -388,12 +403,15 @@ export function ResourceRow(props: {
 						}
 					}}
 				>
-					<FileIcon name={name} />
+					{/* 16px twistie 占位 + 24px 图标槽：文件图标列与目录行 chevron 同列，列宽与文件抽屉的树行一致 */}
+					<span aria-hidden="true" className="h-full w-4 shrink-0" />
+					<FileIcon name={name} className="mr-0 size-6" />
 					<span className="git-resource-name min-w-0 flex-[0_1_auto] truncate text-[var(--git-panel-fg)]">{name}</span>
 				</button>
 			) : (
-				<div className="flex h-[26px] min-w-0 flex-1 cursor-default items-center border-0 bg-transparent p-0 text-left font-inherit" style={rowPadding}>
-					<FileIcon name={name} />
+				<div className="flex h-full min-w-0 flex-1 cursor-default items-center gap-1.5 border-0 bg-transparent p-0 text-left font-inherit" style={rowPadding}>
+					<span aria-hidden="true" className="h-full w-4 shrink-0" />
+					<FileIcon name={name} className="mr-0 size-6" />
 					<span className="git-resource-name min-w-0 flex-[0_1_auto] truncate text-[var(--git-panel-fg)]">{name}</span>
 				</div>
 			)}
@@ -450,10 +468,13 @@ export function ResourceRow(props: {
 export function ResourceGroup(props: { title: string; count: number; open: boolean; onToggle: () => void; allAction?: () => void; allLabel?: string; allDisabled?: boolean; children: ReactNode }) {
 	return (
 		<div className={`group border-b border-[var(--git-panel-border)] last:border-b-0${props.open ? " open" : ""}`}>
-			<div className="flex h-[22px] items-center bg-transparent px-[7px] pl-[3px] hover:bg-[var(--git-panel-hover)]">
-				<button type="button" className="inline-flex h-[22px] min-w-0 flex-1 cursor-pointer items-center border-0 bg-transparent p-0 text-left text-inherit focus-visible:shadow-[inset_var(--focus-ring)] focus-visible:outline-none" aria-expanded={props.open} onClick={props.onToggle}>
-					<Twistie open={props.open} />
-					<span className="ml-px min-w-0 flex-1 truncate text-control font-semibold tracking-normal text-[var(--git-panel-fg)]">{props.title}</span>
+			<div className="flex h-7 items-center bg-transparent pr-2 pl-2 hover:bg-muted">
+				<button type="button" className="inline-flex h-7 min-w-0 flex-1 cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 text-left text-inherit focus-visible:shadow-[inset_var(--focus-ring)] focus-visible:outline-none" aria-expanded={props.open} onClick={props.onToggle}>
+					{/* 与下方目录行的 twistie 同列（16px 槽 + 3px 偏移） */}
+					<span aria-hidden="true" className="inline-flex h-full w-4 shrink-0 translate-x-[3px] items-center justify-center">
+						<Twistie open={props.open} />
+					</span>
+					<span className="min-w-0 flex-1 truncate text-control font-semibold tracking-normal text-[var(--git-panel-fg)]">{props.title}</span>
 				</button>
 				{props.allAction && (
 					<div className="hidden items-center gap-px group-hover:flex group-focus-within:flex group-[.open]:flex">
@@ -462,7 +483,7 @@ export function ResourceGroup(props: { title: string; count: number; open: boole
 						</Button>
 					</div>
 				)}
-				<span className="ml-1 min-w-[14px] text-right text-xs tabular-nums text-[var(--git-desc-fg)]">{props.count}</span>
+				<span className="ml-1 min-w-[14px] text-right text-micro tabular-nums text-[var(--git-desc-fg)]">{props.count}</span>
 			</div>
 			{props.open && <div className="min-w-0">{props.children}</div>}
 		</div>
