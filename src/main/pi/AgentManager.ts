@@ -88,7 +88,7 @@ import { estimateMessagesPayloadBytes } from "./messagePayloadSize";
 import { bindRemoteUserMessageTimestamp } from "./remoteMessageTimestamp";
 import { StoppedMessageIdentityCache } from "./stoppedMessageIdentity";
 import { currentIndexTree, diffCheckpoints, loadAllCheckpoints, loadCheckpointFromRef, MUTATING_TOOLS, restoreCheckpoint as applyCheckpointRestore, toCheckpointSummary } from "../rewind/index.ts";
-import { AgentMessageProjector, buildActiveBranchEntryIds as buildActiveBranchEntryIdsForDisplay } from "./AgentMessageProjector";
+import { AgentMessageProjector, buildActiveBranchEntryIds as buildActiveBranchEntryIdsForDisplay, hasPiToolCallBlock, normalizePiStopReason } from "./AgentMessageProjector";
 import { RewindCheckpointCoordinator } from "./RewindCheckpointCoordinator";
 import { LiveStreamChannel } from "./liveStreamChannel";
 import { resolveNotificationSessionId } from "./agentUtils";
@@ -6119,7 +6119,12 @@ export class AgentManager {
 		// pending 是骨架占位值：不持久化（new 分支）也不覆盖既有值（existing 分支），
 		// 否则 message_end 缺 stopReason 时消息永远停 in pending，渲染层回退启发式失效。
 		const extractedStopReason = partialMessage && typeof partialMessage === "object" ? (nonEmptyString(asRecord(partialMessage)?.stopReason) ?? "") : "";
-		const finalStopReason = extractedStopReason && extractedStopReason !== "pending" ? extractedStopReason : undefined;
+		// 与历史投影同源归一：被打断的纯文本回复 pi 记 toolUse 但无 toolCall 块，按最终回复处理
+		// （否则渲染层把它当中间回复折进「执行过程」，整段回复在空闲后仍不可见）。
+		const finalStopReason = normalizePiStopReason(
+			extractedStopReason && extractedStopReason !== "pending" ? extractedStopReason : undefined,
+			hasPiToolCallBlock(partialMessage && typeof partialMessage === "object" ? asRecord(partialMessage)?.content : undefined),
+		);
 		// 本条消息用的模型：message_end 的完整消息带 provider/model（message_start 骨架也有）。
 		// 缺省不覆盖旧值——delta 路径的消息对象可能不带这两个字段。
 		const messageRecord = partialMessage && typeof partialMessage === "object" ? asRecord(partialMessage) : undefined;
