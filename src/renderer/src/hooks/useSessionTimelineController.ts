@@ -35,6 +35,7 @@ import { shouldAutoExpandRenderWindow, shouldApplyDelayedHistoryResult } from ".
 import { beginProgrammaticScroll, clearProgrammaticScroll, createProgrammaticScrollGuard, finishProgrammaticScrollFrame, isProgrammaticScrollActive } from "./timeline/programmaticScrollGuard";
 import { browsePinScrollTop, followBrowsePinAfterUserScroll, pickVisibleRootRow, shouldCompensateBrowsePin, type BrowsePin } from "./timeline/browsePin";
 import { countUserTurns, TIMELINE_MOUNTED_TURN_LIMIT, TIMELINE_SCROLLED_TURN_LIMIT, TIMELINE_WINDOW_EXPAND_STEP } from "../components/session/timeline/turnRenderWindow";
+import { readSessionFirstScreenPage } from "../components/session/sessionSubagentTranscript";
 import { estimateJumpExpandTurns, resolveJumpFallbackEntry, resolveJumpPendingAction } from "../components/session/timeline/jumpWindowPolicy";
 import { shouldDeferJumpUntilLoaded } from "./timeline/timelineRevealChannel";
 import { resolveJumpMessageIndex, resolveJumpScrollTarget } from "../components/session/timeline/jumpTarget";
@@ -86,10 +87,6 @@ const BOTTOM_THRESHOLD = 16;
 const LEGACY_OWNER_KEY = "legacy";
 /** runtime 窗口会话「加载更多对话」的单页轮数（与主进程 DEFAULT_TURN_PAGE_SIZE 对齐） */
 const RUNTIME_HISTORY_TURN_PAGE_SIZE = 3;
-/** 历史会话（disk 路径）首开加载的轮数：与运行时窗口 DISPLAY_WINDOW_TURNS(9) 对齐，
- *  首次上滚 9 轮内零延迟；翻页与 runtime 同用 3 轮 cohort。
- *  2026-09 统一轮次协议：废除旧的「按消息条数(100)」页大小，页大小只以轮次计。 */
-const DISK_INITIAL_TURN_PAGE_SIZE = 9;
 /** 翻页成功后仅开放实际带回的 cohort，防止消息页大小与 DOM 窗口脱节。
  *  disk 消息页不一定以 user 消息开头（可能在长回答中间切断）；只要页非空就至少开放 1 轮，
  *  否则新增 agent-run 会被尾部窗口裁掉，出现「数据已加载但看不见」的无反馈。 */
@@ -642,8 +639,9 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		trackLatestLoad(sessionId, sequence);
 		setLoadState({ sessionId, state: { status: "loading" } });
 
-		void desktopApi.sessions
-			.readRecordMessagePage(sessionId, undefined, DISK_INITIAL_TURN_PAGE_SIZE)
+		// 子代理子会话（parentSessionPath）首开把数据窗口补拉到 40 轮：上滚/「显示更早」
+		// 在缓存内零延迟；DOM 挂载窗口仍按贴底治理渐进展开，不受影响。
+		void readSessionFirstScreenPage((id, before, pageSize) => desktopApi.sessions.readRecordMessagePage(id, before, pageSize), sessionId, sessionRecord?.parentSessionPath)
 			.then((page: SessionMessagePage) => {
 				if (latestLoadBySession.get(sessionId) !== sequence) return;
 				// DSH host 被手动停止：历史暂时读不了——不是空历史、也不是会话文件失效。
@@ -682,7 +680,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		trackLatestLoad(sessionId, sequence);
 		setLoadState({ sessionId, state: { status: "loading" } });
 		try {
-			const page = await desktopApi.sessions.readRecordMessagePage(sessionId, undefined, DISK_INITIAL_TURN_PAGE_SIZE);
+			const page = await readSessionFirstScreenPage((id, before, pageSize) => desktopApi.sessions.readRecordMessagePage(id, before, pageSize), sessionId, sessionRecord?.parentSessionPath);
 			if (latestLoadBySession.get(sessionId) !== sequence) return;
 			// 与首屏同源：手动停止态下重试仍不会成功，保持专态
 			//（否则「重试」会把错误态洗成空会话，又回到用户看到的错误方向）。
@@ -711,7 +709,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 			});
 			throw error;
 		}
-	}, [cacheMessages, options.sessionId, setLoadState]);
+	}, [cacheMessages, options.sessionId, setLoadState, sessionRecord]);
 
 	/**
 	 * DSH host 被手动停止时的恢复入口（时间线专态的「启动 host 并重试」）。

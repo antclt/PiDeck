@@ -823,11 +823,7 @@ const api = {
 				}>
 			>,
 		/** DSH 子代理历史（subagent.history 只读 transcript）。 */
-		readDshSubagentHistory: (agentId: string, childSessionId: string, beforeSeq?: number, maxMessages?: number) =>
-			ipcRenderer.invoke(ipcChannels.dshSubagentHistory, agentId, childSessionId, beforeSeq, maxMessages) as Promise<{
-				messages: import("../shared/types").ChatMessage[];
-				hasMore: boolean;
-			}>,
+		readDshSubagentHistory: (agentId: string, childSessionId: string, beforeSeq?: number, maxMessages?: number) => ipcRenderer.invoke(ipcChannels.dshSubagentHistory, agentId, childSessionId, beforeSeq, maxMessages) as Promise<{ messages: import("../shared/types").ChatMessage[]; hasMore: boolean; oldestSeq?: number }>,
 		/** pi-subagents 扩展子代理列表（record + 子会话回填）。 */
 		listSessionSubagents: (sessionId: string) => ipcRenderer.invoke(ipcChannels.sessionsListSubagents, sessionId) as Promise<import("../shared/types").PiSubagentEntry[]>,
 		/** 会话级 todo 快照（pi-deck-todo custom 条目重建，历史会话任务 tab）。 */

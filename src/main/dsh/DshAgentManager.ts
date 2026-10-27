@@ -32,6 +32,7 @@ import type { SessionAgentGateway } from "../sessions/SessionRuntimeCoordinator"
 import type { DshHost } from "./DshHost";
 import { renderDshSessionHtml, sanitizeExportFileName } from "./dshSessionHtmlExport";
 import { projectDshEvent, parseDshTodoList, parseDshInboxProjection, type DshProjection } from "./dshEventProjector";
+import { projectDshSubagentTranscriptPage, type DshSubagentTranscriptPage } from "./dshSubagentTranscript";
 import {
 	cacheHitPercentOf,
 	collectDshProcessEvent,
@@ -1480,7 +1481,7 @@ export class DshAgentManager implements SessionAgentGateway {
 	}
 
 	/** 子代理历史（G6）：只读 transcript（不激活 Agent），投影成 ChatMessage。 */
-	async readSubagentHistory(agentId: string, childSessionId: string, beforeSeq?: number, maxMessages = 100): Promise<{ messages: ChatMessage[]; hasMore: boolean }> {
+	async readSubagentHistory(agentId: string, childSessionId: string, beforeSeq?: number, maxMessages = 100): Promise<DshSubagentTranscriptPage> {
 		const runtime = this.runtime(agentId);
 		const client = this.requireClient();
 		// 新目录保留 continuable 模式；页地址必须与真实 descriptor 一致，不能硬编码 one-shot。
@@ -1511,16 +1512,8 @@ export class DshAgentManager implements SessionAgentGateway {
 		if (!page.result.ok) {
 			return { messages: [], hasMore: false };
 		}
-		const entries = (page.result.value.events ?? [])
-			.map((entry) => ({ event: entry.event, view: entry.view }))
-			.filter((item): item is { event: NonNullable<typeof item.event>; view: typeof item.view } => Boolean(item.event))
-			.sort((left: { event: { seq?: number } }, right: { event: { seq?: number } }) => (left.event.seq ?? 0) - (right.event.seq ?? 0));
 		const childAgentId = `dsh:${childSessionId}`;
-		let projection = projectDshEvent(undefined, undefined, childAgentId);
-		for (const { event, view } of entries) {
-			projection = projectDshEvent(projection, event, childAgentId, view);
-		}
-		return { messages: projection.messages, hasMore: page.result.value.hasMore === true };
+		return projectDshSubagentTranscriptPage(page.result.value.events ?? [], childAgentId, page.result.value.hasMore === true);
 	}
 
 	/**
