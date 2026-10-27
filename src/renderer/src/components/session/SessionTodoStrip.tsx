@@ -185,11 +185,14 @@ export function useSessionTodoSources(sessionId: string): TodoWidgetLines[] {
 
 	// 数据源归一化成统一行式，再整体走 dismiss 指纹与解析链路
 	return useMemo<WidgetLines[]>(() => {
-		// DSH 不产出 Pi widget，优先消费其运行时的结构化 todos；
+		// DSH 不产出 Pi widget，优先消费其运行时的结构化 todos；ACP 同路：主进程把 CLI
+		// 的 plan 投影整表推进 agents:runtime-state（AcpUpdatePipeline 对 todos/usage
+		// 变更主动 emitRuntimeState），不消费的话 ACP 会话的任务列表永远不渲染（#428）。
 		// Pi 活会话仍以 widget 为实时真源；历史会话用快照兜底。
-		if (runtime?.backend === "dsh") {
+		if (runtime?.backend === "dsh" || runtime?.backend === "acp") {
 			const todos = runtime.state?.todos;
 			if (!Array.isArray(todos) || todos.length === 0) return [];
+			// key 沿用 dsh-todos：两后端是同构 TodoItem[] 消费，dismiss 指纹按内容算，不区分来源。
 			return [{ key: "dsh-todos", lines: todoItemsToLines(runtimeTodosToItems(todos)) }];
 		}
 		if (!coherent) {
