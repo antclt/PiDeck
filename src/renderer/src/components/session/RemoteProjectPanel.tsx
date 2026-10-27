@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, FilePlus2, FileText, Folder, FolderPlus, Link2, Loader2, Search, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, FilePlus2, FileText, Folder, FolderPlus, Link2, Loader2, Plus, Search, TerminalSquare, Trash2, Upload, X } from "lucide-react";
 import type { RemoteWorkspaceEntry } from "../../../../shared/types/remoteHost";
 import type { RemoteEntryKind } from "../../../../shared/types/remoteFiles";
 import { desktopApi } from "../../desktopApi";
@@ -11,23 +11,14 @@ import { t } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
 import { Input } from "../ui-shadcn/input";
-import { sortRemoteEntries } from "./remoteProjectEntries";
+import { isRemoteHostNotConnectedCode as isNotConnectedCode, remoteEntryParentPath as parentPath, remoteEntryRelativePath as relativePath, sortRemoteEntries } from "./remoteProjectEntries";
 import { createRequestGate } from "./remoteRequestGate";
 import { RemoteFileEditor } from "../workspace/RemoteFileEditor";
 import { RemoteFileRow } from "./RemoteFileRow";
 import { RemoteProjectEntryDialogs, type RemoteEntryDialog } from "./RemoteProjectEntryDialogs";
-import { RemoteProjectHeader } from "./RemoteProjectHeader";
 import { RemoteTrashPanel } from "./RemoteTrashPanel";
 import { remoteFileEntryKeepsInput } from "./remoteFileManagementState";
 import type { RemoteSearchEntryView } from "./remoteProjectSearchState";
-
-/** 主机未连接是最常见的失败，且与「路径有问题」完全不同：直接说怎么办，而不是只扔稳定码。 */
-function isNotConnectedCode(code: string): boolean {
-	return code === "SSH_HOST_NOT_READY" || code === "SSH_CONNECTION_FAILED";
-}
-
-const relativePath = (segments: string[], name: string): string => [...segments, name].join("/");
-const parentPath = (segments: string[]): string => segments.join("/");
 
 /**
  * 远端项目目录浏览 + 文件名搜索 + 文本编辑 + 文件管理（Phase 5 文件面）。
@@ -253,7 +244,30 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 				transfer.onDrop(event);
 			}}
 		>
-			<RemoteProjectHeader projectName={props.projectName} onBack={props.onBack} onCreateSession={props.onCreateSession} onOpenTerminal={props.onOpenTerminal} />
+			<div className="flex flex-wrap items-center gap-2 text-label">
+				{props.onBack ? (
+					<Button variant="ghost" size="sm" data-testid="remote-project-back" onClick={props.onBack}>
+						<ArrowLeft className="size-4" aria-hidden="true" />
+						{t("project.remote.back")}
+					</Button>
+				) : null}
+				<span className="rounded bg-muted px-1.5 py-0.5 font-medium text-muted-foreground">{t("project.remote.badge")}</span>
+				<strong className="text-body font-semibold text-foreground">{props.projectName}</strong>
+				<span className="text-muted-foreground">{t("project.remote.title")}</span>
+				{/* 无会话空态的主入口：远端项目也能一键起会话。文件浏览仍是同一页的次要动作，不把「新建会话」藏在侧栏项目行的 hover 按钮里。 */}
+				{props.onCreateSession && (
+					<Button variant="default" size="sm" data-testid="remote-project-new-session" onClick={props.onCreateSession}>
+						<Plus className="size-4" aria-hidden="true" />
+						{t("project.remote.newSession")}
+					</Button>
+				)}
+				{props.onOpenTerminal && (
+					<Button variant="ghost" size="sm" onClick={props.onOpenTerminal}>
+						<TerminalSquare className="size-4" aria-hidden="true" />
+						{t("app.terminal")}
+					</Button>
+				)}
+			</div>
 			{/* 工具栏只在目录浏览态出现（搜索态由搜索自身的结果/错误呈现）；空目录仍可见，可在空目录新建。 */}
 			{!searching ? (
 				<div data-testid="remote-file-toolbar" className="flex flex-wrap items-center gap-1">
