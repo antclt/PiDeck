@@ -359,6 +359,9 @@ export const DshSubagentEntryRow = (props: { agentId: string; entry: DshSubagent
 			</button>
 			<Collapsible open={!collapsed}>
 				<CollapsibleContent>
+					{/* scroll-ok: bounded —— DSH 子代理转录是受控分页的只读列表：每次只拉一页
+					    （DSH_SUBAGENT_TRANSCRIPT_PAGE_SIZE），「加载更多」前插旧页还要保滚动位置，
+					    且整体限高 max-h-56；虚拟化会与「前插 + 高度未测」直接冲突（见 docs/virtualization-audit.md）。 */}
 					<div ref={transcriptRef} className="flex max-h-56 flex-col gap-1 overflow-y-auto border-t border-border-subtle px-2 py-1.5">
 						{!transcriptLoading && pageInfo.hasMore && (transcript?.length ?? 0) > 0 && (
 							<button type="button" className="shrink-0 self-start rounded px-1 py-0.5 text-micro text-text-tertiary transition-colors hover:bg-muted/60 hover:text-foreground disabled:opacity-60" disabled={olderLoading} onClick={() => void loadOlder()}>
