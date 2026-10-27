@@ -649,7 +649,7 @@ export class AgentManager {
 	 * 扫文件、安全快照与 trust flag 要写/读本机 userData、会话文件预检要读本机 JSONL —— 而远端进程
 	 * 跑在另一台机器上（`PiProcess.start` 的远端分支也不消费这些选项，参数与 cwd 全来自 plan）。
 	 */
-	private createPiProcess(cwd: string, sessionPath?: string, securitySessionKey?: string, settingsOverride?: Partial<Pick<AppSettings, "piRpcNoExtensions" | "piRpcNoSkills" | "removedBuiltInExtensions">>, agentId?: string, remoteLaunch?: { plan: RemoteSshPiRuntimeLaunchPlan; launcher: PiRuntimeLauncher }): PiProcess {
+	private createPiProcess(cwd: string, sessionPath?: string, securitySessionKey?: string, settingsOverride?: Partial<Pick<AppSettings, "piRpcNoExtensions" | "piRpcNoSkills" | "removedBuiltInExtensions" | "wslEnabled" | "wslDistro" | "wslUser">>, agentId?: string, remoteLaunch?: { plan: RemoteSshPiRuntimeLaunchPlan; launcher: PiRuntimeLauncher }): PiProcess {
 		const settings = settingsOverride ? { ...this.settingsStore.get(), ...settingsOverride } : this.settingsStore.get();
 		if (remoteLaunch) {
 			// cwd 只进诊断（远端诊断的 cwd 本来就来自 plan），本地读者看到的是远端项目根。
@@ -980,13 +980,16 @@ export class AgentManager {
 	}
 
 	/** Windows 主进程文件操作必须使用可由 host 访问的路径。 */
-	private toSessionHostPath(sessionPath: string): string {
-		return this.wslEnvironment ? toWindowsHostPath(sessionPath, this.wslEnvironment) : sessionPath;
+	private toSessionHostPath(sessionPath: string, distro = this.wslEnvironment?.distro): string {
+		return distro ? toWindowsHostPath(sessionPath, { distro }) : sessionPath;
 	}
 
-	/** Pi/RPC/session identity 在 WSL 模式下始终使用 Linux 逻辑路径。 */
-	private toSessionProtocolPath(sessionPath: string): string {
-		return this.wslEnvironment ? toWslLinuxPath(sessionPath, this.wslEnvironment) : sessionPath;
+	/**
+	 * Pi/RPC/session identity 在 WSL 模式下始终使用 Linux 逻辑路径。
+	 * 第 12 步：distro 可由调用方显式传入（按项目/会话档案），缺省回退全局环境。
+	 */
+	private toSessionProtocolPath(sessionPath: string, distro = this.wslEnvironment?.distro): string {
+		return distro ? toWslLinuxPath(sessionPath, { distro }) : sessionPath;
 	}
 
 	/**
@@ -1896,13 +1899,15 @@ export class AgentManager {
 		// 远端会话身份不套 WSL（理由见 sessionIdentityDefaultsFor）：在这里归一化，让
 		// 「身份 key / creatingSessionAgents 去重 / tab 字段」三处从同一个输入出发。
 		let input = remote ? { ...rawInput, environment: "native" as const, wslDistro: undefined, wslUser: undefined } : rawInput;
+		// 第 12 步：按输入身份转换路径，不固定使用全局环境（缺字段时仍回退全局）。
+		const createWslDistro = input.environment === "wsl" ? (input.wslDistro ?? this.wslEnvironment?.distro) : undefined;
 		if (rawInput.sessionLocator) {
 			const sessionPath = this.sessionLocatorRouter.resolveFilePath(rawInput.sessionLocator);
 			if (!sessionPath) throw new Error("SESSION_LOCATOR_FILE_REQUIRED");
-			input = { ...input, sessionPath: remote ? sessionPath : this.toSessionProtocolPath(sessionPath) };
+			input = { ...input, sessionPath: remote ? sessionPath : this.toSessionProtocolPath(sessionPath, createWslDistro) };
 		} else if (rawInput.sessionPath) {
 			// 远端会话文件是那台机器上的绝对 POSIX 路径：不得过本机 WSL 转换（\\wsl$ 形状不是远端路径）。
-			input = { ...input, sessionPath: remote ? rawInput.sessionPath : this.toSessionProtocolPath(rawInput.sessionPath) };
+			input = { ...input, sessionPath: remote ? rawInput.sessionPath : this.toSessionProtocolPath(rawInput.sessionPath, createWslDistro) };
 		}
 		const sessionKey = this.sessionKeyFor(input, this.sessionIdentityDefaultsFor(project));
 		if (!sessionKey) return this.createUnlocked(input);
@@ -2287,7 +2292,10 @@ export class AgentManager {
 		// 每次 spawn 前异步刷新模型列表缓存（不等完成，避免阻塞 Agent 启动）：
 		// 用户直接编辑 models.json/auth.json 后，下一次启动的 Agent 即能看到新模型。
 		this.onBeforeAgentSpawn?.();
-		this.agents.set(id, { tab, process: this.createPiProcess(project.path, input.sessionPath, input.deckSessionId, undefined, id) });
+		// 第 12 步：WSL 会话把档案里的 distro/user 作为本次 spawn 的覆盖值，
+		// 让 PiProcess 用正确发行版解析命令与路径；缺字段才回退全局设置。
+		const wslSpawnOverride = sessionEnvironment === "wsl" && tab.wslDistro !== undefined && tab.wslUser !== undefined ? { wslEnabled: true, wslDistro: tab.wslDistro, wslUser: tab.wslUser } : undefined;
+		this.agents.set(id, { tab, process: this.createPiProcess(project.path, input.sessionPath, input.deckSessionId, wslSpawnOverride, id) });
 		this.messages.set(id, []);
 		this.emitState();
 
