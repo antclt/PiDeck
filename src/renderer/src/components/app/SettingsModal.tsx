@@ -8,6 +8,7 @@ import { t, type TranslationKey } from "../../i18n";
 import { applyAppearanceAttributes, type AppearanceSettings } from "../../themeAppearance";
 import { applyCustomThemeTokens, applyFontSizeAttributes } from "../../hooks/appearance/useAppAppearance";
 import { useRemoteFeatureAvailable } from "../../hooks/useRemoteFeatureAvailable";
+import { applyRemoteGateToSettingsLayout, isRemoteEntryVisible } from "../../hooks/remoteFeatureVisibility";
 import { Button } from "../ui-shadcn/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui-shadcn/tabs";
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
@@ -599,7 +600,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 	// 「连接」tab 装的是远端（SSH）主机，受通道门禁约束：正式包（stable）不提供远端能力，
 	// 这个 tab 直接从布局里拿掉——不给入口比给了再报「未启用」更符合「正式包不提这个」。
 	const remoteAvailable = useRemoteFeatureAvailable();
-	const settingsLayout = useMemo(() => (remoteAvailable === false ? SETTINGS_TAB_LAYOUT.filter((entry) => entry.id !== "connections") : SETTINGS_TAB_LAYOUT), [remoteAvailable]);
+	const settingsLayout = useMemo(() => applyRemoteGateToSettingsLayout(SETTINGS_TAB_LAYOUT, remoteAvailable), [remoteAvailable]);
 	const hiddenModules = draftSettings.hiddenModules ?? NO_HIDDEN_MODULES;
 	const tabs = resolveVisibleSettingsTabs(hiddenModules, revealedTabs, settingsLayout).map((entry) => ({
 		id: entry.id,
@@ -610,7 +611,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 	// tab 被通道拿掉（如从 dev 通道构建切到正式包后 localStorage 里还记着 connections）时回「常用」：
 	// 侧栏已无该项，停在那里只会是一片空白。
 	useEffect(() => {
-		if (remoteAvailable === false && activeTab === "connections") setActiveTab("common");
+		if (!isRemoteEntryVisible(remoteAvailable) && activeTab === "connections") setActiveTab("common");
 	}, [remoteAvailable, activeTab]);
 	// 当前 tab 被隐藏（深链 / 命令面板直达）时临时显示并提示一次，避免用户看到内容却在侧栏里找不到高亮项。
 	useEffect(() => {
@@ -622,7 +623,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 	// 设置搜索能搜到全部 tab 与设置项（含已隐藏模块的 tab）：条目现算不记忆——131 条、每条两次 t() 查表，
 	// 相比给 useMemo 挂语言依赖的出错风险（locale 可能在渲染后才加载完）不如直接重建。
 	// 通道拿掉的「连接」tab 同样不进搜索结果：否则搜「ssh」会命中一个打不开的页。
-	const settingsSearchEntries = buildSettingsSearchEntries(t).filter((entry) => entry.tab !== "connections" || remoteAvailable !== false);
+	const settingsSearchEntries = buildSettingsSearchEntries(t).filter((entry) => entry.tab !== "connections" || isRemoteEntryVisible(remoteAvailable));
 	// 搜索词提升到弹窗壳持有（而不是搜索组件内部）：DialogContent 的 Esc 拦截要在
 	// 搜索中先清搜索、再按一次才关弹窗——结果替换内容区时直接关弹窗会误触未保存确认流。
 	const [settingsSearchQuery, setSettingsSearchQuery] = useState("");
@@ -860,7 +861,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 								)}
 
 								{/* ── 连接 tab（远端 SSH 主机；WSL 将来并列于此）。通道门禁关掉时不渲染 ── */}
-								{activeTab === "connections" && remoteAvailable !== false && (
+								{activeTab === "connections" && isRemoteEntryVisible(remoteAvailable) && (
 									<TabsContent value="connections" className="settings-panel min-w-0 [overflow-anchor:none]">
 										<Suspense fallback={<SettingsTabLoading />}>
 											<ConnectionsTab />
