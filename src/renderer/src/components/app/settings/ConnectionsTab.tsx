@@ -12,6 +12,8 @@ import { RepairPanel } from "./RepairPanel";
 import { RemoteProjectTrustPanel } from "./RemoteProjectTrustPanel";
 import { SettingsSection } from "./SettingsStorageTab";
 import type { RemoteHostConnectionState, RemoteHostDiagnosticEntry, RemoteHostListItem } from "../../../../../shared/types/remoteHost";
+import type { WslHostListItem } from "../../../../../shared/types/wslHost";
+import { detectRendererPlatform } from "../../../lib/detectRendererPlatform";
 
 /**
  * 设置 → 连接：远端主机列表 + 连接开关 + 状态/诊断。
@@ -41,6 +43,14 @@ export function ConnectionsTab() {
 	const [removing, setRemoving] = useState<RemoteHostListItem | null>(null);
 	const [removingBusy, setRemovingBusy] = useState(false);
 	const [removeError, setRemoveError] = useState<string | null>(null);
+	// WSL 档案：只在 Windows 出现；列表只读写本机清单，不连接发行版。
+	const wslSupported = detectRendererPlatform() === "win32";
+	const [wslHosts, setWslHosts] = useState<WslHostListItem[]>([]);
+	const [wslError, setWslError] = useState<string | null>(null);
+	const [addingWsl, setAddingWsl] = useState(false);
+	const [removingWsl, setRemovingWsl] = useState<WslHostListItem | null>(null);
+	const [wslRemoveBusy, setWslRemoveBusy] = useState(false);
+	const [wslRemoveError, setWslRemoveError] = useState<string | null>(null);
 	/** 取消/重试会换代：旧 connect 的迟到结果不得回写新一次的状态。 */
 	const attemptRef = useRef(0);
 
@@ -74,6 +84,39 @@ export function ConnectionsTab() {
 	useEffect(() => {
 		void refresh();
 	}, [refresh]);
+
+	const refreshWsl = useCallback(async () => {
+		if (!wslSupported) return;
+		const result = await desktopApi.remoteHosts.listWslHosts();
+		if (!result.ok) {
+			setWslHosts([]);
+			setWslError(t("settings.connections.wsl.remove.failed", { code: result.code }));
+			return;
+		}
+		setWslError(null);
+		setWslHosts(result.hosts);
+	}, [wslSupported]);
+
+	useEffect(() => {
+		void refreshWsl();
+	}, [refreshWsl]);
+
+	const confirmRemoveWsl = useCallback(async () => {
+		if (removingWsl === null) return;
+		setWslRemoveBusy(true);
+		setWslRemoveError(null);
+		try {
+			const result = await desktopApi.remoteHosts.removeWslHost(removingWsl.id);
+			if (!result.ok) {
+				setWslRemoveError(result.code === "WSL_HOST_REFERENCED" ? t("settings.connections.wsl.remove.referenced") : t("settings.connections.wsl.remove.failed", { code: result.code }));
+				return;
+			}
+			setRemovingWsl(null);
+			await refreshWsl();
+		} finally {
+			setWslRemoveBusy(false);
+		}
+	}, [refreshWsl, removingWsl]);
 
 	/** 连接/断开共用一条路径：置忙 → 调用 → 用稳定码或状态回填 → 清忙。 */
 	const toggle = useCallback(async (hostId: string, connect: boolean, label?: string) => {
@@ -273,6 +316,47 @@ export function ConnectionsTab() {
 					</div>
 				</div>
 			</SettingsSection>
+			{wslSupported ? (
+				<SettingsSection title={t("settings.connections.wsl.title")} description={t("settings.connections.wsl.hint")}>
+					<div className="flex flex-col gap-2">
+						{wslHosts.length === 0 ? <p className="px-1 py-3 text-body text-muted-foreground">{t("settings.connections.wsl.empty")}</p> : null}
+						{wslHosts.map((host) => (
+							<div key={host.id} className="flex items-center gap-3 rounded-lg border border-border-subtle px-3 py-2">
+								<span className="shrink-0 rounded border border-border-subtle px-1 text-micro text-muted-foreground">{t("settings.connections.wsl.badge")}</span>
+								<div className="flex min-w-0 flex-col">
+									<strong className="truncate text-body font-semibold text-foreground">{host.label}</strong>
+									<span className="truncate text-label text-muted-foreground">
+										{host.distro} · {host.user}
+									</span>
+								</div>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon-sm"
+									className="ml-auto shrink-0 text-muted-foreground hover:text-destructive"
+									title={t("settings.connections.wsl.remove")}
+									aria-label={t("settings.connections.wsl.remove")}
+									onClick={() => {
+										setWslRemoveError(null);
+										setRemovingWsl(host);
+									}}
+								>
+									<Trash2 className="size-3.5" aria-hidden="true" />
+								</Button>
+							</div>
+						))}
+						<div className="flex items-center gap-2 pt-1">
+							<Button variant="default" size="sm" onClick={() => setAddingWsl(true)}>
+								{t("settings.connections.wsl.add")}
+							</Button>
+							<Button variant="ghost" size="sm" onClick={() => void refreshWsl()}>
+								{t("settings.connections.refresh")}
+							</Button>
+							{wslError !== null ? <span className="text-label text-muted-foreground">{wslError}</span> : null}
+						</div>
+					</div>
+				</SettingsSection>
+			) : null}
 			{/* 远端信任清单：与主机列表同一页（都是「远端开发」这一域的设置），但状态权威是决策存储而非连接状态。 */}
 			<RemoteProjectTrustPanel />
 			{adding ? (
@@ -287,6 +371,41 @@ export function ConnectionsTab() {
 					}}
 				/>
 			) : null}
+			{addingWsl ? (
+				<AddHostDialog
+					initialKind="wsl"
+					onClose={() => setAddingWsl(false)}
+					onSubmitted={() => undefined}
+					onWslSubmitted={(host) => {
+						setAddingWsl(false);
+						setMessage(t("settings.connections.wsl.added", { host: host.label }));
+						void refreshWsl();
+					}}
+				/>
+			) : null}
+			{/* WSL 档案移除：只删本机清单，发行版数据不动。 */}
+			<Dialog
+				open={removingWsl !== null}
+				onOpenChange={(open) => {
+					if (!open && !wslRemoveBusy) setRemovingWsl(null);
+				}}
+			>
+				<DialogContent className="max-w-md">
+					<DialogHeader>
+						<DialogTitle>{t("settings.connections.wsl.remove.title", { host: removingWsl?.label ?? "" })}</DialogTitle>
+						<DialogDescription>{t("settings.connections.wsl.remove.body")}</DialogDescription>
+					</DialogHeader>
+					{wslRemoveError !== null ? <p className="text-label text-destructive">{wslRemoveError}</p> : null}
+					<DialogFooter>
+						<Button variant="ghost" disabled={wslRemoveBusy} onClick={() => setRemovingWsl(null)}>
+							{t("common.cancel")}
+						</Button>
+						<Button variant="destructive" disabled={wslRemoveBusy} onClick={() => void confirmRemoveWsl()}>
+							{t("settings.connections.wsl.remove.confirm")}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 			{/* 连接进度：添加/连接后立即出现；阶段来自诊断历史，状态来自 main 推送。 */}
 			{/* 移除确认：删掉的是本机 profile 与 host key pin，远端数据不动。 */}
 			<Dialog

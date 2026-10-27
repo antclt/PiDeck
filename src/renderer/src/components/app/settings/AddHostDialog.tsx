@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSetAtom } from "jotai";
 import { Box, ChevronDown, FileCode, Server, TerminalSquare } from "lucide-react";
-import { openSettingsAtom } from "../../../atoms";
 import { detectRendererPlatform } from "../../../lib/detectRendererPlatform";
 import { desktopApi } from "../../../desktopApi";
 import { t } from "../../../i18n";
@@ -11,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "../../ui-shadcn/input";
 import { Label } from "../../ui-shadcn/label";
 import type { RemoteHostAddInput, RemoteHostConfigCandidate } from "../../../../../shared/types/remoteHost";
+import type { WslHostListItem } from "../../../../../shared/types/wslHost";
 
 /** 跳过原因是稳定枚举；这里显式映射而不是拼接 key，否则远端回来的任意字符串会拼出不存在的 key。 */
 function skipReasonLabel(reason: string): string {
@@ -37,9 +36,8 @@ type FormState = typeof EMPTY_FORM;
  * 「新建连接」面板。
  *
  * 结构照 ZCode 的远程配置面板：**类型切换 + 实时目标预览 + 表单 + 从 SSH config 导入**。
- * SSH 是本面板真正创建的对象；WSL 不是一个可选连接类型，而是 PiDeck 已有的本机环境模式
- * （设置 → 开发 → WSL），因此 WSL 页只解释差异并提供深链，不假装能在这里登记主机。
- * Docker 目前没有任何后端，显示为 disabled 并说明，而不是给一个点进去必然失败的入口。
+ * SSH 与 WSL 都在这里创建：SSH 建远端主机（pin/TOFU），WSL 建本机档案（distro/user）。
+ * 两者信任模型不同，但入口与表单骨架共用；Docker 没有后端，保持 disabled 并说明。
  *
  * 认证只提供「自动（ssh-agent/默认密钥）」与「指定私钥」：底层 OpenSSH 调用固定
  * `BatchMode=yes` / `NumberOfPasswordPrompts=0`，密码与私钥口令都没有可用的传递通道，
@@ -48,9 +46,8 @@ type FormState = typeof EMPTY_FORM;
  * 保存仍是「一次动作」：主进程在同一次 add 里完成首次 host key 信任（TOFU）并落盘 pin，
  * 成功后由调用方立刻发起连接，没有第二步「核对指纹」。
  */
-export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId: string, label: string) => void }) {
-	const openSettings = useSetAtom(openSettingsAtom);
-	const [kind, setKind] = useState<ConnectionKind>("ssh");
+export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId: string, label: string) => void; onWslSubmitted?: (host: WslHostListItem) => void; initialKind?: ConnectionKind }) {
+	const [kind, setKind] = useState<ConnectionKind>(props.initialKind ?? "ssh");
 	const [candidates, setCandidates] = useState<RemoteHostConfigCandidate[]>([]);
 	const [skipped, setSkipped] = useState<{ alias: string; reason: string }[]>([]);
 	const [currentUser, setCurrentUser] = useState("");
@@ -60,6 +57,10 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 	const [form, setForm] = useState<FormState>(EMPTY_FORM);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	// WSL 档案：只保存显示名/发行版/Linux 用户，目录在「添加项目」时选。
+	const [wsl, setWsl] = useState({ label: "", distro: "", user: "" });
+	const [wslBusy, setWslBusy] = useState(false);
+	const [wslError, setWslError] = useState<string | null>(null);
 
 	useEffect(() => {
 		let active = true;
@@ -138,14 +139,28 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 	const previewPort = form.port.trim() || "22";
 	const preview = kind === "wsl" ? t("settings.connections.add.wsl.preview") : previewHost.length === 0 ? t("settings.connections.add.previewPlaceholder") : `${previewUser.length > 0 ? `${previewUser}@` : ""}${previewHost}:${previewPort}`;
 	const kindLabel = kind === "ssh" ? t("settings.connections.add.kind.ssh") : t("settings.connections.add.kind.wsl");
-	// WSL 只有 Windows 宿主才有：其它平台不渲染这一页，避免深链到不存在的设置分区（与 ZCode buildAvailableKinds 同判据）。
+	// WSL 只有 Windows 宿主才有：其它平台不渲染这一页（与 ZCode buildAvailableKinds 同判据）。
 	const wslSupported = detectRendererPlatform() === "win32";
 
-	/** WSL 是本地环境而不是远端主机：这里只负责把用户送到真正能配置它的地方。 */
-	const openWslSettings = useCallback(() => {
-		props.onClose();
-		openSettings({ tab: "dev" });
-	}, [openSettings, props]);
+	/** 创建 WSL 档案：主进程只写本机清单，不启动 wsl.exe；引用保护在移除时生效。 */
+	const submitWsl = useCallback(async () => {
+		const label = wsl.label.trim();
+		const distro = wsl.distro.trim();
+		const user = wsl.user.trim();
+		if (label.length === 0 || !/^[A-Za-z0-9._-]{1,64}$/u.test(distro) || !/^[A-Za-z_][A-Za-z0-9._-]{0,31}$/u.test(user)) {
+			setWslError(t("settings.connections.add.wsl.invalid"));
+			return;
+		}
+		setWslBusy(true);
+		setWslError(null);
+		try {
+			const result = await desktopApi.remoteHosts.addWslHost({ label, distro, user });
+			if (result.ok) props.onWslSubmitted?.(result.host);
+			else setWslError(t("settings.connections.add.wsl.failed", { code: result.code }));
+		} finally {
+			setWslBusy(false);
+		}
+	}, [props, wsl]);
 
 	return (
 		<Dialog
@@ -163,7 +178,7 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 					<DialogDescription className={cn("break-all font-mono text-label", kind === "ssh" && previewHost.length > 0 ? "text-foreground" : "text-muted-foreground")}>{preview}</DialogDescription>
 				</DialogHeader>
 
-				{/* 类型切换：SSH 在这里创建；WSL 指向本机环境设置；Docker 还没有后端。 */}
+				{/* 类型切换：SSH 建远端主机，WSL 建本机档案；Docker 还没有后端。 */}
 				<div className="flex flex-wrap items-center justify-between gap-2">
 					<div role="group" aria-label={t("settings.connections.add.typeLabel")} className="flex w-fit overflow-hidden rounded-lg border border-input">
 						<button type="button" aria-pressed={kind === "ssh"} className={cn("inline-flex min-h-8 items-center gap-1.5 px-3 text-body", kind === "ssh" ? "bg-accent font-medium text-accent-foreground" : "text-muted-foreground hover:bg-bg-hover")} onClick={() => setKind("ssh")}>
@@ -198,12 +213,23 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 				</div>
 
 				{kind === "wsl" ? (
-					<div className="flex flex-col gap-2 rounded-lg border border-border-subtle bg-bg-panel p-3">
-						<p className="text-body text-foreground">{t("settings.connections.add.wsl.hint")}</p>
-						<p className="text-label text-muted-foreground">{t("settings.connections.add.wsl.steps")}</p>
-						<Button type="button" size="sm" className="self-start" onClick={openWslSettings}>
-							{t("settings.connections.add.wsl.openSettings")}
-						</Button>
+					<div className="flex flex-col gap-3">
+						<p className="text-label text-muted-foreground">{t("settings.connections.add.wsl.hint")}</p>
+						<div className="flex flex-col gap-1">
+							<Label htmlFor="wsl-host-label">{t("settings.connections.add.wsl.label")}</Label>
+							<Input id="wsl-host-label" value={wsl.label} onChange={(event) => setWsl((current) => ({ ...current, label: event.target.value }))} />
+						</div>
+						<div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
+							<div className="flex min-w-0 flex-col gap-1">
+								<Label htmlFor="wsl-host-distro">{t("settings.connections.add.wsl.distro")}</Label>
+								<Input id="wsl-host-distro" placeholder="Ubuntu" value={wsl.distro} onChange={(event) => setWsl((current) => ({ ...current, distro: event.target.value }))} />
+							</div>
+							<div className="flex min-w-0 flex-col gap-1">
+								<Label htmlFor="wsl-host-user">{t("settings.connections.add.wsl.user")}</Label>
+								<Input id="wsl-host-user" autoComplete="off" spellCheck={false} placeholder="dev" value={wsl.user} onChange={(event) => setWsl((current) => ({ ...current, user: event.target.value }))} />
+							</div>
+						</div>
+						{wslError !== null ? <p className="text-label text-destructive">{wslError}</p> : null}
 					</div>
 				) : (
 					<>
@@ -307,7 +333,11 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 							<Button disabled={busy} onClick={() => void submit()}>
 								{t("settings.connections.add.submitConnect")}
 							</Button>
-						) : null}
+						) : (
+							<Button disabled={wslBusy} onClick={() => void submitWsl()}>
+								{t("settings.connections.add.wsl.submit")}
+							</Button>
+						)}
 					</div>
 				</DialogFooter>
 			</DialogContent>

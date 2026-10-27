@@ -16,9 +16,10 @@ test("empty connections state is an actionable card", () => {
 	assert.match(tab, /\{hosts\.length > 0 \? \(\s*<Button variant="default" size="sm" onClick=\{\(\) => setAdding\(true\)\}>/);
 });
 
-test("WSL in the add dialog is a real deep link, not a fake host tab", () => {
-	assert.match(dialog, /openSettings\(\{ tab: "dev" \}\)/);
+test("WSL in the add dialog creates a profile instead of deep-linking", () => {
+	assert.match(dialog, /addWslHost\(\{ label, distro, user \}\)/);
 	assert.match(dialog, /kind === "wsl" \? \(/);
+	assert.match(dialog, /id="wsl-host-distro"/);
 	// WSL 页不再渲染 SSH 表单或提交按钮。
 	assert.match(dialog, /\{kind === "ssh" \? \(\s*<Button disabled=\{busy\} onClick=\{\(\) => void submit\(\)\}>/);
 });

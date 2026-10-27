@@ -26,15 +26,15 @@ test("SSH config import fills the form instead of submitting silently", () => {
 	assert.match(dialog, /settings\.connections\.add\.skipped/);
 });
 
-test("WSL routes to the existing local-environment setting; Docker stays unavailable", () => {
-	// WSL 不是远端主机：入口真实存在，但落地是「设置 → 开发」里的发行版/用户配置。
+	test("WSL is created here as a real profile; Docker stays unavailable", () => {
+	// WSL 页现在是真实的档案创建表单（不再深链到开发设置）。
 	assert.match(dialog, /onClick=\{\(\) => setKind\("wsl"\)\}/);
-	// 只有 Windows 才展示 WSL 页（其它平台没有这个设置分区）。
+	// 只有 Windows 才展示 WSL 页。
 	assert.match(dialog, /const wslSupported = detectRendererPlatform\(\) === "win32"/);
 	assert.match(dialog, /\{wslSupported \? \(/);
-	assert.match(dialog, /openSettings\(\{ tab: "dev" \}\)/);
-	assert.match(dialog, /add\.wsl\.hint/);
-	assert.match(dialog, /add\.wsl\.openSettings/);
+	assert.match(dialog, /addWslHost\(\{ label, distro, user \}\)/);
+	assert.match(dialog, /initialKind\?: ConnectionKind/);
+	assert.match(dialog, /add\.wsl\.invalid/);
 	// 只有 Docker 仍然 disabled（没有任何后端）。
 	assert.equal((dialog.match(/aria-pressed="false"\s+disabled/g) ?? []).length, 1);
 });
