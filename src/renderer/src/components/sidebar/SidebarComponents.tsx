@@ -44,7 +44,7 @@ import { t } from "../../i18n";
 import { copyTextWithCopiedNotice } from "../../utils/clipboardNotice";
 import { canRunSessionAction, type SessionReloadMode, type SessionRunAction, type SessionRunCapabilities } from "../../utils/sessionCommands";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui-shadcn/alert-dialog";
-import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
 import { X } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
@@ -259,11 +259,9 @@ export function SessionManagerModal(props: {
 						<small className="text-muted-foreground">
 							{filteredSessions.length} / {props.sessions.length} sessions
 						</small>
-						<DialogClose asChild>
-							<Button variant="ghost" size="icon" aria-label={t("common.close")} title={t("common.close")}>
-								<X size={18} strokeWidth={2.2} aria-hidden="true" />
-							</Button>
-						</DialogClose>
+						<Button variant="ghost" size="icon" aria-label={t("common.close")} title={t("common.close")} data-testid="session-manager-close" onClick={props.onClose}>
+							<X size={18} strokeWidth={2.2} aria-hidden="true" />
+						</Button>
 					</div>
 				</DialogHeader>
 				<div className="flex min-h-0 flex-1 flex-col overflow-hidden border-none bg-transparent shadow-none">
