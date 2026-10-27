@@ -24,12 +24,31 @@ export const LARGE_RPC_LINE_PARSE_CHARS = LARGE_NDJSON_LINE_PARSE_CHARS;
 /** 单行缓冲硬上限：无 LF 的失控输出（启动脚本打印二进制/死循环刷屏）会让行缓冲无界增长。（共享护栏见 ndjsonLineGuards） */
 export const MAX_RPC_LINE_BYTES = MAX_NDJSON_LINE_BYTES;
 
+/** 溢出诊断只看帧头这么多字节：够认出 type/command/id，又不把 base64 正文抄进日志。 */
+const OVERFLOW_HEAD_BYTES = 4096;
+
+/** 帧头里可安全回显的标识字段（响应带 type/command，事件带 type，ACP 风格帧带 method/id）。 */
+const FRAME_HEAD_FIELDS = /"(type|command|method|id)"\s*:\s*"([^"\\]{1,48})"/g;
+
+/** 从超长帧的头部字节里取出标识字段，只用于日志定位是哪一类消息把帧撑爆。 */
+function describeFrameHead(head: string): string {
+	const seen = new Set<string>();
+	const fields: string[] = [];
+	for (const match of head.matchAll(FRAME_HEAD_FIELDS)) {
+		if (seen.has(match[1])) continue;
+		seen.add(match[1]);
+		fields.push(`${match[1]}=${match[2]}`);
+	}
+	return fields.length > 0 ? ` (frame: ${fields.join(" ")})` : "";
+}
+
 export class PiRpcClient extends EventEmitter {
 	/**
 	 * 行泵（Buffer 分段版，2027-02 性能治理）：字符串版 `buffer += chunk` 后立即
 	 * indexOf("\n") 会让每个 data 事件对已累积全长做一次扁平化拷贝——pi 的大
-	 * tool_result / get_entries 帧（上限 8MiB）按 64KB chunk 就是百余次全长拷贝。
-	 * 溢出语义不变：剩余未成行缓冲超过 MAX_RPC_LINE_BYTES 仍按协议错误丢弃上报。
+	 * tool_result / get_entries 帧（上限 32MiB）按 64KB chunk 就是百余次全长拷贝。
+	 * 溢出语义：剩余未成行缓冲超过 MAX_RPC_LINE_BYTES 时丢当前帧并从下一个 LF 重新对齐
+	 * （只清缓冲会让其后所有帧错位，请求/响应配对永久失配）。
 	 */
 	private readonly linePump = createNdjsonLinePump((line) => {
 		this.handleLine(line);
@@ -117,14 +136,15 @@ export class PiRpcClient extends EventEmitter {
 
 	private consumeChunk(chunk: Buffer | string) {
 		// 先切行再判剩余未成行缓冲（完整合法行不受残端失控影响）；
-		// 剩余超上限 = stdout 已被无换行的失控输出污染，继续累积只会 OOM——
-		// 丢弃整段缓冲并按协议错误上报（AgentManager 会转 agentsLog + appLogger），
-		// 进程随后由启动失败/退出路径回收。
+		// 剩余超上限 = 这一帧本身就超过上限（图片 base64 撑大）或 stdout 被无换行的
+		// 失控输出污染。两种情况下都只能丢这一帧，但**必须对齐到下一个 LF**：只清空
+		// 缓冲会把超长帧的尾巴当成下一帧起始，其后所有帧边界全错位（图片会话曾因此
+		// 每天出现「发得出去、收不回来」，只能重开会话）。
 		this.linePump.push(chunk);
-		if (!this.closed && this.linePump.bufferedBytes > MAX_RPC_LINE_BYTES) {
-			const droppedBytes = this.linePump.reset();
-			this.emit("protocol-error", `rpc line buffer overflow: dropped ${droppedBytes} bytes without newline`);
-		}
+		if (this.closed || this.linePump.bufferedBytes <= MAX_RPC_LINE_BYTES) return;
+		const head = this.linePump.peekHead(OVERFLOW_HEAD_BYTES);
+		const droppedBytes = this.linePump.discardUntilNewline();
+		this.emit("protocol-error", `rpc line buffer overflow: dropped ${droppedBytes} bytes without newline${describeFrameHead(head)}; re-aligning at next line break`);
 	}
 
 	private consumeEnd() {

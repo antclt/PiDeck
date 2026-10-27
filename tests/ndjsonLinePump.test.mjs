@@ -65,3 +65,42 @@ test("end() 把残行作为最后一行吐出；reset() 返回丢弃字节数并
 	pump.end();
 	assert.equal(lines.length, 1, "reset 后 end 无残行可吐");
 });
+
+test("discardUntilNewline 丢超长帧后从下一个 LF 重新对齐（不把尾巴当新帧起始）", () => {
+	const lines = [];
+	const pump = createNdjsonLinePump((line) => lines.push(line));
+	pump.push(Buffer.from('{"type":"response","data":"', "utf8"));
+	assert.match(pump.peekHead(64), /^\{"type":"response"/, "peekHead 取到未成行缓冲的开头");
+	assert.equal(pump.discardUntilNewline(), 27, "返回本次丢弃的字节数");
+	assert.equal(pump.bufferedBytes, 0, "丢弃后缓冲清零");
+	assert.equal(pump.discarding, true, "进入重新对齐状态");
+
+	// 超长帧的尾巴里即使看着像合法帧也不派发：这一行还没结束
+	pump.push(Buffer.from('{"id":"tail-of-oversized"}', "utf8"));
+	assert.deepEqual(lines, []);
+	assert.equal(pump.bufferedBytes, 0, "丢弃期间缓冲不增长");
+
+	// LF 结束超长帧，它之后的字节才是下一帧的起始
+	pump.push(Buffer.from('\n{"id":"next"}\n{"id":"third"}\n', "utf8"));
+	assert.equal(pump.discarding, false);
+	assert.deepEqual(lines, ['{"id":"next"}', '{"id":"third"}']);
+
+	// EOF 发生在超长帧中途：残端不得当作一行吐出
+	pump.push(Buffer.from("another-oversized", "utf8"));
+	pump.discardUntilNewline();
+	pump.push(Buffer.from("tail-without-lf", "utf8"));
+	pump.end();
+	assert.deepEqual(lines, ['{"id":"next"}', '{"id":"third"}']);
+	assert.equal(pump.discarding, false);
+});
+
+test("peekHead 跨多个块拼接，且不吐超过上限的字节", () => {
+	const pump = createNdjsonLinePump((line) => {
+		throw new Error(`不应派发: ${line}`);
+	});
+	pump.push(Buffer.from("ab", "utf8"));
+	pump.push(Buffer.from("cdef", "utf8"));
+	assert.equal(pump.peekHead(3), "abc");
+	assert.equal(pump.peekHead(64), "abcdef");
+	assert.equal(pump.peekHead(0), "");
+});
