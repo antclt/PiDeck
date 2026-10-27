@@ -74,7 +74,8 @@ test("菜单只挂文件链接，且无可解析路径时不弹", () => {
 // （useExternalPathOpenGate）决定直开 / 二次确认 / 拒绝；右键菜单里的系统动作（默认方式打开 /
 // 在资源管理器中打开）走同一道门，项目内仍按项目边界直连主进程。
 test("项目外路径：菜单系统动作也过安全等级门，项目内仍带项目 scope", () => {
-	assert.match(linkSource, /const\s+externalPath\s*=[\s\S]{0,200}?resolveFileLinkPath\(fileLinkPath,\s*baseDir\)/);
+	// issue #426：项目外词法解析同样先展开 `~`（否则菜单里的系统动作拿到的是字面 `~/…`）
+	assert.match(linkSource, /const\s+externalPath\s*=[\s\S]{0,200}?resolveFileLinkPath\(fileLinkPath,\s*baseDir,\s*undefined,\s*getRendererHomeDir\(\)\)/);
 	assert.match(linkSource, /const\s+menuPath\s*=\s*resolvedPath\s*\?\?\s*externalPath;/);
 	// 门实例挂在链接自己身上（右键菜单本来就是本组件的局部状态），与 App 侧共用同一套判定函数
 	assert.match(linkSource, /const\s*\{\s*requestExternalPathOpen,\s*dialog:\s*externalPathOpenDialog\s*\}\s*=\s*useExternalPathOpenGate\(\)/);
