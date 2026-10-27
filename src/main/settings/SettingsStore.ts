@@ -506,7 +506,8 @@ export class SettingsStore {
 		if (persisted === null) {
 			this.settings = { ...defaultSettings };
 		} else {
-			const parsed = persisted;
+			const parsed = persisted.settings;
+			this.loadedJson = persisted.text;
 			this.settings = {
 				...defaultSettings,
 				...parsed,
@@ -692,16 +693,17 @@ export class SettingsStore {
 	 * 读主 settings.json；解析失败（撕裂写/外部改坏）时回退 .bak，两者都不可用返回 null。
 	 * 只负责读与解析，不做任何规范化——normalize 逻辑保持在 load() 单一位置。
 	 */
-	private async readPersistedSettings(): Promise<Partial<AppSettings> | null> {
-		try {
-			return JSON.parse(await readFile(this.filePath, "utf8")) as Partial<AppSettings>;
-		} catch {
+	/** 读盘结果附带原文 text：writeAtomic 的外部合并（#433）需要「本次启动读到的原文」作对比基准。 */
+	private async readPersistedSettings(): Promise<{ settings: Partial<AppSettings>; text: string } | null> {
+		for (const path of [this.filePath, `${this.filePath}.bak`]) {
 			try {
-				return JSON.parse(await readFile(`${this.filePath}.bak`, "utf8")) as Partial<AppSettings>;
+				const text = await readFile(path, "utf8");
+				return { settings: JSON.parse(text) as Partial<AppSettings>, text };
 			} catch {
-				return null;
+				// 主文件缺失/损坏 → 试 .bak（与既有兜底顺序一致），两份都不可用才返回 null
 			}
 		}
+		return null;
 	}
 
 	/**
@@ -1237,12 +1239,15 @@ export class SettingsStore {
 	/** 上次成功落盘的序列化内容：.bak 只在内容真正变化时复制（去重高频写）。 */
 	private lastPersistedJson: string | null = null;
 
+	/** 本次启动 load() 读到的磁盘原文：外部合并（#433）的对比基准（首写前 lastPersistedJson 为 null 时使用）。 */
+	private loadedJson: string | null = null;
+
 	private async writeAtomic(): Promise<void> {
 		await mkdir(app.getPath("userData"), { recursive: true });
 		// showThinking 由 pi agent 的 hideThinkingBlock 决定，不持久化到桌面 settings.json
 		const { showThinking: _unused, ...persistable } = this.settings;
 		const tmpPath = `${this.filePath}.tmp`;
-		const json = JSON.stringify(persistable, null, 2);
+		const json = await this.resolveJsonToPersist(persistable);
 		await writeFile(tmpPath, json, "utf8");
 		// .bak 降频（2027-02 性能审计）：备份的语义是「上一次不同的好版本」——内容与上次
 		// 落盘一致时复制是纯浪费（原先每次 update 都 copyFile，3×写放大的三分之一）。
@@ -1251,6 +1256,38 @@ export class SettingsStore {
 		}
 		await renameWithRetry(tmpPath, this.filePath);
 		this.lastPersistedJson = json;
+	}
+
+	/**
+	 * 计算本次应落盘的 JSON（#433 外部合并）：deck 运行期间用户可能手改 settings.json
+	 * （如按 release notes 加 acpPromptTurnTimeoutMs），而任何一次内部 update（版本通知、
+	 * 面板宽度等）都会触发全量写盘，把外部修改整体抹掉且无任何提示。
+	 * 磁盘内容与基准（上次自写 / 本次启动读取）一致 → 原样全量写（快路径）；
+	 * 不一致 → 以磁盘为基底做顶层键级合并：只把程序真正变更过的键盖回去（活跃编辑者优先），
+	 * 程序删除的键随删，外部新增/修改且程序未碰的键原样保留。
+	 * 外部文件损坏时退回内存覆盖（load 已有 .bak 兜底，坏文件没有合并价值）。
+	 */
+	private async resolveJsonToPersist(persistable: Omit<AppSettings, "showThinking">): Promise<string> {
+		const baseline = this.lastPersistedJson ?? this.loadedJson;
+		if (baseline === null) return JSON.stringify(persistable, null, 2);
+		const diskText = await readFile(this.filePath, "utf8").catch(() => null);
+		if (diskText === null || diskText === baseline) return JSON.stringify(persistable, null, 2);
+		try {
+			const disk = JSON.parse(diskText) as Record<string, unknown>;
+			const fromBaseline = JSON.parse(baseline) as Record<string, unknown>;
+			const memory = persistable as unknown as Record<string, unknown>;
+			const merged: Record<string, unknown> = { ...disk };
+			for (const [key, value] of Object.entries(memory)) {
+				if (JSON.stringify(value) !== JSON.stringify(fromBaseline[key])) merged[key] = value;
+			}
+			for (const key of Object.keys(fromBaseline)) {
+				if (!(key in memory)) delete merged[key];
+			}
+			delete merged.showThinking;
+			return JSON.stringify(merged, null, 2);
+		} catch {
+			return JSON.stringify(persistable, null, 2);
+		}
 	}
 
 	/**
