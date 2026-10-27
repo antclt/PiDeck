@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useAtomValue } from "jotai";
 import { detectRendererPlatform } from "../../lib/detectRendererPlatform";
 import { appDisplayNameAtom } from "../../atoms/app-ui-atoms";
+import { setRendererHomeDir } from "../../utils/rendererHomeDir";
 import { composeAppTitle } from "../../../../shared/appTitle";
 import type { AppInfo } from "../../../../shared/types";
 
@@ -31,6 +32,11 @@ export function useAppBootstrapInfo(api: AppInfoApi): { appInfo: AppInfo; system
 	const [systemLanguage, setSystemLanguage] = useState<string | null>(null);
 	// 应用显示名称（设置里的品牌名）由 App.tsx 写入 atom，改了要即时反映到标题
 	const displayName = useAtomValue(appDisplayNameAtom);
+
+	// issue #426：文件链接要能展开 `~` 就必须在渲染层知道家目录，而解析函数是渲染期同步调用的纯函数。
+	// 故意写在渲染期而非 useEffect：appInfo 到达触发的那一次渲染里，解析链接的子组件必须已经能读到
+	// 家目录，否则要等下一次无关的状态更新 `~` 才生效。写入是幂等的模块级缓存（开发态双渲染也无害）。
+	setRendererHomeDir(appInfo.homeDir);
 
 	useEffect(() => {
 		void api.app

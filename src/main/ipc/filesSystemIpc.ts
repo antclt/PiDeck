@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { FileManagerInfo } from "../../shared/types/project";
 import { ipcChannels } from "../../shared/ipc";
 import { detectFileManager, openFileManagerAt } from "../files/FileManager";
+import { expandHomeForFileAccess } from "../fs/homePathExpansion";
 import { openSystemPath } from "../fs/openPath";
 import type { SettingsStore } from "../settings/SettingsStore";
 import { parseWslUncPath, toWindowsHostPath } from "../wsl/WslPaths";
@@ -42,7 +43,8 @@ export function registerFilesSystemIpc({ settingsStore, openExternalUrl }: Files
 
 	ipcMain.handle(ipcChannels.filesOpenFileManager, async (_event, path: unknown) => {
 		if (typeof path !== "string" || path.length > 32_768) throw new Error("Invalid file manager path");
-		const target = path.trim() ? toWindowsPath(path) : homedir();
+		// issue #426：`~/x` 形态先展开家目录（WSL 会话用发行版内 home），再转宿主路径。
+		const target = path.trim() ? toWindowsPath(expandHomeForFileAccess(path, settingsStore.get())) : homedir();
 		if (process.platform !== "linux") {
 			// 走受保护的统一入口：Linux 上 Electron 的 shell.openPath 永不 settle（issue #396）。
 			const error = await openSystemPath(target);

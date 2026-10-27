@@ -1,5 +1,5 @@
 /**
- * AI 回复中裸文件路径的「识别 + 解析」纯函数模块（零依赖，可被 node:test 直接导入）。
+ * AI 回复中裸文件路径的「识别 + 解析」纯函数模块（仅依赖 shared/homePath 的纯函数，可被 node:test 直接导入）。
  *
  * 背景：remarkLinkifyPaths 把回复里的裸路径渲染成 file:// 链接，但模型提到的
  * 路径经常不存在（幻觉、跨项目绝对路径、文件已删/已移动），点击后主进程
@@ -14,6 +14,7 @@
  * `N/A` 无法区分）、斜杠列表（`A/B/C/`、`他/她/`、中文散文里的 `降分辨率/抽帧`，
  * 判据见 isTrailingSlashDirCandidate）。
  */
+import { expandHomePath } from "../../../shared/homePath.ts";
 
 /** 裸文件路径识别正则：
  * - 前缀支持盘符（大小写）、~ 家目录缩写、./ …、POSIX 根与「段段/」形式
@@ -406,22 +407,25 @@ export function relativeFilePathWithinRoot(target: string, root: string): string
  * 相对路径按 basePath 解析，并可选收敛到 projectRoot。
  *
  * - `.`/`..` 在渲染层先做词法规范化，避免同一文件产生多个缓存键；
+ * - `~`/`~/x` 在边界判断**之前**按 homeDir 展开（issue #426）：展开后才能正确判断
+ *   「项目内 / 项目外」，拿到的也是可直接 stat 的绝对路径。homeDir 未知时保留旧行为（不展开）；
  * - 指定 projectRoot 时，绝对路径和相对路径都必须落在项目内，否则返回 null；
- * - 主进程仍会按 ProjectStore 根目录 + realpath 再校验，渲染层判断只负责尽早拒绝和改善提示；
- * - `~` 保持用户家目录语义；在有 projectRoot 的会话入口中通常会因越界而被拒绝。
+ * - 主进程仍会按 ProjectStore 根目录 + realpath 再校验，渲染层判断只负责尽早拒绝和改善提示。
  */
-export function resolveFileLinkPath(path: string, basePath?: string, projectRoot?: string): string | null {
+export function resolveFileLinkPath(path: string, basePath?: string, projectRoot?: string, homeDir?: string): string | null {
 	const normalized = normalizeFileLinkPath(path);
 	if (!normalized) return null;
+	// 展开后 `~` 形态不复存在（除非 homeDir 未知），后续不再需要特殊分支。
+	const expanded = expandHomePath(normalized, homeDir);
 
 	let resolved: string;
-	if (isAbsoluteFilePath(normalized)) {
-		resolved = normalizeLexicalFilePath(normalized);
+	if (isAbsoluteFilePath(expanded)) {
+		resolved = normalizeLexicalFilePath(expanded);
 	} else {
 		if (!basePath) return null;
 		const windowsStyle = usesWindowsPathSyntax(basePath);
 		const separator = windowsStyle ? "\\" : "/";
-		resolved = normalizeLexicalFilePath(`${basePath.replace(/[\\/]+$/, "")}${separator}${normalized.replace(/^[\\/]+/, "")}`, windowsStyle);
+		resolved = normalizeLexicalFilePath(`${basePath.replace(/[\\/]+$/, "")}${separator}${expanded.replace(/^[\\/]+/, "")}`, windowsStyle);
 	}
 
 	if (projectRoot) {
