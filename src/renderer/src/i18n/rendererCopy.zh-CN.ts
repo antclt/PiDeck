@@ -3409,7 +3409,7 @@ export const zhCN = {
 	"config.builtInExtDesc.pi-deck-model-trace": "模型请求快照：把 Pi 实际发给供应商的请求体（系统提示词/上下文消息/工具表）记入 RPC 日志的「模型」视图，排查「模型到底收到了什么」；快照只存本机，超限自动截断。",
 	"config.builtInExtDesc.pi-deck-nul-redirect-fix": "NUL 重定向修复：bash 执行前把「> nul」等 Windows 重定向改写为 /dev/null，避免 Git Bash 产生删不掉的 nul 文件。",
 	"config.builtInExtDesc.pi-deck-plan-mode": "计划模式：先以只读工具集产出编号计划，经你选择执行/停留/修改后再恢复写工具，[DONE:n] 标记驱动进度展示。",
-	"config.builtInExtDesc.pi-deck-retry-no-body": "瞬态错误重试增强：识别网关空响应、中文「服务暂时不可用」、stream_read_error、Cloudflare Tunnel 530 等 Pi 重试名单外的瞬态故障并改写，触发自动重试。",
+	"config.builtInExtDesc.pi-deck-retry-no-body": "瞬态错误重试增强：识别网关空响应、中文「服务暂时不可用」、过载/限流、stream_read_error、Cloudflare Tunnel 530 等重试名单外的瞬态故障并改写，触发自动重试。",
 	"config.builtInExtDesc.pi-deck-security-gate": "安全门：按会话安全等级策略拦截工具调用——危险 bash 命令弹窗确认或直接拒绝；策略快照热更新，无需重启。",
 	"config.builtInExtDesc.pi-deck-session-title": "会话标题生成：首轮结束后用独立最小上下文异步生成简短标题，不修改主对话与会话记录。",
 	"config.builtInExtDesc.pi-deck-subagents": "子代理状态桥接：订阅 pi-subagents / acp_delegate 委托链的生命周期事件，把各子代理的运行状态与结果快照推给桌面端子代理面板展示（本身不派发子代理）。",

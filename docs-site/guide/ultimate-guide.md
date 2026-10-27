@@ -404,7 +404,7 @@ PiDeck 内置了基于 Git 专有引用的轻量快照系统（移植自 `pi-rew
 7. **pi-deck-vision.ts（视觉桥）**：
    - 当使用不支持图片的代码模型（如 DeepSeek）时，在后台静默调用轻量视觉模型将图片转为高精度技术描述文字无缝注入，让纯文本模型也能看懂页面截图。
 8. **pi-deck-retry-no-body.ts（瞬态报错智能重试）**：
-   - 中转网关偶发返回的 `400 (no body)`、中文 `模型服务暂时不可用`、`stream_read_error`，以及 Cloudflare 隧道回源故障（`530: {... The host is configured as a Cloudflare Tunnel, but Cloudflare is currently unable to reach it.}`、520-527 等边缘层 5xx）会被原生 pi 误认为不可重试。本扩展改写错误标识，触发 pi 内置的指数退避自动重试，防止任务夭折。
+   - 中转网关偶发返回的 `400 (no body)`、中文 `模型服务暂时不可用`/`您的账户已达到速率限制`、英文 `server_is_overloaded`/`Service temporarily unavailable`、`stream_read_error`，以及 Cloudflare 隧道回源故障（`530: {... The host is configured as a Cloudflare Tunnel, but Cloudflare is currently unable to reach it.}`、520-527 等边缘层 5xx）会被运行时误认为不可重试。本扩展改写错误标识（过载类标 `rate limit`、其余标 `connection error`），触发内置的指数退避自动重试，防止任务夭折。
 9. **pi-deck-request-size-recovery.ts（413 超长请求救援）**：
    - 当会话太长撞上网关 `413 Payload Too Large` 导致连压缩请求都发不出去时，自动弹出救援框，引导临时切换到大窗口模型执行一次瘦身压缩。
 10. **pi-deck-session-title.ts（智能命名）**：

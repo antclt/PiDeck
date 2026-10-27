@@ -28,7 +28,9 @@ const UPDATE = process.argv.includes("--update");
 
 const SOURCE_READ = [/readFileSync\(\s*["'`]src\//, /readFileSync\(\s*`\$\{root\}/, /readFileSync\(\s*join\(\s*["'`]src\//];
 const SOURCE_ROOT_DECL = /\b(?:const|let)\s+\w*(?:root|Root|SRC|src)\w*\s*=\s*["'`]src\//;
-const RUNTIME_LOAD = [/loadTsCommonJs\(\s*["'`]src\//, /from\s+["'`]\.\.\/src\//, /await\s+import\(\s*["'`]\.\.\/src\//, /require\(\s*["'`]\.\.\/src\//];
+// 说明：`loadTsCommonJs(MODULE)`（路径先存常量再传入）同样是运行时加载真模块，
+// 但字面量正则识别不到，会被误判成 sourceOnly（changelogSections / rendererVirtualization 就是如此）。
+const RUNTIME_LOAD = [/loadTsCommonJs\(\s*["'`]src\//, /loadTsCommonJs\(\s*[A-Za-z_$][\w$]*\s*[,)]/, /from\s+["'`]\.\.\/src\//, /await\s+import\(\s*["'`]\.\.\/src\//, /require\(\s*["'`]\.\.\/src\//];
 
 function collectTests(dir, out = []) {
 	if (!existsSync(dir)) return out;
@@ -40,10 +42,21 @@ function collectTests(dir, out = []) {
 	return out;
 }
 
+/** `const loadTs = loadTsCommonJs;` 这类别名：别名调用也是运行时加载真模块。 */
+const LOAD_ALIAS = /\b(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*loadTsCommonJs\s*;/g;
+
+function hasRuntimeLoad(source) {
+	if (RUNTIME_LOAD.some((re) => re.test(source))) return true;
+	for (const match of source.matchAll(LOAD_ALIAS)) {
+		if (new RegExp(`\\b${match[1]}\\s*\\(`).test(source)) return true;
+	}
+	return false;
+}
+
 function isSourceOnly(source) {
 	const readsSource = SOURCE_READ.some((re) => re.test(source)) || (SOURCE_ROOT_DECL.test(source) && /readFileSync\(/.test(source));
 	if (!readsSource) return false;
-	return !RUNTIME_LOAD.some((re) => re.test(source));
+	return !hasRuntimeLoad(source);
 }
 
 const testFiles = collectTests(join(ROOT, "tests"));
