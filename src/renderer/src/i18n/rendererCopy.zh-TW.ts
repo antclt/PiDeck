@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 8c30c59c2595ef821fdc39d4b1390f43344059c6c140063a2579df907ba2f339（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 837fff9d9f078c911c992b5c5a736dc937c143eaee9cc7c1a6bbc19d3785d27c（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -2534,8 +2534,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.import.targetProjectAgentsSkills": "專案 .agents/skills",
 	"config.import.scanning": "正在掃描 Claude Code 和 Codex…",
 	"config.import.candidateCount": "發現 {count} 個候選項",
-	"config.import.selectAll": "全選可匯入項",
-	"config.import.clearAll": "清除選擇",
+	"config.import.selectedCount": "已選 {selected} / 可匯入 {total}",
+	"config.import.selectPage": "全選本頁",
+	"config.import.deselectPage": "取消本頁",
 	"config.import.sourceFound": "已找到",
 	"config.import.sourceMissing": "未找到",
 	"config.import.sourceClaudeGlobal": "Claude Code · 使用者級",

@@ -2,10 +2,12 @@ import { AlertTriangle, CheckCircle2, Download, Loader2, XCircle } from "lucide-
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/ui-shadcn/dialog";
 import { Button } from "../components/ui-shadcn/button";
 import { Checkbox } from "../components/ui-shadcn/checkbox";
+import { useRef } from "react";
+import { Pagination } from "../components/ui-shadcn/pagination";
 import { ConfigSelect } from "./ConfigShared";
 import { t } from "../i18n";
 import type { ResourceImportKind, ResourceImportReport, ResourceImportSourceKind } from "../../../shared/types/resourceImport";
-import { canImportResource, type ResourceImportProject, useResourceImportDialog } from "./useResourceImportDialog";
+import { canImportResource, RESOURCE_IMPORT_PAGE_SIZE, type ResourceImportProject, useResourceImportDialog } from "./useResourceImportDialog";
 
 function formatImportMessage(message: string): string {
 	const unsupported = /^Unsupported transport:\s*(.+)$/.exec(message);
@@ -122,6 +124,17 @@ export function ResourceImportDialog(props: {
 		onImported: props.onImported,
 	});
 
+	const listRef = useRef<HTMLDivElement | null>(null);
+
+	// 候选分页在展示层派生：页数随扫描结果收缩时收敛到最后一页，不改 hook 里保存的用户意图。
+	const importableCount = state.scan?.candidates.filter(canImportResource).length ?? 0;
+	const totalPages = Math.max(1, Math.ceil((state.scan?.candidates.length ?? 0) / RESOURCE_IMPORT_PAGE_SIZE));
+	const pageClamped = Math.min(state.page, totalPages);
+	const pageCandidates = (state.scan?.candidates ?? []).slice((pageClamped - 1) * RESOURCE_IMPORT_PAGE_SIZE, pageClamped * RESOURCE_IMPORT_PAGE_SIZE);
+	const pageSelectableCount = pageCandidates.filter(canImportResource).length;
+	const pageSelectedCount = pageCandidates.filter((candidate) => state.selected.has(candidate.candidateId)).length;
+	const allSelected = importableCount > 0 && state.selected.size >= importableCount;
+
 	return (
 		<>
 			<Button variant="outline" size="sm" onClick={state.openDialog} disabled={state.loading || state.applying}>
@@ -166,13 +179,25 @@ export function ResourceImportDialog(props: {
 							</div>
 						) : state.scan ? (
 							<>
-								<div className="flex items-center justify-between text-caption text-muted-foreground">
+								<div className="flex flex-wrap items-center justify-between gap-2 text-caption text-muted-foreground">
 									<span>{t("config.import.candidateCount", { count: state.scan.candidates.length })}</span>
-									<Button variant="ghost" size="sm" onClick={() => state.toggleAll(state.selected.size === 0)} disabled={state.applying}>
-										{state.selected.size === 0 ? t("config.import.selectAll") : t("config.import.clearAll")}
-									</Button>
+									<div className="flex items-center gap-1.5">
+										<span className="tabular-nums">{t("config.import.selectedCount", { selected: state.selected.size, total: importableCount })}</span>
+										{/* 全选/取消全选跨页生效；本页按钮只动当前页，避免在分页列表里误会 */}
+										<Button variant="ghost" size="sm" onClick={() => state.toggleAll(true)} disabled={state.applying || allSelected}>
+											{t("common.selectAll")}
+										</Button>
+										<Button variant="ghost" size="sm" onClick={() => state.toggleAll(false)} disabled={state.applying || state.selected.size === 0}>
+											{t("common.deselectAll")}
+										</Button>
+										{totalPages > 1 ? (
+											<Button variant="ghost" size="sm" onClick={() => state.togglePage(pageSelectedCount < pageSelectableCount, pageClamped)} disabled={state.applying || pageSelectableCount === 0}>
+												{pageSelectedCount > 0 && pageSelectedCount >= pageSelectableCount ? t("config.import.deselectPage") : t("config.import.selectPage")}
+											</Button>
+										) : null}
+									</div>
 								</div>
-								<div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+								<div ref={listRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
 									{state.scan.sources.map((source) => (
 										<div key={`${source.source}:${source.pathLabel}`} className="text-micro text-muted-foreground">
 											{sourceLabelFor(source.source)} · {source.pathLabel} · {source.exists ? t("config.import.sourceFound") : t("config.import.sourceMissing")}
@@ -182,7 +207,7 @@ export function ResourceImportDialog(props: {
 									{state.scan.candidates.length === 0 ? (
 										<div className="py-8 text-center text-control text-muted-foreground">{t("config.import.empty")}</div>
 									) : (
-										state.scan.candidates.map((candidate) => {
+										pageCandidates.map((candidate) => {
 											const disabled = !canImportResource(candidate);
 											return (
 												<div key={candidate.candidateId} className="rounded border border-border-subtle px-3 py-2">
@@ -222,6 +247,18 @@ export function ResourceImportDialog(props: {
 											);
 										})
 									)}
+									{totalPages > 1 ? (
+										// 页码点击/跳页后把当前页滚回列表顶部，否则从长列表底部翻页会直接落到新页中部
+										<Pagination
+											page={pageClamped}
+											totalPages={totalPages}
+											onPageChange={(next) => {
+												state.setPage(next);
+												listRef.current?.scrollTo({ top: 0 });
+											}}
+											className="py-2"
+										/>
+									) : null}
 								</div>
 							</>
 						) : null}
