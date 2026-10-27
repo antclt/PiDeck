@@ -12,6 +12,8 @@ export const ipcChannels = {
 	remoteHostAdd: "remote:add",
 	/** 移除一台主机：先停连接，再 disable + retire（引用检查由主进程执行）。 */
 	remoteHostRemove: "remote:remove",
+	/** 只读列目录（项目登记时的目录浏览器）：只返回目录名，不返回文件/内容。 */
+	remoteHostListDirs: "remote:list-dirs",
 	/** 主进程 → 渲染层：主机连接状态变化推送（connect 返回之后的迁移也在此到达）。 */
 	remoteHostStateChanged: "remote:state-changed",
 	/** 只读：诊断 needs-repair 的原因与合法动作（不写任何东西）。 */

@@ -52,6 +52,11 @@ export type RemoteHostConnectResult = { ok: true; hostId: string; state: RemoteH
  */
 export type RemoteHostRemoveResult = { ok: true; hostId: string } | RemoteHostOperationFailure;
 
+/** 目录浏览只返回目录名与是否符号链接；文件、大小与内容都不出主进程。 */
+export type RemoteDirectoryEntry = { name: string; isSymlink: boolean };
+
+export type RemoteDirectoryListResult = { ok: true; hostId: string; path: string; entries: RemoteDirectoryEntry[]; truncated: boolean } | RemoteHostOperationFailure;
+
 /** disconnect 的结果：成功或稳定码（主机 id 非法、功能未启用等）。 */
 export type RemoteHostDisconnectResult = { ok: true; hostId: string } | RemoteHostOperationFailure;
 

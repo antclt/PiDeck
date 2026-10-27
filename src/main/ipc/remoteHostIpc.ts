@@ -18,10 +18,12 @@ import type {
 	RemoteHostRepairFinding,
 	RemoteHostRepairRequest,
 	RemoteHostRepairRunResult,
+	RemoteDirectoryListResult,
 	RemoteHostRemoveResult,
 	RemoteHostRepairSummary,
 } from "../../shared/types/remoteHost";
 import { openRemoteHostStoreForRetire, type RemoteHostCatalogView } from "../remote/RemoteHostCatalogView";
+import { listRemoteDirectories } from "../remote/RemoteDirectoryListing";
 import { RemoteHostRepair, type HostRepairAction } from "../remote/RemoteHostRepair";
 import { PendingConfirmationBroker } from "../security/PendingConfirmationBroker";
 import type { RemoteHostConnectionService } from "../remote/RemoteHostConnectionService";
@@ -244,6 +246,20 @@ export function registerRemoteHostIpc(input: { enabled: boolean; list: () => Pro
 		} finally {
 			opened.dispose();
 		}
+	});
+
+	/**
+	 * 只读目录浏览（项目登记用）：`path` 缺省时从远端 `$HOME` 开始。
+	 * 走与 canonical 探测同一套 pinned ssh 调用，不经过 helper 的 `--root`，也不返回任何文件内容。
+	 */
+	ipcMain.handle(ipcChannels.remoteHostListDirs, async (_event, rawHostId: unknown, rawPath: unknown): Promise<RemoteDirectoryListResult> => {
+		const hostId = typeof rawHostId === "string" ? rawHostId : "";
+		if (!input.enabled) return { ok: false, hostId, code: "REMOTE_FEATURE_DISABLED" };
+		if (!HOST_ID.test(hostId)) return { ok: false, hostId, code: "REMOTE_HOST_ID_INVALID" };
+		if (rawPath !== undefined && typeof rawPath !== "string") return { ok: false, hostId, code: "REMOTE_LIST_DIRS_PATH_INVALID" };
+		const resolved = await resolveService();
+		if ("code" in resolved) return { ok: false, hostId, code: resolved.code };
+		return listRemoteDirectories({ userDataDir: input.userDataDir, hostId, client: resolved.service.client, ...(rawPath === undefined ? {} : { path: rawPath }) });
 	});
 
 	ipcMain.handle(ipcChannels.remoteHostsList, async (): Promise<RemoteHostListResult> => {

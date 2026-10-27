@@ -376,6 +376,8 @@ const api = {
 		add: (input: import("../shared/types/remoteHost").RemoteHostAddInput) => ipcRenderer.invoke(ipcChannels.remoteHostAdd, input) as Promise<import("../shared/types/remoteHost").RemoteHostAddResult>,
 		/** 移除连接：主进程先断开再退役 profile/pin；仍被项目引用时拒绝。 */
 		remove: (hostId: string) => ipcRenderer.invoke(ipcChannels.remoteHostRemove, hostId) as Promise<import("../shared/types/remoteHost").RemoteHostRemoveResult>,
+		/** 只读列目录：path 缺省从远端 home 开始；只返回目录名。 */
+		listDirs: (hostId: string, path?: string) => ipcRenderer.invoke(ipcChannels.remoteHostListDirs, hostId, path) as Promise<import("../shared/types/remoteHost").RemoteDirectoryListResult>,
 		/** 订阅连接状态推送；返回 unsubscribe，组件卸载必须退订。 */
 		onStateChange: (callback: (change: import("../shared/types/remoteHost").RemoteHostStateChange) => void) => subscribe(ipcChannels.remoteHostStateChanged, callback),
 		/** 只读：诊断 needs-repair 的原因与合法动作。 */

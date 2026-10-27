@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 2560f598bf5df373a841ca1208b6774f685dd3a9ccf4b5ef52afaf3cfd6bb811（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 4fd147492804bb7574dba3bcddba7dade86bd4350074eab755a3ba6b985e899e（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -6924,6 +6924,20 @@ export const zhTW: Record<TranslationKey, string> = {
 	"sidebar.remoteEnroll.modeExisting": "使用已有目錄",
 	"sidebar.remoteEnroll.modeCreate": "新建空目錄",
 	"sidebar.remoteEnroll.createHint": "輸入的路徑當前必須不存在；PiDeck 將建立一個空目錄並新增為專案（不會覆蓋、不會遞迴建立父目錄）。",
+	"sidebar.remoteEnroll.dirParent": "上一級",
+	"sidebar.remoteEnroll.dirCurrentPath": "當前目錄",
+	"sidebar.remoteEnroll.dirRefresh": "重新整理目錄",
+	"sidebar.remoteEnroll.dirShowHidden": "顯示隱藏目錄",
+	"sidebar.remoteEnroll.dirLoading": "正在讀取目錄…",
+	"sidebar.remoteEnroll.dirEmpty": "這裡沒有子目錄",
+	"sidebar.remoteEnroll.dirTruncated": "目錄過多，僅顯示前 300 個；可進入更具體的目錄繼續瀏覽。",
+	"sidebar.remoteEnroll.dirNotConnected": "主機未連線，請先在「設定 → 連線」連線。",
+	"sidebar.remoteEnroll.dirNotADirectory": "該路徑不是目錄。",
+	"sidebar.remoteEnroll.dirFailed": "讀取目錄失敗：{code}",
+	"sidebar.remoteEnroll.dirSymlink": "符號連結目錄",
+	"sidebar.remoteEnroll.leaf": "新目錄名",
+	"sidebar.remoteEnroll.leafPlaceholder": "例如 my-app",
+	"sidebar.remoteEnroll.badLeaf": "目錄名不能包含 / 或控制字元，也不能是 . 或 ..。",
 	"sidebar.remoteEnroll.createConfirmTitle": "新建空遠端專案目錄",
 	"sidebar.remoteEnroll.createConfirmBody": "將在主機「{host}」上建立目錄：{path}。建立後會複核 canonical 路徑並新增為專案。",
 	"sidebar.remoteEnroll.createExists": "該路徑已存在。請改用「使用已有目錄」，或換一個名字。",
