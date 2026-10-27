@@ -1,5 +1,5 @@
 import { expect, type Page, type TestInfo } from "@playwright/test";
-import { runRemoteCommand, remoteProjectRow, type RemoteAcceptanceCredentials } from "./remote-fixtures";
+import { dismissRemoteConnectionProgress, runRemoteCommand, remoteProjectRow, openRemoteProjectFiles, type RemoteAcceptanceCredentials } from "./remote-fixtures";
 import { historyEntries } from "./remoteHistoryAssertions";
 
 const INITIAL = "module.exports = { value: 1 };\n";
@@ -34,6 +34,7 @@ export async function verifyRemoteCodeEditing(input: { window: Page; credentials
 	const read = async () => (await runRemoteCommand(credentials, "cat -- '" + path + "'", 60_000)).stdout;
 	const mode = async () => (await runRemoteCommand(credentials, "stat -c '%a' -- '" + path + "'", 60_000)).stdout.trim();
 	const region = window.getByRole("region", { name: "远端文件编辑器" });
+	await openRemoteProjectFiles(window);
 	await window.getByRole("button", { name: "calc.cjs", exact: false }).click();
 	await expect(region.locator(".cm-content")).toContainText("value: 1", { timeout: timeoutMs });
 	await replaceEditor(window, REMOTE_EDITED_CODE);
@@ -92,6 +93,7 @@ export async function verifyRemoteCodeIsolation(window: Page, credentials: Remot
 		.locator(".conversation-title")
 		.first()
 		.click();
+	await openRemoteProjectFiles(window);
 	await window.getByRole("button", { name: "calc.cjs", exact: false }).click();
 	const region = window.getByRole("region", { name: "远端文件编辑器" });
 	await expect(region.locator(".cm-content")).toContainText("value: 101", { timeout: timeoutMs });
@@ -104,6 +106,7 @@ export async function verifyRemoteCodeIsolation(window: Page, credentials: Remot
 		.locator(".conversation-title")
 		.first()
 		.click();
+	await openRemoteProjectFiles(window);
 	await window.getByRole("button", { name: "calc.cjs", exact: false }).click();
 	await expect(region.locator(".cm-content")).toContainText("value: 2", { timeout: timeoutMs });
 	console.log("[remote-file-acceptance] twoProjectSameNameIsolation=true");
@@ -119,6 +122,7 @@ export async function verifyRemoteCodeDisconnect(window: Page, credentials: Remo
 	// 切项目会重建helper；连接页只保留最近一次显式操作的状态。先明确连接，再测试用户断开。
 	const connect = settings.getByRole("button", { name: "连接", exact: true }).first();
 	if (await connect.isVisible()) await connect.click();
+	await dismissRemoteConnectionProgress(window);
 	await expect(settings.getByRole("button", { name: "断开", exact: true }).first()).toBeVisible({ timeout: timeoutMs });
 	await settings.getByRole("button", { name: "断开", exact: true }).first().click();
 	await expect(settings.getByRole("button", { name: "连接", exact: true }).first()).toBeVisible({ timeout: timeoutMs });
@@ -131,6 +135,7 @@ export async function verifyRemoteCodeDisconnect(window: Page, credentials: Remo
 	await settings.getByRole("tab", { name: "连接", exact: true }).click();
 	await settings.getByRole("button", { name: "连接", exact: true }).first().click();
 	await expect(settings.getByText("已连接").first()).toBeVisible({ timeout: timeoutMs });
+	await dismissRemoteConnectionProgress(window);
 	await settings.getByRole("button", { name: "关闭" }).first().click();
 	await region.getByRole("button", { name: "重新加载文件", exact: true }).click();
 	await window.getByRole("dialog").filter({ hasText: "重新加载远端文件" }).getByRole("button", { name: "丢弃草稿并重新加载", exact: true }).click();

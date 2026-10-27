@@ -216,8 +216,10 @@ test.describe("远端主机功能级验收（真机）", () => {
 				await enrollRemoteProject(window, projectBPath);
 				await expect(projectRow(window, projectAName)).toBeVisible();
 				await expect(projectRow(window, projectBName)).toBeVisible();
-				// 登记成功后项目被选中：远端项目页面出现在中栏（这是「立即打开」的用户可见结果）。
-				await expect(window.getByText("远端项目", { exact: true })).toBeVisible({ timeout: timeouts.helperMs });
+				// 登记成功后项目被选中：空态直接是远端项目的输入页（59a1fb351 起文件浏览降为次级视图）。
+				// 旧断言等的是文件管理器标题「远端项目」，改版后该标题只在「浏览远端文件」后出现。
+				await expect(window.getByRole("combobox", { name: "选择要创建会话的项目" }), "中栏项目选择器必须切到新登记的远端项目").toContainText(projectBName, { timeout: timeouts.helperMs });
+				await expect(window.getByRole("button", { name: "浏览远端文件" }), "远端空态必须保留文件浏览次入口").toBeVisible();
 			});
 			await test.step("展开项目 A 行：远端会话 列表按主机只读列出夹具会话", async () => {
 				try {
@@ -311,6 +313,8 @@ test.describe("远端主机功能级验收（真机）", () => {
 				movedA = true;
 				// 选中 A 会读它的 root，从而在会话建立时复核 root → fail-closed，并把这个项目的状态记成 needs-attention。
 				await selectProject(window, projectAName);
+				// 空态默认是输入页：从次入口进入文件面板，才会触发列目录并按失效 root fail-closed。
+				await window.getByRole("button", { name: "浏览远端文件" }).click();
 				const failure = window.locator("p").filter({ hasText: "无法列出目录：" }).first();
 				await expect(failure, "失效的 root 必须 fail-closed，而不是列出别的目录").toBeVisible({ timeout: timeouts.helperMs });
 				const failureCode = ((await failure.textContent()) ?? "").replace("无法列出目录：", "").trim();
@@ -332,6 +336,7 @@ test.describe("远端主机功能级验收（真机）", () => {
 				expect(statusB, "B 仍应是 ok").toEqual({ ok: true, status: "ok" });
 				// B 仍能正常读取：选中 B，面板必须列出它的文件。
 				await selectProject(window, projectBName);
+				await window.getByRole("button", { name: "浏览远端文件" }).click();
 				await expect(window.getByText("hello-b.txt", { exact: true }), "B 必须仍能列出目录内容").toBeVisible({ timeout: timeouts.helperMs });
 			});
 		} finally {

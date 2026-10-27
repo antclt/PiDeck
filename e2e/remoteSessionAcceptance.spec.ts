@@ -24,6 +24,8 @@ import { initializeRemoteGitReposFixture, verifyRemoteGitRepos } from "./remote-
 import { verifyRemoteHistoryMutations } from "./remote-history-mutations";
 import {
 	REMOTE_ACCEPTANCE_ENV,
+	dismissRemoteToasts,
+	openSessionRunMenu,
 	REMOTE_APP_DATA_DIR_NAME,
 	createRemoteSessionInProject,
 	matchesRemoteFingerprint,
@@ -138,7 +140,7 @@ function readLatestPlanArgs(userDataRoot: string): string {
 
 /** 会话 Tab 栏右上角的 ⋯ 菜单（运行控制组：启动/重启、停止回答、重新加载、关闭 Agent 都在这里）。 */
 async function openTabsActionMenu(window: Page): Promise<void> {
-	await window.locator(".session-tabs-actions").getByRole("button", { name: "更多操作" }).click();
+	await openSessionRunMenu(window);
 }
 
 /** 会话管理入口锚定项目标题行，不右键整个含会话正文的项目组。 */
@@ -346,7 +348,8 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 			});
 			await test.step("侧栏登记远端项目（canonical 确认 + 立即选中）", async () => {
 				await enrollRemoteProjectInSidebar(window, paths.projectPath, timeouts);
-				await expect(window.getByText("远端项目", { exact: true })).toBeVisible({ timeout: timeouts.helperMs });
+				// 空态默认输入页；文件浏览是次入口（59a1fb351 起）。
+				await expect(window.getByRole("button", { name: "浏览远端文件" })).toBeVisible({ timeout: timeouts.helperMs });
 			});
 			await test.step("在该远端项目里新建会话（项目行 + →「普通会话」）", async () => {
 				sessionId = await createRemoteSessionAndReadId(window, paths.projectName, timeouts);
@@ -489,8 +492,8 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 				// 默认门禁的一部分（见文件头）：这条走的是「应用侧从远端会话文件读回正文」，与上面的
 				// 「重开标签页」不同——后者可能仍靠 runtime 内存消息，覆盖不到读页分支。
 				await openTabsActionMenu(window);
-				await expect(window.getByRole("menuitem", { name: "重新加载会话", exact: true }), "无进程时「重新加载会话」必须可用").toBeVisible({ timeout: timeouts.helperMs });
-				await window.getByRole("menuitem", { name: "重新加载会话", exact: true }).click();
+				await expect(window.getByRole("menuitem", { name: "从磁盘重新加载消息", exact: true }), "无进程时「重新加载会话」必须可用").toBeVisible({ timeout: timeouts.helperMs });
+				await window.getByRole("menuitem", { name: "从磁盘重新加载消息", exact: true }).click();
 				const timeline = window.locator(".message-timeline");
 				// 时间线现状原样记进日志（证据不只来自失败信息）。
 				console.log("[p42-acceptance] after reload: userTurns=" + (await timeline.locator(".user-turn-text").count()) + " assistant=" + (await timeline.locator(".assistant-text").count()) + " textLength=" + (await timeline.innerText()).trim().length);
@@ -508,10 +511,10 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 				const activeRow = dialog.locator("tbody tr").filter({ has: window.getByRole("button", { name: "归档", exact: true }) });
 				await expect(activeRow, "远端会话必须出现在普通管理列表").toHaveCount(1);
 				await activeRow.getByRole("button", { name: "归档", exact: true }).click();
-				await expect(dialog).toHaveCount(0, { timeout: timeouts.helperMs });
+				// 现行产品：归档成功后弹窗保持打开，方便连续清理/切到归档视图核对。
+				await expect(activeRow).toHaveCount(0, { timeout: timeouts.helperMs });
 				expect((await runRemoteCommand(creds, "[ ! -e '" + evidenceFile + "' ] && [ -f '" + archiveFile + "' ] && printf moved", 20_000)).stdout.trim()).toBe("moved");
 				expect(await checksum(archiveFile)).toBe(before);
-				dialog = await openRemoteSessionManager(window, paths.projectName);
 				await dialog.getByRole("button", { name: "已归档", exact: true }).click();
 				const archivedRow = dialog.locator("tbody tr").filter({ has: window.getByRole("button", { name: "恢复", exact: true }) });
 				await expect(archivedRow).toHaveCount(1, { timeout: timeouts.helperMs });
@@ -527,6 +530,9 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 				await dialog.getByRole("button", { name: "已归档", exact: true }).click();
 				await expect(dialog.getByRole("button", { name: "归档", exact: true })).toHaveCount(1, { timeout: timeouts.helperMs });
 				await dialog.getByRole("button", { name: "关闭", exact: true }).click();
+				// 恢复后立刻关闭时，Radix 偶发收不到这次点击（真机 trace 复现）；Escape 是同一受控关闭路径。
+				if (await dialog.isVisible().catch(() => false)) await window.keyboard.press("Escape");
+				await expect(dialog).toHaveCount(0, { timeout: timeouts.helperMs });
 				const rows = projectRow(window, paths.projectName).locator(".session-row");
 				await expect(rows).toHaveCount(1, { timeout: timeouts.helperMs });
 				await rows.first().click();
@@ -621,9 +627,10 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 					.filter({ hasNotText: "(fork)" });
 				await expect(activeRow, "再次归档前会话必须回到普通管理列表").toHaveCount(1);
 				await activeRow.getByRole("button", { name: "归档", exact: true }).click();
-				await expect(dialog).toHaveCount(0, { timeout: timeouts.helperMs });
+				// 归档成功后弹窗保持打开（现行产品语义）：同一弹窗切到归档视图，不重复打开。
+				await expect(activeRow).toHaveCount(0, { timeout: timeouts.helperMs });
 				expect((await runRemoteCommand(creds, "[ -f '" + archiveFile + "' ] && printf archived", 20_000)).stdout.trim()).toBe("archived");
-				let archivedDialog = await openRemoteSessionManager(window, paths.projectName);
+				const archivedDialog = dialog;
 				await archivedDialog.getByRole("button", { name: "已归档", exact: true }).click();
 				const archivedRow = archivedDialog.locator("tbody tr").filter({ has: window.getByRole("button", { name: "恢复", exact: true }) });
 				await expect(archivedRow).toHaveCount(1, { timeout: timeouts.helperMs });

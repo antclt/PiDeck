@@ -371,6 +371,72 @@ function classifyProbe(scan: unknown, projectRead: unknown): string {
  * 而 spec 内的局部函数无法跨文件复用（那份 spec 不在本次允许改动的范围内）。放这里是为了让
  * 「新增的远端会话入口」与既有的项目锚点只有一个来源，避免第二次实现挑选器。
  */
+/** 远端空态默认是输入页：文件面板是次入口，测试要列目录时先点「浏览远端文件」。 */
+export async function openRemoteProjectFiles(window: Page): Promise<void> {
+	const browse = window.getByRole("button", { name: "浏览远端文件", exact: true }).first();
+	if (await browse.isVisible().catch(() => false)) await browse.click();
+}
+
+/** 打开会话运行菜单：兼容旧 Tab 栏 ⋯ 与现行会话头部「更多运行操作」。 */
+export async function openSessionRunMenu(window: Page): Promise<void> {
+	await dismissRemoteToasts(window);
+	const legacy = window.locator(".session-tabs-actions").getByRole("button", { name: "更多操作" });
+	if ((await legacy.count()) > 0) {
+		await legacy.first().click();
+		return;
+	}
+	await window.getByRole("button", { name: "更多运行操作" }).first().click();
+}
+
+/** 关闭通知中心里的 toast：它们会盖住会话头部按钮并拦截点击。 */
+export async function dismissRemoteToasts(window: Page): Promise<void> {
+	const region = window.getByRole("region", { name: /Notifications/ });
+	const close = region.getByRole("button", { name: "关闭", exact: true });
+	for (let index = 0; index < 8; index += 1) {
+		if ((await close.count()) === 0) break;
+		await close
+			.first()
+			.click({ timeout: 2_000 })
+			.catch(() => undefined);
+		await window.waitForTimeout(30);
+	}
+}
+
+/** 连接成功后的进度对话框是模态的；不关掉会挡住设置页的连接/断开按钮。 */
+export async function dismissRemoteConnectionProgress(window: Page): Promise<void> {
+	const progress = window.getByRole("dialog", { name: /已连接$/ });
+	const buttons = progress.getByRole("button", { name: /^(完成|关闭)$/ });
+	// 连接/断开都可能异步再弹一次进度框；观察 5s，出现就关，避免它在随后挡住设置页按钮。
+	for (let tick = 0; tick < 20; tick += 1) {
+		if (
+			(await progress.count()) > 0 &&
+			(await progress
+				.first()
+				.isVisible()
+				.catch(() => false))
+		) {
+			// 「完成」在已就绪态可靠关闭；仍可见再试「关闭」。
+			// 嵌套在设置弹窗里时命中测试可能被外层遮罩抢走，直接派发 click 给按钮本身。
+			await buttons
+				.first()
+				.dispatchEvent("click")
+				.catch(() => undefined);
+			await window.waitForTimeout(100);
+			if (
+				await progress
+					.first()
+					.isVisible()
+					.catch(() => false)
+			)
+				await buttons
+					.last()
+					.dispatchEvent("click")
+					.catch(() => undefined);
+		}
+		await window.waitForTimeout(250);
+	}
+}
+
 export function remoteProjectRow(window: Page, projectName: string) {
 	return window.locator(".project-group").filter({ hasText: projectName });
 }

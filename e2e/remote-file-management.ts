@@ -1,5 +1,5 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { runRemoteCommand, remoteProjectRow, type RemoteAcceptanceCredentials, type RemoteAcceptanceTimeouts } from "./remote-fixtures";
+import { runRemoteCommand, remoteProjectRow, openRemoteProjectFiles, type RemoteAcceptanceCredentials, type RemoteAcceptanceTimeouts } from "./remote-fixtures";
 
 const q = (value: string): string => "'" + value.replace(/'/g, "'\\''") + "'";
 
@@ -14,6 +14,7 @@ async function openProjectPanel(window: Page, projectPath: string): Promise<void
 		.locator(".conversation-title")
 		.first()
 		.click();
+	await openRemoteProjectFiles(window);
 	await expect(window.getByTestId("remote-file-toolbar")).toBeVisible();
 }
 

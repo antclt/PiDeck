@@ -139,7 +139,7 @@ test("the reload-history step is part of the default chain and still asserts the
 	assert.ok(stepIndex > 0, "the reload-history step must exist and be labelled");
 	const step = text.slice(stepIndex, text.indexOf("} finally {"));
 	// 它必须是"真断言"而不是静默观察：断言 prompt 与回复正文都可见。
-	assert.match(step, /getByRole\("menuitem", \{ name: "重新加载会话", exact: true \}\)/, "the step must drive the real reload menu item");
+	assert.match(step, /getByRole\("menuitem", \{ name: "从磁盘重新加载消息", exact: true \}\)/, "the step must drive the real reload menu item");
 	assert.match(step, /重载后必须仍能看到 prompt/, "the step must assert the prompt is still visible");
 	assert.match(step, /重载后必须仍能看到回复正文/, "the step must assert the assistant body is still visible");
 	// 顺序仍在"重开标签页后历史仍在"之后：先交付链、再这条与 runtime 无关的路径。

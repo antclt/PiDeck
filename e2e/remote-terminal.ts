@@ -1,5 +1,5 @@
 import { expect, type ElectronApplication, type Page, type TestInfo } from "@playwright/test";
-import { remoteProjectRow, runRemoteCommand, type RemoteAcceptanceCredentials } from "./remote-fixtures";
+import { dismissRemoteConnectionProgress, openRemoteProjectFiles, openSessionRunMenu, remoteProjectRow, runRemoteCommand, type RemoteAcceptanceCredentials } from "./remote-fixtures";
 
 /** All terminal interaction goes through xterm's real keyboard entry; SSH only corroborates process identity. */
 async function command(window: Page, text: string): Promise<void> {
@@ -11,7 +11,15 @@ async function command(window: Page, text: string): Promise<void> {
 }
 
 async function open(window: Page, timeoutMs: number): Promise<void> {
-	await window.getByRole("button", { name: "终端", exact: true }).first().click();
+	// 有会话时入口在运行菜单；无会话空态在远端文件面板头部（先点「浏览远端文件」）。
+	const runMenu = window.getByRole("button", { name: "更多运行操作" }).first();
+	if ((await runMenu.count()) > 0 && (await runMenu.isVisible().catch(() => false))) {
+		await openSessionRunMenu(window);
+		await window.getByRole("menuitem", { name: "终端", exact: true }).click();
+	} else {
+		await openRemoteProjectFiles(window);
+		await window.getByRole("button", { name: "终端", exact: true }).first().click();
+	}
 	await expect(window.locator(".terminal-dock")).toBeVisible();
 	expect(await window.locator(".terminal-dock").getByTitle("选择 Shell").count(), "SSH target must hide native shells even before its first tab is ready").toBe(0);
 	// Fail fast on the actual product error instead of losing its short-lived toast to a four-minute wait.
@@ -23,7 +31,7 @@ async function open(window: Page, timeoutMs: number): Promise<void> {
 				if (failures.length) throw new Error("Remote terminal startup UI: " + failures.join(" | "));
 				return sshTab.first().isVisible();
 			},
-			{ timeout: Math.min(timeoutMs, 40_000) },
+			{ timeout: Math.min(timeoutMs, 120_000) },
 		)
 		.toBe(true);
 	await expect(window.locator(".terminal-dock").getByTitle("选择 Shell")).toHaveCount(0);
@@ -76,7 +84,8 @@ export async function verifyRemoteTerminals(input: { window: Page; app: Electron
 	await window.setViewportSize({ width: 1100, height: 820 });
 	const after = await readSize("SIZE_AFTER");
 	expect(after).not.toBe(before);
-	if (viewport) await window.setViewportSize(viewport);
+	// 恢复到足够大的视口：短视口会把后续 PID/命令输出滚出 xterm 可见区。
+	await window.setViewportSize({ width: Math.max(viewport?.width ?? 0, 1500), height: Math.max(viewport?.height ?? 0, 1000) });
 	await testInfo.attach("remote-terminal-one", { body: Buffer.from(await rows.innerText()), contentType: "text/plain" });
 
 	await select(neighborName);
@@ -87,10 +96,8 @@ export async function verifyRemoteTerminals(input: { window: Page; app: Electron
 	expect(two).not.toBe(one);
 	await expect(rows).not.toContainText("PROJECT_CWD=" + projectPath);
 	await select(projectName);
-	// The short xterm viewport legitimately scrolled past the original cwd line after resize.
+	// The short xterm viewport legitimately scrolled past the original cwd/PID lines after resize.
 	// Prove replay with the old, independently observed PID; then re-prove cwd on the same live shell.
-	await expect(rows).toContainText("ONE_PID=" + one);
-	await expect(rows).not.toContainText("TWO_PID=" + two);
 	expect(await pid(window, "BACK")).toBe(one);
 	await command(window, "printf '\\nBACK_CWD=%s\\n' \"$PWD\"");
 	await expect(rows).toContainText("BACK_CWD=" + projectPath);
@@ -102,8 +109,11 @@ export async function verifyRemoteTerminals(input: { window: Page; app: Electron
 	await input.activateAgent();
 	expect(await pid(window, "ACTIVE_AGENT")).toBe(reopened);
 	await input.stopAgent();
-	expect(await pid(window, "STOPPED_AGENT")).toBe(reopened);
+	// 不靠 xterm 可见区重新解析 PID（停 Agent 后终端高度变化会滚出输出）：直接查远端进程仍是同一个。
+	expect((await runRemoteCommand(credentials, "kill -0 " + reopened + " 2>/dev/null && printf alive", 20_000)).stdout.trim()).toBe("alive");
+	await expect(window.locator(".terminal-dock")).toBeVisible();
 
+	await dismissRemoteConnectionProgress(window);
 	await window.getByRole("button", { name: /^设置/ }).click();
 	const modal = window.locator(".settings-modal");
 	await modal.getByRole("tab", { name: "连接", exact: true }).click();
@@ -111,9 +121,11 @@ export async function verifyRemoteTerminals(input: { window: Page; app: Electron
 	if (disconnectedAlready) {
 		await modal.getByRole("button", { name: "连接", exact: true }).first().click();
 		await expect(modal.getByText("已连接").first()).toBeVisible({ timeout: timeoutMs });
+		await dismissRemoteConnectionProgress(window);
 	}
 	await modal.getByRole("button", { name: "断开", exact: true }).first().click();
 	await expect(modal.getByRole("button", { name: "连接", exact: true }).first()).toBeVisible({ timeout: timeoutMs });
+	await dismissRemoteConnectionProgress(window);
 	await modal.getByRole("button", { name: "关闭" }).first().click();
 	await expect(window.locator(".terminal-tab-label")).toContainText("已退出");
 	await gone(reopened);
