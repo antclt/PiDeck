@@ -24,7 +24,8 @@ import type { SessionProcessEvent } from "../../shared/types/trajectory";
 import type { SessionId } from "@deepseek-ai/dsh-session/types";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ipcChannels } from "../../shared/ipc";
+import { agentEventTags, ipcChannels } from "../../shared/ipc";
+import { isLocalProject } from "../../shared/projectLocation";
 import { getAppLogger } from "../logging/sharedLogger";
 import type { DshEnvelope, DshHistoryEntry, DshHistoryPage } from "./dshRemoteClient";
 import type { SessionAgentGateway } from "../sessions/SessionRuntimeCoordinator";
@@ -258,6 +259,7 @@ export class DshAgentManager implements SessionAgentGateway {
 	async create(input: CreateAgentInput): Promise<AgentTab> {
 		const project = this.getProject(input.projectId);
 		if (!project) throw new Error(`Project not found: ${input.projectId}`);
+		if (!isLocalProject(project)) throw new Error("UNSUPPORTED_PROJECT_LOCATION");
 		const client = await this.ensureClient();
 		const cwd = project.path;
 
@@ -425,7 +427,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		this.runtimes.set(agentId, runtime);
 		await this.refreshModelDirectory(runtime, client).catch(() => undefined);
 		this.startMux(runtime);
-		this.emit(ipcChannels.agentsState, this.list());
+		this.emit(agentEventTags.agentsState, this.list());
 		// attach 历史会话：消息/投影已就位，立刻推 runtime，输入框底下就能出「N 轮」。
 		this.emitRuntimeState(agentId);
 		return tab;
@@ -636,7 +638,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		this.runtimes.set(agentId, runtime);
 		await this.refreshModelDirectory(runtime, client).catch(() => undefined);
 		this.startMux(runtime);
-		this.emit(ipcChannels.agentsState, this.list());
+		this.emit(agentEventTags.agentsState, this.list());
 		// 重启后历史已投影：立刻推 runtime，输入框底下就能出「N 轮」。
 		this.emitRuntimeState(agentId);
 		return tab;
@@ -662,7 +664,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		this.rpcLogLive?.dropPending(agentId);
 		// 共享 mux 只在最后一个 runtime 离开时关掉，避免停当前会话把其他会话的流一起掐掉。
 		if (this.runtimes.size === 0) this.stopSharedMux();
-		this.emit(ipcChannels.agentsState, this.list());
+		this.emit(agentEventTags.agentsState, this.list());
 	}
 
 	/** 对全部 pending 审批/提问帧应答「拒绝」并清表（abort/stop 共用，D1/D5）。
@@ -691,7 +693,7 @@ export class DshAgentManager implements SessionAgentGateway {
 					result: { ok: true, value },
 				})
 				.catch(() => undefined);
-			this.emit(ipcChannels.agentsUiRequest, { agentId, requestId, completed: true });
+			this.emit(agentEventTags.agentsUiRequest, { agentId, requestId, completed: true });
 		}
 	}
 
@@ -843,14 +845,14 @@ export class DshAgentManager implements SessionAgentGateway {
 				}
 				await this.refreshModelDirectory(runtime, client).catch(() => undefined);
 				if (wasStreaming) {
-					this.emit(ipcChannels.agentsTextStream, {
+					this.emit(agentEventTags.agentsTextStream, {
 						agentId,
 						text: lastAssistantText(runtime.messages),
 						done: true,
 						turnEnded: true,
 					});
 				}
-				this.emit(ipcChannels.agentsState, this.list());
+				this.emit(agentEventTags.agentsState, this.list());
 				this.emitMessages(runtime);
 				this.emitRuntimeState(agentId);
 			} catch (error) {
@@ -870,7 +872,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		// 立即收口思考流：停止后旧回合的 reasoning 残留帧会被 cancelled 守卫丢弃，
 		// Live 思考块不能等 turn/end（可能迟到/缺失），否则「停止后思考还在转」。
 		if (runtime.thinkingId) {
-			this.emit(ipcChannels.agentsThinking, {
+			this.emit(agentEventTags.agentsThinking, {
 				agentId: runtime.tab.id,
 				id: runtime.thinkingId,
 				text: "",
@@ -890,14 +892,14 @@ export class DshAgentManager implements SessionAgentGateway {
 		// 停止时立刻收口正文通道：带上已累积字，避免空 done 把屏幕抹空白。
 		// turnEnded 标记「这一轮真的结束了」：Web SSE 靠它产出 finish/[DONE]（停止后
 		// useChat 的 status 才能从 streaming 收回 ready；desktop 渲染层不读该字段）。
-		this.emit(ipcChannels.agentsTextStream, {
+		this.emit(agentEventTags.agentsTextStream, {
 			agentId: runtime.tab.id,
 			text: lastAssistantText(runtime.messages) || runtime.projection.pendingAssistantText || "",
 			done: true,
 			turnEnded: true,
 		});
 		this.emitRuntimeState(agentId);
-		this.emit(ipcChannels.agentsState, this.list());
+		this.emit(agentEventTags.agentsState, this.list());
 	}
 
 	async rename(agentId: string, name: string): Promise<AgentTab> {
@@ -906,7 +908,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		const renamed = await client.sessionsRename({ sessionId: runtime.sessionId, title: name });
 		if (renamed.result.ok) {
 			runtime.tab.title = renamed.result.value.title;
-			this.emit(ipcChannels.agentsState, this.list());
+			this.emit(agentEventTags.agentsState, this.list());
 			this.onTitleChanged?.(String(runtime.sessionId), runtime.tab.title);
 		}
 		return runtime.tab;
@@ -1669,7 +1671,7 @@ export class DshAgentManager implements SessionAgentGateway {
 	 */
 	notifyModelPreferenceIgnored(agentId: string, provider: string, modelId: string): void {
 		if (!this.runtimes.has(agentId)) return;
-		this.emit(ipcChannels.agentsNotice, {
+		this.emit(agentEventTags.agentsNotice, {
 			agentId,
 			i18nKey: "notice.modelPreferenceIgnored",
 			kind: "warning",
@@ -1833,7 +1835,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		}
 		this.runtimes.set(agentId, nextRuntime);
 		this.startMux(nextRuntime);
-		this.emit(ipcChannels.agentsState, this.list());
+		this.emit(agentEventTags.agentsState, this.list());
 		this.emitMessages(nextRuntime);
 		this.emitRuntimeState(agentId);
 		// 返回 fork 点文案（渲染层把它预填到输入框，与 pi 一致；clone 无锚点时为 undefined）
@@ -1853,7 +1855,7 @@ export class DshAgentManager implements SessionAgentGateway {
 			// 应答不可解析（如 batch 答案 JSON 损坏）：按拒绝处理，避免 host 永久挂起。
 			this.pendingResponses.delete(requestId);
 			this.clearPendingTimeout(requestId);
-			this.emit(ipcChannels.agentsUiRequest, { agentId, requestId, completed: true });
+			this.emit(agentEventTags.agentsUiRequest, { agentId, requestId, completed: true });
 			return { accepted: false, reason: "unparseable-response" };
 		}
 		await client.respond({
@@ -1865,7 +1867,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		this.pendingResponses.delete(requestId);
 		this.clearPendingTimeout(requestId);
 		// 通知渲染层请求完成（与 pi 的 agentsUiRequest completed 同协议）
-		this.emit(ipcChannels.agentsUiRequest, { agentId, requestId, completed: true });
+		this.emit(agentEventTags.agentsUiRequest, { agentId, requestId, completed: true });
 		return { accepted: true };
 	}
 
@@ -2018,7 +2020,7 @@ export class DshAgentManager implements SessionAgentGateway {
 	private emitRuntimeState(agentId: string): void {
 		void this.getRuntimeState(agentId)
 			.then((state) => {
-				this.emit(ipcChannels.agentsRuntimeState, { agentId, state });
+				this.emit(agentEventTags.agentsRuntimeState, { agentId, state });
 			})
 			.catch(() => undefined);
 	}
@@ -2181,7 +2183,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		runtime.isStreaming = next.isStreaming;
 		if (statusChanged) {
 			runtime.tab.status = next.status;
-			this.emit(ipcChannels.agentsState, this.list());
+			this.emit(agentEventTags.agentsState, this.list());
 		}
 	}
 
@@ -2205,7 +2207,7 @@ export class DshAgentManager implements SessionAgentGateway {
 	}
 
 	private emitMessages(runtime: DshAgentRuntime): void {
-		this.emit(ipcChannels.agentsMessage, {
+		this.emit(agentEventTags.agentsMessage, {
 			agentId: runtime.tab.id,
 			messages: runtime.messages,
 			...this.historyWindowFields(runtime),
@@ -2234,14 +2236,14 @@ export class DshAgentManager implements SessionAgentGateway {
 			}
 			this.pendingResponses.set(approval.requestId, approval);
 			this.schedulePendingTimeout(runtime.tab.id, approval.requestId);
-			this.emit(ipcChannels.agentsUiRequest, approvalUiRequest(approval, runtime.tab.id));
+			this.emit(agentEventTags.agentsUiRequest, approvalUiRequest(approval, runtime.tab.id));
 			return;
 		}
 		const question = parseDshQuestionFrame(frame);
 		if (question) {
 			this.pendingResponses.set(question.requestId, question);
 			this.schedulePendingTimeout(runtime.tab.id, question.requestId);
-			this.emit(ipcChannels.agentsUiRequest, questionUiRequest(question, runtime.tab.id));
+			this.emit(agentEventTags.agentsUiRequest, questionUiRequest(question, runtime.tab.id));
 		}
 	}
 
@@ -2268,7 +2270,7 @@ export class DshAgentManager implements SessionAgentGateway {
 				} catch {
 					// host 已不可用：应答失败也不阻断 completed 通知
 				}
-				this.emit(ipcChannels.agentsUiRequest, { agentId, requestId, completed: true });
+				this.emit(agentEventTags.agentsUiRequest, { agentId, requestId, completed: true });
 			})();
 		}, DshAgentManager.PENDING_RESPONSE_TIMEOUT_MS);
 		timer.unref();
@@ -2293,7 +2295,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		} catch (error) {
 			this.pendingResponses.set(approval.requestId, approval);
 			this.schedulePendingTimeout(runtime.tab.id, approval.requestId);
-			this.emit(ipcChannels.agentsUiRequest, approvalUiRequest(approval, runtime.tab.id));
+			this.emit(agentEventTags.agentsUiRequest, approvalUiRequest(approval, runtime.tab.id));
 		}
 	}
 
@@ -2516,7 +2518,7 @@ export class DshAgentManager implements SessionAgentGateway {
 			const title = (event.data as { title: string }).title.trim();
 			if (runtime.tab.title !== title) {
 				runtime.tab.title = title;
-				this.emit(ipcChannels.agentsState, this.list());
+				this.emit(agentEventTags.agentsState, this.list());
 				this.onTitleChanged?.(String(runtime.sessionId), title);
 			}
 			return;
@@ -2536,7 +2538,7 @@ export class DshAgentManager implements SessionAgentGateway {
 				runtime.messages = mergeDshProjectedMessages(runtime.messages, runtime.projection.messages);
 				// 收口时带上已累积正文，避免空 done 把渲染层 live 槽抹成空白。
 				// turnEnded：停止后迟到的 turn/end 同样是「本轮终点」，Web SSE 在此收流。
-				this.emit(ipcChannels.agentsTextStream, {
+				this.emit(agentEventTags.agentsTextStream, {
 					agentId: runtime.tab.id,
 					text: lastAssistantText(runtime.messages),
 					done: true,
@@ -2563,7 +2565,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		const eventTime = typeof event?.time === "number" ? event.time : Date.now();
 		if (event?.type === "turn/start") {
 			// 与 pi agent_start 对齐：新回合丢掉上一轮 held live 槽。
-			this.emit(ipcChannels.agentsTextStream, {
+			this.emit(agentEventTags.agentsTextStream, {
 				agentId: runtime.tab.id,
 				text: "",
 				done: true,
@@ -2571,7 +2573,7 @@ export class DshAgentManager implements SessionAgentGateway {
 			});
 		}
 		if (p.deltaText !== undefined) {
-			this.emit(ipcChannels.agentsTextStream, {
+			this.emit(agentEventTags.agentsTextStream, {
 				agentId: runtime.tab.id,
 				text: p.pendingAssistantText,
 				done: false,
@@ -2580,7 +2582,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		if (p.deltaReasoning !== undefined) {
 			runtime.thinkingId ??= `msg-thinking-${p.pendingAssistantId ?? `dsh:${eventSeq}`}`;
 			runtime.thinkingStartedAt ??= eventTime;
-			this.emit(ipcChannels.agentsThinking, {
+			this.emit(agentEventTags.agentsThinking, {
 				agentId: runtime.tab.id,
 				id: runtime.thinkingId,
 				text: p.pendingAssistantThinking,
@@ -2589,7 +2591,7 @@ export class DshAgentManager implements SessionAgentGateway {
 			});
 		}
 		if (runtime.thinkingId && p.deltaReasoning === undefined && p.pendingAssistantThinking === "") {
-			this.emit(ipcChannels.agentsThinking, {
+			this.emit(agentEventTags.agentsThinking, {
 				agentId: runtime.tab.id,
 				id: runtime.thinkingId,
 				text: "",
@@ -2621,7 +2623,7 @@ export class DshAgentManager implements SessionAgentGateway {
 				runtime.contextOverflow = false;
 			}
 			// turnEnded：正常回合终点（含被停止的 cancelled 收口），Web SSE 在此收流。
-			this.emit(ipcChannels.agentsTextStream, {
+			this.emit(agentEventTags.agentsTextStream, {
 				agentId: runtime.tab.id,
 				text: lastAssistantText(runtime.messages),
 				done: true,
@@ -2636,7 +2638,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		if (p.messagesChanged && !p.turnEnded) {
 			this.emitMessages(runtime);
 			if (event?.type === "assistant/message") {
-				this.emit(ipcChannels.agentsTextStream, {
+				this.emit(agentEventTags.agentsTextStream, {
 					agentId: runtime.tab.id,
 					text: lastAssistantText(runtime.messages),
 					done: true,

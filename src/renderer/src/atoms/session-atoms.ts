@@ -5,7 +5,7 @@ import { getSessionDisposalAtoms, removeRegisteredSessionFamilies } from "./sess
 import { atom } from "jotai";
 import type { Getter, Setter } from "jotai";
 import { atomFamily, selectAtom } from "jotai/utils";
-import type { AgentBackend, AgentRuntimeState, AgentStatus, AgentUiBatchQuestion, AgentUiRequest, ChatMessage, SessionHistoryUnavailableReason, SessionMessagePage, SessionRecord, SessionRuntimeEvent, SessionRuntimeInfo } from "../../../shared/types";
+import type { AgentBackend, AgentRuntimeState, AgentStatus, AgentUiBatchQuestion, AgentUiRequest, ChatMessage, RemoteSessionExtensions, SessionHistoryUnavailableReason, SessionMessagePage, SessionRecord, SessionRuntimeEvent, SessionRuntimeInfo } from "../../../shared/types";
 import { mergeAgentRuntimeState } from "../utils/agentRuntimeState";
 import { isSessionTurnRunning } from "../utils/sessionActivityClock";
 import { findLastUserMessageIndex, shouldRefreshOutlineForRuntimeUpsert } from "./outlineRevision";
@@ -41,6 +41,25 @@ export function selectRetainedCacheEntryIds(lru: readonly string[], openedTabIds
 	const closed = lru.filter((id) => !openedTabIds.has(id));
 	const closedBudget = Math.max(0, limit - open.length);
 	return [...open, ...closed.slice(0, closedBudget)];
+}
+
+const REMOTE_EXTENSION_REASONS = ["REMOTE_PI_EXTENSIONS_UNSUPPORTED", "REMOTE_EXTENSIONS_UNAVAILABLE", "REMOTE_EXTENSIONS_DISABLED", "REMOTE_EXTENSIONS_NONE"] as const;
+
+/**
+ * `agents:state` 载荷里的注入面是 unknown（旧 main / 旧 payload / 半可信事件），只接受闭集形状。
+ * 形状不对就当作没带这个字段（保留已知值），不报错也不净化成空数组——空数组是「确认什么都没注入」的强事实。
+ */
+export function readRemoteExtensions(value: unknown): RemoteSessionExtensions | undefined {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+	const record = value as Record<string, unknown>;
+	if (!Array.isArray(record.applied) || record.applied.length > 64) return undefined;
+	const applied: string[] = [];
+	for (const entry of record.applied) {
+		if (typeof entry !== "string" || entry.length === 0 || entry.length > 128) return undefined;
+		applied.push(entry);
+	}
+	const reason = typeof record.reason === "string" ? REMOTE_EXTENSION_REASONS.find((known) => known === record.reason) : undefined;
+	return { applied, ...(reason === undefined ? {} : { reason }), ...(typeof record.detail === "string" && record.detail.length <= 128 ? { detail: record.detail } : {}) };
 }
 
 /**
@@ -125,6 +144,19 @@ export type SessionRuntimeViewState = {
 	createdAt?: number;
 	compactionCount?: number;
 	noSession?: boolean;
+	/**
+	 * 远端会话标记（agents:state 载荷透传自 `AgentTab.remoteTrustUnhandled`）：这条会话的远端项目
+	 * trust 由 PiDeck 的决策表管理（P4.4b）。它只决定**是否**显示 trust 提示；四种展示态由决策表合成
+	 * （见 `remote-trust-atoms.ts` 的 `sessionRemoteTrustStateAtomFamily`），不以 pi 事件为准。
+	 * undefined/false = 本地/WSL/DSH/生图会话，或旧 main 的载荷没带这个字段；
+	 * 消费端（RemoteSessionTrustNotice）按「无标记 = 不显示提示」处理，不报错。
+	 */
+	remoteTrustUnhandled?: boolean;
+	/**
+	 * 远端会话实际注入的内置扩展（`AgentTab.remoteExtensions` 透传）。能力门（计划/目标/安全等级）
+	 * 只认它的 `applied`；空数组 + reason = 本轮降级，UI 必须禁用入口而不是让用户选了没反应。
+	 */
+	remoteExtensions?: RemoteSessionExtensions;
 	/** 运行时后端（pi/dsh）：agents:state 事件透传，侧栏徽章/配对用。 */
 	backend?: AgentBackend;
 };
@@ -151,7 +183,9 @@ export type SessionLoadState = {
 export type SessionMessageCacheEntry = {
 	messages: ChatMessage[];
 	revision: number;
-	source: "disk" | "runtime";
+	// "remote" = 这条历史来自远端会话文件（ssh locator）经主进程有界窗口读回：
+	// 游标语义与本地**不同**（远端是字节偏移，本地是活动分支消息下标），因此不能走本地那套数值算术。
+	source: "disk" | "runtime" | "remote";
 	updatedAt: number;
 	/**
 	 * 条目驻留字节估算（estimateSessionCacheEntryBytes，写入时随条目重建刷新）。
@@ -540,6 +574,11 @@ export const replaceSessionRuntimesAtom = atom(null, (get, set, runtimes: Sessio
 			createdAt: runtime.createdAt,
 			compactionCount: runtime.compactionCount,
 			noSession: runtime.noSession,
+			// 与 `agents:state` 那条路径同源：远端 trust 现状在 runtime 快照里也要带，
+			// 否则「渲染层重载 + runtime 空闲」时提示要等下一次状态推送才出现。
+			remoteTrustUnhandled: runtime.remoteTrustUnhandled === true ? true : undefined,
+			// 注入面与 trust 标记同源：runtime 快照重载后 UI 不能凭空恢复能力门。
+			remoteExtensions: runtime.remoteExtensions,
 			// listRuntimes 快照可能落后于事件流（或旧主进程未带此字段）：不冲掉已知身份。
 			deckSessionId: runtime.deckSessionId ?? existing?.deckSessionId,
 		};
@@ -619,7 +658,9 @@ export const cacheSessionMessagesAtom = atom(
 		input: {
 			sessionId: string;
 			messages: ChatMessage[];
-			source: "disk" | "runtime";
+			// "remote"：远端会话文件经主进程有界窗口读回的历史（游标是字节偏移，与本地磁盘页不同）；
+			// 本地页与 runtime 更新只写 disk/runtime，这里放宽是为了让远端历史页能原样转存。
+			source: "disk" | "runtime" | "remote";
 			expectedRevision?: number;
 			page?: Pick<SessionMessagePage, "total" | "nextBefore">;
 			/** runtime 窗口协议字段（2026-08 激活分页） */
@@ -638,7 +679,10 @@ export const cacheSessionMessagesAtom = atom(
 			force?: boolean;
 		},
 	) => {
+		const historySource = input.source === "disk" && get(sessionRecordsAtom)[input.sessionId]?.locator?.kind === "ssh" ? ("remote" as const) : input.source;
 		const cache = get(sessionMessagesCacheAtom);
+		// 远端记录的「磁盘页」其实是远端有界窗口读回的结果：来源要标成 "remote"，否则下游那条
+		// 「超限裁剪时把数值游标前移」的算术会把字节偏移算坏（静默跳内容）。
 		const current = cache[input.sessionId];
 		// Revision 守卫仅在「上一次与本次均为 disk 来源」时生效——
 		// 防止慢一拍的历史分页响应覆盖后续新快照。
@@ -679,14 +723,16 @@ export const cacheSessionMessagesAtom = atom(
 			[input.sessionId]: {
 				messages: input.messages,
 				revision,
-				source: input.source,
+				source: historySource,
 				updatedAt: Date.now(),
 				outlineRevision,
 				outlineLastUserIndex,
 				// 条目驻留字节估算（2026-10 内存轮）：随本次重建刷新，供已关闭 Tab
 				// 条目的字节预算淘汰用（下方 selectByteBudgetEvictions）。
 				bytes: estimateSessionCacheEntryBytes(input.messages, storedHistory?.messages),
-				...(input.source === "disk" && input.page ? { page: input.page } : {}),
+				// page 只属于 disk/remote 来源（runtime 窗口走下方 windowStart/history）；
+				// historySource 已把远端 disk 改写成 "remote"，不能再用 input.source 判。
+				...(historySource !== "runtime" && input.page ? { page: input.page } : {}),
 				...(input.source === "runtime"
 					? {
 							windowStart: input.windowStart && input.windowStart > 0 ? input.windowStart : undefined,
@@ -1338,6 +1384,11 @@ export const applySessionRuntimeEventAtom = atom(null, (get, set, event: Session
 					// 新绑定不能继承旧 agent 的运行时状态：清掉残留 state，
 					// 否则底栏 state?.modelName 优先于 record 显示旧模型（模型切换后显示旧）。
 					// 真实值由后续 agents:runtime-state 事件（含 applyPreferences 后的主动推送）填充。
+					// 但**会话级事实必须留**：`remoteTrustUnhandled` 只随 `agents:state` 的 tab 快照下发，
+					// `agents:runtime-state` 载荷里没有它——在这里丢掉就再没人补，远端会话的
+					// trust 提示会永久消失（2026-10 真机 UI 验收实测：输入首键→绑定变化→提示从不出现）。
+					remoteTrustUnhandled: currentRuntime?.remoteTrustUnhandled,
+					remoteExtensions: currentRuntime?.remoteExtensions,
 					state: undefined,
 				}
 			: currentRuntime),
@@ -1377,6 +1428,11 @@ export const applySessionRuntimeEventAtom = atom(null, (get, set, event: Session
 				// backend 只在运行时事件里透传（dsh=DSH host 会话；acp=ACP CLI 会话，tab 侧栏徽章与配对依赖它），
 				// 其余一律回落本地状态，防止旧事件把已知后端冲掉。
 				backend: payload.backend === "dsh" || payload.backend === "acp" ? payload.backend : (nextRuntime.backend ?? "pi"),
+				// 远端 trust 标记只在远端会话上出现；旧 main 的载荷没有这个字段（undefined）。
+				// 同一绑定内 sticky（会话身份含 hostId，不会本地↔远端跳变），避免 refresh 抖动。
+				remoteTrustUnhandled: payload.remoteTrustUnhandled === true || nextRuntime.remoteTrustUnhandled,
+				// 注入面跟本次绑定走（每次 spawn/reattach 都可能变）；旧载荷缺字段时保留已知值，不凭空清空。
+				remoteExtensions: readRemoteExtensions(payload.remoteExtensions) ?? nextRuntime.remoteExtensions,
 			};
 		}
 		// ACP 首回合：sessions:prompt IPC 要等整个回合结束才返回，而 sendState 的 activating→sending
@@ -1645,7 +1701,12 @@ export const applySessionRuntimeEventAtom = atom(null, (get, set, event: Session
 		currentRuntime.compactionCount === nextRuntime.compactionCount &&
 		currentRuntime.noSession === nextRuntime.noSession &&
 		currentRuntime.backend === nextRuntime.backend &&
-		currentRuntime.deckSessionId === nextRuntime.deckSessionId;
+		currentRuntime.deckSessionId === nextRuntime.deckSessionId &&
+		// 远端 trust 标记参与「无变化」判定：它在同一绑定内首次出现时若被跳过写入，
+		// 本会话就永远看不到那条提示（本机会话两个值都是 undefined，不影响原行为）。
+		currentRuntime.remoteTrustUnhandled === nextRuntime.remoteTrustUnhandled &&
+		// 注入面同样参与：能力门晚到一步就会被旧值盖掉（只在 spawn/reattach 后出现）。
+		JSON.stringify(currentRuntime.remoteExtensions ?? null) === JSON.stringify(nextRuntime.remoteExtensions ?? null);
 	if (!runtimeUnchanged) {
 		set(sessionRuntimeByIdAtom, {
 			...get(sessionRuntimeByIdAtom),
@@ -1752,6 +1813,11 @@ export const bindSessionRuntimeAtom = atom(
 				runtimeGeneration: input.runtimeGeneration ?? currentGeneration,
 				status: input.status ?? (bindingChanged ? "idle" : current?.status) ?? "idle",
 				state: bindingChanged ? undefined : current?.state,
+				// 这里是「只有这几个字段」的绑定刷新（send 路径），不跟随其它字段；
+				// 远端 trust 标记是会话级事实（不属于某次 agent 绑定），必须跟着会话走，
+				// 否则发一条消息就会把刚显示的「远端项目资源未加载」提示抹掉。
+				remoteTrustUnhandled: current?.remoteTrustUnhandled,
+				remoteExtensions: current?.remoteExtensions,
 				updatedAt: Date.now(),
 			},
 		});

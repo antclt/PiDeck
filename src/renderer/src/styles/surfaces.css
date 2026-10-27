@@ -1799,13 +1799,12 @@
   object-fit: cover;
 }
 
+/* 尺寸（size-5）与圆角（rounded-full）由调用点的 Tailwind utility 决定：
+   utility 层高于 legacy，这里再写 width/height/border-radius 只会变成死规则。 */
 .image-remove-btn {
   position: absolute;
   top: 2px;
   right: 2px;
-  width: 20px;
-  height: 20px;
-  border-radius: var(--radius-pill);
   background: var(--image-thumbnail-remove-bg);
   color: var(--color-text-inverse);
   border: none;

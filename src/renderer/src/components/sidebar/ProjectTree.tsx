@@ -6,6 +6,13 @@ import type { Project, WorktreeEntry } from "../../../../shared/types";
 import type { SidebarController } from "../../hooks/useSidebarController";
 import { t } from "../../i18n";
 import type { SidebarActions } from "./SidebarContent";
+import { isRemoteProject } from "../../../../shared/projectLocation";
+import { desktopApi } from "../../desktopApi";
+import { collectRegisteredRemoteSessionIds } from "../session/remoteSessionListState";
+import { AddProjectMenu } from "./AddProjectMenu";
+import { RemoteProjectStatusTag } from "./RemoteProjectStatusTag";
+import { RemoteSessionsSection } from "./RemoteSessionsSection";
+import { useRemoteProjectRootStatuses } from "./useRemoteProjectRootStatuses";
 import { ActiveSessionsTree } from "./ActiveSessionsTree";
 import { SessionTree } from "./SessionTree";
 import { WorktreeTree } from "./WorktreeTree";
@@ -74,8 +81,8 @@ export function ProjectTree(props: {
 	currentSessionId?: string;
 	worktreesByProject: Readonly<Record<string, readonly WorktreeEntry[]>>;
 	branchByProject?: Readonly<Record<string, string | null | undefined>>;
-	/** 正在删除的 worktree 路径集合（透传给 WorktreeTree 驱动淡出动画）。 */
-	removingWorktreePaths?: ReadonlySet<string>;
+	/** Child projects being removed; keyed by project ID（远端工作区必需，dev 的纯 path 版本不适用）。 */
+	removingWorktreeProjectIds?: ReadonlySet<string>;
 	/** 「聊天」「项目」分组标题栏在列表滚动时冻结（sticky）在滚动区顶部（settings.sidebarStickyGroupHeaders）。 */
 	stickyGroupHeaders?: boolean;
 }) {
@@ -83,6 +90,9 @@ export function ProjectTree(props: {
 	// 冻结标题只在常规模式生效：simple 壳侧栏背景是 --simple-shell-surface，
 	// 遮底用的 bg-sidebar 会在该模式下露出色差，直接不启用。
 	const stickyHeader = !props.simple && props.stickyGroupHeaders === true;
+	// 远端项目的 root 复核状态：项目级只读查询，随清单刷新的整批结果按代次落地（不在这里渲染）。
+	// 侧栏只读 atom（RemoteProjectStatusTag），所以查询集中一处、不随行重复发。
+	useRemoteProjectRootStatuses(desktopApi, props.controller.catalog.projects);
 	const rootProjects = props.controller.catalog.projects.filter((project) => !project.worktreeParentId && matchesProject(project, props.controller.search.trim(), props.controller));
 	// 项目拖拽不再要求静止长按：原生 HTML5 拖拽自带 ~4px 启动阈值，天然区分点按与拖动
 	//（2027-03 用户反馈「拖动行为不好用」：旧逻辑要先静止长按 350ms 才变 draggable，
@@ -203,6 +213,8 @@ export function ProjectTree(props: {
 										{t("app.projectMissing")}
 									</span>
 								)}
+								{/* 远端项目 root 复核需要用户处理时给「需处理」提示：项目级、不影响同主机其他项目 */}
+								{isRemoteProject(project) ? <RemoteProjectStatusTag projectId={project.id} /> : null}
 							</div>
 							{/* 项目名称只承担导航信息；详细会话状态由下方的 Agent/历史会话行承担。 */}
 						</div>
@@ -267,8 +279,14 @@ export function ProjectTree(props: {
 								agents={props.controller.catalog.agents}
 								entries={props.worktreesByProject[project.id] ?? []}
 								branch={props.branchByProject?.[project.id]}
-								removingWorktreePaths={props.removingWorktreePaths}
+								removingWorktreeProjectIds={props.removingWorktreeProjectIds}
 							/>
+						) : isRemoteProject(project) ? (
+							<>
+								{/* 已导入本地的远端会话仍在 SessionTree 里；下面这块是远端侧的「发现」列表（只读扫描 + 导入）。 */}
+								<SessionTree project={project} sessions={rootProjectSessions} agents={props.controller.catalog.agents} currentSessionId={props.currentSessionId} controller={props.controller} actions={props.actions} />
+								<RemoteSessionsSection hostId={project.locator.hostId} importedRemoteSessionIds={collectRegisteredRemoteSessionIds(rootProjectSessions, project.locator.hostId)} onImported={(result) => props.actions.sessions.importRemoteSession(project.id, result.sessionId)} />
+							</>
 						) : (
 							<SessionTree project={project} sessions={rootProjectSessions} agents={props.controller.catalog.agents} currentSessionId={props.currentSessionId} controller={props.controller} actions={props.actions} />
 						)}
@@ -400,17 +418,19 @@ export function ProjectTree(props: {
 
 	const projectsSection = (
 		<section aria-label={t("app.sidebarProjects")} role="tree">
+			{/* 分组标题栏：左侧「项目」标题，右侧 = 「+ 添加项目」+ 全部折叠/展开（高频操作外露）
+            + 「⋯ 更多操作」。目录存在性重扫属于低频维护动作，收进菜单避免挤占窄侧栏。
+            开启冻结时给这层纯逻辑包裹加 display:contents：它不生成盒子，里面的标题栏
+            就直接成为 section 的子元素，sticky 的包含块从「只有标题栏高度的包裹 div」变成
+            「跨越全部内容的 section」。否则包含块在滚动一开始就到头，sticky 永远不生效
+            （项目区标题不冻结、聊天区标题正常，就是这个原因）。 */}
 			{workspaceProjects.length > 0 && (
-				<div>
-					{/* 分组标题栏：左侧「项目」标题，右侧 = 「+ 添加项目」+ 全部折叠/展开（高频操作外露）
-            + 「⋯ 更多操作」。目录存在性重扫属于低频维护动作，收进菜单避免挤占窄侧栏。 */}
+				<div className={cn(stickyHeader && "contents")}>
 					<div className={cn("flex items-center justify-between px-1 pb-1", stickyHeader && stickyGroupHeaderClass)}>
 						<span className="text-caption font-medium text-muted-foreground">{t("app.sidebarProjects")}</span>
 						<div className="flex items-center gap-0.5">
-							{/* 添加项目是最常用入口，外露为显式「+」按钮 */}
-							<Button type="button" variant="ghost" size="icon-xs" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-bg-hover hover:text-foreground" aria-label={t("app.addProject")} title={t("app.addProject")} onClick={() => void props.actions.projects.add()}>
-								<Plus className="size-3.5" aria-hidden="true" />
-							</Button>
+							{/* 添加项目是最常用入口，外露为显式「+」菜单：本地目录行为不变，另加远端（SSH）登记入口。 */}
+							<AddProjectMenu onAddLocal={() => void props.actions.projects.add()} />
 							{/* 全部折叠/展开：批量收起所有工作区项目，批量展开/折叠入口外露（与聊天折叠同策略） */}
 							<Button
 								type="button"
@@ -470,10 +490,7 @@ export function ProjectTree(props: {
 						<FolderPlus className="mx-auto mb-2 size-5 text-muted-foreground" aria-hidden="true" />
 						<div className="text-body font-medium text-foreground">{t("sidebar.emptyProjectsTitle")}</div>
 						<p className="mt-1 text-caption text-muted-foreground">{t("sidebar.emptyProjectsDesc")}</p>
-						<Button type="button" variant="secondary" size="sm" className="mt-3" title={t("app.addProject")} aria-label={t("app.addProject")} onClick={() => void props.actions.projects.add()}>
-							<FolderPlus className="size-3.5" aria-hidden="true" />
-							{t("app.addProject")}
-						</Button>
+						<AddProjectMenu onAddLocal={() => void props.actions.projects.add()} labeled />
 					</div>
 				</div>
 			)}

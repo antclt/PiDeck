@@ -190,7 +190,10 @@ function compileBridge(loadBindings = [], options = {}) {
 				(() => {
 					throw new Error(`unexpected import: ${specifier}`);
 				})(),
-			console,
+			// 静音 console：bridge 的 console.log 若写真实 stdout，会与 node --test 子进程的
+			// 结果协议流交织，偶发 "Unable to deserialize cloned data"（2026-10 实测；
+			// 本文件 35 个用例会打几十行 [飞书 Bridge] 日志，单独跑通过、走 runner 偶发红）。
+			console: { log() {}, warn() {}, error() {}, info() {}, debug() {}, trace() {} },
 			Buffer,
 			setTimeout,
 			clearTimeout,

@@ -5,9 +5,11 @@
  * 的静态映射，不 import 运行时代码。行数据由通道面探针推导（锚定数字见 TEST-PLAN §0），非手写臆测。
  * 守卫测试 tests/unifiedApiDomainCatalog.test.mjs
  * 校验：id 唯一且 kebab-case、62 行、每行 channelPrefix ⊆ shared/ipc.ts 实际 85 前缀、
- * 两表并集认领全部 85 前缀与 71 命名空间（F1-4/5/6）、红线行 aggregation === "redline"（F1-7）。
+ * 两表并集认领全部 85 前缀与 74 命名空间（F1-4/5/6）、红线行 aggregation === "redline"（F1-7）。
  * 2026-10-16 合并刷新：随 dev 演进补 acp/wechat/host-plugins/pideck-mcp/videogen/notice-history
  * 六行（+7 前缀 +6 命名空间，探针口径同 §0），sessions/config 收口组同步补新方法。
+ * 2026-10-18 远端合并刷新：补 remote 行（remote:* 前缀 + remoteHosts/probeRemoteModels/
+ * remoteTrust/remoteSessions 四命名空间），远端通道面从 dev 的 679 增至 743 后再次闭合。
  *
  * 命名空间认领的唯一冻结例外（伴生行，F1-6 例外表）：settings 由 settings/web 两行认领
  * （web:status → settings.webServiceStatus，systemIpc.ts:1752）、sessions 由 sessions/dsh
@@ -143,6 +145,19 @@ export const DOMAIN_CATALOG = [
 	{ id: "voice-transcription", group: "integration", manager: "语音转写（5 类协作组件）", ipcFile: ["ipc/voiceTranscriptionIpc.ts"], preloadNamespaces: ["voiceTranscription"], channelPrefix: ["voice-transcription"], aggregation: "aggregate" },
 	{ id: "automation", group: "integration", manager: "AutomationStore + AutomationScheduler + RunCoordinator", ipcFile: ["ipc/automationIpc.ts"], preloadNamespaces: ["automation"], channelPrefix: ["automation"], aggregation: "aggregate" },
 	{ id: "acp", group: "integration", manager: "AcpAgentManager + AcpConnection/AcpProcessHost + AcpMessageSnapshotStore（外部 ACP CLI agent 接入）", ipcFile: ["ipc/acpIpc.ts"], preloadNamespaces: ["acp"], channelPrefix: ["acp"], aggregation: "aggregate" },
+	// 裁决（远端合并刷新）：远端开发面（SSH 主机/项目/文件/会话/信任/模型探测/Git 只读）
+	// 全部经 remote:* 前缀，由四个 preload 命名空间承载——remoteHosts（主机与远端项目读写）、
+	// probeRemoteModels（主机级模型探测，无独立前缀）、remoteTrust、remoteSessions（只读发现与登记）。
+	// 远端会话读写本身仍归 sessions 域；本行只认领远端访问与传输面。
+	{
+		id: "remote",
+		group: "integration",
+		manager: "RemoteHostStore + RemoteHostConnectionService + RemoteWorkspaceReader + RemoteSessionHistoryWriter + RemoteHostReferenceRegistry（SSH 主机/项目/会话/信任/模型探测）",
+		ipcFile: ["ipc/remoteHostIpc.ts", "ipc/remoteProjectIpc.ts", "ipc/remoteProjectFileIpc.ts", "ipc/remoteProjectEntryIpc.ts", "ipc/remoteProjectCreateIpc.ts", "ipc/remoteProjectTrustIpc.ts", "ipc/remoteSessionIpc.ts", "ipc/remoteGitReadIpc.ts", "ipc/remotePiModelIpc.ts"],
+		preloadNamespaces: ["remoteHosts", "probeRemoteModels", "remoteTrust", "remoteSessions"],
+		channelPrefix: ["remote"],
+		aggregation: "aggregate",
+	},
 	{ id: "wechat", group: "integration", manager: "WeChatBridge + WeChatService/WeChatLogin", ipcFile: ["ipc/wechatIpc.ts"], preloadNamespaces: ["wechat"], channelPrefix: ["wechat"], aggregation: "aggregate" },
 	{ id: "host-plugins", group: "integration", manager: "HostPluginManager + HostPluginService + HostPluginWebviewBridge", ipcFile: ["ipc/hostPluginsIpc.ts"], preloadNamespaces: ["hostPlugins"], channelPrefix: ["host-plugin", "host-plugins"], aggregation: "aggregate" },
 	{ id: "pideck-mcp", group: "integration", manager: "PiDeckMcpService（PiDeck 对外 MCP 服务）", ipcFile: ["ipc/piDeckMcpIpc.ts"], preloadNamespaces: ["piDeckMcp"], channelPrefix: ["pideck-mcp"], aggregation: "aggregate" },

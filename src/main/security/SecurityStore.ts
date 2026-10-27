@@ -11,7 +11,7 @@
  */
 
 import { app } from "electron";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { renameWithRetry } from "../utils/fsRetry";
 import { createDefaultSecurityConfig, type SecurityConfig, type SecurityPolicySnapshot } from "../../shared/types/security";
@@ -26,16 +26,23 @@ export type SecurityStoreDeps = {
 	settingsStore: SettingsStore;
 	/** 日志回调（与 appLogger.info 同签名；不强制，缺省静默） */
 	log?: (domain: string, message: string, details?: Record<string, unknown>) => void;
+	/**
+	 * 快照写盘成功后的回调（可选）。远端会话的安全门读的是**远端副本**，所以等级/配置一变就要
+	 * 把同一份字节热推到已连接主机；回调失败不影响本机流程（调用方自己 catch）。
+	 */
+	onSnapshotWritten?: (bytes: Buffer) => void;
 };
 
 export class SecurityStore {
 	private readonly settingsStore: SettingsStore;
 	private readonly log: (domain: string, message: string, details?: Record<string, unknown>) => void;
+	private readonly onSnapshotWritten: (bytes: Buffer) => void;
 	private snapshotPromise: Promise<void> | null = null;
 
 	constructor(deps: SecurityStoreDeps) {
 		this.settingsStore = deps.settingsStore;
 		this.log = deps.log ?? (() => undefined);
+		this.onSnapshotWritten = deps.onSnapshotWritten ?? (() => undefined);
 	}
 
 	/** 快照绝对路径（Windows 用户数据目录；WSL 下由 PiProcess 转 Linux 路径后注入） */
@@ -152,16 +159,32 @@ export class SecurityStore {
 		return this.snapshotPromise;
 	}
 
+	/** 读回刚写出的快照字节（远端安全门热推送用）；读不到返回 undefined，不抛。 */
+	async readSnapshotBytes(): Promise<Buffer | undefined> {
+		try {
+			return await readFile(this.getSnapshotPath());
+		} catch {
+			return undefined;
+		}
+	}
+
 	/** 写快照文件（原子写：先写临时文件再 rename，避免扩展读到半截 JSON）。 */
 	private async writeSnapshot(config: SecurityConfig): Promise<void> {
 		const snapshot: SecurityPolicySnapshot = buildSnapshot(config);
+		const text = JSON.stringify(snapshot, null, 2);
 		const target = this.getSnapshotPath();
 		const tmp = `${target}.tmp`;
 		try {
 			await mkdir(app.getPath("userData"), { recursive: true });
-			await writeFile(tmp, JSON.stringify(snapshot, null, 2), "utf8");
+			await writeFile(tmp, text, "utf8");
 			// 杀软扫描可能瞬时锁住刚写出的 tmp，rename 走退避重试；仍失败则由外层 catch 降级日志
 			await renameWithRetry(tmp, target);
+			// 远端副本只在写盘成功后推送（与磁盘上的字节逐字一致）。
+			try {
+				this.onSnapshotWritten(Buffer.from(text, "utf8"));
+			} catch (error) {
+				this.log("security", "Snapshot listener failed", { error: error instanceof Error ? error.message : String(error) });
+			}
 		} catch (error) {
 			// 快照写失败不阻塞主流程：Agent 以旧快照继续运行（fail-safe 方向由扩展 defaultAction 兜底）
 			this.log("security", "Snapshot write failed", {

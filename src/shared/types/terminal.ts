@@ -10,10 +10,9 @@ export type TerminalShellCandidate = {
 export type TerminalTab = {
 	id: string;
 	agentId: string;
-	/** 归属键（agent:<id> / cwd:<normalized>）：主进程按此隔离终端实例，切换项目/agent 不串台 */
+	/** Stable owner identity (agent:<id> / project:<id>); contains no host path. */
 	ownerKey: string;
 	title: string;
-	cwd: string;
 	shell: TerminalShell;
 	createdAt: number;
 	exited?: boolean;
@@ -21,6 +20,10 @@ export type TerminalTab = {
 	buffer?: string;
 	/** 前台进程名快照（node-pty process）：渲染层在「关闭确认=running」时据此判断是否有任务在跑 */
 	frontProcess?: string;
+	/** SSH tabs have a fixed remote shell and a bounded acknowledged output stream. */
+	location?: "ssh";
+	outputSequence?: number;
+	exitReason?: string;
 };
 
 /**
@@ -39,17 +42,23 @@ export type TerminalAgentTarget = {
 export type TerminalProjectTarget = {
 	kind: "project";
 	projectId: string;
-	cwd: string;
 };
 
 export type TerminalTarget = TerminalAgentTarget | TerminalProjectTarget;
 
+/** A single stable bucket key shared by main, renderer, and preview terminal routing. */
+export function terminalOwnerKeyFor(target: TerminalTarget): string {
+	return target.kind === "agent" ? `agent:${target.agentId}` : `project:${target.projectId}`;
+}
+
 export type TerminalDataEvent = {
 	tabId: string;
 	data: string;
+	sequence?: number;
 };
 
 export type TerminalExitEvent = {
 	tabId: string;
 	exitCode?: number;
+	reason?: string;
 };

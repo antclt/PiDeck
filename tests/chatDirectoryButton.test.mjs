@@ -6,25 +6,6 @@ import test from "node:test";
 // （弹目录选择器 → 主进程写 chat-path.json → 重扫会话 → toast）。IPC 链路（choose-chat-path
 // / set-chat-path）已有主进程实现与 preload 暴露，此处断言渲染层接线完整、无重复入口。
 
-test("ChatDirectoryButton exists and gates on chat projects only", () => {
-	const source = readFileSync("src/renderer/src/components/session/ChatDirectoryButton.tsx", "utf8");
-	// 组件按「会话所属项目」判定，非 chat 项目不渲染（避免与普通项目的目录管理重复抢占）
-	assert.match(source, /export function ChatDirectoryButton\(props: \{ sessionId: string \}\)/);
-	assert.match(source, /sessionRecordByIdAtomFamily\(props\.sessionId\)/);
-	assert.match(source, /projectByIdAtomFamily\(session\?\.projectId \?\? ""\)/);
-	assert.match(source, /if \(!session \|\| !isChatProject\(project\)\) return null/);
-});
-
-test("ChatDirectoryButton reuses the App-level changeChatPath service", () => {
-	const source = readFileSync("src/renderer/src/components/session/ChatDirectoryButton.tsx", "utf8");
-	assert.match(source, /useSessionPaneServices\(\)/);
-	assert.match(source, /\{ changeChatPath, showNotice \}/);
-	assert.match(source, /void changeChatPath\(project\)\.catch/);
-	// 图标入口语义：目录图标 + i18n 文案
-	assert.match(source, /FolderCog/);
-	assert.match(source, /t\("app\.chatProjectSettings"\)/);
-});
-
 test("SessionView keeps directory settings out of the header actions slot", () => {
 	const source = readFileSync("src/renderer/src/components/session/SessionView.tsx", "utf8");
 	assert.doesNotMatch(source, /ChatDirectoryButton/);

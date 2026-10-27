@@ -18,6 +18,7 @@ import { useFavorites } from "../../hooks/useFavorites";
 import { SelectionToolbar } from "./timeline/SelectionToolbar";
 import { MessageContextMenu } from "./timeline/MessageContextMenu";
 import { deriveTimelineRunActivity } from "./timeline/timelineRunActivity";
+import { deriveRetryProgress } from "./timeline/retryProgress";
 import { canLoadSessionTimelineMore, deriveSessionSurfaceRuntime, type SessionTimelineController } from "../../hooks/useSessionTimelineController";
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
@@ -205,6 +206,10 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 	// 状态条只订 streaming 位（boolean），不订正文 atom，避免 50ms 重渲整条 timeline。
 	const liveTextStreaming = useAtomValue(liveTextStreamingBySessionAtom(sessionId ?? ""));
 	const liveThinkingStreaming = useAtomValue(liveThinkingStreamingBySessionAtom(sessionId ?? ""));
+	// 自动重试退避期：状态条必须说清「在等下一次重试」而不是笼统的「正在处理」。
+	// 数据源是时间线上的重试卡（pi auto_retry / DSH llm/retry 同款），卡片收口即回到普通状态。
+	const retryProgress = useMemo(() => deriveRetryProgress(activeMessages), [activeMessages]);
+	// 不在这里读本轮已用时间：TurnRow 末尾的 LiveDuration 是唯一的实时耗时展示点。
 	const sessionRuntimeBusy = modernSurfaceState.isBusy;
 	// Pi can compact immediately after agent_end. Keep the session busy during that
 	// file rewrite, but finalize the just-completed model turn in the timeline.
@@ -1117,7 +1122,16 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 					/>
 
 					{hasActiveConversation && !cancellingUi && isRuntimeBusy && (
-						<RespondingIndicator isCompacting={isCompacting} isStarting={activeConversationStatus === "starting"} isExecutingTool={activeRuntimeState?.isExecutingTool} executingToolName={activeRuntimeState?.executingToolName} liveTextStreaming={liveTextStreaming} liveThinkingStreaming={liveThinkingStreaming} />
+						<RespondingIndicator
+							isCompacting={isCompacting}
+							isStarting={activeConversationStatus === "starting"}
+							isExecutingTool={activeRuntimeState?.isExecutingTool}
+							executingToolName={activeRuntimeState?.executingToolName}
+							liveTextStreaming={liveTextStreaming}
+							liveThinkingStreaming={liveThinkingStreaming}
+							retry={retryProgress}
+							contextPercent={activeRuntimeState?.contextPercent}
+						/>
 					)}
 					{props.replyActionsRef ? <div key={sessionId} ref={props.replyActionsRef} data-session-id={sessionId} data-testid="session-reply-actions-target" className="min-w-0 empty:hidden" /> : null}
 				</div>

@@ -12,6 +12,9 @@ import type { SessionRecord } from "../../../shared/types";
  * （components/sidebar/activitySessionsModel）共用同一判据，避免两处各写一遍后漂移
  * ——过滤通过但渲染返回 null 会留下一行空标题。
  */
-export function isDisplayableSessionRecord(session: Pick<SessionRecord, "filePath" | "backend">): boolean {
-	return Boolean(session.filePath) || session.backend === "dsh" || session.backend === "imagegen" || session.backend === "acp";
+export function isDisplayableSessionRecord(session: Pick<SessionRecord, "filePath" | "backend" | "locator">): boolean {
+	// ssh locator 的 filePath 在规范化时被清空（远端路径不是本机路径），但记录本身可显示：
+	// 导入的远端会话必须留在活动列表/最近列表里，否则用户一导入就从侧栏消失。
+	// 判据必须与 sessionRecordToSummary（显示管线）同源，否则会留下空标题行。
+	return Boolean(session.filePath) || session.locator?.kind === "ssh" || session.backend === "dsh" || session.backend === "imagegen" || session.backend === "acp";
 }

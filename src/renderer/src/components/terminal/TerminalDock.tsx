@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent } from "react";
+import { isRemoteProject } from "../../../../shared/projectLocation";
 // xterm 主库 + addon 按需装载（首次创建终端实例才加载，不进启动 chunk）；
 // 这里只引类型供 ref 声明，值统一经 loadXtermModules 取。
 import type { Terminal } from "@xterm/xterm";
@@ -8,6 +9,7 @@ import type { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { loadXtermModules, type XtermModules } from "./xtermModules";
 import { openInSystemBrowser } from "../../utils/openExternal";
+import { remoteTerminalErrorMessage } from "../../utils/remoteTerminalErrors";
 import { showNotice } from "../../utils/notice";
 import { writeClipboard } from "../../utils/clipboard";
 import { ChevronDown, ChevronUp, MoreHorizontal, Plus, X } from "lucide-react";
@@ -16,7 +18,8 @@ import { Button } from "../ui-shadcn/button";
 import { RemovalList, RemovalRow } from "../removal/RemovalList";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui-shadcn/popover";
 import type { PiDesktopApi } from "../../../../preload";
-import type { TerminalShell, TerminalTarget } from "../../../../shared/types";
+import { terminalOwnerKeyFor } from "../../../../shared/types/terminal";
+import type { Project, TerminalShell, TerminalTarget } from "../../../../shared/types";
 import type { TerminalConfirmCloseMode, TerminalCursorStyle, TerminalThemeId } from "../../../../shared/types/settings";
 import { useTerminalDockTabs } from "../../hooks/useTerminalDockTabs";
 import { TERMINAL_THEME_DEFS, resolveTerminalTheme } from "../../terminalThemes";
@@ -59,6 +62,12 @@ function resolveTerminalFont(settings: TerminalDockSettings): { fontFamily: stri
 
 const TERMINAL_OPEN_ANIMATION_MS = 300;
 
+/** Runtime refresh can remount xterm after the composer/editor already claimed keyboard input. */
+function focusWithoutStealingInput(terminal: Terminal, container: HTMLElement | null): void {
+	const focused = document.activeElement;
+	if (focused?.matches("input, textarea, [contenteditable='true']") && !container?.contains(focused)) return;
+	terminal.focus();
+}
 export function TerminalDock(props: {
 	target: TerminalTarget;
 	open: boolean;
@@ -75,6 +84,8 @@ export function TerminalDock(props: {
 	onClose: () => void;
 	/** 可选：终端归属键（agent:<id> / project:<id>）；缺省时按 target 推导 */
 	sessionKey?: string;
+	/** 可选：project target 对应的项目记录（父级读取后传入；远端项目在 SSH tab 建立前也要按远端外观渲染） */
+	targetProject?: Project;
 }) {
 	const dockRef = useRef<HTMLElement>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
@@ -89,8 +100,10 @@ export function TerminalDock(props: {
 	const pendingStartupCommandRef = useRef<Set<string>>(new Set());
 	/** 启动命令走 ref 读取：onData 订阅不能因设置变更重建，重建窗口内到达的数据事件会丢掉首个提示符触发点 */
 	const startupCommandRef = useRef(props.terminalSettings.startupCommand);
+	/** 远端终端输出序号（ACK 用）：重挂后迟到/重复帧按序号丢弃，ACK 让主进程安全裁剪回放缓冲。 */
+	const sequencesRef = useRef<Record<string, number>>({});
 	// 归属键：决定加载 gate 与 pending 占位判断；project 终端由父级显式传入
-	const sessionKey = props.sessionKey ?? (props.target.kind === "agent" ? `agent:${props.target.agentId}` : `project:${props.target.projectId}`);
+	const sessionKey = props.sessionKey ?? terminalOwnerKeyFor(props.target);
 	const { open, collapsed } = props;
 	const [themeMenuOpen, setThemeMenuOpen] = useState(false);
 	const [contentReady, setContentReady] = useState(false);
@@ -110,10 +123,21 @@ export function TerminalDock(props: {
 			const ids = new Set(nextTabs.map((tab) => tab.id));
 			// ensure/create 完成后只留下当前归属；未知标签只能在 IPC 结算前短暂暂存。
 			for (const id of Object.keys(buffersRef.current)) if (!ids.has(id)) delete buffersRef.current[id];
+			for (const id of Object.keys(sequencesRef.current)) if (!ids.has(id)) delete sequencesRef.current[id];
 			for (const id of pendingStartupCommandRef.current) if (!ids.has(id)) pendingStartupCommandRef.current.delete(id);
 			for (const tab of nextTabs) buffersRef.current[tab.id] = tab.buffer ?? buffersRef.current[tab.id] ?? "";
+			// 远端终端帧带单调序号：水合后 ACK 已接收位置；重复水合幂等。
+			for (const tab of nextTabs) {
+				if (tab.outputSequence === undefined) continue;
+				sequencesRef.current[tab.id] = tab.outputSequence;
+				void props.terminal.acknowledge(tab.id, tab.outputSequence).catch(() => undefined);
+			}
 		},
 		onCreated(tab) {
+			if (tab.outputSequence !== undefined) {
+				sequencesRef.current[tab.id] = tab.outputSequence;
+				void props.terminal.acknowledge(tab.id, tab.outputSequence).catch(() => undefined);
+			}
 			// 提示符可能先于 create 返回；只补发新建且仍运行的标签，不对恢复终端重跑。
 			if (tab.exited || !startupCommandRef.current.trim()) return;
 			pendingStartupCommandRef.current.add(tab.id);
@@ -123,11 +147,17 @@ export function TerminalDock(props: {
 			for (const id of tabIds) {
 				pendingStartupCommandRef.current.delete(id);
 				delete buffersRef.current[id];
+				delete sequencesRef.current[id];
 			}
 		},
 		onClose: props.onClose,
 		onExpand: () => props.onCollapsedChange(false),
 	});
+	// 远端项目终端：SSH tab 建立前也要按远端外观渲染；主进程仍会校验每个启动目标。
+	// 项目记录由父级读取后经 props 传入——本组件不依赖 Jotai，dev 的 terminalDock harness
+	// 仅通过公开 props 渲染它（合并前本组件没有 jotai 依赖）。
+	const targetProject = props.target.kind === "project" ? props.targetProject : undefined;
+	const remoteTerminal = (targetProject !== undefined && isRemoteProject(targetProject)) || activeTab?.location === "ssh";
 	const themeId = props.terminalSettings.themeId;
 	// 主题解析的唯一入口：inherit 按应用明暗取 pi-soft 亮/暗版，显式主题不分明暗。
 	const resolvedTheme = useMemo(() => resolveTerminalTheme(themeId, appTheme), [themeId, appTheme]);
@@ -210,9 +240,10 @@ export function TerminalDock(props: {
 		startupCommandRef.current = props.terminalSettings.startupCommand;
 	}, [props.terminalSettings.startupCommand]);
 
-	// 独立加载可用 shell 列表，避免与 loadTabs 耦合
+	// Remote targets never query or display the local shell candidates, including startup failures.
 	useEffect(() => {
 		if (!open || !contentReady) return;
+		if (remoteTerminal) return;
 		let cancelled = false;
 		void props.terminal
 			.shells()
@@ -226,7 +257,7 @@ export function TerminalDock(props: {
 		return () => {
 			cancelled = true;
 		};
-	}, [props.terminal, open, contentReady]);
+	}, [props.terminal, open, contentReady, remoteTerminal]);
 
 	/** 发送前移除待办，避免输出重入重复执行；失败不自动重试可能有副作用的命令。 */
 	function sendStartupCommand(tabId: string) {
@@ -242,19 +273,27 @@ export function TerminalDock(props: {
 	useEffect(() => {
 		const offData = props.terminal.onData((payload) => {
 			if (!acceptsTabEvent(payload.tabId)) return;
+			// 远端终端帧带单调 sequence：迟到/重复帧不能重复写入（ACK 后主进程可能重发同段）。
+			if (payload.sequence !== undefined && payload.sequence <= (sequencesRef.current[payload.tabId] ?? 0)) {
+				void props.terminal.acknowledge(payload.tabId, payload.sequence).catch(() => undefined);
+				return;
+			}
 			// 回放缓冲与主进程对齐截尾到 200K：只作 xterm 重建回放源，不能无限常驻
 			buffersRef.current[payload.tabId] = appendTerminalReplayBuffer(buffersRef.current[payload.tabId] ?? "", payload.data);
-			if (payload.tabId === activeTabIdRef.current) {
-				xtermRef.current?.write(payload.data);
-			}
+			if (payload.sequence !== undefined) sequencesRef.current[payload.tabId] = payload.sequence;
+			const acknowledge = () => {
+				if (payload.sequence !== undefined) void props.terminal.acknowledge(payload.tabId, payload.sequence).catch(() => undefined);
+			};
+			if (payload.tabId === activeTabIdRef.current && xtermRef.current) xtermRef.current.write(payload.data, acknowledge);
+			else acknowledge();
 			// 等 shell 首次输出后再注入；与 create 完成后的早到提示符走同一去重入口。
 			sendStartupCommand(payload.tabId);
 		});
 		const offExit = props.terminal.onExit((payload) => {
 			if (!acceptsTabEvent(payload.tabId)) return;
 			pendingStartupCommandRef.current.delete(payload.tabId);
-			markExited(payload.tabId, payload.exitCode);
-			const exitText = `\r\n[process exited${payload.exitCode != null ? ` with code ${payload.exitCode}` : ""}]\r\n`;
+			markExited(payload.tabId, payload.exitCode, payload.reason);
+			const exitText = payload.reason ? `\r\n[${remoteTerminalErrorMessage(payload.reason)}]\r\n` : `\r\n[process exited${payload.exitCode != null ? ` with code ${payload.exitCode}` : ""}]\r\n`;
 			buffersRef.current[payload.tabId] = appendTerminalReplayBuffer(buffersRef.current[payload.tabId] ?? "", exitText);
 			if (payload.tabId === activeTabIdRef.current) xtermRef.current?.write(exitText);
 		});
@@ -328,21 +367,11 @@ export function TerminalDock(props: {
 		// 再搜索/回放序列化/Unicode 宽度，最后链接点击。
 		// allowTransparency 不设置：PiDeck 走 CSS 层透明（实测 WebGL 下与 DOM 渲染器逐像素一致），
 		// 再开 xterm 自己的透明通道是重复实现。
-		try {
-			const webgl = new modules.WebglAddon();
-			// WebGL 上下文可能因 OOM / 系统休眠被浏览器回收；丢失时 dispose 回退 DOM 渲染器，
-			// 终端本身不受影响（官方 README 推荐的兜底方式）。
-			webgl.onContextLoss(() => {
-				if (webglRef.current !== webgl) return;
-				webglRef.current = null;
-				webgl.dispose();
-			});
-			terminal.loadAddon(webgl);
-			webglRef.current = webgl;
-		} catch (error) {
-			// 部分 Windows 机器/驱动不支持 WebGL2：静默回退 DOM 渲染器，不给用户报错
-			console.warn("[TerminalDock] WebGL renderer unavailable, falling back to DOM renderer", error);
-		}
+		// WebGL 渲染器在 terminal.open() 之后装配（见下方）：WebglAddon 的 activate() 要等
+		// 终端挂到 DOM 才跑，而 activate 内部 new 渲染器时若拿不到 WebGL2 会同步 throw——
+		// 那个 throw 发生在 xterm 的事件派发里，外层 try/catch 包不住，会变成未捕获异常
+		// （实测：--disable-gpu 下 renderer 崩在 commitPassiveMountEffect）。因此装配点
+		// 必须跟着 open() 一起纳入受控范围（装配语句用 modules.WebglAddon，值走惰性模块）。
 		// SearchAddon 已装配（后续搜索栏 UI 直接可用），本组件暂不持引用
 		terminal.loadAddon(new modules.SearchAddon());
 		const serialize = new modules.SerializeAddon();
@@ -356,6 +385,26 @@ export function TerminalDock(props: {
 		terminal.open(container);
 		xtermRef.current = terminal;
 		fitRef.current = fit;
+		// WebGL 只在 open() 之后装配：activate() 需要挂到 DOM 的终端才有 renderer，
+		// 且它在拿不到 WebGL2 时同步 throw（见上方注释）。这里整体 try/catch，
+		// 任何失败都只是留在 xterm 内置 DOM 渲染器上——产品路径本就依赖这条降级。
+		try {
+			const webgl = new modules.WebglAddon();
+			// WebGL 上下文可能因 OOM / 系统休眠被浏览器回收；丢失时 dispose 回退 DOM 渲染器，
+			// 终端本身不受影响（官方 README 推荐的兜底方式）。
+			webgl.onContextLoss(() => {
+				if (webglRef.current !== webgl) return;
+				webglRef.current = null;
+				webgl.dispose();
+				// dispose 后 renderer 回到 DOM；尺寸可能因换渲染器而变，补一次 fit 保持列数一致。
+				fit.fit();
+			});
+			terminal.loadAddon(webgl);
+			webglRef.current = webgl;
+		} catch (error) {
+			// 部分 Windows 机器/驱动（以及 --disable-gpu）不支持 WebGL2：静默回退 DOM 渲染器，不给用户报错。
+			console.warn("[TerminalDock] WebGL renderer unavailable, falling back to DOM renderer", error);
+		}
 		// 首次 fit、容器/设置/高度变化共用同一实例边界，旧 xterm 的迟到失败不能干扰新面板。
 		// 注（2027-02 解耦 activeTab 身份后）：闭包捕获的 activeTab.exited 会停留在
 		// 创建时的值（markExited 不再触发本 effect 重建）——这不构成问题：主进程
@@ -386,7 +435,7 @@ export function TerminalDock(props: {
 
 		const focusFrame = window.requestAnimationFrame(() => {
 			scheduleResize();
-			terminal.focus();
+			focusWithoutStealingInput(terminal, containerRef.current);
 		});
 		return () => {
 			io.dispose();
@@ -454,7 +503,9 @@ export function TerminalDock(props: {
 
 	useEffect(() => {
 		if (collapsed || !contentReady || !activeTab || activeTab.exited) return;
-		const frame = requestAnimationFrame(() => xtermRef.current?.focus());
+		const frame = requestAnimationFrame(() => {
+			if (xtermRef.current) focusWithoutStealingInput(xtermRef.current, containerRef.current);
+		});
 		return () => cancelAnimationFrame(frame);
 	}, [activeTab?.id, activeTab?.exited, collapsed, contentReady]);
 
@@ -506,7 +557,6 @@ export function TerminalDock(props: {
 											props.onCollapsedChange(false);
 											focusTerminalSoon();
 										}}
-										title={tab.cwd}
 									>
 										{tab.title}
 										{tab.exited ? ` · ${t("terminal.exited")}` : ""}
@@ -535,33 +585,40 @@ export function TerminalDock(props: {
 				    dock 挂在 react-resizable-panels 的 Panel 里，Panel 内层是 overflow:auto
 				    容器，菜单向上弹出会被裁剪（表现为「下拉没有值」）；Popover 渲染到 body，
 				    不受任何祖先 overflow 影响，且自带碰撞翻转与外部点击关闭。 */}
-					<Popover open={shellMenuOpen} onOpenChange={setShellMenuOpen}>
-						<PopoverTrigger asChild>
-							<Button type="button" variant="ghost" size="icon-xs" className="terminal-icon-btn size-6 inline-grid size-6 place-items-center rounded-md" title={t("terminal.selectShell")} disabled={loading || !contentReady}>
-								<ChevronDown size={12} />
-							</Button>
-						</PopoverTrigger>
-						<PopoverContent side="top" align="start" className="w-44 gap-0.5 p-1.5">
-							<strong className="px-1 py-0.5 text-xs">{t("terminal.selectShell")}</strong>
-							{shells.length === 0 && <span className="block px-1 py-1 text-micro text-muted-foreground">{t("terminal.shellEmpty")}</span>}
-							{shells.map((s) => (
-								<Button
-									key={s.shell}
-									type="button"
-									variant="ghost"
-									size="sm"
-									className={`h-auto w-full justify-start rounded-md px-2 py-1 text-left text-xs hover:bg-accent${s.available ? "" : " unavailable opacity-50"}`}
-									onClick={() => {
-										if (!s.available) return;
-										void addTabWithShell(s.shell);
-									}}
-									title={s.available ? undefined : t("terminal.shellNotAvailable")}
-								>
-									{s.label}
+					{!remoteTerminal && (
+						<Popover open={shellMenuOpen} onOpenChange={setShellMenuOpen}>
+							<PopoverTrigger asChild>
+								<Button type="button" variant="ghost" size="icon-xs" className="terminal-icon-btn size-6 inline-grid size-6 place-items-center rounded-md" title={t("terminal.selectShell")} disabled={loading || !contentReady}>
+									<ChevronDown size={12} />
 								</Button>
-							))}
-						</PopoverContent>
-					</Popover>
+							</PopoverTrigger>
+							<PopoverContent side="top" align="start" className="w-44 gap-0.5 p-1.5">
+								<strong className="px-1 py-0.5 text-xs">{t("terminal.selectShell")}</strong>
+								{shells.length === 0 && <span className="block px-1 py-1 text-micro text-muted-foreground">{t("terminal.shellEmpty")}</span>}
+								{shells.map((s) => (
+									<Button
+										key={s.shell}
+										type="button"
+										variant="ghost"
+										size="sm"
+										className={`h-auto w-full justify-start rounded-md px-2 py-1 text-left text-xs hover:bg-accent${s.available ? "" : " unavailable opacity-50"}`}
+										onClick={() => {
+											if (!s.available) return;
+											void addTabWithShell(s.shell);
+										}}
+										title={s.available ? undefined : t("terminal.shellNotAvailable")}
+									>
+										{s.label}
+									</Button>
+								))}
+							</PopoverContent>
+						</Popover>
+					)}
+					{remoteTerminal && (
+						<span className="px-2 text-xs text-muted-foreground" title={t("terminal.remoteShell")}>
+							SSH · /bin/sh
+						</span>
+					)}
 				</div>
 				<div className="terminal-actions flex shrink-0 items-center gap-0.5">
 					<Popover open={themeMenuOpen} onOpenChange={setThemeMenuOpen}>

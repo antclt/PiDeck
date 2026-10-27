@@ -133,6 +133,10 @@ export default defineConfig({
     define: {
       // 构建标记：npm run dist:win:dev 打包时注入 true，用于隔离 dev 构建的配置目录与 AppUserModelID。
       __PIDECK_DEV_BUILD__: JSON.stringify(process.env.PIDECK_DEV_BUILD === "1"),
+      // 发布流水线标记：只有 CI 发布 workflow（release.yml / build-dev.yml / release-linux-manual.yml）
+      // 显式注入 PIDECK_RELEASE_BUILD=1；本机打包脚本一律不设 → 构建来源判定为 local-package
+      // （见 src/main/buildIdentity.ts）。缺省 local 是安全方向：漏标只会让发布产物自带「本地构建」徽章。
+      __PIDECK_RELEASE_BUILD__: JSON.stringify(process.env.PIDECK_RELEASE_BUILD === "1"),
     },
   },
   preload: {

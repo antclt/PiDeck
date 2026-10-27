@@ -68,7 +68,9 @@ export function terminalOwnerKey(owner: TerminalDockOwner): string {
  * 单按钮双作用域：有 agent 优先挂 agent，否则挂当前项目。
  * 与「项目空引导页也能开终端」的产品规则对齐。
  */
-export function resolveTerminalOwner(activeAgentId: string | undefined, activeProjectId: string | undefined): TerminalDockOwner | undefined {
+export function resolveTerminalOwner(activeAgentId: string | undefined, activeProjectId: string | undefined, remoteProject = false): TerminalDockOwner | undefined {
+	// Remote terminals belong to the project and survive stopping/replacing its Agent.
+	if (remoteProject) return activeProjectId ? { kind: "project", id: activeProjectId } : undefined;
 	// pending-* 只是渲染层占位 id，主进程 agents map 里还不存在。
 	// 若把 Dock 挂到 pending owner 上，ensure/create 会立刻抛 Agent not found。
 	if (activeAgentId && !activeAgentId.startsWith("pending-")) {
@@ -186,8 +188,8 @@ export function shouldMountPaneTerminalDock(input: { ownerKey: string | undefine
  * 单栏视角的终端归属 + 目标解析（纯函数，可单测）：
  * 会话栏把自家会话的 runtime/record 喂进来，得到本栏自己的 owner 与 target，
  * 不再读取 App 级聚焦态（分屏双栏各挂各的 dock，焦点切换不清非聚焦栏终端）。
- * - agent runtime 可用 → agent 目标；绑定缺失 → 回退本会话项目的 cwd 目标。
- * - Chat 项目没有可落地的 cwd，不提供终端。
+ * - agent runtime 可用 → agent 目标；绑定缺失 → 回退本会话项目 ID，由主进程解析 cwd。
+ * - Chat 项目没有可用终端。
  * - owner 未解析（无 agent 也无 project）→ undefined。
  */
 export function resolvePaneTerminal(input: {
@@ -200,9 +202,9 @@ export function resolvePaneTerminal(input: {
 		  }
 		| undefined;
 	projectId?: string;
-	project?: { id: string; path: string; kind?: string } | undefined;
+	project?: { id: string; kind?: string; locator?: { kind: string } } | undefined;
 }): { owner: TerminalDockOwner; target: TerminalTarget } | undefined {
-	const owner = resolveTerminalOwner(input.runtime?.agentId, input.projectId);
+	const owner = resolveTerminalOwner(input.runtime?.agentId, input.projectId, input.project?.locator?.kind === "ssh");
 	if (!owner) return undefined;
 	if (owner.kind === "agent") {
 		// 与 shared 层 toSessionRuntimeTarget 同构：target 只表达「会话→当前绑定运行实例」句柄
@@ -226,7 +228,6 @@ export function resolvePaneTerminal(input: {
 			target: {
 				kind: "project",
 				projectId: input.project.id,
-				cwd: input.project.path,
 			},
 		};
 	}
@@ -251,15 +252,6 @@ export function applyTerminalPanelResize(input: { px: number; collapsed: boolean
 	}
 	const height = Math.max(TERMINAL_HEIGHT_MIN, Math.min(Math.round(input.px), Math.round(input.maxHeight)));
 	return input.collapsed ? { collapsed: false, height } : { height };
-}
-
-/**
- * 无 agent 时 PTY 会话键按 cwd 隔离，避免多项目共用 `_project_` 串台。
- * Windows 路径统一为正斜杠 + 小写，降低盘符/分隔符差异导致的重复会话。
- */
-export function projectTerminalSessionKey(cwd: string): string {
-	const normalized = cwd.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-	return `cwd:${normalized}`;
 }
 
 export function loadTerminalHeight(fallback: number): number {

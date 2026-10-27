@@ -1342,17 +1342,13 @@ select:focus-visible {
 .quick-task-shell.custom-titlebar-enabled .list-toolbar button {
   -webkit-app-region: no-drag;
 }
-/* 抽屉开关：固定在会话 Tab 栏最右侧 */
+/* 抽屉开关：只在抽屉关闭时出现在会话 Tab 栏最右侧（打开后开关并入抽屉活动栏） */
 .session-tabs-bar .header-drawer-toggle {
   color: var(--color-text-secondary);
 }
 .session-tabs-bar .header-drawer-toggle:hover {
   background: var(--color-bg-hover);
   color: var(--color-text-primary);
-}
-.session-tabs-bar .header-drawer-toggle.active {
-  background: var(--color-bg-active);
-  color: var(--color-accent);
 }
 .custom-titlebar-enabled .list-toolbar button,
 .custom-titlebar-enabled .toolbar-actions,

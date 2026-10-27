@@ -26,6 +26,27 @@ export class AcpMessageSnapshotStore {
 		// delete+set：同会话重写时刷新 LRU 位置，保证逐出的是“最久未更新”的会话。
 		this.sessions.delete(acpSessionId);
 		this.sessions.set(acpSessionId, messages.slice(-MESSAGE_SNAPSHOT_LIMIT));
+		this.evictOverflow();
+	}
+
+	/**
+	 * 归档回灌专用：用磁盘归档（已由 AcpSessionArchive 按 2000 条 / 8MiB 有界）种内存快照，
+	 * **不经 MESSAGE_SNAPSHOT_LIMIT 裁剪**。
+	 *
+	 * 为什么不复用 set()：400 条是「流式末段」的内存护栏，而重启后回灌要的是「能读回多少
+	 * 历史」。走 set() 会把归档前面的部分直接丢掉——重开长会话只看得到末尾 400 条，
+	 * 会话内查找也只覆盖那 400 条，#415 的「历史可读回」就成了半截。
+	 * 规模仍受归档自身上限与 MAX_TRACKED_SESSIONS 双重约束（回灌只发生在激活时，
+	 * 不是每条 update 都发生，不构成常态内存压力）。
+	 */
+	setRestored(acpSessionId: string, messages: ChatMessage[]): void {
+		this.sessions.delete(acpSessionId);
+		this.sessions.set(acpSessionId, messages.slice());
+		this.evictOverflow();
+	}
+
+	/** 会话数上限的 LRU 逐出（两个写口共用，保证策略只有一份）。 */
+	private evictOverflow(): void {
 		while (this.sessions.size > MAX_TRACKED_SESSIONS) {
 			const oldest = this.sessions.keys().next().value;
 			if (oldest === undefined) break;

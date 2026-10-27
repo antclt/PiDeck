@@ -192,7 +192,7 @@ export const ProcessGroupStep = memo(function ProcessGroupStep(props: ProcessGro
 - 组头文案：
   - `running === true`：`t(activityCategoryLabelKey(topKind, "running"))` + 若有实时详情则追加 `t("timeline.processGroup.separator")` + 详情；文案走 `<ShimmerText>`（复用 `src/renderer/src/components/session/ShimmerText.tsx`）。
   - 已结束：`topActivityKinds(group.counts, 3)` → 分别取 `done` 文案，按 `joinTwo` / `joinList` + `listSeparator` 组装；超过 3 类用 `more` 包裹；**`counts` 为空且有思考时**用 `t("timeline.processGroup.analyzed")`。
-  - 实时详情仅在**最后一个成员是 `tool-entry`** 时取其工具名 + 参数 → 复用 `timeline/toolPhrase.ts` 的 `getToolPhraseFromArgs(toolName, args).loadingLabel`；切回思考或取不到时不显示详情。
+  - 实时详情仅在**最后一个成员是 `tool-entry`** 时取其工具名 + 参数 → 复用 `timeline/toolPhrase.ts` 的 `getToolPhraseFromArgs(toolName, args).object`（**只取作用对象**：命令 / 路径 / 查询词），不拼 `loadingLabel`：类别标签已经说了在做什么，再拼「正在执行 …」是同一句两个「正在」，而没有可读参数的（如 `ask_question`）只会把原始工具名重复一遍。切回思考或取不到对象时不显示详情。**且仅在组体收起时显示**：展开后组体里那条运行中的工具行已经带命令 + 状态 + 秒表，组头再报一遍同一命令等于同一行「执行 …」一屏出现两次，长命令还会铺满整行挤压右侧 chevron（2026-11 用户截图反馈）。布局分工固定：标签 `shrink-0`（状态词永远完整可读），详情 `flex-[1_1_auto] truncate`（吃剩余宽度、尾部截断）——两者不参与同一场收缩竞争，长命令不得把标签压成省略号。回归守卫：`tests/processGroupRendering.test.mjs` 的「组头实时详情必须在组体收起时才显示」「组头实时详情只取作用对象，且标签不参与收缩」。
 - **组体**：`max-h-[min(320px,30vh)] overflow-y-auto overscroll-behavior-contain`，外层 `ml-5 border-l-2 border-border-subtle pl-3`（沿用现有「思考展开正文」的缩进语言）。限高 flex 列里的子项必须 `shrink-0`（AGENTS.md 记录过的塌陷事故）。
 - **组体内部跟底（2026-08 用户报修）**：组体复用外层时间线同一套跟底引擎 `lib/stick-to-bottom`（`useStickToBottom`），不另造阈值/意图判定。要点：
   - `scrollRef` 绑组体滚动容器，`contentRef` 绑内层内容包装盒：限高后的滚动容器不随成员增长，必须观察内容盒才能收到 `ResizeObserver` 通知；

@@ -190,3 +190,28 @@ test("rebindInFlightMessages：运行中工具消息重载后按 toolCallId 重�
 
 	assert.equal(runningTool.get("tc-9"), projectedTool.id, "工具身份映射重定向到投影版");
 });
+
+// 实时链路同源归一：message_end 的 stopReason=toolUse 但消息里没有 toolCall 块时，
+// 落库按最终回复（stop）处理。回归「纯文本回复被打断后折进执行过程、空闲后仍不可见」。
+test("message_end toolUse 但无 toolCall 块：落库为最终回复 stop", () => {
+	const manager = createManager();
+	manager.upsertAssistantMessage("agent-1", assistantEvent("被新消息打断的回复", "toolUse"));
+	const list = manager.messages.get("agent-1");
+	assert.equal(list.length, 1);
+	assert.equal(list[0].stopReason, "stop", "无工具调用的 toolUse 归一为 stop");
+});
+
+test("message_end toolUse 且带 toolCall 块：保留中间回复 toolUse", () => {
+	const manager = createManager();
+	manager.upsertAssistantMessage("agent-1", {
+		role: "assistant",
+		content: [
+			{ type: "text", text: "我查一下" },
+			{ type: "toolCall", id: "call-1", name: "read", arguments: { path: "src/a.ts" } },
+		],
+		stopReason: "toolUse",
+		timestamp: 2_000,
+	});
+	const list = manager.messages.get("agent-1");
+	assert.equal(list[0].stopReason, "toolUse", "带工具调用的中间回复保持 toolUse");
+});

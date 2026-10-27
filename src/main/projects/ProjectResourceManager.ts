@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { createProjectFileReadBoundary, resolveProjectFileReadPath, resolveProjectFileWritePath, type ProjectFileReadBoundary } from "../files/projectFileAccess";
 import { trashPath } from "../fs/trash";
 import type { CreateProjectSkillInput, PiExtensionSummary, PiPromptTemplateSummary, PiSkillLocation, PiSkillSummary, Project, ProjectInheritedResourceToggleInput, ProjectResourceDirectoryKind, ProjectResourceListResult, ProjectResourceOverrides } from "../../shared/types";
+import { isLocalProject } from "../../shared/projectLocation";
 import type { McpConfigFile } from "../../shared/types/mcp";
 import { parseMcpConfigFile, validateMcpConfigFile } from "../config/mcpConfig";
 import { revisionOf } from "../config/piConfigFileStore";
@@ -65,7 +66,10 @@ export class ProjectResourceManager {
 	constructor(
 		private readonly getProject: ProjectProvider,
 		private readonly translate: ProjectResourceCopy = () => "Project resource operation failed.",
-		private readonly resolveProjectPath: ProjectPathResolver = (project) => project.path,
+		private readonly resolveProjectPath: ProjectPathResolver = (project) => {
+			if (!isLocalProject(project)) throw new Error("UNSUPPORTED_PROJECT_LOCATION");
+			return project.path;
+		},
 		private readonly discoveryDependencies: ProjectResourceDiscoveryDependencies = {},
 		/** 原生过滤规则（A4）：装配后项目侧开关写 `.pi/settings.json` 原生条目。 */
 		private readonly depsNativeProjectRules: ProjectNativeRules | null = null,

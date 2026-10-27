@@ -6,11 +6,15 @@
  * session/update 通知投影消息、应答 session/request_permission 审批。
  *
  * 结构对照 DshAgentManager(同类第三后端),但大幅简化:无共享 host、无 mux
- * 重连、无 follow 泵——进程即会话,stop 即结束。历史不落 PiDeck 本地文件,
- * 由 agent CLI 自行持久化;重启恢复靠 acpSessionId + session/load 重放。
+ * 重连、无 follow 泵——进程即会话,stop 即结束。
+ *
+ * 历史来源有两级:agent CLI 侧(主)与 deck 侧归档(AcpSessionArchive,userData/acp-sessions,
+ * 副)。CLI 侧的 session/load 重放才是权威历史;归档只是为了「CLI 存档被清(换机器/清缓存)
+ * 或 CLI 根本不支持 load 时仍有历史可读 + 会话内可检索」,因此写盘只挂在回合结算与
+ * stop 上(见 create/sendPrompt/stop),失败只记日志,不参与会话成败判定。
  */
 import { randomUUID } from "node:crypto";
-import { ipcChannels } from "../../shared/ipc";
+import { agentEventTags } from "../../shared/ipc";
 import type { AcpAgentInfo, AcpToolConfig } from "../../shared/types/acp";
 import type { AgentGatewayCapability, AgentRuntimeState, AgentStatus, AgentTab, AvailableModel, CreateAgentInput } from "../../shared/types/agent";
 import type { ChatMessage, SendPromptInput, SendPromptResult, SessionUiResponseInput } from "../../shared/types/session";
@@ -25,6 +29,7 @@ import { authRequiredDescriptor, localizeCreateFailure } from "./acpFailureDescr
 import { buildAgentRuntimeState, type AcpAgentRuntime } from "./acpAgentRuntime";
 import { AcpTurnWatchdog } from "./acpTurnWatchdog";
 import { AcpMessageSnapshotStore } from "./AcpMessageSnapshotStore";
+import type { AcpSessionArchive } from "./AcpSessionArchive";
 import { killAcpProcessTree, spawnAcpProcess } from "./AcpProcessHost";
 import { performAcpHandshake } from "./AcpHandshake";
 import { AcpUpdatePipeline } from "./AcpUpdatePipeline";
@@ -60,6 +65,18 @@ type AcpManagerDeps = {
 	abortEscalationMs?: number;
 	/** 回合无输出 stall 判定阈值(默认 90s)。测试注入短值验证看门狗。 */
 	promptStallTimeoutMs?: number;
+	/**
+	 * 会话归档（userData/acp-sessions）：投影消息按 acpSessionId 落盘，重启后仍可读回。
+	 * 缺省不落盘（单测/未装配场景）：归档永远是增强项，不是会话可用性的前提。
+	 */
+	archive?: AcpSessionArchive;
+	/**
+	 * ACP 超时口径的运行时读口（settings.acpPromptStallTimeoutMs / acpPromptTurnTimeoutMs）。
+	 * 每次布防/派发实时读：设置变更后新回合立即生效，不需要重启。静态注入字段
+	 * （promptStallTimeoutMs/promptTurnTimeoutMs，单测用）优先于本读口（#411：静态快照
+	 * 让设置够不到看门狗，长工具调用/长回合被 90s/10min 硬编码误杀）。
+	 */
+	readAcpTimeoutSettings?: () => { promptStallTimeoutMs?: number; promptTurnTimeoutMs?: number };
 };
 
 export class AcpAgentManager implements SessionAgentGateway {
@@ -87,7 +104,11 @@ export class AcpAgentManager implements SessionAgentGateway {
 			forceStop: (runtime, reason) => this.forceStopRuntime(runtime, reason),
 			logger: deps.logger,
 			abortEscalationMs: deps.abortEscalationMs,
-			promptStallTimeoutMs: deps.promptStallTimeoutMs,
+			// getter：stall 阈值每次布防时实时解析（静态测试注入优先，其次 settings 读口，
+			// 最后代码内默认 90s）。构造期静态快照会让设置变更够不到看门狗（#411 根因之一）。
+			get promptStallTimeoutMs() {
+				return deps.promptStallTimeoutMs ?? deps.readAcpTimeoutSettings?.().promptStallTimeoutMs;
+			},
 		});
 		this.updates = new AcpUpdatePipeline(
 			{
@@ -129,15 +150,41 @@ export class AcpAgentManager implements SessionAgentGateway {
 	}
 
 	/**
-	 * 按 agent 侧 sessionId 找消息。runtime 在场返回全量投影；已停止（stop/升级强杀）
-	 * 返回最近一次 flush 的内存快照（cap MESSAGE_SNAPSHOT_LIMIT）——重入会话时时间线
-	 * 不再空白，激活后 session/load 重放会覆盖为完整历史（无 load 能力则快照即全部可见历史）。
+	 * 按 agent 侧 sessionId 找消息（**同步读口，只覆盖内存态**）。runtime 在场返回全量投影；
+	 * 已停止（stop/升级强杀）返回最近一次 flush 的内存快照（cap MESSAGE_SNAPSHOT_LIMIT）——
+	 * 重入会话时时间线不再空白，激活后 session/load 重放会覆盖为完整历史（无 load 能力
+	 * 则快照即全部可见历史）。
+	 *
+	 * 为什么这里不回退磁盘归档：这是同步契约（重启播种链路与既有回归用例都按同步返回
+	 * 断言），而归档读取是磁盘 IO，同步读在 Electron 主进程会阻塞事件循环。需要
+	 * 「内存 miss 时读归档」的异步边界（IPC/Web）用 readMessagesWithArchive。
 	 */
 	readMessagesByAcpSessionId(acpSessionId: string): ChatMessage[] {
 		if (!acpSessionId) return [];
 		for (const runtime of this.runtimes.values()) {
 			if (runtime.acpSessionId === acpSessionId) return runtime.projection.messages;
 		}
+		return this.messageSnapshots.get(acpSessionId) ?? [];
+	}
+
+	/**
+	 * 按 acpSessionId 读消息（**异步读口**）：runtime 投影 → 磁盘归档 → 内存快照逐级回退
+	 * （归档在快照之前，理由见方法内注释：快照有 400 条上限，归档才是完整历史）。
+	 *
+	 * 为什么保留两个入口：同步版是既有契约（开机恢复/播种与历史用例按同步断言），只覆盖
+	 * 内存；归档是磁盘 IO，不能塞进同步路径。归档读失败/文件损坏在 AcpSessionArchive
+	 * 内部降级为空数组，不抛——跨 IPC 不得把归档异常透给渲染层。
+	 */
+	async readMessagesWithArchive(acpSessionId: string): Promise<ChatMessage[]> {
+		if (!acpSessionId) return [];
+		for (const runtime of this.runtimes.values()) {
+			if (runtime.acpSessionId === acpSessionId) return runtime.projection.messages;
+		}
+		// 归档优先于内存快照：归档是结算点写的完整快照（≤2000 条），内存快照只是
+		// ≤400 条的流式末段。先读快照会让重开的长会话只剩末尾 400 条（时间线、分页、
+		// 会话内查找都被截断）。归档读不到（首次运行/写盘失败）才回退快照。
+		const archived = (await this.deps.archive?.read(acpSessionId)) ?? [];
+		if (archived.length > 0) return archived;
 		return this.messageSnapshots.get(acpSessionId) ?? [];
 	}
 
@@ -149,7 +196,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 		// ACP v1 无改名请求;标题由 agent 侧 session_info_update 维护,这里只改本地 tab。
 		const runtime = this.requireRuntime(agentId);
 		runtime.tab = { ...runtime.tab, title: name };
-		this.emit(ipcChannels.agentsState, this.list());
+		this.emit(agentEventTags.agentsState, this.list());
 		return { ...runtime.tab };
 	}
 
@@ -253,7 +300,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 			agentInfo: { capabilities: { loadSession: false, agentThought: false, sessionList: false, promptImage: false }, protocolVersion: ACP_PROTOCOL_VERSION },
 			status: "starting",
 			turnActive: false,
-			permissions: new AcpPermissionRequests(conn, (event) => this.emit(ipcChannels.agentsUiRequest, { agentId, ...event }), this.deps.permissionTimeoutMs),
+			permissions: new AcpPermissionRequests(conn, (event) => this.emit(agentEventTags.agentsUiRequest, { agentId, ...event }), this.deps.permissionTimeoutMs),
 			cancelling: false,
 			cancelReason: null,
 			reloading: false,
@@ -262,10 +309,16 @@ export class AcpAgentManager implements SessionAgentGateway {
 			abortEscalateTimer: null,
 			stallTimer: null,
 			lastUpdateAt: 0,
+			inFlightToolCalls: new Set<string>(),
 			escalatedStop: null,
 		};
 		this.runtimes.set(agentId, runtime);
-		this.emit(ipcChannels.agentsState, this.list());
+		this.emit(agentEventTags.agentsState, this.list());
+
+		// 归档回灌必须在 performAcpHandshake **之前**：握手的 seedMessages 读的是快照存储
+		// （load 失败回退 session/new、CLI 无 loadSession 能力这两条路径都靠它播种投影），
+		// 晚一步播种就是空数组 —— 重启/换机后历史仍然空白，正是本功能要解决的那件事。
+		await this.restoreArchivedSnapshot(input.acpSessionId);
 
 		try {
 			await performAcpHandshake(runtime, input.acpSessionId, cwd, spawnFailure, {
@@ -278,7 +331,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 		} catch (error) {
 			this.runtimes.delete(agentId);
 			this.killProcess(runtime);
-			this.emit(ipcChannels.agentsState, this.list());
+			this.emit(agentEventTags.agentsState, this.list());
 			const thrown = error instanceof Error ? error : new Error(String(error));
 			// AUTH_REQUIRED / CLI 未安装(ENOENT) / 握手超时：附描述符再抛，
 			// coordinator 透传为本地化引导 toast（不命中的错误原样透出原文）。
@@ -290,10 +343,13 @@ export class AcpAgentManager implements SessionAgentGateway {
 		if (runtime.title && runtime.tab.deckSessionId) this.deps.onTitleChanged?.(runtime.tab.deckSessionId, runtime.title);
 		runtime.status = "idle";
 		runtime.tab.status = "idle";
-		this.emit(ipcChannels.agentsState, this.list());
+		this.emit(agentEventTags.agentsState, this.list());
 		this.emitRuntimeState(agentId);
 		// load 重放/新建即回显:attach 会话历史立即可见。
 		this.updates.flushMessages(runtime, true);
+		// 握手成功即留一份归档副本（load 重放完成 / 归档回灌后），不必等到第一次回合结算
+		// 或 stop()。空投影不会写盘（AcpSessionArchive 的护栏），load 重放为空也不会写坏归档。
+		await this.persistArchive(runtime);
 		return { ...runtime.tab };
 	}
 
@@ -317,7 +373,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 					runtime.projection = settleAcpTurn(runtime.projection, "error");
 					this.failPendingPermissions(runtime);
 					this.updates.flushMessages(runtime, true);
-					this.emit(ipcChannels.agentsState, this.list());
+					this.emit(agentEventTags.agentsState, this.list());
 					this.emitRuntimeState(runtime.tab.id);
 					if (error) this.deps.logger?.warn("acp", `[${runtime.tool.name}] connection closed: ${error.message}`);
 				})
@@ -347,7 +403,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 		runtime.escalatedStop = null;
 		runtime.status = "running";
 		runtime.tab.status = "running";
-		this.emit(ipcChannels.agentsState, this.list());
+		this.emit(agentEventTags.agentsState, this.list());
 		this.emitRuntimeState(input.agentId);
 		// 先 flush 用户气泡再走物化链:base64→ref 可能慢,不等它,渲染层立即看到本条消息;
 		// 物化完成后下一次 flush 把快照里的 base64 换成 ref(内存形态不违反「base64 不进存储」契约)。
@@ -366,7 +422,10 @@ export class AcpAgentManager implements SessionAgentGateway {
 			// 长回合请求不套默认 60s 短超时:深思模型单回合可超分钟级,超时应由 abort/stop/连接死亡驱动;
 			// 10 分钟兑底防真悬死(实测 codex-acp 思考型回合 >60s,见 scripts/acpLiveSmoke.mjs)。
 			// 可注入 deps.promptTurnTimeoutMs 供测试缩短。
-			const result = (await conn.request("session/prompt", { sessionId: runtime.acpSessionId, prompt }, this.deps.promptTurnTimeoutMs ?? PROMPT_TURN_TIMEOUT_MS)) as AcpSessionPromptResult;
+			// 回合兑底超时三段解析：静态测试注入 → settings 读口（每次派发实时读，变更后
+			// 新回合生效）→ 代码内默认 10min。
+			const turnTimeoutMs = this.deps.promptTurnTimeoutMs ?? this.deps.readAcpTimeoutSettings?.().promptTurnTimeoutMs ?? PROMPT_TURN_TIMEOUT_MS;
+			const result = (await conn.request("session/prompt", { sessionId: runtime.acpSessionId, prompt }, turnTimeoutMs)) as AcpSessionPromptResult;
 			this.turnWatchdog.clearTurnTimers(runtime);
 			// 结算前先排空 update 链:result 帧与末批 update 同为 stdout 行序分发,
 			// 但链上每步含异步物化,settle 提前会把在途流式块拆成新回合。
@@ -384,6 +443,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 			runtime.projection = settleAcpTurn(runtime.projection, runtime.cancelling ? "cancelled" : "error");
 			runtime.turnActive = false;
 			runtime.permissions.cancelAll();
+			runtime.inFlightToolCalls.clear();
 			// 请求超时 ≠ agent 侧回合结束:agent 仍在跑旧回合,后续 session/prompt 会一直
 			// 排在它后面反复超时(opencode 卡死实测);abort() 也因 turnActive 已清而 no-op。
 			// 超时必须补发 session/cancel 让 agent 收口旧回合,否则会话永久卡死。
@@ -402,8 +462,11 @@ export class AcpAgentManager implements SessionAgentGateway {
 				runtime.tab.status = "idle";
 			}
 			this.updates.flushMessages(runtime, true);
-			this.emit(ipcChannels.agentsState, this.list());
+			this.emit(agentEventTags.agentsState, this.list());
 			this.emitRuntimeState(input.agentId);
+			// 回合结算（失败收口）后落盘：此时投影已 settle，是稳定快照；一次回合最多写一次，
+			// 不进 80ms flush。失败路径也要写 —— 已产生的部分输出同样是用户可见历史。
+			await this.persistArchive(runtime);
 			const message = error instanceof Error ? error.message : String(error);
 			const hasOutput = hasTurnOutput(runtime.projection.messages, seededIndex);
 			// 升级强杀（abort 宽限超时/二次停止/stall）：用户消息已留在时间线（cancelling 不回滚），
@@ -417,12 +480,13 @@ export class AcpAgentManager implements SessionAgentGateway {
 		}
 		runtime.turnActive = false;
 		runtime.permissions.cancelAll();
+		runtime.inFlightToolCalls.clear();
 		if (runtime.status === "running") {
 			runtime.status = "idle";
 			runtime.tab.status = "idle";
 		}
 		this.updates.flushMessages(runtime, true);
-		this.emit(ipcChannels.agentsState, this.list());
+		this.emit(agentEventTags.agentsState, this.list());
 		this.emitRuntimeState(input.agentId);
 		// 成功结算 ≠ 有可见输出：部分 CLI 因自身事件流竞态会正常回 end_turn 却漏掉全部
 		// session/update（OpenCode 1.15.4 /event 订阅竞态实测：消息已被处理但 client 一无所获，
@@ -436,8 +500,10 @@ export class AcpAgentManager implements SessionAgentGateway {
 			this.updates.flushMessages(runtime, true);
 			const error = `ACP agent ${runtime.tool.name} completed the turn without any output`;
 			this.deps.logger?.warn("acp", error, { tool: runtime.tool.name, sessionId: runtime.acpSessionId, stopReason: settledStopReason });
+			await this.persistArchive(runtime);
 			return emptyTurnRejection(runtime.tool.name);
 		}
+		await this.persistArchive(runtime);
 		return { accepted: true };
 	}
 
@@ -454,6 +520,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 		runtime.cancelling = true;
 		runtime.cancelReason = "user_stop";
 		runtime.permissions.cancelAll();
+		runtime.inFlightToolCalls.clear();
 		runtime.conn.notify("session/cancel", { sessionId: runtime.acpSessionId, reason: "user_stop" });
 		// cancel 只是通知:CLI 可能既不处理也不回包(opencode 流错误后实测 wedged)。
 		// 宽限内回合自行结算则定时器被清;超时升级强杀,保证「停止」最终必然生效。
@@ -463,6 +530,9 @@ export class AcpAgentManager implements SessionAgentGateway {
 	async stop(agentId: string): Promise<void> {
 		const runtime = this.runtimes.get(agentId);
 		if (!runtime) return;
+		// 停止是最后一个写盘窗口：进程即将被杀、runtime 即将删除，之后没有投影可写。
+		// 必须 await（退出路径 before-quit 会 await stopAll），否则最后一次写盘可能没落地。
+		await this.persistArchive(runtime);
 		runtime.status = "closed";
 		runtime.tab.status = "closed";
 		this.failPendingPermissions(runtime);
@@ -470,9 +540,9 @@ export class AcpAgentManager implements SessionAgentGateway {
 		// 删除前先推一次终态:stop()/abort 升级强杀都走这里,渲染层需要 closed 事件把
 		// 会话从 running 收口(删除后的 list() 不再含该 agent,不会产生逐 agent 事件;
 		// 用户主动停止另有 coordinator 的 detach 事件,此推送与其幂等)。
-		this.emit(ipcChannels.agentsState, this.list());
+		this.emit(agentEventTags.agentsState, this.list());
 		this.runtimes.delete(agentId);
-		this.emit(ipcChannels.agentsState, this.list());
+		this.emit(agentEventTags.agentsState, this.list());
 	}
 
 	async stopAll(): Promise<void> {
@@ -541,17 +611,47 @@ export class AcpAgentManager implements SessionAgentGateway {
 		return runtime;
 	}
 
+	/**
+	 * 从磁盘归档回灌内存快照（仅在内存没有该会话时）。
+	 * 内存优先的理由：内存快照是本进程最新的投影（归档只在结算点写，可能更旧），
+	 * 用归档覆盖会回退刚产生的历史。读失败/文件损坏在 AcpSessionArchive 内部降级空数组，
+	 * 这里不做错误分支——归档不可用等价于「没有历史」，不能影响 create。
+	 */
+	private async restoreArchivedSnapshot(acpSessionId: string | undefined): Promise<void> {
+		const archive = this.deps.archive;
+		if (!archive || !acpSessionId) return;
+		if (this.messageSnapshots.get(acpSessionId)) return;
+		const archived = await archive.read(acpSessionId);
+		if (archived.length === 0) return;
+		// 双检：await 期间同会话可能有 runtime 结算并写入更新的快照，别用旧归档盖掉它。
+		if (this.messageSnapshots.get(acpSessionId)) return;
+		// setRestored：回灌要完整历史，不能套用流式末段的 400 条裁剪（否则重启后只回灌
+		// 末尾 400 条，#415 的「历史可读回」打折）。
+		this.messageSnapshots.setRestored(acpSessionId, archived);
+	}
+
+	/**
+	 * 把当前投影排队写入归档（失败只记日志，永不外抛）。调用点固定在「回合结算后」与
+	 * stop()/stopAll()：那里投影已 settle、内容稳定，且是一回合一次的写频率。
+	 */
+	private persistArchive(runtime: AcpAgentRuntime): Promise<void> {
+		const acpSessionId = runtime.acpSessionId;
+		if (!this.deps.archive || !acpSessionId) return Promise.resolve();
+		return this.deps.archive.enqueueSave(acpSessionId, runtime.projection.messages);
+	}
+
 	private emitRuntimeState(agentId: string): void {
 		const runtime = this.runtimes.get(agentId);
 		if (!runtime) return;
 		// runtime state 与 agentsState 同步推送：渲染层底栏状态依赖两个通道。
-		this.emit(ipcChannels.agentsState, this.list());
-		this.emit(ipcChannels.agentsRuntimeState, { agentId, state: buildAgentRuntimeState(runtime) });
+		this.emit(agentEventTags.agentsState, this.list());
+		this.emit(agentEventTags.agentsRuntimeState, { agentId, state: buildAgentRuntimeState(runtime) });
 	}
 
-	/** 连接关闭/stop 时撤销全部审批；RPC 回包与 timer 清理由权限 owner 配对。 */
+	/** 连接关闭/stop 时撤销全部审批并清在途工具集；RPC 回包与 timer 清理由权限 owner 配对。 */
 	private failPendingPermissions(runtime: AcpAgentRuntime): void {
 		runtime.permissions.cancelAll();
+		runtime.inFlightToolCalls.clear();
 	}
 
 	/**

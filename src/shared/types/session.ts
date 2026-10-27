@@ -1,3 +1,5 @@
+import type { ProjectFileTarget } from "./project";
+
 export type ChatRole = "user" | "assistant" | "tool" | "system" | "error";
 
 import type { VideoContent } from "./videogen";
@@ -79,8 +81,12 @@ export type SessionMessagePage = {
 
 export type FileTreeNode = {
 	name: string;
-	path: string;
+	/** Local-only compatibility path; project actions must use target. */
+	path?: string;
+	displayPath?: string;
 	relativePath: string;
+	/** Stable project-scoped identity; optional only for preview and legacy local fixtures. */
+	target?: ProjectFileTarget;
 	type: "file" | "directory";
 	children?: FileTreeNode[];
 	/**
@@ -96,13 +102,15 @@ export type FileTreeNode = {
 
 /**
  * 工作区文件名搜索结果（issue #215）：扁平列表，不构树。
- * `path` 为绝对路径，预览/打开/在文件夹中显示等复用 FileTreeNode 的下游链路；
+ * `target` 是项目作用域下的规范身份；`displayPath` 仅用于界面展示，`path` 仅供 local compatibility adapter。
  * 高亮由渲染层用查询词在 name 上 indexOf 计算，主进程不冗余回传命中片段。
  */
 export type FileSearchResult = {
 	name: string;
-	path: string;
+	path?: string;
+	displayPath?: string;
 	relativePath: string;
+	target?: ProjectFileTarget;
 	type: "file" | "directory";
 };
 
@@ -130,6 +138,16 @@ export type FileContentSearchResult = {
 
 export type SessionSource = "pi" | "codex" | "claude" | "opencode" | "zcode" | "workbuddy" | "cursor" | "qoder" | "kimi" | "kimiwork" | "minimax";
 export type SessionEnvironment = "native" | "wsl";
+
+export type SessionLocator = { kind: "local"; environment: SessionEnvironment; filePath?: string; wslDistro?: string; wslUser?: string } | { kind: "ssh"; hostId: string; remotePath?: string; remoteSessionId?: string; remotePathAliases?: string[] };
+
+export type LegacySessionLocationFields = {
+	environment: SessionEnvironment;
+	filePath?: string;
+	wslDistro?: string;
+	wslUser?: string;
+	wsl?: boolean;
+};
 
 /**
  * 外部连接渠道（会话来源标记）：外部 IM 桥（微信/飞书）在 PiDeck 里建的会话。
@@ -174,7 +192,9 @@ export type SessionSortModeId = "updatedAt" | "createdAt" | "title";
 
 export type SessionSummary = {
 	id: string;
+	/** Local scanner identity; session consumers should use locator and catalog ID. */
 	filePath: string;
+	locator?: SessionLocator;
 	/** 会话归属项目 id（渲染层 worktree 家族区分用；扫描摘要恒缺省，catalog 记录回填）。 */
 	projectId?: string;
 	projectPath?: string;
@@ -255,7 +275,33 @@ export type ArchivedDshSession = {
 export type ArchivedPiSession = {
 	summary: SessionSummary;
 	originalPath?: string;
+	/**
+	 * 远端归档条目（P4.5b）：远端文件被 `mv` 进远端 `.pideck-archive/` 后，本机只剩归档索引，
+	 * 恢复身份是**本机 catalog 会话 id**（远端没有本机归档路径，所以恢复走
+	 * `sessions:catalog-unarchive-remote` 而不是本机路径契约）。
+	 * 与 `originalPath` 分开：`originalPath` 是「本机文件要移回哪里」，远端条目没有这个信息。
+	 */
+	archivedRemoteSessionId?: string;
 };
+
+/**
+ * 远端归档会话「永久删除」的两步信封（Phase 5）。
+ *
+ * 为什么是「请求 → 一次性确认 → 回答」而不是一个 confirmed 参数：高风险破坏性操作不能相信
+ * renderer 自报的 confirmed；main 用 PendingConfirmationBroker 持有短暂、sender 绑定、状态摘要绑定
+ * 的一次性 requestId，消费即失效（重放/过期/别的窗口回答都只能得到 CONFIRMATION_REQUIRED）。
+ * 请求入参只有本机 catalog 会话 id，远端路径永远由 main 从归档索引读取。
+ */
+export type RemoteArchivedSessionDeleteRequestResult =
+	| { ok: true; status: "pending"; requestId: string; expiresAt: number }
+	/** 失败码见 shared/sessionDeleteCodes.ts 的闭集（busy/unavailable/entryNotFound/notArchived…）。 */
+	| { ok: false; code: string };
+
+export type RemoteArchivedSessionDeleteAnswerResult =
+	/** deleted=false 表示用户拒绝（deny），不是失败。 */
+	| { ok: true; deleted: boolean }
+	/** 失败码；RESULT_UNCONFIRMED 表示远端可能已删除，UI 必须保留未知态且不自动刷新掉。 */
+	| { ok: false; code: string };
 
 /** PiDeck-owned session identity, independent from a running Pi process. */
 export type SessionRecord = {
@@ -275,6 +321,9 @@ export type SessionRecord = {
 	sideTask?: boolean;
 	/** 运行时后端（pi/dsh）；缺省 "pi"，旧 catalog 数据无需迁移。 */
 	backend?: import("./agent").AgentBackend;
+	/** Canonical file-backed location; absent for DSH, imagegen, and anonymous sessions. */
+	locator?: SessionLocator;
+	/** Local-only compatibility path; use locator for history routing. */
 	filePath?: string;
 	wslDistro?: string;
 	wslUser?: string;
@@ -497,6 +546,20 @@ export type SessionRuntimeTarget = {
 	runtimeGeneration: number;
 };
 
+/**
+ * 远端会话本次实际注入的 PiDeck 内置扩展（P4.4 扩展面）。
+ *
+ * `applied` 是**运行时事实上注入的 basename 列表**（顺序即 `-e` 顺序），不是编译期「应该能」：
+ * 渲染层的能力门（计划/目标模式、安全等级）只认它。空数组 + 闭集 reason 表示降级，UI 据此禁用入口
+ * 并给出原因，而不是让用户选了却什么都不发生。
+ */
+export type RemoteSessionExtensions = {
+	applied: readonly string[];
+	reason?: "REMOTE_PI_EXTENSIONS_UNSUPPORTED" | "REMOTE_EXTENSIONS_UNAVAILABLE" | "REMOTE_EXTENSIONS_DISABLED" | "REMOTE_EXTENSIONS_NONE";
+	/** 诊断用稳定码（不直接展示；reason=REMOTE_EXTENSIONS_UNAVAILABLE 时可能带部署失败码）。 */
+	detail?: string;
+};
+
 export type SessionRuntimeInfo = SessionRuntimeTarget & {
 	projectId: string;
 	cwd: string;
@@ -505,6 +568,18 @@ export type SessionRuntimeInfo = SessionRuntimeTarget & {
 	createdAt: number;
 	compactionCount?: number;
 	noSession?: boolean;
+	/**
+	 * 远端会话标记（P4.2 的字段名；P4.4b 后它不再表示「资源未加载」，而是「远端项目 trust 由 PiDeck 的
+	 * 决策表管理」）。渲染层用它决定**是否**显示 trust 条；四种展示态（未决策 / 已信任 / 已拒绝 /
+	 * 因 endpoint 变更作废）来自决策表，不依赖任何 pi 事件（目标远端版本没有 `project_trust` 事件）。
+	 * 本机会话不带它；预览层按它显示常驻提示（缺失 ⇒ 不显示）。
+	 *
+	 * 放在 runtime info 里而不只走 `agents:state`：那个推送只在该会话发生状态变化时才来，
+	 * 而 runtime 快照（`sessions:runtime-info`）是渲染层重载/首次渲染时就能拿到的。
+	 */
+	remoteTrustUnhandled?: boolean;
+	/** 远端会话实际注入的内置扩展（见 `RemoteSessionExtensions`）；本机会话不带。 */
+	remoteExtensions?: RemoteSessionExtensions;
 	/** PiDeck 会话身份（AgentTab.deckSessionId 透传）：渲染层侧栏 ACP「agent↔会话」配对用，缺它会把同一会话画成两行。 */
 	deckSessionId?: string;
 };

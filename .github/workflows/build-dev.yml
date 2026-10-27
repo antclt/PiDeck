@@ -129,6 +129,9 @@ jobs:
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 发布产物标记（dev 通道同样是正式发布）：注入后构建来源判定 release，
+          # 否则 PiDeck Dev 安装包会在设置页显示「本地构建」（见 src/main/buildIdentity.ts）。
+          PIDECK_RELEASE_BUILD: "1"
           ELECTRON_MIRROR: ${{ matrix.electron_mirror }}
           ELECTRON_BUILDER_BINARIES_MIRROR: ${{ matrix.electron_builder_binaries_mirror }}
 

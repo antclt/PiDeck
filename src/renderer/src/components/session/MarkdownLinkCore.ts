@@ -46,8 +46,12 @@ export function markdownUrlTransform(url: string): string {
  * 符合文件路径时转换，因此模型遵循 `path:line` 规则后，行内代码也能直接点击。
  * 匹配规则与存在性校验共用 utils/filePathLinks 的 matchPlainFilePaths（含 URL 尾巴排除），
  * 保证「渲染出的链接」与「后续 stat 校验的对象」永远同一份字符串。
+ *
+ * 导出给 remarkRecoverInlineLinks 复用：救回的链接必须也是 file:// 形式。
+ * 裸盘符 `C:/...` 会被 sanitize 当成未知协议 `c:` 而剥掉 href，渲染出无 href 的
+ * <a>（看得到文字、点不动、也没有右键菜单）。
  */
-function encodeFileLinkTarget(path: string): string {
+export function encodeFileLinkTarget(path: string): string {
 	return `file://${encodeURIComponent(path).replace(/%2F/g, "/").replace(/%3A/g, ":")}`;
 }
 

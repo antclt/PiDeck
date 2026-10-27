@@ -1,3 +1,5 @@
+import type { ProjectFileTarget } from "./project";
+
 // ── Git 基础类型 ──────────────────────────────────────────────────────
 
 export type GitBranchInfo = {
@@ -10,12 +12,14 @@ export type GitBranchInfo = {
  * 侧栏按此项切换 cwd，避免把整棵工作区当成单一仓库。
  */
 export type GitRepoInfo = {
-	/** 仓库工作区绝对路径，作为后续 git 命令的 cwd */
-	path: string;
-	/** 展示名：根仓库用项目文件夹名，嵌套仓库用该目录名 */
-	name: string;
-	/** 相对项目根的 posix 路径；根仓库为空串 */
+	target: ProjectFileTarget;
+	/** Stable project-relative repository path; empty for the project root. */
 	relativePath: string;
+	/** Presentation label; must never be used as filesystem authority. */
+	displayPath: string;
+	name: string;
+	/** @deprecated Local-only compatibility for callers not yet migrated. */
+	path?: string;
 };
 
 /** AI 生成提交摘要的结果：结构化错误码供渲染层区分“未配置/忙碌/超时”，避免透传 pi 英文错误。 */
@@ -40,16 +44,23 @@ export type GitGenerateCommitMessageResult =
 export type GitFileStatus = "modified" | "added" | "deleted" | "renamed";
 
 export type GitChangedFile = {
+	/** Canonical project-relative path using slash separators. */
 	path: string;
+	target: ProjectFileTarget;
+	/** Repository-relative label for presentation. */
+	displayPath: string;
 	status: GitFileStatus;
-	/** 重命名文件在父提交中的原始路径；其他状态不设置。 */
 	originalPath?: string;
+	originalTarget?: ProjectFileTarget;
 };
 
-/** git worktree --porcelain 输出解析出的单条工作树信息 */
+/** git worktree entry registered as a local child project. */
 export type WorktreeEntry = {
-	path: string;
+	target: ProjectFileTarget;
 	branch: string;
+	displayPath: string;
+	/** @deprecated Local-only compatibility. */
+	path?: string;
 };
 
 // ── VS Code 风格 Git Status 系统 ─────────────────────────────────────
@@ -84,14 +95,14 @@ export type GitResourceGroupType = "merge" | "index" | "workingTree" | "untracke
 
 /** 单个 Git 变更资源，对应 VS Code Resource 类 */
 export type GitResource = {
-	/** 文件绝对路径 */
+	/** Stable slash-separated project-relative path, mirrored by target for compatibility. */
 	path: string;
-	/** Git 状态 */
+	target: ProjectFileTarget;
+	displayPath: string;
 	status: GitStatus;
-	/** 状态字母 (M/A/D/R/U/!/T) */
 	letter: string;
-	/** 重命名/拷贝的原始路径 */
 	oldPath?: string;
+	oldTarget?: ProjectFileTarget;
 };
 
 /** 按组分类的 Git 资源 */
@@ -102,10 +113,100 @@ export type GitResourceGroups = {
 	untracked: GitResource[];
 };
 
+/** Complete read-only repository snapshot; unsupported or failed reads never masquerade as empty status. */
+export type GitReadSnapshot = {
+	groups: GitResourceGroups;
+	head: string | null;
+	branch: string | null;
+	mutationToken?: string;
+	commitToken?: string;
+	branchToken?: string;
+	switchToken?: string;
+	discardToken?: string;
+	restoreToken?: string;
+	dropToken?: string;
+	fetchToken?: string;
+	pushToken?: string;
+	pullToken?: string;
+};
+
+// ── G3a：远端历史／引用／提交详情／两个版本之间的单文件差异（只读、有界、超限即拒）──
+
+/** 一页历史：`commits` 有界，`hasMore` 表示还有下一页（由 main 多取一条判断，不向渲染层报告总数）。 */
+export type RemoteGitCommit = { oid: string; parents: string[]; authorName: string; authorEmail: string; authorTimeSec: number; subject: string };
+export type RemoteGitLogPage = { commits: RemoteGitCommit[]; hasMore: boolean };
+export type RemoteGitLogResult = { ok: true; page: RemoteGitLogPage } | { ok: false; code: string };
+/** 提交详情：完整消息（有界 UTF-8）＋相对第一父提交的变更文件列表；根提交无 base。 */
+export type RemoteGitCommitFile = { status: string; path: string; oldPath?: string };
+export type RemoteGitCommitDetail = {
+	oid: string;
+	parents: string[];
+	authorName: string;
+	authorEmail: string;
+	authorTimeSec: number;
+	committerName: string;
+	committerEmail: string;
+	committerTimeSec: number;
+	subject: string;
+	message: string;
+	files: RemoteGitCommitFile[];
+};
+export type RemoteGitCommitDetailResult = { ok: true; detail: RemoteGitCommitDetail } | { ok: false; code: string };
+/** 本地分支与 tag；不含 remote-tracking ref，避免暗示尚未交付的同步状态。 */
+export type RemoteGitRef = { fullName: string; name: string; oid: string; kind: "branch" | "tag" };
+export type RemoteGitRefs = { head: string | null; branch: string | null; refs: RemoteGitRef[] };
+export type RemoteGitRefsResult = { ok: true; refs: RemoteGitRefs } | { ok: false; code: string };
+/** `base: null` 表示该侧不存在（根提交，或该侧新增文件）；两侧都不存在时拒绝。 */
+export type RemoteGitRefFileDiff = { path: string; target: ProjectFileTarget; displayPath: string; base: string | null; head: string; originalContent: string; modifiedContent: string };
+export type RemoteGitRefFileDiffResult = { ok: true; diff: RemoteGitRefFileDiff } | { ok: false; code: string };
+/**
+ * G5b refs compare：两个**全名本地引用**（refs/heads/* 或 refs/tags/*）之间的有界变更文件列表。
+ * 结果携带解析后的 OID，逐文件两侧内容仍走既有 `remoteRefFileDiff`（同一 diff 视图），不新增内容通道。
+ */
+export type RemoteGitCompareSide = { ref: string; oid: string };
+export type RemoteGitCompareFile = { status: string; path: string; oldPath?: string };
+export type RemoteGitCompare = { base: RemoteGitCompareSide; head: RemoteGitCompareSide; files: RemoteGitCompareFile[] };
+export type RemoteGitCompareResult = { ok: true; compare: RemoteGitCompare } | { ok: false; code: string };
+/**
+ * G5c explicit init: creates .git at the project root and reports the default branch of the new repository.
+ * The renderer only sends projectId; main and the helper decide whether the root may be initialized at all.
+ */
+export type RemoteGitInitResult = { ok: true; branch: string | null } | { ok: false; code: string };
+/**
+ * G5d repository discovery: repositories under the project root as the remote helper found them. `path` is a
+ * project-relative POSIX path ("" is the root repository) and is the only value that may become a read scope;
+ * `name` is a display label. `truncated` says the helper's bounded walk was cut by a cap.
+ */
+export type RemoteGitRepo = { path: string; name: string };
+export type RemoteGitReposResult = { ok: true; repos: RemoteGitRepo[]; truncated: boolean } | { ok: false; code: string };
+/** G3b branch write face: creating and switching both move a ref the user explicitly asked for. */
+export type RemoteGitBranchMutationResult = { ok: true } | { ok: false; code: string };
+/** G4a recoverable discard: the snapshot ref (null when the discarded change was a deletion) goes back to the panel. */
+export type RemoteGitDiscardResult = { ok: true; recoveryRef: string | null } | { ok: false; code: string };
+/** G4b recovery store: the list is read-only, restore and drop each need their own main-owned grant. */
+export type RemoteGitRecoveryEntryView = { ref: string; oid: string; path: string; bytes: number; at: number };
+export type RemoteGitRecoveryListResult = { ok: true; entries: RemoteGitRecoveryEntryView[]; truncated: boolean } | { ok: false; code: string };
+export type RemoteGitRecoveryRestoreResult = { ok: true; path: string; bytes: number } | { ok: false; code: string };
+export type RemoteGitRecoveryDropResult = { ok: true } | { ok: false; code: string };
+/** G5a sync: facts are read-only, the three verbs each need their own grant and never force anything. */
+export type RemoteGitSyncFactsView = { branch: string | null; upstream: string | null; ahead: number; behind: number; remotes: string[] };
+export type RemoteGitSyncFactsResult = { ok: true; facts: RemoteGitSyncFactsView } | { ok: false; code: string };
+export type RemoteGitFetchOutcome = { upToDate: boolean; updated: { ref: string; before: string | null; after: string }[] };
+export type RemoteGitFetchOutcomeResult = { ok: true; outcome: RemoteGitFetchOutcome } | { ok: false; code: string };
+export type RemoteGitPushOutcome = { outcome: "up-to-date" | "pushed" | "new"; refspec: string };
+export type RemoteGitPushOutcomeResult = { ok: true; outcome: RemoteGitPushOutcome } | { ok: false; code: string };
+export type RemoteGitPullOutcome = { mode: "up-to-date" | "fast-forward" | "merge"; head: string };
+export type RemoteGitPullOutcomeResult = { ok: true; outcome: RemoteGitPullOutcome } | { ok: false; code: string };
+/** An uncertain mutation must be checked by a fresh read, never automatically replayed. */
+export type GitIndexMutationResult = { ok: true } | { ok: false; code: string };
+/** A commit has no renderer-visible result beyond success: the new HEAD is read back through a fresh snapshot. */
+export type GitCommitResult = { ok: true } | { ok: false; code: string };
+export type GitReadSnapshotResult = { ok: true; snapshot: GitReadSnapshot } | { ok: false; code: string };
+
 /** 批量回滚时保留资源组，避免同一目录中的 tracked/untracked 文件混淆。 */
 export type GitDiscardResource = {
 	group: "workingTree" | "untracked";
-	path: string;
+	target: ProjectFileTarget;
 };
 
 /** Git Changes 各资源组打开 Diff 时的比较上下文。 */
@@ -116,8 +217,9 @@ export type GitWorkspaceDiffGroup = GitResourceGroupType;
  * 不随 status 轮询返回，避免在常驻 Git 抽屉中缓存所有变更文件内容。
  */
 export type GitWorkspaceFileDiff = {
-	/** 当前工作区文件绝对路径，供只读 Diff Viewer 识别语言和标签。 */
 	path: string;
+	target: ProjectFileTarget;
+	displayPath: string;
 	originalContent: string;
 	modifiedContent: string;
 };
@@ -151,7 +253,10 @@ export type CommitDetail = {
 /** 提交历史中单个文件相对第一父提交的两侧内容，供 Monaco Diff Viewer 展示。 */
 export type GitCommitFileDiff = {
 	path: string;
+	target: ProjectFileTarget;
+	displayPath: string;
 	originalPath?: string;
+	originalTarget?: ProjectFileTarget;
 	originalContent: string;
 	modifiedContent: string;
 };

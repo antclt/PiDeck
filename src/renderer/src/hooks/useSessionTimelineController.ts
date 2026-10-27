@@ -210,11 +210,14 @@ export function isUserFacingSessionStart(sendStatus: string | undefined): boolea
 
 /** catalog 已确认无磁盘历史：空草稿、从未落文件的 pi 会话、尚无 host id 的新 DSH。
  * 预热会写 filePath / dshSessionId，但草稿在真正开聊前仍算空——见控制器 sticky。 */
-export function isKnownEmptySessionRecord(record: Pick<SessionRecord, "status" | "filePath" | "messageCount" | "backend" | "dshSessionId"> | undefined): boolean {
+export function isKnownEmptySessionRecord(record: Pick<SessionRecord, "status" | "filePath" | "messageCount" | "backend" | "dshSessionId" | "locator"> | undefined): boolean {
 	if (!record) return false;
 	if (record.status === "draft") return true;
 	if ((record.messageCount ?? 0) > 0) return false;
 	if (record.filePath) return false;
+	// SSH 的 messageCount=0 是未读取摘要，不是磁盘无历史；归档恢复的新记录没有内存缓存。
+	// 只要已有远端文件身份就必须读页。草稿仍由上面的 draft 分支保留空态。
+	if (record.locator?.kind === "ssh" && (record.locator.remoteSessionId || record.locator.remotePath)) return false;
 	if (record.backend === "dsh" && record.dshSessionId) return false;
 	// imagegen 会话历史独立存 ImageSessionStore，不体现在 filePath/messageCount：
 	// 已 promote 为 active 的生图会话不能判为空，否则重启后打开会跳过历史加载显示空引导页。
@@ -282,7 +285,7 @@ export function canLoadSessionTimelineMore(isStarting: boolean, messageCount: nu
  *     「读盘还没应答/失败」的状态，必须读盘让磁盘给出 ready（起始页）或
  *     error（错误卡片 + 重试），否则失败被伪装成空历史且骨架永驻。
  */
-export function shouldSkipInitialDiskLoad(cachedEntry: { source: "disk" | "runtime"; messages: readonly unknown[] } | undefined, knownEmpty: boolean): boolean {
+export function shouldSkipInitialDiskLoad(cachedEntry: { source: "disk" | "runtime" | "remote"; messages: readonly unknown[] } | undefined, knownEmpty: boolean): boolean {
 	if (knownEmpty) return true;
 	if (!cachedEntry) return false;
 	if (cachedEntry.messages.length > 0) return true;
@@ -304,7 +307,7 @@ export function shouldSkipInitialDiskLoad(cachedEntry: { source: "disk" | "runti
  *   - loadState 已 settled 且缓存条目被 8-LRU 整体淘汰（undefined）→ 不得跳过，重读自愈
  *     （2026-12 回归修复）；条目仍在时以已有磁盘结论为准，不因 runtime 重写条目重读。
  */
-export function shouldSkipInitialDiskRead(input: { previouslyLoaded: boolean; cachedEntry: { source: "disk" | "runtime"; messages: readonly unknown[] } | undefined; knownEmpty: boolean; loadStateStatus: SessionLoadState["status"] | undefined }): boolean {
+export function shouldSkipInitialDiskRead(input: { previouslyLoaded: boolean; cachedEntry: { source: "disk" | "runtime" | "remote"; messages: readonly unknown[] } | undefined; knownEmpty: boolean; loadStateStatus: SessionLoadState["status"] | undefined }): boolean {
 	if (shouldSkipInitialDiskLoad(input.cachedEntry, input.knownEmpty)) return true;
 	// 首次挂载到本会话：是否读盘完全由缓存权威性决定（与旧行为一致）。
 	if (!input.previouslyLoaded) return false;

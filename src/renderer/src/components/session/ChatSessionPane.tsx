@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { pendingMessageJumpAtom, requestSessionFindAtom, sessionFindOpenRequestsAtom, sessionRecordByIdAtomFamily } from "../../atoms";
 import { useSessionTimelineController } from "../../hooks/useSessionTimelineController";
+import { useSessionProcessFactsPrefetch } from "../../hooks/useSessionTrajectorySource";
 import { SessionRuntimeInjector } from "./SessionRuntimeInjector";
 import { useSessionPaneServices } from "./SessionPaneServices";
 import { SessionFindOverlay } from "./SessionFindOverlay";
@@ -31,6 +32,9 @@ export function ChatSessionPane(props: ChatSessionPaneProps) {
 	const sessionTitle = record?.title?.trim() || t("app.chatProject");
 
 	const sessionTimeline = useSessionTimelineController({ sessionId });
+	// 「轨迹」抽屉的生命周期只在打开时：会话一进视口就先把事实读进缓存，
+	// 点开轨迹时第一帧就带过程轨（否则要等面板自己那次 IPC 往返）。
+	useSessionProcessFactsPrefetch(sessionId);
 
 	// 会话内查找（Ctrl/Cmd+Shift+F）：openSignal 自增即请求浮层展开并聚焦输入框。
 	// 打开请求按会话 id 计数（atoms/session-find-atoms.ts）：头部放大镜按钮与本栏快捷键

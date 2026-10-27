@@ -11,7 +11,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.9.7-blue)
+![Version](https://img.shields.io/badge/version-0.9.8-blue)
 
 <!-- star-history:start -->
 <picture>
@@ -81,16 +81,21 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.9.7** (2026-10-26)
+> **Latest: v0.9.8** (2026-10-27)
 
-### v0.9.7 Release Highlights
-- 🚀 **Thinking-intensity picker rebuilt: ZCode-style gradient intensity bar**
-- 🚀 **Sidebar sticky group headers switch**
-- 🚀 **Web: explicit paging for the sidebar session list**
-- ✨ **A visual pass aligning the UI with ZCode**
-- ✨ **Web: conditional requests for /api/state**
-- ✨ **Image-only sends silently injected an English prompt (#404)**
-- ✨ **OpenCode 2.x sessions unrecognized on import (#410)**
+### v0.9.8 Release Highlights
+- 🚀 **ACP session archive and in-session search (#413 #415)**
+- 🚀 **Configurable ACP turn timeouts (#411)**
+- 🚀 **Status bar shows real retry progress and the current turn's facts**
+- 🚀 **Image preview supports zoom**
+- 🚀 **MCP / skill import selects across pages**
+- 🚀 **Trajectory drawer: provider and model, with a prewarmed process track**
+- 🚀 **Model config import restored, merged with local tool discovery (#419)**
+- 🚀 **Local builds carry a "local build" badge**
+- ✨ **Thinking-intensity bar colours follow progress**
+- ✨ **Drawer toggle moved to the left end of the activity bar**
+- ✨ **Git panel row metrics aligned with the file drawer**
+- ✨ **Composer and reference chips tidied**
 
 [View Full Changelog →](CHANGELOG.md)
 

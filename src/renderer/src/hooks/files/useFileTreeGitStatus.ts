@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EMPTY_FILE_TREE_GIT_STATUS, buildFileTreeGitStatusLookup, dropNestedRepoUntrackedPlaceholders, mergeGitResourceGroups, type FileTreeGitStatusLookup } from "../../utils/fileTreeGitStatus";
-import type { GitResourceGroups } from "../../../../shared/types";
+import type { GitResourceGroups, ProjectFileTarget } from "../../../../shared/types";
 
 /**
  * 文件树 Git 着色状态域（IDEA 风格：modified 蓝 / added 绿 / untracked 琥珀棕 / conflict 红）。
@@ -41,7 +41,9 @@ export function useFileTreeGitStatus(options: { projectId?: string; projectRoot?
 		const seq = ++requestSeqRef.current;
 		try {
 			const repos = await window.piDesktop.git.listRepos(projectId);
-			const targets: GitStatusTarget[] = repos.map((repo) => ({ repoPath: repo.path, repoRoot: repo.relativePath === "" ? null : repo.path }));
+			// repo.path 在远端项目里可能缺失（远端仓库条目以相对路径标识）：缺省即走默认 scope，
+			// 不把 undefined 传给 git:status（它按「未传 repoPath」处理）。
+			const targets: GitStatusTarget[] = repos.flatMap((repo) => (repo.path ? [{ repoPath: repo.path, repoRoot: repo.relativePath === "" ? null : repo.path }] : []));
 			// relativePath 为空的条目就是项目根仓库，此时默认 scope 与它同义；没有这种条目
 			// （项目根不是仓库：可能是更大仓库里的子目录，也可能压根不在 git 里）才补默认 scope。
 			if (!repos.some((repo) => repo.relativePath === "")) targets.push({ repoRoot: null });
@@ -49,7 +51,7 @@ export function useFileTreeGitStatus(options: { projectId?: string; projectRoot?
 				await Promise.all(
 					targets.map(async (target): Promise<GitStatusFetch> => {
 						try {
-							return { target, groups: await window.piDesktop.git.status(projectId, target.repoPath) };
+							return { target, groups: await window.piDesktop.git.status(projectId, target.repoPath as ProjectFileTarget | undefined) };
 						} catch {
 							// 单个仓库失败（仓刚被删 / 权限变化 / 不在 git 里）不能让整盘着色归零：跳过它，其余照常上色。
 							return null;

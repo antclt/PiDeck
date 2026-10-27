@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import type { Project, FileTreeNode, GitBranchInfo, WorktreeEntry, SessionSummary, SessionRecord } from "../../../shared/types";
+import type { Project, ProjectFileTarget, FileTreeNode, GitBranchInfo, WorktreeEntry, SessionSummary, SessionRecord } from "../../../shared/types";
 import type { SessionLoadState } from "../atoms/session-atoms";
 import { sessionRecordToSummary } from "../atoms/session-selectors";
 import { loadProjectFileTree } from "../utils/fileTreeLazy";
 import { createKeyedWatchdog } from "../utils/catalogLoadWatchdog";
+import { isLocalProject, isRemoteProject } from "../../../shared/projectLocation";
 import { useFileTreeContentState } from "./files/useFileTreeContentState";
 
 const SESSION_REFRESH_TIMEOUT_MS = 20_000;
@@ -41,7 +42,7 @@ type UseProjectSyncInput = {
 			syncDshForeignSessions?: () => Promise<{ imported: number; skipped: number }>;
 		};
 		files: {
-			list: (projectId: string, options?: { maxDepth?: number; directory?: string }) => Promise<FileTreeNode[]>;
+			list: (project: string | ProjectFileTarget, options?: { maxDepth?: number; directory?: string }) => Promise<FileTreeNode[]>;
 		};
 	};
 	showToast: (message: string, duration?: number) => void;
@@ -125,7 +126,7 @@ export function useProjectSync(input: UseProjectSyncInput) {
 		// 失效目录与内置 Chat 不能继续触发 Git 扫描，否则手动刷新项目后仍会产生 ENOENT 噪音。
 		// 工作区模式的项目分支随 worktree 列表一起取（refreshWorktrees），供 worktree 主工作区行展示。
 		for (const p of next) {
-			if (p.missing || p.kind === "chat") continue;
+			if (p.missing || p.kind === "chat" || !isLocalProject(p)) continue;
 			if (p.worktreeEnabled) void refreshWorktrees(p.id);
 		}
 		return next;
@@ -148,6 +149,8 @@ export function useProjectSync(input: UseProjectSyncInput) {
 	}
 
 	async function refreshWorktrees(projectId: string) {
+		const project = projects.find((entry) => entry.id === projectId);
+		if (project && isRemoteProject(project)) return;
 		try {
 			const [entries, branchInfo] = await Promise.all([api.git.worktreeList(projectId), api.git.branches(projectId).catch(() => ({ current: null, branches: [] }))]);
 			setWorktreesByProject((prev) => ({ ...prev, [projectId]: entries }));
@@ -336,7 +339,7 @@ export function useProjectSync(input: UseProjectSyncInput) {
 			return;
 		}
 		await refreshProjectSessions(latestProject.id);
-		if (latestProject.worktreeEnabled) {
+		if (isLocalProject(latestProject) && latestProject.worktreeEnabled) {
 			await refreshWorktrees(latestProject.id);
 			const projectsAfterWorktreeRefresh = await api.projects.list();
 			setProjects(projectsAfterWorktreeRefresh);
@@ -352,10 +355,10 @@ export function useProjectSync(input: UseProjectSyncInput) {
 		try {
 			// 抽屉刷新只拉浅层根，再按当前展开目录补齐，避免整棵 12 层 IPC。
 			const next = await loadProjectFileTree(
-				() => api.files.list(projectId, { maxDepth: 0 }),
+				() => api.files.list({ projectId, relativePath: "" }, { maxDepth: 0 }),
 				expandedDirs,
 				() => isFileTreeRequestCurrent(generation, projectId),
-				(directory) => api.files.list(projectId, { maxDepth: 0, directory }),
+				(directory) => (typeof directory === "string" ? api.files.list(projectId, { maxDepth: 0, directory }) : api.files.list(directory, { maxDepth: 0 })),
 			);
 			if (!next) return;
 			setFiles(next);

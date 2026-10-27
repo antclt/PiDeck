@@ -20,8 +20,8 @@ interface AppSidebarProps {
 	worktreesByProject: Record<string, WorktreeEntry[]>;
 	branchByProject: Record<string, string | null>;
 	creatingWorktree: boolean;
-	/** 正在删除的 worktree 路径集合（useWorktreeActions 维护，驱动行淡出动画）。 */
-	removingWorktreePaths: ReadonlySet<string>;
+	/** Child projects currently being removed（远端工作区按 ProjectId 索引，dev 的纯 path 版本不适用）。 */
+	removingWorktreeProjectIds: ReadonlySet<string>;
 	/** 「聊天」「项目」分组标题栏在列表滚动时冻结在顶部（settings.sidebarStickyGroupHeaders）。 */
 	stickyGroupHeaders?: boolean;
 	isLanWeb: boolean;
@@ -105,7 +105,7 @@ export function AppSidebar(props: AppSidebarProps) {
 				worktreesByProject={props.worktreesByProject}
 				branchByProject={props.branchByProject}
 				creatingWorktree={props.creatingWorktree}
-				removingWorktreePaths={props.removingWorktreePaths}
+				removingWorktreeProjectIds={props.removingWorktreeProjectIds}
 				stickyGroupHeaders={props.stickyGroupHeaders}
 				isLanWeb={props.isLanWeb}
 				onOpenNewSession={props.onOpenNewSession}

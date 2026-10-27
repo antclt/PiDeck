@@ -1,10 +1,14 @@
-import { FolderGit2, Plus } from "lucide-react";
+import { FolderGit2, Plus, Server } from "lucide-react";
+import { useSetAtom } from "jotai";
 import type { Project } from "../../../../shared/types";
+import { isRemoteProject } from "../../../../shared/projectLocation";
 import { t } from "../../i18n";
 import { GUIDE_BOOTSTRAP_SESSION_ID } from "../../utils/chatSessionBootstrap";
 import { isChatProject } from "../../rendererUtils";
+import { remoteEnrollDialogOpenAtom } from "../../atoms/remote-project-atoms";
 import { Button } from "../ui-shadcn/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui-shadcn/select";
+import { RemoteProjectPanel } from "./RemoteProjectPanel";
 import { LogoMark } from "./SurfaceParts";
 import { SessionStartSurface } from "./SessionStartSurface";
 
@@ -24,7 +28,10 @@ export function ProjectEmptyState(props: {
 	projects: Project[];
 	onAddProject: () => void;
 	onSelectProject: (projectId: string) => void;
+	onOpenTerminal?: () => void;
 }) {
+	// 远端登记弹框由 App 统一挂载，这里只打开开关（与侧栏「+」同一条路径）。
+	const setRemoteEnrollOpen = useSetAtom(remoteEnrollDialogOpenAtom);
 	// 无项目时没有任何可创建会话的项目上下文，只保留添加项目入口。
 	// 与有项目引导页同比例：Logo 72 / gap-8 / pt-[18vh] 靠中。
 	if (!props.activeProject) {
@@ -36,6 +43,11 @@ export function ProjectEmptyState(props: {
 						<Plus className="size-5" aria-hidden="true" />
 						<span>{t("app.addProject")}</span>
 					</Button>
+					{/* 零项目的新用户也可能只有远端目录：与侧栏「+」同源的远端登记入口。 */}
+					<Button variant="ghost" size="sm" onClick={() => setRemoteEnrollOpen(true)}>
+						<Server className="size-4" aria-hidden="true" />
+						{t("sidebar.addProjectRemote")}
+					</Button>
 				</div>
 			</div>
 		);
@@ -45,6 +57,13 @@ export function ProjectEmptyState(props: {
 	// 发送时由 promoteSessionComposerStateAtom 整体搬到真实会话，输入不丢失。
 	// 项目下拉只切换 activeProjectId——切项目后仍留在引导页（currentSessionId 保持
 	// 空），发送时按选中项目创建；下拉列表 = 已加入的全部项目（含内置 Chat）。
+	//
+	// 远端项目没有本机路径：使用同源远端目录/文本编辑宿主，各本机IPC仍按locator拒绝。
+	// 会话创建仍由项目行入口负责，不把无会话引导页当成本机项目。
+	if (isRemoteProject(props.activeProject)) {
+		return <RemoteProjectPanel projectId={props.activeProject.id} projectName={props.activeProject.name} onOpenTerminal={props.onOpenTerminal} />;
+	}
+
 	return (
 		<SessionStartSurface
 			sessionId={GUIDE_BOOTSTRAP_SESSION_ID}

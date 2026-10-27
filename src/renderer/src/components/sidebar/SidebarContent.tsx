@@ -31,6 +31,7 @@ import { MorphingSearch, type MorphingSearchItem } from "../motion/morphing-sear
 import { parseSidebarNavTab } from "../../utils/sidebarNavTab";
 import { ensurePinyinTable, pinyinKeys } from "../../utils/pinyinSearch";
 import { displayProjectDirectoryName, isChatProject } from "../../rendererUtils";
+import { isLocalProject } from "../../../../shared/projectLocation";
 import { formatAccelerator } from "../../../../shared/shortcuts";
 import { desktopApi } from "../../desktopApi";
 import { useShortcutBindings } from "../../hooks/useShortcutBindings";
@@ -77,6 +78,12 @@ export type SidebarActions = {
 		/** 新建侧边任务：在该会话所属项目建一条带标记的会话，由右侧抽屉「侧边任务」面板承载。 */
 		createSideTask: (projectId: string, backend?: AgentBackend) => Promise<void>;
 		createAnonymous: (projectId: string) => Promise<void>;
+		/**
+		 * 远端会话登记成功后：显式重拉该项目的本地会话清单并选中新会话。
+		 * 远端发现/登记本身在侧栏「远端会话」区块里发起（register 已写进 catalog），这里只做「刷新 + 选中」，
+		 * 不创建任何会话、也不打开 Tab（选中 ≠ 呈现）。
+		 */
+		importRemoteSession: (projectId: string, sessionId: string) => Promise<void>;
 		/** 新建 ACP 工具会话(toolId → settings.acpTools 条目);后端固定 acp。 */
 		createAcp: (projectId: string, toolId: string) => Promise<void>;
 		deleteDraft: (session: SessionRecord) => Promise<void>;
@@ -96,7 +103,7 @@ export type SidebarActions = {
 		/** 归档会话（可恢复） */
 		archive: (projectId: string, session: SessionSummary) => Promise<void>;
 		/** 恢复归档会话 */
-		unarchive: (session: SessionSummary, projectId?: string) => Promise<void>;
+		unarchive: (session: ArchivedPiSession, projectId?: string) => Promise<void>;
 		/** 列出已归档会话（恢复 UI 用；带原始路径，弹窗按项目归属过滤） */
 		listArchived: () => Promise<ArchivedPiSession[]>;
 		/** 永久删除已归档会话（pi 文件归档；移入回收站并移出索引） */
@@ -107,6 +114,10 @@ export type SidebarActions = {
 		listArchivedDsh: () => Promise<ArchivedDshSession[]>;
 		/** 永久删除已归档 DSH 会话（host 目录移入回收站） */
 		deleteArchivedDsh: (dshSessionId: string) => Promise<void>;
+		/** 远端归档行永久删除：请求 main 的一次性确认（只传本机 catalog 会话 id）。 */
+		requestDeleteArchivedRemote: (sessionId: string) => Promise<import("../../../../shared/types").RemoteArchivedSessionDeleteRequestResult>;
+		/** 回答远端永久删除的一次性确认（approve 才真正删远端数据）。 */
+		answerDeleteArchivedRemote: (requestId: string, choice: "approve" | "deny") => Promise<import("../../../../shared/types").RemoteArchivedSessionDeleteAnswerResult>;
 	};
 	agents: {
 		rename: (agent: AgentTab) => void;
@@ -140,8 +151,8 @@ export type SidebarContentProps = {
 	worktreesByProject: Readonly<Record<string, readonly WorktreeEntry[]>>;
 	branchByProject?: Readonly<Record<string, string | null | undefined>>;
 	creatingWorktree?: boolean;
-	/** 正在删除的 worktree 路径集合（透传给 WorktreeTree 驱动淡出动画）。 */
-	removingWorktreePaths?: ReadonlySet<string>;
+	/** 正在删除的 worktree 子项目 id 集合（透传给 ProjectTree 驱动淡出动画；远端工作区必需）。 */
+	removingWorktreeProjectIds?: ReadonlySet<string>;
 	/** 「聊天」「项目」分组标题栏在列表滚动时冻结在顶部（settings.sidebarStickyGroupHeaders）。 */
 	stickyGroupHeaders?: boolean;
 	isLanWeb?: boolean;
@@ -281,7 +292,8 @@ export function SidebarContent(props: SidebarContentProps) {
 		searchItems.push({
 			id: `project:${project.id}`,
 			title: projectTitle,
-			description: project.path,
+			// 远端项目没有本机 path：描述用远端根路径，避免空串让搜索结果看起来没有位置。
+			description: isLocalProject(project) ? project.path : project.locator.remotePath,
 			pinyin: pinyinKeys(projectTitle),
 			icon: isChatProject(project) ? MessageSquare : Folder,
 			onSelect: () => {
@@ -431,7 +443,7 @@ export function SidebarContent(props: SidebarContentProps) {
 						currentSessionId={props.currentSessionId}
 						worktreesByProject={props.worktreesByProject}
 						branchByProject={props.branchByProject}
-						removingWorktreePaths={props.removingWorktreePaths}
+						removingWorktreeProjectIds={props.removingWorktreeProjectIds}
 						stickyGroupHeaders={props.stickyGroupHeaders}
 					/>
 				</section>
@@ -636,12 +648,13 @@ export function SidebarContent(props: SidebarContentProps) {
 							: undefined
 					}
 					onRemoveWorktree={
-						menuProjectWorktreeParent
+						menuProjectWorktreeParent && isLocalProject(menuProject)
 							? () => {
 									void actions.worktrees.remove(
 										menuProjectWorktreeParent.id,
 										{
-											path: menuProject.path,
+											target: { projectId: menuProject.id, relativePath: "" },
+											displayPath: menuProject.path,
 											branch: menuProject.name,
 										},
 										menuProject,
@@ -750,6 +763,8 @@ export function SidebarContent(props: SidebarContentProps) {
 						void actions.agents.close(menuAgent);
 						controller.closeMenu();
 					}}
+					// 远端记录的「删除」只是移除本机记录（远端文件保留，主进程记墓碑）：菜单文案必须如实。
+					isRemoteSession={menuAgentSessionRecord?.locator?.kind === "ssh"}
 					onDeleteSession={() => {
 						const bound = Object.entries(controller.catalog.runtimeBySessionId).find(([, runtime]) => runtime?.agentId === menuAgent.id);
 						const sessionId = bound?.[0];
@@ -831,6 +846,8 @@ export function SidebarContent(props: SidebarContentProps) {
 					}}
 					// F5：DSH 会话无 filePath 但可复制 host 会话文件路径（主进程按 dshSessionId 推导）
 					hasFilePath={Boolean(menuSession.filePath) || menuSession.backend === "dsh"}
+					// 远端记录的「删除」只是移除本机记录（远端文件保留，主进程记墓碑）：菜单文案必须如实。
+					isRemoteSession={menuSession.locator?.kind === "ssh"}
 					canRpcLog={Boolean(menuSessionRuntimeAgent)}
 					rpcToggleDisabled={!menuSessionRuntimeAgent}
 					isRpcLogging={menuSessionRuntimeAgent ? controller.isAgentRpcLogging(menuSessionRuntimeAgent.id) : false}
@@ -902,7 +919,8 @@ export function SidebarContent(props: SidebarContentProps) {
 						// 归档成功后弹窗保持打开（用户要继续管理/切到归档视图核对），关闭只由用户触发。
 						// 家族列表跨多个工作区：按会话归属项目归档，dismiss/refresh 才不会落到错误项目，
 						// 否则弹窗留着时子工作区的行会残留。
-						await Promise.all(sessions.map((session) => actions.sessions.archive(session.projectId ?? managerProject.id, session)));
+						// 失败必须转 toast：弹窗不关闭时，静默失败会让用户以为已经归档而反复点击。
+						await Promise.all(sessions.map((session) => actions.sessions.archive(session.projectId ?? managerProject.id, session))).catch((error: unknown) => showNotice(error instanceof Error ? error.message : String(error), 5000, "error"));
 					}}
 					onUnarchive={(archived) => actions.sessions.unarchive(archived, managerProject.id)}
 					listArchived={actions.sessions.listArchived}
@@ -910,6 +928,8 @@ export function SidebarContent(props: SidebarContentProps) {
 					onUnarchiveDsh={(dshSessionId) => actions.sessions.unarchiveDsh(dshSessionId, managerProject.id)}
 					listArchivedDsh={actions.sessions.listArchivedDsh}
 					deleteArchivedDsh={(dshSessionId) => actions.sessions.deleteArchivedDsh(dshSessionId)}
+					requestDeleteArchivedRemote={(sessionId) => actions.sessions.requestDeleteArchivedRemote(sessionId)}
+					answerDeleteArchivedRemote={(requestId, choice) => actions.sessions.answerDeleteArchivedRemote(requestId, choice)}
 				/>
 			)}
 			{controller.worktreeCreateProjectId && (

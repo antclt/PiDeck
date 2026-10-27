@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: d8731c15ef327f57408a084de4050ac83b3223abb3938809b9aad399818c916d（来自 src/shared/i18n/mainProcessCopy.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 866316a8b961cba20cca6d3b56b81afdbf628babf2ef09c1407fc193e475f1af（来自 src/shared/i18n/mainProcessCopy.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import type { MainProcessTranslationKey } from "./mainProcessCopy";
 
@@ -14,6 +14,15 @@ export const mainProcessZhTW: Record<MainProcessTranslationKey, string> = {
 	"diagnostic.processReconnectFailed": "Agent 程序意外退出，自動重連失敗",
 	"diagnostic.runtimeError": "Agent 執行時發生錯誤。",
 	"diagnostic.agentStartFailed": "Pi RPC 啟動失敗。",
+	// 远端 pi 探测三个稳定码（P4.1）的用户可读版：都是「该主机环境没准备好」，必须给出可执行的下一步，
+	// 否则用户只看到一个裸码（来源见 main/remote/RemotePiDiscovery.ts 的 REMOTE_PI_DISCOVERY_CODES）。
+	"remote.piPathInvalid": "遠端 pi 路徑無效：登入 shell 解析出的 pi 入口不是執行檔。請在該主機上確認 pi 已安裝、且能從登入 shell 直接呼叫。",
+	"remote.piNodePathInvalid": "遠端 node 路徑無效：解析出的 node 直譯器不可執行。請檢查該主機的 node（含 nvm 等版本管理器）在登入 shell 中是否可用。",
+	"remote.piShellPathUnreadable": "讀不到遠端登入 shell 的 PATH（shell 配置讀取失敗）。請檢查該主機的 shell 配置檔案與權限。",
+	"remote.piNotFound": "該主機上找不到 pi（登入 shell 的 PATH 裡沒有，也沒有已知安裝位置）。請在該主機安裝 pi，或確認登入 shell 裡能直接呼叫 pi。",
+	"remote.piTooOld": "該主機的 pi 版本低於 PiDeck 支援的下限。請升級該主機的 pi 後重試。",
+	"remote.piVersionUnreadable": "讀不到該主機 pi 的版本（命令沒有返回可解析的版本號）。請在該主機手動執行 pi --version 確認。",
+	"remote.piVersionUnverified": "該主機 pi 的版本號無法核驗（返回內容與預期形態不符）。請手動確認該主機的 pi 版本。",
 	// 两种成因：回退只作用于本次运行（不写入设置），设置开关则是每个新会话都会复现的持续成因。
 	"diagnostic.extensionsDisabledFallback": "擴充套件載入失敗，本次執行已臨時停用擴充套件（不寫入設定，「停用擴充套件啟動」開關保持原樣），下次啟動會重新嘗試載入擴充套件。可在本會話把下面的錯誤資訊發給 AI，協助排查擴充套件問題。",
 	"diagnostic.extensionsDisabledBySetting": "本次啟動未載入任何擴充套件：設定 → 開發設定 的「停用擴充套件啟動」處於開啟狀態，todo/plan/ask 等擴充套件能力不可用。如非排查擴充套件問題需要，請關閉該開關後重啟會話。",
@@ -101,8 +110,15 @@ export const mainProcessZhTW: Record<MainProcessTranslationKey, string> = {
 	"session.fileNotFound": "會話檔案不存在，請重新整理會話列表後重試。",
 	"session.copyDshUnsupported": "DSH 歷史會話暫不支援直接複製，請開啟會話後使用執行中 Agent 的「複製會話」。",
 	"session.exportFailed": "會話匯出失敗，請重試。",
+	// 远端会话导出（只读远端 + 本机写文件）：页脚与「上限命中」提示都由装配注入，模块内不硬编码文案。
+	"session.exportRemoteFooter": "由 PiDeck 匯出（SSH 遠端會話，歷史按視窗分頁讀取）",
+	"session.exportRemotePartialNotice": "這是部分歷史：遠端會話按 128 KiB 視窗分頁讀取，本次匯出已達上限（最多 {pages} 頁 / {messages} 條訊息），更早的訊息未包含。需要完整歷史請在該遠端主機上匯出。",
 	"session.inUseDeleteBlocked": "會話“{title}”正在使用中，請先關閉 Agent 後再刪除。",
 	"session.stopBeforeDelete": "請先停止會話執行例項，再刪除會話。",
+	// P4.5b：远端归档/取消归档要移动的是**那台机器上**的文件，而运行中的远端 pi 正在追加写它。
+	// 必须给出可执行下一步（先停 Agent），而不是只报一个码。
+	"session.remoteArchiveStopFirst": "該會話正在執行：請先停止它的 Agent（關閉 Agent）再歸檔，移動正被遠端 pi 寫入的會話檔案會破壞歷史。",
+	"session.remoteUnarchiveStopFirst": "該會話正在執行：請先停止它的 Agent（關閉 Agent）再恢復歸檔。",
 	"session.deleteFileBusy": "會話檔案仍被佔用，請先停止該會話後重試。",
 	"session.invalidArchivePath": "無效的歸檔會話路徑。",
 	"session.newTitle": "新會話",

@@ -73,13 +73,17 @@ describe("Seti file icon integration", () => {
 	});
 
 	test("Git status and history parsers preserve rename paths", () => {
+		// 历史（commit diff --name-status -z）解析仍在 GitService.ts。
 		const source = readFileSync("src/main/git/GitService.ts", "utf8");
 		assert.match(source, /"--name-status", "-z"/);
 		assert.match(source, /statusChar === "R" \|\| statusChar === "C" \? "renamed"/);
 		// formatter 会给三元的取字段表达式补括号：只锁"重命名/复制时按顺序取下一字段"的语义。
 		assert.match(source, /const currentPath = isRenameOrCopy \? \(?fields\[index\+\+\]/);
-		assert.match(source, /porcelain -z 的 rename\/copy 顺序是“当前路径\\0原路径\\0”/);
-		assert.match(source, /includeOldPath && oldPath/);
+		// 工作区 status 解析已拆到 gitStatusParser.ts（f83f9d550）：porcelain 顺序说明与 oldPath 落盘断言读新宿主，
+		// 原意不变——rename/copy 必须按“当前路径\0原路径\0”顺序读字段并带出 oldPath。
+		const statusParser = readFileSync("src/main/git/gitStatusParser.ts", "utf8");
+		assert.match(statusParser, /porcelain -z 的 rename\/copy 顺序是“当前路径\\0原路径\\0”/);
+		assert.match(statusParser, /includeOldPath && oldPath/);
 	});
 
 	test("stylesheet sizes and colors Seti SVG icons", () => {

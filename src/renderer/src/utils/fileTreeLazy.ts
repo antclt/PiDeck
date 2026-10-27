@@ -1,4 +1,7 @@
+import type { ProjectFileTarget } from "../../../shared/types/project";
 import type { FileTreeNode } from "../../../shared/types";
+
+export type FileTreeListTarget = ProjectFileTarget | string;
 
 /**
  * 按相对路径查找目录节点（含尚未展开的，children 可为 undefined）。
@@ -63,10 +66,31 @@ export function shouldLoadFullTreeForAtSearch(query: string): boolean {
 	return true;
 }
 
+export function fileTreeNodeKey(node: FileTreeNode): string {
+	if (node.path) return node.path;
+	if (node.target) return `project:${node.target.projectId}\u0000${node.target.relativePath}`;
+	return node.displayPath ?? node.relativePath;
+}
+
+export function fileTreeNodeDisplayPath(node: FileTreeNode): string {
+	return node.displayPath ?? node.path ?? node.relativePath;
+}
+
+export function findDirectoryNodeByPath(nodes: FileTreeNode[], directoryPath: string): FileTreeNode | undefined {
+	for (const node of nodes) {
+		if (node.type === "directory" && fileTreeNodeKey(node) === directoryPath) return node;
+		if (node.children?.length) {
+			const nested = findDirectoryNodeByPath(node.children, directoryPath);
+			if (nested) return nested;
+		}
+	}
+	return undefined;
+}
+
 /** 目录是否已经拉过子项（有 children 数组即视为已加载，含空目录）。 */
 export function findLoadedDirectory(nodes: FileTreeNode[], directoryPath: string): FileTreeNode | undefined {
 	for (const node of nodes) {
-		if (node.type === "directory" && node.path === directoryPath) {
+		if (node.type === "directory" && fileTreeNodeKey(node) === directoryPath) {
 			return Array.isArray(node.children) ? node : undefined;
 		}
 		if (node.children?.length) {
@@ -92,7 +116,7 @@ export function markFileTreeLoadFailed(nodes: FileTreeNode[], directoryPath: str
 	// FilesPanel 的 useMemo / FileNode 全量重渲染（与 compactMiddlePackages 同约定）。
 	let touched = false;
 	const marked = nodes.map((node) => {
-		if (node.type === "directory" && node.path === directoryPath) {
+		if (node.type === "directory" && fileTreeNodeKey(node) === directoryPath) {
 			touched = true;
 			return { ...node, hasChildren: false };
 		}
@@ -118,7 +142,8 @@ export function markFileTreeLoadFailed(nodes: FileTreeNode[], directoryPath: str
 export function mergeFileTreeChildren(nodes: FileTreeNode[], directoryPath: string, children: FileTreeNode[]): FileTreeNode[] {
 	let touched = false;
 	const merged = nodes.map((node) => {
-		if (node.type === "directory" && node.path === directoryPath) {
+		// 远端节点的 path 可能为空（仅 relativePath），统一用 fileTreeNodeKey 归一化后比较。
+		if (node.type === "directory" && fileTreeNodeKey(node) === directoryPath) {
 			touched = true;
 			return {
 				...node,
@@ -144,15 +169,14 @@ export function mergeFileTreeChildren(nodes: FileTreeNode[], directoryPath: stri
 /**
  * 按路径从短到长补齐已展开目录，保证父目录先于子目录写入。
  * 单个目录失败（已删/无权限）跳过，不阻断整棵树。
- */
-/**
+ *
  * 并发上限：展开恢复的目录一般 5-30 个，逐个串行 IPC 往返（每个又叠加主进程侧
  * 一层 readdir + 探测）在慢盘上会累积成秒级。取 8 并发：既把往返摊平，又不会
  * 在恢复瞬间打出上百个并发 listing。
  */
 const HYDRATE_CONCURRENCY = 8;
 
-export async function hydrateExpandedFileTree(listDirectory: (directory: string) => Promise<FileTreeNode[]>, tree: FileTreeNode[], expandedDirs: Iterable<string>): Promise<FileTreeNode[]> {
+export async function hydrateExpandedFileTree(listDirectory: (directory: FileTreeListTarget) => Promise<FileTreeNode[]>, tree: FileTreeNode[], expandedDirs: Iterable<string>): Promise<FileTreeNode[]> {
 	const dirs = [...expandedDirs].sort((left, right) => left.length - right.length);
 	if (dirs.length === 0) return tree;
 	// 两阶段（2027-02 性能审计）：listing 只依赖磁盘路径、与已合并的树无关——
@@ -161,7 +185,7 @@ export async function hydrateExpandedFileTree(listDirectory: (directory: string)
 	const listings = new Map<string, FileTreeNode[]>();
 	for (let start = 0; start < dirs.length; start += HYDRATE_CONCURRENCY) {
 		const batch = dirs.slice(start, start + HYDRATE_CONCURRENCY);
-		const settled = await Promise.allSettled(batch.map(async (directory) => ({ directory, children: await listDirectory(directory) })));
+		const settled = await Promise.allSettled(batch.map(async (directory) => ({ directory, children: await listDirectory(findDirectoryNodeByPath(tree, directory)?.target ?? directory) })));
 		for (const result of settled) {
 			// 持久化里的展开路径可能已不存在；单个失败跳过，不阻断其余目录。
 			if (result.status === "fulfilled") listings.set(result.value.directory, result.value.children);
@@ -185,7 +209,7 @@ export function shouldApplyFileTreeResult(requestedProjectId: string, currentPro
  * 拉浅层根再补齐已展开目录；中途项目切走或请求被取代时返回 null，
  * 避免慢扫描结果盖住当前项目的文件树。
  */
-export async function loadProjectFileTree(listRoot: () => Promise<FileTreeNode[]>, expandedDirs: Iterable<string>, isCurrent: () => boolean, listDirectory: (directory: string) => Promise<FileTreeNode[]> = listRoot): Promise<FileTreeNode[] | null> {
+export async function loadProjectFileTree(listRoot: () => Promise<FileTreeNode[]>, expandedDirs: Iterable<string>, isCurrent: () => boolean, listDirectory: (directory: FileTreeListTarget) => Promise<FileTreeNode[]> = listRoot): Promise<FileTreeNode[] | null> {
 	const tree = await listRoot();
 	if (!isCurrent()) return null;
 	const next = await hydrateExpandedFileTree(listDirectory, tree, expandedDirs);

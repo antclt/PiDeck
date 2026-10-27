@@ -18,7 +18,7 @@ import test from "node:test";
 const CONTROL_PAGES = ["src/renderer/src/components/app/settings", "src/renderer/src/config", "src/renderer/src/components/config", "src/renderer/src/components/automation"];
 
 /** 允许保留自定义高度的例外：输入条/底栏 chip 是另一套紧凑 chrome，不属表单控件。 */
-const ALLOWED_CUSTOM_HEIGHT = [/composer-bar-btn/, /prompt-input\.tsx/, /GitRepoSwitcher\.tsx/];
+const ALLOWED_CUSTOM_HEIGHT = [/composer-bar-btn/];
 
 test("Input 与 SelectTrigger 共享 default/sm 两档高度", () => {
 	const input = readFileSync("src/renderer/src/components/ui-shadcn/input.tsx", "utf8");

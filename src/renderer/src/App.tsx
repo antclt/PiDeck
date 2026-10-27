@@ -170,6 +170,8 @@ import {
 import { isSameSessionPath } from "./agentListDisplay";
 import { t } from "./i18n";
 import { isChatProject, loadSessionSourceFilter, saveSessionSourceFilter, isReplacementForPendingAgent, isPendingAgentId, migrateAgentRecord, stampIdleSessionDuration, type PendingAgentTab } from "./rendererUtils";
+import { isLocalProject, isRemoteProject } from "../../shared/projectLocation";
+import { fileTreeNodeDisplayPath } from "./utils/fileTreeLazy";
 import { reorderProjectList } from "./utils/projectOrder";
 import { MiniOverlaySurface } from "./components/mini-overlay/MiniOverlaySurface";
 import type { SessionFilterPill } from "./sessionFilterPills";
@@ -188,6 +190,7 @@ import { SessionTabsBar, type SessionTabsBarProps, type SessionToolAction, type 
 import { SessionPaneServicesProvider, type SessionFileOpenContext } from "./components/session/SessionPaneServices";
 import { SessionStatusPanel } from "./components/session/statusPanel/SessionStatusPanel";
 import { ProjectEmptyState } from "./components/session/ProjectEmptyState";
+import { RemoteProjectEnrollDialog } from "./components/sidebar/RemoteProjectEnrollDialog";
 import { FileLinkBaseProvider } from "./components/session/FileLinkBase";
 import { useSessionWorkspaceChrome } from "./hooks/useSessionWorkspaceChrome";
 import { useSessionIdAliasMigration } from "./hooks/useSessionIdAliasMigration";
@@ -227,12 +230,14 @@ import type {
 	AgentRuntimeState,
 	AgentTab,
 	SessionRuntimeTarget,
+	AppInfo,
 	AppSettings,
 	ChatMessage,
 	FileTreeNode,
 	ImageContent,
 	PiCommand,
 	Project,
+	ProjectFileTarget,
 	AgentBackend,
 	AgentProfile,
 	SessionLaunchPreferences,
@@ -384,6 +389,7 @@ export function App() {
 	const [hasClipboardFiles, setHasClipboardFiles] = useState(false);
 	const [renamingFile, setRenamingFile] = useState<{
 		path: string;
+		target?: ProjectFileTarget;
 		name: string;
 	} | null>(null);
 	const [renamingFileInput, setRenamingFileInput] = useState("");
@@ -537,13 +543,14 @@ export function App() {
 				syncDshForeignSessions: api.sessions.syncDshForeignSessions,
 			},
 			files: {
-				list: (projectId: string, options?: { maxDepth?: number; directory?: string }) => api.files.list(projectId, options),
+				list: (project: string | ProjectFileTarget, options?: { maxDepth?: number; directory?: string }) => api.files.list(project, options),
 			},
 		},
 		showToast,
 		setSessionCatalogLoadState,
 		t,
 	});
+
 	// 回答结束后的会话列表后台静默刷新：500ms 尾沿去抖。
 	// 多个 Agent 同时结束回答时只扫描一次，避免重复 IPC 与列表抖动。
 	const answerEndRefreshTimerRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -801,7 +808,12 @@ export function App() {
 	// 终端归属：有 activeAgent → agent owner；未激活 agent/历史会话 → project owner。
 	// activeProjectId 未同步（如 Tab 直切跨项目会话）时用当前会话所属项目兜底，
 	// 保证未激活 agent 的会话也常显「打开终端」按钮。
-	const terminalOwner = resolveTerminalOwner(activeAgentId, activeProjectId ?? currentSessionRecord?.projectId);
+	const terminalProjectId = activeProjectId ?? currentSessionRecord?.projectId;
+	const terminalOwner = resolveTerminalOwner(
+		activeAgentId,
+		terminalProjectId,
+		projects.some((project) => project.id === terminalProjectId && isRemoteProject(project)),
+	);
 	const {
 		terminalOpen,
 		terminalCollapsed,
@@ -859,7 +871,9 @@ export function App() {
 	const pendingComposerCaretRef = useRef<number | null>(null);
 	const pendingAgentsRef = useRef<PendingAgentTab[]>([]);
 
-	// 项目文件树域（展开持久化/自愈/下钻/切换加载）收口到 useProjectFileTreeController
+	// 项目文件树域（展开持久化/自愈/下钻/切换加载）收口到 useProjectFileTreeController。
+	// 文件树是纯本机能力：远端项目没有本机 path，hook 需要据此跳过一切本地 files:list。
+	const isLocalProjectId = useCallback((projectId: string) => projects.some((project) => project.id === projectId && isLocalProject(project)), [projects]);
 	const { expandedDirs, refreshVisibleFiles, restoreExpandedDirs, drillCompactChain, toggleDirectory, collapseAllDirectories } = useProjectFileTreeController({
 		files,
 		setFiles,
@@ -868,6 +882,7 @@ export function App() {
 		isFileTreeRequestCurrent,
 		activeProjectId,
 		activeProjectIdRef,
+		isLocalProjectId,
 		compactMiddlePackagesEnabled,
 		agentsRef,
 		refreshProjects,
@@ -888,6 +903,8 @@ export function App() {
 
 	const activeProjectRuntimeCapabilities = useProjectRuntimeCapabilities(activeProjectId);
 	const activeProject = projects.find((project) => project.id === activeProjectId);
+	// 远端项目没有本机路径：本地文件树/Git/会话扫描一律不得对它触发（各 IPC 也已按 locator 拒绝）。
+	const activeProjectIsRemote = activeProject !== undefined && isRemoteProject(activeProject);
 	const overlays = useOverlayActions({ activeProject, appInfo, showToast });
 	const sessionsProject = projects.find((project) => project.id === sessionsProjectId);
 	const displayAgents = useMemo(() => {
@@ -896,7 +913,7 @@ export function App() {
 	}, [agents, pendingAgents]);
 
 	// === worktree actions hook ===
-	const { worktreeCreating, removingWorktreePaths, createWorktree, removeWorktree, requestRemoveWorktree, toggleProjectWorktree } = useWorktreeActions({
+	const { worktreeCreating, removingWorktreeProjectIds, createWorktree, removeWorktree, requestRemoveWorktree, toggleProjectWorktree } = useWorktreeActions({
 		projects,
 		displayAgents,
 		setProjects,
@@ -1285,13 +1302,17 @@ export function App() {
 			const pid = terminalOwner.kind === "project" ? terminalOwner.id : (activeProjectId ?? currentSessionRecord?.projectId);
 			return pid ? projects.find((p) => p.id === pid) : undefined;
 		})();
-		const projectTarget = fallbackProject && !isChatProject(fallbackProject) ? { kind: "project" as const, projectId: fallbackProject.id, cwd: fallbackProject.path } : undefined;
+		// 远端项目没有本机 cwd：只传 projectId，由主进程按项目 locator 解析远端终端目标。
+		const projectTarget = fallbackProject && !isChatProject(fallbackProject) ? { kind: "project" as const, projectId: fallbackProject.id, ...(isRemoteProject(fallbackProject) ? {} : { cwd: fallbackProject.path }) } : undefined;
 		if (terminalOwner.kind === "agent") {
 			const runtimeTarget = getRuntimeTargetForSession(currentSessionId);
 			return runtimeTarget ? { kind: "agent" as const, ...runtimeTarget } : projectTarget;
 		}
 		return projectTarget;
 	}, [terminalOwner, currentSessionId, currentSessionRecord, projects, activeProjectId, getRuntimeTargetForSession]);
+	// 终端面板判定远端外观需要的项目记录：由 App 读取后作为普通 prop 下传，
+	// TerminalDock 本身保持无 Jotai 依赖（dev 的终端 harness 直接以 props 渲染它）。
+	const terminalTargetProject = terminalProjectId ? projects.find((project) => project.id === terminalProjectId) : undefined;
 
 	const quickTask = useQuickTask({ ready: settingsLoaded, backend: effectiveAgentBackend, upsertSession, selectSession: selectSessionCommand, registerSession: workspaceChrome.registerOpenSession, refreshProjects, getSessionRecord });
 
@@ -1832,7 +1853,7 @@ export function App() {
 	}, []);
 
 	useEffect(() => {
-		if (!activeProjectId) return;
+		if (!activeProjectId || activeProjectIsRemote) return;
 		// 切换项目时按 catalog load state 判断。空项目成功返回 [] 后也会是 ready，
 		// 不能再用列表长度，否则每次选中都会重扫。
 		const activeProject = projects.find((p) => p.id === activeProjectId);
@@ -1840,15 +1861,16 @@ export function App() {
 		if (expandedProjectsReady && activeProject && expandedProjects.has(activeProjectId) && loadState?.status !== "loading" && loadState?.status !== "ready") {
 			void refreshProjectSessions(activeProjectId).catch(() => undefined);
 		}
-	}, [activeProjectId, expandedProjects, expandedProjectsReady, projects, refreshProjectSessions, store]);
+	}, [activeProjectId, activeProjectIsRemote, expandedProjects, expandedProjectsReady, projects, refreshProjectSessions, store]);
 
 	// 项目切换只刷 git 分支（文件树加载/恢复已收口到 useProjectFileTreeController）
 	useEffect(() => {
-		if (!activeProjectId) {
+		if (!activeProjectId || activeProjectIsRemote) {
 			setGitInfo({ current: null, branches: [] });
 			return;
 		}
 		let cancelled = false;
+
 		void api.git
 			.branches(activeProjectId)
 			.then((info) => {
@@ -1860,10 +1882,10 @@ export function App() {
 		return () => {
 			cancelled = true;
 		};
-	}, [activeProjectId]);
+	}, [activeProjectId, activeProjectIsRemote]);
 
 	useEffect(() => {
-		if (!activeProjectId) return;
+		if (!activeProjectId || activeProjectIsRemote) return;
 		let stopped = false;
 		const refreshGitInfo = async () => {
 			try {
@@ -1900,7 +1922,7 @@ export function App() {
 				if (id) void api.git.unwatchRefs(id);
 			});
 		};
-	}, [activeProjectId]);
+	}, [activeProjectId, activeProjectIsRemote]);
 
 	/**
 	 * clone / fork 会把同一个 Agent 换绑到新的 SessionRecord。
@@ -2033,12 +2055,20 @@ export function App() {
 		resolveProjectId: (sessionId) => getSessionRecord(sessionId)?.projectId ?? activeProjectId,
 		hasPersistedSessionFile: (sessionId) => {
 			const record = getSessionRecord(sessionId);
-			return Boolean(record?.filePath) && !record?.noSession;
+			if (!record || record.noSession) return false;
+			// 远端（ssh）会话没有本机 filePath，但它在远端有真实的会话文件——编辑 / 删除 / 准备重发改写的
+			// 就是它（P4.5c 的远端写面）。判据必须认 locator 里的远端身份，否则远端会话在这里被判成
+			// 「无持久化文件」，那三条链路在 UI 上永远走不到（表现为"匿名会话不支持编辑"）。
+			if (record.locator?.kind === "ssh") return Boolean(record.locator.remoteSessionId || record.locator.remotePath);
+			return Boolean(record.filePath);
 		},
 		// 生图 draft：会话消息里存在生图占位/结果即判定为生图模式（无 pi runtime、无 pi JSONL）。
 		isImageGenSession: (sessionId) => (store.get(sessionMessagesCacheAtom)?.[sessionId]?.messages ?? []).some((message) => message.meta?.imageGen !== undefined),
-		// fork 化重发/编辑只服务 pi 后端：DSH 维持 legacy 路径（策略层返回 catalog）
+		// fork 化重发/编辑只服务本机 pi 后端：DSH 维持 legacy 路径（策略层返回 catalog）
 		isDshSession: (sessionId) => getSessionRecord(sessionId)?.backend === "dsh",
+		// 远端 SSH 会话同样维持 catalog：改写主机上的会话文件由 RemoteSessionHistoryWriter 负责
+		// （含外部改动冲突检测）；pi fork 只接受 user 条目，而编辑目标是 assistant 回复。
+		isRemoteSession: (sessionId) => getSessionRecord(sessionId)?.locator?.kind === "ssh",
 		// fork 锚点是否为最后一条用户消息：尾部 → 替换语义（旧会话隐藏）；非尾部 → 分支模式（旧会话保留可见）。
 		// 缓存缺失时按非尾部处理（false），宁可两会话并存也不隐藏可能还有独属内容的旧会话。
 		isLastUserMessage: (sessionId, message) => {
@@ -2196,11 +2226,13 @@ export function App() {
 	 */
 	const ensureProjectCatalogLoaded = useCallback(
 		(projectId: string, silent = false) => {
+			// 远端项目的会话扫描属于后续阶段：本地 scanner 不读远端路径，主进程也会拒绝。
+			if (projects.some((project) => project.id === projectId && isRemoteProject(project))) return;
 			const loadState = store.get(sessionCatalogLoadStateAtom)[projectId];
 			if (loadState?.status === "loading" || loadState?.status === "ready") return;
 			void refreshProjectSessions(projectId, silent).catch(() => undefined);
 		},
-		[store, refreshProjectSessions],
+		[store, refreshProjectSessions, projects],
 	);
 
 	const sidebarActions: SidebarActions = {
@@ -2221,8 +2253,13 @@ export function App() {
 			refreshAll: refreshAllProjects,
 			reorder: reorderProjects,
 			setPinned: setProjectPinned,
-			reveal: (project) => api.files.showInFolder(project.path),
+			reveal: (project) => {
+				// 本机文件处理器不接受远端路径：远端项目不提供「在文件夹中显示」。
+				if (!isLocalProject(project)) return Promise.resolve();
+				return api.files.showInFolder(project.path);
+			},
 			openWithEditor: (project) => {
+				if (!isLocalProject(project)) return;
 				workspace.openExternalEditorChooser(project.path, { x: 80, y: 80 });
 			},
 			importSessions: (project, source) => {
@@ -2242,7 +2279,7 @@ export function App() {
 			manageAutomations: (projectId) => openAutomationPage(projectId),
 			toggleWorktree: toggleProjectWorktree,
 			copyPath: async (project) => {
-				await navigator.clipboard.writeText(project.path);
+				await navigator.clipboard.writeText(isLocalProject(project) ? project.path : project.locator.remotePath);
 				showToast(t("common.copied"));
 			},
 			remove: removeSidebarProject,
@@ -2258,6 +2295,12 @@ export function App() {
 			// 活动页「最近会话」跨项目展示：后台静默预热尚未扫描的项目 catalog。
 			ensureCatalogsLoaded: (projectIds) => {
 				for (const projectId of projectIds) ensureProjectCatalogLoaded(projectId, true);
+			},
+			// 远端会话登记（侧栏「远端会话」→ 导入）：register 已把记录写进主进程 catalog，
+			// 这里只做「显式重拉本地会话清单 + 选中新会话」——不创建会话、也不开 Tab。
+			importRemoteSession: async (projectId, sessionId) => {
+				await refreshProjectSessions(projectId, true);
+				selectSessionCommand(projectId, sessionId);
 			},
 			beginDrag: workspaceChrome.beginDrag,
 			endDrag: workspaceChrome.endDrag,
@@ -2318,7 +2361,8 @@ export function App() {
 				await archiveSidebarSession(projectId, session);
 			},
 			unarchive: async (archived, projectId) => {
-				await unarchiveSidebarSession(archived.filePath, projectId);
+				// 远端归档记录只能按 catalog id 恢复，本机归档走归档路径；派发收在 hook 内，身份不互相回退。
+				await unarchiveSidebarSession(archived, projectId);
 			},
 			listArchived: () => listArchivedSidebarSessions(),
 			deleteArchived: async (archivedPath) => {
@@ -2331,6 +2375,9 @@ export function App() {
 			deleteArchivedDsh: async (dshSessionId) => {
 				await deleteArchivedDshSidebarSession(dshSessionId);
 			},
+			// 远端归档行的永久删除：两步 IPC（main 一次性确认），只传本机 catalog 会话 id。
+			requestDeleteArchivedRemote: (sessionId) => api.sessions.deleteArchivedRemoteRecord(sessionId),
+			answerDeleteArchivedRemote: (requestId, choice) => api.sessions.answerDeleteArchivedRemoteRecord(requestId, choice),
 		},
 		agents: {
 			rename: rename.openAgentRename,
@@ -2358,7 +2405,7 @@ export function App() {
 				await createWorktree(projectId, branchName);
 			},
 			remove: (parentProjectId, entry, childProject) => {
-				requestRemoveWorktree(parentProjectId, entry.path, childProject);
+				requestRemoveWorktree(parentProjectId, entry.target, childProject);
 				return Promise.resolve();
 			},
 		},
@@ -2397,7 +2444,7 @@ export function App() {
 			worktreesByProject={worktreesByProject}
 			branchByProject={branchByProject}
 			creatingWorktree={worktreeCreating}
-			removingWorktreePaths={removingWorktreePaths}
+			removingWorktreeProjectIds={removingWorktreeProjectIds}
 			isLanWeb={isLanWeb}
 			// 「新建会话」：清空当前会话并选中活动项目 → 落到初始引导页（居中输入框 + 项目下拉切换），
 			// 用户选择项目后可直接输入对话（首次发送才创建真实会话）。无项目时保持引导页「添加项目」空态。
@@ -2558,7 +2605,7 @@ export function App() {
 				}
 				api.sessions
 					.exportRecordHtml(sessionId)
-					.then((result) => showToast(t("app.exportedPath", { path: result.path }), 3500))
+					.then((result) => showToast(result.truncated ? t("app.exportedPathTruncated", { path: result.path }) : t("app.exportedPath", { path: result.path }), 3500))
 					.catch((error) => showToast(error instanceof Error ? error.message : String(error), 5000));
 			},
 			onRename: canRename
@@ -2911,11 +2958,12 @@ export function App() {
 					<ResizablePanel id="empty-main" minSize={200} className="flex min-h-0 flex-col">
 						{/* 无会话空态：引导页 = 新建页面形态（居中 ComposerArea + 虚拟会话），
                 不登记 Tab；首次发送才由 ensureSessionForSend 创建真实会话并落 Tab */}
-						<ProjectEmptyState activeProject={activeProject} projects={projects} onAddProject={() => void addProject()} onSelectProject={selectProjectCommand} />
+						<ProjectEmptyState activeProject={activeProject} projects={projects} onAddProject={() => void addProject()} onSelectProject={selectProjectCommand} onOpenTerminal={!isLanWeb && terminalTarget ? () => setTerminalOpenForOwner(true) : undefined} />
 					</ResizablePanel>
 					{!isLanWeb && terminalDockVisible && terminalTarget && (
 						<TerminalDockPanel
 							target={terminalTarget}
+							targetProject={terminalTargetProject}
 							open={terminalOpen}
 							closing={terminalDockClosing}
 							collapsed={terminalCollapsed}
@@ -3099,6 +3147,7 @@ export function App() {
 	const drawerPorts = useDrawerPorts({
 		enableGitManagement: settings.enableGitManagement,
 		activeProjectId,
+		activeProject: activeProject ?? undefined,
 		gitDiffDisplayMode,
 		openCommitFileDiff,
 		openWorkspaceFileDiff,
@@ -3275,6 +3324,7 @@ export function App() {
 					drawerRail={
 						<WorkspaceDrawerRail
 							addLabel={t("drawer.addPanel")}
+							onClose={toggleRightDrawer}
 							actions={[
 								{
 									id: "files",
@@ -3456,15 +3506,21 @@ export function App() {
 							}}
 							onClose={() => setFileMenu(null)}
 							onOpen={() => {
-								void api.files.open(fileMenu.node.path).catch((error) => {
-									showToast(t("app.openFileFailed", { error: error instanceof Error ? error.message : String(error) }), 4000);
-								});
+								const target = fileMenu.node.target ?? fileMenu.node.path;
+								if (target) {
+									void api.files.open(target).catch((error) => {
+										showToast(t("app.openFileFailed", { error: error instanceof Error ? error.message : String(error) }), 4000);
+									});
+								}
 								setFileMenu(null);
 							}}
 							onReveal={() => {
-								void api.files.showInFolder(fileMenu.node.path).catch((error) => {
-									showToast(t("app.openFileFailed", { error: error instanceof Error ? error.message : String(error) }), 4000);
-								});
+								const target = fileMenu.node.target ?? fileMenu.node.path;
+								if (target) {
+									void api.files.showInFolder(target).catch((error) => {
+										showToast(t("app.openFileFailed", { error: error instanceof Error ? error.message : String(error) }), 4000);
+									});
+								}
 								setFileMenu(null);
 							}}
 							onAttach={() => {
@@ -3476,7 +3532,7 @@ export function App() {
 										detail: {
 											refs: [
 												fileNodeDragPayloadToRef({
-													path: fileMenu.node.path,
+													path: fileTreeNodeDisplayPath(fileMenu.node),
 													relativePath: fileMenu.node.relativePath,
 													type: fileMenu.node.type,
 												}),
@@ -3487,19 +3543,23 @@ export function App() {
 								setFileMenu(null);
 							}}
 							onCopyPath={() => {
-								void navigator.clipboard.writeText(fileMenu.node.path);
+								void navigator.clipboard.writeText(fileTreeNodeDisplayPath(fileMenu.node));
 								setFileMenu(null);
 								showToast(t("app.pathCopied"), 1200);
 							}}
 							onRename={() => {
 								const node = fileMenu.node;
-								setRenamingFile({ path: node.path, name: node.name });
-								setRenamingFileInput(node.name);
+								if (node.target || node.path) {
+									setRenamingFile({ path: fileTreeNodeDisplayPath(node), target: node.target, name: node.name });
+									setRenamingFileInput(node.name);
+								}
 								setFileMenu(null);
 							}}
 							onDelete={() => {
 								const node = fileMenu.node;
+								const target = node.target ?? node.path;
 								setFileMenu(null);
+								if (!target) return;
 								overlays.showConfirm({
 									title: node.type === "directory" ? t("drawer.deleteFolderTitle") : t("drawer.deleteFileTitle"),
 									message: node.type === "directory" ? t("drawer.deleteFolderConfirm", { name: node.name }) : t("drawer.deleteFileConfirm", { name: node.name }),
@@ -3508,7 +3568,7 @@ export function App() {
 									onConfirm: async () => {
 										overlays.clearConfirm();
 										try {
-											await api.files.delete(node.path, true);
+											await api.files.delete(target, true);
 											void refreshVisibleFiles();
 											showToast(t("app.fileDeleted"), 2000);
 										} catch (error) {
@@ -3545,7 +3605,7 @@ export function App() {
 										onClose: () => setRenamingFile(null),
 										onConfirm: (path, newName) => {
 											void api.files
-												.rename(path, newName)
+												.rename(renamingFile.target ?? path, newName)
 												.then(() => {
 													void refreshVisibleFiles();
 													setRenamingFile(null);
@@ -3642,6 +3702,14 @@ export function App() {
 						/>
 					</EnvironmentOverlay>
 					<SettingsFeatureRoot settings={settings} piUpdate={piUpdate} webServiceChanging={webServiceChanging} onRestartWebService={restartWebService} appInfo={appInfo} onChange={updateSettings} projects={projects} projectId={activeProject?.id} projectKind={activeProject?.kind} projectName={activeProject?.name} />
+					{/* 远端项目登记：全应用唯一挂载点（侧栏「+」/空态只写开关 atom）。成功后先刷新清单再选中新项目，不创建本地会话。 */}
+					<RemoteProjectEnrollDialog
+						onEnrolled={(projectId) => {
+							void refreshProjects()
+								.then(() => selectProjectCommand(projectId))
+								.catch(() => undefined);
+						}}
+					/>
 					{/*
 					 * 问题反馈弹窗的「新建会话分析」依赖 App 级会话创建能力（createSessionDraftWithTab），
 					 * 在装配层组合：useOverlayActions 只持开关状态，会话创建与预填在此处注入。

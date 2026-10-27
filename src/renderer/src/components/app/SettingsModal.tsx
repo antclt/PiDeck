@@ -3,10 +3,11 @@ import { getDefaultStore, useAtom, useAtomValue } from "jotai";
 import { settingsFocusAtom, type SettingsPaneId, type SettingsSectionId, type SettingsTabId } from "../../atoms";
 import { hasPendingUpdateAtom, updateStatusAtom } from "../../atoms/update-atoms";
 import { useSettingsFocus } from "./settings/useSettingsFocus.ts";
-import { Settings2, Network, Wrench, PawPrint, Bell, Trash2, Brush, Eye, ChartColumnBig, Activity, MessageSquare, ImageIcon, DatabaseBackup, Globe, FileCode2, GitBranch, Loader2, SlidersHorizontal, MonitorCog, Keyboard, TerminalSquare, X, Bot, Puzzle, Clapperboard } from "lucide-react";
+import { Settings2, Network, Plug, Wrench, PawPrint, Bell, Trash2, Brush, Eye, ChartColumnBig, Activity, MessageSquare, ImageIcon, DatabaseBackup, Globe, FileCode2, GitBranch, Loader2, SlidersHorizontal, MonitorCog, Keyboard, TerminalSquare, X, Bot, Puzzle, Clapperboard } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
 import { applyAppearanceAttributes, type AppearanceSettings } from "../../themeAppearance";
 import { applyCustomThemeTokens, applyFontSizeAttributes } from "../../hooks/appearance/useAppAppearance";
+import { useRemoteFeatureAvailable } from "../../hooks/useRemoteFeatureAvailable";
 import { Button } from "../ui-shadcn/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui-shadcn/tabs";
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
@@ -17,7 +18,7 @@ import { buttonVariants } from "../ui-shadcn/button";
 import { useVisionBridgeDraft } from "./settings/visionDraft.ts";
 import { dirtySettingsTabIds, type SettingsUnsavedTabId } from "./settings/unsavedChangesSummary";
 import { computeDirtyFields } from "./settings/settingsDirtyFields.ts";
-import { SETTINGS_TAB_IDS, SETTINGS_TAB_LABEL_KEYS } from "./settings/settingsTabLayout";
+import { SETTINGS_TAB_IDS, SETTINGS_TAB_LABEL_KEYS, SETTINGS_TAB_LAYOUT } from "./settings/settingsTabLayout";
 import { SettingsSearchBox } from "./settings/SettingsSearchBox";
 import { buildSettingsSearchEntries } from "./settings/settingsSearchEntries";
 import type { SettingsSearchEntry } from "./settings/settingsSearch";
@@ -34,6 +35,7 @@ const CommonTab = lazy(() => import("./settings/CommonTab").then((m) => ({ defau
 const ShortcutsTab = lazy(() => import("./settings/ShortcutsTab").then((m) => ({ default: m.ShortcutsTab })));
 const AppearanceTab = lazy(() => import("./settings/AppearanceTab").then((m) => ({ default: m.AppearanceTab })));
 const ProxyTab = lazy(() => import("./settings/ProxyTab").then((m) => ({ default: m.ProxyTab })));
+const ConnectionsTab = lazy(() => import("./settings/ConnectionsTab").then((m) => ({ default: m.ConnectionsTab })));
 const WebTab = lazy(() => import("./settings/WebTab").then((m) => ({ default: m.WebTab })));
 const EditorsTab = lazy(() => import("./settings/EditorsTab").then((m) => ({ default: m.EditorsTab })));
 const GitTab = lazy(() => import("./settings/GitTab").then((m) => ({ default: m.GitTab })));
@@ -250,6 +252,7 @@ const TAB_META: Record<SettingsTabId, { labelKey: TranslationKey; icon: ReactNod
 	appearance: { labelKey: SETTINGS_TAB_LABEL_KEYS.appearance, icon: <Brush size={16} /> },
 	terminal: { labelKey: SETTINGS_TAB_LABEL_KEYS.terminal, icon: <TerminalSquare size={16} /> },
 	proxy: { labelKey: SETTINGS_TAB_LABEL_KEYS.proxy, icon: <Network size={16} /> },
+	connections: { labelKey: SETTINGS_TAB_LABEL_KEYS.connections, icon: <Plug size={16} /> },
 	web: { labelKey: SETTINGS_TAB_LABEL_KEYS.web, icon: <Globe size={16} /> },
 	editors: { labelKey: SETTINGS_TAB_LABEL_KEYS.editors, icon: <FileCode2 size={16} /> },
 	git: { labelKey: SETTINGS_TAB_LABEL_KEYS.git, icon: <GitBranch size={16} /> },
@@ -592,14 +595,23 @@ function SettingsModalContent(props: SettingsModalProps) {
 		[draftSettings.favoriteModels, updateDraft],
 	);
 
-	// 侧栏条目 = 布局模块定义的顺序/分组边界，经隐藏模块过滤（按草稿，开关即预览），再拼上面的图标文案元数据
+	// 侧栏条目 = 布局模块定义的顺序/分组边界，经隐藏模块过滤（按草稿，开关即预览），再拼上面的图标文案元数据。
+	// 「连接」tab 装的是远端（SSH）主机，受通道门禁约束：正式包（stable）不提供远端能力，
+	// 这个 tab 直接从布局里拿掉——不给入口比给了再报「未启用」更符合「正式包不提这个」。
+	const remoteAvailable = useRemoteFeatureAvailable();
+	const settingsLayout = useMemo(() => (remoteAvailable === false ? SETTINGS_TAB_LAYOUT.filter((entry) => entry.id !== "connections") : SETTINGS_TAB_LAYOUT), [remoteAvailable]);
 	const hiddenModules = draftSettings.hiddenModules ?? NO_HIDDEN_MODULES;
-	const tabs = resolveVisibleSettingsTabs(hiddenModules, revealedTabs).map((entry) => ({
+	const tabs = resolveVisibleSettingsTabs(hiddenModules, revealedTabs, settingsLayout).map((entry) => ({
 		id: entry.id,
 		dividerBefore: entry.dividerBefore ?? false,
 		label: t(TAB_META[entry.id].labelKey),
 		icon: TAB_META[entry.id].icon,
 	}));
+	// tab 被通道拿掉（如从 dev 通道构建切到正式包后 localStorage 里还记着 connections）时回「常用」：
+	// 侧栏已无该项，停在那里只会是一片空白。
+	useEffect(() => {
+		if (remoteAvailable === false && activeTab === "connections") setActiveTab("common");
+	}, [remoteAvailable, activeTab]);
 	// 当前 tab 被隐藏（深链 / 命令面板直达）时临时显示并提示一次，避免用户看到内容却在侧栏里找不到高亮项。
 	useEffect(() => {
 		if (!isSettingsTabHidden(hiddenModules, activeTab) || revealedTabs.has(activeTab)) return;
@@ -609,7 +621,8 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 	// 设置搜索能搜到全部 tab 与设置项（含已隐藏模块的 tab）：条目现算不记忆——131 条、每条两次 t() 查表，
 	// 相比给 useMemo 挂语言依赖的出错风险（locale 可能在渲染后才加载完）不如直接重建。
-	const settingsSearchEntries = buildSettingsSearchEntries(t);
+	// 通道拿掉的「连接」tab 同样不进搜索结果：否则搜「ssh」会命中一个打不开的页。
+	const settingsSearchEntries = buildSettingsSearchEntries(t).filter((entry) => entry.tab !== "connections" || remoteAvailable !== false);
 	// 搜索词提升到弹窗壳持有（而不是搜索组件内部）：DialogContent 的 Esc 拦截要在
 	// 搜索中先清搜索、再按一次才关弹窗——结果替换内容区时直接关弹窗会误触未保存确认流。
 	const [settingsSearchQuery, setSettingsSearchQuery] = useState("");
@@ -842,6 +855,15 @@ function SettingsModalContent(props: SettingsModalProps) {
 									<TabsContent value="proxy" className="settings-panel min-w-0 [overflow-anchor:none]">
 										<Suspense fallback={<SettingsTabLoading />}>
 											<ProxyTab draft={draftSettings} updateDraft={updateDraft} isDirty={isDirty} piProxyChecking={props.piProxyChecking} piProxyNotice={props.piProxyNotice} piProxyNoticeTone={props.piProxyNoticeTone} onTestPiProxy={props.onTestPiProxy} />
+										</Suspense>
+									</TabsContent>
+								)}
+
+								{/* ── 连接 tab（远端 SSH 主机；WSL 将来并列于此）。通道门禁关掉时不渲染 ── */}
+								{activeTab === "connections" && remoteAvailable !== false && (
+									<TabsContent value="connections" className="settings-panel min-w-0 [overflow-anchor:none]">
+										<Suspense fallback={<SettingsTabLoading />}>
+											<ConnectionsTab />
 										</Suspense>
 									</TabsContent>
 								)}

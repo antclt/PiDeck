@@ -4,7 +4,8 @@ import { cn } from "../../lib/utils";
 import { Button } from "../ui-shadcn/button";
 import { getFileIconSeti, getFileIconColor } from "../../fileIcons";
 import { t } from "../../i18n";
-import type { FileContentSearchHit, FileContentSearchResult, FileSearchResult } from "../../../../shared/types";
+import { fileTreeNodeKey } from "../../utils/fileTreeLazy";
+import type { FileContentSearchHit, FileContentSearchResult, FileSearchResult, ProjectFileTarget } from "../../../../shared/types";
 import { findFileNameMatchIndex } from "../../utils/fileSearchFilter";
 
 /**
@@ -22,7 +23,7 @@ export function FileSearchResults(props: {
 	/** 正文命中（Go sidecar）；null = 未就绪/失败/词太短，此时不渲染正文分区 */
 	contentResults: FileContentSearchResult | null;
 	isContentSearching: boolean;
-	onViewFile?: (path: string, openMode?: "preview" | "permanent") => void;
+	onViewFile?: (path: string | ProjectFileTarget, openMode?: "preview" | "permanent") => void;
 	onFileContextMenu: (node: FileSearchResult, x: number, y: number) => void;
 	onClear: () => void;
 }) {
@@ -84,7 +85,8 @@ export function FileSearchResults(props: {
 						{rows.length === 0 ? (
 							<div className="px-3 py-6 text-center text-xs text-muted-foreground">{isSearching ? t("drawer.fileSearchScanning") : t("drawer.fileSearchNoResults", { query: trimmed })}</div>
 						) : (
-							rows.map(({ item, index }) => <FileSearchRow key={item.path} item={item} matchIndex={index} matchLength={trimmed.length} onViewFile={props.onViewFile} onFileContextMenu={props.onFileContextMenu} />)
+							// 远端结果没有绝对 path：key 用 target/path 归一后的稳定键，避免 undefined 折叠。
+							rows.map(({ item, index }) => <FileSearchRow key={fileTreeNodeKey(item)} item={item} matchIndex={index} matchLength={trimmed.length} onViewFile={props.onViewFile} onFileContextMenu={props.onFileContextMenu} />)
 						)}
 						<FileContentSection query={trimmed} result={props.contentResults} isSearching={props.isContentSearching} onViewFile={props.onViewFile} onFileContextMenu={props.onFileContextMenu} />
 					</>
@@ -147,8 +149,9 @@ function FileContentRow(props: { hit: FileContentSearchHit; onViewFile?: (path: 
 	);
 }
 
-function FileSearchRow(props: { item: FileSearchResult; matchIndex: number; matchLength: number; onViewFile?: (path: string, openMode?: "preview" | "permanent") => void; onFileContextMenu: (node: FileSearchResult, x: number, y: number) => void }) {
+function FileSearchRow(props: { item: FileSearchResult; matchIndex: number; matchLength: number; onViewFile?: (path: string | ProjectFileTarget, openMode?: "preview" | "permanent") => void; onFileContextMenu: (node: FileSearchResult, x: number, y: number) => void }) {
 	const { item, matchIndex, matchLength } = props;
+	const fileActionTarget = item.target ?? item.path;
 	// Seti 图标与文件树行同源，视觉上「搜索结果就是文件」而不是另一个列表
 	let icon: ReactNode = null;
 	if (item.type === "file") {
@@ -168,11 +171,11 @@ function FileSearchRow(props: { item: FileSearchResult; matchIndex: number; matc
 			className={cn(
 				"file-node-row inline-flex h-[28px] w-full items-center justify-start gap-1.5 rounded-sm border-0 bg-transparent px-2 py-0 text-left text-body font-normal text-foreground transition-[background-color] duration-base hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
 			)}
-			title={item.relativePath}
-			onClick={() => props.onViewFile?.(item.path)}
+			title={item.displayPath ?? item.relativePath}
+			onClick={() => fileActionTarget && props.onViewFile?.(fileActionTarget)}
 			onDoubleClick={(event) => {
 				event.preventDefault();
-				props.onViewFile?.(item.path, "permanent");
+				if (fileActionTarget) props.onViewFile?.(fileActionTarget, "permanent");
 			}}
 			onContextMenu={(event) => {
 				event.preventDefault();

@@ -1,5 +1,5 @@
 import type { PiDesktopApi } from "../../../../preload";
-import type { TerminalTarget } from "../../../../shared/types";
+import type { Project, TerminalTarget } from "../../../../shared/types";
 import { TerminalDock, type TerminalDockSettings } from "../terminal/TerminalDock";
 import type { TerminalThemeId } from "../../../../shared/types/settings";
 
@@ -35,6 +35,8 @@ export function disposeSessionRuntimeDock(): SessionRuntimeDockMotionState {
 export type SessionRuntimeDockProps = {
 	/** agent 或 project 终端目标；未解析出目标（无 owner）时不渲染 */
 	target?: TerminalTarget;
+	/** 可选的 target 项目记录：project 终端用它判定远端外观 */
+	targetProject?: Project;
 	mounted: boolean;
 	open: boolean;
 	closing: boolean;
@@ -56,6 +58,7 @@ export function SessionRuntimeDock(props: SessionRuntimeDockProps) {
 	return (
 		<TerminalDock
 			target={props.target}
+			targetProject={props.targetProject}
 			open={props.open}
 			closing={props.closing}
 			collapsed={props.collapsed}

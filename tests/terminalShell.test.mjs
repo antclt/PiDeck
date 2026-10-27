@@ -16,7 +16,7 @@ function loadTranspiledModule(filePath, customRequire = require) {
 			esModuleInterop: true,
 		},
 	});
-	const sandbox = { exports: {}, require: customRequire };
+	const sandbox = { exports: {}, require: customRequire, process };
 	vm.runInNewContext(outputText, sandbox, { filename: filePath });
 	return sandbox.exports;
 }
@@ -37,11 +37,11 @@ function loadTerminalSessionManagerModule() {
 	const sandbox = {
 		exports: {},
 		require: (name) => {
-			// 原生模块只经 ./nodePtyRuntime 惰性加载（见该文件头注释）：
-			// 本用例只测纯函数，替身不参与。
-			if (name === "./nodePtyRuntime") return { loadNodePty: () => ({}) };
+			if (name === "node-pty") return {};
 			if (name === "node:crypto") return { randomUUID: () => "id" };
 			if (name === "../../shared/ipc") return { ipcChannels: {} };
+			if (name === "../../shared/types/terminal") return loadTranspiledModule("src/shared/types/terminal.ts");
+			if (name === "../../shared/projectLocation") return loadTranspiledModule("src/shared/projectLocation.ts");
 			// shell 检测依赖宿主环境（git-bash 路径、wsl.exe），桩掉以保证候选列表断言可复现；
 			// existsSync=false / execSync 抛错 = 宿主未安装可选 shell 的最小环境。
 			if (name === "node:fs") return { existsSync: () => false };
@@ -58,6 +58,16 @@ function loadTerminalSessionManagerModule() {
 			if (name === "../wsl/wslExe") {
 				return { getWslExe: () => ({ command: "wsl.exe", shell: false }) };
 			}
+			if (name === "./TerminalSessionLauncher")
+				return loadTranspiledModule("src/main/terminal/TerminalSessionLauncher.ts", (inner) => {
+					// 原生模块只经 ./nodePtyRuntime 惰性加载（AGENTS 硬约束）：桩在运行时入口。
+					if (inner === "./nodePtyRuntime") return { loadNodePty: () => ({}) };
+					if (inner === "../../shared/types/terminal") return loadTranspiledModule("src/shared/types/terminal.ts");
+					if (inner === "../wsl/WslPaths") return loadTranspiledModule("src/main/wsl/WslPaths.ts");
+					if (inner === "../wsl/wslExe") return { getWslExe: () => ({ command: "wsl.exe", shell: false }) };
+					if (inner === "node:fs") return { existsSync: () => false };
+					return require(inner);
+				});
 			if (name === "./terminalDataBatching") {
 				return loadTranspiledModule("src/main/terminal/terminalDataBatching.ts");
 			}
@@ -130,9 +140,11 @@ function loadWithPty() {
 		exports: {},
 		process: { platform: "win32", env: {} },
 		require: (name) => {
-			if (name === "./nodePtyRuntime") return { loadNodePty: () => ptyStub };
+			if (name === "node-pty") return ptyStub;
 			if (name === "node:crypto") return { randomUUID: () => `id-${spawns.length}` };
 			if (name === "../../shared/ipc") return { ipcChannels: {} };
+			if (name === "../../shared/types/terminal") return loadTranspiledModule("src/shared/types/terminal.ts");
+			if (name === "../../shared/projectLocation") return loadTranspiledModule("src/shared/projectLocation.ts");
 			if (name === "node:fs") return { existsSync: () => false };
 			if (name === "node:child_process") {
 				return {
@@ -147,6 +159,16 @@ function loadWithPty() {
 			if (name === "../wsl/wslExe") {
 				return { getWslExe: () => ({ command: "wsl.exe", shell: false }) };
 			}
+			if (name === "./TerminalSessionLauncher")
+				return loadTranspiledModule("src/main/terminal/TerminalSessionLauncher.ts", (inner) => {
+					// 原生模块只经 ./nodePtyRuntime 惰性加载（AGENTS 硬约束）：桩在运行时入口。
+					if (inner === "./nodePtyRuntime") return { loadNodePty: () => ptyStub };
+					if (inner === "../../shared/types/terminal") return loadTranspiledModule("src/shared/types/terminal.ts");
+					if (inner === "../wsl/WslPaths") return loadTranspiledModule("src/main/wsl/WslPaths.ts");
+					if (inner === "../wsl/wslExe") return { getWslExe: () => ({ command: "wsl.exe", shell: false }) };
+					if (inner === "node:fs") return { existsSync: () => false };
+					return require(inner);
+				});
 			if (name === "./terminalDataBatching") {
 				return loadTranspiledModule("src/main/terminal/terminalDataBatching.ts");
 			}
@@ -166,40 +188,46 @@ function agentTarget(agentId, sessionId = "s1") {
 	return { kind: "agent", sessionId, agentId, runtimeGeneration: 1 };
 }
 
-function projectTarget(cwd, projectId = "p1") {
-	return { kind: "project", projectId, cwd };
+function projectTarget(projectId = "p1") {
+	return { kind: "project", projectId };
 }
 
-test("owner key normalizes agent id and project cwd for isolation", () => {
-	const { manager, spawns } = loadWithPty();
+function projectStore(paths) {
+	return { get: (projectId) => (paths[projectId] ? { id: projectId, name: projectId, path: paths[projectId], lastOpenedAt: 0 } : undefined) };
+}
+
+test("owner key isolates terminals by stable project ID", () => {
+	const { manager } = loadWithPty();
 	const instance = new manager(
 		(agentId) => `C:/agents/${agentId}`,
 		() => {},
+		projectStore({ p1: "C:/Users/Me/Proj", p2: "C:/Users/Me/Proj" }),
 	);
 
-	// 同一项目路径的不同写法（大小写/分隔符/尾斜杠）必须归一为同一个隔离键
-	const a = instance.create(projectTarget("C:\\Users\\Me\\Proj"));
-	const b = instance.create(projectTarget("c:/users/me/proj/"));
-	const tabs = instance.list(projectTarget("C:/USERS/Me/Proj"));
+	const a = instance.create(projectTarget("p1"));
+	const b = instance.create(projectTarget("p1"));
+	const tabs = instance.list(projectTarget("p1"));
 	assert.equal(tabs.length, 2);
-	assert.equal(a.ownerKey, "cwd:c:/users/me/proj");
-	assert.equal(b.ownerKey, "cwd:c:/users/me/proj");
+	assert.equal(a.ownerKey, "project:p1");
+	assert.equal(b.ownerKey, "project:p1");
+	assert.equal(instance.list(projectTarget("p2")).length, 0);
 
-	// agent 终端与项目终端绝不共用桶
+	// Agent and project terminals always use different owner buckets.
 	const agentTab = instance.create(agentTarget("agentA"));
 	assert.equal(agentTab.ownerKey, "agent:agentA");
 	assert.equal(instance.list(agentTarget("agentA")).length, 1);
-	assert.equal(instance.list(projectTarget("C:\\Users\\Me\\Proj")).length, 2);
+	assert.equal(instance.list(projectTarget("p1")).length, 2);
 });
 
-test("project terminals are spawned in the project cwd, agent terminals in agent cwd", () => {
+test("project terminals use ProjectStore cwd, agent terminals use runtime cwd", () => {
 	const { manager, spawns } = loadWithPty();
 	const instance = new manager(
 		(agentId) => `C:/agents/${agentId}`,
 		() => {},
+		projectStore({ p1: "D:/work/proj" }),
 	);
 
-	instance.create(projectTarget("D:/work/proj"));
+	instance.create(projectTarget("p1"));
 	instance.create(agentTarget("agentB"));
 
 	assert.equal(spawns[0].cwd, "D:/work/proj");
@@ -211,12 +239,14 @@ test("configured WSL terminals use the Linux cwd inside the selected distro", ()
 	const instance = new manager(
 		(agentId) => `C:/agents/${agentId}`,
 		() => {},
+		projectStore({ p1: "D:/work/proj" }),
 		() => ({ wslEnabled: true, wslDistro: "Ubuntu-24.04", wslUser: "dev" }),
 	);
 
-	const tab = instance.create(projectTarget("D:/work/proj"), "wsl");
+	const tab = instance.create(projectTarget("p1"), "wsl");
 
 	assert.equal(tab.shell, "wsl");
+	assert.equal("cwd" in tab, false);
 	assert.equal(spawns[0].command, "wsl.exe");
 	assert.deepEqual(plain(spawns[0].args), ["-d", "Ubuntu-24.04", "-u", "dev", "--cd", "/mnt/d/work/proj"]);
 	assert.equal(spawns[0].cwd, "D:\\work\\proj");
@@ -227,13 +257,14 @@ test("closing an agent leaves project terminal buckets intact", () => {
 	const instance = new manager(
 		(agentId) => `C:/agents/${agentId}`,
 		() => {},
+		projectStore({ p1: "D:/work/proj" }),
 	);
 
-	instance.create(projectTarget("D:/work/proj"));
+	instance.create(projectTarget("p1"));
 	instance.create(agentTarget("agentC"));
 	instance.closeAgent("agentC");
 
-	assert.equal(instance.list(projectTarget("D:/work/proj")).length, 1);
+	assert.equal(instance.list(projectTarget("p1")).length, 1);
 	assert.equal(instance.list(agentTarget("agentC")).length, 0);
 });
 
@@ -251,16 +282,17 @@ test("input on a removed tab is silently ignored (no cross-IPC throw)", () => {
 	assert.doesNotThrow(() => instance.input(tab.id, "ls\r"));
 });
 
-test("ensure returns existing tabs for the same owner instead of duplicating", () => {
+test("ensure returns existing tabs for the same project identity instead of duplicating", () => {
 	const { manager, spawns } = loadWithPty();
 	const instance = new manager(
 		(agentId) => `C:/agents/${agentId}`,
 		() => {},
+		projectStore({ p1: "E:/repo" }),
 	);
 
-	const first = instance.ensure(projectTarget("E:/repo"));
+	const first = instance.ensure(projectTarget("p1"));
 	assert.equal(first.length, 1);
-	const second = instance.ensure(projectTarget("E:/repo"));
+	const second = instance.ensure(projectTarget("p1"));
 	assert.equal(second.length, 1);
 	assert.equal(spawns.length, 1);
 });
@@ -277,4 +309,5 @@ test("terminal manager wiring resolves agent cwd through the composite gateway (
 	assert.match(block, /\.list\(\)/);
 	assert.match(block, /candidate\.id === agentId/);
 	assert.match(block, /return tab\.cwd/);
+	assert.match(block, /projectStore/);
 });

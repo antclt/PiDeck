@@ -2,11 +2,12 @@ import { useAtomValue } from "jotai";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject, type ReactNode } from "react";
 import { type GroupImperativeHandle, type PanelImperativeHandle } from "react-resizable-panels";
 import { ResizablePanel, ResizablePanelGroup } from "../ui-shadcn/resizable";
-import type { ChatMessage, GitBranchInfo, ImageContent, TerminalTarget, TerminalThemeId } from "../../../../shared/types";
+import type { ChatMessage, GitBranchInfo, ImageContent, Project, TerminalTarget, TerminalThemeId } from "../../../../shared/types";
 import type { SessionTimelineController } from "../../hooks/useSessionTimelineController";
 import { isLanWeb, desktopApi as api } from "../../desktopApi";
 import { SessionHeader } from "./SessionHeader";
 import { SessionBranchBar } from "./SessionBranchBar";
+import { RemoteSessionTrustNotice } from "./RemoteSessionTrustNotice";
 import { SessionGoalStrip } from "./SessionGoalStrip";
 import { SessionSubagentsStrip } from "./SessionSubagentsStrip";
 import { SessionTodoStrip } from "./SessionTodoStrip";
@@ -103,6 +104,8 @@ export type SessionViewProps = {
 	terminalOwnerKey?: string;
 	/** agent 或 project 终端目标；undefined 时不渲染 dock */
 	terminalTarget?: TerminalTarget;
+	/** 可选的 target 项目记录：project 终端用它判定远端外观（SSH tab 建立前） */
+	terminalTargetProject?: Project;
 	setTerminalOpenForOwner: (open: boolean) => void;
 	setTerminalCollapsedForOwner: (collapsed: boolean) => void;
 	/** 回写终端分屏高度（全局单份，hook 内部持久化） */
@@ -172,6 +175,7 @@ export function SessionView({
 	availableTerminalHeight,
 	terminalOwnerKey,
 	terminalTarget,
+	terminalTargetProject,
 	setTerminalOpenForOwner,
 	setTerminalCollapsedForOwner,
 	setTerminalHeight,
@@ -325,6 +329,9 @@ export function SessionView({
 			)}
 			{/* 分支导航条：仅当当前会话存在 fork 分支关系（父/兄弟/子分支）时显示 */}
 			<SessionBranchBar sessionId={sessionId} onOpenSession={onOpenBranchSession} />
+			{/* 远端会话的 trust 现状提示（P4.2）：标记存在时常驻在会话头下方；
+			  本地/WSL 会话与旧 main（无标记）不渲染任何东西。 */}
+			<RemoteSessionTrustNotice sessionId={sessionId} />
 			<ResizablePanelGroup
 				// 面板数只随终端挂载变化：输入栏在时间线列内，不再改变 Group 面板数。
 				key={`${sessionId}:${sessionResizableGroupKey(sessionPanels)}`}
@@ -398,6 +405,7 @@ export function SessionView({
 				{terminalPanelVisible && (
 					<TerminalDockPanel
 						target={terminalTarget}
+						targetProject={terminalTargetProject}
 						panelRef={terminalPanelRef}
 						open={terminalOpen}
 						closing={terminalDockClosing}

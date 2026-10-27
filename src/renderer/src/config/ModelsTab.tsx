@@ -294,7 +294,7 @@ export function ModelsTab(props: {
 										{t("config.addProvider")}
 									</Button>
 									<Button size="sm" variant="outline" onClick={() => setTransferView({ kind: "import" })} disabled={saving}>
-										{t("config.models.transfer.discoverButton")}
+										{t("config.models.transfer.importButton")}
 									</Button>
 									<Button size="sm" variant="outline" onClick={() => setShowGuide(!showGuide)} disabled={saving}>
 										{t("config.providerGuide")}

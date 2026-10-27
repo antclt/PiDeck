@@ -4,7 +4,7 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 import { deferred, plain } from "./helpers/sessionRunControlHarness.mjs";
 
 const { AgentManager } = loadTsCommonJs("src/main/pi/AgentManager.ts");
-const { ipcChannels } = loadTsCommonJs("src/shared/ipc.ts");
+const { agentEventTags } = loadTsCommonJs("src/shared/ipc.ts");
 const AGENT_ID = "state-owner";
 
 /** 暂停真实运行态查询的 RPC/文件统计；不启动 pi，不读取用户会话。 */
@@ -45,7 +45,7 @@ function harness({ waitAt, rpcFails = false, cacheStats } = {}) {
 	manager.agents.set(AGENT_ID, runtime);
 	manager.getSessionCacheHitStats = () => pause("cache", cacheStats ?? { latest: 80, average: 60, sampleCount: 2, conversationTokens: 200 });
 	manager.onOutput((channel, payload) => {
-		if (channel === ipcChannels.agentsRuntimeState) events.push(plain(payload));
+		if (channel === agentEventTags.agentsRuntimeState) events.push(plain(payload));
 	});
 	return { manager, runtime, process, entered, release, requests, events };
 }

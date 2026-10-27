@@ -48,6 +48,28 @@ test("相同事实版本保持渲染引用，失败不清空旧数据", () => {
 	assert.doesNotMatch(catchBlock.slice(0, catchBlock.indexOf("factsTriggerKey") > 0 ? catchBlock.indexOf("factsTriggerKey") : 600), /setProcessEvents\(\[\]\)/);
 });
 
+test("后端暂时不可用时保留同会话上一次成功的事实", () => {
+	// 一次瞬时 unavailable 不得清空已显示的过程轨（否则「过程」轨静默变空）。
+	assert.match(hook, /const unavailable = !Array\.isArray\(result\) && result\?\.coverage\.reason === "unavailable"/);
+	assert.match(hook, /unavailable && lastGoodProcessEventsRef\.current\?\.sessionId === sessionId/);
+	assert.match(hook, /if \(!unavailable\) lastGoodProcessEventsRef\.current = \{ sessionId, events \}/);
+});
+
+test("会话聚焦即预热事实：抽屉第一帧就带过程轨", () => {
+	const pane = readFileSync("src/renderer/src/components/session/ChatSessionPane.tsx", "utf8");
+	assert.match(pane, /useSessionProcessFactsPrefetch\(sessionId\)/);
+	assert.match(hook, /export function useSessionProcessFactsPrefetch/);
+	assert.match(hook, /export function prefetchSessionProcessFacts/);
+	// 初值直接取预热缓存：首帧就有过程轨，不必等面板自己那次 IPC 往返。
+	assert.match(hook, /useState<SessionProcessEvent\[\]>\(\(\) =>/);
+	assert.match(hook, /processFactsCache\.get\(sessionId\)\?\.events/);
+	// 切会话时用缓存铺底，但同一会话的后续重跑不铺底（不得回退成旧事实）。
+	assert.match(hook, /seededSessionRef\.current !== sessionId/);
+	// 成功结果回写缓存；「读不到」不入缓存（不把没读到当成事实）。
+	assert.match(hook, /rememberProcessFacts\(sessionId, events, result\.coverage\)/);
+	assert.match(hook, /Array\.isArray\(result\) \|\| result\.coverage\.reason === "unavailable"/);
+});
+
 test("模型请求快照不再跟消息条数刷新", () => {
 	assert.doesNotMatch(hook, /messages\.length\]\s*\)/);
 });

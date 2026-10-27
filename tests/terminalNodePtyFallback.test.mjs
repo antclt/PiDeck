@@ -121,15 +121,20 @@ function loadManagerWithPtyGate() {
 	return { state, TerminalSessionManager: load(MANAGER_FILE).TerminalSessionManager };
 }
 
+/**
+ * 合并后的 ctor 是 (getAgentCwd, emit, projectStore, getSettings)：项目 cwd 由 projectStore
+ * 按 projectId 解析（目标身份是 { kind: "project", projectId }，不再带 cwd）。
+ */
 function newManager(TerminalSessionManager) {
 	return new TerminalSessionManager(
 		() => "/proj/agent",
 		() => {},
+		{ get: (projectId) => ({ id: projectId, name: `proj ${projectId}`, path: `/proj/${projectId}`, lastOpenedAt: 0 }) },
 		() => ({}),
 	);
 }
 
-const projectTarget = { kind: "project", cwd: "/proj" };
+const projectTarget = { kind: "project", projectId: "p1" };
 
 /** vm 沙箱产出的数组/对象带另一套原型，deepStrictEqual 会因原型不同失败（同 terminalShell 的 plain）。 */
 function plain(value) {
@@ -154,6 +159,7 @@ test("node-pty 不可用时模块仍可加载：终端操作在调用期报错�
 		new TerminalSessionManager(
 			() => "/proj",
 			() => {},
+			{ get: (projectId) => ({ id: projectId, name: projectId, path: `/proj/${projectId}`, lastOpenedAt: 0 }) },
 			() => ({}),
 		).closeAll(),
 	);

@@ -1,6 +1,6 @@
 {
   "name": "pideck",
-  "version": "0.9.7",
+  "version": "0.9.8",
   "dshRuntimeVersion": "0.2.1-rc.2",
   "packageManager": "npm@11.6.2",
   "engines": {
@@ -89,6 +89,9 @@
     "check:xueprompts": "node scripts/check-xueprompts.mjs",
     "check:electron": "node scripts/check-electron.mjs",
     "check:dsh-wire": "node scripts/check-dsh-wire-payloads.mjs",
+    "check:ipc-wiring": "node scripts/check-ipc-wiring.mjs",
+    "check:test-shape": "node scripts/check-test-shape.mjs",
+    "find:dead-code": "node scripts/find-dead-code.mjs",
     "pack:dev": "node scripts/pack-dev.js",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",

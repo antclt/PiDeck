@@ -1,4 +1,6 @@
+import { useAtomValue } from "jotai";
 import type { AgentBackend } from "../../../../shared/types";
+import { sessionIsRemoteAtomFamily, sessionRemoteExtensionsAtomFamily } from "../../atoms";
 import { DshPermissionMenu } from "./DshPermissionMenu";
 import { SecurityLevelMenu } from "./SecurityLevelMenu";
 
@@ -10,8 +12,14 @@ import { SecurityLevelMenu } from "./SecurityLevelMenu";
  *   （运行中弹卡应答），PiDeck 的 pi 安全门对 ACP 子进程不生效，摆出来只会误导
  *   （用户反馈：ACP 会话的权限/模式不应再走 PiDeck 的）。
  * 新增后端（如未来 Codex 运行时）只在这里注册控制位，不再在 ComposerArea 写 if/else。
+ *
+ * 远端 pi：安全门是 PiDeck 内置扩展，只有在**实际注入**（`remoteExtensions.applied`）后才会生效。
+ * 未注入时这里直接不渲染——一个“能切、不生效”的等级选择器比没有入口更糟（用户会以为已经拦了）。
  */
 export function SecurityControl(props: { sessionId: string; backend?: AgentBackend; disabled?: boolean }) {
+	const isRemoteSession = useAtomValue(sessionIsRemoteAtomFamily(props.sessionId));
+	const remoteExtensions = useAtomValue(sessionRemoteExtensionsAtomFamily(props.sessionId));
+	if (isRemoteSession && !(remoteExtensions?.applied ?? []).includes("pi-deck-security-gate.ts")) return null;
 	if (props.backend === "dsh") {
 		return <DshPermissionMenu sessionId={props.sessionId} disabled={props.disabled} />;
 	}

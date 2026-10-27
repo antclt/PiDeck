@@ -74,9 +74,15 @@ test("catalog deletion unbinds first then waits for the agent exit before touchi
 	assert.match(coordinator, /isActivating\(sessionId: string\): boolean/);
 });
 
-test("replacement restore is gated by full origin identity in main", () => {
-	assert.match(main, /const originKey = originEntry\?\.filePath[\s\S]*buildSessionOriginKey/);
-	assert.match(main, /canRestoreOrigin: \(\) => \{[\s\S]*?buildSessionOriginKey[\s\S]*?originKey/);
+test("replacement restore is gated by full local/SSH origin identity in the session owner", () => {
+	// 合并后策略内联进 index.ts（batch A1）：owner 就是这里的 replaceAgentSession，
+	// 所以断言落在它的函数体切片上（整文件的 `[\s\S]*?` 会跨函数误命中）。
+	const owner = main.slice(main.indexOf("async function replaceAgentSession("), main.indexOf("onDetached: emitSessionRuntimeDetach"));
+	assert.ok(owner.length > 0, "index.ts 里必须保留 replaceAgentSession 所有者");
+	assert.match(owner, /const\s+originKey\s*=[\s\S]*?originEntry\?\.filePath[\s\S]*?buildSessionOriginKey\s*\(/);
+	assert.match(owner, /canRestoreOrigin:\s*\(\)\s*=>\s*\{[\s\S]*?buildSessionOriginKey[\s\S]*?originKey/);
+	assert.match(owner, /project\.hostId\s*===\s*originLocator\.hostId/);
+	assert.match(owner, /tab\.sessionPath\s*===\s*originLocator\.remotePath/);
 	assert.match(coordinator, /failClosedRuntimeReplacement/);
 	assert.match(coordinator, /replacementBySession/);
 });

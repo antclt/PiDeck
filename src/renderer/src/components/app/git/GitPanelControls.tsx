@@ -38,8 +38,9 @@ function fromSelectValue(value: string): string {
  * Compact Git pane filter：shadcn Select。
  * - 必须挂 SelectValue：Radix item-aligned / popper 定位依赖它，缺了菜单会对不齐甚至「点了没反应」。
  * - 抽屉边缘用 popper + collision，避免菜单跑出视口。
+ * - compact：放进 32px 的 PaneHeader 时用 24px 高、无纵向内边距的 chip 形态。
  */
-export function GitCompactFilter(props: { value: string; options: { value: string; label: string }[]; onChange: (value: string) => void; ariaLabel: string; className?: string }) {
+export function GitCompactFilter(props: { value: string; options: { value: string; label: string }[]; onChange: (value: string) => void; ariaLabel: string; className?: string; compact?: boolean }) {
 	const selected = props.options.find((option) => option.value === props.value);
 	return (
 		<Select value={toSelectValue(props.value)} onValueChange={(next) => props.onChange(fromSelectValue(next))}>
@@ -50,7 +51,11 @@ export function GitCompactFilter(props: { value: string; options: { value: strin
 					// 不用 font-mono：「全部」等中文标签走面板 --git-ui-font / 项目 base 栈。
 					// bg-transparent + shadow-none 压过 SelectTrigger 基类的 bg-bg-input/shadow-xs——
 					// 白底+投影在 chrome 面板头上「突出成一块白 chip」（用户反馈）；hover 才浮起。
-					"h-6 w-auto max-w-full min-w-0 gap-1 overflow-hidden rounded-sm border border-transparent bg-transparent px-2 text-control whitespace-nowrap text-text-primary shadow-none transition-[border-color,background-color] duration-fast hover:border-border-subtle hover:bg-bg-hover focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none [&>svg]:size-3",
+					// h-6! 必须带 important：基类 data-[size=default]:h-9（36px）特定性高于 h-6，chip 曾被撑到 36px，
+					// 在 32px 面板头里上下各溢 2px、盖过标题栏下边线。
+					// py-0 压掉基类 py-2：24px 定高再留 8px 纵向内边距，内容盒只剩 6px，文字会被 overflow-hidden 裁掉。
+					"w-auto max-w-full min-w-0 gap-1 overflow-hidden rounded-sm border border-transparent bg-transparent px-2 text-control whitespace-nowrap text-text-primary shadow-none transition-[border-color,background-color] duration-fast hover:border-border-subtle hover:bg-bg-hover focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none [&>svg]:size-3",
+					props.compact && "h-6! py-0",
 					props.className,
 				)}
 			>

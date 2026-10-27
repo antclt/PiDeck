@@ -323,6 +323,14 @@ test("shared project owner dereplicates against the focused pane", () => {
 	);
 });
 
+test("SSH pane terminals are project-owned even while an Agent runtime is live", () => {
+	const { resolvePaneTerminal, resolveTerminalOwner } = loadTerminalDockStateModule();
+	const project = { id: "remote", locator: { kind: "ssh" } };
+	const pane = resolvePaneTerminal({ sessionId: "s", projectId: project.id, project, runtime: { agentId: "a", runtimeGeneration: 1 } });
+	assert.deepEqual(JSON.parse(JSON.stringify(pane)), { owner: { kind: "project", id: "remote" }, target: { kind: "project", projectId: "remote" } });
+	assert.deepEqual(JSON.parse(JSON.stringify(resolveTerminalOwner("a", "remote", true))), { kind: "project", id: "remote" });
+});
+
 test("pane terminal resolves agent target from its own runtime and project fallback", () => {
 	const { resolvePaneTerminal, terminalOwnerKey } = loadTerminalDockStateModule();
 
@@ -350,7 +358,8 @@ test("pane terminal resolves agent target from its own runtime and project fallb
 	assert.equal(history.owner.kind, "project");
 	assert.equal(terminalOwnerKey(history.owner), "project:projP");
 	assert.equal(history.target.kind, "project");
-	assert.equal(history.target.cwd, "C:/work/projP");
+	assert.equal(history.target.projectId, "projP");
+	assert.equal("cwd" in history.target, false);
 
 	// Chat 项目没有可落地的 cwd → 不提供终端
 	const chat = resolvePaneTerminal({

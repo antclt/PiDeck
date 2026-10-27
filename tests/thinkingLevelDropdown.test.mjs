@@ -15,17 +15,24 @@ function createHarness() {
 	const captured = { sliders: [], buttons: [] };
 	const slider = (props) => {
 		captured.sliders.push(props);
-		return createElement("div", { role: "slider", "aria-label": props["aria-label"], className: props.className }, props.children);
+		// 与 Radix 一致：Root 只渲染 Track/Range/Thumb，children 被丢弃（探针实测），
+		// 因此装饰节点必须挂在外层容器，不能靠塞进 Slider 里。
+		return createElement("div", { role: "slider", "aria-label": props["aria-label"], className: props.className });
 	};
 	const button = ({ children, onClick, disabled, ...props }) => {
 		captured.buttons.push({ ...props, onClick, disabled, children });
 		return createElement("button", { ...props, onClick, disabled }, children);
 	};
+	// Popover 壳：捕获 onOpenChange（提交时机就在这条回调上，必须可断言）。
+	const popover = (props) => {
+		captured.popover = props;
+		return createElement("div", { "data-slot": "popover" }, props.children);
+	};
 	const { ModelThinkingChip, ThinkingLevelDropdown } = loadTsCommonJs("src/renderer/src/components/session/ModelThinkingChip.tsx", {
 		stubs: {
 			"../../i18n": { t: (key) => key },
 			"../ui-shadcn/button": { Button: button },
-			"../ui-shadcn/popover": { Popover: passthrough, PopoverTrigger: passthrough, PopoverContent: passthrough },
+			"../ui-shadcn/popover": { Popover: popover, PopoverTrigger: passthrough, PopoverContent: passthrough },
 			"../ui-shadcn/slider": { Slider: slider },
 			"../../hooks/useShortcutBindings": { useShortcutBindings: () => ({ bindings: { cycleThinking: "Control+T" }, platform: "win32" }) },
 		},
@@ -47,6 +54,20 @@ test("思考强度条直接呈现（Popover 壳 + 渐变滑条），无单选菜
 	// 快捷键提示跟随生效绑定（hook 桩返回 Control+T）
 	assert.ok(html.includes("Ctrl+T"));
 	assert.doesNotMatch(html, /role="menuitemradio"|common\.confirm|<input/);
+});
+
+test("轨道上每个档位都有刻度点，且填充段/未选段分色（不能挂在 Slider children 里）", () => {
+	const { ThinkingLevelDropdown } = createHarness();
+	const levels = [{ value: "off" }, { value: "low" }, { value: "medium" }, { value: "high" }];
+	const html = renderToStaticMarkup(createElement(ThinkingLevelDropdown, { ...BASE, current: "low", levels }));
+	// 回归：Radix Slider.Root 丢弃 children，星尘点曾因此完全不渲染（DOM 里一个点也没有）。
+	// 用 data-track-dot 计数，不依赖 class 拼接顺序。
+	const filled = html.match(/data-track-dot="filled"/g) ?? [];
+	const idle = html.match(/data-track-dot="idle"/g) ?? [];
+	assert.equal(filled.length + idle.length, levels.length, `档位点数量应等于档位数，实际 DOM：${filled.length + idle.length}`);
+	// current=low → 下标 1：前两个点落在填充段，其余落在灰轨
+	assert.equal(filled.length, 2);
+	assert.equal(idle.length, 2);
 });
 
 test("滑条离散吸附：min/max 覆盖全部档位，value=当前档位下标，step=1", () => {
@@ -82,24 +103,50 @@ test("当传入超出模型支持档位（如 max）时，滑条 clamp 到支持
 	assert.ok(!captured.buttons.some((b) => b["data-tick-value"] === "max"));
 });
 
-test("拖拽只预览不提交（松手 onPointerUp 才 onPick），同值提交跳过", () => {
+test("选择期间只预览：拖拽/刻度/方向键都不提交，关闭弹层才发一次 onPick", () => {
 	const { captured, ThinkingLevelDropdown } = createHarness();
 	const picked = [];
 	const levels = [{ value: "low" }, { value: "medium" }, { value: "high" }];
 	renderToStaticMarkup(createElement(ThinkingLevelDropdown, { ...BASE, current: "low", levels, onPick: (value) => picked.push(value) }));
-	// 拖拽路径（onValueChange 逐档触发）：不得提交——否则第一档应用后弹层立即关闭
+	// 拖拽（onValueChange 逐档触发）：不得提交，也不得提前关闭
 	captured.sliders[0].onValueChange([1]);
 	captured.sliders[0].onValueChange([2]);
 	assert.deepEqual(picked, []);
-	// 松手：提交拖拽终点档位
-	captured.sliders[0].onPointerUp();
-	assert.deepEqual(picked, ["high"]);
-	// 原地点击 thumb（值未变）：跳过无意义 RPC
-	captured.sliders[0].onPointerUp();
-	assert.deepEqual(picked, ["high"]);
+	// 点刻度：同样只改预览
+	captured.buttons.find((b) => b["data-tick-value"] === "medium").onClick();
+	assert.deepEqual(picked, []);
+	// 关闭弹层：提交当时预览的档位（一次）
+	captured.popover.onOpenChange(false);
+	assert.deepEqual(picked, ["medium"]);
+	// 再次关闭（已应用）：跳过无意义 RPC
+	captured.popover.onOpenChange(false);
+	assert.deepEqual(picked, ["medium"]);
 });
 
-test("键盘方向键预览（onValueChange）、Enter/空格提交预览档位", () => {
+test("打开弹层不提交；打开又原样关闭也不发 RPC", () => {
+	const { captured, ThinkingLevelDropdown } = createHarness();
+	const picked = [];
+	const levels = [{ value: "low" }, { value: "medium" }, { value: "high" }];
+	renderToStaticMarkup(createElement(ThinkingLevelDropdown, { ...BASE, current: "medium", levels, onPick: (value) => picked.push(value) }));
+	captured.popover.onOpenChange(true);
+	assert.deepEqual(picked, []);
+	captured.popover.onOpenChange(false);
+	assert.deepEqual(picked, []);
+});
+
+test("重新打开弹层时清掉上次未提交的预览（不把旧预览当新选择发回去）", () => {
+	const { captured, ThinkingLevelDropdown } = createHarness();
+	const picked = [];
+	const levels = [{ value: "low" }, { value: "medium" }, { value: "high" }];
+	renderToStaticMarkup(createElement(ThinkingLevelDropdown, { ...BASE, open: false, current: "low", levels, onPick: (value) => picked.push(value) }));
+	// 上一次残留的预览（例如提交失败 / RPC 未落地）
+	captured.sliders[0].onValueChange([2]);
+	captured.popover.onOpenChange(true);
+	captured.popover.onOpenChange(false);
+	assert.deepEqual(picked, [], "重新打开后应回到已应用档位，关闭时无变化不发 RPC");
+});
+
+test("键盘方向键预览（onValueChange）、Enter/空格 = 确认并关闭（关闭时才提交）", () => {
 	const { captured, ThinkingLevelDropdown } = createHarness();
 	const picked = [];
 	const levels = [{ value: "low" }, { value: "medium" }, { value: "high" }];
@@ -110,17 +157,18 @@ test("键盘方向键预览（onValueChange）、Enter/空格提交预览档位"
 	assert.deepEqual(picked, []);
 	key("Enter");
 	assert.deepEqual(picked, ["medium"]);
+	// 已关闭（open=false）后重复 Enter 不再发
 	key("Enter");
-	assert.deepEqual(picked, ["medium"]); // 已提交值不重复发
+	assert.deepEqual(picked, ["medium"]);
 });
 
-test("点刻度标签立即提交原始 id", () => {
+test("点刻度标签只改预览，不提交", () => {
 	const { captured, ThinkingLevelDropdown } = createHarness();
 	const picked = [];
 	const levels = [{ value: "low" }, { value: "medium" }, { value: "high" }];
 	renderToStaticMarkup(createElement(ThinkingLevelDropdown, { ...BASE, current: "low", levels, onPick: (value) => picked.push(value) }));
 	captured.buttons.find((b) => b["data-tick-value"] === "medium").onClick();
-	assert.deepEqual(picked, ["medium"]);
+	assert.deepEqual(picked, []);
 });
 
 test("后端明确返回空档位时展示不可用提示，不渲染滑条", () => {

@@ -1,9 +1,13 @@
-import { mkdir, readdir, stat } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { normalizeImportedToolArguments } from "./importToolArguments";
 import { assertSourceWithinRoot } from "./importPathGuard";
 import { readImportMetaHead } from "./importMetaHead";
 import { readSessionSourceHead } from "./sessionSourceHead";
+import { ensureProjectSessionDir, getProjectSessionDir, normalizePath, readRecord, safePathToken } from "./importShared";
+
+// 共用工具实现统一在 importShared；仍从本模块转出，保持既有调用点不变。
+export { ensureProjectSessionDir, getProjectSessionDir, normalizePath, readRecord, safePathToken };
 
 /** WorkBuddy 的 JSONL 行结构不固定，统一按 unknown 读取后再逐字段收窄。 */
 export type WorkBuddyRecord = Record<string, unknown>;
@@ -40,17 +44,6 @@ export function readNumber(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-export function readRecord(value: unknown): Record<string, unknown> {
-	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-
-export function normalizePath(path?: string): string {
-	return String(path ?? "")
-		.replace(/\\/g, "/")
-		.replace(/\/+$/, "")
-		.toLowerCase();
-}
-
 /**
  * 项目路径 → WorkBuddy 目录名：盘符小写，所有分隔符转 '-'，其余大小写保留。
  * 例：D:\project\github\pi-desktop → d-project-github-pi-desktop
@@ -60,17 +53,6 @@ export function getWorkBuddyProjectDir(root: string, projectPath: string): strin
 	const win = normalized.match(/^([A-Za-z]):\/(.+)$/);
 	const slug = win ? `${win[1].toLowerCase()}-${win[2].replace(/\//g, "-")}` : normalized.replace(/^\//, "").replace(/\//g, "-");
 	return join(root, slug);
-}
-
-export function safePathToken(path: string): string {
-	const normalized = path.replace(/\\/g, "/");
-	const win = normalized.match(/^([A-Za-z]):\/(.+)$/);
-	if (win) return `--${win[1]}--${win[2].replace(/\//g, "-")}--`;
-	return `--${normalized.replace(/^\//, "").replace(/\//g, "-")}--`;
-}
-
-export function getProjectSessionDir(piRoot: string, projectPath: string): string {
-	return join(piRoot, safePathToken(projectPath));
 }
 
 export function getWorkBuddyTargetPath(piRoot: string, projectPath: string, session: ParsedWorkBuddySession): string {
@@ -180,12 +162,6 @@ export async function readWorkBuddySessionHead(root: string, filePath: string): 
 /** 读取导入产物头部的 import 标记（有界读头部，不再整读会话文件——见 importMetaHead）。 */
 export async function readWorkBuddyImportMeta(targetPath: string): Promise<WorkBuddyImportMeta | undefined> {
 	return readImportMetaHead(targetPath, "workbuddy_import");
-}
-
-export async function ensureProjectSessionDir(piRoot: string, projectPath: string) {
-	const dir = getProjectSessionDir(piRoot, projectPath);
-	await mkdir(dir, { recursive: true });
-	return dir;
 }
 
 /** 移除平台注入的 <system-reminder> 上下文块，只保留用户真实输入。 */

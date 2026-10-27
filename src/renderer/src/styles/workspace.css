@@ -842,21 +842,16 @@ body.is-git-pane-resizing, body.is-git-pane-resizing * { cursor: row-resize !imp
 /* 最后一个分组不要底部边框，避免在列表末尾残留一条横线 */
 .git-resource-group:last-child { border-bottom: none; }.git-resource-group.open .git-resource-group-actions{ display: flex; }/* 变更文件树目录头 —— 点击折叠/展开 + 显示每个目录下的文件计数 */
 
+/* 行尺寸/内边距/圆角/hover 全由行上的 utility 控制（28px 行高、--space-2 基准、bg-muted），
+   与文件抽屉的树行同一套规格；legacy 层只保留随字号档位缩放的字号与字体。 */
 .git-resource-row {
-  display: flex;
-  height: 26px;
-  align-items: center;
-  gap: 0;
-  padding: 0 7px 0 0;
   font-family: var(--git-ui-font);
   font-size: var(--font-size-body);
-  line-height: 26px;
 }
-.git-resource-row:hover, .git-resource-row:focus-within { background: var(--git-panel-hover); }
 .git-resource-open.static { cursor: default; }
 .git-resource-open:disabled { cursor: progress; opacity: 0.72; }
 .git-resource-open:focus-visible { outline: none; box-shadow: inset var(--focus-ring); }.git-resource-name { min-width: 0; flex: 0 1 auto; overflow: hidden; color: var(--git-panel-fg); text-overflow: ellipsis; white-space: nowrap; }
-.git-decoration { width: 16px; flex: 0 0 16px; margin-left: 5px; color: var(--git-desc-fg); font-family: var(--git-ui-font); font-size: 12px; font-weight: 600; text-align: right; }
+.git-decoration { width: 16px; flex: 0 0 16px; margin-left: 5px; color: var(--git-desc-fg); font-family: var(--git-ui-font); font-size: var(--font-size-caption); font-weight: 600; text-align: right; }
 .git-resource-row.status-modified .git-decoration { color: var(--git-modified); }
 .git-resource-row.status-added .git-decoration { color: var(--git-added); }
 .git-resource-row.status-deleted .git-decoration { color: var(--git-deleted); }

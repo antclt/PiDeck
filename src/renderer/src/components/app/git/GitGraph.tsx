@@ -665,10 +665,11 @@ export function SourceControlGraph(props: GitGraphProps) {
 			style={{ "--git-pane-height": `${props.height}px` } as CSSProperties}
 		>
 			<PaneHeader id={`${props.paneIdPrefix}-graph`} title={t("git.sourceControlGraph")} count={totalCount} open={props.open} onToggle={props.onToggle}>
-				{props.historyRepoOptions && props.historyRepoOptions.length > 1 && props.onSelectHistoryRepo && <GitCompactFilter value={props.historyRepoPath ?? ""} ariaLabel={t("git.switchRepository")} options={props.historyRepoOptions} onChange={props.onSelectHistoryRepo} className="max-w-[8.5rem]" />}
+				{props.historyRepoOptions && props.historyRepoOptions.length > 1 && props.onSelectHistoryRepo && <GitCompactFilter value={props.historyRepoPath ?? ""} ariaLabel={t("git.switchRepository")} options={props.historyRepoOptions} onChange={props.onSelectHistoryRepo} compact className="max-w-[8.5rem]" />}
 				<GitCompactFilter
 					value={ref}
 					ariaLabel={t("git.filterReference")}
+					compact
 					options={[
 						{ value: "", label: t("common.all") },
 						...props.branches.map((branch) => ({

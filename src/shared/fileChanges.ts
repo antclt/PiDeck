@@ -5,32 +5,16 @@
  * main（会话文件修改汇总 IPC）与 renderer（TimelineFormat / 文件 tab）共用同一份实现，
  * 避免两处各自复制解析逻辑导致口径漂移。
  *
- * 注意：与 AppUtils 的工具参数解析同逻辑（AppUtils 保留独立副本，改动时需同步）。
+ * 注意：工具参数解析已收口到 `shared/toolArgs.ts`，main / renderer 共用同一实现。
  * 本模块无运行时依赖，可被 node 单测直接加载。
  */
 import type { ChatMessage } from "./types.ts";
 import type { SessionFileChange } from "./types/fileChanges.ts";
+// ANSI 净化与工具参数解析的唯一实现在 shared/ 下；本模块只转出 stripAnsi 维持旧调用点。
+import { stripAnsiCsi as stripAnsi } from "./ansiText.ts";
+import { parseToolArgs } from "./toolArgs.ts";
 
-/* ── 工具参数解析 ── */
-
-function parseToolArgs(value: unknown): Record<string, unknown> | undefined {
-	if (!value) return undefined;
-	if (typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
-	if (typeof value !== "string" || !value.trim()) return undefined;
-	try {
-		let parsed = JSON.parse(value) as unknown;
-		if (typeof parsed === "string" && parsed.trim()) {
-			try {
-				parsed = JSON.parse(parsed);
-			} catch {
-				return undefined;
-			}
-		}
-		return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : undefined;
-	} catch {
-		return undefined;
-	}
-}
+export { stripAnsi };
 
 export function getToolFilePath(args: unknown): string | undefined {
 	if (!args) return undefined;
@@ -93,12 +77,6 @@ function getToolEditDiff(args: Record<string, unknown>): { oldText: string; newT
 	const newText = typeof args.newText === "string" ? args.newText : typeof args.new_text === "string" ? args.new_text : typeof args.new_string === "string" ? args.new_string : undefined;
 	if (oldText === undefined || newText === undefined) return undefined;
 	return { oldText, newText };
-}
-
-const ANSI_RE = /\x1b\[[0-9;]*[a-zA-Z]/g;
-
-export function stripAnsi(text: string): string {
-	return text.replace(ANSI_RE, "");
 }
 
 /**

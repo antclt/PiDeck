@@ -1,4 +1,5 @@
-import { ipcChannels } from "../../shared/ipc";
+import type { AgentRuntimeState } from "../../shared/types";
+import { agentEventTags } from "../../shared/ipc";
 import { calculateTokensPerSecond, calculateSessionTokensPerSecond, type TaskPerfSpan } from "../../shared/tps";
 
 /** 最近一次 assistant 回复及会话级性能指标（结算后保留，供 getRuntimeState 合并展示）。 */
@@ -13,6 +14,23 @@ export interface MessagePerfSnapshot {
 	/** 会话累计平均端到端速度（tokens/s；整体活跃耗时并集）。 */
 	sessionEndToEndTps?: number;
 	at: number;
+}
+
+/** 结算时可读到的运行时模型事实（宿主持有的最近快照）。 */
+export type RuntimeModelFact = { provider?: string; modelId?: string; modelName?: string };
+
+/** 最近一次回复实际使用的模型事实（渲染层「最近一次回复指标」展示用）。 */
+export type ReplyModelFacts = RuntimeModelFact;
+
+/**
+ * assistant 消息里的模型事实优先。只用于本机展示，不做任何真伪校验——
+ * 消息结构由 pi 版本保证，非法值一律丢弃（宁可缺字段也不能渲染乱码）。
+ */
+function pickText(...values: unknown[]): string | undefined {
+	for (const value of values) {
+		if (typeof value === "string" && value.trim()) return value.trim();
+	}
+	return undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -38,6 +56,18 @@ export class MessagePerfTracker {
 	private readonly lastPerfByAgent = new Map<string, MessagePerfSnapshot>();
 	/** 会话内已结算的模型回复与派生任务性能区间（per agent）。 */
 	private readonly spansByAgent = new Map<string, TaskPerfSpan[]>();
+	/** 「最近一次回复」实际使用的模型事实（与 perf 数值分开存：子代理区间同步只重算数值）。 */
+	private readonly replyModelByAgent = new Map<string, ReplyModelFacts>();
+	/** 运行时模型事实读取（宿主的最近快照；结算在流式热路径，不能等 RPC）。 */
+	private readRuntimeModel?: (agentId: string) => RuntimeModelFact | undefined;
+
+	/**
+	 * 绑定运行时模型来源。必须在流式结算前设置：settle 用它补齐 assistant 消息里没有的
+	 * 供应商（pi 的 assistant 消息只带 model，不带 provider）。
+	 */
+	bindRuntimeModelSource(read: (agentId: string) => RuntimeModelFact | undefined): void {
+		this.readRuntimeModel = read;
+	}
 
 	/**
 	 * sendPrompt 请求发出时刻：把 pi 内部排队与模型服务端等待计入用户体感的
@@ -50,6 +80,35 @@ export class MessagePerfTracker {
 	/** 最近一次结算结果（getRuntimeState 合并展示用）。 */
 	getLast(agentId: string): MessagePerfSnapshot | undefined {
 		return this.lastPerfByAgent.get(agentId);
+	}
+
+	/** 最近一次回复实际使用的供应商/模型（AgentManager 组装 RuntimeState 时合并）。 */
+	getLastReplyModel(agentId: string): ReplyModelFacts | undefined {
+		return this.replyModelByAgent.get(agentId);
+	}
+
+	/** RuntimeState 合并用：无论有无值都给全字段（undefined 会覆盖掉上一轮残留的归属）。 */
+	getLastReplyModelFields(agentId: string): AgentRuntimeState {
+		return this.replyModelPatch(this.replyModelByAgent.get(agentId) ?? {}, "state");
+	}
+
+	/** assistant 消息里的 model 优先（pi 消息自带），缺省退回宿主最近快照（含 provider/展示名）。 */
+	private resolveReplyModel(agentId: string, message: unknown): ReplyModelFacts {
+		const runtimeModel = this.readRuntimeModel?.(agentId);
+		const messageModel = pickText(message && isRecord(message) ? message.model : undefined);
+		return {
+			provider: pickText(runtimeModel?.provider),
+			modelId: pickText(messageModel, runtimeModel?.modelId),
+			modelName: pickText(messageModel ? undefined : runtimeModel?.modelName),
+		};
+	}
+
+	/** 「最近一次回复」的模型字段：emit = 推送事件（无事实时不带字段），state = RuntimeState 合并（全字段）。 */
+	private replyModelPatch(facts: ReplyModelFacts, kind: "emit" | "state"): AgentRuntimeState {
+		// 推送：完全没有模型事实时一个字段都不带（事件形状保持紧凑）。
+		if (kind === "emit" && !facts.provider && !facts.modelId && !facts.modelName) return {};
+		// 合并：全字段都给，没有值记 undefined，覆盖上一轮残留的归属。
+		return { perfProvider: facts.provider, perfModelId: facts.modelId, perfModelName: facts.modelName };
 	}
 
 	/**
@@ -180,10 +239,18 @@ export class MessagePerfTracker {
 			totalMs,
 		});
 		this.lastPerfByAgent.set(agentId, { ttftMs, totalMs, endToEndTps, tps, sessionTps, sessionEndToEndTps, at: now });
-		emit(ipcChannels.agentsRuntimeState, {
+		// 模型事实单独记账：之后切了模型，这条回复的指标仍归属发起它的供应商/模型。
+		const replyModel = this.resolveReplyModel(agentId, message);
+		this.replyModelByAgent.set(agentId, replyModel);
+		emit(agentEventTags.agentsRuntimeState, {
 			agentId,
 			state: { ttftMs, totalMs, endToEndTps, tps, sessionTps, sessionEndToEndTps, perfAt: now },
 		});
+		// 模型归属按 delta 补发：推送载荷保持原有形状，渲染层照常 merge 进 RuntimeState。
+		const modelPatch = this.replyModelPatch(replyModel, "state");
+		if (Object.values(modelPatch).some((value) => value !== undefined)) {
+			emit(agentEventTags.agentsRuntimeState, { agentId, state: { ...modelPatch, perfAt: now } });
+		}
 	}
 
 	/**
@@ -245,7 +312,7 @@ export class MessagePerfTracker {
 	recordSubagentTask(agentId: string, task: { id?: string; startedAt: number; completedAt: number; tokens: number; firstDeltaAt?: number }, emit?: (channel: string, payload: unknown) => void): void {
 		if (!this.upsertSpan(agentId, task)) return;
 		const updated = this.refreshSessionPerf(agentId);
-		emit?.(ipcChannels.agentsRuntimeState, { agentId, state: this.sessionStatePatch(updated) });
+		emit?.(agentEventTags.agentsRuntimeState, { agentId, state: this.sessionStatePatch(updated) });
 	}
 
 	/**
@@ -260,7 +327,7 @@ export class MessagePerfTracker {
 		}
 		if (!modified) return;
 		const updated = this.refreshSessionPerf(agentId);
-		emit?.(ipcChannels.agentsRuntimeState, { agentId, state: this.sessionStatePatch(updated) });
+		emit?.(agentEventTags.agentsRuntimeState, { agentId, state: this.sessionStatePatch(updated) });
 	}
 
 	/** 获取某 agent 会话已记录的所有性能区间 */
@@ -284,5 +351,6 @@ export class MessagePerfTracker {
 		this.discardInFlight(agentId);
 		this.lastPerfByAgent.delete(agentId);
 		this.spansByAgent.delete(agentId);
+		this.replyModelByAgent.delete(agentId);
 	}
 }

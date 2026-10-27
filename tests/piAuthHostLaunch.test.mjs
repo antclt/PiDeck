@@ -14,6 +14,7 @@ import { test } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const { PI_PACKAGE_NAME, resolvePiAuthHostPath, resolvePiAuthHostLaunch, resolvePiSdkEntry } = loadTsCommonJs("src/main/pi/auth/piAuthHostLaunch.ts");
+const { buildPiProxyEnvPatch } = loadTsCommonJs("src/main/sessions/sessionProxyPolicy.ts");
 
 /** 造一个 pi 包目录；`withDist: false` 用来模拟「包在但入口缺失」的半损坏安装。 */
 function writePiPackage(rootDir, { withDist = true, name = PI_PACKAGE_NAME } = {}) {
@@ -34,14 +35,15 @@ function writeAppDir(rootDir) {
 	return appDir;
 }
 
-const BASE_SETTINGS = { customPiPath: undefined, wslEnabled: false, wslDistro: undefined, wslUser: undefined, piProxyEnabled: false, piProxyUrl: undefined, piProxyBypass: undefined };
+const BASE_SETTINGS = { customPiPath: undefined, wslEnabled: false, wslDistro: undefined, wslUser: undefined, piProxyEnabled: false, piProxyUrl: undefined, piProxyBypass: "", piProxyProviders: [], piProxyModels: [] };
 
 /** 只实现本模块用到的三个方法；生产 PiLocator 有 electron 依赖，测试用替身更聚焦。 */
 function fakeLocator({ command, windowsLaunch, env = { PATH: "stub", EMPTY: undefined } }) {
 	return {
 		resolveCommand: () => command,
 		createInvocation: () => ({ command, args: [], shell: false, pathPrefix: undefined, wsl: undefined, windowsLaunch }),
-		createProcessEnv: () => ({ ...env }),
+		// 生产实现在 env 上叠代理 patch；替身复用生产规则，代理相关断言才有意义。
+		createProcessEnv: (settings) => ({ ...env, ...(buildPiProxyEnvPatch(settings) ?? {}) }),
 	};
 }
 
@@ -233,6 +235,53 @@ test("resolvePiAuthHostLaunch: 裸命令名走 PATH 解析并保留代理环境�
 			assert.equal(launch.ok, true);
 			assert.equal(launch.sdkEntry, join(prefix, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js"));
 			assert.equal(launch.env.HTTPS_PROXY, "http://127.0.0.1:7890");
+		} finally {
+			process.env.PATH = originalPath;
+		}
+	});
+});
+
+test("resolvePiAuthHostLaunch: 按 proxyModel 套用模型名单，并给出可直接比对的代理指纹", () => {
+	withTempDir((dir) => {
+		const appPath = writeAppDir(dir);
+		const prefix = join(dir, "npm-prefix");
+		writePiPackage(join(prefix, "node_modules", "@earendil-works", "pi-coding-agent"));
+		writeFileSync(join(prefix, "pi.cmd"), "@echo off\n");
+		writeFileSync(join(prefix, "pi"), "#!/usr/bin/env node\n");
+		const originalPath = process.env.PATH;
+		process.env.PATH = prefix;
+		const launchFor = (settings, proxyModel) =>
+			resolvePiAuthHostLaunch({
+				settings,
+				proxyModel,
+				locator: fakeLocator({ command: "pi", env: { PATH: prefix } }),
+				userDataPath: join(dir, "userData"),
+				appPath,
+				resourcesPath: join(dir, "unused"),
+				isPackaged: false,
+			});
+		try {
+			const base = { ...BASE_SETTINGS, piProxyUrl: "http://127.0.0.1:7890", piProxyBypass: "", piProxyModels: ["kimi-coding/kimi-k2"] };
+			// 名单内：全局开关关着也要走代理（与 pi 会话名单语义一致，复用全局 URL）。
+			const listed = launchFor(base, { provider: "kimi-coding", modelId: "kimi-k2" });
+			assert.equal(listed.ok, true);
+			assert.equal(listed.env.HTTPS_PROXY, "http://127.0.0.1:7890");
+			assert.equal(listed.env.NODE_USE_ENV_PROXY, "1");
+			// 名单外：全局开关开着也强制直连（不注入任何代理键）。
+			const unlisted = launchFor({ ...base, piProxyEnabled: true }, { provider: "deepseek", modelId: "deepseek-chat" });
+			assert.equal(unlisted.ok, true);
+			assert.equal(unlisted.env.HTTPS_PROXY, undefined);
+			assert.equal(unlisted.env.NODE_USE_ENV_PROXY, undefined);
+			// 指纹必须区分这三种状态：常驻侧车靠它判断能不能复用旧进程。
+			assert.notEqual(listed.proxyKey, unlisted.proxyKey);
+			const changedUrl = launchFor({ ...base, piProxyUrl: "http://127.0.0.1:7891" }, { provider: "kimi-coding", modelId: "kimi-k2" });
+			assert.equal(changedUrl.ok, true);
+			assert.notEqual(changedUrl.proxyKey, listed.proxyKey);
+			// 名单未启用时跟随全局开关：开关关 = 直连，开关开 = 走代理。
+			const followOff = launchFor({ ...base, piProxyEnabled: false, piProxyModels: [] }, { provider: "kimi-coding", modelId: "kimi-k2" });
+			const followOn = launchFor({ ...base, piProxyEnabled: true, piProxyModels: [] }, { provider: "kimi-coding", modelId: "kimi-k2" });
+			assert.equal(followOff.env.HTTPS_PROXY, undefined);
+			assert.equal(followOn.env.HTTPS_PROXY, "http://127.0.0.1:7890");
 		} finally {
 			process.env.PATH = originalPath;
 		}

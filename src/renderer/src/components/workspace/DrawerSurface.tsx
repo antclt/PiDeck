@@ -1,5 +1,8 @@
+import { RemoteProjectPanel } from "../session/RemoteProjectPanel";
+import { isRemoteProject } from "../../../../shared/projectLocation";
 import { BrowserSurface } from "./BrowserSurface";
 import { GitDrawerHost, type GitDrawerApi } from "./GitDrawerHost";
+import { RemoteGitPanel } from "./RemoteGitPanel";
 import { RewindPanel } from "./RewindPanel";
 import { RpcLogPanel } from "./RpcLogPanel";
 import { ScratchPadDrawer } from "../scratchPad/ScratchPadDrawer";
@@ -16,7 +19,7 @@ import { SessionBranchTreePanel } from "../session/branch/SessionBranchTreePanel
 import type { RpcLogEntry } from "../../../../shared/types/rpcLog";
 import { sessionPillOf, type SessionFilterPill } from "../../sessionFilterPills";
 import { t } from "../../i18n";
-import type { CommitEntry, FileTreeNode, GitBranchInfo, GitChangedFile, GitResourceGroupType, Project, SessionSummary } from "../../../../shared/types";
+import type { CommitEntry, FileTreeNode, GitBranchInfo, GitChangedFile, GitResourceGroupType, Project, ProjectFileTarget, SessionSummary } from "../../../../shared/types";
 import type { PiDesktopApi } from "../../../../preload";
 
 // ── port objects（字段类型直接取自消费组件的 props 契约：GitDrawerHost / DrawerContent）──
@@ -25,8 +28,8 @@ export interface DrawerGitPort {
 	enableGitManagement: boolean;
 	activeProjectId: string | undefined;
 	gitDiffDisplayMode: string;
-	openCommitFileDiff: (commit: CommitEntry, file: GitChangedFile, repoPath?: string) => void | Promise<void>;
-	openWorkspaceFileDiff: (group: GitResourceGroupType, path: string, repoPath?: string) => void | Promise<void>;
+	openCommitFileDiff: (commit: CommitEntry, file: GitChangedFile, repoTarget?: ProjectFileTarget) => void | Promise<void>;
+	openWorkspaceFileDiff: (group: GitResourceGroupType, target: ProjectFileTarget, repoTarget?: ProjectFileTarget) => void | Promise<void>;
 	toggleGitDiffDisplayMode: () => void;
 	closeGitDiff: () => void;
 	gitApi: GitDrawerApi;
@@ -66,6 +69,8 @@ export interface DrawerFileMenu {
 }
 
 export interface DrawerFilesPort {
+	/** 当前项目：远端项目走 RemoteProjectPanel / RemoteGitPanel 分支 */
+	activeProject?: Project;
 	sessionsProject: Project | undefined;
 	sessionsProjectId: string | undefined;
 	files: FileTreeNode[];
@@ -88,10 +93,10 @@ export interface DrawerFilesPort {
 	runCopySession: (sessionId: string, projectId: string | undefined) => void | Promise<void>;
 	runExportHistorySession: (session: SessionSummary) => void | Promise<void>;
 	runDeleteHistorySession: (session: SessionSummary) => void | Promise<void>;
-	viewFilePath: (path: string, openMode?: "preview" | "permanent") => void;
-	openFilePath: (path: string) => void;
-	/** 在中间栏编辑器打开（可编辑 tab）；Git 变更行内“打开”按钮使用 */
-	openEditorTab: (path: string) => void;
+	viewFilePath: (path: string | ProjectFileTarget, openMode?: "preview" | "permanent") => void;
+	openFilePath: (path: string | ProjectFileTarget) => void;
+	/** 在中间栏编辑器打开（可编辑 tab）；Git 变更行内“打开”按钮使用（远端为 ProjectFileTarget） */
+	openEditorTab: (path: string | ProjectFileTarget) => void;
 	api: PiDesktopApi;
 	t: typeof t;
 	/** 当前项目根目录：文件面板空白处拖入/粘贴/右键菜单的落点 */
@@ -125,7 +130,10 @@ export function DrawerSurface(props: DrawerSurfaceProps) {
 	return (
 		<>
 			{/* 工具面板共享抽屉开关；草稿本保留自身编辑工具行。 */}
-			{drawer === "sideTask" && !drawerCollapsed ? (
+			{drawer === "files" && !drawerCollapsed && files.activeProject && isRemoteProject(files.activeProject) ? (
+				// 远端项目没有本机文件系统可列：文件抽屉改由远端面板承接（主机连接/root 状态/目录浏览）。
+				<RemoteProjectPanel projectId={files.activeProject.id} projectName={files.activeProject.name} />
+			) : drawer === "sideTask" && !drawerCollapsed ? (
 				<SideTaskPanel controller={sideTask.controller} paneServices={sideTask.paneServices} />
 			) : drawer === "scratchPad" && !drawerCollapsed ? (
 				<ScratchPadDrawer controller={scratchPad} />
@@ -153,17 +161,20 @@ export function DrawerSurface(props: DrawerSurfaceProps) {
 				<div className="drawer-content-frame flex min-h-0 flex-1 flex-col overflow-hidden">
 					<div className="git-drawer-stack">
 						<div className="git-drawer-source">
-							<GitDrawerHost
-								projectId={git.activeProjectId}
-								projectRoot={files.projects.find((project: { id: string; path?: string }) => project.id === git.activeProjectId)?.path}
-								gitApi={git.gitApi}
-								fallbackGitInfo={git.gitInfo}
-								fallbackSwitchBranch={git.switchBranch}
-								fallbackCreateBranch={git.createBranch}
-								onOpenCommitFileDiff={git.openCommitFileDiff}
-								onOpenWorkspaceFileDiff={git.openWorkspaceFileDiff}
-								onOpenFile={files.openEditorTab}
-							/>
+							{files.activeProject && files.activeProject.id === git.activeProjectId && isRemoteProject(files.activeProject) ? (
+								<RemoteGitPanel key={JSON.stringify([files.activeProject.id, files.activeProject.locator.hostId, files.activeProject.locator.remotePath])} project={files.activeProject} />
+							) : (
+								<GitDrawerHost
+									projectId={git.activeProjectId}
+									gitApi={git.gitApi}
+									fallbackGitInfo={git.gitInfo}
+									fallbackSwitchBranch={git.switchBranch}
+									fallbackCreateBranch={git.createBranch}
+									onOpenCommitFileDiff={git.openCommitFileDiff}
+									onOpenWorkspaceFileDiff={git.openWorkspaceFileDiff}
+									onOpenFile={files.openEditorTab}
+								/>
+							)}
 						</div>
 					</div>
 				</div>
@@ -218,7 +229,7 @@ export function DrawerSurface(props: DrawerSurfaceProps) {
 						}}
 						onOpenFolder={() => {
 							const p = files.projects.find((p) => p.id === git.activeProjectId);
-							if (p) {
+							if (p?.path) {
 								void files.api.files.open(p.path).catch((error: unknown) => {
 									files.showToast?.(
 										t("app.openFileFailed", {

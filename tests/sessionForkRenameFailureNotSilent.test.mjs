@@ -69,7 +69,7 @@ test("copy 流程的 rename 失败分支必须发出 agentsNotice 用户通知",
 });
 
 test("fork 流程的 rename 失败分支必须发出 agentsNotice 用户通知", () => {
-	const body = functionBody(indexSource, "resolveTargetSessionId: async () => {");
+	const body = functionBody(indexSource, "resolveTargetSessionId: async");
 	assert.match(body, /agentManager\.rename\(agentId,\s*forkedTitle\)/);
 	const catchBody = catchBranch(body);
 	assert.match(catchBody, /emitAgentsNotice\(/, "fork rename 失败必须发用户通知（不能只写日志）");
@@ -80,14 +80,14 @@ test("emitAgentsNotice 汇聚点必须走 sessionsRuntimeEvent envelope（渲染
 	// 渲染层 useSessionRuntimeBridge 只消费 runtime envelope（sourceChannel=agents:notice），
 	// 裸 webContents.send(agentsNotice) 是死流量（与 AgentManager DIRECT_EMIT_CHANNELS 同规则）。
 	assert.match(helper, /sendSessionRuntimeEnvelope\(/);
-	assert.match(helper, /ipcChannels\.agentsNotice/);
-	assert.match(helper, /sourceChannel: ipcChannels\.agentsNotice/);
+	assert.match(helper, /agentEventTags\.agentsNotice/);
+	assert.match(helper, /sourceChannel: agentEventTags\.agentsNotice/);
 });
 
 test("rename 失败时条目标题保持未加后缀的原名（权威名以文件为准）", () => {
 	// title 只在 rename 成功后才被改写为 forkedTitle —— 失败分支不得触碰 title。
 	const copyBody = functionBody(indexSource, "async function copyCatalogSession");
-	const forkBody = functionBody(indexSource, "resolveTargetSessionId: async () => {");
+	const forkBody = functionBody(indexSource, "resolveTargetSessionId: async");
 	for (const body of [copyBody, forkBody]) {
 		const tryPart = body.slice(0, body.indexOf("} catch (error) {"));
 		assert.match(tryPart, /title = forkedTitle;/, "成功路径才写回标题");
@@ -121,7 +121,7 @@ test("通知文案存在于主进程 i18n（渲染层经 ...mainProcess 展开�
 test("fork/copy 注册必须把命令层标题授权传给 catalog（titleAuthority）", () => {
 	const copyBody = functionBody(indexSource, "async function copyCatalogSession");
 	assert.match(copyBody, /titleAuthority:\s*"command"/, "copy 静态复制路径必须授权命令层标题");
-	const forkBody = functionBody(indexSource, "resolveTargetSessionId: async () => {");
+	const forkBody = functionBody(indexSource, "resolveTargetSessionId: async");
 	assert.match(forkBody, /titleAuthority:\s*"command"/, "fork/clone 换绑路径必须授权命令层标题");
 
 	const catalogSource = readFileSync("src/main/sessions/SessionCatalog.ts", "utf8");

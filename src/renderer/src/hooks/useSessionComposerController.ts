@@ -7,6 +7,7 @@ import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../../shared/fileTree";
 import { classifyCompactError, compactOwnerReason, compactRoutedCommand, type CompactNoticeKind } from "../../../shared/compactFeedback";
 import { findImageGenProvider } from "../../../shared/imageGenConfig";
 import { findVideoGenProvider } from "../../../shared/videoGenConfig";
+import { buildSessionReferenceContext } from "../../../shared/sessionReferenceContext";
 import { resolveEnhanceTargetModel } from "../../../shared/enhanceModelPreference";
 import { collectPromptEnhanceContext } from "../utils/promptEnhanceContext";
 import { sessionCommandsRefreshTickAtom } from "../atoms/session-commands-atoms";
@@ -67,7 +68,7 @@ import {
 } from "../composerBehavior";
 import { applySuggestion, buildSuggestionItems, clearSuggestionTrigger, detectTrigger, DSH_COMMAND_SUGGESTIONS, fileNodeDragPayloadToRef, flattenFiles, mergeCommands, PI_FILE_NODE_DRAG_MIME, PI_FILE_PATH_DRAG_MIME, readFileNodeDragPayload, type SuggestionItem } from "../components/app/AppUtils";
 import { SESSION_TAB_DRAG_MIME } from "../utils/sessionSplitEdge";
-import { mergeFileTreeChildren, resolveAtDrillDirectory, shouldLoadFullTreeForAtSearch } from "../utils/fileTreeLazy";
+import { fileTreeNodeKey, mergeFileTreeChildren, resolveAtDrillDirectory, shouldLoadFullTreeForAtSearch } from "../utils/fileTreeLazy";
 import { formatFilePathRef, type ComposerChip } from "../components/session/composer/chips";
 import type { ComposerCaretRequest } from "../components/session/composer/types";
 import { getComposerCaretCoords, getComposerCaretOffset, getComposerCaretBlockEdge, getComposerSelectionRange, isComposerAtVisualEdge } from "../components/session/composer/caretCoords";
@@ -991,24 +992,25 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		if (!trigger || trigger.char !== "@") return;
 		const dirNode = resolveAtDrillDirectory(trigger.query, files);
 		if (!dirNode) return;
-		// 已有 children 数组 = 子项已加载（含空目录），不重复请求
-		if (Array.isArray(dirNode.children) || loadingDirPathsRef.current.has(dirNode.path)) {
-			return;
-		}
+		const directoryKey = fileTreeNodeKey(dirNode);
+		if (Array.isArray(dirNode.children) || loadingDirPathsRef.current.has(directoryKey)) return;
+		if (!dirNode.target && !dirNode.path) return;
 		let current = true;
-		loadingDirPathsRef.current.add(dirNode.path);
+		loadingDirPathsRef.current.add(directoryKey);
+		const listTarget = dirNode.target ?? effectiveProjectId;
+		const listOptions = dirNode.target ? { maxDepth: 0, skipGeneratedDirs: true } : { maxDepth: 0, directory: dirNode.path, skipGeneratedDirs: true };
 		void desktopApi.files
-			.list(effectiveProjectId, { maxDepth: 0, directory: dirNode.path, skipGeneratedDirs: true })
+			.list(listTarget, listOptions)
 			.then((children) => {
 				if (!current) return;
-				setFiles((prev) => mergeFileTreeChildren(prev, dirNode.path, children));
-				loadedDirPathsRef.current.add(dirNode.path);
+				setFiles((prev) => mergeFileTreeChildren(prev, directoryKey, children));
+				loadedDirPathsRef.current.add(directoryKey);
 			})
 			.catch(() => {
 				// 目录被删/权限不足：保留已加载部分，下次输入自然重试
 			})
 			.finally(() => {
-				loadingDirPathsRef.current.delete(dirNode.path);
+				loadingDirPathsRef.current.delete(directoryKey);
 			});
 		return () => {
 			current = false;
@@ -1137,7 +1139,17 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			return await expandSessionReferences(message, targets, async (session) => {
 				const saved = sessionReferenceSelections[`&${session.name}`];
 				const selectedMessages = saved ? selectedSessionReferenceMessages(saved) : await desktopApi.sessions.readReferenceMessages(session.id);
-				return selectedMessages.map((item) => `[${item.role === "user" ? "User" : "Assistant"}]: ${item.content}`).join("\n");
+				// 取文口径与预算统一收口在 shared/sessionReferenceContext：thinking 不进引用上下文，
+				// 超出预算时保留最近的消息并提示用户。这段正文会写进用户消息落盘，之后每轮请求
+				// 都随历史重传，所以必须在这里一次性封顶，不能交给上游上下文水位兜底。
+				const context = buildSessionReferenceContext(selectedMessages);
+				if (context.dropped > 0) {
+					const params = { kept: context.kept, dropped: context.dropped };
+					showNotice(t("sessionRef.truncated", params), 6000);
+					// 块内留一行说明：模型要知道这是「最近一段」而不是完整会话，否则会答“我没看到那条”。
+					return `${t("sessionRef.truncatedNote", params)}\n${context.body}`;
+				}
+				return context.body;
 			});
 		},
 		[projectSessions, sessionReferenceSelections],

@@ -3,8 +3,11 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import ts from "typescript";
 import vm from "node:vm";
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 import { buildTurnDisplay, hasFoldableContent } from "../src/renderer/src/components/session/timeline/buildTurnDisplay.ts";
 import { buildProcessSummary } from "../src/renderer/src/components/session/timeline/segmentSummary.ts";
+// 沙箱里的 AppUtils 依赖 shared/ansiText 的真实现（不在这里复制正则）。
+import { stripAnsiCsi } from "../src/shared/ansiText.ts";
 
 /**
  * 一轮回答（agent-run）扁平展示序列测试。
@@ -207,6 +210,7 @@ function loadAppUtils() {
 		location: { href: "file:///Users/test/app" },
 		require: (id) => {
 			if (id === "../session/composer/chips") return { formatFilePathRef: (p) => p };
+			if (id.endsWith("shared/ansiText")) return { stripAnsiCsi };
 			if (id === "../session/timelineFailureNotice") {
 				// 重试状态消息判定：与生产实现同口径（diagnostic.retry* i18nKey 集合）
 				const RETRY_KEYS = new Set(["diagnostic.retryScheduled", "diagnostic.retryScheduledAfterDelay", "diagnostic.retrySucceeded", "diagnostic.retryFailed"]);
@@ -650,4 +654,56 @@ test("重试行时序：retry 到来时未成组的工具先 flush，重试行�
 	assert.ok(run, "tool + retry 应组成同一 run");
 	const kinds = run.items.map((item) => item.kind);
 	assert.equal(JSON.stringify(kinds), JSON.stringify(["tool-group", "retry-group"]), "重试行必须晚于它之前的工具组");
+});
+
+/* ── #413 ACP 切段：同一用户回合内多段 assistant 必须仍是单 run ── */
+
+/**
+ * 投影契约（#413 + task-3）：工具卡把一条回复切成两段时，工具前的正文是「中间回复」，
+ * 收口为 stopReason="toolUse"；工具后的收尾文本才是 "stop"。渲染层
+ * AppUtils.hasFinishedTurnInRun 只把 stop 当「回合已收尾」，切段若标 stop 会在工具卡
+ * 到达时把同一用户回合 flush 成多个 agent-run（DSH 2026-09-17 同款回归，见
+ * dshEventProjector 的 stopReason 归一化注释），且旧段会被 buildTurnDisplay 提升为
+ * 常驻「最终回答」——一轮两个最终回答。此用例锁住投影与分组的接缝。
+ */
+test("ACP 形状：工具前正文段(toolUse) + 工具卡 + 最终回复(stop) 只产出一个 agent-run", () => {
+	const { groupToolMessages } = loadAppUtils();
+	const user = { id: "u1", agentId: "a", role: "user", text: "帮我检查", timestamp: 1 };
+	const first = { id: "a1", agentId: "a", role: "assistant", text: "我先看一下", timestamp: 2, stopReason: "toolUse" };
+	const tool = { id: "t1", agentId: "a", role: "tool", text: "✓ read", timestamp: 3, meta: { toolName: "read", status: "done" } };
+	const final = { id: "a2", agentId: "a", role: "assistant", text: "检查结果：全部 PASS。", timestamp: 4, stopReason: "stop" };
+	const rendered = groupToolMessages([user, first, tool, final]);
+	const runs = [...rendered].filter((item) => item.kind === "agent-run");
+	assert.equal(runs.length, 1, "同一用户回合只能有一个 agent-run（toolUse 中间段不得触发回合边界）");
+	const texts = [...runs[0].items].filter((item) => item.kind === "message").map((item) => item.message.text);
+	assert.equal(JSON.stringify(texts), JSON.stringify(["我先看一下", "检查结果：全部 PASS。"]), "run 内 message 顺序必须保持到达顺序");
+	// 最终回答只能是最后一段：第一段（工具前正文）是中间回答，进执行过程折叠，不能常驻。
+	const display = buildTurnDisplay(runs[0], { isComplete: true });
+	assert.equal(JSON.stringify(display.filter((item) => item.kind === "final-answer").map((item) => item.message.text)), JSON.stringify(["检查结果：全部 PASS。"]));
+	assert.equal(JSON.stringify(display.filter((item) => item.kind === "interim-answer").map((item) => item.message.text)), JSON.stringify(["我先看一下"]));
+});
+
+test("端到端：AcpEventProjector 切段产出的消息经 groupToolMessages 仍是单 run", () => {
+	// 直接喂投影器（而非手写消息），锁住「投影改一个字都不能再把一轮拆碎」：
+	// 旧实现切段收口 stop 时，这里的 runs.length 会是 2（工具前正文被当回合收尾）。
+	const { groupToolMessages } = loadAppUtils();
+	const { initialAcpProjection, projectAcpSessionUpdate } = loadTsCommonJs("src/main/acp/AcpEventProjector.ts");
+	let state = initialAcpProjection();
+	const step = (update) => {
+		state = projectAcpSessionUpdate(state, update, "agent-1");
+	};
+	step({ sessionUpdate: "user_message_chunk", content: { type: "text", text: "帮我检查" } });
+	step({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "我先看一下" } });
+	step({ sessionUpdate: "tool_call", toolCallId: "tc-A", title: "Read file", kind: "read", status: "in_progress" });
+	step({ sessionUpdate: "tool_call_update", toolCallId: "tc-A", status: "completed" });
+	step({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "检查结果：全部 PASS。" } });
+	const rendered = groupToolMessages([...state.messages]);
+	const runs = [...rendered].filter((item) => item.kind === "agent-run");
+	assert.equal(runs.length, 1, "投影切段后仍必须是同一个 agent-run（旧 stop 语义会拆成 2 个）");
+	const texts = [...runs[0].items].filter((item) => item.kind === "message").map((item) => item.message.text);
+	assert.equal(JSON.stringify(texts), JSON.stringify(["我先看一下", "检查结果：全部 PASS。"]));
+	const finals = buildTurnDisplay(runs[0], { isComplete: true })
+		.filter((item) => item.kind === "final-answer")
+		.map((item) => item.message.text);
+	assert.equal(JSON.stringify(finals), JSON.stringify(["检查结果：全部 PASS。"]), "最终回答必须是最后一段");
 });

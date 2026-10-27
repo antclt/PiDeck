@@ -1,9 +1,10 @@
-import type { ProjectFileAccessScope, WorkspaceContentOpenMode } from "../../../../shared/types";
+import type { ProjectFileAccessScope, ProjectFileTarget, WorkspaceContentOpenMode } from "../../../../shared/types";
 import { FileDiffViewer } from "../app/FileDiffViewer";
 
 type EditorTabLike = {
 	id: string;
 	filePath: string;
+	fileTarget?: ProjectFileTarget;
 	mode: "view" | "diff";
 	originalContent: string;
 	modifiedContent?: string;
@@ -17,6 +18,7 @@ type EditorTabLike = {
 };
 
 type GitDiffLike = {
+	target: ProjectFileTarget;
 	filePath: string;
 	originalContent: string;
 	modifiedContent: string;
@@ -39,9 +41,9 @@ export type WorkbenchContentProps = {
 	onCloseEditor: () => void;
 	/** 只读 tab（项目外文件）确认后解锁编辑：宿主把该 tab 的 allowSave 翻成 true。 */
 	onAllowSaveTab?: (tabId: string) => void;
-	readContent: (path: string, maxBytes?: number, scope?: ProjectFileAccessScope) => Promise<string>;
-	readOriginalContent: (path: string) => Promise<string>;
-	saveContent: (path: string, content: string, scope?: ProjectFileAccessScope) => Promise<void>;
+	readContent: (path: string | ProjectFileTarget, maxBytes?: number, scope?: ProjectFileAccessScope) => Promise<string>;
+	readOriginalContent: (target?: ProjectFileTarget) => Promise<string>;
+	saveContent: (path: string | ProjectFileTarget, content: string, scope?: ProjectFileAccessScope) => Promise<void>;
 };
 
 /**
@@ -63,6 +65,7 @@ export function WorkbenchContent(props: WorkbenchContentProps) {
 						onDirty={() => props.onDirty(tab.id)}
 						displayMode={props.editorMode}
 						filePath={tab.filePath}
+						fileTarget={tab.fileTarget}
 						activeTabId={tab.id}
 						fileAccessScope={tab.fileAccessScope}
 						mode={tab.mode}
@@ -85,6 +88,7 @@ export function WorkbenchContent(props: WorkbenchContentProps) {
 				<FileDiffViewer
 					key="git-diff"
 					displayMode={props.gitDiffDisplayMode}
+					fileTarget={props.gitDiff.target}
 					filePath={props.gitDiff.filePath}
 					mode="diff"
 					onToggleMode={props.onToggleGitDiffMode}

@@ -12,15 +12,9 @@ export { looksLikePiSessionFileStem } from "../../shared/sessionIdentity";
 
 /**
  * 去除 ANSI 转义码，用于清洗 thinking 中的终端颜色控制序列。
- *
- * 快速路径（2027-02 性能审计）：绝大多数模型正文根本不含 ESC 字符，先做单字符
- * includes 扫描（memchr 级，远快于正则）命中即返回原引用——此前流式通道每个 delta
- * 都对全量累积文本跑正则 replace（O(N²)/消息的扫描 + 分配），长回复时主进程持续承压。
+ * 实现在 shared/ansiText.ts（带 ESC 快速路径：无 ESC 时返回原引用）。
  */
-export function stripAnsi(text: string): string {
-	if (!text.includes("\u001b")) return text;
-	return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
-}
+export { stripAnsiCsi as stripAnsi } from "../../shared/ansiText";
 
 /** RPC/JSON 边界收窄：unknown → Record<string, unknown>（非对象返回 undefined；数组会收窄成 Record，调用方按需另判 Array.isArray）。 */
 export function asRecord(value: unknown): Record<string, unknown> | undefined {

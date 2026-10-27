@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { ipcChannels } from "../../shared/ipc";
-import type { Project } from "../../shared/types";
+import type { LocalProject } from "../../shared/types";
 import { toWindowsHostPath, toWslLinuxPath, type WslEnvironment } from "../wsl/WslPaths";
 
 export type ProjectTrustChoice = "trust-remember" | "trust-session" | "deny";
@@ -87,7 +87,7 @@ export class ProjectTrustGate {
 	 *   - trust-session：用 --approve 本次覆盖，不落盘。
 	 *   - deny：用 --no-approve 本次以不信任模式启动，pi 不加载项目级资源，Agent 仍可创建。
 	 */
-	async ensureProjectTrust(project: Project): Promise<"approve" | "no-approve" | undefined> {
+	async ensureProjectTrust(project: LocalProject): Promise<"approve" | "no-approve" | undefined> {
 		const wslEnvironment = this.host.getWslEnvironment();
 		const cwd = wslEnvironment ? toWslLinuxPath(project.path, wslEnvironment) : project.path;
 		const hostCwd = wslEnvironment ? toWindowsHostPath(project.path, wslEnvironment) : project.path;
@@ -120,7 +120,7 @@ export class ProjectTrustGate {
 	 * 含资源且已持久化信任返回 undefined；含资源但未决策（需要用户选择）返回 null——
 	 * 调用方应放弃后台池化，等用户走正常创建流程完成信任决策。
 	 */
-	async resolveTrustWithoutPrompt(project: Project): Promise<undefined | null> {
+	async resolveTrustWithoutPrompt(project: LocalProject): Promise<undefined | null> {
 		const wslEnvironment = this.host.getWslEnvironment();
 		const cwd = wslEnvironment ? toWslLinuxPath(project.path, wslEnvironment) : project.path;
 		const hostCwd = wslEnvironment ? toWindowsHostPath(project.path, wslEnvironment) : project.path;
