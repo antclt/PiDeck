@@ -5805,11 +5805,9 @@ export const zhCN = {
 	"agent.loading.retrying": "正在重试",
 	"agent.loading.retryingCount": "正在重试 {attempt}/{max}",
 	"agent.loading.retryIn": "{seconds} 秒后",
-	"agent.loading.stepCount": "工具调用 {step} 次",
 	"agent.loading.contextUsage": "上下文 {percent}%",
-	// 状态条尾部指标的行内解释（悬停 title）：用户不知道「第 13 步」数的是什么
+	// 状态条尾部指标的行内解释（悬停 title）：用户不知道数字数的是什么
 	"agent.loading.hint.retryIn": "{seconds} 秒后：下一次自动重试的倒计时，到点自动发起",
-	"agent.loading.hint.stepCount": "本轮已完成 {step} 次工具调用：只数工具结果，不含思考与正文；上一轮的不计",
 	"agent.loading.hint.contextUsage": "上下文 {percent}%：本轮对话已占用的上下文窗口比例，到 80% 起提示",
 	"agent.loading.waiting": "正在处理",
 	"agent.loading.aria": "Agent 运行中",

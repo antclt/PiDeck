@@ -5822,11 +5822,9 @@ export const enUS: Record<TranslationKey, string> = {
 	"agent.loading.retrying": "Retrying",
 	"agent.loading.retryingCount": "Retrying {attempt}/{max}",
 	"agent.loading.retryIn": "in {seconds}s",
-	"agent.loading.stepCount": "{step} tool calls",
 	"agent.loading.contextUsage": "context {percent}%",
-	// Inline hints for the status-bar facts (hover title): "step 13" alone is a riddle
+	// Inline hints for the status-bar facts (hover title)
 	"agent.loading.hint.retryIn": "in {seconds}s: countdown to the next automatic retry",
-	"agent.loading.hint.stepCount": "{step} tool calls completed this turn: tool results only, thinking and reply excluded, previous turns not counted",
 	"agent.loading.hint.contextUsage": "context {percent}%: share of the context window used by this turn, flagged from 80%",
 	"agent.loading.waiting": "Processing",
 	"agent.loading.aria": "Agent is working",

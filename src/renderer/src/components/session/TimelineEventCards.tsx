@@ -252,7 +252,7 @@ function useNowTick(enabled: boolean, intervalMs = 1000): number {
 }
 
 /**
- * 状态条尾部的事实后缀：重试倒计时 / 本轮步数 / 上下文压力。
+ * 状态条尾部的事实后缀：重试倒计时 / 上下文压力。
  *
  * 单独成叶子组件是有意为之：倒计时每秒变了它才重渲染，父级（ReasoningText +
  * 功能提示轮播）不受影响——流式正文 50ms 刷新与读秒互不干扰。后缀全是可测量的量，
@@ -265,10 +265,12 @@ function useNowTick(enabled: boolean, intervalMs = 1000): number {
  * 状态短语；读秒每秒变化，若也进无障碍树就是每秒打断一次屏幕阅读器。
  *
  * 每个指标配一句 `title` 解释（用户不知道那个数字数的是什么），悬停才出现，
- * 不占行宽；顺序与可见文字一致，一眼对得上。文案本身写清单位（"工具调用 13 次"），
- * 不用「第 13 步」这种听起来像计划进度的说法——它只是个计数。
+ * 不占行宽；顺序与可见文字一致，一眼对得上。
+ *
+ * 不显示本轮工具调用次数（用户反馈「· 工具调用 12 次」是纯噪音）：进度看时间线本身，
+ * 状态条只回答「此刻在干什么 / 还要等多久」。
  */
-function StatusSuffix(props: { kind: RespondingKind; retry?: RetryProgress; toolSteps?: number; contextPercent?: number | null }) {
+function StatusSuffix(props: { retry?: RetryProgress; contextPercent?: number | null }) {
 	const retryAtMs = props.retry?.retryAtMs;
 	const now = useNowTick(retryAtMs !== undefined);
 	const parts: string[] = [];
@@ -281,14 +283,7 @@ function StatusSuffix(props: { kind: RespondingKind; retry?: RetryProgress; tool
 		hints.push(t("agent.loading.hint.retryIn", { seconds: countdown }));
 	}
 
-	// 步数只在「工具链 / 等工具下一步 / 空窗」三个场景有意义：模型正在写答案、
-	// 正在预热、正在压缩时，工具调用数是噪音。
-	const steps = props.toolSteps ?? 0;
-	if (steps > 0 && (props.kind === "executing" || props.kind === "thinking" || props.kind === "waiting")) {
-		parts.push(t("agent.loading.stepCount", { step: steps }));
-		hints.push(t("agent.loading.hint.stepCount", { step: steps }));
-	}
-
+	// 上下文压力达到阈值才提：压缩通常发生在这之上，提前告警。
 	const contextPercent = props.contextPercent;
 	if (typeof contextPercent === "number" && Number.isFinite(contextPercent) && contextPercent >= CONTEXT_PRESSURE_PERCENT) {
 		const percent = Math.round(contextPercent);
@@ -312,8 +307,6 @@ export function RespondingIndicator(props: {
 	liveTextStreaming?: boolean;
 	liveThinkingStreaming?: boolean;
 	retry?: RetryProgress;
-	/** 本轮工具调用次数（deriveTurnStatusFacts；0/缺失不展示步骤） */
-	toolSteps?: number;
 	/** 上下文占用百分比（runtime.contextPercent；达阈值才展示） */
 	contextPercent?: number | null;
 }) {
@@ -351,7 +344,7 @@ export function RespondingIndicator(props: {
 				indicator={<Loader variant="dot-matrix" size={18} speed={1.1} label={t("agent.loading.aria")} />}
 				// 字号用官方默认（text-sm）：实测语义 token 缩放的观感不如官方字阶，保持官方原样
 			/>
-			<StatusSuffix kind={kind} retry={retry} toolSteps={props.toolSteps} contextPercent={props.contextPercent} />
+			<StatusSuffix retry={retry} contextPercent={props.contextPercent} />
 			{/* 功能提示轮播：等待期是用户的注意力空档，用它曝光「没有可见入口」的能力
 			    （命令面板、划选引用、排队发送…）。内容与收录规则见 RespondingTips.tsx / sessionFeatureTips.ts。 */}
 			<RespondingTips />

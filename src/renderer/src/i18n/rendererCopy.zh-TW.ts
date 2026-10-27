@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 95135b286ba48a77c87bed12b189d02c123f6f5868200de6c6292642319c36b3（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 49941a9645b2b60b3149d3854ea6733eddc7c791f78febd19b8905d53c95ce31（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5812,11 +5812,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"agent.loading.retrying": "正在重試",
 	"agent.loading.retryingCount": "正在重試 {attempt}/{max}",
 	"agent.loading.retryIn": "{seconds} 秒後",
-	"agent.loading.stepCount": "工具呼叫 {step} 次",
 	"agent.loading.contextUsage": "上下文 {percent}%",
-	// 状态条尾部指标的行内解释（悬停 title）：用户不知道「第 13 步」数的是什么
+	// 状态条尾部指标的行内解释（悬停 title）：用户不知道数字数的是什么
 	"agent.loading.hint.retryIn": "{seconds} 秒後：下一次自動重試的倒計時，到點自動發起",
-	"agent.loading.hint.stepCount": "本輪已完成 {step} 次工具呼叫：只數工具結果，不含思考與正文；上一輪的不計",
 	"agent.loading.hint.contextUsage": "上下文 {percent}%：本輪對話已佔用的上下文視窗比例，到 80% 起提示",
 	"agent.loading.waiting": "正在處理",
 	"agent.loading.aria": "Agent 執行中",
