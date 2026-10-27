@@ -20,12 +20,13 @@
  *   越界是**拒绝**（稳定码），不是悄悄截断——截断后的列表看起来和完整列表一样。
  * - 每个失败都带稳定码；reader/连接层自己的稳定码原样转述，未知异常才折叠成 REMOTE_SESSION_SCAN_FAILED。
  *
- * 已知代价（有意为之，写在这里免得下次误读）：fs.list 不带 mtime，所以每个候选文件要一次 fs.stat
- * 才能填出 mtimeMs；最多 2000 次 stat、并发 4，是有界但不是零成本。下一增量若要有上限批量元数据，
- * 正确做法是在 helper 侧加 session.list，而不是在这里把 mtime 编造出来。
+ * 已知代价（有意为之，写在这里免得下次误读）：fs.list 不带 mtime，所以每个候选文件都要被描述一次；
+ * 自 helper 1.22.0 起这件事走 `fs.statMany`（每批 ≤64 条路径，逐条语义与单条 fs.stat 完全相同），
+ * 2000 个文件最多 32 次 RPC，而不是 2000 次。候选选择、预算、排序与归属仍然全部留在本模块，
+ * helper 只负责「把这些已知路径逐个描述」。
  */
 
-import { type RemoteHelperListEntry } from "../remote/RemoteHelperContract";
+import { REMOTE_HELPER_MAX_STAT_MANY_PATHS, type RemoteHelperListEntry } from "../remote/RemoteHelperContract";
 // hostId 的判据只允许有一份：与持久化边界（readSshSessionLocator / 项目域）共用 shared 的权威取值域。
 import { PROJECT_HOST_ID_PATTERN } from "../../shared/projectLocation";
 import { createRemoteWorkspaceReader, REMOTE_WORKSPACE_MAX_HEAD_BYTES, REMOTE_WORKSPACE_MAX_WINDOW_BYTES, type RemoteWorkspacePort } from "../remote/RemoteWorkspaceReader";
@@ -346,6 +347,16 @@ function chargeListing(budget: Budget, entries: readonly RemoteHelperListEntry[]
 }
 
 /** 并发受限的 map：worker 数不超过 limits.concurrency，且结果按输入顺序落位。 */
+/**
+ * Split candidates into the helper's fixed batch size. The last batch is simply shorter: a short final batch is
+ * a normal answer, never a reason to pad or to send a second, empty request.
+ */
+function batches(candidates: readonly string[]): string[][] {
+	const result: string[][] = [];
+	for (let index = 0; index < candidates.length; index += REMOTE_HELPER_MAX_STAT_MANY_PATHS) result.push(candidates.slice(index, index + REMOTE_HELPER_MAX_STAT_MANY_PATHS));
+	return result;
+}
+
 async function mapBounded<Input, Output>(items: readonly Input[], concurrency: number, run: (item: Input, index: number) => Promise<Output>): Promise<Output[]> {
 	const results = new Array<Output>(items.length);
 	let cursor = 0;
@@ -472,16 +483,22 @@ export function createRemoteSessionScanner(options: RemoteSessionScannerOptions)
 		// 文件上限同样在 stat 之前判断：越界是稳定码，不是截断。
 		if (candidates.length > limits.maxFiles) throw new Error(REMOTE_SESSION_CODES.fileLimitExceeded);
 
-		const entries = await mapBounded(candidates, limits.concurrency, async (remoteSessionId) => {
-			charge(budget, REMOTE_SESSION_STAT_OVERHEAD_BYTES);
-			const stat = await reader.stat(hostId, remoteSessionId);
-			// 列表与 stat 之间类型变了（并发改名/替换）：跳过这条，不把非文件登记成会话。
-			if (stat.kind !== "file") return undefined;
-			const entry: RemoteSessionEntry = { remoteSessionId, remotePath: remoteSessionId, name: titleFromRemoteSessionId(remoteSessionId), size: stat.bytes, mtimeMs: stat.mtimeMs };
-			return entry;
-		});
+		const entries = (
+			await mapBounded(batches(candidates), limits.concurrency, async (batch) => {
+				// 预算按**逻辑条目**扣：一次批量 RPC 仍然等于 batch.length 条描述，不能因为合成一个帧就少计。
+				for (let index = 0; index < batch.length; index += 1) charge(budget, REMOTE_SESSION_STAT_OVERHEAD_BYTES);
+				const described = await reader.statMany(hostId, batch);
+				const collected: RemoteSessionEntry[] = [];
+				for (const stat of described.entries) {
+					// 列表与 stat 之间类型变了（并发改名/替换）：跳过这条，不把非文件登记成会话。
+					if (stat.kind !== "file") continue;
+					collected.push({ remoteSessionId: stat.path, remotePath: stat.path, name: titleFromRemoteSessionId(stat.path), size: stat.bytes, mtimeMs: stat.mtimeMs });
+				}
+				return collected;
+			})
+		).flat();
 		// 输出顺序固定（按远端身份升序）：同一棵远端目录树的两次扫描结果逐字可比。
-		return entries.filter((entry): entry is RemoteSessionEntry => entry !== undefined).sort((left, right) => (left.remoteSessionId < right.remoteSessionId ? -1 : left.remoteSessionId > right.remoteSessionId ? 1 : 0));
+		return entries.sort((left, right) => (left.remoteSessionId < right.remoteSessionId ? -1 : left.remoteSessionId > right.remoteSessionId ? 1 : 0));
 	}
 
 	return {

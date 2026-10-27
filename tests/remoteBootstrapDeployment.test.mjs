@@ -33,6 +33,11 @@ function bootstrap(manifest) {
 		write(line) {
 			const frame = JSON.parse(line);
 			writes.push(frame);
+			// Reuse check first (F3): this fixture models a host without the bundle, so the upload follows.
+			if (frame.op === "finalize-verify")
+				queueMicrotask(() => {
+					for (const listener of listeners) listener(JSON.stringify({ v: 1, op: "verify-miss", reason: "absent" }));
+				});
 			if (frame.op === "finalize-commit")
 				queueMicrotask(() => {
 					for (const listener of listeners) listener(JSON.stringify({ v: 1, op: "finalized", active: `./bundles/${manifest.bundleSha256}`, files: manifest.files.length }));
@@ -126,7 +131,11 @@ test("pinned scp reads the snapshot and finalize follows only successful exit", 
 			assert.notEqual(snapshotDirectory, directory);
 			await writeFile(join(directory, "entry.mjs"), "changed bytes\n");
 			assert.equal(await readFile(join(snapshotDirectory, "entry.mjs"), "utf8"), "original bytes\n");
-			assert.deepEqual(session.writes, [], "finalize must wait for the scp exit");
+			assert.equal(
+				session.writes.some((frame) => frame.op === "finalize-commit"),
+				false,
+				"finalize must wait for the scp exit",
+			);
 			return exitingUpload(0);
 		},
 	};
@@ -149,7 +158,8 @@ test("a failed scp aborts staging without sending finalize and releases the snap
 	await assert.rejects(deployPreparedBundle({ directory, names: ["entry.mjs"], connection: CONNECTION, ready, launcher, session, hostId: "b145de8c-6330-45be-8752-f20e8e270150", generation: 1 }), /BOOTSTRAP_UPLOAD_FAILED/);
 	assert.deepEqual(
 		session.writes.map((frame) => frame.op),
-		["abort"],
+		// 复用检查先跑（absent → 需要上传）；scp 失败后不能再有 finalize，只剩 abort 清理。
+		["finalize-begin", "finalize-file", "finalize-verify", "abort"],
 	);
 	await assert.rejects(lstat(snapshotDirectory), { code: "ENOENT" });
 });

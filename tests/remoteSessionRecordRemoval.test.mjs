@@ -66,7 +66,7 @@ function resolveRemoteNode(tree, path) {
 
 /**
  * 带帧日志的假远端：frames 是「发过哪些帧」的账本，establishments 是「借会话」的次数。
- * 讀类助手方法只有 fs.list / fs.stat（列表级发现用）；其余方法一律记入 dataCommands 并当场报错——
+ * 讀类助手方法只有 fs.list / fs.stat / fs.statMany（列表级发现用）；其余方法一律记入 dataCommands 并当场报错——
  * 任何**数据类**远端操作（写/移动/删除）在这条路径上都必须为零，否则这就是一个会叫的探针。
  */
 function fakeRemote(tree) {
@@ -75,9 +75,19 @@ function fakeRemote(tree) {
 	const session = {
 		async request(method, params) {
 			frames.push({ method, params: JSON.parse(JSON.stringify(params ?? {})) });
-			if (method !== "fs.list" && method !== "fs.stat") {
+			if (method !== "fs.list" && method !== "fs.stat" && method !== "fs.statMany") {
 				dataCommands.push(method);
 				throw new Error("UNEXPECTED_DATA_COMMAND:" + method);
+			}
+			if (method === "fs.statMany") {
+				// 批量元数据仍是**读**：每条路径都要能解析，否则整批拒绝（与真实 helper 同语义）。
+				return {
+					entries: params.paths.map((path) => {
+						const node = resolveRemoteNode(tree, path);
+						if (node === undefined) throw Object.assign(new Error("PATH_NOT_FOUND"), { code: "PATH_NOT_FOUND" });
+						return node.kind === "file" ? { path, kind: "file", bytes: node.bytes, mtimeMs: node.mtimeMs } : { path, kind: node.kind, bytes: 0, mtimeMs: 1 };
+					}),
+				};
 			}
 			if (method === "fs.list") {
 				const node = resolveRemoteNode(tree, params.path);

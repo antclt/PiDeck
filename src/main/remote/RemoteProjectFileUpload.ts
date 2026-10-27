@@ -181,6 +181,14 @@ export async function uploadRemoteProjectFile(input: {
 	// 超时按块数放大：一次 ssh 要传完整个文件，固定 30s 会让大文件中途被掐。
 	const timeoutMs = Number.isSafeInteger(input.timeoutMs) && (input.timeoutMs as number) > 0 ? (input.timeoutMs as number) : Math.max(60_000, Math.ceil(bytes.length / REMOTE_PROJECT_UPLOAD_CHUNK_BYTES) * 15_000);
 	const handle: SshLauncherHandle = await input.launcher.start({ hostId: input.hostId, generation: input.generation, invocation, stdin: true, timeoutMs, maxOutputBytes: 64 * 1024, maxLineBytes: Math.ceil(REMOTE_PROJECT_UPLOAD_CHUNK_BYTES / 3) * 4 + 64 });
+	// 缓冲背压：一整份文件可以到 16 MiB，全部同步塞进 stdin 就是无界积压。有 `writeAwait` 时逐块等对端排空；
+	// 旧替身 handle 只有同步 `write`，回退到它但保持 await 形状（顺序不变、END 仍是最后一行）。
+	const writeFrame =
+		typeof handle.writeAwait === "function"
+			? (line: string) => handle.writeAwait!(line)
+			: async (line: string) => {
+					await handle.write(line);
+				};
 	try {
 		const outcome = await new Promise<{ ok: true } | { ok: false; code: string }>((resolve) => {
 			let settled = false;
@@ -207,16 +215,19 @@ export async function uploadRemoteProjectFile(input: {
 				}
 			});
 			unsubscribeExit = handle.onExit(() => finish({ ok: false, code: REMOTE_PROJECT_UPLOAD_CODES.commandFailed }));
-			try {
-				for (let offset = 0; offset < bytes.length; offset += REMOTE_PROJECT_UPLOAD_CHUNK_BYTES) {
-					// launcher **自己补换行**，且显式拒绝含 \n 的行（`SSH_LAUNCHER_STDIN_LINE_INVALID`）：
-					// 在这里拼上换行会让第一条就抛错，字节一个都到不了远端。
-					handle.write(bytes.subarray(offset, offset + REMOTE_PROJECT_UPLOAD_CHUNK_BYTES).toString("base64"));
+			// 整个写入串行 await：块与 END 的先后顺序由 await 保证，而内存占用只跟单帧有关。
+			void (async () => {
+				try {
+					for (let offset = 0; offset < bytes.length; offset += REMOTE_PROJECT_UPLOAD_CHUNK_BYTES) {
+						// launcher **自己补换行**，且显式拒绝含 \n 的行（`SSH_LAUNCHER_STDIN_LINE_INVALID`）：
+						// 在这里拼上换行会让第一条就抛错，字节一个都到不了远端。
+						await writeFrame(bytes.subarray(offset, offset + REMOTE_PROJECT_UPLOAD_CHUNK_BYTES).toString("base64"));
+					}
+					await writeFrame("END");
+				} catch {
+					finish({ ok: false, code: REMOTE_PROJECT_UPLOAD_CODES.commandFailed });
 				}
-				handle.write("END");
-			} catch {
-				finish({ ok: false, code: REMOTE_PROJECT_UPLOAD_CODES.commandFailed });
-			}
+			})();
 		});
 		if (!outcome.ok) throw new Error(outcome.code);
 	} finally {

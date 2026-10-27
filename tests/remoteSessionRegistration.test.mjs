@@ -195,11 +195,16 @@ function fakeRegisterPort(options = {}) {
 						calls.probe.push(method + ":" + params.path);
 						throw Object.assign(new Error("PATH_NOT_FOUND"), { code: "PATH_NOT_FOUND" });
 					}
-					if (method !== "fs.stat") throw new Error("PROTOCOL_INVALID");
-					calls.stat.push(params.path);
-					const file = (options.files ?? {})[params.path];
-					if (file === undefined) throw new Error("PATH_NOT_FOUND");
-					return { kind: file.kind ?? "file", bytes: file.bytes ?? 4, mtimeMs: file.mtimeMs ?? 3 };
+					if (method !== "fs.stat" && method !== "fs.statMany") throw new Error("PROTOCOL_INVALID");
+					const describe = (path) => {
+						const file = (options.files ?? {})[path];
+						if (file === undefined) throw new Error("PATH_NOT_FOUND");
+						calls.stat.push(path);
+						return { path, kind: file.kind ?? "file", bytes: file.bytes ?? 4, mtimeMs: file.mtimeMs ?? 3 };
+					};
+					if (method === "fs.statMany") return { entries: params.paths.map(describe) };
+					const { kind, bytes, mtimeMs } = describe(params.path);
+					return { kind, bytes, mtimeMs };
 				},
 				async cancel() {
 					return { cancelled: false };

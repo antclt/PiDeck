@@ -175,7 +175,19 @@ type HostEntry = {
 	manager?: SshConnectionManager;
 	/** In-flight connect, so dispose can wait for it instead of racing the spawn. */
 	inFlight?: Promise<RemoteHostConnectResult>;
+	/**
+	 * The connect attempt currently inside the host lock, reachable from *outside* it.
+	 *
+	 * The lock is held for the whole bootstrap (node probe, ready, upload, finalize), so a cancel that
+	 * queued behind it would be waiting for the very work it is meant to stop. `disconnect()` and
+	 * `dispose()` therefore abort this controller before they enter the lock; the attempt then settles its
+	 * own waits and releases the lock promptly.
+	 */
+	attempt?: HostAttempt;
 };
+
+/** One connect attempt's identity and cancellation. `generation` names the attempt, not the pin. */
+type HostAttempt = { generation: number; controller: AbortController };
 
 const HOST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 /** 16 random bytes base64url: matches the 15–63 character nonce the frozen entry accepts. */
@@ -225,6 +237,14 @@ function extensionDeployCodeOf(error: unknown): string {
 	return typeof message === "string" && /^[A-Z][A-Z0-9_]{2,63}$/.test(message) ? message : "REMOTE_EXTENSIONS_DEPLOY_FAILED";
 }
 
+/**
+ * Stable code for "this attempt was cancelled". Reuses the existing disconnect code instead of minting a
+ * new public one: the renderer already renders it as "not connected", which is exactly the outcome.
+ */
+function throwIfCancelled(signal: AbortSignal | undefined): void {
+	if (signal?.aborted === true) throw new Error("SSH_HOST_DISCONNECTED");
+}
+
 function defaultPorts(): RemoteHostConnectionPorts {
 	return {
 		bootstrap: bootstrapPinnedHost,
@@ -242,12 +262,14 @@ function defaultPorts(): RemoteHostConnectionPorts {
  * Own the wired connection lifecycle of remote hosts: one verified bootstrap per host, held until the
  * store revision it was produced under changes, plus the manager that consumes it.
  *
- * Bootstrap and connect are deliberately separate steps. `bootstrapPinnedHost` takes no cancellation
- * parameter and only stops its own entry process in its own `finally`, so an abort can be honoured
- * *between* bootstrap and connect but never inside a running upload. Stating that here is cheaper than
- * pretending the seam is cancellable: the upload stays bounded by the coordinator's own session
- * deadline. Both fences are re-checked at every step, so a host whose profile changed mid-flight
- * never reaches the manager with a stale helper location.
+ * Bootstrap and connect are deliberately separate steps. Each attempt owns an `AbortController`:
+ * `disconnect()`/`dispose()` abort it **before** entering the host lock, and the signal reaches node
+ * discovery, the ready wait, the scp upload and the finalize wait, so the user's cancel settles those
+ * waits instead of queueing behind them (or waiting out the 30 s/300 s budgets). Every await re-checks the
+ * signal and the attempt identity too, so a late continuation of a cancelled attempt can only clean up its
+ * own handle, nonce and staging - it never publishes or tears down whatever replaced it.
+ * Both fences are re-checked at every step, so a host whose profile changed mid-flight never reaches the
+ * manager with a stale helper location.
  *
  * Nothing in this module is reachable in production: no IPC channel and no assembly site reference it.
  *
@@ -384,8 +406,9 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 	 * on the previous deploy root stayed alive. Reading the revision first and comparing afterwards
 	 * means any disagreement invalidates the held session instead of blessing it.
 	 */
-	async function ensureHeld(entry: HostEntry, hostId: string): Promise<HeldBootstrap> {
+	async function ensureHeld(entry: HostEntry, hostId: string, signal?: AbortSignal): Promise<HeldBootstrap> {
 		const current = await readRevision();
+		throwIfCancelled(signal);
 		if (entry.held !== undefined) {
 			if (entry.held.revision === current) return entry.held;
 			// A rebind/disable/re-verification superseded this helper location: the deploy root it names
@@ -398,11 +421,19 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 		// Resolve the node before bootstrapping. An explicit override skips discovery; otherwise the host
 		// user's own node is found via their login shell. Only a fresh bootstrap pays for discovery — a
 		// revision that already has a held session returns above without reaching here.
-		const nodePath = options.nodePath ?? (await ports.resolveNode({ userDataDir: options.userDataDir, hostId, client: options.client, sentinel: ports.createSentinel() })).nodePath;
-		const prepared = await ports.bootstrap({ userDataDir: options.userDataDir, hostId, generation, nonce, nodePath, client: options.client, launcher });
+		const nodePath = options.nodePath ?? (await ports.resolveNode({ userDataDir: options.userDataDir, hostId, client: options.client, sentinel: ports.createSentinel(), ...(signal === undefined ? {} : { signal }) })).nodePath;
+		// A cancel between discovery and the entry spawn must not start an upload.
+		throwIfCancelled(signal);
+		const prepared = await ports.bootstrap({ userDataDir: options.userDataDir, hostId, generation, nonce, nodePath, client: options.client, launcher, ...(signal === undefined ? {} : { signal }) });
+		// A cancelled attempt owns nothing: it must not publish a held session (or a deploy root) for the
+		// next attempt to trust.
+		throwIfCancelled(signal);
+		// A newer attempt took this host over while the upload ran: its result is not this attempt's to publish.
+		if (entry.generation !== generation) throw new Error("SSH_HOST_NOT_READY");
 		// Re-read after the await: a rebind during the upload invalidates this result instead of
 		// publishing a helper location that the profile no longer describes.
 		const after = await readRevision();
+		throwIfCancelled(signal);
 		if (after !== current) throw new Error("SSH_HOST_NOT_READY");
 		// Read the effective root after any await: a confirmation that landed while this bootstrap was in
 		// flight must not be published under a session that started without it.
@@ -422,13 +453,19 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 		const entry = entryFor(hostId);
 		if (explicitlyDisconnected.has(hostId)) return { ok: false, hostId, code: "SSH_HOST_DISCONNECTED" };
 		entry.generation += 1;
+		// Registered before the first await so disconnect()/dispose() can abort *this* attempt from outside
+		// the host lock instead of queueing behind its upload.
+		const attempt: HostAttempt = { generation: entry.generation, controller: new AbortController() };
+		entry.attempt = attempt;
+		const signal = attempt.controller.signal;
 		try {
 			// A machine latched by an explicit disconnect can never be revived — the reducer drops every later
 			// begin-attempt — so a latched manager is replaced instead of being reported as a live session.
 			// Without this, the user's own "connect" after a disconnect succeeded on paper while the session
 			// stayed dead, and every read kept failing with SSH_CONNECTION_NOT_READY.
 			if (entry.manager !== undefined && entry.manager.getState(hostId).latched === true) discard(entry);
-			const held = await ensureHeld(entry, hostId);
+			const held = await ensureHeld(entry, hostId, signal);
+			throwIfCancelled(signal);
 			if (disposed) return { ok: false, hostId, code: "REMOTE_CONNECTION_SERVICE_DISPOSED" };
 			const manager = entry.manager ?? managerFor(held);
 			entry.manager = manager;
@@ -436,11 +473,18 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 			// would only report the terminal state back and the user's own "connect" could never leave it. The
 			// reducer's one legal exit is `user-retry`, which is exactly what an explicit connect means here.
 			const state = manager.getState(hostId).state === "needs-attention" ? await manager.retry(hostId) : await manager.connect(hostId);
+			// A cancel that landed while the manager was connecting still settles this attempt as cancelled
+			// rather than publishing "ready" for a user who walked away.
+			throwIfCancelled(signal);
 			return { ok: true, hostId, state };
 		} catch (error) {
-			// A failed connect must not leave a helper session behind that the next attempt would trust.
-			discard(entry);
+			// A failed/cancelled connect must not leave a helper session behind that the next attempt would trust.
+			if (entry.attempt === attempt) discard(entry);
+			if (disposed) return { ok: false, hostId, code: "REMOTE_CONNECTION_SERVICE_DISPOSED" };
+			if (signal.aborted) return { ok: false, hostId, code: "SSH_HOST_DISCONNECTED" };
 			return { ok: false, hostId, code: diagnosticCodeFromError(error) };
+		} finally {
+			if (entry.attempt === attempt) entry.attempt = undefined;
 		}
 	}
 
@@ -477,7 +521,7 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 		return { ok: true };
 	}
 
-	async function establishProjectSession(hostId: string, root: string): Promise<{ ok: true; session: RemoteProjectSession } | { ok: false; code: string }> {
+	async function establishProjectSession(hostId: string, root: string, signal?: AbortSignal): Promise<{ ok: true; session: RemoteProjectSession } | { ok: false; code: string }> {
 		const entry = entryFor(hostId);
 		// 保存令牌绑定host store代数；登记/重绑后不能一直复用旧held使所有重载永久失败。
 		if (entry.held && entry.held.revision !== (await readRevision())) discard(entry);
@@ -531,7 +575,8 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 			}
 		}
 		if (manager === undefined) {
-			const held = await ensureHeld(entry, hostId);
+			const held = await ensureHeld(entry, hostId, signal);
+			throwIfCancelled(signal);
 			manager = managerFor(held);
 			entry.manager = manager;
 			const connected = await manager.connect(hostId);
@@ -780,6 +825,14 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 		 * explicit `connect` clears it again.
 		 */
 		async disconnect(hostId: string, reason: "abort" | "shutdown"): Promise<void> {
+			// The user's decision is recorded before anything waits, and the in-flight attempt is cancelled
+			// *before* the lock is entered: that attempt holds the lock for its whole upload/finalize, so a
+			// cancel queued behind the lock would wait for the very work it is meant to stop. A read that
+			// starts between the two observations sees the intent and reports SSH_HOST_DISCONNECTED.
+			if (HOST_ID.test(hostId)) {
+				explicitlyDisconnected.add(hostId);
+				hosts.get(hostId)?.attempt?.controller.abort();
+			}
 			await operationLock.run(hostId, async () => {
 				if (HOST_ID.test(hostId)) explicitlyDisconnected.add(hostId);
 				options.onDisconnect?.(hostId);
@@ -868,6 +921,9 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 						client: options.client,
 						launcher,
 						snapshot: { dir: snapshot.dir, names: fileNames },
+						// An explicit disconnect/dispose during the upload cancels this attempt too; the cache is then
+						// not written, and the next session redeploys instead of trusting a half-finished result.
+						...(entry.attempt === undefined ? {} : { signal: entry.attempt.controller.signal }),
 					});
 					const root = deployedExtensionSnapshotRoot(deployed);
 					entry.extensionSnapshot = { revision: held.revision, generation: held.generation, sha256: deployed.bundleSha256, root, fileNames };
@@ -977,10 +1033,13 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 				if (readOptions?.requireReady && hosts.get(hostId)?.manager?.getState(hostId).state !== "ready") return { ok: false, code: "SSH_HOST_NOT_READY" };
 				let session: RemoteProjectSession;
 				try {
-					const established = await establishProjectSession(hostId, root);
+					const established = await establishProjectSession(hostId, root, readOptions?.signal);
 					if (!established.ok) return established;
 					session = established.session;
 				} catch (error) {
+					// A cancel during establishment is the caller's own withdrawal, reported with the read channel's
+					// code (the same one a cancel before or after establishment produces).
+					if (readOptions?.signal?.aborted) return { ok: false, code: "REQUEST_CANCELLED" };
 					// Establishing can fail in ways only the connection layer can name (a failed bootstrap, a
 					// disposed manager). Relaying its own stable code keeps the UI's hint truthful; a thrown
 					// surprise would otherwise be flattened into a generic read failure by the caller.
@@ -997,6 +1056,10 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 		dispose(): Promise<void> {
 			disposing ??= (async () => {
 				disposed = true;
+				// Abort every in-flight attempt before waiting for it: an upload that ignored the cancel would
+				// otherwise hold quit open for its whole session budget. Each attempt settles its own waits and
+				// releases the lock, so the awaits below converge promptly.
+				for (const entry of hosts.values()) entry.attempt?.controller.abort();
 				for (const hostId of hosts.keys()) options.onDisconnect?.(hostId);
 				const entries = [...hosts.values()];
 				const pending = entries.flatMap((entry) => (entry.inFlight === undefined ? [] : [entry.inFlight.catch(() => undefined)]));

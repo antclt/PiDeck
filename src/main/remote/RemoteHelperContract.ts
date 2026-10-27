@@ -125,6 +125,13 @@ export const REMOTE_HELPER_METHOD_ECHO = "echo";
 export const REMOTE_HELPER_METHOD_CANCEL = "cancel";
 /** Read-only workspace methods: the first batch of helpers that actually touches the remote filesystem. */
 export const REMOTE_HELPER_METHOD_FS_STAT = "fs.stat";
+/**
+ * Batched form of `fs.stat` (helper 1.22.0): one bounded frame describes up to
+ * REMOTE_HELPER_MAX_STAT_MANY_PATHS entries with exactly the per-path rules of the single call. It exists
+ * because a session list costs one round trip per file without it; nothing about *which* paths are scanned
+ * moves into the helper.
+ */
+export const REMOTE_HELPER_METHOD_FS_STAT_MANY = "fs.statMany";
 export const REMOTE_HELPER_METHOD_FS_LIST = "fs.list";
 export const REMOTE_HELPER_METHOD_FS_READ = "fs.read";
 /**
@@ -313,6 +320,7 @@ export type RemoteGitWorkspaceDiffResult = { originalContent: string; modifiedCo
 export const REMOTE_HELPER_CAPABILITIES = [
 	"echo",
 	"fs.stat",
+	"fs.statMany",
 	"fs.list",
 	"fs.read",
 	"fs.searchNames",
@@ -348,6 +356,12 @@ export type RemoteHelperCapability = (typeof REMOTE_HELPER_CAPABILITIES)[number]
  * so an over-long path is a PROTOCOL_INVALID refusal rather than an ENAMETOOLONG round trip.
  */
 export const REMOTE_HELPER_MAX_PATH_LENGTH = 4096;
+/**
+ * Paths per `fs.statMany` request. It bounds both directions: the caller sends few enough paths for one
+ * frame, and the helper answers without splitting a batch, so a full 2000-file listing is <= 32 round trips
+ * instead of 2000 while each entry still counts as its own logical unit.
+ */
+export const REMOTE_HELPER_MAX_STAT_MANY_PATHS = 64;
 /**
  * `fs.list` answers in one frame, so the entry count is capped instead of paged: past the cap the whole
  * call is refused with RESULT_TOO_LARGE, never truncated into a listing that silently looks complete.
@@ -427,6 +441,15 @@ export type RemoteHelperPathKind = "file" | "directory" | "other";
 export type RemoteHelperStatParams = { path: string };
 /** `bytes` is the entry's own size (the link's size for a symlink) and `mtimeMs` its modification time. */
 export type RemoteHelperStatResult = { kind: RemoteHelperPathKind; bytes: number; mtimeMs: number };
+/**
+ * `paths` is 1..REMOTE_HELPER_MAX_STAT_MANY_PATHS relative POSIX paths, each checked exactly like
+ * RemoteHelperStatParams. Any unusable path refuses the whole request with that path's own code: a batch is
+ * all-or-nothing, which is what keeps its result comparable to calling `fs.stat` once per entry.
+ */
+export type RemoteHelperStatManyParams = { paths: readonly string[] };
+/** Entries are in request order and echo the requested path; an index is never implied by omission. */
+export type RemoteHelperStatManyEntry = { path: string; kind: RemoteHelperPathKind; bytes: number; mtimeMs: number };
+export type RemoteHelperStatManyResult = { entries: readonly RemoteHelperStatManyEntry[] };
 
 export type RemoteHelperListParams = { path: string };
 /** `bytes` is present for regular files only; a symlink is `other` and is never followed. */
@@ -653,14 +676,23 @@ export type RemoteBootstrapFileMode = (typeof REMOTE_BOOTSTRAP_FILE_MODES)[numbe
 export type RemoteBootstrapFinalizeBeginFrame = { v: 1; op: "finalize-begin"; files: number; bundleSha256: string };
 export type RemoteBootstrapFinalizeFileFrame = { v: 1; op: "finalize-file"; name: string; sha256: string; bytes: number; mode: RemoteBootstrapFileMode };
 export type RemoteBootstrapFinalizeCommitFrame = { v: 1; op: "finalize-commit" };
+/**
+ * Read-only reuse check (plan F3): the same declaration frames, but instead of a commit the entry is asked
+ * to re-prove the already active `<target>/<bundleSha256>` directory. It answers `verified` (main skips the
+ * upload), `verify-miss` with `reason: absent` (continue with the upload) or `conflict` (stop: an installed
+ * but different directory is never overwritten), or an `error` frame.
+ */
+export type RemoteBootstrapFinalizeVerifyFrame = { v: 1; op: "finalize-verify" };
 export type RemoteBootstrapAbortFrame = { v: 1; op: "abort" };
-export type RemoteBootstrapInboundFrame = RemoteBootstrapFinalizeBeginFrame | RemoteBootstrapFinalizeFileFrame | RemoteBootstrapFinalizeCommitFrame | RemoteBootstrapAbortFrame;
+export type RemoteBootstrapInboundFrame = RemoteBootstrapFinalizeBeginFrame | RemoteBootstrapFinalizeFileFrame | RemoteBootstrapFinalizeCommitFrame | RemoteBootstrapFinalizeVerifyFrame | RemoteBootstrapAbortFrame;
 
 export type RemoteBootstrapReadyFrame = { v: 1; op: "ready"; protocolVersion: number; bundleSha256: string; nonce: string; deployRoot: string; staging: string; stagingMode: "0700" };
 export type RemoteBootstrapFinalizedFrame = { v: 1; op: "finalized"; active: string; files: number };
+export type RemoteBootstrapVerifiedFrame = { v: 1; op: "verified"; active: string; files: number };
+export type RemoteBootstrapVerifyMissFrame = { v: 1; op: "verify-miss"; reason: "absent" | "conflict" };
 export type RemoteBootstrapAbortedFrame = { v: 1; op: "aborted"; reason: "requested" | "eof" };
 export type RemoteBootstrapErrorFrame = { v: 1; op: "error"; code: string };
-export type RemoteBootstrapResultFrame = RemoteBootstrapReadyFrame | RemoteBootstrapFinalizedFrame | RemoteBootstrapAbortedFrame | RemoteBootstrapErrorFrame;
+export type RemoteBootstrapResultFrame = RemoteBootstrapReadyFrame | RemoteBootstrapFinalizedFrame | RemoteBootstrapVerifiedFrame | RemoteBootstrapVerifyMissFrame | RemoteBootstrapAbortedFrame | RemoteBootstrapErrorFrame;
 
 export const REMOTE_BOOTSTRAP_FINALIZE_ERROR_CODES = ["BOOTSTRAP_INPUT_INVALID", "BOOTSTRAP_ENTRY_OP_UNSUPPORTED", "BOOTSTRAP_FINALIZE_INCOMPLETE", "BOOTSTRAP_FILE_MISMATCH", "BOOTSTRAP_MODE_INVALID", "BOOTSTRAP_ACTIVE_CONFLICT", "BOOTSTRAP_INTERNAL"] as const;
 export type RemoteBootstrapFinalizeErrorCode = (typeof REMOTE_BOOTSTRAP_FINALIZE_ERROR_CODES)[number];

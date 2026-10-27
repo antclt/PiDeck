@@ -54,17 +54,23 @@ function fakeRemote(options = {}) {
 	const session = {
 		async request(method, params) {
 			frames.push({ method, params: plain(params ?? {}) });
+			const describe = (relative) => {
+				const absolute = absOf(relative);
+				const content = contents[absolute];
+				if (content !== undefined) return { path: relative, kind: "file", bytes: content.length, mtimeMs: 7 };
+				if (dirs[absolute] !== undefined) return { path: relative, kind: "directory", bytes: 0, mtimeMs: 1 };
+				throw Object.assign(new Error("PATH_NOT_FOUND"), { code: "PATH_NOT_FOUND" });
+			};
 			const absolute = absOf(params.path);
 			if (method === "fs.list") {
 				const entries = dirs[absolute];
 				if (entries === undefined) throw Object.assign(new Error("PATH_NOT_FOUND"), { code: "PATH_NOT_FOUND" });
 				return { entries };
 			}
+			if (method === "fs.statMany") return { entries: params.paths.map(describe) };
 			if (method === "fs.stat") {
-				const content = contents[absolute];
-				if (content !== undefined) return { kind: "file", bytes: content.length, mtimeMs: 7 };
-				if (dirs[absolute] !== undefined) return { kind: "directory", bytes: 0, mtimeMs: 1 };
-				throw Object.assign(new Error("PATH_NOT_FOUND"), { code: "PATH_NOT_FOUND" });
+				const { kind, bytes, mtimeMs } = describe(params.path);
+				return { kind, bytes, mtimeMs };
 			}
 			if (method === "fs.read") {
 				const content = contents[absolute];

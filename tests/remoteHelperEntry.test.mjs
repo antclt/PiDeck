@@ -38,6 +38,7 @@ const {
 	REMOTE_HELPER_MAX_SEARCH_MATCHES,
 	REMOTE_HELPER_MAX_SEARCH_QUERY_LENGTH,
 	REMOTE_HELPER_MAX_SEARCH_SCANNED,
+	REMOTE_HELPER_MAX_STAT_MANY_PATHS,
 	REMOTE_HELPER_MAX_QUEUED_REQUESTS,
 	REMOTE_HELPER_METHOD_CANCEL,
 	REMOTE_HELPER_METHOD_ECHO,
@@ -45,6 +46,7 @@ const {
 	REMOTE_HELPER_METHOD_FS_READ,
 	REMOTE_HELPER_METHOD_FS_SEARCH_NAMES,
 	REMOTE_HELPER_METHOD_FS_STAT,
+	REMOTE_HELPER_METHOD_FS_STAT_MANY,
 	REMOTE_HELPER_METHOD_GIT_REPOS,
 	REMOTE_HELPER_METHOD_HELLO,
 	REMOTE_HELPER_MAX_ECHO_TEXT_LENGTH,
@@ -72,7 +74,7 @@ const HOST_ID = "01234567-89ab-4def-8123-456789abcdef";
 /** The helper never resolves HOME into a path, so a POSIX literal is the honest fixture on any platform. */
 const HELPER_HOME = "/home/pideck-helper";
 /** Frozen digest, pinned here as well as in the module: editing the source means editing both. */
-const FROZEN_SHA256 = "957cb0346a420bf9e875ba9031ce3b82991d4326be53959add774f8df102b872";
+const FROZEN_SHA256 = "2f773369aa90b427e6553522a68701cea59ead3d6cdba0dd170e4b53858e8e2c";
 const MAX_TEXT = 4096;
 const TEST_TIMEOUT_MS = 30_000;
 const GUARD_TIMEOUT_MS = 10_000;
@@ -497,10 +499,10 @@ helperTest("every frozen bundle artifact is one byte-frozen ASCII line with its 
 helperTest("the exported entry identity matches the frozen source", () => {
 	assert.equal(REMOTE_HELPER_ENTRY_FILE_NAME, "helper.mjs");
 	assert.match(REMOTE_HELPER_ENTRY_VERSION, /^\d+\.\d+\.\d+$/);
-	assert.equal(REMOTE_HELPER_ENTRY_VERSION, "1.21.2", "the remote config scope hardening is helper 1.21.2");
+	assert.equal(REMOTE_HELPER_ENTRY_VERSION, "1.22.0", "fs.statMany metadata batching is helper 1.22.0");
 	// The frozen source cannot import the contract, so its literals are checked against it here.
 	assert.ok(REMOTE_HELPER_INLINE_SOURCE.includes(`"${REMOTE_HELPER_ENTRY_VERSION}"`), "hello must report REMOTE_HELPER_ENTRY_VERSION");
-	for (const token of [REMOTE_HELPER_METHOD_HELLO, REMOTE_HELPER_METHOD_ECHO, REMOTE_HELPER_METHOD_CANCEL, REMOTE_HELPER_METHOD_FS_STAT, REMOTE_HELPER_METHOD_FS_LIST, REMOTE_HELPER_METHOD_FS_READ]) {
+	for (const token of [REMOTE_HELPER_METHOD_HELLO, REMOTE_HELPER_METHOD_ECHO, REMOTE_HELPER_METHOD_CANCEL, REMOTE_HELPER_METHOD_FS_STAT, REMOTE_HELPER_METHOD_FS_STAT_MANY, REMOTE_HELPER_METHOD_FS_LIST, REMOTE_HELPER_METHOD_FS_READ]) {
 		assert.ok(REMOTE_HELPER_INLINE_SOURCE.includes(`"${token}"`), token);
 	}
 	assert.ok(REMOTE_HELPER_INLINE_SOURCE.includes(String(REMOTE_HELPER_MAX_FRAME_BYTES)), "the frame cap must be visible in the frozen source");
@@ -1542,4 +1544,49 @@ helperTest("hello reports the canonical root, resolving a symlinked root to its 
 	assert.notEqual(result.root, linkedRoot, "a symlinked root must not be reported as itself");
 	assert.equal(result.root, realRoot, "the reported root is the resolved directory");
 	assert.equal(session.root, linkedRoot, "the fixture still records what it actually passed");
+});
+
+/*
+ * F4: `fs.statMany` is the batched form of `fs.stat` (docs/remote-functional-optimization-plan.md §3 F4).
+ * Per-path rules are the single call's own rules; the batch adds nothing but framing.
+ */
+
+linkHelperTest("fs.statMany describes a bounded path list in request order", async (t) => {
+	const fixture = createFsFixture(t);
+	const session = startHelper(t, { root: fixture.root });
+	const paths = ["alpha.txt", "sub", "inside-link", "empty.txt", "."];
+	const batch = await call(session, REMOTE_HELPER_METHOD_FS_STAT_MANY, { paths });
+	assert.deepEqual(Object.keys(batch), contractFields("RemoteHelperStatManyResult"));
+	assert.deepEqual(
+		batch.entries.map((entry) => entry.path),
+		paths,
+		"the answer is in request order and echoes every requested path",
+	);
+	const singles = [];
+	for (const path of paths) singles.push(await call(session, REMOTE_HELPER_METHOD_FS_STAT, { path }));
+	for (const [index, entry] of batch.entries.entries()) {
+		assert.deepEqual(Object.keys(entry).sort(), ["bytes", "kind", "mtimeMs", "path"]);
+		// Entry for entry identical to the single call: same classification, same bytes, same mtime.
+		assert.deepEqual({ kind: entry.kind, bytes: entry.bytes, mtimeMs: entry.mtimeMs }, singles[index]);
+	}
+	assert.equal(batch.entries[2].kind, "other", "a link stays the link itself, exactly as fs.stat reports it");
+	assert.equal(session.stderr(), "");
+});
+
+helperTest("fs.statMany refuses the whole batch when any single path is unusable", async (t) => {
+	const fixture = createFsFixture(t);
+	const session = startHelper(t, { root: fixture.root });
+	// All-or-nothing: a partial list would look complete while one entry silently went undescribed.
+	await expectRefusal(session, REMOTE_HELPER_METHOD_FS_STAT_MANY, { paths: ["alpha.txt", "sub/missing.txt"] }, "PATH_NOT_FOUND");
+	await expectRefusal(session, REMOTE_HELPER_METHOD_FS_STAT_MANY, { paths: ["../outside/secret.txt"] }, "PATH_OUTSIDE_ROOT");
+	await expectRefusal(session, REMOTE_HELPER_METHOD_FS_STAT_MANY, { paths: ["alpha.txt", "escape"] }, "PATH_OUTSIDE_ROOT");
+	await expectRefusal(session, REMOTE_HELPER_METHOD_FS_STAT_MANY, { paths: ["alpha.txt/child"] }, THROUGH_A_FILE);
+	// The list itself is part of the protocol shape.
+	for (const params of [undefined, {}, { paths: [] }, { paths: "alpha.txt" }, { paths: [7] }, { paths: [null] }, { paths: ["a\u0000b"] }, { paths: ["a".repeat(REMOTE_HELPER_MAX_PATH_LENGTH + 1)] }, { paths: Array.from({ length: REMOTE_HELPER_MAX_STAT_MANY_PATHS + 1 }, () => "alpha.txt") }]) {
+		await expectRefusal(session, REMOTE_HELPER_METHOD_FS_STAT_MANY, params, "PROTOCOL_INVALID");
+	}
+	// One path past the cap is the boundary: exactly the ceiling still answers.
+	const atCap = await call(session, REMOTE_HELPER_METHOD_FS_STAT_MANY, { paths: Array.from({ length: REMOTE_HELPER_MAX_STAT_MANY_PATHS }, () => "alpha.txt") });
+	assert.equal(atCap.entries.length, REMOTE_HELPER_MAX_STAT_MANY_PATHS);
+	assert.equal(session.stderr(), "");
 });

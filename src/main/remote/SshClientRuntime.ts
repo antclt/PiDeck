@@ -4,7 +4,9 @@ import { dirname, isAbsolute, join } from "node:path";
 import { parseSshResolvedRoute } from "./SshRouteDigest";
 
 export type SshCommandResult = { exitCode: number; stdout: string; stderr?: string };
-export type SshCommandRunner = (executable: string, args: string[]) => Promise<SshCommandResult>;
+/** Per-invocation options. `signal` aborts the child process (used to cancel a running probe/upload attempt). */
+export type SshCommandOptions = { signal?: AbortSignal };
+export type SshCommandRunner = (executable: string, args: string[], options?: SshCommandOptions) => Promise<SshCommandResult>;
 
 /**
  * Main-owned OpenSSH client binding: absolute ssh/scp binaries from one installation plus the
@@ -113,7 +115,8 @@ function resolveWindowsSshPath(options: SshClientRuntimeOptions, env: NodeJS.Pro
 	throw new Error("SSH_CLIENT_MISSING");
 }
 
-function mapProcessError(error: { code?: unknown; killed?: boolean } | null): Error | null {
+function mapProcessError(error: { code?: unknown; killed?: boolean; name?: unknown } | null): Error | null {
+	if (error?.name === "AbortError" || error?.code === "ABORT_ERR") return new Error("SSH_HOST_COMMAND_CANCELLED");
 	if (error?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") return new Error("SSH_HOST_COMMAND_OUTPUT_TOO_LARGE");
 	if (error?.code === "ETIMEDOUT" || error?.killed) return new Error("SSH_HOST_COMMAND_TIMEOUT");
 	if (error?.code === "ENOENT" || error?.code === "EACCES") return new Error("SSH_CLIENT_UNAVAILABLE");
@@ -121,11 +124,13 @@ function mapProcessError(error: { code?: unknown; killed?: boolean } | null): Er
 }
 
 function createRunner(executable: string, env: NodeJS.ProcessEnv, timeoutMs: number): SshCommandRunner {
-	return (target, args) => {
+	return (target, args, options) => {
 		if (target !== executable) throw new Error("SSH_CLIENT_EXECUTABLE_MISMATCH");
 		if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string")) throw new Error("SSH_CLIENT_ARGUMENT_INVALID");
+		const signal = options?.signal;
+		if (signal?.aborted === true) throw new Error("SSH_HOST_COMMAND_CANCELLED");
 		return new Promise((resolve, reject) => {
-			execFile(executable, args, { encoding: "utf8", timeout: timeoutMs, maxBuffer: 256 * 1024, windowsHide: true, shell: false, env }, (error, stdout, stderr) => {
+			execFile(executable, args, { encoding: "utf8", timeout: timeoutMs, maxBuffer: 256 * 1024, windowsHide: true, shell: false, env, ...(signal === undefined ? {} : { signal }) }, (error, stdout, stderr) => {
 				const mapped = mapProcessError(error);
 				if (mapped) return reject(mapped);
 				resolve({ exitCode: error ? (typeof error.code === "number" ? error.code : -1) : 0, stdout, stderr });

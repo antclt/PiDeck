@@ -77,8 +77,19 @@ export type SshLauncherHandle = {
 	onStdoutLine(listener: (line: string) => void): () => void;
 	/** Decoded stderr lines, for redacted diagnostics only (never parsed as protocol data). */
 	onStderrLine(listener: (line: string) => void): () => void;
-	/** Write one protocol line; throws after the process settled or when stdin was not requested. */
-	write(line: string): void;
+	/**
+	 * Write one protocol line; throws after the process settled or when stdin was not requested.
+	 *
+	 * May return a promise when the frame is still queued behind peer backpressure; a caller that writes
+	 * more frames must await it. Synchronous callers are bounded by the launcher's unsent-byte budget and get
+	 * a stable `SSH_LAUNCHER_STDIN_BACKLOG` instead of buffering without limit.
+	 */
+	write(line: string): void | Promise<void>;
+	/**
+	 * Awaitable write that stops at the unsent-byte budget until the peer drains (never a backlog error).
+	 * Writers of many large frames (the project upload) use this so whole-frame order and memory stay bounded.
+	 */
+	writeAwait?(line: string): Promise<void>;
 	stop(reason: "abort" | "shutdown"): Promise<void>;
 };
 

@@ -28,16 +28,17 @@ const { REMOTE_HELPER_ENTRY_VERSION, REMOTE_HELPER_ENTRY_SHA256, REMOTE_HELPER_I
 const HOST_ID = "6f1d2c3b-4a59-4e8d-9f70-1a2b3c4d5e6f";
 const HOME = "/home/dev";
 const CONTROL = String.fromCharCode(0);
-/** Current frozen build (helper 1.21.2); it was 1.6.0 when the J2 feature was verified. */
-const FROZEN_HELPER_SHA256 = "957cb0346a420bf9e875ba9031ce3b82991d4326be53959add774f8df102b872";
+/** Current frozen build (helper 1.22.0); it was 1.6.0 when the J2 feature was verified. */
+const FROZEN_HELPER_SHA256 = "2f773369aa90b427e6553522a68701cea59ead3d6cdba0dd170e4b53858e8e2c";
 const CONFIG_ROOT = HOME + "/.pi/agent";
 const CONFIG_PATH = "settings.json";
 const DEFAULT_ROOT = HOME + "/.pi/agent/sessions";
 const SETTINGS_READ_CEILING = 65536;
-/** The frozen helper's advertised vocabulary (build 1.21.2); the session-root code may use the fs batch only. */
+/** The frozen helper's advertised vocabulary (build 1.22.0); the session-root code may use the fs batch only. */
 const FROZEN_CAPABILITIES = [
 	"echo",
 	"fs.stat",
+	"fs.statMany",
 	"fs.list",
 	"fs.read",
 	"fs.searchNames",
@@ -68,8 +69,8 @@ const FROZEN_CAPABILITIES = [
 	"config.patch",
 ];
 
-test("the helper protocol is byte-for-byte the frozen 1.21.2 artifact", () => {
-	assert.equal(REMOTE_HELPER_ENTRY_VERSION, "1.21.2", "the helper version must match the frozen artifact");
+test("the helper protocol is byte-for-byte the frozen 1.22.0 artifact", () => {
+	assert.equal(REMOTE_HELPER_ENTRY_VERSION, "1.22.0", "the helper version must match the frozen artifact");
 	assert.equal(REMOTE_HELPER_ENTRY_SHA256, FROZEN_HELPER_SHA256, "the declared digest must stay the frozen one");
 	const recomputed = createHash("sha256").update(Buffer.from(REMOTE_HELPER_INLINE_SOURCE, "utf8")).digest("hex");
 	assert.equal(recomputed, REMOTE_HELPER_ENTRY_SHA256, "the uploaded body must hash to the declared digest");
@@ -112,6 +113,16 @@ function remoteHarness(tree, options = {}) {
 		return {
 			async request(method, params) {
 				frames.push({ root, method, params });
+				if (method === "fs.statMany") {
+					// One batch, request order, all-or-nothing — exactly the helper's rule.
+					return {
+						entries: params.paths.map((path) => {
+							const described = tree[root + "|" + path];
+							if (described === undefined) throw Object.assign(new Error("PATH_NOT_FOUND"), { code: "PATH_NOT_FOUND" });
+							return described.kind === "directory" ? { path, kind: "directory", bytes: 0, mtimeMs: 1 } : { path, kind: "file", bytes: described.bytes.length, mtimeMs: 1 };
+						}),
+					};
+				}
 				const entry = tree[root + "|" + params.path];
 				if (entry === undefined) throw Object.assign(new Error("PATH_NOT_FOUND"), { code: "PATH_NOT_FOUND" });
 				if (method === "fs.stat") return entry.kind === "directory" ? { kind: "directory", bytes: 0, mtimeMs: 1 } : { kind: "file", bytes: entry.bytes.length, mtimeMs: 1 };
@@ -323,6 +334,6 @@ test("the configuration is read with the existing bounded primitives only", asyn
 	const probeStats = harness.frames.filter((frame) => frame.root === CONFIG_ROOT && frame.method === "fs.stat");
 	assert.equal(probeStats.length, 1, "the probe sizes the settings file once");
 	for (const frame of harness.frames) {
-		assert.ok(["fs.stat", "fs.list", "fs.read", "fs.searchNames"].includes(frame.method), "unexpected helper method " + frame.method);
+		assert.ok(["fs.stat", "fs.statMany", "fs.list", "fs.read", "fs.searchNames"].includes(frame.method), "unexpected helper method " + frame.method);
 	}
 });

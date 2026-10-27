@@ -33,8 +33,20 @@ export class BootstrapReadyUnconfirmedError extends Error {
 	}
 }
 
+/**
+ * Cancellation of one bootstrap attempt. It is a stable code and not free text: every caller (connect,
+ * disconnect, dispose) flattens a thrown value into a code, and this one has to keep the meaning
+ * "the user cancelled" all the way to the renderer instead of degrading to a generic failure.
+ */
+export const REMOTE_BOOTSTRAP_ABORTED = "BOOTSTRAP_ABORTED";
+
+/** Throw the stable cancellation code when this attempt was already cancelled. */
+function throwIfAborted(signal: AbortSignal | undefined): void {
+	if (signal?.aborted === true) throw new Error(REMOTE_BOOTSTRAP_ABORTED);
+}
+
 /** Wait for the frozen entry to acknowledge the exact bundle and nonce before allowing upload. */
-function awaitBootstrapReady(session: SshLauncherHandle, expected: { bundleSha256: string; nonce: string; target: RemoteBootstrapTarget }): Promise<BootstrapReadyFrame> {
+function awaitBootstrapReady(session: SshLauncherHandle, expected: { bundleSha256: string; nonce: string; target: RemoteBootstrapTarget }, signal?: AbortSignal): Promise<BootstrapReadyFrame> {
 	return new Promise((resolve, reject) => {
 		let settled = false;
 		let stderrSeen = false;
@@ -42,11 +54,13 @@ function awaitBootstrapReady(session: SshLauncherHandle, expected: { bundleSha25
 		let offStderr: (() => void) | undefined;
 		let offExit: (() => void) | undefined;
 		const timer = setTimeout(() => fail(new BootstrapReadyUnconfirmedError("deadline", null, stderrSeen)), READY_TIMEOUT_MS);
+		const onAbort = (): void => fail(REMOTE_BOOTSTRAP_ABORTED);
 		const clear = (): void => {
 			clearTimeout(timer);
 			offLine?.();
 			offStderr?.();
 			offExit?.();
+			signal?.removeEventListener("abort", onAbort);
 		};
 		const fail = (reason: string | Error): void => {
 			if (settled) return;
@@ -60,6 +74,11 @@ function awaitBootstrapReady(session: SshLauncherHandle, expected: { bundleSha25
 			clear();
 			resolve(frame);
 		};
+		if (signal?.aborted === true) {
+			fail(REMOTE_BOOTSTRAP_ABORTED);
+			return;
+		}
+		signal?.addEventListener("abort", onAbort, { once: true });
 		try {
 			// Both backlogged stdout and an already-settled exit replay in microtasks. Register stdout first
 			// so the entry's final error frame cannot be lost when the exit callback tears down listeners.
@@ -105,6 +124,11 @@ export type PreparedBootstrapInput = {
 	 * 缺省 = helper 部署（历史调用点/测试的行为逐字不变）。
 	 */
 	deploy?(session: BootstrapSession, ready: BootstrapReadyFrame): Promise<PreparedBundleResult>;
+	/**
+	 * Cancels this attempt. Aborting settles ready/finalize waits immediately and ends the entry process in
+	 * the finally below, so a caller never has to wait out the 30 s ready / 300 s session budgets.
+	 */
+	signal?: AbortSignal;
 };
 
 function hasPinnedAlias(args: readonly string[], alias: string): boolean {
@@ -119,6 +143,7 @@ function hasPinnedAlias(args: readonly string[], alias: string): boolean {
 
 /** Own one verified entry process from ready through upload, finalize and shutdown. */
 export async function runPreparedBootstrap(input: PreparedBootstrapInput): Promise<PreparedBundleResult> {
+	throwIfAborted(input?.signal);
 	if (!HOST_ID.test(input?.hostId) || !Number.isSafeInteger(input.generation) || input.generation < 0 || !NONCE.test(input.nonce) || !SHA256.test(input.expectedBundleSha256) || typeof input.launcher?.start !== "function") throw new Error("BOOTSTRAP_INPUT_INVALID");
 	const target = input.target ?? "helper";
 	// 只有 helper target 有一个仓库内的权威 bundle 身份；扩展快照的 sha 由调用方按实际文件算出。
@@ -137,7 +162,11 @@ export async function runPreparedBootstrap(input: PreparedBootstrapInput): Promi
 	const session = await input.launcher.start({ hostId: input.hostId, generation: input.generation, invocation: input.sshConnection, stdin: true, timeoutMs: SESSION_TIMEOUT_MS, maxOutputBytes: 64 * 1024, maxLineBytes: 4096 });
 	let confirmed = false;
 	try {
-		const ready = await awaitBootstrapReady(session, { bundleSha256: input.expectedBundleSha256, nonce: input.nonce, target });
+		// A cancel that landed while the entry was spawning must not wait for its first frame.
+		throwIfAborted(input.signal);
+		const ready = await awaitBootstrapReady(session, { bundleSha256: input.expectedBundleSha256, nonce: input.nonce, target }, input.signal);
+		// Re-check before the deployment half starts: a cancel after ready must not start an upload.
+		throwIfAborted(input.signal);
 		const result = await deploy(session, ready);
 		confirmed = true;
 		return result;
@@ -159,14 +188,18 @@ export async function runPreparedBootstrap(input: PreparedBootstrapInput): Promi
  * probed in PATH order and the first one that satisfies the contract's version gate wins. `sentinel` is
  * supplied by the caller (a local random value) so the answer can be told apart from shell init output.
  */
-export async function resolveRemoteNodeExecutable(input: { userDataDir: string; hostId: string; client: SshClientRuntime; sentinel: string }): Promise<{ nodePath: string; version: string; probed: number }> {
+export async function resolveRemoteNodeExecutable(input: { userDataDir: string; hostId: string; client: SshClientRuntime; sentinel: string; signal?: AbortSignal }): Promise<{ nodePath: string; version: string; probed: number }> {
+	throwIfAborted(input.signal);
 	const pathInvocation = await buildPinnedSshInvocation(input.userDataDir, input.hostId, "ssh-batch", { client: input.client, remoteCommand: buildLoginShellPathCommand(input.sentinel) });
+	throwIfAborted(input.signal);
 	let pathResult: SshCommandResult;
 	try {
-		pathResult = await input.client.run(pathInvocation.executable, pathInvocation.args);
-	} catch {
+		pathResult = await input.client.run(pathInvocation.executable, pathInvocation.args, { signal: input.signal });
+	} catch (error) {
+		throwIfAborted(input.signal);
 		throw new Error("REMOTE_NODE_SHELL_PROBE_FAILED");
 	}
+	throwIfAborted(input.signal);
 	if (pathResult.exitCode !== 0) throw new Error("REMOTE_NODE_SHELL_PROBE_FAILED");
 	// Throws REMOTE_NODE_SHELL_PATH_UNREADABLE when the sentinel is missing or duplicated. It must not
 	// fall back to the non-interactive PATH: that fallback is exactly how an unusable node got admitted.
@@ -175,15 +208,21 @@ export async function resolveRemoteNodeExecutable(input: { userDataDir: string; 
 	let probed = 0;
 	let lastVersion = "";
 	for (const candidate of candidates.slice(0, MAX_NODE_CANDIDATES)) {
+		// Every candidate is another round trip, so a cancel has to be honoured between probes and never
+		// spent on the remaining PATH candidates.
+		throwIfAborted(input.signal);
 		const versionCommand = buildRemoteNodeVersionCommand(candidate);
 		const invocation = await buildPinnedSshInvocation(input.userDataDir, input.hostId, "ssh-batch", { client: input.client, remoteCommand: versionCommand });
+		throwIfAborted(input.signal);
 		let result: SshCommandResult;
 		probed += 1;
 		try {
-			result = await input.client.run(invocation.executable, invocation.args);
+			result = await input.client.run(invocation.executable, invocation.args, { signal: input.signal });
 		} catch {
+			throwIfAborted(input.signal);
 			continue; // A candidate that cannot even be executed is not the answer; try the next one.
 		}
+		throwIfAborted(input.signal);
 		if (result.exitCode !== 0) continue;
 		try {
 			assertSupportedRemoteNodeVersion(result.stdout);
@@ -230,20 +269,25 @@ async function sweepDeployedBundles(input: { userDataDir: string; hostId: string
 }
 
 /** Re-preflight both commands against the persisted pin, then run the frozen one-file bootstrap. */
-export async function bootstrapPinnedHost(input: { userDataDir: string; hostId: string; generation: number; nonce: string; nodePath: string; client: SshClientRuntime; launcher: SshProcessLauncher }): Promise<PreparedBundleResult> {
+export async function bootstrapPinnedHost(input: { userDataDir: string; hostId: string; generation: number; nonce: string; nodePath: string; client: SshClientRuntime; launcher: SshProcessLauncher; signal?: AbortSignal }): Promise<PreparedBundleResult> {
+	throwIfAborted(input.signal);
 	const manifest = frozenHelperBundleManifest();
 	const versionCommand = buildRemoteNodeVersionCommand(input.nodePath);
 	const versionInvocation = await buildPinnedSshInvocation(input.userDataDir, input.hostId, "ssh-batch", { client: input.client, remoteCommand: versionCommand });
+	throwIfAborted(input.signal);
 	let nodeVersion: SshCommandResult;
 	try {
-		nodeVersion = await input.client.run(versionInvocation.executable, versionInvocation.args);
-	} catch {
+		nodeVersion = await input.client.run(versionInvocation.executable, versionInvocation.args, { signal: input.signal });
+	} catch (error) {
+		throwIfAborted(input.signal);
 		throw new Error("REMOTE_NODE_PROBE_FAILED");
 	}
+	throwIfAborted(input.signal);
 	if (nodeVersion.exitCode !== 0) throw new Error("REMOTE_NODE_PROBE_FAILED");
 	assertSupportedRemoteNodeVersion(nodeVersion.stdout);
 	const sshConnection = await buildPinnedSshInvocation(input.userDataDir, input.hostId, "ssh-batch", { client: input.client, bootstrap: { nodeExecutable: input.nodePath, protocolVersion: REMOTE_BOOTSTRAP_PROTOCOL_VERSION, bundleSha256: manifest.bundleSha256, nonce: input.nonce, target: "helper" } });
 	const scpConnection = await buildPinnedSshInvocation(input.userDataDir, input.hostId, "scp", { client: input.client });
+	throwIfAborted(input.signal);
 	const deployed = await runPreparedBootstrap({
 		hostId: input.hostId,
 		generation: input.generation,
@@ -253,9 +297,11 @@ export async function bootstrapPinnedHost(input: { userDataDir: string; hostId: 
 		sshConnection,
 		scpConnection,
 		launcher: input.launcher,
-		deploy: (session, ready) => deployFrozenHelperBundle({ connection: scpConnection, ready, launcher: input.launcher, session, hostId: input.hostId, generation: input.generation }),
+		...(input.signal === undefined ? {} : { signal: input.signal }),
+		deploy: (session, ready) => deployFrozenHelperBundle({ connection: scpConnection, ready, launcher: input.launcher, session, hostId: input.hostId, generation: input.generation, ...(input.signal === undefined ? {} : { signal: input.signal }) }),
 	});
 	// 只在**已确认激活**之后清理（plan §4.2「清理与激活判据」；F2）。sweep 失败不影响本次部署的结果。
-	await sweepDeployedBundles({ userDataDir: input.userDataDir, hostId: input.hostId, client: input.client, nodePath: input.nodePath, deployRoot: deployed.deployRoot, activeBundleSha256: deployed.bundleSha256 });
+	// 取消发生在激活之后时部署已成立：清理只是回收，不再为一个已取消的 attempt 多跑一轮远端命令。
+	if (input.signal?.aborted !== true) await sweepDeployedBundles({ userDataDir: input.userDataDir, hostId: input.hostId, client: input.client, nodePath: input.nodePath, deployRoot: deployed.deployRoot, activeBundleSha256: deployed.bundleSha256 });
 	return deployed;
 }

@@ -224,15 +224,23 @@ function fakeRemote(tree, options = {}) {
 					inFlight -= 1;
 				}
 			}
-			if (method === "fs.stat") {
-				if (typeof options.statOverride === "function") {
-					const custom = options.statOverride(params);
-					if (custom !== undefined) return custom;
+			if (method === "fs.stat" || method === "fs.statMany") {
+				const paths = method === "fs.stat" ? [params.path] : params.paths;
+				const described = [];
+				for (const path of paths) {
+					if (typeof options.statOverride === "function") {
+						const custom = options.statOverride({ path });
+						if (custom !== undefined) {
+							described.push({ path, kind: custom.kind, bytes: custom.bytes, mtimeMs: custom.mtimeMs });
+							continue;
+						}
+					}
+					const node = resolveRemoteNode(tree, path);
+					if (node === undefined) throw Object.assign(new Error("PATH_NOT_FOUND"), { code: "PATH_NOT_FOUND" });
+					described.push(node.kind === "file" ? { path, kind: "file", bytes: node.bytes, mtimeMs: node.mtimeMs } : { path, kind: node.kind, bytes: 0, mtimeMs: 1 });
 				}
-				const node = resolveRemoteNode(tree, params.path);
-				if (node === undefined) throw Object.assign(new Error("PATH_NOT_FOUND"), { code: "PATH_NOT_FOUND" });
-				if (node.kind === "file") return { kind: "file", bytes: node.bytes, mtimeMs: node.mtimeMs };
-				return { kind: node.kind, bytes: 0, mtimeMs: 1 };
+				// The batch answers in request order, exactly like N single calls would have.
+				return method === "fs.stat" ? { kind: described[0].kind, bytes: described[0].bytes, mtimeMs: described[0].mtimeMs } : { entries: described };
 			}
 			if (method === "fs.read") {
 				const node = resolveRemoteNode(tree, params.path);
