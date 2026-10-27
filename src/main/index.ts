@@ -63,7 +63,7 @@ import { readDataEnvDecision, validateStartupDataEnv, writeDataEnvDecision } fro
 import { registerDataEnvIpc } from "./ipc/dataEnvIpc";
 import { ChannelSwitchService } from "./update/ChannelSwitchService";
 import { registerChannelSwitchIpc } from "./ipc/channelSwitchIpc";
-import { resolveUpdateChannel } from "./update/channelIdentity";
+import { isDevChannelBuild, resolveUpdateChannel } from "./update/channelIdentity";
 import { resolveBuildOrigin } from "./buildIdentity";
 import { APP_DEEP_LINK_SCHEME } from "./utils/deepLinkScheme";
 import { APP_DISPLAY_NAME, initializeAppBrand } from "./utils/appBrand";
@@ -3204,12 +3204,13 @@ function createCompletionHelperService(namespace: "enhance" | "agent-invoke" | "
 }
 
 function registerIpc() {
-	// 集成分支策略（2026-10-19）：远端能力在本分支**恒开**，不再区分打包/开发态，也不再读
-	// PIDECK_REMOTE_EXPERIMENTAL —— 目标是任何构建（npm run dev / pack:dev / dist）都能直接验收远端，
-	// 发现的问题由本分支直接修。历史上这里是 !app.isPackaged && env === "1"；
-	// 正式发布前若要收回，只改这一行即可（远端通道在没有启用时本就会统一返回 REMOTE_FEATURE_DISABLED，
-	// 所以开关只是策略位，不牵扯装配）。
-	const remoteExperimentEnabled = true;
+	// 通道策略（2026-10-27）：远端能力**只在 dev 通道提供**，正式包不启用、界面也不暴露入口。
+	// 判据复用 isDevChannelBuild()（未打包运行 / dev 通道安装包为 true，release 产物为 false），
+	// 与更新通道同源，不再另外维护第二份打包/环境变量表达式（历史上这里是
+	// `!app.isPackaged && env === "1"`，后来一度写死 true 便于集成分支验收）。
+	// 关掉时开关只是策略位：远端 IPC 本就统一返回 REMOTE_FEATURE_DISABLED；
+	// 渲染层按同一判据（app:get-channel 的 devBuild）连入口都不渲染。
+	const remoteExperimentEnabled = isDevChannelBuild();
 	let remoteHostService: import("./remote/RemoteHostConnectionService").RemoteHostConnectionService | undefined;
 	/**
 	 * 已解析的 OpenSSH 客户端（SSH 路由校验与每个 ssh/scp 子进程共用同一份）。

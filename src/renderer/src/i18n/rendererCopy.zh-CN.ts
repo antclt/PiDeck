@@ -6875,7 +6875,7 @@ export const zhCN = {
 	"sidebar.remoteEnroll.resolve": "解析并确认",
 	"sidebar.remoteEnroll.loading": "正在读取主机列表…",
 	"sidebar.remoteEnroll.loadFailed": "无法读取主机列表：{code}",
-	"sidebar.remoteEnroll.featureDisabled": "远端功能未启用：开发构建需要设置 PIDECK_REMOTE_EXPERIMENTAL=1。",
+	"sidebar.remoteEnroll.featureDisabled": "远端功能未启用：当前构建不提供远端开发能力。",
 	"sidebar.remoteEnroll.needsRepair": "远端主机存储需要修复，请先在设备设置里完成修复。",
 	"sidebar.remoteEnroll.noHost": "没有已验证且未禁用的主机。先在设备设置里添加主机并完成指纹确认。",
 	"sidebar.remoteEnroll.openDeviceSettings": "去设备设置",

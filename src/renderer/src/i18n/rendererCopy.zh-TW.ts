@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 49941a9645b2b60b3149d3854ea6733eddc7c791f78febd19b8905d53c95ce31（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 8fc36b486f4f78dfe51aa3892898f14b43fb13efb4e48ba35436c67352b23626（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -6882,7 +6882,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"sidebar.remoteEnroll.resolve": "解析並確認",
 	"sidebar.remoteEnroll.loading": "正在讀取主機列表…",
 	"sidebar.remoteEnroll.loadFailed": "無法讀取主機列表：{code}",
-	"sidebar.remoteEnroll.featureDisabled": "遠端功能未啟用：開發構建需要設定 PIDECK_REMOTE_EXPERIMENTAL=1。",
+	"sidebar.remoteEnroll.featureDisabled": "遠端功能未啟用：當前構建不提供遠端開發能力。",
 	"sidebar.remoteEnroll.needsRepair": "遠端主機儲存需要修復，請先在裝置設定裡完成修復。",
 	"sidebar.remoteEnroll.noHost": "沒有已驗證且未停用的主機。先在裝置設定裡新增主機並完成指紋確認。",
 	"sidebar.remoteEnroll.openDeviceSettings": "去裝置設定",

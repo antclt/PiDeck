@@ -11,7 +11,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.9.7-blue)
+![Version](https://img.shields.io/badge/version-0.9.8-blue)
 
 国内 AtomGit 托管：https://atomgit.com/ayuayue/PiDeck
 <!-- 预留 AtomGit G-Star 徽章位（替换占位链接后启用）
@@ -101,16 +101,21 @@
 
 ## 📋 更新日志
 
-> **最新版本 v0.9.7**（2026-10-26）
+> **最新版本 v0.9.8**（2026-10-27）
 
-### v0.9.7 更新亮点
-- 🚀 **思考强度选择器重做：ZCode 同款渐变强度条**
-- 🚀 **侧栏分组标题栏冻结开关**
-- 🚀 **Web 端：侧栏会话列表显式分页**
-- ✨ **界面对齐 ZCode 的一轮视觉收口**
-- ✨ **Web 端：/api/state 条件请求**
-- ✨ **纯图片发送被静默注入英文提示词 (#404)**
-- ✨ **OpenCode 2.x 会话导入不识别 (#410)**
+### v0.9.8 更新亮点
+- 🚀 **ACP 会话归档与会话内检索 (#413 #415)**
+- 🚀 **ACP 回合超时可按需调大 (#411)**
+- 🚀 **状态条显示真实重试进度与本轮事实**
+- 🚀 **图片预览支持缩放**
+- 🚀 **MCP / 技能导入支持跨页全选**
+- 🚀 **轨迹抽屉：显示供应商与模型，并预热过程轨**
+- 🚀 **模型配置导入恢复，并与本机工具发现合成双源 (#419)**
+- 🚀 **本机构建显示「本地构建」徽章**
+- ✨ **思考强度条按进度显色**
+- ✨ **抽屉开关挪到活动栏左端**
+- ✨ **Git 面板行规格对齐文件抽屉**
+- ✨ **输入框与引用 chip 收口**
 
 [查看完整更新日志 →](CHANGELOG.zh-CN.md)
 

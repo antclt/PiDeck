@@ -33,7 +33,10 @@ test("thinking 块不进引用正文（回归：思考链被当成正文）", ()
 
 test("图片与工具结果块同样不入选，字符串 content 原样返回", () => {
 	const { extractReferenceMessageText } = contextModule();
-	const image = extractReferenceMessageText([{ type: "image", data: "AAA", mimeType: "image/png" }, { type: "text", text: "看图" }]);
+	const image = extractReferenceMessageText([
+		{ type: "image", data: "AAA", mimeType: "image/png" },
+		{ type: "text", text: "看图" },
+	]);
 	assert.equal(image, "看图");
 	assert.equal(extractReferenceMessageText("纯文本消息"), "纯文本消息");
 	assert.equal(extractReferenceMessageText(null), "");
@@ -108,11 +111,7 @@ test("readMessages 端到端：JSONL 里的 thinking 不进消息正文", async 
 
 		const messages = await new SessionScanner().readMessages(sessionPath);
 		// 跨 vm 加载：sandbox 里的数组/对象原型与宿主不同，比较前先摊成宿主值。
-		assert.deepEqual(
-			[...messages.map((message) => String(message.role))],
-			["user", "assistant"],
-			"只回传 user/assistant（toolResult 不入引用）",
-		);
+		assert.deepEqual([...messages.map((message) => String(message.role))], ["user", "assistant"], "只回传 user/assistant（toolResult 不入引用）");
 		assert.ok(!messages.some((message) => String(message.content).includes("SECRET-THINKING")), "thinking 不得出现在引用消息里");
 		assert.ok(String(messages[1]?.content).includes("助手回答"));
 	} finally {

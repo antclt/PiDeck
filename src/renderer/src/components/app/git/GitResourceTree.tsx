@@ -327,14 +327,7 @@ export function compareStatusLetter(status: GitFileStatus): string {
 export function FileIcon({ name, className }: { name: string; className?: string }) {
 	try {
 		const { svg, colorName } = getFileIconSeti(name);
-		return (
-			<span
-				aria-hidden="true"
-				className={cn("mr-1.5 inline-flex size-5 shrink-0 items-center justify-center [&_svg]:size-full [&_svg]:fill-current", className)}
-				style={{ color: getFileIconColor(colorName) }}
-				dangerouslySetInnerHTML={{ __html: svg }}
-			/>
-		);
+		return <span aria-hidden="true" className={cn("mr-1.5 inline-flex size-5 shrink-0 items-center justify-center [&_svg]:size-full [&_svg]:fill-current", className)} style={{ color: getFileIconColor(colorName) }} dangerouslySetInnerHTML={{ __html: svg }} />;
 	} catch {
 		// 未知类型兜底：FileText 线性图标（16px，与 Seti 图标同槽位）而非空透明方块——
 		// 空方块在非代码文件密集的目录里像图标加载失败。

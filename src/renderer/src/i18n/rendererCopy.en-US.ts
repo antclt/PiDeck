@@ -6894,7 +6894,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"sidebar.remoteEnroll.resolve": "Resolve and confirm",
 	"sidebar.remoteEnroll.loading": "Reading the host list…",
 	"sidebar.remoteEnroll.loadFailed": "Could not read the host list: {code}",
-	"sidebar.remoteEnroll.featureDisabled": "Remote development is not enabled: dev builds need PIDECK_REMOTE_EXPERIMENTAL=1.",
+	"sidebar.remoteEnroll.featureDisabled": "Remote development is not enabled in this build.",
 	"sidebar.remoteEnroll.needsRepair": "The remote host store needs repair. Finish the repair in device settings first.",
 	"sidebar.remoteEnroll.noHost": "No verified, enabled host yet. Add a host and confirm its fingerprint in device settings first.",
 	"sidebar.remoteEnroll.openDeviceSettings": "Open device settings",

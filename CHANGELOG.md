@@ -1,3 +1,41 @@
+## v0.9.8 (2026-10-27)
+
+This release completes the session pipeline for ACP external agents (archiving, in-session search, projection segmentation and configurable timeouts), rebuilds the session status bar and the image preview so real progress and fine detail are actually legible, and clears a round of UI regressions across the Git panel, the sidebar and the composer.
+
+### 🚀 New Features
+- **ACP session archive and in-session search (#413 #415)** — Message projections for ACP sessions are now persisted per session under `userData/acp-sessions/` (up to 2000 entries / 8MiB, written to a temp name then renamed), so they survive a restart; in-session find now covers ACP sessions too. The same pass fixes a timing bug where text split by a tool card was merged into one block — the old segment closes into the tool card and the new one starts fresh, while still emitting the turn's terminal marker from a single place.
+- **Configurable ACP turn timeouts (#411)** — New `acpPromptStallTimeoutMs` (silent-stall detection, 90s by default) and `acpPromptTurnTimeoutMs` (hard per-turn cap, 10 minutes by default). Long-running commands with a tool call in flight are no longer killed by the stall watchdog, and changes take effect on the next turn without a restart.
+- **Status bar shows real retry progress and the current turn's facts** — Upstream retries display "retrying 2/3" with a countdown, and the turn's tool steps, context pressure (surfaced at ≥80%) and turn stopwatch sit right in the status bar.
+- **Image preview supports zoom** — The wheel zooms anchored at the cursor up to 800%, where 100% fits the whole image inside the window; buttons step through 25% increments, drag and arrow keys pan, and a single click on the pill returns to fit.
+- **MCP / skill import selects across pages** — Select all / clear all, a "selected N / importable M" count and 20-per-page paging mean picking across pages no longer has to be done one row at a time.
+- **Trajectory drawer: provider and model, with a prewarmed process track** — The latest reply's metrics name its provider and model, and the process track is cached ahead of time so opening the drawer shows the record immediately instead of waiting for a first load.
+- **Model config import restored, merged with local tool discovery (#419)** — Paste / choose file (Base64, 4MB limit, encryption password) and local tool discovery now sit side by side as two tabs, so migrating a config no longer has a single path.
+- **Local builds carry a "local build" badge** — A build whose version comes straight from `package.json` now looks different from a published release, so "up to date" is no longer mistaken for an official build.
+
+### ✨ Improvements
+- **Thinking-intensity bar colours follow progress** — Unselected segments use a neutral grey, the filled segment is a gradient computed across the whole track, and level ticks sit on the rail itself; dragging only edits a draft that is committed when the popover closes, so trying levels back to back can't commit by accident.
+- **Drawer toggle moved to the left end of the activity bar** — It now hugs the drawer's left edge instead of crowding the other actions on the right.
+- **Git panel row metrics aligned with the file drawer** — Changed-file tree rows share the file drawer's row height and indentation, so the two panels are no longer mismatched; branch filter chips no longer overflow the title bar either.
+- **Composer and reference chips tidied** — The image remove button narrows into a 20px dot, and directory reference chips keep their trailing slash so the last character no longer looks cut off.
+- **Session references are cheaper** — Reference content no longer carries the thinking chain and only keeps the most recent messages within a budget, so referencing a long session no longer dumps a whole reasoning block into context.
+
+### 🐛 Fixes
+- **Sidebar "Projects" group header freeze had no effect (#420)** — Turning it on left the header scrolling away with the list; headers now stick per group.
+- **Local path links with spaces or a hand-typed drive letter weren't clickable (#421 #422)** — Paths containing spaces were only rendered as text, while absolute paths with a hand-typed drive letter were stripped whole by link sanitising; both are now recognised as files and open normally.
+- **Git panel showed the previous project's repository after switching projects** — Panel requests no longer reuse the previous project's repository target and snap back as soon as the project changes.
+- **Self-incrementing effect loop in the repository scope (React #185)** — Repository scope and branch state writes keep stable references, so they no longer trigger a render loop.
+- **End-of-turn file chips overflowed their row** — File chips after a turn no longer spread across the full row and push out of the panel.
+- **ACP sessions falsely showed the "vision bridge converting" animation on image messages (#417)** — The vision bridge is a pi extension and does not run under ACP, so the renderer no longer shows a conversion animation that isn't happening.
+- **ACP tool rows repeated their title and arguments** — A tool row no longer glues the agent title and the arguments together twice.
+- **Process group headers repeated the running command** — Headers show only the target, and expanding no longer repeats the command line.
+- **Frame boundaries stayed misaligned after a pi RPC line-buffer overflow** — Overflowing lines now realign to the next newline instead of corrupting every frame that follows.
+- **Prompt-enhance sidecar picked the wrong proxy** — The model list now decides whether a proxy is used, and the sidecar is rebuilt when its startup fingerprint changes.
+- **Terminal WebGL renderer assembly timing** — It is now attached after `open()`, and silently falls back to the DOM renderer when WebGL2 is unavailable instead of rendering a black screen.
+
+### 🙏 Thanks
+
+Thanks to **lamugu** for fixing the sidebar "Projects" group header freeze (#420), local path links with spaces (#421) and hand-typed drive-letter path links (#422); to **juzijun233** for restoring model config import and merging it with local tool discovery (#419); and to **hetingyi** for fixing the false vision-bridge animation on ACP image messages (#417) 🎉
+
 ## v0.9.7 (2026-10-26)
 
 The through-line of this release is a visual consolidation aligned with ZCode: the session page settles into a three-layer surface model with typography, shadows and control backgrounds aligned item by item; the thinking-intensity picker is rebuilt as a gradient intensity bar; and the Web gains explicit sidebar paging plus conditional requests, keeping large workspaces light.

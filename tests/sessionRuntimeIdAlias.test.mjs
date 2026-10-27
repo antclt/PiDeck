@@ -83,7 +83,9 @@ async function withAliasCatalog(run) {
 		await catalog.load();
 		await run({ catalog, filePath });
 	} finally {
-		await rm(dir, { recursive: true, force: true });
+		// Windows 上 catalog 写队列/临时备份可能在 rm 瞬间还在目录里，直接 rm 会 ENOTEMPTY；
+		// 全量并行跑测试时更容易撞上，重试收敛即可。
+		await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 });
 	}
 }
 
