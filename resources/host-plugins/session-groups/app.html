@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>会话分组</title>
+		<link rel="stylesheet" href="styles.css" />
+	</head>
+	<body>
+		<header class="topbar">
+			<div class="topbar-info">
+				<h1 id="project-name" class="project-name"></h1>
+				<span id="project-count" class="project-count"></span>
+			</div>
+			<div class="topbar-controls">
+				<button id="btn-toggle-all" class="btn" type="button"></button>
+				<button id="btn-new" class="btn primary" type="button"></button>
+			</div>
+		</header>
+
+		<div class="search-row">
+			<input id="search-input" class="text-input" type="text" />
+			<button id="search-clear" class="icon-btn" type="button" hidden>×</button>
+		</div>
+
+		<div id="new-group-row" class="new-group-row" hidden>
+			<input id="new-group-input" class="text-input" type="text" maxlength="80" />
+			<button id="new-group-ok" class="btn primary" type="button"></button>
+			<button id="new-group-cancel" class="btn" type="button"></button>
+		</div>
+
+		<div id="status" class="status" hidden></div>
+
+		<main id="groups" class="groups"></main>
+
+		<div id="overlay" class="overlay" hidden>
+			<div class="modal" role="dialog" aria-modal="true">
+				<div class="modal-head">
+					<span id="modal-title" class="modal-title"></span>
+					<button id="modal-close" class="icon-btn" type="button" aria-label="close">×</button>
+				</div>
+				<input id="modal-search" class="text-input" type="text" />
+				<div id="modal-list" class="modal-list"></div>
+				<div class="modal-foot">
+					<span id="modal-hint" class="modal-hint"></span>
+					<button id="modal-cancel" class="btn" type="button"></button>
+					<button id="modal-save" class="btn primary" type="button"></button>
+				</div>
+			</div>
+		</div>
+
+		<div id="info-overlay" class="overlay" hidden>
+			<div class="modal info-modal" role="dialog" aria-modal="true">
+				<div class="modal-head">
+					<span id="info-title" class="modal-title"></span>
+					<button id="info-close" class="icon-btn" type="button" aria-label="close">×</button>
+				</div>
+				<div id="info-body" class="info-body"></div>
+			</div>
+		</div>
+
+		<script type="module" src="app.js"></script>
+	</body>
+</html>

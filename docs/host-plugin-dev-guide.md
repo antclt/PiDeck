@@ -285,6 +285,8 @@ await pideck.workbench.openExternal("https://github.com/ayuayue/PiDeck/blob/main
 - `navigate` 只对**当前项目的可读会话**生效，否则 `session-not-authorized`；它由 PiDeck 主界面执行，插件页不做任何跳转。
 - `openExternal` 只接受 **https** 且不能带账号密码；系统浏览器打开。带 `http:`、`file:`、`javascript:`、`pideck-plugin:` 一律 `invalid-request`。
 
+> 5.2 + 5.3 + 5.4 合起来的完整示例：`resources/host-plugins/session-groups/`（列会话、分组持久化到 `storage`、点击经 `navigate` 跳转），随 PiDeck 内置；它也是 `page` 面板形态的参考实现。
+
 ### 5.5 network：第三方 API 与已启动本地服务
 
 **先声明、再授权、最后请求**。网络权限与「用系统浏览器打开链接」是两回事：`openExternal` 不返回接口数据，也不会授予网络权限。

@@ -1,0 +1,24 @@
+{
+	"schemaVersion": 1,
+	"apiVersion": 1,
+	"id": "session-groups",
+	"name": "会话分组",
+	"version": "1.6.0",
+	"description": "把当前项目的会话手动整理成分组：新建/重命名/删除分组，勾选会话归组，点击跳转打开，会话删除后自动清理失效引用。",
+	"permissions": [
+		"sessions.read",
+		"workbench.navigate"
+	],
+	"contributes": {
+		"panels": [
+			{
+				"id": "main",
+				"title": "会话分组",
+				"entry": "app.html",
+				"icon": "layers",
+				"presentation": "page"
+			}
+		],
+		"commands": []
+	}
+}

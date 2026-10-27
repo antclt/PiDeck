@@ -125,6 +125,20 @@
 - 安装：设置 → PiDeck 插件 →「从文件安装…」收 `.pideck-plugin` 归档，「从文件夹安装…」收已解压的目录包；两条路径都：路径只来自主进程对话框（渲染层不传路径）→ 拷/写到隐藏 temp 目录（`stageHostPluginFile` 逐级建目录，支持 `assets/app.html` 这类嵌套资产）→ 走 `readHostPluginPackage` 全量验证 → 原子换入，失败自动清理。目录来源额外跳过 `.git`/`node_modules` 整棵；路径形状不合法（空格/中文名等）或超限的文件被跳过而不是造成整包失败，其余文件照搬到落位目录。
 - 替换语义：启用中的插件拒绝替换（`plugin-in-use`，先禁用再装）；禁用状态重装同 id 允许，字节一致则指纹不变，内容变化则旧授权失效。
 
+## 内置示例（`resources/host-plugins/`）
+
+- 目录：`resources/host-plugins/<id>/`（目录名必须等于 `manifest.id`，落位按目录名走），`extraResources` → `<resources>/host-plugins`，开发态取 `appPath/resources/host-plugins`（`src/main/plugins/builtinHostPlugins.ts`）；`seedBuiltin()` 在 `load()` 前落位到 `userData/host-plugins/<id>/`。目录缺失只少一个面板，内置插件是可选示例而不是功能依赖。
+- 当前两个内置插件：
+
+| id | 演示了什么 | 权限 | 面板 |
+| --- | --- | --- | --- |
+| `billion-context` | 本地服务点名与启停（适配器只认 service id） | `service.local` | `popover` |
+| `session-groups` | 只读会话目录 + 工作台跳转 + 私有 `storage` 持久化；首个 `page` 形态完整示例（会话分组，上游 [Lamb-Yang/pideck-plugin](https://github.com/Lamb-Yang/pideck-plugin) 的随包副本，见该目录 README 的同步说明） | `sessions.read`、`workbench.navigate` | `page` |
+
+- `session-groups` 的分组关系只写插件自己的 `storage`（键 `grp.<projectId>`，按项目隔离），不写会话文件、不联网；它没有网络/服务权限。
+- 内置插件的能力面在 `tests/builtinHostPlugins.test.mjs` 的登记表里锁定：目录与登记表必须一一对应，权限/面板形态变化会让测试先红——因此把上游新版复制进来（尤其上游新增 `network.*` / `service.local`）时必须先审一遍数据外发与命令执行风险、改登记表，再随包。
+- 落位、升级、卸载语义与「本地服务」一节同一套：落位 ≠ 授权（首次仍是 `requiresConsent`），只有内容仍等于上次落位指纹才随新版替换并顺延授权，手改过的副本永不被覆盖；`seeded` 里的 id 拒绝卸载（`plugin-builtin`，要停用请用禁用）。
+
 ## pi-context 本地适配
 
 `scripts/convert-pi-context-host-plugin.mjs <pi-context 目录> <输出目录>` 把本地 pi-context 的 viewer 一次性转换为宿主插件：
@@ -137,5 +151,5 @@
 ## 开发与验证
 
 - 网络回归：`node --test tests/hostPluginNetwork.test.mjs tests/hostPluginNetworkTransport.test.mjs tests/hostPluginNetworkUi.test.mjs tests/hostPluginNetworkDemo.test.mjs`（策略/撤权、真实 hop 的替身 socket、授权展示、静态 demo；不启动服务或连接真实接口）。
-- 回归测试：`node --test tests/hostPlugins.test.mjs`（manifest/授权/隔离视图/预算/跨项目 fork/撤销提交）、`node --test tests/hostPluginScaffold.test.mjs`（脚手架产物与新增 API 面）、`node --test tests/hostPluginDirectoryInstall.test.mjs`（目录安装）、`node --test tests/hostPluginArchive.test.mjs`（归档）、`node --test tests/piContextHostAdapter.test.mjs`（转换器）。
+- 回归测试：`node --test tests/hostPlugins.test.mjs`（manifest/授权/隔离视图/预算/跨项目 fork/撤销提交）、`node --test tests/hostPluginScaffold.test.mjs`（脚手架产物与新增 API 面）、`node --test tests/hostPluginDirectoryInstall.test.mjs`（目录安装）、`node --test tests/hostPluginArchive.test.mjs`（归档）、`node --test tests/builtinHostPlugins.test.mjs`（随包内置插件的出厂契约与能力面登记）、`node --test tests/piContextHostAdapter.test.mjs`（转换器）。
 - 主进程模块在 `src/main/plugins/`（含 `hostPluginScaffold.ts`）；IPC 入口 `src/main/ipc/hostPluginsIpc.ts`；共享契约 `src/shared/types/hostPlugin.ts`；preload 白名单 `src/preload/hostPlugin.ts`。面向插件作者的完整文档是 `docs/host-plugin-dev-guide.md`（同一份文件同步上官网 `/guide/host-plugins`）。
