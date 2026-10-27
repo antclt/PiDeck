@@ -7,7 +7,7 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AgentRuntimeState, CreateAnonymousSessionInput, CreateSessionDraftInput, ImageContent, SendSessionPromptInput, SessionRuntimeTarget, SessionUiResponseInput, UpdateSessionRecordInput } from "../../shared/types";
-import { readBoundedFile } from "./WebHttpResponders";
+import { readBoundedFile, WEB_CORS_HEADERS } from "./WebHttpResponders";
 import { ifNoneMatchHits, stateEtag } from "./WebStateEtag";
 import type { WebServiceDependencies } from "./WebServiceManager";
 
@@ -93,7 +93,8 @@ export class WebApiRoutes {
 			// 未变化时回 304，客户端保留原状态——空闲流量从每 10s 228KB 降到几十字节。
 			const etag = stateEtag(state);
 			if (ifNoneMatchHits(request.headers["if-none-match"], etag)) {
-				response.writeHead(304, { etag, "cache-control": "no-store" });
+				// 304 也要带 CORS：缓存命中时浏览器仍按本次响应做跨域校验（#435 同类缺口）。
+				response.writeHead(304, { etag, "cache-control": "no-store", ...WEB_CORS_HEADERS });
 				response.end();
 				return true;
 			}
@@ -389,6 +390,7 @@ export class WebApiRoutes {
 					"content-type": "text/html; charset=utf-8",
 					"content-disposition": `attachment; filename="pideck-session-${safeTitle}.html"`,
 					"cache-control": "no-store",
+					...WEB_CORS_HEADERS,
 				});
 				response.end(html);
 			} catch (error) {
