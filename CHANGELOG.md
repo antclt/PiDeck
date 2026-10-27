@@ -36,6 +36,8 @@ This release completes the session pipeline for ACP external agents (archiving, 
 
 Thanks to **lamugu** for fixing the sidebar "Projects" group header freeze (#420), local path links with spaces (#421) and hand-typed drive-letter path links (#422); to **juzijun233** for restoring model config import and merging it with local tool discovery (#419); and to **hetingyi** for fixing the false vision-bridge animation on ACP image messages (#417) 🎉
 
+Special thanks to **罪**, **橙子** and **微时** for providing the model service used in our software development 🎉
+
 ## v0.9.7 (2026-10-26)
 
 The through-line of this release is a visual consolidation aligned with ZCode: the session page settles into a three-layer surface model with typography, shadows and control backgrounds aligned item by item; the thinking-intensity picker is rebuilt as a gradient intensity bar; and the Web gains explicit sidebar paging plus conditional requests, keeping large workspaces light.
