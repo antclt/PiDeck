@@ -6121,10 +6121,7 @@ export class AgentManager {
 		const extractedStopReason = partialMessage && typeof partialMessage === "object" ? (nonEmptyString(asRecord(partialMessage)?.stopReason) ?? "") : "";
 		// 与历史投影同源归一：被打断的纯文本回复 pi 记 toolUse 但无 toolCall 块，按最终回复处理
 		// （否则渲染层把它当中间回复折进「执行过程」，整段回复在空闲后仍不可见）。
-		const finalStopReason = normalizePiStopReason(
-			extractedStopReason && extractedStopReason !== "pending" ? extractedStopReason : undefined,
-			hasPiToolCallBlock(partialMessage && typeof partialMessage === "object" ? asRecord(partialMessage)?.content : undefined),
-		);
+		const finalStopReason = normalizePiStopReason(extractedStopReason && extractedStopReason !== "pending" ? extractedStopReason : undefined, hasPiToolCallBlock(partialMessage && typeof partialMessage === "object" ? asRecord(partialMessage)?.content : undefined));
 		// 本条消息用的模型：message_end 的完整消息带 provider/model（message_start 骨架也有）。
 		// 缺省不覆盖旧值——delta 路径的消息对象可能不带这两个字段。
 		const messageRecord = partialMessage && typeof partialMessage === "object" ? asRecord(partialMessage) : undefined;
