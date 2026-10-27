@@ -14,7 +14,11 @@ import { markdownToCardElements } from "./rich-text";
 
 const OUTPUT_MAX = 15_000;
 const THINKING_MAX = 2_000;
-const TRAIL_ENTRIES_MAX = 20;
+/**
+ * 轨迹最多显示几条。卡片是对外可见的 IM 渠道（群里所有人都会看到），不是调试面板：
+ * 一次「你在吗」只有 4 条事件，原先 20 条的上限等于全露（#425）。
+ */
+const TRAIL_ENTRIES_MAX = 5;
 
 export interface RenderOptions {
 	stopHint?: string;
@@ -30,7 +34,9 @@ export function renderRunCard(state: RunState, opts: RenderOptions = {}): object
 	elements.push(renderTrail(state.trail, isRunning, locale));
 
 	// ── 2. 思考过程 ──
-	if (state.reasoning.content) {
+	// #425：showThinking 跟随 pi agent 的 hideThinkingBlock。思考过程属于内部推理，
+	// 推到 IM 群里既是噪音也是信息泄露，用户关掉后必须彻底不出现。
+	if (state.showThinking !== false && state.reasoning.content) {
 		elements.push(renderThinking(state.reasoning.content, state.reasoning.active, locale));
 	}
 
@@ -88,7 +94,8 @@ function renderTrail(trail: TrailEntry[], isRunning: boolean, locale: FeishuLoca
 		for (const e of entries) {
 			const time = fmt(e.timestamp);
 			const icon = e.status === "running" ? "🔄" : e.status === "error" ? "❌" : "✅";
-			let line = `\`${time}\` ${icon} ${e.text}`;
+			// 飞书卡片 markdown 不渲染行内代码，反引号会原样显示成 `14:49:27`（#425），所以用纯文本时间戳
+			let line = `${time} ${icon} ${e.text}`;
 			if (e.detail) line += ` — ${e.detail}`;
 			lines.push(line);
 		}

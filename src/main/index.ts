@@ -6932,6 +6932,8 @@ app
 			sessionRuntimeCoordinator,
 			feishuSessionRuntimeBindings: imSessionRuntimeBindings,
 			getCurrentLocale: currentFeishuLocale,
+			// 卡片思考过程跟随 pi 的 hideThinkingBlock（#425）：每次建状态时现读，用户改完立刻生效
+			getShowThinking: () => settingsStore.get().showThinking,
 		});
 		// 微信 iLink 桥接：与飞书同构，但登录方式是扫码，且必须等界面就绪才能展示二维码。
 		// 服务在这里建好并登记退出清理；启用状态下的实际连接由 start() 发起（fire-and-forget，

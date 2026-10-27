@@ -122,14 +122,32 @@ export class FeishuBridge {
 	/** 用户消息中检测到要做飞书文档，agent 结束后自动创建 */
 	private pendingDocRequests = new Map<string, string>();
 
-	constructor(botConfig: FeishuBotConfig, agentManager: AgentManager, getWindow: () => BrowserWindow | null, getProjects: () => LocalProject[], runtimeBindings: SessionRuntimeBindingGateway, plainAppSecret?: string, locale: FeishuLocale = "zh-CN") {
+	/** 卡片是否展示思考过程（跟随 pi agent 的 hideThinkingBlock）：用 resolver 而不是快照，用户改配置后立刻生效。 */
+	private readonly getShowThinking: () => boolean;
+
+	constructor(botConfig: FeishuBotConfig, agentManager: AgentManager, getWindow: () => BrowserWindow | null, getProjects: () => LocalProject[], runtimeBindings: SessionRuntimeBindingGateway, plainAppSecret?: string, locale: FeishuLocale = "zh-CN", getShowThinking: () => boolean = () => true) {
 		this.botConfig = botConfig;
 		this.agentManager = agentManager;
 		this.runtimeBindings = runtimeBindings;
 		this.getWindow = getWindow;
 		this.getProjects = getProjects;
 		this.locale = normalizeFeishuLocale(locale);
+		this.getShowThinking = getShowThinking;
 		this.connection = new FeishuConnection(botConfig, plainAppSecret, this.locale);
+	}
+
+	/**
+	 * 新建一次运行的状态机。showThinking 在建状态时就定下来：关闭时 reducer 连思考增量都不累积（#425）。
+	 * resolver 抛错按「显示」处理，保持与历史行为一致 —— 卡片缺一块比整轮不推要好。
+	 */
+	private newRunState(): RunState {
+		let showThinking = true;
+		try {
+			showThinking = this.getShowThinking();
+		} catch {
+			showThinking = true;
+		}
+		return createInitialState({ showThinking });
 	}
 
 	getStatus(): FeishuBridgeStatus {
@@ -773,7 +791,7 @@ export class FeishuBridge {
 		// 关闭已有流式卡片
 		const existingCard = this.streamingCards.get(agentId);
 		if (existingCard) {
-			await existingCard.flush(markInterrupted(createInitialState())).catch(() => {});
+			await existingCard.flush(markInterrupted(this.newRunState())).catch(() => {});
 			await existingCard.close().catch(() => {});
 			this.streamingCards.delete(agentId);
 			this.streamingRunStates.delete(agentId);
@@ -804,7 +822,7 @@ export class FeishuBridge {
 			finalText = finalText ? `${finalText}\n\n[附件: ${names}]` : `处理以下文件: ${names}`;
 		}
 
-		const initialState = createInitialState();
+		const initialState = this.newRunState();
 		// 卡片事件机由 pi 本地事件驱动（handleAgentEvent）：非 pi 后端没有这些事件，
 		// 既不能开卡片也不能登记缓存表，否则每轮都会留下永不清理的孤儿注册项。
 		const useStreamingCard = backend === "pi";
@@ -918,7 +936,7 @@ export class FeishuBridge {
 			}
 		} catch (e) {
 			logErr("[飞书 Bridge] Agent 运行失败:", e);
-			const errState = markError(createInitialState(), feishuT(this.locale, "agent.failed"));
+			const errState = markError(this.newRunState(), feishuT(this.locale, "agent.failed"));
 			const finalCardStream = this.streamingCards.get(agentId);
 			if (finalCardStream) {
 				await finalCardStream.flush(renderRunCard(errState, { locale: this.locale })).catch(() => {});
@@ -950,7 +968,7 @@ export class FeishuBridge {
 		}
 
 		log(`[飞书 Bridge] 回放 ${pending.length} 个缓存事件到卡片`);
-		let currentState = this.streamingRunStates.get(sessionId) ?? createInitialState();
+		let currentState = this.streamingRunStates.get(sessionId) ?? this.newRunState();
 		for (const ev of pending) {
 			const nextState = reduceFromPiEvent(currentState, ev as Record<string, unknown>, this.locale);
 			if (nextState !== currentState) {
@@ -1515,7 +1533,7 @@ export class FeishuBridge {
 		if (!binding || binding.source !== "session-mirror") return;
 		if (this.streamingCards.has(agentId)) return;
 
-		const initialState = createInitialState();
+		const initialState = this.newRunState();
 		this.streamingRunStates.set(agentId, initialState);
 		// 与 runAgent 一致：卡片创建窗口（一次网络往返）内到达的 agent 事件（含快速失败
 		// 的终态）必须缓冲，否则 handleAgentEvent 找不到 pending 直接丢弃，卡片永久停

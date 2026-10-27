@@ -55,6 +55,11 @@ export interface RunState {
 	trail: TrailEntry[];
 	/** assistant 累积输出文本 */
 	outputText: string;
+	/**
+	 * 卡片是否展示思考过程（跟随 pi agent 的 hideThinkingBlock，由 Bridge 在建状态时带入）。
+	 * false 时 reducer 直接不累积，卡片也不会渲染（#425）。
+	 */
+	showThinking?: boolean;
 }
 
 let _trailSeq = 0;
@@ -62,7 +67,7 @@ function nextTrailId(): string {
 	return `trail_${Date.now()}_${++_trailSeq}`;
 }
 
-export function createInitialState(): RunState {
+export function createInitialState(opts: { showThinking?: boolean } = {}): RunState {
 	return {
 		blocks: [],
 		reasoning: { content: "", active: false },
@@ -72,6 +77,7 @@ export function createInitialState(): RunState {
 		meta: {},
 		trail: [],
 		outputText: "",
+		showThinking: opts.showThinking !== false,
 	};
 }
 
@@ -136,6 +142,9 @@ export function reduceFromPiEvent(state: RunState, event: Record<string, unknown
 				if (text) return appendText(state, text, locale);
 			}
 			if (assistantEvent.type === "thinking_delta") {
+				// #425：用户关了思考块就别攒了 —— 飞书卡片是对外渠道，攒了也不会被渲染，
+				// 只在内存里多留一份内部推理原文（可能含文件路径、对用户的评价）。
+				if (state.showThinking === false) return state;
 				// AgentManager 发出的字段是 delta，兼容 delta 和 thinking 两种格式
 				const thinking = (assistantEvent as { delta?: string; thinking?: string }).delta ?? (assistantEvent as { thinking?: string }).thinking ?? "";
 				if (thinking) return appendThinking(state, thinking, locale);

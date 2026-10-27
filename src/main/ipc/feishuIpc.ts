@@ -27,6 +27,8 @@ export interface FeishuIpcDeps {
 	feishuSessionRuntimeBindings: SessionRuntimeBindingGateway;
 	/** 当前飞书文案 locale（由 index.ts 的 currentFeishuLocale 提供，读设置与系统语言）。 */
 	getCurrentLocale(): FeishuLocale;
+	/** 卡片是否展示思考过程（跟随 pi 的 hideThinkingBlock；#425）。 */
+	getShowThinking(): boolean;
 }
 
 export function registerFeishuIpc(deps: FeishuIpcDeps): void {
@@ -73,6 +75,7 @@ export function registerFeishuIpc(deps: FeishuIpcDeps): void {
 				deps.feishuSessionRuntimeBindings,
 				appSecret,
 				deps.getCurrentLocale(),
+				() => deps.getShowThinking(),
 			);
 			await feishuBridgeRef.current.start();
 			const status = feishuBridgeRef.current.getStatus();
@@ -119,6 +122,7 @@ export function registerFeishuIpc(deps: FeishuIpcDeps): void {
 				deps.feishuSessionRuntimeBindings,
 				plainAppSecret,
 				deps.getCurrentLocale(),
+				() => deps.getShowThinking(),
 			);
 			await feishuBridgeRef.current.start();
 
@@ -253,6 +257,7 @@ export function registerFeishuIpc(deps: FeishuIpcDeps): void {
 			deps.feishuSessionRuntimeBindings,
 			undefined,
 			deps.getCurrentLocale(),
+			() => deps.getShowThinking(),
 		);
 		return testBridge.testConnection(appId, appSecret);
 	});
@@ -308,6 +313,7 @@ export function registerFeishuIpc(deps: FeishuIpcDeps): void {
 				deps.feishuSessionRuntimeBindings,
 				undefined,
 				deps.getCurrentLocale(),
+				() => deps.getShowThinking(),
 			);
 			await feishuBridgeRef.current.start();
 			void logger()?.info("feishu", "Feishu connected by saved bot", { botId, name: botConfig.name });
