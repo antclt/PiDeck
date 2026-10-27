@@ -203,7 +203,7 @@ export const FileTree = memo(function FileTree(props: {
 				<span aria-hidden="true" className="inline-flex h-full w-4 shrink-0 translate-x-[3px] items-center justify-center">
 					<ChevronDown size={14} strokeWidth={2} className={`shrink-0 text-text-tertiary transition-transform duration-fast${props.collapsedDirs.has(dir) ? " -rotate-90" : " rotate-0"}`} />
 				</span>
-				<span className="min-w-0 flex-1 truncate font-semibold text-[var(--git-panel-fg)]" title={dir || "/"}>
+				<span className="min-w-0 flex-1 truncate font-normal text-[var(--git-panel-fg)]" title={dir || "/"}>
 					{label}
 				</span>
 				<span className="ml-auto flex items-center gap-0.5">
