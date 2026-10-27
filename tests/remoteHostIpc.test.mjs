@@ -32,10 +32,12 @@ test("remote host channel is declared, bridged, and registered behind the dev ga
 	const catalog = readFileSync("src/main/remote/RemoteHostCatalogView.ts", "utf8");
 	assert.match(shared, /remoteHostsList:\s*"remote:hosts-list"/);
 	assert.match(preload, /remoteHosts:\s*\{[\s\S]*?ipcRenderer\.invoke\(ipcChannels\.remoteHostsList\)/);
-	// 集成分支策略（2026-10-19）：远端面恒定开启，任何构建（dev / pack:dev / dist）都可直接验收。
-	// 因此门禁表达式必须是字面量 true —— 不得重新耦合 app.isPackaged 或环境变量，否则
-	// `npm run pack:dev` 打出来的包又会静默关掉远端（真机验收时表现为「功能没启用」且难排查）。
-	assert.match(main, /const remoteExperimentEnabled = true;/);
+	// 发布策略（2026-10-26，随小版本收回）：远端面在 dev 渠道构建恒开（npm run dev / pack:dev /
+	// dist:*:dev，isDevChannelBuild 口径），稳定渠道安装包关闭，待 remote-release-gate-status.md
+	// 门禁补齐后把策略位改回 true 放开。门禁表达式必须是 isDevChannelBuild() —— 不得直接耦合
+	// !app.isPackaged（pack:dev 是打包态，会静默关掉远端）或环境变量（运行期易漂移、难排查）；
+	// pack:dev 的 dev 渠道标记由 pack-dev.js 注入 PIDECK_DEV_BUILD=1 + PiDeck Dev 品牌配置保证。
+	assert.match(main, /const remoteExperimentEnabled = isDevChannelBuild\(\);/);
 	assert.doesNotMatch(main, /remoteExperimentEnabled\s*=\s*(?:!app\.isPackaged|process\.env\.PIDECK_REMOTE_EXPERIMENTAL)/);
 	assert.match(main, /registerRemoteHostIpc\(\{[\s\S]{0,400}?enabled:\s*remoteExperimentEnabled/);
 	// 目录读取在装配处接上「主机退役即清 trust 决策」的钩子（P4.4b；与 pin 清理同一位置、同一重试语义）。

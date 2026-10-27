@@ -63,7 +63,7 @@ import { readDataEnvDecision, validateStartupDataEnv, writeDataEnvDecision } fro
 import { registerDataEnvIpc } from "./ipc/dataEnvIpc";
 import { ChannelSwitchService } from "./update/ChannelSwitchService";
 import { registerChannelSwitchIpc } from "./ipc/channelSwitchIpc";
-import { resolveUpdateChannel } from "./update/channelIdentity";
+import { isDevChannelBuild, resolveUpdateChannel } from "./update/channelIdentity";
 import { APP_DEEP_LINK_SCHEME } from "./utils/deepLinkScheme";
 import { APP_DISPLAY_NAME, initializeAppBrand } from "./utils/appBrand";
 import { migrateDevUserData } from "./projects/devUserDataMigration";
@@ -3197,12 +3197,13 @@ function createCompletionHelperService(namespace: "enhance" | "agent-invoke" | "
 }
 
 function registerIpc() {
-	// 集成分支策略（2026-10-19）：远端能力在本分支**恒开**，不再区分打包/开发态，也不再读
-	// PIDECK_REMOTE_EXPERIMENTAL —— 目标是任何构建（npm run dev / pack:dev / dist）都能直接验收远端，
-	// 发现的问题由本分支直接修。历史上这里是 !app.isPackaged && env === "1"；
-	// 正式发布前若要收回，只改这一行即可（远端通道在没有启用时本就会统一返回 REMOTE_FEATURE_DISABLED，
-	// 所以开关只是策略位，不牵扯装配）。
-	const remoteExperimentEnabled = true;
+	// 发布策略（2026-10-26，随小版本收回）：远端能力在 dev 渠道构建恒开（npm run dev / pack:dev /
+	// dist:*:dev，isDevChannelBuild 口径），稳定渠道安装包关闭——功能尚未过 remote-release-gate-status.md
+	// 的发布门禁（打包版人工 smoke / macOS / 独立复核），先随小版本下线；稳定版用户点远端入口会收到
+	// REMOTE_FEATURE_DISABLED 的统一文案，不需要任何装配分支。门禁补齐后放开：只改这一行为 true
+	// （集成分支期间曾是恒开策略位）。pack:dev 的 dev 渠道标记由 pack-dev.js 注入 PIDECK_DEV_BUILD=1
+	// 保证——缺了它打包验收包会静默关掉远端（真机验收表现为「功能没启用」且难排查）。
+	const remoteExperimentEnabled = isDevChannelBuild();
 	let remoteHostService: import("./remote/RemoteHostConnectionService").RemoteHostConnectionService | undefined;
 	/**
 	 * 已解析的 OpenSSH 客户端（SSH 路由校验与每个 ssh/scp 子进程共用同一份）。
