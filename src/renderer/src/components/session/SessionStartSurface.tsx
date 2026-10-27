@@ -26,6 +26,8 @@ export function SessionStartSurface(props: {
 	sessionId: string;
 	/** 可选项目切换器：引导页（无会话空态）传入，标明并可切换下一次发送将会话创建到哪个项目 */
 	projectSwitcher?: ReactNode;
+	/** 项目切换器下方的次级入口（远端空态的「浏览远端文件」）；本机引导页不传。 */
+	secondaryAction?: ReactNode;
 	/** 引导页虚拟会话没有 SessionRecord，用选中项目兑底加载 @ 引用文件树。 */
 	bootstrapProjectId?: string;
 }) {
@@ -49,6 +51,7 @@ export function SessionStartSurface(props: {
 		<div className="session-start-surface flex min-h-full w-full flex-col items-center gap-8 bg-transparent px-6 pb-10 pt-[18vh] [--font-size-input:15.5px] [--line-height-input:25px]">
 			<LogoMark size={72} />
 			{props.projectSwitcher}
+			{props.secondaryAction}
 			{/* 复用会话页底部输入框组件：高度随内容撑开，底部栏（模型/思考/模式/安全级别/git）与发送按钮全保留。
 				宽度：容器 1080px；[--chat-content-pct-set:100%] 只在本页生效，抵消内容宽度设置（默认 80%）
 				在引导页的二次收窄——引导页没有消息列要对其，输入框直接用满容器

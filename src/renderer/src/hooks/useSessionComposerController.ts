@@ -4,6 +4,7 @@ import type { AgentBackend, ChatMessage, ComposerAgentMode, FileTreeNode, ImageC
 import { DEFAULT_IMAGE_GEN_OUTPUT_FORMAT, DEFAULT_IMAGE_GEN_SIZE, DEFAULT_IMAGE_GEN_WATERMARK, parseImageGenOutputFormat, parseImageGenSize, parseImageGenWatermark } from "../../../shared/imageGenParams";
 import { resolveBusySendDelivery } from "../../../shared/busySendDelivery";
 import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../../shared/fileTree";
+import { isRemoteProject } from "../../../shared/projectLocation";
 import { classifyCompactError, compactOwnerReason, compactRoutedCommand, type CompactNoticeKind } from "../../../shared/compactFeedback";
 import { findImageGenProvider } from "../../../shared/imageGenConfig";
 import { findVideoGenProvider } from "../../../shared/videoGenConfig";
@@ -302,6 +303,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	// 统一经 projectId 反查项目清单，拿到已登记的项目根路径，避免把有项目会话
 	// 误当成匿名会话（用户反馈：粘贴大文本发送后消息里被展开成普通文本）。
 	const composerProject = useAtomValue(projectByIdAtomFamily(effectiveProjectId ?? ""));
+	// 远端项目只跑主机上的 pi：底栏不提供后端切换，引导页也不能把 dsh/acp 偏好带进来。
+	// （dsh/acp 是本地 runtime，绑到远端项目上必然起不来；创建侧在 App.ensureSessionForSend 同源钳制。）
+	const isRemoteProjectSession = composerProject !== undefined && isRemoteProject(composerProject);
 	const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(sessionId));
 	const runtimeUi = useAtomValue(sessionRuntimeUiBySessionIdAtomFamily(sessionId));
 	const projectSessions = useAtomValue(sessionSummariesByProjectIdAtomFamily(effectiveProjectId ?? ""));
@@ -424,7 +428,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	// host settings），底栏自然回落到 dshDefaultModel。
 	// 仍然经 effectiveAgentBackendAtom 取默认值（DSH runtime 安装态钳制）。
 	const defaultAgentBackend = useAtomValue(effectiveAgentBackendAtom);
-	const guidePageBackend: AgentBackend = isGuideBootstrapSession ? resolveGuidePageBackend({ override: guideBackendOverride, effectiveDefault: defaultAgentBackend }) : defaultAgentBackend;
+	const guidePageBackend: AgentBackend = isRemoteProjectSession ? "pi" : isGuideBootstrapSession ? resolveGuidePageBackend({ override: guideBackendOverride, effectiveDefault: defaultAgentBackend }) : defaultAgentBackend;
 	const [bootstrapDefaults, setBootstrapDefaults] = useState<ResolvedLaunchDefaults | undefined>(undefined);
 	useEffect(() => {
 		if (record) return;
@@ -2162,6 +2166,8 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	const backendLocked = record?.status === "active" || hasUserMessage;
 	const changeBackend = useCallback(
 		async (next: AgentBackend, explicitAcpToolId?: string) => {
+			// 远端项目固定 pi；选择器已经隐藏，这里再挡一次键盘/程序化切换。
+			if (isRemoteProjectSession) return;
 			if (backendLocked) return;
 			// 引导页虚拟会话（无 catalog record）：与 pickModel/pickThinking 的引导页
 			// 分支同构——显式选择写 localStorage 偏好并本地即时回显，不走 IPC。
@@ -2235,7 +2241,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 				showNotice(error instanceof Error ? error.message : String(error), 4000);
 			}
 		},
-		[backendLocked, isGuideBootstrapSession, record, runtime?.agentId, sessionId, store, upsertSession],
+		[backendLocked, isGuideBootstrapSession, isRemoteProjectSession, record, runtime?.agentId, sessionId, store, upsertSession],
 	);
 
 	/**
@@ -2352,9 +2358,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		runtime,
 		// 引导页优先回显显式切换（guideBackendOverride），否则退回上次偏好/默认 pi；
 		// 真实会话以 record 为准。
-		backend: record?.backend ?? (isGuideBootstrapSession ? guideBackendOverride : undefined) ?? "pi",
-		/** 草稿期可切换后端；激活后锁定（undefined → UI 隐藏切换器）。 */
-		changeBackend: backendLocked ? undefined : changeBackend,
+		backend: isRemoteProjectSession ? "pi" : (record?.backend ?? (isGuideBootstrapSession ? guideBackendOverride : undefined) ?? "pi"),
+		/** 草稿期可切换后端；激活后锁定、远端项目固定 pi（undefined → UI 隐藏切换器）。 */
+		changeBackend: backendLocked || isRemoteProjectSession ? undefined : changeBackend,
 		// ACP 工具二级选择（草稿期；激活后 UI 不再渲染选择器）
 		acpTool:
 			record?.backend === "acp"

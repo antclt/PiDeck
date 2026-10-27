@@ -1,4 +1,5 @@
-import { FolderGit2, Plus, Server } from "lucide-react";
+import { FolderGit2, FolderOpen, Plus, Server } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useSetAtom } from "jotai";
 import type { Project } from "../../../../shared/types";
 import { isRemoteProject } from "../../../../shared/projectLocation";
@@ -34,6 +35,11 @@ export function ProjectEmptyState(props: {
 }) {
 	// 远端登记弹框由 App 统一挂载，这里只打开开关（与侧栏「+」同一条路径）。
 	const setRemoteEnrollOpen = useSetAtom(remoteEnrollDialogOpenAtom);
+	// 远端项目：输入页与文件浏览是同一个空态里的两级视图；切项目时回到输入页。
+	const [remoteFilesOpen, setRemoteFilesOpen] = useState(false);
+	useEffect(() => {
+		setRemoteFilesOpen(false);
+	}, [props.activeProject?.id]);
 	// 无项目时没有任何可创建会话的项目上下文，只保留添加项目入口。
 	// 与有项目引导页同比例：Logo 72 / gap-8 / pt-[18vh] 靠中。
 	if (!props.activeProject) {
@@ -60,33 +66,44 @@ export function ProjectEmptyState(props: {
 	// 项目下拉只切换 activeProjectId——切项目后仍留在引导页（currentSessionId 保持
 	// 空），发送时按选中项目创建；下拉列表 = 已加入的全部项目（含内置 Chat）。
 	//
+	const projectSwitcher = (
+		<Select value={props.activeProject.id} onValueChange={props.onSelectProject}>
+			<SelectTrigger aria-label={t("app.guideProjectPicker")} className="gap-2 border-0 bg-transparent px-2.5 text-sm font-normal text-text-secondary shadow-none hover:bg-accent/50 focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:hover:bg-accent/50">
+				<FolderGit2 size={15} aria-hidden="true" className="shrink-0 text-text-tertiary" />
+				<SelectValue />
+			</SelectTrigger>
+			<SelectContent align="start">
+				{props.projects.map((project) => (
+					<SelectItem key={project.id} value={project.id}>
+						{isChatProject(project) ? t("app.chatProject") : project.name}
+					</SelectItem>
+				))}
+			</SelectContent>
+		</Select>
+	);
+
 	// 远端项目没有本机路径：使用同源远端目录/文本编辑宿主，各本机IPC仍按locator拒绝。
-	// 无会话空态先给「新建会话」主入口（与项目行「+」同一条 createDraft），文件浏览仍在本页。
+	// 空态与本地同构：先把输入页给用户，文件浏览作为同一页的次级视图（返回即回到输入页）。
+	// 首次发送由 App.ensureSessionForSend 创建 pi 会话；后端/模型门控在 composer 内按项目类型锁定。
 	const remoteProject = props.activeProject;
 	if (isRemoteProject(remoteProject)) {
-		return <RemoteProjectPanel projectId={remoteProject.id} projectName={remoteProject.name} onOpenTerminal={props.onOpenTerminal} onCreateSession={props.onCreateSession === undefined ? undefined : () => props.onCreateSession?.(remoteProject.id)} />;
+		if (remoteFilesOpen) {
+			return <RemoteProjectPanel projectId={remoteProject.id} projectName={remoteProject.name} onOpenTerminal={props.onOpenTerminal} onBack={() => setRemoteFilesOpen(false)} onCreateSession={props.onCreateSession === undefined ? undefined : () => props.onCreateSession?.(remoteProject.id)} />;
+		}
+		return (
+			<SessionStartSurface
+				sessionId={GUIDE_BOOTSTRAP_SESSION_ID}
+				bootstrapProjectId={remoteProject.id}
+				projectSwitcher={projectSwitcher}
+				secondaryAction={
+					<Button variant="ghost" size="sm" data-testid="remote-project-browse-files" onClick={() => setRemoteFilesOpen(true)}>
+						<FolderOpen className="size-4" aria-hidden="true" />
+						{t("project.remote.browseFiles")}
+					</Button>
+				}
+			/>
+		);
 	}
 
-	return (
-		<SessionStartSurface
-			sessionId={GUIDE_BOOTSTRAP_SESSION_ID}
-			// 虚拟会话无 record：用选中项目加载 @ 引用文件树与模型目录。
-			bootstrapProjectId={props.activeProject.id}
-			projectSwitcher={
-				<Select value={props.activeProject.id} onValueChange={props.onSelectProject}>
-					<SelectTrigger aria-label={t("app.guideProjectPicker")} className="gap-2 border-0 bg-transparent px-2.5 text-sm font-normal text-text-secondary shadow-none hover:bg-accent/50 focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:hover:bg-accent/50">
-						<FolderGit2 size={15} aria-hidden="true" className="shrink-0 text-text-tertiary" />
-						<SelectValue />
-					</SelectTrigger>
-					<SelectContent align="start">
-						{props.projects.map((project) => (
-							<SelectItem key={project.id} value={project.id}>
-								{isChatProject(project) ? t("app.chatProject") : project.name}
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
-			}
-		/>
-	);
+	return <SessionStartSurface sessionId={GUIDE_BOOTSTRAP_SESSION_ID} bootstrapProjectId={props.activeProject.id} projectSwitcher={projectSwitcher} />;
 }

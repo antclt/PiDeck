@@ -4376,6 +4376,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"project.remote.title": "Remote project",
 	"project.remote.badge": "Remote",
 	"project.remote.newSession": "New session",
+	"project.remote.browseFiles": "Browse remote files",
+	"project.remote.back": "Back to chat",
 	"project.remote.unsupported": "This action is not supported for remote projects yet (a later phase).",
 	"project.remote.connectFirst": "The host is not connected: connect this host in Settings first.",
 	"project.remote.notConnectedHint": "Reading remotely needs a live session. Connect this host in Settings → Connections first.",

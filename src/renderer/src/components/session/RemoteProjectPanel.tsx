@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, FilePlus2, FileText, Folder, FolderPlus, Link2, Loader2, Plus, Search, TerminalSquare, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, FilePlus2, FileText, Folder, FolderPlus, Link2, Loader2, Plus, Search, TerminalSquare, Trash2, Upload, X } from "lucide-react";
 import type { RemoteWorkspaceEntry } from "../../../../shared/types/remoteHost";
 import type { RemoteEntryKind } from "../../../../shared/types/remoteFiles";
 import { desktopApi } from "../../desktopApi";
@@ -38,7 +38,7 @@ const parentPath = (segments: string[]): string => segments.join("/");
  * useRemoteProjectEntries，弹框、行菜单、回收站与 testid 在 §10.2 冻结。失败与空目录分开呈现，
  * 未知结果消息保留到用户显式刷新；本机 FileTree/右键菜单不受影响。
  */
-export function RemoteProjectPanel(props: { projectId: string; projectName: string; onOpenTerminal?: () => void; onCreateSession?: () => void }) {
+export function RemoteProjectPanel(props: { projectId: string; projectName: string; onOpenTerminal?: () => void; onCreateSession?: () => void; onBack?: () => void }) {
 	const [entries, setEntries] = useState<RemoteWorkspaceEntry[]>([]);
 	const [relative, setRelative] = useState<string[]>([]);
 	const [file, setFile] = useState<{ projectId: string; path: string } | null>(null);
@@ -253,6 +253,12 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 			}}
 		>
 			<div className="flex flex-wrap items-center gap-2 text-label">
+				{props.onBack ? (
+					<Button variant="ghost" size="sm" data-testid="remote-project-back" onClick={props.onBack}>
+						<ArrowLeft className="size-4" aria-hidden="true" />
+						{t("project.remote.back")}
+					</Button>
+				) : null}
 				<span className="rounded bg-muted px-1.5 py-0.5 font-medium text-muted-foreground">{t("project.remote.badge")}</span>
 				<strong className="text-body font-semibold text-foreground">{props.projectName}</strong>
 				<span className="text-muted-foreground">{t("project.remote.title")}</span>

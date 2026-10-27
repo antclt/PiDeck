@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 0bd5b80d569a69bc391d6470761630307cd2ac5c1fc8973c3da75e49931a9bb9（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 30a3793c5d65d5cccafebb35d1e5386f714880bdd4ff2a873910c76e4dafad45（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4367,6 +4367,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"project.remote.title": "遠端專案",
 	"project.remote.badge": "遠端",
 	"project.remote.newSession": "新建會話",
+	"project.remote.browseFiles": "瀏覽遠端檔案",
+	"project.remote.back": "返回對話",
 	"project.remote.unsupported": "遠端專案暫不支援此操作（屬於後續階段）。",
 	"project.remote.connectFirst": "主機未連線：請先在設定頁連線這臺主機。",
 	"project.remote.notConnectedHint": "遠端讀取需要一條已連線的會話。請先在「設定 → 連線」連線這臺主機。",
