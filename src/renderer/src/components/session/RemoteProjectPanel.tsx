@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowLeft, FilePlus2, FileText, Folder, FolderPlus, Link2, Loader2, Plus, Search, TerminalSquare, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, FilePlus2, FileText, Folder, FolderPlus, Link2, Loader2, Search, Trash2, Upload, X } from "lucide-react";
 import type { RemoteWorkspaceEntry } from "../../../../shared/types/remoteHost";
 import type { RemoteEntryKind } from "../../../../shared/types/remoteFiles";
 import { desktopApi } from "../../desktopApi";
@@ -16,6 +16,7 @@ import { createRequestGate } from "./remoteRequestGate";
 import { RemoteFileEditor } from "../workspace/RemoteFileEditor";
 import { RemoteFileRow } from "./RemoteFileRow";
 import { RemoteProjectEntryDialogs, type RemoteEntryDialog } from "./RemoteProjectEntryDialogs";
+import { RemoteProjectHeader } from "./RemoteProjectHeader";
 import { RemoteTrashPanel } from "./RemoteTrashPanel";
 import { remoteFileEntryKeepsInput } from "./remoteFileManagementState";
 import type { RemoteSearchEntryView } from "./remoteProjectSearchState";
@@ -252,31 +253,7 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 				transfer.onDrop(event);
 			}}
 		>
-			<div className="flex flex-wrap items-center gap-2 text-label">
-				{props.onBack ? (
-					<Button variant="ghost" size="sm" data-testid="remote-project-back" onClick={props.onBack}>
-						<ArrowLeft className="size-4" aria-hidden="true" />
-						{t("project.remote.back")}
-					</Button>
-				) : null}
-				<span className="rounded bg-muted px-1.5 py-0.5 font-medium text-muted-foreground">{t("project.remote.badge")}</span>
-				<strong className="text-body font-semibold text-foreground">{props.projectName}</strong>
-				<span className="text-muted-foreground">{t("project.remote.title")}</span>
-				{/* 无会话空态的主入口：远端项目也能一键起会话。文件浏览仍是同一页的次要动作，
-				    不把「新建会话」藏在侧栏项目行的 hover 按钮里。 */}
-				{props.onCreateSession && (
-					<Button variant="default" size="sm" data-testid="remote-project-new-session" onClick={props.onCreateSession}>
-						<Plus className="size-4" aria-hidden="true" />
-						{t("project.remote.newSession")}
-					</Button>
-				)}
-				{props.onOpenTerminal && (
-					<Button variant="ghost" size="sm" onClick={props.onOpenTerminal}>
-						<TerminalSquare className="size-4" aria-hidden="true" />
-						{t("app.terminal")}
-					</Button>
-				)}
-			</div>
+			<RemoteProjectHeader projectName={props.projectName} onBack={props.onBack} onCreateSession={props.onCreateSession} onOpenTerminal={props.onOpenTerminal} />
 			{/* 工具栏只在目录浏览态出现（搜索态由搜索自身的结果/错误呈现）；空目录仍可见，可在空目录新建。 */}
 			{!searching ? (
 				<div data-testid="remote-file-toolbar" className="flex flex-wrap items-center gap-1">
