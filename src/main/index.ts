@@ -3178,16 +3178,22 @@ function resolveBuiltInExtensionRoots(): BuiltInExtensionPathRoots {
 function createCompletionHelperService(namespace: "enhance" | "agent-invoke" | "suggest"): EnhancePromptService {
 	const log = (level: "debug" | "info" | "warn" | "error", message: string) => void appLogger?.[level](namespace, message);
 	return new EnhancePromptService({
-		resolveLaunch: () =>
-			resolvePiAuthHostLaunch({
-				settings: settingsStore.get(),
+		// 侧车是常驻单进程，env 在 spawn 时固定，所以代理只能在这里落地：
+		// 把本次要用的模型交给启动参数解析，按与 pi 会话同一套名单语义决定要不要走代理；
+		// 换模型或改代理设置后启动指纹变化，服务会重建进程而不是沿用旧出口。
+		resolveLaunch: (run) => {
+			const settings = settingsStore.get();
+			return resolvePiAuthHostLaunch({
+				settings,
+				proxyModel: run,
 				locator: piLocator as PiLocator,
 				userDataPath: app.getPath("userData"),
 				appPath: app.getAppPath(),
 				resourcesPath: process.resourcesPath,
 				isPackaged: app.isPackaged,
 				helperFilename: PI_ENHANCE_HOST_FILENAME,
-			}),
+			});
+		},
 		logger: {
 			debug: (message) => log("debug", message),
 			info: (message) => log("info", message),
