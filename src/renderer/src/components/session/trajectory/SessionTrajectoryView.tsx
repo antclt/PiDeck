@@ -10,6 +10,7 @@ import { buildTpsDisplay } from "../../../utils/tpsDisplay";
 import { desktopApi } from "../../../desktopApi";
 import { t } from "../../../i18n";
 import { writeClipboard } from "../../../utils/clipboard";
+import { formatModelRef } from "../../../utils/modelPendingDisplay";
 import { formatDuration, formatTime } from "../TimelineFormat";
 import { buildTrajectory, filterRecordsByRange, traceSizeLabel, type TrajectoryLane, type TrajectoryModelTraceSummary, type TrajectoryRecord, type TrajectoryTimeRange, type TrajectoryTurn } from "./buildTrajectory";
 import type { SessionFactsCoverage } from "../../../../../shared/types/trajectory";
@@ -817,6 +818,8 @@ function TrajectoryInspector(props: {
 	const state = props.runtimeState;
 	const tpsMode = useAtomValue(tpsDisplayModeAtom);
 	const sessionStats = state?.dshSessionStats;
+	// 最近一次回复的模型：结算时记账的 perfModel*（切模型后仍归属发起这次回复的那个模型）。
+	const perfModelLabel = state?.perfModelId || state?.perfModelName ? formatModelRef({ provider: state.perfProvider ?? "", modelId: state.perfModelId ?? "", modelName: state.perfModelName }) : undefined;
 	const throughput = buildTpsDisplay(tpsMode, sessionStats ? sessionStats.tokensPerSecond : state?.tps, sessionStats ? sessionStats.endToEndTokensPerSecond : state?.endToEndTps, sessionStats ? "session" : "reply", 1);
 	// modelRequest 检查器的完整请求体回读：按记录隔离，切换选中即清空。
 	const [traceView, setTraceView] = useState<{ traceId: string; status: "loading" | "loaded" | "missing"; payloadJson?: string } | undefined>(undefined);
@@ -1005,6 +1008,14 @@ function TrajectoryInspector(props: {
 						{t("session.trajectory.runtime")}
 					</div>
 					<dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-caption text-muted-foreground">
+						{perfModelLabel ? (
+							<>
+								<dt>{t("session.trajectory.field.provider")}</dt>
+								<dd className="truncate">{state.perfProvider || "—"}</dd>
+								<dt>{t("session.trajectory.field.model")}</dt>
+								<dd className="truncate">{perfModelLabel}</dd>
+							</>
+						) : null}
 						{state.ttftMs !== undefined ? (
 							<>
 								<dt>TTFT</dt>

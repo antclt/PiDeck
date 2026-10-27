@@ -160,14 +160,25 @@ test("collapsed sidebar keeps 14px gutter; restore lives in tab bar", () => {
 	assert.match(foundation, /\.custom-titlebar-enabled \.session-tabs-bar \{[\s\S]*?z-index:\s*930;/);
 });
 
-test("drawer toggle stays on session tab bar right; no gap when drawer open", () => {
+test("drawer toggle follows the drawer edge; no gap when drawer open", () => {
 	assert.match(tabs, /header-drawer-toggle/);
 	assert.match(tabs, /PanelRight/);
-	assert.doesNotMatch(tabs, /onToggleDrawer && !props\.drawerOpen/);
+	// 关闭态：开关在会话 Tab 栏最右缘；打开后搬进抽屉顶栏那一行（贴抽屉左边界），本栏隐藏
+	assert.match(tabs, /props\.onToggleDrawer && !props\.drawerOpen/);
 	const rail = readFileSync("src/renderer/src/components/workspace/WorkspaceDrawerRail.tsx", "utf8");
-	assert.doesNotMatch(rail, /onClose/);
-	assert.doesNotMatch(rail, /drawer-rail-close/);
-	// 抽屉打开后窗口控件叠在抽屉顶上，会话 Tab 不再预留 144px，开关贴在 Tab 栏右缘。
+	assert.match(rail, /onClose/);
+	// 顶栏那颗是主入口；rail 这颗只在原生标题栏（顶栏高度 0）时兜底显示
+	assert.match(rail, /drawer-rail-close/);
+	assert.match(rail, /workspace-titlebar:hidden/);
+	// -ml-2 抵掉 rail 的 px-2：按钮左缘落在抽屉左边界，与上方分栏线同一条竖线
+	assert.match(rail, /drawer-rail-close -ml-2/);
+	const host = readFileSync("src/renderer/src/components/workspace/WorkspaceDrawerHost.tsx", "utf8");
+	assert.match(host, /drawer-titlebar-close/);
+	// 顶栏整条是窗口拖拽热区（.window-drag-layer z-900），按钮必须更高且退出拖拽区，否则点不到
+	assert.match(host, /z-\[905\]/);
+	assert.match(host, /-webkit-app-region:no-drag/);
+	assert.match(host, /workspace-titlebar:block/);
+	// 抽屉打开后窗口控件叠在抽屉顶上，会话 Tab 栏不再预留 144px（开关此时已并入抽屉活动栏）。
 	// drawer-open 必须同时要求未折叠：折叠后聊天区顶到窗口右缘，Tab 栏仍须让位，
 	// 否则抽屉开关会与关闭按钮重叠。
 	assert.match(shell, /drawer && !drawerCollapsed \? "drawer-open" : ""/);
@@ -181,8 +192,11 @@ test("titlebar bottom rule stays continuous across drawer and window controls", 
 	// 39–40px），标题栏下沿才是一条横贯整窗的线。用 .detail-drawer 的 padding-top 下推内容时
 	// 让位区没有线，抽屉 tab 栏比会话 tab 栏低 40px，观感就是「tab header 线不齐」。
 	assert.doesNotMatch(foundation, /\.custom-titlebar-enabled \.shell-panel-drawer \.detail-drawer \{[\s\S]*?padding-top:\s*var\(--window-drag-height\);/);
-	const spacer = host.match(/aria-hidden="true"[\s\S]*?\/>/)?.[0];
+	// 让位区现在是容器（里面放抽屉开关），只取开标签做类名断言
+	const spacer = host.match(/<div className="[^"]*h-\[var\(--window-drag-height\)\][^"]*">/)?.[0];
 	assert.ok(spacer, "drawer host must render the titlebar inset spacer");
+	// 容器内现在有可交互按钮，不能再标 aria-hidden（否则开关对辅助技术不可见）
+	assert.doesNotMatch(spacer, /aria-hidden/);
 	assert.match(spacer, /h-\[var\(--window-drag-height\)\]/);
 	// 右边距扣掉窗口控件宽度：控件容器补的底边线接着画到窗口右缘，两段不在同一像素行重叠
 	//（壁纸模式窗口控件背景透明，重叠会叠出更深的双线）。

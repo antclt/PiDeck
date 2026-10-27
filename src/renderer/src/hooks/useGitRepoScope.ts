@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { GitRepoInfo } from "../../../shared/types";
+import { reposForProject } from "../utils/gitRepoScope";
 
 export type UseGitRepoScopeInput = {
 	projectId: string | undefined;
@@ -14,28 +15,32 @@ export type UseGitRepoScopeInput = {
  */
 export function useGitRepoScope(input: UseGitRepoScopeInput) {
 	const { projectId, listRepos } = input;
-	const [repos, setRepos] = useState<GitRepoInfo[]>([]);
+	const [discoveredRepos, setDiscoveredRepos] = useState<GitRepoInfo[]>([]);
 	const requestRef = useRef(0);
 
 	const refreshRepos = useCallback(async () => {
 		if (!projectId) {
-			setRepos([]);
+			setDiscoveredRepos([]);
 			return;
 		}
 		const request = ++requestRef.current;
 		try {
 			const next = await listRepos(projectId);
 			if (request !== requestRef.current) return;
-			setRepos(next);
+			setDiscoveredRepos(next);
 		} catch {
 			if (request !== requestRef.current) return;
-			setRepos([]);
+			setDiscoveredRepos([]);
 		}
 	}, [projectId, listRepos]);
 
 	useEffect(() => {
 		void refreshRepos();
 	}, [refreshRepos]);
+
+	// 项目切换瞬间列表还是上一项目的（listRepos 未回）：按 projectId 过滤后再下发，
+	// 否则面板会带着旧 target 调 Git IPC，撞 GIT_PROJECT_TARGET_MISMATCH。
+	const repos = reposForProject(projectId, discoveredRepos);
 
 	return {
 		repos,

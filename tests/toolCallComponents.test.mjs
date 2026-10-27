@@ -166,6 +166,14 @@ test("tool card keeps status pills only for non-default states; done rows go sil
 	assert.doesNotMatch(toolCalls, /statusLabel/);
 });
 
+// 2026-10 用户反馈「acp 的工具调用有时候一行重复俩」：ACP 的 meta.toolName 是 agent 给的人类
+// 标题（`` `ls -la` ``、`Read <path>`），标题本身已带着参数。副标题不能再把同一个值回填成
+// 作用对象（否则同一行把命令印两遍），短语侧靠 meta.kind 选动词而不是拿标题当工具名。
+test("ACP title-like tool names never repeat the argument on the tool row", () => {
+	assert.match(toolCalls, /getToolPhraseFromArgs\(toolName, props\.message\.meta\?\.args, props\.message\.meta\?\.kind\)/);
+	assert.match(toolCalls, /const title = getToolName\(message\);\s*return title\.includes\(value\) \? "" : value;/);
+});
+
 // 2026-10 对齐 ZCode 过程行排版：主标签 = 语义动词，作用对象进等宽 chip 单行截断，
 // 原始工具名/完整参数/完成耗时撤到行 tooltip——行内只留扫读锚点，细节 hover 可达。
 test("tool trigger shows verb label with mono object chip; details move to row tooltip", () => {

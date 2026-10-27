@@ -64,6 +64,7 @@ import { registerDataEnvIpc } from "./ipc/dataEnvIpc";
 import { ChannelSwitchService } from "./update/ChannelSwitchService";
 import { registerChannelSwitchIpc } from "./ipc/channelSwitchIpc";
 import { isDevChannelBuild, resolveUpdateChannel } from "./update/channelIdentity";
+import { resolveBuildOrigin } from "./buildIdentity";
 import { APP_DEEP_LINK_SCHEME } from "./utils/deepLinkScheme";
 import { APP_DISPLAY_NAME, initializeAppBrand } from "./utils/appBrand";
 import { migrateDevUserData } from "./projects/devUserDataMigration";
@@ -3177,16 +3178,22 @@ function resolveBuiltInExtensionRoots(): BuiltInExtensionPathRoots {
 function createCompletionHelperService(namespace: "enhance" | "agent-invoke" | "suggest"): EnhancePromptService {
 	const log = (level: "debug" | "info" | "warn" | "error", message: string) => void appLogger?.[level](namespace, message);
 	return new EnhancePromptService({
-		resolveLaunch: () =>
-			resolvePiAuthHostLaunch({
-				settings: settingsStore.get(),
+		// 侧车是常驻单进程，env 在 spawn 时固定，所以代理只能在这里落地：
+		// 把本次要用的模型交给启动参数解析，按与 pi 会话同一套名单语义决定要不要走代理；
+		// 换模型或改代理设置后启动指纹变化，服务会重建进程而不是沿用旧出口。
+		resolveLaunch: (run) => {
+			const settings = settingsStore.get();
+			return resolvePiAuthHostLaunch({
+				settings,
+				proxyModel: run,
 				locator: piLocator as PiLocator,
 				userDataPath: app.getPath("userData"),
 				appPath: app.getAppPath(),
 				resourcesPath: process.resourcesPath,
 				isPackaged: app.isPackaged,
 				helperFilename: PI_ENHANCE_HOST_FILENAME,
-			}),
+			});
+		},
 		logger: {
 			debug: (message) => log("debug", message),
 			info: (message) => log("info", message),
@@ -3197,12 +3204,14 @@ function createCompletionHelperService(namespace: "enhance" | "agent-invoke" | "
 }
 
 function registerIpc() {
-	// 发布策略（2026-10-26，随小版本收回）：远端能力在 dev 渠道构建恒开（npm run dev / pack:dev /
-	// dist:*:dev，isDevChannelBuild 口径），稳定渠道安装包关闭——功能尚未过 remote-release-gate-status.md
-	// 的发布门禁（打包版人工 smoke / macOS / 独立复核），先随小版本下线；稳定版用户点远端入口会收到
-	// REMOTE_FEATURE_DISABLED 的统一文案，不需要任何装配分支。门禁补齐后放开：只改这一行为 true
-	// （集成分支期间曾是恒开策略位）。pack:dev 的 dev 渠道标记由 pack-dev.js 注入 PIDECK_DEV_BUILD=1
-	// 保证——缺了它打包验收包会静默关掉远端（真机验收表现为「功能没启用」且难排查）。
+	// 通道策略（2026-10-27）：远端能力**只在 dev 通道提供**，正式包不启用、界面也不暴露入口。
+	// 判据复用 isDevChannelBuild()（未打包运行 / dev 通道安装包为 true，release 产物为 false），
+	// 与更新通道同源，不再另外维护第二份打包/环境变量表达式（历史上这里是
+	// `!app.isPackaged && env === "1"`，后来一度写死 true 便于集成分支验收）。
+	// 关掉时开关只是策略位：远端 IPC 本就统一返回 REMOTE_FEATURE_DISABLED；
+	// 渲染层按同一判据（app:get-channel 的 devBuild）连入口都不渲染。
+	// pack:dev 的 dev 渠道标记由 pack-dev.js 注入 PIDECK_DEV_BUILD=1 保证——缺了它打包验收包会以稳定渠道
+	// 运行、远端静默关闭（真机验收表现为「功能没启用」且难排查）。
 	const remoteExperimentEnabled = isDevChannelBuild();
 	let remoteHostService: import("./remote/RemoteHostConnectionService").RemoteHostConnectionService | undefined;
 	/**
@@ -5070,6 +5079,13 @@ app
 		void appLogger.info("app", "Cold start milestone: app ready", {
 			sinceModuleLoadMs: Date.now() - bootAnchorMs,
 			processUptimeMs: Math.round(process.uptime() * 1000),
+		});
+		// 构建身份（通道 + 来源）：支持排障时一眼看出这个包是本机打包还是发布产物。
+		// 与更新界面的「本地构建」徽章同源（systemIpc 的 update:get-channel）。
+		void appLogger.info("app", "Build identity", {
+			channel: updateChannel,
+			buildOrigin: resolveBuildOrigin(),
+			packaged: app.isPackaged,
 		});
 		// userData 更名迁移（pi-desktop → PiDeck）在 setPath 前同步执行，当时还没有日志器；
 		// 结果在此补记，失败/回退路径必须可从日志诊断。

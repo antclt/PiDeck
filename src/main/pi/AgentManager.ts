@@ -88,7 +88,7 @@ import { estimateMessagesPayloadBytes } from "./messagePayloadSize";
 import { bindRemoteUserMessageTimestamp } from "./remoteMessageTimestamp";
 import { StoppedMessageIdentityCache } from "./stoppedMessageIdentity";
 import { currentIndexTree, diffCheckpoints, loadAllCheckpoints, loadCheckpointFromRef, MUTATING_TOOLS, restoreCheckpoint as applyCheckpointRestore, toCheckpointSummary } from "../rewind/index.ts";
-import { AgentMessageProjector, buildActiveBranchEntryIds as buildActiveBranchEntryIdsForDisplay } from "./AgentMessageProjector";
+import { AgentMessageProjector, buildActiveBranchEntryIds as buildActiveBranchEntryIdsForDisplay, hasPiToolCallBlock, normalizePiStopReason } from "./AgentMessageProjector";
 import { RewindCheckpointCoordinator } from "./RewindCheckpointCoordinator";
 import { LiveStreamChannel } from "./liveStreamChannel";
 import { resolveNotificationSessionId } from "./agentUtils";
@@ -413,6 +413,9 @@ export class AgentManager {
 
 	/** 流式性能计时（TTFT/总耗时/TPS，起点为请求发出时刻）收口在 MessagePerfTracker。 */
 	private readonly messagePerf = new MessagePerfTracker();
+	/** 最近一次完整 runtime 快照（按 agent）：流式结算拿不到 RPC，只能从这里取模型事实。 */
+	private readonly lastRuntimeStateByAgent = new Map<string, AgentRuntimeState>();
+
 	/**
 	 * 最近一次用户 abort 的时刻（毫秒）。退出处理器用它识别「终止窗口内的进程退出」：
 	 * pi 在处理 abort 时可能自行崩溃（上游 #2716 族：abort 期间 unhandled rejection
@@ -539,6 +542,9 @@ export class AgentManager {
 		 */
 		private readonly listThirdPartyMcpExtensions?: () => Promise<import("../../shared/mcpThirdParty").ThirdPartyMcpExtension[]>,
 	) {
+		// 「最近一次回复指标」的供应商/模型：结算（message_end）在流式热路径上不能等 get_state RPC，
+		// 只读最近一次完整快照；快照缺失（刚启动/尚未轮询）时 settle 退回 assistant 消息自带的 model。
+		this.messagePerf.bindRuntimeModelSource((agentId) => this.lastRuntimeStateByAgent.get(agentId));
 		// resourceMigrationGate 由 index.ts 在迁移器装配后注入（构造早于迁移器）。
 		this.messageEmit = new MessageEmitBatcher({
 			getMessages: (agentId) => this.messages.get(agentId) ?? [],
@@ -3489,6 +3495,7 @@ export class AgentManager {
 		const cacheHitPercent = clampPercent(directCacheHitPercent ?? fileHitStats.latest);
 		const cacheHitAveragePercent = clampPercent(fileHitStats.average);
 		const perf = this.messagePerf.getLast(agentId);
+		const replyModel = this.messagePerf.getLastReplyModel(agentId);
 		const contextTokens = pickNumber(contextUsage?.tokens);
 		/**
 		 * 上下文构成三段：
@@ -3502,7 +3509,9 @@ export class AgentManager {
 		const loadoutMeasured = fileHitStats.systemTokens != null && fileHitStats.toolsTokens != null;
 		const conversationResidual = loadoutMeasured && contextTokens != null && contextTokens > 0 ? Math.round(contextTokens - (fileHitStats.systemTokens ?? 0) - (fileHitStats.toolsTokens ?? 0)) : undefined;
 		const contextMessageTokens = conversationResidual != null && conversationResidual > 0 ? conversationResidual : fileHitStats.conversationTokens;
-		return {
+		// 流式结算（message_end）拿不到 RPC，只能读这里缓存的模型事实，因此必须在返回前写回。
+		// 只在本 agent 仍是当前绑定时写（上面已校验 runtime 未变化，此处之下的 await 已不存在）。
+		const runtimeState: AgentRuntimeState = {
 			modelName: normalizedRuntimeName(model?.name) ?? normalizedRuntimeName(model?.id),
 			provider: normalizedRuntimeName(model?.provider),
 			modelId: normalizedRuntimeName(model?.id),
@@ -3537,8 +3546,13 @@ export class AgentManager {
 			tps: perf?.tps,
 			sessionTps: perf?.sessionTps,
 			sessionEndToEndTps: perf?.sessionEndToEndTps,
+			// 最近一次回复真实使用的模型（与上面「当前模型」不同：切模型后仍归属发起它的那一次）。
+			// 全字段下发（含 undefined）：否则渲染层会把上一个模型的归属 merge 保留下来。
+			...this.messagePerf.getLastReplyModelFields(agentId),
 			perfAt: perf?.at,
 		};
+		this.lastRuntimeStateByAgent.set(agentId, runtimeState);
+		return runtimeState;
 	}
 
 	/**
@@ -4264,6 +4278,7 @@ export class AgentManager {
 		this.agentTurnActiveById.delete(agentId);
 		this.autoRestartAttempted.delete(agentId);
 		this.messagePerf.clearAgent(agentId);
+		this.lastRuntimeStateByAgent.delete(agentId);
 		this.notifiedAskAgents.delete(agentId);
 		this.abortedDuringAsk.delete(agentId);
 		this.abortGate.clearEscalation(agentId);
@@ -6104,7 +6119,9 @@ export class AgentManager {
 		// pending 是骨架占位值：不持久化（new 分支）也不覆盖既有值（existing 分支），
 		// 否则 message_end 缺 stopReason 时消息永远停 in pending，渲染层回退启发式失效。
 		const extractedStopReason = partialMessage && typeof partialMessage === "object" ? (nonEmptyString(asRecord(partialMessage)?.stopReason) ?? "") : "";
-		const finalStopReason = extractedStopReason && extractedStopReason !== "pending" ? extractedStopReason : undefined;
+		// 与历史投影同源归一：被打断的纯文本回复 pi 记 toolUse 但无 toolCall 块，按最终回复处理
+		// （否则渲染层把它当中间回复折进「执行过程」，整段回复在空闲后仍不可见）。
+		const finalStopReason = normalizePiStopReason(extractedStopReason && extractedStopReason !== "pending" ? extractedStopReason : undefined, hasPiToolCallBlock(partialMessage && typeof partialMessage === "object" ? asRecord(partialMessage)?.content : undefined));
 		// 本条消息用的模型：message_end 的完整消息带 provider/model（message_start 骨架也有）。
 		// 缺省不覆盖旧值——delta 路径的消息对象可能不带这两个字段。
 		const messageRecord = partialMessage && typeof partialMessage === "object" ? asRecord(partialMessage) : undefined;

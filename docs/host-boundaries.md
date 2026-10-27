@@ -32,6 +32,7 @@
 
 - 主进程经常驻单进程 sidecar：`resources/pi-enhance-host.mjs`（stdout 只放 NDJSON，载入 `PIDECK_PI_SDK_ENTRY` 指向的 pi `dist/index.js` 建 `ModelRuntime`）。宿主收口 `src/main/pi/enhance/EnhancePromptService.ts`，启动参数定位复用 `piAuthHostLaunch` 的 `resolvePiAuthHostLaunch`；必须列进 `extraResources`。
 - 常驻单进程多 run：新 run 打断旧 run、显式 cancel、boot/run 超时、进程意外退出都在服务层结算（每 run 回调恰好一次）；渲染层按 scopeKey 隔离，切会话作废进行中的 run，结果只回填发起方输入框。入口 `enhance:run` / `enhance:cancel` / `enhance:on-event`（`src/main/ipc/enhanceIpc.ts`；provider/modelId 只挡空白/控制字符/超长，`builtin:`、`https://`、`a/b` 形态必须放行）。
+- 常驻进程的启动指纹（node / 助手脚本 / SDK 入口 / 代理 env）在**每次受理时**重新求值，任一变化即重建进程：env 在 spawn 时定格，不重建会让用户「改了代理设置却还是旧出口」。代理按 `proxyModel` 走与 pi 会话同一套名单语义（`applyPiProxyModeWithProvider` + `computeGenProxyKey`），因此名单模式下换模型会在「走代理」和「直连」之间切换进程；未传模型时跟随全局开关（pi-auth 侧车即此情形）。
 - 目标模型优先级见 `src/shared/enhanceModelPreference.ts`：设置固定模型（`settings.enhanceModel`）> 会话记录 > 引导页点选 > 部署/主进程默认；默认跟随会话模型。
 - **三个消费者必须各用独立实例**（服务的单飞语义是「新 run 打断旧 run」，共用会互相打断）：
   - 输入框增强：`EnhancePromptService` 主实例（logger 默认命名空间），hook `usePromptEnhance`。

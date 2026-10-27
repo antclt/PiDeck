@@ -102,8 +102,13 @@ export type EnhanceServiceRunInput = EnhanceRunInput & { systemPrompt?: string; 
 export type EnhanceAcceptResult = { ok: true; runId: string } | { ok: false; errorKind: EnhanceErrorKind; message: string };
 
 export type EnhancePromptServiceOptions = {
-	/** 由装配层注入：需要 app 路径、settings 与 PiLocator，服务本身不碰 electron。 */
-	resolveLaunch: () => PiAuthHostLaunch;
+	/**
+	 * 由装配层注入：需要 app 路径、settings 与 PiLocator，服务本身不碰 electron。
+	 * 入参是本次要用的模型：常驻进程的 env（代理）在 spawn 时就固定，
+	 * 名单模式下同一个进程不能同时服务「走代理」和「直连」的模型，
+	 * 所以要按模型现求值，指纹变了再重建进程。
+	 */
+	resolveLaunch: (run?: { provider?: string; modelId?: string }) => PiAuthHostLaunch;
 	logger?: EnhanceLogger;
 	/** 便于单测替换 spawn；默认用 node:child_process。 */
 	spawnFn?: typeof spawn;
@@ -145,6 +150,14 @@ function getErrorMessage(error: unknown): string {
 	return String(error);
 }
 
+/**
+ * 侧车进程的启动指纹：env（代理）与 SDK 入口都在 spawn 时固定，任一项变了就必须重建。
+ * 用 \0 分隔，避免路径里恰好包含分隔符时拼出同一个键。
+ */
+function launchKey(launch: Extract<PiAuthHostLaunch, { ok: true }>): string {
+	return [launch.nodeExe, launch.helperPath, launch.sdkEntry, launch.proxyKey].join("\u0000");
+}
+
 /** 解析助手的一行 stdout；非 JSON 或结构异常返回 undefined（前向兼容）。 */
 function parseHostRecord(line: string): HostRecord | undefined {
 	const trimmed = line.trim();
@@ -159,7 +172,7 @@ function parseHostRecord(line: string): HostRecord | undefined {
 }
 
 export class EnhancePromptService {
-	private readonly resolveLaunch: () => PiAuthHostLaunch;
+	private readonly resolveLaunch: (run?: { provider?: string; modelId?: string }) => PiAuthHostLaunch;
 	private readonly logger?: EnhanceLogger;
 	private readonly spawnFn: typeof spawn;
 	private readonly bootTimeoutMs: number;
@@ -167,6 +180,8 @@ export class EnhancePromptService {
 
 	private disposed = false;
 	private child: ChildProcessWithoutNullStreams | null = null;
+	/** 当前进程的启动指纹（node / 助手脚本 / SDK 入口 / 代理 env）；与本次求值不符则重建。 */
+	private childKey: string | null = null;
 	/** 当前进程的 boot 完成信号："ready" 可用；"dead" 表示本进程不可用（下次重拉）。 */
 	private childReady: Promise<"ready" | "dead"> | null = null;
 	private notifyReady: () => void = () => {};
@@ -208,7 +223,7 @@ export class EnhancePromptService {
 		// 先停掉助手侧旧模型流，再本地结算；只清 UI 会让旧请求继续消耗额度。
 		// 旧 id 的迟到记录被丢弃，不等待助手确认，也不会二次回调。
 		this.cancel();
-		const boot = await this.ensureChild();
+		const boot = await this.ensureChild({ provider: input.provider, modelId: input.modelId });
 		if (boot !== "ready") {
 			return { ok: false, errorKind: "sdk-unavailable", message: "增强助手启动失败，请重试" };
 		}
@@ -264,14 +279,18 @@ export class EnhancePromptService {
 	// ------------------------------------------------------------------
 
 	/** 拉起（或复用）助手进程并等到 ready。失败返回 "dead"，下次调用会重试新进程。 */
-	private ensureChild(): Promise<"ready" | "dead"> {
+	private ensureChild(run?: { provider?: string; modelId?: string }): Promise<"ready" | "dead"> {
 		if (this.disposed) return Promise.resolve("dead");
-		if (this.child && this.childReady) return this.childReady;
-		const launch = this.resolveLaunch();
+		const launch = this.resolveLaunch(run);
 		if (!launch.ok) {
 			this.logger?.warn(`增强助手启动参数解析失败：${launch.reason}${launch.detail ? `（${launch.detail}）` : ""}`);
 			return Promise.resolve("dead");
 		}
+		const key = launchKey(launch);
+		if (this.child && this.childReady && this.childKey === key) return this.childReady;
+		// 启动参数（代理模式/地址、pi 入口、node）变了：旧进程的 env 已失效，杀掉重拉。
+		// 常驻进程不重建就会让用户「改了代理设置却还是旧出口」。
+		if (this.child) this.killChild("launch-changed");
 		// sdkEntry 必须进日志：助手报「加载失败/卡住」时，第一步就是核对它拿到的是
 		// 哪个 node、哪个 SDK 入口（managed 安装的版本指针与手工测试未必同一个）。
 		this.logger?.debug(`启动增强助手：${launch.nodeExe} ${launch.helperPath}（SDK: ${launch.sdkEntry}）`);
@@ -281,6 +300,7 @@ export class EnhancePromptService {
 			windowsHide: true,
 		}) as ChildProcessWithoutNullStreams;
 		this.child = child;
+		this.childKey = key;
 		this.stderrTail = [];
 		// write 的异步 EPIPE 不会被 try/catch 或 child 的 error 监听捕获。
 		// 监听保留到旧进程被回收，身份核对让迟到管道错误只被吸收、不影响新 run。
@@ -349,6 +369,7 @@ export class EnhancePromptService {
 	private teardownChild(): ChildProcessWithoutNullStreams | null {
 		const child = this.child;
 		this.child = null;
+		this.childKey = null;
 		this.childReady = null;
 		// 半帧/半字符只属于原进程，不能与重拉助手的第一条 ready 拼接。
 		this.buffer = "";

@@ -1252,7 +1252,8 @@ export function createPreviewApi(): PiDesktopApi {
 			preferredSystemLanguages: async () => (navigator.languages?.length ? [...navigator.languages] : [navigator.language]),
 			networkAddresses: async () => [{ address: "192.168.1.100", interfaceName: "Wi-Fi", cidr: "192.168.1.100/24", isPrivate: true, family: "IPv4" }],
 			checkUpdate: async () => undefined,
-			getChannel: async () => ({ channel: "stable" as const, currentVersion: "preview", devBuild: false }),
+			// 浏览器预览不是真实构建：按 release 呈现，不显示「本地构建」徽章。
+			getChannel: async () => ({ channel: "stable" as const, currentVersion: "preview", devBuild: false, buildOrigin: "release" as const }),
 			onUpdateStatus: () => () => undefined,
 			onOpenSettings: () => () => undefined,
 			// 预览/浏览器模式没有全局快捷键，订阅退化为空操作

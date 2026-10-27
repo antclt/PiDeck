@@ -57,6 +57,12 @@ GitHub 的 choice 只能写死静态列表，无法动态读 tag，所以每发�
 
 `npm run pack`（--dir 快速验证）→ `dist:win/mac/linux`；发版前至少跑过一次目标平台完整安装包的人工 smoke，不依赖 CI 构建成功即发布。
 
+构建来源标记：本机脚本一律不注入 `PIDECK_RELEASE_BUILD`，产物因此在设置页显示「本地构建」徽章；
+发布 workflow（`release.yml` / `build-dev.yml` / `release-linux-manual.yml`）必须在其构建步骤 env 注入
+`PIDECK_RELEASE_BUILD: "1"`（编译期 define `__PIDECK_RELEASE_BUILD__` → 构建来源判定 release，见
+`src/main/buildIdentity.ts`）。漏标的表现是发布包也显示「本地构建」，守卫测试
+`tests/releaseWorkflowBuildOrigin.test.mjs` 会按「会发 Release 的 workflow」逐一拦下。
+
 ### macOS 签名（无 Apple 证书时的 ad-hoc 策略）
 
 - CI 与打包机都没有 Apple 证书，`package.json` 的 `build.mac.identity: "-"` 是签名身份的唯一来源（`scripts/dist-dev.js` 以 `build.mac` 为基底，dev 通道同样继承）。**不要删这一行**：electron-builder 26.15 起找不到证书时不再回退 ad-hoc（26.8.1 的 `fallBackToAdhoc` 已删除，`scheme.json` 的 identity 说明也写明 "no automatic ad-hoc fallback"），省略它只会得到「签名静默跳过、CI 全绿」的假绿包——0.9.0 的 arm64 包就是这样：没有 `Contents/_CodeSignature`、`Info.plist` 未封印（CodeDirectory identifier 仍是 Electron），Apple Silicon 上停在 `_dyld_start` 打不开（#347）。

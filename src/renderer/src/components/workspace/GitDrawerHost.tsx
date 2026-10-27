@@ -101,6 +101,25 @@ function repoLabel(repo: GitRepoInfo): string {
 }
 
 /**
+ * 两份「按仓库路径分桶的分支信息」内容是否一致。
+ *
+ * 多仓分支查询是异步的，结果对象每次都是新建的，内容没变也写进 state 会白渲染一轮；
+ * 更关键的是它把「上游依赖不稳定 → 反复查询 → 反复 setState → 再渲染」变成无限循环
+ * （React #185 Maximum update depth exceeded）。内容相同就返回原引用让 React bail out。
+ * `GitBranchInfo` 是纯数据（`{ current: string | null; branches: string[] }`），可安全比较。
+ */
+function sameBranchInfoMap(current: Record<string, GitBranchInfo>, next: Record<string, GitBranchInfo>): boolean {
+	const currentKeys = Object.keys(current);
+	if (currentKeys.length !== Object.keys(next).length) return false;
+	return currentKeys.every((key) => {
+		const left = current[key];
+		const right = next[key];
+		if (!right) return false;
+		return JSON.stringify(left) === JSON.stringify(right);
+	});
+}
+
+/**
  * Git 抽屉宿主：多仓时只堆叠各仓变更区；Graph / Compare 全局只挂一份，
  * 通过下拉切换仓库。单仓继续完整三栏；嵌套仓分支状态按路径隔离。
  */
@@ -113,7 +132,10 @@ export function GitDrawerHost(props: GitDrawerHostProps) {
 
 	useEffect(() => {
 		if (!needsScopedBranchInfo) {
-			setGitInfoByRepoPath({});
+			// 幂等写入：清空已空时返回原引用，React 直接 bail out。上游任何依赖一旦
+			// 变得不稳定（repos 换引用、gitApi 重建），这里每次都写 `{}` 就会变成
+			// 「effect → setState → 重渲染 → effect」的无限循环（React #185）。
+			setGitInfoByRepoPath((current) => (Object.keys(current).length === 0 ? current : {}));
 			return;
 		}
 		let cancelled = false;
@@ -126,7 +148,9 @@ export function GitDrawerHost(props: GitDrawerHostProps) {
 				}
 			}),
 		).then((entries) => {
-			if (!cancelled) setGitInfoByRepoPath(Object.fromEntries(entries));
+			if (cancelled) return;
+			const next = Object.fromEntries(entries);
+			setGitInfoByRepoPath((current) => (sameBranchInfoMap(current, next) ? current : next));
 		});
 		return () => {
 			cancelled = true;

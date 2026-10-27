@@ -417,6 +417,7 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
 					platform={props.appInfo.platform}
 					releasesUrl={props.appInfo.releasesUrl}
 					channel={channelInfo?.channel ?? "stable"}
+					buildOrigin={channelInfo?.buildOrigin ?? "release"}
 					installationType={draft.installationType}
 					updateSource={draft.updateSource}
 					checking={props.updateChecking}

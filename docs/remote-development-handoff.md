@@ -26,7 +26,7 @@
 >    要做时的安全做法：从**该会话自己的远端 runtime** 拿 pid（不用 `pkill -f pi`），kill 后断言会话自动恢复且历史仍在。
 >    ⇒ **P4.2 至此闭合**（协议/运行时/产品路/trust 可见/re-attach）；下一期是 P4.4（远端 trust 完整语义）。## 1. 当前能做什么
 
-远端功能仍限定为开发构建且显式设置 `PIDECK_REMOTE_EXPERIMENTAL=1`。正式包不开放这些能力。
+远端功能只在 **dev 通道构建**（`npm run dev` 与 `npm run dist:*-dev`）里提供；判据是 `update/channelIdentity.ts` 的 `isDevChannelBuild()`（`!app.isPackaged || __PIDECK_DEV_BUILD__`），不再读 `PIDECK_REMOTE_EXPERIMENTAL`（2026-10-27 用户裁定）。正式包（stable / release 流水线产物）不开放远端，渲染层也不渲染入口。
 
 | 能力 | 实现与验证状态 |
 | --- | --- |
@@ -325,10 +325,10 @@ A/B/C 可由不同开发者并行，D 随开发跟进。每块指定一个负责
 完成仓库 [贡献指南](../CONTRIBUTING.md) 中的开发环境准备后，在 POSIX shell 启用：
 
 ```bash
-PIDECK_REMOTE_EXPERIMENTAL=1 npm run dev
+npm run dev
 ```
 
-门禁位于 `src/main/index.ts`：`!app.isPackaged && process.env.PIDECK_REMOTE_EXPERIMENTAL === "1"`。设置页“连接”现在只管设备（添加、信任、连接/断开、诊断、修复）；**远端项目入口已在侧栏“+”**（本地目录 / 远端 SSH 两个真实入口）。
+门禁位于 `src/main/index.ts`：`isDevChannelBuild()`（未打包运行与 dev 通道安装包为 true，正式包为 false；2026-10-27 起不再读 `PIDECK_REMOTE_EXPERIMENTAL`）。设置页“连接”现在只管设备（添加、信任、连接/断开、诊断、修复）；**远端项目入口已在侧栏“+”**（本地目录 / 远端 SSH 两个真实入口），但该入口按同一判据在正式包里不渲染。
 
 日常只跑改动涉及的检查。例如 A 的读取/连接改动：
 

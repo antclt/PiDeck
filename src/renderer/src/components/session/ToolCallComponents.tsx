@@ -56,9 +56,8 @@ function toolIcon(toolName: string): ReactNode {
 	return <Wrench size={16} />;
 }
 
-/** 从工具消息 meta 中提取副标题（文件路径或命令），让 trigger 行能体现工具作用对象。
- *  pi 的工具参数可能是对象，也可能已被主进程截断/序列化为 JSON 字符串；两种格式都要兼容，否则 bash 命令摘要会丢失。 */
-function getToolSubtitle(message: ChatMessage): string {
+/** 从工具消息 meta 中提取副标题（文件路径或命令），不做去重（见 getToolSubtitle）。 */
+function pickToolSubtitle(message: ChatMessage): string {
 	const meta = message.meta;
 	if (!meta) return "";
 	// 优先从 args 取参数（pi 工具事件的标准结构）
@@ -103,6 +102,17 @@ function getToolSubtitle(message: ChatMessage): string {
 		}
 	}
 	return "";
+}
+
+/** trigger 行的副标题：工具作用对象（文件路径或命令）。
+ *  pi 的工具参数可能是对象，也可能已被主进程截断/序列化为 JSON 字符串；两种格式都要兼容，否则 bash 命令摘要会丢失。
+ *  副标题不得与主标签重复：ACP 的 meta.toolName 是 agent 给的人类标题（`` `ls -la` ``、`Read <路径>`），
+ *  标题里已经带着同一个参数，再当副标题回填就会把命令在同一行印两遍（2026-10 用户反馈）。 */
+function getToolSubtitle(message: ChatMessage): string {
+	const value = pickToolSubtitle(message);
+	if (!value) return value;
+	const title = getToolName(message);
+	return title.includes(value) ? "" : value;
 }
 
 /**
@@ -224,7 +234,7 @@ export const ToolCard = memo(function ToolCard(props: {
 	const showDiff = diffTarget !== undefined;
 	// 学 ZCode 过程行：主标签是语义动词（「读取」「执行」），作用对象进等宽 chip 单行截断；
 	// 原始工具名退到行 tooltip，不再常驻行内与动词重复占位。
-	const phrase = getToolPhraseFromArgs(toolName, props.message.meta?.args);
+	const phrase = getToolPhraseFromArgs(toolName, props.message.meta?.args, props.message.meta?.kind);
 	const durationMs = typeof props.message.meta?.durationMs === "number" ? props.message.meta.durationMs : undefined;
 	// 模型用 read 工具读取 SKILL.md 来加载 skill：识别后以 skill 徽标样式渲染
 	const skillName = getReadSkillName(props.message);

@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 688b0c500e60c4071b8e9d3d2683605e885705d3d97833b3a988dc1e5dba15e6（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 8c0ed41c5fbb47fc4494c94e55bf81a45998be6ca5744ea1cf08f239e63f4559（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -1464,6 +1464,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"sessionRef.insertAll": "引用全部（{count} 條）",
 	"sessionRef.insertSelected": "引用選中（{count} 條）",
 	"sessionRef.loadError": "載入失敗",
+	"sessionRef.truncated": "會話引用已截斷：保留最近 {kept} 條訊息，省略了更早的 {dropped} 條（超出引用上下文預算）。",
+	"sessionRef.truncatedNote": "[PiDeck] 會話引用已截斷：以下為最近 {kept} 條訊息，更早的 {dropped} 條超出上下文預算已省略。",
 	"app.shareAsImage": "分享為圖片",
 	"app.promptTemplatePickerTitle": "提示詞模板",
 
@@ -2541,8 +2543,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.import.targetProjectAgentsSkills": "專案 .agents/skills",
 	"config.import.scanning": "正在掃描 Claude Code 和 Codex…",
 	"config.import.candidateCount": "發現 {count} 個候選項",
-	"config.import.selectAll": "全選可匯入項",
-	"config.import.clearAll": "清除選擇",
+	"config.import.selectedCount": "已選 {selected} / 可匯入 {total}",
+	"config.import.selectPage": "全選本頁",
+	"config.import.deselectPage": "取消本頁",
 	"config.import.sourceFound": "已找到",
 	"config.import.sourceMissing": "未找到",
 	"config.import.sourceClaudeGlobal": "Claude Code · 使用者級",
@@ -5064,6 +5067,10 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.portableUpdateOpenRelease": "前往 GitHub 下 portable",
 	"settings.updateGithubFailHint": "官方 GitHub 直連失敗時，可在下方「更新源」切換到國內映象。",
 	"settings.updateUpToDate": "已是最新版本",
+	// 构建来源（与更新通道正交，2026-10）：本机打包/源码运行的版本号抄 package.json，
+	// 与发布版同号，「已是最新」只比版本字符串——不标出来会被误认为官方发布版。
+	"settings.buildOriginLocal": "本地構建",
+	"settings.buildOriginLocalHint": "本機構建：版本號取自 package.json，「已是最新」只表示版本字串與最新發布版相同。",
 	"settings.updateErrorDetail": "更新失敗：{error}",
 	"settings.checkUpdateRetry": "重試檢測",
 	"app.updateCardVersion": "PiDeck v{version}",
@@ -5811,6 +5818,13 @@ export const zhTW: Record<TranslationKey, string> = {
 	"agent.loading.responding2": "組織回答",
 	"agent.loading.responding3": "撰寫回復",
 	"agent.loading.compacting": "正在壓縮",
+	"agent.loading.retrying": "正在重試",
+	"agent.loading.retryingCount": "正在重試 {attempt}/{max}",
+	"agent.loading.retryIn": "{seconds} 秒後",
+	"agent.loading.contextUsage": "上下文 {percent}%",
+	// 状态条尾部指标的行内解释（悬停 title）：用户不知道数字数的是什么
+	"agent.loading.hint.retryIn": "{seconds} 秒後：下一次自動重試的倒計時，到點自動發起",
+	"agent.loading.hint.contextUsage": "上下文 {percent}%：本輪對話已佔用的上下文視窗比例，到 80% 起提示",
 	"agent.loading.waiting": "正在處理",
 	"agent.loading.aria": "Agent 執行中",
 	// 流式状态条右侧的功能提示（sessionFeatureTips.ts，逐条按代码核实过入口）
@@ -6194,6 +6208,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"session.trajectory.loadOlder": "載入更早記錄",
 	"session.trajectory.loadingOlder": "正在載入…",
 	"session.trajectory.runtime": "最近一次回覆指標",
+	"session.trajectory.field.provider": "供應商",
 	"session.trajectory.lane.input": "輸入",
 	"session.trajectory.lane.model": "模型",
 	"session.trajectory.lane.tools": "工具",
@@ -6876,7 +6891,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"sidebar.remoteEnroll.resolve": "解析並確認",
 	"sidebar.remoteEnroll.loading": "正在讀取主機列表…",
 	"sidebar.remoteEnroll.loadFailed": "無法讀取主機列表：{code}",
-	"sidebar.remoteEnroll.featureDisabled": "遠端功能未啟用：穩定版暫未開放遠端開發，請使用開發版（PiDeck Dev）。",
+	"sidebar.remoteEnroll.featureDisabled": "遠端功能未啟用：當前構建不提供遠端開發能力。",
 	"sidebar.remoteEnroll.needsRepair": "遠端主機儲存需要修復，請先在裝置設定裡完成修復。",
 	"sidebar.remoteEnroll.noHost": "沒有已驗證且未停用的主機。先在裝置設定裡新增主機並完成指紋確認。",
 	"sidebar.remoteEnroll.openDeviceSettings": "去裝置設定",

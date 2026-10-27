@@ -257,6 +257,13 @@ export type AgentRuntimeState = {
 	sessionTps?: number;
 	/** 会话累计平均端到端速度（tokens/s；output tokens ÷ 整体活跃耗时并集，已消除派生任务并发重叠）。 */
 	sessionEndToEndTps?: number;
+	/**
+	 * 最近一次回复实际使用的供应商/模型（结算时记账，不随之后切模型变化）。
+	 * 与同一状态里的 provider/modelId（当前模型）不同：切模型后仍归属发起这次回复的那个模型。
+	 */
+	perfProvider?: string;
+	perfModelId?: string;
+	perfModelName?: string;
 	/** 性能指标结算时刻（Date.now()），渲染层据此判断是否为近期数据 */
 	perfAt?: number;
 };

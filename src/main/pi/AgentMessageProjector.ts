@@ -44,6 +44,28 @@ export function buildActiveBranchEntryIds(entries: Array<{ id: string; parentId:
 	});
 }
 
+/** assistant.content 里是否有工具调用块（`toolCall` 是 pi 会话文件里的块类型名）。 */
+export function hasPiToolCallBlock(content: unknown): boolean {
+	if (!Array.isArray(content)) return false;
+	return content.some((block) => Boolean(block) && typeof block === "object" && (block as Record<string, unknown>).type === "toolCall");
+}
+
+/**
+ * 归一 pi assistant 消息的收尾原因：`toolUse` 的协议含义是「本回合后面还有工具调用」，
+ * 所以「带 toolUse 却没有任何 toolCall 块」是自相矛盾的记录。
+ *
+ * 实测成因（2026-10 用户反馈「没有工具调用、没有思考时最终回复被折叠」）：回合流式途中
+ * 用户发了新消息，pi 把被打断的那条 assistant 按 toolUse 收尾——它既没有 toolCall 块，
+ * 后面也不再接任何工具。渲染层按 stopReason 判定最终回答（toolUse = 中间回复），整段回复
+ * 于是被折进「执行过程」，会话空闲后也一直看不到。
+ *
+ * 规则与导入侧 `importNormalize.normalizeImportedStopReason` 一致：有 toolCall 才是
+ * toolUse，没有工具调用的收尾消息一律算最终回复（stop）。
+ */
+export function normalizePiStopReason(stopReason: string | undefined, hasToolCall: boolean): string | undefined {
+	return stopReason === "toolUse" && !hasToolCall ? "stop" : stopReason;
+}
+
 /**
  * Converts persisted Pi/RPC history into renderer ChatMessage records. It has no
  * process, window, or Session ownership; AgentManager supplies the live state
@@ -134,7 +156,8 @@ export class AgentMessageProjector {
 						if (!text.trim() && !thinking?.trim() && images.length === 0) return [];
 						// stopReason（provider 归一化）：历史 JSONL 已持久化，
 						// 渲染层据此精确区分中间/最终回复（与 live 路径同源）。
-						const stopReason = typeof typed.stopReason === "string" && typed.stopReason ? typed.stopReason : undefined;
+						// 归一：被打断的纯文本回复在 pi 里记成 toolUse 但没有 toolCall 块，见 normalizePiStopReason。
+						const stopReason = normalizePiStopReason(typeof typed.stopReason === "string" && typed.stopReason ? typed.stopReason : undefined, hasPiToolCallBlock(typed.content));
 						// 本条消息用的模型：pi 会话文件每条 assistant 消息自带 provider/model。
 						// 同一会话里用户会频繁换模型，时间线按条展示需要这个字段。
 						const modelProvider = typeof typed.provider === "string" ? typed.provider : "";

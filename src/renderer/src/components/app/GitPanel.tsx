@@ -707,6 +707,9 @@ export function GitPanel(props: GitPanelProps) {
 					// 直接 set 会让 FileTree（浅比较 memo）每 5 秒对整棵变更树全量
 					// reconcile——大仓（万级文件）零变化也一样。与上方 aheadBehind 同款门卫。
 					setGroups((current) => (deepEqual(current, next) ? current : next));
+					// 静默轮询成功也清掉上一次的失败横幅：作用域恢复（切项目后仓库列表回填、
+					// 外部 git 操作修好目录）后，错误文本没有别的出口，会一直挂在变更区。
+					setError((current) => (current ? null : current));
 					// 刷新成功说明当前目录可用，恢复仓库/工具标记（手动 git init 或安装 git 后自动恢复轮询）
 					setNotAGitRepo(false);
 					setGitNotInstalled(false);

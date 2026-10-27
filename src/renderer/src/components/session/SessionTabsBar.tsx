@@ -633,14 +633,15 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
           放在滚动容器外层（absolute 子元素放 overflow-x-auto 容器内会随内容滚走）。 */}
 				{tabsOverflow && <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 z-10 w-6 bg-gradient-to-l from-background/90 to-transparent" />}
 			</div>
-			{/* 右侧抽屉总开关：固定在会话 Tab 栏最右侧；面板切换图标在抽屉内活动栏。
+			{/* 抽屉开关：关闭态在会话 Tab 栏最右侧开启；打开后开关并入抽屉活动栏左端（
+          贴抽屉左边界），本栏隐藏，否则同一动作在相邻两行各出现一颗按钮。
           运行控制 / 会话操作 / 工具开关已并入会话头部控制钮（SessionActionsControl），
           本栏只保留「+」新建会话与抽屉开关；Tab 级操作（固定/关闭等）在 Tab 右键菜单。 */}
 			{props.onToggleDrawer || props.actions != null ? (
 				<div className="session-tabs-actions flex shrink-0 items-center gap-1 border-l border-border/30 pl-1">
 					{props.actions}
-					{props.onToggleDrawer ? (
-						<Button type="button" variant="ghost" size="icon-sm" className={`header-drawer-toggle size-7${props.drawerOpen ? " active" : ""}`} title={props.drawerOpen ? t("app.closeDrawer") : t("app.openDrawer")} aria-label={props.drawerOpen ? t("app.closeDrawer") : t("app.openDrawer")} onClick={props.onToggleDrawer}>
+					{props.onToggleDrawer && !props.drawerOpen ? (
+						<Button type="button" variant="ghost" size="icon-sm" className="header-drawer-toggle size-7" title={t("app.openDrawer")} aria-label={t("app.openDrawer")} onClick={props.onToggleDrawer}>
 							<PanelRight className="size-3.5" aria-hidden="true" />
 						</Button>
 					) : null}

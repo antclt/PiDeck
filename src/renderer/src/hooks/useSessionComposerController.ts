@@ -7,6 +7,7 @@ import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../../shared/fileTree";
 import { classifyCompactError, compactOwnerReason, compactRoutedCommand, type CompactNoticeKind } from "../../../shared/compactFeedback";
 import { findImageGenProvider } from "../../../shared/imageGenConfig";
 import { findVideoGenProvider } from "../../../shared/videoGenConfig";
+import { buildSessionReferenceContext } from "../../../shared/sessionReferenceContext";
 import { resolveEnhanceTargetModel } from "../../../shared/enhanceModelPreference";
 import { collectPromptEnhanceContext } from "../utils/promptEnhanceContext";
 import { sessionCommandsRefreshTickAtom } from "../atoms/session-commands-atoms";
@@ -1138,7 +1139,17 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			return await expandSessionReferences(message, targets, async (session) => {
 				const saved = sessionReferenceSelections[`&${session.name}`];
 				const selectedMessages = saved ? selectedSessionReferenceMessages(saved) : await desktopApi.sessions.readReferenceMessages(session.id);
-				return selectedMessages.map((item) => `[${item.role === "user" ? "User" : "Assistant"}]: ${item.content}`).join("\n");
+				// 取文口径与预算统一收口在 shared/sessionReferenceContext：thinking 不进引用上下文，
+				// 超出预算时保留最近的消息并提示用户。这段正文会写进用户消息落盘，之后每轮请求
+				// 都随历史重传，所以必须在这里一次性封顶，不能交给上游上下文水位兜底。
+				const context = buildSessionReferenceContext(selectedMessages);
+				if (context.dropped > 0) {
+					const params = { kept: context.kept, dropped: context.dropped };
+					showNotice(t("sessionRef.truncated", params), 6000);
+					// 块内留一行说明：模型要知道这是「最近一段」而不是完整会话，否则会答“我没看到那条”。
+					return `${t("sessionRef.truncatedNote", params)}\n${context.body}`;
+				}
+				return context.body;
 			});
 		},
 		[projectSessions, sessionReferenceSelections],

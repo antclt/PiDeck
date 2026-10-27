@@ -183,6 +183,11 @@ const remoteExperimentEnabled = true;
   开关只影响装配，不牵扯其它逻辑。
 - 守卫：`tests/remoteHostIpc.test.mjs` 断言该行是字面量 `true`，且禁止重新耦合
   `app.isPackaged` / 环境变量（否则 `pack:dev` 出的包又会静默关掉远端）。
+
+**后续（2026-10-27，用户裁定）：上述恒开已作废。** 远端只在 **dev 通道构建**提供——
+开关改为 `isDevChannelBuild()`（未打包运行 / `dist:*-dev` 为 true，release 产物为 false），
+正式包不启用且渲染层不渲染入口；`PIDECK_REMOTE_EXPERIMENTAL` 不再被读取。
+`tests/remoteHostIpc.test.mjs` 的守卫已随之改写（策略变更，非放宽断言）。
 - 曾短暂采用的 `remoteFeatureGate.ts`（三档：stable 恒关 / dev 态需环境变量 / dev 品牌包默认开）
   已随本决策删除；`channelIdentity.ts` 的 `isDevBrandBuild()` 一并移除。
 

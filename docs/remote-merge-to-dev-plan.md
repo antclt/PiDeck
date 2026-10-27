@@ -42,9 +42,16 @@ const remoteExperimentEnabled = true;   // 2026-10-19 集成分支策略：任�
 | **C 单行可配**（默认关，env 开） | 1 行 + 1 条测试 + 3 份 i18n 文案 | 低：1 行 diff + 针对性测试 | 低 | 1–2 小时 |
 
 - 推荐：**合并提交用 A（零代码 diff），随后独立 commit 补 C**。FF 合并不该夹带行为变更——否则「合并出问题」和「开关出问题」无法归因。
+- **决议（2026-10-27，用户裁定）：远端能力只在 dev 通道提供，正式包不启用也不提及。** 落地形态取 B/C 的语义但复用已有判据，不新写纯函数：`src/main/index.ts` 的开关改为
+
+```ts
+const remoteExperimentEnabled = isDevChannelBuild();   // 未打包运行 / dev 通道包为 true，release 产物为 false
+```
+
+  即「未打包运行（npm run dev / E2E）与 dev 通道安装包开，stable 通道安装包关」；渲染层按同一判据（`app:get-channel` 的 `devBuild`，见 `hooks/useRemoteFeatureAvailable.ts`）连入口都不渲染（侧栏「+ → 远端（SSH）…」与设置「连接」tab）。`docs/remote-merge-to-dev-plan.md` 原表列的 A「恒开」因此作废。
 - 关掉不会白屏：未启用时所有 host IPC 统一返回 `REMOTE_FEATURE_DISABLED`，renderer 每处都有文案（`ConnectionsTab.tsx:50-51`、`AddHostDialog.tsx:53`、`RemoteProjectTrustPanel.tsx:43`、`RemoteProjectEnrollDialog.tsx:46`、`RemoteGitPanel.tsx:80`）。
-- 两个约束：`tests/remoteHostIpc.test.mjs:39` 显式禁止把开关重新耦合到 `app.isPackaged` / `PIDECK_REMOTE_EXPERIMENTAL`（选 B/C 必须同改这条并在 PR 写明「策略变更」而非放宽断言）；`e2e/remote-fixtures.ts:158` 仍在给子进程注入 `PIDECK_REMOTE_EXPERIMENTAL=1`（现为无害 no-op，选 C 时正好复用）。
-- 选 C 时 `sidebar.remoteEnroll.featureDisabled` 三份文案（zh-CN / en-US / zh-TW 生成物）要改成新口径，否则会让用户去设一个没人设的变量。
+- 两个约束：`tests/remoteHostIpc.test.mjs:39` 显式禁止把开关重新耦合到 `app.isPackaged` / `PIDECK_REMOTE_EXPERIMENTAL`（2026-10-27 已按「策略变更」改写为断言 `isDevChannelBuild()` 接线，不是放宽断言）；`e2e/remote-fixtures.ts:158` 仍在给子进程注入 `PIDECK_REMOTE_EXPERIMENTAL=1`（现为无害 no-op）。
+- `sidebar.remoteEnroll.featureDisabled` 文案已改成新口径（不再让用户去设一个没人读的变量），zh-TW 为生成物（`node scripts/genZhTwCopy.mjs`）。
 
 ### 1.3 门禁台账与代码不一致（6 份文档 10 处）
 

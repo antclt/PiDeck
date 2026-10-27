@@ -7,6 +7,7 @@ import { app, dialog, ipcMain, shell } from "electron";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { ipcChannels } from "../../shared/ipc";
+import { resolveBuildOrigin } from "../buildIdentity";
 import { isDevChannelBuild, resolveUpdateChannel } from "../update/channelIdentity";
 import { UPDATE_REPO, UPDATE_REPO_OWNER } from "../update/releaseRepo";
 import { probeAllMirrors, type MirrorHealthResult } from "../update/mirrorHealth";
@@ -1323,6 +1324,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		currentVersion: app.getVersion(),
 		// 构建身份：未打包 dev 或 dev 通道包为 true，stable 安装包恒 false（不作为功能入口门控）。
 		devBuild: isDevChannelBuild(),
+		// 来源与通道正交：本地打包的 stable 包在更新界面上与官方发布包同形，靠这个字段区分。
+		buildOrigin: resolveBuildOrigin(),
 	}));
 	ipcMain.handle(ipcChannels.appDownloadUpdate, async () => {
 		await updateService?.downloadNow();

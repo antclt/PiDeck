@@ -315,3 +315,35 @@ test("assistant without usage/duration leaves the meta fields absent", () => {
 	assert.equal(assistant?.meta?.durationMs, undefined);
 	assert.equal(assistant?.meta?.startedAt, undefined);
 });
+
+// 回归（2026-10 用户反馈「没有工具调用、没有思考时最终回复被折叠」）：
+// 用户在回合流式途中发新消息时，pi 把被打断的那条 assistant 按 stopReason="toolUse" 收尾，
+// 但它没有任何 toolCall 块，后面也不再接工具。渲染层按 stopReason 判定最终回答
+// （toolUse = 中间回复），整段回复被折进「执行过程」，会话空闲后也看不到。
+// 投影侧按「有无 toolCall 块」归一，与导入侧 normalizeImportedStopReason 同一契约。
+test("stopReason=toolUse 但没有 toolCall 块的历史回复归一为最终回复", () => {
+	const messages = createProjector().convert("agent", [
+		{ role: "user", content: [{ type: "text", text: "WPS 怎么复制" }], timestamp: 1_000 },
+		{ role: "assistant", content: [{ type: "text", text: "复制成数值有几种办法…" }], timestamp: 1_500, stopReason: "toolUse" },
+	]);
+	const assistant = messages.find((message) => message.role === "assistant");
+	assert.equal(assistant?.stopReason, "stop", "无工具调用的收尾消息不得保留 toolUse");
+});
+
+test("stopReason=toolUse 且带 toolCall 块的历史回复保持中间回复", () => {
+	const messages = createProjector().convert("agent", [
+		{ role: "user", content: [{ type: "text", text: "看下代码" }], timestamp: 1_000 },
+		{
+			role: "assistant",
+			content: [
+				{ type: "text", text: "我先看下代码" },
+				{ type: "toolCall", id: "call-1", name: "read", arguments: { path: "src/a.ts" } },
+			],
+			timestamp: 1_500,
+			stopReason: "toolUse",
+		},
+		{ role: "toolResult", toolCallId: "call-1", content: [{ type: "text", text: "file" }], timestamp: 2_000 },
+	]);
+	const assistant = messages.find((message) => message.role === "assistant");
+	assert.equal(assistant?.stopReason, "toolUse", "带工具调用的中间回复必须保留 toolUse");
+});

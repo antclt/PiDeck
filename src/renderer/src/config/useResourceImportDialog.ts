@@ -9,6 +9,9 @@ const api = desktopApi;
 
 export type ResourceImportProject = { id: string; name: string; kind?: string };
 
+/** 候选列表每页条数：扫描结果动辄上百条，分页避免弹窗里刷屏。 */
+export const RESOURCE_IMPORT_PAGE_SIZE = 20;
+
 export type ResourceImportTargetOption = {
 	value: string;
 	label: string;
@@ -45,6 +48,8 @@ export function useResourceImportDialog(options: UseResourceImportDialogOptions)
 	const [target, setTarget] = useState<ResourceImportTarget>(() => (options.kind === "skill" && options.fixedProjectId ? { scope: "project", projectId: options.fixedProjectId, locationId: "project-pi" } : { scope: "global", locationId: "pi-global" }));
 	const [scan, setScan] = useState<ResourceImportScanResult | null>(null);
 	const [selected, setSelected] = useState<Set<string>>(new Set());
+	/** 候选列表当前页（1 基）：展示层负责在页数收缩时收敛，这里只保存用户意图。 */
+	const [page, setPage] = useState(1);
 	const [loading, setLoading] = useState(false);
 	const [applying, setApplying] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -116,6 +121,7 @@ export function useResourceImportDialog(options: UseResourceImportDialogOptions)
 			setError(null);
 			setSelected(new Set());
 			setReport(null);
+			setPage(1);
 			try {
 				const response = await api.resourceImport.scan({
 					kind: options.kind,
@@ -147,6 +153,7 @@ export function useResourceImportDialog(options: UseResourceImportDialogOptions)
 			setSelected(new Set());
 			setReport(null);
 			setError(null);
+			setPage(1);
 		}
 		setOpen(options.open);
 	}, [options.open]);
@@ -159,6 +166,7 @@ export function useResourceImportDialog(options: UseResourceImportDialogOptions)
 				setScan(null);
 				setSelected(new Set());
 				setReport(null);
+				setPage(1);
 			}
 		}
 	}, [open, target, targetOptionEntries]);
@@ -169,6 +177,7 @@ export function useResourceImportDialog(options: UseResourceImportDialogOptions)
 		setReport(null);
 		setError(null);
 		setSelected(new Set());
+		setPage(1);
 		void runScan(selectedTargetEntry.target);
 	}, [open, runScan, selectedTargetKey]);
 
@@ -180,10 +189,32 @@ export function useResourceImportDialog(options: UseResourceImportDialogOptions)
 		[targetOptionEntries],
 	);
 
+	/** 全选 / 取消全选：作用于全部候选（跨页），不是当前页。 */
 	const toggleAll = useCallback(
 		(checked: boolean) => {
 			if (!scan) return;
 			setSelected(checked ? new Set(scan.candidates.filter(canImportResource).map((candidate) => candidate.candidateId)) : new Set());
+		},
+		[scan],
+	);
+
+	/**
+	 * 当前页全选 / 取消全选：只动本页的可导入候选，其他页的选择保持不变。
+	 * page 由调用方传入展示层收敛后的页码，避免展示层页数收缩后操作到不存在的页。
+	 */
+	const togglePage = useCallback(
+		(checked: boolean, pageIndex: number) => {
+			if (!scan) return;
+			const start = Math.max(0, Math.floor(pageIndex) - 1) * RESOURCE_IMPORT_PAGE_SIZE;
+			const pageIds = scan.candidates.slice(start, start + RESOURCE_IMPORT_PAGE_SIZE).map((candidate) => candidate.candidateId);
+			setSelected((current) => {
+				const next = new Set(current);
+				for (const id of pageIds) {
+					if (checked) next.add(id);
+					else next.delete(id);
+				}
+				return next;
+			});
 		},
 		[scan],
 	);
@@ -229,6 +260,7 @@ export function useResourceImportDialog(options: UseResourceImportDialogOptions)
 				setScan(null);
 				setSelected(new Set());
 				setReport(null);
+				setPage(1);
 			}
 			setOpen(nextOpen);
 		},
@@ -245,7 +277,10 @@ export function useResourceImportDialog(options: UseResourceImportDialogOptions)
 		effectiveTarget,
 		scan,
 		selected,
+		page,
+		setPage,
 		toggleAll,
+		togglePage,
 		toggleCandidate,
 		loading,
 		applying,

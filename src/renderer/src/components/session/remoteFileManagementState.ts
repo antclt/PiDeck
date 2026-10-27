@@ -82,10 +82,6 @@ export function remoteFileEntryErrorKey(code: string | null): TranslationKey {
 			return "sidebar.remoteEnroll.createUnconfirmed";
 		case "REMOTE_PROJECT_CREATE_FAILED":
 			return "sidebar.remoteEnroll.createFailed";
-		case "REMOTE_PROJECT_PARENT_NOT_FOUND":
-			return "sidebar.remoteEnroll.parentMissing";
-		case "REMOTE_PROJECT_TARGET_EXISTS":
-			return "sidebar.remoteEnroll.createExists";
 		case "SSH_HOST_NOT_READY":
 		case "SSH_HOST_DISCONNECTED":
 		case "REMOTE_CONNECTION_SERVICE_UNAVAILABLE":

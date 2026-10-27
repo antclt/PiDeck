@@ -149,7 +149,8 @@ test("text backend badge keeps its width instead of covering tab actions", () =>
 
 test("session tabs stay outside SessionView; header is standalone in pane", () => {
 	assert.match(tabBar, /actions\?: ReactNode/);
-	assert.match(tabBar, /props\.onToggleDrawer \? \(/);
+	// 抽屉开关：关闭态在 Tab 栏（打开后并入抽屉活动栏左端）
+	assert.match(tabBar, /props\.onToggleDrawer && !props\.drawerOpen \? \(/);
 	// Tab 栏外置后，SessionView 只渲染独立 Header，不再把操作嵌入 Tab 的 actions 槽。
 	assert.doesNotMatch(sessionView, /SessionTabsBar/);
 	// header 不再接收 widget chips（2026-08 移除：待办统一走输入框上方常驻条）

@@ -11,8 +11,9 @@
  * （headSearchedBytes 只对头块生效——其余块要么整块消费、要么是刚到达当轮
  * 已扫过的尾块）。行尾单个 \r 剥离（NDJSON 对 CRLF 的标准容忍）。
  *
- * 溢出/关闭策略不在泵内：调用方按各自协议语义处理（pi 丢缓冲报协议错误、
- * ACP 先切行再看剩余再关连接），泵只提供 bufferedBytes / reset / end。
+ * 溢出/关闭策略不在泵内：调用方按各自协议语义处理（pi 丢当前帧后重新对齐报协议错误、
+ * ACP 先切行再看剩余再关连接），泵只提供 bufferedBytes / peekHead / discardUntilNewline /
+ * reset / end。
  */
 export type NdjsonLinePump = {
 	/** 喂入一个 stdout data chunk（Buffer 或 string），内部完成切行分发。 */
@@ -21,8 +22,18 @@ export type NdjsonLinePump = {
 	end(): void;
 	/** 清空缓冲，返回丢弃的字节数（协议错误/关闭路径用）。 */
 	reset(): number;
-	/** 当前未成行缓冲的字节数。 */
+	/**
+	 * 超限处理（pi RPC 用）：丢弃当前未成行的缓冲，并进入「丢弃字节直到下一个 LF」的重新对齐
+	 * 状态，返回此刻丢弃的字节数。**不能只清空缓冲**：超长帧的剩余部分会被当成下一帧的起始，
+	 * 其后所有帧边界全错位，请求/响应配对永久失配（图片大帧撑爆行上限时必现）。
+	 */
+	discardUntilNewline(): number;
+	/** 未成行缓冲开头最多 maxBytes 字节的 UTF-8 文本（诊断用：从超长帧里认字段，不吐正文）。 */
+	peekHead(maxBytes: number): string;
+	/** 当前未成行缓冲的字节数；重新对齐期间恒为 0（调用方不会重复触发超限）。 */
 	readonly bufferedBytes: number;
+	/** 是否正在丢弃字节直到下一个 LF（重新对齐中）。 */
+	readonly discarding: boolean;
 };
 
 /**
@@ -33,6 +44,8 @@ export function createNdjsonLinePump(onLine: (line: string) => boolean | void): 
 	let chunks: Buffer[] = [];
 	let totalBytes = 0;
 	let headSearched = 0;
+	/** 超长帧丢弃后跳过字节直到下一个 LF，避免把它的尾巴当成新帧起始。 */
+	let discarding = false;
 
 	const dispatch = (line: Buffer): boolean => {
 		// 行尾单个 \r 剥离（CRLF 容忍）；空行照常分发，由消费方决定跳过
@@ -82,15 +95,39 @@ export function createNdjsonLinePump(onLine: (line: string) => boolean | void): 
 		}
 	};
 
+	/** 清空缓冲并返回丢弃字节数。 */
+	const clear = (): number => {
+		const dropped = totalBytes;
+		chunks = [];
+		totalBytes = 0;
+		headSearched = 0;
+		return dropped;
+	};
+
 	return {
 		push(chunk: Buffer | string): void {
-			const bytes = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk;
+			let bytes = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk;
 			if (bytes.length === 0) return;
+			if (discarding) {
+				const lf = bytes.indexOf(0x0a);
+				// 整块都属于被丢弃的超长帧，没有 LF 就继续跳过
+				if (lf === -1) return;
+				// LF 结束超长帧：它之后的字节才是下一帧的起始，重新对齐完成
+				discarding = false;
+				bytes = bytes.subarray(lf + 1);
+				if (bytes.length === 0) return;
+			}
 			chunks.push(bytes);
 			totalBytes += bytes.length;
 			drain();
 		},
 		end(): void {
+			// 超长帧没等到 LF 就 EOF：残端已随重新对齐放弃，不能当成一行吐出
+			if (discarding) {
+				discarding = false;
+				clear();
+				return;
+			}
 			if (chunks.length === 0) return;
 			const line = chunks.length === 1 ? chunks[0] : Buffer.concat(chunks);
 			chunks = [];
@@ -100,14 +137,30 @@ export function createNdjsonLinePump(onLine: (line: string) => boolean | void): 
 			dispatch(line);
 		},
 		reset(): number {
-			const dropped = totalBytes;
-			chunks = [];
-			totalBytes = 0;
-			headSearched = 0;
-			return dropped;
+			discarding = false;
+			return clear();
+		},
+		discardUntilNewline(): number {
+			discarding = true;
+			return clear();
+		},
+		peekHead(maxBytes: number): string {
+			const wanted = Number.isFinite(maxBytes) ? Math.max(0, Math.floor(maxBytes)) : 0;
+			const parts: Buffer[] = [];
+			let taken = 0;
+			for (const piece of chunks) {
+				if (taken >= wanted) break;
+				const slice = piece.subarray(0, wanted - taken);
+				parts.push(slice);
+				taken += slice.length;
+			}
+			return Buffer.concat(parts).toString("utf8");
 		},
 		get bufferedBytes(): number {
 			return totalBytes;
+		},
+		get discarding(): boolean {
+			return discarding;
 		},
 	};
 }

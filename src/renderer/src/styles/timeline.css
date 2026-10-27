@@ -645,19 +645,33 @@
 }
 
 /* ── 状态变体：只差异颜色，容器尺寸不变，避免布局跳动 ──
-   starting / executing / compacting 用警告色（后台在忙、等待时长不确定）；
+   starting / executing / compacting / retrying 用警告色（后台在忙、等待时长不确定；
+   retrying 还表示本次请求已失败，需要与“正常推进”区分开）；
    thinking / responding 不写规则，继承容器基础色（模型正常输出中）；waiting 用最弱三级色。
    新增 kind（如 thinking）不写规则即继承基础色，这是有意的默认分支。 */
 
 /* 状态色只作用于前置指示器（Loader 用 currentColor）与文字基调；无框后不再有边框/背景色 */
 .responding-indicator[data-kind="starting"],
 .responding-indicator[data-kind="executing"],
-.responding-indicator[data-kind="compacting"] {
+.responding-indicator[data-kind="compacting"],
+.responding-indicator[data-kind="retrying"] {
   color: var(--color-warning, #d97706);
 }
 
 /* 过渡等待：只显示静态文案，不轮播 */
 .responding-indicator[data-kind="waiting"] {
+  color: var(--color-text-tertiary);
+}
+
+/* 尾部事实后缀（重试倒计时 / 本轮步数 / 上下文压力 / 秒表）：
+   与主文案同行但降一级颜色，tabular-nums 让每秒跳动的数字不推动布局；
+   窄面板下宁可截断也不把消息流撑宽。 */
+.responding-suffix {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
   color: var(--color-text-tertiary);
 }
 
