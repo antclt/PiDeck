@@ -311,6 +311,7 @@ import { AcpAgentManager } from "./acp/AcpAgentManager";
 import { AcpSessionArchive } from "./acp/AcpSessionArchive";
 import { acpMessagePage } from "./acp/acpMessagePage";
 import { findSessionMatches } from "./sessions/sessionFindMatches";
+import { broadcastCatalogRefreshed } from "./sessions/catalogRefresh";
 import { registerAcpIpc } from "./ipc/acpIpc";
 import { DshHost, resolveDshHomeDir } from "./dsh/DshHost";
 import { DshPluginInstallService } from "./dsh/DshPluginInstallService";
@@ -956,13 +957,11 @@ const foreignSyncDeps: DshForeignSyncDeps = {
 	dismissedDshSessionIds: () => sessionCatalog.listDismissedDshSessionIds(),
 };
 
-/** 导入/同步落库后向渲染层广播对应项目刷新（侧栏静默重拉，新会话立即可见）。 */
-function notifyDshCatalogRefreshed(projectIds: Iterable<string>): void {
-	const window = mainWindow;
-	if (!window || window.isDestroyed()) return;
-	for (const projectId of new Set(projectIds)) {
-		window.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId });
-	}
+/** catalog 变更后向渲染层广播对应项目刷新（侧栏静默重拉，新/删/改的会话立即对齐）。
+ *  渲染进程自己发起的增删改会拿 IPC 返回值就地更新，所以只有**非渲染进程发起**的改动
+ *  （DSH 导入/同步、自动化、Web API 等）才必须走这里，否则侧栏会留下幽灵行或漏掉新行（issue #436）。 */
+function notifyCatalogRefreshed(projectIds: Iterable<string>): void {
+	broadcastCatalogRefreshed(projectIds, { channel: ipcChannels.sessionsCatalogRefreshed, getWindow: () => mainWindow });
 }
 
 /** 按当前设置过滤可见项目并推给渲染层（启动 load / 自动导入兑底项目后共用）。 */
@@ -1001,7 +1000,7 @@ async function runDshForeignSync(): Promise<{ imported: number; skipped: number 
 	const result = await syncForeignSessions(foreignSyncDeps, knownForeignSessionIds(sessionCatalog.listEntries()));
 	if (result.imported > 0 || result.skipped > 0) {
 		// skipped>0 也可能是纠正归属（从兑底拆到各自目录），侧栏要重拉。
-		notifyDshCatalogRefreshed(
+		notifyCatalogRefreshed(
 			sessionCatalog
 				.listEntries()
 				.filter((entry) => entry.backend === "dsh" && entry.dshSessionId)
@@ -4357,7 +4356,7 @@ function registerIpc() {
 			// 幂等：同 dshSessionId 重复导入被 SessionCatalog.createDraft 吸收（只更新标题/归属）。
 			importDshForeignSession: async (dshSessionId) => {
 				const record = await importForeignSession(foreignSyncDeps, dshSessionId);
-				notifyDshCatalogRefreshed([record.projectId]);
+				notifyCatalogRefreshed([record.projectId]);
 				void appLogger.info("session", "Foreign DSH session imported", {
 					dshSessionId,
 					projectId: record.projectId,
@@ -6026,6 +6025,8 @@ app
 				// 趁用户输入空窗后台预热 pi 进程；首条消息经 activateRuntime 认领实现秒级启动。
 				// fire-and-forget；ensure 幂等且受 standbyRuntimeEnabled 设置闸。
 				if (draft.backend !== "dsh") agentManager.ensureStandbyAgent(draft.projectId);
+				// Web 建的草稿不是渲染进程发的：不广播侧栏就一直看不到这一行（issue #436 同类缺口）。
+				notifyCatalogRefreshed([draft.projectId]);
 				return draft;
 			},
 			createAnonymousSession,
@@ -6044,11 +6045,14 @@ app
 						await sessionScanner.rename(entry.filePath, title);
 					}
 				}
-				return sessionCatalog.update(sessionId, {
+				const updated = await sessionCatalog.update(sessionId, {
 					...patch,
 					...(patch.model ? { model: createSessionModelPreference(patch.model.provider, patch.model.modelId, patch.model.modelName) } : {}),
 					title: title || undefined,
 				});
+				// 改名/换模型都是从 Web 端改的，侧栏标题不重拉就一直停在旧名上（issue #436）。
+				notifyCatalogRefreshed([updated.projectId]);
+				return updated;
 			},
 			deleteSessionRecord: async (sessionId) => {
 				const entry = sessionCatalog.get(sessionId);
@@ -6071,9 +6075,19 @@ app
 					await sessionCatalog.rememberDismissedDshSession(entry.dshSessionId);
 				}
 				await sessionCatalog.removeWithDescendants(sessionId);
+				// 删除成功后才广播：渲染层收到事件会立刻重拉列表，早发会把刚删的行再拉回来一次。
+				// 缺这一句 = 通过 Web API 删会话后桌面端留下幽灵行（issue #436）。
+				notifyCatalogRefreshed([entry.projectId]);
 				return true;
 			},
-			copySessionRecord: (sessionId) => copyCatalogSession(sessionId),
+			copySessionRecord: async (sessionId) => {
+				const result = await copyCatalogSession(sessionId);
+				if (result.cancelled) return result;
+				// 副本同样是 Web 端发起的：不广播侧栏要等手动刷新才出现新行（issue #436）。
+				const projectId = (result.targetSessionId ? sessionCatalog.get(result.targetSessionId)?.projectId : undefined) ?? sessionCatalog.get(sessionId)?.projectId;
+				if (projectId) notifyCatalogRefreshed([projectId]);
+				return result;
+			},
 			exportSessionRecordHtml: (sessionId) => exportCatalogSessionHtml(sessionId),
 			readSessionReferenceMessages: (sessionId) => readCatalogSessionReferenceMessages(sessionId),
 			readSessionMessages: async (sessionId) => {
@@ -6757,7 +6771,7 @@ app
 			},
 			// catalog 变更广播：automation createDraft / dispatch 接受后让侧栏静默重拉，
 			// 避免新会话行延迟出现、DSH agent 行先落成孤儿条目（复用 DSH 刷新同一条 IPC 通道）。
-			notifySessionCatalogChanged: (projectId) => notifyDshCatalogRefreshed([projectId]),
+			notifySessionCatalogChanged: (projectId) => notifyCatalogRefreshed([projectId]),
 		});
 		automationScheduler = new AutomationScheduler(automationStore);
 		automationScheduler.setTriggerHandler(async (task, scheduledFor, trigger) => {
