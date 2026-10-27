@@ -3324,6 +3324,7 @@ export function App() {
 					drawerRail={
 						<WorkspaceDrawerRail
 							addLabel={t("drawer.addPanel")}
+							onClose={toggleRightDrawer}
 							actions={[
 								{
 									id: "files",

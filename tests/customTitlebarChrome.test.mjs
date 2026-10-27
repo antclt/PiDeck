@@ -160,14 +160,17 @@ test("collapsed sidebar keeps 14px gutter; restore lives in tab bar", () => {
 	assert.match(foundation, /\.custom-titlebar-enabled \.session-tabs-bar \{[\s\S]*?z-index:\s*930;/);
 });
 
-test("drawer toggle stays on session tab bar right; no gap when drawer open", () => {
+test("drawer toggle follows the drawer edge; no gap when drawer open", () => {
 	assert.match(tabs, /header-drawer-toggle/);
 	assert.match(tabs, /PanelRight/);
-	assert.doesNotMatch(tabs, /onToggleDrawer && !props\.drawerOpen/);
+	// 关闭态：开关在会话 Tab 栏最右缘；打开后搬进抽屉活动栏左端，本栏隐藏
+	assert.match(tabs, /props\.onToggleDrawer && !props\.drawerOpen/);
 	const rail = readFileSync("src/renderer/src/components/workspace/WorkspaceDrawerRail.tsx", "utf8");
-	assert.doesNotMatch(rail, /onClose/);
-	assert.doesNotMatch(rail, /drawer-rail-close/);
-	// 抽屉打开后窗口控件叠在抽屉顶上，会话 Tab 不再预留 144px，开关贴在 Tab 栏右缘。
+	assert.match(rail, /onClose/);
+	assert.match(rail, /drawer-rail-close/);
+	// -ml-2 抵掉 rail 的 px-2：按钮左缘落在抽屉左边界，与上方分栏线同一条竖线
+	assert.match(rail, /drawer-rail-close -ml-2/);
+	// 抽屉打开后窗口控件叠在抽屉顶上，会话 Tab 栏不再预留 144px（开关此时已并入抽屉活动栏）。
 	// drawer-open 必须同时要求未折叠：折叠后聊天区顶到窗口右缘，Tab 栏仍须让位，
 	// 否则抽屉开关会与关闭按钮重叠。
 	assert.match(shell, /drawer && !drawerCollapsed \? "drawer-open" : ""/);

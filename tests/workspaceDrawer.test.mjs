@@ -171,9 +171,11 @@ test("drawer defaults closed on project load; pin restores per project", () => {
 	const tabs = readFileSync("src/renderer/src/components/session/SessionTabsBar.tsx", "utf8");
 	assert.match(tabs, /header-drawer-toggle/);
 	assert.match(tabs, /PanelRight/);
-	assert.doesNotMatch(tabs, /onToggleDrawer && !props\.drawerOpen/);
+	// 抽屉开关：关闭态在会话 Tab 栏最右侧；打开后搬进抽屉活动栏左端，本栏隐藏
+	assert.match(tabs, /props\.onToggleDrawer && !props\.drawerOpen/);
 	const rail = readFileSync("src/renderer/src/components/workspace/WorkspaceDrawerRail.tsx", "utf8");
-	assert.doesNotMatch(rail, /drawer-rail-close/);
+	assert.match(rail, /drawer-rail-close/);
+	assert.match(rail, /onClose\?: \(\) => void/);
 	const surface = readFileSync("src/renderer/src/components/session/WorkspaceSurface.tsx", "utf8");
 	assert.doesNotMatch(surface, /drawer\.pin/);
 	assert.doesNotMatch(surface, /onTogglePin/);
