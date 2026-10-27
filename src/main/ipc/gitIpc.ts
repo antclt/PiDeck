@@ -256,15 +256,17 @@ async function quickGenerate(projectPath: string, prompt: string, piLocator: PiL
 // ── IPC 注册 ────────────────────────────────────────────────────────
 
 export function registerGitIpc({ appLogger, mainCopy, gitService, gitRefsWatcher, getMainWindow, piLocator, projectStore, settingsStore, worktreeService, remoteGitReads }: GitIpcDeps): void {
-	const hostPath = (path: string): string => {
+	// 第 12 步 Wave 4：WSL 项目优先用档案 distro；缺字段回退全局。
+	const hostPath = (path: string, project?: LocalProject): string => {
 		const settings = settingsStore.get();
-		if (process.platform !== "win32" || !settings.wslEnabled || !settings.wslDistro || (!path.startsWith("/") && !parseWslUncPath(path))) {
+		const distro = project?.environment === "wsl" ? (project.wslDistro ?? settings.wslDistro) : settings.wslDistro;
+		if (process.platform !== "win32" || !distro || (!path.startsWith("/") && !parseWslUncPath(path))) {
 			return path;
 		}
-		return toWindowsHostPath(path, { distro: settings.wslDistro });
+		return toWindowsHostPath(path, { distro });
 	};
 
-	const projectHostPath = (project: LocalProject) => hostPath(project.path);
+	const projectHostPath = (project: LocalProject) => hostPath(project.path, project);
 	const gitBackendRouter = new GitBackendRouter(new LocalGitBackend(projectStore, projectHostPath), projectStore);
 	/** worktree 相关 handler 的入口：解析 store 中的本地项目，远端拒绝。 */
 	const requireLocalProject = (projectId: string): LocalProject => {
@@ -275,10 +277,11 @@ export function registerGitIpc({ appLogger, mainCopy, gitService, gitRefsWatcher
 	};
 	const projectStoredPath = (path: string, project: LocalProject) => {
 		const settings = settingsStore.get();
-		if (process.platform !== "win32" || project.environment !== "wsl" || !settings.wslEnabled || !settings.wslDistro) {
+		const distro = project.wslDistro ?? settings.wslDistro;
+		if (process.platform !== "win32" || project.environment !== "wsl" || !distro) {
 			return path;
 		}
-		return normalizeSelectedWslProjectPath(path, { distro: settings.wslDistro });
+		return normalizeSelectedWslProjectPath(path, { distro });
 	};
 
 	const projectTargetFromLocalPath = (projectId: string, path: unknown): ProjectFileTarget => {

@@ -89,9 +89,10 @@ export class LocalTerminalSessionLauncher {
 		private readonly log: (message: string) => void = () => undefined,
 	) {}
 
-	candidates(): TerminalShellCandidate[] {
+	candidates(override?: TerminalWslSettings): TerminalShellCandidate[] {
 		const candidates = getTerminalShellCandidates(process.platform, process.env);
-		const settings = this.getSettings();
+		// 第 12 步 Wave 4：项目终端可显式传入自己的 WSL 档案，未传时回退全局设置。
+		const settings = override ?? this.getSettings();
 		if (process.platform !== "win32" || !settings.wslEnabled || !settings.wslDistro || !settings.wslUser) {
 			return candidates;
 		}
@@ -106,11 +107,11 @@ export class LocalTerminalSessionLauncher {
 		];
 	}
 
-	spawn(input: { cwd: string; preferredShell?: TerminalShell }): { shell: TerminalShell; pty: IPty } {
+	spawn(input: { cwd: string; preferredShell?: TerminalShell }, override?: TerminalWslSettings): { shell: TerminalShell; pty: IPty } {
 		// Native module is loaded here, BEFORE the per-candidate try: a missing/incompatible node-pty must
 		// surface as NodePtyUnavailableError instead of being masked by the last candidate shell error.
 		const nodePty = loadNodePty();
-		const candidates = this.candidates();
+		const candidates = this.candidates(override);
 		// 如果有首选 shell，先在候选列表中查找匹配项
 		const ordered = input.preferredShell ? [...candidates.filter((c) => c.shell === input.preferredShell), ...candidates.filter((c) => c.shell !== input.preferredShell)] : candidates;
 		this.log(`spawnShell: preferred=${input.preferredShell}, ordered=${ordered.map((c) => c.shell).join(", ")}`);
@@ -123,7 +124,7 @@ export class LocalTerminalSessionLauncher {
 				const env = { ...process.env };
 				if (!env.LANG) env.LANG = "en_US.UTF-8";
 				if (!env.LC_ALL) env.LC_ALL = "en_US.UTF-8";
-				const wsl = candidate.shell === "wsl" ? this.getSettings() : undefined;
+				const wsl = candidate.shell === "wsl" ? (override ?? this.getSettings()) : undefined;
 				let args = candidate.args;
 				let spawnCwd = input.cwd;
 				// WSL 终端：--cd 用 Linux 路径，PTY 的 cwd 仍必须是 Windows 主机路径。

@@ -103,12 +103,27 @@ export class TerminalSessionManager {
 		return [this.create(target)];
 	}
 
+	/**
+	 * 第 12 步 Wave 4：本地 WSL 项目终端优先用项目自己的 distro/user；
+	 * 缺字段回退全局设置；agent 目标仍走全局（其项目身份未在 ticket 上暴露）。
+	 */
+	private wslSettingsFor(target: TerminalTarget): TerminalWslSettings | undefined {
+		if (target.kind !== "project") return undefined;
+		const project = this.projectStore.get(target.projectId);
+		if (!project || !isLocalProject(project) || project.environment !== "wsl") return undefined;
+		const fallback = this.getSettings();
+		const distro = project.wslDistro ?? fallback.wslDistro;
+		const user = project.wslUser ?? fallback.wslUser;
+		return distro && user ? { wslEnabled: true, wslDistro: distro, wslUser: user } : undefined;
+	}
+
 	create(target: TerminalTarget, shell?: TerminalShell): TerminalTab {
 		const ownerKey = terminalOwnerKeyFor(target);
 		const resolvedCwd = this.cwdFor(target);
+		const wslSettings = this.wslSettingsFor(target);
 		// spawn 必须先于桶/序号分配：node-pty 不可用或所有 shell 都 spawn 失败时
 		// create 会抛错，不能留下空桶和已被消耗的标题序号（渲染层每次挂载都会重试）。
-		const spawned = this.launcher.spawn({ cwd: resolvedCwd, preferredShell: shell });
+		const spawned = this.launcher.spawn({ cwd: resolvedCwd, preferredShell: shell }, wslSettings);
 		const runtimes = this.ensureOwner(ownerKey);
 		// 单调递增序号：不能用 runtimes.size + 1（关闭一个 tab 后 size 回退，新建会与存活 tab 撞名）
 		const seq = (this.ownerSeq.get(ownerKey) ?? 0) + 1;
