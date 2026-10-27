@@ -99,7 +99,7 @@ test("every flow step asserts something concrete, through the real UI", () => {
 		["the credential environment variables", /readRemoteAcceptanceCredentials\(process\.env\)/],
 		["the pin fingerprint check", /matchesRemoteFingerprint\(/],
 		["the ready state", /"已连接"/],
-		["the remote project enrollment", /remote-enroll-path/],
+		["the remote project enrollment", /chooseRemoteDirectory\(/],
 		["the remote session creation entry", /createRemoteSessionInProject\(/],
 		["the assistant body (not just a card)", /\.assistant-text/],
 		["the user prompt in the timeline", /\.user-turn-text/],

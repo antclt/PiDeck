@@ -937,7 +937,7 @@ const foreignSyncDeps: DshForeignSyncDeps = {
 			dismissedPaths: projectStore.listDismissedPaths(),
 			pathExists: await defaultPathCheck(cwd),
 		}),
-	ensureProjectForCwd: (cwd) => projectStore.add(cwd, undefined, settingsStore.get().wslEnabled ? "wsl" : "windows"),
+	ensureProjectForCwd: (cwd) => projectStore.add(cwd),
 	ensureFallbackProject: () => projectStore.ensureExternalSessionsProject(mainCopy("project.externalSessions")),
 	createDraft: (input) => sessionCatalog.createDraft(input),
 	// 纠正归属时看现有标题是不是 cwd 兑底占位；有官方投影名时必须覆盖。
@@ -945,7 +945,7 @@ const foreignSyncDeps: DshForeignSyncDeps = {
 		const existing = sessionCatalog.listEntries().find((entry) => entry.dshSessionId === dshSessionId);
 		return existing ? { title: existing.title } : undefined;
 	},
-	getEnvironment: () => (settingsStore.get().wslEnabled ? "wsl" : "native"),
+	getEnvironment: () => "native",
 	// 惰性：此对象在模块顶层创建，此时 settingsStore 尚未赋值，eager mainCopy 会崩。
 	fallbackTitle: () => mainCopy("session.dshUntitled"),
 	onError: (dshSessionId, error) => {
@@ -971,13 +971,48 @@ function notifyDshCatalogRefreshed(projectIds: Iterable<string>): void {
 function broadcastVisibleProjects(): void {
 	const window = mainWindow;
 	if (!window || window.isDestroyed()) return;
-	const s = settingsStore.get();
-	const visible = s.wslEnabled ? projectStore.list().filter((p) => p.kind === "chat" || p.environment === "wsl") : projectStore.list().filter((p) => p.kind === "chat" || !p.environment || p.environment === "windows");
+	const visible = projectStore.list();
 	// 这里只广播 store 清单；渲染层接到事件后会再调用 projects:list 附加实时 presence。
 	// 直接把未检测版本写进 atom 会短暂抹掉 missing 标记，使失效目录看起来又恢复正常。
 	window.webContents.send(ipcChannels.projectsChanged, visible);
 	// 项目集变化同步重建托盘菜单（最近项目区），否则增删项目后菜单滞后。
 	refreshTrayContextMenu();
+}
+
+/**
+ * 第 14 步：WSL 项目按档案 distro/user 使用独立的 SessionScanner 实例。
+ *
+ * 旧实现靠全局 `sessionScanner.configureWsl()`，同一时刻只能扫一个发行版；两个 WSL 档案
+ * 并存时会互相覆盖。每个 `(distro,user)` 一份 scanner（含各自的摘要缓存），按需解析 home；
+ * 解析失败不缓存失败结果，下次请求重试。本机项目继续用主 `sessionScanner`。
+ */
+const wslSessionScanners = new Map<string, Promise<SessionScanner>>();
+
+async function wslSessionScannerFor(identity: { distro: string; user: string }): Promise<SessionScanner> {
+	const key = `${identity.distro}\u0000${identity.user}`;
+	const existing = wslSessionScanners.get(key);
+	if (existing) return existing;
+	const pending = (async () => {
+		const { resolveWslEnvironment } = await import("./wsl/WslEnvironment");
+		const environment = await resolveWslEnvironment(identity.distro, identity.user, {
+			warn: (message: string, detail: unknown) => void appLogger?.warn("wsl", String(message), { detail }),
+		});
+		const scanner = new SessionScanner(mainCopy);
+		await scanner.configureWsl(environment);
+		return scanner;
+	})();
+	wslSessionScanners.set(key, pending);
+	pending.catch(() => {
+		if (wslSessionScanners.get(key) === pending) wslSessionScanners.delete(key);
+	});
+	return pending;
+}
+
+async function sessionScannerForProject(project: Project | undefined): Promise<SessionScanner> {
+	if (project === undefined || !isLocalProject(project) || project.environment !== "wsl") return sessionScanner;
+	const identity = resolveProjectWslIdentity(project, settingsStore.get());
+	if (identity === undefined) return sessionScanner;
+	return wslSessionScannerFor(identity);
 }
 
 /**
@@ -1204,10 +1239,12 @@ async function createAnonymousSession(input: CreateAnonymousSessionInput): Promi
 		// Config read is best-effort.
 	}
 
+	const projectWsl = resolveProjectWslIdentity(project, settingsStore.get());
 	const session = sessionCatalog.createAnonymous({
 		projectId: project.id,
 		title: input.title?.trim() || mainCopy("session.anonymousTitle", { project: project.name }),
-		environment: settingsStore.get().wslEnabled ? "wsl" : "native",
+		environment: projectWsl !== undefined ? "wsl" : "native",
+		...(projectWsl !== undefined ? { wslDistro: projectWsl.distro, wslUser: projectWsl.user } : {}),
 		model,
 		thinkingLevel,
 	});
@@ -1710,7 +1747,9 @@ const imSessionRuntimeBindings: SessionRuntimeBindingGateway = {
 			const existing = sessionCatalog.get(input.existingSessionId);
 			if (existing) return { sessionId: existing.id };
 		}
-		const environment = settingsStore.get().wslEnabled ? "wsl" : "native";
+		const project = projectStore.get(input.projectId);
+		const projectWsl = resolveProjectWslIdentity(project, settingsStore.get());
+		const environment = projectWsl !== undefined ? "wsl" : "native";
 		if (input.sessionPath) {
 			const existing = sessionCatalog.findByFilePath(input.sessionPath, environment);
 			if (existing) return { sessionId: existing.id };
@@ -1722,8 +1761,7 @@ const imSessionRuntimeBindings: SessionRuntimeBindingGateway = {
 				filePath: input.sessionPath,
 				// 已存在的会话文件：标题按权威名落库（有历史就不会再有自动命名），只透传渠道标志。
 				channel: input.channel,
-				wslDistro: environment === "wsl" ? settingsStore.get().wslDistro : undefined,
-				wslUser: environment === "wsl" ? settingsStore.get().wslUser : undefined,
+				...(projectWsl !== undefined ? { wslDistro: projectWsl.distro, wslUser: projectWsl.user } : {}),
 			});
 			return { sessionId: restored.id };
 		}
@@ -1768,7 +1806,7 @@ const imSessionRuntimeBindings: SessionRuntimeBindingGateway = {
 		if (input.agent.status === "error" || input.agent.status === "closed") {
 			throw new Error(`Cannot bind terminal Feishu runtime: ${input.agent.id}`);
 		}
-		const environment = input.agent.sessionEnvironment ?? (settingsStore.get().wslEnabled ? "wsl" : "native");
+		const environment = input.agent.sessionEnvironment ?? "native";
 		const source = input.agent.sessionSource ?? "pi";
 		let sessionId: string | undefined;
 		if (input.existingSessionId) {
@@ -3512,10 +3550,7 @@ function registerIpc() {
 		});
 	}
 
-	const catalogIdentityContext = () => {
-		const { wslEnabled, wslDistro, wslUser } = settingsStore.get();
-		return wslEnabled ? { wslDistro, wslUser } : {};
-	};
+	const catalogIdentityContext = () => ({});
 
 	registerEditorsIpc({
 		settingsStore,
@@ -4163,6 +4198,7 @@ function registerIpc() {
 		projectStore,
 		settingsStore,
 		sessionScanner,
+		resolveWslSessionScanner: (identity) => wslSessionScannerFor(identity),
 		sessionCatalog,
 		// 会话 ↔ 智能体绑定：绑定的会话每次发送注入角色设定（pi/acp 隐藏 agentMessage，
 		// dsh 退化为可见前缀，由 sessionIpc 的 composeAgentInstruction 统一组合）。
@@ -4421,7 +4457,8 @@ function registerIpc() {
 						if (wsl !== undefined) {
 							projectPath = projectPath.replace(/^([A-Za-z]):\\/, (_: string, drive: string) => `/mnt/${drive.toLowerCase()}/`).replace(/\\/g, "/");
 						}
-						const summaries = await sessionScanner.list(projectPath);
+						const scanner = wsl !== undefined ? await wslSessionScannerFor(wsl) : sessionScanner;
+						const summaries = await scanner.list(projectPath);
 						await sessionCatalog.mergeScanned(project.id, summaries, wsl !== undefined ? { wslDistro: wsl.distro, wslUser: wsl.user } : {});
 					} catch (error) {
 						void appLogger.warn("session", "Catalog prewarm scan failed", {
@@ -4771,16 +4808,8 @@ function registerIpc() {
 			setFeishuConfigDefaultBotName(feishuT(currentFeishuLocale(), "bridge.defaultBotName"));
 		},
 		notifyTitleBarChange: (window) => settingsStore.notifyTitleBarChange(window),
-		setSessionCatalogIdentityContext: (ctx) => sessionCatalog.setIdentityContext(ctx),
-		resolveWslEnvironment: async (distro, user, logger) => {
-			const { resolveWslEnvironment: resolveWsl } = await import("./wsl/WslEnvironment");
-			return resolveWsl(distro, user, logger);
-		},
-		configureSessionScannerWsl: (env) => sessionScanner.configureWsl(env),
-		clearSessionScannerWsl: () => sessionScanner.clearWsl(),
-		configureSkillManagerWsl: (env) => skillManager.configureWsl(env),
 		// 技能正文读取：注入路径白名单上下文（全局技能目录 + 已注册项目根），
-		// 由 readSkillContent 完成校验后读 SKILL.md；WSL 项目按主机路径读取。
+		// 由 readSkillContent 完成校验后读 SKILL.md；WSL 项目按项目档案 distro 转主机路径。
 		readSkillContent: (skillPath) =>
 			readSkillContent(skillPath, {
 				globalSkillPaths: skillManager.getLocations().map((location) => location.path),
@@ -4788,9 +4817,7 @@ function registerIpc() {
 					.list()
 					.filter(isLocalProject)
 					.map((project) => {
-						const settings = settingsStore.get();
-						// 第 12 步：项目自带 distro 优先；缺字段回退全局。
-						const distro = project.environment === "wsl" ? (project.wslDistro ?? settings.wslDistro) : undefined;
+						const distro = project.environment === "wsl" ? (project.wslDistro ?? settingsStore.get().wslDistro) : undefined;
 						if (process.platform === "win32" && distro !== undefined) {
 							try {
 								return toWindowsHostPath(project.path, { distro });
@@ -4801,14 +4828,6 @@ function registerIpc() {
 						return project.path;
 					}),
 			}),
-		configurePromptManagerWsl: (env) => promptManager.configureWsl(env),
-		configureExtensionManagerWsl: (env) => extensionManager.configureWsl(env),
-		configureConfigManagerWsl: (env) => configManager.configureWsl(env),
-		configureXuePromptManagerWsl: (env) => xuePromptManager.configureWsl(env),
-		configureAgentManagerWsl: (env) => agentManager.configureWsl(env),
-		// DSH host 同样需要 WSL 环境：它拿到的 workspace 路径必须是 Windows 主机路径
-		// （WSL 模式下项目是 /mnt/...，host 的 realpath 会算到 C:\mnt 而报 ENOENT）。
-		configureDshHostWsl: (env) => dshHost.configureWsl(env),
 		sessionCommandIpcError,
 		// 重启路径需要同步 isQuitting / 停服务，避免 closeToTray 吞掉 relaunch
 		webServiceManager,
@@ -5970,7 +5989,7 @@ app
 					handler(agentId, channel, payload);
 				}),
 			listProjects: () => projectStore.list().filter(isLocalProject),
-			createProject: (path) => projectStore.add(path, undefined, settingsStore.get().wslEnabled ? "wsl" : "windows"),
+			createProject: (path) => projectStore.add(path),
 			deleteProject: async (projectId) => {
 				if (!projectStore.get(projectId) || projectStore.get(projectId)?.kind === "chat") return false;
 				const childIds = projectStore.listWorktreeChildren(projectId).map((child) => child.id);
@@ -5982,9 +6001,9 @@ app
 				const snapshot = force ? await piModelCapabilityCache?.refresh() : await piModelCapabilityCache?.ensure();
 				return snapshot?.models ?? (force ? refreshModelList(piLocator, settingsStore, configManager) : fetchModelList(piLocator, settingsStore, configManager));
 			},
-			listSessions: (projectId) => {
+			listSessions: async (projectId) => {
 				const project = projectStore.get(projectId);
-				return sessionScanner.list(project?.path);
+				return (await sessionScannerForProject(project)).list(project?.path);
 			},
 			listCatalogSessions: async (projectId) => {
 				// 与桌面 sessionsListCatalog 同规则：重发/编辑 fork 化后被替换的旧会话
@@ -6005,7 +6024,8 @@ app
 				if (wsl !== undefined) {
 					projectPath = projectPath.replace(/^([A-Za-z]):\\/, (_: string, drive: string) => `/mnt/${drive.toLowerCase()}/`).replace(/\\/g, "/");
 				}
-				const summaries = await sessionScanner.list(projectPath);
+				const scanner = wsl !== undefined ? await wslSessionScannerFor(wsl) : sessionScanner;
+				const summaries = await scanner.list(projectPath);
 				const scanned = await sessionCatalog.mergeScanned(projectId, summaries, wsl !== undefined ? { wslDistro: wsl.distro, wslUser: wsl.user } : {});
 				// 同上：supersededBy 隐藏规则与桌面列表一致（mergeScanned 可能重新接上被打标的旧会话）
 				const records = scanned.filter((record) => !record.supersededBy);
@@ -6019,10 +6039,12 @@ app
 			createSessionDraft: async (input) => {
 				const project = projectStore.get(input.projectId);
 				if (!project) throw new Error(mainCopy("project.notFound"));
+				const projectWsl = resolveProjectWslIdentity(project, settingsStore.get());
 				const draft = await sessionCatalog.createDraft({
 					projectId: input.projectId,
 					title: input.title?.trim() || mainCopy("session.newTitle"),
-					environment: settingsStore.get().wslEnabled ? "wsl" : "native",
+					environment: projectWsl !== undefined ? "wsl" : "native",
+					...(projectWsl !== undefined ? { wslDistro: projectWsl.distro, wslUser: projectWsl.user } : {}),
 					model: input.model ? createSessionModelPreference(input.model.provider, input.model.modelId, input.model.modelName) : undefined,
 					thinkingLevel: input.thinkingLevel,
 				});
@@ -6309,7 +6331,8 @@ app
 			},
 			(channel, payload) => mainWindow?.webContents.send(channel, payload),
 			projectStore,
-			() => settingsStore.get(),
+			// 第 14 步：原生终端不再读取旧全局 WSL 开关；WSL 终端的身份只来自项目档案。
+			() => ({}),
 		);
 		// C12：退出清理登记（before-quit 统一 runAll）
 		quitCleanup.register("terminal", () => terminalManager?.closeAll());
@@ -6364,7 +6387,7 @@ app
 		const initialSessionSettings = settingsStore.get();
 		sessionCatalog = new SessionCatalog(
 			join(app.getPath("userData"), "session-catalog.json"),
-			initialSessionSettings.wslEnabled ? { wslDistro: initialSessionSettings.wslDistro, wslUser: initialSessionSettings.wslUser } : {},
+			{},
 			// 会话路径统一绝对化：pi 的 sessionDir 配置为相对路径（如 ".pi/sessions"）时，
 			// get_state 返回的 sessionFile 是相对 cwd 的；与扫描器绝对路径 originKey 不一致
 			// 会导致同一会话在侧栏出现两条记录。加载与写入边界都经此归一化。
@@ -6376,7 +6399,15 @@ app
 			// 占位标题回填 + 会话头有效性校验：未打开过的 pi 会话也能在侧栏显示首条消息标题
 			// （不再永远 Untitled）；同一次有界读头部顺带校验首条记录是否带 type 头，
 			// 把 pi-subagents transcript 等无 type 头的产物挡在 catalog 之外（#168）。
-			(filePath, options) => sessionScanner.inferSessionNameAndValidity(filePath, options),
+			async (filePath, options) => {
+				// WSL 会话文件是发行版内的 Linux 路径，宿主 Node 读不到；按合并上下文里的 distro/user
+				// 选对应 scanner 读头部。本机会话继续用主 scanner。
+				if (options?.wslDistro && options?.wslUser) {
+					const scanner = await wslSessionScannerFor({ distro: options.wslDistro, user: options.wslUser });
+					return scanner.inferSessionNameAndValidity(filePath, options);
+				}
+				return sessionScanner.inferSessionNameAndValidity(filePath, options);
+			},
 			// 远端会话登记（ensureRemoteSession）也写 hostId 引用，用同一道门。
 			{ referenceGuard: remoteReferenceWriteGuard },
 		);
@@ -6863,39 +6894,23 @@ app
 		});
 
 		// 根据已加载的 WSL 设置配置会话扫描器，使其能同时扫描 WSL 中的 pi 会话目录
+		/**
+		 * 第 14 步：不再根据全局设置切换单例管理器的 WSL HOME。
+		 *
+		 * 会话扫描按项目档案使用独立 scanner（wslSessionScannerFor），spawn 由 AgentManager 的
+		 * 每次启动覆盖值决定；这里只把旧的全局状态清掉，避免残留一个发行版影响其它项目。
+		 * WSL 的配置/技能/扩展页暂按本机（Windows）HOME 展示，多档案配置作用域后续单独做。
+		 */
 		const syncWslConfig = async () => {
-			const { wslEnabled, wslDistro, wslUser } = settingsStore.get();
-			if (wslEnabled && wslDistro && wslUser) {
-				const { resolveWslEnvironment: resolveWsl2 } = await import("./wsl/WslEnvironment");
-				const wslEnv = await resolveWsl2(wslDistro, wslUser, {
-					warn: (msg: string, detail: unknown) => void appLogger?.warn("wsl", String(msg), { detail }),
-				});
-				await sessionScanner.configureWsl(wslEnv);
-				agentManager.configureWsl(wslEnv);
-				// DSH host 是 Windows 原生进程：WSL 项目的 workspace 路径与会话目录编码
-				// 都要按主机路径算，否则 workspace.resolve 失败、会话建不出来。
-				dshHost.configureWsl(wslEnv);
-				skillManager.configureWsl(wslEnv);
-				promptManager.configureWsl(wslEnv);
-				extensionManager.configureWsl(wslEnv);
-				if (configManager) configManager.configureWsl(wslEnv);
-				if (xuePromptManager) xuePromptManager.configureWsl(wslEnv);
-				// 窗口已起来后再异步探测 WSL which，点会话时 resolveCommand 才能命中 wsl:// 缓存。
-				void piLocator.warmWslCommand(wslDistro, wslUser).catch((error) => {
-					void appLogger?.warn("app", "WSL pi which warmup failed", error);
-				});
-			} else {
-				sessionScanner.clearWsl();
-				agentManager.configureWsl(null);
-				dshHost.configureWsl(null);
-				skillManager.configureWsl(null);
-				promptManager.configureWsl(null);
-				extensionManager.configureWsl(null);
-				if (configManager) configManager.configureWsl(null);
-				if (xuePromptManager) xuePromptManager.configureWsl(null);
-			}
+			sessionScanner.clearWsl();
+			agentManager.configureWsl(null);
+			dshHost.configureWsl(null);
+			skillManager.configureWsl(null);
+			promptManager.configureWsl(null);
+			extensionManager.configureWsl(null);
+			if (configManager) configManager.configureWsl(null);
+			if (xuePromptManager) xuePromptManager.configureWsl(null);
 		};
-
 		// 先注册 IPC 并创建窗口：WSL 探测 / pi settings / 代理 / Web 服务都可能卡住或抛错，
 		// 不能挡在 createWindow 前面（打包便携版表现为「启动没反应」，dev 因热路径较短不易复现）。
 		// 模型请求快照端点：只绑 127.0.0.1，起不来就静默跳过（快照不工作，pi 与 PiDeck 照常）。
@@ -7307,15 +7322,8 @@ async function removeStalePiDeckExtension(extensionName: string, homeDir?: strin
 async function migrateLegacyBuiltInExtensions(): Promise<void> {
 	const { BUILT_IN_EXTENSIONS } = await import("./extensions/builtInExtensions");
 	const legacyNames = [...BUILT_IN_EXTENSIONS, "pi-deck-project-trust.ts", "pi-deck-file-capture.ts"];
-	const homes = [app.getPath("home")];
-	const wslSettings = settingsStore.get();
-	if (wslSettings.wslEnabled && wslSettings.wslDistro && wslSettings.wslUser) {
-		homes.push(`\\\\wsl$\\${wslSettings.wslDistro}\\home\\${wslSettings.wslUser}`);
-	}
-	for (const home of homes) {
-		for (const name of legacyNames) {
-			await removeStalePiDeckExtension(name, home).catch(() => undefined);
-		}
+	for (const name of legacyNames) {
+		await removeStalePiDeckExtension(name).catch(() => undefined);
 	}
 }
 
@@ -7324,21 +7332,11 @@ async function migrateLegacyBuiltInExtensions(): Promise<void> {
  * 具体边界（不覆盖不可解析文件、只补缺失键、锁内原子写）在 config/piSettingsDefaults.ts。
  */
 async function ensureAllPiSettingsDefaults(): Promise<void> {
-	const s = settingsStore.get();
 	let piVersion = "";
 	if (piLocator) {
-		piVersion = (await piLocator.check(undefined, s.wslEnabled, s.wslDistro, s.wslUser).catch(() => null))?.version ?? "";
+		piVersion = (await piLocator.check().catch(() => null))?.version ?? "";
 	}
-
-	// Windows 本地
-	const winDir = join(app.getPath("home"), ".pi", "agent");
-	await ensurePiSettingsDefaults(winDir, piVersion).catch(() => undefined);
-
-	// WSL（如果已配置）
-	if (s.wslEnabled && s.wslDistro && s.wslUser) {
-		const wslDir = join(`\\\\wsl$\\${s.wslDistro}\\home\\${s.wslUser}`, ".pi", "agent");
-		await ensurePiSettingsDefaults(wslDir, piVersion).catch(() => undefined);
-	}
+	await ensurePiSettingsDefaults(join(app.getPath("home"), ".pi", "agent"), piVersion).catch(() => undefined);
 }
 
 // 子进程（含 GPU/utility）异常退出：Mac 上偶发“整窗闪一下”，需要留下 reason/exitCode。

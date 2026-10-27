@@ -248,7 +248,7 @@ export function resolvePiAuthHostLaunch(input: { settings: PiAuthHostSettings; l
 		return { ok: false, reason: "helper-missing", detail: helperPath };
 	}
 
-	const piCommand = input.locator.resolveCommand(input.settings.customPiPath, input.settings.wslEnabled, input.settings.wslDistro, input.settings.wslUser);
+	const piCommand = input.locator.resolveCommand(input.settings.customPiPath);
 	if (piCommand.startsWith("wsl://")) {
 		// WSL 模式下 pi 的凭据目录在 distro 内，宿主侧拉起的助手读不到同一份 auth.json。
 		return { ok: false, reason: "wsl", detail: piCommand };

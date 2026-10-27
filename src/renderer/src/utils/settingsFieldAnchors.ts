@@ -88,18 +88,6 @@ const SETTINGS_ROW_ANCHORS = [
 	// ── 开发设置 ──────────────────────────────────────────────────────
 	{
 		tab: "dev",
-		slug: "dev-pi-source",
-		labelKey: "settings.piSource.label",
-		keywords: ["pi 来源", "wsl", "windows 原生", "运行环境", "pi source"],
-	},
-	{
-		tab: "dev",
-		slug: "dev-wsl-config",
-		labelKey: "settings.wsl.distro",
-		keywords: ["wsl", "发行版", "distro", "子系统", "linux 用户", "wsl user"],
-	},
-	{
-		tab: "dev",
 		slug: "dev-data-env-mode",
 		labelKey: "settings.dataEnvCurrentMode",
 		keywords: ["数据模式", "stable 通道", "dev 通道", "双通道", "数据目录模式", "data env"],

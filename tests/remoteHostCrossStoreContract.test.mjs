@@ -51,6 +51,8 @@ const COVERED_HOST_ID_FIELDS = new Map([
 	["src/shared/types/remoteHost.ts:RemoteHostOperationFailure", "runtime"],
 	// 添加主机的结果只是回显 hostId（一个刚建的 draft/刚验证的主机），不持久化引用。
 	["src/shared/types/remoteHost.ts:RemoteHostAddResult", "runtime"],
+	// 移除主机的结果只回显刚移除的 id；真正的清理由 store 完成，不形成新的持久化引用。
+	["src/shared/types/remoteHost.ts:RemoteHostRemoveResult", "runtime"],
 	// 状态推送只是告诉界面「哪台主机变成什么状态」，不持久化任何东西。
 	["src/shared/types/remoteHost.ts:RemoteHostStateChange", "runtime"],
 	// 修复确认请求只是告知界面「要修哪台主机」，不持久化引用。
@@ -61,6 +63,8 @@ const COVERED_HOST_ID_FIELDS = new Map([
 	["src/shared/types/remoteHost.ts:RemoteProjectEnrollResult", "runtime"],
 	// 新建空目录确认请求：hostId 只是回显「在哪台主机上创建」，不落盘；真正持久化的引用仍是 ProjectStore 的 ssh locator。
 	["src/shared/types/remoteHost.ts:RemoteProjectCreateRequest", "runtime"],
+	// 目录浏览结果只回显 hostId + 一次探针结果，不持久化引用；项目登记仍写 ProjectStore 的 ssh locator。
+	["src/shared/types/remoteHost.ts:RemoteDirectoryListResult", "runtime"],
 	// Phase 5 模型目录探测（task-18）：结果只回显调用方的 hostId，不持久化任何引用；真正的模型
 	// catalog 数据来自远端 runtime，随会话生命周期消失。归 runtime 源（canHoldHostReferences: false）。
 	["src/shared/types/remoteModel.ts:RemoteModelProbeResult", "runtime"],

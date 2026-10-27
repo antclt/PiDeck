@@ -24,5 +24,5 @@ test("a failed connect keeps a per-host code and offers inline retry", () => {
 	assert.match(tab, /settings\.connections\.lastFailure/);
 	assert.match(tab, /toggle\(host\.id, true, host\.label\)\}>/);
 	// 成功或主动断开后清除失败码，避免旧错误挂在已恢复的主机上。
-	assert.equal((tab.match(/delete next\[hostId\]/g) ?? []).length, 2);
+	assert.equal((tab.match(/delete next\[hostId\]/g) ?? []).length, 5);
 });

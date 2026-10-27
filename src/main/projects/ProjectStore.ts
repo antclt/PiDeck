@@ -280,12 +280,12 @@ export class ProjectStore implements HostRebindStorePort {
 			projectPath = normalizeSelectedWslProjectPath(projectPath, wslEnvironment!);
 		}
 
-		return this.addWithLocation(projectPath, undefined, environment, wslIdentity);
+		return this.add(projectPath, undefined, environment, wslIdentity);
 	}
 
-	/** 添加项目，可指定所属环境（缺省 windows）；旧的全局 WSL 路径不带档案身份。 */
-	async add(path: string, worktreeParentId?: string, environment?: "windows" | "wsl") {
-		return this.addWithLocation(path, worktreeParentId, environment);
+	/** 添加项目，可指定所属环境（缺省 windows）；WSL 档案身份可选，供选择器链路复用。 */
+	async add(path: string, worktreeParentId?: string, environment?: "windows" | "wsl", wslIdentity?: WslProjectIdentity) {
+		return this.addWithLocation(path, worktreeParentId, environment, wslIdentity);
 	}
 
 	/**

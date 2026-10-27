@@ -16,10 +16,12 @@ export type FilesSystemIpcDeps = {
 export function registerFilesSystemIpc({ settingsStore, openExternalUrl }: FilesSystemIpcDeps): void {
 	const toWindowsPath = (path: string): string => {
 		if (!path || process.platform !== "win32") return path;
-		const settings = settingsStore.get();
-		if (!settings.wslEnabled || !settings.wslDistro) return path;
-		if (!path.startsWith("/") && !parseWslUncPath(path)) return path;
-		return toWindowsHostPath(path, { distro: settings.wslDistro });
+		const unc = parseWslUncPath(path);
+		// UNC 自带发行版；/mnt/<drive> 与发行版无关。其余 Linux 绝对路径没有项目上下文，
+		// 不能猜一个发行版（猜错会把文件写到另一个发行版的 home）。
+		if (unc !== null) return toWindowsHostPath(path, { distro: unc.distro });
+		if (/^\/mnt\/[A-Za-z](?:\/|$)/.test(path)) return toWindowsHostPath(path, { distro: "Ubuntu" });
+		return path;
 	};
 
 	ipcMain.handle(ipcChannels.dialogPickFiles, async (_event, options?: { title?: string; includeDirectories?: boolean }) => {

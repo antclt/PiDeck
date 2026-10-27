@@ -84,7 +84,7 @@ function resetGenIdleTimer() {
 }
 
 /** 确保有一个轻量 pi RPC 进程在运行，跨项目复用 */
-async function ensureGenProcess(projectPath: string, command: string, piLocator: PiLocator, settingsStore: SettingsStore, model: { provider: string; modelId: string }, appLogger: Pick<AppLogger, "warn">): Promise<PiRpcClient> {
+async function ensureGenProcess(projectPath: string, command: string, piLocator: PiLocator, settingsStore: SettingsStore, model: { provider: string; modelId: string }, appLogger: Pick<AppLogger, "warn">, wsl?: { distro: string; user: string }): Promise<PiRpcClient> {
 	// provider/model 变化时必须重启轻量进程，避免旧进程继续持有上一组选中的模型。
 	// 代理指纹同理：HTTP_PROXY 等环境变量在 spawn 时定格，设置页改代理/名单后不重建
 	// 旧进程会一直直连（或沿用旧代理），表现为「配置了代理但生成摘要没走代理」。
@@ -107,11 +107,11 @@ async function ensureGenProcess(projectPath: string, command: string, piLocator:
 		// 贡献的模型（issue #181），进程必须能解析它们，与运行时会话保持一致。
 		// 用户开启「禁用扩展启动」诊断开关（piRpcNoExtensions）时首次也直接不带扩展。
 		const firstWithExtensions = !settingsStore.get().piRpcNoExtensions;
-		return await trySpawnGenProcess(firstWithExtensions, projectPath, command, piLocator, settingsStore, model, appLogger);
+		return await trySpawnGenProcess(firstWithExtensions, projectPath, command, piLocator, settingsStore, model, appLogger, wsl);
 	} catch {
 		// 带扩展启动失败（坏扩展导致崩溃/启动挂起/RPC 未就绪）：
 		// 降级为无扩展重试一次；仍失败则抛出第二轮错误（无扩展基线，更能反映真实状态）。
-		return await trySpawnGenProcess(false, projectPath, command, piLocator, settingsStore, model, appLogger);
+		return await trySpawnGenProcess(false, projectPath, command, piLocator, settingsStore, model, appLogger, wsl);
 	}
 }
 
@@ -123,13 +123,13 @@ function buildGenArgs(withExtensions: boolean): string[] {
 
 /** 启动轻量 pi RPC 生成进程并完成 set_model；withExtensions 决定是否加载扩展。
  * 失败时清理进程与全局状态并抛错，由 ensureGenProcess 决定是否降级重试。 */
-async function trySpawnGenProcess(withExtensions: boolean, projectPath: string, command: string, piLocator: PiLocator, settingsStore: SettingsStore, model: { provider: string; modelId: string }, appLogger: Pick<AppLogger, "warn">): Promise<PiRpcClient> {
+async function trySpawnGenProcess(withExtensions: boolean, projectPath: string, command: string, piLocator: PiLocator, settingsStore: SettingsStore, model: { provider: string; modelId: string }, appLogger: Pick<AppLogger, "warn">, wsl?: { distro: string; user: string }): Promise<PiRpcClient> {
 	const modelKey = `${model.provider}\0${model.modelId}`;
 	const settings = settingsStore.get();
 	// WSL pi 需要 Linux cwd（--cd）；Windows spawn 本身仍必须落在主机路径上。
-	const wslCwd = settings.wslEnabled && settings.wslDistro && command.startsWith("wsl://") ? toWslLinuxPath(projectPath, { distro: settings.wslDistro }) : undefined;
+	const wslCwd = wsl !== undefined && command.startsWith("wsl://") ? toWslLinuxPath(projectPath, { distro: wsl.distro }) : undefined;
 	const invocation = piLocator.createInvocation(command, buildGenArgs(withExtensions), wslCwd ? { wslCwd } : {});
-	const spawnCwd = wslCwd && settings.wslDistro ? toWindowsHostPath(projectPath, { distro: settings.wslDistro }) : projectPath;
+	const spawnCwd = wslCwd !== undefined && wsl !== undefined ? toWindowsHostPath(projectPath, { distro: wsl.distro }) : projectPath;
 
 	const childProcess = spawn(invocation.command, invocation.args, {
 		cwd: spawnCwd,
@@ -185,7 +185,7 @@ async function trySpawnGenProcess(withExtensions: boolean, projectPath: string, 
 }
 
 /** 通过持久化 RPC 进程快速生成文本，避免每次 fork 新进程 */
-async function quickGenerate(projectPath: string, prompt: string, piLocator: PiLocator, settingsStore: SettingsStore, model: { provider: string; modelId: string }, appLogger: Pick<AppLogger, "warn">): Promise<string> {
+async function quickGenerate(projectPath: string, prompt: string, piLocator: PiLocator, settingsStore: SettingsStore, model: { provider: string; modelId: string }, appLogger: Pick<AppLogger, "warn">, project?: LocalProject): Promise<string> {
 	// 复用进程同时只能跑一个生成；并发（连点/跨项目）直接拒绝，由 handler 转友好提示
 	if (genBusy) {
 		throw new Error("Agent is already processing");
@@ -193,14 +193,13 @@ async function quickGenerate(projectPath: string, prompt: string, piLocator: PiL
 	genBusy = true;
 
 	const settings = settingsStore.get();
-	// Git 快生成前异步预热 WSL which，避免 resolveCommand 同步卡住主进程。
-	if (settings.wslEnabled && settings.wslDistro && settings.wslUser) {
-		await piLocator.warmWslCommand(settings.wslDistro, settings.wslUser);
-	}
-	const command = piLocator.resolveCommand(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
+	// 第 14 步：Git 快生成按项目档案挑发行版，不再看全局 WSL 开关。
+	const wsl = project?.environment === "wsl" ? { distro: project.wslDistro ?? settings.wslDistro, user: project.wslUser ?? settings.wslUser } : undefined;
+	if (wsl !== undefined && wsl.distro && wsl.user) await piLocator.warmWslCommand(wsl.distro, wsl.user);
+	const command = piLocator.resolveCommand(settings.customPiPath, wsl !== undefined, wsl?.distro, wsl?.user);
 
 	try {
-		const rpc = await ensureGenProcess(projectPath, command, piLocator, settingsStore, model, appLogger);
+		const rpc = await ensureGenProcess(projectPath, command, piLocator, settingsStore, model, appLogger, wsl);
 
 		return await new Promise<string>((resolve, reject) => {
 			const collected: string[] = [];
@@ -259,7 +258,7 @@ export function registerGitIpc({ appLogger, mainCopy, gitService, gitRefsWatcher
 	// 第 12 步 Wave 4：WSL 项目优先用档案 distro；缺字段回退全局。
 	const hostPath = (path: string, project?: LocalProject): string => {
 		const settings = settingsStore.get();
-		const distro = project?.environment === "wsl" ? (project.wslDistro ?? settings.wslDistro) : settings.wslDistro;
+		const distro = project?.environment === "wsl" ? (project.wslDistro ?? settings.wslDistro) : undefined;
 		if (process.platform !== "win32" || !distro || (!path.startsWith("/") && !parseWslUncPath(path))) {
 			return path;
 		}
@@ -750,7 +749,8 @@ export function registerGitIpc({ appLogger, mainCopy, gitService, gitRefsWatcher
 		const prompt = promptTemplate.replace("{diff}", diff.slice(0, 8000));
 
 		try {
-			const result = await quickGenerate(cwd, prompt, piLocator, settingsStore, { provider, modelId }, appLogger);
+			const project = projectStore.get(projectId);
+			const result = await quickGenerate(cwd, prompt, piLocator, settingsStore, { provider, modelId }, appLogger, project && isLocalProject(project) ? project : undefined);
 			void appLogger.warn("git", "Generate commit message result", { length: result.length });
 			return { ok: true, message: result.trim() };
 		} catch (err) {

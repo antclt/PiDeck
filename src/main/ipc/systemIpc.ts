@@ -62,7 +62,7 @@ import type { TokendancePaymentStore } from "../config/tokendancePayment";
 import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
 
 import { probePiModel } from "../pi/PiModelProber";
-import { PROBE_AGENT_DIR_ENV, buildProbeDraftFiles, toWslAccessiblePath } from "../pi/probeDraftConfig";
+import { PROBE_AGENT_DIR_ENV, buildProbeDraftFiles } from "../pi/probeDraftConfig";
 import type { PiModelCapabilityCache } from "../pi/PiModelCapabilityCache";
 import { getPiAiCatalogIndex, readBuiltinPiAiCatalogVersion } from "../pi/piAiBuiltinCatalog";
 import { resolveModelSpecFromCatalogs } from "../pi/modelCapabilityResolver";
@@ -236,18 +236,10 @@ export type SystemIpcDeps = {
 	installAppUpdate: () => void;
 	/** Open external URL */
 	openExternalUrl: (url: string, forceSystem?: boolean) => Promise<void>;
-	/**
-	 * Resolve WSL environment (lazy import in index.ts).
-	 * 返回值直接喂给各 manager.configureWsl，形状必须是 WslEnvironment。
-	 */
-	resolveWslEnvironment?: (distro: string, user: string, logger: { warn: (msg: string, detail: unknown) => void }) => Promise<import("../wsl/WslPaths").WslEnvironment>;
 	/** React to settings changes for pet system */
 	reactToPetSettings?: (prev: AppSettings, next: AppSettings) => Promise<void>;
 	/** React to CUA enable/disable changes (start/stop the in-process MCP host). */
 	reactToCuaSettings?: (prev: AppSettings, next: AppSettings) => Promise<void>;
-	/** Session scanner WSL config */
-	configureSessionScannerWsl?: (env: import("../wsl/WslPaths").WslEnvironment) => Promise<void>;
-	clearSessionScannerWsl?: () => void;
 	/** Set feishu locale */
 	setFeishuLocale?: (locale: unknown) => void;
 	/** Set default bot name */
@@ -266,25 +258,10 @@ export type SystemIpcDeps = {
 	applyWebServiceSettings?: (settings: AppSettings) => Promise<void>;
 	/** Restart the running Web service without changing persisted settings. */
 	restartWebService?: (settings: AppSettings) => Promise<void>;
-	/** Session catalog set identity context */
-	setSessionCatalogIdentityContext?: (ctx: { wslDistro?: string; wslUser?: string }) => void;
 	/** DSH host 重启（改 runner node 路径后写入 fork env）。 */
 	restartDshHost?: () => Promise<boolean>;
 	/** host 是否已 fork；未启动时改路径不必立刻重启。 */
 	dshHostIsStarted?: () => boolean;
-	/** Configure WSL for various services — null 表示切回本机路径 */
-	configureSkillManagerWsl?: (env: import("../wsl/WslPaths").WslEnvironment | null) => void;
-	configurePromptManagerWsl?: (env: import("../wsl/WslPaths").WslEnvironment | null) => void;
-	configureExtensionManagerWsl?: (env: import("../wsl/WslPaths").WslEnvironment | null) => void;
-	configureConfigManagerWsl?: (env: import("../wsl/WslPaths").WslEnvironment | null) => void;
-	configureXuePromptManagerWsl?: (env: import("../wsl/WslPaths").WslEnvironment | null) => void;
-	configureAgentManagerWsl?: (env: import("../wsl/WslPaths").WslEnvironment | null) => void;
-	/**
-	 * DSH host 的 WSL 环境：DSH host 是 Windows 原生进程，workspace 解析与会话目录
-	 * 编码都必须是 Windows 主机路径。WSL 模式下项目记录是 /mnt/... 形式，缺了这层转换
-	 * 会让 workspace.resolve 直接失败（会话建不出来）。
-	 */
-	configureDshHostWsl?: (env: import("../wsl/WslPaths").WslEnvironment | null) => void;
 	/** Session command IPC error converter */
 	sessionCommandIpcError?: (error: import("../../shared/types").SessionCommandError) => Error;
 	/** 读取技能 SKILL.md 正文（装配层注入：路径白名单校验由 readSkillContent 完成）。 */
@@ -415,11 +392,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		downloadAppUpdate,
 		installAppUpdate,
 		openExternalUrl: doOpenExternalUrl,
-		resolveWslEnvironment,
 		reactToPetSettings,
 		reactToCuaSettings,
-		configureSessionScannerWsl,
-		clearSessionScannerWsl,
 		setFeishuLocale,
 		setFeishuConfigDefaultBotName,
 		refreshTrayContextMenu,
@@ -430,16 +404,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		testPiProxy,
 		applyWebServiceSettings,
 		restartWebService,
-		setSessionCatalogIdentityContext,
 		restartDshHost,
 		dshHostIsStarted,
-		configureSkillManagerWsl,
-		configurePromptManagerWsl,
-		configureExtensionManagerWsl,
-		configureConfigManagerWsl,
-		configureXuePromptManagerWsl,
-		configureAgentManagerWsl,
-		configureDshHostWsl,
 		sessionCommandIpcError,
 		readSkillContent,
 		extensionManager,
@@ -560,7 +526,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		const settings = settingsStore.get();
 		// 渲染层输入不可信：只认布尔 true，其他一律当非强制重检
 		const forceWslProbe = force === true;
-		const status = await piLocator.check(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser, { forceWslProbe });
+		const status = await piLocator.check(settings.customPiPath, false, undefined, undefined, { forceWslProbe });
 		void appLogger.info("pi", "Pi check completed", {
 			installed: status.installed,
 			version: status.version,
@@ -589,7 +555,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.piInstallations, async (_event, force?: unknown) => {
 		const settings = settingsStore.get();
 		const forceShellProbe = force === true;
-		const installations = await piLocator.listInstallations(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser, { forceShellProbe, customPaths: settings.piCustomPaths });
+		const installations = await piLocator.listInstallations(settings.customPiPath, false, undefined, undefined, { forceShellProbe, customPaths: settings.piCustomPaths });
 		void appLogger.info("pi", "Pi installations listed", {
 			count: installations.length,
 			forceShellProbe,
@@ -646,7 +612,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.piCheckCustom, async (_event, customPath: string, activate?: unknown) => {
 		const shouldActivate = activate !== false;
 		const settings = settingsStore.get();
-		const status = await piLocator.validateCustomPath(customPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
+		const status = await piLocator.validateCustomPath(customPath, false, undefined, undefined);
 		if (status.installed && status.command && shouldActivate) {
 			await settingsStore.update({ customPiPath: status.command });
 			// 自定义路径变了，当前使用项/排序跟着变；不清缓存会让设置页在 TTL 内显示旧列表。
@@ -658,11 +624,6 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			version: status.version,
 			command: status.command,
 			error: status.error,
-			// 校验实际使用的 WSL 上下文：用户报告「校验失败」时先看这三个字段与
-			// 设置页展示是否一致（设置弹窗草稿未提交时主进程读到的仍是旧值）。
-			wslEnabled: settings.wslEnabled,
-			wslDistro: settings.wslDistro,
-			wslUser: settings.wslUser,
 		});
 		return status;
 	});
@@ -1121,7 +1082,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			// 只在 UI 层不展示引导不够——检测总有覆盖不到的地方（自定义目录、别名、只在 GUI 看不见的 shell 里配的 PATH），
 			// 一旦漏判，用户点一下就会真的多出一份，之后终端与 PiDeck 各用各的、更新走两条路。
 			const settings = settingsStore.get();
-			const existing = await piLocator.listInstallations(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
+			const existing = await piLocator.listInstallations(settings.customPiPath);
 			const guard = resolvePiInstallGuard(existing);
 			if (guard.skip) {
 				void appLogger.info("pi", "Runtime pi install skipped because pi already exists", {
@@ -1268,7 +1229,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			try {
 				// 与设置页/反馈环境一致：用当前设置的 WSL 路径探测 pi CLI 版本
 				const settings = settingsStore.get();
-				const status = await piLocator.check(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
+				const status = await piLocator.check(settings.customPiPath);
 				piVersion = status.version;
 			} catch (error) {
 				appLogger.warn("appInfo", "pi version probe failed", { error });
@@ -1557,7 +1518,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 
 	ipcMain.handle(ipcChannels.appFeedbackEnvironment, async () => {
 		const settings = settingsStore.get();
-		const pi = await piLocator.check(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
+		const pi = await piLocator.check(settings.customPiPath);
 		return {
 			appVersion: app.getVersion(),
 			platform: process.platform,
@@ -1879,36 +1840,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 				throw new Error(mainCopy(debugDetails === "WEB_SERVICE_INVALID_PORT" ? "webService.invalidPort" : "webService.startFailed"));
 			}
 		}
-		// WSL 设置变更时同步更新会话扫描器和配置管理器
-		if ("wslEnabled" in patch || "wslDistro" in patch || "wslUser" in patch) {
-			if (setSessionCatalogIdentityContext) {
-				setSessionCatalogIdentityContext(settings.wslEnabled ? { wslDistro: settings.wslDistro, wslUser: settings.wslUser } : {});
-			}
-			if (settings.wslEnabled && settings.wslDistro && settings.wslUser && resolveWslEnvironment) {
-				const environment = await resolveWslEnvironment(settings.wslDistro, settings.wslUser, {
-					warn: (msg: string, detail: unknown) => console.warn("[PiDeck] " + String(msg), detail),
-				});
-				if (configureSessionScannerWsl) await configureSessionScannerWsl(environment);
-				if (configureSkillManagerWsl) configureSkillManagerWsl(environment);
-				if (configurePromptManagerWsl) configurePromptManagerWsl(environment);
-				if (configureExtensionManagerWsl) configureExtensionManagerWsl(environment);
-				if (configureConfigManagerWsl) configureConfigManagerWsl(environment);
-				if (configureXuePromptManagerWsl) configureXuePromptManagerWsl(environment);
-				if (configureAgentManagerWsl) configureAgentManagerWsl(environment);
-				if (configureDshHostWsl) configureDshHostWsl(environment);
-			} else {
-				if (clearSessionScannerWsl) clearSessionScannerWsl();
-				if (configureSkillManagerWsl) configureSkillManagerWsl(null);
-				if (configurePromptManagerWsl) configurePromptManagerWsl(null);
-				if (configureExtensionManagerWsl) configureExtensionManagerWsl(null);
-				if (configureConfigManagerWsl) configureConfigManagerWsl(null);
-				if (configureXuePromptManagerWsl) configureXuePromptManagerWsl(null);
-				if (configureAgentManagerWsl) configureAgentManagerWsl(null);
-				if (configureDshHostWsl) configureDshHostWsl(null);
-			}
-		}
-		if ("customPiPath" in patch || "wslEnabled" in patch || "wslDistro" in patch || "wslUser" in patch) {
-			// WSL 切换会改变 ConfigManager 的目录；先重新挂 watcher，再启动新 generation。
+		if ("customPiPath" in patch) {
+			// 当前使用的 pi 路径变化后重新挂 watcher，再启动新 generation。
 			modelCapabilityCache.watchConfigDirectory();
 			// 当前使用项与候选列表都随这些字段变化：不清缓存会让 UI 在 TTL 内显示旧安装列表。
 			invalidatePiInstallationCache();
@@ -2465,9 +2398,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			await writeFile(join(tempDir, "auth.json"), authJson, "utf8");
 			// 正式 settings.json 副本：扩展注册的 api 协议靠它加载；空配置不写。
 			if (settingsJson) await writeFile(join(tempDir, "settings.json"), settingsJson, "utf8");
-			// WSL：pi 在 Linux 里读不到 Windows 路径，转 /mnt/<drive>；非 WSL 用原路径。
-			const settings = settingsStore.get();
-			const agentDirEnv = settings.wslEnabled && process.platform === "win32" ? toWslAccessiblePath(tempDir) : tempDir;
+			// 模型探针只跑本机 pi；WSL 内的自定义配置由该发行版的 pi 自己处理。
+			const agentDirEnv = tempDir;
 			// 3) 用真实 pi 做一次最小调用（走 pi 的 provider 解析 + SDK，与真实会话同路径）。
 			//    测试连接显式选了代理时，把它覆盖到探针进程的代理环境（pi 侧只认 piProxy* 配置）。
 			const result = await probePiModel(piLocator, settingsStore, providerName, modelId, resolveConfigProxyTarget(settingsStore.get(), asConfigProxyMode(raw.proxyMode)), { [PROBE_AGENT_DIR_ENV]: agentDirEnv });

@@ -73,12 +73,13 @@ export function registerFilesIpc({ fileSystemService, projectStore, settingsStor
 	registerFilesSystemIpc({ settingsStore, openExternalUrl });
 	// Windows Node / Electron 边界不能直接消费 WSL Linux 路径：统一走 WslPaths 转成当前发行版的主机 UNC。
 	// 已经是普通 Windows/非 WSL 网络盘的输入保持不变，避免误伤非 WSL 路径。
-	const toWindowsPath = (path: string): string => {
+	const toWindowsPath = (path: string, project?: { environment?: string; wslDistro?: string }): string => {
 		if (!path || process.platform !== "win32") return path;
-		const settings = settingsStore.get();
-		if (!settings.wslEnabled || !settings.wslDistro) return path;
 		if (!path.startsWith("/") && !parseWslUncPath(path)) return path;
-		return toWindowsHostPath(path, { distro: settings.wslDistro });
+		const unc = parseWslUncPath(path);
+		const distro = unc?.distro ?? (project?.environment === "wsl" ? (project.wslDistro ?? settingsStore.get().wslDistro) : undefined);
+		if (distro === undefined || distro.length === 0) return path;
+		return toWindowsHostPath(path, { distro });
 	};
 
 	// ProjectStore currently returns legacy local records. A locator-bearing future record must
@@ -93,7 +94,7 @@ export function registerFilesIpc({ fileSystemService, projectStore, settingsStor
 		resolveProjectRoot: (projectId) => {
 			const project = localProject(projectId);
 			if (!project) throw new Error("PROJECT_NOT_FOUND");
-			return toWindowsPath(project.path);
+			return toWindowsPath(project.path, project);
 		},
 	});
 	// 文件抽屉的 skipGeneratedDirs 需要透传到 FileSystemService.listTree 的第 4 个选项；
@@ -110,7 +111,7 @@ export function registerFilesIpc({ fileSystemService, projectStore, settingsStor
 		resolveProjectRoot: (projectId) => {
 			const project = localProject(projectId);
 			if (!project) throw new Error("PROJECT_NOT_FOUND");
-			return toWindowsPath(project.path);
+			return toWindowsPath(project.path, project);
 		},
 	});
 	const projectFileBackendRouter = new ProjectFileBackendRouter(localProjectFileBackend, (projectId) => {
@@ -141,7 +142,7 @@ export function registerFilesIpc({ fileSystemService, projectStore, settingsStor
 		}
 		const project = localProject(rawScope.projectId);
 		if (!project) throw new Error("PROJECT_NOT_FOUND");
-		return createProjectFileReadBoundary(toWindowsPath(project.path));
+		return createProjectFileReadBoundary(toWindowsPath(project.path, project));
 	};
 
 	const resolveReadablePath = async (rawPath: unknown, boundary?: ProjectFileReadBoundary): Promise<string> => {
@@ -150,7 +151,7 @@ export function registerFilesIpc({ fileSystemService, projectStore, settingsStor
 			const target = parseProjectFileTarget(rawPath);
 			const project = localProject(target.projectId);
 			if (!project) throw new Error("PROJECT_NOT_FOUND");
-			const projectRoot = toWindowsPath(project.path);
+			const projectRoot = toWindowsPath(project.path, project);
 			const targetPath = resolveLocalProjectFileTarget(projectRoot, target.relativePath);
 			const targetBoundary = await createProjectFileReadBoundary(projectRoot);
 			return resolveProjectFileReadPath(targetBoundary, targetPath);
@@ -208,8 +209,8 @@ export function registerFilesIpc({ fileSystemService, projectStore, settingsStor
 		if (legacyDirectory) {
 			const project = localProject(projectId);
 			if (!project) throw new Error("PROJECT_NOT_FOUND");
-			const boundary = await createProjectFileReadBoundary(toWindowsPath(project.path));
-			const directory = await resolveProjectFileReadPath(boundary, toWindowsPath(legacyDirectory));
+			const boundary = await createProjectFileReadBoundary(toWindowsPath(project.path, project));
+			const directory = await resolveProjectFileReadPath(boundary, toWindowsPath(legacyDirectory, project));
 			relativePath = relative(boundary.canonicalRoot, directory).replace(/\\/g, "/");
 		}
 		return await listOrEmpty({ projectId, relativePath });
@@ -232,7 +233,7 @@ export function registerFilesIpc({ fileSystemService, projectStore, settingsStor
 		const normalizedQuery = parseFileSearchQuery(query);
 		const project = localProject(rawProjectId);
 		if (!project) throw new Error("PROJECT_NOT_FOUND");
-		const root = toWindowsPath(project.path);
+		const root = toWindowsPath(project.path, project);
 		// 索引就绪时走 Go sidecar（评分排序 + 路径段命中）；否则回退实时 BFS 扫盘（fail-open）。
 		const fileIndex = getFileIndexService?.() ?? null;
 		const roots = fileIndex ? indexRootsFor(project.environment, root) : [];
@@ -262,7 +263,7 @@ export function registerFilesIpc({ fileSystemService, projectStore, settingsStor
 		if (!project) throw new Error("PROJECT_NOT_FOUND");
 		const fileIndex = getFileIndexService?.() ?? null;
 		if (!fileIndex) return null;
-		const roots = indexRootsFor(project.environment, toWindowsPath(project.path));
+		const roots = indexRootsFor(project.environment, toWindowsPath(project.path, project));
 		if (roots.length === 0) return null;
 		// 未就绪同样返回 null：渲染层不展示内容分区，索引建好后下一次输入自然出现。
 		if (!fileIndex.isReady(roots)) {

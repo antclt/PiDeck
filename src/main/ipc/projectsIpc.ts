@@ -54,13 +54,11 @@ export function registerProjectsIpc({ projectStore, settingsStore, gitService, w
 		}
 	};
 
-	const resolveProjectStoredPath = (path: string, project: { environment?: string }) => {
-		const settings = settingsStore.get();
-		if (process.platform !== "win32" || project.environment !== "wsl" || !settings.wslEnabled || !settings.wslDistro) {
-			return path;
-		}
+	const resolveProjectStoredPath = (path: string, project: LocalProject) => {
+		const distro = project.wslDistro ?? settingsStore.get().wslDistro;
+		if (process.platform !== "win32" || project.environment !== "wsl" || !distro) return path;
 		try {
-			return normalizeSelectedWslProjectPath(path, { distro: settings.wslDistro });
+			return normalizeSelectedWslProjectPath(path, { distro });
 		} catch {
 			return path;
 		}
@@ -81,12 +79,9 @@ export function registerProjectsIpc({ projectStore, settingsStore, gitService, w
 
 	ipcMain.handle(ipcChannels.projectsList, async () => getVisibleProjects());
 	ipcMain.handle(ipcChannels.projectsAdd, async () => {
-		const settings = settingsStore.get();
-		const env = settings.wslEnabled ? ("wsl" as const) : ("windows" as const);
-		// #155：WSL 模式下必须带上当前发行版环境，否则 chooseAndAdd 直接抛 INVALID_WSL_PATH。
-		const wslEnvironment = env === "wsl" && settings.wslDistro && settings.wslUser && resolveWslEnvironment ? await resolveWslEnvironment(settings.wslDistro, settings.wslUser) : null;
-		const project = await projectStore.chooseAndAdd(env, wslEnvironment);
-		void appLogger.info("project", "Project added", { projectId: project?.id, path: project?.path, environment: env });
+		// 第 14 步：普通「添加项目」只加本机项目；WSL 项目必须经 projects:add-wsl 选择连接档案。
+		const project = await projectStore.chooseAndAdd("windows");
+		void appLogger.info("project", "Project added", { projectId: project?.id, path: project?.path, environment: "windows" });
 		return project;
 	});
 	// 文件夹右键菜单（--open-project）直达：给定路径必须是已存在的目录，

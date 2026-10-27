@@ -37,10 +37,12 @@ export function registerPasteFilesIpc({ projectStore, settingsStore, appLogger }
 	// 落盘必须转成当前发行版可挂载的主机 UNC；返回给渲染层/p做 @ 引用的仍是原路径。
 	const toWindowsPath = (path: string): string => {
 		if (!path || process.platform !== "win32") return path;
-		const settings = settingsStore.get();
-		if (!settings.wslEnabled || !settings.wslDistro) return path;
-		if (!path.startsWith("/") && !parseWslUncPath(path)) return path;
-		return toWindowsHostPath(path, { distro: settings.wslDistro });
+		const unc = parseWslUncPath(path);
+		// UNC 自带发行版；/mnt/<drive> 与发行版无关。其余 Linux 绝对路径没有项目上下文，
+		// 不能猜一个发行版（猜错会把文件写到另一个发行版的 home）。
+		if (unc !== null) return toWindowsHostPath(path, { distro: unc.distro });
+		if (/^\/mnt\/[A-Za-z](?:\/|$)/.test(path)) return toWindowsHostPath(path, { distro: "Ubuntu" });
+		return path;
 	};
 
 	const userPasteRoot = (): string => join(app.getPath("userData"), USER_PASTE_DIR);

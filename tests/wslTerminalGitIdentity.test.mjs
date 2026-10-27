@@ -22,7 +22,7 @@ test("terminal manager passes the project profile into spawn", () => {
 });
 
 test("git host paths prefer the project's distro", () => {
-	assert.match(gitIpc, /const distro = project\?\.environment === "wsl" \? \(project\.wslDistro \?\? settings\.wslDistro\) : settings\.wslDistro;/);
+	assert.match(gitIpc, /const distro = project\?\.environment === "wsl" \? \(project\.wslDistro \?\? settings\.wslDistro\) : undefined;/);
 	assert.match(gitIpc, /const projectHostPath = \(project: LocalProject\) => hostPath\(project\.path, project\);/);
 	assert.match(gitIpc, /const distro = project\.wslDistro \?\? settings\.wslDistro;/);
 });

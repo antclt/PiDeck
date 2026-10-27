@@ -91,7 +91,7 @@ export class LocalTerminalSessionLauncher {
 
 	candidates(override?: TerminalWslSettings): TerminalShellCandidate[] {
 		const candidates = getTerminalShellCandidates(process.platform, process.env);
-		// 第 12 步 Wave 4：项目终端可显式传入自己的 WSL 档案，未传时回退全局设置。
+		// 显式传入项目 WSL 档案时优先；未传时由管理器决定是否提供全局默认（生产装配传空）。
 		const settings = override ?? this.getSettings();
 		if (process.platform !== "win32" || !settings.wslEnabled || !settings.wslDistro || !settings.wslUser) {
 			return candidates;
