@@ -406,6 +406,7 @@ import { registerProjectsIpc } from "./ipc/projectsIpc";
 import { registerRemoteHostIpc } from "./ipc/remoteHostIpc";
 import { registerWslHostIpc } from "./ipc/wslHostIpc";
 import { createWslHostReferenceRegistry } from "./wsl/WslHostReferences";
+import { resolveProjectWslIdentity } from "./wsl/WslProjectEnvironment";
 import { registerRemoteProjectIpc } from "./ipc/remoteProjectIpc";
 import { registerRemoteProjectFileIpc } from "./ipc/remoteProjectFileIpc";
 import { registerRemoteProjectTransferIpc } from "./ipc/remoteProjectTransferIpc";
@@ -4415,12 +4416,13 @@ function registerIpc() {
 					if (!isLocalProject(project)) return;
 					try {
 						const settings = settingsStore.get();
+						const wsl = resolveProjectWslIdentity(project, settings);
 						let projectPath = project.path;
-						if (settings.wslEnabled && settings.wslDistro) {
+						if (wsl !== undefined) {
 							projectPath = projectPath.replace(/^([A-Za-z]):\\/, (_: string, drive: string) => `/mnt/${drive.toLowerCase()}/`).replace(/\\/g, "/");
 						}
 						const summaries = await sessionScanner.list(projectPath);
-						await sessionCatalog.mergeScanned(project.id, summaries, settings.wslEnabled ? { wslDistro: settings.wslDistro, wslUser: settings.wslUser } : {});
+						await sessionCatalog.mergeScanned(project.id, summaries, wsl !== undefined ? { wslDistro: wsl.distro, wslUser: wsl.user } : {});
 					} catch (error) {
 						void appLogger.warn("session", "Catalog prewarm scan failed", {
 							projectId: project.id,
@@ -4648,7 +4650,8 @@ function registerIpc() {
 		isProjectTrusted: async (projectId, projectRoot) => {
 			const project = projectStore.get(projectId);
 			const settings = settingsStore.get();
-			const trustPath = project?.environment === "wsl" && process.platform === "win32" && settings.wslEnabled && settings.wslDistro ? toWslLinuxPath(projectRoot, { distro: settings.wslDistro }) : projectRoot;
+			const trustWslDistro = project?.environment === "wsl" ? (project?.wslDistro ?? settings.wslDistro) : undefined;
+			const trustPath = process.platform === "win32" && trustWslDistro ? toWslLinuxPath(projectRoot, { distro: trustWslDistro }) : projectRoot;
 			return (await configManager.getProjectTrustDecision(trustPath)) === true;
 		},
 		// pi 环境引导：便携 Node 安装器的真实 IO（下载/解压与 DSH runtime 同源，
@@ -4786,9 +4789,11 @@ function registerIpc() {
 					.filter(isLocalProject)
 					.map((project) => {
 						const settings = settingsStore.get();
-						if (process.platform === "win32" && project.environment === "wsl" && settings.wslEnabled && settings.wslDistro) {
+						// 第 12 步：项目自带 distro 优先；缺字段回退全局。
+						const distro = project.environment === "wsl" ? (project.wslDistro ?? settings.wslDistro) : undefined;
+						if (process.platform === "win32" && distro !== undefined) {
 							try {
-								return toWindowsHostPath(project.path, { distro: settings.wslDistro });
+								return toWindowsHostPath(project.path, { distro });
 							} catch {
 								return project.path;
 							}
@@ -4830,9 +4835,10 @@ function registerIpc() {
 		projectTrustPath: (projectRoot, projectId) => {
 			const project = projectStore.get(projectId);
 			const settings = settingsStore.get();
-			if (project?.environment === "wsl" && process.platform === "win32" && settings.wslEnabled && settings.wslDistro) {
+			const trustWslDistro = project?.environment === "wsl" ? (project?.wslDistro ?? settings.wslDistro) : undefined;
+			if (process.platform === "win32" && trustWslDistro !== undefined) {
 				try {
-					return toWslLinuxPath(projectRoot, { distro: settings.wslDistro });
+					return toWslLinuxPath(projectRoot, { distro: trustWslDistro });
 				} catch {
 					return projectRoot;
 				}
@@ -5481,9 +5487,10 @@ app
 				// ProjectResourceManager 只在本地项目上工作（远端资源发现属 Phase 4）。
 				if (!isLocalProject(project)) throw new Error("UNSUPPORTED_PROJECT_LOCATION");
 				const settings = settingsStore.get();
-				if (process.platform === "win32" && project.environment === "wsl" && settings.wslEnabled && settings.wslDistro) {
+				const resourceWslDistro = project.environment === "wsl" ? (project.wslDistro ?? settings.wslDistro) : undefined;
+				if (process.platform === "win32" && resourceWslDistro !== undefined) {
 					try {
-						return toWindowsHostPath(project.path, { distro: settings.wslDistro });
+						return toWindowsHostPath(project.path, { distro: resourceWslDistro });
 					} catch {
 						return project.path;
 					}
@@ -5494,7 +5501,8 @@ app
 				getProjectTrustDecision: async (project) => {
 					if (!isLocalProject(project)) throw new Error("UNSUPPORTED_PROJECT_LOCATION");
 					const settings = settingsStore.get();
-					const cwd = process.platform === "win32" && project.environment === "wsl" && settings.wslEnabled && settings.wslDistro ? toWslLinuxPath(project.path, { distro: settings.wslDistro }) : project.path;
+					const projectWslDistro = project.environment === "wsl" ? (project.wslDistro ?? settings.wslDistro) : undefined;
+					const cwd = process.platform === "win32" && projectWslDistro !== undefined ? toWslLinuxPath(project.path, { distro: projectWslDistro }) : project.path;
 					return configManager.getProjectTrustDecision(cwd);
 				},
 				getGlobalDisabledResourceNames: () => {
@@ -5993,12 +6001,12 @@ app
 				if (!isLocalProject(project)) throw new Error("UNSUPPORTED_PROJECT_LOCATION");
 				let projectPath = project.path;
 				const settings = settingsStore.get();
-				if (settings.wslEnabled && settings.wslDistro) {
+				const wsl = resolveProjectWslIdentity(project, settings);
+				if (wsl !== undefined) {
 					projectPath = projectPath.replace(/^([A-Za-z]):\\/, (_: string, drive: string) => `/mnt/${drive.toLowerCase()}/`).replace(/\\/g, "/");
 				}
 				const summaries = await sessionScanner.list(projectPath);
-				const { wslEnabled, wslDistro, wslUser } = settings;
-				const scanned = await sessionCatalog.mergeScanned(projectId, summaries, wslEnabled ? { wslDistro, wslUser } : {});
+				const scanned = await sessionCatalog.mergeScanned(projectId, summaries, wsl !== undefined ? { wslDistro: wsl.distro, wslUser: wsl.user } : {});
 				// 同上：supersededBy 隐藏规则与桌面列表一致（mergeScanned 可能重新接上被打标的旧会话）
 				const records = scanned.filter((record) => !record.supersededBy);
 				const bindings = sessionRuntimeCoordinator.attachCatalogRuntimes(records);
@@ -6477,7 +6485,8 @@ app
 					if (!project || project.kind === "chat" || !isLocalProject(project)) return null;
 					const root = project.path;
 					const settings = settingsStore.get();
-					const trustPath = process.platform === "win32" && project.environment === "wsl" && settings.wslEnabled && settings.wslDistro ? toWslLinuxPath(root, { distro: settings.wslDistro }) : root;
+					const resourceWslDistro = project.environment === "wsl" ? (project.wslDistro ?? settings.wslDistro) : undefined;
+					const trustPath = process.platform === "win32" && resourceWslDistro !== undefined ? toWslLinuxPath(root, { distro: resourceWslDistro }) : root;
 					return { root, trusted: (await configManager.getProjectTrustDecision(trustPath)) === true };
 				},
 			},
