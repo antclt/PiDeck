@@ -25,7 +25,7 @@ import { ACP_PROTOCOL_VERSION, type AcpConfigOption, type AcpContentBlock, type 
 import { AcpTimeoutError } from "./AcpConnection";
 import { AcpPermissionRequests } from "./AcpPermissionRequests";
 import { acpPromptBlocks, appendAcpUserPrompt, initialAcpProjection, rollbackAcpUserPrompt, settleAcpTurn, type AcpProjectionState } from "./AcpEventProjector";
-import { authRequiredDescriptor, localizeCreateFailure } from "./acpFailureDescriptors";
+import { authRequiredDescriptor, localizeCreateFailure, promptTurnTimeoutDescriptor } from "./acpFailureDescriptors";
 import { buildAgentRuntimeState, type AcpAgentRuntime } from "./acpAgentRuntime";
 import { AcpTurnWatchdog } from "./acpTurnWatchdog";
 import { AcpMessageSnapshotStore } from "./AcpMessageSnapshotStore";
@@ -475,7 +475,9 @@ export class AcpAgentManager implements SessionAgentGateway {
 				return escalatedStopRejection(runtime.escalatedStop, message, runtime.tool.name);
 			}
 			// AUTH_REQUIRED（凭据过期等回合期失败）：描述符随拒收结果透出登录引导。
-			const descriptor = authRequiredDescriptor(error, runtime.tool);
+			// 回合兑底超时同样挂描述符：渲染层弹「人性化时长 + acpPromptTurnTimeoutMs 指引」，
+			// 原文留在 debugDetails（#431）。
+			const descriptor = authRequiredDescriptor(error, runtime.tool) ?? promptTurnTimeoutDescriptor(error, runtime.tool);
 			return { accepted: false, error: message, delivery: hasOutput || error instanceof AcpTimeoutError ? "unknown" : "rejected", ...(descriptor ?? {}) };
 		}
 		runtime.turnActive = false;

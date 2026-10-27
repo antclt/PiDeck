@@ -1088,6 +1088,11 @@ test("session/prompt 超时后补发 session/cancel：agent 侧旧回合必须�
 	const first = await manager.sendPrompt({ agentId: tab.id, message: "hello" });
 	assert.equal(first.accepted, false);
 	assert.match(first.error, /ACP request timed out after 40ms: session\/prompt/);
+	// 回合超时带本地化描述符（#431）：人性化时长 + 配置键指引，原文留 debugDetails
+	assert.equal(first.i18nKey, "acp.turnTimeout");
+	assert.equal(first.i18nParams.tool, "Gemini CLI");
+	assert.equal(first.i18nParams.minutes, "<1");
+	assert.match(first.debugDetails, /ACP request timed out after 40ms: session\/prompt/);
 	// 超时后必须补发 cancel，让 agent 收口旧回合（reason 固定 turn_timeout）
 	await waitFor(() => lastProc().methodFrames("session/cancel").length === 1);
 	const cancel = lastProc().methodFrames("session/cancel")[0];
@@ -1319,8 +1324,48 @@ test("session/prompt 兑底超时:settings 读口生效(readAcpTimeoutSettings.p
 	await waitFor(() => promptSeen, "prompt dispatched");
 	assert.equal(result.accepted, false);
 	assert.match(result.error, /ACP request timed out after 40ms: session\/prompt/);
+	// settings 读口路径同样要带描述符：否则用户只看到「600000ms」这种搜不出配置键的裸文本（#431）
+	assert.equal(result.i18nKey, "acp.turnTimeout");
+	assert.equal(result.i18nParams.minutes, "<1");
 	await waitFor(() => lastProc().methodFrames("session/cancel").length === 1);
 	assert.equal(lastProc().methodFrames("session/cancel")[0].params.reason, "turn_timeout");
+});
+
+test("回合超时文案:时长按分钟人性化 + 只认超时错误(其余错误不挂描述符)", () => {
+	// loadTsCommonJs 每次调用是独立模块注册表（vm 独立 realm），跨调用 instanceof 必失配：
+	// 这里用 stubs 把 ./AcpConnection 替成同注册表内的类，专注测「时长格式化与键选择」。
+	// 真实 AcpTimeoutError 的身份匹配由上面的 manager 级用例（含 i18nKey/minutes 断言）覆盖。
+	class StubAcpTimeoutError extends Error {
+		constructor(method, timeoutMs) {
+			super(`ACP request timed out after ${timeoutMs}ms: ${method}`);
+			this.name = "AcpTimeoutError";
+			this.method = method;
+			this.timeoutMs = timeoutMs;
+		}
+	}
+	class StubAcpRpcError extends Error {}
+	const { formatTurnTimeoutMinutes, promptTurnTimeoutDescriptor, startupTimeoutDescriptor } = loadTsCommonJs("src/main/acp/acpFailureDescriptors.ts", {
+		stubs: { "./AcpConnection": { AcpTimeoutError: StubAcpTimeoutError, AcpRpcError: StubAcpRpcError } },
+	});
+	const tool = { id: "cb", name: "CodeBuddy", command: "codebuddy", args: [], enabled: true };
+
+	// 默认 10min / 自定义整分钟 / 亚分钟 / 非整分钟
+	assert.equal(formatTurnTimeoutMinutes(600_000), "10");
+	assert.equal(formatTurnTimeoutMinutes(3_600_000), "60");
+	assert.equal(formatTurnTimeoutMinutes(40), "<1");
+	assert.equal(formatTurnTimeoutMinutes(90_000), "1.5");
+
+	// 逐字段断言：对象来自 vm 独立 realm，deepEqual 会因 prototype 不同而失配
+	const descriptor = promptTurnTimeoutDescriptor(new StubAcpTimeoutError("session/prompt", 600_000), tool);
+	assert.equal(descriptor.i18nKey, "acp.turnTimeout");
+	assert.equal(descriptor.i18nParams.tool, "CodeBuddy");
+	assert.equal(descriptor.i18nParams.minutes, "10");
+	// debugDetails 保留原文（ms 与 method）：本地化文案是概括，排查要靠它
+	assert.equal(descriptor.debugDetails, "ACP request timed out after 600000ms: session/prompt");
+
+	// 非超时错误不挂回合超时描述符；create 阶段的握手超时仍归 acp.startupTimeout，两键互不串
+	assert.equal(promptTurnTimeoutDescriptor(new Error("boom"), tool), undefined);
+	assert.equal(startupTimeoutDescriptor(new StubAcpTimeoutError("initialize", 60_000), tool).i18nKey, "acp.startupTimeout");
 });
 
 // ── #415 MVP：deck 侧归档（userData/acp-sessions）接线 ─────────────────────────
