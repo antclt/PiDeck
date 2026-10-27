@@ -404,6 +404,8 @@ import { ResourceImportManager } from "./resourceImport/ResourceImportManager";
 import { toWslLinuxPath, toWindowsHostPath } from "./wsl/WslPaths";
 import { registerProjectsIpc } from "./ipc/projectsIpc";
 import { registerRemoteHostIpc } from "./ipc/remoteHostIpc";
+import { registerWslHostIpc } from "./ipc/wslHostIpc";
+import { createWslHostReferenceRegistry } from "./wsl/WslHostReferences";
 import { registerRemoteProjectIpc } from "./ipc/remoteProjectIpc";
 import { registerRemoteProjectFileIpc } from "./ipc/remoteProjectFileIpc";
 import { registerRemoteProjectTransferIpc } from "./ipc/remoteProjectTransferIpc";
@@ -3290,6 +3292,14 @@ function registerIpc() {
 	});
 	// 远端项目域（登记/回答/列表/读取/搜索）与 hosts 域分开注册：同一个连接服务端口，不同域的 handler。
 	// 远端 trust 域（决策表的清单/写入/撤销）同样分开：它不动 SSH，只读写桌面配置 + 已确认的 pin 事实。
+	// WSL 连接档案：只读写本机清单；移除前扫描项目/会话的 wslHostId 引用（字段在第 11/12 步接入）。
+	registerWslHostIpc({
+		userDataDir: app.getPath("userData"),
+		references: createWslHostReferenceRegistry({
+			projectsFile: join(app.getPath("userData"), "projects.json"),
+			sessionCatalogFile: join(app.getPath("userData"), "session-catalog.json"),
+		}),
+	});
 	registerRemoteProjectTrustIpc({ enabled: remoteExperimentEnabled, trust: () => remoteProjectTrustService });
 	registerRemoteProjectIpc({
 		enabled: remoteExperimentEnabled,

@@ -378,6 +378,11 @@ const api = {
 		remove: (hostId: string) => ipcRenderer.invoke(ipcChannels.remoteHostRemove, hostId) as Promise<import("../shared/types/remoteHost").RemoteHostRemoveResult>,
 		/** 只读列目录：path 缺省从远端 home 开始；只返回目录名。 */
 		listDirs: (hostId: string, path?: string) => ipcRenderer.invoke(ipcChannels.remoteHostListDirs, hostId, path) as Promise<import("../shared/types/remoteHost").RemoteDirectoryListResult>,
+		/** WSL 连接档案：只读写本机档案，不启动 wsl.exe。 */
+		listWslHosts: () => ipcRenderer.invoke(ipcChannels.remoteHostsWslList) as Promise<import("../shared/types/wslHost").WslHostListResult>,
+		addWslHost: (input: import("../shared/types/wslHost").WslHostAddInput) => ipcRenderer.invoke(ipcChannels.remoteHostsWslAdd, input) as Promise<import("../shared/types/wslHost").WslHostMutationResult>,
+		updateWslHost: (id: string, patch: import("../shared/types/wslHost").WslHostUpdateInput) => ipcRenderer.invoke(ipcChannels.remoteHostsWslUpdate, id, patch) as Promise<import("../shared/types/wslHost").WslHostMutationResult>,
+		removeWslHost: (id: string) => ipcRenderer.invoke(ipcChannels.remoteHostsWslRemove, id) as Promise<import("../shared/types/wslHost").WslHostRemoveResult>,
 		/** 订阅连接状态推送；返回 unsubscribe，组件卸载必须退订。 */
 		onStateChange: (callback: (change: import("../shared/types/remoteHost").RemoteHostStateChange) => void) => subscribe(ipcChannels.remoteHostStateChanged, callback),
 		/** 只读：诊断 needs-repair 的原因与合法动作。 */
