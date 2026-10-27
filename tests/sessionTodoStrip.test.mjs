@@ -114,12 +114,14 @@ test("in-progress glyph keeps its spin on the svg box and the row clips the rota
 	assert.match(progressGlyph, /<svg[^>]*className="[^"]*overflow-visible animate-pideck-spin[^"]*\[animation-duration:1s\][^"]*"/, "spin animation must stay on the <svg> box");
 	// 不能下放到 circle：SVG 子元素默认 transform-origin:0 0，会围绕 viewBox 左上角甩出去
 	assert.doesNotMatch(progressGlyph, /<circle[^>]*className="[^"]*animate-pideck-spin/, "spinning a <circle> swings it out of the viewBox (transform-origin defaults to 0 0)");
-	// 行级裁剪：把旋转 AABB（≈22.6px）关在 20px 行内，否则外层 ul 的 scrollHeight 会反复越界
-	assert.match(strip, /<li[^>]*className="flex min-w-0 items-center gap-2\.5 overflow-hidden[^"]*"/);
+	// 行级裁剪：把旋转 AABB（≈22.6px）关在 20px 行内，否则外层 ul 的 scrollHeight 会反复越界。
+	// 行标签是 `ItemTag`（虚拟化分支换成 div[role=listitem]，见 SessionTodoStrip 的说明），
+	// 所以判据从 `<li` 放宽到「任意行标签」，但 className 逐字仍要匹配。
+	assert.match(strip, /<ItemTag[^>]*className="flex min-w-0 items-center gap-2\.5 overflow-hidden[^"]*"/);
 	// shrink-0 语义：ul 是「flex 列 + max-h-[180px]」容器，flex 子项默认可压缩——条目多到溢出时
 	// 每行会被从 20px 压到约 7.7px（文字被 overflow-hidden 切成横条、相邻行重叠），且
 	// scrollHeight 收缩到与 clientHeight 相等 → 不出现滚动条、用户滚不动。见 2027-01 排版事故。
-	assert.match(strip, /<li[^>]*className="flex min-w-0 items-center gap-2\.5 overflow-hidden shrink-0[^"]*"/, "todo rows must not be flex-shrunk when the capped list overflows");
+	assert.match(strip, /<ItemTag[^>]*className="flex min-w-0 items-center gap-2\.5 overflow-hidden shrink-0[^"]*"/, "todo rows must not be flex-shrunk when the capped list overflows");
 });
 
 test("ACP 会话的 plan 投影接入 todo 数据源（与 DSH 同路消费 runtime.state.todos）", () => {

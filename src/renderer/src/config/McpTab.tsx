@@ -638,14 +638,6 @@ export const McpTab = forwardRef<
 
 	useImperativeHandle(ref, () => ({ save, reload: load }), [save, load]);
 
-	const layerLabel = useMemo(
-		() => ({
-			"pi-agent": t("config.mcp.layer.piAgent"),
-			"project-pi": t("config.mcp.layer.projectPi"),
-		}),
-		[],
-	);
-
 	if (loading && !snapshot) {
 		return (
 			<div className="flex items-center justify-center gap-2 py-12 text-control text-muted-foreground">

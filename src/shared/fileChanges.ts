@@ -79,6 +79,20 @@ function getToolEditDiff(args: Record<string, unknown>): { oldText: string; newT
 	return { oldText, newText };
 }
 
+export function createTextTransformCache(transform: (text: string) => string, limit = 256, maxInput = 64 * 1024): (text: string) => string {
+	const cache = new Map<string, string>();
+	return (text: string) => {
+		const cached = cache.get(text);
+		if (cached !== undefined) return cached;
+		const value = transform(text);
+		if (text.length <= maxInput) {
+			if (cache.size >= limit) cache.clear();
+			cache.set(text, value);
+		}
+		return value;
+	};
+}
+
 /**
  * 文件修改类工具名（write / edit / create / patch）：产出 diff 目标的工具集合。
  *

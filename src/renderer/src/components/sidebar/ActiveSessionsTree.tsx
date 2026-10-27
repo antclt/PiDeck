@@ -120,6 +120,8 @@ export function ActiveSessionsTree(props: { controller: SidebarController; actio
 		/* h-full：两半必须在侧栏可视高度内分配，否则下半个滚动区会被内容顶出屏幕。 */
 		<div className="active-sessions-pane flex h-full min-h-0 flex-col">
 			{/* 上半：活动行。行数多时只滚这里，「最近会话」不会被挤下去。 */}
+			{/* scroll-ok: flip —— 行是 RemovalRow，退场走 AnimatePresence 的 FLIP 淡出：行被卸载就没有锚点可淡出。
+			    要虚拟化必须先给退场动画设计「离场占位行」，属于独立改动，不是接一个 VirtualStack 就完。 */}
 			<div className="active-sessions-list flex min-h-0 flex-1 flex-col gap-0 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
 				{liveRows.length === 0 ? <div className="px-2 py-1.5 text-caption text-muted-foreground">{t("app.sidebarActiveEmpty")}</div> : null}
 				{/* 关闭/删除会话时行淡出 + 下方行滑位（与 SessionTree 同一原语）；活动行按
@@ -202,6 +204,7 @@ export function ActiveSessionsTree(props: { controller: SidebarController; actio
 					})}
 				</RemovalList>
 			</div>
+			{/* scroll-ok: bounded —— 最近会话是受控分页（默认 10 条、+10 加载），行数本来有硬上限。 */}
 			{/* 下半：最近会话常驻面板下半部分，自带滚动（与上半各自独立）。 */}
 			{hasRecent && (
 				<div className="recent-sessions-pane flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">

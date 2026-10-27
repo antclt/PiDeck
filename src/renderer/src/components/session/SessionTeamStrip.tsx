@@ -1,10 +1,11 @@
 import { useAtomValue } from "jotai";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import { ChevronDown, ChevronUp, Users } from "lucide-react";
 import { sessionRuntimeBySessionIdAtomFamily } from "../../atoms";
 import { t } from "../../i18n";
 import type { DshTeamMember, DshTeamState, DshTeamTask } from "../../../../shared/types/agent";
 import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
+import { VirtualStack, VIRTUAL_STACK_MIN_ROWS } from "../ui-shadcn/virtual-stack";
 import { ComposerWidgetFrame, useComposerWidgetCollapsed } from "./ComposerWidgetLayout";
 import { TEAM_WIDGET_KEY, readTeamCollapsedPreference, writeTeamCollapsedPreference } from "../../utils/sessionTeamCollapsePreference";
 
@@ -75,6 +76,26 @@ export function SessionTeamStrip(props: { sessionId: string }) {
 	const members = useMemo(() => team?.members ?? [], [team]);
 	const tasks = useMemo(() => (team ? team.tasks.filter((task) => task.status !== "deleted") : []), [team]);
 
+	// 成员 + 任务板压成扁平行序列交给虚拟栈：两者在同一个限高滚窗里，行数随成员/任务增长。
+	// 虚拟化只在超过门槛时启用，短列表仍走原来的 flex 列（DOM 完全不变）。
+	// 行里**不放文案**：`t()` 读的是模块级当前 locale，而这份 useMemo 的依赖只有数据；
+	// 文案一旦在这里烘焙，切语言后这几行会停在旧语言（数据没变 → memo 不重算）。
+	type TeamRow = { kind: "failure"; key: string } | { kind: "member"; key: string; member: DshTeamMember } | { kind: "tasks-header"; key: string } | { kind: "empty"; key: string } | { kind: "task"; key: string; task: DshTeamTask };
+	const rows = useMemo<TeamRow[]>(() => {
+		const out: TeamRow[] = [];
+		if (team?.failure) out.push({ kind: "failure", key: "failure" });
+		for (const member of members) out.push({ kind: "member", key: member.id, member });
+		if (tasks.length > 0) out.push({ kind: "tasks-header", key: "tasks-header" });
+		if (tasks.length === 0 && members.length === 0) out.push({ kind: "empty", key: "empty" });
+		for (const task of tasks) out.push({ kind: "task", key: task.id, task });
+		return out;
+	}, [team, members, tasks]);
+	const listRef = useRef<HTMLDivElement | null>(null);
+	const virtualizeRows = rows.length > VIRTUAL_STACK_MIN_ROWS;
+	// 提前返回必须放在**全部 hooks 之后**：DSH 会话里 team 初始为 undefined，一旦 team 出现，
+	// 本次渲染会比上次多调用 useMemo/useRef → React 抛
+	// "Rendered more hooks than during the previous render"，整个 composer 区崩掉。
+	// （这个组件在 SessionView 里是无条件挂载的，所以不是边缘路径。）
 	if (!hasTeamContent(team)) return null;
 
 	return (
@@ -93,26 +114,60 @@ export function SessionTeamStrip(props: { sessionId: string }) {
 					</button>
 				</div>
 				<CollapsibleContent>
-					<div className="mb-2 flex max-h-[260px] flex-col gap-2 overflow-y-auto [contain:layout_paint] px-3">
-						{/* 与 todo 条同款 shrink-0 纪律：限高 flex 列 + 行 overflow-hidden 会清零
-					    min-height:auto，不锁行高整列会被线性压扁（2027-01 排版事故）。 */}
-						{team?.failure && <p className="shrink-0 rounded-md bg-[var(--color-danger)]/10 px-2 py-1 text-xs leading-5 text-[var(--color-danger)]">{t("sessionTeam.failure", { failure: team.failure })}</p>}
-						{members.map((member) => (
-							<div key={member.id} className="flex min-w-0 shrink-0 items-center gap-2.5 overflow-hidden text-control leading-5">
-								<span className={`size-1.5 shrink-0 rounded-full ${memberPhaseDotClass(member)}`} aria-hidden="true" />
-								<span className="min-w-0 shrink-0 truncate font-medium text-text-secondary">{member.name}</span>
-								<span className="min-w-0 flex-1 truncate text-xs text-text-tertiary">{memberPhaseLabel(member)}</span>
-							</div>
-						))}
-						{tasks.length > 0 && <p className="shrink-0 pt-1 text-xs font-medium uppercase tracking-wide text-text-tertiary">{t("sessionTeam.tasks")}</p>}
-						{tasks.length === 0 && members.length === 0 && <p className="shrink-0 text-control leading-5 text-text-tertiary">{t("sessionTeam.noTasks")}</p>}
-						{tasks.map((task) => (
-							<div key={task.id} className="flex min-w-0 shrink-0 items-center gap-2.5 overflow-hidden text-control leading-5">
-								<span className={`size-1.5 shrink-0 rounded-full transition-colors ${taskStatusDotClass(task)}`} aria-hidden="true" />
-								<span className="min-w-0 flex-1 truncate text-text-secondary">{task.subject}</span>
-								<span className="shrink-0 truncate text-xs text-text-tertiary">{task.ownerName ?? t("sessionTeam.unassigned")}</span>
-							</div>
-						))}
+					<div ref={listRef} className={`mb-2 max-h-[260px] overflow-y-auto [contain:layout_paint] px-3${virtualizeRows ? "" : " flex flex-col gap-2"}`}>
+						{virtualizeRows ? (
+							<VirtualStack
+								items={rows}
+								getKey={(row) => row.key}
+								scrollRef={listRef}
+								minRows={VIRTUAL_STACK_MIN_ROWS}
+								estimateHeight={30}
+								rowClassName="pb-2"
+								renderItem={(row) => {
+									if (row.kind === "failure") return team?.failure ? <p className="rounded-md bg-[var(--color-danger)]/10 px-2 py-1 text-xs leading-5 text-[var(--color-danger)]">{t("sessionTeam.failure", { failure: team.failure })}</p> : null;
+									if (row.kind === "member")
+										return (
+											<div className="flex min-w-0 items-center gap-2.5 overflow-hidden text-control leading-5">
+												<span className={`size-1.5 shrink-0 rounded-full ${memberPhaseDotClass(row.member)}`} aria-hidden="true" />
+												<span className="min-w-0 shrink-0 truncate font-medium text-text-secondary">{row.member.name}</span>
+												<span className="min-w-0 flex-1 truncate text-xs text-text-tertiary">{memberPhaseLabel(row.member)}</span>
+											</div>
+										);
+									if (row.kind === "tasks-header") return <p className="pt-1 text-xs font-medium uppercase tracking-wide text-text-tertiary">{t("sessionTeam.tasks")}</p>;
+									if (row.kind === "empty") return <p className="text-control leading-5 text-text-tertiary">{t("sessionTeam.noTasks")}</p>;
+									return (
+										<div className="flex min-w-0 items-center gap-2.5 overflow-hidden text-control leading-5">
+											<span className={`size-1.5 shrink-0 rounded-full transition-colors ${taskStatusDotClass(row.task)}`} aria-hidden="true" />
+											<span className="min-w-0 flex-1 truncate text-text-secondary">{row.task.subject}</span>
+											<span className="shrink-0 truncate text-xs text-text-tertiary">{row.task.ownerName ?? t("sessionTeam.unassigned")}</span>
+										</div>
+									);
+								}}
+							/>
+						) : (
+							<>
+								{/* 短列表：保留原来的 flex 列与行距，DOM 与接入虚拟化前完全一致 */}
+								{/* 与 todo 条同款 shrink-0 纪律：限高 flex 列 + 行 overflow-hidden 会清零
+						    min-height:auto，不锁行高整列会被线性压扁（2027-01 排版事故）。 */}
+								{team?.failure && <p className="shrink-0 rounded-md bg-[var(--color-danger)]/10 px-2 py-1 text-xs leading-5 text-[var(--color-danger)]">{t("sessionTeam.failure", { failure: team.failure })}</p>}
+								{members.map((member) => (
+									<div key={member.id} className="flex min-w-0 shrink-0 items-center gap-2.5 overflow-hidden text-control leading-5">
+										<span className={`size-1.5 shrink-0 rounded-full ${memberPhaseDotClass(member)}`} aria-hidden="true" />
+										<span className="min-w-0 shrink-0 truncate font-medium text-text-secondary">{member.name}</span>
+										<span className="min-w-0 flex-1 truncate text-xs text-text-tertiary">{memberPhaseLabel(member)}</span>
+									</div>
+								))}
+								{tasks.length > 0 && <p className="shrink-0 pt-1 text-xs font-medium uppercase tracking-wide text-text-tertiary">{t("sessionTeam.tasks")}</p>}
+								{tasks.length === 0 && members.length === 0 && <p className="shrink-0 text-control leading-5 text-text-tertiary">{t("sessionTeam.noTasks")}</p>}
+								{tasks.map((task) => (
+									<div key={task.id} className="flex min-w-0 shrink-0 items-center gap-2.5 overflow-hidden text-control leading-5">
+										<span className={`size-1.5 shrink-0 rounded-full transition-colors ${taskStatusDotClass(task)}`} aria-hidden="true" />
+										<span className="min-w-0 flex-1 truncate text-text-secondary">{task.subject}</span>
+										<span className="shrink-0 truncate text-xs text-text-tertiary">{task.ownerName ?? t("sessionTeam.unassigned")}</span>
+									</div>
+								))}
+							</>
+						)}
 					</div>
 				</CollapsibleContent>
 			</Collapsible>

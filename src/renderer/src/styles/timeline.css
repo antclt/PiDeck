@@ -255,12 +255,80 @@
 }
 .execution-summary-details {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
+  /*
+   * 刻意用 block 而不是 flex 列：这里是一长串无间距的块级行（gap 本来就是 0），
+   * 而 flex 布局每次重排都要遍历全部 flex item，59 个一级节点展开时开销明显高于
+   * 普通块级流。视觉与顺序完全一致（子元素都是块级 div，无 flex 属性依赖）。
+   */
+  display: block;
+  /*
+   * 布局边界：展开某个成员、hover 组头这类局部变化，重排范围只有这一块，
+   * 不会以整条时间线为范围扩散（这条折叠区展开后可达几万 px）。
+   */
+  contain: layout;
   margin-top: var(--space-3);
   /* 过程行已无左侧圆点轨，不再画贯穿竖线，也不再给中间回答留 26px 轨道缩进。 */
   padding-left: 0;
+}
+/*
+ * 执行过程一级节点的布局/绘制边界。
+ *
+ * 这一层现在是虚拟化的：ProcessFold 在内部建了一个 `max-h-[min(70vh,900px)]` 的滚动视口，
+ * 超过 16 个一级节点就改走 <VirtualStack>。
+ *
+ * 历史（别照旧结论办）：这里原先**没有**视口（既无 max-h 也无 overflow，随页面一起滚），
+ * 那时套 VirtualStack 一定算错——组体那次「展开方向反了」就是这么来的。现在视口存在，
+ * 结论反转。判据是「有没有视口」，不是「这一块能不能虚拟化」。
+ *
+ * 为什么也不用 `content-visibility: auto`：它靠 `contain-intrinsic-size` 给屏外节点估高，
+ * 而这个折叠区就在**时间线虚拟行内部**——行高由 `@tanstack/react-virtual` 的
+ * ResizeObserver 实测回写。屏外节点按 96px 占位、滚进视口后突然变成真实几千 px，
+ * 虚拟行每变一次尺寸就回写一次总高与滚动条长度，表现为滚动时连续抖动。
+ * 仓库里已经踩过一次：SessionMessageTimeline 的注释写着「不再使用 content-visibility
+ * 估算高度（展开工具会抖）」。
+ *
+ * `contain: layout` 是同一目的的正确形态：把布局失效范围关进单个节点，
+ * **不改变元素对外的尺寸贡献**（不估高、不抖），于是「hover 组头 / 展开一个成员 /
+ * 图片加载到位」只需重排这一个节点，而不是整块几万 px 的折叠区。
+ * 只取 `layout`、不取 `paint` 的理由见本节末尾（子树里有真实的外溢绘制）。
+ *
+ * 用**子选择器**而不是给每个节点标 class：将来在这一层新增节点类型（新的过程行样式、
+ * 新的卡片）自动获得同样的边界，不需要有人记得加 class。这正是这轮修复暴露的问题类型
+ * ——「写好的机制没人接线」。
+ *
+ * 只用 `layout` 而**不用 `paint`**：`paint` 会把溢出裁到 padding box，而这一层子树里
+ * 有真实的外溢绘制——`ToolCallComponents` 的「运行中」扫光是
+ * `absolute left-0 w-[300px]` + `translateX` 扫光，裁掉就是视觉缺陷。`layout` 已经隔离了布局失效范围
+ * （主要收益），绘制的失效范围交给浏览器自己合并。
+ *
+ * 矮节点（重试/错误行、按钮）也会带上 contain，但它们本来只有几十 px，多一层隔离无副作用。
+ */
+.execution-summary-details > * {
+  contain: layout;
+}
+/*
+ * 虚拟化路径的行容器同样是 `> *` 的孙辈（VirtualStack 在中间插了一层 relative 内容盒），
+ * 上一行选择器够不到。这里补一条同一目的的选择器，别让虚拟化把布局边界丢掉。
+ */
+.execution-summary-details [data-virtual-stack] > * {
+  contain: layout;
+}
+/*
+ * 虚拟行里的折叠内容不做高度动画（2026-10 接入虚拟化时定的，不是漏改）。
+ *
+ * 理由：Radix CollapsibleContent 的开合走 height 动画（见 ui-shadcn/collapsible.tsx），
+ * 而虚拟栈的行高来自 measureElement + ResizeObserver。同一条行在 200ms 内从 32px 长到
+ * 几百 px 时，虚拟器每帧都在重算 totalSize 与后续行起点，滚动位置、跟底引擎、行集合
+ * 重算三者互相追——手指在滚、内容在跳。关掉动画后行高一次落定，测一次即稳定。
+ *
+ * 代价（已知且接受）：动画只在「非虚拟渲染的轮」里保留，虚拟轮没有。真实分界不是行数，
+ * 而是 timeline/virtualTimelinePolicy.ts 的两条策略：VIRTUAL_MIN_TURNS（轮数 ≤ 它时整段真实
+ * 渲染）与 VIRTUAL_SOLID_TAIL_TURNS（尾部若干轮刻意保留真实渲染）。数具体轮次请看那两个常量。
+ * 这条不一致是刻意的取舍，不是两条代码路径走偏。删本节之前先证明虚拟行的高度动画
+ * 不再进入 measure 回路。
+ */
+.message-list [data-virtual-run-id] [data-slot="collapsible-content"] {
+  animation: none !important;
 }
 .execution-summary-details > .timeline-marker-row:last-child .timeline-marker-content {
   padding-bottom: 0;

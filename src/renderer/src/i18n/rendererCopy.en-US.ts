@@ -2429,7 +2429,6 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.mcp.field.enabledHint": "When off, Pi will not connect this server. The config is kept.",
 	"config.mcp.transport.stdio": "stdio command",
 	"config.mcp.transport.http": "HTTP",
-	"config.mcp.layer.piAgent": "~/.pi/agent (global)",
 	"config.mcp.layer.projectPi": "Project .pi/mcp.json (read-only, after trust)",
 	"config.mcp.providerAuth.sectionHint": "Authentication for this HTTP server. When enabled, pi uses the selected provider's login token (read per request; provider re-login applies automatically). When disabled, MCP OAuth on demand or the Authorization header above is used.",
 	"config.mcp.providerAuth.provider": "Provider",

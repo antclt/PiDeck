@@ -152,7 +152,9 @@ export const WebTab = memo(function WebTab(props: WebTabProps) {
 	);
 
 	// 过期剩余时间展示：超过 1 天显示天数，不足 1 天显示小时数，不足 1 小时显示分钟。
-	const tokenRemaining = useMemo(() => {
+	// 不用 useMemo：这里的 t() 读模块级 locale（切语言不订阅），Date.now() 也不在依赖里
+	// （时间本来就不会自己变），memo 只会让文案停在切语言之前那一刻。每次渲染现算。
+	const tokenRemaining = (() => {
 		const expiresAt = webStatus?.tokenExpiresAt;
 		if (!expiresAt) return null;
 		const remaining = expiresAt - Date.now();
@@ -162,7 +164,7 @@ export const WebTab = memo(function WebTab(props: WebTabProps) {
 		const hours = Math.round(minutes / 60);
 		if (hours < 48) return t("settings.webTokenExpiresInHours", { hours: String(hours) });
 		return t("settings.webTokenExpiresInDays", { days: String(Math.round(hours / 24)) });
-	}, [webStatus?.tokenExpiresAt, t]);
+	})();
 
 	// 以实际运行的绑定为准，而非尚未保存的草稿；切换监听后同步排除旧选择，避免生成不可达链接。
 	const availableWebAddresses = useMemo(() => webAddressesForBinding(webNetworkAddresses, webStatus?.host ?? ""), [webNetworkAddresses, webStatus?.host]);
