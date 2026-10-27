@@ -247,7 +247,8 @@ assert.equal(timers.size, 0);
 - **实现**：`RemoteHostConnectionService` 每次 connect 持有一个 `AbortController`（`HostEntry.attempt`）；`disconnect()` / `dispose()` 在**进入 host 锁之前** abort，`ensureHeld` 把 signal 传给 node 探测与 bootstrap，并在每个 await 后重验 signal 与 attempt generation（旧 generation 不得发布 held/manager）。`RemoteBootstrapSession` / `RemoteBootstrapDeployment` / `RemoteBootstrapTransfer` / `RemoteExtensionDeployment` 接受 `signal`，在 await 后与 spawn/上传/finalize 前检查；`awaitUploadExit` 在 abort 时只停止本次 scp。`SshClientRuntime.run` 增加可选 `{ signal }`，把 abort 映射为 `SSH_HOST_COMMAND_CANCELLED`（main 内部）。
 - **稳住的行为**：finalize 的提交点语义未改——提交已发出而回执丢失只报 `BOOTSTRAP_FINALIZE_UNCONFIRMED`，不宣称回滚、不自动重放；取消统一沿用既有码（连接层 `SSH_HOST_DISCONNECTED`、部署层 `BOOTSTRAP_ABORTED`、退出 `REMOTE_CONNECTION_SERVICE_DISPOSED`），未新增公共码、未改状态名、未碰连接向导。
 - **与参考实现的关系**：只借鉴 ZCode 当前 `TransportContext.signal` / attempt 内 abort / await 后重验 disposed 的生命周期做法；未引入 daemon、未改传输拓扑。
-- **验证**：`tests/remoteBootstrapCancellation.test.mjs`（5：ready 阻塞中取消、上传中取消停止 scp 且无 finalize、提交后取消=未确认、入口前取消不 spawn、node 探测取消不再花钱后续候选）、`tests/remoteConnectionCancellation.test.mjs`（4：disconnect 立即取消 bootstrap、迟到完成不发布、A 主机取消不影响 B、dispose 立即取消）。
+- **验证**：`tests/remoteBootstrapCancellation.test.mjs`（5：ready 阻塞中取消、上传中取消停止 scp 且无 finalize、提交后取消=未确认、入口前取消不 spawn、node 探测取消不再花钱后续候选）、`tests/remoteConnectionCancellation.test.mjs`（5：disconnect 立即取消 bootstrap、迟到完成不发布、A 主机取消不影响 B、dispose 立即取消、**读取路径的 bootstrap 同样可被 disconnect 取消**）。
+- **补强（2026-11 收尾）**：需要 bootstrap 的**读取**（`establishProjectSession`）也会占用同一个 attempt 槽位，因此 `disconnect()`/`dispose()` 同样能取消它，而不是等完 probe/upload 预算；调用方自己的 `readOptions.signal` 仍映射为 `REQUEST_CANCELLED`。
 - **回退**：按文件原子回退即可（无 schema、无数据迁移、无用户设置项）。
 
 ### F2 控制写侧背压与取消去重
@@ -271,13 +272,34 @@ assert.equal(timers.size, 0);
 - **用户可见**：会话列表在高延迟链路上从「每个文件一次往返」变成「每 64 个文件一次」；列表形状、归属、排序不变。
 - **实现**：helper 1.22.0 新增 `fs.statMany`（`{ paths: string[1..64] }`，逐条复用 `fs.stat` 的 root/非链接/路径判定，**任何一条不可用整批拒绝**，按请求顺序回显 `path`，进 hello capabilities，无新错误码）；`RemoteWorkspaceReader.statMany` 严格按位置/字段校验（空列表不发帧、非法列表不发帧）；`RemoteSessionScanner.collectEntries` 改为 ≤64 条/批（并发仍 ≤4），预算仍按逻辑条目计，候选选择/配置根解析/排序/catalog 归属/tombstone 全部留在扫描器。
 - **刻意不做的**：不把会话发现/标题/项目归属搬进 helper；不提高 512 目录 / 2000 文件 / 1 MiB 预算；不为旧 helper 维护逐条 fallback（缺方法会得到 `METHOD_NOT_FOUND`，属明确不兼容，升级由既有的内容寻址部署在连接时完成）。
+- **握手期的可诊断性**：`fs.statMany` 在握手上是**建议能力**（不进 `REQUIRED_HELPER_CAPABILITIES`，旧 helper 仍可 ready），但缺失时会记录 `SSH_HELPER_CAPABILITY_MISSING_FS_STAT_MANY` 诊断——于是「扫描报 METHOD_NOT_FOUND」在此之前就有一句可读的事实，而不是一个没有前因的失败（`tests/sshHelperCapabilityGate.test.mjs`）。
 - **验证**：`tests/remoteHelperEntry.test.mjs` 新增 2 个**真实 helper** 用例（批量顺序与逐条结果完全一致；整批拒绝清单与 64 条上限边界）、`tests/remoteWorkspaceReader.test.mjs` 新增 5 个（单帧、空集不发帧、非法列表不发帧、位置/字段不符拒绝、helper 拒绝原样转述）、`tests/remoteSessionScanner.test.mjs` 新增 2 个（2000 文件 ≤32 次请求且每批 ≤64；短批与空集）。
 - **回退**：按文件原子回退；旧 bundle 仍在主机上，回退客户端会部署回自己的内容寻址 bundle，不影响其他客户端。
 
+### F0 基线（注入 100 ms RTT，离线）
+
+固定一次远端往返 = 100 ms，用**实际工作量**（请求数、上线字节）做硬判据、墙钟作同条件对照：
+
+```sh
+node --test tests/remoteLatencyBaseline.test.mjs
+```
+
+| 场景 | 请求数（硬判据） | 墙钟（同条件，Windows 本机） |
+| --- | --- | --- |
+| 2000 个会话文件的元数据（现行为） | 34 = 1 配置探测 + 1 列目录 + **32** 批 `fs.statMany`（峰值并发 4） | 1051–1059 ms |
+| 200 个会话文件，逐条 `fs.stat`（F4 之前的扫描循环） | 201 = 1 + 200 | 5341–5466 ms |
+| 200 个会话文件，批量 `fs.statMany`（现行为） | 6 = 1 探测 + 1 + **4** 批 | 310–311 ms |
+| bundle 首次安装（F3 cold） | 1 次 scp + 2 轮声明（verify + finalize），1728 字节上线 | — |
+| bundle 复用命中（F3） | **0 次 scp**、0 字节、1 轮声明 | — |
+
+- 两种口径的**结果逐字段一致**（id/size/mtime/mtime 顺序），测试同时对 200 文件夹具做了新旧路径的逐项比对。
+- 2000 文件的旧行为没有实跑（2000/4×100 ms ≈ 50 s，不值得占用测试时长）：它由同一份 200 文件夹具逐条循环实测后，按「每文件一次往返、并发 4」外推；请求数一栏两种口径都是实测。
+- 这些数字只证明「注入 100 ms 下的工作量与同条件耗时」，不代表任何真实网络；真机耗时与 RTT 仍属 §7.2 未验证项。
+
 ### 本轮改动文件
 
-- main（15）：`RemoteHostConnectionService`、`RemoteBootstrapSession`、`RemoteBootstrapDeployment`、`RemoteBootstrapTransfer`、`RemoteBootstrapContract`、`RemoteExtensionDeployment`、`RemoteControlClient`、`SshProcessLauncher`、`SshClientRuntime`、`RemoteHostConnectionTypes`、`RemoteHelperContract`、`RemoteHelperEntry`、`RemoteWorkspaceReader`、`RemoteProjectFileUpload`、`sessions/RemoteSessionScanner`。
-- 测试：新增 `remoteBootstrapCancellation`、`remoteConnectionCancellation`、`remoteControlClientCancelBudget`、`sshLauncherStdinBackpressure`、`remoteBootstrapReuse` 五个文件；既有文件的适配只有两类——fake transport 补上新增的协议步骤/方法，冻结摘要与 helper 版本 pin 随源改动同步（`remoteBootstrapContract`、`remoteBootstrapDeployment`、`remoteBootstrapSession`、`remoteHelperEntry`、`remoteConfigContract`、`remoteSessionRootIsolation`、`remoteSessionScanner`、`remoteSessionScanIsolation`、`remoteSessionRootResolution`、`remoteSessionRegistration`、`remoteSessionRecordRemoval`、`remoteHostIdTransportBoundary`）。没有删除测试、没有放宽断言。
+- main（16）：`RemoteHostConnectionService`、`RemoteBootstrapSession`、`RemoteBootstrapDeployment`、`RemoteBootstrapTransfer`、`RemoteBootstrapContract`、`RemoteExtensionDeployment`、`RemoteControlClient`、`SshProcessLauncher`、`SshClientRuntime`、`RemoteHostConnectionTypes`、`RemoteHelperContract`、`RemoteHelperEntry`、`RemoteWorkspaceReader`、`RemoteProjectFileUpload`、`SshConnectionAttempt`、`sessions/RemoteSessionScanner`。
+- 测试：新增 `remoteBootstrapCancellation`、`remoteConnectionCancellation`、`remoteControlClientCancelBudget`、`sshLauncherStdinBackpressure`、`remoteBootstrapReuse`、`remoteLatencyBaseline` 六个文件（`sshHelperCapabilityGate` 追加一条建议能力用例）；既有文件的适配只有两类——fake transport 补上新增的协议步骤/方法，冻结摘要与 helper 版本 pin 随源改动同步（`remoteBootstrapContract`、`remoteBootstrapDeployment`、`remoteBootstrapSession`、`remoteHelperEntry`、`remoteConfigContract`、`remoteSessionRootIsolation`、`remoteSessionScanner`、`remoteSessionScanIsolation`、`remoteSessionRootResolution`、`remoteSessionRegistration`、`remoteSessionRecordRemoval`、`remoteHostIdTransportBoundary`）。没有删除测试、没有放宽断言。
 - 文档：本文件、`docs/remote-development-plan.md`（§4.2 增量 + helper 1.22.0）。
 
 ### 验证结果
@@ -285,15 +307,16 @@ assert.equal(timers.size, 0);
 | 命令 | 结果 |
 | --- | --- |
 | `npm run typecheck` | 通过（`tsc --noEmit` 无输出）。运行期间工作区有并行 agent 的 renderer/i18n 改动，它们落地后本项才变成全绿；本任务未触碰那些文件。 |
-| `node --test <14 个定向文件>` | 269 tests / 266 pass / 0 fail / 3 skipped（跳过项是既有的平台跳过：POSIX 专用 bootstrap 集成）。 |
-| `node --test --test-concurrency=4 <183 个 remote*/ssh* 测试文件>` | 1972 tests / 1698 pass / 0 fail / 274 skipped（跳过项全部为既有平台/环境跳过）。 |
+| `node --test <16 个定向文件>` | 279 tests / 276 pass / 0 fail / 3 skipped（跳过项是既有的平台跳过：POSIX 专用 bootstrap 集成）。 |
+| `node --test --test-concurrency=4 <184 个 remote*/ssh* 测试文件>` | 1977 tests / 1703 pass / 0 fail / 274 skipped（跳过项全部为既有平台/环境跳过）。 |
+| `biome format`（本任务文件） | 无差异。 |
 
 ## 7.2 未验证 / 待真机确认
 
 以下全部**未验证**，不作为发布证据：
 
 1. §4 F5 的六类真机场景一项未跑：真实 SSH/Electron 下的「部署中取消→立即重试」、A/B 项目交替、普通请求满载 + 重复 cancel + 慢读、写已执行但回执丢失、pi runtime 意外退出恢复、退出/断开 + 终端。
-2. 没有 100 ms 可控 RTT 下的 F4 前后耗时对比，也没有真机 2000 会话列表的往返计数；本轮只有「请求数上限」与离线计数。
+2. 100 ms **注入** RTT 的离线前后对比已在 §7.1「F0 基线」完成（请求数与同条件墙钟），但没有真实网络/真实主机的 RTT 与 2000 会话列表实测。
 3. 取消后「独立检查本 run 的进程/staging/锁」只在离线 transport 上验证，未在真实主机上观察。
 4. 慢 Writable 下的真实内存峰值未压测；本轮只证明字节预算与等待者释放（有界性），没有曲线数据。
 5. 未运行 `npm run build` / `npm run pack` / 任何 E2E；未做 Windows→Linux、Linux→Linux、macOS 任一组真机矩阵。

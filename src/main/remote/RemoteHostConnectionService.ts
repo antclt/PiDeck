@@ -447,6 +447,37 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 		return held;
 	}
 
+	/**
+	 * Take this host's attempt slot for the duration of one operation that may bootstrap.
+	 *
+	 * The slot exists so `disconnect()`/`dispose()` can cancel work that owns the host lock *from outside
+	 * it*; a read that has to bootstrap holds the lock exactly like a connect, so it must be cancellable the
+	 * same way. Only one such operation runs at a time (all of them hold the host lock), which makes the slot
+	 * exclusive by construction. `cancelWith` links a caller-owned signal to the same cancellation, so a read
+	 * that named its own AbortSignal keeps reporting through it.
+	 */
+	async function withAttemptSlot<T>(entry: HostEntry, work: (signal: AbortSignal) => Promise<T>, cancelWith?: AbortSignal): Promise<T> {
+		const existing = entry.attempt;
+		const attempt: HostAttempt = existing ?? { generation: entry.generation, controller: new AbortController() };
+		if (existing === undefined) entry.attempt = attempt;
+		const onCancelWith = (): void => attempt.controller.abort();
+		if (cancelWith?.aborted === true) attempt.controller.abort();
+		cancelWith?.addEventListener("abort", onCancelWith, { once: true });
+		try {
+			return await work(attempt.controller.signal);
+		} catch (error) {
+			// A cancel that reached this slot owns the outcome: whatever the transport called the failure, the
+			// fact the caller needs is that their operation was cancelled (withProjectSession maps this back
+			// to REQUEST_CANCELLED when the caller's own signal was the cause).
+			throwIfCancelled(attempt.controller.signal);
+			throw error;
+		} finally {
+			cancelWith?.removeEventListener("abort", onCancelWith);
+			// Only the operation that created the slot may clear it; an existing one belongs to its owner.
+			if (existing === undefined && entry.attempt === attempt) entry.attempt = undefined;
+		}
+	}
+
 	async function connectLocked(hostId: string): Promise<RemoteHostConnectResult> {
 		if (disposed) return { ok: false, hostId, code: "REMOTE_CONNECTION_SERVICE_DISPOSED" };
 		if (!HOST_ID.test(hostId)) return { ok: false, hostId, code: "REMOTE_CONNECTION_HOST_ID_INVALID" };
@@ -575,12 +606,22 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 			}
 		}
 		if (manager === undefined) {
-			const held = await ensureHeld(entry, hostId, signal);
-			throwIfCancelled(signal);
-			manager = managerFor(held);
-			entry.manager = manager;
-			const connected = await manager.connect(hostId);
-			if (connected.state !== "ready") return { ok: false, code: connected.lastCode ?? "SSH_HOST_NOT_READY" };
+			// A read that has to bootstrap holds the host lock for as long as a connect does, so it takes the
+			// same attempt slot: an explicit disconnect/quit must be able to cancel *this* one too, instead of
+			// waiting for the whole probe/upload budget it is supposed to stop.
+			const created = await withAttemptSlot(
+				entry,
+				async (attemptSignal) => {
+					const held = await ensureHeld(entry, hostId, attemptSignal);
+					throwIfCancelled(attemptSignal);
+					const built = managerFor(held);
+					entry.manager = built;
+					return { manager: built, connected: await built.connect(hostId) };
+				},
+				signal,
+			);
+			manager = created.manager;
+			if (created.connected.state !== "ready") return { ok: false, code: created.connected.lastCode ?? "SSH_HOST_NOT_READY" };
 		} else if (reestablish) {
 			// disconnected/offline: the verified helper location is still valid, so revive in place instead of
 			// paying for node discovery and another upload.

@@ -204,6 +204,15 @@ const CAPABILITY_MISSING_CODES: Readonly<Record<string, string>> = {
 	"fs.list": "SSH_HELPER_CAPABILITY_MISSING_FS_LIST",
 	"fs.read": "SSH_HELPER_CAPABILITY_MISSING_FS_READ",
 };
+/**
+ * Advisory capability, not a handshake gate: `fs.statMany` (helper 1.22.0) makes a session list cost one
+ * round trip per 64 files instead of one per file. A host without it is still usable - the ordinary read
+ * batch answers the same questions one path at a time - but every scan would then fail with the helper's
+ * own `METHOD_NOT_FOUND`. Recording the absence at handshake time names the real incompatibility in the
+ * redacted diagnostics, and leaves the failure of the scan itself fail-closed.
+ */
+const ADVISORY_HELPER_CAPABILITY = "fs.statMany";
+const CODE_ADVISORY_CAPABILITY_MISSING = "SSH_HELPER_CAPABILITY_MISSING_FS_STAT_MANY";
 
 /**
  * `ready` may only mean "the remote helper answered a v1 handshake" (plan §10/§11.1). The pinned ssh
@@ -262,6 +271,9 @@ async function assertHelperHandshake(host: SshAttemptHost, deps: SshAttemptDeps,
 		for (const capability of missing) host.record(CAPABILITY_MISSING_CODES[capability]);
 		throw new Error(CODE_CAPABILITY_MISSING);
 	}
+	// Batched metadata is optional for the *session* to be usable, but every session list needs it: naming it
+	// here is what turns a later `METHOD_NOT_FOUND` during a scan into a diagnosable fact.
+	if (capabilities.includes(ADVISORY_HELPER_CAPABILITY) === false) host.record(CODE_ADVISORY_CAPABILITY_MISSING);
 	// `helperVersion`/`nodeVersion`/`pid` are identity for the UI, not evidence of compatibility, so a
 	// helper that omits them is still a working helper.
 	host.record("SSH_HELPER_HANDSHAKE_OK");

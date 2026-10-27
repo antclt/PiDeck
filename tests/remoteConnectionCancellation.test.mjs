@@ -212,3 +212,38 @@ test("dispose aborts an in-flight bootstrap instead of waiting for it", async ()
 		assert.equal(ports.calls.createManager.length, 0);
 	});
 });
+
+test("a disconnect also cancels a read-path bootstrap, not just an explicit connect", async () => {
+	await withUserData(async (userDataDir) => {
+		await writeStore(userDataDir, 3, [HOST_ID]);
+		let aborted = false;
+		const ports = fakePorts(
+			(input) =>
+				new Promise((_resolve, reject) => {
+					input.signal?.addEventListener(
+						"abort",
+						() => {
+							aborted = true;
+							reject(new Error("BOOTSTRAP_ABORTED"));
+						},
+						{ once: true },
+					);
+				}),
+		);
+		const service = createRemoteHostConnectionService({ userDataDir, client: CLIENT, nodePath: "/usr/bin/node", ports });
+		try {
+			// A project read that finds no held session bootstraps while holding the host lock — the same
+			// resource an explicit connect would commit, so the user's disconnect has to reach it too.
+			const read = service.withProjectSession(HOST_ID, "/repo", async () => "never");
+			while (ports.calls.bootstrap.length === 0) await new Promise((resolve) => setImmediate(resolve));
+			await service.disconnect(HOST_ID, "shutdown");
+			const result = await read;
+			assert.equal(result.ok, false);
+			assert.equal(result.code, "SSH_HOST_DISCONNECTED");
+			assert.equal(aborted, true, "the read-path bootstrap must observe the cancel");
+			assert.equal(ports.calls.createManager.length, 0, "a cancelled read must not build a session");
+		} finally {
+			await service.dispose();
+		}
+	});
+});
