@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 553847aabc48e6222633669b56b76ae9e87bdaaa0463d017e60ea5b6e0a0a3ff（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 688b0c500e60c4071b8e9d3d2683605e885705d3d97833b3a988dc1e5dba15e6（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -248,6 +248,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"acp.toolNotInstalled": "「{tool}」啟動失敗：該 CLI 未安裝或不在 PATH 中（{command}），請先安裝後在設定裡檢測",
 	"acp.toolMissing": "會話繫結的 ACP 工具已被刪除或停用，請在設定 → ACP 工具裡重新登記後重試",
 	"acp.startupTimeout": "「{tool}」啟動超時（首次下載或冷啟動可能較慢），請重試",
+	"acp.turnTimeout": "「{tool}」回合超時（{minutes} 分鐘仍未結束）：長任務可將 settings.json 中的 acpPromptTurnTimeoutMs 調大，重啟 PiDeck 後生效",
 	"acp.restoreHint": "歷史儲存在 {tool} 側：傳送訊息後自動恢復最近的對話內容",
 	"acp.restoringHistory": "正在從 {tool} 恢復歷史訊息…",
 	"acp.restoreMissing": "該會話繫結的 ACP 工具已被刪除，請在設定 → ACP 工具裡重新登記後才能恢復與繼續",
@@ -270,6 +271,10 @@ export const zhTW: Record<TranslationKey, string> = {
 	"acp.toolCommand": "命令",
 	"acp.toolArgs": "啟動引數",
 	"acp.toolEnv": "環境變數 KEY=VALUE,每行一條(僅本程序注入,不落日誌)",
+	"acp.toolUnnamed": "未命名工具",
+	"acp.envCount": "{count} 條環境變數",
+	"acp.registeredTitle": "已登記工具（{count}）",
+	"acp.registeredHint": "點選名稱行展開編輯，收起後仍顯示命令與環境變數摘要。",
 	"acp.toolAdd": "新增工具",
 	"acp.toolRemove": "刪除",
 	"acp.toolsEmpty": "暫無工具",
@@ -876,6 +881,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"changelog.updatedAt": "更新於 {time}",
 	"changelog.staleNotice": "網路不可用，以下為本地快取",
 	"changelog.sourceLabel": "內容來源：{source}",
+	"changelog.showAllVersions": "檢視全部 {count} 個版本",
+	"changelog.showLatestOnly": "收起，只看最新版本",
 	"about.devBranch": "開發分支",
 	"about.runtimeInfo": "執行時",
 	"about.dshVersion": "DSH 執行時",

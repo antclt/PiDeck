@@ -1,6 +1,6 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { useAtom, useSetAtom } from "jotai";
-import { Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Plus, Trash2 } from "lucide-react";
 import { desktopApi } from "../../../desktopApi";
 import { acpEnabledAtom, acpToolsAtom } from "../../../atoms";
 import { t } from "../../../i18n";
@@ -9,12 +9,15 @@ import type { AcpToolPreset } from "../../../../../shared/acpToolPresets";
 import { Switch } from "../../ui-shadcn/switch";
 import { Badge } from "../../ui-shadcn/badge";
 import { AcpPresetChips } from "./AcpPresetChips";
+import { SectionHeading } from "../../ui-shadcn/section-heading";
 import { Button } from "../../ui-shadcn/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../../ui-shadcn/collapsible";
 import { Input } from "../../ui-shadcn/input";
 import { Textarea } from "../../ui-shadcn/textarea";
+import { cn } from "../../../lib/utils";
 
-/** 草稿行 = IPC 输入形态:id 空表示新增行,保存时由主进程分配并返回。 */
-type AcpToolRow = { id?: string; name: string; command: string; args: string[]; envText: string };
+/** 草稿行 = IPC 输入形态:id 空表示新增行,保存时由主进程分配并返回;draftKey 是纯渲染用本地标识(React key/折叠态跟踪),不入盘。 */
+type AcpToolRow = { draftKey: string; id?: string; name: string; command: string; args: string[]; envText: string };
 
 /** env 序列化:Record → 「KEY=VALUE」每行一条的编辑文本;顺序稳定保证脏标记确定。 */
 function envToText(env: Record<string, string> | undefined): string {
@@ -61,6 +64,11 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 	const [saved, setSaved] = useAtom(acpToolsAtom);
 	const setAcpEnabledAtom = useSetAtom(acpEnabledAtom);
 	const [rows, setRows] = useState<AcpToolRow[]>([]);
+	// 折叠展开态按 draftKey 跟踪:默认全部收起只留摘要行,点头部展开编辑(同生图 tab 供应商行)。
+	const [expandedKeys, setExpandedKeys] = useState<Set<string>>(() => new Set());
+	// 草稿行没有稳定身份(新增行无 id,行序会变),本地递增 key 让折叠态在增删后不错位。
+	const nextKeyRef = useRef(1);
+	const makeRowKey = useCallback(() => `draft-${nextKeyRef.current++}`, []);
 	const [hydrated, setHydrated] = useState(false);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | undefined>();
@@ -102,7 +110,7 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 	// 挂载时以 atom 快照为初值;之后只经保存回写,弹窗开关不重复拉 IPC
 	useEffect(() => {
 		if (!hydrated) {
-			setRows(saved.map((tool) => ({ id: tool.id, name: tool.name, command: tool.command, args: [...tool.args], envText: envToText(tool.env) })));
+			setRows(saved.map((tool) => ({ draftKey: makeRowKey(), id: tool.id, name: tool.name, command: tool.command, args: [...tool.args], envText: envToText(tool.env) })));
 			setHydrated(true);
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- 一次性初值同步,后续以保存回写为准
@@ -118,13 +126,30 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 		setRows((current) => current.map((row, i) => (i === index ? { ...row, ...patch } : row)));
 	}, []);
 
+	const toggleExpanded = useCallback((key: string, open: boolean) => {
+		setExpandedKeys((current) => {
+			const next = new Set(current);
+			if (open) next.add(key);
+			else next.delete(key);
+			return next;
+		});
+	}, []);
+
+	const expandKey = useCallback((key: string | undefined) => {
+		if (!key) return;
+		setExpandedKeys((current) => new Set(current).add(key));
+	}, []);
+
 	const removeRow = useCallback((index: number) => {
 		setRows((current) => current.filter((_, i) => i !== index));
 	}, []);
 
+	// 新增/预设预填的行自动展开:用户要填的字段直接可见,填完可手动收起。
 	const addRow = useCallback(() => {
-		setRows((current) => [...current, { name: "", command: "", args: [], envText: "" }]);
-	}, []);
+		const draftKey = makeRowKey();
+		setRows((current) => [...current, { draftKey, name: "", command: "", args: [], envText: "" }]);
+		expandKey(draftKey);
+	}, [makeRowKey, expandKey]);
 
 	// 预设只是预填草稿行(名称/命令/参数可改),保存仍走统一校验链;
 	// 同命令同参的行已存在(草稿或已存)时提示,避免重复堆行。
@@ -136,9 +161,11 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 				return;
 			}
 			setError(undefined);
-			setRows((current) => [...current, { name: preset.name, command: preset.command, args: [...preset.args], envText: "" }]);
+			const draftKey = makeRowKey();
+			setRows((current) => [...current, { draftKey, name: preset.name, command: preset.command, args: [...preset.args], envText: "" }]);
+			expandKey(draftKey);
 		},
-		[rows],
+		[rows, makeRowKey, expandKey],
 	);
 
 	const save = useCallback(async (): Promise<boolean> => {
@@ -150,6 +177,8 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 			const firstInvalid = validations.findIndex((result) => !result.ok);
 			if (firstInvalid >= 0) {
 				const failed = validations[firstInvalid];
+				// 自动展开出错行:行已收起时错误文案在列表外,不展开用户找不到是哪条
+				expandKey(rows[firstInvalid]?.draftKey);
 				if (failed && !failed.ok && failed.reasonKey) setError(t(failed.reasonKey));
 				return false;
 			}
@@ -157,14 +186,16 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 			const names = new Set<string>();
 			for (const row of rows) {
 				if (names.has(row.name)) {
+					expandKey(row.draftKey);
 					setError(t("acp.toolDuplicateName"));
 					return false;
 				}
 				names.add(row.name);
 			}
-			// id 缺省 = 新增行,由主进程分配;返回的规范化表同步回 atom(菜单立即可见)
+			// id 缺省 = 新增行,由主进程分配;返回的规范化表同步回 atom(菜单立即可见)。
+			// draftKey 按位沿用:normalize 保序,收起态不因保存而重置。
 			const normalized = await desktopApi.acp.saveTools(rows.map((row) => ({ id: row.id, name: row.name, command: row.command, args: row.args, env: envFromText(row.envText) })));
-			setRows(normalized.map((tool: AcpToolConfig) => ({ id: tool.id, name: tool.name, command: tool.command, args: [...tool.args], envText: envToText(tool.env) })));
+			setRows(normalized.map((tool: AcpToolConfig, index: number) => ({ draftKey: rows[index]?.draftKey ?? makeRowKey(), id: tool.id, name: tool.name, command: tool.command, args: [...tool.args], envText: envToText(tool.env) })));
 			setSaved(normalized);
 			return true;
 		} catch (cause) {
@@ -173,7 +204,7 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 		} finally {
 			setSaving(false);
 		}
-	}, [rows, setSaved]);
+	}, [rows, setSaved, makeRowKey, expandKey]);
 
 	// 弹框头部统一「保存」按钮复用同一保存路径(校验/回写/脏标记清理完全一致)
 	useImperativeHandle(ref, () => ({ save }), [save]);
@@ -206,41 +237,61 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 					{rows.length === 0 ? (
 						<p className="text-muted-foreground py-6 text-center text-xs">{t("acp.toolsEmpty")}</p>
 					) : (
-						<div className="flex flex-col gap-3">
-							{rows.map((row, index) => (
-								// 行 key 用 index:新增/删除都经整表保存,草稿行没有稳定身份
-								<div key={index} className="border-border bg-background flex flex-col gap-2 rounded-md border p-3">
-									{/* 字段一律带可见 label：此前只靠 placeholder，填了值之后就看不出这格是什么，
-									    标签用隐式关联（label 包裹控件）同时补上可访问名。 */}
-									<div className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
-										<label className="flex min-w-0 flex-col gap-1">
-											<span className="text-micro text-muted-foreground">{t("acp.toolName")}</span>
-											<Input value={row.name} onChange={(event) => patchRow(index, { name: event.target.value })} />
-										</label>
-										<label className="flex min-w-0 flex-col gap-1">
-											<span className="text-micro text-muted-foreground">{t("acp.toolCommand")}</span>
-											<Input value={row.command} onChange={(event) => patchRow(index, { command: event.target.value })} />
-										</label>
-										<Button variant="ghost" size="icon" title={t("acp.toolRemove")} onClick={() => removeRow(index)}>
-											<Trash2 size={14} aria-hidden="true" />
-										</Button>
-									</div>
-									<label className="flex min-w-0 flex-col gap-1">
-										<span className="text-micro text-muted-foreground">{t("acp.toolArgs")}</span>
-										<Input
-											value={row.args.join(" ")}
-											onChange={(event) => {
-												// 参数按空白拆分:与主进程 spawn 的数组语义一致,避免引号转义教学成本
-												patchRow(index, { args: event.target.value.trim() ? event.target.value.split(/\s+/) : [] });
-											}}
-										/>
-									</label>
-									<label className="flex min-w-0 flex-col gap-1">
-										<span className="text-micro text-muted-foreground">{t("acp.toolEnv")}</span>
-										<Textarea value={row.envText} rows={2} className="font-mono text-xs" spellCheck={false} onChange={(event) => patchRow(index, { envText: event.target.value })} />
-									</label>
-								</div>
-							))}
+						<div className="flex flex-col gap-2">
+							<SectionHeading title={t("acp.registeredTitle", { count: rows.length })} description={t("acp.registeredHint")} />
+							{rows.map((row, index) => {
+								const open = expandedKeys.has(row.draftKey);
+								// 折叠态摘要:命令+参数一眼核对是不是某条 CLI;env 有内容才附条数。
+								const commandSummary = [row.command.trim(), row.args.join(" ")].filter(Boolean).join(" ");
+								const envLineCount = row.envText.split(/\r?\n/).filter((line) => line.trim()).length;
+								return (
+									// key 用本地 draftKey:折叠态跟着行走,删除中间行不会错位到相邻行
+									<Collapsible key={row.draftKey} open={open} onOpenChange={(next) => toggleExpanded(row.draftKey, next)} className="border-border bg-background rounded-md border">
+										{/* 折叠头 = 名称 + 命令摘要;删除按钮与 trigger 平级(button 嵌套 button 非法),收起时也能删。 */}
+										<div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 py-2 pl-3 pr-2">
+											<CollapsibleTrigger asChild>
+												<button type="button" className="flex min-w-0 items-center gap-1.5 rounded text-left" title={open ? t("common.collapse") : t("common.expand")}>
+													<ChevronDown size={14} aria-hidden="true" className={cn("shrink-0 text-muted-foreground transition-transform", !open && "-rotate-90")} />
+													<span className="shrink-0 truncate text-control font-medium text-foreground">{row.name.trim() || t("acp.toolUnnamed")}</span>
+													{!open && commandSummary ? <code className="text-caption text-muted-foreground min-w-0 truncate font-mono">{commandSummary}</code> : null}
+													{!open && envLineCount > 0 ? <span className="text-caption text-muted-foreground shrink-0">{t("acp.envCount", { count: envLineCount })}</span> : null}
+												</button>
+											</CollapsibleTrigger>
+											<Button variant="ghost" size="icon" title={t("acp.toolRemove")} onClick={() => removeRow(index)}>
+												<Trash2 size={14} aria-hidden="true" />
+											</Button>
+										</div>
+										<CollapsibleContent className="flex flex-col gap-2 px-3 pb-3">
+											{/* 字段一律带可见 label：此前只靠 placeholder，填了值之后就看不出这格是什么，
+											    标签用隐式关联（label 包裹控件）同时补上可访问名。 */}
+											<div className="grid grid-cols-2 items-end gap-2">
+												<label className="flex min-w-0 flex-col gap-1">
+													<span className="text-micro text-muted-foreground">{t("acp.toolName")}</span>
+													<Input value={row.name} onChange={(event) => patchRow(index, { name: event.target.value })} />
+												</label>
+												<label className="flex min-w-0 flex-col gap-1">
+													<span className="text-micro text-muted-foreground">{t("acp.toolCommand")}</span>
+													<Input value={row.command} onChange={(event) => patchRow(index, { command: event.target.value })} />
+												</label>
+											</div>
+											<label className="flex min-w-0 flex-col gap-1">
+												<span className="text-micro text-muted-foreground">{t("acp.toolArgs")}</span>
+												<Input
+													value={row.args.join(" ")}
+													onChange={(event) => {
+														// 参数按空白拆分:与主进程 spawn 的数组语义一致,避免引号转义教学成本
+														patchRow(index, { args: event.target.value.trim() ? event.target.value.split(/\s+/) : [] });
+													}}
+												/>
+											</label>
+											<label className="flex min-w-0 flex-col gap-1">
+												<span className="text-micro text-muted-foreground">{t("acp.toolEnv")}</span>
+												<Textarea value={row.envText} rows={2} className="font-mono text-xs" spellCheck={false} onChange={(event) => patchRow(index, { envText: event.target.value })} />
+											</label>
+										</CollapsibleContent>
+									</Collapsible>
+								);
+							})}
 						</div>
 					)}
 					<div className="flex items-center justify-between">
@@ -259,7 +310,7 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 	);
 });
 
-/** 脏标记投影:参数顺序无关(重排行不算脏),字段稳定序列化即可。 */
-function serializeRows(rows: AcpToolRow[]): string {
+/** 脏标记投影:参数顺序无关(重排行不算脏),字段稳定序列化即可;入参放宽到字段子集,已存表投影无需补 draftKey。 */
+function serializeRows(rows: Array<Pick<AcpToolRow, "id" | "name" | "command" | "args" | "envText">>): string {
 	return JSON.stringify(rows.map((row) => ({ id: row.id ?? "", name: row.name, command: row.command, args: [...row.args].sort(), envText: row.envText })));
 }
