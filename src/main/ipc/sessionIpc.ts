@@ -8,6 +8,7 @@ import { isAbsolute } from "node:path";
 import { dialog, ipcMain, type BrowserWindow, type WebContents } from "electron";
 import { agentEventTags, ipcChannels } from "../../shared/ipc";
 import { isLocalProject } from "../../shared/projectLocation";
+import { resolveProjectWslIdentity } from "../wsl/WslProjectEnvironment";
 import { isDshPermissionPreset } from "../../shared/types/agent";
 import { isRewindRestoreScope } from "../../shared/types/rewind";
 import { canonicalizeSessionPath } from "../../shared/sessionIdentity";
@@ -928,15 +929,15 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		}
 		let projectPath = project.path;
 		const settings = settingsStore.get();
-		if (settings.wslEnabled && settings.wslDistro) {
+		// 第 12 步：扫描按项目身份解析；缺字段的旧项目回退全局设置。
+		const projectWsl = resolveProjectWslIdentity(project, settings);
+		if (projectWsl !== undefined) {
 			projectPath = projectPath.replace(/^([A-Za-z]):\\/, (_: string, drive: string) => `/mnt/${drive.toLowerCase()}/`).replace(/\\/g, "/");
 		}
-		const { wslEnabled, wslDistro, wslUser } = settings;
-
 		// 扫描 + 合并 + 运行时绑定（首次同步路径与后台路径共用）
 		const runScanAndMerge = async (): Promise<SessionRecord[]> => {
 			const summaries = await sessionScanner.list(projectPath);
-			const records = await sessionCatalog.mergeScanned(projectId, summaries, wslEnabled ? { wslDistro, wslUser } : {});
+			const records = await sessionCatalog.mergeScanned(projectId, summaries, projectWsl !== undefined ? { wslDistro: projectWsl.distro, wslUser: projectWsl.user } : {});
 			// 重发/编辑 fork 化替换：被子会话接替的旧记录不出现在列表（文件保留可恢复，
 			// 用户要求 fork 后历史会话不重复）
 			const visibleRecords = records.filter((record) => !record.supersededBy);
@@ -1091,10 +1092,13 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				// Config read is best-effort; draft creation must never block.
 			}
 		}
+		const projectWsl = resolveProjectWslIdentity(project, settingsStore.get());
 		const draft = await sessionCatalog.createDraft({
 			projectId: input.projectId,
+			...(projectWsl !== undefined ? { wslDistro: projectWsl.distro, wslUser: projectWsl.user } : {}),
 			title: input.title?.trim() || mainCopy("session.newTitle"),
-			environment: settingsStore.get().wslEnabled ? "wsl" : "native",
+			// 第 12 步：会话按项目档案记录环境；旧项目回退全局设置。
+			environment: projectWsl !== undefined ? "wsl" : "native",
 			// 后端透传：仅接受白名单枚举，其余视为 pi（渲染层不可信输入校验在边界）。
 			backend: input.backend === "dsh" ? "dsh" : input.backend === "acp" ? "acp" : undefined,
 			// ACP 工具预选（AcpToolConfig.id）：backend=acp 草稿期选哪个 CLI。

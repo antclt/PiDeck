@@ -1395,6 +1395,9 @@ export class SessionCatalog implements HostRebindStorePort {
 		projectId: string;
 		title: string;
 		environment: SessionEnvironment;
+		/** 第 12 步：WSL 项目按自己的档案记录身份；缺省时回退 identityContext（兼容旧调用）。 */
+		wslDistro?: string;
+		wslUser?: string;
 		source?: SessionSource;
 		backend?: AgentBackend;
 		model?: SessionModelPreference;
@@ -1494,8 +1497,9 @@ export class SessionCatalog implements HostRebindStorePort {
 				sideTask: input.sideTask ? true : undefined,
 				forked: input.forked ? true : undefined,
 				backend: input.backend,
-				wslDistro: input.environment === "wsl" ? this.identityContext.wslDistro : undefined,
-				wslUser: input.environment === "wsl" ? this.identityContext.wslUser : undefined,
+				// 第 12 步：显式身份优先；旧调用没有时仍回退全局上下文。
+				wslDistro: input.environment === "wsl" ? (input.wslDistro ?? this.identityContext.wslDistro) : undefined,
+				wslUser: input.environment === "wsl" ? (input.wslUser ?? this.identityContext.wslUser) : undefined,
 				// 带 dshSessionId = 导入已有 host 会话（数据在 $DSH_HOME），
 				// 不是「尚未发送」的草稿：置 active，重启清理/重新打开都按真实会话处理。
 				status: input.dshSessionId ? "active" : "draft",
