@@ -176,6 +176,11 @@ test("drawer defaults closed on project load; pin restores per project", () => {
 	const rail = readFileSync("src/renderer/src/components/workspace/WorkspaceDrawerRail.tsx", "utf8");
 	assert.match(rail, /drawer-rail-close/);
 	assert.match(rail, /onClose\?: \(\) => void/);
+	// 关闭按钮的主入口在抽屉顶栏那一行（贴抽屉左边界）；rail 这颗只是原生标题栏兜底
+	assert.match(rail, /workspace-titlebar:hidden/);
+	const host = readFileSync("src/renderer/src/components/workspace/WorkspaceDrawerHost.tsx", "utf8");
+	assert.match(host, /drawer-titlebar-close/);
+	assert.match(host, /workspace-titlebar:block/);
 	const surface = readFileSync("src/renderer/src/components/session/WorkspaceSurface.tsx", "utf8");
 	assert.doesNotMatch(surface, /drawer\.pin/);
 	assert.doesNotMatch(surface, /onTogglePin/);
