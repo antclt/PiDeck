@@ -123,3 +123,12 @@ test("in-progress glyph keeps its spin on the svg box and the row clips the rota
 	// scrollHeight 收缩到与 clientHeight 相等 → 不出现滚动条、用户滚不动。见 2027-01 排版事故。
 	assert.match(strip, /<ItemTag[^>]*className="flex min-w-0 items-center gap-2\.5 overflow-hidden shrink-0[^"]*"/, "todo rows must not be flex-shrunk when the capped list overflows");
 });
+
+test("ACP 会话的 plan 投影接入 todo 数据源（与 DSH 同路消费 runtime.state.todos）", () => {
+	const strip = stripSource();
+	// 主进程已把 ACP plan/todos 整表推进 agents:runtime-state（AcpUpdatePipeline 对
+	// todos/usage_update 变更主动 emitRuntimeState；AcpEventProjector case "plan" 归一化），
+	// 渲染层此前只有 DSH 分支消费 runtime.state.todos → ACP 会话的 CLI 代办任务列表
+	// 永远不渲染（折叠条与「会话状态」面板共用本 hook，两处一起失明）。见 issue #428。
+	assert.match(strip, /backend === "dsh" \|\| runtime\?\.backend === "acp"/, "useSessionTodoSources must consume runtime.state.todos for ACP sessions too");
+});

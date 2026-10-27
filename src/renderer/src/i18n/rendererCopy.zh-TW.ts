@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 8c0ed41c5fbb47fc4494c94e55bf81a45998be6ca5744ea1cf08f239e63f4559（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: d1121fdddc373e7f860d0c4682cba4114a3a81cbc8622772a8e623f75ba69cf1（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -2433,7 +2433,6 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.mcp.field.enabledHint": "關閉後 Pi 不會連線該服務，配置仍保留。",
 	"config.mcp.transport.stdio": "stdio 命令",
 	"config.mcp.transport.http": "HTTP",
-	"config.mcp.layer.piAgent": "~/.pi/agent（全域）",
 	"config.mcp.layer.projectPi": "專案 .pi/mcp.json（信任後生效，只讀）",
 	"config.mcp.providerAuth.sectionHint": "此 HTTP 伺服器的認證方式。開啟後 pi 使用所選供應商的登入憑據（逐請求讀取，供應商登入續期自動生效）；關閉則按需走 MCP OAuth，或用上方 Authorization 頭。",
 	"config.mcp.providerAuth.provider": "供應商",

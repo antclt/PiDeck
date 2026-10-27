@@ -2426,7 +2426,6 @@ export const zhCN = {
 	"config.mcp.field.enabledHint": "关闭后 Pi 不会连接该服务，配置仍保留。",
 	"config.mcp.transport.stdio": "stdio 命令",
 	"config.mcp.transport.http": "HTTP",
-	"config.mcp.layer.piAgent": "~/.pi/agent（全局）",
 	"config.mcp.layer.projectPi": "项目 .pi/mcp.json（信任后生效，只读）",
 	"config.mcp.providerAuth.sectionHint": "此 HTTP 服务器的认证方式。开启后 pi 使用所选供应商的登录凭据（逐请求读取，供应商登录续期自动生效）；关闭则按需走 MCP OAuth，或用上方 Authorization 头。",
 	"config.mcp.providerAuth.provider": "供应商",
