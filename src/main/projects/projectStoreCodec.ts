@@ -62,8 +62,8 @@ export function encodeProjectStoreSnapshot(projects: Project[], revision: number
 
 function encodeLocalEntry(project: Project): ProjectStoreV2Entry {
 	if (isRemoteProject(project)) throw new Error("PROJECT_STORE_INVALID_PROJECT");
-	const { path, environment, wslDistro, ...rest } = project;
-	return { ...rest, locator: projectLocatorFromLegacy({ path, environment, wslDistro }) };
+	const { path, environment, wslDistro, wslUser, wslHostId, ...rest } = project;
+	return { ...rest, locator: projectLocatorFromLegacy({ path, environment, wslDistro, wslUser, wslHostId }) };
 }
 
 function readLegacyProject(value: unknown): Project {
@@ -77,6 +77,8 @@ function readLegacyProject(value: unknown): Project {
 			path: value.path,
 			...(value.environment === "windows" || value.environment === "wsl" ? { environment: value.environment } : {}),
 			...(typeof value.wslDistro === "string" ? { wslDistro: value.wslDistro } : {}),
+			...(typeof value.wslUser === "string" ? { wslUser: value.wslUser } : {}),
+			...(typeof value.wslHostId === "string" ? { wslHostId: value.wslHostId } : {}),
 		}),
 	);
 	if (!fields) throw new Error("PROJECT_STORE_INVALID_PROJECT");

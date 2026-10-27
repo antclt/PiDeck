@@ -519,6 +519,7 @@ export function createPreviewApi(): PiDesktopApi {
 			list: async () => projects,
 			add: async () => projects[0],
 			addByPath: async () => projects[0],
+			addWsl: async () => projects[0] ?? null,
 			remove: async () => projects,
 			reorder: async (projectIds) => {
 				projects.sort((a, b) => projectIds.indexOf(a.id) - projectIds.indexOf(b.id));

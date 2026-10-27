@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 7ba677d5ed7c1a5820a4b21ee8b17bd09d50bdc463546410e1b2a95be2c465cd（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: ac4ea25043c3bf0027a136d660420f03de01d1a763a8316c11870ce41294db79（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4413,6 +4413,11 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.connections.emptyHint": "新增主機後即可登記遠端專案並在遠端執行 pi；WSL 專案請在開發設定啟用後用「新增專案」加入。",
 	"settings.connections.wsl.title": "WSL",
 	"settings.connections.wsl.hint": "本機 WSL 環境；這裡管理發行版/使用者檔案，專案目錄在「新增專案」時選擇。",
+	"settings.connections.wsl.addProject": "新增專案",
+	"settings.connections.wsl.addingProject": "選擇目錄…",
+	"settings.connections.wsl.projectAdded": "已新增專案：{name}",
+	"settings.connections.wsl.projectHostMissing": "WSL 檔案已不存在，請重新整理後重試。",
+	"settings.connections.wsl.projectAddFailed": "新增專案失敗：{code}",
 	"settings.connections.wsl.add": "新增 WSL",
 	"settings.connections.wsl.added": "已儲存 WSL 連線：{host}",
 	"settings.connections.wsl.empty": "還沒有 WSL 連線。",

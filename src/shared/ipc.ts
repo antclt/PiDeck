@@ -88,6 +88,8 @@ export const ipcChannels = {
 	remotePiModels: "remote:pi-models",
 	projectsList: "projects:list",
 	projectsAdd: "projects:add",
+	/** 按 WSL 连接档案添加项目：主进程查档案、解析环境、选目录并写入 wslHostId/distro/user。 */
+	projectsAddWsl: "projects:add-wsl",
 	// 文件夹右键菜单直达：按路径添加项目（渲染层确认后调用；projectsAdd 走系统目录选择框）
 	projectsAddByPath: "projects:add-by-path",
 	projectsRemove: "projects:remove",

@@ -96,11 +96,18 @@ export function readProjectLocator(value: unknown): ProjectLocator | undefined {
 		if (record.environment !== "native" && record.environment !== "wsl") return undefined;
 		if (typeof record.localPath !== "string" || !record.localPath.trim()) return undefined;
 		if (record.wslDistro !== undefined && typeof record.wslDistro !== "string") return undefined;
+		// 第 11 步的新字段：wslHostId 是 WSL 档案主键（UUID），wslUser 是 Linux 用户。
+		// native 项目带这些字段属于写入侧混淆，整条拒绝而不是忽略。
+		if (record.wslUser !== undefined && (typeof record.wslUser !== "string" || !/^[A-Za-z_][A-Za-z0-9._-]{0,31}$/u.test(record.wslUser))) return undefined;
+		if (record.wslHostId !== undefined && (typeof record.wslHostId !== "string" || !PROJECT_HOST_ID_PATTERN.test(record.wslHostId))) return undefined;
+		if (record.environment !== "wsl" && (record.wslUser !== undefined || record.wslHostId !== undefined)) return undefined;
 		return {
 			kind: "local",
 			environment: record.environment,
 			localPath: record.localPath,
 			...(typeof record.wslDistro === "string" ? { wslDistro: record.wslDistro } : {}),
+			...(typeof record.wslUser === "string" ? { wslUser: record.wslUser } : {}),
+			...(typeof record.wslHostId === "string" ? { wslHostId: record.wslHostId } : {}),
 		};
 	}
 	if (record.kind === "ssh") return readSshProjectLocator(record);

@@ -81,6 +81,9 @@ function errorMessage(error: unknown): string {
 	return String(error);
 }
 
+/** 第 11 步：从 WSL 连接档案得到的项目身份（main 校验后传入，不来自渲染层自由文本）。 */
+export type WslProjectIdentity = { hostId: string; distro: string; user: string };
+
 export class ProjectStore implements HostRebindStorePort {
 	/** DSH 外部会话兑底项目稳定 id（无 cwd/未匹配目录的会话归属；见 ensureExternalSessionsProject）。 */
 	private static readonly EXTERNAL_PROJECT_ID = "builtin-external";
@@ -258,7 +261,7 @@ export class ProjectStore implements HostRebindStorePort {
 		}
 	}
 
-	async chooseAndAdd(environment?: "windows" | "wsl", wslEnvironment?: WslEnvironment | null) {
+	async chooseAndAdd(environment?: "windows" | "wsl", wslEnvironment?: WslEnvironment | null, wslIdentity?: WslProjectIdentity) {
 		this.assertWritable();
 		if (environment === "wsl" && !wslEnvironment) {
 			throw new WslPathError("INVALID_WSL_PATH", "The active WSL environment is unavailable.");
@@ -277,11 +280,19 @@ export class ProjectStore implements HostRebindStorePort {
 			projectPath = normalizeSelectedWslProjectPath(projectPath, wslEnvironment!);
 		}
 
-		return this.add(projectPath, undefined, environment);
+		return this.addWithLocation(projectPath, undefined, environment, wslIdentity);
 	}
 
-	/** 添加项目，可指定所属环境（缺省 windows） */
+	/** 添加项目，可指定所属环境（缺省 windows）；旧的全局 WSL 路径不带档案身份。 */
 	async add(path: string, worktreeParentId?: string, environment?: "windows" | "wsl") {
+		return this.addWithLocation(path, worktreeParentId, environment);
+	}
+
+	/**
+	 * 第 11 步：带 WSL 档案身份写入项目。身份只来自已校验的档案（IPC 侧查询），
+	 * 缺失时保持旧行为（运行时回退全局 distro/user）。
+	 */
+	async addWithLocation(path: string, worktreeParentId?: string, environment?: "windows" | "wsl", wslIdentity?: WslProjectIdentity) {
 		this.assertWritable();
 		return this.commitWrite(async () => {
 			const normalizedPath = this.normalizeProjectPath(path);
@@ -292,6 +303,13 @@ export class ProjectStore implements HostRebindStorePort {
 			if (existing && isLocalProject(existing)) {
 				existing.path = normalizedPath;
 				existing.lastOpenedAt = Date.now();
+				// 显式用某个档案重新添加同一目录：以本次选择为准，避免项目继续指向旧环境。
+				if (wslIdentity !== undefined) {
+					existing.environment = "wsl";
+					existing.wslDistro = wslIdentity.distro;
+					existing.wslUser = wslIdentity.user;
+					existing.wslHostId = wslIdentity.hostId;
+				}
 				// 外部已有 worktree 可能曾经作为顶级项目加入；开启工作区后需要补上父子关系。
 				if (worktreeParentId && existing.id !== worktreeParentId) {
 					existing.worktreeParentId = worktreeParentId;
@@ -311,6 +329,7 @@ export class ProjectStore implements HostRebindStorePort {
 				sortOrder: this.nextSortOrder(),
 				// 兼容旧数据：environment 缺省视为 windows
 				environment: environment || "windows",
+				...(environment === "wsl" && wslIdentity !== undefined ? { wslDistro: wslIdentity.distro, wslUser: wslIdentity.user, wslHostId: wslIdentity.hostId } : {}),
 				...(worktreeParentId ? { worktreeParentId } : {}),
 			};
 

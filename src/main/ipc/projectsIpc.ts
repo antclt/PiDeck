@@ -2,7 +2,7 @@ import { dialog, ipcMain, type BrowserWindow } from "electron";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { ipcChannels } from "../../shared/ipc";
-import { isLocalProject, isRemoteProject } from "../../shared/projectLocation";
+import { isLocalProject, isRemoteProject, PROJECT_HOST_ID_PATTERN } from "../../shared/projectLocation";
 import type { FeedbackProjectContext, LocalProject } from "../../shared/types";
 import type { ProjectStore } from "../projects/ProjectStore";
 import type { SettingsStore } from "../settings/SettingsStore";
@@ -18,6 +18,7 @@ import { removeProjectWithSessions } from "../projects/projectRemoval";
 import { consumeUserDataNameMigrationNotice } from "../projects/userDataNameMigration";
 import { registerProjectResourceIpc } from "./projectResourceIpc";
 import { normalizeSelectedWslProjectPath, toWindowsHostPath, type WslEnvironment } from "../wsl/WslPaths";
+import { createWslHostStore } from "../wsl/WslHostStore";
 
 export type ProjectsIpcDeps = {
 	projectStore: ProjectStore;
@@ -32,17 +33,21 @@ export type ProjectsIpcDeps = {
 	getMainWindow: () => BrowserWindow | null;
 	/** 添加 WSL 项目前解析当前发行版/用户；缺失时 chooseAndAdd 会拒绝（#155）。 */
 	resolveWslEnvironment?: (distro: string, user: string) => Promise<WslEnvironment>;
+	/** WSL 档案文件所在目录（本机 userData）；只读该目录，不启动发行版。 */
+	userDataDir: string;
 };
 
-export function registerProjectsIpc({ projectStore, settingsStore, gitService, worktreeService, agentManager, appLogger, projectResourceManager, sessionCatalog, mainCopy, getMainWindow, resolveWslEnvironment }: ProjectsIpcDeps): void {
+export function registerProjectsIpc({ projectStore, settingsStore, gitService, worktreeService, agentManager, appLogger, projectResourceManager, sessionCatalog, mainCopy, getMainWindow, resolveWslEnvironment, userDataDir }: ProjectsIpcDeps): void {
 	// Windows Node 只能 stat/打开主机路径；WSL 项目在 store 里可能是 Linux 路径。远端项目不能到这里。
 	const resolveProjectHostPath = (project: LocalProject) => {
 		const settings = settingsStore.get();
-		if (process.platform !== "win32" || project.environment !== "wsl" || !settings.wslEnabled || !settings.wslDistro) {
+		// 第 11 步起，项目自带 distro 时优先使用它；缺省才回退全局设置（第 14 步删除）。
+		const distro = project.wslDistro ?? settings.wslDistro;
+		if (process.platform !== "win32" || project.environment !== "wsl" || !distro) {
 			return project.path;
 		}
 		try {
-			return toWindowsHostPath(project.path, { distro: settings.wslDistro });
+			return toWindowsHostPath(project.path, { distro });
 		} catch {
 			// Presence / git 探测不应把临时 WSL 不可用升级成 IPC 硬失败。
 			return project.path;
@@ -64,9 +69,9 @@ export function registerProjectsIpc({ projectStore, settingsStore, gitService, w
 	// 可见项目 = 按环境过滤 + 目录存在性标记（missing 保留记录，见 projectPresence.ts）。
 	// 远端项目不受 WSL 模式过滤影响（它不属于本机环境），一律保留。
 	const getVisibleProjects = async () => {
-		const settings = settingsStore.get();
 		const all = projectStore.list();
-		const visible = settings.wslEnabled ? all.filter((p) => isRemoteProject(p) || p.kind === "chat" || p.environment === "wsl") : all.filter((p) => isRemoteProject(p) || p.kind === "chat" || !p.environment || p.environment === "windows");
+		// WSL 已是一等连接：不再按全局开关隐藏 WSL 项目；Windows 与 WSL 项目并存由用户显式添加决定。
+		const visible = all;
 		return attachProjectPresence(visible, undefined, (project) => {
 			// 远端项目已在 attachProjectPresence 内跳过；走到这里说明窄化失败。
 			if (!isLocalProject(project)) throw new Error("UNSUPPORTED_PROJECT_LOCATION");
@@ -86,6 +91,33 @@ export function registerProjectsIpc({ projectStore, settingsStore, gitService, w
 	});
 	// 文件夹右键菜单（--open-project）直达：给定路径必须是已存在的目录，
 	// 校验通过后直接入库（与选择框添加同一 add 链路：同路径去重/聊天目录特判）。
+	/**
+	 * 第 11 步：按 WSL 档案添加项目。
+	 *
+	 * 身份只来自主进程读到的档案（渲染层只给 id）；目录仍用系统选择框，选中后按该档案的
+	 * distro/user 构造 WslEnvironment 并写入项目 locator。旧 `projects:add` 保留给
+	 * 全局 WSL 模式（第 14 步删除）。
+	 */
+	ipcMain.handle(ipcChannels.projectsAddWsl, async (_event, hostIdValue: unknown) => {
+		if (typeof hostIdValue !== "string" || !PROJECT_HOST_ID_PATTERN.test(hostIdValue)) throw new Error("WSL_HOST_NOT_FOUND");
+		if (resolveWslEnvironment === undefined) throw new Error("WSL_HOST_UNAVAILABLE");
+		const store = await createWslHostStore(userDataDir);
+		const profile = (await store.list()).find((host) => host.id === hostIdValue);
+		if (profile === undefined) throw new Error("WSL_HOST_NOT_FOUND");
+		let environment: WslEnvironment;
+		try {
+			environment = await resolveWslEnvironment(profile.distro, profile.user);
+		} catch {
+			throw new Error("WSL_HOST_UNAVAILABLE");
+		}
+		const project = await projectStore.chooseAndAdd("wsl", environment, { hostId: profile.id, distro: profile.distro, user: profile.user });
+		if (project !== null) {
+			const visible = await getVisibleProjects();
+			getMainWindow()?.webContents.send(ipcChannels.projectsChanged, visible);
+		}
+		return project;
+	});
+
 	ipcMain.handle(ipcChannels.projectsAddByPath, async (_event, path: unknown) => {
 		if (typeof path !== "string" || path.trim().length === 0) {
 			throw new Error("INVALID_PROJECT_PATH");

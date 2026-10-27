@@ -3646,6 +3646,7 @@ function registerIpc() {
 		sessionCatalog,
 		mainCopy: mainCopy as (key: string, params?: Record<string, string | number>) => string,
 		getMainWindow: () => mainWindow,
+		userDataDir: app.getPath("userData"),
 		resolveWslEnvironment: async (distro, user) => {
 			const { resolveWslEnvironment } = await import("./wsl/WslEnvironment");
 			return resolveWslEnvironment(distro, user, {
