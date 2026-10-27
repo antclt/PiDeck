@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSetAtom } from "jotai";
 import { Box, ChevronDown, FileCode, Server, TerminalSquare } from "lucide-react";
+import { openSettingsAtom } from "../../../atoms";
 import { desktopApi } from "../../../desktopApi";
 import { t } from "../../../i18n";
 import { cn } from "../../../lib/utils";
@@ -24,24 +26,19 @@ function skipReasonLabel(reason: string): string {
 }
 
 type AuthMode = "agent" | "key";
+type ConnectionKind = "ssh" | "wsl";
 
 /** 表单初值：端口默认 22，认证默认交给 ssh-agent / 默认密钥（与 Transport 的 BatchMode 一致）。 */
-const EMPTY_FORM = {
-	label: "",
-	hostName: "",
-	port: "22",
-	user: "",
-	auth: "agent" as AuthMode,
-	identityFile: "",
-};
+const EMPTY_FORM = { label: "", hostName: "", port: "22", user: "", auth: "agent" as AuthMode, identityFile: "" };
 type FormState = typeof EMPTY_FORM;
 
 /**
  * 「新建连接」面板。
  *
  * 结构照 ZCode 的远程配置面板：**类型切换 + 实时目标预览 + 表单 + 从 SSH config 导入**。
- * 类型切换里只有 SSH 能真正工作——WSL/Docker 在 PiDeck 还属于后续能力，因此显示为 disabled
- * 并标注「暂未接入」，而不是给一个点进去必然失败的入口。
+ * SSH 是本面板真正创建的对象；WSL 不是一个可选连接类型，而是 PiDeck 已有的本机环境模式
+ * （设置 → 开发 → WSL），因此 WSL 页只解释差异并提供深链，不假装能在这里登记主机。
+ * Docker 目前没有任何后端，显示为 disabled 并说明，而不是给一个点进去必然失败的入口。
  *
  * 认证只提供「自动（ssh-agent/默认密钥）」与「指定私钥」：底层 OpenSSH 调用固定
  * `BatchMode=yes` / `NumberOfPasswordPrompts=0`，密码与私钥口令都没有可用的传递通道，
@@ -51,6 +48,8 @@ type FormState = typeof EMPTY_FORM;
  * 成功后由调用方立刻发起连接，没有第二步「核对指纹」。
  */
 export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId: string, label: string) => void }) {
+	const openSettings = useSetAtom(openSettingsAtom);
+	const [kind, setKind] = useState<ConnectionKind>("ssh");
 	const [candidates, setCandidates] = useState<RemoteHostConfigCandidate[]>([]);
 	const [skipped, setSkipped] = useState<{ alias: string; reason: string }[]>([]);
 	const [currentUser, setCurrentUser] = useState("");
@@ -91,13 +90,7 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 		const identityFile = form.auth === "key" ? form.identityFile.trim() : "";
 		if (form.auth === "key" && identityFile.length === 0) return t("settings.connections.add.keyRequired");
 		const user = form.user.trim();
-		return {
-			label,
-			hostName,
-			...(port === undefined ? {} : { port }),
-			...(user.length > 0 ? { user } : {}),
-			...(identityFile.length > 0 ? { identityFile } : {}),
-		};
+		return { label, hostName, ...(port === undefined ? {} : { port }), ...(user.length > 0 ? { user } : {}), ...(identityFile.length > 0 ? { identityFile } : {}) };
 	}, [form]);
 
 	const submit = useCallback(async () => {
@@ -142,7 +135,14 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 	const previewHost = form.hostName.trim();
 	const previewUser = form.user.trim();
 	const previewPort = form.port.trim() || "22";
-	const preview = previewHost.length === 0 ? t("settings.connections.add.previewPlaceholder") : `${previewUser.length > 0 ? `${previewUser}@` : ""}${previewHost}:${previewPort}`;
+	const preview = kind === "wsl" ? t("settings.connections.add.wsl.preview") : previewHost.length === 0 ? t("settings.connections.add.previewPlaceholder") : `${previewUser.length > 0 ? `${previewUser}@` : ""}${previewHost}:${previewPort}`;
+	const kindLabel = kind === "ssh" ? t("settings.connections.add.kind.ssh") : t("settings.connections.add.kind.wsl");
+
+	/** WSL 是本地环境而不是远端主机：这里只负责把用户送到真正能配置它的地方。 */
+	const openWslSettings = useCallback(() => {
+		props.onClose();
+		openSettings({ tab: "dev" });
+	}, [openSettings, props]);
 
 	return (
 		<Dialog
@@ -155,26 +155,19 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 				<DialogHeader>
 					<div className="flex flex-wrap items-center gap-2">
 						<DialogTitle>{t("settings.connections.add.title")}</DialogTitle>
-						<span className="rounded border border-border-subtle px-1.5 py-0.5 text-micro text-muted-foreground">SSH</span>
+						<span className="rounded border border-border-subtle px-1.5 py-0.5 text-micro text-muted-foreground">{kindLabel}</span>
 					</div>
-					<DialogDescription className={cn("break-all font-mono text-label", previewHost.length === 0 ? "text-muted-foreground" : "text-foreground")}>{preview}</DialogDescription>
+					<DialogDescription className={cn("break-all font-mono text-label", kind === "ssh" && previewHost.length > 0 ? "text-foreground" : "text-muted-foreground")}>{preview}</DialogDescription>
 				</DialogHeader>
 
-				{/* 类型切换：SSH 可用；WSL/Docker 是 PiDeck 的后续能力，标注而不是隐藏。 */}
+				{/* 类型切换：SSH 在这里创建；WSL 指向本机环境设置；Docker 还没有后端。 */}
 				<div className="flex flex-wrap items-center justify-between gap-2">
 					<div role="group" aria-label={t("settings.connections.add.typeLabel")} className="flex w-fit overflow-hidden rounded-lg border border-input">
-						<button type="button" aria-pressed="true" className="inline-flex min-h-8 items-center gap-1.5 bg-accent px-3 text-body font-medium text-accent-foreground">
+						<button type="button" aria-pressed={kind === "ssh"} className={cn("inline-flex min-h-8 items-center gap-1.5 px-3 text-body", kind === "ssh" ? "bg-accent font-medium text-accent-foreground" : "text-muted-foreground hover:bg-bg-hover")} onClick={() => setKind("ssh")}>
 							<Server className="size-3.5" aria-hidden="true" />
 							{t("settings.connections.add.kind.ssh")}
 						</button>
-						<button
-							type="button"
-							aria-pressed="false"
-							disabled
-							aria-label={`${t("settings.connections.add.kind.wsl")} — ${t("settings.connections.add.kindUnavailable")}`}
-							title={t("settings.connections.add.kindUnavailable")}
-							className="inline-flex min-h-8 items-center gap-1.5 border-l border-input px-3 text-body text-muted-foreground opacity-50"
-						>
+						<button type="button" aria-pressed={kind === "wsl"} className={cn("inline-flex min-h-8 items-center gap-1.5 border-l border-input px-3 text-body", kind === "wsl" ? "bg-accent font-medium text-accent-foreground" : "text-muted-foreground hover:bg-bg-hover")} onClick={() => setKind("wsl")}>
 							<TerminalSquare className="size-3.5" aria-hidden="true" />
 							{t("settings.connections.add.kind.wsl")}
 						</button>
@@ -184,168 +177,132 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 							disabled
 							aria-label={`${t("settings.connections.add.kind.docker")} — ${t("settings.connections.add.kindUnavailable")}`}
 							title={t("settings.connections.add.kindUnavailable")}
-							className="inline-flex min-h-8 items-center gap-1.5 border-l border-input px-3 text-body text-muted-foreground opacity-50"
+							className="inline-flex min-h-8 cursor-not-allowed items-center gap-1.5 border-l border-input px-3 text-body text-muted-foreground opacity-50"
 						>
 							<Box className="size-3.5" aria-hidden="true" />
 							{t("settings.connections.add.kind.docker")}
 						</button>
 					</div>
-					<Button type="button" variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setImporting((open) => !open)} aria-expanded={importing}>
-						<FileCode className="size-4" aria-hidden="true" />
-						{t("settings.connections.add.import")}
-						<ChevronDown className={cn("size-3.5 transition-transform", importing && "rotate-180")} aria-hidden="true" />
-					</Button>
+					{kind === "ssh" ? (
+						<Button type="button" variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setImporting((open) => !open)} aria-expanded={importing}>
+							<FileCode className="size-4" aria-hidden="true" />
+							{t("settings.connections.add.import")}
+							<ChevronDown className={cn("size-3.5 transition-transform", importing && "rotate-180")} aria-hidden="true" />
+						</Button>
+					) : null}
 				</div>
 
-				{importing ? (
-					<div className="flex flex-col gap-2 rounded-lg border border-border-subtle bg-bg-panel p-2">
-						<Input autoFocus value={query} placeholder={t("settings.connections.add.importSearch")} aria-label={t("settings.connections.add.importSearch")} onChange={(event) => setQuery(event.target.value)} />
-						{filtered.length === 0 ? <p className="px-1 py-2 text-label text-muted-foreground">{t("settings.connections.add.importEmpty")}</p> : null}
-						<ul className="flex max-h-48 flex-col gap-0.5 overflow-y-auto">
-							{filtered.map((candidate) => (
-								<li key={candidate.alias}>
-									<button type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body hover:bg-bg-hover" onClick={() => applyCandidate(candidate)}>
-										<span className="min-w-0 flex-1 truncate font-medium">{candidate.alias}</span>
-										<span className="shrink-0 font-mono text-label text-muted-foreground">
-											{candidate.user.length > 0 ? candidate.user : currentUser}@{candidate.hostName}
-											{candidate.port !== null ? `:${candidate.port}` : ""}
-										</span>
-									</button>
-								</li>
-							))}
-						</ul>
-						{/* 被跳过的条目要说明原因：静默少一项会让用户以为自己的配置丢了。 */}
-						{skipped.length > 0 ? (
-							<details className="px-1 text-label text-muted-foreground">
-								<summary className="cursor-pointer select-none">
-									{t("settings.connections.add.skipped", {
-										count: String(skipped.length),
-									})}
-								</summary>
-								<ul className="mt-1 flex flex-col gap-0.5">
-									{skipped.map((entry) => (
-										<li key={`${entry.alias}-${entry.reason}`}>
-											{entry.alias} — {skipReasonLabel(entry.reason)}
+				{kind === "wsl" ? (
+					<div className="flex flex-col gap-2 rounded-lg border border-border-subtle bg-bg-panel p-3">
+						<p className="text-body text-foreground">{t("settings.connections.add.wsl.hint")}</p>
+						<p className="text-label text-muted-foreground">{t("settings.connections.add.wsl.steps")}</p>
+						<Button type="button" size="sm" className="self-start" onClick={openWslSettings}>
+							{t("settings.connections.add.wsl.openSettings")}
+						</Button>
+					</div>
+				) : (
+					<>
+						{importing ? (
+							<div className="flex flex-col gap-2 rounded-lg border border-border-subtle bg-bg-panel p-2">
+								<Input autoFocus value={query} placeholder={t("settings.connections.add.importSearch")} aria-label={t("settings.connections.add.importSearch")} onChange={(event) => setQuery(event.target.value)} />
+								{filtered.length === 0 ? <p className="px-1 py-2 text-label text-muted-foreground">{t("settings.connections.add.importEmpty")}</p> : null}
+								<ul className="flex max-h-48 flex-col gap-0.5 overflow-y-auto">
+									{filtered.map((candidate) => (
+										<li key={candidate.alias}>
+											<button type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body hover:bg-bg-hover" onClick={() => applyCandidate(candidate)}>
+												<span className="min-w-0 flex-1 truncate font-medium">{candidate.alias}</span>
+												<span className="shrink-0 font-mono text-label text-muted-foreground">
+													{candidate.user.length > 0 ? candidate.user : currentUser}@{candidate.hostName}
+													{candidate.port !== null ? `:${candidate.port}` : ""}
+												</span>
+											</button>
 										</li>
 									))}
 								</ul>
-							</details>
+								{/* 被跳过的条目要说明原因：静默少一项会让用户以为自己的配置丢了。 */}
+								{skipped.length > 0 ? (
+									<details className="px-1 text-label text-muted-foreground">
+										<summary className="cursor-pointer select-none">{t("settings.connections.add.skipped", { count: String(skipped.length) })}</summary>
+										<ul className="mt-1 flex flex-col gap-0.5">
+											{skipped.map((entry) => (
+												<li key={`${entry.alias}-${entry.reason}`}>
+													{entry.alias} — {skipReasonLabel(entry.reason)}
+												</li>
+											))}
+										</ul>
+									</details>
+								) : null}
+								{scanNote !== null ? <p className="px-1 text-label text-muted-foreground">{scanNote}</p> : null}
+							</div>
 						) : null}
-						{scanNote !== null ? <p className="px-1 text-label text-muted-foreground">{scanNote}</p> : null}
-					</div>
-				) : null}
 
-				<div className="flex flex-col gap-3">
-					<div className="flex flex-col gap-1">
-						<Label htmlFor="remote-host-label">{t("settings.connections.add.label")}</Label>
-						<Input
-							id="remote-host-label"
-							value={form.label}
-							onChange={(event) =>
-								setForm((current) => ({
-									...current,
-									label: event.target.value,
-								}))
-							}
-						/>
-					</div>
-					<div className="grid grid-cols-[minmax(0,1fr)_6rem] gap-2">
-						<div className="flex min-w-0 flex-col gap-1">
-							<Label htmlFor="remote-host-name">{t("settings.connections.add.hostName")}</Label>
-							<Input
-								id="remote-host-name"
-								placeholder="host.com"
-								value={form.hostName}
-								onChange={(event) =>
-									setForm((current) => ({
-										...current,
-										hostName: event.target.value,
-									}))
-								}
-							/>
+						<div className="flex flex-col gap-3">
+							<div className="flex flex-col gap-1">
+								<Label htmlFor="remote-host-label">{t("settings.connections.add.label")}</Label>
+								<Input id="remote-host-label" value={form.label} onChange={(event) => setForm((current) => ({ ...current, label: event.target.value }))} />
+							</div>
+							<div className="grid grid-cols-[minmax(0,1fr)_6rem] gap-2">
+								<div className="flex min-w-0 flex-col gap-1">
+									<Label htmlFor="remote-host-name">{t("settings.connections.add.hostName")}</Label>
+									<Input id="remote-host-name" placeholder="host.com" value={form.hostName} onChange={(event) => setForm((current) => ({ ...current, hostName: event.target.value }))} />
+								</div>
+								<div className="flex min-w-0 flex-col gap-1">
+									<Label htmlFor="remote-host-port">{t("settings.connections.add.port")}</Label>
+									<Input id="remote-host-port" inputMode="numeric" placeholder="22" value={form.port} onChange={(event) => setForm((current) => ({ ...current, port: event.target.value }))} />
+								</div>
+							</div>
+							<div className="flex flex-col gap-1">
+								<Label htmlFor="remote-host-user">{t("settings.connections.add.user")}</Label>
+								<Input id="remote-host-user" autoComplete="off" spellCheck={false} placeholder={t("settings.connections.add.userPlaceholder")} value={form.user} onChange={(event) => setForm((current) => ({ ...current, user: event.target.value }))} />
+							</div>
+							<div className="flex flex-col gap-1">
+								<span className="text-label text-muted-foreground">{t("settings.connections.add.authLabel")}</span>
+								<div role="group" aria-label={t("settings.connections.add.authLabel")} className="flex w-fit overflow-hidden rounded-lg border border-input">
+									<button
+										type="button"
+										aria-pressed={form.auth === "agent"}
+										className={cn("inline-flex min-h-8 items-center px-3 text-body", form.auth === "agent" ? "bg-accent font-medium text-accent-foreground" : "text-muted-foreground hover:bg-bg-hover")}
+										onClick={() => setForm((current) => ({ ...current, auth: "agent", identityFile: "" }))}
+									>
+										{t("settings.connections.add.auth.agent")}
+									</button>
+									<button
+										type="button"
+										aria-pressed={form.auth === "key"}
+										className={cn("inline-flex min-h-8 items-center border-l border-input px-3 text-body", form.auth === "key" ? "bg-accent font-medium text-accent-foreground" : "text-muted-foreground hover:bg-bg-hover")}
+										onClick={() => setForm((current) => ({ ...current, auth: "key" }))}
+									>
+										{t("settings.connections.add.auth.key")}
+									</button>
+									<span title={t("settings.connections.add.auth.passwordUnsupported")} aria-disabled="true" className="inline-flex min-h-8 cursor-not-allowed items-center border-l border-input px-3 text-body text-muted-foreground opacity-50">
+										{t("settings.connections.add.auth.password")}
+									</span>
+								</div>
+							</div>
+							{form.auth === "key" ? (
+								<div className="flex flex-col gap-1">
+									<Label htmlFor="remote-host-identity">{t("settings.connections.add.identityFile")}</Label>
+									<Input id="remote-host-identity" autoComplete="off" spellCheck={false} placeholder={t("settings.connections.add.identityFilePlaceholder")} value={form.identityFile} onChange={(event) => setForm((current) => ({ ...current, identityFile: event.target.value }))} />
+								</div>
+							) : null}
+							<p className="text-label text-muted-foreground">{t("settings.connections.add.credentialsHint")}</p>
 						</div>
-						<div className="flex min-w-0 flex-col gap-1">
-							<Label htmlFor="remote-host-port">{t("settings.connections.add.port")}</Label>
-							<Input
-								id="remote-host-port"
-								inputMode="numeric"
-								placeholder="22"
-								value={form.port}
-								onChange={(event) =>
-									setForm((current) => ({
-										...current,
-										port: event.target.value,
-									}))
-								}
-							/>
-						</div>
-					</div>
-					<div className="flex flex-col gap-1">
-						<Label htmlFor="remote-host-user">{t("settings.connections.add.user")}</Label>
-						<Input id="remote-host-user" autoComplete="off" spellCheck={false} placeholder={t("settings.connections.add.userPlaceholder")} value={form.user} onChange={(event) => setForm((current) => ({ ...current, user: event.target.value }))} />
-					</div>
-					<div className="flex flex-col gap-1">
-						<span className="text-label text-muted-foreground">{t("settings.connections.add.authLabel")}</span>
-						<div role="group" aria-label={t("settings.connections.add.authLabel")} className="flex w-fit overflow-hidden rounded-lg border border-input">
-							<button
-								type="button"
-								aria-pressed={form.auth === "agent"}
-								className={cn("inline-flex min-h-8 items-center px-3 text-body", form.auth === "agent" ? "bg-accent font-medium text-accent-foreground" : "text-muted-foreground hover:bg-bg-hover")}
-								onClick={() =>
-									setForm((current) => ({
-										...current,
-										auth: "agent",
-										identityFile: "",
-									}))
-								}
-							>
-								{t("settings.connections.add.auth.agent")}
-							</button>
-							<button
-								type="button"
-								aria-pressed={form.auth === "key"}
-								className={cn("inline-flex min-h-8 items-center border-l border-input px-3 text-body", form.auth === "key" ? "bg-accent font-medium text-accent-foreground" : "text-muted-foreground hover:bg-bg-hover")}
-								onClick={() => setForm((current) => ({ ...current, auth: "key" }))}
-							>
-								{t("settings.connections.add.auth.key")}
-							</button>
-							<span title={t("settings.connections.add.auth.passwordUnsupported")} aria-disabled="true" className="inline-flex min-h-8 cursor-not-allowed items-center border-l border-input px-3 text-body text-muted-foreground opacity-50">
-								{t("settings.connections.add.auth.password")}
-							</span>
-						</div>
-					</div>
-					{form.auth === "key" ? (
-						<div className="flex flex-col gap-1">
-							<Label htmlFor="remote-host-identity">{t("settings.connections.add.identityFile")}</Label>
-							<Input
-								id="remote-host-identity"
-								autoComplete="off"
-								spellCheck={false}
-								placeholder={t("settings.connections.add.identityFilePlaceholder")}
-								value={form.identityFile}
-								onChange={(event) =>
-									setForm((current) => ({
-										...current,
-										identityFile: event.target.value,
-									}))
-								}
-							/>
-						</div>
-					) : null}
-					<p className="text-label text-muted-foreground">{t("settings.connections.add.credentialsHint")}</p>
-				</div>
 
-				{error !== null ? <p className="text-label text-destructive">{error}</p> : null}
+						{error !== null ? <p className="text-label text-destructive">{error}</p> : null}
+					</>
+				)}
 
 				<DialogFooter className="items-center justify-between gap-2 sm:justify-between">
-					<span className="min-w-0 truncate text-label text-muted-foreground">{importing ? t("settings.connections.add.importHint") : null}</span>
+					<span className="min-w-0 truncate text-label text-muted-foreground">{kind === "ssh" && importing ? t("settings.connections.add.importHint") : null}</span>
 					<div className="flex items-center gap-2">
 						<Button variant="ghost" onClick={props.onClose}>
 							{t("common.cancel")}
 						</Button>
-						<Button disabled={busy} onClick={() => void submit()}>
-							{t("settings.connections.add.submitConnect")}
-						</Button>
+						{kind === "ssh" ? (
+							<Button disabled={busy} onClick={() => void submit()}>
+								{t("settings.connections.add.submitConnect")}
+							</Button>
+						) : null}
 					</div>
 				</DialogFooter>
 			</DialogContent>

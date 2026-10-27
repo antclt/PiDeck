@@ -8,7 +8,7 @@ import test from "node:test";
 const dialog = readFileSync("src/renderer/src/components/app/settings/AddHostDialog.tsx", "utf8");
 
 test("form carries username, auth mode and private key", () => {
-	assert.match(dialog, /const EMPTY_FORM = \{[\s\S]*?port: "22",[\s\S]*?auth: "agent" as AuthMode,[\s\S]*?identityFile: "",\s*\};/);
+	assert.match(dialog, /const EMPTY_FORM = \{[\s\S]*?port: "22",[\s\S]*?auth: "agent" as AuthMode,[\s\S]*?identityFile: ""\s*\};/);
 	assert.match(dialog, /const \[form, setForm\] = useState<FormState>\(EMPTY_FORM\)/);
 	assert.match(dialog, /id="remote-host-user"/);
 	assert.match(dialog, /id="remote-host-identity"/);
@@ -26,13 +26,14 @@ test("SSH config import fills the form instead of submitting silently", () => {
 	assert.match(dialog, /settings\.connections\.add\.skipped/);
 });
 
-test("type switch shows WSL and Docker but never as working tabs", () => {
-	const wsl = dialog.match(/<TerminalSquare[\s\S]{0,200}?kind\.wsl/);
-	const docker = dialog.match(/<Box[\s\S]{0,200}?kind\.docker/);
-	assert.ok(wsl && docker, "both unsupported kinds are visible");
-	// 两者都必须是 disabled：当前后端只有 SSH 主机。
-	assert.equal((dialog.match(/aria-pressed="false"\s+disabled/g) ?? []).length, 2);
-	assert.match(dialog, /kindUnavailable/);
+test("WSL routes to the existing local-environment setting; Docker stays unavailable", () => {
+	// WSL 不是远端主机：入口真实存在，但落地是「设置 → 开发」里的发行版/用户配置。
+	assert.match(dialog, /onClick=\{\(\) => setKind\("wsl"\)\}/);
+	assert.match(dialog, /openSettings\(\{ tab: "dev" \}\)/);
+	assert.match(dialog, /add\.wsl\.hint/);
+	assert.match(dialog, /add\.wsl\.openSettings/);
+	// 只有 Docker 仍然 disabled（没有任何后端）。
+	assert.equal((dialog.match(/aria-pressed="false"\s+disabled/g) ?? []).length, 1);
 });
 
 test("no password field is offered while the transport refuses it", () => {

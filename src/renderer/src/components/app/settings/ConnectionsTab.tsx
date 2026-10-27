@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, Server } from "lucide-react";
 import { desktopApi } from "../../../desktopApi";
 import { t } from "../../../i18n";
 import { cn } from "../../../lib/utils";
@@ -129,7 +129,18 @@ export function ConnectionsTab() {
 			<RepairPanel onRepaired={() => void refresh()} />
 			<SettingsSection title={t("settings.connections.title")} description={t("settings.connections.hint")}>
 				<div className="flex flex-col gap-2">
-					{hosts.length === 0 ? <p className="px-1 py-3 text-body text-muted-foreground">{t("settings.connections.empty")}</p> : null}
+					{hosts.length === 0 ? (
+						<div className="flex flex-col items-start gap-2 rounded-lg border border-dashed border-border-subtle px-4 py-5">
+							<div className="flex items-center gap-2 text-body font-medium text-foreground">
+								<Server className="size-4" aria-hidden="true" />
+								{t("settings.connections.emptyTitle")}
+							</div>
+							<p className="text-label leading-relaxed text-muted-foreground">{t("settings.connections.emptyHint")}</p>
+							<Button size="sm" onClick={() => setAdding(true)}>
+								{t("settings.connections.add")}
+							</Button>
+						</div>
+					) : null}
 					{hosts.map((host) => {
 						const state = states[host.id] ?? (host.disabled ? "offline" : "disconnected");
 						const tone = resolveRemoteHostConnectionTone(state);
@@ -187,10 +198,12 @@ export function ConnectionsTab() {
 						);
 					})}
 					<div className="flex items-center gap-2 pt-1">
-						{/* 添加是主路径入口；未验证/禁用是持久属性，因此统一在此展示。 */}
-						<Button variant="default" size="sm" onClick={() => setAdding(true)}>
-							{t("settings.connections.add")}
-						</Button>
+						{/* 添加是主路径入口；空态已经有主按钮，这里只给已有主机的列表。 */}
+						{hosts.length > 0 ? (
+							<Button variant="default" size="sm" onClick={() => setAdding(true)}>
+								{t("settings.connections.add")}
+							</Button>
+						) : null}
 						<Button variant="ghost" size="sm" onClick={() => void refresh()}>
 							{t("settings.connections.refresh")}
 						</Button>

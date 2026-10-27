@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 30a3793c5d65d5cccafebb35d1e5386f714880bdd4ff2a873910c76e4dafad45（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 963bd663bef5af1c17837a4aa689f51f383f7e3902f9f9cf643f3bb8a68bcd83（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4306,6 +4306,10 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.connections.add.kind.wsl": "WSL",
 	"settings.connections.add.kind.docker": "Docker",
 	"settings.connections.add.kindUnavailable": "暫未接入：當前版本只支援 SSH 主機。",
+	"settings.connections.add.wsl.preview": "本機 WSL 環境",
+	"settings.connections.add.wsl.hint": "WSL 是 PiDeck 的本機環境模式，不是遠端主機。",
+	"settings.connections.add.wsl.steps": "在「設定 → 開發 → WSL」啟用發行版與使用者後，用「新增專案」選擇 WSL 目錄。",
+	"settings.connections.add.wsl.openSettings": "開啟 WSL 設定",
 	"settings.connections.add.import": "從 SSH config 匯入",
 	"settings.connections.add.importSearch": "搜尋別名、地址或使用者",
 	"settings.connections.add.importEmpty": "沒有匹配的主機",
@@ -4399,6 +4403,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.connections.title": "遠端主機",
 	"settings.connections.hint": "通過 SSH 連線遠端主機。主機狀態與 Agent 執行狀態是兩回事：主機連通不代表每個會話都能執行。",
 	"settings.connections.empty": "還沒有已登記的主機。",
+	"settings.connections.emptyTitle": "還沒有 SSH 連線",
+	"settings.connections.emptyHint": "新增主機後即可登記遠端專案並在遠端執行 pi；WSL 專案請在開發設定啟用後用「新增專案」加入。",
 	"settings.connections.refresh": "重新整理",
 	"settings.connections.connect": "連線",
 	"settings.connections.disconnect": "斷開",
