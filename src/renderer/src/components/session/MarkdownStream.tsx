@@ -217,10 +217,12 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 	// 205KB 一次 commit 是秒级冻结。改为按顶层块切成 ≈32K 的组：首组同步出（秒开开头），
 	// 其余组 rIC 每次挂一组（每次 commit 几毫秒），总 DOM 与不分块时完全一致。
 	// 已挂块经 FrozenMarkdownChunk memo（key 钉 index+start），后续挂载零重解析。
+	// light（更新日志等轻插件场景）同样适用：light 只省重插件，marked 解析 + sanitize
+	// + commit 的成本照旧，125KB 的 changelog 全文单次 commit 一样卡（2026-10-27 更新日志）。
 	const settledChunks = useMemo(() => {
-		if (props.light || isStreamingNow || streamPlain || displayText.length <= STREAM_LIGHT_MAX_CHARS) return undefined;
+		if (isStreamingNow || streamPlain || displayText.length <= STREAM_LIGHT_MAX_CHARS) return undefined;
 		return splitMarkdownChunks(displayText, SETTLED_CHUNK_CHARS);
-	}, [props.light, isStreamingNow, streamPlain, displayText]);
+	}, [isStreamingNow, streamPlain, displayText]);
 	const [mountedChunkCount, setMountedChunkCount] = useState(1);
 	useEffect(() => {
 		setMountedChunkCount(1);
