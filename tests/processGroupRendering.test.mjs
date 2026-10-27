@@ -269,3 +269,41 @@ test("组体内部滚轮必须自己跟底，且复用时间线同一个跟底�
 	assert.match(engineSource, /if \(animation === "instant"\) \{/);
 	assert.match(engineSource, /state\.scrollTop = state\.calculatedTargetScrollTop;/);
 });
+
+test("组头实时详情必须在组体收起时才显示，避免与组内的运行中行重复", () => {
+	// 复现的原问题（2026-11 用户截图）：组头在运行中会追加「· 正在执行 <命令>…」，
+	// 展开后组体里那条运行中的工具行本来就是「执行 <同一命令>」，同一行样式一屏出现两次；
+	// 长命令还会铺满整行、把右侧 chevron 挤到边缘。
+	//
+	// 规则：详情只服务「收起时看不到组体」这一种情况 → 必须同时满足 running 且 !open。
+	const detailLine = groupSource.match(/const detail = [^;]+;/)?.[0] ?? "";
+	assert.ok(detailLine.length > 0, "必须能找到组头实时详情的派生语句");
+	assert.match(detailLine, /props\.running/, "详情仍只在运行中才有意义");
+	assert.match(detailLine, /!props\.open/, "展开后必须不再报详情（组体内已有同一行）");
+	// 组头渲染侧只认 detail：不得绕过它直接调 lastToolDetail
+	const header = groupSource.match(/data-process-group-head=""[\s\S]*?<\/button>/)?.[0] ?? "";
+	assert.ok(header.length > 0, "必须能找到组头 button");
+	assert.doesNotMatch(header, /lastToolDetail/, "组头只能消费 detail，不得绕过收起判定直接取实时短语");
+});
+
+test("组头实时详情只取作用对象，且标签不参与收缩", () => {
+	// 复现的原问题（2026-11 用户截图）：「等待你的操作 · 正在ask_question...」「正在运行命令 · 正在执行 <长命令>」
+	// 1) 类别标签已经说了在做什么，详情再拼一个「正在…」是同一句两个「正在」；
+	//    ask_question 这类没有可读参数的，详情就只剩原始工具名，纯噪声。
+	// 2) 标签与详情都带 min-w-0 时两者会一起收缩，长命令下标签被压成省略号，
+	//    读起来像「详情盖住了标签」。改成：标签 shrink-0 永远完整，详情单独吃剩余宽度并尾部截断。
+	const helper = groupSource.match(/function lastToolDetail[\s\S]*?\n\}/)?.[0] ?? "";
+	assert.ok(helper.length > 0, "必须能找到 lastToolDetail");
+	assert.match(helper, /\.object/, "详情取作用对象（命令/路径/查询词）");
+	assert.doesNotMatch(helper, /\.loadingLabel/, "详情不得再拼 loadingVerb，否则与类别标签重复");
+
+	const header = groupSource.match(/data-process-group-head=""[\s\S]*?<\/button>/)?.[0] ?? "";
+	const label = header.match(/<ShimmerText[\s\S]{0,200}?\/>/)?.[0] ?? "";
+	assert.ok(label.length > 0, "组头运行中分支必须有 ShimmerText 标签");
+	assert.match(label, /shrink-0/, "标签不得参与收缩（长命令不得把状态词压成省略号）");
+	const detailSpan = header.match(/<span[^>]*\{detail\}[^>]*>/) ?? header.match(/<span[^>]*font-mono[^>]*>/);
+	const detailClass = detailSpan?.[0] ?? "";
+	assert.ok(detailClass.length > 0, "组头必须有等宽详情 span");
+	assert.match(detailClass, /flex-\[1_1_auto\]/, "详情吃剩余宽度");
+	assert.match(detailClass, /truncate/, "详情单行尾部截断（溢出不得压到标签）");
+});

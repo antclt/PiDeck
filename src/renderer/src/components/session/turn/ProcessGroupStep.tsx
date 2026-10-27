@@ -114,17 +114,25 @@ function extensionLabel(count: number): string {
 }
 
 /**
- * 组头「正在…」的实时详情：只看当前（最后）工具条目的加载态短语。
+ * 组头「正在…」的实时详情：只看当前（最后）工具条目的**作用对象**（命令 / 路径 / 查询词）。
+ *
+ * 不拼 loadingVerb（「正在执行 …」）：组头的类别标签已经说明了在做什么
+ * （「正在运行命令」「等待你的操作」），再拼一个「正在」就是同一句里两个正在，
+ * 而且详情里多五个字反而更容易挤掉标签（2026-11 用户截图反馈）。
+ *
+ * 无对象的工具（如 ask_question 这类只有工具名、参数里没有可读摘要的）直接不给详情：
+ * 「等待你的操作 · 正在ask_question...」只是把原始工具名重复一遍。
+ *
  * 若最新成员已切回思考，旧工具详情必须一起消失。
  */
-function lastToolLoadingLabel(members: readonly TurnProcessEntry[]): string | undefined {
+function lastToolDetail(members: readonly TurnProcessEntry[]): string | undefined {
 	const current = members[members.length - 1];
 	if (current?.kind !== "tool-entry") return undefined;
 	const message = current.group.messages[current.group.messages.length - 1];
 	if (!message) return undefined;
 	const name = getToolName(message);
-	// 带 meta.kind：ACP 的 toolName 是 agent 标题，靠类别得到「正在执行 …」而不是把标题拼两遍。
-	return name ? getToolPhraseFromArgs(name, message.meta?.args, message.meta?.kind).loadingLabel || undefined : undefined;
+	// 带 meta.kind：ACP 的 toolName 是 agent 标题，靠类别取动词/对象，不把标题拼两遍。
+	return name ? getToolPhraseFromArgs(name, message.meta?.args, message.meta?.kind).object || undefined : undefined;
 }
 
 export const ProcessGroupStep = memo(function ProcessGroupStep(props: ProcessGroupStepProps) {
@@ -184,8 +192,12 @@ export const ProcessGroupStep = memo(function ProcessGroupStep(props: ProcessGro
 	const headKind = props.running ? runningKind : topKind;
 	// 纯扩展组（无工具类别）：已结束用 Puzzle 标识来源；运行中退回 Sparkles（无工具活动可报）。
 	const Icon = headKind ? CATEGORY_ICONS[headKind] : !props.running && props.group.extensionCount > 0 ? Puzzle : Sparkles;
-	// 实时详情只对运行中的组有意义（结束后组头是类别摘要，不再报「正在执行…」）。
-	const detail = props.running ? lastToolLoadingLabel(props.group.members) : undefined;
+	// 实时详情只对「运行中且收起」的组有意义：
+	// - 结束后组头是类别摘要，不再报「正在执行…」；
+	// - 展开后组体里就有那条运行中的工具行（命令 + 状态 + 活秒表），组头再报一遍同一命令，
+	//   等于同一行「执行 …」在一屏里出现两次，长命令还会铺满整行挤压右侧 chevron
+	//   （2026-11 用户截图反馈）。收起时组体不可见，组头才是唯一的实时线索。
+	const detail = props.running && !props.open ? lastToolDetail(props.group.members) : undefined;
 	const runningLabel = props.running ? runningGroupLabel(runningKind) : "";
 	const doneLabel = props.running ? "" : doneGroupLabel(props.group);
 
@@ -242,15 +254,18 @@ export const ProcessGroupStep = memo(function ProcessGroupStep(props: ProcessGro
 				</span>
 				{props.running ? (
 					/* 文本段：主标签（text-chat-row）与「·」后的 12px 等宽实时详情必须共基线，
-					   否则详情整体高出约 3px、看起来「没纵向居中」（原理解释见 RowText）。 */
-					<RowText>
-						<ShimmerText text={runningLabel} className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap" />
+					   否则详情整体高出约 3px、看起来「没纵向居中」（原理解释见 RowText）。
+					   伸缩分工固定：标签 shrink-0（状态词永远完整可读，不被长命令压成省略号），
+					   详情 flex-[1_1_auto] + truncate 吃掉剩余宽度并在尾部截断——
+					   两者都不设 min-w-0 收缩竞争，就不会出现「中间两个词挤在一起/互相盖住」。 */
+					<RowText className="flex-[1_1_auto]">
+						<ShimmerText text={runningLabel} className="shrink-0 whitespace-nowrap" />
 						{detail && (
 							<>
 								<span aria-hidden="true" className="shrink-0 text-text-faint">
 									{t("timeline.processGroup.separator")}
 								</span>
-								<span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-chat-detail font-normal text-text-tertiary">{detail}</span>
+								<span className="min-w-0 flex-[1_1_auto] truncate font-mono text-chat-detail font-normal text-text-tertiary">{detail}</span>
 							</>
 						)}
 					</RowText>
