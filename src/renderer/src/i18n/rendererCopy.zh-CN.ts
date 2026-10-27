@@ -5800,6 +5800,11 @@ export const zhCN = {
 	"agent.loading.responding2": "组织回答",
 	"agent.loading.responding3": "撰写回复",
 	"agent.loading.compacting": "正在压缩",
+	"agent.loading.retrying": "正在重试",
+	"agent.loading.retryingCount": "正在重试 {attempt}/{max}",
+	"agent.loading.retryIn": "{seconds} 秒后",
+	"agent.loading.stepCount": "第 {step} 步",
+	"agent.loading.contextUsage": "上下文 {percent}%",
 	"agent.loading.waiting": "正在处理",
 	"agent.loading.aria": "Agent 运行中",
 	// 流式状态条右侧的功能提示（sessionFeatureTips.ts，逐条按代码核实过入口）

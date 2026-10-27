@@ -1,4 +1,4 @@
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { cn } from "../../lib/utils";
 import { ProcessEntryReturnToStart } from "./turn/ProcessEntryReturnToStart";
 import { useProcessEntryStickyHeader } from "./turn/useProcessEntryStickyHeader";
@@ -20,6 +20,8 @@ import { useSmoothStream } from "../../utils/useSmoothStream";
 import { SingleLinePreview } from "./SingleLinePreview";
 import { RowText } from "./RowText";
 import { deriveRespondingKind, type RespondingKind } from "./timeline/respondingKind";
+import type { RetryProgress } from "./timeline/retryProgress";
+import { CONTEXT_PRESSURE_PERCENT, elapsedClockText, retryCountdownSeconds } from "./timeline/statusFacts";
 import { getToolPhrase } from "./timeline/toolPhrase";
 import { isRetryStatusMessage } from "./timelineFailureNotice";
 
@@ -188,11 +190,11 @@ export const ThinkingBlock = memo(
 /**
  * 流式响应指示器（三点脉动动画 + 状态文案），在 agent 运行/流式期间显示。
  *
- * 状态优先级：
- *  1. 上下文压缩中 → “正在压缩”（压缩发生在上一轮结束后）
- *  2. Agent 启动中 → “正在启动 Agent”（琥珀色）
- *  3. 工具执行中 → “正在工具调用”（琥珀色）
- *  4. 有思考文本 / 流式回答中 → “正在回应”
+ * 状态优先级（判定见 deriveRespondingKind）：
+ *  1. 上下文压缩中 → “正在压缩”（琥珀色）
+ *  2. 工具执行中 → “正在工具调用”（琥珀色）
+ *  3. 有思考文本 / 流式回答中 → “正在回应”
+ *  4. 自动重试退避中 → “正在重试 N/M”（琥珀色，序号取自时间线重试卡）
  *  5. 过渡等待 → 单条静态文案
  *
  * 启动状态单独展示，避免用户发消息后 Agent 尚未完成预热时看起来像“没有响应”。
@@ -207,9 +209,11 @@ export const ThinkingBlock = memo(
 const RESPONDING_PHRASES: Record<RespondingKind, string[]> = {
 	compacting: [t("agent.loading.compacting")],
 	starting: [t("agent.loading.starting1"), t("agent.loading.starting2"), t("agent.loading.starting3")],
+	// executing / retrying 的真实文案由运行时数据拼（工具名、重试序号），这里的单条是兜底
 	executing: [t("agent.loading.executing1")],
 	thinking: [t("agent.loading.responding1")],
 	responding: [t("agent.loading.responding3")],
+	retrying: [t("agent.loading.retrying")],
 	waiting: [t("agent.loading.waiting")],
 };
 
@@ -220,13 +224,88 @@ const RESPONDING_PHRASES: Record<RespondingKind, string[]> = {
  * 过长（扩展 / MCP 工具名）时截断——状态条是单行 nowrap，否则会把消息流撑宽。
  */
 function executingPhrases(toolName: string | undefined): string[] {
-	const fallback = t("agent.loading.executing1");
+	const fallback = RESPONDING_PHRASES.executing[0];
 	if (!toolName) return [fallback];
 	const label = getToolPhrase(toolName, {}).loadingLabel || fallback;
 	return [label.length > 48 ? `${label.slice(0, 47)}…` : label];
 }
 
-export function RespondingIndicator(props: { isCompacting?: boolean; isStarting?: boolean; isExecutingTool?: boolean; executingToolName?: string; liveTextStreaming?: boolean; liveThinkingStreaming?: boolean }) {
+/**
+ * 重试态文案：直接读时间线重试卡上的真实序号（“正在重试 2/3”），上限缺失时只说
+ * “正在重试”，不猜数字——状态条只能说后台已经确定的事实。
+ */
+function retryingPhrases(attempt: number | undefined, maxAttempts: number | undefined): string[] {
+	if (attempt === undefined || maxAttempts === undefined) return RESPONDING_PHRASES.retrying;
+	return [t("agent.loading.retryingCount", { attempt, max: maxAttempts })];
+}
+
+/** 状态条每秒自刷新（只用于尾部读秒；叶子组件局部 state，不触及父级）。 */
+function useNowTick(intervalMs = 1000): number {
+	const [now, setNow] = useState(() => Date.now());
+	useEffect(() => {
+		const timer = window.setInterval(() => setNow(Date.now()), intervalMs);
+		return () => window.clearInterval(timer);
+	}, [intervalMs]);
+	return now;
+}
+
+/**
+ * 状态条尾部的事实后缀：重试倒计时 / 本轮步数 / 上下文压力 / 本轮秒表。
+ *
+ * 单独成叶子组件是有意为之：它每秒自刷新，父级（ReasoningText + 功能提示轮播）
+ * 每秒零重渲染——流式正文 50ms 刷新与读秒互不干扰。后缀全是可测量的量，
+ * 不参与状态判定（无数据就不渲染某一段，不补味）。
+ *
+ * `aria-hidden`：ReasoningText 已经用 `role="status" aria-live="polite"` 播报当前
+ * 状态短语；读秒每秒变化，若也进无障碍树就是每秒打断一次屏幕阅读器。
+ */
+function StatusSuffix(props: { kind: RespondingKind; retry?: RetryProgress; toolSteps?: number; contextPercent?: number | null; turnStartedAt?: number }) {
+	const now = useNowTick();
+	const parts: string[] = [];
+
+	// 倒计时到 0 就不再显示：那一下重试已经在飞了，“0 秒后”是句废话。
+	const countdown = retryCountdownSeconds(props.retry?.retryAtMs, now);
+	if (countdown !== undefined && countdown > 0) parts.push(t("agent.loading.retryIn", { seconds: countdown }));
+
+	// 步数只在「工具链 / 等工具下一步 / 空窗」三个场景有意义：模型正在写答案、
+	// 正在预热、正在压缩时，步数是噪音。
+	const steps = props.toolSteps ?? 0;
+	if (steps > 0 && (props.kind === "executing" || props.kind === "thinking" || props.kind === "waiting")) {
+		parts.push(t("agent.loading.stepCount", { step: steps }));
+	}
+
+	const contextPercent = props.contextPercent;
+	if (typeof contextPercent === "number" && Number.isFinite(contextPercent) && contextPercent >= CONTEXT_PRESSURE_PERCENT) {
+		parts.push(t("agent.loading.contextUsage", { percent: Math.round(contextPercent) }));
+	}
+
+	const startedAt = props.turnStartedAt;
+	if (typeof startedAt === "number" && Number.isFinite(startedAt)) parts.push(elapsedClockText(now - startedAt));
+
+	if (parts.length === 0) return null;
+	return (
+		<span className="responding-suffix" aria-hidden="true">
+			{`· ${parts.join(" · ")}`}
+		</span>
+	);
+}
+
+export function RespondingIndicator(props: {
+	isCompacting?: boolean;
+	isStarting?: boolean;
+	isExecutingTool?: boolean;
+	executingToolName?: string;
+	liveTextStreaming?: boolean;
+	liveThinkingStreaming?: boolean;
+	retry?: RetryProgress;
+	/** 本轮工具调用次数（deriveTurnStatusFacts；0/缺失不展示步骤） */
+	toolSteps?: number;
+	/** 上下文占用百分比（runtime.contextPercent；达阈值才展示） */
+	contextPercent?: number | null;
+	/** 本轮起点（最后一条用户消息时间；缺失则不读秒） */
+	turnStartedAt?: number;
+}) {
+	const retry = props.retry;
 	// 判定抽到 deriveRespondingKind：pi / DSH 共用，状态条跟「此刻有没有字/工具」对齐。
 	const kind = deriveRespondingKind({
 		isCompacting: props.isCompacting,
@@ -234,9 +313,18 @@ export function RespondingIndicator(props: { isCompacting?: boolean; isStarting?
 		isExecutingTool: props.isExecutingTool,
 		liveTextStreaming: props.liveTextStreaming,
 		liveThinkingStreaming: props.liveThinkingStreaming,
+		isRetrying: retry !== undefined,
 	});
-	// executing 的短语依赖真实工具名（动态），无法放进静态短语表
-	const phrases = kind === "executing" ? executingPhrases(props.executingToolName) : RESPONDING_PHRASES[kind];
+	// executing / retrying 的短语依赖运行时数据（工具名、重试序号），无法放进静态短语表。
+	// 依赖写成原始值：重试对象每次消息更新都会换引用，直接依赖它会让短语数组每秒重建。
+	const executingToolName = props.executingToolName;
+	const retryAttempt = retry?.attempt;
+	const retryMaxAttempts = retry?.maxAttempts;
+	const phrases = useMemo(() => {
+		if (kind === "executing") return executingPhrases(executingToolName);
+		if (kind === "retrying") return retryingPhrases(retryAttempt, retryMaxAttempts);
+		return RESPONDING_PHRASES[kind];
+	}, [kind, executingToolName, retryAttempt, retryMaxAttempts]);
 
 	return (
 		<div className="responding-indicator" data-kind={kind}>
@@ -251,6 +339,7 @@ export function RespondingIndicator(props: { isCompacting?: boolean; isStarting?
 				indicator={<Loader variant="dot-matrix" size={18} speed={1.1} label={t("agent.loading.aria")} />}
 				// 字号用官方默认（text-sm）：实测语义 token 缩放的观感不如官方字阶，保持官方原样
 			/>
+			<StatusSuffix kind={kind} retry={retry} toolSteps={props.toolSteps} contextPercent={props.contextPercent} turnStartedAt={props.turnStartedAt} />
 			{/* 功能提示轮播：等待期是用户的注意力空档，用它曝光「没有可见入口」的能力
 			    （命令面板、划选引用、排队发送…）。内容与收录规则见 RespondingTips.tsx / sessionFeatureTips.ts。 */}
 			<RespondingTips />

@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 88d7ea0ee8981fedcec7a1a8d5e8cc1affc57f933871dadcc1362f9ff99035ee（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 38734bd8487aed0220d8c5393f956fa64c4a7d3b7fd38a68c0838813054de65f（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5807,6 +5807,11 @@ export const zhTW: Record<TranslationKey, string> = {
 	"agent.loading.responding2": "組織回答",
 	"agent.loading.responding3": "撰寫回復",
 	"agent.loading.compacting": "正在壓縮",
+	"agent.loading.retrying": "正在重試",
+	"agent.loading.retryingCount": "正在重試 {attempt}/{max}",
+	"agent.loading.retryIn": "{seconds} 秒後",
+	"agent.loading.stepCount": "第 {step} 步",
+	"agent.loading.contextUsage": "上下文 {percent}%",
 	"agent.loading.waiting": "正在處理",
 	"agent.loading.aria": "Agent 執行中",
 	// 流式状态条右侧的功能提示（sessionFeatureTips.ts，逐条按代码核实过入口）

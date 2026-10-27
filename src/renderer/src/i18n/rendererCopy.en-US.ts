@@ -5817,6 +5817,11 @@ export const enUS: Record<TranslationKey, string> = {
 	"agent.loading.responding2": "Drafting",
 	"agent.loading.responding3": "Writing reply",
 	"agent.loading.compacting": "Compacting context",
+	"agent.loading.retrying": "Retrying",
+	"agent.loading.retryingCount": "Retrying {attempt}/{max}",
+	"agent.loading.retryIn": "in {seconds}s",
+	"agent.loading.stepCount": "step {step}",
+	"agent.loading.contextUsage": "context {percent}%",
 	"agent.loading.waiting": "Processing",
 	"agent.loading.aria": "Agent is working",
 	// Feature tips rotating next to the streaming status line (sessionFeatureTips.ts, entries verified in code)
