@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: ab78ec4602cb5b96512ca65a357286c4129640a80b46ebcbb87f4b0bcd92f1fd（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: a4077becc7c6e14f08450898747336c26ba642bceb791758d76476854302c1fd（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4295,6 +4295,11 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.connections.add.submit": "儲存",
 	"settings.connections.add.required": "顯示名稱與主機名不能為空。",
 	"settings.connections.add.badPort": "埠必須是 1-65535 之間的整數。",
+	"settings.connections.add.user": "使用者名稱（可選）",
+	"settings.connections.add.userPlaceholder": "留空使用 SSH 配置或當前使用者",
+	"settings.connections.add.identityFile": "私鑰檔案（可選）",
+	"settings.connections.add.identityFilePlaceholder": "~/.ssh/id_ed25519",
+	"settings.connections.add.credentialsHint": "私鑰留空時使用 ssh-agent 或預設金鑰；密碼認證暫不支援。",
 	"settings.connections.add.failed": "新增失敗：{code}",
 	"settings.connections.repair.title": "主機庫需要修復",
 	"settings.connections.repair.hint": "檢測到跨檔案不一致，寫入已被暫停。下面列出原因與可執行的動作。",
@@ -6916,6 +6921,12 @@ export const zhTW: Record<TranslationKey, string> = {
 	"sidebar.remoteProject.needsAttention": "需處理",
 	"sidebar.remoteProject.needsAttentionHint": "這個遠端專案的目錄需要複核（開啟專案檢視詳情）。",
 	"sidebar.remoteProject.needsAttentionHintCode": "這個遠端專案需要處理：{code}",
+	"sidebar.remoteProject.unknownHost": "未知主機",
+	"sidebar.remoteProject.connectionHint": "遠端主機：{host} · {state}",
+	"sidebar.remoteProject.connection.online": "已連線",
+	"sidebar.remoteProject.connection.connecting": "連線中",
+	"sidebar.remoteProject.connection.offline": "未連線",
+	"sidebar.remoteProject.connection.error": "連線異常",
 	"ctx.detail.tps": "生成速度",
 	"config.extensionWhitelistOff": "停用 -e 引數",
 	"config.extensionWhitelistOn": "-e 引數已停用",

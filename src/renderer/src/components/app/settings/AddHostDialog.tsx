@@ -39,7 +39,7 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 	const [selected, setSelected] = useState<string | null>(null);
 	const [scanNote, setScanNote] = useState<string | null>(null);
 	const [mode, setMode] = useState<"scan" | "manual">("scan");
-	const [manual, setManual] = useState({ label: "", hostName: "", port: "" });
+	const [manual, setManual] = useState({ label: "", hostName: "", port: "", user: "", identityFile: "" });
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
@@ -99,7 +99,11 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 			setError(t("settings.connections.add.badPort"));
 			return;
 		}
-		void submit({ label, hostName, port });
+		// 用户名与私钥都可留空：留空时由 OpenSSH 使用 ssh_config / 当前用户 / 默认密钥。
+		// 私钥路径不做渲染层展开，`~` 由主进程规范化（store 只接受本机绝对路径）。
+		const user = manual.user.trim();
+		const identityFile = manual.identityFile.trim();
+		void submit({ label, hostName, port, ...(user.length > 0 ? { user } : {}), ...(identityFile.length > 0 ? { identityFile } : {}) });
 	}, [manual, submit]);
 
 	return (
@@ -152,14 +156,28 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 							<Label htmlFor="remote-host-label">{t("settings.connections.add.label")}</Label>
 							<Input id="remote-host-label" value={manual.label} onChange={(event) => setManual((current) => ({ ...current, label: event.target.value }))} />
 						</div>
-						<div className="flex flex-col gap-1">
-							<Label htmlFor="remote-host-name">{t("settings.connections.add.hostName")}</Label>
-							<Input id="remote-host-name" placeholder="host.com" value={manual.hostName} onChange={(event) => setManual((current) => ({ ...current, hostName: event.target.value }))} />
+						{/* 主机与端口同排：端口是短字段，独占一行只会把表单拉长。 */}
+						<div className="grid grid-cols-[minmax(0,1fr)_6rem] gap-2">
+							<div className="flex min-w-0 flex-col gap-1">
+								<Label htmlFor="remote-host-name">{t("settings.connections.add.hostName")}</Label>
+								<Input id="remote-host-name" placeholder="host.com" value={manual.hostName} onChange={(event) => setManual((current) => ({ ...current, hostName: event.target.value }))} />
+							</div>
+							<div className="flex min-w-0 flex-col gap-1">
+								<Label htmlFor="remote-host-port">{t("settings.connections.add.port")}</Label>
+								<Input id="remote-host-port" inputMode="numeric" placeholder="22" value={manual.port} onChange={(event) => setManual((current) => ({ ...current, port: event.target.value }))} />
+							</div>
 						</div>
-						<div className="flex flex-col gap-1">
-							<Label htmlFor="remote-host-port">{t("settings.connections.add.port")}</Label>
-							<Input id="remote-host-port" inputMode="numeric" placeholder="22" value={manual.port} onChange={(event) => setManual((current) => ({ ...current, port: event.target.value }))} />
+						<div className="grid gap-2 sm:grid-cols-2">
+							<div className="flex min-w-0 flex-col gap-1">
+								<Label htmlFor="remote-host-user">{t("settings.connections.add.user")}</Label>
+								<Input id="remote-host-user" autoComplete="off" spellCheck={false} placeholder={t("settings.connections.add.userPlaceholder")} value={manual.user} onChange={(event) => setManual((current) => ({ ...current, user: event.target.value }))} />
+							</div>
+							<div className="flex min-w-0 flex-col gap-1">
+								<Label htmlFor="remote-host-identity">{t("settings.connections.add.identityFile")}</Label>
+								<Input id="remote-host-identity" autoComplete="off" spellCheck={false} placeholder={t("settings.connections.add.identityFilePlaceholder")} value={manual.identityFile} onChange={(event) => setManual((current) => ({ ...current, identityFile: event.target.value }))} />
+							</div>
 						</div>
+						<p className="text-label text-muted-foreground">{t("settings.connections.add.credentialsHint")}</p>
 					</div>
 				)}
 

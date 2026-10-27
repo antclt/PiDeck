@@ -11,6 +11,9 @@ import { desktopApi } from "../../desktopApi";
 import { collectRegisteredRemoteSessionIds } from "../session/remoteSessionListState";
 import { AddProjectMenu } from "./AddProjectMenu";
 import { RemoteProjectStatusTag } from "./RemoteProjectStatusTag";
+import { RemoteProjectFolderIcon } from "./RemoteProjectFolderIcon";
+import { RemoteProjectHostTag } from "./RemoteProjectHostTag";
+import { useRemoteHostIdentityIndex } from "./useRemoteHostIdentityIndex";
 import { RemoteSessionsSection } from "./RemoteSessionsSection";
 import { useRemoteProjectRootStatuses } from "./useRemoteProjectRootStatuses";
 import { ActiveSessionsTree } from "./ActiveSessionsTree";
@@ -93,6 +96,8 @@ export function ProjectTree(props: {
 	// 远端项目的 root 复核状态：项目级只读查询，随清单刷新的整批结果按代次落地（不在这里渲染）。
 	// 侧栏只读 atom（RemoteProjectStatusTag），所以查询集中一处、不随行重复发。
 	useRemoteProjectRootStatuses(desktopApi, props.controller.catalog.projects);
+	// 主机名与连接状态：目录一次只读拉取 + main 推送，行内只读 atom（见 useRemoteHostIdentityIndex）。
+	useRemoteHostIdentityIndex(desktopApi, props.controller.catalog.projects);
 	const rootProjects = props.controller.catalog.projects.filter((project) => !project.worktreeParentId && matchesProject(project, props.controller.search.trim(), props.controller));
 	// 项目拖拽不再要求静止长按：原生 HTML5 拖拽自带 ~4px 启动阈值，天然区分点按与拖动
 	//（2027-03 用户反馈「拖动行为不好用」：旧逻辑要先静止长按 350ms 才变 draggable，
@@ -189,9 +194,13 @@ export function ProjectTree(props: {
 							props.actions.projects.select(project.id);
 						}}
 					>
-						<span className="grid size-5 shrink-0 place-items-center text-muted-foreground" aria-hidden="true">
-							{collapsed ? <Folder size={14} /> : <FolderOpen size={14} />}
-						</span>
+						{isRemoteProject(project) ? (
+							<RemoteProjectFolderIcon collapsed={collapsed} />
+						) : (
+							<span className="grid size-5 shrink-0 place-items-center text-muted-foreground" aria-hidden="true">
+								{collapsed ? <Folder size={14} /> : <FolderOpen size={14} />}
+							</span>
+						)}
 						<div className={cn("conversation-body min-w-0 flex-1 pr-7 transition-[padding-right] group-hover:pr-[88px] group-focus-within:pr-[88px]", menuOpen && "pr-[88px]")}>
 							{/* 筛选 / ⋯ 共 2 个按钮 hover 浮层；「+ 新建会话」拆到下面常显。
                   twMerge 语义见 tests/sidebarNarrowRowActions.test.mjs 契约测试。 */}
@@ -215,6 +224,8 @@ export function ProjectTree(props: {
 								)}
 								{/* 远端项目 root 复核需要用户处理时给「需处理」提示：项目级、不影响同主机其他项目 */}
 								{isRemoteProject(project) ? <RemoteProjectStatusTag projectId={project.id} /> : null}
+								{/* 服务器名 + 主机连接状态点：与「需处理」并列在行尾，不抢项目名的截断空间。 */}
+								{isRemoteProject(project) ? <RemoteProjectHostTag hostId={project.locator.hostId} /> : null}
 							</div>
 							{/* 项目名称只承担导航信息；详细会话状态由下方的 Agent/历史会话行承担。 */}
 						</div>
