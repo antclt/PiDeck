@@ -123,7 +123,8 @@ function lastToolLoadingLabel(members: readonly TurnProcessEntry[]): string | un
 	const message = current.group.messages[current.group.messages.length - 1];
 	if (!message) return undefined;
 	const name = getToolName(message);
-	return name ? getToolPhraseFromArgs(name, message.meta?.args).loadingLabel || undefined : undefined;
+	// 带 meta.kind：ACP 的 toolName 是 agent 标题，靠类别得到「正在执行 …」而不是把标题拼两遍。
+	return name ? getToolPhraseFromArgs(name, message.meta?.args, message.meta?.kind).loadingLabel || undefined : undefined;
 }
 
 export const ProcessGroupStep = memo(function ProcessGroupStep(props: ProcessGroupStepProps) {
