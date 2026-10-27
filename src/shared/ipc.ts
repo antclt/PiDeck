@@ -10,6 +10,8 @@ export const ipcChannels = {
 	remoteHostScanConfig: "remote:scan-config",
 	/** 添加主机：建立 draft、完成首次 host key 信任（TOFU）并落盘 pin，返回 verified。 */
 	remoteHostAdd: "remote:add",
+	/** 移除一台主机：先停连接，再 disable + retire（引用检查由主进程执行）。 */
+	remoteHostRemove: "remote:remove",
 	/** 主进程 → 渲染层：主机连接状态变化推送（connect 返回之后的迁移也在此到达）。 */
 	remoteHostStateChanged: "remote:state-changed",
 	/** 只读：诊断 needs-repair 的原因与合法动作（不写任何东西）。 */

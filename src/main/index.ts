@@ -3281,6 +3281,8 @@ function registerIpc() {
 		// 主机退役时同时清掉它的 trust 决策（与 pin 清理同一位置、同一重试语义）。
 		list: () => openRemoteHostCatalogView(app.getPath("userData"), { onHostRetired: (hostId) => remoteProjectTrustService?.forgetHost(hostId) ?? Promise.resolve() }),
 		service: remoteHostServiceIfEnabled,
+		// 移除连接与列表共用同一组退役清理：pin 删除后 trust 决策也要跟着清。
+		onHostRetired: (hostId) => remoteProjectTrustService?.forgetHost(hostId) ?? Promise.resolve(),
 		// The add-host flow holds a pin store across two IPC calls (offer, then the user's answer), so its
 		// lifetime is the process, not a call. Registering disposal here keeps the broker's timers from
 		// outliving the app.

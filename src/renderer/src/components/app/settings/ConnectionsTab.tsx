@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LoaderCircle, Server } from "lucide-react";
+import { LoaderCircle, Server, Trash2 } from "lucide-react";
 import { desktopApi } from "../../../desktopApi";
 import { t } from "../../../i18n";
 import { cn } from "../../../lib/utils";
 import { REMOTE_HOST_TONE_DOT_CLASS, resolveRemoteHostConnectionTone } from "../../../utils/remoteHostIdentity";
 import { Button } from "../../ui-shadcn/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../ui-shadcn/dialog";
 import { AddHostDialog } from "./AddHostDialog";
 import { RemoteConnectionProgressDialog } from "./RemoteConnectionProgressDialog";
 import { RepairPanel } from "./RepairPanel";
@@ -36,6 +37,10 @@ export function ConnectionsTab() {
 	const [progress, setProgress] = useState<{ hostId: string; label: string; errorCode: string | null } | null>(null);
 	/** 每台主机最近一次 connect 的稳定失败码；成功后清除，用于行内重试。 */
 	const [failures, setFailures] = useState<Record<string, string>>({});
+	/** 待确认的移除目标：删除 profile/pin 属于破坏性动作，必须先确认。 */
+	const [removing, setRemoving] = useState<RemoteHostListItem | null>(null);
+	const [removingBusy, setRemovingBusy] = useState(false);
+	const [removeError, setRemoveError] = useState<string | null>(null);
 	/** 取消/重试会换代：旧 connect 的迟到结果不得回写新一次的状态。 */
 	const attemptRef = useRef(0);
 
@@ -123,6 +128,49 @@ export function ConnectionsTab() {
 		}
 	}, []);
 
+	/** 移除失败一律翻译成可行动的说法；稳定码只作兜底。 */
+	const removeErrorText = useCallback((code: string): string => {
+		if (code === "REMOTE_HOST_REFERENCED") return t("settings.connections.remove.referenced");
+		if (code === "REMOTE_HOST_STORE_NEEDS_REPAIR") return t("settings.connections.remove.needsRepair");
+		if (code === "REMOTE_HOST_STORE_UNAVAILABLE") return t("settings.connections.remove.unavailable");
+		return t("settings.connections.remove.failed", { code });
+	}, []);
+
+	const confirmRemove = useCallback(async () => {
+		if (removing === null) return;
+		const hostId = removing.id;
+		setRemovingBusy(true);
+		setRemoveError(null);
+		try {
+			const result = await desktopApi.remoteHosts.remove(hostId);
+			if (!result.ok) {
+				setRemoveError(removeErrorText(result.code));
+				return;
+			}
+			// 退役成功后清掉这台主机的本地视图状态，避免幽灵行/幽灵诊断留到下次刷新。
+			setRemoving(null);
+			setStates((current) => {
+				const next = { ...current };
+				delete next[hostId];
+				return next;
+			});
+			setDiagnostics((current) => {
+				const next = { ...current };
+				delete next[hostId];
+				return next;
+			});
+			setFailures((current) => {
+				const next = { ...current };
+				delete next[hostId];
+				return next;
+			});
+			setProgress((current) => (current?.hostId === hostId ? null : current));
+			await refresh();
+		} finally {
+			setRemovingBusy(false);
+		}
+	}, [refresh, removeErrorText, removing]);
+
 	return (
 		<div className="flex min-w-0 flex-col gap-3">
 			{/* 放在列表之前：store 进入 needs-repair 时列表读不出来，恢复入口必须先可见。 */}
@@ -170,6 +218,20 @@ export function ConnectionsTab() {
 									<div className="ml-auto flex items-center gap-2">
 										{host.disabled ? <span className="text-label text-muted-foreground">{t("settings.connections.disabledTag")}</span> : null}
 										{host.verified ? null : <span className="text-label text-muted-foreground">{t("settings.connections.unverifiedTag")}</span>}
+										<Button
+											type="button"
+											variant="ghost"
+											size="icon-sm"
+											className="shrink-0 text-muted-foreground hover:text-destructive"
+											title={t("settings.connections.remove")}
+											aria-label={t("settings.connections.remove")}
+											onClick={() => {
+												setRemoveError(null);
+												setRemoving(host);
+											}}
+										>
+											<Trash2 className="size-3.5" aria-hidden="true" />
+										</Button>
 									</div>
 								</div>
 								{/* 行内失败 + 重试：关闭进度框后仍能直接知道上次卡在哪，不用再开一次对话框。 */}
@@ -226,6 +288,30 @@ export function ConnectionsTab() {
 				/>
 			) : null}
 			{/* 连接进度：添加/连接后立即出现；阶段来自诊断历史，状态来自 main 推送。 */}
+			{/* 移除确认：删掉的是本机 profile 与 host key pin，远端数据不动。 */}
+			<Dialog
+				open={removing !== null}
+				onOpenChange={(open) => {
+					if (!open && !removingBusy) setRemoving(null);
+				}}
+			>
+				<DialogContent className="max-w-md">
+					<DialogHeader>
+						<DialogTitle>{t("settings.connections.remove.title", { host: removing?.label ?? "" })}</DialogTitle>
+						<DialogDescription>{t("settings.connections.remove.body")}</DialogDescription>
+					</DialogHeader>
+					<p className="text-label text-muted-foreground">{t("settings.connections.remove.hint")}</p>
+					{removeError !== null ? <p className="text-label text-destructive">{removeError}</p> : null}
+					<DialogFooter>
+						<Button variant="ghost" disabled={removingBusy} onClick={() => setRemoving(null)}>
+							{t("common.cancel")}
+						</Button>
+						<Button variant="destructive" disabled={removingBusy} onClick={() => void confirmRemove()}>
+							{t("settings.connections.remove.confirm")}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 			{progress !== null ? (
 				<RemoteConnectionProgressDialog
 					open

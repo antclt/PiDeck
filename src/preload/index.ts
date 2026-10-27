@@ -374,6 +374,8 @@ const api = {
 		scanConfig: () => ipcRenderer.invoke(ipcChannels.remoteHostScanConfig) as Promise<import("../shared/types/remoteHost").RemoteHostConfigScanResult>,
 		/** 添加主机：建立 draft、完成首次 host key 信任（TOFU）并落盘 pin；成功即 verified，可直接连接。 */
 		add: (input: import("../shared/types/remoteHost").RemoteHostAddInput) => ipcRenderer.invoke(ipcChannels.remoteHostAdd, input) as Promise<import("../shared/types/remoteHost").RemoteHostAddResult>,
+		/** 移除连接：主进程先断开再退役 profile/pin；仍被项目引用时拒绝。 */
+		remove: (hostId: string) => ipcRenderer.invoke(ipcChannels.remoteHostRemove, hostId) as Promise<import("../shared/types/remoteHost").RemoteHostRemoveResult>,
 		/** 订阅连接状态推送；返回 unsubscribe，组件卸载必须退订。 */
 		onStateChange: (callback: (change: import("../shared/types/remoteHost").RemoteHostStateChange) => void) => subscribe(ipcChannels.remoteHostStateChanged, callback),
 		/** 只读：诊断 needs-repair 的原因与合法动作。 */

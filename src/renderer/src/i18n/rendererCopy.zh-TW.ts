@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 85a78df24b4b5891eb623fe34ed57e5cbb37ea8ba12d27382a74d3abd6c3608b（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 2560f598bf5df373a841ca1208b6774f685dd3a9ccf4b5ef52afaf3cfd6bb811（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4424,6 +4424,15 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.remoteTrust.actionFailed": "操作失敗：{code}",
 	"settings.connections.connectFailed": "連線失敗：{code}",
 	"settings.connections.lastFailure": "上次連線失敗：{code}",
+	"settings.connections.remove": "移除連線",
+	"settings.connections.remove.title": "移除「{host}」？",
+	"settings.connections.remove.body": "將從本機移除這臺連線與已儲存的主機金鑰指紋；遠端檔案與程序不受影響。",
+	"settings.connections.remove.hint": "仍有遠端專案或會話使用該主機時會被拒絕；請先移除這些引用。",
+	"settings.connections.remove.confirm": "移除",
+	"settings.connections.remove.referenced": "這臺主機仍被遠端專案或會話引用，請先移除它們。",
+	"settings.connections.remove.needsRepair": "主機檔案需要修復，先在修復面板處理後重試。",
+	"settings.connections.remove.unavailable": "主機檔案當前不可讀，無法移除。",
+	"settings.connections.remove.failed": "移除失敗：{code}",
 	"settings.connections.disconnectFailed": "斷開失敗：{code}",
 	"settings.connections.disabledTag": "已停用",
 	"settings.connections.unverifiedTag": "未驗證",

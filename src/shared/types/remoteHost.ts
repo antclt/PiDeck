@@ -46,6 +46,12 @@ export type RemoteHostOperationFailure = { ok: false; hostId: string; code: stri
 
 export type RemoteHostConnectResult = { ok: true; hostId: string; state: RemoteHostConnectionState } | RemoteHostOperationFailure;
 
+/**
+ * remove 的结果：成功即本机 profile/pin 已退役（远端数据不受影响）。
+ * 仍被项目/会话引用时返回 REMOTE_HOST_REFERENCED，由调用方先移除引用。
+ */
+export type RemoteHostRemoveResult = { ok: true; hostId: string } | RemoteHostOperationFailure;
+
 /** disconnect 的结果：成功或稳定码（主机 id 非法、功能未启用等）。 */
 export type RemoteHostDisconnectResult = { ok: true; hostId: string } | RemoteHostOperationFailure;
 

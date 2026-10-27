@@ -18,9 +18,10 @@ import type {
 	RemoteHostRepairFinding,
 	RemoteHostRepairRequest,
 	RemoteHostRepairRunResult,
+	RemoteHostRemoveResult,
 	RemoteHostRepairSummary,
 } from "../../shared/types/remoteHost";
-import type { RemoteHostCatalogView } from "../remote/RemoteHostCatalogView";
+import { openRemoteHostStoreForRetire, type RemoteHostCatalogView } from "../remote/RemoteHostCatalogView";
 import { RemoteHostRepair, type HostRepairAction } from "../remote/RemoteHostRepair";
 import { PendingConfirmationBroker } from "../security/PendingConfirmationBroker";
 import type { RemoteHostConnectionService } from "../remote/RemoteHostConnectionService";
@@ -152,7 +153,7 @@ function readAddInput(value: unknown): AddInputRead {
  *
  * `service` is optional so the read-only catalog stays usable without a connection service.
  */
-export function registerRemoteHostIpc(input: { enabled: boolean; list: () => Promise<RemoteHostCatalogView>; service?: () => RemoteHostConnectionService | undefined | Promise<RemoteHostConnectionService | undefined>; userDataDir: string; registerCleanup?: (cleanup: () => Promise<void>) => void }): void {
+export function registerRemoteHostIpc(input: { enabled: boolean; list: () => Promise<RemoteHostCatalogView>; service?: () => RemoteHostConnectionService | undefined | Promise<RemoteHostConnectionService | undefined>; userDataDir: string; registerCleanup?: (cleanup: () => Promise<void>) => void; onHostRetired?: (hostId: string) => Promise<void> }): void {
 	const guard = <T>(fallback: () => T): T | undefined => (input.enabled ? undefined : fallback());
 
 	/**
@@ -207,6 +208,43 @@ export function registerRemoteHostIpc(input: { enabled: boolean; list: () => Pro
 			return { code: codeOf(error, "REMOTE_CONNECTION_SERVICE_UNAVAILABLE") };
 		}
 	};
+
+	/**
+	 * 移除连接：先中止/断开本次连接，再走 store 的 disable → retire。
+	 *
+	 * - retire 自带引用扫描：仍有项目/会话指向该主机时返回 REMOTE_HOST_REFERENCED，绝不硬删；
+	 * - 远端数据一律不动（这里只退役本机 profile 与 host key pin）；
+	 * - 关闭连接失败不拦移除：profile 退役后它也无法再被寻址。
+	 */
+	ipcMain.handle(ipcChannels.remoteHostRemove, async (_event, rawHostId: unknown): Promise<RemoteHostRemoveResult> => {
+		const hostId = typeof rawHostId === "string" ? rawHostId : "";
+		if (!input.enabled) return { ok: false, hostId, code: "REMOTE_FEATURE_DISABLED" };
+		if (!HOST_ID.test(hostId)) return { ok: false, hostId, code: "REMOTE_HOST_ID_INVALID" };
+		const resolved = await resolveService();
+		if ("service" in resolved) await resolved.service.disconnect(hostId, "shutdown").catch(() => undefined);
+		let opened: Awaited<ReturnType<typeof openRemoteHostStoreForRetire>>;
+		try {
+			opened = await openRemoteHostStoreForRetire(input.userDataDir, input.onHostRetired === undefined ? {} : { onHostRetired: input.onHostRetired });
+		} catch {
+			return { ok: false, hostId, code: "REMOTE_HOST_STORE_UNAVAILABLE" };
+		}
+		try {
+			let snapshot = opened.store.getSnapshot();
+			if (snapshot.status !== "ready") return { ok: false, hostId, code: "REMOTE_HOST_STORE_NEEDS_REPAIR" };
+			const profile = snapshot.profiles.find((item) => item.id === hostId);
+			if (profile === undefined) return { ok: false, hostId, code: "REMOTE_HOST_NOT_FOUND" };
+			if (profile.disabledAt === undefined) {
+				await opened.store.disable(hostId, snapshot.revision);
+				snapshot = opened.store.getSnapshot();
+			}
+			await opened.store.retire(hostId, snapshot.revision);
+			return { ok: true, hostId };
+		} catch (error) {
+			return { ok: false, hostId, code: codeOf(error, "REMOTE_HOST_REMOVE_FAILED") };
+		} finally {
+			opened.dispose();
+		}
+	});
 
 	ipcMain.handle(ipcChannels.remoteHostsList, async (): Promise<RemoteHostListResult> => {
 		if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
