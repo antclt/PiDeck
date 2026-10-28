@@ -10,6 +10,7 @@ import {
 	REMOTE_HELPER_MAX_HOST_ID_LENGTH,
 	REMOTE_HELPER_MAX_METHOD_LENGTH,
 } from "./RemoteHelperContract";
+import { remoteCallMeter, type RemoteCallMeterPort } from "./RemoteCallMeter";
 
 /**
  * Main-side client for helper protocol v1 (plan §7.1). It owns framing, host/generation fencing, the
@@ -94,6 +95,11 @@ export type RemoteControlClientOptions = {
 	maxFrameBytes?: number;
 	defaultTimeoutMs?: number;
 	scheduler?: RemoteControlScheduler;
+	/**
+	 * Optional remote-call accounting (W0 baseline). Defaults to the process-wide meter so every helper
+	 * round trip is counted without touching call sites; tests inject a fake to keep it hermetic.
+	 */
+	meter?: RemoteCallMeterPort;
 };
 
 export type RemoteControlClient = {
@@ -259,6 +265,9 @@ export function createRemoteControlClient(options: RemoteControlClientOptions): 
 	const nowOption = options?.now;
 	const now = typeof nowOption === "function" ? nowOption : () => Date.now();
 	const scheduler = options?.scheduler ?? DEFAULT_SCHEDULER;
+	const providedMeter = options?.meter;
+	if (providedMeter !== undefined && typeof providedMeter.record !== "function") throw invalidOptions();
+	const meter: RemoteCallMeterPort = providedMeter ?? remoteCallMeter;
 	const maxFrameBytes = readFrameLimit(options?.maxFrameBytes);
 	const defaultTimeoutMs = readTimeoutMs(options?.defaultTimeoutMs, REMOTE_HELPER_DEFAULT_REQUEST_TIMEOUT_MS);
 
@@ -522,6 +531,8 @@ export function createRemoteControlClient(options: RemoteControlClientOptions): 
 			diagnose("REMOTE_REQUEST_LIMIT");
 			throw new RemoteControlError("REMOTE_REQUEST_LIMIT", true);
 		}
+		// W0 基线：只统计将要发出帧的请求。连接已关闭 / 本地限流在上面就返回了，不构成真实往返。
+		meter.record(hostId, method);
 		const id = mintId();
 		const timeoutMs = readTimeoutMs(options?.timeoutMs, defaultTimeoutMs);
 		const frame: RemoteHelperRequestFrame = {
