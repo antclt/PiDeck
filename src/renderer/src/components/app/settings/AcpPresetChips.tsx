@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Download, ExternalLink, Loader2, Plus, Trash2 } from "lucide-react";
 import { desktopApi } from "../../../desktopApi";
 import { t } from "../../../i18n";
+import { openInSystemBrowser } from "../../../utils/openExternal";
 import { ACP_TOOL_PRESETS, type AcpToolPreset } from "../../../../../shared/acpToolPresets";
 import type { AcpToolStatus } from "../../../../../shared/types/acp";
 import { Badge } from "../../ui-shadcn/badge";
@@ -51,9 +52,12 @@ function PresetChip(props: { preset: AcpToolPreset; status?: AcpToolStatus; runn
 					</Button>
 				) : null}
 				{preset.install?.kind === "manual" && status?.state === "missing" ? <span className="text-muted-foreground text-micro">{t("acp.manualInstallHint")}</span> : null}
-				<a href={preset.homepage} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground" title={t("acp.presetHome")}>
+				{/* 官方文档/安装页强制走系统浏览器：那是照着敲安装命令、下载安装包的页面，
+				    塞进内置浏览器既没有下载能力也没有终端，用户还得再复制一遍 URL 出去。
+				    与更新页的发行说明同一口径（openExternal(url, forceSystem)），不受「链接打开方式」设置影响。 */}
+				<button type="button" className="text-muted-foreground hover:text-foreground" title={t("acp.presetHome")} onClick={() => void openInSystemBrowser(preset.homepage)}>
 					<ExternalLink size={11} aria-hidden="true" />
-				</a>
+				</button>
 			</div>
 		</div>
 	);

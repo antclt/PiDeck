@@ -56,4 +56,9 @@ test("UI:AcpPresetChips 引用共享预设表(加预设无需改 UI)", () => {
 	for (const preset of ACP_TOOL_PRESETS) {
 		assert.match(source, new RegExp(`["']?${preset.id}["']?\\s*:\\s*"acp\\.presetDesc\\.${preset.id}"`), `PRESET_DESC_KEYS 缺 ${preset.id}`);
 	}
+	// 官网/文档链接必须走系统浏览器：内置浏览器没有终端与下载能力，安装命令只能在那里照着敲。
+	// `<a target="_blank">` 会被主窗的 windowOpenHandler 统一交给「链接打开方式」设置，
+	// 用户设成 internal 就被塞回 BrowserPanel（本次就是这个反馈）。
+	assert.match(source, /openInSystemBrowser\(preset\.homepage\)/, "预设官网链接应用 openInSystemBrowser 强制系统浏览器");
+	assert.doesNotMatch(source, /href=\{preset\.homepage\}/, "预设官网链接不应再用 href（会被内置浏览器接管）");
 });
