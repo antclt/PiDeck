@@ -391,8 +391,11 @@ export function AppShell(props: AppShellProps) {
 			ref={shellRef}
 			className={[
 				"wechat-shell",
+				// 简洁模式不再单独占顶部导航行，会话 Tab 栏就是窗口标题行本身，
+				// 右侧必须给 Windows 窗口控件让位（foundation.css 的 :not(.drawer-open)
+				// 规则），否则抽屉开关/末尾 Tab 被关闭键盖住点不到。
 				props.simpleShell
-					? "simple-shell bg-(--simple-shell-surface) [--simple-shell-surface:color-mix(in_srgb,var(--color-bg-sidebar)_25%,var(--color-bg-muted))] dark:[--simple-shell-surface:var(--color-bg-app)] [[data-bg-image=on]_&]:bg-transparent [[data-bg-image=on]_&]:[--simple-shell-surface:var(--color-bg-sidebar)] [&_.session-tabs-bar]:mr-0"
+					? "simple-shell bg-(--simple-shell-surface) [--simple-shell-surface:color-mix(in_srgb,var(--color-bg-sidebar)_25%,var(--color-bg-muted))] dark:[--simple-shell-surface:var(--color-bg-app)] [[data-bg-image=on]_&]:bg-transparent [[data-bg-image=on]_&]:[--simple-shell-surface:var(--color-bg-sidebar)]"
 					: "bg-bg-app [[data-bg-image=on]_&]:bg-transparent",
 				drawer && !drawerCollapsed ? "drawer-open" : "",
 				listCollapsed ? "list-collapsed" : "",
