@@ -1,6 +1,8 @@
-// 会话分组 / Session Groups — PiDeck 宿主插件（v2，工作区级）
+// 会话分组 / Session Groups — PiDeck 宿主插件（v2.1，工作区级）
 // 只用 window.pideck 能力面：context / sessions / storage / workbench / onEvent。
 // 会话数据只读；分组关系存插件私有 storage，范围是整个工作区（storage 单键 ≤64KB，所以分组与 id 列表分键存）。
+// 视觉只用宿主注入的 --color-* / --radius-* / --font-* 等 token（见 useHostPluginView.ts），
+// 与 PiDeck 的按钮、输入框、下拉、列表、弹层保持同一套语汇；每个 token 都带兜底值。
 "use strict";
 
 const pideck = window.pideck;
@@ -9,7 +11,6 @@ const pideck = window.pideck;
 
 const STR = {
 	"zh-CN": {
-		title: "会话分组",
 		workspace: "全部项目",
 		statsSep: " · ",
 		sessionsUnit: "个会话",
@@ -17,13 +18,12 @@ const STR = {
 		groupsUnit: "个分组",
 		newGroup: "新建分组",
 		createGroup: "新建分组",
+		nameLabel: "分组名称",
 		groupNamePlaceholder: "分组名称，如「T6 结账流程」",
 		createDirsHead: "按目录添加（可选）",
-		createDirsHint: "选中目录里的所有会话会加入本组；目录里以后新增的会话不会自动加入。",
 		createHint: "将加入 {n} 个会话（含已在其他分组的）",
 		createHintEmpty: "也可以先建空分组，稍后手动添加会话",
 		scopeLabel: "目录范围",
-		scopeAll: "全部目录",
 		scopeHint: "本组只收这些目录里的会话；勾别的目录的会话会让该目录自动并入范围。",
 		editScope: "编辑目录范围",
 		editScopeTitle: "编辑「{name}」的目录范围",
@@ -38,6 +38,7 @@ const STR = {
 		pruned: "已按目录范围移出 {n} 个会话",
 		extendScope: "已把目录「{dir}」并入本组范围",
 		selectAll: "全选",
+		selectPage: "本页全选",
 		clearAll: "清空",
 		ungrouped: "未分组",
 		addSessions: "添加会话",
@@ -48,6 +49,7 @@ const STR = {
 		confirmDelete: "删除分组「{name}」？只删分组，不会删会话；它们在别的分组里的引用也不受影响。",
 		delete: "删除",
 		cancel: "取消",
+		close: "关闭",
 		save: "保存",
 		create: "创建",
 		searchPlaceholder: "搜索会话标题…",
@@ -55,8 +57,10 @@ const STR = {
 		empty: "还没有分组",
 		emptyHint: "点右上角「新建分组」，可以直接选目录把整个目录的会话收进来。",
 		emptyGroup: "空分组，点「添加会话」放会话进来。",
+		ungroupedEmpty: "所有会话都已分组",
 		noSessions: "工作区还没有已保存的会话。",
 		noMatch: "没有匹配的会话",
+		clearFilters: "清除筛选",
 		justNow: "刚刚",
 		minAgo: " 分钟前",
 		hourAgo: " 小时前",
@@ -79,7 +83,6 @@ const STR = {
 		fieldId: "会话 ID",
 		statusSaved: "已保存 · 可读历史",
 		statusNoHistory: "已保存 · 无历史文件（直接打开即可）",
-		unreadableTag: "无历史",
 		noGroup: "未加入任何分组",
 		expandAll: "全部展开",
 		collapseAll: "全部收起",
@@ -88,7 +91,6 @@ const STR = {
 		selectedUnit: "已选 {n}",
 		removeSelected: "移出本组",
 		done: "完成",
-		showMore: "显示更多（还有 {n} 个）",
 		changeColor: "换颜色",
 		moveUp: "上移",
 		moveDown: "下移",
@@ -96,9 +98,14 @@ const STR = {
 		expand: "展开",
 		unknownDir: "未知目录",
 		allProjectsHint: "跨项目会话可同组，点击自动切换项目",
+		groupActions: "分组操作",
+		pageLabel: "分页",
+		pagePrev: "上一页",
+		pageNext: "下一页",
+		pageCurrent: "第 {page} 页",
+		totalItems: "共 {n} 条",
 	},
 	"en-US": {
-		title: "Session groups",
 		workspace: "All projects",
 		statsSep: " · ",
 		sessionsUnit: "sessions",
@@ -106,13 +113,12 @@ const STR = {
 		groupsUnit: "groups",
 		newGroup: "New group",
 		createGroup: "New group",
+		nameLabel: "Group name",
 		groupNamePlaceholder: "Group name, e.g. “T6 checkout flow”",
 		createDirsHead: "Add by directory (optional)",
-		createDirsHint: "Every session in the checked directories joins this group; sessions added to a directory later do not join automatically.",
 		createHint: "{n} sessions will join (including ones already in other groups)",
 		createHintEmpty: "You can also create an empty group and add sessions later",
 		scopeLabel: "Directories",
-		scopeAll: "All directories",
 		scopeHint: "This group only takes sessions from these directories; ticking a session elsewhere adds that directory to the scope.",
 		editScope: "Edit directories",
 		editScopeTitle: "Edit directories of “{name}”",
@@ -127,6 +133,7 @@ const STR = {
 		pruned: "Removed {n} sessions outside the directory scope",
 		extendScope: "Added directory “{dir}” to the group scope",
 		selectAll: "All",
+		selectPage: "Select page",
 		clearAll: "None",
 		ungrouped: "Ungrouped",
 		addSessions: "Add sessions",
@@ -137,6 +144,7 @@ const STR = {
 		confirmDelete: "Delete group \"{name}\"? Sessions are not deleted; other groups keep their references.",
 		delete: "Delete",
 		cancel: "Cancel",
+		close: "Close",
 		save: "Save",
 		create: "Create",
 		searchPlaceholder: "Search session titles…",
@@ -144,8 +152,10 @@ const STR = {
 		empty: "No groups yet",
 		emptyHint: "Click “New group” and pick directories to pull a whole directory's sessions in at once.",
 		emptyGroup: "Empty group. Use “Add sessions” to fill it.",
+		ungroupedEmpty: "Every session is in a group",
 		noSessions: "No saved sessions in this workspace yet.",
 		noMatch: "No matching sessions",
+		clearFilters: "Clear filters",
 		justNow: "just now",
 		minAgo: " min ago",
 		hourAgo: " h ago",
@@ -168,7 +178,6 @@ const STR = {
 		fieldId: "Session ID",
 		statusSaved: "Saved · history readable",
 		statusNoHistory: "Saved · no history file (opens directly)",
-		unreadableTag: "No history",
 		noGroup: "Not in any group",
 		expandAll: "Expand all",
 		collapseAll: "Collapse all",
@@ -177,7 +186,6 @@ const STR = {
 		selectedUnit: "{n} selected",
 		removeSelected: "Remove from group",
 		done: "Done",
-		showMore: "Show more ({n} left)",
 		changeColor: "Change color",
 		moveUp: "Move up",
 		moveDown: "Move down",
@@ -185,6 +193,12 @@ const STR = {
 		expand: "Expand",
 		unknownDir: "Unknown directory",
 		allProjectsHint: "Sessions from different projects can share a group; clicking switches project",
+		groupActions: "Group actions",
+		pageLabel: "Pagination",
+		pagePrev: "Previous page",
+		pageNext: "Next page",
+		pageCurrent: "Page {page}",
+		totalItems: "{n} items",
 	},
 };
 
@@ -197,13 +211,13 @@ const GROUP_PREFIX = "ws.g.";
 const LEGACY_PREFIX = "grp.";
 const UNGROUPED = "__ungrouped__";
 const COLORS = ["blue", "green", "orange", "purple", "red", "cyan"];
-const PAGE_SIZE = 100; // 与宿主 sessions.list 的页大小一致
-const UNGROUPED_PAGE = 60;
+// 每页条数：分组卡片里一次铺 20 条（约两屏），再靠页码条翻页；搜索/筛选会重置页码。
+const PAGE_SIZE = 20;
 const ACTIVE_WINDOW_MS = 10 * 60 * 1000;
 const COLOR_INDEX = new Map(COLORS.map((name, index) => [name, index]));
-// 单键 JSON 上限 64KB：一个分组装几千条 id 会超，超出部分拆到 `ws.g.<id>.<n>` 分片键。
+// 单键 JSON 上限 64KB：一个分组装几千条 id 会超，超出部分拆到 ws.g.<id>.<n> 分片键。
 const GROUP_CHUNK = 800;
-const chunkKey = (groupId, index) => `${GROUP_PREFIX}${groupId}.${index}`;
+const chunkKey = (groupId, index) => GROUP_PREFIX + groupId + "." + index;
 
 /* ---------- 状态 ---------- */
 
@@ -223,10 +237,56 @@ const state = {
 let filterQuery = "";
 let dirFilter = "";
 let draggingId = null;
-let ungroupedVisible = UNGROUPED_PAGE;
+const pages = new Map(); // 分页键（groupId / UNGROUPED）-> 页码（1 基）
 const selection = { groupId: null, ids: new Set() };
-const modal = { groupId: null, was: new Set(), now: new Set(), dirs: new Set(), allDirs: false };
+const modal = { groupId: null, now: new Set(), dirs: new Set(), allDirs: false };
 const createDraft = { dirs: new Set(), mode: "create", groupId: null };
+let confirmAction = null;
+
+/* ---------- 图标（内联 SVG，lucide 形态；插件不能引外部资源） ---------- */
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+const ICONS = {
+	"chevron-down": ["m6 9 6 6 6-6"],
+	"chevron-up": ["m18 15-6-6-6 6"],
+	"chevron-left": ["m15 18-6-6 6-6"],
+	"chevron-right": ["m9 18 6-6-6-6"],
+	plus: ["M12 5v14", "M5 12h14"],
+	check: ["M20 6 9 17l-5-5"],
+	x: ["M18 6 6 18", "m6 6 12 12"],
+	more: ["M5 12h.01", "M12 12h.01", "M19 12h.01"],
+	folder: ["M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"],
+	pencil: ["M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497Z", "m15 5 4 4"],
+	trash: ["M3 6h18", "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6", "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"],
+	rotate: ["M21 12a9 9 0 1 1-2.64-6.36", "M21 3v6h-6"],
+	select: ["m9 11 3 3L22 4", "M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"],
+	info: ["M12 16v-4", "M12 8h.01", "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"],
+	layers: [
+		"m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z",
+		"m22 12.18-9.17 4.16a2 2 0 0 1-1.66 0L2 12.18",
+		"m22 17.18-9.17 4.16a2 2 0 0 1-1.66 0L2 17.18",
+	],
+};
+
+function icon(name, size = 16) {
+	const node = document.createElementNS(SVG_NS, "svg");
+	node.setAttribute("viewBox", "0 0 24 24");
+	node.setAttribute("width", String(size));
+	node.setAttribute("height", String(size));
+	node.setAttribute("fill", "none");
+	node.setAttribute("stroke", "currentColor");
+	node.setAttribute("stroke-width", "1.75");
+	node.setAttribute("stroke-linecap", "round");
+	node.setAttribute("stroke-linejoin", "round");
+	node.setAttribute("aria-hidden", "true");
+	node.setAttribute("focusable", "false");
+	for (const shape of ICONS[name] || []) {
+		const path = document.createElementNS(SVG_NS, "path");
+		path.setAttribute("d", shape);
+		node.append(path);
+	}
+	return node;
+}
 
 /* ---------- 工具 ---------- */
 
@@ -239,12 +299,58 @@ function el(tag, cls, text) {
 	return node;
 }
 
-function iconBtn(text, title, cls) {
-	const node = el("button", "icon-btn" + (cls ? " " + cls : ""), text);
+function iconBtn(name, title, cls) {
+	const node = el("button", "icon-btn" + (cls ? " " + cls : ""));
 	node.type = "button";
 	node.title = title;
 	node.setAttribute("aria-label", title);
+	node.append(icon(name, 16));
 	return node;
+}
+
+function textBtn(label, iconName, cls) {
+	const node = el("button", cls || "btn");
+	node.type = "button";
+	if (iconName) node.append(icon(iconName, 14));
+	node.append(el("span", "btn-label", label));
+	return node;
+}
+
+function checkBoxMark() {
+	const box = el("span", "check-box");
+	box.append(icon("check", 12));
+	return box;
+}
+
+/** 独立复选框（会话行批量选择）：原生 input 只做可访问性，外观由 .check-box 画。 */
+function checkControl(checked, label, onChange) {
+	const wrap = el("label", "check");
+	const input = el("input", "check-input");
+	input.type = "checkbox";
+	input.checked = checked;
+	input.setAttribute("aria-label", label);
+	input.addEventListener("change", () => onChange(input.checked));
+	wrap.append(input, checkBoxMark());
+	return wrap;
+}
+
+/** 整行可点的勾选行（目录 / 会话选择器）：label 包住 input，点行任意位置即切换。 */
+function pickerRow(options) {
+	const row = el("label", "picker-row" + (options.checked ? " is-checked" : ""));
+	const input = el("input", "check-input");
+	input.type = "checkbox";
+	input.checked = Boolean(options.checked);
+	input.addEventListener("change", () => {
+		row.classList.toggle("is-checked", input.checked);
+		options.onToggle(input.checked);
+	});
+	row.append(input, checkBoxMark());
+	const text = el("div", "picker-text");
+	text.append(el("span", "picker-label", options.title));
+	if (options.subtitle) text.append(el("span", "picker-meta", options.subtitle));
+	row.append(text);
+	if (options.full) row.title = options.full;
+	return row;
 }
 
 function newGroupId() {
@@ -261,7 +367,7 @@ function isRecentlyActive(session) {
 	return Number.isFinite(t) && Date.now() - t <= ACTIVE_WINDOW_MS;
 }
 
-// 把宿主下发的主题 token（--color-*）写到 <html> 内联样式上。
+// 把宿主下发的主题 token（--color-* / --radius-* / --font-* …）写到 <html> 内联样式上。
 // 不能只依赖宿主的 insertCSS 注入：在 webview 完成导航前插入容易丢失，
 // 面板就只剩 CSS 缺省色；内联变量优先级最高且随 context.changed 实时刷新。
 function applyTokens(tokens) {
@@ -277,10 +383,10 @@ function fmtTime(ts) {
 	const t = timeOf(ts);
 	if (!Number.isFinite(t)) return "";
 	const diff = Date.now() - t;
-	if (diff < 60_000) return L.justNow;
-	if (diff < 3_600_000) return Math.floor(diff / 60_000) + L.minAgo;
-	if (diff < 86_400_000) return Math.floor(diff / 3_600_000) + L.hourAgo;
-	return Math.floor(diff / 86_400_000) + L.dayAgo;
+	if (diff < 60000) return L.justNow;
+	if (diff < 3600000) return Math.floor(diff / 60000) + L.minAgo;
+	if (diff < 86400000) return Math.floor(diff / 3600000) + L.hourAgo;
+	return Math.floor(diff / 86400000) + L.dayAgo;
 }
 
 /** 完整时间（到分钟）：分组页里「什么时候聊的」比「几天前」更有用。 */
@@ -291,14 +397,7 @@ function fmtClock(ts) {
 	return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
 }
 
-function fmtDate(ts) {
-	const d = new Date(timeOf(ts));
-	if (Number.isNaN(d.getTime())) return "";
-	const p = (n) => String(n).padStart(2, "0");
-	return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
-}
-
-/** 目录路径中间省略：`D:\project\java\T6` → `D:\…\java\T6`，够区分又不占满一行。 */
+/** 目录路径中间省略：D:\\project\\java\\T6 -> D:\\…\\java\\T6，够区分又不占满一行。 */
 function shortPath(path) {
 	if (!path) return "";
 	const parts = String(path).split(/[\\/]+/).filter(Boolean);
@@ -587,12 +686,6 @@ function groupScope(group) {
 	return Array.isArray(group.dirs) ? group.dirs.filter((key) => typeof key === "string" && key.length > 0 && key.length <= 240).slice(0, 64) : [];
 }
 
-/** 会话是否落在分组目录范围内（不限目录时恒为 true）。 */
-function inScope(group, session) {
-	const scope = groupScope(group);
-	return scope.length === 0 || scope.includes(dirKeyOf(session));
-}
-
 /** 把会话所在目录并入范围：手工放进来的会话不能让组处于「范围外」的不一致状态。 */
 function extendScope(group, session) {
 	const key = dirKeyOf(session);
@@ -671,6 +764,210 @@ function visibleIds(ids) {
 	return sortByUpdated(ids.filter((id) => matchesFilters(state.sessions.get(id))));
 }
 
+/* ---------- 分页 ---------- */
+
+function resetPages() {
+	pages.clear();
+}
+
+/** 取分组当前页并就地收敛（会话被移出后页码可能越界）。 */
+function pageInfo(key, total) {
+	const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+	const page = Math.min(Math.max(pages.get(key) || 1, 1), totalPages);
+	pages.set(key, page);
+	const start = (page - 1) * PAGE_SIZE;
+	return { page, totalPages, start, end: start + PAGE_SIZE };
+}
+
+/** 页码窗口（与宿主 Pagination 同策略，窄一档）：首尾常驻 + 当前页两侧各 1 页 + 省略号。 */
+function pageWindow(page, totalPages) {
+	if (totalPages <= 5) return Array.from({ length: totalPages }, (_, index) => index + 1);
+	const items = [];
+	const start = Math.max(1, page - 1);
+	const end = Math.min(totalPages, page + 1);
+	if (start > 1) {
+		items.push(1);
+		if (start > 2) items.push("gap");
+	}
+	for (let index = start; index <= end; index += 1) items.push(index);
+	if (end < totalPages) {
+		if (end < totalPages - 1) items.push("gap");
+		items.push(totalPages);
+	}
+	return items;
+}
+
+function goPage(key, page) {
+	pages.set(key, page);
+	render();
+	// 翻页后把目标卡片滚回顶部：否则从第 1 页底部翻页会停在列表尾部。
+	const card = [...$("groups").querySelectorAll(".card")].find((node) => (key === UNGROUPED ? node.classList.contains("card-ungrouped") : node.dataset.groupId === key));
+	if (card) card.scrollIntoView({ block: "start" });
+}
+
+/** 页码条：左侧总数，右侧上一页 / 页码窗口 / 下一页。只有一页时不渲染。 */
+function pager(key, total) {
+	const info = pageInfo(key, total);
+	const page = info.page;
+	const totalPages = info.totalPages;
+	if (totalPages <= 1) return null;
+	const nav = el("nav", "pager");
+	nav.setAttribute("aria-label", L.pageLabel);
+	nav.append(el("span", "pager-count", L.totalItems.replace("{n}", String(total))));
+	const pagesBox = el("div", "pager-pages");
+	const prev = el("button", "pager-btn");
+	prev.type = "button";
+	prev.disabled = page <= 1;
+	prev.title = L.pagePrev;
+	prev.setAttribute("aria-label", L.pagePrev);
+	prev.append(icon("chevron-left", 14));
+	prev.addEventListener("click", () => goPage(key, page - 1));
+	pagesBox.append(prev);
+	for (const item of pageWindow(page, totalPages)) {
+		if (item === "gap") {
+			pagesBox.append(el("span", "pager-gap", "…"));
+			continue;
+		}
+		const button = el("button", "pager-btn" + (item === page ? " is-current" : ""), String(item));
+		button.type = "button";
+		button.setAttribute("aria-label", L.pageCurrent.replace("{page}", String(item)));
+		if (item === page) button.setAttribute("aria-current", "page");
+		button.addEventListener("click", () => goPage(key, item));
+		pagesBox.append(button);
+	}
+	const next = el("button", "pager-btn");
+	next.type = "button";
+	next.disabled = page >= totalPages;
+	next.title = L.pageNext;
+	next.setAttribute("aria-label", L.pageNext);
+	next.append(icon("chevron-right", 14));
+	next.addEventListener("click", () => goPage(key, page + 1));
+	pagesBox.append(next);
+	nav.append(pagesBox);
+	return nav;
+}
+
+/* ---------- 菜单 / 确认弹层 ---------- */
+
+let menuState = null;
+
+function closeMenu(refocus = true) {
+	if (!menuState) return false;
+	const current = menuState;
+	document.removeEventListener("pointerdown", current.onPointerDown, true);
+	window.removeEventListener("scroll", current.onScroll, true);
+	window.removeEventListener("resize", current.onResize);
+	current.anchor.removeAttribute("aria-expanded");
+	current.node.remove();
+	menuState = null;
+	if (refocus && current.anchor.isConnected) current.anchor.focus({ preventScroll: true });
+	return true;
+}
+
+/**
+ * 通用浮层菜单：下拉筛选与分组操作共用。
+ * fixed 定位贴住锚点（滚动/缩放即关闭），键盘 ↑↓ Home End Esc 可操作。
+ */
+function openMenu(anchor, items, options = {}) {
+	closeMenu(false);
+	const menu = el("div", "menu");
+	menu.tabIndex = -1;
+	menu.setAttribute("role", options.role || "menu");
+	if (options.matchWidth) menu.classList.add("menu-match");
+	for (const item of items) {
+		if (item.separator) {
+			menu.append(el("div", "menu-sep"));
+			continue;
+		}
+		const row = el("button", "menu-item" + (item.danger ? " is-danger" : ""));
+		row.type = "button";
+		row.disabled = Boolean(item.disabled);
+		row.setAttribute("role", options.role === "listbox" ? "option" : "menuitem");
+		if (item.hint) row.title = item.hint;
+		if (options.role === "listbox") row.setAttribute("aria-selected", item.checked ? "true" : "false");
+		if (item.icon) row.append(icon(item.icon, 15));
+		row.append(el("span", "menu-label", item.label));
+		if (item.checked) row.append(icon("check", 15));
+		row.addEventListener("click", () => {
+			closeMenu(false);
+			item.onSelect();
+		});
+		menu.append(row);
+	}
+	document.body.append(menu);
+	const rect = anchor.getBoundingClientRect();
+	const width = options.matchWidth ? Math.max(rect.width, 160) : Math.max(menu.offsetWidth, options.minWidth || 180);
+	if (options.matchWidth) menu.style.width = width + "px";
+	const height = menu.offsetHeight;
+	let top = rect.bottom + 6;
+	if (top + height > window.innerHeight - 8) top = Math.max(8, rect.top - height - 6);
+	const left = options.align === "start" ? Math.min(rect.left, window.innerWidth - width - 8) : Math.max(8, rect.right - width);
+	menu.style.top = top + "px";
+	menu.style.left = Math.max(8, left) + "px";
+	anchor.setAttribute("aria-expanded", "true");
+
+	const onPointerDown = (event) => {
+		if (menu.contains(event.target) || anchor.contains(event.target)) return;
+		closeMenu(false);
+	};
+	// 滚动事件可能在菜单打开之后才投递（例如点击前刚把卡片滚进视口）：
+	// 只有锚点真的位移了才关闭，否则会把刚打开的面板误关。
+	const onScroll = (event) => {
+		if (menu.contains(event.target)) return;
+		const now = anchor.getBoundingClientRect();
+		if (Math.abs(now.top - rect.top) < 1 && Math.abs(now.left - rect.left) < 1) return;
+		closeMenu(false);
+	};
+	const onResize = () => closeMenu(false);
+	// 捕获阶段监听：面板内滚动容器（.groups）不冒泡到 window，必须 capture 才能收到。
+	document.addEventListener("pointerdown", onPointerDown, true);
+	window.addEventListener("scroll", onScroll, true);
+	window.addEventListener("resize", onResize);
+	menuState = { node: menu, anchor, onPointerDown, onScroll, onResize };
+
+	menu.addEventListener("keydown", (event) => {
+		const buttons = [...menu.querySelectorAll(".menu-item:not(:disabled)")];
+		const index = buttons.indexOf(document.activeElement);
+		if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+			event.preventDefault();
+			// 方向键在可用条目间循环；焦点若还在菜单容器（无可用项）就从首/尾开始。
+			const current = index >= 0 ? index : event.key === "ArrowDown" ? -1 : 0;
+			const next = event.key === "ArrowDown" ? (current + 1) % buttons.length : (current - 1 + buttons.length) % buttons.length;
+			buttons[next]?.focus({ preventScroll: true });
+		} else if (event.key === "Home") {
+			event.preventDefault();
+			buttons[0]?.focus({ preventScroll: true });
+		} else if (event.key === "End") {
+			event.preventDefault();
+			buttons[buttons.length - 1]?.focus({ preventScroll: true });
+		} else if (event.key === "Escape") {
+			event.preventDefault();
+			event.stopPropagation();
+			closeMenu();
+		} else if (event.key === "Tab") {
+			closeMenu(false);
+		}
+	});
+	// 下拉优先聚焦当前选中项（方向键从它继续），操作菜单聚焦第一个可用项；
+	// preventScroll 避免聚焦本身把页面滚动、触发 scroll 监听把菜单关掉。
+	const initial = options.role === "listbox" ? [...menu.querySelectorAll(".menu-item")].find((node) => node.getAttribute("aria-selected") === "true") : null;
+	(initial || menu.querySelector(".menu-item:not(:disabled)") || menu).focus({ preventScroll: true });
+}
+
+function openConfirm(options) {
+	confirmAction = options.onConfirm;
+	$("confirm-title").textContent = options.title;
+	$("confirm-text").textContent = options.message;
+	$("confirm-ok").textContent = options.confirmLabel || L.delete;
+	$("confirm-overlay").hidden = false;
+	$("confirm-cancel").focus();
+}
+
+function closeConfirm() {
+	$("confirm-overlay").hidden = true;
+	confirmAction = null;
+}
+
 /* ---------- 上下文 / 事件 ---------- */
 
 async function applyContext(context) {
@@ -682,7 +979,7 @@ async function applyContext(context) {
 	state.scope = context.scope === "workspace" ? "workspace" : "project";
 	state.locale = context.locale === "en-US" ? "en-US" : "zh-CN";
 	L = STR[state.locale];
-	// 把主题写到 <html data-theme>，CSS 据此联动错误色/遮罩等 --color-* 没覆盖的语义色
+	// 把主题写到 <html data-theme>，CSS 据此联动兜底色板（token 注入缺失时也不会串色）
 	document.documentElement.dataset.theme = context.theme === "light" ? "light" : "dark";
 	applyTokens(context.tokens);
 	if (!state.ready) {
@@ -691,8 +988,6 @@ async function applyContext(context) {
 	} else if (state.scope !== "workspace" && previousProjectId !== state.projectId) {
 		// 没拿到工作区范围时退回旧行为：切项目重载（分组数据同一份，不会被覆盖）
 		await reloadCatalog();
-	} else if (previousLocale !== state.locale) {
-		// 只换文案：分组没有语言相关的持久化字段，不需要重读数据
 	}
 	render();
 }
@@ -726,12 +1021,20 @@ function handleEvent(event) {
 
 function renderStaticText() {
 	document.documentElement.lang = state.locale;
-	$("scope-title").textContent = L.title;
-	$("btn-new").textContent = L.newGroup;
+	const title = $("scope-title");
+	title.textContent = state.scope === "workspace" ? L.workspace : state.projectName || L.workspace;
+	title.title = L.allProjectsHint;
 	$("btn-toggle-all").textContent = anyCollapsed() ? L.expandAll : L.collapseAll;
+	const newBtn = $("btn-new");
+	newBtn.replaceChildren(icon("plus", 14), document.createTextNode(L.newGroup));
 	$("search-input").placeholder = L.searchPlaceholder;
-	$("search-clear").title = L.clearSearch;
-	$("create-title").textContent = createDraft.mode === "edit" ? L.editScopeTitle.replace("{name}", $("create-name").value || L.scopeLabel) : L.createGroup;
+	$("search-input").setAttribute("aria-label", L.searchPlaceholder);
+	const clear = $("search-clear");
+	clear.title = L.clearSearch;
+	clear.setAttribute("aria-label", L.clearSearch);
+	if (!clear.firstChild) clear.append(icon("x", 14));
+	$("dir-filter-trigger").setAttribute("aria-label", L.filterDir);
+	$("create-name-label").textContent = L.nameLabel;
 	$("create-name").placeholder = L.groupNamePlaceholder;
 	$("create-dirs-head").textContent = createDraft.mode === "edit" ? L.scopeLabel : L.createDirsHead;
 	$("create-dirs-all").textContent = L.selectAll;
@@ -740,84 +1043,140 @@ function renderStaticText() {
 	$("create-note").textContent = createDraft.mode === "edit" ? L.editScopeHint : "";
 	$("create-cancel").textContent = L.cancel;
 	$("create-ok").textContent = createDraft.mode === "edit" ? L.save : L.create;
+	$("create-close").title = L.close;
+	$("create-close").setAttribute("aria-label", L.close);
 	$("modal-search").placeholder = L.searchPlaceholder;
+	$("modal-search").setAttribute("aria-label", L.searchPlaceholder);
 	$("modal-cancel").textContent = L.cancel;
 	$("modal-save").textContent = L.save;
-	$("info-close").title = L.cancel;
-	$("dir-filter").title = L.filterDir;
+	$("modal-close").title = L.close;
+	$("modal-close").setAttribute("aria-label", L.close);
+	$("info-close").title = L.close;
+	$("info-close").setAttribute("aria-label", L.close);
+	$("confirm-cancel").textContent = L.cancel;
+	for (const id of ["create-close", "modal-close", "info-close"]) {
+		const node = $(id);
+		if (!node.firstChild) node.append(icon("x", 16));
+	}
+	$("search-clear").hidden = filterQuery.length === 0;
 }
 
 function renderStats() {
 	const dirs = dirEntries().length;
-	$("scope-stats").textContent = [state.scope === "workspace" ? L.workspace : state.projectName || L.workspace, `${state.sessions.size} ${L.sessionsUnit}`, `${dirs} ${L.dirsUnit}`, `${state.groups.length} ${L.groupsUnit}`].join(L.statsSep);
+	$("scope-stats").textContent = [state.sessions.size + " " + L.sessionsUnit, dirs + " " + L.dirsUnit, state.groups.length + " " + L.groupsUnit].join(L.statsSep);
+}
+
+function renderDirFilter() {
+	const entries = dirEntries();
+	if (dirFilter && !entries.some((entry) => entry.key === dirFilter)) dirFilter = "";
+	const root = $("dir-filter");
+	root.hidden = entries.length <= 1;
+	const current = entries.find((entry) => entry.key === dirFilter);
+	$("dir-filter-value").textContent = current ? current.short : L.filterDir;
+	$("dir-filter-trigger").title = current ? current.directory || current.label : L.filterDir;
+	$("dir-filter-trigger").setAttribute("aria-expanded", menuState && menuState.anchor === $("dir-filter-trigger") ? "true" : "false");
+}
+
+function setDirFilter(value) {
+	if (dirFilter === value) return;
+	dirFilter = value;
+	resetPages();
+	render();
+}
+
+function openDirFilter() {
+	const trigger = $("dir-filter-trigger");
+	if (menuState && menuState.anchor === trigger) {
+		closeMenu();
+		return;
+	}
+	const entries = dirEntries();
+	const items = [
+		{
+			label: L.filterDir + "（" + state.sessions.size + "）",
+			checked: dirFilter === "",
+			onSelect: () => setDirFilter(""),
+		},
+	];
+	for (const entry of entries) {
+		items.push({
+			label: entry.short + "（" + entry.ids.length + "）",
+			hint: entry.directory || entry.label,
+			checked: dirFilter === entry.key,
+			onSelect: () => setDirFilter(entry.key),
+		});
+	}
+	openMenu(trigger, items, { role: "listbox", align: "start", matchWidth: true, minWidth: 180 });
 }
 
 /* ---------- 渲染：会话行 ---------- */
 
+/** 非 pi 后端才显示徽标（与宿主会话列表一致：pi 是默认运行时，不额外加噪点）。 */
 function backendBadge(session) {
-	if (!session || !session.backend) return null;
-	const map = {
-		pi: ["pi", "pi"],
-		dsh: ["DSH", "dsh"],
-		acp: ["ACP", "acp"],
-		imagegen: ["IMG", "img"],
-		videogen: ["VID", "vid"],
-	};
-	const pair = map[session.backend];
-	if (!pair) return null;
-	const badge = el("span", "badge badge-" + pair[1], pair[0]);
-	badge.title = session.backend;
+	const backend = (session && session.backend) || "pi";
+	if (backend === "pi") return null;
+	const labels = { dsh: "DSH", acp: "ACP", imagegen: "IMG", videogen: "VID" };
+	const label = labels[backend];
+	if (!label) return null;
+	const media = backend === "imagegen" || backend === "videogen";
+	const badge = el("span", "badge" + (media ? " badge-media" : ""), label);
+	badge.title = backend;
+	badge.setAttribute("data-backend", backend);
 	return badge;
 }
 
-function sessionRow(sessionId, groupId) {
+function sessionRow(sessionId, groupId, inSelection) {
 	const session = state.sessions.get(sessionId);
 	if (!session) return null;
-	const inSelection = selection.groupId != null && selection.groupId === groupId;
+	const current = sessionId === state.currentSessionId;
 	const checked = inSelection && selection.ids.has(sessionId);
-	const row = el("div", "session" + (sessionId === state.currentSessionId ? " current" : "") + (checked ? " selected" : ""));
+	const row = el("div", "row" + (current ? " is-current" : "") + (checked ? " is-checked" : ""));
 	row.dataset.sessionId = sessionId;
 
 	if (inSelection) {
-		const box = el("input", "session-check");
-		box.type = "checkbox";
-		box.checked = checked;
-		box.addEventListener("click", (event) => event.stopPropagation());
-		box.addEventListener("change", () => {
-			if (box.checked) selection.ids.add(sessionId);
-			else selection.ids.delete(sessionId);
-			render();
-		});
-		row.append(box);
+		row.append(
+			checkControl(checked, session.title || L.untitled, (value) => {
+				if (value) selection.ids.add(sessionId);
+				else selection.ids.delete(sessionId);
+				render();
+			}),
+		);
 	}
 
-	const main = el("div", "session-main");
-	const line1 = el("div", "session-line");
+	const main = el("div", "row-main");
+	main.tabIndex = 0;
+	main.setAttribute("role", "button");
+	main.setAttribute("aria-label", session.title || L.untitled);
+
+	const line = el("div", "row-line");
 	if (isRecentlyActive(session)) {
 		const dot = el("span", "active-dot");
 		dot.title = L.activeNow;
-		line1.append(dot);
+		line.append(dot);
 	}
-	const title = el("span", "session-title", session.title || L.untitled);
+	const title = el("span", "row-title", session.title || L.untitled);
 	title.title = session.title || L.untitled;
-	line1.append(title);
-	if (sessionId === state.currentSessionId) line1.append(el("span", "tag current-tag", L.currentTag));
-	if (session.backend && session.backend !== "pi") line1.append(el("span", "tag soft-tag", session.backend));
-	line1.append(el("span", "session-clock", fmtClock(session.updatedAt)));
-	main.append(line1);
+	line.append(title);
+	if (current) line.append(el("span", "chip chip-current", L.currentTag));
+	line.append(el("span", "row-time", fmtClock(session.updatedAt)));
+	main.append(line);
 
-	const line2 = el("div", "session-line session-line-2");
+	const meta = el("div", "row-line row-meta");
 	const badge = backendBadge(session);
-	if (badge) line2.append(badge);
-	if (session.model) line2.append(el("span", "model", session.model));
+	if (badge) meta.append(badge);
+	if (session.model) {
+		const model = el("span", "row-model", session.model);
+		model.title = session.model;
+		meta.append(model);
+	}
 	const dirText = session.directory || session.projectName || L.unknownDir;
-	const path = el("span", "dir-path", shortPath(dirText));
-	path.title = dirText;
-	line2.append(path);
-	line2.append(el("span", "session-rel", fmtTime(session.updatedAt)));
-	main.append(line2);
+	const dir = el("span", "row-dir", shortPath(dirText));
+	dir.title = dirText;
+	meta.append(dir);
+	meta.append(el("span", "row-rel", fmtTime(session.updatedAt)));
+	main.append(meta);
 
-	main.addEventListener("click", () => {
+	const open = () => {
 		if (inSelection) {
 			if (selection.ids.has(sessionId)) selection.ids.delete(sessionId);
 			else selection.ids.add(sessionId);
@@ -825,21 +1184,29 @@ function sessionRow(sessionId, groupId) {
 			return;
 		}
 		void pideck.workbench.navigate(sessionId).catch(actionError);
+	};
+	main.addEventListener("click", open);
+	main.addEventListener("keydown", (event) => {
+		if (event.key === "Enter" || event.key === " ") {
+			event.preventDefault();
+			open();
+		}
 	});
 	row.append(main);
 
-	const tools = el("div", "session-tools");
-	const info = iconBtn("ⓘ", L.detailTitle, "session-info");
+	const tools = el("div", "row-actions");
+	const info = iconBtn("info", L.detailTitle, "action-btn");
 	info.addEventListener("click", (event) => {
 		event.stopPropagation();
 		openInfoModal(sessionId);
 	});
 	tools.append(info);
 	if (groupId) {
-		const remove = iconBtn("×", L.removeSession, "session-remove");
+		const remove = iconBtn("x", L.removeSession, "action-btn");
 		remove.addEventListener("click", (event) => {
 			event.stopPropagation();
 			const group = groupById(groupId);
+			selection.ids.delete(sessionId);
 			if (group && removeFromGroup(group, sessionId)) render();
 		});
 		tools.append(remove);
@@ -853,11 +1220,11 @@ function sessionRow(sessionId, groupId) {
 			event.dataTransfer.setData("text/plain", sessionId);
 			event.dataTransfer.effectAllowed = "move";
 		}
-		row.classList.add("dragging");
+		row.classList.add("is-dragging");
 	});
 	row.addEventListener("dragend", () => {
 		draggingId = null;
-		row.classList.remove("dragging");
+		row.classList.remove("is-dragging");
 	});
 	return row;
 }
@@ -869,24 +1236,150 @@ function nextColor(color) {
 	return COLORS[(index + 1) % COLORS.length];
 }
 
-function selectionBar(group) {
+function toggleGroup(id) {
+	if (state.collapsed.has(id)) state.collapsed.delete(id);
+	else state.collapsed.add(id);
+	void saveMeta();
+	render();
+}
+
+function moveGroup(index, delta) {
+	const target = index + delta;
+	if (target < 0 || target >= state.groups.length) return;
+	const [group] = state.groups.splice(index, 1);
+	state.groups.splice(target, 0, group);
+	void saveMeta();
+	render();
+}
+
+function toggleSelection(groupId) {
+	if (selection.groupId === groupId) {
+		selection.groupId = null;
+		selection.ids.clear();
+	} else {
+		selection.groupId = groupId;
+		selection.ids = new Set();
+	}
+	render();
+}
+
+function beginRename(group, titles) {
+	// 不用 window.prompt：Electron 的渲染器不支持 prompt，改名走行内输入。
+	const input = el("input", "input rename-input");
+	input.type = "text";
+	input.value = group.name;
+	input.maxLength = 80;
+	input.setAttribute("aria-label", L.rename);
+	titles.replaceChildren(input);
+	input.focus();
+	input.select();
+	let settled = false;
+	const finish = (commit) => {
+		if (settled) return;
+		settled = true;
+		const next = input.value.trim();
+		if (commit && next && next !== group.name) {
+			group.name = next.slice(0, 80);
+			void saveMeta();
+		}
+		render();
+	};
+	input.addEventListener("keydown", (event) => {
+		if (event.key === "Enter") {
+			event.preventDefault();
+			finish(true);
+		} else if (event.key === "Escape") {
+			event.preventDefault();
+			event.stopPropagation();
+			finish(false);
+		}
+	});
+	input.addEventListener("blur", () => finish(true));
+}
+
+/** 删除分组：只清分组与它的分片键，会话本身与别的分组不受影响。 */
+function deleteGroup(group) {
+	const chunks = group.chunks ?? 0;
+	state.groups = state.groups.filter((item) => item.id !== group.id);
+	state.collapsed.delete(group.id);
+	pages.delete(group.id);
+	if (selection.groupId === group.id) {
+		selection.groupId = null;
+		selection.ids.clear();
+	}
+	void queue(async () => {
+		await pideck.storage.remove(GROUP_PREFIX + group.id).catch(() => {});
+		for (let index = 0; index < chunks; index += 1) await pideck.storage.remove(chunkKey(group.id, index)).catch(() => {});
+	});
+	void saveMeta();
+	render();
+}
+
+function groupMenu(group, index, titles, anchor) {
+	const scoped = groupScope(group).length > 0;
+	openMenu(
+		anchor,
+		[
+			{ label: L.moveUp, icon: "chevron-up", disabled: index === 0, onSelect: () => moveGroup(index, -1) },
+			{ label: L.moveDown, icon: "chevron-down", disabled: index === state.groups.length - 1, onSelect: () => moveGroup(index, 1) },
+			{ separator: true },
+			{ label: L.fillScope, icon: "rotate", hint: L.fillScopeHint, disabled: !scoped, onSelect: () => void fillGroupFromDirs(group) },
+			{ label: L.editScope, icon: "folder", onSelect: () => openScopeEditor(group.id) },
+			{ label: L.rename, icon: "pencil", onSelect: () => beginRename(group, titles) },
+			{ separator: true },
+			{
+				label: L.deleteGroup,
+				icon: "trash",
+				danger: true,
+				onSelect: () =>
+					openConfirm({
+						title: L.deleteGroup,
+						message: L.confirmDelete.replace("{name}", group.name),
+						confirmLabel: L.delete,
+						onConfirm: () => deleteGroup(group),
+					}),
+			},
+		],
+		{ align: "end", minWidth: 200 },
+	);
+}
+
+function emptyState(text, actionLabel, onAction, big, hint) {
+	const box = el("div", "empty-state" + (big ? "" : " is-compact"));
+	if (big) box.append(icon("layers", 22));
+	box.append(el("p", "empty-text", text));
+	if (hint) box.append(el("p", "empty-hint", hint));
+	if (actionLabel) {
+		const button = textBtn(actionLabel, null, "btn btn-outline btn-sm");
+		button.addEventListener("click", onAction);
+		box.append(button);
+	}
+	return box;
+}
+
+function clearFilters() {
+	filterQuery = "";
+	dirFilter = "";
+	$("search-input").value = "";
+	$("search-clear").hidden = true;
+	resetPages();
+	render();
+}
+
+function selectionBar(group, pageIds) {
 	const bar = el("div", "select-bar");
-	const count = el("span", "select-count", L.selectedUnit.replace("{n}", String(selection.ids.size)));
-	bar.append(count);
-	const all = el("button", "link-btn", L.selectAll);
-	all.type = "button";
+	bar.append(el("span", "select-count", L.selectedUnit.replace("{n}", String(selection.ids.size))));
+	const all = textBtn(L.selectPage, null, "btn btn-ghost btn-xs");
 	all.addEventListener("click", () => {
-		for (const id of visibleIds(group.ids)) selection.ids.add(id);
+		for (const id of pageIds) selection.ids.add(id);
 		render();
 	});
-	const none = el("button", "link-btn", L.clearAll);
-	none.type = "button";
+	const none = textBtn(L.clearAll, null, "btn btn-ghost btn-xs");
 	none.addEventListener("click", () => {
 		selection.ids.clear();
 		render();
 	});
-	const remove = el("button", "link-btn danger", L.removeSelected);
-	remove.type = "button";
+	const remove = textBtn(L.removeSelected, null, "btn btn-danger-ghost btn-xs");
 	remove.disabled = selection.ids.size === 0;
 	remove.addEventListener("click", () => {
 		for (const id of selection.ids) removeFromGroup(group, id);
@@ -894,8 +1387,7 @@ function selectionBar(group) {
 		selection.ids.clear();
 		render();
 	});
-	const done = el("button", "link-btn", L.done);
-	done.type = "button";
+	const done = textBtn(L.done, null, "btn btn-outline btn-xs");
 	done.addEventListener("click", () => {
 		selection.groupId = null;
 		selection.ids.clear();
@@ -909,167 +1401,74 @@ function attachDropTarget(node, onDrop) {
 	node.addEventListener("dragover", (event) => {
 		if (!draggingId) return;
 		event.preventDefault();
-		node.classList.add("drop-hover");
+		node.classList.add("is-drop-target");
 	});
-	node.addEventListener("dragleave", () => node.classList.remove("drop-hover"));
+	node.addEventListener("dragleave", () => node.classList.remove("is-drop-target"));
 	node.addEventListener("drop", (event) => {
 		event.preventDefault();
-		node.classList.remove("drop-hover");
+		node.classList.remove("is-drop-target");
 		const sessionId = draggingId || (event.dataTransfer ? event.dataTransfer.getData("text/plain") : "");
 		draggingId = null;
 		if (sessionId && state.sessions.has(sessionId)) onDrop(sessionId);
 	});
 }
 
-/** 删除分组：只清分组与它的分片键，会话本身与别的分组不受影响。 */
-function deleteGroup(group) {
-	const chunks = group.chunks ?? 0;
-	state.groups = state.groups.filter((item) => item.id !== group.id);
-	state.collapsed.delete(group.id);
-	if (selection.groupId === group.id) {
-		selection.groupId = null;
-		selection.ids.clear();
-	}
-	void queue(async () => {
-		await pideck.storage.remove(GROUP_PREFIX + group.id).catch(() => {});
-		for (let index = 0; index < chunks; index += 1) await pideck.storage.remove(chunkKey(group.id, index)).catch(() => {});
-	});
-	void saveMeta();
-	render();
-}
-
 function groupCard(group, index, forceExpand) {
 	const collapsed = !forceExpand && state.collapsed.has(group.id);
-	const card = el("section", "group" + (collapsed ? " collapsed" : ""));
+	const card = el("section", "card" + (collapsed ? " is-collapsed" : ""));
 	card.dataset.groupId = group.id;
+	card.setAttribute("aria-label", group.name);
 
-	const head = el("div", "group-head");
-	const dot = el("button", "color-dot color-" + group.color);
-	dot.type = "button";
-	dot.title = L.changeColor;
-	dot.addEventListener("click", () => {
+	const head = el("div", "card-head");
+	const toggle = iconBtn(collapsed ? "chevron-right" : "chevron-down", collapsed ? L.expand : L.collapse, "tool-btn head-toggle");
+	toggle.addEventListener("click", () => toggleGroup(group.id));
+	head.append(toggle);
+
+	const dotBtn = el("button", "dot-btn");
+	dotBtn.type = "button";
+	dotBtn.title = L.changeColor;
+	dotBtn.setAttribute("aria-label", L.changeColor);
+	dotBtn.append(el("span", "dot color-" + group.color));
+	dotBtn.addEventListener("click", () => {
 		group.color = nextColor(group.color);
 		void saveMeta();
 		render();
 	});
-	head.append(dot);
+	head.append(dotBtn);
 
-	const nameWrap = el("div", "group-name-wrap");
-	nameWrap.append(el("span", "group-name", group.name));
+	const titles = el("div", "card-titles");
+	const nameRow = el("div", "card-name-row");
+	nameRow.append(el("h2", "card-name", group.name));
 	const dirs = new Set(group.ids.map((id) => dirKeyOf(state.sessions.get(id))));
-	nameWrap.append(el("span", "group-meta", `${group.ids.length} ${L.sessionsUnit}${L.statsSep}${dirs.size} ${L.dirsUnit}`));
+	nameRow.append(el("span", "card-meta", group.ids.length + " " + L.sessionsUnit + L.statsSep + dirs.size + " " + L.dirsUnit));
+	titles.append(nameRow);
 	const scope = groupScope(group);
-	const scopeBox = el("span", "group-scope");
-	if (scope.length === 0) {
-		scopeBox.append(el("span", "scope-chip muted", L.scopeAll));
+	if (scope.length > 0) {
+		const scopeRow = el("div", "card-scope");
+		for (const key of scope.slice(0, 3)) scopeRow.append(el("span", "scope-chip", scopeLabelOf(key)));
+		if (scope.length > 3) scopeRow.append(el("span", "scope-chip", "+" + (scope.length - 3)));
+		scopeRow.title = L.scopeLabel + ": " + scope.join("\n");
+		titles.append(scopeRow);
 	} else {
-		for (const key of scope.slice(0, 2)) scopeBox.append(el("span", "scope-chip", scopeLabelOf(key)));
-		if (scope.length > 2) scopeBox.append(el("span", "scope-chip", `+${scope.length - 2}`));
+		titles.title = L.scopeHint;
 	}
-	scopeBox.title = scope.length === 0 ? L.scopeHint : `${L.scopeLabel}: ${scope.join("\n")}`;
-	nameWrap.append(scopeBox);
-	head.append(nameWrap);
+	head.append(titles);
 
-	const tools = el("div", "group-tools");
-	const up = iconBtn("↑", L.moveUp);
-	up.disabled = index === 0;
-	up.addEventListener("click", () => {
-		state.groups.splice(index, 1);
-		state.groups.splice(index - 1, 0, group);
-		void saveMeta();
-		render();
-	});
-	const down = iconBtn("↓", L.moveDown);
-	down.disabled = index === state.groups.length - 1;
-	down.addEventListener("click", () => {
-		state.groups.splice(index, 1);
-		state.groups.splice(index + 1, 0, group);
-		void saveMeta();
-		render();
-	});
-	const select = iconBtn("☑", L.select);
-	select.addEventListener("click", () => {
-		if (selection.groupId === group.id) {
-			selection.groupId = null;
-			selection.ids.clear();
-		} else {
-			selection.groupId = group.id;
-			selection.ids = new Set();
-		}
-		render();
-	});
-	const add = iconBtn("＋", L.addSessions);
+	const tools = el("div", "card-tools");
+	const add = textBtn(L.addSessions, "plus", "btn btn-outline btn-sm");
+	// 窄窗只留加号图标，文字隐藏后仍要保留可访问名称。
+	add.title = L.addSessions;
+	add.setAttribute("aria-label", L.addSessions);
 	add.addEventListener("click", () => openAddModal(group.id));
-	const fill = iconBtn("⟳", L.fillScopeHint);
-	fill.disabled = groupScope(group).length === 0;
-	fill.addEventListener("click", () => {
-		void fillGroupFromDirs(group);
-	});
-	const scopeBtn = iconBtn("📁", L.editScope);
-	scopeBtn.addEventListener("click", () => openScopeEditor(group.id));
-	const rename = iconBtn("✎", L.rename);
-	rename.addEventListener("click", () => {
-		// 不用 window.prompt：Electron 的渲染器不支持 prompt，改名走行内输入。
-		const input = el("input", "text-input group-rename");
-		input.type = "text";
-		input.value = group.name;
-		input.maxLength = 80;
-		input.setAttribute("aria-label", L.rename);
-		nameWrap.replaceChildren(input);
-		input.focus();
-		input.select();
-		let settled = false;
-		const finish = (commit) => {
-			if (settled) return;
-			settled = true;
-			const next = input.value.trim();
-			if (commit && next && next !== group.name) {
-				group.name = next.slice(0, 80);
-				void saveMeta();
-			}
-			render();
-		};
-		input.addEventListener("keydown", (event) => {
-			if (event.key === "Enter") {
-				event.preventDefault();
-				finish(true);
-			} else if (event.key === "Escape") {
-				event.preventDefault();
-				event.stopPropagation();
-				finish(false);
-			}
-		});
-		input.addEventListener("blur", () => finish(true));
-	});
-	const remove = iconBtn("✕", L.deleteGroup);
-	remove.addEventListener("click", () => {
-		// 同样不用 window.confirm：就地换成确认条，不阻塞也不依赖渲染器对话框。
-		const bar = el("div", "confirm-bar");
-		bar.append(el("span", "confirm-text", L.confirmDelete.replace("{name}", group.name)));
-		const yes = el("button", "link-btn danger", L.delete);
-		yes.type = "button";
-		yes.addEventListener("click", () => deleteGroup(group));
-		const no = el("button", "link-btn", L.cancel);
-		no.type = "button";
-		no.addEventListener("click", () => render());
-		bar.append(yes, no);
-		tools.replaceChildren(bar);
-	});
-	const toggle = iconBtn(collapsed ? "▸" : "▾", collapsed ? L.expand : L.collapse);
-	toggle.addEventListener("click", () => {
-		if (collapsed) state.collapsed.delete(group.id);
-		else state.collapsed.add(group.id);
-		void saveMeta();
-		render();
-	});
-	tools.append(up, down, select, fill, add, scopeBtn, rename, remove, toggle);
+	tools.append(add);
+	const select = iconBtn("select", L.select, "tool-btn" + (selection.groupId === group.id ? " is-active" : ""));
+	select.addEventListener("click", () => toggleSelection(group.id));
+	tools.append(select);
+	const more = iconBtn("more", L.groupActions, "tool-btn");
+	more.setAttribute("aria-haspopup", "menu");
+	more.addEventListener("click", () => groupMenu(group, index, titles, more));
+	tools.append(more);
 	head.append(tools);
-	head.addEventListener("dblclick", () => {
-		if (collapsed) state.collapsed.delete(group.id);
-		else state.collapsed.add(group.id);
-		void saveMeta();
-		render();
-	});
 	card.append(head);
 
 	attachDropTarget(card, (sessionId) => {
@@ -1078,13 +1477,21 @@ function groupCard(group, index, forceExpand) {
 
 	if (collapsed) return card;
 
-	const body = el("div", "group-body");
-	if (selection.groupId === group.id) body.append(selectionBar(group));
+	const body = el("div", "card-body");
 	const ids = visibleIds(group.ids);
-	if (ids.length === 0) body.append(el("p", "empty", L.emptyGroup));
-	for (const id of ids) {
-		const row = sessionRow(id, group.id);
-		if (row) body.append(row);
+	const info = pageInfo(group.id, ids.length);
+	const pageIds = ids.slice(info.start, info.end);
+	if (selection.groupId === group.id) body.append(selectionBar(group, pageIds));
+	if (ids.length === 0) {
+		if (group.ids.length > 0 && (filterQuery || dirFilter)) body.append(emptyState(L.noMatch, L.clearFilters, clearFilters));
+		else body.append(emptyState(L.emptyGroup, L.addSessions, () => openAddModal(group.id)));
+	} else {
+		for (const id of pageIds) {
+			const row = sessionRow(id, group.id, selection.groupId === group.id);
+			if (row) body.append(row);
+		}
+		const nav = pager(group.id, ids.length);
+		if (nav) body.append(nav);
 	}
 	card.append(body);
 	return card;
@@ -1092,24 +1499,21 @@ function groupCard(group, index, forceExpand) {
 
 function ungroupedCard(forceExpand) {
 	const collapsed = !forceExpand && state.collapsed.has(UNGROUPED);
-	const card = el("section", "group ungrouped" + (collapsed ? " collapsed" : ""));
-	const ids = visibleIds(ungroupedIds());
+	const card = el("section", "card card-ungrouped" + (collapsed ? " is-collapsed" : ""));
+	card.setAttribute("aria-label", L.ungrouped);
 
-	const head = el("div", "group-head");
-	head.append(el("span", "color-dot color-none"));
-	const nameWrap = el("div", "group-name-wrap");
-	nameWrap.append(el("span", "group-name", L.ungrouped));
+	const ids = visibleIds(ungroupedIds());
+	const head = el("div", "card-head");
+	const toggle = iconBtn(collapsed ? "chevron-right" : "chevron-down", collapsed ? L.expand : L.collapse, "tool-btn head-toggle");
+	toggle.addEventListener("click", () => toggleGroup(UNGROUPED));
+	head.append(toggle, el("span", "dot dot-none"));
+	const titles = el("div", "card-titles");
+	const nameRow = el("div", "card-name-row");
+	nameRow.append(el("h2", "card-name", L.ungrouped));
 	const dirs = new Set(ids.map((id) => dirKeyOf(state.sessions.get(id))));
-	nameWrap.append(el("span", "group-meta", `${ids.length} ${L.sessionsUnit}${L.statsSep}${dirs.size} ${L.dirsUnit}`));
-	head.append(nameWrap);
-	const toggle = iconBtn(collapsed ? "▸" : "▾", collapsed ? L.expand : L.collapse);
-	toggle.addEventListener("click", () => {
-		if (collapsed) state.collapsed.delete(UNGROUPED);
-		else state.collapsed.add(UNGROUPED);
-		void saveMeta();
-		render();
-	});
-	head.append(toggle);
+	nameRow.append(el("span", "card-meta", ids.length + " " + L.sessionsUnit + L.statsSep + dirs.size + " " + L.dirsUnit));
+	titles.append(nameRow);
+	head.append(titles);
 	card.append(head);
 
 	attachDropTarget(card, (sessionId) => {
@@ -1117,21 +1521,18 @@ function ungroupedCard(forceExpand) {
 	});
 	if (collapsed) return card;
 
-	const body = el("div", "group-body");
-	if (ids.length === 0) body.append(el("p", "empty", filterQuery || dirFilter ? L.noMatch : L.emptyGroup));
-	const shown = ids.slice(0, ungroupedVisible);
-	for (const id of shown) {
-		const row = sessionRow(id, null);
-		if (row) body.append(row);
-	}
-	if (ids.length > shown.length) {
-		const more = el("button", "btn more", L.showMore.replace("{n}", String(ids.length - shown.length)));
-		more.type = "button";
-		more.addEventListener("click", () => {
-			ungroupedVisible += PAGE_SIZE;
-			render();
-		});
-		body.append(more);
+	const body = el("div", "card-body");
+	const info = pageInfo(UNGROUPED, ids.length);
+	if (ids.length === 0) {
+		const filtering = filterQuery || dirFilter;
+		body.append(emptyState(filtering ? L.noMatch : L.ungroupedEmpty, filtering ? L.clearFilters : null, clearFilters));
+	} else {
+		for (const id of ids.slice(info.start, info.end)) {
+			const row = sessionRow(id, null, false);
+			if (row) body.append(row);
+		}
+		const nav = pager(UNGROUPED, ids.length);
+		if (nav) body.append(nav);
 	}
 	card.append(body);
 	return card;
@@ -1142,38 +1543,24 @@ function anyCollapsed() {
 	return state.groups.some((group) => state.collapsed.has(group.id));
 }
 
-function renderDirFilter() {
-	const select = $("dir-filter");
-	const entries = dirEntries();
-	select.replaceChildren();
-	const all = el("option", null, `${L.filterDir}（${state.sessions.size}）`);
-	all.value = "";
-	select.append(all);
-	for (const entry of entries) {
-		const option = el("option", null, `${entry.short}（${entry.ids.length}）`);
-		option.value = entry.key;
-		option.title = entry.directory || entry.label;
-		select.append(option);
-	}
-	select.value = dirFilter;
-	select.hidden = entries.length <= 1;
-}
-
 function render() {
 	if (!state.ready) return;
+	closeMenu(false);
 	renderStaticText();
 	renderStats();
 	renderDirFilter();
 
 	const container = $("groups");
+	const scrollTop = container.scrollTop;
 	container.replaceChildren();
 	if (state.sessions.size === 0) {
-		container.append(el("p", "empty", L.noSessions));
+		container.append(emptyState(L.noSessions, null, null, true));
+		container.scrollTop = scrollTop;
 		return;
 	}
 
 	if (filterQuery || dirFilter) {
-		// 过滤时自动展开：结构还在，但有命中的组必须露出来（不写回 folded 状态）
+		// 过滤时自动展开：结构还在，但有命中的组必须露出来（不写回折叠状态）
 		const matched = new Set(visibleIds([...state.sessions.keys()]));
 		let any = false;
 		state.groups.forEach((group, index) => {
@@ -1185,15 +1572,15 @@ function render() {
 			any = true;
 			container.append(ungroupedCard(true));
 		}
-		if (!any) container.append(el("p", "empty", L.noMatch));
+		if (!any) container.append(emptyState(L.noMatch, L.clearFilters, clearFilters, true));
+		container.scrollTop = scrollTop;
 		return;
 	}
 
-	if (state.groups.length === 0) {
-		container.append(el("p", "empty", L.emptyHint));
-	}
+	if (state.groups.length === 0) container.append(emptyState(L.empty, L.newGroup, openCreateModal, true, L.emptyHint));
 	state.groups.forEach((group, index) => container.append(groupCard(group, index, false)));
 	container.append(ungroupedCard(false));
+	container.scrollTop = scrollTop;
 }
 
 /* ---------- 新建分组弹层（按目录添加） ---------- */
@@ -1234,28 +1621,23 @@ function createSelectedCount() {
 function renderCreateDirs() {
 	const container = $("create-dirs");
 	container.replaceChildren();
+	container.scrollTop = 0;
 	const entries = dirEntries();
-	if (entries.length === 0) {
-		container.append(el("p", "empty", L.noSessions));
-	} else {
-		for (const entry of entries) {
-			const row = el("label", "picker-row");
-			const box = el("input", "picker-check");
-			box.type = "checkbox";
-			box.checked = createDraft.dirs.has(entry.key);
-			box.addEventListener("change", () => {
-				if (box.checked) createDraft.dirs.add(entry.key);
-				else createDraft.dirs.delete(entry.key);
-				updateCreateHint();
-			});
-			row.append(box);
-			const text = el("div", "picker-text");
-			text.append(el("span", "picker-label", entry.short));
-			text.append(el("span", "picker-meta", `${entry.projectName || L.unknownDir}${L.statsSep}${entry.ids.length} ${L.sessionsUnit}`));
-			row.title = entry.directory || entry.label;
-			row.append(text);
-			container.append(row);
-		}
+	if (entries.length === 0) container.append(el("p", "empty-text", L.noSessions));
+	for (const entry of entries) {
+		container.append(
+			pickerRow({
+				checked: createDraft.dirs.has(entry.key),
+				title: entry.short,
+				subtitle: (entry.projectName || L.unknownDir) + L.statsSep + entry.ids.length + " " + L.sessionsUnit,
+				full: entry.directory || entry.label,
+				onToggle: (value) => {
+					if (value) createDraft.dirs.add(entry.key);
+					else createDraft.dirs.delete(entry.key);
+					updateCreateHint();
+				},
+			}),
+		);
 	}
 	updateCreateHint();
 }
@@ -1314,7 +1696,7 @@ async function submitCreateModal() {
 	state.groups.push(group);
 	await saveGroup(group);
 	await saveMeta();
-	ungroupedVisible = UNGROUPED_PAGE;
+	pages.delete(group.id);
 	closeCreateModal();
 	render();
 }
@@ -1325,28 +1707,25 @@ function openAddModal(groupId) {
 	const group = groupById(groupId);
 	if (!group) return;
 	modal.groupId = groupId;
-	modal.was = new Set(group.ids);
 	modal.now = new Set(group.ids);
 	modal.dirs = new Set(groupScope(group));
 	modal.allDirs = false;
 	$("modal-title").textContent = L.addSessionsTitle.replace("{name}", group.name);
 	$("modal-search").value = "";
-	$("modal-hint").textContent = L.modalHint;
 	$("overlay").hidden = false;
-	renderAddList();
+	renderAddList(true);
 	$("modal-search").focus();
 }
 
 function closeAddModal() {
 	modal.groupId = null;
-	modal.was = new Set();
 	modal.now = new Set();
 	modal.dirs = new Set();
 	modal.allDirs = false;
 	$("overlay").hidden = true;
 }
 
-/** 勾选不合法（跨范围）时就地把目录并入范围，保证「组内会话 ⊆ 目录范围」。 */
+/** 勾选不合法（跨范围）时就地把目录并入范围，保证「组内会话 属于 目录范围」。 */
 function addToDraft(id) {
 	modal.now.add(id);
 	if (modal.dirs.size === 0) return false;
@@ -1358,8 +1737,13 @@ function addToDraft(id) {
 	return true;
 }
 
-function renderAddList() {
+function updateAddHint() {
+	$("modal-hint").textContent = L.selectedUnit.replace("{n}", String(modal.now.size)) + L.statsSep + L.modalHint;
+}
+
+function renderAddList(resetScroll = false) {
 	const container = $("modal-list");
+	const scrollTop = resetScroll ? 0 : container.scrollTop;
 	container.replaceChildren();
 	const group = groupById(modal.groupId);
 	if (!group) return;
@@ -1368,14 +1752,13 @@ function renderAddList() {
 
 	if (limited) {
 		const bar = el("div", "scope-bar");
-		bar.append(el("span", "scope-bar-label", `${L.scopeLabel}${L.statsSep}`));
+		bar.append(el("span", "scope-bar-label", L.scopeLabel));
 		for (const key of [...modal.dirs].slice(0, 4)) bar.append(el("span", "scope-chip", scopeLabelOf(key)));
-		if (modal.dirs.size > 4) bar.append(el("span", "scope-chip", `+${modal.dirs.size - 4}`));
-		const toggle = el("button", "link-btn", showAll ? L.onlyScope : L.showAllDirs);
-		toggle.type = "button";
+		if (modal.dirs.size > 4) bar.append(el("span", "scope-chip", "+" + (modal.dirs.size - 4)));
+		const toggle = textBtn(showAll ? L.onlyScope : L.showAllDirs, null, "btn btn-ghost btn-xs");
 		toggle.addEventListener("click", () => {
 			modal.allDirs = !modal.allDirs;
-			renderAddList();
+			renderAddList(true);
 		});
 		bar.title = L.scopeHint;
 		bar.append(toggle);
@@ -1401,18 +1784,16 @@ function renderAddList() {
 		if (ids.length === 0) continue;
 		total += ids.length;
 		const section = el("div", "picker-section");
-		const head = el("div", "picker-section-head");
-		const label = el("span", "picker-section-name", `${entry.short}${L.statsSep}${ids.length}`);
+		const head = el("div", "picker-head");
+		const label = el("span", "picker-name", entry.short + L.statsSep + ids.length);
 		if (entry.directory) label.title = entry.directory;
 		head.append(label);
-		const allBtn = el("button", "link-btn", L.selectAll);
-		allBtn.type = "button";
+		const allBtn = textBtn(L.selectAll, null, "btn btn-ghost btn-xs");
 		allBtn.addEventListener("click", () => {
 			for (const id of ids) addToDraft(id);
 			renderAddList();
 		});
-		const noneBtn = el("button", "link-btn", L.clearAll);
-		noneBtn.type = "button";
+		const noneBtn = textBtn(L.clearAll, null, "btn btn-ghost btn-xs");
 		noneBtn.addEventListener("click", () => {
 			for (const id of ids) modal.now.delete(id);
 			renderAddList();
@@ -1423,30 +1804,33 @@ function renderAddList() {
 		for (const id of ids) {
 			const session = state.sessions.get(id);
 			if (!session) continue;
-			const row = el("label", "picker-row" + (modal.now.has(id) ? " checked" : ""));
-			const box = el("input", "picker-check");
-			box.type = "checkbox";
-			box.checked = modal.now.has(id);
-			box.addEventListener("change", () => {
-				if (box.checked) addToDraft(id);
-				else modal.now.delete(id);
-				renderAddList();
-			});
-			row.append(box);
-			const text = el("div", "picker-text");
-			text.append(el("span", "picker-label", session.title || L.untitled));
 			const others = groupsOf(id).filter((item) => item.id !== group.id);
-			const meta = el("span", "picker-meta");
-			const time = fmtClock(session.updatedAt);
-			meta.append(el("span", null, time));
-			if (others.length > 0) meta.append(el("span", "chip", others.map((item) => item.name).join(" / ")));
-			text.append(meta);
-			row.append(text);
+			const subtitle = [fmtClock(session.updatedAt), others.length > 0 ? others.map((item) => item.name).join(" / ") : ""].filter(Boolean).join(L.statsSep);
+			const row = pickerRow({
+				checked: modal.now.has(id),
+				title: session.title || L.untitled,
+				subtitle,
+				full: session.title || L.untitled,
+				onToggle: (value) => {
+					if (value) {
+						// 勾了范围外的会话会顺带把目录并入范围：重绘一次让范围条同步。
+						if (addToDraft(id)) {
+							renderAddList();
+							return;
+						}
+					} else {
+						modal.now.delete(id);
+					}
+					updateAddHint();
+				},
+			});
 			section.append(row);
 		}
 		container.append(section);
 	}
-	if (total === 0) container.append(el("p", "empty", L.noMatch));
+	if (total === 0) container.append(el("p", "empty-text", L.noMatch));
+	container.scrollTop = scrollTop;
+	updateAddHint();
 }
 
 async function submitAddModal() {
@@ -1465,10 +1849,10 @@ async function submitAddModal() {
 
 /* ---------- 详情弹层 ---------- */
 
-function infoRow(label, value, title) {
+function infoRow(label, value, title, mono) {
 	const row = el("div", "info-row");
 	row.append(el("span", "info-label", label));
-	const text = el("span", "info-value", value);
+	const text = el("span", "info-value" + (mono ? " is-mono" : ""), value);
 	if (title) text.title = title;
 	row.append(text);
 	return row;
@@ -1483,7 +1867,7 @@ function openInfoModal(sessionId) {
 	body.replaceChildren();
 	body.append(el("p", "info-title-text", session.title || L.untitled));
 	const groupNames = groupsOf(sessionId).map((group) => group.name);
-	body.append(infoRow(L.fieldDirectory, session.directory || L.unknownDir, session.directory));
+	body.append(infoRow(L.fieldDirectory, session.directory || L.unknownDir, session.directory, true));
 	if (session.projectName) body.append(infoRow(L.fieldProject, session.projectName));
 	body.append(infoRow(L.fieldBackend, session.backend || "pi"));
 	if (session.model) body.append(infoRow(L.fieldModel, session.model));
@@ -1491,7 +1875,7 @@ function openInfoModal(sessionId) {
 	body.append(infoRow(L.fieldCreatedAt, fmtClock(session.createdAt)));
 	body.append(infoRow(L.fieldUpdatedAt, fmtClock(session.updatedAt)));
 	body.append(infoRow(L.fieldStatus, session.readable ? L.statusSaved : L.statusNoHistory));
-	body.append(infoRow(L.fieldId, session.id));
+	body.append(infoRow(L.fieldId, session.id, session.id, true));
 }
 
 function closeInfoModal() {
@@ -1501,6 +1885,7 @@ function closeInfoModal() {
 /* ---------- 事件绑定 ---------- */
 
 function closeTopOverlay() {
+	if (!$("confirm-overlay").hidden) return closeConfirm();
 	if (!$("info-overlay").hidden) return closeInfoModal();
 	if (!$("create-overlay").hidden) return closeCreateModal();
 	if (!$("overlay").hidden) return closeAddModal();
@@ -1524,6 +1909,7 @@ function bindStaticControls() {
 	const applyFilter = debounce(() => {
 		filterQuery = search.value.trim().toLowerCase();
 		$("search-clear").hidden = filterQuery.length === 0;
+		resetPages();
 		render();
 	}, 120);
 	search.addEventListener("input", applyFilter);
@@ -1531,14 +1917,11 @@ function bindStaticControls() {
 		search.value = "";
 		filterQuery = "";
 		$("search-clear").hidden = true;
+		resetPages();
 		render();
 		search.focus();
 	});
-	$("dir-filter").addEventListener("change", (event) => {
-		dirFilter = event.target.value;
-		ungroupedVisible = UNGROUPED_PAGE;
-		render();
-	});
+	$("dir-filter-trigger").addEventListener("click", openDirFilter);
 
 	$("create-close").addEventListener("click", closeCreateModal);
 	$("create-cancel").addEventListener("click", closeCreateModal);
@@ -1562,27 +1945,51 @@ function bindStaticControls() {
 	$("modal-close").addEventListener("click", closeAddModal);
 	$("modal-cancel").addEventListener("click", closeAddModal);
 	$("modal-save").addEventListener("click", () => void submitAddModal().catch(actionError));
-	$("modal-search").addEventListener("input", renderAddList);
+	$("modal-search").addEventListener("input", () => renderAddList(true));
 	$("info-close").addEventListener("click", closeInfoModal);
 
-	for (const id of ["create-overlay", "overlay", "info-overlay"]) {
+	$("confirm-cancel").addEventListener("click", closeConfirm);
+	$("confirm-ok").addEventListener("click", () => {
+		const action = confirmAction;
+		closeConfirm();
+		if (action) action();
+	});
+
+	for (const id of ["create-overlay", "overlay", "info-overlay", "confirm-overlay"]) {
 		$(id).addEventListener("click", (event) => {
 			if (event.target === event.currentTarget) closeTopOverlay();
 		});
 	}
 	document.addEventListener("keydown", (event) => {
 		if (event.key !== "Escape") return;
-		if (closeTopOverlay() !== false) event.preventDefault();
-		else if (filterQuery) {
+		if (closeMenu()) {
+			event.preventDefault();
+			return;
+		}
+		if (closeTopOverlay() !== false) {
+			event.preventDefault();
+			return;
+		}
+		if (filterQuery) {
 			$("search-input").value = "";
 			filterQuery = "";
 			$("search-clear").hidden = true;
+			resetPages();
 			render();
 		}
 	});
 }
 
 /* ---------- 启动 ---------- */
+
+/** 60s 静默重绘会打断正在进行的改名/勾选与弹层输入：这些时刻跳过。 */
+function isInteracting() {
+	if (menuState) return true;
+	if (["create-overlay", "overlay", "info-overlay", "confirm-overlay"].some((id) => !$(id).hidden)) return true;
+	const active = document.activeElement;
+	if (!active) return false;
+	return active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.closest(".overlay") !== null;
+}
 
 async function boot() {
 	bindStaticControls();
@@ -1597,7 +2004,9 @@ async function boot() {
 	render();
 	pideck.onEvent(handleEvent);
 	// 活跃点与相对时间会随时间漂移：每分钟静默重绘一次（不重新请求数据）
-	setInterval(() => render(), 60_000);
+	setInterval(() => {
+		if (!isInteracting()) render();
+	}, 60000);
 }
 
 void boot();

@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import type { HostPluginContext } from "../../../../shared/types/hostPlugin";
 import { desktopApi } from "../../desktopApi";
-
-const TOKEN_NAMES = ["--color-bg-app", "--color-bg-panel", "--color-bg-input", "--color-text-primary", "--color-text-secondary", "--color-border-default", "--color-accent", "--color-text-inverse"];
+import { HOST_PLUGIN_THEME_TOKENS } from "./hostPluginTokens";
 
 /** 创建型 API 需要的额外属性：全局 WebviewElement（types.d.ts）只声明了方法面。 */
 type CreatableWebview = WebviewElement & { src: string; partition: string };
@@ -11,7 +10,9 @@ type CreatableWebview = WebviewElement & { src: string; partition: string };
 function contextInput(scope: { projectId?: string; sessionId?: string }): HostPluginContext {
 	const root = document.documentElement;
 	const style = getComputedStyle(root);
-	const tokens = Object.fromEntries(TOKEN_NAMES.map((name) => [name, style.getPropertyValue(name).trim()]).filter(([, value]) => value));
+	// 字体 token 可能来自用户自定义字体（原样写入 CSS），先按 policy 的同一组边界筛掉非法值：
+	// 一个坏值不该让整次 context 更新被拒、把面板卡在 invalid-context。
+	const tokens = Object.fromEntries(HOST_PLUGIN_THEME_TOKENS.map((name) => [name, style.getPropertyValue(name).trim()] as const).filter(([, value]) => value.length > 0 && value.length <= 400 && !/[;{}<>\u0000-\u001f]/.test(value)));
 	return { ...scope, locale: root.lang.startsWith("zh") ? "zh-CN" : "en-US", theme: root.dataset.theme === "light" ? "light" : "dark", tokens };
 }
 

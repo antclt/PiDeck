@@ -26,8 +26,10 @@ export function parsePluginContext(value: unknown): HostPluginContext {
 	const tokens: Record<string, string> = {};
 	if (value.tokens !== undefined) {
 		if (!isPluginRecord(value.tokens) || Object.keys(value.tokens).length > 40) throw new Error("invalid-context");
+		// 值长度上限 400：默认字体栈（--font-family-base）约 200 字符，160 会把整套 context 判成非法。
+		// 禁止 ;{}<> 与控制字符后，再长的值也只是同一条声明的取值，无法逃出 insertCSS 规则块。
 		for (const [key, token] of Object.entries(value.tokens)) {
-			if (!/^--[a-z-]{1,60}$/.test(key) || typeof token !== "string" || token.length > 160 || /[;{}<>\u0000-\u001f]/.test(token)) throw new Error("invalid-context");
+			if (!/^--[a-z-]{1,60}$/.test(key) || typeof token !== "string" || token.length > 400 || /[;{}<>\u0000-\u001f]/.test(token)) throw new Error("invalid-context");
 			tokens[key] = token;
 		}
 	}

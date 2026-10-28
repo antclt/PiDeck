@@ -300,7 +300,7 @@ const PIDECK_PLUGIN_DEV_SYSTEM_PROMPT = [
 	"- 会话数据只读、只当前项目；分页用 nextCursor/nextOffset，禁止一次拉全量。",
 	"- 权限最小化：只声明真实需要的权限；网络只声明实际 origin/端口；同时 sessions.read + 网络时必须明确提示「会把哪些数据发到哪里」。",
 	"- 不要写死密钥/Token 到包或日志；storage 不是密钥保险箱；需要认证让用户自行提供并说明风险。",
-	"- 样式只用 PiDeck 注入的 --color-* 变量并带缺省值（--color-bg-app/panel/input、--color-text-primary/secondary、--color-border-default、--color-accent、--color-text-inverse）；不要假设暗色主题；文案按 context.locale 出中英两份。",
+	"- 样式只用 PiDeck 注入的 --color-* / --radius-* / --shadow-* / --control-height-* / --font-size-* / --font-family-* token 并带缺省值（清单见 docs/host-plugin-dev-guide.md §5.7）；不要假设暗色主题；文案按 context.locale 出中英两份。",
 	"- 面板是独立沙箱 webview：CSP 禁止直连；用相对路径引用包内资源；不要带 query；ES module 可 import 包内模块。",
 	"- 频率限制：每实例 2 个在途请求、每秒 20 个请求；超出 rate-limited，要合并/节流。",
 	"- 本地服务面板通常只监听 127.0.0.1 且无鉴权；不要引导用户暴露公网。",

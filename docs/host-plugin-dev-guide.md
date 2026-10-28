@@ -217,7 +217,7 @@ type HostPluginContext = {
 	scope?: "project" | "workspace"; // 会话数据范围：声明 sessions.read.workspace 才是 workspace
 	locale: "zh-CN" | "en-US"; // 跟随界面语言
 	theme: "light" | "dark"; // 跟随明暗主题
-	tokens?: Record<string, string>; // 主题色变量（CSS 自定义属性）
+	tokens?: Record<string, string>; // 宿主设计 token（颜色 / 圆角 / 阴影 / 控件高度 / 字号 / 字体）
 };
 ```
 
@@ -420,23 +420,32 @@ const off = pideck.onEvent((event) => {
 
 ### 5.7 主题与样式
 
-PiDeck 把语义色注入为 CSS 变量（`:root`，随主题/语言实时更新），直接用即可：
+PiDeck 把设计体系的关键 token 注入为 CSS 变量（`:root`，随主题/语言/字体设置实时更新），插件面板据此画成和宿主一致的样子：
 
-`--color-bg-app`、`--color-bg-panel`、`--color-bg-input`、`--color-text-primary`、`--color-text-secondary`、`--color-border-default`、`--color-accent`、`--color-text-inverse`。
+- 颜色：`--color-bg-app`、`--color-bg-panel`、`--color-bg-input`、`--color-bg-muted`、`--color-bg-hover`、`--color-bg-active`、`--color-bg-popover`、`--color-text-primary`、`--color-text-secondary`、`--color-text-tertiary`、`--color-text-faint`、`--color-text-inverse`、`--color-border-subtle`、`--color-border-default`、`--color-border-strong`、`--color-accent`、`--color-accent-strong`、`--color-accent-soft`、`--color-danger`、`--color-success`
+- 形状与阴影：`--radius-sm` / `--radius-md` / `--radius-lg` / `--radius-xl` / `--radius-pill`、`--shadow-popover`、`--shadow-modal`
+- 控件高度：`--control-height-sm`（28）/ `--control-height-md`（32）/ `--control-height-lg`（36）
+- 排版：`--font-size-micro` / `--font-size-caption` / `--font-size-control` / `--font-size-body` / `--font-size-title`、`--font-family-base`、`--font-family-mono`
 
 ```css
 body {
-	background: var(--color-bg-panel, #1b1b1f);
+	background: var(--color-bg-app, #1b1b1f);
 	color: var(--color-text-primary, #e6e6e6);
+	font-family: var(--font-family-base, -apple-system, sans-serif);
+	font-size: var(--font-size-control, 13px);
 }
 .primary {
 	background: var(--color-accent, #3b82f6);
 	color: var(--color-text-inverse, #fff);
 }
+.row:hover {
+	background: var(--color-bg-hover, #262626);
+}
 ```
 
-- 一定要带缺省值，且**不要**只按暗色硬编码——亮色主题下会看不清。
-- `--color-accent` 是「面」色：文字要用 `--color-text-inverse`，别拿它当文字色。
+- 一定要带缺省值，且**不要**只按暗色硬编码——亮色主题下会看不清；缺省值写宿主默认值即可。
+- `--color-accent` 是「面」色（主按钮 / 选中强调）：文字要用 `--color-text-inverse`，别拿它当文字色或悬停底色；悬停 / 选中用 `--color-bg-hover` / `--color-bg-active`，弹层用 `--color-bg-popover` + `--shadow-popover`。
+- 每个面板最多注入 40 个 token，单个值 ≤400 字符（默认字体栈较长）；值里带 `;{}` 或 `<>` 会被判非法，整次 context 更新失败。新增 token 需同时改 `src/renderer/src/hooks/plugins/hostPluginTokens.ts` 的 `HOST_PLUGIN_THEME_TOKENS` 与本节。
 
 ### 5.8 本地服务：启停与打开 Web 面板（`service.local`）
 
