@@ -15,6 +15,8 @@ import { ipcChannels } from "../../shared/ipc";
 import type { AcpSessionConfigOption, AcpToolConfig } from "../../shared/types/acp";
 import { sanitizeAcpTools, validateAcpTool } from "../acp/acpToolConfig";
 import { detectAcpPreset, findPresetById, runNpmGlobalAction, type AcpToolLifecycleDeps } from "../acp/acpToolLifecycle";
+import { getAppLogger } from "../logging/sharedLogger";
+import { ensureWindowsPathFresh } from "../process/windowsPathRefresh";
 import type { AcpLifecycleEvent, AcpToolStatus } from "../../shared/types/acp";
 import type { SettingsStore } from "../settings/SettingsStore";
 
@@ -75,6 +77,11 @@ export function registerAcpIpc(deps: {
 
 	ipcMain.handle(ipcChannels.acpToolDetect, async (_event, presetId: unknown): Promise<AcpToolStatus> => {
 		const preset = requirePreset(presetId);
+		// 检测就是「用户刚装完 CLI 想确认一下」的那个时刻：先补一次注册表 PATH 差集，
+		// 否则本轮跑在旧 PATH 快照上，装好的命令一律报 missing（详见 windowsPathRefresh）。
+		await ensureWindowsPathFresh({
+			onAdded: (directories) => void getAppLogger()?.info("acp", "Windows PATH refreshed before detect", { presetId: preset.id, added: directories }),
+		});
 		return detectAcpPreset(getLifecycleDeps(), preset);
 	});
 

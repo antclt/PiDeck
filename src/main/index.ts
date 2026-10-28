@@ -537,6 +537,7 @@ import { DiagnosticsMonitor } from "./diagnostics/DiagnosticsMonitor";
 import { EnvironmentDoctor } from "./health/EnvironmentDoctor";
 import { LogBundleExporter } from "./health/LogBundleExporter";
 import { QuitCleanupRegistry } from "./lifecycle/QuitCleanupRegistry";
+import { ensureWindowsPathFresh } from "./process/windowsPathRefresh";
 import type { FeishuChatBinding } from "../shared/types";
 import { createRealAutoUpdater } from "./update/createAutoUpdater";
 import { installAtomgitNoCacheBypass, UPDATER_PARTITION_NAME } from "./update/atomgitNoCacheBypass";
@@ -5004,6 +5005,13 @@ app
 	.then(async () => {
 		// 未拿到同版本主实例锁时不要继续初始化，避免第二进程短暂闪窗。
 		if (singleInstanceEnabled && !gotSingleInstanceLock) return;
+
+		// Windows 的进程环境块是启动快照：用户在 PiDeck 开着的时候装了 CLI（官网脚本只改注册表 PATH，
+		// 如 %USERPROFILE%\.qoder-cn\bin\qoderclicn），已运行的进程里 spawn 出去只会回
+		// 「不是内部或外部命令」。开机刷一次，设置页点「检测」时还会再刷（见 acpIpc）。
+		void ensureWindowsPathFresh({
+			onAdded: (directories) => void appLogger?.info("app", "Windows PATH refreshed from registry", { added: directories }),
+		});
 
 		// 引用写入门（INV-1 / INV-12 写入侧）：远端项目与会话登记前复查 hostId 仍能解析到 profile、
 		// 且没有跨 store rebind 事务在跑。门自己读 remote-hosts.json，不依赖主进程缓存；构造本身不做 I/O。
