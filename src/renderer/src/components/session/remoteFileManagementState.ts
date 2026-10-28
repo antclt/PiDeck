@@ -71,6 +71,10 @@ export function remoteFileEntryErrorKey(code: string | null): TranslationKey {
 		case "REMOTE_FILE_BUSY":
 			return "remoteFileEntry.busy";
 		case "REMOTE_FILE_CHANGED":
+		// 版本令牌失效（文件真变了 / 令牌过期 / 令牌表被挤掉）是**确定性拒绝**：远端一条命令都没执行。
+		// 它不能落到 default 的 failure（文案是「文件操作未获确认」），那会把「什么都没发生」说成「结果未知」，
+		// 与 REMOTE_FILE_RESULT_UNCONFIRMED 的唯一 unknown 语义冲突。
+		case "REMOTE_FILE_VERSION_INVALID":
 			return "remoteFileEntry.changed";
 		case "REMOTE_FILE_PERMISSION_DENIED":
 			return "remoteFileEntry.permission";
@@ -100,7 +104,15 @@ export function remoteFileEntryErrorKey(code: string | null): TranslationKey {
  * 目标已存在/条目已变化/名字非法都保留；受保护路径关闭（继续改也改不出合法路径）。
  */
 export function remoteFileEntryKeepsInput(code: string | null): boolean {
-	return code === "REMOTE_FILE_TARGET_EXISTS" || code === "REMOTE_FILE_CHANGED" || code === "REMOTE_FILE_NAME_INVALID" || code === "REMOTE_FILE_PARENT_NOT_FOUND" || code === "REMOTE_FILE_PARENT_NOT_DIRECTORY";
+	return (
+		code === "REMOTE_FILE_TARGET_EXISTS" ||
+		code === "REMOTE_FILE_CHANGED" ||
+		// 令牌失效同样是「刷新后重试」，输入保留才不至于让用户重打一遍名字。
+		code === "REMOTE_FILE_VERSION_INVALID" ||
+		code === "REMOTE_FILE_NAME_INVALID" ||
+		code === "REMOTE_FILE_PARENT_NOT_FOUND" ||
+		code === "REMOTE_FILE_PARENT_NOT_DIRECTORY"
+	);
 }
 
 export function remoteFileEntryIsUnknown(code: string | null): boolean {
