@@ -41,7 +41,18 @@ export type TurnRowActionsProps = {
  *    （与「正在执行命令…」同行，见 statusFacts），这里只显示本轮结束后的固定耗时，
  *    保证同一个数字不同时出现两处；
  * 2. 半透明降噪必须盖住整行——按钮图标与行末数字同一层，否则「图标偏淡、数字偏深」。
+ *
+ * 分区（2026-10 用户要求）：按钮 | 耗时 | 模型，三区之间用竖线分隔，视觉上各归各位。
+ * 竖线只在两侧都真有内容时才画：空正文的轮只剩耗时/模型，不能留下孤立的竖线。
  */
+function ZoneDivider() {
+	return (
+		<span aria-hidden="true" className="mx-1 select-none leading-none text-text-faint">
+			|
+		</span>
+	);
+}
+
 export function TurnRowActions(props: TurnRowActionsProps) {
 	const showActions = Boolean(props.mergedText) && !props.editing;
 	if (!showActions && !props.showDuration && !props.showTurnModel) return null;
@@ -81,24 +92,27 @@ export function TurnRowActions(props: TurnRowActionsProps) {
 					)}
 				</>
 			)}
+			{showActions && (props.showDuration || (props.showTurnModel && props.turnModel)) && <ZoneDivider />}
 			{props.showDuration && (
-				/* 图标尺寸 14 对齐同行按钮图标（原独占一行时是 12）；
-					   pl-[7px] 等于 size-7 按钮里 14px 图标的水平内缩量：时钟与前一个按钮图标的间距
-					   7+gap-1+7 与按钮之间的一致，不再比按钮之间更近。 */
-				<div className="flex items-center gap-1.5 pl-[7px] text-muted-foreground">
+				/* 图标尺寸 14 对齐同行按钮图标（原独占一行时是 12）；与按钮区之间改由竖线分隔，
+				   不再用 pl-[7px] 模拟按钮内缩。 */
+				<div className="flex items-center gap-1.5 text-muted-foreground">
 					<Clock size={14} className="shrink-0" aria-hidden="true" />
 					{/* 固定耗时（实时读数在状态条，见 statusFacts）；tabular-nums 与行头时间对齐 */}
 					<span className="text-body leading-none tabular-nums">{formatDuration(props.duration)}</span>
 				</div>
 			)}
+			{props.showDuration && props.showTurnModel && props.turnModel && <ZoneDivider />}
 			{props.showTurnModel && props.turnModel && (
 				/* 本轮实际使用的模型（provider + modelId）跟在耗时后面：同一会话内用户会频繁换模型，
-					   只在输入框显示当前模型不足以回看历史轮；流式中不显示，回复结束才落定。
-					   保留等宽字体与限宽截断以区别于耗时读数（text-body + 等宽数字），但去掉灰底
-					   ——每轮都有的元信息 chip 会给时间线添碎（2026-10 去底，ZCode 模型名即裸暗字）。
-					   title 给全量 provider/model。 */
-				<span className="ml-1 min-w-0 max-w-[16rem] truncate font-mono text-chat-detail leading-none text-text-tertiary" title={`${props.turnModel.provider}/${props.turnModel.modelId}`} data-turn-model={props.turnModel.modelId}>
-					{props.turnModel.modelId}
+				   只在输入框显示当前模型不足以回看历史轮；流式中不显示，回复结束才落定。
+				   字号与耗时区统一为 text-body（2026-10 用户要求：模型名不再比同行小一号）；保留等宽
+				   字体以区别于耗时读数，但去掉灰底——每轮都有的元信息 chip 会给时间线添碎。
+				   字符上限 28ch：等宽字体里 1ch 恰好是一个字符宽，超过按字符截断成省略号；
+				   max-w-[16rem] 只是窄窗口下的硬顶，不让长 id 把操作栏挤走。
+				   title 给全量 provider/model，鼠标移入可看全。 */
+				<span className="min-w-0 max-w-[16rem] truncate font-mono text-body leading-none text-text-tertiary" title={`${props.turnModel.provider}/${props.turnModel.modelId}`} data-turn-model={props.turnModel.modelId}>
+					<span className="block max-w-[28ch] truncate">{props.turnModel.modelId}</span>
 				</span>
 			)}
 		</div>
