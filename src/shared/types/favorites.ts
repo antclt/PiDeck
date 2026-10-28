@@ -1,8 +1,9 @@
 /**
- * 收藏（回复 / 划选片段）的共享契约。
+ * 收藏（回复 / 划选片段 / 会话）的共享契约。
  *
  * 收藏是 PiDeck 自己的本地数据（<userData>/favorites.json），**不写入会话文件、不改 pi 协议**：
- * 存的是「收藏那一刻的正文快照」，会话被删除或消息被编辑后收藏仍然可读；
+ * 回复与片段存「收藏那一刻的正文快照」，会话删除或消息编辑后仍可读；
+ * 会话收藏只存引用（sessionId/title/projectId），点击跳回原会话，不复制正文。
  * sessionId/messageId 只作为「来源」元信息，用于展示与后续跳转，不承担可读性。
  */
 
@@ -17,8 +18,8 @@ export const FAVORITE_META_MAX_CHARS = 200;
 /** 会话标题长度上限。 */
 export const FAVORITE_SESSION_TITLE_MAX_CHARS = 200;
 
-/** 收藏来源：整条消息快照 / 划选片段。 */
-export type FavoriteKind = "message" | "selection";
+/** 收藏来源：整条消息快照 / 划选片段 / 整个会话（引用，不复制正文）。 */
+export type FavoriteKind = "message" | "selection" | "session";
 
 /** 快照所属消息角色；划选片段可能跨块，未知时为 null。 */
 export type FavoriteRole = "user" | "assistant" | "system";
@@ -28,7 +29,7 @@ export type FavoriteEntry = {
 	/** 收藏时刻（epoch ms）：列表按此倒序，页面直接展示完整日期时间。 */
 	createdAt: number;
 	kind: FavoriteKind;
-	/** 正文快照（消息为 Markdown 源码，片段为纯文本）。 */
+	/** 正文快照（消息为 Markdown 源码，片段为纯文本）；会话收藏为空字符串。 */
 	text: string;
 	role: FavoriteRole | null;
 	sessionId: string | null;

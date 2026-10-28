@@ -35,6 +35,7 @@ import { isLocalProject } from "../../../../shared/projectLocation";
 import { formatAccelerator } from "../../../../shared/shortcuts";
 import { desktopApi } from "../../desktopApi";
 import { useShortcutBindings } from "../../hooks/useShortcutBindings";
+import { useFavorites } from "../../hooks/useFavorites";
 import { useRelativeTimeTicker } from "../../hooks/sidebar/useSessionActivityClock";
 
 export type SidebarActions = {
@@ -168,6 +169,8 @@ export type SidebarContentProps = {
 
 export function SidebarContent(props: SidebarContentProps) {
 	const { controller, actions } = props;
+	// 会话收藏：右键菜单的「已收藏态 + 切换」与收藏页共用同一份 atom/写入链路。
+	const favorites = useFavorites();
 	// 侧栏相对时间刷新节拍：会话静置时没有别的渲染源，「n分钟」也得自己往前走。
 	// 只在本组件挂一次，行组件订阅同一个 atom。
 	useRelativeTimeTicker();
@@ -690,6 +693,21 @@ export function SidebarContent(props: SidebarContentProps) {
 								}
 							: undefined
 					}
+					isSessionFavorited={menuAgentSessionRecord && menuAgentSessionRecord.status !== "draft" && menu.pinnable !== false ? favorites.favoritedSessionIds.has(menuAgentSessionRecord.id) : false}
+					onToggleSessionFavorite={
+						menuAgentSessionRecord && menuAgentSessionRecord.status !== "draft" && menu.pinnable !== false
+							? () => {
+									void favorites.toggleSessionFavorite({
+										kind: "session",
+										text: "",
+										sessionId: menuAgentSessionRecord.id,
+										sessionTitle: menuAgentSessionRecord.title,
+										projectId: menuAgentSessionRecord.projectId,
+									});
+									controller.closeMenu();
+								}
+							: undefined
+					}
 					onExport={() => {
 						void actions.agents.export(menuAgent);
 						controller.closeMenu();
@@ -813,6 +831,21 @@ export function SidebarContent(props: SidebarContentProps) {
 						menu.pinnable
 							? () => {
 									controller.toggleSessionPin(menuSession.id);
+									controller.closeMenu();
+								}
+							: undefined
+					}
+					isSessionFavorited={menu.pinnable ? favorites.favoritedSessionIds.has(menuSession.id) : false}
+					onToggleSessionFavorite={
+						menu.pinnable
+							? () => {
+									void favorites.toggleSessionFavorite({
+										kind: "session",
+										text: "",
+										sessionId: menuSession.id,
+										sessionTitle: menuSessionRecord?.title ?? menuSession.name,
+										projectId: menuSession.projectId ?? menu.projectId,
+									});
 									controller.closeMenu();
 								}
 							: undefined

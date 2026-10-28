@@ -49,6 +49,7 @@ import {
 	hiddenModulesAtom,
 	openAgentMarketPageAtom,
 	openFavoritesPageAtom,
+	favoritesOpenSessionRequestAtom,
 	hiddenComposerFeaturesAtom,
 	imageGenConfigAtom,
 	enhanceModelAtom,
@@ -294,6 +295,8 @@ export function App() {
 	const openAutomationPage = useSetAtom(openAutomationPageAtom);
 	const openAgentMarketPage = useSetAtom(openAgentMarketPageAtom);
 	const openFavoritesPage = useSetAtom(openFavoritesPageAtom);
+	const favoritesOpenSessionRequest = useAtomValue(favoritesOpenSessionRequestAtom);
+	const setFavoritesOpenSessionRequest = useSetAtom(favoritesOpenSessionRequestAtom);
 	// 页面式工作区（定时任务 / 智能体）：Tab 列表与当前呈现页面；切会话只失活、关闭才卸载。
 	const openWorkspacePageIds = useAtomValue(openWorkspacePageIdsAtom);
 	const activeWorkspacePage = useAtomValue(activeWorkspacePageAtom);
@@ -1543,6 +1546,21 @@ export function App() {
 		},
 		[runOpenSidebarSessionById, workspaceChrome],
 	);
+
+	// 收藏页「会话」条目：FavoritesPage 渲染在 SessionPaneServices 之外，经 atom 发导航请求，
+	// 这里复用侧栏打开链路（选中 + 常驻 Tab），不引入第二条会话选中路径。
+	useEffect(() => {
+		if (!favoritesOpenSessionRequest) return;
+		const request = favoritesOpenSessionRequest;
+		// 先消费再打开：openSidebarSessionByIdWithTab 的身份会随 workspaceChrome 变化，
+		// 不清空请求会在后续渲染里重复打开同一会话。
+		setFavoritesOpenSessionRequest(null);
+		void openSidebarSessionByIdWithTab(request.projectId, request.sessionId, "permanent").then((openedId) => {
+			// 目标恰好是当前会话时 scope 不变，页面自身不会失活；打开成功后显式让收藏页让位。
+			// 失败（会话已删除/项目读不到）时保留页面，用户还能看到收藏条目与提示。
+			if (openedId) deactivateWorkspacePage();
+		});
+	}, [deactivateWorkspacePage, favoritesOpenSessionRequest, openSidebarSessionByIdWithTab, setFavoritesOpenSessionRequest]);
 
 	useEffect(() => {
 		if (!activeProject) return;

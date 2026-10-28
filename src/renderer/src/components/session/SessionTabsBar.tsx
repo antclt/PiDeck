@@ -1,5 +1,5 @@
 import { useAtomValue } from "jotai";
-import { Check, ChevronDown, ChevronRight, CircleStop, CircleX, Copy, FileDown, FileText, Fingerprint, Folder, Globe, Link2, ListChecks, MessagesSquare, Pencil, PanelLeft, PanelRight, Pin, PinOff, ListRestart, Play, Plus, RefreshCcw, RotateCw, Target, Terminal, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, CircleStop, CircleX, Copy, FileDown, FileText, Fingerprint, Folder, Globe, Link2, ListChecks, MessagesSquare, Pencil, PanelLeft, PanelRight, Pin, PinOff, ListRestart, Play, Plus, RefreshCcw, RotateCw, Star, StarOff, Target, Terminal, X } from "lucide-react";
 import { Fragment, useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { sessionRecordByIdAtomFamily, sessionRuntimeBySessionIdAtomFamily, sessionRecordsAtom, projectInventoryByIdAtom, projectByIdAtomFamily, acpEnabledAtom, acpToolsAtom } from "../../atoms";
 import { t } from "../../i18n";
@@ -23,6 +23,7 @@ import { TitleScrollText } from "../sidebar/TitleScrollText";
 import { SessionHeader } from "./SessionHeader";
 import type { SessionMenuRunControl } from "./SessionActionsMenu";
 import { SessionActivityIndicator } from "./SessionActivityIndicator";
+import { useFavorites } from "../../hooks/useFavorites";
 import { TAB_CLOSE_BUTTON_CLASS } from "../../utils/tabCloseButton";
 
 import { SESSION_TAB_DRAG_MIME } from "../../utils/sessionSplitEdge";
@@ -908,6 +909,9 @@ function SessionTab(props: {
 	const { sessionId, active, pinned, preview, dragging } = props;
 	const record = useAtomValue(sessionRecordByIdAtomFamily(sessionId));
 	const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(sessionId));
+	// 收藏态与收藏页共用同一 atom；每个 Tab 只读一个 Set，写入走同一条 toggle 链路。
+	const favorites = useFavorites();
+	const sessionFavorited = Boolean(record && favorites.favoritedSessionIds.has(sessionId));
 	// Tab hover 富提示的工作区段：会话所属项目的目录名/完整路径。
 	// 无记录（草稿/匿名）或项目已移除时省略，不显示空行。
 	const tabProject = useAtomValue(projectByIdAtomFamily(record?.projectId ?? ""));
@@ -1139,6 +1143,14 @@ function SessionTab(props: {
 						{pinned ? t("tabs.unpin") : t("tabs.pin")}
 					</span>
 				</ContextMenuItem>
+				{record && record.status !== "draft" && (
+					<ContextMenuItem onSelect={() => void favorites.toggleSessionFavorite({ kind: "session", text: "", sessionId, sessionTitle: record.title, projectId: record.projectId })}>
+						<span className="inline-flex items-center gap-2">
+							{sessionFavorited ? <StarOff className="size-3.5" aria-hidden="true" /> : <Star className="size-3.5" aria-hidden="true" />}
+							{t(sessionFavorited ? "favorites.unsaveSession" : "favorites.saveSession")}
+						</span>
+					</ContextMenuItem>
+				)}
 				{!pinned && (
 					<ContextMenuItem onSelect={close}>
 						<span className="inline-flex items-center gap-2">

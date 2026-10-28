@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Bot, Copy, GripVertical, ListChecks, Loader2, Search, Star, TextQuote, Trash2, UserRound, X } from "lucide-react";
-import { useSetAtom } from "jotai";
+import { Bot, Copy, GripVertical, ListChecks, Loader2, MessagesSquare, Search, Star, TextQuote, Trash2, UserRound, X } from "lucide-react";
+import { useAtomValue, useSetAtom } from "jotai";
 import type { FavoriteEntry, FavoriteRole } from "../../../../shared/types";
-import { favoriteDetailOpenAtom } from "../../atoms/favorites-atoms";
+import { projectInventoryAtom, sessionCatalogLoadStateAtom, sessionRecordsAtom } from "../../atoms";
+import { favoriteDetailOpenAtom, favoritesOpenSessionRequestAtom } from "../../atoms/favorites-atoms";
 import { useFavorites } from "../../hooks/useFavorites";
 import { useListReorder, type ListReorderItemBinding } from "../../hooks/useListReorder";
 import { t } from "../../i18n";
@@ -25,11 +26,12 @@ import { ConfirmDialog } from "../ui-shadcn/ConfirmDialog";
 import { Input } from "../ui-shadcn/input";
 import { filterFavorites, type FavoriteFilter } from "./favoriteFilters";
 
-/** 筛选 chips：全部 / 回复 / 片段（与智能体分类 chips 同一形态）。 */
-const FILTERS: readonly { value: FavoriteFilter; labelKey: "favorites.filterAll" | "favorites.filterMessage" | "favorites.filterSelection" }[] = [
+/** 筛选 chips：全部 / 回复 / 片段 / 会话（与智能体分类 chips 同一形态）。 */
+const FILTERS: readonly { value: FavoriteFilter; labelKey: "favorites.filterAll" | "favorites.filterMessage" | "favorites.filterSelection" | "favorites.filterSession" }[] = [
 	{ value: "all", labelKey: "favorites.filterAll" },
 	{ value: "message", labelKey: "favorites.filterMessage" },
 	{ value: "selection", labelKey: "favorites.filterSelection" },
+	{ value: "session", labelKey: "favorites.filterSession" },
 ];
 
 function roleLabel(role: FavoriteRole): string {
@@ -62,6 +64,11 @@ export function FavoritesWorkspace() {
 	const [selected, setSelected] = useState<Set<string>>(() => new Set<string>());
 	const [pendingBulkDelete, setPendingBulkDelete] = useState(false);
 	const setDetailOpen = useSetAtom(favoriteDetailOpenAtom);
+	const setOpenSessionRequest = useSetAtom(favoritesOpenSessionRequestAtom);
+	const sessionRecords = useAtomValue(sessionRecordsAtom);
+	const catalogLoadState = useAtomValue(sessionCatalogLoadStateAtom);
+	const projects = useAtomValue(projectInventoryAtom);
+	const projectNameById = useMemo(() => new Map(projects.map((project) => [project.id, project.name])), [projects]);
 
 	const visible = useMemo(() => filterFavorites(entries ?? [], query, filter), [entries, query, filter]);
 	// 拖拽排序：keys 用完整列表，落点用可见列表——搜索时隐藏的收藏在完整顺序里保持原槽位。
@@ -98,6 +105,31 @@ export function FavoritesWorkspace() {
 	const handleCopy = async (entry: FavoriteEntry) => {
 		const ok = await writeClipboard(entry.text);
 		showNotice(ok ? t("copy.success") : t("copy.failed"), ok ? 1200 : 2000, ok ? undefined : "error");
+	};
+
+	/**
+	 * 会话收藏是引用：优先按内存 catalog 打开；跨项目条目可能还没加载 catalog，
+	 * 此时带收藏时记录的项目 id 交给 App 的侧栏打开链路（它会先刷新该项目）。
+	 * 只有「项目 catalog 已就绪且确实找不到」才提示失效，避免把未加载误报成已删除。
+	 * 条目永不因失效自动删除，用户可自行删除。
+	 */
+	const sessionMissing = (entry: FavoriteEntry): boolean => {
+		if (entry.kind !== "session" || !entry.sessionId) return false;
+		if (sessionRecords[entry.sessionId]) return false;
+		// 没有项目归属的会话条目无法交给侧栏打开链路，直接按失效处理。
+		if (!entry.projectId) return true;
+		return catalogLoadState[entry.projectId]?.status === "ready";
+	};
+
+	const handleOpenSession = (entry: FavoriteEntry) => {
+		if (!entry.sessionId) return;
+		const record = sessionRecords[entry.sessionId];
+		const projectId = record?.projectId ?? entry.projectId;
+		if (!projectId || sessionMissing(entry)) {
+			showNotice(t("favorites.sessionMissing"), 2600, "error");
+			return;
+		}
+		setOpenSessionRequest({ sessionId: entry.sessionId, projectId });
 	};
 
 	const exitSelection = () => {
@@ -192,21 +224,29 @@ export function FavoritesWorkspace() {
 						    收藏不算删除（exit 时长为 0），真实删除（单删/批量删）才淡出并让下方行滑位。
 						    与 useListReorder 的拖拽 FLIP 互不干扰：重排不 bump 生成数。 */}
 						<RemovalList remainingIds={allIds}>
-							{visible.map((entry) => (
-								<RemovalRow key={entry.id} itemId={entry.id}>
-									<FavoriteCard
-										entry={entry}
-										active={entry.id === detailId}
-										selectionMode={selectionMode}
-										checked={selected.has(entry.id)}
-										reorder={reorder.itemBinding(entry.id)}
-										onOpen={(item) => setDetailId((current) => (current === item.id ? null : item.id))}
-										onToggleSelect={toggleSelect}
-										onCopy={(item) => void handleCopy(item)}
-										onRequestDelete={setPendingDelete}
-									/>
-								</RemovalRow>
-							))}
+							{visible.map((entry) => {
+								const record = entry.kind === "session" && entry.sessionId ? sessionRecords[entry.sessionId] : undefined;
+								const projectId = entry.projectId ?? record?.projectId;
+								return (
+									<RemovalRow key={entry.id} itemId={entry.id}>
+										<FavoriteCard
+											entry={entry}
+											active={entry.id === detailId}
+											selectionMode={selectionMode}
+											checked={selected.has(entry.id)}
+											reorder={reorder.itemBinding(entry.id)}
+											onOpen={(item) => setDetailId((current) => (current === item.id ? null : item.id))}
+											onOpenSession={handleOpenSession}
+											onToggleSelect={toggleSelect}
+											onCopy={(item) => void handleCopy(item)}
+											onRequestDelete={setPendingDelete}
+											sessionTitle={record?.title ?? entry.sessionTitle ?? undefined}
+											sessionProject={projectId ? projectNameById.get(projectId) : undefined}
+											sessionMissing={sessionMissing(entry)}
+										/>
+									</RemovalRow>
+								);
+							})}
 						</RemovalList>
 					</div>
 				)}
@@ -247,21 +287,29 @@ function FavoriteCard(props: {
 	checked: boolean;
 	reorder: ListReorderItemBinding;
 	onOpen: (entry: FavoriteEntry) => void;
+	onOpenSession: (entry: FavoriteEntry) => void;
 	onToggleSelect: (entry: FavoriteEntry) => void;
 	onCopy: (entry: FavoriteEntry) => void;
 	onRequestDelete: (entry: FavoriteEntry) => void;
+	/** 会话收藏的当前标题（优先取 catalog，标题改过后仍展示最新值）。 */
+	sessionTitle?: string;
+	/** 会话所属项目名；项目已移除时 undefined。 */
+	sessionProject?: string;
+	/** 会话已从 catalog 消失：仍保留条目供删除，但点击只提示失效。 */
+	sessionMissing?: boolean;
 }) {
 	const entry = props.entry;
+	const isSession = entry.kind === "session";
 	const isSelection = entry.kind === "selection";
-	const KindIcon = isSelection ? TextQuote : entry.role === "user" ? UserRound : Bot;
+	const KindIcon = isSession ? MessagesSquare : isSelection ? TextQuote : entry.role === "user" ? UserRound : Bot;
 	const preview = useMemo(() => (isSelection ? entry.text : stripMarkdown(entry.text)), [entry.text, isSelection]);
-	const activate = () => (props.selectionMode ? props.onToggleSelect(entry) : props.onOpen(entry));
+	const activate = () => (props.selectionMode ? props.onToggleSelect(entry) : isSession ? props.onOpenSession(entry) : props.onOpen(entry));
 	return (
 		<article
 			ref={props.reorder.register}
 			role="button"
 			tabIndex={0}
-			aria-label={props.selectionMode ? t("common.toggleSelection") : t("favorites.openDetail")}
+			aria-label={props.selectionMode ? t("common.toggleSelection") : isSession ? t("favorites.openSession") : t("favorites.openDetail")}
 			aria-pressed={props.selectionMode ? props.checked : props.active}
 			onClick={activate}
 			onKeyDown={(event) => {
@@ -306,10 +354,10 @@ function FavoriteCard(props: {
 			)}
 			<div className="min-w-0 flex-1">
 				<div className="flex min-w-0 items-center gap-1.5 text-micro text-muted-foreground">
-					<span className="shrink-0">{isSelection ? t("favorites.kindSelection") : t("favorites.kindMessage")}</span>
+					<span className="shrink-0">{isSession ? t("favorites.kindSession") : isSelection ? t("favorites.kindSelection") : t("favorites.kindMessage")}</span>
 					{entry.role && <span className="shrink-0">· {roleLabel(entry.role)}</span>}
-					<span className="min-w-0 truncate" title={entry.sessionTitle ?? undefined}>
-						· {entry.sessionTitle ?? t("favorites.sourceUnknown")}
+					<span className="min-w-0 truncate" title={isSession ? props.sessionProject : (entry.sessionTitle ?? undefined)}>
+						· {isSession ? (props.sessionProject ?? t("favorites.sourceUnknown")) : (props.sessionTitle ?? entry.sessionTitle ?? t("favorites.sourceUnknown"))}
 					</span>
 					{entry.partial && <span className="shrink-0 rounded-sm bg-muted px-1 py-0.5">{t("favorites.partial")}</span>}
 					{entry.truncated && <span className="shrink-0 rounded-sm bg-muted px-1 py-0.5">{t("favorites.truncated")}</span>}
@@ -318,24 +366,31 @@ function FavoriteCard(props: {
 						{formatFullDateTime(entry.createdAt)}
 					</time>
 				</div>
-				<div className="mt-1 line-clamp-2 text-xs leading-5 break-words text-foreground/90">{preview}</div>
+				{isSession ? (
+					<div className={cn("mt-1 line-clamp-2 text-xs leading-5 break-words", props.sessionMissing ? "text-muted-foreground" : "text-foreground/90")}>{props.sessionMissing ? t("favorites.sessionMissing") : (props.sessionTitle ?? t("common.untitled"))}</div>
+				) : (
+					<div className="mt-1 line-clamp-2 text-xs leading-5 break-words text-foreground/90">{preview}</div>
+				)}
 			</div>
 			{!props.selectionMode && (
 				<div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-					<Button
-						type="button"
-						variant="ghost"
-						size="icon-sm"
-						className="size-6 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-						title={t("favorites.copy")}
-						aria-label={t("favorites.copy")}
-						onClick={(event) => {
-							event.stopPropagation();
-							props.onCopy(entry);
-						}}
-					>
-						<Copy size={13} />
-					</Button>
+					{/* 会话收藏没有正文可复制：只留打开（整行点击）与删除。 */}
+					{!isSession && (
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-sm"
+							className="size-6 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+							title={t("favorites.copy")}
+							aria-label={t("favorites.copy")}
+							onClick={(event) => {
+								event.stopPropagation();
+								props.onCopy(entry);
+							}}
+						>
+							<Copy size={13} />
+						</Button>
+					)}
 					<Button
 						type="button"
 						variant="ghost"

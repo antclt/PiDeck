@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: c587b51dc22f946ecc78e5730a30d9cd35f39bd6096fef259c6a0a8b16ec2070（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: e5a0c2b539991af799d0c9bdff6ae51cad865b0bceeaec8f1893d2850ed70b3d（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -7081,26 +7081,32 @@ export const zhTW: Record<TranslationKey, string> = {
 	"agentMarket.title": "智慧體",
 	"agentMarket.subtitle": "管理你的智慧體：新增、編輯、隨時呼叫；在頁面中選中文字即可用預設智慧體翻譯",
 	"favorites.title": "收藏",
-	"favorites.subtitle": "整條回覆與劃選片段都儲存在本機，不寫入會話檔案。",
+	"favorites.subtitle": "整條回覆、劃選片段與整個會話都儲存在本機，不寫入會話檔案。",
 	"favorites.count": "共 {count} 條",
 	"favorites.searchPlaceholder": "搜尋收藏內容或來源會話",
 	"favorites.filterLabel": "收藏篩選",
 	"favorites.filterAll": "全部",
 	"favorites.filterMessage": "回覆",
 	"favorites.filterSelection": "片段",
+	"favorites.filterSession": "會話",
 	"favorites.kindMessage": "回覆",
 	"favorites.kindSelection": "片段",
+	"favorites.kindSession": "會話",
 	"favorites.roleUser": "我",
 	"favorites.roleAssistant": "AI",
 	"favorites.roleSystem": "系統",
 	"favorites.emptyTitle": "還沒有收藏",
-	"favorites.emptyHint": "右鍵任意訊息可「收藏這條回覆」；選中文字後點浮層的「收藏所選」。",
+	"favorites.emptyHint": "右鍵任意訊息可「收藏這條回覆」；選中文字後點浮層的「收藏所選」；右鍵會話可收藏整個會話。",
 	"favorites.noMatch": "沒有匹配的收藏。",
 	"favorites.partial": "生成中收藏",
 	"favorites.truncated": "內容過長已截斷",
 	"favorites.saveMessage": "收藏這條回覆",
 	"favorites.saveUserMessage": "收藏這條訊息",
 	"favorites.saveSelection": "收藏所選",
+	"favorites.saveSession": "收藏會話",
+	"favorites.unsaveSession": "取消收藏會話",
+	"favorites.openSession": "開啟會話",
+	"favorites.sessionMissing": "原會話已刪除或不可用",
 	"favorites.saved": "已收藏",
 	"favorites.saveFailed": "收藏失敗，請重試",
 	"favorites.removed": "已取消收藏",

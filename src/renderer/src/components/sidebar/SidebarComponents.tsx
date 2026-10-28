@@ -36,6 +36,8 @@ import {
 	ScrollText,
 	Settings2,
 	SquarePen,
+	Star,
+	StarOff,
 	Trash2,
 	UserPlus,
 	XCircle,
@@ -959,6 +961,9 @@ export function AgentContextMenu(props: {
 	onRename: () => void;
 	isPinned?: boolean;
 	onTogglePinned?: () => void;
+	/** 会话收藏态与开关（入口与置顶同级）。 */
+	isSessionFavorited?: boolean;
+	onToggleSessionFavorite?: () => void;
 	onExport: () => void;
 	onCopySession: () => void;
 	onCopySessionFilePath: () => void;
@@ -995,6 +1000,12 @@ export function AgentContextMenu(props: {
 				<DropdownMenuItem disabled={busy} onSelect={props.onTogglePinned}>
 					{props.isPinned ? <PinOff className="size-3.5" aria-hidden="true" /> : <Pin className="size-3.5" aria-hidden="true" />}
 					{t(props.isPinned ? "menu.unpinSession" : "menu.pinSession")}
+				</DropdownMenuItem>
+			)}
+			{props.onToggleSessionFavorite && (
+				<DropdownMenuItem disabled={busy} onSelect={props.onToggleSessionFavorite}>
+					{props.isSessionFavorited ? <StarOff className="size-3.5" aria-hidden="true" /> : <Star className="size-3.5" aria-hidden="true" />}
+					{t(props.isSessionFavorited ? "favorites.unsaveSession" : "favorites.saveSession")}
 				</DropdownMenuItem>
 			)}
 			{/* 侧边任务：与历史会话菜单同源入口，项目归属由宿主按 agent 对应会话算好。 */}
@@ -1118,6 +1129,9 @@ export function SessionContextMenu(props: {
 	onRename: () => void;
 	isPinned?: boolean;
 	onTogglePinned?: () => void;
+	/** 会话收藏态与开关（入口与置顶同级）。 */
+	isSessionFavorited?: boolean;
+	onToggleSessionFavorite?: () => void;
 	onExport: () => void;
 	onCopySession: () => void;
 	onCopySessionFilePath: () => void;
@@ -1163,6 +1177,12 @@ export function SessionContextMenu(props: {
 				<DropdownMenuItem disabled={busy} onSelect={props.onTogglePinned}>
 					{props.isPinned ? <PinOff className="size-3.5" aria-hidden="true" /> : <Pin className="size-3.5" aria-hidden="true" />}
 					{t(props.isPinned ? "menu.unpinSession" : "menu.pinSession")}
+				</DropdownMenuItem>
+			)}
+			{props.onToggleSessionFavorite && (
+				<DropdownMenuItem disabled={busy} onSelect={props.onToggleSessionFavorite}>
+					{props.isSessionFavorited ? <StarOff className="size-3.5" aria-hidden="true" /> : <Star className="size-3.5" aria-hidden="true" />}
+					{t(props.isSessionFavorited ? "favorites.unsaveSession" : "favorites.saveSession")}
 				</DropdownMenuItem>
 			)}
 			{/* 侧边任务：在该会话所属项目另开一条轻量会话，落在右侧抽屉「侧边任务」面板，不动主区 Tab。 */}
