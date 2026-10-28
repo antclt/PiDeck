@@ -32,7 +32,7 @@ export function RemoteImagePreview(props: { projectId: string; path: string }) {
 					setErrorCode(result.code);
 					return;
 				}
-				setSrc(`data:${mime};base64,${result.contentBase64}`);
+				setSrc(`data:${mime};base64,${result.value.contentBase64}`);
 			} catch {
 				if (active) setErrorCode("REMOTE_PROJECT_READ_FAILED");
 			} finally {

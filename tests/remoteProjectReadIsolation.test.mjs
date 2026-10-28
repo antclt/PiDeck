@@ -43,7 +43,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 function decode(result) {
-	return Buffer.from(result.contentBase64, "base64");
+	return Buffer.from(result.value.contentBase64, "base64");
 }
 
 function expected(fill, bytes = FILE_SIZE) {
@@ -419,7 +419,7 @@ test("a single-frame list must be served from the root it was resolved for, even
 		releaseOperation();
 		const listed = await pendingList;
 		assert.equal(listed.ok, true, "project A's listing must succeed: " + JSON.stringify(listed));
-		const names = plain(listed.entries ?? []).map((entry) => entry.name);
+		const names = plain(listed.value?.entries ?? []).map((entry) => entry.name);
 		assert.ok(names.includes("only-a.txt"), "project A's listing must come from project A's root; got " + JSON.stringify(names));
 		assert.ok(!names.includes("only-b.txt"), "project A's listing must never come from project B's root; got " + JSON.stringify(names));
 	});

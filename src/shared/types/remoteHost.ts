@@ -1,3 +1,5 @@
+import type { Op } from "../op";
+
 export type RemoteHostListItem = {
 	id: string;
 	label: string;
@@ -189,10 +191,10 @@ export type RemoteProjectEnrollRequest = { requestId: string; expiresAt: number;
 export type RemoteProjectEnrollMode = "existing" | "create";
 
 /** 发起登记的结果：`pending` 表示已推送确认、等用户回答。create 模式的目标尚不存在，故不回显 canonicalPath。 */
-export type RemoteProjectEnrollResult = { ok: true; status: "pending"; hostId: string; canonicalPath?: string } | { ok: false; code: string };
+export type RemoteProjectEnrollResult = Op<{ status: "pending"; hostId: string; canonicalPath?: string }>;
 
 /** 回答登记确认的结果；批准时回显新项目的 stable id。 */
-export type RemoteProjectEnrollAnswerResult = { ok: true; enrolled: boolean; projectId?: string } | { ok: false; code: string };
+export type RemoteProjectEnrollAnswerResult = Op<{ enrolled: boolean; projectId?: string }>;
 
 /**
  * 「新建空远端项目」确认请求（独立于既有目录的登记确认：动作、broker 表与推送通道都分开）。
@@ -204,7 +206,7 @@ export type RemoteProjectEnrollAnswerResult = { ok: true; enrolled: boolean; pro
 export type RemoteProjectCreateRequest = { requestId: string; expiresAt: number; hostId: string; requestedPath: string; parentPath: string; leaf: string };
 
 /** 回答 create 确认的结果；批准并成功登记时回显新项目的 stable id。 */
-export type RemoteProjectCreateAnswerResult = { ok: true; enrolled: boolean; projectId?: string } | { ok: false; code: string };
+export type RemoteProjectCreateAnswerResult = Op<{ enrolled: boolean; projectId?: string }>;
 
 /**
  * 按 projectId 的只读远端浏览（Phase 3 第二段）。
@@ -213,10 +215,10 @@ export type RemoteProjectCreateAnswerResult = { ok: true; enrolled: boolean; pro
  * `ProjectStore` 中该项目持有的 canonical `remotePath`，因此可以跨重启恢复。渲染层只给
  * `projectId` 与**相对路径**，由 main 解析 host/root；绝对路径与 `..` 在触达 reader 前被拒。
  */
-export type RemoteProjectListResult = { ok: true; entries: RemoteWorkspaceEntry[] } | { ok: false; code: string };
+export type RemoteProjectListResult = Op<{ entries: RemoteWorkspaceEntry[] }>;
 
 /** 读项目内文件的结果；`contentBase64` 跨 IPC 传二进制。 */
-export type RemoteProjectReadResult = { ok: true; contentBase64: string; bytes: number; mtimeMs: number } | { ok: false; code: string };
+export type RemoteProjectReadResult = Op<{ contentBase64: string; bytes: number; mtimeMs: number }>;
 
 /**
  * 下载结果。
@@ -243,7 +245,7 @@ export type RemoteProjectSearchEntry = { path: string; name: string; kind: Remot
  * `truncated` 必须如实呈现：它表示遍历在某一项上限处收束（匹配数 / 已扫描条目 / 深度 / 单目录条目），
  * 因此界面可以说「结果已截断」，而不是把一屏结果伪装成完整答案。
  */
-export type RemoteProjectSearchResult = { ok: true; entries: RemoteProjectSearchEntry[]; scanned: number; truncated: boolean } | { ok: false; code: string };
+export type RemoteProjectSearchResult = Op<{ entries: RemoteProjectSearchEntry[]; scanned: number; truncated: boolean }>;
 
 /**
  * 一条远端会话文件（Phase 3 第三段，只读发现）。
@@ -266,7 +268,7 @@ export type RemoteSessionEntry = {
  * 刻意是项目级而不是主机级：漂移属于某一个项目的持久路径，若把它升级成主机级 needs-attention，
  * 一个目录被挪动就会阻断同主机上所有其他项目的读取。`needs-attention` 时 `code` 是稳定的失败码。
  */
-export type RemoteProjectRootStatusResult = { ok: true; status: "ok" | "needs-attention"; code?: string } | { ok: false; code: string };
+export type RemoteProjectRootStatusResult = Op<{ status: "ok" | "needs-attention"; code?: string }>;
 
 export type RemoteSessionScanResult = { ok: true; entries: RemoteSessionEntry[] } | { ok: false; code: string };
 

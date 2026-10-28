@@ -92,7 +92,7 @@ test("create mode probes, pushes an independent confirmation, then mkdir + canon
 	const h = createHarness();
 	const pending = await h.invoke("remote:project-enroll", HOST, "/srv/new-dir", "create");
 	assert.equal(pending.ok, true);
-	assert.equal(pending.status, "pending");
+	assert.equal(pending.value.status, "pending");
 	assert.equal(h.sent.length, 1);
 	assert.equal(h.sent[0].channel, "remote:project-create-confirm");
 	assert.equal(h.sent[0].payload.parentPath, "/srv");
@@ -101,8 +101,8 @@ test("create mode probes, pushes an independent confirmation, then mkdir + canon
 	const requestId = h.sent[0].payload.requestId;
 	const answered = await h.invoke("remote:project-create-answer", requestId, "approve");
 	assert.equal(answered.ok, true);
-	assert.equal(answered.enrolled, true);
-	assert.equal(answered.projectId, "project-1");
+	assert.equal(answered.value.enrolled, true);
+	assert.equal(answered.value.projectId, "project-1");
 	// 确认前探针 1 次 + 批准后复核探针 1 次 + mkdir 1 次 = 3（§8 caps）。
 	assert.deepEqual(h.calls, ["probe:/srv/new-dir", "probe:/srv/new-dir", "mkdir:/srv/new-dir"]);
 	assert.deepEqual(
@@ -118,7 +118,7 @@ test("denying the create confirmation writes nothing; a consumed request cannot 
 	h.calls.length = 0;
 	const denied = await h.invoke("remote:project-create-answer", requestId, "deny");
 	assert.equal(denied.ok, true);
-	assert.equal(denied.enrolled, false);
+	assert.equal(denied.value.enrolled, false);
 	assert.deepEqual(h.calls, []);
 	assert.equal(h.enrolled.length, 0);
 	assert.equal((await h.invoke("remote:project-create-answer", requestId, "approve")).code, "REMOTE_PROJECT_ENROLL_CONFIRMATION_REQUIRED");
@@ -165,7 +165,7 @@ test("unknown mode is refused before any remote command; existing mode keeps its
 	const existing = createHarness();
 	const pending = await existing.invoke("remote:project-enroll", HOST, "/srv/app", "existing");
 	assert.equal(pending.ok, true);
-	assert.equal(pending.canonicalPath, "/srv/app");
+	assert.equal(pending.value.canonicalPath, "/srv/app");
 	assert.equal(existing.sent[0].channel, "remote:project-enroll-confirm");
 	assert.deepEqual(existing.calls, []);
 });

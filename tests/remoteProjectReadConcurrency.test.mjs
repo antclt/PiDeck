@@ -251,7 +251,7 @@ test("一次读取不会被同主机另一个项目的切根打断（跨项目�
 		const switched = await switchPromise;
 
 		assert.equal(read.ok, true, JSON.stringify(read));
-		assert.equal(decodeBase64(read.contentBase64), "AAAA", "项目 A 的读取绝不能由项目 B 的 root 服务");
+		assert.equal(decodeBase64(read.value.contentBase64), "AAAA", "项目 A 的读取绝不能由项目 B 的 root 服务");
 		assert.equal(disposedWhileReadingA, 0, "读取仍在进行时，承载它的 helper 会话不得被切根销毁");
 		assert.equal(switched.ok, true, JSON.stringify(switched));
 		assert.equal(switchDone, true);
@@ -271,7 +271,7 @@ test("同目录连接失败后，下一次读取必须能重新建立会话", as
 		api.control.connectFails = false;
 		const retried = await api.read("project-a", "data.bin");
 		assert.equal(retried.ok, true, "同 root 重试必须恢复，实际 " + JSON.stringify(retried));
-		assert.equal(decodeBase64(retried.contentBase64), "AAAA");
+		assert.equal(decodeBase64(retried.value.contentBase64), "AAAA");
 	});
 });
 
@@ -299,7 +299,7 @@ test("用户显式断开后，用户自己发起的重连必须能恢复", async
 		assert.equal(reconnected.ok, true, JSON.stringify(reconnected));
 		const read = await api.read("project-a", "data.bin");
 		assert.equal(read.ok, true, "用户重连后必须可读，实际 " + JSON.stringify(read));
-		assert.equal(decodeBase64(read.contentBase64), "AAAA");
+		assert.equal(decodeBase64(read.value.contentBase64), "AAAA");
 	});
 });
 
@@ -349,7 +349,7 @@ test("一台主机的读取不会阻塞另一台主机", async () => {
 		await gated;
 		const readOther = await api.read("project-other", "data.bin");
 		assert.equal(readOther.ok, true, "另一台主机必须能在 A 被卡住时正常读取");
-		assert.equal(decodeBase64(readOther.contentBase64), "OTHER");
+		assert.equal(decodeBase64(readOther.value.contentBase64), "OTHER");
 		released.resolve();
 		assert.equal((await readA).ok, true);
 	});
@@ -363,6 +363,6 @@ test("一次读取失败不会卡死后续读取", async () => {
 		assert.equal(missing.ok, false);
 		const read = await api.read("project-a", "data.bin");
 		assert.equal(read.ok, true, "失败之后队列必须继续工作");
-		assert.equal(decodeBase64(read.contentBase64), "AAAA");
+		assert.equal(decodeBase64(read.value.contentBase64), "AAAA");
 	});
 });

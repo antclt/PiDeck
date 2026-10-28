@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { RemoteHostListItem, RemoteProjectCreateRequest, RemoteProjectEnrollMode, RemoteProjectEnrollRequest } from "../../../shared/types/remoteHost";
+import type { RemoteHostListItem, RemoteProjectCreateRequest, RemoteProjectEnrollAnswerResult, RemoteProjectEnrollMode, RemoteProjectEnrollRequest } from "../../../shared/types/remoteHost";
 import { desktopApi } from "../desktopApi";
 
 /**
@@ -229,7 +229,7 @@ export function useRemoteProjectEnroll(options: RemoteProjectEnrollOptions) {
 			if (request === null || kind === null || request.requestId !== activeRequestIdRef.current) return;
 			const generation = generationRef.current;
 			patch((previous) => ({ ...previous, busy: true, errorCode: null }));
-			let result: { ok: true; enrolled: boolean; projectId?: string } | { ok: false; code: string };
+			let result: RemoteProjectEnrollAnswerResult;
 			try {
 				result = kind === "create" ? await desktopApi.remoteHosts.answerProjectCreate(request.requestId, choice) : await desktopApi.remoteHosts.answerProjectEnroll(request.requestId, choice);
 			} catch {
@@ -245,12 +245,12 @@ export function useRemoteProjectEnroll(options: RemoteProjectEnrollOptions) {
 			}
 			activeRequestIdRef.current = null;
 			activeKindRef.current = null;
-			if (!result.enrolled || result.projectId === undefined) {
+			if (!result.value.enrolled || result.value.projectId === undefined) {
 				// 拒绝是正常结果：回到路径态，不提示错误。
 				patch((previous) => ({ ...previous, stage: "path", busy: false, request: null, createRequest: null }));
 				return;
 			}
-			const projectId = result.projectId;
+			const projectId = result.value.projectId;
 			patch((previous) => ({ ...previous, stage: "enrolled", busy: false, request: null, createRequest: null, projectId }));
 			try {
 				optionsRef.current.onEnrolled(projectId);

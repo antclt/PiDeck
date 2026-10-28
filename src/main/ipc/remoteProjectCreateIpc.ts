@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { ipcMain, type WebContents } from "electron";
 import { ipcChannels } from "../../shared/ipc";
-import { codeOf } from "../../shared/op";
+import { codeOf, opFailFromCode, opOk } from "../../shared/op";
 import type { RemoteProjectCreateAnswerResult, RemoteProjectCreateRequest, RemoteProjectEnrollResult } from "../../shared/types/remoteHost";
 import type { SshClientRuntime } from "../remote/SshClientRuntime";
 import { resolveRemoteBrowseRoot } from "../remote/RemoteBrowseRoot";
@@ -56,43 +56,44 @@ export function registerRemoteProjectCreateFlow(input: {
 	};
 
 	ipcMain.handle(ipcChannels.remoteProjectCreateAnswer, async (event, requestId: unknown, choice: unknown): Promise<RemoteProjectCreateAnswerResult> => {
-		if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
-		if (input.projects === undefined) return { ok: false, code: "REMOTE_PROJECT_ENROLL_UNAVAILABLE" };
-		if (typeof requestId !== "string" || requestId.length === 0 || requestId.length > 128) return { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID" };
-		if (choice !== "approve" && choice !== "deny") return { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID" };
+		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
+		if (input.projects === undefined) return opFailFromCode("REMOTE_PROJECT_ENROLL_UNAVAILABLE");
+		if (typeof requestId !== "string" || requestId.length === 0 || requestId.length > 128) return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
+		if (choice !== "approve" && choice !== "deny") return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
 		const senderId = senderIdOf(event.sender);
-		if (senderId === undefined) return { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID" };
+		if (senderId === undefined) return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
 		const offered = offers.get(requestId);
-		if (offered === undefined) return { ok: false, code: "REMOTE_PROJECT_ENROLL_CONFIRMATION_REQUIRED" };
+		if (offered === undefined) return opFailFromCode("REMOTE_PROJECT_ENROLL_CONFIRMATION_REQUIRED");
 		try {
 			const payload = broker.answer({ requestId, senderId, action, subjectId: offered.subjectId, stateDigest: offered.digest, choice });
-			if (payload === null) return { ok: true, enrolled: false };
+			if (payload === null) return opOk({ enrolled: false });
 			const resolvedService = await input.resolveService();
-			if ("code" in resolvedService) return { ok: false, code: resolvedService.code };
+			if ("code" in resolvedService) return opFailFromCode(resolvedService.code);
 			const service = resolvedService;
 			const parsed = await probe(service, payload.hostId, payload.path);
 			let mkdirResult: { exitCode: number; stdout: string };
 			try {
 				mkdirResult = await runRemoteProjectCreateCommand({ userDataDir: input.userDataDir, hostId: payload.hostId, client: service.client, command: buildRemoteProjectCreateMkdirCommand(parsed) });
 			} catch {
-				return { ok: false, code: "REMOTE_PROJECT_CREATE_UNCONFIRMED" };
+				// 命令已发出、回执没拿到：outcome=unknown（闭集推出），界面不得重放。
+				return opFailFromCode("REMOTE_PROJECT_CREATE_UNCONFIRMED");
 			}
 			const mkdirCode = remoteProjectCreateMkdirCode(mkdirResult.exitCode);
-			if (mkdirCode !== "REMOTE_PROJECT_CREATE_OK") return { ok: false, code: mkdirCode };
+			if (mkdirCode !== "REMOTE_PROJECT_CREATE_OK") return opFailFromCode(mkdirCode);
 			try {
 				const resolved = await resolveRemoteBrowseRoot({ userDataDir: input.userDataDir, hostId: payload.hostId, client: service.client, userPath: parsed.path });
-				if (resolved.canonicalPath !== parsed.path) return { ok: false, code: "REMOTE_PROJECT_ROOT_CHANGED" };
+				if (resolved.canonicalPath !== parsed.path) return opFailFromCode("REMOTE_PROJECT_ROOT_CHANGED");
 			} catch (error) {
-				return { ok: false, code: codeOf(error, "REMOTE_PROJECT_ROOT_CHANGED") };
+				return opFailFromCode(codeOf(error, "REMOTE_PROJECT_ROOT_CHANGED"));
 			}
 			try {
 				const { projectId } = await input.projects.enroll({ hostId: payload.hostId, canonicalRemotePath: parsed.path });
-				return { ok: true, enrolled: true, projectId };
+				return opOk({ enrolled: true, projectId });
 			} catch (error) {
-				return { ok: false, code: codeOf(error, "REMOTE_PROJECT_TARGET_INVALID") };
+				return opFailFromCode(codeOf(error, "REMOTE_PROJECT_TARGET_INVALID"));
 			}
 		} catch (error) {
-			return { ok: false, code: codeOf(error, "REMOTE_PROJECT_CREATE_FAILED") };
+			return opFailFromCode(codeOf(error, "REMOTE_PROJECT_CREATE_FAILED"));
 		}
 	});
 
@@ -102,13 +103,13 @@ export function registerRemoteProjectCreateFlow(input: {
 				const parsed = await probe(service, hostId, pathValue);
 				const digest = digestOf(hostId, parsed.path);
 				const senderId = senderIdOf(sender);
-				if (senderId === undefined) return { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID" };
+				if (senderId === undefined) return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
 				const { requestId, expiresAt } = broker.begin({ senderId, action, subjectId: hostId, stateDigest: digest, payload: { hostId, path: parsed.path } });
 				offers.set(requestId, { subjectId: hostId, digest });
 				if (!sender.isDestroyed()) sender.send(ipcChannels.remoteProjectCreateConfirm, { requestId, expiresAt, hostId, requestedPath: parsed.path, parentPath: parsed.parent, leaf: parsed.leaf } satisfies RemoteProjectCreateRequest);
-				return { ok: true, status: "pending", hostId };
+				return opOk({ status: "pending" as const, hostId });
 			} catch (error) {
-				return { ok: false, code: codeOf(error, "REMOTE_PROJECT_CREATE_FAILED") };
+				return opFailFromCode(codeOf(error, "REMOTE_PROJECT_CREATE_FAILED"));
 			}
 		},
 	};

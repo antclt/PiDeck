@@ -78,7 +78,7 @@ export function useRemoteFileTree(projectId: string): RemoteFileTree {
 					return false;
 				}
 				// 与本机文件树同样的顺序：目录在前、同类按名字；远端返回顺序不作为展示契约。
-				const ordered = result.entries
+				const ordered = result.value.entries
 					.filter((entry) => !IGNORED_NAMES.has(entry.name))
 					.slice()
 					.sort((left, right) => {

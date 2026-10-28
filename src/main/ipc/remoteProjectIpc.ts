@@ -9,14 +9,16 @@
  *
  * 两个域刻意互不 import：`HOST_ID`、`senderIdOf`、`codeOf` 在本文件按 hosts 域的同一判据重新声明
  * （仓库里 `HOST_ID` 本来就是每个远端模块各自持有的闭集判据）；若让项目域 import hosts 域，拆分
- * 只是把耦合换了个文件名。
+ * 只是把耦合换了个文件名。稳定码判据本身走 `shared/op`（全仓唯一一份实现）。
+ *
+ * 信封形状是 `Op<T>`（v5 §2「单信封」）：成功 `{ok:true, value}`，失败 `{ok:false, code, outcome}`。
  */
 
 import { createHash } from "node:crypto";
 import { createRemoteProjectTargetResolver } from "./remoteProjectTarget";
 import { ipcMain, type WebContents } from "electron";
 import { ipcChannels } from "../../shared/ipc";
-import { codeOf } from "../../shared/op";
+import { codeOf, opFailFromCode, opOk } from "../../shared/op";
 import type {
 	RemoteProjectDownloadResult,
 	RemoteProjectUploadResult,
@@ -47,8 +49,6 @@ function senderIdOf(sender: WebContents): number | undefined {
 	const id = sender?.id;
 	return Number.isSafeInteger(id) && id > 0 ? id : undefined;
 }
-
-// codeOf 只有一份实现（`shared/op.ts`）：判据分散会让同一种失败在不同入口得到不同的码。
 
 /**
  * 远端项目 IPC：登记、确认回答、按 projectId 的列表/读取/搜索。
@@ -89,14 +89,6 @@ export function registerRemoteProjectIpc(input: {
 			return { code: codeOf(error, "REMOTE_CONNECTION_SERVICE_UNAVAILABLE") };
 		}
 	};
-
-	/**
-	 * 设置页那套临时「浏览已确认 root」的入口曾在这里：五条 `remote:workspace-*` 通道只凭内存里的
-	 * confirmed root 就放行读取，从不重新对齐 live helper 会话。删除它是必要的，但从来不是充分的——
-	 * 项目之间的并发串根修在 `RemoteHostConnectionService.withProjectSession`，边界现在在那里。
-	 * 它用到的只读构件（RemoteWorkspaceReader、canonical root resolver、helper）全部保留，
-	 * 各自的测试也照旧运行。
-	 */
 
 	/**
 	 * Validate a path the renderer named. Relative to the confirmed root by construction: an absolute path,
@@ -154,22 +146,22 @@ export function registerRemoteProjectIpc(input: {
 			.digest("hex");
 
 	ipcMain.handle(ipcChannels.remoteProjectEnroll, async (event, hostIdValue: unknown, pathValue: unknown, modeValue: unknown): Promise<RemoteProjectEnrollResult> => {
-		if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
-		if (input.projects === undefined) return { ok: false, code: "REMOTE_PROJECT_ENROLL_UNAVAILABLE" };
-		if (typeof hostIdValue !== "string" || !HOST_ID.test(hostIdValue)) return { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID" };
+		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
+		if (input.projects === undefined) return opFailFromCode("REMOTE_PROJECT_ENROLL_UNAVAILABLE");
+		if (typeof hostIdValue !== "string" || !HOST_ID.test(hostIdValue)) return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
 		const senderId = senderIdOf(event.sender);
-		if (senderId === undefined) return { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID" };
-		if (typeof pathValue !== "string") return { ok: false, code: "REMOTE_BROWSE_ROOT_INVALID" };
-		if (modeValue !== undefined && modeValue !== "existing" && modeValue !== "create") return { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID" };
+		if (senderId === undefined) return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
+		if (typeof pathValue !== "string") return opFailFromCode("REMOTE_BROWSE_ROOT_INVALID");
+		if (modeValue !== undefined && modeValue !== "existing" && modeValue !== "create") return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
 		const mode: RemoteProjectEnrollMode = modeValue === "create" ? "create" : "existing";
 		// 「新建空目录」不是登记：它会在项目根之外执行一次写命令，因此必须先探针、再走独立确认 broker。
 		if (mode === "create") {
 			const createService = await resolveService();
-			if ("code" in createService) return { ok: false, code: createService.code };
+			if ("code" in createService) return opFailFromCode(createService.code);
 			return createProjectFlow.begin(event.sender, createService.service, hostIdValue, pathValue);
 		}
 		const resolvedService = await resolveService();
-		if ("code" in resolvedService) return { ok: false, code: resolvedService.code };
+		if ("code" in resolvedService) return opFailFromCode(resolvedService.code);
 		try {
 			// Same pinned probe the workspace panel uses: the canonical value shown here is the one that will be
 			// confined to, and a symlink that the handshake would reject can never be confirmed in the first place.
@@ -178,24 +170,24 @@ export function registerRemoteProjectIpc(input: {
 			const { requestId, expiresAt } = enrollBroker.begin({ senderId, action: enrollAction, subjectId: hostIdValue, stateDigest: digest, payload: { hostId: hostIdValue, canonicalPath: resolved.canonicalPath } });
 			enrollOffers.set(requestId, { subjectId: hostIdValue, digest });
 			if (!event.sender.isDestroyed()) event.sender.send(ipcChannels.remoteProjectEnrollConfirm, { requestId, expiresAt, hostId: hostIdValue, label: pathValue, requestedPath: pathValue, canonicalPath: resolved.canonicalPath } satisfies RemoteProjectEnrollRequest);
-			return { ok: true, status: "pending", hostId: hostIdValue, canonicalPath: resolved.canonicalPath };
+			return opOk({ status: "pending" as const, hostId: hostIdValue, canonicalPath: resolved.canonicalPath });
 		} catch (error) {
-			return { ok: false, code: codeOf(error, "REMOTE_PROJECT_TARGET_INVALID") };
+			return opFailFromCode(codeOf(error, "REMOTE_PROJECT_TARGET_INVALID"));
 		}
 	});
 
 	ipcMain.handle(ipcChannels.remoteProjectAnswer, async (event, requestId: unknown, choice: unknown): Promise<RemoteProjectEnrollAnswerResult> => {
-		if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
-		if (input.projects === undefined) return { ok: false, code: "REMOTE_PROJECT_ENROLL_UNAVAILABLE" };
-		if (typeof requestId !== "string" || requestId.length === 0 || requestId.length > 128) return { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID" };
-		if (choice !== "approve" && choice !== "deny") return { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID" };
+		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
+		if (input.projects === undefined) return opFailFromCode("REMOTE_PROJECT_ENROLL_UNAVAILABLE");
+		if (typeof requestId !== "string" || requestId.length === 0 || requestId.length > 128) return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
+		if (choice !== "approve" && choice !== "deny") return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
 		const senderId = senderIdOf(event.sender);
-		if (senderId === undefined) return { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID" };
+		if (senderId === undefined) return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
 		const offered = enrollOffers.get(requestId);
-		if (offered === undefined) return { ok: false, code: "REMOTE_PROJECT_ENROLL_CONFIRMATION_REQUIRED" };
+		if (offered === undefined) return opFailFromCode("REMOTE_PROJECT_ENROLL_CONFIRMATION_REQUIRED");
 		try {
 			const payload = enrollBroker.answer({ requestId, senderId, action: enrollAction, subjectId: offered.subjectId, stateDigest: offered.digest, choice });
-			if (payload === null) return { ok: true, enrolled: false };
+			if (payload === null) return opOk({ enrolled: false });
 			// The confirmation window is real time, and the world moves inside it: the directory can be deleted,
 			// or a symlink along it can be re-pointed at something else. Writing the value the user was *shown*
 			// is therefore not enough on its own — that value has to still resolve to itself right now, or the
@@ -206,19 +198,19 @@ export function registerRemoteProjectIpc(input: {
 			// and the broker already consumed the request, so the user re-enrolls rather than getting a
 			// half-written record.
 			const resolvedService = await resolveService();
-			if ("code" in resolvedService) return { ok: false, code: resolvedService.code };
+			if ("code" in resolvedService) return opFailFromCode(resolvedService.code);
 			try {
 				const rechecked = await resolveRemoteBrowseRoot({ userDataDir: input.userDataDir, hostId: payload.hostId, client: resolvedService.service.client, userPath: payload.canonicalPath });
-				if (rechecked.canonicalPath !== payload.canonicalPath) return { ok: false, code: "REMOTE_PROJECT_ROOT_CHANGED" };
+				if (rechecked.canonicalPath !== payload.canonicalPath) return opFailFromCode("REMOTE_PROJECT_ROOT_CHANGED");
 			} catch (error) {
-				return { ok: false, code: codeOf(error, "REMOTE_PROJECT_ROOT_UNRESOLVED") };
+				return opFailFromCode(codeOf(error, "REMOTE_PROJECT_ROOT_UNRESOLVED"));
 			}
 			// Write the durable record only now, with the main-held canonical value. The renderer cannot supply
 			// the path, the id or an "already confirmed" flag.
 			const { projectId } = await input.projects.enroll({ hostId: payload.hostId, canonicalRemotePath: payload.canonicalPath });
-			return { ok: true, enrolled: true, projectId };
+			return opOk({ enrolled: true, projectId });
 		} catch (error) {
-			return { ok: false, code: codeOf(error, "REMOTE_PROJECT_TARGET_INVALID") };
+			return opFailFromCode(codeOf(error, "REMOTE_PROJECT_TARGET_INVALID"));
 		}
 	});
 
@@ -236,11 +228,11 @@ export function registerRemoteProjectIpc(input: {
 	});
 
 	ipcMain.handle(ipcChannels.remoteProjectList, async (_event, projectIdValue: unknown, pathValue: unknown): Promise<RemoteProjectListResult> => {
-		if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
+		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
 		const relative = readRelativePath(pathValue);
-		if (relative === undefined) return { ok: false, code: "REMOTE_PROJECT_PATH_INVALID" };
+		if (relative === undefined) return opFailFromCode("REMOTE_PROJECT_PATH_INVALID");
 		const target = await projectReadTarget(projectIdValue);
-		if ("code" in target) return { ok: false, code: target.code };
+		if ("code" in target) return opFailFromCode(target.code);
 		try {
 			// The whole listing runs inside the host's operation boundary: a switch for another project queues
 			// behind it instead of re-pointing the session halfway through.
@@ -248,28 +240,27 @@ export function registerRemoteProjectIpc(input: {
 				const reader = createRemoteWorkspaceReader({ port: sessionPort(session, target.hostId) });
 				return reader.list(target.hostId, readerPath(relative));
 			});
-			if (!outcome.ok) return { ok: false, code: outcome.code };
+			if (!outcome.ok) return opFailFromCode(outcome.code);
 			// 回收站是项目根的保留命名空间（读通道也拒绝它）；只隐藏根目录下这一项，子目录里同名条目属于用户数据。
-			return {
-				ok: true,
+			return opOk({
 				// 两类条目不属于用户数据：回收站命名空间（只在根目录隐藏）与本通道自己的上传临时文件
 				// （强杀后可能残留）。后者按形状隐藏，用户自己造的同后缀文件照常显示。
 				entries: outcome.value.entries.filter((entry) => (relative !== "" || entry.name !== REMOTE_PROJECT_TRASH_DIR) && !REMOTE_UPLOAD_TEMP_NAME.test(entry.name)).map((entry) => ({ name: entry.name, kind: entry.kind, ...(entry.bytes === undefined ? {} : { bytes: entry.bytes }) })),
-			};
+			});
 		} catch (error) {
-			return { ok: false, code: codeOf(error, "REMOTE_PROJECT_READ_FAILED") };
+			return opFailFromCode(codeOf(error, "REMOTE_PROJECT_READ_FAILED"));
 		}
 	});
 
 	ipcMain.handle(ipcChannels.remoteProjectRead, async (_event, projectIdValue: unknown, pathValue: unknown): Promise<RemoteProjectReadResult> => {
-		if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
+		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
 		// The read of the root itself is not a file; an empty path is a valid listing target but never a read.
 		const relative = readRelativePath(pathValue);
-		if (relative === undefined || relative === "") return { ok: false, code: "REMOTE_PROJECT_PATH_INVALID" };
+		if (relative === undefined || relative === "") return opFailFromCode("REMOTE_PROJECT_PATH_INVALID");
 		// 回收站不是用户可读的项目文件：读通道在这里拒绝（只读列表隐藏、回收站三通道单独授权）。
-		if (relative === REMOTE_PROJECT_TRASH_DIR || relative.startsWith(REMOTE_PROJECT_TRASH_DIR + "/")) return { ok: false, code: "REMOTE_FILE_PROTECTED_PATH" };
+		if (relative === REMOTE_PROJECT_TRASH_DIR || relative.startsWith(REMOTE_PROJECT_TRASH_DIR + "/")) return opFailFromCode("REMOTE_FILE_PROTECTED_PATH");
 		const target = await projectReadTarget(projectIdValue);
-		if ("code" in target) return { ok: false, code: target.code };
+		if ("code" in target) return opFailFromCode(target.code);
 		try {
 			// The sizing stat, every chunk and the closing stat all happen under one host operation, so no
 			// other project can switch the root between two chunks of this file.
@@ -277,11 +268,11 @@ export function registerRemoteProjectIpc(input: {
 				const reader = createRemoteWorkspaceReader({ port: sessionPort(session, target.hostId) });
 				return reader.readFile(target.hostId, relative);
 			});
-			if (!outcome.ok) return { ok: false, code: outcome.code };
+			if (!outcome.ok) return opFailFromCode(outcome.code);
 			const file = outcome.value;
-			return { ok: true, contentBase64: Buffer.from(file.content).toString("base64"), bytes: file.bytes, mtimeMs: file.mtimeMs };
+			return opOk({ contentBase64: Buffer.from(file.content).toString("base64"), bytes: file.bytes, mtimeMs: file.mtimeMs });
 		} catch (error) {
-			return { ok: false, code: codeOf(error, "REMOTE_PROJECT_READ_FAILED") };
+			return opFailFromCode(codeOf(error, "REMOTE_PROJECT_READ_FAILED"));
 		}
 	});
 
@@ -296,30 +287,29 @@ export function registerRemoteProjectIpc(input: {
 	 * 结果伪装成完整答案。
 	 */
 	ipcMain.handle(ipcChannels.remoteProjectSearch, async (_event, projectIdValue: unknown, pathValue: unknown, queryValue: unknown): Promise<RemoteProjectSearchResult> => {
-		if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
+		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
 		const relative = readRelativePath(pathValue);
-		if (relative === undefined) return { ok: false, code: "REMOTE_PROJECT_PATH_INVALID" };
+		if (relative === undefined) return opFailFromCode("REMOTE_PROJECT_PATH_INVALID");
 		// 渲染层来的值一律不可信：长度与控制字节在这里就拒，绝不把非法 query 发到远端。
-		if (typeof queryValue !== "string" || queryValue.length === 0 || queryValue.length > REMOTE_HELPER_MAX_SEARCH_QUERY_LENGTH || /[\u0000-\u001f\u007f]/.test(queryValue)) return { ok: false, code: REMOTE_SEARCH_READER_CODES.queryInvalid };
+		if (typeof queryValue !== "string" || queryValue.length === 0 || queryValue.length > REMOTE_HELPER_MAX_SEARCH_QUERY_LENGTH || /[\u0000-\u001f\u007f]/.test(queryValue)) return opFailFromCode(REMOTE_SEARCH_READER_CODES.queryInvalid);
 		const target = await projectReadTarget(projectIdValue);
-		if ("code" in target) return { ok: false, code: target.code };
+		if ("code" in target) return opFailFromCode(target.code);
 		try {
 			const outcome = await target.service.withProjectSession(target.hostId, target.remotePath, async (session) => {
 				const reader = createRemoteSearchReader({ port: sessionPort(session, target.hostId) });
 				return reader.search(target.hostId, readerPath(relative), queryValue);
 			});
-			if (!outcome.ok) return { ok: false, code: outcome.code };
+			if (!outcome.ok) return opFailFromCode(outcome.code);
 			const result = outcome.value;
 			// 只把界面要用的字段接过去；远端多余字段在 reader 里已被拒，这里再显式重建一次。
 			// 递归搜索会命中回收站里的归档条目，但它们不是用户可搜索的文件：按首段过滤整棵 .pideck-trash。
-			return {
-				ok: true,
+			return opOk({
 				entries: result.entries.filter((entry) => entry.path.split("/")[0] !== REMOTE_PROJECT_TRASH_DIR && !REMOTE_UPLOAD_TEMP_NAME.test(entry.path.split("/").at(-1) ?? "")).map((entry) => ({ path: entry.path, name: entry.name, kind: entry.kind, ...(entry.bytes === undefined ? {} : { bytes: entry.bytes }) })),
 				scanned: result.scanned,
 				truncated: result.truncated,
-			};
+			});
 		} catch (error) {
-			return { ok: false, code: codeOf(error, "REMOTE_PROJECT_READ_FAILED") };
+			return opFailFromCode(codeOf(error, "REMOTE_PROJECT_READ_FAILED"));
 		}
 	});
 
@@ -333,10 +323,10 @@ export function registerRemoteProjectIpc(input: {
 	 * 但只取 locator 与 service，不碰会话。
 	 */
 	ipcMain.handle(ipcChannels.remoteProjectRootStatus, async (_event, projectIdValue: unknown): Promise<RemoteProjectRootStatusResult> => {
-		if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
+		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
 		const target = await projectReadTarget(projectIdValue);
-		if ("code" in target) return { ok: false, code: target.code };
+		if ("code" in target) return opFailFromCode(target.code);
 		const status = target.service.projectRootStatus(target.hostId, target.remotePath);
-		return status.status === "ok" ? { ok: true, status: "ok" } : { ok: true, status: "needs-attention", code: status.code };
+		return opOk(status.status === "ok" ? { status: "ok" } : { status: "needs-attention", code: status.code });
 	});
 }

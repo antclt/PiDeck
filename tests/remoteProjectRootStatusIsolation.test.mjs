@@ -164,8 +164,8 @@ test("a drifted project is needs-attention while its healthy neighbour on the sa
 	// Both projects start healthy on the same host.
 	assert.equal((await read(ROOT_A)).ok, true);
 	assert.equal((await read(ROOT_B)).ok, true);
-	assert.deepEqual(plain(await rootStatus(handlers, "project-a")), { ok: true, status: "ok" });
-	assert.deepEqual(plain(await rootStatus(handlers, "project-b")), { ok: true, status: "ok" });
+	assert.deepEqual(plain(await rootStatus(handlers, "project-a")), { ok: true, value: { status: "ok" } });
+	assert.deepEqual(plain(await rootStatus(handlers, "project-b")), { ok: true, value: { status: "ok" } });
 
 	// Project A's persisted path is re-pointed somewhere else. Switching back to A is where the service
 	// re-probes it; the probe now canonicalizes to a different path.
@@ -181,12 +181,12 @@ test("a drifted project is needs-attention while its healthy neighbour on the sa
 	// ...and the statuses say exactly that.
 	const statusA = await rootStatus(handlers, "project-a");
 	assert.equal(statusA.ok, true, JSON.stringify(statusA));
-	assert.equal(statusA.status, "needs-attention", "the drifted project must be flagged: " + JSON.stringify(statusA));
-	assert.match(statusA.code, STABLE_CODE, "the recorded reason must be a stable code");
+	assert.equal(statusA.value.status, "needs-attention", "the drifted project must be flagged: " + JSON.stringify(statusA));
+	assert.match(statusA.value.code, STABLE_CODE, "the recorded reason must be a stable code");
 	const statusB = await rootStatus(handlers, "project-b");
 	assert.equal(statusB.ok, true, JSON.stringify(statusB));
-	assert.equal(statusB.status, "ok", "design (i): the neighbour's status must stay ok, got " + JSON.stringify(statusB));
-	assert.equal(statusB.code, undefined, "a healthy project has no reason code");
+	assert.equal(statusB.value.status, "ok", "design (i): the neighbour's status must stay ok, got " + JSON.stringify(statusB));
+	assert.equal(statusB.value.code, undefined, "a healthy project has no reason code");
 
 	// Repeated queries are stable and must not accumulate state.
 	assert.deepEqual(plain(await rootStatus(handlers, "project-a")), plain(statusA));
@@ -215,7 +215,7 @@ test("the status query is read-only: no session work, no helper request, no stat
 	for (let index = 0; index < 5; index += 1) {
 		const status = await rootStatus(handlers, "project-a");
 		assert.equal(status.ok, true);
-		assert.equal(status.status, "needs-attention");
+		assert.equal(status.value.status, "needs-attention");
 	}
 	assert.equal(fake.requests.length, requestsBefore, "a status query must not launch a process");
 	assert.equal(control.bootstraps, bootstrapsBefore, "a status query must not bootstrap a helper");
@@ -233,14 +233,14 @@ test("a successful re-check clears the recorded failure back to ok", async (t) =
 	assert.equal((await read(ROOT_B)).ok, true);
 	control.canonicalByRoot.set(ROOT_A, ROOT_A + "-moved");
 	assert.equal((await read(ROOT_A)).ok, false);
-	assert.equal((await rootStatus(handlers, "project-a")).status, "needs-attention");
+	assert.equal((await rootStatus(handlers, "project-a")).value.status, "needs-attention");
 
 	// The directory is put back: the next establishment must succeed and clear the recorded reason.
 	control.canonicalByRoot.delete(ROOT_A);
 	assert.equal((await read(ROOT_A)).ok, true, "the restored root must be readable again");
 	const cleared = await rootStatus(handlers, "project-a");
-	assert.equal(cleared.status, "ok", "a successful re-check must clear the recorded failure: " + JSON.stringify(cleared));
-	assert.equal(cleared.code, undefined);
+	assert.equal(cleared.value.status, "ok", "a successful re-check must clear the recorded failure: " + JSON.stringify(cleared));
+	assert.equal(cleared.value.code, undefined);
 });
 
 test("an unresolvable root records its own stable code", async (t) => {
@@ -254,8 +254,8 @@ test("an unresolvable root records its own stable code", async (t) => {
 	const refused = await read(ROOT_A);
 	assert.equal(refused.ok, false);
 	const status = await rootStatus(handlers, "project-a");
-	assert.equal(status.status, "needs-attention");
-	assert.equal(status.code, "SSH_PROJECT_ROOT_UNRESOLVED", "the probe's own code must be what is recorded");
+	assert.equal(status.value.status, "needs-attention");
+	assert.equal(status.value.code, "SSH_PROJECT_ROOT_UNRESOLVED", "the probe's own code must be what is recorded");
 });
 
 test("unknown, non-ssh and invalid project ids are refused with stable codes", async (t) => {
