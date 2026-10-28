@@ -119,8 +119,11 @@ export function AppSidebar(props: AppSidebarProps) {
 							{/* min-w-0 flex-1 必须给到 MorphPopover 根：它默认 inline-flex（min-width:auto），
 							    不改就无法收缩，长应用名会把字标顶出标题行、折叠按钮被挤到栏外。 */}
 							<AboutPopover appInfo={props.appInfo} className="min-w-0 flex-1">
+								{/* 品牌对齐分平台：mac 红绿灯占左侧，字标在剩余空间居中才显得对称；
+								    Windows/Linux 没有红绿灯，继续居中会在左边留一条空白（用户反馈），改为靠左，
+								    与右端折叠按钮的 10px 内距形成对称。 */}
 								<div
-									className="app-badge flex min-w-0 flex-1 cursor-pointer items-center justify-center pl-5"
+									className="app-badge flex min-w-0 flex-1 cursor-pointer items-center justify-start [.mac-custom-titlebar_&]:justify-center [.mac-custom-titlebar_&]:pl-5"
 									role="button"
 									tabIndex={0}
 									aria-label={t("about.title")}

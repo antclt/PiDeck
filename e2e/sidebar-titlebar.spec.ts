@@ -11,7 +11,9 @@ import { test as fixture } from "./fixtures";
 const LONG_DISPLAY_NAME = "PiDeck超长应用显示名测试用例";
 
 type HeaderMetrics = {
-	bar: { height: number; right: number; clientWidth: number; scrollWidth: number };
+	bar: { height: number; left: number; right: number; clientWidth: number; scrollWidth: number };
+	/** 品牌整块左缘：mac 有红绿灯可以居中，Win/Linux 没有红绿灯时必须靠左（否则左边留空白）。 */
+	brandLeft: number;
 	wordmark: { left: number; right: number; scrollWidth: number; clientWidth: number; centerDy: number };
 	toggle: { left: number; right: number; centerDy: number };
 	backForwardCount: number;
@@ -33,7 +35,8 @@ async function readHeaderMetrics(window: Page): Promise<HeaderMetrics> {
 		const toggle = toggleElement.getBoundingClientRect();
 		const labels = [...document.querySelectorAll("button")].map((button) => button.getAttribute("aria-label"));
 		return {
-			bar: { height: bar.height, right: bar.right, clientWidth: barElement.clientWidth, scrollWidth: barElement.scrollWidth },
+			bar: { height: bar.height, left: bar.left, right: bar.right, clientWidth: barElement.clientWidth, scrollWidth: barElement.scrollWidth },
+			brandLeft: brandRect.left,
 			wordmark: {
 				left: wordmark.left,
 				right: wordmark.right,
@@ -77,6 +80,11 @@ for (const [mode, navigationMode] of [
 			expect(metrics.bar.scrollWidth).toBeLessThanOrEqual(metrics.bar.clientWidth);
 			// 折叠入口贴标题行右端（不是跟在 mac 红绿灯后面靠左）。
 			expect(metrics.bar.right - metrics.toggle.right).toBeLessThanOrEqual(12);
+			// Win/Linux 没有红绿灯：品牌必须靠左，居中会在左边留一条空白（2026-10 用户反馈）。
+			const isMacChrome = await window.evaluate(() => Boolean(document.querySelector(".mac-custom-titlebar")));
+			if (!isMacChrome) {
+				expect(metrics.brandLeft - metrics.bar.left).toBeLessThanOrEqual(24);
+			}
 		});
 
 		fixture("collapsed sidebar keeps its only restore entry clear of the traffic lights", async ({ window }) => {
