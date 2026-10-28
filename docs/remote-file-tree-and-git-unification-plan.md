@@ -188,21 +188,24 @@ type GrantScope = { purpose: "git-write"|"file-entry"|"file-text"; sender: numbe
 | 波 | 状态 | 已落地面 |
 |---|---|---|
 | W0 | ✅ | `src/main/remote/RemoteCallMeter.ts` 挂在 `RemoteControlClient` 发帧路径；`tests/remoteCallMeter.test.mjs`（5 例） |
-| W2 | ◐ 部分 | **entry / text / trust 三域已 `Op<T>`**（`shared/types/remoteFiles.ts`、`remoteTrust.ts`、三个 IPC）；新增 `shared/op.ts`（`Op` / `codeOf` / `OP_UNKNOWN_CODES`）；`codeOf` 独立实现 9 份 → **1 份**（`remoteHostInputValidation` 改 re-export） |
-| W3 | ◐ 地基 | `RemoteFactCache.ts`（合并/失效/revision/LRU）、`RemoteWorkspaceView.ts`（三族事实 + 失效矩阵 + `onChanged`）；共 13 例确定性测试 |
-| W1 / W4 / W5 / W6 | ⨯ 未开 | 见下表「下一步的确定落点」 |
+| W1 | ◐ 主体 | `fileTreeLazy`：`projectFileKey` / `parseFileTreeKey` / `fileTreeNodeKey`（不再退回本机绝对路径）/ `migrateExpandedDirKeys` / `isActiveFileTreeRow`；拖拽负载的 `path` 变可选、远端不再伪造本机路径；展开集旧键按树内 `path` 别名迁移（幂等）；`useProjectSync` / `useProjectFileTreeController` / `FileTreeRows` / `RemoteProjectPanel` 已跟随 |
+| W2 | ◐ 大部分 | **entry / text / trust / project（7 类）/ transfer（上传下载）已 `Op<T>`**；`shared/op.ts` 提供 `Op` / `codeOf` / `OP_UNKNOWN_CODES` / `opFailFromCode`；`codeOf` 独立实现 **10 份 → 1 份**（`remoteHostInputValidation` 改 re-export）；`tests/envelopeSingleSource.test.mjs` 守不变量 |
+| W3 | ◐ 地基 | `RemoteFactCache`（合并/失效/revision/LRU）、`RemoteWorkspaceView`（dir/repos/status + 失效矩阵 + `onChanged`）、`ProjectCapabilities`（修 R3：主机可用从两个定义变一个） |
+| W4 / W5 / W6 | ⨯ 未开 | 见下表 |
+
+**W2 的未完成项与理由（不是遗漏）**
+
+- **sessions 域（scan / title / register）暂不迁移**：`R1a` 刚把会话扫描改成一次性命令并重写了这三个结果的生产侧。同一批类型再改一次会让那批新测试整体红；价值只在“词汇一致”，风险却是刚稳定的链路。等 W4 合并通道时与 `remoteSessionIpc` 一起改，代价相同。
+- **hosts 域（约 20 类）不按 `Op<T>` 迁移**，改为文档化例外：`RemoteHostOperationFailure` 带 `hostId` 回显（并发请求交错时的可归因性），而 `OpFailure` 刻意只有 `code` + `outcome`。强行迁移要么丢掉回显、要么把 `hostId` 塞进 value 让失败分支失去归属。hosts 域本来就已经信封化（只有 `ok`/`code` 两种字段），真正的病在**渲染层 4 处各自判定可用性**——那已经由 `ProjectCapabilities` 解决。
 
 **下一步的确定落点（按依赖顺序）**
 
-1. **W2 收尾（可增量、每步绿）**：
-   - project 域 8 类结果在 `shared/types/remoteHost.ts:192-271`（enroll / create-answer / list / read / download / upload / search / root-status），对应 `remoteProjectIpc.ts`、`remoteProjectTransferIpc.ts`、`remoteProjectCreateIpc.ts` 的返回，以及渲染层 19 处读点（7 个文件，含 `useRemoteFileTree.ts`）。
-   - hosts 域 26 类结果（`remoteHost.ts` 前半段）与 `remoteHostIpc` / `remoteHostEditIpc` / `remoteHostScanIpc` / `wslHostIpc`。
-   - sessions 域（`remoteSessionIpc.ts`）与 R1a 协调后再动。
-2. **W1（必须独占）**：`FileTreeNode.path` 退役 → 落点 `shared/types/session.ts`、`renderer/src/utils/fileTreeLazy.ts`（`fileTreeNodeKey`）、`components/app/AppUtils.ts`（拖拽负载）、`FileTreeRows.tsx`、`useProjectFileTreeController.ts`、`useSessionComposerController.ts`。
-3. **W3 接线**：dir 装载端口接 `RemoteWorkspaceReader.list`（`remoteProjectIpc.ts:255` 的形状），status/repos 接 `remoteGitReadIpc` 既有的 `withProjectSession` 路径；`capabilities(projectId)` 快照替掉 renderer 的 4 处 `onStateChange` 各自判定。
-4. **W4/W5/W6** 按表推进。
+1. **W3 接线**：`RemoteWorkspaceView` 的 dir 端口接 `RemoteWorkspaceReader.list`（`remoteProjectIpc.ts:255` 的形状），status/repos 接 `remoteGitReadIpc` 既有的 `withProjectSession` 路径；把 renderer 的 4 处 `onStateChange` 判定换成 `ProjectCapabilities`。
+2. **W4** 单通道族：删 `remoteGitReadIpc` 的通道注册，ssh 作为 backend 注册在同一批通道名上；sessions 域在同一波迁 `Op<T>`。
+3. **W1 收尾**：把 `activeEditorFileAtom` 的写入侧统一到项目键（今天已两态兼容），之后才能让 `fileTreeNodeKey` 完全不看 `relative:` 兜底。
+4. **W5 / W6** 按表推进。
 
-**并行约束（重要）**：R1a（会话扫描改一次性命令，`src/main/sessions/`）在跑时，不要做「多文件中间态必红」的改动——那边会跑 typecheck。只能做「新增文件」或「单文件原子、当次就绿」的切片。
+**并行约束（重要）**：`src/main/sessions/` 上还有别人的改动时不碰它；`src/main/index.ts` 是公共汇聚文件，只由装配相关的那一波改。
 
 ## 5. 明确不重写（重写零收益，只有风险）
 
