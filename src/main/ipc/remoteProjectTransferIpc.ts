@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { BrowserWindow, dialog, ipcMain } from "electron";
-import { codeOf } from "../../shared/op";
+import { codeOf, opFailFromCode, opOk } from "../../shared/op";
 import { ipcChannels } from "../../shared/ipc";
 import type { RemoteProjectDownloadResult, RemoteProjectUploadResult } from "../../shared/types/remoteHost";
 import type { RemoteHostConnectionService, RemoteProjectSession } from "../remote/RemoteHostConnectionService";
@@ -86,9 +86,9 @@ export function registerRemoteProjectTransferIpc(input: { enabled: boolean; serv
 		}
 		// 一个都没成：把**第一条真实失败码**交出去。之前多文件全失败时折叠成笼统的
 		// REMOTE_UPLOAD_FAILED，于是「网络盘断掉」这种最需要说清的场景反而看不到原因。
-		if (uploaded.length === 0 && failed.length > 0) return { ok: false, code: failed[0].code };
-		if (uploaded.length === 0) return { ok: false, code: "REMOTE_UPLOAD_FAILED" };
-		return { ok: true, uploaded, failed };
+		if (uploaded.length === 0 && failed.length > 0) return opFailFromCode(failed[0].code);
+		if (uploaded.length === 0) return opFailFromCode("REMOTE_UPLOAD_FAILED");
+		return opOk({ uploaded, failed });
 	};
 
 	/**
@@ -99,17 +99,17 @@ export function registerRemoteProjectTransferIpc(input: { enabled: boolean; serv
 	 * 一个失败不影响其余项，也不把整批变成一个布尔值。
 	 */
 	ipcMain.handle(ipcChannels.remoteProjectUpload, async (event, projectIdValue: unknown, directoryValue: unknown): Promise<RemoteProjectUploadResult> => {
-		if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
+		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
 		const directory = typeof directoryValue === "string" ? directoryValue.trim() : "";
 		// 目录相对路径复用同一套校验（空串 = 项目根，合法）。
-		if (directoryValue !== undefined && directory !== "" && readRelative(directory) === undefined) return { ok: false, code: "REMOTE_PROJECT_PATH_INVALID" };
+		if (directoryValue !== undefined && directory !== "" && readRelative(directory) === undefined) return opFailFromCode("REMOTE_PROJECT_PATH_INVALID");
 		const target = await projectTarget(projectIdValue);
-		if ("code" in target) return { ok: false, code: target.code };
+		if ("code" in target) return opFailFromCode(target.code);
 
 		const owner = event.sender.isDestroyed() ? undefined : BrowserWindow.fromWebContents(event.sender);
 		const options = { properties: ["openFile", "multiSelections"] as Array<"openFile" | "multiSelections"> };
 		const choice = owner === null || owner === undefined ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(owner, options);
-		if (choice.canceled === true || !Array.isArray(choice.filePaths) || choice.filePaths.length === 0) return { ok: false, code: "REMOTE_UPLOAD_CANCELED", canceled: true };
+		if (choice.canceled === true || !Array.isArray(choice.filePaths) || choice.filePaths.length === 0) return opOk({ canceled: true as const });
 
 		return await uploadMany(target, directory, choice.filePaths);
 	});
@@ -122,13 +122,13 @@ export function registerRemoteProjectTransferIpc(input: { enabled: boolean; serv
 	 * 大小门与写通道。也就是说「拖放」只是省掉一次选文件，不放宽任何远端写约束。
 	 */
 	ipcMain.handle(ipcChannels.remoteProjectUploadPaths, async (_event, projectIdValue: unknown, directoryValue: unknown, pathsValue: unknown): Promise<RemoteProjectUploadResult> => {
-		if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
+		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
 		const directory = typeof directoryValue === "string" ? directoryValue.trim() : "";
-		if (directoryValue !== undefined && directory !== "" && readRelative(directory) === undefined) return { ok: false, code: "REMOTE_PROJECT_PATH_INVALID" };
+		if (directoryValue !== undefined && directory !== "" && readRelative(directory) === undefined) return opFailFromCode("REMOTE_PROJECT_PATH_INVALID");
 		const parsed = parseLocalUploadPaths(pathsValue);
-		if (!parsed.ok) return { ok: false, code: "REMOTE_UPLOAD_INVALID_PATHS" };
+		if (!parsed.ok) return opFailFromCode("REMOTE_UPLOAD_INVALID_PATHS");
 		const target = await projectTarget(projectIdValue);
-		if ("code" in target) return { ok: false, code: target.code };
+		if ("code" in target) return opFailFromCode(target.code);
 		return await uploadMany(target, directory, parsed.paths);
 	});
 
@@ -140,34 +140,34 @@ export function registerRemoteProjectTransferIpc(input: { enabled: boolean; serv
 	 * 为什么放主进程：写本机路径必须由用户经系统对话框选择，渲染层只传「远端哪个文件」。
 	 */
 	ipcMain.handle(ipcChannels.remoteProjectDownload, async (event, projectIdValue: unknown, pathValue: unknown): Promise<RemoteProjectDownloadResult> => {
-		if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
+		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
 		const relative = readRelative(pathValue);
-		if (relative === undefined || relative === "") return { ok: false, code: "REMOTE_PROJECT_PATH_INVALID" };
+		if (relative === undefined || relative === "") return opFailFromCode("REMOTE_PROJECT_PATH_INVALID");
 		// 回收站不是用户文件：与读通道同一道门（路径在远端，绝不能进本机）。
-		if (relative === REMOTE_PROJECT_TRASH_DIR || relative.startsWith(REMOTE_PROJECT_TRASH_DIR + "/")) return { ok: false, code: "REMOTE_FILE_PROTECTED_PATH" };
+		if (relative === REMOTE_PROJECT_TRASH_DIR || relative.startsWith(REMOTE_PROJECT_TRASH_DIR + "/")) return opFailFromCode("REMOTE_FILE_PROTECTED_PATH");
 		const target = await projectTarget(projectIdValue);
-		if ("code" in target) return { ok: false, code: target.code };
+		if ("code" in target) return opFailFromCode(target.code);
 		let content: Uint8Array;
 		try {
 			const outcome = await target.service.withProjectSession(target.hostId, target.remotePath, async (session) => {
 				const reader = createRemoteWorkspaceReader({ port: sessionPort(session, target.hostId) });
 				return reader.readFile(target.hostId, relative);
 			});
-			if (!outcome.ok) return { ok: false, code: outcome.code };
+			if (!outcome.ok) return opFailFromCode(outcome.code);
 			content = outcome.value.content;
 		} catch (error) {
-			return { ok: false, code: codeOf(error, "REMOTE_PROJECT_READ_FAILED") };
+			return opFailFromCode(codeOf(error, "REMOTE_PROJECT_READ_FAILED"));
 		}
 		// 对话框挂到发起窗口上：无归属的对话框在 macOS 上会飘到别的 space，在 Windows 上可能被主窗口盖住。
 		const owner = event.sender.isDestroyed() ? undefined : BrowserWindow.fromWebContents(event.sender);
 		const options = { defaultPath: basename(relative) };
 		const choice = owner === null || owner === undefined ? await dialog.showSaveDialog(options) : await dialog.showSaveDialog(owner, options);
-		if (choice.canceled === true || typeof choice.filePath !== "string" || choice.filePath.length === 0) return { ok: false, code: "REMOTE_DOWNLOAD_CANCELED", canceled: true };
+		if (choice.canceled === true || typeof choice.filePath !== "string" || choice.filePath.length === 0) return opOk({ canceled: true as const });
 		try {
 			await writeFile(choice.filePath, content);
 		} catch (error) {
-			return { ok: false, code: codeOf(error, "REMOTE_DOWNLOAD_WRITE_FAILED") };
+			return opFailFromCode(codeOf(error, "REMOTE_DOWNLOAD_WRITE_FAILED"));
 		}
-		return { ok: true, path: choice.filePath, bytes: content.length };
+		return opOk({ path: choice.filePath, bytes: content.length });
 	});
 }

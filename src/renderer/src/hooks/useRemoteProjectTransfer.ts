@@ -38,12 +38,13 @@ export function useRemoteProjectTransfer(input: { projectId: string; directory: 
 	const finish = useCallback(
 		async (result: Awaited<ReturnType<typeof desktopApi.remoteHosts.uploadProjectFiles>>) => {
 			if (!result.ok) {
-				if (result.canceled === true) return;
 				setError(failureText(result.code));
 				return;
 			}
+			// 取消是用户的动作（现在是成功载荷的一个分支），不报错、也不当作已完成。
+			if (result.value.canceled === true) return;
 			await reload();
-			if (result.failed.length > 0) setError(t("project.remote.uploadPartial", { count: result.failed.length, message: failureText(result.failed[0].code) }));
+			if (result.value.failed.length > 0) setError(t("project.remote.uploadPartial", { count: result.value.failed.length, message: failureText(result.value.failed[0].code) }));
 		},
 		[failureText, reload, setError],
 	);
@@ -93,12 +94,13 @@ export function useRemoteProjectTransfer(input: { projectId: string; directory: 
 		(relativePath: string) => {
 			void (async () => {
 				const result = await desktopApi.remoteHosts.downloadProjectFile(projectId, relativePath);
-				if (result.ok) {
-					setError(null);
+				if (!result.ok) {
+					setError(t("project.remote.downloadFailed", { code: result.code }));
 					return;
 				}
-				if (result.canceled === true) return;
-				setError(t("project.remote.downloadFailed", { code: result.code }));
+				// 取消不是失败：用户自己关掉了保存对话框。
+				if (result.value.canceled === true) return;
+				setError(null);
 			})();
 		},
 		[projectId, setError],

@@ -226,7 +226,8 @@ export type RemoteProjectReadResult = Op<{ contentBase64: string; bytes: number;
  * `canceled` 是用户动作而不是失败：界面不该为「点了取消」弹错误。
  * `path` 只在成功时出现，是本机绝对路径（远端路径不进这个结构）。
  */
-export type RemoteProjectDownloadResult = { ok: true; path: string; bytes: number } | { ok: false; code: string; canceled?: true };
+/** 下载：`canceled` 是用户的动作而不是失败——把它放在成功载荷里，失败分支就只剩稳定码。 */
+export type RemoteProjectDownloadResult = Op<{ canceled: true } | { canceled?: false; path: string; bytes: number }>;
 
 /**
  * 上传结果。
@@ -234,7 +235,7 @@ export type RemoteProjectDownloadResult = { ok: true; path: string; bytes: numbe
  * `uploaded` 只列真正写到远端的文件名（不含远端路径），`failed` 逐项说明哪个没传上去、为什么——
  * 多选上传里一个失败不该让整批结果变成一个笼统的布尔值。
  */
-export type RemoteProjectUploadResult = { ok: true; uploaded: Array<{ name: string; bytes: number }>; failed: Array<{ name: string; code: string }> } | { ok: false; code: string; canceled?: true };
+export type RemoteProjectUploadResult = Op<{ canceled: true } | { canceled?: false; uploaded: Array<{ name: string; bytes: number }>; failed: Array<{ name: string; code: string }> }>;
 
 /** 一条文件名匹配；`path` 是**相对项目根**的 POSIX 路径，渲染层不得当成本机路径。 */
 export type RemoteProjectSearchEntry = { path: string; name: string; kind: RemoteWorkspacePathKind; bytes?: number };
