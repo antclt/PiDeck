@@ -1,3 +1,5 @@
+import type { Op } from "../op";
+
 /** 远端已有UTF-8文本文件的编辑契约；version是不透明的主进程快照令牌，不是渲染层自报摘要。 */
 export type RemoteTextDocument = { content: string; version: string };
 export type RemoteTextOpenResult = { ok: true; document: RemoteTextDocument } | { ok: false; code: string };
@@ -27,11 +29,13 @@ export type RemoteEntryRevision = {
 export type RemoteEntryStat = { kind: RemoteEntryKind; bytes?: number; mtimeMs: number };
 
 /** entry-stat 成功即签发不透明 entry 令牌（rename/delete 的一次性授权）。 */
-export type RemoteEntryStatResult = { ok: true; stat: RemoteEntryStat; version: string } | { ok: false; code: string };
+export type RemoteEntryStatPayload = { stat: RemoteEntryStat; version: string };
+export type RemoteEntryStatResult = Op<RemoteEntryStatPayload>;
 
-export type RemoteEntryCreateResult = { ok: true; relativePath: string; kind: RemoteEntryKind } | { ok: false; code: string };
-export type RemoteEntryRenameResult = { ok: true; relativePath: string } | { ok: false; code: string };
-export type RemoteEntryDeleteResult = { ok: true; trashId: string } | { ok: false; code: string };
+export type RemoteEntryCreatePayload = { relativePath: string; kind: RemoteEntryKind };
+export type RemoteEntryCreateResult = Op<RemoteEntryCreatePayload>;
+export type RemoteEntryRenameResult = Op<{ relativePath: string }>;
+export type RemoteEntryDeleteResult = Op<{ trashId: string }>;
 
 /**
  * 回收站条目状态：只有 intact 可还原；其余只能被显式 prune（invalid 连 prune 都拒绝）。
@@ -54,6 +58,6 @@ export type RemoteTrashEntry = {
 	state: RemoteTrashEntryState;
 };
 
-export type RemoteTrashListResult = { ok: true; entries: RemoteTrashEntry[]; truncated: boolean } | { ok: false; code: string };
-export type RemoteTrashRestoreResult = { ok: true; relativePath: string } | { ok: false; code: string };
-export type RemoteTrashPruneResult = { ok: true; removed: string[]; kept: Array<{ id: string; code: string }> } | { ok: false; code: string };
+export type RemoteTrashListResult = Op<{ entries: RemoteTrashEntry[]; truncated: boolean }>;
+export type RemoteTrashRestoreResult = Op<{ relativePath: string }>;
+export type RemoteTrashPruneResult = Op<{ removed: string[]; kept: Array<{ id: string; code: string }> }>;

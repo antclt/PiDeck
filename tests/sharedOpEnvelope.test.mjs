@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { opOk, opFail, isOpFailure, codeOf, opError, STABLE_CODE_PATTERN } = loadTsCommonJs("src/shared/op.ts");
+const { opOk, opFail, isOpFailure, codeOf, opError, opOutcomeOf, opFailFromCode, OP_UNKNOWN_CODES, STABLE_CODE_PATTERN } = loadTsCommonJs("src/shared/op.ts");
 
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
@@ -35,6 +35,19 @@ test("codeOf 只透传稳定码，其余一律回落调用方给的域常量", (
 	assert.equal(codeOf(undefined, fallback), fallback);
 	assert.equal(codeOf(null, fallback), fallback);
 	assert.equal(codeOf({ message: "REMOTE_OK_LOOKING" }, fallback), fallback, "普通对象不是码来源");
+});
+
+test("outcome 只由闭集推出：写面的 unconfirmed ⇒ unknown，其余 ⇒ rejected", () => {
+	assert.deepEqual(plain(opFailFromCode("REMOTE_FILE_RESULT_UNCONFIRMED")), { ok: false, code: "REMOTE_FILE_RESULT_UNCONFIRMED", outcome: "unknown" });
+	assert.deepEqual(plain(opFailFromCode("REMOTE_FILE_CHANGED")), { ok: false, code: "REMOTE_FILE_CHANGED", outcome: "rejected" });
+
+	// 用户写面的 unconfirmed 全部进 unknown：重试会重复执行。
+	for (const code of ["GIT_WRITE_RESULT_UNCONFIRMED", "CONFIG_RESULT_UNCONFIRMED", "REMOTE_CONFIG_RESULT_UNCONFIRMED", "REMOTE_PROJECT_CREATE_UNCONFIRMED", "REMOTE_SESSION_DELETE_RESULT_UNCONFIRMED", "REMOTE_SESSION_HISTORY_WRITER_RESULT_UNCONFIRMED"])
+		assert.equal(opOutcomeOf(code), "unknown", code);
+
+	// 引导/握手码是连接层内部状态，不是一次写操作：绝不能因为名字像就进 unknown。
+	for (const code of ["BOOTSTRAP_FINALIZE_UNCONFIRMED", "BOOTSTRAP_READY_UNCONFIRMED", "REMOTE_RUNTIME_HANDSHAKE_UNCONFIRMED"])
+		assert.equal(OP_UNKNOWN_CODES.has(code), false, code);
 });
 
 test("信封 → 异常：code 与 outcome 一起过边界，不退化", () => {

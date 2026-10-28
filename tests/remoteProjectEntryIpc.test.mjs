@@ -91,10 +91,11 @@ test("entry IPC validates renderer input before touching the remote service and 
 	assert.equal(f.calls.length, 0);
 	const stat = await f.invoke("remote:project-entry-stat", "project", "a.txt");
 	assert.equal(stat.ok, true);
-	assert.match(stat.version, /^[a-f0-9]{32}$/);
+	// v5 单信封：成功载荷在 `value` 下，失败带 `outcome`。
+	assert.match(stat.value.version, /^[a-f0-9]{32}$/);
 	const created = await f.invoke("remote:project-file-create", "project", "", "new.txt");
 	assert.equal(created.ok, true);
-	assert.equal(created.relativePath, "new.txt");
+	assert.equal(created.value.relativePath, "new.txt");
 	const renamed = await f.invoke("remote:project-entry-rename", "project", "a.txt", "b.txt", "a".repeat(32));
 	assert.equal(renamed.ok, true);
 	assert.equal((await f.invoke("remote:project-trash-list", "project")).ok, true);
@@ -111,7 +112,7 @@ test("disabled entry IPC returns REMOTE_FEATURE_DISABLED and registers no sender
 		["remote:project-file-create", ["project", "", "new.txt"]],
 		["remote:project-trash-list", ["project"]],
 	])
-		assert.deepEqual(await f.invoke(channel, ...args), { ok: false, code: "REMOTE_FEATURE_DISABLED" });
+		assert.deepEqual(await f.invoke(channel, ...args), { ok: false, code: "REMOTE_FEATURE_DISABLED", outcome: "rejected" });
 	assert.equal(f.calls.length, 0);
 	assert.equal(f.sender.listenerCount("destroyed"), 0);
 });

@@ -1,26 +1,15 @@
 import { useCallback, useReducer, useRef, useState } from "react";
 import { useStore } from "jotai";
 import type { RemoteEntryKind } from "../../../shared/types/remoteFiles";
+import { opFail, type Op } from "../../../shared/op";
 import { remoteFileDraftsAtom } from "../atoms/remote-file-atoms";
 import { desktopApi } from "../desktopApi";
 import { t } from "../i18n";
 import { applyRemoteFileMutation } from "../utils/remoteFileDrafts";
-import { initialRemoteFileManagementState, reduceRemoteFileManagement, remoteFileEntryErrorKey, remoteFileEntryIsUnknown, remoteFileEntrySuccessKey, REMOTE_FILE_ENTRY_UNKNOWN_CODE, type RemoteFileOperation } from "../components/session/remoteFileManagementState";
+import { initialRemoteFileManagementState, reduceRemoteFileManagement, remoteFileEntryErrorKey, remoteFileEntrySuccessKey, REMOTE_FILE_ENTRY_UNKNOWN_CODE, type RemoteFileOperation } from "../components/session/remoteFileManagementState";
 
 export type RemoteFileOutcome = { kind: "success" | "failed" | "unknown"; text: string; code: string | null; operation: RemoteFileOperation } | null;
 
-/** 写命令的统一结果形状：成功分支可带附加字段，失败分支只有稳定码。 */
-type MutationResult = { ok: true; [key: string]: unknown } | { ok: false; code: string };
-
-function keptCodes(result: { ok: true; [key: string]: unknown }): string[] {
-	const kept = result.kept;
-	if (!Array.isArray(kept)) return [];
-	const codes: string[] = [];
-	for (const item of kept) {
-		if (typeof item === "object" && item !== null && "code" in item && typeof item.code === "string") codes.push(item.code);
-	}
-	return codes;
-}
 
 /**
  * 远端文件管理的命令与状态接线（UI 只转发事件）。
@@ -42,27 +31,28 @@ export function useRemoteProjectEntries(options: { projectId: string; reload: ()
 	const reloadRef = useRef(reload);
 	reloadRef.current = reload;
 
-	const execute = useCallback(async (operation: RemoteFileOperation, work: () => Promise<MutationResult>, successText?: (result: { ok: true; [key: string]: unknown }) => string): Promise<MutationResult> => {
-		if (phaseRef.current === "busy") return { ok: false, code: "REMOTE_FILE_BUSY" };
+	const execute = useCallback(async <T>(operation: RemoteFileOperation, work: () => Promise<Op<T>>, successText?: (value: T) => string): Promise<Op<T>> => {
+		if (phaseRef.current === "busy") return opFail("REMOTE_FILE_BUSY");
 		setOutcome(null);
 		dispatch({ type: "begin", operation });
-		let result: MutationResult;
+		let result: Op<T>;
 		try {
 			result = await work();
 		} catch {
 			// IPC reject 不是业务结论：按「未获确认」呈现，绝不谎报成功或未执行。
-			result = { ok: false, code: "REMOTE_FILE_COMMAND_FAILED" };
+			result = opFail("REMOTE_FILE_COMMAND_FAILED");
 		}
 		if (result.ok) {
 			dispatch({ type: "succeeded" });
-			setOutcome({ kind: "success", text: successText ? successText(result) : t(remoteFileEntrySuccessKey(operation)), code: null, operation });
+			setOutcome({ kind: "success", text: successText ? successText(result.value) : t(remoteFileEntrySuccessKey(operation)), code: null, operation });
 			try {
 				await reloadRef.current();
 			} catch {
 				// 刷新失败不影响「操作已成功」这个事实；目录事实保持旧值，由用户显式刷新核对。
 			}
 		} else {
-			const unknown = remoteFileEntryIsUnknown(result.code);
+			// unknown 现在来自信封本身（main 按闭集推出），不再由渲染层看码猜。
+			const unknown = result.outcome === "unknown";
 			dispatch(unknown ? { type: "unknown", code: result.code } : { type: "failed", code: result.code });
 			setOutcome({ kind: unknown ? "unknown" : "failed", text: t(remoteFileEntryErrorKey(result.code), { code: result.code }), code: result.code, operation });
 		}
@@ -80,7 +70,7 @@ export function useRemoteProjectEntries(options: { projectId: string; reload: ()
 			execute("rename", async () => {
 				const stat = await desktopApi.remoteHosts.statProjectEntry(projectId, source);
 				if (!stat.ok) return stat;
-				const result = await desktopApi.remoteHosts.renameProjectEntry(projectId, source, target, stat.version);
+				const result = await desktopApi.remoteHosts.renameProjectEntry(projectId, source, target, stat.value.version);
 				if (result.ok) store.set(remoteFileDraftsAtom, (held) => applyRemoteFileMutation(held, projectId, source));
 				return result;
 			}),
@@ -92,7 +82,7 @@ export function useRemoteProjectEntries(options: { projectId: string; reload: ()
 			execute("delete", async () => {
 				const stat = await desktopApi.remoteHosts.statProjectEntry(projectId, path);
 				if (!stat.ok) return stat;
-				const result = await desktopApi.remoteHosts.deleteProjectEntry(projectId, path, stat.version);
+				const result = await desktopApi.remoteHosts.deleteProjectEntry(projectId, path, stat.value.version);
 				if (result.ok) store.set(remoteFileDraftsAtom, (held) => applyRemoteFileMutation(held, projectId, path));
 				return result;
 			}),
@@ -104,7 +94,7 @@ export function useRemoteProjectEntries(options: { projectId: string; reload: ()
 			execute(
 				"restore",
 				() => desktopApi.remoteHosts.restoreProjectTrash(projectId, trashId),
-				(result) => (typeof result.relativePath === "string" ? t("remoteTrash.restored", { name: result.relativePath }) : t("remoteFileEntry.renamed")),
+				(result) => t("remoteTrash.restored", { name: result.relativePath }),
 			),
 		[execute, projectId],
 	);
@@ -115,7 +105,7 @@ export function useRemoteProjectEntries(options: { projectId: string; reload: ()
 				"prune",
 				() => desktopApi.remoteHosts.pruneProjectTrash(projectId, trashIds),
 				(result) => {
-					const codes = keptCodes(result);
+					const codes = result.kept.map((item) => item.code);
 					if (codes.length > 0) return t("remoteTrash.kept", { count: codes.length, code: codes[0] });
 					return t("remoteTrash.removed", { count: trashIds.length });
 				},

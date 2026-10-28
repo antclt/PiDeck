@@ -33,6 +33,32 @@ export function isOpFailure<T>(op: Op<T>): op is OpFailure {
 	return op.ok === false;
 }
 
+/**
+ * 「可能已经执行」的码（闭集）。把它们从直接失败里分出来的唯一理由：重试会重复执行。
+ *
+ * 不收以 `_UNCONFIRMED` 结尾的引导/握手码（`BOOTSTRAP_*` / `REMOTE_RUNTIME_HANDSHAKE_UNCONFIRMED`）：
+ * 它们是连接层内部状态，不是用户的一次写操作，永远不该出现在操作结果信封里。
+ */
+export const OP_UNKNOWN_CODES: ReadonlySet<string> = new Set([
+	"REMOTE_FILE_RESULT_UNCONFIRMED",
+	"REMOTE_PROJECT_CREATE_UNCONFIRMED",
+	"GIT_WRITE_RESULT_UNCONFIRMED",
+	"CONFIG_RESULT_UNCONFIRMED",
+	"REMOTE_CONFIG_RESULT_UNCONFIRMED",
+	"REMOTE_SESSION_DELETE_RESULT_UNCONFIRMED",
+	"REMOTE_SESSION_HISTORY_WRITER_RESULT_UNCONFIRMED",
+]);
+
+/** 由稳定码推出 outcome：唯一的真相来源是闭集，不靠调用方记着传。 */
+export function opOutcomeOf(code: string): OpOutcome {
+	return OP_UNKNOWN_CODES.has(code) ? "unknown" : "rejected";
+}
+
+/** 失败信封的一行式构造：码 + 由码推出的 outcome（迁移期用它替掉各处手写的 outcome 判定）。 */
+export function opFailFromCode(code: string): OpFailure {
+	return { ok: false, code, outcome: opOutcomeOf(code) };
+}
+
 /** 稳定码的形状：全大写、下划线分段、3..64 字符。与各域既有判据逐字相同。 */
 export const STABLE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{2,63}$/;
 
