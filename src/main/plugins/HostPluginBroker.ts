@@ -1,5 +1,6 @@
 /** Dedicated, sender-bound API. Neither renderer-supplied plugin IDs nor raw IPC are capabilities. */
 import type { HostPluginContext, HostPluginResponse } from "../../shared/types/hostPlugin";
+import type { SessionGroupStore } from "../sessionGroups/sessionGroupStore";
 import type { HostPluginManager } from "./HostPluginManager";
 import type { HostPluginSessions } from "./HostPluginSessions";
 import type { HostPluginStorage } from "./HostPluginStorage";
@@ -39,6 +40,8 @@ export class HostPluginBroker {
 		private readonly network = new HostPluginNetwork(),
 		/** 本地服务适配器表。缺省是空表：没装配适配器的服务一律 `service-unavailable`（fail-closed）。 */
 		private readonly services = new LocalServiceRegistry([]),
+		/** 会话分组 store（惰性求值）：未装配时 sessionGroups.* 一律 `service-unavailable`（fail-closed）。 */
+		private readonly sessionGroups?: () => SessionGroupStore | undefined,
 	) {
 		// Manager revocation happens before persistence: do not leave a live socket while disable writes to disk.
 		this.unsubscribe = manager.onChanged(() => {
@@ -104,6 +107,13 @@ export class HostPluginBroker {
 		return this.bindings.get(senderId) === binding && binding.generation === generation && this.manager.getEnabled(binding.pluginId)?.fingerprint === binding.fingerprint;
 	}
 
+	/** sessionGroups.* 的前置条件：宿主装配了分组 store（未装配 = 功能面不存在，fail-closed）。 */
+	private requireSessionGroups(): SessionGroupStore {
+		const store = this.sessionGroups?.();
+		if (!store) throw new Error("service-unavailable");
+		return store;
+	}
+
 	/** Recheck after every asynchronous operation: disable/scope changes revoke already queued results. */
 	async request(senderId: number, mainFrame: boolean, input: unknown): Promise<HostPluginResponse> {
 		const binding = this.bindings.get(senderId);
@@ -127,6 +137,9 @@ export class HostPluginBroker {
 			// 服务控制是「权限 + 点名」双重门：插件只能动自己声明过、且 PiDeck 已实现的服务。
 			// 四个方法逐个登记（不用前缀推断）：新增服务方法忘了登记会报错，而不是白拿权限。
 			if ((request.method === "service.status" || request.method === "service.start" || request.method === "service.stop" || request.method === "service.openUi") && (!plugin.manifest.permissions.includes("service.local") || !plugin.manifest.services?.includes(request.id))) throw new Error("permission-denied");
+			// 会话分组是宿主数据（侧栏消费同一份）：整体替换式写入，不做逐字段合并；
+			// 权限逐个登记（不用前缀推断）：新增方法忘了登记会报错，而不是白拿权限。
+			if (request.method.startsWith("sessionGroups.") && !plugin.manifest.permissions.includes("sessionGroups.manage")) throw new Error("permission-denied");
 			let value: unknown;
 			switch (request.method) {
 				case "network.request": {
@@ -203,6 +216,23 @@ export class HostPluginBroker {
 					const navigate = { projectId: target.projectId, sessionId: target.sessionId, entryId: request.entryId };
 					if (this.authorized(senderId, binding, generation)) for (const sink of this.navigateSinks) sink(navigate);
 					value = null;
+					break;
+				}
+				case "sessionGroups.list": {
+					value = this.requireSessionGroups().list();
+					break;
+				}
+				case "sessionGroups.save": {
+					// parsePluginRequest 已按白名单收窄形状；这里整体替换式写入，store 负责字段级归一化。
+					value = await this.requireSessionGroups().save(request.group);
+					break;
+				}
+				case "sessionGroups.delete": {
+					value = await this.requireSessionGroups().delete(request.groupId);
+					break;
+				}
+				case "sessionGroups.reorder": {
+					value = await this.requireSessionGroups().reorder(request.groupIds);
 					break;
 				}
 			}

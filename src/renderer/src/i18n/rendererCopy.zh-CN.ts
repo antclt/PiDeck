@@ -6120,6 +6120,7 @@ export const zhCN = {
 	"web.backendSheetTitle": "选择会话后端",
 	"web.backendPiDesc": "Pi 编码助手会话（默认）",
 	"web.backendDshDesc": "DSH 驱动的智能体会话",
+	"web.backendAcpToolDesc": "外部 CLI 智能体会话（ACP）",
 	"web.backendImagegen": "生图",
 	"web.backendImagegenDesc": "输入提示词生成图片",
 	"web.noMessages": "暂无消息",

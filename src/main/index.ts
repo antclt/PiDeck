@@ -20,12 +20,14 @@ import { BrowserAgentService } from "./browser/BrowserAgentService";
 import { AutomationStore } from "./automation/AutomationStore";
 import { AgentProfileStore } from "./agents/AgentProfileStore";
 import { FavoritesStore } from "./favorites/FavoritesStore";
+import { SessionGroupStore } from "./sessionGroups/sessionGroupStore";
 import { AgentInvokeService } from "./agents/AgentInvokeService";
 import { AutomationScheduler } from "./automation/AutomationScheduler";
 import { AutomationRunCoordinator } from "./automation/AutomationRunCoordinator";
 import { registerAutomationIpc } from "./ipc/automationIpc";
 import { registerAgentProfileIpc } from "./ipc/agentProfileIpc";
 import { registerFavoritesIpc } from "./ipc/favoritesIpc";
+import { registerSessionGroupsIpc } from "./ipc/sessionGroupsIpc";
 import { registerAgentInvokeIpc } from "./ipc/agentInvokeIpc";
 import { registerSelectionToolIpc } from "./ipc/selectionToolIpc";
 import { SelectionToolService } from "./selection/SelectionToolService";
@@ -790,6 +792,8 @@ let enhancePromptService: EnhancePromptService | null = null;
 let agentProfileStore: AgentProfileStore | null = null;
 /** 收藏存储（<userData>/favorites.json）；null = 尚未初始化。 */
 let favoritesStore: FavoritesStore | null = null;
+/** 会话分组存储（<userData>/session-groups.json）；null = 尚未初始化。侧栏与插件经它共用一份数据。 */
+let sessionGroupStore: SessionGroupStore | null = null;
 /** 智能体一次性调用服务（划词工具 / 市场面板）：业务在 service，侧车进程在下面的 completion。 */
 let agentInvokeService: AgentInvokeService | null = null;
 /**
@@ -3410,6 +3414,8 @@ function registerIpc() {
 	}
 	// 收藏：整条回复 / 划选片段的本地快照（userData/favorites.json）。
 	if (favoritesStore) registerFavoritesIpc({ store: favoritesStore, appLogger });
+	// 会话分组：侧栏只读消费 + 插件页写入，同一份 store（userData/session-groups.json）。
+	if (sessionGroupStore) registerSessionGroupsIpc({ store: sessionGroupStore, appLogger });
 	registerAgentInvokeIpc(ipcMain, agentInvokeService);
 	// 系统级划词浮窗：状态/隐藏/「发送到 PiDeck」（文本插入主窗口当前会话输入框）。
 	registerSelectionToolIpc({
@@ -3546,7 +3552,7 @@ function registerIpc() {
 		if (!project) return undefined;
 		// 目录只用于「这条会话属于哪个项目」的展示；ssh 项目拿不到本机路径，给远端路径。
 		return { name: project.name, directory: "locator" in project ? project.locator.remotePath : project.path };
-	});
+	}, () => sessionGroupStore ?? undefined);
 	const unregisterHostPlugins = registerHostPluginsIpc(hostPlugins, () => mainWindow);
 	const mcpWarning = (code: string) => {
 		void appLogger.warn("pideck-mcp", "Optional MCP operation rejected", { code });
@@ -6415,7 +6421,16 @@ app
 		// 收藏：本地快照（userData/favorites.json）。坏文件按空列表重建，不阻断启动。
 		favoritesStore = new FavoritesStore(join(app.getPath("userData"), "favorites.json"));
 		const favoritesStorePreload = favoritesStore.load();
-		await Promise.all([sessionCatalog.load(), automationStorePreload, agentProfileStorePreload, favoritesStorePreload]);
+		// 会话分组（userData/session-groups.json）：启动时一次性从内置插件的私有 storage 迁入
+		//（只读插件文件、不写不删）；此后侧栏与插件 v3 都经 store 读写同一份数据。
+		sessionGroupStore = new SessionGroupStore(join(app.getPath("userData"), "session-groups.json"), join(app.getPath("userData"), "host-plugin-storage", "session-groups.json"));
+		const sessionGroupStorePreload = sessionGroupStore.load();
+		// 插件页保存分组后实时刷侧栏：数据变化统一从 store 冒泡，广播给主窗口。
+		sessionGroupStore.onChanged(() => {
+			const win = mainWindow;
+			if (win && !win.isDestroyed()) win.webContents.send(ipcChannels.sessionGroupsChanged, null);
+		});
+		await Promise.all([sessionCatalog.load(), automationStorePreload, agentProfileStorePreload, favoritesStorePreload, sessionGroupStorePreload]);
 		// 智能体一次性调用（划词工具 / 市场面板）：复用提示词增强侧车协议，但**独立实例**。
 		// 侧车进程常驻、首次调用才拉起（EnhancePromptService 的现有语义），启动期只做装配。
 		agentInvokeCompletionService = createCompletionHelperService("agent-invoke");

@@ -20,7 +20,7 @@ function label(value: unknown): value is string {
 	return typeof value === "string" && value.trim().length > 0 && value.length <= 160 && !/[\u0000-\u001f]/.test(value);
 }
 
-const HOST_PLUGIN_PERMISSIONS = new Set<string>(["sessions.read", "sessions.read.workspace", "workbench.navigate", "workbench.openExternal", "network.https", "network.local", "service.local"]);
+const HOST_PLUGIN_PERMISSIONS = new Set<string>(["sessions.read", "sessions.read.workspace", "workbench.navigate", "workbench.openExternal", "network.https", "network.local", "service.local", "sessionGroups.manage"]);
 /** 权限白名单校验：manifest 解析与管理入口（脚手架）共用同一份，保证两边不会拒/收不一致。 */
 export const isHostPluginPermission = (value: unknown): value is HostPluginPermission => typeof value === "string" && HOST_PLUGIN_PERMISSIONS.has(value);
 

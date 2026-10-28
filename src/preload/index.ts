@@ -42,6 +42,7 @@ import type { AgentChangedEvent, AgentInvokeEventPayload, AgentInvokeInput, Agen
 import type { SelectionToolInsertInput, SelectionToolResizeInput, SelectionToolShowPayload, SelectionToolWindowState } from "../shared/types/selectionTool";
 import type { QuickMessagesSaveResult, QuickMessagesSnapshot } from "../shared/types/quickMessages";
 import type { AddFavoriteInput, FavoriteEntry } from "../shared/types/favorites";
+import type { SessionGroup } from "../shared/types/sessionGroups";
 import type { NoticeHistoryFileEntry, NoticeHistoryRecordInput } from "../shared/types/noticeHistory";
 import type { ReplyActionRule, ReplyActionsSaveResult, ReplyActionsSnapshot } from "../shared/types/replyActions";
 import type {
@@ -1914,6 +1915,15 @@ const api = {
 		removeMany: (favoriteIds: string[]) => ipcRenderer.invoke(ipcChannels.favoritesRemoveMany, favoriteIds) as Promise<number>,
 		/** 保存拖拽出的顺序（完整 id 数组）；返回主进程落地后的列表。 */
 		reorder: (favoriteIds: string[]) => ipcRenderer.invoke(ipcChannels.favoritesReorder, favoriteIds) as Promise<FavoriteEntry[]>,
+	},
+
+	// ── 会话分组（userData/session-groups.json）：侧栏只读消费，写入方是插件页 ──
+	sessionGroups: {
+		list: () => ipcRenderer.invoke(ipcChannels.sessionGroupsList) as Promise<SessionGroup[]>,
+		save: (input: unknown) => ipcRenderer.invoke(ipcChannels.sessionGroupsSave, input) as Promise<SessionGroup[]>,
+		delete: (groupId: string) => ipcRenderer.invoke(ipcChannels.sessionGroupsDelete, groupId) as Promise<boolean>,
+		reorder: (groupIds: string[]) => ipcRenderer.invoke(ipcChannels.sessionGroupsReorder, groupIds) as Promise<SessionGroup[]>,
+		onChanged: (callback: () => void) => subscribe(ipcChannels.sessionGroupsChanged, callback),
 	},
 
 	// ── 系统级划词浮窗（全局快捷键触发的独立窗口；与主窗口共用同一份 preload） ──

@@ -2181,6 +2181,16 @@ export function createPreviewApi(): PiDesktopApi {
 			// 列表恒空：排序无可命中的条目，与主进程「剔除未知 id」后的结果一致。
 			reorder: async () => [],
 		},
+		// 会话分组：预览/Web 端没有宿主 store，列表恒空、写入抛错（与 favorites 同语义）。
+		sessionGroups: {
+			list: async () => [],
+			save: async () => {
+				throw new Error("preview stub");
+			},
+			delete: async () => false,
+			reorder: async () => [],
+			onChanged: () => () => {},
+		},
 		// 系统级划词浮窗：预览/Web 端没有独立窗口，全部 inert。
 		selectionTool: {
 			getState: async () => ({ visible: false }),

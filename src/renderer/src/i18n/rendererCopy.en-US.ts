@@ -6140,6 +6140,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"web.backendSheetTitle": "Choose session backend",
 	"web.backendPiDesc": "Pi coding agent session (default)",
 	"web.backendDshDesc": "DSH-powered agent session",
+	"web.backendAcpToolDesc": "External CLI agent session (ACP)",
 	"web.backendImagegen": "Image",
 	"web.backendImagegenDesc": "Generate images from prompts",
 	"web.noMessages": "No messages",

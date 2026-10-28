@@ -47,7 +47,7 @@ title: 宿主插件开发指南
 2. 点 **「新建插件…」**，填：
    - **插件 ID**：小写字母开头，`[a-z0-9.-]`，≤80 字符，例如 `demo.viewer`（同时是生成目录名）；
    - **显示名**：面板与命令里的名字；
-   - **权限**：默认只勾 `sessions.read`；按需增加 `workbench.navigate` / `workbench.openExternal` / `network.https` / `network.local` / `service.local`。纯联网工具可取消会话读取；
+   - **权限**：默认只勾 `sessions.read`；按需增加 `workbench.navigate` / `workbench.openExternal` / `network.https` / `network.local` / `service.local` / `sessionGroups.manage`。纯联网工具可取消会话读取；
    - **网络目的地**（仅勾网络权限时出现）：HTTPS 填 `https://api.example.com` 这样的 origin，本地填明确端口（如 `4187`）；多个值用逗号或空白分隔，每类最多 16 个，不支持通配符；
    - **面板形态**：`modal`（大弹框，默认）、`popover`（侧栏一行旁边的浮层，适合几行控件的紧凑面板）或 `page`（工作区内联页）；
 3. 生成后目录出现在插件目录里，并自动重新扫描（默认**禁用**）；
@@ -152,7 +152,7 @@ for (const session of page.sessions) {
 | `name` | ✅ | 非空，≤160 字符，无控制字符 |
 | `version` | ✅ | 非空，≤160 字符（仅用于展示，授权不看它） |
 | `description` | — | ≤1000 字符 |
-| `permissions` | ✅ | 数组，只能取 `sessions.read` / `sessions.read.workspace` / `workbench.navigate` / `workbench.openExternal` / `network.https` / `network.local` / `service.local`，不能重复；未知权限拒装。`sessions.read.workspace` 是 `sessions.read` 的**范围扩展**（把读取与导航扩到整个工作区），必须同时声明 `sessions.read`，单独声明直接拒装 |
+| `permissions` | ✅ | 数组，只能取 `sessions.read` / `sessions.read.workspace` / `workbench.navigate` / `workbench.openExternal` / `network.https` / `network.local` / `service.local` / `sessionGroups.manage`，不能重复；未知权限拒装。`sessions.read.workspace` 是 `sessions.read` 的**范围扩展**（把读取与导航扩到整个工作区），必须同时声明 `sessions.read`，单独声明直接拒装 |
 | `network` | 网络权限存在时 ✅ | `network.https` 对应 `httpsOrigins`，`network.local` 对应 `localPorts`。没声明对应权限不得填写该字段；规则见 5.5 |
 | `services` | `service.local` 存在时 ✅ | 1–8 个，只能点名 PiDeck **已实现适配器**的本地服务（当前仅 `billion-context`）；没声明 `service.local` 不得填写该字段；规则见 5.8 |
 | `contributes.panels` | ✅ | 1–8 个。`id`（同上 ID 规则）、`title`（≤160）、`entry`（包内相对路径，**必须以 `.html` 结尾**）、`icon`（白名单，可选）、`presentation`（`modal` / `popover` / `page`，可选） |
@@ -202,6 +202,10 @@ for (const session of page.sessions) {
 | `pideck.services.status(id)` | `service.local` + `services` 点名 | `HostPluginServiceStatus` |
 | `pideck.services.start(id)` / `stop(id)` | `service.local` + `services` 点名 | 操作后的 `HostPluginServiceStatus` |
 | `pideck.services.openUi(id, pid?)` | `service.local` + `services` 点名 | 操作后的 `HostPluginServiceStatus`（由 PiDeck 开内置浏览器；`pid` 可从 `status.instances` 白名单里点名多实例服务的某个实例） |
+| `pideck.sessionGroups.list()` | `sessionGroups.manage` | `SessionGroup[]`（宿主会话分组全量） |
+| `pideck.sessionGroups.save(group)` | `sessionGroups.manage` | `SessionGroup[]`（按 id upsert 一组，`id` 省略 = 新建，返回全量） |
+| `pideck.sessionGroups.delete(groupId)` | `sessionGroups.manage` | `boolean`（是否真的删了） |
+| `pideck.sessionGroups.reorder(groupIds)` | `sessionGroups.manage` | `SessionGroup[]`（保存显示顺序，未知 id 容错） |
 | `pideck.onEvent(listener)` | — | 取消订阅函数 |
 
 > 兼容策略：新能力只做加法。老插件不受影响；想探测新方法用 `typeof pideck.sessions.search === "function"`。
@@ -501,6 +505,26 @@ for (const inst of status.instances ?? []) {
 #### 可直接导入的 demo
 
 `resources/host-plugins/billion-context/` 就是完整实现（状态卡 + 启停 + 开面板）。它会随 PiDeck 落位到插件目录，可直接改；改完重新扫描 + 重新授权。
+
+### 5.9 会话分组：读写宿主分组数据（`sessionGroups.manage`）
+
+会话分组是 PiDeck 自己的本地数据（`<userData>/session-groups.json`）：侧栏「分组」树只读消费它，声明了 `sessionGroups.manage` 的插件可以读写它（目前是内置的会话分组插件）。用途边界见 `docs/host-boundaries.md` 例外七——**只允许分组读写，不是通用存储桥**。
+
+```ts
+type SessionGroup = {
+	id: string;
+	name: string; // ≤80 字符
+	color: "blue" | "green" | "orange" | "purple" | "red" | "cyan";
+	createdAt: number;
+	sessionIds: string[]; // 会话引用，失效引用由消费方按 catalog 过滤，宿主不校验存在性
+	dirs: string[]; // 目录范围（dirKey 列表，空数组 = 不限目录），宿主按不透明字符串透传
+};
+```
+
+- `save` 是**整体替换**（按 id upsert）：先 `list()` 拿全量、改内存、再写回，不要按字段猜合并语义。
+- 写入成功后宿主广播 `session-groups:changed`，桌面帧自动刷新侧栏；插件自己不需要（也无法）通知侧栏。
+- 分组是跨插件的共享数据：按 id 增量改，禁止整表清空重建；单组会话引用上限 20000，组数上限 200。
+- 保存/删除/排序分别有 1 次 IPC 往返；高频操作（拖拽、勾选）先改内存、防抖后再落盘（参考内置插件的 `queue()` 串行 + 签名 diff 写法）。
 
 ## 6. 安全模型（为什么这些限制是这样）
 

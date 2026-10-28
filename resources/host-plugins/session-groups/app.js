@@ -206,18 +206,16 @@ let L = STR["zh-CN"];
 
 /* ---------- 常量 ---------- */
 
-const META_KEY = "ws.meta";
-const GROUP_PREFIX = "ws.g.";
-const LEGACY_PREFIX = "grp.";
+// v3：分组数据在宿主 store（<userData>/session-groups.json），经 pideck.sessionGroups.* 读写；
+// 侧栏分组树消费同一份数据，这里保存后宿主会广播 session-groups:changed，桌面帧自动刷新。
+// 折叠态是纯 UI 偏好，改存本机 localStorage，不再进宿主数据。
+const COLLAPSE_KEY = "session-groups.collapsed";
 const UNGROUPED = "__ungrouped__";
 const COLORS = ["blue", "green", "orange", "purple", "red", "cyan"];
 // 每页条数：分组卡片里一次铺 20 条（约两屏），再靠页码条翻页；搜索/筛选会重置页码。
 const PAGE_SIZE = 20;
 const ACTIVE_WINDOW_MS = 10 * 60 * 1000;
 const COLOR_INDEX = new Map(COLORS.map((name, index) => [name, index]));
-// 单键 JSON 上限 64KB：一个分组装几千条 id 会超，超出部分拆到 ws.g.<id>.<n> 分片键。
-const GROUP_CHUNK = 800;
-const chunkKey = (groupId, index) => GROUP_PREFIX + groupId + "." + index;
 
 /* ---------- 状态 ---------- */
 
@@ -449,127 +447,77 @@ function normalizeIds(value) {
 	return Array.isArray(value) ? [...new Set(value.filter((id) => typeof id === "string" && id))] : [];
 }
 
-function saveMeta() {
-	return queue(() =>
-		pideck.storage.set(META_KEY, {
-			v: 2,
-			groups: state.groups.map((g) => ({ id: g.id, name: g.name, color: g.color, createdAt: g.createdAt, dirs: groupScope(g) })),
-			collapsed: [...state.collapsed],
-		}),
-	);
+/** 组的宿主载荷：与宿主 SessionGroup 契约同构（ids → sessionIds）。 */
+function groupPayload(group) {
+	return { id: group.id, name: group.name, color: group.color, createdAt: group.createdAt, sessionIds: group.ids, dirs: groupScope(group) };
 }
 
-function saveGroup(group) {
+function groupSig(group) {
+	return JSON.stringify(groupPayload(group));
+}
+
+// 上次成功落盘的签名：diff 出真正变化的组，避免每次折叠/换色都全量写宿主 store。
+let persistedSigs = new Map();
+
+function persistGroup(group) {
+	const sig = groupSig(group);
+	if (persistedSigs.get(group.id) === sig) return Promise.resolve();
+	return pideck.sessionGroups
+		.save(groupPayload(group))
+		.then(() => {
+			persistedSigs.set(group.id, sig);
+		})
+		.catch((err) => {
+			persistedSigs.delete(group.id);
+			throw err;
+		});
+}
+
+/** 全量对账：名字/颜色/顺序/折叠可能一次变多处；只写签名变过的组，再落显示顺序与折叠态。 */
+function saveMeta() {
 	return queue(async () => {
-		const chunks = [];
-		for (let index = 0; index < group.ids.length; index += GROUP_CHUNK) chunks.push(group.ids.slice(index, index + GROUP_CHUNK));
-		const previous = group.chunks ?? 0;
-		if (chunks.length <= 1) {
-			await pideck.storage.set(GROUP_PREFIX + group.id, { ids: group.ids });
-		} else {
-			await pideck.storage.set(GROUP_PREFIX + group.id, { chunked: chunks.length });
-			for (let index = 0; index < chunks.length; index += 1) await pideck.storage.set(chunkKey(group.id, index), { ids: chunks[index] });
-		}
-		// 组缩小后旧分片要清掉，否则下次读会拼出已经不存在的 id
-		const kept = chunks.length <= 1 ? 0 : chunks.length;
-		for (let index = kept; index < previous; index += 1) await pideck.storage.remove(chunkKey(group.id, index)).catch(() => {});
-		group.chunks = kept;
+		for (const group of state.groups) await persistGroup(group);
+		try {
+			localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...state.collapsed]));
+		} catch {}
+		if (state.groups.length > 0) await pideck.sessionGroups.reorder(state.groups.map((g) => g.id));
 	});
 }
 
-/** 旧版按键（grp.<projectId>）一次性并入工作区数据；旧键保留不删，用户回退版本也不会丢。 */
-async function migrateLegacy() {
-	let keys = [];
-	try {
-		keys = await pideck.storage.keys();
-	} catch {
-		keys = [];
-	}
-	const legacyKeys = (Array.isArray(keys) ? keys : []).filter((key) => typeof key === "string" && key.startsWith(LEGACY_PREFIX));
-	if (legacyKeys.length === 0) return false;
-	const byId = new Map(state.groups.map((g) => [g.id, g]));
-	let merged = false;
-	for (const key of legacyKeys) {
-		let raw;
-		try {
-			raw = await pideck.storage.get(key);
-		} catch {
-			continue;
-		}
-		if (!raw || typeof raw !== "object" || !Array.isArray(raw.groups)) continue;
-		for (const item of raw.groups) {
-			if (!item || typeof item.id !== "string" || typeof item.name !== "string") continue;
-			const ids = normalizeIds(item.sessionIds);
-			const existing = byId.get(item.id);
-			if (existing) {
-				for (const id of ids) if (!existing.ids.includes(id)) existing.ids.push(id);
-			} else {
-				const group = {
-					id: item.id,
-					name: item.name,
-					color: COLORS[state.groups.length % COLORS.length],
-					createdAt: typeof item.createdAt === "number" ? item.createdAt : Date.now(),
-					ids,
-				};
-				state.groups.push(group);
-				byId.set(group.id, group);
-			}
-			merged = true;
-		}
-		if (Array.isArray(raw.collapsed)) for (const id of raw.collapsed) if (typeof id === "string") state.collapsed.add(id);
-	}
-	if (!merged) return false;
-	for (const group of state.groups) await saveGroup(group);
-	await saveMeta();
-	return true;
+function saveGroup(group) {
+	return queue(() => persistGroup(group));
 }
 
 async function loadWorkspaceData() {
 	state.groups = [];
 	state.collapsed = new Set();
-	let meta;
+	persistedSigs = new Map();
+	// 宿主 store 是唯一数据源（启动时宿主已从插件 v2 私有 storage 一次性迁入）。
+	let list = [];
 	try {
-		meta = await pideck.storage.get(META_KEY);
+		list = await pideck.sessionGroups.list();
 	} catch {
-		meta = undefined;
+		list = [];
 	}
-	if (meta && typeof meta === "object" && Array.isArray(meta.groups)) {
-		for (const item of meta.groups) {
-			if (!item || typeof item.id !== "string" || typeof item.name !== "string") continue;
-			state.groups.push({
-				id: item.id,
-				name: item.name,
-				color: COLORS.includes(item.color) ? item.color : COLORS[state.groups.length % COLORS.length],
-				createdAt: typeof item.createdAt === "number" ? item.createdAt : Date.now(),
-				dirs: Array.isArray(item.dirs) ? item.dirs.filter((key) => typeof key === "string" && key.length > 0 && key.length <= 240).slice(0, 64) : [],
-				ids: [],
-			});
-		}
-		if (Array.isArray(meta.collapsed)) for (const id of meta.collapsed) if (typeof id === "string") state.collapsed.add(id);
+	for (const item of Array.isArray(list) ? list : []) {
+		if (!item || typeof item.id !== "string" || typeof item.name !== "string") continue;
+		const group = {
+			id: item.id,
+			name: item.name,
+			color: COLORS.includes(item.color) ? item.color : COLORS[state.groups.length % COLORS.length],
+			createdAt: typeof item.createdAt === "number" ? item.createdAt : Date.now(),
+			dirs: Array.isArray(item.dirs) ? item.dirs.filter((key) => typeof key === "string" && key.length > 0 && key.length <= 200).slice(0, 64) : [],
+			ids: normalizeIds(item.sessionIds),
+		};
+		state.groups.push(group);
+		persistedSigs.set(group.id, groupSig(group));
 	}
-	for (const group of state.groups) {
-		try {
-			const raw = await pideck.storage.get(GROUP_PREFIX + group.id);
-			if (!raw || typeof raw !== "object") continue;
-			if (Array.isArray(raw.ids)) {
-				group.ids = normalizeIds(raw.ids);
-				continue;
-			}
-			const chunked = Number.isInteger(raw.chunked) ? raw.chunked : 0;
-			if (chunked <= 0) continue;
-			const ids = [];
-			for (let index = 0; index < chunked; index += 1) {
-				const part = await pideck.storage.get(chunkKey(group.id, index));
-				if (part && Array.isArray(part.ids)) ids.push(...part.ids);
-			}
-			group.ids = normalizeIds(ids);
-			group.chunks = chunked;
-		} catch {
-			group.ids = [];
-		}
-	}
-	const migrated = await migrateLegacy();
-	if (!meta || migrated) await saveMeta();
+	// 折叠态只在本机：不再随宿主数据走（跨设备同步折叠没有意义）。
+	try {
+		const raw = localStorage.getItem(COLLAPSE_KEY);
+		const parsed = raw ? JSON.parse(raw) : [];
+		if (Array.isArray(parsed)) for (const id of parsed) if (typeof id === "string") state.collapsed.add(id);
+	} catch {}
 }
 
 /* ---------- 会话目录 ---------- */
@@ -681,9 +629,9 @@ function dirLabelOf(key, sample) {
 	return (sample && sample.projectName) || key;
 }
 
-/** 目录范围：空数组 = 不限（旧分组与「先建空分组」都走这里）。 */
+/** 目录范围：空数组 = 不限（旧分组与「先建空分组」都走这里）。key 长度上限与宿主契约一致（200）。 */
 function groupScope(group) {
-	return Array.isArray(group.dirs) ? group.dirs.filter((key) => typeof key === "string" && key.length > 0 && key.length <= 240).slice(0, 64) : [];
+	return Array.isArray(group.dirs) ? group.dirs.filter((key) => typeof key === "string" && key.length > 0 && key.length <= 200).slice(0, 64) : [];
 }
 
 /** 把会话所在目录并入范围：手工放进来的会话不能让组处于「范围外」的不一致状态。 */
@@ -1297,20 +1245,17 @@ function beginRename(group, titles) {
 	input.addEventListener("blur", () => finish(true));
 }
 
-/** 删除分组：只清分组与它的分片键，会话本身与别的分组不受影响。 */
+/** 删除分组：只删宿主 store 里的这一组，会话本身与别的分组不受影响。 */
 function deleteGroup(group) {
-	const chunks = group.chunks ?? 0;
 	state.groups = state.groups.filter((item) => item.id !== group.id);
 	state.collapsed.delete(group.id);
 	pages.delete(group.id);
+	persistedSigs.delete(group.id);
 	if (selection.groupId === group.id) {
 		selection.groupId = null;
 		selection.ids.clear();
 	}
-	void queue(async () => {
-		await pideck.storage.remove(GROUP_PREFIX + group.id).catch(() => {});
-		for (let index = 0; index < chunks; index += 1) await pideck.storage.remove(chunkKey(group.id, index)).catch(() => {});
-	});
+	void queue(() => pideck.sessionGroups.delete(group.id).catch(() => {}));
 	void saveMeta();
 	render();
 }

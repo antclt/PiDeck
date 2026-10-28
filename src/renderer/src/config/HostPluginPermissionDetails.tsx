@@ -13,6 +13,7 @@ export const HOST_PLUGIN_PERMISSION_OPTIONS = [
 	["network.https", "hostPlugins.networkHttps", "hostPlugins.networkHttpsHint"],
 	["network.local", "hostPlugins.networkLocal", "hostPlugins.networkLocalHint"],
 	["service.local", "hostPlugins.serviceLocal", "hostPlugins.scaffoldServiceLocalHint"],
+	["sessionGroups.manage", "hostPlugins.sessionGroupsManage", "hostPlugins.sessionGroupsManageHint"],
 ] as const;
 
 /** 列表行用的短标签：与上面的完整选项一一对应，避免行内被长句撑成多行。 */
@@ -24,6 +25,7 @@ export const HOST_PLUGIN_PERMISSION_CHIP_KEYS: Record<HostPluginPermission, Tran
 	"network.https": "hostPlugins.chipHttps",
 	"network.local": "hostPlugins.chipLocal",
 	"service.local": "hostPlugins.chipService",
+	"sessionGroups.manage": "hostPlugins.chipSessionGroups",
 };
 
 /** Never collapse grants into “can access the network”: the exact origins and loopback ports are the consent. */

@@ -1346,9 +1346,6 @@ export function App() {
 		navigateTo(url);
 	};
 
-	// 桌面插件发起的会话导航：broker 已验权限/归属，这里只注入现有选中动作（复用唯一选中路径）
-	useHostPluginNavigation(selectSessionCommand, openInBrowser);
-
 	// 关闭 Tab / 分屏退栏时的焦点切换：只改 currentSession，不碰 Tab 登记
 	useEffect(() => {
 		workspaceChrome.bindFocusHandlers({
@@ -1559,6 +1556,12 @@ export function App() {
 		},
 		[runOpenSidebarSessionById, workspaceChrome],
 	);
+
+	// 桌面插件发起的会话导航：broker 已验权限/归属，复用侧栏打开链路（选中 + 常驻 Tab）。
+	// 插件页是临时页面，走纯选中会让会话没有任何 Tab 归属；与「定时任务」页查看会话同一条链路。
+	useHostPluginNavigation((projectId, sessionId) => {
+		void openSidebarSessionByIdWithTab(projectId, sessionId, "permanent");
+	}, openInBrowser);
 
 	// 收藏页「会话」条目：FavoritesPage 渲染在 SessionPaneServices 之外，经 atom 发导航请求，
 	// 这里复用侧栏打开链路（选中 + 常驻 Tab），不引入第二条会话选中路径。

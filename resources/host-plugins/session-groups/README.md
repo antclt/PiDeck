@@ -32,22 +32,25 @@
 - `sessions.read`：只读会话目录与元信息（不读历史正文）。
 - `sessions.read.workspace`：把上面的读取与跳转范围从「当前项目」扩到**整个工作区**（所有项目目录）。它是 `sessions.read` 的范围扩展，单独声明无效（清单校验会拒）。
 - `workbench.navigate`：点击会话让 PiDeck 切到会话所属项目再打开（DSH/ACP/生图会话没有 JSONL 也能打开）。
-- 没有网络权限，不联网、不上传会话、不写密钥。分组关系存在插件私有 `storage`（每插件 1 MiB），只存「组名 + 颜色 + 会话 id 引用」，不存会话内容。
+- 没有网络权限，不联网、不上传会话、不写密钥。分组数据存**宿主 store**（`<userData>/session-groups.json`，经 `sessionGroups.*` API 读写），只存「组名 + 颜色 + 会话 id 引用 + 目录范围」，不存会话内容；侧栏分组树消费同一份数据，这里的修改实时反映到侧栏。
+- `sessionGroups.manage`：读写宿主会话分组（见 `docs/host-boundaries.md` 例外七）。折叠状态是纯 UI 偏好，只存本机 localStorage，不进宿主数据。
 
 ## 存储布局
 
-宿主 `storage.set` 单值有 64KB 上限，上万条 id 放一个键会超，所以分键存：
+分组数据自 v3 起存**宿主 store**（`<userData>/session-groups.json`，由 PiDeck 主进程持有与落盘），本插件经 `pideck.sessionGroups.*` 读写，不再使用插件私有 `storage`：
 
-| 键 | 内容 |
+| 位置 | 内容 |
 |---|---|
-| `ws.meta` | `{ v: 2, groups: [{ id, name, color, createdAt, dirs }], collapsed: [...] }`，数组顺序即显示顺序；`dirs` 是目录范围（空数组 = 不限目录） |
-| `ws.g.<groupId>` | `{ ids: [...] }` |
+| 宿主 store `groups[]` | `{ id, name, color, createdAt, sessionIds, dirs }`，数组顺序即显示顺序；`dirs` 是目录范围（空数组 = 不限目录） |
+| 本机 `localStorage["session-groups.collapsed"]` | 折叠的分组 id 列表（纯 UI 偏好，不进宿主数据） |
 
-旧版（≤1.6.0）按项目隔离的 `grp.<projectId>` 键会在首次启动时并入工作区数据，**旧键保留不删**（回退旧版本也不会丢分组）。
+历史迁移：PiDeck 启动时把 v2 插件私有 storage（`host-plugin-storage/session-groups.json` 的 `ws.meta` / `ws.g.*` 分片键）一次性导入宿主 store（只读、不删旧文件，回退旧版插件不丢分组）。更早的 v1 按项目 `grp.<projectId>` 键未迁移——需要先跑一次 v2 插件完成并组。会话被删除/替代后的失效引用由插件页与侧栏各自按 catalog 过滤，store 不追删。
 
 ## 面板形态
 
-`"presentation": "page"`：工作区内联页，非模态，侧栏 `layers` 图标入口再点即关。点击某个会话时工作台会切到它所属的项目并打开，页面式覆盖层随之收起（这是宿主的既有行为：切会话就露出会话）。
+`"presentation": "page"`：工作区内联页，非模态，侧栏 `layers` 图标入口再点即关。页面铺满会话列，不设居中限宽（与「定时任务 / 智能体 / 收藏」页一致）。宿主的页面式覆盖层不再叠一条「面板名 + 关闭」的页头：面板名在会话 Tab 栏的伪 Tab 上，关闭走伪 Tab 的 ×。
+
+点击某个会话时工作台会切到它所属的项目，**登记常驻 Tab** 后打开，插件页随之收起——打开的会话必须在 Tab 栏里有归属，否则关不掉、切不回来。
 
 ## 内置落位语义
 
@@ -57,6 +60,8 @@
 - 内置插件不允许卸载（`plugin-builtin`，下次启动会被重新落位），要停用请用禁用。
 - v1.6.0 → v2.0.0 新增了 `sessions.read.workspace` 权限，包的指纹变了：升级后需要在设置里重新授权一次。
 - v2.1.0 只改界面与分页，未新增权限；内置副本随包升级会替换并顺延授权。
+- v2.1.1 只改界面（去掉居中限宽），未新增权限；指纹变化后同样随包替换。
+- **v3.0.0 新增 `sessionGroups.manage` 权限**（分组数据搬到宿主 store，侧栏分组树实时同步）：指纹变化，升级后需要在设置里重新授权一次。
 - 样式 token 由宿主 `hostPluginTokens.ts` 的 `HOST_PLUGIN_THEME_TOKENS` 注入（颜色 / 圆角 / 阴影 / 控件高度 / 字号 / 字体）；新增 token 需同步 `docs/host-plugin-dev-guide.md` §5.7。
 
 ## 改这个插件

@@ -23,7 +23,7 @@ const BUILTIN_DIRECTORY = join(process.cwd(), "resources", "host-plugins");
  */
 const BUILTIN_PLUGINS = {
 	"billion-context": { permissions: ["service.local"], services: ["billion-context"], panelId: "main", presentation: "popover", icon: "activity" },
-	"session-groups": { permissions: ["sessions.read", "sessions.read.workspace", "workbench.navigate"], panelId: "main", presentation: "page", icon: "layers" },
+	"session-groups": { permissions: ["sessions.read", "sessions.read.workspace", "workbench.navigate", "sessionGroups.manage"], panelId: "main", presentation: "page", icon: "layers" },
 };
 
 /** 面板 HTML 引用的包内资产（`src`/`href`），外链与锚点单独判定，不当作包内路径。 */

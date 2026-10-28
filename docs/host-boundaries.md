@@ -57,6 +57,12 @@
 - 禁止扩展成通用宿主控制通道：不得暴露任意 JS 执行、文件系统、shell、任意 HTTP 代理、会话/模型控制。内置浏览器工具不得绕过 `isAllowedBrowserPanelUrl`、不得注入 preload / 放开 allowpopups、不得改 webview 安全档位。
 - 详见 `docs/browser-agent-plan.md`（工具面、快照契约、风险与合并门禁）。
 
+## 例外七：会话分组宿主数据（`sessionGroups.*`，只允许分组读写）
+
+- 会话分组是 PiDeck 自己的本地数据（`<userData>/session-groups.json`，主进程 `SessionGroupStore` 持有与原子落盘），消费方两处：侧栏「分组」树（只读）与会话分组插件页（读写）。插件经专属 preload 的 `pideck.sessionGroups.list/save/delete/reorder` 访问，需 manifest 声明 `sessionGroups.manage`；请求走 `hostPluginRequest` 同一条通道，broker 逐方法验权，不做前缀推断。
+- **写入是整体替换式**（按 group id upsert），不做字段级合并；保存/删除/排序成功后 store 广播 `session-groups:changed`，桌面帧据此刷新侧栏。插件不是唯一写入方时的竞态由「启动时一次性迁移 + 单写方约定」收敛：v2 插件私有 storage 只在首次启动被导入一次（只读不删），之后一律以宿主 store 为准。
+- 禁止扩成通用存储桥：不得在此通道上夹带任意键值、会话正文、文件路径或设置读写；会话 id 只是引用，失效引用由消费方按 catalog 过滤，宿主不追删、不校验会话存在性。
+
 ## 侧车通用规则
 
 - 所有随包 sidecar 必须列进 `extraResources`，stdout 只放协议数据（日志走 stderr 或主进程 logger）。

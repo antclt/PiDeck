@@ -124,8 +124,8 @@ input {
 	flex-direction: column;
 	height: 100vh;
 	width: 100%;
-	max-width: 1080px;
-	margin: 0 auto;
+	/* 铺满会话列：宿主其他页面式工作区（定时任务 / 智能体 / 收藏）都不设居中限宽，
+	   旧的 1080px 上限在宽窗口里两侧各留几百像素空白。 */
 }
 
 .page-head {

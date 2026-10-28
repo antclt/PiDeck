@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: dad16a0cb7e7de0b4502b66c1ae3480b977610edf20e92e2ab79200c4e678219（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 3edaa04a0bb30bec2f8ebbb529f109cc784f8f3cd7d74fe8eb34ff66b4c30eb4（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -6127,6 +6127,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"web.backendSheetTitle": "選擇會話後端",
 	"web.backendPiDesc": "Pi 編碼助手會話（預設）",
 	"web.backendDshDesc": "DSH 驅動的智慧體會話",
+	"web.backendAcpToolDesc": "外部 CLI 智慧體會話（ACP）",
 	"web.backendImagegen": "生圖",
 	"web.backendImagegenDesc": "輸入提示詞生成圖片",
 	"web.noMessages": "暫無訊息",

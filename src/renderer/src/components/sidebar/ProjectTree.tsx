@@ -14,6 +14,7 @@ import { RemoteProjectStatusTag } from "./RemoteProjectStatusTag";
 import { RemoteSessionsSection } from "./RemoteSessionsSection";
 import { useRemoteProjectRootStatuses } from "./useRemoteProjectRootStatuses";
 import { ActiveSessionsTree } from "./ActiveSessionsTree";
+import { SessionGroupsSection } from "./SessionGroupsSection";
 import { SessionTree } from "./SessionTree";
 import { WorktreeTree } from "./WorktreeTree";
 import { SessionActivityIndicator } from "../session/SessionActivityIndicator";
@@ -421,6 +422,8 @@ export function ProjectTree(props: {
 
 	const projectsSection = (
 		<section aria-label={t("app.sidebarProjects")} role="tree">
+			{/* 会话分组树（只读浏览，数据在宿主 store，写入方是分组插件页）：置于普通项目之上 */} 
+			<SessionGroupsSection actions={props.actions} currentSessionId={props.currentSessionId} />
 			{/* 分组标题栏：左侧「项目」标题，右侧 = 「+ 添加项目」+ 全部折叠/展开（高频操作外露）
             + 「⋯ 更多操作」。目录存在性重扫属于低频维护动作，收进菜单避免挤占窄侧栏。
             开启冻结时给这层纯逻辑包裹加 display:contents：它不生成盒子，里面的标题栏
@@ -508,5 +511,22 @@ export function ProjectTree(props: {
 				<ActiveSessionsTree controller={props.controller} actions={props.actions} currentSessionId={props.currentSessionId} recentOnly />
 			</>
 		);
-	return <>{props.controller.navTab === "active" ? <ActiveSessionsTree controller={props.controller} actions={props.actions} currentSessionId={props.currentSessionId} /> : props.controller.navTab === "chats" ? chatSection : projectsSection}</>;
+	const groupsSection = <SessionGroupsSection actions={props.actions} currentSessionId={props.currentSessionId} />;
+	return (
+		<>
+			{props.controller.navTab === "active" ? (
+				<>
+					{groupsSection}
+					<ActiveSessionsTree controller={props.controller} actions={props.actions} currentSessionId={props.currentSessionId} />
+				</>
+			) : props.controller.navTab === "chats" ? (
+				<>
+					{groupsSection}
+					{chatSection}
+				</>
+			) : (
+				projectsSection
+			)}
+		</>
+	);
 }

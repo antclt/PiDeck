@@ -353,6 +353,12 @@ export const ipcChannels = {
 	favoritesRemove: "favorites:remove",
 	favoritesRemoveMany: "favorites:remove-many",
 	favoritesReorder: "favorites:reorder",
+	/** 会话分组：本地 profile/session-groups.json（宿主数据），插件 v3 经 host API 读写同一份。 */
+	sessionGroupsList: "session-groups:list",
+	sessionGroupsSave: "session-groups:save",
+	sessionGroupsDelete: "session-groups:delete",
+	sessionGroupsReorder: "session-groups:reorder",
+	sessionGroupsChanged: "session-groups:changed",
 	/** 系统级划词浮窗（全局快捷键触发）：可见性/隐藏/发送回主窗口/捕获推流。 */
 	selectionToolGetState: "selection-tool:get-state",
 	selectionToolHide: "selection-tool:hide",

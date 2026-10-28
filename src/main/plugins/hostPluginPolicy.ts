@@ -1,4 +1,5 @@
 /** Pure policy shared by the view host and broker; failures never fall back to a broader capability. */
+import type { SaveSessionGroupInput } from "../../shared/types/sessionGroups";
 import type { HostPluginContext, HostPluginRequest } from "../../shared/types/hostPlugin";
 import { isLocalServiceId } from "../../shared/localServices";
 import { isHostPluginAsset, isPluginRecord } from "./hostPluginManifest";
@@ -87,6 +88,27 @@ export function parsePluginRequest(value: unknown): HostPluginRequest {
 		if (typeof value.sessionId !== "string" || value.sessionId.length < 1 || value.sessionId.length > 160) throw new Error("invalid-request");
 		if (value.entryId !== undefined && (typeof value.entryId !== "string" || value.entryId.length < 1 || value.entryId.length > 160 || /[\u0000-\u001f]/.test(value.entryId))) throw new Error("invalid-request");
 		return { method: value.method, sessionId: value.sessionId, entryId: value.entryId === undefined ? undefined : value.entryId };
+	}
+	if (value.method === "sessionGroups.list") return { method: value.method };
+	if (value.method === "sessionGroups.save") {
+		const group = value.group;
+		if (typeof group !== "object" || group === null || Array.isArray(group)) throw new Error("invalid-request");
+		const raw = group as Record<string, unknown>;
+		// 名称必有；id/createdAt/sessionIds/dirs 可省（省略 = 宿主按默认值收窄），形状越界一律拒。
+		if (typeof raw.name !== "string" || raw.name.trim().length < 1 || raw.name.length > 200) throw new Error("invalid-request");
+		if (raw.id !== undefined && (typeof raw.id !== "string" || raw.id.length < 1 || raw.id.length > 200)) throw new Error("invalid-request");
+		if (raw.createdAt !== undefined && (typeof raw.createdAt !== "number" || !Number.isFinite(raw.createdAt))) throw new Error("invalid-request");
+		if (raw.sessionIds !== undefined && (!Array.isArray(raw.sessionIds) || raw.sessionIds.length > 30_000 || raw.sessionIds.some((id) => typeof id !== "string" || id.length < 1 || id.length > 200))) throw new Error("invalid-request");
+		if (raw.dirs !== undefined && (!Array.isArray(raw.dirs) || raw.dirs.length > 1_000 || raw.dirs.some((key) => typeof key !== "string" || key.length < 1 || key.length > 200))) throw new Error("invalid-request");
+		return { method: value.method, group: raw as unknown as SaveSessionGroupInput };
+	}
+	if (value.method === "sessionGroups.delete") {
+		if (typeof value.groupId !== "string" || value.groupId.length < 1 || value.groupId.length > 200) throw new Error("invalid-request");
+		return { method: value.method, groupId: value.groupId };
+	}
+	if (value.method === "sessionGroups.reorder") {
+		if (!Array.isArray(value.groupIds) || value.groupIds.length > 500 || value.groupIds.some((id) => typeof id !== "string" || id.length < 1 || id.length > 200)) throw new Error("invalid-request");
+		return { method: value.method, groupIds: value.groupIds };
 	}
 	if (value.method === "storage.keys") return { method: value.method };
 	if (value.method === "storage.delete") {
