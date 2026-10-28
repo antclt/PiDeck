@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowLeft, FilePlus2, FileText, Folder, FolderPlus, Link2, Loader2, Plus, Search, TerminalSquare, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, FilePlus2, FileText, Folder, FolderPlus, Link2, Loader2, Plus, RefreshCw, Search, TerminalSquare, Trash2, Upload } from "lucide-react";
 import type { RemoteWorkspaceEntry } from "../../../../shared/types/remoteHost";
 import type { RemoteEntryKind } from "../../../../shared/types/remoteFiles";
 import { desktopApi } from "../../desktopApi";
@@ -10,7 +10,6 @@ import { moveDestination, remoteDropOnBlankArea, remoteDropRoute, REMOTE_ENTRY_D
 import { t } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
-import { Input } from "../ui-shadcn/input";
 import { isRemoteHostNotConnectedCode as isNotConnectedCode, remoteEntryParentPath as parentPath, remoteEntryRelativePath as relativePath, sortRemoteEntries } from "./remoteProjectEntries";
 import { createRequestGate } from "./remoteRequestGate";
 import { RemoteFileEditor } from "../workspace/RemoteFileEditor";
@@ -19,6 +18,7 @@ import { RemoteProjectEntryDialogs, type RemoteEntryDialog } from "./RemoteProje
 import { RemoteTrashPanel } from "./RemoteTrashPanel";
 import { remoteFileEntryKeepsInput } from "./remoteFileManagementState";
 import type { RemoteSearchEntryView } from "./remoteProjectSearchState";
+import { RemoteProjectSearchBar } from "./RemoteProjectSearchBar";
 
 /**
  * 远端项目目录浏览 + 文件名搜索 + 文本编辑 + 文件管理（Phase 5 文件面）。
@@ -38,6 +38,7 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 	const [error, setError] = useState<string | null>(null);
 	const [listed, setListed] = useState(false);
 	const [query, setQuery] = useState("");
+	const [searchOpen, setSearchOpen] = useState(false);
 	const [entryDialog, setEntryDialog] = useState<RemoteEntryDialog | null>(null);
 	const [trashOpen, setTrashOpen] = useState(false);
 	/**
@@ -244,117 +245,117 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 				transfer.onDrop(event);
 			}}
 		>
-			<div className="flex flex-wrap items-center gap-2 text-label">
+			{/* 工具行与本地文件面板同密度：图标按钮贴右，返回/新建会话/终端保留为图标动作，不额外做一条「远端项目」标题栏。 */}
+			<div data-testid="remote-file-toolbar" className="flex h-8 shrink-0 items-center gap-1 border-b border-border/40 px-2">
 				{props.onBack ? (
-					<Button variant="ghost" size="sm" data-testid="remote-project-back" onClick={props.onBack}>
+					<Button variant="ghost" size="icon-sm" data-testid="remote-project-back" aria-label={t("project.remote.back")} title={t("project.remote.back")} onClick={props.onBack}>
 						<ArrowLeft className="size-4" aria-hidden="true" />
-						{t("project.remote.back")}
 					</Button>
 				) : null}
-				<span className="rounded bg-muted px-1.5 py-0.5 font-medium text-muted-foreground">{t("project.remote.badge")}</span>
-				<strong className="text-body font-semibold text-foreground">{props.projectName}</strong>
-				<span className="text-muted-foreground">{t("project.remote.title")}</span>
-				{/* 无会话空态的主入口：远端项目也能一键起会话。文件浏览仍是同一页的次要动作，不把「新建会话」藏在侧栏项目行的 hover 按钮里。 */}
-				{props.onCreateSession && (
-					<Button variant="default" size="sm" data-testid="remote-project-new-session" onClick={props.onCreateSession}>
+				{props.onCreateSession ? (
+					<Button variant="ghost" size="icon-sm" data-testid="remote-project-new-session" aria-label={t("project.remote.newSession")} title={t("project.remote.newSession")} onClick={props.onCreateSession}>
 						<Plus className="size-4" aria-hidden="true" />
-						{t("project.remote.newSession")}
 					</Button>
-				)}
-				{props.onOpenTerminal && (
-					<Button variant="ghost" size="sm" onClick={props.onOpenTerminal}>
+				) : null}
+				{props.onOpenTerminal ? (
+					<Button variant="ghost" size="icon-sm" aria-label={t("app.terminal")} title={t("app.terminal")} onClick={props.onOpenTerminal}>
 						<TerminalSquare className="size-4" aria-hidden="true" />
-						{t("app.terminal")}
 					</Button>
-				)}
+				) : null}
+				<span className="min-w-0 flex-1 truncate px-1 text-label text-muted-foreground">{props.projectName}</span>
+				{!searching && !searchOpen ? (
+					<>
+						<Button type="button" size="icon-sm" variant="ghost" data-testid="remote-file-create" aria-label={t("remoteFileEntry.newFile")} title={t("remoteFileEntry.newFile")} disabled={files.busy || busy} onClick={() => setEntryDialog({ kind: "new", entryKind: "file", parent: parentPath(relative) })}>
+							<FilePlus2 className="size-4" />
+						</Button>
+						<Button type="button" size="icon-sm" variant="ghost" data-testid="remote-file-mkdir" aria-label={t("remoteFileEntry.newFolder")} title={t("remoteFileEntry.newFolder")} disabled={files.busy || busy} onClick={() => setEntryDialog({ kind: "new", entryKind: "directory", parent: parentPath(relative) })}>
+							<FolderPlus className="size-4" />
+						</Button>
+						<Button type="button" size="icon-sm" variant="ghost" data-testid="remote-file-upload" aria-label={t("remoteFileEntry.uploadAction")} title={t("remoteFileEntry.uploadAction")} disabled={files.busy || busy} onClick={transfer.uploadFiles}>
+							<Upload className="size-4" />
+						</Button>
+						<Button
+							type="button"
+							size="icon-sm"
+							variant="ghost"
+							aria-label={t("project.remote.searchPlaceholder")}
+							title={t("project.remote.searchPlaceholder")}
+							aria-pressed={searchOpen}
+							disabled={busy}
+							onClick={() => {
+								setSearchOpen((open) => {
+									if (open) {
+										resetSearch();
+										setQuery("");
+									}
+									return !open;
+								});
+							}}
+						>
+							<Search className="size-4" />
+						</Button>
+						<Button type="button" size="icon-sm" variant="ghost" data-testid="remote-trash-toggle" aria-label={t("remoteTrash.title")} title={t("remoteTrash.title")} aria-expanded={trashOpen} disabled={files.busy} onClick={() => setTrashOpen((open) => !open)}>
+							<Trash2 className="size-4" />
+						</Button>
+						<Button type="button" size="icon-sm" variant="ghost" aria-label={t("common.refresh")} title={t("common.refresh")} disabled={busy} onClick={() => void loadDirectory(relative)}>
+							<RefreshCw className="size-4" />
+						</Button>
+					</>
+				) : null}
 			</div>
-			{/* 工具栏只在目录浏览态出现（搜索态由搜索自身的结果/错误呈现）；空目录仍可见，可在空目录新建。 */}
-			{!searching ? (
-				<div data-testid="remote-file-toolbar" className="flex flex-wrap items-center gap-1">
-					<Button type="button" size="sm" variant="secondary" data-testid="remote-file-create" disabled={files.busy || busy} onClick={() => setEntryDialog({ kind: "new", entryKind: "file", parent: parentPath(relative) })}>
-						<FilePlus2 className="size-3.5" />
-						{t("remoteFileEntry.newFile")}
-					</Button>
-					<Button type="button" size="sm" variant="secondary" data-testid="remote-file-mkdir" disabled={files.busy || busy} onClick={() => setEntryDialog({ kind: "new", entryKind: "directory", parent: parentPath(relative) })}>
-						<FolderPlus className="size-3.5" />
-						{t("remoteFileEntry.newFolder")}
-					</Button>
-					<Button type="button" size="sm" variant="secondary" data-testid="remote-file-upload" disabled={files.busy || busy} onClick={transfer.uploadFiles}>
-						<Upload className="size-3.5" />
-						{t("remoteFileEntry.uploadAction")}
-					</Button>
-					<Button type="button" size="sm" variant="ghost" data-testid="remote-trash-toggle" aria-expanded={trashOpen} disabled={files.busy} onClick={() => setTrashOpen((open) => !open)}>
-						<Trash2 className="size-3.5" />
-						{t("remoteTrash.title")}
-					</Button>
-				</div>
-			) : null}
-			<nav className="flex flex-wrap items-center gap-1 text-label">
-				<button
-					type="button"
-					className={`underline ${dropTarget === "" ? "rounded px-1 outline outline-1 -outline-offset-1 outline-primary/60" : ""}`}
-					disabled={busy}
-					onClick={() => void loadDirectory([])}
-					onDragOver={(event) => {
-						if (dragEntry === null) return;
-						event.preventDefault();
-						event.stopPropagation();
-						// 不给 dropEffect 时 Chromium 对自定义类型显示「禁止」光标，看着像放不了。
-						event.dataTransfer.dropEffect = "move";
-						setDropTarget("");
-					}}
-					onDragLeave={(event) => {
-						// 只在真正离开这个可放置区域时清高亮：从其内部子节点移出也会触发 dragleave。
-						if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-						if (dropTarget === "") setDropTarget(null);
-					}}
-					onDrop={(event) => {
-						if (dragEntry === null) return;
-						event.preventDefault();
-						event.stopPropagation();
-						setDropTarget(null);
-						moveInto(dragEntry, "");
-					}}
-				>
-					/
-				</button>
-				{relative.map((crumb, index) => (
-					<span key={relative.slice(0, index + 1).join("/")} className="flex items-center gap-1">
-						<button type="button" className="underline" disabled={busy} onClick={() => void loadDirectory(relative.slice(0, index + 1))}>
-							{crumb}
-						</button>
-						{index < relative.length - 1 ? <span className="text-muted-foreground">/</span> : null}
-					</span>
-				))}
-			</nav>
-			<form
-				className="flex items-center gap-1"
-				onSubmit={(event) => {
-					event.preventDefault();
-					if (query.length > 0 && !busy) void runSearch(query);
-				}}
-			>
-				<Input value={query} onChange={(event) => setQuery(event.target.value)} maxLength={128} disabled={busy} placeholder={t("project.remote.searchPlaceholder")} aria-label={t("project.remote.searchPlaceholder")} className="h-8 min-w-0 flex-1 text-label" />
-				<Button type="submit" variant="secondary" size="sm" disabled={busy || query.length === 0}>
-					<Search className="size-3.5" />
-					{t("project.remote.searchAction")}
-				</Button>
-				{searching ? (
-					<Button
+			{relative.length > 0 ? (
+				<nav className="flex flex-wrap items-center gap-1 text-label">
+					<button
 						type="button"
-						variant="ghost"
-						size="sm"
-						title={t("project.remote.searchClear")}
-						aria-label={t("project.remote.searchClear")}
-						onClick={() => {
-							resetSearch();
-							setQuery("");
+						className={`underline ${dropTarget === "" ? "rounded px-1 outline outline-1 -outline-offset-1 outline-primary/60" : ""}`}
+						disabled={busy}
+						onClick={() => void loadDirectory([])}
+						onDragOver={(event) => {
+							if (dragEntry === null) return;
+							event.preventDefault();
+							event.stopPropagation();
+							// 不给 dropEffect 时 Chromium 对自定义类型显示「禁止」光标，看着像放不了。
+							event.dataTransfer.dropEffect = "move";
+							setDropTarget("");
+						}}
+						onDragLeave={(event) => {
+							// 只在真正离开这个可放置区域时清高亮：从其内部子节点移出也会触发 dragleave。
+							if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+							if (dropTarget === "") setDropTarget(null);
+						}}
+						onDrop={(event) => {
+							if (dragEntry === null) return;
+							event.preventDefault();
+							event.stopPropagation();
+							setDropTarget(null);
+							moveInto(dragEntry, "");
 						}}
 					>
-						<X className="size-3.5" />
-					</Button>
-				) : null}
-			</form>
+						/
+					</button>
+					{relative.map((crumb, index) => (
+						<span key={relative.slice(0, index + 1).join("/")} className="flex items-center gap-1">
+							<button type="button" className="underline" disabled={busy} onClick={() => void loadDirectory(relative.slice(0, index + 1))}>
+								{crumb}
+							</button>
+							{index < relative.length - 1 ? <span className="text-muted-foreground">/</span> : null}
+						</span>
+					))}
+				</nav>
+			) : null}
+			{searchOpen ? (
+				<RemoteProjectSearchBar
+					query={query}
+					busy={busy}
+					onQueryChange={setQuery}
+					onSubmit={() => void runSearch(query)}
+					onClose={() => {
+						resetSearch();
+						setQuery("");
+						setSearchOpen(false);
+					}}
+				/>
+			) : null}
 			{/* 写操作结果/未知提示：固定单行高度，避免布局抖动；读失败只影响目录列表，不覆盖这条回执。 */}
 			<p data-testid="remote-file-outcome" aria-live="polite" className="h-5 truncate text-label text-muted-foreground">
 				{fileOutcomeText}
@@ -430,9 +431,6 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 			)}
 			{!searching ? <RemoteTrashPanel projectId={props.projectId} open={trashOpen} reloadToken={trashReloadToken} busy={files.busy} outcome={trashOutcomeText} onRestore={restoreTrash} onRequestPrune={(ids, count) => setEntryDialog({ kind: "prune", ids, count })} /> : null}
 			{file !== null && file.projectId === props.projectId ? <RemoteFileEditor key={JSON.stringify([file.projectId, file.path])} projectId={file.projectId} path={file.path} /> : null}
-			<Button variant="ghost" size="sm" className="self-start" disabled={busy} onClick={() => void loadDirectory(relative)}>
-				{t("common.refresh")}
-			</Button>
 			<RemoteProjectEntryDialogs dialog={entryDialog} busy={files.busy} errorText={dialogErrorText} onClose={() => setEntryDialog(null)} onCreate={submitNew} onRename={submitRename} onDelete={submitDelete} onPrune={submitPrune} />
 		</div>
 	);

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LoaderCircle, Server, Trash2 } from "lucide-react";
+import { LoaderCircle, Plus, Server, TerminalSquare, Trash2 } from "lucide-react";
 import { desktopApi } from "../../../desktopApi";
 import { t } from "../../../i18n";
 import { cn } from "../../../lib/utils";
@@ -10,7 +10,6 @@ import { AddHostDialog } from "./AddHostDialog";
 import { RemoteConnectionProgressDialog } from "./RemoteConnectionProgressDialog";
 import { RepairPanel } from "./RepairPanel";
 import { RemoteProjectTrustPanel } from "./RemoteProjectTrustPanel";
-import { SettingsSection } from "./SettingsStorageTab";
 import type { RemoteHostConnectionState, RemoteHostDiagnosticEntry, RemoteHostListItem } from "../../../../../shared/types/remoteHost";
 import type { WslHostListItem } from "../../../../../shared/types/wslHost";
 import { detectRendererPlatform } from "../../../lib/detectRendererPlatform";
@@ -235,147 +234,173 @@ export function ConnectionsTab() {
 		<div className="flex min-w-0 flex-col gap-3">
 			{/* 放在列表之前：store 进入 needs-repair 时列表读不出来，恢复入口必须先可见。 */}
 			<RepairPanel onRepaired={() => void refresh()} />
-			<SettingsSection title={t("settings.connections.title")} description={t("settings.connections.hint")}>
-				<div className="flex flex-col gap-2">
+			<div className="flex flex-wrap items-center justify-between gap-3">
+				<p className="text-body text-muted-foreground">{t("settings.connections.overview")}</p>
+				<Button size="sm" onClick={() => setAdding(true)}>
+					<Plus className="size-4" aria-hidden="true" />
+					{t("settings.connections.new")}
+				</Button>
+			</div>
+			<div className="flex items-center justify-between gap-3 pt-4">
+				<h3 className="text-body font-medium">{t("settings.connections.devices", { count: String(hosts.length + wslHosts.length) })}</h3>
+				<Button
+					variant="ghost"
+					size="sm"
+					onClick={() => {
+						void refresh();
+						void refreshWsl();
+					}}
+				>
+					{t("settings.connections.refresh")}
+				</Button>
+			</div>
+			<section aria-label={t("settings.connections.title")}>
+				<div className="flex flex-col gap-3">
 					{hosts.length === 0 ? (
-						<div className="flex flex-col items-start gap-2 rounded-lg border border-dashed border-border-subtle px-4 py-5">
-							<div className="flex items-center gap-2 text-body font-medium text-foreground">
-								<Server className="size-4" aria-hidden="true" />
-								{t("settings.connections.emptyTitle")}
-							</div>
-							<p className="text-label leading-relaxed text-muted-foreground">{t("settings.connections.emptyHint")}</p>
-							<Button size="sm" onClick={() => setAdding(true)}>
-								{t("settings.connections.add")}
-							</Button>
+						<div className="flex items-center gap-2 rounded-lg border border-dashed border-border-subtle px-4 py-5 text-body text-muted-foreground">
+							<Server className="size-4" aria-hidden="true" />
+							{t("settings.connections.emptyTitle")}
 						</div>
-					) : null}
-					{hosts.map((host) => {
-						const state = states[host.id] ?? (host.disabled ? "offline" : "disconnected");
-						const tone = resolveRemoteHostConnectionTone(state);
-						const connected = state === "ready" || state === "degraded";
-						const pending = busy[host.id] === true;
-						// 未验证的主机没有信任锚，连接必然在路由校验处失败（SSH_HOST_NOT_READY）。
-						// 界面本来就知道它未验证（下面就显示「未验证」），所以直接禁用按钮，
-						// 而不是让用户点一下才拿到错误——那是把用户引到一条注定失败的路上。
-						const connectable = host.verified && !host.disabled;
-						return (
-							<div key={host.id} className="flex flex-col gap-2 rounded-lg border border-border-subtle px-3 py-2">
-								<div className="flex items-center gap-3">
-									{/* 开关语义：「连上」是唯一目标状态，中间态与失败态都如实显示，不假装成功。 */}
-									<Button variant={connected ? "secondary" : "default"} size="sm" disabled={pending || !connectable} onClick={() => void toggle(host.id, !connected, host.label)} aria-label={connected ? t("settings.connections.disconnect") : t("settings.connections.connect")}>
-										{connected ? t("settings.connections.disconnect") : t("settings.connections.connect")}
-									</Button>
-									<div className="flex min-w-0 flex-col">
-										<strong className="truncate text-body font-semibold text-foreground">{host.label}</strong>
-										<span className="flex min-w-0 items-center gap-1.5 text-label text-muted-foreground">
-											{tone === "connecting" ? <LoaderCircle className="size-2.5 shrink-0 animate-pideck-spin text-warning motion-reduce:animate-none" aria-hidden="true" /> : <span className={cn("size-2 shrink-0 rounded-full", REMOTE_HOST_TONE_DOT_CLASS[tone])} aria-hidden="true" />}
-											<span className="truncate">
-												{host.sshHost} · {t(`settings.connections.state.${state}`)}
+					) : (
+						<div className="flex flex-col gap-3">
+							{hosts.map((host) => {
+								const state = states[host.id] ?? (host.disabled ? "offline" : "disconnected");
+								const tone = resolveRemoteHostConnectionTone(state);
+								const connected = state === "ready" || state === "degraded";
+								const pending = busy[host.id] === true;
+								// 未验证的主机没有信任锚，连接必然在路由校验处失败（SSH_HOST_NOT_READY）。
+								const connectable = host.verified && !host.disabled;
+								const dotClass = tone === "connecting" ? undefined : REMOTE_HOST_TONE_DOT_CLASS[tone];
+								return (
+									<div key={host.id} className="flex flex-col gap-3 rounded-lg border border-border-subtle bg-bg-panel px-4 py-4">
+										<div className="flex items-center gap-3">
+											<span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground" aria-hidden="true">
+												<Server className="size-4" />
 											</span>
-										</span>
+											<div className="flex min-w-0 flex-1 flex-col gap-0.5">
+												<div className="flex min-w-0 items-center gap-2">
+													<strong className="truncate text-body font-semibold text-foreground">{host.label}</strong>
+													{host.disabled ? <span className="shrink-0 text-micro text-muted-foreground">{t("settings.connections.disabledTag")}</span> : null}
+													{host.verified ? null : <span className="shrink-0 text-micro text-muted-foreground">{t("settings.connections.unverifiedTag")}</span>}
+												</div>
+												<span className="truncate font-mono text-label text-muted-foreground">{host.sshHost}</span>
+											</div>
+											<span
+												role="status"
+												aria-atomic="true"
+												className={cn(
+													"inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md border px-2 text-micro font-semibold",
+													tone === "online" ? "border-success/25 bg-success/10 text-success" : null,
+													tone === "connecting" ? "border-warning/25 bg-warning/10 text-warning" : null,
+													tone === "error" ? "border-destructive/25 bg-destructive/10 text-destructive" : null,
+													tone === "offline" ? "border-border-subtle bg-muted text-muted-foreground" : null,
+												)}
+											>
+												{tone === "connecting" ? <LoaderCircle className="size-2.5 shrink-0 animate-pideck-spin motion-reduce:animate-none" aria-hidden="true" /> : <span className={cn("size-1.5 shrink-0 rounded-full", dotClass)} aria-hidden="true" />}
+												{t(`settings.connections.state.${state}`)}
+											</span>
+											<Button variant={connected ? "ghost" : "secondary"} size="sm" className="shrink-0" disabled={pending || !connectable} onClick={() => void toggle(host.id, !connected, host.label)} aria-label={connected ? t("settings.connections.disconnect") : t("settings.connections.connect")}>
+												{connected ? t("settings.connections.disconnect") : t("settings.connections.connect")}
+											</Button>
+											<Button
+												type="button"
+												variant="ghost"
+												size="icon-sm"
+												className="shrink-0 text-muted-foreground hover:text-destructive"
+												title={t("settings.connections.remove")}
+												aria-label={t("settings.connections.remove")}
+												onClick={() => {
+													setRemoveError(null);
+													setRemoving(host);
+												}}
+											>
+												<Trash2 className="size-3.5" aria-hidden="true" />
+											</Button>
+										</div>
+										{/* 行内失败 + 重试：关闭进度框后仍能直接知道上次卡在哪，不用再开一次对话框。 */}
+										{failures[host.id] !== undefined ? (
+											<div className="flex items-center gap-2 pl-12 text-label text-warning">
+												<span className="min-w-0 truncate">{t("settings.connections.lastFailure", { code: failures[host.id] })}</span>
+												<Button variant="ghost" size="sm" className="shrink-0" disabled={pending || !connectable} onClick={() => void toggle(host.id, true, host.label)}>
+													{t("common.retry")}
+												</Button>
+											</div>
+										) : null}
+										{/* 诊断只在有内容且非空时展示：连上时它通常只有几行阶段记录。 */}
+										{(diagnostics[host.id] ?? []).length > 0 ? (
+											<details className="pl-12 text-label text-muted-foreground">
+												<summary className="cursor-pointer select-none">{t("settings.connections.diagnostics")}</summary>
+												<ul className="mt-1 flex flex-col gap-0.5 font-mono">
+													{(diagnostics[host.id] ?? []).slice(-8).map((entry) => (
+														<li key={`${entry.at}-${entry.code}`}>
+															{entry.phase} · {entry.state} · {entry.code}
+														</li>
+													))}
+												</ul>
+											</details>
+										) : null}
 									</div>
-									{/* 未验证 / 已禁用是持久属性，和连接状态分开显示，避免被当成「连接失败」。 */}
-									<div className="ml-auto flex items-center gap-2">
-										{host.disabled ? <span className="text-label text-muted-foreground">{t("settings.connections.disabledTag")}</span> : null}
-										{host.verified ? null : <span className="text-label text-muted-foreground">{t("settings.connections.unverifiedTag")}</span>}
+								);
+							})}
+						</div>
+					)}
+					{message !== null ? <p className="text-label text-muted-foreground">{message}</p> : null}
+				</div>
+			</section>
+			{wslSupported ? (
+				<section aria-label={t("settings.connections.wsl.title")}>
+					<div className="flex flex-col gap-2">
+						{wslHosts.length === 0 ? (
+							<div className="flex items-center gap-2 rounded-xl border border-dashed border-border-subtle px-4 py-4 text-body text-muted-foreground">
+								<TerminalSquare className="size-4 shrink-0" aria-hidden="true" />
+								{t("settings.connections.wsl.empty")}
+							</div>
+						) : null}
+						{wslHosts.length > 0 ? (
+							<div className="divide-y divide-border-subtle overflow-hidden rounded-xl border border-border-subtle">
+								{wslHosts.map((host) => (
+									<div key={host.id} className="flex items-center gap-3 bg-bg-panel px-3 py-2.5 transition-colors hover:bg-muted/35">
+										<span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground" aria-hidden="true">
+											<TerminalSquare className="size-4" />
+										</span>
+										<div className="flex min-w-0 flex-1 flex-col gap-0.5">
+											<div className="flex min-w-0 items-center gap-2">
+												<strong className="truncate text-body font-semibold text-foreground">{host.label}</strong>
+												<span className="shrink-0 rounded border border-border-subtle px-1 text-micro text-muted-foreground">{t("settings.connections.wsl.badge")}</span>
+											</div>
+											<span className="truncate font-mono text-label text-muted-foreground">
+												{host.distro} · {host.user}
+											</span>
+										</div>
+										<Button variant="secondary" size="sm" className="ml-auto shrink-0" disabled={wslAddingId === host.id} onClick={() => void addWslProject(host)}>
+											{wslAddingId === host.id ? t("settings.connections.wsl.addingProject") : t("settings.connections.wsl.addProject")}
+										</Button>
 										<Button
 											type="button"
 											variant="ghost"
 											size="icon-sm"
 											className="shrink-0 text-muted-foreground hover:text-destructive"
-											title={t("settings.connections.remove")}
-											aria-label={t("settings.connections.remove")}
+											title={t("settings.connections.wsl.remove")}
+											aria-label={t("settings.connections.wsl.remove")}
 											onClick={() => {
-												setRemoveError(null);
-												setRemoving(host);
+												setWslRemoveError(null);
+												setRemovingWsl(host);
 											}}
 										>
 											<Trash2 className="size-3.5" aria-hidden="true" />
 										</Button>
 									</div>
-								</div>
-								{/* 行内失败 + 重试：关闭进度框后仍能直接知道上次卡在哪，不用再开一次对话框。 */}
-								{failures[host.id] !== undefined ? (
-									<div className="flex items-center gap-2 text-label text-warning">
-										<span className="min-w-0 truncate">{t("settings.connections.lastFailure", { code: failures[host.id] })}</span>
-										<Button variant="ghost" size="sm" className="shrink-0" disabled={pending || !connectable} onClick={() => void toggle(host.id, true, host.label)}>
-											{t("common.retry")}
-										</Button>
-									</div>
-								) : null}
-								{/* 诊断只在有内容且非空时展示：连上时它通常只有几行阶段记录。 */}
-								{(diagnostics[host.id] ?? []).length > 0 ? (
-									<details className="text-label text-muted-foreground">
-										<summary className="cursor-pointer select-none">{t("settings.connections.diagnostics")}</summary>
-										<ul className="mt-1 flex flex-col gap-0.5 font-mono">
-											{(diagnostics[host.id] ?? []).slice(-8).map((entry) => (
-												<li key={`${entry.at}-${entry.code}`}>
-													{entry.phase} · {entry.state} · {entry.code}
-												</li>
-											))}
-										</ul>
-									</details>
-								) : null}
+								))}
 							</div>
-						);
-					})}
-					<div className="flex items-center gap-2 pt-1">
-						{/* 添加是主路径入口；空态已经有主按钮，这里只给已有主机的列表。 */}
-						{hosts.length > 0 ? (
-							<Button variant="default" size="sm" onClick={() => setAdding(true)}>
-								{t("settings.connections.add")}
-							</Button>
 						) : null}
-						<Button variant="ghost" size="sm" onClick={() => void refresh()}>
-							{t("settings.connections.refresh")}
-						</Button>
-						{message !== null ? <span className="text-label text-muted-foreground">{message}</span> : null}
-					</div>
-				</div>
-			</SettingsSection>
-			{wslSupported ? (
-				<SettingsSection title={t("settings.connections.wsl.title")} description={t("settings.connections.wsl.hint")}>
-					<div className="flex flex-col gap-2">
-						{wslHosts.length === 0 ? <p className="px-1 py-3 text-body text-muted-foreground">{t("settings.connections.wsl.empty")}</p> : null}
-						{wslHosts.map((host) => (
-							<div key={host.id} className="flex items-center gap-3 rounded-lg border border-border-subtle px-3 py-2">
-								<span className="shrink-0 rounded border border-border-subtle px-1 text-micro text-muted-foreground">{t("settings.connections.wsl.badge")}</span>
-								<div className="flex min-w-0 flex-col">
-									<strong className="truncate text-body font-semibold text-foreground">{host.label}</strong>
-									<span className="truncate text-label text-muted-foreground">
-										{host.distro} · {host.user}
-									</span>
-								</div>
-								<Button variant="secondary" size="sm" className="ml-auto shrink-0" disabled={wslAddingId === host.id} onClick={() => void addWslProject(host)}>
-									{wslAddingId === host.id ? t("settings.connections.wsl.addingProject") : t("settings.connections.wsl.addProject")}
-								</Button>
-								<Button
-									type="button"
-									variant="ghost"
-									size="icon-sm"
-									className="shrink-0 text-muted-foreground hover:text-destructive"
-									title={t("settings.connections.wsl.remove")}
-									aria-label={t("settings.connections.wsl.remove")}
-									onClick={() => {
-										setWslRemoveError(null);
-										setRemovingWsl(host);
-									}}
-								>
-									<Trash2 className="size-3.5" aria-hidden="true" />
-								</Button>
-							</div>
-						))}
-						<div className="flex items-center gap-2 pt-1">
-							<Button variant="default" size="sm" onClick={() => setAddingWsl(true)}>
+						<div className="flex items-center gap-2">
+							<Button variant="ghost" size="sm" onClick={() => setAddingWsl(true)}>
 								{t("settings.connections.wsl.add")}
-							</Button>
-							<Button variant="ghost" size="sm" onClick={() => void refreshWsl()}>
-								{t("settings.connections.refresh")}
 							</Button>
 							{wslError !== null ? <span className="text-label text-muted-foreground">{wslError}</span> : null}
 						</div>
 					</div>
-				</SettingsSection>
+				</section>
 			) : null}
 			{/* 远端信任清单：与主机列表同一页（都是「远端开发」这一域的设置），但状态权威是决策存储而非连接状态。 */}
 			<RemoteProjectTrustPanel />
@@ -389,13 +414,22 @@ export function ConnectionsTab() {
 						void refresh();
 						void toggle(hostId, true, label);
 					}}
+					onWslSubmitted={(host) => {
+						setAdding(false);
+						setMessage(t("settings.connections.wsl.added", { host: host.label }));
+						void refreshWsl();
+					}}
 				/>
 			) : null}
 			{addingWsl ? (
 				<AddHostDialog
 					initialKind="wsl"
 					onClose={() => setAddingWsl(false)}
-					onSubmitted={() => undefined}
+					onSubmitted={(hostId, label) => {
+						setAddingWsl(false);
+						void refresh();
+						void toggle(hostId, true, label);
+					}}
 					onWslSubmitted={(host) => {
 						setAddingWsl(false);
 						setMessage(t("settings.connections.wsl.added", { host: host.label }));

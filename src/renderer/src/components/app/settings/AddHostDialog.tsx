@@ -138,7 +138,6 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 	const previewUser = form.user.trim();
 	const previewPort = form.port.trim() || "22";
 	const preview = kind === "wsl" ? t("settings.connections.add.wsl.preview") : previewHost.length === 0 ? t("settings.connections.add.previewPlaceholder") : `${previewUser.length > 0 ? `${previewUser}@` : ""}${previewHost}:${previewPort}`;
-	const kindLabel = kind === "ssh" ? t("settings.connections.add.kind.ssh") : t("settings.connections.add.kind.wsl");
 	// WSL 只有 Windows 宿主才有：其它平台不渲染这一页（与 ZCode buildAvailableKinds 同判据）。
 	const wslSupported = detectRendererPlatform() === "win32";
 
@@ -169,24 +168,21 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 				if (!open) props.onClose();
 			}}
 		>
-			<DialogContent className="max-w-xl">
-				<DialogHeader>
-					<div className="flex flex-wrap items-center gap-2">
-						<DialogTitle>{t("settings.connections.add.title")}</DialogTitle>
-						<span className="rounded border border-border-subtle px-1.5 py-0.5 text-micro text-muted-foreground">{kindLabel}</span>
-					</div>
+			<DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto p-6 sm:max-w-3xl sm:p-8">
+				<DialogHeader className="pr-8">
+					<DialogTitle className="text-lg font-medium">{t("settings.connections.add.title")}</DialogTitle>
 					<DialogDescription className={cn("break-all font-mono text-label", kind === "ssh" && previewHost.length > 0 ? "text-foreground" : "text-muted-foreground")}>{preview}</DialogDescription>
 				</DialogHeader>
 
 				{/* 类型切换：SSH 建远端主机，WSL 建本机档案；Docker 还没有后端。 */}
 				<div className="flex flex-wrap items-center justify-between gap-2">
 					<div role="group" aria-label={t("settings.connections.add.typeLabel")} className="flex w-fit overflow-hidden rounded-lg border border-input">
-						<button type="button" aria-pressed={kind === "ssh"} className={cn("inline-flex min-h-8 items-center gap-1.5 px-3 text-body", kind === "ssh" ? "bg-accent font-medium text-accent-foreground" : "text-muted-foreground hover:bg-bg-hover")} onClick={() => setKind("ssh")}>
+						<button type="button" aria-pressed={kind === "ssh"} className={cn("inline-flex min-h-8 items-center gap-1.5 px-3 text-body", kind === "ssh" ? "bg-primary/10 font-medium text-primary" : "text-muted-foreground hover:bg-bg-hover")} onClick={() => setKind("ssh")}>
 							<Server className="size-3.5" aria-hidden="true" />
 							{t("settings.connections.add.kind.ssh")}
 						</button>
 						{wslSupported ? (
-							<button type="button" aria-pressed={kind === "wsl"} className={cn("inline-flex min-h-8 items-center gap-1.5 border-l border-input px-3 text-body", kind === "wsl" ? "bg-accent font-medium text-accent-foreground" : "text-muted-foreground hover:bg-bg-hover")} onClick={() => setKind("wsl")}>
+							<button type="button" aria-pressed={kind === "wsl"} className={cn("inline-flex min-h-8 items-center gap-1.5 border-l border-input px-3 text-body", kind === "wsl" ? "bg-primary/10 font-medium text-primary" : "text-muted-foreground hover:bg-bg-hover")} onClick={() => setKind("wsl")}>
 								<TerminalSquare className="size-3.5" aria-hidden="true" />
 								{t("settings.connections.add.kind.wsl")}
 							</button>
@@ -267,12 +263,8 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 							</div>
 						) : null}
 
-						<div className="flex flex-col gap-3">
-							<div className="flex flex-col gap-1">
-								<Label htmlFor="remote-host-label">{t("settings.connections.add.label")}</Label>
-								<Input id="remote-host-label" value={form.label} onChange={(event) => setForm((current) => ({ ...current, label: event.target.value }))} />
-							</div>
-							<div className="grid grid-cols-[minmax(0,1fr)_6rem] gap-2">
+						<div className="flex flex-col gap-4">
+							<div className="grid grid-cols-[minmax(0,1fr)_7rem] gap-3">
 								<div className="flex min-w-0 flex-col gap-1">
 									<Label htmlFor="remote-host-name">{t("settings.connections.add.hostName")}</Label>
 									<Input id="remote-host-name" placeholder="host.com" value={form.hostName} onChange={(event) => setForm((current) => ({ ...current, hostName: event.target.value }))} />
@@ -287,6 +279,10 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 								<Input id="remote-host-user" autoComplete="off" spellCheck={false} placeholder={t("settings.connections.add.userPlaceholder")} value={form.user} onChange={(event) => setForm((current) => ({ ...current, user: event.target.value }))} />
 							</div>
 							<div className="flex flex-col gap-1">
+								<Label htmlFor="remote-host-label">{t("settings.connections.add.label")}</Label>
+								<Input id="remote-host-label" value={form.label} onChange={(event) => setForm((current) => ({ ...current, label: event.target.value }))} />
+							</div>
+							<div className="flex flex-wrap items-center gap-3">
 								<span className="text-label text-muted-foreground">{t("settings.connections.add.authLabel")}</span>
 								<div role="group" aria-label={t("settings.connections.add.authLabel")} className="flex w-fit overflow-hidden rounded-lg border border-input">
 									<button
@@ -323,7 +319,7 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 					</>
 				)}
 
-				<DialogFooter className="items-center justify-between gap-2 sm:justify-between">
+				<DialogFooter className="flex-row items-center justify-between gap-2 border-t border-border-subtle pt-4 sm:justify-between">
 					<span className="min-w-0 truncate text-label text-muted-foreground">{kind === "ssh" && importing ? t("settings.connections.add.importHint") : null}</span>
 					<div className="flex items-center gap-2">
 						<Button variant="ghost" onClick={props.onClose}>

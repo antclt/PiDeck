@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: ac4ea25043c3bf0027a136d660420f03de01d1a763a8316c11870ce41294db79（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 4f9c60755382305dfe573006949ae1d3299337252fba0052323c763de075e5ea（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4279,7 +4279,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.tabs.proxy": "代理設定",
 	"settings.tabs.connections": "連線",
 	"settings.connections.add": "新增",
-	"settings.connections.add.title": "新增 SSH 連線",
+	"settings.connections.add.title": "新建連線",
 	"settings.connections.add.hint": "從 ~/.ssh/config 選擇，或手動填寫。儲存即完成信任並直接連上，不需要再確認指紋。",
 	"settings.connections.add.disabled": "遠端連線功能未啟用。",
 	"settings.connections.add.scanFailed": "無法讀取 ~/.ssh/config，請手動填寫。",
@@ -4289,7 +4289,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.connections.add.skipReason.unsupported-directive": "含無法解析的指令（Match / Include / Proxy）",
 	"settings.connections.add.label": "顯示名稱",
 	"settings.connections.add.hostName": "主機名",
-	"settings.connections.add.port": "SSH 埠（可選）",
+	"settings.connections.add.port": "埠",
 	"settings.connections.add.manual": "手動新增",
 	"settings.connections.add.fromConfig": "從 SSH 配置選擇",
 	"settings.connections.add.submit": "儲存",
@@ -4406,6 +4406,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"project.remote.uploadPartial": "{count} 個檔案上傳失敗：{message}；其餘已上傳",
 	"project.remote.searchFailed": "無法搜尋：{code}",
 	"project.remote.searchUnwired": "搜尋通道尚未接線：請更新應用後再試。",
+	"settings.connections.overview": "管理 SSH 主機和 WSL 連線。",
+	"settings.connections.new": "新建連線",
+	"settings.connections.devices": "裝置 {count}",
 	"settings.connections.title": "遠端主機",
 	"settings.connections.hint": "通過 SSH 連線遠端主機。主機狀態與 Agent 執行狀態是兩回事：主機連通不代表每個會話都能執行。",
 	"settings.connections.empty": "還沒有已登記的主機。",

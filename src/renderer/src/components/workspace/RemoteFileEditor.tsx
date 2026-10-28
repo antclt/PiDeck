@@ -49,7 +49,7 @@ function RemoteTextFileEditor(props: { projectId: string; path: string }) {
 													: null;
 	return (
 		<section
-			className="flex min-h-0 flex-col gap-2 rounded border border-border p-2"
+			className="flex min-h-0 flex-1 flex-col overflow-hidden"
 			aria-label={t("remoteFile.editor")}
 			onKeyDownCapture={(event) => {
 				if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
@@ -59,27 +59,26 @@ function RemoteTextFileEditor(props: { projectId: string; path: string }) {
 				}
 			}}
 		>
-			<div className="flex flex-wrap items-center gap-2">
+			<div className="flex h-8 shrink-0 items-center gap-2 border-b border-border/40 px-2">
 				<strong className="min-w-0 flex-1 truncate font-mono text-label">{props.path}</strong>
 				<span className="text-label text-muted-foreground">{draft?.phase === "saving" ? t("remoteFile.saving") : dirty ? t("remoteFile.unsaved") : draft?.phase === "ready" ? t("remoteFile.saved") : ""}</span>
-				<Button size="sm" variant="secondary" disabled={!dirty || draft?.phase !== "ready" || draft.blocked} onClick={() => void save()}>
-					<Save className="size-3.5" />
-					{t("remoteFile.save")}
+				<Button size="icon-sm" variant="ghost" aria-label={t("remoteFile.save")} title={t("remoteFile.save")} disabled={!dirty || draft?.phase !== "ready" || draft.blocked} onClick={() => void save()}>
+					<Save className="size-4" />
 				</Button>
 				<Button
-					size="sm"
+					size="icon-sm"
 					variant="ghost"
+					aria-label={t("remoteFile.reload")}
+					title={t("remoteFile.reload")}
 					disabled={draft?.phase === "saving" || draft?.phase === "loading"}
 					onClick={() => {
 						if (dirty) setConfirmReload(true);
 						else void reload();
 					}}
 				>
-					<RefreshCw className="size-3.5" />
-					{t("remoteFile.reload")}
+					<RefreshCw className="size-4" />
 				</Button>
 			</div>
-			<p className="text-label text-muted-foreground">{t("remoteFile.explicitSave")}</p>
 			{/* 脏草稿在 rename/delete 后保留并标 stale（§5.7）：保存会失败，但绝不自动丢弃用户输入。 */}
 			{draft?.stale ? <p className="text-label text-muted-foreground">{t("remoteFileEntry.staleDraft")}</p> : null}
 			{errorText ? (
@@ -89,7 +88,7 @@ function RemoteTextFileEditor(props: { projectId: string; path: string }) {
 			) : null}
 			{draft?.phase === "loading" ? <Loader2 className="size-4 animate-pideck-spin" aria-label={t("remoteFile.loading")} /> : null}
 			{draft && (draft.phase === "ready" || draft.phase === "saving" || dirty) ? (
-				<div className="h-[360px] min-h-0 overflow-hidden rounded border border-border">
+				<div className="min-h-0 flex-1 overflow-hidden">
 					<CodeMirrorEditor key={draft.rejectedEdits ?? 0} value={draft.content} lineSeparator={draft.savedContent.includes("\r\n") ? "\r\n" : "\n"} onChange={change} language={props.path.split(".").at(-1)} readOnly={draft.phase === "loading"} />
 				</div>
 			) : null}

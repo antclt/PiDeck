@@ -1,8 +1,10 @@
-import { FileText, Folder, Link2, MoreHorizontal } from "lucide-react";
+import { MoreHorizontal } from "lucide-react";
 import type { RemoteWorkspaceEntry } from "../../../../shared/types/remoteHost";
 import { t } from "../../i18n";
 import { REMOTE_ENTRY_DRAG_TYPE, remoteDropRoute } from "../../utils/remoteEntryDrag";
 import { Button } from "../ui-shadcn/button";
+import { getFileTypeLabel } from "../../fileIcons";
+import { FILE_ROW_BUTTON_CLASS, fileIconElement } from "./FileTreeRows";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
 
 /**
@@ -36,7 +38,7 @@ export function RemoteFileRow(props: {
 	const acceptsDrop = (event: { dataTransfer: DataTransfer }) => isDirectoryTarget && remoteDropRoute({ hasEntryMarker: event.dataTransfer.types.includes(REMOTE_ENTRY_DRAG_TYPE), hasFiles: event.dataTransfer.types.includes("Files") }) === "move";
 	return (
 		<li
-			className={`flex shrink-0 items-center gap-1 rounded ${dropTarget === path ? "bg-muted/60 outline outline-1 -outline-offset-1 outline-primary/60" : ""}`}
+			className={`group flex shrink-0 items-center gap-0.5 rounded-sm ${dropTarget === path ? "bg-muted/60 outline outline-1 -outline-offset-1 outline-primary/60" : ""}`}
 			onDragOver={(event) => {
 				// 只接受内部拖动：从资源管理器拖文件进来上传时这里不该拦截，否则 drop 会被吃掉。
 				if (!acceptsDrop(event)) return;
@@ -61,7 +63,7 @@ export function RemoteFileRow(props: {
 		>
 			<button
 				type="button"
-				className="flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-0.5 text-left text-label hover:bg-muted/60"
+				className={`${FILE_ROW_BUTTON_CLASS} min-w-0 flex-1 px-2 text-label`}
 				disabled={busy || entry.kind === "other"}
 				draggable={entry.kind !== "other" && !busy}
 				onDragStart={(event) => {
@@ -74,11 +76,10 @@ export function RemoteFileRow(props: {
 				onDragEnd={props.onDragEndEntry}
 				onClick={props.onOpen}
 			>
-				{isDirectoryTarget ? <Folder className="size-3.5 shrink-0" /> : entry.kind === "file" ? <FileText className="size-3.5 shrink-0" /> : <Link2 className="size-3.5 shrink-0" />}
-				<span className="min-w-0 flex-1 truncate">{entry.name}</span>
-				{entry.bytes !== undefined ? <span className="shrink-0 text-muted-foreground">{entry.bytes} B</span> : null}
-				{/* 符号链接不跟随：helper 把它报为 other，这里如实禁用而不是假装能打开。 */}
-				{entry.kind === "other" ? <span className="shrink-0 text-muted-foreground">{t("project.remote.linkNotFollowed")}</span> : null}
+				{/* 与本地文件树共用 Seti 图标槽与行高，远端目录不再用一套通用 Folder/FileText 外观。 */}
+				<span className="file-node-icon">{fileIconElement(entry.name, isDirectoryTarget, false)}</span>
+				<span className="file-node-name">{entry.name}</span>
+				{entry.kind === "other" ? <span className="shrink-0 text-label text-muted-foreground">{t("project.remote.linkNotFollowed")}</span> : <span className="file-node-type-label">{getFileTypeLabel(entry.name)}</span>}
 			</button>
 			{entry.kind !== "other" ? (
 				<DropdownMenu>

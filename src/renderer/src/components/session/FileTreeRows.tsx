@@ -17,7 +17,7 @@ import { fileTreeGitStatusClass, fileTreeGitStatusLabelKey, type FileTreeGitStat
 // 迁出的原因只有一个：WorkspaceSurface 超过 600 行红线；面板外壳与文件面板本体仍在 WorkspaceSurface，
 // 行组件经 props 拿查表函数与回调（不逐行订阅 atom），memo 边界与 200 行分批窗口全部保持原样。
 
-function fileIconElement(name: string, isDirectory: boolean, isExpanded: boolean) {
+export function fileIconElement(name: string, isDirectory: boolean, isExpanded: boolean) {
 	if (isDirectory) {
 		return isExpanded ? <FolderOpen size={18} aria-hidden="true" /> : <Folder size={18} aria-hidden="true" />;
 	}
@@ -79,7 +79,7 @@ function fileRowStyle(depth: number): CSSProperties {
    border-color,box-shadow] duration-base），移入文件列表时背景平滑渐变而非瞬切。
    hover 用 bg-muted（白面板上 Δ11 轻档）：抽屉底是白面板，更深的 hover 档
    （#eaeaea/#e4e4e4）偏重，用户裁决工具面灰底一律取轻（2026-10）。 */
-const FILE_ROW_BUTTON_CLASS =
+export const FILE_ROW_BUTTON_CLASS =
 	"file-node-row flex h-[28px] min-h-0 w-full items-center justify-start gap-1.5 rounded-sm border-0 bg-transparent py-0 text-left text-body font-normal text-foreground transition-[background-color,border-color,box-shadow] duration-base hover:bg-muted active:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset relative";
 
 /**
