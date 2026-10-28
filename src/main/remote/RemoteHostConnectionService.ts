@@ -421,10 +421,14 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 		// Resolve the node before bootstrapping. An explicit override skips discovery; otherwise the host
 		// user's own node is found via their login shell. Only a fresh bootstrap pays for discovery — a
 		// revision that already has a held session returns above without reaching here.
-		const nodePath = options.nodePath ?? (await ports.resolveNode({ userDataDir: options.userDataDir, hostId, client: options.client, sentinel: ports.createSentinel(), ...(signal === undefined ? {} : { signal }) })).nodePath;
+		const discovered = options.nodePath === undefined ? await ports.resolveNode({ userDataDir: options.userDataDir, hostId, client: options.client, sentinel: ports.createSentinel(), ...(signal === undefined ? {} : { signal }) }) : undefined;
+		const nodePath = discovered?.nodePath ?? options.nodePath;
+		if (nodePath === undefined) throw new Error("REMOTE_NODE_NOT_FOUND");
 		// A cancel between discovery and the entry spawn must not start an upload.
 		throwIfCancelled(signal);
-		const prepared = await ports.bootstrap({ userDataDir: options.userDataDir, hostId, generation, nonce, nodePath, client: options.client, launcher, ...(signal === undefined ? {} : { signal }) });
+		// Discovery already asserted this version for this exact path; asking the host again costs a whole
+		// SSH connection and cannot produce a different answer this soon.
+		const prepared = await ports.bootstrap({ userDataDir: options.userDataDir, hostId, generation, nonce, nodePath, ...(discovered === undefined ? {} : { nodeVersion: discovered.version }), client: options.client, launcher, ...(signal === undefined ? {} : { signal }) });
 		// A cancelled attempt owns nothing: it must not publish a held session (or a deploy root) for the
 		// next attempt to trust.
 		throwIfCancelled(signal);

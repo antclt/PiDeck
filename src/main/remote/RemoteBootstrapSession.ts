@@ -268,23 +268,33 @@ async function sweepDeployedBundles(input: { userDataDir: string; hostId: string
 	getAppLogger()?.debug("remote", "REMOTE_MAINTENANCE_SWEEP", { hostId: input.hostId, removedBundles: outcome.removedBundles, removedStaging: outcome.removedStaging, removedStaleLock: outcome.removedStaleLock, skipped: outcome.skipped });
 }
 
-/** Re-preflight both commands against the persisted pin, then run the frozen one-file bootstrap. */
-export async function bootstrapPinnedHost(input: { userDataDir: string; hostId: string; generation: number; nonce: string; nodePath: string; client: SshClientRuntime; launcher: SshProcessLauncher; signal?: AbortSignal }): Promise<PreparedBundleResult> {
+/**
+ * Re-preflight both commands against the persisted pin, then run the frozen one-file bootstrap.
+ *
+ * `nodeVersion` is the version discovery already asserted for this exact `nodePath`. Passing it skips a
+ * second `node --version` round trip for a value that cannot have changed in between; without it (the
+ * explicit `nodePath` override path) the probe still runs. Either way the same version gate applies.
+ */
+export async function bootstrapPinnedHost(input: { userDataDir: string; hostId: string; generation: number; nonce: string; nodePath: string; nodeVersion?: string; client: SshClientRuntime; launcher: SshProcessLauncher; signal?: AbortSignal }): Promise<PreparedBundleResult> {
 	throwIfAborted(input.signal);
 	const manifest = frozenHelperBundleManifest();
-	const versionCommand = buildRemoteNodeVersionCommand(input.nodePath);
-	const versionInvocation = await buildPinnedSshInvocation(input.userDataDir, input.hostId, "ssh-batch", { client: input.client, remoteCommand: versionCommand });
-	throwIfAborted(input.signal);
-	let nodeVersion: SshCommandResult;
-	try {
-		nodeVersion = await input.client.run(versionInvocation.executable, versionInvocation.args, { signal: input.signal });
-	} catch (error) {
+	if (input.nodeVersion !== undefined) {
+		assertSupportedRemoteNodeVersion(input.nodeVersion);
+	} else {
+		const versionCommand = buildRemoteNodeVersionCommand(input.nodePath);
+		const versionInvocation = await buildPinnedSshInvocation(input.userDataDir, input.hostId, "ssh-batch", { client: input.client, remoteCommand: versionCommand });
 		throwIfAborted(input.signal);
-		throw new Error("REMOTE_NODE_PROBE_FAILED");
+		let nodeVersion: SshCommandResult;
+		try {
+			nodeVersion = await input.client.run(versionInvocation.executable, versionInvocation.args, { signal: input.signal });
+		} catch (error) {
+			throwIfAborted(input.signal);
+			throw new Error("REMOTE_NODE_PROBE_FAILED");
+		}
+		throwIfAborted(input.signal);
+		if (nodeVersion.exitCode !== 0) throw new Error("REMOTE_NODE_PROBE_FAILED");
+		assertSupportedRemoteNodeVersion(nodeVersion.stdout);
 	}
-	throwIfAborted(input.signal);
-	if (nodeVersion.exitCode !== 0) throw new Error("REMOTE_NODE_PROBE_FAILED");
-	assertSupportedRemoteNodeVersion(nodeVersion.stdout);
 	const sshConnection = await buildPinnedSshInvocation(input.userDataDir, input.hostId, "ssh-batch", { client: input.client, bootstrap: { nodeExecutable: input.nodePath, protocolVersion: REMOTE_BOOTSTRAP_PROTOCOL_VERSION, bundleSha256: manifest.bundleSha256, nonce: input.nonce, target: "helper" } });
 	const scpConnection = await buildPinnedSshInvocation(input.userDataDir, input.hostId, "scp", { client: input.client });
 	throwIfAborted(input.signal);
@@ -302,6 +312,8 @@ export async function bootstrapPinnedHost(input: { userDataDir: string; hostId: 
 	});
 	// 只在**已确认激活**之后清理（plan §4.2「清理与激活判据」；F2）。sweep 失败不影响本次部署的结果。
 	// 取消发生在激活之后时部署已成立：清理只是回收，不再为一个已取消的 attempt 多跑一轮远端命令。
-	if (input.signal?.aborted !== true) await sweepDeployedBundles({ userDataDir: input.userDataDir, hostId: input.hostId, client: input.client, nodePath: input.nodePath, deployRoot: deployed.deployRoot, activeBundleSha256: deployed.bundleSha256 });
+	// 复用（`reused`）意味着本次没有激活任何东西：可回收的快照都由某次激活产生，而那次激活已经扫过；
+	// 再连一次 SSH 只为一个空清理，会把普通连接白白拖慢一个握手。
+	if (deployed.reused !== true && input.signal?.aborted !== true) await sweepDeployedBundles({ userDataDir: input.userDataDir, hostId: input.hostId, client: input.client, nodePath: input.nodePath, deployRoot: deployed.deployRoot, activeBundleSha256: deployed.bundleSha256 });
 	return deployed;
 }

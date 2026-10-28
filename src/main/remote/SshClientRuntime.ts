@@ -262,10 +262,7 @@ function errorCode(error: unknown): string | undefined {
 	return typeof message === "string" && /^[A-Z][A-Z0-9_]{2,63}$/.test(message) ? message : undefined;
 }
 
-/** Probe `ssh -V` (OpenSSH prints its banner on stderr) through the bound runner; returns a redacted version. */
-export async function runSshClientSelfCheck(client: SshClientRuntime, options: { run?: SshCommandRunner } = {}): Promise<{ version: string }> {
-	if (!client || typeof client.sshPath !== "string" || typeof client.run !== "function") throw new Error("SSH_CLIENT_CONTEXT_REQUIRED");
-	const run = options.run ?? client.run;
+async function probeSshClientVersion(client: SshClientRuntime, run: SshCommandRunner): Promise<{ version: string }> {
 	const result = await run(client.sshPath, ["-V"]);
 	const banner = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
 	if (result.exitCode !== 0 || !banner) throw new Error("SSH_CLIENT_VERSION_UNSUPPORTED");
@@ -273,4 +270,27 @@ export async function runSshClientSelfCheck(client: SshClientRuntime, options: {
 	if (!match) throw new Error("SSH_CLIENT_VERSION_UNSUPPORTED");
 	if (Number(match[1]) < MIN_OPENSSH_MAJOR) throw new Error("SSH_CLIENT_VERSION_UNSUPPORTED");
 	return { version: match[0] };
+}
+
+/**
+ * `ssh -V` reports the installation, not the connection: one client binding can only ever answer with the
+ * same banner. A single connect used to spawn it once per pinned invocation (five times per cold connect),
+ * so the promise is cached per client object. Concurrent callers share one process; a failed probe is
+ * dropped instead of poisoning later retries.
+ */
+const selfCheckCache = new WeakMap<SshClientRuntime, Promise<{ version: string }>>();
+
+/** Probe `ssh -V` (OpenSSH prints its banner on stderr) through the bound runner; returns a redacted version. */
+export async function runSshClientSelfCheck(client: SshClientRuntime, options: { run?: SshCommandRunner } = {}): Promise<{ version: string }> {
+	if (!client || typeof client.sshPath !== "string" || typeof client.run !== "function") throw new Error("SSH_CLIENT_CONTEXT_REQUIRED");
+	// An injected runner is a test seam: caching would hide the calls a test is counting.
+	if (options.run !== undefined) return probeSshClientVersion(client, options.run);
+	const cached = selfCheckCache.get(client);
+	if (cached !== undefined) return { ...(await cached) };
+	const pending = probeSshClientVersion(client, client.run).catch((error: unknown) => {
+		selfCheckCache.delete(client);
+		throw error;
+	});
+	selfCheckCache.set(client, pending);
+	return { ...(await pending) };
 }
