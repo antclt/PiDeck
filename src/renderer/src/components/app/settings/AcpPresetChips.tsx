@@ -152,4 +152,6 @@ const PRESET_DESC_KEYS: Record<AcpToolPreset["id"], Parameters<typeof t>[0]> = {
 	"cursor-agent": "acp.presetDesc.cursor-agent",
 	codebuddy: "acp.presetDesc.codebuddy",
 	minimax: "acp.presetDesc.minimax",
+	qoder: "acp.presetDesc.qoder",
+	"qoder-cn": "acp.presetDesc.qoder-cn",
 };

@@ -318,6 +318,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"acp.presetDesc.cursor-agent": "Cursor Agent (agent acp; official install script, requires Cursor sign-in)",
 	"acp.presetDesc.codebuddy": "Tencent CodeBuddy (npx pulls @tencent-ai/codebuddy-code --acp on demand)",
 	"acp.presetDesc.minimax": "MiniMax Code (npx pulls @minimax-ai/code acp on demand; cn/global region account)",
+	"acp.presetDesc.qoder": "Qoder CLI (qodercli --acp; install via the official script, then sign in in a terminal or set QODER_PERSONAL_ACCESS_TOKEN)",
+	"acp.presetDesc.qoder-cn": "Qoder CLI CN (qoderclicn --acp; mainland build with its own account, sign in in a terminal or set QODERCN_PERSONAL_ACCESS_TOKEN)",
 	"app.anonymousChat": "Anonymous chat (no session saved)",
 	"sidebar.moreActions": "More actions",
 	"sidebar.hoverCard.workspace": "Workspace: {name}",

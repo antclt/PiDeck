@@ -24,6 +24,8 @@ const EXPECTED_BY_PRESET = {
 	"cursor-agent": "cursor",
 	codebuddy: "codebuddy",
 	minimax: "minimax",
+	qoder: "qoder",
+	"qoder-cn": "qoder",
 };
 
 test("每个内置预设都能推断出品牌（不会退化成通用终端图标）", () => {
@@ -46,6 +48,9 @@ test("用户改名/改路径后仍按命令与参数判定", () => {
 	// 命令是绝对路径/包装脚本：参数或显示名里的品牌作为兜底线索
 	assert.equal(resolveAcpToolBrand({ command: "C:\\tools\\run.cmd", args: ["--acp"], name: "Kimi CLI" }), "kimi");
 	assert.equal(resolveAcpToolBrand({ command: "npx", args: ["-y", "some-wrapper", "--"], name: "MiniMax Code" }), "minimax");
+	// Qoder CLI CN 是另一个二进制（qoderclicn / 新别名 qodercn），命令名里就带 qoder，同归 Qoder 品牌
+	assert.equal(resolveAcpToolBrand({ command: "qodercn", args: ["--acp"], name: "Qoder CLI CN" }), "qoder");
+	assert.equal(resolveAcpToolBrand({ command: "qoderclicn", args: ["--acp"], name: "Qoder CLI CN" }), "qoder");
 });
 
 test("自定义工具回退 generic（不假装成某个品牌）", () => {
