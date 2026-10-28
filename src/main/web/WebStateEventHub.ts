@@ -106,11 +106,15 @@ export class WebStateEventHub {
 	/**
 	 * 构建快照并推给目标订阅者（缺省全部）。
 	 * force=true 时无视「与上次一致」门控（新连接的初始快照必须下发）。
+	 * skipRevisionGate=true 时只绕过**版本键**快速门（#442）：版本键只覆盖 pi 事件能驱动的
+	 * runtime/pendingUi 面，桌面端改名/删除会话这类目录变更不进键；5s tick 必须能穿过它，
+	 * 否则在第一道门就 return，后面的全量 JSON 比对永远执行不到，兜底形同虚设。
+	 * 代价是 tick 每次都建一次快照（5s 一次，与 400ms 去抖路径的性能优化不冲突）。
 	 */
-	async push(targetClients: Array<{ writeRaw: (wire: string) => boolean }> = [...this.stateEventClients], force = false): Promise<void> {
+	async push(targetClients: Array<{ writeRaw: (wire: string) => boolean }> = [...this.stateEventClients], force = false, options?: { skipRevisionGate?: boolean }): Promise<void> {
 		if (targetClients.length === 0) return;
 		const revision = this.deps.stateRevision?.();
-		if (!force && revision !== undefined && this.lastStateRevision !== null && revision === this.lastStateRevision && this.lastStatePushJson !== null) {
+		if (!force && !options?.skipRevisionGate && revision !== undefined && this.lastStateRevision !== null && revision === this.lastStateRevision && this.lastStatePushJson !== null) {
 			return;
 		}
 		let json: string;
@@ -155,8 +159,12 @@ export class WebStateEventHub {
 		this.lastStateRevision = null;
 	}
 
-	/** 5s 兜底 tick：捕捉不经 pi 事件的目录变更（桌面端改名/删除/导入等）。 */
+	/**
+	 * 5s 兜底 tick：捕捉不经 pi 事件的目录变更（桌面端改名/删除/导入等）。
+	 * 直接 push 并绕过版本键门控——目录变更不进 version 键，走 schedule() 会被同一道门挡回，
+	 * 兜底等于没接（#442）。tick 本身是 5s 固定节奏，不需要去抖。
+	 */
 	startTick(): void {
-		this.stateTickTimer = setInterval(() => this.schedule(), 5_000);
+		this.stateTickTimer = setInterval(() => void this.push(undefined, false, { skipRevisionGate: true }), 5_000);
 	}
 }

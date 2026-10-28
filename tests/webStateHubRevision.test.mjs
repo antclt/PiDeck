@@ -6,6 +6,7 @@
  * 必须跳过整快照构建 + 序列化（此前每次构建 ~100KB JSON 只为比对出「无变化」）。
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
@@ -62,6 +63,25 @@ test("键未变：跳过整快照构建；键变化：构建并推送；force �
 	await hub.push([client]);
 	assert.equal(getLoadCalls(), 2, "回到稳定键不得重复构建");
 	assert.equal(writes.length, 2);
+});
+
+test("skipRevisionGate：5s 兜底 tick 必须穿过版本键门（#442）", async () => {
+	// 版本键只含 runtimes + pendingUi；桌面端改名/删除会话不进键。tick 若也走这个门，
+	// 第一道就 return，后面的全量 JSON 比对永远执行不到 —— 兜底形同虚设。
+	const { hub, client, writes, getLoadCalls } = makeHarness();
+	await hub.push([client], true);
+	assert.equal(getLoadCalls(), 1);
+	// 键未变：普通 push（pi 事件路径）保持跳过，性能优化不能被 tick 修复撤掉
+	await hub.push([client]);
+	assert.equal(getLoadCalls(), 1, "普通 push 键未变时必须继续跳过构建");
+	// 绕过版本键：必须构建快照去比对（内容确实没变时仍不重复推送）
+	await hub.push([client], false, { skipRevisionGate: true });
+	assert.equal(getLoadCalls(), 2, "tick 必须穿过版本键门，否则目录变更永远推不出去");
+	assert.equal(writes.length, 1, "内容真的没变时不得重复推送（JSON 比对门照常生效）");
+
+	// 接线契约：tick 的定时器确实把 flag 传下去了（flag 有了但没接等于没修）
+	const source = readFileSync(`${process.cwd()}/src/main/web/WebStateEventHub.ts`, "utf8");
+	assert.match(source, /setInterval\(\(\) => void this\.push\(undefined, false, \{ skipRevisionGate: true \}\), 5_000\)/, "startTick 必须每 5s 走绕过版本键的 push");
 });
 
 test("未提供 stateRevision 时退回旧行为（每次构建 + json 比对）", async () => {

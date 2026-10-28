@@ -221,7 +221,8 @@ export class WebServiceManager {
 		this.stateHub = new WebStateEventHub({ loadState: () => this.getState(), stateRevision: () => this.stateRevision() });
 		this.apiRoutes = new WebApiRoutes({
 			deps,
-			sendJson: (response, body) => this.sendJson(response, body),
+			// 第三参必须转发：/api/state 的 { etag } 就是靠它下发的，丢了等于条件请求整条链路失效（#442）。
+			sendJson: (response, body, extraHeaders) => this.sendJson(response, body, extraHeaders),
 			sendError: (response, statusCode, code, error, params) => this.sendError(response, statusCode, code, error, params),
 			sendNoContent: (response) => this.sendNoContent(response),
 			readJson: (request, maxBytes) => this.readJson(request, maxBytes),
@@ -564,8 +565,8 @@ export class WebServiceManager {
 	}
 
 	// ── HTTP 响应/请求体工具：实现在 WebHttpResponders；路由与静态资源各用自己的入口，这里只留仍在用的包装 ──
-	private sendJson(response: ServerResponse, body: unknown) {
-		return writeJson(response, body);
+	private sendJson(response: ServerResponse, body: unknown, extraHeaders?: Record<string, string>) {
+		return writeJson(response, body, extraHeaders);
 	}
 
 	private sendError(response: ServerResponse, statusCode: number, code: string, error: string, params?: Record<string, string | number>) {

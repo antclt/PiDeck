@@ -94,11 +94,13 @@ export class WebApiRoutes {
 			const etag = stateEtag(state);
 			if (ifNoneMatchHits(request.headers["if-none-match"], etag)) {
 				// 304 也要带 CORS：缓存命中时浏览器仍按本次响应做跨域校验（#435 同类缺口）。
-				response.writeHead(304, { etag, "cache-control": "no-store", ...WEB_CORS_HEADERS });
+				// cache-control 用 no-cache 而不是 no-store：后者禁止客户端留存副本，等于让 ETag
+				// 没有可复用对象，条件请求永远命中不了（#442 第 3 点）。no-cache = 可存但每次必校验。
+				response.writeHead(304, { etag, "cache-control": "no-cache", ...WEB_CORS_HEADERS });
 				response.end();
 				return true;
 			}
-			this.sendJson(response, state, { etag });
+			this.sendJson(response, state, { etag, "cache-control": "no-cache" });
 			return true;
 		}
 		if (url.pathname === "/api/ui-response" && request.method === "POST") {
