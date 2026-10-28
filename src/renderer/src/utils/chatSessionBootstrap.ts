@@ -24,10 +24,14 @@ export const WELCOME_MODEL_KEY = "pideck:welcome-model";
 export const WELCOME_DSH_MODEL_KEY = "pideck:welcome-dsh-model";
 /** 欢迎页（未启动 Agent）显式选择的思考级别存储 key；首次发送时提升到真实会话。 */
 export const WELCOME_THINKING_KEY = "pideck:welcome-thinking";
-/** 欢迎页（未启动 Agent）显式切换的后端存储 key；首次发送时提升到真实会话。 */
+/**
+ * 上一次显式选择的后端存储 key（值 "pi"/"dsh"/"acp:<toolId>"）。
+ * 引导页与真实会话共用：首次发送提升到真实会话，新建会话（侧栏「+"/引导页）
+ * 也读它，只有与设置默认不同才接管——设置项 defaultAgentBackend 本身不变。
+ */
 export const WELCOME_BACKEND_KEY = "pideck:welcome-backend";
 
-/** 读取欢迎页最后显式切换的后端（pi/dsh/acp；无则 undefined）。 */
+/** 读取上一次显式选择的后端（pi/dsh/acp；无则 undefined，引导页与新建会话共用）。 */
 export function readWelcomeBackendPreference(): AgentBackend | undefined {
 	try {
 		const raw = localStorage.getItem(WELCOME_BACKEND_KEY);
@@ -41,7 +45,7 @@ export function readWelcomeBackendPreference(): AgentBackend | undefined {
 	return undefined;
 }
 
-/** 读取欢迎页 ACP 偏好携带的工具 id（非 acp 偏好/无工具段时 undefined）。 */
+/** 读取上次 ACP 选择携带的工具 id（非 acp 偏好/无工具段时 undefined）。 */
 export function readWelcomeAcpToolPreference(): string | undefined {
 	try {
 		const raw = localStorage.getItem(WELCOME_BACKEND_KEY);
@@ -51,6 +55,60 @@ export function readWelcomeAcpToolPreference(): string | undefined {
 	} catch {
 		return undefined;
 	}
+}
+
+/**
+ * 记住用户显式切换的后端：pi/dsh 直接存，acp 带上工具 id（"acp:<toolId>"）。
+ * 生图/生视频是模式不是 Agent 后端，选中它们不写也不清——最后一次 Agent 后端
+ * 选择继续有效，下次新建不会误建生图会话。写入失败只影响「下次新建」，本次
+ * 页面内仍由调用方本地状态生效。
+ */
+export function rememberBackendPreference(backend: AgentBackend, acpToolId?: string): void {
+	try {
+		if (backend === "pi" || backend === "dsh") {
+			localStorage.setItem(WELCOME_BACKEND_KEY, backend);
+			return;
+		}
+		if (backend === "acp" && acpToolId) localStorage.setItem(WELCOME_BACKEND_KEY, `acp:${acpToolId}`);
+	} catch {
+		// localStorage 不可用：忽略，调用方本地状态已即时生效
+	}
+}
+
+export type NewSessionBackendTarget = { backend: AgentBackend; acpToolId?: string };
+
+/**
+ * 新建会话的后端：上次显式选择优先，且只在它与设置默认不同时接管；
+ * 后端不可用（DSH runtime 未装 / ACP 关闭或没有可用工具）回落默认。
+ *
+ * 纯函数：App 传入运行时可用性，单测覆盖「上次=默认/不同/失效」三种分支。
+ */
+export function resolveRememberedNewSessionTarget(input: {
+	/** 上次显式选择的后端（readWelcomeBackendPreference）。 */
+	last?: AgentBackend;
+	/** 上次选择携带的 ACP 工具 id（readWelcomeAcpToolPreference）。 */
+	lastAcpToolId?: string;
+	/** 设置项默认后端（already clamped：effectiveAgentBackendAtom）。 */
+	defaultBackend: AgentBackend;
+	/** DSH runtime 是否已安装（checking/missing 都视为不可用）。 */
+	dshAvailable: boolean;
+	acpEnabled: boolean;
+	acpTools: ReadonlyArray<{ id: string; enabled?: boolean }>;
+}): NewSessionBackendTarget {
+	const fallback: NewSessionBackendTarget = { backend: input.defaultBackend };
+	// 没选过 / 和默认一样：正常工作，不引入额外分支。
+	if (!input.last || input.last === input.defaultBackend) return fallback;
+	if (input.last === "pi") return { backend: "pi" };
+	if (input.last === "dsh") return input.dshAvailable ? { backend: "dsh" } : fallback;
+	if (input.last === "acp") {
+		if (!input.acpEnabled) return fallback;
+		const tools = input.acpTools.filter((tool) => tool.enabled !== false);
+		if (tools.length === 0) return fallback;
+		// 工具被删/禁用时退到第一个可用工具，而不是让新会话落到建不出来的 acp。
+		const toolId = tools.find((tool) => tool.id === input.lastAcpToolId)?.id ?? tools[0].id;
+		return { backend: "acp", acpToolId: toolId };
+	}
+	return fallback;
 }
 
 /**

@@ -79,7 +79,7 @@ import { t } from "../i18n";
 import { COMPOSER_ATTACHMENT_BUDGET_BYTES, COMPOSER_IMAGE_MAX_BYTES, ComposerImageError, attachmentBytes, base64DataBytes, dataUrlToFile, getClipboardImageFiles, getDroppedImageFiles, imageMimeTypeFromPath, isImageFilePath, processComposerImageFile } from "../utils/composerImages";
 import { PASTE_TO_FILE_MIN_CHARS } from "../rendererUtils";
 import { resolveBackendSwitchDefaults } from "../utils/backendSwitchDefaults";
-import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeAcpToolPreference, readWelcomeBackendPreference, readWelcomeDshModelPreference, readWelcomeModelPreference, resolveGuidePageBackend, WELCOME_BACKEND_KEY } from "../utils/chatSessionBootstrap";
+import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeAcpToolPreference, readWelcomeBackendPreference, readWelcomeDshModelPreference, readWelcomeModelPreference, rememberBackendPreference, resolveGuidePageBackend } from "../utils/chatSessionBootstrap";
 import { expandSessionReferences } from "../sending/outgoingExpansion";
 import { showNotice } from "../utils/notice";
 import { requireSessionCommand, toSessionRuntimeTarget } from "../utils/sessionCommands";
@@ -2193,7 +2193,6 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			// 首次发送时 App.ensureSessionForSend 读取同一份偏好创建真实会话，选择不丢失。
 			if (isGuideBootstrapSession) {
 				// acp 偏好携带工具 id（"acp:<toolId>"）；工具表为空/未选时不切也不存
-				let stored: string = next;
 				let guideToolId: string | undefined;
 				if (next === "acp") {
 					const tools = store.get(acpToolsAtom);
@@ -2202,17 +2201,12 @@ export function useSessionComposerController(options: UseSessionComposerControll
 						showNotice(t("app.acpNoTools"), 4000);
 						return;
 					}
-					stored = `acp:${toolId}`;
 					guideToolId = toolId;
 				}
 				setGuideBackendOverride(next);
 				// acp→acp 换工具：后端同值不触发重渲染，工具 id 单独 set（见 state 声明处注释）
 				if (guideToolId) setGuideAcpToolOverride(guideToolId);
-				try {
-					localStorage.setItem(WELCOME_BACKEND_KEY, stored);
-				} catch {
-					// localStorage 不可用时静默；本次页面内仍由 guideBackendOverride 即时生效
-				}
+				rememberBackendPreference(next, guideToolId);
 				return;
 			}
 			// 未开始对话的会话允许换后端：先把预热/认领出来的 runtime 停掉再改 record。
@@ -2254,6 +2248,8 @@ export function useSessionComposerController(options: UseSessionComposerControll
 					...(next === "acp" && acpToolId ? { acpToolId } : {}),
 				});
 				upsertSession(updated);
+				// 成功切换才记：下次新建会话沿用这次选择（与设置默认相同则解析时自然忽略）。
+				rememberBackendPreference(next, acpToolId);
 			} catch (error) {
 				showNotice(error instanceof Error ? error.message : String(error), 4000);
 			}
@@ -2271,6 +2267,8 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			try {
 				const updated = await desktopApi.sessions.updateRecord(sessionId, { acpToolId: toolId });
 				upsertSession(updated);
+				// acp→acp 换工具同样算一次显式后端选择，下次新建沿用该工具。
+				rememberBackendPreference("acp", toolId);
 			} catch (error) {
 				showNotice(error instanceof Error ? error.message : String(error), 4000);
 			}

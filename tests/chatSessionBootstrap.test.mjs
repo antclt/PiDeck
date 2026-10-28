@@ -4,7 +4,16 @@ import path from "node:path";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { resolveChatSessionBootstrap } = loadTsCommonJs("src/renderer/src/utils/chatSessionBootstrap.ts");
+// 模块在 VM 沙箱里执行，localStorage 必须经 globals 注入；同一个 backing 供读写断言复用。
+const storageBacking = new Map();
+const memoryStorage = {
+	getItem: (key) => (storageBacking.has(key) ? storageBacking.get(key) : null),
+	setItem: (key, value) => storageBacking.set(key, String(value)),
+	removeItem: (key) => storageBacking.delete(key),
+};
+const { resolveChatSessionBootstrap, resolveRememberedNewSessionTarget, rememberBackendPreference, readWelcomeBackendPreference, readWelcomeAcpToolPreference } = loadTsCommonJs("src/renderer/src/utils/chatSessionBootstrap.ts", {
+	globals: { localStorage: memoryStorage },
+});
 const appSource = readFileSync("src/renderer/src/App.tsx", "utf8");
 
 function resolve(input) {
@@ -42,6 +51,54 @@ test("Chat bootstrap loads a collapsed catalog, then shows the unified guide pag
 		}),
 		{ kind: "none" },
 	);
+});
+
+function resolveTarget(input) {
+	return JSON.parse(JSON.stringify(resolveRememberedNewSessionTarget(input)));
+}
+
+test("新建会话后端：没选过/与默认相同 → 默认；选了别的且可用 → 上次的", () => {
+	const base = { defaultBackend: "pi", dshAvailable: true, acpEnabled: true, acpTools: [] };
+	assert.deepEqual(resolveTarget(base), { backend: "pi" });
+	assert.deepEqual(resolveTarget({ ...base, last: "pi" }), { backend: "pi" });
+	assert.deepEqual(resolveTarget({ ...base, last: "dsh" }), { backend: "dsh" });
+	assert.deepEqual(resolveTarget({ ...base, defaultBackend: "dsh", last: "dsh" }), { backend: "dsh" });
+	assert.deepEqual(resolveTarget({ ...base, last: "pi", defaultBackend: "dsh" }), { backend: "pi" });
+});
+
+test("新建会话后端：上次的 DSH 不可用则回落默认", () => {
+	assert.deepEqual(resolveTarget({ defaultBackend: "pi", last: "dsh", dshAvailable: false, acpEnabled: false, acpTools: [] }), { backend: "pi" });
+});
+
+test("新建会话后端：上次的 ACP 选择沿用工具，工具失效退第一个可用；关闭/空表回落默认", () => {
+	const base = { defaultBackend: "pi", last: "acp", lastAcpToolId: "cb", dshAvailable: false, acpEnabled: true };
+	assert.deepEqual(resolveTarget({ ...base, acpTools: [{ id: "cb" }, { id: "gem" }] }), { backend: "acp", acpToolId: "cb" });
+	// 上次工具被删/禁用：退到第一个可用工具
+	assert.deepEqual(resolveTarget({ ...base, lastAcpToolId: "gone", acpTools: [{ id: "cb" }, { id: "gem", enabled: false }] }), { backend: "acp", acpToolId: "cb" });
+	// ACP 关闭 / 没有可用工具：不能建出无法激活的草稿
+	assert.deepEqual(resolveTarget({ ...base, acpEnabled: false, acpTools: [{ id: "cb" }] }), { backend: "pi" });
+	assert.deepEqual(resolveTarget({ ...base, acpTools: [] }), { backend: "pi" });
+	assert.deepEqual(resolveTarget({ ...base, acpTools: [{ id: "cb", enabled: false }] }), { backend: "pi" });
+});
+
+test("新建会话后端：生图/生视频等模式不参与上次后端", () => {
+	const base = { defaultBackend: "pi", dshAvailable: true, acpEnabled: true, acpTools: [{ id: "cb" }] };
+	assert.deepEqual(resolveTarget({ ...base, last: "imagegen" }), { backend: "pi" });
+	assert.deepEqual(resolveTarget({ ...base, last: "videogen" }), { backend: "pi" });
+});
+
+test("rememberBackendPreference 记住 pi/dsh/acp(工具)，模式选择不参与", () => {
+	storageBacking.clear();
+	rememberBackendPreference("acp", "cb");
+	assert.equal(readWelcomeBackendPreference(), "acp");
+	assert.equal(readWelcomeAcpToolPreference(), "cb");
+	rememberBackendPreference("dsh");
+	assert.equal(readWelcomeBackendPreference(), "dsh");
+	assert.equal(readWelcomeAcpToolPreference(), undefined);
+	// 生图/生视频是模式：不写也不清，最后一次 Agent 后端选择继续有效
+	rememberBackendPreference("imagegen");
+	assert.equal(readWelcomeBackendPreference(), "dsh");
+	storageBacking.clear();
 });
 
 test("Chat bootstrap never replaces an existing selection or non-Chat project", () => {
