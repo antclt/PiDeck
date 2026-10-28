@@ -4889,6 +4889,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.customThemesEmpty": "還沒有自定義主題——點「新建主題」，或點「AI 開發指南」讓 AI 幫你寫一個",
 	"settings.customThemesBuiltin": "內建示例",
 	"settings.customThemesUser": "使用者",
+	"settings.customThemesBasedOn": "基於 {skin}",
+	"settings.customThemesBasedOnHint": "該主題包繼承了這套內建皮膚：等寬、方角、訊息標記、模糊等形狀效果都保留，它只覆蓋自己寫明的顏色與字型",
 	"settings.customThemesApplied": "使用中",
 	"settings.customThemesAppliedToast": "已應用自定義主題（預覽中），儲存設定後生效",
 	"settings.customThemesApply": "應用",

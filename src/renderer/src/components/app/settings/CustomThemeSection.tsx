@@ -1,14 +1,15 @@
 /**
  * 设置页「自定义主题」区块：主题目录卡片列表（内置示例 + 用户文件）、应用/停用、
  * JSON 编辑器（保存前主进程同源校验）、AI 开发指南落盘入口。
- * 应用动作只写草稿（themeSkin=custom + customTheme 快照），预览/持久化由壳层接管；
- * 编辑保存直接落盘主题目录（与设置草稿无关，改坏可随时再编辑）。
+ * 应用动作只写草稿（themeSkin=base 皮肤或 custom + customTheme 快照），预览/持久化由壳层接管；
+ * 主题包带 base 时继承该内置皮肤（等宽/方角/标记/模糊等形状 chrome），只覆盖它写明的 token。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getI18nLocale, t } from "../../../i18n";
 import { desktopApi } from "../../../desktopApi";
 import type { AppSettings } from "../../../../../shared/types";
-import { CUSTOM_THEME_TEMPLATE, DEMO_CUSTOM_THEME, serializeCustomThemePackage, type CustomThemeListItem } from "../../../../../shared/customThemes";
+import { CUSTOM_THEME_TEMPLATE, DEMO_CUSTOM_THEME, serializeCustomThemePackage, type CustomThemeBaseSkin, type CustomThemeListItem } from "../../../../../shared/customThemes";
+import { SKIN_PRESETS } from "../../../themePresets";
 import { Button } from "../../ui-shadcn/button";
 import { Badge } from "../../ui-shadcn/badge";
 import { Textarea } from "../../ui-shadcn/textarea";
@@ -68,13 +69,20 @@ export function CustomThemeSection({ draft, updateDraft }: CustomThemeSectionPro
 		};
 	}, []);
 
-	// 当前生效的自定义主题 id（themeSkin 非 custom 时快照不生效，不标「使用中」）
-	const appliedId = draft.themeSkin === "custom" ? draft.customTheme?.id : undefined;
+	// 当前生效的自定义主题 id：裸 custom 皮肤，或它继承的那套内置皮肤（base）上都算「使用中」
+	const appliedId = draft.themeSkin === "custom" || draft.themeSkin === draft.customTheme?.base ? draft.customTheme?.id : undefined;
+
+	/** 继承皮肤的显示名（base 为空返回空串） */
+	const baseLabel = (base?: CustomThemeBaseSkin) => {
+		const preset = base ? SKIN_PRESETS.find((entry) => entry.id === base) : undefined;
+		return preset ? t(preset.labelKey) : "";
+	};
 
 	const applyTheme = (item: CustomThemeListItem) => {
 		if (item.parseError) return;
-		// 只写草稿：设置弹窗预览立即生效，保存后由 App 的 useAppAppearance 持久化接管
-		updateDraft({ themeSkin: "custom", customTheme: { id: item.id, name: item.name, light: item.tokens.light, dark: item.tokens.dark } });
+		// 只写草稿：设置弹窗预览立即生效，保存后由 App 的 useAppAppearance 持久化接管。
+		// 带 base 的主题直接把 themeSkin 落到继承皮肤（内置形状 chrome 整套保留），只叠 token。
+		updateDraft({ themeSkin: item.base ?? "custom", customTheme: { id: item.id, name: item.name, ...(item.base ? { base: item.base } : {}), light: item.tokens.light, dark: item.tokens.dark } });
 		toast(t("settings.customThemesAppliedToast"));
 	};
 
@@ -128,7 +136,7 @@ export function CustomThemeSection({ draft, updateDraft }: CustomThemeSectionPro
 			// 正在使用的主题被就地修改：同步刷新草稿快照，避免「文件改了界面没变」
 			if (appliedId === result.id) {
 				const updated = list.find((entry) => entry.id === result.id && !entry.parseError);
-				if (updated) updateDraft({ themeSkin: "custom", customTheme: { id: updated.id, name: updated.name, light: updated.tokens.light, dark: updated.tokens.dark } });
+				if (updated) updateDraft({ themeSkin: updated.base ?? "custom", customTheme: { id: updated.id, name: updated.name, ...(updated.base ? { base: updated.base } : {}), light: updated.tokens.light, dark: updated.tokens.dark } });
 			}
 			toast(t("settings.customThemesSavedToast", { id: result.id }));
 		} finally {
@@ -228,6 +236,11 @@ export function CustomThemeSection({ draft, updateDraft }: CustomThemeSectionPro
 											<Badge variant="secondary" className="shrink-0">
 												{item.source === "builtin" ? t("settings.customThemesBuiltin") : t("settings.customThemesUser")}
 											</Badge>
+											{item.base ? (
+												<Badge variant="outline" className="shrink-0" title={t("settings.customThemesBasedOnHint")}>
+													{t("settings.customThemesBasedOn", { skin: baseLabel(item.base) })}
+												</Badge>
+											) : null}
 											{applied ? (
 												<Badge className="shrink-0 gap-1">
 													<Check className="size-3" />

@@ -16,7 +16,7 @@ import test from "node:test";
 import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
 
 const loadPure = createTsSandbox();
-const { parseCustomThemePackage, serializeCustomThemePackage, sanitizeCustomThemeSnapshot, buildCustomThemeGuideMarkdown, DEMO_CUSTOM_THEME, CUSTOM_THEME_TEMPLATE, CUSTOM_THEME_TOKEN_WHITELIST, customThemeCssVar } = loadPure("src/shared/customThemes.ts");
+const { parseCustomThemePackage, serializeCustomThemePackage, sanitizeCustomThemeSnapshot, buildCustomThemeGuideMarkdown, DEMO_CUSTOM_THEME, CUSTOM_THEME_TEMPLATE, CUSTOM_THEME_TOKEN_WHITELIST, CUSTOM_THEME_BASE_SKINS, customThemeCssVar } = loadPure("src/shared/customThemes.ts");
 // 指南模块与主题契约同目录，单独加载避免一次绑死两个模块
 const { buildCustomThemeGuideMarkdown: buildGuide } = loadPure("src/shared/customThemeGuide.ts");
 
@@ -119,6 +119,35 @@ test("sanitizeCustomThemeSnapshot：逐键过滤 + 整体非法丢弃", () => {
 	assert.equal(sanitizeCustomThemeSnapshot({ id: "Bad Id", name: "x", light: { "bg-app": "#fff" } }), undefined);
 	assert.equal(sanitizeCustomThemeSnapshot({ id: "a-b", name: "x", light: {}, dark: {} }), undefined);
 	assert.equal(sanitizeCustomThemeSnapshot("junk"), undefined);
+});
+
+test("base 继承：合法内置皮肤 id 进 theme.base / 快照，非法 id 与 custom 明确拒绝", () => {
+	const parsed = parseCustomThemePackage(minimalPackageJson({ base: "terminal" }));
+	assert.equal(parsed.ok, true);
+	assert.equal(parsed.theme.base, "terminal");
+	// 序列化往返不丢 base（编辑器保存 + 目录重扫两步都靠它）
+	assert.equal(parseCustomThemePackage(serializeCustomThemePackage(parsed.theme)).theme.base, "terminal");
+
+	// 快照透传 base
+	const snapshot = sanitizeCustomThemeSnapshot({ id: "t", name: "T", base: "glass", light: { "bg-app": "#fff" } });
+	assert.equal(snapshot.base, "glass");
+	// 历史快照没有 base 时不得凭空长出字段；非法 base 直接丢弃而不报错（SettingsStore 容错口径）
+	assert.equal("base" in sanitizeCustomThemeSnapshot({ id: "t", name: "T", light: { "bg-app": "#fff" } }), false);
+	assert.equal("base" in sanitizeCustomThemeSnapshot({ id: "t", name: "T", base: "custom", light: { "bg-app": "#fff" } }), false);
+	// 不写 base 的包没有该字段（不能写成 undefined 进 JSON）
+	const plain = parseCustomThemePackage(minimalPackageJson());
+	assert.equal("base" in plain.theme, false);
+
+	for (const bad of ["custom", "nope", 42]) {
+		const rejected = parseCustomThemePackage(minimalPackageJson({ base: bad }));
+		assert.equal(rejected.ok, false, String(bad));
+		assert.match(rejected.errors.join("\n"), /base 必须是内置皮肤 id/);
+	}
+	assert.ok(CUSTOM_THEME_BASE_SKINS.includes("terminal"));
+	assert.ok(!CUSTOM_THEME_BASE_SKINS.includes("custom"));
+	// 指南得教 AI 用 base（否则生成的主题只能从零写全）
+	assert.ok(buildGuide("zh-CN", "/tmp").includes("base 可选"));
+	assert.ok(buildGuide("en-US", "/tmp").includes("base field"));
 });
 
 test("AI 指南：含白名单 token、示例主题 id 与目录路径（双语）", () => {

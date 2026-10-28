@@ -27,16 +27,32 @@ export type CustomThemePackage = {
 	version?: string;
 	author?: string;
 	description?: string;
+	/**
+	 * 继承的内置皮肤 id（可省略 = 不继承，走 themeSkin="custom" 的裸色板）。
+	 * 写了 base 的主题包只在被继承皮肤的形状 chrome（等宽/方角/标记/模糊）之上覆盖 token，
+	 * 应用时 themeSkin 直接落到该皮肤，因此不用把整套 token 写全。
+	 */
+	base?: CustomThemeBaseSkin;
 	appearance: {
 		light?: CustomThemeTokenInput;
 		dark?: CustomThemeTokenInput;
 	};
 };
 
+/**
+ * 主题包可继承的内置皮肤（"custom" 除外：它就是「不继承」本身）。
+ * shared/ 是纯契约层，不能反向 import renderer 的 SKIN_PRESETS —— 两侧同步由
+ * tests/appearanceThemes.test.mjs 守（新增皮肤漏更新会红）。
+ */
+export const CUSTOM_THEME_BASE_SKINS = ["classic-green", "fresh-green", "graphite", "sea-blue", "warm-beige", "terminal", "glass", "liquid-glass"] as const;
+export type CustomThemeBaseSkin = (typeof CUSTOM_THEME_BASE_SKINS)[number];
+
 /** 应用主题时写入 settings 的快照（内部无前缀键；亮暗分档） */
 export type CustomThemeSnapshot = {
 	id: string;
 	name: string;
+	/** 继承的内置皮肤；有值时 settings.themeSkin 被设为该皮肤，快照 token 叠加在皮肤色板之上 */
+	base?: CustomThemeBaseSkin;
 	light: CustomThemeTokenMap;
 	dark: CustomThemeTokenMap;
 };
@@ -55,6 +71,8 @@ export type CustomThemeListItem = {
 	version?: string;
 	author?: string;
 	description?: string;
+	/** 继承的内置皮肤 id（省略表示不继承） */
+	base?: CustomThemeBaseSkin;
 	tokens: { light: CustomThemeTokenMap; dark: CustomThemeTokenMap };
 	parseError?: string[];
 };
@@ -344,6 +362,15 @@ export function parseCustomThemePackage(raw: string): CustomThemeParseResult {
 			optionalTexts[label] = value;
 		}
 	}
+	// base：可选的内置皮肤继承（写错 id 直接报错，不静默忽略——否则用户以为继承生效了）
+	let base: CustomThemeBaseSkin | undefined;
+	if (pkg.base !== undefined) {
+		if (typeof pkg.base !== "string" || !(CUSTOM_THEME_BASE_SKINS as readonly string[]).includes(pkg.base)) {
+			errors.push(`base 必须是内置皮肤 id 之一（${CUSTOM_THEME_BASE_SKINS.join(" / ")}），当前为 ${JSON.stringify(pkg.base)}`);
+		} else {
+			base = pkg.base as CustomThemeBaseSkin;
+		}
+	}
 	if (pkg.appearance === undefined || typeof pkg.appearance !== "object" || pkg.appearance === null) {
 		errors.push("appearance 必须是对象（含 light/dark 两档）");
 		return { ok: false, errors };
@@ -366,6 +393,7 @@ export function parseCustomThemePackage(raw: string): CustomThemeParseResult {
 	if (optionalTexts.version !== undefined) theme.version = optionalTexts.version;
 	if (optionalTexts.author !== undefined) theme.author = optionalTexts.author;
 	if (optionalTexts.description !== undefined) theme.description = optionalTexts.description;
+	if (base !== undefined) theme.base = base;
 	return { ok: true, theme, tokens };
 }
 
@@ -398,7 +426,8 @@ export function sanitizeCustomThemeSnapshot(value: unknown): CustomThemeSnapshot
 	const light = cleanScheme(input.light);
 	const dark = cleanScheme(input.dark);
 	if (Object.keys(light).length === 0 && Object.keys(dark).length === 0) return undefined;
-	return { id, name, light, dark };
+	const base = typeof input.base === "string" && (CUSTOM_THEME_BASE_SKINS as readonly string[]).includes(input.base) ? (input.base as CustomThemeBaseSkin) : undefined;
+	return { id, name, ...(base ? { base } : {}), light, dark };
 }
 
 /**

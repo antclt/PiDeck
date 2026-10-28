@@ -8,6 +8,7 @@ const zhCN = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8")
 const enUS = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
 
 const { SKIN_PRESETS, DEFAULT_SKIN, ACCENT_PRESETS } = loadTsCommonJs("src/renderer/src/themePresets.ts");
+const { CUSTOM_THEME_BASE_SKINS } = loadTsCommonJs("src/shared/customThemes.ts");
 
 /**
  * 外观主题契约：
@@ -68,6 +69,26 @@ test("SKIN_PRESETS is complete and DEFAULT is classic-green", () => {
 			assert.ok(preset.previewSurfaces[key].startsWith("#"), `${preset.id}.${key}`);
 		}
 	}
+});
+
+test("CUSTOM_THEME_BASE_SKINS 与 SKIN_PRESETS 同步：主题包只能继承真实存在的内置皮肤", () => {
+	// shared/ 是纯契约层，不能 import renderer 的预设表（反向依赖），所以两侧靠这条守卫对齐：
+	// 新增/删除皮肤漏改 BASE_SKINS 时，主题包的 base 校验会放过不存在的 id 或拒掉合法 id。
+	assert.deepEqual(
+		[...CUSTOM_THEME_BASE_SKINS],
+		[...SKIN_PRESETS].map((preset) => preset.id),
+	);
+	assert.ok(!CUSTOM_THEME_BASE_SKINS.includes("custom"), "custom 不是可继承的皮肤（它就是「不继承」）");
+});
+
+test("主题包 base 继承的应用侧契约：themeSkin 落到 base 皮肤、快照按 base 判定生效", () => {
+	// 应用主题时把 themeSkin 直接设成继承皮肤（内置形状 chrome 才能整套保留），而不是固定 "custom"
+	const section = readFileSync("src/renderer/src/components/app/settings/CustomThemeSection.tsx", "utf8");
+	assert.match(section, /themeSkin: item\.base \?\? "custom"/);
+	// 快照生效条件必须是「裸 custom 或它继承的 base」，不能只认 custom（否则 base 主题的 token 不生效）
+	const hook = readFileSync("src/renderer/src/hooks/appearance/useAppAppearance.ts", "utf8");
+	assert.match(hook, /function activeCustomTheme\(/);
+	assert.match(hook, /settings\.themeSkin === theme\.base/);
 });
 
 test("CSS data-appearance blocks exist for every non-default skin, light + dark", () => {

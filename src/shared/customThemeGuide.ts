@@ -6,7 +6,7 @@
  * - 主进程写入主题目录 AI-THEME-GUIDE.md（用户可让 AI 直接读该文件）；
  * - 单测校验指南完整性（含白名单 token 与示例主题 id）。
  */
-import { CUSTOM_THEME_TOKEN_GROUPS, CUSTOM_THEME_ID_PATTERN, DEMO_CUSTOM_THEME, customThemeCssVar, serializeCustomThemePackage } from "./customThemes";
+import { CUSTOM_THEME_BASE_SKINS, CUSTOM_THEME_TOKEN_GROUPS, CUSTOM_THEME_ID_PATTERN, DEMO_CUSTOM_THEME, customThemeCssVar, serializeCustomThemePackage } from "./customThemes";
 
 export type CustomThemeGuideLocale = "zh-CN" | "en-US";
 
@@ -60,6 +60,7 @@ function schemaSection(locale: CustomThemeGuideLocale): string {
 			`\t"version": "1.0.0",            // optional`,
 			`\t"author": "you",               // optional`,
 			`\t"description": "...",          // optional, <=200 chars`,
+			`\t"base": "terminal",           // optional: inherit a built-in skin`,
 			`\t"appearance": {`,
 			`\t\t"light": { "--color-bg-app": "#faf6f7", ... },  // light tokens`,
 			`\t\t"dark":  { "--color-bg-app": "#171114", ... }   // dark tokens`,
@@ -72,6 +73,7 @@ function schemaSection(locale: CustomThemeGuideLocale): string {
 			`- Font values are plain font stacks (letters/digits/spaces/commas/quotes/hyphens, <=120 chars), e.g. "JetBrains Mono", Menlo, monospace. A font picked explicitly in Settings always wins over the theme.`,
 			`- Values must be static colors: \`#rgb\`/\`#rgba\`/\`#rrggbb\`/\`#rrggbbaa\` or \`rgb()/rgba()/hsl()/hsla()/oklch()/oklab()\` with numeric arguments only. No \`var()\`, no gradients, no \`url()\`.`,
 			`- At least one of light/dark must be non-empty; providing both is strongly recommended (missing tokens fall back to the built-in default look).`,
+			`- The optional base field names a built-in skin (${CUSTOM_THEME_BASE_SKINS.join(", ")}): the theme then inherits that skin — monospace body, sharp corners, message markers, blur, and every token you do not override. Write only the tokens you want to change. Without base the theme starts from the bare default palette, so define a full set.`,
 			`- \`id\` must not be \`${DEMO_CUSTOM_THEME.id}\`: that id is reserved for the built-in demo theme (saving it is rejected).`,
 		].join("\n");
 	}
@@ -87,6 +89,7 @@ function schemaSection(locale: CustomThemeGuideLocale): string {
 		`\t"version": "1.0.0",            // 可选`,
 		`\t"author": "you",               // 可选`,
 		`\t"description": "...",          // 可选，≤200 字符`,
+		`\t"base": "terminal",           // 可选：继承内置皮肤`,
 		`\t"appearance": {`,
 		`\t\t"light": { "--color-bg-app": "#faf6f7", ... },  // 浅色档 token`,
 		`\t\t"dark":  { "--color-bg-app": "#171114", ... }   // 暗色档 token`,
@@ -99,6 +102,7 @@ function schemaSection(locale: CustomThemeGuideLocale): string {
 		`- 字体值是普通字体栈（字母/数字/空格/逗号/引号/连字符，≤120 字符），如 "JetBrains Mono", Menlo, monospace；设置里显式选的字体永远优先于主题，`,
 		`- 值只能是静态颜色：\`#rgb\`/\`#rgba\`/\`#rrggbb\`/\`#rrggbbaa\` 或 \`rgb()/rgba()/hsl()/hsla()/oklch()/oklab()\`（纯数值参数）。不支持 \`var()\`、渐变、\`url()\`；`,
 		`- light/dark 至少一档非空；强烈建议两档都写全（缺失的 token 会回落到内置默认观感）；`,
+		`- base 可选：填内置皮肤 id（${CUSTOM_THEME_BASE_SKINS.join("、")}）即整套继承该皮肤——等宽字体、方角、消息标记、模糊效果与所有未覆盖的 token 都保留，只写想改的那几项即可；不写 base 则从默认色板从零开始，应当把 token 写全；`,
 		`- \`id\` 不能是 \`${DEMO_CUSTOM_THEME.id}\`：该 id 保留给内置示例（保存时会被拒绝）。`,
 	].join("\n");
 }

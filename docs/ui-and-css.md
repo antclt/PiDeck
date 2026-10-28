@@ -67,6 +67,7 @@ Markdown 渲染（streamdown）的颜色一律走 `--color-md-*` 语义 token，
   另外：blur 只挂小体积浮层（侧栏 + dialog/popover/tooltip/copy-menu），不挂 `.chat-pane` 长列表（每帧滚动重算模糊）；玻璃皮肤**不覆盖** `--color-accent`，accent 交给 `data-accent` 块（皮肤块写会被暗色 accent 块的特异性压过）。
 - 新增皮肤必须带齐 16 个必需 token（面色/灰阶）+ 亮暗两块；守卫：`tests/appearanceThemes.test.mjs`（id 列表与 token 完整性）、`tests/themeContrast.test.mjs`（把皮肤加进 `APPEARANCES`，按 WCAG 校验正文/md 文字对）。
 - 用户侧可定制范围由 `src/shared/customThemes.ts` 的 `CUSTOM_THEME_TOKEN_GROUPS` 决定（颜色值必须是 `#hex`/`rgb()`/`hsl()`/`oklch()` 静态形式）；`markdown` 组让自定义主题包也能改标题/链接/行内码/引用/列表符/分割线/加粗斜体删除线/表格/任务勾选/图片边框颜色，`font` 组让主题包改字体，指南页由 groups 自动生成。
+- **主题包 `base` 继承内置皮肤**：主题包可写 `"base": "terminal"`（可选值 = `CUSTOM_THEME_BASE_SKINS`，即 `SKIN_PRESETS` 全部 id 去掉 `custom`）。应用时 `settings.themeSkin` 直接落到该皮肤（不是 `"custom"`），因此内置皮肤的 CSS 块与形状 chrome（等宽/方角/`⏺`/blur/画布）整套继承，主题包只需写想改的 token；不写 `base` 时仍走裸 `custom` 皮肤（无内置色板，需写全）。生效判定在 `useAppAppearance.ts` 的 `activeCustomTheme()`（`themeSkin === "custom"` 或 `=== customTheme.base`），同步守卫：`tests/appearanceThemes.test.mjs`（`CUSTOM_THEME_BASE_SKINS` 与 `SKIN_PRESETS` 逐项相等 + 应用侧源码契约）。
 - **字体 token**：`--font-family-base` / `--font-family-mono` / `--font-family-md`，值走独立白名单 `FONT_VALUE_PATTERN`（字母/数字/空格/逗号/引号/连字符/下划线/点，≤120 字符，排除 `;(){}:/` 等注入面），内部快照键是 `font-family-*`（不是 `--color-*`），注入时由 `customThemeCssVar()` 拼回 `--font-family-*`。
 - 字体优先级：**设置页里显式选的自定义字体 > 主题包字体 > 内置皮肤/默认值**，集中在 `applyFontFamilyTokens()`（`hooks/appearance/useAppAppearance.ts`）算一次最终值，`applyCustomThemeTokens()` 末尾也调它，避免两处 `removeProperty` 互相抹掉。
 

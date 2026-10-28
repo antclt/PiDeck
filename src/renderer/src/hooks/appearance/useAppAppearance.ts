@@ -17,23 +17,36 @@ const injectedWallpaperValues = new Map<string, string>();
 
 /**
  * 自定义 token 注入（主题包快照 + 手写 overrides）：App 持久化应用与设置弹窗实时预览共用。
- * 先清后注、幂等；快照仅 themeSkin=custom 时生效（切回内置皮肤不残留），
- * overrides 沿袭历史行为始终叠加（inline 样式压过 [data-appearance] 样式表）。
+ * 先清后注、幂等；快照仅在当前皮肤匹配时生效（裸 custom 皮肤，或它的 base 继承皮肤），
+ * 切回其它内置皮肤不残留；overrides 沿袭历史行为始终叠加（inline 样式压过 [data-appearance] 样式表）。
  */
 type CustomThemeSettingsSlice = Pick<AppSettings, "themeSkin" | "customTheme" | "customThemeOverrides" | "fontFamilyBase" | "fontFamilyBaseCustom" | "fontFamilyMono" | "fontFamilyMonoCustom">;
+
+/**
+ * 本皮肤下生效的主题包快照：裸 `custom` 皮肤，或恰好是它继承的那套内置皮肤（`base`）。
+ * 继承皮肤之所以把快照限于 base：用户手动把皮肤换成别的内置皮肤后，
+ * 旧快照不能再去覆盖新皮肤（切肤时的清空是另一道防线）。
+ */
+function activeCustomTheme(settings: CustomThemeSettingsSlice): CustomThemeSettingsSlice["customTheme"] {
+	const theme = settings.customTheme;
+	if (!theme) return undefined;
+	if (settings.themeSkin === "custom") return theme;
+	return theme.base !== undefined && settings.themeSkin === theme.base ? theme : undefined;
+}
 
 /** 用户输入的自定义字体统一追加 CJK 回退（只填西文字体时中文不能落到 SimSun 小字挤压） */
 const CJK_FONT_FALLBACK = '"Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "HarmonyOS Sans SC", "Hiragino Sans GB", "Noto Sans CJK SC"';
 
 /**
- * 字体族 token：主题包字体（themeSkin=custom 时）先落，再用用户显式自定义字体覆盖。
+ * 字体族 token：主题包字体（当前皮肤匹配快照时）先落，再用用户显式自定义字体覆盖。
  *
  * 为什么和颜色注入分开：两者写的是同一批 inline style，用户「设置里选的字体」必须压过
  * 主题包默认值；如果各自 removeProperty，先跑的会把后跑的覆盖结果抹掉（切主题/改字体时
  * 互相打架）。这里集中算一次最终值，谁调用都得到同一结果，天然幂等。
  */
 export function applyFontFamilyTokens(root: HTMLElement, settings: CustomThemeSettingsSlice, isDark: boolean): void {
-	const themeTokens = settings.themeSkin === "custom" && settings.customTheme ? (isDark ? settings.customTheme.dark : settings.customTheme.light) : {};
+	const theme = activeCustomTheme(settings);
+	const themeTokens = theme ? (isDark ? theme.dark : theme.light) : {};
 	const themeFont = (cssVar: string): string | undefined => themeTokens[cssVar] ?? themeTokens[cssVar.slice("--".length)];
 	const apply = (cssVar: string, userChoice: string, userValue: string, tail: string) => {
 		const fromTheme = themeFont(cssVar);
@@ -59,8 +72,9 @@ export function applyCustomThemeTokens(root: HTMLElement, settings: CustomThemeS
 	// 主题包里的字体 token 由 applyFontFamilyTokens 统一处理（它们不是 --color-* 变量）；
 	// overrides 里手写的字体也一并交给它，避免这里拼出 --color-font-family-* 这种错变量。
 	const isFontToken = (token: string) => token.startsWith("font-family-");
-	if (settings.themeSkin === "custom" && settings.customTheme) {
-		const schemeTokens = isDark ? settings.customTheme.dark : settings.customTheme.light;
+	const theme = activeCustomTheme(settings);
+	if (theme) {
+		const schemeTokens = isDark ? theme.dark : theme.light;
 		for (const [k, v] of Object.entries(schemeTokens)) {
 			if (isFontToken(k)) continue;
 			const cssVar = k.startsWith("--") ? k : `--color-${k}`;

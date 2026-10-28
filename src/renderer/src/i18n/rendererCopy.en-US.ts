@@ -4900,6 +4900,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.customThemesEmpty": "No custom themes yet — click “New theme”, or generate the AI guide and let an AI write one",
 	"settings.customThemesBuiltin": "Built-in demo",
 	"settings.customThemesUser": "User",
+	"settings.customThemesBasedOn": "Based on {skin}",
+	"settings.customThemesBasedOnHint": "This theme package inherits that built-in skin: monospace body, sharp corners, message markers and blur effects stay intact — it only overrides the colors and fonts it declares.",
 	"settings.customThemesApplied": "Active",
 	"settings.customThemesAppliedToast": "Custom theme applied (preview); save settings to persist",
 	"settings.customThemesApply": "Apply",

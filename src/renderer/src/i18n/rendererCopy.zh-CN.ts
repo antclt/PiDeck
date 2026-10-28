@@ -4882,6 +4882,8 @@ export const zhCN = {
 	"settings.customThemesEmpty": "还没有自定义主题——点「新建主题」，或点「AI 开发指南」让 AI 帮你写一个",
 	"settings.customThemesBuiltin": "内置示例",
 	"settings.customThemesUser": "用户",
+	"settings.customThemesBasedOn": "基于 {skin}",
+	"settings.customThemesBasedOnHint": "该主题包继承了这套内置皮肤：等宽、方角、消息标记、模糊等形状效果都保留，它只覆盖自己写明的颜色与字体",
 	"settings.customThemesApplied": "使用中",
 	"settings.customThemesAppliedToast": "已应用自定义主题（预览中），保存设置后生效",
 	"settings.customThemesApply": "应用",
