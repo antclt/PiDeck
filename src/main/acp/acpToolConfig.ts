@@ -6,6 +6,7 @@
  * 用户增删一条工具时,另一条脏数据不应阻断保存。
  */
 import type { AcpToolConfig, AcpToolValidation } from "../../shared/types/acp";
+import type { AcpConfigOption } from "./acpProtocol";
 
 /** 单字段长度上限(显示名/命令足够,防滥用)。 */
 const NAME_MAX_CHARS = 80;
@@ -69,6 +70,86 @@ export function validateAcpTool(input: { id?: string; name?: unknown; command?: 
 /** 渲染层不应用 crypto/randomUUID 造 id(纯函数可测):时间戳+随机后缀。 */
 export function createAcpToolId(): string {
 	return `acp-tool-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** settings.acpToolConfigDefaults 的运行时形态：工具 id → 选项 id → 值。 */
+export type AcpToolConfigDefaults = Record<string, Record<string, string | boolean>>;
+
+const DEFAULTS_TOOLS_LIMIT = 32;
+const DEFAULTS_OPTIONS_LIMIT = 16;
+const DEFAULT_TOOL_ID_MAX_CHARS = 128;
+const DEFAULT_OPTION_ID_MAX_CHARS = 80;
+const DEFAULT_VALUE_MAX_CHARS = 200;
+
+/**
+ * 是否记忆该 configOption：用户口径只记思考档/模式/权限，模型与模型参数不记。
+ * category 缺失时用 id 兜底排除 model（少数 agent 不回 category）。
+ */
+export function isRememberedAcpConfigOption(option: { id: string; category?: string }): boolean {
+	const category = option.category?.trim().toLowerCase();
+	if (category === "model" || category === "model_config") return false;
+	if (!category && option.id.trim().toLowerCase() === "model") return false;
+	return true;
+}
+
+/** 设置加载/更新边界的整表消毒：脏工具/脏选项/超长值丢弃，不因一条坏数据拒绝整表。 */
+export function sanitizeAcpToolConfigDefaults(value: unknown): AcpToolConfigDefaults {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+	const result: AcpToolConfigDefaults = {};
+	let toolCount = 0;
+	for (const [rawToolId, rawOptions] of Object.entries(value as Record<string, unknown>)) {
+		if (toolCount >= DEFAULTS_TOOLS_LIMIT) break;
+		const toolId = cleanString(rawToolId, DEFAULT_TOOL_ID_MAX_CHARS);
+		if (!toolId || !rawOptions || typeof rawOptions !== "object" || Array.isArray(rawOptions)) continue;
+		const options: Record<string, string | boolean> = {};
+		let optionCount = 0;
+		for (const [rawOptionId, rawValue] of Object.entries(rawOptions as Record<string, unknown>)) {
+			if (optionCount >= DEFAULTS_OPTIONS_LIMIT) break;
+			const optionId = cleanString(rawOptionId, DEFAULT_OPTION_ID_MAX_CHARS);
+			if (!optionId) continue;
+			if (typeof rawValue === "boolean") {
+				options[optionId] = rawValue;
+			} else {
+				const text = cleanString(rawValue, DEFAULT_VALUE_MAX_CHARS);
+				if (!text) continue;
+				options[optionId] = text;
+			}
+			optionCount += 1;
+		}
+		if (optionCount > 0) {
+			result[toolId] = options;
+			toolCount += 1;
+		}
+	}
+	return result;
+}
+
+/**
+ * 计算新建会话要重放的配置：只保留当前 agent 枚举里仍存在、类型匹配且值确实不同的项。
+ * 顺序按 defaults 的插入顺序；单条失败由调用方跳过，不阻塞会话创建。
+ */
+export function planAcpConfigReplay(options: ReadonlyArray<Pick<AcpConfigOption, "id" | "category" | "type" | "currentValue">> | undefined, defaults: Record<string, string | boolean> | undefined): Array<{ id: string; value: string | boolean }> {
+	if (!options || !defaults) return [];
+	const plan: Array<{ id: string; value: string | boolean }> = [];
+	for (const [id, value] of Object.entries(defaults)) {
+		const option = options.find((candidate) => candidate.id === id);
+		if (!option || !isRememberedAcpConfigOption(option)) continue;
+		if (option.type === "boolean" ? typeof value !== "boolean" : typeof value !== "string") continue;
+		if (option.currentValue === value) continue;
+		plan.push({ id, value });
+	}
+	return plan;
+}
+
+/** 单条记忆写入（不可变）：值非法或与现值相同时返回 undefined，调用方跳过落盘。 */
+export function withAcpConfigDefault(defaults: AcpToolConfigDefaults, toolId: string, optionId: string, value: string | boolean): AcpToolConfigDefaults | undefined {
+	const cleanToolId = cleanString(toolId, DEFAULT_TOOL_ID_MAX_CHARS);
+	const cleanOptionId = cleanString(optionId, DEFAULT_OPTION_ID_MAX_CHARS);
+	if (!cleanToolId || !cleanOptionId) return undefined;
+	if (typeof value === "string" && !cleanString(value, DEFAULT_VALUE_MAX_CHARS)) return undefined;
+	const current = defaults[cleanToolId] ?? {};
+	if (current[cleanOptionId] === value) return undefined;
+	return { ...defaults, [cleanToolId]: { ...current, [cleanOptionId]: value } };
 }
 
 /** 设置加载/更新边界的整表消毒:非法条目丢弃,合法条目字段归一。 */

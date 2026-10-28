@@ -95,6 +95,8 @@ export async function performAcpHandshake(runtime: AcpAgentRuntime, resumeSessio
 			await runtime.updateChain;
 			// 标准 load 响应无 sessionId；保留请求身份。兼容明确回传身份的旧 CLI。
 			setup = { ...loaded, sessionId: typeof loaded?.sessionId === "string" && loaded.sessionId ? loaded.sessionId : resumeSessionId };
+			// 成功的 load 才标记：失败回退 session/new 时仍要重放工具级默认配置。
+			runtime.loadedSession = true;
 		} catch (error) {
 			// 排空已经开始的物化再丢弃；否则在途旧快照能污染 session/new。
 			runtime.acpSessionId = "";

@@ -33,6 +33,13 @@ export function registerAcpIpc(deps: {
 		if (!Array.isArray(tools)) throw new Error("acp:tools-save expects an array of tools");
 		const sanitized = sanitizeAcpTools(tools);
 		settingsStore.update({ acpTools: sanitized });
+		// 工具删除后清理其配置记忆：键是工具 id，孤儿条目只会在日后 id 复用时误重放。
+		const defaults = settingsStore.get().acpToolConfigDefaults;
+		if (defaults) {
+			const ids = new Set(sanitized.map((tool) => tool.id));
+			const kept = Object.fromEntries(Object.entries(defaults).filter(([toolId]) => ids.has(toolId)));
+			if (Object.keys(kept).length !== Object.keys(defaults).length) settingsStore.update({ acpToolConfigDefaults: kept });
+		}
 		return settingsStore.get().acpTools ?? [];
 	});
 

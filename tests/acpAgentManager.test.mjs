@@ -1094,6 +1094,78 @@ test("configOptions:config_option_update 通知整表替换并回调 onConfigOpt
 	assert.equal(manager.getSessionConfigOptions(tab.id)?.[0]?.currentValue, "o3");
 });
 
+// ── 工具级配置记忆:用户切换写回 → 新建会话重放;load 恢复不覆盖 ──
+
+test("configOptions:新建会话重放思考档,模型与失效项不重放,重放不反向写记忆", async (t) => {
+	const applied = [];
+	const remembered = [];
+	const { manager, createAgent, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: false } };
+				if (frame.method === "session/new") return { sessionId: "sess-mem", configOptions: CONFIG_OPTIONS };
+				if (frame.method === "session/set_config_option") {
+					applied.push(frame.params);
+					return { configOptions: CONFIG_OPTIONS.map((option) => (option.id === frame.params.configId ? { ...option, currentValue: frame.params.value } : option)) };
+				}
+				return {};
+			},
+		},
+		{
+			getToolConfigDefaults: () => ({ model: "o3", effort: "high", removed: "x" }),
+			rememberConfigOption: (toolId, optionId, value) => remembered.push({ toolId, optionId, value }),
+		},
+	);
+	const tab = await createAgent();
+	// 只重放 effort:model 不在记忆范围,removed 已不在当前枚举
+	assert.deepEqual(applied, [{ sessionId: "sess-mem", configId: "effort", value: "high" }]);
+	assert.equal(manager.getSessionConfigOptions(tab.id)?.[1]?.currentValue, "high");
+	assert.equal(lastProc().methodFrames("session/set_config_option").length, 1);
+	// 重放是恢复历史选择,不能反过来再写一次设置
+	assert.deepEqual(remembered, []);
+});
+
+test("configOptions:session/load 恢复的会话不重放工具记忆", async (t) => {
+	const { manager, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: true } };
+				if (frame.method === "session/load") return { configOptions: CONFIG_OPTIONS };
+				if (frame.method === "session/new") return { sessionId: "sess-new", configOptions: CONFIG_OPTIONS };
+				return {};
+			},
+		},
+		{ getToolConfigDefaults: () => ({ effort: "high" }) },
+	);
+	await manager.create({ projectId: "p1", title: "t", deckSessionId: "deck-1", backend: "acp", agentPreset: "gemini", acpSessionId: "sess-old" });
+	assert.equal(lastProc().methodFrames("session/set_config_option").length, 0);
+	assert.equal(lastProc().methodFrames("session/new").length, 0);
+});
+
+test("configOptions:用户切换思考档后写回记忆,模型切换不写", async (t) => {
+	const remembered = [];
+	const { manager, createAgent } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: false } };
+				if (frame.method === "session/new") return { sessionId: "sess-mem2", configOptions: CONFIG_OPTIONS };
+				if (frame.method === "session/set_config_option") {
+					return { configOptions: CONFIG_OPTIONS.map((option) => (option.id === frame.params.configId ? { ...option, currentValue: frame.params.value } : option)) };
+				}
+				return {};
+			},
+		},
+		{ rememberConfigOption: (toolId, optionId, value) => remembered.push({ toolId, optionId, value }) },
+	);
+	const tab = await createAgent();
+	await manager.applyConfigOption(tab.id, "effort", "high");
+	await manager.applyConfigOption(tab.id, "model", "o3");
+	assert.deepEqual(remembered, [{ toolId: "gemini", optionId: "effort", value: "high" }]);
+});
+
 test("session/prompt 超时后补发 session/cancel：agent 侧旧回合必须收口，否则后续 prompt 永久排队", async (t) => {
 	const { manager, createAgent, lastProc } = harness(
 		t,

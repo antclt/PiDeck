@@ -40,6 +40,8 @@ export type AcpAgentRuntime = {
 	cancelReason: AcpCancelSource | null;
 	/** load 尚未成功时不发布半段历史、标题或配置，失败可完整丢弃。 */
 	reloading: boolean;
+	/** 握手时 session/load 成功（历史会话恢复）：此时不重放工具级默认配置，交给 agent 恢复会话状态。 */
+	loadedSession: boolean;
 	flushTimer: NodeJS.Timeout | null;
 	flushPending: boolean;
 	/** abort/超时升级强杀前的宽限定时器;回合正常结算时清除。 */

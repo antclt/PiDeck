@@ -925,6 +925,14 @@ export type AppSettings = {
 	 */
 	acpTools?: AcpToolConfig[];
 	/**
+	 * ACP 工具级配置记忆：按 acpToolId → { configOptionId → 值 } 保存用户最近一次选择的
+	 * 思考档/模式/权限等会话级配置（agent 在 session/new 回传的 configOptions）。
+	 * 新建会话握手成功后自动重放；session/load 恢复的会话不覆盖（agent 自己会恢复）。
+	 * **不含模型**（category=model/model_config 一律不记）：模型仍随 CLI/会话默认。
+	 * 删除工具时由 acp:tools-save 链路清理对应条目；值来自 agent 回传，入参仍按不可信消毒。
+	 */
+	acpToolConfigDefaults?: Record<string, Record<string, string | boolean>>;
+	/**
 	 * ACP 回合 stall 静默判定阈值（ms）：回合内无任何 session/update、无挂起审批且无在途
 	 * 工具调用的全静默超过该值，先补发 session/cancel 再升级强杀。缺省 undefined = 代码内
 	 * 默认 180_000（acpTurnWatchdog.PROMPT_STALL_TIMEOUT_MS）。变更后新回合生效，不需要重启。

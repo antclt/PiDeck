@@ -27,6 +27,7 @@ import { AcpPermissionRequests } from "./AcpPermissionRequests";
 import { acpPromptBlocks, appendAcpUserPrompt, initialAcpProjection, rollbackAcpUserPrompt, settleAcpTurn, type AcpProjectionState } from "./AcpEventProjector";
 import { authRequiredDescriptor, localizeCreateFailure, promptTurnTimeoutDescriptor } from "./acpFailureDescriptors";
 import { buildAgentRuntimeState, type AcpAgentRuntime } from "./acpAgentRuntime";
+import { isRememberedAcpConfigOption, planAcpConfigReplay } from "./acpToolConfig";
 import { AcpTurnWatchdog } from "./acpTurnWatchdog";
 import { AcpMessageSnapshotStore } from "./AcpMessageSnapshotStore";
 import type { AcpSessionArchive } from "./AcpSessionArchive";
@@ -56,6 +57,10 @@ type AcpManagerDeps = {
 	onTitleChanged?: (deckSessionId: string, title: string) => void;
 	/** configOptions 变更推送(set_config_option 响应/config_option_update 通知)。 */
 	onConfigOptionsChanged?: (tab: AgentTab, options: AcpConfigOption[]) => void;
+	/** 读取某工具记住的会话级配置(settings.acpToolConfigDefaults[toolId]);缺省不重放。 */
+	getToolConfigDefaults?: (toolId: string) => Record<string, string | boolean> | undefined;
+	/** 用户手动切换配置成功后的记忆回调(主进程写 settings;缺省不持久化)。 */
+	rememberConfigOption?: (toolId: string, optionId: string, value: string | boolean) => void;
 	logger?: { info(channel: string, message: string, meta?: Record<string, unknown>): void; warn(channel: string, message: string, meta?: Record<string, unknown>): void };
 	/** 图片落盘(base64→内容寻址 ref):生图 ImageBlobStore 的最小结构化依赖,便于单测注入假实现。 */
 	imageStore?: { put(data: string, mimeType: string): Promise<string | null> };
@@ -236,11 +241,18 @@ export class AcpAgentManager implements SessionAgentGateway {
 
 	/** 下发配置选择并返回 agent 回传的完整 configOptions(规范:响应必带整表)。 */
 	async applyConfigOption(agentId: string, optionId: string, value: string | boolean): Promise<AcpConfigOption[]> {
+		return this.enqueueConfigOption(agentId, optionId, value, true);
+	}
+
+	/**
+	 * 配置写入入队:串行化同一 runtime 的配置写入(乱序响应下迟到的旧整表会回退
+	 * runtime.configOptions 并推过期通知;排队后通知顺序=请求顺序)。
+	 * remember=false 用于新建会话重放,避免把记忆值再写回设置。
+	 */
+	private enqueueConfigOption(agentId: string, optionId: string, value: string | boolean, remember: boolean): Promise<AcpConfigOption[]> {
 		const runtime = this.requireRuntime(agentId);
-		// 串行化同一 runtime 的配置写入:乱序响应下迟到的旧整表会回退 runtime.configOptions
-		// 并通过通知推过期状态(复核发现的乱序回退缺陷);排队后通知顺序=请求顺序。
 		const previous = (runtime.configChain ?? Promise.resolve()).catch(() => undefined);
-		const operation = previous.then(() => this.performConfigOptionRequest(runtime, optionId, value));
+		const operation = previous.then(() => this.performConfigOptionRequest(runtime, optionId, value, remember));
 		runtime.configChain = operation.then(
 			() => undefined,
 			() => undefined,
@@ -249,7 +261,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 	}
 
 	/** 真正发出 session/set_config_option;在串行链上迟到执行,需重新校验 runtime 归属与连接。 */
-	private async performConfigOptionRequest(runtime: AcpAgentRuntime, optionId: string, value: string | boolean): Promise<AcpConfigOption[]> {
+	private async performConfigOptionRequest(runtime: AcpAgentRuntime, optionId: string, value: string | boolean, remember: boolean): Promise<AcpConfigOption[]> {
 		if (this.runtimes.get(runtime.tab.id) !== runtime) throw new Error("ACP agent is not running");
 		const conn = runtime.conn;
 		if (!conn || conn.isClosed()) throw new Error("ACP agent is not running");
@@ -257,7 +269,33 @@ export class AcpAgentManager implements SessionAgentGateway {
 		if (!result || !Array.isArray(result.configOptions)) throw new Error("session/set_config_option returned no configOptions");
 		runtime.configOptions = result.configOptions;
 		this.deps.onConfigOptionsChanged?.(runtime.tab, result.configOptions);
+		if (remember) this.rememberAppliedConfigOption(runtime, optionId, value, result.configOptions);
 		return result.configOptions;
+	}
+
+	/** 只记忆 agent 实际接受的值;模型类选项(用户口径)不落盘。 */
+	private rememberAppliedConfigOption(runtime: AcpAgentRuntime, optionId: string, requested: string | boolean, options: AcpConfigOption[]): void {
+		const option = options.find((candidate) => candidate.id === optionId);
+		if (!option || !isRememberedAcpConfigOption(option)) return;
+		const applied = option.currentValue ?? requested;
+		if (typeof applied !== "string" && typeof applied !== "boolean") return;
+		this.deps.rememberConfigOption?.(runtime.tool.id, optionId, applied);
+	}
+
+	/** 新建会话握手后重放工具级记忆;session/load 恢复的会话不覆盖 agent 侧状态。 */
+	private async replayToolConfigDefaults(runtime: AcpAgentRuntime): Promise<void> {
+		if (runtime.loadedSession) return;
+		const defaults = this.deps.getToolConfigDefaults?.(runtime.tool.id);
+		for (const item of planAcpConfigReplay(runtime.configOptions, defaults)) {
+			try {
+				await this.enqueueConfigOption(runtime.tab.id, item.id, item.value, false);
+			} catch (error) {
+				// 选项在当前 CLI 版本已移除/值被拒:跳过,不能让记忆阻断开会话。
+				this.deps.logger?.warn("acp", `[${runtime.tool.name}] remembered config skipped: ${item.id}`, {
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+		}
 	}
 
 	async setThinking(agentId: string, _level: string): Promise<unknown> {
@@ -308,6 +346,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 			cancelling: false,
 			cancelReason: null,
 			reloading: false,
+			loadedSession: false,
 			flushTimer: null,
 			flushPending: false,
 			abortEscalateTimer: null,
@@ -343,6 +382,11 @@ export class AcpAgentManager implements SessionAgentGateway {
 			localizeCreateFailure(thrown, tool);
 			throw thrown;
 		}
+
+		// 新建会话(含 load 失败回退 session/new)重放工具级记忆:思考档/模式/权限等跨会话继承,
+		// 模型不在记忆范围(见 acpToolConfig.isRememberedAcpConfigOption)。单条失败只跳过,
+		// 不影响开会话。session/load 成功的恢复会话交给 agent 自己恢复状态。
+		await this.replayToolConfigDefaults(runtime);
 
 		this.wireConnection(runtime);
 		if (runtime.title && runtime.tab.deckSessionId) this.deps.onTitleChanged?.(runtime.tab.deckSessionId, runtime.title);

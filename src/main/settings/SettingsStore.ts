@@ -35,7 +35,7 @@ import { normalizeQuickMessages } from "../../shared/quickMessages";
 import { sanitizePiCustomPaths } from "../pi/piCustomPaths";
 import { sanitizeCustomThemeSnapshot } from "../../shared/customThemes";
 import { normalizeThemeAppearance } from "../../shared/themeSkinMigration";
-import { sanitizeAcpTools } from "../acp/acpToolConfig";
+import { sanitizeAcpToolConfigDefaults, sanitizeAcpTools } from "../acp/acpToolConfig";
 import { normalizeFontSizeMode, normalizeOptionalFontSizeMode } from "../../shared/fontSize";
 import { clampSessionTabMaxWidth, SESSION_TAB_MAX_WIDTH_DEFAULT } from "../../shared/sessionTabWidth";
 import { getAppLogger } from "../logging/sharedLogger";
@@ -327,6 +327,8 @@ Gitmoji 对应关系：
 	// ACP 总开关默认 false（opt-in，见 settings.acpEnabled 注释）；工具表默认空。
 	acpEnabled: false,
 	acpTools: [],
+	// 工具级配置记忆默认空：未记忆时新建会话保持 CLI 自己的默认值。
+	acpToolConfigDefaults: {},
 
 	// ── 扩展管理 ──
 	/** 用户手动移除的内置扩展，启动时跳过自动部署 */
@@ -615,6 +617,8 @@ export class SettingsStore {
 			this.settings.acpEnabled = parsed.acpEnabled === true;
 			// ACP 工具登记表：手改 settings.json 的脏条目在加载边界归一，不等到首次 update。
 			this.settings.acpTools = sanitizeAcpTools(parsed.acpTools);
+			// ACP 工具级配置记忆：手改 settings.json 的脏工具/脏选项在加载边界归一。
+			this.settings.acpToolConfigDefaults = sanitizeAcpToolConfigDefaults(parsed.acpToolConfigDefaults);
 			// ACP 超时口径：正整数毫秒；脏值丢弃回落代码内默认（stall 90s / turn 10min）。
 			this.settings.acpPromptStallTimeoutMs = sanitizeOptionalPositiveIntMs(parsed.acpPromptStallTimeoutMs);
 			this.settings.acpPromptTurnTimeoutMs = sanitizeOptionalPositiveIntMs(parsed.acpPromptTurnTimeoutMs);
@@ -903,6 +907,10 @@ export class SettingsStore {
 		}
 		if ("acpTools" in safePatch) {
 			safePatch.acpTools = sanitizeAcpTools(safePatch.acpTools);
+		}
+		// 工具级配置记忆来自主进程回调/渲染层，入参不可信：超长/脏值丢弃，不拒绝整表。
+		if ("acpToolConfigDefaults" in safePatch) {
+			safePatch.acpToolConfigDefaults = sanitizeAcpToolConfigDefaults(safePatch.acpToolConfigDefaults);
 		}
 		// ACP 超时口径来自渲染层/手改，入参不可信：非法值删键不落盘（保留既有合法值或回落默认），
 		// 合法值 floor 成整数——同一口径在加载边界与写入边界都归一，避免两条路径漂移。

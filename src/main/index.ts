@@ -309,6 +309,7 @@ import { isDefaultAgentTitle } from "./pi/agentUtils";
 import { CompositeAgentGateway } from "./agents/CompositeAgentGateway";
 import { AcpAgentManager } from "./acp/AcpAgentManager";
 import { AcpSessionArchive } from "./acp/AcpSessionArchive";
+import { withAcpConfigDefault } from "./acp/acpToolConfig";
 import { acpMessagePage } from "./acp/acpMessagePage";
 import { findSessionMatches } from "./sessions/sessionFindMatches";
 import { broadcastCatalogRefreshed } from "./sessions/catalogRefresh";
@@ -6663,6 +6664,15 @@ app
 			},
 			getTools: () => settingsStore.get().acpTools ?? [],
 			isEnabled: () => settingsStore.get().acpEnabled === true,
+			// 工具级配置记忆：新建会话重放；用户切换成功即写回 settings（只记思考/模式/权限，不含模型）。
+			getToolConfigDefaults: (toolId) => settingsStore.get().acpToolConfigDefaults?.[toolId],
+			rememberConfigOption: (toolId, optionId, value) => {
+				const settings = settingsStore.get();
+				// 工具已被删除/改名后不再写记忆，避免产生永不消费的孤儿条目。
+				if (!(settings.acpTools ?? []).some((tool) => tool.id === toolId)) return;
+				const next = withAcpConfigDefault(settings.acpToolConfigDefaults ?? {}, toolId, optionId, value);
+				if (next) void settingsStore.update({ acpToolConfigDefaults: next });
+			},
 			// ACP 超时口径运行时读口：每次布防/派发实时读 settings（变更后新回合生效，
 			// 不需要重启）；undefined 回落代码内默认（stall 90s / turn 10min）。
 			readAcpTimeoutSettings: () => {
