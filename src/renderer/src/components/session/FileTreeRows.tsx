@@ -101,7 +101,10 @@ const FileRow = memo(function FileRow(props: FileTreeRowProps) {
 	const typeLabel = getFileTypeLabel(node.name);
 	const rowStyle = fileRowStyle(depth);
 	// Git 着色查表：文件行取自身状态；直接父目录实色、更远祖先由档位决定洗淡。
-	const gitStatus = props.gitStatusOf?.(node.path ?? node.relativePath);
+	// 查表键必须与 git:status 资源同源：资源 path 是**项目相对路径**，而本地节点的 node.path
+	// 是绝对路径（恒存在），拿它查表永远落空、整树失色。`?? node.path` 只兜住 relativePath
+	// 缺失的历史/预览节点；活跃文件比较（node.path ?? node.relativePath）是另一条语义，不动。
+	const gitStatus = props.gitStatusOf?.(node.relativePath ?? node.path);
 	// 活跃编辑器行的选中高亮优先：不叠加着色类，避免 git 色压掉选中态。
 	const gitStatusClass = isActiveFile ? undefined : fileTreeGitStatusClass(gitStatus);
 	// 文字替代通道：颜色是唯一信号时色弱用户无从判断，title / aria-label 里带上状态名。
@@ -202,7 +205,8 @@ const DirectoryRow = memo(function DirectoryRow(props: FileTreeRowProps) {
 	);
 	const isDragOver = props.dragOverDir === nodeKey;
 	// Git 着色查表：目录行取子树聚合状态（直接父目录实色、更远祖先洗淡）。
-	const gitStatus = props.gitStatusOf?.(nodeKey);
+	// nodeKey 是树内身份键（本地节点为绝对路径），不能当查表键——git 资源是项目相对路径。
+	const gitStatus = props.gitStatusOf?.(node.relativePath ?? nodeKey);
 	const gitStatusClass = fileTreeGitStatusClass(gitStatus);
 	const gitStatusLabelKey = fileTreeGitStatusLabelKey(gitStatus?.status);
 	const gitStatusLabel = gitStatusLabelKey ? t(gitStatusLabelKey) : "";

@@ -155,7 +155,9 @@ export function mergeGitResourceGroups(groupsList: readonly GitResourceGroups[])
  *   标成未跟踪色，因为「这个目录有东西没进 git」比「有已跟踪改动」更值得提醒；
  * - 档位：直接父目录 = 实色（这一层就有变化），更远的祖先 = 洗淡（只有更深处才有变化）。
  *   与 IDEA 的「Have immediate changed children / Have changed descendants」两档同构。
- * 前提是 git 资源路径与文件树节点路径同源（都从 ProjectStore 的项目路径出发）；
+ * 前提是 git 资源路径与查询路径同源：**资源 path 是项目相对路径**（gitIpc 的 decorateResource 下发
+ * target.relativePath），所以行查询也必须传节点的 `relativePath`，不能传本地节点的绝对 `path`
+ * （传绝对路径会整树失色——查表是精确键匹配，见 tests/fileTreeGitStatus 的同源契约用例）。
  * WSL 项目的 UNC 形态不一致时只会上色失败（静默退化），不会误染。
  * 删除/重命名资源按新路径标记：文件本身已不在树上，着色落在父目录（目录确有变更，语义成立）。
  *

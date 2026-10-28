@@ -262,6 +262,20 @@ test("多仓合并：空数组不产生任何条目，原分组不被修改", ()
 	assert.equal(mergeGitResourceGroups([]).workingTree.length, 0);
 });
 
+test("同源契约：git:status 下发项目相对路径，行必须按 relativePath 查表（issue #444）", () => {
+	// 主进程 decorateResource 用 target.relativePath 下发资源；files:list 的本地节点同时带绝对
+	// path 与项目相对 relativePath（FileSystemService）。两边形态不同源就整树失色——这条用例
+	// 钉住「查表键 = 项目相对路径」这个前提，下次再改任一边的路径形态都会先红。
+	const projectRoot = "/Users/x/project";
+	const fileNode = { name: "foo.md", path: `${projectRoot}/skills/foo.md`, relativePath: "skills/foo.md", type: "file" };
+	const dirNode = { name: "skills", path: `${projectRoot}/skills`, relativePath: "skills", type: "directory" };
+	const lookup = lookupOf(groups({ workingTree: [resource("skills/foo.md", GitStatus.MODIFIED)] }), projectRoot);
+	assert.equal(hitOf(lookup, fileNode.relativePath), "modified:strong", "文件行按相对路径查表命中");
+	assert.equal(hitOf(lookup, dirNode.relativePath), "modified:strong", "目录行同样按相对路径命中（直接父目录实色）");
+	assert.equal(lookup(fileNode.path), undefined, "按绝对 node.path 查表恒未命中——0.9.8 整树失色的成因");
+	assert.equal(lookup(dirNode.path), undefined, "目录的绝对路径同样不是查表键");
+});
+
 test("查找表：空分组返回空表", () => {
 	const lookup = lookupOf(groups(), "/proj");
 	assert.equal(lookup("/proj/a.ts"), undefined);
@@ -316,10 +330,12 @@ test("接线契约：行组件把查表命中原样交给着色映射，目录�
 	// 命中对象必须整体传入：中间解构只剩 status 会把 muted 丢掉，洗淡档变成死代码（评审 P1-b）
 	const classCalls = rows.match(/fileTreeGitStatusClass\(\s*gitStatus\s*\)/g) ?? [];
 	assert.equal(classCalls.length, 2, "文件行与目录行都必须用完整命中（含 muted）取类");
-	// 查表键：本机节点用 node.path；远端节点的 path 可能缺失，缺省回落到 relativePath
-	// （远端 FileTreeNode 只有相对路径，回落到 node.path 会让远端文件树整棵失色）。
-	const lookups = rows.match(/props\.gitStatusOf\?\.\(\s*node\.path\s*\?\?\s*node\.relativePath\s*\)|props\.gitStatusOf\?\.\(\s*nodeKey\s*\)/g) ?? [];
-	assert.equal(lookups.length, 2, "两种行都按节点路径查表（本机 path / 远端回落 relativePath / 目录用 fileTreeNodeKey）");
+	// 查表键必须与 git:status 资源同源：资源 path 是**项目相对路径**（gitIpc.decorateResource），
+	// 本地节点的 node.path 是绝对路径 —— 拿它查表恒未命中，整树失色（issue #444）。
+	// relativePath 本地/远端节点都有；目录行的 nodeKey（绝对）与文件行的 node.path 都只能当兜底。
+	const lookups = rows.match(/props\.gitStatusOf\?\.\(\s*node\.relativePath\s*\?\?\s*(?:node\.path|nodeKey)\s*\)/g) ?? [];
+	assert.equal(lookups.length, 2, "两种行都必须优先按 node.relativePath 查表（git 资源用的是项目相对路径）");
+	assert.doesNotMatch(rows, /gitStatusOf\?\.\(\s*node\.path\b/, "文件行不得用绝对 node.path 查表（相对路径资源永远命中不了）");
 	assert.doesNotMatch(rows, /fileTreeGitStatusClass\(\s*\{/, "不得手工拼命中对象（会写死档位）");
 	assert.doesNotMatch(rows, /muted\s*:\s*(?:true|false)/, "档位只能来自查表结果，行组件不得写死");
 	assert.match(rows, /gitStatusOf=\{\s*props\.gitStatusOf\s*\}/, "目录递归必须透传查表函数（缺了深层节点全失色）");
