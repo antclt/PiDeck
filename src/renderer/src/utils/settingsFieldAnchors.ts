@@ -224,6 +224,12 @@ const SETTINGS_ROW_ANCHORS = [
 		keywords: ["会话标签打开方式", "预览", "固定标签", "tab 打开模式", "preview"],
 	},
 	{
+		tab: "common",
+		slug: "common-scratch-pad-scope",
+		labelKey: "settings.scratchPadScope",
+		keywords: ["草稿本", "便签", "作用域", "项目草稿", "全局草稿", "scratch pad", "scope", "draft"],
+	},
+	{
 		tab: "appearance",
 		slug: "appearance-sidebar-sticky-group-headers",
 		labelKey: "settings.sidebarStickyGroupHeaders",

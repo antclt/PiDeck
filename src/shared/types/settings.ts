@@ -75,6 +75,8 @@ export type WebNetworkAddress = {
 export type WorkspaceContentOpenMode = "split" | "maximize";
 /** 会话 Tab 打开模式：preview=单击为临时预览（发消息后自动晋升常驻），permanent=单击即常驻共存 */
 export type SessionTabOpenMode = "preview" | "permanent";
+/** 草稿本作用域：project=每个项目一份（默认，列表同时可读写全局草稿）；global=所有项目共用一份。 */
+export type ScratchPadScopeMode = "project" | "global";
 export type AppFontSizeMode = "compact" | "medium" | "large" | "xlarge";
 
 /** 更新源：atomgit = 国内 AtomGit 源（默认首选）；github = 官方 GitHub Release。 */
@@ -200,6 +202,8 @@ export type AppSettings = {
 	piInstall?: { command: string; version: string };
 	/** 会话 Tab 打开模式：preview=单击为临时预览（发消息后自动晋升常驻），permanent=单击即常驻共存 */
 	sessionTabOpenMode: SessionTabOpenMode;
+	/** 草稿本作用域：project=每个项目一份（默认）；global=所有项目共用一份。 */
+	scratchPadScope: ScratchPadScopeMode;
 	/**
 	 * 是否在首轮 agent 成功结束后，用当前 pi 模型异步生成会话标题。
 	 * 默认开启，让侧栏自动获得可读标题；会额外消耗一次模型调用和少量 token（设置说明已写明）。
@@ -1061,6 +1065,8 @@ export function createDefaultAppSettings(): AppSettings {
 		/** 提示词模板禁用列表：与 SettingsStore 默认一致，空数组 = 不启用模板白名单 */
 		disabledPrompts: [],
 		sessionTabOpenMode: "preview",
+		// 与 main SettingsStore 默认一致：草稿本按项目隔离，切项目右栏内容随之切换
+		scratchPadScope: "project",
 		// 与 main SettingsStore 默认一致：标题生成默认开启，侧栏不再全是「新会话」
 		autoSessionTitle: true,
 		// 与 main SettingsStore 默认一致：忙碌时发送默认「插入当前回合」

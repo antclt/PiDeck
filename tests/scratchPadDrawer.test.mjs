@@ -5,25 +5,31 @@ import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
 import { quickMessageHookHost } from "./helpers/quickMessageHookHost.mjs";
 
 /** 只模拟草稿存储和抽屉命令，不启动 Electron、不写真实用户草稿。 */
-function createHarness(initialPanel = null) {
+function createHarness(initialPanel = null, initialDrafts) {
 	const host = quickMessageHookHost();
 	const listeners = new Map();
 	const timers = new Map();
 	const saves = [];
 	const commands = [];
+	const listScopes = [];
 	let timerId = 0;
 	let drawer = initialPanel;
 	let collapsed = false;
-	const draft = { path: "/notes/first.md", name: "First", createdAt: 1, updatedAt: 1 };
+	const draft = { path: "/notes/first.md", name: "First", createdAt: 1, updatedAt: 1, scope: "global" };
+	const drafts = initialDrafts ?? [draft];
 	const load = createTsSandbox({
 		stubs: { react: host.react },
 		globals: {
 			window: {
 				piDesktop: {
 					scratchPad: {
-						list: async () => [draft],
+						list: async (scope) => {
+							listScopes.push(scope);
+							return drafts;
+						},
 						load: async () => ({ content: "existing note" }),
 						save: async (path, content) => saves.push({ path, content }),
+						create: async (scope) => ({ path: `/notes/${scope?.kind ?? "global"}-new.md`, name: "New", createdAt: 2, updatedAt: 2, scope: scope?.kind ?? "global" }),
 					},
 				},
 				addEventListener: (name, handler) => listeners.set(name, handler),
@@ -53,7 +59,8 @@ function createHarness(initialPanel = null) {
 		saves,
 		listeners,
 		timers,
-		render: () => host.render(() => useScratchPad({ drawer, drawerCollapsed: collapsed, openDrawerForce, closeDrawer })),
+		listScopes,
+		render: (scope = { kind: "global" }) => host.render(() => useScratchPad({ drawer, drawerCollapsed: collapsed, openDrawerForce, closeDrawer, scope })),
 		setPanel: (panel) => {
 			drawer = panel;
 		},
@@ -106,6 +113,43 @@ test("switching away from scratch pad flushes the latest content and cancels pen
 	harness.unmount();
 });
 
+test("scratch pad follows the active project and saves the previous scope before switching", async () => {
+	const harness = createHarness("scratchPad");
+	harness.render({ kind: "global" });
+	await settle();
+	let scratch = harness.render({ kind: "global" });
+	assert.equal(scratch.content, "existing note");
+	scratch.setContent("global edit");
+	scratch = harness.render({ kind: "global" });
+	assert.equal(scratch.content, "global edit");
+	assert.equal(harness.timers.size, 1);
+
+	// 切到项目作用域：先把全局草稿的未落盘内容写回原路径，再按新作用域重新装载列表。
+	harness.render({ kind: "project", projectId: "project-a" });
+	await settle();
+	assert.deepEqual(harness.listScopes.at(-1), { kind: "project", projectId: "project-a" });
+	assert.deepEqual(harness.saves.at(-1), { path: "/notes/first.md", content: "global edit" });
+	assert.equal(harness.timers.size, 0);
+	assert.equal(harness.render({ kind: "project", projectId: "project-a" }).content, "existing note");
+	harness.unmount();
+});
+
+test("typing in an empty scope creates a draft on scope switch instead of losing the input", async () => {
+	const harness = createHarness("scratchPad", []);
+	harness.render({ kind: "project", projectId: "project-a" });
+	await settle();
+	let scratch = harness.render({ kind: "project", projectId: "project-a" });
+	assert.equal(scratch.currentDraftPath, null);
+	scratch.setContent("unsaved thought");
+	scratch = harness.render({ kind: "project", projectId: "project-a" });
+	assert.equal(scratch.content, "unsaved thought");
+
+	harness.render({ kind: "global" });
+	await settle();
+	assert.deepEqual(harness.saves.at(-1), { path: "/notes/project-new.md", content: "unsaved thought" });
+	harness.unmount();
+});
+
 test("scratch pad keyboard shortcut stays global, Escape respects consumed events, and listeners clean up", () => {
 	const harness = createHarness();
 	harness.render();
@@ -128,7 +172,9 @@ test("scratch pad renders only inside DrawerSurface and is included in drawer re
 	const app = readFileSync("src/renderer/src/App.tsx", "utf8");
 	const surface = readFileSync("src/renderer/src/components/workspace/DrawerSurface.tsx", "utf8");
 	const panels = readFileSync("src/renderer/src/hooks/useWorkspacePanels.ts", "utf8");
-	assert.match(app, /useScratchPad\(workspace\)/);
+	// 作用域由 App 从设置 + 当前项目计算后注入；workspace 继续提供抽屉可见性控制。
+	assert.match(app, /useScratchPad\(\{\s*\.\.\.workspace,\s*scope: scratchPadScope\s*\}\)/);
+	assert.match(app, /settings\.scratchPadScope === "project"/);
 	assert.match(app, /<DrawerSurface\s[^>]*scratchPad=\{scratchPad\}/);
 	assert.doesNotMatch(app, /<ScratchPadOverlay/);
 	assert.match(surface, /drawer\s*===\s*"scratchPad"\s*&&\s*!drawerCollapsed/);

@@ -249,6 +249,7 @@ import type {
 	TerminalThemeId,
 	GitBranchInfo,
 	FocusTargetPayload,
+	ScratchPadScope,
 } from "../../shared/types";
 import type { TerminalDockSettings } from "./components/terminal/TerminalDock";
 import { WallpaperVideoLayer } from "./components/app/wallpaper/WallpaperVideoLayer";
@@ -892,7 +893,11 @@ export function App() {
 		showToast,
 	});
 
-	const scratchPad = useScratchPad(workspace);
+	// 草稿本作用域：项目模式按当前项目分桶（activeProjectId 未同步时用会话所属项目兜底，
+	// 与终端 owner 同口径）；没有项目时回落全局。全局模式永远只有一份。
+	const scratchPadProjectId = activeProjectId ?? currentSessionRecord?.projectId;
+	const scratchPadScope: ScratchPadScope = settings.scratchPadScope === "project" && scratchPadProjectId ? { kind: "project", projectId: scratchPadProjectId } : { kind: "global" };
+	const scratchPad = useScratchPad({ ...workspace, scope: scratchPadScope });
 	// CUA 操作审批：根级订阅主进程推送的审批请求并渲染确认弹框（事件驱动，全局唯一一份）。
 	const cuaApproval = useCuaApproval();
 	// DSH runtime 安装态同步：全进程只挂这一份（IPC 拉取 + 变更订阅 → dshRuntimeStatusAtom）。

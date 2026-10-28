@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 0ee7255e2b1e8b91ea0056096d8420e9f96c9aa9682f0d4da8049c820f385ff0（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: e6f0d7de0708eb7035d0b33f335f25bc8543c6fa13b7cc499487d9321135a1c2（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -447,6 +447,11 @@ export const zhTW: Record<TranslationKey, string> = {
 	"scratchPad.drafts": "份草稿",
 	"scratchPad.hideFileList": "隱藏檔案列表",
 	"scratchPad.showFileList": "顯示檔案列表",
+	"scratchPad.selectDraftPlaceholder": "選擇草稿",
+	"scratchPad.searchDrafts": "搜尋草稿",
+	"scratchPad.noDraftsMatch": "沒有匹配的草稿",
+	"scratchPad.groupProject": "本專案",
+	"scratchPad.groupGlobal": "全域",
 	"scratchPad.openTooltip": "開啟草稿本",
 	"app.think": "思考",
 	"app.path": "路徑",
@@ -4957,6 +4962,10 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.languageZhTW": "繁體中文",
 	"settings.languageEn": "English",
 	"settings.sessionTabOpenMode": "會話 Tab 開啟方式",
+	"settings.scratchPadScope": "草稿本作用域",
+	"settings.scratchPadScopeDesc": "專案：每個專案一份草稿，切換專案時右欄內容隨之切換；全域：所有專案共用一份。專案作用域下仍可檢視和編輯全域草稿，但看不到其他專案的草稿。",
+	"settings.scratchPadScopeProject": "專案（預設）",
+	"settings.scratchPadScopeGlobal": "全域",
 	"settings.autoSessionTitle": "自動生成會話標題",
 	"settings.autoSessionTitleDesc": "首輪 Agent 成功結束後，用當前 Pi 模型非同步生成標題；會額外消耗一次模型呼叫和少量 token，不修改主提示詞或會話訊息。關閉後需新建或重啟 Agent 才生效。",
 	"settings.sessionTabOpenModePreview": "預覽（發訊息後自動固定）",

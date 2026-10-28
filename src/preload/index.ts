@@ -195,6 +195,7 @@ import type {
 	PromptStoreSearchResult,
 	PromptStoreItem,
 	ScratchPadData,
+	ScratchPadScope,
 	SecurityConfig,
 	SendSessionPromptInput,
 	SendSessionPromptResult,
@@ -1759,8 +1760,9 @@ const api = {
 	},
 
 	scratchPad: {
-		list: () => ipcRenderer.invoke(ipcChannels.scratchPadList) as Promise<DraftMeta[]>,
-		create: () => ipcRenderer.invoke(ipcChannels.scratchPadCreate) as Promise<DraftMeta>,
+		/** 作用域缺省 = global（与旧调用方兼容）；project 会合并返回本项目 + 全局草稿。 */
+		list: (scope?: ScratchPadScope) => ipcRenderer.invoke(ipcChannels.scratchPadList, scope) as Promise<DraftMeta[]>,
+		create: (scope?: ScratchPadScope) => ipcRenderer.invoke(ipcChannels.scratchPadCreate, scope) as Promise<DraftMeta>,
 		delete: (draftPath: string) => ipcRenderer.invoke(ipcChannels.scratchPadDelete, draftPath) as Promise<void>,
 		load: (draftPath?: string) => ipcRenderer.invoke(ipcChannels.scratchPadLoad, draftPath) as Promise<ScratchPadData>,
 		save: (draftPath: string, content: string, cursorPosition: number) => ipcRenderer.invoke(ipcChannels.scratchPadSave, draftPath, content, cursorPosition) as Promise<void>,

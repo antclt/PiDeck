@@ -116,7 +116,8 @@ let previewSettings: AppSettings = {
 	disabledSkills: [],
 	/** 提示词模板禁用列表：与 SettingsStore 默认一致，预览壳不启用模板白名单 */
 	disabledPrompts: [],
-	sessionTabOpenMode: "preview", // 与 SettingsStore 默认一致：忙碌时发送默认「插入当前回合」
+	sessionTabOpenMode: "preview",
+	scratchPadScope: "project", // 与 SettingsStore 默认一致：草稿本按项目隔离
 	busySendDelivery: "steer",
 	tpsDisplayMode: "streaming",
 	// 遗留字段：快捷消息已改存独立配置文件（预览模式没有真实文件，见下方 quickMessages 预览桩）
@@ -1941,7 +1942,7 @@ export function createPreviewApi(): PiDesktopApi {
 		},
 		scratchPad: {
 			list: async () => [],
-			create: async () => ({ id: "", name: "", path: "", createdAt: 0, updatedAt: 0 }),
+			create: async (scope) => ({ id: "", name: "", path: "", createdAt: 0, updatedAt: 0, scope: scope?.kind === "project" ? "project" : "global" }),
 			delete: async () => {},
 			load: async () => ({ content: "", lastEditedAt: 0, cursorPosition: 0 }),
 			save: async () => {},

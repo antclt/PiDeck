@@ -169,6 +169,8 @@ const defaultSettings: AppSettings = {
 	startupWindowMode: "last",
 	piEnvironmentChecked: false,
 	sessionTabOpenMode: "preview",
+	// 草稿本按项目隔离：切项目时右栏草稿随之切换；「全局」为所有项目共用一份
+	scratchPadScope: "project",
 	// 侧栏分组标题栏冻结默认关闭：保持历史行为（标题随列表滚走），用户可在设置里开启
 	sidebarStickyGroupHeaders: false,
 	// 默认开启：标题由当前 pi 模型异步生成，侧栏不再全是「新会话」；
@@ -575,6 +577,8 @@ export class SettingsStore {
 			this.migrateContentWidth();
 			// 会话 Tab 最大宽度：磁盘 JSON 无类型，手工改坏（非数字/超界）时钳回合法区间。
 			this.settings.navigationMode = this.settings.navigationMode === "simple" ? "simple" : "tabs";
+			// 草稿本作用域：手改/旧 JSON 的未知值回落「项目」，避免 IPC 带着坏作用域。
+			this.settings.scratchPadScope = this.settings.scratchPadScope === "global" ? "global" : "project";
 			this.settings.sessionTabMaxWidth = clampSessionTabMaxWidth(this.settings.sessionTabMaxWidth);
 			// 兼容迁移：全局用量自动查询开关已删除（改为每个 provider 徽章/弹窗里的开关）。
 			this.migrateRemovedUsageAutoQuerySwitch();
@@ -838,6 +842,10 @@ export class SettingsStore {
 		}
 		if ("navigationMode" in safePatch && safePatch.navigationMode !== "tabs" && safePatch.navigationMode !== "simple") {
 			delete safePatch.navigationMode;
+		}
+		// 草稿本作用域只接受两个已知枚举，非法 IPC 入参丢掉、保持原设置。
+		if ("scratchPadScope" in safePatch && safePatch.scratchPadScope !== "project" && safePatch.scratchPadScope !== "global") {
+			delete safePatch.scratchPadScope;
 		}
 		// 会话状态显示位置只接受已知枚举，非法值丢掉、保持原设置（不重置用户选择）。
 		if ("sessionStatusPlacement" in safePatch && parseSessionStatusPlacement(safePatch.sessionStatusPlacement) !== safePatch.sessionStatusPlacement) {
