@@ -401,15 +401,39 @@ test("an attachment-only message is answered instead of silently dropped", async
 	await harness.bridge.stop();
 });
 
-test("a second message during a run gets a busy notice rather than queueing", async () => {
+// issue #427：忙时的策略从「丢弃」改成「排队」。旧用例钉的是丢弃行为，随本改动重写。
+test("a second message during a run is queued with an ack and runs after the first settles", async () => {
 	const harness = createHarness({ allowedUsers: ["wxid_me"], batches: [{ msgs: [userMessage({ id: 1, text: "长任务" })] }, { msgs: [userMessage({ id: 2, text: "还在吗" })] }] });
 	await harness.start();
 
-	// 第一条占住 run 槽（Agent 永远不会结束），第二条必须立刻收到「忙」而不是排进队列。
+	// 第一条占住 run 槽（Agent 永远不会结束），第二条必须收到「已排队」回执，而不是被吞。
 	await waitFor(() => harness.prompts.length === 1, "the first prompt");
 	await waitFor(() => harness.client.calls.getUpdates >= 2, "the second poll");
-	await waitFor(() => harness.client.calls.sent.length === 1, "the busy notice");
-	assert.equal(harness.prompts.length, 1, "a busy channel must not start a second run");
+	await waitFor(() => harness.client.calls.sent.length === 1, "the queued ack");
+	assert.ok(harness.client.calls.sent[0].text.includes("已排队第 1 位"), "第二条必须拿到排队回执");
+	assert.equal(harness.prompts.length, 1, "排队中的消息不得立刻开跑");
+
+	// 第一轮收口：先回结果，队首随后自动出队开跑。
+	harness.messages.set("a1", [{ role: "assistant", text: "长任务完成" }]);
+	harness.emitAgentEvent("a1", { type: "agent_end" });
+	await waitFor(() => harness.client.calls.sent.some((s) => s.text === "长任务完成"), "the first result");
+	await waitFor(() => harness.prompts.length === 2, "the queued prompt to run after settle");
+
+	// 第二轮也要收口，否则 300s 等待器定时器会拖住测试进程。
+	harness.emitAgentEvent("a1", { type: "agent_end" });
+	await waitFor(() => harness.activeWaiters() === 0, "the second waiter to unsubscribe");
+	await harness.bridge.stop();
+});
+
+test("/stop aborts the run and clears the pending queue instead of running it", async () => {
+	const harness = createHarness({ allowedUsers: ["wxid_me"], batches: [{ msgs: [userMessage({ id: 1, text: "长任务" })] }, { msgs: [userMessage({ id: 2, text: "第二" })] }, { msgs: [userMessage({ id: 3, text: "/stop" })] }] });
+	await harness.start();
+
+	await waitFor(() => harness.prompts.length === 1, "the first prompt");
+	await waitFor(() => harness.client.calls.sent.length >= 1, "the queued ack");
+	await waitFor(() => harness.client.calls.sent.some((s) => s.text.includes("清空排队中的 1 条")), "the stop notice with cleared count");
+	await new Promise((resolve) => setTimeout(resolve, 300));
+	assert.equal(harness.prompts.length, 1, "/stop 必须清空队列，排队的消息不得开跑");
 	await harness.finishPendingRun();
 });
 

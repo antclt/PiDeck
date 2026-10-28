@@ -51,6 +51,11 @@ export type WeChatBridgeDeps = {
 
 /** 已处理消息 ID 的环形缓冲上限。微信侧重投概率低，但游标回退会重放，必须有幂等网。 */
 const DEDUP_MAX = 200;
+/**
+ * 忙时排队上限（微信 1:1 单会话）。
+ * 超限必须明确回「排满」而不是静默丢弃：用户连发几条长任务时，丢掉的往往是最新那条。
+ */
+const PENDING_QUEUE_MAX = 20;
 /** 单次 run 的上限。飞书同值：超时不是失败，而是转交「迟到投递」。 */
 const RUN_TIMEOUT_MS = 300_000;
 /** 回合收口后等落盘/尾部 text_delta 收尾，避免回信缺最后一段（飞书同样 800ms）。 */
@@ -86,8 +91,10 @@ export class WeChatBridge {
 	private readonly seenMessages: number[] = [];
 	private readonly seenMessageSet = new Set<number>();
 
-	/** 当前占着会话的 run（微信 1:1，最多一个）。非空时新消息只回「忙」。 */
+	/** 当前占着会话的 run（微信 1:1，最多一个）。非空时新消息进 pendingQueue 排队，不再直接丢弃。 */
 	private activeRun: { chatId: string; contextToken: string; agentId?: string; startedAt: number } | null = null;
+	/** 忙时排队的消息（FIFO）：上一轮收尾后自动出队继续跑，/stop 或断开时清空。 */
+	private readonly pendingQueue: Array<{ chatId: string; contextToken: string; text: string }> = [];
 	/**
 	 * 超时后仍挂着等待投递结果的 run（按 sessionId）。收口事件由等待器给出，
 	 * 不再需要 endedAgents/runWaiters 那套「事件早于注册」的兜底表——等待器现在
@@ -167,6 +174,8 @@ export class WeChatBridge {
 			}
 		}
 		this.activeRun = null;
+		// 断连即作废队列：停机后没人会再 drain 它，留着只会在下次启动时误跑旧消息。
+		this.pendingQueue.length = 0;
 		this.lateRuns.clear();
 		this.typingTickets.clear();
 		this.setStatus({ status: "disconnected", account: getPublicAccount(), activeBindings: loadBindings().length });
@@ -200,12 +209,14 @@ export class WeChatBridge {
 			try {
 				const { msgs, cursor } = await client.getUpdates(session, session.cursor);
 				consecutiveFailures = 0;
+				// 先分诊再落盘：分诊抛错时游标不动，下一轮会重投（message_id 幂等网兜重复）。
+				// 反过来先落盘再分诊的话，一次异常就让这批消息永久跳过——服务端不会重投。
+				for (const message of msgs) {
+					this.handleIncoming(message);
+				}
 				if (cursor && cursor !== session.cursor) {
 					setCursor(cursor);
 					session.cursor = cursor;
-				}
-				for (const message of msgs) {
-					this.handleIncoming(message);
 				}
 			} catch (error) {
 				if (this.stopping) return;
@@ -268,13 +279,50 @@ export class WeChatBridge {
 		}
 
 		if (this.activeRun) {
-			this.sendSafe(chatId, contextToken, this.t("run.busy"));
+			this.enqueuePending(chatId, contextToken, text);
 			return;
 		}
-		this.activeRun = { chatId, contextToken, startedAt: Date.now() };
-		void this.runAgent(chatId, contextToken, text).catch((error) => {
-			this.deps.logger?.("error", "微信任务执行失败", error instanceof Error ? error.message : String(error));
-		});
+		this.startRun(chatId, contextToken, text);
+	}
+
+	/**
+	 * 起一轮 run，并在它收尾后放出队列里的下一条。
+	 *
+	 * finally 只在 activeRun 仍是本轮对象时清槽：/stop 之后用户可能已经发来新消息并占了槽，
+	 * 无条件清空会误伤那一轮（表现为两条 run 并行、上下文互相踩）。
+	 */
+	private startRun(chatId: string, contextToken: string, text: string): void {
+		const run = { chatId, contextToken, startedAt: Date.now() };
+		this.activeRun = run;
+		void this.runAgent(chatId, contextToken, text)
+			.catch((error) => {
+				this.deps.logger?.("error", "微信任务执行失败", error instanceof Error ? error.message : String(error));
+			})
+			.finally(() => {
+				if (this.activeRun === run) this.activeRun = null;
+				this.drainPendingQueue();
+			});
+	}
+
+	/**
+	 * 忙时入队并回执「第 N 位」；排满则明确告诉用户没排上。
+	 * 旧实现回一句「正在处理上一条」就把消息吞了，用户以为发了却没跑。
+	 */
+	private enqueuePending(chatId: string, contextToken: string, text: string): void {
+		if (this.pendingQueue.length >= PENDING_QUEUE_MAX) {
+			void this.sendSafe(chatId, contextToken, this.t("run.queueFull", { limit: PENDING_QUEUE_MAX }));
+			return;
+		}
+		this.pendingQueue.push({ chatId, contextToken, text });
+		void this.sendSafe(chatId, contextToken, this.t("run.queued", { position: this.pendingQueue.length }));
+	}
+
+	/** 上一轮收尾后放行队首；仍有 run 在跑或已停机时什么都不做。 */
+	private drainPendingQueue(): void {
+		if (this.stopping || this.activeRun) return;
+		const next = this.pendingQueue.shift();
+		if (!next) return;
+		this.startRun(next.chatId, next.contextToken, next.text);
 	}
 
 	/**
@@ -578,7 +626,9 @@ export class WeChatBridge {
 				this.activeRun = null;
 				// 取消可能挂着的超时补发：用户已经停掉的活不该在收口后再回一条。
 				this.lateRuns.delete(binding.sessionId);
-				await this.sendSafe(chatId, contextToken, this.t("run.stopped"));
+				// 排队中的消息一并作废：/stop 的语义是「停下来」，不是「接着跑下一条」。
+				const cleared = this.pendingQueue.splice(0).length;
+				await this.sendSafe(chatId, contextToken, cleared > 0 ? this.t("run.stoppedWithQueue", { count: cleared }) : this.t("run.stopped"));
 				return;
 			}
 			case "/status": {
@@ -589,16 +639,20 @@ export class WeChatBridge {
 				}
 				const state = await this.deps.runtimeBindings.getRuntimeState(binding.sessionId);
 				const model = state?.modelName ?? state?.modelId ?? binding.modelId ?? "-";
-				await this.sendSafe(
-					chatId,
-					contextToken,
-					this.t("session.status", {
-						id: binding.sessionId.slice(0, 8),
-						workspace: binding.workspaceId || this.projectName(binding.workspaceId),
-						model,
-						state: this.activeRun ? "running" : "idle",
-					}),
-				);
+				// 「桥接锁」与「后端真在跑」是两件事：锁被占但后端已空闲 = 上一轮没收口就解锁失败，
+				// 正是用户反馈「/status 显示 running 但桌面端已经回完了」的现场，必须分开报。
+				const backendRunning = state?.isStreaming === true || state?.isTurnActive === true;
+				const stateLabel = this.activeRun ? (backendRunning ? this.t("session.stateRunning") : this.t("session.stateBridgeOnly")) : backendRunning ? this.t("session.stateBackendOnly") : this.t("session.stateIdle");
+				const queued = this.pendingQueue.length;
+				// 排队条数只在非空时追加，避免空闲时多一行噪音。
+				const queuedLine = queued > 0 ? "\n" + this.t("session.queued", { count: queued }) : "";
+				const statusText = this.t("session.status", {
+					id: binding.sessionId.slice(0, 8),
+					workspace: binding.workspaceId || this.projectName(binding.workspaceId),
+					model,
+					state: stateLabel,
+				});
+				await this.sendSafe(chatId, contextToken, statusText + queuedLine);
 				return;
 			}
 			case "/model": {

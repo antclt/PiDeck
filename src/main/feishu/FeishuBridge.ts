@@ -32,6 +32,11 @@ export type { SessionRuntimeBindingGateway };
 
 // ===== 常量 =====
 const DEDUP_MAX = 200;
+/**
+ * 每个 chat 的忙时排队上限。
+ * 超限必须明确回「排满」，不能沿用旧实现的「静默跳过」——用户连发几条时丢的往往是最新那条。
+ */
+const PENDING_QUEUE_MAX = 20;
 const GROUP_CACHE_TTL = 3600_000;
 
 /** 飞书端待回答的 ask/confirm 请求（pi 发 extension_ui_request 后阻塞等待，必须有人回答）。 */
@@ -80,8 +85,12 @@ export class FeishuBridge {
 
 	private recentMessageIds = new Set<string>();
 	private recentEventIds = new Set<string>();
-	private recentContent = new Map<string, number>();
 	private processingChats = new Set<string>();
+	/**
+	 * 忙时排队的入站事件（按 chatId FIFO，队列里存原始事件对象）。
+	 * 与桌面端 busySendDelivery 的排队语义对齐：上一轮收尾后自动重放，不再直接丢弃。
+	 */
+	private pendingMessageQueues = new Map<string, Array<Record<string, unknown>>>();
 	/** 用户发了文件但还没说需求，暂存着等文字指令 */
 	private pendingAttachments = new Map<string, { images: FeishuImageAttachment[]; files: FeishuFileAttachment[] }>();
 
@@ -386,8 +395,9 @@ export class FeishuBridge {
 		this.feishuSessions.clear();
 		this.recentMessageIds.clear();
 		this.recentEventIds.clear();
-		this.recentContent.clear();
 		this.processingChats.clear();
+		// 断开即作废队列：没人会再 drain 它，留着只会在下次连接时误跑旧消息。
+		this.pendingMessageQueues.clear();
 		this.lastUserMessageId.clear();
 		this.syncedFingerprints.clear();
 		this.groupInfoCache.clear();
@@ -513,7 +523,8 @@ export class FeishuBridge {
 		}
 
 		if (this.processingChats.has(chatId)) {
-			log(`[飞书 Bridge] 跳过重入消息: ${chatId}`);
+			// 忙时排队而不是丢弃：旧实现只写一行日志就 return，用户在群里完全没反馈。
+			this.enqueuePendingMessage(chatId, data);
 			return;
 		}
 		this.processingChats.add(chatId);
@@ -667,17 +678,8 @@ export class FeishuBridge {
 
 			const msgCtx: FeishuMessageContext = { chatId, senderOpenId: userId, senderName, messageId, chatType: chatType as "p2p" | "group", groupName };
 
-			const dedupParts = [chatId, userId, text];
-			if (imageAttachments.length > 0) dedupParts.push("img", ...imageAttachments.map((a) => a.imageKey));
-			if (fileAttachments.length > 0) dedupParts.push("file", ...fileAttachments.map((f) => f.fileKey));
-			const contentKey = dedupParts.join("\u0000");
-			const lastTime = this.recentContent.get(contentKey);
-			if (lastTime && Date.now() - lastTime <= 5000) {
-				log(`[飞书 Bridge] 重复内容已跳过: ${text.slice(0, 50)}`);
-				return;
-			}
-			this.recentContent.set(contentKey, Date.now());
-			if (this.recentContent.size > 2000) this.recentContent.delete(this.recentContent.keys().next().value as string);
+			// 幂等只认平台投递身份（event_id / message_id，见 handleMessage 开头）：
+			// 5s 同文本去重会吞掉用户主动连发的两句「在吗」，重投场景已由 id 幂等覆盖。
 
 			log(`[飞书 Bridge] 准备调用 Agent: ${chatId}, "${text.slice(0, 60)}", images=${imageAttachments.length}`);
 
@@ -688,7 +690,44 @@ export class FeishuBridge {
 			await this.runAgent(msgCtx, text, imageAttachments, fileAttachments);
 		} finally {
 			this.processingChats.delete(chatId);
+			this.drainPendingMessageQueue(chatId);
 		}
+	}
+
+	/** 忙时把原始事件按 chatId 排队并回执「第 N 位」；排满则明确告诉用户没排上。 */
+	private enqueuePendingMessage(chatId: string, event: Record<string, unknown>): void {
+		const queue = this.pendingMessageQueues.get(chatId) ?? [];
+		if (queue.length >= PENDING_QUEUE_MAX) {
+			void this.sendSmartMessage(chatId, feishuT(this.locale, "queue.full", { limit: PENDING_QUEUE_MAX })).catch(() => {});
+			return;
+		}
+		queue.push(event);
+		this.pendingMessageQueues.set(chatId, queue);
+		log(`[飞书 Bridge] 忙时排队: ${chatId.slice(0, 8)} (第 ${queue.length} 位)`);
+		void this.sendSmartMessage(chatId, feishuT(this.locale, "queue.accepted", { position: queue.length })).catch(() => {});
+	}
+
+	/**
+	 * 上一轮收尾后重放队首。
+	 *
+	 * 重放前必须撤销这条消息的幂等记录：event_id/message_id 在入队前就已经记账，
+	 * 不撤销会被 handleMessage 当成平台重投直接丢掉（用户看到的就是「排队后没反应」）。
+	 */
+	private drainPendingMessageQueue(chatId: string): void {
+		if (this.processingChats.has(chatId)) return;
+		const queue = this.pendingMessageQueues.get(chatId);
+		const next = queue?.shift();
+		if (!queue || !next) {
+			this.pendingMessageQueues.delete(chatId);
+			return;
+		}
+		if (queue.length === 0) this.pendingMessageQueues.delete(chatId);
+		const eventId = next.event_id as string | undefined;
+		if (eventId) this.recentEventIds.delete(eventId);
+		const messageId = (next.message as { message_id?: string } | undefined)?.message_id;
+		if (messageId) this.recentMessageIds.delete(messageId);
+		log(`[飞书 Bridge] 排队消息出队: ${chatId.slice(0, 8)}`);
+		void this.handleMessage(next).catch((error) => logErr("[飞书 Bridge] 排队消息重放失败:", error));
 	}
 
 	// ===== 命令处理 =====
@@ -1574,6 +1613,9 @@ export class FeishuBridge {
 	}
 
 	private async handleStopCommand(ctx: FeishuMessageContext): Promise<void> {
+		// /stop 的语义是「停下来」：排队中的后续消息一并作废，不能 stop 完接着跑下一条。
+		const cleared = this.pendingMessageQueues.get(ctx.chatId)?.length ?? 0;
+		this.pendingMessageQueues.delete(ctx.chatId);
 		const binding = this.chatBindings.get(ctx.chatId);
 		if (!binding) {
 			await this.sendSmartMessage(ctx.chatId, feishuT(this.locale, "session.notBound"));
@@ -1599,15 +1641,24 @@ export class FeishuBridge {
 		}
 
 		await this.runtimeBindings.abortRuntime(binding.sessionId);
-		await this.sendSmartMessage(ctx.chatId, feishuT(this.locale, "session.stopped"));
+		await this.sendSmartMessage(ctx.chatId, cleared > 0 ? feishuT(this.locale, "session.stoppedWithQueue", { count: cleared }) : feishuT(this.locale, "session.stopped"));
 	}
 
 	private async handleStatusCommand(ctx: FeishuMessageContext): Promise<void> {
 		const binding = this.chatBindings.get(ctx.chatId);
 		const statusLabel = feishuT(this.locale, `status.${this.status.status}` as "status.disconnected" | "status.connecting" | "status.connected" | "status.error");
+		// 「桥接占用」与「后端真在跑」分开报：锁被占但后端已空闲 = 上一轮没收口就解锁失败，
+		// 用户反馈的「/status 显示 running 但桌面端已回完」就是这种现场，方便确诊。
+		const runtime = binding ? await this.runtimeBindings.getRuntimeState(binding.sessionId).catch(() => undefined) : undefined;
+		const backendRunning = runtime?.isStreaming === true || runtime?.isTurnActive === true;
+		const bridgeBusy = this.processingChats.has(ctx.chatId);
+		const runState = bridgeBusy ? (backendRunning ? feishuT(this.locale, "status.runRunning") : feishuT(this.locale, "status.runBridgeOnly")) : backendRunning ? feishuT(this.locale, "status.runBackendOnly") : feishuT(this.locale, "status.runIdle");
+		const queued = this.pendingMessageQueues.get(ctx.chatId)?.length ?? 0;
 		const lines = [
 			feishuT(this.locale, "status.heading"),
 			feishuT(this.locale, "status.status", { status: statusLabel }),
+			feishuT(this.locale, "status.run", { state: runState }),
+			...(queued > 0 ? [feishuT(this.locale, "status.queued", { count: queued })] : []),
 			feishuT(this.locale, "status.bindings", { count: this.chatBindings.size }),
 			binding ? feishuT(this.locale, "status.session", { id: binding.sessionId.slice(0, 8) }) : feishuT(this.locale, "status.sessionUnbound"),
 		];
