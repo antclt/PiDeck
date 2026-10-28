@@ -556,7 +556,7 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 const AppearanceThemePicker = memo(function AppearanceThemePicker(props: { value: AppSkinId; onPick: (id: AppSkinId) => void }) {
 	const { value, onPick } = props;
 	return (
-		<div className="grid w-full grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-6" role="radiogroup" aria-label={t("settings.accent")}>
+		<div className="grid w-full grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-4" role="radiogroup" aria-label={t("settings.accent")}>
 			{SKIN_PRESETS.map((preset) => {
 				const selected = preset.id === value;
 				const surface = preset.previewSurfaces;

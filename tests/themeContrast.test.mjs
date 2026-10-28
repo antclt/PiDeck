@@ -119,7 +119,7 @@ const DARK = { ...LIGHT, ...extractBlock(':root[data-theme="dark"]') };
 // accent 只覆盖 accent 族 token、appearance 只覆盖面色/灰阶——两轴交叠组合的 token/面
 // 配对已由这 20 块成对覆盖（跨轴组合不产生新配对），不展开 60 组全叉积。
 const ACCENTS = ["green", "blue", "purple", "amber", "rose"];
-const APPEARANCES = ["fresh-green", "graphite", "sea-blue", "warm-beige", "terminal"];
+const APPEARANCES = ["fresh-green", "graphite", "sea-blue", "warm-beige", "terminal", "glass", "liquid-glass"];
 const PALETTES = [
 	{ label: "浅色", tokens: LIGHT },
 	...ACCENTS.map((a) => ({ label: `浅色+${a}`, tokens: { ...LIGHT, ...extractBlock(`:root[data-accent="${a}"]`) } })),

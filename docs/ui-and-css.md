@@ -60,6 +60,11 @@ Markdown 渲染（streamdown）的颜色一律走 `--color-md-*` 语义 token，
 - 内置 `terminal` 皮肤是 pi TUI 主题的**成套移植**（不是只借 md 色）：面色取 TUI `pageBg/cardBg`、文字取 `text/muted/dim`、边框取 `border/borderAccent`、气泡底色取 `userMessageBg`、`--font-family-base` 直接换成等宽（整屏等宽）、`--radius-*` 全归零成方框，再加 `terminalSkin.css` 的 `⏺`（助手轮）/ `❯`（用户消息）标记、表头大写标签、代码块头部等宽。它同时是 `--color-md-*` 的第一个实际消费者，可当新增皮肤的模板。
   移植时的硬约束：**状态语义色（`--color-info`/`--color-warning`/`--color-danger`/`--color-success` 及其 soft/strong）不许被皮肤覆盖**（状态灯跨主题恒定，守卫 `tests/appearanceThemes.test.mjs`），皮肤只能改装饰色（面/字/边框/md/代码/chip）。
 - 皮肤专属的形状 chrome 放 `styles/terminalSkin.css`（`@import … layer(utilities)` 排在 `streamdownChrome.css` 之后，才能压过 Tailwind 布局 utility），色值仍在 `foundation.css` 皮肤块里。
+- 内置 `glass`（毛玻璃）/ `liquid-glass`（液态玻璃）是**半透明玻璃**皮肤：面色 token 直接带 alpha（`rgba()`），靠 `--app-glass-canvas` 的光雾画布 + `glassSkin.css` 的 blur 出玻璃感。三条硬约束：
+  1. **画布层**：`body::before` 已被壁纸占用，玻璃画布走 `body::after`（同为 `z-index:0`、后绘制，仍在 `#root{z-index:1}` 之下；开启壁纸时让位）。`--app-glass-canvas` / `--shadow-*` / `--radius-*` 的覆盖必须写在 `foundation.css`（未分层）——`glassSkin.css` 被 `layer(utilities)` 包裹，压不过 `:root` 的未分层声明。
+  2. **组件透明化**：`.wechat-shell`/`.simple-shell` 带 `bg-bg-app` 实底，必须显式 `background: transparent` 才透得出画布；贴边条（`session-tabs-bar`/`chat-header`/`drawer-activity-rail`/`window-controls`）同步透明，否则与半透明面板叠成「双层磨砂带」（同壁纸模式的处理）。
+  3. **对比度口径**：`tests/themeContrast.test.mjs` 的 `parseColor` 忽略 alpha，面 token 的 RGB 要写成「叠在画布上合成后的观感色」；改面色后需另按 alpha 叠到画布渐变的极端色（最亮/最暗角）重算一遍，否则测试算的不是用户看到的颜色。
+  另外：blur 只挂小体积浮层（侧栏 + dialog/popover/tooltip/copy-menu），不挂 `.chat-pane` 长列表（每帧滚动重算模糊）；玻璃皮肤**不覆盖** `--color-accent`，accent 交给 `data-accent` 块（皮肤块写会被暗色 accent 块的特异性压过）。
 - 新增皮肤必须带齐 16 个必需 token（面色/灰阶）+ 亮暗两块；守卫：`tests/appearanceThemes.test.mjs`（id 列表与 token 完整性）、`tests/themeContrast.test.mjs`（把皮肤加进 `APPEARANCES`，按 WCAG 校验正文/md 文字对）。
 - 用户侧可定制范围由 `src/shared/customThemes.ts` 的 `CUSTOM_THEME_TOKEN_GROUPS` 决定（颜色值必须是 `#hex`/`rgb()`/`hsl()`/`oklch()` 静态形式）；`markdown` 组让自定义主题包也能改标题/链接/行内码/引用/列表符/分割线/加粗斜体删除线/表格/任务勾选/图片边框颜色，`font` 组让主题包改字体，指南页由 groups 自动生成。
 - **字体 token**：`--font-family-base` / `--font-family-mono` / `--font-family-md`，值走独立白名单 `FONT_VALUE_PATTERN`（字母/数字/空格/逗号/引号/连字符/下划线/点，≤120 字符，排除 `;(){}:/` 等注入面），内部快照键是 `font-family-*`（不是 `--color-*`），注入时由 `customThemeCssVar()` 拼回 `--font-family-*`。

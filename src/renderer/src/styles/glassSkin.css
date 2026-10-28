@@ -1,0 +1,118 @@
+/*
+ * 毛玻璃 / 液态玻璃皮肤（data-appearance="glass" / "liquid-glass"）专属 chrome。
+ *
+ * 为什么单独成文件、并入 utilities 层且排在 streamdownChrome.css 之后：
+ * 这些规则要压过 Tailwind 的 bg-* / rounded-* / backdrop-* utility，legacy 层压不住；
+ * 又全部带 :root[data-appearance="…"] 前缀，写进通用文件会让其它皮肤读一堆用不上的选择器。
+ * 色值仍在 foundation.css 的皮肤块里（未分层，见下方「层优先级」注记），这里只管形状与模糊。
+ *
+ * 玻璃观感的三层（缺一层就会「像没渲染完」）：
+ *   1) 画布：body::after 的柔和光雾渐变（--app-glass-canvas，只有这两个皮肤定义）；
+ *   2) 面：皮肤块的面色 token 带 alpha，只让画布透上来、不透下层正文；
+ *   3) 质感：backdrop-filter 模糊 + 边缘 inset 高光 + 柔和大扩散阴影。
+ *
+ * 只给侧栏与浮层挂 blur，不给聊天区：聊天区背后是同一张柔和画布，再叠一层大面积
+ * backdrop-filter 只会让长列表滚动每帧重算模糊（壁纸模式同样只挂小体积浮层，见 foundation.css）。
+ */
+
+/* 0) 层优先级提醒：--app-glass-canvas / --shadow-* 的覆盖写在 foundation.css 的皮肤块里
+   （未分层规则优先于本文件的 layer(utilities)，写在下面会被静默压掉）。 */
+
+/* 1) 画布承载层：body::before 被壁纸占用（z-index 0），::after 同层后绘制 →
+   盖住壁纸但仍在 #root（z-index 1）之下。用户开了自定义背景图时让位给壁纸机制
+   （壁纸自带半透明面，玻璃皮肤的 blur 依然生效）。 */
+:root[data-appearance="glass"]:not([data-bg-image="on"]) body::after,
+:root[data-appearance="liquid-glass"]:not([data-bg-image="on"]) body::after {
+	content: "";
+	position: fixed;
+	inset: 0;
+	z-index: 0;
+	pointer-events: none;
+	background-image: var(--app-glass-canvas, none);
+	background-size: cover;
+	background-position: center;
+	background-attachment: fixed;
+}
+
+/* 2) 根壳透明：AppShell 主容器带 bg-bg-app（不透明应用底色），会把画布整块盖掉。 */
+:root[data-appearance="glass"] .wechat-shell,
+:root[data-appearance="glass"] .simple-shell,
+:root[data-appearance="liquid-glass"] .wechat-shell,
+:root[data-appearance="liquid-glass"] .simple-shell {
+	background-color: transparent;
+}
+
+/* 3) 侧栏：毛玻璃的主舞台——模糊背后的画布光斑，再补一道内边缘高光当玻璃厚度。 */
+:root[data-appearance="glass"] .chat-list-pane,
+:root[data-appearance="liquid-glass"] .chat-list-pane {
+	backdrop-filter: blur(24px) saturate(1.45);
+	-webkit-backdrop-filter: blur(24px) saturate(1.45);
+	box-shadow: inset -1px 0 0 rgb(255 255 255 / 0.45);
+}
+:root[data-theme="dark"][data-appearance="glass"] .chat-list-pane,
+:root[data-theme="dark"][data-appearance="liquid-glass"] .chat-list-pane {
+	box-shadow: inset -1px 0 0 rgb(255 255 255 / 0.06);
+}
+
+/* 4) 浮层：弹窗/浮标/复制菜单同档模糊，避免「底半透明但内容锐利」的割裂观感。 */
+:root[data-appearance="glass"] [data-slot="dialog-content"],
+:root[data-appearance="glass"] .widget-popover,
+:root[data-appearance="glass"] .ctx-detail-tooltip,
+:root[data-appearance="glass"] .copy-menu-popover,
+:root[data-appearance="liquid-glass"] [data-slot="dialog-content"],
+:root[data-appearance="liquid-glass"] .widget-popover,
+:root[data-appearance="liquid-glass"] .ctx-detail-tooltip,
+:root[data-appearance="liquid-glass"] .copy-menu-popover {
+	backdrop-filter: blur(28px) saturate(1.6);
+	-webkit-backdrop-filter: blur(28px) saturate(1.6);
+}
+
+/* 5) 液态玻璃：折射感来自「边缘双向高光 + 更大更散的外阴影」，不再是纯色描边。
+   只覆写可控的容器（侧栏/气泡/输入卡片）：浮层的 box-shadow 由 --shadow-popover 等
+   token 统一驱动，直接在 foundation 的皮肤块里调柔更安全。 */
+:root[data-appearance="liquid-glass"] .chat-list-pane {
+	box-shadow:
+		inset 0 1px 0 rgb(255 255 255 / 0.6),
+		inset 0 -1px 0 rgb(255 255 255 / 0.22),
+		18px 0 50px -30px rgb(28 16 40 / 0.28);
+}
+:root[data-theme="dark"][data-appearance="liquid-glass"] .chat-list-pane {
+	box-shadow:
+		inset 0 1px 0 rgb(255 255 255 / 0.16),
+		inset 0 -1px 0 rgb(255 255 255 / 0.06),
+		18px 0 50px -30px rgb(0 0 0 / 0.6);
+}
+
+/* 6) 输入卡片与用户气泡是用户视线最常停留的「玻璃片」，各补一道顶边高光。
+   圆角跟随皮肤块的 --radius-* 档位，不再单独 hardcode；外阴影沿用原 token，
+   避免把 legacy 层的 --shadow-composer-lifted 一并盖掉（气泡原本无外阴影，留给 token 决定）。 */
+:root[data-appearance="glass"] .composer-box,
+:root[data-appearance="liquid-glass"] .composer-box {
+	box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.5), var(--shadow-composer-lifted);
+}
+:root[data-theme="dark"][data-appearance="glass"] .composer-box,
+:root[data-theme="dark"][data-appearance="liquid-glass"] .composer-box {
+	box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), var(--shadow-composer-lifted);
+}
+:root[data-appearance="glass"] .user-turn-bubble,
+:root[data-appearance="liquid-glass"] .user-turn-bubble {
+	box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.45);
+}
+:root[data-theme="dark"][data-appearance="glass"] .user-turn-bubble,
+:root[data-theme="dark"][data-appearance="liquid-glass"] .user-turn-bubble {
+	box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1);
+}
+
+/* 7) 贴边条（Tab 栏 / 会话头 / 抽屉侧条 / 窗口控件）：与壁纸模式同一个道理——
+   它们用 bg-background(/80) 叠在已经半透明的面板上，会形成一条「双层半透明」磨砂带；
+   玻璃皮肤下直接略去底色，靠面板自身的边缘高光与边框分界。 */
+:root[data-appearance="glass"] .session-tabs-bar,
+:root[data-appearance="glass"] .chat-header,
+:root[data-appearance="glass"] .drawer-activity-rail,
+:root[data-appearance="glass"] .window-controls,
+:root[data-appearance="liquid-glass"] .session-tabs-bar,
+:root[data-appearance="liquid-glass"] .chat-header,
+:root[data-appearance="liquid-glass"] .drawer-activity-rail,
+:root[data-appearance="liquid-glass"] .window-controls {
+	background: transparent;
+}

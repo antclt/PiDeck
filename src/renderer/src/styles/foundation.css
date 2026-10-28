@@ -1041,6 +1041,277 @@
   --radius-lg: 0px;
   --radius-xl: 0px;
 }
+/* 毛玻璃 / 液态玻璃：成套「半透明表面」皮肤。
+   玻璃观感 = 三件事配合，缺一不可：
+   1. 面色 token 带 alpha（下表）——只让画布的光雾透上来，不透出下层正文；
+   2. 画布：`--app-glass-canvas` 的柔和光雾渐变，由 glassSkin.css 写到 body::after
+      （默认 none，未选玻璃皮肤时零影响；用户开了自定义背景图时让位给壁纸）；
+   3. 形状与模糊：backdrop-filter / 边缘高光 / 外阴影全在 glassSkin.css。
+   透明度取「记录的 RGB ≈ 合成后的观感色」写法：对比度守卫（tests/themeContrast.test.mjs）
+   按不透明口径解析 rgba，所以每个面写成合成值才能让守卫算的就是用户看到的颜色。
+   玻璃皮肤不改 --color-accent（交给 data-accent 块，避免与暗色 accent 块的特异性打架）。 */
+:root[data-appearance="glass"] {
+  --color-bg-app: #eef3fa;
+  --color-bg-page: rgba(250, 252, 255, 0.7);
+  --color-bg-page-raised: rgba(252, 253, 255, 0.84);
+  --color-bg-sidebar: rgba(248, 251, 254, 0.62);
+  --color-bg-panel: rgba(252, 253, 255, 0.72);
+  --color-bg-popover: rgba(252, 253, 255, 0.9);
+  --color-bg-input: rgba(255, 255, 255, 0.66);
+  --color-bg-muted: rgba(238, 243, 249, 0.76);
+  --color-bg-hover: rgba(255, 255, 255, 0.8);
+  --color-bg-active: rgba(214, 229, 247, 0.86);
+  --color-text-primary: #101a2b;
+  --color-text-secondary: #46566b;
+  --color-text-tertiary: #55667c;
+  --color-text-faint: #7d8ea3;
+  --color-text-inverse: #f7fafd;
+  --color-border-subtle: #dde5ef;
+  --color-border-default: #cdd9e7;
+  --color-border-strong: #b3c4d8;
+  --color-chat-card-bg: rgba(252, 253, 255, 0.7);
+  --color-chat-muted-bg: rgba(240, 245, 251, 0.72);
+  --color-chat-control-bg: rgba(252, 253, 255, 0.8);
+  --color-chat-table-bg: rgba(248, 251, 254, 0.66);
+  --color-chat-bubble-bg: rgba(219, 233, 251, 0.8);
+  --color-chat-link: #2563eb;
+
+  --color-thinking: #6b7c92;
+  --color-tool: #2563eb;
+  --color-chip-file: #1a66c2;
+  --color-chip-skill: #7c3aed;
+  --color-chip-session: #0f766e;
+  --color-code-bg: rgba(243, 247, 252, 0.85);
+  --color-code-text: #101a2b;
+  --color-md-heading: #1e4f9c;
+  --color-md-link: #2563eb;
+  --color-md-code: #6d4bc4;
+  --color-md-quote: #4a5b70;
+  --color-md-quote-border: #b3c4d8;
+  --color-md-list-bullet: #2563eb;
+  --color-md-hr: #cdd9e7;
+  --color-md-strong: #0b1424;
+  --color-md-em: #3d4d61;
+  --color-md-del: #55667c;
+  --color-md-inline-code-bg: rgba(235, 242, 250, 0.9);
+  --color-md-frame: #cdd9e7;
+  --color-md-table-border: #dde5ef;
+  --color-md-table-head-bg: rgba(233, 240, 249, 0.85);
+  --color-md-table-head-text: #1e4f9c;
+  --color-md-task-accent: #2563eb;
+  --color-md-image-border: rgba(205, 217, 231, 0.9);
+  /* 画布：柔和蓝绿紫光雾。半透明面色透出它才有「磨砂」观感（承载层见 glassSkin.css）。 */
+  --app-glass-canvas:
+    radial-gradient(64rem 44rem at 2% -14%, #d7e6ff 0%, transparent 62%),
+    radial-gradient(52rem 38rem at 98% 6%, #d3f0f2 0%, transparent 60%),
+    radial-gradient(46rem 46rem at 46% 114%, #e9e0ff 0%, transparent 64%),
+    linear-gradient(168deg, #f9fbfe 0%, #e9f0f9 100%);
+  /* 浮层阴影比默认档更散：玻璃片是「浮起来」而不是「贴上去」。 */
+  --shadow-popover: 0 8px 24px -6px rgb(28 45 74 / 0.14), 0 2px 6px -2px rgb(28 45 74 / 0.1);
+  --shadow-modal: 0 24px 60px -20px rgb(28 45 74 / 0.28), 0 8px 20px -8px rgb(28 45 74 / 0.14);
+  /* 玻璃是「圆润的片」，比默认档再圆一档 */
+  --radius-xs: 5px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+}
+:root[data-theme="dark"][data-appearance="glass"] {
+  --color-bg-app: #070b11;
+  --color-bg-page: rgba(12, 19, 28, 0.72);
+  --color-bg-page-raised: rgba(16, 24, 34, 0.85);
+  --color-bg-sidebar: rgba(11, 17, 25, 0.66);
+  --color-bg-panel: rgba(15, 22, 31, 0.74);
+  --color-bg-popover: rgba(21, 30, 41, 0.9);
+  --color-bg-input: rgba(13, 20, 28, 0.72);
+  --color-bg-muted: rgba(20, 28, 39, 0.76);
+  --color-bg-hover: rgba(28, 38, 50, 0.8);
+  --color-bg-active: rgba(22, 44, 66, 0.86);
+  --color-text-primary: #e6eef7;
+  --color-text-secondary: #a9b8c7;
+  --color-text-tertiary: #8b9bac;
+  --color-text-faint: #6f8095;
+  --color-text-inverse: #0a0f16;
+  --color-border-subtle: #1c2632;
+  --color-border-default: #2b3a4a;
+  --color-border-strong: #3d5063;
+  --color-chat-card-bg: rgba(15, 22, 31, 0.74);
+  --color-chat-muted-bg: rgba(20, 28, 39, 0.78);
+  --color-chat-control-bg: rgba(26, 36, 48, 0.82);
+  --color-chat-table-bg: rgba(17, 24, 34, 0.78);
+  --color-chat-bubble-bg: rgba(23, 48, 74, 0.82);
+  --color-chat-link: #7cb8ff;
+
+  --color-thinking: #8b9bac;
+  --color-tool: #6fb1ff;
+  --color-chip-file: #6fb1ff;
+  --color-chip-skill: #b39cf7;
+  --color-chip-session: #58c9ae;
+  --color-code-bg: rgba(11, 17, 24, 0.9);
+  --color-code-text: #e6eef7;
+  --color-md-heading: #93c5fd;
+  --color-md-link: #7cb8ff;
+  --color-md-code: #c4a7f7;
+  --color-md-quote: #a9b8c7;
+  --color-md-quote-border: #3d5063;
+  --color-md-list-bullet: #7cb8ff;
+  --color-md-hr: #2b3a4a;
+  --color-md-strong: #f2f7fc;
+  --color-md-em: #c0ccd8;
+  --color-md-del: #8b9bac;
+  --color-md-inline-code-bg: rgba(30, 41, 55, 0.9);
+  --color-md-frame: #3d5063;
+  --color-md-table-border: #2b3a4a;
+  --color-md-table-head-bg: rgba(26, 36, 49, 0.9);
+  --color-md-table-head-text: #93c5fd;
+  --color-md-task-accent: #7cb8ff;
+  --color-md-image-border: rgba(61, 80, 99, 0.9);
+  --app-glass-canvas:
+    radial-gradient(60rem 42rem at 2% -12%, #123a58 0%, transparent 62%),
+    radial-gradient(50rem 36rem at 98% 8%, #0f4040 0%, transparent 60%),
+    radial-gradient(44rem 44rem at 46% 116%, #241a4f 0%, transparent 64%),
+    linear-gradient(168deg, #0d131b 0%, #070b11 100%);
+  --shadow-popover: 0 8px 24px -6px rgb(0 0 0 / 0.5), 0 2px 6px -2px rgb(0 0 0 / 0.4);
+  --shadow-modal: 0 24px 60px -20px rgb(0 0 0 / 0.65), 0 8px 20px -8px rgb(0 0 0 / 0.5);
+  --radius-xs: 5px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+}
+/* 液态玻璃：比毛玻璃更透、更圆、边缘更亮（iOS 26 liquid glass 取向）。
+   玫瑰/紫的光雾画布 + alpha 更低的面色 → 同样模糊强度下折射感更强；
+   超大圆角与双向高光在 glassSkin.css。 */
+:root[data-appearance="liquid-glass"] {
+  --color-bg-app: #f5f2fa;
+  --color-bg-page: rgba(252, 249, 255, 0.66);
+  --color-bg-page-raised: rgba(253, 251, 255, 0.82);
+  --color-bg-sidebar: rgba(250, 247, 254, 0.58);
+  --color-bg-panel: rgba(253, 250, 255, 0.68);
+  --color-bg-popover: rgba(253, 251, 255, 0.9);
+  --color-bg-input: rgba(255, 253, 255, 0.64);
+  --color-bg-muted: rgba(243, 238, 250, 0.74);
+  --color-bg-hover: rgba(255, 252, 255, 0.78);
+  --color-bg-active: rgba(238, 226, 250, 0.86);
+  --color-text-primary: #1d1826;
+  --color-text-secondary: #4e4659;
+  --color-text-tertiary: #5f5670;
+  --color-text-faint: #8b8098;
+  --color-text-inverse: #fbf8ff;
+  --color-border-subtle: #e6dcef;
+  --color-border-default: #d8cde6;
+  --color-border-strong: #c2b4d6;
+  --color-chat-card-bg: rgba(253, 250, 255, 0.66);
+  --color-chat-muted-bg: rgba(244, 239, 251, 0.72);
+  --color-chat-control-bg: rgba(253, 251, 255, 0.78);
+  --color-chat-table-bg: rgba(250, 246, 255, 0.62);
+  --color-chat-bubble-bg: rgba(240, 226, 250, 0.78);
+  --color-chat-link: #b3195c;
+
+  --color-thinking: #6f6580;
+  --color-tool: #b3195c;
+  --color-chip-file: #a4144f;
+  --color-chip-skill: #7c3aed;
+  --color-chip-session: #0f766e;
+  --color-code-bg: rgba(246, 241, 252, 0.84);
+  --color-code-text: #1d1826;
+  --color-md-heading: #8e2c66;
+  --color-md-link: #b3195c;
+  --color-md-code: #7c3aed;
+  --color-md-quote: #524962;
+  --color-md-quote-border: #c2b4d6;
+  --color-md-list-bullet: #b3195c;
+  --color-md-hr: #d8cde6;
+  --color-md-strong: #150f1d;
+  --color-md-em: #443b53;
+  --color-md-del: #5f5670;
+  --color-md-inline-code-bg: rgba(241, 235, 249, 0.9);
+  --color-md-frame: #d8cde6;
+  --color-md-table-border: #e6dcef;
+  --color-md-table-head-bg: rgba(239, 232, 248, 0.85);
+  --color-md-table-head-text: #8e2c66;
+  --color-md-task-accent: #b3195c;
+  --color-md-image-border: rgba(216, 205, 230, 0.9);
+  /* 画布：玫瑰/紫/青的更强光斑（比毛玻璃亮一档）——液态玻璃的「折射」靠它透上来。 */
+  --app-glass-canvas:
+    radial-gradient(62rem 44rem at 0% -12%, #ffe0f0 0%, transparent 62%),
+    radial-gradient(50rem 38rem at 100% 4%, #e6dcff 0%, transparent 60%),
+    radial-gradient(44rem 44rem at 42% 114%, #d8f2ff 0%, transparent 64%),
+    linear-gradient(168deg, #fbf8ff 0%, #f0ebf8 100%);
+  /* 外阴影更大更散（液滴厚度感），配合 glassSkin.css 的双向边缘高光。 */
+  --shadow-popover: 0 12px 32px -8px rgb(60 24 80 / 0.18), 0 3px 8px -3px rgb(60 24 80 / 0.12);
+  --shadow-modal: 0 32px 80px -24px rgb(60 24 80 / 0.32), 0 10px 24px -10px rgb(60 24 80 / 0.18);
+  /* 液态玻璃：最大一档圆角（片状玻璃越圆越「液」） */
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 26px;
+  --radius-pill: 999px;
+}
+:root[data-theme="dark"][data-appearance="liquid-glass"] {
+  --color-bg-app: #0a0711;
+  --color-bg-page: rgba(19, 15, 27, 0.7);
+  --color-bg-page-raised: rgba(24, 19, 33, 0.84);
+  --color-bg-sidebar: rgba(16, 12, 23, 0.64);
+  --color-bg-panel: rgba(22, 17, 30, 0.72);
+  --color-bg-popover: rgba(29, 23, 39, 0.9);
+  --color-bg-input: rgba(19, 15, 27, 0.72);
+  --color-bg-muted: rgba(28, 22, 38, 0.76);
+  --color-bg-hover: rgba(37, 30, 49, 0.8);
+  --color-bg-active: rgba(50, 28, 54, 0.86);
+  --color-text-primary: #eae4f2;
+  --color-text-secondary: #b3a9c2;
+  --color-text-tertiary: #968ca8;
+  --color-text-faint: #756b86;
+  --color-text-inverse: #0d0913;
+  --color-border-subtle: #241d2f;
+  --color-border-default: #362c45;
+  --color-border-strong: #4b3d5e;
+  --color-chat-card-bg: rgba(22, 17, 30, 0.72);
+  --color-chat-muted-bg: rgba(28, 22, 38, 0.78);
+  --color-chat-control-bg: rgba(34, 27, 45, 0.82);
+  --color-chat-table-bg: rgba(24, 19, 33, 0.78);
+  --color-chat-bubble-bg: rgba(56, 28, 60, 0.8);
+  --color-chat-link: #f784b8;
+
+  --color-thinking: #968ca8;
+  --color-tool: #f784b8;
+  --color-chip-file: #f784b8;
+  --color-chip-skill: #c9a9ff;
+  --color-chip-session: #58c9ae;
+  --color-code-bg: rgba(15, 11, 22, 0.9);
+  --color-code-text: #eae4f2;
+  --color-md-heading: #f0a6cf;
+  --color-md-link: #f784b8;
+  --color-md-code: #c9a9ff;
+  --color-md-quote: #b3a9c2;
+  --color-md-quote-border: #4b3d5e;
+  --color-md-list-bullet: #f784b8;
+  --color-md-hr: #362c45;
+  --color-md-strong: #f7f2fc;
+  --color-md-em: #cbc2d8;
+  --color-md-del: #968ca8;
+  --color-md-inline-code-bg: rgba(38, 30, 50, 0.9);
+  --color-md-frame: #4b3d5e;
+  --color-md-table-border: #362c45;
+  --color-md-table-head-bg: rgba(34, 27, 45, 0.9);
+  --color-md-table-head-text: #f0a6cf;
+  --color-md-task-accent: #f784b8;
+  --color-md-image-border: rgba(75, 61, 94, 0.9);
+  --app-glass-canvas:
+    radial-gradient(60rem 42rem at 0% -10%, #4a1338 0%, transparent 62%),
+    radial-gradient(50rem 38rem at 100% 6%, #2b1a4f 0%, transparent 60%),
+    radial-gradient(44rem 44rem at 42% 116%, #0e3346 0%, transparent 64%),
+    linear-gradient(168deg, #100b18 0%, #08050d 100%);
+  --shadow-popover: 0 12px 32px -8px rgb(0 0 0 / 0.55), 0 3px 8px -3px rgb(0 0 0 / 0.45);
+  --shadow-modal: 0 32px 80px -24px rgb(0 0 0 / 0.7), 0 10px 24px -10px rgb(0 0 0 / 0.55);
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 26px;
+}
 * {
   box-sizing: border-box;
 }

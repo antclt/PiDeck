@@ -168,6 +168,37 @@ export const SKIN_PRESETS: readonly SkinPreset[] = [
 			border: "#d8ded9",
 		},
 	},
+	{
+		id: "glass",
+		labelKey: "settings.skin.glass",
+		descKey: "settings.skin.glassDesc",
+		// 毛玻璃：面板色带 alpha（透出 body::after 的光雾画布）+ 侧栏/浮层 backdrop-filter，
+		// 形状与模糊在 glassSkin.css，色值在 foundation.css。
+		accent: "blue",
+		preview: "#f2f6fb",
+		previewSurfaces: {
+			background: "#f2f6fb",
+			sidebar: "#f9fbfd",
+			panel: "#fafcfe",
+			accent: "#2563eb",
+			border: "#cfdae8",
+		},
+	},
+	{
+		id: "liquid-glass",
+		labelKey: "settings.skin.liquidGlass",
+		descKey: "settings.skin.liquidGlassDesc",
+		// 液态玻璃：比毛玻璃更大的圆角 + 双向边缘高光 + 更散的外阴影（iOS 26 liquid glass 取向）。
+		accent: "rose",
+		preview: "#f6f3fa",
+		previewSurfaces: {
+			background: "#f6f3fa",
+			sidebar: "#fbf9fe",
+			panel: "#fdfbff",
+			accent: "#e11d48",
+			border: "#ddd4e8",
+		},
+	},
 ];
 
 /** 出厂外观主题：classic-green（中性黑白灰，与旧版出厂观感一致） */
