@@ -145,7 +145,7 @@ export type RemoteRuntimeServicePort = {
 	ensureRemoteExtensionSnapshot(hostId: string): Promise<RemoteExtensionSnapshotFacts>;
 	/** 把安全策略快照写到该主机（原子替换）。缺省 = 不支持远端安全门，安全门不会被注入。 */
 	pushSecurityPolicySnapshot?(hostId: string, bytes: Buffer | Uint8Array): Promise<void>;
-	createPiRuntimeLauncher(): PiRuntimeLauncher;
+	createPiRuntimeLauncher(hostId: string): PiRuntimeLauncher;
 } & RemoteSessionScannerPort;
 
 /**
@@ -378,7 +378,7 @@ export function createRemoteRuntimePort(deps: RemoteRuntimePortDeps): RemoteRunt
 				...(env === undefined ? {} : { env }),
 				settings,
 			});
-			launcher = service.createPiRuntimeLauncher();
+			launcher = service.createPiRuntimeLauncher(input.hostId);
 			// `--no-session` 在这里补：`buildRemotePiArgs` 只产出基础参数与 `--session`（远端与本地共享
 			// 同一份基础参数，不允许两处各写一套），而匿名会话在本地由 `PiProcess.start` 追加同一面旗标。
 			// 远端不补，pi 会把一次 PiDeck 匿名会话写成一个远端会话文件——PiDeck 这边并不认它。

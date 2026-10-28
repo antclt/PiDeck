@@ -1,8 +1,8 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { createHash } from "node:crypto";
-import { ipcMain, type WebContents } from "electron";
+import { BrowserWindow, dialog, ipcMain, type WebContents } from "electron";
 import { ipcChannels } from "../../shared/ipc";
 import type {
 	RemoteHostAddInput,
@@ -13,6 +13,7 @@ import type {
 	RemoteHostDiagnosticsResult,
 	RemoteHostDisconnectResult,
 	RemoteHostListResult,
+	RemoteHostPickIdentityFileResult,
 	RemoteHostRepairAnswerResult,
 	RemoteHostRepairDiagnosisResult,
 	RemoteHostRepairFinding,
@@ -20,6 +21,8 @@ import type {
 	RemoteHostRepairRunResult,
 	RemoteDirectoryListResult,
 	RemoteHostRemoveResult,
+	RemoteHostEditDraftResult,
+	RemoteHostUpdateResult,
 	RemoteHostRepairSummary,
 } from "../../shared/types/remoteHost";
 import { openRemoteHostStoreForRetire, type RemoteHostCatalogView } from "../remote/RemoteHostCatalogView";
@@ -82,6 +85,26 @@ function diagnosticEntry(value: unknown): RemoteHostDiagnosticEntry | null {
  * else (permissions, a directory in its place, a huge file) is reported as a stable code so the UI can
  * fall back to manual entry and say why.
  */
+/** Names of likely private keys in `~/.ssh`; files are listed, never opened. */
+async function scanSshIdentityFiles(): Promise<string[]> {
+	const directory = join(homedir(), ".ssh");
+	const excluded = new Set(["config", "known_hosts", "known_hosts.old", "authorized_keys", "authorized_keys2", "environment", "rc"]);
+	const found: string[] = [];
+	try {
+		const entries = await readdir(directory, { withFileTypes: true });
+		for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+			const name = entry.name;
+			if (!entry.isFile() || name.startsWith(".") || excluded.has(name) || name.endsWith(".pub")) continue;
+			if (!name.startsWith("id_") && !/\.(pem|key|ppk)$/i.test(name)) continue;
+			found.push(join(directory, name));
+			if (found.length >= 32) break;
+		}
+	} catch {
+		// No ~/.ssh: config candidates and manual entry still work.
+	}
+	return found;
+}
+
 async function scanSshConfig(): Promise<RemoteHostConfigScanResult> {
 	const currentUser = safeCurrentUser();
 	const path = join(homedir(), ".ssh", "config");
@@ -90,12 +113,12 @@ async function scanSshConfig(): Promise<RemoteHostConfigScanResult> {
 		text = await readFile(path, "utf8");
 	} catch (error) {
 		const code = typeof error === "object" && error !== null && "code" in error ? (error as { code?: unknown }).code : undefined;
-		if (code === "ENOENT") return { ok: true, candidates: [], skipped: [], user: currentUser };
+		if (code === "ENOENT") return { ok: true, candidates: [], skipped: [], user: currentUser, identityFiles: await scanSshIdentityFiles() };
 		return { ok: false, code: "REMOTE_HOST_CONFIG_UNREADABLE" };
 	}
 	if (text.length > MAX_SSH_CONFIG_BYTES) return { ok: false, code: "REMOTE_HOST_CONFIG_TOO_LARGE" };
 	const parsed = parseSshConfig(text);
-	return { ok: true, candidates: parsed.candidates, skipped: parsed.skipped, user: currentUser };
+	return { ok: true, candidates: parsed.candidates, skipped: parsed.skipped, user: currentUser, identityFiles: await scanSshIdentityFiles() };
 }
 
 /** The login user, used only as the displayed default when a config entry omits `User`. */
@@ -111,7 +134,7 @@ function safeCurrentUser(): string {
  * Validate a manual add. Every field becomes part of SSH argv or a known_hosts alias, so it is checked
  * here rather than trusted: the renderer's form is a convenience, not a guarantee.
  */
-type AddInput = { label: string; hostName: string; user?: string; port?: number; identityFile?: string };
+type AddInput = { label: string; hostName: string; user?: string; port?: number; identityFile?: string; authMethod?: "password" };
 type AddInputRead = { ok: true; input: AddInput } | { ok: false; code: string };
 
 function readAddInput(value: unknown): AddInputRead {
@@ -136,6 +159,7 @@ function readAddInput(value: unknown): AddInputRead {
 	// 绝对路径（`-i` 实参，不经过 shell，`~` 不会被展开）。展开/规范化是 main 的职责，且必须发生在
 	// `createDraft` 之前——否则失败会以不透明的 `REMOTE_HOST_STORE_INVALID` 冒出来。
 	// 「路径本身不合法」用独立稳定码，与「表单其它字段不合法」区分：这是真实配置形态，用户需要知道原因。
+	const authMethod = input.authMethod === "password" ? "password" : undefined;
 	const rawIdentityFile = typeof input.identityFile === "string" && input.identityFile.trim().length > 0 ? input.identityFile : undefined;
 	let identityFile: string | undefined;
 	if (rawIdentityFile !== undefined) {
@@ -144,7 +168,7 @@ function readAddInput(value: unknown): AddInputRead {
 	}
 	// `null` and "absent" both mean "use the default"; the store models absence as undefined, so collapse here
 	// rather than letting a null reach it and be written as a literal.
-	return { ok: true, input: { label, hostName, ...(user.length > 0 ? { user } : {}), ...(port === undefined ? {} : { port }), ...(identityFile === undefined ? {} : { identityFile }) } };
+	return { ok: true, input: { label, hostName, ...(user.length > 0 ? { user } : {}), ...(port === undefined ? {} : { port }), ...(identityFile === undefined ? {} : { identityFile }), ...(authMethod === undefined ? {} : { authMethod }) } };
 }
 
 /**
@@ -155,7 +179,14 @@ function readAddInput(value: unknown): AddInputRead {
  *
  * `service` is optional so the read-only catalog stays usable without a connection service.
  */
-export function registerRemoteHostIpc(input: { enabled: boolean; list: () => Promise<RemoteHostCatalogView>; service?: () => RemoteHostConnectionService | undefined | Promise<RemoteHostConnectionService | undefined>; userDataDir: string; registerCleanup?: (cleanup: () => Promise<void>) => void; onHostRetired?: (hostId: string) => Promise<void> }): void {
+export function registerRemoteHostIpc(input: {
+	enabled: boolean;
+	list: () => Promise<RemoteHostCatalogView>;
+	service?: () => RemoteHostConnectionService | undefined | Promise<RemoteHostConnectionService | undefined>;
+	userDataDir: string;
+	registerCleanup?: (cleanup: () => Promise<void>) => void;
+	onHostRetired?: (hostId: string) => Promise<void>;
+}): void {
 	const guard = <T>(fallback: () => T): T | undefined => (input.enabled ? undefined : fallback());
 
 	/**
@@ -240,6 +271,8 @@ export function registerRemoteHostIpc(input: { enabled: boolean; list: () => Pro
 				snapshot = opened.store.getSnapshot();
 			}
 			await opened.store.retire(hostId, snapshot.revision);
+			// The stored secret belongs to the retired host id; a retired id is never reused, so drop it with it.
+			if ("service" in resolved) await resolved.service.forgetHost(hostId).catch(() => undefined);
 			return { ok: true, hostId };
 		} catch (error) {
 			return { ok: false, hostId, code: codeOf(error, "REMOTE_HOST_REMOVE_FAILED") };
@@ -259,7 +292,7 @@ export function registerRemoteHostIpc(input: { enabled: boolean; list: () => Pro
 		if (rawPath !== undefined && typeof rawPath !== "string") return { ok: false, hostId, code: "REMOTE_LIST_DIRS_PATH_INVALID" };
 		const resolved = await resolveService();
 		if ("code" in resolved) return { ok: false, hostId, code: resolved.code };
-		return listRemoteDirectories({ userDataDir: input.userDataDir, hostId, client: resolved.service.client, ...(rawPath === undefined ? {} : { path: rawPath }) });
+		return listRemoteDirectories({ userDataDir: input.userDataDir, hostId, client: resolved.service.clientForHost(hostId), ...(rawPath === undefined ? {} : { path: rawPath }) });
 	});
 
 	ipcMain.handle(ipcChannels.remoteHostsList, async (): Promise<RemoteHostListResult> => {
@@ -278,15 +311,193 @@ export function registerRemoteHostIpc(input: { enabled: boolean; list: () => Pro
 		}
 	});
 
-	ipcMain.handle(ipcChannels.remoteHostConnect, async (_event, hostId: unknown): Promise<RemoteHostConnectResult> => {
+	/**
+	 * Native file picker for a private key. Only the absolute path crosses back to the renderer: nothing is read
+	 * here and no passphrase is involved, so a cancelled dialog is an ordinary `ok: false` answer.
+	 */
+	/**
+	 * Private keys a user is likely to pick, from the same `~/.ssh` directory on every platform.
+	 *
+	 * Only names are listed - files are never opened, so this cannot read a key or a passphrase. The filter is
+	 * the convention shared by OpenSSH (`id_*`) and the common PEM/PPK exports; everything else (`*.pub`,
+	 * `config`, `known_hosts*`, `authorized_keys*`) is not a private key a picker should offer.
+	 */
+	async function scanSshIdentityFiles(): Promise<string[]> {
+		const directory = join(homedir(), ".ssh");
+		const excluded = new Set(["config", "known_hosts", "known_hosts.old", "authorized_keys", "authorized_keys2", "environment", "rc"]);
+		const found: string[] = [];
+		try {
+			const entries = await readdir(directory, { withFileTypes: true });
+			for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+				const name = entry.name;
+				if (!entry.isFile() || name.startsWith(".") || excluded.has(name) || name.endsWith(".pub")) continue;
+				if (!name.startsWith("id_") && !/\.(pem|key|ppk)$/i.test(name)) continue;
+				found.push(join(directory, name));
+				if (found.length >= 32) break;
+			}
+		} catch {
+			// No ~/.ssh (or it is unreadable): the config candidates and manual entry still work.
+		}
+		return found;
+	}
+
+	ipcMain.handle(ipcChannels.remoteHostPickIdentityFile, async (event): Promise<RemoteHostPickIdentityFileResult> => {
+		if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
+		const window = BrowserWindow.fromWebContents(event.sender);
+		const options = { title: "SSH 私钥", defaultPath: join(homedir(), ".ssh"), properties: ["openFile" as const] };
+		const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
+		const picked = result.filePaths[0];
+		if (result.canceled || picked === undefined) return { ok: false, code: "REMOTE_HOST_IDENTITY_FILE_CANCELLED" };
+		// The store only accepts a local absolute path; reject anything else at the boundary.
+		if (!isAbsolute(picked) || /[ -]/.test(picked)) return { ok: false, code: "REMOTE_HOST_IDENTITY_FILE_INVALID" };
+		return { ok: true, path: picked };
+	});
+
+	/** 编辑补丁的边界校验：只接受已知字段，逐项按新增时的同一套规则检查。 */
+	type UpdateInput = { hostId: string; patch: { label?: string; sshHost?: string; user?: string; port?: number; identityFile?: string; authMethod?: "password" }; secret?: string };
+	function readUpdateInput(value: unknown): { ok: true; input: UpdateInput } | { ok: false; code: string } {
+		if (typeof value !== "object" || value === null) return { ok: false, code: "REMOTE_HOST_EDIT_INVALID" };
+		const raw = value as Record<string, unknown>;
+		const hostId = typeof raw.hostId === "string" ? raw.hostId : "";
+		if (!HOST_ID.test(hostId)) return { ok: false, code: "REMOTE_HOST_EDIT_INVALID" };
+		const patch = typeof raw.patch === "object" && raw.patch !== null ? (raw.patch as Record<string, unknown>) : {};
+		const out: UpdateInput["patch"] = {};
+		if (Object.hasOwn(patch, "label")) {
+			const label = typeof patch.label === "string" ? patch.label.trim() : "";
+			if (label.length === 0 || label.length > MAX_LABEL || /[ -]/.test(label)) return { ok: false, code: "REMOTE_HOST_EDIT_INVALID" };
+			out.label = label;
+		}
+		if (Object.hasOwn(patch, "hostName")) {
+			const hostName = typeof patch.hostName === "string" ? patch.hostName.trim() : "";
+			if (hostName.length === 0 || hostName.length > 1024 || !HOST_NAME.test(hostName)) return { ok: false, code: "REMOTE_HOST_EDIT_INVALID" };
+			out.sshHost = hostName;
+		}
+		if (Object.hasOwn(patch, "user")) {
+			const user = typeof patch.user === "string" ? patch.user.trim() : "";
+			if (user.length > 0 && (user.length > 256 || !SAFE_USER.test(user))) return { ok: false, code: "REMOTE_HOST_EDIT_INVALID" };
+			// 空串表示「回到默认用户」，所以这里显式写入 undefined 而不是跳过。
+			out.user = user.length > 0 ? user : undefined;
+		}
+		if (Object.hasOwn(patch, "port")) {
+			const rawPort = patch.port;
+			if (rawPort === undefined || rawPort === null || rawPort === "") out.port = undefined;
+			else {
+				const parsed = typeof rawPort === "number" ? rawPort : Number(rawPort);
+				if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 65535) return { ok: false, code: "REMOTE_HOST_EDIT_INVALID" };
+				out.port = parsed;
+			}
+		}
+		if (Object.hasOwn(patch, "identityFile")) {
+			const rawIdentity = typeof patch.identityFile === "string" && patch.identityFile.trim().length > 0 ? patch.identityFile : undefined;
+			if (rawIdentity === undefined) out.identityFile = undefined;
+			else {
+				const identityFile = normalizeRemoteHostIdentityFile(rawIdentity);
+				if (identityFile === undefined) return { ok: false, code: REMOTE_HOST_IDENTITY_FILE_INVALID };
+				out.identityFile = identityFile;
+			}
+		}
+		if (Object.hasOwn(patch, "authMethod")) out.authMethod = patch.authMethod === "password" ? "password" : undefined;
+		const secret = typeof raw.secret === "string" && raw.secret.length > 0 ? raw.secret : undefined;
+		if (secret !== undefined && (secret.length > 4096 || secret.includes(String.fromCharCode(0)))) return { ok: false, code: "REMOTE_HOST_EDIT_INVALID" };
+		return { ok: true, input: { hostId, patch: out, ...(secret === undefined ? {} : { secret }) } };
+	}
+
+	/**
+	 * 编辑一台已添加的主机：同一个 hostId 原位更新，项目和会话引用保持有效。
+	 *
+	 * 端点（host/user/port/proxyJump）变化时旧的 pin 与 verifiedEndpoint 描述的是另一台机器，store 会在
+	 * 同一次写入里清掉它们；这里随后对新地址重跑一次探针并 pin，语义与首次添加完全一致（TOFU + 确认）。
+	 * 口令只在显式提交时覆盖，留空表示沿用已保存的值。
+	 */
+	ipcMain.handle(ipcChannels.remoteHostUpdate, async (event, value: unknown): Promise<RemoteHostUpdateResult> => {
+		if (!input.enabled) return { ok: false, hostId: "", code: "REMOTE_FEATURE_DISABLED" };
+		const parsed = readUpdateInput(value);
+		if (!parsed.ok) return { ok: false, hostId: "", code: parsed.code };
+		const { hostId, patch, secret } = parsed.input;
+		const senderId = senderIdOf(event.sender);
+		if (senderId === undefined) return { ok: false, hostId, code: "REMOTE_HOST_EDIT_INVALID" };
+		let store: Awaited<ReturnType<typeof openStores>>["store"];
+		try {
+			({ store } = await openStores());
+		} catch {
+			return { ok: false, hostId, code: "REMOTE_HOST_STORE_UNAVAILABLE" };
+		}
+		let updated: Awaited<ReturnType<typeof store.updateProfile>>;
+		try {
+			updated = await store.updateProfile(hostId, patch, store.getSnapshot().revision);
+		} catch (error) {
+			const code = typeof error === "object" && error !== null && "message" in error ? (error as { message?: unknown }).message : undefined;
+			return { ok: false, hostId, code: typeof code === "string" && /^REMOTE_HOST_[A-Z0-9_]{1,64}$/.test(code) ? code : "REMOTE_HOST_EDIT_INVALID" };
+		}
+		if (updated.endpointChanged) {
+			try {
+				const offer = await store.offerPin(hostId, senderId, store.getSnapshot().revision);
+				await store.confirmPin({ requestId: offer.requestId, hostId, senderId, choice: "approve" }, store.getSnapshot().revision);
+			} catch (error) {
+				// The edit itself is already committed; report the stable verification code so the UI can show
+				// "saved but needs re-verification" instead of pretending the host is usable.
+				const code = typeof error === "object" && error !== null && "message" in error ? (error as { message?: unknown }).message : undefined;
+				return { ok: false, hostId, saved: true, code: typeof code === "string" && /^SSH_[A-Z0-9_]{1,64}$/.test(code) ? code : "REMOTE_HOST_VERIFY_FAILED" };
+			}
+		}
+		if (secret !== undefined) {
+			const resolved = await resolveService();
+			if (!("service" in resolved)) return { ok: false, hostId, code: resolved.code };
+			try {
+				await resolved.service.setHostSecret(hostId, secret);
+			} catch {
+				return { ok: false, hostId, code: "SSH_PASSWORD_INVALID" };
+			}
+		}
+		return { ok: true, hostId, endpointChanged: updated.endpointChanged, verified: store.getSnapshot().profiles.some((profile) => profile.id === hostId && profile.verifiedEndpoint !== undefined) };
+	});
+
+	/**
+	 * The edit form's starting values: the profile's endpoint fields plus the stored secret.
+	 *
+	 * This is the one place a plaintext secret is handed to the renderer. It is scoped to an explicit
+	 * "open the editor" action, and the value never enters the host store, a log line or a process argv.
+	 */
+	ipcMain.handle(ipcChannels.remoteHostEditDraft, async (_event, rawHostId: unknown): Promise<RemoteHostEditDraftResult> => {
+		const hostId = typeof rawHostId === "string" ? rawHostId : "";
+		if (!HOST_ID.test(hostId)) return { ok: false, hostId, code: "REMOTE_HOST_EDIT_INVALID" };
+		if (!input.enabled) return { ok: false, hostId, code: "REMOTE_FEATURE_DISABLED" };
+		let store: Awaited<ReturnType<typeof openStores>>["store"];
+		try {
+			({ store } = await openStores());
+		} catch {
+			return { ok: false, hostId, code: "REMOTE_HOST_STORE_UNAVAILABLE" };
+		}
+		const profile = store.getSnapshot().profiles.find((item) => item.id === hostId);
+		if (profile === undefined) return { ok: false, hostId, code: "REMOTE_HOST_NOT_FOUND" };
+		const resolved = await resolveService();
+		if (!("service" in resolved)) return { ok: false, hostId, code: resolved.code };
+		const secret = await resolved.service.readStoredSecret(hostId).catch(() => undefined);
+		return {
+			ok: true,
+			hostId,
+			draft: {
+				label: profile.label,
+				hostName: profile.sshHost,
+				...(profile.user === undefined ? {} : { user: profile.user }),
+				...(profile.port === undefined ? {} : { port: profile.port }),
+				...(profile.identityFile === undefined ? {} : { identityFile: profile.identityFile }),
+				...(profile.authMethod === undefined ? {} : { authMethod: profile.authMethod }),
+			},
+			secret: secret ?? null,
+		};
+	});
+
+	ipcMain.handle(ipcChannels.remoteHostConnect, async (_event, hostId: unknown, password?: unknown): Promise<RemoteHostConnectResult> => {
 		// Renderer input is never trusted: validate at the boundary before any process can start.
 		if (typeof hostId !== "string" || !HOST_ID.test(hostId)) return { ok: false, hostId: typeof hostId === "string" ? hostId : "", code: "REMOTE_CONNECTION_HOST_ID_INVALID" };
 		if (!input.enabled) return { ok: false, hostId, code: "REMOTE_FEATURE_DISABLED" };
+		if (password !== undefined && (typeof password !== "string" || password.length === 0 || password.length > 4096 || password.includes(String.fromCharCode(0)))) return { ok: false, hostId, code: "SSH_PASSWORD_INVALID" };
 		const resolved = await resolveService();
 		if ("code" in resolved) return { ok: false, hostId, code: resolved.code };
 		try {
 			// The service already converts every failure into a stable code; it never throws here.
-			const result = await resolved.service.connect(hostId);
+			const result = await resolved.service.connect(hostId, password === undefined ? undefined : { password });
 			// Reduce the machine snapshot to the state the UI actually renders: generation, attempts and the
 			// latched flag are main-internal and would invite the renderer to reason about fencing it cannot
 			// observe. Diagnostics carry the detail the UI is allowed to show.
@@ -354,7 +565,18 @@ export function registerRemoteHostIpc(input: { enabled: boolean; list: () => Pro
 		try {
 			const { store } = await openStores();
 			const revision = store.getSnapshot().revision;
-			const profile = await store.createDraft({ label: add.label, sshHost: add.hostName, connectTimeoutMs: 10_000, ...(add.user === undefined ? {} : { user: add.user }), ...(add.port === undefined ? {} : { port: add.port }), ...(add.identityFile === undefined ? {} : { identityFile: add.identityFile }) }, revision);
+			const profile = await store.createDraft(
+				{
+					label: add.label,
+					sshHost: add.hostName,
+					connectTimeoutMs: 10_000,
+					...(add.user === undefined ? {} : { user: add.user }),
+					...(add.port === undefined ? {} : { port: add.port }),
+					...(add.identityFile === undefined ? {} : { identityFile: add.identityFile }),
+					...(add.authMethod === undefined ? {} : { authMethod: add.authMethod }),
+				},
+				revision,
+			);
 			// `createDraft` is a CAS write, so the revision it committed under is already stale here.
 			// `offerPin` validates against the *current* revision, so it has to be re-read after the write;
 			// passing the pre-write value always fails as REMOTE_HOST_REVISION_CONFLICT. Same discipline the

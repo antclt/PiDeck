@@ -53,7 +53,8 @@ test("connect, disconnect and diagnostics are declared, bridged and registered",
 		["remoteHostDiagnostics", "remote:diagnostics"],
 	])
 		assert.match(shared, new RegExp(`${key}:\\s*"${channel}"`));
-	assert.match(preload, /connect:\s*\(hostId: string\)\s*=>\s*ipcRenderer\.invoke\(ipcChannels\.remoteHostConnect/);
+	// 密码登录：connect 多一个可选的本次口令，仍然走同一条通道。
+	assert.match(preload, /connect:\s*\(hostId: string, password\?: string\)\s*=>\s*ipcRenderer\.invoke\(ipcChannels\.remoteHostConnect/);
 	assert.match(preload, /disconnect:\s*\(hostId: string\)\s*=>\s*ipcRenderer\.invoke\(ipcChannels\.remoteHostDisconnect/);
 	assert.match(preload, /diagnostics:\s*\(hostId: string\)\s*=>\s*ipcRenderer\.invoke\(ipcChannels\.remoteHostDiagnostics/);
 	// 每个通道都要真的注册上，否则 UI 调用会挂在没有 handler 的通道上。

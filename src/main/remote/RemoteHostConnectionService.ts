@@ -18,7 +18,9 @@ import type { PiRuntimeLauncher } from "../pi/PiSpawnHandle";
 import { createSshConnectionManager, type SshConnectionManager, type SshHelperSession } from "./SshConnectionManager";
 import { createSshProcessLauncher } from "./SshProcessLauncher";
 import { diagnosticCodeFromError } from "./SshConnectionDiagnostics";
-import type { SshClientRuntime } from "./SshClientRuntime";
+import { withClientEnv, type SshClientRuntime } from "./SshClientRuntime";
+import { createSshAskpassBridge, type SshAskpassBridge } from "./SshAskpass";
+import { RemoteHostCredentialStore } from "./RemoteHostCredentialStore";
 import type { SshProcessLauncher } from "./RemoteHostConnectionTypes";
 import { uploadRemoteProjectFile } from "./RemoteProjectFileUpload";
 import type { ConnectionMachineState } from "./RemoteHostConnectionState";
@@ -354,6 +356,58 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 		return { revision: snapshot.revision, routeDigest: endpoint.routeDigest };
 	}
 
+	/**
+	 * In-memory password material for hosts that authenticate with one.
+	 *
+	 * The secret never leaves this process: it is (a) not persisted, (b) not logged, (c) not passed to `ssh` as
+	 * an argument or an environment value. Each host gets its own askpass bridge and its own client view, so
+	 * `SSH_ASKPASS` is only inherited by the ssh processes of the host that actually holds a secret.
+	 */
+	const hostPasswords = new Map<string, string>();
+	const askpassBridges = new Map<string, SshAskpassBridge>();
+	const hostClients = new Map<string, SshClientRuntime>();
+	const credentials = new RemoteHostCredentialStore(options.userDataDir);
+
+	/** The client every pinned invocation of this host must use. */
+	function hostClient(hostId: string): SshClientRuntime {
+		return hostClients.get(hostId) ?? options.client;
+	}
+
+	async function releaseHostPassword(hostId: string): Promise<void> {
+		hostPasswords.delete(hostId);
+		hostClients.delete(hostId);
+		const bridge = askpassBridges.get(hostId);
+		askpassBridges.delete(hostId);
+		await bridge?.dispose();
+	}
+
+	async function applyHostPassword(hostId: string, secret: string): Promise<void> {
+		if (typeof secret !== "string" || secret.length === 0 || secret.length > 4096 || secret.includes(String.fromCharCode(0))) throw new Error("SSH_PASSWORD_INVALID");
+		await releaseHostPassword(hostId);
+		const bridge = await createSshAskpassBridge({ secret, executable: process.execPath });
+		try {
+			hostClients.set(hostId, withClientEnv(options.client, bridge.env));
+		} catch (error) {
+			await bridge.dispose();
+			throw error;
+		}
+		askpassBridges.set(hostId, bridge);
+		hostPasswords.set(hostId, secret);
+		// Persist a copy (OS-encrypted) so the next run does not ask again. A platform that cannot encrypt
+		// simply keeps the secret for this session; `set` returning false is not an error.
+		await credentials.set(hostId, secret).catch(() => false);
+	}
+
+	/** Best-effort profile read used only to decide whether a secret is required before connecting. */
+	async function readProfile(hostId: string) {
+		try {
+			const snapshot = (await RemoteHostStore.open(options.userDataDir)).getSnapshot();
+			return snapshot.status === "ready" ? snapshot.profiles.find((item) => item.id === hostId) : undefined;
+		} catch {
+			return undefined;
+		}
+	}
+
 	function entryFor(hostId: string): HostEntry {
 		const existing = hosts.get(hostId);
 		if (existing !== undefined) return existing;
@@ -363,11 +417,11 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 	}
 
 	/** Build the per-host connection manager over one verified helper session. */
-	function managerFor(held: HeldBootstrap): SshConnectionManager {
+	function managerFor(held: HeldBootstrap, hostId: string): SshConnectionManager {
 		let manager: SshConnectionManager | undefined;
 		manager = ports.createManager({
 			userDataDir: options.userDataDir,
-			client: options.client,
+			client: hostClient(hostId),
 			launcher,
 			helperSession: held.session,
 			...(options.onStateChange === undefined
@@ -421,14 +475,14 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 		// Resolve the node before bootstrapping. An explicit override skips discovery; otherwise the host
 		// user's own node is found via their login shell. Only a fresh bootstrap pays for discovery — a
 		// revision that already has a held session returns above without reaching here.
-		const discovered = options.nodePath === undefined ? await ports.resolveNode({ userDataDir: options.userDataDir, hostId, client: options.client, sentinel: ports.createSentinel(), ...(signal === undefined ? {} : { signal }) }) : undefined;
+		const discovered = options.nodePath === undefined ? await ports.resolveNode({ userDataDir: options.userDataDir, hostId, client: hostClient(hostId), sentinel: ports.createSentinel(), ...(signal === undefined ? {} : { signal }) }) : undefined;
 		const nodePath = discovered?.nodePath ?? options.nodePath;
 		if (nodePath === undefined) throw new Error("REMOTE_NODE_NOT_FOUND");
 		// A cancel between discovery and the entry spawn must not start an upload.
 		throwIfCancelled(signal);
 		// Discovery already asserted this version for this exact path; asking the host again costs a whole
 		// SSH connection and cannot produce a different answer this soon.
-		const prepared = await ports.bootstrap({ userDataDir: options.userDataDir, hostId, generation, nonce, nodePath, ...(discovered === undefined ? {} : { nodeVersion: discovered.version }), client: options.client, launcher, ...(signal === undefined ? {} : { signal }) });
+		const prepared = await ports.bootstrap({ userDataDir: options.userDataDir, hostId, generation, nonce, nodePath, ...(discovered === undefined ? {} : { nodeVersion: discovered.version }), client: hostClient(hostId), launcher, ...(signal === undefined ? {} : { signal }) });
 		// A cancelled attempt owns nothing: it must not publish a held session (or a deploy root) for the
 		// next attempt to trust.
 		throwIfCancelled(signal);
@@ -502,7 +556,7 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 			const held = await ensureHeld(entry, hostId, signal);
 			throwIfCancelled(signal);
 			if (disposed) return { ok: false, hostId, code: "REMOTE_CONNECTION_SERVICE_DISPOSED" };
-			const manager = entry.manager ?? managerFor(held);
+			const manager = entry.manager ?? managerFor(held, hostId);
 			entry.manager = manager;
 			// needs-attention is terminal for the reducer: `begin-attempt` is dropped there, so a plain connect
 			// would only report the terminal state back and the user's own "connect" could never leave it. The
@@ -544,7 +598,7 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 	async function verifyProjectRoot(hostId: string, root: string): Promise<{ ok: true } | { ok: false; code: string }> {
 		let canonicalPath: string;
 		try {
-			canonicalPath = (await ports.verifyRoot({ userDataDir: options.userDataDir, hostId, client: options.client, userPath: root })).canonicalPath;
+			canonicalPath = (await ports.verifyRoot({ userDataDir: options.userDataDir, hostId, client: hostClient(hostId), userPath: root })).canonicalPath;
 		} catch {
 			// The probe's own code describes the probe, not the project boundary; callers act on the latter.
 			return rememberRootFailure(hostId, root, "SSH_PROJECT_ROOT_UNRESOLVED");
@@ -618,7 +672,7 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 				async (attemptSignal) => {
 					const held = await ensureHeld(entry, hostId, attemptSignal);
 					throwIfCancelled(attemptSignal);
-					const built = managerFor(held);
+					const built = managerFor(held, hostId);
 					entry.manager = built;
 					return { manager: built, connected: await built.connect(hostId) };
 				},
@@ -652,10 +706,10 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 				async runCommand(remoteCommand) {
 					// 每块重新校验pin和host store代数；不能拿旧Node路径向重绑后的主机发写命令。
 					if (disposed || hosts.get(hostId)?.manager !== bound || bound.getState(hostId).state !== "ready" || (await readRevision()) !== held.revision) throw new Error("SSH_HOST_NOT_READY");
-					const invocation = await buildPinnedSshInvocation(options.userDataDir, hostId, "ssh-batch", { client: options.client, remoteCommand });
+					const invocation = await buildPinnedSshInvocation(options.userDataDir, hostId, "ssh-batch", { client: hostClient(hostId), remoteCommand });
 					// pin/route构造本身有await；必须在真正启动写命令前再次把host代数绑定到已验证Node。
 					if (disposed || hosts.get(hostId)?.manager !== bound || bound.getState(hostId).state !== "ready" || (await readRevision()) !== held.revision) throw new Error("SSH_HOST_NOT_READY");
-					const result = await options.client.run(invocation.executable, invocation.args);
+					const result = await hostClient(hostId).run(invocation.executable, invocation.args);
 					return { exitCode: result.exitCode, stdout: result.stdout };
 				},
 				async withTerminalInvocation(remoteCommand, launch) {
@@ -663,7 +717,7 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 						if (disposed || explicitlyDisconnected.has(hostId) || hosts.get(hostId)?.manager !== bound || bound.getState(hostId).state !== "ready" || (await readRevision()) !== held.revision) throw new Error("SSH_HOST_NOT_READY");
 					};
 					await assertBound();
-					const invocation = await buildPinnedSshInvocation(options.userDataDir, hostId, "ssh-terminal", { client: options.client, remoteCommand });
+					const invocation = await buildPinnedSshInvocation(options.userDataDir, hostId, "ssh-terminal", { client: hostClient(hostId), remoteCommand });
 					await assertBound();
 					// The PTY outlives helper-root switches, but never a host rebind, explicit disconnect or disposal.
 					const assertCurrent = async () => {
@@ -753,7 +807,7 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 				nodePath: held.session.nodePath,
 				deployRoot: held.session.deployRoot,
 				bytes,
-				client: options.client,
+				client: hostClient(hostId),
 				launcher,
 				nonce: ports.createNonce(),
 			});
@@ -786,16 +840,56 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 		 */
 		client: options.client,
 		/**
+		 * Replace this host's secret without opening a connection (the edit form's "save").
+		 *
+		 * Returns whether the value was also written to the encrypted store: a platform without an OS
+		 * keyring keeps it for this session only, and the caller must not claim otherwise.
+		 */
+		async setHostSecret(hostId: string, secret: string): Promise<{ persisted: boolean }> {
+			await applyHostPassword(hostId, secret);
+			return { persisted: await credentials.available() };
+		},
+		/** The stored secret, decrypted for the edit form. Never crosses into a log or a host store file. */
+		async readStoredSecret(hostId: string): Promise<string | undefined> {
+			return credentials.get(hostId);
+		},
+		/** Drop this host's stored secret (host removal). A plain disconnect keeps it for the next connect. */
+		async forgetHost(hostId: string): Promise<void> {
+			await releaseHostPassword(hostId);
+			await credentials.delete(hostId).catch(() => undefined);
+		},
+		/** The client a pinned command for this host must use (a password host carries its askpass bridge). */
+		clientForHost(hostId: string): SshClientRuntime {
+			return hostClient(hostId);
+		},
+		/**
 		 * 与会话配对的远端启动器：复用本服务**已验证的** client 与同一个 ssh launcher。
 		 *
 		 * 为什么在这里造而不是让调用方自己 new：第二条通道一旦用另一个 client 实例，就会用一套不同于会话
 		 * 验证时的环境/路径去拉 ssh——那正是「连得上但行为不一样」的根源；而且 launcher 的生命周期本就属于本服务。
 		 */
-		createPiRuntimeLauncher(): PiRuntimeLauncher {
-			return createSshPiRuntimeLauncher({ userDataDir: options.userDataDir, client: options.client, launcher });
+		createPiRuntimeLauncher(hostId: string): PiRuntimeLauncher {
+			return createSshPiRuntimeLauncher({ userDataDir: options.userDataDir, client: hostClient(hostId), launcher });
 		},
 		/** Bootstrap-then-connect one host. Every failure is a stable code, never a thrown message. */
-		async connect(hostId: string): Promise<RemoteHostConnectResult> {
+		async connect(hostId: string, input?: { password?: string }): Promise<RemoteHostConnectResult> {
+			if (input?.password !== undefined) {
+				try {
+					await applyHostPassword(hostId, input.password);
+				} catch {
+					return { ok: false, hostId, code: "SSH_PASSWORD_INVALID" };
+				}
+			}
+			// A password host can only be driven while a secret is held: without it every ssh child below would
+			// start a password prompt that no bridge can answer, and the failure would surface as a generic timeout.
+			const profile = await readProfile(hostId);
+			if (profile?.authMethod === "password" && !hostClients.has(hostId)) {
+				// A stored secret (encrypted at rest) is the normal path after the first connect; only when
+				// none exists, or it cannot be decrypted on this machine, does the UI have to ask again.
+				const stored = await credentials.get(hostId);
+				if (stored !== undefined) await applyHostPassword(hostId, stored).catch(() => undefined);
+				if (!hostClients.has(hostId)) return { ok: false, hostId, code: "SSH_PASSWORD_REQUIRED" };
+			}
 			const entry = entryFor(hostId);
 			// Only this explicit user boundary may undo a disconnect; session scanning also uses connectLocked.
 			const run = operationLock.run(hostId, () => {
@@ -884,6 +978,8 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 				const entry = hosts.get(hostId);
 				const manager = entry?.manager;
 				if (manager !== undefined) await manager.disconnect(hostId, reason).catch(() => undefined);
+				// A disconnect ends the authenticated session, so the secret it needed must not outlive it.
+				await releaseHostPassword(hostId);
 			});
 		},
 		listDiagnostics(hostId?: string) {
@@ -916,7 +1012,7 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 					cached !== undefined && cached.revision === held.revision && cached.generation === held.generation
 						? cached
 						: await (async (): Promise<PiProbeFacts> => {
-								const observation = await ports.resolvePi({ userDataDir: options.userDataDir, hostId, client: options.client, sentinel: ports.createSentinel(), nodePath: held.session.nodePath });
+								const observation = await ports.resolvePi({ userDataDir: options.userDataDir, hostId, client: hostClient(hostId), sentinel: ports.createSentinel(), nodePath: held.session.nodePath });
 								const facts: PiProbeFacts = { revision: held.revision, generation: held.generation, piPath: observation.piPath, version: observation.version, ...(observation.warning === undefined ? {} : { warning: observation.warning }) };
 								entry.piProbe = facts;
 								return facts;
@@ -963,7 +1059,7 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 						generation: held.generation,
 						nonce: ports.createNonce(),
 						nodePath: held.session.nodePath,
-						client: options.client,
+						client: hostClient(hostId),
 						launcher,
 						snapshot: { dir: snapshot.dir, names: fileNames },
 						// An explicit disconnect/dispose during the upload cancels this attempt too; the cache is then
@@ -976,7 +1072,7 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 					void maintainDeployedBundles({
 						userDataDir: options.userDataDir,
 						hostId,
-						client: options.client,
+						client: hostClient(hostId),
 						nodePath: held.session.nodePath,
 						deployRoot: deployed.deployRoot,
 						activeBundleSha256: held.session.bundleSha256,
@@ -1017,7 +1113,7 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 					relative: input.relative,
 					bytes: input.bytes,
 					overwrite: input.overwrite === true,
-					client: options.client,
+					client: hostClient(input.hostId),
 					launcher,
 					nonce: ports.createNonce(),
 				});
@@ -1115,6 +1211,7 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 					}),
 				);
 				hosts.clear();
+				await Promise.all([...askpassBridges.keys()].map((hostId) => releaseHostPassword(hostId)));
 			})();
 			return disposing;
 		},

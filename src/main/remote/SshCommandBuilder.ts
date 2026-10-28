@@ -68,7 +68,7 @@ function validLocalPath(path: unknown): path is string {
 }
 
 /** Pure argv builder; callers must first revalidate persisted route and pin for this use. */
-export function buildVerifiedSshArgv(target: VerifiedSshArgvInput, kind: VerifiedSshCommandKind): string[] {
+export function buildVerifiedSshArgv(target: VerifiedSshArgvInput, kind: VerifiedSshCommandKind, options: { password?: boolean; passphrase?: boolean } = {}): string[] {
 	if (!target || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(target.hostId) || target.pinAlias !== `pideck-${target.hostId}`) throw new Error("INVALID_SSH_VERIFIED_TARGET");
 	buildSshConfigQueryArgs({ sshHost: target.sshHost, ...(target.proxyJump !== undefined ? { proxyJump: target.proxyJump } : {}) });
 	if (typeof target.hostName !== "string" || !validHost(target.hostName) || typeof target.user !== "string" || !/^[A-Za-z0-9_][A-Za-z0-9_.@-]*$/.test(target.user) || !validPort(target.port)) throw new Error("INVALID_SSH_VERIFIED_TARGET");
@@ -122,9 +122,13 @@ export function buildVerifiedSshArgv(target: VerifiedSshArgvInput, kind: Verifie
 		"-o",
 		"RemoteCommand=none",
 		"-o",
-		"BatchMode=yes",
+		// Password mode is the only one allowed to ask: it answers through the askpass bridge, never a tty.
+		// A key passphrase is asked the same way but authenticates with the key, so only the password method
+		// narrows the authentication list.
+		options.password === true || options.passphrase === true ? "BatchMode=no" : "BatchMode=yes",
 		"-o",
-		"NumberOfPasswordPrompts=0",
+		options.password === true || options.passphrase === true ? "NumberOfPasswordPrompts=1" : "NumberOfPasswordPrompts=0",
+		...(options.password === true ? ["-o", "PreferredAuthentications=password"] : []),
 		"-o",
 		"SendEnv=-*",
 		"-o",

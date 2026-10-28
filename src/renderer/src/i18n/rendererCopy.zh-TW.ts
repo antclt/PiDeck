@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 4f9c60755382305dfe573006949ae1d3299337252fba0052323c763de075e5ea（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 357dc1edbb9922d56f71b3c1f92cc3a8ce2f1a8f57eeaf9c55fab7fab333094c（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4280,6 +4280,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.tabs.connections": "連線",
 	"settings.connections.add": "新增",
 	"settings.connections.add.title": "新建連線",
+	"settings.connections.edit.title": "編輯連線",
+	"settings.connections.edit.loadFailed": "無法讀取該連線的配置（{code}），未做任何修改。",
+	"settings.connections.edit.savedUnverified": "已儲存，但新地址驗證失敗（{code}）。請檢查地址/埠後再次儲存。",
 	"settings.connections.add.hint": "從 ~/.ssh/config 選擇，或手動填寫。儲存即完成信任並直接連上，不需要再確認指紋。",
 	"settings.connections.add.disabled": "遠端連線功能未啟用。",
 	"settings.connections.add.scanFailed": "無法讀取 ~/.ssh/config，請手動填寫。",
@@ -4324,6 +4327,19 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.connections.add.auth.agent": "自動（ssh-agent）",
 	"settings.connections.add.auth.key": "指定私鑰",
 	"settings.connections.add.auth.password": "密碼",
+	"settings.connections.add.identityBrowse": "選擇私鑰檔案",
+	"settings.connections.add.identitySuggestions": "已掃描到的私鑰",
+	"settings.connections.add.passphrase": "私鑰口令",
+	"settings.connections.add.passphrasePlaceholder": "私鑰未加密時留空",
+	"settings.connections.add.showSecret": "顯示口令",
+	"settings.connections.add.hideSecret": "隱藏口令",
+	"settings.connections.add.password": "登入密碼",
+	"settings.connections.add.passwordRequired": "請輸入登入密碼",
+	"settings.connections.password.title": "連線 {host} 需要密碼",
+	"settings.connections.password.description": "密碼會儲存到系統金鑰庫。",
+	"settings.connections.password.label": "登入密碼",
+	"settings.connections.password.cancel": "取消",
+	"settings.connections.password.submit": "連線",
 	"settings.connections.add.auth.passwordUnsupported": "暫不支援密碼認證：底層 SSH 以 BatchMode 執行，沒有密碼輸入通道。",
 	"settings.connections.add.keyRequired": "請填寫私鑰路徑，或改用自動認證。",
 	"settings.connections.add.submitConnect": "新增並連線",

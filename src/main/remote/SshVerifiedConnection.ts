@@ -50,7 +50,7 @@ function assertSavedRoute(hostName: string, user: string, port: number, routeDig
 	if (hostName !== expected.verifiedEndpoint.hostName || user !== expected.verifiedEndpoint.user || port !== expected.verifiedEndpoint.port || routeDigest !== expected.verifiedEndpoint.routeDigest) throw new Error("SSH_HOST_ROUTE_CHANGED");
 }
 
-function assertStrictConfig(stdout: string, target: VerifiedSshArgvInput): void {
+function assertStrictConfig(stdout: string, target: VerifiedSshArgvInput, password: boolean): void {
 	assertNoForwardedEnvironment(stdout);
 	const values = new Map<string, string[]>();
 	for (const rawLine of stdout.split(/\r?\n/)) {
@@ -90,8 +90,8 @@ function assertStrictConfig(stdout: string, target: VerifiedSshArgvInput): void 
 	requireBoolean("verifyhostkeydns", false);
 	// OpenSSH omits disabled UpdateHostKeys from -G on Debian, but prints it when enabled.
 	if (values.has("updatehostkeys")) requireBoolean("updatehostkeys", false);
-	requireBoolean("batchmode", true);
-	requireOne("numberofpasswordprompts", "0");
+	requireBoolean("batchmode", !password);
+	requireOne("numberofpasswordprompts", password ? "1" : "0");
 	requireOne("connecttimeout", String(Math.ceil(target.connectTimeoutMs / 1000)));
 	requireOne("connectionattempts", "1");
 	requireOne("serveraliveinterval", "15");
@@ -157,7 +157,7 @@ async function cachedCandidateRoute(route: SshDraftRoute, pinAlias: string, clie
 }
 
 /** Build argv after fresh route/pin checks through the caller's client; ssh -G can evaluate Match exec or DNS. */
-export async function buildPinnedSshInvocation(userDataDir: string, hostId: string, kind: VerifiedSshCommandKind, options: { client: SshClientRuntime; remoteCommand?: string; bootstrap?: BootstrapCommandInput }): Promise<PinnedSshInvocation> {
+export async function buildPinnedSshInvocation(userDataDir: string, hostId: string, kind: VerifiedSshCommandKind, options: { client: SshClientRuntime; remoteCommand?: string; bootstrap?: BootstrapCommandInput; password?: boolean }): Promise<PinnedSshInvocation> {
 	if (typeof options?.client?.run !== "function" || typeof options.client.sshPath !== "string") throw new Error("SSH_HOST_CLIENT_CONTEXT_REQUIRED");
 	const client = options.client;
 	await assertNoPendingHostRebind(userDataDir);
@@ -178,7 +178,13 @@ export async function buildPinnedSshInvocation(userDataDir: string, hostId: stri
 		...(profile.proxyJump !== undefined ? { proxyJump: profile.proxyJump } : {}),
 		...(profile.identityFile !== undefined ? { identityFile: profile.identityFile } : {}),
 	};
-	const requestedArgs = buildVerifiedSshArgv(target, kind);
+	// A client that carries an askpass bridge must run interactively, otherwise the bridge is never asked.
+	// Which method the prompt belongs to is decided by the profile: password hosts narrow authentication to
+	// `password`, key hosts keep publickey (the bridge only answers the key's passphrase prompt).
+	const bridged = typeof options.client.env.SSH_ASKPASS === "string";
+	const password = options.password === true || (bridged && profile.authMethod === "password");
+	const passphrase = !password && bridged;
+	const requestedArgs = buildVerifiedSshArgv(target, kind, password || passphrase ? { ...(password ? { password: true } : {}), ...(passphrase ? { passphrase: true } : {}) } : {});
 	// The helper command is the one argv element a remote shell will parse; it stays optional so a plain
 	// preflight keeps producing exactly the argv earlier batches shipped, and it is never part of the
 	// resolved-config query (that query verifies the route, not the command).
@@ -190,7 +196,7 @@ export async function buildPinnedSshInvocation(userDataDir: string, hostId: stri
 	const strictQuery = await client.run(client.sshPath, strictArgs);
 	const effective = parseSshResolvedRoute(strictQuery);
 	assertSavedRoute(effective.hostName, effective.user, effective.port, sshRouteDigest(effective), profile);
-	assertStrictConfig(strictQuery.stdout, target);
+	assertStrictConfig(strictQuery.stdout, target, password || passphrase);
 	const current = (await RemoteHostStore.open(userDataDir)).getSnapshot();
 	const currentProfile = activeProfile(current, hostId);
 	if (current.revision !== initial.revision || JSON.stringify(currentProfile) !== JSON.stringify(profile)) throw new Error("SSH_HOST_NOT_READY");

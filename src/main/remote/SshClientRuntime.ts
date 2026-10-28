@@ -280,6 +280,30 @@ async function probeSshClientVersion(client: SshClientRuntime, run: SshCommandRu
  */
 const selfCheckCache = new WeakMap<SshClientRuntime, Promise<{ version: string }>>();
 
+/**
+ * Bind a client to extra environment variables (e.g. the askpass bridge).
+ *
+ * The env allowlist is the reason this exists: the sanitized environment is shared by every ssh process, and
+ * a password attempt needs `SSH_ASKPASS`/`SSH_ASKPASS_REQUIRE` that no other attempt may inherit. A per-host
+ * view keeps those two variables scoped to the host that actually holds an in-memory secret.
+ */
+export function withClientEnv(client: SshClientRuntime, extra: Readonly<Record<string, string>>): SshClientRuntime {
+	if (!client || typeof client.run !== "function" || typeof client.sshPath !== "string") throw new Error("SSH_CLIENT_CONTEXT_REQUIRED");
+	const env: NodeJS.ProcessEnv = { ...client.env };
+	for (const [key, value] of Object.entries(extra)) {
+		// Only plain variable names can be added; a NUL would truncate inside the child.
+		if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || typeof value !== "string" || value.length === 0 || value.includes("\0")) throw new Error("SSH_CLIENT_ARGUMENT_INVALID");
+		env[key] = value;
+	}
+	return Object.freeze({
+		sshPath: client.sshPath,
+		scpPath: client.scpPath,
+		env: Object.freeze(env),
+		run: createRunner(client.sshPath, env, MAX_COMMAND_TIMEOUT_MS),
+		runScp: createRunner(client.scpPath, env, MAX_COMMAND_TIMEOUT_MS),
+	});
+}
+
 /** Probe `ssh -V` (OpenSSH prints its banner on stderr) through the bound runner; returns a redacted version. */
 export async function runSshClientSelfCheck(client: SshClientRuntime, options: { run?: SshCommandRunner } = {}): Promise<{ version: string }> {
 	if (!client || typeof client.sshPath !== "string" || typeof client.run !== "function") throw new Error("SSH_CLIENT_CONTEXT_REQUIRED");

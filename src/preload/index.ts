@@ -364,8 +364,14 @@ const api = {
 	remoteHosts: {
 		/** 只读：列出已登记主机（不发请求、不启动 SSH）。功能未启用时返回稳定码。 */
 		list: () => ipcRenderer.invoke(ipcChannels.remoteHostsList) as Promise<import("../shared/types/remoteHost").RemoteHostListResult>,
-		/** 连接一台主机。这是本组里唯一会启动真实 SSH 的方法。 */
-		connect: (hostId: string) => ipcRenderer.invoke(ipcChannels.remoteHostConnect, hostId) as Promise<import("../shared/types/remoteHost").RemoteHostConnectResult>,
+		/** 连接一台主机。这是本组里唯一会启动真实 SSH 的方法；密码只随本次调用进入 main 内存。 */
+		connect: (hostId: string, password?: string) => ipcRenderer.invoke(ipcChannels.remoteHostConnect, hostId, password) as Promise<import("../shared/types/remoteHost").RemoteHostConnectResult>,
+		/** 打开系统文件选择器挑选私钥；返回绝对路径。 */
+		/** Edit an added host in place; an address change re-probes and re-pins in main. */
+		update: (input: { hostId: string; patch: import("../shared/types/remoteHost").RemoteHostUpdatePatch; secret?: string }) => ipcRenderer.invoke(ipcChannels.remoteHostUpdate, input) as Promise<import("../shared/types/remoteHost").RemoteHostUpdateResult>,
+		/** The edit form's starting values, including the stored secret (plaintext); null when none is saved. */
+		editDraft: (hostId: string) => ipcRenderer.invoke(ipcChannels.remoteHostEditDraft, hostId) as Promise<import("../shared/types/remoteHost").RemoteHostEditDraftResult>,
+		pickIdentityFile: () => ipcRenderer.invoke(ipcChannels.remoteHostPickIdentityFile) as Promise<import("../shared/types/remoteHost").RemoteHostPickIdentityFileResult>,
 		/** 断开一台主机（不忘记已验证的 bootstrap，重连会复用）。 */
 		disconnect: (hostId: string) => ipcRenderer.invoke(ipcChannels.remoteHostDisconnect, hostId) as Promise<import("../shared/types/remoteHost").RemoteHostDisconnectResult>,
 		/** 读取脱敏诊断历史（只读）。 */

@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LoaderCircle, Plus, Server, TerminalSquare, Trash2 } from "lucide-react";
+import { LoaderCircle, Pencil, Plus, Server, TerminalSquare, Trash2 } from "lucide-react";
 import { desktopApi } from "../../../desktopApi";
 import { t } from "../../../i18n";
 import { cn } from "../../../lib/utils";
 import { REMOTE_HOST_TONE_DOT_CLASS, resolveRemoteHostConnectionTone } from "../../../utils/remoteHostIdentity";
 import { Button } from "../../ui-shadcn/button";
+import { Input } from "../../ui-shadcn/input";
+import { Label } from "../../ui-shadcn/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../ui-shadcn/dialog";
 import { AddHostDialog } from "./AddHostDialog";
+import type { AddHostEditSeed } from "./AddHostDialog";
 import { RemoteConnectionProgressDialog } from "./RemoteConnectionProgressDialog";
 import { RepairPanel } from "./RepairPanel";
 import { RemoteProjectTrustPanel } from "./RemoteProjectTrustPanel";
@@ -34,6 +37,9 @@ export function ConnectionsTab() {
 	const [message, setMessage] = useState<string | null>(null);
 	const [diagnostics, setDiagnostics] = useState<Record<string, RemoteHostDiagnosticEntry[]>>({});
 	const [adding, setAdding] = useState(false);
+	/** 正在编辑的主机初值；加载失败时保留稳定码，不打开一个空表单。 */
+	const [editing, setEditing] = useState<AddHostEditSeed | null>(null);
+	const [editLoading, setEditLoading] = useState<string | null>(null);
 	/** 当前正在展示进度的那次连接；errorCode 只来自这次 connect 的结果。 */
 	const [progress, setProgress] = useState<{ hostId: string; label: string; errorCode: string | null } | null>(null);
 	/** 每台主机最近一次 connect 的稳定失败码；成功后清除，用于行内重试。 */
@@ -135,13 +141,40 @@ export function ConnectionsTab() {
 	}, [refreshWsl, removingWsl]);
 
 	/** 连接/断开共用一条路径：置忙 → 调用 → 用稳定码或状态回填 → 清忙。 */
-	const toggle = useCallback(async (hostId: string, connect: boolean, label?: string) => {
+	const [passwordRequest, setPasswordRequest] = useState<{ hostId: string; label: string } | null>(null);
+	const [passwordDraft, setPasswordDraft] = useState("");
+	/** 打开编辑表单：初值（含已存口令）由主进程一次性给出。 */
+	const openEditor = useCallback(async (hostId: string) => {
+		setEditLoading(hostId);
+		setMessage(null);
+		try {
+			const result = await desktopApi.remoteHosts.editDraft(hostId);
+			if (!result.ok) {
+				setMessage(t("settings.connections.edit.loadFailed", { code: result.code }));
+				return;
+			}
+			setEditing({
+				hostId: result.hostId,
+				label: result.draft.label,
+				hostName: result.draft.hostName,
+				...(result.draft.user === undefined ? {} : { user: result.draft.user }),
+				...(result.draft.port === undefined ? {} : { port: result.draft.port }),
+				...(result.draft.identityFile === undefined ? {} : { identityFile: result.draft.identityFile }),
+				...(result.draft.authMethod === undefined ? {} : { authMethod: result.draft.authMethod }),
+				...(result.secret === null ? {} : { secret: result.secret }),
+			});
+		} finally {
+			setEditLoading(null);
+		}
+	}, []);
+
+	const toggle = useCallback(async (hostId: string, connect: boolean, label?: string, password?: string) => {
 		const attempt = ++attemptRef.current;
 		setBusy((current) => ({ ...current, [hostId]: true }));
 		if (connect) setProgress({ hostId, label: label ?? hostId, errorCode: null });
 		try {
 			if (connect) {
-				const result = await desktopApi.remoteHosts.connect(hostId);
+				const result = await desktopApi.remoteHosts.connect(hostId, password);
 				// 取消/重试已换代：这次 attempt 的迟到结果整体丢弃。
 				if (attemptRef.current !== attempt) return;
 				if (result.ok) {
@@ -153,6 +186,12 @@ export function ConnectionsTab() {
 						delete next[hostId];
 						return next;
 					});
+				} else if (result.code === "SSH_PASSWORD_REQUIRED") {
+					// The secret lives in main memory only, so it is gone after a restart or a disconnect:
+					// ask for it again instead of reporting a generic connection failure.
+					setProgress(null);
+					setStates((current) => ({ ...current, [hostId]: "offline" }));
+					setPasswordRequest({ hostId, label: label ?? hostId });
 				} else {
 					// 失败不猜状态：显示稳定码，具体原因去诊断里看。
 					setMessage(t("settings.connections.connectFailed", { code: result.code }));
@@ -306,6 +345,18 @@ export function ConnectionsTab() {
 												type="button"
 												variant="ghost"
 												size="icon-sm"
+												className="shrink-0 text-muted-foreground hover:text-foreground"
+												title={t("settings.connections.edit.title")}
+												aria-label={t("settings.connections.edit.title")}
+												disabled={pending || editLoading === host.id}
+												onClick={() => void openEditor(host.id)}
+											>
+												<Pencil className="size-3.5" aria-hidden="true" />
+											</Button>
+											<Button
+												type="button"
+												variant="ghost"
+												size="icon-sm"
 												className="shrink-0 text-muted-foreground hover:text-destructive"
 												title={t("settings.connections.remove")}
 												aria-label={t("settings.connections.remove")}
@@ -404,15 +455,81 @@ export function ConnectionsTab() {
 			) : null}
 			{/* 远端信任清单：与主机列表同一页（都是「远端开发」这一域的设置），但状态权威是决策存储而非连接状态。 */}
 			<RemoteProjectTrustPanel />
+			{passwordRequest !== null ? (
+				<Dialog
+					open
+					onOpenChange={(open) => {
+						if (!open) {
+							setPasswordRequest(null);
+							setPasswordDraft("");
+						}
+					}}
+				>
+					<DialogContent>
+						<DialogHeader>
+							<DialogTitle>{t("settings.connections.password.title", { host: passwordRequest.label })}</DialogTitle>
+							<DialogDescription>{t("settings.connections.password.description")}</DialogDescription>
+						</DialogHeader>
+						<div className="flex flex-col gap-1">
+							<Label htmlFor="remote-connect-password">{t("settings.connections.password.label")}</Label>
+							<Input id="remote-connect-password" type="password" autoComplete="off" spellCheck={false} value={passwordDraft} onChange={(event) => setPasswordDraft(event.target.value)} />
+						</div>
+						<DialogFooter>
+							<Button
+								variant="ghost"
+								onClick={() => {
+									setPasswordRequest(null);
+									setPasswordDraft("");
+								}}
+							>
+								{t("settings.connections.password.cancel")}
+							</Button>
+							<Button
+								disabled={passwordDraft.length === 0}
+								onClick={() => {
+									const request = passwordRequest;
+									const value = passwordDraft;
+									setPasswordRequest(null);
+									setPasswordDraft("");
+									void toggle(request.hostId, true, request.label, value);
+								}}
+							>
+								{t("settings.connections.password.submit")}
+							</Button>
+						</DialogFooter>
+					</DialogContent>
+				</Dialog>
+			) : null}
+			{editing !== null ? (
+				<AddHostDialog
+					edit={editing}
+					onClose={() => setEditing(null)}
+					onSubmitted={(hostId, label, password) => {
+						const host = editing;
+						setEditing(null);
+						void refresh();
+						// 地址或凭据变了，旧连接已不代表新配置：先断开再按新值连一次。
+						if (states[hostId] === "ready" || states[hostId] === "degraded") {
+							void (async () => {
+								await desktopApi.remoteHosts.disconnect(hostId).catch(() => undefined);
+								await toggle(hostId, true, label, password);
+							})();
+						} else {
+							void toggle(hostId, true, label, password);
+						}
+						void host;
+					}}
+				/>
+			) : null}
 			{adding ? (
 				<AddHostDialog
 					onClose={() => setAdding(false)}
-					onSubmitted={(hostId, label) => {
+					onSubmitted={(hostId, label, password) => {
 						// 添加即已验证（首次信任在主进程内完成）：关框、刷新列表，并直接把这条新主机连上——
 						// 用户的下一步永远是「连上它」，多一次点击只是仪式。
 						setAdding(false);
 						void refresh();
-						void toggle(hostId, true, label);
+						void toggle(hostId, true, label, password);
 					}}
 					onWslSubmitted={(host) => {
 						setAdding(false);

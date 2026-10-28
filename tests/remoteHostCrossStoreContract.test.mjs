@@ -51,6 +51,10 @@ const COVERED_HOST_ID_FIELDS = new Map([
 	["src/shared/types/remoteHost.ts:RemoteHostOperationFailure", "runtime"],
 	// 添加主机的结果只是回显 hostId（一个刚建的 draft/刚验证的主机），不持久化引用。
 	["src/shared/types/remoteHost.ts:RemoteHostAddResult", "runtime"],
+	// 编辑结果回显被编辑的主机 id；编辑本身是原位更新，不新建引用。
+	["src/shared/types/remoteHost.ts:RemoteHostUpdateResult", "runtime"],
+	// 编辑表单初值只回显「正在编辑哪台主机」，口令与字段都不落盘（口令走系统密钥库）。
+	["src/shared/types/remoteHost.ts:RemoteHostEditDraftResult", "runtime"],
 	// 移除主机的结果只回显刚移除的 id；真正的清理由 store 完成，不形成新的持久化引用。
 	["src/shared/types/remoteHost.ts:RemoteHostRemoveResult", "runtime"],
 	// 状态推送只是告诉界面「哪台主机变成什么状态」，不持久化任何东西。

@@ -76,15 +76,26 @@ export type RemoteHostConfigCandidate = {
 };
 
 /** 扫描结果。`skipped` 让 UI 能解释「为什么某台主机没出现」，而不是静默少一项。 */
-export type RemoteHostConfigScanResult = { ok: true; candidates: RemoteHostConfigCandidate[]; skipped: { alias: string; reason: "wildcard" | "invalid" | "unsupported-directive" }[]; user: string } | { ok: false; code: string };
+export type RemoteHostConfigScanResult = { ok: true; candidates: RemoteHostConfigCandidate[]; skipped: { alias: string; reason: "wildcard" | "invalid" | "unsupported-directive" }[]; user: string; identityFiles: string[] } | { ok: false; code: string };
 
 /** 手动添加的字段（与扫描候选共用同一套提交路径）。 */
+/** 编辑补丁：只带要改的字段；缺省字段保持原值。 */
+export type RemoteHostUpdatePatch = { label?: string; hostName?: string; user?: string; port?: number; identityFile?: string; authMethod?: "password" };
+
+export type RemoteHostUpdateResult = { ok: true; hostId: string; endpointChanged: boolean; verified: boolean } | (RemoteHostOperationFailure & { saved?: true });
+
+/** 编辑表单初值；`secret: null` 表示没有保存口令（或本机无法解密）。 */
+export type RemoteHostEditDraft = { label: string; hostName: string; user?: string; port?: number; identityFile?: string; authMethod?: "password" };
+export type RemoteHostEditDraftResult = { ok: true; hostId: string; draft: RemoteHostEditDraft; secret: string | null } | RemoteHostOperationFailure;
+
 export type RemoteHostAddInput = {
 	label: string;
 	hostName: string;
 	user?: string;
 	port?: number | null;
 	identityFile?: string | null;
+	/** `password` pins the key first and authenticates later with an in-memory secret. */
+	authMethod?: "password";
 };
 
 /**
@@ -95,6 +106,9 @@ export type RemoteHostAddInput = {
  * 不会在这里被静默接受）。
  */
 export type RemoteHostAddResult = { ok: true; hostId: string; status: "verified" } | { ok: false; code: string };
+
+/** Result of the native file picker used for a private key. The path is absolute; nothing is read here. */
+export type RemoteHostPickIdentityFileResult = { ok: true; path: string } | { ok: false; code: string };
 
 /**
  * 连接状态变化推送。

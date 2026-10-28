@@ -64,7 +64,8 @@ export function isRemoteHostStoreCode(code: string): code is RemoteHostStoreCode
 
 /** Editable fields of a never-verified draft; absent keys keep their current value. */
 export type RemoteHostDraftPatch = Partial<Pick<RemoteHostProfile, "label" | "sshHost" | "user" | "port" | "proxyJump" | "identityFile" | "connectTimeoutMs">>;
-type DraftInput = Pick<RemoteHostProfile, "label" | "sshHost" | "connectTimeoutMs"> & Partial<Pick<RemoteHostProfile, "user" | "port" | "proxyJump" | "identityFile" | "remotePiCommand" | "remoteNodeCommand">>;
+export type RemoteHostProfilePatch = RemoteHostDraftPatch & Partial<Pick<RemoteHostProfile, "authMethod">>;
+type DraftInput = Pick<RemoteHostProfile, "label" | "sshHost" | "connectTimeoutMs"> & Partial<Pick<RemoteHostProfile, "user" | "port" | "proxyJump" | "identityFile" | "authMethod" | "remotePiCommand" | "remoteNodeCommand">>;
 const MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024;
 
 /** Endpoint identity comparison for the offer/confirm handshake (optional fields must match exactly). */
@@ -139,7 +140,7 @@ async function readSnapshot(filePath: string): Promise<SnapshotRead> {
 	}
 }
 
-async function pinIssues(userDataDir: string, snapshot: DecodedRemoteHostSnapshot, pinStore: PinEnrollment, pendingActivationHostId?: string): Promise<string[]> {
+async function pinIssues(userDataDir: string, snapshot: DecodedRemoteHostSnapshot, pinStore: PinEnrollment, pendingActivationHostId?: string, pendingEndpointChangeHostId?: string): Promise<string[]> {
 	const issues: string[] = [];
 	const root = resolveRemoteHostPaths(userDataDir).pinRoot;
 	let names: string[] = [];
@@ -159,10 +160,13 @@ async function pinIssues(userDataDir: string, snapshot: DecodedRemoteHostSnapsho
 		// A pin whose host id is retired is leftover garbage from a retired host, not damage: the id can
 		// never be reused, so it cannot be mistaken for a live trust anchor.
 		if (retired.has(name)) continue;
-		if (!profile?.verifiedEndpoint) issues.push("REMOTE_HOST_PIN_ORPHAN");
+		// A host whose endpoint is being re-pointed keeps its old pin until the commit lands; tolerating it
+		// only for the duration of that write is what makes "clear verifiedEndpoint, then drop the pin"
+		// safe. Any crash between the two steps is still an orphan pin the repair panel can prune.
+		if (!profile?.verifiedEndpoint && name !== pendingEndpointChangeHostId) issues.push("REMOTE_HOST_PIN_ORPHAN");
 	}
 	for (const profile of snapshot.profiles) {
-		if (!profile.verifiedEndpoint) continue;
+		if (!profile.verifiedEndpoint || profile.id === pendingEndpointChangeHostId) continue;
 		try {
 			await pinStore.readPin(profile.id, profile.verifiedEndpoint);
 		} catch {
@@ -207,7 +211,7 @@ async function pruneRetiredPins(userDataDir: string, snapshot: DecodedRemoteHost
 	}
 }
 
-async function loadState(userDataDir: string, pinStore: PinEnrollment, pendingActivationHostId?: string): Promise<RemoteHostStoreState> {
+async function loadState(userDataDir: string, pinStore: PinEnrollment, pendingActivationHostId?: string, pendingEndpointChangeHostId?: string): Promise<RemoteHostStoreState> {
 	const paths = resolveRemoteHostPaths(userDataDir);
 	const [primary, backup] = await Promise.all([readSnapshot(paths.hostStoreFile), readSnapshot(paths.hostStoreBackupFile)]);
 	const reasons: string[] = [];
@@ -229,7 +233,7 @@ async function loadState(userDataDir: string, pinStore: PinEnrollment, pendingAc
 	} else if (primary.kind !== "missing" || backup.kind !== "missing") {
 		reasons.push("REMOTE_HOST_SNAPSHOT_INVALID");
 	}
-	reasons.push(...(await pinIssues(userDataDir, snapshot, pinStore, pendingActivationHostId)));
+	reasons.push(...(await pinIssues(userDataDir, snapshot, pinStore, pendingActivationHostId, pendingEndpointChangeHostId)));
 	return { ...snapshot, status: reasons.length ? "needs-repair" : "ready", reasons: [...new Set(reasons)] };
 }
 
@@ -342,6 +346,86 @@ export class RemoteHostStore {
 	}
 
 	/**
+	 * Edit a profile in place, including one that is already verified.
+	 *
+	 * This deliberately does not mint a new host id. A new id would break every project and session that
+	 * points at this host and fragment the history of one machine into several rows - the exact problem
+	 * the upstream implementation fixed by editing in place. The trust anchor is what moves: when the
+	 * endpoint (host/user/port/proxyJump) changes, the old pin and `verifiedEndpoint` describe a machine
+	 * this profile no longer denotes, so both are dropped and the host must be re-verified before it can
+	 * be connected. A profile that keeps its endpoint keeps its pin unchanged.
+	 */
+	async updateProfile(hostId: string, patch: RemoteHostProfilePatch, expectedRevision: number): Promise<{ profile: RemoteHostProfile; endpointChanged: boolean }> {
+		if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw new Error("REMOTE_HOST_EDIT_INVALID");
+		// The marker has to be known before the write so both the pre-write and post-write consistency
+		// checks tolerate the intermediate "pin present, verifiedEndpoint cleared" state.
+		const current = this.state.profiles.find((item) => item.id === hostId);
+		const has = (key: keyof RemoteHostProfilePatch): boolean => Object.hasOwn(patch, key);
+		const endpointChanged = current !== undefined && ((has("sshHost") && patch.sshHost !== current.sshHost) || (has("user") && patch.user !== current.user) || (has("port") && patch.port !== current.port) || (has("proxyJump") && patch.proxyJump !== current.proxyJump));
+		let changed = false;
+		const updated = await this.mutate(
+			expectedRevision,
+			async (snapshot) => {
+				const profile = snapshot.profiles.find((item) => item.id === hostId);
+				if (!profile || profile.disabledAt) throw new Error("REMOTE_HOST_EDIT_INVALID");
+				const pick = <K extends keyof RemoteHostProfilePatch>(key: K, fallback: RemoteHostProfilePatch[K]): RemoteHostProfilePatch[K] => (Object.hasOwn(patch, key) ? patch[key] : fallback);
+				const label = pick("label", profile.label);
+				const sshHost = pick("sshHost", profile.sshHost);
+				const user = pick("user", profile.user);
+				const port = pick("port", profile.port);
+				const proxyJump = pick("proxyJump", profile.proxyJump);
+				const identityFile = pick("identityFile", profile.identityFile);
+				const connectTimeoutMs = pick("connectTimeoutMs", profile.connectTimeoutMs);
+				const authMethod = pick("authMethod", profile.authMethod);
+				if (typeof label !== "string" || !label.trim() || label.length > 128 || /[ -]/.test(label)) throw new Error("REMOTE_HOST_EDIT_INVALID");
+				if (typeof sshHost !== "string" || !sshHost.trim() || /[ -]/.test(sshHost)) throw new Error("REMOTE_HOST_EDIT_INVALID");
+				if (identityFile !== undefined && (typeof identityFile !== "string" || !isAbsolute(identityFile) || /[ -]/.test(identityFile))) throw new Error("REMOTE_HOST_EDIT_INVALID");
+				if (typeof connectTimeoutMs !== "number" || !Number.isSafeInteger(connectTimeoutMs) || connectTimeoutMs < 1000 || connectTimeoutMs > 120_000) throw new Error("REMOTE_HOST_EDIT_INVALID");
+				if (authMethod !== undefined && authMethod !== "password") throw new Error("REMOTE_HOST_EDIT_INVALID");
+				try {
+					buildSshConfigQueryArgs({ sshHost, ...(user !== undefined ? { user } : {}), ...(port !== undefined ? { port } : {}), ...(proxyJump !== undefined ? { proxyJump } : {}) });
+				} catch {
+					throw new Error("REMOTE_HOST_EDIT_INVALID");
+				}
+				changed = sshHost !== profile.sshHost || user !== profile.user || port !== profile.port || proxyJump !== profile.proxyJump;
+				const { user: _user, port: _port, proxyJump: _proxyJump, identityFile: _identityFile, authMethod: _authMethod, verifiedEndpoint: _verifiedEndpoint, verifiedAt: _verifiedAt, ...rest } = profile;
+				const next: RemoteHostProfile = {
+					...rest,
+					label,
+					sshHost,
+					connectTimeoutMs,
+					updatedAt: new Date().toISOString(),
+					...(user !== undefined ? { user } : {}),
+					...(port !== undefined ? { port } : {}),
+					...(proxyJump !== undefined ? { proxyJump } : {}),
+					...(identityFile !== undefined ? { identityFile } : {}),
+					...(authMethod !== undefined ? { authMethod } : {}),
+					// Keeping the anchor is only correct while the endpoint identity is unchanged.
+					...(!changed && profile.verifiedEndpoint !== undefined ? { verifiedEndpoint: profile.verifiedEndpoint } : {}),
+					...(!changed && profile.verifiedAt !== undefined ? { verifiedAt: profile.verifiedAt } : {}),
+				};
+				return { next: { ...snapshot, profiles: snapshot.profiles.map((item) => (item.id === hostId ? next : item)) }, result: { profile: next, endpointChanged: changed } };
+			},
+			undefined,
+			endpointChanged ? hostId : undefined,
+		);
+		// Order matters: the snapshot commit is the authoritative record, so the pin is dropped only after
+		// it lands. A crash in between leaves an orphan pin - the store's existing repair path prunes it -
+		// whereas deleting first would leave a verified profile with no trust anchor.
+		if (updated.endpointChanged) {
+			try {
+				await this.pinStore.deletePin?.(hostId);
+			} catch {
+				// The endpoint change already invalidated the pin for connection purposes.
+			}
+			// Recompute the status now that the orphan pin is gone; without this the instance would keep
+			// the pending marker out of its own state and report needs-repair.
+			await this.refresh();
+		}
+		return updated;
+	}
+
+	/**
 	 * Compress a disabled tombstone into a retired id. Requires a reference provider: without one the
 	 * store cannot prove that no project/session still points at the host, and a silent hard delete
 	 * would break those locators without any way to detect it.
@@ -433,6 +517,7 @@ export class RemoteHostStore {
 			...(input.port !== undefined ? { port: input.port } : {}),
 			...(input.proxyJump !== undefined ? { proxyJump: input.proxyJump } : {}),
 			...(input.identityFile !== undefined ? { identityFile: input.identityFile } : {}),
+			...(input.authMethod !== undefined ? { authMethod: input.authMethod } : {}),
 			...(input.remotePiCommand !== undefined ? { remotePiCommand: input.remotePiCommand } : {}),
 			...(input.remoteNodeCommand !== undefined ? { remoteNodeCommand: input.remoteNodeCommand } : {}),
 		};
@@ -453,6 +538,9 @@ export class RemoteHostStore {
 			senderId,
 			route: { sshHost: profile.sshHost, ...(profile.user !== undefined ? { user: profile.user } : {}), ...(profile.port !== undefined ? { port: profile.port } : {}), ...(profile.proxyJump !== undefined ? { proxyJump: profile.proxyJump } : {}) },
 			...(preverifiedHostKey === undefined ? {} : { preverifiedHostKey }),
+			// A password host has no credential at enrollment time by design: the key is pinned first, the
+			// secret is only ever sent to a host whose key is already on disk.
+			...(profile.authMethod === "password" ? { allowUnauthenticatedHostKey: true } : {}),
 		});
 	}
 
@@ -595,7 +683,7 @@ export class RemoteHostStore {
 		}
 	}
 
-	private async mutate<T>(expectedRevision: number, change: (snapshot: DecodedRemoteHostSnapshot) => Promise<{ next: DecodedRemoteHostSnapshot; result: T; write?: boolean }>, pendingActivationHostId?: string): Promise<T> {
+	private async mutate<T>(expectedRevision: number, change: (snapshot: DecodedRemoteHostSnapshot) => Promise<{ next: DecodedRemoteHostSnapshot; result: T; write?: boolean }>, pendingActivationHostId?: string, pendingEndpointChangeHostId?: string): Promise<T> {
 		if (this.state.status !== "ready") throw new Error("REMOTE_HOST_STORE_NEEDS_REPAIR");
 		if (!Number.isSafeInteger(expectedRevision) || expectedRevision !== this.state.revision) throw new Error("REMOTE_HOST_REVISION_CONFLICT");
 		await mkdir(this.userDataDir, { recursive: true });
@@ -608,7 +696,7 @@ export class RemoteHostStore {
 		}
 		let writeStarted = false;
 		try {
-			const disk = await loadState(this.userDataDir, this.pinStore, pendingActivationHostId);
+			const disk = await loadState(this.userDataDir, this.pinStore, pendingActivationHostId, pendingEndpointChangeHostId);
 			if (disk.status !== "ready") throw new Error("REMOTE_HOST_STORE_NEEDS_REPAIR");
 			if (disk.revision !== expectedRevision || JSON.stringify(disk.profiles) !== JSON.stringify(this.state.profiles) || JSON.stringify(disk.retiredHostIds) !== JSON.stringify(this.state.retiredHostIds)) throw new Error("REMOTE_HOST_REVISION_CONFLICT");
 			const { next, result, write } = await change(disk);
@@ -616,7 +704,7 @@ export class RemoteHostStore {
 			const encoded = encodeRemoteHostSnapshot(next.profiles, next.retiredHostIds, expectedRevision + 1);
 			writeStarted = true;
 			await writeDurableJsonFile(this.filePath, `${JSON.stringify(encoded, null, 2)}\n`, { backupPath: this.backupFilePath, backupFailurePolicy: "throw" });
-			const checked = await loadState(this.userDataDir, this.pinStore);
+			const checked = await loadState(this.userDataDir, this.pinStore, undefined, pendingEndpointChangeHostId);
 			if (checked.status !== "ready" || checked.revision !== expectedRevision + 1) throw new Error("REMOTE_HOST_STORE_NEEDS_REPAIR");
 			this.state = checked;
 			return result;
