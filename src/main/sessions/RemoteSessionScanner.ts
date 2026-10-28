@@ -13,8 +13,14 @@
  * （读内容前不可知）——两者都只做默认根扫描，详见 docs/remote-development-handoff.md 第六批。
  *
  * 边界与不变量（全部 fail-closed）：
- * - 远端路径**绝不进本地 fs**：本模块不 import node:fs，唯一的远端访问通道是
- *   port.withProjectSession(hostId, 会话根, task) —— 借用它做「任意 root 的受控操作边界」。
+ * - 远端路径**绝不进本地 fs**：本模块不 import node:fs。远端访问面收敛成一个
+ *   `RemoteSessionTreeSource`（「在一个 root 上列目录 / 批量描述 / 有界头读」），两个实现：
+ *   `port.withProjectSession`（helper 会话，旧路径）与一次性短命令（`options.transport`，R1a）。
+ *   这样「候选选择 / 上限 / 字节预算 / 排序 / 归属」只有一份，换通道不改语义。
+ * - **扫描与根解析不抢 root**（R1a）：helper 一个 host 只有一个活动 root，借 `withProjectSession(会话根)`
+ *   读列表会把用户的文件树/Git 踢下线再连回来（docs/remote-file-tree-and-git-unification-plan.md §1.2 R1）。
+ *   装配注入一次性命令传输后这两件事全程不碰 helper；`register`/`title` 仍走 helper 会话（按需单条读，
+ *   不在本卡范围内），所以装配与旧行为在未注入 transport 时逐字不变。
  * - 结果只含 { remoteSessionId, remotePath, name, size, mtimeMs }；没有任何远端正文。
  * - 上限是硬上限：工作区目录 ≤512、会话文件 ≤2000、单次扫描元数据字节预算 ≤1 MiB、并发 ≤4。
  *   越界是**拒绝**（稳定码），不是悄悄截断——截断后的列表看起来和完整列表一样。
@@ -23,13 +29,24 @@
  * 已知代价（有意为之，写在这里免得下次误读）：fs.list 不带 mtime，所以每个候选文件都要被描述一次；
  * 自 helper 1.22.0 起这件事走 `fs.statMany`（每批 ≤64 条路径，逐条语义与单条 fs.stat 完全相同），
  * 2000 个文件最多 32 次 RPC，而不是 2000 次。候选选择、预算、排序与归属仍然全部留在本模块，
- * helper 只负责「把这些已知路径逐个描述」。
+ * helper 只负责「把这些已知路径逐个描述」。走一次性命令时请求数是同一量级（一目录一条命令 + 每 64 条
+ * 候选一条命令），差别是 mtime 只有秒精度、且需要远端有 `wc` 与 `stat`（细节见 `RemoteSessionScanSource`）。
  */
 
-import { REMOTE_HELPER_MAX_STAT_MANY_PATHS, type RemoteHelperListEntry } from "../remote/RemoteHelperContract";
+import { REMOTE_HELPER_MAX_STAT_MANY_PATHS } from "../remote/RemoteHelperContract";
 // hostId 的判据只允许有一份：与持久化边界（readSshSessionLocator / 项目域）共用 shared 的权威取值域。
 import { PROJECT_HOST_ID_PATTERN } from "../../shared/projectLocation";
 import { createRemoteWorkspaceReader, REMOTE_WORKSPACE_MAX_HEAD_BYTES, REMOTE_WORKSPACE_MAX_WINDOW_BYTES, type RemoteWorkspacePort } from "../remote/RemoteWorkspaceReader";
+// R1a：一次性命令版的「根解析 + 列表读取」。两个实现共用同一套扫描语义，区别只在远端访问通道。
+import {
+	createRemoteSessionScanSource,
+	type RemoteSessionCommandTransportPort,
+	type RemoteSessionTree,
+	type RemoteSessionTreeEntry,
+	type RemoteSessionTreeSource,
+} from "./RemoteSessionScanSource";
+// 装配侧（index.ts / remoteSessionIpc / remoteRuntimePort）要声明同样的端口：从本模块转出，避免各处自己去 source 模块取。
+export type { RemoteSessionCommandTransportPort };
 import { SUBAGENT_ARTIFACTS_DIR_NAME } from "../../shared/sessionIdentity";
 import type { RemoteSessionRegistration, RemoteSessionRegistrationInput } from "./SessionCatalog";
 import { inferSessionTitleFromHeadText, type SessionTitleInference } from "./sessionNameLine";
@@ -153,6 +170,12 @@ export type RemoteSessionScannerLimits = {
 
 export type RemoteSessionScannerOptions = {
 	port: RemoteSessionScannerPort;
+	/**
+	 * 可选：一次性远端命令传输（生产是 `runPinnedRemoteCommand`，与读/写/归档同一条 pinned SSH 通道）。
+	 * 给了它时**扫描与会话根解析**不再借 helper 会话，因此不再把 host 的活动 root 切走（R1a）；缺省退回
+	 * helper 会话路径，旧装配与测试替身因此逐字不变。
+	 */
+	transport?: RemoteSessionCommandTransportPort;
 	catalog?: RemoteSessionCatalogPort;
 	projectIdForHost?: RemoteSessionProjectResolver;
 	/** 只允许把这些硬上限调小（测试用）。 */
@@ -334,6 +357,45 @@ function sessionPort(session: RemoteSessionSessionPort, hostId: string): RemoteW
 	return port;
 }
 
+/**
+ * helper 会话实现（旧路径）：把三件只读操作绑到一个 root 的 helper 会话上。
+ *
+ * 代价如实记下：`withProjectSession` 会让 host **切换活动 root**（helper 启动时固定了 `--root`，换 root 就
+ * discard 重建），所以这条路径仍会把用户项目的文件树/Git 踢下线再连回来。装配注入 `transport` 后扫描与
+ * 根解析走一次性命令（`RemoteSessionScanSource`），不再经过这里；`register`/`title` 仍用它（按需单条读）。
+ */
+function helperTreeSource(port: RemoteSessionScannerPort): RemoteSessionTreeSource {
+	return {
+		async withRoot(hostId, root, task) {
+			const outcome = await port.withProjectSession(hostId, root, (session) => task(helperTree(hostId, session)));
+			// 建立失败（未连接/已断开）原样转述它自己的稳定码：调用方按稳定码上报，不猜原因。
+			if (!outcome.ok) throw new Error(outcome.code);
+			return outcome.value;
+		},
+	};
+}
+
+/** helper 会话上的四件只读操作：一律走 `RemoteWorkspaceReader`（与项目读面同一套协议校验）。 */
+function helperTree(hostId: string, session: RemoteSessionSessionPort): RemoteSessionTree {
+	const reader = createRemoteWorkspaceReader({ port: sessionPort(session, hostId) });
+	return {
+		async readHead(relativePath, maxBytes) {
+			const head = await reader.readHead(hostId, relativePath, maxBytes);
+			return { content: head.content, bytes: head.bytes, size: head.size };
+		},
+		async readWindow(relativePath, window) {
+			const read = await reader.readWindow(hostId, relativePath, window);
+			return { content: read.content, bytes: read.bytes, size: read.size };
+		},
+		async list(relativeDirectory) {
+			return (await reader.list(hostId, relativeDirectory)).entries;
+		},
+		async statMany(relativePaths) {
+			return (await reader.statMany(hostId, relativePaths)).entries;
+		},
+	};
+}
+
 type Budget = { remaining: number };
 
 /** 元数据字节预算：一旦为负立刻拒绝（预算是有界这件事的体现，不是统计值）。 */
@@ -342,7 +404,7 @@ function charge(budget: Budget, bytes: number): void {
 	if (budget.remaining < 0) throw new Error(REMOTE_SESSION_CODES.budgetExceeded);
 }
 
-function chargeListing(budget: Budget, entries: readonly RemoteHelperListEntry[]): void {
+function chargeListing(budget: Budget, entries: readonly RemoteSessionTreeEntry[]): void {
 	for (const entry of entries) charge(budget, Buffer.byteLength(entry.name, "utf8") + REMOTE_SESSION_ENTRY_OVERHEAD_BYTES);
 }
 
@@ -372,10 +434,18 @@ async function mapBounded<Input, Output>(items: readonly Input[], concurrency: n
 
 export function createRemoteSessionScanner(options: RemoteSessionScannerOptions): RemoteSessionScanner {
 	if (!isRecord(options) || !isRemoteSessionScannerPort(options.port)) throw new Error(REMOTE_SESSION_SCANNER_OPTIONS_INVALID);
+	// 传输端口是可选的能力升级：给了就必须真的可用（否则会在第一次扫描时才炸，而不是在装配期）。
+	if (options.transport !== undefined && (!isRecord(options.transport) || typeof options.transport.runRemoteCommand !== "function")) throw new Error(REMOTE_SESSION_SCANNER_OPTIONS_INVALID);
 	const parsedLimits = readLimits(options.limits);
 	if (parsedLimits === undefined) throw new Error(REMOTE_SESSION_SCANNER_OPTIONS_INVALID);
 	const limits: RemoteSessionScannerLimits = parsedLimits;
 	const { port, catalog, projectIdForHost } = options;
+	/**
+	 * 远端访问面：注入一次性命令传输时扫描与根解析全程不碰 helper（R1a）；缺省退回 helper 会话
+	 * （旧装配与测试替身）。两个实现都只提供「一个 root 上的三件只读操作」，所以下面的上限/预算/排序只有一份。
+	 */
+	const treeSource: RemoteSessionTreeSource =
+		options.transport === undefined ? helperTreeSource(port) : createRemoteSessionScanSource({ transport: options.transport });
 
 	/**
 	 * 解析会话根（J2，供 scan / title / register 共用）：
@@ -387,8 +457,9 @@ export function createRemoteSessionScanner(options: RemoteSessionScannerOptions)
 	 *   REMOTE_SESSION_SESSION_DIR_INVALID，**不退回默认根**：那会在配了自定义目录的机器上给出看起来正常但错的列表；
 	 * - 合法（含 `~` 展开与 `.`/`..` 规范化）⇒ 用它当会话根。
 	 *
-	 * 代价（如实记录）：一次操作 = 1 次配置探测（root=<home>/.pi/agent 的一次 withProjectSession + 1 stat + 1 次 ≤64 KiB read）
-	 * + 1 次真正的会话操作；两次的 root 不同会让服务的 helper 会话切换（现有服务语义）。
+	 * 代价（如实记录）：一次操作 = 1 次配置探测（<home>/.pi/agent 上的 1 次有界读，≤64 KiB）
+	 * + 1 次真正的会话操作。注入 `transport` 时两次都用一次性命令，**不会**切 host 的活动 root；
+	 * 退回 helper 会话时两次的 root 不同，服务会切会话（旧语义）。
 	 */
 	async function resolveSessionRoot(hostId: string): Promise<RemoteSessionRootResolution> {
 		let home: unknown;
@@ -415,13 +486,9 @@ export function createRemoteSessionScanner(options: RemoteSessionScannerOptions)
 	async function readConfiguredSessionDir(hostId: string, home: string): Promise<{ readonly ok: true; readonly sessionDir?: string } | { readonly ok: false; readonly code: string }> {
 		let raw: string | undefined;
 		try {
-			const outcome = await port.withProjectSession(hostId, home + "/" + REMOTE_SESSION_AGENT_DIR_SUFFIX, async (session) => {
-				const reader = createRemoteWorkspaceReader({ port: sessionPort(session, hostId) });
-				const head = await reader.readHead(hostId, REMOTE_SESSION_SETTINGS_FILE_NAME, REMOTE_WORKSPACE_MAX_HEAD_BYTES);
-				// 配置可能截断多字节字符：U+FFFD 落在字符串里会让 JSON.parse 失败，于是按「未配置」处理。
-				return new TextDecoder().decode(head.content);
-			});
-			if (outcome.ok) raw = outcome.value;
+			const head = await treeSource.withRoot(hostId, home + "/" + REMOTE_SESSION_AGENT_DIR_SUFFIX, (tree) => tree.readHead(REMOTE_SESSION_SETTINGS_FILE_NAME, REMOTE_WORKSPACE_MAX_HEAD_BYTES));
+			// 配置可能截断多字节字符：U+FFFD 落在字符串里会让 JSON.parse 失败，于是按「未配置」处理。
+			raw = new TextDecoder().decode(head.content);
 		} catch {
 			// 不存在 / 不是普通文件 / 权限 / 传输失败：一律按「未配置」处理（今天就是扫默认根）。
 			raw = undefined;
@@ -448,15 +515,14 @@ export function createRemoteSessionScanner(options: RemoteSessionScannerOptions)
 	 * 目录列表与每个候选的 stat 都并发受限；上限与字节预算在**发起之前**判断，越界即抛稳定码。
 	 * 任何一次列目录失败都会让整次扫描失败：返回「少一半但看起来完整」的列表比失败更糟。
 	 */
-	async function collectEntries(hostId: string, session: RemoteSessionSessionPort): Promise<RemoteSessionEntry[]> {
-		const reader = createRemoteWorkspaceReader({ port: sessionPort(session, hostId) });
+	async function collectEntries(tree: RemoteSessionTree): Promise<RemoteSessionEntry[]> {
 		const budget: Budget = { remaining: limits.maxTotalBytes };
-		const rootListing = await reader.list(hostId, ".");
-		chargeListing(budget, rootListing.entries);
+		const rootListing = await tree.list(".");
+		chargeListing(budget, rootListing);
 
 		const workspaceDirs: string[] = [];
 		const candidates: string[] = [];
-		for (const entry of rootListing.entries) {
+		for (const entry of rootListing) {
 			if (entry.kind === "directory") {
 				if (!SKIP_DIRECTORIES.has(entry.name)) workspaceDirs.push(entry.name);
 				continue;
@@ -469,14 +535,14 @@ export function createRemoteSessionScanner(options: RemoteSessionScannerOptions)
 
 		// 预算在 worker 里就扣：一旦越界就停止继续发列目录请求，而不是等 512 个目录都列完再判。
 		const listings = await mapBounded(workspaceDirs, limits.concurrency, async (directory) => {
-			const listing = await reader.list(hostId, directory);
-			chargeListing(budget, listing.entries);
+			const listing = await tree.list(directory);
+			chargeListing(budget, listing);
 			return listing;
 		});
 		for (let index = 0; index < workspaceDirs.length; index += 1) {
 			const directory = workspaceDirs[index];
 			const listing = listings[index];
-			for (const entry of listing.entries) {
+			for (const entry of listing) {
 				if (entry.kind === "file" && isJsonlName(entry.name)) candidates.push(directory + "/" + entry.name);
 			}
 		}
@@ -487,10 +553,10 @@ export function createRemoteSessionScanner(options: RemoteSessionScannerOptions)
 			await mapBounded(batches(candidates), limits.concurrency, async (batch) => {
 				// 预算按**逻辑条目**扣：一次批量 RPC 仍然等于 batch.length 条描述，不能因为合成一个帧就少计。
 				for (let index = 0; index < batch.length; index += 1) charge(budget, REMOTE_SESSION_STAT_OVERHEAD_BYTES);
-				const described = await reader.statMany(hostId, batch);
+				const described = await tree.statMany(batch);
 				const collected: RemoteSessionEntry[] = [];
-				for (const stat of described.entries) {
-					// 列表与 stat 之间类型变了（并发改名/替换）：跳过这条，不把非文件登记成会话。
+				for (const stat of described) {
+					// 列表与描述之间类型变了（并发改名/替换）或文件已消失：跳过这条，不把非文件登记成会话。
 					if (stat.kind !== "file") continue;
 					collected.push({ remoteSessionId: stat.path, remotePath: stat.path, name: titleFromRemoteSessionId(stat.path), size: stat.bytes, mtimeMs: stat.mtimeMs });
 				}
@@ -511,11 +577,11 @@ export function createRemoteSessionScanner(options: RemoteSessionScannerOptions)
 			if (!resolvedRoot.ok) return { ok: false, code: resolvedRoot.code };
 			const root = resolvedRoot.root;
 			try {
-				const outcome = await port.withProjectSession(host, root, (session) => collectEntries(host, session));
-				// withProjectSession 的建立失败（未连接/已断开）原样转述它自己的稳定码。
-				if (!outcome.ok) return { ok: false, code: outcome.code };
-				return { ok: true, entries: outcome.value };
+				// 两种实现共用这一句：注入 transport 时是一次性命令（不切 root），否则是 helper 会话。
+				const entries = await treeSource.withRoot(host, root, (tree) => collectEntries(tree));
+				return { ok: true, entries };
 			} catch (error) {
+				// 稳定码原样转述（连接层/命令源/reader 各自有自己的码），未知异常才折叠成 scanFailed。
 				return { ok: false, code: stableCodeOf(error) ?? REMOTE_SESSION_CODES.scanFailed };
 			}
 		},
@@ -534,12 +600,16 @@ export function createRemoteSessionScanner(options: RemoteSessionScannerOptions)
 			const root = resolvedRoot.root;
 			try {
 				// 登记前先在远端确认这条 id 现在仍是一个普通文件：远端 id 不能凭空编造。
-				const outcome = await port.withProjectSession(host, root, (session) => createRemoteWorkspaceReader({ port: sessionPort(session, host) }).stat(host, remoteSessionId));
-				if (!outcome.ok) return { ok: false, code: outcome.code };
-				if (outcome.value.kind !== "file") return { ok: false, code: "NOT_A_FILE" };
+				// 描述走与扫描同一个树面（单条 statMany 与单条 stat 逐字段同义）：注入 transport 时不切 root。
+				const described = await treeSource.withRoot(host, root, (tree) => tree.statMany([remoteSessionId]));
+				const stat = described[0];
+				if (stat === undefined) return { ok: false, code: REMOTE_SESSION_CODES.registerFailed };
+				// 两个码与 helper 通道逐字一致：路径消失 ⇒ PATH_NOT_FOUND，存在的非普通文件 ⇒ NOT_A_FILE。
+				if (stat.kind === "missing") return { ok: false, code: "PATH_NOT_FOUND" };
+				if (stat.kind !== "file") return { ok: false, code: "NOT_A_FILE" };
 				// 登记的标题仍是文件名 stem（暂定，catalog 里标成 fallback）：真实标题走 title() 按需解析，
 				// 登记路径**不读正文**（列表级发现必须与内容解析分离）。
-				const registration = await catalog.ensureRemoteSession({ projectId, hostId: host, remoteSessionId, remotePath: remoteSessionId, title: titleFromRemoteSessionId(remoteSessionId), updatedAt: outcome.value.mtimeMs });
+				const registration = await catalog.ensureRemoteSession({ projectId, hostId: host, remoteSessionId, remotePath: remoteSessionId, title: titleFromRemoteSessionId(remoteSessionId), updatedAt: stat.mtimeMs });
 				return { ok: true, sessionId: registration.record.id, created: registration.created, remoteSessionId, remotePath: remoteSessionId };
 			} catch (error) {
 				return { ok: false, code: stableCodeOf(error) ?? REMOTE_SESSION_CODES.registerFailed };
@@ -554,11 +624,10 @@ export function createRemoteSessionScanner(options: RemoteSessionScannerOptions)
 			if (!resolvedRoot.ok) return { ok: false, code: resolvedRoot.code };
 			const root = resolvedRoot.root;
 			try {
-				// 只读：整次解析在受控 root 内完成。帧预算 = 1 次 sizing stat + 头读 +（仅在头不足时）尾读，
-				// 每段各自 ≤64 KiB；刻意不接收也不需要 catalog —— 标题通道不写盘（写盘仍只属于 register）。
-				const outcome = await port.withProjectSession(host, root, async (session) => {
-					const reader = createRemoteWorkspaceReader({ port: sessionPort(session, host) });
-					const head = await reader.readHead(host, remoteSessionId, REMOTE_WORKSPACE_MAX_HEAD_BYTES);
+				// 只读：整次解析在同一个树面上完成（帧预算 = 1 次头读 +（仅在头不足时）1 次尾窗读，各自 ≤64 KiB）；
+				// 刻意不接收也不需要 catalog —— 标题通道不写盘（写盘仍只属于 register）。
+				const outcome = await treeSource.withRoot(host, root, async (tree) => {
+					const head = await tree.readHead(remoteSessionId, REMOTE_WORKSPACE_MAX_HEAD_BYTES);
 					// 头尾可能截断多字节字符：fatal:false 会得到 U+FFFD，落在最后一行 → 该行 JSON.parse 失败被跳过。
 					const headText = new TextDecoder().decode(head.content);
 					const headInference = inferSessionTitleFromHeadText(headText);
@@ -575,7 +644,7 @@ export function createRemoteSessionScanner(options: RemoteSessionScannerOptions)
 						// size > 128 KiB 时与原来一致（就是最后 ≤64 KiB）；64 KiB < size < 128 KiB 时只读头窗
 						// 没覆盖的那段，不再重复传输头窗覆盖过的字节。
 						const offset = Math.max(head.bytes, head.size - REMOTE_WORKSPACE_MAX_WINDOW_BYTES);
-						const tail = await reader.readWindow(host, remoteSessionId, { offset, maxBytes: REMOTE_WORKSPACE_MAX_WINDOW_BYTES, size: head.size });
+						const tail = await tree.readWindow(remoteSessionId, { offset, maxBytes: REMOTE_WORKSPACE_MAX_WINDOW_BYTES, size: head.size });
 						if (tail.bytes === 0) return { inference: headInference, tailDegraded: false };
 						// 同一套解析器跑 head + tail（本地 readHeadAndInfer 也是把两个窗口拼起来解析一次）：
 						// 权威名优先，弱兜底仍取最早一条 user 文本（头窗口在前）。
@@ -586,8 +655,7 @@ export function createRemoteSessionScanner(options: RemoteSessionScannerOptions)
 						return { inference: headInference, tailDegraded: true };
 					}
 				});
-				if (!outcome.ok) return { ok: false, code: outcome.code };
-				const { inference, tailDegraded } = outcome.value;
+				const { inference, tailDegraded } = outcome;
 				// tailDegraded 只在**真的降级**时出现（缺省即正常）：不给 shared 契约与既有 deepEqual 加噪声。
 				const degraded = tailDegraded ? { tailDegraded: true } : {};
 				// 解析不出绝不编造：强制 fallback 到文件名 stem（与 G3 的暂定标题同一取值）。

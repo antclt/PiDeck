@@ -13,7 +13,7 @@
  */
 
 import { ipcMain } from "electron";
-import { createRemoteSessionScanner, REMOTE_SESSION_CODES, type RemoteSessionCatalogPort, type RemoteSessionProjectResolver, type RemoteSessionRegisterResult, type RemoteSessionScannerPort, type RemoteSessionScanResult, type RemoteSessionTitleResult } from "../sessions/RemoteSessionScanner";
+import { createRemoteSessionScanner, REMOTE_SESSION_CODES, type RemoteSessionCatalogPort, type RemoteSessionCommandTransportPort, type RemoteSessionProjectResolver, type RemoteSessionRegisterResult, type RemoteSessionScannerPort, type RemoteSessionScanResult, type RemoteSessionTitleResult } from "../sessions/RemoteSessionScanner";
 
 /** 与 remoteHostIpc 同域：hostId 是 UUID 形态的稳定端点身份。 */
 const HOST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -30,6 +30,11 @@ export type RemoteSessionIpcInput = {
 	enabled: boolean;
 	/** 懒构建连接服务：解析失败（SSH 客户端不可用等）也是可上报的稳定码，不是崩溃。 */
 	service?: () => RemoteSessionScannerPort | undefined | Promise<RemoteSessionScannerPort | undefined>;
+	/**
+	 * 一次性远端命令（R1a）：给了它时 scan / 会话根解析 / register / title 都不再借 helper 会话，
+	 * 因此不会把 host 的活动 root 切走。每次创建 scanner 时才求值（门禁/装配状态都可能变）；缺省退回旧路径。
+	 */
+	transport?: () => RemoteSessionCommandTransportPort | undefined;
 	/** 懒取 SessionCatalog（旧装配可以不提供）。 */
 	catalog?: () => RemoteSessionCatalogPort | undefined;
 	/** 远端会话归属哪个本地项目：本批不解析正文，归属只能由装配给出。 */
@@ -90,7 +95,7 @@ export function registerRemoteSessionIpc(input: RemoteSessionIpcInput): void {
 		try {
 			const port = await input.service?.();
 			if (port === undefined) return { code: "REMOTE_CONNECTION_SERVICE_UNAVAILABLE" };
-			return { scanner: createRemoteSessionScanner({ port, catalog: input.catalog?.(), projectIdForHost: input.projectIdForHost }) };
+			return { scanner: createRemoteSessionScanner({ port, transport: input.transport?.(), catalog: input.catalog?.(), projectIdForHost: input.projectIdForHost }) };
 		} catch (error) {
 			return { code: codeOf(error, "REMOTE_CONNECTION_SERVICE_UNAVAILABLE") };
 		}

@@ -425,7 +425,7 @@ import { createRemoteSessionDelete } from "./remote/RemoteSessionDelete";
 import { createRemotePiConfigBackend } from "./config/RemotePiConfigBackend";
 import { createRemoteSessionHistoryWriter, type RemoteSessionMessageMutationPort } from "./remote/RemoteSessionHistoryWriter";
 import { exportRemoteSessionHtml, REMOTE_SESSION_EXPORT_LIMITS } from "./remote/RemoteSessionHtmlExport";
-import { createRemoteSessionScanner } from "./sessions/RemoteSessionScanner";
+import { createRemoteSessionScanner, type RemoteSessionCommandTransportPort } from "./sessions/RemoteSessionScanner";
 import type { SshSessionLocator } from "../shared/projectLocation";
 import { matchRemoteSessionProject } from "./remote/remoteSessionProjectMatch";
 import { openRemoteHostCatalogView } from "./remote/RemoteHostCatalogView";
@@ -652,6 +652,14 @@ let sessionRuntimeCoordinator: SessionRuntimeCoordinator;
  * 分支塞回本文件。
  */
 let remoteSessionMessageMutation: RemoteSessionMessageMutationPort | undefined;
+/**
+ * 远端一次性短命令传输（R1a）：扫描 / 会话根解析 / 登记用它替代 helper 会话，不再切 host 的活动 root。
+ *
+ * 为什么是模块级 let：它由 `registerIpc()` 与 pinned SSH 通道一起装配（那里才知道已验过的客户端），
+ * 而 `AgentManager` 的远端运行时端口比 `registerIpc()` 更早构造 — 与 `remoteProjectTrustService` 同理，
+ * 用解析器（`resolveRemoteTransport`）在**真正登记会话时**才求值，才不会捕获一个当时还不存在的对象。
+ */
+let remoteCommandTransport: RemoteSessionCommandTransportPort | undefined;
 /**
  * 远端项目 trust 决策服务（P4.4b）：决策表读写 + 主机 pin 事实 → 四态。
  *
@@ -3396,10 +3404,31 @@ function registerIpc() {
 		},
 	});
 	quitCleanup.register("remote-project-entries", remoteProjectEntries.dispose);
+	/**
+	 * 远端短命令的统一执行入口（会话读取/写入/归档/扫描四条链共用）：每次重新过 `buildPinnedSshInvocation`
+	 * （pin 文件/指纹、路由摘要、严格配置复查）。超时归传输层：`SshClientRuntime.run` 的 execFile 自带
+	 * 30 s 上限与 256 KiB 输出上限（远端历史窗口上界 128 KiB 就是为后者留的余量）。
+	 *
+	 * 定义在装配点之前（而不是就地定义）：会话扫描/登记也走它（R1a），而它们的装配代码在下面靠前的位置。
+	 */
+	const runPinnedRemoteCommand = async ({ hostId, remoteCommand }: { hostId: string; remoteCommand: string }) => {
+		const client = await remoteSshClientIfEnabled();
+		const invocation = await buildPinnedSshInvocation(app.getPath("userData"), hostId, "ssh-batch", { client, remoteCommand });
+		const result = await client.run(invocation.executable, invocation.args);
+		// stderr 也要回传：pi 对未知旗标的抱怨随版本在 stdout 或 stderr（模型目录的降级判据要用它），
+		// 丢掉就等于把「不认这个旗标」误判成「远端没有模型」。
+		return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr ?? "" };
+	};
+	/** 同一入口的端口形状：远端会话扫描/根解析/登记用它换掉 helper 会话（不切 host 的活动 root）。 */
+	remoteCommandTransport = { runRemoteCommand: runPinnedRemoteCommand };
+
 	// 远端 Session 只读发现与登记（Phase 3 第三段）。通道名由装配注入（与 contentStoreIpc 的 ChannelGroup 同一先例）。
 	registerRemoteSessionIpc({
 		enabled: remoteExperimentEnabled,
 		service: remoteHostServiceIfEnabled,
+		// R1a：扫描 / 根解析 / register / title 走一次性 pinned SSH 短命令（与读/写/归档同一条通道），
+		// 不再借 helper 会话 —— 否则每次刷新会话列表都会把用户项目的活动 root 切走再连回来。
+		transport: () => remoteCommandTransport,
 		catalog: () => sessionCatalog,
 		// 归属必须按**会话所在目录**判定：取该主机上的 ssh 项目作候选，用 pi 的目录编码与会话路径第一段比对。
 		// 判不出来（多候选且都没命中）⇒ undefined，由 scanner 以既有稳定码 REMOTE_SESSION_PROJECT_UNRESOLVED
@@ -3947,20 +3976,6 @@ function registerIpc() {
 	});
 
 	/**
-	 * 远端短命令的统一执行入口（读取与归档两条链共用）：每次重新过 `buildPinnedSshInvocation`
-	 * （pin 文件/指纹、路由摘要、严格配置复查）。超时归传输层：`SshClientRuntime.run` 的 execFile 自带
-	 * 30 s 上限与 256 KiB 输出上限（远端历史窗口上界 128 KiB 就是为后者留的余量）。
-	 */
-	const runPinnedRemoteCommand = async ({ hostId, remoteCommand }: { hostId: string; remoteCommand: string }) => {
-		const client = await remoteSshClientIfEnabled();
-		const invocation = await buildPinnedSshInvocation(app.getPath("userData"), hostId, "ssh-batch", { client, remoteCommand });
-		const result = await client.run(invocation.executable, invocation.args);
-		// stderr 也要回传：pi 对未知旗标的抱怨随版本在 stdout 或 stderr（模型目录的降级判据要用它），
-		// 丢掉就等于把「不认这个旗标」误判成「远端没有模型」。
-		return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr ?? "" };
-	};
-
-	/**
 	 * 远端会话根判定（远端读取与远端归档共用）：走**与扫描/登记同一份**实现。
 	 * pi 的 user-level `settings.json` 可以把会话根换掉，各自再拼一次 `<home>/.pi/agent/sessions` 就会在
 	 * 那些机器上读/写错文件（那是「读到了别人的历史」级别的问题，不是少一点）。
@@ -3968,7 +3983,7 @@ function registerIpc() {
 	const resolveRemoteSessionRoot = async (hostId: string): Promise<{ ok: true; root: string } | { ok: false; code: string }> => {
 		const port = await remoteHostServiceIfEnabled();
 		if (port === undefined) return { ok: false, code: "REMOTE_CONNECTION_SERVICE_UNAVAILABLE" };
-		return await createRemoteSessionScanner({ port, catalog: sessionCatalog }).resolveSessionRoot(hostId);
+		return await createRemoteSessionScanner({ port, catalog: sessionCatalog, transport: remoteCommandTransport }).resolveSessionRoot(hostId);
 	};
 
 	/**
@@ -5612,6 +5627,8 @@ app
 				resolveService: () => remoteHostServiceResolver?.(),
 				// 远端会话身份登记（P4.2 收口）的正门：catalog 也是懒取（AgentManager 比它更早装配）。
 				resolveCatalog: () => sessionCatalog,
+				// 登记时的会话根解析同样走一次性命令（R1a）：不在会话启动路径上切 host 的活动 root。
+				resolveRemoteTransport: () => remoteCommandTransport,
 				settings: () => settingsStore.get(),
 				// runner 1.1.0 起支持 init 帧 env：安全门可以拿到 PIDECK_SECURITY_CONFIG。
 				envChannelAvailable: true,

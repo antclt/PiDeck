@@ -26,7 +26,7 @@ import { listRemoteInjectableExtensionNames } from "../extensions/remoteExtensio
 import type { RemoteSessionRegistration } from "../sessions/SessionCatalog";
 // 会话根解析与文件名 stem 都从 scanner 转出：远端会话身份的两个既有判定（根在哪、暂定标题取什么）
 // 只允许有一份实现。
-import { createRemoteSessionScanner, REMOTE_SESSION_MAX_ID_LENGTH, REMOTE_SESSION_MAX_PATH_LENGTH, titleFromRemoteSessionId, type RemoteSessionCatalogPort, type RemoteSessionScannerPort } from "../sessions/RemoteSessionScanner";
+import { createRemoteSessionScanner, REMOTE_SESSION_MAX_ID_LENGTH, REMOTE_SESSION_MAX_PATH_LENGTH, titleFromRemoteSessionId, type RemoteSessionCatalogPort, type RemoteSessionCommandTransportPort, type RemoteSessionScannerPort } from "../sessions/RemoteSessionScanner";
 import type { PiRuntimeLauncher, RemoteSshPiRuntimeLaunchPlan } from "./PiSpawnHandle";
 import { buildRemotePiRuntimePlan } from "./piRemoteRuntimePlan";
 import { remoteSecurityPolicyPath } from "../remote/RemoteSecurityPolicyArtifact";
@@ -197,6 +197,12 @@ export type RemoteRuntimePortDeps = {
 	 * 与 `resolveService` 同一个立场：装配比 catalog 早，回调只在真正要登记时才求值。
 	 */
 	resolveCatalog(): Promise<RemoteSessionCatalogPort | undefined> | RemoteSessionCatalogPort | undefined;
+	/**
+	 * 一次性远端命令（R1a，可选）：与 `resolveService` 同一立场——只在真正要解析会话根时才求值。
+	 * 给了它时 `registerRemoteSession` 的根解析不借 helper 会话（不再把 host 的活动 root 切走）；
+	 * 缺省退回 `withProjectSession`（旧装配/测试替身）。
+	 */
+	resolveRemoteTransport?(): RemoteSessionCommandTransportPort | undefined;
 	/** 一次运行的身份（runner lease 命名/握手校验）；缺省随机，测试可注入固定值。 */
 	createNonce?(): string;
 };
@@ -395,7 +401,7 @@ export function createRemoteRuntimePort(deps: RemoteRuntimePortDeps): RemoteRunt
 			const catalog = await resolveOrUnavailable(() => deps.resolveCatalog());
 			// 会话根解析**复用 scanner 的导出入口**（默认 `<home>/.pi/agent/sessions` vs user-level
 			// `settings.json` 的 `sessionDir` 覆盖）：失败原样转述它的稳定码，不在这里折叠。
-			const resolvedRoot = await createRemoteSessionScanner({ port: service }).resolveSessionRoot(input.hostId);
+			const resolvedRoot = await createRemoteSessionScanner({ port: service, transport: deps.resolveRemoteTransport?.() }).resolveSessionRoot(input.hostId);
 			if (!resolvedRoot.ok) throw new Error(resolvedRoot.code);
 			const remoteSessionId = remoteSessionIdWithinRoot(resolvedRoot.root, input.remotePath);
 			if (remoteSessionId === undefined) throw new Error(REMOTE_RUNTIME_CODES.locatorUnresolved);
