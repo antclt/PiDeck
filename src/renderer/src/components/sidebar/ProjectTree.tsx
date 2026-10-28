@@ -141,7 +141,9 @@ export function ProjectTree(props: {
 		const pendingAskCount = countProjectPendingAsks(project.id, props.controller, sessionRuntimeUiById);
 		return (
 			<SidebarRemovalRow key={project.id} itemId={project.id} className={cn("project-group mb-1.5", project.worktreeEnabled && "worktree-enabled")}>
+				{/* data-project-row-id：搜索面板选中项目后按此定位（SidebarContent.revealSearchProject）。 */}
 				<div
+					data-project-row-id={project.id}
 					className={cn(
 						treeRowClass,
 						dragging && "dragging opacity-60",
@@ -320,6 +322,7 @@ export function ProjectTree(props: {
             + 「⋯ 更多操作」（完整项目菜单，新建/定位/会话管理/目录设置）。
             新建与折叠都是最常用入口，直接外露；其余操作收进完整菜单。 */}
 				<div
+					data-project-row-id={project.id}
 					className={cn("flex items-center justify-between px-1 pb-1", stickyHeader && stickyGroupHeaderClass)}
 					// 右键与「⋯」同款完整项目菜单：让 Chat 项目行获得与工作区项目一致的操作入口
 					onContextMenu={(event) => {

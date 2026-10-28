@@ -1,5 +1,5 @@
 import { Activity, Bolt, CirclePlus, Clock, Folder, Globe, MessageSquare, Monitor, Moon, Search, Sun } from "lucide-react";
-import { useEffect, useReducer, useState, type ReactNode } from "react";
+import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import type { AgentBackend, AgentTab, AppThemeMode, ArchivedDshSession, ArchivedPiSession, Project, SessionRecord, SessionSummary, WorktreeEntry } from "../../../../shared/types";
 import { AgentContextMenu, DraftSessionContextMenu, ProjectContextMenu, SessionContextMenu, SessionManagerModal, SessionSourceFilterMenu, WorktreeCreateDialog } from "./SidebarParts";
 import { automationModuleHiddenAtom, sessionRecordToSummary } from "../../atoms";
@@ -286,6 +286,30 @@ export function SidebarContent(props: SidebarContentProps) {
 	const currentProject = props.currentProjectId ? controller.catalog.projects.find((project) => project.id === props.currentProjectId) : undefined;
 	const currentRootProject = currentProject?.worktreeParentId ? (controller.catalog.projects.find((project) => project.id === currentProject.worktreeParentId) ?? currentProject) : currentProject;
 
+	// 列表滚动容器：搜索面板选中项目后要把目标行滚进可视区（见 revealSearchProject）。
+	const conversationListRef = useRef<HTMLElement>(null);
+	/**
+	 * 搜索面板里点项目 = 「跳过去」：右侧已由 actions.projects.select 切到该项目引导页，
+	 * 左侧列表必须跟着定位，否则分段停在「活动/聊天」时目标行根本没挂载，看起来像没反应。
+	 * 顺序：先切到项目所在分段（Chat 在「聊天」，其余在「项目」）→ 展开父级与自身 →
+	 * 等搜索词清空、行回流落定后滚到可视区。搜索词由面板关闭同步清空，所以等两帧。
+	 */
+	const revealSearchProject = (project: Project) => {
+		if (!props.simple) controller.setNavTab(isChatProject(project) ? "chats" : "projects");
+		// worktree 子项目行挂在父项目树下：父项目折叠或该分支未展开时行都不存在，先展开。
+		const parent = project.worktreeParentId ? controller.catalog.projects.find((candidate) => candidate.id === project.worktreeParentId) : undefined;
+		if (parent) {
+			controller.revealProject(parent.id);
+			controller.expandWorktreeSessions(project.id);
+		}
+		controller.revealProject(project.id);
+		requestAnimationFrame(() => {
+			requestAnimationFrame(() => {
+				conversationListRef.current?.querySelector<HTMLElement>(`[data-project-row-id="${CSS.escape(project.id)}"]`)?.scrollIntoView({ block: "nearest" });
+			});
+		});
+	};
+
 	// MorphingSearch 检索项：扁平化所有项目 + 会话，供命令面板跳转。
 	// 项目项用目录名（chat 用「Chat」），会话项用标题 + 预览；选中即打开/选中目标。
 	// pinyin：中文标题的首字母/全拼键（纯字母查询才能命中，键按标题缓存）。
@@ -301,7 +325,7 @@ export function SidebarContent(props: SidebarContentProps) {
 			icon: isChatProject(project) ? MessageSquare : Folder,
 			onSelect: () => {
 				actions.projects.select(project.id);
-				controller.setProjectExpanded(project.id, true);
+				revealSearchProject(project);
 			},
 		});
 		for (const session of controller.catalog.sessionsByProject[project.id] ?? []) {
@@ -437,7 +461,7 @@ export function SidebarContent(props: SidebarContentProps) {
 
 				{/* 单一滚动区承载项目与展开内容，避免项目导航/详情双滚动和重复标题。
             scrollbar-gutter: stable：滚动条出现/消失时列表宽度不跳变（与抽屉一致）。 */}
-				<section className="conversation-list min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
+				<section ref={conversationListRef} className="conversation-list min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
 					<ProjectTree
 						simple={props.simple}
 						controller={controller}
