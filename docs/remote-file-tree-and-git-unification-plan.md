@@ -52,6 +52,22 @@ R1 的后果（写下来以免当成 bug 反复查）：
 
 **看过但不构成根问题（不改，只记一笔）**：连接状态机（`RemoteHostConnectionState` 是纯 reducer + generation 围栏）、`withProjectSession` 的会话钉定、会话文件写入（收敛在 `RemoteSessionHistoryWriter` + 一个 write guard）、远端模型目录（复用 live runtime，不重新探测 pi）、上传的 stdin 分块（argv 8 KiB 预算所致）、四个传输并存（helper NDJSON / 终端 PTY / stdin 分块 / 远端 pi rpc——**各有物理原因，统一它们才是错的**）。
 
+### 1.2.1 R1a 任务卡：会话扫描不抢 root（可并行，不碰 helper）
+
+**目标**：读会话列表 / 解析会话根时不再借 `withProjectSession`，因此不再把用户项目的活动 root 切走。
+
+- 现状：`RemoteSessionScanner.ts:418` 走 `port.withProjectSession(hostId, <home>/.pi/agent, …)` → helper 换 root → `RemoteHostConnectionService.ts:618-623` 直接 `discard` 整个会话。用户每刷一次会话列表，文件树/Git 就要重连一次。
+- 现成的对标先例：`RemoteSessionHistoryWriter.ts:755` 用**一次性命令** `ports.transport.runRemoteCommand({ hostId, remoteCommand })`，全程不碰 helper、不切 root。会话历史**写**已经是这条路，**扫描**却不是 → 这就是 R1a。
+- 做法：
+  1. `src/main/sessions/` 新增一次性命令版的「会话根解析 + 会话列表读取」（复用 `RemoteSessionHistoryWriter` 同款 transport 注入；stderr 不外传，失败折稳定码）。
+  2. `RemoteSessionScanner` 改用它；`remoteSessionIpc` / `remoteRuntimePort` 的端口装配同步（`resolveSessionRoot` 也走同一路径）。
+  3. 命令形态沿用既有判据：`BOUNDARY_SCRIPT` 同源的路径校验、输出上限、闭集稳定码。
+- **不碰**：`RemoteHelperContract.ts`、`RemoteHelperEntry.ts`、`RemoteHostConnectionService.ts` 内部逻辑（只在装配处传新端口）。
+- 门禁：`node --test tests/remoteSession*.test.mjs`；新增一例断言“扫描会话列表后不发生 root 切换”（用假 port 计数，断言 `withProjectSession` 零调用）；`npm run typecheck`。
+- 冲突面：`src/main/index.ts`（公共汇聚文件，单写者）、`src/main/ipc/remoteSessionIpc.ts`；与 hosts 域的并行改动不重叠。
+
+R1b（helper 多 root）不在本卡内：它要改 helper 协议（帧带 root，或每 root 一进程 + LRU），必须与 W6 的 helper 升版同批，且先回答“同 host 并行多项目要不要支持”。
+
 ### 1.3 审计口径：为什么以前会漏，以后怎么不再漏
 
 以前的盘点按**界面**分组（文件树 / Git 面板 / 侧栏圆点），所以只找到了“同一份界面里”的重复；跨界面、跨传输、跨域的同一种病看不见。改成按**不变量**逐域问 5 句：
