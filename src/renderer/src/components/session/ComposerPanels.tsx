@@ -233,7 +233,9 @@ export function QueuedPromptPanel(props: {
 	// 停止响应后的队列抑制（toast 瞬时易逝）：面板常驻提示用户队列不会自动发送，需再发一条消息恢复。
 	const drainSuspended = useAtomValue(queueDrainSuppressedByIdAtom)[sessionId ?? ""] === true;
 	const askPanel = useAskPanel();
-	const agentBusy = isSessionRuntimeBusy(runtime?.status, runtime?.state);
+	const backend = runtime?.backend ?? sessionRecord?.backend;
+	// ACP 回合结算后 status 可能滞后为 running：isTurnActive=false 视为空闲（与 composer 发送判定同口径）。
+	const agentBusy = isSessionRuntimeBusy(runtime?.status, runtime?.state, backend === "acp" ? "acp" : undefined);
 	// runtime 优先于 record（record 未及回写时 runtime 已生效）；ACP 无 steer 通道。
 	const steerSupported = (runtime?.backend ?? sessionRecord?.backend) !== "acp";
 	if (!sessionId || !props.prompts.length) return null;

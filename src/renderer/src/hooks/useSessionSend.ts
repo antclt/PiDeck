@@ -30,6 +30,8 @@ import { t, translateI18nDescriptor } from "../i18n";
 import { DSH_INSTALL_SETTINGS_TARGET, maybeHintMissingDshRunnerNode, showDshRuntimeBlockHint } from "../utils/dshRuntimeHint";
 import { toSessionRuntimeTarget } from "../utils/sessionCommands";
 import { sessionReloadingByIdAtom } from "../atoms/session-commands-atoms";
+import { logFromRenderer } from "../utils/rendererLog";
+import { shouldMarkRuntimeRunningAfterSend } from "../utils/sessionActivityClock";
 import { dshSendBlockReason } from "../../../shared/types/dshRuntime";
 
 export type EnqueuePromptSnapshot = {
@@ -498,6 +500,16 @@ export function useSessionSend(options: UseSessionSendOptions) {
 				rejectEmptyTemplate(sessionId, emptyTemplateName);
 				return;
 			}
+			// 队列是用户可见状态（输入框上方一排），记下当时的忙碌依据，方便区分
+			// 「真的在跑」与「status 滞后于回合结算」两类误排队。
+			const runtimeBeforeQueue = store.get(sessionRuntimeByIdAtom)[sessionId];
+			logFromRenderer("debug", "session", "Prompt queued", {
+				sessionId,
+				behavior: streamingBehavior,
+				status: runtimeBeforeQueue?.status,
+				turnActive: runtimeBeforeQueue?.state?.isTurnActive,
+				backend: store.get(sessionRecordsAtom)[sessionId]?.backend ?? runtimeBeforeQueue?.backend,
+			});
 			const enqueued = options.enqueue(sessionId, {
 				displayText: message,
 				message: expandedMessage,
@@ -620,11 +632,21 @@ export function useSessionSend(options: UseSessionSendOptions) {
 			// 只有已接受的消息才开始新一轮；拒绝/未知投递不能折叠现有时间线。
 			if (result.accepted) store.set(bumpNewTurnCollapseTickAtom, sessionId);
 			if (result.agentId && !staleRuntime) {
+				// ACP 的 sessions.sendPrompt 要等整个回合结束才返回：此刻 manager 已经推过
+				// status=idle，再写 running 会把刚结束的回合重新标成运行中。随后预测 ghost
+				// 按 isTurnActive=false 出现，用户 Tab 采纳发送时却被判忙碌、排进 followUp
+				// 队列（输入框上方凭空多出一条「发送中」）。回合已结算时不要覆盖 status，
+				// 让 bindSessionRuntimeAtom 保留 runtime 事件给出的 idle。
 				bindRuntime({
 					sessionId,
 					agentId: result.agentId,
 					runtimeGeneration: result.runtimeGeneration,
-					status: result.accepted ? "running" : undefined,
+					status: shouldMarkRuntimeRunningAfterSend({
+						accepted: result.accepted,
+						backend: currentRuntime?.backend ?? store.get(sessionRecordsAtom)[sessionId]?.backend,
+					})
+						? "running"
+						: undefined,
 				});
 			}
 

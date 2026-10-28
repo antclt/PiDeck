@@ -193,7 +193,11 @@ export function matchesTimelineOwner(taggedOwnerKey: string, currentOwnerKey: st
 	return taggedOwnerKey === currentOwnerKey;
 }
 
-export function isSessionRuntimeBusy(status: string | undefined, state: AgentRuntimeState | undefined): boolean {
+export function isSessionRuntimeBusy(status: string | undefined, state: AgentRuntimeState | undefined, backend?: string): boolean {
+	// ACP：status 只会随 tab 快照更新，可能比回合结算晚一拍；isTurnActive 已显式落回 false
+	// （此时输入预测 ghost 已经出现）却仍报 running 时，按空闲处理。否则 Tab 采纳预测后的
+	// 发送会被误判成「忙碌」排进 followUp 队列，输入框上方凭空多出一条队列行。
+	if (backend === "acp" && state?.isTurnActive === false) return false;
 	// idle/error/closed 是停止的权威边沿；旧 runtime-state 可能稍后到达，
 	// 不能让滞后的 isStreaming/isExecutingTool 把页面继续显示为运行中。
 	if (status === "idle" || status === "error" || status === "closed" || status === "detached") return false;

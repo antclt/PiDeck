@@ -1094,7 +1094,10 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		return { top: "auto", bottom: 16, left };
 	}, [cursor, suggestionsOpen]);
 
-	const isBusy = isSessionRuntimeBusy(runtime?.status, runtime?.state);
+	// 回合边界（isTurnActive）与忙碌态分开算：ACP 的 tab status 可能滞后于回合结算，
+	// 预测 ghost 已按 isTurnActive=false 出现时，发送也必须按空闲直发，不能进 followUp 队列。
+	const sessionTurnRunning = isSessionTurnRunning(runtime?.state, runtime?.status);
+	const isBusy = isSessionRuntimeBusy(runtime?.status, runtime?.state, isAcpBackend ? "acp" : undefined);
 	// 预热只创建进程，不能把编辑器 setEditable(false)：contenteditable 关掉会失焦，输入一半就断。
 	const isStarting = isUserFacingSessionStart(sendState.status);
 	// ACP 预热（握手 + 枚举 configOptions）可能持续数秒：编辑器照常可输入，
@@ -1875,7 +1878,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		scopeKey: sessionId,
 		enabled: promptSuggestionEnabled,
 		target: suggestionTarget,
-		turnRunning: isSessionTurnRunning(runtime?.state, runtime?.status),
+		turnRunning: sessionTurnRunning,
 		// 用 hasContent 而不是 draft.length：纯空白、附件/粘贴文件也属于「有内容」，
 		// 否则预测会盖在已经放好附件的输入框上，Tab 还会把附件留下却把 ghost 当草稿采纳。
 		draftEmpty: !hasContent,

@@ -231,13 +231,21 @@ export function useQueuedPrompt(options: UseQueuedPromptOptions) {
 	function isSessionRuntimeBusy(sessionId: string) {
 		if (!liveTarget(sessionId)) return false;
 		const runtime = store.get(sessionRuntimeByIdAtom)[sessionId];
+		const record = store.get(sessionRecordsAtom)[sessionId];
+		// ACP 的 tab status 可能滞后于回合结算：isTurnActive 显式 false 即回合已结束，
+		// 不能再用 displayAgents 里滞后的 running 把队列 drain 永久挡住。
+		if ((record?.backend === "acp" || runtime.backend === "acp") && runtime.state?.isTurnActive === false) return false;
 		const agent = displayAgentsRef.current.find((item) => item.id === runtime.agentId);
 		const runtimeState = runtime.state;
 		return Boolean(runtime.status === "starting" || runtime.status === "running" || agent?.status === "starting" || agent?.status === "running" || runtimeState?.isStreaming || runtimeState?.isExecutingTool);
 	}
 
 	function canFlushQueuedPrompt(sessionId: string) {
-		return Boolean(liveTarget(sessionId)) && store.get(sessionRuntimeByIdAtom)[sessionId]?.status === "idle" && !isSessionRuntimeBusy(sessionId) && !suppressedRef.current.has(sessionId);
+		const runtime = store.get(sessionRuntimeByIdAtom)[sessionId];
+		const record = store.get(sessionRecordsAtom)[sessionId];
+		// 与 isSessionRuntimeBusy 同口径：ACP 回合已结算时，即使 status 仍是 running 也允许 drain。
+		const acpTurnIdle = (record?.backend === "acp" || runtime?.backend === "acp") && runtime?.state?.isTurnActive === false;
+		return Boolean(liveTarget(sessionId)) && (runtime?.status === "idle" || acpTurnIdle) && !isSessionRuntimeBusy(sessionId) && !suppressedRef.current.has(sessionId);
 	}
 
 	/** 「停止响应」打断的是整个回合，队列必须交还用户：自动投递暂停，直到用户再次发起回合。

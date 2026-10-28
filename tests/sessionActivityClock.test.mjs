@@ -10,7 +10,7 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
  * 2. 只有「在跑 ⇄ 未跑」的边沿才推进计时点——中间态与首次观测到空闲都不推进。
  */
 
-const { isSessionTurnRunning, nextSessionActivityAnchor } = loadTsCommonJs("src/renderer/src/utils/sessionActivityClock.ts");
+const { isSessionTurnRunning, nextSessionActivityAnchor, shouldMarkRuntimeRunningAfterSend } = loadTsCommonJs("src/renderer/src/utils/sessionActivityClock.ts");
 
 test("isTurnActive is the authority when the backend reports it", () => {
 	// pi：agent_end 之后进程可能仍在收尾（status=running），但这一轮已经结束。
@@ -31,6 +31,17 @@ test("terminal statuses close the turn even with a stale isTurnActive", () => {
 	assert.equal(isSessionTurnRunning({ isTurnActive: true }, "closed"), false);
 	assert.equal(isSessionTurnRunning({ isTurnActive: true }, "error"), false);
 	assert.equal(isSessionTurnRunning({ isTurnActive: true }, "detached"), false);
+});
+
+test("send result only marks running for backends that ack on dispatch", () => {
+	// pi/DSH 的 IPC 在派发时返回：补写 running 让底栏立刻进入运行态。
+	assert.equal(shouldMarkRuntimeRunningAfterSend({ accepted: true, backend: "pi" }), true);
+	assert.equal(shouldMarkRuntimeRunningAfterSend({ accepted: true, backend: "dsh" }), true);
+	// ACP 的 IPC 要等整轮结束才返回：此时 status 已由 manager 推成 idle，绝不能再写 running；
+	// 否则下一次预测采纳后的发送会被误判忙碌、排进 followUp 队列。
+	assert.equal(shouldMarkRuntimeRunningAfterSend({ accepted: true, backend: "acp" }), false);
+	assert.equal(shouldMarkRuntimeRunningAfterSend({ accepted: false, backend: "acp" }), false);
+	assert.equal(shouldMarkRuntimeRunningAfterSend({ accepted: false, backend: "pi" }), false);
 });
 
 test("turn start and turn end both move the timing point", () => {
