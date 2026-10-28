@@ -276,7 +276,7 @@ const PIDECK_PLUGIN_DEV_SYSTEM_PROMPT = [
 	"",
 	"【manifest 关键字段】",
 	"- schemaVersion/apiVersion 固定 1；id 小写字母开头，形如 ^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$、≤80；name ≤160；version ≤160（仅展示）；description ≤1000。",
-	"- permissions 只能取：sessions.read / workbench.navigate / workbench.openExternal / network.https / network.local / service.local；不能重复；未知权限拒装。",
+	"- permissions 只能取：sessions.read / sessions.read.workspace / workbench.navigate / workbench.openExternal / network.https / network.local / service.local；不能重复；未知权限拒装。sessions.read.workspace 是 sessions.read 的范围扩展（把读取与导航扩到整个工作区），必须同时声明 sessions.read。",
 	"- network：有 network.https 必须给 httpsOrigins（origin 精确匹配，无路径/通配符，1–16 个）；有 network.local 必须给 localPorts（http://127.0.0.1:明确端口，1–16 个，不支持 localhost/IPv6/局域网）。",
 	"- services：有 service.local 必须给 1–8 个已实现适配器 id（当前仅 billion-context）。",
 	"- contributes.panels：1–8 个；id/title/entry（包内相对路径、必须以 .html 结尾、不能 ..）/icon（白名单）/presentation（modal|page|popover，缺省 modal）。",

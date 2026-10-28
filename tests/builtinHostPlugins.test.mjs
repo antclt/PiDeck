@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
@@ -23,7 +23,7 @@ const BUILTIN_DIRECTORY = join(process.cwd(), "resources", "host-plugins");
  */
 const BUILTIN_PLUGINS = {
 	"billion-context": { permissions: ["service.local"], services: ["billion-context"], panelId: "main", presentation: "popover", icon: "activity" },
-	"session-groups": { permissions: ["sessions.read", "workbench.navigate"], panelId: "main", presentation: "page", icon: "layers" },
+	"session-groups": { permissions: ["sessions.read", "sessions.read.workspace", "workbench.navigate"], panelId: "main", presentation: "page", icon: "layers" },
 };
 
 /** 面板 HTML 引用的包内资产（`src`/`href`），外链与锚点单独判定，不当作包内路径。 */
@@ -61,7 +61,7 @@ test("内置插件的面板入口只引用包内资产，不挂外链", async ()
 	}
 });
 
-test("session-groups：能力面锁定在只读会话 + 工作台跳转", async () => {
+test("session-groups：能力面锁定在只读会话 + 工作区范围 + 工作台跳转", async () => {
 	const plugin = await readHostPluginPackage(join(BUILTIN_DIRECTORY, "session-groups"));
 	const expected = BUILTIN_PLUGINS["session-groups"];
 	assert.deepEqual(Array.from(plugin.manifest.permissions), expected.permissions);
@@ -95,6 +95,52 @@ test("内置插件随包落位到 userData，默认仍是待授权状态", async
 		assert.equal(granted.plugins.find((plugin) => plugin.manifest.id === "session-groups").enabled, true);
 		// 内置插件不允许卸载（下次启动会被重新落位），要停用只能用禁用。
 		await assert.rejects(() => manager.remove("session-groups"), /plugin-builtin/);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+/**
+ * 内置载荷升级时的授权边界：权限没扩大才顺延，多要一项权限必须回到待授权。
+ * 反例（本次 session-groups v1.6.0 → v2.0.0 新增 `sessions.read.workspace`）：顺延会让插件在用户没批准过的
+ * 范围（整个工作区）上取数据，等于绕过设置页的授权。
+ */
+test("内置载荷升级只在权限没扩大时顺延授权", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pideck-builtin-host-plugins-"));
+	const baseline = join(root, "baseline", "example.plugin");
+	const wider = join(root, "wider", "example.plugin");
+	const narrower = join(root, "narrower", "example.plugin");
+	const write = async (directory, version, permissions) => {
+		await mkdir(directory, { recursive: true });
+		await writeFile(join(directory, "pideck-plugin.json"), JSON.stringify({ schemaVersion: 1, apiVersion: 1, id: "example.plugin", name: "Example", version, permissions, contributes: { panels: [{ id: "main", title: "Main", entry: "app.html" }], commands: [] } }));
+		await writeFile(join(directory, "app.html"), "<!doctype html><p>example</p>");
+	};
+	await write(baseline, "1.0.0", ["sessions.read"]);
+	await write(wider, "2.0.0", ["sessions.read", "sessions.read.workspace"]);
+	await write(narrower, "1.1.0", ["sessions.read"]);
+	try {
+		const manager = new HostPluginManager(join(root, "userData"));
+		await manager.seedBuiltin(join(root, "baseline"));
+		await manager.load();
+		const seeded = manager.catalog().plugins.find((plugin) => plugin.manifest.id === "example.plugin");
+		assert.equal(seeded.manifest.version, "1.0.0");
+		await manager.setEnabled("example.plugin", true, seeded.fingerprint);
+		assert.equal(manager.catalog().plugins.find((plugin) => plugin.manifest.id === "example.plugin").enabled, true);
+
+		// 同样权限的新版载荷：授权跟着走，用户不必每次升级都重新点一遍。
+		await manager.seedBuiltin(join(root, "narrower"));
+		await manager.load();
+		const carried = manager.catalog().plugins.find((plugin) => plugin.manifest.id === "example.plugin");
+		assert.equal(carried.manifest.version, "1.1.0");
+		assert.equal(carried.enabled, true);
+
+		// 多要一项权限：旧的授权不能顺延到加载物上。
+		await manager.seedBuiltin(join(root, "wider"));
+		await manager.load();
+		const widened = manager.catalog().plugins.find((plugin) => plugin.manifest.id === "example.plugin");
+		assert.equal(widened.manifest.version, "2.0.0");
+		assert.equal(widened.enabled, false, "权限扩大的内置升级必须回到待授权");
+		assert.equal(widened.requiresConsent, true);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

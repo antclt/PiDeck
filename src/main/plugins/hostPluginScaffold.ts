@@ -117,9 +117,13 @@ function appJs(input: HostPluginScaffoldInput): string {
 	const network = scaffoldNetworkDemo(input);
 	// sessions.read 是模板主体（会话列表与历史）：没声明就整块不生成，避免生成一份必然报权限错的示例。
 	const readsSessions = input.permissions.includes("sessions.read");
-	return `// 宿主插件示例：读当前项目的会话目录与历史，并（可选）让工作台跳转。
+	// 范围由 manifest 决定：同一个 list() 在工作区声明下会跨项目返回，这里只改注释免得误导。
+	const scopeNote = input.permissions.includes("sessions.read.workspace")
+		? "// 数据范围：整个工作区（所有项目目录）——声明了 sessions.read.workspace，且导航会自己切到目标项目。"
+		: "// 数据范围：只有当前项目（context.projectId）下已保存的会话；其他项目一律 session-not-authorized。";
+	return `// 宿主插件示例：读会话目录与历史，并（可选）让工作台跳转。
 // 能力边界：只有 window.pideck 一个入口——网络由宿主按授权代发，不能直接 fetch、读文件、执行命令、加载 CDN。
-// 数据范围：只有当前项目（context.projectId）下已保存的会话；其他项目一律 session-not-authorized。
+${scopeNote}
 const pideck = window.pideck;
 
 const copy = {
@@ -479,6 +483,9 @@ function readme(input: HostPluginScaffoldInput): string {
 		"- `pideck.workbench.navigate(sessionId, entryId)`",
 	];
 	if (input.permissions.includes("workbench.openExternal")) lines.push("- `pideck.workbench.openExternal(url)`：用系统浏览器打开 https 链接");
+	if (input.permissions.includes("sessions.read.workspace")) {
+		lines.push("- `sessions.read.workspace`：上面 `sessions.list/get/search/entries` 与 `workbench.navigate` 的范围是整个工作区（所有项目目录），不再是当前项目");
+	}
 	lines.push(...scaffoldNetworkDemo(input).readme);
 	lines.push("- `pideck.onEvent(listener)`：`context.changed` / `sessions.changed` 推送", "", "完整规则、错误码与预算见仓库开发指南 `docs/host-plugin-dev-guide.md`（官网同页：/guide/host-plugins）。", "", "## 打包给别人", "", "```bash", "node scripts/pack-host-plugin.mjs <本目录> my-plugin.pideck-plugin", "```", "");
 	return lines.join("\n");

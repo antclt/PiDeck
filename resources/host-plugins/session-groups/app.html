@@ -9,8 +9,8 @@
 	<body>
 		<header class="topbar">
 			<div class="topbar-info">
-				<h1 id="project-name" class="project-name"></h1>
-				<span id="project-count" class="project-count"></span>
+				<h1 id="scope-title" class="app-title"></h1>
+				<span id="scope-stats" class="app-stats"></span>
 			</div>
 			<div class="topbar-controls">
 				<button id="btn-toggle-all" class="btn" type="button"></button>
@@ -18,21 +18,44 @@
 			</div>
 		</header>
 
-		<div class="search-row">
-			<input id="search-input" class="text-input" type="text" />
-			<button id="search-clear" class="icon-btn" type="button" hidden>×</button>
-		</div>
-
-		<div id="new-group-row" class="new-group-row" hidden>
-			<input id="new-group-input" class="text-input" type="text" maxlength="80" />
-			<button id="new-group-ok" class="btn primary" type="button"></button>
-			<button id="new-group-cancel" class="btn" type="button"></button>
+		<div class="toolbar">
+			<div class="search-row">
+				<input id="search-input" class="text-input" type="text" />
+				<button id="search-clear" class="icon-btn" type="button" hidden>×</button>
+			</div>
+			<select id="dir-filter" class="text-input select"></select>
 		</div>
 
 		<div id="status" class="status" hidden></div>
 
 		<main id="groups" class="groups"></main>
 
+		<!-- 新建分组：名称 + 目录多选（选中的目录里所有会话自动入组） -->
+		<div id="create-overlay" class="overlay" hidden>
+			<div class="modal" role="dialog" aria-modal="true">
+				<div class="modal-head">
+					<span id="create-title" class="modal-title"></span>
+					<button id="create-close" class="icon-btn" type="button" aria-label="close">×</button>
+				</div>
+				<input id="create-name" class="text-input" type="text" maxlength="80" />
+				<p id="create-note" class="modal-hint" hidden></p>
+				<div class="modal-sub">
+					<span id="create-dirs-head"></span>
+					<span class="modal-sub-actions">
+						<button id="create-dirs-all" class="link-btn" type="button"></button>
+						<button id="create-dirs-none" class="link-btn" type="button"></button>
+					</span>
+				</div>
+				<div id="create-dirs" class="picker"></div>
+				<div class="modal-foot">
+					<span id="create-hint" class="modal-hint"></span>
+					<button id="create-cancel" class="btn" type="button"></button>
+					<button id="create-ok" class="btn primary" type="button"></button>
+				</div>
+			</div>
+		</div>
+
+		<!-- 添加会话：按目录分节，勾选即加入本组（不互斥） -->
 		<div id="overlay" class="overlay" hidden>
 			<div class="modal" role="dialog" aria-modal="true">
 				<div class="modal-head">

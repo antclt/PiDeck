@@ -6,7 +6,7 @@ import type { LocalServiceRegistry } from "../localServices/LocalServiceRegistry
 import { preparePreloadPath } from "../preloadPath";
 import { setHostPluginWebviewBridge } from "./hostPluginWebviewPolicy";
 import { HostPluginManager } from "./HostPluginManager";
-import { HostPluginSessions } from "./HostPluginSessions";
+import { HostPluginSessions, type HostPluginProjectInfo } from "./HostPluginSessions";
 import { HostPluginStorage } from "./HostPluginStorage";
 import { HostPluginBroker } from "./HostPluginBroker";
 import { HostPluginViewHost } from "./HostPluginViewHost";
@@ -22,11 +22,12 @@ export class HostPluginService {
 		catalog: SessionCatalog,
 		private readonly preload: string,
 		services: LocalServiceRegistry,
-		projectNameOf?: (projectId: string) => string | undefined,
+		/** 项目登记表查询：名字给 context / 会话行，目录给会话行（不暴露会话文件路径）。 */
+		projectOf?: (projectId: string) => HostPluginProjectInfo | undefined,
 	) {
 		this.manager = new HostPluginManager(userData, process.env.PIDECK_DISABLE_HOST_PLUGINS === "1");
-		this.sessions = new HostPluginSessions(catalog);
-		this.broker = new HostPluginBroker(this.manager, this.sessions, new HostPluginStorage(join(userData, "host-plugin-storage")), projectNameOf, undefined, services);
+		this.sessions = new HostPluginSessions(catalog, projectOf);
+		this.broker = new HostPluginBroker(this.manager, this.sessions, new HostPluginStorage(join(userData, "host-plugin-storage")), (projectId) => projectOf?.(projectId)?.name, undefined, services);
 	}
 
 	/** 内置示例插件（如 billion-context）在首次扫描前落位；目录已存在则不覆盖。 */

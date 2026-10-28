@@ -152,7 +152,7 @@ for (const session of page.sessions) {
 | `name` | ✅ | 非空，≤160 字符，无控制字符 |
 | `version` | ✅ | 非空，≤160 字符（仅用于展示，授权不看它） |
 | `description` | — | ≤1000 字符 |
-| `permissions` | ✅ | 数组，只能取 `sessions.read` / `workbench.navigate` / `workbench.openExternal` / `network.https` / `network.local` / `service.local`，不能重复；未知权限拒装 |
+| `permissions` | ✅ | 数组，只能取 `sessions.read` / `sessions.read.workspace` / `workbench.navigate` / `workbench.openExternal` / `network.https` / `network.local` / `service.local`，不能重复；未知权限拒装。`sessions.read.workspace` 是 `sessions.read` 的**范围扩展**（把读取与导航扩到整个工作区），必须同时声明 `sessions.read`，单独声明直接拒装 |
 | `network` | 网络权限存在时 ✅ | `network.https` 对应 `httpsOrigins`，`network.local` 对应 `localPorts`。没声明对应权限不得填写该字段；规则见 5.5 |
 | `services` | `service.local` 存在时 ✅ | 1–8 个，只能点名 PiDeck **已实现适配器**的本地服务（当前仅 `billion-context`）；没声明 `service.local` 不得填写该字段；规则见 5.8 |
 | `contributes.panels` | ✅ | 1–8 个。`id`（同上 ID 规则）、`title`（≤160）、`entry`（包内相对路径，**必须以 `.html` 结尾**）、`icon`（白名单，可选）、`presentation`（`modal` / `popover` / `page`，可选） |
@@ -214,6 +214,7 @@ type HostPluginContext = {
 	projectName?: string; // 项目显示名（PiDeck 侧补全，可直接当标题用）
 	sessionId?: string; // 当前会话
 	sessionTitle?: string; // 当前会话标题（PiDeck 侧补全）
+	scope?: "project" | "workspace"; // 会话数据范围：声明 sessions.read.workspace 才是 workspace
 	locale: "zh-CN" | "en-US"; // 跟随界面语言
 	theme: "light" | "dark"; // 跟随明暗主题
 	tokens?: Record<string, string>; // 主题色变量（CSS 自定义属性）
@@ -224,7 +225,7 @@ type HostPluginContext = {
 const { projectName, sessionTitle, locale, theme } = await pideck.context.get();
 ```
 
-- 作用域由 **PiDeck 分配**，不接受插件传参：插件只能看到当前项目。
+- 作用域由 **PiDeck 分配**，不接受插件传参：默认只能看到当前项目；只有 manifest 声明了 `sessions.read.workspace` 才是整个工作区（`scope === "workspace"`）。自己往上下文里塞 `scope` 无效，宿主会按 manifest 权限重写。
 - `projectName` / `sessionTitle` 由 PiDeck 补全，插件自己伪造无效；拿不到就是 `undefined`，**不要假设一定有值**。
 
 ### 5.2 sessions
@@ -243,7 +244,11 @@ const hits = await pideck.sessions.search("重构", 50);
 const history = await pideck.sessions.entries("session-id"); // → { entries, nextCursor, version, truncated }
 ```
 
-`HostPluginSession`：`{ id, projectId, title, updatedAt, createdAt, model?, readable }`。
+`HostPluginSession`：`{ id, projectId, projectName?, directory?, title, backend?, model?, updatedAt, createdAt, readable }`。
+
+- `directory` 是**项目根目录**（如 `D:\project\java\T6`），用于在列表里区分同名会话；不是会话文件路径（JSONL 路径永不下发）。
+- `backend` 取 `pi` / `dsh` / `acp` / `imagegen` / `videogen`（缺省视为 `pi`）。
+- `projectName` / `directory` 只在宿主知道该项目时才有值，`workspace` 范围下列表可能混着多个项目。
 
 `entries` 的边界（都需要记住）：
 
@@ -257,7 +262,7 @@ const history = await pideck.sessions.entries("session-id"); // → { entries, n
 | 读期间文件被改写 | 整页作废，报 `history-changed`，重读即可 |
 | 图片 / 长压缩摘要 | 图片内联字节与超长 compaction summary 不会传给插件；分页读原始条目不受影响 |
 | 被剥掉的字段 | `cwd`、`parentSession`、`sessionFile`、`filePath`，以及图片的 `data` / `imageRef` / `url` / `source` |
-| `readable: false` | 该会话不可读（例如由别的后端创建），不要尝试读它的历史 |
+| `readable: false` | 该会话没有可读的 JSONL 历史（DSH/ACP/生图等），**但可以正常导航**；不要尝试读它的 `entries` |
 
 ### 5.3 storage（无需权限）
 
@@ -282,7 +287,7 @@ await pideck.workbench.navigate("session-id", "entry-id"); // 让 PiDeck 打开�
 await pideck.workbench.openExternal("https://github.com/ayuayue/PiDeck/blob/main/docs/host-plugin-dev-guide.md");
 ```
 
-- `navigate` 只对**当前项目的可读会话**生效，否则 `session-not-authorized`；它由 PiDeck 主界面执行，插件页不做任何跳转。
+- `navigate` 只对**插件数据范围内**的已保存会话生效（默认当前项目；声明 `sessions.read.workspace` 后是整个工作区，导航会自己切到会话所属项目），否则 `session-not-authorized`；它由 PiDeck 主界面执行，插件页不做任何跳转。没有 JSONL 历史的会话（DSH/ACP/生图/生视频）也能导航——能否导航只看会话是否在范围内，“能否读历史”另由 `readable` 表示。
 - `openExternal` 只接受 **https** 且不能带账号密码；系统浏览器打开。带 `http:`、`file:`、`javascript:`、`pideck-plugin:` 一律 `invalid-request`。
 
 > 5.2 + 5.3 + 5.4 合起来的完整示例：`resources/host-plugins/session-groups/`（列会话、分组持久化到 `storage`、点击经 `navigate` 跳转），随 PiDeck 内置；它也是 `page` 面板形态的参考实现。
@@ -497,7 +502,7 @@ for (const inst of status.instances ?? []) {
 | 请求绑定实例 | 每个请求绑定面板实例；插件被禁用、上下文变化或面板关闭后未完成的结果作废（`plugin-revoked`），网络 socket 同步中止 |
 | 网络授权 | 启用前展示所有权限与具体 origin / 本地端口；会话读取 + 网络同时存在时提示数据外发风险；每跳复查目的地与公网 DNS，阻止未授权地址 |
 | 服务控制 | `service.local` 只是「点名权」：命令、参数、端口全在 PiDeck 的服务适配器里，插件无法执行任意命令；启用前展示可控制的服务 id |
-| 项目隔离 | 会话读取逐条校验归属（含 fork 祖先链逐跳校验）；跨项目一律 `session-not-authorized`，也不泄露「该会话是否存在」 |
+| 项目隔离 | 会话读取逐条校验归属（含 fork 祖先链逐跳校验）；默认跨项目一律 `session-not-authorized`，也不泄露「该会话是否存在」。只有显式声明 `sessions.read.workspace` 的插件才拿整个工作区范围，该标记由宿主依 manifest 写入 `context.scope`，面板页伪造无效 |
 | 指纹授权 | 授权 = 整包逐文件 sha256。内容一变授权即失效，必须重新确认；启用中的插件不能被静默替换（`plugin-in-use`） |
 | 频率限制 | 每实例同时最多 2 个在途请求，每秒最多 20 个请求，超出 `rate-limited` |
 | 隐私 | `projectName` / `sessionTitle` 由 PiDeck 补全；未授权项目的会话标题根本不会下发 |
@@ -509,8 +514,8 @@ for (const inst of status.instances ?? []) {
 | 错误码 | 含义 | 怎么办 |
 |--------|------|--------|
 | `permission-denied` | manifest 未声明该权限 | 补 `permissions` 后重新扫描 + 重新授权 |
-| `session-not-authorized` | 会话不属于当前项目（或不可读） | 只用 `sessions.list` 返回的 id |
-| `history-unavailable` | 该会话没有可读的历史文件 | 以 `readable` 判断 |
+| `session-not-authorized` | 会话不在插件数据范围内（或已被删除） | 只用 `sessions.list` 返回的 id；需要跨项目就声明 `sessions.read.workspace` |
+| `history-unavailable` | 该会话没有可读的历史文件（DSH/ACP/生图等） | 以 `readable` 判断，不要把它当作不可导航 |
 | `history-too-large` | 本次读取超扫描预算 | 分页、缩小范围，不要整包拉 |
 | `history-changed` / `stale-cursor` | 读期间文件变化 / 游标过期 | 清掉游标重新从 `undefined` 拉 |
 | `invalid-request` / `invalid-offset` / `invalid-context` | 参数不合法（offset 上限 100000、search limit 1–100…） | 按第 5 节的范围传参 |

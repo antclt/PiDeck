@@ -1,14 +1,14 @@
-/* 会话分组 — Ant Design 形态 + 宿主配色（v1.2.0）
+/* 会话分组 — Ant Design 形态 + 宿主配色（v2，工作区级）
    颜色：优先宿主 --color-* token（app.js 把 context.tokens 内联到 <html>）；
    形态：圆角 / 间距 / 字号 / 阴影 / 悬停按 AntD v5 设计语言，本地兜底色板取自 AntD token。
-   尺寸：固定紧凑单行布局（密度三档已移除）；完整字段进 ⓘ 详情弹层。
-   悬停 / 焦点的浅色调用 color-mix 从主题色派生（Chromium 111+），
+   布局：会话行两行（标题 + 绝对时间 / 后端徽标 + 模型 + 所属目录 + 相对时间），
+   完整字段进 ⓘ 详情弹层。悬停 / 焦点的浅色调用 color-mix 从主题色派生（Chromium 111+），
    每处都先写一条普通回退声明，color-mix 不支持时自动降级。 */
 
 :root {
-	/* 尺寸：紧凑档数值固定 */
 	--sg-font: 13px;
 	--sg-font-s: 12px;
+	--sg-font-xs: 11px;
 	--sg-ctl: 28px;
 	--sg-ctl-s: 22px;
 	--sg-ctl-pad: 11px;
@@ -18,6 +18,14 @@
 	--sg-gap: 8px;
 	--sg-body-pad: 12px;
 	--sg-modal-pad: 12px;
+
+	/* 分组颜色标记（与 app.js 的 COLORS 顺序一致） */
+	--sg-c-blue: #1677ff;
+	--sg-c-green: #52c41a;
+	--sg-c-orange: #fa8c16;
+	--sg-c-purple: #722ed1;
+	--sg-c-red: #ff4d4f;
+	--sg-c-cyan: #13c2c2;
 
 	/* 本地暗色兜底（AntD dark token 近似值） */
 	--sg-bg-layout: #141414;
@@ -96,18 +104,18 @@ button {
 	flex-shrink: 0;
 }
 
-.project-name {
+.app-title {
 	margin: 0;
 	font-size: 16px;
 	font-weight: 600;
 	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
 }
 
-.project-count {
+.app-stats {
 	color: var(--color-text-secondary, var(--sg-text-2));
 	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 	font-size: var(--sg-font-s);
 }
 
@@ -122,15 +130,12 @@ button {
 	color: var(--color-text-primary, var(--sg-text));
 	cursor: pointer;
 	transition: all 0.2s;
+	white-space: nowrap;
 }
 
 .btn:hover {
 	border-color: var(--color-accent, var(--sg-accent));
 	color: var(--color-accent, var(--sg-accent));
-}
-
-.btn:active {
-	border-color: var(--color-accent, var(--sg-accent));
 }
 
 .btn:disabled {
@@ -152,24 +157,15 @@ button {
 	filter: brightness(1.12);
 }
 
-.btn.danger {
-	color: var(--color-danger, var(--sg-danger));
-	border-color: var(--color-danger, var(--sg-danger));
+.btn.more {
+	width: 100%;
+	margin-top: 4px;
+	color: var(--color-text-secondary, var(--sg-text-2));
 }
 
-.btn.danger:hover {
-	color: var(--color-danger, var(--sg-danger));
-	border-color: var(--color-danger, var(--sg-danger));
-	background: color-mix(in srgb, var(--color-danger, var(--sg-danger)) 10%, transparent);
-}
-
-.btn-s {
-	height: var(--sg-ctl-s);
-	padding: 0 7px;
-	font-size: var(--sg-font-s);
-}
-
-button:focus-visible {
+button:focus-visible,
+select:focus-visible,
+input:focus-visible {
 	outline: 2px solid color-mix(in srgb, var(--color-accent, var(--sg-accent)) 50%, transparent);
 	outline-offset: 1px;
 }
@@ -186,12 +182,44 @@ button:focus-visible {
 	color: var(--color-text-secondary, var(--sg-text-2));
 	cursor: pointer;
 	line-height: calc(var(--sg-ctl-s) - 2px);
+	font-size: var(--sg-font-s);
 	transition: all 0.2s;
 }
 
 .icon-btn:hover {
 	background: color-mix(in srgb, var(--color-text-primary, var(--sg-text)) 8%, transparent);
 	color: var(--color-text-primary, var(--sg-text));
+}
+
+.icon-btn:disabled {
+	opacity: 0.35;
+	cursor: default;
+	background: transparent;
+}
+
+/* 文字链接按钮（批量条 / 目录节头） */
+
+.link-btn {
+	border: none;
+	background: transparent;
+	color: var(--color-accent, var(--sg-accent));
+	cursor: pointer;
+	padding: 0 2px;
+	font-size: var(--sg-font-s);
+}
+
+.link-btn:hover {
+	text-decoration: underline;
+}
+
+.link-btn:disabled {
+	color: var(--sg-text-3);
+	cursor: default;
+	text-decoration: none;
+}
+
+.link-btn.danger {
+	color: var(--color-danger, var(--sg-danger));
 }
 
 /* ---------- 输入框 ---------- */
@@ -219,29 +247,35 @@ button:focus-visible {
 	box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent, var(--sg-accent)) 15%, transparent);
 }
 
-/* ---------- 搜索行 ---------- */
+.text-input.select {
+	cursor: pointer;
+}
 
-.search-row {
+/* ---------- 工具栏（搜索 + 目录筛选） ---------- */
+
+.toolbar {
 	display: flex;
 	gap: 6px;
 	margin-bottom: var(--sg-gap);
 	align-items: center;
+	flex-wrap: wrap;
+}
+
+.search-row {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	flex: 1;
+	min-width: 180px;
 }
 
 .search-row .text-input {
 	flex: 1;
 }
 
-/* ---------- 新建分组行 ---------- */
-
-.new-group-row {
-	display: flex;
-	gap: 8px;
-	margin-bottom: var(--sg-gap);
-}
-
-.new-group-row .text-input {
-	flex: 1;
+#dir-filter {
+	max-width: 240px;
+	flex: 0 1 auto;
 }
 
 /* ---------- 状态条（AntD Alert 形态） ---------- */
@@ -283,13 +317,12 @@ button:focus-visible {
 	padding: var(--sg-head-y) var(--sg-card-pad);
 }
 
-.chevron {
-	transition: transform 0.2s;
-	flex-shrink: 0;
-}
-
-.group:not(.collapsed) .chevron {
-	transform: rotate(90deg);
+.group-name-wrap {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
 }
 
 .group-name {
@@ -300,17 +333,89 @@ button:focus-visible {
 	text-overflow: ellipsis;
 }
 
-.group-count {
+.group-meta {
 	color: var(--color-text-secondary, var(--sg-text-2));
 	white-space: nowrap;
 	font-size: var(--sg-font-s);
+	flex-shrink: 0;
 }
 
-.group-actions {
-	margin-left: auto;
-	display: flex;
+/* 目录范围标记：组只收这些目录的会话（空 = 不限） */
+.group-scope {
+	display: inline-flex;
+	align-items: center;
 	gap: 4px;
 	flex-shrink: 0;
+	min-width: 0;
+}
+
+.scope-chip {
+	font-size: var(--sg-font-xs);
+	font-family: var(--sg-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+	color: var(--color-text-secondary, var(--sg-text-2));
+	background: color-mix(in srgb, var(--sg-text) 8%, transparent);
+	border-radius: 4px;
+	padding: 1px 5px;
+	white-space: nowrap;
+	max-width: 180px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.scope-chip.muted {
+	opacity: 0.6;
+	font-family: inherit;
+}
+
+.scope-bar {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 2px 4px 6px;
+	border-bottom: 1px solid var(--color-border-default, var(--sg-border-2));
+	margin-bottom: 4px;
+	flex-wrap: wrap;
+}
+
+.scope-bar-label {
+	font-size: var(--sg-font-xs);
+	color: var(--color-text-secondary, var(--sg-text-2));
+}
+
+.group-tools {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	flex-shrink: 0;
+}
+
+/* 行内改名：不依赖 window.prompt（Electron 渲染器不支持） */
+.group-rename {
+	flex: 1;
+	min-width: 160px;
+	max-width: 320px;
+	height: 26px;
+	font-size: var(--sg-font);
+	font-weight: 600;
+}
+
+/* 删除确认条：就地替换工具栏，不用 window.confirm 阻塞 */
+.confirm-bar {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.confirm-text {
+	font-size: var(--sg-font-xs);
+	color: var(--color-danger, var(--sg-danger));
+	max-width: 460px;
+	line-height: 1.4;
+}
+
+.group-body {
+	border-top: 1px solid var(--color-border-default, var(--sg-border-2));
+	padding: 4px;
 }
 
 .ungrouped .group-name {
@@ -318,52 +423,97 @@ button:focus-visible {
 	color: var(--color-text-secondary, var(--sg-text-2));
 }
 
-.rename-input {
-	flex: 1;
-	height: var(--sg-ctl-s);
-	padding: 0 7px;
-	font-size: var(--sg-font-s);
+/* 分组颜色标记：点击循环切换 */
+
+.color-dot {
+	width: 10px;
+	height: 10px;
+	padding: 0;
+	border: none;
+	border-radius: 50%;
+	flex-shrink: 0;
+	cursor: pointer;
+	background: var(--sg-text-3);
+	transition: transform 0.2s;
 }
 
-/* ---------- 删除确认条 ---------- */
+.color-dot:hover {
+	transform: scale(1.2);
+}
 
-.confirm-bar {
+.color-dot.color-none {
+	background: transparent;
+	border: 1px dashed var(--sg-text-3);
+	cursor: default;
+}
+
+.color-dot.color-blue {
+	background: var(--sg-c-blue);
+}
+
+.color-dot.color-green {
+	background: var(--sg-c-green);
+}
+
+.color-dot.color-orange {
+	background: var(--sg-c-orange);
+}
+
+.color-dot.color-purple {
+	background: var(--sg-c-purple);
+}
+
+.color-dot.color-red {
+	background: var(--sg-c-red);
+}
+
+.color-dot.color-cyan {
+	background: var(--sg-c-cyan);
+}
+
+/* ---------- 组内批量选择条 ---------- */
+
+.select-bar {
 	display: flex;
 	align-items: center;
-	gap: 8px;
-	padding: var(--sg-row-y) var(--sg-card-pad);
-	border-top: 1px solid var(--color-border-default, var(--sg-border-2));
+	gap: 10px;
+	padding: 2px 6px 6px;
+	flex-wrap: wrap;
 }
 
-.confirm-text {
-	flex: 1;
-	color: var(--color-text-secondary, var(--sg-text-2));
+.select-count {
+	color: var(--sg-text-3);
 	font-size: var(--sg-font-s);
-	min-width: 0;
+	margin-right: auto;
 }
 
-/* ---------- 会话条目（AntD List item 形态） ---------- */
-
-.session-list {
-	border-top: 1px solid var(--color-border-default, var(--sg-border-2));
-}
+/* ---------- 会话条目（AntD List item 形态，两行） ---------- */
 
 .session {
 	display: flex;
 	align-items: center;
 	gap: 4px;
-	padding: var(--sg-row-y) var(--sg-card-pad) var(--sg-row-y) calc(var(--sg-card-pad) + 16px);
+	padding: 0 var(--sg-card-pad) 0 calc(var(--sg-card-pad) + 14px);
 }
 
 .session + .session {
 	border-top: 1px solid var(--color-border-default, var(--sg-border-2));
 }
 
+.session.selected {
+	background: color-mix(in srgb, var(--color-accent, var(--sg-accent)) 10%, transparent);
+}
+
+.session-check {
+	flex-shrink: 0;
+	margin: 0;
+}
+
 .session-main {
 	flex: 1;
 	min-width: 0;
 	cursor: pointer;
-	padding: 6px 10px;
+	padding: 5px 8px;
 	border-radius: 4px;
 	transition: background 0.2s;
 }
@@ -378,12 +528,10 @@ button:focus-visible {
 
 .session.current .session-main {
 	position: relative;
-	/* 高亮条与文本的间距加大，避免视觉太紧 */
-	padding-left: 18px;
+	padding-left: 16px;
 }
 
-/* 当前会话左侧高亮条：伪元素直角竖条，不随 border-radius 变圆；
-   上下内缩 6px（＝行内边距），高度与文本内容一致 */
+/* 当前会话左侧高亮条：伪元素直角竖条，不随 border-radius 变圆 */
 .session.current .session-main::before {
 	content: "";
 	position: absolute;
@@ -399,28 +547,26 @@ button:focus-visible {
 	font-weight: 600;
 }
 
-.session.unreadable {
-	opacity: 0.5;
-}
-
-.session-title {
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	font-size: var(--sg-font);
-}
-
-/* 标题行：活跃绿点 + 标题 + 「当前」小标签 */
-
-.session-title-row {
+.session-line {
 	display: flex;
 	align-items: center;
 	gap: 6px;
 	min-width: 0;
 }
 
-.session-title-row .session-title {
+.session-line-2 {
+	margin-top: 1px;
+	color: var(--color-text-secondary, var(--sg-text-2));
+	font-size: var(--sg-font-xs);
+	gap: 8px;
+}
+
+.session-title {
 	flex: 1;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	font-size: var(--sg-font);
 }
 
 .active-dot {
@@ -431,37 +577,134 @@ button:focus-visible {
 	flex-shrink: 0;
 }
 
-.current-tag {
+/* 绝对时间：分组页里「哪天聊的」比「几天前」更有用 */
+
+.session-clock {
 	flex-shrink: 0;
-	font-size: var(--sg-font-s);
-	line-height: 18px;
-	padding: 0 6px;
+	color: var(--sg-text-3);
+	font-size: var(--sg-font-xs);
+	font-variant-numeric: tabular-nums;
+}
+
+.session-rel {
+	margin-left: auto;
+	flex-shrink: 0;
+	color: var(--sg-text-3);
+	font-size: var(--sg-font-xs);
+}
+
+/* 后端徽标：pi / DSH / ACP / IMG / VID */
+
+.badge {
+	flex-shrink: 0;
+	font-size: var(--sg-font-xs);
+	line-height: 15px;
+	padding: 0 5px;
+	border-radius: 3px;
+	border: 1px solid var(--color-border-default, var(--sg-border-2));
+	color: var(--color-text-secondary, var(--sg-text-2));
+	letter-spacing: 0.02em;
+}
+
+.badge.badge-pi {
+	border-color: color-mix(in srgb, var(--sg-c-blue) 45%, transparent);
+	color: var(--sg-c-blue);
+}
+
+.badge.badge-dsh {
+	border-color: color-mix(in srgb, var(--sg-c-purple) 45%, transparent);
+	color: var(--sg-c-purple);
+}
+
+.badge.badge-acp {
+	border-color: color-mix(in srgb, var(--sg-c-cyan) 45%, transparent);
+	color: var(--sg-c-cyan);
+}
+
+.badge.badge-img,
+.badge.badge-vid {
+	border-color: color-mix(in srgb, var(--sg-c-orange) 45%, transparent);
+	color: var(--sg-c-orange);
+}
+
+.model {
+	flex-shrink: 0;
+	max-width: 140px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--color-text-secondary, var(--sg-text-2));
+}
+
+.dir-path {
+	flex-shrink: 0;
+	max-width: 45%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--sg-text-3);
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: var(--sg-font-xs);
+}
+
+/* 标签（AntD Tag 形态） */
+
+.tag {
+	flex-shrink: 0;
+	font-size: var(--sg-font-xs);
+	line-height: 16px;
+	padding: 0 5px;
 	border-radius: 4px;
-	border: 1px solid var(--color-accent, var(--sg-accent));
-	color: var(--color-accent, var(--sg-accent));
-	background: transparent;
+	border: 1px solid var(--color-border-default, var(--sg-border-2));
+	color: var(--color-text-secondary, var(--sg-text-2));
+	white-space: nowrap;
 }
 
 .current-tag {
 	border-color: color-mix(in srgb, var(--color-accent, var(--sg-accent)) 40%, transparent);
+	color: var(--color-accent, var(--sg-accent));
 	background: color-mix(in srgb, var(--color-accent, var(--sg-accent)) 8%, transparent);
 }
 
-.session-meta {
-	color: var(--color-text-secondary, var(--sg-text-2));
-	font-size: var(--sg-font-s);
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	margin-top: 2px;
+.soft-tag {
+	text-transform: lowercase;
 }
 
-/* 紧凑单行：标题行尾的相对时间（详情进 ⓘ 弹层） */
-
-.compact-time {
+.chip {
 	flex-shrink: 0;
-	color: var(--color-text-secondary, var(--sg-text-2));
-	font-size: var(--sg-font-s);
+	font-size: var(--sg-font-xs);
+	padding: 0 5px;
+	border-radius: 3px;
+	background: color-mix(in srgb, var(--color-accent, var(--sg-accent)) 12%, transparent);
+	color: var(--color-accent, var(--sg-accent));
+	max-width: 160px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.session-tools {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	flex-shrink: 0;
+	opacity: 0;
+	transition: opacity 0.15s;
+}
+
+.session:hover .session-tools,
+.session.current .session-tools,
+.session.selected .session-tools {
+	opacity: 1;
+}
+
+.session-info:hover {
+	color: var(--color-accent, var(--sg-accent));
+}
+
+.session-remove:hover {
+	color: var(--color-danger, var(--sg-danger));
+	background: color-mix(in srgb, var(--color-danger, var(--sg-danger)) 10%, transparent);
 }
 
 /* 拖拽归组 */
@@ -474,43 +717,22 @@ button:focus-visible {
 	opacity: 0.45;
 }
 
-.group.drag-over {
-	border-color: var(--color-accent, var(--sg-accent));
-}
-
-.group.drag-over {
+.group.drop-hover {
 	border-color: color-mix(in srgb, var(--color-accent, var(--sg-accent)) 60%, transparent);
 	background: color-mix(in srgb, var(--color-accent, var(--sg-accent)) 4%, var(--sg-bg-container));
 }
 
-.session-remove {
-	flex-shrink: 0;
-}
-
-.session-remove:hover {
-	color: var(--color-danger, var(--sg-danger));
-	background: color-mix(in srgb, var(--color-danger, var(--sg-danger)) 10%, transparent);
-}
-
 /* ---------- 空态 / 提示 ---------- */
 
-.empty-state {
-	padding: calc(var(--sg-gap) * 2.5) 12px;
+.empty {
+	color: var(--sg-text-3);
+	padding: 10px 12px;
+	margin: 0;
+	font-size: var(--sg-font-s);
 	text-align: center;
 }
 
-.empty-title {
-	font-weight: 600;
-	margin-bottom: 8px;
-}
-
-.hint {
-	color: var(--sg-text-3);
-	padding: var(--sg-row-y) var(--sg-card-pad);
-	font-size: var(--sg-font-s);
-}
-
-/* ---------- 添加会话弹层（AntD Modal 形态） ---------- */
+/* ---------- 弹层（AntD Modal 形态） ---------- */
 
 .overlay {
 	position: fixed;
@@ -523,8 +745,8 @@ button:focus-visible {
 }
 
 .modal {
-	width: min(520px, 100%);
-	max-height: min(70vh, 560px);
+	width: min(560px, 100%);
+	max-height: min(76vh, 620px);
 	display: flex;
 	flex-direction: column;
 	background: var(--color-bg-panel, var(--sg-bg-container));
@@ -552,55 +774,30 @@ button:focus-visible {
 	text-overflow: ellipsis;
 }
 
-.modal-list {
+.modal-sub {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 0 4px;
+	color: var(--color-text-secondary, var(--sg-text-2));
+	font-size: var(--sg-font-s);
+}
+
+.modal-sub-actions {
+	display: flex;
+	gap: 10px;
+	flex-shrink: 0;
+}
+
+.modal-list,
+.picker {
 	flex: 1;
+	min-height: 120px;
 	overflow-y: auto;
 	border: 1px solid var(--color-border-default, var(--sg-border-2));
 	border-radius: 6px;
 	padding: 4px;
-}
-
-.modal-row {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	padding: calc(var(--sg-row-y) - 2px) 8px;
-	border-radius: 4px;
-	cursor: pointer;
-	transition: background 0.2s;
-}
-
-.modal-row:hover {
-	background: var(--color-bg-input, var(--sg-bg-input));
-}
-
-.modal-row:hover {
-	background: color-mix(in srgb, var(--color-accent, var(--sg-accent)) 6%, transparent);
-}
-
-.modal-row-main {
-	flex: 1;
-	min-width: 0;
-	display: flex;
-	align-items: baseline;
-	gap: 8px;
-}
-
-.modal-row-main .session-title {
-	flex: 1;
-}
-
-/* 标签（AntD Tag 形态） */
-
-.tag {
-	flex-shrink: 0;
-	font-size: var(--sg-font-s);
-	line-height: 20px;
-	padding: 0 8px;
-	border-radius: 4px;
-	border: 1px solid var(--color-border-default, var(--sg-border-2));
-	color: var(--color-text-secondary, var(--sg-text-2));
-	white-space: nowrap;
 }
 
 .modal-foot {
@@ -615,16 +812,100 @@ button:focus-visible {
 	color: var(--sg-text-3);
 	font-size: var(--sg-font-s);
 	min-width: 0;
+}
+
+/* 目录节 + 选择行（新建分组 / 添加会话共用） */
+
+.picker-section + .picker-section {
+	margin-top: 2px;
+	border-top: 1px solid var(--color-border-default, var(--sg-border-2));
+}
+
+.picker-section-head {
+	display: flex;
+	align-items: baseline;
+	gap: 10px;
+	padding: 4px 6px 2px;
+	position: sticky;
+	top: -4px;
+	background: var(--color-bg-panel, var(--sg-bg-container));
+	z-index: 1;
+}
+
+.picker-section-name {
+	flex: 1;
+	min-width: 0;
+	color: var(--color-text-secondary, var(--sg-text-2));
+	font-size: var(--sg-font-s);
+	font-weight: 600;
 	overflow: hidden;
 	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.picker-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 3px 8px;
+	border-radius: 4px;
+	cursor: pointer;
+	transition: background 0.2s;
+}
+
+.picker-row:hover {
+	background: color-mix(in srgb, var(--color-accent, var(--sg-accent)) 6%, transparent);
+}
+
+.picker-row.checked {
+	background: color-mix(in srgb, var(--color-accent, var(--sg-accent)) 9%, transparent);
+}
+
+.picker-check {
+	flex-shrink: 0;
+	margin: 0;
+}
+
+.picker-text {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+}
+
+.picker-label {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.picker-meta {
+	flex-shrink: 0;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--sg-text-3);
+	font-size: var(--sg-font-xs);
+	max-width: 60%;
+	overflow: hidden;
 	white-space: nowrap;
 }
 
 /* ---------- 会话详情弹层（AntD Descriptions 形态） ---------- */
 
 .info-modal {
-	width: min(420px, 100%);
+	width: min(460px, 100%);
 	max-height: min(80vh, 640px);
+}
+
+.info-title-text {
+	margin: 0;
+	padding: 0 4px 2px;
+	font-weight: 600;
+	overflow-wrap: anywhere;
 }
 
 .info-body {
@@ -647,7 +928,7 @@ button:focus-visible {
 
 .info-label {
 	flex-shrink: 0;
-	width: 72px;
+	width: 76px;
 	color: var(--color-text-secondary, var(--sg-text-2));
 	font-size: var(--sg-font-s);
 	line-height: 1.66;
@@ -659,14 +940,10 @@ button:focus-visible {
 	word-break: break-all;
 }
 
-.session-info {
-	flex-shrink: 0;
-}
-
 /* hidden 属性要压过上面的 display:flex
    （类选择器 + 属性选择器，特异性高于单类，不需要 !important） */
 .overlay[hidden],
-.new-group-row[hidden],
-.status[hidden] {
+.status[hidden],
+select[hidden] {
 	display: none;
 }

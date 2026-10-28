@@ -3539,7 +3539,12 @@ function registerIpc() {
 			kill: (pid) => killLocalServiceProcess(pid),
 		}),
 	]);
-	const hostPlugins = new HostPluginService(app.getPath("userData"), sessionCatalog, join(__dirname, "../preload/hostPlugin.js"), localServices, (projectId) => projectStore?.get(projectId)?.name);
+	const hostPlugins = new HostPluginService(app.getPath("userData"), sessionCatalog, join(__dirname, "../preload/hostPlugin.js"), localServices, (projectId) => {
+		const project = projectStore?.get(projectId);
+		if (!project) return undefined;
+		// 目录只用于「这条会话属于哪个项目」的展示；ssh 项目拿不到本机路径，给远端路径。
+		return { name: project.name, directory: "locator" in project ? project.locator.remotePath : project.path };
+	});
 	const unregisterHostPlugins = registerHostPluginsIpc(hostPlugins, () => mainWindow);
 	const mcpWarning = (code: string) => {
 		void appLogger.warn("pideck-mcp", "Optional MCP operation rejected", { code });

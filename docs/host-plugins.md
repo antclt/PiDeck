@@ -30,7 +30,7 @@
 }
 ```
 
-- `permissions` 白名单：`sessions.read`（读会话）、`workbench.navigate`（导航时间线）、`workbench.openExternal`（系统浏览器开 https）、`network.https`（受控公网 HTTPS）、`network.local`（受控固定端口本地 HTTP）、`service.local`（按名启停 PiDeck 已实现适配器的本地服务）；未知权限直接拒绝加载。网络权限必须配对应的 `network.httpsOrigins` / `network.localPorts`，每类 1–16 个不重复目的地；`service.local` 必须配 `services`（1–8 个，且必须命中 `src/shared/localServices.ts` 白名单）。`storage` 不需要权限，每插件一个独立命名空间（见下）。
+- `permissions` 白名单：`sessions.read`（读会话）、`sessions.read.workspace`（把会话读取与导航范围扩到整个工作区，必须同时声明 `sessions.read`，单独声明直接拒装）、`workbench.navigate`（导航时间线）、`workbench.openExternal`（系统浏览器开 https）、`network.https`（受控公网 HTTPS）、`network.local`（受控固定端口本地 HTTP）、`service.local`（按名启停 PiDeck 已实现适配器的本地服务）；未知权限直接拒绝加载。网络权限必须配对应的 `network.httpsOrigins` / `network.localPorts`，每类 1–16 个不重复目的地；`service.local` 必须配 `services`（1–8 个，且必须命中 `src/shared/localServices.ts` 白名单）。`storage` 不需要权限，每插件一个独立命名空间（见下）。
 - 资产上限：单文件 4 MiB、整包 16 MiB、100 个文件、目录深度 8；禁止符号链接。
 - 面板 `entry` 必须是包内相对路径且以 `.html` 结尾（拒 `../` 逃逸）；可服务扩展名固定为 `HOST_PLUGIN_MIME`：html/js/mjs/css/json/svg/png/jpg/webp/woff2，`pideck-plugin.json` 自身永不可服务（`asset-not-allowed`）。资产路径只允许 `^[a-zA-Z0-9_./-]+$`（空格/中文文件名无法引用）。可选 `icon` 走 `src/shared/hostPluginIcons.ts` 白名单，可选 `presentation` 只接受 `modal`/`popover`/`page`，其余值 fail closed 拒装（`src/main/plugins/hostPluginManifest.ts`）。
 
@@ -50,11 +50,12 @@
 
 ## 会话数据 API（`sessions.read`）
 
-- `sessions.list(offset?)`：仅当前项目的已保存会话，分页 100 条，offset ≤ 100000。
-- `sessions.get(id)`：单会话元信息；归属判定与 list 同源，拿不到就 `session-not-authorized`（不泄露其他项目会话的存在性）。
-- `sessions.search(query, limit?)`：按标题子串（大小写不敏感）搜当前项目，默认 20 条、上限 100；只查目录标题，不读历史文件。
-- `sessions.entries`：读会话**活跃分支**的历史（含 compaction/custom 条目，不含 provider 输入），带游标分页；单条上限 256 KiB、单页 1 MiB，超限条目以 `truncated` 标记省略。
-- **跨项目隔离**：会话 id 必须属于当前项目；fork 祖先链每一跳都按 catalog 重新授权，跨项目祖先自动降级为单文件读（绝不合并外部项目消息）。
+- `sessions.list(offset?)`：已保存会话，分页 100 条，offset ≤ 100000；默认只有当前项目，声明 `sessions.read.workspace` 后是整个工作区（含 DSH/ACP/生图/生视频等所有后端）。
+- 每条会话带 `id`/`projectId`/`projectName`/`directory`（项目根目录，不是会话文件路径）/`title`/`backend`/`model`/`createdAt`/`updatedAt`/`readable`；`readable` 只表示「有可读的 JSONL 历史」，不影响 list/get/navigate。
+- `sessions.get(id)`：单会话元信息；归属判定与 list 同源，拿不到就 `session-not-authorized`（不泄露范围外会话的存在性）。
+- `sessions.search(query, limit?)`：按标题子串（大小写不敏感）搜当前范围，默认 20 条、上限 100；只查目录标题，不读历史文件。
+- `sessions.entries`：读会话**活跃分支**的历史（含 compaction/custom 条目，不含 provider 输入），带游标分页；单条上限 256 KiB、单页 1 MiB，超限条目以 `truncated` 标记省略；没有 JSONL 的会话（DSH/ACP/生图）报 `history-unavailable`。
+- **范围隔离**：默认会话 id 必须属于当前项目，只有声明 `sessions.read.workspace` 的插件才按整个工作区判定。范围由宿主依 manifest 权限写进 `context.scope`（`project` / `workspace`），面板页伪造该字段无效。fork 祖先链每一跳都按 catalog 重新授权，跨项目祖先自动降级为单文件读（绝不合并外部项目消息）。
 - **资源预算**：单次请求（含祖先链全部文件）扫描上限 64 MiB / 10 万条，超限抛稳定错误码 `history-too-large`；索引内存不保留超长 compaction summary（分页读原始字节不受影响）。
 - 插件索引使用单槽缓存（只随最后访问的会话 bounded），与桌面历史的 LRU 隔离。
 - **字段剥离**：条目过 `projectValue`（`src/main/sessions/boundedEntryPage.ts`）——剔除 `cwd`/`parentSession`/`sessionFile`/`filePath` 与图片内联字节（`data`/`imageRef`/`url`/`source`），递归深度上限 24。
@@ -64,7 +65,7 @@
 ## 工作台导航（`workbench.navigate` / `workbench.openExternal`）
 
 - `pideck.workbench.navigate(sessionId, entryId?)`：让 PiDeck 选中该会话并滚动到指定时间线条目（`entryId` 可省略，省略时落到底部）。
-- Broker 门禁与 `sessions.entries` 同源：目标会话必须属于当前项目，否则 `session-not-authorized`；导航事件不携带任何插件数据。
+- Broker 门禁与 `sessions.*` 同源：目标会话必须落在插件的数据范围内（默认当前项目，`sessions.read.workspace` 下为整个工作区），否则 `session-not-authorized`；导航事件的 `projectId` 取自会话归属（工作区范围下会切到那个项目），不携带任何插件数据。
 - pi-context viewer 的「在浏览器中查看」按钮即走此链路：转换器给模型行补 `id`，桥接层 `host.locate` 反查快照行 → `navigate`。
 - `pideck.workbench.openExternal(url)`：只接受 https 且不带账号密码（其余一律 `invalid-request`），经主进程 sink 交给 `openExternalUrl`；不返回接口结果，也不授予网络权限。
 
@@ -90,7 +91,7 @@
 - 停止**不保证停得住**：billion-context 的 pi lane 由 pi 自己的扩展持有（`dist/agent/pi-native.js` 的 `ensureProxyRunning`），进程一死 pi 会立刻重新拉起——实测杀掉 pid 后约 2 秒就有新 pid 监听同一端口。适配器在轮询窗口内看到「仍在运行但 pid 已变」时返回 `reason: "stop-restarted"`（带新 pid 与 uiUrl），而不是报 `stop-failed` 或假装成功；只有 pid 没变才算真失败。面板要如实转述（要彻底停掉需先退出 pi），不要自动重试。
 - 「打开面板」不走插件：Broker 转发 `onOpenBrowser` sink → `hostPluginOpenBrowser` IPC → 渲染层 `workspace.openDrawerForce("browser") + navigateTo(url)`。插件页 CSP 是 `frame-src 'none'`，本来就无法内嵌这类 SPA。
 - 内置示例：`resources/host-plugins/billion-context/` 随包分发（`extraResources` → `resources/host-plugins`），由 `HostPluginManager.seedBuiltin()` 在 `load()` 前落位到 `userData/host-plugins/`。落位不等于授权：首次落位同样是 `requiresConsent`，仍需用户按指纹确认。
-- 落位的三种情形（`seeded` 记录上次落位指纹，存在 `host-plugin-state.json`）：目录不存在 → 复制一份；目录内容仍等于上次落位的指纹（用户没动过）→ 用新版内置内容替换；其余（用户改过、装过别的版本、自己写了同 id 的）→ **永不覆盖**。只有第一种情形（上一版内置内容）升级时授权顺延，避免每次应用更新都要求重新批准自己的内置示例；第三方与用户改过的副本不在顺延范围。
+- 落位的三种情形（`seeded` 记录上次落位指纹，存在 `host-plugin-state.json`）：目录不存在 → 复制一份；目录内容仍等于上次落位的指纹（用户没动过）→ 用新版内置内容替换；其余（用户改过、装过别的版本、自己写了同 id 的）→ **永不覆盖**。只有第一种情形（上一版内置内容）升级时授权顺延，避免每次应用更新都要求重新批准自己的内置示例；第三方与用户改过的副本不在顺延范围。顺延只在新载荷的权限没有扩大时成立（旧权限集合必须是新集合的超集）：内置示例新增权限就是扩大数据范围，必须回到 `requiresConsent` 让用户按指纹重新批准。
 - 旧状态文件（`seeded` 机制之前）没有落位记录，磁盘上分不出「我们落的」与「用户自己装的同 id 插件」：这种情形只用一次，拿 `manifest.version` 当第二条线索——版本不同 ⇒ 来自另一个 PiDeck 版本的内置载荷（即我们自己落的），替换并顺延授权；版本相同则当作用户的副本不覆盖。`seedBuiltin` 写过一次 `seeded` 后该分支就永久失效。
 - 卸载：`HostPluginManager.remove(id)` 先撤权再删目录（顺序与 `setEnabled` 一致，挂载中的视图立刻失效），同时清掉授权与落位记录。`seeded` 里的 id 拒绝卸载（`plugin-builtin`）——下次启动 `seedBuiltin` 会把它重新落位，删了只会让人以为卸载没生效；要停用请用禁用。渲染层入口在设置页插件行（`HostPluginsTab` 的「卸载」+ 确认框）。
 - 新增服务的成本：`src/main/localServices/` 加适配器 + 在 `src/shared/localServices.ts` 登记 ID，插件侧 manifest 校验随之放行。第三方插件无法自行扩展能力面。
@@ -134,11 +135,11 @@
 | id | 演示了什么 | 权限 | 面板 |
 | --- | --- | --- | --- |
 | `billion-context` | 本地服务点名与启停（适配器只认 service id） | `service.local` | `popover` |
-| `session-groups` | 只读会话目录 + 工作台跳转 + 私有 `storage` 持久化；首个 `page` 形态完整示例（会话分组，上游 [Lamb-Yang/pideck-plugin](https://github.com/Lamb-Yang/pideck-plugin) 的随包副本，见该目录 README 的同步说明） | `sessions.read`、`workbench.navigate` | `page` |
+| `session-groups` | 只读会话目录 + 工作区分组 + 工作台跳转 + 私有 `storage` 持久化；首个 `page` 形态完整示例（按目录建组，上游 [Lamb-Yang/pideck-plugin](https://github.com/Lamb-Yang/pideck-plugin) 的随包副本，见该目录 README 的同步说明） | `sessions.read`、`sessions.read.workspace`、`workbench.navigate` | `page` |
 
-- `session-groups` 的分组关系只写插件自己的 `storage`（键 `grp.<projectId>`，按项目隔离），不写会话文件、不联网；它没有网络/服务权限。
+- `session-groups` 的分组关系只写插件自己的 `storage`（`ws.meta` + 每个分组一个 `ws.g.<groupId>`；分组可带 `dirs` 目录范围，超 800 条 id 自动分片到 `ws.g.<groupId>.<n>`；旧版按项目隔离的 `grp.<projectId>` 会一次性并入且保留原键），不写会话文件、不联网；它没有网络/服务权限。
 - 内置插件的能力面在 `tests/builtinHostPlugins.test.mjs` 的登记表里锁定：目录与登记表必须一一对应，权限/面板形态变化会让测试先红——因此把上游新版复制进来（尤其上游新增 `network.*` / `service.local`）时必须先审一遍数据外发与命令执行风险、改登记表，再随包。
-- 落位、升级、卸载语义与「本地服务」一节同一套：落位 ≠ 授权（首次仍是 `requiresConsent`），只有内容仍等于上次落位指纹才随新版替换并顺延授权，手改过的副本永不被覆盖；`seeded` 里的 id 拒绝卸载（`plugin-builtin`，要停用请用禁用）。
+- 落位、升级、卸载语义与「本地服务」一节同一套：落位 ≠ 授权（首次仍是 `requiresConsent`），只有内容仍等于上次落位指纹才随新版替换并顺延授权（权限扩大时不再顺延），手改过的副本永不被覆盖；`seeded` 里的 id 拒绝卸载（`plugin-builtin`，要停用请用禁用）。
 
 ## pi-context 本地适配
 

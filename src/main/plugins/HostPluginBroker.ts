@@ -55,21 +55,24 @@ export class HostPluginBroker {
 		binding.scope = new AbortController();
 	}
 
-	/** 存进来的范围一律先在桌面侧补全显示名：插件拿到 context 就能直接渲染。 */
-	private describe(context: HostPluginContext): HostPluginContext {
-		return this.sessions.describe(context, this.projectNameOf);
+	/**
+	 * 存进来的范围一律先在桌面侧补全：显示名 + `scope`。scope 由 manifest 权限算出
+	 * （`sessions.read.workspace` → workspace，否则 project），插件传什么都不算数。
+	 */
+	private describe(pluginId: string, context: HostPluginContext): HostPluginContext {
+		return this.sessions.describe(context, this.manager.getEnabled(pluginId)?.manifest.permissions ?? [], this.projectNameOf);
 	}
 
 	bind(senderId: number, pluginId: string, fingerprint: string, context: HostPluginContext): void {
 		this.unbind(senderId);
-		this.bindings.set(senderId, { pluginId, fingerprint, context: this.describe(context), generation: 0, pending: 0, budget: 0, windowAt: Date.now(), requests: new Set(), scope: new AbortController() });
+		this.bindings.set(senderId, { pluginId, fingerprint, context: this.describe(pluginId, context), generation: 0, pending: 0, budget: 0, windowAt: Date.now(), requests: new Set(), scope: new AbortController() });
 	}
 
 	update(senderId: number, context: HostPluginContext): void {
 		const binding = this.bindings.get(senderId);
 		if (!binding) return;
 		this.cancel(binding);
-		binding.context = this.describe(context);
+		binding.context = this.describe(binding.pluginId, context);
 		binding.generation += 1;
 	}
 
@@ -193,11 +196,12 @@ export class HostPluginBroker {
 					value = null;
 					break;
 				case "workbench.navigate": {
-					// Navigation acts on the workbench, not on plugin data: ownership gate mirrors sessions.entries.
-					const projectId = binding.context.projectId;
-					if (!projectId || !this.sessions.navigable(binding.context, request.sessionId)) throw new Error("session-not-authorized");
-					const target = { projectId, sessionId: request.sessionId, entryId: request.entryId };
-					if (this.authorized(senderId, binding, generation)) for (const sink of this.navigateSinks) sink(target);
+					// Navigation acts on the workbench, not on plugin data: ownership gate mirrors sessions.list.
+					// 目标项目取自会话自己的归属（工作区范围下可与当前项目不同），不看插件传入的 projectId。
+					const target = this.sessions.resolveNavigation(binding.context, request.sessionId);
+					if (!target) throw new Error("session-not-authorized");
+					const navigate = { projectId: target.projectId, sessionId: target.sessionId, entryId: request.entryId };
+					if (this.authorized(senderId, binding, generation)) for (const sink of this.navigateSinks) sink(navigate);
 					value = null;
 					break;
 				}

@@ -1,7 +1,21 @@
+import type { AgentBackend } from "./agent";
 import type { LocalServiceStatus } from "../localServices";
 
 /** PiDeck-owned browser plugins. This API never proxies pi SDK or runtime commands. */
-export type HostPluginPermission = "sessions.read" | "workbench.navigate" | "workbench.openExternal" | "network.https" | "network.local" | "service.local";
+export type HostPluginPermission =
+	| "sessions.read"
+	/** `sessions.read` 的范围扩展：读取与跳转覆盖整个工作区（所有项目目录），而不是只有当前项目。单独声明无效，需同时声明 `sessions.read`。 */
+	| "sessions.read.workspace"
+	| "workbench.navigate"
+	| "workbench.openExternal"
+	| "network.https"
+	| "network.local"
+	| "service.local";
+/**
+ * 插件能看到的会话范围，**由 PiDeck 依 manifest 权限算出来**写进 context，插件入参一律被覆盖。
+ * project = 只有当前项目（默认）；workspace = 整个工作区（需 `sessions.read.workspace`）。
+ */
+export type HostPluginScope = "project" | "workspace";
 /** Declared destinations are part of the code fingerprint and require fresh consent when changed. */
 export type HostPluginNetworkPolicy = { httpsOrigins?: string[]; localPorts?: number[] };
 /**
@@ -49,6 +63,8 @@ export type HostPluginContext = {
 	projectId?: string;
 	/** 当前项目显示名：面板标题/文案直接可用，不必再绕一次 API。 */
 	projectName?: string;
+	/** 会话可见/可跳转范围；只在声明 `sessions.read.workspace` 时才是 workspace。 */
+	scope?: HostPluginScope;
 	sessionId?: string;
 	/** 当前会话标题（同 sessions.get 的 title，便于构建标题栏）。 */
 	sessionTitle?: string;
@@ -60,10 +76,17 @@ export type HostPluginContext = {
 export type HostPluginSession = {
 	id: string;
 	projectId: string;
+	/** 会话所属项目显示名（工作区范围下用于区分不同目录里的同名会话）。 */
+	projectName?: string;
+	/** 会话所属目录（项目根路径，不含会话文件路径）：跨目录分组时用它区分。 */
+	directory?: string;
 	title: string;
 	updatedAt: number;
 	createdAt: number;
 	model?: string;
+	/** 产生这条会话的后端；早期目录条目可能没有（按 pi 处理）。 */
+	backend?: AgentBackend;
+	/** 有可读历史（JSONL）：不影响 list/get/navigate，只影响 sessions.entries 能不能读正文。 */
 	readable: boolean;
 };
 export type HostPluginSessionPage = { sessions: HostPluginSession[]; nextOffset: number | null };
