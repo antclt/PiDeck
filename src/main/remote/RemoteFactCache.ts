@@ -46,6 +46,8 @@ export type FactCache<T> = {
 	stats(): FactCacheStats;
 	/** 丢弃全部状态（host 断开、项目关闭时调用，避免旧事实跨连接存活）。 */
 	clear(): void;
+	/** 只丢弃匹配的键（单项目关闭）：不装载、不碰其它项目。 */
+	clearWhere(matches: (key: string) => boolean): void;
 };
 
 type Entry<T> = { value: T | undefined; revision: number; stale: boolean };
@@ -149,6 +151,9 @@ export function createFactCache<T>(load: (key: string) => Promise<Op<T>>, option
 		clear(): void {
 			// 在途装载不取消：它 settle 时会把结果写回，调用方（host 断开后的下一次读取）再自行决定是否采用。
 			entries.clear();
+		},
+		clearWhere(matches: (key: string) => boolean): void {
+			for (const key of [...entries.keys()]) if (matches(key)) entries.delete(key);
 		},
 	};
 }
