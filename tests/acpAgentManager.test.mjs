@@ -80,7 +80,7 @@ function fakeAgentProcess(t, { handler = () => undefined, spawnError = undefined
 }
 
 function harness(t, cliOptions, depsExtra = {}) {
-	const events = { uiRequests: [], messages: [] };
+	const events = { uiRequests: [], messages: [], runtimeStates: [] };
 	const procs = [];
 	const spawnCalls = [];
 	const { AcpAgentManager } = loadTsCommonJs("src/main/acp/AcpAgentManager.ts", {
@@ -114,6 +114,7 @@ function harness(t, cliOptions, depsExtra = {}) {
 	const unsubscribe = manager.onOutput((channel, payload) => {
 		if (channel === "agents:ui-request") events.uiRequests.push(payload);
 		if (channel === "agents:message") events.messages.push(payload);
+		if (channel === "agents:runtime-state") events.runtimeStates.push(payload);
 	});
 	t.after(() => {
 		unsubscribe();
@@ -377,6 +378,28 @@ test("abort 升级:首次 cancel 后 CLI 无响应,宽限超时强杀进程并�
 	assert.equal(result.i18nKey, "acp.abortForceStopped");
 	assert.equal(result.i18nParams?.tool, "Gemini CLI");
 	assert.equal(manager.list().length, 0, "runtime 已随强杀移除");
+});
+
+test("abort 在回合已结算但 status 残留 running 时收回 idle，而不是静默 no-op", async (t) => {
+	const { manager, events, createAgent, lastProc } = harness(t, {
+		handler: (frame) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+			if (frame.method === "session/new") return { sessionId: "sess-stale" };
+			return {};
+		},
+	});
+	const tab = await createAgent();
+	// 模拟迟到的 status 快照：回合早已结束（turnActive=false），渲染层却仍显示 running。
+	const runtime = manager.runtimes.get(tab.id);
+	runtime.status = "running";
+	runtime.tab.status = "running";
+	runtime.turnActive = false;
+	const before = events.runtimeStates.length;
+	await manager.abort(tab.id);
+	assert.equal(manager.list().find((item) => item.id === tab.id)?.status, "idle", "停止按钮必须能把残留 running 收回 idle");
+	assert.ok(events.runtimeStates.length > before, "应推送一次 runtime-state 让渲染层收口");
+	assert.equal(events.runtimeStates.at(-1).state.isTurnActive, false);
+	assert.equal(lastProc().methodFrames("session/cancel").length, 0, "没有活动回合时不应向 CLI 发 cancel");
 });
 
 test("abort 升级:二次停止立即强杀,不等宽限", async (t) => {

@@ -526,7 +526,20 @@ export class AcpAgentManager implements SessionAgentGateway {
 
 	async abort(agentId: string): Promise<void> {
 		const runtime = this.runtimes.get(agentId);
-		if (!runtime?.conn || runtime.conn.isClosed() || !runtime.turnActive) return;
+		if (!runtime) return;
+		this.deps.logger?.info("acp", `[${runtime.tool.name}] abort requested`, {
+			agentId,
+			status: runtime.status,
+			turnActive: runtime.turnActive,
+			cancelling: runtime.cancelling,
+			connClosed: !runtime.conn || runtime.conn.isClosed(),
+		});
+		if (!runtime.conn || runtime.conn.isClosed() || !runtime.turnActive) {
+			// 回合已结算（结论早就出完）或连接已死，但渲染层可能因迟到的 status 事件仍显示运行中；
+			// 停止按钮必须是一个有效收口动作，静默 no-op 会表现成「点停止没反应」。
+			this.correctStaleRunningStatus(agentId, runtime);
+			return;
+		}
 		if (runtime.cancelling) {
 			// 二次停止:cancel 已发出但回合仍未收口(CLI wedged),不再等待,立即强杀。
 			// 强杀 → conn.close 拒绝在途 session/prompt → sendPrompt catch 定向结算。
@@ -542,6 +555,20 @@ export class AcpAgentManager implements SessionAgentGateway {
 		// cancel 只是通知:CLI 可能既不处理也不回包(opencode 流错误后实测 wedged)。
 		// 宽限内回合自行结算则定时器被清;超时升级强杀,保证「停止」最终必然生效。
 		this.turnWatchdog.scheduleAbortEscalation(runtime, "abort_no_response");
+	}
+
+	/**
+	 * 收口渲染层可能残留的 running/starting：只在本端已确定没有活动回合时调用。
+	 * conn 还在 → 推 idle；连接已死 → 推 error（与 closed handler 同语义），并清回合定时器。
+	 */
+	private correctStaleRunningStatus(agentId: string, runtime: AcpAgentRuntime): void {
+		if (runtime.status !== "running" && runtime.status !== "starting") return;
+		this.turnWatchdog.clearTurnTimers(runtime);
+		runtime.turnActive = false;
+		runtime.status = runtime.conn && !runtime.conn.isClosed() ? "idle" : "error";
+		runtime.tab.status = runtime.status;
+		this.emit(agentEventTags.agentsState, this.list());
+		this.emitRuntimeState(agentId);
 	}
 
 	async stop(agentId: string): Promise<void> {
