@@ -512,9 +512,9 @@ export function createPreviewApi(): PiDesktopApi {
 		remoteTrust: {
 			// 预览模式没有主进程、也没有主机 pin 事实：清单返回空表而非报错（静态预览下提示条/清单
 			// 仍可渲染成「未决策」），写操作一律报「功能未启用」——静默假装成功会误导 UI。
-			list: async () => ({ ok: true as const, entries: [] }),
-			set: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
-			clear: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			list: async () => ({ ok: true as const, value: { entries: [] } }),
+			set: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED", outcome: "rejected" as const }),
+			clear: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED", outcome: "rejected" as const }),
 		},
 		// 预览模式没有主进程/远端 runtime：目录探测只报稳定码，不伪造模型列表。
 		probeRemoteModels: async () => ({ ok: false as const, code: "REMOTE_MODEL_PROBE_UNAVAILABLE" }),
