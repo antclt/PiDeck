@@ -28,6 +28,9 @@ export type WorkspaceWriteEffect = {
 	repoPath?: string;
 };
 
+/** 事实变化的通知：一次失效一个事件，带上被标脏的全部范围（同一次写只发一次）。 */
+export type WorkspaceChange = { projectId: string; scopes: WorkspaceScope[] };
+
 export type RemoteWorkspacePorts<Dir, Repos, Status> = {
 	listDir(projectId: string, path: string): Promise<Op<Dir>>;
 	listRepos(projectId: string): Promise<Op<Repos>>;
@@ -50,6 +53,11 @@ export type RemoteWorkspaceView<Dir, Repos, Status> = {
 	clearAll(): void;
 	/** 三个缓存的计数合并（预算门禁直接读它）。 */
 	stats(): FactCacheStats;
+	/**
+	 * 订阅事实变化（S8 推送的接口面）：今天由写面/失效同步触发，将来换成 helper `fs.watch` 事件时
+	 * 上层代码不改。监听者抛错不影响写面（观察者不是事务的一部分）。
+	 */
+	onChanged(listener: (change: WorkspaceChange) => void): () => void;
 };
 
 const SEP = "\u0000";
@@ -76,6 +84,30 @@ export function createRemoteWorkspaceView<Dir, Repos, Status>(ports: RemoteWorks
 		return ports.status(parts[0], parts[2]);
 	}, { maxEntries: 64 });
 
+	const listeners = new Set<(change: WorkspaceChange) => void>();
+
+	/** 把一组范围应用到缓存（不通知）。 */
+	function applyScopes(projectId: string, scopes: readonly WorkspaceScope[]): void {
+		for (const scope of scopes) {
+			if (scope.kind === "dir") dirs.invalidate(dirKey(projectId, scope.path));
+			else if (scope.kind === "repos") repos.invalidate(reposKey(projectId));
+			else statuses.invalidate(statusKey(projectId, scope.repoPath));
+		}
+	}
+
+	/** 一次失效一个事件：同一次写只发一次，监听者抛错不影响写面。 */
+	function emit(projectId: string, scopes: readonly WorkspaceScope[]): void {
+		if (scopes.length === 0) return;
+		const change: WorkspaceChange = { projectId, scopes: [...scopes] };
+		for (const listener of [...listeners]) {
+			try {
+				listener(change);
+			} catch {
+				// 观察者不是事务的一部分：界面渲染出错不能把已经生效的写报成失败。
+			}
+		}
+	}
+
 	return {
 		dir: (projectId, path) => dirs.read(dirKey(projectId, path)),
 		repos: (projectId) => repos.read(reposKey(projectId)),
@@ -84,9 +116,8 @@ export function createRemoteWorkspaceView<Dir, Repos, Status>(ports: RemoteWorks
 		refreshRepos: (projectId) => repos.refresh(reposKey(projectId)),
 		refreshStatus: (projectId, repoPath) => statuses.refresh(statusKey(projectId, repoPath)),
 		invalidate(projectId: string, scope: WorkspaceScope): void {
-			if (scope.kind === "dir") dirs.invalidate(dirKey(projectId, scope.path));
-			else if (scope.kind === "repos") repos.invalidate(reposKey(projectId));
-			else statuses.invalidate(statusKey(projectId, scope.repoPath));
+			applyScopes(projectId, [scope]);
+			emit(projectId, [scope]);
 		},
 		afterWrite(projectId: string, effect: WorkspaceWriteEffect): void {
 			const touchedDirs = new Set<string>();
@@ -98,10 +129,20 @@ export function createRemoteWorkspaceView<Dir, Repos, Status>(ports: RemoteWorks
 				const grandparent = parentDirOf(parent);
 				if (parent !== "") touchedDirs.add(grandparent);
 			}
-			for (const path of touchedDirs) dirs.invalidate(dirKey(projectId, path));
 			// 写可能建出/删掉仓库（`.git`），所以仓库列表总是标脏；状态只在知道仓库时标脏。
-			repos.invalidate(reposKey(projectId));
-			if (effect.repoPath !== undefined) statuses.invalidate(statusKey(projectId, effect.repoPath));
+			const scopes: WorkspaceScope[] = [
+				...[...touchedDirs].map((path): WorkspaceScope => ({ kind: "dir", path })),
+				{ kind: "repos" },
+				...(effect.repoPath === undefined ? [] : [{ kind: "status", repoPath: effect.repoPath } as WorkspaceScope]),
+			];
+			applyScopes(projectId, scopes);
+			emit(projectId, scopes);
+		},
+		onChanged(listener: (change: WorkspaceChange) => void): () => void {
+			listeners.add(listener);
+			return () => {
+				listeners.delete(listener);
+			};
 		},
 		clearProject(projectId: string): void {
 			const prefix = projectPrefix(projectId);

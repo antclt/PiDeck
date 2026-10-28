@@ -111,3 +111,27 @@ test("parentDirOf 只做所在目录判定（不做路径规范化）", () => {
 	assert.equal(parentDirOf("src"), "");
 	assert.equal(parentDirOf("./a"), ".");
 });
+
+test("onChanged：一次写只发一个事件，带全部被标脏的范围；退订与坏监听都不影响写面", async () => {
+	const { view } = harness();
+	const seen = [];
+	const off = view.onChanged((change) => seen.push(plain(change)));
+	const offBad = view.onChanged(() => {
+		throw new Error("renderer exploded");
+	});
+
+	view.afterWrite("p1", { paths: ["src/a.ts"], repoPath: "/repo" });
+	assert.equal(seen.length, 1, "一次写只发一个事件（不按范围拆成四个）");
+	assert.equal(seen[0].projectId, "p1");
+	const kinds = seen[0].scopes.map((scope) => (scope.kind === "dir" ? `dir:${scope.path}` : scope.kind)).sort();
+	assert.deepEqual(kinds, ["dir:", "dir:src", "repos", "status"]);
+
+	view.invalidate("p1", { kind: "repos" });
+	assert.equal(seen.length, 2, "单次失效也发一个事件");
+	assert.deepEqual(seen[1].scopes, [{ kind: "repos" }]);
+
+	off();
+	view.invalidate("p1", { kind: "repos" });
+	assert.equal(seen.length, 2, "退订后不再收到");
+	offBad();
+});
