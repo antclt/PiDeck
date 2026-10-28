@@ -5,6 +5,7 @@
 
 import type { ReactNode } from "react";
 import type { ChatMessage, FileTreeNode, PiCommand } from "../../../../shared/types";
+import type { ProjectFileTarget } from "../../../../shared/types/project";
 import { fileTreeNodeKey } from "../../utils/fileTreeLazy";
 import { isRetryStatusMessage } from "../session/timelineFailureNotice";
 import { t, type TranslationKey } from "../../i18n";
@@ -27,19 +28,24 @@ export const PI_FILE_PATH_DRAG_MIME = "text/pi-file-path";
 export const PI_FILE_NODE_DRAG_MIME = "application/x-pi-file-node";
 
 export interface FileNodeDragPayload {
-	path: string;
+	/** 本机绝对路径：**只有真有本机位置的节点才有**（远端节点不该伪造这个字段）。 */
+	path?: string;
 	relativePath: string;
 	type: "file" | "directory";
+	/** 项目作用域身份：跨位置通用的打开凭据，远端拖拽只靠它。 */
+	target?: ProjectFileTarget;
 }
 
-/** 拖拽开始侧：把节点信息写入 dataTransfer（路径 + JSON 双写，兼容只读路径的旧落点） */
+/** 拖拽开始侧：把节点信息写入 dataTransfer（项目作用域 JSON + 仅有本机路径时的纯路径通道） */
 export function writeFileNodeDragPayload(dataTransfer: DataTransfer, node: FileTreeNode): void {
-	const displayPath = node.displayPath ?? node.path ?? node.relativePath;
-	dataTransfer.setData(PI_FILE_PATH_DRAG_MIME, node.path ?? displayPath);
+	// 纯路径通道只在本机节点写：远端节点没有本机绝对路径，拿 displayPath 充数会让
+	// 落点以为是本机文件（拖进终端/上传会把一个不存在的路径发下去）。
+	if (node.path !== undefined) dataTransfer.setData(PI_FILE_PATH_DRAG_MIME, node.path);
 	const payload: FileNodeDragPayload = {
-		path: node.path ?? displayPath,
+		...(node.path === undefined ? {} : { path: node.path }),
 		relativePath: node.relativePath,
 		type: node.type,
+		...(node.target === undefined ? {} : { target: node.target }),
 	};
 	dataTransfer.setData(PI_FILE_NODE_DRAG_MIME, JSON.stringify(payload));
 }
@@ -54,11 +60,16 @@ export function readFileNodeDragPayload(dataTransfer: DataTransfer): FileNodeDra
 	if (raw) {
 		try {
 			const parsed = JSON.parse(raw) as Partial<FileNodeDragPayload>;
-			if (typeof parsed.path === "string" && parsed.path) {
+			const relativePath = typeof parsed.relativePath === "string" ? parsed.relativePath : "";
+			const path = typeof parsed.path === "string" && parsed.path ? parsed.path : undefined;
+			// target 是本机与远端都成立的打开凭据；字段残缺就当没有（不猜）。
+			const target = parsed.target !== undefined && typeof parsed.target.projectId === "string" && typeof parsed.target.relativePath === "string" ? { projectId: parsed.target.projectId, relativePath: parsed.target.relativePath } : undefined;
+			if (path !== undefined || relativePath !== "" || target !== undefined) {
 				return {
-					path: parsed.path,
-					relativePath: typeof parsed.relativePath === "string" ? parsed.relativePath : "",
+					...(path === undefined ? {} : { path }),
+					relativePath: target?.relativePath ?? relativePath,
 					type: parsed.type === "directory" ? "directory" : "file",
+					...(target === undefined ? {} : { target }),
 				};
 			}
 		} catch {
@@ -76,7 +87,7 @@ export function readFileNodeDragPayload(dataTransfer: DataTransfer): FileNodeDra
  * 目录由 formatFilePathRef 追加尾斜杠，含空格路径自动加引号。
  */
 export function fileNodeDragPayloadToRef(payload: FileNodeDragPayload): string {
-	return formatFilePathRef(payload.relativePath || payload.path, {
+	return formatFilePathRef(payload.relativePath || payload.path || "", {
 		isDirectory: payload.type === "directory",
 	});
 }

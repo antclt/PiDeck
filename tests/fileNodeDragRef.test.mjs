@@ -190,3 +190,19 @@ test("生成的引用文本可解析为 file chip", () => {
 	assert.equal(spacedChips[0].raw, '@"my docs/"');
 	assert.equal(spacedChips[0].label, "my docs");
 });
+
+test("远端节点（无本机 path）：不伪造纯路径通道，payload 带项目身份，@ 引用用相对路径", () => {
+	// W1：projectFileKey 后，远端节点就本当没有本机绝对路径——之前用 displayPath 充数，
+	// 落点（终端/上传）会得到一个本机上不存在的路径。
+	const remoteNode = { name: "a.ts", relativePath: "src/a.ts", type: "file", target: { projectId: "p1", relativePath: "src/a.ts" } };
+	const dt = createDataTransfer();
+	writeFileNodeDragPayload(dt, remoteNode);
+	assert.equal(dt.getData(PI_FILE_PATH_DRAG_MIME), "", "远端节点不得写纯路径通道");
+	assert.deepEqual(dt.types, [PI_FILE_NODE_DRAG_MIME], "只留项目作用域 JSON 一条通道");
+
+	const payload = readFileNodeDragPayload(dt);
+	assert.equal(payload.path, undefined);
+	assert.equal(payload.relativePath, "src/a.ts");
+	assert.equal(payload.target.projectId, "p1");
+	assert.equal(fileNodeDragPayloadToRef(payload), "@src/a.ts", "引用只依赖相对路径，不依赖本机位置");
+});
