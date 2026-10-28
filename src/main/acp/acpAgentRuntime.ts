@@ -60,6 +60,16 @@ export type AcpAgentRuntime = {
 	inFlightToolCalls: Set<string>;
 	/** 本回合升级强杀原因;sendPrompt catch 依此定向结算(delivery=unknown + 本地化文案)。 */
 	escalatedStop: AcpAbortEscalationReason | null;
+	/**
+	 * 本回合收到的 session/update 类型计数（诊断用）：空白回合要靠它区分
+	 * 「事件流真的没来」与「来了但我们没消费」（如 agent 发的是非标准 update 类型）。
+	 * 每回合派发前清空。
+	 */
+	turnUpdateKinds: Map<string, number>;
+	/** 本回合收到的非 session/update 通知的最后一个样本（method + 截断原文），诊断用。 */
+	turnForeignNotification?: string;
+	/** CLI stderr 尾部（最近几行，限流/登录失败等只打在 stderr 的错误靠它带进 UI）。 */
+	stderrTail: string[];
 	/** 会话标题(session_info_update / new 返回值;供 catalog 自动标题)。 */
 	title?: string;
 	/** session/new|load 与 set_config_option 返回的会话级配置(模型/思考档/模式)。

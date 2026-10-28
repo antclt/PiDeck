@@ -34,7 +34,7 @@ import type { AcpSessionArchive } from "./AcpSessionArchive";
 import { killAcpProcessTree, spawnAcpProcess } from "./AcpProcessHost";
 import { performAcpHandshake } from "./AcpHandshake";
 import { AcpUpdatePipeline } from "./AcpUpdatePipeline";
-import { emptyTurnRejection, escalatedStopRejection, hasTurnOutput, resolvePromptDispatch } from "./acpTurnSettlement";
+import { describeEmptyTurn, emptyTurnRejection, escalatedStopRejection, hasTurnOutput, promptResultSnippet, resolvePromptDispatch } from "./acpTurnSettlement";
 
 /** session/prompt 回合兑底超时：口径是「无进展静默上限」——回合内每有 session/update 或挂起审批
  *  就顺延截止（见 runtime.turnDeadlineRefresh），所以这里只约束「完全没动静」的时长。
@@ -87,6 +87,18 @@ type AcpManagerDeps = {
 	 */
 	readAcpTimeoutSettings?: () => { promptStallTimeoutMs?: number; promptTurnTimeoutMs?: number };
 };
+
+/** CLI 诊断输出(stderr)尾部:只留最近几行且每行截断,仅供空白回合诊断/日志,不进时间线。 */
+const STDERR_TAIL_LINES = 5;
+const STDERR_LINE_MAX_CHARS = 200;
+
+function pushStderrTail(runtime: AcpAgentRuntime, text: string): void {
+	for (const raw of text.split(/\r?\n/)) {
+		const line = raw.trim();
+		if (line) runtime.stderrTail.push(line.slice(0, STDERR_LINE_MAX_CHARS));
+	}
+	if (runtime.stderrTail.length > STDERR_TAIL_LINES) runtime.stderrTail.splice(0, runtime.stderrTail.length - STDERR_TAIL_LINES);
+}
 
 export class AcpAgentManager implements SessionAgentGateway {
 	readonly backend = "acp" as const;
@@ -282,6 +294,14 @@ export class AcpAgentManager implements SessionAgentGateway {
 		this.deps.rememberConfigOption?.(runtime.tool.id, optionId, applied);
 	}
 
+	/** 非 session/update 通知留样本（诊断）：只保留最后一条，截断防长帧污染 UI。 */
+	private rememberTurnNotification(runtime: AcpAgentRuntime, notification: AcpRpcNotification): void {
+		const method = notification.method ?? "";
+		// config_option_update 是已知通道（握手期即处理），不算异常信号。
+		if (!method || method === "session/update" || method === "config_option_update") return;
+		runtime.turnForeignNotification = `${method}: ${JSON.stringify(notification).slice(0, 300)}`;
+	}
+
 	/** 新建会话握手后重放工具级记忆;session/load 恢复的会话不覆盖 agent 侧状态。 */
 	private async replayToolConfigDefaults(runtime: AcpAgentRuntime): Promise<void> {
 		if (runtime.loadedSession) return;
@@ -355,9 +375,14 @@ export class AcpAgentManager implements SessionAgentGateway {
 			turnDeadlineRefresh: null,
 			inFlightToolCalls: new Set<string>(),
 			escalatedStop: null,
+			turnUpdateKinds: new Map<string, number>(),
+			stderrTail: [],
 		};
 		this.runtimes.set(agentId, runtime);
 		this.emit(agentEventTags.agentsState, this.list());
+		// CLI 诊断输出（stderr）留一份尾部：限流/登录失败常常只打在这里，空白回合时要随
+		// 拒收结果带进 UI，否则用户只看到「无输出」的概括（主进程日志另有全量记录）。
+		runtime.proc?.stderr?.on("data", (chunk: Buffer) => pushStderrTail(runtime, chunk.toString("utf8")));
 
 		// 归档回灌必须在 performAcpHandshake **之前**：握手的 seedMessages 读的是快照存储
 		// （load 失败回退 session/new、CLI 无 loadSession 能力这两条路径都靠它播种投影），
@@ -369,7 +394,12 @@ export class AcpAgentManager implements SessionAgentGateway {
 				handshakeTimeoutMs: this.deps.handshakeTimeoutMs,
 				logger: this.deps.logger,
 				seedMessages: (acpSessionId) => this.messageSnapshots.get(acpSessionId) ?? [],
-				onNotification: (rt, notification) => this.updates.enqueueSessionUpdate(rt, notification),
+				onNotification: (rt, notification) => {
+					// 非标准通知（如 session/error）留样本：空白回合的诊断要能说出 agent 是否用
+					// 协议外通道报过错，而不是一律当作没看见。
+					this.rememberTurnNotification(rt, notification);
+					this.updates.enqueueSessionUpdate(rt, notification);
+				},
 				onConfigOptionsChanged: this.deps.onConfigOptionsChanged,
 			});
 		} catch (error) {
@@ -446,6 +476,8 @@ export class AcpAgentManager implements SessionAgentGateway {
 		const prompt = acpPromptBlocks(input.message, input.images);
 		// 本回合结算 stopReason 的快照:成功路径的空白回合守卫在 try 外使用,需提前记录。
 		let settledStopReason: AcpStopReason = "end_turn";
+		// session/prompt 响应原文:空白回合时把它的非 stopReason 部分带进诊断。
+		let promptResult: AcpSessionPromptResult | undefined;
 		// 用户消息先落投影:ACP 规范不保证 agent 回显 user_message_chunk(OpenCode 等根本不发),
 		// 而 agents:message 是全量替换语义,主进程不落条目的话渲染层乐观气泡会被第一次 flush 抹掉。
 		const messagesBeforeSeed = runtime.projection.messages.length;
@@ -481,10 +513,14 @@ export class AcpAgentManager implements SessionAgentGateway {
 			// 新回合生效）→ 代码内默认 10min。截止随进展顺延（onArm 拿到 refresh 句柄，
 			// 回合内每有 session/update 就 refresh）：口径是「无进展静默上限」，长但健康的
 			// 回合不会因为总时长到点被掐断。
+			// 本回合诊断清零:update 类型计数/非标准通知只统计这一回合。
+			runtime.turnUpdateKinds.clear();
+			runtime.turnForeignNotification = undefined;
 			const turnTimeoutMs = this.deps.promptTurnTimeoutMs ?? this.deps.readAcpTimeoutSettings?.().promptTurnTimeoutMs ?? PROMPT_TURN_TIMEOUT_MS;
 			const result = (await conn.request("session/prompt", { sessionId: runtime.acpSessionId, prompt }, turnTimeoutMs, (refresh) => {
 				runtime.turnDeadlineRefresh = refresh;
 			})) as AcpSessionPromptResult;
+			promptResult = result;
 			this.turnWatchdog.clearTurnTimers(runtime);
 			// 结算前先排空 update 链:result 帧与末批 update 同为 stdout 行序分发,
 			// 但链上每步含异步物化,settle 提前会把在途流式块拆成新回合。
@@ -560,9 +596,25 @@ export class AcpAgentManager implements SessionAgentGateway {
 			runtime.projection = rollbackAcpUserPrompt(runtime.projection, seededIndex);
 			this.updates.flushMessages(runtime, true);
 			const error = `ACP agent ${runtime.tool.name} completed the turn without any output`;
-			this.deps.logger?.warn("acp", error, { tool: runtime.tool.name, sessionId: runtime.acpSessionId, stopReason: settledStopReason });
+			// 概括文案看不出根因（限流/登录失败/事件流丢失都长一个样）：把这一回合能拿到的
+			// 原始证据拼进 debugDetails，toast 与日志都能看到。
+			const debugDetails = describeEmptyTurn({
+				stopReason: settledStopReason,
+				updateKinds: runtime.turnUpdateKinds,
+				stderrTail: runtime.stderrTail,
+				foreignNotification: runtime.turnForeignNotification,
+				rawResult: promptResultSnippet(promptResult),
+			});
+			this.deps.logger?.warn("acp", error, {
+				tool: runtime.tool.name,
+				sessionId: runtime.acpSessionId,
+				stopReason: settledStopReason,
+				updateKinds: Object.fromEntries(runtime.turnUpdateKinds),
+				stderrTail: runtime.stderrTail,
+				foreignNotification: runtime.turnForeignNotification,
+			});
 			await this.persistArchive(runtime);
-			return emptyTurnRejection(runtime.tool.name);
+			return emptyTurnRejection(runtime.tool.name, debugDetails);
 		}
 		await this.persistArchive(runtime);
 		return { accepted: true };

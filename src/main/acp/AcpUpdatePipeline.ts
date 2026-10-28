@@ -61,6 +61,8 @@ export class AcpUpdatePipeline {
 		const rawUpdate = notification.params.update;
 		if (!rawUpdate || typeof rawUpdate !== "object" || !("sessionUpdate" in rawUpdate) || typeof rawUpdate.sessionUpdate !== "string") return;
 		const update = rawUpdate as AcpSessionUpdate;
+		// 诊断计数：空白回合要能说出「收到过哪些 update 类型」，否则只能笼统归咎 CLI。
+		if (runtime.turnActive) runtime.turnUpdateKinds.set(update.sessionUpdate, (runtime.turnUpdateKinds.get(update.sessionUpdate) ?? 0) + 1);
 		if (update.sessionUpdate === "config_option_update") {
 			if (Array.isArray(update.configOptions)) {
 				runtime.configOptions = update.configOptions;

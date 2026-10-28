@@ -1244,6 +1244,50 @@ test("sendPrompt:agent 成功结算但全程无输出时不得谎报成功或留
 	assert.equal(events.messages.at(-1).messages.length, 0, "空白回合必须撤回孤立用户消息，便于草稿回填重试");
 });
 
+test("空白回合:debugDetails 带出 CLI stderr / 非标准通知 / update 统计(限流等根因可见)", async (t) => {
+	const { manager, createAgent, lastProc } = harness(t, {
+		handler: (frame, { writeFromCli }) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+			if (frame.method === "session/new") return { sessionId: "sess-blank-diag" };
+			if (frame.method === "session/prompt") {
+				// 协议外通道报错：CLI 常把限流/登录失败塞在这里，而不是 session/update
+				writeFromCli({ jsonrpc: "2.0", method: "session/error", params: { message: "quota exceeded" } });
+				return { stopReason: "end_turn" };
+			}
+			return {};
+		},
+	});
+	const tab = await createAgent();
+	lastProc().proc.stderr.write("Error: account quota exceeded\n");
+	await sleep(30);
+	const result = await manager.sendPrompt({ agentId: tab.id, message: "不会得到回复" });
+	assert.equal(result.accepted, false);
+	assert.equal(result.i18nKey, "acp.emptyTurn");
+	const details = result.debugDetails ?? "";
+	assert.match(details, /account quota exceeded/, "CLI stderr 里的根因必须进 debugDetails");
+	assert.match(details, /stopReason=end_turn/);
+	assert.match(details, /updates=none/);
+	assert.match(details, /session\/error/, "协议外通知同样要留下痕迹");
+});
+
+test("空白回合:非标准 update 类型在诊断里可见(区分「没发」与「发了我们没消费」)", async (t) => {
+	const { manager, createAgent } = harness(t, {
+		handler: (frame, { writeFromCli }) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+			if (frame.method === "session/new") return { sessionId: "sess-blank-unknown" };
+			if (frame.method === "session/prompt") {
+				writeFromCli({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "sess-blank-unknown", update: { sessionUpdate: "agent_message", text: "hi" } } });
+				return { stopReason: "end_turn" };
+			}
+			return {};
+		},
+	});
+	const tab = await createAgent();
+	const result = await manager.sendPrompt({ agentId: tab.id, message: "不会得到回复" });
+	assert.equal(result.i18nKey, "acp.emptyTurn");
+	assert.match(result.debugDetails ?? "", /updates=agent_message/);
+});
+
 test("sendPrompt:agent 不回显 user chunk 时用户消息仍进投影,首条 prompt 兜底标题写回 catalog", async (t) => {
 	const titles = [];
 	const { manager, events, createAgent } = harness(
