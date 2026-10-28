@@ -100,10 +100,33 @@
 }
 .markdown-body [data-streamdown="horizontal-rule"] {
   margin-block: 1.1em;
+  /* streamdown 自带 border-border（utilities 层）会压过 timeline.css（legacy），
+     颜色必须在这里同层改回语义 token，皮肤/自定义主题才能改分隔线色。 */
+  border-color: var(--color-md-hr);
 }
 .markdown-body [data-streamdown="blockquote"] {
   margin-block: 0.7em;
   padding: 0.45em 0.85em;
+  /* 同上：text-muted-foreground / border-muted-foreground 由 streamdown 钉在 utilities 层。
+     只换颜色（文字 + 左侧竖线），宽度 4px / italic 保留 streamdown 原观感。 */
+  color: var(--color-md-quote);
+  border-left-color: var(--color-md-quote-border);
+}
+/* 正文链接：streamdown 的 text-primary 同层覆盖，需在此改回 md 语义色。 */
+.markdown-body [data-streamdown="link"]:not([data-md-file-link]) {
+  color: var(--color-md-link);
+}
+/* 文件/本地引用链接：组件意图是 accent 色（可点开文件），但它的 text-[var(--color-accent)]
+   与 streamdown 传入的 text-primary 同层同权重，源顺序一变就被顶掉；这里显式固定为 accent，
+   同时使皮肤改 --color-md-link 时不会连带改掉文件链接。 */
+.markdown-body [data-streamdown="link"][data-md-file-link] {
+  color: var(--color-accent);
+  text-decoration-color: color-mix(in srgb, var(--color-accent) 50%, transparent);
+}
+/* 行内代码：streamdown 只给了背景/间距 utility，文字色无冲突，这里显式写出
+   以免将来 streamdown 加 text-* class 时静默失联。 */
+.markdown-body [data-streamdown="inline-code"] {
+  color: var(--color-md-code);
 }
 
 /* ── 代码块 ─────────────────────────────────────────────── */

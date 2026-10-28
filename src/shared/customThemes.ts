@@ -150,6 +150,20 @@ export const CUSTOM_THEME_TOKEN_GROUPS: readonly CustomThemeTokenGroup[] = [
 		],
 	},
 	{
+		key: "markdown",
+		zhTitle: "Markdown 正文",
+		enTitle: "Markdown body",
+		tokens: [
+			{ token: "md-heading", zhDesc: "消息内标题（h1–h6）颜色", enDesc: "Heading (h1–h6) color in messages" },
+			{ token: "md-link", zhDesc: "消息内链接颜色", enDesc: "Link color in messages" },
+			{ token: "md-code", zhDesc: "行内代码文字颜色", enDesc: "Inline code text color" },
+			{ token: "md-quote", zhDesc: "引用块文字颜色", enDesc: "Blockquote text color" },
+			{ token: "md-quote-border", zhDesc: "引用块左侧竖线颜色", enDesc: "Blockquote left bar color" },
+			{ token: "md-list-bullet", zhDesc: "列表符号（• / 序号）颜色", enDesc: "List bullet / number color" },
+			{ token: "md-hr", zhDesc: "分割线颜色", enDesc: "Horizontal rule color" },
+		],
+	},
+	{
 		key: "code",
 		zhTitle: "代码块",
 		enTitle: "Code blocks",

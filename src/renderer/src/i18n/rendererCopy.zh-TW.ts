@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: e822313ef24453eccfacc440ca073ddb9287dbfe6d959b49269c253b2918d7c1（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: bc62146ff6c94026bdd11d3efe6ae3ea0022eab3f2edad60d28134f8e9a93e8f（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -34,6 +34,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"hostPlugins.errorInvalidPackageFile": "外掛包裡有不合法的檔案路徑，已拒絕安裝。",
 	"hostPlugins.errorAssetTooLarge": "外掛包內單個檔案超過 4MB。",
 	"hostPlugins.chipSessionsRead": "會話讀取",
+	"hostPlugins.chipWorkspace": "整個工作區",
 	"hostPlugins.chipNavigate": "跳轉會話",
 	"hostPlugins.chipOpenExternal": "開啟連結",
 	"hostPlugins.chipHttps": "HTTPS 請求",
@@ -48,6 +49,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"hostPlugins.scaffoldName": "顯示名",
 	"hostPlugins.scaffoldPermissions": "權限（清單裡寫什麼就只拿到什麼）",
 	"hostPlugins.scaffoldSessionsReadHint": "讀取當前專案已儲存的會話列表與歷史條目。",
+	"hostPlugins.workspaceSessions": "會話讀取範圍：整個工作區",
+	"hostPlugins.scaffoldWorkspaceHint": "把上面三項讀取與跳轉的範圍從「當前專案」擴到整個工作區（所有專案目錄），需同時勾「會話讀取」。不勾時只能看到當前專案的會話。",
+	"hostPlugins.workspaceWarning": "此外掛的讀取與跳轉範圍是整個工作區：它能看到所有專案目錄的會話標題與位置，也能把工作臺切到其他專案的會話。請確認程式碼可信。",
 	"hostPlugins.scaffoldNavigate": "跳轉到會話",
 	"hostPlugins.scaffoldNavigateHint": "讓工作臺開啟會話或某條歷史（不能執行任何命令）。",
 	"hostPlugins.scaffoldOpenExternal": "開啟外部連結",
@@ -4896,6 +4900,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.skin.graphiteDesc": "冷調石墨灰表面 + 中性主色，安靜剋制。",
 	"settings.skin.seaBlueDesc": "海藍冷調表面 + 藍色主色，清爽通透。",
 	"settings.skin.warmBeigeDesc": "暖米紙感表面 + 琥珀主色，柔和護眼。",
+	"settings.skin.terminal": "終端",
+	"settings.skin.terminalDesc": "復刻 pi 終端介面：Markdown 正文/標題用等寬字，標題黃、行內碼紫、連結藍；深色下最像 TUI。",
 	"settings.accent.default": "黑白灰（預設）",
 	"settings.accent.green": "清新綠",
 	"settings.accent.blue": "天空藍",

@@ -151,6 +151,23 @@ export const SKIN_PRESETS: readonly SkinPreset[] = [
 			border: "#ded2bf",
 		},
 	},
+	{
+		id: "terminal",
+		labelKey: "settings.skin.terminal",
+		descKey: "settings.skin.terminalDesc",
+		// 终端（TUI）：复刻 pi 交互模式的终端观感——md 正文/标题定格为等宽，
+		// 标题黄 / 行内码紫 / 链接蓝（取值来自 pi 内置 light/dark 主题的 md 色板）。
+		// 主色 = purple：pi 的 accent 是 violet，本应用无 violet 档，取最近的一档。
+		accent: "purple",
+		preview: "#f7f8f7",
+		previewSurfaces: {
+			background: "#f7f8f7",
+			sidebar: "#eef1f0",
+			panel: "#fcfcfb",
+			accent: "#7c3aed",
+			border: "#d8ded9",
+		},
+	},
 ];
 
 /** 出厂外观主题：classic-green（中性黑白灰，与旧版出厂观感一致） */

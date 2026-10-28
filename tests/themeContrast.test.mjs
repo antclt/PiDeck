@@ -116,7 +116,7 @@ const DARK = { ...LIGHT, ...extractBlock(':root[data-theme="dark"]') };
 // accent 只覆盖 accent 族 token、appearance 只覆盖面色/灰阶——两轴交叠组合的 token/面
 // 配对已由这 20 块成对覆盖（跨轴组合不产生新配对），不展开 60 组全叉积。
 const ACCENTS = ["green", "blue", "purple", "amber", "rose"];
-const APPEARANCES = ["fresh-green", "graphite", "sea-blue", "warm-beige"];
+const APPEARANCES = ["fresh-green", "graphite", "sea-blue", "warm-beige", "terminal"];
 const PALETTES = [
 	{ label: "浅色", tokens: LIGHT },
 	...ACCENTS.map((a) => ({ label: `浅色+${a}`, tokens: { ...LIGHT, ...extractBlock(`:root[data-accent="${a}"]`) } })),
@@ -182,6 +182,16 @@ const PAIRS = [
 	["chip-session", "bg-panel", 4.5, "session chip × 面板"],
 	// 代码块（code-bg 两主题都是深底）
 	["code-text", "code-bg", 4.5, "代码文字 × 代码底"],
+	// Markdown 语义色：正文落在页面/面板/chat-card 底上；行内码自带 bg-muted 底；引用是次级文字；列表符非文字 3:1。
+	// 皮肤（terminal）会单独覆盖这组 token，其余皮肤继承 :root 默认值（= 正文色，等价于改造前的写死值）。
+	...["bg-page", "bg-panel", "chat-card-bg"].flatMap((face) => [
+		["md-heading", face, 4.5, `Markdown 标题 × ${face}`],
+		["md-link", face, 4.5, `Markdown 链接 × ${face}`],
+	]),
+	["md-code", "bg-muted", 4.5, "Markdown 行内码 × 行内码底"],
+	["md-code", "chat-card-bg", 4.5, "Markdown 行内码 × chat-card 底"],
+	["md-quote", "chat-card-bg", 4.5, "Markdown 引用文字 × chat-card 底"],
+	["md-list-bullet", "chat-card-bg", 3, "Markdown 列表符号 × chat-card 底"],
 	// 过程层图标（非文字）：3:1——注意边框不进矩阵：装饰性分隔线是刻意低对比设计（WCAG 只要求
 	// 「唯一视觉指示」的构件边 3:1，本应用输入控件用聚焦环作主要指示）
 	["thinking", "bg-panel", 3, "思考过程图标 × 面板"],

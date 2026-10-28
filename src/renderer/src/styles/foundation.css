@@ -40,6 +40,9 @@
     "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "HarmonyOS Sans SC",
     "Hiragino Sans GB", "Noto Sans CJK SC", monospace;
   --font-family-business: var(--font-family-mono);
+  /* Markdown 正文字体：默认跟随正文；终端皮肤覆盖为等宽呈现 TUI 渲染感。
+     用 var 引用而不是复制字面量，用户自定义等宽字体时 md 区一并跟随。 */
+  --font-family-md: var(--font-family-base);
   --font-size-micro: 11px;
   /* 会话 Tab 栏标题字号：独立一轨（外观设置「会话 Tab 栏字号」），
      出厂基线与 --font-size-micro 同值，保证未单独设置时视觉不变。 */
@@ -216,6 +219,21 @@
   --color-chat-bubble-bg: var(--color-bg-panel);
   --color-chat-table-bg: #ffffff;
   --color-chat-link: #4a4a4a;
+  /* ===== Markdown 语义色（会话正文 / 预览渲染） =====
+   * 标题、行内码、链接、引用、列表符号、分隔线的可着色入口。
+   * 默认值刻意等价于改造前的实际取值（streamdown 的 text-primary /
+   * text-secondary / border-default / muted-foreground 30%），所以任何既有主题、
+   * 任何主色下观感零变化；皮肤块与自定义主题包按需覆盖。
+   * 终端皮肤用它复刻 pi TUI 的 md 色板（黄标题 / 紫行内码 / 蓝链接）。
+   * 注意颜色的生效层：streamdown 自带的 class 在 utilities 层，所以真正压住它们的
+   * 是 streamdownChrome.css 里的同名规则（timeline.css 的对应规则只管 legacy 渲染）。 */
+  --color-md-heading: var(--color-text-primary);
+  --color-md-link: var(--color-text-primary);
+  --color-md-code: var(--color-text-primary);
+  --color-md-quote: var(--color-text-secondary);
+  --color-md-quote-border: color-mix(in srgb, var(--color-text-secondary) 30%, transparent);
+  --color-md-list-bullet: var(--color-text-primary);
+  --color-md-hr: var(--color-border-default);
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -875,6 +893,70 @@
   --color-chat-muted-bg: #352e24;
   --color-chat-control-bg: #2b251d;
   --color-chat-table-bg: #2b251d;
+}
+/* 终端（TUI）：复刻 pi 编码助手交互模式的观感——后台终端底色、等宽正文、
+   彩色 Markdown（标题黄 #7d5a04 / 行内码紫 #7459b4 / 链接蓝 #2a6f8c / 引用灰），
+   md 色板直接取自 pi 内置 light/dark 主题的 mdHeading/mdCode/mdLink/mdQuote
+   （okhsl 转 sRGB），所以与 pi TUI 里看到的标题色一致。
+   主色由 data-accent="purple"（pi 的 accent=violet，本应用无 violet 档，取最近的紫）。 */
+:root[data-appearance="terminal"] {
+  --color-bg-app: #f7f8f7;
+  --color-bg-sidebar: #eef1f0;
+  --color-bg-panel: #fcfcfb;
+  --color-bg-popover: #ffffff;
+  --color-bg-input: #eef1f0;
+  --color-bg-muted: #e8ebe9;
+  --color-bg-hover: #dfe4e1;
+  --color-bg-active: #d3dad6;
+  --color-text-primary: #2b3237;
+  --color-text-secondary: #4a5359;
+  --color-text-tertiary: #5f6a70;
+  --color-text-faint: #8d959a;
+  --color-border-subtle: #d8ded9;
+  --color-border-default: #c4ccc7;
+  --color-border-strong: #aab5af;
+  --color-chat-card-bg: #fcfcfb;
+  --color-chat-muted-bg: #f1f4f2;
+  --color-chat-control-bg: #fcfcfb;
+  --color-chat-table-bg: #fcfcfb;
+  --color-md-heading: #7d5a04;
+  --color-md-link: #2a6f8c;
+  --color-md-code: #7459b4;
+  --color-md-quote: #677176;
+  --color-md-quote-border: #9aa5a0;
+  --color-md-list-bullet: #7459b4;
+  --color-md-hr: #c4ccc7;
+  --font-family-md: var(--font-family-mono);
+}
+:root[data-theme="dark"][data-appearance="terminal"] {
+  --color-bg-app: #0a0d11;
+  --color-bg-sidebar: #0d1116;
+  --color-bg-panel: #0f141a;
+  --color-bg-popover: #151b22;
+  --color-bg-input: #0d1116;
+  --color-bg-muted: #161d24;
+  --color-bg-hover: #1b232b;
+  --color-bg-active: #232d36;
+  --color-text-primary: #dfe2e4;
+  --color-text-secondary: #b6bec4;
+  --color-text-tertiary: #97a2a9;
+  --color-text-faint: #74828a;
+  --color-border-subtle: #1e262e;
+  --color-border-default: #2a343d;
+  --color-border-strong: #3b4751;
+  --color-chat-card-bg: #0f141a;
+  --color-chat-muted-bg: #0d1217;
+  --color-chat-control-bg: #151b22;
+  --color-chat-table-bg: #0f141a;
+  /* 暗色底上把 pi 的暗色 md 色板提亮一档（#cd9a22 → #d8a63a）：8.3:1 落在消息卡上。 */
+  --color-md-heading: #d8a63a;
+  --color-md-link: #69add0;
+  --color-md-code: #a798d7;
+  --color-md-quote: #9da5a9;
+  --color-md-quote-border: #4a555c;
+  --color-md-list-bullet: #a798d7;
+  --color-md-hr: #2a343d;
+  --font-family-md: var(--font-family-mono);
 }
 * {
   box-sizing: border-box;

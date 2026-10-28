@@ -110,7 +110,7 @@ test("dark popovers float one step above panels in every palette", () => {
 	const base = tokensOf(darkBlock());
 	const palettes = [
 		["classic", base],
-		...["fresh-green", "graphite", "sea-blue", "warm-beige"].map((skin) => {
+		...["fresh-green", "graphite", "sea-blue", "warm-beige", "terminal"].map((skin) => {
 			const merged = new Map(base);
 			for (const [k, v] of tokensOf(skinDarkBlock(skin))) merged.set(k, v);
 			return [skin, merged];

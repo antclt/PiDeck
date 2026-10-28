@@ -56,7 +56,7 @@ function parseAppearanceBlocks(source) {
 test("SKIN_PRESETS is complete and DEFAULT is classic-green", () => {
 	// VM 加载的数组属于另一个 realm，需先展平为本地数组再比较
 	const ids = [...SKIN_PRESETS].map((preset) => preset.id);
-	assert.deepEqual(ids, ["classic-green", "fresh-green", "graphite", "sea-blue", "warm-beige"]);
+	assert.deepEqual(ids, ["classic-green", "fresh-green", "graphite", "sea-blue", "warm-beige", "terminal"]);
 	assert.equal(DEFAULT_SKIN, "classic-green");
 	// 每个预设都有完整元数据：Label/描述/推荐主色/预览色块
 	for (const preset of SKIN_PRESETS) {

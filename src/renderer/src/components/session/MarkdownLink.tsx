@@ -183,6 +183,10 @@ export function MarkdownLink(
 			<a
 				{...anchorProps}
 				className={linkClass}
+				// 文件/本地引用链接自带 accent 色与右键菜单，不算「正文链接」：
+				// streamdownChrome 用 :not([data-md-file-link]) 给正文链接上 md 语义色，
+				// 避免皮肤改 --color-md-link 时把文件链接一起改掉。
+				data-md-file-link={isFileLink || isLocalRef ? "" : undefined}
 				onClick={handleClick}
 				onContextMenu={isFileLink || isLocalRef ? handleContextMenu : undefined}
 				// 文件链接 hover 展示解码后的完整路径 + 修饰键提示（右键菜单之外的快路径）；
