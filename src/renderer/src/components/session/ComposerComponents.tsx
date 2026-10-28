@@ -439,6 +439,8 @@ export function ComposerBottomBar(props: {
 	acpTool?: { toolId?: string; onChange?: (toolId: string) => void };
 	/** ACP 会话配置选择器（configOptions 整表 + 下发回调；undefined=agent 未提供,隐藏）。 */
 	acpConfig?: { options: import("../../../../shared/types/acp").AcpSessionConfigOption[]; onSet: (optionId: string, value: string | boolean) => void };
+	/** ACP 预热中（runtime starting）：configOptions 尚未下发，原位显示初始化指示。 */
+	acpInitializing?: boolean;
 	feishuIndicator?: ReactNode;
 	/** 安全等级选择器（自包含组件，注入到左下角工具组） */
 	securityControl?: ReactNode;
@@ -746,8 +748,17 @@ export function ComposerBottomBar(props: {
 						<ModelThinkingChip modelLabel={modelLabel} modelPendingTo={modelDisplay.pending && modelTo ? modelTo.modelName || modelTo.modelId : undefined} modelPendingTitle={modelPendingTitle} disabled={props.modelDisabled ?? props.disabled} onPickModel={props.onPickModel} thinkingControl={props.thinkingControl} />
 					)}
 					{/* ACP：模型/思考档/模式选择器,枚举来自 agent 回传的 configOptions
-					    （本尊清单,不手写防漂移）;agent 未提供时不渲染。 */}
-					{props.backend === "acp" && props.acpConfig ? <AcpConfigControls options={props.acpConfig.options} disabled={props.disabled} onSet={props.acpConfig.onSet} /> : null}
+					    （本尊清单,不手写防漂移）;agent 未提供时不渲染。
+					    握手期（runtime starting）选项还没到：在原位置显示启动指示，让「选中会话 → 加载选项」
+					    在输入框内有连续反馈；发送按钮由 controller 同源置灰。 */}
+					{props.backend === "acp" && props.acpConfig ? (
+						<AcpConfigControls options={props.acpConfig.options} disabled={props.disabled} onSet={props.acpConfig.onSet} />
+					) : props.backend === "acp" && props.acpInitializing ? (
+						<span className="inline-flex h-7 min-w-0 max-w-56 items-center gap-1.5 px-1.5 text-control text-muted-foreground" role="status" aria-live="polite" title={t("app.agentStartingPlaceholder")}>
+							<Loader2 size={15} className="shrink-0 animate-pideck-spin" aria-hidden="true" />
+							<span className="truncate">{t("app.agentStartingPlaceholder")}</span>
+						</span>
+					) : null}
 					{/* DSH 压缩入口与 pi 统一：上下文圆环（右侧）常驻并带压缩按钮。
 					    2026-12 兼容期：dsh runtime state 已由主进程提供 contextPercent 兜底
 					    （request/context 的 contextWindow + 消息估算），圆环不再因缺数据隐藏，

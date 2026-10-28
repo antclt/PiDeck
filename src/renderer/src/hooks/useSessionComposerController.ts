@@ -86,6 +86,7 @@ import { requireSessionCommand, toSessionRuntimeTarget } from "../utils/sessionC
 import { collectReservedCommandNames, needsTemplateRefetch } from "../utils/reservedCommandNames";
 import { assembleTemplates, mergeRuntimeTemplates } from "../utils/templateCatalog";
 import { buildDraftResourceCommands, draftResourceCommandsForProject, selectComposerSuggestionCommands, standbyPreviewCommandsForProject, type DraftResourceCommandSnapshot, type StandbyPreviewCommandSnapshot } from "../utils/draftResourceCommands";
+import { isAcpComposerInitializing } from "../utils/composerInitializing";
 import { isSessionRuntimeBusy, isUserFacingSessionStart } from "./useSessionTimelineController";
 import { truncateQuoteLabel } from "../components/session/composer/quoteChip";
 import { useSessionSend, type EnqueuePromptSnapshot } from "./useSessionSend";
@@ -1096,6 +1097,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	const isBusy = isSessionRuntimeBusy(runtime?.status, runtime?.state);
 	// 预热只创建进程，不能把编辑器 setEditable(false)：contenteditable 关掉会失焦，输入一半就断。
 	const isStarting = isUserFacingSessionStart(sendState.status);
+	// ACP 预热（握手 + 枚举 configOptions）可能持续数秒：编辑器照常可输入，
+	// 但发送要等选项落地，输入框底栏同时显示初始化指示。
+	const isAcpInitializing = isAcpComposerInitializing(isAcpBackend, runtime?.status);
 	const hasContent = Boolean(draft.trim() || attachments.length || pasteFiles.length);
 
 	const resetEphemeralUi = useCallback(() => {
@@ -1500,6 +1504,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	// 生图模式：所有发送入口统一转生图（不晋升预览 Tab、不发消息），避免各入口分支不一致。
 	const promoteAndSend = useCallback(
 		async (behavior?: "steer" | "followUp", overrideText?: string) => {
+			// ACP 初始化中（runtime starting，configOptions 还没回来）：按钮已置灰，
+			// 这里再兜 Enter / 快捷消息 / 追问等所有发送入口，避免绕过按钮把首发送进半握手的 runtime。
+			if (isAcpInitializing) return;
 			if (mode === "imagegen") {
 				void generateImage();
 				return;
@@ -1534,7 +1541,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			options.onPromoteSession?.(sessionId);
 			return send(behavior, overrideText);
 		},
-		[draft, mode, generateImage, submitVideo, options.onPromoteSession, pasteFiles, send, sessionId, setDraft, setPasteFiles],
+		[draft, isAcpInitializing, mode, generateImage, submitVideo, options.onPromoteSession, pasteFiles, send, sessionId, setDraft, setPasteFiles],
 	);
 
 	const selectSuggestion = useCallback(
@@ -2410,6 +2417,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		bangMode: getBangMode(draft),
 		isBusy,
 		isStarting,
+		isAcpInitializing,
 		hasContent,
 		busyDraftLocked,
 		voice,
@@ -2498,7 +2506,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			 * 快捷消息直发可用性：与 canSend 同源，但去掉「草稿非空」这一项——
 			 * 快捷消息的正文来自清单，发它的时候输入框通常是空的。
 			 */
-			canSendQuickMessage: !isStarting && !generatingImage && (!isDshBackend || runtime?.state?.modelRoutable !== false),
+			canSendQuickMessage: !isStarting && !isAcpInitializing && !generatingImage && (!isDshBackend || runtime?.state?.modelRoutable !== false),
 			// 并行发送（拆分菜单）：当前草稿文本进独立 Ask 会话后台处理，成功后清空草稿。
 			// 上下文由 useAskPanel 按 originSessionId 自动生成（与队列面板共用同一口径），
 			// 这里只负责把来源会话传下去；不要在本入口另建一份 context，否则会再次分叉。
@@ -2569,7 +2577,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			unknownError: sendState.error,
 			acknowledgeUnknown: acknowledgeUnknownDelivery,
 			// DSH 只在 host 明确报告 routable=false 时锁住发送；undefined 代表尚未确认或目录加载失败。
-			canSend: hasContent && !isStarting && !generatingImage && !submittingVideo && (!isDshBackend || runtime?.state?.modelRoutable !== false),
+			canSend: hasContent && !isStarting && !isAcpInitializing && !generatingImage && !submittingVideo && (!isDshBackend || runtime?.state?.modelRoutable !== false),
 			generatingImage,
 		},
 		pickers: {
