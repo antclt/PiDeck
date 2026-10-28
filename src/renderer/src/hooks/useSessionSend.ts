@@ -241,7 +241,17 @@ export function useSessionSend(options: UseSessionSendOptions) {
 		const sourceSessionId = options.sessionId;
 		// atom 随 bootstrap 提升且跨 Composer 重挂载保留；局部 ref 只守当前实例。
 		const existingSend = store.get(sessionSendStateByIdAtom)[sourceSessionId];
-		if (sendingSessionIdsRef.current.has(sourceSessionId) || existingSend?.status === "activating" || existingSend?.status === "sending") return;
+		// 忙碌排队必须在发送锁之前判定：ACP 的 sessions.sendPrompt 是「整回合 IPC」
+		// （等 session/prompt 返回才 resolve，见下方 ACP 注释），回合期间 sendingSessionIdsRef
+		// 与 sendState=sending 恒为真。若让锁先返回，回合中第二次发送会被静默丢弃——既不排队
+		// 也无任何提示，用户只能等回合结束再重发。锁只约束「空闲直发」。
+		const queueingWhileBusy = Boolean(options.enqueue && (streamingBehavior === "steer" || streamingBehavior === "followUp"));
+		// 本次调用之前锁是否已被别的发送持有：队列路径不改动别人的锁，退出时也不能替它释放。
+		const sendLockHeldBeforeCall = sendingSessionIdsRef.current.has(sourceSessionId);
+		const releaseSendLock = () => {
+			if (!sendLockHeldBeforeCall) sendingSessionIdsRef.current.delete(sourceSessionId);
+		};
+		if (!queueingWhileBusy && (sendLockHeldBeforeCall || existingSend?.status === "activating" || existingSend?.status === "sending")) return;
 		// 热重载会拆掉扩展运行时；期间禁止并发发送（含再次 /reload），避免把 handler 拆掉或让命令排队。
 		if (store.get(sessionReloadingByIdAtom)[sourceSessionId]) {
 			options.showError?.(t("sessionCommand.reloadResourcesBusy"), 3000);
@@ -322,7 +332,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 			// 也不占 sending 锁（弹框里的登录与后续发送互不干扰）。
 			clearComposerSnapshot(sourceSessionId, keepDraft);
 			resetComposerEphemeralUi(keepDraft);
-			sendingSessionIdsRef.current.delete(sourceSessionId);
+			releaseSendLock();
 			options.openProviderLogin?.(slashCommand.providerId);
 			return;
 		}
@@ -331,7 +341,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 			// 发下去只会得到「命令被模型回答了」。同样不写乐观气泡、不占 sending 锁。
 			clearComposerSnapshot(sourceSessionId, keepDraft);
 			resetComposerEphemeralUi(keepDraft);
-			sendingSessionIdsRef.current.delete(sourceSessionId);
+			releaseSendLock();
 			store.set(openSettingsAtom, { tab: "shortcuts" });
 			return;
 		}
@@ -340,7 +350,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 			// 不写乐观用户气泡、不进模型消息流。
 			clearComposerSnapshot(sourceSessionId, keepDraft);
 			resetComposerEphemeralUi(keepDraft);
-			sendingSessionIdsRef.current.delete(sourceSessionId);
+			releaseSendLock();
 			const target = toSessionRuntimeTarget(sourceSessionId, runtimeAtEntry);
 			if (!target) {
 				options.showError?.(t("sessionCommand.runtimeUnavailable"), 4000);
@@ -373,11 +383,11 @@ export function useSessionSend(options: UseSessionSendOptions) {
 				});
 				options.showError?.(errorMessage, 4000);
 			} finally {
-				sendingSessionIdsRef.current.delete(sourceSessionId);
+				releaseSendLock();
 			}
 			return;
 		}
-		const usesLocalQueue = Boolean(options.enqueue && (streamingBehavior === "steer" || streamingBehavior === "followUp"));
+		const usesLocalQueue = queueingWhileBusy;
 
 		// 首次发送的运行时启动可能包含 spawn/get_state/会话绑定；先发布用户可见状态，
 		// 让输入反馈与后台准备解耦，避免用户把冷启动时间误判成点击无效。
@@ -422,7 +432,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 		const isCurrentRequest = () => (!trackedRecord || Boolean(store.get(sessionRecordsAtom)[sessionId])) && (!submissionPublished || store.get(sessionSendStateByIdAtom)[sessionId]?.requestId === requestId);
 		const releaseIfRetired = () => {
 			if (isCurrentRequest()) return false;
-			sendingSessionIdsRef.current.delete(sourceSessionId);
+			releaseSendLock();
 			return true;
 		};
 		try {
@@ -440,7 +450,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 				state: { status: "error", error: errorMessage },
 			});
 			options.showError?.(errorMessage, 4000);
-			sendingSessionIdsRef.current.delete(sourceSessionId);
+			releaseSendLock();
 			return;
 		}
 
@@ -479,7 +489,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 					await options.compact(runtimeTarget, compactPrompt || undefined);
 				} finally {
 					// /compact 是 chrome 命令，不能占用 sending 锁；否则后续消息被静默丢掉。
-					sendingSessionIdsRef.current.delete(sourceSessionId);
+					releaseSendLock();
 				}
 				return;
 			}
@@ -496,7 +506,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 			const { message: expandedMessage, emptyTemplateName } = expandPromptTemplates(message, options.getTemplates(), { reservedNames: options.getReservedCommandNames?.() });
 			if (emptyTemplateName) {
 				// 展开器会保留空模板的 /命令原文，不能靠消息是否空白判断正文有效。
-				sendingSessionIdsRef.current.delete(sourceSessionId);
+				releaseSendLock();
 				rejectEmptyTemplate(sessionId, emptyTemplateName);
 				return;
 			}
@@ -520,7 +530,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 			if (enqueued) {
 				clearComposerSnapshot(sessionId, keepDraft);
 				resetComposerEphemeralUi(keepDraft);
-				sendingSessionIdsRef.current.delete(sourceSessionId);
+				releaseSendLock();
 				return;
 			}
 			// Queue full: fall through to direct send.
@@ -576,7 +586,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 				state: { status: "error", requestId, error: errorMessage },
 			});
 			options.showError?.(errorMessage, 4000);
-			sendingSessionIdsRef.current.delete(sourceSessionId);
+			releaseSendLock();
 			return;
 		}
 
@@ -588,7 +598,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 			restoreRejectedPrompt(sessionId, keepDraft, rawDraft, imageSnapshot, quoteMap);
 			dropPendingUserMessage(sessionId, requestId);
 			rejectEmptyTemplate(sessionId, emptyTemplateName);
-			sendingSessionIdsRef.current.delete(sourceSessionId);
+			releaseSendLock();
 			return;
 		}
 		const record = store.get(sessionRecordsAtom)[sessionId];
@@ -732,7 +742,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
 			});
 			options.showUnknown?.();
 		} finally {
-			sendingSessionIdsRef.current.delete(sourceSessionId);
+			releaseSendLock();
 		}
 	};
 }
