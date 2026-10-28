@@ -50,7 +50,9 @@ export function useHostPluginView(element: RefObject<HTMLDivElement | null>, plu
 		};
 		synchronize.current = schedule;
 		const appearance = new MutationObserver(schedule);
-		appearance.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "data-theme", "data-appearance", "data-accent", "lang"] });
+		// 宿主插件面板跟着肤色同步：外观拆成两维后 data-palette 也会变（只换色不换形状），
+		// 漏听会导致切配色后插件面板还停在上旧色板
+		appearance.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "data-theme", "data-appearance", "data-palette", "data-accent", "lang"] });
 		void desktopApi.hostPlugins
 			.mount({ pluginId, panelId, context: contextInput(scope.current) })
 			.then(async (result) => {

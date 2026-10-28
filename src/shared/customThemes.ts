@@ -14,8 +14,9 @@
  *   与 logo-green 系列（品牌标识固定）。
  */
 
-/** 主题包 JSON 的 token 键：完整 CSS 变量名 */
-export type CustomThemeTokenInput = Record<string, string>;
+import { isLegacyAppSkinId, normalizeThemeAppearance } from "./themeSkinMigration";
+
+/** 主题包 JSON 的 token 键：完整 CSS 变量名 */ export type CustomThemeTokenInput = Record<string, string>;
 /** 内部快照 token 键：不含 "--color-" 前缀（与 customThemeOverrides 约定一致） */
 export type CustomThemeTokenMap = Record<string, string>;
 
@@ -28,9 +29,9 @@ export type CustomThemePackage = {
 	author?: string;
 	description?: string;
 	/**
-	 * 继承的内置皮肤 id（可省略 = 不继承，走 themeSkin="custom" 的裸色板）。
-	 * 写了 base 的主题包只在被继承皮肤的形状 chrome（等宽/方角/标记/模糊）之上覆盖 token，
-	 * 应用时 themeSkin 直接落到该皮肤，因此不用把整套 token 写全。
+	 * 继承的内置样式 id（可省略 = 不继承，只叠 token，形状走当前样式）。
+	 * 写了 base 的主题包只在被继承样式的形状 chrome（等宽/方角/标记）之上覆盖颜色，
+	 * 应用时 themeStyle 直接落到该样式，因此不用把整套 token 写全。
 	 */
 	base?: CustomThemeBaseSkin;
 	appearance: {
@@ -40,18 +41,19 @@ export type CustomThemePackage = {
 };
 
 /**
- * 主题包可继承的内置皮肤（"custom" 除外：它就是「不继承」本身）。
- * shared/ 是纯契约层，不能反向 import renderer 的 SKIN_PRESETS —— 两侧同步由
- * tests/appearanceThemes.test.mjs 守（新增皮肤漏更新会红）。
+ * 主题包可继承的内置样式（形状层）。颜色不在 base 里——主题包本身就是一套颜色，
+ * 与样式正交，所以 base 只决定形状 chrome（等宽/方角/消息标记）。
+ * shared/ 是纯契约层，不能反向 import renderer 的 STYLE_PRESETS —— 两侧同步由
+ * tests/appearanceThemes.test.mjs 守（新增样式漏更新会红）。
  */
-export const CUSTOM_THEME_BASE_SKINS = ["classic-green", "fresh-green", "graphite", "sea-blue", "warm-beige", "terminal", "glass", "liquid-glass"] as const;
+export const CUSTOM_THEME_BASE_SKINS = ["classic", "terminal"] as const;
 export type CustomThemeBaseSkin = (typeof CUSTOM_THEME_BASE_SKINS)[number];
 
 /** 应用主题时写入 settings 的快照（内部无前缀键；亮暗分档） */
 export type CustomThemeSnapshot = {
 	id: string;
 	name: string;
-	/** 继承的内置皮肤；有值时 settings.themeSkin 被设为该皮肤，快照 token 叠加在皮肤色板之上 */
+	/** 继承的内置样式；有值时 settings.themeStyle 被设为该样式，快照颜色叠加在样式之上 */
 	base?: CustomThemeBaseSkin;
 	light: CustomThemeTokenMap;
 	dark: CustomThemeTokenMap;
@@ -71,7 +73,7 @@ export type CustomThemeListItem = {
 	version?: string;
 	author?: string;
 	description?: string;
-	/** 继承的内置皮肤 id（省略表示不继承） */
+	/** 继承的内置样式 id（省略表示不继承） */
 	base?: CustomThemeBaseSkin;
 	tokens: { light: CustomThemeTokenMap; dark: CustomThemeTokenMap };
 	parseError?: string[];
@@ -362,13 +364,17 @@ export function parseCustomThemePackage(raw: string): CustomThemeParseResult {
 			optionalTexts[label] = value;
 		}
 	}
-	// base：可选的内置皮肤继承（写错 id 直接报错，不静默忽略——否则用户以为继承生效了）
+	// base：可选的内置样式继承（写错 id 直接报错，不静默忽略——否则用户以为继承生效了）。
+	// 旧版主题包的 base 写的是皮肤 id（如 "graphite" / "terminal"）：按旧映射归一到样式，
+	// 不报错也不静默丢弃，让存量主题包平滑过渡。
 	let base: CustomThemeBaseSkin | undefined;
 	if (pkg.base !== undefined) {
-		if (typeof pkg.base !== "string" || !(CUSTOM_THEME_BASE_SKINS as readonly string[]).includes(pkg.base)) {
-			errors.push(`base 必须是内置皮肤 id 之一（${CUSTOM_THEME_BASE_SKINS.join(" / ")}），当前为 ${JSON.stringify(pkg.base)}`);
-		} else {
+		if (typeof pkg.base === "string" && (CUSTOM_THEME_BASE_SKINS as readonly string[]).includes(pkg.base)) {
 			base = pkg.base as CustomThemeBaseSkin;
+		} else if (isLegacyAppSkinId(pkg.base)) {
+			base = normalizeThemeAppearance({ themeSkin: pkg.base }).themeStyle;
+		} else {
+			errors.push(`base 必须是内置样式 id 之一（${CUSTOM_THEME_BASE_SKINS.join(" / ")}），当前为 ${JSON.stringify(pkg.base)}`);
 		}
 	}
 	if (pkg.appearance === undefined || typeof pkg.appearance !== "object" || pkg.appearance === null) {
@@ -426,7 +432,9 @@ export function sanitizeCustomThemeSnapshot(value: unknown): CustomThemeSnapshot
 	const light = cleanScheme(input.light);
 	const dark = cleanScheme(input.dark);
 	if (Object.keys(light).length === 0 && Object.keys(dark).length === 0) return undefined;
-	const base = typeof input.base === "string" && (CUSTOM_THEME_BASE_SKINS as readonly string[]).includes(input.base) ? (input.base as CustomThemeBaseSkin) : undefined;
+	// 旧皮肤 id 同样归一到样式（见 parseCustomThemePackage 的 base 解析）
+	const rawBase = input.base;
+	const base: CustomThemeBaseSkin | undefined = typeof rawBase === "string" && (CUSTOM_THEME_BASE_SKINS as readonly string[]).includes(rawBase) ? (rawBase as CustomThemeBaseSkin) : isLegacyAppSkinId(rawBase) ? normalizeThemeAppearance({ themeSkin: rawBase }).themeStyle : undefined;
 	return { id, name, ...(base ? { base } : {}), light, dark };
 }
 

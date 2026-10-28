@@ -34,6 +34,7 @@ import { normalizeEnhanceModel } from "../../shared/enhanceModelPreference";
 import { normalizeQuickMessages } from "../../shared/quickMessages";
 import { sanitizePiCustomPaths } from "../pi/piCustomPaths";
 import { sanitizeCustomThemeSnapshot } from "../../shared/customThemes";
+import { normalizeThemeAppearance } from "../../shared/themeSkinMigration";
 import { sanitizeAcpTools } from "../acp/acpToolConfig";
 import { normalizeFontSizeMode, normalizeOptionalFontSizeMode } from "../../shared/fontSize";
 import { clampSessionTabMaxWidth, SESSION_TAB_MAX_WIDTH_DEFAULT } from "../../shared/sessionTabWidth";
@@ -153,7 +154,8 @@ const defaultSettings: AppSettings = {
 	themeScheduleLightStart: "07:00",
 	themeScheduleDarkStart: "19:00",
 	accent: "default",
-	themeSkin: "classic-green",
+	themeStyle: "classic",
+	themePalette: "classic-green",
 	logoStyle: "pi-tui",
 	// 自定义 logo 图（data URL）与显示名称：默认空 = 未启用，旧 settings.json 缺这两个键也走这里
 	logoCustomImage: "",
@@ -518,6 +520,13 @@ export class SettingsStore {
 					...(parsed.externalEditors ?? {}),
 				},
 			};
+			// 兼容迁移：单维 themeSkin（样式与配色合一的旧模型）→ themeStyle + themePalette。
+			// 逐字段校验，旧 id 映射与已下线皮肤（glass/liquid-glass）的回落在 shared/themeSkinMigration.ts；
+			// 迁移后丢弃内存里的旧字段，下次保存即以两维新字段为准（磁盘旧值在迁移前仍可被旧版读取）。
+			const appearance = normalizeThemeAppearance(this.settings);
+			this.settings.themeStyle = appearance.themeStyle;
+			this.settings.themePalette = appearance.themePalette;
+			delete this.settings.themeSkin;
 			// 新增布尔开关按旧 settings.json 的缺省/脏数据回落，避免字符串值让 UI 或 pi env 误判。
 			if (typeof this.settings.autoSessionTitle !== "boolean") {
 				this.settings.autoSessionTitle = defaultSettings.autoSessionTitle;

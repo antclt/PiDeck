@@ -1,9 +1,9 @@
 import { memo } from "react";
 import type { AppSettings } from "../../../../../shared/types";
-import type { AppSkinId } from "../../../../../shared/types/settings";
+import type { AppPaletteId, AppStyleId } from "../../../../../shared/types/settings";
 import { t } from "../../../i18n";
 import { desktopApi } from "../../../desktopApi";
-import { SKIN_PRESETS } from "../../../themePresets";
+import { PALETTE_PRESETS, STYLE_PRESETS } from "../../../themePresets";
 import { clampSessionTabMaxWidth, SESSION_TAB_MAX_WIDTH_MAX, SESSION_TAB_MAX_WIDTH_MIN } from "../../../../../shared/sessionTabWidth";
 // 缩放档位与快捷键（shared/shortcuts zoomIn/zoomOut）共用同一套边界/步长，避免两处漂移
 import { clampZoomFactor, ZOOM_FACTOR_MAX, ZOOM_FACTOR_MIN, ZOOM_FACTOR_STEP } from "../../../../../shared/zoom";
@@ -46,8 +46,8 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 		{ value: "light", label: t("settings.themeLight") },
 		{ value: "dark", label: t("settings.themeDark") },
 	];
-	// 主题色预设来自 themePresets.ts；外观主题选择器中每套主题自带推荐主色，
-	// 保留 ACCENT_PRESETS 仅供自定义主题参考（无独立主色下拉）。
+	// 主色（accent）不再单独暴露：每套配色自带推荐主色，选配色即连带写入 settings.accent；
+	// 真正需要自定义颜色的用户走下方「自定义主题」主题包（配色选 custom）。
 	const fontSizeOptions: SelectOption[] = [
 		{ value: "compact", label: t("settings.fontSizeCompact") },
 		{ value: "medium", label: t("settings.fontSizeMedium") },
@@ -140,20 +140,33 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 				<SettingRow
 					title={
 						<>
-							<span>{t("settings.accent")}</span>
-							<DirtyMarker dirty={isDirty("themeSkin") || isDirty("accent")} label={t("settings.accent")} />
+							<span>{t("settings.appearanceStyle")}</span>
+							<DirtyMarker dirty={isDirty("themeStyle")} label={t("settings.appearanceStyle")} />
 						</>
 					}
-					description={t("settings.accentDesc")}
+					description={t("settings.appearanceStyleDesc")}
 					stacked
 				>
-					<AppearanceThemePicker
-						value={draft.themeSkin}
+					<AppearanceStylePicker value={draft.themeStyle} onPick={(id) => updateDraft({ themeStyle: id })} />
+				</SettingRow>
+				<SettingRow
+					title={
+						<>
+							<span>{t("settings.appearancePalette")}</span>
+							<DirtyMarker dirty={isDirty("themePalette") || isDirty("accent")} label={t("settings.appearancePalette")} />
+						</>
+					}
+					description={t("settings.appearancePaletteDesc")}
+					stacked
+				>
+					<AppearancePalettePicker
+						value={draft.themePalette}
 						onPick={(id) => {
-							const preset = SKIN_PRESETS.find((p) => p.id === id);
-							// 外观主题自带推荐主色：选择主题时联动写入 accent，保证「一套主题 = 完整外观」；
-							// 切回内置皮肤时同时清掉自定义主题包快照（快照仅 themeSkin=custom 时生效，双保险防残留）
-							updateDraft(preset ? { themeSkin: id, accent: preset.accent, customTheme: undefined } : { themeSkin: id, customTheme: undefined });
+							if (id === "custom") return;
+							const preset = PALETTE_PRESETS.find((p) => p.id === id);
+							// 配色自带推荐主色：选配色时联动写入 accent，保证「一套配色 = 完整颜色方案」；
+							// 切到内置配色时同时清掉自定义主题包快照（快照仅在 themePalette=custom 时生效，双保险防残留）
+							updateDraft({ themePalette: id, accent: preset?.accent ?? draft.accent, customTheme: undefined });
 						}}
 					/>
 				</SettingRow>
@@ -162,7 +175,7 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 					title={
 						<>
 							<span>{t("settings.sectionCustomThemes")}</span>
-							<DirtyMarker dirty={isDirty("customTheme") || (isDirty("themeSkin") && draft.themeSkin === "custom")} label={t("settings.sectionCustomThemes")} />
+							<DirtyMarker dirty={isDirty("customTheme") || (isDirty("themePalette") && draft.themePalette === "custom")} label={t("settings.sectionCustomThemes")} />
 						</>
 					}
 					description={t("settings.customThemesDesc")}
@@ -547,17 +560,67 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 });
 
 /**
- * 外观主题选择器：每个主题一张色板预览卡（背景/侧栏/面板/主色/边框五色块），
- * 选中态用主色描边 + 勾选标记。选择即联动写入 themeSkin + 主题自带主色 accent
- * （值更新在父级 AppearanceTab 的 onPick 中完成）。
- * custom 主题没有内置色板（由 customThemeOverrides 驱动），仅当当前值为 custom 时
- * 显示一个占位卡，避免选中状态丢失；自定义覆盖的高级编辑不在本组件范围。
+ * 外观样式选择器（data-appearance）：只选形状与排版，颜色交给配色选择器。
+ * 两张卡各画一个迷你示意——classic 是圆角气泡，terminal 是方角 + `❯`/`⏺` 前缀标记，
+ * 让「换的是形状而不是配色」一眼可见，而不是只看到一小块色板。
  */
-const AppearanceThemePicker = memo(function AppearanceThemePicker(props: { value: AppSkinId; onPick: (id: AppSkinId) => void }) {
+const AppearanceStylePicker = memo(function AppearanceStylePicker(props: { value: AppStyleId; onPick: (id: AppStyleId) => void }) {
 	const { value, onPick } = props;
 	return (
-		<div className="grid w-full grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-4" role="radiogroup" aria-label={t("settings.accent")}>
-			{SKIN_PRESETS.map((preset) => {
+		<div className="grid w-full grid-cols-2 gap-2 md:grid-cols-4" role="radiogroup" aria-label={t("settings.appearanceStyle")}>
+			{STYLE_PRESETS.map((preset) => {
+				const selected = preset.id === value;
+				const isTerminal = preset.id === "terminal";
+				return (
+					<button
+						key={preset.id}
+						type="button"
+						role="radio"
+						aria-checked={selected}
+						title={t(preset.descKey)}
+						onClick={() => onPick(preset.id)}
+						className={cn("group relative flex flex-col gap-1.5 rounded-lg border p-2 text-left transition-colors duration-fast", selected ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)]" : "border-border-subtle bg-bg-panel hover:border-border-default")}
+					>
+						<span className={cn("flex h-12 w-full flex-col justify-center gap-1 overflow-hidden border border-border-subtle bg-bg-page px-2", isTerminal ? "rounded-none" : "rounded-sm")} aria-hidden="true">
+							{isTerminal ? (
+								<>
+									<span className="flex items-center gap-1 font-mono text-[10px] leading-none text-[var(--color-accent)]">
+										<span>❯</span>
+										<span className="h-2 flex-1 bg-[var(--color-accent)] opacity-25" />
+									</span>
+									<span className="flex items-center gap-1 font-mono text-[10px] leading-none text-[var(--color-md-heading)]">
+										<span>⏺</span>
+										<span className="h-2 flex-1 bg-[var(--color-text-tertiary)] opacity-25" />
+									</span>
+								</>
+							) : (
+								<>
+									<span className="ml-auto block h-2.5 w-1/2 rounded-full bg-[var(--color-accent)] opacity-40" />
+									<span className="block h-2.5 w-2/3 rounded-full bg-[var(--color-text-tertiary)] opacity-25" />
+								</>
+							)}
+						</span>
+						<span className="text-control leading-tight text-foreground">{t(preset.labelKey)}</span>
+						{selected && <Check className="absolute right-1.5 top-1.5 size-3.5 text-[var(--color-accent)]" strokeWidth={3} aria-hidden="true" />}
+					</button>
+				);
+			})}
+		</div>
+	);
+});
+
+/**
+ * 外观配色选择器（data-palette）：只选颜色，与样式正交——任意样式都能套任意配色
+ * （terminal 样式配 classic-green、classic 样式配 tui 都合法）。
+ * 每套配色一张五色块预览卡，选中即联动写入该配色自带的主色（见父级 onPick）。
+ * custom 不吃内置色板：颜色来自自定义主题包，仅在当前值就是 custom 时显示占位卡，
+ * 避免选中态丢失；真正的编辑入口在下方「自定义主题」区。
+ */
+const AppearancePalettePicker = memo(function AppearancePalettePicker(props: { value: AppPaletteId; onPick: (id: AppPaletteId) => void }) {
+	const { value, onPick } = props;
+	return (
+		<div className="grid w-full grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-4" role="radiogroup" aria-label={t("settings.appearancePalette")}>
+			{PALETTE_PRESETS.filter((preset) => preset.id !== "custom" || preset.id === value).map((preset) => {
 				const selected = preset.id === value;
 				const surface = preset.previewSurfaces;
 				return (
@@ -576,13 +639,7 @@ const AppearanceThemePicker = memo(function AppearanceThemePicker(props: { value
 							<span className="flex-1 p-1.5">
 								<span className="mb-1 block h-1.5 w-3/4 rounded-sm" style={{ background: surface.border }} />
 								<span className="block h-1.5 w-1/2 rounded-sm" style={{ background: surface.accent }} />
-								<span
-									className="mt-1 block h-1.5 w-2/3 rounded-sm"
-									style={{
-										background: surface.panel,
-										border: `1px solid ${surface.border}`,
-									}}
-								/>
+								<span className="mt-1 block h-1.5 w-2/3 rounded-sm" style={{ background: surface.panel, border: `1px solid ${surface.border}` }} />
 							</span>
 						</span>
 						<span className="text-control leading-tight text-foreground">{t(preset.labelKey)}</span>
@@ -590,11 +647,6 @@ const AppearanceThemePicker = memo(function AppearanceThemePicker(props: { value
 					</button>
 				);
 			})}
-			{value === "custom" && (
-				<button type="button" role="radio" aria-checked={true} className="flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border-default bg-bg-panel p-2 text-control leading-tight text-muted-foreground">
-					{t("settings.skin.custom")}
-				</button>
-			)}
 		</div>
 	);
 });

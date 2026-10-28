@@ -1,7 +1,7 @@
 import type { ThemeRegistrationAny } from "shiki";
 
 /**
- * 终端皮肤（data-appearance="terminal"）的代码高亮色板。
+ * `tui` 配色（data-palette="tui"）的代码高亮色板。
  *
  * 为什么要在代码里造 Shiki 主题，而不是加 CSS token：
  * 代码块每个 token 的颜色由 Shiki 生成的 inline style 决定，CSS 变量管不到；pi TUI 的

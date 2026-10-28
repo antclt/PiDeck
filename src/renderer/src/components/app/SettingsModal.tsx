@@ -402,7 +402,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 		// 自定义主题包快照同样实时预览：与 App 的 useAppAppearance 共用注入实现
 		// （data-theme 先由 applyAppearanceAttributes 写好，再按当前亮暗选档注入）。
 		applyCustomThemeTokens(root, draftSettings, root.dataset.theme === "dark");
-	}, [draftSettings.theme, draftSettings.themeScheduleLightStart, draftSettings.themeScheduleDarkStart, draftSettings.themeSkin, draftSettings.accent, draftSettings.customTheme, draftSettings.customThemeOverrides]);
+	}, [draftSettings.theme, draftSettings.themeScheduleLightStart, draftSettings.themeScheduleDarkStart, draftSettings.themeStyle, draftSettings.themePalette, draftSettings.accent, draftSettings.customTheme, draftSettings.customThemeOverrides]);
 
 	// 字号档位实时预览：与上方主题色预览同理，草稿变化立即写入 <html> dataset（含 Tab 栏字号）。
 	// 此前字号不预览，弹窗内选档位界面毫无反应，用户以为设置无效（v0.7.8 发布前用户反馈）；

@@ -23,20 +23,24 @@ export function useDocumentTheme(): "dark" | "light" {
 }
 
 /**
- * 订阅 documentElement 的 data-appearance（皮肤 id，默认皮肤为空串）。
+ * 订阅 documentElement 的 data-palette（配色 id）。
  *
- * 与 useDocumentTheme 同理：皮肤切换只改 root 属性，不触发 React 更新。
- * 目前用于让 MarkdownStream 换用终端皮肤的 Shiki 代码高亮色板（代码 token 色由
- * inline style 决定，CSS 变量管不到）。
+ * 与 useDocumentTheme 同理：切配色只改 root 属性，不触发 React 更新。
+ * 用于让 MarkdownStream 在 `tui` 配色下换用 pi 终端的 Shiki 代码高亮色板
+ * （代码 token 色由 inline style 决定，CSS 变量管不到）。
+ *
+ * 为什么跟配色而不是跟样式：代码块的语法色是「颜色」而不是「形状」，
+ * 与另外 19 个 `--color-*` 一样属于配色维度；terminal 样式配 graphite 配色时
+ * 用默认高亮、classic 样式配 tui 配色时用 TUI 高亮，两种组合都自洽。
  */
-export function useDocumentAppearance(): string {
-	const read = () => (typeof document === "undefined" ? "" : (document.documentElement.dataset.appearance ?? ""));
-	const [appearance, setAppearance] = useState<string>(read);
+export function useDocumentPalette(): string {
+	const read = () => (typeof document === "undefined" ? "" : (document.documentElement.dataset.palette ?? ""));
+	const [palette, setPalette] = useState<string>(read);
 	useEffect(() => {
 		const root = document.documentElement;
-		const observer = new MutationObserver(() => setAppearance(root.dataset.appearance ?? ""));
-		observer.observe(root, { attributes: true, attributeFilter: ["data-appearance"] });
+		const observer = new MutationObserver(() => setPalette(root.dataset.palette ?? ""));
+		observer.observe(root, { attributes: true, attributeFilter: ["data-palette"] });
 		return () => observer.disconnect();
 	}, []);
-	return appearance;
+	return palette;
 }

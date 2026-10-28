@@ -17,21 +17,21 @@ const injectedWallpaperValues = new Map<string, string>();
 
 /**
  * 自定义 token 注入（主题包快照 + 手写 overrides）：App 持久化应用与设置弹窗实时预览共用。
- * 先清后注、幂等；快照仅在当前皮肤匹配时生效（裸 custom 皮肤，或它的 base 继承皮肤），
- * 切回其它内置皮肤不残留；overrides 沿袭历史行为始终叠加（inline 样式压过 [data-appearance] 样式表）。
+ * 先清后注、幂等；快照仅在配色为 `custom` 时生效（颜色完全来自主题包），
+ * 切到任何内置配色都不残留；overrides 沿袭历史行为始终叠加（inline 样式压过 [data-palette] 样式表）。
  */
-type CustomThemeSettingsSlice = Pick<AppSettings, "themeSkin" | "customTheme" | "customThemeOverrides" | "fontFamilyBase" | "fontFamilyBaseCustom" | "fontFamilyMono" | "fontFamilyMonoCustom">;
+type CustomThemeSettingsSlice = Pick<AppSettings, "themePalette" | "customTheme" | "customThemeOverrides" | "fontFamilyBase" | "fontFamilyBaseCustom" | "fontFamilyMono" | "fontFamilyMonoCustom">;
 
 /**
- * 本皮肤下生效的主题包快照：裸 `custom` 皮肤，或恰好是它继承的那套内置皮肤（`base`）。
- * 继承皮肤之所以把快照限于 base：用户手动把皮肤换成别的内置皮肤后，
- * 旧快照不能再去覆盖新皮肤（切肤时的清空是另一道防线）。
+ * 当前生效的主题包快照：配色为 `custom` 时生效。
+ *
+ * 样式与配色已拆开，主题包的 `base` 只决定应用时绑定哪套样式（形状 chrome），
+ * 颜色本身与样式正交——因此之后手动切换样式不应让主题包颜色失效。
  */
 function activeCustomTheme(settings: CustomThemeSettingsSlice): CustomThemeSettingsSlice["customTheme"] {
 	const theme = settings.customTheme;
 	if (!theme) return undefined;
-	if (settings.themeSkin === "custom") return theme;
-	return theme.base !== undefined && settings.themeSkin === theme.base ? theme : undefined;
+	return settings.themePalette === "custom" ? theme : undefined;
 }
 
 /** 用户输入的自定义字体统一追加 CJK 回退（只填西文字体时中文不能落到 SimSun 小字挤压） */
@@ -197,7 +197,7 @@ export function useAppAppearance({ settings, systemLanguage, settingsLoaded }: {
 		if (settingsLoaded) hasAppliedAuthoritativeAppearanceRef.current = true;
 		// 依赖 theme 与 accent：只改主题色时也必须重新应用 data-accent（否则界面不变）
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- settings 是整对象入参，列全字段反而脆弱；与既有行为一致（见 App.tsx 迁出前同注释）
-	}, [resolvedTheme, settings.theme, settings.themeScheduleLightStart, settings.themeScheduleDarkStart, settings.accent, settings.themeSkin, settingsLoaded, systemPrefersDark]);
+	}, [resolvedTheme, settings.theme, settings.themeScheduleLightStart, settings.themeScheduleDarkStart, settings.accent, settings.themeStyle, settings.themePalette, settingsLoaded, systemPrefersDark]);
 
 	// 外观主题自定义覆盖 + 换肤背景图统一管理（原两个 effect 互相清除：
 	// 皮肤 effect 清 token 时误清壁纸注入、背景 effect 的 else 分支又误清皮肤 bg 键——
@@ -297,7 +297,7 @@ export function useAppAppearance({ settings, systemLanguage, settingsLoaded }: {
 		}
 		// resolvedTheme 必须进依赖：系统明暗翻转/时间边界到达时壁纸 inline token 要按新明暗重算，
 		// 否则上一主题烤进的 color-mix 基色焊死在 root.style 上压过样式表（issue #297）
-	}, [resolvedTheme, settings.themeSkin, settings.theme, settings.customTheme, settings.customThemeOverrides, settings.backgroundImage, settings.backgroundImageOpacity, settings.weWorkshopDir, settings.weWallpaperId]);
+	}, [resolvedTheme, settings.themePalette, settings.theme, settings.customTheme, settings.customThemeOverrides, settings.backgroundImage, settings.backgroundImageOpacity, settings.weWorkshopDir, settings.weWallpaperId]);
 
 	// 字号与命名字体预设由 data 属性选择 CSS token；只有 custom 字体需要注入用户输入。
 	useEffect(() => {
@@ -309,5 +309,5 @@ export function useAppAppearance({ settings, systemLanguage, settingsLoaded }: {
 		// 字体族：主题包字体 + 用户显式自定义字体（CJK 回退、覆盖顺序）统一在
 		// applyFontFamilyTokens 里算，这里只负责在字体设置变化时重算一次。
 		applyFontFamilyTokens(root, settings, resolvedTheme === "dark");
-	}, [settings.fontSize, settings.uiFontSize, settings.tabBarFontSize, settings.chatFontSize, settings.inputFontSize, settings.fontFamilyBase, settings.fontFamilyBaseCustom, settings.fontFamilyMono, settings.fontFamilyMonoCustom, settings.themeSkin, settings.customTheme, resolvedTheme]);
+	}, [settings.fontSize, settings.uiFontSize, settings.tabBarFontSize, settings.chatFontSize, settings.inputFontSize, settings.fontFamilyBase, settings.fontFamilyBaseCustom, settings.fontFamilyMono, settings.fontFamilyMonoCustom, settings.themePalette, settings.customTheme, resolvedTheme]);
 }

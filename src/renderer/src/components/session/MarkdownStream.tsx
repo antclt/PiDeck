@@ -17,7 +17,7 @@ import { normalizeMathDelimiters } from "../../utils/normalizeMathDelimiters";
 import { UNTRUSTED_MARKDOWN_REHYPE_PLUGINS } from "./markdownSanitize";
 import { FormulaCopyLayer } from "./FormulaCopyLayer";
 import { useSmoothStream } from "../../utils/useSmoothStream";
-import { useDocumentAppearance, useDocumentTheme } from "../../hooks/useDocumentTheme";
+import { useDocumentPalette, useDocumentTheme } from "../../hooks/useDocumentTheme";
 import { STREAM_LIGHT_MAX_CHARS, STREAM_UNFREEZABLE_MIN_CHARS, SETTLE_FULL_MAX_CHARS, SETTLED_CHUNK_CHARS, shouldRenderStreamPlain, shouldKeepLightOnSettle } from "./markdownStreamPolicy";
 // 兼容导出：既有引用与源码契约测试从 MarkdownStream 读阈值常量
 export { STREAM_LIGHT_MAX_CHARS } from "./markdownStreamPolicy";
@@ -35,11 +35,11 @@ import { IncrementalMarkdownFrontier, splitMarkdownChunks, UNSTABLE_TAIL_BLOCKS 
 const mathPlugin = createMathPlugin({ singleDollarTextMath: true });
 
 /**
- * 终端皮肤（data-appearance="terminal"）的代码高亮插件。
+ * `tui` 配色的代码高亮插件。
  *
- * 代码 token 的颜色是 Shiki 写进 inline style 的，CSS 变量改不动，所以终端皮肤的高亮
- * 只能整块换主题（色板见 markdown/piTuiShikiThemes.ts）。默认皮肤继续用 @streamdown/code
- * 的内置 `code`，保证未启用皮肤时零变化。
+ * 代码 token 的颜色是 Shiki 写进 inline style 的，CSS 变量改不动，所以 pi 终端配色下的
+ * 高亮只能整块换主题（色板见 markdown/piTuiShikiThemes.ts）。其他配色继续用 @streamdown/code
+ * 的内置 `code`，保证未选 tui 配色时零变化。
  */
 const piTuiCodePlugin = createCodePlugin({ themes: PI_TUI_SHIKI_THEMES });
 
@@ -161,8 +161,8 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 	// 订阅式读主题（2027-02 修正）：直读 dataset 拿不到切主题后的变化，mermaid
 	// 配置会保持旧明暗档直到下次无关重渲染。观察器见 hooks/useDocumentTheme。
 	const isDark = useDocumentTheme() === "dark";
-	// 皮肤（data-appearance）同样是 root 属性，需要订阅才能跟着切换代码高亮色板。
-	const appearance = useDocumentAppearance();
+	// 配色（data-palette）同样是 root 属性，需要订阅才能跟着切换代码高亮色板。
+	const palette = useDocumentPalette();
 	// 逐字打字机：默认参数见 useSmoothStream（16ms / 每帧最多 10 字；长文本按长度再降频）。
 	const { displayedContent } = useSmoothStream({
 		content: props.text,
@@ -307,7 +307,7 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 			plugins: (effectiveLight
 				? { math: mathPlugin }
 				: {
-						code: appearance === "terminal" ? piTuiCodePlugin : code,
+						code: palette === "tui" ? piTuiCodePlugin : code,
 						mermaid,
 						math: mathPlugin,
 					}) as Parameters<typeof Streamdown>[0]["plugins"],
@@ -319,7 +319,7 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 			},
 			components,
 		}),
-		[components, props.isStreaming, effectiveLight, resolvedRemarkPlugins, resolvedRehypePlugins, urlTransform, isDark, appearance],
+		[components, props.isStreaming, effectiveLight, resolvedRemarkPlugins, resolvedRehypePlugins, urlTransform, isDark, palette],
 	);
 	// 冻结切分与 streamPlain 已在上面（settle effect 之后）先行计算，
 	// 此处直接消费 frozenSplit：节流窗口内 displayText 不变时 useMemo 返回

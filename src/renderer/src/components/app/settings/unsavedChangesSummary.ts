@@ -81,10 +81,12 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "theme", tab: "appearance", itemKey: "settings.theme" },
 	{ field: "themeScheduleLightStart", tab: "appearance", itemKey: "settings.themeScheduleRange" },
 	{ field: "themeScheduleDarkStart", tab: "appearance", itemKey: "settings.themeScheduleRange" },
-	{ field: "accent", tab: "appearance", itemKey: "settings.accent" },
-	// 外观主题选择器同时改 themeSkin + accent（主题自带主色），两项归并到同一摘要
-	{ field: "themeSkin", tab: "appearance", itemKey: "settings.accent" },
-	// 自定义主题包快照与 themeSkin 联动（应用即切 custom + 写快照），归并到同一摘要
+	{ field: "accent", tab: "appearance", itemKey: "settings.appearancePalette" },
+	// 外观样式选择器只改形状（themeStyle），配色选择器改 themePalette + accent（配色自带主色）：
+	// 颜色两项归并到同一摘要，形状单独一条
+	{ field: "themeStyle", tab: "appearance", itemKey: "settings.appearanceStyle" },
+	{ field: "themePalette", tab: "appearance", itemKey: "settings.appearancePalette" },
+	// 自定义主题包快照与 themePalette 联动（应用即切 custom + 写快照），归并到同一摘要
 	{ field: "customTheme", tab: "appearance", itemKey: "settings.sectionCustomThemes" },
 	{ field: "backgroundImage", tab: "appearance", itemKey: "settings.backgroundImage" },
 	{ field: "backgroundImageOpacity", tab: "appearance", itemKey: "settings.backgroundImage" },

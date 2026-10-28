@@ -121,28 +121,33 @@ test("sanitizeCustomThemeSnapshot：逐键过滤 + 整体非法丢弃", () => {
 	assert.equal(sanitizeCustomThemeSnapshot("junk"), undefined);
 });
 
-test("base 继承：合法内置皮肤 id 进 theme.base / 快照，非法 id 与 custom 明确拒绝", () => {
+test("base 继承：合法样式 id 进 theme.base / 快照，旧皮肤 id 归一，非法 id 明确拒绝", () => {
 	const parsed = parseCustomThemePackage(minimalPackageJson({ base: "terminal" }));
 	assert.equal(parsed.ok, true);
 	assert.equal(parsed.theme.base, "terminal");
 	// 序列化往返不丢 base（编辑器保存 + 目录重扫两步都靠它）
 	assert.equal(parseCustomThemePackage(serializeCustomThemePackage(parsed.theme)).theme.base, "terminal");
 
-	// 快照透传 base
-	const snapshot = sanitizeCustomThemeSnapshot({ id: "t", name: "T", base: "glass", light: { "bg-app": "#fff" } });
-	assert.equal(snapshot.base, "glass");
-	// 历史快照没有 base 时不得凭空长出字段；非法 base 直接丢弃而不报错（SettingsStore 容错口径）
+	// 快照透传样式 id
+	const snapshot = sanitizeCustomThemeSnapshot({ id: "t", name: "T", base: "terminal", light: { "bg-app": "#fff" } });
+	assert.equal(snapshot.base, "terminal");
+	// 旧版主题包/快照写的是皮肤 id：按迁移表归一到样式，不报错也不静默丢弃
+	assert.equal(sanitizeCustomThemeSnapshot({ id: "t", name: "T", base: "glass", light: { "bg-app": "#fff" } }).base, "classic");
+	assert.equal(sanitizeCustomThemeSnapshot({ id: "t", name: "T", base: "graphite", light: { "bg-app": "#fff" } }).base, "classic");
+	// 历史快照没有 base 时不得凭空长出字段；既非样式也非旧皮肤的值直接丢弃（SettingsStore 容错口径）
 	assert.equal("base" in sanitizeCustomThemeSnapshot({ id: "t", name: "T", light: { "bg-app": "#fff" } }), false);
-	assert.equal("base" in sanitizeCustomThemeSnapshot({ id: "t", name: "T", base: "custom", light: { "bg-app": "#fff" } }), false);
+	assert.equal("base" in sanitizeCustomThemeSnapshot({ id: "t", name: "T", base: "nope", light: { "bg-app": "#fff" } }), false);
 	// 不写 base 的包没有该字段（不能写成 undefined 进 JSON）
 	const plain = parseCustomThemePackage(minimalPackageJson());
 	assert.equal("base" in plain.theme, false);
 
-	for (const bad of ["custom", "nope", 42]) {
+	for (const bad of ["nope", 42]) {
 		const rejected = parseCustomThemePackage(minimalPackageJson({ base: bad }));
 		assert.equal(rejected.ok, false, String(bad));
-		assert.match(rejected.errors.join("\n"), /base 必须是内置皮肤 id/);
+		assert.match(rejected.errors.join("\n"), /base 必须是内置样式 id/);
 	}
+	// 旧皮肤 id 在包解析阶段同样归一，不报错（存量主题包平滑过渡）
+	assert.equal(parseCustomThemePackage(minimalPackageJson({ base: "liquid-glass" })).theme.base, "classic");
 	assert.ok(CUSTOM_THEME_BASE_SKINS.includes("terminal"));
 	assert.ok(!CUSTOM_THEME_BASE_SKINS.includes("custom"));
 	// 指南得教 AI 用 base（否则生成的主题只能从零写全）

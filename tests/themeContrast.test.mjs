@@ -115,11 +115,13 @@ const LIGHT = extractBlock(":root");
 // 测试必须模拟继承，否则会把「变体下实际生效的残留值」漏掉——warning 漏暗色覆盖就是这么发现的。
 const DARK = { ...LIGHT, ...extractBlock(':root[data-theme="dark"]') };
 
-// 全部用户可选色板：亮/暗 × accent(5)，亮/暗 × appearance 皮肤(4)。
-// accent 只覆盖 accent 族 token、appearance 只覆盖面色/灰阶——两轴交叠组合的 token/面
-// 配对已由这 20 块成对覆盖（跨轴组合不产生新配对），不展开 60 组全叉积。
+// 全部用户可选色板：亮/暗 × accent(5)，亮/暗 × 配色（data-palette，6 套内置）。
+// accent 只覆盖 accent 族 token、配色只覆盖面色/灰阶——两轴交叠组合的 token/面
+// 配对已由这批块成对覆盖（跨轴组合不产生新配对），不展开全叉积。
+// 外观样式（data-appearance）不在这里：它只改形状/字体/圆角，没有任何颜色声明，
+// 因此不产生新的文字/底色配对（守卫见 tests/appearanceThemes.test.mjs）。
 const ACCENTS = ["green", "blue", "purple", "amber", "rose"];
-const APPEARANCES = ["fresh-green", "graphite", "sea-blue", "warm-beige", "terminal", "glass", "liquid-glass"];
+const PALETTE_IDS = ["fresh-green", "graphite", "sea-blue", "warm-beige", "tui"];
 const PALETTES = [
 	{ label: "浅色", tokens: LIGHT },
 	...ACCENTS.map((a) => ({ label: `浅色+${a}`, tokens: { ...LIGHT, ...extractBlock(`:root[data-accent="${a}"]`) } })),
@@ -128,9 +130,9 @@ const PALETTES = [
 		label: `暗色+${a}`,
 		tokens: { ...DARK, ...extractBlock(`:root[data-theme="dark"][data-accent="${a}"]`) },
 	})),
-	...APPEARANCES.flatMap((a) => [
-		{ label: `浅色皮肤·${a}`, tokens: { ...LIGHT, ...extractBlock(`:root[data-appearance="${a}"]`) } },
-		{ label: `暗色皮肤·${a}`, tokens: { ...DARK, ...extractBlock(`:root[data-theme="dark"][data-appearance="${a}"]`) } },
+	...PALETTE_IDS.flatMap((a) => [
+		{ label: `浅色配色·${a}`, tokens: { ...LIGHT, ...extractBlock(`:root[data-palette="${a}"]`) } },
+		{ label: `暗色配色·${a}`, tokens: { ...DARK, ...extractBlock(`:root[data-theme="dark"][data-palette="${a}"]`) } },
 	]),
 ];
 

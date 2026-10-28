@@ -98,7 +98,7 @@ function resolveSurface(tokens, name) {
 
 function skinDarkBlock(skin) {
 	// 普通字符串拼接（模板字面量会把 \[ \s 等转义折叠掉，正则就坏了）
-	const pattern = ':root\\[data-theme="dark"\\]\\[data-appearance="' + skin + '"\\] \\{([\\s\\S]*?)\\n\\}';
+	const pattern = ':root\\[data-theme="dark"\\]\\[data-palette="' + skin + '"\\] \\{([\\s\\S]*?)\\n\\}';
 	return foundation.match(new RegExp(pattern))?.[1] ?? "";
 }
 

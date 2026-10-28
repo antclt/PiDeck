@@ -18,9 +18,23 @@ export type AppThemeMode = "system" | "light" | "dark" | "schedule";
 /** 主题色预设：data-accent 属性驱动 foundation.css 的 accent/logo 变量 */
 export type AppAccentMode = "default" | "green" | "blue" | "purple" | "amber" | "rose";
 /**
- * 外观主题（皮肤）：覆盖表面/边框/文字色板 + 自带推荐主色，明暗自适应。
- * 内置主题在 themePresets.ts SKIN_PRESETS 定义；custom 由 customThemeOverrides 驱动。
- * classic-green 为出厂默认（中性黑白灰）；fresh-green 为全屏绿色主题（表面带绿色调）。
+ * 外观样式：只管形状与排版（字体、圆角、消息标记、额外 chrome），不决定颜色。
+ * 内置样式在 themePresets.ts STYLE_PRESETS 定义，CSS 走 `[data-appearance="<id>"]`：
+ * - classic：出厂默认，无任何形状覆盖；
+ * - terminal：等宽正文 + 直角框线 + `❯`/`⏺` 消息标记（terminalSkin.css）。
+ */
+export type AppStyleId = "classic" | "terminal";
+
+/**
+ * 外观配色：一套完整的颜色方案（表面/文字/边框/会话面板/Markdown/状态色 + 自带推荐主色），
+ * 与样式正交。CSS 走 `[data-palette="<id>"]`，classic-green 为出厂默认（无覆盖块 = :root 中性色板）。
+ * custom = 颜色完全来自自定义主题包 / customThemeOverrides，不套内置色板。
+ */
+export type AppPaletteId = "classic-green" | "fresh-green" | "graphite" | "sea-blue" | "warm-beige" | "tui" | "custom";
+
+/**
+ * @deprecated 单维外观主题 id（样式与配色合一的旧模型，含已下线的 glass / liquid-glass）。
+ * 仅供旧 settings.json 迁移使用，见 shared/themeSkinMigration.ts；新代码不要再读写 themeSkin。
  */
 export type AppSkinId = "classic-green" | "fresh-green" | "graphite" | "sea-blue" | "warm-beige" | "terminal" | "glass" | "liquid-glass" | "custom";
 /** Logo 风格：pi-tui = pi 官方 TUI 三色像素标（coral/blue/yellow，默认）；classic = PiDeck 四块拼图 π；custom = 用户自备图片（logoCustomImage）。 */
@@ -166,8 +180,15 @@ export type AppSettings = {
 	themeScheduleDarkStart: string;
 	/** 主题色（accent）预设，data-accent 驱动；新增预设只需扩充 AppAccentMode 与色板 */
 	accent: AppAccentMode;
-	/** 皮肤（换肤）：内置预设见 themePresets.ts SKIN_PRESETS；custom 走 customThemeOverrides/customTheme */
-	themeSkin: AppSkinId;
+	/** 外观样式（形状/排版）：内置样式见 themePresets.ts STYLE_PRESETS，CSS 走 data-appearance */
+	themeStyle: AppStyleId;
+	/** 外观配色（颜色方案）：内置配色见 themePresets.ts PALETTE_PRESETS，CSS 走 data-palette；custom 走 customThemeOverrides/customTheme */
+	themePalette: AppPaletteId;
+	/**
+	 * @deprecated 旧版单维外观主题；读取旧 settings.json 时由 normalizeThemeAppearance 迁移到
+	 * themeStyle/themePalette，新写入不再产生该字段。
+	 */
+	themeSkin?: AppSkinId;
 	/** Logo 风格：可选以兼容旧 settings.json，缺省按默认 pi-tui 处理；启动画面经 localStorage 提前生效 */
 	logoStyle?: LogoStyle;
 	/**
@@ -1046,7 +1067,8 @@ export function createDefaultAppSettings(): AppSettings {
 		themeScheduleLightStart: "07:00",
 		themeScheduleDarkStart: "19:00",
 		accent: "default",
-		themeSkin: "classic-green",
+		themeStyle: "classic",
+		themePalette: "classic-green",
 		logoStyle: "pi-tui",
 		logoCustomImage: "",
 		appDisplayName: "",
