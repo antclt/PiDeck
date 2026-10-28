@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { projectFileKey, parseFileTreeKey, fileTreeNodeKey, migrateExpandedDirKeys } = loadTsCommonJs("src/renderer/src/utils/fileTreeLazy.ts");
+const { projectFileKey, parseFileTreeKey, fileTreeNodeKey, migrateExpandedDirKeys, isActiveFileTreeRow } = loadTsCommonJs("src/renderer/src/utils/fileTreeLazy.ts");
 
 /** 沙箱里造的对象的原型与测试文件不同：比较前复制成本地值。 */
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -52,4 +52,18 @@ test("迁移幂等：没有旧键时原样返回，且不产生新集合", () =>
 	const migrated = migrateExpandedDirKeys(tree, current);
 	assert.equal(migrated.changed, false);
 	assert.equal(migrated.keys, current, "无变化时返回同一个引用，避免无谓的重渲染与写盘");
+});
+
+test("活跃行判定：项目作用域键与旧的本机路径两种输入都认", () => {
+	const local = { name: "a.ts", type: "file", relativePath: "src/a.ts", path: "F:\PiDeck\src\a.ts", target: { projectId: "p1", relativePath: "src/a.ts" } };
+	const remote = { name: "a.ts", type: "file", relativePath: "src/a.ts", target: { projectId: "p1", relativePath: "src/a.ts" } };
+	// 新：项目作用域键（远端面板用它，本机将来也用它）。
+	assert.equal(isActiveFileTreeRow(projectFileKey({ projectId: "p1", relativePath: "src/a.ts" }), local), true);
+	assert.equal(isActiveFileTreeRow(projectFileKey({ projectId: "p1", relativePath: "src/a.ts" }), remote), true);
+	// 旧：本机绝对路径 / 无 path 时的相对路径（从 chip / Git 面板直接打开的 tab 没有 target）。
+	assert.equal(isActiveFileTreeRow("F:\PiDeck\src\a.ts", local), true);
+	assert.equal(isActiveFileTreeRow("src/a.ts", remote), true);
+	// 不同项目同相对路径不能串。
+	assert.equal(isActiveFileTreeRow(projectFileKey({ projectId: "p2", relativePath: "src/a.ts" }), remote), false);
+	assert.equal(isActiveFileTreeRow(null, local), false);
 });

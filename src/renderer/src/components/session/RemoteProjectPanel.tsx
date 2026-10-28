@@ -17,7 +17,7 @@ import { RemoteTrashPanel } from "./RemoteTrashPanel";
 import { remoteFileEntryKeepsInput } from "./remoteFileManagementState";
 import { FileTreeNodeRow } from "./FileTreeRows";
 import { useRemoteFileTree } from "../../hooks/useRemoteFileTree";
-import { fileTreeNodeKey } from "../../utils/fileTreeLazy";
+import { fileTreeNodeKey, projectFileKey } from "../../utils/fileTreeLazy";
 import type { RemoteSearchEntryView } from "./remoteProjectSearchState";
 import { RemoteProjectSearchBar } from "./RemoteProjectSearchBar";
 
@@ -284,7 +284,8 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 							node={node}
 							depth={0}
 							expandedDirs={tree.expanded}
-							activeEditorFile={file?.path ?? null}
+							// 活跃文件用项目作用域键比：远端没有本机绝对路径，之前传裸相对路径会让两边各用一套词。
+							activeEditorFile={file === null ? null : projectFileKey({ projectId: file.projectId, relativePath: file.path })}
 							onToggleDirectory={(key) => tree.toggle(key)}
 							onFileContextMenu={(target, x, y) => setRowMenu({ node: target, x, y })}
 							onViewFile={(target) => {

@@ -85,6 +85,19 @@ export function parseFileTreeKey(key: string): ProjectFileTarget | undefined {
 	return matched === null ? undefined : { projectId: matched[1], relativePath: matched[2] };
 }
 
+/**
+ * 树行是否就是当前活跃文件（W1）。
+ *
+ * 接受两种输入，是因为「活跃文件」目前由两个面板各自产生：远端面板给项目作用域键，本机编辑器 tab
+ * 仍可能给绝对路径（从 chip / Git 面板直接打开的 tab 没有 target）。先让键可用，再逐步把产生侧收窄；
+ * 两边的比较集中在这里，避免每个调用点各写一遍三选一。
+ */
+export function isActiveFileTreeRow(activeEditorFile: string | null, node: FileTreeNode): boolean {
+	if (activeEditorFile === null) return false;
+	if (node.target !== undefined && activeEditorFile === projectFileKey(node.target)) return true;
+	return activeEditorFile === (node.path ?? node.relativePath);
+}
+
 export function fileTreeNodeKey(node: FileTreeNode): string {
 	// 只认 project 作用域身份：绝不退回本机绝对路径（那正是「同一个文件两个名字」的来源）。
 	if (node.target) return projectFileKey(node.target);

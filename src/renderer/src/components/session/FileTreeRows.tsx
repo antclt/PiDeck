@@ -5,7 +5,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui-shadc
 import { FileTreeIndentGuides } from "./FileTreeIndentGuides";
 import { getFileIconSeti, getFileIconColor, getFileTypeLabel } from "../../fileIcons";
 import { writeFileNodeDragPayload } from "../app/AppUtils";
-import { fileTreeNodeKey } from "../../utils/fileTreeLazy";
+import { fileTreeNodeKey, isActiveFileTreeRow } from "../../utils/fileTreeLazy";
 import { t } from "../../i18n";
 import type { FileTreeNode, ProjectFileTarget } from "../../../../shared/types";
 import { useLazyListWindow } from "../../hooks/useLazyListWindow";
@@ -104,7 +104,7 @@ const FileRow = memo(function FileRow(props: FileTreeRowProps) {
 	// 远端节点的 path 可能缺失：活跃文件按相对路径比较（tab.filePath 对远端就是 relativePath），
 	// 点击目标回落到 node.target（远端 FileTreeNode 的打开凭据）。
 	const fileActionTarget = node.target ?? node.path;
-	const isActiveFile = props.activeEditorFile === (node.path ?? node.relativePath);
+	const isActiveFile = isActiveFileTreeRow(props.activeEditorFile, node);
 	const typeLabel = getFileTypeLabel(node.name);
 	const rowStyle = fileRowStyle(depth);
 	// Git 着色查表：文件行取自身状态；直接父目录实色、更远祖先由档位决定洗淡。
