@@ -12,7 +12,9 @@ export type RemoteHostRepairSummary = {
 	hostIds: string[];
 };
 
-export type RemoteHostListResult = { ok: true; status: "ready" | "needs-repair"; hosts: RemoteHostListItem[]; repair?: RemoteHostRepairSummary[] } | { ok: false; code: "REMOTE_FEATURE_DISABLED" | "REMOTE_HOST_LIST_UNAVAILABLE" };
+export type RemoteHostListResult =
+	| { ok: true; status: "ready" | "needs-repair"; hosts: RemoteHostListItem[] /** 当前连接状态（仅主进程有实时状态的会话）：视图重新挂载时用来补一次快照。 */; states?: Record<string, RemoteHostConnectionState>; repair?: RemoteHostRepairSummary[] }
+	| { ok: false; code: "REMOTE_FEATURE_DISABLED" | "REMOTE_HOST_LIST_UNAVAILABLE" };
 
 /**
  * 连接开关的状态。这是**主机的连接状态**，与 Agent 的 send state 分开建模（设计文档 §10）：

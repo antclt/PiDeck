@@ -24,6 +24,7 @@ import { RemoteHostCredentialStore } from "./RemoteHostCredentialStore";
 import type { SshProcessLauncher } from "./RemoteHostConnectionTypes";
 import { uploadRemoteProjectFile } from "./RemoteProjectFileUpload";
 import type { ConnectionMachineState } from "./RemoteHostConnectionState";
+import type { RemoteHostConnectionState } from "./RemoteHostConnectionTypes";
 
 /**
  * The verified bootstrap result of one host, held for exactly as long as the store revision it was
@@ -857,6 +858,20 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 		async forgetHost(hostId: string): Promise<void> {
 			await releaseHostPassword(hostId);
 			await credentials.delete(hostId).catch(() => undefined);
+		},
+		/**
+		 * Current machine state per host that has a live manager.
+		 *
+		 * State changes are pushed, so a view that unmounts (leaving settings) loses them and would render
+		 * "disconnected" for a host that is still connected. This is the replay point for a fresh mount.
+		 */
+		states(): Record<string, RemoteHostConnectionState> {
+			const current: Record<string, RemoteHostConnectionState> = {};
+			for (const [hostId, entry] of hosts) {
+				const state = entry.manager?.getState(hostId).state;
+				if (state !== undefined) current[hostId] = state;
+			}
+			return current;
 		},
 		/** The client a pinned command for this host must use (a password host carries its askpass bridge). */
 		clientForHost(hostId: string): SshClientRuntime {

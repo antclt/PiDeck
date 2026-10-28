@@ -66,6 +66,23 @@ export function readRemoteHostDirectory(raw: unknown): Record<string, RemoteHost
 }
 
 /** `remote:state-changed` 推送 → 一条可落地的状态变化；UUID/枚举不合法的载荷整体丢弃。 */
+/**
+ * `remoteHosts.list()` 顺带带回的状态快照。
+ *
+ * 推送只覆盖「视图挂载期间发生的变化」：离开设置页再回来、或应用刚启动时，没有任何事件可重放，
+ * 界面只能把已连接的主机显示成未连接。列表把当前状态一起带回来，用来补这一次。
+ */
+export function readRemoteHostStates(raw: unknown): Record<string, RemoteHostConnectionState> {
+	if (!isRecord(raw) || raw.ok !== true || !isRecord(raw.states)) return {};
+	const states: Record<string, RemoteHostConnectionState> = {};
+	for (const [hostId, value] of Object.entries(raw.states)) {
+		if (!HOST_ID.test(hostId) || typeof value !== "string") continue;
+		const state = REMOTE_HOST_CONNECTION_STATES.find((candidate) => candidate === value);
+		if (state !== undefined) states[hostId] = state;
+	}
+	return states;
+}
+
 export function readRemoteHostStateChange(raw: unknown): { hostId: string; state: RemoteHostConnectionState } | undefined {
 	if (!isRecord(raw)) return undefined;
 	if (typeof raw.hostId !== "string" || !HOST_ID.test(raw.hostId)) return undefined;

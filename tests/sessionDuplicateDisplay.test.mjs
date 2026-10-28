@@ -80,3 +80,34 @@ test("#354 equal-time duplicate records have a stable identity independent of li
 	const second = session("b-duplicate", "A1", 100);
 	assert.equal(displayedSession([first, second]).id, displayedSession([second, first]).id);
 });
+
+// 远端（SSH）会话没有本机 filePath：agent 的 sessionPath 是远端路径，永远配不上会话行。
+// 不按 catalog 会话 id 配对，侧栏就会出现「agent 行 + 会话行」两条同名条目（用户实拍）。
+test("remote sessions pair with their runtime by catalog id instead of a local path", () => {
+	const remote = {
+		id: "remote-session",
+		name: "列出当前目录并确认其为空",
+		updatedAt: 200,
+		filePath: "",
+		source: "pi",
+		preview: "",
+		messageCount: 2,
+		locator: { kind: "ssh", hostId: "0f1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d", remoteSessionId: "--home-x--/s.jsonl", remotePath: "/home/x/.pi/agent/sessions/--home-x--/s.jsonl" },
+	};
+	const runtime = {
+		id: "runtime-1",
+		deckSessionId: "remote-session",
+		projectId: "project-1",
+		cwd: "/home/x/pideck",
+		title: "runtime title",
+		status: "idle",
+		createdAt: 10,
+		sessionPath: "/home/x/.pi/agent/sessions/--home-x--/s.jsonl",
+		sessionEnvironment: "native",
+	};
+	const display = getProjectAgentSessionDisplay({ sessions: [remote], agents: [runtime] });
+	assert.equal(display.children.length, 1);
+	assert.equal(display.children[0].type, "session");
+	assert.equal(display.children[0].session.id, "remote-session");
+	assert.equal(display.children[0].agent?.id, "runtime-1");
+});

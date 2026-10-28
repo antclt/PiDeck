@@ -6,7 +6,7 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 // 侧栏远端项目行的「服务器名 + 连接状态点」：状态映射与 IPC 载荷收窄都是纯函数，
 // 这里直接加载生产模块验证，不从组件源码里复制一套判据。
 
-const { applyRemoteHostStateChange, mergeRemoteHostIdentity, readRemoteHostDirectory, readRemoteHostStateChange, resolveRemoteHostConnectionTone } = loadTsCommonJs("src/renderer/src/utils/remoteHostIdentity.ts");
+const { applyRemoteHostStateChange, mergeRemoteHostIdentity, readRemoteHostDirectory, readRemoteHostStateChange, readRemoteHostStates, resolveRemoteHostConnectionTone } = loadTsCommonJs("src/renderer/src/utils/remoteHostIdentity.ts");
 
 // VM 里加载的模块与测试文件不同 realm：原型比较没有意义，按普通对象/标量比较。
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -94,4 +94,13 @@ test("project row renders the remote badge, host name and dot without losing hov
 	const badge = readFileSync("src/renderer/src/components/sidebar/RemoteProjectFolderIcon.tsx", "utf8");
 	assert.match(badge, /Globe2/);
 	assert.match(badge, /text-info/);
+});
+
+// 离开设置页再回来时没有任何推送可重放：列表必须把当前状态一起带回来，否则已连接的主机会显示成断开。
+test("list carries a state snapshot for views that remount", () => {
+	assert.deepEqual(plain(readRemoteHostStates({ ok: true, states: { [HOST_A]: "ready", [HOST_B]: "degraded" } })), { [HOST_A]: "ready", [HOST_B]: "degraded" });
+	// 不合法的主机 id / 状态一律丢弃，不能把脏数据当成连接状态。
+	assert.deepEqual(plain(readRemoteHostStates({ ok: true, states: { "not-a-host": "ready", [HOST_A]: "bogus" } })), {});
+	// 旧主进程没有这个字段时退化为空对象，不影响目录加载。
+	assert.deepEqual(plain(readRemoteHostStates({ ok: true, hosts: [] })), {});
 });

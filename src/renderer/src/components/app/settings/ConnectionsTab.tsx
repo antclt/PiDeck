@@ -85,6 +85,8 @@ export function ConnectionsTab() {
 		}
 		setMessage(null);
 		setHosts(result.hosts);
+		// 重新挂载时没有历史推送可重放：用列表带回的状态快照补齐，否则已连接的主机会显示成「未连接」。
+		if (result.states !== undefined) setStates((current) => ({ ...current, ...result.states }));
 	}, []);
 
 	useEffect(() => {

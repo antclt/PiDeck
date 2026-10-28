@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 import { isRemoteProject } from "../../../../shared/projectLocation";
 import type { Project } from "../../../../shared/types";
 import { remoteHostIdentityIndexAtom } from "../../atoms/remote-host-atoms";
-import { applyRemoteHostStateChange, mergeRemoteHostIdentity, readRemoteHostDirectory, readRemoteHostStateChange } from "../../utils/remoteHostIdentity";
+import { applyRemoteHostStateChange, mergeRemoteHostIdentity, readRemoteHostDirectory, readRemoteHostStateChange, readRemoteHostStates } from "../../utils/remoteHostIdentity";
 
 /**
  * 侧栏远端项目行的主机身份/连接状态来源。
@@ -79,6 +79,8 @@ export function useRemoteHostIdentityIndex(hostApi: unknown, projects: readonly 
 				if (!active) return;
 				const directory = readRemoteHostDirectory(result);
 				if (directory !== undefined) setIndex((previous) => mergeRemoteHostIdentity(previous, directory));
+				// 列表带回的状态快照：没有历史推送可重放时（刚启动、刚回到会话），用它把已连接的主机点亮。
+				for (const [hostId, state] of Object.entries(readRemoteHostStates(result))) setIndex((previous) => applyRemoteHostStateChange(previous, { hostId, state }));
 			})();
 		}
 		const unsubscribe = port.onStateChange((change) => {
