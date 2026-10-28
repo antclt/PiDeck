@@ -3,6 +3,111 @@
 > 写代码、写测试、改 IPC 边界或处理用户数据前读本文。
 > 命令与门禁速查见根 `AGENTS.md`；域运维细节见 `docs/maintenance-domains.md`。
 
+## 改动方法（内化自 unclebob/ub-mode）
+
+来源 <https://github.com/unclebob/ub-mode>：Bob 大叔给自家 agent 的改动纪律（脱胎于 `poteto-mode` / `pstack`），配 crapper / dryer / mutator 三个确定性门禁工具。
+原作者未声明 LICENSE；维护者明确「复制都没事，思想不要断」，因此这里**按原文结构逐条对译、全量保留**，不为了精简删条——包括已经被本仓库其他规则覆盖或与之冲突的条目，只在末尾「落地注记」里标出以哪个为准。
+原文逐字副本：`docs/ub-mode.SKILL.original.md`（3958 字节，sha256 `4120873d…`）；译文与它 20 个小节一一对应，上游发新版时拿它做 diff，再补译新增条目。
+
+三个阶段顺序固定：**First Make it Work → Then Make it Right → Practice**。
+
+### 一、First Make it Work
+
+**Laziness Protocol（懒惰协议）**
+- 一个决策只存在一处。
+- 交能解决问题的最小改动。
+
+**Foundational Thinking（地基优先）**
+- 先定数据结构形状，再写逻辑。
+- 先做那个能让后面每一步都变容易的动作。
+- 如果并发写者会构成影响，就不共享状态。
+
+**TDD**
+- 先写会失败的测试，再改代码。
+- 确认它是**因为预期原因**失败。
+- 用能通过的最小改动让它变绿。
+- 如果写不出诚实的测试，就不要写一个假测试。
+
+**Redesign From First Principles（从第一性原理重设计）**
+- 不要把新需求焊到旧设计上。
+- 自问「如果这个需求一开始就在，我会怎么建」，想清楚后分片交付。
+
+**Attack the Premise（攻击前提）**
+- 两个共享同一前提的修复挂在同一道门禁上时，用一句话写下这个前提，并数清谁在承担不对称。
+- 删掉那段赋值。
+- 在写下这句话之前，不要开始下一次修复。
+
+**Subtract Before You Add（先减后加）**
+- 加任何东西之前，先把复杂度拿出去。
+
+**Outcome-Oriented Execution（终态导向）**
+- 瞄准一个你可以检查的终态。
+- 中途允许断开，前提是计划过并且能撤回。
+
+**Build the Lever（造杠杆）**
+- 一眼看不完的活，就做那个替你做它的工具。
+- 先手工做完一个单元，再让工具对齐这个单元。
+
+**Architecture（架构）**
+- *Model the Domain*：把领域放进让非法状态无法表达的结构里；维护领域术语表；如果代码已经清楚且局部，就别动它。
+- *Boundary Discipline*：在数据入口处校验；内部信任已校验的数据；业务逻辑放在纯函数里。
+- *Type System Discipline*：让非法值写不出来；外部数据只在入口解析一次；不要用强转把编译器消音。
+- *Make Operations Idempotent*：跑两遍、或中途崩溃后再跑，终态必须相同。
+- *Separate Before Serializing Shared State*：不需要同一份可变状态就各给一份；需要就只允许一个写者，并在结构里强制它。
+
+### 二、Then Make it Right
+
+**Fix Root Causes（修根因）**
+- 先复现，再修原因。只把崩溃藏起来的守卫不是修复。
+
+**Sequence Work into Verifiable Units（切成可验证单元）**
+- 做完一个小单元并检查它，再开下一个。
+
+**Test Behavior, Not Implementation（测行为不测实现）**
+- 测试像它的使用者那样调用代码，检查使用者会看到的结果。
+- 如果所有函数都返回空时这个测试还能过，就丢掉它。
+
+**Crapper（CRAP < 10）**
+- 用 crapper 工具；每个函数把 CRAP 压到 10 以下——拆分、补测试，或两者都做。
+- 顺手判断 case/switch 分支是否值得压。
+
+**Dryer（重复度 < 0.8）**
+- 用 dryer 工具，消除相似度 ≥ 0.8 的重复。
+
+**Mutator（变异测试）**
+- 用 mutator 工具：覆盖未覆盖的，杀掉幸存者，删掉死代码。
+
+**Refactoring（重构）**
+- 先钉住代码现在的行为，再改结构，最后证明行为没变。
+
+### 三、Practice
+
+**Keep a Log**
+- 记下每个动作和你做它的理由，完成后汇报这份日志。
+
+**Guard the Context Window**
+- 主线程保持小；大头送出去，只留摘要。
+
+**Worktree Cleanup**
+- 找出可以安全删除的东西，确认没有在用，再回收磁盘。
+- 未提交的工作要等一个决定。
+
+**Commit and Push**
+- 经常提交，小步、有序。
+- 每条提交说清为什么、改了什么、怎么证明。
+- 最后推到主线。
+
+### 本仓库的落地注记（与原文不同之处）
+
+| 原文条目 | 本仓库怎么落 |
+|---|---|
+| Keep a Log | 日志不逐条播报（`~/.pi/agent/AGENTS.md`：不输出过程性独白），改成「协作 · 收尾」一次性汇报「做了什么 / 为什么 / 怎么验证」 |
+| Commit and Push 到主线 | 与铁律 7「不自动提交」冲突，以铁律为准：列出改动等用户决定 |
+| Crapper / Dryer / Mutator | 本仓库没有这三个 Python 工具（首次运行自举 `.venv` 联网装依赖），暂不引入。无工具时的替代：「先减后加」那条管重复，「复杂度」靠拆分与针对性测试压；真要上量化门禁得自己写脚本（Node 24 自带 `--experimental-test-coverage` 与 `--test-reporter=lcov`，够算 CRAP），属独立任务 |
+| TDD、修根因、测行为、切成可验证单元、边界与类型纪律 | 与「测试」「安全」两节和铁律 4 重合，以那几处为细则 |
+| Worktree Cleanup | 与铁律 8 一致：只清理本任务产物，别人的未提交工作不动 |
+| 常驻精简版 | 根 `AGENTS.md` §改动方法 只留 5 条最不容易自发想到的（先减后加 / 攻击前提 / 不焊新需求 / 造杠杆 / 可重入），其余每次改代码时读本文 |
+
 ## 代码风格
 
 - TypeScript strict；禁止新增 `any`（第三方交互用 `unknown` + 收窄并注释）；禁止 `as` 强转绕过类型错误；测试数据用工厂函数构造完整对象。
