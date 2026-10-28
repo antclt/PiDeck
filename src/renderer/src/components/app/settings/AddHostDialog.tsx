@@ -77,6 +77,8 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 		};
 	});
 	const [showSecret, setShowSecret] = useState(false);
+	// 密码与密钥口令是两个独立字段：共用一个可见态会让「看密码」顺手把口令也揭开。
+	const [showPassword, setShowPassword] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	// WSL 档案：只保存显示名/发行版/Linux 用户，目录在「添加项目」时选。
@@ -396,7 +398,18 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 							{form.auth === "password" ? (
 								<div className="flex flex-col gap-1">
 									<Label htmlFor="remote-host-password">{t("settings.connections.add.password")}</Label>
-									<Input id="remote-host-password" type="password" autoComplete="off" spellCheck={false} value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} />
+									<div className="relative">
+										<Input id="remote-host-password" type={showPassword ? "text" : "password"} autoComplete="off" spellCheck={false} className="pr-10" value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} />
+										<button
+											type="button"
+											aria-label={t(showPassword ? "settings.connections.add.hidePassword" : "settings.connections.add.showPassword")}
+											aria-pressed={showPassword}
+											className="absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-bg-hover hover:text-foreground"
+											onClick={() => setShowPassword((current) => !current)}
+										>
+											{showPassword ? <EyeOff className="size-4" aria-hidden="true" /> : <Eye className="size-4" aria-hidden="true" />}
+										</button>
+									</div>
 								</div>
 							) : null}
 							{form.auth === "key" ? (

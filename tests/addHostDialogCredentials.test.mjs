@@ -46,7 +46,9 @@ test("password mode is offered, and the secret is never part of the persisted in
 	// 输入框只在「密码」模式出现，默认仍是 agent。
 	assert.match(dialog, /form\.auth === "password" \? \(/);
 	assert.match(dialog, /id="remote-host-password"/);
-	assert.match(dialog, /type="password"/);
+	// 密码字段现在带明文切换（用户要求）：默认仍遮罩，且可见态与密钥口令分离。
+	assert.match(dialog, /const \[showPassword, setShowPassword\] = useState\(false\)/);
+	assert.match(dialog, /type=\{showPassword \? "text" : "password"\}/);
 	assert.match(dialog, /form\.auth === "password" && password\.length === 0/);
 	// 提交给主进程的只有 authMethod；密码走 onSubmitted 的第三个参数，不进 add 的输入对象。
 	assert.match(dialog, /form\.auth === "password" \? \{ authMethod: "password" as const \} : \{\}/);

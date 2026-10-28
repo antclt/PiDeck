@@ -4325,6 +4325,8 @@ export const zhCN = {
 	"settings.connections.add.passphrase": "私钥口令",
 	"settings.connections.add.passphrasePlaceholder": "私钥未加密时留空",
 	"settings.connections.add.showSecret": "显示口令",
+	"settings.connections.add.showPassword": "显示密码",
+	"settings.connections.add.hidePassword": "隐藏密码",
 	"settings.connections.add.hideSecret": "隐藏口令",
 	"settings.connections.add.password": "登录密码",
 	"settings.connections.add.passwordRequired": "请输入登录密码",

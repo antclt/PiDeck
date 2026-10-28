@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 357dc1edbb9922d56f71b3c1f92cc3a8ce2f1a8f57eeaf9c55fab7fab333094c（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 9889a35306b9db5ad67c694f665e3a16e9647597b7bdd13f1ebcf71d1a5a0a1c（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4332,6 +4332,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.connections.add.passphrase": "私鑰口令",
 	"settings.connections.add.passphrasePlaceholder": "私鑰未加密時留空",
 	"settings.connections.add.showSecret": "顯示口令",
+	"settings.connections.add.showPassword": "顯示密碼",
+	"settings.connections.add.hidePassword": "隱藏密碼",
 	"settings.connections.add.hideSecret": "隱藏口令",
 	"settings.connections.add.password": "登入密碼",
 	"settings.connections.add.passwordRequired": "請輸入登入密碼",

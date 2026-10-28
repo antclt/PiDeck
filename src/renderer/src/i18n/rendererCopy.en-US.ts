@@ -4341,6 +4341,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.connections.add.passphrase": "Key passphrase",
 	"settings.connections.add.passphrasePlaceholder": "Leave empty for an unencrypted key",
 	"settings.connections.add.showSecret": "Show passphrase",
+	"settings.connections.add.showPassword": "Show password",
+	"settings.connections.add.hidePassword": "Hide password",
 	"settings.connections.add.hideSecret": "Hide passphrase",
 	"settings.connections.add.password": "Login password",
 	"settings.connections.add.passwordRequired": "Enter the login password",
