@@ -163,6 +163,20 @@ test("withAcpConfigDefault is immutable and skips no-op/invalid writes", () => {
 	assert.equal(withAcpConfigDefault(base, "t1", "x", "bad\u0007value"), undefined);
 });
 
+test("bypassPermissions:只认显式 true，保存与加载都保留（默认关）", () => {
+	// 工具级「新会话默认 bypass 权限」：没写=关，写了 true 才开；脏值一律当关。
+	const [kept] = sanitizeAcpTools([{ ...validTool, bypassPermissions: true }]);
+	assert.equal(kept.bypassPermissions, true);
+	const [dropped] = sanitizeAcpTools([{ ...validTool, bypassPermissions: "yes" }]);
+	assert.equal("bypassPermissions" in dropped, false, "非布尔值不得落盘成开关");
+
+	const validated = validateAcpTool({ name: "Claude Agent", command: "npx", args: ["-y", "@agentclientprotocol/claude-agent-acp"], bypassPermissions: true });
+	assert.equal(validated.ok, true);
+	assert.equal(validated.tool.bypassPermissions, true);
+	const off = validateAcpTool({ name: "Claude Agent", command: "npx", args: [] });
+	assert.equal("bypassPermissions" in off.tool, false, "未勾选时不得凭空写字段");
+});
+
 test("validateAcpTool carries env into the normalized tool", () => {
 	const result = validateAcpTool({ name: "Codex", command: "codex-acp", args: [], env: { ZAI_CODING_KEY: "sk-xyz" } });
 	assert.equal(result.ok, true);

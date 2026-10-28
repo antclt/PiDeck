@@ -313,6 +313,34 @@ export class AcpAgentManager implements SessionAgentGateway {
 		runtime.turnForeignNotification = `${method}: ${JSON.stringify(notification).slice(0, 300)}`;
 	}
 
+	/**
+	 * 工具级「新会话默认 bypass 权限」：握手后在 agent 自己的 mode 枚举里挑 bypass 档下发。
+	 *
+	 * 只能用运行期下发：Claude 适配器不读启动参数（初始模式只取 settings.json 的
+	 * permissions.defaultMode），Qoder 适配器则直接拒绝 set_config_option（见 #444 同类问题）。
+	 * 所以失败只记日志——某些 CLI 版本压根没有 bypass 档，不该因此开不了会话。
+	 * session/load 恢复的会话不覆盖 agent 侧状态（与重放记忆同口径）。
+	 */
+	private async applyBypassPermissionDefault(runtime: AcpAgentRuntime): Promise<void> {
+		if (runtime.tool.bypassPermissions !== true || runtime.loadedSession) return;
+		const mode = (runtime.configOptions ?? []).find((option) => option.id === "mode" || option.category === "mode");
+		if (!mode || mode.type === "boolean") return;
+		const values: string[] = [];
+		for (const item of mode.options ?? []) {
+			if ("group" in item) for (const inner of item.options) values.push(inner.value);
+			else values.push(item.value);
+		}
+		// 各家叫法不同：Claude 是 bypassPermissions、Qoder 是 yolo、其余按 bypass 前缀兜住
+		const bypass = values.find((value) => /^(bypass|bypasspermissions|bypass_permissions|yolo)$/i.test(value));
+		if (!bypass || mode.currentValue === bypass) return;
+		try {
+			await this.enqueueConfigOption(runtime.tab.id, mode.id, bypass, false);
+		} catch (error) {
+			// 记忆里不落这条：用户没主动选过，写进去会污染后续会话的默认值
+			this.deps.logger?.warn("acp", `[${runtime.tool.name}] bypass permission mode rejected: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
 	/** 新建会话握手后重放工具级记忆;session/load 恢复的会话不覆盖 agent 侧状态。 */
 	private async replayToolConfigDefaults(runtime: AcpAgentRuntime): Promise<void> {
 		if (runtime.loadedSession) return;
@@ -428,6 +456,8 @@ export class AcpAgentManager implements SessionAgentGateway {
 		// 模型不在记忆范围(见 acpToolConfig.isRememberedAcpConfigOption)。单条失败只跳过,
 		// 不影响开会话。session/load 成功的恢复会话交给 agent 自己恢复状态。
 		await this.replayToolConfigDefaults(runtime);
+		// 放记忆重放之后：工具级开关是「明确配置」，优先级高于学来的上次选择
+		await this.applyBypassPermissionDefault(runtime);
 
 		this.wireConnection(runtime);
 		if (runtime.title && runtime.tab.deckSessionId) this.deps.onTitleChanged?.(runtime.tab.deckSessionId, runtime.title);

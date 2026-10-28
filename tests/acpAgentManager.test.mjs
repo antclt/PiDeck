@@ -1095,6 +1095,62 @@ test("configOptions:拒绝时把 error.data.details 拼进错误文案（渲染�
 	);
 });
 
+test("configOptions:工具级 bypassPermissions 在新会话握手后自动切到 bypass 档", async (t) => {
+	// Claude 适配器不读启动参数（初始模式只取 settings.json 的 defaultMode），只能握手后下发；
+	// Qoder 适配器则直接拒绝该值——所以这条是「尽力而为」，失败不阻断开会话。
+	const modeOption = {
+		id: "mode",
+		name: "Mode",
+		category: "mode",
+		type: "select",
+		currentValue: "default",
+		options: [
+			{ value: "default", name: "Manual" },
+			{ value: "bypassPermissions", name: "Bypass permissions" },
+		],
+	};
+	const { manager, createAgent, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: false } };
+				if (frame.method === "session/new") return { sessionId: "sess-bypass", configOptions: [modeOption] };
+				if (frame.method === "session/set_config_option") return { configOptions: [{ ...modeOption, currentValue: frame.params.value }] };
+				return {};
+			},
+		},
+		{ getTools: () => [{ id: "gemini", name: "Gemini CLI", command: "gemini", args: ["--experimental-acp"], enabled: true, bypassPermissions: true }] },
+	);
+	const tab = await createAgent();
+	const frames = lastProc().methodFrames("session/set_config_option");
+	assert.equal(frames.length, 1, "开了开关必须下发一次配置切换");
+	assert.equal(JSON.stringify(frames[0]?.params), JSON.stringify({ sessionId: "sess-bypass", configId: "mode", value: "bypassPermissions" }));
+	assert.equal(manager.getSessionConfigOptions(tab.id)?.[0]?.currentValue, "bypassPermissions");
+});
+
+test("configOptions:不开 bypassPermissions 时不得自动下发（默认权限不动）", async (t) => {
+	const modeOption = {
+		id: "mode",
+		name: "Mode",
+		category: "mode",
+		type: "select",
+		currentValue: "default",
+		options: [
+			{ value: "default", name: "Manual" },
+			{ value: "bypassPermissions", name: "Bypass permissions" },
+		],
+	};
+	const { createAgent, lastProc } = harness(t, {
+		handler: (frame) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: false } };
+			if (frame.method === "session/new") return { sessionId: "sess-plain", configOptions: [modeOption] };
+			return {};
+		},
+	});
+	await createAgent();
+	assert.equal(lastProc().methodFrames("session/set_config_option").length, 0, "没开开关就不该动权限模式");
+});
+
 test("configOptions:config_option_update 通知整表替换并回调 onConfigOptionsChanged", async (t) => {
 	const seen = [];
 	const { manager, createAgent, lastProc } = harness(

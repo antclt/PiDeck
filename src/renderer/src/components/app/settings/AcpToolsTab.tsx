@@ -12,13 +12,14 @@ import { AcpPresetChips } from "./AcpPresetChips";
 import { SectionHeading } from "../../ui-shadcn/section-heading";
 import { Button } from "../../ui-shadcn/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../../ui-shadcn/collapsible";
+import { Checkbox } from "../../ui-shadcn/checkbox";
 import { Input } from "../../ui-shadcn/input";
 import { Textarea } from "../../ui-shadcn/textarea";
 import { ACP_STALL_TIMEOUT_DEFAULT_MS, ACP_STALL_TIMEOUT_SECONDS, ACP_TURN_TIMEOUT_DEFAULT_MS, ACP_TURN_TIMEOUT_MINUTES, acpStallTimeoutPatch, acpStallTimeoutText, acpTurnTimeoutPatch, acpTurnTimeoutText } from "./acpTimeoutInput";
 import { cn } from "../../../lib/utils";
 
 /** 草稿行 = IPC 输入形态:id 空表示新增行,保存时由主进程分配并返回;draftKey 是纯渲染用本地标识(React key/折叠态跟踪),不入盘。 */
-type AcpToolRow = { draftKey: string; id?: string; name: string; command: string; args: string[]; envText: string };
+type AcpToolRow = { draftKey: string; id?: string; name: string; command: string; args: string[]; envText: string; bypassPermissions: boolean };
 
 /** env 序列化:Record → 「KEY=VALUE」每行一条的编辑文本;顺序稳定保证脏标记确定。 */
 function envToText(env: Record<string, string> | undefined): string {
@@ -111,13 +112,13 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 	// 挂载时以 atom 快照为初值;之后只经保存回写,弹窗开关不重复拉 IPC
 	useEffect(() => {
 		if (!hydrated) {
-			setRows(saved.map((tool) => ({ draftKey: makeRowKey(), id: tool.id, name: tool.name, command: tool.command, args: [...tool.args], envText: envToText(tool.env) })));
+			setRows(saved.map((tool) => ({ draftKey: makeRowKey(), id: tool.id, name: tool.name, command: tool.command, args: [...tool.args], envText: envToText(tool.env), bypassPermissions: tool.bypassPermissions === true })));
 			setHydrated(true);
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- 一次性初值同步,后续以保存回写为准
 	}, [hydrated]);
 
-	const dirty = useMemo(() => serializeRows(rows) !== serializeRows(saved.map((tool) => ({ id: tool.id, name: tool.name, command: tool.command, args: [...tool.args], envText: envToText(tool.env) }))), [rows, saved]);
+	const dirty = useMemo(() => serializeRows(rows) !== serializeRows(saved.map((tool) => ({ id: tool.id, name: tool.name, command: tool.command, args: [...tool.args], envText: envToText(tool.env), bypassPermissions: tool.bypassPermissions === true }))), [rows, saved]);
 	useEffect(() => {
 		props.onDirtyChange?.(dirty);
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- onDirtyChange 由弹框稳定传入,不参与比较
@@ -148,7 +149,7 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 	// 新增/预设预填的行自动展开:用户要填的字段直接可见,填完可手动收起。
 	const addRow = useCallback(() => {
 		const draftKey = makeRowKey();
-		setRows((current) => [...current, { draftKey, name: "", command: "", args: [], envText: "" }]);
+		setRows((current) => [...current, { draftKey, name: "", command: "", args: [], envText: "", bypassPermissions: false }]);
 		expandKey(draftKey);
 	}, [makeRowKey, expandKey]);
 
@@ -163,7 +164,8 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 			}
 			setError(undefined);
 			const draftKey = makeRowKey();
-			setRows((current) => [...current, { draftKey, name: preset.name, command: preset.command, args: [...preset.args], envText: "" }]);
+			// qoder 预设把 bypass 写进了启动参数，复选框不需要重复表达
+			setRows((current) => [...current, { draftKey, name: preset.name, command: preset.command, args: [...preset.args], envText: "", bypassPermissions: false }]);
 			expandKey(draftKey);
 		},
 		[rows, makeRowKey, expandKey],
@@ -195,8 +197,8 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 			}
 			// id 缺省 = 新增行,由主进程分配;返回的规范化表同步回 atom(菜单立即可见)。
 			// draftKey 按位沿用:normalize 保序,收起态不因保存而重置。
-			const normalized = await desktopApi.acp.saveTools(rows.map((row) => ({ id: row.id, name: row.name, command: row.command, args: row.args, env: envFromText(row.envText) })));
-			setRows(normalized.map((tool: AcpToolConfig, index: number) => ({ draftKey: rows[index]?.draftKey ?? makeRowKey(), id: tool.id, name: tool.name, command: tool.command, args: [...tool.args], envText: envToText(tool.env) })));
+			const normalized = await desktopApi.acp.saveTools(rows.map((row) => ({ id: row.id, name: row.name, command: row.command, args: row.args, env: envFromText(row.envText), bypassPermissions: row.bypassPermissions })));
+			setRows(normalized.map((tool: AcpToolConfig, index: number) => ({ draftKey: rows[index]?.draftKey ?? makeRowKey(), id: tool.id, name: tool.name, command: tool.command, args: [...tool.args], envText: envToText(tool.env), bypassPermissions: tool.bypassPermissions === true })));
 			setSaved(normalized);
 			return true;
 		} catch (cause) {
@@ -289,6 +291,15 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 												<span className="text-micro text-muted-foreground">{t("acp.toolEnv")}</span>
 												<Textarea value={row.envText} rows={2} className="font-mono text-xs" spellCheck={false} onChange={(event) => patchRow(index, { envText: event.target.value })} />
 											</label>
+											{/* 逐工具开关：有的 CLI 不认启动参数（Claude 适配器只认 settings.json），
+									    只能握手后按它自己的 mode 枚举切，所以做成工具级配置而不是预设参数。 */}
+											<label className="flex items-start gap-2">
+												<Checkbox checked={row.bypassPermissions} onCheckedChange={(checked) => patchRow(index, { bypassPermissions: checked === true })} className="mt-0.5" />
+												<span className="flex min-w-0 flex-col gap-0.5">
+													<span className="text-micro text-muted-foreground">{t("acp.bypassPermissionsLabel")}</span>
+													<span className="text-micro text-muted-foreground/80">{t("acp.bypassPermissionsHint")}</span>
+												</span>
+											</label>
 										</CollapsibleContent>
 									</Collapsible>
 								);
@@ -313,8 +324,8 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 });
 
 /** 脏标记投影:参数顺序无关(重排行不算脏),字段稳定序列化即可;入参放宽到字段子集,已存表投影无需补 draftKey。 */
-function serializeRows(rows: Array<Pick<AcpToolRow, "id" | "name" | "command" | "args" | "envText">>): string {
-	return JSON.stringify(rows.map((row) => ({ id: row.id ?? "", name: row.name, command: row.command, args: [...row.args].sort(), envText: row.envText })));
+function serializeRows(rows: Array<Pick<AcpToolRow, "id" | "name" | "command" | "args" | "envText" | "bypassPermissions">>): string {
+	return JSON.stringify(rows.map((row) => ({ id: row.id ?? "", name: row.name, command: row.command, args: [...row.args].sort(), envText: row.envText, bypassPermissions: row.bypassPermissions })));
 }
 
 /**

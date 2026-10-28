@@ -259,6 +259,8 @@ export const zhCN = {
 	"acp.emptyTurn": "「{tool}」本轮结束但没有返回任何输出（该 CLI 可能存在已知缺陷，如事件流丢失），请升级到最新版本后重试",
 	"acp.imagesNotSupported": "{tool} 不支持图片输入，请移除图片后重试",
 	"acp.authRequired": "「{tool}」未登录或凭据失效：请先在终端运行该 CLI 完成登录，再回到这里重试",
+	"acp.bypassPermissionsLabel": "新会话默认 Bypass 权限（自动批准所有工具）",
+	"acp.bypassPermissionsHint": "握手后把权限模式切到该 CLI 自带的 bypass 档（如 Claude 的 bypassPermissions）；CLI 没有这一档时自动跳过，仍可在会话里手动选择",
 	"acp.configOptionRejected": "ACP 设置未生效（{option} → {value}）：{reason}。多数是该 CLI 版本的缺陷——可先升级 CLI；也可以把该模式写进 设置 → ACP 工具 → 启动参数（如 --permission-mode bypass_permissions），重开会话后即按该模式启动",
 	"acp.toolNameRequired": "名称必填",
 	"acp.toolCommandRequired": "命令必填",

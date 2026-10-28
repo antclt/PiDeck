@@ -261,6 +261,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"acp.emptyTurn": "{tool} finished the turn without returning any output (the CLI may have a known defect such as a lost event stream); upgrade it to the latest version and retry",
 	"acp.imagesNotSupported": "{tool} does not accept image input; remove the images and try again",
 	"acp.authRequired": "{tool} is not signed in or its credentials expired: run the CLI in a terminal to log in, then come back and retry",
+	"acp.bypassPermissionsLabel": "Start new sessions with bypass permissions (auto-approve every tool)",
+	"acp.bypassPermissionsHint": "Switches the permission mode to the CLI's own bypass option after the handshake (e.g. bypassPermissions for Claude). Skipped when the CLI offers no such mode; you can still pick it per session",
 	"acp.configOptionRejected": "ACP setting did not apply ({option} → {value}): {reason}. This is usually a defect in that CLI version — upgrade it, or pass the mode in Settings → ACP Tools → launch arguments (e.g. --permission-mode bypass_permissions) and reopen the session",
 	"acp.toolNameRequired": "Name is required",
 	"acp.toolCommandRequired": "Command is required",

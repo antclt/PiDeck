@@ -45,7 +45,7 @@ function sanitizeEnv(value: unknown): Record<string, string> | undefined {
  * 新建/编辑单条工具的表单校验:返回 ok=false 时 reasonKey 供渲染层本地化。
  * duplicateAgainst 用于查重(编辑时排除自身 id)。
  */
-export function validateAcpTool(input: { id?: string; name?: unknown; command?: unknown; args?: unknown; env?: unknown }, existing: AcpToolConfig[] = []): AcpToolValidation & { tool?: AcpToolConfig } {
+export function validateAcpTool(input: { id?: string; name?: unknown; command?: unknown; args?: unknown; env?: unknown; bypassPermissions?: unknown }, existing: AcpToolConfig[] = []): AcpToolValidation & { tool?: AcpToolConfig } {
 	const name = cleanString(input.name, NAME_MAX_CHARS);
 	const command = cleanString(input.command, COMMAND_MAX_CHARS);
 	const args = Array.isArray(input.args) ? input.args.filter((arg): arg is string => typeof arg === "string" && arg.trim().length > 0).slice(0, ARGS_LIMIT) : [];
@@ -62,6 +62,8 @@ export function validateAcpTool(input: { id?: string; name?: unknown; command?: 
 			command,
 			args,
 			...(env ? { env } : {}),
+			// 只认显式 true：历史设置里没有该字段 = 不启用（默认不开旁路权限）
+			...(input.bypassPermissions === true ? { bypassPermissions: true } : {}),
 			enabled: true,
 		},
 	};
@@ -170,7 +172,7 @@ export function sanitizeAcpTools(value: unknown): AcpToolConfig[] {
 		const env = sanitizeEnv(record.env);
 		seenIds.add(id);
 		seenNames.add(name);
-		tools.push({ id, name, command, args, ...(env ? { env } : {}), enabled: record.enabled !== false });
+		tools.push({ id, name, command, args, ...(env ? { env } : {}), ...(record.bypassPermissions === true ? { bypassPermissions: true } : {}), enabled: record.enabled !== false });
 	}
 	return tools;
 }

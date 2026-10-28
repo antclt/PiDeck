@@ -55,6 +55,7 @@ export function registerAcpIpc(deps: {
 				command: record.command,
 				args: record.args,
 				env: record.env,
+				bypassPermissions: record.bypassPermissions,
 			},
 			settingsStore.get().acpTools ?? [],
 		);
