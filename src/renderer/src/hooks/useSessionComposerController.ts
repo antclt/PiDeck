@@ -1101,7 +1101,8 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	// 预热只创建进程，不能把编辑器 setEditable(false)：contenteditable 关掉会失焦，输入一半就断。
 	const isStarting = isUserFacingSessionStart(sendState.status);
 	// ACP 预热（握手 + 枚举 configOptions）可能持续数秒：编辑器照常可输入，
-	// 但发送要等选项落地，输入框底栏同时显示初始化指示。
+	// 输入框底栏同时显示初始化指示。**发送不被它拦住**：主进程的激活闸门（ensureRuntime 复用同一条
+	// pending activation）会把这一发排到握手之后，用户不用先等选项落地再按发送。
 	const isAcpInitializing = isAcpComposerInitializing(isAcpBackend, runtime?.status);
 	const hasContent = Boolean(draft.trim() || attachments.length || pasteFiles.length);
 
@@ -1507,9 +1508,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	// 生图模式：所有发送入口统一转生图（不晋升预览 Tab、不发消息），避免各入口分支不一致。
 	const promoteAndSend = useCallback(
 		async (behavior?: "steer" | "followUp", overrideText?: string) => {
-			// ACP 初始化中（runtime starting，configOptions 还没回来）：按钮已置灰，
-			// 这里再兜 Enter / 快捷消息 / 追问等所有发送入口，避免绕过按钮把首发送进半握手的 runtime。
-			if (isAcpInitializing) return;
+			// ACP 初始化中不再拦发送：冷启动发送本来就允许（useSessionSend 先发布 activating 状态，
+			// 再由 ensureRuntime 等同一条 pending activation）。旧实现除了置灰按钮，还在这里静默 return，
+			// 用户敲完回车毫无反馈，只像「输入框坏了」。
 			if (mode === "imagegen") {
 				void generateImage();
 				return;
@@ -1544,7 +1545,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			options.onPromoteSession?.(sessionId);
 			return send(behavior, overrideText);
 		},
-		[draft, isAcpInitializing, mode, generateImage, submitVideo, options.onPromoteSession, pasteFiles, send, sessionId, setDraft, setPasteFiles],
+		[draft, mode, generateImage, submitVideo, options.onPromoteSession, pasteFiles, send, sessionId, setDraft, setPasteFiles],
 	);
 
 	const selectSuggestion = useCallback(
@@ -2210,10 +2211,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 				return;
 			}
 			// 未开始对话的会话允许换后端：先把预热/认领出来的 runtime 停掉再改 record。
-			// 主进程边界防御要求「无绑定 runtime」才接受 backend 变更
-			// （sessionIpc 的 sessionsCatalogUpdate 守卫），且停掉没人用的进程正是用户诉求
-			// ——否则预热出来的 pi 进程会一直挂到会话被删。
-			// 停不掉不拦：交给主进程守卫给出与旧行为一致的报错。
+			// 停掉没人用的进程正是用户诉求——否则预热出来的 pi 进程会一直挂到会话被删。
+			// 预热中的 ACP 握手在这拿不到 agentId（合成 starting 事件不带），靠主进程的
+			// cancelActivation 作废（停进程 + 禁 bind），所以这里停不掉也不拦。
 			const boundAgentId = runtime?.agentId;
 			if (boundAgentId) {
 				try {
@@ -2507,7 +2507,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			 * 快捷消息直发可用性：与 canSend 同源，但去掉「草稿非空」这一项——
 			 * 快捷消息的正文来自清单，发它的时候输入框通常是空的。
 			 */
-			canSendQuickMessage: !isStarting && !isAcpInitializing && !generatingImage && (!isDshBackend || runtime?.state?.modelRoutable !== false),
+			canSendQuickMessage: !isStarting && !generatingImage && (!isDshBackend || runtime?.state?.modelRoutable !== false),
 			// 并行发送（拆分菜单）：当前草稿文本进独立 Ask 会话后台处理，成功后清空草稿。
 			// 上下文由 useAskPanel 按 originSessionId 自动生成（与队列面板共用同一口径），
 			// 这里只负责把来源会话传下去；不要在本入口另建一份 context，否则会再次分叉。
@@ -2578,7 +2578,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			unknownError: sendState.error,
 			acknowledgeUnknown: acknowledgeUnknownDelivery,
 			// DSH 只在 host 明确报告 routable=false 时锁住发送；undefined 代表尚未确认或目录加载失败。
-			canSend: hasContent && !isStarting && !isAcpInitializing && !generatingImage && !submittingVideo && (!isDshBackend || runtime?.state?.modelRoutable !== false),
+			canSend: hasContent && !isStarting && !generatingImage && !submittingVideo && (!isDshBackend || runtime?.state?.modelRoutable !== false),
 			generatingImage,
 		},
 		pickers: {

@@ -338,6 +338,16 @@ export class SessionRuntimeCoordinator {
 	/** 正在删除的会话：先解绑再异步停 agent，禁止激活/bind 把运行时写回 catalog。 */
 	private readonly deletingSessions = new Set<string>();
 	/**
+	 * 草稿期被用户切换后端/ACP 工具作废的进行中激活。
+	 *
+	 * ACP 激活要等一整个握手（可达数秒）。旧行为是等它绑完再看 catalog——用户为了换个后端
+	 * 得干等握手结束或失败，且迟到 bind 会把旧后端的进程（连同 acpSessionId）写进已经切走的会话。
+	 * 处理中的取消靠这个集合在 bind 检查点生效；`cancelledActivationReports` 留到下次激活，
+	 * 供 IPC 区分「被切换作废」与「真的启动失败」（后者才要弹错误态）。
+	 */
+	private readonly cancelledActivations = new Set<string>();
+	private readonly cancelledActivationReports = new Set<string>();
+	/**
 	 * 上次成功应用到该会话当前 agent 的偏好。catalog.get 返回 clone，activate 开头的
 	 * 快照会过期；预热绑定后用户仍可改模型。用这份记录跳过「catalog 没变」的重复
 	 * setModel，保住并发 send / 历史 attach / 懒启动 publish 的 setModel==1 约束。
@@ -549,6 +559,42 @@ export class SessionRuntimeCoordinator {
 	/** A pending activation owns the Session even before AgentManager binding completes. */
 	isActivating(sessionId: string): boolean {
 		return this.activationBySession.has(this.canonicalSessionId(sessionId));
+	}
+
+	/** 最近一次激活是否被 {@link cancelActivation} 作废（下次激活开始时清空）。 */
+	isActivationCancelled(sessionId: string): boolean {
+		return this.cancelledActivationReports.has(this.canonicalSessionId(sessionId));
+	}
+
+	/**
+	 * 作废这条会话进行中的激活（换后端 / 换 ACP 工具的专用出口）。
+	 *
+	 * 为什么不能交给「改完 catalog 再让激活自己发现」：ACP 预热是一次完整握手（npx 拉包 + 会话
+	 * 创建，秒级），用户改完后端后既不想等它握手完、也不该收下它的迟到绑定。所以这里主动做四件事：
+	 * 1. 标记取消，`activate` 的 bind 检查点据此拒绑（否则记录已切走，运行时还挂在旧后端进程上）；
+	 * 2. 停掉已 spawn 的启动中进程——只等它自然结束的话用户仍要等握手超时；
+	 * 3. 等激活 promise 收敛，保证本方法返回时不会再有后续副作用；
+	 * 4. 收尾：激活在信号之前已越过检查点时会留下绑定，解绑并停掉（迟到绑定不得存活）。
+	 */
+	async cancelActivation(sessionId: string): Promise<void> {
+		const canonicalSessionId = this.canonicalSessionId(sessionId);
+		this.cancelledActivations.add(canonicalSessionId);
+		// 报告留到下次激活：IPC 失败分支要据此区分「被切换取消」和真正的启动失败。
+		this.cancelledActivationReports.add(canonicalSessionId);
+		try {
+			const starting = this.agents.list().find((tab) => tab.deckSessionId === canonicalSessionId && tab.status === "starting");
+			if (starting) await this.agents.stop(starting.id).catch(() => undefined);
+			const activating = this.activationBySession.get(canonicalSessionId);
+			if (activating) await activating.catch(() => undefined);
+			const target = this.getTarget(canonicalSessionId);
+			if (target) {
+				this.unbindAgentUnchecked(target.agentId);
+				await this.agents.stop(target.agentId).catch(() => undefined);
+				void this.logger?.info("session-runtime", "Late runtime binding dropped after activation cancel", { sessionId: canonicalSessionId, agentId: target.agentId });
+			}
+		} finally {
+			this.cancelledActivations.delete(canonicalSessionId);
+		}
 	}
 
 	/**
@@ -1574,6 +1620,9 @@ export class SessionRuntimeCoordinator {
 		if (this.deletingSessions.has(sessionId)) {
 			throw new Error(`Session is being deleted: ${sessionId}`);
 		}
+		// 新一次激活自己就是「最新意图」：上一次被切换作废的报告到此失效——
+		// 之后若再失败，那是真失败，IPC 要照常弹错误态。
+		this.cancelledActivationReports.delete(sessionId);
 		const entry = this.catalog.get(sessionId);
 		if (!entry) throw new Error(`Session not found: ${sessionId}`);
 		const locator = this.catalog.getLocator(sessionId);
@@ -1690,6 +1739,17 @@ export class SessionRuntimeCoordinator {
 				await this.agents.stop(tab.id).catch(() => undefined);
 			}
 			throw new Error(`Failed to apply session preferences: ${errorMessage(error)}`);
+		}
+
+		// 过期激活检查点：到这里已经过 create/claimStandby、waitUntilReady、applyLatestPreferences
+		// 三段 await（ACP 的握手就在第一段里，可达数秒）。这期间用户完全可能已经换了后端或 ACP
+		// 工具——此时 catalog 里的身份已变，本次激活不得再 bind：否则记录指向新后端，绑定和
+		// acpSessionId 回写却挂在旧后端的进程上（表现为「切了后端但还在等旧进程启动」）。
+		// 取消信号和 catalog 身份都要看：后端未变但同后端换了工具时只有前者能发现。
+		const latestEntry = this.catalog.get(sessionId);
+		if (this.cancelledActivations.has(sessionId) || !latestEntry || latestEntry.backend !== entry.backend || latestEntry.acpToolId !== entry.acpToolId) {
+			if (created) await this.agents.stop(tab.id).catch(() => undefined);
+			throw new Error(`Session activation cancelled: ${sessionId}`);
 		}
 
 		const runtimeGeneration = this.bind(sessionId, tab.id);

@@ -1036,6 +1036,25 @@ function emitSessionActivationFailed(sessionId: string): void {
 	});
 }
 
+/**
+ * 激活被作废（草稿期换后端 / 换 ACP 工具）：抵消 emitSessionActivating 的合成 starting。
+ *
+ * 语义与 emitSessionActivationFailed 相反：作废不是失败，不应画成错误可重试；但合成 starting
+ * 已把会话标成「启动中」，不发事件就永远收不回来。detach = 未绑定，与取消后的真实状态一致
+ * （旧进程已停、旧激活不得 bind）。payload 为空，渲染层 detach 分支不读它，
+ * runtimeGeneration 取当前值以保证能盖住那条 starting。
+ */
+function emitSessionActivationCancelled(sessionId: string): void {
+	sendSessionRuntimeEnvelope({
+		kind: "detach",
+		sessionId,
+		agentId: "",
+		runtimeGeneration: sessionRuntimeCoordinator.currentRuntimeGeneration(sessionId),
+		sourceChannel: "sessions:runtime-detach",
+		payload: null,
+	});
+}
+
 function sendSessionRuntimeEnvelope(event: SessionRuntimeEvent): void {
 	const window = mainWindow;
 	if (window && !window.isDestroyed()) {
@@ -4197,6 +4216,7 @@ function registerIpc() {
 		emitSessionRuntimeDetach,
 		emitSessionActivating,
 		emitSessionActivationFailed,
+		emitSessionActivationCancelled,
 		createAnonymousSession,
 		stopSessionRuntime,
 		emitReplacementState,

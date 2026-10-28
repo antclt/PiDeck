@@ -431,6 +431,8 @@ export type SessionIpcDeps = {
 	emitSessionActivating?: (sessionId: string) => void;
 	/** 激活失败的 session 级合成 error 事件：无绑定时失败终态同样被丢弃，不补发则加载态永挂。 */
 	emitSessionActivationFailed?: (sessionId: string) => void;
+	/** 激活被作废（换后端/换工具）的 session 级合成 detach：抵消合成 starting，否则侧栏永远停在「启动中」。 */
+	emitSessionActivationCancelled?: (sessionId: string) => void;
 	createAnonymousSession: (input: CreateAnonymousSessionInput) => Promise<CreateAnonymousSessionResult>;
 	stopSessionRuntime: (target: SessionRuntimeTarget) => void;
 	emitReplacementState: (runtime: SessionRuntimeInfo, includeMessages: boolean) => void;
@@ -569,6 +571,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		stopSessionRuntime,
 		emitSessionActivating,
 		emitSessionActivationFailed,
+		emitSessionActivationCancelled,
 		emitReplacementState,
 		readCatalogSessionReferenceMessages,
 		// 无 pi 会话文件（纯生图草稿）历史读取回退：ImageSession 独立存储
@@ -1167,9 +1170,17 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		if (!entry) throw new Error(mainCopy("session.notFound"));
 		// 后端锁定（草稿期可改，激活后禁止）：pi 会话文件（JSONL）与 DSH 会话
 		// （host session log）格式不同，中途切换会导致消息同步渲染不可靠。
-		// 已 active 或已有 runtime 的会话拒绝 backend 变更（渲染层已隐藏入口，这里是边界防御）。
-		if (patch.backend !== undefined && patch.backend !== entry.backend && (entry.status === "active" || sessionRuntimeCoordinator.getTarget(sessionId))) {
-			throw new Error(mainCopy("session.backendLocked"));
+		// 已 active 的会话拒绝 backend 变更（渲染层已隐藏入口，这里是边界防御）。
+		// 未 active 但在预热激活中的会话**不**拒绝：旧实现在这里用 getTarget 当闸门，而预热期间
+		// 绑定尚未建立（ACP 握手在 bind 之前），target 为空→闸门放行，旧激活随后才把旧后端进程
+		// 绑到已经切走的会话上。现在改为主动作废旧激活（停进程 + 禁 bind），用户不用等握手。
+		if (patch.backend !== undefined && patch.backend !== entry.backend) {
+			if (entry.status === "active") throw new Error(mainCopy("session.backendLocked"));
+			await sessionRuntimeCoordinator.cancelActivation(sessionId);
+		}
+		// ACP 换工具同理：激活链按工具表 spawn，旧工具的握手不得绑到已换工具的会话。
+		if (patch.acpToolId !== undefined && patch.acpToolId !== entry.acpToolId && entry.status !== "active") {
+			await sessionRuntimeCoordinator.cancelActivation(sessionId);
 		}
 		// 草稿会话切到非 pi 后端时回收本项目的 standby 预热进程：它服务不了这个会话，
 		// 不主动丢就只能等 10min TTL 自然到期（用户反馈的「没用到还占着内存」）。
@@ -2234,9 +2245,16 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			// 行双行并存）；播种快照历史直接进时间线，不等首个回合。
 			emitReplacementState(result.value, true);
 		} else if (!sessionRuntimeCoordinator.hasLiveRuntime(sessionId)) {
-			// 失败且无活 runtime（spawn 失败/握手超时，binding 从未建立）：合成 error
-			// 抵消上面的合成 starting，加载态收敛为可重试的静态引导。
-			emitSessionActivationFailed?.(sessionId);
+			if (sessionRuntimeCoordinator.isActivationCancelled(sessionId)) {
+				// 被换后端/换 ACP 工具作废：这不是失败（用户已经放弃了它，合成 error 会把刚切好的
+				// 会话画成「启动失败」），但也不能什么都不发——上面的合成 starting 没人抵消，
+				// 侧栏会一直停在「启动中」。发 detach 把加载态收敛回未绑定。
+				emitSessionActivationCancelled?.(sessionId);
+			} else {
+				// 失败且无活 runtime（spawn 失败/握手超时，binding 从未建立）：合成 error
+				// 抵消上面的合成 starting，加载态收敛为可重试的静态引导。
+				emitSessionActivationFailed?.(sessionId);
+			}
 		}
 		void appLogger.info("session-perf", "Runtime activation IPC completed", {
 			sessionId,
