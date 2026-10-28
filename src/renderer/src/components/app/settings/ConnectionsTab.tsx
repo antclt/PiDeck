@@ -16,6 +16,7 @@ import { RemoteProjectTrustPanel } from "./RemoteProjectTrustPanel";
 import type { RemoteHostConnectionState, RemoteHostDiagnosticEntry, RemoteHostListItem } from "../../../../../shared/types/remoteHost";
 import type { WslHostListItem } from "../../../../../shared/types/wslHost";
 import { detectRendererPlatform } from "../../../lib/detectRendererPlatform";
+import { isLiveHostState } from "../../../../../shared/projectCapabilities";
 
 /**
  * 设置 → 连接：远端主机列表 + 连接开关 + 状态/诊断。
@@ -307,7 +308,8 @@ export function ConnectionsTab() {
 							{hosts.map((host) => {
 								const state = states[host.id] ?? (host.disabled ? "offline" : "disconnected");
 								const tone = resolveRemoteHostConnectionTone(state);
-								const connected = state === "ready" || state === "degraded";
+								// 「已连接」只有一个判据（shared/projectCapabilities）：与远端面板共用同一份，避免两个答案。
+								const connected = isLiveHostState(state);
 								const pending = busy[host.id] === true;
 								// 未验证的主机没有信任锚，连接必然在路由校验处失败（SSH_HOST_NOT_READY）。
 								const connectable = host.verified && !host.disabled;

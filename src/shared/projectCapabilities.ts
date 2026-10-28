@@ -2,19 +2,18 @@
  * 项目能力快照（v5 §2 硬规定 3 / W3 门禁）：**「这台主机现在能做什么」只有一个定义**。
  *
  * 现在渲染层有四个地方各自判定：设置页与进度条把 `ready || degraded` 当已连接，远端 Git 面板只认
- * `ready`，于是同一台主机在同一个时刻能给出两个答案。这里把判定收成一处纯函数：
+ * `ready`，于是同一台主机在同一个时刻能给出两个答案（审计发现 R3）。这里把判定收成一组纯函数：
  *
- * - `local`：本机项目，读写、Git、忽略规则全部可用（不看任何远端状态）；
- * - `ssh` + `ready`：全部可用；
- * - `ssh` + `degraded`：**读可用、写不可用**。降级意味着会话还在但状态不健康——读错了只是显示旧值，
- *   写错了是数据损坏，所以写面在降级时关闭并给出稳定原因码；
- * - 其它状态（`connecting` / `booting` / `reconnecting` / `offline` / `needs-attention` / `disconnected`）：
- *   全部关闭。
+ * - `isLiveHostState`：会话还活着（读到的东西可能是旧的，但连接是通的）——设置页徽标、进度条用它；
+ * - `isWritableHostState`：写面可用。降级意味着会话在但状态不健康：读错只是显示旧值，写错是数据损坏，
+ *   所以写面只在 `ready` 打开——远端 Git 面板的写动词用它；
+ * - `resolveProjectCapabilities`：把两类位置合成为一张能力表（含 .gitignore 权威来源与 watch 支持）。
  *
- * `watch` 单独一条：只有 helper 明确声明了 `fs.watch` 能力才为 true（S8 推送的前提），否则调用方走轮询。
- * 这个函数不读时钟、不读全局、不碰 IPC，所以同一组输入永远给同一个答案，可以在任何层复用。
+ * 放在 `shared/` 而不是 main：两层的判定必须同源，否则又会分叉。本模块不读时钟、不读全局、不碰 IPC。
  */
-import type { RemoteHostConnectionState } from "./RemoteHostConnectionTypes";
+
+/** 与 `RemoteHostConnectionTypes` 的连接状态逐字相同；在契约层重新声明是为了让渲染层可依赖。 */
+export type HostConnectionStateLike = "disconnected" | "connecting" | "probing" | "bootstrapping" | "ready" | "degraded" | "reconnecting" | "offline" | "needs-attention";
 
 /** 能力被关闭的稳定原因码（给 UI 分类用，不是文案）。 */
 export const PROJECT_CAPABILITY_REASONS = {
@@ -22,6 +21,16 @@ export const PROJECT_CAPABILITY_REASONS = {
 	hostDegraded: "PROJECT_CAPABILITY_WRITE_NEEDS_READY_HOST",
 	helperNoWatch: "PROJECT_CAPABILITY_WATCH_UNSUPPORTED",
 } as const;
+
+/** 会话还活着（读面可用）。这是「已连接」的唯一判据。 */
+export function isLiveHostState(state: HostConnectionStateLike): boolean {
+	return state === "ready" || state === "degraded";
+}
+
+/** 写面可用。降级主机一律关闭写：读错只是旧值，写错是数据损坏。 */
+export function isWritableHostState(state: HostConnectionStateLike): boolean {
+	return state === "ready";
+}
 
 export type ProjectCapabilities = {
 	locationKind: "local" | "ssh";
@@ -41,7 +50,7 @@ export type ProjectCapabilities = {
 export type ProjectCapabilityInput = {
 	locationKind: "local" | "ssh";
 	/** 本机项目传 `"local"`（不看远端状态机）。 */
-	hostState: RemoteHostConnectionState | "local";
+	hostState: HostConnectionStateLike | "local";
 	/** helper 声明支持的方法（缺省 = 未知，按不支持处理）。 */
 	helperCapabilities?: readonly string[];
 };
@@ -52,11 +61,11 @@ export function resolveProjectCapabilities(input: ProjectCapabilityInput): Proje
 	if (input.locationKind === "local") {
 		return { locationKind: "local", readFiles: true, writeFiles: true, gitRead: true, gitWrite: true, ignore: "git", watch: false };
 	}
-	if (input.hostState === "ready") {
+	if (isWritableHostState(input.hostState as HostConnectionStateLike)) {
 		return { locationKind: "ssh", readFiles: true, writeFiles: true, gitRead: true, gitWrite: true, ignore: "git", watch, ...noWatch };
 	}
-	if (input.hostState === "degraded") {
-		// 降级：读错只是旧值，写错是数据损坏——所以只关写面，并把原因说清楚。
+	if (isLiveHostState(input.hostState as HostConnectionStateLike)) {
+		// 降级：读留下、写关掉，并把原因说清楚。
 		return { locationKind: "ssh", readFiles: true, writeFiles: false, gitRead: true, gitWrite: false, ignore: "git", watch, reason: PROJECT_CAPABILITY_REASONS.hostDegraded };
 	}
 	return { locationKind: "ssh", readFiles: false, writeFiles: false, gitRead: false, gitWrite: false, ignore: "builtin", watch, reason: PROJECT_CAPABILITY_REASONS.hostNotReady };

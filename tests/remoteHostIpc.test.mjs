@@ -905,7 +905,7 @@ async function confirmEnroll(harness, path = "/srv/link-project") {
 test("enrolling a project probes the host then asks the user to confirm the canonical path", async () => {
 	const harness = projectHandlers({ canonicalPath: "/srv/real-project" });
 	const result = await harness.handlers.get("remote:project-enroll")({ sender: harness.sender }, HOST_ID, "/srv/link-project");
-	assert.deepEqual(JSON.parse(JSON.stringify(result)), { ok: true, status: "pending", hostId: HOST_ID, canonicalPath: "/srv/real-project" });
+	assert.deepEqual(JSON.parse(JSON.stringify(result)), { ok: true, value: { status: "pending", hostId: HOST_ID, canonicalPath: "/srv/real-project" } });
 	assert.equal(harness.calls.resolve.length, 1, "the host is probed with what the user typed");
 	assert.equal(harness.calls.resolve[0].userPath, "/srv/link-project");
 	const pushed = harness.calls.sent.at(-1);
@@ -918,7 +918,7 @@ test("enrolling a project probes the host then asks the user to confirm the cano
 test("approving an enrollment writes the durable record with the main-held canonical path", async () => {
 	const harness = projectHandlers({ canonicalPath: "/srv/real-project", projectId: "project-remote-9" });
 	const { answer } = await confirmEnroll(harness, "/srv/link-project");
-	assert.deepEqual(JSON.parse(JSON.stringify(answer)), { ok: true, enrolled: true, projectId: "project-remote-9" });
+	assert.deepEqual(JSON.parse(JSON.stringify(answer)), { ok: true, value: { enrolled: true, projectId: "project-remote-9" } });
 	assert.deepEqual(JSON.parse(JSON.stringify(harness.calls.enroll)), [{ hostId: HOST_ID, canonicalRemotePath: "/srv/real-project" }], "the store gets the canonical value, never the typed one");
 	// 确认是一次复核而不仅是落库：复核的是「用户看到的 canonical 值」本身，而不是他当初敲的路径。
 	assert.equal(harness.calls.resolve.length, 2, "approval re-probes the root it is about to persist");
@@ -950,7 +950,7 @@ test("denying an enrollment persists nothing", async () => {
 	await harness.handlers.get("remote:project-enroll")({ sender: harness.sender }, HOST_ID, "/srv/x");
 	const requestId = harness.calls.sent.at(-1).payload.requestId;
 	const denied = await harness.handlers.get("remote:project-answer")({ sender: harness.sender }, requestId, "deny");
-	assert.deepEqual(JSON.parse(JSON.stringify(denied)), { ok: true, enrolled: false });
+	assert.deepEqual(JSON.parse(JSON.stringify(denied)), { ok: true, value: { enrolled: false } });
 	assert.equal(harness.calls.enroll, undefined);
 });
 
@@ -984,17 +984,19 @@ test("per-project reads resolve the locator, switch the root and read relative t
 	const listed = await harness.handlers.get("remote:project-list")({}, "project-remote-1", "");
 	assert.deepEqual(JSON.parse(JSON.stringify(listed)), {
 		ok: true,
-		entries: [
-			{ name: "src", kind: "directory" },
-			{ name: "readme.md", kind: "file", bytes: 12 },
-		],
+		value: {
+			entries: [
+				{ name: "src", kind: "directory" },
+				{ name: "readme.md", kind: "file", bytes: 12 },
+			],
+		},
 	});
 	assert.deepEqual(harness.calls.setRoot, [{ hostId: HOST_ID, root: "/srv/app" }], "the project's root is handed to the connection");
 	assert.deepEqual(harness.calls.connects, [HOST_ID], "and the session is established with it");
 	assert.deepEqual(harness.calls.list, [{ hostId: HOST_ID, path: ".", portHasRequest: true }]);
 
 	const read = await harness.handlers.get("remote:project-read")({}, "project-remote-1", "readme.md");
-	assert.deepEqual(JSON.parse(JSON.stringify(read)), { ok: true, contentBase64: Buffer.from("hello").toString("base64"), bytes: 5, mtimeMs: 1 });
+	assert.deepEqual(JSON.parse(JSON.stringify(read)), { ok: true, value: { contentBase64: Buffer.from("hello").toString("base64"), bytes: 5, mtimeMs: 1 } });
 });
 
 test("the project trash directory is hidden from the root listing but not from a user subdirectory", async () => {
@@ -1006,16 +1008,18 @@ test("the project trash directory is hidden from the root listing but not from a
 		],
 	});
 	const root = await harness.handlers.get("remote:project-list")({}, "project-remote-1", "");
-	assert.deepEqual(JSON.parse(JSON.stringify(root)), { ok: true, entries: [{ name: "src", kind: "directory" }] }, "the reserved trash namespace is not a user-visible root entry");
+	assert.deepEqual(JSON.parse(JSON.stringify(root)), { ok: true, value: { entries: [{ name: "src", kind: "directory" }] } }, "the reserved trash namespace is not a user-visible root entry");
 	const nested = await harness.handlers.get("remote:project-list")({}, "project-remote-1", "src");
 	assert.deepEqual(
 		JSON.parse(JSON.stringify(nested)),
 		{
 			ok: true,
-			entries: [
-				{ name: ".pideck-trash", kind: "directory" },
-				{ name: "src", kind: "directory" },
-			],
+			value: {
+				entries: [
+					{ name: ".pideck-trash", kind: "directory" },
+					{ name: "src", kind: "directory" },
+				],
+			},
 		},
 		"a same-named entry inside a subdirectory is user data and stays visible",
 	);
@@ -1035,12 +1039,14 @@ test("recursive search does not return entries inside the project trash", async 
 		JSON.parse(JSON.stringify(found)),
 		{
 			ok: true,
-			entries: [
-				{ path: ".pideck-trashish/app.ts", name: "app.ts", kind: "file", bytes: 10 },
-				{ path: "src/app.ts", name: "app.ts", kind: "file", bytes: 10 },
-			],
-			scanned: 3,
-			truncated: false,
+			value: {
+				entries: [
+					{ path: ".pideck-trashish/app.ts", name: "app.ts", kind: "file", bytes: 10 },
+					{ path: "src/app.ts", name: "app.ts", kind: "file", bytes: 10 },
+				],
+				scanned: 3,
+				truncated: false,
+			},
 		},
 		"only the reserved first segment is filtered; a lookalike user path stays searchable",
 	);
@@ -1086,7 +1092,7 @@ test("the search channel is declared, bridged and registered", () => {
 test("per-project search resolves the locator, switches the root and returns rebuilt fields", async () => {
 	const harness = projectHandlers({ projects: { "project-remote-1": { kind: "ssh", hostId: HOST_ID, remotePath: "/srv/app" } } });
 	const found = await harness.handlers.get("remote:project-search")({}, "project-remote-1", "", "app");
-	assert.deepEqual(JSON.parse(JSON.stringify(found)), { ok: true, entries: [{ path: "src/app.ts", name: "app.ts", kind: "file", bytes: 10 }], scanned: 3, truncated: false });
+	assert.deepEqual(JSON.parse(JSON.stringify(found)), { ok: true, value: { entries: [{ path: "src/app.ts", name: "app.ts", kind: "file", bytes: 10 }], scanned: 3, truncated: false } });
 	assert.deepEqual(harness.calls.setRoot, [{ hostId: HOST_ID, root: "/srv/app" }], "the project's root is handed to the connection");
 	assert.deepEqual(harness.calls.search, [{ hostId: HOST_ID, path: ".", query: "app", portHasRequest: true }], "the empty relative path is the project root, spelled the reader's way");
 });
@@ -1095,7 +1101,7 @@ test("search passes truncation through instead of pretending a partial answer is
 	const harness = projectHandlers({ projects: { "project-remote-1": { kind: "ssh", hostId: HOST_ID, remotePath: "/srv/app" } }, searchTruncated: true });
 	const found = await harness.handlers.get("remote:project-search")({}, "project-remote-1", "", "app");
 	assert.equal(found.ok, true);
-	assert.equal(found.truncated, true, "a capped walk must be visible to the UI");
+	assert.equal(found.value.truncated, true, "a capped walk must be visible to the UI");
 });
 
 test("an invalid search query is refused at the boundary without touching the host", async () => {

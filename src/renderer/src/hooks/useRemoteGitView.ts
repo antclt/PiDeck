@@ -1,3 +1,4 @@
+import { isWritableHostState } from "../../../shared/projectCapabilities";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RemoteProject } from "../../../shared/types/project";
 import { desktopApi } from "../desktopApi";
@@ -25,7 +26,8 @@ export function useRemoteGitView(project: RemoteProject, repoPath = "") {
 		const unsubscribe = desktopApi.remoteHosts.onStateChange((change) => {
 			if (change.hostId !== project.locator.hostId) return;
 			// Only "ready" resumes polling; every other observed transition pauses it until the host is ready again.
-			setHostReady(change.state === "ready");
+			// 写面只在 ready 打开（degraded 的会话不健康，写错是数据损坏）：判据来自 shared。
+			setHostReady(isWritableHostState(change.state));
 			if (["disconnected", "offline", "degraded", "needs-attention", "reconnecting"].includes(change.state)) reads.invalidateConnection();
 		});
 		void reads.refresh();

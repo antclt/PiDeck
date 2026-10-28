@@ -1,3 +1,4 @@
+import { isLiveHostState } from "../../../../../shared/projectCapabilities";
 import type { RemoteHostConnectionPhase, RemoteHostConnectionState, RemoteHostDiagnosticEntry } from "../../../../../shared/types/remoteHost";
 
 /**
@@ -94,7 +95,7 @@ export function resolveRemoteConnectionProgress(input: { state: RemoteHostConnec
 		};
 	}
 
-	if (state === "ready" || state === "degraded") {
+	if (state !== undefined && isLiveHostState(state)) {
 		return { phase: "ready", steps: REMOTE_CONNECTION_STEPS.map((key) => ({ key, status: "complete" })), code: null };
 	}
 

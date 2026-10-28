@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { resolveProjectCapabilities, PROJECT_CAPABILITY_REASONS } = loadTsCommonJs("src/main/remote/ProjectCapabilities.ts");
+const { resolveProjectCapabilities, PROJECT_CAPABILITY_REASONS, isLiveHostState, isWritableHostState } = loadTsCommonJs("src/shared/projectCapabilities.ts");
 
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
@@ -63,4 +63,17 @@ test("其它任何状态：全部关闭，并给出稳定原因", () => {
 test("同一组输入永远同一个答案（纯函数，可在任何层复用）", () => {
 	const input = { locationKind: "ssh", hostState: "ready", helperCapabilities: ["fs.watch"] };
 	assert.deepEqual(plain(resolveProjectCapabilities(input)), plain(resolveProjectCapabilities(input)));
+});
+
+test("「已连接」与「可写」各只有一个判据：设置页与远端面板不再各算一套", () => {
+	// 设置页徽标/进度条：会话还活着就算已连接。
+	for (const state of ["ready", "degraded"]) assert.equal(isLiveHostState(state), true, state);
+	for (const state of ["disconnected", "connecting", "probing", "bootstrapping", "reconnecting", "offline", "needs-attention"]) assert.equal(isLiveHostState(state), false, state);
+	// 写面：只认 ready（degraded 的会话不健康，写错是数据损坏）。
+	assert.equal(isWritableHostState("ready"), true);
+	assert.equal(isWritableHostState("degraded"), false);
+	// 两个判据必须与能力表自洽：degraded ⇒ 读开写关。
+	const degraded = resolveProjectCapabilities({ locationKind: "ssh", hostState: "degraded" });
+	assert.equal(degraded.readFiles, isLiveHostState("degraded"));
+	assert.equal(degraded.writeFiles, isWritableHostState("degraded"));
 });
