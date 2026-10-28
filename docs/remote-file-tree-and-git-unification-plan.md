@@ -167,6 +167,10 @@ type GrantScope = { purpose: "git-write"|"file-entry"|"file-text"; sender: numbe
 
 ## 4. 迁移波次（每波自带 parity 门禁与回滚点）
 
+> **两个 agent 在同一工作区并行时的顺序纪律**：**W1 不可并行**——它是跨文件改名（`FileTreeNode` / 拖拽负载 / 活跃键 / 展开态键），中间态 typecheck 必红，会把另一个 agent 卡死；必须等 `FileTreeRows.tsx` / `RemoteProjectPanel.tsx` / `useRemoteFileTree.ts` 空出来再单干。
+>
+> 可并行的只有两类切片：① 新增文件 + 逐域迁移、**每步都绿**（`shared/op.ts` 底座、`RemoteWorkspaceView`）；② 边界在别的目录且不溢到 renderer（R1a，见 §1.2.1）。所以并行窗口里先做 R1a + W2 底座，W1 放最后。
+
 | 波 | 内容 | 门禁（必须同时满足） | 回滚 |
 |---|---|---|---|
 | **W0** | 计数器：helper 每次 `request` 按 `(hostId, method)` 计数 + 快照/格式化 + `PIDECK_REMOTE_METER=1` 时低频日志——**已交付**：`src/main/remote/RemoteCallMeter.ts` 挂在 `RemoteControlClient` 的发帧路径上，`tests/remoteCallMeter.test.mjs` 5 例绿 | 单测覆盖计数/排序/上限/复位/只计发帧请求；typecheck 绿；不改任何行为 | 纯新增，删文件即回滚 |
