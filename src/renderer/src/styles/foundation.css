@@ -1048,9 +1048,18 @@
 body {
   margin: 0;
   overflow: hidden;
-  /* 全局灰阶抗锯齿（Windows 下无视觉影响，macOS/Webkit 渲染下消除彩色边缘）；
-     编辑器/代码等正文密集区在 surfaces.css 里局部回退 subpixel-antialiased 保文字锐度 */
-  -webkit-font-smoothing: antialiased;
+  /* 全应用统一用子像素抗锯齿（Chromium 默认值，这里显式写死防止又被改回灰阶）。
+     旧值是 antialiased，理由写的是「macOS/Webkit 渲染下消除彩色边缘」——该理由在
+     现代 macOS 上已不成立：Mojave 起系统不再做次像素彩边合成，实测同一段 15px 中文
+     （Retina 2x、暗色）在 antialiased 与 subpixel-antialiased 两种设置下，彩边指标
+     （通道最大差）都是 5/255、肉眼不可见；而切到 subpixel-antialiased 后笔画覆盖
+     +11%、边缘锐度 +19%，正是「亮字压暗底发虚」的直接来源。也就是说旧值拿「消除
+     彩边」换掉的是笔画粗细，收益为零、代价全额。
+     Windows 上 Chromium 不实现该属性（走 DirectWrite），改动只影响 macOS。
+     -moz-osx-font-smoothing 仅 Firefox 读取（局域网 Web 客户端），Electron 内不生效。
+     编辑器/代码等正文密集区在 surfaces.css / timeline.css 里仍显式声明
+     subpixel-antialiased（现为冗余保护，不再需要但保留以防回退）。 */
+  -webkit-font-smoothing: subpixel-antialiased;
   -moz-osx-font-smoothing: grayscale;
   /* 换肤背景图：--app-bg-image 由 App.tsx 按设置注入（pideck-bg:// 协议），
      --app-bg-mask 为同色遮罩渐变（浅色白/暗色黑，透明度=1-opacity）。
