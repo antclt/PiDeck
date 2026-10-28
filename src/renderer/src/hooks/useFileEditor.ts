@@ -1,3 +1,4 @@
+import { projectFileKey } from "../utils/fileTreeLazy";
 import { t as i18nT } from "../i18n";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSetAtom } from "jotai";
@@ -179,7 +180,10 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
 	// tab 全关时回写 null 让高亮消失。见 activeEditorFileAtom 注释。
 	const setActiveEditorFile = useSetAtom(activeEditorFileAtom);
 	useEffect(() => {
-		setActiveEditorFile(activeTab?.filePath ?? null);
+		// 身份优先用项目作用域键（W1）：tab 有 fileTarget 时它就是与位置无关的身份，
+		// 树行判活跃只用这一种；没有 target 的 tab（从 chip / Git 面板直接打开）仍回落到 filePath。
+		const target = activeTab?.fileTarget;
+		setActiveEditorFile(target === undefined ? (activeTab?.filePath ?? null) : projectFileKey(target));
 	}, [activeTab, setActiveEditorFile]);
 
 	/** 仅关掉 Git Diff，保留文件 tab（打开文件时不应毁掉已有预览/常驻栏） */
