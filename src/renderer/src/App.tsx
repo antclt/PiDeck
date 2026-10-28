@@ -73,7 +73,7 @@ import { type SidebarActions } from "./components/sidebar/SidebarContent";
 import { AppSidebar } from "./components/sidebar/AppSidebar";
 import { AppBootstrap } from "./components/app/AppBootstrap";
 import { SettingsFeatureRoot } from "./components/app/SettingsFeatureRoot";
-import { hostPluginPanelAtom } from "./atoms/host-plugin-atoms";
+import { hostPluginCatalogAtom, hostPluginPanelAtom, isHostPluginPagePanel } from "./atoms/host-plugin-atoms";
 import { AutomationPage } from "./components/automation/AutomationPage";
 import { AgentMarketPage } from "./components/agents/AgentMarketPage";
 import { FavoritesPage } from "./components/favorites/FavoritesPage";
@@ -1527,9 +1527,12 @@ export function App() {
 
 	// 会话列同一时刻只呈现一层页面：打开工作区页面时收起页面式插件面板
 	// （两者都占 absolute inset-0，叠在一起会互相遮挡，且插件伪 Tab 无法再被点开）。
+	// 反方向（打开页面式面板时让页面失活）在 openHostPluginPanelAtom 里做，否则两边互相抵消。
+	// 对话框/浮层面板不占会话列，不与页面互斥。
 	useEffect(() => {
-		if (activeWorkspacePage && hostPluginPanel) setHostPluginPanel(null);
-	}, [activeWorkspacePage, hostPluginPanel, setHostPluginPanel]);
+		if (!activeWorkspacePage || !hostPluginPanel) return;
+		if (isHostPluginPagePanel(hostPluginPanel, store.get(hostPluginCatalogAtom).catalog)) setHostPluginPanel(null);
+	}, [activeWorkspacePage, hostPluginPanel, setHostPluginPanel, store]);
 
 	/** 侧栏/分支打开：选中成功后按 preview|permanent 登记 Tab */
 	const openSidebarSessionByIdWithTab = useCallback(

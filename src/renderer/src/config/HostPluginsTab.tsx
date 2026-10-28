@@ -3,7 +3,7 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { FolderOpen, FolderPlus, PackagePlus, RefreshCw, Puzzle, BookOpen, FilePlus2, ChevronDown, Link2, Plus, LoaderCircle } from "lucide-react";
 import type { HostPluginCatalog, HostPluginInfo, HostPluginPermission } from "../../../shared/types/hostPlugin";
 import { LOCAL_SERVICE_IDS } from "../../../shared/localServices";
-import { hostPluginCatalogAtom, hostPluginPanelAtom } from "../atoms/host-plugin-atoms";
+import { hostPluginCatalogAtom, openHostPluginPanelAtom } from "../atoms/host-plugin-atoms";
 import { settingsOpenAtom } from "../atoms/app-ui-atoms";
 import { desktopApi } from "../desktopApi";
 import { t, type TranslationKey } from "../i18n";
@@ -39,7 +39,7 @@ const PLUGIN_ERROR_KEYS: Record<string, TranslationKey> = {
 export function HostPluginsTab() {
 	const { catalog, error } = useAtomValue(hostPluginCatalogAtom);
 	const setCatalog = useSetAtom(hostPluginCatalogAtom);
-	const openPanel = useSetAtom(hostPluginPanelAtom);
+	const openPanel = useSetAtom(openHostPluginPanelAtom);
 	const setSettingsOpen = useSetAtom(settingsOpenAtom);
 	const [consent, setConsent] = useState<HostPluginInfo | null>(null);
 	// 卸载确认：删目录不可逆，与启用授权一样走一次显式确认。

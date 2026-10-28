@@ -1,8 +1,8 @@
 import { Fragment } from "react";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import type { LucideIcon } from "lucide-react";
 import type { HostPluginPanelPresentation } from "../../../../shared/types/hostPlugin";
-import { hostPluginCatalogAtom, hostPluginPanelAtom } from "../../atoms/host-plugin-atoms";
+import { hostPluginCatalogAtom, hostPluginPanelAtom, openHostPluginPanelAtom } from "../../atoms/host-plugin-atoms";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui-shadcn/popover";
 import { HostPluginSurface } from "./HostPluginSurface";
 import { hostPluginPanelIcon } from "./hostPluginPanelIcon";
@@ -18,7 +18,8 @@ import { hostPluginPanelIcon } from "./hostPluginPanelIcon";
  */
 export function HostPluginDockButtons({ projectId, sessionId }: { projectId?: string; sessionId?: string }) {
 	const { catalog } = useAtomValue(hostPluginCatalogAtom);
-	const [selected, openPanel] = useAtom(hostPluginPanelAtom);
+	const selected = useAtomValue(hostPluginPanelAtom);
+	const openPanel = useSetAtom(openHostPluginPanelAtom);
 	const rows: Array<{ key: string; pluginId: string; panelId: string; icon: LucideIcon; title: string; presentation: HostPluginPanelPresentation }> = [];
 	for (const plugin of catalog?.plugins ?? []) {
 		if (!plugin.enabled) continue;
