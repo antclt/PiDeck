@@ -2,8 +2,8 @@ import type { Op } from "../op";
 
 /** 远端已有UTF-8文本文件的编辑契约；version是不透明的主进程快照令牌，不是渲染层自报摘要。 */
 export type RemoteTextDocument = { content: string; version: string };
-export type RemoteTextOpenResult = { ok: true; document: RemoteTextDocument } | { ok: false; code: string };
-export type RemoteTextSaveResult = { ok: true; version: string } | { ok: false; code: string };
+export type RemoteTextOpenResult = Op<{ document: RemoteTextDocument }>;
+export type RemoteTextSaveResult = Op<{ version: string }>;
 
 /**
  * 远端文件管理契约（Phase 5 文件面；冻结于 docs/remote-file-management-plan.md §3.3）。
