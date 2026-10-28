@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: ea60237b8829570d0ab200166b858a16fc7128905feba6cca31038811ca90e5d（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 0a6732fbaed87088d671b42e34ad7174472601d5ee711e1347ff94e2195b412d（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4835,8 +4835,6 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.logoCustomImageFailed": "圖片讀取失敗：請改用正方形、透明底的 PNG 或 SVG，檔案不要超過 12MB。",
 	"settings.appDisplayName": "應用顯示名稱",
 	"settings.appDisplayNameDesc": "顯示在左上角品牌區與「關於」面板，按輸入原樣呈現（不轉大寫）；留空用 PiDeck。",
-	"navigation.back": "後退",
-	"navigation.forward": "前進",
 	"settings.sessionTabMaxWidth": "會話 Tab 寬度上限",
 	"settings.sessionTabMaxWidthDesc": "單個會話/檔案 Tab 的最大寬度（80–400px）。Tab 仍按標題內容收縮，短標題不受影響。",
 	"settings.sectionUpdates": "版本與更新",
