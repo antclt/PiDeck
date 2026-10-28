@@ -6133,10 +6133,15 @@ export class AgentManager {
 		const extractedUsage = chatUsageFromPiUsage(messageRecord?.usage);
 		const measuredDurationMs = typeof messageRecord?.durationMs === "number" && Number.isFinite(messageRecord.durationMs) ? messageRecord.durationMs : undefined;
 		const startedAtMs = typeof messageRecord?.timestamp === "number" && messageRecord.timestamp > 0 ? messageRecord.timestamp : undefined;
+		// 冻结耗时（轮末固定「回复耗时」）需要消息真正写完的时刻：pi 的 timestamp 是请求
+		// 开始，结束后 run.endedAt 会与 startedAt 相等 → 轮末耗时恒为 0。优先用
+		// 「请求开始 + 实测耗时」；模拟/远端后端没上报 durationMs 时，终态事件即写盘时刻。
+		const endedAtMs = finalStopReason ? (startedAtMs !== undefined && measuredDurationMs !== undefined ? startedAtMs + measuredDurationMs : Date.now()) : undefined;
 		const usageMeta = {
 			...(extractedUsage ? { usage: extractedUsage } : {}),
 			...(measuredDurationMs !== undefined ? { durationMs: measuredDurationMs } : {}),
 			...(startedAtMs !== undefined && measuredDurationMs !== undefined ? { startedAt: startedAtMs } : {}),
+			...(endedAtMs !== undefined ? { endedAt: endedAtMs } : {}),
 		};
 
 		if (existing) {

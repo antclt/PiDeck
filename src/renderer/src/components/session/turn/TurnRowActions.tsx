@@ -2,14 +2,11 @@ import { Clock, Share, SquarePen, Star, Trash } from "lucide-react";
 import type { RefObject } from "react";
 import type { ChatMessage } from "../../../../../shared/types";
 import { t } from "../../../i18n";
-import type { AgentRunItem } from "../timeline/types";
 import { Button } from "../../ui-shadcn/button";
-import { LiveDuration } from "../LiveDuration";
 import { CopyMenu } from "../SurfaceComponents";
 import { formatDuration } from "../TimelineFormat";
 
 export type TurnRowActionsProps = {
-	run: AgentRunItem;
 	/** 整轮回复正文（Markdown 源码）；为空时整栏只剩耗时/模型。 */
 	mergedText: string;
 	editing: boolean;
@@ -27,8 +24,6 @@ export type TurnRowActionsProps = {
 	/** 删除本轮回复；undefined = 不显示删除按钮，判据同上。 */
 	onDeleteReply?: () => void;
 	showDuration: boolean;
-	isRunLive: boolean;
-	effectiveStart: number;
 	duration: number;
 	showTurnModel: boolean;
 	turnModel?: ChatMessage["model"];
@@ -42,7 +37,9 @@ export type TurnRowActionsProps = {
  * TurnRow 已经越过单文件行数红线（AGENTS.md §6：超 600 行必须评估拆分）。
  *
  * 两条纪律写在搬移前，搬完照旧生效：
- * 1. 耗时与模型名排在**行末**（用户视线在底部），全轮只有一个耗时显示点；
+ * 1. 耗时与模型名排在**行末**（用户视线在底部）。流式期间的实时秒表在状态条
+ *    （与「正在执行命令…」同行，见 statusFacts），这里只显示本轮结束后的固定耗时，
+ *    保证同一个数字不同时出现两处；
  * 2. 半透明降噪必须盖住整行——按钮图标与行末数字同一层，否则「图标偏淡、数字偏深」。
  */
 export function TurnRowActions(props: TurnRowActionsProps) {
@@ -90,10 +87,8 @@ export function TurnRowActions(props: TurnRowActionsProps) {
 					   7+gap-1+7 与按钮之间的一致，不再比按钮之间更近。 */
 				<div className="flex items-center gap-1.5 pl-[7px] text-muted-foreground">
 					<Clock size={14} className="shrink-0" aria-hidden="true" />
-					{/* 耗时数字与行头时间一致用界面字体（见 TurnAuthorHeader 注释）；tabular-nums 保持跳动不抖 */}
-					<span className="text-body leading-none tabular-nums">
-						{props.isRunLive && props.run.askPending ? formatDuration(Math.max(0, (props.run.askPendingAt ?? props.effectiveStart) - props.effectiveStart)) : props.isRunLive ? <LiveDuration startedAt={props.effectiveStart} isStreaming /> : formatDuration(props.duration)}
-					</span>
+					{/* 固定耗时（实时读数在状态条，见 statusFacts）；tabular-nums 与行头时间对齐 */}
+					<span className="text-body leading-none tabular-nums">{formatDuration(props.duration)}</span>
 				</div>
 			)}
 			{props.showTurnModel && props.turnModel && (

@@ -209,7 +209,8 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 	// 自动重试退避期：状态条必须说清「在等下一次重试」而不是笼统的「正在处理」。
 	// 数据源是时间线上的重试卡（pi auto_retry / DSH llm/retry 同款），卡片收口即回到普通状态。
 	const retryProgress = useMemo(() => deriveRetryProgress(activeMessages), [activeMessages]);
-	// 不在这里读本轮已用时间：TurnRow 末尾的 LiveDuration 是唯一的实时耗时展示点。
+	// 本轮已用时间不在这里直接读：状态条要的只是起点与冻结时刻，由下面的
+	// liveRunTiming 从末轮 agent-run 折算后传给 RespondingIndicator（唯一实时读数点）。
 	const sessionRuntimeBusy = modernSurfaceState.isBusy;
 	// Pi can compact immediately after agent_end. Keep the session busy during that
 	// file rewrite, but finalize the just-completed model turn in the timeline.
@@ -442,6 +443,19 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 		prevRenderedRunsRef.current = next;
 		return next;
 	}, [renderedRuns]);
+	// 状态条秒表（2026-10 由 TurnRow 末尾迁入）：取本轮最后一个 agent-run 的起点，
+	// 口径与轮末固定耗时一致——startedAt + askWaitMs（等待用户回答不计），
+	// 阻塞提问期间冻结在 askPendingAt，避免把用户思考时间算成模型耗时。
+	// 只在轮内传：轮结束后由 TurnRow 末尾显示固定耗时，状态条不再读秒。
+	const liveRunTiming = useMemo(() => {
+		if (!isTurnRunning) return undefined;
+		const last = reconciledRuns[reconciledRuns.length - 1];
+		if (!last || last.kind !== "agent-run" || !(last.startedAt > 0)) return undefined;
+		return {
+			startedAt: last.startedAt + (last.askWaitMs ?? 0),
+			frozenAt: last.askPending ? last.askPendingAt : undefined,
+		};
+	}, [isTurnRunning, reconciledRuns]);
 	// 渲染窗口（2026-08 黑屏治理）：贴底只挂尾部 3 轮；上滚查看历史也裁剪
 	// （controller.scrolledWindowTurns，初始 3 轮，接近顶部按 3 轮 cohort 自动扩大）——
 	// 历史全量放开挂载是大会话渲染进程内存峰值/黑屏的来源。数据仍在 atoms。
@@ -1135,6 +1149,8 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 							liveThinkingStreaming={liveThinkingStreaming}
 							retry={retryProgress}
 							contextPercent={activeRuntimeState?.contextPercent}
+							runStartedAt={liveRunTiming?.startedAt}
+							runFrozenAt={liveRunTiming?.frozenAt}
 						/>
 					)}
 					{props.replyActionsRef ? <div key={sessionId} ref={props.replyActionsRef} data-session-id={sessionId} data-testid="session-reply-actions-target" className="min-w-0 empty:hidden" /> : null}

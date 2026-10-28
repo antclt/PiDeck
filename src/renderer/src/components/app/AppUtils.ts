@@ -341,6 +341,19 @@ export function getMultiSelectImageCaptureIds(items: RenderMessage[], selectedId
 
 /* ── 消息分组 ── */
 
+/**
+ * 消息在墙钟时间上的结束点。
+ *
+ * assistant 的 `timestamp` 是请求开始（pi 语义），终态消息另有 `meta.endedAt`
+ * （请求开始 + 实测耗时；无实测耗时的后端为终态事件到达时刻）。轮末固定耗时
+ * 必须用结束点相减——用 `timestamp` 会把「回复耗时」算成最后一次请求的排队时间，
+ * 流式结束后与 `startedAt` 相等时甚至恒为 0。历史/旧数据缺 `endedAt` 时回退 timestamp。
+ */
+export function messageEndedAt(message: ChatMessage): number {
+	const endedAt = message.meta?.endedAt;
+	return typeof endedAt === "number" && Number.isFinite(endedAt) && endedAt > 0 ? endedAt : message.timestamp;
+}
+
 export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?: boolean } = {}): RenderMessage[] {
 	// agentBusy 决定 error 诊断卡是否打断当前 run（见下方 error 分支）
 	const { agentBusy = false } = options;
@@ -454,7 +467,7 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 		flushThinking();
 		flushTools();
 		if (currentRun.length === 0) runStartedAt = message.timestamp;
-		runEndedAt = message.timestamp;
+		runEndedAt = messageEndedAt(message);
 		currentRun.push({ kind: "message", message });
 	}
 

@@ -21,7 +21,7 @@ import { SingleLinePreview } from "./SingleLinePreview";
 import { RowText } from "./RowText";
 import { deriveRespondingKind, type RespondingKind } from "./timeline/respondingKind";
 import type { RetryProgress } from "./timeline/retryProgress";
-import { CONTEXT_PRESSURE_PERCENT, retryCountdownSeconds } from "./timeline/statusFacts";
+import { CONTEXT_PRESSURE_PERCENT, elapsedRunMs, formatElapsed, retryCountdownSeconds } from "./timeline/statusFacts";
 import { getToolPhrase } from "./timeline/toolPhrase";
 import { isRetryStatusMessage } from "./timelineFailureNotice";
 
@@ -251,14 +251,15 @@ function useNowTick(enabled: boolean, intervalMs = 1000): number {
 }
 
 /**
- * 状态条尾部的事实后缀：重试倒计时 / 上下文压力。
+ * 状态条尾部的事实后缀：已运行时长 / 重试倒计时 / 上下文压力。
  *
  * 单独成叶子组件是有意为之：倒计时每秒变了它才重渲染，父级（ReasoningText +
  * 功能提示轮播）不受影响——流式正文 50ms 刷新与读秒互不干扰。后缀全是可测量的量，
  * 不参与状态判定（无数据就不渲染某一段，不补味）。
  *
- * 不再带本轮已用时间：TurnRow 末尾已有唯一的实时耗时（LiveDuration），就在状态条
- * 上方一行，再读一遍就是把同一个数字显示两次，而且口径还不同（见 statusFacts 注释）。
+ * 本轮已用时间也在这里：2026-10 用户反馈 TurnRow 末尾单独挂一个实时秒表「有点突兀」，
+ * 遂与「正在执行命令…」收进同一行、竖线分隔。为保证同一个数字只出现一次，TurnRow 末尾
+ * 改为只在本轮结束后显示固定耗时，实时值全轮只有这一处（口径见 statusFacts 注释）。
  *
  * `aria-hidden`：ReasoningText 已经用 `role="status" aria-live="polite"` 播报当前
  * 状态短语；读秒每秒变化，若也进无障碍树就是每秒打断一次屏幕阅读器。
@@ -269,31 +270,54 @@ function useNowTick(enabled: boolean, intervalMs = 1000): number {
  * 不显示本轮工具调用次数（用户反馈「· 工具调用 12 次」是纯噪音）：进度看时间线本身，
  * 状态条只回答「此刻在干什么 / 还要等多久」。
  */
-function StatusSuffix(props: { retry?: RetryProgress; contextPercent?: number | null }) {
+function StatusSuffix(props: {
+	retry?: RetryProgress;
+	contextPercent?: number | null;
+	/** 本轮起点（已按 run.startedAt + askWaitMs 折算，见 statusFacts 注释） */
+	runStartedAt?: number;
+	/** ask 阻塞时刻：有值时秒表冻结在这里，不算用户思考时间 */
+	runFrozenAt?: number;
+}) {
 	const retryAtMs = props.retry?.retryAtMs;
-	const now = useNowTick(retryAtMs !== undefined);
-	const parts: string[] = [];
-	const hints: string[] = [];
+	const runStartedAt = props.runStartedAt;
+	const runFrozenAt = props.runFrozenAt;
+	// 只有真的有会跳的数字时才开表：结束态（无倒计时、无计时）不空转 interval
+	const now = useNowTick(retryAtMs !== undefined || (runStartedAt !== undefined && runFrozenAt === undefined));
+	const facts: Array<{ text: string; hint: string }> = [];
+
+	// 已运行时长排最前：先回答「已经跑了多久」，再回答「还要等多久」。
+	const elapsed = elapsedRunMs(runStartedAt, now, runFrozenAt);
+	// 不足 1 秒不显示：状态条刚亮起时「已运行 0s」是句废话
+	if (elapsed !== undefined && elapsed >= 1_000) {
+		facts.push({ text: t("agent.loading.elapsed", { duration: formatElapsed(elapsed) }), hint: t("agent.loading.hint.elapsed") });
+	}
 
 	// 倒计时到 0 就不再显示：那一下重试已经在飞了，“0 秒后”是句废话。
 	const countdown = retryCountdownSeconds(retryAtMs, now);
 	if (countdown !== undefined && countdown > 0) {
-		parts.push(t("agent.loading.retryIn", { seconds: countdown }));
-		hints.push(t("agent.loading.hint.retryIn", { seconds: countdown }));
+		facts.push({
+			text: t("agent.loading.retryIn", { seconds: countdown }),
+			hint: t("agent.loading.hint.retryIn", { seconds: countdown }),
+		});
 	}
 
 	// 上下文压力达到阈值才提：压缩通常发生在这之上，提前告警。
 	const contextPercent = props.contextPercent;
 	if (typeof contextPercent === "number" && Number.isFinite(contextPercent) && contextPercent >= CONTEXT_PRESSURE_PERCENT) {
 		const percent = Math.round(contextPercent);
-		parts.push(t("agent.loading.contextUsage", { percent }));
-		hints.push(t("agent.loading.hint.contextUsage", { percent }));
+		facts.push({ text: t("agent.loading.contextUsage", { percent }), hint: t("agent.loading.hint.contextUsage", { percent }) });
 	}
 
-	if (parts.length === 0) return null;
+	if (facts.length === 0) return null;
+	// 每段自带竖线分隔（CSS .responding-fact），与右侧功能提示的分隔线同规格：
+	// 行内是「正在执行命令… | 已运行 12s | 3 秒后 | 上下文 82% | 提示」一串事实。
 	return (
-		<span className="responding-suffix" aria-hidden="true" title={hints.join("\n")}>
-			{`· ${parts.join(" · ")}`}
+		<span className="responding-suffix" aria-hidden="true">
+			{facts.map((fact, index) => (
+				<span key={index} className="responding-fact" title={fact.hint}>
+					{fact.text}
+				</span>
+			))}
 		</span>
 	);
 }
@@ -308,6 +332,10 @@ export function RespondingIndicator(props: {
 	retry?: RetryProgress;
 	/** 上下文占用百分比（runtime.contextPercent；达阈值才展示） */
 	contextPercent?: number | null;
+	/** 本轮已用时间的起点（run.startedAt + askWaitMs；仅本轮进行中传） */
+	runStartedAt?: number;
+	/** ask 阻塞时刻：有值时秒表冻结在这里 */
+	runFrozenAt?: number;
 }) {
 	const retry = props.retry;
 	// 判定抽到 deriveRespondingKind：pi / DSH 共用，状态条跟「此刻有没有字/工具」对齐。
@@ -343,7 +371,7 @@ export function RespondingIndicator(props: {
 				indicator={<Loader variant="dot-matrix" size={18} speed={1.1} label={t("agent.loading.aria")} />}
 				// 字号用官方默认（text-sm）：实测语义 token 缩放的观感不如官方字阶，保持官方原样
 			/>
-			<StatusSuffix retry={retry} contextPercent={props.contextPercent} />
+			<StatusSuffix retry={retry} contextPercent={props.contextPercent} runStartedAt={props.runStartedAt} runFrozenAt={props.runFrozenAt} />
 			{/* 功能提示轮播：等待期是用户的注意力空档，用它曝光「没有可见入口」的能力
 			    （命令面板、划选引用、排队发送…）。内容与收录规则见 RespondingTips.tsx / sessionFeatureTips.ts。 */}
 			<RespondingTips />

@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: c6854a6f602b9acd53b3be4c0d060f0a5e4e2bb1bbf7e4084ef9d029eda7bf23（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: e822313ef24453eccfacc440ca073ddb9287dbfe6d959b49269c253b2918d7c1（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5821,9 +5821,11 @@ export const zhTW: Record<TranslationKey, string> = {
 	"agent.loading.retryingCount": "正在重試 {attempt}/{max}",
 	"agent.loading.retryIn": "{seconds} 秒後",
 	"agent.loading.contextUsage": "上下文 {percent}%",
+	"agent.loading.elapsed": "已執行 {duration}",
 	// 状态条尾部指标的行内解释（悬停 title）：用户不知道数字数的是什么
 	"agent.loading.hint.retryIn": "{seconds} 秒後：下一次自動重試的倒計時，到點自動發起",
 	"agent.loading.hint.contextUsage": "上下文 {percent}%：本輪對話已佔用的上下文視窗比例，到 80% 起提示",
+	"agent.loading.hint.elapsed": "已執行：本輪開始到現在的時長，不含等待你回答的時長",
 	"agent.loading.waiting": "正在處理",
 	"agent.loading.aria": "Agent 執行中",
 	// 流式状态条右侧的功能提示（sessionFeatureTips.ts，逐条按代码核实过入口）

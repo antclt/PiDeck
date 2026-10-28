@@ -5832,9 +5832,11 @@ export const enUS: Record<TranslationKey, string> = {
 	"agent.loading.retryingCount": "Retrying {attempt}/{max}",
 	"agent.loading.retryIn": "in {seconds}s",
 	"agent.loading.contextUsage": "context {percent}%",
+	"agent.loading.elapsed": "running {duration}",
 	// Inline hints for the status-bar facts (hover title)
 	"agent.loading.hint.retryIn": "in {seconds}s: countdown to the next automatic retry",
 	"agent.loading.hint.contextUsage": "context {percent}%: share of the context window used by this turn, flagged from 80%",
+	"agent.loading.hint.elapsed": "running: time since this turn started, excluding time spent waiting for your answer",
 	"agent.loading.waiting": "Processing",
 	"agent.loading.aria": "Agent is working",
 	// Feature tips rotating next to the streaming status line (sessionFeatureTips.ts, entries verified in code)

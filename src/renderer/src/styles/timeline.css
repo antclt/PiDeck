@@ -663,16 +663,28 @@
   color: var(--color-text-tertiary);
 }
 
-/* 尾部事实后缀（重试倒计时 / 本轮步数 / 上下文压力 / 秒表）：
-   与主文案同行但降一级颜色，tabular-nums 让每秒跳动的数字不推动布局；
+/* 尾部事实后缀（已运行时长 / 重试倒计时 / 上下文压力）：
+   与主文案同行、降一级颜色，tabular-nums 让每秒跳动的数字不推动布局；
+   每段自带左侧竖线（与 RespondingTips 的分隔线同规格 4px + 10px），
+   整行读成「正在执行命令… | 已运行 12s | 3 秒后 | 上下文 82% | 提示」；
    窄面板下宁可截断也不把消息流撑宽。 */
 .responding-suffix {
+  display: inline-flex;
+  align-items: center;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
   color: var(--color-text-tertiary);
+}
+
+.responding-fact {
+  /* 数字是重点，不参与收缩：窄面板下让右侧功能提示先截断（它有 truncate） */
+  flex: 0 0 auto;
+  white-space: nowrap;
+  margin-left: 4px;
+  padding-left: 10px;
+  border-left: 1px solid var(--color-border-subtle);
 }
 
 /* 用户偏好减少动态效果时，状态仍通过颜色、图标和文案表达，不能依赖动画才能识别。 */

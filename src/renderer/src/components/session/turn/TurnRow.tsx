@@ -120,15 +120,17 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 	const isComplete = run.endedAt > 0;
 	// 结束判定不能依赖 isComplete：groupToolMessages 里 endedAt 永远是最后一条消息时间戳，
 	// 流式 run 也有空骨架消息（message_start/thinking 时创建），因此流式中 isComplete 恒为 true。
-	// 真实语义：agentRunning 期间（仅末轮）由 LiveDuration 实时计时，agent 空闲后才显示固定值。
+	// 真实语义：agentRunning 期间（仅末轮）实时读数在状态条（2026-10 迁入），
+	// agent 空闲后才在行末显示固定值。
 	const isRunLive = Boolean(props.agentRunning);
 	// 回复耗时扣除本轮 ask_question 的等待：等待段由主进程从工具 durationMs 中排除，
 	// 这里把等价量从轮时长里减去，含义为「agent 实际处理时长」。
 	const effectiveStart = run.startedAt + (run.askWaitMs ?? 0);
 	const duration = isComplete && effectiveStart > 0 ? Math.max(0, run.endedAt - effectiveStart) : 0;
-	// 耗时：结束后固定（endedAt - startedAt - ask 等待）；流式中（isRunLive）由 LiveDuration 实时增长；
-	// 轮被 ask_question 阻塞时冻结在提问弹起时刻（时间不再计入）。
-	const showDuration = (isComplete && !isRunLive && duration > 0) || (isRunLive && effectiveStart > 0);
+	// 轮末固定耗时（endedAt - startedAt - ask 等待）。实时秒表 2026-10 移到状态条
+	// （RespondingIndicator → StatusSuffix，与「正在执行命令…」同行），这里只在结束后显示，
+	// 否则同一个时间会在状态条和轮尾各跳一次。
+	const showDuration = isComplete && !isRunLive && duration > 0;
 
 	// 扁平展示序列：Live 与 History 共用 msg-thinking-* 身份（liveThinkingId 命中即挂步）。
 	//
@@ -466,7 +468,6 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 				<TurnFileChanges run={run} streaming={isRunLive || Boolean(props.isStreaming)} onOpenFile={props.onOpenFile} onDiffFile={props.onDiffFile} />
 
 				<TurnRowActions
-					run={run}
 					mergedText={mergedText}
 					editing={editing}
 					containsImageGen={containsImageGen}
@@ -479,8 +480,6 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 					onStartEdit={!props.isStreaming && !props.isRuntimeBusy && Boolean(editableMessage?.message.id) && props.onEditMessage ? startEditing : undefined}
 					onDeleteReply={!props.isStreaming && !props.isRuntimeBusy && Boolean(editableMessage?.message.id) && props.onDeleteMessage ? deleteMessage : undefined}
 					showDuration={showDuration}
-					isRunLive={isRunLive}
-					effectiveStart={effectiveStart}
 					duration={duration}
 					showTurnModel={showTurnModel}
 					turnModel={turnModel}

@@ -5814,9 +5814,11 @@ export const zhCN = {
 	"agent.loading.retryingCount": "正在重试 {attempt}/{max}",
 	"agent.loading.retryIn": "{seconds} 秒后",
 	"agent.loading.contextUsage": "上下文 {percent}%",
+	"agent.loading.elapsed": "已运行 {duration}",
 	// 状态条尾部指标的行内解释（悬停 title）：用户不知道数字数的是什么
 	"agent.loading.hint.retryIn": "{seconds} 秒后：下一次自动重试的倒计时，到点自动发起",
 	"agent.loading.hint.contextUsage": "上下文 {percent}%：本轮对话已占用的上下文窗口比例，到 80% 起提示",
+	"agent.loading.hint.elapsed": "已运行：本轮开始到现在的时长，不含等待你回答的时长",
 	"agent.loading.waiting": "正在处理",
 	"agent.loading.aria": "Agent 运行中",
 	// 流式状态条右侧的功能提示（sessionFeatureTips.ts，逐条按代码核实过入口）
