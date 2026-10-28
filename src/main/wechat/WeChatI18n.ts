@@ -41,7 +41,12 @@ const zhCN = {
 
 	"login.required": "微信登录已失效，请在电脑端 PiDeck 的「集成 → 微信」里重新扫码。",
 
-	"text.empty": "这条消息里没有可处理的文本（图片、语音、文件、视频暂不支持）。",
+	"text.attachmentUnsupported": "收到{kind}，微信通道暂不支持处理；需要发文件请改用飞书。",
+	"text.kindImage": "图片",
+	"text.kindVoice": "语音",
+	"text.kindFile": "文件",
+	"text.kindVideo": "视频",
+	"text.kindAttachment": "附件",
 	"text.group": "暂不支持群聊，请私聊我。",
 
 	"model.current": "当前模型：{model}",
@@ -87,7 +92,12 @@ const enUS: Record<WeChatTranslationKey, string> = {
 
 	"login.required": "The WeChat login has expired. Re-scan the QR code in PiDeck → Integrations → WeChat.",
 
-	"text.empty": "No processable text in that message (images, voice, files and video are not supported yet).",
+	"text.attachmentUnsupported": "Received {kind}. This WeChat channel cannot process attachments yet — use Feishu to send files.",
+	"text.kindImage": "an image",
+	"text.kindVoice": "voice",
+	"text.kindFile": "a file",
+	"text.kindVideo": "a video",
+	"text.kindAttachment": "an attachment",
 	"text.group": "Group chats are not supported yet — please DM me.",
 
 	"model.current": "Current model: {model}",

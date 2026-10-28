@@ -92,11 +92,12 @@ test("同步指纹集合需 FIFO 上限且 stop 清空（不得用 __feishuSyncF
 });
 
 test("pendingAttachments 必须有单 chat 上界，removeBinding 必须释放", () => {
-	// 只发文件不发指令的聊天会让每个文件（最大 50MB）Buffer 无限驻留；解绑也不释放。
+	// 只发文件不发指令的聊天会让每个文件（最大 200MB）Buffer 无限驻留；解绑也不释放。
+	// #427 追加二把上界从 20 个/20MB 提到 50 个/100MB，闸门本身不变。
 	const stashBlock = source.match(/只有附件没有文字[\s\S]*?pendingAttachments\.set\(chatId, merged\)/);
 	assert.ok(stashBlock, "附件暂存块应存在");
-	assert.match(stashBlock[0], /heldCount \+ incomingCount > 20/, "数量上界 20");
-	assert.match(stashBlock[0], /20 \* 1024 \* 1024/, "字节上界 20MB");
+	assert.match(stashBlock[0], /heldCount \+ incomingCount > PENDING_ATTACHMENT_MAX_COUNT/, "数量上界必须走常量");
+	assert.match(stashBlock[0], /heldBytes \+ incomingBytes > PENDING_ATTACHMENT_MAX_BYTES/, "字节上界必须走常量");
 	assert.match(stashBlock[0], /attachment\.pendingFull/, "超限必须提示用户");
 	const removeFn = source.match(/removeBinding\(chatId: string\): boolean \{[\s\S]*?return true;/);
 	assert.ok(removeFn, "removeBinding 应存在");

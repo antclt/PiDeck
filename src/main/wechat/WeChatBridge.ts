@@ -24,7 +24,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { AgentRuntimeState, AgentTab, ImChannelBackend, WeChatBindingModel, WeChatBridgeStatus, WeChatChatBinding, WeChatModelChainEntry } from "../../shared/types";
 import { IlinkClient, IlinkError, type IlinkLogFn } from "./IlinkClient";
-import { ILINK_CHANNEL_VERSION, MESSAGE_TYPE_USER, POLL_RETRY_FAST_MS, POLL_RETRY_SLOW_AFTER, POLL_RETRY_SLOW_MS, extractMessageText, hasUnsupportedItem, type IlinkMessage, type IlinkSession } from "./ilinkProtocol";
+import { ILINK_CHANNEL_VERSION, ITEM_TYPE_FILE, ITEM_TYPE_IMAGE, ITEM_TYPE_VIDEO, ITEM_TYPE_VOICE, MESSAGE_TYPE_USER, POLL_RETRY_FAST_MS, POLL_RETRY_SLOW_AFTER, POLL_RETRY_SLOW_MS, extractMessageText, extractVoiceTranscript, unsupportedItemTypes, type IlinkMessage, type IlinkSession } from "./ilinkProtocol";
 import type { SessionRuntimeBindingGateway } from "../sessions/sessionRuntimeBinding";
 import type { SessionRunOutcome } from "../sessions/sessionRunWaiter";
 import { getAccount, getBinding, getDecryptedBotToken, getCursor, getPublicAccount, getSettings, isAllowedUser, loadBindings, markNeedsRelogin, normalizeModelChain, removeBinding, removeBindingsBySessionId, setCursor, updateSettings, upsertBinding } from "./WeChatConfig";
@@ -261,10 +261,17 @@ export class WeChatBridge {
 			return;
 		}
 
-		const text = extractMessageText(message.item_list ?? []).trim();
-		const hasUnsupported = hasUnsupportedItem(message.item_list ?? []);
+		const items = message.item_list ?? [];
+		// 语音优先用服务端 ASR 转写当正文（#427 追加三-1）：有转写就正常跑，不必回「不支持语音」。
+		const text = [extractMessageText(items), extractVoiceTranscript(items)]
+			.filter((part) => part.length > 0)
+			.join("\n")
+			.trim();
 		if (!text) {
-			if (hasUnsupported) this.sendSafe(chatId, contextToken, this.t("text.empty"));
+			// 无文本但有附件时按类型明确回执（旧实现一句笼统的「没有可处理的文本」，
+			// 用户不知道是图片、文件还是语音被拒，也不知道该换飞书）。
+			const kinds = unsupportedItemTypes(items);
+			if (kinds.length > 0) this.sendSafe(chatId, contextToken, this.t("text.attachmentUnsupported", { kind: kinds.map((type) => this.itemKindLabel(type)).join("、") }));
 			return;
 		}
 
@@ -980,6 +987,22 @@ export class WeChatBridge {
 
 	private locale(): WeChatLocale {
 		return normalizeWeChatLocale(this.deps.getLocale());
+	}
+
+	/** 附件类型标签：回执里说「收到图片/文件」，不要把协议里的数字抛给用户。 */
+	private itemKindLabel(type: number): string {
+		switch (type) {
+			case ITEM_TYPE_IMAGE:
+				return this.t("text.kindImage");
+			case ITEM_TYPE_VOICE:
+				return this.t("text.kindVoice");
+			case ITEM_TYPE_FILE:
+				return this.t("text.kindFile");
+			case ITEM_TYPE_VIDEO:
+				return this.t("text.kindVideo");
+			default:
+				return this.t("text.kindAttachment");
+		}
 	}
 
 	private t(key: WeChatTranslationKey, params?: Record<string, string | number>): string {

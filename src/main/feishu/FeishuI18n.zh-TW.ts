@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 7b95c478a6905ccc01f780f5525d2eb63884add6e3ca307fb6ce610eb82e79ab（来自 src/main/feishu/FeishuI18n.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 6c2d0febd05094b892552ca912210272eccdb3c014158f154823bbbb8f616b85（来自 src/main/feishu/FeishuI18n.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import type { FeishuTranslationKey } from "./FeishuI18n";
 
@@ -19,8 +19,8 @@ export const feishuZhTW: Record<FeishuTranslationKey, string> = {
 	"message.received": "⚡ 已收到",
 	"attachment.imageDownloadFailed": "⚠️ 圖片下載失敗，請重試。",
 	"attachment.fileDownloadFailed": "⚠️ 檔案下載失敗，請重試。",
-	"attachment.fileTooLarge50": "檔案過大（超過 50MB），暫不支援處理。",
-	"attachment.pendingFull": "⚠ 暫存附件過多（超過 20 個或 20MB），請先發送文字指令處理已暫存的檔案。",
+	"attachment.fileTooLarge": "檔案過大（超過 {limit}），暫不支援處理。",
+	"attachment.pendingFull": "⚠ 暫存附件過多（超過 50 個或 100MB），請先發送文字指令處理已暫存的檔案。",
 	"attachment.filesReceived": "已收到檔案: {names}，請告訴我需要做什麼",
 	"attachment.imageReceived": "已收到圖片，請告訴我需要做什麼",
 	"command.sendFileUsage": "用法: `/sendfile <檔案路徑>`",

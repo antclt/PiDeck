@@ -401,6 +401,32 @@ test("an attachment-only message is answered instead of silently dropped", async
 	await harness.bridge.stop();
 });
 
+// #427 追加三-1：语音自带 ASR 转写时按正文处理，有附件时按类型明确回执并指向飞书。
+test("a voice message with an ASR transcript is treated as normal text", async () => {
+	const harness = createHarness({ allowedUsers: ["wxid_me"], batches: [{ msgs: [userMessage({ items: [{ type: 3, voice_item: { text: "帮我看下这个报错" } }] })] }] });
+	await harness.start();
+
+	await waitFor(() => harness.prompts.length === 1, "the voice prompt");
+	assert.ok(harness.prompts[0].message.includes("帮我看下这个报错"), "转写必须作为正文提交给 Agent");
+	await harness.finishPendingRun();
+});
+
+test("voice without a transcript and files are answered with their kind and a Feishu hint", async () => {
+	const voice = createHarness({ allowedUsers: ["wxid_me"], batches: [{ msgs: [userMessage({ items: [{ type: 3 }] })] }] });
+	await voice.start();
+	await waitFor(() => voice.client.calls.sent.length === 1, "the voice notice");
+	assert.ok(voice.client.calls.sent[0].text.includes("收到语音"), "必须点名收到的是语音");
+	await voice.bridge.stop();
+
+	const file = createHarness({ allowedUsers: ["wxid_me"], batches: [{ msgs: [userMessage({ items: [{ type: 4 }] })] }] });
+	await file.start();
+	await waitFor(() => file.client.calls.sent.length === 1, "the file notice");
+	assert.ok(file.client.calls.sent[0].text.includes("收到文件"));
+	assert.ok(file.client.calls.sent[0].text.includes("飞书"), "文件场景必须指路飞书，而不是笼统的「不支持」");
+	assert.equal(file.prompts.length, 0);
+	await file.bridge.stop();
+});
+
 // issue #427：忙时的策略从「丢弃」改成「排队」。旧用例钉的是丢弃行为，随本改动重写。
 test("a second message during a run is queued with an ack and runs after the first settles", async () => {
 	const harness = createHarness({ allowedUsers: ["wxid_me"], batches: [{ msgs: [userMessage({ id: 1, text: "长任务" })] }, { msgs: [userMessage({ id: 2, text: "还在吗" })] }] });

@@ -23,6 +23,7 @@ import { createInitialState, reduceFromPiEvent, markInterrupted, markError, type
 import { renderRunCard } from "./CardRenderer";
 import { buildModelPickerCard, parseModelActionValue } from "./ModelPickerCard";
 import { buildAskCard, normalizeAskOption, parseAskActionValue, parseAskInputValue, tryParseBatchAskEnvelope, type AskOption, type AskUiRequest } from "./AskCard";
+import { MAX_ATTACHMENT_BYTES, PENDING_ATTACHMENT_MAX_BYTES, PENDING_ATTACHMENT_MAX_COUNT, formatAttachmentSize, safeAttachmentFileName } from "./attachmentFiles";
 import { feishuLanguage, feishuT, normalizeFeishuLocale, type FeishuLocale } from "./FeishuI18n";
 import type { AgentManager } from "../pi/AgentManager";
 
@@ -589,8 +590,10 @@ export class FeishuBridge {
 				if (content.file_key) {
 					try {
 						const fileData = await this.downloadFile(messageId, content.file_key);
-						if (fileData.length > 50 * 1024 * 1024) {
-							await this.sendSmartMessage(chatId, feishuT(this.locale, "attachment.fileTooLarge50"));
+						// 单文件 UX 上限 200MB（#427 追加二）：下载硬闸 256MB 在 streamToBuffer 里，
+						// 这层只负责给出「太大不处理」的明确回执。
+						if (fileData.length > MAX_ATTACHMENT_BYTES) {
+							await this.sendSmartMessage(chatId, feishuT(this.locale, "attachment.fileTooLarge", { limit: formatAttachmentSize(MAX_ATTACHMENT_BYTES) }));
 							return;
 						}
 						fileAttachments.push({ fileKey: content.file_key, fileName: content.file_name || `feishu-${content.file_key}`, data: fileData });
@@ -638,13 +641,13 @@ export class FeishuBridge {
 			// ===== 文件/图片 + 文字 → 一起处理；仅文件/图片 → 暂存等指令 =====
 			if (!text && (imageAttachments.length > 0 || fileAttachments.length > 0)) {
 				// 只有附件没有文字 → 存起来等指令；但必须有上界：只发文件不发指令的聊天
-				// 会让每个文件（最大 50MB）的完整 Buffer 无限期驻留内存直到进程重启。
+				// 会让每个文件（最大 200MB）的完整 Buffer 无限期驻留内存直到进程重启。
 				const existing = this.pendingAttachments.get(chatId);
 				const heldCount = existing ? existing.images.length + existing.files.length : 0;
 				const heldBytes = existing ? [...existing.images, ...existing.files].reduce((n, a) => n + a.data.length, 0) : 0;
 				const incomingCount = imageAttachments.length + fileAttachments.length;
 				const incomingBytes = [...imageAttachments, ...fileAttachments].reduce((n, a) => n + a.data.length, 0);
-				if (heldCount + incomingCount > 20 || heldBytes + incomingBytes > 20 * 1024 * 1024) {
+				if (heldCount + incomingCount > PENDING_ATTACHMENT_MAX_COUNT || heldBytes + incomingBytes > PENDING_ATTACHMENT_MAX_BYTES) {
 					await this.sendSmartMessage(chatId, feishuT(this.locale, "attachment.pendingFull"));
 					return;
 				}
@@ -844,6 +847,7 @@ export class FeishuBridge {
 		const imgDir = join(tmpdir(), "pi-feishu-images");
 		mkdirSync(imgDir, { recursive: true });
 		const savedImages: string[] = [];
+		const savedFiles: Array<{ path: string; name: string; size: number }> = [];
 		const images: ImageContent[] = imageAttachments.map((att) => {
 			const ext = att.mediaType.split("/").pop() || "png";
 			const name = `feishu-img-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
@@ -857,8 +861,19 @@ export class FeishuBridge {
 			finalText = finalText ? `${finalText}\n\n[图片已保存到: ${savedImages.join(", ")}]` : `[图片已保存到: ${savedImages.join(", ")}]`;
 		}
 		if (fileAttachments.length > 0) {
-			const names = fileAttachments.map((f) => f.fileName).join(", ");
-			finalText = finalText ? `${finalText}\n\n[附件: ${names}]` : `处理以下文件: ${names}`;
+			// 落盘 + 绝对路径（#427 追加一）：只把文件名拼进 prompt 时，Agent 以为自己拿到了原文，
+			// 实际是零字节——最容易骗人的失败模式。文件写到临时目录，路径随 prompt 交给 Agent，
+			// run 收尾时删除（同图片）。sendPrompt 只收文本+图片，所以这里只给路径文本。
+			const fileDir = join(tmpdir(), "pi-feishu-files");
+			mkdirSync(fileDir, { recursive: true });
+			for (const att of fileAttachments) {
+				const fp = join(fileDir, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeAttachmentFileName(att.fileName)}`);
+				writeFileSync(fp, att.data);
+				savedFiles.push({ path: fp, name: att.fileName, size: att.data.length });
+			}
+			const manifest = savedFiles.map((file) => `- ${file.path}（原名 ${file.name}，${formatAttachmentSize(file.size)}）`).join("\n");
+			const note = `[文件已保存到本地，务必用 Read/文件工具读取原文，禁止只看文件名猜内容]\n${manifest}`;
+			finalText = finalText ? `${finalText}\n\n${note}` : note;
 		}
 
 		const initialState = this.newRunState();
@@ -988,11 +1003,12 @@ export class FeishuBridge {
 			await this.sendSmartMessage(chatId, feishuT(this.locale, "agent.failed"));
 		} finally {
 			this.feishuDrivenRuns.delete(agentId);
-			// 清理本轮图片临时文件：路径已随 prompt 交给 Agent，run 结束（含 processFeishuActions
-			// 的 [SEND_FILE:] 已执行完）后文件不再有用；不删则 pi-feishu-images 目录无限增长。
-			if (savedImages.length > 0) {
+			// 清理本轮附件临时文件：路径已随 prompt 交给 Agent，run 结束（含 processFeishuActions
+			// 的 [SEND_FILE:] 已执行完）后文件不再有用；不删则 pi-feishu-images / pi-feishu-files 无限增长。
+			const cleanupPaths = [...savedImages, ...savedFiles.map((file) => file.path)];
+			if (cleanupPaths.length > 0) {
 				void import("node:fs").then(({ unlink }) => {
-					for (const fp of savedImages) unlink(fp, () => {});
+					for (const fp of cleanupPaths) unlink(fp, () => {});
 				});
 			}
 		}
@@ -2106,11 +2122,12 @@ export class FeishuBridge {
 
 	/**
 	 * 飞书资源（图片/文件）下载的统一字节上界：超限即中止流并抛错。
-	 * 过去 streamToBuffer 无上界整流到内存，文件型 50MiB 拦截又发生在全量下载之后——
+	 * 过去 streamToBuffer 无上界整流到内存，文件型 UX 拦截又发生在全量下载之后——
 	 * 飞书侧一个超大附件就能把主进程内存打爆（与 filesReadContent 无界读同族）。
-	 * 64MiB 覆盖 UX 允许的 50MiB 文件上限；图片路径过去完全没有检查，同样受此闸保护。
+	 * 256MiB 覆盖 UX 允许的 200MiB 单文件上限（#427 追加二，与同类产品 100MB 上限对齐并留余量）；
+	 * 图片路径过去完全没有检查，同样受此闸保护。
 	 */
-	private static readonly MAX_RESOURCE_DOWNLOAD_BYTES = 64 * 1024 * 1024;
+	private static readonly MAX_RESOURCE_DOWNLOAD_BYTES = 256 * 1024 * 1024;
 
 	private async streamToBuffer(result: unknown): Promise<Buffer> {
 		const resp = result as Record<string, unknown>;
