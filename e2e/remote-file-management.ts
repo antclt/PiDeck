@@ -19,12 +19,15 @@ async function openProjectPanel(window: Page, projectPath: string): Promise<void
 }
 
 /** 主目录列表中的条目行（带行菜单按钮，避免与回收站行/下拉项混淆）。 */
+/**
+ * 远端文件行现在与本机文件树共用 `FileTreeNodeRow`：行是 `.file-node`，
+ * 行操作走右键菜单（不再有常驻的「…」按钮）。
+ */
 function entryRow(window: Page, name: string) {
 	return window
-		.locator("li")
-		.filter({ has: window.getByTestId("remote-file-row-menu") })
-		.filter({ hasText: name })
-		.first();
+		.locator(".file-node")
+		.filter({ has: window.locator(".file-node-name", { hasText: name }) })
+		.last();
 }
 
 async function openEntry(window: Page, name: string): Promise<void> {
@@ -32,7 +35,7 @@ async function openEntry(window: Page, name: string): Promise<void> {
 }
 
 async function rowAction(window: Page, name: string, action: "remote-file-row-rename" | "remote-file-row-delete"): Promise<void> {
-	await entryRow(window, name).getByTestId("remote-file-row-menu").click();
+	await entryRow(window, name).locator("button").first().click({ button: "right" });
 	await window.getByTestId(action).click();
 }
 

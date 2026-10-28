@@ -6,6 +6,8 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 const { createRequestGate } = loadTsCommonJs("src/renderer/src/components/session/remoteRequestGate.ts");
 const { sortRemoteEntries } = loadTsCommonJs("src/renderer/src/components/session/remoteProjectEntries.ts");
 const panel = readFileSync("src/renderer/src/components/session/RemoteProjectPanel.tsx", "utf8");
+// 目录读取已下沉到 useRemoteFileTree：代次闸门、listed/error 与「失败清空旧条目」都在那里。
+const tree = readFileSync("src/renderer/src/hooks/useRemoteFileTree.ts", "utf8");
 
 test("切项目/卸载后，旧代次的迟到结果一律作废", () => {
 	const gate = createRequestGate();
@@ -39,23 +41,24 @@ test("目录在前文件在后，同类按名字；不修改入参数组", () =>
 
 test("面板用代次闸门丢弃迟到结果，并在卸载时作废在途请求", () => {
 	assert.match(panel, /createRequestGate/);
-	assert.match(panel, /const gate = gateRef\.current;\s*\n\s*const generation = gate\.begin\(\);/);
-	assert.match(panel, /if \(!gate\.isCurrent\(generation\)\) return;/);
+	// 每个目录各自的代次：同时展开两个目录时，晚到的旧结果不能盖掉新结果。
+	assert.match(tree, /const generation = \(generations\.current\.get\(dir\) \?\? 0\) \+ 1;/);
+	assert.match(tree, /if \(generations\.current\.get\(dir\) !== generation\) return false;/);
 	assert.match(panel, /gateRef\.current\.invalidate\(\)/);
 });
 
 test("失败与空目录分开呈现：error 只在失败时出现，空提示只在列出成功后出现", () => {
 	// 旧实现共用一个 message：列出失败也可能同时显示「这个目录是空的」。
 	assert.match(panel, /const \[error, setError\] = useState<string \| null>\(null\)/);
-	assert.match(panel, /const \[listed, setListed\] = useState\(false\)/);
-	assert.match(panel, /setListed\(false\);/, "a failed listing must not claim to have listed");
-	assert.match(panel, /listed && error === null && entries\.length === 0/);
-	assert.match(panel, /setError\(t\("project\.remote\.requestFailed"\)\)/, "an IPC reject must surface as a retryable failure, not as an empty directory");
+	assert.match(tree, /const \[listed, setListed\] = useState\(false\)/);
+	assert.match(tree, /setListed\(false\);/, "a failed listing must not claim to have listed");
+	assert.match(panel, /tree\.listed && tree\.error === null && tree\.nodes\.length === 0/);
+	assert.match(tree, /setError\("REMOTE_FILE_REQUEST_FAILED"\)/, "an IPC reject must surface as a retryable failure, not as an empty directory");
 });
 
 test("主机未连接与路径错误分开说，消除失败后仍显示旧条目", () => {
-	assert.match(panel, /isNotConnectedCode\(result\.code\) \? t\("project\.remote\.notConnectedHint"\)/);
-	assert.match(panel, /setEntries\(\[\]\);/);
+	assert.match(panel, /isNotConnectedCode\(tree\.error\) \? t\("project\.remote\.notConnectedHint"\)/);
+	assert.match(tree, /setChildrenByDir\(\(previous\) => \(\{ \.\.\.previous, \[dir\]: \[\] \}\)\);/);
 });
 
 test("面板文案键在中英词典里都存在", () => {

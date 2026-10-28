@@ -61,6 +61,13 @@ type FileTreeRowProps = {
 	onDragOverDirChange: (path: string | null) => void;
 	/** 文件树滚动容器：目录子项增量窗口的 IntersectionObserver root。 */
 	scrollRef: RefObject<HTMLDivElement | null>;
+	/**
+	 * 远端树的自定义拖拽类型（缺省走本机 `text/pi-file-path`）。
+	 *
+	 * 远端条目没有本机路径，源数据必须是相对项目根的路径；用独立类型还能让面板的
+	 * drop 处理区分「内部移动」与「从系统拖文件上传」。
+	 */
+	remoteDragType?: string;
 	/** Git 状态查表（IDEA 风格行名着色）：命中带档位（祖先目录可能洗淡）；缺省（非 git 项目/未加载）不上色 */
 	gitStatusOf?: (path: string) => FileTreeGitStatusHit | undefined;
 };
@@ -116,9 +123,10 @@ const FileRow = memo(function FileRow(props: FileTreeRowProps) {
 	const handleDragStart = useCallback(
 		(event: React.DragEvent) => {
 			event.dataTransfer.effectAllowed = "copyMove";
-			writeFileNodeDragPayload(event.dataTransfer, node);
+			if (props.remoteDragType) event.dataTransfer.setData(props.remoteDragType, node.relativePath);
+			else writeFileNodeDragPayload(event.dataTransfer, node);
 		},
-		[node],
+		[node, props.remoteDragType],
 	);
 	return (
 		<div className="file-node">
@@ -164,9 +172,10 @@ const DirectoryRow = memo(function DirectoryRow(props: FileTreeRowProps) {
 	const handleDragStart = useCallback(
 		(event: React.DragEvent) => {
 			event.dataTransfer.effectAllowed = "copyMove";
-			writeFileNodeDragPayload(event.dataTransfer, node);
+			if (props.remoteDragType) event.dataTransfer.setData(props.remoteDragType, node.relativePath);
+			else writeFileNodeDragPayload(event.dataTransfer, node);
 		},
-		[node],
+		[node, props.remoteDragType],
 	);
 	const handleDragOver = useCallback(
 		(event: React.DragEvent) => {
@@ -185,8 +194,8 @@ const DirectoryRow = memo(function DirectoryRow(props: FileTreeRowProps) {
 			event.preventDefault();
 			event.stopPropagation();
 			props.onDragOverDirChange(null);
-			// 内部拖拽移动：优先检查 pi-file-path
-			const sourcePath = event.dataTransfer.getData("text/pi-file-path");
+			// 内部拖拽移动：远端树用自己的类型，本机树走 pi-file-path。
+			const sourcePath = props.remoteDragType ? event.dataTransfer.getData(props.remoteDragType) : event.dataTransfer.getData("text/pi-file-path");
 			if (sourcePath) {
 				if (sourcePath !== nodeKey && props.onMoveFiles) {
 					props.onMoveFiles([sourcePath], nodeKey);
@@ -198,7 +207,7 @@ const DirectoryRow = memo(function DirectoryRow(props: FileTreeRowProps) {
 				props.onDropFiles(nodeKey, event.dataTransfer.files);
 			}
 		},
-		[nodeKey, props.onDropFiles, props.onMoveFiles, props.onDragOverDirChange],
+		[nodeKey, props.onDropFiles, props.onMoveFiles, props.onDragOverDirChange, props.remoteDragType],
 	);
 	const isDragOver = props.dragOverDir === nodeKey;
 	// Git 着色查表：目录行取子树聚合状态（直接父目录实色、更远祖先洗淡）。
@@ -282,6 +291,7 @@ const DirectoryRow = memo(function DirectoryRow(props: FileTreeRowProps) {
 									onDragOverDirChange={props.onDragOverDirChange}
 									scrollRef={props.scrollRef}
 									gitStatusOf={props.gitStatusOf}
+									remoteDragType={props.remoteDragType}
 								/>
 							))}
 							{childWindow.hasMore && <div ref={childWindow.sentinelRef} aria-hidden="true" className="h-px" />}
