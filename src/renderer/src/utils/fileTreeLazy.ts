@@ -66,10 +66,53 @@ export function shouldLoadFullTreeForAtSearch(query: string): boolean {
 	return true;
 }
 
+/**
+ * 项目作用域的文件身份键（v5 W1）：**同一个文件在本机与远端只有一个名字**。
+ *
+ * 之前树的键是两个词汇表：本机节点用绝对路径（`node.path`），远端节点用 `project:…\0…`。
+ * 于是一份状态（展开集、着色键、活跃键）无法在两边通用，功能一跨位置就得写两套判断。
+ * 这里把身份固定为 `(projectId, relativePath)`：与位置无关、与磁盘路径无关、可解析回 target。
+ */
+export function projectFileKey(target: ProjectFileTarget): string {
+	return `project:${target.projectId}\u0000${target.relativePath}`;
+}
+
+const PROJECT_FILE_KEY = /^project:([^\u0000]+)\u0000([\s\S]*)$/;
+
+/** 键 → 读/写目标；不是本模块格式的键返回 undefined（旧版绝对路径键就属这类）。 */
+export function parseFileTreeKey(key: string): ProjectFileTarget | undefined {
+	const matched = PROJECT_FILE_KEY.exec(key);
+	return matched === null ? undefined : { projectId: matched[1], relativePath: matched[2] };
+}
+
 export function fileTreeNodeKey(node: FileTreeNode): string {
-	if (node.path) return node.path;
-	if (node.target) return `project:${node.target.projectId}\u0000${node.target.relativePath}`;
-	return node.displayPath ?? node.relativePath;
+	// 只认 project 作用域身份：绝不退回本机绝对路径（那正是「同一个文件两个名字」的来源）。
+	if (node.target) return projectFileKey(node.target);
+	return `relative:${node.relativePath}`;
+}
+
+/**
+ * 展开集的旧键迁移：旧版本机键是绝对路径，用树里节点的 `path` 作别名换成新键。
+ *
+ * 为什么要迁移而不是直接清空：展开态是用户手工攒出来的，丢掉等于每次升级都把树全部收起。
+ * 迁移只对「当前树里看得见的目录」生效，深层目录会在它们被父层载入后的一轮内自然补上，
+ * 所以不需要知道项目根目录，也不需要额外扫盘。
+ */
+export function migrateExpandedDirKeys(nodes: FileTreeNode[], keys: ReadonlySet<string>): { keys: Set<string>; changed: boolean } {
+	let changed = false;
+	const next = new Set<string>();
+	for (const key of keys) next.add(key);
+	const walk = (list: FileTreeNode[]) => {
+		for (const node of list) {
+			if (node.type === "directory" && node.path !== undefined && node.path !== fileTreeNodeKey(node) && next.delete(node.path)) {
+				next.add(fileTreeNodeKey(node));
+				changed = true;
+			}
+			if (node.children?.length) walk(node.children);
+		}
+	};
+	walk(nodes);
+	return { keys: changed ? next : (keys as Set<string>), changed };
 }
 
 export function fileTreeNodeDisplayPath(node: FileTreeNode): string {

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import type { Project, ProjectFileTarget, FileTreeNode, GitBranchInfo, WorktreeEntry, SessionSummary, SessionRecord } from "../../../shared/types";
 import type { SessionLoadState } from "../atoms/session-atoms";
 import { sessionRecordToSummary } from "../atoms/session-selectors";
-import { loadProjectFileTree } from "../utils/fileTreeLazy";
+import { loadProjectFileTree, parseFileTreeKey } from "../utils/fileTreeLazy";
 import { createKeyedWatchdog } from "../utils/catalogLoadWatchdog";
 import { isLocalProject, isRemoteProject } from "../../../shared/projectLocation";
 import { useFileTreeContentState } from "./files/useFileTreeContentState";
@@ -358,7 +358,12 @@ export function useProjectSync(input: UseProjectSyncInput) {
 				() => api.files.list({ projectId, relativePath: "" }, { maxDepth: 0 }),
 				expandedDirs,
 				() => isFileTreeRequestCurrent(generation, projectId),
-				(directory) => (typeof directory === "string" ? api.files.list(projectId, { maxDepth: 0, directory }) : api.files.list(directory, { maxDepth: 0 })),
+				// 展开集里存的是项目作用域键（W1）：先解析回 target；旧版绝对路径键仍走 directory 旧路径。
+				(directory) => {
+					const parsed = typeof directory === "string" ? parseFileTreeKey(directory) : directory;
+					if (parsed !== undefined) return api.files.list(parsed, { maxDepth: 0 });
+					return api.files.list(projectId, { maxDepth: 0, directory: directory as string });
+				},
 			);
 			if (!next) return;
 			setFiles(next);

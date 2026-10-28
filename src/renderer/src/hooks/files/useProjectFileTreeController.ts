@@ -3,7 +3,7 @@ import { desktopApi as api } from "../../desktopApi";
 import { t } from "../../i18n";
 import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../../../shared/fileTree";
 import type { FileTreeNode } from "../../../../shared/types";
-import { fileTreeNodeKey, findDirectoryNodeByPath, findLoadedDirectory, type FileTreeListTarget, loadProjectFileTree, markFileTreeLoadFailed, mergeFileTreeChildren } from "../../utils/fileTreeLazy";
+import { fileTreeNodeKey, findDirectoryNodeByPath, findLoadedDirectory, type FileTreeListTarget, loadProjectFileTree, markFileTreeLoadFailed, mergeFileTreeChildren, migrateExpandedDirKeys, parseFileTreeKey } from "../../utils/fileTreeLazy";
 import { legacyAgentIdsForProject, loadExpandedDirsFromStorage, saveExpandedDirsToStorage } from "../../utils/expandedDirsPersistence";
 import type { AgentTab } from "../../../../shared/types";
 
@@ -90,6 +90,21 @@ export function useProjectFileTreeController({ files, setFiles, refreshFiles, be
 	const saveExpandedDirs = useCallback((projectId: string, dirs: Set<string>) => saveExpandedDirsToStorage(projectId, dirs), []);
 	const loadExpandedDirs = useCallback((projectId: string) => loadExpandedDirsFromStorage(projectId, legacyAgentIdsForProject(agentsRef.current, projectId)), [agentsRef]);
 
+	/**
+	 * 展开集的旧键迁移（W1）：旧版本机项目的展开集存的是绝对路径，换成项目作用域键。
+	 *
+	 * 为什么要保留而不是直接清空：展开态是用户手工攒的，丢掉等于每次升级都把树全收起。迁移只用
+	 * 当前树里可见的目录做别名，所以不需要项目根；深层目录会在父层载入后的一轮内自然补上。
+	 * 幂等：没有可迁移的键时不写盘、不 setState。
+	 */
+	useEffect(() => {
+		const migrated = migrateExpandedDirKeys(files, expandedDirsRef.current);
+		if (!migrated.changed) return;
+		expandedDirsRef.current = migrated.keys;
+		setExpandedDirs(migrated.keys);
+		if (activeProjectId) saveExpandedDirs(activeProjectId, migrated.keys);
+	}, [files, activeProjectId, saveExpandedDirs]);
+
 	// 只跟项目：切 tab / agent 数量变化不得清空展开目录，也不得整棵重扫文件树。
 	// 先立刻清空旧树，并抬高代次，避免大仓库扫描期间右侧仍显示上一个项目（#159）。
 	useEffect(() => {
@@ -175,7 +190,7 @@ export function useProjectFileTreeController({ files, setFiles, refreshFiles, be
 			pending.sort((left, right) => left.length - right.length);
 			for (const directory of pending) {
 				// 有 target 的节点按 dev 契约直接以 target 为第一参，legacy 节点才回退到路径形态。
-				const target: FileTreeListTarget = findDirectoryNodeByPath(filesRef.current, directory)?.target ?? directory;
+				const target: FileTreeListTarget = findDirectoryNodeByPath(filesRef.current, directory)?.target ?? parseFileTreeKey(directory) ?? directory;
 				try {
 					const children = await listSubdirectory(projectId, target);
 					if (!isFileTreeRequestCurrent(generation, projectId)) return true;
@@ -205,7 +220,7 @@ export function useProjectFileTreeController({ files, setFiles, refreshFiles, be
 			let children: FileTreeNode[];
 			try {
 				// 与 restoreExpandedDirs 同口径：target 节点直接以 target 为第一参。
-				children = await listSubdirectory(projectId, findDirectoryNodeByPath(filesRef.current, current)?.target ?? current);
+				children = await listSubdirectory(projectId, findDirectoryNodeByPath(filesRef.current, current)?.target ?? parseFileTreeKey(current) ?? current);
 			} catch {
 				// 超大目录 / 权限问题：标记当前层「加载失败」，避免展开占位「加载中...」永久盖住文件名；
 				// 保留已加载部分（已 merge 的上层不受影响），用户重新点开可自然重试。

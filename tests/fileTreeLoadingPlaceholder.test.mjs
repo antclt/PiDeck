@@ -17,19 +17,25 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { markFileTreeLoadFailed, mergeFileTreeChildren } = loadTsCommonJs("src/renderer/src/utils/fileTreeLazy.ts");
+const { markFileTreeLoadFailed, mergeFileTreeChildren, fileTreeNodeKey } = loadTsCommonJs("src/renderer/src/utils/fileTreeLazy.ts");
+
+/** 键是项目作用域身份（W1）：目录节点的 `path` 仍在，但不再当键用。 */
+const PROJECT = "p1";
+const relOf = (path) => path.replace(/^\/p\//, "");
+const targetOf = (path) => ({ projectId: PROJECT, relativePath: relOf(path) });
+const k = (node) => fileTreeNodeKey(node);
 
 function dir(name, path, children, hasChildren = true) {
-	return { name, path, relativePath: name, type: "directory", children, hasChildren };
+	return { name, path, relativePath: relOf(path), target: targetOf(path), type: "directory", children, hasChildren };
 }
 
 function file(name, path) {
-	return { name, path, relativePath: name, type: "file" };
+	return { name, path, relativePath: relOf(path), target: targetOf(path), type: "file" };
 }
 
 test("markFileTreeLoadFailed 在顶层目录打标且不触碰 children", () => {
 	const tree = [dir("src", "/p/src")];
-	const next = markFileTreeLoadFailed(tree, "/p/src");
+	const next = markFileTreeLoadFailed(tree, k(tree[0]));
 	assert.equal(next[0].hasChildren, false);
 	// children 保持 undefined（未加载），占位分支因此不再成立。
 	assert.equal(next[0].children, undefined);
@@ -39,7 +45,7 @@ test("markFileTreeLoadFailed 在顶层目录打标且不触碰 children", () => 
 
 test("markFileTreeLoadFailed 递归命中嵌套目录", () => {
 	const tree = [dir("src", "/p/src", [dir("deep", "/p/src/deep")])];
-	const next = markFileTreeLoadFailed(tree, "/p/src/deep");
+	const next = markFileTreeLoadFailed(tree, k(tree[0].children[0]));
 	assert.equal(next[0].children[0].hasChildren, false);
 	// 父层不受影响。
 	assert.equal(next[0].hasChildren, true);
@@ -47,7 +53,8 @@ test("markFileTreeLoadFailed 递归命中嵌套目录", () => {
 
 test("markFileTreeLoadFailed 目录不存在时节点引用原样保留", () => {
 	const tree = [dir("src", "/p/src", [file("a.ts", "/p/src/a.ts")])];
-	const next = markFileTreeLoadFailed(tree, "/p/other");
+	// 任意不存在的键：不命中任何节点。
+	const next = markFileTreeLoadFailed(tree, "project:p1\u0000other");
 	// map 重建数组但未命中节点复用引用（避免无谓重建，与 compactMiddlePackages 同约定）。
 	assert.equal(next[0], tree[0]);
 	assert.equal(next.length, 1);
@@ -56,10 +63,10 @@ test("markFileTreeLoadFailed 目录不存在时节点引用原样保留", () => 
 test("打标后重新 merge 成功结果可恢复（重试入口语义）", () => {
 	let tree = [dir("src", "/p/src")];
 	// 第一次展开失败 → 打标
-	tree = markFileTreeLoadFailed(tree, "/p/src");
+	tree = markFileTreeLoadFailed(tree, k(tree[0]));
 	assert.equal(tree[0].hasChildren, false);
 	// 用户重试成功 → children 写入且 hasChildren 恢复为真实值
-	tree = mergeFileTreeChildren(tree, "/p/src", [file("a.ts", "/p/src/a.ts")]);
+	tree = mergeFileTreeChildren(tree, k(tree[0]), [file("a.ts", "/p/src/a.ts")]);
 	assert.equal(tree[0].hasChildren, true);
 	assert.equal(tree[0].children.length, 1);
 });
