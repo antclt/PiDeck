@@ -18,8 +18,12 @@ const CONVERTED_IPC = [
 	"src/main/ipc/remoteProjectIpc.ts",
 	"src/main/ipc/remoteProjectTransferIpc.ts",
 	"src/main/ipc/remoteProjectCreateIpc.ts",
+	"src/main/ipc/remoteProjectTransferIpc.ts",
 	"src/main/ipc/wslHostIpc.ts",
 ];
+
+/** 已迁到 Op<T> 的结果类型所在文件（新增域时往这里加，不是往上面加）。 */
+const CONVERTED_TYPES = ["src/shared/types/remoteFiles.ts", "src/shared/types/remoteTrust.ts"];
 
 test("已转换的域不得再自带 codeOf，必须用 shared/op 的那一份", () => {
 	for (const path of CONVERTED_IPC) {
@@ -34,10 +38,16 @@ test("已转换的域不得再自带 codeOf，必须用 shared/op 的那一份",
 });
 
 test("已转换的结果类型不再出现「扁平失败分支」", () => {
-	for (const path of ["src/shared/types/remoteFiles.ts", "src/shared/types/remoteTrust.ts"]) {
+	for (const path of CONVERTED_TYPES) {
 		const text = read(path);
 		assert.equal(/\{ ok: false; code: string \}/.test(text), false, `${path} 还有未转换的扁平失败分支`);
 		assert.match(text, /\bOp</, `${path} 的结果类型应建立在 Op<T> 上`);
+	}
+	// project / transfer 域在 remoteHost.ts 里，同文件还留着未迁移的 hosts 与 sessions 类型，
+	// 所以按「具体结果类型」断言，而不是整文件。
+	const remoteHostTypes = read("src/shared/types/remoteHost.ts");
+	for (const name of ["RemoteProjectEnrollResult", "RemoteProjectEnrollAnswerResult", "RemoteProjectCreateAnswerResult", "RemoteProjectListResult", "RemoteProjectReadResult", "RemoteProjectSearchResult", "RemoteProjectRootStatusResult", "RemoteProjectDownloadResult", "RemoteProjectUploadResult"]) {
+		assert.match(remoteHostTypes, new RegExp(`export type ${name} = Op<`), `${name} 必须是 Op<T>`);
 	}
 });
 
@@ -49,7 +59,7 @@ test("闭集与判据只有一处定义（同义实现在别处再出现会立�
 	};
 	for (const [symbol, owner] of Object.entries(owners)) {
 		const definition = new RegExp(`export (?:const|function) ${symbol}\\b`);
-		for (const path of CONVERTED_IPC.concat(["src/shared/types/remoteFiles.ts", "src/shared/types/remoteTrust.ts", "src/main/ipc/remoteHostInputValidation.ts"])) {
+		for (const path of CONVERTED_IPC.concat(CONVERTED_TYPES).concat(["src/main/ipc/remoteHostInputValidation.ts"])) {
 			assert.equal(definition.test(read(path)), false, `${path} 不得自己定义 ${symbol}`);
 		}
 		assert.match(read(owner), definition, `${owner} 必须定义 ${symbol}`);
