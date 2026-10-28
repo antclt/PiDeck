@@ -17,6 +17,7 @@ import { attachProjectPresence } from "../projects/projectPresence";
 import { removeProjectWithSessions } from "../projects/projectRemoval";
 import { consumeUserDataNameMigrationNotice } from "../projects/userDataNameMigration";
 import { registerProjectResourceIpc } from "./projectResourceIpc";
+import { createProjectGitHandler } from "./gitProjectHandlers";
 import { normalizeSelectedWslProjectPath, toWindowsHostPath, type WslEnvironment } from "../wsl/WslPaths";
 import { createWslHostStore } from "../wsl/WslHostStore";
 
@@ -38,6 +39,7 @@ export type ProjectsIpcDeps = {
 };
 
 export function registerProjectsIpc({ projectStore, settingsStore, gitService, worktreeService, agentManager, appLogger, projectResourceManager, sessionCatalog, mainCopy, getMainWindow, resolveWslEnvironment, userDataDir }: ProjectsIpcDeps): void {
+	const handleProjectGit = createProjectGitHandler(ipcMain, projectStore, settingsStore);
 	// Windows Node 只能 stat/打开主机路径；WSL 项目在 store 里可能是 Linux 路径。远端项目不能到这里。
 	const resolveProjectHostPath = (project: LocalProject) => {
 		const settings = settingsStore.get();
@@ -187,7 +189,7 @@ export function registerProjectsIpc({ projectStore, settingsStore, gitService, w
 		return projectStore.listWorktreeChildren(parentId);
 	});
 
-	ipcMain.handle(ipcChannels.projectsToggleWorktreeEnabled, async (_event, projectId: string) => {
+	handleProjectGit(ipcChannels.projectsToggleWorktreeEnabled, async (_event, projectId: string) => {
 		const existing = projectStore.get(projectId);
 		if (!existing) throw new Error(`Project not found: ${projectId}`);
 		// worktree 工作区模式依赖本机 Git：远端项目明确拒绝（Phase 5 再按 capability 矩阵评估）。

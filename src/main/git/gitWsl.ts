@@ -3,6 +3,7 @@
 import { tmpdir } from "node:os";
 import { DEFAULT_GIT_TIMEOUT_MS } from "./gitProcess.ts";
 import { decodeWslOutput, getWslExe } from "../wsl/wslExe.ts";
+import type { WslGitIdentity } from "./gitWslContext.ts";
 import { parseWslUncPath, toWindowsHostPath, toWslLinuxPath } from "../wsl/WslPaths.ts";
 
 /**
@@ -16,7 +17,7 @@ import { parseWslUncPath, toWindowsHostPath, toWslLinuxPath } from "../wsl/WslPa
  *    与发行版内 git 交替使用会让同一仓库反复出现「整树改动」。
  * 因此当 cwd 是 WSL UNC 路径时，改在发行版内执行：
  *
- *     wsl.exe -d <distro> -e /bin/sh -c <cd 守卫> pideck <linuxCwd> /usr/bin/env [K=V ...] git <args...>
+ *     wsl.exe -d <distro> [-u <user>] -e /bin/sh -c <cd 守卫> pideck <linuxCwd> /usr/bin/env [K=V ...] git <args...>
  *
  * 本模块只做「把宿主调用翻译成 WSL 调用」的纯计算（argv 改写、路径/env 翻译、输出回译），
  * 不 spawn 进程，因此可完整单测；真正的执行在 gitRun.ts。
@@ -192,6 +193,8 @@ export type GitSpawnPlanOptions = {
 	env?: NodeJS.ProcessEnv;
 	/** 宿主 git 命令（用户配置优先），仅宿主分支使用。 */
 	nativeCommand?: string;
+	/** 项目指定的发行版和用户；未指定时保留发行版默认用户。 */
+	wslIdentity?: WslGitIdentity;
 	/** 平台，仅测试注入用。 */
 	platform?: NodeJS.Platform;
 	/** wsl.exe 路径，仅测试注入用；默认走 wslExe 的解析结果。 */
@@ -210,11 +213,16 @@ export function planGitSpawn(args: string[], options: GitSpawnPlanOptions): GitS
 		const command = options.nativeCommand ?? "git";
 		return { command, args, cwd: options.cwd, target: null, env: options.env, display: `${command} ${args.join(" ")}` };
 	}
+	const identity = options.wslIdentity;
+	if (identity) {
+		if (!identity.distro || !/^[A-Za-z_][A-Za-z0-9._-]{0,31}$/u.test(identity.user)) throw new Error("INVALID_WSL_GIT_IDENTITY");
+		toWslLinuxPath(options.cwd, identity);
+	}
 	const command = options.wslCommand ?? getWslExe().command;
 	const gitArgs = toWslGitArgs(args, target);
 	return {
 		command,
-		args: buildWslGitArgs(target, gitArgs, toWslGitEnv(options.env, target)),
+		args: buildWslGitArgs(target, gitArgs, toWslGitEnv(options.env, target), identity?.user),
 		cwd: tmpdir(),
 		target,
 		env: options.env,
@@ -224,6 +232,6 @@ export function planGitSpawn(args: string[], options: GitSpawnPlanOptions): GitS
 }
 
 /** 组装 wsl.exe 的完整 argv（`-e` 之后的项原样传给 Linux 进程，`$0` 位置放占位名）。 */
-export function buildWslGitArgs(target: WslGitTarget, gitArgs: string[], envArgs: string[]): string[] {
-	return ["-d", target.distro, "-e", "/bin/sh", "-c", WSL_GIT_CD_GUARD, "pideck", target.linuxCwd, "/usr/bin/env", ...envArgs, "git", ...gitArgs];
+export function buildWslGitArgs(target: WslGitTarget, gitArgs: string[], envArgs: string[], user?: string): string[] {
+	return ["-d", target.distro, ...(user ? ["-u", user] : []), "-e", "/bin/sh", "-c", WSL_GIT_CD_GUARD, "pideck", target.linuxCwd, "/usr/bin/env", ...envArgs, "git", ...gitArgs];
 }

@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 // Node type stripping 直接加载，extensionless 相对 import 在 Node ESM 下解析不到。
 import { killProcessTree, runGit as spawnGit, type RunGitOptions } from "./gitProcess.ts";
 import { currentGitExecutable } from "./gitExecutable.ts";
+import { currentWslGitIdentity } from "./gitWslContext.ts";
 import { decodeWslGitStderr, decodeWslGitStdout, planGitSpawn, resolveWslGitTarget, resolveWslGitTimeout, toHostGitOutputPath, type GitSpawnPlan } from "./gitWsl.ts";
 
 /**
@@ -50,7 +51,7 @@ const WSL_GIT_MAX_BUFFER = 16 * 1024 * 1024;
 
 /** 执行一个 git 读类命令（execFile 语义）。 */
 export async function execGit(args: string[], options: ExecGitOptions): Promise<{ stdout: string; stderr: string }> {
-	const plan = planGitSpawn(args, { cwd: options.cwd, env: options.env, nativeCommand: currentGitExecutable() });
+	const plan = planGitSpawn(args, { cwd: options.cwd, env: options.env, nativeCommand: currentGitExecutable(), wslIdentity: currentWslGitIdentity() });
 	if (!plan.target) {
 		try {
 			const { stdout, stderr } = await execFileAsync(plan.command, plan.args, {
@@ -85,7 +86,7 @@ function toGitExecError(error: unknown): unknown {
 
 /** 执行一个 git 命令（spawn 语义：进程树 kill、超时兜底、stdin 通道）。 */
 export function runGitCommand(args: string[], options: RunGitOptions): Promise<{ stdout: string; stderr: string }> {
-	const plan = planGitSpawn(args, { cwd: options.cwd, env: options.env, nativeCommand: currentGitExecutable() });
+	const plan = planGitSpawn(args, { cwd: options.cwd, env: options.env, nativeCommand: currentGitExecutable(), wslIdentity: currentWslGitIdentity() });
 	if (!plan.target) {
 		return spawnGit(plan.args, { ...options, cwd: plan.cwd }, plan.command);
 	}
