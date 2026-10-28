@@ -52,8 +52,12 @@ export class AcpUpdatePipeline {
 	async handleSessionUpdate(runtime: AcpAgentRuntime, notification: AcpRpcNotification): Promise<void> {
 		if (runtime.status === "closed" || !this.host.isTracked(runtime.tab.id) || notification.method !== "session/update") return;
 		if (notification.params?.sessionId !== runtime.acpSessionId) return;
-		// 回合中收到任何 update 都刷新活跃时间：stall 看门狗只关心全静默。
-		if (runtime.turnActive) runtime.lastUpdateAt = Date.now();
+		// 回合中收到任何 update 都刷新活跃时间：stall 看门狗只关心全静默；
+		// 同时顺延回合兑底超时截止——有产出就证明 agent 还活着，长回合不应被总时长误杀。
+		if (runtime.turnActive) {
+			runtime.lastUpdateAt = Date.now();
+			runtime.turnDeadlineRefresh?.();
+		}
 		const rawUpdate = notification.params.update;
 		if (!rawUpdate || typeof rawUpdate !== "object" || !("sessionUpdate" in rawUpdate) || typeof rawUpdate.sessionUpdate !== "string") return;
 		const update = rawUpdate as AcpSessionUpdate;

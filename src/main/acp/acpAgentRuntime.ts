@@ -48,6 +48,10 @@ export type AcpAgentRuntime = {
 	stallTimer: NodeJS.Timeout | null;
 	/** 最近一次 session/update 或回合派发的时间戳,stall 判定基准。 */
 	lastUpdateAt: number;
+	/** 回合兑底超时的滚动刷新句柄：session/prompt 在途时由连接层布防，回合内每有进展
+	 *  （session/update、挂起审批）就顺延截止——超时口径因此是「无进展静默上限」而非
+	 *  总时长硬上限，长但健康的回合不会被误杀；回合结算/stop/连接死亡统一置空。 */
+	turnDeadlineRefresh: (() => void) | null;
 	/** 在途工具调用 id 集：tool_call 开始入集，tool_call_update 终态出集（AcpUpdatePipeline 维护）。
 	 *  stall 看门狗把「有在途工具调用」视作合法等待（同挂起审批）：长命令 started→completed
 	 *  之间可长时间无流式输出，不算静默；回合各收口点清空，防跨回合泄漏成永久豁免。 */

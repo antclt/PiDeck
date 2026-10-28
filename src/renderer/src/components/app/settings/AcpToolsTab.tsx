@@ -14,6 +14,7 @@ import { Button } from "../../ui-shadcn/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../../ui-shadcn/collapsible";
 import { Input } from "../../ui-shadcn/input";
 import { Textarea } from "../../ui-shadcn/textarea";
+import { ACP_STALL_TIMEOUT_DEFAULT_MS, ACP_STALL_TIMEOUT_SECONDS, ACP_TURN_TIMEOUT_DEFAULT_MS, ACP_TURN_TIMEOUT_MINUTES, acpStallTimeoutPatch, acpStallTimeoutText, acpTurnTimeoutPatch, acpTurnTimeoutText } from "./acpTimeoutInput";
 import { cn } from "../../../lib/utils";
 
 /** 草稿行 = IPC 输入形态:id 空表示新增行,保存时由主进程分配并返回;draftKey 是纯渲染用本地标识(React key/折叠态跟踪),不入盘。 */
@@ -303,6 +304,7 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 							{saving ? t("common.saving") : t("common.save")}
 						</Button>
 					</div>
+					<AcpTimeoutSettings />
 				</>
 			)}
 			{error ? <p className="text-destructive text-xs">{error}</p> : null}
@@ -313,4 +315,148 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 /** 脏标记投影:参数顺序无关(重排行不算脏),字段稳定序列化即可;入参放宽到字段子集,已存表投影无需补 draftKey。 */
 function serializeRows(rows: Array<Pick<AcpToolRow, "id" | "name" | "command" | "args" | "envText">>): string {
 	return JSON.stringify(rows.map((row) => ({ id: row.id ?? "", name: row.name, command: row.command, args: [...row.args].sort(), envText: row.envText })));
+}
+
+/**
+ * 超时保护：回合无进展兑底（acpPromptTurnTimeoutMs）与完全静默判定（acpPromptStallTimeoutMs）。
+ *
+ * 两项都即时写盘（同总开关，不进弹框脏标记）：回合派发时实时读 settings，所以改完**下一个回合**就生效，
+ * 不需要重启（手动改 settings.json 才需要，因为 SettingsStore 只在启动 load）。
+ * 回合超时的语义是「无进展上限」：回合内有 session/update 或挂起审批就自动顺延，
+ * 因此调大不会让卡死的会话一直挂着，只是放宽真静默的容忍度。
+ */
+function AcpTimeoutSettings() {
+	const [turnDraft, setTurnDraft] = useState<string>("");
+	// 已落盘的毫秒值：非法输入/写盘失败都回退到它，避免输入框停在用户以为生效的错值上。
+	const [turnSaved, setTurnSaved] = useState<number>(ACP_TURN_TIMEOUT_DEFAULT_MS);
+	const [stallDraft, setStallDraft] = useState<string>("");
+	const [stallSaved, setStallSaved] = useState<number>(ACP_STALL_TIMEOUT_DEFAULT_MS);
+	const [error, setError] = useState<string | undefined>();
+
+	useEffect(() => {
+		let cancelled = false;
+		void desktopApi.settings
+			.get()
+			.then((settings) => {
+				if (cancelled) return;
+				// 缺省键 = 未自定义，输入框就显示生效中的代码默认值；用户不改不会写盘。
+				setTurnSaved(settings.acpPromptTurnTimeoutMs ?? ACP_TURN_TIMEOUT_DEFAULT_MS);
+				setStallSaved(settings.acpPromptStallTimeoutMs ?? ACP_STALL_TIMEOUT_DEFAULT_MS);
+				setTurnDraft(acpTurnTimeoutText(settings.acpPromptTurnTimeoutMs));
+				setStallDraft(acpStallTimeoutText(settings.acpPromptStallTimeoutMs));
+			})
+			.catch(() => {
+				if (cancelled) return;
+				setTurnDraft(acpTurnTimeoutText(undefined));
+				setStallDraft(acpStallTimeoutText(undefined));
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	const commitTurn = useCallback(
+		async (raw: string) => {
+			const patch = acpTurnTimeoutPatch(raw);
+			if (!patch) {
+				setTurnDraft(acpTurnTimeoutText(turnSaved));
+				setError(t("acp.timeoutInvalid", { min: ACP_TURN_TIMEOUT_MINUTES.min, max: ACP_TURN_TIMEOUT_MINUTES.max }));
+				return;
+			}
+			if (patch.acpPromptTurnTimeoutMs === turnSaved) {
+				setTurnDraft(acpTurnTimeoutText(turnSaved));
+				setError(undefined);
+				return;
+			}
+			try {
+				await desktopApi.settings.update(patch);
+				setTurnSaved(patch.acpPromptTurnTimeoutMs ?? ACP_TURN_TIMEOUT_DEFAULT_MS);
+				setTurnDraft(acpTurnTimeoutText(patch.acpPromptTurnTimeoutMs));
+				setError(undefined);
+			} catch (cause) {
+				setTurnDraft(acpTurnTimeoutText(turnSaved));
+				setError(t("acp.timeoutSaveFailed", { message: cause instanceof Error ? cause.message : String(cause) }));
+			}
+		},
+		[turnSaved],
+	);
+
+	const commitStall = useCallback(
+		async (raw: string) => {
+			const patch = acpStallTimeoutPatch(raw);
+			if (!patch) {
+				setStallDraft(acpStallTimeoutText(stallSaved));
+				setError(t("acp.timeoutInvalid", { min: ACP_STALL_TIMEOUT_SECONDS.min, max: ACP_STALL_TIMEOUT_SECONDS.max }));
+				return;
+			}
+			if (patch.acpPromptStallTimeoutMs === stallSaved) {
+				setStallDraft(acpStallTimeoutText(stallSaved));
+				setError(undefined);
+				return;
+			}
+			try {
+				await desktopApi.settings.update(patch);
+				setStallSaved(patch.acpPromptStallTimeoutMs ?? ACP_STALL_TIMEOUT_DEFAULT_MS);
+				setStallDraft(acpStallTimeoutText(patch.acpPromptStallTimeoutMs));
+				setError(undefined);
+			} catch (cause) {
+				setStallDraft(acpStallTimeoutText(stallSaved));
+				setError(t("acp.timeoutSaveFailed", { message: cause instanceof Error ? cause.message : String(cause) }));
+			}
+		},
+		[stallSaved],
+	);
+
+	return (
+		<section className="flex flex-col gap-2">
+			<SectionHeading title={t("acp.timeoutTitle")} description={t("acp.timeoutDescription")} />
+			<div className="flex flex-col gap-3">
+				<label className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+					<span className="flex min-w-0 flex-col gap-0.5">
+						<span className="text-control font-medium text-foreground">{t("acp.timeoutTurnLabel")}</span>
+						<span className="text-caption leading-relaxed text-muted-foreground">{t("acp.timeoutTurnDescription")}</span>
+					</span>
+					<span className="flex items-center gap-1.5">
+						<Input
+							type="number"
+							inputMode="numeric"
+							min={ACP_TURN_TIMEOUT_MINUTES.min}
+							max={ACP_TURN_TIMEOUT_MINUTES.max}
+							className="w-20 text-right"
+							value={turnDraft}
+							onChange={(event) => setTurnDraft(event.target.value)}
+							onBlur={() => void commitTurn(turnDraft)}
+							onKeyDown={(event) => {
+								if (event.key === "Enter") event.currentTarget.blur();
+							}}
+						/>
+						<span className="text-micro text-muted-foreground">{t("acp.timeoutUnitMinutes")}</span>
+					</span>
+				</label>
+				<label className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+					<span className="flex min-w-0 flex-col gap-0.5">
+						<span className="text-control font-medium text-foreground">{t("acp.timeoutStallLabel")}</span>
+						<span className="text-caption leading-relaxed text-muted-foreground">{t("acp.timeoutStallDescription")}</span>
+					</span>
+					<span className="flex items-center gap-1.5">
+						<Input
+							type="number"
+							inputMode="numeric"
+							min={ACP_STALL_TIMEOUT_SECONDS.min}
+							max={ACP_STALL_TIMEOUT_SECONDS.max}
+							className="w-20 text-right"
+							value={stallDraft}
+							onChange={(event) => setStallDraft(event.target.value)}
+							onBlur={() => void commitStall(stallDraft)}
+							onKeyDown={(event) => {
+								if (event.key === "Enter") event.currentTarget.blur();
+							}}
+						/>
+						<span className="text-micro text-muted-foreground">{t("acp.timeoutUnitSeconds")}</span>
+					</span>
+				</label>
+			</div>
+			{error ? <p className="text-destructive text-xs">{error}</p> : null}
+		</section>
+	);
 }

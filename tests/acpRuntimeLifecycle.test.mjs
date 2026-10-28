@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createStore } from "jotai/vanilla";
+import { setTimeout as sleep } from "node:timers/promises";
 import { harness, sessionUpdate, waitFor } from "./helpers/acpAgentHarness.mjs";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
@@ -112,4 +113,62 @@ test("standard ACP state payload merges into the canonical session atoms without
 	assert.equal(state.modelName, "Gemini CLI");
 	assert.equal(state.isTurnActive, false);
 	assert.equal(store.get(atoms.sessionRuntimeByIdAtom)["deck-2"], undefined);
+});
+
+// 挂起审批是 agent 在等用户，不是卡死：回合兑底截止在审批期间必须持续顺延
+// （否则用户离开键盘超过兑底时长，回到页面时回合已因「超时」被掐，而这与实测报告的体验完全背离）。
+test("a pending approval keeps the turn alive past the turn timeout", async (t) => {
+	const { manager, createAgent, events, lastProc } = harness(t, { handler: basicHandler }, { promptTurnTimeoutMs: 1_200, promptStallTimeoutMs: 600 });
+	const tab = await createAgent();
+	const sending = manager.sendPrompt({ agentId: tab.id, message: "Question" });
+	await waitFor(() => lastProc().methodFrames("session/prompt").length === 1);
+	const cli = lastProc();
+	cli.writeFromCli({ jsonrpc: "2.0", id: "approval", method: "session/request_permission", params: { sessionId: "session-1", toolCall: { toolCallId: "call" }, options: [{ optionId: "once", name: "Allow", kind: "allow_once" }] } });
+	await waitFor(() => events.uiRequests.some((event) => event.method === "select"));
+	await sleep(1_500);
+	assert.equal((await manager.getRuntimeState(tab.id)).isTurnActive, true, "waiting on the user must not be mistaken for a wedged turn");
+	const request = events.uiRequests.find((event) => event.method === "select");
+	assert.equal((await manager.sendUIResponse(tab.id, request.requestId, { type: "select", value: "Allow" })).accepted, true);
+	// 作答后继续产出：静默基准必须在审批期间被刷新，否则超过 stall 阈值才作答时
+	// 下一 tick 会立刻判 stall 并取消回合（存量隐患，与本次放宽同属「审批是合法等待」）。
+	sessionUpdate(cli.writeFromCli, "session-1", { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "running the approved tool" } });
+	cli.writeFromCli({ jsonrpc: "2.0", id: cli.methodFrames("session/prompt")[0].id, result: { stopReason: "end_turn" } });
+	const result = await sending;
+	assert.equal(result.accepted, true, `approval wait must not fail the turn: ${JSON.stringify(result)}`);
+});
+
+// 实测故障的直接回归：#414 的回合兑底超时旧口径是「单回合总时长硬上限」，把连续产出 10 分钟的
+// 健康长回合在墙钟到点时砍断（归档里该回合有 283 条 session/update，一直流到最后）。
+// 新口径是「无进展静默上限」：回合内有产出就顺延截止。
+test("a turn that keeps streaming updates outlives the configured turn timeout", async (t) => {
+	const { manager, createAgent, lastProc } = harness(t, { handler: basicHandler }, { promptTurnTimeoutMs: 80, promptStallTimeoutMs: 5_000 });
+	const tab = await createAgent();
+	const sending = manager.sendPrompt({ agentId: tab.id, message: "Long task" });
+	await waitFor(() => lastProc().methodFrames("session/prompt").length === 1);
+	const cli = lastProc();
+	// 80ms 上限下持续产出 6 × 30ms = 180ms，仍在原截止之后才收口。
+	for (let i = 0; i < 6; i += 1) {
+		await sleep(30);
+		sessionUpdate(cli.writeFromCli, "session-1", { sessionUpdate: "agent_message_chunk", content: { type: "text", text: `chunk ${i} ` } });
+	}
+	cli.writeFromCli({ jsonrpc: "2.0", id: cli.methodFrames("session/prompt")[0].id, result: { stopReason: "end_turn" } });
+	const result = await sending;
+	assert.equal(result.accepted, true, `a streaming turn must not be killed by the deadline: ${JSON.stringify(result)}`);
+	assert.match(manager.readMessages(tab.id).at(-1).text, /chunk 5/);
+});
+
+test("a turn that goes silent after progress still hits the turn timeout", async (t) => {
+	const { manager, createAgent, lastProc } = harness(t, { handler: basicHandler }, { promptTurnTimeoutMs: 90, promptStallTimeoutMs: 5_000 });
+	const tab = await createAgent();
+	const sending = manager.sendPrompt({ agentId: tab.id, message: "Question" });
+	await waitFor(() => lastProc().methodFrames("session/prompt").length === 1);
+	const cli = lastProc();
+	sessionUpdate(cli.writeFromCli, "session-1", { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "partial" } });
+	const result = await sending;
+	assert.equal(result.accepted, false, "a wedged CLI must still be collected by the turn deadline");
+	assert.equal(result.i18nKey, "acp.turnTimeout");
+	assert.equal(result.delivery, "unknown");
+	// 超时后补发 session/cancel 收口，且旧回合的滚动句柄已清空（不会被下一个回合复用）。
+	assert.equal(cli.methodFrames("session/cancel").length, 1);
+	assert.equal((await manager.getRuntimeState(tab.id)).isTurnActive, false);
 });

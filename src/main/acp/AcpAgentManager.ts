@@ -35,8 +35,12 @@ import { performAcpHandshake } from "./AcpHandshake";
 import { AcpUpdatePipeline } from "./AcpUpdatePipeline";
 import { emptyTurnRejection, escalatedStopRejection, hasTurnOutput, resolvePromptDispatch } from "./acpTurnSettlement";
 
-/** session/prompt 回合兑底超时。测试用 deps.promptTurnTimeoutMs 注入缩短。 */
-const PROMPT_TURN_TIMEOUT_MS = 10 * 60_000;
+/** session/prompt 回合兑底超时：口径是「无进展静默上限」——回合内每有 session/update 或挂起审批
+ *  就顺延截止（见 runtime.turnDeadlineRefresh），所以这里只约束「完全没动静」的时长。
+ *  取 15 分钟：实测 intra-turn 静默峰值约 53s（两个 CodeBuddy 归档共 1096 条消息，超 90s 的空隙全部是
+ *  回合结束后等用户输入），3.4 倍余量；带在途工具的正常长任务不受这条限制（stall 已放行在途工具），
+ *  本值是「工具永不返回」时的最后一道网。测试用 deps.promptTurnTimeoutMs 注入缩短。 */
+const PROMPT_TURN_TIMEOUT_MS = 15 * 60_000;
 
 type AcpManagerDeps = {
 	/** 解析命令启动形态(Windows .cmd 垫片还原、node 直启等)。 */
@@ -309,6 +313,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 			abortEscalateTimer: null,
 			stallTimer: null,
 			lastUpdateAt: 0,
+			turnDeadlineRefresh: null,
 			inFlightToolCalls: new Set<string>(),
 			escalatedStop: null,
 		};
@@ -357,7 +362,13 @@ export class AcpAgentManager implements SessionAgentGateway {
 	private wireConnection(runtime: AcpAgentRuntime): void {
 		const conn = runtime.conn;
 		if (!conn) return;
-		conn.handleRequest("session/request_permission", (params, rpcId) => runtime.permissions.request(params, rpcId, runtime.acpSessionId, runtime.cancelling || runtime.status === "closed"));
+		conn.handleRequest("session/request_permission", (params, rpcId) => {
+			// 挂起审批 = agent 在等用户输入，属合法等待：顺延回合兑底截止
+			// （审批本身另有 PERMISSION_TIMEOUT_MS 到期，不会无限拖延）。
+			runtime.lastUpdateAt = Date.now();
+			runtime.turnDeadlineRefresh?.();
+			return runtime.permissions.request(params, rpcId, runtime.acpSessionId, runtime.cancelling || runtime.status === "closed");
+		});
 		// fs/read_text_file 等未声明能力,规范约定回 method not found(AcpConnection 默认行为)。
 		conn.on("closed", (error: Error | null) => {
 			if (runtime.conn && runtime.conn.isClosed() && runtime.status === "closed") return;
@@ -423,9 +434,13 @@ export class AcpAgentManager implements SessionAgentGateway {
 			// 10 分钟兑底防真悬死(实测 codex-acp 思考型回合 >60s,见 scripts/acpLiveSmoke.mjs)。
 			// 可注入 deps.promptTurnTimeoutMs 供测试缩短。
 			// 回合兑底超时三段解析：静态测试注入 → settings 读口（每次派发实时读，变更后
-			// 新回合生效）→ 代码内默认 10min。
+			// 新回合生效）→ 代码内默认 10min。截止随进展顺延（onArm 拿到 refresh 句柄，
+			// 回合内每有 session/update 就 refresh）：口径是「无进展静默上限」，长但健康的
+			// 回合不会因为总时长到点被掐断。
 			const turnTimeoutMs = this.deps.promptTurnTimeoutMs ?? this.deps.readAcpTimeoutSettings?.().promptTurnTimeoutMs ?? PROMPT_TURN_TIMEOUT_MS;
-			const result = (await conn.request("session/prompt", { sessionId: runtime.acpSessionId, prompt }, turnTimeoutMs)) as AcpSessionPromptResult;
+			const result = (await conn.request("session/prompt", { sessionId: runtime.acpSessionId, prompt }, turnTimeoutMs, (refresh) => {
+				runtime.turnDeadlineRefresh = refresh;
+			})) as AcpSessionPromptResult;
 			this.turnWatchdog.clearTurnTimers(runtime);
 			// 结算前先排空 update 链:result 帧与末批 update 同为 stdout 行序分发,
 			// 但链上每步含异步物化,settle 提前会把在途流式块拆成新回合。

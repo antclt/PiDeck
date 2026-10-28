@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: e5a0c2b539991af799d0c9bdff6ae51cad865b0bceeaec8f1893d2850ed70b3d（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 0ee7255e2b1e8b91ea0056096d8420e9f96c9aa9682f0d4da8049c820f385ff0（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -252,7 +252,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"acp.toolNotInstalled": "「{tool}」啟動失敗：該 CLI 未安裝或不在 PATH 中（{command}），請先安裝後在設定裡檢測",
 	"acp.toolMissing": "會話繫結的 ACP 工具已被刪除或停用，請在設定 → ACP 工具裡重新登記後重試",
 	"acp.startupTimeout": "「{tool}」啟動超時（首次下載或冷啟動可能較慢），請重試",
-	"acp.turnTimeout": "「{tool}」回合超時（{minutes} 分鐘仍未結束）：長任務可將 settings.json 中的 acpPromptTurnTimeoutMs 調大，重啟 PiDeck 後生效",
+	"acp.turnTimeout": "「{tool}」回合超時（連續 {minutes} 分鐘沒有任何輸出）：可在 設定 → ACP 工具 → 超時保護 裡調大",
 	"acp.restoreHint": "歷史儲存在 {tool} 側：傳送訊息後自動恢復最近的對話內容",
 	"acp.restoringHistory": "正在從 {tool} 恢復歷史訊息…",
 	"acp.restoreMissing": "該會話繫結的 ACP 工具已被刪除，請在設定 → ACP 工具裡重新登記後才能恢復與繼續",
@@ -288,6 +288,16 @@ export const zhTW: Record<TranslationKey, string> = {
 	"acp.presetAlreadyAdded": "{name} 已在列表中",
 	"acp.enabledHint": "開關立即生效（無需重啟）：開啟後新建會話選單與輸入框後端下拉立刻出現 ACP；關閉後不再啟動新的 ACP 程序（含從歷史恢復），已在執行的會話不受影響。",
 	"acp.disabledHint": "ACP 多後端預設關閉（opt-in）：不影響 pi 會話，零執行時成本。開啟右上角開關後可登記並管理 agent CLI 工具。",
+	"acp.timeoutTitle": "超時保護",
+	"acp.timeoutDescription": "ACP 回合的兩個看門狗閾值，改完對之後的回合立即生效（無需重啟）。",
+	"acp.timeoutTurnLabel": "回合無進展上限",
+	"acp.timeoutTurnDescription": "回合內連續這麼久沒有任何輸出才判定失敗。Agent 有產出時截止會自動順延，所以正常的長任務不會被這個值提前結束。",
+	"acp.timeoutStallLabel": "完全靜默判定",
+	"acp.timeoutStallDescription": "既無輸出、也沒有掛起審批和在途工具呼叫時的判定閾值；命中的通常是 CLI 真的卡死。",
+	"acp.timeoutUnitMinutes": "分鐘",
+	"acp.timeoutUnitSeconds": "秒",
+	"acp.timeoutInvalid": "請輸入 {min}–{max} 之間的整數",
+	"acp.timeoutSaveFailed": "儲存失敗：{message}",
 	"acp.statusInstalled": "已安裝 v{version}",
 	"acp.statusMissing": "未安裝",
 	"acp.statusNpxReady": "npx 按需",

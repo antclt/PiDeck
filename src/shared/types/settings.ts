@@ -902,13 +902,15 @@ export type AppSettings = {
 	/**
 	 * ACP 回合 stall 静默判定阈值（ms）：回合内无任何 session/update、无挂起审批且无在途
 	 * 工具调用的全静默超过该值，先补发 session/cancel 再升级强杀。缺省 undefined = 代码内
-	 * 默认 90_000（acpTurnWatchdog.PROMPT_STALL_TIMEOUT_MS）。变更后新回合生效，不需要重启。
+	 * 默认 180_000（acpTurnWatchdog.PROMPT_STALL_TIMEOUT_MS）。变更后新回合生效，不需要重启。
 	 */
 	acpPromptStallTimeoutMs?: number;
 	/**
-	 * ACP session/prompt 回合兑底超时（ms）：单回合硬上限，与是否持续产出无关，超时补发
-	 * session/cancel 收口。缺省 undefined = 代码内默认 600_000（AcpAgentManager.PROMPT_TURN_TIMEOUT_MS）。
-	 * 复杂任务单回合可超 10 分钟时按需调大。变更后新回合生效，不需要重启。
+	 * ACP session/prompt 回合兑底超时（ms）：回合内**无进展**（无 session/update、无挂起审批）
+	 * 持续超过该值即兑底，超时补发 session/cancel 收口。有产出的长回合每收到一条 update
+	 * 就顺延截止，因此这里不是「总时长硬上限」而是「静默上限」——长但健康的回合（实测有单回合
+	 * 达到 10 分钟且持续产出）不会因为总时长到点被误杀。缺省 undefined = 代码内默认 900_000
+	 * （AcpAgentManager.PROMPT_TURN_TIMEOUT_MS，15 分钟）。变更后新回合生效，不需要重启。
 	 */
 	acpPromptTurnTimeoutMs?: number;
 };
