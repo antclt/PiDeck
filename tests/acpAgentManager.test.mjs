@@ -40,7 +40,9 @@ function fakeAgentProcess(t, { handler = () => undefined, spawnError = undefined
 				// 第二参数 { writeFromCli }:用例可在应答前先推通知(模拟 ACP 规范的 load 重放时序)
 				const outcome = handler(frame, { writeFromCli: (obj) => stdout.write(`${JSON.stringify(obj)}\n`) });
 				if (outcome?.__error) {
-					stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: frame.id, error: { code: outcome.code ?? -32000, message: outcome.message ?? "fail" } })}\n`);
+					// data 原样透传：agent 的拒绝细节（如 unknown permission_mode）只写在这里
+					const error = { code: outcome.code ?? -32000, message: outcome.message ?? "fail", ...(outcome.data !== undefined ? { data: outcome.data } : {}) };
+					stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: frame.id, error })}\n`);
 				} else if (outcome !== undefined) {
 					stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: frame.id, result: outcome })}\n`);
 				}
@@ -1069,6 +1071,28 @@ test("configOptions:session/new 返回的枚举可查询;set_config_option 用�
 	assert.equal(manager.getSessionConfigOptions(tab.id)?.[0]?.currentValue, "o3");
 	// 帧确实进了连接(防只改内存不发请求)
 	assert.equal(lastProc().methodFrames("session/set_config_option").length, 1);
+});
+
+test("configOptions:拒绝时把 error.data.details 拼进错误文案（渲染层提示要用它）", async (t) => {
+	// Qoder CLI 把 "Bypass Permissions"(yolo) 列进 configOptions，但 set_config_option 回
+	// -32603 且原因只写在 data.details；IPC 只透传 message，不拼进去用户只看到 "Internal error"。
+	const { manager, createAgent } = harness(t, {
+		handler: (frame) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: false } };
+			if (frame.method === "session/new") return { sessionId: "sess-cfg", configOptions: CONFIG_OPTIONS };
+			if (frame.method === "session/set_config_option") return { __error: true, code: -32603, message: "Internal error", data: { details: "unknown permission_mode: yolo" } };
+			return {};
+		},
+	});
+	const tab = await createAgent();
+	await assert.rejects(
+		() => manager.applyConfigOption(tab.id, "mode", "yolo"),
+		(error) => {
+			assert.match(error.message, /ACP RPC error -32603: Internal error/, "原始 RPC 文案保留");
+			assert.match(error.message, /unknown permission_mode: yolo/, "agent 的拒绝细节必须带到渲染层");
+			return true;
+		},
+	);
 });
 
 test("configOptions:config_option_update 通知整表替换并回调 onConfigOptionsChanged", async (t) => {

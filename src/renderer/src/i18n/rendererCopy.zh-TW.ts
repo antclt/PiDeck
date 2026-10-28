@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 0a6732fbaed87088d671b42e34ad7174472601d5ee711e1347ff94e2195b412d（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 7398e689f7e08e9aafb2a7ed6c86fe2711edddaee1a5b5cac3882cc25dfad2ac（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -40,6 +40,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"hostPlugins.chipHttps": "HTTPS 請求",
 	"hostPlugins.chipLocal": "本地埠",
 	"hostPlugins.chipService": "本地服務",
+	"hostPlugins.chipSessionGroups": "會話分組",
 	"hostPlugins.chipNoSessionsRead": "不讀會話",
 	"hostPlugins.scaffold": "新建外掛…",
 	"hostPlugins.scaffoldTitle": "新建外掛腳手架",
@@ -65,6 +66,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"hostPlugins.networkLocalWarning": "本地埠不等於可信服務。請核對監聽該埠的程式和它的介面；PiDeck 不會啟動它，也不會附帶瀏覽器 Cookie 或應用憑據。",
 	"hostPlugins.serviceLocal": "啟停指定本地服務",
 	"hostPlugins.scaffoldServiceLocalHint": "只允許啟停 PiDeck 已實現介面卡的本地服務（如 billion-context），並讓 PiDeck 用內建瀏覽器開啟它的 Web 面板。命令、引數和埠都由 PiDeck 決定，外掛只能點名服務。",
+	"hostPlugins.sessionGroupsManage": "讀寫會話分組",
+	"hostPlugins.sessionGroupsManageHint": "讀寫宿主的會話分組資料（分組名、顏色、會話引用與目錄範圍）。側欄分組樹消費同一份資料，這裡的修改會即時反映到側欄；不涉及會話正文。",
 	"hostPlugins.serviceDestinations": "可控制的本地服務（其他服務不可訪問）",
 	"hostPlugins.serviceLocalWarning": "此外掛可以啟動和停止上面的本地服務，並讓 PiDeck 開啟它的 Web 面板。服務面板通常只監聽 127.0.0.1 且無鑑權，請勿把埠暴露到公網或區域網。",
 	"hostPlugins.scaffoldServices": "可控制的本地服務",
@@ -263,6 +266,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"acp.emptyTurn": "「{tool}」本輪結束但沒有返回任何輸出（該 CLI 可能存在已知缺陷，如事件流丟失），請升級到最新版本後重試",
 	"acp.imagesNotSupported": "{tool} 不支援圖片輸入，請移除圖片後重試",
 	"acp.authRequired": "「{tool}」未登入或憑據失效：請先在終端執行該 CLI 完成登入，再回到這裡重試",
+	"acp.configOptionRejected": "ACP 設定未生效（{option} → {value}）：{reason}。多數是該 CLI 版本的缺陷——可先升級 CLI；也可以把該模式寫進 設定 → ACP 工具 → 啟動引數（如 --permission-mode bypass_permissions），重開會話後即按該模式啟動",
 	"acp.toolNameRequired": "名稱必填",
 	"acp.toolCommandRequired": "命令必填",
 	"acp.toolDuplicateName": "名稱與現有工具重複",
@@ -327,6 +331,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"acp.presetDesc.qoder-cn": "Qoder CLI CN（qoderclicn --acp，國內版官網指令碼安裝；帳號與令牌獨立，先在終端登入或配置 QODERCN_PERSONAL_ACCESS_TOKEN）",
 	"app.anonymousChat": "新建匿名聊天（不儲存會話記錄）",
 	"sidebar.moreActions": "更多操作",
+	"sidebar.sessionGroups": "分組",
+	"sidebar.sessionGroupsEmpty": "組內沒有可用會話",
 	"sidebar.hoverCard.workspace": "所屬空間: {name}",
 	"sidebar.hoverCard.updatedAt": "更新於 {time}",
 	"sidebar.hoverCard.emptyPreview": "暫無內容摘要",

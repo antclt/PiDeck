@@ -15,6 +15,11 @@
  *   官方推荐官网脚本安装,故标记 manual。命令名取 `qodercli`:官网安装脚本(2026-10 实测)解出
  *   的二进制就叫 `qodercli`,即所有安装形态都保证有它;`qoder` 是 V1.1.18 起新增的主命令别名,
  *   官方文档示例已改用 `qoder --acp`,但旧安装没有它)
+ * - Qoder 两个预设默认带 `--permission-mode bypass_permissions`:Qoder 的 ACP 适配器把
+ *   Bypass Permissions(yolo)列进 configOptions,却拒绝 `session/set_config_option`(实测
+ *   1.1.80 回 -32603 unknown permission_mode: yolo),运行期根本切不进去;唯一可行路径是
+ *   启动时用 CLI 自己的 flag 定档(官方文档 docs.qoder.com/zh/cli/permissions)。用户要的就是
+ *   「加进来即 bypass」,否则每次都得手动改参数。
  * - Qoder CN:`qoderclicn --acp`(docs.qoder.cn/cli/acp;国内版是独立二进制/独立账号与
  *   `QODERCN_PERSONAL_ACCESS_TOKEN`,与全球版不互通。同上看重兼容性取安装脚本自带的
  *   `qoderclicn`,`qodercn` 是新增主命令别名)
@@ -58,6 +63,6 @@ export const ACP_TOOL_PRESETS: readonly AcpToolPreset[] = [
 	{ id: "cursor-agent", name: "Cursor Agent", command: "agent", args: ["acp"], homepage: "https://cursor.com/docs/cli/acp", install: { kind: "manual" } },
 	{ id: "codebuddy", name: "CodeBuddy", command: "npx", args: ["-y", "@tencent-ai/codebuddy-code", "--acp"], homepage: "https://codebuddy.ai/docs/cli/acp" },
 	{ id: "minimax", name: "MiniMax Code", command: "npx", args: ["-y", "@minimax-ai/code", "acp"], homepage: "https://agent.minimax.io/docs/cli/integrations" },
-	{ id: "qoder", name: "Qoder CLI", command: "qodercli", args: ["--acp"], homepage: "https://docs.qoder.com/cli/acp", install: { kind: "manual" } },
-	{ id: "qoder-cn", name: "Qoder CLI CN", command: "qoderclicn", args: ["--acp"], homepage: "https://docs.qoder.cn/cli/acp", install: { kind: "manual" } },
+	{ id: "qoder", name: "Qoder CLI", command: "qodercli", args: ["--acp", "--permission-mode", "bypass_permissions"], homepage: "https://docs.qoder.com/cli/acp", install: { kind: "manual" } },
+	{ id: "qoder-cn", name: "Qoder CLI CN", command: "qoderclicn", args: ["--acp", "--permission-mode", "bypass_permissions"], homepage: "https://docs.qoder.cn/cli/acp", install: { kind: "manual" } },
 ];

@@ -277,7 +277,18 @@ export class AcpAgentManager implements SessionAgentGateway {
 		if (this.runtimes.get(runtime.tab.id) !== runtime) throw new Error("ACP agent is not running");
 		const conn = runtime.conn;
 		if (!conn || conn.isClosed()) throw new Error("ACP agent is not running");
-		const result = (await conn.request("session/set_config_option", { sessionId: runtime.acpSessionId, configId: optionId, value }, 15_000)) as { configOptions?: AcpConfigOption[] } | null;
+		let result: { configOptions?: AcpConfigOption[] } | null;
+		try {
+			result = (await conn.request("session/set_config_option", { sessionId: runtime.acpSessionId, configId: optionId, value }, 15_000)) as { configOptions?: AcpConfigOption[] } | null;
+		} catch (error) {
+			// 拒绝原因常只写在 error.data.details 里（如 Qoder 的 "unknown permission_mode: yolo"），
+			// 而 IPC 只透传 message：不拼进去渲染层就只剩 "Internal error"，用户无从判断为什么没生效。
+			const details = (error as { data?: { details?: unknown } } | null)?.data?.details;
+			if (typeof details === "string" && details.trim() && !(error instanceof Error && error.message.includes(details))) {
+				throw new Error(`${error instanceof Error ? error.message : String(error)}: ${details.trim()}`);
+			}
+			throw error;
+		}
 		if (!result || !Array.isArray(result.configOptions)) throw new Error("session/set_config_option returned no configOptions");
 		runtime.configOptions = result.configOptions;
 		this.deps.onConfigOptionsChanged?.(runtime.tab, result.configOptions);
