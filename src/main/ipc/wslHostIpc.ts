@@ -1,5 +1,6 @@
 import { ipcMain } from "electron";
 import { ipcChannels } from "../../shared/ipc";
+import { codeOf } from "../../shared/op";
 import type { WslHostListResult, WslHostMutationResult, WslHostRemoveResult } from "../../shared/types/wslHost";
 import { createWslHostStore, WSL_HOST_CODES, type WslHostReferences } from "../wsl/WslHostStore";
 
@@ -9,11 +10,6 @@ import { createWslHostStore, WSL_HOST_CODES, type WslHostReferences } from "../w
  * 不设 feature gate：WSL 是 Windows 上的本机环境能力，入口可见性由 UI 的平台判断负责；
  * 通道本身只读写本机档案文件，不启动 wsl.exe、不接触任何发行版数据。
  */
-function codeOf(error: unknown, fallback: string): string {
-	const message = typeof error === "object" && error !== null && "message" in error ? (error as { message?: unknown }).message : undefined;
-	return typeof message === "string" && /^[A-Z][A-Z0-9_]{2,63}$/.test(message) ? message : fallback;
-}
-
 export function registerWslHostIpc(input: { userDataDir: string; references?: WslHostReferences }): void {
 	const open = () => createWslHostStore(input.userDataDir, input.references === undefined ? {} : { references: input.references });
 

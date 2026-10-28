@@ -183,6 +183,27 @@ type GrantScope = { purpose: "git-write"|"file-entry"|"file-text"; sender: numbe
 
 **顺序的理由**：W0 给基线，W1 修身份（否则 W3 的 `revision` 无法稳定），W2 修词汇（否则 W4 只是把两套词汇塞进一个文件），W3 立事实层，W4 才合并通道，W5 才敢删渲染层，W6 才加传输。
 
+### 4.1 进度（滚动更新，每次合并时就地改）
+
+| 波 | 状态 | 已落地面 |
+|---|---|---|
+| W0 | ✅ | `src/main/remote/RemoteCallMeter.ts` 挂在 `RemoteControlClient` 发帧路径；`tests/remoteCallMeter.test.mjs`（5 例） |
+| W2 | ◐ 部分 | **entry / text / trust 三域已 `Op<T>`**（`shared/types/remoteFiles.ts`、`remoteTrust.ts`、三个 IPC）；新增 `shared/op.ts`（`Op` / `codeOf` / `OP_UNKNOWN_CODES`）；`codeOf` 独立实现 9 份 → **1 份**（`remoteHostInputValidation` 改 re-export） |
+| W3 | ◐ 地基 | `RemoteFactCache.ts`（合并/失效/revision/LRU）、`RemoteWorkspaceView.ts`（三族事实 + 失效矩阵 + `onChanged`）；共 13 例确定性测试 |
+| W1 / W4 / W5 / W6 | ⨯ 未开 | 见下表「下一步的确定落点」 |
+
+**下一步的确定落点（按依赖顺序）**
+
+1. **W2 收尾（可增量、每步绿）**：
+   - project 域 8 类结果在 `shared/types/remoteHost.ts:192-271`（enroll / create-answer / list / read / download / upload / search / root-status），对应 `remoteProjectIpc.ts`、`remoteProjectTransferIpc.ts`、`remoteProjectCreateIpc.ts` 的返回，以及渲染层 19 处读点（7 个文件，含 `useRemoteFileTree.ts`）。
+   - hosts 域 26 类结果（`remoteHost.ts` 前半段）与 `remoteHostIpc` / `remoteHostEditIpc` / `remoteHostScanIpc` / `wslHostIpc`。
+   - sessions 域（`remoteSessionIpc.ts`）与 R1a 协调后再动。
+2. **W1（必须独占）**：`FileTreeNode.path` 退役 → 落点 `shared/types/session.ts`、`renderer/src/utils/fileTreeLazy.ts`（`fileTreeNodeKey`）、`components/app/AppUtils.ts`（拖拽负载）、`FileTreeRows.tsx`、`useProjectFileTreeController.ts`、`useSessionComposerController.ts`。
+3. **W3 接线**：dir 装载端口接 `RemoteWorkspaceReader.list`（`remoteProjectIpc.ts:255` 的形状），status/repos 接 `remoteGitReadIpc` 既有的 `withProjectSession` 路径；`capabilities(projectId)` 快照替掉 renderer 的 4 处 `onStateChange` 各自判定。
+4. **W4/W5/W6** 按表推进。
+
+**并行约束（重要）**：R1a（会话扫描改一次性命令，`src/main/sessions/`）在跑时，不要做「多文件中间态必红」的改动——那边会跑 typecheck。只能做「新增文件」或「单文件原子、当次就绿」的切片。
+
 ## 5. 明确不重写（重写零收益，只有风险）
 
 | 不重写 | 为什么 |
