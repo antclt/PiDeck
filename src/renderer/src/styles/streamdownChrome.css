@@ -127,6 +127,30 @@
    以免将来 streamdown 加 text-* class 时静默失联。 */
 .markdown-body [data-streamdown="inline-code"] {
   color: var(--color-md-code);
+  background-color: var(--color-md-inline-code-bg);
+}
+/* 加粗/斜体/删除线：CSS 默认继承正文色，皮肤要单独提色时用 md 语义色接管。
+   strong 在 streamdown 里只带 font-semibold（无 color class），放在 utilities 层
+   是为了与其余 md 覆盖同层，避免皮肤值被 legacy 默认值顶掉。 */
+.markdown-body strong,
+.markdown-body b {
+  color: var(--color-md-strong);
+}
+.markdown-body em,
+.markdown-body i {
+  color: var(--color-md-em);
+}
+.markdown-body del,
+.markdown-body s {
+  color: var(--color-md-del);
+}
+/* 图片边框：默认 transparent（零观感变化），终端皮肤给框线。 */
+.markdown-body img {
+  border: 1px solid var(--color-md-image-border);
+}
+/* 任务列表勾选：tailwind.css 把 accent-color 钉在 --color-accent，终端皮肤要绿勾。 */
+.markdown-body input[type="checkbox"] {
+  accent-color: var(--color-md-task-accent);
 }
 
 /* ── 代码块 ─────────────────────────────────────────────── */
@@ -139,8 +163,8 @@
   gap: 0;
   padding: 0;
   overflow: hidden;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: 12px;
+  border: 1px solid var(--color-md-frame);
+  border-radius: var(--radius-xl);
   background: var(--color-chat-muted-bg);
   box-shadow: none;
 }
@@ -284,8 +308,8 @@
      Markdown/CSV/TSV、下载为 CSV/Markdown）是 absolute 定位，裁掉一半会与
      表格内容叠在一起。圆角裁剪下放到顶栏与表格容器各自负责。 */
   overflow: visible;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: 12px;
+  border: 1px solid var(--color-md-frame);
+  border-radius: var(--radius-xl);
   background: var(--color-chat-muted-bg);
   box-shadow: none;
 }
@@ -305,10 +329,10 @@
   margin: 0;
   padding: 0 0.45rem;
   border: 0;
-  border-bottom: 1px solid var(--color-border-subtle);
-  border-radius: 12px 12px 0 0;
+  border-bottom: 1px solid var(--color-md-table-border);
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
   /* 与代码块头部条同档：墨水罩染弱表面（卡身白卡，头部轻退一档） */
-  background: var(--color-surface-ink-subtle);
+  background: var(--color-md-table-head-bg);
   /* 不用 opacity 做整条半隐：opacity<1 会建立层叠上下文，鼠标移出顶栏后
      打开的下拉菜单被压到表格内容下面（字重叠）；半隐改由按钮自身承担。 */
 }
@@ -362,7 +386,7 @@
   border: 0;
   /* 顶栏已负责顶部圆角，表格容器负责底部圆角（裁剪斑马纹/表头底色，
      卡片其余部分可视区域允许下拉菜单越界展示）。 */
-  border-radius: 0 0 12px 12px;
+  border-radius: 0 0 var(--radius-xl) var(--radius-xl);
   background: transparent;
 }
 
@@ -375,20 +399,20 @@
 }
 
 [data-streamdown="table-wrapper"] thead {
-  background: var(--color-surface-ink-subtle);
+  background: var(--color-md-table-head-bg);
 }
 
 [data-streamdown="table-wrapper"] th,
 [data-streamdown="table-wrapper"] td {
   padding: 0.45rem 0.75rem;
-  border-bottom: 1px solid var(--color-border-subtle);
+  border-bottom: 1px solid var(--color-md-table-border);
   text-align: left;
   vertical-align: top;
 }
 
 [data-streamdown="table-wrapper"] th {
   font-weight: 600;
-  color: var(--color-text-secondary);
+  color: var(--color-md-table-head-text);
   white-space: nowrap;
 }
 

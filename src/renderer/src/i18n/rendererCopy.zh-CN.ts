@@ -4894,7 +4894,7 @@ export const zhCN = {
 	"settings.skin.seaBlueDesc": "海蓝冷调表面 + 蓝色主色，清爽通透。",
 	"settings.skin.warmBeigeDesc": "暖米纸感表面 + 琥珀主色，柔和护眼。",
 	"settings.skin.terminal": "终端",
-	"settings.skin.terminalDesc": "复刻 pi 终端界面：Markdown 正文/标题用等宽字，标题黄、行内码紫、链接蓝；深色下最像 TUI。",
+	"settings.skin.terminalDesc": "整套移植 pi 终端主题：全界面等宽、方框线、消息带 ⏺/❯ 标记，标题黄、代码与表格走终端配色；深色下最像 TUI。",
 	"settings.accent.default": "黑白灰（默认）",
 	"settings.accent.green": "清新绿",
 	"settings.accent.blue": "天空蓝",

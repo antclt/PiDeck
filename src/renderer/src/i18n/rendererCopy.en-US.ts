@@ -4912,7 +4912,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.skin.seaBlueDesc": "Cool sea-blue surfaces with a blue accent; crisp and airy.",
 	"settings.skin.warmBeigeDesc": "Warm paper-beige surfaces with an amber accent; soft and easy on the eyes.",
 	"settings.skin.terminal": "Terminal",
-	"settings.skin.terminalDesc": "Mirrors the pi terminal UI: monospace Markdown body and headings with yellow headings, purple inline code and blue links — closest to a TUI in dark mode.",
+	"settings.skin.terminalDesc": "Full port of the pi terminal theme: monospace UI, square frames, ⏺/❯ message markers, yellow headings, terminal-tinted code and tables — closest to a TUI in dark mode.",
 	"settings.accent.default": "Neutral (default)",
 	"settings.accent.green": "Fresh green",
 	"settings.accent.blue": "Sky blue",

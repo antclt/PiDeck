@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: bc62146ff6c94026bdd11d3efe6ae3ea0022eab3f2edad60d28134f8e9a93e8f（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: c587b51dc22f946ecc78e5730a30d9cd35f39bd6096fef259c6a0a8b16ec2070（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4901,7 +4901,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.skin.seaBlueDesc": "海藍冷調表面 + 藍色主色，清爽通透。",
 	"settings.skin.warmBeigeDesc": "暖米紙感表面 + 琥珀主色，柔和護眼。",
 	"settings.skin.terminal": "終端",
-	"settings.skin.terminalDesc": "復刻 pi 終端介面：Markdown 正文/標題用等寬字，標題黃、行內碼紫、連結藍；深色下最像 TUI。",
+	"settings.skin.terminalDesc": "整套移植 pi 終端主題：全介面等寬、方框線、訊息帶 ⏺/❯ 標記，標題黃、程式碼與表格走終端配色；深色下最像 TUI。",
 	"settings.accent.default": "黑白灰（預設）",
 	"settings.accent.green": "清新綠",
 	"settings.accent.blue": "天空藍",

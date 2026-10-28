@@ -1311,19 +1311,22 @@
 
 .markdown-body img {
   max-width: 100%;
+  border: 1px solid var(--color-md-image-border);
   border-radius: var(--radius-sm);
 }
 
 .markdown-body strong {
   font-weight: 600;
+  color: var(--color-md-strong);
 }
 .markdown-body em {
   font-style: italic;
+  color: var(--color-md-em);
 }
 /* remarkGfm 的 ~~删除线~~ 渲染为 <del>（不是 <s>），选择器必须匹配 del 才生效 */
 .markdown-body del {
   text-decoration: line-through;
-  color: var(--color-text-secondary);
+  color: var(--color-md-del);
 }
 
 .composer {

@@ -95,7 +95,10 @@ function contrast(a, b) {
  */
 function resolveText(tokens, textToken, bg) {
 	const [name, alpha] = textToken.split("/");
-	const base = resolve(tokens, `color-${name}`);
+	// `inherit` 表示「跟随所在文字色」（如 md-strong/md-em 默认不单独着色），
+	// 按正文色 text-primary 代表计算——正文自身的对比度已由上方正文配对覆盖。
+	const resolved = resolve(tokens, `color-${name}`);
+	const base = resolved === "inherit" ? resolve(tokens, "color-text-primary") : resolved;
 	return alpha ? blend(base, bg, Number(alpha) / 100) : base;
 }
 
@@ -192,6 +195,14 @@ const PAIRS = [
 	["md-code", "chat-card-bg", 4.5, "Markdown 行内码 × chat-card 底"],
 	["md-quote", "chat-card-bg", 4.5, "Markdown 引用文字 × chat-card 底"],
 	["md-list-bullet", "chat-card-bg", 3, "Markdown 列表符号 × chat-card 底"],
+	// 行内格式与表格：加粗/斜体是正文级文字（4.5），删除线是「弱化但仍要读」的文字（4.5），
+	// 表头文字落在表头底上，勾选框/图片框属于非文字的构件指示（3）。
+	["md-strong", "chat-card-bg", 4.5, "Markdown 加粗 × chat-card 底"],
+	["md-em", "chat-card-bg", 4.5, "Markdown 斜体 × chat-card 底"],
+	["md-del", "chat-card-bg", 4.5, "Markdown 删除线 × chat-card 底"],
+	["md-table-head-text", "md-table-head-bg", 4.5, "表头文字 × 表头底"],
+	["md-code", "md-inline-code-bg", 4.5, "行内码文字 × 行内码底"],
+	["md-task-accent", "chat-card-bg", 3, "任务勾选框 × chat-card 底"],
 	// 过程层图标（非文字）：3:1——注意边框不进矩阵：装饰性分隔线是刻意低对比设计（WCAG 只要求
 	// 「唯一视觉指示」的构件边 3:1，本应用输入控件用聚焦环作主要指示）
 	["thinking", "bg-panel", 3, "思考过程图标 × 面板"],
@@ -205,7 +216,13 @@ function resolveFace(tokens, face) {
 		// 混合基准取 bg-app（徽章都出现在页面级面板上，bg-app/app-panel 暗浅几乎一致）
 		return blend(resolve(tokens, "color-warning"), base, 0.15);
 	}
-	return resolve(tokens, `color-${face}`);
+	const value = resolve(tokens, `color-${face}`);
+	// 透明罩染底（--color-surface-ink* / 表头底默认值 `color-mix(..., transparent)`）：
+	// 单独解析得不到实色，按「罩在 chat-card 底上」的可见结果近似——表头、斑马纹、行内码底
+	// 都画在消息卡片里，这是它们真实的落点。
+	const translucent = value.match(/^color-mix\(in (?:srgb|oklab),\s*var\(--([a-z0-9-]+)\)\s*([\d.]+)%,\s*transparent\)$/);
+	if (translucent) return blend(resolve(tokens, translucent[1]), resolveFace(tokens, "chat-card-bg"), Number(translucent[2]) / 100);
+	return value;
 }
 
 for (const { label, tokens } of PALETTES) {

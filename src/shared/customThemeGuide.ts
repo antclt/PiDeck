@@ -6,7 +6,7 @@
  * - 主进程写入主题目录 AI-THEME-GUIDE.md（用户可让 AI 直接读该文件）；
  * - 单测校验指南完整性（含白名单 token 与示例主题 id）。
  */
-import { CUSTOM_THEME_TOKEN_GROUPS, CUSTOM_THEME_ID_PATTERN, DEMO_CUSTOM_THEME, serializeCustomThemePackage } from "./customThemes";
+import { CUSTOM_THEME_TOKEN_GROUPS, CUSTOM_THEME_ID_PATTERN, DEMO_CUSTOM_THEME, customThemeCssVar, serializeCustomThemePackage } from "./customThemes";
 
 export type CustomThemeGuideLocale = "zh-CN" | "en-US";
 
@@ -20,7 +20,7 @@ function promptIntro(locale: CustomThemeGuideLocale, themesDir: string): string 
 			``,
 			`## What a theme package is`,
 			``,
-			`A PiDeck theme is a single JSON file that overrides the app's semantic design tokens (backgrounds, text, borders, accent, chat bubbles, code blocks) for both light and dark modes. No CSS, no code execution — just token values. Invalid keys or non-color values are rejected.`,
+			`A PiDeck theme is a single JSON file that overrides the app's semantic design tokens (backgrounds, text, borders, accent, chat bubbles, code blocks) for both light and dark modes. No CSS, no code execution — just token values (colors plus font stacks). Invalid keys or non-conforming values are rejected.`,
 			``,
 			`## Quick start`,
 			``,
@@ -36,7 +36,7 @@ function promptIntro(locale: CustomThemeGuideLocale, themesDir: string): string 
 		``,
 		`## 主题包是什么`,
 		``,
-		`PiDeck 主题 = 一个 JSON 文件，覆盖应用的语义设计 token（表面/文字/边框/主色/会话气泡/代码块），浅色与暗色各一套。不是 CSS、不执行代码，只有颜色值；白名单之外的键或非法颜色值都会被拒绝。`,
+		`PiDeck 主题 = 一个 JSON 文件，覆盖应用的语义设计 token（表面/文字/边框/主色/会话气泡/代码块/Markdown 正文/字体），浅色与暗色各一套。不是 CSS、不执行代码，只有 token 值；白名单之外的键或不合规的值都会被拒绝。`,
 		``,
 		`## 快速开始`,
 		``,
@@ -68,7 +68,8 @@ function schemaSection(locale: CustomThemeGuideLocale): string {
 			`\`\`\``,
 			``,
 			`Rules:`,
-			`- Keys are full CSS variable names from the whitelist below; unknown keys are rejected.`,
+			`- Keys are full CSS variable names from the whitelist below: --color-* for colors, --font-family-* for fonts; unknown keys are rejected.`,
+			`- Font values are plain font stacks (letters/digits/spaces/commas/quotes/hyphens, <=120 chars), e.g. "JetBrains Mono", Menlo, monospace. A font picked explicitly in Settings always wins over the theme.`,
 			`- Values must be static colors: \`#rgb\`/\`#rgba\`/\`#rrggbb\`/\`#rrggbbaa\` or \`rgb()/rgba()/hsl()/hsla()/oklch()/oklab()\` with numeric arguments only. No \`var()\`, no gradients, no \`url()\`.`,
 			`- At least one of light/dark must be non-empty; providing both is strongly recommended (missing tokens fall back to the built-in default look).`,
 			`- \`id\` must not be \`${DEMO_CUSTOM_THEME.id}\`: that id is reserved for the built-in demo theme (saving it is rejected).`,
@@ -94,7 +95,8 @@ function schemaSection(locale: CustomThemeGuideLocale): string {
 		`\`\`\``,
 		``,
 		`规则：`,
-		`- 键必须是下方白名单里的完整 CSS 变量名，未知键一律拒绝；`,
+		`- 键必须是下方白名单里的完整 CSS 变量名（颜色 --color-*，字体 --font-family-*），未知键一律拒绝；`,
+		`- 字体值是普通字体栈（字母/数字/空格/逗号/引号/连字符，≤120 字符），如 "JetBrains Mono", Menlo, monospace；设置里显式选的字体永远优先于主题，`,
 		`- 值只能是静态颜色：\`#rgb\`/\`#rgba\`/\`#rrggbb\`/\`#rrggbbaa\` 或 \`rgb()/rgba()/hsl()/hsla()/oklch()/oklab()\`（纯数值参数）。不支持 \`var()\`、渐变、\`url()\`；`,
 		`- light/dark 至少一档非空；强烈建议两档都写全（缺失的 token 会回落到内置默认观感）；`,
 		`- \`id\` 不能是 \`${DEMO_CUSTOM_THEME.id}\`：该 id 保留给内置示例（保存时会被拒绝）。`,
@@ -106,7 +108,7 @@ function tokenTableSection(locale: CustomThemeGuideLocale): string {
 	for (const group of CUSTOM_THEME_TOKEN_GROUPS) {
 		lines.push("", `### ${locale === "en-US" ? group.enTitle : group.zhTitle}`, "", `| Token | ${locale === "en-US" ? "Meaning" : "说明"} |`, `| --- | --- |`);
 		for (const entry of group.tokens) {
-			lines.push(`| \`--color-${entry.token}\` | ${locale === "en-US" ? entry.enDesc : entry.zhDesc} |`);
+			lines.push(`| \`${customThemeCssVar(entry.token)}\` | ${locale === "en-US" ? entry.enDesc : entry.zhDesc} |`);
 		}
 	}
 	return lines.join("\n");

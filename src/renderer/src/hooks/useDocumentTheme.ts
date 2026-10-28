@@ -21,3 +21,22 @@ export function useDocumentTheme(): "dark" | "light" {
 	}, []);
 	return theme;
 }
+
+/**
+ * 订阅 documentElement 的 data-appearance（皮肤 id，默认皮肤为空串）。
+ *
+ * 与 useDocumentTheme 同理：皮肤切换只改 root 属性，不触发 React 更新。
+ * 目前用于让 MarkdownStream 换用终端皮肤的 Shiki 代码高亮色板（代码 token 色由
+ * inline style 决定，CSS 变量管不到）。
+ */
+export function useDocumentAppearance(): string {
+	const read = () => (typeof document === "undefined" ? "" : (document.documentElement.dataset.appearance ?? ""));
+	const [appearance, setAppearance] = useState<string>(read);
+	useEffect(() => {
+		const root = document.documentElement;
+		const observer = new MutationObserver(() => setAppearance(root.dataset.appearance ?? ""));
+		observer.observe(root, { attributes: true, attributeFilter: ["data-appearance"] });
+		return () => observer.disconnect();
+	}, []);
+	return appearance;
+}

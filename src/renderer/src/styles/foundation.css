@@ -234,6 +234,18 @@
   --color-md-quote-border: color-mix(in srgb, var(--color-text-secondary) 30%, transparent);
   --color-md-list-bullet: var(--color-text-primary);
   --color-md-hr: var(--color-border-default);
+  /* 行内元素与块级框线（终端皮肤按 pi TUI 的 mdCodeBlockBorder / 表格框线取值）。
+     strong/em/del 默认 inherit：等价于改造前「继承正文色」，只给皮肤留改造口。 */
+  --color-md-strong: inherit;
+  --color-md-em: inherit;
+  --color-md-del: var(--color-text-secondary);
+  --color-md-inline-code-bg: var(--color-bg-muted);
+  --color-md-frame: var(--color-border-subtle);
+  --color-md-table-border: var(--color-border-subtle);
+  --color-md-table-head-bg: var(--color-surface-ink-subtle);
+  --color-md-table-head-text: var(--color-text-secondary);
+  --color-md-task-accent: var(--color-accent);
+  --color-md-image-border: transparent;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -894,69 +906,140 @@
   --color-chat-control-bg: #2b251d;
   --color-chat-table-bg: #2b251d;
 }
-/* 终端（TUI）：复刻 pi 编码助手交互模式的观感——后台终端底色、等宽正文、
-   彩色 Markdown（标题黄 #7d5a04 / 行内码紫 #7459b4 / 链接蓝 #2a6f8c / 引用灰），
-   md 色板直接取自 pi 内置 light/dark 主题的 mdHeading/mdCode/mdLink/mdQuote
-   （okhsl 转 sRGB），所以与 pi TUI 里看到的标题色一致。
-   主色由 data-accent="purple"（pi 的 accent=violet，本应用无 violet 档，取最近的紫）。 */
+/* 终端（TUI）：把 pi 编码助手交互模式的终端主题整套移植过来（而不是只借几块 md 色）：
+   - 面色/文字/边框/状态色/accent 取 pi theme 的 pageBg / cardBg / text / muted / dim /
+     border / borderMuted / borderAccent / selectedBg / userMessageBg / customMessageBg /
+     tool*Bg（okhsl 转 sRGB，与 pi TUI 屏幕上看到的色一致）；
+   - Markdown 全量取 mdHeading / mdLink / mdCode / mdQuote / mdQuoteBorder / mdHr / mdListBullet，
+     并补 strong / em / del / 行内码底 / 表格框线 / 表头 / 任务勾选 / 图片边框这些 PiDeck 语义位；
+   - 圆角归零 + 正文继承等宽 + 消息加 `❯` / `⏺` 标记（标记在 terminalSkin.css）：
+     等宽 + 方框线 + 蓝框才是终端观感。
+   用户显式选了字体时由 useAppAppearance 的 inline style 覆盖 --font-family-base（尊重用户选择）。
+   代码块的语法高亮不走 CSS token（Shiki 内联样式），见 markdown/piTuiShikiThemes.ts。 */
 :root[data-appearance="terminal"] {
-  --color-bg-app: #f7f8f7;
-  --color-bg-sidebar: #eef1f0;
-  --color-bg-panel: #fcfcfb;
+  --color-bg-app: #efeeee;
+  --color-bg-page: #efeeee;
+  --color-bg-page-raised: #f7f6f6;
+  --color-bg-sidebar: #e9e8e8;
+  --color-bg-panel: #f7f6f6;
   --color-bg-popover: #ffffff;
-  --color-bg-input: #eef1f0;
-  --color-bg-muted: #e8ebe9;
-  --color-bg-hover: #dfe4e1;
-  --color-bg-active: #d3dad6;
-  --color-text-primary: #2b3237;
-  --color-text-secondary: #4a5359;
-  --color-text-tertiary: #5f6a70;
-  --color-text-faint: #8d959a;
-  --color-border-subtle: #d8ded9;
-  --color-border-default: #c4ccc7;
-  --color-border-strong: #aab5af;
-  --color-chat-card-bg: #fcfcfb;
-  --color-chat-muted-bg: #f1f4f2;
-  --color-chat-control-bg: #fcfcfb;
-  --color-chat-table-bg: #fcfcfb;
-  --color-md-heading: #7d5a04;
-  --color-md-link: #2a6f8c;
-  --color-md-code: #7459b4;
+  --color-bg-input: #ecebeb;
+  --color-bg-muted: #e4e5e6;
+  --color-bg-hover: #e9e9e9;
+  --color-bg-active: #dfe7ec;
+  --color-text-primary: #3b3f41;
+  --color-text-secondary: #5f686d;
+  --color-text-tertiary: #60686c;
+  --color-text-faint: #879095;
+  --color-text-inverse: #f7f6f6;
+  --color-border-subtle: #dcdcdc;
+  --color-border-default: #9aa2a7;
+  --color-border-strong: #8a72cb;
+  --color-chat-card-bg: #f7f6f6;
+  --color-chat-muted-bg: #f0efef;
+  --color-chat-control-bg: #eef0ef;
+  --color-chat-table-bg: #fbfafa;
+  --color-chat-bubble-bg: #dfe7ec;
+  --color-chat-link: #2f7899;
+  --color-accent: #7459b4;
+  --color-accent-soft: #e6e4ee;
+  --color-accent-strong: #5f47a0;
+
+  --color-thinking: #7c868c;
+  --color-tool: #3d8eb3;
+  --color-chip-file: #2b6d8b;
+  --color-chip-skill: #7459b4;
+  --color-chip-session: #2e7350;
+  --color-code-bg: #f2f1f1;
+  --color-code-text: #3b3f41;
+  --color-md-heading: #8c6602;
+  --color-md-link: #2d7393;
+  --color-md-code: #6f55ad;
   --color-md-quote: #677176;
-  --color-md-quote-border: #9aa5a0;
+  --color-md-quote-border: #9aa2a7;
   --color-md-list-bullet: #7459b4;
-  --color-md-hr: #c4ccc7;
+  --color-md-hr: #9aa2a7;
+  --color-md-strong: #24282a;
+  --color-md-em: #4b5255;
+  --color-md-del: #677176;
+  --color-md-inline-code-bg: #e8e7ea;
+  --color-md-frame: #9aa2a7;
+  --color-md-table-border: #dcdcdc;
+  --color-md-table-head-bg: #ecebeb;
+  --color-md-table-head-text: #7d5a04;
+  --color-md-task-accent: #337e58;
+  --color-md-image-border: #dcdcdc;
   --font-family-md: var(--font-family-mono);
+  /* 等宽接管整个界面（终端皮肤的核心观感） */
+  --font-family-base: var(--font-family-mono);
+  /* 方角：TUI 是框线而不是圆角卡片；hardcoded 的 12px 已在 streamdownChrome 改用 --radius-xl */
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
 }
 :root[data-theme="dark"][data-appearance="terminal"] {
-  --color-bg-app: #0a0d11;
-  --color-bg-sidebar: #0d1116;
-  --color-bg-panel: #0f141a;
-  --color-bg-popover: #151b22;
-  --color-bg-input: #0d1116;
-  --color-bg-muted: #161d24;
-  --color-bg-hover: #1b232b;
-  --color-bg-active: #232d36;
-  --color-text-primary: #dfe2e4;
-  --color-text-secondary: #b6bec4;
+  --color-bg-app: #21252c;
+  --color-bg-page: #21252c;
+  --color-bg-page-raised: #282c34;
+  --color-bg-sidebar: #1b1f25;
+  --color-bg-panel: #282c34;
+  --color-bg-popover: #333842;
+  --color-bg-input: #1d2127;
+  --color-bg-muted: #2b3038;
+  --color-bg-hover: #30363e;
+  --color-bg-active: #213b49;
+  --color-text-primary: #dee0e1;
+  --color-text-secondary: #9da5a9;
   --color-text-tertiary: #97a2a9;
-  --color-text-faint: #74828a;
-  --color-border-subtle: #1e262e;
-  --color-border-default: #2a343d;
-  --color-border-strong: #3b4751;
-  --color-chat-card-bg: #0f141a;
-  --color-chat-muted-bg: #0d1217;
-  --color-chat-control-bg: #151b22;
-  --color-chat-table-bg: #0f141a;
-  /* 暗色底上把 pi 的暗色 md 色板提亮一档（#cd9a22 → #d8a63a）：8.3:1 落在消息卡上。 */
-  --color-md-heading: #d8a63a;
+  --color-text-faint: #707a80;
+  --color-text-inverse: #16191d;
+  --color-border-subtle: #34383a;
+  --color-border-default: #6b767c;
+  --color-border-strong: #5fa8cc;
+  --color-chat-card-bg: #282c34;
+  --color-chat-muted-bg: #23272e;
+  --color-chat-control-bg: #34383a;
+  --color-chat-table-bg: #2b3038;
+  --color-chat-bubble-bg: #213b49;
+  --color-chat-link: #69add0;
+  --color-accent: #a798d7;
+  --color-accent-soft: #3a3055;
+  --color-accent-strong: #b7a7e6;
+
+  --color-thinking: #96a0a4;
+  --color-tool: #69add0;
+  --color-chip-file: #69add0;
+  --color-chip-skill: #a798d7;
+  --color-chip-session: #68b78d;
+  --color-code-bg: #1f2329;
+  --color-code-text: #dee0e1;
+  /* pi TUI 的 md 色板原值（暗色档不像旧版那样提亮：底色已从近黑抬到 pageBg #21252c） */
+  --color-md-heading: #cd9a22;
   --color-md-link: #69add0;
   --color-md-code: #a798d7;
   --color-md-quote: #9da5a9;
-  --color-md-quote-border: #4a555c;
+  --color-md-quote-border: #9da5a9;
   --color-md-list-bullet: #a798d7;
-  --color-md-hr: #2a343d;
+  --color-md-hr: #4a545a;
+  --color-md-strong: #f0f2f3;
+  --color-md-em: #b6bec4;
+  --color-md-del: #9da5a9;
+  --color-md-inline-code-bg: #2f343c;
+  --color-md-frame: #6b767c;
+  --color-md-table-border: #4a545a;
+  --color-md-table-head-bg: #2f343c;
+  --color-md-table-head-text: #cd9a22;
+  --color-md-task-accent: #68b78d;
+  --color-md-image-border: #34383a;
   --font-family-md: var(--font-family-mono);
+  --font-family-base: var(--font-family-mono);
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
 }
 * {
   box-sizing: border-box;

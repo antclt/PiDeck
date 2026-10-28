@@ -38,17 +38,32 @@ Markdown 渲染（streamdown）的颜色一律走 `--color-md-*` 语义 token，
 | `--color-md-quote-border` | 引用左侧竖条 | `color-mix(in srgb, var(--color-text-secondary) 30%, transparent)` |
 | `--color-md-list-bullet` | ul `::marker` / ol `::before` 序号 | `var(--color-text-primary)` |
 | `--color-md-hr` | 分割线 | `var(--color-border-default)` |
+| `--color-md-strong` | 加粗 `<strong>` | `inherit`（跟随所在文字色） |
+| `--color-md-em` | 斜体 `<em>` | `inherit` |
+| `--color-md-del` | 删除线 `<del>` | `var(--color-text-secondary)` |
+| `--color-md-inline-code-bg` | 行内码底色 | `var(--color-bg-muted)` |
+| `--color-md-frame` | 表格 / 代码块外框线 | `var(--color-border-subtle)` |
+| `--color-md-table-border` | 表格单元格分隔线 | `var(--color-border-subtle)` |
+| `--color-md-table-head-bg` | 表头底色 | `var(--color-surface-ink-subtle)` |
+| `--color-md-table-head-text` | 表头文字 | `var(--color-text-secondary)` |
+| `--color-md-task-accent` | 任务列表勾选框（`accent-color`） | `var(--color-accent)` |
+| `--color-md-image-border` | 图片边框 | `transparent` |
 | `--font-family-md` | Markdown 正文字体 | `var(--font-family-base)` |
 
 **为什么有一半规则写在 `streamdownChrome.css`**：streamdown 给元素自带 utility 颜色（链接 `text-primary`、引用 `text-muted-foreground`、hr `border-border`），同样在 `utilities` 层，legacy 层的高 specificity 规则也压不住。所以这些覆盖必须写在 `streamdownChrome.css`（`@layer utilities`，且 `@import` 排在 `tailwind.css` 之后）；标题、行内码没有 utility 颜色，仍由 `timeline.css` 负责。
 文件链接（`data-md-file-link`，`MarkdownLink.tsx` 为可点击本地/文件引用加的自定义属性）固定为 `--color-accent`，不跟随 `--color-md-link`，避免改 md 链接色时连带改掉「可打开文件」这一语义。
+代码块里的 token 颜色由 Shiki 生成的 inline style 决定，CSS 变量管不到；终端皮肤另带一套 Shiki 主题（`src/renderer/src/components/session/markdown/piTuiShikiThemes.ts`，`MarkdownStream` 按 `data-appearance` 换 `createCodePlugin`），移植 TUI 语法高亮时就改那个文件。
 
 ## 主题皮肤与自定义主题
 
 - 皮肤 = `data-appearance`，定义在 `foundation.css`（`:root[data-appearance="x"]` 浅色 + `:root[data-theme="dark"][data-appearance="x"]` 暗色两块），id 在 `AppSkinId`（`shared/types/settings.ts`）与 `SKIN_PRESETS`（`themePresets.ts`）同步。
-- 内置 `terminal` 皮肤复刻 pi TUI 色板：整屏近黑、Markdown 用等宽字、标题黄、行内码紫、链接蓝，暗色下最像终端。它同时是 `--color-md-*` 的第一个实际消费者，可当新增皮肤的模板。
+- 内置 `terminal` 皮肤是 pi TUI 主题的**成套移植**（不是只借 md 色）：面色取 TUI `pageBg/cardBg`、文字取 `text/muted/dim`、边框取 `border/borderAccent`、气泡底色取 `userMessageBg`、`--font-family-base` 直接换成等宽（整屏等宽）、`--radius-*` 全归零成方框，再加 `terminalSkin.css` 的 `⏺`（助手轮）/ `❯`（用户消息）标记、表头大写标签、代码块头部等宽。它同时是 `--color-md-*` 的第一个实际消费者，可当新增皮肤的模板。
+  移植时的硬约束：**状态语义色（`--color-info`/`--color-warning`/`--color-danger`/`--color-success` 及其 soft/strong）不许被皮肤覆盖**（状态灯跨主题恒定，守卫 `tests/appearanceThemes.test.mjs`），皮肤只能改装饰色（面/字/边框/md/代码/chip）。
+- 皮肤专属的形状 chrome 放 `styles/terminalSkin.css`（`@import … layer(utilities)` 排在 `streamdownChrome.css` 之后，才能压过 Tailwind 布局 utility），色值仍在 `foundation.css` 皮肤块里。
 - 新增皮肤必须带齐 16 个必需 token（面色/灰阶）+ 亮暗两块；守卫：`tests/appearanceThemes.test.mjs`（id 列表与 token 完整性）、`tests/themeContrast.test.mjs`（把皮肤加进 `APPEARANCES`，按 WCAG 校验正文/md 文字对）。
-- 用户侧可定制范围由 `src/shared/customThemes.ts` 的 `CUSTOM_THEME_TOKEN_GROUPS` 决定（只允许静态颜色值，注入为 `--color-<key>`）；`markdown` 组让自定义主题包也能改标题/链接/行内码/引用/列表符/分割线颜色，指南页由 groups 自动生成。
+- 用户侧可定制范围由 `src/shared/customThemes.ts` 的 `CUSTOM_THEME_TOKEN_GROUPS` 决定（颜色值必须是 `#hex`/`rgb()`/`hsl()`/`oklch()` 静态形式）；`markdown` 组让自定义主题包也能改标题/链接/行内码/引用/列表符/分割线/加粗斜体删除线/表格/任务勾选/图片边框颜色，`font` 组让主题包改字体，指南页由 groups 自动生成。
+- **字体 token**：`--font-family-base` / `--font-family-mono` / `--font-family-md`，值走独立白名单 `FONT_VALUE_PATTERN`（字母/数字/空格/逗号/引号/连字符/下划线/点，≤120 字符，排除 `;(){}:/` 等注入面），内部快照键是 `font-family-*`（不是 `--color-*`），注入时由 `customThemeCssVar()` 拼回 `--font-family-*`。
+- 字体优先级：**设置页里显式选的自定义字体 > 主题包字体 > 内置皮肤/默认值**，集中在 `applyFontFamilyTokens()`（`hooks/appearance/useAppAppearance.ts`）算一次最终值，`applyCustomThemeTokens()` 末尾也调它，避免两处 `removeProperty` 互相抹掉。
 
 ## beUI 组件迁移
 

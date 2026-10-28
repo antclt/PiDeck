@@ -16,7 +16,7 @@ import test from "node:test";
 import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
 
 const loadPure = createTsSandbox();
-const { parseCustomThemePackage, serializeCustomThemePackage, sanitizeCustomThemeSnapshot, buildCustomThemeGuideMarkdown, DEMO_CUSTOM_THEME, CUSTOM_THEME_TEMPLATE, CUSTOM_THEME_TOKEN_WHITELIST } = loadPure("src/shared/customThemes.ts");
+const { parseCustomThemePackage, serializeCustomThemePackage, sanitizeCustomThemeSnapshot, buildCustomThemeGuideMarkdown, DEMO_CUSTOM_THEME, CUSTOM_THEME_TEMPLATE, CUSTOM_THEME_TOKEN_WHITELIST, customThemeCssVar } = loadPure("src/shared/customThemes.ts");
 // 指南模块与主题契约同目录，单独加载避免一次绑死两个模块
 const { buildCustomThemeGuideMarkdown: buildGuide } = loadPure("src/shared/customThemeGuide.ts");
 
@@ -41,6 +41,51 @@ test("合法包解析：外部 --color-* 键归一化为无前缀快照键", () 
 	assert.deepEqual(Object.keys(parsed.tokens.light).sort(), ["accent", "bg-app"]);
 	// theme 字段保留外部完整键形态（供序列化落盘）
 	assert.equal(parsed.theme.appearance.light["--color-bg-app"], "#fafafa");
+});
+
+test("字体 token：--font-family-* 走字体栈校验，非法值/危险写法拒绝", () => {
+	const ok = parseCustomThemePackage(
+		JSON.stringify({
+			schemaVersion: 1,
+			id: "font-theme",
+			name: "字体主题",
+			appearance: {
+				light: { "--color-bg-app": "#fafafa", "--font-family-base": "'JetBrains Mono', Menlo, monospace", "--font-family-md": "霞鹜文楷, serif" },
+			},
+		}),
+	);
+	assert.equal(ok.ok, true, ok.ok ? "" : ok.errors.join("; "));
+	// 快照键不带前缀，注入时再拼回 --font-family-*
+	assert.deepEqual(Object.keys(ok.tokens.light).sort(), ["bg-app", "font-family-base", "font-family-md"]);
+	// 序列化落盘保留完整变量名（下次读回仍能校验通过）
+	assert.equal(ok.theme.appearance.light["--font-family-base"], "'JetBrains Mono', Menlo, monospace");
+	const roundTrip = parseCustomThemePackage(serializeCustomThemePackage(ok.theme));
+	assert.equal(roundTrip.ok, true);
+	assert.equal(roundTrip.tokens.light["font-family-base"], "'JetBrains Mono', Menlo, monospace");
+
+	// 字体值同样是不可信输入：函数/url/分号注入一律拒绝（值只进 inline style 的双保险）
+	for (const evil of ["var(--x)", "url(x)", "a; color: red", "a}b{", "a/b", ""]) {
+		const bad = parseCustomThemePackage(JSON.stringify({ schemaVersion: 1, id: "a-b", name: "x", appearance: { light: { "--font-family-base": evil } } }));
+		assert.equal(bad.ok, false, `字体值 ${evil} 不应通过校验`);
+	}
+	// 颜色组里混入字体值 / 字体组里混入颜色值都要按各自规则拒绝
+	const colorAsFont = parseCustomThemePackage(JSON.stringify({ schemaVersion: 1, id: "a-b", name: "x", appearance: { light: { "--font-family-base": "#fff" } } }));
+	assert.equal(colorAsFont.ok, false);
+	const fontAsColor = parseCustomThemePackage(JSON.stringify({ schemaVersion: 1, id: "a-b", name: "x", appearance: { light: { "--color-accent": "Menlo, monospace" } } }));
+	assert.equal(fontAsColor.ok, false);
+});
+
+test("sanitizeCustomThemeSnapshot：字体 token 保留合法值、丢弃危险值", () => {
+	const cleaned = sanitizeCustomThemeSnapshot({
+		id: "a-b",
+		name: "x",
+		light: { "font-family-base": "'JetBrains Mono', monospace", "font-family-mono": "url(x)", "bg-app": "#fafafa" },
+		dark: {},
+	});
+	assert.ok(cleaned);
+	assert.equal(cleaned.light["font-family-base"], "'JetBrains Mono', monospace");
+	assert.equal(cleaned.light["font-family-mono"], undefined);
+	assert.equal(cleaned.light["bg-app"], "#fafafa");
 });
 
 test("非法 id / 未知 token / 危险颜色值逐项拒绝", () => {
@@ -89,7 +134,8 @@ test("AI 指南：含白名单 token、示例主题 id 与目录路径（双语�
 	assert.ok(en.includes("reserved for the built-in demo theme"));
 	// 白名单全量 token 都应出现在指南里（AI 能看到全部可扩展点）
 	for (const token of CUSTOM_THEME_TOKEN_WHITELIST) {
-		assert.ok(zh.includes(`--color-${token}`), `指南缺少 token ${token}`);
+		// 颜色组是 --color-<token>，字体组本身就是变量名（--font-family-*），统一走 customThemeCssVar
+		assert.ok(zh.includes(customThemeCssVar(token)), `指南缺少 token ${token}`);
 	}
 });
 
