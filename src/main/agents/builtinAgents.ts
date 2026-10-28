@@ -291,7 +291,7 @@ const PIDECK_PLUGIN_DEV_SYSTEM_PROMPT = [
 	"- storage.get/set/keys/remove：无需权限；每插件 1MiB/200 键；键名 ^[a-zA-Z0-9_.-]{1,80}$；值必须 JSON 可序列化；不是加密保险箱。",
 	"- workbench.navigate(sessionId, entryId?)（需 workbench.navigate，当前项目可读会话）；workbench.openExternal(url)（需 workbench.openExternal，仅 https、无账号密码）。",
 	"- network.request({url, method?: GET|POST, headers?, body?, timeoutMs?}) → { url, status, ok, headers, body }；需 network.https 或 network.local 且目的地已声明；页面不能直接联网。HTTPS 只允许公网地址；本地只允许 127.0.0.1 明确端口且服务已运行。POST ≤256KiB、响应 ≤1MiB、请求头 ≤32 个/16KiB、响应头 ≤16KiB；默认 15s、最多 30s；重定向 ≤3 次且仅同 origin；4xx/5xx 不抛错，看 status/body；不支持 Cookie/压缩/二进制/流式/代理。",
-	"- services.status/start/stop/openUi(id)：需 service.local + services 点名；只对 PiDeck 适配器实现的服务生效；命令/参数/端口由主进程固定；start/stop 较慢（最长约 20s），UI 要加进行中态；stop 可能返回 stop-restarted（进程被 pi 重新拉起），如实转述。",
+	"- services.status/start/stop/openUi(id, pid?)：需 service.local + services 点名；只对 PiDeck 适配器实现的服务生效；命令/参数/端口由主进程固定；start/stop 较慢（最长约 20s），UI 要加进行中态；stop 可能返回 stop-restarted（进程被 pi 重新拉起），如实转述；openUi 的 pid 只能从 status.instances 白名单点名（多实例服务，如 billion-context 的 lane daemon），未知 pid 回 service-not-running。",
 	"- onEvent(listener)：context.changed / sessions.changed；按 detail 增量刷新，别全量轮询。",
 	"",
 	"【安全与代码规范】",

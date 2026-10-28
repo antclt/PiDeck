@@ -18,7 +18,6 @@ export type LocalServiceInstance = {
 	pid: number;
 	/** 该实例自己的 Web UI 地址（回环收口后）。 */
 	uiUrl: string;
-	version?: string;
 };
 
 /** 运行状态快照：uiUrl 由主进程适配器推导，插件不参与拼接，也就无法把浏览器引到别的地址。 */

@@ -81,8 +81,9 @@
 
 ## 本地服务（`service.local`）
 
-- 链路：`pideck.services.status/start/stop/openUi(id)` → sender-bound Broker → `src/main/localServices/LocalServiceRegistry.ts` → 适配器（当前只有 `billion-context`）。
-- **能力面不扩大**：插件只能传 service id，命令名/参数/端口全部是主进程适配器里的常量（`localServiceCli.ts` 的命令与参数各自过字符白名单，Windows 走 `cmd.exe /d /s /c` 的 `.cmd` 垫片范式，不拼字符串 shell）。未在 `src/shared/localServices.ts` 白名单里的 id 在 manifest 校验阶段就被拒（`invalid-services`）。
+- 链路：`pideck.services.status/start/stop/openUi(id[, pid])` → sender-bound Broker → `src/main/localServices/LocalServiceRegistry.ts` → 适配器（当前只有 `billion-context`）。
+- **能力面不扩大**：插件只能传 service id；`openUi` 多出的 `pid` 只是从当次 `status.instances` 白名单里点名某个实例的指针（不是地址、不是端口，未知 pid 回 `service-not-running`），命令名/参数/端口仍全部是主进程适配器里的常量（`localServiceCli.ts` 的命令与参数各自过字符白名单，Windows 走 `cmd.exe /d /s /c` 的 `.cmd` 垫片范式，不拼字符串 shell）。未在 `src/shared/localServices.ts` 白名单里的 id 在 manifest 校验阶段就被拒（`invalid-services`）。
+- **多实例**：`bili` 支持 lane daemon（如 pi 扩展自拉的 18790），`bili doctor --json` 的进程表会同时有多行。`status.instances` 按进程表顺序列出全部活实例，第一个是主实例（顶层 `pid`/`uiUrl` 就是它），单实例服务省略该字段；`openUi(id, pid)` 在这份每次查询都重新取的白名单里点名。
 - 双重门：权限 + `manifest.services` 点名。Broker 里四个方法（`status`/`start`/`stop`/`openUi`）逐个登记，不用前缀推断——新增方法忘登记会报错而不是白拿权限。
 - 启停轮询跟着授权绑定走（Broker binding 的 AbortController）：插件被禁用 / 上下文更新 / 面板关闭时立即中断还在等的 `start`/`stop`。
 - 停止只能按 pid 终止（外部 CLI 没有 stop 子命令）：pid 一律来自 `bili doctor --json` 的报告，不猜、不按名字杀。UI 地址同样从报告里取，但只接受 `http://127.0.0.1|localhost:<port>`，防报告被改写成公网地址把内置浏览器带走。

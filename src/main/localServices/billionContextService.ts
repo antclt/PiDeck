@@ -128,7 +128,7 @@ export class BillionContextService implements LocalServiceAdapter {
 			pid: snapshot.pid,
 			...withVersion(`${snapshot.origin}${BILI_UI_PATH}`),
 			// lane daemon（如 pi 自己拉起的实例）也会出现在进程表里：全部带给面板，
-			// openUi(pid) 从这份白名单里点名，插件依旧拿不到「注 own 地址」的能力面。
+			// openUi(pid) 从这份白名单里点名，插件依旧拿不到「注入任意地址」的能力面。
 			instances: snapshot.instances.map((inst) => ({ pid: inst.pid, uiUrl: `${inst.origin}${BILI_UI_PATH}` })),
 		};
 	}
