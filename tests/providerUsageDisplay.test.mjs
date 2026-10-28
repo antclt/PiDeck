@@ -104,6 +104,35 @@ test("usageWindowPercent：used 缺失时用 total - remaining 反推（Details 
 	assert.equal(display.usageWindowPercent({ total: 0, remaining: 0 }), null);
 	// 用超（used > total）封顶 100
 	assert.equal(display.usageWindowPercent({ total: 100, used: 150 }), 100);
+	// 无额度明细时用服务端 percent 兜底（智谱老套餐 token 窗只回 percentage）
+	assert.equal(display.usageWindowPercent({ percent: 9 }), 9);
+	assert.equal(display.usageWindowPercent({ percent: 130 }), 100);
+	assert.equal(display.usageWindowPercent({ percent: -5 }), 0);
+	// total/used 可算时以计算值为准，percent 只兜底
+	assert.equal(display.usageWindowPercent({ total: 100, used: 20, percent: 80 }), 20);
+});
+
+test("usagePercent/usageBadgeSegments：percent-only 窗口照常出百分比与档位", () => {
+	const t = (key) => `#${key}`;
+	const json = (value) => JSON.stringify(value);
+	// 老套餐：5h 窗只有 percent，MCP 月额度带额度明细
+	const result = creditsResult({
+		windows: [
+			{ key: "fiveHour", percent: 9 },
+			{ key: "mcpMonthly", total: 100, used: 1 },
+		],
+	});
+	assert.equal(display.usagePercent(result), 9);
+	assert.equal(display.usageTone(result), "ok");
+	// percent 参与档位判定（≥90 红）
+	assert.equal(display.usageTone(creditsResult({ windows: [{ key: "fiveHour", percent: 92 }] })), "empty");
+	assert.equal(
+		json(display.usageBadgeSegments(result, t)),
+		json([
+			{ labelKey: "sessionContext.usageWindowFiveHour", text: "9%", tone: "ok" },
+			{ labelKey: "sessionContext.usageWindowMcpMonthly", text: "1%", tone: "ok" },
+		]),
+	);
 });
 
 test("formatUsageBadgeText：periods/credits-windows 出百分比，balance 出余额，credits 出剩余", () => {

@@ -484,6 +484,41 @@ test("智谱 MCP 月度额度窗口：按 type=TIME_LIMIT 遍历匹配，与 5h/
 	assert.equal(byKey.weekly.total, 100000);
 });
 
+test("智谱老套餐响应（TOKENS_LIMIT + 只有 percentage）：5h 窗按 percentPath 出值，不下发周窗", () => {
+	const zhipu = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("open.bigmodel.cn"));
+	// 老套餐（level=lite）实测结构：MCP 月额度是 TIME_LIMIT（带 usage/currentValue），
+	// token 窗是 TOKENS_LIMIT（只有 percentage，没有额度明细），且没有 unit:6 周窗。
+	const res = probe.parseUsageResponseBody(
+		{
+			code: 200,
+			msg: "操作成功",
+			success: true,
+			data: {
+				limits: [
+					{ type: "TIME_LIMIT", unit: 5, number: 1, usage: 100, currentValue: 1, remaining: 99, percentage: 1, nextResetTime: 1795574359984 },
+					{ type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 9, nextResetTime: 1793180330831 },
+				],
+				level: "lite",
+			},
+		},
+		"{}",
+		zhipu.parse,
+	);
+	assert.equal(res.matched, true);
+	const byKey = Object.fromEntries(res.credits.windows.map((w) => [w.key, w]));
+	// 5h 窗不能因为没有 usage/currentValue 被整条跳过（旧实现就是这么消失的）
+	assert.equal(byKey.fiveHour.percent, 9);
+	assert.equal(byKey.fiveHour.total, undefined);
+	assert.equal(byKey.fiveHour.used, undefined);
+	// type=TOKENS_LIMIT 与 CREDIT_LIMIT 同等匹配，不能落到 TIME_LIMIT 条目上
+	assert.notEqual(byKey.fiveHour.total, 100);
+	// 老套餐不下发 unit:6：周窗不出现，也不被其它条目顶替
+	assert.equal(byKey.weekly, undefined);
+	assert.equal(byKey.mcpMonthly.total, 100);
+	assert.equal(byKey.mcpMonthly.used, 1);
+	assert.equal(byKey.mcpMonthly.remaining, 99);
+});
+
 test("Kimi booster 独立货币解析：定点余额/分钱换算成元，unlimited 标记", () => {
 	const kimi = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("api.kimi.com"));
 	const res = probe.parseUsageResponseBody(
