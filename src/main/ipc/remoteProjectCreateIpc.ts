@@ -1,17 +1,14 @@
 import { createHash } from "node:crypto";
 import { ipcMain, type WebContents } from "electron";
 import { ipcChannels } from "../../shared/ipc";
+import { codeOf } from "../../shared/op";
 import type { RemoteProjectCreateAnswerResult, RemoteProjectCreateRequest, RemoteProjectEnrollResult } from "../../shared/types/remoteHost";
 import type { SshClientRuntime } from "../remote/SshClientRuntime";
 import { resolveRemoteBrowseRoot } from "../remote/RemoteBrowseRoot";
 import { buildRemoteProjectCreateMkdirCommand, buildRemoteProjectCreateProbeCommand, remoteProjectCreateMkdirCode, remoteProjectCreateProbeCode, runRemoteProjectCreateCommand, splitRemoteProjectCreatePath } from "../remote/RemoteProjectCreateCommands";
 import { PendingConfirmationBroker } from "../security/PendingConfirmationBroker";
 
-/** 从 PendingConfirmationBroker 的拒绝里取稳定码；未知一律折叠成 create failed。 */
-function codeOf(error: unknown, fallback: string): string {
-	const message = typeof error === "object" && error !== null && "message" in error ? (error as { message?: unknown }).message : undefined;
-	return typeof message === "string" && /^[A-Z][A-Z0-9_]{2,63}$/.test(message) ? message : fallback;
-}
+/** 从 PendingConfirmationBroker 的拒绝里取稳定码；未知一律折叠成 create failed。实现只有一份：`shared/op.ts`。 */
 function senderIdOf(sender: WebContents): number | undefined {
 	const id = sender?.id;
 	return Number.isSafeInteger(id) && id > 0 ? id : undefined;

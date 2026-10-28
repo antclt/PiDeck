@@ -13,6 +13,7 @@ import { createHash } from "node:crypto";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { BrowserWindow, dialog, ipcMain } from "electron";
+import { codeOf } from "../../shared/op";
 import { ipcChannels } from "../../shared/ipc";
 import type { RemoteProjectDownloadResult, RemoteProjectUploadResult } from "../../shared/types/remoteHost";
 import type { RemoteHostConnectionService, RemoteProjectSession } from "../remote/RemoteHostConnectionService";
@@ -25,10 +26,7 @@ import { createLocalIoBudget, LOCAL_FILE_IO_TIMEOUT_MS, LOCAL_IO_TIMEOUT_CODE, p
 
 const CONTROL = /[\u0000-\u001f\u007f]/;
 
-function codeOf(error: unknown, fallback: string): string {
-	const message = typeof error === "object" && error !== null && "message" in error ? (error as { message?: unknown }).message : undefined;
-	return typeof message === "string" && /^[A-Z][A-Z0-9_]{2,63}$/.test(message) ? message : fallback;
-}
+// codeOf 只有一份实现（`shared/op.ts`）。
 
 export function registerRemoteProjectTransferIpc(input: { enabled: boolean; service?: () => RemoteHostConnectionService | undefined | Promise<RemoteHostConnectionService | undefined>; locator?: (projectId: string) => { kind: "ssh"; hostId: string; remotePath: string } | undefined }): void {
 	const projectTarget = createRemoteProjectTargetResolver({ service: input.service, locator: input.locator });

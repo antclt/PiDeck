@@ -21,8 +21,7 @@ export function senderIdOf(sender: WebContents): number | undefined {
 /**
  * Map a thrown store/pin error to a stable code. Only messages that are already a bare code survive;
  * anything else collapses to the fallback so no path or command line can reach the renderer.
+ *
+ * 实现只有一份（`shared/op.ts`）：判据分散到每个域会让同一种失败在不同入口得到不同的码。
  */
-export function codeOf(error: unknown, fallback: string): string {
-	const message = typeof error === "object" && error !== null && "message" in error ? (error as { message?: unknown }).message : undefined;
-	return typeof message === "string" && /^[A-Z][A-Z0-9_]{2,63}$/.test(message) ? message : fallback;
-}
+export { codeOf } from "../../shared/op";

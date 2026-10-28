@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { createRemoteProjectTargetResolver } from "./remoteProjectTarget";
 import { ipcMain, type WebContents } from "electron";
 import { ipcChannels } from "../../shared/ipc";
+import { codeOf } from "../../shared/op";
 import type {
 	RemoteProjectDownloadResult,
 	RemoteProjectUploadResult,
@@ -47,14 +48,7 @@ function senderIdOf(sender: WebContents): number | undefined {
 	return Number.isSafeInteger(id) && id > 0 ? id : undefined;
 }
 
-/**
- * Map a thrown store/pin error to a stable code. Only messages that are already a bare code survive;
- * anything else collapses to the fallback so no path or command line can reach the renderer.
- */
-function codeOf(error: unknown, fallback: string): string {
-	const message = typeof error === "object" && error !== null && "message" in error ? (error as { message?: unknown }).message : undefined;
-	return typeof message === "string" && /^[A-Z][A-Z0-9_]{2,63}$/.test(message) ? message : fallback;
-}
+// codeOf 只有一份实现（`shared/op.ts`）：判据分散会让同一种失败在不同入口得到不同的码。
 
 /**
  * 远端项目 IPC：登记、确认回答、按 projectId 的列表/读取/搜索。
