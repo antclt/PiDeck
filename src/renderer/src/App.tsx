@@ -2670,6 +2670,9 @@ export function App() {
 			isRestarting: Boolean(target?.agentId && restartingAgentId === target.agentId) || activatingSessionId === sessionId,
 			isReloading: reloadingSessionId === sessionId,
 			reloadMode: resolveSessionReloadMode(record?.backend),
+			agentId: target?.agentId,
+			// 右键 Tab 的强制停止入口：杀进程 + 解绑，会话记录保留；无绑定（未启动/已关）时隐藏。
+			onCloseAgent: target ? () => requestCloseAgentForSession(sessionId) : undefined,
 			onAction: (action) => void runSessionControl(sessionId, action),
 		};
 	};

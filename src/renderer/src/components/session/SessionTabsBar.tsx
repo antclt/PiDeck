@@ -1347,6 +1347,18 @@ function RunControlContextItems(props: { control: SessionRunControlView }) {
 					{control.isReloading ? t("app.reloading") : t("menu.reloadMessages")}
 				</span>
 			</ContextMenuItem>
+			{control.onCloseAgent ? (
+				<>
+					<ContextMenuSeparator />
+					{/* 强制停止：abort 只停当前回合；进程僵死时 abort 可能永远不回包，这里直接杀进程。 */}
+					<ContextMenuItem variant="destructive" title={t("menu.closeAgentHint")} onSelect={control.onCloseAgent}>
+						<span className="inline-flex items-center gap-2">
+							<CircleX className={cn("size-3.5", control.isStopping && "animate-pulse")} aria-hidden="true" />
+							{control.isStopping ? t("app.closing") : t("menu.closeAgent")}
+						</span>
+					</ContextMenuItem>
+				</>
+			) : null}
 		</>
 	);
 }
