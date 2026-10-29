@@ -395,6 +395,7 @@ import { PromptManager } from "./prompts/PromptManager";
 import { XuePromptManager } from "./prompts/XuePromptManager";
 import { XueIndexService } from "./prompts/XueIndexService";
 import { SessionIndexService } from "./sessions/SessionIndexService";
+import { deriveOrphanSweepMarkers, sweepOrphanedManagedProcesses } from "./process/orphanSweep";
 import { XuePromptDbStore } from "./prompts/XuePromptDbStore";
 import { SkillManager } from "./skills/SkillManager";
 import { readSkillContent } from "./skills/readSkillContent";
@@ -5510,6 +5511,24 @@ app
 				void appLogger?.warn("skill", "Pideck-doctor skill template auto-install failed", { error: result.error });
 			}
 		});
+		// issue #450：Windows 没有进程组级联回收，强杀/异常退出会留下 npx 型 MCP 与 ACP 的
+		// 孤儿 node 进程（事故现场 195 个 / 21GB 提交内存）。启动后后台回收一次：只杀
+		// 「父进程已消失 + 命令行命中当前 MCP/ACP 配置」的 node.exe，活的进程一律不碰。
+		setTimeout(() => {
+			void (async () => {
+				try {
+					const mcp = await configManager.getMcpConfig().catch(() => null);
+					const markers = deriveOrphanSweepMarkers({
+						mcpServers: (mcp?.servers ?? []).map((server) => server.definition),
+						acpTools: settingsStore.get().acpTools ?? [],
+					});
+					const result = await sweepOrphanedManagedProcesses({ markers });
+					if (result.found > 0) void appLogger?.info("process-sweep", "Reclaimed orphaned managed processes", result);
+				} catch (error) {
+					void appLogger?.warn("process-sweep", "Orphan process sweep failed", { error: error instanceof Error ? error.message : String(error) });
+				}
+			})();
+		}, 5_000);
 		extensionManager = new ExtensionManager(
 			piLocator,
 			() => settingsStore.get(),
