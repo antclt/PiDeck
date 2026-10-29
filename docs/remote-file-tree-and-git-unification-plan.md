@@ -264,7 +264,7 @@ type GrantScope = { purpose: "git-write"|"file-entry"|"file-text"; sender: numbe
 **W5 重定范围（v7——v6 的结论被自己推翻，记录在此免得再走一遍）**
 
 v6 曾写「两侧能力不对称，换侧是 +500 行换 −1400 行，所以 W5 不追求面板合并」。这个判断**错在没看见注入口**：
-`GitPanel` 不直接调 IPC——它的全部动作由 `GitDrawerApi`（29 个方法，见 `GitDrawerHost.tsx:8`）注入，
+`GitPanel` 不直接调 IPC——它的全部动作由 `GitDrawerApi`（28 个方法，见 `GitDrawerHost.tsx:8`）注入，
 `createScopedGitApi` 只是把 `repoPath` 绑上去。所以统一缝**既不是 30 个 IPC 动词，也不是 `GitBackend`**，
 而是这个 `GitDrawerApi` 形状：给 ssh 项目构造一份远端实现（≈150 行，逐方法转发到既有 `desktopApi.git.remote*`），
 `GitPanel` 就能原样挂上去——本地那 1926 行变成**两侧共用**，而不是被复制。
@@ -280,9 +280,11 @@ v6 曾写「两侧能力不对称，换侧是 +500 行换 −1400 行，所以 W
 
 代价（v6 唯一说对的部分，不许省略）：
 
-1. **能力门控要新加**：`GitPanel` 今天没有 capabilities 概念，而远端缺 11 个动作——
+1. **能力门控要新加**：`GitPanel` 今天没有 capabilities 概念，而 28 个动作里远端缺 9 个——
    `commitCount`、`cherryPick`、`revert`、`reset`、`dropCommit`、`generateCommitMessage`、
-   `watchRefs`/`unwatchRefs`/`onRefsChanged`、`originalContent`、`diffFileBetween`（后两个在抽屉里另有入口）。
+   `watchRefs`/`unwatchRefs`/`onRefsChanged`（远端用快照事实 + 轮询代替推送）。其余 19 个都有对端
+   （`listRepos`/`status` 已共用；`stage`/`unstage`/`discard`/`commit`/`push`/`pull`/`fetch`/`init`/`branches`/
+   `checkout`/`createBranch`/`deleteFiles`/`aheadBehind`/`commitLog`/`commitDetail`/`branchCompare` 只需换形状）。
    面板必须显式隐藏它们，而不是让按钮点了报错。这份门控只加一次、两边共用，是**净新增**，要计进预算。
 2. **写动作的令牌生命周期只能住在适配器里**：`snapshot` 每次现签单次令牌，`stage/commit/push/pull/fetch/discard/
    branch` 都要带它且带 `expectedRevision`。适配器必须持「最近一次快照的 token + revision」，写失败时按
@@ -290,8 +292,8 @@ v6 曾写「两侧能力不对称，换侧是 +500 行换 −1400 行，所以 W
 3. **远端单仓 vs 本地多仓堆叠**：抽屉按 `scope.repos` 每仓挂一个面板；远端只有一座仓，
    直接用一个 `repoPath = ""` 的面板即可，不需要新代码。
 
-**顺序**：先给 `GitPanel` 加能力门控（行为零变化，纯新增）→ 再写远端 `GitDrawerApi` 适配器（18 个方法有对端，
-11 个走门控）→ 把抽屉对 ssh 项目指向 `GitPanel` → 删三份远端渲染文件 → 跑远端面板的既有回归（trust gate /
+**顺序**：先给 `GitPanel` 加能力门控（行为零变化，纯新增）→ 再写远端 `GitDrawerApi` 适配器（19 个方法有对端，
+9 个走门控）→ 把抽屉对 ssh 项目指向 `GitPanel` → 删三份远端渲染文件 → 跑远端面板的既有回归（trust gate /
 recovery / 令牌）确认没丢行为。
 
 ## 5. 明确不重写（重写零收益，只有风险）
