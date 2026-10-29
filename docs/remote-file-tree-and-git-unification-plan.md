@@ -225,6 +225,49 @@ type GrantScope = { purpose: "git-write"|"file-entry"|"file-text"; sender: numbe
 
 **并行约束（重要）**：`src/main/sessions/` 上还有别人的改动时不碰它；`src/main/index.ts` 是公共汇聚文件，只由装配相关的那一波改。
 
+### 4.2 W5 / W6 实施清单（已定到文件与行，按序执行）
+
+**W6-a `git.checkIgnore`（可离线验证，先做）**
+
+1. `src/shared/types/git.ts`：新增 `RemoteGitIgnoreParams = { paths: readonly string[] }`、
+   `RemoteGitIgnoreResult = Op<{ ignored: boolean[] }>`；`paths` 与请求**逐位对应**（不省略、不重排）。
+2. `src/main/remote/RemoteHelperContract.ts`：新增 `REMOTE_HELPER_METHOD_GIT_CHECK_IGNORE = "git.checkIgnore"`、
+   `REMOTE_HELPER_MAX_CHECK_IGNORE_PATHS = 64`，并加入 method 闭集与 capability 名单。
+3. `src/main/remote/RemoteGitReadSource.ts`（`git-read.mjs` 的可读源）：
+   - `READ_REPO` 加入 `git.checkIgnore`（它接受仓库作用域）；
+   - `prepare()` 校验 `{paths}`：数组、1..64、每项走既有路径校验；
+   - `start()`：`git check-ignore -z -- <paths...>`（**走 argv 不走 stdin**，避免给 runner 加 stdin 通道）；
+     输出按 NUL 切分，映射回 `paths` 的布尔数组；exit code 1（无命中）是**正常结果**不是失败。
+4. `src/main/remote/RemoteHelperEntry.ts`：`CAPABILITIES` 追加 `"git.checkIgnore"`；
+   升 `REMOTE_HELPER_ENTRY_VERSION`（`1.23.0`）与内嵌 `VERSION`；重算并更新 `REMOTE_HELPER_ENTRY_SHA256`，
+   同步 `tests/remoteHelperEntry.test.mjs` 的 `FROZEN_SHA256`（同一次提交，否则清单校验会失败）。
+5. `src/main/git/RemoteGitService.ts`：`checkIgnore(projectId, repo, paths, signal)`；
+   `src/main/ipc/remoteGitReadIpc.ts` 暴露 `checkIgnore(event, projectId, repo, paths)`。
+6. 忽略语义（§3.5）：条目带 `ignored: true` 降级显示而**不隐藏**；非 git 项目 / helper 不支持时
+   退到内置规则，并在 `capabilities.ignore` 里声明 `"builtin"`。
+7. 门禁：`tests/remoteHelperEntry.test.mjs`（新方法自测 + 摘要）、新增
+   `tests/remoteGitCheckIgnore.test.mjs`（逐位对应、超限拒绝、exit 1 是正常结果、非仓库降级）。
+
+**W6-b `fs.watch` 推送（需要真机）**
+
+1. 帧形状：沿用既有请求/响应，新增**事件帧**（无 `id`，带 `watchId` 与 `paths`）；
+   客户端按 `hostId + generation` 围栏，断开即丢。
+2. `watch({paths})→{watchId}` / `unwatch({watchId})` 两个方法；watcher 数、路径数、
+   事件频率都有上限，超限拒绝而不是排队。
+3. 150ms 防抖在 helper 侧做（同一目录的连写合成一次事件），主进程只做失效——
+   即 `RemoteWorkspaceView.invalidate`，**不重新装载**。
+4. 断连/销毁必须清空全部 watcher（`shutdown` 里与 `gitReader.close()` 同位置）。
+5. 降级：`capabilities.watch = false` 时上层用既有轮询（`ProjectCapabilities.watch` 已经是这个开关）。
+6. 门禁（真机）：改文件 3 秒内树更新、断开后无事件泄漏、watcher 上限生效、事件不触发装载风暴。
+
+**W5 前置（不是许可问题，是技术依赖）**
+
+远端 Git 面板要换成共用 UI，前提是共用通道族能服务 ssh——今天只有
+`status` / `workspaceDiff` / `listRepos` 三个动词做到了。剩下 30 个（refs / commitLog / branches /
+commitDetail / stage / commit / push / pull …）各自的结果形状与本地不同形（例：`git:refs` 返回
+`GitRef[]`，远端返回 `RemoteGitRefs`），逐个做同形映射才是 W5 的第一步；删掉远端面板必须放在
+**它之后**，否则远端 Git 会先失去功能。
+
 ## 5. 明确不重写（重写零收益，只有风险）
 
 | 不重写 | 为什么 |
