@@ -199,3 +199,20 @@ test("模型按钮独立打开现有模型选择器，并保留待生效标签�
 	assert.ok(html.includes("Current model → Next model"));
 	assert.ok(html.includes('data-testid="thinking-control"'));
 });
+
+test("滚轮接管区：滑条与刻度标签行同在 data-wheel-owned 容器内", () => {
+	const { ThinkingLevelDropdown } = createHarness();
+	const html = renderToStaticMarkup(createElement(ThinkingLevelDropdown, { ...BASE, current: "high" }));
+	const marker = html.indexOf("data-wheel-owned");
+	assert.ok(marker >= 0, "SSR 输出应含 data-wheel-owned 标记");
+	const inside = html.slice(marker);
+	assert.ok(inside.includes('role="slider"'), "滑条必须在滚轮接管容器内");
+	const ticks = inside.match(/data-tick-value="[a-z]+"/g) ?? [];
+	assert.equal(ticks.length, 7, "7 个档位标签必须与滑条同在滚轮接管容器内");
+});
+
+test("后端明确返回空档位时不渲染滚轮接管区（滚轮回到无效果的现状）", () => {
+	const { ThinkingLevelDropdown } = createHarness();
+	const html = renderToStaticMarkup(createElement(ThinkingLevelDropdown, { ...BASE, levels: [] }));
+	assert.doesNotMatch(html, /data-wheel-owned/);
+});

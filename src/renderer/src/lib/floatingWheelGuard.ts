@@ -20,6 +20,12 @@ export function attachFloatingWheelGuard(root: Element): () => void {
 	const existing = guards.get(root);
 	if (existing) return existing;
 	const onWheelCapture = (event: Event) => {
+		// 放行「自己接管滚轮」的子树（思考强度滑条这类带 data-wheel-owned 的区域）：
+		// 本 guard 是 capture 阶段的 stopPropagation，挂在其后代上的监听连一次都收不到，
+		// 不放行的话那区域的 wheel 处理没有任何补救机会。
+		// 放行 ≠ 无主手势：接管方必须在自己的监听里 preventDefault（决定是否吞掉默认动作），
+		// 因为放行后事件会一路冒到 document。当前唯一的接管方 ThinkingWheelZone 已无条件拦默认动作。
+		if (event.target instanceof Element && event.target.closest("[data-wheel-owned]")) return;
 		event.stopPropagation();
 	};
 	root.addEventListener("wheel", onWheelCapture, { capture: true });
