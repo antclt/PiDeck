@@ -1728,3 +1728,88 @@ test("归档回灌不按 400 条内存快照裁剪:重开长会话拿到完整�
 	assert.equal(manager.readMessagesByAcpSessionId("sess-long").length, 400, "同步读口仍然是内存快照契约（≤400）");
 	assert.equal((await manager.readMessagesWithArchive("sess-long")).length, 500, "异步读口归档优先：分页与会话内查找要能看到完整历史");
 });
+
+test("成功收口触发 onAgentSettled；用户停止不触发", async (t) => {
+	let promptRpcId = null;
+	const { manager, createAgent, lastProc } = harness(t, {
+		handler: (frame) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+			if (frame.method === "session/new") return { sessionId: "sess-settle" };
+			if (frame.method === "session/prompt") {
+				promptRpcId = frame.id;
+				return undefined;
+			}
+			return {};
+		},
+	});
+	const settled = [];
+	manager.onAgentSettled((info) => settled.push(info));
+	const tab = await createAgent();
+
+	// 正常回合：有输出 + end_turn → 触发一次
+	const first = manager.sendPrompt({ agentId: tab.id, message: "hi" });
+	await waitFor(() => promptRpcId !== null, "prompt dispatched");
+	lastProc().writeFromCli({
+		jsonrpc: "2.0",
+		method: "session/update",
+		params: { sessionId: "sess-settle", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "done" } } },
+	});
+	lastProc().writeFromCli({ jsonrpc: "2.0", id: promptRpcId, result: { stopReason: "end_turn" } });
+	assert.equal((await first).accepted, true);
+	// 标题由首条用户消息派生（applyProjectionTitle），完成信号带的是当时的真实标题
+	assert.equal(settled.length, 1);
+	assert.equal(settled[0].agentId, tab.id);
+	assert.equal(settled[0].title, "hi");
+
+	// 用户停止：本轮收口但不算完成（与 pi 的 agent_settled 语义一致）
+	promptRpcId = null;
+	const second = manager.sendPrompt({ agentId: tab.id, message: "again" });
+	await waitFor(() => promptRpcId !== null, "second prompt dispatched");
+	lastProc().writeFromCli({
+		jsonrpc: "2.0",
+		method: "session/update",
+		params: { sessionId: "sess-settle", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "partial" } } },
+	});
+	await manager.abort(tab.id);
+	lastProc().writeFromCli({ jsonrpc: "2.0", id: promptRpcId, result: { stopReason: "cancelled" } });
+	assert.equal((await second).accepted, true);
+	assert.equal(settled.length, 1, "用户停止不得触发完成信号");
+});
+
+test("Ask 通知：每轮只提醒一次，未弹出（开关关着）不占用去重位", async (t) => {
+	const asks = [];
+	let shown = false;
+	const { manager, createAgent } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+				if (frame.method === "session/new") return { sessionId: "sess-ask" };
+				if (frame.method === "session/prompt") return { stopReason: "end_turn" };
+				return {};
+			},
+		},
+		{
+			notify: {
+				askPending: (input) => {
+					asks.push(input);
+					return shown;
+				},
+			},
+		},
+	);
+	const tab = await createAgent();
+	// 开关关着（askPending 返回 false）：不占去重位，用户中途打开开关仍能收到当前提问
+	manager.notifyAskPending(tab.id, "deck-1", "标题", "问题 1");
+	manager.notifyAskPending(tab.id, "deck-1", "标题", "问题 2");
+	assert.equal(asks.length, 2);
+	// 开关打开后同一轮只提醒一次
+	shown = true;
+	manager.notifyAskPending(tab.id, "deck-1", "标题", "问题 3");
+	manager.notifyAskPending(tab.id, "deck-1", "标题", "问题 4");
+	assert.equal(asks.length, 3);
+	// 新回合开始：去重复位（空回合被拒不影响复位）
+	await manager.sendPrompt({ agentId: tab.id, message: "next" });
+	manager.notifyAskPending(tab.id, "deck-1", "标题", "问题 5");
+	assert.equal(asks.length, 4);
+});

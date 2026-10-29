@@ -193,6 +193,11 @@ export interface SessionAgentGateway {
 	/** 会话收到 Ask 类 UI 请求时触发桌面通知（由 AgentManager 实现，不再区分会话是否聚焦）
 	 * 参数：agentId（去重/日志）、sessionId（点击跳转目标）、sessionTitle、question（提问内容，可空） */
 	notifyAskPending(agentId: string, sessionId: string, sessionTitle: string, question: string): void;
+	/**
+	 * 可选能力：本轮成功收口（用户停止 / 失败 / 压缩不算）。
+	 * 桌宠完成气泡与 ACP/DSH 的会话完成通知都订阅它；pi 早在 AgentManager 内部实现。
+	 */
+	onAgentSettled?(listener: (info: { agentId: string; title: string }) => void): () => void;
 	/** 统一的事件出口（agents:* 通道推送），主进程桥接进 sessions:runtime-event 用。 */
 	onOutput(listener: (channel: string, payload: unknown) => void): () => void;
 }

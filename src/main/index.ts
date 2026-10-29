@@ -72,6 +72,7 @@ import { APP_DISPLAY_NAME, initializeAppBrand } from "./utils/appBrand";
 import { migrateDevUserData } from "./projects/devUserDataMigration";
 import { isMainWindowFocused, shouldAlertNow } from "./notifications/alertFocusGate";
 import { buildToastXml, notificationLaunchUrl, resolveNotificationLogoUri } from "./notifications/notificationToast";
+import { notifyAskPending as notifyAgentAskPending, notifySessionFinished, type AgentToastDeps } from "./notifications/agentToast";
 import { extractFocusTargetFromArgv } from "./utils/focusTarget";
 import type { Project, StartupWindowMode } from "../shared/types";
 import { isLocalProject, isRemoteProject } from "../shared/projectLocation";
@@ -3067,6 +3068,25 @@ function mainCopy(key: MainProcessTranslationKey, params?: Record<string, string
 }
 
 /**
+ * 桌面通知的统一依赖（门控/toast/点击跳转在 notifications/agentToast.ts）。
+ * pi 在 AgentManager 内部用同一份 showAgentToast；ACP/DSH 与「非 pi 完成」订阅走这里。
+ * 每次调用现取：settingsStore / mainWindow 都是后段装配，不能在模块顶层快照。
+ */
+function agentToastDeps(): AgentToastDeps {
+	return {
+		settings: () => settingsStore.get(),
+		getWindow: () => mainWindow,
+		logoUri: () => resolveNotificationLogoUri({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath() }),
+		translate: (key, params) => mainCopy(key, params),
+		activate: (sessionId) => {
+			focusMainWindow();
+			if (sessionId) queueFocusTarget({ sessionId });
+		},
+		logger: appLogger,
+	};
+}
+
+/**
  * 把 DSH runtime 导入/安装的内部错误码翻译为用户可读文案。
  * 错误码是 DshRuntimeManager.verifyStagedRuntime 的返回值契约（tests 亦断言裸码），
  * 因此这里只做「码 → 文案」映射，不修改下层返回值。
@@ -5980,6 +6000,8 @@ app
 			// 新会话无标题时的兜底标题（i18n；与外部会话导入兜底一致）
 			() => mainCopy("session.dshUntitled"),
 			rpcLogLiveBroadcaster,
+			// Ask 通知：DSH 没有 AgentManager 的通道，由装配层注入统一门控/toast。
+			{ askPending: (input) => notifyAgentAskPending(agentToastDeps(), input) },
 		);
 		// C12/E15：DSH 退出清理——先停全部活跃会话（清 mux/订阅/pending）再 dispose host，
 		// 顺序保证避免 host 先被杀导致会话清理路径访问已死 transport。
@@ -6759,6 +6781,8 @@ app
 				const settings = settingsStore.get();
 				return { promptStallTimeoutMs: settings.acpPromptStallTimeoutMs, promptTurnTimeoutMs: settings.acpPromptTurnTimeoutMs };
 			},
+			// Ask 通知：与 pi 共用同一份门控/toast；完成通知由 composite.onAgentSettled 统一补。
+			notify: { askPending: (input) => notifyAgentAskPending(agentToastDeps(), input) },
 			// configOptions 变更推送：set_config_option 响应/config_option_update 通知都走同一事件,
 			// 渲染层按 agentId 隔离(旧 agent 迟到事件写旧 atom,不再被读)。
 			onConfigOptionsChanged: (tab, options) => {
@@ -6800,6 +6824,13 @@ app
 			await acpAgentManager?.stopAll();
 		});
 		compositeAgentGateway = new CompositeAgentGateway([agentManager, dshAgentManager, acpAgentManager]);
+		// 非 pi 后端没有 AgentManager 的内部完成通知：这里统一补「会话完成」。
+		// pi 已经在自己内部发过（门控/文案一致），跳过避免双弹。
+		compositeAgentGateway.onAgentSettled((info) => {
+			const tab = compositeAgentGateway?.list().find((candidate) => candidate.id === info.agentId);
+			if (!tab || (tab.backend ?? "pi") === "pi") return;
+			notifySessionFinished(agentToastDeps(), { agentId: info.agentId, title: info.title, ...(tab.deckSessionId ? { sessionId: tab.deckSessionId } : {}) });
+		});
 		// 项目位置注入给会话协调器：远端会话在 pi 上报会话文件之前没有 ssh 身份，"这条会话的 runtime
 		// 在哪台机器上"只能由项目 locator 回答（AgentManager 也按它路由 runtime）。位置真相同的单一
 		// 来源仍然是 projectStore，这里只给一个只读取值器。
@@ -7265,7 +7296,8 @@ app
 
 		// 桌面宠物系统：新增模块，默认关闭（petEnabled=false），不触碰现有 IPC 与主窗逻辑
 		petSystem = new PetSystem({
-			agentManager,
+			// 全后端聚合：ACP/DSH 的 running/idle/error/waiting 与完成气泡都由 composite 提供。
+			agentSource: compositeAgentGateway,
 			settingsStore,
 			getMainWindow: () => mainWindow,
 			resolveSessionId: (agentId) => sessionRuntimeCoordinator.getSessionId(agentId),

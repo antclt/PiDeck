@@ -86,6 +86,11 @@ type AcpManagerDeps = {
 	 * 让设置够不到看门狗，长工具调用/长回合被 90s/10min 硬编码误杀）。
 	 */
 	readAcpTimeoutSettings?: () => { promptStallTimeoutMs?: number; promptTurnTimeoutMs?: number };
+	/**
+	 * 桌面 Ask 通知出口（与 pi 同一份门控/toast，见 notifications/agentToast.ts）。
+	 * 返回是否真的弹出：false 时不占用「每轮只提醒一次」的去重位。缺省静默。
+	 */
+	notify?: { askPending?: (input: { agentId: string; sessionId: string; sessionTitle: string; question: string }) => boolean };
 };
 
 /** CLI 诊断输出(stderr)尾部:只留最近几行且每行截断,仅供空白回合诊断/日志,不进时间线。 */
@@ -114,6 +119,10 @@ export class AcpAgentManager implements SessionAgentGateway {
 	 *  stop/升级强杀后 runtime 删除，重入会话时 readMessagesByAcpSessionId 的临时数据源。 */
 	private readonly messageSnapshots = new AcpMessageSnapshotStore();
 	private readonly outputListeners = new Set<(channel: string, payload: unknown) => void>();
+	/** 成功收口订阅（桌宠 done 气泡 / 会话完成通知）：用户停止与失败不触发。 */
+	private readonly settledListeners = new Set<(info: { agentId: string; title: string }) => void>();
+	/** 每轮只提醒一次 Ask：sendPrompt 开头清空（与 pi 的 agent_start 同口径）。 */
+	private readonly notifiedAskAgents = new Set<string>();
 	/** 回合看门狗（abort 升级宽限/stall 检测）：强杀出口回注 forceStopRuntime→stop()。 */
 	private readonly turnWatchdog: AcpTurnWatchdog;
 	/** session/update 摄入与消息发布管线（投影→物化→标题→节流 flush→快照）。 */
@@ -529,6 +538,8 @@ export class AcpAgentManager implements SessionAgentGateway {
 		runtime.cancelling = false;
 		runtime.cancelReason = null;
 		runtime.escalatedStop = null;
+		// 新一轮开始：Ask 提醒去重复位（同一轮多次提问只提醒一次，跨轮重新提醒）。
+		this.notifiedAskAgents.delete(input.agentId);
 		runtime.status = "running";
 		runtime.tab.status = "running";
 		this.emit(agentEventTags.agentsState, this.list());
@@ -658,6 +669,9 @@ export class AcpAgentManager implements SessionAgentGateway {
 			return emptyTurnRejection(runtime.tool.name, debugDetails);
 		}
 		await this.persistArchive(runtime);
+		// 真正成功收口（已过空白回合守卫）：通知装配层（会话完成通知 / 桌宠 done 气泡）。
+		// 用户主动停止不算完成，与 pi 的 agent_settled 语义一致。
+		if (runtime.cancelReason !== "user_stop") this.notifyAgentSettled(input.agentId, runtime.tab.title);
 		return { accepted: true };
 	}
 
@@ -754,8 +768,30 @@ export class AcpAgentManager implements SessionAgentGateway {
 		return { accepted: true };
 	}
 
-	notifyAskPending(_agentId: string, _sessionId: string, _sessionTitle: string, _question: string): void {
-		// 桌面通知由 SessionRuntimeCoordinator.observeRuntimeEvent 统一触发。
+	notifyAskPending(agentId: string, sessionId: string, sessionTitle: string, question: string): void {
+		// 桌面通知出口由装配层注入（与 pi 同一份门控/toast）；开关关着时不占用每轮去重位。
+		if (!this.deps.notify?.askPending) return;
+		if (this.notifiedAskAgents.has(agentId)) return;
+		if (!this.deps.notify.askPending({ agentId, sessionId, sessionTitle, question })) return;
+		this.notifiedAskAgents.add(agentId);
+	}
+
+	/** 注册「本轮成功收口」监听器（桌宠 / 完成通知）；返回退订。 */
+	onAgentSettled(listener: (info: { agentId: string; title: string }) => void): () => void {
+		this.settledListeners.add(listener);
+		return () => {
+			this.settledListeners.delete(listener);
+		};
+	}
+
+	private notifyAgentSettled(agentId: string, title: string): void {
+		for (const listener of this.settledListeners) {
+			try {
+				listener({ agentId, title });
+			} catch {
+				// 订阅者失败不得影响会话收口
+			}
+		}
 	}
 
 	async getRuntimeState(agentId: string): Promise<AgentRuntimeState> {

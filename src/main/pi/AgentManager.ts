@@ -47,7 +47,8 @@ import { PiProcess, type WhitelistSkip } from "./PiProcess";
 import { resolveWhitelistSkipCopy } from "./whitelistSkipNotice";
 import { APP_DISPLAY_NAME } from "../utils/appBrand";
 import { isMainWindowFocused, shouldAlertNow } from "../notifications/alertFocusGate";
-import { buildToastXml, notificationLaunchUrl, resolveNotificationLogoUri } from "../notifications/notificationToast";
+import { resolveNotificationLogoUri } from "../notifications/notificationToast";
+import { showAgentToast, type AgentToastDeps } from "../notifications/agentToast";
 import { createCompactRpcRequest } from "./compactRpc";
 import { readPiCompactionOwnership, type PiCompactionOwnership } from "./compactionOwner";
 import { mergeSubagentSources } from "./derivedSubagents";
@@ -6737,22 +6738,7 @@ export class AgentManager {
 			// 有具体提问内容时展示问题，否则退回通用文案（批量提问等无 title 场景）
 			const questionText = question.length > 60 ? `${question.slice(0, 60)}…` : question;
 			const body = questionText ? this.translate("mainNotification.askQuestion", { title, question: questionText }) : this.translate("mainNotification.askPending", { title });
-			const notification = new Notification({
-				title: appName,
-				body,
-				silent: false,
-				// 自定义 toast XML：launch 携带 sessionId，点击后经 pideck:// 协议唤起应用并跳转对应会话
-				toastXml: buildToastXml({ title: appName, body, launch: notificationLaunchUrl(sessionId), logoUri: this.notificationLogoUri() }),
-			});
-			// 点击通知：聚焦主窗口并切换到对应会话（session-first，跳转按 SessionRecord.id）
-			notification.on("click", () => {
-				this.focusMainWindowForSession(sessionId);
-			});
-			notification.on("failed", (_event, error) => {
-				// Windows 拒绝显示 toast 时触发（show() 本身不抛异常），记 warn 便于排查
-				void this.appLogger?.warn("agent", "Ask notification failed to show", { agentId, error: String(error) });
-			});
-			notification.show();
+			showAgentToast(this.notificationDeps, { agentId, kind: "ask", body, sessionId });
 		} catch {
 			// 通知失败不影响主流程，静默处理
 		}
@@ -6772,29 +6758,12 @@ export class AgentManager {
 			if (!shouldAlertNow(settings.alertOnlyWhenUnfocused, isMainWindowFocused(this.getWindow()))) return;
 			if (!Notification.isSupported()) return;
 
-			// 使用品牌常量而非 app.getName()：asar 内 package.json 只有 name=pi-desktop，
-			// 安装版通知标题会显示 pi-desktop（用户反馈），品牌名固定走 APP_DISPLAY_NAME。
-			const appName = APP_DISPLAY_NAME;
 			const body = this.translate("mainNotification.sessionDone", { title: sessionTitle });
 			// 会话结束时 runtime 一定已绑定会话；跳转目标用 record.id（renderer 按它索引会话），
 			// tab.sessionId 是 pi 侧会话 id 只能兜底（见 resolveNotificationSessionId 注释）。
 			const resolveSessionId = this.resolveSessionId;
 			const sessionId = resolveNotificationSessionId(resolveSessionId ? () => resolveSessionId(agentId) : undefined, this.agents.get(agentId)?.tab.sessionId);
-			const notification = new Notification({
-				title: appName,
-				body,
-				silent: false,
-				// 自定义 toast XML：launch 携带 sessionId，点击后经 pideck:// 协议唤起应用并跳转对应会话
-				toastXml: buildToastXml({ title: appName, body, launch: notificationLaunchUrl(sessionId), logoUri: this.notificationLogoUri() }),
-			});
-			notification.on("click", () => {
-				this.focusMainWindowForSession(sessionId);
-			});
-			notification.on("failed", (_event, error) => {
-				// Windows 拒绝显示 toast 时触发（show() 本身不抛异常），记 warn 便于排查
-				void this.appLogger?.warn("agent", "Session notification failed to show", { agentId, error: String(error) });
-			});
-			notification.show();
+			showAgentToast(this.notificationDeps, { agentId, kind: "done", body, sessionId });
 		} catch {
 			// 通知失败不影响主流程，静默处理
 		}
@@ -6830,6 +6799,18 @@ export class AgentManager {
 	 */
 	private notificationLogoUri(): string | null {
 		return resolveNotificationLogoUri({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath() });
+	}
+
+	/** 统一通知出口的依赖（构造/点击/失败日志在 notifications/agentToast.ts）。 */
+	private get notificationDeps(): AgentToastDeps {
+		return {
+			settings: () => this.settingsStore.get(),
+			getWindow: () => this.getWindow(),
+			logoUri: () => this.notificationLogoUri(),
+			translate: (key, params) => this.translate(key, params),
+			activate: (sessionId) => this.focusMainWindowForSession(sessionId),
+			logger: this.appLogger,
+		};
 	}
 
 	// abort 流闸与升级收口在 AbortStreamGateController；以下薄包装保持事件路径调用点与契约测试形态。

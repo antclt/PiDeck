@@ -148,6 +148,10 @@ export class DshAgentManager implements SessionAgentGateway {
 	 *  共享 mux（$events）只剩审批/提问瀑布；journal 事件按会话各开一条。 */
 	private readonly followPumps = new Map<string, { controller: AbortController; promise: Promise<void> }>();
 	private readonly outputListeners = new Set<(channel: string, payload: unknown) => void>();
+	/** 成功收口订阅（桌宠 done 气泡 / 会话完成通知）：用户停止与失败不触发。 */
+	private readonly settledListeners = new Set<(info: { agentId: string; title: string }) => void>();
+	/** 每轮只提醒一次 Ask：sendPrompt 开头清空。 */
+	private readonly notifiedAskAgents = new Set<string>();
 	/** 待应答的 DSH server-request 帧：rpcId → frame（approval/question 共用一张表）。 */
 	private readonly pendingResponses = new Map<string, DshApprovalFrame | DshQuestionFrame>();
 	/** RPC 日志开关集合（G17；agentId → 开启）。 */
@@ -186,6 +190,11 @@ export class DshAgentManager implements SessionAgentGateway {
 		private readonly getUntitledTitle: () => string = () => "DSH 会话",
 		/** 实时 RPC 日志广播（RpcLogLiveBroadcaster；未注入时实时流不可用但记录/落盘不受影响）。 */
 		private readonly rpcLogLive?: RpcLogLiveSink,
+		/**
+		 * 桌面 Ask 通知出口（与 pi 同一份门控/toast，见 notifications/agentToast.ts）。
+		 * 返回是否真的弹出：false 时不占用「每轮只提醒一次」的去重位。缺省静默。
+		 */
+		private readonly notify?: { askPending?: (input: { agentId: string; sessionId: string; sessionTitle: string; question: string }) => boolean },
 	) {
 		// E4：host 崩溃自动重启完成后恢复所有 runtime（host 内存已丢失：流式/工具/
 		// 压缩状态停在崩溃前，mux 重连后新 host 没有已订阅会话，事件不会再推）。
@@ -436,6 +445,8 @@ export class DshAgentManager implements SessionAgentGateway {
 
 	async sendPrompt(input: SendPromptInput): Promise<SendPromptResult> {
 		const runtime = this.runtime(input.agentId);
+		// 新一轮开始：Ask 提醒去重复位（同一轮多次提问只提醒一次，跨轮重新提醒）。
+		this.notifiedAskAgents.delete(input.agentId);
 		const client = this.requireClient();
 		// G2：图片附件直接以 PromptContentPart 的 image 块（mediaType + base64 data）
 		// 随 prompt 发送——host 受理时自行校验/落盘，无需额外上传端点。
@@ -869,7 +880,11 @@ export class DshAgentManager implements SessionAgentGateway {
 		const runtime = this.runtime(agentId);
 		const client = this.requireClient();
 		// 先抬世代再 cancel：mux 里迟到的 chunk/turn/start 必须丢掉，否则停止按钮会一直亮。
+		// turn/end 时 control.cancelled 已被复位，完成信号要单独记「本轮是用户停的」；
+		// 只在确实有活动回合时置位（idle 下点停止不能污染下一轮的完成信号）。
+		const hadActiveTurn = runtime.control.status === "running" || runtime.control.isStreaming;
 		this.applyControl(runtime, beginDshCancel(runtime.control));
+		if (hadActiveTurn) runtime.userStoppedTurn = true;
 		// 立即收口思考流：停止后旧回合的 reasoning 残留帧会被 cancelled 守卫丢弃，
 		// Live 思考块不能等 turn/end（可能迟到/缺失），否则「停止后思考还在转」。
 		if (runtime.thinkingId) {
@@ -1864,9 +1879,30 @@ export class DshAgentManager implements SessionAgentGateway {
 		return { accepted: true };
 	}
 
-	notifyAskPending(): void {
-		// 桌面通知由 SessionRuntimeCoordinator.observeRuntimeEvent 统一触发
-		// （非聚焦会话收到 agents:ui-request 时），DSH 不需要额外通道。
+	notifyAskPending(agentId: string, sessionId: string, sessionTitle: string, question: string): void {
+		// 桌面通知出口由装配层注入（与 pi 同一份门控/toast）；开关关着时不占用每轮去重位。
+		if (!this.notify?.askPending) return;
+		if (this.notifiedAskAgents.has(agentId)) return;
+		if (!this.notify.askPending({ agentId, sessionId, sessionTitle, question })) return;
+		this.notifiedAskAgents.add(agentId);
+	}
+
+	/** 注册「本轮成功收口」监听器（桌宠 / 完成通知）；返回退订。 */
+	onAgentSettled(listener: (info: { agentId: string; title: string }) => void): () => void {
+		this.settledListeners.add(listener);
+		return () => {
+			this.settledListeners.delete(listener);
+		};
+	}
+
+	private notifyAgentSettled(agentId: string, title: string): void {
+		for (const listener of this.settledListeners) {
+			try {
+				listener({ agentId, title });
+			} catch {
+				// 订阅者失败不得影响会话收口
+			}
+		}
 	}
 
 	// ── 内部 ───────────────────────────────────────────────────────────────────
@@ -2609,6 +2645,10 @@ export class DshAgentManager implements SessionAgentGateway {
 			const wasCompacting = runtime.isCompacting === true;
 			const turnEndReason = event?.data && typeof event.data === "object" && (event.data as { reason?: unknown }).reason;
 			const reasonMessage = turnEndReason && typeof turnEndReason === "object" && "error" in turnEndReason && typeof (turnEndReason as { error?: { message?: unknown } }).error?.message === "string" ? (turnEndReason as { error: { message: string } }).error.message : "";
+			const reasonKind = turnEndReason && typeof turnEndReason === "object" && "kind" in turnEndReason ? String((turnEndReason as { kind?: unknown }).kind) : "";
+			// control.cancelled 在 turn/end 已被复位，用户停止只能靠 abort() 置的独立标记判断。
+			const userStopped = runtime.userStoppedTurn === true;
+			runtime.userStoppedTurn = false;
 			if (reasonMessage) {
 				runtime.contextOverflow = isContextOverflowError(reasonMessage);
 			} else if (wasCompacting) {
@@ -2627,6 +2667,9 @@ export class DshAgentManager implements SessionAgentGateway {
 			// 消息兜底的轮数/步数要在 turn/end 当帧更新输入框底下的 StatsLine。
 			if (runtime.isCompacting) runtime.isCompacting = false;
 			this.emitRuntimeState(runtime.tab.id);
+			// 成功收口：通知装配层（会话完成通知 / 桌宠 done 气泡）。
+			// 用户停止、失败回合与 /compact 命令回合都不算「回答完成」（与 pi 的 settled 同口径）。
+			if (!userStopped && !wasCompacting && reasonKind !== "error") this.notifyAgentSettled(runtime.tab.id, runtime.tab.title);
 		}
 		if (p.messagesChanged && !p.turnEnded) {
 			this.emitMessages(runtime);
@@ -2734,6 +2777,8 @@ function initialDshControl(): DshControlState {
 
 type DshAgentRuntime = {
 	tab: AgentTab;
+	/** 本轮是用户主动停止的（abort 置位，turn/end 消费后复位）：完成信号据此跳过。 */
+	userStoppedTurn?: boolean;
 	sessionId: SessionId;
 	cwd: string;
 	messages: ChatMessage[];
