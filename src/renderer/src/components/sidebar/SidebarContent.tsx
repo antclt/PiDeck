@@ -1,4 +1,4 @@
-import { Activity, Bolt, CirclePlus, Clock, Folder, Globe, MessageSquare, Monitor, Moon, Search, Sun } from "lucide-react";
+import { Activity, Bolt, ChevronDown, CirclePlus, Clock, Folder, Globe, MessageSquare, Monitor, Moon, Search, Sun } from "lucide-react";
 import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import type { AgentBackend, AgentTab, AppThemeMode, ArchivedDshSession, ArchivedPiSession, Project, SessionRecord, SessionSummary, WorktreeEntry } from "../../../../shared/types";
 import { AgentContextMenu, DraftSessionContextMenu, ProjectContextMenu, SessionContextMenu, SessionManagerModal, SessionSourceFilterMenu, WorktreeCreateDialog } from "./SidebarParts";
@@ -209,6 +209,9 @@ export function SidebarContent(props: SidebarContentProps) {
 	const menuAgentCanRpcLog = menuAgent !== undefined && getBoundSidebarRuntimeAgentByAgentId(controller.catalog, menuAgent.id) !== undefined;
 	// 顶部「搜索」菜单项控制 MorphingSearch 命令面板的展开状态。
 	const [searchOpen, setSearchOpen] = useState(false);
+	// 低频入口（定时任务 / 智能体 / 收藏）收进「更多」：新建与搜索是每次会话都要用的，
+	// 这三个是偶发入口，平铺在列表上方会把会话列表挤下去。展开态只在本会话内保持。
+	const [moreActionsOpen, setMoreActionsOpen] = useState(false);
 	// 拼音字典按需装载：搜索面板打开才拉 26k 条字典 chunk（不进启动路径）。
 	// 就绪后 bump 一次渲染让 searchItems 重算出真实拼音键；未就绪期间面板退化为
 	// 子串/英文匹配，本地 chunk 毫秒级到位，体感无损。失败静默（只损失拼音通道）。
@@ -372,12 +375,26 @@ export function SidebarContent(props: SidebarContentProps) {
 						{/* 快捷键默认隐藏，行 hover 时才淡入；键位跟随设置页自定义（useShortcutBindings） */}
 						<kbd className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md px-1 text-micro text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">{searchKbd}</kbd>
 					</button>
-					{/* 定时任务入口：放在新建/搜索下面，避免藏在底栏 Dock 里不好找 */}
-					<AutomationDockButton />
-					{/* 智能体入口：紧随定时任务，打开会话 Tab 栏里的「智能体」页面 */}
-					<AgentMarketDockButton />
-					{/* 收藏入口：放在智能体下面，打开会话 Tab 栏里的「收藏」页面 */}
-					<FavoritesDockButton />
+					{/* 低频入口折叠组：定时任务 / 智能体 / 收藏。展开后按原顺序平铺，
+					    不改变各自行为（定时任务仍有运行中呼吸点，智能体/收藏各自打开页面 Tab）。 */}
+					<button
+						type="button"
+						className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-bg-hover"
+						aria-expanded={moreActionsOpen}
+						aria-controls="sidebar-more-actions"
+						title={t("common.more")}
+						onClick={() => setMoreActionsOpen((v) => !v)}
+					>
+						<ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-fast", moreActionsOpen && "rotate-180")} aria-hidden="true" />
+						<span className="min-w-0 flex-1 truncate font-medium">{t("common.more")}</span>
+					</button>
+					{moreActionsOpen ? (
+						<div id="sidebar-more-actions" className="flex flex-col gap-0.5">
+							<AutomationDockButton />
+							<AgentMarketDockButton />
+							<FavoritesDockButton />
+						</div>
+					) : null}
 					{/* 宿主插件面板入口：与定时任务同区，无已启用面板时组件自身不渲染 */}
 					<HostPluginDockButtons projectId={props.currentProjectId} sessionId={props.currentSessionId} />
 				</div>
