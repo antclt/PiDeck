@@ -190,13 +190,21 @@ type GrantScope = { purpose: "git-write"|"file-entry"|"file-text"; sender: numbe
 | W0 | ✅ | `src/main/remote/RemoteCallMeter.ts` 挂在 `RemoteControlClient` 发帧路径；`tests/remoteCallMeter.test.mjs`（5 例） |
 | W1 | ◐ 主体 | `fileTreeLazy`：`projectFileKey` / `parseFileTreeKey` / `fileTreeNodeKey`（不再退回本机绝对路径）/ `migrateExpandedDirKeys` / `isActiveFileTreeRow`；拖拽负载的 `path` 变可选、远端不再伪造本机路径；展开集旧键按树内 `path` 别名迁移（幂等）；`useProjectSync` / `useProjectFileTreeController` / `FileTreeRows` / `RemoteProjectPanel` 已跟随 |
 | W2 | ◐ 大部分 | **entry / text / trust / project（7 类）/ transfer（上传下载）已 `Op<T>`**；`shared/op.ts` 提供 `Op` / `codeOf` / `OP_UNKNOWN_CODES` / `opFailFromCode`；`codeOf` 独立实现 **10 份 → 1 份**（`remoteHostInputValidation` 改 re-export）；`tests/envelopeSingleSource.test.mjs` 守不变量 |
-| W3 | ◐ 地基 | `RemoteFactCache`（合并/失效/revision/LRU）、`RemoteWorkspaceView`（dir/repos/status + 失效矩阵 + `onChanged`）、`ProjectCapabilities`（修 R3：主机可用从两个定义变一个） |
+| W3 | ◐ 目录族已接线 | `RemoteFactCache` / `RemoteWorkspaceView`（三族形状 + 失效矩阵 + `onChanged`）；`ProjectCapabilities` 下沉 shared 并替掉三处「已连接」判定（R3 已修）；**目录族已进生产**：`remoteProjectIpc.list` 走事实层并返回 `{entries, revision}`，entry/text 写成功后标脏（`tests/remoteProjectDirFacts.test.mjs` 5 例） |
 | W4 / W5 / W6 | ⨯ 未开 | 见下表 |
 
 **W2 的未完成项与理由（不是遗漏）**
 
 - **sessions 域（scan / title / register）暂不迁移**：`R1a` 刚把会话扫描改成一次性命令并重写了这三个结果的生产侧。同一批类型再改一次会让那批新测试整体红；价值只在“词汇一致”，风险却是刚稳定的链路。等 W4 合并通道时与 `remoteSessionIpc` 一起改，代价相同。
 - **hosts 域（约 20 类）不按 `Op<T>` 迁移**，改为文档化例外：`RemoteHostOperationFailure` 带 `hostId` 回显（并发请求交错时的可归因性），而 `OpFailure` 刻意只有 `code` + `outcome`。强行迁移要么丢掉回显、要么把 `hostId` 塞进 value 让失败分支失去归属。hosts 域本来就已经信封化（只有 `ok`/`code` 两种字段），真正的病在**渲染层 4 处各自判定可用性**——那已经由 `ProjectCapabilities` 解决。
+
+**W3 的一个硬结论（写清楚免得下次又踩）**：`git:remote-snapshot` **不能进事实缓存**。
+它在同一次读里**签发写授权**（`remoteGitReadIpc.ts:110-135` 为每个 scope `tokens.issue`），
+缓存快照等于把一次性授权的旧副本反复发出去——与 `entry.stat` 是同一类错误（读路径签令牌）。
+所以 Git 侧的正确顺序是：先在 W4 把「读事实」与「签授权」拆成两步（读事实可缓存、授权按当前事实
+每次现签），再让 status/repos 进事实层。今天只有**目录族**进了事实层（不签任何令牌）。
+`git:remote-repos` 虽然不签令牌，但它与 `git:listRepos` 是两个通道、两个返回形状，单改一侧只会让
+「树与面板看同一份仓库列表」这件事更难，留给 W4 一起收。
 
 **下一步的确定落点（按依赖顺序）**
 
