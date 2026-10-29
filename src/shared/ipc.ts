@@ -77,6 +77,12 @@ export const ipcChannels = {
 	remoteProjectSearch: "remote:project-search",
 	/** 项目已确认 root 的最近一次复核结果（只读、不建会话、无 helper 请求）。 */
 	remoteProjectRootStatus: "remote:project-root-status",
+	/** 订阅一个项目的目录/Git 事实变化（只标脏，不触发装载）；订阅绑定 sender + project。 */
+	remoteProjectFactsSubscribe: "remote:project-facts-subscribe",
+	/** 取消一个项目的事实变化订阅。 */
+	remoteProjectFactsUnsubscribe: "remote:project-facts-unsubscribe",
+	/** 主进程 → 渲染层：事实变化通知（projectId + generation + 被标脏的 scopes）。 */
+	remoteProjectFactsChanged: "remote:project-facts-changed",
 	/** 列出远端主机上的会话文件（只读、有界；不含正文）。 */
 	remoteSessionScan: "remote:remote-session-scan",
 	/** 按需解析一条远端会话的标题（有界头读；只读、不写 catalog）。 */

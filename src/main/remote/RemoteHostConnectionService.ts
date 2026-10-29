@@ -126,6 +126,14 @@ export type RemoteProjectSession = {
 	/** The pin-confirmed route digest of this host revision; the ticket binds it, main never guesses it. */
 	readonly hostRouteDigest: string;
 	readonly hostRevision: number;
+	/**
+	 * 主进程持有的稳定 helper 会话身份：manager 实例 + 连接 generation。
+	 *
+	 * 一次会话里每次读都会新建一个 session 包装对象（这是有意的：包装绑定到当时的 manager），但它们
+	 * 代表同一个 helper，所以这个值不变。重连（manager 的 generation 前进）、换根或换 manager 都会
+	 * 换值。��阅类登记（目录 watcher）必须用它作 key：用包装对象会把同一次会话的每次读当成新会话。
+	 */
+	readonly connectionId: string;
 	runCommand(remoteCommand: string): Promise<{ exitCode: number; stdout: string }>;
 	/** Build and consume an interactive invocation under the host lock; no escaped stale spawn plan. */
 	withTerminalInvocation<T>(remoteCommand: string, launch: (invocation: PinnedSshInvocation, assertCurrent: () => Promise<void>) => T): Promise<T>;
@@ -251,6 +259,23 @@ function extensionDeployCodeOf(error: unknown): string {
  */
 function throwIfCancelled(signal: AbortSignal | undefined): void {
 	if (signal?.aborted === true) throw new Error("SSH_HOST_DISCONNECTED");
+}
+
+/**
+ * Opaque identity for one live manager instance (see `RemoteProjectSession.connectionId`).
+ *
+ * A manager object is replaced on every root switch/rebind, so object identity already distinguishes those;
+ * the caller appends the machine generation to distinguish a reconnect on the same manager. Kept as a
+ * WeakMap so a discarded manager cannot be retained by this bookkeeping.
+ */
+const managerTokens = new WeakMap<object, number>();
+let managerTokenCounter = 0;
+function managerToken(manager: object): number {
+	const existing = managerTokens.get(manager);
+	if (existing !== undefined) return existing;
+	managerTokenCounter += 1;
+	managerTokens.set(manager, managerTokenCounter);
+	return managerTokenCounter;
 }
 
 function defaultPorts(): RemoteHostConnectionPorts {
@@ -708,6 +733,8 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 		// launcher refuse to mint (it requires 64 hex) while reads stay independent of the ticket surface.
 		const route = await readVerifiedRoute(hostId);
 		if (route !== null && route.revision !== held.revision) return { ok: false, code: "SSH_HOST_NOT_READY" };
+		// 目录 watcher 的登记身份：同一个 manager、同一个连接代数 ⇒ 同一个 key；换根/重连/换 manager ⇒ 新 key。
+		const connectionId = `${hostId}#${managerToken(bound)}#${bound.getState(hostId).generation}`;
 		return {
 			ok: true,
 			session: {
@@ -717,6 +744,7 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 				bundleSha256: held.session.bundleSha256,
 				hostRouteDigest: route?.routeDigest ?? "",
 				hostRevision: held.revision,
+				connectionId,
 				async runCommand(remoteCommand) {
 					// 每块重新校验pin和host store代数；不能拿旧Node路径向重绑后的主机发写命令。
 					if (disposed || hosts.get(hostId)?.manager !== bound || bound.getState(hostId).state !== "ready" || (await readRevision()) !== held.revision) throw new Error("SSH_HOST_NOT_READY");
@@ -1172,6 +1200,24 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 			const manager = hosts.get(hostId)?.manager;
 			if (manager === undefined) return Promise.reject(new Error("SSH_HOST_NOT_READY"));
 			return manager.cancel(hostId, requestId, options);
+		},
+		/**
+		 * 只读当前连接事实：稳定 helper 身份 + 当前状态。**不连接、不建会话、不持锁**。
+		 *
+		 * 事实缓存用它做两件事：把跨调用缓存围栏到一代 helper（换根/重连 ⇒ 新身份）；缓存命中前
+		 * 确认连接仍然可用（离线时不得返回暖缓存成功）。没有 manager 或已显式断开时返回 undefined。
+		 */
+		connectionFacts(hostId: string): { connectionId: string; state: RemoteHostConnectionState } | undefined {
+			if (disposed || explicitlyDisconnected.has(hostId)) return undefined;
+			const entry = hosts.get(hostId);
+			const manager = entry?.manager;
+			if (manager === undefined) return undefined;
+			try {
+				const state = manager.getState(hostId);
+				return { connectionId: `${hostId}#${managerToken(manager)}#${state.generation}`, state: state.state };
+			} catch {
+				return undefined;
+			}
 		},
 		/**
 		 * Run one whole read-only operation against a host confined to `root`, with the session pinned.

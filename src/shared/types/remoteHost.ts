@@ -275,6 +275,21 @@ export type RemoteSessionEntry = {
  */
 export type RemoteProjectRootStatusResult = Op<{ status: "ok" | "needs-attention"; code?: string }>;
 
+/**
+ * 一次事实失效的范围（目录/Git 共用）。路径是**项目根相对**路径；`status` 的 `repoPath` 也是项目相对。
+ *
+ * 这是跨 IPC 推送的载荷，所以放在契约层：主进程只标脏，读仍由活跃消费者发起。
+ */
+export type RemoteProjectFactsScope = { kind: "dir"; path: string } | { kind: "repos" } | { kind: "status"; repoPath: string };
+
+/**
+ * 事实变化通知：至少携带 projectId、generation 与被标脏的 scopes。
+ *
+ * `generation` 是连接代（稳定 helper 身份）；渲染层跨代一律丢弃缓存。空串表示主进程当时不持有
+ * 稳定身份（例如断连后），渲染层仍以“同一个项目有一次失效”为准。
+ */
+export type RemoteProjectFactsChange = { projectId: string; generation: string; scopes: RemoteProjectFactsScope[] };
+
 export type RemoteSessionScanResult = { ok: true; entries: RemoteSessionEntry[] } | { ok: false; code: string };
 
 /**

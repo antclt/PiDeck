@@ -41,7 +41,8 @@ import { resolveRemoteBrowseRoot } from "../remote/RemoteBrowseRoot";
 import { createRemoteSearchReader, REMOTE_SEARCH_READER_CODES } from "../remote/RemoteSearchReader";
 import { createRemoteWorkspaceReader, type RemoteWorkspacePort } from "../remote/RemoteWorkspaceReader";
 import { createFactCache, type FactCache } from "../remote/RemoteFactCache";
-import { createDirWatchRegistry, dirKeysAfterWrite } from "../remote/RemoteDirWatchRegistry";
+import { createDirWatchRegistry, dirKeysAfterWrite, dirPathsAfterWrite } from "../remote/RemoteDirWatchRegistry";
+import { createRemoteFactsHub, type RemoteFactsHub } from "../remote/RemoteFactsNotifications";
 import { PendingConfirmationBroker } from "../security/PendingConfirmationBroker";
 
 /** host id 的闭集判据，与 hosts 域逐字相同；两个域各自持有，避免项目域 import hosts 域。 */
@@ -71,6 +72,12 @@ export type RemoteProjectIpcHandle = {
 	 * 未注册的 watchId（旧会话、别的项目、已撤销）直接忽略——绝不猜。
 	 */
 	onHelperEvent(entry: { hostId: string; watchId: string; paths: readonly string[] }): void;
+	/** 断连：helper 的 watcher 已随会话一起死，登记直接丢弃（不再发退订）。 */
+	onHostDisconnected(hostId: string): void;
+	/** 项目关闭：退订它在各 host 上的目录订阅，不影响别的项目。 */
+	closeProject(projectId: string): Promise<void>;
+	/** 进程退出：成对退订后丢弃全部订阅登记。 */
+	dispose(): Promise<void>;
 	/** 只读诊断：一次会话内真实发生的目录装载次数。 */
 	dirLoads(): number;
 };
@@ -79,6 +86,8 @@ export function registerRemoteProjectIpc(input: {
 	enabled: boolean;
 	userDataDir: string;
 	service?: () => RemoteHostConnectionService | undefined | Promise<RemoteHostConnectionService | undefined>;
+	/** 事实变化通知出口；装配层提供时由目录与 Git 共用同一个 hub。 */
+	factsEvents?: RemoteFactsHub;
 	/**
 	 * 远端项目登记端口（Phase 3 第二段）。
 	 *
@@ -254,17 +263,43 @@ export function registerRemoteProjectIpc(input: {
 	 */
 	const watchRegistry = createDirWatchRegistry();
 
-	/** 根目录首次读到就订阅（非递归：覆盖根层与 `.git` 变化；更深目录仍走读的人重读）。 */
+	/**
+	 * 事实变化通知的出口（v5 T4）：事实层只标脏，通知由这里发。
+	 * 订阅按 (sender, project) 绑定；退订/窗口销毁都清登记（见 `RemoteFactsNotifications`）。
+	 */
+	const factsEvents: RemoteFactsHub = input.factsEvents ?? createRemoteFactsHub(ipcChannels.remoteProjectFactsChanged);
+	/** projectId → 最近一次装载所用的连接代（通知里带出去，渲染层跨代丢弃缓存）。 */
+	const projectGenerations = new Map<string, string>();
+	/** projectId → hostId（断连时把这一代标成已断开）。 */
+	const projectHosts = new Map<string, string>();
+	let disconnectedGeneration = 0;
+	const generationOf = (projectId: string): string => projectGenerations.get(projectId) ?? "";
+
+	/**
+	 * 根目录首次读到就订阅（非递归：覆盖根层与 `.git` 变化；更深目录仍走读的人重读）。
+	 *
+	 * 会话身份用 `connectionId`：同一次 helper 会话里每次读都拿到新的 session 包装对象，但订阅只能
+	 * 有一个。退订绑定到同一个 session，项目关闭/连接释放时成对收回。
+	 */
 	async function ensureRootWatch(projectId: string, hostId: string, session: RemoteProjectSession): Promise<void> {
-		await watchRegistry.ensure(hostId, session, projectId, async () => {
-			try {
-				const result: unknown = await session.request("fs.watch", { paths: [""] });
-				return typeof result === "object" && result !== null && typeof (result as { watchId?: unknown }).watchId === "string" ? (result as { watchId: string }).watchId : undefined;
-			} catch {
-				/* 订阅不是读的前置条件：失败就退回轮询，不向用户报错。 */
-				return undefined;
-			}
-		});
+		await watchRegistry.ensure(
+			hostId,
+			session.connectionId,
+			projectId,
+			async (paths) => {
+				try {
+					const result: unknown = await session.request("fs.watch", { paths: [...paths] });
+					return typeof result === "object" && result !== null && typeof (result as { watchId?: unknown }).watchId === "string" ? (result as { watchId: string }).watchId : undefined;
+				} catch {
+					/* 订阅不是读的前置条件：失败就退回只读刷新，不向用户报错。 */
+					return undefined;
+				}
+			},
+			{
+				paths: [""],
+				unwatch: (watchId) => session.request("fs.unwatch", { watchId }),
+			},
+		);
 	}
 
 	const dirs: FactCache<RemoteWorkspaceEntry[]> = createFactCache<RemoteWorkspaceEntry[]>(async (key) => {
@@ -275,6 +310,9 @@ export function registerRemoteProjectIpc(input: {
 		if ("code" in target) return opFailFromCode(target.code);
 		try {
 			const outcome = await target.service.withProjectSession(target.hostId, target.remotePath, async (session) => {
+				// 连接代与 host 归属记在这里：事件/写面通知带去给渲染层，断连时据此换代。
+				projectGenerations.set(projectId, session.connectionId);
+				projectHosts.set(projectId, target.hostId);
 				const reader = createRemoteWorkspaceReader({ port: sessionPort(session, target.hostId) });
 				const listed = await reader.list(target.hostId, readerPath(relative));
 				// 根目录第一次读到就顺手订阅：之后 helper 的变更事件会把这个项目的事实标脏。
@@ -283,11 +321,7 @@ export function registerRemoteProjectIpc(input: {
 			});
 			if (!outcome.ok) return opFailFromCode(outcome.code);
 			// 两类条目不属于用户数据：回收站命名空间（只在根目录隐藏）与本通道自己的上传临时文件。
-			return opOk(
-				outcome.value.entries
-					.filter((entry) => (relative !== "" || entry.name !== REMOTE_PROJECT_TRASH_DIR) && !REMOTE_UPLOAD_TEMP_NAME.test(entry.name))
-					.map((entry) => ({ name: entry.name, kind: entry.kind, ...(entry.bytes === undefined ? {} : { bytes: entry.bytes }) })),
-			);
+			return opOk(outcome.value.entries.filter((entry) => (relative !== "" || entry.name !== REMOTE_PROJECT_TRASH_DIR) && !REMOTE_UPLOAD_TEMP_NAME.test(entry.name)).map((entry) => ({ name: entry.name, kind: entry.kind, ...(entry.bytes === undefined ? {} : { bytes: entry.bytes }) })));
 		} catch (error) {
 			return opFailFromCode(codeOf(error, "REMOTE_PROJECT_READ_FAILED"));
 		}
@@ -298,10 +332,31 @@ export function registerRemoteProjectIpc(input: {
 		const relative = readRelativePath(pathValue);
 		if (relative === undefined) return opFailFromCode("REMOTE_PROJECT_PATH_INVALID");
 		if (typeof projectIdValue !== "string") return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
-		const snapshot = await dirs.read(projectIdValue + "\u0000" + relative);
+		// 暖缓存命中也要逐次重解析当前项目/连接：项目被移除、换 root、host 离线都必须当场拒绝。
+		const target = await projectReadTarget(projectIdValue);
+		if ("code" in target) return opFailFromCode(target.code);
+		const key = projectIdValue + "\u0000" + relative;
+		// 只有暖事实才要求活的同代会话；首次打开目录必须允许正常建立会话。
+		const existing = dirs.peek(key);
+		const connection = target.service.connectionFacts?.(target.hostId);
+		if (typeof target.service.connectionFacts === "function" && existing !== undefined && (connection === undefined || connection.state !== "ready")) return opFailFromCode("SSH_HOST_NOT_READY");
+		const snapshot = await dirs.read(key, connection === undefined ? undefined : { generation: connection.connectionId });
 		if (!snapshot.ok) return opFailFromCode(snapshot.code);
 		// revision 随值替换或标脏递增：两个读者拿到同一个数就说明他们看的是同一份事实。
 		return opOk({ entries: snapshot.value, revision: snapshot.revision });
+	});
+
+	ipcMain.handle(ipcChannels.remoteProjectFactsSubscribe, (event, projectIdValue: unknown) => {
+		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
+		if (typeof projectIdValue !== "string" || projectIdValue.length === 0 || projectIdValue.length > 256 || projectIdValue !== projectIdValue.trim() || /[\u0000-\u001f\u007f]/.test(projectIdValue)) return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
+		factsEvents.subscribe(event.sender, projectIdValue);
+		return opOk({ subscribed: true as const });
+	});
+	ipcMain.handle(ipcChannels.remoteProjectFactsUnsubscribe, (event, projectIdValue: unknown) => {
+		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
+		if (typeof projectIdValue !== "string" || projectIdValue.length === 0 || projectIdValue.length > 256) return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
+		factsEvents.unsubscribe(event.sender.id, projectIdValue);
+		return opOk({ subscribed: false as const });
 	});
 
 	ipcMain.handle(ipcChannels.remoteProjectRead, async (_event, projectIdValue: unknown, pathValue: unknown): Promise<RemoteProjectReadResult> => {
@@ -384,15 +439,34 @@ export function registerRemoteProjectIpc(input: {
 
 	return {
 		afterWrite(projectId: string, paths: readonly string[]): void {
+			const touched = dirPathsAfterWrite(paths);
 			for (const key of dirKeysAfterWrite(projectId, paths)) dirs.invalidate(key);
+			// 只标脏 + 通知：读仍由活跃的消费者决定（一次写不产生远端往返）。
+			factsEvents.publish({ projectId, generation: generationOf(projectId), scopes: touched.map((path) => ({ kind: "dir" as const, path })) });
 		},
 		onHelperEvent(entry): void {
-			for (const scope of watchRegistry.scopesForEvent(entry.hostId, entry.watchId) ?? []) {
+			const changed = watchRegistry.scopesForEvent(entry.hostId, entry.watchId) ?? [];
+			// 先发通知再标脏：两者都是同步的，读仍由活跃的消费者决定（事件不装载）。
+			for (const scope of changed) factsEvents.publish({ projectId: scope.projectId, generation: generationOf(scope.projectId), scopes: scope.paths.map((path) => ({ kind: "dir" as const, path })) });
+			for (const scope of changed) {
 				for (const path of scope.paths) dirs.invalidate(scope.projectId + " " + path);
 			}
 		},
 		dirLoads(): number {
 			return dirs.stats().loads;
+		},
+		onHostDisconnected(hostId: string): void {
+			// helper 已死：旧的 watchId 不可能再回来，登记直接丢弃，不发退订。
+			watchRegistry.clearHost(hostId);
+			// 断连换代：旧代缓存与渲染层持有的快照都不能再被当作“现在”。
+			disconnectedGeneration += 1;
+			for (const [projectId, projectHost] of projectHosts) if (projectHost === hostId) projectGenerations.set(projectId, `${hostId}#disconnected#${disconnectedGeneration}`);
+		},
+		closeProject(projectId: string): Promise<void> {
+			return watchRegistry.closeProject(projectId);
+		},
+		dispose(): Promise<void> {
+			return watchRegistry.releaseAll();
 		},
 	};
 }

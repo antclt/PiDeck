@@ -30,6 +30,10 @@ export type ProjectsIpcDeps = {
 	appLogger: AppLogger;
 	projectResourceManager: ProjectResourceManager;
 	sessionCatalog?: SessionCatalog;
+	/**
+	 * 项目被删除后的收尾（目录订阅等）。在数据库删除成功之后调用，失败不回滚删除，也不影响返回值。
+	 */
+	onProjectRemoved?: (projectId: string) => void | Promise<void>;
 	mainCopy: (key: string, params?: Record<string, string | number>) => string;
 	getMainWindow: () => BrowserWindow | null;
 	/** 添加 WSL 项目前解析当前发行版/用户；缺失时 chooseAndAdd 会拒绝（#155）。 */
@@ -38,7 +42,7 @@ export type ProjectsIpcDeps = {
 	userDataDir: string;
 };
 
-export function registerProjectsIpc({ projectStore, settingsStore, gitService, worktreeService, agentManager, appLogger, projectResourceManager, sessionCatalog, mainCopy, getMainWindow, resolveWslEnvironment, userDataDir }: ProjectsIpcDeps): void {
+export function registerProjectsIpc({ projectStore, settingsStore, gitService, worktreeService, agentManager, appLogger, projectResourceManager, sessionCatalog, mainCopy, getMainWindow, resolveWslEnvironment, userDataDir, onProjectRemoved }: ProjectsIpcDeps): void {
 	const handleProjectGit = createProjectGitHandler(ipcMain, projectStore, settingsStore);
 	// Windows Node 只能 stat/打开主机路径；WSL 项目在 store 里可能是 Linux 路径。远端项目不能到这里。
 	const resolveProjectHostPath = (project: LocalProject) => {
@@ -145,6 +149,8 @@ export function registerProjectsIpc({ projectStore, settingsStore, gitService, w
 		// 先清 catalog 引用、再删项目（顺序与理由见 removeProjectWithSessions）：两个 store 没有共同
 		// 提交点，只有这个顺序保证任一段失败时都不会留下指向已删项目的倒挂引用；失败不再被吞成“0 条”。
 		await removeProjectWithSessions({ projects: projectStore, sessions: sessionCatalog }, id, { childProjectIds: childIds });
+		// 目录订阅跟着项目一起收尾：退订失败不影响删除结果，但下次同项目读会重新订阅。
+		if (onProjectRemoved !== undefined) void Promise.resolve(onProjectRemoved(id)).catch(() => undefined);
 		void appLogger.info("project", "Project removed", { projectId: id, path: removed?.path });
 		return getVisibleProjects();
 	});
