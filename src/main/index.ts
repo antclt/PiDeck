@@ -5468,9 +5468,9 @@ app
 			if (!entries) return undefined;
 			return projectResourceEnabled({ entries, value: skillPath, baseDir: dirname(skillPath) });
 		});
-		// 启动时自动安装内置 usage-probe 技能模板到用户全局技能目录：
-		// pi 只扫 ~/.pi/agent/skills、~/.agents/skills，不读 pideck 打包资源目录（resources/skills），
-		// 必须落到用户目录，用户才能在聊天里 /skill:usage-probe 让 AI 引导写用量探针配置。
+		// 启动时自动安装内置 usage-probe 技能模板到 PiDeck 专属技能目录（~/.pi/agent/pideck-skills）：
+		// 该目录不在 pi 的自动发现根里，只有 PiDeck spawn 时以 --skill 注入，
+		// 终端里的 pi（TUI）不会加载；用户仍可在聊天里 /skill:usage-probe 触发。
 		// fire-and-forget：安装失败不阻塞启动，仅记日志（手动入口 configInstallUsageSkill 仍可兑底）。
 		void skillManager.installUsageProbeTemplate().then((result) => {
 			if (result.success) {
@@ -5479,7 +5479,7 @@ app
 				void appLogger?.warn("skill", "Usage probe skill template auto-install failed", { error: result.error });
 			}
 		});
-		// 生图技能同样启动时自动落到用户全局技能目录（pi 只扫 ~/.pi/agent/skills 等，不读 resources/），
+		// 生图技能同样启动时落到 PiDeck 专属技能目录（只由 PiDeck 的 --skill 注入），
 		// 否则用户无法 /skill:image-gen 触发生图。fire-and-forget，失败不阻塞启动。
 		void skillManager.installImageGenTemplate().then((result) => {
 			if (result.success) {
@@ -5488,7 +5488,7 @@ app
 				void appLogger?.warn("skill", "Image-gen skill template auto-install failed", { error: result.error });
 			}
 		});
-		// 环境诊断技能启动时自动落到用户全局技能目录，用户可 /skill:pideck-doctor 让 pi 读诊断报告排障。
+		// 环境诊断技能启动时落到 PiDeck 专属技能目录，用户可 /skill:pideck-doctor 让 pi 读诊断报告排障。
 		// fire-and-forget，失败不阻塞启动。
 		void skillManager.installPideckDoctorTemplate().then((result) => {
 			if (result.success) {
@@ -5700,6 +5700,8 @@ app
 				}
 			},
 		);
+		// 桌面端专用技能只经 spawn 时的 --skill 注入；TUI 不扫内置目录，自然不会加载。
+		agentManager.setBundledSkillResolver(() => skillManager.getBundledSkillLoadPaths());
 		// C12：退出清理登记（before-quit 统一 runAll，新增资源不再改 before-quit）
 		quitCleanup.register("pi-agents", () => agentManager?.stopAll());
 
@@ -6677,7 +6679,9 @@ app
 				}
 				const skills = await skillManager?.list().catch(() => null);
 				for (const skill of skills?.skills ?? []) {
-					if (skill.sourceId !== "pi-global" && skill.sourceId !== "agents-global") continue;
+					// pideck-global（自带技能）也要参与映射：老版本把它们装在 pi 的全局目录，
+					// 迁移时把旧禁用名翻成新路径的 -path 规则，用户的停用意图才不会丢。
+					if (skill.sourceId !== "pi-global" && skill.sourceId !== "agents-global" && skill.sourceId !== "pideck-global") continue;
 					resources.push({ kind: "skills", name: skill.name, value: skill.path, scope: "user" });
 				}
 				const prompts = await promptManager?.list().catch(() => null);

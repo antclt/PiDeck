@@ -3,7 +3,8 @@ import type { PromptStoreItem } from "./prompts";
 // ── Pi Skills ──────────────────────────────────────────────────────────
 
 export type PiSkillLocation = {
-	id: "pi-global" | "agents-global" | "project-pi" | "project-agents";
+	/** pideck-global = PiDeck 自带技能目录（不在 pi 的自动发现根里，仅 spawn 时 --skill 注入）。 */
+	id: "pi-global" | "agents-global" | "pideck-global" | "project-pi" | "project-agents";
 	label: string;
 	path: string;
 	rootMarkdownEnabled: boolean;

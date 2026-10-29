@@ -85,9 +85,9 @@ export function SkillsTab(props: {
 	const projects = props.projects ?? [];
 	// Project scope shows both sources grouped by ownership; global scope shows global skill dirs only
 	// (runtime-discovered package/settings rows are added below for both scopes).
-	const visibleSkills = data.skills.filter((skill) => props.scope === "project" || skill.sourceId === "pi-global" || skill.sourceId === "agents-global");
+	const visibleSkills = data.skills.filter((skill) => props.scope === "project" || skill.sourceId === "pi-global" || skill.sourceId === "agents-global" || skill.sourceId === "pideck-global");
 	const projectSkills = visibleSkills.filter((skill) => skill.sourceId === "project-pi" || skill.sourceId === "project-agents");
-	const globalSkills = visibleSkills.filter((skill) => skill.sourceId === "pi-global" || skill.sourceId === "agents-global");
+	const globalSkills = visibleSkills.filter((skill) => skill.sourceId === "pi-global" || skill.sourceId === "agents-global" || skill.sourceId === "pideck-global");
 	const disabledGlobalKeys = buildProjectOverrideKeyIndex(props.projectOverrides.disabledGlobalSkills);
 	const availableLocations = data.locations.filter((location) => (props.scope === "project" ? location.id === "project-pi" || location.id === "project-agents" : location.id === "pi-global" || location.id === "agents-global"));
 	// discovery 行去重：键是 sourceId + name。只按 name 去重会让包/设置提供的同名技能被本地行吞掉，

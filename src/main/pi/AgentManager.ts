@@ -628,6 +628,16 @@ export class AgentManager {
 	}
 
 	/**
+	 * 注入内置技能目录解析（PiDeck 自带技能只经 --skill 注入，不落 pi 的自动发现根）。
+	 * 由 main/index.ts 在 SkillManager 装配后注入；未注入 = 不注入内置技能（测试/预览）。
+	 */
+	setBundledSkillResolver(resolve: (() => string[]) | null): void {
+		this.bundledSkillResolver = resolve ?? undefined;
+	}
+
+	private bundledSkillResolver?: () => string[];
+
+	/**
 	 * 开发诊断埋点。未开启时 sink 为空，recordTiming 直接返回。
 	 * 用来对照「点 pi 会话卡死」时 create / history.load 是否把主进程堵住。
 	 */
@@ -671,9 +681,10 @@ export class AgentManager {
 			modelTraceEnv: agentId ? this.registerModelTraceSession(agentId) : undefined,
 			// 扩展解析器与模型能力缓存共用（piProcessExtensionResolvers）：
 			// 保证「选择器能看到扩展贡献的模型」与「运行时实际加载的扩展」同源。
-			// 技能/模板解析器同源：禁用的技能与提示词模板在 RPC 启动时以白名单剔除。
-			// PiDeck 自带扩展注入（普通资源启停已交给 pi 原生 settings.json 过滤规则）。
+			// PiDeck 自带扩展用 -e 注入；普通资源的启停已交给 pi 原生 settings.json 过滤规则。
 			...createPiProcessExtensionResolvers(cwd, settings),
+			// 桌面端专用技能：从内置目录以 --skill 注入，TUI 不扫该目录。
+			bundledSkillPaths: this.bundledSkillResolver?.() ?? [],
 			// 会话身份 = PiDeck 会话 key（SessionRecord.id，UUID 或旧版文件路径），扩展按它解析等级覆盖；
 			// 匿名会话（noSession）无 key，扩展仅用全局默认等级。
 			securitySessionId: securitySessionKey ?? sessionPath,
@@ -1344,6 +1355,8 @@ export class AgentManager {
 			disabledSkills: settings.disabledSkills ?? [],
 			disabledPrompts: settings.disabledPrompts ?? [],
 			extensionRoots: createPiProcessExtensionResolvers(project.path, settings).resolveBuiltInExtensionPaths(),
+			// 内置技能开关变化只影响 --skill 注入，必须进指纹，否则池化进程会沿用旧技能集。
+			bundledSkillPaths: this.bundledSkillResolver?.() ?? [],
 			wsl: this.wslEnvironment ? { distro: this.wslEnvironment.distro, user: this.wslEnvironment.user, projectPath: this.toSessionProtocolPath(project.path) } : undefined,
 			modelTraceAvailable: modelTrace.ready,
 			modelTracePort: modelTrace.ready ? String(modelTrace.listeningPort) : "",

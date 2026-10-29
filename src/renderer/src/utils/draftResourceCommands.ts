@@ -92,7 +92,7 @@ function skillSourcePriority(sourceId?: string): number {
 	if (sourceId === "settings-project") return 0;
 	if (sourceId === "project-pi" || sourceId === "project-agents" || sourceId === "ancestor-agents") return 1;
 	if (sourceId === "settings-user") return 2;
-	if (sourceId === "pi-global" || sourceId === "agents-global") return 3;
+	if (sourceId === "pi-global" || sourceId === "agents-global" || sourceId === "pideck-global") return 3;
 	if (sourceId === "package-project" || sourceId === "package-user") return 4;
 	return 5;
 }
@@ -107,6 +107,6 @@ function promptSourcePriority(prompt: DraftPrompt): number {
 }
 
 function globalSkillKey(sourceId: string | undefined, name: string): string | undefined {
-	if (sourceId === "pi-global" || sourceId === "agents-global") return `${sourceId}:${name.toLowerCase()}`;
+	if (sourceId === "pi-global" || sourceId === "agents-global" || sourceId === "pideck-global") return `${sourceId}:${name.toLowerCase()}`;
 	return undefined;
 }

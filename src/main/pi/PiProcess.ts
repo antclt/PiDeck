@@ -54,6 +54,14 @@ type PiProcessOptions = {
 	 */
 	resolveBuiltInExtensionPaths?: (settings?: PiProcessSettings, includeProjectResources?: boolean) => string[];
 	/**
+	 * PiDeck 内置技能目录（每个元素是含 SKILL.md 的技能目录），以 --skill 显式注入。
+	 *
+	 * 为什么不用 pi 的自动发现目录：~/.pi/agent/skills 是 TUI 与 PiDeck 共用的，
+	 * 桌面端专用技能落在那里会被终端里的 pi 也加载。--skill 只影响本进程，
+	 * 由 AgentManager 按当前开关解析后传入；未提供 = 不注入（测试/探针/模型快照）。
+	 */
+	bundledSkillPaths?: string[];
+	/**
 	 * 安全策略快照路径（userData/security-policy.json）。
 	 * 注入 PIDECK_SECURITY_CONFIG 环境变量，pi-deck-security-gate 扩展据此加载规则。
 	 */
@@ -359,7 +367,12 @@ export class PiProcess extends EventEmitter {
 				console.log("[PiProcess] Loading PiDeck built-in extensions via -e:", builtInPaths.map((path) => path.split(/[/\\]/).pop()).join(", "));
 			}
 
-			// 后续信任标志 / session / WSL 路径改写都基于已含 -e 的参数列表
+			// 内置技能：--skill 显式注入，TUI 不扫这个目录，自然看不到。
+			// --no-skills 是「一个技能都不加载」的诊断开关，但 pi 对显式 --skill 仍会加载，
+			// 所以这里必须自己跳过，否则开关名不副实。
+			const bundledSkillPaths = this.settings?.piRpcNoSkills ? [] : (this.options.bundledSkillPaths ?? []);
+			for (const skillPath of bundledSkillPaths) argsWithBuiltIns.push("--skill", skillPath);
+			// 后续信任标志 / session / WSL 路径改写都基于已含 -e / --skill 的参数列表
 			let finalPiArgs = argsWithBuiltIns;
 			if (noSession) finalPiArgs.push("--no-session");
 			if (sessionPath) finalPiArgs.push("--session", sessionPath);
@@ -401,10 +414,11 @@ export class PiProcess extends EventEmitter {
 				spawnCwd = toWindowsHostPath(this.cwd, environment);
 				diagnosticCwd = wslCwd;
 
-				// WSL 下 session 路径与 -e 扩展路径都需转成 Linux 路径，否则 pi 在 distro 内打不开 Windows 路径。
+				// WSL 下 session / -e 扩展 / --skill 技能路径都需转成 Linux 路径，
+				// 否则 pi 在 distro 内打不开 Windows 路径。
 				finalPiArgs = finalPiArgs.map((arg, index) => {
 					const prev = finalPiArgs[index - 1];
-					if (prev === "--session" || prev === "--extension" || prev === "-e") {
+					if (prev === "--session" || prev === "--extension" || prev === "-e" || prev === "--skill") {
 						// 仅转换看起来像 Windows 绝对路径的参数，避免误伤相对路径/选项值
 						if (/^[A-Za-z]:[\\/]/.test(arg) || arg.startsWith("\\\\")) {
 							return toWslLinuxPath(arg, environment);

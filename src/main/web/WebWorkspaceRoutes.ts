@@ -427,7 +427,7 @@ export class WebWorkspaceRoutes {
 			return true;
 		}
 		const sourceId = body.sourceId;
-		if (sourceId !== "pi-global" && sourceId !== "agents-global" && sourceId !== "project-pi" && sourceId !== "project-agents") {
+		if (sourceId !== "pi-global" && sourceId !== "agents-global" && sourceId !== "pideck-global" && sourceId !== "project-pi" && sourceId !== "project-agents") {
 			sendError(response, 400, "webError.invalidRequest", "sourceId must be a valid skill location id");
 			return true;
 		}

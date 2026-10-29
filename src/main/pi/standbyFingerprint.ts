@@ -25,6 +25,8 @@ export interface StandbyFingerprintInput {
 	disabledPrompts: string[];
 	/** 解析后的 -e 注入扩展绝对路径列表（已含 removed/enabled/项目级覆盖语义）。 */
 	extensionRoots: string[];
+	/** 解析后的 --skill 注入内置技能目录（已按开关过滤；缺省 = 无内置技能）。 */
+	bundledSkillPaths?: string[];
 	/** WSL 模式时 cwd/distro/user 都会进 spawn 命令行。 */
 	wsl?: { distro: string; user: string; projectPath: string };
 	/** 宿主模型快照端点的可用性与端口会影响注入子进程的 PIDECK_MODEL_TRACE_URL/TOKEN。 */
@@ -48,6 +50,7 @@ export function computeStandbyFingerprint(input: StandbyFingerprintInput): strin
 		disabledSkills: [...input.disabledSkills].sort(),
 		disabledPrompts: [...input.disabledPrompts].sort(),
 		extensionRoots: [...input.extensionRoots].sort(),
+		bundledSkillPaths: [...(input.bundledSkillPaths ?? [])].sort(),
 		wsl: input.wsl ?? null,
 		modelTraceAvailable: input.modelTraceAvailable,
 		modelTracePort: input.modelTracePort,
