@@ -212,6 +212,44 @@ export function validateRemoteGitRepoPath(value: unknown): string {
 		throw new Error("GIT_RESULT_INVALID");
 	return value;
 }
+/**
+ * 仓库 scope 的唯一归一化：接受字符串（旧远端控制器/helper 风格）或 `ProjectFileTarget`（共享 Git 通道/
+ * 文件树风格）。对象必须是本项目的 target 且只带 `projectId`/`relativePath`，否则拒绝而不是猜。
+ */
+export function remoteGitRepoScope(projectId: string, value: unknown): string {
+	if (value === undefined || value === null || value === "") return "";
+	if (record(value)) {
+		if (Object.keys(value).some((key) => key !== "projectId" && key !== "relativePath") || value.projectId !== projectId) throw new Error("GIT_RESULT_INVALID");
+		return validateRemoteGitRepoPath(value.relativePath);
+	}
+	return validateRemoteGitRepoPath(value);
+}
+
+/**
+ * 仓库内路径 → 项目相对路径（公共输出用）。`repoPath` 为空时两者相同；`repoPath` 自身先按仓库规则验证。
+ */
+export function projectFilePath(repoPath: string, repoRelativePath: string): string {
+	const repo = validateRemoteGitRepoPath(repoPath);
+	const path = validateRemoteGitPath(repoRelativePath);
+	return repo === "" ? path : validateRemoteGitPath(`${repo}/${path}`);
+}
+
+/**
+ * 项目相对 target → 仓库内路径（公共输入交给 helper 前用）。
+ *
+ * 严格按目录前缀匹配：`packages/a-other/x` **不是** `packages/a` 里的文件，`packages/a/x` 才是。
+ * 不提供“有前缀就剥、没前缀也当合法”的猜测式兼容——同一个参数只能有一种语义。
+ */
+export function repoRelativeFilePath(projectId: string, repoPath: string, target: ProjectFileTarget): string {
+	if (!record(target) || target.projectId !== projectId || typeof target.relativePath !== "string") throw new Error("GIT_RESULT_INVALID");
+	const repo = validateRemoteGitRepoPath(repoPath);
+	const path = validateRemoteGitPath(target.relativePath);
+	if (repo === "") return path;
+	const prefix = repo + "/";
+	if (!path.startsWith(prefix)) throw new Error("GIT_RESULT_INVALID");
+	return validateRemoteGitPath(path.slice(prefix.length));
+}
+
 /** Discovery output is re-validated field by field: unique project-relative paths, display names only, honest flag. */
 export function readRemoteGitRepos(value: unknown): { repos: RemoteGitRepo[]; truncated: boolean } {
 	if (!record(value) || Object.keys(value).length !== 2 || typeof value.truncated !== "boolean" || !Array.isArray(value.repos) || value.repos.length > REMOTE_GIT_REPOS_MAX_REPOS) throw new Error("GIT_RESULT_INVALID");
