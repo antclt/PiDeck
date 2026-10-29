@@ -1,5 +1,7 @@
 import type {
 	GitCommitResult,
+	GitCompareRefsResult,
+	GitHistoryPageResult,
 	GitIndexMutationResult,
 	GitReadSnapshot,
 	GitReadSnapshotResult,
@@ -85,10 +87,14 @@ export type RemoteGitViewApi = {
 	refreshRemoteSnapshot?(projectId: string, repo?: string): Promise<GitReadSnapshotResult>;
 	workspaceFileDiff(projectId: string, group: GitResourceGroupType, target: ProjectFileTarget, repoPath?: ProjectFileTarget): Promise<GitWorkspaceFileDiff | null>;
 	remoteLog(projectId: string, options?: { maxCount?: number; skip?: number }, repo?: string): Promise<RemoteGitLogResult>;
+	/** 公共历史页（T7）：存在时优先于旧的 remoteLog；远端仍是 HEAD-only。 */
+	historyPage?(projectId: string, options?: { maxCount?: number; skip?: number }, repo?: ProjectFileTarget): Promise<GitHistoryPageResult>;
 	remoteCommitDetail(projectId: string, oid: string, repo?: string): Promise<RemoteGitCommitDetailResult>;
 	remoteRefs(projectId: string, repo?: string): Promise<RemoteGitRefsResult>;
 	remoteRefFileDiff(projectId: string, base: string | null, head: string, target: ProjectFileTarget, repo?: string): Promise<RemoteGitRefFileDiffResult>;
 	remoteCompare(projectId: string, base: string, head: string, repo?: string): Promise<RemoteGitCompareResult>;
+	/** 公共比较（T7）：存在时优先；mode/ahead/behind 只在需要时展示，这里只取两端与文件。 */
+	compareRefs?(projectId: string, base: string, head: string, repo?: ProjectFileTarget): Promise<GitCompareRefsResult>;
 	initRemote(projectId: string): Promise<RemoteGitInitResult>;
 	createRemoteBranch(projectId: string, name: string, token: string, repo?: string): Promise<RemoteGitBranchMutationResult>;
 	switchRemoteBranch(projectId: string, name: string, token: string, repo?: string): Promise<RemoteGitBranchMutationResult>;
@@ -169,6 +175,18 @@ export function createRemoteGitViewController(projectId: string, projectKey: str
 		const withSyncNotice = next.syncNotice === undefined && state.syncNotice !== undefined ? { ...withNotice, syncNotice: state.syncNotice } : withNotice;
 		state = next.initNotice === undefined && state.initNotice !== undefined ? { ...withSyncNotice, initNotice: state.initNotice } : withSyncNotice;
 		if (active) publish(state);
+	}
+	async function readHistoryPage(maxCount: number, skip?: number): Promise<RemoteGitLogResult> {
+		if (api.historyPage === undefined) return api.remoteLog(projectId, { maxCount, ...(skip === undefined ? {} : { skip }) }, repoPath);
+		const result = await api.historyPage(projectId, { maxCount, ...(skip === undefined ? {} : { skip }) }, { projectId, relativePath: repoPath });
+		if (!result.ok) return { ok: false, code: result.code };
+		return {
+			ok: true,
+			page: {
+				commits: result.value.commits.map((commit) => ({ oid: commit.oid, parents: [...commit.parents], subject: commit.subject, authorName: commit.authorName, authorEmail: commit.authorEmail, authorTimeSec: Math.floor(commit.authorTimeMs / 1000) })),
+				hasMore: result.value.hasMore,
+			},
+		};
 	}
 	const controller = {
 		async refresh(force = false): Promise<void> {
@@ -274,7 +292,7 @@ export function createRemoteGitViewController(projectId: string, projectKey: str
 			const generation = ++historyEpoch;
 			update({ ...state, history: undefined, historyErrorCode: undefined, historyLoading: true, detail: undefined, detailOid: undefined, detailErrorCode: undefined });
 			try {
-				const result = await api.remoteLog(projectId, { maxCount: 50 }, repoPath);
+				const result = await readHistoryPage(50);
 				if (!active || generation !== historyEpoch) return;
 				if (result.ok) update({ ...state, historyLoading: false, history: result.page });
 				else update({ ...state, historyLoading: false, historyErrorCode: result.code });
@@ -288,7 +306,7 @@ export function createRemoteGitViewController(projectId: string, projectKey: str
 			const skip = state.history.commits.length;
 			update({ ...state, historyMoreLoading: true, historyErrorCode: undefined });
 			try {
-				const result = await api.remoteLog(projectId, { maxCount: 50, skip }, repoPath);
+				const result = await readHistoryPage(50, skip);
 				if (!active || generation !== historyEpoch) return;
 				if (result.ok) update({ ...state, historyMoreLoading: false, history: { commits: [...state.history.commits, ...result.page.commits], hasMore: result.page.hasMore } });
 				// A failed page keeps the rows already on screen; only a fresh full load replaces them.
@@ -338,7 +356,22 @@ export function createRemoteGitViewController(projectId: string, projectKey: str
 			const generation = ++compareEpoch;
 			update({ ...state, compare: undefined, compareErrorCode: undefined, compareLoading: true });
 			try {
-				const result = await api.remoteCompare(projectId, base, head, repoPath);
+				const result =
+					api.compareRefs === undefined
+						? await api.remoteCompare(projectId, base, head, repoPath)
+						: await api.compareRefs(projectId, base, head, { projectId, relativePath: repoPath }).then(
+								(answer): RemoteGitCompareResult =>
+									answer.ok
+										? {
+												ok: true,
+												compare: {
+													base: { ref: answer.value.base.ref, oid: answer.value.base.oid },
+													head: { ref: answer.value.head.ref, oid: answer.value.head.oid },
+													files: answer.value.files.map((file) => ({ status: file.status, path: file.path, ...(file.oldPath === undefined ? {} : { oldPath: file.oldPath }) })),
+												},
+											}
+										: { ok: false, code: answer.code },
+							);
 				if (!active || generation !== compareEpoch) return;
 				if (result.ok && result.compare.base.ref === base && result.compare.head.ref === head) update({ ...state, compareLoading: false, compare: result.compare });
 				else update({ ...state, compareLoading: false, compareErrorCode: result.ok ? "GIT_RESOURCE_CHANGED" : result.code });

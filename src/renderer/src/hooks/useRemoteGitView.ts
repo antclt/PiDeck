@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { RemoteProject } from "../../../shared/types/project";
 import { desktopApi } from "../desktopApi";
 import { createRemoteGitViewController, type RemoteGitViewState } from "../utils/remoteGitViewState";
+import { subscribeRemoteGitFacts } from "../utils/remoteGitFactsSubscription";
 
 /**
  * The read-only panel owns this state; neither currentSession atoms nor native Git polling are subscribed. `repoPath`
@@ -23,6 +24,8 @@ export function useRemoteGitView(project: RemoteProject, repoPath = "") {
 		// first repository read, and afterwards only when the user acts (refresh or a sync verb). No effect watches
 		// the snapshot, so a refresh can never trigger a second, self-feeding load that moves the rows under the user.
 		void reads.refresh().then(() => reads.loadSync());
+		// 远端写面/目录写面只发事实通知；只有当前仓库的 status 标脏才让活跃面板强制重读。
+		const offFacts = subscribeRemoteGitFacts(desktopApi.remoteHosts, project.id, repoPath, (force) => void reads.refresh(force));
 		const unsubscribe = desktopApi.remoteHosts.onStateChange((change) => {
 			if (change.hostId !== project.locator.hostId) return;
 			// Only "ready" resumes polling; every other observed transition pauses it until the host is ready again.
@@ -32,6 +35,7 @@ export function useRemoteGitView(project: RemoteProject, repoPath = "") {
 		});
 		void reads.refresh();
 		return () => {
+			offFacts();
 			unsubscribe();
 			reads.dispose();
 			if (controller.current === reads) controller.current = null;

@@ -44,7 +44,7 @@ const EMPTY_FILE_TREE_CHILDREN: readonly FileTreeNode[] = [];
 type FileTreeRowProps = {
 	node: FileTreeNode;
 	depth: number;
-	expandedDirs: Set<string>;
+	expandedDirs: ReadonlySet<string>;
 	/** 当前编辑器活跃文件：面板统一订阅后下发，行组件不再各自订阅 atom（否则点一次文件全树重渲）。 */
 	activeEditorFile: string | null;
 	onToggleDirectory: (path: string) => void;

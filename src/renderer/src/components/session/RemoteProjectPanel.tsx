@@ -278,6 +278,11 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 					{/* 根层读失败：远端错误只报稳定码对应的人话，不伪造空目录。 */}
 					{tree.error !== null ? <p className="px-2 py-1 text-label text-muted-foreground">{isNotConnectedCode(tree.error) ? t("project.remote.notConnectedHint") : t("project.remote.listFailed", { code: tree.error })}</p> : null}
 					{tree.listed && tree.error === null && tree.nodes.length === 0 ? <p className="px-2 py-1 text-label text-muted-foreground">{t("project.remote.empty")}</p> : null}
+					{tree.truncatedDirs.size > 0 ? (
+						<p data-testid="remote-file-tree-truncated" className="px-2 py-1 text-label text-muted-foreground">
+							{t("project.remote.directoryTruncated")}
+						</p>
+					) : null}
 					{tree.nodes.map((node) => (
 						<FileTreeNodeRow
 							key={fileTreeNodeKey(node)}
