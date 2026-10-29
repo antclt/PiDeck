@@ -226,7 +226,7 @@ function SourceBadge(props: { source: "market" | "npm" }) {
 /** UI-only 徽标：主要提供 DSH Web 界面功能（headless 无可见效果）。 */
 function UiOnlyBadge() {
 	return (
-		<Badge variant="outline" className="shrink-0 border-amber-300/70 bg-warning/10 font-medium text-warning dark:border-amber-700/70 ">
+		<Badge variant="outline" className="shrink-0 border-warning/30 bg-warning/10 font-medium text-warning  ">
 			{t("config.dsh.pluginMarketUiOnlyBadge")}
 		</Badge>
 	);

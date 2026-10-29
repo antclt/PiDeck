@@ -175,7 +175,7 @@ function ApiKeyField(props: {
 			<span className="flex items-center gap-1.5 text-caption font-medium text-foreground">
 				{t("config.dsh.apiKey")}
 				<span className="truncate font-mono text-micro text-muted-foreground">{ref}</span>
-				{configured && <span className="rounded-full border border-emerald-300/70 bg-success/10 px-1.5 py-px text-micro text-success dark:border-emerald-700/70 ">{t("config.dsh.keyConfigured")}</span>}
+				{configured && <span className="rounded-full border border-success/30 bg-success/10 px-1.5 py-px text-micro text-success  ">{t("config.dsh.keyConfigured")}</span>}
 			</span>
 			<div className="flex items-center gap-2">
 				<div className="relative max-w-sm flex-1">

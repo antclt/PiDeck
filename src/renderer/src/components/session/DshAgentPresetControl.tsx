@@ -58,12 +58,12 @@ const PRESET_TONES: Record<string, PresetTone> = {
 	// 极简模式（双工具）：绿色对应「轻量」
 	minimal: {
 		chip: "border-success/25 bg-success/12 text-success dark:border-success/30 dark:bg-success/15",
-		hover: "hover:bg-success/20 hover:text-emerald-800 dark:hover:bg-success/25 dark:hover:text-emerald-200",
+		hover: "hover:bg-success/20 hover:text-success dark:hover:bg-success/25 dark:hover:text-success",
 	},
 	// 创造模式（自定义 preset 创作/实验）：琥珀色对应「实验」
 	cordis: {
 		chip: "border-warning/30 bg-warning/12 text-warning dark:border-warning/30 dark:bg-warning/15",
-		hover: "hover:bg-warning/20 hover:text-amber-800 dark:hover:bg-warning/25 dark:hover:text-amber-200",
+		hover: "hover:bg-warning/20 hover:text-warning dark:hover:bg-warning/25 dark:hover:text-warning",
 	},
 };
 const FALLBACK_PRESET_TONE: PresetTone = {
