@@ -2,8 +2,27 @@ import { dialog, ipcMain, type BrowserWindow } from "electron";
 import { relative, resolve } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { ipcChannels } from "../../shared/ipc";
-import type { CommitDetail, GitChangedFile, GitCommitFileDiff, GitDiscardResource, GitGenerateCommitMessageResult, GitRepoInfo, GitResource, GitRef, GitResourceGroups, GitWorkspaceDiffGroup, GitWorkspaceFileDiff, LocalProject, ProjectFileTarget, WorktreeEntry } from "../../shared/types";
+import type {
+	CommitDetail,
+	GitChangedFile,
+	GitCommitFileDiff,
+	GitCompareRefsResult,
+	GitDiscardResource,
+	GitGenerateCommitMessageResult,
+	GitHistoryPageResult,
+	GitRepoInfo,
+	GitRepositoryListResult,
+	GitResource,
+	GitRef,
+	GitResourceGroups,
+	GitWorkspaceDiffGroup,
+	GitWorkspaceFileDiff,
+	LocalProject,
+	ProjectFileTarget,
+	WorktreeEntry,
+} from "../../shared/types";
 import { isLocalProject, isRemoteProject } from "../../shared/projectLocation";
+import { codeOf, opFailFromCode, opOk } from "../../shared/op";
 import type { RemoteGitReadIpc } from "./remoteGitReadIpc";
 import { createProjectGitHandler } from "./gitProjectHandlers";
 import { parseProjectFileTarget } from "../files/projectFileTarget";
@@ -39,7 +58,7 @@ export type GitIpcDeps = {
 	settingsStore: SettingsStore;
 	worktreeService: WorktreeService;
 	/** Optional only for local-only callers/tests; SSH reads must never fall back to GitService. */
-	remoteGitReads?: Pick<RemoteGitReadIpc, "status" | "workspaceDiff" | "listRepositories" | "refs">;
+	remoteGitReads?: Pick<RemoteGitReadIpc, "status" | "workspaceDiff" | "listRepositories" | "repositoryListing" | "historyPage" | "compareRefs" | "refs">;
 };
 
 // ── QuickGen：持久化轻量 pi 进程，通过 RPC 生成提交摘要 ──────────────
@@ -417,6 +436,122 @@ export function registerGitIpc({ appLogger, mainCopy, gitService, gitRefsWatcher
 			...(options.allBranches !== undefined ? { allBranches: options.allBranches } : {}),
 		};
 	};
+
+	/** 公共历史页选项：分页必选语义；本地过滤器（ref/path/allBranches）保留，远端只接受分页两项。 */
+	type ParsedHistoryPageOptions = { maxCount: number; skip: number; ref?: string; path?: ProjectFileTarget; allBranches?: boolean };
+	const parseHistoryPageOptions = (projectId: string, value: unknown): ParsedHistoryPageOptions => {
+		if (value === undefined) return { maxCount: 50, skip: 0 };
+		if (!isRecord(value)) throw new Error("INVALID_GIT_HISTORY_OPTIONS");
+		if (Object.keys(value).some((key) => !["maxCount", "skip", "ref", "path", "allBranches"].includes(key))) throw new Error("INVALID_GIT_HISTORY_OPTIONS");
+		const maxCount = value.maxCount ?? 50;
+		if (typeof maxCount !== "number" || !Number.isSafeInteger(maxCount) || maxCount < 1 || maxCount > 500) throw new Error("INVALID_GIT_HISTORY_OPTIONS");
+		const skip = value.skip ?? 0;
+		if (typeof skip !== "number" || !Number.isSafeInteger(skip) || skip < 0 || skip > 100_000) throw new Error("INVALID_GIT_HISTORY_OPTIONS");
+		const ref = value.ref;
+		if (ref !== undefined && (typeof ref !== "string" || !ref.trim() || ref.length > 512)) throw new Error("INVALID_GIT_HISTORY_OPTIONS");
+		if (value.allBranches !== undefined && typeof value.allBranches !== "boolean") throw new Error("INVALID_GIT_HISTORY_OPTIONS");
+		return {
+			maxCount,
+			skip,
+			...(typeof ref === "string" ? { ref } : {}),
+			...(value.path !== undefined ? { path: parseGitProjectTarget(projectId, value.path) } : {}),
+			...(typeof value.allBranches === "boolean" ? { allBranches: value.allBranches } : {}),
+		};
+	};
+
+	let localRepositoryListingRevision = 0;
+
+	/** 公共仓库列表（T7）：本地不截断（truncated=false），远端保留 helper 的 truncated。 */
+	handleProjectGit(ipcChannels.gitRepositoryList, async (event, projectId: string): Promise<GitRepositoryListResult> => {
+		if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256) return opFailFromCode("INVALID_PROJECT_ID");
+		const located = projectStore.get(projectId);
+		if (located && isRemoteProject(located)) {
+			if (!remoteGitReads) return opFailFromCode("UNSUPPORTED_CAPABILITY");
+			return remoteGitReads.repositoryListing(event, projectId);
+		}
+		if (!located) return opFailFromCode("PROJECT_NOT_FOUND");
+		try {
+			const repos = await gitBackendRouter.forProject(projectId).listRepositories({ projectId, relativePath: "" });
+			localRepositoryListingRevision += 1;
+			return opOk({ repos, truncated: false, revision: localRepositoryListingRevision, generation: "local" });
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+				localRepositoryListingRevision += 1;
+				return opOk({ repos: [], truncated: false, revision: localRepositoryListingRevision, generation: "local" });
+			}
+			return opFailFromCode(codeOf(error, "GIT_COMMAND_FAILED"));
+		}
+	});
+
+	/** 公共历史页（T7）：本地保留 ref/path/allBranches 与 totalCount；远端 HEAD-only 且无总数。 */
+	handleProjectGit(ipcChannels.gitHistoryPage, async (event, projectId: string, rawOptions?: unknown, repoPath?: unknown): Promise<GitHistoryPageResult> => {
+		if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256) return opFailFromCode("INVALID_PROJECT_ID");
+		let options: ParsedHistoryPageOptions;
+		try {
+			options = parseHistoryPageOptions(projectId, rawOptions);
+		} catch (error) {
+			return opFailFromCode(codeOf(error, "INVALID_GIT_HISTORY_OPTIONS"));
+		}
+		const located = projectStore.get(projectId);
+		if (located && isRemoteProject(located)) {
+			if (!remoteGitReads) return opFailFromCode("UNSUPPORTED_CAPABILITY");
+			// 远端没有任意 ref/path/allBranches 或总数保证：拒绝而不是静默吞参数。
+			if (options.ref !== undefined || options.path !== undefined || options.allBranches !== undefined) return opFailFromCode("UNSUPPORTED_CAPABILITY");
+			return remoteGitReads.historyPage(event, projectId, { maxCount: options.maxCount, skip: options.skip }, repoPath);
+		}
+		if (!located) return opFailFromCode("PROJECT_NOT_FOUND");
+		try {
+			const context = await findGitRepository(projectId, repoPath);
+			if (!context) return opOk({ commits: [], hasMore: false, totalCount: 0 });
+			const backend = gitBackendRouter.forProject(projectId);
+			const localOptions = await localGitHistoryOptions(context, backend, { maxEntries: options.maxCount, ...(options.ref === undefined ? {} : { ref: options.ref }), ...(options.path === undefined ? {} : { path: options.path }), ...(options.allBranches === undefined ? {} : { allBranches: options.allBranches }) });
+			const totalCount = await gitService.getCommitCount(context.repoRoot, { ...(localOptions?.ref === undefined ? {} : { ref: localOptions.ref }), ...(localOptions?.path === undefined ? {} : { path: localOptions.path }), ...(localOptions?.allBranches === undefined ? {} : { allBranches: localOptions.allBranches }) });
+			const entries = await gitService.getCommitLog(context.repoRoot, { ...localOptions, maxEntries: options.maxCount, skip: options.skip });
+			const commits = entries.slice(0, options.maxCount).map((entry) => ({
+				oid: entry.hash,
+				parents: entry.parents,
+				subject: entry.message,
+				authorName: entry.authorName,
+				authorEmail: entry.authorEmail,
+				authorTimeMs: entry.authorDate,
+				shortHash: entry.shortHash,
+				refNames: entry.refNames,
+				graph: entry.graph,
+				...(entry.fullMessage === undefined ? {} : { fullMessage: entry.fullMessage }),
+			}));
+			return opOk({ commits, hasMore: totalCount > options.skip + commits.length, totalCount });
+		} catch (error) {
+			return opFailFromCode(codeOf(error, "GIT_COMMAND_FAILED"));
+		}
+	});
+
+	/** 公共比较（T7）：本地三点（merge-base，带 ahead/behind）；远端两树（trees，无 ahead/behind）。 */
+	handleProjectGit(ipcChannels.gitCompareRefs, async (event, projectId: string, base: unknown, head: unknown, repoPath?: unknown): Promise<GitCompareRefsResult> => {
+		if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256) return opFailFromCode("INVALID_PROJECT_ID");
+		if (typeof base !== "string" || base.length === 0 || base.length > 512 || typeof head !== "string" || head.length === 0 || head.length > 512) return opFailFromCode("INVALID_GIT_HISTORY_OPTIONS");
+		const located = projectStore.get(projectId);
+		if (located && isRemoteProject(located)) {
+			if (!remoteGitReads) return opFailFromCode("UNSUPPORTED_CAPABILITY");
+			return remoteGitReads.compareRefs(event, projectId, base, head, repoPath);
+		}
+		if (!located) return opFailFromCode("PROJECT_NOT_FOUND");
+		try {
+			const context = await requireGitRepository(projectId, repoPath);
+			const [baseOid, headOid] = await Promise.all([gitService.resolveRefOid(context.repoRoot, base), gitService.resolveRefOid(context.repoRoot, head)]);
+			if (!baseOid || !headOid) return opFailFromCode("GIT_REF_NOT_FOUND");
+			const diff = await gitService.compareBranches(context.repoRoot, base, head);
+			return opOk({
+				mode: "merge-base",
+				base: { ref: base, oid: baseOid },
+				head: { ref: head, oid: headOid },
+				files: diff.files.map((file) => ({ status: file.status, path: file.path, ...(file.originalPath === undefined ? {} : { oldPath: file.originalPath }) })),
+				ahead: diff.ahead,
+				behind: diff.behind,
+			});
+		} catch (error) {
+			return opFailFromCode(codeOf(error, "GIT_COMMAND_FAILED"));
+		}
+	});
 
 	// Scan repositories through the same local-only boundary used by every Git operation.
 	handleProjectGit(ipcChannels.gitListRepos, async (event, projectId: string) => {

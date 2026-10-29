@@ -8,6 +8,9 @@ import type {
 	GitReadSnapshotResult,
 	GitResourceGroups,
 	GitWorkspaceFileDiff,
+	GitCompareRefsResult,
+	GitHistoryPageResult,
+	GitRepositoryListResult,
 	RemoteGitBranchMutationResult,
 	RemoteGitCommitDetailResult,
 	RemoteGitCompareResult,
@@ -26,6 +29,7 @@ import type {
 	RemoteGitSyncFactsResult,
 } from "../../shared/types/git";
 import type { ProjectFileTarget } from "../../shared/types/project";
+import { opFailFromCode, opOk } from "../../shared/op";
 import { createRemoteGitService, remoteGitFailureCode, remoteGitRepoScope, validateRemoteGitPath, validateRemoteGitRepoPath, type RemoteGitLocator, type RemoteGitReadSnapshot } from "../git/RemoteGitService";
 import { createRemoteGitMutationTokens } from "../git/RemoteGitMutationTokens";
 import { createSnapshotFactsCache } from "../git/RemoteGitSnapshotFacts";
@@ -87,6 +91,20 @@ export function registerRemoteGitReadIpc(input: {
 	 * （见 `RemoteGitSnapshotFacts` 的模块头）。令牌仍然每次现签，缓存的只是事实。
 	 */
 	const facts = createSnapshotFactsCache<RemoteGitReadSnapshot>();
+	/** 公共仓库列表的单调版本：一次成功列表就是一份新事实（truncated 也属这份事实）。 */
+	let repositoryListingRevision = 0;
+
+	/** 当前连接代（没有稳定身份时为空串）：只用于随结果/通知一起返给渲染层。 */
+	async function generationFor(projectId: string): Promise<string> {
+		try {
+			const locator = input.locator(projectId);
+			if (locator === undefined) return "";
+			const service = await input.service();
+			return service?.connectionFacts?.(locator.hostId)?.connectionId ?? "";
+		} catch {
+			return "";
+		}
+	}
 
 	/**
 	 * 写面标脏后通知渲染层：只发“哪个仓库的 status 该重读”，不装载、不碰授权。
@@ -514,6 +532,52 @@ export function registerRemoteGitReadIpc(input: {
 				displayPath: repository.name,
 				name: repository.name,
 			}));
+		},
+		/**
+		 * 公共仓库列表（T7）：保留 truncated，带 revision/generation；旧 `listRepositories` 仍返回裸数组给兼容入口。
+		 */
+		async repositoryListing(event: IpcMainInvokeEvent, projectId: unknown): Promise<GitRepositoryListResult> {
+			try {
+				const listing = await read(event, projectId, "", (id, signal) => git.listRepositories(id, signal));
+				const owner = typeof projectId === "string" ? projectId : "";
+				repositoryListingRevision += 1;
+				return opOk({
+					repos: listing.repos.map((repository) => ({ target: { projectId: owner, relativePath: repository.path }, relativePath: repository.path, displayPath: repository.name, name: repository.name })),
+					truncated: listing.truncated,
+					revision: repositoryListingRevision,
+					generation: typeof projectId === "string" ? await generationFor(projectId) : "",
+				});
+			} catch (error) {
+				return opFailFromCode(remoteGitFailureCode(error));
+			}
+		},
+		/** 公共历史页（T7）：远端 HEAD-only，不编造 totalCount/过滤能力。 */
+		async historyPage(event: IpcMainInvokeEvent, projectId: unknown, options: unknown, repo: unknown): Promise<GitHistoryPageResult> {
+			try {
+				const repoPath = remoteGitRepoScope(typeof projectId === "string" ? projectId : "", repo);
+				const page = await read(event, projectId, repoPath, (id, signal) => git.log(id, options, repoPath, signal));
+				return opOk({
+					commits: page.commits.map((commit) => ({ oid: commit.oid, parents: [...commit.parents], subject: commit.subject, authorName: commit.authorName, authorEmail: commit.authorEmail, authorTimeMs: commit.authorTimeSec * 1000 })),
+					hasMore: page.hasMore,
+				});
+			} catch (error) {
+				return opFailFromCode(remoteGitFailureCode(error));
+			}
+		},
+		/** 公共比较（T7）：远端是两树比较（trees），不返还 ahead/behind。 */
+		async compareRefs(event: IpcMainInvokeEvent, projectId: unknown, base: unknown, head: unknown, repo: unknown): Promise<GitCompareRefsResult> {
+			try {
+				const repoPath = remoteGitRepoScope(typeof projectId === "string" ? projectId : "", repo);
+				const compare = await read(event, projectId, repoPath, (id, signal) => git.compare(id, base, head, repoPath, signal));
+				return opOk({
+					mode: "trees",
+					base: { ref: compare.base.ref, oid: compare.base.oid },
+					head: { ref: compare.head.ref, oid: compare.head.oid },
+					files: compare.files.map((file) => ({ status: file.status, path: file.path, ...(file.oldPath === undefined ? {} : { oldPath: file.oldPath }) })),
+				});
+			} catch (error) {
+				return opFailFromCode(remoteGitFailureCode(error));
+			}
 		},
 		/** 忽略判定（只读、零授权）：结果与请求逐位对应。 */
 		async checkIgnore(event: IpcMainInvokeEvent, projectId: unknown, repo: unknown, paths: unknown): Promise<boolean[]> {

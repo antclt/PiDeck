@@ -323,3 +323,44 @@ export type GitExecutableInfo = {
 	/** 系统自动探测结果：配置为空时展示占位，配置无效时提供一键填入的备选 */
 	system: GitSystemProbe | null;
 };
+
+// ── 公共 Git 面（v5 T7）：本地与 SSH 同一形状的读入口 ───────────────────
+/**
+ * 公共历史条目：两种 backend 都映射到这一份。本地额外的图谱/引用是可选字段，
+ * 远端 HEAD-only 时自然缺席；不允许用空数组/0 冒充“本地也支持”。
+ */
+export type GitHistoryCommit = {
+	oid: string;
+	parents: string[];
+	subject: string;
+	authorName: string;
+	authorEmail: string;
+	authorTimeMs: number;
+	shortHash?: string;
+	refNames?: string[];
+	graph?: string[];
+	fullMessage?: string;
+};
+
+/** 公共历史页：`totalCount` 只有本地能给；远端显式缺席（不填 0）。 */
+export type GitHistoryPage = { commits: GitHistoryCommit[]; hasMore: boolean; totalCount?: number };
+export type GitHistoryPageResult = Op<GitHistoryPage>;
+
+/** 比较语义必须显式：三点（merge-base）与直接两树（trees）不是同一件事。 */
+export type GitCompareMode = "merge-base" | "trees";
+export type GitCompareRefsSide = { ref: string; oid: string };
+export type GitCompareRefsFile = { status: string; path: string; oldPath?: string };
+export type GitCompareRefsValue = {
+	mode: GitCompareMode;
+	base: GitCompareRefsSide;
+	head: GitCompareRefsSide;
+	files: GitCompareRefsFile[];
+	/** 三点模式才有；远端两树比较不支持时缺席，不填 0。 */
+	ahead?: number;
+	behind?: number;
+};
+export type GitCompareRefsResult = Op<GitCompareRefsValue>;
+
+/** 仓库列表的公共结果：`truncated` 是发现阶段的真实元数据，不得在归一化时丢失。 */
+export type GitRepositoryListing = { repos: GitRepoInfo[]; truncated: boolean; revision: number; generation: string };
+export type GitRepositoryListResult = Op<GitRepositoryListing>;
