@@ -193,7 +193,7 @@ type GrantScope = { purpose: "git-write"|"file-entry"|"file-text"; sender: numbe
 | W3 | ◐ 目录族已接线 | `RemoteFactCache` / `RemoteWorkspaceView`（三族形状 + 失效矩阵 + `onChanged`）；`ProjectCapabilities` 下沉 shared 并替掉三处「已连接」判定（R3 已修）；**目录族已进生产**：`remoteProjectIpc.list` 走事实层并返回 `{entries, revision}`，entry/text 写成功后标脏（`tests/remoteProjectDirFacts.test.mjs` 5 例） |
 | W4 | ◐ 前置完成 | **读事实 / 签授权已拆开**：`RemoteGitSnapshotFacts` 只缓存事实（按 项目+仓库、同键合并、带 revision），令牌仍每次现签；安全网是写动词自带的 `expectedRevision`（旧事实写不穿）。`git:listRepos` / `git:refs` 已同时服务 ssh（远端结果在 main 侧映射成同形 `GitRepoInfo[]` / `GitRef[]`）——单通道族已覆盖 4 个读动词 |
 | W6 | ✅ 主链路完成（粒度见下） | **helper 1.24.0**：`git.checkIgnore`（真机验证取反规则）、`fs.watch`/`fs.unwatch` + 无 id 事件帧（150ms 合并、watcher 上限、幂等关闭、shutdown 清理，均真机验证）。客户端：事件帧分流 + `onEvent` 观察者 + 围栏。**事件 → 失效已接线**：`RemoteDirWatchRegistry`（watchId→项目、换会话清空、未登记忽略）+ 会话链路 `onHelperEvent` 透传 + `index.ts` 装配；根目录首次读到即订阅，事件只标脏不装载。**已知粒度**：watcher 非递归，只覆盖根层与 `.git` 变化；更深目录仍走「读的人重读/轮询」。要递归得逐个已展开目录订阅（受 `MAX_WATCHES=4` 限制），属独立增量 |
-| W5 | ◐ 已开工（4/30 动词）| 重定验收：一条事实一条动词 + 删重复传输层；不追求面板合并 |
+| W5 | ◐ 已开工 | 统一缝是 `GitDrawerApi`（面板已按 API 注入）：远端适配器 ≈150 行 + `GitPanel` 能力门控，可删 ≈1200 行；读动词已 4 个共用 |
 
 **W2 的未完成项与理由（不是遗漏）**
 
@@ -261,33 +261,38 @@ type GrantScope = { purpose: "git-write"|"file-entry"|"file-text"; sender: numbe
 5. 降级：`capabilities.watch = false` 时上层用既有轮询（`ProjectCapabilities.watch` 已经是这个开关）。
 6. 门禁（真机）：改文件 3 秒内树更新、断开后无事件泄漏、watcher 上限生效、事件不触发装载风暴。
 
-**W5 重定范围（v6，实测后修正——原「删 ≈1600 行」的前提不成立）**
+**W5 重定范围（v7——v6 的结论被自己推翻，记录在此免得再走一遍）**
 
-原计划假设远端面板是"本地面板的重复品"，映射 30 个动词后即可删掉。实测行数与能力后这个假设被推翻：
+v6 曾写「两侧能力不对称，换侧是 +500 行换 −1400 行，所以 W5 不追求面板合并」。这个判断**错在没看见注入口**：
+`GitPanel` 不直接调 IPC——它的全部动作由 `GitDrawerApi`（29 个方法，见 `GitDrawerHost.tsx:8`）注入，
+`createScopedGitApi` 只是把 `repoPath` 绑上去。所以统一缝**既不是 30 个 IPC 动词，也不是 `GitBackend`**，
+而是这个 `GitDrawerApi` 形状：给 ssh 项目构造一份远端实现（≈150 行，逐方法转发到既有 `desktopApi.git.remote*`），
+`GitPanel` 就能原样挂上去——本地那 1926 行变成**两侧共用**，而不是被复制。
 
-| 侧 | 体量 | 远端没有 | 本地没有 |
-|---|---|---|---|
-| 本地 `GitPanel.tsx` | **1926 行** | — | — |
-| 远端 `RemoteGitPanel` + `remoteGitViewState` + `useRemoteGitView` | 631 + 674 + 129 = **1434 行** | 提交图 graph、多仓堆叠、`stage-all`、`git:watchRefs` 推送 | 回收站(recovery list/restore/drop)、信任门、仓库下拉域、写令牌 |
+于是 W5 的删除目标恢复为 **≈1200 行**：
 
-两侧**能力不对称**且各有独占功能，把任一侧换成另一侧都是 **+500 行新代码换来 −1400 行**，不是删除。
-所以 W5 的验收不能是"行数下降"，而是下面三条：
+| 文件 | 行 | 归属 |
+|---|---|---|
+| `RemoteGitPanel.tsx` | 631 | 由 `GitPanel` 取代 |
+| `remoteGitViewState.ts` | 674 | 由 `GitPanel` 自己的状态机取代 |
+| `useRemoteGitView.ts` | 129 | 同上 |
+| recovery / trust 两个区块 | — | **保留**（远端专属，本地没有） |
 
-1. **一条事实、一条动词**：同一语义只实现一次，`git:*` 按项目类型分派到本地/远端实现，结果同形。
-   已完成 4 个：`status`、`workspaceDiff`、`listRepos`、`refs`（`refs` 把 `oid`→`hash`、
-   `kind:"branch"`→`type:"head"` 换在 main 侧完成，渲染层不必知道自己在看哪一侧）。
-   下一批按此顺序：`commitLog` → `commitDetail` → `branchCompare` → `stage/unstage` → `commit` →
-   `push/pull/fetch`（写动词必须先有 `expectedRevision` 安全网，快照事实层已具备）。
-2. **删的是"只为通道不同而存在"的传输层**，不是面板：`useRemoteGitRepos`、远端 refs 轮询这类
-   重复 hook/state 预计 400–500 行可删。远端专属（recovery / trust / repo 域）保留原通道。
-3. **面板合并要单独立项**：先做远端每个可见行为 × 归属 × 证据的 parity 表，再决定合并方向；
-   在那之前两边各自维护，禁止"看起来一样就删"。
+代价（v6 唯一说对的部分，不许省略）：
 
-另记一条否决：`GitBackend`（`resolveRepository`/`resolveFilePath`/`listRepositories` 三方法）**不适合**
-承载 30 个动词——本地动词全部经 `gitService(repoRoot)` 直跑本机 git，让 `gitService` 远端化比
-在 IPC 层做同形适配贵得多。统一缝放在 **IPC 动词**这一层，不放在 `GitBackend`。
+1. **能力门控要新加**：`GitPanel` 今天没有 capabilities 概念，而远端缺 11 个动作——
+   `commitCount`、`cherryPick`、`revert`、`reset`、`dropCommit`、`generateCommitMessage`、
+   `watchRefs`/`unwatchRefs`/`onRefsChanged`、`originalContent`、`diffFileBetween`（后两个在抽屉里另有入口）。
+   面板必须显式隐藏它们，而不是让按钮点了报错。这份门控只加一次、两边共用，是**净新增**，要计进预算。
+2. **写动作的令牌生命周期只能住在适配器里**：`snapshot` 每次现签单次令牌，`stage/commit/push/pull/fetch/discard/
+   branch` 都要带它且带 `expectedRevision`。适配器必须持「最近一次快照的 token + revision」，写失败时按
+   `RESULT_UNCONFIRMED` 的既有规则处理（不重放）。这是远端面板 674 行里唯一**必须搬进适配器**的逻辑。
+3. **远端单仓 vs 本地多仓堆叠**：抽屉按 `scope.repos` 每仓挂一个面板；远端只有一座仓，
+   直接用一个 `repoPath = ""` 的面板即可，不需要新代码。
 
-**仍然成立的顺序约束**：删远端渲染层必须排在共用通道族覆盖它之后，否则远端 Git 会先失去功能。
+**顺序**：先给 `GitPanel` 加能力门控（行为零变化，纯新增）→ 再写远端 `GitDrawerApi` 适配器（18 个方法有对端，
+11 个走门控）→ 把抽屉对 ssh 项目指向 `GitPanel` → 删三份远端渲染文件 → 跑远端面板的既有回归（trust gate /
+recovery / 令牌）确认没丢行为。
 
 ## 5. 明确不重写（重写零收益，只有风险）
 
