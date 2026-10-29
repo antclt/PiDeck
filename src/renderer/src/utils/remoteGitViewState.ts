@@ -81,6 +81,8 @@ export type RemoteGitViewApi = {
 	mutateRemoteIndex(projectId: string, operation: "stage" | "unstage", group: GitResourceGroupType, target: ProjectFileTarget, token: string, repo?: string): Promise<GitIndexMutationResult>;
 	/* Every read and every write names its repository scope ("" is the project root). */
 	remoteSnapshot(projectId: string, repo?: string): Promise<GitReadSnapshotResult>;
+	/** 显式刷新（force）：越过已完成的事实缓存；未实现的宿主退回普通读。 */
+	refreshRemoteSnapshot?(projectId: string, repo?: string): Promise<GitReadSnapshotResult>;
 	workspaceFileDiff(projectId: string, group: GitResourceGroupType, target: ProjectFileTarget, repoPath?: ProjectFileTarget): Promise<GitWorkspaceFileDiff | null>;
 	remoteLog(projectId: string, options?: { maxCount?: number; skip?: number }, repo?: string): Promise<RemoteGitLogResult>;
 	remoteCommitDetail(projectId: string, oid: string, repo?: string): Promise<RemoteGitCommitDetailResult>;
@@ -169,7 +171,7 @@ export function createRemoteGitViewController(projectId: string, projectKey: str
 		if (active) publish(state);
 	}
 	const controller = {
-		async refresh(): Promise<void> {
+		async refresh(force = false): Promise<void> {
 			if (!active || state.loading || state.diffLoading || state.mutating) return;
 			const generation = ++epoch;
 			diffEpoch += 1;
@@ -185,7 +187,8 @@ export function createRemoteGitViewController(projectId: string, projectKey: str
 			// A failed refresh cannot resolve an uncertain write; only fresh repository facts can.
 			update({ projectKey, loading: true, diffLoading: false, ...(uncertainWrite ? { errorCode: "GIT_WRITE_RESULT_UNCONFIRMED" } : {}) });
 			try {
-				const result = await api.remoteSnapshot(projectId, repoPath);
+				// 显式刷新必须重新核对：已完成的旧缓存不能满足一次明确的刷新请求。
+				const result = force && api.refreshRemoteSnapshot !== undefined ? await api.refreshRemoteSnapshot(projectId, repoPath) : await api.remoteSnapshot(projectId, repoPath);
 				if (!active || generation !== epoch) return;
 				if (result.ok) update({ projectKey, loading: false, diffLoading: false, snapshot: result.snapshot });
 				else update({ projectKey, loading: false, diffLoading: false, errorCode: failureCode(result.code) });

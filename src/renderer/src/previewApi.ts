@@ -477,6 +477,7 @@ export function createPreviewApi(): PiDesktopApi {
 			updateWslHost: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
 			removeWslHost: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
 			onStateChange: () => () => undefined,
+			onProjectFactsChanged: () => () => undefined,
 			diagnoseRepair: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
 			runRepair: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
 			answerRepair: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
@@ -1059,6 +1060,7 @@ export function createPreviewApi(): PiDesktopApi {
 		git: {
 			cancelRemoteReads: async () => {},
 			remoteSnapshot: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
+			refreshRemoteSnapshot: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
 			remoteRepos: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
 			createRemoteBranch: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
 			switchRemoteBranch: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),

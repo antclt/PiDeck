@@ -94,7 +94,7 @@ export function useRemoteGitView(project: RemoteProject, repoPath = "") {
 		state: state.projectKey === projectKey ? state : { projectKey, loading: true, diffLoading: false },
 		// Returning the promise lets an explicit refresh gesture sequence the sync-facts read after the snapshot
 		// read; the snapshot update replaces the whole state and would wipe facts read concurrently.
-		refresh: (): Promise<void> => controller.current?.refresh() ?? Promise.resolve(),
+		refresh: (force = false): Promise<void> => controller.current?.refresh(force) ?? Promise.resolve(),
 		openDiff: (group: Parameters<NonNullable<typeof controller.current>["openDiff"]>[0], target: Parameters<NonNullable<typeof controller.current>["openDiff"]>[1]) => {
 			void controller.current?.openDiff(group, target);
 		},

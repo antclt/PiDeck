@@ -133,7 +133,7 @@ export function RemoteGitPanel({ project }: { project: RemoteProject }) {
 	const refreshAll = () => {
 		// The snapshot read rebuilds the view state and drops the sync facts: read them only after it settles, or a
 		// fast facts answer can be wiped by the snapshot and the bar sits on "loading" forever (G5b regression run).
-		void refresh().then(() => loadSync());
+		void refresh(true).then(() => loadSync());
 		// The explicit refresh gesture is also when a repository that appeared or disappeared natively is re-discovered.
 		void reloadRepos();
 	};

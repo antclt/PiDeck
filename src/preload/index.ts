@@ -391,6 +391,21 @@ const api = {
 		removeWslHost: (id: string) => ipcRenderer.invoke(ipcChannels.remoteHostsWslRemove, id) as Promise<import("../shared/types/wslHost").WslHostRemoveResult>,
 		/** 订阅连接状态推送；返回 unsubscribe，组件卸载必须退订。 */
 		onStateChange: (callback: (change: import("../shared/types/remoteHost").RemoteHostStateChange) => void) => subscribe(ipcChannels.remoteHostStateChanged, callback),
+		/**
+		 * 订阅一个项目的目录/Git 事实变化（只标脏，不触发装载）：返回 unsubscribe。
+		 * 订阅绑定 sender + project：主进程只推送这个项目的变化，别的项目不会串到本监听。
+		 */
+		onProjectFactsChanged: (projectId: string, callback: (change: import("../shared/types/remoteHost").RemoteProjectFactsChange) => void) => {
+			const handler = (_event: unknown, change: import("../shared/types/remoteHost").RemoteProjectFactsChange) => {
+				if (change?.projectId === projectId) callback(change);
+			};
+			ipcRenderer.on(ipcChannels.remoteProjectFactsChanged, handler);
+			void ipcRenderer.invoke(ipcChannels.remoteProjectFactsSubscribe, projectId).catch(() => undefined);
+			return () => {
+				ipcRenderer.removeListener(ipcChannels.remoteProjectFactsChanged, handler);
+				void ipcRenderer.invoke(ipcChannels.remoteProjectFactsUnsubscribe, projectId).catch(() => undefined);
+			};
+		},
 		/** 只读：诊断 needs-repair 的原因与合法动作。 */
 		diagnoseRepair: () => ipcRenderer.invoke(ipcChannels.remoteHostRepairDiagnose) as Promise<import("../shared/types/remoteHost").RemoteHostRepairDiagnosisResult>,
 		/** 发起修复：推送确认请求，用户回答后才真正执行。 */
@@ -1060,6 +1075,8 @@ const api = {
 		commitRemote: (projectId: string, message: string, token: string, repo?: string) => ipcRenderer.invoke(ipcChannels.gitRemoteCommit, projectId, message, token, repo) as Promise<import("../shared/types").GitCommitResult>,
 		// G5d/G5e：读通道与写通道尾部都可带项目相对 repo scope（空/缺省 = 项目根）；写通道的 scope 由 main 的令牌绑定。
 		remoteSnapshot: (projectId: string, repo?: string) => ipcRenderer.invoke(ipcChannels.gitRemoteSnapshot, projectId, repo) as Promise<import("../shared/types").GitReadSnapshotResult>,
+		// 显式刷新（同一通道的 force 位）：越过已完成事实缓存；普通读仍可共享缓存。
+		refreshRemoteSnapshot: (projectId: string, repo?: string) => ipcRenderer.invoke(ipcChannels.gitRemoteSnapshot, projectId, repo, true) as Promise<import("../shared/types").GitReadSnapshotResult>,
 		// G5d：项目根下的有界仓库发现（无 token、纯读）
 		remoteRepos: (projectId: string) => ipcRenderer.invoke(ipcChannels.gitRemoteRepos, projectId) as Promise<import("../shared/types").RemoteGitReposResult>,
 		// 分支写面（G3b）：新建分支不移动 HEAD，切换走原生 switch 且冲突即拒（绝不 force）
