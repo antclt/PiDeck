@@ -1,6 +1,6 @@
 {
   "name": "pideck",
-  "version": "0.9.8",
+  "version": "0.9.9-beta",
   "dshRuntimeVersion": "0.2.1-rc.2",
   "packageManager": "npm@11.6.2",
   "engines": {
