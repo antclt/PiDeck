@@ -192,7 +192,7 @@ type GrantScope = { purpose: "git-write"|"file-entry"|"file-text"; sender: numbe
 | W2 | ◐ 大部分 | **entry / text / trust / project（7 类）/ transfer（上传下载）已 `Op<T>`**；`shared/op.ts` 提供 `Op` / `codeOf` / `OP_UNKNOWN_CODES` / `opFailFromCode`；`codeOf` 独立实现 **10 份 → 1 份**（`remoteHostInputValidation` 改 re-export）；`tests/envelopeSingleSource.test.mjs` 守不变量 |
 | W3 | ◐ 目录族已接线 | `RemoteFactCache` / `RemoteWorkspaceView`（三族形状 + 失效矩阵 + `onChanged`）；`ProjectCapabilities` 下沉 shared 并替掉三处「已连接」判定（R3 已修）；**目录族已进生产**：`remoteProjectIpc.list` 走事实层并返回 `{entries, revision}`，entry/text 写成功后标脏（`tests/remoteProjectDirFacts.test.mjs` 5 例） |
 | W4 | ◐ 前置完成 | **读事实 / 签授权已拆开**：`RemoteGitSnapshotFacts` 只缓存事实（按 项目+仓库、同键合并、带 revision），令牌仍每次现签；安全网是写动词自带的 `expectedRevision`（旧事实写不穿）。`git:listRepos` 已同时服务 ssh（远端结果映射成同形 `GitRepoInfo[]`）——单通道族的第一个动词 |
-| W6 | ◐ helper + 客户端已完成 | **helper 1.24.0**：`git.checkIgnore`（真机验证取反规则）、`fs.watch`/`fs.unwatch` + 无 id 事件帧（150ms 合并、watcher 上限、幂等关闭、shutdown 清理，均真机验证）。客户端：事件帧分流 + `onEvent` 观察者 + 围栏。缺最后一段：**事件 → 事实层失效矩阵的接线**（需要 watchId 注册表 + `capabilities.watch` 门控） |
+| W6 | ✅ 主链路完成（粒度见下） | **helper 1.24.0**：`git.checkIgnore`（真机验证取反规则）、`fs.watch`/`fs.unwatch` + 无 id 事件帧（150ms 合并、watcher 上限、幂等关闭、shutdown 清理，均真机验证）。客户端：事件帧分流 + `onEvent` 观察者 + 围栏。**事件 → 失效已接线**：`RemoteDirWatchRegistry`（watchId→项目、换会话清空、未登记忽略）+ 会话链路 `onHelperEvent` 透传 + `index.ts` 装配；根目录首次读到即订阅，事件只标脏不装载。**已知粒度**：watcher 非递归，只覆盖根层与 `.git` 变化；更深目录仍走「读的人重读/轮询」。要递归得逐个已展开目录订阅（受 `MAX_WATCHES=4` 限制），属独立增量 |
 | W5 | ⨯ 未开 | 见下表 |
 
 **W2 的未完成项与理由（不是遗漏）**
