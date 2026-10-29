@@ -6914,6 +6914,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"remoteFile.reloadBody": "A successful read will replace your unsaved draft. Copy anything you need first. A failed read will retain the draft.",
 	"remoteFile.keepDraft": "Keep draft",
 	"remoteFile.discardReload": "Discard draft and reload",
+	"remoteFileEntry.root": "Go to project root",
 	"remoteFileEntry.newFile": "New file",
 	"remoteFileEntry.newFolder": "New folder",
 	"remoteFileEntry.nameLabel": "Name",

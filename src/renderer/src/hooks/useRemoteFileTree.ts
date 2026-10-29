@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FileTreeNode } from "../../../shared/types";
 import type { ProjectDirectoryEntry } from "../../../shared/types/projectFiles";
 import { desktopApi } from "../desktopApi";
+import { parseFileTreeKey, projectFileKey } from "../utils/fileTreeLazy";
 import { createLazyDirTreeController, lazyDirTreeInitialState, type LazyDirTreeController, type LazyDirTreeState } from "../utils/lazyDirTree";
 
 /**
@@ -89,7 +90,8 @@ export function useRemoteFileTree(projectId: string): RemoteFileTree {
 	}, [projectId]);
 
 	const toggle = useCallback((key: string) => {
-		controller.current?.toggle(key);
+		const relative = parseFileTreeKey(key)?.relativePath ?? key;
+		controller.current?.toggle(relative);
 	}, []);
 	const collapseAll = useCallback(() => {
 		controller.current?.collapseAll();
@@ -101,5 +103,7 @@ export function useRemoteFileTree(projectId: string): RemoteFileTree {
 		controller.current?.setCurrentDir(dir);
 	}, []);
 
-	return { ...state, toggle, collapseAll, refresh, loadDir, reveal, setCurrentDir };
+	// 行组件的展开身份是 projectFileKey；controller 内部只认项目相对路径。
+	const expanded = useMemo(() => new Set([...state.expanded].map((dir) => projectFileKey({ projectId, relativePath: dir }))), [state.expanded, projectId]);
+	return { ...state, expanded, toggle, collapseAll, refresh, loadDir, reveal, setCurrentDir };
 }

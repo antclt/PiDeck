@@ -213,6 +213,11 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 						<TerminalSquare className="size-4" aria-hidden="true" />
 					</Button>
 				) : null}
+				<Button variant="ghost" size="icon-sm" data-testid="remote-file-root" aria-label="/" title={t("remoteFileEntry.root")} onClick={() => tree.setCurrentDir("")}>
+					<span className="font-mono text-xs" aria-hidden="true">
+						/
+					</span>
+				</Button>
 				<span className="min-w-0 flex-1 truncate px-1 text-label text-muted-foreground">{props.projectName}</span>
 				{!searching && !searchOpen ? (
 					<>

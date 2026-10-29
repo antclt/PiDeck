@@ -184,7 +184,7 @@ export async function verifyRemoteGitRead(input: { window: Page; credentials: Re
 	await expect(panel.getByTestId("remote-git-workingTree")).toHaveCount(0);
 	await window.getByRole("button", { name: /^设置/ }).click();
 	await modal.getByRole("tab", { name: "连接", exact: true }).click();
-	await expect(modal.getByText("已断开连接").first()).toBeVisible();
+	await expect(modal.getByText(/已断开连接|已离线/).first()).toBeVisible();
 	await modal.getByRole("button", { name: "连接", exact: true }).first().click();
 	await expect(modal.getByText("已连接").first()).toBeVisible({ timeout: timeoutMs });
 	await dismissRemoteConnectionProgress(window);

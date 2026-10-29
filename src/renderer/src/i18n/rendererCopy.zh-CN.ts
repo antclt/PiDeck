@@ -6895,6 +6895,7 @@ export const zhCN = {
 	"remoteFile.reloadBody": "读取成功后将替换当前未保存草稿。请先复制需要保留的内容；读取失败仍保留草稿。",
 	"remoteFile.keepDraft": "保留草稿",
 	"remoteFile.discardReload": "丢弃草稿并重新加载",
+	"remoteFileEntry.root": "回到项目根目录",
 	"remoteFileEntry.newFile": "新建文件",
 	"remoteFileEntry.newFolder": "新建文件夹",
 	"remoteFileEntry.nameLabel": "名称",

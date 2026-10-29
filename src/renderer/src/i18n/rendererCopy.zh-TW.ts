@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 5184e5e546e93be8548dd51fa14a64d808caf4c3fbff65cb81fb91371cb7fd5c（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 97210326aa5fe1783a7907b34674618d0ec59c8f48050195ce99fbc3c3ef8843（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -6902,6 +6902,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"remoteFile.reloadBody": "讀取成功後將替換當前未儲存草稿。請先複製需要保留的內容；讀取失敗仍保留草稿。",
 	"remoteFile.keepDraft": "保留草稿",
 	"remoteFile.discardReload": "丟棄草稿並重新載入",
+	"remoteFileEntry.root": "回到專案根目錄",
 	"remoteFileEntry.newFile": "新建檔案",
 	"remoteFileEntry.newFolder": "新建資料夾",
 	"remoteFileEntry.nameLabel": "名稱",

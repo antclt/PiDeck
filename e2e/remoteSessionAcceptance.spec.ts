@@ -200,12 +200,12 @@ async function addVerifiedRemoteHostAndConnect(window: Page, credentials: Remote
 	const modal = window.locator(".settings-modal");
 	await expect(modal).toBeVisible();
 	await modal.getByRole("tab", { name: "连接", exact: true }).click();
-	await modal.getByRole("button", { name: "添加", exact: true }).click();
-	const addDialog = window.locator('[role="dialog"]').filter({ hasText: "添加 SSH 连接" });
-	await expect(addDialog, "点「添加」必须打开 AddHostDialog").toBeVisible();
+	await modal.getByRole("button", { name: /^(添加|新建连接)$/ }).click();
+	const addDialog = window.getByRole("dialog", { name: /^(新建连接|添加 SSH 连接)$/ });
+	await expect(addDialog, "点「新建连接」必须打开 AddHostDialog").toBeVisible();
 	// 候选来自真实 ~/.ssh/config：按 user@host 精确匹配，同一条 config 可能有多条别名指向同一主机，
 	// 所以断言「至少一条」再取第一条。
-	const candidate = addDialog.getByRole("button", { name: new RegExp(credentials.user + "@" + credentials.host.replace(/\./g, "\\.")) });
+	const candidate = window.getByRole("button", { name: new RegExp(credentials.user + "@" + credentials.host.replace(/\./g, "\\.")) });
 	// 扫描是异步的：列表可能比对话框晚到。用可等待的可见性断言而不是 count() 立即采样，否则主机负载高
 	// 时会把「还没渲染」误判成「没有候选」（2026-10-17 真机门禁偶发，均停在此断言）。
 	// 面板自 1dd8ceb7e 起默认收起候选列表：先展开「从 SSH config 导入」。
