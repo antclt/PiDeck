@@ -408,7 +408,7 @@ export function ProjectTree(props: {
 							// 展开且为空时给明确空态（#387）：什么都不渲染会让用户把「空列表」当成「列表坏了」。
 							emptyState={
 								chatCatalogReady ? (
-									<div className="px-2 py-1 text-caption text-muted-foreground/70" data-testid="chat-empty-sessions">
+									<div className="px-2 py-1 text-caption text-muted-foreground" data-testid="chat-empty-sessions">
 										{t("app.chatEmptySessions")}
 									</div>
 								) : undefined
