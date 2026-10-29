@@ -58,7 +58,7 @@ function envFromText(text: string): Record<string, string> | undefined {
  *   整表回写 atom——新建会话菜单与设置页共享同一份快照,无需事件订阅;
  * - 校验双层:保存前逐条走主进程 validateTool(名称/命令必填、与已存表查重),
  *   再本地查草稿间重名(两条新增行同名时主进程 sanitize 会静默丢第二条,必须前置拦下);
- * - 删除行只改草稿,点「保存」才写盘;未保存关闭由 SettingsModal 脏标记确认兜底。
+ * - 删除行只改草稿,点弹框头部统一「保存」才写盘;未保存关闭由 SettingsModal 脏标记确认兜底。
  */
 export type AcpToolsTabHandle = { save: () => Promise<boolean> };
 
@@ -72,7 +72,6 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 	const nextKeyRef = useRef(1);
 	const makeRowKey = useCallback(() => `draft-${nextKeyRef.current++}`, []);
 	const [hydrated, setHydrated] = useState(false);
-	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | undefined>();
 	// 总开关独立于弹框 draft:即时写盘(同 WebRemoteAccessSection 模式),变更重启生效。
 	// undefined = 尚未从主进程拉到(settings.get 异步),期间禁用开关防抖动。
@@ -172,7 +171,6 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 	);
 
 	const save = useCallback(async (): Promise<boolean> => {
-		setSaving(true);
 		setError(undefined);
 		try {
 			// 第一层:主进程逐条校验(必填 + 与已存表查重;主进程不知草稿全貌)
@@ -204,8 +202,6 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : String(cause));
 			return false;
-		} finally {
-			setSaving(false);
 		}
 	}, [rows, setSaved, makeRowKey, expandKey]);
 
@@ -306,15 +302,11 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 							})}
 						</div>
 					)}
-					<div className="flex items-center justify-between">
-						<Button variant="outline" size="sm" onClick={addRow}>
-							<Plus size={14} aria-hidden="true" />
-							{t("acp.toolAdd")}
-						</Button>
-						<Button size="sm" disabled={!dirty || saving} onClick={() => void save()}>
-							{saving ? t("common.saving") : t("common.save")}
-						</Button>
-					</div>
+					{/* 工具表变更走弹框头部统一「保存」(经 ref.save 复用同一校验/回写链),此处不再重复放按钮 */}
+					<Button variant="outline" size="sm" className="self-start" onClick={addRow}>
+						<Plus size={14} aria-hidden="true" />
+						{t("acp.toolAdd")}
+					</Button>
 					<AcpTimeoutSettings />
 				</>
 			)}
