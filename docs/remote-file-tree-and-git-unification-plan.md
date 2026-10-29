@@ -208,10 +208,17 @@ type GrantScope = { purpose: "git-write"|"file-entry"|"file-text"; sender: numbe
 
 **下一步的确定落点（按依赖顺序）**
 
-1. **W3 接线**：`RemoteWorkspaceView` 的 dir 端口接 `RemoteWorkspaceReader.list`（`remoteProjectIpc.ts:255` 的形状），status/repos 接 `remoteGitReadIpc` 既有的 `withProjectSession` 路径；把 renderer 的 4 处 `onStateChange` 判定换成 `ProjectCapabilities`。
-2. **W4** 单通道族：删 `remoteGitReadIpc` 的通道注册，ssh 作为 backend 注册在同一批通道名上；sessions 域在同一波迁 `Op<T>`。
-3. **W1 收尾**：把 `activeEditorFileAtom` 的写入侧统一到项目键（今天已两态兼容），之后才能让 `fileTreeNodeKey` 完全不看 `relative:` 兜底。
-4. **W5 / W6** 按表推进。
+1. **W4 前置：把「读事实」与「签授权」拆开**（这是 Git 侧进事实层的唯一前提）。
+   目标形状：读只产出 `{facts, revision}`；写授权按 `(scope, revision)` 在**写的那一刻**现取，
+   helper 侧已经有 `expectedRevision`（`git.push`/`git.pull` 在用）。做完之后 `git:remote-snapshot`
+   才可以进缓存，树着色与面板才算真正共读一份事实。
+   门禁：既有令牌测试（`remoteGitMutationTokens` / `remoteGitMultiRepoTokenScope`）语义不变；
+   「同一 revision 的两次读只发一次 `git.status`」；「revision 变了 ⇒ 旧授权被拒」。
+2. **W4 单通道族**：删 `remoteGitReadIpc` 的通道注册，ssh 作为 backend 注册在同一批通道名上；
+   sessions 域在同一波迁 `Op<T>`（`remoteSessionIpc` + 三个结果类型）。
+3. **W5** 删远端 Git 的 ≈1600 行独立渲染管线（前置是第 1 步，否则两套 UI 会各读各的）。
+4. **W6** helper 同批升版：`git.checkIgnore` + `fs.watch/unwatch` + 事件帧 + `capabilities.watch` 协商。
+5. 旁路小项（可随时插）：`git:remote-repos` 与 `git:listRepos` 两个通道/两种形状收成一个。
 
 **并行约束（重要）**：`src/main/sessions/` 上还有别人的改动时不碰它；`src/main/index.ts` 是公共汇聚文件，只由装配相关的那一波改。
 
