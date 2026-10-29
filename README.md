@@ -406,7 +406,13 @@ src/
 - 提交 Issue 前请先搜索是否已有同类问题；
 - 代码 PR 请遵循仓库的架构约定与提交规范，详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-感谢所有为 PiDeck 做出贡献的人！完整名单请查看 [CONTRIBUTORS.md](CONTRIBUTORS.md)。
+### 🙌 贡献者
+
+感谢所有为 PiDeck 做出贡献的人！完整名单（含各自提交的功能与 Issue 编号）见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。
+
+<a href="https://github.com/ayuayue/PiDeck/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=ayuayue/PiDeck&max=100" alt="PiDeck 贡献者" />
+</a>
 
 ---
 

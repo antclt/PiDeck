@@ -385,7 +385,13 @@ All kinds of contributions are welcome: bug reports, feature ideas, documentatio
 - Please search for existing issues before filing a new one;
 - Code PRs should follow the repo's architecture conventions and commit guidelines — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Thank you to everyone who has contributed to PiDeck! See the full list in [CONTRIBUTORS.en.md](CONTRIBUTORS.en.md).
+### 🙌 Contributors
+
+Thank you to everyone who has contributed to PiDeck! See the full list (with each contributor's features and issue numbers) in [CONTRIBUTORS.en.md](CONTRIBUTORS.en.md).
+
+<a href="https://github.com/ayuayue/PiDeck/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=ayuayue/PiDeck&max=100" alt="PiDeck contributors" />
+</a>
 
 ---
 
