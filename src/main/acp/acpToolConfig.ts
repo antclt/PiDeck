@@ -94,6 +94,35 @@ export function isRememberedAcpConfigOption(option: { id: string; category?: str
 	return true;
 }
 
+/** configOption 里承载「会话模式/权限档」的那一项（id 或 category 为 mode）。 */
+export function isAcpModeOption(option: { id: string; category?: string }): boolean {
+	return option.id.trim().toLowerCase() === "mode" || option.category?.trim().toLowerCase() === "mode";
+}
+
+/** 当前枚举里的模式项；boolean 型不是模式枚举（无值可选），跳过。 */
+export function findAcpModeOption(options: ReadonlyArray<AcpConfigOption> | undefined): AcpConfigOption | undefined {
+	return (options ?? []).find((option) => option.type !== "boolean" && isAcpModeOption(option));
+}
+
+/** select 型选项的全部可选值（分组展开）；非 select/无枚举回空数组。 */
+export function acpConfigOptionValues(option: Pick<AcpConfigOption, "type" | "options"> | undefined): string[] {
+	if (!option || option.type === "boolean") return [];
+	const values: string[] = [];
+	for (const item of option.options ?? []) {
+		if ("group" in item) for (const inner of item.options) values.push(inner.value);
+		else values.push(item.value);
+	}
+	return values;
+}
+
+/**
+ * agent 自己枚举里代表「跳过审批」的模式档：Claude 是 bypassPermissions、Qoder 是 yolo、
+ * 其余按 bypass 前缀兜住。运行期下发能否被接受由 agent 决定（Qoder 直接拒绝）。
+ */
+export function findAcpBypassModeValue(option: Pick<AcpConfigOption, "type" | "options"> | undefined): string | undefined {
+	return acpConfigOptionValues(option).find((value) => /^(bypass|bypasspermissions|bypass_permissions|yolo)$/i.test(value));
+}
+
 /** 设置加载/更新边界的整表消毒：脏工具/脏选项/超长值丢弃，不因一条坏数据拒绝整表。 */
 export function sanitizeAcpToolConfigDefaults(value: unknown): AcpToolConfigDefaults {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return {};

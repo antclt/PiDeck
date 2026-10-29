@@ -27,7 +27,7 @@ import { AcpPermissionRequests } from "./AcpPermissionRequests";
 import { acpPromptBlocks, appendAcpUserPrompt, initialAcpProjection, rollbackAcpUserPrompt, settleAcpTurn, type AcpProjectionState } from "./AcpEventProjector";
 import { authRequiredDescriptor, localizeCreateFailure, promptTurnTimeoutDescriptor } from "./acpFailureDescriptors";
 import { buildAgentRuntimeState, type AcpAgentRuntime } from "./acpAgentRuntime";
-import { isRememberedAcpConfigOption, planAcpConfigReplay } from "./acpToolConfig";
+import { findAcpBypassModeValue, findAcpModeOption, isRememberedAcpConfigOption, planAcpConfigReplay } from "./acpToolConfig";
 import { AcpTurnWatchdog } from "./acpTurnWatchdog";
 import { AcpMessageSnapshotStore } from "./AcpMessageSnapshotStore";
 import type { AcpSessionArchive } from "./AcpSessionArchive";
@@ -334,19 +334,14 @@ export class AcpAgentManager implements SessionAgentGateway {
 	 * 只能用运行期下发：Claude 适配器不读启动参数（初始模式只取 settings.json 的
 	 * permissions.defaultMode），Qoder 适配器则直接拒绝 set_config_option（见 #444 同类问题）。
 	 * 所以失败只记日志——某些 CLI 版本压根没有 bypass 档，不该因此开不了会话。
+	 * 启动参数已经定档（Qoder `--permission-mode`）时记忆重放会让路，见 pinnedBypassModeOptionId。
 	 * session/load 恢复的会话不覆盖 agent 侧状态（与重放记忆同口径）。
 	 */
 	private async applyBypassPermissionDefault(runtime: AcpAgentRuntime): Promise<void> {
 		if (runtime.tool.bypassPermissions !== true || runtime.loadedSession) return;
-		const mode = (runtime.configOptions ?? []).find((option) => option.id === "mode" || option.category === "mode");
-		if (!mode || mode.type === "boolean") return;
-		const values: string[] = [];
-		for (const item of mode.options ?? []) {
-			if ("group" in item) for (const inner of item.options) values.push(inner.value);
-			else values.push(item.value);
-		}
-		// 各家叫法不同：Claude 是 bypassPermissions、Qoder 是 yolo、其余按 bypass 前缀兜住
-		const bypass = values.find((value) => /^(bypass|bypasspermissions|bypass_permissions|yolo)$/i.test(value));
+		const mode = findAcpModeOption(runtime.configOptions);
+		if (!mode) return;
+		const bypass = findAcpBypassModeValue(mode);
 		if (!bypass || mode.currentValue === bypass) return;
 		try {
 			await this.enqueueConfigOption(runtime.tab.id, mode.id, bypass, false);
@@ -356,11 +351,30 @@ export class AcpAgentManager implements SessionAgentGateway {
 		}
 	}
 
+	/**
+	 * 模式档已由启动参数定在 bypass 时的选项 id（记忆重放必须让路）。
+	 *
+	 * Qoder 只能靠 `--permission-mode` 定档（运行期 set_config_option 回
+	 * -32603 unknown permission_mode: yolo），若这里不拦，重放记忆里的旧档位（如 auto）会把
+	 * 会话降回非 bypass，随后补设 bypass 又必然失败——新会话显示 Auto、重开（session/load
+	 * 不重放）反而正常，正是这条链。
+	 */
+	private pinnedBypassModeOptionId(runtime: AcpAgentRuntime): string | undefined {
+		if (runtime.tool.bypassPermissions !== true) return undefined;
+		const mode = findAcpModeOption(runtime.configOptions);
+		if (!mode) return undefined;
+		const bypass = findAcpBypassModeValue(mode);
+		return bypass && mode.currentValue === bypass ? mode.id : undefined;
+	}
+
 	/** 新建会话握手后重放工具级记忆;session/load 恢复的会话不覆盖 agent 侧状态。 */
 	private async replayToolConfigDefaults(runtime: AcpAgentRuntime): Promise<void> {
 		if (runtime.loadedSession) return;
 		const defaults = this.deps.getToolConfigDefaults?.(runtime.tool.id);
+		// 工具级 bypass 开关是「明确配置」：模式已是 bypass 时保住它，不让学来的上次选择覆盖。
+		const pinnedModeId = this.pinnedBypassModeOptionId(runtime);
 		for (const item of planAcpConfigReplay(runtime.configOptions, defaults)) {
+			if (item.id === pinnedModeId) continue;
 			try {
 				await this.enqueueConfigOption(runtime.tab.id, item.id, item.value, false);
 			} catch (error) {

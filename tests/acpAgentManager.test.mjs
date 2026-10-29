@@ -1151,6 +1151,51 @@ test("configOptions:不开 bypassPermissions 时不得自动下发（默认权�
 	assert.equal(lastProc().methodFrames("session/set_config_option").length, 0, "没开开关就不该动权限模式");
 });
 
+test("configOptions:启动参数已定档 bypass 时，记忆里的旧模式不得覆盖（Qoder --permission-mode）", async (t) => {
+	// 现场：Qoder CLI 只能靠 `--permission-mode bypass_permissions` 定档，运行期回写 yolo 一律
+	// -32603 unknown permission_mode。此前重放记忆里的 mode=auto 会把会话降回 Auto，随后补设
+	// bypass 又必然失败；而重开会话（session/load 不重放）却正常。本用例钉住：模式已经是
+	// bypass 时既不得重放旧值，也不得再发一次注定被拒的下发；其他选项照旧重放。
+	const modeOption = {
+		id: "mode",
+		name: "Mode",
+		category: "mode",
+		type: "select",
+		currentValue: "yolo",
+		options: [
+			{ value: "default", name: "Default" },
+			{ value: "auto", name: "Auto" },
+			{ value: "yolo", name: "Bypass Permissions" },
+		],
+	};
+	const effortOption = { id: "effort", name: "Reasoning effort", category: "thought_level", type: "select", currentValue: "medium", options: [{ value: "medium", name: "Medium" }, { value: "high", name: "High" }] };
+	const { manager, createAgent, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: false } };
+				if (frame.method === "session/new") return { sessionId: "sess-qoder", configOptions: [modeOption, effortOption] };
+				if (frame.method === "session/set_config_option") {
+					if (frame.params.value === "yolo") return { __error: true, code: -32603, message: "Internal error", data: { details: "unknown permission_mode: yolo" } };
+					const next = [modeOption, effortOption].map((option) => (option.id === frame.params.configId ? { ...option, currentValue: frame.params.value } : option));
+					return { configOptions: next };
+				}
+				return {};
+			},
+		},
+		{
+			getTools: () => [{ id: "qoder", name: "Qoder CLI", command: "qodercli", args: ["--acp", "--permission-mode", "bypass_permissions"], enabled: true, bypassPermissions: true }],
+			getToolConfigDefaults: () => ({ mode: "auto", effort: "high" }),
+		},
+	);
+	const tab = await createAgent("qoder");
+	const frames = lastProc().methodFrames("session/set_config_option");
+	assert.equal(JSON.stringify(frames.map((frame) => frame.params)), JSON.stringify([{ sessionId: "sess-qoder", configId: "effort", value: "high" }]), "只重放非模式项；模式既不得降回 auto，也不得再试确定被拒的 yolo");
+	const options = manager.getSessionConfigOptions(tab.id) ?? [];
+	assert.equal(options.find((option) => option.id === "mode")?.currentValue, "yolo", "新会话必须保持在启动参数定下的 bypass 档");
+	assert.equal(options.find((option) => option.id === "effort")?.currentValue, "high", "记忆重放不得被模式锁定连带跳过");
+});
+
 test("configOptions:config_option_update 通知整表替换并回调 onConfigOptionsChanged", async (t) => {
 	const seen = [];
 	const { manager, createAgent, lastProc } = harness(
