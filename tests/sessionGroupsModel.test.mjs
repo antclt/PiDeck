@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { buildSessionGroupNodes, projectDirectoryLabel } = loadTsCommonJs("src/renderer/src/components/sidebar/sessionGroupsModel.ts");
+const { buildSessionGroupNodes, isSessionGroupsPluginEnabled, projectDirectoryLabel } = loadTsCommonJs("src/renderer/src/components/sidebar/sessionGroupsModel.ts");
 
 const RECORD = (id, projectId, updatedAt) => ({ id, projectId, title: id, updatedAt });
 const PROJECT = (id, name, path) => ({ id, name, path });
@@ -36,6 +36,17 @@ test("项目缺失（已移除）与 noSession 虚拟会话都不进树", () => 
 	const label = projectDirectoryLabel(undefined, "gone");
 	assert.equal(label.name, "gone");
 	assert.equal(label.path, undefined);
+});
+
+test("分组插件未启用时侧栏不展示分组的会话", () => {
+	const catalog = (plugins) => ({ directory: "", plugins, issues: [] });
+	const plugin = (id, enabled) => ({ manifest: { id }, enabled });
+	assert.equal(isSessionGroupsPluginEnabled(catalog([plugin("session-groups", true)])), true);
+	// 停用 / 代码已变更待重授权（enabled=false）都不算开启。
+	assert.equal(isSessionGroupsPluginEnabled(catalog([plugin("session-groups", false)])), false);
+	assert.equal(isSessionGroupsPluginEnabled(catalog([plugin("billion-context", true)])), false);
+	// catalog 尚未加载（undefined）按关闭处理：fail-closed，避免插件关掉后旧分组先闪一下。
+	assert.equal(isSessionGroupsPluginEnabled(undefined), false);
 });
 
 test("projectDirectoryLabel：远端项目给远端路径", () => {

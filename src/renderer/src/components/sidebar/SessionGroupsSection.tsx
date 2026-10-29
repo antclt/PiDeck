@@ -4,11 +4,13 @@
  * 数据在宿主 session-groups.json（userData/session-groups.json），写入方是会话分组插件页；
  * 这里只消费 list + onChanged：插件页保存/删除分组后实时刷新，会话失效引用由装配模型丢弃。
  * 点击会话走侧栏同一条打开链路（选中 + 按设置登记 Tab）；增删改管理仍在插件页（v1 约定）。
+ * 分组插件未启用时整块不渲染：分组是插件产出的数据，关掉插件后侧栏不留可点的旧分组。
  */
 import { ChevronRight, Folder } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useAtomValue } from "jotai";
 import { desktopApi } from "../../desktopApi";
+import { hostPluginCatalogAtom } from "../../atoms/host-plugin-atoms";
 import { projectInventoryByIdAtom } from "../../atoms/project-atoms";
 import { sessionRecordsAtom } from "../../atoms/session-atoms";
 import { t } from "../../i18n";
@@ -16,7 +18,7 @@ import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../utils/relativeTime";
 import type { SessionGroup, SessionGroupColor } from "../../../../shared/types";
 import type { SidebarActions } from "./SidebarContent";
-import { buildSessionGroupNodes } from "./sessionGroupsModel";
+import { buildSessionGroupNodes, isSessionGroupsPluginEnabled } from "./sessionGroupsModel";
 
 /** 分组身份色（与插件页色点同值；内联样式避免 Tailwind 按名字 purge）。 */
 const GROUP_COLOR_HEX: Record<SessionGroupColor, string> = {
@@ -52,12 +54,16 @@ function writeIdSet(key: string, ids: Set<string>): void {
 export function SessionGroupsSection(props: { actions: SidebarActions; currentSessionId?: string }) {
 	const records = useAtomValue(sessionRecordsAtom);
 	const projectsById = useAtomValue(projectInventoryByIdAtom);
+	const pluginCatalog = useAtomValue(hostPluginCatalogAtom).catalog;
+	const pluginEnabled = isSessionGroupsPluginEnabled(pluginCatalog);
 	const [groups, setGroups] = useState<SessionGroup[]>([]);
 	const [sectionCollapsed, setSectionCollapsed] = useState(() => readIdSet(SECTION_COLLAPSED_KEY).has("section"));
 	const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => readIdSet(GROUP_COLLAPSED_KEY));
 	const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => new Set());
 
 	useEffect(() => {
+		// 插件没开就不取数、不订阅：分组是插件产出的数据，关掉后不应再出现在侧栏。
+		if (!pluginEnabled) return;
 		let disposed = false;
 		const refresh = () => {
 			void desktopApi.sessionGroups
@@ -73,11 +79,12 @@ export function SessionGroupsSection(props: { actions: SidebarActions; currentSe
 			disposed = true;
 			unsubscribe();
 		};
-	}, []);
+	}, [pluginEnabled]);
 
 	const nodes = useMemo(() => buildSessionGroupNodes(groups, records, projectsById), [groups, records, projectsById]);
-	// 没有任何分组（含全部失效）时整块不渲染：不给侧栏留一个永远空着的区。
-	if (nodes.length === 0) return null;
+	// 分组插件没开（未安装 / 已停用 / catalog 未加载）时整块不渲染；
+	// 没有任何分组（含全部失效）时同理：不给侧栏留一个永远空着的区。
+	if (!pluginEnabled || nodes.length === 0) return null;
 
 	const toggleGroup = (groupId: string) => {
 		setCollapsedGroups((current) => {

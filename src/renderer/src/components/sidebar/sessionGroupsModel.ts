@@ -7,6 +7,18 @@
  * - 「目录」= 会话所属项目：名字用项目名，tooltip 给完整路径（远端给远端路径）。
  */
 import type { Project, SessionGroup, SessionRecord } from "../../../../shared/types";
+import type { HostPluginCatalog } from "../../../../shared/types/hostPlugin";
+
+/** 侧栏分组树的产出方：内置「会话分组」宿主插件（目录名 = manifest.id）。 */
+export const SESSION_GROUPS_PLUGIN_ID = "session-groups";
+
+/**
+ * 分组插件开关：只有插件处于已启用（且代码指纹一致）状态时，侧栏才展示分组的会话。
+ * 未安装 / 已停用 / catalog 尚未加载都按关闭处理（fail-closed），避免插件关掉后还留着可点的旧分组。
+ */
+export function isSessionGroupsPluginEnabled(catalog: HostPluginCatalog | undefined): boolean {
+	return catalog?.plugins.some((plugin) => plugin.enabled && plugin.manifest.id === SESSION_GROUPS_PLUGIN_ID) === true;
+}
 
 export type SessionGroupDirNode = {
 	/** 分组内去重键：项目 id。 */
