@@ -365,7 +365,10 @@ export function registerRemoteGitReadIpc(input: { enabled: boolean; locator(proj
 	return {
 		async status(event: IpcMainInvokeEvent, projectId: unknown, repo?: unknown): Promise<GitResourceGroups> {
 			const repoPath = compatRepo(typeof projectId === "string" ? projectId : "", repo);
-			return read(event, projectId, repoPath, async (id, signal) => (await git.status(id, repoPath, signal)).groups);
+			// 文件树着色与 Git 面板读的是同一份事实：同一次内容变化里，一个仓库只读一次状态。
+			if (typeof projectId !== "string") return (await read(event, projectId, repoPath, (id, signal) => git.status(id, repoPath, signal))).groups;
+			const cached = await facts.read(projectId, repoPath, () => read(event, projectId, repoPath, (id, signal) => git.status(id, repoPath, signal)));
+			return cached.facts.groups;
 		},
 		async workspaceDiff(event: IpcMainInvokeEvent, projectId: unknown, group: unknown, value: unknown, repo?: unknown): Promise<GitWorkspaceFileDiff> {
 			const repoPath = compatRepo(typeof projectId === "string" ? projectId : "", repo);
