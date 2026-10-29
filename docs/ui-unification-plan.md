@@ -41,8 +41,8 @@ PiDeck 是密集的桌面 Operate 界面，不是营销站：
 |---|---|---|---|
 | 0 | 冻结标准进 DESIGN.md，登记豁免 | — | ✅ 已完成（见 DESIGN.md） |
 | 1 | 间距吸附 4px 网格（`[3/5/7/9px]` 全部换成刻度类，GitGraph 一并处理） | typecheck + detect | ✅ 已完成 |
-| 2 | 字号越界收敛（13.5 / 11.5 / 40，另 AppearanceTab 两处 10px 触发 fontSizeDiscipline 守卫） | typecheck + detect | 待办 |
-| 3 | 颜色：逐文件判断，真漂移换语义 token | detect 归零 | 待办 |
+| 2 | 字号越界收敛（13.5 / 11.5 → token；AppearanceTab 10px → micro） | typecheck + detect | ✅ 已完成 |
+| 3 | 颜色：未定义变量 + 字面兜底 → 语义 token；修 --radius-full 未定义 | 颜色 advisory 26 → 7 | ✅ 已完成 |
 | 4 | 对齐与视觉重量：需要真实渲染，按页面抽查 | 截图对比 | 待办（缺浏览器通道） |
 
 ## 纪律
