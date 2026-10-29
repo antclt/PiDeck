@@ -30,6 +30,7 @@ import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
 import { CommandPickerGroup, CommandPickerPanel, type CommandPickerFilter } from "../ui-shadcn/command-picker";
 import { computeModelPickerDefaultExpanded, groupModelsByProvider, modelPickerSearchFilter, modelRowLabel, modelRowName, orderProviderGroups, resolveModelPickerBody } from "./sessionPickerOptions";
 import { ComposerModeChip } from "./composer/ComposerModeChip";
+import { resolveAcpConfigSelect } from "./acpConfigSelect";
 import type { AgentBackend, AgentRuntimeState, AvailableModel, ComposerAgentMode, GitBranchInfo, ModelListFailReason, ModelListReport, SessionRecord, SessionRuntimeTarget, UsageProbeBackend } from "../../../../shared/types";
 
 /** 单个 extension widget 卡片：可折叠标题栏 + 内容行，支持手动关闭 */
@@ -181,31 +182,37 @@ function AcpConfigControls(props: { options: import("../../../../shared/types/ac
 	if (entries.length === 0) return null;
 	return (
 		<>
-			{entries.map((entry) => (
-				<Select key={entry.option.id} value={String(entry.option.currentValue ?? "")} disabled={props.disabled} onValueChange={(value) => props.onSet(entry.option.id, value)}>
-					<SelectTrigger
-						size="sm"
-						className="composer-bar-btn backend h-7 gap-1 rounded-md border-transparent bg-transparent px-1.5 text-control font-semibold text-foreground hover:bg-muted/60 focus-visible:border-transparent focus-visible:ring-0 data-[state=open]:border-transparent data-[state=open]:bg-muted/60 data-[state=open]:ring-0 max-w-44 [&_[data-slot='select-icon']]:hidden"
-						title={`${entry.option.name}${entry.option.description ? ` — ${entry.option.description}` : ""}`}
-					>
-						{entry.option.category === "model" ? (
-							<Sparkles className="size-[15px] shrink-0 text-muted-foreground" aria-hidden="true" />
-						) : entry.option.category === "thought_level" ? (
-							<BrainCircuit className="size-[15px] shrink-0 text-muted-foreground" />
-						) : (
-							<Settings2 className="size-[15px] shrink-0 text-muted-foreground" />
-						)}
-						<span className="truncate text-xs">{currentValueName(entry)}</span>
-					</SelectTrigger>
-					<SelectContent align="start" className="max-h-72">
-						{entry.values.map((value) => (
-							<SelectItem key={value.value} value={value.value}>
-								<span className="truncate">{value.name}</span>
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
-			))}
+			{entries.map((entry) => {
+				// currentValue 可能不在 agent 的枚举里（完整模型 id vs 别名）：补一条当前项，保证高亮/滚动指向真实值。
+				const select = resolveAcpConfigSelect(entry.option, entry.values);
+				return (
+					// 再点选当前项等价于「保持不变」，不发 IPC。
+					<Select key={entry.option.id} value={select.value} disabled={props.disabled} onValueChange={(value) => (value === select.value ? undefined : props.onSet(entry.option.id, value))}>
+						<SelectTrigger
+							size="sm"
+							className="composer-bar-btn backend h-7 gap-1 rounded-md border-transparent bg-transparent px-1.5 text-control font-semibold text-foreground hover:bg-muted/60 focus-visible:border-transparent focus-visible:ring-0 data-[state=open]:border-transparent data-[state=open]:bg-muted/60 data-[state=open]:ring-0 max-w-56 [&_[data-slot='select-icon']]:hidden"
+							// 悬停必须能看到实际生效值：只给选项名+描述时，长模型名被截断后无从确认。
+							title={`${entry.option.name}: ${select.label}${entry.option.description ? ` — ${entry.option.description}` : ""}`}
+						>
+							{entry.option.category === "model" ? (
+								<Sparkles className="size-[15px] shrink-0 text-muted-foreground" aria-hidden="true" />
+							) : entry.option.category === "thought_level" ? (
+								<BrainCircuit className="size-[15px] shrink-0 text-muted-foreground" />
+							) : (
+								<Settings2 className="size-[15px] shrink-0 text-muted-foreground" />
+							)}
+							<span className="truncate text-xs">{select.label}</span>
+						</SelectTrigger>
+						<SelectContent align="start" className="max-h-72">
+							{select.values.map((value) => (
+								<SelectItem key={value.value} value={value.value}>
+									<span className="truncate">{value.name}</span>
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				);
+			})}
 		</>
 	);
 }
@@ -226,14 +233,6 @@ function flattenConfigOptions(options: import("../../../../shared/types/acp").Ac
 		result.push({ option, values });
 	}
 	return result;
-}
-
-/** 当前值的显示名(枚举里找不到时回退原值,如 agent 只回 currentValue 不回枚举)。 */
-function currentValueName(entry: { option: import("../../../../shared/types/acp").AcpSessionConfigOption; values: Array<{ value: string; name: string }> }): string {
-	const raw = entry.option.currentValue;
-	if (raw === undefined) return entry.option.name;
-	const text = String(raw);
-	return entry.values.find((value) => value.value === text)?.name ?? text;
 }
 
 /**
