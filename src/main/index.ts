@@ -6004,6 +6004,22 @@ app
 					if (typeof agentId !== "string") return;
 					handler(agentId, channel, payload);
 				}),
+			// ACP 后端的实时流：会话正文在 agents:message 投影快照里（全量替换），
+			// 回合终态只在 agents:runtime-state 里（settleAcpTurn 在工具-only 回合不写任何标记）。
+			// 同 DSH 只订各自的 manager，不订聚合网关（否则会把 pi 帧重复翻译一遍）。
+			subscribeAcpChannelEvents: (handler) =>
+				acpAgentManager?.onOutput((channel, payload) => {
+					const agentId = payload && typeof payload === "object" && "agentId" in payload ? (payload as { agentId?: unknown }).agentId : undefined;
+					if (typeof agentId !== "string") return;
+					handler(agentId, channel, payload);
+				}) ?? (() => {}),
+			// ACP 工具清单（只给 id/name，command/args/env 不外发）：Web 端后端选择器的 ACP 入口。
+			// 未开启 ACP 或没有启用的工具时返回空数组，Web 端就不展示 ACP 选项。
+			listAcpTools: () => {
+				const settings = settingsStore.get();
+				if (settings.acpEnabled !== true) return [];
+				return (settings.acpTools ?? []).filter((tool) => tool.enabled).map((tool) => ({ id: tool.id, name: tool.name }));
+			},
 			listProjects: () => projectStore.list().filter(isLocalProject),
 			createProject: (path) => projectStore.add(path, undefined, settingsStore.get().wslEnabled ? "wsl" : "windows"),
 			deleteProject: async (projectId) => {
@@ -6054,17 +6070,25 @@ app
 			createSessionDraft: async (input) => {
 				const project = projectStore.get(input.projectId);
 				if (!project) throw new Error(mainCopy("project.notFound"));
+				// 后端白名单（渲染层输入不可信）：只认 dsh/acp，其余按 pi；acp 必须带工具 id。
+				const backend = input.backend === "dsh" ? "dsh" : input.backend === "acp" ? "acp" : undefined;
+				const acpToolId = backend === "acp" && typeof input.acpToolId === "string" ? input.acpToolId : undefined;
+				// ACP 的模型/思考由 agent CLI 自持（session/config options），PiDeck 的 models.json
+				// 对它无意义：与桌面 IPC（sessionIpc createDraft 的 nonPiBackend 分支）同规，不写偏好。
+				const acp = backend === "acp";
 				const draft = await sessionCatalog.createDraft({
 					projectId: input.projectId,
 					title: input.title?.trim() || mainCopy("session.newTitle"),
 					environment: settingsStore.get().wslEnabled ? "wsl" : "native",
-					model: input.model ? createSessionModelPreference(input.model.provider, input.model.modelId, input.model.modelName) : undefined,
-					thinkingLevel: input.thinkingLevel,
+					backend,
+					acpToolId,
+					model: !acp && input.model ? createSessionModelPreference(input.model.provider, input.model.modelId, input.model.modelName) : undefined,
+					thinkingLevel: acp ? undefined : input.thinkingLevel,
 				});
 				// standby 补热：与桌面 IPC（sessionIpc createDraft）同款——Web 建草稿即「马上要开聊」，
 				// 趁用户输入空窗后台预热 pi 进程；首条消息经 activateRuntime 认领实现秒级启动。
 				// fire-and-forget；ensure 幂等且受 standbyRuntimeEnabled 设置闸。
-				if (draft.backend !== "dsh") agentManager.ensureStandbyAgent(draft.projectId);
+				if (draft.backend !== "dsh" && draft.backend !== "acp") agentManager.ensureStandbyAgent(draft.projectId);
 				// Web 建的草稿不是渲染进程发的：不广播侧栏就一直看不到这一行（issue #436 同类缺口）。
 				notifyCatalogRefreshed([draft.projectId]);
 				return draft;

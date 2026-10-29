@@ -26,7 +26,7 @@
 | 会话消息编辑/删除/重发 | 编辑/删除写 pi 原生 `context_edit`（原文不改写、费用不回退；被移出的条目界面直接不显示，原始文件仍保留）；重发仍用 `deleted` 墓碑截断分支；追加条目的 parentId 必须取当前 leaf，pi 活着禁改会话文件，三道闸不许放宽 | 本文「会话消息编辑/删除/重发」 |
 | Markdown 渲染 | 唯一引擎 MarkdownStream，禁止再引 marked/react-markdown；流式与 settle 是两条路径，**复现要看最终态**；HTML 一律过 `markdownSanitize.ts`（raw→摘毒→sanitize，不开 harden），模型回复里的 `<style>` 会污染整页图标（#397） | 本文「会话 Markdown 渲染管线」 |
 | 宿主插件 | 与 pi 扩展是两套系统（`src/main/plugins/`，不依赖 pi 进程）；授权按内容 sha256 指纹不按版本，指纹变即重新授权；历史读取 64MiB/10 万条硬预算；改 API/权限面必须同步 `src/preload/hostPlugin.ts` + `docs/host-plugin-dev-guide.md` + 脚手架；`service.local` 只给「点名权」（id 白名单 `src/shared/localServices.ts`）；内置示例由 `seedBuiltin` 落位（内容没被手改过才随新版刷新）；`.pideck-plugin` NDJSON 归档逐文件 sha256；GitHub 安装只走 `codeload.github.com` 的 tar.gz + 自写 tar 解析，三条安装路径共用 `HostPluginManager.installFiles` 同一套预算与信任判定 | 本文「宿主插件」 |
-| Web 端流式链路 | 流式事件源必须按后端分别注入 `WebEventStreamRouter`：pi 走 `subscribePiEvents`，DSH 等非 pi 后端走 `subscribeAgentChannelEvents`（`DshChannelToPiEvents` 把通道载荷翻成 pi 事件形状）；漏挂的后端在 Web 端退化成「轮询 + 磁盘重拉」；回合边界只认 `turnEnded: true` | 本文「Web 端流式链路」 |
+| Web 端流式链路 | 流式事件源必须按后端分别注入 `WebEventStreamRouter`：pi 走 `subscribePiEvents`，DSH 走 `subscribeAgentChannelEvents`（`DshChannelToPiEvents`），ACP 走 `subscribeAcpChannelEvents`（`AcpChannelToPiEvents`，投影快照差分）；漏挂的后端在 Web 端退化成「轮询 + 磁盘重拉」；DSH 回合边界只认 `turnEnded: true`，ACP 只认 `agents:runtime-state` 的 `isStreaming` 翻 false | 本文「Web 端流式链路」 |
 | i18n 文案 | 改任何 zh-CN 词典（rendererCopy / mainProcessCopy / WebI18n / FeishuI18n）后必须重跑 `node scripts/genZhTwCopy.mjs`；四份 `*.zh-TW.ts` 是生成物禁止手改（漏跑：先 typecheck 报 TS2739，改值不加键则由 `source-sha256` 指纹门禁拦下） | 本文「繁体中文」 |
 | 发版 | CHANGELOG 中英一致 → sync-release-notes → sync-workflow-choices → 打包人工 smoke | `docs/release-process.md` |
 | 宿主通道 / 侧车 / MCP | 六条例外各只允许一种用途，禁止扩成通用桥；新增工具先改文档再改代码 | `docs/host-boundaries.md` |
@@ -332,19 +332,31 @@ description: …
 - **冷会话恢复提示**：`SessionAcpRestoreStrip`（纯函数 `utils/acpSessionRestore.resolveAcpRestoreHint`，单测 tests/acpSessionRestore.test.mjs）挂在 `SessionStartSurface` widgets 顶层，只有「backend=acp + acpSessionId + 未激活」才显示；绑定工具被删降级为只读引导。composer 占位符对 ACP 会话用 `app.composerAcpPlaceholder`（工具名来源：激活后 runtime.modelName，草稿期 acpToolId 查表）。
 - **图片能力门控**：`agentInfo.capabilities.promptImage` 来自 initialize 的 `promptCapabilities.image`；未声明时 `sendPrompt` 带图直接拒收（`acp.imagesNotSupported`），不然给不支持图的 agent 发 image 块只会换来整回合协议错误（acpCompatibility/acpRuntimeLifecycle 的物化用例显式声明 image=true）。
 - **激活可作废（草稿期换后端 / 换 ACP 工具）**：ACP 激活是一次完整握手（spawn + `session/new`，秒级），"把 catalog 改完交给激活自己发现"不够——旧闸门用 `sessionRuntimeCoordinator.getTarget()` 当后端锁定守卫，而 bind 在 `applyLatestPreferences` 之后，握手窗口里 target 恒为空，于是记录已切走、旧激活随后又把旧后端进程和 `acpSessionId` 绑回来（用户表现为「切了后端还要等旧后端启动完」）。现在的契约：`sessionsCatalogUpdate` 在非 active 会话上的 `backend`/`acpToolId` 变更先 `await cancelActivation(sessionId)`（标取消 + 立刻停 `status==="starting"` 的进程 + 等激活收敛 + 清迟到绑定），`activate()` 在 `bind()` 前重读 catalog 并查取消集，身份不符就停掉刚建的 tab 并抛 `Session activation cancelled`。IPC 失败分支用 `isActivationCancelled` 区分「被切换作废」（发 detach 抵消合成 starting）与真失败（发合成 error）。渲染层 `isAcpInitializing` 只是指示态，**不得再接进 `canSend`/`promoteAndSend`**（那会让 Enter 静默无效）。回归：`tests/sessionRuntimeCoordinator.test.mjs`（cancel 两例）+ `tests/acpComposerInitializing.test.mjs`。
-- 已知未做（勿宣称完整支持）：**跨会话（全局）正文搜索索引**——session-index Go sidecar 只索引 pi 会话 JSONL，ACP 归档不参与（当前只有会话内 Ctrl/Cmd+Shift+F）；归档没有 GC/删除语义（单会话有界，但删会话不清归档）；冷历史自动激活（历史本身已由归档保留，打开历史会话仍需手动激活 runtime）；Web 端 ACP 无实时流（SSE 事件源只订 DSH）；工具卡图片渲染；真实 CLI smoke（`scripts/acpLiveSmoke.mjs` 需真实 agent，不进 CI）；`authenticate` RPC（AUTH_REQUIRED 目前只引导用户去终端登录，未拉起 agent 声明的 `authMethods`）。
+- 已知未做（勿宣称完整支持）：**跨会话（全局）正文搜索索引**——session-index Go sidecar 只索引 pi 会话 JSONL，ACP 归档不参与（当前只有会话内 Ctrl/Cmd+Shift+F）；归档没有 GC/删除语义（单会话有界，但删会话不清归档）；冷历史自动激活（历史本身已由归档保留，打开历史会话仍需手动激活 runtime）；Web 端 ACP 不显示 ACP `configOptions`（模型/模式改由桌面端或 agent CLI 自身配置，Web 只能选工具）；Web 端 ACP 无编辑/重发/fork 入口（ACP 运行时没有 fork 命令，后端选择器把 ACP 会话当作只读历史）；工具卡图片渲染；真实 CLI smoke（`scripts/acpLiveSmoke.mjs` 需真实 agent，不进 CI）；`authenticate` RPC（AUTH_REQUIRED 目前只引导用户去终端登录，未拉起 agent 声明的 `authMethods`）。
+
+## Web 端后端选择（pi / DSH / ACP / 生图）
+
+> 硬边界：浏览器不能直接读设置，ACP 工具清单由主进程门控后随 `/api/state` 下发；**只下发 `{id, name}`**，`command`/`args`/`env` 可能含凭据与本地路径，一律不外发。
+
+- 数据面：`WebServiceManager` 的 `listAcpTools` 口（`src/main/index.ts` 注入）——`acpEnabled !== true` 或工具 `enabled === false` 时不出现在列表；空数组 = 整个 ACP 入口不展示（手机端不能自己选择本机未开启的 CLI）。
+- 渲染面：`src/renderer/src/web/WebBackendSelector.tsx` 把 ACP 做成「分组标题 + 工具各占一行」（桌面端是两级子菜单，手机上要少一次点击）；`onChange(backend, acpToolId?)` 带工具 id，选中态按 `backend === "acp" && acpToolId === tool.id` 判定。
+- 建会话/切换：`CreateSessionDraftInput` / `UpdateSessionRecordInput` 已含 `backend` + `acpToolId`；Web 建 ACP 草稿必须把两个字段透传到 `sessionCatalog.createDraft`（只传 backend 会退化成 pi 草稿），首条消息由 `SessionRuntimeCoordinator` 自动 ensure ACP runtime（`agentPreset` 取 `entry.acpToolId ?? entry.agentPreset`）。ACP 草稿不写模型/思考偏好、不预热 pi standby。
+- 切换回其他后端时 `acpToolId` 要显式传 `null` 清掉，否则下次激活仍按旧工具拉起 CLI。
+- ACP 会话在 Web 端隐藏模型/思考 pill（模型由 agent CLI 自持，`models.json` 无意义），也不提供编辑/重发/删除（ACP 无 fork 命令）。
 
 ## Web 端流式链路（WebChatApp：/api/chat 一次性流 + /api/sessions/:id/stream 保活流）
 
 > 硬边界：Web 只有一条流式协议（AI SDK UIMessageStream，响应头 `x-vercel-ai-ui-message-stream: v1`）。任何后端都必须先翻译成同一形状的 pi 事件再进 `PiEventToUiMessageStream`；禁止在翻译器或前端里按后端分叉。
 
 - **两条连接语义相反**：`/api/chat`（useChat 一次性 fetch）非 keepAlive，finish 帧后必须补 `[DONE]` 并 `response.end()`，否则前端 status 永远停在 streaming；`/api/sessions/:id/stream`（外部流，页面可见且本页未发消息时订阅）keepAlive，finish 后换新适配器继续等下一轮，客户端在下一轮 `start` 帧上重置合并器。收尾统一走 `WebEventStreamRouter.emitFrames`（finish 帧后跟 `SSE_DONE`）。
-- **事件源按后端分别注入**（`bindPiSource` / `bindChannelSource`）：pi 走 `deps.subscribePiEvents`；DSH 等非 pi 后端走 `deps.subscribeAgentChannelEvents`——`src/main/index.ts` 注入时**只订 `dshAgentManager.onOutput`**，不能订 `compositeAgentGateway`（它把 pi 的 `agents:text-stream` 一并转发，会与 pi 源重复推帧）；`agents:state` 载荷是无 agentId 的数组，天然被过滤。缺这一层的表现就是「输出很慢」（只剩 3s 状态轮询 + 5s 防抖磁盘重拉）与「察觉不到结束/停止」（整轮没有 finish 帧）。未注入时静默退化为旧行为（fail-safe）。
+- **事件源按后端分别注入**（`bindPiSource` / `bindChannelSource` / `bindAcpChannelSource`）：pi 走 `deps.subscribePiEvents`；DSH 走 `deps.subscribeAgentChannelEvents`；ACP 走 `deps.subscribeAcpChannelEvents`——`src/main/index.ts` 注入时**只订各自的 manager**（`dshAgentManager.onOutput` / `acpAgentManager.onOutput`），不能订 `compositeAgentGateway`（它把 pi 的 `agents:text-stream` 一并转发，会与 pi 源重复推帧）；`agents:state` 载荷是无 agentId 的数组，天然被过滤。缺这一层的表现就是「输出很慢」（只剩 3s 状态轮询 + 5s 防抖磁盘重拉）与「察觉不到结束/停止」（整轮没有 finish 帧）。未注入时静默退化为旧行为（fail-safe）。
 - **DSH 通道 → pi 事件**（`src/main/web/DshChannelToPiEvents.ts`，每条连接一份实例）：`agents:text-stream` / `agents:thinking` 是**累积全量文本**，用游标取增量后当 `text_delta`/`thinking_delta`；工具卡从 `agents:message` 快照补 input/output（首个消息帧是整会话历史，只保留在跑的卡与本轮新卡，否则刷新页面会把满屏旧卡片追加进当前回复）。
+- **ACP 通道 → pi 事件**（`src/main/web/AcpChannelToPiEvents.ts`，每条连接一份实例）：ACP 没有增量流，流式数据是**投影快照**——`agents:message` 每 ≤80ms 推一次完整的 `projection.messages`（全量替换语义），所以按 `message.id` + 已发长度取差集；一回合可有多段 assistant（工具前后切段，见 #413），每段一次 `message_start`，适配器翻成 `start-step` 继续画同一条 UI 消息；工具卡用 `meta.toolCallId` 做身份，running→completed 发 `tool_execution_start`/`end`（输出 32KB 截断）。**首张快照即基线，但只锁已结算内容**：历史由历史接口覆盖不重发，进行中的段/工具照常补发（否则首帧那 ≤80ms 的正文会永久丢失）；基线之后只翻译「最后一条 user 消息之后」的窗口，游标表恒为一回合的量。
 - **回合边界只认 `turnEnded: true`**（由 `DshAgentManager` 在四处发：正常 turn/end、abort、停止后迟到的 turn/end、host 崩溃恢复；desktop 渲染层不读该字段）。`isStreaming=false` **不能**当收口信号——带工具调用的 `assistant/message` 也会把它置 false，而回合还在跑。
 - **停止的重复收口**：abort 先收一次，host 随后补发的 turn/end 会带同一份全文再收一次；翻译器用 `closedRunText` 忽略第二次，避免保活连接上重复上屏一条回复。
+- **回合边界（ACP）只看 `agents:runtime-state`**：`isStreaming`/`isTurnActive` 翻 false 才是收口（发 `agent_settled` → `finish`），翻 true 就立刻补 `start`（发送后马上进运行态，空白回合也有可收口气泡）。`settleAcpTurn`（`src/main/acp/AcpEventProjector.ts`）在无 active 段的工具-only 回合**什么都不写**，而「无 pending 段 + 无 running 工具」在「工具已完成、下一段正文未到」时是合法中间态——拿它当收口会把回合切断。
 - **状态推送**：通道事件同样触发 `scheduleStatePush()`（400ms 去抖），运行时忙闲翻转即时可达；5s tick 只兜不住事件流里的目录变更。
-- 回归集：`tests/webDshChannelStream.test.mjs`（翻译器 + 路由 + 契约）、`tests/webServiceDshStream.test.mjs`（真实 WebServiceManager + 真实 HTTP：帧序列 / 保活 / 状态推送）、`tests/webEventStream.test.mjs`、`tests/webExternalReplyMerger.test.mjs`。
+- 回归集：`tests/webDshChannelStream.test.mjs`（翻译器 + 路由 + 契约）、`tests/webServiceDshStream.test.mjs`（真实 WebServiceManager + 真实 HTTP：帧序列 / 保活 / 状态推送）、`tests/webEventStream.test.mjs`、`tests/webExternalReplyMerger.test.mjs`、`tests/webAcpChannelStream.test.mjs`（ACP 翻译器 + 路由 + 接线契约）、`tests/webAcpRealtimePipeline.test.mjs`（真 `AcpAgentManager` + 真传输 → SSE 帧：回合未结算前就要有 text-delta、工具卡实时、结算才有 finish）。
 
 ## 会话定位轴（消息区刻度条 / outline rail）
 

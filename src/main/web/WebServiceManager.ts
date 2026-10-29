@@ -60,6 +60,9 @@ export function normalizeWebHost(raw: string): string {
 
 /** /api/chat 图片 parts 上限：最多 4 张，单张 base64 ≤2MB（客户端已预压缩）。 */
 
+/** Web 端可见的 ACP 工具条目：只下发渲染选择器需要的 id/name（command/args/env 不外发）。 */
+export type WebAcpToolInfo = { id: string; name: string };
+
 export type WebServiceDependencies = {
 	/**
 	 * dev 模式渲染层 dev server 基址（如 http://localhost:5181）。
@@ -80,6 +83,16 @@ export type WebServiceDependencies = {
 	 * 未注入时该后端在 Web 端退化为「状态轮询 + 磁盘重拉」的旧行为（fail-safe）。
 	 */
 	subscribeAgentChannelEvents?: AgentChannelEventSource;
+	/**
+	 * 订阅 ACP 的 agent 通道事件（agents:message 投影快照 / agents:runtime-state 回合终态）。
+	 * 未注入时 ACP 会话在 Web 端退化为「状态轮询 + 磁盘重拉」（fail-safe）。
+	 */
+	subscribeAcpChannelEvents?: AgentChannelEventSource;
+	/**
+	 * 可选的 ACP 工具清单（AcpToolConfig 的 id/name，已按 acpEnabled + enabled 门控）。
+	 * Web 端后端选择器据此列出 ACP 入口；未注入或为空即完全不提供 ACP 选项。
+	 */
+	listAcpTools?: () => WebAcpToolInfo[];
 	/** agentId → sessionId 路由，用于把 pi 事件导向对应 session 的 SSE 连接。 */
 	getSessionIdForAgent: (agentId: string) => string | undefined;
 	listProjects: () => Project[];
@@ -314,6 +327,7 @@ export class WebServiceManager {
 		// 解绑 pi 事件源与 DSH 等非 pi 后端的通道事件源，避免服务关闭后仍在转发事件到已失效的 SSE 连接。
 		this.eventStreamRouter.unbindPiSource();
 		this.eventStreamRouter.unbindChannelSource();
+		this.eventStreamRouter.unbindAcpChannelSource();
 		this.stateHub.dispose();
 		if (!this.server) return;
 		const server = this.server;
@@ -367,7 +381,19 @@ export class WebServiceManager {
 						})
 				: undefined,
 		);
-		// 5s 兑底 tick：捕捉不经 pi 事件的目录变更（桌面端改名/删除/导入等）。
+		// ACP 同理：它的流式数据是「投影快照」（agents:message）+ 回合终态（agents:runtime-state），
+		// 不在 pi 事件源里；不接这一层时 Web 端 ACP 会话不实时出字，也不会有 finish 帧。
+		const subscribeAcpChannels = this.deps.subscribeAcpChannelEvents;
+		this.eventStreamRouter.bindAcpChannelSource(
+			subscribeAcpChannels
+				? (handler) =>
+						subscribeAcpChannels((agentId, channel, payload) => {
+							handler(agentId, channel, payload);
+							this.scheduleStatePush();
+						})
+				: undefined,
+		);
+		// 5s 兜底 tick：捕捉不经 pi 事件的目录变更（桌面端改名/删除/导入等）。
 		this.stateHub.startTick();
 		const server = createServer(async (request, response) => {
 			try {
@@ -538,6 +564,9 @@ export class WebServiceManager {
 			sessions: toPublicSessions(sessions),
 			runtimes,
 			pendingUiRequests: this.deps.listPendingUiRequests(),
+			// ACP 工具清单（id/name，已按 acpEnabled + enabled 门控）：Web 端后端选择器的 ACP 入口。
+			// 空数组 = 不提供 ACP 选项——本机未开启 ACP 时不能把入口抛给手机端。
+			acpTools: this.deps.listAcpTools?.() ?? [],
 		};
 	}
 

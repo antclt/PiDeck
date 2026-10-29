@@ -12,8 +12,10 @@
  *
  * DSH 后端没有 pi 的 RPC 事件（agent_start/message_update/agent_settled），它的流式
  * 数据走自己的 IPC 通道，由 DshChannelToPiEvents 先翻译成同形状的 pi 事件再进同一套
- * 适配器（见 bindChannelSource），因此 Web 线协议与前端零分支。
+ * 适配器（见 bindChannelSource）；ACP 后端同理，走 AcpChannelToPiEvents
+ * （见 bindAcpChannelSource）。因此 Web 线协议与前端零分支。
  */
+import { AcpChannelToPiEvents } from "./AcpChannelToPiEvents";
 import { DshChannelToPiEvents } from "./DshChannelToPiEvents";
 
 /** AI SDK UIMessageStream 单个 SSE 帧（data: 后的 JSON 对象）。 */
@@ -22,7 +24,7 @@ export type UiMessageStreamFrame = Record<string, unknown>;
 /** 事件来源 agentId → 目标 sessionId 的路由函数，由装配方注入。 */
 export type AgentToSessionRouter = (agentId: string) => string | undefined;
 
-/** 非 pi 后端（DSH）的 agent 通道事件源：由装配方提供订阅句柄。 */
+/** 非 pi 后端（DSH / ACP）的 agent 通道事件源：由装配方提供订阅句柄。 */
 export type AgentChannelEventSource = (handler: (agentId: string, channel: string, payload: unknown) => void) => () => void;
 
 /** SSE 帧写出函数；返回 false 表示连接已失效（对方已断开）。 */
@@ -359,6 +361,8 @@ type SessionRunState = {
 	adapter: PiEventToUiMessageStream;
 	/** 非 pi 后端（DSH）通道载荷 → pi 事件 的会话级翻译器。 */
 	channels: DshChannelToPiEvents;
+	/** 非 pi 后端（ACP）投影快照 → pi 事件 的会话级翻译器。 */
+	acpChannels: AcpChannelToPiEvents;
 	/** 本轮回放帧（text/reasoning 增量已合并）。 */
 	runFrames: UiMessageStreamFrame[];
 	/** 本轮已收口（收口后不回放，等下一轮 start 重建）。 */
@@ -380,6 +384,7 @@ export class WebEventStreamRouter {
 	private readonly sessionStreams = new Map<string, Set<SessionStreamEntry>>();
 	private unsubscribePi: (() => void) | null = null;
 	private unsubscribeChannels: (() => void) | null = null;
+	private unsubscribeAcp: (() => void) | null = null;
 	/**
 	 * 会话级「已收口正文」基准：每条连接一份翻译器，连接重建时基准必须延续——
 	 * 停止的握手是「abort 先收口，host 迟到的 turn/end 再带同一份全文收一次」，
@@ -459,6 +464,26 @@ export class WebEventStreamRouter {
 		this.unsubscribeChannels = null;
 	}
 
+	/**
+	 * 供后端绑定：订阅 ACP 的 agent 通道事件。
+	 * ACP 的流式数据不是增量流而是「投影快照」（agents:message 全量替换 +
+	 * agents:runtime-state 回合终态），翻译见 AcpChannelToPiEvents。
+	 */
+	bindAcpChannelSource(subscribe: AgentChannelEventSource | undefined): void {
+		this.unsubscribeAcp?.();
+		if (!subscribe) {
+			this.unsubscribeAcp = null;
+			return;
+		}
+		this.unsubscribeAcp = subscribe((agentId, channel, payload) => this.onAcpChannelEvent(agentId, channel, payload));
+	}
+
+	/** 解绑 ACP 通道事件源（服务停止时调用）。 */
+	unbindAcpChannelSource(): void {
+		this.unsubscribeAcp?.();
+		this.unsubscribeAcp = null;
+	}
+
 	private onPiEvent(agentId: string, event: PiEvent): void {
 		const sessionId = this.resolveSession(agentId);
 		if (!sessionId) return;
@@ -495,6 +520,25 @@ export class WebEventStreamRouter {
 	}
 
 	/**
+	 * ACP 的通道事件：同样是「先翻译成 pi 事件，再走同一个适配器」，只是翻译器不同
+	 * （投影快照 → 增量，见 AcpChannelToPiEvents）。无订阅者也翻译，回放源必须连续。
+	 */
+	private onAcpChannelEvent(agentId: string, channel: string, payload: unknown): void {
+		const sessionId = this.resolveSession(agentId);
+		if (!sessionId) return;
+		const state = this.sessionStateFor(sessionId);
+
+		const frames: UiMessageStreamFrame[] = [];
+		for (const event of state.acpChannels.push(channel, payload)) {
+			frames.push(...state.adapter.push(event));
+		}
+
+		this.recordRunFrames(state, frames);
+		this.emitToSession(sessionId, frames);
+		if (frames.some((frame) => frame.type === "finish")) this.endRun(state);
+	}
+
+	/**
 	 * 取（或创建）会话级实时状态；超上限时优先淘汰没有活跃连接的最旧会话。
 	 * 命中即刷新顺序（LRU）：长时间在跑的会话不能被新会话挤掉，否则翻译器状态丢失，
 	 * 在跑的工具会变成孤儿事件被丢掉、卡片卡在 running。
@@ -510,6 +554,7 @@ export class WebEventStreamRouter {
 		const state: SessionRunState = {
 			adapter: new PiEventToUiMessageStream(),
 			channels: new DshChannelToPiEvents(this.closedRunTextBySession.get(sessionId) ?? null),
+			acpChannels: new AcpChannelToPiEvents(),
 			runFrames: [],
 			runClosed: true,
 			runOverflow: false,

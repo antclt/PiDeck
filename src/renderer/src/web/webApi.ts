@@ -107,7 +107,7 @@ export async function fetchModels(force = false): Promise<AvailableModel[]> {
  * 新建会话草稿；preferences 携带启动前选择的模型/思考级别/后端（首页直发场景），
  * 无偏好时保持后端默认（pi 配置默认值）。backend 对应 CreateSessionDraftInput.backend。
  */
-export async function createSession(projectId: string, preferences?: SessionLaunchPreferences & { backend?: AgentBackend }): Promise<string> {
+export async function createSession(projectId: string, preferences?: SessionLaunchPreferences & { backend?: AgentBackend; acpToolId?: string }): Promise<string> {
 	const res = await apiFetch("/api/sessions", {
 		method: "POST",
 		headers: { "content-type": "application/json" },

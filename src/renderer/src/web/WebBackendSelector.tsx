@@ -1,23 +1,30 @@
 /**
  * WebBackendSelector — 会话后端选择器（Composer 工具行驻留，对齐桌面端能力）。
  *
- * 语义与桌面一致：后端（pi / dsh / 生图）仅在草稿期可切换——pi 会话文件与 DSH
- * session log 格式不同，会话激活（有 runtime）后锁定禁用；切换草稿会话后端时由
- * 父级同时清空跨后端的模型/思考偏好（见 UpdateSessionRecordInput.model 注释）。
+ * 语义与桌面一致：后端（pi / dsh / acp / 生图）仅在草稿期可切换——pi 会话文件、
+ * DSH session log、ACP CLI 会话三者格式不同，会话激活（有 runtime）后锁定禁用；
+ * 切换草稿会话后端时由父级同时清空跨后端的模型/思考偏好
+ * （见 UpdateSessionRecordInput.model 注释）。
+ *
+ * ACP 需要额外指定具体 CLI（AcpToolConfig.id）：桌面端是「ACP → 子菜单选工具」两级，
+ * 手机端改成一次点击可达——ACP 作为分组标题，工具各占一行（通常 1~3 个）。
+ * 可选工具来自 /api/state 的 acpTools（主进程已按 acpEnabled + enabled 门控），
+ * 空数组即完全不展示 ACP 入口。
  *
  * 交互：工具行文本 pill（与模型/思考 pill 同范式）→ WebBottomSheet 大触控行选择
  * （窄屏底部滑出 / 宽屏居中卡片，复用跨端基石组件）。
  */
 import { useState } from "react";
-import { Check, ChevronsUpDown, Image as ImageIcon, SquareTerminal } from "lucide-react";
+import { Bot, Check, ChevronsUpDown, Image as ImageIcon, SquareTerminal } from "lucide-react";
 import type { AgentBackend } from "../../../shared/types";
 import { AgentPresetLogo } from "@/components/session/SessionSourceBadge";
 import { Button } from "@/components/ui-shadcn/button";
 import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { WebBottomSheet } from "./WebBottomSheet";
+import type { WebAcpTool } from "./webTypes";
 
-/** 后端选项元数据；label 里 Pi/DSH 是品牌名不本地化，生图走 i18n。 */
+/** 非 ACP 的后端选项元数据；label 里 Pi/DSH 是品牌名不本地化，生图走 i18n。 */
 function backendOptions(): { value: AgentBackend; label: string; desc: string }[] {
 	return [
 		{ value: "pi", label: "Pi", desc: t("web.backendPiDesc") },
@@ -33,10 +40,28 @@ function BackendOptionMark(props: { backend: AgentBackend }) {
 	return <SquareTerminal className="size-4" aria-hidden="true" />;
 }
 
-export function WebBackendSelector(props: { backend: AgentBackend /** 会话已激活（有 runtime）后锁定，禁用切换单元 */; locked: boolean; onChange: (backend: AgentBackend) => void }) {
+/** 选择器当前展示的标签：acp 显示具体工具名（未指定工具时回退 "ACP"）。 */
+function currentLabel(backend: AgentBackend, acpToolId: string | undefined, acpTools: WebAcpTool[]): string {
+	if (backend === "acp") {
+		return acpTools.find((tool) => tool.id === acpToolId)?.name ?? "ACP";
+	}
+	return backendOptions().find((option) => option.value === backend)?.label ?? "Pi";
+}
+
+export function WebBackendSelector(props: {
+	backend: AgentBackend;
+	/** 当前 acp 工具 id（仅 backend === "acp" 有意义） */
+	acpToolId?: string;
+	/** 可选 ACP 工具（空数组=不提供 ACP 入口） */
+	acpTools?: WebAcpTool[];
+	/** 会话已激活（有 runtime）后锁定，禁用切换单元 */
+	locked: boolean;
+	/** acp 需带工具 id；其余后端 acpToolId 为 undefined */
+	onChange: (backend: AgentBackend, acpToolId?: string) => void;
+}) {
 	const [open, setOpen] = useState(false);
-	const options = backendOptions();
-	const label = options.find((option) => option.value === props.backend)?.label ?? "Pi";
+	const acpTools = props.acpTools ?? [];
+	const label = currentLabel(props.backend, props.acpToolId, acpTools);
 
 	return (
 		<>
@@ -59,7 +84,7 @@ export function WebBackendSelector(props: { backend: AgentBackend /** 会话已�
 					<p className="px-4 py-4 text-sm text-muted-foreground">{t("session.backendLockedNotice")}</p>
 				) : (
 					<div className="flex flex-col pb-2">
-						{options.map((option) => {
+						{backendOptions().map((option) => {
 							const selected = option.value === props.backend;
 							return (
 								<button
@@ -87,6 +112,37 @@ export function WebBackendSelector(props: { backend: AgentBackend /** 会话已�
 								</button>
 							);
 						})}
+						{acpTools.length > 0 && (
+							<>
+								{/* ACP 分组：工具各占一行（一次点击直达，避免手机上两级菜单） */}
+								<p className="px-4 pt-3 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wide">ACP</p>
+								{acpTools.map((tool) => {
+									const selected = props.backend === "acp" && props.acpToolId === tool.id;
+									return (
+										<button
+											type="button"
+											key={tool.id}
+											aria-pressed={selected}
+											className={cn("flex h-12 w-full items-center gap-3 px-4 text-left transition-colors hover:bg-muted/60", selected && "bg-muted/40")}
+											onClick={() => {
+												setOpen(false);
+												if (!selected) props.onChange("acp", tool.id);
+											}}
+										>
+											<span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-foreground">
+												<Bot className="size-4" aria-hidden="true" />
+											</span>
+											<span className="min-w-0 flex-1">
+												{/* 工具名由用户配置（AcpToolConfig.name），可能是 Codex CLI / Claude Agent 等 */}
+												<span className="block truncate text-sm font-medium text-foreground">{tool.name}</span>
+												<span className="block truncate text-xs text-muted-foreground">{t("web.backendAcpToolDesc")}</span>
+											</span>
+											{selected && <Check className="size-4 shrink-0 text-primary" aria-hidden="true" />}
+										</button>
+									);
+								})}
+							</>
+						)}
 					</div>
 				)}
 			</WebBottomSheet>
