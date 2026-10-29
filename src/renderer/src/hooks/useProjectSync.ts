@@ -2,7 +2,6 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import type { Project, ProjectFileTarget, FileTreeNode, GitBranchInfo, WorktreeEntry, SessionSummary, SessionRecord } from "../../../shared/types";
 import type { SessionLoadState } from "../atoms/session-atoms";
 import { sessionRecordToSummary } from "../atoms/session-selectors";
-import { loadProjectFileTree, parseFileTreeKey } from "../utils/fileTreeLazy";
 import { createKeyedWatchdog } from "../utils/catalogLoadWatchdog";
 import { isLocalProject, isRemoteProject } from "../../../shared/projectLocation";
 import { useFileTreeContentState } from "./files/useFileTreeContentState";
@@ -86,9 +85,6 @@ export function useProjectSync(input: UseProjectSyncInput) {
 	const sessionRefreshPendingRef = useRef<Set<string>>(new Set());
 	const sessionRefreshCompletionByProjectRef = useRef<Record<string, ProjectSessionRefreshCompletion | undefined>>({});
 	// #159：文件树刷新按代次丢弃，避免旧项目慢扫描覆盖当前抽屉。
-	const fileTreeGenerationRef = useRef(0);
-	const activeProjectIdRef = useRef(activeProjectId);
-	activeProjectIdRef.current = activeProjectId;
 
 	/** 包一层：任何 loadState 变更（loading/ready/error）都取消该项目看门狗，
 	 *  只有「一直没被揭开」的 loading 才继续享受超时兜底。 */
@@ -109,11 +105,6 @@ export function useProjectSync(input: UseProjectSyncInput) {
 	);
 
 	/** 发起新的根树请求；旧代次的 listing 一律丢弃。 */
-	const beginFileTreeRequest = useCallback(() => ++fileTreeGenerationRef.current, []);
-
-	const isFileTreeRequestCurrent = useCallback((generation: number, projectId: string) => {
-		return fileTreeGenerationRef.current === generation && activeProjectIdRef.current === projectId;
-	}, []);
 
 	/**
 	 * 重新读取项目目录存在性并替换侧栏清单。
@@ -349,40 +340,6 @@ export function useProjectSync(input: UseProjectSyncInput) {
 		showToast(t("app.projectRefreshed", {}), 1800);
 	}
 
-	async function refreshFiles(projectId = activeProjectId, silent = false, expandedDirs: Iterable<string> = []) {
-		if (!projectId) return;
-		const generation = beginFileTreeRequest();
-		try {
-			// 抽屉刷新只拉浅层根，再按当前展开目录补齐，避免整棵 12 层 IPC。
-			const next = await loadProjectFileTree(
-				() => api.files.list({ projectId, relativePath: "" }, { maxDepth: 0 }),
-				expandedDirs,
-				() => isFileTreeRequestCurrent(generation, projectId),
-				// 展开集里存的是项目作用域键（W1）：先解析回 target；旧版绝对路径键仍走 directory 旧路径。
-				(directory) => {
-					const parsed = typeof directory === "string" ? parseFileTreeKey(directory) : directory;
-					if (parsed !== undefined) return api.files.list(parsed, { maxDepth: 0 });
-					return api.files.list(projectId, { maxDepth: 0, directory: directory as string });
-				},
-			);
-			if (!next) return;
-			setFiles(next);
-			if (!silent) showToast(t("app.filesRefreshed", {}), 1800);
-		} catch (error) {
-			if (!isFileTreeRequestCurrent(generation, projectId)) return;
-			const message = error instanceof Error ? error.message : String(error);
-			const tooLarge = message.match(/FILE_TREE_DIRECTORY_TOO_LARGE:(\d+):(\d+)/);
-			const projectDirectoryMissing = message.includes("PROJECT_DIRECTORY_MISSING");
-			if (projectDirectoryMissing) {
-				// 目录被外部删除后先清掉陈旧文件树，再刷新项目 presence，让侧栏立即出现“目录不存在”。
-				// 已经是空树时复用原数组：内容没变就不推进内容代次（避免白跑一轮 Git 着色重拉）。
-				setFiles((current) => (current.length === 0 ? current : []));
-				void refreshProjects().catch(() => undefined);
-			}
-			showToast(tooLarge ? t("app.filesDirectoryTooLarge", { count: tooLarge[1], max: tooLarge[2] }) : projectDirectoryMissing ? t("app.projectDirectoryMissing") : t("app.filesRefreshFailed", { error: message }), 4000);
-		}
-	}
-
 	return {
 		worktreesByProject,
 		branchByProject,
@@ -401,10 +358,7 @@ export function useProjectSync(input: UseProjectSyncInput) {
 		refreshWorktrees,
 		refreshSessions,
 		refreshProjectSessions,
-		refreshFiles,
 		refreshProjectTree,
 		syncDshForeignSessionsIfEnabled,
-		beginFileTreeRequest,
-		isFileTreeRequestCurrent,
 	};
 }

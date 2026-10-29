@@ -43,6 +43,14 @@ export type LazyDirTreeController = {
 	refresh(): Promise<void>;
 	/** 展开到指定目录（含祖先），并把当前目录切过去。 */
 	reveal(dir: string): Promise<void>;
+	/** 恢复持久化展开集：根层之后按深度逐层读取并展开（失败也保留展开意图）。 */
+	hydrate(dirs: readonly string[], includeRoot?: boolean): Promise<void>;
+	/** 只补读尚未加载的目录；返回是否发起过读取。 */
+	loadMissing(dirs: readonly string[]): Promise<boolean>;
+	/** 目录是否已经有一份已落地的子项（含空目录）。 */
+	hasLoaded(dir: string): boolean;
+	/** 沿单子目录链下钻：每层用 descend 决定下一层，返回路径串的相对目录名。 */
+	drill(start: string, descend: (children: readonly FileTreeNode[]) => string | null, maxDepth?: number): Promise<void>;
 	setCurrentDir(dir: string): void;
 	/** 远端事实通知：已加载目录按 scope 强制重读；连接代变化时丢弃整棵树再读根层。 */
 	applyFactsChange(change: RemoteProjectFactsChange): void;
@@ -54,11 +62,12 @@ export function lazyDirTreeInitialState(): LazyDirTreeState {
 	return { nodes: [], expanded: new Set(), loadingDirs: new Set(), truncatedDirs: new Set(), listed: false, error: null, currentDir: "" };
 }
 
-function buildNodes(children: ReadonlyMap<string, readonly FileTreeNode[]>, expanded: ReadonlySet<string>, dir: string): FileTreeNode[] {
+function buildNodes(children: ReadonlyMap<string, readonly FileTreeNode[]>, expanded: ReadonlySet<string>, failed: ReadonlySet<string>, dir: string): FileTreeNode[] {
 	return (children.get(dir) ?? []).map((node) => {
 		if (node.type !== "directory") return node;
 		const key = node.relativePath;
-		return expanded.has(key) && children.has(key) ? { ...node, children: buildNodes(children, expanded, key) } : { ...node, children: undefined };
+		if (failed.has(key)) return { ...node, children: undefined, hasChildren: false };
+		return expanded.has(key) && children.has(key) ? { ...node, children: buildNodes(children, expanded, failed, key) } : { ...node, children: undefined };
 	});
 }
 
@@ -67,6 +76,8 @@ export function createLazyDirTreeController(loader: LazyDirLoader): LazyDirTreeC
 	const expanded = new Set<string>();
 	const loading = new Set<string>();
 	const truncatedDirs = new Set<string>();
+	/** 读失败且尚未重新成功的目录：节点 hasChildren=false（去掉永久占位），但保留展开意图供重试。 */
+	const failed = new Set<string>();
 	/** 每个目录各自的代次：同时展开两个目录时，晚到的旧结果不能盖掉新结果。 */
 	const generations = new Map<string, number>();
 	const revisions = new Map<string, number>();
@@ -79,10 +90,17 @@ export function createLazyDirTreeController(loader: LazyDirLoader): LazyDirTreeC
 	let currentDir = "";
 	let disposed = false;
 	let snapshot: LazyDirTreeState = lazyDirTreeInitialState();
+	/** 只有子项/展开集变化才重建 nodes；加载态/错误的 publish 必须复用同一数组，避免内容代次空转。 */
+	let nodesDirty = false;
+	let lastNodes: FileTreeNode[] = snapshot.nodes;
 
 	const rebuild = (): void => {
+		if (nodesDirty) {
+			lastNodes = buildNodes(children, expanded, failed, "");
+			nodesDirty = false;
+		}
 		snapshot = {
-			nodes: buildNodes(children, expanded, ""),
+			nodes: lastNodes,
 			expanded: new Set(expanded),
 			loadingDirs: new Set(loading),
 			truncatedDirs: new Set(truncatedDirs),
@@ -113,14 +131,18 @@ export function createLazyDirTreeController(loader: LazyDirLoader): LazyDirTreeC
 				if (disposed || ticket !== epoch || generations.get(dir) !== request) return false;
 				if (!result.ok) {
 					// 读失败不能继续展示上一次的条目：那会让用户以为目录内容仍是当前事实。
-					children.set(dir, []);
+					children.delete(dir);
+					failed.add(dir);
 					truncatedDirs.delete(dir);
+					nodesDirty = true;
 					error = result.code;
 					if (dir === "") listed = false;
 					rebuild();
 					return false;
 				}
 				children.set(dir, result.page.nodes);
+				failed.delete(dir);
+				nodesDirty = true;
 				if (result.page.truncated === true) truncatedDirs.add(dir);
 				else truncatedDirs.delete(dir);
 				if (result.page.revision !== undefined) revisions.set(dir, result.page.revision);
@@ -131,8 +153,10 @@ export function createLazyDirTreeController(loader: LazyDirLoader): LazyDirTreeC
 				return true;
 			} catch {
 				if (disposed || ticket !== epoch || generations.get(dir) !== request) return false;
-				children.set(dir, []);
+				children.delete(dir);
+				failed.add(dir);
 				truncatedDirs.delete(dir);
+				nodesDirty = true;
 				error = "REMOTE_FILE_REQUEST_FAILED";
 				if (dir === "") listed = false;
 				rebuild();
@@ -147,23 +171,31 @@ export function createLazyDirTreeController(loader: LazyDirLoader): LazyDirTreeC
 		toggle(dir) {
 			if (disposed) return;
 			const opening = !expanded.has(dir);
+			// 展开一个尚未加载的目录不改变 nodes（children 仍未定义）；只有已加载目录的
+			// 展开/收起才需要重建，避免一次展开就推进内容代次、白跑一轮 Git 着色。
+			const changesNodes = children.has(dir);
 			if (opening) {
 				expanded.add(dir);
 				currentDir = dir;
 			} else {
 				expanded.delete(dir);
 			}
+			nodesDirty = nodesDirty || changesNodes;
 			rebuild();
 			if (opening && !children.has(dir) && !loading.has(dir)) void this.load(dir);
 		},
 		collapseAll() {
 			if (disposed) return;
+			const changesNodes = [...expanded].some((dir) => children.has(dir));
 			expanded.clear();
 			currentDir = "";
+			nodesDirty = nodesDirty || changesNodes;
 			rebuild();
 		},
 		async refresh() {
-			const dirs = [...new Set(["", ...children.keys()])];
+			// 已在途的目录不重复发起：抽屉打开时的静默刷新常与首屏加载重叠，重发会让树在
+			// 用户展开/滚动时整块替换（滚动位置和 sticky 几何都会跳）。
+			const dirs = [...new Set(["", ...children.keys()])].filter((dir) => !loading.has(dir));
 			await Promise.all(dirs.map((dir) => this.load(dir, true)));
 		},
 		async reveal(dir) {
@@ -182,7 +214,55 @@ export function createLazyDirTreeController(loader: LazyDirLoader): LazyDirTreeC
 				expanded.add(current);
 			}
 			currentDir = dir;
+			nodesDirty = true;
 			rebuild();
+		},
+		async hydrate(dirs, includeRoot = true) {
+			if (disposed) return;
+			if (includeRoot) await this.load("");
+			if (disposed) return;
+			const ordered = [...new Set(dirs)].filter((dir) => dir.length > 0).sort((left, right) => left.split("/").length - right.split("/").length || left.localeCompare(right));
+			for (const dir of ordered) {
+				if (disposed) return;
+				// 失败也保留展开意图：与持久化里的旧键一致，交给下一次显式刷新/自愈重试。
+				await this.load(dir);
+				expanded.add(dir);
+				nodesDirty = true;
+				rebuild();
+			}
+		},
+		async loadMissing(dirs) {
+			if (disposed) return false;
+			let attempted = false;
+			for (const dir of new Set(dirs)) {
+				if (disposed) return attempted;
+				if (children.has(dir) && !failed.has(dir)) continue;
+				attempted = true;
+				await this.load(dir);
+			}
+			return attempted;
+		},
+		hasLoaded: (dir) => children.has(dir),
+		async drill(start, descend, maxDepth = 32) {
+			if (disposed) return;
+			let current = start;
+			const chain = new Set<string>([start]);
+			for (let depth = 0; depth < Math.max(1, maxDepth); depth += 1) {
+				if (disposed) return;
+				const loaded = await this.load(current);
+				expanded.add(current);
+				nodesDirty = true;
+				rebuild();
+				if (!loaded) break;
+				const entries = children.get(current) ?? [];
+				const next = descend(entries);
+				if (next === null || next === current || !entries.some((node) => node.type === "directory" && node.relativePath === next)) break;
+				current = next;
+				chain.add(current);
+			}
+			currentDir = current;
+			rebuild();
+			void chain;
 		},
 		setCurrentDir(dir) {
 			if (disposed) return;
@@ -196,9 +276,11 @@ export function createLazyDirTreeController(loader: LazyDirLoader): LazyDirTreeC
 				const keep = [...children.keys()];
 				epoch += 1;
 				children.clear();
+				failed.clear();
 				revisions.clear();
 				loading.clear();
 				truncatedDirs.clear();
+				nodesDirty = true;
 				listed = false;
 				error = null;
 				generation = change.generation;
@@ -217,9 +299,11 @@ export function createLazyDirTreeController(loader: LazyDirLoader): LazyDirTreeC
 			if (disposed) return;
 			epoch += 1;
 			children.clear();
+			failed.clear();
 			revisions.clear();
 			loading.clear();
 			truncatedDirs.clear();
+			nodesDirty = true;
 			listed = false;
 			error = null;
 			rebuild();

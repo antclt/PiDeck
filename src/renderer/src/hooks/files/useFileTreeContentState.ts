@@ -21,7 +21,7 @@ export type FileTreeContentStateHandle = {
  * 懒加载新目录的 children 是新节点、需要着色，必须推进代次。
  *
  * 边界（刻意不做深等价比较）：判据只认引用，所以「等价重载」也会推进一代——
- * 例如 useProjectSync.refreshFiles 每次都 setFiles(next)，即使扫回来的树与旧树内容等价。
+ * 例如目录刷新每次都 setFiles(next)，即使扫回来的树与旧树内容等价。
  * 代价只是多一轮 listRepos + 每仓 `git status -uall`（与引入代次之前的行为一致，不是回归）；
  * 换深度比较会在每次 setFiles 上同步遍历整棵树，大仓库下比多拉一次更贵。
  *

@@ -71,37 +71,28 @@ test("打标后重新 merge 成功结果可恢复（重试入口语义）", () =
 	assert.equal(tree[0].children.length, 1);
 });
 
-test("接线：toggleDirectory / drillCompactChain 失败路径调用 markFileTreeLoadFailed", () => {
-	// 文件树域已迁入 useProjectFileTreeController（App 只接线）
+test("接线：展开失败由 lazyDirTree 清空该层，占位不会永久停留", () => {
 	const app = readFileSync("src/renderer/src/hooks/files/useProjectFileTreeController.ts", "utf8");
-	// toggleDirectory 的 catch：打标 + 保留代次校验（切项目后不得写入）。
-	const toggleCatch = app.match(/\.catch\(\(error\) => \{[\s\S]{0,400}?markFileTreeLoadFailed\(tree, path\)[\s\S]{0,200}?\}\);/);
-	assert.ok(toggleCatch, "toggleDirectory expand failure should mark the directory");
-	assert.match(toggleCatch[0], /activeProjectIdRef\.current !== projectId/);
-	// drillCompactChain 的 catch：打标当前层而不是静默 break。
-	const drillCatch = app.match(/} catch \{\s*\n[\s\S]{0,300}?markFileTreeLoadFailed\(tree, current\)\);\s*\n\s*break;/);
-	assert.ok(drillCatch, "drillCompactChain failure should mark the current layer");
+	const core = readFileSync("src/renderer/src/utils/lazyDirTree.ts", "utf8");
+	// toggle / 折叠中间包都交给 controller；失败路径统一在 controller 里把该层置空（children=[]），
+	// hasChildren !== false 的永久「加载中...」占位因此不会出现。
+	assert.match(app, /controller\.toggle\(relative\)/);
+	assert.match(app, /controller\.drill\(start/);
+	assert.match(core, /failed\.add\(dir\)/);
+	assert.match(core, /hasChildren: false/);
+	assert.match(core, /error = result.code/);
 });
 
-test("接线：restoreExpandedDirs 只补拉「已展开 + 无 children + 未标失败」目录", () => {
+test("接线：restoreExpandedDirs 只补读已展开但尚未落地的目录", () => {
 	const app = readFileSync("src/renderer/src/hooks/files/useProjectFileTreeController.ts", "utf8");
-	// 注意：biome 格式基线（tabs + 折行）会把签名与依赖数组拆行，正则必须容忍空白/换行，
-	// 不能写死「两空格缩进 + 单行签名」，否则格式化一动测试就假失败。
-	// 依赖数组允许追加（如本机项目判定），但两个代次守卫必须在。
-	const fn = app.match(/const restoreExpandedDirs = useCallback\(\s*async \(projectId: string\): Promise<boolean> => \{[\s\S]*?\},\s*\[beginFileTreeRequest, isFileTreeRequestCurrent[^\]]*\],?\s*\);/);
-	assert.ok(fn, "restoreExpandedDirs should exist with generation guards");
+	const fn = app.match(/const restoreExpandedDirs = useCallback\(\s*async \(projectId: string\): Promise<boolean> => \{[\s\S]*?\},\s*\[[^\]]*\],?\s*\);/);
+	assert.ok(fn, "restoreExpandedDirs should exist");
 	const body = fn[0];
-	// 判定条件与 FileNode 占位分支同构：expanded && !children && hasChildren !== false。
-	assert.match(body, /const nodeKey = fileTreeNodeKey\(node\)/);
-	assert.match(body, /expandedDirsRef\.current\.has\(nodeKey\)/);
-	assert.match(body, /!Array\.isArray\(node\.children\)/);
-	assert.match(body, /node\.hasChildren !== false/);
-	// 父目录先补（merge 依赖父层节点先存在）。合并后展开键统一走 fileTreeNodeKey，元素是字符串。
-	assert.match(body, /sort\(\(left, right\) => left\.length - right\.length\)/);
-	// 补拉过程带代次校验，切项目后不得写入。
-	assert.match(body, /isFileTreeRequestCurrent\(generation, projectId\)/);
-	// 失败打标：补拉本身失败也不能留下永久占位。
-	assert.match(body, /markFileTreeLoadFailed\(tree, directory\)/);
+	// controller 记录 expanded 与已落地目录；loadMissing 只补未加载项，失败仍是显式 error，不是假成功。
+	assert.match(body, /controller\.loadMissing\(\[\.\.\.controller\.getState\(\)\.expanded\]\)/);
+	assert.match(body, /isLocalProjectId\(projectId\)/);
+	const core = readFileSync("src/renderer/src/utils/lazyDirTree.ts", "utf8");
+	assert.match(core, /if \(children\.has\(dir\) && !failed\.has\(dir\)\) continue;/);
 });
 
 test("接线：打开文件抽屉先自愈，无待修复目录才静默 refreshFiles", () => {

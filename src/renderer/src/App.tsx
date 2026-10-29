@@ -522,11 +522,8 @@ export function App() {
 		refreshAllProjects,
 		refreshWorktrees,
 		refreshProjectSessions,
-		refreshFiles,
 		refreshProjectTree,
 		syncDshForeignSessionsIfEnabled,
-		beginFileTreeRequest,
-		isFileTreeRequestCurrent,
 	} = useProjectSync({
 		projects,
 		activeProjectId,
@@ -875,13 +872,8 @@ export function App() {
 	// 文件树是纯本机能力：远端项目没有本机 path，hook 需要据此跳过一切本地 files:list。
 	const isLocalProjectId = useCallback((projectId: string) => projects.some((project) => project.id === projectId && isLocalProject(project)), [projects]);
 	const { expandedDirs, refreshVisibleFiles, restoreExpandedDirs, drillCompactChain, toggleDirectory, collapseAllDirectories } = useProjectFileTreeController({
-		files,
 		setFiles,
-		refreshFiles,
-		beginFileTreeRequest,
-		isFileTreeRequestCurrent,
 		activeProjectId,
-		activeProjectIdRef,
 		isLocalProjectId,
 		compactMiddlePackagesEnabled,
 		agentsRef,

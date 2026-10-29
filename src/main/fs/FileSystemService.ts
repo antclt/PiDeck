@@ -1,4 +1,4 @@
-import { readdir, rename as fsRename, mkdir, writeFile, stat } from "node:fs/promises";
+import { readdir, realpath, rename as fsRename, mkdir, writeFile, stat } from "node:fs/promises";
 import { join, relative, dirname, resolve, sep, basename } from "node:path";
 import { trashPath } from "./trash";
 import { parseWslUncPath } from "../wsl/WslPaths";
@@ -50,13 +50,17 @@ export class FileSystemService {
 	 * maxDepth>0：继续向下递归，供 composer @ 引用一次性拿到有限深度清单。
 	 */
 	async listTree(root: string, maxDepth = DEFAULT_FILE_TREE_MAX_DEPTH, directory?: string, options?: FileTreeListOptions): Promise<FileTreeNode[]> {
-		const current = directory ? resolve(directory) : resolve(root);
-		if (!isPathInsideProject(root, current)) {
+		const requested = directory ? resolve(directory) : root;
+		// 边界与读取都用 canonicalRoot：项目根可能是短路径/临时目录，而 target 解析给的是 realpath。
+		// 只 canonicalize 一次，node.path 也保持一致，避免同一文件出现两种绝对路径。
+		const canonicalRoot = await realpath(root).catch(() => resolve(root));
+		const current = await realpath(requested).catch(() => resolve(requested));
+		if (!isPathInsideProject(canonicalRoot, current)) {
 			throw new Error(`Invalid path: "${directory}" escapes project directory`);
 		}
 		const depthLimit = Math.max(0, Math.min(maxDepth, FILE_TREE_ABSOLUTE_MAX_DEPTH));
 		const ignored = options?.skipGeneratedDirs ? SCAN_IGNORED_NAMES : ALWAYS_IGNORED_NAMES;
-		return this.readDirectory(root, current, 0, depthLimit, ignored);
+		return this.readDirectory(canonicalRoot, current, 0, depthLimit, ignored);
 	}
 
 	/**

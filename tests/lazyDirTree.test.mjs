@@ -217,3 +217,94 @@ test("截断标记随页面显式保存，重读不截断时清除", async () =>
 	await controller.load("", true);
 	assert.deepEqual([...controller.getState().truncatedDirs], []);
 });
+
+test("加载态/错误的 publish 复用同一 nodes 引用，避免文件树内容代次空转", async () => {
+	const testHarness = harness();
+	const controller = createLazyDirTreeController(testHarness.loader);
+	const before = controller.getState().nodes;
+	const root = controller.load("");
+	assert.equal(controller.getState().nodes, before, "loading 开始不应重建 nodes");
+	testHarness.pending[0].request.resolve(page([file("a")]));
+	await root;
+	const after = controller.getState().nodes;
+	assert.notEqual(after, before, "子项落地必须重建 nodes");
+	controller.setCurrentDir("x");
+	assert.equal(controller.getState().nodes, after, "currentDir 变化不应重建 nodes");
+});
+
+test("hydrate 先读根层，再按深度逐层读取并展开持久化目录", async () => {
+	const testHarness = harness({
+		"": page([dir("a")]),
+		a: page([dir("a/b")]),
+		"a/b": page([file("x")]),
+	});
+	const controller = createLazyDirTreeController(testHarness.loader);
+	await controller.hydrate(["a/b", "a"]);
+	assert.deepEqual(
+		testHarness.calls.map((call) => call.dir),
+		["", "a", "a/b"],
+	);
+	assert.deepEqual([...controller.getState().expanded].sort(), ["a", "a/b"]);
+	assert.equal(controller.getState().nodes[0].children[0].children[0].name, "x");
+});
+
+test("loadMissing 只补读未加载目录；drill 沿单子目录链展开到链尾", async () => {
+	const testHarness = harness({
+		"": page([dir("a")]),
+		a: page([dir("a/b")]),
+		"a/b": page([dir("a/b/c")]),
+		"a/b/c": page([file("leaf")]),
+	});
+	const controller = createLazyDirTreeController(testHarness.loader);
+	await controller.load("");
+	assert.equal(controller.hasLoaded("a"), false);
+	assert.equal(await controller.loadMissing(["a", "a"]), true);
+	assert.equal(controller.hasLoaded("a"), true);
+	assert.equal(await controller.loadMissing(["a"]), false);
+
+	await controller.drill("a", (entries) => (entries.length === 1 && entries[0].type === "directory" ? entries[0].relativePath : null));
+	assert.deepEqual([...controller.getState().expanded].sort(), ["a", "a/b", "a/b/c"]);
+	assert.equal(controller.getState().currentDir, "a/b/c");
+});
+
+test("展开未加载目录不重建 nodes；已加载目录的展开/收起才重建", async () => {
+	const testHarness = harness({
+		"": page([dir("a")]),
+		a: page([file("x")]),
+	});
+	const controller = createLazyDirTreeController(testHarness.loader);
+	await controller.load("");
+	const rootNodes = controller.getState().nodes;
+	controller.toggle("a"); // 尚未加载：nodes 不变
+	assert.equal(controller.getState().nodes, rootNodes);
+	await tick();
+	const loadedNodes = controller.getState().nodes;
+	assert.notEqual(loadedNodes, rootNodes);
+	controller.toggle("a"); // 收起已加载目录：子节点消失，必须重建
+	assert.notEqual(controller.getState().nodes, loadedNodes);
+	assert.equal(controller.getState().nodes[0].children, undefined);
+});
+
+test("失败目录标 hasChildren=false、hasLoaded=false，重试成功后可恢复", async () => {
+	let fail = true;
+	const calls = [];
+	const loader = (path, force) => {
+		calls.push({ dir: path, force });
+		if (path === "a" && fail) return Promise.resolve({ ok: false, code: "REMOTE_FILE_REQUEST_FAILED" });
+		if (path === "a") return Promise.resolve(page([file("x")]));
+		return Promise.resolve(page([dir("a")]));
+	};
+	const controller = createLazyDirTreeController(loader);
+	await controller.load("");
+	controller.toggle("a");
+	await tick();
+	assert.equal(controller.getState().nodes[0].hasChildren, false, "失败档不得留下永久加载占位");
+	assert.equal(controller.hasLoaded("a"), false);
+	fail = false;
+	controller.toggle("a"); // 收起
+	controller.toggle("a"); // 重新展开：失败档必须能重试
+	await tick();
+	assert.equal(controller.hasLoaded("a"), true);
+	assert.equal(controller.getState().nodes[0].hasChildren, true);
+	assert.equal(controller.getState().nodes[0].children[0].name, "x");
+});
