@@ -24,8 +24,9 @@ import type {
 	RemoteGitSyncFactsResult,
 } from "../../shared/types/git";
 import type { ProjectFileTarget } from "../../shared/types/project";
-import { createRemoteGitService, remoteGitFailureCode, validateRemoteGitPath, validateRemoteGitRepoPath, type RemoteGitLocator } from "../git/RemoteGitService";
+import { createRemoteGitService, remoteGitFailureCode, validateRemoteGitPath, validateRemoteGitRepoPath, type RemoteGitLocator, type RemoteGitReadSnapshot } from "../git/RemoteGitService";
 import { createRemoteGitMutationTokens } from "../git/RemoteGitMutationTokens";
+import { createSnapshotFactsCache } from "../git/RemoteGitSnapshotFacts";
 import { REMOTE_GIT_COMMIT_MESSAGE_MAX_BYTES } from "../remote/RemoteHelperContract";
 import type { RemoteHostConnectionService } from "../remote/RemoteHostConnectionService";
 
@@ -73,13 +74,21 @@ export function registerRemoteGitReadIpc(input: { enabled: boolean; locator(proj
 			return result.value;
 		},
 	});
+	/**
+	 * 快照**事实**缓存（W4 前置）：读与签授权拆开之后，同一个仓库状态在一次内容变化里只读一次。
+	 *
+	 * 事实旧了不会让写穿过去：每个写动词都带 `expectedRevision`，revision 不符时远端自己拒绝
+	 * （见 `RemoteGitSnapshotFacts` 的模块头）。令牌仍然每次现签，缓存的只是事实。
+	 */
+	const facts = createSnapshotFactsCache<RemoteGitReadSnapshot>();
+
 	async function read<T>(event: IpcMainInvokeEvent, projectId: unknown, repo: unknown, task: (projectId: string, signal: AbortSignal) => Promise<T>, mutating = false): Promise<T> {
 		if (!input.enabled) throw new Error("REMOTE_FEATURE_DISABLED");
 		if (disposed) throw new Error("REQUEST_CANCELLED");
 		const sender = event.sender;
 		if (!Number.isSafeInteger(sender.id) || sender.id < 1 || sender.isDestroyed() || typeof projectId !== "string" || !projectId.trim() || projectId !== projectId.trim() || projectId.length > 256 || /[\x00-\x1f\x7f]/.test(projectId)) throw new Error("GIT_RESULT_INVALID");
 		// The scope is validated (and refused) before anything is queued for SSH.
-		validateRemoteGitRepoPath(repo);
+		const scopedRepo = validateRemoteGitRepoPath(repo);
 		if (reads.size >= 32 || [...reads.values()].filter((read) => read.senderId === sender.id).length >= 4) throw new Error("TOO_MANY_REQUESTS");
 		const controller = new AbortController();
 		const cancel = () => controller.abort();
@@ -88,6 +97,8 @@ export function registerRemoteGitReadIpc(input: { enabled: boolean; locator(proj
 		try {
 			const value = await task(projectId, controller.signal);
 			if (controller.signal.aborted || sender.isDestroyed()) throw new Error(mutating ? "GIT_WRITE_RESULT_UNCONFIRMED" : "REQUEST_CANCELLED");
+			// 写成功 ⇒ 这一仓的事实过时了：只标脏，下一次读重新装载（不在这里主动再读一次）。
+			if (mutating) facts.invalidate(projectId, scopedRepo);
 			return value;
 		} finally {
 			sender.removeListener("destroyed", cancel);
@@ -104,7 +115,13 @@ export function registerRemoteGitReadIpc(input: { enabled: boolean; locator(proj
 		try {
 			const repoPath = validateRemoteGitRepoPath(repo);
 			tokens.revoke(event.sender.id, typeof projectId === "string" ? projectId : "");
-			const { writeExpectation, commitExpectation, branchExpectation, switchExpectation, discardExpectation, restoreExpectation, dropExpectation, fetchExpectation, pushExpectation, pullExpectation, ...snapshot } = await read(event, projectId, repoPath, (id, signal) => git.status(id, repoPath, signal));
+			// 事实可缓存（同键并发合并成一次往返）；令牌每次现签，绑定的是这份事实的 revision。
+			const cached =
+				typeof projectId === "string"
+					? await facts.read(projectId, repoPath, () => read(event, projectId, repoPath, (id, signal) => git.status(id, repoPath, signal)))
+					: undefined;
+			const readSnapshot = cached?.facts ?? (await read(event, projectId, repoPath, (id, signal) => git.status(id, repoPath, signal)));
+			const { writeExpectation, commitExpectation, branchExpectation, switchExpectation, discardExpectation, restoreExpectation, dropExpectation, fetchExpectation, pushExpectation, pullExpectation, ...snapshot } = readSnapshot;
 			// Every confirmed scope mints grants bound to itself (G5e): a nested snapshot's tokens carry its repoPath, so
 			// the token layer refuses them against another repository.
 			if (typeof projectId === "string") {
