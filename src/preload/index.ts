@@ -1388,6 +1388,8 @@ const api = {
 		getConfig: () => ipcRenderer.invoke(ipcChannels.securityGetConfig) as Promise<SecurityConfig>,
 		updateConfig: (patch: Partial<SecurityConfig>) => ipcRenderer.invoke(ipcChannels.securityUpdateConfig, patch) as Promise<{ ok: true; config: SecurityConfig } | { ok: false; error: string }>,
 		setSessionLevel: (sessionId: string, levelId: string | null) => ipcRenderer.invoke(ipcChannels.securitySetSessionLevel, sessionId, levelId) as Promise<{ ok: true; config: SecurityConfig } | { ok: false; error: string }>,
+		/** 安全配置变更（任一端修改）：接收方重拉 getConfig 刷新菜单；返回退订函数。 */
+		onConfigChanged: (callback: () => void) => subscribe(ipcChannels.securityConfigChanged, callback),
 	},
 	config: {
 		previewProviderMigration: (direction: import("../shared/types/providerMigration").ProviderMigrationDirection) => ipcRenderer.invoke(ipcChannels.configPreviewProviderMigration, direction) as Promise<import("../shared/types/providerMigration").ProviderMigrationPreview>,

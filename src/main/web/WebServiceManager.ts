@@ -32,6 +32,7 @@ import type {
 	SessionTodoSnapshot,
 	SessionUiResponseInput,
 	PiSubagentEntry,
+	SecurityConfig,
 	UpdateSessionRecordInput,
 	WebServiceStatusInfo,
 } from "../../shared/types";
@@ -42,6 +43,7 @@ import { WebStaticAssets } from "./WebStaticAssets";
 import { WebApiRoutes } from "./WebApiRoutes";
 import { WebStateEventHub } from "./WebStateEventHub";
 import { toPublicSessions } from "./WebSessionProjection";
+import { toWebSecurityState } from "./WebSecurityProjection";
 import { openSessionStream, writeSessionStreamError } from "./WebSessionStream";
 import { WebTokenAuth, type WebTokenPolicy } from "./WebTokenAuth";
 import { WebEventStreamRouter, type AgentChannelEventSource, type PiEvent } from "./WebEventStream";
@@ -173,6 +175,16 @@ export type WebServiceDependencies = {
 	listSessionTodo?: (sessionId: string) => Promise<SessionTodoSnapshot | undefined>;
 	listPendingUiRequests: () => PendingUiRequestSnapshot[];
 	respondToUi: (input: SessionUiResponseInput) => Promise<void>;
+	/**
+	 * 安全配置读取（/api/state 的 security 投影与 Web 端等级菜单）。
+	 * 未装配时不向 Web 端暴露安全入口——避免出现「能点但改不了」的假控件。
+	 */
+	getSecurityConfig?: () => SecurityConfig;
+	/**
+	 * 会话安全等级切换：服务端校验会话/等级后写 SecurityStore（levelId=null 清除覆盖）。
+	 * 返回切换后的完整配置，路由层投影成 Web 形状。
+	 */
+	setSessionSecurityLevel?: (sessionId: string, levelId: string | null) => Promise<SecurityConfig>;
 	/** DSH 子代理列表（S6.3：web 端工具面板；未装配 DSH 时缺省）。 */
 	listDshSubagents?: (agentId: string) => Promise<
 		Array<{
@@ -567,7 +579,21 @@ export class WebServiceManager {
 			// ACP 工具清单（id/name，已按 acpEnabled + enabled 门控）：Web 端后端选择器的 ACP 入口。
 			// 空数组 = 不提供 ACP 选项——本机未开启 ACP 时不能把入口抛给手机端。
 			acpTools: this.deps.listAcpTools?.() ?? [],
+			// Pi 会话安全等级（全局默认 + 会话覆盖）：Web 端据此显示当前有效等级并切换。
+			// 与桌面端共用 SecurityStore，切换后由 notifySecurityChanged 立即推送本快照。
+			...(this.deps.getSecurityConfig ? { security: toWebSecurityState(this.deps.getSecurityConfig()) } : {}),
 		};
+	}
+
+	/**
+	 * 安全配置变更后立即广播一次状态快照。
+	 *
+	 * 安全配置不在 stateRevision 的版本键里（该键只覆盖 runtime/pendingUi），走
+	 * schedule() 会被快速门挡回；这里绕过版本键直接做全量比对，保证任一端切换后
+	 * 另一端在下一次 SSE 帧就能看到（不依赖 5s 兜底 tick）。
+	 */
+	notifySecurityChanged(): void {
+		void this.stateHub.push(undefined, false, { skipRevisionGate: true });
 	}
 
 	/** SSE 流式响应（实现在 WebSessionStream）：写协议头、注册路由、心跳保活。 */

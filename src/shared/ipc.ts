@@ -910,6 +910,8 @@ export const ipcChannels = {
 	securityUpdateConfig: "security:update-config",
 	/** 设置单个会话的等级覆盖（levelId 为空 = 清除覆盖跟随全局） */
 	securitySetSessionLevel: "security:set-session-level",
+	/** 安全配置变更广播（任一端修改后通知桌面渲染层刷新菜单；载荷为空，接收方重拉配置） */
+	securityConfigChanged: "security:config-changed",
 
 	/** 视觉桥：读取当前配置 + 可选模型列表 */
 	visionGetConfig: "vision:get-config",

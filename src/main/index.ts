@@ -5110,6 +5110,12 @@ app
 				if (pending === undefined) return;
 				pending.then((service) => service.pushSecurityPolicySnapshotToReadyHosts(bytes)).catch(() => undefined);
 			},
+			// 配置变更（桌面设置页 / 会话菜单 / Web 端 API 任一来源）：
+			// 桌面渲染层刷新等级菜单，Web 端经 /api/events 立即拿到新快照。
+			onConfigChanged: () => {
+				if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(ipcChannels.securityConfigChanged);
+				webServiceManager?.notifySecurityChanged();
+			},
 		});
 		appLogger = new AppLogger();
 		setAppLogger(appLogger);
@@ -6285,6 +6291,10 @@ app
 			setSessionRuntimeModel: (target, provider, modelId, modelName) => sessionRuntimeCoordinator.setRuntimeModel(target, provider, modelId, modelName),
 			setSessionRuntimeThinking: (target, level) => sessionRuntimeCoordinator.setRuntimeThinking(target, level),
 			setSessionRuntimePermission: (target, preset) => sessionRuntimeCoordinator.setRuntimePermission(target, preset),
+			// Pi 会话安全等级：与桌面 SecurityLevelMenu 同源（SecurityStore 全局默认 + 会话覆盖），
+			// 路由层已校验会话/后端/等级，这里只做存储写入（策略快照由 SecurityStore 刷新）。
+			getSecurityConfig: () => securityStore.getConfig(),
+			setSessionSecurityLevel: (sessionId, levelId) => securityStore.setSessionLevel(sessionId, levelId),
 			// fork/clone 与桌面 IPC 同源（sessionForkCommands 统一命令层）：
 			// 重发/编辑 fork 化（mutationFork/branchMode）、supersededBy 隐藏、
 			// catalog 刷新广播都在那一层维护，两端行为必须一致。

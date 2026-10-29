@@ -2774,6 +2774,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"security.levelUnknown": "Unknown level",
 	"security.menuTitle": "Security level",
 	"security.menuHint": "Choose the level for this session; rule changes apply within ~2 seconds",
+	"security.sessionOverrideHint": "This session uses its own level, overriding the global default",
+	"security.usingGlobalDefault": "Using the global default level",
 	"security.pickerEmpty": "No matching level",
 	"security.disabled": "disabled",
 	"security.followDefault": "Follow global default",

@@ -5,7 +5,7 @@
  * 由 webApi.ts 轮询填充。会话/运行态只读展示用，不持有桌面端 atoms。
  */
 
-import type { AgentUiBatchQuestion, SessionModelPreference } from "../../../shared/types";
+import type { AgentUiBatchQuestion, SessionModelPreference, WebSecurityState } from "../../../shared/types";
 
 export type WebProject = {
 	id: string;
@@ -71,6 +71,8 @@ export type WebState = {
 	pendingUiRequests?: WebPendingUiRequest[];
 	/** 可选的 ACP 工具（id/name；空/缺失=本机未开启 ACP，后端选择器不列 ACP 入口） */
 	acpTools?: WebAcpTool[];
+	/** Pi 会话安全等级（全局默认 + 会话覆盖）；缺失=服务端未装配安全管理，不渲染入口 */
+	security?: WebSecurityState;
 };
 
 /** /api/state 下发的 ACP 工具条目（command/args/env 不外发）。 */

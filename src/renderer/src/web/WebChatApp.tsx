@@ -34,7 +34,7 @@ import { Button } from "@/components/ui-shadcn/button";
 import { Input } from "@/components/ui-shadcn/input";
 import { chatMessagesToUiMessages, createProject, createSession, deleteProject, fetchMessagePage, fetchModels, fetchState, getWebAuthHeaders, respondToUi, setRuntimeModel, setRuntimeThinking, updateSessionRecord } from "./webApi";
 import { abortRuntime, cloneRuntime, compactRuntime, copySession, deleteSession, downloadSessionHtml, editRuntimeMessage, deleteRuntimeMessage, prepareResend, renameSession, restartRuntime, activateRuntime, forkRuntimeSession, getForkMessages } from "./webApi";
-import { fetchRuntimeContextUsage, setRuntimePermission } from "./webApi";
+import { fetchRuntimeContextUsage, setRuntimePermission, setSessionSecurityLevel } from "./webApi";
 import { dataUrlToFilePart } from "./webMessageParts";
 import { shouldFlushQueuedPrompt } from "./webQueueFlush";
 import { sessionUiMessagesToMarkdown } from "./webMarkdown";
@@ -495,6 +495,9 @@ export function WebChatApp() {
 					.map((request) => request.sessionId + ":" + request.requestId)
 					.sort()
 					.join(","),
+				// 安全等级（全局默认/覆盖/等级表）不在会话/runtime 字段里，必须单独进指纹；
+				// 否则 SSE 只推安全变更时 setState 被跳过，菜单停在旧等级。
+				JSON.stringify(state.security ?? null),
 			].join("|");
 		// payload：SSE state 事件的现成载荷（/api/state 同构），有则免一次拉取。
 		// 形状由服务端 serializePublicWebPayload 保证；这里只做最小字段防御（缺 runtimes 视为畸形，回退拉取）。
@@ -1200,6 +1203,19 @@ export function WebChatApp() {
 		}
 	};
 
+	// Pi 会话安全等级：服务端写 SecurityStore（策略快照），返回最新配置；
+	// 不乐观改本地状态——校验/写盘失败必须让菜单停在真实等级。
+	const handleSecurityLevelChange = async (levelId: string | null) => {
+		if (!activeSessionId) return;
+		setCommandError(null);
+		try {
+			const security = await setSessionSecurityLevel(activeSessionId, levelId);
+			setState((current) => ({ ...current, security }));
+		} catch (error) {
+			setCommandError(error instanceof Error ? error.message : String(error));
+		}
+	};
+
 	// P2：上下文用量随主轮询节奏拉取（活跃 runtime 存在时；无 runtime 清空圆环）
 	useEffect(() => {
 		if (!activeTarget) {
@@ -1296,6 +1312,10 @@ export function WebChatApp() {
 					usageProvider={contextUsage?.provider ?? activeSession?.model?.provider}
 					usageBackend={activeSession?.backend === "dsh" ? "dsh" : "pi"}
 					permissionPreset={contextUsage?.permissionPreset ?? activeSession?.permissionPreset}
+					// Pi 会话安全等级（DSH/ACP 不渲染）：与桌面 SecurityLevelMenu 同一数据源
+					sessionId={activeSessionId || undefined}
+					security={activeSession && activeSession.backend !== "dsh" && activeSession.backend !== "acp" ? state.security : undefined}
+					onSecurityLevelChange={activeSession && activeSession.backend !== "dsh" && activeSession.backend !== "acp" ? (levelId) => void handleSecurityLevelChange(levelId) : undefined}
 					actions={{
 						onPermissionChange: activeSession?.backend === "dsh" ? (preset) => void handlePermissionChange(preset) : undefined,
 						onOpenWorkspace: activeSession ? () => setWorkspaceOpen(true) : undefined,

@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 3edaa04a0bb30bec2f8ebbb529f109cc784f8f3cd7d74fe8eb34ff66b4c30eb4（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 1e346b6eb0f57407d57b06ab637ca06d851258ebba4509218fc660870924497d（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -2771,6 +2771,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"security.levelUnknown": "未知等級",
 	"security.menuTitle": "安全等級",
 	"security.menuHint": "為當前會話選擇生效等級，規則變更約 2 秒內生效",
+	"security.sessionOverrideHint": "當前會話使用單獨等級，覆蓋全域預設",
+	"security.usingGlobalDefault": "當前跟隨全域預設等級",
 	"security.pickerEmpty": "沒有匹配的等級",
 	"security.disabled": "已關閉",
 	"security.followDefault": "跟隨全域預設",

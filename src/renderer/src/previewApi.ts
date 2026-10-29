@@ -1709,6 +1709,7 @@ export function createPreviewApi(): PiDesktopApi {
 				ok: true,
 				config: createDefaultSecurityConfig(),
 			}),
+			onConfigChanged: noop,
 		},
 		config: {
 			previewProviderMigration: async () => ({ direction: "pi-to-dsh" as const, providers: [] }),

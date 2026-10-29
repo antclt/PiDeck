@@ -31,18 +31,25 @@ export type SecurityStoreDeps = {
 	 * 把同一份字节热推到已连接主机；回调失败不影响本机流程（调用方自己 catch）。
 	 */
 	onSnapshotWritten?: (bytes: Buffer) => void;
+	/**
+	 * 配置变更后的通知（可选）：桌面渲染层据此刷新安全等级菜单，Web 服务据此立即
+	 * 推送 /api/events 快照。回调失败不阻塞配置落盘（与快照回调同策略）。
+	 */
+	onConfigChanged?: () => void;
 };
 
 export class SecurityStore {
 	private readonly settingsStore: SettingsStore;
 	private readonly log: (domain: string, message: string, details?: Record<string, unknown>) => void;
 	private readonly onSnapshotWritten: (bytes: Buffer) => void;
+	private readonly onConfigChanged: () => void;
 	private snapshotPromise: Promise<void> | null = null;
 
 	constructor(deps: SecurityStoreDeps) {
 		this.settingsStore = deps.settingsStore;
 		this.log = deps.log ?? (() => undefined);
 		this.onSnapshotWritten = deps.onSnapshotWritten ?? (() => undefined);
+		this.onConfigChanged = deps.onConfigChanged ?? (() => undefined);
 	}
 
 	/** 快照绝对路径（Windows 用户数据目录；WSL 下由 PiProcess 转 Linux 路径后注入） */
@@ -118,6 +125,11 @@ export class SecurityStore {
 			defaultLevelId: normalized.defaultLevelId,
 			levels: normalized.levels.length,
 		});
+		try {
+			this.onConfigChanged?.();
+		} catch (error) {
+			this.log("security", "Config change listener failed", { error: error instanceof Error ? error.message : String(error) });
+		}
 		return normalized;
 	}
 

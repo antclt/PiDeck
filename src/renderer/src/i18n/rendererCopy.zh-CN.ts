@@ -2764,6 +2764,8 @@ export const zhCN = {
 	"security.levelUnknown": "未知等级",
 	"security.menuTitle": "安全等级",
 	"security.menuHint": "为当前会话选择生效等级，规则变更约 2 秒内生效",
+	"security.sessionOverrideHint": "当前会话使用单独等级，覆盖全局默认",
+	"security.usingGlobalDefault": "当前跟随全局默认等级",
 	"security.pickerEmpty": "没有匹配的等级",
 	"security.disabled": "已关闭",
 	"security.followDefault": "跟随全局默认",
