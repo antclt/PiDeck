@@ -1780,6 +1780,8 @@ export function createPreviewApi(): PiDesktopApi {
 			tokendanceAuthCancel: async () => ({ ok: true }),
 			tokendanceAuthExchange: async () => ({ ok: false, error: "preview" }),
 			// 设计预览：充值接口不触真实网络（弹窗能看到完整链路，但创建会话必然失败）
+			watchaAccess: async () => ({ ok: false, code: "not-configured" }),
+			watchaOpenAlipay: async () => ({ ok: false, error: "unavailable in preview" }),
 			tokendanceTopUpCreate: async () => ({ ok: false, code: "not-configured" }),
 			tokendanceTopUpStatus: async () => ({ ok: false, code: "not-configured" }),
 			tokendanceTopUpOpenAlipay: async () => ({ ok: false, error: "preview" }),

@@ -141,8 +141,10 @@ features:
 
 ## 赞助
 
-如果 PiDeck 对你有帮助，欢迎请作者喝杯咖啡。微信扫码即可赞赏，感谢支持。
+如果 PiDeck 对你有帮助，欢迎请作者喝杯咖啡。感谢支持。
 
 <p class="sponsor-block">
   <img class="sponsor-qr" src="/images/wechat_pay.png" alt="微信赞赏码" />
 </p>
+
+**支付宝**：打开 PiDeck，点左上角「PiDeck」品牌名 →「请作者喝咖啡」，手机支付宝扫码即可。购买链接按设备生成，无法固化成静态二维码。

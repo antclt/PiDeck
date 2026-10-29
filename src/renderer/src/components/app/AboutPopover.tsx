@@ -1,5 +1,5 @@
-import { useCallback, useState, type ReactElement, type ReactNode } from "react";
-import { ChevronRight, ExternalLink, FolderGit2, Globe, ScrollText, Tag } from "lucide-react";
+import { useCallback, useEffect, useState, type ReactElement, type ReactNode } from "react";
+import { ChevronRight, Coffee, ExternalLink, FolderGit2, Globe, ScrollText, Tag } from "lucide-react";
 import type { AppInfo } from "../../../../shared/types";
 import { desktopApi } from "../../desktopApi";
 import { formatI18nDateTime, t } from "../../i18n";
@@ -9,6 +9,7 @@ import { PiLogoCanvas } from "./PiLogoCanvas";
 import { PiTuiLogoCanvas, useAppDisplayName, useBrandGlyph } from "./PiTuiLogo";
 import { Button } from "../ui-shadcn/button";
 import { ChangelogDialog } from "./settings/ChangelogDialog";
+import { SupportPiDeckDialog } from "./SupportPiDeckDialog";
 
 /** 官网入口：站点自己的自定义域名（CNAME 即是它），不随仓库 owner / 改名漂移；点击强制系统浏览器打开。 */
 const WEBSITE_URL = "https://pideck.caoayu.top/";
@@ -42,6 +43,15 @@ export function AboutPopover(props: AboutPopoverProps) {
 	// 两层浮层叠放时更新日志弹窗（portal 到 body、带遮罩）会盖在面板上，
 	// 面板残留在遮罩下既挡视线又会被误认为还在交互，应随弹窗打开一并收起。
 	const [aboutOpen, setAboutOpen] = useState(false);
+	// 「请作者喝咖啡」按次付费：与更新日志同款——开弹窗即收起关于面板，避免浮层叠放。
+	const [supportOpen, setSupportOpen] = useState(false);
+
+	// 预取打赏快照：边缘代理跨境链路慢（5–12s），面板一打开就先把结果拉进主进程缓存，
+	// 用户点「请作者喝咖啡」时通常已经是现成的，不用再等。
+	useEffect(() => {
+		if (!aboutOpen) return;
+		void desktopApi.config.watchaAccess().catch(() => undefined);
+	}, [aboutOpen]);
 
 	// releasesUrl 形如 https://github.com/ayuayue/PiDeck/releases，去掉 /releases 即仓库主页
 	const githubUrl = props.appInfo.releasesUrl.replace(/\/releases\/?$/, "") || WEBSITE_URL;
@@ -110,6 +120,15 @@ export function AboutPopover(props: AboutPopoverProps) {
 							}}
 						/>
 						<AboutLinkRow icon={Tag} label={t("about.releases")} url={info.releasesUrl} onOpen={openExternal} />
+						{/* 「请作者喝咖啡」：余额与购买入口都在应用内弹窗（外链箭头会误导成跳走）。 */}
+						<AboutActionRow
+							icon={Coffee}
+							label={t("support.entry")}
+							onClick={() => {
+								setSupportOpen(true);
+								setAboutOpen(false);
+							}}
+						/>
 					</div>
 				</div>
 			</MorphPopoverContent>
@@ -117,6 +136,7 @@ export function AboutPopover(props: AboutPopoverProps) {
           动画不会卸载弹窗。打开弹窗时面板主动关闭（见 aboutOpen 注释），二者不再同时
           存活，无需再像旧实现那样用 dismissExemptOnOutside 豁免外点判定。 */}
 			<ChangelogDialog open={changelogOpen} onOpenChange={setChangelogOpen} />
+			<SupportPiDeckDialog open={supportOpen} onOpenChange={setSupportOpen} />
 		</MorphPopover>
 	);
 }

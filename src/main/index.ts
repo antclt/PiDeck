@@ -382,6 +382,7 @@ import { TokendanceAuthStore } from "./config/tokendanceAuth";
 import { createRemoteTerminalManager } from "./terminal/createRemoteTerminalManager";
 import type { RemoteTerminalSessionManager } from "./terminal/RemoteTerminalSessionManager";
 import { TokendancePaymentStore } from "./config/tokendancePayment";
+import { WatchaEntitlementStore } from "./config/watchaEntitlement";
 import { usageProbeRequest } from "./config/usageProbeTransport";
 import { TOKENDANCE_PROVIDER } from "../shared/tokendance";
 import { TerminalSessionManager } from "./terminal/TerminalSessionManager";
@@ -4680,6 +4681,19 @@ function registerIpc() {
 			})
 		: undefined;
 
+	// 「请作者喝咖啡」按次付费：桌面端只调自家边缘代理（平台服务端 Key 在代理里，不进客户端）。
+	// 用户标识首次查询时生成并落盘；并发首查共用一个 Promise，避免生成两个 ID 把余额拆到两处。
+	let watchaUserIdPromise: Promise<string> | undefined;
+	const resolveWatchaUserId = () => {
+		watchaUserIdPromise ??= (async () => {
+			const existing = settingsStore.get().watchaUserId;
+			if (existing) return existing;
+			const created = randomUUID();
+			await settingsStore.update({ watchaUserId: created });
+			return created;
+		})();
+		return watchaUserIdPromise;
+	};
 	registerSystemIpc({
 		// 设置保存后的主进程副作用：系统级划词快捷键按新键位/开关重注册（appShortcuts 同一时机）。
 		afterSettingsUpdate: () => syncSelectionToolShortcut(),
@@ -4754,6 +4768,8 @@ function registerIpc() {
 			resolveEndpoint: () => configManager.resolveProviderEndpoint(TOKENDANCE_PROVIDER),
 			request: usageProbeRequest,
 		}),
+		// 「请作者喝咖啡」：查余额 + 按次扣减，全部经自家边缘代理；失败不拦截用户使用。
+		watchaEntitlement: new WatchaEntitlementStore({ resolveUserId: resolveWatchaUserId, request: usageProbeRequest }),
 		// 一键安装：pi models.json + DSH llm-pi-ai 双落盘（复用迁移服务的写盘策略：
 		// host 就绪走官方 settings API，否则直写 settings.yaml/.credentials.yaml）
 		tokendanceInstall: (apiKey) =>

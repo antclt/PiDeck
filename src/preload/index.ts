@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { ipcChannels } from "../shared/ipc";
 import type { TokendanceAuthMode, TokendancePaymentSessionResult } from "../shared/tokendance";
+import type { WatchaAccessResult } from "../shared/watcha";
 import type { SkillHubSearchOptions } from "../shared/types/skills";
 import type { AcpToolConfig, AcpToolInput, AcpToolValidation } from "../shared/types/acp";
 import type { AnnouncementState } from "../shared/types/announcement";
@@ -1513,6 +1514,10 @@ const api = {
 		tokendanceTopUpStatus: (statusUrl: string) => ipcRenderer.invoke(ipcChannels.configTokendanceTopUpStatus, { statusUrl }) as Promise<TokendancePaymentSessionResult>,
 		/** 在用户点击后唤起支付宝 App（仅 alipays:// 深链；移动端链路，PC 扫码不需要）。 */
 		tokendanceTopUpOpenAlipay: (url: string) => ipcRenderer.invoke(ipcChannels.configTokendanceTopUpOpenAlipay, { url }) as Promise<{ ok: boolean; error?: string }>,
+		/** 查「请作者喝咖啡」剩余次数 + 当次购买入口（经主进程边缘代理，渲染层不接触平台密钥）。 */
+		watchaAccess: (force?: boolean) => ipcRenderer.invoke(ipcChannels.configWatchaAccess, { force: force === true }) as Promise<WatchaAccessResult>,
+		/** 用户点击后唤起支付宝 App（仅 alipays:// 深链；正式环境购买链接就是这种）。 */
+		watchaOpenAlipay: (url: string) => ipcRenderer.invoke(ipcChannels.configWatchaOpenAlipay, { url }) as Promise<{ ok: boolean; error?: string }>,
 		/** 一键安装 TokenDance：供应商信息 + 目录模型写入 pi models.json 与 DSH llm-pi-ai；apiKey 可选（OAuth 后已持有）。 */
 		installTokendance: (apiKey?: string) =>
 			ipcRenderer.invoke(ipcChannels.configInstallTokendance, { apiKey }) as Promise<{

@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 0463ccd8a17fbd89c0f7abee415c9119a7177c943826b1c2639d449351f90569（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: dc6f3c1d73ad4b079796d0e9d99b81ac47dcd5d9d734b325f4d089f66c2cf37b（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -896,6 +896,25 @@ export const zhTW: Record<TranslationKey, string> = {
 	"about.github": "GitHub 主頁",
 	"about.releases": "版本釋出",
 	"about.changelog": "更新日誌",
+	"support.entry": "請作者喝咖啡",
+	"support.title": "請作者喝咖啡",
+	"support.desc": "PiDeck 是免費的。如果它幫到了你，可以請作者喝杯咖啡——純打賞，不繫結會話和用量，點一次就完事。",
+	"support.loading": "正在獲取支付碼…",
+	"support.scanHint": "用支付寶掃一掃購買",
+	"support.qrExpiry": "支付碼 5 分鐘內有效，過期會自動換新",
+	"support.qrAlt": "請作者喝咖啡的購買二維碼",
+	"support.waiting": "等待支付…到帳後自動重新整理",
+	"support.paid": "已到帳，謝謝！",
+	"support.noPurchase": "暫時沒有可用的購買入口（可能未開通或商品已下架）。",
+	"support.notConfigured": "當前版本沒有接入支付代理。",
+	"support.timeout": "查詢超時，請稍後重試。",
+	"support.network": "網路不可用，請檢查代理或稍後重試。",
+	"support.badResponse": "支付服務返回了無法識別的結果。",
+	"support.refresh": "重新整理",
+	"support.openBrowser": "瀏覽器開啟",
+	"support.openAlipay": "用支付寶開啟",
+	"support.alipayFailed": "未能喚起支付寶：可能未安裝或被系統攔截。請改用手機掃碼。",
+	"support.close": "關閉",
 	"piChangelog.title": "Pi 更新日誌",
 	"piChangelog.subtitle": "當前 {current} → 最新 {latest}",
 	"piChangelog.subtitleVersions": "當前 {current} → 最新 {latest} · 共 {count} 個版本",

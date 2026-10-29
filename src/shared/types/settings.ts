@@ -409,6 +409,11 @@ export type AppSettings = {
 	telemetryInstallId?: string;
 	/** 最近一次发送 app_heartbeat 的本地日期，格式 YYYY-MM-DD */
 	telemetryLastHeartbeatDate?: string;
+	/**
+	 * 「请作者喝咖啡」的稳定用户标识（首次查询余额时生成，只在本机持久化）。
+	 * 不是账号：换机/重装即换新 ID，未消耗完的次数留在旧 ID 下。
+	 */
+	watchaUserId?: string;
 	/** 应用安装类型：portable（便携版）或 installed（安装版），启动时自动检测并持久化 */
 	installationType?: "portable" | "installed";
 	/** RPC 调用超时时间（毫秒），默认 600000（10 分钟），用于长时间运行的命令 */

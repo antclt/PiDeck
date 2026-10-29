@@ -869,6 +869,10 @@ export const ipcChannels = {
 	configTokendanceTopUpStatus: "config:tokendance-topup-status",
 	/** 由用户点击浏览器支付宝 App 深链（仅允许 alipays://；不得自动跳转） */
 	configTokendanceTopUpOpenAlipay: "config:tokendance-topup-open-alipay",
+	/** 查询「请作者喝咖啡」剩余次数 + 当次购买入口（经边缘代理，不含任何平台密钥） */
+	configWatchaAccess: "config:watcha-access",
+	/** 由用户点击唤起支付宝 App 完成购买（仅允许 alipays://；不得自动跳转） */
+	configWatchaOpenAlipay: "config:watcha-open-alipay",
 	/** 测试 provider 连接（隔离探针）：临时 agent 目录 + PI_CODING_AGENT_DIR 跑真实 pi，测当前表单值且不落盘正式配置 */
 	configTestProvider: "config:test-provider",
 	/** 查询 provider 用量/余额（主进程按 provider 名路由：门控 → 端点解析 → 模板探测） */

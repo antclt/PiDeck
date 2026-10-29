@@ -401,11 +401,14 @@ This app starts local `pi` processes and exposes limited file operations through
 
 ## ☕ Sponsor
 
-If PiDeck is useful to you, you can buy the author a coffee. Scan the WeChat Pay QR code below to tip. Thank you.
+If PiDeck is useful to you, you can buy the author a coffee. Thank you.
 
 <p align="center">
   <img src="docs/images/wechat_pay.png" alt="WeChat Pay tip QR code" width="280" />
 </p>
+
+**Alipay**: open PiDeck, click the "PiDeck" brand name at the top left → "Buy the author a coffee", then scan with the Alipay app.
+(The purchase link is generated per device, so it cannot be a static QR code here.)
 
 ## License
 
