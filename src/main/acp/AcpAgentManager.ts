@@ -32,6 +32,7 @@ import { AcpTurnWatchdog } from "./acpTurnWatchdog";
 import { AcpMessageSnapshotStore } from "./AcpMessageSnapshotStore";
 import type { AcpSessionArchive } from "./AcpSessionArchive";
 import { killAcpProcessTree, spawnAcpProcess } from "./AcpProcessHost";
+import type { AcpProxyEnvSettings } from "../sessions/sessionProxyPolicy";
 import { performAcpHandshake } from "./AcpHandshake";
 import { AcpUpdatePipeline } from "./AcpUpdatePipeline";
 import { describeEmptyTurn, emptyTurnRejection, escalatedStopRejection, hasTurnOutput, promptResultSnippet, resolvePromptDispatch } from "./acpTurnSettlement";
@@ -54,6 +55,11 @@ type AcpManagerDeps = {
 	 * 必须每次 create 时实时读:设置页变更立即生效,不需要重启应用。
 	 */
 	isEnabled: () => boolean;
+	/**
+	 * ACP 代理(settings.acpProxy*)的运行时读口:每次 create 时实时读,只影响新进程。
+	 * 缺省不注入,进程继承系统环境变量(与引入该设置前的行为一致)。
+	 */
+	getProxySettings?: () => AcpProxyEnvSettings | undefined;
 	onTitleChanged?: (deckSessionId: string, title: string) => void;
 	/** configOptions 变更推送(set_config_option 响应/config_option_update 通知)。 */
 	onConfigOptionsChanged?: (tab: AgentTab, options: AcpConfigOption[]) => void;
@@ -385,7 +391,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 		// 工具被删/禁用：会话绑定还在（acpToolId 落 catalog），给明确引导而不是裸 id 报错。
 		if (!tool) throw Object.assign(new Error(`ACP tool not found or disabled: ${toolId || "(none)"}`), { i18nKey: "acp.toolMissing", i18nParams: { tool: toolId || "(none)" } });
 		const cwd = project.path;
-		const { proc, conn, spawnFailure } = spawnAcpProcess(tool, cwd, { piLocator: this.deps.piLocator, logger: this.deps.logger });
+		const { proc, conn, spawnFailure } = spawnAcpProcess(tool, cwd, { piLocator: this.deps.piLocator, proxy: this.deps.getProxySettings?.(), logger: this.deps.logger });
 
 		const agentId = `acp:${randomUUID()}`;
 		const runtime: AcpAgentRuntime = {

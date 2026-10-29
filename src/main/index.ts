@@ -345,7 +345,7 @@ import { createSessionModelPreference } from "../shared/modelDisplayName";
 import { modelThinkingLevelOf } from "../shared/modelThinkingLevels";
 import { SessionCatalog, canAttachRuntimeMetadata } from "./sessions/SessionCatalog";
 import { waitForSessionRunEnd } from "./sessions/sessionRunWaiter";
-import { aggregateDshProxyMode, buildHostProxyEnvPatch, resolveDshHostProxyMode, resolveEffectiveSessionProxyMode } from "./sessions/sessionProxyPolicy";
+import { aggregateDshProxyMode, buildHostProxyEnvPatch, resolveAcpProxySettings, resolveDshHostProxyMode, resolveEffectiveSessionProxyMode } from "./sessions/sessionProxyPolicy";
 import { SessionRuntimeCoordinator, type SessionRuntimeBinding } from "./sessions/SessionRuntimeCoordinator";
 import { migrateMergedSessionPinnedIds } from "./sessions/sessionPinnedIdsMigration";
 import { IdleAgentReleaser } from "./sessions/IdleAgentReleaser";
@@ -6782,6 +6782,8 @@ app
 			},
 			getTools: () => settingsStore.get().acpTools ?? [],
 			isEnabled: () => settingsStore.get().acpEnabled === true,
+			// ACP 代理：每次开会话实时读，只作用于新 spawn 的 CLI 进程（env 在启动时定格）。
+			getProxySettings: () => resolveAcpProxySettings(settingsStore.get()),
 			// 工具级配置记忆：新建会话重放；用户切换成功即写回 settings（只记思考/模式/权限，不含模型）。
 			getToolConfigDefaults: (toolId) => settingsStore.get().acpToolConfigDefaults?.[toolId],
 			rememberConfigOption: (toolId, optionId, value) => {

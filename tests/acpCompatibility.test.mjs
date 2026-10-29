@@ -46,6 +46,34 @@ test("initialize declares the CodeBuddy mainAgentSupport _meta gate (#447)", asy
 	});
 });
 
+test("session create passes the configured ACP proxy into the child env", async (t) => {
+	// ACP 代理是独立设置（settings.acpProxy*）：manager 每次 create 实时读，
+	// 经 PiLocator.createProcessEnv 注入 HTTP_PROXY/NODE_USE_ENV_PROXY；关闭时传 undefined 保持继承环境。
+	const seen = [];
+	const proxy = { piProxyEnabled: true, piProxyUrl: "http://127.0.0.1:7890", piProxyBypass: "localhost" };
+	const { createAgent, spawnCalls } = harness(
+		t,
+		{ handler: basicHandler },
+		{
+			getProxySettings: () => proxy,
+			piLocator: {
+				createInvocation: (command, args) => ({ command, args, shell: false }),
+				createProcessEnv: (settings) => {
+					seen.push(settings);
+					return settings ? { HTTP_PROXY: settings.piProxyUrl, NO_PROXY: settings.piProxyBypass, NODE_USE_ENV_PROXY: "1" } : {};
+				},
+			},
+		},
+	);
+	await createAgent();
+	assert.equal(seen.length, 1);
+	assert.equal(seen[0].piProxyEnabled, true);
+	assert.equal(seen[0].piProxyUrl, "http://127.0.0.1:7890");
+	assert.equal(spawnCalls[0].options.env.HTTP_PROXY, "http://127.0.0.1:7890");
+	assert.equal(spawnCalls[0].options.env.NO_PROXY, "localhost");
+	assert.equal(spawnCalls[0].options.env.NODE_USE_ENV_PROXY, "1");
+});
+
 for (const version of [2, "1", undefined]) {
 	test(`initialize rejects unsupported or malformed protocolVersion: ${String(version)}`, async (t) => {
 		const { manager, createAgent, lastProc } = harness(t, { handler: (frame) => (frame.method === "initialize" ? { protocolVersion: version, agentCapabilities: {} } : basicHandler(frame)) });

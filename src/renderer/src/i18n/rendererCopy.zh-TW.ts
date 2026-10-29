@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: dc6f3c1d73ad4b079796d0e9d99b81ac47dcd5d9d734b325f4d089f66c2cf37b（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 02e2ec058df191788d533c15b42461fb927acf3da7018a5aafc0cb1563d01fc0（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5247,8 +5247,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.announcementNotification": "公告通知",
 	"settings.announcementNotificationDesc": "收到新公告時彈出提醒（預設開啟；輸入或會話執行中會自動延後彈出）。關閉後側欄公告入口與提醒一併隱藏",
 	"settings.enablePiProxy": "啟用 Pi agent 代理",
-	"settings.enablePiProxyDesc": "開啟後所有 Pi 會話預設走下方地址（重啟會話後生效）。僅儲存地址不開啟開關時，可配合右鍵選單「會話代理」或下方供應商白名單按需啟用",
-	"settings.piProxySwitchOverridden": "「按模型走代理」名單已啟用：名單內模型強制走代理、名單外強制直連，此開關不再參與決策。清空名單後開關恢復生效。",
+	"settings.enablePiProxyDesc": "開啟後所有 Pi 會話預設走下方地址（重啟會話後生效）。僅儲存地址不開啟開關時，可配合右鍵選單「會話代理」或下方供應商白名單按需啟用；配置「按模型走代理」名單後由名單決定（名單內走代理、名單外直連，開關置灰）",
 	"settings.piProxyModels": "按模型走代理",
 	"settings.piProxyModelsDesc": "粒度比供應商更細：僅名單內模型強制走代理（即使全域關閉也複用上方地址），名單外強制直連。條目格式為 provider/模型ID，留空則不按模型過濾（回落供應商名單/全域設定）",
 	"settings.piProxyModelsHint": "與按供應商白名單可共存：模型名單優先匹配，供應商名單兜底；新建會話首條請求即按模型自動匹配代理",
@@ -5496,6 +5495,12 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.piMissing": "未檢測到 Pi CLI",
 	"settings.piProxy": "Pi agent 代理",
 	"settings.piProxyDesc": "只注入給新啟動的 Pi agent 子程序",
+	"settings.piProxyModelsSummaryOff": "未配置",
+	"settings.piProxyModelsSummaryOn": "已選 {count}",
+	"settings.acpProxy": "ACP 代理",
+	"settings.acpProxyDesc": "只注入給新啟動的 ACP CLI 程序（CodeBuddy / Claude / Codex 等）",
+	"settings.enableAcpProxy": "啟用 ACP 代理",
+	"settings.enableAcpProxyDesc": "開啟後 ACP CLI 的模型請求走下方地址；關閉時直連（繼承系統環境變數）。程序啟動時讀取，修改後需重啟會話",
 	"settings.privacy": "隱私",
 	"settings.proxyBypass": "繞過代理",
 	"settings.proxyBypassDesc": "對應 NO_PROXY，多個條目用英文逗號分隔",

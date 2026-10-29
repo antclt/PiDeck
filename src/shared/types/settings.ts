@@ -358,6 +358,16 @@ export type AppSettings = {
 	 * 避免不同 provider 下同名模型互相误伤；新建会话首条请求即按模型自动匹配代理，无需先激活再手动切。
 	 */
 	piProxyModels: string[];
+	/**
+	 * 是否给 ACP CLI 子进程注入代理环境变量（CodeBuddy / Claude / Codex 等）。
+	 * 与 pi 代理分开配置：ACP CLI 的模型请求走它们自己的端点，出口常与 pi 不同。
+	 * 关闭 = 不注入（继承系统环境变量，与引入该设置前的行为一致）。
+	 */
+	acpProxyEnabled: boolean;
+	/** ACP CLI 使用的代理地址，例如 http://127.0.0.1:7890 */
+	acpProxyUrl: string;
+	/** ACP CLI 代理绕过列表，对应 NO_PROXY 环境变量 */
+	acpProxyBypass: string;
 	/** 是否给桌面端自身网络请求启用代理，不影响已启动的 pi agent 子进程 */
 	desktopProxyEnabled: boolean;
 	/** 桌面端自身网络请求使用的代理地址，例如 http://127.0.0.1:7890 */
@@ -1144,6 +1154,9 @@ export function createDefaultAppSettings(): AppSettings {
 		piProxyBypass: "localhost,127.0.0.1,::1",
 		piProxyProviders: [],
 		piProxyModels: [],
+		acpProxyEnabled: false,
+		acpProxyUrl: "http://127.0.0.1:7890",
+		acpProxyBypass: "localhost,127.0.0.1,::1",
 		desktopProxyEnabled: false,
 		desktopProxyUrl: "http://127.0.0.1:7890",
 		desktopProxyBypass: "localhost,127.0.0.1,::1",

@@ -5264,8 +5264,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.announcementNotification": "Announcement notifications",
 	"settings.announcementNotificationDesc": "Show a toast when new announcements arrive (default on; auto-deferred while typing or a session is running). Turning off also hides the sidebar megaphone entry",
 	"settings.enablePiProxy": "Enable Pi agent proxy",
-	"settings.enablePiProxyDesc": "When on, all Pi sessions use the address below by default (takes effect after restarting the session). Save the address without enabling it to apply it per-session via the \u201CSession proxy\u201D context menu or the provider allowlist below",
-	"settings.piProxySwitchOverridden": "The proxy-by-model allowlist is active: listed models are forced through the proxy and all others are forced direct, so this switch no longer applies. Clear the list to make it effective again.",
+	"settings.enablePiProxyDesc":
+		"When on, all Pi sessions use the address below by default (takes effect after restarting the session). Save the address without enabling it to apply it per-session via the \u201CSession proxy\u201D context menu or the provider allowlist below. Once the proxy-by-model list is configured, it decides instead (listed models proxy, others direct) and this switch is disabled",
 	"settings.piProxyModels": "Proxy by model",
 	"settings.piProxyModelsDesc":
 		"Finer granularity than providers: when the allowlist is non-empty, only listed models are forced through the proxy (reusing the address above even if the global switch is off) and others are forced direct. Entries use provider/modelId. Leave empty to disable model filtering (fall back to provider allowlist / global settings).",
@@ -5514,6 +5514,12 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.piMissing": "Pi CLI not found",
 	"settings.piProxy": "Pi agent proxy",
 	"settings.piProxyDesc": "Injected only into newly started Pi agent child processes",
+	"settings.piProxyModelsSummaryOff": "Off",
+	"settings.piProxyModelsSummaryOn": "{count} selected",
+	"settings.acpProxy": "ACP proxy",
+	"settings.acpProxyDesc": "Injected only into newly started ACP CLI processes (CodeBuddy / Claude / Codex, etc.)",
+	"settings.enableAcpProxy": "Enable ACP proxy",
+	"settings.enableAcpProxyDesc": "ACP CLI model requests use the proxy below; when off, they connect directly and inherit system environment variables. Read at process start — restart the session after changes.",
 	"settings.privacy": "Privacy",
 	"settings.proxyBypass": "Proxy bypass",
 	"settings.proxyBypassDesc": "Maps to NO_PROXY. Separate entries with commas.",

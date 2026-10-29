@@ -529,6 +529,12 @@ const SETTINGS_ROW_ANCHORS = [
 	},
 	{
 		tab: "proxy",
+		slug: "proxy-enable-acp",
+		labelKey: "settings.enableAcpProxy",
+		keywords: ["acp 代理", "cli 代理", "codebuddy 代理", "claude 代理", "acp proxy"],
+	},
+	{
+		tab: "proxy",
 		slug: "proxy-enable-desktop",
 		labelKey: "settings.enableDesktopProxy",
 		keywords: ["桌面代理", "应用代理", "desktop proxy", "全局代理", "更新代理"],
