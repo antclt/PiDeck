@@ -29,12 +29,12 @@ const HOST_ID = "6f1d2c3b-4a59-4e8d-9f70-1a2b3c4d5e6f";
 const HOME = "/home/dev";
 const CONTROL = String.fromCharCode(0);
 /** Current frozen build (helper 1.22.0); it was 1.6.0 when the J2 feature was verified. */
-const FROZEN_HELPER_SHA256 = "2f773369aa90b427e6553522a68701cea59ead3d6cdba0dd170e4b53858e8e2c";
+const FROZEN_HELPER_SHA256 = "9181c054b2f5002146ba1035623f9d898e79dc5ae6f89066e630604cebe7d153";
 const CONFIG_ROOT = HOME + "/.pi/agent";
 const CONFIG_PATH = "settings.json";
 const DEFAULT_ROOT = HOME + "/.pi/agent/sessions";
 const SETTINGS_READ_CEILING = 65536;
-/** The frozen helper's advertised vocabulary (build 1.22.0); the session-root code may use the fs batch only. */
+/** The frozen helper's advertised vocabulary (build 1.23.0); the session-root code may use the fs batch only. */
 const FROZEN_CAPABILITIES = [
 	"echo",
 	"fs.stat",
@@ -64,13 +64,14 @@ const FROZEN_CAPABILITIES = [
 	"git.pull",
 	"git.init",
 	"git.repos",
+	"git.checkIgnore",
 	"terminal.prepare",
 	"config.read",
 	"config.patch",
 ];
 
-test("the helper protocol is byte-for-byte the frozen 1.22.0 artifact", () => {
-	assert.equal(REMOTE_HELPER_ENTRY_VERSION, "1.22.0", "the helper version must match the frozen artifact");
+test("the helper protocol is byte-for-byte the frozen 1.23.0 artifact", () => {
+	assert.equal(REMOTE_HELPER_ENTRY_VERSION, "1.23.0", "the helper version must match the frozen artifact");
 	assert.equal(REMOTE_HELPER_ENTRY_SHA256, FROZEN_HELPER_SHA256, "the declared digest must stay the frozen one");
 	const recomputed = createHash("sha256").update(Buffer.from(REMOTE_HELPER_INLINE_SOURCE, "utf8")).digest("hex");
 	assert.equal(recomputed, REMOTE_HELPER_ENTRY_SHA256, "the uploaded body must hash to the declared digest");
