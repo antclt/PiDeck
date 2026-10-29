@@ -39,7 +39,7 @@ export type GitIpcDeps = {
 	settingsStore: SettingsStore;
 	worktreeService: WorktreeService;
 	/** Optional only for local-only callers/tests; SSH reads must never fall back to GitService. */
-	remoteGitReads?: Pick<RemoteGitReadIpc, "status" | "workspaceDiff">;
+	remoteGitReads?: Pick<RemoteGitReadIpc, "status" | "workspaceDiff" | "listRepositories">;
 };
 
 // ── QuickGen：持久化轻量 pi 进程，通过 RPC 生成提交摘要 ──────────────
@@ -419,9 +419,16 @@ export function registerGitIpc({ appLogger, mainCopy, gitService, gitRefsWatcher
 	};
 
 	// Scan repositories through the same local-only boundary used by every Git operation.
-	handleProjectGit(ipcChannels.gitListRepos, async (_event, projectId: string) => {
+	handleProjectGit(ipcChannels.gitListRepos, async (event, projectId: string) => {
 		if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256) throw new Error("INVALID_PROJECT_ID");
 		if (!projectStore.get(projectId)) return [];
+		// W4：同一条通道也服务 ssh 项目（远端结果映射成与本地同形的 GitRepoInfo[]），
+		// 上层不必为「位置」写第二个分支。
+		const located = projectStore.get(projectId);
+		if (located && isRemoteProject(located)) {
+			if (!remoteGitReads) throw new Error("UNSUPPORTED_CAPABILITY");
+			return remoteGitReads.listRepositories(event, projectId);
+		}
 		try {
 			return await gitBackendRouter.forProject(projectId).listRepositories({ projectId, relativePath: "" });
 		} catch (error) {

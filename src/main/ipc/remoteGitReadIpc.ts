@@ -2,6 +2,7 @@ import { ipcMain, type IpcMainInvokeEvent } from "electron";
 import { ipcChannels } from "../../shared/ipc";
 import type {
 	GitCommitResult,
+	GitRepoInfo,
 	GitIndexMutationResult,
 	GitReadSnapshotResult,
 	GitResourceGroups,
@@ -116,10 +117,7 @@ export function registerRemoteGitReadIpc(input: { enabled: boolean; locator(proj
 			const repoPath = validateRemoteGitRepoPath(repo);
 			tokens.revoke(event.sender.id, typeof projectId === "string" ? projectId : "");
 			// 事实可缓存（同键并发合并成一次往返）；令牌每次现签，绑定的是这份事实的 revision。
-			const cached =
-				typeof projectId === "string"
-					? await facts.read(projectId, repoPath, () => read(event, projectId, repoPath, (id, signal) => git.status(id, repoPath, signal)))
-					: undefined;
+			const cached = typeof projectId === "string" ? await facts.read(projectId, repoPath, () => read(event, projectId, repoPath, (id, signal) => git.status(id, repoPath, signal))) : undefined;
 			const readSnapshot = cached?.facts ?? (await read(event, projectId, repoPath, (id, signal) => git.status(id, repoPath, signal)));
 			const { writeExpectation, commitExpectation, branchExpectation, switchExpectation, discardExpectation, restoreExpectation, dropExpectation, fetchExpectation, pushExpectation, pullExpectation, ...snapshot } = readSnapshot;
 			// Every confirmed scope mints grants bound to itself (G5e): a nested snapshot's tokens carry its repoPath, so
@@ -375,6 +373,23 @@ export function registerRemoteGitReadIpc(input: { enabled: boolean; locator(proj
 				if (group !== "merge" && group !== "index" && group !== "workingTree" && group !== "untracked") throw new Error("GIT_RESULT_INVALID");
 				return git.workspaceDiff(id, group, fileTarget(id, value), repoPath, signal);
 			});
+		},
+		/**
+		 * 仓库列表（W4：同一条 `git:listRepos` 通道服务两种位置）。
+		 *
+		 * 过去 ssh 项目在这条通道上直接抛 UNSUPPORTED_PROJECT_LOCATION，于是远端文件树的着色与
+		 * 仓库下拉只能各自再走一条 `git:remote-repos`（不同形状、不同失败词汇）。这里把远端结果
+		 * 映射成与本地同形的 `GitRepoInfo[]`，上层不需要知道自己看的是哪种位置。
+		 */
+		async listRepositories(event: IpcMainInvokeEvent, projectId: unknown): Promise<GitRepoInfo[]> {
+			const listing = await read(event, projectId, "", (id, signal) => git.listRepositories(id, signal));
+			const owner = typeof projectId === "string" ? projectId : "";
+			return listing.repos.map((repository) => ({
+				target: { projectId: owner, relativePath: repository.path },
+				relativePath: repository.path,
+				displayPath: repository.name,
+				name: repository.name,
+			}));
 		},
 		/** Pair with quit cleanup; sender destruction separately cancels only that window's pending reads. */
 		dispose() {

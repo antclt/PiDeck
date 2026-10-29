@@ -29,6 +29,8 @@ function fixture() {
 	const groups = { merge: [], index: [], workingTree: [], untracked: [] };
 	const diff = { target, path: "file.txt", displayPath: "file.txt", originalContent: "old", modifiedContent: "new" };
 	const remoteCalls = [];
+	// 远端仓库列表映射成与本地同形的 GitRepoInfo[]（W4：同一条 git:listRepos 服务两种位置）。
+	const repos = [{ target: { projectId, relativePath: "packages/a" }, relativePath: "packages/a", displayPath: "a", name: "a" }];
 	registerGitIpc({
 		appLogger: forbidden,
 		mainCopy: (key) => key,
@@ -48,26 +50,32 @@ function fixture() {
 				remoteCalls.push(["diff", ...args]);
 				return diff;
 			},
+			listRepositories: async (...args) => {
+				remoteCalls.push(["repos", ...args]);
+				return repos;
+			},
 		},
 	});
-	return { handlers, calls, remoteCalls, groups, diff, event: { sender: { id: 1 } } };
+	return { handlers, calls, remoteCalls, groups, diff, repos, event: { sender: { id: 1 } } };
 }
 
-test("existing status/diff IPC selects SSH reads before local repository/fs/executable parsing", async () => {
+test("status/diff/listRepos IPC select SSH reads before local repository/fs/executable parsing", async () => {
 	const f = fixture();
 	assert.equal(await f.handlers.get(ipcChannels.gitStatus)(f.event, projectId), f.groups);
 	assert.equal(await f.handlers.get(ipcChannels.gitWorkspaceFileDiff)(f.event, projectId, "workingTree", target), f.diff);
 	assert.deepEqual(f.calls, []);
+	// W4：同一条通道也服务 ssh —— 结果与本地同形，且不落到任何本机 Git/fs。
+	assert.deepEqual(await f.handlers.get(ipcChannels.gitListRepos)(f.event, projectId), f.repos);
+	assert.deepEqual(f.calls, []);
 	assert.deepEqual(
 		f.remoteCalls.map((call) => call[0]),
-		["status", "diff"],
+		["status", "diff", "repos"],
 	);
 });
 
-test("all unsupported project Git operations reject SSH with zero local work and zero remote writes", async () => {
+test("still-unsupported project Git operations reject SSH with zero local work and zero remote writes", async () => {
 	const f = fixture();
 	const argumentsByChannel = new Map([
-		["gitListRepos", [projectId]],
 		["gitBranches", [projectId]],
 		["gitCheckout", [projectId, "main"]],
 		["gitCreateBranch", [projectId, "new"]],
