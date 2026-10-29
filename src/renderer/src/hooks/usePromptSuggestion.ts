@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useStore } from "jotai";
+import { useCallback, useEffect, useRef } from "react";
+import { useAtomValue, useSetAtom, useStore } from "jotai";
+import { sessionPromptSuggestionBySessionIdAtomFamily, setSessionPromptSuggestionAtom } from "../atoms/composer-atoms";
 import { sessionMessageCacheBySessionIdAtomFamily } from "../atoms/session-atoms";
 import { desktopApi } from "../desktopApi";
 import { collectPromptEnhanceContext } from "../utils/promptEnhanceContext";
@@ -44,10 +45,18 @@ export function usePromptSuggestion(input: {
 	applyText: (text: string) => void;
 }): { text: string; visible: boolean; accept: () => void; dismiss: () => void; acceptKey: (event: { key: string; shiftKey: boolean; altKey: boolean; ctrlKey: boolean; metaKey: boolean }) => boolean } {
 	const store = useStore();
-	const [text, setText] = useState("");
+	// ghost 文案按会话落 atom：切 Tab / 分屏切换会卸载整棵会话子树，hook 内 useState
+	// 会随之销毁（用户切走再回来预测消失）；atom 按 sessionId 隔离，回来仍在。
+	const text = useAtomValue(sessionPromptSuggestionBySessionIdAtomFamily(input.scopeKey));
+	const setSuggestion = useSetAtom(setSessionPromptSuggestionAtom);
 
 	const runIdRef = useRef("");
 	const scopeKeyRef = useRef(input.scopeKey);
+	/** 上一次的 scope（只用于在 effect 里检测「切了会话」）。 */
+	const prevScopeKeyRef = useRef(input.scopeKey);
+	// 渲染期同步而不是在 effect 里同步：同一帧内 turn-edge / 失效 effect 先于
+	// scope 检测 effect 执行，它们的清理必须写到「新会话」，否则会误清旧会话的 ghost。
+	scopeKeyRef.current = input.scopeKey;
 	const prevRunningRef = useRef(input.turnRunning);
 	const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const applyRef = useRef(input.applyText);
@@ -56,6 +65,14 @@ export function usePromptSuggestion(input: {
 	applyRef.current = input.applyText;
 	targetRef.current = input.target;
 	enabledRef.current = input.enabled;
+
+	/** 写入当前会话的 ghost 文案（用 ref 取 scope：事件订阅只挂一次，闭包会停在首帧）。 */
+	const setText = useCallback(
+		(value: string) => {
+			setSuggestion({ sessionId: scopeKeyRef.current, value });
+		},
+		[setSuggestion],
+	);
 
 	const clearTimer = useCallback(() => {
 		if (timerRef.current) {
@@ -75,7 +92,7 @@ export function usePromptSuggestion(input: {
 		clearTimer();
 		cancel();
 		setText("");
-	}, [cancel, clearTimer]);
+	}, [cancel, clearTimer, setText]);
 
 	/** 取本轮结束时的快照并发起预测；完成前只看开关与目标是否还有效。 */
 	const start = useCallback(() => {
@@ -136,7 +153,7 @@ export function usePromptSuggestion(input: {
 			if (event.phase === "aborted" || event.phase === "error") runIdRef.current = "";
 		});
 		return unsubscribe;
-	}, []);
+	}, [setText]);
 
 	// 回合边沿：开始 → 清旧建议并取消；结束 → 延迟一拍取快照预测。
 	useEffect(() => {
@@ -161,7 +178,7 @@ export function usePromptSuggestion(input: {
 			timerRef.current = null;
 			start();
 		}, PREDICT_DELAY_MS);
-	}, [input.turnRunning, cancel, clearTimer, start]);
+	}, [input.turnRunning, cancel, clearTimer, setText, start]);
 
 	// 开关/目标模型失效：立即作废（关开关不保留「最后一屏」ghost）。
 	useEffect(() => {
@@ -170,15 +187,14 @@ export function usePromptSuggestion(input: {
 			cancel();
 			setText("");
 		}
-	}, [input.enabled, input.target, cancel, clearTimer]);
+	}, [input.enabled, input.target, cancel, clearTimer, setText]);
 
-	// 切会话：旧建议与在跑的预测都属于旧会话。
+	// 切会话：取消旧会话在跑的预测（文案按 sessionId 分仓，新会话自己的 ghost 保留）。
 	useEffect(() => {
-		if (scopeKeyRef.current === input.scopeKey) return;
-		scopeKeyRef.current = input.scopeKey;
+		if (prevScopeKeyRef.current === input.scopeKey) return;
+		prevScopeKeyRef.current = input.scopeKey;
 		clearTimer();
 		cancel();
-		setText("");
 	}, [input.scopeKey, cancel, clearTimer]);
 
 	// 卸载：与订阅/定时器配对清理。
@@ -196,7 +212,7 @@ export function usePromptSuggestion(input: {
 		// 采纳即消费：ghost 消失，内容进入草稿（与增强回填同一条路径）。
 		setText("");
 		applyRef.current(text);
-	}, [text]);
+	}, [text, setText]);
 
 	const acceptKey = useCallback(
 		(event: { key: string; shiftKey: boolean; altKey: boolean; ctrlKey: boolean; metaKey: boolean }) =>

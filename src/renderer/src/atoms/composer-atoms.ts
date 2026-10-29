@@ -65,6 +65,15 @@ export const sessionQuotesByIdAtom = atom<Record<string, SessionQuoteMap>>({});
 
 export const sessionComposerModeByIdAtom = atom<Record<string, SessionComposerMode>>({});
 export const sessionSendStateByIdAtom = atom<Record<string, SessionSendState>>({});
+/**
+ * 输入预测的 ghost 文案（按会话）。
+ *
+ * 为什么必须落 atom 而不是 usePromptSuggestion 里的 useState：切 Tab / 分屏切换会
+ * 卸载整棵会话子树，hook 内 state 随之销毁——用户切走再回来预测就没了。ghost 只
+ * 在空输入框出现，重建成本是一次模型调用且要等下一轮，体验上等同「功能失效」。
+ * 与 SessionRuntimeUiOverlay 的交互草稿同因同解（都按会话存 atom）。
+ */
+export const sessionPromptSuggestionByIdAtom = atom<Record<string, string>>({});
 /** 「停止响应」后排队消息抑制自动投递的会话集合（useQueuedPrompt 的 UI 投影：
  *  逻辑真值在该 hook 的 ref 里，这里只供队列面板显示「已暂停自动发送」提示，避免 toast 瞬时易逝后无从得知队列不会自动发）。 */
 export const queueDrainSuppressedByIdAtom = atom<Record<string, true>>({});
@@ -90,6 +99,7 @@ export const sessionPasteFilesBySessionIdAtomFamily = registerSessionFamilyForDi
 export const sessionQuotesBySessionIdAtomFamily = registerSessionFamilyForDisposal(atomFamily((sessionId: string) => selectAtom(sessionQuotesByIdAtom, (byId) => byId[sessionId], Object.is)));
 export const sessionComposerModeBySessionIdAtomFamily = registerSessionFamilyForDisposal(atomFamily((sessionId: string) => selectAtom(sessionComposerModeByIdAtom, (byId) => byId[sessionId], Object.is)));
 export const sessionSendStateBySessionIdAtomFamily = registerSessionFamilyForDisposal(atomFamily((sessionId: string) => selectAtom(sessionSendStateByIdAtom, (byId) => byId[sessionId] ?? idleSessionSendState, Object.is)));
+export const sessionPromptSuggestionBySessionIdAtomFamily = registerSessionFamilyForDisposal(atomFamily((sessionId: string) => selectAtom(sessionPromptSuggestionByIdAtom, (byId) => byId[sessionId] ?? "", Object.is)));
 
 export const currentSessionDraftAtom = atom(
 	(get) => {
@@ -151,6 +161,16 @@ export const setSessionDraftAtom = atom(
 		set(sessionDraftByIdAtom, next);
 	},
 );
+
+/** 输入预测 ghost 文案写入（空串 = 清掉该会话的预测，不留下空对象键）。 */
+export const setSessionPromptSuggestionAtom = atom(null, (get, set, input: { sessionId: string; value: string }) => {
+	const current = get(sessionPromptSuggestionByIdAtom);
+	if ((current[input.sessionId] ?? "") === input.value) return;
+	const next = { ...current };
+	if (input.value) next[input.sessionId] = input.value;
+	else delete next[input.sessionId];
+	set(sessionPromptSuggestionByIdAtom, next);
+});
 
 export const setSessionAttachmentsAtom = atom(
 	null,
@@ -270,6 +290,8 @@ export const promoteSessionComposerStateAtom = atom(null, (get, set, input: { fr
 	set(sessionPasteFilesByIdAtom, move(get(sessionPasteFilesByIdAtom)));
 	set(sessionComposerModeByIdAtom, move(get(sessionComposerModeByIdAtom)));
 	set(sessionSendStateByIdAtom, move(get(sessionSendStateByIdAtom)));
+	// 预测文案也随会话迁移：切页后新会话的首轮结束前不该丢掉已有 ghost。
+	set(sessionPromptSuggestionByIdAtom, move(get(sessionPromptSuggestionByIdAtom)));
 });
 
 export const removeSessionComposerStateAtom = atom(null, (get, set, sessionId: string) => {
@@ -295,6 +317,9 @@ export const removeSessionComposerStateAtom = atom(null, (get, set, sessionId: s
 	const modelPending = { ...get(modelPendingByIdAtom) };
 	delete modelPending[sessionId];
 	set(modelPendingByIdAtom, modelPending);
+	const suggestions = { ...get(sessionPromptSuggestionByIdAtom) };
+	delete suggestions[sessionId];
+	set(sessionPromptSuggestionByIdAtom, suggestions);
 });
 
 /**

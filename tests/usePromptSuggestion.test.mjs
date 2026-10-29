@@ -26,11 +26,25 @@ function hookHarness() {
 	// 预测不弹 toast：没预测/没结果的原因只能靠应用日志（scope=suggest）解释。
 	const logs = [];
 	let eventSink = null;
+	// ghost 文案已按会话落 atom（切 Tab 重挂载不丢）；宿主用 Map 模拟 atom 的读写。
+	const suggestionsByScope = new Map();
+	const setSuggestion = ({ sessionId, value }) => {
+		if (value) suggestionsByScope.set(sessionId, value);
+		else suggestionsByScope.delete(sessionId);
+	};
 
 	const { usePromptSuggestion } = loadTsCommonJs("src/renderer/src/hooks/usePromptSuggestion.ts", {
 		stubs: {
 			react: host.react,
-			jotai: { useStore: () => ({ get: () => ({ messages }) }) },
+			jotai: {
+				useStore: () => ({ get: () => ({ messages }) }),
+				useAtomValue: (atom) => suggestionsByScope.get(atom.sessionId) ?? "",
+				useSetAtom: () => setSuggestion,
+			},
+			"../atoms/composer-atoms": {
+				sessionPromptSuggestionBySessionIdAtomFamily: (sessionId) => ({ sessionId }),
+				setSessionPromptSuggestionAtom: { kind: "set-suggestion" },
+			},
 			"../atoms/session-atoms": { sessionMessageCacheBySessionIdAtomFamily: (sessionId) => ({ sessionId }) },
 			"../utils/promptEnhanceContext": { collectPromptEnhanceContext: (list) => (contextEmpty ? [] : list.map(({ role, text }) => ({ role, text }))) },
 			"../utils/rendererLog": { logFromRenderer: (level, scope, message, detail) => logs.push({ level, scope, message, detail }) },
@@ -172,6 +186,24 @@ test("切会话 / 关开关 / 开始新回合：取消进行中的预测并清�
 		assert.equal(h.render().text, "");
 		assert.equal(h.render().visible, false);
 	}
+});
+
+test("切走再切回：ghost 文案按会话保留（切 Tab 会重挂载 composer）", async () => {
+	const h = hookHarness();
+	h.setMessages(ASSISTANT_LAST);
+	await finishTurn(h);
+	h.emit({ runId: "run-1", phase: "done", text: "把测试也跑一遍" });
+	assert.equal(h.render().visible, true);
+
+	// 切到另一个会话：当前视图没有建议，但 s1 的文案仍留在自己的仓里。
+	const other = h.render({ scopeKey: "s2" });
+	assert.equal(other.text, "");
+	assert.equal(other.visible, false);
+
+	// 切回 s1：不需要重新预测，ghost 直接恢复。
+	const back = h.render({ scopeKey: "s1" });
+	assert.equal(back.text, "把测试也跑一遍");
+	assert.equal(back.visible, true);
 });
 
 test("受理前已取消：迟到结果立即撤回，不把 ghost 复活", async () => {
