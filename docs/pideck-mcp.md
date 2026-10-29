@@ -1,8 +1,10 @@
 # PiDeck MCP 服务（API v1）
 
-PiDeck 可作为本机 MCP 服务，向 pi 和其他兼容客户端开放**明确授权项目的会话数据与定时任务**，以及**宿主自身的配置摘要、内置扩展加载状态、智能体目录元信息与本机收藏**（后几项不属于任何项目）。读取默认可全量开放；写能力必须由用户逐项单独开启：中止正在生成响应的会话、管理智能体（创建/编辑/删除/绑定会话）、管理定时任务（创建/编辑/删除/立即运行/中止）、管理收藏（新增/删除，含任意文本）。它与宿主插件共用会话读取实现，但有独立的授权和生命周期，不借用插件身份、不启动 pi 会话；关掉写开关时对应工具**不注册**，客户端连看都看不到。
+PiDeck 可作为本机 MCP 服务，向 pi 和其他兼容客户端开放**明确授权项目的会话数据与定时任务**，以及**宿主自身的配置摘要、内置扩展加载状态、智能体目录元信息与本机收藏**（后几项不属于任何项目）。读取默认可全量开放；写能力必须由用户逐项单独开启：中止正在生成响应的会话、管理智能体（创建/编辑/删除/绑定会话）、管理定时任务（创建/编辑/删除/立即运行/中止）、管理收藏（新增/删除，含任意文本）、调用 ACP（新建并驱动 ACP 会话）。它与宿主插件共用会话读取实现，但有独立的授权和生命周期，不借用插件身份、不启动 pi 会话；关掉写开关时对应工具**不注册**，客户端连看都看不到。
 
 智能体的**角色设定（systemPrompt）只写不读**：创建/编辑工具可以写入它，但任何工具（包括 `agents_list` / `agents_get`）都不会返回它，也不开放模型调用——外部客户端只能按 id 使用智能体，角色设定始终留在 PiDeck 主进程内解析。
+
+ACP 调用（默认关）只作用于 `backend=acp` 的会话，且只能引用用户在设置里登记的 ACP CLI 工具：工具面**不接受命令、参数或环境变量**，也不能驱动 pi/DSH 会话。新建会话会 spawn 本机 CLI 进程并消耗该 CLI 自己的模型额度；ACP 的 `session/prompt` 在回合结束时才返回，而 MCP 响应 30s 会断开，所以 `sessions_send` 只等一小段就返回（`status=accepted`），长回合用 `sessions_wait` 分段轮询。
 
 服务已列入 PiDeck 的 MCP 推荐服务目录，**首次使用默认关闭**：不监听端口、不创建令牌、不自动改写 pi 的 `mcp.json`。这里的“公共服务”指公开的调用接口，不是公网服务。
 
@@ -14,7 +16,8 @@ PiDeck 可作为本机 MCP 服务，向 pi 和其他兼容客户端开放**明�
    - 勾选“允许停止正在生成的响应” → 注册 `sessions_abort`；
    - 勾选“允许创建/编辑/删除智能体并绑定会话” → 注册 `agents_create` / `agents_update` / `agents_delete` / `agents_bind_session`（角色设定只写不读）；
    - 勾选“允许创建/编辑/删除定时任务、立即运行与中止” → 注册 `automation_task_create` / `automation_task_update` / `automation_task_delete` / `automation_task_run_now` / `automation_run_abort`（立即运行会真实启动会话并消耗模型额度）；
-   - 勾选“允许新增/删除本机收藏（含任意文本）” → 注册 `favorites_add` / `favorites_remove`（收藏列表 `favorites_list` / `favorites_get` 始终可用）。
+   - 勾选“允许新增/删除本机收藏（含任意文本）” → 注册 `favorites_add` / `favorites_remove`（收藏列表 `favorites_list` / `favorites_get` 始终可用）；
+   - 勾选“允许通过 MCP 新建并驱动 ACP 会话” → 注册 `acp_tools_list` / `sessions_create` / `sessions_send` / `sessions_wait` / `sessions_messages` / `sessions_stop`（只会启动你在设置里登记的 ACP CLI，不能传任意命令；需要同时在 PiDeck 设置里开启 ACP 后端）。
 4. 接入 pi：点击“添加到当前 pi 配置（禁用）”。仅新增 `pideck` 条目，保留其他服务和配置；已存在本地或继承的同名条目时不覆盖。随后界面会直接落到该条目页：在「连接与认证」里点「启用」（与下方「启用」开关等价），由 **pi 原生 MCP 客户端**建立连接；新建或重启会话后生效。
 5. 接入其他客户端：点击“复制连接配置”，按客户端要求填写 **Streamable HTTP URL** 和 `Authorization` 请求头。`enabled`、`exposure` 是 pi 配置项，其他客户端可能不接受它们。
 
@@ -48,9 +51,10 @@ PiDeck 可作为本机 MCP 服务，向 pi 和其他兼容客户端开放**明�
 - 只接收 `/mcp` 上的 POST，使用无状态 Streamable HTTP（JSON 响应）；握手、工具发现和 JSON-RPC 由官方 MCP SDK 处理。
 - 项目只输出 `id`、`name`；会话元信息不暴露磁盘文件名。历史投影去掉 `cwd`、`parentSession`、`sessionFile`、`filePath` 字段与图片块中的二进制/引用，但**不是通用脱敏器**，不会清洗用户文字、工具结果中嵌入的秘密或路径。
 - 项目删除、会话归属改变或撤权后拒绝继续访问；异步历史读取返回前再次校验授权。fork 祖先沿用宿主插件的同项目校验，不合并其他项目的源文件。
-- 服务自身不执行终端命令、不读任意路径、不修改会话内容、不访问网络、不读取插件私有存储。没有启用服务、扩大权限或导出令牌的 MCP 工具；写能力只有用户显式开启的三类：中止正在运行的会话、管理智能体（含会话绑定）、管理本机收藏（新增/删除），且写工具在开关关闭时都不注册。
+- 服务自身不执行任意终端命令、不读任意路径、不修改会话内容、不访问网络、不读取插件私有存储。唯一的进程启动面是 ACP 调用：只能 spawn 用户在设置里登记的 ACP CLI，命令/参数/环境变量全部来自本地设置，MCP 入参只允许引用工具 id。没有启用服务、扩大权限或导出令牌的 MCP 工具；写能力只有用户显式开启的四类：中止正在运行的会话、管理智能体（含会话绑定）、管理本机收藏（新增/删除）、调用 ACP，且写工具在开关关闭时都不注册。
 - 收藏工具（读 + 可选写）：收藏是本机快照，读接口只返回**未关联项目**或**已授权项目**的条目，避免借收藏绕过项目授权；`favorites_add` 可保存任意文本（不要求会话），`sessionId`/`projectId` 只是可选来源链接——关联会话找不到时仍保存成功，`sessionTitle` 为 `null`，界面显示「无关联会话」。
 - `settings_get` / `extensions_list` / `agents_list` / `agents_get` 描述宿主自身，**不受项目白名单影响**（设置、内置扩展与智能体目录不属于任何项目）：只要服务处于授权状态就能读。它们只输出 `src/main/mcp/piDeckMcpViews.ts` 里的显式允许清单——不含令牌、代理 URL（可能带凭据）、pi/DSH/git 等可执行文件路径、自定义镜像地址、`acpTools` 环境变量、用户自写文本（快速消息）与任何插件私有存储；设置页/智能体新增字段默认不可见。它们也不跑 `pi` 进程、不扫扩展目录、不访问网络，只读保存的设置快照、内置清单常量与智能体元信息。
+- ACP 调用（默认关）的边界：只能新建/驱动 `backend=acp` 的会话，且 `acpToolId` 必须是设置里存在且启用的工具（`acp_tools_list` 只返回 id/名称/是否跳过审批，**不含 command/args/env**）。`sessions_send` 拒绝 pi/DSH 会话；`sessions_create` 只建草稿（不 spawn 进程，环境固定 native），首次发送才握手。ACP 回合失败原因会截断到 2000 字符返回（与定时任务运行错误同口径，属不可信文本）；消息投影只保留 id/role/text/timestamp，图片与思考内容不下发。`sessions_stop` 只释放运行时，不删除会话或历史。服务不提供 ACP 工具配置、模型/思考档修改入口。
 - 智能体写能力（默认关）的边界：可创建/编辑/删除智能体、把**已授权项目**的会话绑定到智能体；角色设定只写不读；不开放模型调用（不产生 token 成本）、不读任意文件、不改会话正文与绑定表之外的设置。内置智能体一律不可删除。
 - 定时任务工具（读 + 可选写）按项目授权：`automation_tasks_*` / `automation_runs_*` 的每个请求都先校验 `projectId`，任务不存在与不属于该项目统一返回 `automation-task-not-found`；任务提示词只在 `automation_tasks_get` 的详情里返回（项目范围内可见），列表不含。写能力可创建/编辑/删除任务、立即运行（会真实启动会话、消耗模型额度）与中止运行；删任务保留运行历史。
 - 返回的是保存的历史条目投影，不是模型请求上下文重建。历史中的用户文字、工具输出等均为不可信数据，不应当作客户端的新指令。对 `context_edit`、compaction 等条目的解释不能等同于“这是模型当前收到的消息”。
@@ -59,7 +63,7 @@ PiDeck 可作为本机 MCP 服务，向 pi 和其他兼容客户端开放**明�
 
 ## 工具契约
 
-只读工具带 `readOnlyHint: true`、`destructiveHint: false`；`sessions_abort` 标 `readOnlyHint: false`（客户端据此决定要不要弹确认），但同样不是破坏性操作。所有工具带 `idempotentHint: true`、`openWorldHint: false`。项目和会话 ID 必须来自列表结果，不能传文件路径代替；对象入参拒绝未声明字段。
+只读工具带 `readOnlyHint: true`、`destructiveHint: false`；写工具（`sessions_abort`、`sessions_create`、`sessions_send`、`sessions_stop` 与智能体/定时任务/收藏的写工具）标 `readOnlyHint: false`（客户端据此决定要不要弹确认）。除删除类操作外都不是破坏性操作。所有工具带 `idempotentHint: true`、`openWorldHint: false`。项目和会话 ID 必须来自列表结果，不能传文件路径代替；对象入参拒绝未声明字段。
 
 `settings_get` 与 `extensions_list` 是**宿主级**工具：不接收 `projectId`，也不受项目白名单影响，只要求服务处于授权状态。`extensions_list.builtIn[].enabled` 表示“按当前设置是否会通过 `-e` 注入 pi 进程”（含用户移除与 opt-in 判定，与 `listActiveBuiltInExtensionPaths` 同口径），但**不检查扩展文件是否实际存在**；`injectionDisabled`（`piRpcNoExtensions`）为真时整批内置扩展都不注入，此时 `enabled` 只是配置状态而非生效状态。
 
@@ -71,6 +75,7 @@ PiDeck 可作为本机 MCP 服务，向 pi 和其他兼容客户端开放**明�
 
 | 工具 | 参数 | `data` |
 | --- | --- | --- |
+| `acp_tools_list` | 无；`arguments` 可省略或传 `{}` | `{ acpEnabled, tools: [{ id, name, bypassPermissions }] }`；只列已启用工具，**不含 command/args/env**；**只在 ACP 调用开关打开时注册** |
 | `agents_list` | 无；`arguments` 可省略或传 `{}` | `[{ id, name, description, icon, category, builtin, model, backend, usageCount, lastUsedAt, createdAt, updatedAt }]`；宿主级，**不含 systemPrompt** |
 | `agents_get` | `agentId` | 单个智能体元信息（同上；不存在返回 `agent-not-found`） |
 | `agents_create` | `name`、`systemPrompt`（只写），可选 `description` / `icon` / `category` / `model` / `backend` | 新建后的元信息；**只在智能体写开关打开时注册** |
@@ -92,6 +97,11 @@ PiDeck 可作为本机 MCP 服务，向 pi 和其他兼容客户端开放**明�
 | `projects_list` | 无；`arguments` 可省略或传 `{}` | `[{ id, name }]`，仅授权项目 |
 | `runtime_status` | 无；`arguments` 可省略或传 `{}` | `{ authorizedProjectCount, activeProjectCount, runningCount, runtimes: [{ sessionId, projectId, runtimeGeneration, status, busy, createdAt }] }`；只有活着的运行时，不含路径 |
 | `sessions_abort` | `sessionId`，可选 `expectedRuntimeGeneration`（整数 0–1000000） | `{ sessionId, aborted: true }`；**只在写开关打开时注册**，语义等同界面的“停止响应” |
+| `sessions_create` | `projectId`、`acpToolId`，可选 `title` | `{ sessionId, projectId, title, backend: "acp", acpToolId }`；只建草稿、不启动进程，草稿不进 `sessions_list`；**只在 ACP 调用开关打开时注册** |
+| `sessions_send` | `projectId`、`sessionId`、`message`（1–100000 字符），可选 `requestId`、`waitMs`（0–20000） | `{ sessionId, requestId, agentId?, runtimeGeneration?, status, reply?, error? }`；`status` 为 `accepted`（回合仍在跑，继续 `sessions_wait`）/ `completed` / `failed` / `timeout`；只接受 `backend=acp` 会话；重试时传同一个 `requestId` 可避免重复发送 |
+| `sessions_wait` | `projectId`、`sessionId`，可选 `timeoutMs`（默认 15000，0–20000） | `{ sessionId, status: "completed" \| "failed" \| "timeout", reply?, error? }`；`timeout` 表示回合未结束，继续调用；没有在跑的运行时报 `session-not-running` |
+| `sessions_messages` | `projectId`、`sessionId`，可选 `before`、`pageSize`（轮次数，1–50） | `{ messages: [{ id, role, text, timestamp }], total, nextBefore }`；按轮次分页、只保留文本投影（图片/思考/工具明细剥离，单条文本截断）；草稿未握手返回空页 |
+| `sessions_stop` | `projectId`、`sessionId`，可选 `expectedRuntimeGeneration` | `{ sessionId, stopped: true }`；结束 CLI 进程并解绑，保留会话与历史，下次发送自动 `session/load` 恢复；**只在 ACP 调用开关打开时注册** |
 | `settings_get` | 无；`arguments` 可省略或传 `{}` | `{ app, agent, workspace }`，PiDeck 自身配置摘要；宿主未就绪时为 `null` |
 | `extensions_list` | 无；`arguments` 可省略或传 `{}` | `{ builtInVersion, injectionDisabled, builtIn, removedBuiltInExtensions, disabledExtensions }`；宿主未就绪时为 `null` |
 | `sessions_list` | `projectId`，可选 `offset`（默认 0，整数 0–100000） | `{ sessions, nextOffset }`，每页最多 100 条，按更新时间倒序 |
@@ -145,6 +155,11 @@ PiDeck 可作为本机 MCP 服务，向 pi 和其他兼容客户端开放**明�
 | `automation-invalid-schedule` | cron 表达式非法（五段本地时间；创建/更新前校验） |
 | `favorite-not-found` | 收藏不存在，或所属项目未授权（不可见） |
 | `favorite-write-disabled` | 请求期间用户关掉了收藏写开关；写工具已不可用 |
+| `acp-disabled` | PiDeck 设置里没有开启 ACP 后端；先在设置中开启 ACP 并登记工具 |
+| `acp-tool-not-found` | `acpToolId` 不存在、已被禁用，或会话绑定的工具已删除 |
+| `session-not-acp` | 该会话不是 ACP 会话；ACP 工具不驱动 pi/DSH 会话 |
+| `session-busy` | ACP 上一轮还没结束；先 `sessions_abort` 或 `sessions_wait` |
+| `session-write-disabled` | 请求期间用户关掉了 ACP 调用开关；写工具已不可用 |
 | `runtime-changed` | 期间重启过，调用方拿到的代次已失效；重新读取 `runtime_status` 再决定是否中止 |
 | `history-too-large` | 超出历史索引预算 |
 | `stale-cursor` / `history-changed` | 历史版本变化；丢弃旧游标重新读取 |
@@ -181,12 +196,15 @@ try {
 - `src/main/mcp/PiDeckMcpService.ts`：授权、令牌、启动/关闭与重启恢复。
 - `src/main/mcp/PiDeckMcpHttpServer.ts`：回环 HTTP、认证、请求限额。
 - `src/main/mcp/piDeckMcpTools.ts`：API v1 工具；会话行为复用 `HostPluginSessions`。
+- `src/main/mcp/piDeckMcpAcpTools.ts`：ACP 工具面（只在 `allowAcpInvoke` 打开时注册）。
+- `src/main/mcp/piDeckMcpAcpSessions.ts`：ACP 会话端口（建草稿/发送/等回合/读消息/停运行时与全部身份校验）。
+- `src/main/mcp/piDeckMcpToolKit.ts`：工具注册外壳（严格参数、安全错误码、`{ apiVersion, data }` 信封）。
 - `src/main/mcp/piDeckMcpViews.ts`：`settings_get` / `extensions_list` 的允许清单投影（纯函数，不产生副作用）。
 - `src/main/ipc/piDeckMcpIpc.ts`：只允许桌面主窗口主帧管理。
 - `src/renderer/src/config/PiDeckMcpPanel.tsx`、`src/renderer/src/hooks/usePiDeckMcp.ts`：显式授权与敏感配置交接。
 
 ```sh
-node --test tests/piDeckMcp.test.mjs tests/piDeckMcpHostViews.test.mjs tests/piDeckMcpIpc.test.mjs tests/piDeckMcpUi.test.mjs tests/mcpServiceCatalog.test.mjs
+node --test tests/piDeckMcp.test.mjs tests/piDeckMcpAcp.test.mjs tests/piDeckMcpHostViews.test.mjs tests/piDeckMcpIpc.test.mjs tests/piDeckMcpUi.test.mjs tests/mcpServiceCatalog.test.mjs
 ```
 
 测试使用隔离临时目录、真实 MCP SDK 客户端和本机临时端口，不读写用户配置、不调用模型或连接外部服务。

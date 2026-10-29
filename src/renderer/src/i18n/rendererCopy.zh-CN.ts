@@ -2284,7 +2284,7 @@ export const zhCN = {
 	"config.mcp.catalog.pideck": "PiDeck（本地 MCP 服务）",
 	"config.mcp.catalog.pideckHint": "读取已授权项目和会话、本机设置摘要与内置扩展状态、智能体元信息，以及项目内定时任务与运行历史；写能力需单独开启。默认关闭，仅本机可访问。",
 	"config.mcp.pideck.hint":
-		"向 pi 和其他 MCP 客户端开放项目列表、会话元信息、标题搜索、分页历史，以及本机设置摘要、内置扩展状态、智能体元信息与定时任务。默认只读；只有显式打开写开关后才允许中断回答、管理智能体或管理定时任务。不会执行命令、修改会话内容、读取任意文件，也不输出令牌、代理凭据、磁盘路径或智能体的角色设定。",
+		"向 pi 和其他 MCP 客户端开放项目列表、会话元信息、标题搜索、分页历史，以及本机设置摘要、内置扩展状态、智能体元信息与定时任务。默认只读；只有显式打开写开关后才允许中断回答、管理智能体、管理定时任务或调用 ACP。不会执行任意命令、修改会话内容、读取任意文件，也不输出令牌、代理凭据、磁盘路径或智能体的角色设定。",
 	"config.mcp.pideck.warning": "任何持有令牌的客户端都能读取所选项目的全部可见会话，包括今后新增的会话；内容可能含敏感信息，也可能被客户端发送给模型。请仅授权必要项目，不要分享连接配置。",
 	"config.mcp.pideck.running": "服务运行中",
 	"config.mcp.pideck.stopped": "服务已关闭",
@@ -2306,6 +2306,9 @@ export const zhCN = {
 	"config.mcp.pideck.favoriteWriteSection": "收藏写能力",
 	"config.mcp.pideck.allowFavoritesWrite": "允许新增/删除本机收藏（含任意文本）",
 	"config.mcp.pideck.allowFavoritesWriteHint": "开启后客户端可把任意文本或消息快照写入 PiDeck 收藏；列表只返回未关联项目或已授权项目的收藏，关联会话找不到时显示「无关联会话」。",
+	"config.mcp.pideck.acpSection": "ACP 调用",
+	"config.mcp.pideck.allowAcpInvoke": "允许通过 MCP 新建并驱动 ACP 会话",
+	"config.mcp.pideck.allowAcpInvokeHint": "开启后客户端可新建 ACP 会话、发送消息、等待回合、读取消息与停止运行时。只能用你在设置里登记的 ACP 工具，不能传命令/参数/环境变量，也不能驱动 pi/DSH 会话；新建会话会启动本机 CLI 进程并消耗该 CLI 自己的模型额度。",
 	"config.mcp.pideck.apply": "应用授权并更新令牌",
 	"config.mcp.pideck.enable": "授权并启用本地服务",
 	"config.mcp.pideck.disable": "关闭服务并撤销令牌",

@@ -15,6 +15,25 @@ const { AutomationStore } = loadTsCommonJs("src/main/automation/AutomationStore.
 const { FavoritesStore } = loadTsCommonJs("src/main/favorites/FavoritesStore.ts");
 const { createDefaultAppSettings } = loadTsCommonJs("src/shared/types/settings.ts");
 const plain = (value) => JSON.parse(JSON.stringify(value));
+// ACP 端口桩：本文件只验证默认关闭时不注册 ACP 工具；真正的 ACP 行为见 piDeckMcpAcp.test.mjs。
+const stubAcp = {
+	tools: () => ({ acpEnabled: false, tools: [] }),
+	create: async () => {
+		throw new Error("acp-disabled");
+	},
+	send: async () => {
+		throw new Error("acp-disabled");
+	},
+	wait: async () => {
+		throw new Error("acp-disabled");
+	},
+	messages: async () => {
+		throw new Error("acp-disabled");
+	},
+	stop: async () => {
+		throw new Error("acp-disabled");
+	},
+};
 
 async function fixture(t, override = {}) {
 	const dir = await mkdtemp(join(tmpdir(), "pideck-mcp-"));
@@ -92,7 +111,7 @@ async function fixture(t, override = {}) {
 		remove: (favoriteId) => favoritesStore.remove(favoriteId),
 	};
 	const configPath = join(dir, "mcp-host.json");
-	const service = new PiDeckMcpService({ configPath, projects: () => projects, sessions, agents, automation, favorites, settings: () => null, builtInExtensionsVersion: () => null, runtimes: () => [], abortRuntime: async () => ({ ok: true, value: undefined }), warn: () => undefined, ...override });
+	const service = new PiDeckMcpService({ configPath, projects: () => projects, sessions, agents, automation, favorites, acp: stubAcp, settings: () => null, builtInExtensionsVersion: () => null, runtimes: () => [], abortRuntime: async () => ({ ok: true, value: undefined }), warn: () => undefined, ...override });
 	t.after(async () => {
 		await service.dispose();
 		await rm(dir, { recursive: true, force: true });
@@ -121,6 +140,7 @@ test("MCP is off by default, has no endpoint/credential and exports disabled con
 		allowAgentWrite: false,
 		allowAutomationWrite: false,
 		allowFavoritesWrite: false,
+		allowAcpInvoke: false,
 		running: false,
 		projects: [
 			{ id: "p1", name: "Allowed" },
@@ -286,14 +306,14 @@ test("enabled consent survives restart with the same endpoint/token; disabled co
 	await service.setAccess({ enabled: true, projectIds: ["p1"] });
 	const initial = plain(await service.connection());
 	await service.dispose();
-	const restarted = new PiDeckMcpService({ configPath, projects: () => projects, sessions, settings: () => null, builtInExtensionsVersion: () => null, runtimes: () => [], abortRuntime: async () => ({ ok: true, value: undefined }), warn: () => undefined });
+	const restarted = new PiDeckMcpService({ configPath, projects: () => projects, sessions, acp: stubAcp, settings: () => null, builtInExtensionsVersion: () => null, runtimes: () => [], abortRuntime: async () => ({ ok: true, value: undefined }), warn: () => undefined });
 	t.after(() => restarted.dispose());
 	assert.deepEqual(plain(await restarted.connection()), initial);
 	const { client } = await connect(t, restarted);
 	assert.equal((await client.callTool({ name: "projects_list" })).structuredContent.data[0].id, "p1");
 	await restarted.setAccess({ enabled: false, projectIds: [] });
 	await restarted.dispose();
-	const stopped = new PiDeckMcpService({ configPath, projects: () => projects, sessions, settings: () => null, builtInExtensionsVersion: () => null, runtimes: () => [], abortRuntime: async () => ({ ok: true, value: undefined }), warn: () => undefined });
+	const stopped = new PiDeckMcpService({ configPath, projects: () => projects, sessions, acp: stubAcp, settings: () => null, builtInExtensionsVersion: () => null, runtimes: () => [], abortRuntime: async () => ({ ok: true, value: undefined }), warn: () => undefined });
 	t.after(() => stopped.dispose());
 	assert.equal((await stopped.getState()).running, false);
 	assert.equal(JSON.parse(await readFile(configPath, "utf8")).token, "");
@@ -304,7 +324,7 @@ test("corrupt and oversized consent files fail closed without overwriting them",
 	await service.dispose();
 	for (const contents of ["{corrupt", " ".repeat(256 * 1024 + 1)]) {
 		await writeFile(configPath, contents);
-		const broken = new PiDeckMcpService({ configPath, projects: () => projects, sessions, settings: () => null, builtInExtensionsVersion: () => null, runtimes: () => [], abortRuntime: async () => ({ ok: true, value: undefined }), warn: () => undefined });
+		const broken = new PiDeckMcpService({ configPath, projects: () => projects, sessions, acp: stubAcp, settings: () => null, builtInExtensionsVersion: () => null, runtimes: () => [], abortRuntime: async () => ({ ok: true, value: undefined }), warn: () => undefined });
 		try {
 			const state = await broken.getState();
 			assert.equal(state.running, false);
@@ -328,7 +348,7 @@ test("port conflict leaves saved consent visible so the user can disable it perm
 		blocker.listen(Number(port), "127.0.0.1", resolve);
 	});
 	t.after(() => new Promise((resolve) => blocker.close(resolve)));
-	const blocked = new PiDeckMcpService({ configPath, projects: () => projects, sessions, settings: () => null, builtInExtensionsVersion: () => null, runtimes: () => [], abortRuntime: async () => ({ ok: true, value: undefined }), warn: () => undefined });
+	const blocked = new PiDeckMcpService({ configPath, projects: () => projects, sessions, acp: stubAcp, settings: () => null, builtInExtensionsVersion: () => null, runtimes: () => [], abortRuntime: async () => ({ ok: true, value: undefined }), warn: () => undefined });
 	t.after(() => blocked.dispose());
 	const state = await blocked.getState();
 	assert.equal(state.running, false);
@@ -341,7 +361,7 @@ test("port conflict leaves saved consent visible so the user can disable it perm
 test("failed consent persistence closes the newly bound listener and returns a safe error", async (t) => {
 	const { service, dir, projects, sessions } = await fixture(t);
 	await service.dispose();
-	const failed = new PiDeckMcpService({ configPath: dir, projects: () => projects, sessions, settings: () => null, builtInExtensionsVersion: () => null, runtimes: () => [], abortRuntime: async () => ({ ok: true, value: undefined }), warn: () => undefined });
+	const failed = new PiDeckMcpService({ configPath: dir, projects: () => projects, sessions, acp: stubAcp, settings: () => null, builtInExtensionsVersion: () => null, runtimes: () => [], abortRuntime: async () => ({ ok: true, value: undefined }), warn: () => undefined });
 	t.after(() => failed.dispose());
 	await failed.getState();
 	await assert.rejects(failed.setAccess({ enabled: true, projectIds: ["p1"] }), /config-write-failed/);
@@ -370,7 +390,7 @@ test("revocation requested during initialization wins over persisted enabled sta
 	const { service, projects, sessions, configPath } = await fixture(t);
 	await service.setAccess({ enabled: true, projectIds: ["p1"] });
 	await service.dispose();
-	const restarted = new PiDeckMcpService({ configPath, projects: () => projects, sessions, settings: () => null, builtInExtensionsVersion: () => null, runtimes: () => [], abortRuntime: async () => ({ ok: true, value: undefined }), warn: () => undefined });
+	const restarted = new PiDeckMcpService({ configPath, projects: () => projects, sessions, acp: stubAcp, settings: () => null, builtInExtensionsVersion: () => null, runtimes: () => [], abortRuntime: async () => ({ ok: true, value: undefined }), warn: () => undefined });
 	t.after(() => restarted.dispose());
 	const state = await restarted.setAccess({ enabled: false, projectIds: [] });
 	assert.equal(state.enabled, false);

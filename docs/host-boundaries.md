@@ -55,6 +55,7 @@
 - 能力各自有独立开关（`cuaEnabled` / `browserAgentEnabled`，默认都关）、独立 gate 与独立 autoApprove（默认自动放行，可关闭改为逐次确认）。host 只在任一能力启用时监听并写 mcp.json，两者都关时停监听并注销。工具按开关条件注册：**host 存活 ≠ 能力启用**。
 - 只读工具免审批；写工具 fail-closed（无 approval handler / 超时 / 拒绝即不执行）。页面与屏幕内容是不可信输入；工具输出不得包含凭据，日志不得写页面文本或截图内容。
 - 禁止扩展成通用宿主控制通道：不得暴露任意 JS 执行、文件系统、shell、任意 HTTP 代理、会话/模型控制。内置浏览器工具不得绕过 `isAllowedBrowserPanelUrl`、不得注入 preload / 放开 allowpopups、不得改 webview 安全档位。
+- 与 `pideck`（对外 MCP 服务，见 `docs/pideck-mcp.md`）是两个独立端点：CUA/浏览器工具只服务 pi；ACP 调用（`acp_tools_list` / `sessions_create` / `sessions_send` / `sessions_wait` / `sessions_messages` / `sessions_stop`）只存在于 `pideck`，由独立开关 `allowAcpInvoke` 约束，**不在本端点扩展**。
 - 详见 `docs/browser-agent-plan.md`（工具面、快照契约、风险与合并门禁）。
 
 ## 例外七：会话分组宿主数据（`sessionGroups.*`，只允许分组读写）

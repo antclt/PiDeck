@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 1e346b6eb0f57407d57b06ab637ca06d851258ebba4509218fc660870924497d（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: a78c452dd33a545f5225b88a85966d56a467bb19c705369b22356e5a0e275e6b（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -2291,7 +2291,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.mcp.catalog.pideck": "PiDeck（本地 MCP 服務）",
 	"config.mcp.catalog.pideckHint": "讀取已授權專案和會話、本機設定摘要與內建擴充套件狀態、智慧體元資訊，以及專案內定時任務與執行歷史；寫能力需單獨開啟。預設關閉，僅本機可訪問。",
 	"config.mcp.pideck.hint":
-		"向 pi 和其他 MCP 客戶端開放專案列表、會話元資訊、標題搜尋、分頁歷史，以及本機設定摘要、內建擴充套件狀態、智慧體元資訊與定時任務。預設只讀；只有顯式開啟寫開關後才允許中斷回答、管理智慧體或管理定時任務。不會執行命令、修改會話內容、讀取任意檔案，也不輸出令牌、代理憑據、磁碟路徑或智慧體的角色設定。",
+		"向 pi 和其他 MCP 客戶端開放專案列表、會話元資訊、標題搜尋、分頁歷史，以及本機設定摘要、內建擴充套件狀態、智慧體元資訊與定時任務。預設只讀；只有顯式開啟寫開關後才允許中斷回答、管理智慧體、管理定時任務或呼叫 ACP。不會執行任意命令、修改會話內容、讀取任意檔案，也不輸出令牌、代理憑據、磁碟路徑或智慧體的角色設定。",
 	"config.mcp.pideck.warning": "任何持有令牌的客戶端都能讀取所選專案的全部可見會話，包括今後新增的會話；內容可能含敏感資訊，也可能被客戶端傳送給模型。請僅授權必要專案，不要分享連線配置。",
 	"config.mcp.pideck.running": "服務執行中",
 	"config.mcp.pideck.stopped": "服務已關閉",
@@ -2313,6 +2313,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.mcp.pideck.favoriteWriteSection": "收藏寫能力",
 	"config.mcp.pideck.allowFavoritesWrite": "允許新增/刪除本機收藏（含任意文本）",
 	"config.mcp.pideck.allowFavoritesWriteHint": "開啟後客戶端可把任意文本或訊息快照寫入 PiDeck 收藏；列表只返回未關聯專案或已授權專案的收藏，關聯會話找不到時顯示「無關聯會話」。",
+	"config.mcp.pideck.acpSection": "ACP 呼叫",
+	"config.mcp.pideck.allowAcpInvoke": "允許通過 MCP 新建並驅動 ACP 會話",
+	"config.mcp.pideck.allowAcpInvokeHint": "開啟後客戶端可新建 ACP 會話、傳送訊息、等待回合、讀取訊息與停止執行時。只能用你在設定裡登記的 ACP 工具，不能傳命令/引數/環境變數，也不能驅動 pi/DSH 會話；新建會話會啟動本機 CLI 程序並消耗該 CLI 自己的模型額度。",
 	"config.mcp.pideck.apply": "應用授權並更新令牌",
 	"config.mcp.pideck.enable": "授權並啟用本地服務",
 	"config.mcp.pideck.disable": "關閉服務並撤銷令牌",

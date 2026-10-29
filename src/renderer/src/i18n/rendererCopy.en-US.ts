@@ -2290,7 +2290,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.mcp.catalog.pideck": "PiDeck (local MCP service)",
 	"config.mcp.catalog.pideckHint": "Read authorized projects and sessions, host settings, built-in extension state, agent metadata and project scheduled tasks with run history; write capabilities need separate opt-in. Off by default; local access only.",
 	"config.mcp.pideck.hint":
-		"Expose project listings, session metadata, title search, paginated history, a host settings summary, built-in extension state, agent metadata and scheduled tasks to pi and other MCP clients. Read-only by default; interrupting a response, managing agents or managing scheduled tasks requires an explicitly enabled write switch. No commands, session content mutations, arbitrary file access, tokens, proxy credentials, filesystem paths or agent role prompts.",
+		"Expose project listings, session metadata, title search, paginated history, a host settings summary, built-in extension state, agent metadata and scheduled tasks to pi and other MCP clients. Read-only by default; interrupting a response, managing agents, managing scheduled tasks or invoking ACP requires an explicitly enabled write switch. No arbitrary commands, session content mutations, arbitrary file access, tokens, proxy credentials, filesystem paths or agent role prompts.",
 	"config.mcp.pideck.warning": "Anyone holding the token can read all visible sessions in the selected projects, including future sessions. Content may contain secrets and may be sent to a model by the client. Authorize only necessary projects and do not share the connection configuration.",
 	"config.mcp.pideck.running": "Service running",
 	"config.mcp.pideck.stopped": "Service stopped",
@@ -2313,6 +2313,10 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.mcp.pideck.favoriteWriteSection": "Favorite write access",
 	"config.mcp.pideck.allowFavoritesWrite": "Allow adding and deleting local favorites (including arbitrary text)",
 	"config.mcp.pideck.allowFavoritesWriteHint": "When on, clients can save arbitrary text or message snapshots as favorites and delete them. Favorites linked to unauthorized projects stay hidden; unresolved session links display as “no linked session”.",
+	"config.mcp.pideck.acpSection": "ACP invocation",
+	"config.mcp.pideck.allowAcpInvoke": "Allow creating and driving ACP sessions over MCP",
+	"config.mcp.pideck.allowAcpInvokeHint":
+		"When on, clients can create ACP sessions, send messages, wait for turns, read messages and stop the runtime. Only the ACP tools you registered can be used — commands, arguments and environment variables are never accepted — and pi/DSH sessions cannot be driven. Creating a session starts a local CLI process and consumes that CLI's own model budget.",
 	"config.mcp.pideck.apply": "Apply access and rotate token",
 	"config.mcp.pideck.enable": "Authorize and enable local service",
 	"config.mcp.pideck.disable": "Stop service and revoke token",

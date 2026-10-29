@@ -446,6 +446,7 @@ import { registerThemesIpc } from "./ipc/themesIpc";
 import { registerHostPluginsIpc } from "./ipc/hostPluginsIpc";
 import { registerPiDeckMcpIpc } from "./ipc/piDeckMcpIpc";
 import { PiDeckMcpService } from "./mcp/PiDeckMcpService";
+import { PiDeckMcpAcpSessions } from "./mcp/piDeckMcpAcpSessions";
 import { HostPluginSessions } from "./plugins/HostPluginSessions";
 import { HostPluginService } from "./plugins/HostPluginService";
 import { resolveBuiltinHostPluginDirectory } from "./plugins/builtinHostPlugins";
@@ -3651,6 +3652,8 @@ function registerIpc() {
 				return favoritesStore.remove(favoriteId);
 			},
 		},
+		// ACP 调用端口：catalog/coordinator/ACP manager 都在启动后段装配，闭包按请求时求值；未开启时工具不注册。
+		acp: new PiDeckMcpAcpSessions({ catalog: sessionCatalog, runtime: sessionRuntimeCoordinator, readMessages: (acpSessionId) => (acpAgentManager ? acpAgentManager.readMessagesWithArchive(acpSessionId) : Promise.resolve([])), settings: () => settingsStore?.get() ?? null, getRuntimeMessages: (sessionId) => sessionRuntimeCoordinator.getRuntimeMessages(sessionId)?.value ?? [] }),
 		warn: mcpWarning,
 	});
 	const unregisterPiDeckMcp = registerPiDeckMcpIpc(piDeckMcp, () => mainWindow, mcpWarning);
