@@ -1,7 +1,24 @@
+import type { AgentBackend } from "./agent";
 import type { LocalServiceStatus } from "../localServices";
+import type { SaveSessionGroupInput } from "./sessionGroups";
 
 /** PiDeck-owned browser plugins. This API never proxies pi SDK or runtime commands. */
-export type HostPluginPermission = "sessions.read" | "workbench.navigate" | "workbench.openExternal" | "network.https" | "network.local" | "service.local";
+export type HostPluginPermission =
+	| "sessions.read"
+	/** `sessions.read` 的范围扩展：读取与跳转覆盖整个工作区（所有项目目录），而不是只有当前项目。单独声明无效，需同时声明 `sessions.read`。 */
+	| "sessions.read.workspace"
+	| "workbench.navigate"
+	| "workbench.openExternal"
+	| "network.https"
+	| "network.local"
+	| "service.local"
+	/** 读写宿主会话分组（sessionGroups.*）：唯一写入方约定见 docs/host-boundaries.md 例外七。 */
+	| "sessionGroups.manage";
+/**
+ * 插件能看到的会话范围，**由 PiDeck 依 manifest 权限算出来**写进 context，插件入参一律被覆盖。
+ * project = 只有当前项目（默认）；workspace = 整个工作区（需 `sessions.read.workspace`）。
+ */
+export type HostPluginScope = "project" | "workspace";
 /** Declared destinations are part of the code fingerprint and require fresh consent when changed. */
 export type HostPluginNetworkPolicy = { httpsOrigins?: string[]; localPorts?: number[] };
 /**
@@ -49,6 +66,8 @@ export type HostPluginContext = {
 	projectId?: string;
 	/** 当前项目显示名：面板标题/文案直接可用，不必再绕一次 API。 */
 	projectName?: string;
+	/** 会话可见/可跳转范围；只在声明 `sessions.read.workspace` 时才是 workspace。 */
+	scope?: HostPluginScope;
 	sessionId?: string;
 	/** 当前会话标题（同 sessions.get 的 title，便于构建标题栏）。 */
 	sessionTitle?: string;
@@ -60,10 +79,17 @@ export type HostPluginContext = {
 export type HostPluginSession = {
 	id: string;
 	projectId: string;
+	/** 会话所属项目显示名（工作区范围下用于区分不同目录里的同名会话）。 */
+	projectName?: string;
+	/** 会话所属目录（项目根路径，不含会话文件路径）：跨目录分组时用它区分。 */
+	directory?: string;
 	title: string;
 	updatedAt: number;
 	createdAt: number;
 	model?: string;
+	/** 产生这条会话的后端；早期目录条目可能没有（按 pi 处理）。 */
+	backend?: AgentBackend;
+	/** 有可读历史（JSONL）：不影响 list/get/navigate，只影响 sessions.entries 能不能读正文。 */
 	readable: boolean;
 };
 export type HostPluginSessionPage = { sessions: HostPluginSession[]; nextOffset: number | null };
@@ -93,8 +119,12 @@ export type HostPluginRequest =
 	| { method: "service.status"; id: string }
 	| { method: "service.start"; id: string }
 	| { method: "service.stop"; id: string }
-	/** 打开服务自己的 Web UI（不返回地址，由 PiDeck 用内置浏览器打开，避免插件把浏览器引到别处）。 */
-	| { method: "service.openUi"; id: string }
+	/** 打开服务自己的 Web UI（不返回地址，由 PiDeck 用内置浏览器打开，避免插件把浏览器引到别处）；pid 可从 status.instances 白名单里点名多实例服务（如 lane daemon）的某个实例。 */
+	| { method: "service.openUi"; id: string; pid?: number }
+	| { method: "sessionGroups.list" }
+	| { method: "sessionGroups.save"; group: SaveSessionGroupInput }
+	| { method: "sessionGroups.delete"; groupId: string }
+	| { method: "sessionGroups.reorder"; groupIds: string[] }
 	| { method: "network.request"; request: HostPluginNetworkRequest };
 export type HostPluginResponse = HostPluginResult<unknown>;
 export type HostPluginMountInput = { pluginId: string; panelId: string; context: HostPluginContext };
@@ -172,7 +202,19 @@ export type HostPluginApi = {
 		status: (id: string) => Promise<LocalServiceStatus>;
 		start: (id: string) => Promise<LocalServiceStatus>;
 		stop: (id: string) => Promise<LocalServiceStatus>;
-		openUi: (id: string) => Promise<void>;
+		openUi: (id: string, pid?: number) => Promise<void>;
+	};
+	/**
+	 * 宿主会话分组（<userData>/session-groups.json）的读写；需 manifest 声明 `sessionGroups.manage`。
+	 * 侧栏分组树消费同一份数据：保存/删除/排序成功后宿主广播 session-groups:changed，桌面帧自动刷新。
+	 */
+	sessionGroups: {
+		list: () => Promise<import("./sessionGroups").SessionGroup[]>;
+		/** 新建（无 id 时宿主生成）或整体替换一个分组；返回全量列表。 */
+		save: (group: SaveSessionGroupInput) => Promise<import("./sessionGroups").SessionGroup[]>;
+		delete: (groupId: string) => Promise<boolean>;
+		/** 保存分组显示顺序；返回全量列表。 */
+		reorder: (groupIds: string[]) => Promise<import("./sessionGroups").SessionGroup[]>;
 	};
 	onEvent: (listener: (event: HostPluginEvent) => void) => () => void;
 };

@@ -23,6 +23,11 @@ function compileFeishuI18n() {
 	return createTsSandbox()("src/main/feishu/FeishuI18n.ts");
 }
 
+/** 真实加载附件落盘工具（文件名清洗是路径穿越边界，stub 会把断言变成自证）。 */
+function compileAttachmentFiles() {
+	return createTsSandbox()("src/main/feishu/attachmentFiles.ts");
+}
+
 /** 真实加载 AskCard（卡片构建/action 解析必须走真实现，mock 会丢断言）。 */
 function compileAskCard(feishuI18n) {
 	const output = ts.transpileModule(readFileSync("src/main/feishu/AskCard.ts", "utf8"), {
@@ -179,6 +184,7 @@ function compileBridge(loadBindings = [], options = {}) {
 		"./ModelPickerCard": { buildModelPickerCard: () => ({}), parseModelActionValue: () => undefined },
 		"./AskCard": askCard,
 		"./FeishuI18n": feishuI18n,
+		"./attachmentFiles": compileAttachmentFiles(),
 	};
 	vm.runInNewContext(
 		output,

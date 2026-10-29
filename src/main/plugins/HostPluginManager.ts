@@ -225,7 +225,9 @@ export class HostPluginManager {
 			}
 			const grant = this.grants.get(entry.name);
 			// 授权顺延：用户批准的就是磁盘上这份（grant 指纹等于 installed 指纹）且我们正在用自己更新的内置载荷替换它。
-			if (installed && grant?.enabled === true && grant.fingerprint === installed.fingerprint) this.grants.set(entry.name, { fingerprint: source.fingerprint, enabled: true });
+			// 但权限扩大时顺延就等于绕过授权：新的加载物会在用户没批准过的范围上取数据，只保留「权限没扩大」的那一类。
+			const widened = source.manifest.permissions.some((permission) => !installed?.manifest.permissions.includes(permission));
+			if (installed && !widened && grant?.enabled === true && grant.fingerprint === installed.fingerprint) this.grants.set(entry.name, { fingerprint: source.fingerprint, enabled: true });
 			this.seeded.set(entry.name, source.fingerprint);
 			changed = true;
 		}

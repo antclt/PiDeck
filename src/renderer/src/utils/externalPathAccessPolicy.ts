@@ -21,6 +21,7 @@
 
 import { DEFAULT_SENSITIVE_PATH_PATTERNS, type SecurityConfig, type SecurityLevelConfig } from "../../../shared/types";
 import { isFilePathInsideRoot, resolveFileLinkPath } from "./filePathLinks";
+import { getRendererHomeDir } from "./rendererHomeDir";
 
 /** 判定原因（渲染层据此选文案；reason 只影响提示，不参与放行与否的推导） */
 export type ExternalPathAccessReason =
@@ -96,9 +97,10 @@ export function isExecutableLikePath(filePath: string): boolean {
 	return EXECUTABLE_LIKE_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
 }
 
-/** denyDirs / customAllowDirs 里的相对路径按会话基准目录展开（与主进程注释「相对路径视为相对工作目录」一致）。 */
+/** denyDirs / customAllowDirs 里的相对路径按会话基准目录展开（与主进程注释「相对路径视为相对工作目录」一致）。
+ *  `~/x` 先按家目录展开成绝对路径（issue #426），否则这类条目永远命不中。 */
 function resolveConfigDir(dir: string, base: string | undefined): string {
-	return resolveFileLinkPath(dir, base) ?? dir;
+	return resolveFileLinkPath(dir, base, undefined, getRendererHomeDir()) ?? dir;
 }
 
 /** 配置目录列表命中判定（denyDirs / customAllowDirs 共用）：打开目录时也走同一语义。 */

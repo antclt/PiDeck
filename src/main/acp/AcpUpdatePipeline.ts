@@ -52,11 +52,17 @@ export class AcpUpdatePipeline {
 	async handleSessionUpdate(runtime: AcpAgentRuntime, notification: AcpRpcNotification): Promise<void> {
 		if (runtime.status === "closed" || !this.host.isTracked(runtime.tab.id) || notification.method !== "session/update") return;
 		if (notification.params?.sessionId !== runtime.acpSessionId) return;
-		// 回合中收到任何 update 都刷新活跃时间：stall 看门狗只关心全静默。
-		if (runtime.turnActive) runtime.lastUpdateAt = Date.now();
+		// 回合中收到任何 update 都刷新活跃时间：stall 看门狗只关心全静默；
+		// 同时顺延回合兑底超时截止——有产出就证明 agent 还活着，长回合不应被总时长误杀。
+		if (runtime.turnActive) {
+			runtime.lastUpdateAt = Date.now();
+			runtime.turnDeadlineRefresh?.();
+		}
 		const rawUpdate = notification.params.update;
 		if (!rawUpdate || typeof rawUpdate !== "object" || !("sessionUpdate" in rawUpdate) || typeof rawUpdate.sessionUpdate !== "string") return;
 		const update = rawUpdate as AcpSessionUpdate;
+		// 诊断计数：空白回合要能说出「收到过哪些 update 类型」，否则只能笼统归咎 CLI。
+		if (runtime.turnActive) runtime.turnUpdateKinds.set(update.sessionUpdate, (runtime.turnUpdateKinds.get(update.sessionUpdate) ?? 0) + 1);
 		if (update.sessionUpdate === "config_option_update") {
 			if (Array.isArray(update.configOptions)) {
 				runtime.configOptions = update.configOptions;
@@ -66,6 +72,12 @@ export class AcpUpdatePipeline {
 		}
 		// 实时 prompt 已在本地记录完整 user 消息；echo 仅用于历史恢复，不能重复追加。
 		if (runtime.turnActive && update.sessionUpdate === "user_message_chunk") return;
+		// TTFT：正文与思考分别记首次到达；结算时优先正文、无正文回退思考（与 pi 同语义）。
+		// 工具调用不算「首字」。
+		if (runtime.turnActive) {
+			if (update.sessionUpdate === "agent_message_chunk" && runtime.turnFirstTextAt === undefined) runtime.turnFirstTextAt = Date.now();
+			else if (update.sessionUpdate === "agent_thought_chunk" && runtime.turnFirstThoughtAt === undefined) runtime.turnFirstThoughtAt = Date.now();
+		}
 		// 在途工具调用跟踪（stall 看门狗豁免依据）：tool_call 开始入集，终态出集。
 		// 长命令 started→completed 之间常无任何流式输出，是合法静默，与挂起审批同等对待。
 		trackInFlightToolCall(runtime, update);

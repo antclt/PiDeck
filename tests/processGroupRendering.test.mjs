@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 // 过程组渲染的**结构性契约**（源码级断言）。
 //
@@ -27,6 +28,8 @@ function contrastOnWhite(hex) {
 	return 1.05 / (luminance + 0.05);
 }
 const turnRowSource = readFileSync("src/renderer/src/components/session/turn/TurnRow.tsx", "utf8");
+// 折叠栏里的单行渲染 2026-10 抽成 TurnStepRow：中间回答的隐藏开关与 variant 落在那儿。
+const stepRowSource = readFileSync("src/renderer/src/components/session/turn/TurnStepRow.tsx", "utf8");
 const budgetSource = readFileSync("src/renderer/src/components/session/timeline/turnMountBudget.ts", "utf8");
 
 test("过程组组头必须全宽：占满内容列，不许按文字宽度收缩", () => {
@@ -57,9 +60,20 @@ test("两级挂载预算各自落在真正会一次性挂载的那一层", () =>
 	// 大折叠栏一级节点：每轮一份预算（中间回复是重量级节点）
 	assert.match(foldSource, /boundMountedSteps\(\s*props\.nodes\s*,\s*PROCESS_FOLD_NODE_LIMIT/);
 	assert.match(foldSource, /timeline\.showEarlierSteps/);
-	// 两个常量都从既有实测档位派生，不引入未调参的新数字
-	assert.match(budgetSource, /export const PROCESS_GROUP_MEMBER_LIMIT = TIMELINE_MOUNTED_STEP_LIMIT;/);
+	// 两个预算是两种风险面，不是同一个数字的两份拷贝（2026-10 审查后定死）：
+	// - 组体成员：组体默认不挂载（`{props.open && (`），点开才付，风险面 = 一个被展开的组；
+	//   实测常见组只有个位数成员，32 足够覆盖，超出走「显示更早」。
+	// - 大折叠栏一级节点：造出滚动视口 + 虚拟栈后 DOM 量由虚拟化收敛，预算退化成极端保护，
+	//   于是沿用单轮档 120。
+	assert.match(budgetSource, /export const PROCESS_GROUP_MEMBER_LIMIT = 32;/);
 	assert.match(budgetSource, /export const PROCESS_FOLD_NODE_LIMIT = TIMELINE_MOUNTED_STEP_LIMIT;/);
+	// 反向守卫一：两者不得再并成同一个常量——那等于把「一个组」与「一轮」的风险面混为一谈。
+	assert.doesNotMatch(budgetSource, /PROCESS_GROUP_MEMBER_LIMIT = TIMELINE_MOUNTED_STEP_LIMIT/);
+	// 反向守卫二：组体预算必须真小于单轮档；相等意味着又回到「一轮全挂」口径，这层预算白设。
+	// 用运行时导入取两个常量，不从源码正则抠数字：后者在常量改成表达式（= BASE * 2）时得到 NaN，
+	// 报出来是「组体预算 32 必须小于单轮档 NaN」这种真红假因。
+	const budget = loadTsCommonJs("src/renderer/src/components/session/timeline/turnMountBudget.ts");
+	assert.ok(budget.PROCESS_GROUP_MEMBER_LIMIT > 0 && budget.PROCESS_GROUP_MEMBER_LIMIT < budget.TIMELINE_MOUNTED_STEP_LIMIT, "组体预算 " + budget.PROCESS_GROUP_MEMBER_LIMIT + " 必须小于单轮档 " + budget.TIMELINE_MOUNTED_STEP_LIMIT);
 });
 
 test("组体限高 + 内部滚轮，且子项不得被压扁", () => {
@@ -78,7 +92,8 @@ test("TurnRow 两条渲染路径都在：开关关闭时必须保持原扁平渲
 	assert.match(turnRowSource, /boundMountedSteps\(foldableItems, TIMELINE_MOUNTED_STEP_LIMIT/);
 	assert.match(turnRowSource, /mountedSteps\.items\.map/);
 	assert.match(turnRowSource, /timeline\.showEarlierSteps/);
-	assert.match(turnRowSource, /variant="process"/);
+	// variant 落在单行渲染组件里（2026-10 拆件），语义仍是「折叠区内的中间段用 process」
+	assert.match(stepRowSource, /variant="process"/);
 	assert.match(turnRowSource, /<FinalAnswer/);
 	assert.match(turnRowSource, /<Collapsible/);
 	assert.match(turnRowSource, /<CollapsibleContent/);

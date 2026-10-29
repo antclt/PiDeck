@@ -175,6 +175,25 @@ test("timeout is unknown and late acceptance never retries or removes the warnin
 	h.unmount();
 });
 
+test("ACP acknowledges at turn end: a long turn is neither unknown nor a stuck queue head", async () => {
+	const response = deferredQueueResult();
+	const h = queuedPromptHarness({ dispatch: () => response.promise });
+	h.addSession("A", "idle", 1, "acp");
+	h.queue.enqueueQueuedPrompt("A", queuedPrompt("one"));
+	const sending = h.queue.flushNextQueuedPrompt("A");
+	assert.equal(h.submissions.length, 1);
+	h.fireTimers(30_000);
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(h.queue.queuedPromptsRef.current.A[0].status, "sending", "已上屏的 ACP 消息在回合结算前不得被判成投递未知");
+	assert.equal(h.notices.length, 0, "投递未知的提示只属于真的没拿到确认的 pi/dsh 投递");
+	assert.equal(h.timers.size, 0, "ACP 没有入队即回的投递确认，不得装 30s 窗口");
+	response.resolve();
+	await sending;
+	assert.equal(h.queue.queuedPromptsRef.current.A, undefined, "回合结算后队列行必须清掉");
+	assert.equal(h.notices.length, 0);
+	h.unmount();
+});
+
 test("retract-to-edit does not focus a newly selected session on the next frame", () => {
 	const h = queuedPromptHarness();
 	const prompt = queuedPrompt("one");

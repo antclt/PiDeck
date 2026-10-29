@@ -1,6 +1,6 @@
 import { messageEntryId } from "../../../utils/sessionCommands";
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronUp, Clock, Share, SquarePen, Star, Trash } from "lucide-react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronUp } from "lucide-react";
 import { atom, useAtomValue, useSetAtom } from "jotai";
 import { selectAtom } from "jotai/utils";
 import type { AgentBackend, ChatMessage, ImageContent } from "../../../../../shared/types";
@@ -9,14 +9,13 @@ import { timelineRevealRequestsAtom, type TimelineRevealRequest } from "../../..
 import { turnFlowSettingsAtom } from "../../../atoms/app-ui-atoms";
 import { t } from "../../../i18n";
 import { useStreamSelectionPreserve } from "../../../hooks/useStreamSelectionPreserve";
-import { Button } from "../../ui-shadcn/button";
 import { Collapsible, CollapsibleContent } from "../../ui-shadcn/collapsible";
-import { formatDuration } from "../TimelineFormat";
-import { LiveDuration } from "../LiveDuration";
-import { CopyMenu, stripMarkdown } from "../SurfaceComponents";
+import { stripMarkdown } from "../SurfaceComponents";
 import { favoriteMessageKey } from "../../favorites/favoriteIdentity";
 import { buildTurnDisplay, hasFoldableContent } from "../timeline/buildTurnDisplay";
 import { groupTurnProcess, lastProcessGroup } from "../timeline/groupTurnProcess";
+import { sameTurnDisplayItem, sameTurnProcessNode } from "../timeline/structureReuse";
+import { useLazyValue, useReusedList } from "../../../lib/hooks/use-render-reuse";
 import { boundMountedSteps, TIMELINE_MOUNTED_STEP_LIMIT } from "../timeline/turnMountBudget";
 import { resolveLiveInterimId } from "../timeline/liveMount";
 import { buildProcessSummary } from "../timeline/segmentSummary";
@@ -28,13 +27,10 @@ import { FinalAnswer } from "./FinalAnswer";
 import { InterimAnswer } from "./InterimAnswer";
 import { ProcessFold } from "./ProcessFold";
 import { ProcessSummaryToggle } from "./ProcessSummaryToggle";
+import { TurnStepRow } from "./TurnStepRow";
+import { TurnRowActions } from "./TurnRowActions";
 import { useProcessGroupOpenState } from "./useProcessGroupState";
 import { TurnAuthorHeader } from "./TurnAuthorHeader";
-import { ThinkingStep } from "./ThinkingStep";
-import { RetryStep } from "./RetryStep";
-import { ErrorStep } from "./ErrorStep";
-import { ToolStep } from "./ToolStep";
-import { ExtensionEntryStep } from "./ExtensionEntryStep";
 import { TurnFileChanges } from "./TurnFileChanges";
 import { useTurnExecution } from "./useTurnExecution";
 import type { DiffFileHandler } from "../ToolCallComponents";
@@ -124,18 +120,25 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 	const isComplete = run.endedAt > 0;
 	// 结束判定不能依赖 isComplete：groupToolMessages 里 endedAt 永远是最后一条消息时间戳，
 	// 流式 run 也有空骨架消息（message_start/thinking 时创建），因此流式中 isComplete 恒为 true。
-	// 真实语义：agentRunning 期间（仅末轮）由 LiveDuration 实时计时，agent 空闲后才显示固定值。
+	// 真实语义：agentRunning 期间（仅末轮）实时读数在状态条（2026-10 迁入），
+	// agent 空闲后才在行末显示固定值。
 	const isRunLive = Boolean(props.agentRunning);
 	// 回复耗时扣除本轮 ask_question 的等待：等待段由主进程从工具 durationMs 中排除，
 	// 这里把等价量从轮时长里减去，含义为「agent 实际处理时长」。
 	const effectiveStart = run.startedAt + (run.askWaitMs ?? 0);
 	const duration = isComplete && effectiveStart > 0 ? Math.max(0, run.endedAt - effectiveStart) : 0;
-	// 耗时：结束后固定（endedAt - startedAt - ask 等待）；流式中（isRunLive）由 LiveDuration 实时增长；
-	// 轮被 ask_question 阻塞时冻结在提问弹起时刻（时间不再计入）。
-	const showDuration = (isComplete && !isRunLive && duration > 0) || (isRunLive && effectiveStart > 0);
+	// 轮末固定耗时（endedAt - startedAt - ask 等待）。实时秒表 2026-10 移到状态条
+	// （RespondingIndicator → StatusSuffix，与「正在执行命令…」同行），这里只在结束后显示，
+	// 否则同一个时间会在状态条和轮尾各跳一次。
+	const showDuration = isComplete && !isRunLive && duration > 0;
 
 	// 扁平展示序列：Live 与 History 共用 msg-thinking-* 身份（liveThinkingId 命中即挂步）。
-	const displayItems = useMemo(
+	//
+	// 结构复用（见 timeline/structureReuse）：`buildTurnDisplay` 每次调用都新建 entry 包装对象，
+	// 即使 run.items 的条目引用没变。这里把内容等价的条目换回上一轮的对象，否则
+	// `buildProcessSummary` / `groupTurnProcess` / `ProcessFold` 的 memo 全部按新引用失效，
+	// 已展开的执行过程组每 50ms flush 重渲染一次。
+	const displayItems = useReusedList(
 		() =>
 			buildTurnDisplay(run, {
 				showThinking: props.showThinking,
@@ -143,6 +146,7 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 				liveThinkingId: props.liveThinkingId,
 			}),
 		[run, props.showThinking, props.agentRunning, props.liveThinkingId],
+		sameTurnDisplayItem,
 	);
 
 	const processSummary = useMemo(() => buildProcessSummary(displayItems), [displayItems]);
@@ -274,7 +278,8 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 	 * - 大折叠栏关闭 → 两通道一起清空。组内卡片的展开态不需要额外代码：Radix 折叠时
 	 *   子树整体卸载（children: isOpen && children），组件内部 state 随之销毁。
 	 */
-	const processNodes = useMemo(() => groupTurnProcess(displayItems), [displayItems]);
+	// 同上一层的道理：`groupTurnProcess` 每次新建过程组节点对象，成员引用相同时也一样。
+	const processNodes = useReusedList(() => groupTurnProcess(displayItems), [displayItems], sameTurnProcessNode);
 	const latestProcessGroupId = useMemo(() => lastProcessGroup(processNodes)?.id, [processNodes]);
 	const { groupState: processGroupState, toggleGroup: toggleProcessGroup, syncLatestGroup: syncLatestProcessGroup, reset: resetProcessGroups } = useProcessGroupOpenState(props.sessionId, run.id);
 	useEffect(() => {
@@ -287,31 +292,42 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 	}, [flowSettings.processGroupDisplay, stepsVisible, latestProcessGroupId, resetProcessGroups, syncLatestProcessGroup]);
 
 	// 收集本轮所有 assistant 消息（按 run.items 的时序保持原始顺序）
-	const assistantMessages = run.items.filter((item): item is MessageItem => item.kind === "message" && item.message.role === "assistant");
-	const allImages: ImageContent[] = [];
-	for (const item of assistantMessages) {
-		if (item.message.images) allImages.push(...item.message.images);
-	}
-	// 合并后的完整文本仅用于复制等操作栏（复制整轮输出），不得作为编辑初值（issue #310）
-	const mergedText = assistantMessages
-		.map((item) => visibleAssistantText(item.message.text))
-		.filter(Boolean)
-		.join("\n\n");
-	const containsImageGen = assistantMessages.some((item) => Boolean(item.message.meta?.imageGen));
-	// 编辑目标与编辑初值同源：最后一条有可见正文的 assistant 消息，加载/保存/按钮显隐都指向它
-	const editableMessage = pickEditableAssistantMessage(assistantMessages);
+	const { assistantMessages, allImages, mergedText, containsImageGen, editableMessage, turnModel } = useMemo(() => {
+		const messages = run.items.filter((item): item is MessageItem => item.kind === "message" && item.message.role === "assistant");
+		const images: ImageContent[] = [];
+		for (const item of messages) {
+			if (item.message.images) images.push(...item.message.images);
+		}
+		// 合并后的完整文本仅用于复制等操作栏（复制整轮输出），不得作为编辑初值（issue #310）
+		const merged = messages
+			.map((item) => visibleAssistantText(item.message.text))
+			.filter(Boolean)
+			.join("\n\n");
+		// 复制按钮要的纯文本**不在这里算**：`stripMarkdown` 是多趟正则、代价正比于整轮正文，
+		// 而流式期间 run.items 每 50ms 变一次——挂在 useMemo 里等于每帧对整轮正文跑一遍正则。
+		// 改成把 mergedText 交给 CopyMenu，点「复制为文本」那一刻才算（见 CopyMenu 的 resolveText）。
+		// 本轮模型名：取最后一条带 model 的 assistant 消息（同轮内一般同源），显示在底部耗时行。
+		let model: ChatMessage["model"];
+		for (let index = messages.length - 1; index >= 0 && !model; index -= 1) {
+			model = messages[index]?.message.model;
+		}
+		return {
+			assistantMessages: messages,
+			allImages: images,
+			mergedText: merged,
+			containsImageGen: messages.some((item) => Boolean(item.message.meta?.imageGen)),
+			// 编辑目标与编辑初值同源：最后一条有可见正文的 assistant 消息，加载/保存/按钮显隐都指向它
+			editableMessage: pickEditableAssistantMessage(messages),
+			turnModel: model,
+		};
+	}, [run.items]);
+	// 复制为文本用的纯文本：`stripMarkdown` 是多趟正则、代价正比于整轮正文，而它只在用户点
+	// 「复制为文本」那一刻才需要。走 useLazyValue 推迟到点击时算，流式期间不再每 50ms 跑一遍。
+	const resolvePlainText = useLazyValue(() => (mergedText ? stripMarkdown(mergedText) : ""), [mergedText]);
 	// 收藏身份与右键菜单同源（会话 + 消息 id）：星标显示实心即表示这条回复已在收藏里，再点即取消。
 	const replyMessageId = editableMessage?.message.id ?? null;
 	const replyFavoriteKey = replyMessageId ? favoriteMessageKey(props.sessionId ?? null, replyMessageId) : null;
 	const replyFavorited = replyFavoriteKey ? (props.favoritedMessageKeys?.has(replyFavoriteKey) ?? false) : false;
-	// 本轮回答用的模型（逐轮展示）：取本轮最后一条带模型信息的 assistant 消息。
-	// 同一会话内用户会频繁换模型，只有逐轮记录才能看出哪段是谁答的；
-	// 旧数据/ACP 会话没有该字段时留空，行头不占位。
-	// 本轮模型名：取最后一条带 model 的 assistant 消息（同轮内一般同源），显示在底部耗时行。
-	let turnModel: ChatMessage["model"];
-	for (let index = assistantMessages.length - 1; index >= 0 && !turnModel; index -= 1) {
-		turnModel = assistantMessages[index]?.message.model;
-	}
 	// 只在本轮结束后显示：流式期间模型名跟着正文一起长出来，既干扰阅读也像「已经定稿」的断言；
 	// 回看历史轮用的是哪个模型只关心定论，故与固定耗时（showDuration 的非 live 分支）同一时机出现。
 	const showTurnModel = !isRunLive && Boolean(turnModel);
@@ -393,51 +409,20 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 										</button>
 									)}
 									{(stepsVisible || props.agentRunning === true) &&
-										mountedSteps.items.map((item) => {
-											let content: ReactNode;
-											let itemKey: string;
-											if (item.kind === "process-entry") {
-												itemKey = item.entry.id;
-												if (item.entry.kind === "thinking-entry") {
-													content = <ThinkingStep group={item.entry.group} hidden={!stepsVisible} showThinking={props.showThinking} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />;
-												} else if (item.entry.kind === "retry-entry") {
-													// 自动重试过程行：与工具/思考同层，失败红、运行中旋转（见 RetryStep 注释）
-													content = <RetryStep group={{ kind: "retry-group", id: item.entry.id, message: item.entry.message }} hidden={!stepsVisible} />;
-												} else if (item.entry.kind === "error-entry") {
-													// 错误诊断过程行：429 等错误并入工具调用，可点开看具体错误（见 ErrorStep 注释）
-													content = <ErrorStep group={{ kind: "error-group", id: item.entry.id, message: item.entry.message }} hidden={!stepsVisible} />;
-												} else if (item.entry.kind === "extension-entry") {
-													// 扩展输出行（平铺路径）：无流式状态，隐藏时直接卸载即可
-													content = stepsVisible ? <ExtensionEntryStep messages={item.entry.messages} /> : null;
-												} else {
-													content = <ToolStep group={item.entry.group} hidden={!stepsVisible} stopped={props.agentRunning !== true} sessionId={props.sessionId} onOpenFile={props.onOpenFile} />;
-												}
-											} else if (item.kind === "interim-answer") {
-												itemKey = item.id;
-												// Live 末条在折叠容器外渲染，此处跳过以免双份。
-												if (item.id === liveInterimId) return null;
-												content = (
-													<InterimAnswer
-														mode="settled"
-														text={item.message.text}
-														hidden={!stepsVisible}
-														isStreaming={false}
-														settle={settleId === item.id}
-														// 折叠区内一律 process：正文已与最终回答同尺寸，process 只负责 my-3 间距。
-														// 无最终回答的末段也要这段间距，否则会贴着上方工具行。
-														variant="process"
-														// 中间回复引用锚点：settled 正文根节点带 data-message-id，划选可解析来源消息。
-														messageId={item.id}
-														onOpenExternal={props.onOpenExternal}
-														onOpenFile={props.onOpenFile}
-													/>
-												);
-											} else {
-												// final-answer 不在此容器内（见下方常驻区），此处仅兜底跳过
-												return null;
-											}
-											return <Fragment key={itemKey}>{content}</Fragment>;
-										})}
+										mountedSteps.items.map((item) => (
+											<TurnStepRow
+												key={item.kind === "process-entry" ? item.entry.id : item.id}
+												item={item}
+												stepsVisible={stepsVisible}
+												liveInterimId={liveInterimId}
+												settleId={settleId}
+												showThinking={props.showThinking}
+												agentRunning={props.agentRunning}
+												sessionId={props.sessionId}
+												onOpenExternal={props.onOpenExternal}
+												onOpenFile={props.onOpenFile}
+											/>
+										))}
 									{/* 收起按钮：固定在折叠容器末尾（不再是动态跟随） */}
 									{stepsVisible && (
 										<button type="button" className="execution-summary-collapse" onClick={toggleSteps} title={t("common.collapse")}>
@@ -482,76 +467,23 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 				    流式中不渲染：文件列表还在长，逐条冒出来会让正文区持续抖动。 */}
 				<TurnFileChanges run={run} streaming={isRunLive || Boolean(props.isStreaming)} onOpenFile={props.onOpenFile} onDiffFile={props.onDiffFile} />
 
-				{/* 操作栏 + 尾部耗时/模型：合并为同一行，耗时与模型排在行末（少占一行高度）。
-				    耗时：回复生成中由 LiveDuration 实时计时（100ms 连续跳动，用户视线在底部），
-				    回复结束后固定为总耗时。全轮只有一个耗时显示点（行头只留时间戳），
-				    避免开头结尾重复；无最终回答的轮（纯工具/思考）只有耗时、无按钮，同样可见。
-				    本轮模型名跟在耗时之后（同一行同一层）：回看历史轮用的是哪个模型时视线不用翻回行头。
-				    透明度：半透明降噪（hover/focus-within 恢复）必须盖住整行——按钮图标与行末耗时/模型同一层，
-				    否则出现「图标偏淡、数字偏深」的割裂观感；无按钮时不降噪（没有需要弱化的交互件）。
-				    ask_question 等待回答期间不增长：冻结在提问弹起时刻，等待不计入处理耗时。 */}
-				{((mergedText && !editing) || showDuration || showTurnModel) && (
-					<div className={`flex min-h-6 items-center gap-1${mergedText && !editing ? " opacity-55 transition-opacity hover:opacity-100 focus-within:opacity-100" : ""}`}>
-						{mergedText && !editing && (
-							<>
-								{!containsImageGen && <CopyMenu text={stripMarkdown(mergedText)} markdown={mergedText} targetRef={rowRef} />}
-								{/* 收藏整轮回复：与复制同源（Markdown 源码），快照落本机收藏页；入口不依赖编辑权限。
-								    已收藏显示实心星（与右键菜单同一身份），再点即取消。 */}
-								{props.onFavoriteReply && (
-									<Button
-										type="button"
-										variant="ghost"
-										size="icon-sm"
-										className="turn-row-action-btn size-7 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-										aria-pressed={replyFavorited}
-										onClick={() => props.onFavoriteReply?.(mergedText, replyMessageId)}
-										title={replyFavorited ? t("favorites.unsaveMessage") : t("favorites.saveMessage")}
-										aria-label={replyFavorited ? t("favorites.unsaveMessage") : t("favorites.saveMessage")}
-									>
-										<Star size={14} className={replyFavorited ? "fill-current" : undefined} />
-									</Button>
-								)}
-								<Button type="button" variant="ghost" size="icon-sm" className="turn-row-action-btn size-7 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground" onClick={props.onEnterMultiSelect} title={t("app.multiSelectEnter")}>
-									<Share size={14} />
-								</Button>
-								{!props.isStreaming && !props.isRuntimeBusy && editableMessage?.message.id && (
-									<>
-										{props.onEditMessage && (
-											<Button type="button" variant="ghost" size="icon-sm" className="turn-row-action-btn size-7 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground" onClick={startEditing} title={t("common.edit")}>
-												<SquarePen size={14} />
-											</Button>
-										)}
-										{props.onDeleteMessage && (
-											<Button type="button" variant="ghost" size="icon-sm" className="turn-row-action-btn size-7 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground" onClick={deleteMessage} title={t("common.delete")}>
-												<Trash size={14} />
-											</Button>
-										)}
-									</>
-								)}
-							</>
-						)}
-						{showDuration && (
-							/* 图标尺寸 14 对齐同行按钮图标（原独占一行时是 12）；
-							   pl-[7px] 等于 size-7 按钮里 14px 图标的水平内缩量：时钟与前一个按钮图标的间距
-							   7+gap-1+7 与按钮之间的一致，不再比按钮之间更近。 */
-							<div className="flex items-center gap-1.5 pl-[7px] text-muted-foreground">
-								<Clock size={14} className="shrink-0" aria-hidden="true" />
-								{/* 耗时数字与行头时间一致用界面字体（见 TurnAuthorHeader 注释）；tabular-nums 保持跳动不抖 */}
-								<span className="text-body leading-none tabular-nums">{isRunLive && run.askPending ? formatDuration(Math.max(0, (run.askPendingAt ?? effectiveStart) - effectiveStart)) : isRunLive ? <LiveDuration startedAt={effectiveStart} isStreaming /> : formatDuration(duration)}</span>
-							</div>
-						)}
-						{showTurnModel && turnModel && (
-							/* 本轮实际使用的模型（provider + modelId）跟在耗时后面：同一会话内用户会频繁换模型，
-							   只在输入框显示当前模型不足以回看历史轮；流式中不显示，回复结束才落定。
-							   保留等宽字体与限宽截断以区别于耗时读数（text-body + 等宽数字），但去掉灰底
-							   ——每轮都有的元信息 chip 会给时间线添碎（2026-10 去底，ZCode 模型名即裸暗字）。
-							   title 给全量 provider/model。 */
-							<span className="ml-1 min-w-0 max-w-[16rem] truncate font-mono text-chat-detail leading-none text-text-tertiary" title={`${turnModel.provider}/${turnModel.modelId}`} data-turn-model={turnModel.modelId}>
-								{turnModel.modelId}
-							</span>
-						)}
-					</div>
-				)}
+				<TurnRowActions
+					mergedText={mergedText}
+					editing={editing}
+					containsImageGen={containsImageGen}
+					resolvePlainText={resolvePlainText}
+					targetRef={rowRef}
+					replyFavorited={replyFavorited}
+					replyMessageId={replyMessageId}
+					onFavoriteReply={props.onFavoriteReply}
+					onEnterMultiSelect={props.onEnterMultiSelect}
+					onStartEdit={!props.isStreaming && !props.isRuntimeBusy && Boolean(editableMessage?.message.id) && props.onEditMessage ? startEditing : undefined}
+					onDeleteReply={!props.isStreaming && !props.isRuntimeBusy && Boolean(editableMessage?.message.id) && props.onDeleteMessage ? deleteMessage : undefined}
+					showDuration={showDuration}
+					duration={duration}
+					showTurnModel={showTurnModel}
+					turnModel={turnModel}
+				/>
 			</div>
 		</article>
 	);

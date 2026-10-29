@@ -12,9 +12,9 @@ import { SettingRow } from "./SettingRows";
 
 /** 镜像健康状态点配色：ok=绿（可用）、slow=黄（较慢）、broken=红（不可用）；未探测=灰。 */
 const HEALTH_DOT_CLASS: Record<MirrorHealthResult["status"], string> = {
-	ok: "bg-emerald-500",
-	slow: "bg-amber-500",
-	broken: "bg-red-500",
+	ok: "bg-success",
+	slow: "bg-warning",
+	broken: "bg-danger",
 };
 
 /**

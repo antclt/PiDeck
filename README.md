@@ -72,6 +72,7 @@
   - [🐳 DSH 后端](#-dsh-后端)
   - [🏗️ 工作原理](#-工作原理)
   - [📦 下载安装](#-下载安装)
+  - [📱 移动端客户端](#-移动端客户端)
   - [🧰 快速开始（从源码运行）](#-快速开始从源码运行)
   - [❓ 常见问题 FAQ](#-常见问题-faq)
   - [🧑‍💻 开发指南](#-开发指南)
@@ -285,6 +286,17 @@ npm run dist:linux:dev # Linux（AppImage + deb + tar.gz）
 
 ---
 
+## 📱 移动端客户端
+
+社区维护的 PiDeck 手机客户端，配合桌面端「设置 → Web 服务 → 局域网 Web 服务」使用：
+
+| 项目 | 说明 |
+|---|---|
+| [qgx1992/pideck-mobile](https://github.com/qgx1992/pideck-mobile) | 协议核心 + Capacitor 手机客户端：扫码 / 手填链接配对、流式会话、通知与工作区，可自行打包 APK。 |
+| [xrbbm/PocketDeck](https://github.com/xrbbm/PocketDeck) | 原生 Android（Kotlin + Jetpack Compose）客户端：扫码直达最近会话、审批卡片、Git / 文件工作区，Releases 可直接下载 APK。 |
+
+---
+
 ## 🧰 快速开始（从源码运行）
 
 ```bash
@@ -394,7 +406,13 @@ src/
 - 提交 Issue 前请先搜索是否已有同类问题；
 - 代码 PR 请遵循仓库的架构约定与提交规范，详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-感谢所有为 PiDeck 做出贡献的人！完整名单请查看 [CONTRIBUTORS.md](CONTRIBUTORS.md)。
+### 🙌 贡献者
+
+感谢所有为 PiDeck 做出贡献的人！完整名单（含各自提交的功能与 Issue 编号）见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。
+
+<a href="https://github.com/ayuayue/PiDeck/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=ayuayue/PiDeck&max=100" alt="PiDeck 贡献者" />
+</a>
 
 ---
 
@@ -432,11 +450,14 @@ src/
 
 ## ☕ 赞助
 
-如果 PiDeck 对你有帮助，欢迎请作者喝杯咖啡。微信扫码即可赞赏，感谢支持。
+如果 PiDeck 对你有帮助，欢迎请作者喝杯咖啡。感谢支持。
 
 <p align="center">
   <img src="docs/images/wechat_pay.png" alt="微信赞赏码" width="280" />
 </p>
+
+**支付宝**：打开 PiDeck，点左上角「PiDeck」品牌名 → 「请作者喝咖啡」，手机支付宝扫码即可。
+（购买链接按设备生成，无法固化成静态二维码，所以这里只放应用内入口。）
 
 ## License
 

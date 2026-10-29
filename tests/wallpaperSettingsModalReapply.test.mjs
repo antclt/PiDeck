@@ -74,7 +74,7 @@ function makeRoot() {
 function baseSettings(extra) {
 	return {
 		theme: "light",
-		themeSkin: "custom",
+		themePalette: "custom",
 		customTheme,
 		customThemeOverrides: {},
 		backgroundImage: null,

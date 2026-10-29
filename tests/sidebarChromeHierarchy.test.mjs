@@ -98,7 +98,7 @@ function resolveSurface(tokens, name) {
 
 function skinDarkBlock(skin) {
 	// 普通字符串拼接（模板字面量会把 \[ \s 等转义折叠掉，正则就坏了）
-	const pattern = ':root\\[data-theme="dark"\\]\\[data-appearance="' + skin + '"\\] \\{([\\s\\S]*?)\\n\\}';
+	const pattern = ':root\\[data-theme="dark"\\]\\[data-palette="' + skin + '"\\] \\{([\\s\\S]*?)\\n\\}';
 	return foundation.match(new RegExp(pattern))?.[1] ?? "";
 }
 
@@ -110,7 +110,7 @@ test("dark popovers float one step above panels in every palette", () => {
 	const base = tokensOf(darkBlock());
 	const palettes = [
 		["classic", base],
-		...["fresh-green", "graphite", "sea-blue", "warm-beige"].map((skin) => {
+		...["fresh-green", "graphite", "sea-blue", "warm-beige", "terminal"].map((skin) => {
 			const merged = new Map(base);
 			for (const [k, v] of tokensOf(skinDarkBlock(skin))) merged.set(k, v);
 			return [skin, merged];

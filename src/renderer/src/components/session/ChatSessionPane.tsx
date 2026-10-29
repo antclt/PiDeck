@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { pendingMessageJumpAtom, requestSessionFindAtom, sessionFindOpenRequestsAtom, sessionRecordByIdAtomFamily } from "../../atoms";
+import { clearSessionLiveTextAtom, pendingMessageJumpAtom, requestSessionFindAtom, sessionFindOpenRequestsAtom, sessionRecordByIdAtomFamily } from "../../atoms";
 import { useSessionTimelineController } from "../../hooks/useSessionTimelineController";
 import { useSessionProcessFactsPrefetch } from "../../hooks/useSessionTrajectorySource";
 import { SessionRuntimeInjector } from "./SessionRuntimeInjector";
@@ -9,6 +9,7 @@ import { SessionFindOverlay } from "./SessionFindOverlay";
 import { desktopApi } from "../../desktopApi";
 import { t } from "../../i18n";
 import { supportsSessionFind } from "../../utils/sessionFindSupport";
+import { registerVisibleSession } from "../../utils/sessionVisibility";
 
 export type ChatSessionPaneProps = {
 	sessionId: string;
@@ -27,6 +28,17 @@ export function ChatSessionPane(props: ChatSessionPaneProps) {
 	const services = useSessionPaneServices();
 	const setPendingMessageJump = useSetAtom(pendingMessageJumpAtom);
 	const pendingJump = useAtomValue(pendingMessageJumpAtom);
+	const clearLiveText = useSetAtom(clearSessionLiveTextAtom);
+
+	// 可见性上报：主进程只给挂载中的聊天栏推 live 正文/思考（discussion #446）。
+	// 卸载时顺手清掉本会话的 live 槽：后台流不再下发，切回时主进程按可见性补一帧全量。
+	useEffect(() => {
+		const unregister = registerVisibleSession(sessionId);
+		return () => {
+			// 只有最后一个实例卸载才清 live 槽：同一会话可能同时挂在两个栏里。
+			if (unregister()) clearLiveText(sessionId);
+		};
+	}, [sessionId, clearLiveText]);
 
 	const record = useAtomValue(sessionRecordByIdAtomFamily(sessionId));
 	const sessionTitle = record?.title?.trim() || t("app.chatProject");

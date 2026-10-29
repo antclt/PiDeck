@@ -12,7 +12,7 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
  * 驱动，不启动任何真实进程。
  */
 
-const { LocalPiRuntimeLauncher, LOCAL_PI_GROUP_KILL_DELAY_MS } = loadTsCommonJs("src/main/pi/LocalPiRuntimeLauncher.ts");
+const { LocalPiRuntimeLauncher, LOCAL_PI_GROUP_KILL_DELAY_MS, WINDOWS_PI_GRACEFUL_EXIT_MS } = loadTsCommonJs("src/main/pi/LocalPiRuntimeLauncher.ts");
 
 const PLAN = { kind: "local", command: "/usr/bin/pi", args: ["--mode", "rpc", "--offline"], cwd: "/srv/app", env: { PATH: "/usr/bin" }, shell: false, windowsVerbatimArguments: true };
 
@@ -167,26 +167,52 @@ test("Unix 停止：先 SIGTERM、再延迟对进程组兜底；stop 幂等且�
 	await stopping;
 });
 
-test("Windows 停止：先整树 taskkill、再杀根，且不武装 Unix 的组兜底", async () => {
+test("Windows 停止：先关 stdin 等有序退出，宽限到点才整树强杀（issue #450）", async () => {
 	const child = fakeChild();
 	const treeKills = [];
+	const scheduled = [];
 	const handle = await makeLauncher({
 		platform: "win32",
 		spawn: () => child,
 		killTree: (pid) => treeKills.push(pid),
-		schedule: () => {
-			throw new Error("win32 不得武装组兜底");
-		},
+		schedule: (task, delayMs) => scheduled.push({ task, delayMs }),
 		groupKill: () => {
 			throw new Error("win32 不得组杀");
 		},
 	}).launch(PLAN);
 
 	const stopping = handle.stop("shutdown");
-	assert.deepEqual(treeKills, [4321], "先整树（子代理是 pi 自己 spawn 的独立进程）");
+	assert.equal(child.stdin.writableEnded, true, "先关 stdin：pi RPC 约定它等同于有序停止");
+	assert.deepEqual(treeKills, [], "宽限期内不得强杀");
+	assert.deepEqual(child.kills, [], "宽限期内不得杀根");
+	assert.equal(scheduled.length, 1);
+	assert.equal(scheduled[0].delayMs, WINDOWS_PI_GRACEFUL_EXIT_MS);
+
+	scheduled[0].task();
+	assert.deepEqual(treeKills, [4321], "超时后整树强杀（子进程是 pi 自己 spawn 的）");
 	assert.deepEqual(child.kills, ["SIGTERM"], "再杀根");
 	child.emit("exit", 0, null);
 	await stopping;
+});
+
+test("Windows 宽限内正常退出：到点不补强杀（避免 PID 复用误杀）", async () => {
+	const child = fakeChild();
+	const treeKills = [];
+	const scheduled = [];
+	const handle = await makeLauncher({
+		platform: "win32",
+		spawn: () => child,
+		killTree: (pid) => treeKills.push(pid),
+		schedule: (task, delayMs) => scheduled.push({ task, delayMs }),
+	}).launch(PLAN);
+
+	const stopping = handle.stop("shutdown");
+	child.emit("exit", 0, null);
+	await stopping;
+
+	scheduled[0].task();
+	assert.deepEqual(treeKills, []);
+	assert.deepEqual(child.kills, []);
 });
 
 test("已退出的进程再 stop：立即 resolve，不补发信号", async () => {

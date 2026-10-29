@@ -3,6 +3,7 @@ import type React from "react";
 import { isLocalPathRef, remarkLinkifyPaths } from "./MarkdownLinkCore";
 import { useFileLinkContext, useFilePathExists } from "./FileLinkBase";
 import { extractFileLinkLocation, relativeFilePathWithinRoot, resolveFileLinkPath } from "../../utils/filePathLinks";
+import { getRendererHomeDir } from "../../utils/rendererHomeDir";
 import { isExecutableLikePath } from "../../utils/externalPathAccessPolicy";
 import { useExternalPathOpenGate } from "../../hooks/useExternalPathOpenGate";
 import type { ProjectFileAccessScope } from "../../../../shared/types";
@@ -56,10 +57,11 @@ export function MarkdownLink(
 	//（右键菜单本来就是本组件的局部 UI 状态），与 App 侧左键那份共用同一套判定函数，
 	// 同时只可能有一个处于 pending，因此不会出现两扇确认窗。
 	const { requestExternalPathOpen, dialog: externalPathOpenDialog } = useExternalPathOpenGate();
-	const resolvedPath = fileLinkPath === undefined ? null : resolveFileLinkPath(fileLinkPath, baseDir, projectRoot);
+	const resolvedPath = fileLinkPath === undefined ? null : resolveFileLinkPath(fileLinkPath, baseDir, projectRoot, getRendererHomeDir());
 	// 项目外引用：按本档项目边界解析失败（resolvedPath 为 null），但词法上仍是一个绝对路径。
 	// 解析得出来就必须可用：左键由 App 侧的门放行/确认，菜单里的系统动作由下面两个 handler 送进同一道门。
-	const externalPath = resolvedPath === null && fileLinkPath !== undefined ? resolveFileLinkPath(fileLinkPath, baseDir) : null;
+	// 这里同样带家目录（issue #426）：菜单里的「复制绝对路径 / 在资源管理器打开」必须拿到真绝对路径。
+	const externalPath = resolvedPath === null && fileLinkPath !== undefined ? resolveFileLinkPath(fileLinkPath, baseDir, undefined, getRendererHomeDir()) : null;
 	const menuPath = resolvedPath ?? externalPath;
 	// 「用系统默认方式打开」= shell.openPath：项目内是用户自己的工程文件，直接给；
 	// 项目外要对可执行/脚本后缀收回入口（对这些后缀等于执行代码），其余后缀仍可经等级门打开。
@@ -181,6 +183,10 @@ export function MarkdownLink(
 			<a
 				{...anchorProps}
 				className={linkClass}
+				// 文件/本地引用链接自带 accent 色与右键菜单，不算「正文链接」：
+				// streamdownChrome 用 :not([data-md-file-link]) 给正文链接上 md 语义色，
+				// 避免皮肤改 --color-md-link 时把文件链接一起改掉。
+				data-md-file-link={isFileLink || isLocalRef ? "" : undefined}
 				onClick={handleClick}
 				onContextMenu={isFileLink || isLocalRef ? handleContextMenu : undefined}
 				// 文件链接 hover 展示解码后的完整路径 + 修饰键提示（右键菜单之外的快路径）；

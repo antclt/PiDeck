@@ -18,11 +18,25 @@ export type AppThemeMode = "system" | "light" | "dark" | "schedule";
 /** 主题色预设：data-accent 属性驱动 foundation.css 的 accent/logo 变量 */
 export type AppAccentMode = "default" | "green" | "blue" | "purple" | "amber" | "rose";
 /**
- * 外观主题（皮肤）：覆盖表面/边框/文字色板 + 自带推荐主色，明暗自适应。
- * 内置主题在 themePresets.ts SKIN_PRESETS 定义；custom 由 customThemeOverrides 驱动。
- * classic-green 为出厂默认（中性黑白灰）；fresh-green 为全屏绿色主题（表面带绿色调）。
+ * 外观样式：只管形状与排版（字体、圆角、消息标记、额外 chrome），不决定颜色。
+ * 内置样式在 themePresets.ts STYLE_PRESETS 定义，CSS 走 `[data-appearance="<id>"]`：
+ * - classic：出厂默认，无任何形状覆盖；
+ * - terminal：等宽正文 + 直角框线 + `❯`/`⏺` 消息标记（terminalSkin.css）。
  */
-export type AppSkinId = "classic-green" | "fresh-green" | "graphite" | "sea-blue" | "warm-beige" | "custom";
+export type AppStyleId = "classic" | "terminal";
+
+/**
+ * 外观配色：一套完整的颜色方案（表面/文字/边框/会话面板/Markdown/状态色 + 自带推荐主色），
+ * 与样式正交。CSS 走 `[data-palette="<id>"]`，classic-green 为出厂默认（无覆盖块 = :root 中性色板）。
+ * custom = 颜色完全来自自定义主题包 / customThemeOverrides，不套内置色板。
+ */
+export type AppPaletteId = "classic-green" | "fresh-green" | "graphite" | "sea-blue" | "warm-beige" | "tui" | "custom";
+
+/**
+ * @deprecated 单维外观主题 id（样式与配色合一的旧模型，含已下线的 glass / liquid-glass）。
+ * 仅供旧 settings.json 迁移使用，见 shared/themeSkinMigration.ts；新代码不要再读写 themeSkin。
+ */
+export type AppSkinId = "classic-green" | "fresh-green" | "graphite" | "sea-blue" | "warm-beige" | "terminal" | "glass" | "liquid-glass" | "custom";
 /** Logo 风格：pi-tui = pi 官方 TUI 三色像素标（coral/blue/yellow，默认）；classic = PiDeck 四块拼图 π；custom = 用户自备图片（logoCustomImage）。 */
 export type LogoStyle = "classic" | "pi-tui" | "custom";
 
@@ -75,6 +89,8 @@ export type WebNetworkAddress = {
 export type WorkspaceContentOpenMode = "split" | "maximize";
 /** 会话 Tab 打开模式：preview=单击为临时预览（发消息后自动晋升常驻），permanent=单击即常驻共存 */
 export type SessionTabOpenMode = "preview" | "permanent";
+/** 草稿本作用域：project=每个项目一份（默认，列表同时可读写全局草稿）；global=所有项目共用一份。 */
+export type ScratchPadScopeMode = "project" | "global";
 export type AppFontSizeMode = "compact" | "medium" | "large" | "xlarge";
 
 /** 更新源：atomgit = 国内 AtomGit 源（默认首选）；github = 官方 GitHub Release。 */
@@ -164,8 +180,15 @@ export type AppSettings = {
 	themeScheduleDarkStart: string;
 	/** 主题色（accent）预设，data-accent 驱动；新增预设只需扩充 AppAccentMode 与色板 */
 	accent: AppAccentMode;
-	/** 皮肤（换肤）：内置预设见 themePresets.ts SKIN_PRESETS；custom 走 customThemeOverrides/customTheme */
-	themeSkin: AppSkinId;
+	/** 外观样式（形状/排版）：内置样式见 themePresets.ts STYLE_PRESETS，CSS 走 data-appearance */
+	themeStyle: AppStyleId;
+	/** 外观配色（颜色方案）：内置配色见 themePresets.ts PALETTE_PRESETS，CSS 走 data-palette；custom 走 customThemeOverrides/customTheme */
+	themePalette: AppPaletteId;
+	/**
+	 * @deprecated 旧版单维外观主题；读取旧 settings.json 时由 normalizeThemeAppearance 迁移到
+	 * themeStyle/themePalette，新写入不再产生该字段。
+	 */
+	themeSkin?: AppSkinId;
 	/** Logo 风格：可选以兼容旧 settings.json，缺省按默认 pi-tui 处理；启动画面经 localStorage 提前生效 */
 	logoStyle?: LogoStyle;
 	/**
@@ -200,6 +223,8 @@ export type AppSettings = {
 	piInstall?: { command: string; version: string };
 	/** 会话 Tab 打开模式：preview=单击为临时预览（发消息后自动晋升常驻），permanent=单击即常驻共存 */
 	sessionTabOpenMode: SessionTabOpenMode;
+	/** 草稿本作用域：project=每个项目一份（默认）；global=所有项目共用一份。 */
+	scratchPadScope: ScratchPadScopeMode;
 	/**
 	 * 是否在首轮 agent 成功结束后，用当前 pi 模型异步生成会话标题。
 	 * 默认开启，让侧栏自动获得可读标题；会额外消耗一次模型调用和少量 token（设置说明已写明）。
@@ -333,6 +358,16 @@ export type AppSettings = {
 	 * 避免不同 provider 下同名模型互相误伤；新建会话首条请求即按模型自动匹配代理，无需先激活再手动切。
 	 */
 	piProxyModels: string[];
+	/**
+	 * 是否给 ACP CLI 子进程注入代理环境变量（CodeBuddy / Claude / Codex 等）。
+	 * 与 pi 代理分开配置：ACP CLI 的模型请求走它们自己的端点，出口常与 pi 不同。
+	 * 关闭 = 不注入（继承系统环境变量，与引入该设置前的行为一致）。
+	 */
+	acpProxyEnabled: boolean;
+	/** ACP CLI 使用的代理地址，例如 http://127.0.0.1:7890 */
+	acpProxyUrl: string;
+	/** ACP CLI 代理绕过列表，对应 NO_PROXY 环境变量 */
+	acpProxyBypass: string;
 	/** 是否给桌面端自身网络请求启用代理，不影响已启动的 pi agent 子进程 */
 	desktopProxyEnabled: boolean;
 	/** 桌面端自身网络请求使用的代理地址，例如 http://127.0.0.1:7890 */
@@ -384,6 +419,11 @@ export type AppSettings = {
 	telemetryInstallId?: string;
 	/** 最近一次发送 app_heartbeat 的本地日期，格式 YYYY-MM-DD */
 	telemetryLastHeartbeatDate?: string;
+	/**
+	 * 「请作者喝咖啡」的稳定用户标识（首次查询余额时生成，只在本机持久化）。
+	 * 不是账号：换机/重装即换新 ID，未消耗完的次数留在旧 ID 下。
+	 */
+	watchaUserId?: string;
 	/** 应用安装类型：portable（便携版）或 installed（安装版），启动时自动检测并持久化 */
 	installationType?: "portable" | "installed";
 	/** RPC 调用超时时间（毫秒），默认 600000（10 分钟），用于长时间运行的命令 */
@@ -900,15 +940,25 @@ export type AppSettings = {
 	 */
 	acpTools?: AcpToolConfig[];
 	/**
+	 * ACP 工具级配置记忆：按 acpToolId → { configOptionId → 值 } 保存用户最近一次选择的
+	 * 思考档/模式/权限等会话级配置（agent 在 session/new 回传的 configOptions）。
+	 * 新建会话握手成功后自动重放；session/load 恢复的会话不覆盖（agent 自己会恢复）。
+	 * **不含模型**（category=model/model_config 一律不记）：模型仍随 CLI/会话默认。
+	 * 删除工具时由 acp:tools-save 链路清理对应条目；值来自 agent 回传，入参仍按不可信消毒。
+	 */
+	acpToolConfigDefaults?: Record<string, Record<string, string | boolean>>;
+	/**
 	 * ACP 回合 stall 静默判定阈值（ms）：回合内无任何 session/update、无挂起审批且无在途
 	 * 工具调用的全静默超过该值，先补发 session/cancel 再升级强杀。缺省 undefined = 代码内
-	 * 默认 90_000（acpTurnWatchdog.PROMPT_STALL_TIMEOUT_MS）。变更后新回合生效，不需要重启。
+	 * 默认 180_000（acpTurnWatchdog.PROMPT_STALL_TIMEOUT_MS）。变更后新回合生效，不需要重启。
 	 */
 	acpPromptStallTimeoutMs?: number;
 	/**
-	 * ACP session/prompt 回合兑底超时（ms）：单回合硬上限，与是否持续产出无关，超时补发
-	 * session/cancel 收口。缺省 undefined = 代码内默认 600_000（AcpAgentManager.PROMPT_TURN_TIMEOUT_MS）。
-	 * 复杂任务单回合可超 10 分钟时按需调大。变更后新回合生效，不需要重启。
+	 * ACP session/prompt 回合兑底超时（ms）：回合内**无进展**（无 session/update、无挂起审批）
+	 * 持续超过该值即兑底，超时补发 session/cancel 收口。有产出的长回合每收到一条 update
+	 * 就顺延截止，因此这里不是「总时长硬上限」而是「静默上限」——长但健康的回合（实测有单回合
+	 * 达到 10 分钟且持续产出）不会因为总时长到点被误杀。缺省 undefined = 代码内默认 900_000
+	 * （AcpAgentManager.PROMPT_TURN_TIMEOUT_MS，15 分钟）。变更后新回合生效，不需要重启。
 	 */
 	acpPromptTurnTimeoutMs?: number;
 };
@@ -1040,7 +1090,8 @@ export function createDefaultAppSettings(): AppSettings {
 		themeScheduleLightStart: "07:00",
 		themeScheduleDarkStart: "19:00",
 		accent: "default",
-		themeSkin: "classic-green",
+		themeStyle: "classic",
+		themePalette: "classic-green",
 		logoStyle: "pi-tui",
 		logoCustomImage: "",
 		appDisplayName: "",
@@ -1059,6 +1110,8 @@ export function createDefaultAppSettings(): AppSettings {
 		/** 提示词模板禁用列表：与 SettingsStore 默认一致，空数组 = 不启用模板白名单 */
 		disabledPrompts: [],
 		sessionTabOpenMode: "preview",
+		// 与 main SettingsStore 默认一致：草稿本按项目隔离，切项目右栏内容随之切换
+		scratchPadScope: "project",
 		// 与 main SettingsStore 默认一致：标题生成默认开启，侧栏不再全是「新会话」
 		autoSessionTitle: true,
 		// 与 main SettingsStore 默认一致：忙碌时发送默认「插入当前回合」
@@ -1101,6 +1154,9 @@ export function createDefaultAppSettings(): AppSettings {
 		piProxyBypass: "localhost,127.0.0.1,::1",
 		piProxyProviders: [],
 		piProxyModels: [],
+		acpProxyEnabled: false,
+		acpProxyUrl: "http://127.0.0.1:7890",
+		acpProxyBypass: "localhost,127.0.0.1,::1",
 		desktopProxyEnabled: false,
 		desktopProxyUrl: "http://127.0.0.1:7890",
 		desktopProxyBypass: "localhost,127.0.0.1,::1",

@@ -5,7 +5,7 @@
  * 由 webApi.ts 轮询填充。会话/运行态只读展示用，不持有桌面端 atoms。
  */
 
-import type { AgentUiBatchQuestion, SessionModelPreference } from "../../../shared/types";
+import type { AgentUiBatchQuestion, SessionModelPreference, WebSecurityState } from "../../../shared/types";
 
 export type WebProject = {
 	id: string;
@@ -28,6 +28,8 @@ export type WebSession = {
 	thinkingLevel?: string;
 	/** 运行时后端（pi/dsh；缺省 pi），侧栏/头部徽标展示用 */
 	backend?: import("../../../shared/types").AgentBackend;
+	/** ACP 工具 id（AcpToolConfig.id）：acp 会话的后端选择器要回填具体 CLI */
+	acpToolId?: string;
 	/** 最近活动时间（毫秒时间戳），Web 端会话列表按此降序展示（最新在上） */
 	updatedAt?: number;
 	/** 分支导航（P3）：fork 自哪条会话 / 是否为 fork 产物 / 创建时间 */
@@ -67,7 +69,14 @@ export type WebState = {
 	sessions: WebSession[];
 	runtimes: WebRuntime[];
 	pendingUiRequests?: WebPendingUiRequest[];
+	/** 可选的 ACP 工具（id/name；空/缺失=本机未开启 ACP，后端选择器不列 ACP 入口） */
+	acpTools?: WebAcpTool[];
+	/** Pi 会话安全等级（全局默认 + 会话覆盖）；缺失=服务端未装配安全管理，不渲染入口 */
+	security?: WebSecurityState;
 };
+
+/** /api/state 下发的 ACP 工具条目（command/args/env 不外发）。 */
+export type WebAcpTool = { id: string; name: string };
 
 /** 上下文用量环（P2）：来自 runtime state 轮询，字段与 AgentManager 聚合同名。 */
 export type WebContextUsage = {

@@ -59,6 +59,23 @@ export type SecurityLevelConfig = {
 	defaultAction: SecurityAction;
 };
 
+/**
+ * Web 端安全配置投影（/api/state 的 security 字段）。
+ *
+ * 只保留等级选择器需要的字段：工具规则/正则/目录边界属于主进程与扩展的
+ * 执行契约，Web 端既不展示也不允许修改，不下发。
+ */
+export type WebSecurityState = {
+	/** 总开关：false 时菜单只展示、不可切换（与桌面端置灰语义一致） */
+	enabled: boolean;
+	/** 全局默认等级 id */
+	defaultLevelId: string;
+	/** 可选等级（内置 3 档 + 用户自定义），顺序与桌面端一致 */
+	levels: Array<Pick<SecurityLevelConfig, "id" | "name" | "description" | "builtin">>;
+	/** 会话级覆盖：SessionRecord.id → levelId（未覆盖的会话不出现） */
+	sessionOverrides: Record<string, string>;
+};
+
 /** 完整安全配置（持久化于 AppSettings.securityConfig） */
 export type SecurityConfig = {
 	/** 总开关：false 时扩展完全放行（等价于未安装扩展），且不读快照 */

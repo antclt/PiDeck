@@ -24,3 +24,15 @@ export function classifySmoothStreamChange(prevContent: string, displayed: strin
 	}
 	return { kind: "replace", text: nextContent };
 }
+
+/**
+ * 把 grapheme 数组逐个推入队列。
+ *
+ * 为什么不用 `queue.push(...chars)`：spread 会把整个数组变成一次函数调用的实参，
+ * 实参个数有引擎上限（V8 约十万个）。打字机的 delta 不受单条消息长度约束——
+ * 「展开全文」把预览一次性换成 205KB 全文时，delta 能切出十几万 grapheme，
+ * spread 直接 RangeError: Maximum call stack size exceeded（2026-10-27 事故）。
+ */
+export function pushGraphemes(queue: string[], chars: readonly string[]): void {
+	for (let index = 0; index < chars.length; index += 1) queue.push(chars[index]);
+}

@@ -54,7 +54,7 @@ export interface UseSessionActionsOptions {
 			listArchived: () => Promise<ArchivedPiSession[]>;
 			deleteArchivedRecord: (archivedPath: string) => Promise<boolean>;
 			deleteArchivedDshSession: (dshSessionId: string) => Promise<boolean>;
-			createDraft: (input: { projectId: string; title: string; backend?: AgentBackend } & SessionLaunchPreferences) => Promise<SessionRecord>;
+			createDraft: (input: { projectId: string; title: string; backend?: AgentBackend; acpToolId?: string } & SessionLaunchPreferences) => Promise<SessionRecord>;
 			createAnonymous: (input: { projectId: string; title: string; backend?: AgentBackend } & SessionLaunchPreferences) => Promise<CreateAnonymousSessionResult>;
 		};
 	};
@@ -241,18 +241,19 @@ export function useSessionActions(options: UseSessionActionsOptions) {
 	async function createSessionDraft(
 		projectId = activeProjectId,
 		preferences: SessionLaunchPreferences = {},
-		// 新建会话默认后端：设置项 defaultAgentBackend（C21 统一真相源；旧会话缺省仍按 pi 语义读取）。
-		backend: AgentBackend = options.defaultBackend ?? DEFAULT_AGENT_BACKEND,
+		// 显式 backend（调用方指定）优先；缺省只用设置默认，不沿用「上次选择」。
+		backend?: AgentBackend,
 	): Promise<SessionRecord | undefined> {
 		if (!projectId || creatingSessionDraftRef.current.has(projectId)) return undefined;
 		const project = projects.find((item) => item.id === projectId);
 		if (!project) return undefined;
+		const targetBackend = backend ?? options.defaultBackend ?? DEFAULT_AGENT_BACKEND;
 		creatingSessionDraftRef.current.add(projectId);
 		try {
 			const session = await api.sessions.createDraft({
 				projectId,
-				title: backend === "dsh" ? `${project.name} DSH` : `${project.name} agent`,
-				backend,
+				title: targetBackend === "dsh" ? `${project.name} DSH` : `${project.name} agent`,
+				backend: targetBackend,
 				...preferences,
 			});
 			upsertSession(session);

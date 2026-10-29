@@ -32,6 +32,7 @@ import type {
 	SessionTodoSnapshot,
 	SessionUiResponseInput,
 	PiSubagentEntry,
+	SecurityConfig,
 	UpdateSessionRecordInput,
 	WebServiceStatusInfo,
 } from "../../shared/types";
@@ -42,6 +43,7 @@ import { WebStaticAssets } from "./WebStaticAssets";
 import { WebApiRoutes } from "./WebApiRoutes";
 import { WebStateEventHub } from "./WebStateEventHub";
 import { toPublicSessions } from "./WebSessionProjection";
+import { toWebSecurityState } from "./WebSecurityProjection";
 import { openSessionStream, writeSessionStreamError } from "./WebSessionStream";
 import { WebTokenAuth, type WebTokenPolicy } from "./WebTokenAuth";
 import { WebEventStreamRouter, type AgentChannelEventSource, type PiEvent } from "./WebEventStream";
@@ -59,6 +61,9 @@ export function normalizeWebHost(raw: string): string {
 }
 
 /** /api/chat 图片 parts 上限：最多 4 张，单张 base64 ≤2MB（客户端已预压缩）。 */
+
+/** Web 端可见的 ACP 工具条目：只下发渲染选择器需要的 id/name（command/args/env 不外发）。 */
+export type WebAcpToolInfo = { id: string; name: string };
 
 export type WebServiceDependencies = {
 	/**
@@ -80,6 +85,16 @@ export type WebServiceDependencies = {
 	 * 未注入时该后端在 Web 端退化为「状态轮询 + 磁盘重拉」的旧行为（fail-safe）。
 	 */
 	subscribeAgentChannelEvents?: AgentChannelEventSource;
+	/**
+	 * 订阅 ACP 的 agent 通道事件（agents:message 投影快照 / agents:runtime-state 回合终态）。
+	 * 未注入时 ACP 会话在 Web 端退化为「状态轮询 + 磁盘重拉」（fail-safe）。
+	 */
+	subscribeAcpChannelEvents?: AgentChannelEventSource;
+	/**
+	 * 可选的 ACP 工具清单（AcpToolConfig 的 id/name，已按 acpEnabled + enabled 门控）。
+	 * Web 端后端选择器据此列出 ACP 入口；未注入或为空即完全不提供 ACP 选项。
+	 */
+	listAcpTools?: () => WebAcpToolInfo[];
 	/** agentId → sessionId 路由，用于把 pi 事件导向对应 session 的 SSE 连接。 */
 	getSessionIdForAgent: (agentId: string) => string | undefined;
 	listProjects: () => Project[];
@@ -160,6 +175,16 @@ export type WebServiceDependencies = {
 	listSessionTodo?: (sessionId: string) => Promise<SessionTodoSnapshot | undefined>;
 	listPendingUiRequests: () => PendingUiRequestSnapshot[];
 	respondToUi: (input: SessionUiResponseInput) => Promise<void>;
+	/**
+	 * 安全配置读取（/api/state 的 security 投影与 Web 端等级菜单）。
+	 * 未装配时不向 Web 端暴露安全入口——避免出现「能点但改不了」的假控件。
+	 */
+	getSecurityConfig?: () => SecurityConfig;
+	/**
+	 * 会话安全等级切换：服务端校验会话/等级后写 SecurityStore（levelId=null 清除覆盖）。
+	 * 返回切换后的完整配置，路由层投影成 Web 形状。
+	 */
+	setSessionSecurityLevel?: (sessionId: string, levelId: string | null) => Promise<SecurityConfig>;
 	/** DSH 子代理列表（S6.3：web 端工具面板；未装配 DSH 时缺省）。 */
 	listDshSubagents?: (agentId: string) => Promise<
 		Array<{
@@ -221,7 +246,8 @@ export class WebServiceManager {
 		this.stateHub = new WebStateEventHub({ loadState: () => this.getState(), stateRevision: () => this.stateRevision() });
 		this.apiRoutes = new WebApiRoutes({
 			deps,
-			sendJson: (response, body) => this.sendJson(response, body),
+			// 第三参必须转发：/api/state 的 { etag } 就是靠它下发的，丢了等于条件请求整条链路失效（#442）。
+			sendJson: (response, body, extraHeaders) => this.sendJson(response, body, extraHeaders),
 			sendError: (response, statusCode, code, error, params) => this.sendError(response, statusCode, code, error, params),
 			sendNoContent: (response) => this.sendNoContent(response),
 			readJson: (request, maxBytes) => this.readJson(request, maxBytes),
@@ -313,6 +339,7 @@ export class WebServiceManager {
 		// 解绑 pi 事件源与 DSH 等非 pi 后端的通道事件源，避免服务关闭后仍在转发事件到已失效的 SSE 连接。
 		this.eventStreamRouter.unbindPiSource();
 		this.eventStreamRouter.unbindChannelSource();
+		this.eventStreamRouter.unbindAcpChannelSource();
 		this.stateHub.dispose();
 		if (!this.server) return;
 		const server = this.server;
@@ -366,7 +393,19 @@ export class WebServiceManager {
 						})
 				: undefined,
 		);
-		// 5s 兑底 tick：捕捉不经 pi 事件的目录变更（桌面端改名/删除/导入等）。
+		// ACP 同理：它的流式数据是「投影快照」（agents:message）+ 回合终态（agents:runtime-state），
+		// 不在 pi 事件源里；不接这一层时 Web 端 ACP 会话不实时出字，也不会有 finish 帧。
+		const subscribeAcpChannels = this.deps.subscribeAcpChannelEvents;
+		this.eventStreamRouter.bindAcpChannelSource(
+			subscribeAcpChannels
+				? (handler) =>
+						subscribeAcpChannels((agentId, channel, payload) => {
+							handler(agentId, channel, payload);
+							this.scheduleStatePush();
+						})
+				: undefined,
+		);
+		// 5s 兜底 tick：捕捉不经 pi 事件的目录变更（桌面端改名/删除/导入等）。
 		this.stateHub.startTick();
 		const server = createServer(async (request, response) => {
 			try {
@@ -537,7 +576,24 @@ export class WebServiceManager {
 			sessions: toPublicSessions(sessions),
 			runtimes,
 			pendingUiRequests: this.deps.listPendingUiRequests(),
+			// ACP 工具清单（id/name，已按 acpEnabled + enabled 门控）：Web 端后端选择器的 ACP 入口。
+			// 空数组 = 不提供 ACP 选项——本机未开启 ACP 时不能把入口抛给手机端。
+			acpTools: this.deps.listAcpTools?.() ?? [],
+			// Pi 会话安全等级（全局默认 + 会话覆盖）：Web 端据此显示当前有效等级并切换。
+			// 与桌面端共用 SecurityStore，切换后由 notifySecurityChanged 立即推送本快照。
+			...(this.deps.getSecurityConfig ? { security: toWebSecurityState(this.deps.getSecurityConfig()) } : {}),
 		};
+	}
+
+	/**
+	 * 安全配置变更后立即广播一次状态快照。
+	 *
+	 * 安全配置不在 stateRevision 的版本键里（该键只覆盖 runtime/pendingUi），走
+	 * schedule() 会被快速门挡回；这里绕过版本键直接做全量比对，保证任一端切换后
+	 * 另一端在下一次 SSE 帧就能看到（不依赖 5s 兜底 tick）。
+	 */
+	notifySecurityChanged(): void {
+		void this.stateHub.push(undefined, false, { skipRevisionGate: true });
 	}
 
 	/** SSE 流式响应（实现在 WebSessionStream）：写协议头、注册路由、心跳保活。 */
@@ -564,8 +620,8 @@ export class WebServiceManager {
 	}
 
 	// ── HTTP 响应/请求体工具：实现在 WebHttpResponders；路由与静态资源各用自己的入口，这里只留仍在用的包装 ──
-	private sendJson(response: ServerResponse, body: unknown) {
-		return writeJson(response, body);
+	private sendJson(response: ServerResponse, body: unknown, extraHeaders?: Record<string, string>) {
+		return writeJson(response, body, extraHeaders);
 	}
 
 	private sendError(response: ServerResponse, statusCode: number, code: string, error: string, params?: Record<string, string | number>) {

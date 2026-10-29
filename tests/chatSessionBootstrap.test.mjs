@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { resolveChatSessionBootstrap } = loadTsCommonJs("src/renderer/src/utils/chatSessionBootstrap.ts");
+const { resolveChatSessionBootstrap, resolveNewSessionTarget } = loadTsCommonJs("src/renderer/src/utils/chatSessionBootstrap.ts");
 const appSource = readFileSync("src/renderer/src/App.tsx", "utf8");
 
 function resolve(input) {
@@ -42,6 +42,40 @@ test("Chat bootstrap loads a collapsed catalog, then shows the unified guide pag
 		}),
 		{ kind: "none" },
 	);
+});
+
+function resolveTarget(input) {
+	return JSON.parse(JSON.stringify(resolveNewSessionTarget(input)));
+}
+
+test("新建会话后端：没选/与默认相同 → 默认；本次选了别的且可用 → 所选", () => {
+	const base = { defaultBackend: "pi", dshAvailable: true, acpEnabled: true, acpTools: [] };
+	assert.deepEqual(resolveTarget(base), { backend: "pi" });
+	assert.deepEqual(resolveTarget({ ...base, requested: "pi" }), { backend: "pi" });
+	assert.deepEqual(resolveTarget({ ...base, requested: "dsh" }), { backend: "dsh" });
+	assert.deepEqual(resolveTarget({ ...base, defaultBackend: "dsh", requested: "dsh" }), { backend: "dsh" });
+	assert.deepEqual(resolveTarget({ ...base, requested: "pi", defaultBackend: "dsh" }), { backend: "pi" });
+});
+
+test("新建会话后端：所选 DSH 不可用则回落默认", () => {
+	assert.deepEqual(resolveTarget({ defaultBackend: "pi", requested: "dsh", dshAvailable: false, acpEnabled: false, acpTools: [] }), { backend: "pi" });
+});
+
+test("新建会话后端：所选 ACP 沿用工具，工具失效退第一个可用；关闭/空表回落默认", () => {
+	const base = { defaultBackend: "pi", requested: "acp", requestedAcpToolId: "cb", dshAvailable: false, acpEnabled: true };
+	assert.deepEqual(resolveTarget({ ...base, acpTools: [{ id: "cb" }, { id: "gem" }] }), { backend: "acp", acpToolId: "cb" });
+	// 所选工具被删/禁用：退到第一个可用工具
+	assert.deepEqual(resolveTarget({ ...base, requestedAcpToolId: "gone", acpTools: [{ id: "cb" }, { id: "gem", enabled: false }] }), { backend: "acp", acpToolId: "cb" });
+	// ACP 关闭 / 没有可用工具：不能建出无法激活的草稿
+	assert.deepEqual(resolveTarget({ ...base, acpEnabled: false, acpTools: [{ id: "cb" }] }), { backend: "pi" });
+	assert.deepEqual(resolveTarget({ ...base, acpTools: [] }), { backend: "pi" });
+	assert.deepEqual(resolveTarget({ ...base, acpTools: [{ id: "cb", enabled: false }] }), { backend: "pi" });
+});
+
+test("新建会话后端：生图/生视频等模式不参与后端解析", () => {
+	const base = { defaultBackend: "pi", dshAvailable: true, acpEnabled: true, acpTools: [{ id: "cb" }] };
+	assert.deepEqual(resolveTarget({ ...base, requested: "imagegen" }), { backend: "pi" });
+	assert.deepEqual(resolveTarget({ ...base, requested: "videogen" }), { backend: "pi" });
 });
 
 test("Chat bootstrap never replaces an existing selection or non-Chat project", () => {

@@ -18,6 +18,12 @@ export type AcpToolConfig = {
 	args: string[];
 	/** 追加注入子进程的环境变量（如 codex-acp 需要 ZAI_CODING_KEY）；键名限 [A-Za-z0-9_]，值不落日志。 */
 	env?: Record<string, string>;
+	/**
+	 * 新会话自动切到 agent 自带的 bypass 权限档（Claude 的 bypassPermissions / Qoder 的 yolo 等）。
+	 * 只能在握手后下发：Claude 适配器不读启动参数（只认 settings.json 的 permissions.defaultMode），
+	 * Qoder 适配器又拒绝 set_config_option，故下发失败只记日志、不阻断开会话。
+	 */
+	bypassPermissions?: boolean;
 	/** 禁用后不出现在新建会话选择中；已建会话不受影响。 */
 	enabled: boolean;
 };
@@ -28,6 +34,7 @@ export type AcpToolInput = {
 	name: string;
 	command: string;
 	args: string[];
+	bypassPermissions?: boolean;
 	env?: Record<string, string>;
 };
 

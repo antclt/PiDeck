@@ -5,7 +5,7 @@ import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs
 
 import { ipcChannels } from "../../shared/ipc";
 import { trashPath } from "../fs/trash";
-import type { DraftMeta, ScratchPadData } from "../../shared/types";
+import type { DraftMeta, ScratchPadData, ScratchPadScope } from "../../shared/types";
 import type { AppLogger } from "../logging/AppLogger";
 
 export type ScratchPadIpcDeps = {
@@ -43,14 +43,33 @@ export function registerScratchPadIpc({ appLogger }: ScratchPadIpcDeps): void {
 		return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}-${String(now.getMinutes()).padStart(2, "0")}-${String(now.getSeconds()).padStart(2, "0")}.md`;
 	}
 
-	/** 列出所有草稿，按更新时间降序排列 */
-	ipcMain.handle(ipcChannels.scratchPadList, async (): Promise<DraftMeta[]> => {
-		await ensureDraftsDir();
-		const files = await readdir(draftsDir);
+	/**
+	 * 作用域 id 只用于目录名：限制为字母数字与 `_-`，杜绝 `..` / 分隔符把草稿写到 drafts 之外。
+	 * 项目 id 是 randomUUID（或 builtin-*），全部落在这个字符集内。
+	 */
+	const SCOPE_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+
+	/** 把作用域解析成实际目录；缺省/global = drafts 根目录（向后兼容旧调用方）。 */
+	function resolveScopeDir(scope?: ScratchPadScope): { dir: string; scope: "global" | "project" } {
+		if (!scope || scope.kind === "global") return { dir: draftsDir, scope: "global" };
+		if (scope.kind !== "project" || typeof scope.projectId !== "string" || !SCOPE_ID_PATTERN.test(scope.projectId)) {
+			throw new Error("Invalid scratch pad scope");
+		}
+		return { dir: join(draftsDir, "projects", scope.projectId), scope: "project" };
+	}
+
+	/** 列出某个目录下的 .md 草稿，按更新时间降序；目录不存在时返回空表。 */
+	async function listDraftsIn(dir: string, scope: "global" | "project"): Promise<DraftMeta[]> {
+		let files: string[];
+		try {
+			files = await readdir(dir);
+		} catch {
+			return [];
+		}
 		const mdFiles = files.filter((f) => f.endsWith(".md"));
 		const drafts = await Promise.all(
 			mdFiles.map(async (f) => {
-				const fullPath = join(draftsDir, f);
+				const fullPath = join(dir, f);
 				try {
 					const s = await stat(fullPath);
 					return {
@@ -59,29 +78,46 @@ export function registerScratchPadIpc({ appLogger }: ScratchPadIpcDeps): void {
 						path: fullPath,
 						createdAt: s.birthtimeMs,
 						updatedAt: s.mtimeMs,
+						scope,
 					};
 				} catch {
 					return null;
 				}
 			}),
 		);
-		return drafts.filter((d): d is NonNullable<typeof d> => d !== null).sort((a, b) => b.updatedAt - a.updatedAt);
+		return drafts.filter((d): d is NonNullable<typeof d> => d !== null);
+	}
+
+	/**
+	 * 列出草稿，按更新时间降序排列。
+	 * - global：只返回全局草稿；
+	 * - project：返回本项目草稿 + 全局草稿（可编辑），但不含其他项目——作用域隔离在这里收口。
+	 */
+	ipcMain.handle(ipcChannels.scratchPadList, async (_event, scope?: ScratchPadScope): Promise<DraftMeta[]> => {
+		const resolved = resolveScopeDir(scope);
+		// 根目录迁移（旧 scratch-pad.md → drafts）只在访问全局桶时做一次；项目作用域也要能看到全局草稿。
+		await ensureDraftsDir();
+		const globalDrafts = await listDraftsIn(draftsDir, "global");
+		const scopedDrafts = resolved.scope === "project" ? await listDraftsIn(resolved.dir, "project") : [];
+		return [...scopedDrafts, ...globalDrafts].sort((a, b) => b.updatedAt - a.updatedAt);
 	});
 
-	/** 创建新草稿，默认文件名为当前时间 */
-	ipcMain.handle(ipcChannels.scratchPadCreate, async (): Promise<DraftMeta> => {
-		await ensureDraftsDir();
+	/** 创建新草稿，默认文件名为当前时间；项目作用域写入项目目录，全局作用域写入 drafts 根目录。 */
+	ipcMain.handle(ipcChannels.scratchPadCreate, async (_event, scope?: ScratchPadScope): Promise<DraftMeta> => {
+		const resolved = resolveScopeDir(scope);
+		await mkdir(resolved.dir, { recursive: true });
 		const name = generateDraftName();
-		const fullPath = join(draftsDir, name);
+		const fullPath = join(resolved.dir, name);
 		await writeFile(fullPath, "", "utf8");
 		const s = await stat(fullPath);
-		void appLogger.info("scratchPad", "draft created", { path: fullPath });
+		void appLogger.info("scratchPad", "draft created", { path: fullPath, scope: resolved.scope });
 		return {
 			id: name.replace(/\.md$/, ""),
 			name: name.replace(/\.md$/, ""),
 			path: fullPath,
 			createdAt: s.birthtimeMs,
 			updatedAt: s.mtimeMs,
+			scope: resolved.scope,
 		};
 	});
 

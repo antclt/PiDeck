@@ -19,7 +19,7 @@ export type NormalizedFavoriteInput = {
 	partial: boolean;
 };
 
-const FAVORITE_KINDS: readonly FavoriteKind[] = ["message", "selection"];
+const FAVORITE_KINDS: readonly FavoriteKind[] = ["message", "selection", "session"];
 const FAVORITE_ROLES: readonly FavoriteRole[] = ["user", "assistant", "system"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -38,18 +38,36 @@ function readRole(value: unknown): FavoriteRole | null {
 
 /**
  * 解析并收窄一条收藏入参。
- * 只拒绝「形状不对 / 正文明文为空 / 正文超长」三类错误；其余字段非法一律降级为 null，
+ * 只拒绝「形状不对 / 正文明文为空 / 正文超长」三类错误；会话收藏是引用，
+ * 正文合法为空但必须带 sessionId。其余字段非法一律降级为 null，
  * 避免因为一个可选元信息（如会话标题）缺字段就把整次收藏打回。
  */
 export function parseAddFavoriteInput(value: unknown): NormalizedFavoriteInput {
 	if (!isRecord(value)) throw new Error("Invalid favorite input: not an object");
 	if (typeof value.kind !== "string" || !(FAVORITE_KINDS as readonly string[]).includes(value.kind)) throw new Error("Invalid favorite input: kind");
 	if (typeof value.text !== "string") throw new Error("Invalid favorite input: text");
+	const kind = value.kind as FavoriteKind;
 	const text = value.text.trim();
+	// 会话收藏是引用不是正文快照：正文恒为空，但必须有 sessionId 才能跳回原会话。
+	if (kind === "session") {
+		const sessionId = readOptionalString(value.sessionId, FAVORITE_META_MAX_CHARS);
+		if (!sessionId) throw new Error("Invalid favorite input: sessionId");
+		return {
+			kind,
+			text: "",
+			role: null,
+			sessionId,
+			sessionTitle: readOptionalString(value.sessionTitle, FAVORITE_SESSION_TITLE_MAX_CHARS),
+			projectId: readOptionalString(value.projectId, FAVORITE_META_MAX_CHARS),
+			messageId: null,
+			model: null,
+			partial: false,
+		};
+	}
 	if (!text) throw new Error("Invalid favorite input: text is empty");
 	if (text.length > FAVORITE_TEXT_INPUT_MAX_CHARS) throw new Error("Invalid favorite input: text too long");
 	return {
-		kind: value.kind as FavoriteKind,
+		kind,
 		text,
 		role: readRole(value.role),
 		sessionId: readOptionalString(value.sessionId, FAVORITE_META_MAX_CHARS),

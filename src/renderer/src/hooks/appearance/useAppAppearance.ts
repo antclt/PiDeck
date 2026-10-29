@@ -17,23 +17,78 @@ const injectedWallpaperValues = new Map<string, string>();
 
 /**
  * 自定义 token 注入（主题包快照 + 手写 overrides）：App 持久化应用与设置弹窗实时预览共用。
- * 先清后注、幂等；快照仅 themeSkin=custom 时生效（切回内置皮肤不残留），
- * overrides 沿袭历史行为始终叠加（inline 样式压过 [data-appearance] 样式表）。
+ * 先清后注、幂等；快照仅在配色为 `custom` 时生效（颜色完全来自主题包），
+ * 切到任何内置配色都不残留；overrides 沿袭历史行为始终叠加（inline 样式压过 [data-palette] 样式表）。
  */
-export function applyCustomThemeTokens(root: HTMLElement, settings: Pick<AppSettings, "themeSkin" | "customTheme" | "customThemeOverrides">, isDark: boolean): void {
-	for (const k of injectedCustomTokens) root.style.removeProperty(`--color-${k}`);
+type CustomThemeSettingsSlice = Pick<AppSettings, "themePalette" | "customTheme" | "customThemeOverrides" | "fontFamilyBase" | "fontFamilyBaseCustom" | "fontFamilyMono" | "fontFamilyMonoCustom">;
+
+/**
+ * 当前生效的主题包快照：配色为 `custom` 时生效。
+ *
+ * 样式与配色已拆开，主题包的 `base` 只决定应用时绑定哪套样式（形状 chrome），
+ * 颜色本身与样式正交——因此之后手动切换样式不应让主题包颜色失效。
+ */
+function activeCustomTheme(settings: CustomThemeSettingsSlice): CustomThemeSettingsSlice["customTheme"] {
+	const theme = settings.customTheme;
+	if (!theme) return undefined;
+	return settings.themePalette === "custom" ? theme : undefined;
+}
+
+/** 用户输入的自定义字体统一追加 CJK 回退（只填西文字体时中文不能落到 SimSun 小字挤压） */
+const CJK_FONT_FALLBACK = '"Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "HarmonyOS Sans SC", "Hiragino Sans GB", "Noto Sans CJK SC"';
+
+/**
+ * 字体族 token：主题包字体（当前皮肤匹配快照时）先落，再用用户显式自定义字体覆盖。
+ *
+ * 为什么和颜色注入分开：两者写的是同一批 inline style，用户「设置里选的字体」必须压过
+ * 主题包默认值；如果各自 removeProperty，先跑的会把后跑的覆盖结果抹掉（切主题/改字体时
+ * 互相打架）。这里集中算一次最终值，谁调用都得到同一结果，天然幂等。
+ */
+export function applyFontFamilyTokens(root: HTMLElement, settings: CustomThemeSettingsSlice, isDark: boolean): void {
+	const theme = activeCustomTheme(settings);
+	const themeTokens = theme ? (isDark ? theme.dark : theme.light) : {};
+	const themeFont = (cssVar: string): string | undefined => themeTokens[cssVar] ?? themeTokens[cssVar.slice("--".length)];
+	const apply = (cssVar: string, userChoice: string, userValue: string, tail: string) => {
+		const fromTheme = themeFont(cssVar);
+		if (userChoice === "custom" && userValue.trim()) {
+			root.style.setProperty(cssVar, `${userValue.trim()}, ${tail}`);
+		} else if (fromTheme) {
+			root.style.setProperty(cssVar, fromTheme);
+		} else {
+			root.style.removeProperty(cssVar);
+		}
+	};
+	apply("--font-family-base", settings.fontFamilyBase, settings.fontFamilyBaseCustom, `${CJK_FONT_FALLBACK}, sans-serif`);
+	apply("--font-family-mono", settings.fontFamilyMono, settings.fontFamilyMonoCustom, CJK_FONT_FALLBACK);
+	// Markdown 专用字体：主题包独有（皮肤自己在样式表里给等宽值），没有就交回样式表
+	const mdFont = themeFont("--font-family-md");
+	if (mdFont) root.style.setProperty("--font-family-md", mdFont);
+	else root.style.removeProperty("--font-family-md");
+}
+
+export function applyCustomThemeTokens(root: HTMLElement, settings: CustomThemeSettingsSlice, isDark: boolean): void {
+	for (const v of injectedCustomTokens) root.style.removeProperty(v);
 	injectedCustomTokens.clear();
-	if (settings.themeSkin === "custom" && settings.customTheme) {
-		const schemeTokens = isDark ? settings.customTheme.dark : settings.customTheme.light;
+	// 主题包里的字体 token 由 applyFontFamilyTokens 统一处理（它们不是 --color-* 变量）；
+	// overrides 里手写的字体也一并交给它，避免这里拼出 --color-font-family-* 这种错变量。
+	const isFontToken = (token: string) => token.startsWith("font-family-");
+	const theme = activeCustomTheme(settings);
+	if (theme) {
+		const schemeTokens = isDark ? theme.dark : theme.light;
 		for (const [k, v] of Object.entries(schemeTokens)) {
-			root.style.setProperty(`--color-${k}`, v);
-			injectedCustomTokens.add(k);
+			if (isFontToken(k)) continue;
+			const cssVar = k.startsWith("--") ? k : `--color-${k}`;
+			root.style.setProperty(cssVar, v);
+			injectedCustomTokens.add(cssVar);
 		}
 	}
 	for (const [k, v] of Object.entries(settings.customThemeOverrides ?? {})) {
-		root.style.setProperty(`--color-${k}`, v);
-		injectedCustomTokens.add(k);
+		if (isFontToken(k)) continue;
+		const cssVar = k.startsWith("--") ? k : `--color-${k}`;
+		root.style.setProperty(cssVar, v);
+		injectedCustomTokens.add(cssVar);
 	}
+	applyFontFamilyTokens(root, settings, isDark);
 	// 壁纸开启时壁纸 token 必须压在自定义色之上（与 useAppAppearance 中「先自定义、后壁纸」的顺序一致）
 	for (const [k, v] of injectedWallpaperValues) root.style.setProperty(k, v);
 }
@@ -142,7 +197,7 @@ export function useAppAppearance({ settings, systemLanguage, settingsLoaded }: {
 		if (settingsLoaded) hasAppliedAuthoritativeAppearanceRef.current = true;
 		// 依赖 theme 与 accent：只改主题色时也必须重新应用 data-accent（否则界面不变）
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- settings 是整对象入参，列全字段反而脆弱；与既有行为一致（见 App.tsx 迁出前同注释）
-	}, [resolvedTheme, settings.theme, settings.themeScheduleLightStart, settings.themeScheduleDarkStart, settings.accent, settings.themeSkin, settingsLoaded, systemPrefersDark]);
+	}, [resolvedTheme, settings.theme, settings.themeScheduleLightStart, settings.themeScheduleDarkStart, settings.accent, settings.themeStyle, settings.themePalette, settingsLoaded, systemPrefersDark]);
 
 	// 外观主题自定义覆盖 + 换肤背景图统一管理（原两个 effect 互相清除：
 	// 皮肤 effect 清 token 时误清壁纸注入、背景 effect 的 else 分支又误清皮肤 bg 键——
@@ -242,7 +297,7 @@ export function useAppAppearance({ settings, systemLanguage, settingsLoaded }: {
 		}
 		// resolvedTheme 必须进依赖：系统明暗翻转/时间边界到达时壁纸 inline token 要按新明暗重算，
 		// 否则上一主题烤进的 color-mix 基色焊死在 root.style 上压过样式表（issue #297）
-	}, [resolvedTheme, settings.themeSkin, settings.theme, settings.customTheme, settings.customThemeOverrides, settings.backgroundImage, settings.backgroundImageOpacity, settings.weWorkshopDir, settings.weWallpaperId]);
+	}, [resolvedTheme, settings.themePalette, settings.theme, settings.customTheme, settings.customThemeOverrides, settings.backgroundImage, settings.backgroundImageOpacity, settings.weWorkshopDir, settings.weWallpaperId]);
 
 	// 字号与命名字体预设由 data 属性选择 CSS token；只有 custom 字体需要注入用户输入。
 	useEffect(() => {
@@ -251,22 +306,8 @@ export function useAppAppearance({ settings, systemLanguage, settingsLoaded }: {
 		root.dataset.fontBase = settings.fontFamilyBase;
 		root.dataset.fontMono = settings.fontFamilyMono;
 
-		// 自定义字体统一追加 CJK 回退：用户只填西文字体时，中文不能落到 SimSun 小字挤压
-		// （与下方 mono 注入同理，见 foundation.css 注释）。
-		const baseCustomFont = settings.fontFamilyBaseCustom.trim();
-		if (settings.fontFamilyBase === "custom" && baseCustomFont) {
-			root.style.setProperty("--font-family-base", `${baseCustomFont}, "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "HarmonyOS Sans SC", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif`);
-		} else {
-			root.style.removeProperty("--font-family-base");
-		}
-
-		// 自定义等宽字体同样必须追加 CJK 回退：用户一般只填西文字体
-		// （如 JetBrains Mono），不追加时中文会落到 SimSun 小字挤压（见 foundation.css 注释）。
-		const monoCustomFont = settings.fontFamilyMonoCustom.trim();
-		if (settings.fontFamilyMono === "custom" && monoCustomFont) {
-			root.style.setProperty("--font-family-mono", `${monoCustomFont}, "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "HarmonyOS Sans SC", "Hiragino Sans GB", "Noto Sans CJK SC"`);
-		} else {
-			root.style.removeProperty("--font-family-mono");
-		}
-	}, [settings.fontSize, settings.uiFontSize, settings.tabBarFontSize, settings.chatFontSize, settings.inputFontSize, settings.fontFamilyBase, settings.fontFamilyBaseCustom, settings.fontFamilyMono, settings.fontFamilyMonoCustom]);
+		// 字体族：主题包字体 + 用户显式自定义字体（CJK 回退、覆盖顺序）统一在
+		// applyFontFamilyTokens 里算，这里只负责在字体设置变化时重算一次。
+		applyFontFamilyTokens(root, settings, resolvedTheme === "dark");
+	}, [settings.fontSize, settings.uiFontSize, settings.tabBarFontSize, settings.chatFontSize, settings.inputFontSize, settings.fontFamilyBase, settings.fontFamilyBaseCustom, settings.fontFamilyMono, settings.fontFamilyMonoCustom, settings.themePalette, settings.customTheme, resolvedTheme]);
 }

@@ -1,54 +1,54 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { classifySmoothStreamChange } from "./smoothStreamContent";
+import { classifySmoothStreamChange, pushGraphemes } from "./smoothStreamContent";
 
 /**
- * useSmoothStream - ???????? Hook????????
+ * useSmoothStream —— 把「后端一次性到达的一大段文本」摊成逐字显示。
  *
- * ????????????????????????? Cherry Studio ????
+ * 设计思路沿用 Cherry Studio 的打字机。
  *
- * ?????
- * 1. ?????? startsWith ???????? Intl.Segmenter ????????
- *    ?Intl.Segmenter ??????/??/??????????
- * 2. requestAnimationFrame ???????
- * 3. ?????????????????????/divisor?????????
- * 4. ?????????????????? dump???????
+ * 四步：
+ * 1. 变更分类：用 startsWith 判断是追加 / 回退 / 替换，追加部分按 Intl.Segmenter 切字符
+ *    （Intl.Segmenter 保证 emoji、组合字、CJK 不会被切坏）；
+ * 2. 排队：请求动画帧（rAF）驱动，不按固定定时器；
+ * 3. 每帧步进量 = 队列长度 / divisor，再夹到上限，队列越长追得越快；
+ * 4. 收口：流式结束立即直出全文，不再逐字排空。
  *
- * ?????
- * - ???"??"?????? atom/???????????/????????
- * - ? hook?????? UI ??? timeline/turn ???????
+ * 边界：
+ * - 它只负责「显示进度」，不负责解码：上游 atom 给什么文本就显示什么前缀；
+ * - 本 hook 只被 UI 层（timeline / turn）调用，不参与数据层。
  *
- * ?????Pideck ????streamdown ?????????????????????
- * ?? rAF ??????????? minDelay?? 24/33ms???? divisor?
+ * 与 PiDeck 既有 streamdown 的区别：那边是「冻结前缀 + 尾部重解析」，
+ * 这边只管「这一帧露几个字」，两者叠加，minDelay 的取值口径也不同。
  */
 
 interface UseSmoothStreamOptions {
-	/** ????????? chunk ????????? */
+	/** 目标全文（上游给的完整文本，每次变化都是一个 chunk） */
 	content: string;
-	/** ????????? */
+	/** 是否仍在流式 */
 	isStreaming: boolean;
 	/**
 	 * 禁用平滑（折叠态用）：直接同步返回 content，不启动 rAF 打字机。
 	 * 折叠态内容不可见，逐字推进是纯浪费；展开瞬间以全文呈现（与打字机追平后的观感一致）。
 	 */
 	disabled?: boolean;
-	/** ???????ms???? 8ms?~120Hz ??????? 16ms ??? */
+	/** 两帧之间最短间隔（ms）。默认 16ms≈60Hz；长文本会再降频，见下方 effectiveMinDelay */
 	minDelay?: number;
-	/** ??????????? / divisor = ???????????? */
+	/** 流式期的分母：队列越长步进越大。步进 = 队列长度 / divisor */
 	streamingDivisor?: number;
-	/** ????????????????? dump? */
+	/** 收口期的分母（流已结束、队列还在排空） */
 	drainDivisor?: number;
-	/** ?????????????????? */
+	/** 流式期单帧步进上限（字） */
 	maxStepPerFrame?: number;
-	/** ???????????????? */
+	/** 收口期单帧步进上限（字） */
 	maxDrainStepPerFrame?: number;
 }
 
 interface UseSmoothStreamReturn {
-	/** ???????? */
+	/** 当前应显示的文本前缀 */
 	displayedContent: string;
 }
 
-/** ????????????????????????? */
+/** 流式仍活跃但长时间没有新内容时的停帧阈值（防通道中断后 60fps 空转烧 CPU）。 */
 const segmenter = new Intl.Segmenter(["en-US", "zh-CN", "zh-TW", "ja-JP", "ko-KR", "de-DE", "fr-FR", "es-ES", "pt-PT", "ru-RU"]);
 
 /**
@@ -74,17 +74,17 @@ export function useSmoothStream({ content, isStreaming, disabled = false, minDel
 	const effectiveMinDelay = Math.max(minDelay, content.length > 64_000 ? 33 : content.length > 8_000 ? 16 : 8);
 	const effectiveMaxStepPerFrame = Math.max(maxStepPerFrame, content.length > 8_000 ? 12 : 6);
 
-	// ????????
+	// 待显示字符队列（已按 grapheme 切开）
 	const chunkQueueRef = useRef<string[]>([]);
 	// rAF ID
 	const rafRef = useRef<number | null>(null);
-	// ???? UI ???
+	// 已提交给 UI 的文本
 	const displayedRef = useRef(content);
-	// ??????????????? delta?
+	// 上一版权威文本（用于下次算 delta）
 	const prevContentRef = useRef(content);
-	// ??????
+	// 上次实际渲染的时刻（minDelay 闸门）
 	const lastRenderTimeRef = useRef(0);
-	// ?????
+	// 流式是否已结束（renderLoop 里读它决定 divisor / maxStep）
 	const streamDoneRef = useRef(!isStreaming);
 	streamDoneRef.current = !isStreaming;
 	// 最近一次内容变更时刻：空转停帧判定用（见 renderLoop 空队列分支）
@@ -93,7 +93,7 @@ export function useSmoothStream({ content, isStreaming, disabled = false, minDel
 	// （TDZ），且引用稳定，不参与 effect 依赖。
 	const renderLoopRef = useRef<(currentTime: number) => void>(() => {});
 
-	// ??????? delta ???
+	// 计算 delta 并入队
 	useEffect(() => {
 		const prevContent = prevContentRef.current;
 		const newContent = content;
@@ -107,10 +107,21 @@ export function useSmoothStream({ content, isStreaming, disabled = false, minDel
 			return;
 		}
 
+		// 流已结束（isStreaming=false）：不进打字机。同一提交里「收口」effect 会把全文
+		// 直接 dump，且 settled 展示只读 props.text（MarkdownStream），displayedContent
+		// 根本不参与——这里入队是纯浪费；更糟的是大 delta（点「展开全文」把预览一次性
+		// 换成 205KB 全文）segmentText 出十几万 grapheme，曾经 spread 进 push 直接爆栈
+		// （RangeError: Maximum call stack size exceeded，2026-10-27 事故）。
+		if (streamDoneRef.current) {
+			prevContentRef.current = newContent;
+			return;
+		}
+
 		const change = classifySmoothStreamChange(prevContent, displayedRef.current, newContent);
 		if (change.kind === "append") {
 			const chars = segmentText(change.delta);
-			chunkQueueRef.current.push(...chars);
+			// 入队必须走 pushGraphemes：流式期一次异常大的 flush 同样会撑爆 spread 实参上限。
+			pushGraphemes(chunkQueueRef.current, chars);
 			// 空转停帧后新 delta 到达：重启打字机
 			if (!rafRef.current) renderLoopRef.current(performance.now());
 		} else if (change.kind === "rewind") {
@@ -130,7 +141,7 @@ export function useSmoothStream({ content, isStreaming, disabled = false, minDel
 		lastChunkAtRef.current = performance.now();
 	}, [content, disabled]);
 
-	// ?????????????????????? dump ???? rAF ?????
+	// 流式结束：取消在途 rAF，直接 dump 全文（不再逐字排空）
 	useEffect(() => {
 		if (isStreaming) return;
 		// 流式结束（会话/回合收口）：立即收口，不再逐字排空——
@@ -146,13 +157,13 @@ export function useSmoothStream({ content, isStreaming, disabled = false, minDel
 		setDisplayedContent(content);
 	}, [isStreaming, content]);
 
-	// ????
+	// 主循环
 	const renderLoop = useCallback(
 		(currentTime: number) => {
 			const queue = chunkQueueRef.current;
 			if (queue.length === 0) {
 				if (streamDoneRef.current) {
-					// ??? + ?????????????
+					// 队列空 + 流已结束：与权威文本对齐后停帧
 					if (displayedRef.current !== prevContentRef.current) {
 						displayedRef.current = prevContentRef.current;
 						setDisplayedContent(displayedRef.current);
@@ -178,10 +189,10 @@ export function useSmoothStream({ content, isStreaming, disabled = false, minDel
 			}
 			lastRenderTimeRef.current = currentTime;
 
-			// ?????????????? /streamingDivisor ??????????
-			// ??? /drainDivisor ????????? maxStep ??????
-			// ????????? delta ??? LLM ??? queue ???count ??
-			// ? queue ??????????? ? maxStep????????
+			// 流式期用 streamingDivisor，收口期用 drainDivisor（收口要更快追上全文）
+			// 步进再夹到 maxStep 上限：队列再长也不能一帧喷完，否则等于没有打字机
+			// 队列长度随 LLM 产出增长，步进随之变大，保证排空速率 > 产出速率
+			// （否则队列越积越长，显示永远滞后）
 			const divisor = streamDoneRef.current ? drainDivisor : streamingDivisor;
 			const maxStep = streamDoneRef.current ? maxDrainStepPerFrame : effectiveMaxStepPerFrame;
 			const count = Math.min(Math.max(1, Math.floor(queue.length / divisor)), maxStep);
@@ -192,7 +203,7 @@ export function useSmoothStream({ content, isStreaming, disabled = false, minDel
 			if (queue.length > 0 || !streamDoneRef.current) {
 				rafRef.current = requestAnimationFrame(renderLoop);
 			} else {
-				// ????? + ??????????????
+				// 队列空 + 流已结束：与权威文本对齐后停帧
 				if (displayedRef.current !== prevContentRef.current) {
 					displayedRef.current = prevContentRef.current;
 					setDisplayedContent(displayedRef.current);
@@ -204,7 +215,7 @@ export function useSmoothStream({ content, isStreaming, disabled = false, minDel
 	);
 	renderLoopRef.current = renderLoop;
 
-	// ??/???????????????????????
+	// 启停 rAF：流式中或有积压就挂帧，卸载时取消
 	useEffect(() => {
 		if (disabled) return; // 折叠态：不启动 rAF，避免不可见内容逐字推进
 		if ((isStreaming || chunkQueueRef.current.length > 0) && !rafRef.current) {

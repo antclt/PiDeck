@@ -19,7 +19,10 @@ export class AcpRpcError extends Error {
  *  session/cancel」的超时与普通失败——不取消的话,下一个 session/prompt 会一直
  *  排队在旧回合之后反复超时(opencode 卡死实测)。 */
 export class AcpTimeoutError extends Error {
-	constructor(method: string, timeoutMs: number) {
+	constructor(
+		readonly method: string,
+		readonly timeoutMs: number,
+	) {
 		super(`ACP request timed out after ${timeoutMs}ms: ${method}`);
 		this.name = "AcpTimeoutError";
 	}
@@ -31,7 +34,8 @@ export const ACP_DEFER_RESPONSE: unique symbol = Symbol("ACP_DEFER_RESPONSE");
 type PendingRequest = {
 	resolve: (value: unknown) => void;
 	reject: (error: Error) => void;
-	timer: NodeJS.Timeout;
+	/** 超时定时器；滚动刷新的请求会反复重建（顺延截止），因此可能短暂为 null。 */
+	timer: NodeJS.Timeout | null;
 };
 
 /** agent → client 请求的处理器注册；返回值作为 result，抛错按 JSON-RPC error 回给 agent。
@@ -99,8 +103,15 @@ export class AcpConnection extends EventEmitter {
 		this.requestHandlers.delete(method);
 	}
 
-	/** client → agent 请求；agent 返回 error 时 reject AcpRpcError。 */
-	request(method: string, params?: Record<string, unknown>, timeoutMs = 60_000): Promise<unknown> {
+	/**
+	 * client → agent 请求；agent 返回 error 时 reject AcpRpcError。
+	 *
+	 * onArm（可选）把「顺延截止」句柄交给调用方：timeoutMs 语义因此可以是「无进展静默上限」
+	 * 而不是「总时长硬上限」——session/prompt 这类长回合只要有进展就 refresh()，
+	 * 健康的长时间任务不会被总时长误杀（归档实测：CodeBuddy 单回合连续产出 283 条
+	 * update 直到第 10 分钟整被墙钟上限掐断）。真悬死的 CLI 不再产出，仍然到点收口。
+	 */
+	request(method: string, params?: Record<string, unknown>, timeoutMs = 60_000, onArm?: (refresh: () => void) => void): Promise<unknown> {
 		if (this.closed) {
 			return Promise.reject(this.closeReason ? new Error(`${this.closeReason.message} (ACP request not sent: ${method})`) : new Error(`ACP connection closed: ${method}`));
 		}
@@ -108,11 +119,19 @@ export class AcpConnection extends EventEmitter {
 		const payload: AcpRpcRequest = { jsonrpc: "2.0", id, method, ...(params === undefined ? {} : { params }) };
 
 		const promise = new Promise<unknown>((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(new AcpTimeoutError(method, timeoutMs));
-			}, timeoutMs);
-			this.pending.set(id, { resolve, reject, timer });
+			const entry: PendingRequest = { resolve, reject, timer: null };
+			const arm = (): void => {
+				// 已结算/连接已关：迟到的 refresh 不再布防，免得给已删除的 pending 挂无效定时器。
+				if (this.pending.get(id) !== entry) return;
+				if (entry.timer) clearTimeout(entry.timer);
+				entry.timer = setTimeout(() => {
+					this.pending.delete(id);
+					reject(new AcpTimeoutError(method, timeoutMs));
+				}, timeoutMs);
+			};
+			this.pending.set(id, entry);
+			arm();
+			onArm?.(arm);
 		});
 
 		this.write(payload);
@@ -143,7 +162,7 @@ export class AcpConnection extends EventEmitter {
 		this.linePump.reset();
 		this.closeReason = error ?? null;
 		for (const [, pending] of this.pending) {
-			clearTimeout(pending.timer);
+			if (pending.timer) clearTimeout(pending.timer);
 			pending.reject(error ?? new Error("ACP connection closed before response"));
 		}
 		this.pending.clear();
@@ -238,7 +257,7 @@ export class AcpConnection extends EventEmitter {
 			const pending = this.pending.get(id);
 			if (!pending) return;
 			this.pending.delete(id);
-			clearTimeout(pending.timer);
+			if (pending.timer) clearTimeout(pending.timer);
 			const error = (message as { error?: { code: number; message: string; data?: unknown } }).error;
 			if (error) pending.reject(new AcpRpcError(error.message, error.code, error.data));
 			else pending.resolve((message as { result?: unknown }).result);

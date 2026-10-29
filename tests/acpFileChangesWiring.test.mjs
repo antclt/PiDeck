@@ -50,3 +50,64 @@ test("ACP 工具卡片能被轮末 chip 行的按轮聚合复用（collectRunFil
 	assert.equal(files.length, 1);
 	assert.equal(files[0].path, "C:/repo/a.ts");
 });
+
+test("ACP content diff 经投影后可直接被 collectSessionFileChanges 聚合（不依赖 rawInput 形状）", () => {
+	const { initialAcpProjection, projectAcpSessionUpdate } = loadTsCommonJs("src/main/acp/AcpEventProjector.ts");
+	const { collectSessionFileChanges } = loadTsCommonJs("src/shared/fileChanges.ts");
+	// agent 只把改动放 content（规范路径），标题也不是英文 edit/write：
+	// 投影层必须归一成 pi/DSH 同形的 toolName=edit + {filePath,oldText,newText}。
+	const state = projectAcpSessionUpdate(
+		initialAcpProjection(),
+		{
+			sessionUpdate: "tool_call",
+			toolCallId: "tc-diff",
+			title: "修改文件",
+			status: "completed",
+			content: [{ type: "diff", path: "C:/repo/a.ts", oldValue: "a", newValue: "b" }],
+		},
+		"agent-1",
+	);
+	const entries = collectSessionFileChanges(state.messages);
+	assert.equal(entries.length, 1);
+	assert.equal(entries[0].path, "C:/repo/a.ts");
+	assert.equal(entries[0].originalContent, "a");
+	assert.equal(entries[0].content, "b");
+});
+
+test("ACP 只上报 file_path 的编辑（Qoder 实测 kind=edit）也进本轮文件清单，且不产生虚假 diff", () => {
+	const { initialAcpProjection, projectAcpSessionUpdate } = loadTsCommonJs("src/main/acp/AcpEventProjector.ts");
+	const { collectSessionFileChanges, getToolDiffTarget, hasFileChangePayload } = loadTsCommonJs("src/shared/fileChanges.ts");
+	// Qoder CLI 的 wire 实际形态：title=Edit、kind=edit，rawInput 只有 file_path，
+	// content 为空数组（旧/新文本根本不上 wire）。修复前聚合结果恒为空 → 轮末 chip 行消失。
+	let state = projectAcpSessionUpdate(
+		initialAcpProjection(),
+		{ sessionUpdate: "tool_call", toolCallId: "tc-path", title: "Edit", kind: "edit", status: "in_progress", rawInput: { file_path: "C:/repo/a.ts" } },
+		"agent-1",
+	);
+	state = projectAcpSessionUpdate(state, { sessionUpdate: "tool_call_update", toolCallId: "tc-path", status: "completed", content: [] }, "agent-1");
+	const entries = collectSessionFileChanges(state.messages);
+	assert.equal(entries.length, 1);
+	assert.equal(entries[0].path, "C:/repo/a.ts");
+	assert.equal(entries[0].count, 1);
+	// 空载荷：工具卡不渲染空 diff、chip 不显示 +0/−0，点击退回打开文件。
+	assert.equal(hasFileChangePayload(getToolDiffTarget(state.messages[0])), false);
+});
+
+test("非编辑类工具即使带 file_path 也不进文件清单（kind=read）", () => {
+	const { initialAcpProjection, projectAcpSessionUpdate } = loadTsCommonJs("src/main/acp/AcpEventProjector.ts");
+	const { collectSessionFileChanges } = loadTsCommonJs("src/shared/fileChanges.ts");
+	const state = projectAcpSessionUpdate(initialAcpProjection(), { sessionUpdate: "tool_call", toolCallId: "tc-read", title: "Read File", kind: "read", status: "completed", rawInput: { file_path: "C:/repo/a.ts" } }, "agent-1");
+	assert.equal(collectSessionFileChanges(state.messages).length, 0);
+});
+
+test("同一文件先有 diff 再有只路径编辑：保留先前 diff 载荷，只累计次数", () => {
+	const { collectSessionFileChanges } = loadTsCommonJs("src/shared/fileChanges.ts");
+	const entries = collectSessionFileChanges([
+		{ role: "tool", text: "edit", meta: { toolName: "edit", kind: "edit", args: { filePath: "C:/repo/a.ts", oldText: "a", newText: "b" } } },
+		{ role: "tool", text: "Edit", meta: { toolName: "Edit", kind: "edit", args: { file_path: "C:/repo/a.ts" } } },
+	]);
+	assert.equal(entries.length, 1);
+	assert.equal(entries[0].count, 2);
+	assert.equal(entries[0].originalContent, "a");
+	assert.equal(entries[0].content, "b");
+});

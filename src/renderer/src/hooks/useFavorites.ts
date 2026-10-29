@@ -2,7 +2,7 @@ import { useAtom } from "jotai";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { AddFavoriteInput, FavoriteEntry } from "../../../shared/types";
 import { favoriteEntriesAtom } from "../atoms/favorites-atoms";
-import { collectFavoritedMessageKeys, findMessageFavorite } from "../components/favorites/favoriteIdentity";
+import { collectFavoritedMessageKeys, collectFavoritedSessionIds, findMessageFavorite, findSessionFavorite } from "../components/favorites/favoriteIdentity";
 import { applyFavoriteOrder } from "../components/favorites/favoriteFilters";
 import { desktopApi } from "../desktopApi";
 import { t } from "../i18n";
@@ -23,6 +23,8 @@ export type FavoriteActions = {
 	entries: FavoriteEntry[] | null;
 	/** 已收藏的「整条消息」身份键集合（sessionId::messageId），供入口显示/切换已收藏态。 */
 	favoritedMessageKeys: ReadonlySet<string>;
+	/** 已收藏的会话 id 集合，供侧栏/标签页入口显示与切换已收藏态。 */
+	favoritedSessionIds: ReadonlySet<string>;
 	refresh: () => Promise<void>;
 	/** 收藏成功返回条目（入口用于判断是否要收起浮层），失败返回 null 并 toast。 */
 	addFavorite: (input: AddFavoriteInput) => Promise<FavoriteEntry | null>;
@@ -39,6 +41,11 @@ export type FavoriteActions = {
 	 * 没有 messageId（live 流式正文）无法去重，退化为「只新增」。
 	 */
 	toggleMessageFavorite: (input: AddFavoriteInput) => Promise<boolean>;
+	/**
+	 * 会话收藏开关：同一 sessionId 已有收藏则删除，否则新增引用。
+	 * 只存 sessionId/标题/项目，不复制正文；原会话删除后收藏保留并显示失效。
+	 */
+	toggleSessionFavorite: (input: AddFavoriteInput) => Promise<boolean>;
 };
 
 /**
@@ -67,6 +74,7 @@ export function useFavorites(): FavoriteActions {
 	}, [entries, refresh]);
 
 	const favoritedMessageKeys = useMemo(() => collectFavoritedMessageKeys(entries ?? []), [entries]);
+	const favoritedSessionIds = useMemo(() => collectFavoritedSessionIds(entries ?? []), [entries]);
 
 	const addFavorite = useCallback(
 		async (input: AddFavoriteInput): Promise<FavoriteEntry | null> => {
@@ -144,5 +152,14 @@ export function useFavorites(): FavoriteActions {
 		[addFavorite, removeFavorite],
 	);
 
-	return { entries, favoritedMessageKeys, refresh, addFavorite, removeFavorite, removeFavorites, reorderFavorites, toggleMessageFavorite };
+	const toggleSessionFavorite = useCallback(
+		async (input: AddFavoriteInput): Promise<boolean> => {
+			const existing = findSessionFavorite(entriesRef.current ?? [], input.sessionId ?? null);
+			if (existing) return removeFavorite(existing.id);
+			return (await addFavorite(input)) !== null;
+		},
+		[addFavorite, removeFavorite],
+	);
+
+	return { entries, favoritedMessageKeys, favoritedSessionIds, refresh, addFavorite, removeFavorite, removeFavorites, reorderFavorites, toggleMessageFavorite, toggleSessionFavorite };
 }

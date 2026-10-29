@@ -36,9 +36,56 @@ export function hasTurnOutput(messages: ChatMessage[], seededIndex: number): boo
 	return messages.slice(seededIndex + 1).some((entry) => entry.role === "assistant" || entry.role === "tool");
 }
 
+/**
+ * 空白回合的诊断串（进 debugDetails）：按「最可能是根因」排序——渲染层 toast 只截前
+ * 140 字符，CLI 自己的报错（限流/登录失败，通常只打在 stderr）必须排在最前面。
+ */
+export function describeEmptyTurn(input: {
+	stopReason: string;
+	/** 本回合 session/update 类型 → 次数（空 = 一条 update 都没收到）。 */
+	updateKinds?: ReadonlyMap<string, number>;
+	/** CLI stderr 尾部（最近几行）。 */
+	stderrTail?: readonly string[];
+	/** 本回合收到的非 session/update 通知样本。 */
+	foreignNotification?: string;
+	/** session/prompt 响应里除 stopReason 之外的原始片段。 */
+	rawResult?: string;
+}): string {
+	const parts: string[] = [];
+	const stderr = (input.stderrTail ?? [])
+		.filter((line) => line.trim())
+		.slice(-2)
+		.join(" | ")
+		.slice(0, 240);
+	if (stderr) parts.push(`stderr=${stderr}`);
+	parts.push(`stopReason=${input.stopReason}`);
+	// forEach 而不是展开：跨 realm（Node 测试加载 TS 的 vm 沙箱）时展开 Map 会失败。
+	const kinds: string[] = [];
+	input.updateKinds?.forEach((count, kind) => kinds.push(count > 1 ? `${kind}x${count}` : kind));
+	parts.push(`updates=${kinds.length > 0 ? kinds.join(",") : "none"}`);
+	if (input.foreignNotification) parts.push(`notification=${input.foreignNotification}`);
+	if (input.rawResult) parts.push(`result=${input.rawResult}`);
+	return parts.join("; ");
+}
+
+/** session/prompt 响应里除 stopReason/_meta 之外的原始片段（agent 可能把失败原因塞在这里）。 */
+export function promptResultSnippet(result: unknown): string | undefined {
+	if (!result || typeof result !== "object") return undefined;
+	const rest = Object.fromEntries(Object.entries(result as Record<string, unknown>).filter(([key]) => key !== "stopReason" && key !== "_meta"));
+	if (Object.keys(rest).length === 0) return undefined;
+	return JSON.stringify(rest).slice(0, 240);
+}
+
 /** 正常结算但全程零输出的拒收结果（调用方已回滚用户条目并 flush）。 */
-export function emptyTurnRejection(toolName: string): SendPromptResult {
-	return { accepted: false, error: `ACP agent ${toolName} completed the turn without any output`, delivery: "rejected", i18nKey: "acp.emptyTurn", i18nParams: { tool: toolName } };
+export function emptyTurnRejection(toolName: string, debugDetails?: string): SendPromptResult {
+	return {
+		accepted: false,
+		error: `ACP agent ${toolName} completed the turn without any output`,
+		delivery: "rejected",
+		i18nKey: "acp.emptyTurn",
+		i18nParams: { tool: toolName },
+		...(debugDetails ? { debugDetails } : {}),
+	};
 }
 
 /** 升级强杀（abort 宽限超时/二次停止/stall）的结果：delivery=unknown，不回填草稿避免重发重复。 */

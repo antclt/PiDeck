@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { ipcChannels } from "../shared/ipc";
 import type { TokendanceAuthMode, TokendancePaymentSessionResult } from "../shared/tokendance";
+import type { WatchaAccessResult } from "../shared/watcha";
 import type { SkillHubSearchOptions } from "../shared/types/skills";
 import type { AcpToolConfig, AcpToolInput, AcpToolValidation } from "../shared/types/acp";
 import type { AnnouncementState } from "../shared/types/announcement";
@@ -42,6 +43,7 @@ import type { AgentChangedEvent, AgentInvokeEventPayload, AgentInvokeInput, Agen
 import type { SelectionToolInsertInput, SelectionToolResizeInput, SelectionToolShowPayload, SelectionToolWindowState } from "../shared/types/selectionTool";
 import type { QuickMessagesSaveResult, QuickMessagesSnapshot } from "../shared/types/quickMessages";
 import type { AddFavoriteInput, FavoriteEntry } from "../shared/types/favorites";
+import type { SessionGroup } from "../shared/types/sessionGroups";
 import type { NoticeHistoryFileEntry, NoticeHistoryRecordInput } from "../shared/types/noticeHistory";
 import type { ReplyActionRule, ReplyActionsSaveResult, ReplyActionsSnapshot } from "../shared/types/replyActions";
 import type {
@@ -195,6 +197,7 @@ import type {
 	PromptStoreSearchResult,
 	PromptStoreItem,
 	ScratchPadData,
+	ScratchPadScope,
 	SecurityConfig,
 	SendSessionPromptInput,
 	SendSessionPromptResult,
@@ -823,11 +826,7 @@ const api = {
 				}>
 			>,
 		/** DSH 子代理历史（subagent.history 只读 transcript）。 */
-		readDshSubagentHistory: (agentId: string, childSessionId: string, beforeSeq?: number, maxMessages?: number) =>
-			ipcRenderer.invoke(ipcChannels.dshSubagentHistory, agentId, childSessionId, beforeSeq, maxMessages) as Promise<{
-				messages: import("../shared/types").ChatMessage[];
-				hasMore: boolean;
-			}>,
+		readDshSubagentHistory: (agentId: string, childSessionId: string, beforeSeq?: number, maxMessages?: number) => ipcRenderer.invoke(ipcChannels.dshSubagentHistory, agentId, childSessionId, beforeSeq, maxMessages) as Promise<{ messages: import("../shared/types").ChatMessage[]; hasMore: boolean; oldestSeq?: number }>,
 		/** pi-subagents 扩展子代理列表（record + 子会话回填）。 */
 		listSessionSubagents: (sessionId: string) => ipcRenderer.invoke(ipcChannels.sessionsListSubagents, sessionId) as Promise<import("../shared/types").PiSubagentEntry[]>,
 		/** 会话级 todo 快照（pi-deck-todo custom 条目重建，历史会话任务 tab）。 */
@@ -892,6 +891,8 @@ const api = {
 		listRuntimes: () => ipcRenderer.invoke(ipcChannels.sessionsRuntimeList) as Promise<SessionRuntimeInfo[]>,
 		activateRuntime: (sessionId: string) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeActivate, sessionId) as Promise<SessionCommandResult<SessionRuntimeInfo>> /** 汇报当前聚焦的会话（主进程据此决定非聚焦会话的 Ask 桌面通知） */,
 		setFocusedSession: (sessionId?: string) => ipcRenderer.invoke(ipcChannels.sessionsSetFocusedSession, sessionId) as Promise<void>,
+		/** 汇报主窗口实际挂载的聊天栏（当前 + 分屏）；主进程据此裁剪后台会话的 live 流。 */
+		setVisibleSessions: (sessionIds: string[]) => ipcRenderer.invoke(ipcChannels.sessionsSetVisibleSessions, sessionIds) as Promise<void>,
 		stopRuntime: (target: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeStop, target) as Promise<SessionCommandResult<SessionRuntimeTarget>>,
 		abortRuntime: (target: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeAbort, target) as Promise<SessionCommandResult<SessionTargetedValue<void>>>,
 		restartRuntime: (target: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeRestart, target) as Promise<SessionCommandResult<SessionRuntimeReplacement>>,
@@ -1390,6 +1391,8 @@ const api = {
 		getConfig: () => ipcRenderer.invoke(ipcChannels.securityGetConfig) as Promise<SecurityConfig>,
 		updateConfig: (patch: Partial<SecurityConfig>) => ipcRenderer.invoke(ipcChannels.securityUpdateConfig, patch) as Promise<{ ok: true; config: SecurityConfig } | { ok: false; error: string }>,
 		setSessionLevel: (sessionId: string, levelId: string | null) => ipcRenderer.invoke(ipcChannels.securitySetSessionLevel, sessionId, levelId) as Promise<{ ok: true; config: SecurityConfig } | { ok: false; error: string }>,
+		/** 安全配置变更（任一端修改）：接收方重拉 getConfig 刷新菜单；返回退订函数。 */
+		onConfigChanged: (callback: () => void) => subscribe(ipcChannels.securityConfigChanged, callback),
 	},
 	config: {
 		previewProviderMigration: (direction: import("../shared/types/providerMigration").ProviderMigrationDirection) => ipcRenderer.invoke(ipcChannels.configPreviewProviderMigration, direction) as Promise<import("../shared/types/providerMigration").ProviderMigrationPreview>,
@@ -1513,6 +1516,10 @@ const api = {
 		tokendanceTopUpStatus: (statusUrl: string) => ipcRenderer.invoke(ipcChannels.configTokendanceTopUpStatus, { statusUrl }) as Promise<TokendancePaymentSessionResult>,
 		/** 在用户点击后唤起支付宝 App（仅 alipays:// 深链；移动端链路，PC 扫码不需要）。 */
 		tokendanceTopUpOpenAlipay: (url: string) => ipcRenderer.invoke(ipcChannels.configTokendanceTopUpOpenAlipay, { url }) as Promise<{ ok: boolean; error?: string }>,
+		/** 查「请作者喝咖啡」剩余次数 + 当次购买入口（经主进程边缘代理，渲染层不接触平台密钥）。 */
+		watchaAccess: (force?: boolean) => ipcRenderer.invoke(ipcChannels.configWatchaAccess, { force: force === true }) as Promise<WatchaAccessResult>,
+		/** 用户点击后唤起支付宝 App（仅 alipays:// 深链；正式环境购买链接就是这种）。 */
+		watchaOpenAlipay: (url: string) => ipcRenderer.invoke(ipcChannels.configWatchaOpenAlipay, { url }) as Promise<{ ok: boolean; error?: string }>,
 		/** 一键安装 TokenDance：供应商信息 + 目录模型写入 pi models.json 与 DSH llm-pi-ai；apiKey 可选（OAuth 后已持有）。 */
 		installTokendance: (apiKey?: string) =>
 			ipcRenderer.invoke(ipcChannels.configInstallTokendance, { apiKey }) as Promise<{
@@ -1763,8 +1770,9 @@ const api = {
 	},
 
 	scratchPad: {
-		list: () => ipcRenderer.invoke(ipcChannels.scratchPadList) as Promise<DraftMeta[]>,
-		create: () => ipcRenderer.invoke(ipcChannels.scratchPadCreate) as Promise<DraftMeta>,
+		/** 作用域缺省 = global（与旧调用方兼容）；project 会合并返回本项目 + 全局草稿。 */
+		list: (scope?: ScratchPadScope) => ipcRenderer.invoke(ipcChannels.scratchPadList, scope) as Promise<DraftMeta[]>,
+		create: (scope?: ScratchPadScope) => ipcRenderer.invoke(ipcChannels.scratchPadCreate, scope) as Promise<DraftMeta>,
 		delete: (draftPath: string) => ipcRenderer.invoke(ipcChannels.scratchPadDelete, draftPath) as Promise<void>,
 		load: (draftPath?: string) => ipcRenderer.invoke(ipcChannels.scratchPadLoad, draftPath) as Promise<ScratchPadData>,
 		save: (draftPath: string, content: string, cursorPosition: number) => ipcRenderer.invoke(ipcChannels.scratchPadSave, draftPath, content, cursorPosition) as Promise<void>,
@@ -1916,6 +1924,15 @@ const api = {
 		removeMany: (favoriteIds: string[]) => ipcRenderer.invoke(ipcChannels.favoritesRemoveMany, favoriteIds) as Promise<number>,
 		/** 保存拖拽出的顺序（完整 id 数组）；返回主进程落地后的列表。 */
 		reorder: (favoriteIds: string[]) => ipcRenderer.invoke(ipcChannels.favoritesReorder, favoriteIds) as Promise<FavoriteEntry[]>,
+	},
+
+	// ── 会话分组（userData/session-groups.json）：侧栏只读消费，写入方是插件页 ──
+	sessionGroups: {
+		list: () => ipcRenderer.invoke(ipcChannels.sessionGroupsList) as Promise<SessionGroup[]>,
+		save: (input: unknown) => ipcRenderer.invoke(ipcChannels.sessionGroupsSave, input) as Promise<SessionGroup[]>,
+		delete: (groupId: string) => ipcRenderer.invoke(ipcChannels.sessionGroupsDelete, groupId) as Promise<boolean>,
+		reorder: (groupIds: string[]) => ipcRenderer.invoke(ipcChannels.sessionGroupsReorder, groupIds) as Promise<SessionGroup[]>,
+		onChanged: (callback: () => void) => subscribe(ipcChannels.sessionGroupsChanged, callback),
 	},
 
 	// ── 系统级划词浮窗（全局快捷键触发的独立窗口；与主窗口共用同一份 preload） ──

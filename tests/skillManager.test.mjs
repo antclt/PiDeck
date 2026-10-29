@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 import ts from "typescript";
@@ -36,6 +36,7 @@ function loadSkillManagerModule() {
 			if (id === "../logging/sharedLogger") return { getAppLogger: () => null };
 			// 打开目录统一入口（issue #396）：本测试不触达打开路径，noop stub。
 			if (id === "../fs/openPath") return { openSystemPath: async () => "" };
+			if (id === "./pideckSkillsPath") return { pideckBundledSkillsDir: (home) => join(home, ".pi", "agent", "pideck-skills") };
 			return require(id);
 		},
 	};
@@ -290,13 +291,13 @@ test("does not recurse forever through a directory symlink cycle", async () => {
 	});
 });
 
-test("installUsageProbeTemplate copies the bundled template into the global skills dir", async () => {
+test("installUsageProbeTemplate copies the bundled template into the PiDeck-only skills dir", async () => {
 	await withTemporaryHome(async (home) => {
 		const { SkillManager } = loadSkillManagerModule();
 		const manager = new SkillManager(home);
 		const result = await manager.installUsageProbeTemplate();
 		assert.equal(result.success, true);
-		const target = join(home, ".pi", "agent", "skills", "usage-probe", "SKILL.md");
+		const target = join(home, ".pi", "agent", "pideck-skills", "usage-probe", "SKILL.md");
 		const written = readFileSync(target, "utf8");
 		assert.match(written, /name: usage-probe/);
 		assert.match(written, /usage-probes\.json/);
@@ -314,7 +315,7 @@ test("installTemplate 保留用户对内置技能的禁用标记（重启覆盖�
 		// 1. 首次启动安装模板
 		const first = await manager.installUsageProbeTemplate();
 		assert.equal(first.success, true);
-		const target = join(home, ".pi", "agent", "skills", "usage-probe", "SKILL.md");
+		const target = join(home, ".pi", "agent", "pideck-skills", "usage-probe", "SKILL.md");
 		const settings = { disabledSkills: [] };
 		manager.configureSettings(
 			() => settings,
@@ -338,13 +339,13 @@ test("installTemplate 保留用户对内置技能的禁用标记（重启覆盖�
 	});
 });
 
-test("installImageGenTemplate copies the bundled image-gen skill into the global skills dir", async () => {
+test("installImageGenTemplate copies the bundled image-gen skill into the PiDeck-only skills dir", async () => {
 	await withTemporaryHome(async (home) => {
 		const { SkillManager } = loadSkillManagerModule();
 		const manager = new SkillManager(home);
 		const result = await manager.installImageGenTemplate();
 		assert.equal(result.success, true);
-		const target = join(home, ".pi", "agent", "skills", "image-gen", "SKILL.md");
+		const target = join(home, ".pi", "agent", "pideck-skills", "image-gen", "SKILL.md");
 		const written = readFileSync(target, "utf8");
 		assert.match(written, /name: image-gen/);
 		assert.match(written, /images\/generations/);
@@ -352,6 +353,74 @@ test("installImageGenTemplate copies the bundled image-gen skill into the global
 		const again = await manager.installImageGenTemplate();
 		assert.equal(again.success, true);
 		assert.equal(readFileSync(target, "utf8"), written);
+	});
+});
+
+test("legacy 内置技能整目录迁到 PiDeck 目录：旧位置消失、附加文件保留", async () => {
+	await withTemporaryHome(async (home) => {
+		const { SkillManager } = loadSkillManagerModule();
+		const manager = new SkillManager(home);
+		const legacyDir = join(home, ".pi", "agent", "skills", "image-gen");
+		await createSkillFile(join(legacyDir, "SKILL.md"), "image-gen");
+		await writeFile(join(legacyDir, "notes.txt"), "keep me", "utf8");
+
+		const result = await manager.installImageGenTemplate();
+		assert.equal(result.success, true);
+		assert.equal(existsSync(legacyDir), false);
+		const migratedDir = join(home, ".pi", "agent", "pideck-skills", "image-gen");
+		assert.equal(readFileSync(join(migratedDir, "notes.txt"), "utf8"), "keep me");
+		assert.match(readFileSync(join(migratedDir, "SKILL.md"), "utf8"), /name: image-gen/);
+
+		// 列表里只剩一份，来源是 pideck-global（TUI 的扫描根里已经没有它）
+		const { skills } = await manager.list();
+		const matches = skills.filter((skill) => skill.name === "image-gen");
+		assert.equal(matches.length, 1);
+		assert.equal(matches[0].sourceId, "pideck-global");
+	});
+});
+
+test("legacy 内置技能是软链时不动用户的链接与库文件", async (t) => {
+	await withTemporaryHome(async (home) => {
+		const libraryDir = join(home, "library", "image-gen");
+		await createSkillFile(join(libraryDir, "SKILL.md"), "image-gen", "library copy");
+		const legacyLink = join(home, ".pi", "agent", "skills", "image-gen");
+		await mkdir(dirname(legacyLink), { recursive: true });
+		try {
+			await createDirectoryLink(libraryDir, legacyLink);
+		} catch (error) {
+			if (skipUnavailable(t, error)) return;
+			throw error;
+		}
+
+		const { SkillManager } = loadSkillManagerModule();
+		const manager = new SkillManager(home);
+		const result = await manager.installImageGenTemplate();
+		assert.equal(result.success, true);
+		// 链接与库文件原样保留（不是 PiDeck 建的东西），新副本落在 PiDeck 目录
+		assert.equal(lstatSync(legacyLink).isSymbolicLink(), true);
+		assert.match(readFileSync(join(libraryDir, "SKILL.md"), "utf8"), /library copy/);
+		assert.match(readFileSync(join(home, ".pi", "agent", "pideck-skills", "image-gen", "SKILL.md"), "utf8"), /name: image-gen/);
+	});
+});
+
+test("getBundledSkillLoadPaths 只返回存在且已启用的内置技能目录", async () => {
+	await withTemporaryHome(async (home) => {
+		const { SkillManager } = loadSkillManagerModule();
+		const manager = new SkillManager(home);
+		await manager.installUsageProbeTemplate();
+		await manager.installImageGenTemplate();
+		// 跨 vm realm 的数组原型不同，先复制成本 realm 数组再比较
+		assert.deepEqual(
+			Array.from(manager.getBundledSkillLoadPaths(), (path) => basename(path)),
+			["image-gen", "usage-probe"],
+		);
+
+		// 模拟 pi settings.json 投影：image-gen 被显式停用 → 不再注入
+		manager.configureNativeEnabledReader((skillPath) => (skillPath.replace(/\\/g, "/").includes("/image-gen/SKILL.md") ? false : undefined));
+		assert.deepEqual(
+			Array.from(manager.getBundledSkillLoadPaths(), (path) => basename(path)),
+			["usage-probe"],
+		);
 	});
 });
 

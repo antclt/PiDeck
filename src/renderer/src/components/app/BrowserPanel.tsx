@@ -518,7 +518,7 @@ export function BrowserPanel(props: {
 									type="button"
 									variant="ghost"
 									size="sm"
-									className={`h-[30px] w-full items-center gap-[7px] rounded-sm px-2 text-xs text-text-secondary text-left${preset.id === device ? " bg-bg-active text-[color:var(--color-accent)]" : ""} hover:bg-bg-hover hover:text-[color:var(--color-accent)]`}
+									className={`h-[30px] w-full items-center gap-2 rounded-sm px-2 text-xs text-text-secondary text-left${preset.id === device ? " bg-bg-active text-[color:var(--color-accent)]" : ""} hover:bg-bg-hover hover:text-[color:var(--color-accent)]`}
 									onClick={() => selectDevice(preset.id)}
 								>
 									{preset.id === "mobile" ? <Smartphone size={13} /> : preset.id === "tablet" ? <Tablet size={13} /> : <span className="size-[13px] rounded-[3px] border border-current" />}

@@ -15,6 +15,7 @@ import { formatDuration, formatTime } from "../TimelineFormat";
 import { buildTrajectory, filterRecordsByRange, traceSizeLabel, type TrajectoryLane, type TrajectoryModelTraceSummary, type TrajectoryRecord, type TrajectoryTimeRange, type TrajectoryTurn } from "./buildTrajectory";
 import type { SessionFactsCoverage } from "../../../../../shared/types/trajectory";
 import { bucketOverviewTicks, buildTrajectoryWindow } from "./trajectoryWindow";
+import { VirtualStack, VIRTUAL_STACK_MIN_ROWS } from "../../ui-shadcn/virtual-stack";
 import { defaultFoldedTurns, foldedTurnPeek, foldTurnRecords, summarizeTurn } from "./trajectoryFold";
 import { ModelTraceDetail } from "../../workspace/ModelTraceDetail";
 import { countUserTurns } from "../timeline/turnRenderWindow";
@@ -69,9 +70,10 @@ function kindLabel(record: TrajectoryRecord): string {
 
 function laneTone(lane: TrajectoryLane): string {
 	if (lane === "input") return "bg-primary/70";
-	if (lane === "tools") return "bg-amber-500/75 dark:bg-amber-400/70";
-	if (lane === "process") return "bg-violet-500/70 dark:bg-violet-400/65";
-	return "bg-sky-500/70 dark:bg-sky-400/65";
+	if (lane === "tools") return "bg-warning/75 dark:bg-warning/70";
+	// 轨迹泳道要的是实色带（70% 不透明），不是 chip 的淡底
+	if (lane === "process") return "bg-[var(--color-identity-agent)] opacity-70";
+	return "bg-[var(--color-identity-tool)] opacity-70";
 }
 
 function projectLeft(start: number, domainStart: number, span: number): number {
@@ -551,6 +553,11 @@ function TrajectoryLedger(props: {
 	onToggleTurn: (turn: number) => void;
 	onToggleGroup: (key: string) => void;
 }) {
+	// 滚动窗必须有一个确定存在的 ref：容器与虚拟栈得指向同一个对象。外部传的 ref 只用于
+	// 「切 tab 卸载前保存、重挂载后恢复滚动位置」，是可选的；缺省时用内部兜底，
+	// 这样 VirtualStack 的 scrollRef（必填）永远拿得到真实元素（2026-10 审查后收窄）。
+	const localScrollRef = useRef<HTMLDivElement | null>(null);
+	const scrollRef = props.scrollRef ?? localScrollRef;
 	const byTurn = useMemo(() => {
 		const map = new Map<number, TrajectoryRecord[]>();
 		for (const record of props.records) {
@@ -562,24 +569,97 @@ function TrajectoryLedger(props: {
 	}, [props.records]);
 
 	const row = (record: TrajectoryRecord) => (
-		<li key={record.id}>
-			<button type="button" className={`flex w-full items-start gap-2 px-3 py-1.5 text-left text-caption hover:bg-muted/50 ${record.id === props.selectedId ? "bg-muted" : ""}`} onClick={() => props.onSelect(record.id)}>
-				<span className={`mt-1 size-1.5 shrink-0 rounded-full ${laneTone(record.lane)}`} />
-				<span className="w-20 shrink-0 font-medium text-foreground">{kindLabel(record)}</span>
-				<span className="min-w-0 flex-1 truncate text-muted-foreground">{record.summary || "—"}</span>
-				{usageSummary(record) ? (
-					<span className="shrink-0 tabular-nums text-micro text-muted-foreground" title={usageTitle(record)}>
-						{usageSummary(record)}
-					</span>
-				) : null}
-				<span className="shrink-0 tabular-nums text-muted-foreground">{rowTimeLabel(record)}</span>
-			</button>
-		</li>
+		<button type="button" className={`flex w-full items-start gap-2 px-3 py-1.5 text-left text-caption hover:bg-muted/50 ${record.id === props.selectedId ? "bg-muted" : ""}`} onClick={() => props.onSelect(record.id)}>
+			<span className={`mt-1 size-1.5 shrink-0 rounded-full ${laneTone(record.lane)}`} />
+			<span className="w-20 shrink-0 font-medium text-foreground">{kindLabel(record)}</span>
+			<span className="min-w-0 flex-1 truncate text-muted-foreground">{record.summary || "—"}</span>
+			{usageSummary(record) ? (
+				<span className="shrink-0 tabular-nums text-micro text-muted-foreground" title={usageTitle(record)}>
+					{usageSummary(record)}
+				</span>
+			) : null}
+			<span className="shrink-0 tabular-nums text-muted-foreground">{rowTimeLabel(record)}</span>
+		</button>
 	);
+
+	// ── 扁平化（虚拟化的前提）──────────────────────────────────────────────
+	// 虚拟栈只吃扁平数组，所以把「轮标题 / 记录行 / 组折叠行」压成同一层。
+	// 原树形 DOM 的唯一消费者是父级的 `divide-y`，改为行自带 border-b ——
+	// 虚拟化后行是 absolute、彼此不是兄弟，兄弟选择器不再生效。
+	type TrajectoryRow = { kind: "turn"; key: string; index: number; steps: number; tools: number; tokens: string | null; duration: string | null } | { kind: "record"; key: string; record: TrajectoryRecord } | { kind: "group-fold"; key: string; count: number; toolCalls: number };
+
+	// 轮头数据单独 memo：短列表分支要按基线两层结构渲染，必须与扁平化分支用同一份计算，
+	// 不能各算一遍（两份算法迟早走偏，而走偏的表现只是「展开后数字对不上」）。
+	const turnHeadByIndex = useMemo(() => {
+		const map = new Map<number, { steps: number; tools: number; tokens: string | null; duration: string | null }>();
+		for (const [turnIndex, turnRecords] of byTurn) {
+			const summary = summarizeTurn(props.turns[turnIndex], props.turns[turnIndex]?.records ?? turnRecords);
+			const totalTokens = summary.inputTokens + summary.outputTokens;
+			map.set(turnIndex, {
+				steps: summary.steps,
+				tools: summary.toolCalls,
+				tokens: totalTokens > 0 ? `${compactTokens(summary.inputTokens)}→${compactTokens(summary.outputTokens)}` : null,
+				duration: turnDurationLabel(props.turns[turnIndex], props.now) ?? null,
+			});
+		}
+		return map;
+	}, [byTurn, props.turns, props.now]);
+
+	const rows = useMemo<TrajectoryRow[]>(() => {
+		const out: TrajectoryRow[] = [];
+		for (const [turnIndex, turnRecords] of byTurn) {
+			const folded = props.foldedTurns.has(turnIndex);
+			const head = turnHeadByIndex.get(turnIndex);
+			out.push({ kind: "turn", key: `turn:${turnIndex}`, index: turnIndex, steps: head?.steps ?? 0, tools: head?.tools ?? 0, tokens: head?.tokens ?? null, duration: head?.duration ?? null });
+			if (folded) {
+				const peek = foldedTurnPeek(turnRecords);
+				if (peek) out.push({ kind: "record", key: `peek:${peek.id}`, record: peek });
+				continue;
+			}
+			for (const item of foldTurnRecords(turnRecords)) {
+				if (item.type === "record") {
+					out.push({ kind: "record", key: item.record.id, record: item.record });
+					continue;
+				}
+				if (props.expandedGroups.has(item.key)) {
+					for (const record of item.records) out.push({ kind: "record", key: record.id, record });
+					continue;
+				}
+				out.push({ kind: "group-fold", key: item.key, count: item.records.length, toolCalls: item.toolCalls });
+			}
+		}
+		return out;
+	}, [byTurn, props.foldedTurns, props.expandedGroups, turnHeadByIndex]);
+
+	// 三种扁平行的渲染：虚拟化分支与短列表分支共用这一份，避免两份 JSX 走偏。
+	const renderRow = (item: TrajectoryRow) => {
+		if (item.kind === "turn") {
+			return (
+				<button type="button" className="flex w-full items-center justify-between gap-2 bg-muted/40 px-3 py-1 text-micro font-medium tracking-wide text-muted-foreground uppercase hover:bg-muted/60" onClick={() => props.onToggleTurn(item.index)}>
+					<span>{t("session.trajectory.turn", { index: item.index + 1 })}</span>
+					<span className="flex items-center gap-2 tabular-nums normal-case">
+						<span>{t("session.trajectory.turnSteps", { steps: item.steps, tools: item.tools })}</span>
+						{item.tokens ? <span>{item.tokens}</span> : null}
+						{item.duration ? <span>{item.duration}</span> : null}
+					</span>
+				</button>
+			);
+		}
+		if (item.kind === "group-fold") {
+			return (
+				<button type="button" className="w-full px-3 py-1.5 text-left text-caption text-muted-foreground hover:bg-muted/50" onClick={() => props.onToggleGroup(item.key)}>
+					{t("session.trajectory.groupFold", { steps: item.count, tools: item.toolCalls })}
+				</button>
+			);
+		}
+		// 记录行：row(record) 只产出按钮本体，外层 li 由两条渲染路径各自提供
+		// （短列表 ul>li，虚拟列表 div[role=list]>div[role=listitem]）。
+		return row(item.record);
+	};
 
 	return (
 		<div
-			ref={props.scrollRef}
+			ref={scrollRef}
 			className={`min-h-0 overflow-auto ${props.borderBottom ? "border-b border-border/60" : "border-r border-border/60"}`}
 			onScroll={(event) => {
 				// 顶部 48px 内继续上滚 → 放下一轮窗口（滑动窗口，不累加挂载）。
@@ -589,44 +669,63 @@ function TrajectoryLedger(props: {
 		>
 			{props.records.length === 0 ? (
 				<div className="px-3 py-6 text-center text-caption text-muted-foreground">{t("session.trajectory.empty")}</div>
-			) : (
+			) : rows.length <= VIRTUAL_STACK_MIN_ROWS ? (
+				// 短列表不走虚拟栈（虚拟栈对 ≤16 行走直出路径），并且**结构与接入虚拟化前逐字节一致**：
+				// 两层 ul —— 外层 divide-y /50 分隔「轮」，内层 divide-y /40 分隔「记录行」。
+				//
+				// 这一条是被维护者打回过的：上一版为了复用扁平化数据把它拍成一层 ul（记录行直接成
+				// 外层的 li），结果记录行的分隔线从基线内层的 /40 变成外层的 /50，而「轮 → 记录」
+				// 的嵌套列表语义也没了。拍平是虚拟路径的必要代价（虚拟栈只吃一维数组），但不能
+				// 顺手把短列表也拍平 —— 短列表路径的全部价值就是「DOM 与改前一致」。
+				//
+				// 虚拟路径的差异登记在 docs/virtualization-audit.md 与交付 README 的「已知的差异」。
 				<ul className="divide-y divide-border/50">
 					{[...byTurn.entries()].map(([turnIndex, turnRecords]) => {
 						const folded = props.foldedTurns.has(turnIndex);
-						const summary = summarizeTurn(props.turns[turnIndex], props.turns[turnIndex]?.records ?? turnRecords);
 						const peek = folded ? foldedTurnPeek(turnRecords) : undefined;
-						const duration = turnDurationLabel(props.turns[turnIndex], props.now);
+						const head = turnHeadByIndex.get(turnIndex);
 						return (
 							<li key={`turn:${turnIndex}`}>
-								<button type="button" className="flex w-full items-center justify-between gap-2 bg-muted/40 px-3 py-1 text-micro font-medium tracking-wide text-muted-foreground uppercase hover:bg-muted/60" onClick={() => props.onToggleTurn(turnIndex)}>
-									<span>{t("session.trajectory.turn", { index: turnIndex + 1 })}</span>
-									<span className="flex items-center gap-2 tabular-nums normal-case">
-										<span>{t("session.trajectory.turnSteps", { steps: summary.steps, tools: summary.toolCalls })}</span>
-										{summary.inputTokens + summary.outputTokens > 0 ? <span>{`${compactTokens(summary.inputTokens)}→${compactTokens(summary.outputTokens)}`}</span> : null}
-										{duration ? <span>{duration}</span> : null}
-									</span>
-								</button>
+								{renderRow({
+									kind: "turn",
+									key: `turn:${turnIndex}`,
+									index: turnIndex,
+									steps: head?.steps ?? 0,
+									tools: head?.tools ?? 0,
+									tokens: head?.tokens ?? null,
+									duration: head?.duration ?? null,
+								})}
 								<ul className="divide-y divide-border/40">
 									{folded
 										? peek
-											? [row(peek)]
-											: []
+											? [<li key={peek.id}>{renderRow({ kind: "record", key: peek.id, record: peek })}</li>]
+											: null
 										: foldTurnRecords(turnRecords).map((item) => {
-												if (item.type === "record") return row(item.record);
-												if (props.expandedGroups.has(item.key)) return item.records.map(row);
-												return (
-													<li key={item.key}>
-														<button type="button" className="w-full px-3 py-1.5 text-left text-caption text-muted-foreground hover:bg-muted/50" onClick={() => props.onToggleGroup(item.key)}>
-															{t("session.trajectory.groupFold", { steps: item.records.length, tools: item.toolCalls })}
-														</button>
-													</li>
-												);
+												if (item.type === "record") return <li key={item.record.id}>{renderRow({ kind: "record", key: item.record.id, record: item.record })}</li>;
+												if (props.expandedGroups.has(item.key)) return item.records.map((record) => <li key={record.id}>{renderRow({ kind: "record", key: record.id, record })}</li>);
+												return <li key={item.key}>{renderRow({ kind: "group-fold", key: item.key, count: item.records.length, toolCalls: item.toolCalls })}</li>;
 											})}
 								</ul>
 							</li>
 						);
 					})}
 				</ul>
+			) : (
+				<VirtualStack
+					items={rows}
+					getKey={(item) => item.key}
+					scrollRef={scrollRef}
+					minRows={VIRTUAL_STACK_MIN_ROWS}
+					// 轮标题 22px、记录行 26px、组折叠行 28px，取中间档；实测随即覆盖。
+					// 虚拟路径把两层列表压平（虚拟栈只吃一维数组），行间分隔线只能统一取记录行那一档
+					// /40（基线里轮与轮之间是 /50、轮内记录行是 /40）。短列表路径保留基线两层结构。
+					rowClassName="border-b border-border/40"
+					// 虚拟行是 div，列表语义靠 role 补：内容盒 role="list"、每行 role="listitem"。
+					// 短列表路径不用这两个 prop（那一支是 ul > li 两层）。
+					containerProps={{ role: "list" }}
+					rowProps={() => ({ role: "listitem" })}
+					renderItem={(item) => renderRow(item)}
+				/>
 			)}
 		</div>
 	);
@@ -660,6 +759,7 @@ function CopyableBlock(props: { label?: string; text: string }) {
 					{copied ? t("common.copied") : t("common.copy")}
 				</button>
 			</div>
+			{/* scroll-ok: text —— 单一文本块（复制出来的记录详情），没有行列表可虚拟化 */}
 			<pre className="max-h-72 overflow-auto rounded-md bg-muted/50 p-2 text-micro leading-relaxed wrap-break-word whitespace-pre-wrap">{props.text}</pre>
 		</div>
 	);
@@ -703,7 +803,7 @@ function PromptSnapshotDetail(props: { prompt: SessionPromptSnapshot }) {
 					<p className="font-mono text-micro leading-relaxed text-muted-foreground wrap-break-word">{prompt.tools.join(", ")}</p>
 				</div>
 			) : null}
-			{prompt.truncated ? <p className="mt-2 text-caption text-amber-600 dark:text-amber-400">{t("session.trajectory.prompt.truncated")}</p> : null}
+			{prompt.truncated ? <p className="mt-2 text-caption text-warning">{t("session.trajectory.prompt.truncated")}</p> : null}
 			<CopyableBlock label={t("session.trajectory.prompt.fullText")} text={prompt.text} />
 		</div>
 	);

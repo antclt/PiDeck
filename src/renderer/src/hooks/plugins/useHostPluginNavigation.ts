@@ -64,6 +64,9 @@ export function useHostPluginNavigation(selectSession: (projectId: string, sessi
 		let cancelReveal: (() => void) | undefined;
 		const unsubscribe = desktopApi.hostPlugins.onNavigate((input) => {
 			cancelReveal?.();
+			// 面板（modal 遮罩 / page 覆盖层）必须先让位：否则插件页继续占着会话列，
+			// 用户看不到刚打开/刚切到的会话（与 openBrowser 同一条约定）。
+			closePanel(null);
 			// 带 entryId 时不自动滚到底部，避免与定位滚动互相打架。
 			select.current(input.projectId, input.sessionId, input.entryId === undefined);
 			if (input.entryId !== undefined) cancelReveal = revealTimelineEntry(input.entryId, input.sessionId);

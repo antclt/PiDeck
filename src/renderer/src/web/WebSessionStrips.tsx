@@ -63,13 +63,13 @@ const SUB_STATUS_LABEL: Record<PiSubagentEntry["status"], TranslationKey> = {
 };
 
 const SUB_STATUS_TONE: Record<PiSubagentEntry["status"], string> = {
-	queued: "text-zinc-500",
-	running: "text-sky-500",
-	completed: "text-emerald-500",
-	steered: "text-amber-500",
-	aborted: "text-zinc-500",
-	stopped: "text-zinc-500",
-	error: "text-red-500",
+	queued: "text-text-tertiary",
+	running: "text-[var(--color-identity-tool)]",
+	completed: "text-success",
+	steered: "text-warning",
+	aborted: "text-text-tertiary",
+	stopped: "text-text-tertiary",
+	error: "text-danger",
 };
 
 function basename(path: string): string {
@@ -141,7 +141,7 @@ function WebTodoStrip({ todo }: { todo: SessionTodoSnapshot | null }) {
 			<ul className="flex max-h-40 flex-col gap-1 overflow-y-auto">
 				{todo.todos.map((item) => (
 					<li key={`${todo.planId}-${item.id}`} className="flex shrink-0 items-start gap-1.5 rounded border border-border-subtle bg-bg-panel px-2 py-1 text-xs">
-						{item.status === "completed" ? <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-500" /> : item.status === "in_progress" ? <Circle className="mt-0.5 size-3.5 shrink-0 animate-pulse text-sky-500" /> : <Circle className="mt-0.5 size-3.5 shrink-0 text-text-tertiary" />}
+						{item.status === "completed" ? <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-success" /> : item.status === "in_progress" ? <Circle className="mt-0.5 size-3.5 shrink-0 animate-pulse text-[var(--color-identity-tool)]" /> : <Circle className="mt-0.5 size-3.5 shrink-0 text-text-tertiary" />}
 						<span className={item.status === "completed" ? "text-text-tertiary line-through" : ""}>{item.text}</span>
 					</li>
 				))}

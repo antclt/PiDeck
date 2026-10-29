@@ -57,6 +57,12 @@ test("Session runtime busy state is authoritative and stop status wins over stal
 	assert.equal(timeline.isSessionRuntimeBusy("idle", { isStreaming: true, isExecutingTool: true }), false);
 	assert.equal(timeline.isSessionRuntimeBusy("running", undefined), true);
 	assert.equal(timeline.isSessionRuntimeBusy("idle", undefined), false);
+	// ACP：tab status 可能比回合结算晚一拍；isTurnActive=false 时必须是空闲，
+	// 否则 Tab 采纳预测后的发送会被误排进 followUp 队列（输入框上方多一条队列行）。
+	assert.equal(timeline.isSessionRuntimeBusy("running", { isTurnActive: false }, "acp"), false);
+	assert.equal(timeline.isSessionRuntimeBusy("running", { isTurnActive: true }, "acp"), true);
+	// 非 ACP 后端保持原语义：status=running 仍算忙碌（pi 的 status 是权威停止边沿）。
+	assert.equal(timeline.isSessionRuntimeBusy("running", { isTurnActive: false }, "pi"), true);
 	assert.equal(timeline.isLatestTimelineRunBusy(true, 1, 2), true);
 	assert.equal(timeline.isLatestTimelineRunBusy(true, 0, 2), false);
 });

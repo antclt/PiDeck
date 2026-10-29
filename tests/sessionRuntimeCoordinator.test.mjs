@@ -2421,3 +2421,79 @@ test("main 装配把惰性解绑接成 sessions:runtime-detach 推送", () => {
 	assert.match(coordinatorSource, /this\.unbindTerminalAgent\(agentId\);\s*\/\/[^\n]*\n\s*if \(binding\) this\.notifyRuntimeDetached\(\{ \.\.\.binding, agentId \}\);/);
 	assert.equal(coordinatorSource.match(/notifyRuntimeDetached\(/g).length, 2, "notifyRuntimeDetached 只应有定义 + 终态解绑一处调用");
 });
+
+/**
+ * 草稿期换后端/换 ACP 工具必须能「立刻」作废进行中的激活。
+ *
+ * 现场（用户反馈）：ACP 预热是一次完整握手（npx 拉包 + session/new，秒级），旧实现里
+ * catalog 改了后端之后旧激活照样 bind，于是会话要等它握手结束/失败才切得动，而且绑定
+ * 与 acpSessionId 回写都还挂在旧后端进程上。
+ */
+test("cancelActivation 让进行中的激活在 bind 前作废：停进程、不 bind、不回写 acpSessionId", async () => {
+	const { SessionRuntimeCoordinator } = loadCoordinator();
+	const handshake = deferred();
+	const harness = createHarness({
+		entry: { backend: "acp", acpToolId: "tool-claude", status: "draft" },
+		// 握手窗口：create 一直挂着，等价于 ACP 的 performAcpHandshake 还没回包。
+		createHold: handshake,
+		createdTab: {
+			id: "agent-acp",
+			projectId: "project-1",
+			cwd: "C:/project",
+			title: "Session 1",
+			status: "idle",
+			sessionId: "acp-session-1",
+			deckSessionId: "session-1",
+			backend: "acp",
+			createdAt: 1,
+		},
+	});
+	const coordinator = new SessionRuntimeCoordinator(harness.catalog, harness.agents, harness.sender);
+
+	const activation = coordinator.activateRuntime("session-1");
+	// 用户在握手期间改了后端（sessionIpc 先 cancelActivation 再写 record，这里直接改 entry 模拟写入）。
+	harness.entry.backend = "pi";
+	const cancelling = coordinator.cancelActivation("session-1");
+	handshake.resolve();
+	await cancelling;
+
+	const result = await activation;
+	assert.equal(result.ok, false, "被作废的激活不能报成功");
+	assert.equal(coordinator.getTarget("session-1"), undefined, "不得留下迟到绑定");
+	assert.deepEqual(
+		harness.calls.attachInputs.filter((input) => input.acpSessionId),
+		[],
+		"acpSessionId 不得回写到已经切走的会话",
+	);
+	assert.equal(harness.calls.stop, 1, "已 spawn 的旧后端进程要被停掉");
+	assert.equal(harness.tabs.length, 0);
+	// IPC 失败分支据此把「被切换取消」和真失败区分开（前者不弹启动失败）。
+	assert.equal(coordinator.isActivationCancelled("session-1"), true);
+});
+
+test("cancelActivation 直接停掉启动中的进程（不必等握手超时），新激活开始后取消报告失效", async () => {
+	const { SessionRuntimeCoordinator } = loadCoordinator();
+	const starting = {
+		id: "agent-acp",
+		projectId: "project-1",
+		cwd: "C:/project",
+		title: "Session 1",
+		status: "starting",
+		deckSessionId: "session-1",
+		backend: "acp",
+		createdAt: 1,
+	};
+	const harness = createHarness({ entry: { backend: "acp", acpToolId: "tool-claude", status: "draft" }, tabs: [starting] });
+	const coordinator = new SessionRuntimeCoordinator(harness.catalog, harness.agents, harness.sender);
+
+	await coordinator.cancelActivation("session-1");
+	assert.equal(harness.calls.stop, 1, "启动中的进程要立刻停，用户不该等握手自己超时");
+	assert.equal(harness.tabs.length, 0);
+	assert.equal(coordinator.isActivationCancelled("session-1"), true);
+
+	// 换完后端后新的激活就是「最新意图」：取消报告清空，此时失败要照常报错。
+	harness.entry.backend = "pi";
+	const activated = await coordinator.activateRuntime("session-1");
+	assert.equal(activated.ok, true);
+	assert.equal(coordinator.isActivationCancelled("session-1"), false);
+});

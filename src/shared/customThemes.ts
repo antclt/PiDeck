@@ -14,8 +14,9 @@
  *   与 logo-green 系列（品牌标识固定）。
  */
 
-/** 主题包 JSON 的 token 键：完整 CSS 变量名 */
-export type CustomThemeTokenInput = Record<string, string>;
+import { isLegacyAppSkinId, normalizeThemeAppearance } from "./themeSkinMigration";
+
+/** 主题包 JSON 的 token 键：完整 CSS 变量名 */ export type CustomThemeTokenInput = Record<string, string>;
 /** 内部快照 token 键：不含 "--color-" 前缀（与 customThemeOverrides 约定一致） */
 export type CustomThemeTokenMap = Record<string, string>;
 
@@ -27,16 +28,33 @@ export type CustomThemePackage = {
 	version?: string;
 	author?: string;
 	description?: string;
+	/**
+	 * 继承的内置样式 id（可省略 = 不继承，只叠 token，形状走当前样式）。
+	 * 写了 base 的主题包只在被继承样式的形状 chrome（等宽/方角/标记）之上覆盖颜色，
+	 * 应用时 themeStyle 直接落到该样式，因此不用把整套 token 写全。
+	 */
+	base?: CustomThemeBaseSkin;
 	appearance: {
 		light?: CustomThemeTokenInput;
 		dark?: CustomThemeTokenInput;
 	};
 };
 
+/**
+ * 主题包可继承的内置样式（形状层）。颜色不在 base 里——主题包本身就是一套颜色，
+ * 与样式正交，所以 base 只决定形状 chrome（等宽/方角/消息标记）。
+ * shared/ 是纯契约层，不能反向 import renderer 的 STYLE_PRESETS —— 两侧同步由
+ * tests/appearanceThemes.test.mjs 守（新增样式漏更新会红）。
+ */
+export const CUSTOM_THEME_BASE_SKINS = ["classic", "terminal"] as const;
+export type CustomThemeBaseSkin = (typeof CUSTOM_THEME_BASE_SKINS)[number];
+
 /** 应用主题时写入 settings 的快照（内部无前缀键；亮暗分档） */
 export type CustomThemeSnapshot = {
 	id: string;
 	name: string;
+	/** 继承的内置样式；有值时 settings.themeStyle 被设为该样式，快照颜色叠加在样式之上 */
+	base?: CustomThemeBaseSkin;
 	light: CustomThemeTokenMap;
 	dark: CustomThemeTokenMap;
 };
@@ -55,6 +73,8 @@ export type CustomThemeListItem = {
 	version?: string;
 	author?: string;
 	description?: string;
+	/** 继承的内置样式 id（省略表示不继承） */
+	base?: CustomThemeBaseSkin;
 	tokens: { light: CustomThemeTokenMap; dark: CustomThemeTokenMap };
 	parseError?: string[];
 };
@@ -150,6 +170,30 @@ export const CUSTOM_THEME_TOKEN_GROUPS: readonly CustomThemeTokenGroup[] = [
 		],
 	},
 	{
+		key: "markdown",
+		zhTitle: "Markdown 正文",
+		enTitle: "Markdown body",
+		tokens: [
+			{ token: "md-heading", zhDesc: "消息内标题（h1–h6）颜色", enDesc: "Heading (h1–h6) color in messages" },
+			{ token: "md-link", zhDesc: "消息内链接颜色", enDesc: "Link color in messages" },
+			{ token: "md-code", zhDesc: "行内代码文字颜色", enDesc: "Inline code text color" },
+			{ token: "md-quote", zhDesc: "引用块文字颜色", enDesc: "Blockquote text color" },
+			{ token: "md-quote-border", zhDesc: "引用块左侧竖线颜色", enDesc: "Blockquote left bar color" },
+			{ token: "md-list-bullet", zhDesc: "列表符号（• / 序号）颜色", enDesc: "List bullet / number color" },
+			{ token: "md-hr", zhDesc: "分割线颜色", enDesc: "Horizontal rule color" },
+			{ token: "md-strong", zhDesc: "加粗文字颜色", enDesc: "Bold text color" },
+			{ token: "md-em", zhDesc: "斜体文字颜色", enDesc: "Italic text color" },
+			{ token: "md-del", zhDesc: "删除线文字颜色", enDesc: "Strikethrough text color" },
+			{ token: "md-inline-code-bg", zhDesc: "行内代码底色", enDesc: "Inline code background" },
+			{ token: "md-frame", zhDesc: "表格/代码块外框线颜色", enDesc: "Table / code block frame color" },
+			{ token: "md-table-border", zhDesc: "表格单元格分隔线颜色", enDesc: "Table cell divider color" },
+			{ token: "md-table-head-bg", zhDesc: "表格表头底色", enDesc: "Table header background" },
+			{ token: "md-table-head-text", zhDesc: "表格表头文字颜色", enDesc: "Table header text color" },
+			{ token: "md-task-accent", zhDesc: "任务列表勾选色", enDesc: "Task list checkbox color" },
+			{ token: "md-image-border", zhDesc: "图片边框颜色", enDesc: "Image border color" },
+		],
+	},
+	{
 		key: "code",
 		zhTitle: "代码块",
 		enTitle: "Code blocks",
@@ -178,6 +222,18 @@ export const CUSTOM_THEME_TOKEN_GROUPS: readonly CustomThemeTokenGroup[] = [
 		],
 	},
 	{
+		// 字体组的值不是颜色：白名单里用完整变量名（--font-family-*），校验走 FONT_VALUE_PATTERN。
+		// 放在最后是因为「字体」属于结构性定制，颜色仍是主题包的主体。
+		key: "font",
+		zhTitle: "字体",
+		enTitle: "Fonts",
+		tokens: [
+			{ token: "font-family-base", zhDesc: "界面正文字体族（逗号分隔，可带引号）", enDesc: "UI body font stack (comma separated, quotes ok)" },
+			{ token: "font-family-mono", zhDesc: "等宽字体族（代码、终端皮肤）", enDesc: "Monospace font stack (code, terminal skin)" },
+			{ token: "font-family-md", zhDesc: "Markdown 正文/标题字体族", enDesc: "Markdown body / heading font stack" },
+		],
+	},
+	{
 		key: "brand",
 		zhTitle: "供应商徽章五色",
 		enTitle: "Provider badge palette",
@@ -191,9 +247,26 @@ export const CUSTOM_THEME_TOKEN_GROUPS: readonly CustomThemeTokenGroup[] = [
 	},
 ];
 
-/** 白名单内部键集合（无前缀）；外部 JSON 键统一是 `--color-${token}` */
+/** 白名单内部键集合（无前缀）；外部 JSON 键是 `--color-${token}` 或 `--${token}`（字体组） */
 export const CUSTOM_THEME_TOKEN_WHITELIST: readonly string[] = CUSTOM_THEME_TOKEN_GROUPS.flatMap((group) => group.tokens.map((entry) => entry.token));
 const TOKEN_SET = new Set(CUSTOM_THEME_TOKEN_WHITELIST);
+/** 字体组 token（font-family-*）：值不是颜色，走字体栈校验与 `--${token}` 变量名 */
+const FONT_TOKEN_SET = new Set(CUSTOM_THEME_TOKEN_WHITELIST.filter((token) => token.startsWith("font-family-")));
+
+/**
+ * 内部快照键 → 完整 CSS 变量名。
+ * 颜色组沿用既有约定 `--color-${token}`；字体组本身就是变量名（`--font-family-base`），
+ * 单独判断而不是给颜色键也塞前缀，避免破坏已发布主题包与 settings 里的旧快照。
+ */
+export function customThemeCssVar(token: string): string {
+	return token.startsWith("font-family-") ? `--${token}` : `--color-${token}`;
+}
+
+/** 完整变量名 → 白名单内部键；未知变量返回 null */
+function toInternalToken(key: string): string | null {
+	const token = key.startsWith("--color-") ? key.slice("--color-".length) : key.startsWith("--font-family-") ? key.slice(2) : null;
+	return token && TOKEN_SET.has(token) ? token : null;
+}
 
 /** 主题 id：小写字母/数字/连字符，用于文件名（<id>.json），拒绝路径与特殊字符 */
 export const CUSTOM_THEME_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -204,6 +277,12 @@ export const CUSTOM_THEME_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/;
  * 天然排除 var()/url()/嵌套函数等引用与注入面（值只进 inline style，双保险）。
  */
 const COLOR_VALUE_PATTERN = /^(#[0-9a-fA-F]{3}|#[0-9a-fA-F]{4}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8}|(rgba?|hsla?|oklch|oklab)\(\s*[-#0-9.,%/\s]{1,64}\))$/;
+
+/**
+ * 字体栈白名单：字母（含 CJK）/数字/空格/逗号/引号/连字符/下划线/点，≤120 字符。
+ * 排除 `;(){}:/` 等字符 → 写不出 url()/var()/嵌套规则，值只进 inline style 也无法逃逸。
+ */
+const FONT_VALUE_PATTERN = /^[\p{L}\p{N} ,'"\-_.]{1,120}$/u;
 
 const MAX_TOKENS_PER_SCHEME = CUSTOM_THEME_TOKEN_WHITELIST.length;
 export const CUSTOM_THEME_NAME_MAX = 40;
@@ -224,12 +303,17 @@ function normalizeTokenScheme(scheme: unknown, schemeLabel: string, errors: stri
 	}
 	const normalized: CustomThemeTokenMap = {};
 	for (const [key, value] of entries) {
-		const token = key.startsWith("--color-") ? key.slice("--color-".length) : null;
-		if (!token || !TOKEN_SET.has(token)) {
-			errors.push(`${schemeLabel}: 未知 token "${key}"（只允许白名单内的 --color-* 变量，见 AI 指南）`);
+		const token = toInternalToken(key);
+		if (!token) {
+			errors.push(`${schemeLabel}: 未知 token "${key}"（只允许白名单内的 --color-* / --font-family-* 变量，见 AI 指南）`);
 			continue;
 		}
-		if (typeof value !== "string" || !COLOR_VALUE_PATTERN.test(value)) {
+		if (FONT_TOKEN_SET.has(token)) {
+			if (typeof value !== "string" || !FONT_VALUE_PATTERN.test(value)) {
+				errors.push(`${schemeLabel}: "${key}" 的值必须是字体栈（字母/数字/空格/逗号/引号/连字符，≤120 字符），当前为 ${JSON.stringify(value)}`);
+				continue;
+			}
+		} else if (typeof value !== "string" || !COLOR_VALUE_PATTERN.test(value)) {
 			errors.push(`${schemeLabel}: "${key}" 的值必须是静态颜色（#hex 或 rgb()/hsl()/oklch() 数值形式），当前为 ${JSON.stringify(value)}`);
 			continue;
 		}
@@ -280,6 +364,19 @@ export function parseCustomThemePackage(raw: string): CustomThemeParseResult {
 			optionalTexts[label] = value;
 		}
 	}
+	// base：可选的内置样式继承（写错 id 直接报错，不静默忽略——否则用户以为继承生效了）。
+	// 旧版主题包的 base 写的是皮肤 id（如 "graphite" / "terminal"）：按旧映射归一到样式，
+	// 不报错也不静默丢弃，让存量主题包平滑过渡。
+	let base: CustomThemeBaseSkin | undefined;
+	if (pkg.base !== undefined) {
+		if (typeof pkg.base === "string" && (CUSTOM_THEME_BASE_SKINS as readonly string[]).includes(pkg.base)) {
+			base = pkg.base as CustomThemeBaseSkin;
+		} else if (isLegacyAppSkinId(pkg.base)) {
+			base = normalizeThemeAppearance({ themeSkin: pkg.base }).themeStyle;
+		} else {
+			errors.push(`base 必须是内置样式 id 之一（${CUSTOM_THEME_BASE_SKINS.join(" / ")}），当前为 ${JSON.stringify(pkg.base)}`);
+		}
+	}
 	if (pkg.appearance === undefined || typeof pkg.appearance !== "object" || pkg.appearance === null) {
 		errors.push("appearance 必须是对象（含 light/dark 两档）");
 		return { ok: false, errors };
@@ -297,11 +394,12 @@ export function parseCustomThemePackage(raw: string): CustomThemeParseResult {
 		schemaVersion: 1,
 		id,
 		name,
-		appearance: { light: Object.fromEntries(Object.entries(tokens.light).map(([token, value]) => [`--color-${token}`, value])), dark: Object.fromEntries(Object.entries(tokens.dark).map(([token, value]) => [`--color-${token}`, value])) },
+		appearance: { light: Object.fromEntries(Object.entries(tokens.light).map(([token, value]) => [customThemeCssVar(token), value])), dark: Object.fromEntries(Object.entries(tokens.dark).map(([token, value]) => [customThemeCssVar(token), value])) },
 	};
 	if (optionalTexts.version !== undefined) theme.version = optionalTexts.version;
 	if (optionalTexts.author !== undefined) theme.author = optionalTexts.author;
 	if (optionalTexts.description !== undefined) theme.description = optionalTexts.description;
+	if (base !== undefined) theme.base = base;
 	return { ok: true, theme, tokens };
 }
 
@@ -323,17 +421,21 @@ export function sanitizeCustomThemeSnapshot(value: unknown): CustomThemeSnapshot
 	const cleanScheme = (scheme: unknown): CustomThemeTokenMap => {
 		if (typeof scheme !== "object" || scheme === null) return {};
 		const result: CustomThemeTokenMap = {};
-		for (const [key, color] of Object.entries(scheme as Record<string, unknown>)) {
+		for (const [key, value] of Object.entries(scheme as Record<string, unknown>)) {
 			// 快照键约定无前缀；兼容历史/手写时也接受完整变量名
-			const token = key.startsWith("--color-") ? key.slice("--color-".length) : key;
-			if (TOKEN_SET.has(token) && typeof color === "string" && COLOR_VALUE_PATTERN.test(color)) result[token] = color;
+			const token = toInternalToken(key) ?? (TOKEN_SET.has(key) ? key : null);
+			if (!token || typeof value !== "string") continue;
+			if (FONT_TOKEN_SET.has(token) ? FONT_VALUE_PATTERN.test(value) : COLOR_VALUE_PATTERN.test(value)) result[token] = value;
 		}
 		return result;
 	};
 	const light = cleanScheme(input.light);
 	const dark = cleanScheme(input.dark);
 	if (Object.keys(light).length === 0 && Object.keys(dark).length === 0) return undefined;
-	return { id, name, light, dark };
+	// 旧皮肤 id 同样归一到样式（见 parseCustomThemePackage 的 base 解析）
+	const rawBase = input.base;
+	const base: CustomThemeBaseSkin | undefined = typeof rawBase === "string" && (CUSTOM_THEME_BASE_SKINS as readonly string[]).includes(rawBase) ? (rawBase as CustomThemeBaseSkin) : isLegacyAppSkinId(rawBase) ? normalizeThemeAppearance({ themeSkin: rawBase }).themeStyle : undefined;
+	return { id, name, ...(base ? { base } : {}), light, dark };
 }
 
 /**

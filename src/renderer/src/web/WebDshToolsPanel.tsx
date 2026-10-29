@@ -104,7 +104,7 @@ function GoalsTab(props: { sessionId: string }) {
 						className={cn(
 							"shrink-0 rounded px-1.5 py-0.5 text-micro font-medium",
 							goal.phase === "active" && "bg-primary/15 text-primary",
-							goal.phase === "paused" && "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+							goal.phase === "paused" && "bg-warning/15 text-warning",
 							goal.phase === "blocked" && "bg-destructive/15 text-destructive",
 							goal.phase === "complete" && "bg-success/15 text-success",
 						)}
@@ -183,7 +183,7 @@ function SubagentsTab(props: { sessionId: string }) {
 								{t("dshTools.subagentInactive")}
 							</span>
 						)}
-						{entry.kind === "diagnostic" && <span className="inline-flex shrink-0 items-center rounded bg-amber-500/15 px-1.5 py-0.5 text-micro text-amber-600 dark:text-amber-400">{t("dshTools.subagentDiagnostic")}</span>}
+						{entry.kind === "diagnostic" && <span className="inline-flex shrink-0 items-center rounded bg-warning/15 px-1.5 py-0.5 text-micro text-warning">{t("dshTools.subagentDiagnostic")}</span>}
 					</button>
 					{expanded === entry.id && (
 						<div className="flex max-h-56 flex-col gap-1 overflow-y-auto border-t border-border-subtle p-2">
@@ -238,7 +238,7 @@ function SkillsTab(props: { sessionId: string }) {
 					<div className="flex min-w-0 items-center gap-2">
 						<Sparkles size={13} className="shrink-0 text-muted-foreground" aria-hidden="true" />
 						<code className="min-w-0 flex-1 truncate text-control font-medium text-foreground">/{entry.name}</code>
-						{!entry.modelInvocable && <span className="inline-flex shrink-0 items-center rounded bg-amber-500/15 px-1.5 py-0.5 text-micro font-medium text-amber-600 dark:text-amber-400">{t("dshTools.skillUserOnly")}</span>}
+						{!entry.modelInvocable && <span className="inline-flex shrink-0 items-center rounded bg-warning/15 px-1.5 py-0.5 text-micro font-medium text-warning">{t("dshTools.skillUserOnly")}</span>}
 					</div>
 					<p className="text-caption text-text-secondary">{entry.description}</p>
 					{entry.whenToUse && <p className="text-micro text-text-tertiary">{entry.whenToUse}</p>}

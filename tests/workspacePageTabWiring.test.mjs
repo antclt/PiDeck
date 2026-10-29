@@ -19,6 +19,7 @@ const automationAtoms = read("src/renderer/src/atoms/automation-atoms.ts");
 const agentAtoms = read("src/renderer/src/atoms/agent-atoms.ts");
 const workspaceAtoms = read("src/renderer/src/atoms/workspace-page-atoms.ts");
 const workspaceUtil = read("src/renderer/src/utils/workspacePageTabs.ts");
+const hostPluginAtomsSrc = read("src/renderer/src/atoms/host-plugin-atoms.ts");
 const zh = read("src/renderer/src/i18n/rendererCopy.zh-CN.ts");
 const en = read("src/renderer/src/i18n/rendererCopy.en-US.ts");
 
@@ -69,6 +70,13 @@ test("定时任务页面化：复用原管理界面、不再有 Dialog 弹框", 
 	assert.match(automationPage, /absolute inset-0 z-30 flex flex-col bg-background/);
 	assert.match(automationPage, /!props\.active && "hidden"/, "失活时保持挂载并隐藏（切回来状态不丢）");
 	assert.equal(existsSync("src/renderer/src/components/automation/AutomationModal.tsx"), false, "旧弹框宿主必须删除");
+});
+
+test("页面式插件面板与工作区页面互斥：打开面板时让页面失活（否则面板会被立刻关掉）", () => {
+	// 用户反馈：停在定时任务/智能体页面时点侧栏「会话分组」没反应——面板被打开了，又被互斥 effect 关掉。
+	assert.match(hostPluginAtomsSrc, /export const openHostPluginPanelAtom/, "打开面板必须走统一入口，所有入口共用同一条互斥逻辑");
+	assert.match(hostPluginAtomsSrc, /if \(target && isHostPluginPagePanel\(target, get\(hostPluginCatalogAtom\)\.catalog\)\) set\(deactivateWorkspacePageAtom\)/, "打开页面式面板时要在本动作内就让页面失活（同一帧内完成，避免被 effect 反手关掉）");
+	assert.match(app, /if \(isHostPluginPagePanel\(hostPluginPanel, store\.get\(hostPluginCatalogAtom\)\.catalog\)\) setHostPluginPanel\(null\)/, "反方向只收起页面式面板，对话框/浮层不占会话列");
 });
 
 test("页面关闭统一由会话 Tab 管理：页面头部不再渲染关闭叉", () => {

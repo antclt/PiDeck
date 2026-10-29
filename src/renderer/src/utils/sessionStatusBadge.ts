@@ -40,7 +40,7 @@ export function sessionStatusBadge(status?: string | null, busy?: SessionTabBusy
 		case "waiting":
 			return {
 				status: "loading",
-				colorClass: "text-amber-500 dark:text-amber-400",
+				colorClass: "text-warning",
 			};
 		default:
 			return undefined;

@@ -12,19 +12,19 @@ import type { ProviderUsageResult } from "../../../shared/types/providerUsage";
 /** 用量状态档位（cc-switch utilizationColor 语义）。 */
 export type UsageTone = "ok" | "low" | "empty" | "neutral";
 
-/** tone → 文字色（cc-switch text-green-600/orange-500/red-500 同款，含暗色变体）。 */
+/** tone → 文字色（cc-switch text-success/orange-500/red-500 同款，含暗色变体）。 */
 export const USAGE_TONE_TEXT_CLASS: Record<UsageTone, string> = {
-	ok: "text-green-600 dark:text-green-400",
-	low: "text-orange-500 dark:text-orange-400",
-	empty: "text-red-500 dark:text-red-400",
+	ok: "text-success",
+	low: "text-warning dark:text-orange-400",
+	empty: "text-danger",
 	neutral: "text-text-tertiary",
 };
 
 /** tone → 进度条填充色（TierBar 同款：绿/橙/红）。 */
 export const USAGE_TONE_BAR_CLASS: Record<UsageTone, string> = {
-	ok: "bg-green-500",
-	low: "bg-orange-500",
-	empty: "bg-red-500",
+	ok: "bg-success",
+	low: "bg-warning",
+	empty: "bg-danger",
 	neutral: "bg-text-tertiary",
 };
 
@@ -87,7 +87,11 @@ export function usagePercent(result: ProviderUsageResult): number | null {
 			return Math.min(100, Math.round((used / total) * 100));
 		};
 		const usedOf = (total?: number, used?: number, remaining?: number): number | undefined => used ?? (remaining != null && total != null ? total - remaining : undefined);
-		const windowPercents = (credits.windows ?? []).map((window) => fromWindow(window.total, usedOf(window.total, window.used, window.remaining))).filter((value): value is number => value != null);
+		// 窗口百分比：used/total 优先，缺额度明细时用服务端 percent（老套餐 token 窗只有 percentage）。
+		const windowPercents = (credits.windows ?? [])
+			.map((window) => fromWindow(window.total, usedOf(window.total, window.used, window.remaining)) ?? window.percent)
+			.filter((value): value is number => value != null)
+			.map((value) => Math.min(100, Math.max(0, Math.round(value))));
 		if (windowPercents.length > 0) return Math.max(...windowPercents);
 		const mainPercent = fromWindow(credits.total, usedOf(credits.total, credits.used, credits.remaining));
 		if (mainPercent != null) return mainPercent;
@@ -219,11 +223,15 @@ export type UsageBadgeSegment = {
 /** 档位严重度（主段挑选用）：红 > 橙 > 绿 > 灰——选择器行只放一段时优先示警。 */
 const TONE_SEVERITY: Record<UsageTone, number> = { empty: 3, low: 2, ok: 1, neutral: 0 };
 
-/** 单窗口的已用百分比（0-100 封顶）：used 缺失时用 total-remaining 反推；无 total 不产生百分比。 */
-export function usageWindowPercent(window: { total?: number; used?: number; remaining?: number }): number | null {
+/**
+ * 单窗口的已用百分比（0-100 封顶）：优先 used/total 计算（used 缺失时用 total-remaining 反推），
+ * 无额度明细时退回服务端给的 percent（智谱老套餐 token 窗只回 percentage）；都没有则不产生百分比。
+ */
+export function usageWindowPercent(window: { total?: number; used?: number; remaining?: number; percent?: number }): number | null {
 	const used = window.used ?? (window.remaining != null && window.total != null ? window.total - window.remaining : undefined);
-	if (window.total == null || used == null || window.total <= 0) return null;
-	return Math.min(100, (used / window.total) * 100);
+	if (window.total != null && used != null && window.total > 0) return Math.min(100, (used / window.total) * 100);
+	if (window.percent != null && Number.isFinite(window.percent)) return Math.min(100, Math.max(0, window.percent));
+	return null;
 }
 
 /**

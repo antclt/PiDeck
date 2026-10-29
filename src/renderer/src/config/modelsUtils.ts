@@ -33,3 +33,18 @@ export function buildModelsFromFetchedSelection(fetchedModels: FetchedModel[], s
 	// 按展示名正序排列（name 缺失回退 id），保证保存后模型表顺序稳定。
 	return sortModelRows(result);
 }
+
+// 模型表渐进渲染窗口：每行是「4 输入框 + Popover + 2 Dialog + 操作按钮」的重树，上百行全量平铺
+// 挂载与逐键整表重渲都会卡。默认窗口 100 行，不足再按步长「继续加载」。
+export const MODEL_TABLE_INITIAL_VISIBLE_ROWS = 100;
+export const MODEL_TABLE_LOAD_MORE_STEP = 100;
+
+/**
+ * 模型表当前应渲染的行数（前缀窗口）。
+ * 窗口只做前缀切片：行 index 与原数组一一对应，批量选择/删除/移动等 index 定位语义不变。
+ * focusIndex ≥ 0 时（聚焦新增行）扩窗到能看见该行；结果始终夹在 [0, total]。
+ */
+export function resolveModelTableVisibleRowCount(total: number, windowSize: number, focusIndex: number): number {
+	const expanded = Math.max(windowSize, focusIndex + 1);
+	return Math.max(0, Math.min(total, expanded));
+}

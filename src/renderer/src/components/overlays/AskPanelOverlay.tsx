@@ -242,12 +242,12 @@ export function AskPanelOverlay() {
 							) : null}
 						</div>
 						{running ? (
-							<span className="inline-flex shrink-0 items-center gap-1 text-micro font-medium text-emerald-600 dark:text-emerald-400">
-								<span className="size-1.5 animate-pulse rounded-full bg-emerald-500" aria-hidden="true" />
+							<span className="inline-flex shrink-0 items-center gap-1 text-micro font-medium text-success">
+								<span className="size-1.5 animate-pulse rounded-full bg-success" aria-hidden="true" />
 								{t("askPanel.running")}
 							</span>
 						) : done ? (
-							<Check size={13} className="shrink-0 text-emerald-500" aria-hidden="true" />
+							<Check size={13} className="shrink-0 text-success" aria-hidden="true" />
 						) : null}
 						<span className="flex-1" />
 						<button className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/60 hover:text-foreground disabled:opacity-40" aria-label={t("askPanel.copyAnswer")} title={t("askPanel.copyAnswer")} disabled={!fullAnswer} onClick={copyAnswer}>
@@ -323,18 +323,18 @@ export function AskPanelOverlay() {
 					<Loader2 size={14} className="animate-pideck-spin text-muted-foreground" aria-hidden="true" />
 				) : running ? (
 					<span className="relative flex size-2" aria-hidden="true">
-						<span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-						<span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+						<span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-75" />
+						<span className="relative inline-flex size-2 rounded-full bg-success" />
 					</span>
 				) : done ? (
-					<Check size={14} className="text-emerald-500" aria-hidden="true" />
+					<Check size={14} className="text-success" aria-hidden="true" />
 				) : (
 					<MessageSquarePlus size={14} className="text-muted-foreground" aria-hidden="true" />
 				)}
 				<span className="truncate text-xs text-foreground/90">{questionSummary || summary || (panel.creating ? t("askPanel.creating") : t("askPanel.waiting"))}</span>
 				{running && !panel.creating ? (
-					<span className="inline-flex shrink-0 items-center gap-0.5 text-micro font-medium text-emerald-600 dark:text-emerald-400">
-						<span className="size-1.5 animate-pulse rounded-full bg-emerald-500" aria-hidden="true" />
+					<span className="inline-flex shrink-0 items-center gap-0.5 text-micro font-medium text-success">
+						<span className="size-1.5 animate-pulse rounded-full bg-success" aria-hidden="true" />
 						{t("askPanel.running")}
 					</span>
 				) : null}

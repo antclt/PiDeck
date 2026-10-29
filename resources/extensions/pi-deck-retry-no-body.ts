@@ -17,6 +17,11 @@
  *   2. `模型服务暂时不可用，请稍后重试` —— 中文文案，名单里一个词都命中不了。
  *   3. `stream_read_error` / `unexpected EOF` / HTTP2 `GOAWAY` —— 传输层瞬态错误，
  *      同样不在名单里。
+ *   4. `juzi-r4: The host is configured as a Cloudflare Tunnel, but Cloudflare is
+ *      currently unable to reach it.`（HTTP 530）—— 边缘层/隧道回源故障：文案是
+ *      全英文但一个名单关键词都没有，530 也不在名单（只列 429/500/502/503/504/524），
+ *      会话直接失败停止。
+ *   5. Cloudflare 520-527 等边缘层 5xx —— 同样是服务端瞬态，pi 名单未列。
  *
  * 方案：本扩展在 `message_end` 事件里拦截 assistant 错误消息，识别上述瞬态故障，
  * 把 `errorMessage` 改写成既命中 pi 重试名单、又不触发 pi 上下文溢出误判的文本。
@@ -27,6 +32,16 @@
  *   - 可中止：重试 sleep 期间可被 abort 取消
  *   - 不污染会话：_prepareRetry 会从 agent state 移除 error 消息再重发
  *   - UI 事件：auto_retry_start/end 原生触发，PiDeck 气泡显示「重试中」无需额外处理
+ *
+ * 桌面端真正的重试门禁（2026-10 审计结论）：不是 pi 的名单，而是 dsh 的
+ * `classifyPiAiError` + `DEFAULT_RETRYABLE_CODES`——它先按 400/413/422
+ * 判 INVALID_REQUEST，再要求标签落在 RATE_LIMIT→`rate limit` 或 TRANSPORT→
+ * `connection error` 两类上。所以：
+ *
+ *   - 过载/限流只能标 `(rate limit)`，标 `(overloaded)` 桌面端不重试；
+ *   - 空响应的 400/413 必须降级成 `4xx`，否则优先级更高的 400 规则会盖掉标签。
+ *
+ * pi 名单（pi-ai / 旧版 pi CLI）与本文件两套规则同时满足，用户切回 pi 也能重试。
  *
  * 为什么不直接改状态码为 503：那会篡改事实、丢失「网关报的是 400」这一诊断
  * 信息。追加说明词既保留原文又诚实表达「这是连接层瞬态故障，正在重试」。
@@ -92,11 +107,19 @@ const NON_RETRYABLE_LOCALIZED_PATTERNS: RegExp[] = [
 const NON_RETRYABLE_HTTP_STATUS_PATTERN =
 	/(?:^|[^0-9])(?:400|401|402|403|404|405|406|409|410|412|413|415|422|431)\b/;
 
-/** 过载类本地化文案：命中后标注为 overloaded。 */
+/** 过载/限流类文案：命中后标注为 `rate limit`（dsh 判 RATE_LIMIT、pi 判 rate.?limit）。 */
 const TRANSIENT_OVERLOAD_PATTERNS: RegExp[] = [
 	/访问量过大|流量过大|并发.*?过(?:大|高)|请求过快|频率过高/,
 	/负载(?:过高|过大|满载)|压力过大|排队中|拥挤/,
 	/服务繁忙|系统繁忙|业务繁忙|服务器繁忙|繁忙，请/,
+	// 中文限流（如「您的账户已达到速率限制，请您控制请求频率」）——dsh 不懂中文，必须补英文标注
+	/速率限制|频率限制|请求频率|限流/,
+	// 英文过载/容量不足：pi 名单认得，dsh 的 classifyPiAiError 完全不认，必须改写
+	/overload(?:ed)?|server_is_overloaded/i,
+	/servers? (?:are|is) (?:currently )?(?:busy|overloaded)|currently experiencing high demand|model is at capacity/i,
+	// 「The model is currently at capacity due to high demand」——容量打满，过几分钟重试即可
+	/(?:model|server|service|provider)[^.]{0,40}?\b(?:at|near|nearing|exceeding)\s+capacity\b/i,
+	/\bdue\s+to\s+(?:high|heavy|extreme)\s+demand\b/i,
 ];
 
 /** 上游/连接类本地化文案：命中后标注为 connection error。 */
@@ -109,6 +132,10 @@ const TRANSIENT_UPSTREAM_PATTERNS: RegExp[] = [
 	/没有可用的?健康.*?账号|无可用的?健康.*?账号/,
 	/正在(?:维护|重启|升级|恢复)|维护中|升级中|重启中/,
 	/请稍后重试|请稍后再试|稍后重试|稍后再试|请重试|请重新尝试/,
+	// 英文上游不可用/内部错误：pi 名单认得，dsh 不认（只能靠数字或 transport 词）
+	/\b(?:service|upstream|server|provider)\b[^.]{0,40}?\bunavailable\b/i,
+	/\b(?:server|internal)[_\s-]?error\b/i,
+	/\bupstream\b[^.]{0,40}?\b(?:failed|error|unreachable)\b/i,
 ];
 
 /**
@@ -116,39 +143,113 @@ const TRANSIENT_UPSTREAM_PATTERNS: RegExp[] = [
  * 这些都不含 pi 重试名单里的任何关键词，因此会直接导致会话失败停止。
  */
 const TRANSIENT_TRANSPORT_PATTERNS: RegExp[] = [
-	/^stream_read_error$/i,
+	/^stream_read_error\b/i,
 	/unexpected\s+eof/i,
 	/premature\s+close/i,
 	/upstream\s+request\s+failed/i,
 	/no\s+available\s+channel/i,
 	/GOAWAY/i,
+	// 常见 socket 层错误：dsh 只认 ECONN* 前缀，pi 一个都不认，两者都必须补标注。
+	/connection\s+reset(?:\s+by\s+peer)?/i,
+	/\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|EAI_AGAIN)\b/,
 ];
 
 /**
- * pi 已能自行重试的信号。
+ * 边缘层 / 隧道类故障（Cloudflare Tunnel、Argo 隧道、CDN 回源不通）。
  *
- * 若原文已含这些锚点（如 `429: {...中文...}`、`503: {...}`），pi 的重试判定本就
- * 会命中，扩展不应再插手——否则只是给错误气泡多加一段无意义后缀。
+ * 实测原文（juzi 网关，HTTP 530）：
+ * ```text
+ * 530: {"code":null,"message":"juzi-r4: The host is configured as a Cloudflare
+ * Tunnel, but Cloudflare is currently unable to reach it.","param":null,"type":"api_error"}
+ * ```
+ * 「Cloudflare 连不上隧道后面的宿主机」本质是连接层瞬态，重发即成功；但文案里
+ * 没有任何 pi 重试名单的关键词（`unable to reach it` 不在名单），530 也不在名单，
+ * 于是会话直接失败停止。
+ *
+ * 判定只锚定「隧道/回源不可达」这一确定性特征，不宽泛匹配 `cloudflare`——
+ * 后者出现在 WAF 拦截（403 challenge）文案里，重试必然复现。
+ */
+const TRANSIENT_EDGE_PATTERNS: RegExp[] = [
+	/cloudflare\s+tunnel/i,
+	/\bargo\s+tunnel\b/i,
+	// `... unable to reach it` / `cannot reach the origin` —— 隧道回源不通的通用表述
+	/\b(?:unable|not\s+able|can(?:'|no)t|couldn'?t)\s+to\s+reach\s+(?:it\b|the\s+(?:host|origin|server|upstream))/i,
+	// Cloudflare 错误页编号：1033 Argo Tunnel error、1035（隧道/回源握手失败）
+	/\berror\s*(?:code\s*)?10(?:33|35)\b/i,
+	// 回源不可达短语（Cloudflare 52x 文案的主体）
+	/\b(?:origin|web\s+server|upstream)\b[\s\S]{0,80}?(?:unreachable|is\s+down|has\s+been\s+down|refused\s+(?:the\s+)?connection|handshake\s+failed)/i,
+];
+
+/**
+ * 状态码位上下文前缀：`HTTP/1.1 530`、`status 530`、`status_code: 530`、`error: 530`
+ * 或字符串开头。
+ *
+ * 只认这些位置，避免把正文/JSON 里的普通数字（`usage: 512`、ID、毫秒数）
+ * 当成状态码而误判为可重试。
+ */
+const STATUS_CONTEXT_PREFIX =
+	"(?:^|\\bhttps?\\/[\\d.]+\\s+|\\b(?:status(?:\\s*code)?|code|error)\\b[\\s:=#-]{0,3})";
+
+/**
+ * pi 重试名单外的 5xx 服务端状态码。
+ *
+ * pi 的 `isRetryableAssistantError` 只列 429/500/502/503/504/524，其余同族状态码全是
+ * 服务端/边缘层瞬态：Cloudflare 520（回源空响应）、521（源站拒绝连接）、
+ * 522（连接源站超时）、523（源站不可达）、525-527（TLS 握手失败）、529（过载）、
+ * 530（隧道回源失败）。这些状态码重发即可能成功，不重试则整个会话失败停止。
+ *
+ * 刻意不含 51x（510 Not Extended / 511 Network Authentication Required）：两者都
+ * 要先改配置才能成功，而 `512 tokens`、`511 ms` 这类正文数字很容易误命中——宁可漏判。
+ */
+const RETRYABLE_SERVER_STATUS_PATTERN = new RegExp(
+	`${STATUS_CONTEXT_PREFIX}(5(?:0\\d|2\\d|3\\d|99))(?![0-9])`,
+	"i",
+);
+
+/**
+ * 5xx 中的确定性错误：501 Not Implemented（接口不支持该用法）、
+ * 505 HTTP Version Not Supported。重试一百次也是同样的结果。
+ */
+const NON_RETRYABLE_SERVER_STATUS_PATTERN = new RegExp(
+	`${STATUS_CONTEXT_PREFIX}(?:501|505)(?![0-9])`,
+	"i",
+);
+
+/**
+ * 桌面运行时（`@deepseek-ai/dsh-llm-pi-ai` 的 `classifyPiAiError` + `dsh-llm-retry`
+ * 的默认 `retryableCodes`）一定会重试的锚点。
+ *
+ * 关键点：真正跑会话的是 dsh，而它的分类器比 pi 的名单**窄得多**——只认
+ * 429/4xx 数字、`rate.?limit`、任意 5xx 数字、`time(d) out`、`stream ended`、
+ * 以及 `network|connection|socket|fetch|terminated|premature close`。
+ * 所以像 `overloaded`、`service unavailable`、`internal error` 这类「pi 认得、
+ * dsh 不认得」的文案**不能**放在这里跳过，否则扩展不改写、dsh 判成 PI_AI_ERROR，
+ * 会话直接死掉（实测 `Error Code server_is_overloaded` 命中 23 次均未重试）。
+ *
+ * 若原文已含这些锚点（如 `429: {...中文...}`、`503: {...}`），dsh 本就会重试，
+ * 扩展不应再插手——否则只是给错误气泡多加一段无意义后缀。
  */
 const ALREADY_RETRYABLE_SIGNALS: RegExp[] = [
 	/\b(?:429|500|502|503|504|524)\b/,
-	/rate.?limit|too many requests|overloaded/i,
-	/service.?unavailable|server.?error|internal.?error/i,
+	/rate.?limit|too many requests/i,
 	/timed?\s*out|timeout|terminated/i,
-	/connection.?error|socket hang up|fetch failed/i,
+	/connection.?error|socket hang up|fetch failed|other side closed/i,
 ];
 
 /**
  * 判断错误信息是否为「应重试但 pi 识别不了」的瞬态故障。
  *
- * 覆盖两类 pi 名单漏掉的瞬态故障：
+ * 覆盖 pi 名单漏掉的瞬态故障：
  * 1. 本地化（中文）文案 —— 中转网关常把上游故障翻译成中文，
  *    其中没有一个词落在 pi 的全英文重试名单里。
  * 2. 传输层错误 —— `stream_read_error` / `unexpected EOF` / HTTP2 `GOAWAY` 等。
+ * 3. 边缘层/隧道回源故障 —— Cloudflare Tunnel「unable to reach it」、Argo 1033 等。
+ * 4. 名单外的 5xx 状态码 —— 520-527/529/530/531…（pi 只列 500/502/503/504/524）。
  *
  * 排除原则（宁可漏判，不可误判）：
  * - 额度/鉴权/模型不存在/请求构造错误 → 重试无意义（黑名单优先）
  * - 带 4xx 状态码 → 服务端明确拒绝，重试必然复现（如 403 region 限制）
+ * - 501/505 → 确定性错误，重试必然复现
  * - 已含 pi 重试锚点的文案 → 交给 pi，扩展不改写
  * - 用户主动中止（`Request was aborted` / `Operation aborted`）→ **不重试**。
  *   这是刻意排除的：abort 通常是用户点了停止，自动重发会让已停止的会话"复活"。
@@ -160,17 +261,20 @@ export function isTransientError(errorMessage: string): boolean {
 	if (!errorMessage) return false;
 	if (NON_RETRYABLE_LOCALIZED_PATTERNS.some((p) => p.test(errorMessage))) return false;
 	if (NON_RETRYABLE_HTTP_STATUS_PATTERN.test(errorMessage)) return false;
+	if (NON_RETRYABLE_SERVER_STATUS_PATTERN.test(errorMessage)) return false;
 	if (ALREADY_RETRYABLE_SIGNALS.some((p) => p.test(errorMessage))) return false;
 	return (
 		TRANSIENT_OVERLOAD_PATTERNS.some((p) => p.test(errorMessage)) ||
 		TRANSIENT_UPSTREAM_PATTERNS.some((p) => p.test(errorMessage)) ||
-		TRANSIENT_TRANSPORT_PATTERNS.some((p) => p.test(errorMessage))
+		TRANSIENT_TRANSPORT_PATTERNS.some((p) => p.test(errorMessage)) ||
+		TRANSIENT_EDGE_PATTERNS.some((p) => p.test(errorMessage)) ||
+		RETRYABLE_SERVER_STATUS_PATTERN.test(errorMessage)
 	);
 }
 
-/** 过载瞬态错误的英文标注（命中 pi 重试名单的 `overloaded`）。 */
-const OVERLOAD_TAG = "overloaded";
-/** 上游/连接瞬态错误的英文标注（命中 pi 重试名单的 `connection.?error`）。 */
+/** 过载/限流瞬态错误的英文标注（dsh 判 RATE_LIMIT，pi 名单命中 `rate.?limit`）。 */
+const OVERLOAD_TAG = "rate limit";
+/** 上游/连接瞬态错误的英文标注（dsh 判 TRANSPORT，pi 名单命中 `connection.?error`）。 */
 const CONNECTION_TAG = "connection error";
 
 /**
@@ -179,7 +283,9 @@ const CONNECTION_TAG = "connection error";
  * 保留原文并追加括号标注（而非替换），用户气泡仍能看到网关的原始中文文案，
  * 会话历史可诊断；追加的英文词命中 pi 的 `RETRYABLE_PROVIDER_ERROR_PATTERN`。
  *
- * 标注按语义分派：过载类用 `overloaded`，上游/连接/超时类用 `connection error`。
+ * 标注按语义分派：过载/限流类用 `rate limit`，上游/连接/超时类用 `connection error`。
+ * 两者都同时命中 pi 的重试名单与 dsh 的 `classifyPiAiError`（RATE_LIMIT / TRANSPORT），
+ * 因此同一份改写对两种运行时都有效。
  * 这类本地化文案不会命中 pi 的溢出正则（后者全为英文），因此无需破锚前缀。
  *
  * @param errorMessage - 原始错误信息
@@ -245,18 +351,45 @@ export function needsOverflowUnanchor(errorMessage: string, api?: string): boole
 }
 
 /** 改写标注：用于幂等判断，避免重复追加。 */
-const REWRITE_TAG_PATTERN = /\((?:connection error|overloaded)\)\s*$/i;
+const REWRITE_TAG_PATTERN = /\((?:connection error|rate limit|overloaded)\)\s*$/i;
+
+/**
+ * 空响应里会被 dsh 判成 INVALID_REQUEST 的 4xx 状态码。
+ *
+ * `classifyPiAiError` 先看 `\b400\b`/`\b413\b` 再看 transport 词，所以
+ * `400 status code (no body) (connection error)` 在桌面端仍会被判 INVALID_REQUEST
+ * → 不重试（pi 路径则正常重试）。这里把状态码降级为 `4xx`，保留「请求在网关处
+ * 没拿到 body」的语义，又能落回 transport 分支。
+ *
+ * 只限 isNoBodyError 分支，且只处理 400/413：401/403（鉴权/WAF）、404（路由错）
+ * 重试必然复现，不受影响。
+ */
+const NO_BODY_4XX_TOKEN_PATTERN = /\b(?:400|413)\b/g;
+
+/**
+ * 空响应里「重试必然复现」的确定性 4xx：鉴权/WAF（401/403）、路由不存在（404）等。
+ *
+ * 这些码即使没有 body 也不该重试：`classifyPiAiError` 先匹配 `\b401|403\b` 判 AUTH，
+ * 再加标注也救不回来（实测会话里 `OpenAI API error (403): 403 status code (no body)`
+ * 被改写后仍不重试，只是给气泡添噪）。
+ */
+const NON_RETRYABLE_NO_BODY_4XX_PATTERN =
+	/(?:^|[^0-9])(?:401|402|403|404|405|406|409|410|412|415|422|431)\b/;
 
 /**
  * 幂等改写：已带标注的文案只补前缀、不重复追加（兼容旧版扩展改写过的会话）。
+ *
+ * 4xx 降级与破锚前缀同属「非 Anthropic 的空响应」分支：一旦降级，pi 与 dsh 都不再
+ * 把 400/413 当溢出，语义一致地走重试；Anthropic 必须保留原状态码，否则会连 pi 的
+ * 「超长 prompt → 压缩恢复」这条路一起切断。
  */
 export function makeRetryableErrorMessage(errorMessage: string, api?: string): string {
-	const tagged = REWRITE_TAG_PATTERN.test(errorMessage)
-		? errorMessage
-		: `${errorMessage} (connection error)`;
-	return needsOverflowUnanchor(errorMessage, api)
-		? `transient upstream fault: ${tagged}`
-		: tagged;
+	const isAnthropic = typeof api === "string" && ANTHROPIC_MESSAGE_APIS.has(api);
+	// 非 Anthropic：400/413 降级为 4xx，避开 pi 溢出误判与 dsh 的 400/413 优先规则。
+	// Anthropic 保留原码，让 pi 继续走「超长 prompt → 压缩恢复」。
+	const base = isAnthropic ? errorMessage : errorMessage.replace(NO_BODY_4XX_TOKEN_PATTERN, "4xx");
+	const tagged = REWRITE_TAG_PATTERN.test(base) ? base : `${base} (connection error)`;
+	return needsOverflowUnanchor(errorMessage, api) ? `transient upstream fault: ${tagged}` : tagged;
 }
 
 // ---------------------------------------------------------------------------
@@ -280,12 +413,17 @@ export default function (pi: ExtensionAPI): void {
 
 		const errorMessage = message.errorMessage;
 		if (!errorMessage) return;
+		// 已带标注（旧版本改写过的会话回放、或宿主重复派发）→ 直接放行，
+		// 不要再走判定：标注里的 `rate limit` 会命中「本就可重试」名单，导致反复处理。
+		if (REWRITE_TAG_PATTERN.test(errorMessage)) return;
 
 		// 传入 api：Anthropic 的 400/413 + 空 body 多为真实溢出，需保留 pi 的压缩恢复路径。
 		const api = typeof message.api === "string" ? message.api : undefined;
 
 		let rewritten: string;
 		if (isNoBodyError(errorMessage)) {
+			// 401/403/404 等确定性 4xx：空 body 也不重试（鉴权/WAF/路由错，重试必然复现）。
+			if (NON_RETRYABLE_NO_BODY_4XX_PATTERN.test(errorMessage)) return;
 			// pi 名单已覆盖的状态码（500/502/503/504/429…）空响应本就会重试，
 			// 保持原文以免给错误气泡加无意义后缀；只有被溢出误判的 400/413 需要改写。
 			const needsRewrite =

@@ -185,6 +185,10 @@ export type SessionRunControlView = {
 	isRestarting?: boolean;
 	isReloading?: boolean;
 	reloadMode?: SessionReloadMode;
+	/** 当前绑定的进程实例：复制 Agent ID / 关闭 Agent 入口依赖它（无绑定时不渲染）。 */
+	agentId?: string;
+	/** 强制停止 = 杀进程 + 解绑（会话记录保留）；与 abort（只停当前回合）语义不同。 */
+	onCloseAgent?: () => void;
 	onAction: (action: SessionRunAction) => void;
 };
 

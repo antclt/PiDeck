@@ -169,6 +169,10 @@ export class AgentMessageProjector {
 						const usage = chatUsageFromPiUsage(typed.usage);
 						const measuredDurationMs = typeof typed.durationMs === "number" && Number.isFinite(typed.durationMs) ? typed.durationMs : undefined;
 						const startedAt = typeof typed.timestamp === "number" && typed.timestamp > 0 ? typed.timestamp : undefined;
+						// 本轮冻结耗时用的墙钟结束点：pi 的 timestamp 是请求开始，单看它会把
+						// 「回复耗时」算成最后一次请求的排队时长（历史会话因此长期偏小）。
+						// 请求开始 + 实测耗时 = 本条消息真正写完的时刻。
+						const endedAt = startedAt !== undefined && measuredDurationMs !== undefined ? startedAt + measuredDurationMs : undefined;
 						return [
 							{
 								id: `${agentId}-history-${currentEntryId ?? index}`,
@@ -183,6 +187,7 @@ export class AgentMessageProjector {
 									...(usage ? { usage } : {}),
 									...(measuredDurationMs !== undefined ? { durationMs: measuredDurationMs } : {}),
 									...(startedAt !== undefined && measuredDurationMs !== undefined ? { startedAt } : {}),
+									...(endedAt !== undefined ? { endedAt } : {}),
 								},
 								...(thinking ? { thinking } : {}),
 								...(images.length > 0 ? { images } : {}),

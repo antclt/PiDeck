@@ -7,6 +7,7 @@ import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../shared/fileTree";
 import type { ProjectFileAccessScope, ProjectFileTarget } from "../../shared/types/project";
 import type { FileContentSearchResult, FileSearchResult } from "../../shared/types";
 import { detectFileManager, openFileManagerAt } from "../files/FileManager";
+import { expandHomeForFileAccess } from "../fs/homePathExpansion";
 import { openSystemPath } from "../fs/openPath";
 import type { FileIndexService } from "../files/FileIndexService";
 import { registerFilesSystemIpc } from "./filesSystemIpc";
@@ -118,6 +119,13 @@ export function registerFilesIpc({ fileSystemService, projectStore, settingsStor
 		return project ? projectLocatorFromLegacy(project) : undefined;
 	});
 
+	/**
+	 * issue #426：`~` 必须在落到 fs.* / shell.* 之前展开成家目录绝对路径。
+	 * renderer 侧的裸路径可能直接来自模型回复（`~/桌面/x.html`），此前原样进 stat 必然 ENOENT。
+	 * 顺序：先展开（WSL 下拿到发行版内 home），再 toWindowsPath 转 UNC。
+	 */
+	const expandHome = (path: string): string => expandHomeForFileAccess(path, settingsStore.get());
+
 	const fileBackendForTargets = (targets: ProjectFileTarget[]) => {
 		const backends = targets.map((target) => projectFileBackendRouter.forProject(target.projectId));
 		const backend = backends[0];
@@ -158,7 +166,7 @@ export function registerFilesIpc({ fileSystemService, projectStore, settingsStor
 		if (typeof rawPath !== "string" || !rawPath.trim() || rawPath.length > 32_768) {
 			throw new Error("Invalid file path");
 		}
-		const hostPath = toWindowsPath(rawPath);
+		const hostPath = toWindowsPath(expandHome(rawPath));
 		return boundary ? resolveProjectFileReadPath(boundary, hostPath) : hostPath;
 	};
 

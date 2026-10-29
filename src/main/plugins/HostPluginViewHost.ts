@@ -68,7 +68,9 @@ export class HostPluginViewHost implements HostPluginWebviewBridge {
 			id,
 			pluginId: plugin.manifest.id,
 			fingerprint: plugin.fingerprint,
-			context: input.context,
+			// scope 在这里就补上：轮询的 changeSince 也按 instance.context 判定范围，
+			// 不能只靠 broker.bind 补（那一步在 guest attach 之后）。
+			context: this.sessions.describe(input.context, plugin.manifest.permissions),
 			entryUrl,
 			generation: 0,
 			polling: false,
@@ -122,8 +124,9 @@ export class HostPluginViewHost implements HostPluginWebviewBridge {
 	update(id: string, context: HostPluginContext): void {
 		const instance = this.instances.get(id);
 		if (!instance) throw new Error("unknown-instance");
-		if (JSON.stringify(instance.context) === JSON.stringify(context)) return;
-		instance.context = context;
+		const described = this.sessions.describe(context, this.manager.getEnabled(instance.pluginId)?.manifest.permissions ?? []);
+		if (JSON.stringify(instance.context) === JSON.stringify(described)) return;
+		instance.context = described;
 		instance.generation += 1;
 		instance.revision = undefined;
 		if (instance.guest) this.broker.update(instance.guest.id, context);

@@ -313,3 +313,26 @@ export function buildPiProxyEnvPatch(settings: (PiProxyModeSettings & { piProxyB
 	patch[PIDECK_PI_PROXY_SCOPE] = PIDECK_PI_PROXY_SCOPE_MODEL_ONLY;
 	return patch;
 }
+
+/** ACP CLI 代理设置子集（与 pi 代理分开配置：ACP 进程访问的是各自的模型端点）。 */
+export type AcpProxySettings = Pick<AppSettings, "acpProxyEnabled" | "acpProxyUrl" | "acpProxyBypass">;
+
+/** 注入 ACP 子进程的代理形态（`PiLocator.createProcessEnv` 的入参形状）。 */
+export type AcpProxyEnvSettings = { piProxyEnabled: boolean; piProxyUrl: string; piProxyBypass: string };
+
+/**
+ * 把 ACP 代理设置映射成 `PiLocator.createProcessEnv` 需要的形状。
+ *
+ * 关闭或地址为空 → undefined（不注入，ACP 进程继承系统环境变量，与引入该设置前一致）；
+ * 开启 → 复用 pi 同一套 env 组装（HTTP(S)/ALL_PROXY + NO_PROXY + NODE_USE_ENV_PROXY），
+ * 保证 ACP 与 pi 的代理注入语义不会两处漂移。额外写入的 PIDECK_PI_PROXY_SCOPE 对
+ * ACP 进程无消费者（只有 pi 的 shell 隔离扩展读它），留着无害。
+ */
+export function resolveAcpProxySettings(settings: AcpProxySettings): AcpProxyEnvSettings | undefined {
+	if (settings.acpProxyEnabled !== true) return undefined;
+	// settings.json 可能被手改成非字符串：脏值按「未配置」处理，不能让 ACP 开会话直接抛错。
+	const url = typeof settings.acpProxyUrl === "string" ? settings.acpProxyUrl.trim() : "";
+	if (!url) return undefined;
+	const bypass = typeof settings.acpProxyBypass === "string" ? settings.acpProxyBypass.trim() : "";
+	return { piProxyEnabled: true, piProxyUrl: url, piProxyBypass: bypass };
+}

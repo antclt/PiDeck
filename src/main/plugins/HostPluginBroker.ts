@@ -1,5 +1,6 @@
 /** Dedicated, sender-bound API. Neither renderer-supplied plugin IDs nor raw IPC are capabilities. */
 import type { HostPluginContext, HostPluginResponse } from "../../shared/types/hostPlugin";
+import type { SessionGroupStore } from "../sessionGroups/sessionGroupStore";
 import type { HostPluginManager } from "./HostPluginManager";
 import type { HostPluginSessions } from "./HostPluginSessions";
 import type { HostPluginStorage } from "./HostPluginStorage";
@@ -39,6 +40,8 @@ export class HostPluginBroker {
 		private readonly network = new HostPluginNetwork(),
 		/** 本地服务适配器表。缺省是空表：没装配适配器的服务一律 `service-unavailable`（fail-closed）。 */
 		private readonly services = new LocalServiceRegistry([]),
+		/** 会话分组 store（惰性求值）：未装配时 sessionGroups.* 一律 `service-unavailable`（fail-closed）。 */
+		private readonly sessionGroups?: () => SessionGroupStore | undefined,
 	) {
 		// Manager revocation happens before persistence: do not leave a live socket while disable writes to disk.
 		this.unsubscribe = manager.onChanged(() => {
@@ -55,21 +58,24 @@ export class HostPluginBroker {
 		binding.scope = new AbortController();
 	}
 
-	/** 存进来的范围一律先在桌面侧补全显示名：插件拿到 context 就能直接渲染。 */
-	private describe(context: HostPluginContext): HostPluginContext {
-		return this.sessions.describe(context, this.projectNameOf);
+	/**
+	 * 存进来的范围一律先在桌面侧补全：显示名 + `scope`。scope 由 manifest 权限算出
+	 * （`sessions.read.workspace` → workspace，否则 project），插件传什么都不算数。
+	 */
+	private describe(pluginId: string, context: HostPluginContext): HostPluginContext {
+		return this.sessions.describe(context, this.manager.getEnabled(pluginId)?.manifest.permissions ?? [], this.projectNameOf);
 	}
 
 	bind(senderId: number, pluginId: string, fingerprint: string, context: HostPluginContext): void {
 		this.unbind(senderId);
-		this.bindings.set(senderId, { pluginId, fingerprint, context: this.describe(context), generation: 0, pending: 0, budget: 0, windowAt: Date.now(), requests: new Set(), scope: new AbortController() });
+		this.bindings.set(senderId, { pluginId, fingerprint, context: this.describe(pluginId, context), generation: 0, pending: 0, budget: 0, windowAt: Date.now(), requests: new Set(), scope: new AbortController() });
 	}
 
 	update(senderId: number, context: HostPluginContext): void {
 		const binding = this.bindings.get(senderId);
 		if (!binding) return;
 		this.cancel(binding);
-		binding.context = this.describe(context);
+		binding.context = this.describe(binding.pluginId, context);
 		binding.generation += 1;
 	}
 
@@ -101,6 +107,13 @@ export class HostPluginBroker {
 		return this.bindings.get(senderId) === binding && binding.generation === generation && this.manager.getEnabled(binding.pluginId)?.fingerprint === binding.fingerprint;
 	}
 
+	/** sessionGroups.* 的前置条件：宿主装配了分组 store（未装配 = 功能面不存在，fail-closed）。 */
+	private requireSessionGroups(): SessionGroupStore {
+		const store = this.sessionGroups?.();
+		if (!store) throw new Error("service-unavailable");
+		return store;
+	}
+
 	/** Recheck after every asynchronous operation: disable/scope changes revoke already queued results. */
 	async request(senderId: number, mainFrame: boolean, input: unknown): Promise<HostPluginResponse> {
 		const binding = this.bindings.get(senderId);
@@ -124,6 +137,9 @@ export class HostPluginBroker {
 			// 服务控制是「权限 + 点名」双重门：插件只能动自己声明过、且 PiDeck 已实现的服务。
 			// 四个方法逐个登记（不用前缀推断）：新增服务方法忘了登记会报错，而不是白拿权限。
 			if ((request.method === "service.status" || request.method === "service.start" || request.method === "service.stop" || request.method === "service.openUi") && (!plugin.manifest.permissions.includes("service.local") || !plugin.manifest.services?.includes(request.id))) throw new Error("permission-denied");
+			// 会话分组是宿主数据（侧栏消费同一份）：整体替换式写入，不做逐字段合并；
+			// 权限逐个登记（不用前缀推断）：新增方法忘了登记会报错，而不是白拿权限。
+			if (request.method.startsWith("sessionGroups.") && !plugin.manifest.permissions.includes("sessionGroups.manage")) throw new Error("permission-denied");
 			let value: unknown;
 			switch (request.method) {
 				case "network.request": {
@@ -176,10 +192,14 @@ export class HostPluginBroker {
 				case "service.openUi": {
 					const adapter = this.services.get(request.id);
 					if (!adapter) throw new Error("service-unavailable");
-					// 地址来自主进程适配器（已收口到回环），插件拿不到也改不了，只能要求「打开」。
+					// 地址来自主进程适配器（已收口到回环），插件拿不到也改不了：pid 只能从 status.instances
+					// 白名单里点名多实例服务（如 lane daemon）的某个实例，未知 pid 一律 service-not-running。
 					const status = await adapter.status(binding.scope.signal);
-					if (!status.running || !status.uiUrl) throw new Error("service-not-running");
-					if (this.authorized(senderId, binding, generation)) for (const sink of this.openBrowserSinks) sink(status.uiUrl);
+					const target = typeof request.pid === "number" ? status.instances?.find((inst) => inst.pid === request.pid) : undefined;
+					if (typeof request.pid === "number" && !target) throw new Error("service-not-running");
+					const uiUrl = target?.uiUrl ?? status.uiUrl;
+					if (!status.running || !uiUrl) throw new Error("service-not-running");
+					if (this.authorized(senderId, binding, generation)) for (const sink of this.openBrowserSinks) sink(uiUrl);
 					value = null;
 					break;
 				}
@@ -189,12 +209,30 @@ export class HostPluginBroker {
 					value = null;
 					break;
 				case "workbench.navigate": {
-					// Navigation acts on the workbench, not on plugin data: ownership gate mirrors sessions.entries.
-					const projectId = binding.context.projectId;
-					if (!projectId || !this.sessions.navigable(binding.context, request.sessionId)) throw new Error("session-not-authorized");
-					const target = { projectId, sessionId: request.sessionId, entryId: request.entryId };
-					if (this.authorized(senderId, binding, generation)) for (const sink of this.navigateSinks) sink(target);
+					// Navigation acts on the workbench, not on plugin data: ownership gate mirrors sessions.list.
+					// 目标项目取自会话自己的归属（工作区范围下可与当前项目不同），不看插件传入的 projectId。
+					const target = this.sessions.resolveNavigation(binding.context, request.sessionId);
+					if (!target) throw new Error("session-not-authorized");
+					const navigate = { projectId: target.projectId, sessionId: target.sessionId, entryId: request.entryId };
+					if (this.authorized(senderId, binding, generation)) for (const sink of this.navigateSinks) sink(navigate);
 					value = null;
+					break;
+				}
+				case "sessionGroups.list": {
+					value = this.requireSessionGroups().list();
+					break;
+				}
+				case "sessionGroups.save": {
+					// parsePluginRequest 已按白名单收窄形状；这里整体替换式写入，store 负责字段级归一化。
+					value = await this.requireSessionGroups().save(request.group);
+					break;
+				}
+				case "sessionGroups.delete": {
+					value = await this.requireSessionGroups().delete(request.groupId);
+					break;
+				}
+				case "sessionGroups.reorder": {
+					value = await this.requireSessionGroups().reorder(request.groupIds);
 					break;
 				}
 			}

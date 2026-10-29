@@ -47,7 +47,8 @@ import { PiProcess, type WhitelistSkip } from "./PiProcess";
 import { resolveWhitelistSkipCopy } from "./whitelistSkipNotice";
 import { APP_DISPLAY_NAME } from "../utils/appBrand";
 import { isMainWindowFocused, shouldAlertNow } from "../notifications/alertFocusGate";
-import { buildToastXml, notificationLaunchUrl, resolveNotificationLogoUri } from "../notifications/notificationToast";
+import { resolveNotificationLogoUri } from "../notifications/notificationToast";
+import { showAgentToast, type AgentToastDeps } from "../notifications/agentToast";
 import { createCompactRpcRequest } from "./compactRpc";
 import { readPiCompactionOwnership, type PiCompactionOwnership } from "./compactionOwner";
 import { mergeSubagentSources } from "./derivedSubagents";
@@ -415,6 +416,15 @@ export class AgentManager {
 	private readonly messagePerf = new MessagePerfTracker();
 	/** 最近一次完整 runtime 快照（按 agent）：流式结算拿不到 RPC，只能从这里取模型事实。 */
 	private readonly lastRuntimeStateByAgent = new Map<string, AgentRuntimeState>();
+	/**
+	 * 最近一次流式状态补丁（按 agent）：正文通道每 100ms flush 都会补一条 patch，
+	 * 但两个边沿之间内容不变。同值跳过，避免几百个会话把万级/秒的同值事件灌给渲染层
+	 * （discussion #446）。签名与 emitStreamingStatePatch 的字段一一对应；
+	 * 心跳间隔保证渲染层重载/丢帧后仍能在数秒内恢复状态指示，而不是永久缺失。
+	 */
+	private readonly lastStreamingPatchByAgent = new Map<string, { signature: string; at: number }>();
+	/** 同值补丁心跳：5s 未发就重发一次当前状态（渲染层 reload 后自愈）。 */
+	private static readonly STREAMING_PATCH_REFRESH_MS = 5000;
 
 	/**
 	 * 最近一次用户 abort 的时刻（毫秒）。退出处理器用它识别「终止窗口内的进程退出」：
@@ -627,6 +637,16 @@ export class AgentManager {
 	}
 
 	/**
+	 * 注入内置技能目录解析（PiDeck 自带技能只经 --skill 注入，不落 pi 的自动发现根）。
+	 * 由 main/index.ts 在 SkillManager 装配后注入；未注入 = 不注入内置技能（测试/预览）。
+	 */
+	setBundledSkillResolver(resolve: (() => string[]) | null): void {
+		this.bundledSkillResolver = resolve ?? undefined;
+	}
+
+	private bundledSkillResolver?: () => string[];
+
+	/**
 	 * 开发诊断埋点。未开启时 sink 为空，recordTiming 直接返回。
 	 * 用来对照「点 pi 会话卡死」时 create / history.load 是否把主进程堵住。
 	 */
@@ -670,9 +690,10 @@ export class AgentManager {
 			modelTraceEnv: agentId ? this.registerModelTraceSession(agentId) : undefined,
 			// 扩展解析器与模型能力缓存共用（piProcessExtensionResolvers）：
 			// 保证「选择器能看到扩展贡献的模型」与「运行时实际加载的扩展」同源。
-			// 技能/模板解析器同源：禁用的技能与提示词模板在 RPC 启动时以白名单剔除。
-			// PiDeck 自带扩展注入（普通资源启停已交给 pi 原生 settings.json 过滤规则）。
+			// PiDeck 自带扩展用 -e 注入；普通资源的启停已交给 pi 原生 settings.json 过滤规则。
 			...createPiProcessExtensionResolvers(cwd, settings),
+			// 桌面端专用技能：从内置目录以 --skill 注入，TUI 不扫该目录。
+			bundledSkillPaths: this.bundledSkillResolver?.() ?? [],
 			// 会话身份 = PiDeck 会话 key（SessionRecord.id，UUID 或旧版文件路径），扩展按它解析等级覆盖；
 			// 匿名会话（noSession）无 key，扩展仅用全局默认等级。
 			securitySessionId: securitySessionKey ?? sessionPath,
@@ -1343,6 +1364,8 @@ export class AgentManager {
 			disabledSkills: settings.disabledSkills ?? [],
 			disabledPrompts: settings.disabledPrompts ?? [],
 			extensionRoots: createPiProcessExtensionResolvers(project.path, settings).resolveBuiltInExtensionPaths(),
+			// 内置技能开关变化只影响 --skill 注入，必须进指纹，否则池化进程会沿用旧技能集。
+			bundledSkillPaths: this.bundledSkillResolver?.() ?? [],
 			wsl: this.wslEnvironment ? { distro: this.wslEnvironment.distro, user: this.wslEnvironment.user, projectPath: this.toSessionProtocolPath(project.path) } : undefined,
 			modelTraceAvailable: modelTrace.ready,
 			modelTracePort: modelTrace.ready ? String(modelTrace.listeningPort) : "",
@@ -4279,6 +4302,7 @@ export class AgentManager {
 		this.autoRestartAttempted.delete(agentId);
 		this.messagePerf.clearAgent(agentId);
 		this.lastRuntimeStateByAgent.delete(agentId);
+		this.lastStreamingPatchByAgent.delete(agentId);
 		this.notifiedAskAgents.delete(agentId);
 		this.abortedDuringAsk.delete(agentId);
 		this.abortGate.clearEscalation(agentId);
@@ -6133,10 +6157,15 @@ export class AgentManager {
 		const extractedUsage = chatUsageFromPiUsage(messageRecord?.usage);
 		const measuredDurationMs = typeof messageRecord?.durationMs === "number" && Number.isFinite(messageRecord.durationMs) ? messageRecord.durationMs : undefined;
 		const startedAtMs = typeof messageRecord?.timestamp === "number" && messageRecord.timestamp > 0 ? messageRecord.timestamp : undefined;
+		// 冻结耗时（轮末固定「回复耗时」）需要消息真正写完的时刻：pi 的 timestamp 是请求
+		// 开始，结束后 run.endedAt 会与 startedAt 相等 → 轮末耗时恒为 0。优先用
+		// 「请求开始 + 实测耗时」；模拟/远端后端没上报 durationMs 时，终态事件即写盘时刻。
+		const endedAtMs = finalStopReason ? (startedAtMs !== undefined && measuredDurationMs !== undefined ? startedAtMs + measuredDurationMs : Date.now()) : undefined;
 		const usageMeta = {
 			...(extractedUsage ? { usage: extractedUsage } : {}),
 			...(measuredDurationMs !== undefined ? { durationMs: measuredDurationMs } : {}),
 			...(startedAtMs !== undefined && measuredDurationMs !== undefined ? { startedAt: startedAtMs } : {}),
+			...(endedAtMs !== undefined ? { endedAt: endedAtMs } : {}),
 		};
 
 		if (existing) {
@@ -6732,22 +6761,7 @@ export class AgentManager {
 			// 有具体提问内容时展示问题，否则退回通用文案（批量提问等无 title 场景）
 			const questionText = question.length > 60 ? `${question.slice(0, 60)}…` : question;
 			const body = questionText ? this.translate("mainNotification.askQuestion", { title, question: questionText }) : this.translate("mainNotification.askPending", { title });
-			const notification = new Notification({
-				title: appName,
-				body,
-				silent: false,
-				// 自定义 toast XML：launch 携带 sessionId，点击后经 pideck:// 协议唤起应用并跳转对应会话
-				toastXml: buildToastXml({ title: appName, body, launch: notificationLaunchUrl(sessionId), logoUri: this.notificationLogoUri() }),
-			});
-			// 点击通知：聚焦主窗口并切换到对应会话（session-first，跳转按 SessionRecord.id）
-			notification.on("click", () => {
-				this.focusMainWindowForSession(sessionId);
-			});
-			notification.on("failed", (_event, error) => {
-				// Windows 拒绝显示 toast 时触发（show() 本身不抛异常），记 warn 便于排查
-				void this.appLogger?.warn("agent", "Ask notification failed to show", { agentId, error: String(error) });
-			});
-			notification.show();
+			showAgentToast(this.notificationDeps, { agentId, kind: "ask", body, sessionId });
 		} catch {
 			// 通知失败不影响主流程，静默处理
 		}
@@ -6767,29 +6781,12 @@ export class AgentManager {
 			if (!shouldAlertNow(settings.alertOnlyWhenUnfocused, isMainWindowFocused(this.getWindow()))) return;
 			if (!Notification.isSupported()) return;
 
-			// 使用品牌常量而非 app.getName()：asar 内 package.json 只有 name=pi-desktop，
-			// 安装版通知标题会显示 pi-desktop（用户反馈），品牌名固定走 APP_DISPLAY_NAME。
-			const appName = APP_DISPLAY_NAME;
 			const body = this.translate("mainNotification.sessionDone", { title: sessionTitle });
 			// 会话结束时 runtime 一定已绑定会话；跳转目标用 record.id（renderer 按它索引会话），
 			// tab.sessionId 是 pi 侧会话 id 只能兜底（见 resolveNotificationSessionId 注释）。
 			const resolveSessionId = this.resolveSessionId;
 			const sessionId = resolveNotificationSessionId(resolveSessionId ? () => resolveSessionId(agentId) : undefined, this.agents.get(agentId)?.tab.sessionId);
-			const notification = new Notification({
-				title: appName,
-				body,
-				silent: false,
-				// 自定义 toast XML：launch 携带 sessionId，点击后经 pideck:// 协议唤起应用并跳转对应会话
-				toastXml: buildToastXml({ title: appName, body, launch: notificationLaunchUrl(sessionId), logoUri: this.notificationLogoUri() }),
-			});
-			notification.on("click", () => {
-				this.focusMainWindowForSession(sessionId);
-			});
-			notification.on("failed", (_event, error) => {
-				// Windows 拒绝显示 toast 时触发（show() 本身不抛异常），记 warn 便于排查
-				void this.appLogger?.warn("agent", "Session notification failed to show", { agentId, error: String(error) });
-			});
-			notification.show();
+			showAgentToast(this.notificationDeps, { agentId, kind: "done", body, sessionId });
 		} catch {
 			// 通知失败不影响主流程，静默处理
 		}
@@ -6825,6 +6822,18 @@ export class AgentManager {
 	 */
 	private notificationLogoUri(): string | null {
 		return resolveNotificationLogoUri({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath() });
+	}
+
+	/** 统一通知出口的依赖（构造/点击/失败日志在 notifications/agentToast.ts）。 */
+	private get notificationDeps(): AgentToastDeps {
+		return {
+			settings: () => this.settingsStore.get(),
+			getWindow: () => this.getWindow(),
+			logoUri: () => this.notificationLogoUri(),
+			translate: (key, params) => this.translate(key, params),
+			activate: (sessionId) => this.focusMainWindowForSession(sessionId),
+			logger: this.appLogger,
+		};
 	}
 
 	// abort 流闸与升级收口在 AbortStreamGateController；以下薄包装保持事件路径调用点与契约测试形态。
@@ -6913,6 +6922,11 @@ export class AgentManager {
 
 	/** 轻量 runtime 状态补丁：只同步本地流式标志与工具执行状态，不发 RPC。 */
 	private emitStreamingStatePatch(agentId: string) {
+		const signature = JSON.stringify([this.streamingAgents.has(agentId), this.toolExecutingByAgent.get(agentId) ?? null, this.toolStateSequenceByAgent.get(agentId) ?? 0]);
+		const now = Date.now();
+		const previous = this.lastStreamingPatchByAgent.get(agentId);
+		if (previous?.signature === signature && now - previous.at < AgentManager.STREAMING_PATCH_REFRESH_MS) return;
+		this.lastStreamingPatchByAgent.set(agentId, { signature, at: now });
 		this.emit(agentEventTags.agentsRuntimeState, {
 			agentId,
 			state: {
@@ -6922,6 +6936,19 @@ export class AgentManager {
 				toolStateSequence: this.toolStateSequenceByAgent.get(agentId) ?? 0,
 			} as AgentRuntimeState,
 		});
+	}
+
+	/**
+	 * 可见性补帧：会话从后台变为可见时，把当前还在流式输出的正文/思考整段补发一次。
+	 * 后台期间主进程不发 live 增量（见 sessions/visibleSessionRegistry.ts），渲染层手里
+	 * 没有内容；直接等下一次增量会先显示半截，因此这里强制全量。
+	 * 后台期间已经结束的输出不需要补：历史消息（agents:message）照常全量下发。
+	 */
+	emitLiveSnapshot(agentId: string): void {
+		const runtime = this.agents.get(agentId);
+		if (!runtime || runtime.tab.status === "closed" || runtime.tab.status === "error") return;
+		this.liveStream.emitTextSnapshot(agentId);
+		this.liveStream.emitThinkingSnapshot(agentId);
 	}
 
 	/**

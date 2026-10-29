@@ -10,7 +10,7 @@
  */
 import type { AcpToolConfig } from "../../../../shared/types/acp";
 
-export type AcpToolBrand = "gemini" | "claude" | "codex" | "kimi" | "qwen" | "opencode" | "cursor" | "codebuddy" | "minimax" | "generic";
+export type AcpToolBrand = "gemini" | "claude" | "codex" | "kimi" | "qwen" | "qoder" | "opencode" | "cursor" | "codebuddy" | "minimax" | "generic";
 
 /**
  * 关键词表，**顺序敏感**：
@@ -24,6 +24,8 @@ const BRAND_KEYWORDS: ReadonlyArray<readonly [AcpToolBrand, readonly string[]]> 
 	["codebuddy", ["codebuddy"]],
 	["kimi", ["kimi", "moonshot"]],
 	["qwen", ["qwen"]],
+	// qoder 同时覆盖 Qoder CLI(global)与 Qoder CLI CN(`qodercn`):后者命令名里就带 qoder。
+	["qoder", ["qoder"]],
 	["gemini", ["gemini"]],
 	["opencode", ["opencode"]],
 	["minimax", ["minimax"]],

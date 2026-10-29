@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { desktopApi } from "../desktopApi";
+import { t } from "../i18n";
+import { showNotice } from "../utils/notice";
 import type { AcpSessionConfigOption } from "../../../shared/types/acp";
+
+/**
+ * IPC 失败文案去掉传输前缀：Electron 会把主进程的 throw 包成
+ * "Error invoking remote method 'acp:session-config-set': Error: …"，只留原因部分给用户看。
+ */
+function errorText(error: unknown): string {
+	const raw = error instanceof Error ? error.message : String(error);
+	return raw.replace(/^Error invoking remote method '[^']*': (?:Error: )?/, "");
+}
 
 /**
  * ACP 会话级配置(configOptions 规范路径)的渲染层状态:
@@ -9,7 +20,8 @@ import type { AcpSessionConfigOption } from "../../../shared/types/acp";
  *
  * agentId 按 runtime 隔离:事件带 agentId,旧 agent 的迟到事件被过滤;
  * agent 未提供 configOptions 时 options 为 undefined(调用方隐藏选择器)。
- * 失败静默为 undefined(切换/关闭瞬间的 IPC 失败不值得打扰用户)。
+ * 读取失败静默为 undefined(切换/关闭瞬间的 IPC 失败不值得打扰用户);
+ * 下发失败则要提示:agent 明确拒绝时必须让用户知道为什么没生效(见 setOption 的 catch)。
  */
 export function useAcpSessionConfig(agentId: string | undefined, backend: string | undefined) {
 	type Scope = { agentId: string; revision: number };
@@ -50,8 +62,12 @@ export function useAcpSessionConfig(agentId: string | undefined, backend: string
 				const options = await desktopApi.acp.setSessionConfig(agentId, optionId, value);
 				// 复用的 Composer、runtime 重启、连续选择都可能让应答迟到。
 				if (scopeRef.current === scope && scope.revision === revision) setSnapshot({ scope, options });
-			} catch {
-				// agent 拒绝该值时保留当前选项；切换/关闭后的 IPC 失败无需打扰用户。
+			} catch (error) {
+				// 只对「agent 明确拒绝」出声：切换/关闭瞬间的 IPC 失败属于竞态噪声（scope 已换），
+				// 静默保留旧值即可。拒绝必须提示——否则 chip 原地弹回旧值，用户只会以为点了没反应
+				// （Qoder CLI 把 Bypass Permissions 列为可选值却回 unknown permission_mode）。
+				if (scopeRef.current !== scope || scope.agentId !== agentId) return;
+				showNotice(t("acp.configOptionRejected", { option: optionId, value: String(value), reason: errorText(error) }), undefined, "warning");
 			}
 		},
 		[enabled, agentId],

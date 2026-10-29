@@ -1,6 +1,6 @@
 import { useStore } from "jotai";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AvailableModel, ModelListReport, SessionRuntimeModelSelection, SessionRuntimeTarget } from "../../../shared/types";
+import type { AgentBackend, AvailableModel, ModelListReport, SessionRuntimeModelSelection, SessionRuntimeTarget } from "../../../shared/types";
 import { createSessionModelPreference } from "../../../shared/modelDisplayName";
 import { currentSessionIdAtom, sessionFocusedByIdAtomFamily, sessionRuntimeByIdAtom } from "../atoms";
 import { useSessionPreferenceState } from "./useSessionPreferenceState";
@@ -95,6 +95,8 @@ export function useSessionPreferenceController(options: {
 	pickerOpen: boolean;
 	/** 思考选择器是否打开（决定要不要向运行中 Agent 校验精确档位） */
 	thinkingPickerOpen: boolean;
+	/** 当前会话后端（引导页取输入框当前选择；有 record 时仍以 record 为准）。 */
+	backend?: AgentBackend;
 	/** DSH 部署默认模型（草稿期高亮） */
 	defaultModel?: { provider?: string; modelId?: string; modelName?: string };
 	defaultThinkingLevel?: string;
@@ -117,6 +119,7 @@ export function useSessionPreferenceController(options: {
 		pickerOpen: options.pickerOpen,
 		thinkingPickerOpen: options.thinkingPickerOpen,
 		cycleArmed,
+		backend: options.backend,
 		defaultModel: options.defaultModel,
 		defaultThinkingLevel: options.defaultThinkingLevel,
 		modelThinkingLevels: options.modelThinkingLevels,

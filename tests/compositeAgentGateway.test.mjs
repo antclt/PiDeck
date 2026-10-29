@@ -13,6 +13,7 @@ function makeFakeGateway(backend, { supportsOptional = true } = {}) {
 	const tabs = [];
 	const calls = [];
 	const listeners = new Set();
+	const settledListeners = new Set();
 	const gateway = {
 		backend,
 		capabilities: new Set(["compact", "fork", "getForkMessages", ...(supportsOptional ? ["editMessage", "deleteMessage", "getCommands", "exportHtml", "rewind"] : [])]),
@@ -96,6 +97,10 @@ function makeFakeGateway(backend, { supportsOptional = true } = {}) {
 			listeners.add(listener);
 			return () => listeners.delete(listener);
 		},
+		onAgentSettled(listener) {
+			settledListeners.add(listener);
+			return () => settledListeners.delete(listener);
+		},
 		// 可选能力：supportsOptional=false 时这些键不存在（同 DshAgentManager）
 		...(supportsOptional
 			? {
@@ -141,6 +146,9 @@ function makeFakeGateway(backend, { supportsOptional = true } = {}) {
 	};
 	gateway.calls = calls;
 	gateway.listeners = listeners;
+	gateway.emitSettled = (info) => {
+		for (const listener of settledListeners) listener(info);
+	};
 	return gateway;
 }
 
@@ -330,4 +338,36 @@ test("getMessageWindow：pi 网关的窗口协议原样透传（窗口段 + wind
 	const composite = new CompositeAgentGateway([pi]);
 	const tab = await composite.create({ projectId: "p1", backend: "pi" });
 	assert.equal(composite.getMessageWindow(tab.id), expected, "对象调用透传，不得丢 this 或复制错窗口");
+});
+
+test("addStateListener 用聚合快照：任一端发 agents:state 都带全部后端的 tab", async () => {
+	const { pi, dsh, composite } = makeComposite();
+	const piTab = await composite.create({ projectId: "p1", backend: "pi" });
+	const dshTab = await composite.create({ projectId: "p1", backend: "dsh" });
+	const snapshots = [];
+	const unsubscribe = composite.addStateListener((tabs) => snapshots.push(tabs.map((tab) => tab.id)));
+	// 只从 dsh 发 agents:state：若把子网关载荷原样透传，快照会只剩 dsh 的 tab（宠物会丢 pi 会话）。
+	for (const listener of dsh.listeners) listener("agents:state", [dshTab]);
+	assert.deepEqual(snapshots, [[piTab.id, dshTab.id]]);
+	// 非状态事件不触发状态快照
+	for (const listener of dsh.listeners) listener("agents:ui-request", { agentId: dshTab.id, requestId: "r1", method: "select" });
+	assert.equal(snapshots.length, 1);
+	unsubscribe();
+	for (const listener of dsh.listeners) listener("agents:state", [dshTab]);
+	assert.equal(snapshots.length, 1);
+});
+
+test("onAgentSettled 聚合所有实现了该能力的网关", () => {
+	const { pi, dsh, composite } = makeComposite();
+	const seen = [];
+	const unsubscribe = composite.onAgentSettled((info) => seen.push(info));
+	pi.emitSettled({ agentId: "pi:1", title: "Pi" });
+	dsh.emitSettled({ agentId: "dsh:1", title: "Dsh" });
+	assert.deepEqual(seen, [
+		{ agentId: "pi:1", title: "Pi" },
+		{ agentId: "dsh:1", title: "Dsh" },
+	]);
+	unsubscribe();
+	pi.emitSettled({ agentId: "pi:2", title: "Pi 2" });
+	assert.equal(seen.length, 2);
 });

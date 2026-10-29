@@ -12,11 +12,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, RotateCcw } from "lucide-react";
-import type { SecurityConfig, SecurityLevelConfig } from "../../../../shared/types";
+import type { SecurityConfig } from "../../../../shared/types";
 import { Button } from "../ui-shadcn/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
 import { t } from "../../i18n";
-import { permissionStrengthIcon } from "../../utils/permissionLevelIcon";
+import { permissionStrengthIcon, securityLevelIcon } from "../../utils/permissionLevelIcon";
 
 const api = (
 	window as unknown as {
@@ -24,18 +24,11 @@ const api = (
 			security: {
 				getConfig: () => Promise<SecurityConfig>;
 				setSessionLevel: (sessionId: string, levelId: string | null) => Promise<{ ok: true; config: SecurityConfig } | { ok: false; error: string }>;
+				onConfigChanged: (callback: () => void) => () => void;
 			};
 		};
 	}
 ).piDesktop;
-
-/** 等级图标：按统一保护强度语义取（utils/permissionLevelIcon，#214 与 DSH 权限预设同源） */
-function levelIcon(level: SecurityLevelConfig) {
-	if (level.id === "off") return permissionStrengthIcon("relaxed");
-	if (level.id === "strict") return permissionStrengthIcon("strict");
-	if (level.id === "standard") return permissionStrengthIcon("standard");
-	return permissionStrengthIcon("unknown");
-}
 
 export function SecurityLevelMenu(props: { sessionId: string; disabled?: boolean }) {
 	const [config, setConfig] = useState<SecurityConfig | null>(null);
@@ -44,16 +37,23 @@ export function SecurityLevelMenu(props: { sessionId: string; disabled?: boolean
 
 	useEffect(() => {
 		mountedRef.current = true;
-		api.security
-			.getConfig()
-			.then((loaded) => {
-				if (mountedRef.current) setConfig(loaded);
-			})
-			.catch(() => {
-				// 配置拉取失败：菜单置灰即可，不打扰输入
-			});
+		const reload = () => {
+			void api.security
+				.getConfig()
+				.then((loaded) => {
+					if (mountedRef.current) setConfig(loaded);
+				})
+				.catch(() => {
+					// 配置拉取失败：菜单置灰即可，不打扰输入
+				});
+		};
+		reload();
+		// 任一端（桌面设置页 / Web 端）修改安全配置后主进程广播，菜单跟随刷新；
+		// 否则 Web 改完回到桌面还显示旧等级，用户会以为没生效。
+		const unsubscribe = api.security.onConfigChanged(reload);
 		return () => {
 			mountedRef.current = false;
+			unsubscribe();
 		};
 	}, [props.sessionId]);
 
@@ -95,7 +95,7 @@ export function SecurityLevelMenu(props: { sessionId: string; disabled?: boolean
 	const hasSessionOverride = effectiveLevelId != null && effectiveLevelId !== config.defaultLevelId;
 
 	// 触发器图标反映当前安全状态：停用显示关闭盾，启用时按等级换专属盾
-	const Icon = !enabled ? permissionStrengthIcon("relaxed") : levelIcon(effectiveLevel ?? config.levels[0]);
+	const Icon = !enabled ? permissionStrengthIcon("relaxed") : securityLevelIcon(effectiveLevel ?? config.levels[0]);
 
 	return (
 		<DropdownMenu>
@@ -109,7 +109,7 @@ export function SecurityLevelMenu(props: { sessionId: string; disabled?: boolean
 				<div className="border-b border-border/60 px-2.5 py-2 text-caption leading-relaxed text-muted-foreground">{enabled ? t("security.menuHint") : t("security.menuDisabledHint")}</div>
 				{config.levels.map((level) => {
 					const selected = effectiveLevelId === level.id;
-					const ItemIcon = levelIcon(level);
+					const ItemIcon = securityLevelIcon(level);
 					return (
 						<DropdownMenuItem key={level.id} disabled={!enabled || props.disabled || saving} onSelect={() => void handlePick(level.id)} title={level.description} className="min-h-9 gap-2 px-2.5 py-1">
 							<span className={`grid size-6 shrink-0 place-items-center rounded-md ${selected ? "bg-primary/12 text-primary" : "bg-muted text-muted-foreground"}`}>

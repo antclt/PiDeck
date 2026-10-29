@@ -17,6 +17,7 @@ const {
 	applyPiProxyModeWithProvider,
 	computeGenProxyKey,
 	buildPiProxyEnvPatch,
+	resolveAcpProxySettings,
 } = loadTsCommonJs("src/main/sessions/sessionProxyPolicy.ts");
 
 // 名单启用判据与设置页共用（设置页据此置灰主开关）。
@@ -256,5 +257,27 @@ test("buildPiProxyEnvPatch: bypass 非空 → 注入 NO_PROXY 大小写双份并
 	assert.equal(patch.HTTPS_PROXY, "http://127.0.0.1:7890");
 	assert.equal(patch.NO_PROXY, "localhost,127.0.0.1");
 	assert.equal(patch.no_proxy, "localhost,127.0.0.1");
+	assert.equal(patch.NODE_USE_ENV_PROXY, "1");
+});
+
+// ── resolveAcpProxySettings：ACP CLI 与 pi 代理分开配置 ─────────────────────
+
+test("resolveAcpProxySettings: 关闭或地址为空 → 不注入（继承系统环境）", () => {
+	assert.equal(resolveAcpProxySettings({ acpProxyEnabled: false, acpProxyUrl: "http://127.0.0.1:7890", acpProxyBypass: "" }), undefined);
+	// 开关开着但没填地址：无法代理，保持原 env 而不是注入半个配置
+	assert.equal(resolveAcpProxySettings({ acpProxyEnabled: true, acpProxyUrl: "   ", acpProxyBypass: "" }), undefined);
+});
+
+test("resolveAcpProxySettings: 开启后 trim URL/bypass，并复用 pi 的 env 组装", () => {
+	const resolved = resolveAcpProxySettings({ acpProxyEnabled: true, acpProxyUrl: "  http://127.0.0.1:7890  ", acpProxyBypass: " localhost,127.0.0.1 " });
+	assert.ok(resolved);
+	assert.equal(resolved.piProxyEnabled, true);
+	assert.equal(resolved.piProxyUrl, "http://127.0.0.1:7890");
+	assert.equal(resolved.piProxyBypass, "localhost,127.0.0.1");
+	// 关键契约：映射结果喂给 spawn env 组装后必须带 undici 开关与 NO_PROXY，否则 ACP 仍直连。
+	const patch = buildPiProxyEnvPatch(resolved);
+	assert.ok(patch);
+	assert.equal(patch.HTTPS_PROXY, "http://127.0.0.1:7890");
+	assert.equal(patch.NO_PROXY, "localhost,127.0.0.1");
 	assert.equal(patch.NODE_USE_ENV_PROXY, "1");
 });

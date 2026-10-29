@@ -102,9 +102,14 @@ export class LiveStreamChannel {
 	emitTextStreamNow(agentId: string, rawText: string, done = false) {
 		// ANSI 剥离开口在 emit：flush 每 100ms 一次，不再每个 delta 全文扫描（见 accumulateText 注释）
 		const text = stripAnsi(rawText);
+		this.pushTextStream(agentId, text, done, false);
+	}
+
+	/** 正文通道的实际发送：forceFull=true 时忽略增量基准，整段下发（可见性补帧用）。 */
+	private pushTextStream(agentId: string, text: string, done: boolean, forceFull: boolean) {
 		const lastSent = this.lastSentTextByAgent.get(agentId) ?? "";
 		const pushCount = (this.textPushCountByAgent.get(agentId) ?? 0) + 1;
-		const sendFull = !text.startsWith(lastSent) || pushCount >= 50;
+		const sendFull = forceFull || !text.startsWith(lastSent) || pushCount >= 50;
 		const payload: {
 			agentId: string;
 			sessionId?: string;
@@ -126,6 +131,16 @@ export class LiveStreamChannel {
 		}
 		this.host.emit(agentEventTags.agentsTextStream, payload);
 		this.host.onTextStreamPushed(agentId);
+	}
+
+	/**
+	 * 可见性补帧：强制推一次全量正文。会话在后台时主进程不发 live 增量，切到前台时
+	 * 渲染层手里还是旧内容（或空），必须整段替换；同时重置增量基准，后续 delta 才对得上。
+	 */
+	emitTextSnapshot(agentId: string): void {
+		const text = this.streamingText.get(agentId);
+		if (text === undefined || text.length === 0) return;
+		this.pushTextStream(agentId, stripAnsi(text), false, true);
 	}
 
 	// ── 思考通道 ───────────────────────────────────────────────
@@ -236,13 +251,17 @@ export class LiveStreamChannel {
 		const segment = this.thinkingSegmentByAgent.get(agentId);
 		if (!segment) return;
 		// 与正文通道同策略：ANSI 剥离只在 emit（每 100ms 一次）发生
-		const text = stripAnsi(rawText);
+		this.pushThinkingStream(agentId, segment, stripAnsi(rawText), false);
+	}
+
+	/** 思考通道的实际发送：forceFull=true 时忽略增量基准，整段下发（可见性补帧用）。 */
+	private pushThinkingStream(agentId: string, segment: ThinkingSegmentRecord, text: string, forceFull: boolean) {
 		// 增量推送（同正文通道治理）：只发上次快照之后的新字符；非 append
 		// （重置/ANSI 变化）或距上次快照超过 50 次推送（≈2.5s）时补一次全量，
 		// 兜底渲染层 HMR/晚绑定丢失的增量。
 		const lastSent = this.lastSentThinkingByAgent.get(agentId) ?? "";
 		const pushCount = (this.thinkingPushCountByAgent.get(agentId) ?? 0) + 1;
-		const sendFull = !text.startsWith(lastSent) || pushCount >= 50;
+		const sendFull = forceFull || !text.startsWith(lastSent) || pushCount >= 50;
 		const update: ThinkingUpdate = {
 			agentId,
 			id: segment.id,
@@ -254,6 +273,15 @@ export class LiveStreamChannel {
 		this.lastSentThinkingByAgent.set(agentId, text);
 		this.thinkingPushCountByAgent.set(agentId, sendFull ? 0 : pushCount);
 		this.host.emit(agentEventTags.agentsThinking, update);
+	}
+
+	/** 可见性补帧：强制推一次全量思考（与正文同策略，见 emitTextSnapshot）。 */
+	emitThinkingSnapshot(agentId: string): void {
+		const segment = this.thinkingSegmentByAgent.get(agentId);
+		if (!segment) return;
+		const text = this.streamingThinking.get(agentId);
+		if (text === undefined || text.length === 0) return;
+		this.pushThinkingStream(agentId, segment, stripAnsi(text), true);
 	}
 
 	// ── 生命周期清理 ───────────────────────────────────────────

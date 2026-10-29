@@ -48,6 +48,7 @@ export const SETTINGS_SECTION_ANCHORS = [
 	{ tab: "terminal", slug: "terminal-behavior", labelKey: "settings.terminal.behavior", keywords: ["终端行为", "复制粘贴", "behavior"] },
 	{ tab: "terminal", slug: "terminal-startup", labelKey: "settings.terminal.startup", keywords: ["终端启动", "启动命令", "初始命令", "startup", "shell"] },
 	{ tab: "proxy", slug: "proxy-pi-agent", labelKey: "settings.piProxy", keywords: ["pi 代理", "agent 代理", "模型代理", "pi proxy"] },
+	{ tab: "proxy", slug: "proxy-acp", labelKey: "settings.acpProxy", keywords: ["acp 代理", "cli 代理", "codebuddy 代理", "acp proxy"] },
 	{ tab: "proxy", slug: "proxy-desktop", labelKey: "settings.desktopProxy", keywords: ["桌面端代理", "应用代理", "desktop proxy"] },
 	{ tab: "pet", slug: "pet-preview", labelKey: "settings.pet.preview", keywords: ["动画预览", "预览", "宠物动画", "preview", "animation"] },
 	{ tab: "vision", slug: "vision-general", labelKey: "settings.vision.section", keywords: ["视觉桥", "图片识别", "视觉", "vision bridge", "multimodal"] },

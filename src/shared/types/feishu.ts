@@ -50,6 +50,13 @@ export type FeishuChatBinding = {
 	createdAt: number;
 };
 
+/**
+ * 草稿作用域：
+ * - global：userData/drafts 根目录，所有项目共享；
+ * - project：当前项目专属目录；列表会合并全局草稿（可读可编辑），但绝不包含其他项目的草稿。
+ */
+export type ScratchPadScope = { kind: "global" } | { kind: "project"; projectId: string };
+
 /** 草稿元信息，对应 drafts 目录中的单个 .md 文件 */
 export type DraftMeta = {
 	id: string;
@@ -57,6 +64,8 @@ export type DraftMeta = {
 	path: string;
 	createdAt: number;
 	updatedAt: number;
+	/** 该草稿实际所在作用域：项目作用域的列表会同时返回本项目与全局草稿，用此字段区分分组。 */
+	scope: "global" | "project";
 };
 
 export type ScratchPadData = {

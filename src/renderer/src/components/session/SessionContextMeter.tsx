@@ -156,6 +156,8 @@ export function SessionContextMeter(props: {
 		| "totalMs"
 		| "tps"
 		| "endToEndTps"
+		| "sessionTps"
+		| "sessionEndToEndTps"
 		| "dshSessionStats"
 		| "cacheRead"
 		| "cacheWrite"
@@ -316,7 +318,7 @@ export function SessionContextMeter(props: {
 		: compactUi.urgency === "danger"
 			? "text-destructive border-destructive/40 hover:bg-destructive/10"
 			: compactUi.urgency === "warn"
-				? "text-amber-500 border-amber-500/40 hover:bg-amber-500/10"
+				? "text-warning border-warning/40 hover:bg-warning/10"
 				: "border-border hover:bg-muted/60";
 
 	return (

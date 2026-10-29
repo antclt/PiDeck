@@ -87,7 +87,7 @@ test("edit/write diff cards expose an accessible open-file action", () => {
 	assert.match(toolCalls, /onClick=\{\(\) => props\.onOpenFile\?\.\(diffTarget\.path\)\}/);
 	assert.match(toolCalls, /onOpenFile=\{props\.onOpenFile\}/);
 	assert.match(readFileSync("src/renderer/src/components/session/turn/ToolStep.tsx", "utf8"), /onOpenFile=\{props\.onOpenFile\}/);
-	assert.match(readFileSync("src/renderer/src/components/session/turn/TurnRow.tsx", "utf8"), /<ToolStep[\s\S]*?onOpenFile=\{props\.onOpenFile\}/);
+	assert.match(readFileSync("src/renderer/src/components/session/turn/TurnStepRow.tsx", "utf8"), /<ToolStep[\s\S]*?onOpenFile=\{props\.onOpenFile\}/);
 	assert.match(readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8"), /"tool\.openFile": "打开文件"/);
 	assert.match(readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8"), /"tool\.openFile": "Open file"/);
 	// 每个分屏栏在 injector 绑定自己的 runtime cwd/project；App 只消费这份上下文。
@@ -96,7 +96,9 @@ test("edit/write diff cards expose an accessible open-file action", () => {
 	assert.match(runtimeInjector, /projectId: paneProjectId \|\| undefined/);
 	assert.match(runtimeInjector, /services\.onOpenFile\(path, line, paneFileContext\)/);
 	assert.match(app, /if \(context && !projectId\)/);
-	assert.match(app, /resolveFileLinkPath\(path, baseDir, projectRoot\)/);
+	assert.match(app, /resolveFileLinkPath\(path, baseDir, projectRoot, getRendererHomeDir\(\)\)/);
+	// issue #426：`~` 先按家目录展开再判项目边界，否则 `~/x` 恒被判「项目外」
+	assert.match(app, /resolveFileLinkPath\(path, baseDir, undefined, getRendererHomeDir\(\)\)/);
 	// 打开方式已抽到 hook：既校验 App 传递本栏授权，也校验 hook 消费同一份快照，
 	// 不能继续只扫描旧 App 闭包，或只证明 hook 存在而漏掉实际接线。
 	assert.match(app, /const\s+openSessionFilePath\s*=\s*useSessionFilePathOpener\(\{\s*onPreviewImage:\s*setPreviewImage,\s*viewFilePath\s*\}\)/);

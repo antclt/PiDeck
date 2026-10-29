@@ -1,5 +1,5 @@
 import { useAtomValue } from "jotai";
-import { Check, ChevronDown, ChevronRight, CircleStop, CircleX, Copy, FileDown, FileText, Fingerprint, Folder, Globe, Link2, ListChecks, MessagesSquare, Pencil, PanelLeft, PanelRight, Pin, PinOff, ListRestart, Play, Plus, RefreshCcw, RotateCw, Target, Terminal, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, CircleStop, CircleX, Copy, FileDown, FileText, Fingerprint, Folder, Globe, Link2, ListChecks, MessagesSquare, Pencil, PanelLeft, PanelRight, Pin, PinOff, ListRestart, Play, Plus, RefreshCcw, RotateCw, Star, StarOff, Target, Terminal, X } from "lucide-react";
 import { Fragment, useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { sessionRecordByIdAtomFamily, sessionRuntimeBySessionIdAtomFamily, sessionRecordsAtom, projectInventoryByIdAtom, projectByIdAtomFamily, acpEnabledAtom, acpToolsAtom } from "../../atoms";
 import { t } from "../../i18n";
@@ -23,26 +23,28 @@ import { TitleScrollText } from "../sidebar/TitleScrollText";
 import { SessionHeader } from "./SessionHeader";
 import type { SessionMenuRunControl } from "./SessionActionsMenu";
 import { SessionActivityIndicator } from "./SessionActivityIndicator";
+import { useFavorites } from "../../hooks/useFavorites";
 import { TAB_CLOSE_BUTTON_CLASS } from "../../utils/tabCloseButton";
 
 import { SESSION_TAB_DRAG_MIME } from "../../utils/sessionSplitEdge";
-import { buildSessionTabBarEntries, flattenSessionTabBarEntries } from "../../utils/sessionTabGroups";
+import { buildSessionTabBarEntries, flattenSessionTabBarEntries, GROUP_COLOR_VALUES } from "../../utils/sessionTabGroups";
 import { SESSION_TAB_BADGE_EXTRA_WIDTH } from "../../../../shared/sessionTabWidth";
 
 /**
  * 分屏组预设色板（浏览器标签组风格）。
  * 第一个为默认色，与 SPLIT_GROUP_DEFAULT_COLOR 保持一致；labelKey 走 i18n。
  */
-export const SPLIT_GROUP_COLOR_PALETTE = [
-	{ name: "blue", value: "#0091ff", labelKey: "session.splitGroup.color.blue" },
-	{ name: "green", value: "#30a46c", labelKey: "session.splitGroup.color.green" },
-	{ name: "yellow", value: "#f5d90a", labelKey: "session.splitGroup.color.yellow" },
-	{ name: "orange", value: "#f76b15", labelKey: "session.splitGroup.color.orange" },
-	{ name: "red", value: "#e5484d", labelKey: "session.splitGroup.color.red" },
-	{ name: "purple", value: "#8e4ec6", labelKey: "session.splitGroup.color.purple" },
-	{ name: "pink", value: "#d6409f", labelKey: "session.splitGroup.color.pink" },
-	{ name: "gray", value: "#8d8d8d", labelKey: "session.splitGroup.color.gray" },
-] as const;
+const SPLIT_GROUP_COLOR_NAMES = ["blue", "green", "yellow", "orange", "red", "purple", "pink", "gray"] as const;
+
+/**
+ * 色值来源是 utils/sessionTabGroups 的 GROUP_COLOR_VALUES（项目分组与分屏组共用同一套）。
+ * 这里只补 name 与 i18n key，**不再重复写字面色**——两处各存一份正是色板漂移的老路。
+ */
+export const SPLIT_GROUP_COLOR_PALETTE = SPLIT_GROUP_COLOR_NAMES.map((name, index) => ({
+	name,
+	value: GROUP_COLOR_VALUES[index],
+	labelKey: `session.splitGroup.color.${name}` as const,
+}));
 
 /**
  * 会话 Tab 栏（浏览器式多 Tab）：标题栏下方展示当前打开的所有会话。
@@ -397,7 +399,14 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 	// --session-tab-max-*：外观设置可调的 Tab 宽度上限，徽标 Tab 额外加 28px（见 shared/sessionTabWidth.ts）。
 	return (
 		<div
-			className={cn("session-tabs-bar flex h-10 shrink-0 items-center gap-1 overflow-x-clip border-b border-border/40 bg-bg-page pl-[max(0.5rem,var(--session-tabs-left-inset,0.5rem))]", props.simple && "simple-session-header h-12 border-0 bg-transparent [--session-tabs-left-inset:16px]")}
+			className={cn(
+				"session-tabs-bar flex h-10 shrink-0 items-center gap-1 overflow-x-clip border-b border-border/40 bg-bg-page pl-[max(0.5rem,var(--session-tabs-left-inset,0.5rem))]",
+				// 简洁模式与会话栏同高（40px），去掉底边线靠底色差分区。
+				// 左内距只在侧栏展开时固定 16px：侧栏收起后本栏顶到窗口左缘，mac 上必须
+				// 让位系统红绿灯——留给 foundation.css 的 .list-collapsed 规则算
+				// calc(红绿灯宽 + 8px)，这里写死会把它盖掉（utilities 层高于 legacy）。
+				props.simple && cn("simple-session-header border-0 bg-transparent", !props.listCollapsed && "[--session-tabs-left-inset:16px]"),
+			)}
 			style={
 				{
 					"--session-tab-max-w": `${tabMaxWidth}px`,
@@ -405,7 +414,8 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 				} as CSSProperties
 			}
 		>
-			{!props.simple && props.listCollapsed && props.onToggleListCollapsed ? (
+			{/* 侧栏收起后的唯一恢复入口：简洁模式同样需要（该模式不再有独立的顶部导航行）。 */}
+			{props.listCollapsed && props.onToggleListCollapsed ? (
 				<Button type="button" variant="ghost" size="icon-sm" className="list-toggle-native size-7 shrink-0" aria-label={t("app.expandList")} title={t("app.expandList")} onClick={props.onToggleListCollapsed}>
 					<PanelLeft className="size-3.5" aria-hidden="true" />
 				</Button>
@@ -908,6 +918,9 @@ function SessionTab(props: {
 	const { sessionId, active, pinned, preview, dragging } = props;
 	const record = useAtomValue(sessionRecordByIdAtomFamily(sessionId));
 	const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(sessionId));
+	// 收藏态与收藏页共用同一 atom；每个 Tab 只读一个 Set，写入走同一条 toggle 链路。
+	const favorites = useFavorites();
+	const sessionFavorited = Boolean(record && favorites.favoritedSessionIds.has(sessionId));
 	// Tab hover 富提示的工作区段：会话所属项目的目录名/完整路径。
 	// 无记录（草稿/匿名）或项目已移除时省略，不显示空行。
 	const tabProject = useAtomValue(projectByIdAtomFamily(record?.projectId ?? ""));
@@ -1139,6 +1152,14 @@ function SessionTab(props: {
 						{pinned ? t("tabs.unpin") : t("tabs.pin")}
 					</span>
 				</ContextMenuItem>
+				{record && record.status !== "draft" && (
+					<ContextMenuItem onSelect={() => void favorites.toggleSessionFavorite({ kind: "session", text: "", sessionId, sessionTitle: record.title, projectId: record.projectId })}>
+						<span className="inline-flex items-center gap-2">
+							{sessionFavorited ? <StarOff className="size-3.5" aria-hidden="true" /> : <Star className="size-3.5" aria-hidden="true" />}
+							{t(sessionFavorited ? "favorites.unsaveSession" : "favorites.saveSession")}
+						</span>
+					</ContextMenuItem>
+				)}
 				{!pinned && (
 					<ContextMenuItem onSelect={close}>
 						<span className="inline-flex items-center gap-2">
@@ -1335,6 +1356,18 @@ function RunControlContextItems(props: { control: SessionRunControlView }) {
 					{control.isReloading ? t("app.reloading") : t("menu.reloadMessages")}
 				</span>
 			</ContextMenuItem>
+			{control.onCloseAgent ? (
+				<>
+					<ContextMenuSeparator />
+					{/* 强制停止：abort 只停当前回合；进程僵死时 abort 可能永远不回包，这里直接杀进程。 */}
+					<ContextMenuItem variant="destructive" title={t("menu.closeAgentHint")} onSelect={control.onCloseAgent}>
+						<span className="inline-flex items-center gap-2">
+							<CircleX className={cn("size-3.5", control.isStopping && "animate-pulse")} aria-hidden="true" />
+							{control.isStopping ? t("app.closing") : t("menu.closeAgent")}
+						</span>
+					</ContextMenuItem>
+				</>
+			) : null}
 		</>
 	);
 }

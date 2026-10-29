@@ -286,6 +286,11 @@ export const ipcChannels = {
 	sessionsRuntimeFork: "sessions:runtime-fork",
 	/** 渲染层汇报当前聚焦的会话（用于非聚焦会话 Ask 请求的桌面通知） */
 	sessionsSetFocusedSession: "sessions:set-focused-session",
+	/**
+	 * 渲染层汇报主窗口实际挂载的聊天栏（当前 + 分屏）。主进程只对可见会话下发
+	 * live 正文/思考流，避免几百个后台流式会话把渲染进程打满（discussion #446）。
+	 */
+	sessionsSetVisibleSessions: "sessions:set-visible-sessions",
 	/** DSH 会话文件路径推导（渲染层右键「复制会话文件路径」；按 dshSessionId + cwd 计算 host 持久化路径）。 */
 	sessionsGetDshSessionPath: "sessions:get-dsh-session-path",
 	sessionsSearchContent: "sessions:search-content",
@@ -353,6 +358,12 @@ export const ipcChannels = {
 	favoritesRemove: "favorites:remove",
 	favoritesRemoveMany: "favorites:remove-many",
 	favoritesReorder: "favorites:reorder",
+	/** 会话分组：本地 profile/session-groups.json（宿主数据），插件 v3 经 host API 读写同一份。 */
+	sessionGroupsList: "session-groups:list",
+	sessionGroupsSave: "session-groups:save",
+	sessionGroupsDelete: "session-groups:delete",
+	sessionGroupsReorder: "session-groups:reorder",
+	sessionGroupsChanged: "session-groups:changed",
 	/** 系统级划词浮窗（全局快捷键触发）：可见性/隐藏/发送回主窗口/捕获推流。 */
 	selectionToolGetState: "selection-tool:get-state",
 	selectionToolHide: "selection-tool:hide",
@@ -863,6 +874,10 @@ export const ipcChannels = {
 	configTokendanceTopUpStatus: "config:tokendance-topup-status",
 	/** 由用户点击浏览器支付宝 App 深链（仅允许 alipays://；不得自动跳转） */
 	configTokendanceTopUpOpenAlipay: "config:tokendance-topup-open-alipay",
+	/** 查询「请作者喝咖啡」剩余次数 + 当次购买入口（经边缘代理，不含任何平台密钥） */
+	configWatchaAccess: "config:watcha-access",
+	/** 由用户点击唤起支付宝 App 完成购买（仅允许 alipays://；不得自动跳转） */
+	configWatchaOpenAlipay: "config:watcha-open-alipay",
 	/** 测试 provider 连接（隔离探针）：临时 agent 目录 + PI_CODING_AGENT_DIR 跑真实 pi，测当前表单值且不落盘正式配置 */
 	configTestProvider: "config:test-provider",
 	/** 查询 provider 用量/余额（主进程按 provider 名路由：门控 → 端点解析 → 模板探测） */
@@ -904,6 +919,8 @@ export const ipcChannels = {
 	securityUpdateConfig: "security:update-config",
 	/** 设置单个会话的等级覆盖（levelId 为空 = 清除覆盖跟随全局） */
 	securitySetSessionLevel: "security:set-session-level",
+	/** 安全配置变更广播（任一端修改后通知桌面渲染层刷新菜单；载荷为空，接收方重拉配置） */
+	securityConfigChanged: "security:config-changed",
 
 	/** 视觉桥：读取当前配置 + 可选模型列表 */
 	visionGetConfig: "vision:get-config",

@@ -170,7 +170,7 @@ function fakeRoot() {
 
 const settingsBase = {
 	theme: "light",
-	themeSkin: "classic-green",
+	themePalette: "classic-green",
 	customThemeOverrides: {},
 	backgroundImage: "",
 	backgroundImageOpacity: 0.8,

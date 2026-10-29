@@ -32,7 +32,17 @@ export type ProviderUsageCredits = {
 	 * xAI 套餐内额度 + 按需用量），各窗口是独立配额。
 	 * 有则 UI 逐窗口展示（条 + 百分比）；无则仅主值。
 	 */
-	windows?: { key: string; total?: number; used?: number; remaining?: number }[];
+	windows?: {
+		key: string;
+		total?: number;
+		used?: number;
+		remaining?: number;
+		/**
+		 * 服务端直接给的已用百分比（0-100）：部分套餐只回 percentage，不给 usage/currentValue
+		 * （如智谱老套餐的 5h token 窗）。展示层优先用 used/total 计算，percent 仅作兜底。
+		 */
+		percent?: number;
+	}[];
 };
 
 /**

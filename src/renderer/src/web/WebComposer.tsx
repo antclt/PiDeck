@@ -48,8 +48,12 @@ export function WebComposer(props: {
 	streaming: boolean;
 	/** 第四批：后端选择驻留 composer（对齐桌面端后端切换，仅草稿期可切）。 */
 	backend?: import("../../../shared/types").AgentBackend;
+	/** 当前 ACP 工具 id（backend === "acp" 时回填选择器） */
+	acpToolId?: string;
+	/** 可选 ACP 工具（/api/state 下发；空/缺失=不提供 ACP 入口） */
+	acpTools?: import("./webTypes").WebAcpTool[];
 	backendLocked?: boolean;
-	onBackendChange?: (backend: import("../../../shared/types").AgentBackend) => void;
+	onBackendChange?: (backend: import("../../../shared/types").AgentBackend, acpToolId?: string) => void;
 	/** 第三批：模型/思考选择驻留 composer（从 WebHeader 迁入）。 */
 	model?: SessionModelPreference;
 	models: AvailableModel[];
@@ -284,7 +288,7 @@ export function WebComposer(props: {
 						{attachError ? <div className="px-3 text-micro text-danger">{t("web.imageAttachFailed")}</div> : null}
 						{collapsed ? (
 							<div className="absolute right-2 bottom-2 flex items-center gap-1" onPointerDown={suppressPointerFocus}>
-								{collapsedBackendPicker && props.onBackendChange ? <WebBackendSelector backend={props.backend ?? "pi"} locked={false} onChange={props.onBackendChange} /> : null}
+								{collapsedBackendPicker && props.onBackendChange ? <WebBackendSelector backend={props.backend ?? "pi"} acpToolId={props.acpToolId} acpTools={props.acpTools} locked={false} onChange={props.onBackendChange} /> : null}
 								{sendControls(true)}
 							</div>
 						) : null}
@@ -304,7 +308,7 @@ export function WebComposer(props: {
 												event.target.value = "";
 											}}
 										/>
-										{props.onBackendChange ? <WebBackendSelector backend={props.backend ?? "pi"} locked={Boolean(props.backendLocked)} onChange={props.onBackendChange} /> : null}
+										{props.onBackendChange ? <WebBackendSelector backend={props.backend ?? "pi"} acpToolId={props.acpToolId} acpTools={props.acpTools} locked={Boolean(props.backendLocked)} onChange={props.onBackendChange} /> : null}
 										<Button
 											type="button"
 											variant="ghost"
@@ -337,9 +341,15 @@ export function WebComposer(props: {
 								</div>
 								{/* 模型行（底部驻留）：模型/思考选择器 + 状态提示（计划模式时提示只读分析语义） */}
 								<div className="flex shrink-0 items-center gap-1.5 px-3 pt-1.5 pb-2.5" data-testid="web-composer-model-row" onPointerDown={suppressPointerFocus}>
-									{/* 模型+思考两个 pill 靠左成组，提示文案推到行尾两端对齐，避免整行挤在左侧留大片空白 */}
-									<WebModelSelector model={props.model} models={props.models} refreshing={props.refreshingModels} onRefresh={props.onRefreshModels} onChange={props.onModelChange} />
-									<WebThinkingSelector level={props.thinkingLevel} onChange={props.onThinkingChange} />
+									{/* 模型+思考两个 pill 靠左成组，提示文案推到行尾两端对齐，避免整行挤在左侧留大片空白。
+										ACP 会话不显示：模型/思考由 agent CLI 自持（session config options），
+										PiDeck 的 models.json 对它无意义——与桌面端 ComposerComponents 同规。 */}
+									{props.backend === "acp" ? null : (
+										<>
+											<WebModelSelector model={props.model} models={props.models} refreshing={props.refreshingModels} onRefresh={props.onRefreshModels} onChange={props.onModelChange} />
+											<WebThinkingSelector level={props.thinkingLevel} onChange={props.onThinkingChange} />
+										</>
+									)}
 									<span className="composer-hint ml-auto hidden min-w-0 truncate text-caption text-muted-foreground sm:inline">{mode === "plan" ? t("app.composerPlanStatus") : t("web.composerHint")}</span>
 								</div>
 							</div>

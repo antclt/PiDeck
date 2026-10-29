@@ -13,7 +13,7 @@ import { formatTime, summarizeMessage } from "../app/AppUtils";
 import { replaceExpandedRefBlocksWithLabels } from "../../../../shared/expandedRefBlocks";
 import { Button } from "../ui-shadcn/button";
 import { chatContentWidthStyle } from "./chatContentWidth";
-import { t, type TranslationKey } from "../../i18n";
+import { getI18nLocale, t, type TranslationKey } from "../../i18n";
 import type { AgentRunItem } from "./timeline/types";
 import { ConversationOutline } from "./SurfaceComponents";
 import { areOutlineRailItemsEqual } from "./timeline/outlineRailActive";
@@ -41,6 +41,8 @@ export function SessionSurfaceStage(props: { sessionId: string; sessionTimeline:
 	const directory = useSessionOutlineDirectory(sessionId, outlineItems.length);
 	// 目录项 → 导轨卡片：标题用索引预览（与已加载标题同一套归一，加载前后是同一句话），
 	// 时间与已加载项同一格式化口（此前误塞原始 ISO）。
+	// 标题兜底走 t()，而 t() 读模块级 locale 且不订阅变化：locale 必须进依赖，
+	// 否则切语言后未加载项的标题会停在旧语言（依赖里那次调用就是判据本身）。
 	const directoryRailItems = useMemo(
 		() =>
 			directory.map((entry) => ({
@@ -48,7 +50,7 @@ export function SessionSurfaceStage(props: { sessionId: string; sessionTimeline:
 				title: entry.preview ? summarizeMessage(replaceExpandedRefBlocksWithLabels(entry.preview)) : t("outline.turnFallback", { index: entry.turnOrdinal + 1 }),
 				time: entry.timestamp ? formatTime(Date.parse(entry.timestamp)) : "",
 			})),
-		[directory],
+		[directory, getI18nLocale()],
 	);
 	const railItems = useMemo(() => mergeOutlineRailItems(outlineItems, directoryRailItems), [outlineItems, directoryRailItems]);
 	const [pendingEntryId, setPendingEntryId] = useState<string | undefined>(undefined);

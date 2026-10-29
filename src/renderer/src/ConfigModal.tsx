@@ -2725,13 +2725,13 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						<TabsTrigger variant={embedded ? "line" : "default"} value="pi" className={cn("h-8 gap-1.5 px-3 text-control font-medium", !embedded && "config-backend-tab")}>
 							<PiLogo className="size-3.5 shrink-0" />
 							{t("config.backend.pi")}
-							{hasPiDirty ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+							{hasPiDirty ? <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" /> : null}
 						</TabsTrigger>
 						<TabsTrigger variant={embedded ? "line" : "default"} value="dsh" className={cn("h-8 gap-1.5 px-3 text-control font-medium", !embedded && "config-backend-tab")}>
 							<DshLogo className="size-3.5 shrink-0" />
 							{t("config.backend.dsh")}
 							{/* 后端分页黄点：该后端任意分区有草稿时提醒 */}
-							{hasDshDirty ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+							{hasDshDirty ? <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" /> : null}
 						</TabsTrigger>
 					</TabsList>
 				)}
@@ -2779,7 +2779,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 											<span className="config-nav-icon">{item.icon}</span>
 											{item.label}
 											{/* 未保存黄点：与 DSH 导航同款 */}
-											{dirtyTabs.has(`config:${item.id}`) || dirtyTabs.has(item.id) ? <span className="ml-auto size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+											{dirtyTabs.has(`config:${item.id}`) || dirtyTabs.has(item.id) ? <span className="ml-auto size-1.5 rounded-full bg-warning" aria-hidden="true" /> : null}
 										</TabsTrigger>
 									))}
 								</div>
@@ -3359,7 +3359,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						{/* 顶部统一保存：各 tab 内部保存按钮可能被滚动藏住，这里常驻可见；
 						    有未保存修改时按钮带黄点标记；无修改也放开再次保存，不再禁用 */}
 						<Button variant="default" size="sm" onClick={() => void handleSaveCurrent()} disabled={saving || configTarget.kind === "ssh"} title={configTarget.kind === "ssh" ? t("config.target.remoteSaveHint") : hasDirty ? t("config.dirtyTooltip") : undefined}>
-							{hasDirty && <span className="size-2 rounded-full bg-amber-400" aria-hidden="true" />}
+							{hasDirty && <span className="size-2 rounded-full bg-warning" aria-hidden="true" />}
 							{saving ? t("common.saving") : t("common.save")}
 						</Button>
 						{backendPane === "pi" && section === "config" ? (

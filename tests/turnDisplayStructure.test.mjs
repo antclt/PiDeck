@@ -6,6 +6,8 @@ const buildSource = readFileSync("src/renderer/src/components/session/timeline/b
 const summarySource = readFileSync("src/renderer/src/components/session/timeline/segmentSummary.ts", "utf8");
 const typesSource = readFileSync("src/renderer/src/components/session/timeline/types.ts", "utf8");
 const turnRowSource = readFileSync("src/renderer/src/components/session/turn/TurnRow.tsx", "utf8");
+// 折叠栏里的单行渲染 2026-10 抽成 TurnStepRow（TurnRow 越过单文件红线必须拆分）。
+const stepRowSource = readFileSync("src/renderer/src/components/session/turn/TurnStepRow.tsx", "utf8");
 const summaryToggleSource = readFileSync("src/renderer/src/components/session/turn/ProcessSummaryToggle.tsx", "utf8");
 
 // 单折叠汇总：整轮只出现一个「执行过程」汇总按钮，思考/工具/中间回答共用一个
@@ -16,13 +18,13 @@ test("TurnRow renders a single process summary toggle plus order-preserving flat
 	assert.match(turnRowSource, /ProcessSummaryToggle\s*summary=\{processSummary\}/);
 	assert.match(turnRowSource, /showProcessToggle && \(/);
 	// 中间回答/最终回答区分渲染；最终回答走 FinalAnswer（常驻）
-	assert.match(turnRowSource, /item\.kind === "interim-answer"/);
+	assert.match(stepRowSource, /item\.kind === "interim-answer"/);
 	assert.match(turnRowSource, /<FinalAnswer/);
-	assert.match(turnRowSource, /\/\/ final-answer/);
+	assert.match(turnRowSource, /data-final-answer=\{run\.id\}/);
 	// 思考/工具/中间回答共用一个折叠开关
-	assert.match(turnRowSource, /hidden=\{!stepsVisible\}/);
+	assert.match(stepRowSource, /hidden=\{!stepsVisible\}/);
 	// 折叠区内 settled 中间段一律 process（同正文尺寸 + my-3 间距）；live 在容器外走 answer
-	assert.match(turnRowSource, /variant="process"/);
+	assert.match(stepRowSource, /variant="process"/);
 	// 中间内容收进执行过程折叠容器（foldableItems），最终回答常驻容器外（finalItems）。
 	// #213：折叠区先过 boundMountedSteps 挂载预算（默认只挂尾部 N 条），渲染源仍是
 	// foldableItems 的尾部切片——顺序不变；同时锁住「显示更早步骤」入口存在，

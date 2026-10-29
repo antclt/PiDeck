@@ -1,7 +1,7 @@
 /** Version-1 tools; reuse the plugin data port without borrowing plugin identity. */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { registerPiDeckMcpTool } from "./piDeckMcpToolKit";
 import {
 	AGENT_PROFILE_BACKENDS,
 	AGENT_PROFILE_CATEGORIES,
@@ -136,31 +136,6 @@ const automationBudget = z
 	})
 	.strict();
 
-const SAFE_ERRORS = new Set([
-	"access-revoked",
-	"project-not-authorized",
-	"session-not-authorized",
-	"session-not-running",
-	"runtime-changed",
-	"control-disabled",
-	"history-unavailable",
-	"history-too-large",
-	"history-changed",
-	"stale-cursor",
-	"invalid-offset",
-	"agent-not-found",
-	"agent-not-deletable",
-	"agent-write-disabled",
-	"agent-patch-empty",
-	"automation-task-not-found",
-	"automation-run-not-found",
-	"automation-write-disabled",
-	"automation-patch-empty",
-	"automation-invalid-schedule",
-	"favorite-not-found",
-	"favorite-write-disabled",
-]);
-
 /** Each HTTP request owns a fresh stateless protocol server; the session reader is shared and bounded. */
 export function createPiDeckMcpServer(deps: PiDeckMcpToolDeps): McpServer {
 	// 写能力由用户开关控制：关着时 sessions_abort 直接不注册，客户端连看都看不到。
@@ -183,28 +158,9 @@ export function createPiDeckMcpServer(deps: PiDeckMcpToolDeps): McpServer {
 	);
 	/**
 	 * Registry boundary: strict schemas and sanitized errors for every tool.
-	 * 默认按只读标注；写工具必须显式声明 `write`——readOnlyHint 是客户端决定「要不要弹确认」的依据，
-	 * 把 sessions_abort 标成只读会直接绕过用户预期。
+	 * 外壳在 `piDeckMcpToolKit.ts`（与 ACP 工具面共用同一份错误码与信封）。
 	 */
-	function tool<S extends z.ZodRawShape>(name: string, description: string, shape: S, run: (args: z.output<z.ZodObject<S>>) => unknown | Promise<unknown>, options?: { write?: boolean }): void {
-		const schema = z.object(shape).strict();
-		// MCP clients may omit arguments for a zero-argument tool, not only send {}；
-		// 全部字段都可选的工具（如 favorites_list 的筛选参数）同样允许省略整个 arguments。
-		const allFieldsOptional = Object.keys(shape).length === 0 || Object.values(shape).every((field) => field.isOptional?.() === true);
-		const inputSchema = allFieldsOptional ? schema.optional() : schema;
-		server.registerTool(name, { description, inputSchema, annotations: { readOnlyHint: !options?.write, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async (input: unknown): Promise<CallToolResult> => {
-			try {
-				deps.authorize();
-				const value = await run(schema.parse(input ?? {}));
-				deps.authorize();
-				const structuredContent = { apiVersion: 1, data: value };
-				return { content: [{ type: "text", text: JSON.stringify(structuredContent) }], structuredContent };
-			} catch (error) {
-				const code = error instanceof Error && SAFE_ERRORS.has(error.message) ? error.message : "operation-failed";
-				return { isError: true, content: [{ type: "text", text: JSON.stringify({ code }) }] };
-			}
-		});
-	}
+	const tool = <S extends z.ZodRawShape>(name: string, description: string, shape: S, run: (args: z.output<z.ZodObject<S>>) => unknown | Promise<unknown>, options?: { write?: boolean }): void => registerPiDeckMcpTool(server, deps.authorize, name, description, shape, run, options);
 	tool("projects_list", "List authorized projects (id/name only; no filesystem paths).", {}, () => deps.projects());
 	// 宿主级工具：只过 authorize()（服务启用/本次授权有效），不要求 projectId——设置与内置扩展不属于任何项目。
 	tool("settings_get", "Read a summary of PiDeck's own configuration (app/agent/workspace sections). Host-level, not scoped to an authorized project. Credentials, tokens, proxy URLs and filesystem paths are never included.", {}, () => deps.settings());
@@ -261,7 +217,11 @@ export function createPiDeckMcpServer(deps: PiDeckMcpToolDeps): McpServer {
 	tool(
 		"automation_runs_list",
 		"List recent runs of scheduled tasks in an authorized project, newest first. Includes status, trigger, timing, token/cost metrics and a bounded error string; run event details are not included.",
-		{ projectId: id, taskId: id.optional(), limit: z.number().int().min(1).max(100).optional() },
+		{
+			projectId: id,
+			taskId: id.optional(),
+			limit: z.number().int().min(1).max(100).optional(),
+		},
 		({ projectId, taskId, limit }) => {
 			deps.authorize(projectId);
 			if (taskId) {
@@ -280,7 +240,11 @@ export function createPiDeckMcpServer(deps: PiDeckMcpToolDeps): McpServer {
 	tool(
 		"favorites_list",
 		"List saved favorites on this machine, newest first. Favorites are whole replies or selected snippets saved by the user; entries linked to a project outside the authorized set are omitted. Session links that no longer resolve still return the saved text with sessionTitle=null.",
-		{ kind: z.enum(["message", "selection"]).optional(), query: z.string().trim().max(500).optional(), limit: z.number().int().min(1).max(200).optional() },
+		{
+			kind: z.enum(["message", "selection"]).optional(),
+			query: z.string().trim().max(500).optional(),
+			limit: z.number().int().min(1).max(200).optional(),
+		},
 		({ kind, query, limit }) => {
 			const keyword = query?.toLowerCase();
 			return deps.favorites
@@ -560,7 +524,11 @@ export function createPiDeckMcpServer(deps: PiDeckMcpToolDeps): McpServer {
 						sessionTitle = null;
 					}
 				}
-				const parsed = parseAddFavoriteInput({ ...input, kind: input.kind ?? "selection", sessionTitle });
+				const parsed = parseAddFavoriteInput({
+					...input,
+					kind: input.kind ?? "selection",
+					sessionTitle,
+				});
 				const entry = await deps.favorites.add(parsed);
 				return entry;
 			},
@@ -589,10 +557,19 @@ export function createPiDeckMcpServer(deps: PiDeckMcpToolDeps): McpServer {
 		deps.authorize(projectId);
 		return deps.sessions.get(context(projectId), sessionId);
 	});
-	tool("sessions_search", "Search session titles (case-insensitive substring), not message contents.", { projectId: id, query: z.string().min(1).max(500), limit: z.number().int().min(1).max(100).optional() }, ({ projectId, query, limit }) => {
-		deps.authorize(projectId);
-		return deps.sessions.search(context(projectId), query, limit);
-	});
+	tool(
+		"sessions_search",
+		"Search session titles (case-insensitive substring), not message contents.",
+		{
+			projectId: id,
+			query: z.string().min(1).max(500),
+			limit: z.number().int().min(1).max(100).optional(),
+		},
+		({ projectId, query, limit }) => {
+			deps.authorize(projectId);
+			return deps.sessions.search(context(projectId), query, limit);
+		},
+	);
 	tool(
 		"sessions_entries",
 		"Read a saved session's active branch: newest page first, chronological within each page. At most 100 entries/1 MiB per page, 256 KiB per entry; oversized entries are marked omitted, images stripped. History index budget 64 MiB/100000 entries including ancestors. Pass nextCursor unchanged; on stale-cursor/history-changed restart without it.",
@@ -600,7 +577,10 @@ export function createPiDeckMcpServer(deps: PiDeckMcpToolDeps): McpServer {
 			projectId: id,
 			sessionId: id,
 			cursor: z
-				.object({ before: z.number().int().min(0), version: z.string().min(1).max(4096) })
+				.object({
+					before: z.number().int().min(0),
+					version: z.string().min(1).max(4096),
+				})
 				.strict()
 				.optional(),
 		},

@@ -145,7 +145,7 @@ export function DshPluginSection() {
 						<div key={plugin.pluginId} className="rounded-md border border-border-subtle bg-bg-panel px-2.5 py-2">
 							<div className="flex items-center gap-2">
 								<span className="min-w-0 flex-1 truncate text-control font-medium text-foreground">{plugin.packages[0]?.name || plugin.pluginId}</span>
-								<span className={`shrink-0 rounded-full border px-2 py-0.5 text-micro ${plugin.activeRun ? "border-emerald-300/70 bg-emerald-500/10 text-emerald-700 dark:border-emerald-700/70 dark:text-emerald-300" : "border-border-subtle text-muted-foreground"}`}>
+								<span className={`shrink-0 rounded-full border px-2 py-0.5 text-micro ${plugin.activeRun ? "border-success/30 bg-success/10 text-success  " : "border-border-subtle text-muted-foreground"}`}>
 									{plugin.activeRun ? t("config.dsh.pluginRunning") : t("config.dsh.pluginStopped")}
 								</span>
 							</div>
@@ -219,13 +219,13 @@ function phaseDotClass(fiberPhase: string | null, enabled: boolean): string {
 	if (!enabled) return "bg-border";
 	switch (fiberPhase) {
 		case "active":
-			return "bg-emerald-500";
+			return "bg-success";
 		case "failed":
 			return "bg-danger";
 		case "pending":
 		case "loading":
 		case "unloading":
-			return "bg-amber-500";
+			return "bg-warning";
 		default:
 			return "bg-border";
 	}
@@ -247,7 +247,7 @@ function matchesEntry(entry: DshStaticPluginView, normalizedQuery: string): bool
 function OriginBadge(props: { origin: "builtin" | "user" | undefined }) {
 	if (props.origin === "user") {
 		return (
-			<Badge variant="outline" className="shrink-0 border-sky-300/70 bg-sky-500/10 font-medium text-sky-700 dark:border-sky-700/70 dark:text-sky-300">
+			<Badge variant="outline" className="shrink-0 border-[var(--color-identity-tool-line)] bg-[var(--color-identity-tool-soft)] font-medium text-[var(--color-identity-tool)]  ">
 				{t("config.dsh.pluginOriginUser")}
 			</Badge>
 		);
@@ -421,7 +421,7 @@ export function PluginInventoryView() {
 										</span>
 										<OriginBadge origin={entry.origin} />
 										{entry.enabled ? (
-											<Badge variant="outline" className="shrink-0 border-emerald-300/70 bg-emerald-500/10 font-medium text-emerald-700 dark:border-emerald-700/70 dark:text-emerald-300">
+											<Badge variant="outline" className="shrink-0 border-success/30 bg-success/10 font-medium text-success  ">
 												{t("config.dsh.pluginEnabled")}
 											</Badge>
 										) : (

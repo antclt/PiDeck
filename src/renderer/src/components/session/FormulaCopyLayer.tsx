@@ -35,7 +35,7 @@ const BLOCK_BUTTON_CLASS = "flex h-[22px] w-[22px] shrink-0 cursor-pointer items
 // 底色用 --color-bg-muted、边框用 --color-border-subtle 语义 token，暗色自动适配。
 const INLINE_BOX_BORDER_BG = ["border-[var(--color-border-subtle)]", "bg-[var(--color-bg-muted)]"];
 const INLINE_BOX_COPIED_BORDER_BG = ["border-[var(--color-success)]", "bg-[var(--color-success-soft)]"];
-const INLINE_BOX_CLASS = ["inline-block", "cursor-pointer", "rounded-xs", "border", "px-[5px]", "py-[1px]", "transition-colors", "hover:border-[var(--color-accent)]", ...INLINE_BOX_BORDER_BG];
+const INLINE_BOX_CLASS = ["inline-block", "cursor-pointer", "rounded-xs", "border", "px-1.5", "py-[1px]", "transition-colors", "hover:border-[var(--color-accent)]", ...INLINE_BOX_BORDER_BG];
 
 /** 复制 LaTeX 源码（KaTeX MathML annotation），返回是否成功。 */
 function copyTexFrom(root: Element): Promise<boolean> {

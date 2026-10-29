@@ -10,6 +10,7 @@ import { Button } from "../ui-shadcn/button";
 import { ConfirmDialog } from "../ui-shadcn/ConfirmDialog";
 import { ComposerWidgetFrame } from "./ComposerWidgetLayout";
 import { isCoherentComposerRuntimeUi, type RuntimeHandle } from "./ComposerRuntimeIntegrations";
+import { useSessionPaneServices } from "./SessionPaneServices";
 
 /**
  * composer 上方的 goal 常驻条（移植自 dsh-web GoalBar）。
@@ -19,6 +20,7 @@ import { isCoherentComposerRuntimeUi, type RuntimeHandle } from "./ComposerRunti
  * 无目标、已完成都不渲染。创建入口是模式选择器 / `/goal` / DSH 工具面板。
  */
 export function SessionGoalStrip(props: { sessionId: string }) {
+	const paneServices = useSessionPaneServices();
 	const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(props.sessionId));
 	const runtimeUi = useAtomValue(sessionRuntimeUiBySessionIdAtomFamily(props.sessionId));
 	const agentId = runtime?.agentId;
@@ -43,6 +45,10 @@ export function SessionGoalStrip(props: { sessionId: string }) {
 	const runAction = useCallback(
 		async (action: "pause" | "resume" | "clear") => {
 			if (pendingRef.current) return;
+			// 目标条三个动作不走 composer 的 promoteAndSend：这里补同一条「主动交互 → 晋升常驻」。
+			// 否则在预览 Tab 里恢复目标后它仍是斜体，切到别的会话就被顶掉，与「发消息后自动固定」不一致。
+			// DSH 无 agent 时按钮本身已 disabled，不会走到这里。
+			paneServices.promoteSessionToPermanent(props.sessionId);
 			pendingRef.current = true;
 			setBusy(true);
 			try {
@@ -67,7 +73,7 @@ export function SessionGoalStrip(props: { sessionId: string }) {
 				setBusy(false);
 			}
 		},
-		[agentId, isDsh, props.sessionId],
+		[agentId, isDsh, paneServices, props.sessionId],
 	);
 
 	// 无投影 / 已完成：不占输入区。blocked 仍展示，否则用户看不到卡住原因。

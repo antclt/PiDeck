@@ -95,7 +95,7 @@ export function RemoteConfigPanel(props: { file: PiConfigFileKey; hostId: string
 								{shortConfigDigest(snapshot.sha256)}
 							</code>
 						</div>
-						{dirty ? <span className="ml-auto text-micro text-amber-600 dark:text-amber-400">{t("remoteConfig.dirty")}</span> : null}
+						{dirty ? <span className="ml-auto text-micro text-warning">{t("remoteConfig.dirty")}</span> : null}
 					</div>
 
 					<div className="flex shrink-0 flex-col gap-1.5 rounded-md border border-border-subtle bg-bg-panel px-3 py-2" data-testid="remote-config-secrets">
@@ -109,7 +109,7 @@ export function RemoteConfigPanel(props: { file: PiConfigFileKey; hostId: string
 										<code className="font-mono text-foreground/80" data-testid="remote-config-secret-path">
 											{secret.path}
 										</code>
-										<span data-testid="remote-config-secret-badge" data-status={secret.status} className={secret.status === "configured" ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>
+										<span data-testid="remote-config-secret-badge" data-status={secret.status} className={secret.status === "configured" ? "text-success" : "text-muted-foreground"}>
 											{secret.status === "configured" ? t("remoteConfig.secretConfigured") : t("remoteConfig.secretMissing")}
 										</span>
 									</span>
@@ -119,8 +119,8 @@ export function RemoteConfigPanel(props: { file: PiConfigFileKey; hostId: string
 					</div>
 
 					{conflict ? (
-						<div className="flex flex-col gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5" data-testid="remote-config-conflict">
-							<div className="flex items-center gap-2 text-control font-medium text-amber-700 dark:text-amber-300">
+						<div className="flex flex-col gap-2 rounded-md border border-warning/30 bg-warning/10 px-3.5 py-2.5" data-testid="remote-config-conflict">
+							<div className="flex items-center gap-2 text-control font-medium text-warning">
 								<ShieldAlert className="size-4 shrink-0" aria-hidden="true" />
 								{t("remoteConfig.conflictTitle")}
 							</div>

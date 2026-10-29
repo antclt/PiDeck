@@ -25,18 +25,25 @@ import { ACP_PROTOCOL_VERSION, type AcpConfigOption, type AcpContentBlock, type 
 import { AcpTimeoutError } from "./AcpConnection";
 import { AcpPermissionRequests } from "./AcpPermissionRequests";
 import { acpPromptBlocks, appendAcpUserPrompt, initialAcpProjection, rollbackAcpUserPrompt, settleAcpTurn, type AcpProjectionState } from "./AcpEventProjector";
-import { authRequiredDescriptor, localizeCreateFailure } from "./acpFailureDescriptors";
+import { authRequiredDescriptor, localizeCreateFailure, promptTurnTimeoutDescriptor } from "./acpFailureDescriptors";
 import { buildAgentRuntimeState, type AcpAgentRuntime } from "./acpAgentRuntime";
+import { findAcpBypassModeValue, findAcpModeOption, isRememberedAcpConfigOption, planAcpConfigReplay } from "./acpToolConfig";
+import { accumulateAcpUsage, acpReplyPerf, readAcpTurnUsage } from "./acpUsageMetrics";
 import { AcpTurnWatchdog } from "./acpTurnWatchdog";
 import { AcpMessageSnapshotStore } from "./AcpMessageSnapshotStore";
 import type { AcpSessionArchive } from "./AcpSessionArchive";
 import { killAcpProcessTree, spawnAcpProcess } from "./AcpProcessHost";
+import type { AcpProxyEnvSettings } from "../sessions/sessionProxyPolicy";
 import { performAcpHandshake } from "./AcpHandshake";
 import { AcpUpdatePipeline } from "./AcpUpdatePipeline";
-import { emptyTurnRejection, escalatedStopRejection, hasTurnOutput, resolvePromptDispatch } from "./acpTurnSettlement";
+import { describeEmptyTurn, emptyTurnRejection, escalatedStopRejection, hasTurnOutput, promptResultSnippet, resolvePromptDispatch } from "./acpTurnSettlement";
 
-/** session/prompt 回合兑底超时。测试用 deps.promptTurnTimeoutMs 注入缩短。 */
-const PROMPT_TURN_TIMEOUT_MS = 10 * 60_000;
+/** session/prompt 回合兑底超时：口径是「无进展静默上限」——回合内每有 session/update 或挂起审批
+ *  就顺延截止（见 runtime.turnDeadlineRefresh），所以这里只约束「完全没动静」的时长。
+ *  取 15 分钟：实测 intra-turn 静默峰值约 53s（两个 CodeBuddy 归档共 1096 条消息，超 90s 的空隙全部是
+ *  回合结束后等用户输入），3.4 倍余量；带在途工具的正常长任务不受这条限制（stall 已放行在途工具），
+ *  本值是「工具永不返回」时的最后一道网。测试用 deps.promptTurnTimeoutMs 注入缩短。 */
+const PROMPT_TURN_TIMEOUT_MS = 15 * 60_000;
 
 type AcpManagerDeps = {
 	/** 解析命令启动形态(Windows .cmd 垫片还原、node 直启等)。 */
@@ -49,9 +56,18 @@ type AcpManagerDeps = {
 	 * 必须每次 create 时实时读:设置页变更立即生效,不需要重启应用。
 	 */
 	isEnabled: () => boolean;
+	/**
+	 * ACP 代理(settings.acpProxy*)的运行时读口:每次 create 时实时读,只影响新进程。
+	 * 缺省不注入,进程继承系统环境变量(与引入该设置前的行为一致)。
+	 */
+	getProxySettings?: () => AcpProxyEnvSettings | undefined;
 	onTitleChanged?: (deckSessionId: string, title: string) => void;
 	/** configOptions 变更推送(set_config_option 响应/config_option_update 通知)。 */
 	onConfigOptionsChanged?: (tab: AgentTab, options: AcpConfigOption[]) => void;
+	/** 读取某工具记住的会话级配置(settings.acpToolConfigDefaults[toolId]);缺省不重放。 */
+	getToolConfigDefaults?: (toolId: string) => Record<string, string | boolean> | undefined;
+	/** 用户手动切换配置成功后的记忆回调(主进程写 settings;缺省不持久化)。 */
+	rememberConfigOption?: (toolId: string, optionId: string, value: string | boolean) => void;
 	logger?: { info(channel: string, message: string, meta?: Record<string, unknown>): void; warn(channel: string, message: string, meta?: Record<string, unknown>): void };
 	/** 图片落盘(base64→内容寻址 ref):生图 ImageBlobStore 的最小结构化依赖,便于单测注入假实现。 */
 	imageStore?: { put(data: string, mimeType: string): Promise<string | null> };
@@ -77,7 +93,24 @@ type AcpManagerDeps = {
 	 * 让设置够不到看门狗，长工具调用/长回合被 90s/10min 硬编码误杀）。
 	 */
 	readAcpTimeoutSettings?: () => { promptStallTimeoutMs?: number; promptTurnTimeoutMs?: number };
+	/**
+	 * 桌面 Ask 通知出口（与 pi 同一份门控/toast，见 notifications/agentToast.ts）。
+	 * 返回是否真的弹出：false 时不占用「每轮只提醒一次」的去重位。缺省静默。
+	 */
+	notify?: { askPending?: (input: { agentId: string; sessionId: string; sessionTitle: string; question: string }) => boolean };
 };
+
+/** CLI 诊断输出(stderr)尾部:只留最近几行且每行截断,仅供空白回合诊断/日志,不进时间线。 */
+const STDERR_TAIL_LINES = 5;
+const STDERR_LINE_MAX_CHARS = 200;
+
+function pushStderrTail(runtime: AcpAgentRuntime, text: string): void {
+	for (const raw of text.split(/\r?\n/)) {
+		const line = raw.trim();
+		if (line) runtime.stderrTail.push(line.slice(0, STDERR_LINE_MAX_CHARS));
+	}
+	if (runtime.stderrTail.length > STDERR_TAIL_LINES) runtime.stderrTail.splice(0, runtime.stderrTail.length - STDERR_TAIL_LINES);
+}
 
 export class AcpAgentManager implements SessionAgentGateway {
 	readonly backend = "acp" as const;
@@ -93,6 +126,10 @@ export class AcpAgentManager implements SessionAgentGateway {
 	 *  stop/升级强杀后 runtime 删除，重入会话时 readMessagesByAcpSessionId 的临时数据源。 */
 	private readonly messageSnapshots = new AcpMessageSnapshotStore();
 	private readonly outputListeners = new Set<(channel: string, payload: unknown) => void>();
+	/** 成功收口订阅（桌宠 done 气泡 / 会话完成通知）：用户停止与失败不触发。 */
+	private readonly settledListeners = new Set<(info: { agentId: string; title: string }) => void>();
+	/** 每轮只提醒一次 Ask：sendPrompt 开头清空（与 pi 的 agent_start 同口径）。 */
+	private readonly notifiedAskAgents = new Set<string>();
 	/** 回合看门狗（abort 升级宽限/stall 检测）：强杀出口回注 forceStopRuntime→stop()。 */
 	private readonly turnWatchdog: AcpTurnWatchdog;
 	/** session/update 摄入与消息发布管线（投影→物化→标题→节流 flush→快照）。 */
@@ -232,11 +269,18 @@ export class AcpAgentManager implements SessionAgentGateway {
 
 	/** 下发配置选择并返回 agent 回传的完整 configOptions(规范:响应必带整表)。 */
 	async applyConfigOption(agentId: string, optionId: string, value: string | boolean): Promise<AcpConfigOption[]> {
+		return this.enqueueConfigOption(agentId, optionId, value, true);
+	}
+
+	/**
+	 * 配置写入入队:串行化同一 runtime 的配置写入(乱序响应下迟到的旧整表会回退
+	 * runtime.configOptions 并推过期通知;排队后通知顺序=请求顺序)。
+	 * remember=false 用于新建会话重放,避免把记忆值再写回设置。
+	 */
+	private enqueueConfigOption(agentId: string, optionId: string, value: string | boolean, remember: boolean): Promise<AcpConfigOption[]> {
 		const runtime = this.requireRuntime(agentId);
-		// 串行化同一 runtime 的配置写入:乱序响应下迟到的旧整表会回退 runtime.configOptions
-		// 并通过通知推过期状态(复核发现的乱序回退缺陷);排队后通知顺序=请求顺序。
 		const previous = (runtime.configChain ?? Promise.resolve()).catch(() => undefined);
-		const operation = previous.then(() => this.performConfigOptionRequest(runtime, optionId, value));
+		const operation = previous.then(() => this.performConfigOptionRequest(runtime, optionId, value, remember));
 		runtime.configChain = operation.then(
 			() => undefined,
 			() => undefined,
@@ -245,15 +289,102 @@ export class AcpAgentManager implements SessionAgentGateway {
 	}
 
 	/** 真正发出 session/set_config_option;在串行链上迟到执行,需重新校验 runtime 归属与连接。 */
-	private async performConfigOptionRequest(runtime: AcpAgentRuntime, optionId: string, value: string | boolean): Promise<AcpConfigOption[]> {
+	private async performConfigOptionRequest(runtime: AcpAgentRuntime, optionId: string, value: string | boolean, remember: boolean): Promise<AcpConfigOption[]> {
 		if (this.runtimes.get(runtime.tab.id) !== runtime) throw new Error("ACP agent is not running");
 		const conn = runtime.conn;
 		if (!conn || conn.isClosed()) throw new Error("ACP agent is not running");
-		const result = (await conn.request("session/set_config_option", { sessionId: runtime.acpSessionId, configId: optionId, value }, 15_000)) as { configOptions?: AcpConfigOption[] } | null;
+		let result: { configOptions?: AcpConfigOption[] } | null;
+		try {
+			result = (await conn.request("session/set_config_option", { sessionId: runtime.acpSessionId, configId: optionId, value }, 15_000)) as { configOptions?: AcpConfigOption[] } | null;
+		} catch (error) {
+			// 拒绝原因常只写在 error.data.details 里（如 Qoder 的 "unknown permission_mode: yolo"），
+			// 而 IPC 只透传 message：不拼进去渲染层就只剩 "Internal error"，用户无从判断为什么没生效。
+			const details = (error as { data?: { details?: unknown } } | null)?.data?.details;
+			if (typeof details === "string" && details.trim() && !(error instanceof Error && error.message.includes(details))) {
+				throw new Error(`${error instanceof Error ? error.message : String(error)}: ${details.trim()}`);
+			}
+			throw error;
+		}
 		if (!result || !Array.isArray(result.configOptions)) throw new Error("session/set_config_option returned no configOptions");
 		runtime.configOptions = result.configOptions;
 		this.deps.onConfigOptionsChanged?.(runtime.tab, result.configOptions);
+		if (remember) this.rememberAppliedConfigOption(runtime, optionId, value, result.configOptions);
 		return result.configOptions;
+	}
+
+	/** 只记忆 agent 实际接受的值;模型类选项(用户口径)不落盘。 */
+	private rememberAppliedConfigOption(runtime: AcpAgentRuntime, optionId: string, requested: string | boolean, options: AcpConfigOption[]): void {
+		const option = options.find((candidate) => candidate.id === optionId);
+		if (!option || !isRememberedAcpConfigOption(option)) return;
+		const applied = option.currentValue ?? requested;
+		if (typeof applied !== "string" && typeof applied !== "boolean") return;
+		this.deps.rememberConfigOption?.(runtime.tool.id, optionId, applied);
+	}
+
+	/** 非 session/update 通知留样本（诊断）：只保留最后一条，截断防长帧污染 UI。 */
+	private rememberTurnNotification(runtime: AcpAgentRuntime, notification: AcpRpcNotification): void {
+		const method = notification.method ?? "";
+		// config_option_update 是已知通道（握手期即处理），不算异常信号。
+		if (!method || method === "session/update" || method === "config_option_update") return;
+		runtime.turnForeignNotification = `${method}: ${JSON.stringify(notification).slice(0, 300)}`;
+	}
+
+	/**
+	 * 工具级「新会话默认 bypass 权限」：握手后在 agent 自己的 mode 枚举里挑 bypass 档下发。
+	 *
+	 * 只能用运行期下发：Claude 适配器不读启动参数（初始模式只取 settings.json 的
+	 * permissions.defaultMode），Qoder 适配器则直接拒绝 set_config_option（见 #444 同类问题）。
+	 * 所以失败只记日志——某些 CLI 版本压根没有 bypass 档，不该因此开不了会话。
+	 * 启动参数已经定档（Qoder `--permission-mode`）时记忆重放会让路，见 pinnedBypassModeOptionId。
+	 * session/load 恢复的会话不覆盖 agent 侧状态（与重放记忆同口径）。
+	 */
+	private async applyBypassPermissionDefault(runtime: AcpAgentRuntime): Promise<void> {
+		if (runtime.tool.bypassPermissions !== true || runtime.loadedSession) return;
+		const mode = findAcpModeOption(runtime.configOptions);
+		if (!mode) return;
+		const bypass = findAcpBypassModeValue(mode);
+		if (!bypass || mode.currentValue === bypass) return;
+		try {
+			await this.enqueueConfigOption(runtime.tab.id, mode.id, bypass, false);
+		} catch (error) {
+			// 记忆里不落这条：用户没主动选过，写进去会污染后续会话的默认值
+			this.deps.logger?.warn("acp", `[${runtime.tool.name}] bypass permission mode rejected: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
+	/**
+	 * 模式档已由启动参数定在 bypass 时的选项 id（记忆重放必须让路）。
+	 *
+	 * Qoder 只能靠 `--permission-mode` 定档（运行期 set_config_option 回
+	 * -32603 unknown permission_mode: yolo），若这里不拦，重放记忆里的旧档位（如 auto）会把
+	 * 会话降回非 bypass，随后补设 bypass 又必然失败——新会话显示 Auto、重开（session/load
+	 * 不重放）反而正常，正是这条链。
+	 */
+	private pinnedBypassModeOptionId(runtime: AcpAgentRuntime): string | undefined {
+		if (runtime.tool.bypassPermissions !== true) return undefined;
+		const mode = findAcpModeOption(runtime.configOptions);
+		if (!mode) return undefined;
+		const bypass = findAcpBypassModeValue(mode);
+		return bypass && mode.currentValue === bypass ? mode.id : undefined;
+	}
+
+	/** 新建会话握手后重放工具级记忆;session/load 恢复的会话不覆盖 agent 侧状态。 */
+	private async replayToolConfigDefaults(runtime: AcpAgentRuntime): Promise<void> {
+		if (runtime.loadedSession) return;
+		const defaults = this.deps.getToolConfigDefaults?.(runtime.tool.id);
+		// 工具级 bypass 开关是「明确配置」：模式已是 bypass 时保住它，不让学来的上次选择覆盖。
+		const pinnedModeId = this.pinnedBypassModeOptionId(runtime);
+		for (const item of planAcpConfigReplay(runtime.configOptions, defaults)) {
+			if (item.id === pinnedModeId) continue;
+			try {
+				await this.enqueueConfigOption(runtime.tab.id, item.id, item.value, false);
+			} catch (error) {
+				// 选项在当前 CLI 版本已移除/值被拒:跳过,不能让记忆阻断开会话。
+				this.deps.logger?.warn("acp", `[${runtime.tool.name}] remembered config skipped: ${item.id}`, {
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+		}
 	}
 
 	async setThinking(agentId: string, _level: string): Promise<unknown> {
@@ -275,7 +406,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 		// 工具被删/禁用：会话绑定还在（acpToolId 落 catalog），给明确引导而不是裸 id 报错。
 		if (!tool) throw Object.assign(new Error(`ACP tool not found or disabled: ${toolId || "(none)"}`), { i18nKey: "acp.toolMissing", i18nParams: { tool: toolId || "(none)" } });
 		const cwd = project.path;
-		const { proc, conn, spawnFailure } = spawnAcpProcess(tool, cwd, { piLocator: this.deps.piLocator, logger: this.deps.logger });
+		const { proc, conn, spawnFailure } = spawnAcpProcess(tool, cwd, { piLocator: this.deps.piLocator, proxy: this.deps.getProxySettings?.(), logger: this.deps.logger });
 
 		const agentId = `acp:${randomUUID()}`;
 		const runtime: AcpAgentRuntime = {
@@ -304,16 +435,23 @@ export class AcpAgentManager implements SessionAgentGateway {
 			cancelling: false,
 			cancelReason: null,
 			reloading: false,
+			loadedSession: false,
 			flushTimer: null,
 			flushPending: false,
 			abortEscalateTimer: null,
 			stallTimer: null,
 			lastUpdateAt: 0,
+			turnDeadlineRefresh: null,
 			inFlightToolCalls: new Set<string>(),
 			escalatedStop: null,
+			turnUpdateKinds: new Map<string, number>(),
+			stderrTail: [],
 		};
 		this.runtimes.set(agentId, runtime);
 		this.emit(agentEventTags.agentsState, this.list());
+		// CLI 诊断输出（stderr）留一份尾部：限流/登录失败常常只打在这里，空白回合时要随
+		// 拒收结果带进 UI，否则用户只看到「无输出」的概括（主进程日志另有全量记录）。
+		runtime.proc?.stderr?.on("data", (chunk: Buffer) => pushStderrTail(runtime, chunk.toString("utf8")));
 
 		// 归档回灌必须在 performAcpHandshake **之前**：握手的 seedMessages 读的是快照存储
 		// （load 失败回退 session/new、CLI 无 loadSession 能力这两条路径都靠它播种投影），
@@ -325,7 +463,12 @@ export class AcpAgentManager implements SessionAgentGateway {
 				handshakeTimeoutMs: this.deps.handshakeTimeoutMs,
 				logger: this.deps.logger,
 				seedMessages: (acpSessionId) => this.messageSnapshots.get(acpSessionId) ?? [],
-				onNotification: (rt, notification) => this.updates.enqueueSessionUpdate(rt, notification),
+				onNotification: (rt, notification) => {
+					// 非标准通知（如 session/error）留样本：空白回合的诊断要能说出 agent 是否用
+					// 协议外通道报过错，而不是一律当作没看见。
+					this.rememberTurnNotification(rt, notification);
+					this.updates.enqueueSessionUpdate(rt, notification);
+				},
 				onConfigOptionsChanged: this.deps.onConfigOptionsChanged,
 			});
 		} catch (error) {
@@ -338,6 +481,13 @@ export class AcpAgentManager implements SessionAgentGateway {
 			localizeCreateFailure(thrown, tool);
 			throw thrown;
 		}
+
+		// 新建会话(含 load 失败回退 session/new)重放工具级记忆:思考档/模式/权限等跨会话继承,
+		// 模型不在记忆范围(见 acpToolConfig.isRememberedAcpConfigOption)。单条失败只跳过,
+		// 不影响开会话。session/load 成功的恢复会话交给 agent 自己恢复状态。
+		await this.replayToolConfigDefaults(runtime);
+		// 放记忆重放之后：工具级开关是「明确配置」，优先级高于学来的上次选择
+		await this.applyBypassPermissionDefault(runtime);
 
 		this.wireConnection(runtime);
 		if (runtime.title && runtime.tab.deckSessionId) this.deps.onTitleChanged?.(runtime.tab.deckSessionId, runtime.title);
@@ -357,7 +507,13 @@ export class AcpAgentManager implements SessionAgentGateway {
 	private wireConnection(runtime: AcpAgentRuntime): void {
 		const conn = runtime.conn;
 		if (!conn) return;
-		conn.handleRequest("session/request_permission", (params, rpcId) => runtime.permissions.request(params, rpcId, runtime.acpSessionId, runtime.cancelling || runtime.status === "closed"));
+		conn.handleRequest("session/request_permission", (params, rpcId) => {
+			// 挂起审批 = agent 在等用户输入，属合法等待：顺延回合兑底截止
+			// （审批本身另有 PERMISSION_TIMEOUT_MS 到期，不会无限拖延）。
+			runtime.lastUpdateAt = Date.now();
+			runtime.turnDeadlineRefresh?.();
+			return runtime.permissions.request(params, rpcId, runtime.acpSessionId, runtime.cancelling || runtime.status === "closed");
+		});
 		// fs/read_text_file 等未声明能力,规范约定回 method not found(AcpConnection 默认行为)。
 		conn.on("closed", (error: Error | null) => {
 			if (runtime.conn && runtime.conn.isClosed() && runtime.status === "closed") return;
@@ -391,6 +547,8 @@ export class AcpAgentManager implements SessionAgentGateway {
 		const prompt = acpPromptBlocks(input.message, input.images);
 		// 本回合结算 stopReason 的快照:成功路径的空白回合守卫在 try 外使用,需提前记录。
 		let settledStopReason: AcpStopReason = "end_turn";
+		// session/prompt 响应原文:空白回合时把它的非 stopReason 部分带进诊断。
+		let promptResult: AcpSessionPromptResult | undefined;
 		// 用户消息先落投影:ACP 规范不保证 agent 回显 user_message_chunk(OpenCode 等根本不发),
 		// 而 agents:message 是全量替换语义,主进程不落条目的话渲染层乐观气泡会被第一次 flush 抹掉。
 		const messagesBeforeSeed = runtime.projection.messages.length;
@@ -401,6 +559,8 @@ export class AcpAgentManager implements SessionAgentGateway {
 		runtime.cancelling = false;
 		runtime.cancelReason = null;
 		runtime.escalatedStop = null;
+		// 新一轮开始：Ask 提醒去重复位（同一轮多次提问只提醒一次，跨轮重新提醒）。
+		this.notifiedAskAgents.delete(input.agentId);
 		runtime.status = "running";
 		runtime.tab.status = "running";
 		this.emit(agentEventTags.agentsState, this.list());
@@ -423,9 +583,22 @@ export class AcpAgentManager implements SessionAgentGateway {
 			// 10 分钟兑底防真悬死(实测 codex-acp 思考型回合 >60s,见 scripts/acpLiveSmoke.mjs)。
 			// 可注入 deps.promptTurnTimeoutMs 供测试缩短。
 			// 回合兑底超时三段解析：静态测试注入 → settings 读口（每次派发实时读，变更后
-			// 新回合生效）→ 代码内默认 10min。
+			// 新回合生效）→ 代码内默认 10min。截止随进展顺延（onArm 拿到 refresh 句柄，
+			// 回合内每有 session/update 就 refresh）：口径是「无进展静默上限」，长但健康的
+			// 回合不会因为总时长到点被掐断。
+			// 本回合诊断清零:update 类型计数/非标准通知只统计这一回合。
+			runtime.turnUpdateKinds.clear();
+			runtime.turnForeignNotification = undefined;
 			const turnTimeoutMs = this.deps.promptTurnTimeoutMs ?? this.deps.readAcpTimeoutSettings?.().promptTurnTimeoutMs ?? PROMPT_TURN_TIMEOUT_MS;
-			const result = (await conn.request("session/prompt", { sessionId: runtime.acpSessionId, prompt }, turnTimeoutMs)) as AcpSessionPromptResult;
+			// 回合计时基准：TTFT（首个正文 chunk）与总耗时（结算）都以派发时刻为起点，
+			// 不含本地 seed/物化耗时；上一回合的残留值在这里清掉。
+			runtime.turnStartedAt = Date.now();
+			runtime.turnFirstTextAt = undefined;
+			runtime.turnFirstThoughtAt = undefined;
+			const result = (await conn.request("session/prompt", { sessionId: runtime.acpSessionId, prompt }, turnTimeoutMs, (refresh) => {
+				runtime.turnDeadlineRefresh = refresh;
+			})) as AcpSessionPromptResult;
+			promptResult = result;
 			this.turnWatchdog.clearTurnTimers(runtime);
 			// 结算前先排空 update 链:result 帧与末批 update 同为 stdout 行序分发,
 			// 但链上每步含异步物化,settle 提前会把在途流式块拆成新回合。
@@ -435,6 +608,10 @@ export class AcpAgentManager implements SessionAgentGateway {
 		} catch (error) {
 			await runtime.updateChain;
 			this.turnWatchdog.clearTurnTimers(runtime);
+			// 失败/中止回合不记账，计时基准也一并清掉，避免下一次成功结算算出跨回合的超长耗时。
+			runtime.turnStartedAt = undefined;
+			runtime.turnFirstTextAt = undefined;
+			runtime.turnFirstThoughtAt = undefined;
 			// 派发失败（JSON-RPC 拒绝 / 连接死）且 agent 未产出任何内容：撤回刚落的用户条目，
 			// 否则时间线会留一条没有回复的「幽灵消息」，而渲染层已把草稿回填输入框（会重发）。
 			// 用户主动取消(cancelling)不撤回:语义同 pi 后端 abort,用户消息留在时间线。
@@ -475,7 +652,9 @@ export class AcpAgentManager implements SessionAgentGateway {
 				return escalatedStopRejection(runtime.escalatedStop, message, runtime.tool.name);
 			}
 			// AUTH_REQUIRED（凭据过期等回合期失败）：描述符随拒收结果透出登录引导。
-			const descriptor = authRequiredDescriptor(error, runtime.tool);
+			// 回合兑底超时同样挂描述符：渲染层弹「人性化时长 + acpPromptTurnTimeoutMs 指引」，
+			// 原文留在 debugDetails（#431）。
+			const descriptor = authRequiredDescriptor(error, runtime.tool) ?? promptTurnTimeoutDescriptor(error, runtime.tool);
 			return { accepted: false, error: message, delivery: hasOutput || error instanceof AcpTimeoutError ? "unknown" : "rejected", ...(descriptor ?? {}) };
 		}
 		runtime.turnActive = false;
@@ -485,6 +664,9 @@ export class AcpAgentManager implements SessionAgentGateway {
 			runtime.status = "idle";
 			runtime.tab.status = "idle";
 		}
+		// 产出判定提前算：记账只对真有可见输出的回合做（空白回合稍后会被回滚并报错）。
+		const hasOutput = hasTurnOutput(runtime.projection.messages, seededIndex);
+		if (hasOutput) this.recordTurnMetrics(runtime, promptResult);
 		this.updates.flushMessages(runtime, true);
 		this.emit(agentEventTags.agentsState, this.list());
 		this.emitRuntimeState(input.agentId);
@@ -494,22 +676,53 @@ export class AcpAgentManager implements SessionAgentGateway {
 		// 按 rejected 收口并回滚本地用户条目：渲染层回填草稿，用户升级 CLI 后可安全重发。
 		// 用户主动停止(cancelling 且来源 user_stop,CLI 回 cancelled)不在此列:语义同 pi 后端
 		// abort,正常收口;看门狗 stall 代发的 cancel 不豁免——那就是本守卫要抓的异常形态。
-		const hasOutput = hasTurnOutput(runtime.projection.messages, seededIndex);
 		if (!hasOutput && runtime.cancelReason !== "user_stop") {
 			runtime.projection = rollbackAcpUserPrompt(runtime.projection, seededIndex);
 			this.updates.flushMessages(runtime, true);
 			const error = `ACP agent ${runtime.tool.name} completed the turn without any output`;
-			this.deps.logger?.warn("acp", error, { tool: runtime.tool.name, sessionId: runtime.acpSessionId, stopReason: settledStopReason });
+			// 概括文案看不出根因（限流/登录失败/事件流丢失都长一个样）：把这一回合能拿到的
+			// 原始证据拼进 debugDetails，toast 与日志都能看到。
+			const debugDetails = describeEmptyTurn({
+				stopReason: settledStopReason,
+				updateKinds: runtime.turnUpdateKinds,
+				stderrTail: runtime.stderrTail,
+				foreignNotification: runtime.turnForeignNotification,
+				rawResult: promptResultSnippet(promptResult),
+			});
+			this.deps.logger?.warn("acp", error, {
+				tool: runtime.tool.name,
+				sessionId: runtime.acpSessionId,
+				stopReason: settledStopReason,
+				updateKinds: Object.fromEntries(runtime.turnUpdateKinds),
+				stderrTail: runtime.stderrTail,
+				foreignNotification: runtime.turnForeignNotification,
+			});
 			await this.persistArchive(runtime);
-			return emptyTurnRejection(runtime.tool.name);
+			return emptyTurnRejection(runtime.tool.name, debugDetails);
 		}
 		await this.persistArchive(runtime);
+		// 真正成功收口（已过空白回合守卫）：通知装配层（会话完成通知 / 桌宠 done 气泡）。
+		// 用户主动停止不算完成，与 pi 的 agent_settled 语义一致。
+		if (runtime.cancelReason !== "user_stop") this.notifyAgentSettled(input.agentId, runtime.tab.title);
 		return { accepted: true };
 	}
 
 	async abort(agentId: string): Promise<void> {
 		const runtime = this.runtimes.get(agentId);
-		if (!runtime?.conn || runtime.conn.isClosed() || !runtime.turnActive) return;
+		if (!runtime) return;
+		this.deps.logger?.info("acp", `[${runtime.tool.name}] abort requested`, {
+			agentId,
+			status: runtime.status,
+			turnActive: runtime.turnActive,
+			cancelling: runtime.cancelling,
+			connClosed: !runtime.conn || runtime.conn.isClosed(),
+		});
+		if (!runtime.conn || runtime.conn.isClosed() || !runtime.turnActive) {
+			// 回合已结算（结论早就出完）或连接已死，但渲染层可能因迟到的 status 事件仍显示运行中；
+			// 停止按钮必须是一个有效收口动作，静默 no-op 会表现成「点停止没反应」。
+			this.correctStaleRunningStatus(agentId, runtime);
+			return;
+		}
 		if (runtime.cancelling) {
 			// 二次停止:cancel 已发出但回合仍未收口(CLI wedged),不再等待,立即强杀。
 			// 强杀 → conn.close 拒绝在途 session/prompt → sendPrompt catch 定向结算。
@@ -525,6 +738,20 @@ export class AcpAgentManager implements SessionAgentGateway {
 		// cancel 只是通知:CLI 可能既不处理也不回包(opencode 流错误后实测 wedged)。
 		// 宽限内回合自行结算则定时器被清;超时升级强杀,保证「停止」最终必然生效。
 		this.turnWatchdog.scheduleAbortEscalation(runtime, "abort_no_response");
+	}
+
+	/**
+	 * 收口渲染层可能残留的 running/starting：只在本端已确定没有活动回合时调用。
+	 * conn 还在 → 推 idle；连接已死 → 推 error（与 closed handler 同语义），并清回合定时器。
+	 */
+	private correctStaleRunningStatus(agentId: string, runtime: AcpAgentRuntime): void {
+		if (runtime.status !== "running" && runtime.status !== "starting") return;
+		this.turnWatchdog.clearTurnTimers(runtime);
+		runtime.turnActive = false;
+		runtime.status = runtime.conn && !runtime.conn.isClosed() ? "idle" : "error";
+		runtime.tab.status = runtime.status;
+		this.emit(agentEventTags.agentsState, this.list());
+		this.emitRuntimeState(agentId);
 	}
 
 	async stop(agentId: string): Promise<void> {
@@ -573,8 +800,30 @@ export class AcpAgentManager implements SessionAgentGateway {
 		return { accepted: true };
 	}
 
-	notifyAskPending(_agentId: string, _sessionId: string, _sessionTitle: string, _question: string): void {
-		// 桌面通知由 SessionRuntimeCoordinator.observeRuntimeEvent 统一触发。
+	notifyAskPending(agentId: string, sessionId: string, sessionTitle: string, question: string): void {
+		// 桌面通知出口由装配层注入（与 pi 同一份门控/toast）；开关关着时不占用每轮去重位。
+		if (!this.deps.notify?.askPending) return;
+		if (this.notifiedAskAgents.has(agentId)) return;
+		if (!this.deps.notify.askPending({ agentId, sessionId, sessionTitle, question })) return;
+		this.notifiedAskAgents.add(agentId);
+	}
+
+	/** 注册「本轮成功收口」监听器（桌宠 / 完成通知）；返回退订。 */
+	onAgentSettled(listener: (info: { agentId: string; title: string }) => void): () => void {
+		this.settledListeners.add(listener);
+		return () => {
+			this.settledListeners.delete(listener);
+		};
+	}
+
+	private notifyAgentSettled(agentId: string, title: string): void {
+		for (const listener of this.settledListeners) {
+			try {
+				listener({ agentId, title });
+			} catch {
+				// 订阅者失败不得影响会话收口
+			}
+		}
 	}
 
 	async getRuntimeState(agentId: string): Promise<AgentRuntimeState> {
@@ -638,6 +887,23 @@ export class AcpAgentManager implements SessionAgentGateway {
 		const acpSessionId = runtime.acpSessionId;
 		if (!this.deps.archive || !acpSessionId) return Promise.resolve();
 		return this.deps.archive.enqueueSave(acpSessionId, runtime.projection.messages);
+	}
+
+	/**
+	 * 成功回合记账：session/prompt 响应的实验性 usage（Qoder 返回 input/output tokens）
+	 * 累计进会话 totals；TTFT/总耗时/TPS 用本地计时。空白回合会被回滚并报错，
+	 * 由调用方用 hasOutput 挡掉，不污染「最近一次回复」与命中率样本。
+	 */
+	private recordTurnMetrics(runtime: AcpAgentRuntime, result: AcpSessionPromptResult | undefined): void {
+		const endedAt = Date.now();
+		const usage = readAcpTurnUsage(result);
+		// TTFT 优先正文首字；纯思考回合（没有任何正文）回退思考首字——与 pi 的语义一致。
+		const perf = acpReplyPerf({ startedAt: runtime.turnStartedAt, firstTextAt: runtime.turnFirstTextAt ?? runtime.turnFirstThoughtAt, endedAt, usage });
+		if (perf) runtime.lastReplyPerf = { ...perf, at: endedAt };
+		runtime.usageTotals = accumulateAcpUsage(runtime.usageTotals, usage, perf ? { totalMs: perf.totalMs ?? 0, ttftMs: perf.ttftMs } : undefined);
+		runtime.turnStartedAt = undefined;
+		runtime.turnFirstTextAt = undefined;
+		runtime.turnFirstThoughtAt = undefined;
 	}
 
 	private emitRuntimeState(agentId: string): void {

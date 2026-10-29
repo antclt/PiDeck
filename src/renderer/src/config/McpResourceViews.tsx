@@ -88,7 +88,21 @@ export function McpServerListPane(props: {
 								if (!props.creating) props.onSelect(item.name);
 							}}
 						>
-							<span className={`size-1.5 shrink-0 rounded-full ${connected ? "bg-[var(--color-success)]" : needsAuth ? "bg-[var(--color-warning,#d97706)]" : disabled ? "bg-muted-foreground" : status ? "bg-danger" : "bg-muted-foreground"}`} aria-hidden="true" />
+							<span
+								role="img"
+								aria-label={
+									connected
+										? t("config.mcp.status.connected", { count: status?.tools.length ?? 0 })
+										: needsAuth
+											? t("config.mcp.status.needsAuth")
+											: disabled
+												? t("config.mcp.status.disabled")
+												: status
+													? t("config.mcp.status.disconnected")
+													: t("config.mcp.status.notTested")
+								}
+								className={`size-1.5 shrink-0 rounded-full ${connected ? "bg-[var(--color-success)]" : needsAuth ? "bg-[var(--color-warning,#d97706)]" : disabled ? "bg-muted-foreground" : status ? "bg-danger" : "bg-muted-foreground"}`}
+							/>
 							<span className={`min-w-0 flex-1 truncate font-medium ${item.pendingDelete && !item.revertsToInherited ? "line-through opacity-60" : ""}`}>{item.name}</span>
 							{item.pendingDelete ? <span className="shrink-0 rounded-sm border border-border-subtle px-1 text-micro text-muted-foreground">{item.revertsToInherited ? t("config.mcp.revertBadge") : t("config.mcp.pendingDeleteBadge")}</span> : null}
 							{item.originScope === "project-pi" && !item.pendingDelete ? <span className="shrink-0 rounded-sm border border-border-subtle px-1 text-micro text-muted-foreground">{t("config.mcp.layer.projectPi")}</span> : null}
@@ -123,7 +137,7 @@ export function McpServerListPane(props: {
 									<LogOut size={12} />
 								</Button>
 							) : null}
-							{status?.error ? <span className="size-1.5 shrink-0 rounded-full bg-danger" title={status.error} aria-hidden="true" /> : null}
+							{status?.error ? <span role="img" aria-label={status.error} className="size-1.5 shrink-0 rounded-full bg-danger" title={status.error} /> : null}
 						</div>
 					);
 				})

@@ -28,10 +28,15 @@ function needsOverflowUnanchor(errorMessage, api) {
 	return !isAnthropic && PI_OVERFLOW_ANCHORED_STATUS.test(errorMessage);
 }
 
-const REWRITE_TAG_PATTERN = /\((?:connection error|overloaded)\)\s*$/i;
+const REWRITE_TAG_PATTERN = /\((?:connection error|rate limit|overloaded)\)\s*$/i;
+
+const NO_BODY_4XX_TOKEN_PATTERN = /\b(?:400|413)\b/g;
+const NON_RETRYABLE_NO_BODY_4XX_PATTERN = /(?:^|[^0-9])(?:401|402|403|404|405|406|409|410|412|415|422|431)/;
 
 function makeRetryableErrorMessage(errorMessage, api) {
-	const tagged = REWRITE_TAG_PATTERN.test(errorMessage) ? errorMessage : errorMessage + " (connection error)";
+	const isAnthropic = typeof api === "string" && ANTHROPIC_MESSAGE_APIS.has(api);
+	const base = isAnthropic ? errorMessage : errorMessage.replace(NO_BODY_4XX_TOKEN_PATTERN, "4xx");
+	const tagged = REWRITE_TAG_PATTERN.test(base) ? base : base + " (connection error)";
 	return needsOverflowUnanchor(errorMessage, api) ? "transient upstream fault: " + tagged : tagged;
 }
 
@@ -41,7 +46,16 @@ const NON_RETRYABLE_LOCALIZED_PATTERNS = [/额度|余额|配额|限额|上限|�
 
 const NON_RETRYABLE_HTTP_STATUS_PATTERN = /(?:^|[^0-9])(?:400|401|402|403|404|405|406|409|410|412|413|415|422|431)\b/;
 
-const TRANSIENT_OVERLOAD_PATTERNS = [/访问量过大|流量过大|并发.*?过(?:大|高)|请求过快|频率过高/, /负载(?:过高|过大|满载)|压力过大|排队中|拥挤/, /服务繁忙|系统繁忙|业务繁忙|服务器繁忙|繁忙，请/];
+const TRANSIENT_OVERLOAD_PATTERNS = [
+	/访问量过大|流量过大|并发.*?过(?:大|高)|请求过快|频率过高/,
+	/负载(?:过高|过大|满载)|压力过大|排队中|拥挤/,
+	/服务繁忙|系统繁忙|业务繁忙|服务器繁忙|繁忙，请/,
+	/速率限制|频率限制|请求频率|限流/,
+	/overload(?:ed)?|server_is_overloaded/i,
+	/servers? (?:are|is) (?:currently )?(?:busy|overloaded)|currently experiencing high demand|model is at capacity/i,
+	/(?:model|server|service|provider)[^.]{0,40}?(?:at|near|nearing|exceeding)s+capacity/i,
+	/dues+tos+(?:high|heavy|extreme)s+demand/i,
+];
 
 const TRANSIENT_UPSTREAM_PATTERNS = [
 	/暂时不可用|临时不可用|暂不可用|暂时无法(?:访问|响应|处理)|临时无法(?:访问|响应|处理)/,
@@ -52,21 +66,37 @@ const TRANSIENT_UPSTREAM_PATTERNS = [
 	/没有可用的?健康.*?账号|无可用的?健康.*?账号/,
 	/正在(?:维护|重启|升级|恢复)|维护中|升级中|重启中/,
 	/请稍后重试|请稍后再试|稍后重试|稍后再试|请重试|请重新尝试/,
+	/\b(?:service|upstream|server|provider)\b[^.]{0,40}?\bunavailable\b/i,
+	/\b(?:server|internal)[_\s-]?error\b/i,
+	/\bupstream\b[^.]{0,40}?\b(?:failed|error|unreachable)\b/i,
 ];
 
-const TRANSIENT_TRANSPORT_PATTERNS = [/^stream_read_error$/i, /unexpected\s+eof/i, /premature\s+close/i, /upstream\s+request\s+failed/i, /no\s+available\s+channel/i, /GOAWAY/i];
+const TRANSIENT_TRANSPORT_PATTERNS = [/^stream_read_error\b/i, /unexpected\s+eof/i, /premature\s+close/i, /upstream\s+request\s+failed/i, /no\s+available\s+channel/i, /GOAWAY/i, /connection\s+reset(?:\s+by\s+peer)?/i, /\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|EAI_AGAIN)\b/];
 
-const ALREADY_RETRYABLE_SIGNALS = [/\b(?:429|500|502|503|504|524)\b/, /rate.?limit|too many requests|overloaded/i, /service.?unavailable|server.?error|internal.?error/i, /timed?\s*out|timeout|terminated/i, /connection.?error|socket hang up|fetch failed/i];
+const TRANSIENT_EDGE_PATTERNS = [
+	/cloudflare\s+tunnel/i,
+	/\bargo\s+tunnel\b/i,
+	/\b(?:unable|not\s+able|can(?:'|no)t|couldn'?t)\s+to\s+reach\s+(?:it\b|the\s+(?:host|origin|server|upstream))/i,
+	/\berror\s*(?:code\s*)?10(?:33|35)\b/i,
+	/\b(?:origin|web\s+server|upstream)\b[\s\S]{0,80}?(?:unreachable|is\s+down|has\s+been\s+down|refused\s+(?:the\s+)?connection|handshake\s+failed)/i,
+];
+
+const STATUS_CONTEXT_PREFIX = "(?:^|\\bhttps?\\/[\\d.]+\\s+|\\b(?:status(?:\\s*code)?|code|error)\\b[\\s:=#-]{0,3})";
+const RETRYABLE_SERVER_STATUS_PATTERN = new RegExp(`${STATUS_CONTEXT_PREFIX}(5(?:0\\d|2\\d|3\\d|99))(?![0-9])`, "i");
+const NON_RETRYABLE_SERVER_STATUS_PATTERN = new RegExp(`${STATUS_CONTEXT_PREFIX}(?:501|505)(?![0-9])`, "i");
+
+const ALREADY_RETRYABLE_SIGNALS = [/\b(?:429|500|502|503|504|524)\b/, /rate.?limit|too many requests/i, /timed?\s*out|timeout|terminated/i, /connection.?error|socket hang up|fetch failed|other side closed/i];
 
 function isTransientError(errorMessage) {
 	if (!errorMessage) return false;
 	if (NON_RETRYABLE_LOCALIZED_PATTERNS.some((p) => p.test(errorMessage))) return false;
 	if (NON_RETRYABLE_HTTP_STATUS_PATTERN.test(errorMessage)) return false;
+	if (NON_RETRYABLE_SERVER_STATUS_PATTERN.test(errorMessage)) return false;
 	if (ALREADY_RETRYABLE_SIGNALS.some((p) => p.test(errorMessage))) return false;
-	return TRANSIENT_OVERLOAD_PATTERNS.some((p) => p.test(errorMessage)) || TRANSIENT_UPSTREAM_PATTERNS.some((p) => p.test(errorMessage)) || TRANSIENT_TRANSPORT_PATTERNS.some((p) => p.test(errorMessage));
+	return TRANSIENT_OVERLOAD_PATTERNS.some((p) => p.test(errorMessage)) || TRANSIENT_UPSTREAM_PATTERNS.some((p) => p.test(errorMessage)) || TRANSIENT_TRANSPORT_PATTERNS.some((p) => p.test(errorMessage)) || TRANSIENT_EDGE_PATTERNS.some((p) => p.test(errorMessage)) || RETRYABLE_SERVER_STATUS_PATTERN.test(errorMessage);
 }
 
-const OVERLOAD_TAG = "overloaded";
+const OVERLOAD_TAG = "rate limit";
 const CONNECTION_TAG = "connection error";
 
 function makeTransientErrorMessage(errorMessage) {
@@ -78,7 +108,9 @@ function makeTransientErrorMessage(errorMessage) {
 function rewriteErrorMessage(message) {
 	const errorMessage = message.errorMessage;
 	if (!errorMessage) return undefined;
+	if (REWRITE_TAG_PATTERN.test(errorMessage)) return undefined;
 	if (isNoBodyError(errorMessage)) {
+		if (NON_RETRYABLE_NO_BODY_4XX_PATTERN.test(errorMessage)) return undefined;
 		const needsRewrite = needsOverflowUnanchor(errorMessage, message.api) || !ALREADY_RETRYABLE_SIGNALS.some((p) => p.test(errorMessage));
 		if (!needsRewrite) return undefined;
 		return makeRetryableErrorMessage(errorMessage, message.api);
@@ -209,8 +241,8 @@ test("makeRetryableErrorMessage 追加连接错误说明并保留原文", () => 
 });
 
 test("makeRetryableErrorMessage 对 400/413 破锚，对其它状态码不破锚", () => {
-	assert.equal(makeRetryableErrorMessage("400 status code (no body)", "openai-completions"), "transient upstream fault: 400 status code (no body) (connection error)");
-	assert.equal(makeRetryableErrorMessage("413 status code (no body)", "openai-completions"), "transient upstream fault: 413 status code (no body) (connection error)");
+	assert.equal(makeRetryableErrorMessage("400 status code (no body)", "openai-completions"), "transient upstream fault: 4xx status code (no body) (connection error)");
+	assert.equal(makeRetryableErrorMessage("413 status code (no body)", "openai-completions"), "transient upstream fault: 4xx status code (no body) (connection error)");
 	// 503 本就可重试，无需破锚，保留原文便于诊断
 	assert.equal(makeRetryableErrorMessage("503 status code (no body)", "openai-completions"), "503 status code (no body) (connection error)");
 });
@@ -330,14 +362,14 @@ test("中文瞬态文案改写后进入 pi 重试闭环", () => {
 	assert.match(rewritten, /^模型服务暂时不可用，请稍后重试/);
 });
 
-test("过载类中文文案标注为 overloaded 并可重试", () => {
+test("过载类中文文案标注为 rate limit 并可重试", () => {
 	const message = {
 		stopReason: "error",
 		errorMessage: "该模型当前访问量过大，请您稍后再试",
 		api: "openai-completions",
 	};
 	const rewritten = rewriteErrorMessage(message);
-	assert.equal(rewritten, "该模型当前访问量过大，请您稍后再试 (overloaded)");
+	assert.equal(rewritten, "该模型当前访问量过大，请您稍后再试 (rate limit)");
 	assert.equal(piWillRetry({ ...message, errorMessage: rewritten }), true);
 });
 
@@ -420,15 +452,15 @@ test("pi 名单已覆盖的状态码空响应保持原文（不给气泡加噪�
 	}
 });
 
-test("幂等：旧版扩展已改写过的文案只补前缀，不重复追加标注", () => {
+test("幂等：已带标注的文案直接放行，不重复追加", () => {
 	const message = {
 		stopReason: "error",
 		errorMessage: "400 status code (no body) (connection error)",
 		api: "openai-completions",
 	};
-	const rewritten = rewriteErrorMessage(message);
-	assert.equal(rewritten, "transient upstream fault: 400 status code (no body) (connection error)");
-	assert.equal(piWillRetry({ ...message, errorMessage: rewritten }), true);
+	// 已改写过（含旧版本）的消息不再处理：标注里的 rate limit / connection error
+	// 会命中「本就可重试」名单，重复处理只会叠前缀。
+	assert.equal(rewriteErrorMessage(message), undefined);
 });
 
 test("408 空响应仍被救援（Request Timeout 属瞬态，不在 4xx 排除表内）", () => {
@@ -491,4 +523,87 @@ test("扩展按 api 区分改写，并对 400/413 解除 pi 溢出误判", () =>
 
 test("扩展已注册进 BUILT_IN_EXTENSIONS 白名单", () => {
 	assert.match(builtInsSource, /"pi-deck-retry-no-body\.ts"/);
+});
+
+// =========================================================================
+// 边缘层 / 隧道回源故障（Cloudflare Tunnel 530 等）：pi 名单既无状态码也无关键词
+// =========================================================================
+
+/** juzi 网关实测原文（HTTP 530 + Cloudflare Tunnel 文案，全英文但名单零命中）。 */
+const CLOUDFLARE_TUNNEL_530 = '530: {"code":null,"message":"juzi-r4: The host is configured as a Cloudflare Tunnel, but Cloudflare is currently unable to reach it.","param":null,"type":"api_error"}';
+
+test("Cloudflare Tunnel 530 原本 pi 不重试（用户实测的失败场景）", () => {
+	const message = { stopReason: "error", errorMessage: CLOUDFLARE_TUNNEL_530, api: "openai-completions" };
+	assert.equal(isNoBodyError(CLOUDFLARE_TUNNEL_530), false);
+	assert.equal(isRetryableAssistantError(message), false);
+	assert.equal(isContextOverflow086(message), false);
+	assert.equal(piWillRetry(message), false);
+});
+
+test("Cloudflare Tunnel 530 改写为 connection error 后进入 pi 重试闭环", () => {
+	const message = { stopReason: "error", errorMessage: CLOUDFLARE_TUNNEL_530, api: "openai-completions" };
+	const rewritten = rewriteErrorMessage(message);
+	assert.ok(rewritten, "应改写");
+	assert.equal(rewritten, `${CLOUDFLARE_TUNNEL_530} (connection error)`);
+	// 原文完整保留（含 530 与隧道名 juzi-r4），会话历史仍可诊断
+	assert.match(rewritten, /^530: \{"code":null/);
+	assert.match(rewritten, /juzi-r4/);
+	// 两个版本的 pi 都必须真正重试
+	for (const willRetry of [piWillRetry, (m) => !isContextOverflow086(m) && isRetryableAssistantError(m)]) {
+		assert.equal(willRetry({ ...message, errorMessage: rewritten }), true);
+	}
+});
+
+test("只给未列名的 5xx 状态码（等价于把 530 换成 520-527/531）也无须隧道文案即可重试", () => {
+	// 注意：`522: connection to origin timed out` / `HTTP/1.1 503 ...` 这类含 pi 名单关键词的文案本就会重试，不在此列
+	for (const errorMessage of ["520: upstream returned an empty response", "523: origin is unreachable", "527: invalid SSL certificate", "529: upstream capacity exhausted", "531", "HTTP/1.1 530 Origin unreachable"]) {
+		const message = { stopReason: "error", errorMessage, api: "openai-completions" };
+		assert.equal(isRetryableAssistantError(message), false, `原本不重试: ${errorMessage}`);
+		const rewritten = rewriteErrorMessage(message);
+		assert.ok(rewritten, `应改写: ${errorMessage}`);
+		assert.match(rewritten, /\(connection error\)$/, errorMessage);
+	}
+});
+
+test("边缘层文案（无论有无状态码）单独也能识别为瞬态", () => {
+	for (const errorMessage of ["Error 1033: Argo Tunnel error", "Cloudflare is currently unable to reach it.", "Origin web server is unreachable", "The host is configured as a Cloudflare Tunnel, but Cloudflare is currently unable to reach it."]) {
+		assert.equal(isTransientError(errorMessage), true, `应判为瞬态: ${errorMessage}`);
+	}
+});
+
+test("501/505/51x 是确定性错误或易误命中，绝不重试", () => {
+	for (const errorMessage of ["501: not implemented", "505 HTTP Version Not Supported", "status 501", "510 status code", "511 Network Authentication Required", "512 tokens over the model limit"]) {
+		const message = { stopReason: "error", errorMessage, api: "openai-completions" };
+		assert.equal(rewriteErrorMessage(message), undefined, `不应改写: ${errorMessage}`);
+	}
+});
+
+test("正文里的普通 5xx 数字不会被当成状态码（避免误判）", () => {
+	for (const errorMessage of ["usage: 512 tokens", "generated 5300 characters", "last_stream_id=5120", "auth failed for key 512"]) {
+		const message = { stopReason: "error", errorMessage, api: "openai-completions" };
+		assert.equal(rewriteErrorMessage(message), undefined, `不应改写: ${errorMessage}`);
+	}
+});
+
+test("WAF / challenge 类 Cloudflare 拦截不被误救（重试必然复现）", () => {
+	for (const errorMessage of ["403 Forbidden: Cloudflare challenge required", "Cloudflare Ray ID: 8a1b2c3d, access denied"]) {
+		const message = { stopReason: "error", errorMessage, api: "openai-completions" };
+		assert.equal(rewriteErrorMessage(message), undefined, `不应改写: ${errorMessage}`);
+	}
+});
+
+test("扩展源码保留边缘层与 5xx 名单的锚点", () => {
+	assert.match(extensionSource, /TRANSIENT_EDGE_PATTERNS/);
+	assert.match(extensionSource, /RETRYABLE_SERVER_STATUS_PATTERN/);
+	assert.match(extensionSource, /NON_RETRYABLE_SERVER_STATUS_PATTERN/);
+	assert.ok(extensionSource.includes("Cloudflare Tunnel"), "应保留 Cloudflare Tunnel 识别锚点");
+});
+
+test("530 空响应（网关只回状态码不回 body）同样被救援，且无需破锚", () => {
+	const message = { stopReason: "error", errorMessage: "530 status code (no body)", api: "openai-completions" };
+	assert.equal(isNoBodyError(message.errorMessage), true);
+	assert.equal(piWillRetry(message), false);
+	const rewritten = rewriteErrorMessage(message);
+	assert.equal(rewritten, "530 status code (no body) (connection error)");
+	assert.equal(piWillRetry({ ...message, errorMessage: rewritten }), true);
 });

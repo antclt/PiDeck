@@ -80,6 +80,25 @@ function getToolEditDiff(args: Record<string, unknown>): { oldText: string; newT
 }
 
 /**
+ * 纯函数结果缓存（v0.9.7 渲染虚拟化补丁，#406）：同输入直接返回上次结果，条目到上限整表清空，
+ * 超过 maxInput 的输入不缓存（防长正文撑爆）。本模块原有的 stripAnsi 缓存包装在 dev 侧
+ * stripAnsi 迁往 shared/ansiText.ts 时一并让位——这里只保留通用 helper，
+ * 供 renderer 的 cleanAnswerText 等多趟正则变换使用（见 timeline/answerText.ts）。
+ */
+export function createTextTransformCache(transform: (text: string) => string, limit = 256, maxInput = 64 * 1024): (text: string) => string {
+	const cache = new Map<string, string>();
+	return (text: string) => {
+		const cached = cache.get(text);
+		if (cached !== undefined) return cached;
+		const value = transform(text);
+		if (text.length <= maxInput) {
+			if (cache.size >= limit) cache.clear();
+			cache.set(text, value);
+		}
+		return value;
+	};
+}
+/**
  * 文件修改类工具名（write / edit / create / patch）：产出 diff 目标的工具集合。
  *
  * 单一口径：聚合侧（getToolDiffTarget）与读取侧的「预判要不要把这一行读进内存」
@@ -104,32 +123,49 @@ export function getToolName(message: ChatMessage): string {
  * 提取单条工具消息的 diff 目标（write/edit/create/patch）：
  * write/create 提供完整新内容；edit/patch 提供变动区域（oldText/newText）。
  * 与单条工具卡片的 diff 按钮共用，会话文件汇总也复用此逻辑。
+ *
+ * ACP 的编辑工具还多一条「只有路径」的形态：Qoder 等 CLI 的 rawInput 只上报
+ * `{file_path}`（旧/新文本不在 wire 上），而 meta.kind="edit" 是协议里的可靠类别。
  */
 export function getToolDiffTarget(message: ChatMessage): { path: string; originalContent: string; content: string; changedLines: number } | undefined {
 	const toolName = getToolName(message);
-	if (!isFileChangeToolName(toolName)) return undefined;
+	// ACP 工具卡的 toolName 是 agent 给的人类标题（Qoder 为 "Edit"/"Write"），
+	// kind 才是协议类别；只有路径的编辑靠它兜底（见下方 return）。
+	const acpEdit = message.meta?.kind === "edit";
+	if (!isFileChangeToolName(toolName) && !acpEdit) return undefined;
 	const args = parseToolArgs(message.meta?.args);
 	const path = getToolFilePath(args);
 	if (!args || !path) return undefined;
 	if (/write|create/i.test(toolName)) {
 		const content = typeof args.content === "string" ? args.content : typeof args.text === "string" ? args.text : undefined;
-		if (content === undefined) return undefined;
-		return { path, originalContent: "", content, changedLines: countTextLines(content) };
+		if (content !== undefined) return { path, originalContent: "", content, changedLines: countTextLines(content) };
 	}
 	// edit/patch：不存储 full file originalContent，只展示变动区域
-	const diff = getToolEditDiff(args);
-	if (!diff) return undefined;
-	return {
-		path,
-		originalContent: diff.oldText,
-		content: diff.newText,
-		changedLines: Math.max(countTextLines(diff.oldText), countTextLines(diff.newText)),
-	};
+	if (isFileChangeToolName(toolName)) {
+		const diff = getToolEditDiff(args);
+		if (diff) {
+			return {
+				path,
+				originalContent: diff.oldText,
+				content: diff.newText,
+				changedLines: Math.max(countTextLines(diff.oldText), countTextLines(diff.newText)),
+			};
+		}
+	}
+	// 只有路径（wire 上没有旧/新文本）：文件确实被改过，但没有 diff 内容可展示。
+	if (acpEdit) return { path, originalContent: "", content: "", changedLines: 0 };
+	return undefined;
+}
+
+/** 条目是否带可展示的 diff 内容：只上报路径的 ACP 编辑为空，chip 不显示增删行数、点击退回打开文件。 */
+export function hasFileChangePayload(entry: { originalContent: string; content: string }): boolean {
+	return entry.originalContent.length > 0 || entry.content.length > 0;
 }
 
 /**
  * 遍历会话消息收集 write/edit/create/patch 修改的文件（复用 getToolDiffTarget）。
- * 同文件多次修改取最后一次 diff 并累计次数。供会话文件汇总组件与单测共用。
+ * 同文件多次修改取最后一次**带内容**的 diff 并累计次数：ACP 只上报路径的条目
+ * 不能把先前拿到的 diff 冲成空串（否则同一文件后一次编辑会把 chip 的增删行数抹掉）。
  */
 export function collectSessionFileChanges(messages: readonly ChatMessage[]): SessionFileChange[] {
 	const map = new Map<string, SessionFileChange>();
@@ -137,11 +173,13 @@ export function collectSessionFileChanges(messages: readonly ChatMessage[]): Ses
 		const target = getToolDiffTarget(message);
 		if (!target) continue;
 		const prev = map.get(target.path);
+		// 新条目没有内容（ACP 只上报路径）时保留上一次的 diff 载荷。
+		const payload = hasFileChangePayload(target);
 		map.set(target.path, {
 			path: target.path,
 			count: (prev?.count ?? 0) + 1,
-			originalContent: target.originalContent,
-			content: target.content,
+			originalContent: payload ? target.originalContent : prev?.originalContent ?? "",
+			content: payload ? target.content : prev?.content ?? "",
 		});
 	}
 	return [...map.values()];

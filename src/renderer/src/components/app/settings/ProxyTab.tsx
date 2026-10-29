@@ -4,6 +4,7 @@ import { CheckCheck, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, 
 import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
 import { Checkbox } from "../../ui-shadcn/checkbox";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../../ui-shadcn/collapsible";
 import { Input } from "../../ui-shadcn/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../ui-shadcn/table";
 import { SettingsSection } from "./SettingsStorageTab";
@@ -16,7 +17,7 @@ import { configuredProviderSummariesFromModelsConfig, hasPiProxyListFilter, spli
 import { INITIAL_PICKER_GROUP_SELECTION, applyPickerGroupAction, resolveGroupExpanded, type PickerGroupSelection } from "../../ui-shadcn/commandPickerExpansion";
 
 /** 代理相关字段：用于判断代理 tab 是否有未保存变更。 */
-const PROXY_FIELDS: (keyof AppSettings)[] = ["piProxyEnabled", "piProxyUrl", "piProxyBypass", "piProxyModels", "desktopProxyEnabled", "desktopProxyUrl", "desktopProxyBypass"];
+const PROXY_FIELDS: (keyof AppSettings)[] = ["piProxyEnabled", "piProxyUrl", "piProxyBypass", "piProxyModels", "acpProxyEnabled", "acpProxyUrl", "acpProxyBypass", "desktopProxyEnabled", "desktopProxyUrl", "desktopProxyBypass"];
 
 type ProxyTabProps = {
 	draft: AppSettings;
@@ -29,15 +30,19 @@ type ProxyTabProps = {
 };
 
 /**
- * 设置弹框「代理设置」tab：pi / 桌面代理两段（未保存变更提示 + 统一保存/取消）。
+ * 设置弹框「代理设置」tab：pi / ACP / 桌面代理三段（未保存变更提示 + 统一保存/取消）。
  * 独立组件 + memo：切换 tab 或壳层无关状态变化时不重渲染本 tab。
- * 「按模型走代理」用模型表格（与 Pi 管理 → 模型 同款 Table 展示），搜索按 provider/ID/名称过滤。
+ * 「按模型走代理」是 pi 分区里的高级项，默认折叠成一行摘要（已配置名单时展开），
+ * 内层模型表格与 Pi 管理 → 模型 同款 Table 展示，搜索按 provider/ID/名称过滤。
  */
 export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
 	const { draft, updateDraft, isDirty } = props;
 	// 模型名单的批量勾选已有组内/顶部已选数和全局保存栏反馈；首次选择时再插入
 	// 局部横幅会改变滚动内容高度并造成视口跳动。因此横幅仅用于其余代理配置字段。
 	const proxyBannerDirty = PROXY_FIELDS.some((field) => field !== "piProxyModels" && isDirty(field));
+	// 「按模型走代理」是低频高级项：默认只展示一行摘要，已配置名单时才展开，
+	// 避免模型表格把三段代理设置淹掉（设置页反馈「太乱」的主要来源）。
+	const [advancedOpen, setAdvancedOpen] = useState(() => (draft.piProxyModels?.length ?? 0) > 0);
 	// 模型白名单候选：从 models.json 拉全量（与会话模型选择器同一数据源），保留 AvailableModel 结构，
 	// 搜索可同时命中 provider/modelId 与显示名。
 	const [availableModelList, setAvailableModelList] = useState<AvailableModel[] | null>(null);
@@ -195,19 +200,7 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
 				</div>
 			)}
 			<SettingsSection id="settings-section-proxy-pi-agent" title={t("settings.piProxy")} description={t("settings.piProxyDesc")}>
-				<SettingSwitchRow
-					anchor="proxy-enable-pi"
-					title={t("settings.enablePiProxy")}
-					description={
-						<>
-							{t("settings.enablePiProxyDesc")}
-							{proxyListActive && <span className="mt-0.5 block text-amber-600/90 dark:text-amber-400/90">{t("settings.piProxySwitchOverridden")}</span>}
-						</>
-					}
-					checked={draft.piProxyEnabled}
-					disabled={proxyListActive}
-					onChange={(checked) => updateDraft({ piProxyEnabled: checked })}
-				/>
+				<SettingSwitchRow anchor="proxy-enable-pi" title={t("settings.enablePiProxy")} description={t("settings.enablePiProxyDesc")} checked={draft.piProxyEnabled} disabled={proxyListActive} onChange={(checked) => updateDraft({ piProxyEnabled: checked })} />
 				{/* 配置与开关解耦：地址/绕过/测试始终可编辑，关闭开关时仅保存配置不启用——
             单会话「会话代理」的 on 模式会复用下方地址，无需全局开启。 */}
 				<div className="setting-proxy-panel">
@@ -230,9 +223,27 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
 							{props.piProxyChecking ? t("settings.testingProxy") : t("settings.testProxy")}
 						</Button>
 					</SettingRow>
-					{/* 按模型走代理：名单内模型强制走代理（即使全局关闭也复用上方地址），名单外强制直连；
-              留空则跟随全局/会话设置。模型表格与 Pi 管理 → 模型 同款展示，搜索按任意列过滤。 */}
-					<SettingRow title={<span>{t("settings.piProxyModels")}</span>} description={t("settings.piProxyModelsDesc")} stacked>
+				</div>
+				{/* 按模型走代理：名单内模型强制走代理（即使全局关闭也复用上方地址），名单外强制直连；
+            留空则跟随全局/会话设置。默认折叠成一行摘要，避免模型表格淹没三段代理设置。 */}
+				<Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="mt-1 border-t border-border-subtle/60 pt-2">
+					<CollapsibleTrigger asChild>
+						<button type="button" className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-md px-1 py-2 text-left transition-colors hover:bg-bg-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
+							<span className="min-w-0">
+								<span className="flex items-center gap-1.5 text-control font-medium text-foreground">
+									{t("settings.piProxyModels")}
+									{advancedOpen ? <ChevronDown className="size-3.5 text-muted-foreground" aria-hidden="true" /> : <ChevronRight className="size-3.5 text-muted-foreground" aria-hidden="true" />}
+								</span>
+								<small className="mt-0.5 block text-caption leading-relaxed text-muted-foreground">{t("settings.piProxyModelsDesc")}</small>
+							</span>
+							{/* 固定宽度摘要：首次勾选时文案变化不能改变触发器高度/左列宽度，
+							    否则滚动锚定会把整个设置面板弹走（e2e/proxy-model-selection-scroll 守卫）。 */}
+							<span className="inline-flex w-24 shrink-0 items-center justify-center whitespace-nowrap rounded-full border border-border-subtle bg-bg-muted/60 px-2 py-0.5 text-micro tabular-nums text-text-secondary">
+								{hasModelFilter ? t("settings.piProxyModelsSummaryOn", { count: selectedModels.size }) : t("settings.piProxyModelsSummaryOff")}
+							</span>
+						</button>
+					</CollapsibleTrigger>
+					<CollapsibleContent className="pt-2">
 						<div className="flex flex-col gap-2.5">
 							{/* 顶部操作行：搜索 + 已选计数 + 清空（结构对齐 Pi 管理模型列表头部） */}
 							<div className="flex flex-nowrap items-center gap-2 max-[820px]:flex-wrap">
@@ -272,7 +283,7 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
 							{extraModelKeys.length > 0 && (
 								<div className="flex flex-col gap-1">
 									<span className="px-0.5 text-micro font-medium text-muted-foreground">{t("settings.piProxyModelsExtras")}</span>
-									<div className="flex flex-col gap-1 rounded-md border border-amber-500/25 bg-amber-500/5 p-2">{extraModelKeys.map(renderExtraRow)}</div>
+									<div className="flex flex-col gap-1 rounded-md border border-warning/25 bg-warning/5 p-2">{extraModelKeys.map(renderExtraRow)}</div>
 								</div>
 							)}
 							{/* 配置里有、pi 报告里没有的供应商，按原因分两类展示（issue #356）：
@@ -282,7 +293,7 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
 							{unlistedProviders.withModels.length > 0 && !proxyListLoading && (
 								<div className="flex flex-col gap-1">
 									<span className="px-0.5 text-micro font-medium text-muted-foreground">{t("settings.piProxyModelsUnlistedProviders")}</span>
-									<div className="flex flex-col gap-1 rounded-md border border-amber-500/25 bg-amber-500/5 p-2">
+									<div className="flex flex-col gap-1 rounded-md border border-warning/25 bg-warning/5 p-2">
 										{unlistedProviders.withModels.map((providerName) => (
 											<div key={providerName} className="flex min-w-0 items-baseline gap-2 px-2 py-0.5">
 												<span className="min-w-0 flex-none font-mono text-caption text-foreground" title={providerName}>
@@ -352,7 +363,7 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
 																		<span className="flex-none whitespace-nowrap font-mono text-caption text-muted-foreground/70">{t("config.count.models", { count: models.length })}</span>
 																		{/* 固定预留已选计数宽度，首次选择时组头不会因插入文字而重排。 */}
 																		<span className="min-w-4 flex-1" />
-																		<span className={`min-w-20 flex-none whitespace-nowrap text-right text-micro font-medium text-amber-600/90 dark:text-amber-400/90 ${selectedInGroup === 0 ? "invisible" : ""}`} aria-hidden={selectedInGroup === 0}>
+																		<span className={`min-w-20 flex-none whitespace-nowrap text-right text-micro font-medium text-warning/90 /90 ${selectedInGroup === 0 ? "invisible" : ""}`} aria-hidden={selectedInGroup === 0}>
 																			{t("settings.piProxyModelsGroupSelected", { count: selectedInGroup })}
 																		</span>
 																	</button>
@@ -396,8 +407,21 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
 							{modelSearchQuery && visibleModels.length > 0 && <span className="text-micro text-muted-foreground/70">{t("settings.piProxyModelsSearchHint")}</span>}
 							<span className="text-micro text-muted-foreground/70">{t("settings.piProxyModelsHint")}</span>
 						</div>
-					</SettingRow>
-				</div>
+					</CollapsibleContent>
+				</Collapsible>
+			</SettingsSection>
+			<SettingsSection id="settings-section-proxy-acp" title={t("settings.acpProxy")} description={t("settings.acpProxyDesc")}>
+				<SettingSwitchRow anchor="proxy-enable-acp" title={t("settings.enableAcpProxy")} description={t("settings.enableAcpProxyDesc")} checked={draft.acpProxyEnabled} onChange={(checked) => updateDraft({ acpProxyEnabled: checked })} />
+				{draft.acpProxyEnabled && (
+					<div className="setting-proxy-panel">
+						<SettingRow title={<span>{t("settings.proxyUrl")}</span>} stacked>
+							<Input type="text" value={draft.acpProxyUrl} placeholder={"http://127.0.0.1:7890"} onChange={(event) => updateDraft({ acpProxyUrl: event.target.value })} />
+						</SettingRow>
+						<SettingRow title={<span>{t("settings.proxyBypass")}</span>} description={t("settings.noProxyHint")} stacked>
+							<Input type="text" value={draft.acpProxyBypass} placeholder={"localhost,127.0.0.1,::1"} onChange={(event) => updateDraft({ acpProxyBypass: event.target.value })} />
+						</SettingRow>
+					</div>
+				)}
 			</SettingsSection>
 			<SettingsSection id="settings-section-proxy-desktop" title={t("settings.desktopProxy")} description={t("settings.desktopProxyDesc")}>
 				<SettingSwitchRow anchor="proxy-enable-desktop" title={t("settings.enableDesktopProxy")} description={t("settings.desktopProxyDesc")} checked={draft.desktopProxyEnabled} onChange={(checked) => updateDraft({ desktopProxyEnabled: checked })} />

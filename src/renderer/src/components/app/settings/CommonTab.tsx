@@ -176,6 +176,27 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 						</SelectContent>
 					</Select>
 				</SettingRow>
+				<SettingRow
+					anchor="common-scratch-pad-scope"
+					title={
+						<>
+							<span>{t("settings.scratchPadScope")}</span>
+							<DirtyMarker dirty={isDirty("scratchPadScope")} label={t("settings.scratchPadScope")} />
+						</>
+					}
+					description={t("settings.scratchPadScopeDesc")}
+					alignEnd={false}
+				>
+					<Select value={draft.scratchPadScope} onValueChange={(value) => updateDraft({ scratchPadScope: value as AppSettings["scratchPadScope"] })}>
+						<SelectTrigger className="w-full">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="project">{t("settings.scratchPadScopeProject")}</SelectItem>
+							<SelectItem value="global">{t("settings.scratchPadScopeGlobal")}</SelectItem>
+						</SelectContent>
+					</Select>
+				</SettingRow>
 				<SettingSwitchRow anchor="common-auto-session-title" title={t("settings.autoSessionTitle")} description={t("settings.autoSessionTitleDesc")} checked={draft.autoSessionTitle ?? false} dirty={isDirty("autoSessionTitle")} onChange={(checked) => updateDraft({ autoSessionTitle: checked })} />
 				<SettingRow
 					anchor="common-tps-display-mode"

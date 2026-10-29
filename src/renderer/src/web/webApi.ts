@@ -11,6 +11,7 @@ import type { UIMessage } from "ai";
 import type { AvailableModel, AgentBackend, ChatMessage, SessionCommandResult, SessionLaunchPreferences, SessionMessagePage, SessionRuntimeInfo, SessionRuntimeTarget, SessionSearchResult, SessionTargetedValue, SessionTodoSnapshot, UpdateSessionRecordInput } from "../../../shared/types";
 import type { CommitEntry, GitBranchInfo, GitResourceGroups, ImageContent, PiExtensionSummary, PiSkillLocation, PiSkillSummary, PiSubagentEntry, YaoPromptCategory, ProviderUsageResult, UsageProbeBackend } from "../../../shared/types";
 import type { AgentUiResponse } from "../../../shared/types";
+import type { WebSecurityState } from "../../../shared/types";
 import type { WebContextUsage, WebFileNodeLite, WebState } from "./webTypes";
 
 // Web 服务令牌：与 browserApi 同型（同一 localStorage key），从二维码/分享链接的 ?token= 读取一次并持久化。
@@ -107,7 +108,7 @@ export async function fetchModels(force = false): Promise<AvailableModel[]> {
  * 新建会话草稿；preferences 携带启动前选择的模型/思考级别/后端（首页直发场景），
  * 无偏好时保持后端默认（pi 配置默认值）。backend 对应 CreateSessionDraftInput.backend。
  */
-export async function createSession(projectId: string, preferences?: SessionLaunchPreferences & { backend?: AgentBackend }): Promise<string> {
+export async function createSession(projectId: string, preferences?: SessionLaunchPreferences & { backend?: AgentBackend; acpToolId?: string }): Promise<string> {
 	const res = await apiFetch("/api/sessions", {
 		method: "POST",
 		headers: { "content-type": "application/json" },
@@ -178,6 +179,24 @@ export function setRuntimeThinking(target: SessionRuntimeTarget, level: string):
 /** 运行中的 DSH 权限切换走 runtime 命令，避免 `/permission` 进入普通消息流。 */
 export function setRuntimePermission(target: SessionRuntimeTarget, preset: string): Promise<unknown> {
 	return callRuntimeCommand(target.sessionId, target, "permission", { preset });
+}
+
+/**
+ * Pi 会话安全等级切换（levelId=null 清除会话覆盖、跟随全局默认）。
+ *
+ * 与 DSH 权限预设是两套机制：这里写的是 SecurityStore（策略快照），由服务端校验
+ * 会话/后端/等级后落盘，返回投影后的最新安全配置；不要用前端本地状态假装已切换。
+ */
+export async function setSessionSecurityLevel(sessionId: string, levelId: string | null): Promise<WebSecurityState> {
+	const res = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/security-level`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ levelId }),
+	});
+	if (!res.ok) throw new Error(`security level ${res.status}`);
+	const body = (await res.json()) as { security?: WebSecurityState };
+	if (!body.security) throw new Error("security level: missing security");
+	return body.security;
 }
 
 /** 手机/Web 端回答 ask_question / confirm / input。 */

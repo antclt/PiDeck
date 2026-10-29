@@ -105,9 +105,9 @@ function KeyStatusDot(props: { state: DshCredentialState | undefined }) {
 		return <span className="size-2 shrink-0 rounded-full bg-muted-foreground/30" title={t("config.dsh.keyUnknown")} aria-label={t("config.dsh.keyUnknown")} />;
 	}
 	if (state.configured) {
-		return <span className="size-2 shrink-0 rounded-full bg-emerald-500" title={t("config.dsh.keyConfigured")} aria-label={t("config.dsh.keyConfigured")} />;
+		return <span className="size-2 shrink-0 rounded-full bg-success" title={t("config.dsh.keyConfigured")} aria-label={t("config.dsh.keyConfigured")} />;
 	}
-	return <span className="size-2 shrink-0 rounded-full bg-red-500" title={t("config.dsh.keyMissing")} aria-label={t("config.dsh.keyMissing")} />;
+	return <span className="size-2 shrink-0 rounded-full bg-danger" title={t("config.dsh.keyMissing")} aria-label={t("config.dsh.keyMissing")} />;
 }
 
 /**
@@ -175,7 +175,7 @@ function ApiKeyField(props: {
 			<span className="flex items-center gap-1.5 text-caption font-medium text-foreground">
 				{t("config.dsh.apiKey")}
 				<span className="truncate font-mono text-micro text-muted-foreground">{ref}</span>
-				{configured && <span className="rounded-full border border-emerald-300/70 bg-emerald-500/10 px-1.5 py-px text-micro text-emerald-700 dark:border-emerald-700/70 dark:text-emerald-300">{t("config.dsh.keyConfigured")}</span>}
+				{configured && <span className="rounded-full border border-success/30 bg-success/10 px-1.5 py-px text-micro text-success  ">{t("config.dsh.keyConfigured")}</span>}
 			</span>
 			<div className="flex items-center gap-2">
 				<div className="relative max-w-sm flex-1">
@@ -523,7 +523,7 @@ export function PiAiProvidersCard(props: {
 					</span>
 				)}
 				{dirty && (
-					<span className="ml-auto text-micro text-amber-500" title={t("config.dirtyTooltip")}>
+					<span className="ml-auto text-micro text-warning" title={t("config.dirtyTooltip")}>
 						●
 					</span>
 				)}
@@ -816,7 +816,7 @@ export function DeepseekRouteCard(props: {
 					</span>
 				)}
 				{dirty && (
-					<span className="ml-auto text-micro text-amber-500" title={t("config.dirtyTooltip")}>
+					<span className="ml-auto text-micro text-warning" title={t("config.dirtyTooltip")}>
 						●
 					</span>
 				)}

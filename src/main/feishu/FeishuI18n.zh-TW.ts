@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: a71c3f52a50fb0891e58cde366ef3588e4a10b5a616816be683a1725ad19649e（来自 src/main/feishu/FeishuI18n.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 6c2d0febd05094b892552ca912210272eccdb3c014158f154823bbbb8f616b85（来自 src/main/feishu/FeishuI18n.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import type { FeishuTranslationKey } from "./FeishuI18n";
 
@@ -19,8 +19,8 @@ export const feishuZhTW: Record<FeishuTranslationKey, string> = {
 	"message.received": "⚡ 已收到",
 	"attachment.imageDownloadFailed": "⚠️ 圖片下載失敗，請重試。",
 	"attachment.fileDownloadFailed": "⚠️ 檔案下載失敗，請重試。",
-	"attachment.fileTooLarge50": "檔案過大（超過 50MB），暫不支援處理。",
-	"attachment.pendingFull": "⚠ 暫存附件過多（超過 20 個或 20MB），請先發送文字指令處理已暫存的檔案。",
+	"attachment.fileTooLarge": "檔案過大（超過 {limit}），暫不支援處理。",
+	"attachment.pendingFull": "⚠ 暫存附件過多（超過 50 個或 100MB），請先發送文字指令處理已暫存的檔案。",
 	"attachment.filesReceived": "已收到檔案: {names}，請告訴我需要做什麼",
 	"attachment.imageReceived": "已收到圖片，請告訴我需要做什麼",
 	"command.sendFileUsage": "用法: `/sendfile <檔案路徑>`",
@@ -43,11 +43,20 @@ export const feishuZhTW: Record<FeishuTranslationKey, string> = {
 	"session.botMismatch": "請先連線所選飛書 Bot。",
 	"session.bindFailed": "當前會話無法繫結飛書。",
 	"session.stopped": "⏹ 已停止 Agent",
+	"session.stoppedWithQueue": "⏹ 已停止 Agent，並清空排隊中的 {count} 條訊息",
+	"queue.accepted": "已排隊第 {position} 位，上一條處理完後自動繼續；傳送 /stop 可清空佇列。",
+	"queue.full": "排隊已滿（{limit} 條），這條訊息沒有排上；傳送 /stop 可清空佇列。",
 	"agent.failed": "❌ Agent 執行失敗，請重試。",
 	"card.stopHint": "傳送 /stop 可終止當前任務",
 	"status.heading": "**飛書 Bridge 狀態**",
 	"status.header": "當前狀態",
 	"status.status": "狀態: {status}",
+	"status.run": "執行: {state}",
+	"status.runIdle": "空閒",
+	"status.runRunning": "執行中",
+	"status.runBridgeOnly": "橋接佔用（後端已空閒，傳送 /stop 可釋放）",
+	"status.runBackendOnly": "後端執行中（非飛書發起）",
+	"status.queued": "排隊: {count} 條",
 	"status.bindings": "繫結數: {count}",
 	"status.session": "會話: {id}",
 	"status.sessionUnbound": "會話: 未繫結",

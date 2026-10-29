@@ -236,7 +236,7 @@ PiDeck 在随安装包发布的 `resources/extensions/` 中内置了一批强大
 | **pi-deck-security-gate.ts** | 运行时安全防护网（高/中/低三级安全策略） | 拦截危险 shell 命令（如 `rm -rf`、`chmod 777`、`git push` 等），限制写目录边界，保护 `.env`、密钥和 `.git` 内部文件免受恶意篡改。 |
 | **pi-deck-trash-guard.ts** | 回收站守卫（防误删安全气囊） | 很多模型写脚本动不动就执行 `rm -rf`。本扩展拦截一切删除类命令，在真实删除前先将文件移入**操作系统的回收站/废纸篓**中备份一份，彻底解决“代码被 AI 删光找不回”的恐惧。 |
 | **pi-deck-vision.ts** | 视觉桥（给 DeepSeek 等纯文本模型装眼睛） | DeepSeek 等强大的代码模型本身不支持图片输入。当用户拖入截图时，视觉桥会在后台静默调用一个低成本的视觉模型把图片转化为详细的文字技术描述再喂给代码模型，完全无感。 |
-| **pi-deck-retry-no-body.ts** | 瞬态网络故障与中文报错自动重试 | 第三方中转 API 经常报 `400 (no body)`、`502 Bad Gateway` 或中文 `模型服务暂时不可用`。pi 原生错误匹配通常放弃并停机。本扩展拦截这些瞬态错误，转交 pi 执行指数退避重试，避免任务半途而废。 |
+| **pi-deck-retry-no-body.ts** | 瞬态网络故障与中文报错自动重试 | 第三方中转 API 经常报 `400 (no body)`、`502 Bad Gateway`、中文 `模型服务暂时不可用`，或边缘层隧道回源不通（Cloudflare `530` "unable to reach it"、520-527 等）。pi 原生错误匹配通常放弃并停机。本扩展拦截这些瞬态错误，转交 pi 执行指数退避重试，避免任务半途而废。 |
 | **pi-deck-request-size-recovery.ts** | 超大请求体熔断恢复（413 Recovery） | 当上下文太长导致中转站报 `413 Payload Too Large` 时，自动弹出救援弹窗，引导用户临时切换到大窗口模型执行单次会话压缩，解开死锁。 |
 | **pi-deck-nul-redirect-fix.ts** | Windows 环境 `> nul` 设备名修复 | Windows 上执行 `> nul` 会生成一个既打不开又删不掉的奇怪文件 `nul`。本扩展自动在底层把重定向改写为标准的 `> /dev/null`。 |
 | **pi-deck-session-title.ts** | 首轮对话智能自动命名 | 首轮任务完成后，在后台异步启动轻量模型，根据用户首轮真实意图提取简洁的中文标题（如“实现登录鉴权中间件”），替换默认的时间戳会话名。 |

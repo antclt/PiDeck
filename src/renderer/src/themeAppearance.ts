@@ -1,9 +1,9 @@
 import { resolveAppColorScheme } from "../../shared/themeSchedule";
 import type { AppSettings, AppThemeMode } from "../../shared/types";
-import { SKIN_PRESETS } from "./themePresets";
+import { PALETTE_PRESETS } from "./themePresets";
 
-/** 外观相关设置子集：明暗（含跟随时间）、外观主题、主色 */
-export type AppearanceSettings = Pick<AppSettings, "theme" | "themeScheduleLightStart" | "themeScheduleDarkStart" | "themeSkin" | "accent">;
+/** 外观相关设置子集：明暗（含跟随时间）、样式、配色、主色 */
+export type AppearanceSettings = Pick<AppSettings, "theme" | "themeScheduleLightStart" | "themeScheduleDarkStart" | "themeStyle" | "themePalette" | "accent">;
 
 /**
  * 底栏 dock 主题按钮：点击在浅色/暗色之间翻转。
@@ -19,13 +19,14 @@ export function toggleThemeMode(appearance: Pick<AppSettings, "theme" | "themeSc
 }
 
 /**
- * 把外观设置应用到 <html> 的 data-* 属性（data-theme / data-appearance / data-accent）。
+ * 把外观设置应用到 <html> 的 data-* 属性（data-theme / data-appearance / data-palette / data-accent）。
  *
  * App.tsx（持久化 settings，含跟随系统的 media 监听与跟随时间的定时器）与
  * 设置弹窗（草稿实时预览）共用这一份实现，保证「预览」与「保存后」渲染结果一致：
  * - data-theme：浅/暗（system 由调用方传入 systemPrefersDark）；
- * - data-appearance：外观主题 id，驱动 foundation.css 的 [data-appearance] 表面色板块；
- * - data-accent：外观主题自带推荐主色（SKIN_PRESETS[].accent），custom 沿用 settings.accent；
+ * - data-appearance：外观样式 id，驱动 terminalSkin.css 这类形状规则；
+ * - data-palette：外观配色 id，驱动 foundation.css 的 [data-palette] 色板块；
+ * - data-accent：配色自带推荐主色（PALETTE_PRESETS[].accent），custom 配色沿用 settings.accent；
  *   既有依赖（PiLogoCanvas / CodeMirror / sonner）按 data-theme / data-accent 刷新。
  */
 export function applyAppearanceAttributes(root: HTMLElement, settings: AppearanceSettings, systemPrefersDark: boolean) {
@@ -36,8 +37,9 @@ export function applyAppearanceAttributes(root: HTMLElement, settings: Appearanc
 		systemPrefersDark,
 	});
 	root.dataset.theme = resolvedTheme;
-	root.dataset.appearance = settings.themeSkin;
-	const skinPreset = SKIN_PRESETS.find((p) => p.id === settings.themeSkin);
-	const effectiveAccent = settings.themeSkin === "custom" || !skinPreset ? settings.accent : skinPreset.accent;
-	root.dataset.accent = effectiveAccent;
+	root.dataset.appearance = settings.themeStyle;
+	root.dataset.palette = settings.themePalette;
+	const palettePreset = PALETTE_PRESETS.find((p) => p.id === settings.themePalette);
+	// custom 配色没有内置色板，主色交回用户自己的 settings.accent。
+	root.dataset.accent = palettePreset?.accent ?? settings.accent;
 }

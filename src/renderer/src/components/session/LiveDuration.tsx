@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { formatDuration } from "./TimelineFormat";
 
 /**
- * 实时耗时（公共组件）：run 头部 / 思考卡片 / 工具卡片共用。
+ * 实时耗时（公共组件）：思考卡片 / 工具卡片共用。
+ * 本轮整体的实时耗时在状态条（RespondingIndicator → statusFacts），不走这里：
+ * 它是整轮读数，只该有一个且不与卡片内的小秒表混用。
  *
  * 语义：
  * - isStreaming（执行中）：每 100ms tick 一次，显示 now - startedAt（实时增长，秒表感）；
@@ -19,7 +21,7 @@ export function LiveDuration(props: {
 	startedAt?: number;
 	/** 结束时间戳；执行中（流式）传 0/undefined，由 isStreaming 驱动实时刷新 */
 	endedAt?: number;
-	/** 是否仍在执行：true 时启动 1s tick */
+	/** 是否仍在执行：true 时启动 100ms tick（与 formatDuration 的十分位精度对齐） */
 	isStreaming?: boolean;
 }) {
 	const [now, setNow] = useState(() => Date.now());

@@ -23,6 +23,7 @@ import { createInitialState, reduceFromPiEvent, markInterrupted, markError, type
 import { renderRunCard } from "./CardRenderer";
 import { buildModelPickerCard, parseModelActionValue } from "./ModelPickerCard";
 import { buildAskCard, normalizeAskOption, parseAskActionValue, parseAskInputValue, tryParseBatchAskEnvelope, type AskOption, type AskUiRequest } from "./AskCard";
+import { MAX_ATTACHMENT_BYTES, PENDING_ATTACHMENT_MAX_BYTES, PENDING_ATTACHMENT_MAX_COUNT, formatAttachmentSize, safeAttachmentFileName } from "./attachmentFiles";
 import { feishuLanguage, feishuT, normalizeFeishuLocale, type FeishuLocale } from "./FeishuI18n";
 import type { AgentManager } from "../pi/AgentManager";
 
@@ -32,6 +33,11 @@ export type { SessionRuntimeBindingGateway };
 
 // ===== 常量 =====
 const DEDUP_MAX = 200;
+/**
+ * 每个 chat 的忙时排队上限。
+ * 超限必须明确回「排满」，不能沿用旧实现的「静默跳过」——用户连发几条时丢的往往是最新那条。
+ */
+const PENDING_QUEUE_MAX = 20;
 const GROUP_CACHE_TTL = 3600_000;
 
 /** 飞书端待回答的 ask/confirm 请求（pi 发 extension_ui_request 后阻塞等待，必须有人回答）。 */
@@ -80,8 +86,12 @@ export class FeishuBridge {
 
 	private recentMessageIds = new Set<string>();
 	private recentEventIds = new Set<string>();
-	private recentContent = new Map<string, number>();
 	private processingChats = new Set<string>();
+	/**
+	 * 忙时排队的入站事件（按 chatId FIFO，队列里存原始事件对象）。
+	 * 与桌面端 busySendDelivery 的排队语义对齐：上一轮收尾后自动重放，不再直接丢弃。
+	 */
+	private pendingMessageQueues = new Map<string, Array<Record<string, unknown>>>();
 	/** 用户发了文件但还没说需求，暂存着等文字指令 */
 	private pendingAttachments = new Map<string, { images: FeishuImageAttachment[]; files: FeishuFileAttachment[] }>();
 
@@ -122,14 +132,32 @@ export class FeishuBridge {
 	/** 用户消息中检测到要做飞书文档，agent 结束后自动创建 */
 	private pendingDocRequests = new Map<string, string>();
 
-	constructor(botConfig: FeishuBotConfig, agentManager: AgentManager, getWindow: () => BrowserWindow | null, getProjects: () => LocalProject[], runtimeBindings: SessionRuntimeBindingGateway, plainAppSecret?: string, locale: FeishuLocale = "zh-CN") {
+	/** 卡片是否展示思考过程（跟随 pi agent 的 hideThinkingBlock）：用 resolver 而不是快照，用户改配置后立刻生效。 */
+	private readonly getShowThinking: () => boolean;
+
+	constructor(botConfig: FeishuBotConfig, agentManager: AgentManager, getWindow: () => BrowserWindow | null, getProjects: () => LocalProject[], runtimeBindings: SessionRuntimeBindingGateway, plainAppSecret?: string, locale: FeishuLocale = "zh-CN", getShowThinking: () => boolean = () => true) {
 		this.botConfig = botConfig;
 		this.agentManager = agentManager;
 		this.runtimeBindings = runtimeBindings;
 		this.getWindow = getWindow;
 		this.getProjects = getProjects;
 		this.locale = normalizeFeishuLocale(locale);
+		this.getShowThinking = getShowThinking;
 		this.connection = new FeishuConnection(botConfig, plainAppSecret, this.locale);
+	}
+
+	/**
+	 * 新建一次运行的状态机。showThinking 在建状态时就定下来：关闭时 reducer 连思考增量都不累积（#425）。
+	 * resolver 抛错按「显示」处理，保持与历史行为一致 —— 卡片缺一块比整轮不推要好。
+	 */
+	private newRunState(): RunState {
+		let showThinking = true;
+		try {
+			showThinking = this.getShowThinking();
+		} catch {
+			showThinking = true;
+		}
+		return createInitialState({ showThinking });
 	}
 
 	getStatus(): FeishuBridgeStatus {
@@ -368,8 +396,9 @@ export class FeishuBridge {
 		this.feishuSessions.clear();
 		this.recentMessageIds.clear();
 		this.recentEventIds.clear();
-		this.recentContent.clear();
 		this.processingChats.clear();
+		// 断开即作废队列：没人会再 drain 它，留着只会在下次连接时误跑旧消息。
+		this.pendingMessageQueues.clear();
 		this.lastUserMessageId.clear();
 		this.syncedFingerprints.clear();
 		this.groupInfoCache.clear();
@@ -495,7 +524,8 @@ export class FeishuBridge {
 		}
 
 		if (this.processingChats.has(chatId)) {
-			log(`[飞书 Bridge] 跳过重入消息: ${chatId}`);
+			// 忙时排队而不是丢弃：旧实现只写一行日志就 return，用户在群里完全没反馈。
+			this.enqueuePendingMessage(chatId, data);
 			return;
 		}
 		this.processingChats.add(chatId);
@@ -560,8 +590,10 @@ export class FeishuBridge {
 				if (content.file_key) {
 					try {
 						const fileData = await this.downloadFile(messageId, content.file_key);
-						if (fileData.length > 50 * 1024 * 1024) {
-							await this.sendSmartMessage(chatId, feishuT(this.locale, "attachment.fileTooLarge50"));
+						// 单文件 UX 上限 200MB（#427 追加二）：下载硬闸 256MB 在 streamToBuffer 里，
+						// 这层只负责给出「太大不处理」的明确回执。
+						if (fileData.length > MAX_ATTACHMENT_BYTES) {
+							await this.sendSmartMessage(chatId, feishuT(this.locale, "attachment.fileTooLarge", { limit: formatAttachmentSize(MAX_ATTACHMENT_BYTES) }));
 							return;
 						}
 						fileAttachments.push({ fileKey: content.file_key, fileName: content.file_name || `feishu-${content.file_key}`, data: fileData });
@@ -609,13 +641,13 @@ export class FeishuBridge {
 			// ===== 文件/图片 + 文字 → 一起处理；仅文件/图片 → 暂存等指令 =====
 			if (!text && (imageAttachments.length > 0 || fileAttachments.length > 0)) {
 				// 只有附件没有文字 → 存起来等指令；但必须有上界：只发文件不发指令的聊天
-				// 会让每个文件（最大 50MB）的完整 Buffer 无限期驻留内存直到进程重启。
+				// 会让每个文件（最大 200MB）的完整 Buffer 无限期驻留内存直到进程重启。
 				const existing = this.pendingAttachments.get(chatId);
 				const heldCount = existing ? existing.images.length + existing.files.length : 0;
 				const heldBytes = existing ? [...existing.images, ...existing.files].reduce((n, a) => n + a.data.length, 0) : 0;
 				const incomingCount = imageAttachments.length + fileAttachments.length;
 				const incomingBytes = [...imageAttachments, ...fileAttachments].reduce((n, a) => n + a.data.length, 0);
-				if (heldCount + incomingCount > 20 || heldBytes + incomingBytes > 20 * 1024 * 1024) {
+				if (heldCount + incomingCount > PENDING_ATTACHMENT_MAX_COUNT || heldBytes + incomingBytes > PENDING_ATTACHMENT_MAX_BYTES) {
 					await this.sendSmartMessage(chatId, feishuT(this.locale, "attachment.pendingFull"));
 					return;
 				}
@@ -649,17 +681,8 @@ export class FeishuBridge {
 
 			const msgCtx: FeishuMessageContext = { chatId, senderOpenId: userId, senderName, messageId, chatType: chatType as "p2p" | "group", groupName };
 
-			const dedupParts = [chatId, userId, text];
-			if (imageAttachments.length > 0) dedupParts.push("img", ...imageAttachments.map((a) => a.imageKey));
-			if (fileAttachments.length > 0) dedupParts.push("file", ...fileAttachments.map((f) => f.fileKey));
-			const contentKey = dedupParts.join("\u0000");
-			const lastTime = this.recentContent.get(contentKey);
-			if (lastTime && Date.now() - lastTime <= 5000) {
-				log(`[飞书 Bridge] 重复内容已跳过: ${text.slice(0, 50)}`);
-				return;
-			}
-			this.recentContent.set(contentKey, Date.now());
-			if (this.recentContent.size > 2000) this.recentContent.delete(this.recentContent.keys().next().value as string);
+			// 幂等只认平台投递身份（event_id / message_id，见 handleMessage 开头）：
+			// 5s 同文本去重会吞掉用户主动连发的两句「在吗」，重投场景已由 id 幂等覆盖。
 
 			log(`[飞书 Bridge] 准备调用 Agent: ${chatId}, "${text.slice(0, 60)}", images=${imageAttachments.length}`);
 
@@ -670,7 +693,44 @@ export class FeishuBridge {
 			await this.runAgent(msgCtx, text, imageAttachments, fileAttachments);
 		} finally {
 			this.processingChats.delete(chatId);
+			this.drainPendingMessageQueue(chatId);
 		}
+	}
+
+	/** 忙时把原始事件按 chatId 排队并回执「第 N 位」；排满则明确告诉用户没排上。 */
+	private enqueuePendingMessage(chatId: string, event: Record<string, unknown>): void {
+		const queue = this.pendingMessageQueues.get(chatId) ?? [];
+		if (queue.length >= PENDING_QUEUE_MAX) {
+			void this.sendSmartMessage(chatId, feishuT(this.locale, "queue.full", { limit: PENDING_QUEUE_MAX })).catch(() => {});
+			return;
+		}
+		queue.push(event);
+		this.pendingMessageQueues.set(chatId, queue);
+		log(`[飞书 Bridge] 忙时排队: ${chatId.slice(0, 8)} (第 ${queue.length} 位)`);
+		void this.sendSmartMessage(chatId, feishuT(this.locale, "queue.accepted", { position: queue.length })).catch(() => {});
+	}
+
+	/**
+	 * 上一轮收尾后重放队首。
+	 *
+	 * 重放前必须撤销这条消息的幂等记录：event_id/message_id 在入队前就已经记账，
+	 * 不撤销会被 handleMessage 当成平台重投直接丢掉（用户看到的就是「排队后没反应」）。
+	 */
+	private drainPendingMessageQueue(chatId: string): void {
+		if (this.processingChats.has(chatId)) return;
+		const queue = this.pendingMessageQueues.get(chatId);
+		const next = queue?.shift();
+		if (!queue || !next) {
+			this.pendingMessageQueues.delete(chatId);
+			return;
+		}
+		if (queue.length === 0) this.pendingMessageQueues.delete(chatId);
+		const eventId = next.event_id as string | undefined;
+		if (eventId) this.recentEventIds.delete(eventId);
+		const messageId = (next.message as { message_id?: string } | undefined)?.message_id;
+		if (messageId) this.recentMessageIds.delete(messageId);
+		log(`[飞书 Bridge] 排队消息出队: ${chatId.slice(0, 8)}`);
+		void this.handleMessage(next).catch((error) => logErr("[飞书 Bridge] 排队消息重放失败:", error));
 	}
 
 	// ===== 命令处理 =====
@@ -773,7 +833,7 @@ export class FeishuBridge {
 		// 关闭已有流式卡片
 		const existingCard = this.streamingCards.get(agentId);
 		if (existingCard) {
-			await existingCard.flush(markInterrupted(createInitialState())).catch(() => {});
+			await existingCard.flush(markInterrupted(this.newRunState())).catch(() => {});
 			await existingCard.close().catch(() => {});
 			this.streamingCards.delete(agentId);
 			this.streamingRunStates.delete(agentId);
@@ -787,6 +847,7 @@ export class FeishuBridge {
 		const imgDir = join(tmpdir(), "pi-feishu-images");
 		mkdirSync(imgDir, { recursive: true });
 		const savedImages: string[] = [];
+		const savedFiles: Array<{ path: string; name: string; size: number }> = [];
 		const images: ImageContent[] = imageAttachments.map((att) => {
 			const ext = att.mediaType.split("/").pop() || "png";
 			const name = `feishu-img-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
@@ -800,11 +861,22 @@ export class FeishuBridge {
 			finalText = finalText ? `${finalText}\n\n[图片已保存到: ${savedImages.join(", ")}]` : `[图片已保存到: ${savedImages.join(", ")}]`;
 		}
 		if (fileAttachments.length > 0) {
-			const names = fileAttachments.map((f) => f.fileName).join(", ");
-			finalText = finalText ? `${finalText}\n\n[附件: ${names}]` : `处理以下文件: ${names}`;
+			// 落盘 + 绝对路径（#427 追加一）：只把文件名拼进 prompt 时，Agent 以为自己拿到了原文，
+			// 实际是零字节——最容易骗人的失败模式。文件写到临时目录，路径随 prompt 交给 Agent，
+			// run 收尾时删除（同图片）。sendPrompt 只收文本+图片，所以这里只给路径文本。
+			const fileDir = join(tmpdir(), "pi-feishu-files");
+			mkdirSync(fileDir, { recursive: true });
+			for (const att of fileAttachments) {
+				const fp = join(fileDir, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeAttachmentFileName(att.fileName)}`);
+				writeFileSync(fp, att.data);
+				savedFiles.push({ path: fp, name: att.fileName, size: att.data.length });
+			}
+			const manifest = savedFiles.map((file) => `- ${file.path}（原名 ${file.name}，${formatAttachmentSize(file.size)}）`).join("\n");
+			const note = `[文件已保存到本地，务必用 Read/文件工具读取原文，禁止只看文件名猜内容]\n${manifest}`;
+			finalText = finalText ? `${finalText}\n\n${note}` : note;
 		}
 
-		const initialState = createInitialState();
+		const initialState = this.newRunState();
 		// 卡片事件机由 pi 本地事件驱动（handleAgentEvent）：非 pi 后端没有这些事件，
 		// 既不能开卡片也不能登记缓存表，否则每轮都会留下永不清理的孤儿注册项。
 		const useStreamingCard = backend === "pi";
@@ -918,7 +990,7 @@ export class FeishuBridge {
 			}
 		} catch (e) {
 			logErr("[飞书 Bridge] Agent 运行失败:", e);
-			const errState = markError(createInitialState(), feishuT(this.locale, "agent.failed"));
+			const errState = markError(this.newRunState(), feishuT(this.locale, "agent.failed"));
 			const finalCardStream = this.streamingCards.get(agentId);
 			if (finalCardStream) {
 				await finalCardStream.flush(renderRunCard(errState, { locale: this.locale })).catch(() => {});
@@ -931,11 +1003,12 @@ export class FeishuBridge {
 			await this.sendSmartMessage(chatId, feishuT(this.locale, "agent.failed"));
 		} finally {
 			this.feishuDrivenRuns.delete(agentId);
-			// 清理本轮图片临时文件：路径已随 prompt 交给 Agent，run 结束（含 processFeishuActions
-			// 的 [SEND_FILE:] 已执行完）后文件不再有用；不删则 pi-feishu-images 目录无限增长。
-			if (savedImages.length > 0) {
+			// 清理本轮附件临时文件：路径已随 prompt 交给 Agent，run 结束（含 processFeishuActions
+			// 的 [SEND_FILE:] 已执行完）后文件不再有用；不删则 pi-feishu-images / pi-feishu-files 无限增长。
+			const cleanupPaths = [...savedImages, ...savedFiles.map((file) => file.path)];
+			if (cleanupPaths.length > 0) {
 				void import("node:fs").then(({ unlink }) => {
-					for (const fp of savedImages) unlink(fp, () => {});
+					for (const fp of cleanupPaths) unlink(fp, () => {});
 				});
 			}
 		}
@@ -950,7 +1023,7 @@ export class FeishuBridge {
 		}
 
 		log(`[飞书 Bridge] 回放 ${pending.length} 个缓存事件到卡片`);
-		let currentState = this.streamingRunStates.get(sessionId) ?? createInitialState();
+		let currentState = this.streamingRunStates.get(sessionId) ?? this.newRunState();
 		for (const ev of pending) {
 			const nextState = reduceFromPiEvent(currentState, ev as Record<string, unknown>, this.locale);
 			if (nextState !== currentState) {
@@ -1515,7 +1588,7 @@ export class FeishuBridge {
 		if (!binding || binding.source !== "session-mirror") return;
 		if (this.streamingCards.has(agentId)) return;
 
-		const initialState = createInitialState();
+		const initialState = this.newRunState();
 		this.streamingRunStates.set(agentId, initialState);
 		// 与 runAgent 一致：卡片创建窗口（一次网络往返）内到达的 agent 事件（含快速失败
 		// 的终态）必须缓冲，否则 handleAgentEvent 找不到 pending 直接丢弃，卡片永久停
@@ -1556,6 +1629,9 @@ export class FeishuBridge {
 	}
 
 	private async handleStopCommand(ctx: FeishuMessageContext): Promise<void> {
+		// /stop 的语义是「停下来」：排队中的后续消息一并作废，不能 stop 完接着跑下一条。
+		const cleared = this.pendingMessageQueues.get(ctx.chatId)?.length ?? 0;
+		this.pendingMessageQueues.delete(ctx.chatId);
 		const binding = this.chatBindings.get(ctx.chatId);
 		if (!binding) {
 			await this.sendSmartMessage(ctx.chatId, feishuT(this.locale, "session.notBound"));
@@ -1581,15 +1657,24 @@ export class FeishuBridge {
 		}
 
 		await this.runtimeBindings.abortRuntime(binding.sessionId);
-		await this.sendSmartMessage(ctx.chatId, feishuT(this.locale, "session.stopped"));
+		await this.sendSmartMessage(ctx.chatId, cleared > 0 ? feishuT(this.locale, "session.stoppedWithQueue", { count: cleared }) : feishuT(this.locale, "session.stopped"));
 	}
 
 	private async handleStatusCommand(ctx: FeishuMessageContext): Promise<void> {
 		const binding = this.chatBindings.get(ctx.chatId);
 		const statusLabel = feishuT(this.locale, `status.${this.status.status}` as "status.disconnected" | "status.connecting" | "status.connected" | "status.error");
+		// 「桥接占用」与「后端真在跑」分开报：锁被占但后端已空闲 = 上一轮没收口就解锁失败，
+		// 用户反馈的「/status 显示 running 但桌面端已回完」就是这种现场，方便确诊。
+		const runtime = binding ? await this.runtimeBindings.getRuntimeState(binding.sessionId).catch(() => undefined) : undefined;
+		const backendRunning = runtime?.isStreaming === true || runtime?.isTurnActive === true;
+		const bridgeBusy = this.processingChats.has(ctx.chatId);
+		const runState = bridgeBusy ? (backendRunning ? feishuT(this.locale, "status.runRunning") : feishuT(this.locale, "status.runBridgeOnly")) : backendRunning ? feishuT(this.locale, "status.runBackendOnly") : feishuT(this.locale, "status.runIdle");
+		const queued = this.pendingMessageQueues.get(ctx.chatId)?.length ?? 0;
 		const lines = [
 			feishuT(this.locale, "status.heading"),
 			feishuT(this.locale, "status.status", { status: statusLabel }),
+			feishuT(this.locale, "status.run", { state: runState }),
+			...(queued > 0 ? [feishuT(this.locale, "status.queued", { count: queued })] : []),
 			feishuT(this.locale, "status.bindings", { count: this.chatBindings.size }),
 			binding ? feishuT(this.locale, "status.session", { id: binding.sessionId.slice(0, 8) }) : feishuT(this.locale, "status.sessionUnbound"),
 		];
@@ -2037,11 +2122,12 @@ export class FeishuBridge {
 
 	/**
 	 * 飞书资源（图片/文件）下载的统一字节上界：超限即中止流并抛错。
-	 * 过去 streamToBuffer 无上界整流到内存，文件型 50MiB 拦截又发生在全量下载之后——
+	 * 过去 streamToBuffer 无上界整流到内存，文件型 UX 拦截又发生在全量下载之后——
 	 * 飞书侧一个超大附件就能把主进程内存打爆（与 filesReadContent 无界读同族）。
-	 * 64MiB 覆盖 UX 允许的 50MiB 文件上限；图片路径过去完全没有检查，同样受此闸保护。
+	 * 256MiB 覆盖 UX 允许的 200MiB 单文件上限（#427 追加二，与同类产品 100MB 上限对齐并留余量）；
+	 * 图片路径过去完全没有检查，同样受此闸保护。
 	 */
-	private static readonly MAX_RESOURCE_DOWNLOAD_BYTES = 64 * 1024 * 1024;
+	private static readonly MAX_RESOURCE_DOWNLOAD_BYTES = 256 * 1024 * 1024;
 
 	private async streamToBuffer(result: unknown): Promise<Buffer> {
 		const resp = result as Record<string, unknown>;

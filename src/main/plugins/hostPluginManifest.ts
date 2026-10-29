@@ -20,7 +20,7 @@ function label(value: unknown): value is string {
 	return typeof value === "string" && value.trim().length > 0 && value.length <= 160 && !/[\u0000-\u001f]/.test(value);
 }
 
-const HOST_PLUGIN_PERMISSIONS = new Set<string>(["sessions.read", "workbench.navigate", "workbench.openExternal", "network.https", "network.local", "service.local"]);
+const HOST_PLUGIN_PERMISSIONS = new Set<string>(["sessions.read", "sessions.read.workspace", "workbench.navigate", "workbench.openExternal", "network.https", "network.local", "service.local", "sessionGroups.manage"]);
 /** 权限白名单校验：manifest 解析与管理入口（脚手架）共用同一份，保证两边不会拒/收不一致。 */
 export const isHostPluginPermission = (value: unknown): value is HostPluginPermission => typeof value === "string" && HOST_PLUGIN_PERMISSIONS.has(value);
 
@@ -40,12 +40,21 @@ function parseHostPluginServices(value: unknown, permissions: HostPluginPermissi
 	return [...value];
 }
 
+/**
+ * `sessions.read.workspace` 是 `sessions.read` 的范围扩展，不单独成立：单声明它拿不到任何读取权限，
+ * 只会让作者误以为已经能读；这里直接拒装（fail-closed），与「未知权限拒装」同一口径。
+ */
+function assertWorkspaceScope(permissions: HostPluginPermission[]): void {
+	if (permissions.includes("sessions.read.workspace") && !permissions.includes("sessions.read")) throw new Error("unsupported-permission");
+}
+
 /** Returns a newly constructed manifest instead of trusting properties from JSON. */
 export function parseHostPluginManifest(value: unknown): HostPluginManifest {
 	if (!isPluginRecord(value) || value.schemaVersion !== 1 || value.apiVersion !== 1 || !isHostPluginId(value.id) || !label(value.name) || !label(value.version)) throw new Error("invalid-manifest");
 	if (value.description !== undefined && (typeof value.description !== "string" || value.description.length > 1000)) throw new Error("invalid-manifest");
 	if (!Array.isArray(value.permissions) || !value.permissions.every(isHostPluginPermission) || new Set(value.permissions).size !== value.permissions.length) throw new Error("unsupported-permission");
 	const permissions = value.permissions.filter(isHostPluginPermission);
+	assertWorkspaceScope(permissions);
 	const services = parseHostPluginServices(value.services, permissions);
 	const network = parseHostPluginNetworkPolicy(value.network, permissions);
 	const contributes = value.contributes;

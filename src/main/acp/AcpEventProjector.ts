@@ -62,6 +62,8 @@ export type AcpProjectionState = {
 	lastTouched?: number[];
 	/** 任意 update 到达过(load 重放也置位)。 */
 	replayed: boolean;
+	/** 已落地的多文件隐藏 diff 消息 id（toolCallId + path）：重复 tool_call_update 不得重复追加。 */
+	hiddenDiffIds?: Set<string>;
 };
 
 export function initialAcpProjection(): AcpProjectionState {
@@ -104,6 +106,33 @@ function toolStatus(status: AcpToolCallUpdate["status"]): "running" | "completed
 	return "running";
 }
 
+/**
+ * tool_call.content 里的规范 diff 块 → 与 pi/DSH 同形的 `meta.args`。
+ *
+ * ACP 规范允许 agent 用 `{type:"diff", path, oldText, newText}` 上报改动（SDK 1.4 字段名），
+ * v1 draft 与部分 CLI 用 `oldValue/newValue`。两种都归一成 `{filePath, oldText, newText}`，
+ * 交给 shared/fileChanges 的既有解析（工具名 edit + 这组参数），不新增私有字段。
+ */
+type AcpToolDiff = { path: string; oldText: string; newText: string };
+
+function toolContentDiffs(blocks: readonly unknown[]): AcpToolDiff[] {
+	const diffs: AcpToolDiff[] = [];
+	for (const candidate of blocks) {
+		if (!candidate || typeof candidate !== "object") continue;
+		const wrapper = candidate as Record<string, unknown>;
+		const block = (wrapper.type === "content" ? wrapper.content : wrapper) as Record<string, unknown> | undefined;
+		if (!block || typeof block !== "object") continue;
+		const value = block as Record<string, unknown>;
+		if (value.type !== "diff") continue;
+		const path = typeof value.path === "string" ? value.path : "";
+		const newText = typeof value.newText === "string" ? value.newText : typeof value.newValue === "string" ? value.newValue : undefined;
+		if (!path || newText === undefined) continue;
+		const oldText = typeof value.oldText === "string" ? value.oldText : typeof value.oldValue === "string" ? value.oldValue : "";
+		diffs.push({ path, oldText, newText });
+	}
+	return diffs;
+}
+
 /** 工具正文里的图片结果(截图/生图工具):保进消息 images 走物化链落 ref,不随占位文本丢弃。 */
 function toolContentImages(blocks: readonly unknown[]): NonNullable<ChatMessage["images"]> {
 	const images: NonNullable<ChatMessage["images"]> = [];
@@ -119,7 +148,7 @@ function toolContentImages(blocks: readonly unknown[]): NonNullable<ChatMessage[
 }
 
 /** 仅应用出现的字段；正文空数组是清空，不能用 truthy 判断丢掉。 */
-function patchToolCard(existing: ChatMessage | undefined, update: AcpToolCallUpdate, agentId: string): ChatMessage {
+function patchToolCard(existing: ChatMessage | undefined, update: AcpToolCallUpdate, agentId: string): { card: ChatMessage; hiddenDiffs: AcpToolDiff[] } {
 	const meta: NonNullable<ChatMessage["meta"]> = { ...(existing?.meta ?? {}), toolCallId: update.toolCallId };
 	const title = typeof update.title === "string" ? update.title : typeof meta.toolName === "string" ? meta.toolName : update.toolCallId;
 	meta.toolName = title;
@@ -133,6 +162,13 @@ function patchToolCard(existing: ChatMessage | undefined, update: AcpToolCallUpd
 		meta.fullText = text;
 		meta.truncated = text.length > ACP_TOOL_RESULT_MAX_CHARS;
 	}
+	// 规范 diff 块优先于 rawInput：agent 只把改动放 content 时，rawInput 里没有可解析的路径。
+	const diffs = Array.isArray(update.content) ? toolContentDiffs(update.content) : [];
+	if (diffs.length > 0) {
+		const first = diffs[0];
+		meta.toolName = "edit";
+		meta.args = { filePath: first.path, oldText: first.oldText, newText: first.newText };
+	}
 	// content 是整表替换语义:图片随表替换(0 图即清空);省略 content 的补丁保留旧图。
 	const contentImages = Array.isArray(update.content) ? toolContentImages(update.content) : undefined;
 	const isError = meta.status === "error";
@@ -143,7 +179,9 @@ function patchToolCard(existing: ChatMessage | undefined, update: AcpToolCallUpd
 	const detailStatus: ToolDetailStatus = meta.status === "error" ? "error" : meta.status === "running" ? "running" : "done";
 	meta.detailText = formatToolDetail(title, meta.args, result, detailStatus, defaultToolDetailTranslate);
 	const base = existing ?? { id: nextMessageId(), agentId, role: "tool" as const, timestamp: Date.now() };
-	return { ...base, ...(contentImages !== undefined ? { images: contentImages.length > 0 ? contentImages : undefined } : {}), text: title, meta };
+	// 多文件补丁：第一块给可见卡片出 diff，其余落隐藏工具消息（与 DSH PTC 同一机制），
+	// 否则轮末「本轮修改的文件」只会有第一个文件。
+	return { card: { ...base, ...(contentImages !== undefined ? { images: contentImages.length > 0 ? contentImages : undefined } : {}), text: title, meta }, hiddenDiffs: diffs.slice(1) };
 }
 
 /**
@@ -276,10 +314,28 @@ export function projectAcpSessionUpdate(state: AcpProjectionState, update: AcpSe
 			if (typeof toolUpdate.toolCallId !== "string" || !toolUpdate.toolCallId) return state;
 			const cardIndex = state.toolCardIndex.get(toolUpdate.toolCallId);
 			const existing = cardIndex !== undefined ? state.messages[cardIndex] : undefined;
-			const card = patchToolCard(existing?.role === "tool" ? existing : undefined, toolUpdate, agentId);
+			const { card, hiddenDiffs } = patchToolCard(existing?.role === "tool" ? existing : undefined, toolUpdate, agentId);
 			next.messages = [...state.messages];
 			const index = existing?.role === "tool" && cardIndex !== undefined ? cardIndex : next.messages.length;
 			next.messages[index] = card;
+			// 多文件补丁的其余文件：隐藏工具消息（时间线不渲染，文件聚合照常读取）。
+			if (hiddenDiffs.length > 0) {
+				const seen = new Set(state.hiddenDiffIds ?? []);
+				for (const diff of hiddenDiffs) {
+					const hiddenId = `${toolUpdate.toolCallId}:diff:${diff.path}`;
+					if (seen.has(hiddenId)) continue;
+					seen.add(hiddenId);
+					next.messages.push({
+						id: hiddenId,
+						agentId,
+						role: "tool",
+						text: "edit",
+						timestamp: Date.now(),
+						meta: { toolCallId: hiddenId, toolName: "edit", status: "completed", args: { filePath: diff.path, oldText: diff.oldText, newText: diff.newText }, ptcNested: true },
+					});
+				}
+				next.hiddenDiffIds = seen;
+			}
 			next.toolCardIndex = new Map(state.toolCardIndex);
 			next.toolCardIndex.set(toolUpdate.toolCallId, index);
 			next.lastTouched = [index];

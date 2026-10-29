@@ -56,6 +56,9 @@ export function useSessionPromptDispatch({ store, setSessionDraft, currentSessio
 	const isAgentCurrentlyBusy = useCallback(() => {
 		if (!currentSessionId) return false;
 		const rt = store.get(currentSessionRuntimeAtom);
+		// ACP 的 tab status 可能滞后于回合结算：isTurnActive=false 时已空闲（与 composer 同口径），
+		// 否则重发/编辑会被无谓带上 followUp，排进输入框上方的队列。
+		if (store.get(sessionRecordByIdAtomFamily(currentSessionId))?.backend === "acp" && rt?.state?.isTurnActive === false) return false;
 		// 与 composer isBusy 对齐（含 isExecutingTool）：DSH 工具执行期间 steer 也应可用。
 		return rt?.status === "running" || Boolean(rt?.state?.isStreaming) || Boolean(rt?.state?.isExecutingTool);
 	}, [currentSessionId, store]);

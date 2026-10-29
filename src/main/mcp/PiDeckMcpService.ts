@@ -13,6 +13,7 @@ import { emptyPiDeckMcpConfig, piDeckMcpAccessSchema, readPiDeckMcpConfig, write
 import type { HostPluginSessions } from "../plugins/HostPluginSessions";
 import { buildPiDeckMcpExtensionsView, buildPiDeckMcpRuntimeView, buildPiDeckMcpSettingsView } from "./piDeckMcpViews";
 import type { PiDeckMcpHttpServer } from "./PiDeckMcpHttpServer";
+import type { PiDeckMcpAcpSessions } from "./piDeckMcpAcpSessions";
 
 export class PiDeckMcpService {
 	private config: PiDeckMcpConfig = emptyPiDeckMcpConfig();
@@ -60,6 +61,11 @@ export class PiDeckMcpService {
 				add: (input: NormalizedFavoriteInput) => Promise<FavoriteEntry>;
 				remove: (favoriteId: string) => Promise<boolean>;
 			};
+			/**
+			 * ACP 调用端口（建会话/发送/等待/读消息/停运行时）。判定与副作用都在端口内，
+			 * 这里只负责开关与授权；关着时对应工具不注册。
+			 */
+			acp: PiDeckMcpAcpSessions;
 			automation: {
 				listTasks: (projectId: string) => AutomationTaskSummary[];
 				getTask: (taskId: string) => AutomationTaskSummary | undefined;
@@ -103,6 +109,7 @@ export class PiDeckMcpService {
 			allowAgentWrite: this.config.allowAgentWrite,
 			allowAutomationWrite: this.config.allowAutomationWrite,
 			allowFavoritesWrite: this.config.allowFavoritesWrite,
+			allowAcpInvoke: this.config.allowAcpInvoke,
 			running: Boolean(this.endpoint),
 			endpoint: this.endpoint,
 			projects: this.deps.projects(),
@@ -170,11 +177,11 @@ export class PiDeckMcpService {
 		// 按需加载（2026-10 启动审计）：`@modelcontextprotocol/sdk` 冷 require 实测 ≈100ms，是启动路径上
 		// 最重的静态第三方依赖；而 PiDeck MCP 默认不开启（config.enabled=false 时 initialize 不会进这里）。
 		// 改成动态 import 后，未开启的启动不再加载 SDK；开启时在 start() 一次性付加载延迟。
-		const [{ PiDeckMcpHttpServer: PiDeckMcpHttpServerCtor }, { createPiDeckMcpServer }] = await Promise.all([import("./PiDeckMcpHttpServer"), import("./piDeckMcpTools")]);
+		const [{ PiDeckMcpHttpServer: PiDeckMcpHttpServerCtor }, { createPiDeckMcpServer }, { registerPiDeckMcpAcpTools }] = await Promise.all([import("./PiDeckMcpHttpServer"), import("./piDeckMcpTools"), import("./piDeckMcpAcpTools")]);
 		const listener = new PiDeckMcpHttpServerCtor(
 			config.token,
-			() =>
-				createPiDeckMcpServer({
+			() => {
+				const server = createPiDeckMcpServer({
 					sessions: this.deps.sessions,
 					projects: () => this.deps.projects().filter((p) => this.isProjectAuthorized(p.id)),
 					// 宿主级视图每次请求现算：设置改完无需重启服务即生效，也不会缓存敏感快照。
@@ -226,7 +233,18 @@ export class PiDeckMcpService {
 						if (!result.ok) throw new Error(result.error.code === "SESSION_RUNTIME_CHANGED" ? "runtime-changed" : "session-not-running");
 					},
 					authorize,
-				}),
+				});
+				// ACP 调用是独立写能力：关着时工具不注册，客户端连看都看不到。
+				if (this.config.allowAcpInvoke) {
+					registerPiDeckMcpAcpTools(server, {
+						acp: this.deps.acp,
+						authorize,
+						// 请求期间被关掉也要拒（工具已注册）。
+						enabled: () => this.config.allowAcpInvoke,
+					});
+				}
+				return server;
+			},
 			this.deps.warn,
 		);
 		this.listener = listener;
@@ -250,6 +268,7 @@ export class PiDeckMcpService {
 		if (this.config.allowAgentWrite) capabilities.push("Agent management: create/edit/delete agent presets and bind them to sessions (role prompts are write-only).");
 		if (this.config.allowAutomationWrite) capabilities.push("Scheduled-task management: create/edit/delete tasks, start or abort runs (runs consume model budget).");
 		if (this.config.allowFavoritesWrite) capabilities.push("Favorites: save arbitrary text or message snapshots and delete favorites (host-local snapshots).");
+		if (this.config.allowAcpInvoke) capabilities.push("ACP invocation: create ACP sessions in authorized projects and drive them (send, wait, read messages, stop) using the CLIs the user registered; this starts local CLI processes and consumes their model budget.");
 		return { mcpServers: { pideck: { url: this.endpoint, headers: { Authorization: `Bearer ${this.config.token}` }, enabled: false, exposure: "codemode", description: capabilities.join(" ") } } };
 	}
 

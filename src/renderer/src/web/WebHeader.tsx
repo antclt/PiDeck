@@ -7,7 +7,7 @@
  */
 import { useState } from "react";
 import { AlertCircle, Check, ClipboardCopy, Clock, Copy, Download, EllipsisVertical, FileDown, FoldVertical, GitFork, Menu, Monitor, Moon, MoreHorizontal, PanelRight, Pencil, Puzzle, RefreshCw, RotateCw, Search, Sun, Target, Trash2 } from "lucide-react";
-import type { AgentBackend } from "../../../shared/types";
+import type { AgentBackend, WebSecurityState } from "../../../shared/types";
 import type { UsageProbeBackend } from "../../../shared/types/providerUsage";
 import { Button } from "@/components/ui-shadcn/button";
 import { t } from "@/i18n";
@@ -17,6 +17,7 @@ import { DSH_PERMISSION_PRESETS } from "@/components/session/DshPermissionMenu";
 import { permissionStrengthIcon } from "@/utils/permissionLevelIcon";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui-shadcn/dropdown-menu";
 import { WebBottomSheet } from "./WebBottomSheet";
+import { WebSecurityMenu } from "./WebSecurityMenu";
 import type { WebContextUsage } from "./webTypes";
 import { useWebProviderUsage } from "./useWebProviderUsage";
 import { formatPercent } from "../components/session/TimelineFormat";
@@ -70,6 +71,11 @@ export function WebHeader(props: {
 	usageBackend?: UsageProbeBackend;
 	/** P1：DSH 当前权限预设。 */
 	permissionPreset?: string;
+	/** Pi 会话安全等级（/api/state 的 security 投影；DSH/ACP 不渲染）。 */
+	security?: WebSecurityState;
+	/** 当前会话 id：安全等级菜单用它查会话级覆盖。 */
+	sessionId?: string;
+	onSecurityLevelChange?: (levelId: string | null) => void;
 	/** P0-P3：会话/runtime/workspace 操作回调。 */
 	actions?: WebHeaderActions;
 	/** 第三批：模型/思考已迁 composer，不再由头部渲染。 */
@@ -121,6 +127,9 @@ export function WebHeader(props: {
 						<div className="web-header-actions flex min-w-0 items-center justify-end gap-1.5">
 							{/* P2：上下文用量环（无窗口数据时隐藏；超限变红；点击开详情弹层） */}
 							{contextUsage && (contextUsage.contextWindow ?? 0) > 0 ? <ContextRing usage={contextUsage} onClick={() => setContextSheetOpen(true)} /> : null}
+							{/* Pi 会话安全等级：与桌面 SecurityLevelMenu 同源（SecurityStore 全局默认 + 会话覆盖）。
+							    DSH 走下面的权限预设、ACP 由 agent CLI 自管，两者都不渲染本入口。 */}
+							{backend !== "dsh" && backend !== "acp" && props.sessionId && props.security && props.onSecurityLevelChange ? <WebSecurityMenu sessionId={props.sessionId} security={props.security} onChange={props.onSecurityLevelChange} /> : null}
 							{/* S6.3：DSH 会话的 goals/subagents/skills 工具面板入口（仅 dsh 后端显示） */}
 							{backend === "dsh" && onOpenDshTools && (
 								<Button type="button" variant="ghost" size="sm" className="h-8 gap-1 px-2 text-caption text-muted-foreground hover:bg-muted/60 hover:text-foreground" onClick={onOpenDshTools} aria-label={t("web.dshTools")} title={t("web.dshTools")}>
@@ -428,7 +437,7 @@ function ProviderUsageBlock(props: { provider?: string; backend?: UsageProbeBack
 			) : null}
 			{/* 面板 JWT 余额段被丢弃时显式说明原因，避免「余额行突然消失」的困惑 */}
 			{result.panelBalanceError ? (
-				<div className="flex items-center gap-1.5 px-2.5 text-caption text-amber-600 dark:text-amber-400">
+				<div className="flex items-center gap-1.5 px-2.5 text-caption text-warning">
 					<AlertCircle size={12} aria-hidden="true" />
 					<span>{result.panelBalanceError === "unauthorized" ? t("config.usageProbe.sub2apiPanelJwtExpired") : t("config.usageProbe.sub2apiPanelJwtFailed")}</span>
 				</div>

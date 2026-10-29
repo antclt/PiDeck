@@ -417,7 +417,7 @@ export function AutomationTaskEditor({ task, defaultProjectId, lockProject = fal
 
 			<div className="flex flex-col gap-2 rounded-lg border border-border/50 bg-bg-panel/40 p-3">
 				<Label className="flex items-center gap-1.5 text-xs font-medium">
-					<Sparkles className="size-3.5 text-amber-500" />
+					<Sparkles className="size-3.5 text-warning" />
 					{t("automation.budgets")}
 				</Label>
 				<div className="grid grid-cols-2 gap-3 md:grid-cols-4">

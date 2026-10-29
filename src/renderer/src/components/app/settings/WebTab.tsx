@@ -27,6 +27,8 @@ type WebTabProps = {
 };
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
+/** README「移动端客户端」锚点：GitHub 去掉标题 emoji 后生成的锚点以连字符开头。 */
+const WEB_MOBILE_CLIENTS_DOC_URL = "https://github.com/ayuayue/PiDeck/blob/main/README.md#-移动端客户端";
 
 function isPublicBindHost(host: string): boolean {
 	const trimmed = host.trim();
@@ -152,7 +154,9 @@ export const WebTab = memo(function WebTab(props: WebTabProps) {
 	);
 
 	// 过期剩余时间展示：超过 1 天显示天数，不足 1 天显示小时数，不足 1 小时显示分钟。
-	const tokenRemaining = useMemo(() => {
+	// 不用 useMemo：这里的 t() 读模块级 locale（切语言不订阅），Date.now() 也不在依赖里
+	// （时间本来就不会自己变），memo 只会让文案停在切语言之前那一刻。每次渲染现算。
+	const tokenRemaining = (() => {
 		const expiresAt = webStatus?.tokenExpiresAt;
 		if (!expiresAt) return null;
 		const remaining = expiresAt - Date.now();
@@ -162,7 +166,7 @@ export const WebTab = memo(function WebTab(props: WebTabProps) {
 		const hours = Math.round(minutes / 60);
 		if (hours < 48) return t("settings.webTokenExpiresInHours", { hours: String(hours) });
 		return t("settings.webTokenExpiresInDays", { days: String(Math.round(hours / 24)) });
-	}, [webStatus?.tokenExpiresAt, t]);
+	})();
 
 	// 以实际运行的绑定为准，而非尚未保存的草稿；切换监听后同步排除旧选择，避免生成不可达链接。
 	const availableWebAddresses = useMemo(() => webAddressesForBinding(webNetworkAddresses, webStatus?.host ?? ""), [webNetworkAddresses, webStatus?.host]);
@@ -382,6 +386,13 @@ export const WebTab = memo(function WebTab(props: WebTabProps) {
 					)}
 				</div>
 			)}
+
+			{/* 手机端项目推荐：用 Web 接口做的客户端，点开交给系统浏览器直达 README 锚点 */}
+			<SettingRow anchor="web-mobile-clients" title={t("settings.webMobileClients")} description={t("settings.webMobileClientsDesc")}>
+				<Button variant="outline" size="sm" onClick={() => void desktopApi.app.openExternal(WEB_MOBILE_CLIENTS_DOC_URL, true).catch(() => undefined)}>
+					{t("settings.webMobileClientsAction")}
+				</Button>
+			</SettingRow>
 
 			{/* 外网访问（内网穿透）：cloudflare 隧道 + tailscale，独立卡片不侵入局域网设置 */}
 			<WebRemoteAccessSection webServiceChanging={webServiceChanging} draft={draft} updateDraft={updateDraft} />
