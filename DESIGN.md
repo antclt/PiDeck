@@ -71,12 +71,23 @@ typography:
     fontSize: "13px"
     lineHeight: "1.7"
     fontWeight: 400
+  dense-micro:
+    fontSize: "10px"
+    lineHeight: "12px"
+    fontWeight: 500
+  boot-wordmark:
+    fontFamily: "PiDeckDepartureMono, ui-monospace, monospace"
+    fontSize: "40px"
+    fontWeight: 700
+    letterSpacing: "0.06em"
 rounded:
+  hairline: "2px"
   xs: "4px"
   sm: "6px"
   md: "8px"
   lg: "10px"
   xl: "12px"
+  bubble: "14px"
   pill: "999px"
 components:
   button-primary:
@@ -163,6 +174,16 @@ PiDeck 的界面像一张摊开的制图台：纸是白的，线是墨的，工�
 - **Danger** (#b42318) / **Success** (#14703a) / **Warning** (#854d0e): 状态三色。暗色主题下整体提亮到 400 档（`#f87171` / `#4ade80` / `#fbbf24`），soft 底换成深色版本，不允许浅色 soft 底漏进暗色界面。
 - **Code Surface** (#111418) / **Code Ink** (#d1d5db): 代码块固定深底，不随主题反转——代码永远是"另一块屏"。
 
+### Documented Exceptions
+
+这些值**不属于**调色板漂移，已登记在 `.impeccable/config.json` 的 detector 豁免里，改动它们时不需要同步 DESIGN.md：
+
+- **语法高亮**：`--code-keyword` / `--code-string` / `--code-comment` 等（GitHub dark 系），只在代码块内生效，随主题切换。
+- **第三方品牌标识**：飞书 `#3370FF`、微信 `#2cb35c`、MCP 服务图标原色 —— 品牌原色不得改。
+- **二维码 / 画布**：黑白矩阵色、Logo 渐变、宠物美术色。
+- **终端配色**：`terminalThemes.ts` 是终端 ANSI 调色板，与 UI 调色板无关。
+- **阴影与兜底**：`rgba(0,0,0,.08)` 这类阴影色、`var(--color-danger, #dc2626)` 里的兜底值不算调色板成员。
+
 ### Named Rules
 
 **The One Accent Rule.** 一个界面里只有一个强调色。它由用户的主题设置决定，不能被局部覆盖成第二个品牌色。强调色占屏面积控制在 10% 以内。
@@ -188,6 +209,7 @@ PiDeck 的界面像一张摊开的制图台：纸是白的，线是墨的，工�
 - **Control** (500, 13px / 20px): 按钮、输入框、下拉、菜单项。控件统一 13px，比正文小一档是刻意的。
 - **Caption** (400, 12px / 18px): 元信息、时间戳、次要标签。
 - **Micro** (400, 11px / 16px): 徽章、Tab 标题、极密集的辅助信息。
+- **Dense Micro** (500, 9–10px): 只允许出现在徽章计数、行内 chevron、widget 弹层这类"一个字符也要塞进去"的位置。它随界面字号缩放，不是新的一档阅读字号。
 
 字号不是固定像素：`data-ui-font-size`（紧凑/默认/宽松）整体缩放界面档，`data-chat-font-size` 单独缩放会话档。任何新字号都必须挂到已有 token 上，不能写裸 `text-[13px]`。
 
@@ -242,6 +264,8 @@ PiDeck 的界面像一张摊开的制图台：纸是白的，线是墨的，工�
 - **10px** (`lg`)：面板级容器、对话框。
 - **12px** (`xl`)：大卡片、空态容器。
 - **999px** (`pill`)：Git 分支标签、状态胶囊。
+- **2px**：8px 小方块（图表图例、主题色预览块）—— 小尺寸下 4px 会糊成圆形。
+- **14px**：用户消息气泡专用，比 `xl` 大半档，因为它是全屏最大的内容容器。
 
 边框统一 1px 墨线；需要强调时加到 2px（只在聚焦环和选中态），不靠颜色加深。分割线一律 1px，不用 2px 以上的"重线"。
 
