@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: a78c452dd33a545f5225b88a85966d56a467bb19c705369b22356e5a0e275e6b（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 0463ccd8a17fbd89c0f7abee415c9119a7177c943826b1c2639d449351f90569（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -250,7 +250,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"app.newNormalSession": "普通會話",
 	"app.newAnonymousSession": "匿名會話",
 	"app.newAcpSession": "ACP 工具會話",
-	"app.acpNoTools": "尚未登記 ACP 工具，去設定新增",
+	"app.acpNoTools": "還沒有新增外部 CLI 工具（ACP），去設定新增",
 	"acp.processNotRunning": "{tool} 程序未在執行，請重試",
 	"acp.toolNotInstalled": "「{tool}」啟動失敗：該 CLI 未安裝或不在 PATH 中（{command}），請先安裝後在設定裡檢測",
 	"acp.toolMissing": "會話繫結的 ACP 工具已被刪除或停用，請在設定 → ACP 工具裡重新登記後重試",
@@ -266,7 +266,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"acp.emptyTurn": "「{tool}」本輪結束但沒有返回任何輸出（該 CLI 可能存在已知缺陷，如事件流丟失），請升級到最新版本後重試",
 	"acp.imagesNotSupported": "{tool} 不支援圖片輸入，請移除圖片後重試",
 	"acp.authRequired": "「{tool}」未登入或憑據失效：請先在終端執行該 CLI 完成登入，再回到這裡重試",
-	"acp.bypassPermissionsLabel": "新會話預設 Bypass 權限（自動批准所有工具）",
+	"acp.bypassPermissionsLabel": "新會話預設自動批准工具（Bypass 權限）",
 	"acp.bypassPermissionsHint": "握手後把權限模式切到該 CLI 自帶的 bypass 檔（如 Claude 的 bypassPermissions）；CLI 沒有這一檔時自動跳過，仍可在會話裡手動選擇",
 	"acp.configOptionRejected": "ACP 設定未生效（{option} → {value}）：{reason}。多數是該 CLI 版本的缺陷——可先升級 CLI；也可以把該模式寫進 設定 → ACP 工具 → 啟動引數（如 --permission-mode bypass_permissions），重開會話後即按該模式啟動",
 	"acp.toolNameRequired": "名稱必填",

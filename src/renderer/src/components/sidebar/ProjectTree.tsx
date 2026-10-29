@@ -208,7 +208,7 @@ export function ProjectTree(props: {
 									{/* 待确认徽章：当项目下有会话等待用户输入/确认时醒目展示 */}
 									<PendingAskBadge count={pendingAskCount} />
 									{/* 简洁模式汇总实际计算中状态（含worktree）；空闲进程不转。 */}
-									{props.simple ? <SessionActivityIndicator status={hasRunningAgent ? "running" : undefined} /> : collapsed && hasRunningAgent && <span className="size-1.5 shrink-0 rounded-full bg-warning" title={t("app.projectRunningHint")} aria-hidden="true" />}
+									{props.simple ? <SessionActivityIndicator status={hasRunningAgent ? "running" : undefined} /> : collapsed && hasRunningAgent && <span role="img" aria-label={t("app.projectRunningHint")} className="size-1.5 shrink-0 rounded-full bg-warning" title={t("app.projectRunningHint")} />}
 								</div>
 								{/* 目录已被删除/移动/未挂载：保留记录并标记，用户可右键移除或恢复目录 */}
 								{project.missing && (

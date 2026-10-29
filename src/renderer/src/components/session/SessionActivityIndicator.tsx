@@ -12,8 +12,8 @@ export function SessionActivityIndicator(props: { status?: string | null; sessio
 	const waiting = props.waiting || pending || props.status === "waiting" || props.status === "pending";
 	const running = props.busy || (!waiting && (props.status === "running" || props.status === "starting"));
 	if (running) return <LoaderCircle className="session-activity-spinner size-3 shrink-0 animate-pideck-spin text-warning" aria-label={t("app.statusRunning")} />;
-	if (waiting) return <span className="session-activity-waiting size-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />;
-	if (props.status === "idle") return <span className="size-1.5 shrink-0 rounded-full bg-info" aria-label={t("app.statusIdle")} />;
-	if (props.status === "error") return <span className="size-1.5 shrink-0 rounded-full bg-danger" aria-label={t("app.statusError")} />;
+	if (waiting) return <span role="img" aria-label={t("ask.waitingForAnswer")} className="session-activity-waiting size-1.5 shrink-0 rounded-full bg-warning" />;
+	if (props.status === "idle") return <span role="img" aria-label={t("app.statusIdle")} className="size-1.5 shrink-0 rounded-full bg-info" />;
+	if (props.status === "error") return <span role="img" aria-label={t("app.statusError")} className="size-1.5 shrink-0 rounded-full bg-danger" />;
 	return null;
 }
