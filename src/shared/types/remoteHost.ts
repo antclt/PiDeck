@@ -290,7 +290,10 @@ export type RemoteProjectFactsScope = { kind: "dir"; path: string } | { kind: "r
  */
 export type RemoteProjectFactsChange = { projectId: string; generation: string; scopes: RemoteProjectFactsScope[] };
 
-export type RemoteSessionScanResult = { ok: true; entries: RemoteSessionEntry[] } | { ok: false; code: string };
+export type RemoteSessionScanValue = { entries: RemoteSessionEntry[] };
+export type RemoteSessionScanResult = ({ ok: true } & RemoteSessionScanValue) | { ok: false; code: string };
+/** IPC 结果面（T9）：scanner 内部仍用扁平结果（受保护测试），这里只做边界封装。 */
+export type RemoteSessionScanIpcResult = Op<RemoteSessionScanValue>;
 
 /**
  * 一条远端会话的**按需**标题（Phase 3 第四批；I1 把 origin 拆成三档）。
@@ -309,6 +312,10 @@ export type RemoteSessionScanResult = { ok: true; entries: RemoteSessionEntry[] 
  * 但调用方/界面必须能知道「这次没有看到文件尾」——权威名可能就藏在尾窗口里。只在真的降级时出现，
  * 缺省（undefined）即正常；旧读取方忽略这个字段也不会把它当错误。
  */
-export type RemoteSessionTitleResult = { ok: true; title: string; titleOrigin: "authoritative" | "inferred" | "fallback"; tailDegraded?: boolean } | { ok: false; code: string };
+export type RemoteSessionTitleValue = { title: string; titleOrigin: "authoritative" | "inferred" | "fallback"; tailDegraded?: boolean };
+export type RemoteSessionTitleResult = ({ ok: true } & RemoteSessionTitleValue) | { ok: false; code: string };
+export type RemoteSessionTitleIpcResult = Op<RemoteSessionTitleValue>;
 
-export type RemoteSessionRegisterResult = { ok: true; sessionId: string; created: boolean; remoteSessionId: string; remotePath: string } | { ok: false; code: string };
+export type RemoteSessionRegisterValue = { sessionId: string; created: boolean; remoteSessionId: string; remotePath: string };
+export type RemoteSessionRegisterResult = ({ ok: true } & RemoteSessionRegisterValue) | { ok: false; code: string };
+export type RemoteSessionRegisterIpcResult = Op<RemoteSessionRegisterValue>;

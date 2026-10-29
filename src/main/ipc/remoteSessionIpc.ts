@@ -13,7 +13,9 @@
  */
 
 import { ipcMain } from "electron";
-import { createRemoteSessionScanner, REMOTE_SESSION_CODES, type RemoteSessionCatalogPort, type RemoteSessionCommandTransportPort, type RemoteSessionProjectResolver, type RemoteSessionRegisterResult, type RemoteSessionScannerPort, type RemoteSessionScanResult, type RemoteSessionTitleResult } from "../sessions/RemoteSessionScanner";
+import { opFailFromCode, opOk } from "../../shared/op";
+import type { RemoteSessionRegisterIpcResult, RemoteSessionScanIpcResult, RemoteSessionTitleIpcResult } from "../../shared/types/remoteHost";
+import { createRemoteSessionScanner, REMOTE_SESSION_CODES, type RemoteSessionCatalogPort, type RemoteSessionCommandTransportPort, type RemoteSessionProjectResolver, type RemoteSessionScannerPort } from "../sessions/RemoteSessionScanner";
 
 /** 与 remoteHostIpc 同域：hostId 是 UUID 形态的稳定端点身份。 */
 const HOST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -101,53 +103,55 @@ export function registerRemoteSessionIpc(input: RemoteSessionIpcInput): void {
 		}
 	};
 
-	ipcMain.handle(scanChannel, async (_event, hostIdValue: unknown): Promise<RemoteSessionScanResult> => {
-		if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
+	ipcMain.handle(scanChannel, async (_event, hostIdValue: unknown): Promise<RemoteSessionScanIpcResult> => {
+		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
 		const hostId = readHostId(hostIdValue);
-		if (hostId === undefined) return { ok: false, code: REMOTE_SESSION_CODES.hostIdInvalid };
+		if (hostId === undefined) return opFailFromCode(REMOTE_SESSION_CODES.hostIdInvalid);
 		const resolved = await resolveScanner();
-		if ("code" in resolved) return { ok: false, code: resolved.code };
+		if ("code" in resolved) return opFailFromCode(resolved.code);
 		try {
 			const result = await resolved.scanner.scan(hostId);
-			if (!result.ok) return result;
+			if (!result.ok) return opFailFromCode(result.code);
 			// 墓碑只在**这次列举**生效：已「移除记录」的会话不再出现在「可导入」列表里。
 			// 远端一个字节都不改（也不会额外发任何帧：扫到的条目本身就是列表的全部输入）。
-			return { ok: true, entries: result.entries.filter((entry) => !isRemoteSessionDismissed(hostId, entry.remoteSessionId)) };
+			return opOk({ entries: result.entries.filter((entry) => !isRemoteSessionDismissed(hostId, entry.remoteSessionId)) });
 		} catch (error) {
 			// scanner 自己已 fail-closed；这一层是最后一道「绝不把裸异常跨 IPC 抛出去」。
-			return { ok: false, code: codeOf(error, REMOTE_SESSION_CODES.scanFailed) };
+			return opFailFromCode(codeOf(error, REMOTE_SESSION_CODES.scanFailed));
 		}
 	});
 
-	ipcMain.handle(registerChannel, async (_event, hostIdValue: unknown, remoteSessionIdValue: unknown): Promise<RemoteSessionRegisterResult> => {
-		if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
+	ipcMain.handle(registerChannel, async (_event, hostIdValue: unknown, remoteSessionIdValue: unknown): Promise<RemoteSessionRegisterIpcResult> => {
+		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
 		const hostId = readHostId(hostIdValue);
-		if (hostId === undefined) return { ok: false, code: REMOTE_SESSION_CODES.hostIdInvalid };
+		if (hostId === undefined) return opFailFromCode(REMOTE_SESSION_CODES.hostIdInvalid);
 		// remoteSessionId 的形状校验属于 scanner（它同时要当 helper 路径用）；这里只挡非字符串。
-		if (typeof remoteSessionIdValue !== "string") return { ok: false, code: REMOTE_SESSION_CODES.idInvalid };
+		if (typeof remoteSessionIdValue !== "string") return opFailFromCode(REMOTE_SESSION_CODES.idInvalid);
 		const resolved = await resolveScanner();
-		if ("code" in resolved) return { ok: false, code: resolved.code };
+		if ("code" in resolved) return opFailFromCode(resolved.code);
 		try {
-			return await resolved.scanner.register({ hostId, remoteSessionId: remoteSessionIdValue });
+			const result = await resolved.scanner.register({ hostId, remoteSessionId: remoteSessionIdValue });
+			return result.ok ? opOk({ sessionId: result.sessionId, created: result.created, remoteSessionId: result.remoteSessionId, remotePath: result.remotePath }) : opFailFromCode(result.code);
 		} catch (error) {
-			return { ok: false, code: codeOf(error, REMOTE_SESSION_CODES.registerFailed) };
+			return opFailFromCode(codeOf(error, REMOTE_SESSION_CODES.registerFailed));
 		}
 	});
 
 	// title 是按需标题（H1）：只读、不写 catalog；装配没注入通道名时**不注册**（fail closed，
 	// 不能拿 scan/register 顶上，也不能注册到 undefined）。
 	if (typeof titleChannel === "string" && titleChannel.length > 0) {
-		ipcMain.handle(titleChannel, async (_event, hostIdValue: unknown, remoteSessionIdValue: unknown): Promise<RemoteSessionTitleResult> => {
-			if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
+		ipcMain.handle(titleChannel, async (_event, hostIdValue: unknown, remoteSessionIdValue: unknown): Promise<RemoteSessionTitleIpcResult> => {
+			if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
 			const hostId = readHostId(hostIdValue);
-			if (hostId === undefined) return { ok: false, code: REMOTE_SESSION_CODES.hostIdInvalid };
-			if (typeof remoteSessionIdValue !== "string") return { ok: false, code: REMOTE_SESSION_CODES.idInvalid };
+			if (hostId === undefined) return opFailFromCode(REMOTE_SESSION_CODES.hostIdInvalid);
+			if (typeof remoteSessionIdValue !== "string") return opFailFromCode(REMOTE_SESSION_CODES.idInvalid);
 			const resolved = await resolveScanner();
-			if ("code" in resolved) return { ok: false, code: resolved.code };
+			if ("code" in resolved) return opFailFromCode(resolved.code);
 			try {
-				return await resolved.scanner.title({ hostId, remoteSessionId: remoteSessionIdValue });
+				const result = await resolved.scanner.title({ hostId, remoteSessionId: remoteSessionIdValue });
+				return result.ok ? opOk({ title: result.title, titleOrigin: result.titleOrigin, ...(result.tailDegraded === undefined ? {} : { tailDegraded: result.tailDegraded }) }) : opFailFromCode(result.code);
 			} catch (error) {
-				return { ok: false, code: codeOf(error, REMOTE_SESSION_CODES.titleFailed) };
+				return opFailFromCode(codeOf(error, REMOTE_SESSION_CODES.titleFailed));
 			}
 		});
 	}

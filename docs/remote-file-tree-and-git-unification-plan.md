@@ -486,4 +486,11 @@ helper 事件与写操作仅标脏、发通知；只有活跃读者决定装载�
 - **T8 renderer**：把 `remoteGitViewState` 的取消/互斥/unknown/迟到读规则承接到共用 controller；`GitPanel` 的自动 fetch/轮询策略与展示分离并按能力门控；两个文件树共用 children/expanded/loading；消费 T4 的通知并在隐藏/收起/关闭时退订。
 - **T9 收尾**：sessions 的 scan/title/register 结果迁 `Op<T>`（不改 R1a 传输/JSONL），复核前卡门禁，跑本地 Git E2E 与远端定向验收（真机/凭据不足时明列 skip），清点兼容壳。
 
+| T6 | ◐ 公共文件读已落地 | 新增 `files:directory-page`（`ProjectDirectoryPage` Op：entries/truncated/revision/generation，2000 上限，本机 hasChildren 精确、远端 `"unknown"`）；本地 `FileSystemService.listTreePage` 截断而不报错；远端目录页复用目录事实缓存并支持 force 刷新；远端 `pathsExist` 走只读 `RemoteWorkspaceReader.statMany`（64/帧；批量全有或全无时退回逐项只读 stat），`files:paths-exist`/`files:stat` 对 ssh 目标改走该入口，不再经过 entry 令牌。 | 新增 `tests/projectFileBackendConformance.test.mjs`（7 例：本地/远端 2000/2001、hasChildren、失败不缓存、128 路径 2 帧、缺失路径、整次失败、显式刷新）；T6 套件 57 pass；`check:ipc-wiring` 绿。**未完成**：文件树 hook 尚未消费新页；Git ignore 修饰（checkIgnore 分批）未接入；read/search/create/rename 未改；本地 revision 只是每次读递增的计数。 |
+| T7 | ◐ 三个公共入口已落地 | 新增 `git:repository-list`（保留 truncated + revision/generation）、`git:history-page`（本地保留 ref/path/allBranches 与 totalCount，远端 HEAD-only 且过滤器显式 UNSUPPORTED_CAPABILITY）、`git:compare-refs`（本地 merge-base + ahead/behind，远端 trees 不填 0）；preload/previewApi 接线；`GitService.getCommitLog` 支持 skip，新增 `resolveRefOid`。 | 新增 `tests/projectGitBackendConformance.test.mjs`（3 例）；T7 套件 67 pass。**未完成**：公共 target 尚未统一为项目相对（status/workspaceDiff/写面仍按旧契约，避免与 legacy controller 冲突）；detail/diff/compare 文件 target 与 preload 适配未做；写面仍按能力组逐组迁移。 |
+| T8 | ✗ 未实施 | —— | renderer 的共享 controller/视图区块、GitPanel/GitGraph 能力门控、两个文件树的统一算法、T4 通知的渲染层消费与隐藏/收起退订均未开始。 |
+| T9 | ◐ sessions 结果面已迁 Op | `remoteSessionIpc` 的 scan/title/register 改为 `Op<T>`（成功 value、失败带 outcome），preload 类型同步；renderer 的 `readScanResponse`/`readRegisterResponse`/`readTitleResponse` 在迁移期同时接受 Op 与旧扁平形状；scanner 内部与 R1a 传输/JSONL 未改。相关 IPC 断言按 T9 范围迁到新信封（行为断言保留）。 | T9 套件 162 pass；typecheck 绿。**未完成**：本地 Git E2E、远端定向验收、兼容清单与最终审计；T8 未完成意味着 §4.2 parity 表尚未逐项勾销。 |
+
+**本轮（T6–T9 部分）验证汇总**：T6 套件 57 pass；T7 套件 67 pass；T9 套件 162 pass；renderer/会话相关回归全绿；`npm run typecheck` 退出码 0；`check:ipc-wiring` 786 通道齐备。未执行 E2E/SSH 真机/全量 build。
+
 **本轮验证汇总**：T1 套件 30 pass；T2 套件 37 pass；T3 套件 45 pass + 22 skip；T4 套件 31 pass + `check:ipc-wiring`；T5 套件 34 pass；renderer/宿主/信封相关 158 pass；`npm run typecheck` 退出码 0。未执行全量 `npm test`、全量 build、E2E 或 SSH 真机。

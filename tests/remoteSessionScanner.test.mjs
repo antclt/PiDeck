@@ -311,8 +311,8 @@ test("IPC：实验开关关掉时连服务都不构建", async () => {
 		},
 		channels: CHANNELS,
 	});
-	assert.deepEqual(plain(await handlers.get(CHANNELS.scan)({}, HOST)), { ok: false, code: "REMOTE_FEATURE_DISABLED" });
-	assert.deepEqual(plain(await handlers.get(CHANNELS.register)({}, HOST, "a.jsonl")), { ok: false, code: "REMOTE_FEATURE_DISABLED" });
+	assert.deepEqual(plain(await handlers.get(CHANNELS.scan)({}, HOST)), { ok: false, code: "REMOTE_FEATURE_DISABLED", outcome: "rejected" });
+	assert.deepEqual(plain(await handlers.get(CHANNELS.register)({}, HOST, "a.jsonl")), { ok: false, code: "REMOTE_FEATURE_DISABLED", outcome: "rejected" });
 	assert.equal(called, false);
 });
 
@@ -327,8 +327,8 @@ test("IPC：非法 hostId 在边界就被拒，不进服务", async () => {
 		channels: CHANNELS,
 	});
 	for (const bad of ["", "not-a-uuid", "../../etc/passwd", undefined, 42]) {
-		assert.deepEqual(plain(await handlers.get(CHANNELS.scan)({}, bad)), { ok: false, code: "REMOTE_SESSION_HOST_ID_INVALID" });
-		assert.deepEqual(plain(await handlers.get(CHANNELS.register)({}, bad, "a.jsonl")), { ok: false, code: "REMOTE_SESSION_HOST_ID_INVALID" });
+		assert.deepEqual(plain(await handlers.get(CHANNELS.scan)({}, bad)), { ok: false, code: "REMOTE_SESSION_HOST_ID_INVALID", outcome: "rejected" });
+		assert.deepEqual(plain(await handlers.get(CHANNELS.register)({}, bad, "a.jsonl")), { ok: false, code: "REMOTE_SESSION_HOST_ID_INVALID", outcome: "rejected" });
 	}
 	assert.equal(called, false);
 });
@@ -337,7 +337,7 @@ test("IPC：扫描返回列表级元数据（无正文、无远端路径以外�
 	const { port } = fakeRemote({ listings: { ".": [fileEntry("s.jsonl", 12)] }, files: { "s.jsonl": { bytes: 12, mtimeMs: 5 } } });
 	const handlers = ipcFor({ enabled: true, service: () => port, channels: CHANNELS });
 	const result = await handlers.get(CHANNELS.scan)({}, HOST);
-	assert.deepEqual(plain(result), { ok: true, entries: [{ remoteSessionId: "s.jsonl", remotePath: "s.jsonl", name: "s", size: 12, mtimeMs: 5 }] });
+	assert.deepEqual(plain(result), { ok: true, value: { entries: [{ remoteSessionId: "s.jsonl", remotePath: "s.jsonl", name: "s", size: 12, mtimeMs: 5 }] } });
 });
 
 test("IPC：登记把远端 id 与装配给的项目归属交给 catalog，返回稳定 sessionId", async () => {
@@ -351,8 +351,8 @@ test("IPC：登记把远端 id 与装配给的项目归属交给 catalog，返�
 	};
 	const handlers = ipcFor({ enabled: true, service: () => port, catalog: () => catalog, projectIdForHost: () => "project-1", channels: CHANNELS });
 	const id = "2026-02-03T10-00-00_abc.jsonl";
-	assert.deepEqual(plain(await handlers.get(CHANNELS.register)({}, HOST, id)), { ok: true, sessionId: "stable-1", created: true, remoteSessionId: id, remotePath: id });
-	assert.deepEqual(plain(await handlers.get(CHANNELS.register)({}, HOST, id)), { ok: true, sessionId: "stable-1", created: false, remoteSessionId: id, remotePath: id });
+	assert.deepEqual(plain(await handlers.get(CHANNELS.register)({}, HOST, id)), { ok: true, value: { sessionId: "stable-1", created: true, remoteSessionId: id, remotePath: id } });
+	assert.deepEqual(plain(await handlers.get(CHANNELS.register)({}, HOST, id)), { ok: true, value: { sessionId: "stable-1", created: false, remoteSessionId: id, remotePath: id } });
 	assert.deepEqual(plain(ensured[0]), { projectId: "project-1", hostId: HOST, remoteSessionId: id, remotePath: id, title: "2026-02-03T10-00-00_abc", updatedAt: 999 });
 	// 两次登记各自都在远端确认了一次这条 id 现在是文件。
 	assert.deepEqual(calls.stat, [id, id]);
@@ -368,13 +368,13 @@ test("IPC：非字符串 remoteSessionId 被边界拒绝", async () => {
 		},
 		channels: CHANNELS,
 	});
-	assert.deepEqual(plain(await handlers.get(CHANNELS.register)({}, HOST, 7)), { ok: false, code: "REMOTE_SESSION_ID_INVALID" });
+	assert.deepEqual(plain(await handlers.get(CHANNELS.register)({}, HOST, 7)), { ok: false, code: "REMOTE_SESSION_ID_INVALID", outcome: "rejected" });
 	assert.equal(called, false);
 });
 
 test("IPC：服务构建失败与缺失都是稳定码", async () => {
 	const missing = ipcFor({ enabled: true, service: () => undefined, channels: CHANNELS });
-	assert.deepEqual(plain(await missing.get(CHANNELS.scan)({}, HOST)), { ok: false, code: "REMOTE_CONNECTION_SERVICE_UNAVAILABLE" });
+	assert.deepEqual(plain(await missing.get(CHANNELS.scan)({}, HOST)), { ok: false, code: "REMOTE_CONNECTION_SERVICE_UNAVAILABLE", outcome: "rejected" });
 	const broken = ipcFor({
 		enabled: true,
 		service: () => {
@@ -382,9 +382,9 @@ test("IPC：服务构建失败与缺失都是稳定码", async () => {
 		},
 		channels: CHANNELS,
 	});
-	assert.deepEqual(plain(await broken.get(CHANNELS.scan)({}, HOST)), { ok: false, code: "REMOTE_CONNECTION_SERVICE_UNAVAILABLE" });
+	assert.deepEqual(plain(await broken.get(CHANNELS.scan)({}, HOST)), { ok: false, code: "REMOTE_CONNECTION_SERVICE_UNAVAILABLE", outcome: "rejected" });
 	const service = ipcFor({ enabled: true, service: () => ({ remoteHome: async () => "/home/dev" }), channels: CHANNELS });
-	assert.deepEqual(plain(await service.get(CHANNELS.scan)({}, HOST)), { ok: false, code: "REMOTE_SESSION_SCANNER_OPTIONS_INVALID" });
+	assert.deepEqual(plain(await service.get(CHANNELS.scan)({}, HOST)), { ok: false, code: "REMOTE_SESSION_SCANNER_OPTIONS_INVALID", outcome: "rejected" });
 });
 
 /*

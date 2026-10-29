@@ -226,7 +226,7 @@ test("稳定码真的到达界面：IPC scan 返回 {ok:false,code}，渲染层�
 	const remote = fakeRemote(configuredFixture("relative/dir"));
 	registerRemoteSessionIpc({ enabled: true, service: () => remote.port, channels: { scan: "t:scan", register: "t:register", title: "t:title" } });
 	const result = await handlers.get("t:scan")({}, HOST);
-	assert.deepEqual(plain(result), { ok: false, code: INVALID });
+	assert.deepEqual(plain(result), { ok: false, code: INVALID, outcome: "rejected" });
 	// 渲染层：失败态必须带着这个码（H2 的三态之一），而不是被当成「空列表」。
 	assert.deepEqual(plain(readScanResponse(plain(result))), { kind: "failed", code: INVALID });
 	// 侧栏的错误文案把码原样呈现（未知码走 scanFailed 模板）。

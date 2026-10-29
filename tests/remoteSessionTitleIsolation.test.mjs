@@ -138,8 +138,8 @@ test("an authoritative name line yields an authoritative title", async () => {
 	const harness = titleHarness({ files: standardFiles() });
 	const result = await titleOf(harness, HOST_ID, NAMED);
 	assert.equal(result.ok, true, JSON.stringify(result));
-	assert.equal(result.title, "Refactor the parser");
-	assert.equal(result.titleOrigin, "authoritative");
+	assert.equal(result.value.title, "Refactor the parser");
+	assert.equal(result.value.titleOrigin, "authoritative");
 	assert.equal(harness.catalogCalls.ensureRemoteSession, 0, "the title path must not write the catalog");
 	// The scanner factory is invoked once when the handler resolves its scanner (that is ordinary wiring); what
 	// must stay at zero is any *use* of the catalog port, asserted above and in the scanner-level test.
@@ -149,18 +149,18 @@ test("a legacy private name line is authoritative, and a first user message is t
 	const harness = titleHarness({ files: standardFiles() });
 	const legacy = await titleOf(harness, HOST_ID, LEGACY);
 	assert.equal(legacy.ok, true, JSON.stringify(legacy));
-	assert.equal(legacy.title, "Old rename");
+	assert.equal(legacy.value.title, "Old rename");
 	// 旧版私有 sessionName 行是**名字字段**（当年 PiDeck 写的会话名），不是内容猜测：与本地管线同判据，
 	// fromSessionInfo=true ⇒ authoritative（本地 scannedTitleOrigin 也把同一判据落成 catalog 的 manual）。
-	assert.equal(legacy.titleOrigin, "authoritative");
+	assert.equal(legacy.value.titleOrigin, "authoritative");
 
 	// The local pipeline titles a session whose file has no session_info by its first user message; excluding
 	// that here would only reuse half the pipeline. It is honestly the WEAKER tier (inferred), not fabricated
 	// and not the authoritative name the session never had.
 	const weak = await titleOf(harness, HOST_ID, WEAK);
 	assert.equal(weak.ok, true, JSON.stringify(weak));
-	assert.equal(weak.title, "Fix the failing test");
-	assert.equal(weak.titleOrigin, "inferred");
+	assert.equal(weak.value.title, "Fix the failing test");
+	assert.equal(weak.value.titleOrigin, "inferred");
 	assert.equal(harness.catalogCalls.ensureRemoteSession, 0);
 });
 
@@ -169,11 +169,11 @@ test("a head with nothing to name falls back to the file stem and never invents 
 	for (const id of [EMPTY_HEAD, MALFORMED, TIMESTAMP_NAME]) {
 		const result = await titleOf(harness, HOST_ID, id);
 		assert.equal(result.ok, true, JSON.stringify(result));
-		assert.equal(result.titleOrigin, "fallback", id + " must fall back: " + JSON.stringify(result));
-		assert.equal(result.title, id.replace(/\.jsonl$/, ""), id + " must answer its own file stem");
-		assert.notEqual(result.title, "", id + " must never answer an empty title");
-		assert.ok(!result.title.includes("{"), id + " must never leak raw JSON as a title");
-		assert.ok(!/^untitled$/i.test(result.title), id + " must not invent a placeholder title");
+		assert.equal(result.value.titleOrigin, "fallback", id + " must fall back: " + JSON.stringify(result));
+		assert.equal(result.value.title, id.replace(/\.jsonl$/, ""), id + " must answer its own file stem");
+		assert.notEqual(result.value.title, "", id + " must never answer an empty title");
+		assert.ok(!result.value.title.includes("{"), id + " must never leak raw JSON as a title");
+		assert.ok(!/^untitled$/i.test(result.value.title), id + " must not invent a placeholder title");
 	}
 	assert.equal(harness.catalogCalls.ensureRemoteSession, 0);
 });
@@ -184,8 +184,8 @@ test("the two window reads are bounded: one stat and at most two 64 KiB reads fo
 	const harness = titleHarness({ files: { [big]: { bytes: payload, mtimeMs: 3 } } });
 	const result = await titleOf(harness, HOST_ID, big);
 	assert.equal(result.ok, true, JSON.stringify(result));
-	assert.equal(result.titleOrigin, "fallback", "the payload has no name line");
-	assert.equal(result.title, big.replace(/\.jsonl$/, ""));
+	assert.equal(result.value.titleOrigin, "fallback", "the payload has no name line");
+	assert.equal(result.value.title, big.replace(/\.jsonl$/, ""));
 	// I1：头内没有权威名（这里一个名字都没有），所以会补一次有界尾读——pi 的 `/name` 追加在文件尾。
 	assert.equal(harness.stats().length, 1, "exactly one sizing stat for both windows");
 	assert.equal(harness.reads().length, 2, "one head read + one tail read, never more");
@@ -210,15 +210,15 @@ test("a window that cuts a multi-byte character degrades to the stem instead of 
 	const harness = titleHarness({ files: { [cut]: { bytes: file } } });
 	const result = await titleOf(harness, HOST_ID, cut);
 	assert.equal(result.ok, true, JSON.stringify(result));
-	assert.equal(result.title, "Cut title", "a complete earlier line must still be used");
-	assert.equal(result.titleOrigin, "authoritative");
+	assert.equal(result.value.title, "Cut title", "a complete earlier line must still be used");
+	assert.equal(result.value.titleOrigin, "authoritative");
 
 	// Now only the broken tail exists: nothing parseable, so the answer is the stem, not a guess.
 	const onlyBroken = Buffer.concat([Buffer.from('{"type":"session","id":"x"}\n{"type":"message","text":"', "utf8"), multibyte.subarray(0, 2)]);
 	const second = titleHarness({ files: { [cut]: { bytes: onlyBroken } } });
 	const degraded = await titleOf(second, HOST_ID, cut);
-	assert.equal(degraded.titleOrigin, "fallback");
-	assert.equal(degraded.title, "session-cut");
+	assert.equal(degraded.value.titleOrigin, "fallback");
+	assert.equal(degraded.value.title, "session-cut");
 });
 
 test("invalid identities and an unusable home are refused before any frame", async () => {
