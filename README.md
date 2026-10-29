@@ -72,6 +72,7 @@
   - [🐳 DSH 后端](#-dsh-后端)
   - [🏗️ 工作原理](#-工作原理)
   - [📦 下载安装](#-下载安装)
+  - [📱 移动端客户端](#-移动端客户端)
   - [🧰 快速开始（从源码运行）](#-快速开始从源码运行)
   - [❓ 常见问题 FAQ](#-常见问题-faq)
   - [🧑‍💻 开发指南](#-开发指南)
@@ -282,6 +283,17 @@ npm run dist:linux:dev # Linux（AppImage + deb + tar.gz）
 ```
 
 产物名带 `PiDeck-Dev-` 前缀，可与 stable 包并存安装。注意 `npm run dist:win` 等 stable 系打包命令**不会**注入 dev 通道标记——版本号含 `-beta` 也不改变通道判定（通道由构建命令决定，不由版本号决定）。
+
+---
+
+## 📱 移动端客户端
+
+社区维护的 PiDeck 手机客户端，配合桌面端「设置 → Web 服务 → 局域网 Web 服务」使用：
+
+| 项目 | 说明 |
+|---|---|
+| [qgx1992/pideck-mobile](https://github.com/qgx1992/pideck-mobile) | 协议核心 + Capacitor 手机客户端：扫码 / 手填链接配对、流式会话、通知与工作区，可自行打包 APK。 |
+| [xrbbm/PocketDeck](https://github.com/xrbbm/PocketDeck) | 原生 Android（Kotlin + Jetpack Compose）客户端：扫码直达最近会话、审批卡片、Git / 文件工作区，Releases 可直接下载 APK。 |
 
 ---
 

@@ -53,6 +53,7 @@
   - [🐳 DSH Backend](#-dsh-backend)
   - [🏗️ How It Works](#-how-it-works)
   - [📦 Download](#-download)
+  - [📱 Mobile Clients](#-mobile-clients)
   - [🧰 Quick Start (from Source)](#-quick-start-from-source)
   - [❓ FAQ](#-faq)
   - [🧑‍💻 Development](#-development)
@@ -261,6 +262,17 @@ npm run dist:linux:dev # Linux (AppImage + deb + tar.gz)
 ```
 
 Artifacts carry the `PiDeck-Dev-` prefix and can be installed alongside stable packages. Note that stable packaging commands such as `npm run dist:win` do **not** inject the dev channel marker — a `-beta` version number does not change the channel either (the channel is decided by the build command, not the version number).
+
+---
+
+## 📱 Mobile Clients
+
+Community-maintained PiDeck mobile clients, used with the desktop app's "Settings → Web Service → LAN web service":
+
+| Project | Description |
+|---|---|
+| [qgx1992/pideck-mobile](https://github.com/qgx1992/pideck-mobile) | Protocol core + Capacitor Android client: QR / manual-link pairing, streaming sessions, notifications and workspace; build your own APK. |
+| [xrbbm/PocketDeck](https://github.com/xrbbm/PocketDeck) | Native Android (Kotlin + Jetpack Compose) client: QR pairing straight into your latest session, approval cards, Git / file workspace, APK downloads on Releases. |
 
 ---
 
