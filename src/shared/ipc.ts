@@ -286,6 +286,11 @@ export const ipcChannels = {
 	sessionsRuntimeFork: "sessions:runtime-fork",
 	/** 渲染层汇报当前聚焦的会话（用于非聚焦会话 Ask 请求的桌面通知） */
 	sessionsSetFocusedSession: "sessions:set-focused-session",
+	/**
+	 * 渲染层汇报主窗口实际挂载的聊天栏（当前 + 分屏）。主进程只对可见会话下发
+	 * live 正文/思考流，避免几百个后台流式会话把渲染进程打满（discussion #446）。
+	 */
+	sessionsSetVisibleSessions: "sessions:set-visible-sessions",
 	/** DSH 会话文件路径推导（渲染层右键「复制会话文件路径」；按 dshSessionId + cwd 计算 host 持久化路径）。 */
 	sessionsGetDshSessionPath: "sessions:get-dsh-session-path",
 	sessionsSearchContent: "sessions:search-content",

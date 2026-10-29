@@ -891,6 +891,8 @@ const api = {
 		listRuntimes: () => ipcRenderer.invoke(ipcChannels.sessionsRuntimeList) as Promise<SessionRuntimeInfo[]>,
 		activateRuntime: (sessionId: string) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeActivate, sessionId) as Promise<SessionCommandResult<SessionRuntimeInfo>> /** 汇报当前聚焦的会话（主进程据此决定非聚焦会话的 Ask 桌面通知） */,
 		setFocusedSession: (sessionId?: string) => ipcRenderer.invoke(ipcChannels.sessionsSetFocusedSession, sessionId) as Promise<void>,
+		/** 汇报主窗口实际挂载的聊天栏（当前 + 分屏）；主进程据此裁剪后台会话的 live 流。 */
+		setVisibleSessions: (sessionIds: string[]) => ipcRenderer.invoke(ipcChannels.sessionsSetVisibleSessions, sessionIds) as Promise<void>,
 		stopRuntime: (target: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeStop, target) as Promise<SessionCommandResult<SessionRuntimeTarget>>,
 		abortRuntime: (target: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeAbort, target) as Promise<SessionCommandResult<SessionTargetedValue<void>>>,
 		restartRuntime: (target: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeRestart, target) as Promise<SessionCommandResult<SessionRuntimeReplacement>>,

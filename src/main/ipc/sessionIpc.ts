@@ -15,6 +15,7 @@ import { createSessionModelPreference } from "../../shared/modelDisplayName";
 import { modelThinkingLevelOf } from "../../shared/modelThinkingLevels";
 import { readRuntimePromptTemplateBodies } from "../prompts/runtimeTemplateBodies";
 import { sessionFileExistsCached } from "../sessions/sessionFileLiveness";
+import type { VisibleSessionRegistry } from "../sessions/visibleSessionRegistry";
 import { isDshAgentPresetLocked } from "../../shared/dshAgentPresetLock";
 import type {
 	AvailableModel,
@@ -425,6 +426,10 @@ export type SessionIpcDeps = {
 	terminalManager: TerminalSessionManager;
 	mainCopy: (key: string, params?: Record<string, string | number>) => string;
 	getMainWindow: () => BrowserWindow | null;
+	/** 主窗口可见会话登记（live 流裁剪，见 visibleSessionRegistry.ts）。 */
+	visibleSessions: VisibleSessionRegistry;
+	/** 可见性补帧：按 agentId 路由到对应后端（pi / dsh）的 live 通道。 */
+	emitLiveSnapshot: (agentId: string) => void;
 	emitSessionRuntimeEvent: (agentId: string, channel: string, payload: unknown) => boolean;
 	emitSessionRuntimeDetach: (target: SessionRuntimeTarget) => void;
 	/** 激活窗口的 session 级合成 starting 事件（bind 前 emitSessionRuntimeEvent 会丢弃一切状态，见 index.ts 实现注释）。 */
@@ -565,6 +570,8 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		terminalManager,
 		mainCopy,
 		getMainWindow,
+		visibleSessions,
+		emitLiveSnapshot,
 		emitSessionRuntimeEvent,
 		emitSessionRuntimeDetach,
 		createAnonymousSession,
@@ -2272,6 +2279,17 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 	// 渲染层切换会话时汇报聚焦会话；主进程据此判断 Ask 类请求是否需要桌面通知
 	ipcMain.handle(ipcChannels.sessionsSetFocusedSession, (_event, sessionId: unknown) => {
 		sessionRuntimeCoordinator.setFocusedSession(typeof sessionId === "string" && sessionId.trim() ? sessionId.trim() : undefined);
+	});
+	// 可见会话登记：决定哪些会话的 live 正文/思考值得跨进程推送（discussion #446）。
+	// 只接受主窗口上报——极简浮窗是独立渲染进程，它显示的会话在主窗口不一定可见；
+	// 新可见的会话立即补一帧全量 live，避免切回来先看到半截内容。
+	ipcMain.handle(ipcChannels.sessionsSetVisibleSessions, (event, input: unknown) => {
+		const window = getMainWindow();
+		if (!window || window.isDestroyed() || event.sender !== window.webContents) return;
+		for (const sessionId of visibleSessions.update(input)) {
+			const target = sessionRuntimeCoordinator.getTarget(sessionId);
+			if (target) emitLiveSnapshot(target.agentId);
+		}
 	});
 	ipcMain.handle(ipcChannels.dshListModels, async () => (listDshModels ? listDshModels() : []));
 	ipcMain.handle(ipcChannels.dshDiscoverModels, async (_event, input: unknown) => {

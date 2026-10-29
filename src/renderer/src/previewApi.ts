@@ -913,6 +913,7 @@ export function createPreviewApi(): PiDesktopApi {
 			startDshHost: async () => true,
 			restartDshHost: async () => true,
 			setFocusedSession: async () => undefined,
+			setVisibleSessions: async () => undefined,
 			getRuntimeState: async (target) => ({
 				ok: true,
 				value: { target, value: {} },

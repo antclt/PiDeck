@@ -416,6 +416,15 @@ export class AgentManager {
 	private readonly messagePerf = new MessagePerfTracker();
 	/** 最近一次完整 runtime 快照（按 agent）：流式结算拿不到 RPC，只能从这里取模型事实。 */
 	private readonly lastRuntimeStateByAgent = new Map<string, AgentRuntimeState>();
+	/**
+	 * 最近一次流式状态补丁（按 agent）：正文通道每 100ms flush 都会补一条 patch，
+	 * 但两个边沿之间内容不变。同值跳过，避免几百个会话把万级/秒的同值事件灌给渲染层
+	 * （discussion #446）。签名与 emitStreamingStatePatch 的字段一一对应；
+	 * 心跳间隔保证渲染层重载/丢帧后仍能在数秒内恢复状态指示，而不是永久缺失。
+	 */
+	private readonly lastStreamingPatchByAgent = new Map<string, { signature: string; at: number }>();
+	/** 同值补丁心跳：5s 未发就重发一次当前状态（渲染层 reload 后自愈）。 */
+	private static readonly STREAMING_PATCH_REFRESH_MS = 5000;
 
 	/**
 	 * 最近一次用户 abort 的时刻（毫秒）。退出处理器用它识别「终止窗口内的进程退出」：
@@ -4293,6 +4302,7 @@ export class AgentManager {
 		this.autoRestartAttempted.delete(agentId);
 		this.messagePerf.clearAgent(agentId);
 		this.lastRuntimeStateByAgent.delete(agentId);
+		this.lastStreamingPatchByAgent.delete(agentId);
 		this.notifiedAskAgents.delete(agentId);
 		this.abortedDuringAsk.delete(agentId);
 		this.abortGate.clearEscalation(agentId);
@@ -6912,6 +6922,11 @@ export class AgentManager {
 
 	/** 轻量 runtime 状态补丁：只同步本地流式标志与工具执行状态，不发 RPC。 */
 	private emitStreamingStatePatch(agentId: string) {
+		const signature = JSON.stringify([this.streamingAgents.has(agentId), this.toolExecutingByAgent.get(agentId) ?? null, this.toolStateSequenceByAgent.get(agentId) ?? 0]);
+		const now = Date.now();
+		const previous = this.lastStreamingPatchByAgent.get(agentId);
+		if (previous?.signature === signature && now - previous.at < AgentManager.STREAMING_PATCH_REFRESH_MS) return;
+		this.lastStreamingPatchByAgent.set(agentId, { signature, at: now });
 		this.emit(agentEventTags.agentsRuntimeState, {
 			agentId,
 			state: {
@@ -6921,6 +6936,19 @@ export class AgentManager {
 				toolStateSequence: this.toolStateSequenceByAgent.get(agentId) ?? 0,
 			} as AgentRuntimeState,
 		});
+	}
+
+	/**
+	 * 可见性补帧：会话从后台变为可见时，把当前还在流式输出的正文/思考整段补发一次。
+	 * 后台期间主进程不发 live 增量（见 sessions/visibleSessionRegistry.ts），渲染层手里
+	 * 没有内容；直接等下一次增量会先显示半截，因此这里强制全量。
+	 * 后台期间已经结束的输出不需要补：历史消息（agents:message）照常全量下发。
+	 */
+	emitLiveSnapshot(agentId: string): void {
+		const runtime = this.agents.get(agentId);
+		if (!runtime || runtime.tab.status === "closed" || runtime.tab.status === "error") return;
+		this.liveStream.emitTextSnapshot(agentId);
+		this.liveStream.emitThinkingSnapshot(agentId);
 	}
 
 	/**

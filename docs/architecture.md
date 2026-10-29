@@ -56,6 +56,13 @@ src/
 混进 `ipcChannels` 会让「三处同步」失去机械可判定性（要么误报，要么开白名单）。
 `npm run check:ipc-wiring` 校验这两条边界（CI 已接入）：通道必须主进程 + preload 齐备，事件标签只准在主进程。
 
+**live 流按可见会话裁剪**：`agents:text-stream` / `agents:thinking` 只对主窗口当前挂载的聊天栏
+（当前会话 + 分屏）下发。渲染层经 `sessions:set-visible-sessions` 上报可见集合，主进程
+`VisibleSessionRegistry` 判定；不可见会话没有 live 消费者，几百路并发时会把渲染进程主线程打满
+（discussion #446）。其余事件标签（`agents:message` / `agents:state` / `agents:runtime-state` /
+`agents:notice` / `agents:ui-request`）全量下发；新可见的会话由 `AgentManager.emitLiveSnapshot()`
+补一帧全量正文/思考。
+
 ## 文件体量（增量门禁，防回流）
 
 存量现实（2026-10 核对）：`main/index.ts` 6724 行、`AgentManager.ts` 6439、`App.tsx` 3722，全仓 **86 个文件 >600 行**；三份拆分计划落地后都出现回涨。

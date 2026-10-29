@@ -349,6 +349,7 @@ import { aggregateDshProxyMode, buildHostProxyEnvPatch, resolveAcpProxySettings,
 import { SessionRuntimeCoordinator, type SessionRuntimeBinding } from "./sessions/SessionRuntimeCoordinator";
 import { migrateMergedSessionPinnedIds } from "./sessions/sessionPinnedIdsMigration";
 import { IdleAgentReleaser } from "./sessions/IdleAgentReleaser";
+import { VisibleSessionRegistry, shouldDeliverLiveStreamToMainWindow } from "./sessions/visibleSessionRegistry";
 import { StaleDraftReaper } from "./sessions/StaleDraftReaper";
 import { SessionCommandIpcError } from "./sessions/SessionCommandIpcError";
 import { appendSessionForkSuffix } from "./sessions/sessionForkTitle";
@@ -554,6 +555,8 @@ import { UpdateService } from "./update/UpdateService";
 import type { AppManualUpdateRelease } from "../shared/types/app";
 
 let mainWindow: BrowserWindow | null = null;
+/** 主窗口实际挂载的会话（当前 + 分屏）：live 流只发这些会话，见 visibleSessionRegistry.ts。 */
+const visibleSessions = new VisibleSessionRegistry();
 /**
  * 草稿 DSH 会话的技能目录入口（懒装配）：sessionCatalog/dshAgentManager 都是
  * whenReady 之后才赋值，构造必须延迟到首次 IPC 调用，避免启动顺序耦合。
@@ -1060,7 +1063,11 @@ function emitSessionActivationCancelled(sessionId: string): void {
 
 function sendSessionRuntimeEnvelope(event: SessionRuntimeEvent): void {
 	const window = mainWindow;
-	if (window && !window.isDestroyed()) {
+	// live 正文/思考只对主窗口可见的会话下发：不可见会话没有消费者，几百个后台流式
+	// 会话会把渲染进程主线程打满（discussion #446）。消息/状态/通知不受影响；
+	// 极简浮窗有自己显示的会话，仍按原样转发。
+	// 收到过可见性上报才启用门控（fail-open）：上报链路异常时宁可多推，也不能让正在看的会话没有正文。
+	if (window && !window.isDestroyed() && shouldDeliverLiveStreamToMainWindow(event, (sessionId) => !visibleSessions.hasReported() || visibleSessions.isVisible(sessionId))) {
 		window.webContents.send(ipcChannels.sessionsRuntimeEvent, event);
 	}
 	// 极简浮窗是独立渲染进程，流式事件单独转发，否则会话页停在打开时的快照。
@@ -4236,6 +4243,12 @@ function registerIpc() {
 		terminalManager,
 		mainCopy: mainCopy as (key: string, params?: Record<string, string | number>) => string,
 		getMainWindow: () => mainWindow,
+		visibleSessions,
+		// live 补帧按 agentId 路由：pi 与 DSH 各有自己的流式缓冲，未知 id 各自 no-op。
+		emitLiveSnapshot: (agentId) => {
+			agentManager.emitLiveSnapshot(agentId);
+			dshAgentManager.emitLiveSnapshot(agentId);
+		},
 		emitSessionRuntimeEvent,
 		emitSessionRuntimeDetach,
 		emitSessionActivating,

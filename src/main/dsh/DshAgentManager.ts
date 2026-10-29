@@ -876,6 +876,28 @@ export class DshAgentManager implements SessionAgentGateway {
 		}
 	}
 
+	/**
+	 * 可见性补帧：主窗口切到本会话时补一帧全量 live 正文/思考。
+	 * 后台期间主进程不发 live 增量（见 sessions/visibleSessionRegistry.ts）；DSH 的
+	 * live 事件本身就是全量文本，用当前投影补即可，运行态与消息快照不受影响。
+	 */
+	emitLiveSnapshot(agentId: string): void {
+		const runtime = this.runtimes.get(agentId);
+		if (!runtime || runtime.tab.status === "closed" || runtime.tab.status === "error") return;
+		const text = runtime.projection.pendingAssistantText ?? "";
+		if (text) this.emit(agentEventTags.agentsTextStream, { agentId, text, done: false });
+		const thinking = runtime.projection.pendingAssistantThinking;
+		if (runtime.thinkingId && thinking) {
+			this.emit(agentEventTags.agentsThinking, {
+				agentId,
+				id: runtime.thinkingId,
+				text: thinking,
+				startedAt: runtime.thinkingStartedAt ?? 0,
+				done: false,
+			});
+		}
+	}
+
 	async abort(agentId: string): Promise<void> {
 		const runtime = this.runtime(agentId);
 		const client = this.requireClient();
