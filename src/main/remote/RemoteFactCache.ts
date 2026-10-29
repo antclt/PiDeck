@@ -32,15 +32,26 @@ export type FactCacheStats = {
 	entries: number;
 };
 
+/** 一次读取的可选条件：代数围栏与显式刷新。 */
+export type FactReadOptions = {
+	/**
+	 * 连接代数（`RemoteProjectSession.connectionId`）。值变了说明 helper 已重连/换根：旧代缓存不可发布，
+	 * 在途旧代读也不得被新读合并。undefined 表示调用方不持有稳定身份（兼容/测试端口），不做代数围栏。
+	 */
+	generation?: string;
+	/** 显式刷新：越过已完成缓存（在途同代装载仍可合并）。 */
+	force?: boolean;
+};
+
 export type FactCache<T> = {
 	/** 读一个 key：有现值就返回，标脏或不存在就装载（同 key 并发只装载一次）。 */
-	read(key: string): Promise<FactSnapshot<T>>;
+	read(key: string, options?: FactReadOptions): Promise<FactSnapshot<T>>;
 	/** 标脏：不改值，只让下一次读取去装载。已标脏的 key 重复标脏不额外涨 revision。 */
 	invalidate(key: string): void;
 	/** 标脏全部匹配的 key（用于「一次写影响多个事实」的失效矩阵）。 */
 	invalidateWhere(matches: (key: string) => boolean): void;
 	/** 强制重新装载（读的人明确要求刷新时用）。 */
-	refresh(key: string): Promise<FactSnapshot<T>>;
+	refresh(key: string, options?: Omit<FactReadOptions, "force">): Promise<FactSnapshot<T>>;
 	/** 现值（不装载），给「只想渲染已知事实」的路径用。 */
 	peek(key: string): FactSnapshot<T> | undefined;
 	stats(): FactCacheStats;
@@ -50,8 +61,8 @@ export type FactCache<T> = {
 	clearWhere(matches: (key: string) => boolean): void;
 };
 
-type Entry<T> = { value: T | undefined; revision: number; stale: boolean };
-type Inflight<T> = Promise<FactSnapshot<T>>;
+type Entry<T> = { value: T | undefined; revision: number; stale: boolean; generation?: string };
+type Flight<T> = { cancelled: boolean; generation?: string; promise: Promise<FactSnapshot<T>> };
 
 /**
  * @param load 装载函数：一次调用对应一次真实的远端往返。
@@ -60,7 +71,7 @@ type Inflight<T> = Promise<FactSnapshot<T>>;
 export function createFactCache<T>(load: (key: string) => Promise<Op<T>>, options: { maxEntries?: number } = {}): FactCache<T> {
 	const maxEntries = Math.max(1, Math.trunc(options.maxEntries ?? 512));
 	const entries = new Map<string, Entry<T>>();
-	const inflight = new Map<string, Inflight<T>>();
+	const inflight = new Map<string, Flight<T>>();
 	let revisionCounter = 0;
 	const counters = { loads: 0, merges: 0, hits: 0, failures: 0 };
 
@@ -88,15 +99,38 @@ export function createFactCache<T>(load: (key: string) => Promise<Op<T>>, option
 		return { ok: true, value: entry.value, revision: entry.revision, stale: entry.stale };
 	}
 
-	async function startLoad(key: string): Promise<FactSnapshot<T>> {
+	/**
+	 * 退休一个在途装载：它已经不能代表当前事实了。
+	 *
+	 * 只标脏缓存值是不够的——下一次读会合并到这条旧请求上，读到写前的值。所以既要把请求从登记表里
+	 * **摘掉**（下一次读能建立新 flight），又要给它打上退休标记（它 settle 时不得发布旧成功、也不得
+	 * 删掉替代它的新 flight）。
+	 */
+	function retireFlight(key: string): void {
+		const flight = inflight.get(key);
+		if (flight === undefined) return;
+		flight.cancelled = true;
+		inflight.delete(key);
+	}
+
+	/** 退休读的结局：既有 `REQUEST_CANCELLED` 语义，不制造成功/失败事实。 */
+	function cancelledSnapshot(key: string): FactSnapshot<T> {
+		const revision = entries.get(key)?.revision ?? revisionCounter;
+		return { ...opFail("REQUEST_CANCELLED"), revision };
+	}
+
+	async function startLoad(key: string, generation: string | undefined): Promise<FactSnapshot<T>> {
 		counters.loads += 1;
+		const flight = { cancelled: false, generation } as Flight<T>;
 		const pending = load(key)
 			.then((result): FactSnapshot<T> => {
+				// 失效发生在装载途中：这次读已经作废，不发布旧值、不记失败。
+				if (flight.cancelled) return cancelledSnapshot(key);
 				const existing = entries.get(key);
 				if (result.ok) {
 					// 值被替换才涨 revision：同值重载不该让下游重渲染。
 					const revision = bump();
-					touch(key, { value: result.value, revision, stale: false });
+					touch(key, { value: result.value, revision, stale: false, ...(generation === undefined ? {} : { generation }) });
 					return { ok: true, value: result.value, revision, stale: false };
 				}
 				counters.failures += 1;
@@ -105,30 +139,47 @@ export function createFactCache<T>(load: (key: string) => Promise<Op<T>>, option
 				if (existing !== undefined) touch(key, { ...existing, stale: true });
 				return { ...opFail(result.code, result.outcome), revision };
 			})
+			.catch((error: unknown): FactSnapshot<T> => {
+				if (flight.cancelled) return cancelledSnapshot(key);
+				throw error;
+			})
 			.finally(() => {
-				inflight.delete(key);
+				// 只删自己：退休读的 finally 不能把替代它的新 flight 从登记表里删掉。
+				if (inflight.get(key) === flight) inflight.delete(key);
 			});
-		inflight.set(key, pending);
+		flight.promise = pending;
+		inflight.set(key, flight);
 		return await pending;
 	}
 
-	async function ensureLoaded(key: string, force: boolean): Promise<FactSnapshot<T>> {
+	async function ensureLoaded(key: string, force: boolean, generation: string | undefined): Promise<FactSnapshot<T>> {
 		const entry = entries.get(key);
-		if (!force && entry !== undefined && entry.value !== undefined && !entry.stale) {
+		if (entry !== undefined && entry.generation !== generation && !entry.stale) {
+			// 换代：旧代事实不能继续代表现在（也不删它：失败时 UI 仍可展示旧值并标「陈旧」）。
+			touch(key, { ...entry, revision: bump(), stale: true });
+		}
+		const current = entries.get(key);
+		if (!force && current !== undefined && current.value !== undefined && !current.stale && current.generation === generation) {
 			counters.hits += 1;
 			// 命中也是「用过」：不 touch 的话 LRU 会按写入顺序淘汰，热 key 反被踢掉。
-			touch(key, entry);
-			return { ok: true, value: entry.value, revision: entry.revision, stale: false };
+			touch(key, current);
+			return { ok: true, value: current.value, revision: current.revision, stale: false };
 		}
 		const running = inflight.get(key);
 		if (running !== undefined) {
-			counters.merges += 1;
-			return await running;
+			if (running.generation === generation) {
+				counters.merges += 1;
+				return await running.promise;
+			}
+			// 旧代在途读不得被新代读合并：退休它，另起一飞。
+			retireFlight(key);
 		}
-		return await startLoad(key);
+		return await startLoad(key, generation);
 	}
 
 	function invalidateKey(key: string): void {
+		// 先退休在途请求：否则下一次读会搭上一条“写前”的船。
+		retireFlight(key);
 		const entry = entries.get(key);
 		if (entry === undefined) {
 			// 没有现值也要记账：否则「先失效、后读取」会读到一个看起来「没被失效过」的新值。
@@ -140,19 +191,22 @@ export function createFactCache<T>(load: (key: string) => Promise<Op<T>>, option
 	}
 
 	return {
-		read: (key) => ensureLoaded(key, false),
-		refresh: (key) => ensureLoaded(key, true),
+		read: (key, options) => ensureLoaded(key, options?.force === true, options?.generation),
+		refresh: (key, options) => ensureLoaded(key, true, options?.generation),
 		peek: (key) => snapshotOf(key),
 		invalidate: invalidateKey,
 		invalidateWhere(matches: (key: string) => boolean): void {
-			for (const key of [...entries.keys()]) if (matches(key)) invalidateKey(key);
+			// 只有挂起装载、尚无缓存值的 key 也在登记表里：漏掉它等于失效没发生。
+			for (const key of new Set([...entries.keys(), ...inflight.keys()])) if (matches(key)) invalidateKey(key);
 		},
 		stats: () => ({ ...counters, inflight: inflight.size, entries: entries.size }),
 		clear(): void {
-			// 在途装载不取消：它 settle 时会把结果写回，调用方（host 断开后的下一次读取）再自行决定是否采用。
+			// 在途装载要退休：它 settle 时既不能写回旧值，也不能删掉 clear 之后新建的 flight。
+			for (const key of [...inflight.keys()]) retireFlight(key);
 			entries.clear();
 		},
 		clearWhere(matches: (key: string) => boolean): void {
+			for (const key of [...inflight.keys()]) if (matches(key)) retireFlight(key);
 			for (const key of [...entries.keys()]) if (matches(key)) entries.delete(key);
 		},
 	};
