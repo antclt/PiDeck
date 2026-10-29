@@ -36,7 +36,7 @@ function backendOptions(): { value: AgentBackend; label: string; desc: string }[
 /** 后端行首图标：pi=终端（本地编码助手）、dsh=官方预设 logo、生图=图片。 */
 function BackendOptionMark(props: { backend: AgentBackend }) {
 	if (props.backend === "dsh") return <AgentPresetLogo className="size-4" />;
-	if (props.backend === "imagegen") return <ImageIcon className="size-4 text-violet-600 dark:text-violet-400" aria-hidden="true" />;
+	if (props.backend === "imagegen") return <ImageIcon className="size-4 text-[var(--color-identity-agent)] " aria-hidden="true" />;
 	return <SquareTerminal className="size-4" aria-hidden="true" />;
 }
 

@@ -47,13 +47,13 @@ type PresetTone = { chip: string; hover: string };
 const PRESET_TONES: Record<string, PresetTone> = {
 	// 标准模式（完整能力）：蓝色是「默认/主力」的直觉色
 	standard: {
-		chip: "border-sky-500/25 bg-sky-500/12 text-sky-700 dark:border-sky-400/30 dark:bg-sky-400/15 dark:text-sky-300",
-		hover: "hover:bg-sky-500/20 hover:text-sky-800 dark:hover:bg-sky-400/25 dark:hover:text-sky-200",
+		chip: "border-[var(--color-identity-tool-line)] bg-[var(--color-identity-tool-soft)] text-[var(--color-identity-tool)]",
+		hover: "hover:bg-[var(--color-identity-tool-soft)] hover:text-[var(--color-identity-tool)]",
 	},
 	// PTC 模式（程序化编排多步操作）：紫色区分「编排」语义
 	ptc: {
-		chip: "border-violet-500/25 bg-violet-500/12 text-violet-700 dark:border-violet-400/30 dark:bg-violet-400/15 dark:text-violet-300",
-		hover: "hover:bg-violet-500/20 hover:text-violet-800 dark:hover:bg-violet-400/25 dark:hover:text-violet-200",
+		chip: "border-[var(--color-identity-agent-line)] bg-[var(--color-identity-agent-soft)] text-[var(--color-identity-agent)]",
+		hover: "hover:bg-[var(--color-identity-agent-soft)] hover:text-[var(--color-identity-agent)]",
 	},
 	// 极简模式（双工具）：绿色对应「轻量」
 	minimal: {

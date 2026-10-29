@@ -210,7 +210,7 @@ export function DshPluginMarketSection() {
 function SourceBadge(props: { source: "market" | "npm" }) {
 	if (props.source === "market") {
 		return (
-			<Badge variant="outline" className="shrink-0 border-sky-300/70 bg-sky-500/10 font-medium text-sky-700 dark:border-sky-700/70 dark:text-sky-300">
+			<Badge variant="outline" className="shrink-0 border-[var(--color-identity-tool-line)] bg-[var(--color-identity-tool-soft)] font-medium text-[var(--color-identity-tool)]  ">
 				<Globe className="mr-1 size-2.5" aria-hidden="true" />
 				{t("config.dsh.pluginMarketSourceMarket")}
 			</Badge>

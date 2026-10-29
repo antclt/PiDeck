@@ -174,6 +174,16 @@ PiDeck 的界面像一张摊开的制图台：纸是白的，线是墨的，工�
 - **Danger** (#b42318) / **Success** (#14703a) / **Warning** (#854d0e): 状态三色。暗色主题下整体提亮到 400 档（`#f87171` / `#4ade80` / `#fbbf24`），soft 底换成深色版本，不允许浅色 soft 底漏进暗色界面。
 - **Code Surface** (#111418) / **Code Ink** (#d1d5db): 代码块固定深底，不随主题反转——代码永远是"另一块屏"。
 
+### Identity
+用来回答「这是哪类东西」，不回答「它状态如何」。四个角色固定，不允许新增第五个：
+
+- **Tool** (`--color-identity-tool`): 工具、插件、预设、飞书等外部集成。
+- **Agent** (`--color-identity-agent`): Agent 本体、生成物、子代理、侧任务。
+- **Source** (`--color-identity-source`): pi 这类主来源的会话徽章。
+- **Source Alt** (`--color-identity-source-alt`): 导入来源（codex 等）的会话徽章。
+
+每个角色配 `-soft`（12% 淡底）与 `-line`（32% 描边），暗色随基础色自动派生，不需要 `dark:` 变体。
+
 ### Documented Exceptions
 
 这些值**不属于**调色板漂移，已登记在 `.impeccable/config.json` 的 detector 豁免里，改动它们时不需要同步 DESIGN.md：
@@ -190,6 +200,8 @@ PiDeck 的界面像一张摊开的制图台：纸是白的，线是墨的，工�
 **The One Accent Rule.** 一个界面里只有一个强调色。它由用户的主题设置决定，不能被局部覆盖成第二个品牌色。强调色占屏面积控制在 10% 以内。
 
 **The Ink Line Rule.** 边框永远用墨水的 alpha（`.10/.13/.17`），不用不透明灰。同一屏里出现 `#e5e5e5` 这类实色边框就是错的。
+
+**The Identity Is Not Status Rule.** 身份色只回答「这是哪类东西」，不能用来表示成功/失败/危险。反过来也成立：状态色不能拿来区分来源。两者混用会让"红色"同时意味着"失败"和"codex"。
 
 **The Status Never Borrows Brand Rule.** 成功/警告/危险/信息只用自己的语义 token。禁止写 `emerald-500` / `amber-400` / `rose-500` 这类字面色——那会让同一状态在浅色、暗色、皮肤三套环境里长成三种颜色。
 

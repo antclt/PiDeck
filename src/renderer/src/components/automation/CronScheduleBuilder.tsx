@@ -87,7 +87,7 @@ export function CronScheduleBuilder({ value, onChange, previews, error }: CronSc
 		<div className="flex flex-col gap-2.5 rounded-lg border border-border/50 bg-bg-panel/40 p-3">
 			<div className="flex flex-wrap items-center justify-between gap-2">
 				<Label className="flex items-center gap-1.5 text-xs font-medium">
-					<Clock className="size-3.5 text-sky-500" />
+					<Clock className="size-3.5 text-[var(--color-identity-tool)]" />
 					{t("automation.cronExpression")} <span className="text-destructive">*</span>
 				</Label>
 				<div className="flex flex-wrap items-center gap-1">

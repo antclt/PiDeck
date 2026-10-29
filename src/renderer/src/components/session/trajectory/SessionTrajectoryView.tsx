@@ -71,8 +71,9 @@ function kindLabel(record: TrajectoryRecord): string {
 function laneTone(lane: TrajectoryLane): string {
 	if (lane === "input") return "bg-primary/70";
 	if (lane === "tools") return "bg-warning/75 dark:bg-warning/70";
-	if (lane === "process") return "bg-violet-500/70 dark:bg-violet-400/65";
-	return "bg-sky-500/70 dark:bg-sky-400/65";
+	// 轨迹泳道要的是实色带（70% 不透明），不是 chip 的淡底
+	if (lane === "process") return "bg-[var(--color-identity-agent)] opacity-70";
+	return "bg-[var(--color-identity-tool)] opacity-70";
 }
 
 function projectLeft(start: number, domainStart: number, span: number): number {

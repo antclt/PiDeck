@@ -206,6 +206,23 @@
   --color-chip-file: #1d4ed8;
   --color-chip-skill: #7c3aed;
   --color-chip-session: #166534;
+  /* ── 身份色（identity）：标识「这是哪类东西」，不表达状态 ──────────────
+     四个角色固定：tool=工具/插件/预设，agent=Agent/生成物/子代理，
+     source=主来源（pi 等），source-alt=导入来源（codex 等）。
+     只允许用语义名，禁止再写字面 sky/violet/cyan/indigo。
+     -soft 是 12% 淡底，-line 是 32% 描边，暗色随基础色自动派生。 */
+  --color-identity-tool: #0369a1;
+  --color-identity-agent: #6d28d9;
+  --color-identity-source: #0e7490;
+  --color-identity-source-alt: #4338ca;
+  --color-identity-tool-soft: color-mix(in srgb, var(--color-identity-tool) 12%, transparent);
+  --color-identity-agent-soft: color-mix(in srgb, var(--color-identity-agent) 12%, transparent);
+  --color-identity-source-soft: color-mix(in srgb, var(--color-identity-source) 12%, transparent);
+  --color-identity-source-alt-soft: color-mix(in srgb, var(--color-identity-source-alt) 12%, transparent);
+  --color-identity-tool-line: color-mix(in srgb, var(--color-identity-tool) 32%, transparent);
+  --color-identity-agent-line: color-mix(in srgb, var(--color-identity-agent) 32%, transparent);
+  --color-identity-source-line: color-mix(in srgb, var(--color-identity-source) 32%, transparent);
+  --color-identity-source-alt-line: color-mix(in srgb, var(--color-identity-source-alt) 32%, transparent);
   --color-code-bg: #111418;
   --color-code-text: #d1d5db;
   /* 会话区「卡片」一律白卡（ZCode Light：panel/card/popover 同为 #ffffff，靠浮在
@@ -641,6 +658,10 @@
   --color-thinking: #818cf8;
   /* 引用 chip 身份色暗色档：比浅色提亮一档，保证在深灰底上有足够辨识度
      （实测文字/底色 5.2~7.7:1，均达 AA）。 */
+  --color-identity-tool: #7dd3fc;
+  --color-identity-agent: #c4b5fd;
+  --color-identity-source: #67e8f9;
+  --color-identity-source-alt: #a5b4fc;
   --color-chip-file: #60a5fa;
   --color-chip-skill: #a78bfa;
   --color-chip-session: #4ade80;

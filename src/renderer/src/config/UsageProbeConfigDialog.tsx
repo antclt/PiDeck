@@ -482,7 +482,7 @@ export function UsageProbeConfigDialog(props: {
 						<>
 							{loadErrors.length > 0 && <div className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-caption leading-relaxed text-warning">{loadErrors.join("\n")}</div>}
 							{legacyNotice && (
-								<div className="rounded-md border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-caption leading-relaxed text-sky-600 dark:text-sky-400" data-testid="usage-probe-legacy-notice">
+								<div className="rounded-md border border-[var(--color-identity-tool-line)] bg-[var(--color-identity-tool-soft)] px-3 py-2 text-caption leading-relaxed text-[var(--color-identity-tool)] " data-testid="usage-probe-legacy-notice">
 									{legacyNotice}
 								</div>
 							)}

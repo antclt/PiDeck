@@ -15,7 +15,7 @@ export type UsageTone = "ok" | "low" | "empty" | "neutral";
 /** tone → 文字色（cc-switch text-success/orange-500/red-500 同款，含暗色变体）。 */
 export const USAGE_TONE_TEXT_CLASS: Record<UsageTone, string> = {
 	ok: "text-success",
-	low: "text-orange-500 dark:text-orange-400",
+	low: "text-warning dark:text-orange-400",
 	empty: "text-danger",
 	neutral: "text-text-tertiary",
 };
@@ -23,7 +23,7 @@ export const USAGE_TONE_TEXT_CLASS: Record<UsageTone, string> = {
 /** tone → 进度条填充色（TierBar 同款：绿/橙/红）。 */
 export const USAGE_TONE_BAR_CLASS: Record<UsageTone, string> = {
 	ok: "bg-success",
-	low: "bg-orange-500",
+	low: "bg-warning",
 	empty: "bg-danger",
 	neutral: "bg-text-tertiary",
 };
