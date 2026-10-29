@@ -584,11 +584,11 @@ const AppearanceStylePicker = memo(function AppearanceStylePicker(props: { value
 						<span className={cn("flex h-12 w-full flex-col justify-center gap-1 overflow-hidden border border-border-subtle bg-bg-page px-2", isTerminal ? "rounded-none" : "rounded-sm")} aria-hidden="true">
 							{isTerminal ? (
 								<>
-									<span className="flex items-center gap-1 font-mono text-[10px] leading-none text-[var(--color-accent)]">
+									<span className="flex items-center gap-1 font-mono text-micro leading-none text-[var(--color-accent)]">
 										<span>❯</span>
 										<span className="h-2 flex-1 bg-[var(--color-accent)] opacity-25" />
 									</span>
-									<span className="flex items-center gap-1 font-mono text-[10px] leading-none text-[var(--color-md-heading)]">
+									<span className="flex items-center gap-1 font-mono text-micro leading-none text-[var(--color-md-heading)]">
 										<span>⏺</span>
 										<span className="h-2 flex-1 bg-[var(--color-text-tertiary)] opacity-25" />
 									</span>

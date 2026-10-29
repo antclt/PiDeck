@@ -290,7 +290,7 @@ export function VisionBridgeSettingsTab(props: {
 			{/* 保存失败提示：成功走全局 toast（showNotice），失败就近展示便于与头部保存按钮对照 */}
 			{notice && (
 				<div className="flex items-center gap-3 px-0.5 pt-4">
-					<small style={{ color: "var(--color-danger, #dc2626)" }}>{notice}</small>
+					<small style={{ color: "var(--color-danger)" }}>{notice}</small>
 				</div>
 			)}
 			{saving && <div className="px-0.5 pt-2 text-caption text-muted-foreground">{t("common.saving")}</div>}

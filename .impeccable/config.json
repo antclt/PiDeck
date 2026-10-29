@@ -11,7 +11,8 @@
       "src/renderer/src/components/app/settings/useQrDataUrl.ts",
       "src/renderer/src/config/TokenDanceTopUpDialog.tsx",
       "src/renderer/src/styles/foundation.css",
-      "src/renderer/src/styles/tailwind.css"
+      "src/renderer/src/styles/tailwind.css",
+      "src/renderer/src/components/app/SupportPiDeckDialog.tsx"
     ],
     "ignoreValues": []
   }

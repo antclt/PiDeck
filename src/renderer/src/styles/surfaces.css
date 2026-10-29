@@ -721,9 +721,9 @@
   padding: 8px 12px;
   margin-bottom: 12px;
   border-radius: var(--radius-md);
-  background: var(--color-warning-bg, #fef9c3);
-  border: 1px solid var(--color-warning-border, #fde047);
-  color: var(--color-warning-text, #854d0e);
+  background: color-mix(in srgb, var(--color-warning) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 30%, transparent);
+  color: var(--color-warning);
   font-size: var(--font-size-control);
 }
 .setting-proxy-unsaved-bar small {
@@ -731,16 +731,12 @@
   opacity: 0.8;
   font-size: var(--font-size-caption);
 }
-:root[data-theme="dark"] .setting-proxy-unsaved-bar {
-  background: var(--color-warning-bg, #422006);
-  border-color: var(--color-warning-border, #854d0e);
-}
 /* 未保存圆点指示器 */
 .setting-proxy-unsaved-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--color-warning, #eab308);
+  background: var(--color-warning);
   flex-shrink: 0;
 }
 /* 代理保存/取消操作栏 */
@@ -807,12 +803,12 @@
   gap: 4px;
 }
 .setting-wsl-validation.success {
-  background: var(--color-success-bg, #f0fdf4);
-  border: 1px solid var(--color-success-border, #bbf7d0);
+  background: color-mix(in srgb, var(--color-success) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-success) 30%, transparent);
 }
 .setting-wsl-validation.error {
-  background: var(--color-error-bg, #fef2f2);
-  border: 1px solid var(--color-error-border, #fecaca);
+  background: color-mix(in srgb, var(--color-danger) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 30%, transparent);
 }
 /* WSL 面板操作按钮（应用/取消） */
 
@@ -842,8 +838,8 @@
   transition: background-color var(--transition-base) ease, box-shadow var(--transition-base) ease;
 }
 .pi-status-dot.online {
-  background: var(--color-success, #22c55e);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-success, #22c55e) 30%, transparent);
+  background: var(--color-success);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-success) 30%, transparent);
 }
 .pi-status-dot.offline {
   background: var(--color-text-tertiary);
@@ -897,7 +893,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--color-warning, #eab308);
+  background: var(--color-warning);
   margin-left: 6px;
   vertical-align: middle;
   flex-shrink: 0;
@@ -1214,9 +1210,9 @@
   gap: 3px;
   margin-left: 8px;
   padding: 1px 6px;
-  border-radius: var(--radius-full);
-  background: var(--color-success-soft, color-mix(in srgb, #22c55e 12%, transparent));
-  color: var(--color-success, #22c55e);
+  border-radius: var(--radius-pill);
+  background: var(--color-success-soft);
+  color: var(--color-success);
   font-size: 11px;
   font-weight: 500;
   vertical-align: middle;
@@ -2648,7 +2644,7 @@ div.fixed.inset-0.z-50 {
 .app-error-boundary-message {
   margin: 0 auto;
   max-width: 420px;
-  font-size: 13.5px;
+  font-size: var(--font-size-control);
   line-height: 1.7;
   color: var(--color-text-secondary, #4a4a4a);
   font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
@@ -2680,7 +2676,7 @@ div.fixed.inset-0.z-50 {
   display: inline-block;
   margin-right: 6px;
   transition: transform 0.15s ease;
-  color: var(--color-text-tertiary, #6b7280);
+  color: var(--color-text-tertiary);
 }
 .app-error-boundary-stack[open] summary::before {
   transform: rotate(90deg);
@@ -2694,7 +2690,7 @@ div.fixed.inset-0.z-50 {
   padding: 12px 14px;
   overflow: auto;
   border-top: 1px solid var(--color-border-subtle, rgba(13, 13, 13, 0.1));
-  font-size: 11.5px;
+  font-size: var(--font-size-micro);
   line-height: 1.6;
   color: var(--color-danger, #b42318);
   white-space: pre-wrap;
@@ -2714,7 +2710,7 @@ div.fixed.inset-0.z-50 {
   margin-top: 18px;
   font-size: 12px;
   line-height: 1.6;
-  color: var(--color-text-tertiary, #6b7280);
+  color: var(--color-text-tertiary);
 }
 
 /* 自动刷新状态行：倒计时文案 + 取消按钮水平排布，与上方按钮组保持节奏 */
@@ -2727,11 +2723,11 @@ div.fixed.inset-0.z-50 {
   margin-top: 14px;
   font-size: 12px;
   line-height: 1.6;
-  color: var(--color-text-tertiary, #6b7280);
+  color: var(--color-text-tertiary);
 }
 
 .app-error-boundary-autoreload-cancel {
-  color: var(--color-text-tertiary, #6b7280);
+  color: var(--color-text-tertiary);
 }
 
 /* ── keyframes ── */

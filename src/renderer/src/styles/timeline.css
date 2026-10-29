@@ -655,7 +655,7 @@
 .responding-indicator[data-kind="executing"],
 .responding-indicator[data-kind="compacting"],
 .responding-indicator[data-kind="retrying"] {
-  color: var(--color-warning, #d97706);
+  color: var(--color-warning);
 }
 
 /* 过渡等待：只显示静态文案，不轮播 */
