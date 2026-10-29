@@ -191,7 +191,8 @@ type GrantScope = { purpose: "git-write"|"file-entry"|"file-text"; sender: numbe
 | W1 | ◐ 主体 | `fileTreeLazy`：`projectFileKey` / `parseFileTreeKey` / `fileTreeNodeKey`（不再退回本机绝对路径）/ `migrateExpandedDirKeys` / `isActiveFileTreeRow`；拖拽负载的 `path` 变可选、远端不再伪造本机路径；展开集旧键按树内 `path` 别名迁移（幂等）；`useProjectSync` / `useProjectFileTreeController` / `FileTreeRows` / `RemoteProjectPanel` 已跟随 |
 | W2 | ◐ 大部分 | **entry / text / trust / project（7 类）/ transfer（上传下载）已 `Op<T>`**；`shared/op.ts` 提供 `Op` / `codeOf` / `OP_UNKNOWN_CODES` / `opFailFromCode`；`codeOf` 独立实现 **10 份 → 1 份**（`remoteHostInputValidation` 改 re-export）；`tests/envelopeSingleSource.test.mjs` 守不变量 |
 | W3 | ◐ 目录族已接线 | `RemoteFactCache` / `RemoteWorkspaceView`（三族形状 + 失效矩阵 + `onChanged`）；`ProjectCapabilities` 下沉 shared 并替掉三处「已连接」判定（R3 已修）；**目录族已进生产**：`remoteProjectIpc.list` 走事实层并返回 `{entries, revision}`，entry/text 写成功后标脏（`tests/remoteProjectDirFacts.test.mjs` 5 例） |
-| W4 / W5 / W6 | ⨯ 未开 | 见下表 |
+| W4 | ◐ 前置完成 | **读事实 / 签授权已拆开**：`RemoteGitSnapshotFacts` 只缓存事实（按 项目+仓库、同键合并、带 revision），令牌仍每次现签；安全网是写动词自带的 `expectedRevision`（旧事实写不穿）。`git:listRepos` 已同时服务 ssh（远端结果映射成同形 `GitRepoInfo[]`）——单通道族的第一个动词 |
+| W5 / W6 | ⨯ 未开 | 见下表 |
 
 **W2 的未完成项与理由（不是遗漏）**
 
@@ -208,7 +209,9 @@ type GrantScope = { purpose: "git-write"|"file-entry"|"file-text"; sender: numbe
 
 **下一步的确定落点（按依赖顺序）**
 
-1. **W4 前置：把「读事实」与「签授权」拆开**（这是 Git 侧进事实层的唯一前提）。
+1. **W4 前置：~~把「读事实」与「签授权」拆开~~ ✅ 已完成**（`src/main/git/RemoteGitSnapshotFacts.ts` + 7 例测试；
+   `git:remote-snapshot` 走它，写动词成功即标脏）。剩余：把 `status` 也接进 `RemoteWorkspaceView` 的
+   status 族（形状已就绪，缺的是把它接到 git 读路径的那一步接线）。
    目标形状：读只产出 `{facts, revision}`；写授权按 `(scope, revision)` 在**写的那一刻**现取，
    helper 侧已经有 `expectedRevision`（`git.push`/`git.pull` 在用）。做完之后 `git:remote-snapshot`
    才可以进缓存，树着色与面板才算真正共读一份事实。
