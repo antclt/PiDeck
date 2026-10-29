@@ -205,6 +205,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 	return (
 		<ComposerPickerHost
 			sessionId={props.sessionId}
+			backend={composer.backend}
 			picker={composer.picker}
 			templates={composer.templates}
 			onClose={composer.pickers.close}

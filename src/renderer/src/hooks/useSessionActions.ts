@@ -3,7 +3,6 @@ import type { AgentBackend, ArchivedPiSession, CreateAnonymousSessionResult, Pro
 import { collectSessionSubtreeIds, getSessionEnvironment } from "../../../shared/sessionIdentity";
 import { isSameSessionPath } from "../agentListDisplay";
 import { t } from "../i18n";
-import type { NewSessionBackendTarget } from "../utils/chatSessionBootstrap";
 
 /**
  * 新建会话默认后端（C21 统一真相源）：缺省为 pi（经典后端，2026-12 兼容期
@@ -45,11 +44,6 @@ export interface UseSessionActionsOptions {
 	refreshProjectSessions: RefreshProjectSessions;
 	/** 新建会话默认后端（设置项 defaultAgentBackend；缺省走 DEFAULT_AGENT_BACKEND）。 */
 	defaultBackend?: AgentBackend;
-	/**
-	 * 新建草稿的后端解析（创建时调用）：上次显式选择优先，不可用回落 defaultBackend。
-	 * 不传 = 只用 defaultBackend（旧装配/单测）。
-	 */
-	resolveNewSessionTarget?: () => NewSessionBackendTarget;
 	api: {
 		sessions: {
 			copyRecord: (sessionId: string) => Promise<{ cancelled?: boolean; targetSessionId?: string }>;
@@ -247,21 +241,19 @@ export function useSessionActions(options: UseSessionActionsOptions) {
 	async function createSessionDraft(
 		projectId = activeProjectId,
 		preferences: SessionLaunchPreferences = {},
-		// 显式 backend（调用方指定）优先；缺省按「上次显式选择 → 设置默认」解析。
+		// 显式 backend（调用方指定）优先；缺省只用设置默认，不沿用「上次选择」。
 		backend?: AgentBackend,
 	): Promise<SessionRecord | undefined> {
 		if (!projectId || creatingSessionDraftRef.current.has(projectId)) return undefined;
 		const project = projects.find((item) => item.id === projectId);
 		if (!project) return undefined;
-		const target: NewSessionBackendTarget = backend ? { backend } : (options.resolveNewSessionTarget?.() ?? { backend: options.defaultBackend ?? DEFAULT_AGENT_BACKEND });
-		const acpToolId = target.backend === "acp" ? target.acpToolId : undefined;
+		const targetBackend = backend ?? options.defaultBackend ?? DEFAULT_AGENT_BACKEND;
 		creatingSessionDraftRef.current.add(projectId);
 		try {
 			const session = await api.sessions.createDraft({
 				projectId,
-				title: target.backend === "dsh" ? `${project.name} DSH` : `${project.name} agent`,
-				backend: target.backend,
-				...(acpToolId ? { acpToolId } : {}),
+				title: targetBackend === "dsh" ? `${project.name} DSH` : `${project.name} agent`,
+				backend: targetBackend,
 				...preferences,
 			});
 			upsertSession(session);

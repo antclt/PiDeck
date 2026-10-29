@@ -47,7 +47,9 @@ import {
 	promoteSessionComposerStateAtom,
 	removeSessionStateAtom,
 	currentSessionIdAtom,
+	acpEnabledAtom,
 	acpToolsAtom,
+	dshRuntimeStatusAtom,
 	type PastedTextFile,
 } from "../atoms";
 import {
@@ -79,7 +81,7 @@ import { t } from "../i18n";
 import { COMPOSER_ATTACHMENT_BUDGET_BYTES, COMPOSER_IMAGE_MAX_BYTES, ComposerImageError, attachmentBytes, base64DataBytes, dataUrlToFile, getClipboardImageFiles, getDroppedImageFiles, imageMimeTypeFromPath, isImageFilePath, processComposerImageFile } from "../utils/composerImages";
 import { PASTE_TO_FILE_MIN_CHARS } from "../rendererUtils";
 import { resolveBackendSwitchDefaults } from "../utils/backendSwitchDefaults";
-import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeAcpToolPreference, readWelcomeBackendPreference, readWelcomeDshModelPreference, readWelcomeModelPreference, rememberBackendPreference, resolveGuidePageBackend } from "../utils/chatSessionBootstrap";
+import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeDshModelPreference, readWelcomeModelPreference, resolveGuidePageBackend, resolveNewSessionTarget, type NewSessionBackendTarget } from "../utils/chatSessionBootstrap";
 import { expandSessionReferences } from "../sending/outgoingExpansion";
 import { showNotice } from "../utils/notice";
 import { requireSessionCommand, toSessionRuntimeTarget } from "../utils/sessionCommands";
@@ -168,7 +170,8 @@ export type UseSessionComposerControllerOptions = {
 	 * 会话创建（发送仍由 App.ensureSessionForSend 落地）。
 	 */
 	bootstrapProjectId?: string;
-	ensureSessionId?: (sessionId: string) => Promise<string>;
+	/** target：引导页首次发送时的后端选择（缺省按设置默认创建）。 */
+	ensureSessionId?: (sessionId: string, target?: NewSessionBackendTarget) => Promise<string>;
 	/** 用户主动发消息时回调（预览 Tab 晋升常驻）；来自 SessionPaneServices 装配。 */
 	onPromoteSession?: (sessionId: string) => void;
 	/** `/new` 拦截后新建会话（与侧栏 + 同源）；来自 SessionPaneServices。 */
@@ -336,20 +339,23 @@ export function useSessionComposerController(options: UseSessionComposerControll
 
 	// DSH：plan 由 host 持有；goal 由本地选择或进行中/阻塞的目标驱动（切回普通会 pause）。
 	// 生图为独立供应商配置，不属于 pi/dsh 任一后端，两种后端均可用。
-	// 引导页虚拟会话的后端显式选择：无 record、不落 catalog，后端切换走
-	// localStorage 偏好（与 pickModel/pickThinking 的引导页分支同构），首次发送
-	// 由 App.ensureSessionForSend 读取同一份偏好创建真实会话。仅在引导页初始化，
-	// 真实会话（record 短暂未就绪）不受 localStorage 残留影响。
+	// 引导页虚拟会话的后端显式选择：无 record、不落 catalog，切换只写本页 state。
+	// 刻意不从 localStorage 恢复「上次选择」：新建会话默认后端只跟随设置项——
+	// 自动沿用 ACP 会在冷启动把握手加载态塞进输入框（用户反馈体验差），用户要
+	// 换后端就在输入框里手动切，首次发送按当前选择创建真实会话。
+	const defaultAgentBackend = useAtomValue(effectiveAgentBackendAtom);
 	const isGuideBootstrapSession = sessionId === GUIDE_BOOTSTRAP_SESSION_ID;
-	const [guideBackendOverride, setGuideBackendOverride] = useState<AgentBackend | undefined>(() => (isGuideBootstrapSession ? readWelcomeBackendPreference() : undefined));
+	const [guideBackendOverride, setGuideBackendOverride] = useState<AgentBackend | undefined>(undefined);
 	// 引导页 ACP 工具预选单独入 state：acp→acp 换工具时后端名不变，
 	// setGuideBackendOverride("acp") 同值不触发重渲染，trigger 回显会停在旧工具；
 	// 工具 id 必须自己有 state 才能让受控 Select 刷新。
-	const [guideAcpToolOverride, setGuideAcpToolOverride] = useState<string | undefined>(() => (isGuideBootstrapSession ? readWelcomeAcpToolPreference() : undefined));
-	const isDshBackend = record?.backend === "dsh" || runtime?.backend === "dsh" || (isGuideBootstrapSession && guideBackendOverride === "dsh");
+	const [guideAcpToolOverride, setGuideAcpToolOverride] = useState<string | undefined>(undefined);
+	// 引导页当前展示/将创建的后端：本页手动切换优先，否则设置默认（已按 DSH 安装态钳制）。
+	const guideBackend: AgentBackend = isGuideBootstrapSession ? (guideBackendOverride ?? defaultAgentBackend) : defaultAgentBackend;
+	const isDshBackend = record?.backend === "dsh" || runtime?.backend === "dsh" || (isGuideBootstrapSession && guideBackend === "dsh");
 	// ACP 后端：忙碌投递恒收敛为 followUp（协议无 steer 通道，插队必被 manager 拒收），
 	// 拆分菜单的「插入当前回合」项也整体隐藏。
-	const isAcpBackend = record?.backend === "acp" || runtime?.backend === "acp" || (isGuideBootstrapSession && guideBackendOverride === "acp");
+	const isAcpBackend = record?.backend === "acp" || runtime?.backend === "acp" || (isGuideBootstrapSession && guideBackend === "acp");
 	const hasImageGenHistory = (messageCache?.messages ?? []).some((message) => Boolean(message.meta?.imageGen));
 	// 生视频不存在 legacy 混排（videogen 是新后端，只有它自己会写 meta.videoGen），不需要历史锁。
 	const isVideoGenBackend = record?.backend === "videogen";
@@ -425,7 +431,6 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	// 「切到 dsh 后底栏显示 pi 模型」）。按 dsh 解析时该 IPC 不返回模型（模型归属
 	// host settings），底栏自然回落到 dshDefaultModel。
 	// 仍然经 effectiveAgentBackendAtom 取默认值（DSH runtime 安装态钳制）。
-	const defaultAgentBackend = useAtomValue(effectiveAgentBackendAtom);
 	const guidePageBackend: AgentBackend = isGuideBootstrapSession ? resolveGuidePageBackend({ override: guideBackendOverride, effectiveDefault: defaultAgentBackend }) : defaultAgentBackend;
 	const [bootstrapDefaults, setBootstrapDefaults] = useState<ResolvedLaunchDefaults | undefined>(undefined);
 	useEffect(() => {
@@ -1190,7 +1195,24 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	const send = useSessionSend({
 		sessionId,
 		sendPrompt: (input) => desktopApi.sessions.sendPrompt(input),
-		ensureSessionId,
+		// 引导页首次发送：把本页当前后端选择（含 ACP 工具）带给创建链路，
+		// 不再依赖 localStorage 的「上次选择」；非引导页会话直接透传。
+		ensureSessionId: ensureSessionId
+			? (id) =>
+					ensureSessionId(
+						id,
+						isGuideBootstrapSession
+							? resolveNewSessionTarget({
+									requested: guideBackendOverride,
+									requestedAcpToolId: guideAcpToolOverride,
+									defaultBackend: defaultAgentBackend,
+									dshAvailable: store.get(dshRuntimeStatusAtom).state === "installed",
+									acpEnabled: store.get(acpEnabledAtom),
+									acpTools: store.get(acpToolsAtom),
+								})
+							: undefined,
+					)
+			: undefined,
 		getTemplates: () => templatesRef.current,
 		getReservedCommandNames: () => reservedCommandNamesRef.current,
 		ensureTemplates: ensureTemplatesForMessage,
@@ -2207,7 +2229,6 @@ export function useSessionComposerController(options: UseSessionComposerControll
 				setGuideBackendOverride(next);
 				// acp→acp 换工具：后端同值不触发重渲染，工具 id 单独 set（见 state 声明处注释）
 				if (guideToolId) setGuideAcpToolOverride(guideToolId);
-				rememberBackendPreference(next, guideToolId);
 				return;
 			}
 			// 未开始对话的会话允许换后端：先把预热/认领出来的 runtime 停掉再改 record。
@@ -2248,8 +2269,6 @@ export function useSessionComposerController(options: UseSessionComposerControll
 					...(next === "acp" && acpToolId ? { acpToolId } : {}),
 				});
 				upsertSession(updated);
-				// 成功切换才记：下次新建会话沿用这次选择（与设置默认相同则解析时自然忽略）。
-				rememberBackendPreference(next, acpToolId);
 			} catch (error) {
 				showNotice(error instanceof Error ? error.message : String(error), 4000);
 			}
@@ -2267,8 +2286,6 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			try {
 				const updated = await desktopApi.sessions.updateRecord(sessionId, { acpToolId: toolId });
 				upsertSession(updated);
-				// acp→acp 换工具同样算一次显式后端选择，下次新建沿用该工具。
-				rememberBackendPreference("acp", toolId);
 			} catch (error) {
 				showNotice(error instanceof Error ? error.message : String(error), 4000);
 			}
@@ -2371,9 +2388,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		sessionId,
 		record,
 		runtime,
-		// 引导页优先回显显式切换（guideBackendOverride），否则退回上次偏好/默认 pi；
+		// 引导页优先回显本页手动切换，否则就是设置默认后端（不沿用上次选择）；
 		// 真实会话以 record 为准。
-		backend: record?.backend ?? (isGuideBootstrapSession ? guideBackendOverride : undefined) ?? "pi",
+		backend: record?.backend ?? (isGuideBootstrapSession ? guideBackend : undefined) ?? "pi",
 		/** 草稿期可切换后端；激活后锁定（undefined → UI 隐藏切换器）。 */
 		changeBackend: backendLocked ? undefined : changeBackend,
 		// ACP 工具二级选择（草稿期；激活后 UI 不再渲染选择器）

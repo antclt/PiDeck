@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { AgentBackend } from "../../../../shared/types";
 import type { PromptTemplateInfo } from "../../composerBehavior";
 import { ModelPicker, PromptTemplatePicker } from "./ComposerParts";
 import { ThinkingLevelDropdown } from "./ModelThinkingChip";
@@ -10,6 +11,8 @@ import { useSessionPreferenceController } from "../../hooks/useSessionPreference
 
 export type ComposerPickerHostProps = {
 	sessionId: string;
+	/** 当前会话后端（引导页 = 输入框当前选择；有 record 时以 record 为准）。 */
+	backend?: AgentBackend;
 	picker: ComposerPickerKind | null;
 	templates: PromptTemplateInfo[];
 	onClose: () => void;
@@ -43,6 +46,7 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
 		sessionId: props.sessionId,
 		pickerOpen: props.picker === "model" || props.picker === "thinking",
 		thinkingPickerOpen: props.picker === "thinking",
+		backend: props.backend,
 		defaultModel: props.defaultModel,
 		defaultThinkingLevel: props.defaultThinkingLevel,
 		modelThinkingLevels: props.modelThinkingLevels,

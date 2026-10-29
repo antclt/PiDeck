@@ -108,7 +108,7 @@ import { activeAgentIdAtom } from "./hooks/useSessionRuntimeController";
 import { useSessionHistoryMutations } from "./hooks/useSessionHistoryMutations";
 import { useUserMessageEditReplay } from "./hooks/useUserMessageEditReplay";
 import { isLiveRuntimeStatus, resolveSessionReloadMode, sessionCommandFailureToast, type SessionRunAction, type SessionRunCapabilities, type SessionRunControlView } from "./utils/sessionCommands";
-import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeAcpToolPreference, readWelcomeBackendPreference, readWelcomeDshModelPreference, readWelcomeModelPreference, readWelcomeThinkingPreference, rememberBackendPreference, resolveChatSessionBootstrap, resolveRememberedNewSessionTarget } from "./utils/chatSessionBootstrap";
+import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeDshModelPreference, readWelcomeModelPreference, readWelcomeThinkingPreference, resolveChatSessionBootstrap, type NewSessionBackendTarget } from "./utils/chatSessionBootstrap";
 import { useAppAppearance } from "./hooks/appearance/useAppAppearance";
 import { useAppBootstrapInfo } from "./hooks/app/useAppBootstrapInfo";
 import { useBootOverlayReady } from "./hooks/app/useBootOverlayReady";
@@ -1251,18 +1251,9 @@ export function App() {
 		refreshProjectSessions,
 		api,
 		showToast,
-		// 新建会话默认后端：跟随设置项（默认 pi，可切换 dsh），经 DSH runtime 安装态钳制
+		// 新建会话默认后端：跟随设置项（默认 pi，可切换 dsh），经 DSH runtime 安装态钳制。
+		// 不再沿用「上次选择」——侧栏「+」等入口一律按设置默认建会话。
 		defaultBackend: effectiveAgentBackend,
-		// 上次显式选择的后端优先（仅当与默认不同且仍可用）；设置默认本身不变。
-		resolveNewSessionTarget: () =>
-			resolveRememberedNewSessionTarget({
-				last: readWelcomeBackendPreference(),
-				lastAcpToolId: readWelcomeAcpToolPreference(),
-				defaultBackend: effectiveAgentBackend,
-				dshAvailable: store.get(dshRuntimeStatusAtom).state === "installed",
-				acpEnabled: store.get(acpEnabledAtom),
-				acpTools: store.get(acpToolsAtom),
-			}),
 	});
 
 	// 会话运行控制域（target 解析/克隆/关闭/中止/重启/重载/能力快照 + 四个 busy 态）收口到 useSessionRunControl
@@ -1597,7 +1588,7 @@ export function App() {
 	// 并发发送（快速双击）复用 guideBootstrapPromotionRef 里的同一个提升 promise，
 	// 避免建出两个会话。创建即用户意图（已输入消息），Chat 拉起 pi 是预期行为。
 	const ensureSessionForSend = useCallback(
-		async (sessionId: string) => {
+		async (sessionId: string, target?: NewSessionBackendTarget) => {
 			if (sessionId !== GUIDE_BOOTSTRAP_SESSION_ID) return sessionId;
 			if (guideBootstrapPromotionRef.current) return guideBootstrapPromotionRef.current;
 			const project = projects.find((candidate) => candidate.id === activeProjectId);
@@ -1608,17 +1599,10 @@ export function App() {
 				// 引导页 picker 无 record 分支把显式选择存进 localStorage；创建时将模型交给
 				// 主进程校验、将思考档位作为启动偏好带入。底栏展示和真实会话创建读取同一份值，
 				// 避免出现「菜单看似切换，首次发送后又回到默认档位」。
-				// 上次显式选择的后端优先（与侧栏「+」共用同一解析器）；DSH runtime 未装 /
-				// ACP 关闭或没有可用工具时回落设置默认，避免首次发送才在 createDraft 门控上抛错。
-				const target = resolveRememberedNewSessionTarget({
-					last: readWelcomeBackendPreference(),
-					lastAcpToolId: readWelcomeAcpToolPreference(),
-					defaultBackend: effectiveAgentBackend,
-					dshAvailable: store.get(dshRuntimeStatusAtom).state === "installed",
-					acpEnabled: store.get(acpEnabledAtom),
-					acpTools: store.get(acpToolsAtom),
-				});
-				const draftBackend = target.backend;
+				// 后端取引导页输入框当前选择（composer 经 ensureSessionId 传入，已做可用性
+				// 回落）；没有显式选择就是设置默认后端。不再读 localStorage 的「上次选择」。
+				const draftBackend = target?.backend ?? effectiveAgentBackend;
+				const acpToolId = target?.acpToolId;
 				// 模型偏好按后端分开取（issue #253）：DSH 的模型是 host route 名，不在 models.json，
 				// 必须作为显式 model 直接带给 host；pi 的偏好走 welcomeModel（launchDefaults 会按
 				// models.json 校验存在性）。历史上 DSH 侧不读偏好，点选因此永远不生效。
@@ -1635,7 +1619,7 @@ export function App() {
 					projectId: project.id,
 					title: draftBackend === "dsh" ? `${project.name} DSH` : `${project.name} agent`,
 					backend: draftBackend,
-					...(draftBackend === "acp" && target.acpToolId ? { acpToolId: target.acpToolId } : {}),
+					...(draftBackend === "acp" && acpToolId ? { acpToolId } : {}),
 					...(welcomeModel ? (draftBackend === "dsh" ? { model: welcomeModel } : { welcomeModel }) : {}),
 					...(welcomeThinking ? { thinkingLevel: welcomeThinking } : {}),
 				});
@@ -1663,7 +1647,7 @@ export function App() {
 				guideBootstrapPromotionRef.current = undefined;
 			}
 		},
-		[activeProjectId, projects, promoteSessionComposerState, promoteSessionMessagesCache, selectSessionCommand, upsertSession, workspaceChrome, effectiveAgentBackend, store],
+		[activeProjectId, projects, promoteSessionComposerState, promoteSessionMessagesCache, selectSessionCommand, upsertSession, workspaceChrome, effectiveAgentBackend],
 	);
 
 	/** 有效文件路径白名单：仅工作区真实存在的 @ 引用渲染为 chip */
@@ -2369,8 +2353,6 @@ export function App() {
 				}
 				const session = await api.sessions.createDraft({ projectId, title: tool.name, backend: "acp", acpToolId: tool.id });
 				upsertSession(session);
-				// 从 ACP 工具入口显式建会话也算「上一次选择」，侧栏「+」下次沿用该工具。
-				rememberBackendPreference("acp", tool.id);
 				selectSessionCommand(projectId, session.id, false);
 				workspaceChrome.registerOpenSession(session.id, "permanent");
 			},
