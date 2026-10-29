@@ -80,6 +80,11 @@ export type SshAttemptDeps = {
 	readBootstrap(): SshAttemptBootstrap | undefined;
 	/** Forwarded to the control client verbatim; omitted means the client uses its own clock. */
 	now?: () => number;
+	/**
+	 * 变更事件（helper 1.24.0）的出口：`fs.watch` 推送的无 id 帧从这里交出去。
+	 * 只带 watchId 与请求时的路径标签，不碰任何请求的结算。
+	 */
+	onEvent?: (hostId: string, event: { watchId: string; paths: readonly string[] }) => void;
 };
 
 /**
@@ -343,6 +348,7 @@ export async function runSshConnectionAttempt(host: SshAttemptHost, deps: SshAtt
 			},
 			...(deps.now === undefined ? {} : { now: deps.now }),
 			onDiagnostic: (diagnostic) => host.record(diagnostic.code),
+			...(deps.onEvent === undefined ? {} : { onEvent: (event: { watchId: string; paths: readonly string[] }) => deps.onEvent?.(host.hostId, event) }),
 		});
 		control.openConnection();
 		attempt.control = control;

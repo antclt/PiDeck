@@ -272,6 +272,8 @@ function startHelper(t, options = {}) {
 	const lines = [];
 	const frames = [];
 	const diagnostics = [];
+	const events = [];
+	const eventWaiters = new Set();
 	const frameWaiters = new Set();
 	const exitWaiters = new Set();
 	let buffered = "";
@@ -293,6 +295,16 @@ function startHelper(t, options = {}) {
 		},
 		onDiagnostic: (entry) => {
 			diagnostics.push(plain(entry));
+		},
+		// W6-b：变更事件走无 id 帧，客户端把它们交给这个观察者（与请求应答永不相混）。
+		onEvent: (event) => {
+			events.push(plain(event));
+			for (const waiter of [...eventWaiters]) {
+				if (waiter.predicate(event)) {
+					eventWaiters.delete(waiter);
+					waiter.resolve(plain(event));
+				}
+			}
 		},
 	});
 	client.openConnection();
@@ -364,6 +376,26 @@ function startHelper(t, options = {}) {
 		lines,
 		frames,
 		diagnostics,
+		events,
+		/** Resolves with the first event frame matching the predicate (W6-b: 无 id 的推送帧). */
+		waitForEvent(predicate, timeoutMs = GUARD_TIMEOUT_MS) {
+			const already = events.find(predicate);
+			if (already !== undefined) return Promise.resolve(already);
+			return new Promise((resolve, reject) => {
+				const entry = {
+					predicate,
+					resolve: (event) => {
+						clearTimeout(timer);
+						resolve(event);
+					},
+				};
+				const timer = setTimeout(() => {
+					eventWaiters.delete(entry);
+					reject(new Error("timed out waiting for a helper event"));
+				}, timeoutMs);
+				eventWaiters.add(entry);
+			});
+		},
 		/** The root this helper was started with, or null for a host-only session. */
 		root: rootArgs.length > 0 ? rootArgs[1] : null,
 		stderr: () => stderr,
@@ -1589,4 +1621,33 @@ helperTest("fs.statMany refuses the whole batch when any single path is unusable
 	const atCap = await call(session, REMOTE_HELPER_METHOD_FS_STAT_MANY, { paths: Array.from({ length: REMOTE_HELPER_MAX_STAT_MANY_PATHS }, () => "alpha.txt") });
 	assert.equal(atCap.entries.length, REMOTE_HELPER_MAX_STAT_MANY_PATHS);
 	assert.equal(session.stderr(), "");
+});
+
+/**
+ * W6-b：`fs.watch` 的推送路径。真实 helper 进程 + 生产客户端，断言「订阅 → 写文件 → 一个无 id 事件帧」，
+ * 以及事件帧永远不会被当成某个请求的应答（它没有 id）。
+ */
+helperTest("fs.watch pushes one debounced event frame and never settles a request", async (t) => {
+	// 只在 Linux 上跑真实 watcher：Windows 的 libuv fs-event 在临时目录里会触发断言（uv 的已知问题，
+	// 与协议无关），那时这条用例失败的原因会是运行环境而不是实现。Linux 侧的等价验证在 serve 上做过。
+	if (process.platform !== "linux") {
+		t.skip("real fs.watch events are only exercised on Linux");
+		return;
+	}
+	const helper = startHelper(t, { argvSeparator: true });
+	await guard(helper.client.request(REMOTE_HELPER_METHOD_HELLO), "hello");
+
+	const watched = await helper.client.request("fs.watch", { paths: ["", "."] });
+	assert.equal(typeof watched.watchId, "string");
+	assert.equal(watched.paths, 2);
+
+	writeFileSync(join(helper.root, "created.txt"), "x");
+	const event = await helper.waitForEvent((item) => item.watchId === watched.watchId);
+	assert.equal(event.watchId, watched.watchId);
+	assert.ok(event.paths.length >= 1, "事件必须带回请求时的路径标签");
+	for (const path of event.paths) assert.ok(path === "" || path === ".", `unexpected label ${path}`);
+
+	// 幂等关闭：第一次 closed:true，第二次 closed:false（不是错误）。
+	assert.deepEqual(plain(await helper.client.request("fs.unwatch", { watchId: watched.watchId })), { closed: true });
+	assert.deepEqual(plain(await helper.client.request("fs.unwatch", { watchId: watched.watchId })), { closed: false });
 });

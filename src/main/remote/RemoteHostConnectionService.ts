@@ -92,6 +92,11 @@ export type RemoteHostConnectionServiceOptions = {
 	 * returns — a later degradation, a reconnect, or the shutdown that follows a successful ready.
 	 */
 	onStateChange?: (entry: { hostId: string; state: ConnectionMachineState }) => void;
+	/**
+	 * 变更事件（helper 1.24.0）：无 id 事件帧的出口。只报 watchId 与请求时的路径标签，
+	 * 订阅方按自己的注册表把它换成「哪个项目的哪些目录变了」，再标脏事实。
+	 */
+	onHelperEvent?: (entry: { hostId: string; watchId: string; paths: readonly string[] }) => void;
 	/** Explicit disconnect closes independent terminal PTYs, not ordinary helper root switches. */
 	onDisconnect?: (hostId: string) => void;
 	/**
@@ -425,6 +430,14 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 			client: hostClient(hostId),
 			launcher,
 			helperSession: held.session,
+			...(options.onHelperEvent === undefined
+				? {}
+				: {
+						onEvent: (hostId: string, event: { watchId: string; paths: readonly string[] }) => {
+							// 只转述仍属于当前 manager 的事件：切根丢弃旧会话后，它的事件不得再影响事实。
+							if (manager && hosts.get(hostId)?.manager === manager) options.onHelperEvent?.({ hostId, watchId: event.watchId, paths: event.paths });
+						},
+					}),
 			...(options.onStateChange === undefined
 				? {}
 				: {

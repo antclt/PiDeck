@@ -3295,6 +3295,8 @@ function registerIpc() {
 					if (!mainWindow || mainWindow.isDestroyed()) return;
 					mainWindow.webContents.send(ipcChannels.remoteHostStateChanged, { hostId, state: state.state });
 				},
+				// helper 1.24.0 的变更事件：只标脏事实，不触发装载（重读仍由读的人决定）。
+				onHelperEvent: (entry) => remoteProjectFacts?.onHelperEvent(entry),
 			});
 			remoteHostService = service;
 			quitCleanup.register("remote-host", () => remoteHostService?.dispose());
@@ -3351,7 +3353,7 @@ function registerIpc() {
 	 * 目录事实层的失效入口（W3）：项目域注册时才创建，文本保存的注册在它之前，因此用晚绑定转发。
 	 * 只标脏、不装载——一次保存不会额外产生任何远端往返。
 	 */
-	let remoteProjectFacts: { afterWrite(projectId: string, paths: readonly string[]): void } | undefined;
+	let remoteProjectFacts: { afterWrite(projectId: string, paths: readonly string[]): void; onHelperEvent(entry: { hostId: string; watchId: string; paths: readonly string[] }): void } | undefined;
 	registerRemoteProjectTrustIpc({ enabled: remoteExperimentEnabled, trust: () => remoteProjectTrustService });
 	const remoteProjectIpc = registerRemoteProjectIpc({
 		enabled: remoteExperimentEnabled,

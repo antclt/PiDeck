@@ -52,6 +52,8 @@ export type SshConnectionManagerOptions = {
 	now?: () => number;
 	random?: () => number;
 	onDiagnostic?: (entry: SshConnectionDiagnostic) => void;
+	/** 变更事件（helper 1.24.0）：无 id 帧的出口，带上 hostId 以区分同进程内的多台主机。 */
+	onEvent?: (hostId: string, event: { watchId: string; paths: readonly string[] }) => void;
 	/**
 	 * Called on every state transition, after the machine has advanced.
 	 *
@@ -332,6 +334,7 @@ export function createSshConnectionManager(options: SshConnectionManagerOptions)
 		delay,
 		readBootstrap: () => readHelperSession(options.helperSession),
 		...(options.now === undefined ? {} : { now: options.now }),
+		...(options.onEvent === undefined ? {} : { onEvent: options.onEvent }),
 	};
 	let disposed = false;
 

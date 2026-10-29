@@ -12,7 +12,7 @@ const HOST_ID = "6f1b7c1e-1a2b-4c3d-8e9f-0a1b2c3d4e5f";
 const PROJECT = "project-remote-1";
 
 function harness(options = {}) {
-	const calls = { list: [] };
+	const calls = { list: [], watches: [] };
 	const handlers = new Map();
 	const { registerRemoteProjectIpc } = loadTsCommonJs("src/main/ipc/remoteProjectIpc.ts", {
 		stubs: {
@@ -36,10 +36,26 @@ function harness(options = {}) {
 			},
 		},
 	});
+	let issuedWatchId = "w-unset";
 	const facts = registerRemoteProjectIpc({
 		enabled: true,
 		userDataDir: "/tmp/unused",
-		service: async () => ({ withProjectSession: async (_hostId, _root, task) => ({ ok: true, value: await task({ request: async () => undefined, cancel: async () => undefined }) }) }),
+		service: async () => ({
+			withProjectSession: async (_hostId, _root, task) => ({
+				ok: true,
+				value: await task({
+					// fs.watch 走同一条 request 通道：这里回答一个稳定的 watchId，其余方法不该被调用。
+					request: async (method, params) => {
+						if (method === "fs.watch") {
+							calls.watches.push(JSON.parse(JSON.stringify(params)));
+							return { watchId: issuedWatchId };
+						}
+						throw new Error("UNEXPECTED_METHOD");
+					},
+					cancel: async () => undefined,
+				}),
+			}),
+		}),
 		projects: {
 			enroll: async () => ({ projectId: PROJECT }),
 			locator: (projectId) => (projectId === PROJECT ? { kind: "ssh", hostId: HOST_ID, remotePath: "/srv/app" } : undefined),
@@ -47,7 +63,7 @@ function harness(options = {}) {
 	});
 	const list = (path) => handlers.get("remote:project-list")({}, PROJECT, path);
 	const plain = (value) => JSON.parse(JSON.stringify(value));
-	return { calls, list, facts, plain };
+	return { calls, list, facts, plain, watchId: (value) => { issuedWatchId = value; } };
 }
 
 test("同一个目录读两次：只装载一次，两次拿到同一个 revision", async () => {
@@ -102,4 +118,32 @@ test("装载失败如实返回稳定码与 outcome，不缓存成空目录", asy
 	// 失败不被当成事实：下一次读取会真的重试。
 	await h.list("");
 	assert.equal(h.calls.list.length, 2);
+});
+
+test("helper 变更事件只标脏对应目录（事件 → 失效接线）", async () => {
+	const h = harness();
+	// 根目录装载成功时订阅一次，helper 回一个 watchId；事件回来时按这个 id 找项目。
+	h.watchId("w1-req-1");
+	const before = await h.list("");
+	assert.equal(h.calls.list.length, 1);
+	assert.deepEqual(h.calls.watches, [{ paths: [""] }], "根目录第一次读到就订阅（非递归，覆盖根层与 .git 变化）");
+
+	h.facts.onHelperEvent({ hostId: HOST_ID, watchId: "w1-req-1", paths: [""] });
+	assert.equal(h.calls.list.length, 1, "事件不装载，只标脏");
+
+	const after = await h.list("");
+	assert.equal(h.calls.list.length, 2, "下一次读才付往返");
+	assert.ok(after.value.revision > before.value.revision);
+});
+
+test("未注册的 watchId、别的 host、别的路径都不影响事实", async () => {
+	const h = harness();
+	h.watchId("w1-req-1");
+	await h.list("src");
+	assert.equal(h.calls.list.length, 1);
+	assert.deepEqual(h.calls.watches, [], "非根目录不订阅");
+	h.facts.onHelperEvent({ hostId: HOST_ID, watchId: "nope", paths: ["src"] });
+	h.facts.onHelperEvent({ hostId: "ffffffff-ffff-4fff-8fff-ffffffffffff", watchId: "w1-req-1", paths: ["src"] });
+	await h.list("src");
+	assert.equal(h.calls.list.length, 1, "只认登记过的 (host, watchId, 路径)");
 });

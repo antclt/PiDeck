@@ -41,7 +41,7 @@ import { resolveRemoteBrowseRoot } from "../remote/RemoteBrowseRoot";
 import { createRemoteSearchReader, REMOTE_SEARCH_READER_CODES } from "../remote/RemoteSearchReader";
 import { createRemoteWorkspaceReader, type RemoteWorkspacePort } from "../remote/RemoteWorkspaceReader";
 import { createFactCache, type FactCache } from "../remote/RemoteFactCache";
-import { parentDirOf } from "../remote/RemoteWorkspaceView";
+import { createDirWatchRegistry, dirKeysAfterWrite } from "../remote/RemoteDirWatchRegistry";
 import { PendingConfirmationBroker } from "../security/PendingConfirmationBroker";
 
 /** host id 的闭集判据，与 hosts 域逐字相同；两个域各自持有，避免项目域 import hosts 域。 */
@@ -64,6 +64,13 @@ function senderIdOf(sender: WebContents): number | undefined {
 export type RemoteProjectIpcHandle = {
 	/** 失效矩阵：写到的路径 ⇒ 所在目录 + 其父目录（目录自身的元数据也变了）。 */
 	afterWrite(projectId: string, paths: readonly string[]): void;
+	/**
+	 * helper 变更事件（helper 1.24.0）的入口：把 watchId 换回「哪个项目的哪些目录」。
+	 *
+	 * 只做**失效**，不装载：事件是「你可能要重读」的提示，重读仍由读的人决定。
+	 * 未注册的 watchId（旧会话、别的项目、已撤销）直接忽略——绝不猜。
+	 */
+	onHelperEvent(entry: { hostId: string; watchId: string; paths: readonly string[] }): void;
 	/** 只读诊断：一次会话内真实发生的目录装载次数。 */
 	dirLoads(): number;
 };
@@ -245,6 +252,21 @@ export function registerRemoteProjectIpc(input: {
 	 * 在同一个装载里合并，并带一个 revision——两个读者据此知道“我看到的是同一份事实”。
 	 * 失效只在写面发生时标脏（`afterWrite`），装载成本由读的人决定，一次写不产生任何往返。
 	 */
+	const watchRegistry = createDirWatchRegistry();
+
+	/** 根目录首次读到就订阅（非递归：覆盖根层与 `.git` 变化；更深目录仍走读的人重读）。 */
+	async function ensureRootWatch(projectId: string, hostId: string, session: RemoteProjectSession): Promise<void> {
+		await watchRegistry.ensure(hostId, session, projectId, async () => {
+			try {
+				const result: unknown = await session.request("fs.watch", { paths: [""] });
+				return typeof result === "object" && result !== null && typeof (result as { watchId?: unknown }).watchId === "string" ? (result as { watchId: string }).watchId : undefined;
+			} catch {
+				/* 订阅不是读的前置条件：失败就退回轮询，不向用户报错。 */
+				return undefined;
+			}
+		});
+	}
+
 	const dirs: FactCache<RemoteWorkspaceEntry[]> = createFactCache<RemoteWorkspaceEntry[]>(async (key) => {
 		const separator = key.indexOf("\u0000");
 		const projectId = key.slice(0, separator);
@@ -254,7 +276,10 @@ export function registerRemoteProjectIpc(input: {
 		try {
 			const outcome = await target.service.withProjectSession(target.hostId, target.remotePath, async (session) => {
 				const reader = createRemoteWorkspaceReader({ port: sessionPort(session, target.hostId) });
-				return reader.list(target.hostId, readerPath(relative));
+				const listed = await reader.list(target.hostId, readerPath(relative));
+				// 根目录第一次读到就顺手订阅：之后 helper 的变更事件会把这个项目的事实标脏。
+				if (relative === "") await ensureRootWatch(projectId, target.hostId, session);
+				return listed;
 			});
 			if (!outcome.ok) return opFailFromCode(outcome.code);
 			// 两类条目不属于用户数据：回收站命名空间（只在根目录隐藏）与本通道自己的上传临时文件。
@@ -359,14 +384,12 @@ export function registerRemoteProjectIpc(input: {
 
 	return {
 		afterWrite(projectId: string, paths: readonly string[]): void {
-			const touched = new Set<string>();
-			for (const path of paths) {
-				const parent = parentDirOf(path);
-				touched.add(parent);
-				// 目录自身的元数据也变了（mtime/子项数），所以它的父目录同样要失效；根层没有父目录。
-				if (parent !== "") touched.add(parentDirOf(parent));
+			for (const key of dirKeysAfterWrite(projectId, paths)) dirs.invalidate(key);
+		},
+		onHelperEvent(entry): void {
+			for (const scope of watchRegistry.scopesForEvent(entry.hostId, entry.watchId) ?? []) {
+				for (const path of scope.paths) dirs.invalidate(scope.projectId + " " + path);
 			}
-			for (const path of touched) dirs.invalidate(projectId + " " + path);
 		},
 		dirLoads(): number {
 			return dirs.stats().loads;
