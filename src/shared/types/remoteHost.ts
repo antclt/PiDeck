@@ -215,7 +215,11 @@ export type RemoteProjectCreateAnswerResult = Op<{ enrolled: boolean; projectId?
  * `ProjectStore` 中该项目持有的 canonical `remotePath`，因此可以跨重启恢复。渲染层只给
  * `projectId` 与**相对路径**，由 main 解析 host/root；绝对路径与 `..` 在触达 reader 前被拒。
  */
-export type RemoteProjectListResult = Op<{ entries: RemoteWorkspaceEntry[] }>;
+/**
+ * `revision` 是目录事实的版本：值被替换或标脏时递增。两个读者拿到同一个数 = 看到同一份事实，
+ * 所以树与面板不再各自「再问一遍确认一下」。
+ */
+export type RemoteProjectListResult = Op<{ entries: RemoteWorkspaceEntry[]; revision: number }>;
 
 /** 读项目内文件的结果；`contentBase64` 跨 IPC 传二进制。 */
 export type RemoteProjectReadResult = Op<{ contentBase64: string; bytes: number; mtimeMs: number }>;

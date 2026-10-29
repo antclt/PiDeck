@@ -61,6 +61,8 @@ export function useRemoteFileTree(projectId: string): RemoteFileTree {
 	const [currentDir, setCurrentDir] = useState("");
 	// 每个目录各自的代次：同时展开两个目录时，晚到的旧结果不能盖掉新结果。
 	const generations = useRef(new Map<string, number>());
+	/** 目录事实版本（来自 main 的事实层）：只做诊断与「读到的是同一份事实」的判据，不参与排序。 */
+	const dirRevisions = useRef(new Map<string, number>());
 
 	const load = useCallback(
 		async (dir: string): Promise<boolean> => {
@@ -77,6 +79,8 @@ export function useRemoteFileTree(projectId: string): RemoteFileTree {
 					if (dir === "") setListed(false);
 					return false;
 				}
+				// revision 是目录事实的版本（W3）：同一个数 = 与其它读者看的是同一份事实。
+				dirRevisions.current.set(dir, result.value.revision);
 				// 与本机文件树同样的顺序：目录在前、同类按名字；远端返回顺序不作为展示契约。
 				const ordered = result.value.entries
 					.filter((entry) => !IGNORED_NAMES.has(entry.name))

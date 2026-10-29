@@ -3347,8 +3347,13 @@ function registerIpc() {
 			sessionCatalogFile: join(app.getPath("userData"), "session-catalog.json"),
 		}),
 	});
+	/**
+	 * 目录事实层的失效入口（W3）：项目域注册时才创建，文本保存的注册在它之前，因此用晚绑定转发。
+	 * 只标脏、不装载——一次保存不会额外产生任何远端往返。
+	 */
+	let remoteProjectFacts: { afterWrite(projectId: string, paths: readonly string[]): void } | undefined;
 	registerRemoteProjectTrustIpc({ enabled: remoteExperimentEnabled, trust: () => remoteProjectTrustService });
-	registerRemoteProjectIpc({
+	const remoteProjectIpc = registerRemoteProjectIpc({
 		enabled: remoteExperimentEnabled,
 		userDataDir: app.getPath("userData"),
 		service: remoteHostServiceIfEnabled,
@@ -3365,6 +3370,7 @@ function registerIpc() {
 			},
 		},
 	});
+	remoteProjectFacts = remoteProjectIpc;
 	const remoteGitReads = registerRemoteGitReadIpc({
 		enabled: remoteExperimentEnabled,
 		service: remoteHostServiceIfEnabled,
@@ -3382,6 +3388,7 @@ function registerIpc() {
 			const project = projectStore.get(projectId);
 			return project && isRemoteProject(project) ? project.locator : undefined;
 		},
+		afterWrite: (projectId, paths) => remoteProjectFacts?.afterWrite(projectId, paths),
 	});
 	// 本机 ↔ 远端文件传输（上传走 stdin 分块，支持二进制；下载走只读 reader + 保存对话框）。
 	// 与只读项目通道共用同一份 locator 解析，避免「列表看得到、下载找不到」。
@@ -3402,6 +3409,8 @@ function registerIpc() {
 			const project = projectStore.get(projectId);
 			return project && isRemoteProject(project) ? project.locator : undefined;
 		},
+		// 写成功后只标脏目录事实（W3）：一次写不产生任何远端往返，下一次读自然重新装载。
+		afterWrite: (projectId, paths) => remoteProjectIpc.afterWrite(projectId, paths),
 	});
 	quitCleanup.register("remote-project-entries", remoteProjectEntries.dispose);
 	/**

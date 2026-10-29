@@ -989,6 +989,8 @@ test("per-project reads resolve the locator, switch the root and read relative t
 				{ name: "src", kind: "directory" },
 				{ name: "readme.md", kind: "file", bytes: 12 },
 			],
+			// 目录事实的版本号（W3）：值第一次装载后是 1；两个读者拿到同一个数说明看的是同一份事实。
+			revision: 1,
 		},
 	});
 	assert.deepEqual(harness.calls.setRoot, [{ hostId: HOST_ID, root: "/srv/app" }], "the project's root is handed to the connection");
@@ -1008,7 +1010,7 @@ test("the project trash directory is hidden from the root listing but not from a
 		],
 	});
 	const root = await harness.handlers.get("remote:project-list")({}, "project-remote-1", "");
-	assert.deepEqual(JSON.parse(JSON.stringify(root)), { ok: true, value: { entries: [{ name: "src", kind: "directory" }] } }, "the reserved trash namespace is not a user-visible root entry");
+	assert.deepEqual(JSON.parse(JSON.stringify(root)), { ok: true, value: { entries: [{ name: "src", kind: "directory" }], revision: 1 } }, "the reserved trash namespace is not a user-visible root entry");
 	const nested = await harness.handlers.get("remote:project-list")({}, "project-remote-1", "src");
 	assert.deepEqual(
 		JSON.parse(JSON.stringify(nested)),
@@ -1019,6 +1021,8 @@ test("the project trash directory is hidden from the root listing but not from a
 					{ name: ".pideck-trash", kind: "directory" },
 					{ name: "src", kind: "directory" },
 				],
+				// 同一个事实缓存里的下一个目录：装载即发新版本号。
+				revision: 2,
 			},
 		},
 		"a same-named entry inside a subdirectory is user data and stays visible",

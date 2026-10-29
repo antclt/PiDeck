@@ -22,7 +22,16 @@ const SENDER = (sender: IpcMainInvokeEvent["sender"]): boolean => Number.isSafeI
  * `outcome` 由 `code` 落在闭集里推出（`REMOTE_FILE_RESULT_UNCONFIRMED` ⇒ unknown），所以「可能已执行」
  * 这件事在结构上就传得下去，不再依赖渲染层猜码。
  */
-export function registerRemoteProjectEntryIpc(input: { enabled: boolean; service: () => RemoteHostConnectionService | undefined | Promise<RemoteHostConnectionService | undefined>; locator: (projectId: string) => { kind: "ssh"; hostId: string; remotePath: string } | undefined }) {
+export function registerRemoteProjectEntryIpc(input: {
+	enabled: boolean;
+	service: () => RemoteHostConnectionService | undefined | Promise<RemoteHostConnectionService | undefined>;
+	locator: (projectId: string) => { kind: "ssh"; hostId: string; remotePath: string } | undefined;
+	/**
+	 * 事实层失效钩子（W3）：写成功后告诉目录事实「这几条路径变了」。
+	 * 只标脏不装载——一次写不产生任何远端往返，下一次读自然重新装载。
+	 */
+	afterWrite?: (projectId: string, paths: readonly string[]) => void;
+}) {
 	const entry = createRemoteProjectEntryService({
 		locator: (projectId) => {
 			const locator = input.locator(projectId);
@@ -79,7 +88,9 @@ export function registerRemoteProjectEntryIpc(input: { enabled: boolean; service
 		wrap(async () => {
 			if (!PROJECT_ID(projectId) || typeof parent !== "string" || typeof name !== "string") throw new Error("REMOTE_FILE_INPUT_INVALID");
 			const sender = watchSender(event.sender);
-			return await entry.createFile(sender, projectId, parent, name);
+			const created = await entry.createFile(sender, projectId, parent, name);
+			input.afterWrite?.(projectId, [created.relativePath]);
+			return created;
 		}),
 	);
 
@@ -87,7 +98,9 @@ export function registerRemoteProjectEntryIpc(input: { enabled: boolean; service
 		wrap(async () => {
 			if (!PROJECT_ID(projectId) || typeof parent !== "string" || typeof name !== "string") throw new Error("REMOTE_FILE_INPUT_INVALID");
 			const sender = watchSender(event.sender);
-			return await entry.createDirectory(sender, projectId, parent, name);
+			const created = await entry.createDirectory(sender, projectId, parent, name);
+			input.afterWrite?.(projectId, [created.relativePath]);
+			return created;
 		}),
 	);
 
@@ -97,7 +110,10 @@ export function registerRemoteProjectEntryIpc(input: { enabled: boolean; service
 			// 令牌格式不合法不烧令牌：形状校验在打开 SSH 之前。
 			if (typeof version !== "string" || !VERSION.test(version)) throw new Error("REMOTE_FILE_INPUT_INVALID");
 			const sender = watchSender(event.sender);
-			return await entry.rename(sender, projectId, source, target, version);
+			const renamed = await entry.rename(sender, projectId, source, target, version);
+			// 改名要连源路径一起标脏：它所在的目录也少了一项。
+			input.afterWrite?.(projectId, [source, renamed.relativePath]);
+			return renamed;
 		}),
 	);
 
@@ -106,7 +122,9 @@ export function registerRemoteProjectEntryIpc(input: { enabled: boolean; service
 			if (!PROJECT_ID(projectId) || typeof relative !== "string") throw new Error("REMOTE_FILE_INPUT_INVALID");
 			if (typeof version !== "string" || !VERSION.test(version)) throw new Error("REMOTE_FILE_INPUT_INVALID");
 			const sender = watchSender(event.sender);
-			return await entry.deleteEntry(sender, projectId, relative, version);
+			const deleted = await entry.deleteEntry(sender, projectId, relative, version);
+			input.afterWrite?.(projectId, [relative]);
+			return deleted;
 		}),
 	);
 
@@ -122,7 +140,9 @@ export function registerRemoteProjectEntryIpc(input: { enabled: boolean; service
 		wrap(async () => {
 			if (!PROJECT_ID(projectId) || typeof trashId !== "string" || !TRASH_ID.test(trashId)) throw new Error("REMOTE_FILE_INPUT_INVALID");
 			const sender = watchSender(event.sender);
-			return await entry.restoreTrash(sender, projectId, trashId);
+			const restored = await entry.restoreTrash(sender, projectId, trashId);
+			input.afterWrite?.(projectId, [restored.relativePath]);
+			return restored;
 		}),
 	);
 

@@ -30,6 +30,7 @@ import type {
 	RemoteProjectReadResult,
 	RemoteProjectRootStatusResult,
 	RemoteProjectSearchResult,
+	RemoteWorkspaceEntry,
 } from "../../shared/types/remoteHost";
 import { registerRemoteProjectCreateFlow } from "./remoteProjectCreateIpc";
 import type { RemoteHostConnectionService, RemoteProjectSession } from "../remote/RemoteHostConnectionService";
@@ -39,6 +40,8 @@ import { REMOTE_UPLOAD_TEMP_NAME } from "../remote/RemoteProjectFileUpload";
 import { resolveRemoteBrowseRoot } from "../remote/RemoteBrowseRoot";
 import { createRemoteSearchReader, REMOTE_SEARCH_READER_CODES } from "../remote/RemoteSearchReader";
 import { createRemoteWorkspaceReader, type RemoteWorkspacePort } from "../remote/RemoteWorkspaceReader";
+import { createFactCache, type FactCache } from "../remote/RemoteFactCache";
+import { parentDirOf } from "../remote/RemoteWorkspaceView";
 import { PendingConfirmationBroker } from "../security/PendingConfirmationBroker";
 
 /** host id 的闭集判据，与 hosts 域逐字相同；两个域各自持有，避免项目域 import hosts 域。 */
@@ -57,6 +60,14 @@ function senderIdOf(sender: WebContents): number | undefined {
  * 只读目录在没有任何连接服务时也返回稳定码而不是崩溃；`projects` 是装配层注入的持久化端口
  * （enroll / locator），未提供时项目相关通道返回稳定码。
  */
+/** 事实层句柄：写面完成后按“我改了哪些路径”标脏，下一次读取自然重新装载。 */
+export type RemoteProjectIpcHandle = {
+	/** 失效矩阵：写到的路径 ⇒ 所在目录 + 其父目录（目录自身的元数据也变了）。 */
+	afterWrite(projectId: string, paths: readonly string[]): void;
+	/** 只读诊断：一次会话内真实发生的目录装载次数。 */
+	dirLoads(): number;
+};
+
 export function registerRemoteProjectIpc(input: {
 	enabled: boolean;
 	userDataDir: string;
@@ -72,7 +83,7 @@ export function registerRemoteProjectIpc(input: {
 		enroll: (input: { hostId: string; canonicalRemotePath: string }) => Promise<{ projectId: string }>;
 		locator: (projectId: string) => { kind: "ssh"; hostId: string; remotePath: string } | undefined;
 	};
-}): void {
+}): RemoteProjectIpcHandle {
 	/**
 	 * Resolve the connection service, turning a discovery failure into a stable code.
 	 *
@@ -227,29 +238,45 @@ export function registerRemoteProjectIpc(input: {
 		cancel: (requestHostId, requestId, options) => (requestHostId === hostId ? session.cancel(requestId, options) : Promise.reject(new Error("SSH_HOST_NOT_READY"))),
 	});
 
-	ipcMain.handle(ipcChannels.remoteProjectList, async (_event, projectIdValue: unknown, pathValue: unknown): Promise<RemoteProjectListResult> => {
-		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
-		const relative = readRelativePath(pathValue);
-		if (relative === undefined) return opFailFromCode("REMOTE_PROJECT_PATH_INVALID");
-		const target = await projectReadTarget(projectIdValue);
+	/**
+	 * 目录事实（W3 接线）：**一次内容变化只装载一次**。
+	 *
+	 * 树、搜索建议、Git 面板的“这个目录里有什么”过去各自问一遍远端；现在同一个 (projectId, 相对路径)
+	 * 在同一个装载里合并，并带一个 revision——两个读者据此知道“我看到的是同一份事实”。
+	 * 失效只在写面发生时标脏（`afterWrite`），装载成本由读的人决定，一次写不产生任何往返。
+	 */
+	const dirs: FactCache<RemoteWorkspaceEntry[]> = createFactCache<RemoteWorkspaceEntry[]>(async (key) => {
+		const separator = key.indexOf("\u0000");
+		const projectId = key.slice(0, separator);
+		const relative = key.slice(separator + 1);
+		const target = await projectReadTarget(projectId);
 		if ("code" in target) return opFailFromCode(target.code);
 		try {
-			// The whole listing runs inside the host's operation boundary: a switch for another project queues
-			// behind it instead of re-pointing the session halfway through.
 			const outcome = await target.service.withProjectSession(target.hostId, target.remotePath, async (session) => {
 				const reader = createRemoteWorkspaceReader({ port: sessionPort(session, target.hostId) });
 				return reader.list(target.hostId, readerPath(relative));
 			});
 			if (!outcome.ok) return opFailFromCode(outcome.code);
-			// 回收站是项目根的保留命名空间（读通道也拒绝它）；只隐藏根目录下这一项，子目录里同名条目属于用户数据。
-			return opOk({
-				// 两类条目不属于用户数据：回收站命名空间（只在根目录隐藏）与本通道自己的上传临时文件
-				// （强杀后可能残留）。后者按形状隐藏，用户自己造的同后缀文件照常显示。
-				entries: outcome.value.entries.filter((entry) => (relative !== "" || entry.name !== REMOTE_PROJECT_TRASH_DIR) && !REMOTE_UPLOAD_TEMP_NAME.test(entry.name)).map((entry) => ({ name: entry.name, kind: entry.kind, ...(entry.bytes === undefined ? {} : { bytes: entry.bytes }) })),
-			});
+			// 两类条目不属于用户数据：回收站命名空间（只在根目录隐藏）与本通道自己的上传临时文件。
+			return opOk(
+				outcome.value.entries
+					.filter((entry) => (relative !== "" || entry.name !== REMOTE_PROJECT_TRASH_DIR) && !REMOTE_UPLOAD_TEMP_NAME.test(entry.name))
+					.map((entry) => ({ name: entry.name, kind: entry.kind, ...(entry.bytes === undefined ? {} : { bytes: entry.bytes }) })),
+			);
 		} catch (error) {
 			return opFailFromCode(codeOf(error, "REMOTE_PROJECT_READ_FAILED"));
 		}
+	});
+
+	ipcMain.handle(ipcChannels.remoteProjectList, async (_event, projectIdValue: unknown, pathValue: unknown): Promise<RemoteProjectListResult> => {
+		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
+		const relative = readRelativePath(pathValue);
+		if (relative === undefined) return opFailFromCode("REMOTE_PROJECT_PATH_INVALID");
+		if (typeof projectIdValue !== "string") return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
+		const snapshot = await dirs.read(projectIdValue + "\u0000" + relative);
+		if (!snapshot.ok) return opFailFromCode(snapshot.code);
+		// revision 随值替换或标脏递增：两个读者拿到同一个数就说明他们看的是同一份事实。
+		return opOk({ entries: snapshot.value, revision: snapshot.revision });
 	});
 
 	ipcMain.handle(ipcChannels.remoteProjectRead, async (_event, projectIdValue: unknown, pathValue: unknown): Promise<RemoteProjectReadResult> => {
@@ -329,4 +356,20 @@ export function registerRemoteProjectIpc(input: {
 		const status = target.service.projectRootStatus(target.hostId, target.remotePath);
 		return opOk(status.status === "ok" ? { status: "ok" } : { status: "needs-attention", code: status.code });
 	});
+
+	return {
+		afterWrite(projectId: string, paths: readonly string[]): void {
+			const touched = new Set<string>();
+			for (const path of paths) {
+				const parent = parentDirOf(path);
+				touched.add(parent);
+				// 目录自身的元数据也变了（mtime/子项数），所以它的父目录同样要失效；根层没有父目录。
+				if (parent !== "") touched.add(parentDirOf(parent));
+			}
+			for (const path of touched) dirs.invalidate(projectId + " " + path);
+		},
+		dirLoads(): number {
+			return dirs.stats().loads;
+		},
+	};
 }

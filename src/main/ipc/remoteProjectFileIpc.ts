@@ -13,7 +13,13 @@ import { isRemoteProjectTrashPath } from "../remote/RemoteProjectEntryCommands";
  * 信封形状是契约层的 `Op<T>`（v5 §2「单信封」）：与 entry 域逐字同款，成功 `{ok:true, value}`、
  * 失败 `{ok:false, code, outcome}`，`outcome` 由稳定码落在闭集里推出。
  */
-export function registerRemoteProjectFileIpc(input: { enabled: boolean; service: () => RemoteHostConnectionService | undefined | Promise<RemoteHostConnectionService | undefined>; locator: (projectId: string) => { kind: "ssh"; hostId: string; remotePath: string } | undefined }): void {
+export function registerRemoteProjectFileIpc(input: {
+	enabled: boolean;
+	service: () => RemoteHostConnectionService | undefined | Promise<RemoteHostConnectionService | undefined>;
+	locator: (projectId: string) => { kind: "ssh"; hostId: string; remotePath: string } | undefined;
+	/** 事实层失效钩子（W3）：保存成功后只标脏该文件所在目录，不触发装载。 */
+	afterWrite?: (projectId: string, paths: readonly string[]) => void;
+}): void {
 	const files = createRemoteProjectFileService({
 		locator: input.locator,
 		withProject: async (target, work) => {
@@ -60,7 +66,9 @@ export function registerRemoteProjectFileIpc(input: { enabled: boolean; service:
 			const valid = validate(event.sender, projectId, relative);
 			if (typeof content !== "string" || typeof version !== "string" || !/^[a-f0-9]{32}$/.test(version)) throw new Error("REMOTE_FILE_INPUT_INVALID");
 			if (content.length > REMOTE_PROJECT_TEXT_MAX_BYTES || Buffer.byteLength(content, "utf8") > REMOTE_PROJECT_TEXT_MAX_BYTES) throw new Error("REMOTE_FILE_TOO_LARGE");
-			return await files.save(valid.senderId, valid.projectId, valid.relative, content, version);
+			const saved = await files.save(valid.senderId, valid.projectId, valid.relative, content, version);
+			input.afterWrite?.(valid.projectId, [valid.relative]);
+			return saved;
 		}),
 	);
 }
