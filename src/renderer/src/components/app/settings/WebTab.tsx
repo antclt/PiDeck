@@ -27,6 +27,8 @@ type WebTabProps = {
 };
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
+/** README「移动端客户端」锚点：GitHub 去掉标题 emoji 后生成的锚点以连字符开头。 */
+const WEB_MOBILE_CLIENTS_DOC_URL = "https://github.com/ayuayue/PiDeck/blob/main/README.md#-移动端客户端";
 
 function isPublicBindHost(host: string): boolean {
 	const trimmed = host.trim();
@@ -384,6 +386,13 @@ export const WebTab = memo(function WebTab(props: WebTabProps) {
 					)}
 				</div>
 			)}
+
+			{/* 手机端项目推荐：用 Web 接口做的客户端，点开交给系统浏览器直达 README 锚点 */}
+			<SettingRow anchor="web-mobile-clients" title={t("settings.webMobileClients")} description={t("settings.webMobileClientsDesc")}>
+				<Button variant="outline" size="sm" onClick={() => void desktopApi.app.openExternal(WEB_MOBILE_CLIENTS_DOC_URL, true).catch(() => undefined)}>
+					{t("settings.webMobileClientsAction")}
+				</Button>
+			</SettingRow>
 
 			{/* 外网访问（内网穿透）：cloudflare 隧道 + tailscale，独立卡片不侵入局域网设置 */}
 			<WebRemoteAccessSection webServiceChanging={webServiceChanging} draft={draft} updateDraft={updateDraft} />

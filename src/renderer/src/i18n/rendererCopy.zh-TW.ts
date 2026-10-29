@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 02e2ec058df191788d533c15b42461fb927acf3da7018a5aafc0cb1563d01fc0（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: b7461ac6aaf3787396a46aae284bb5af090a2c8fce10b64f1061e2c90f4e9625（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5678,6 +5678,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.webQrScanHint": "手機和電腦需要連線到同一個區域網",
 	"settings.webQrTokenHint": "區域網訪問需要令牌，二維碼連結已自動附帶",
 	"settings.webQrUnavailable": "當前無法生成二維碼，請檢查服務埠",
+	"settings.webMobileClients": "手機端專案推薦",
+	"settings.webMobileClientsDesc": "使用 Web 介面開發的 PiDeck 手機客戶端；點選用系統瀏覽器開啟 GitHub README 的「移動端客戶端」一節",
+	"settings.webMobileClientsAction": "檢視推薦專案",
 	"settings.remote.title": "外網訪問",
 	"settings.remote.desc": "不在同一網路時，通過免註冊 Cloudflare 隧道或 Tailscale 私有組網訪問本機 Web 服務",
 	"settings.remote.webServiceRequired": "請先開啟上方的 Web 服務後再使用外網訪問",

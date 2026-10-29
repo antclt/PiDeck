@@ -515,6 +515,12 @@ const SETTINGS_ROW_ANCHORS = [
 	},
 	{
 		tab: "web",
+		slug: "web-mobile-clients",
+		labelKey: "settings.webMobileClients",
+		keywords: ["手机端", "手机客户端", "移动端", "客户端推荐", "mobile", "android", "pocketdeck"],
+	},
+	{
+		tab: "web",
 		slug: "web-remote-access-guide",
 		labelKey: "settings.remote.guideRowTitle",
 		keywords: ["外网访问", "远程访问指南", "cloudflared", "tailscale", "穿透", "隧道"],
