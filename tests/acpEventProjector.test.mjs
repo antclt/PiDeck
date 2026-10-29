@@ -485,3 +485,54 @@ test("prompt response between tool and final chunks still splits correctly", () 
 	assert.equal(state.messages[3].text, "全部 PASS。");
 	assert.equal(state.messages[3].stopReason, "pending");
 });
+
+test("content diff 归一成 pi/DSH 同形的 meta.args（SDK 与 draft 两种字段名都吃）", () => {
+	let state = step(initialAcpProjection(), {
+		sessionUpdate: "tool_call",
+		toolCallId: "tc-diff",
+		// 标题不是英文 edit/write：归一后仍要能被 shared/fileChanges 命中
+		title: "修改文件",
+		status: "completed",
+		content: [{ type: "diff", path: "src/a.ts", oldText: "a", newText: "b" }],
+	});
+	let card = state.messages[0];
+	assert.equal(card.meta.toolName, "edit");
+	assert.equal(card.meta.args.filePath, "src/a.ts");
+	assert.equal(card.meta.args.oldText, "a");
+	assert.equal(card.meta.args.newText, "b");
+
+	// v1 draft 字段名 + 新建文件（oldValue:null）
+	state = step(state, {
+		sessionUpdate: "tool_call",
+		toolCallId: "tc-new",
+		title: "Write",
+		status: "completed",
+		content: [{ type: "diff", path: "src/new.ts", oldValue: null, newValue: "fresh" }],
+	});
+	card = state.messages[1];
+	assert.equal(card.meta.toolName, "edit");
+	assert.equal(card.meta.args.filePath, "src/new.ts");
+	assert.equal(card.meta.args.oldText, "");
+	assert.equal(card.meta.args.newText, "fresh");
+});
+
+test("多文件 diff：第一块进可见卡片，其余落隐藏工具消息且重复 update 不重复追加", () => {
+	const update = {
+		sessionUpdate: "tool_call",
+		toolCallId: "tc-multi",
+		title: "Apply patch",
+		status: "completed",
+		content: [
+			{ type: "diff", path: "a.ts", oldValue: "1", newValue: "2" },
+			{ type: "diff", path: "b.ts", oldValue: "", newValue: "new" },
+		],
+	};
+	let state = step(initialAcpProjection(), update);
+	assert.equal(state.messages.length, 2);
+	assert.equal(state.messages[0].meta.args.filePath, "a.ts");
+	assert.equal(state.messages[1].meta.ptcNested, true, "其余文件走隐藏工具消息（时间线不渲染）");
+	assert.equal(state.messages[1].meta.args.filePath, "b.ts");
+	// 同一 toolCall 的后续状态更新不得重复追加隐藏消息
+	state = step(state, update);
+	assert.equal(state.messages.length, 2);
+});

@@ -541,7 +541,8 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 			}
 			appendRunMessage(message);
 		} else if (message.role === "tool") {
-			// PTC 子调用（meta.ptcNested）：DSH run_code 程序内部的文件类子调用（write/edit…）
+			// 隐藏工具卡（meta.ptcNested）：DSH run_code 程序内部的文件类子调用（write/edit…）、
+			// ACP 多文件 diff 的其余文件——只喂文件聚合，不进时间线。
 			// 时间线仍只展示外层 run_code 卡——否则一轮 PTC 会凭空冒出几十张嵌套工具卡。
 			// 但**不能直接丢弃**：这类消息是 PTC 会话「修改的文件」的唯一数据源（run_code 永远
 			// 命中不到 write/edit 工具名）。直接丢弃会让轮末 chip 行对 PTC 会话恒为空。
