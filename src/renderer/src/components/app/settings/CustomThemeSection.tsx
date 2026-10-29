@@ -218,7 +218,7 @@ export function CustomThemeSection({ draft, updateDraft }: CustomThemeSectionPro
 					{t("settings.customThemesCopyDir")}
 				</Button>
 			</div>
-			{dir ? <div className="font-mono text-micro leading-relaxed text-text-faint break-all">{dir}</div> : null}
+			{dir ? <div className="font-mono text-micro leading-relaxed text-text-tertiary break-all">{dir}</div> : null}
 
 			{/* 主题卡片列表 */}
 			<div className="flex flex-col gap-1.5">

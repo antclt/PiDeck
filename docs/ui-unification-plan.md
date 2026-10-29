@@ -43,7 +43,22 @@ PiDeck 是密集的桌面 Operate 界面，不是营销站：
 | 1 | 间距吸附 4px 网格（`[3/5/7/9px]` 全部换成刻度类，GitGraph 一并处理） | typecheck + detect | ✅ 已完成 |
 | 2 | 字号越界收敛（13.5 / 11.5 → token；AppearanceTab 10px → micro） | typecheck + detect | ✅ 已完成 |
 | 3 | 颜色：未定义变量 + 字面兜底 → 语义 token；修 --radius-full 未定义 | 颜色 advisory 26 → 7 | ✅ 已完成 |
-| 4 | 对齐与视觉重量：需要真实渲染，按页面抽查 | 截图对比 | 待办（缺浏览器通道） |
+| 4 | 对齐与视觉重量：CDP 连真实窗口，逐页扫描 | 截图对比 | ✅ 已完成（36 页） |
+
+## 渲染态扫描怎么做（下次直接复用）
+
+设置弹窗是**三级页签**：系统设置 → 配置管理 → Pi 配置管理 → 模型/认证/MCP…，
+且所有 tabpanel 常驻挂载。因此：
+
+1. 必须用真实鼠标事件点页签（`locator.getByRole("tab", { name, exact: true }).click()`），
+   DOM `.click()` 不触发 Radix 的选中；
+2. `exact: true` 必须开，否则「设置」会命中「常用设置」；
+3. 扫描前注入 `[role="tabpanel"][data-state="inactive"]{display:none}`，
+   否则 `detect --cdp` 会读到隐藏面板，产出假阳性；
+4. 每次点完校验可见面板的 `checked` 数量变化，数量不变就说明没切过去。
+
+启动方式：`PIDECK_E2E=1 PIDECK_E2E_USER_DATA_DIR=<临时目录> npx electron . --remote-debugging-port=9222`
+（窗口自动摆到屏幕外、不进任务栏，不打扰前台）。
 
 ## 纪律
 
