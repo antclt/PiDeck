@@ -9,6 +9,8 @@ import {
 	type RemoteHelperRequestFrame,
 	REMOTE_HELPER_MAX_HOST_ID_LENGTH,
 	REMOTE_HELPER_MAX_METHOD_LENGTH,
+	REMOTE_HELPER_MAX_PATH_LENGTH,
+	REMOTE_HELPER_MAX_WATCH_PATHS,
 } from "./RemoteHelperContract";
 import { remoteCallMeter, type RemoteCallMeterPort } from "./RemoteCallMeter";
 
@@ -91,6 +93,8 @@ export type RemoteControlClientOptions = {
 	send: (line: string) => void | Promise<void>;
 	now?: () => number;
 	onDiagnostic?: (entry: RemoteControlDiagnosticEntry) => void;
+	/** 变更事件（helper 1.24.0）：无 id 的推送帧只在这里出现，永远进不了 pending 表。 */
+	onEvent?: (event: { watchId: string; paths: readonly string[] }) => void;
 	/** Defaults to the contract limit, which is also the ceiling: a caller may lower it, never raise it. */
 	maxFrameBytes?: number;
 	defaultTimeoutMs?: number;
@@ -141,6 +145,9 @@ export class RemoteControlError extends Error {
 // transient: pending entries settle on their own. Grouping them keeps the advice consistent.
 const RETRYABLE_CODES = new Set<string>(["REQUEST_TIMEOUT", "REMOTE_CONNECTION_LOST", "REMOTE_REQUEST_LIMIT"]);
 
+/** watchId 由 helper 生成（"w<n>-<requestId>"）；这里只按长度与控制字节设界。 */
+const MAX_WATCH_ID_LENGTH = 128;
+
 const DEFAULT_SCHEDULER: RemoteControlScheduler = {
 	setTimeout: (handler, delayMs) => setTimeout(handler, delayMs),
 	clearTimeout: (handle) => clearTimeout(handle),
@@ -165,7 +172,12 @@ type PendingEntry = {
 };
 
 /** Validated inbound frame, or the reason it cannot be used. Host/generation checks happen in the caller. */
-type InboundRead = { kind: "invalid"; id?: string } | { kind: "ok"; hostId: string; generation: number; id: string; result: unknown } | { kind: "error"; hostId: string; generation: number; id: string; error: RemoteHelperErrorBody } | { kind: "error-body-invalid"; hostId: string; generation: number; id: string };
+type InboundRead =
+	| { kind: "invalid"; id?: string }
+	| { kind: "event"; hostId: string; generation: number; watchId: string; paths: string[] }
+	| { kind: "ok"; hostId: string; generation: number; id: string; result: unknown }
+	| { kind: "error"; hostId: string; generation: number; id: string; error: RemoteHelperErrorBody }
+	| { kind: "error-body-invalid"; hostId: string; generation: number; id: string };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -206,6 +218,21 @@ function readFrameId(record: Record<string, unknown>): string | undefined {
 	return typeof id === "string" && ID_PATTERN.test(id) ? id : undefined;
 }
 
+/** 变更事件帧（无 id）：与请求应答靠「没有 id」区分，所以两者永远不会互相冒充。 */
+function readEventFrame(value: Record<string, unknown>, hostId: string, generation: number): InboundRead {
+	const watchId = value.watchId;
+	if (typeof watchId !== "string" || watchId.length === 0 || watchId.length > MAX_WATCH_ID_LENGTH || CONTROL_CHARS.test(watchId)) return { kind: "invalid" };
+	if (value.event !== "changed") return { kind: "invalid" };
+	const paths = value.paths;
+	if (!Array.isArray(paths) || paths.length === 0 || paths.length > REMOTE_HELPER_MAX_WATCH_PATHS) return { kind: "invalid" };
+	const cleaned: string[] = [];
+	for (const path of paths) {
+		if (typeof path !== "string" || path.length > REMOTE_HELPER_MAX_PATH_LENGTH || CONTROL_CHARS.test(path)) return { kind: "invalid" };
+		cleaned.push(path);
+	}
+	return { kind: "event", hostId, generation, watchId, paths: cleaned };
+}
+
 function invalidFrame(id: string | undefined): InboundRead {
 	return id === undefined ? { kind: "invalid" } : { kind: "invalid", id };
 }
@@ -222,7 +249,7 @@ function readInboundFrame(value: unknown): InboundRead {
 	if (typeof hostId !== "string" || hostId.length === 0 || hostId.length > MAX_HOST_ID_LENGTH || CONTROL_CHARS.test(hostId)) return invalidFrame(id);
 	const generation = value.generation;
 	if (typeof generation !== "number" || !Number.isSafeInteger(generation) || generation < 0) return invalidFrame(id);
-	if (id === undefined) return { kind: "invalid" };
+	if (id === undefined) return readEventFrame(value, hostId, generation);
 	const ok = value.ok;
 	if (typeof ok !== "boolean") return invalidFrame(id);
 	if (ok) return { kind: "ok", hostId, generation, id, result: value.result };
@@ -268,6 +295,8 @@ export function createRemoteControlClient(options: RemoteControlClientOptions): 
 	const providedMeter = options?.meter;
 	if (providedMeter !== undefined && typeof providedMeter.record !== "function") throw invalidOptions();
 	const meter: RemoteCallMeterPort = providedMeter ?? remoteCallMeter;
+	const optionsOnEvent = options?.onEvent;
+	if (optionsOnEvent !== undefined && typeof optionsOnEvent !== "function") throw invalidOptions();
 	const maxFrameBytes = readFrameLimit(options?.maxFrameBytes);
 	const defaultTimeoutMs = readTimeoutMs(options?.defaultTimeoutMs, REMOTE_HELPER_DEFAULT_REQUEST_TIMEOUT_MS);
 
@@ -486,14 +515,27 @@ export function createRemoteControlClient(options: RemoteControlClientOptions): 
 			diagnose(REMOTE_FRAME_DIAGNOSTIC_CODES.invalid, read.id);
 			return;
 		}
+		// 事件帧没有 id：诊断只带 id 时用 undefined，绝不为了「有个 id」去编造一个。
+		const frameId = read.kind === "event" ? undefined : read.id;
 		if (read.hostId !== hostId) {
-			diagnose(REMOTE_FRAME_DIAGNOSTIC_CODES.wrongHost, read.id);
+			diagnose(REMOTE_FRAME_DIAGNOSTIC_CODES.wrongHost, frameId);
 			return;
 		}
 		if (!open || read.generation !== generation) {
 			// Frames of a closed connection and frames of a superseded generation are equally unusable and
 			// must never touch the live generation's requests (§7.1 fencing rule).
-			diagnose(REMOTE_FRAME_DIAGNOSTIC_CODES.staleGeneration, read.id);
+			diagnose(REMOTE_FRAME_DIAGNOSTIC_CODES.staleGeneration, frameId);
+			return;
+		}
+		if (read.kind === "event") {
+			// 观察者不是事务的一部分：事件回调炸掉不能影响帧的结算。
+			if (optionsOnEvent !== undefined) {
+				try {
+					optionsOnEvent({ watchId: read.watchId, paths: read.paths });
+				} catch {
+					/* ignore: an observer must never break framing */
+				}
+			}
 			return;
 		}
 		const entry = pending.get(read.id);

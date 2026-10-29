@@ -138,6 +138,18 @@ export const REMOTE_HELPER_METHOD_FS_STAT_MANY = "fs.statMany";
  * `info/exclude`、linked worktree 的 common dir）只有 git 自己是权威；重写一遍必然与 `git status` 打架。
  */
 export const REMOTE_HELPER_METHOD_GIT_CHECK_IGNORE = "git.checkIgnore";
+/**
+ * 目录订阅（helper 1.24.0）：`fs.watch { paths } → { watchId }` / `fs.unwatch { watchId } → { closed }`。
+ * 变更以**事件帧**（无 `id`、带 `watchId`）单向推送，主进程只做失效，不触发装载。
+ */
+export const REMOTE_HELPER_METHOD_FS_WATCH = "fs.watch";
+export const REMOTE_HELPER_METHOD_FS_UNWATCH = "fs.unwatch";
+/** 一个 helper 会话同时允许的 watcher 数；超出直接拒绝而不是排队。 */
+export const REMOTE_HELPER_MAX_WATCHES = 4;
+/** 一次订阅里最多几个目录。 */
+export const REMOTE_HELPER_MAX_WATCH_PATHS = 32;
+/** 连续写合并窗口（毫秒）。 */
+export const REMOTE_HELPER_WATCH_DEBOUNCE_MS = 150;
 /** 一次判定的路径数上限（与 `fs.statMany` 同量级，够填满一屏目录）。 */
 export const REMOTE_HELPER_MAX_CHECK_IGNORE_PATHS = 64;
 export const REMOTE_HELPER_METHOD_FS_LIST = "fs.list";
@@ -332,6 +344,8 @@ export const REMOTE_HELPER_CAPABILITIES = [
 	"fs.list",
 	"fs.read",
 	"fs.searchNames",
+	"fs.watch",
+	"fs.unwatch",
 	"git.status",
 	"git.workspaceDiff",
 	"git.stage",
