@@ -10,13 +10,14 @@ const host = readFileSync("src/renderer/src/components/plugins/HostPluginPanelHo
 const sharedIcons = readFileSync("src/shared/hostPluginIcons.ts", "utf8");
 const rendererIcons = readFileSync("src/renderer/src/components/plugins/hostPluginPanelIcon.tsx", "utf8");
 
-test("host plugin dock entry renders under the automation entry in the sidebar action block", () => {
+test("host plugin dock entry renders in the sidebar action block, above the low-frequency group", () => {
 	assert.match(sidebar, /import \{ HostPluginDockButtons \} from "\.\.\/plugins\/HostPluginDockButtons";/);
-	const automationIndex = sidebar.indexOf("<AutomationDockButton />");
 	const pluginIndex = sidebar.indexOf("<HostPluginDockButtons");
+	const moreToggleIndex = sidebar.indexOf('aria-controls="sidebar-more-actions"');
 	const tabsIndex = sidebar.indexOf("<Tabs");
-	assert.ok(automationIndex > -1, "automation entry missing");
-	assert.ok(pluginIndex > automationIndex, "plugin entries should sit below the automation entry");
+	assert.ok(pluginIndex > -1, "plugin entry missing");
+	// 用户决定：插件行排在「更多」之上，展开的定时任务/智能体/收藏三件套因此永远落在插件行之后。
+	assert.ok(pluginIndex < moreToggleIndex, "plugin entries should sit above the More toggle");
 	assert.ok(pluginIndex < tabsIndex, "plugin entries should stay in the top action block");
 });
 

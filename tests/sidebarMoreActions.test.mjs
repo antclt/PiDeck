@@ -28,8 +28,19 @@ test("折叠组默认收起，开关带 aria-expanded", () => {
 	assert.match(sidebar, /\{moreActionsOpen \? \(/, "三个入口只在展开时渲染");
 });
 
-test("折叠组不吞掉宿主插件入口", () => {
-	const groupEnd = sidebar.indexOf("<HostPluginDockButtons");
-	const favoritesIndex = sidebar.indexOf("<FavoritesDockButton />");
-	assert.ok(groupEnd > favoritesIndex, "宿主插件入口应留在折叠组之外（条件渲染，不属于低频三件套）");
+test("折叠箭头与树节点同向：收起右指、展开下指", () => {
+	// 旧实现是 ChevronDown + 展开时 rotate-180（收起下指、展开上指），方向是反的。
+	assert.match(sidebar, /moreActionsOpen && "rotate-90"/, "展开态应向下指（ChevronRight rotate-90）");
+	assert.doesNotMatch(sidebar, /moreActionsOpen && "rotate-180"/, "不应回到反向下指/上指的旧写法");
+});
+
+test("折叠组不吞掉宿主插件入口，且插件行排在「更多」之上", () => {
+	// 产品决定：插件行属于用户自装入口，固定留在折叠组之外、且排在「更多」之前，
+	// 这样展开的三件套始终落在动作区最末（也就是插件行下面）。
+	const hostIndex = sidebar.indexOf("<HostPluginDockButtons");
+	const toggleIndex = sidebar.indexOf("aria-controls=\"sidebar-more-actions\"");
+	const groupIndex = sidebar.indexOf('id="sidebar-more-actions"');
+	assert.ok(hostIndex > -1 && toggleIndex > -1 && groupIndex > -1, "缺少宿主插件入口或折叠开关");
+	assert.ok(hostIndex < toggleIndex, "宿主插件入口应排在「更多」开关之前");
+	assert.ok(groupIndex > toggleIndex, "折叠组容器应挂在开关之后（插件行不得插进折叠组）");
 });

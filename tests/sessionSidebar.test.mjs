@@ -468,9 +468,22 @@ test("sidebar splits Chats/Projects by navTab without duplicating list logic", (
 	assert.match(content, /parseSidebarNavTab\(value\)/);
 	assert.match(content, /value="chats"/);
 	assert.match(content, /value="projects"/);
-	// ProjectTree 按 navTab 分流：active 渲染活动 Agent 页，chats 渲染 Chat 区，projects 渲染项目区
-	assert.match(projectTree, /navTab === "active" \? \(?\s*<ActiveSessionsTree/);
-	assert.match(projectTree, /navTab === "chats" \? chatSection : projectsSection/);
+	// ProjectTree 按 navTab 分流：active 渲染活动 Agent 页，chats 渲染 Chat 区，projects 渲染项目区。
+	// active / chats 两支都会先挂 groupsSection（会话分组区），所以不再要求 ActiveSessionsTree 紧跟问号，
+	// 而是按「分支切片」断言：切出 active / chats / projects 三段，逐个校验内容落在自己那段里。
+	const activeAt = projectTree.indexOf('navTab === "active" ? (');
+	const chatsAt = projectTree.indexOf('navTab === "chats" ? (');
+	const projectsAt = projectTree.search(/\)\s*:\s*\(\s*\n\s*projectsSection/);
+	assert.ok(activeAt > -1 && chatsAt > activeAt && projectsAt > chatsAt, "navTab 三分支（active / chats / projects）缺失或顺序改变");
+	const activeBranch = projectTree.slice(activeAt, chatsAt);
+	const chatsBranch = projectTree.slice(chatsAt, projectsAt);
+	const projectsBranch = projectTree.slice(projectsAt);
+	assert.match(activeBranch, /<ActiveSessionsTree[^>]*currentSessionId=\{props\.currentSessionId\}/, "active 分支应渲染活动会话树");
+	assert.match(activeBranch, /\{groupsSection\}/, "active 分支应挂会话分组区");
+	assert.match(chatsBranch, /\{chatSection\}/, "chats 分支应渲染 Chat 区");
+	assert.doesNotMatch(chatsBranch, /<ActiveSessionsTree/, "chats 分支不得重复渲染活动会话树");
+	assert.match(projectsBranch, /projectsSection/, "projects 分支应渲染项目区");
+	assert.doesNotMatch(projectsBranch, /<ActiveSessionsTree|\{chatSection\}/, "projects 分支不得夹带活动树 / Chat 区");
 	assert.match(projectTree, /const chatSection = chatProjects\.map/);
 	assert.match(projectTree, /const projectsSection = \(/);
 	// 两区都不复制列表逻辑：会话树/项目行只出现一份

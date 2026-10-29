@@ -1,4 +1,4 @@
-import { Activity, Bolt, ChevronDown, CirclePlus, Clock, Folder, Globe, MessageSquare, Monitor, Moon, Search, Sun } from "lucide-react";
+import { Activity, Bolt, ChevronRight, CirclePlus, Clock, Folder, Globe, MessageSquare, Monitor, Moon, Search, Sun } from "lucide-react";
 import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import type { AgentBackend, AgentTab, AppThemeMode, ArchivedDshSession, ArchivedPiSession, Project, SessionRecord, SessionSummary, WorktreeEntry } from "../../../../shared/types";
 import { AgentContextMenu, DraftSessionContextMenu, ProjectContextMenu, SessionContextMenu, SessionManagerModal, SessionSourceFilterMenu, WorktreeCreateDialog } from "./SidebarParts";
@@ -375,8 +375,12 @@ export function SidebarContent(props: SidebarContentProps) {
 						{/* 快捷键默认隐藏，行 hover 时才淡入；键位跟随设置页自定义（useShortcutBindings） */}
 						<kbd className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md px-1 text-micro text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">{searchKbd}</kbd>
 					</button>
-					{/* 低频入口折叠组：定时任务 / 智能体 / 收藏。展开后按原顺序平铺，
-					    不改变各自行为（定时任务仍有运行中呼吸点，智能体/收藏各自打开页面 Tab）。 */}
+					{/* 宿主插件面板入口：插件贡献的行是用户自己装的模块入口，固定排在「更多」之上——
+					    否则「更多」展开的三件套会夹在插件行之前，越展开越乱。无已启用面板时组件自身不渲染。 */}
+					<HostPluginDockButtons projectId={props.currentProjectId} sessionId={props.currentSessionId} />
+					{/* 低频入口折叠组：定时任务 / 智能体 / 收藏，固定排在动作区最末（插件行之后）。展开后按原顺序平铺，
+					    不改变各自行为（定时任务仍有运行中呼吸点，智能体/收藏各自打开页面 Tab）。
+					    箭头与树节点同向：收起指向右（▸），展开转向下（▾）——不是反过来的「收起下指、展开上指」。 */}
 					<button
 						type="button"
 						className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-bg-hover"
@@ -385,7 +389,7 @@ export function SidebarContent(props: SidebarContentProps) {
 						title={t("common.more")}
 						onClick={() => setMoreActionsOpen((v) => !v)}
 					>
-						<ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-fast", moreActionsOpen && "rotate-180")} aria-hidden="true" />
+						<ChevronRight className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-fast", moreActionsOpen && "rotate-90")} aria-hidden="true" />
 						<span className="min-w-0 flex-1 truncate font-medium">{t("common.more")}</span>
 					</button>
 					{moreActionsOpen ? (
@@ -395,8 +399,6 @@ export function SidebarContent(props: SidebarContentProps) {
 							<FavoritesDockButton />
 						</div>
 					) : null}
-					{/* 宿主插件面板入口：与定时任务同区，无已启用面板时组件自身不渲染 */}
-					<HostPluginDockButtons projectId={props.currentProjectId} sessionId={props.currentSessionId} />
 				</div>
 
 				{/* MorphingSearch 命令面板：锚点固定定位到视口水平居中、垂直约 1/5 处，
