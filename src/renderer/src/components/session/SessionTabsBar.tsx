@@ -27,23 +27,24 @@ import { useFavorites } from "../../hooks/useFavorites";
 import { TAB_CLOSE_BUTTON_CLASS } from "../../utils/tabCloseButton";
 
 import { SESSION_TAB_DRAG_MIME } from "../../utils/sessionSplitEdge";
-import { buildSessionTabBarEntries, flattenSessionTabBarEntries } from "../../utils/sessionTabGroups";
+import { buildSessionTabBarEntries, flattenSessionTabBarEntries, GROUP_COLOR_VALUES } from "../../utils/sessionTabGroups";
 import { SESSION_TAB_BADGE_EXTRA_WIDTH } from "../../../../shared/sessionTabWidth";
 
 /**
  * 分屏组预设色板（浏览器标签组风格）。
  * 第一个为默认色，与 SPLIT_GROUP_DEFAULT_COLOR 保持一致；labelKey 走 i18n。
  */
-export const SPLIT_GROUP_COLOR_PALETTE = [
-	{ name: "blue", value: "#0091ff", labelKey: "session.splitGroup.color.blue" },
-	{ name: "green", value: "#30a46c", labelKey: "session.splitGroup.color.green" },
-	{ name: "yellow", value: "#f5d90a", labelKey: "session.splitGroup.color.yellow" },
-	{ name: "orange", value: "#f76b15", labelKey: "session.splitGroup.color.orange" },
-	{ name: "red", value: "#e5484d", labelKey: "session.splitGroup.color.red" },
-	{ name: "purple", value: "#8e4ec6", labelKey: "session.splitGroup.color.purple" },
-	{ name: "pink", value: "#d6409f", labelKey: "session.splitGroup.color.pink" },
-	{ name: "gray", value: "#8d8d8d", labelKey: "session.splitGroup.color.gray" },
-] as const;
+const SPLIT_GROUP_COLOR_NAMES = ["blue", "green", "yellow", "orange", "red", "purple", "pink", "gray"] as const;
+
+/**
+ * 色值来源是 utils/sessionTabGroups 的 GROUP_COLOR_VALUES（项目分组与分屏组共用同一套）。
+ * 这里只补 name 与 i18n key，**不再重复写字面色**——两处各存一份正是色板漂移的老路。
+ */
+export const SPLIT_GROUP_COLOR_PALETTE = SPLIT_GROUP_COLOR_NAMES.map((name, index) => ({
+	name,
+	value: GROUP_COLOR_VALUES[index],
+	labelKey: `session.splitGroup.color.${name}` as const,
+}));
 
 /**
  * 会话 Tab 栏（浏览器式多 Tab）：标题栏下方展示当前打开的所有会话。

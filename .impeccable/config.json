@@ -12,7 +12,13 @@
       "src/renderer/src/config/TokenDanceTopUpDialog.tsx",
       "src/renderer/src/styles/foundation.css",
       "src/renderer/src/styles/tailwind.css",
-      "src/renderer/src/components/app/SupportPiDeckDialog.tsx"
+      "src/renderer/src/components/app/SupportPiDeckDialog.tsx",
+      "src/renderer/src/file-icons.css",
+      "src/renderer/src/components/session/markdown/piTuiShikiThemes.ts",
+      "src/renderer/src/components/app/PiTuiLogo.tsx",
+      "src/renderer/src/components/app/piTuiLogoData.ts",
+      "src/renderer/src/components/app/LogoMark.tsx",
+      "src/renderer/src/web/web.css"
     ],
     "ignoreValues": []
   }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAtomValue, useSetAtom, useStore } from "jotai";
 import { currentSessionIdAtom, projectInventoryByIdAtom, sessionRecordByIdAtomFamily, sessionRecordsAtom, sessionTabIdsAtom } from "../atoms";
 import { cycleSessionTab, openPermanentSessionTab, openPreviewSessionTab, reorderSessionTabs, togglePinSessionTab, type SessionTabOpenMode } from "../utils/sessionTabs";
-import { buildSessionTabBarEntries, flattenSessionTabBarEntries } from "../utils/sessionTabGroups";
+import { buildSessionTabBarEntries, flattenSessionTabBarEntries, GROUP_COLOR_VALUES } from "../utils/sessionTabGroups";
 import { buildSplitLayoutFromDrop, edgeToOrientation, insertRootPaneFromDrop, nestSplitPaneFromDrop, replaceSplitPaneFromDrop, resolveSplitAfterClose, resolveSplitHostSessionId, splitLayoutSessionIds, type SessionSplitDropTarget, type SessionSplitLayout } from "../utils/sessionSplitEdge";
 import { desktopApi } from "../desktopApi";
 import { buildSessionIdAliasMap, remapSessionIds } from "../../../shared/sessionIdAliases";
@@ -11,8 +11,8 @@ import type { FocusTargetPayload } from "../../../shared/types";
 const PINNED_TABS_STORAGE_KEY = "pideck.pinnedSessionTabIds";
 const SPLIT_GROUP_COLLAPSED_KEY = "pideck.splitGroupCollapsed";
 const SPLIT_GROUP_CONFIG_KEY = "pideck.splitGroupConfig";
-/** 分屏组默认颜色（色板第一个，蓝色） */
-export const SPLIT_GROUP_DEFAULT_COLOR = "#0091ff";
+/** 分屏组默认颜色（色板第一个，蓝色）——直接取共用色板，避免第三份副本 */
+export const SPLIT_GROUP_DEFAULT_COLOR = GROUP_COLOR_VALUES[0];
 
 export type SessionWorkspaceFocusHandlers = {
 	/** 切换当前会话焦点（不改 Tab 预览/常驻状态） */

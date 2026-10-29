@@ -2598,7 +2598,7 @@ div.fixed.inset-0.z-50 {
   padding: 44px 40px 32px;
   text-align: center;
   border-radius: var(--radius-lg, 10px);
-  background: var(--color-bg-panel, #ffffff);
+  background: var(--color-bg-panel);
   border: 1px solid var(--color-border-default, rgba(13, 13, 13, 0.13));
   box-shadow: var(--shadow-modal, 0 10px 15px -3px rgba(9, 9, 11, 0.1));
   animation: error-boundary-rise 0.25s ease-out both;
@@ -2620,9 +2620,9 @@ div.fixed.inset-0.z-50 {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 500;
-  color: var(--color-danger, #b42318);
-  background: var(--color-danger-soft, #fdecea);
-  border: 1px solid color-mix(in srgb, var(--color-danger, #b42318) 18%, transparent);
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 18%, transparent);
 }
 .app-error-boundary-dot {
   width: 6px;
@@ -2638,7 +2638,7 @@ div.fixed.inset-0.z-50 {
   font-weight: 600;
   line-height: 1.4;
   letter-spacing: 0.2px;
-  color: var(--color-text-primary, #202124);
+  color: var(--color-text-primary);
 }
 
 .app-error-boundary-message {
@@ -2646,7 +2646,7 @@ div.fixed.inset-0.z-50 {
   max-width: 420px;
   font-size: var(--font-size-control);
   line-height: 1.7;
-  color: var(--color-text-secondary, #4a4a4a);
+  color: var(--color-text-secondary);
   font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
   word-break: break-all;
 }
@@ -2656,14 +2656,14 @@ div.fixed.inset-0.z-50 {
   max-width: 440px;
   text-align: left;
   border-radius: var(--radius-sm, 6px);
-  background: var(--color-bg-muted, #f4f4f4);
+  background: var(--color-bg-muted);
   border: 1px solid var(--color-border-subtle, rgba(13, 13, 13, 0.1));
 }
 .app-error-boundary-stack summary {
   padding: 10px 14px;
   font-size: 12px;
   font-weight: 500;
-  color: var(--color-text-secondary, #4a4a4a);
+  color: var(--color-text-secondary);
   cursor: pointer;
   user-select: none;
   list-style: none;
@@ -2682,7 +2682,7 @@ div.fixed.inset-0.z-50 {
   transform: rotate(90deg);
 }
 .app-error-boundary-stack summary:hover {
-  color: var(--color-text-primary, #202124);
+  color: var(--color-text-primary);
 }
 .app-error-boundary-stack pre {
   max-height: 220px;
@@ -2692,7 +2692,7 @@ div.fixed.inset-0.z-50 {
   border-top: 1px solid var(--color-border-subtle, rgba(13, 13, 13, 0.1));
   font-size: var(--font-size-micro);
   line-height: 1.6;
-  color: var(--color-danger, #b42318);
+  color: var(--color-danger);
   white-space: pre-wrap;
   word-break: break-all;
 }

@@ -185,7 +185,7 @@ function showFallbackNotice(message: string, duration: number, kind: NoticeKind 
 		"pointer-events:auto",
 		"padding:14px",
 		"border-radius:var(--radius-lg, 10px)",
-		"background:var(--color-bg-panel, #ffffff)",
+		"background:var(--color-bg-panel)",
 		"border:1px solid var(--color-border-subtle, rgba(0,0,0,0.08))",
 		"box-shadow:var(--shadow-popover, 0 4px 12px rgba(0,0,0,0.12))",
 		"font:500 13px/1.5 var(--font-family-base, system-ui,-apple-system,Segoe UI,sans-serif)",
@@ -207,13 +207,13 @@ function showFallbackNotice(message: string, duration: number, kind: NoticeKind 
 	content.style.cssText = ["flex:1", "min-width:0", "display:flex", "flex-direction:column"].join(";");
 	if (title) {
 		const titleEl = document.createElement("div");
-		titleEl.style.cssText = ["font-weight:500", "font-size:13px", "line-height:20px", "color:var(--color-text-primary, #1f2328)"].join(";");
+		titleEl.style.cssText = ["font-weight:500", "font-size:13px", "line-height:20px", "color:var(--color-text-primary)"].join(";");
 		titleEl.textContent = title;
 		content.appendChild(titleEl);
 	}
 	const msgEl = document.createElement("div");
 	// 有标题时正文是描述（12px 次级色）；无标题时整段作为主文案（13px 主色）
-	msgEl.style.cssText = title ? ["margin-top:2px", "font-size:12px", "line-height:16px", "color:var(--color-text-secondary, #57606a)"].join(";") : ["font-size:13px", "line-height:20px", "color:var(--color-text-primary, #1f2328)"].join(";");
+	msgEl.style.cssText = title ? ["margin-top:2px", "font-size:12px", "line-height:16px", "color:var(--color-text-secondary)"].join(";") : ["font-size:13px", "line-height:20px", "color:var(--color-text-primary)"].join(";");
 	msgEl.textContent = message;
 	content.appendChild(msgEl);
 
@@ -230,9 +230,9 @@ function showFallbackNotice(message: string, duration: number, kind: NoticeKind 
 			button.textContent = key === "action" ? `${action.label} →` : action.label;
 			button.style.cssText = ["display:inline-flex", "align-items:center", "height:28px", "border:0", "border-radius:var(--radius-md, 8px)", "padding:0 10px", "font:500 12px/1.4 system-ui,sans-serif", "cursor:pointer"].join(";");
 			if (key === "action") {
-				button.style.cssText += ["background:var(--color-primary, var(--color-accent, #3b82f6))", "color:var(--color-primary-foreground, #fff)"].join(";");
+				button.style.cssText += ["background:var(--color-primary, var(--color-accent))", "color:var(--color-primary-foreground)"].join(";");
 			} else {
-				button.style.cssText += ["border:1px solid var(--color-border-subtle, rgba(0,0,0,0.12))", "background:var(--color-bg-muted, rgba(0,0,0,0.04))", "color:var(--color-text-secondary, #57606a)"].join(";");
+				button.style.cssText += ["border:1px solid var(--color-border-subtle, rgba(0,0,0,0.12))", "background:var(--color-bg-muted, rgba(0,0,0,0.04))", "color:var(--color-text-secondary)"].join(";");
 			}
 			button.addEventListener("click", () => {
 				action.onClick?.();
@@ -258,11 +258,11 @@ function showFallbackNotice(message: string, duration: number, kind: NoticeKind 
 			if (!ok) return;
 			// 复制成功后短暂切换成勾号（与 NoticeToastCard 一致），再还原
 			copyBtn.replaceChildren(svgIcon("check"));
-			copyBtn.style.color = "var(--color-success, #16a34a)";
+			copyBtn.style.color = "var(--color-success)";
 			window.setTimeout(() => {
 				copyBtn.replaceChildren(svgIcon("copy"));
-				copyBtn.style.color = "var(--color-text-tertiary, #8b8f94)";
-			}, 1600);
+				copyBtn.style.color = "var(--color-text-tertiary)";
+			});
 		});
 	});
 	actionGroup.appendChild(copyBtn);
@@ -286,7 +286,7 @@ function showFallbackNotice(message: string, duration: number, kind: NoticeKind 
 }
 
 /** 兜底 toast 右上角图标钮的共享样式（24px 方钮，与 NoticeToastCard 的 copy/close 一致）。 */
-const iconButtonCss = ["display:inline-flex", "align-items:center", "justify-content:center", "width:24px", "height:24px", "flex:none", "border:0", "border-radius:var(--radius-md, 6px)", "background:transparent", "color:var(--color-text-tertiary, #8b8f94)", "cursor:pointer"].join(";");
+const iconButtonCss = ["display:inline-flex", "align-items:center", "justify-content:center", "width:24px", "height:24px", "flex:none", "border:0", "border-radius:var(--radius-md, 6px)", "background:transparent", "color:var(--color-text-tertiary)", "cursor:pointer"].join(";");
 
 /**
  * 弹出全局 toast。展示时长由设置项 toastDurationMs 统一决定（全局口径）：

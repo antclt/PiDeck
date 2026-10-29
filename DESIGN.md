@@ -183,6 +183,7 @@ PiDeck 的界面像一张摊开的制图台：纸是白的，线是墨的，工�
 - **二维码 / 画布**：黑白矩阵色、Logo 渐变、宠物美术色。
 - **终端配色**：`terminalThemes.ts` 是终端 ANSI 调色板，与 UI 调色板无关。
 - **阴影与兜底**：`rgba(0,0,0,.08)` 这类阴影色、`var(--color-danger, #dc2626)` 里的兜底值不算调色板成员。
+- **Web 远端界面**：`web/web.css` 是独立的第二套语言——逐字取自官方 `@deepseek-ai/dsh-web-frontend` 的 alias token（含自己的亮/暗值），只作用于 Web 页面。它与桌面端调色板**故意不同**，不要为了"统一"把它并入 foundation。
 
 ### Named Rules
 
