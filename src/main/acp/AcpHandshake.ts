@@ -62,7 +62,16 @@ export async function performAcpHandshake(runtime: AcpAgentRuntime, resumeSessio
 		"initialize",
 		{
 			protocolVersion: ACP_PROTOCOL_VERSION,
-			clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+			clientCapabilities: {
+				fs: { readTextFile: false, writeTextFile: false },
+				terminal: false,
+				// CodeBuddy ≥2.178.1 用 initialize 的这条 vendor 扩展做 mainAgentOptIn 门控：
+				// 不声明就不下发 toolMode（工具模式/PTC）、agent（Main Agent）、delegate，
+				// 连 --agent ptc 与手写 codeMode 都会被拒（-32602，#447 实测）。
+				// 键归属 CB 命名空间，其他 agent 按 ACP 规范忽略未知 _meta；PiDeck 的
+				// configOptions 走通用渲染，声明后这些选项能直接落地，不需要按品牌分支。
+				_meta: { "codebuddy.ai": { mainAgentSupport: true } },
+			},
 		},
 		timeoutMs,
 	);
