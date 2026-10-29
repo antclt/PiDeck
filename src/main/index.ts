@@ -408,6 +408,7 @@ import { registerWslHostIpc } from "./ipc/wslHostIpc";
 import { createWslHostReferenceRegistry } from "./wsl/WslHostReferences";
 import { resolveProjectWslIdentity } from "./wsl/WslProjectEnvironment";
 import { registerRemoteProjectIpc } from "./ipc/remoteProjectIpc";
+import { createRemoteFactsHub } from "./remote/RemoteFactsNotifications";
 import { registerRemoteProjectFileIpc } from "./ipc/remoteProjectFileIpc";
 import { registerRemoteProjectTransferIpc } from "./ipc/remoteProjectTransferIpc";
 import { registerRemoteProjectEntryIpc } from "./ipc/remoteProjectEntryIpc";
@@ -3287,7 +3288,11 @@ function registerIpc() {
 				client,
 				// 内置扩展快照的来源：与本地 `-e` 注入同一份「当前生效」字节（覆盖层优先，整份校验）。
 				builtInExtensionRoots: resolveBuiltInExtensionRoots(),
-				onDisconnect: (hostId) => remoteTerminalManager?.closeHost(hostId),
+				onDisconnect: (hostId) => {
+					remoteTerminalManager?.closeHost(hostId);
+					// helper 的 watcher 已随会话一起死：丢掉登记，不把旧 watchId 当有效。
+					remoteProjectFacts?.onHostDisconnected(hostId);
+				},
 				// Push every transition to the window: `connect()` only returns the state it reached, so
 				// anything afterwards (degradation, reconnect, the shutdown after ready) is invisible without
 				// this, and the UI ends up showing a stale state.
@@ -3353,12 +3358,21 @@ function registerIpc() {
 	 * 目录事实层的失效入口（W3）：项目域注册时才创建，文本保存的注册在它之前，因此用晚绑定转发。
 	 * 只标脏、不装载——一次保存不会额外产生任何远端往返。
 	 */
-	let remoteProjectFacts: { afterWrite(projectId: string, paths: readonly string[]): void; onHelperEvent(entry: { hostId: string; watchId: string; paths: readonly string[] }): void } | undefined;
+	let remoteProjectFacts:
+		| {
+				afterWrite(projectId: string, paths: readonly string[]): void;
+				onHelperEvent(entry: { hostId: string; watchId: string; paths: readonly string[] }): void;
+				onHostDisconnected(hostId: string): void;
+		  }
+		| undefined;
+	/** 目录与 Git 共用的事实变化通知出口（T4）：订阅按 sender + project，事件只标脏。 */
+	const remoteFactsEvents = createRemoteFactsHub(ipcChannels.remoteProjectFactsChanged);
 	registerRemoteProjectTrustIpc({ enabled: remoteExperimentEnabled, trust: () => remoteProjectTrustService });
 	const remoteProjectIpc = registerRemoteProjectIpc({
 		enabled: remoteExperimentEnabled,
 		userDataDir: app.getPath("userData"),
 		service: remoteHostServiceIfEnabled,
+		factsEvents: remoteFactsEvents,
 		// 远端项目登记端口（Phase 3 第二段）：canonical 值已由 IPC 层校验/确认，这里只做持久化
 		// 与按 projectId 取 locator。只暴露 ssh 项目，本机项目不经过这条入口。
 		projects: {
@@ -3373,9 +3387,11 @@ function registerIpc() {
 		},
 	});
 	remoteProjectFacts = remoteProjectIpc;
+	quitCleanup.register("remote-project-ipc", () => remoteProjectIpc.dispose());
 	const remoteGitReads = registerRemoteGitReadIpc({
 		enabled: remoteExperimentEnabled,
 		service: remoteHostServiceIfEnabled,
+		factsEvents: remoteFactsEvents,
 		trusted: async (target) => (await remoteProjectTrustService?.trustOverride({ hostId: target.hostId, remoteRoot: target.remotePath })) === "approve",
 		locator: (projectId) => {
 			const project = projectStore.get(projectId);
@@ -3723,6 +3739,8 @@ function registerIpc() {
 		mainCopy: mainCopy as (key: string, params?: Record<string, string | number>) => string,
 		getMainWindow: () => mainWindow,
 		userDataDir: app.getPath("userData"),
+		// 项目关闭时退订它的目录订阅；连接/窗口级清理分别在 onDisconnect 与 quitCleanup 里。
+		onProjectRemoved: (projectId) => remoteProjectIpc.closeProject(projectId),
 		resolveWslEnvironment: async (distro, user) => {
 			const { resolveWslEnvironment } = await import("./wsl/WslEnvironment");
 			return resolveWslEnvironment(distro, user, {
