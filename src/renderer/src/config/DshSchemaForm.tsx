@@ -115,7 +115,7 @@ export function DshSchemaForm(props: DshSchemaFormProps) {
 					</span>
 				)}
 				{dirty && (
-					<span className="ml-auto text-micro text-amber-500" title={t("config.dirtyTooltip")}>
+					<span className="ml-auto text-micro text-warning" title={t("config.dirtyTooltip")}>
 						●
 					</span>
 				)}
@@ -266,7 +266,7 @@ function Labeled(props: { name: string; meta: Record<string, unknown>; children:
 			<span className="grid min-w-0 gap-0.5">
 				<span className="flex items-center gap-1.5 text-caption font-medium text-foreground">
 					{title ? <span className="truncate">{title}</span> : null}
-					{props.secretSet && <span className="rounded-full border border-emerald-300/70 bg-emerald-500/10 px-1.5 py-px text-micro text-emerald-700 dark:border-emerald-700/70 dark:text-emerald-300">{t("config.dsh.secretSet")}</span>}
+					{props.secretSet && <span className="rounded-full border border-emerald-300/70 bg-success/10 px-1.5 py-px text-micro text-success dark:border-emerald-700/70 ">{t("config.dsh.secretSet")}</span>}
 				</span>
 				{description && <span className="text-micro text-muted-foreground">{description}</span>}
 			</span>

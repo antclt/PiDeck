@@ -28,7 +28,7 @@ const SOURCE_LABELS: Record<SessionSource, string> = {
 const SOURCE_TONES: Record<SessionSource, string> = {
 	pi: "border-cyan-300/70 text-cyan-700 dark:border-cyan-700/70 dark:text-cyan-300",
 	codex: "border-indigo-300/70 text-indigo-700 dark:border-indigo-700/70 dark:text-indigo-300",
-	claude: "border-amber-300/70 text-amber-700 dark:border-amber-700/70 dark:text-amber-300",
+	claude: "border-amber-300/70 text-warning dark:border-amber-700/70 ",
 	// opencode 官方品牌为黑白单色，不用品牌色（避免绿色观感）；中性灰随主题自适应
 	opencode: "border-muted-foreground/40 text-muted-foreground",
 	// zcode（z.ai CLI）无公开品牌图形资源，用中性色 + 自绘 Z 标记，避免错误品牌色
@@ -407,7 +407,7 @@ const CHANNEL_LABELS: Record<SessionChannel, string> = {
 
 const CHANNEL_TONES: Record<SessionChannel, string> = {
 	// 渠道徽标沿用来源徽标的「浅描边 + 深色字形」，颜色取品牌方向：微信用绿、飞书用蓝。
-	wechat: "border-emerald-300/70 text-emerald-700 dark:border-emerald-700/70 dark:text-emerald-300",
+	wechat: "border-emerald-300/70 text-success dark:border-emerald-700/70 ",
 	feishu: "border-sky-300/70 text-sky-700 dark:border-sky-700/70 dark:text-sky-300",
 };
 

@@ -51,7 +51,7 @@ export interface FileDiffProps {
 function ChangeCount({ value, type }: { value: number; type: "added" | "removed" }) {
 	if (!value) return null;
 	return (
-		<span className={cn("font-mono text-xs tabular-nums", type === "added" ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400")}>
+		<span className={cn("font-mono text-xs tabular-nums", type === "added" ? "text-success" : "text-danger")}>
 			{type === "added" ? "+" : "−"}
 			{value}
 		</span>
@@ -163,10 +163,10 @@ export function FileDiff({ file, lines, status = "streaming", open, defaultOpen 
 								{lines.map((line, index) => {
 									const type = line.type ?? "context";
 									return (
-										<div key={line.id} className={cn("grid grid-cols-[2.25rem_2.25rem_1rem_minmax(0,1fr)]", type === "added" && "bg-emerald-500/[0.07]", type === "removed" && "bg-rose-500/[0.07]")}>
+										<div key={line.id} className={cn("grid grid-cols-[2.25rem_2.25rem_1rem_minmax(0,1fr)]", type === "added" && "bg-success/[0.07]", type === "removed" && "bg-danger/[0.07]")}>
 											<span className="select-none pr-2 text-right tabular-nums text-muted-foreground/40">{line.oldLine}</span>
 											<span className="select-none pr-2 text-right tabular-nums text-muted-foreground/40">{line.newLine}</span>
-											<span className={cn("select-none text-center text-muted-foreground/45", type === "added" && "text-emerald-600 dark:text-emerald-400", type === "removed" && "text-rose-600 dark:text-rose-400")}>{type === "added" ? "+" : type === "removed" ? "−" : ""}</span>
+											<span className={cn("select-none text-center text-muted-foreground/45", type === "added" && "text-success", type === "removed" && "text-danger")}>{type === "added" ? "+" : type === "removed" ? "−" : ""}</span>
 											<AgentCodeLine code={line.content} tokens={tokens?.[index]} className="min-w-0 whitespace-pre px-1.5" />
 										</div>
 									);

@@ -353,7 +353,7 @@ export const DshSubagentEntryRow = (props: { agentId: string; entry: DshSubagent
 						{t("dshTools.subagentRunning")}
 					</span>
 				)}
-				{entry.kind === "diagnostic" && <span className="shrink-0 inline-flex items-center rounded bg-amber-500/15 px-1.5 py-0.5 text-micro font-medium text-amber-600 dark:text-amber-400">{t("dshTools.subagentDiagnostic")}</span>}
+				{entry.kind === "diagnostic" && <span className="shrink-0 inline-flex items-center rounded bg-warning/15 px-1.5 py-0.5 text-micro font-medium text-warning">{t("dshTools.subagentDiagnostic")}</span>}
 				<span className="shrink-0 text-micro text-text-tertiary">{entry.mode === "continuable" ? t("dshTools.subagentContinuable") : t("dshTools.subagentOneShot")}</span>
 				<ChevronDown size={13} className={`shrink-0 text-text-tertiary transition-transform ${collapsed ? "" : "rotate-180"}`} aria-hidden="true" />
 			</button>

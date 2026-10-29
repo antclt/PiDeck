@@ -1022,7 +1022,7 @@ export function ModelPicker(props: {
 				{props.onToggleFavorite && (
 					<button
 						type="button"
-						className={`grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground${favorited ? " text-amber-500" : ""}`}
+						className={`grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground${favorited ? " text-warning" : ""}`}
 						title={favorited ? t("app.modelUnfavorite") : t("app.modelFavorite")}
 						aria-label={favorited ? t("app.modelUnfavorite") : t("app.modelFavorite")}
 						onClick={(e) => {

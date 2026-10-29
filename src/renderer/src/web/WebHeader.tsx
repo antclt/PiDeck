@@ -437,7 +437,7 @@ function ProviderUsageBlock(props: { provider?: string; backend?: UsageProbeBack
 			) : null}
 			{/* 面板 JWT 余额段被丢弃时显式说明原因，避免「余额行突然消失」的困惑 */}
 			{result.panelBalanceError ? (
-				<div className="flex items-center gap-1.5 px-2.5 text-caption text-amber-600 dark:text-amber-400">
+				<div className="flex items-center gap-1.5 px-2.5 text-caption text-warning">
 					<AlertCircle size={12} aria-hidden="true" />
 					<span>{result.panelBalanceError === "unauthorized" ? t("config.usageProbe.sub2apiPanelJwtExpired") : t("config.usageProbe.sub2apiPanelJwtFailed")}</span>
 				</div>

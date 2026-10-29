@@ -201,7 +201,7 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
 					description={
 						<>
 							{t("settings.enablePiProxyDesc")}
-							{proxyListActive && <span className="mt-0.5 block text-amber-600/90 dark:text-amber-400/90">{t("settings.piProxySwitchOverridden")}</span>}
+							{proxyListActive && <span className="mt-0.5 block text-warning/90 /90">{t("settings.piProxySwitchOverridden")}</span>}
 						</>
 					}
 					checked={draft.piProxyEnabled}
@@ -272,7 +272,7 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
 							{extraModelKeys.length > 0 && (
 								<div className="flex flex-col gap-1">
 									<span className="px-0.5 text-micro font-medium text-muted-foreground">{t("settings.piProxyModelsExtras")}</span>
-									<div className="flex flex-col gap-1 rounded-md border border-amber-500/25 bg-amber-500/5 p-2">{extraModelKeys.map(renderExtraRow)}</div>
+									<div className="flex flex-col gap-1 rounded-md border border-warning/25 bg-warning/5 p-2">{extraModelKeys.map(renderExtraRow)}</div>
 								</div>
 							)}
 							{/* 配置里有、pi 报告里没有的供应商，按原因分两类展示（issue #356）：
@@ -282,7 +282,7 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
 							{unlistedProviders.withModels.length > 0 && !proxyListLoading && (
 								<div className="flex flex-col gap-1">
 									<span className="px-0.5 text-micro font-medium text-muted-foreground">{t("settings.piProxyModelsUnlistedProviders")}</span>
-									<div className="flex flex-col gap-1 rounded-md border border-amber-500/25 bg-amber-500/5 p-2">
+									<div className="flex flex-col gap-1 rounded-md border border-warning/25 bg-warning/5 p-2">
 										{unlistedProviders.withModels.map((providerName) => (
 											<div key={providerName} className="flex min-w-0 items-baseline gap-2 px-2 py-0.5">
 												<span className="min-w-0 flex-none font-mono text-caption text-foreground" title={providerName}>
@@ -352,7 +352,7 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
 																		<span className="flex-none whitespace-nowrap font-mono text-caption text-muted-foreground/70">{t("config.count.models", { count: models.length })}</span>
 																		{/* 固定预留已选计数宽度，首次选择时组头不会因插入文字而重排。 */}
 																		<span className="min-w-4 flex-1" />
-																		<span className={`min-w-20 flex-none whitespace-nowrap text-right text-micro font-medium text-amber-600/90 dark:text-amber-400/90 ${selectedInGroup === 0 ? "invisible" : ""}`} aria-hidden={selectedInGroup === 0}>
+																		<span className={`min-w-20 flex-none whitespace-nowrap text-right text-micro font-medium text-warning/90 /90 ${selectedInGroup === 0 ? "invisible" : ""}`} aria-hidden={selectedInGroup === 0}>
 																			{t("settings.piProxyModelsGroupSelected", { count: selectedInGroup })}
 																		</span>
 																	</button>

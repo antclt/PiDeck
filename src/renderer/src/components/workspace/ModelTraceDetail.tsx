@@ -134,7 +134,7 @@ export function ModelTraceDetail({ payloadJson, summary }: { payloadJson: string
 				) : null}
 				{summary.payloadBytes ? <span className="rounded bg-muted px-1.5 py-0.5 tabular-nums">{(summary.payloadBytes / 1024).toFixed(1)} KB</span> : null}
 				{summary.durationMs != null ? <span className="rounded bg-muted px-1.5 py-0.5 tabular-nums">{(summary.durationMs / 1000).toFixed(2)}s</span> : null}
-				{summary.truncated || view.truncated ? <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-600">{t("rpc.traceTruncated")}</span> : null}
+				{summary.truncated || view.truncated ? <span className="rounded bg-warning/15 px-1.5 py-0.5 text-warning">{t("rpc.traceTruncated")}</span> : null}
 				{view.parseError ? (
 					<span className="truncate" title={view.parseError}>
 						{view.parseError}

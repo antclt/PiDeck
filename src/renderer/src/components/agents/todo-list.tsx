@@ -62,7 +62,7 @@ function TodoHeaderIcon({ complete }: { complete: boolean }) {
 		<span aria-hidden="true" className="relative grid size-6 shrink-0 place-items-center">
 			<AnimatePresence initial={false} mode="popLayout">
 				{complete ? (
-					<motion.svg key="complete" viewBox="0 0 24 24" initial={reduce ? { opacity: 1 } : { opacity: 0, scale: 0.72 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={reduce ? { duration: 0 } : SPRING_SWAP} className="absolute size-5.5 overflow-visible text-emerald-500">
+					<motion.svg key="complete" viewBox="0 0 24 24" initial={reduce ? { opacity: 1 } : { opacity: 0, scale: 0.72 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={reduce ? { duration: 0 } : SPRING_SWAP} className="absolute size-5.5 overflow-visible text-success">
 						<circle cx="12" cy="12" r="9" fill="currentColor" />
 						<motion.path d="M7.5 12.25 10.5 15.25 16.75 8.75" fill="none" stroke="white" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" initial={reduce ? { pathLength: 1 } : { pathLength: 0 }} animate={{ pathLength: 1 }} transition={reduce ? { duration: 0 } : { duration: 0.24, ease: EASE_OUT }} />
 					</motion.svg>
@@ -91,7 +91,7 @@ function TodoStatusIcon({ status, progress, compact = false }: { status: TodoIte
 				// 用 size-3.5（14px）保持同比例，也略大于 chip 图标（11px）以示层级
 				compact ? "size-3.5" : "size-5",
 				status === "in-progress" && "text-foreground",
-				status === "cancelled" && "text-rose-600 dark:text-rose-400",
+				status === "cancelled" && "text-danger",
 			)}
 		>
 			<motion.circle
@@ -225,7 +225,7 @@ export function TodoList({ items, title = t("app.todoListTitle"), open, defaultO
 			>
 				<TodoHeaderIcon complete={allComplete} />
 				<h3 className={cn("min-w-0 flex-1 truncate font-medium text-foreground/90", compact ? "text-widget" : "text-sm")}>{title}</h3>
-				<span className={cn("shrink-0 font-medium tabular-nums text-muted-foreground", compact ? "text-caption" : "text-xs", allComplete && "text-emerald-600 dark:text-emerald-400")}>
+				<span className={cn("shrink-0 font-medium tabular-nums text-muted-foreground", compact ? "text-caption" : "text-xs", allComplete && "text-success")}>
 					<span className="sr-only">
 						{t("app.todoCompletedCount", {
 							completed,

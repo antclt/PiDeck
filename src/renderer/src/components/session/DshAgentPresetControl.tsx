@@ -57,13 +57,13 @@ const PRESET_TONES: Record<string, PresetTone> = {
 	},
 	// 极简模式（双工具）：绿色对应「轻量」
 	minimal: {
-		chip: "border-emerald-500/25 bg-emerald-500/12 text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-400/15 dark:text-emerald-300",
-		hover: "hover:bg-emerald-500/20 hover:text-emerald-800 dark:hover:bg-emerald-400/25 dark:hover:text-emerald-200",
+		chip: "border-success/25 bg-success/12 text-success dark:border-success/30 dark:bg-success/15",
+		hover: "hover:bg-success/20 hover:text-emerald-800 dark:hover:bg-success/25 dark:hover:text-emerald-200",
 	},
 	// 创造模式（自定义 preset 创作/实验）：琥珀色对应「实验」
 	cordis: {
-		chip: "border-amber-500/30 bg-amber-500/12 text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/15 dark:text-amber-300",
-		hover: "hover:bg-amber-500/20 hover:text-amber-800 dark:hover:bg-amber-400/25 dark:hover:text-amber-200",
+		chip: "border-warning/30 bg-warning/12 text-warning dark:border-warning/30 dark:bg-warning/15",
+		hover: "hover:bg-warning/20 hover:text-amber-800 dark:hover:bg-warning/25 dark:hover:text-amber-200",
 	},
 };
 const FALLBACK_PRESET_TONE: PresetTone = {

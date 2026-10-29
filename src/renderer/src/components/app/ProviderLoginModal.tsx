@@ -76,7 +76,7 @@ function ProviderLoginBody({ preselectedProviderId }: { preselectedProviderId?: 
 					{state.phase === "running" && <RunningBody flow={flow} state={state} />}
 					{state.phase === "succeeded" && (
 						<Alert>
-							<CheckCircle2 className="text-emerald-500" />
+							<CheckCircle2 className="text-success" />
 							<AlertTitle>{t("providerLogin.success.title")}</AlertTitle>
 							<AlertDescription>{t("providerLogin.success.hint")}</AlertDescription>
 						</Alert>

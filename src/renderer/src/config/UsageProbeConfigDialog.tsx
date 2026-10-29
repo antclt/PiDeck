@@ -480,7 +480,7 @@ export function UsageProbeConfigDialog(props: {
 						</div>
 					) : (
 						<>
-							{loadErrors.length > 0 && <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-caption leading-relaxed text-amber-600 dark:text-amber-400">{loadErrors.join("\n")}</div>}
+							{loadErrors.length > 0 && <div className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-caption leading-relaxed text-warning">{loadErrors.join("\n")}</div>}
 							{legacyNotice && (
 								<div className="rounded-md border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-caption leading-relaxed text-sky-600 dark:text-sky-400" data-testid="usage-probe-legacy-notice">
 									{legacyNotice}
@@ -680,7 +680,7 @@ export function UsageProbeConfigDialog(props: {
 								{testState === "success" && testResult?.panelBalanceError ? (
 									// Sub2API 面板 JWT 失效：主查询成功但余额段被丢弃（401=过期最常见），
 									// 显式提示原因而不是无感消失，用户才知道要重贴新令牌。
-									<div className="flex items-center gap-1.5 text-caption leading-5 text-amber-600 dark:text-amber-400" data-testid="usage-probe-panel-jwt-warning">
+									<div className="flex items-center gap-1.5 text-caption leading-5 text-warning" data-testid="usage-probe-panel-jwt-warning">
 										<AlertCircle size={12} aria-hidden="true" />
 										<span>{testResult.panelBalanceError === "unauthorized" ? t("config.usageProbe.sub2apiPanelJwtExpired") : t("config.usageProbe.sub2apiPanelJwtFailed")}</span>
 									</div>

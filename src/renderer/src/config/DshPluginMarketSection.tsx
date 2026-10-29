@@ -167,7 +167,7 @@ export function DshPluginMarketSection() {
 									</Button>
 								</div>
 								{entry.description && <p className="text-micro text-muted-foreground">{entry.description}</p>}
-								{entry.uiOnly && uiOnlyConfirming && <p className="text-micro text-amber-600 dark:text-amber-400">{t("config.dsh.pluginMarketUiOnlyWarning")}</p>}
+								{entry.uiOnly && uiOnlyConfirming && <p className="text-micro text-warning">{t("config.dsh.pluginMarketUiOnlyWarning")}</p>}
 							</div>
 						);
 					})}
@@ -226,7 +226,7 @@ function SourceBadge(props: { source: "market" | "npm" }) {
 /** UI-only 徽标：主要提供 DSH Web 界面功能（headless 无可见效果）。 */
 function UiOnlyBadge() {
 	return (
-		<Badge variant="outline" className="shrink-0 border-amber-300/70 bg-amber-500/10 font-medium text-amber-700 dark:border-amber-700/70 dark:text-amber-300">
+		<Badge variant="outline" className="shrink-0 border-amber-300/70 bg-warning/10 font-medium text-warning dark:border-amber-700/70 ">
 			{t("config.dsh.pluginMarketUiOnlyBadge")}
 		</Badge>
 	);

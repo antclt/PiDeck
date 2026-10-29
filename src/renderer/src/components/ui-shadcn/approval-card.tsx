@@ -27,15 +27,15 @@ export type ApprovalCardStatusTone = "active" | "success" | "danger";
 
 function StatusIndicator({ tone }: { tone: ApprovalCardStatusTone }) {
 	if (tone === "success") {
-		return <Check size={12} className="text-emerald-500" aria-hidden="true" />;
+		return <Check size={12} className="text-success" aria-hidden="true" />;
 	}
 	if (tone === "danger") {
-		return <span className="inline-block size-1.5 rounded-full bg-red-500" aria-hidden="true" />;
+		return <span className="inline-block size-1.5 rounded-full bg-danger" aria-hidden="true" />;
 	}
 	return (
 		<span className="relative flex size-1.5" aria-hidden="true">
-			<span className="absolute inline-flex size-full animate-ping rounded-full bg-amber-400 opacity-75" />
-			<span className="relative inline-flex size-1.5 rounded-full bg-amber-500" />
+			<span className="absolute inline-flex size-full animate-ping rounded-full bg-warning opacity-75" />
+			<span className="relative inline-flex size-1.5 rounded-full bg-warning" />
 		</span>
 	);
 }

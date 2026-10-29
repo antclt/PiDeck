@@ -232,7 +232,7 @@ export function ComposerSkillPicker(props: {
 												{skill.source === "global" ? t("app.skillBadgeGlobal") : t("app.skillBadgeProject")}
 											</span>
 										)}
-										{skill.userOnly && <span className="shrink-0 inline-flex items-center rounded bg-amber-500/15 px-1.5 py-0.5 text-micro font-medium text-amber-600 dark:text-amber-400">{t("dshTools.skillUserOnly")}</span>}
+										{skill.userOnly && <span className="shrink-0 inline-flex items-center rounded bg-warning/15 px-1.5 py-0.5 text-micro font-medium text-warning">{t("dshTools.skillUserOnly")}</span>}
 									</span>
 									{skill.description && (
 										<span className="mt-0.5 block truncate text-caption text-muted-foreground" title={skill.description}>

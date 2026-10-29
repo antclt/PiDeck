@@ -161,7 +161,7 @@ export function CronScheduleBuilder({ value, onChange, previews, error }: CronSc
 					<span className="text-destructive">{error}</span>
 				) : (
 					previews.length > 0 && (
-						<span className="flex items-center gap-1 text-emerald-500">
+						<span className="flex items-center gap-1 text-success">
 							<Check className="size-3" />
 							{t("automation.cronPreview")}: {previews.map(formatPreviewTime).join(" ➔ ")}
 						</span>

@@ -12,19 +12,19 @@ import type { ProviderUsageResult } from "../../../shared/types/providerUsage";
 /** 用量状态档位（cc-switch utilizationColor 语义）。 */
 export type UsageTone = "ok" | "low" | "empty" | "neutral";
 
-/** tone → 文字色（cc-switch text-green-600/orange-500/red-500 同款，含暗色变体）。 */
+/** tone → 文字色（cc-switch text-success/orange-500/red-500 同款，含暗色变体）。 */
 export const USAGE_TONE_TEXT_CLASS: Record<UsageTone, string> = {
-	ok: "text-green-600 dark:text-green-400",
+	ok: "text-success",
 	low: "text-orange-500 dark:text-orange-400",
-	empty: "text-red-500 dark:text-red-400",
+	empty: "text-danger",
 	neutral: "text-text-tertiary",
 };
 
 /** tone → 进度条填充色（TierBar 同款：绿/橙/红）。 */
 export const USAGE_TONE_BAR_CLASS: Record<UsageTone, string> = {
-	ok: "bg-green-500",
+	ok: "bg-success",
 	low: "bg-orange-500",
-	empty: "bg-red-500",
+	empty: "bg-danger",
 	neutral: "bg-text-tertiary",
 };
 

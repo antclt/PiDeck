@@ -70,7 +70,7 @@ function kindLabel(record: TrajectoryRecord): string {
 
 function laneTone(lane: TrajectoryLane): string {
 	if (lane === "input") return "bg-primary/70";
-	if (lane === "tools") return "bg-amber-500/75 dark:bg-amber-400/70";
+	if (lane === "tools") return "bg-warning/75 dark:bg-warning/70";
 	if (lane === "process") return "bg-violet-500/70 dark:bg-violet-400/65";
 	return "bg-sky-500/70 dark:bg-sky-400/65";
 }
@@ -802,7 +802,7 @@ function PromptSnapshotDetail(props: { prompt: SessionPromptSnapshot }) {
 					<p className="font-mono text-micro leading-relaxed text-muted-foreground wrap-break-word">{prompt.tools.join(", ")}</p>
 				</div>
 			) : null}
-			{prompt.truncated ? <p className="mt-2 text-caption text-amber-600 dark:text-amber-400">{t("session.trajectory.prompt.truncated")}</p> : null}
+			{prompt.truncated ? <p className="mt-2 text-caption text-warning">{t("session.trajectory.prompt.truncated")}</p> : null}
 			<CopyableBlock label={t("session.trajectory.prompt.fullText")} text={prompt.text} />
 		</div>
 	);
