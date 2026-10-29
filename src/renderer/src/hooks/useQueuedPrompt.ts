@@ -28,29 +28,32 @@ export interface UseQueuedPromptOptions {
 	dispatchPromptSnapshot: (sessionId: string, message: string, images?: ImageContent[], streamingBehavior?: "steer" | "followUp", agentMode?: ComposerAgentMode, templateDescription?: string) => Promise<void>;
 }
 
-/** 队列发送超时：防止 dispatchPromptSnapshot 长时间挂起导致队列项永久卡在 sending。 */
+/** 队列发送超时：防止「入队即回」的后端长时间挂起、把队列项永久卡在 sending。
+ *  ACP 不适用（`session/prompt` 的回包就是回合结算，见 acksAtTurnEnd）。 */
 const QUEUED_SEND_TIMEOUT_MS = 30_000;
 
-/** 取消只结束本地等待，不表示撤销已经发给主进程的消息。 */
-async function withSendTimeout(promise: Promise<void>, signal: AbortSignal): Promise<boolean> {
+type SendWait = "settled" | "timeout" | "aborted";
+
+/** 取消只结束本地等待，不表示撤销已经发给主进程的消息。
+ *  timeoutMs === undefined：该后端没有短平快的投递确认（ACP 的回合可能跑上十分钟），
+ *  只能等回包或本地取消，不能拿一个固定窗口当作「没送到」。 */
+async function withSendTimeout(promise: Promise<void>, signal: AbortSignal, timeoutMs: number | undefined): Promise<SendWait> {
+	const settled = promise.then(() => "settled" as const);
+	// 竞速已经结束（超时/取消）后才 reject 的投递：挂一个空 catch，避免变成未处理拒绝。
+	settled.catch(() => {});
+	if (signal.aborted) return "aborted";
 	let timer: number | undefined;
-	let cancel = () => {};
+	let onAbort = () => {};
+	const interrupted = new Promise<Exclude<SendWait, "settled">>((resolve) => {
+		onAbort = () => resolve("aborted");
+		signal.addEventListener("abort", onAbort, { once: true });
+		if (timeoutMs !== undefined) timer = window.setTimeout(() => resolve("timeout"), timeoutMs);
+	});
 	try {
-		return await Promise.race([
-			promise.then(() => true),
-			new Promise<false>((resolve) => {
-				cancel = () => {
-					window.clearTimeout(timer);
-					resolve(false);
-				};
-				if (signal.aborted) return cancel();
-				signal.addEventListener("abort", cancel, { once: true });
-				timer = window.setTimeout(() => resolve(false), QUEUED_SEND_TIMEOUT_MS);
-			}),
-		]);
+		return await Promise.race([settled, interrupted]);
 	} finally {
 		window.clearTimeout(timer);
-		signal.removeEventListener("abort", cancel);
+		signal.removeEventListener("abort", onAbort);
 	}
 }
 
@@ -287,21 +290,39 @@ export function useQueuedPrompt(options: UseQueuedPromptOptions) {
 		return !flush.controller.signal.aborted && current?.agentId === flush.target.agentId && current?.runtimeGeneration === flush.target.runtimeGeneration;
 	}
 
+	/** ACP 的 `session/prompt` 回包就是整个回合的结算：投递确认在回合结束才到，
+	 *  没有 pi/dsh 那种「入队即回」。对它套 30s 投递窗口只会把已经上屏的消息误判成
+	 *  「未确认」，并把队首钉成一条既不能撤回也不能丢弃的屏障。 */
+	function acksAtTurnEnd(sessionId: string): boolean {
+		const record = store.get(sessionRecordsAtom)[sessionId];
+		const runtime = store.get(sessionRuntimeByIdAtom)[sessionId];
+		return record?.backend === "acp" || runtime?.backend === "acp";
+	}
+
 	/** 结算原 claim；超时/未知结果保留屏障，删除或卸载后的回包不写回也不弹错。 */
 	async function dispatchClaimedPrompt(sessionId: string, queuedPrompt: QueuedPrompt, flush: QueueFlush): Promise<boolean> {
 		const ownsClaim = () => hasSession(sessionId) && flushesRef.current.get(sessionId) === flush;
+		// 删除、换代或卸载后的回包不写回也不弹错；本地取消只结束等待，同样不改行状态。
+		const settle = (outcome: { type: "accepted" } | { type: "failed" | "unknown"; error: string }) => {
+			if (!mountedRef.current || !ownsClaim()) return;
+			updateQueuedPrompts((current) => resolveClaimedPrompt(current, sessionId, queuedPrompt.id, outcome));
+		};
 		try {
-			const accepted = await withSendTimeout(dispatchPromptSnapshot(sessionId, queuedPrompt.message, queuedPrompt.images, queuedPrompt.behavior === "direct" ? undefined : queuedPrompt.behavior, queuedPrompt.agentMode, queuedPrompt.templateDescription), flush.controller.signal);
-			if (!ownsClaim()) return false;
-			updateQueuedPrompts((current) => resolveClaimedPrompt(current, sessionId, queuedPrompt.id, accepted ? { type: "accepted" } : { type: "unknown", error: unknownDeliveryMessage }));
-			if (!accepted && canContinueFlush(sessionId, flush)) showToast(unknownDeliveryMessage, 6000);
+			const wait = await withSendTimeout(
+				dispatchPromptSnapshot(sessionId, queuedPrompt.message, queuedPrompt.images, queuedPrompt.behavior === "direct" ? undefined : queuedPrompt.behavior, queuedPrompt.agentMode, queuedPrompt.templateDescription),
+				flush.controller.signal,
+				acksAtTurnEnd(sessionId) ? undefined : QUEUED_SEND_TIMEOUT_MS,
+			);
+			if (wait === "aborted") return false;
+			const accepted = wait === "settled";
+			settle(accepted ? { type: "accepted" } : { type: "unknown", error: unknownDeliveryMessage });
+			if (!accepted && ownsClaim() && canContinueFlush(sessionId, flush)) showToast(unknownDeliveryMessage, 6000);
 			return accepted;
 		} catch (error) {
-			if (!ownsClaim()) return false;
 			const errorMessage = error instanceof Error ? error.message : String(error);
 			const deliveryUnknown = error instanceof PromptDeliveryUnknownError;
-			updateQueuedPrompts((current) => resolveClaimedPrompt(current, sessionId, queuedPrompt.id, { type: deliveryUnknown ? "unknown" : "failed", error: errorMessage }));
-			if (canContinueFlush(sessionId, flush)) showToast(deliveryUnknown ? unknownDeliveryMessage : errorMessage, deliveryUnknown ? 6000 : 4000);
+			settle({ type: deliveryUnknown ? "unknown" : "failed", error: errorMessage });
+			if (ownsClaim() && canContinueFlush(sessionId, flush)) showToast(deliveryUnknown ? unknownDeliveryMessage : errorMessage, deliveryUnknown ? 6000 : 4000);
 			return false;
 		}
 	}

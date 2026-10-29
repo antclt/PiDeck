@@ -66,8 +66,8 @@ export function queuedPromptHarness({ status = "idle", dispatch = async () => {}
 	const makeEditor = (id) => ({ focus: () => focused.push(id), scrollHeight: 80, scrollTop: 0 });
 	const composerTextareaRef = { current: makeEditor("A") };
 	const pendingComposerCaretRef = { current: null };
-	function addSession(id, runtimeStatus = "idle", generation = 1) {
-		store.set(atoms.upsertSessionAtom, { id, projectId: "project", title: id, source: "pi", environment: "native", preview: "", messageCount: 0, status: "draft", createdAt: 1, updatedAt: 1 });
+	function addSession(id, runtimeStatus = "idle", generation = 1, backend = "pi") {
+		store.set(atoms.upsertSessionAtom, { id, projectId: "project", title: id, source: "pi", backend, environment: "native", preview: "", messageCount: 0, status: "draft", createdAt: 1, updatedAt: 1 });
 		setRuntime(id, runtimeStatus, generation);
 	}
 	function setRuntime(id, runtimeStatus, generation = 1, state = {}) {
