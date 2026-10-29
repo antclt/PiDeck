@@ -68,6 +68,9 @@ function createLocator(invocationCalls) {
 	};
 }
 
+/** Windows UNC 路径：用 charCode 拼反斜杠，避免测试源码里的多层转义。 */
+const wslUncSkillPath = ["", "", "wsl$", "Ubuntu-24.04", "root", ".pi", "agent", "pideck-skills", "usage-probe"].join(String.fromCharCode(92));
+
 const settings = {
 	wslEnabled: true,
 	wslDistro: "Ubuntu-24.04",
@@ -99,4 +102,30 @@ test("rejects a project UNC from another distro before spawning pi", async () =>
 
 	await assert.rejects(process.start(), (error) => error.code === "WSL_DISTRO_MISMATCH");
 	assert.equal(spawnCalls.length, 0);
+});
+
+test("injects bundled skills via --skill and converts them to Linux paths under WSL", async () => {
+	const spawnCalls = [];
+	const invocationCalls = [];
+	const { PiProcess } = loadPiProcess(spawnCalls);
+	const process = new PiProcess("//wsl.localhost/Ubuntu-24.04/root/ba_cli", settings, createLocator(invocationCalls), {
+		bundledSkillPaths: [wslUncSkillPath],
+	});
+
+	await process.start();
+
+	assert.deepEqual(invocationCalls[0].args, ["--mode", "rpc", "--no-themes", "--offline", "--skill", "/root/.pi/agent/pideck-skills/usage-probe"]);
+});
+
+test("skips --skill injection when the no-skills diagnostic switch is on", async () => {
+	const spawnCalls = [];
+	const invocationCalls = [];
+	const { PiProcess } = loadPiProcess(spawnCalls);
+	const process = new PiProcess("//wsl.localhost/Ubuntu-24.04/root/ba_cli", { ...settings, piRpcNoSkills: true }, createLocator(invocationCalls), {
+		bundledSkillPaths: [wslUncSkillPath],
+	});
+
+	await process.start();
+
+	assert.deepEqual(invocationCalls[0].args, ["--mode", "rpc", "--no-themes", "--offline", "--no-skills"]);
 });

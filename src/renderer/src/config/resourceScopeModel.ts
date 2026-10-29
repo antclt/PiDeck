@@ -5,7 +5,7 @@ export type ResourceScope = "global" | "project";
 
 export const PROJECT_SKILL_SOURCES: ReadonlySet<PiSkillLocation["id"]> = new Set(["project-pi", "project-agents"]);
 
-export const GLOBAL_SKILL_SOURCES: ReadonlySet<PiSkillLocation["id"]> = new Set(["pi-global", "agents-global"]);
+export const GLOBAL_SKILL_SOURCES: ReadonlySet<PiSkillLocation["id"]> = new Set(["pi-global", "agents-global", "pideck-global"]);
 
 export function isProjectSkill(skill: PiSkillSummary): boolean {
 	return PROJECT_SKILL_SOURCES.has(skill.sourceId);

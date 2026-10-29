@@ -21,7 +21,7 @@
 
 - 一次 pi RPC 激活约 8.5s（2026-10 实测：node/pi boot ≈0.5s + 用户 npm 扩展 ≈5s + 内置 16 个 TS 扩展 ≈2.4s），全部发生在 spawn→握手段。池的用法只有「提前起进程」：草稿创建/激活完成后 `AgentManager.ensureStandbyAgent(projectId)` 后台起一个完成握手的进程待命。
 - `src/main/pi/StandbyAgentPool.ts`：单槽位、容量 1、`STANDBY_TTL_MS = 3min` 自动回收（待命进程 RSS 数百 MB，TTL 只覆盖「打字→认领」窗口）。新会话激活经 `SessionRuntimeCoordinator.claimStandbyAgent` 认领，之后照常走 applyLatestPreferences / mergePendingPermissionSettings。
-- 只服务新会话（noSession / 恢复历史会话不认领）。spawn 输入指纹（`src/main/pi/standbyFingerprint.ts`：扩展根/禁用集/offline/noExt/noSkills/customPiPath/WSL/代理/launchArgs）任一变化即丢弃回退普通 spawn；信任走 `resolveTrustWithoutPrompt`，资源未决策不池化（绝不后台弹 trust 弹窗）。
+- 只服务新会话（noSession / 恢复历史会话不认领）。spawn 输入指纹（`src/main/pi/standbyFingerprint.ts`：扩展根/内置技能根/禁用集/offline/noExt/noSkills/customPiPath/WSL/代理/launchArgs）任一变化即丢弃回退普通 spawn；信任走 `resolveTrustWithoutPrompt`，资源未决策不池化（绝不后台弹 trust 弹窗）。
 - 已知限制：池化进程不带 `PIDECK_SESSION_ID`，安检门按默认档工作，per-session 安全覆盖对认领会话要重启才生效；池化 agent 对 `agents:list` / `agent:state-changed` 不可见。
 - 开关 `settings.standbyRuntimeEnabled`（默认开；设置 → 通用 tab）。启动耗时探针 `scripts/probePiStartup.mjs`（`JITI_DEBUG=1` 出逐模块 trace）。
 - 只读借用（Issue #316）：草稿会话斜杠命令预览 `AgentManager.draftCommands` 经 `StandbyAgentPool.peek(projectId)` 查同项目池进程的 `get_commands`（不认领、不消费、进程须 idle、指纹须新鲜）；链路 `sessions:draft-commands` IPC → 渲染层优先预览、空/失败回退本地技能/提示词发现；dsh/browser/preview 模式返回 null。

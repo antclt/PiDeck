@@ -2623,7 +2623,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		});
 		return result;
 	});
-	// 安装内置「用量查询自定义」技能模板：从 app resources 复制 SKILL.md 到全局技能目录。
+	// 安装内置「用量查询自定义」技能模板：从 app resources 复制 SKILL.md 到 PiDeck 专属技能目录
+	// （只由 PiDeck spawn 时 --skill 注入，TUI 不扫）。
 	// 幂等：内容直接覆盖；启动时也会自动安装（见 index.ts），此处保留手动触发兑底。
 	ipcMain.handle(ipcChannels.configInstallUsageSkill, async () => {
 		const result = await skillManager.installUsageProbeTemplate();
