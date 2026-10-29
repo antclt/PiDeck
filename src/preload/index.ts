@@ -480,10 +480,10 @@ const api = {
 	},
 	/** 远端会话只读发现与登记（Phase 3 第三段）；本批无侧栏 UI，通道先按 IPC 契约收口。 */
 	remoteSessions: {
-		scan: (hostId: string) => ipcRenderer.invoke(ipcChannels.remoteSessionScan, hostId) as Promise<import("../shared/types/remoteHost").RemoteSessionScanResult>,
-		register: (hostId: string, remoteSessionId: string) => ipcRenderer.invoke(ipcChannels.remoteSessionRegister, hostId, remoteSessionId) as Promise<import("../shared/types/remoteHost").RemoteSessionRegisterResult>,
+		scan: (hostId: string) => ipcRenderer.invoke(ipcChannels.remoteSessionScan, hostId) as Promise<import("../shared/types/remoteHost").RemoteSessionScanIpcResult>,
+		register: (hostId: string, remoteSessionId: string) => ipcRenderer.invoke(ipcChannels.remoteSessionRegister, hostId, remoteSessionId) as Promise<import("../shared/types/remoteHost").RemoteSessionRegisterIpcResult>,
 		/** 按需解析标题（有界头读；头内没有权威名时再补一次有界尾读）；`titleOrigin` 三档：authoritative（名字字段）/ inferred（首条消息弱兜底）/ fallback（文件名 stem）。 */
-		title: (hostId: string, remoteSessionId: string) => ipcRenderer.invoke(ipcChannels.remoteSessionTitle, hostId, remoteSessionId) as Promise<import("../shared/types/remoteHost").RemoteSessionTitleResult>,
+		title: (hostId: string, remoteSessionId: string) => ipcRenderer.invoke(ipcChannels.remoteSessionTitle, hostId, remoteSessionId) as Promise<import("../shared/types/remoteHost").RemoteSessionTitleIpcResult>,
 	},
 	projects: {
 		list: () => ipcRenderer.invoke(ipcChannels.projectsList) as Promise<Project[]>,
@@ -535,6 +535,11 @@ const api = {
 	},
 	files: {
 		list: (project: string | ProjectFileTarget, options?: { maxDepth?: number; directory?: string; skipGeneratedDirs?: boolean }) => ipcRenderer.invoke(ipcChannels.filesList, project, options) as Promise<FileTreeNode[]>,
+		/**
+		 * 公共目录页（T6）：位置无关，带 `truncated` 与事实版本。
+		 * 本地与远端返回同一形状；`hasChildren` 远端为 "unknown"（不假装空目录）。
+		 */
+		directoryPage: (target: ProjectFileTarget, options?: { force?: boolean }) => ipcRenderer.invoke(ipcChannels.filesDirectoryPage, target, options) as Promise<import("../shared/types/projectFiles").ProjectDirectoryPageResult>,
 		/** 工作区文件名搜索（issue #215）：主进程全盘扫描，忽略规则与文件抽屉的文件树同档（只跳 .git/node_modules） */
 		search: (projectId: string, query: string) => ipcRenderer.invoke(ipcChannels.filesSearch, projectId, query) as Promise<FileSearchResult[]>,
 		/** 工作区文件内容检索（Go file-index sidecar）：未就绪/不可用时回 null，渲染层不展示内容分区 */
@@ -1042,6 +1047,8 @@ const api = {
 	git: {
 		/** 扫描项目内独立仓库；单仓项目通常只返回根仓库 */
 		listRepos: (projectId: string) => ipcRenderer.invoke(ipcChannels.gitListRepos, projectId) as Promise<GitRepoInfo[]>,
+		/** 公共仓库列表（T7）：带 truncated 与 revision/generation；旧 listRepos 保留一版兼容。 */
+		repositoryList: (projectId: string) => ipcRenderer.invoke(ipcChannels.gitRepositoryList, projectId) as Promise<import("../shared/types").GitRepositoryListResult>,
 		branches: (projectId: string, repoPath?: ProjectFileTarget) => ipcRenderer.invoke(ipcChannels.gitBranches, projectId, repoPath) as Promise<GitBranchInfo>,
 		checkout: (projectId: string, branch: string, repoPath?: ProjectFileTarget) => ipcRenderer.invoke(ipcChannels.gitCheckout, projectId, branch, repoPath) as Promise<GitBranchInfo>,
 		createBranch: (projectId: string, branchName: string, repoPath?: ProjectFileTarget) => ipcRenderer.invoke(ipcChannels.gitCreateBranch, projectId, branchName, repoPath) as Promise<GitBranchInfo>,
@@ -1061,6 +1068,10 @@ const api = {
 		refs: (projectId: string, repoPath?: ProjectFileTarget) => ipcRenderer.invoke(ipcChannels.gitRefs, projectId, repoPath) as Promise<GitRef[]>,
 		// 分支对比概要（变更文件 + ahead/behind）
 		branchCompare: (projectId: string, base: string, target: string, repoPath?: ProjectFileTarget) => ipcRenderer.invoke(ipcChannels.gitBranchCompare, projectId, base, target, repoPath) as Promise<BranchDiffResult>,
+		/** 公共历史页（T7）：显式分页；远端 HEAD-only 时没有 totalCount。 */
+		historyPage: (projectId: string, options?: { maxCount?: number; skip?: number; ref?: string; path?: ProjectFileTarget; allBranches?: boolean }, repoPath?: ProjectFileTarget) => ipcRenderer.invoke(ipcChannels.gitHistoryPage, projectId, options, repoPath) as Promise<import("../shared/types").GitHistoryPageResult>,
+		/** 公共比较（T7）：mode 显式；三点模式才有 ahead/behind。 */
+		compareRefs: (projectId: string, base: string, head: string, repoPath?: ProjectFileTarget) => ipcRenderer.invoke(ipcChannels.gitCompareRefs, projectId, base, head, repoPath) as Promise<import("../shared/types").GitCompareRefsResult>,
 		// 单个 commit 详情
 		commitDetail: (projectId: string, ref: string, repoPath?: ProjectFileTarget) => ipcRenderer.invoke(ipcChannels.gitCommitDetail, projectId, ref, repoPath) as Promise<CommitDetail | null>,
 		// 提交历史中单个文件相对第一父提交的两侧内容

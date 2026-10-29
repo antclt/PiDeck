@@ -135,6 +135,8 @@ export const ipcChannels = {
 	editorsChooseExecutable: "editors:choose-executable",
 	editorsOpenProject: "editors:open-project",
 	filesList: "files:list",
+	/** 公共目录页（v5 T6）：本地/SSH 同一形状，带 truncated + revision + generation。 */
+	filesDirectoryPage: "files:directory-page",
 	/** 工作区文件名搜索（issue #215）：主进程全盘扫描，不受抽屉懒加载深度限制 */
 	filesSearch: "files:search",
 	/** 工作区文件内容检索（Go file-index sidecar）：未就绪/不可用时回 null，渲染层不展示内容分区 */
@@ -614,6 +616,12 @@ export const ipcChannels = {
 	skillsStoreOpenDir: "skills-store:open-dir",
 	/** 扫描项目目录内的独立 Git 仓库（根 + 嵌套），供侧栏切换 */
 	gitListRepos: "git:list-repos",
+	/** 公共仓库列表（v5 T7）：带 truncated 与 revision/generation，本地/SSH 同形 */
+	gitRepositoryList: "git:repository-list",
+	/** 公共历史页（v5 T7）：显式分页；远端 HEAD-only 时不填 totalCount */
+	gitHistoryPage: "git:history-page",
+	/** 公共比较（v5 T7）：显式 mode；三点模式才有 ahead/behind */
+	gitCompareRefs: "git:compare-refs",
 	gitBranches: "git:branches",
 	gitCheckout: "git:checkout",
 	gitCreateBranch: "git:create-branch",

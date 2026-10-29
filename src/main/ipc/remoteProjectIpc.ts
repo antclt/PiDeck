@@ -32,6 +32,7 @@ import type {
 	RemoteProjectSearchResult,
 	RemoteWorkspaceEntry,
 } from "../../shared/types/remoteHost";
+import type { ProjectDirectoryPageResult, ProjectPathState, ProjectPathsExistResult } from "../../shared/types/projectFiles";
 import { registerRemoteProjectCreateFlow } from "./remoteProjectCreateIpc";
 import type { RemoteHostConnectionService, RemoteProjectSession } from "../remote/RemoteHostConnectionService";
 import { REMOTE_HELPER_MAX_SEARCH_QUERY_LENGTH } from "../remote/RemoteHelperContract";
@@ -76,6 +77,10 @@ export type RemoteProjectIpcHandle = {
 	onHostDisconnected(hostId: string): void;
 	/** 项目关闭：退订它在各 host 上的目录订阅，不影响别的项目。 */
 	closeProject(projectId: string): Promise<void>;
+	/** 公共目录页（T6）：与远端 list 共用同一份事实缓存，带 truncated/revision/generation。 */
+	directoryPage(projectId: string, path: string, force?: boolean): Promise<ProjectDirectoryPageResult>;
+	/** 批量存在性/类型（只读 fs 面；64 路径/帧，全有或全无时按需逐项核对）。 */
+	pathsExist(projectId: string, paths: readonly string[]): Promise<ProjectPathsExistResult>;
 	/** 进程退出：成对退订后丢弃全部订阅登记。 */
 	dispose(): Promise<void>;
 	/** 只读诊断：一次会话内真实发生的目录装载次数。 */
@@ -327,23 +332,32 @@ export function registerRemoteProjectIpc(input: {
 		}
 	});
 
+	/**
+	 * 目录事实读（list 与公共目录页共用）：暖缓存命中也要逐次重解析当前项目/连接。
+	 *
+	 * `force` 只给显式刷新用：越过已完成缓存；在途同代装载仍可合并。
+	 */
+	async function readDirSnapshot(projectId: string, relative: string, force: boolean): Promise<{ ok: true; snapshot: { value: RemoteWorkspaceEntry[]; revision: number } } | { ok: false; code: string }> {
+		const target = await projectReadTarget(projectId);
+		if ("code" in target) return { ok: false, code: target.code };
+		const key = projectId + "\u0000" + relative;
+		// 只有暖事实才要求活的同代会话；首次打开目录必须允许正常建立会话。
+		const existing = dirs.peek(key);
+		const connection = target.service.connectionFacts?.(target.hostId);
+		if (typeof target.service.connectionFacts === "function" && existing !== undefined && (connection === undefined || connection.state !== "ready")) return { ok: false, code: "SSH_HOST_NOT_READY" };
+		const snapshot = await dirs.read(key, { ...(connection === undefined ? {} : { generation: connection.connectionId }), force });
+		return snapshot.ok ? { ok: true, snapshot } : { ok: false, code: snapshot.code };
+	}
+
 	ipcMain.handle(ipcChannels.remoteProjectList, async (_event, projectIdValue: unknown, pathValue: unknown): Promise<RemoteProjectListResult> => {
 		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
 		const relative = readRelativePath(pathValue);
 		if (relative === undefined) return opFailFromCode("REMOTE_PROJECT_PATH_INVALID");
 		if (typeof projectIdValue !== "string") return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
-		// 暖缓存命中也要逐次重解析当前项目/连接：项目被移除、换 root、host 离线都必须当场拒绝。
-		const target = await projectReadTarget(projectIdValue);
-		if ("code" in target) return opFailFromCode(target.code);
-		const key = projectIdValue + "\u0000" + relative;
-		// 只有暖事实才要求活的同代会话；首次打开目录必须允许正常建立会话。
-		const existing = dirs.peek(key);
-		const connection = target.service.connectionFacts?.(target.hostId);
-		if (typeof target.service.connectionFacts === "function" && existing !== undefined && (connection === undefined || connection.state !== "ready")) return opFailFromCode("SSH_HOST_NOT_READY");
-		const snapshot = await dirs.read(key, connection === undefined ? undefined : { generation: connection.connectionId });
-		if (!snapshot.ok) return opFailFromCode(snapshot.code);
+		const read = await readDirSnapshot(projectIdValue, relative, false);
+		if (!read.ok) return opFailFromCode(read.code);
 		// revision 随值替换或标脏递增：两个读者拿到同一个数就说明他们看的是同一份事实。
-		return opOk({ entries: snapshot.value, revision: snapshot.revision });
+		return opOk({ entries: read.snapshot.value, revision: read.snapshot.revision });
 	});
 
 	ipcMain.handle(ipcChannels.remoteProjectFactsSubscribe, (event, projectIdValue: unknown) => {
@@ -443,6 +457,68 @@ export function registerRemoteProjectIpc(input: {
 			for (const key of dirKeysAfterWrite(projectId, paths)) dirs.invalidate(key);
 			// 只标脏 + 通知：读仍由活跃的消费者决定（一次写不产生远端往返）。
 			factsEvents.publish({ projectId, generation: generationOf(projectId), scopes: touched.map((path) => ({ kind: "dir" as const, path })) });
+		},
+		async directoryPage(projectId: string, path: string, force = false): Promise<ProjectDirectoryPageResult> {
+			const relative = readRelativePath(path);
+			if (relative === undefined) return opFailFromCode("REMOTE_PROJECT_PATH_INVALID");
+			const read = await readDirSnapshot(projectId, relative, force);
+			if (!read.ok) return opFailFromCode(read.code);
+			const prefix = relative === "" ? "" : relative + "/";
+			const entries = read.snapshot.value
+				.filter((entry) => entry.kind === "file" || entry.kind === "directory")
+				.map((entry) => ({
+					target: { projectId, relativePath: prefix + entry.name },
+					relativePath: prefix + entry.name,
+					type: entry.kind as "file" | "directory",
+					// helper 的 fs.list 不逐项探测：远端只能是 unknown，不能伪装成“没有子项”。
+					hasChildren: (entry.kind === "directory" ? "unknown" : false) as boolean | "unknown",
+				}));
+			return opOk({ entries: entries.slice(0, 2000), truncated: entries.length > 2000, revision: read.snapshot.revision, generation: generationOf(projectId) });
+		},
+		async pathsExist(projectId: string, paths: readonly string[]): Promise<ProjectPathsExistResult> {
+			const relativePaths: string[] = [];
+			for (const path of paths) {
+				const relative = readRelativePath(path);
+				if (relative === undefined) return opFailFromCode("REMOTE_PROJECT_PATH_INVALID");
+				relativePaths.push(relative);
+			}
+			const target = await projectReadTarget(projectId);
+			if ("code" in target) return opFailFromCode(target.code);
+			try {
+				const outcome = await target.service.withProjectSession(
+					target.hostId,
+					target.remotePath,
+					async (session) => {
+						const reader = createRemoteWorkspaceReader({ port: sessionPort(session, target.hostId) });
+						const states: ProjectPathState[] = [];
+						// 128 路径 = 2 帧（≤64/帧）；批量是全有或全无，含缺失路径时退回逐项只读 stat，
+						// 仍然不签发任何 entry/文本授权。
+						for (let offset = 0; offset < relativePaths.length; offset += 64) {
+							const batch = relativePaths.slice(offset, offset + 64);
+							try {
+								const answer = await reader.statMany(target.hostId, batch.map(readerPath));
+								for (let index = 0; index < batch.length; index += 1) states.push({ target: { projectId, relativePath: batch[index] }, exists: true, isDirectory: answer.entries[index]?.kind === "directory" });
+							} catch (error) {
+								if (codeOf(error, "REMOTE_PROJECT_READ_FAILED") !== "PATH_NOT_FOUND") throw error;
+								for (const relativePath of batch) {
+									try {
+										const fileStat = await reader.stat(target.hostId, readerPath(relativePath));
+										states.push({ target: { projectId, relativePath }, exists: true, isDirectory: fileStat.kind === "directory" });
+									} catch (inner) {
+										if (codeOf(inner, "REMOTE_PROJECT_READ_FAILED") !== "PATH_NOT_FOUND") throw inner;
+										states.push({ target: { projectId, relativePath }, exists: false, isDirectory: false });
+									}
+								}
+							}
+						}
+						return states;
+					},
+					{ requireReady: true },
+				);
+				return outcome.ok ? opOk(outcome.value) : opFailFromCode(outcome.code);
+			} catch (error) {
+				return opFailFromCode(codeOf(error, "REMOTE_PROJECT_READ_FAILED"));
+			}
 		},
 		onHelperEvent(entry): void {
 			const changed = watchRegistry.scopesForEvent(entry.hostId, entry.watchId) ?? [];

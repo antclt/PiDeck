@@ -506,9 +506,9 @@ export function createPreviewApi(): PiDesktopApi {
 			rootStatus: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED", outcome: "rejected" as const }),
 		},
 		remoteSessions: {
-			scan: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
-			register: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
-			title: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED" }),
+			scan: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED", outcome: "rejected" as const }),
+			register: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED", outcome: "rejected" as const }),
+			title: async () => ({ ok: false as const, code: "REMOTE_FEATURE_DISABLED", outcome: "rejected" as const }),
 		},
 		remoteTrust: {
 			// 预览模式没有主进程、也没有主机 pin 事实：清单返回空表而非报错（静态预览下提示条/清单
@@ -623,6 +623,8 @@ export function createPreviewApi(): PiDesktopApi {
 				}
 				return files;
 			},
+			// 预览模式没有主进程：公共目录页返回稳定码，不伪造空目录。
+			directoryPage: async () => ({ ok: false as const, code: "UNSUPPORTED_PROJECT_LOCATION", outcome: "rejected" as const }),
 			open: async () => undefined,
 			// 预览模式无主进程：文件搜索按空结果处理，搜索入口可用但不返回内容
 			search: async () => [],
@@ -1061,6 +1063,9 @@ export function createPreviewApi(): PiDesktopApi {
 			cancelRemoteReads: async () => {},
 			remoteSnapshot: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
 			refreshRemoteSnapshot: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
+			repositoryList: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED", outcome: "rejected" as const }),
+			historyPage: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED", outcome: "rejected" as const }),
+			compareRefs: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED", outcome: "rejected" as const }),
 			remoteRepos: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
 			createRemoteBranch: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),
 			switchRemoteBranch: async () => ({ ok: false, code: "REMOTE_FEATURE_DISABLED" }),

@@ -2,9 +2,12 @@ import { ipcMain, shell } from "electron";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { relative } from "node:path";
 import { projectLocatorFromLegacy } from "../../shared/locationAdapters";
+import { isRemoteProject } from "../../shared/projectLocation";
+import { codeOf, opFailFromCode, opOk } from "../../shared/op";
 import { ipcChannels } from "../../shared/ipc";
 import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../shared/fileTree";
 import type { ProjectFileAccessScope, ProjectFileTarget } from "../../shared/types/project";
+import type { ProjectDirectoryPageResult, ProjectPathsExistResult } from "../../shared/types/projectFiles";
 import type { FileContentSearchResult, FileSearchResult } from "../../shared/types";
 import { detectFileManager, openFileManagerAt } from "../files/FileManager";
 import { openSystemPath } from "../fs/openPath";
@@ -36,6 +39,14 @@ export type FilesIpcDeps = {
 	getFileIndexService?: () => FileIndexService | null;
 	appLogger: Pick<AppLogger, "info" | "error">;
 	openExternalUrl: (url: string, forceSystem?: boolean) => Promise<void>;
+	/**
+	 * 远端文件读的公共入口（T6）：目录页与批量存在性都走只读 fs 面，不经过 entry 令牌。
+	 * 未装配时远端目标返回稳定码，不静默回退到本机。
+	 */
+	remoteFiles?: {
+		directoryPage(projectId: string, path: string, force?: boolean): Promise<ProjectDirectoryPageResult>;
+		pathsExist(projectId: string, paths: readonly string[]): Promise<ProjectPathsExistResult>;
+	};
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -69,7 +80,7 @@ function parseOptionalMaxBytes(value: unknown): number | undefined {
 	return value;
 }
 
-export function registerFilesIpc({ fileSystemService, projectStore, settingsStore, getFileIndexService, appLogger, openExternalUrl }: FilesIpcDeps): void {
+export function registerFilesIpc({ fileSystemService, projectStore, settingsStore, getFileIndexService, appLogger, openExternalUrl, remoteFiles }: FilesIpcDeps): void {
 	registerFilesSystemIpc({ settingsStore, openExternalUrl });
 	// Windows Node / Electron 边界不能直接消费 WSL Linux 路径：统一走 WslPaths 转成当前发行版的主机 UNC。
 	// 已经是普通 Windows/非 WSL 网络盘的输入保持不变，避免误伤非 WSL 路径。
@@ -103,6 +114,7 @@ export function registerFilesIpc({ fileSystemService, projectStore, settingsStor
 	const localProjectFileBackendWithSkippedGeneratedDirs = new LocalProjectFileBackend({
 		fileSystemService: {
 			listTree: (root, maxDepth, directory) => fileSystemService.listTree(root, maxDepth, directory, { skipGeneratedDirs: true }),
+			listTreePage: (root, maxDepth, directory) => fileSystemService.listTreePage(root, maxDepth, directory, { skipGeneratedDirs: true }),
 			searchNames: (root, query) => fileSystemService.searchNames(root, query),
 			create: (parentDir, name, type) => fileSystemService.create(parentDir, name, type),
 			delete: (targetPath, recursive) => fileSystemService.delete(targetPath, recursive),
@@ -214,6 +226,29 @@ export function registerFilesIpc({ fileSystemService, projectStore, settingsStor
 			relativePath = relative(boundary.canonicalRoot, directory).replace(/\\/g, "/");
 		}
 		return await listOrEmpty({ projectId, relativePath });
+	});
+
+	let localPageRevision = 0;
+	// 公共目录页（T6）：本地/ssh 同一形状；显式 truncated/revision/generation，不伪造本地路径。
+	ipcMain.handle(ipcChannels.filesDirectoryPage, async (_event, targetValue: unknown, options?: unknown): Promise<ProjectDirectoryPageResult> => {
+		if (options !== undefined && (!isRecord(options) || Object.keys(options).some((key) => key !== "force") || (options.force !== undefined && typeof options.force !== "boolean"))) return opFailFromCode("INVALID_FILE_LIST_OPTIONS");
+		let target: ProjectFileTarget;
+		try {
+			target = parseProjectFileTarget(targetValue);
+		} catch (error) {
+			return opFailFromCode(codeOf(error, "INVALID_PROJECT_FILE_TARGET"));
+		}
+		const project = projectStore.get(target.projectId);
+		if (project && isRemoteProject(project)) {
+			if (!remoteFiles) return opFailFromCode("UNSUPPORTED_PROJECT_LOCATION");
+			return await remoteFiles.directoryPage(target.projectId, target.relativePath, isRecord(options) && options.force === true);
+		}
+		try {
+			const page = await localProjectFileBackend.directoryPage(target, 2000);
+			return opOk({ ...page, revision: (localPageRevision += 1), generation: "local" });
+		} catch (error) {
+			return opFailFromCode(codeOf(error, "PROJECT_FILE_READ_FAILED"));
+		}
 	});
 
 	// 渲染层不可信：查询词必须是有限长度的非空字符串；结果上限与共享常量对齐，防大包滥用。
@@ -345,11 +380,33 @@ export function registerFilesIpc({ fileSystemService, projectStore, settingsStor
 			throw new Error("each path must be a local path or ProjectFileTarget");
 		}
 		if (scope !== undefined && normalized.some((path) => typeof path !== "string")) throw new Error("INVALID_PROJECT_FILE_ACCESS_SCOPE");
+		// 远端目标走只读 statMany（≤64/帧，不签任何令牌）；本地目标仍走本地 fs。
+		const remoteState = new Map<string, boolean>();
+		if (remoteFiles !== undefined) {
+			const byProject = new Map<string, ProjectFileTarget[]>();
+			for (const path of normalized) {
+				if (typeof path === "string") continue;
+				const project = projectStore.get(path.projectId);
+				if (project === undefined || !isRemoteProject(project)) continue;
+				const targets = byProject.get(path.projectId) ?? [];
+				targets.push(path);
+				byProject.set(path.projectId, targets);
+			}
+			for (const [projectId, targets] of byProject) {
+				const result = await remoteFiles.pathsExist(
+					projectId,
+					targets.map((target) => target.relativePath),
+				);
+				for (const target of targets) remoteState.set(projectId + "\u0000" + target.relativePath, result.ok ? (result.value.find((state) => state.target.relativePath === target.relativePath)?.exists ?? false) : false);
+			}
+		}
 		// 项目根 realpath 每批只解析一次；每个目标仍独立 realpath，逐项越界按 false 计。
 		const boundary = await resolveProjectReadBoundary(scope);
 		return Promise.all(
 			normalized.map(async (path) => {
 				if (typeof path !== "string") {
+					const remote = remoteState.get(path.projectId + "\u0000" + path.relativePath);
+					if (remote !== undefined) return remote;
 					const backend = projectFileBackendRouter.forProject(path.projectId);
 					try {
 						const [exists] = await backend.pathsExist([path]);
@@ -376,6 +433,13 @@ export function registerFilesIpc({ fileSystemService, projectStore, settingsStor
 		const input = parseFilePathInput(path);
 		if (typeof input !== "string") {
 			if (scope !== undefined) throw new Error("INVALID_PROJECT_FILE_ACCESS_SCOPE");
+			const project = projectStore.get(input.projectId);
+			if (project !== undefined && isRemoteProject(project)) {
+				if (!remoteFiles) return { exists: false, isDirectory: false };
+				const result = await remoteFiles.pathsExist(input.projectId, [input.relativePath]);
+				const state = result.ok ? result.value[0] : undefined;
+				return { exists: state?.exists === true, isDirectory: state?.isDirectory === true };
+			}
 			return projectFileBackendRouter.forProject(input.projectId).stat(input);
 		}
 		const boundary = await resolveProjectReadBoundary(scope);

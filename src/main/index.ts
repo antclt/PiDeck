@@ -4986,6 +4986,11 @@ function registerIpc() {
 		getFileIndexService: () => fileIndexService,
 		appLogger,
 		openExternalUrl,
+		// 公共文件读（T6）：ssh 项目的目录页与批量 stat 走只读 fs 面，不经过 entry 令牌。
+		remoteFiles: {
+			directoryPage: (projectId, path, force) => remoteProjectIpc.directoryPage(projectId, path, force),
+			pathsExist: (projectId, paths) => remoteProjectIpc.pathsExist(projectId, paths),
+		},
 	});
 	registerClipboardIpc({ appLogger });
 	// 资源管理器右键菜单（HKCU）：菜单显示名跟随主进程 locale（可能随设置语言切换）

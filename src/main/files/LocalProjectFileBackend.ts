@@ -1,13 +1,14 @@
 import { cp, readFile, rename as fsRename, rm, stat, writeFile } from "node:fs/promises";
 import { basename } from "node:path";
 import type { FileSearchResult, FileTreeNode, ProjectFileTarget } from "../../shared/types";
+import type { ProjectDirectoryEntry } from "../../shared/types/projectFiles";
 import { createProjectFileReadBoundary, resolveProjectFileReadPath, resolveProjectFileWritePath, type ProjectFileReadBoundary } from "./projectFileAccess";
 import { parseProjectFileTarget, resolveLocalProjectFileTarget } from "./projectFileTarget";
 import type { ProjectFileBackend } from "./ProjectFileBackend";
 import type { FileSystemService } from "../fs/FileSystemService";
 
 export type LocalProjectFileBackendDeps = {
-	fileSystemService: Pick<FileSystemService, "listTree" | "searchNames" | "create" | "delete" | "rename">;
+	fileSystemService: Pick<FileSystemService, "listTree" | "listTreePage" | "searchNames" | "create" | "delete" | "rename">;
 	resolveProjectRoot: (projectId: string) => string;
 };
 
@@ -65,6 +66,31 @@ export class LocalProjectFileBackend implements ProjectFileBackend {
 			if (isMissingPath(error)) throw new Error("PROJECT_DIRECTORY_MISSING");
 			throw error;
 		}
+	}
+
+	/**
+	 * 公共目录页（T6）：只读一层，带 exact 的 hasChildren 与显式 truncated。
+	 * 本机 `generation` 是稳定常量（同一个本地项目不存在连接代切换），`revision` 由调用方每次读取计。
+	 */
+	async directoryPage(target: ProjectFileTarget, limit = 2000): Promise<{ entries: ProjectDirectoryEntry[]; truncated: boolean }> {
+		let page;
+		try {
+			const resolved = await this.resolveTarget(target);
+			page = await this.deps.fileSystemService.listTreePage(resolved.boundary.canonicalRoot, 0, resolved.path);
+		} catch (error) {
+			if (isMissingPath(error)) throw new Error("PROJECT_DIRECTORY_MISSING");
+			throw error;
+		}
+		const projectId = target.projectId;
+		const mapped = page.nodes
+			.filter((node) => node.type === "file" || node.type === "directory")
+			.map((node) => ({
+				target: { projectId, relativePath: node.relativePath },
+				relativePath: node.relativePath,
+				type: node.type,
+				hasChildren: node.type === "directory" ? (node.hasChildren ?? false) : false,
+			}));
+		return { entries: mapped.slice(0, limit), truncated: page.truncated || mapped.length > limit };
 	}
 
 	async search(target: ProjectFileTarget, query: string): Promise<FileSearchResult[]> {
