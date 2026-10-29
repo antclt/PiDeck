@@ -28,6 +28,7 @@ import { acpPromptBlocks, appendAcpUserPrompt, initialAcpProjection, rollbackAcp
 import { authRequiredDescriptor, localizeCreateFailure, promptTurnTimeoutDescriptor } from "./acpFailureDescriptors";
 import { buildAgentRuntimeState, type AcpAgentRuntime } from "./acpAgentRuntime";
 import { findAcpBypassModeValue, findAcpModeOption, isRememberedAcpConfigOption, planAcpConfigReplay } from "./acpToolConfig";
+import { accumulateAcpUsage, acpReplyPerf, readAcpTurnUsage } from "./acpUsageMetrics";
 import { AcpTurnWatchdog } from "./acpTurnWatchdog";
 import { AcpMessageSnapshotStore } from "./AcpMessageSnapshotStore";
 import type { AcpSessionArchive } from "./AcpSessionArchive";
@@ -589,6 +590,11 @@ export class AcpAgentManager implements SessionAgentGateway {
 			runtime.turnUpdateKinds.clear();
 			runtime.turnForeignNotification = undefined;
 			const turnTimeoutMs = this.deps.promptTurnTimeoutMs ?? this.deps.readAcpTimeoutSettings?.().promptTurnTimeoutMs ?? PROMPT_TURN_TIMEOUT_MS;
+			// 回合计时基准：TTFT（首个正文 chunk）与总耗时（结算）都以派发时刻为起点，
+			// 不含本地 seed/物化耗时；上一回合的残留值在这里清掉。
+			runtime.turnStartedAt = Date.now();
+			runtime.turnFirstTextAt = undefined;
+			runtime.turnFirstThoughtAt = undefined;
 			const result = (await conn.request("session/prompt", { sessionId: runtime.acpSessionId, prompt }, turnTimeoutMs, (refresh) => {
 				runtime.turnDeadlineRefresh = refresh;
 			})) as AcpSessionPromptResult;
@@ -602,6 +608,10 @@ export class AcpAgentManager implements SessionAgentGateway {
 		} catch (error) {
 			await runtime.updateChain;
 			this.turnWatchdog.clearTurnTimers(runtime);
+			// 失败/中止回合不记账，计时基准也一并清掉，避免下一次成功结算算出跨回合的超长耗时。
+			runtime.turnStartedAt = undefined;
+			runtime.turnFirstTextAt = undefined;
+			runtime.turnFirstThoughtAt = undefined;
 			// 派发失败（JSON-RPC 拒绝 / 连接死）且 agent 未产出任何内容：撤回刚落的用户条目，
 			// 否则时间线会留一条没有回复的「幽灵消息」，而渲染层已把草稿回填输入框（会重发）。
 			// 用户主动取消(cancelling)不撤回:语义同 pi 后端 abort,用户消息留在时间线。
@@ -654,6 +664,9 @@ export class AcpAgentManager implements SessionAgentGateway {
 			runtime.status = "idle";
 			runtime.tab.status = "idle";
 		}
+		// 产出判定提前算：记账只对真有可见输出的回合做（空白回合稍后会被回滚并报错）。
+		const hasOutput = hasTurnOutput(runtime.projection.messages, seededIndex);
+		if (hasOutput) this.recordTurnMetrics(runtime, promptResult);
 		this.updates.flushMessages(runtime, true);
 		this.emit(agentEventTags.agentsState, this.list());
 		this.emitRuntimeState(input.agentId);
@@ -663,7 +676,6 @@ export class AcpAgentManager implements SessionAgentGateway {
 		// 按 rejected 收口并回滚本地用户条目：渲染层回填草稿，用户升级 CLI 后可安全重发。
 		// 用户主动停止(cancelling 且来源 user_stop,CLI 回 cancelled)不在此列:语义同 pi 后端
 		// abort,正常收口;看门狗 stall 代发的 cancel 不豁免——那就是本守卫要抓的异常形态。
-		const hasOutput = hasTurnOutput(runtime.projection.messages, seededIndex);
 		if (!hasOutput && runtime.cancelReason !== "user_stop") {
 			runtime.projection = rollbackAcpUserPrompt(runtime.projection, seededIndex);
 			this.updates.flushMessages(runtime, true);
@@ -875,6 +887,23 @@ export class AcpAgentManager implements SessionAgentGateway {
 		const acpSessionId = runtime.acpSessionId;
 		if (!this.deps.archive || !acpSessionId) return Promise.resolve();
 		return this.deps.archive.enqueueSave(acpSessionId, runtime.projection.messages);
+	}
+
+	/**
+	 * 成功回合记账：session/prompt 响应的实验性 usage（Qoder 返回 input/output tokens）
+	 * 累计进会话 totals；TTFT/总耗时/TPS 用本地计时。空白回合会被回滚并报错，
+	 * 由调用方用 hasOutput 挡掉，不污染「最近一次回复」与命中率样本。
+	 */
+	private recordTurnMetrics(runtime: AcpAgentRuntime, result: AcpSessionPromptResult | undefined): void {
+		const endedAt = Date.now();
+		const usage = readAcpTurnUsage(result);
+		// TTFT 优先正文首字；纯思考回合（没有任何正文）回退思考首字——与 pi 的语义一致。
+		const perf = acpReplyPerf({ startedAt: runtime.turnStartedAt, firstTextAt: runtime.turnFirstTextAt ?? runtime.turnFirstThoughtAt, endedAt, usage });
+		if (perf) runtime.lastReplyPerf = { ...perf, at: endedAt };
+		runtime.usageTotals = accumulateAcpUsage(runtime.usageTotals, usage, perf ? { totalMs: perf.totalMs ?? 0, ttftMs: perf.ttftMs } : undefined);
+		runtime.turnStartedAt = undefined;
+		runtime.turnFirstTextAt = undefined;
+		runtime.turnFirstThoughtAt = undefined;
 	}
 
 	private emitRuntimeState(agentId: string): void {

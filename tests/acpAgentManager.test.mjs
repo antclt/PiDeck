@@ -1858,3 +1858,38 @@ test("Ask 通知：每轮只提醒一次，未弹出（开关关着）不占用�
 	manager.notifyAskPending(tab.id, "deck-1", "标题", "问题 5");
 	assert.equal(asks.length, 4);
 });
+
+test("用量:session/prompt 的 usage 与本地计时进 runtime 状态（ACP 圆环面板数据源）", async (t) => {
+	// Qoder 实测形态：响应 usage 只有 input/output（没有缓存拆分），
+	// 因此 token 与 TPS 必须有值，缓存/命中率必须整组缺省（不能是假 0）。
+	let promptRpcId = null;
+	const { manager, createAgent, lastProc } = harness(t, {
+		handler: (frame) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+			if (frame.method === "session/new") return { sessionId: "sess-usage" };
+			if (frame.method === "session/prompt") {
+				promptRpcId = frame.id;
+				return undefined; // 先推流式 chunk，再手动结算（模拟真实 CLI）
+			}
+			return {};
+		},
+	});
+	const tab = await createAgent();
+	const sendPromise = manager.sendPrompt({ agentId: tab.id, message: "hi" });
+	await waitFor(() => promptRpcId !== null, "session/prompt dispatched");
+	lastProc().writeFromCli({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "sess-usage", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hello" } } } });
+	// 留出解码窗口（>0）再结算，TPS 才有意义。
+	await sleep(30);
+	lastProc().writeFromCli({ jsonrpc: "2.0", id: promptRpcId, result: { stopReason: "end_turn", usage: { inputTokens: 120, outputTokens: 40, totalTokens: 160 } } });
+	const result = await sendPromise;
+	assert.equal(result.accepted, true);
+	const state = await manager.getRuntimeState(tab.id);
+	assert.equal(state.inputTokens, 120);
+	assert.equal(state.outputTokens, 40);
+	assert.equal(state.cacheRead, undefined, "未上报缓存时不能显示 0");
+	assert.equal(state.cacheHitPercent, undefined);
+	assert.equal(typeof state.ttftMs, "number", "首个正文 chunk 到达即有 TTFT");
+	assert.ok(state.totalMs >= 30, "总耗时覆盖整个回合");
+	assert.ok(state.tps > 0, "有 output tokens 与解码窗口即算 TPS");
+	assert.ok(state.sessionTps > 0, "会话平均 TPS 同步累计");
+});

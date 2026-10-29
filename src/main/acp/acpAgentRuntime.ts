@@ -12,6 +12,7 @@ import type { AcpConfigOption } from "./acpProtocol";
 import type { AcpConnection } from "./AcpConnection";
 import type { AcpPermissionRequests } from "./AcpPermissionRequests";
 import type { AcpProjectionState } from "./AcpEventProjector";
+import { acpSessionTps, type AcpUsageTotals } from "./acpUsageMetrics";
 
 /** cancel 发起方:user_stop=用户主动停止(空白收口属正常);stall=看门狗代发(按失败收口)。 */
 export type AcpCancelSource = "user_stop" | "stall";
@@ -72,6 +73,16 @@ export type AcpAgentRuntime = {
 	stderrTail: string[];
 	/** 会话标题(session_info_update / new 返回值;供 catalog 自动标题)。 */
 	title?: string;
+	/** 本回合派发时刻（TTFT/总耗时的计时基准；回合结算或失败后清空）。 */
+	turnStartedAt?: number;
+	/** 本回合首个正文 chunk 到达时刻（TTFT 首选，与 pi 的 text delta 同口径）。 */
+	turnFirstTextAt?: number;
+	/** 本回合首个思考 chunk 到达时刻（无正文时作为 TTFT 回退，与 pi 同语义）。 */
+	turnFirstThoughtAt?: number;
+	/** 会话累计 token/缓存用量（session/prompt 响应的实验性 usage 累计；CLI 不返回时缺省）。 */
+	usageTotals?: AcpUsageTotals;
+	/** 最近一次成功回合的性能快照（TTFT/总耗时/TPS），供底栏圆环面板展示。 */
+	lastReplyPerf?: { ttftMs?: number; totalMs?: number; tps?: number; endToEndTps?: number; at: number };
 	/** session/new|load 与 set_config_option 返回的会话级配置(模型/思考档/模式)。
 	 *  渲染层按 category 渲染选择器;agent 不提供时恒 undefined(回退隐藏)。 */
 	configOptions?: AcpConfigOption[];
@@ -89,6 +100,11 @@ export type AcpManagerLogger = { info(channel: string, message: string, meta?: R
 /** runtime → agentsRuntimeState 通道载荷（底栏状态/上下文仪表数据源）。纯映射，无副作用。 */
 export function buildAgentRuntimeState(runtime: AcpAgentRuntime): AgentRuntimeState {
 	const usage = runtime.projection.usage;
+	// token/缓存/命中率来自 session/prompt 响应的实验性 usage 累计（CLI 不返回时整组缺省）；
+	// TTFT/总耗时/TPS 由适配层本地计时，任何流式 CLI 都有值。
+	const totals = runtime.usageTotals;
+	const perf = runtime.lastReplyPerf;
+	const sessionTps = acpSessionTps(totals);
 	return {
 		isStreaming: runtime.turnActive,
 		isTurnActive: runtime.turnActive,
@@ -102,5 +118,24 @@ export function buildAgentRuntimeState(runtime: AcpAgentRuntime): AgentRuntimeSt
 		...(usage?.size !== undefined ? { contextWindow: usage.size } : {}),
 		...(usage?.used !== undefined && usage?.size !== undefined ? { contextPercent: Math.max(0, Math.min(100, Math.round((usage.used / usage.size) * 1000) / 10)) } : {}),
 		...(usage?.costAmount !== undefined ? { cost: usage.costAmount } : {}),
+		...(totals
+			? {
+					inputTokens: totals.inputTokens,
+					outputTokens: totals.outputTokens,
+					// 缓存/命中率只在 agent 真的上报过缓存字段时下发（Qoder 只报 input/output，
+					// 显示一排 0 会让用户以为缓存完全没命中）。
+					...(totals.cacheReported
+						? {
+								cacheRead: totals.cacheRead,
+								cacheWrite: totals.cacheWrite,
+								cacheTotal: totals.cacheRead + totals.cacheWrite,
+								...(totals.cacheHitLatest !== undefined ? { cacheHitPercent: totals.cacheHitLatest } : {}),
+								...(totals.cacheHitSamples > 0 ? { cacheHitAveragePercent: totals.cacheHitSum / totals.cacheHitSamples, cacheHitSampleCount: totals.cacheHitSamples } : {}),
+							}
+						: {}),
+				}
+			: {}),
+		...sessionTps,
+		...(perf ? { ttftMs: perf.ttftMs, totalMs: perf.totalMs, tps: perf.tps, endToEndTps: perf.endToEndTps } : {}),
 	};
 }

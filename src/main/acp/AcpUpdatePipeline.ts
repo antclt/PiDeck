@@ -72,6 +72,12 @@ export class AcpUpdatePipeline {
 		}
 		// 实时 prompt 已在本地记录完整 user 消息；echo 仅用于历史恢复，不能重复追加。
 		if (runtime.turnActive && update.sessionUpdate === "user_message_chunk") return;
+		// TTFT：正文与思考分别记首次到达；结算时优先正文、无正文回退思考（与 pi 同语义）。
+		// 工具调用不算「首字」。
+		if (runtime.turnActive) {
+			if (update.sessionUpdate === "agent_message_chunk" && runtime.turnFirstTextAt === undefined) runtime.turnFirstTextAt = Date.now();
+			else if (update.sessionUpdate === "agent_thought_chunk" && runtime.turnFirstThoughtAt === undefined) runtime.turnFirstThoughtAt = Date.now();
+		}
 		// 在途工具调用跟踪（stall 看门狗豁免依据）：tool_call 开始入集，终态出集。
 		// 长命令 started→completed 之间常无任何流式输出，是合法静默，与挂起审批同等对待。
 		trackInFlightToolCall(runtime, update);
