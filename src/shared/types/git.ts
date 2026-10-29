@@ -1,4 +1,5 @@
 import type { ProjectFileTarget } from "./project";
+import type { Op } from "../op";
 
 // ── Git 基础类型 ──────────────────────────────────────────────────────
 
@@ -179,6 +180,12 @@ export type RemoteGitInitResult = { ok: true; branch: string | null } | { ok: fa
  */
 export type RemoteGitRepo = { path: string; name: string };
 export type RemoteGitReposResult = { ok: true; repos: RemoteGitRepo[]; truncated: boolean } | { ok: false; code: string };
+/**
+ * 忽略判定（helper 1.23.0）：`ignored` 与请求**逐位对应**——同序、同长、不省略。
+ * 由 git 自己回答（`check-ignore --no-index`），所以取反规则、嵌套 .gitignore、core.excludesFile
+ * 与 git status 的口径天然一致；PiDeck 不重写匹配器。
+ */
+export type RemoteGitIgnoreResult = Op<{ ignored: boolean[] }>;
 /** G3b branch write face: creating and switching both move a ref the user explicitly asked for. */
 export type RemoteGitBranchMutationResult = { ok: true } | { ok: false; code: string };
 /** G4a recoverable discard: the snapshot ref (null when the discarded change was a deletion) goes back to the panel. */

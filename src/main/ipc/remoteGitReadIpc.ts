@@ -394,6 +394,12 @@ export function registerRemoteGitReadIpc(input: { enabled: boolean; locator(proj
 				name: repository.name,
 			}));
 		},
+		/** 忽略判定（只读、零授权）：结果与请求逐位对应。 */
+		async checkIgnore(event: IpcMainInvokeEvent, projectId: unknown, repo: unknown, paths: unknown): Promise<boolean[]> {
+			const repoPath = compatRepo(typeof projectId === "string" ? projectId : "", repo);
+			if (!Array.isArray(paths) || paths.length === 0 || paths.length > 64 || paths.some((path) => typeof path !== "string")) throw new Error("GIT_RESULT_INVALID");
+			return read(event, projectId, repoPath, (id, signal) => git.checkIgnore(id, repoPath, paths as string[], signal));
+		},
 		/** Pair with quit cleanup; sender destruction separately cancels only that window's pending reads. */
 		dispose() {
 			disposed = true;

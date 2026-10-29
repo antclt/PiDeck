@@ -132,6 +132,14 @@ export const REMOTE_HELPER_METHOD_FS_STAT = "fs.stat";
  * moves into the helper.
  */
 export const REMOTE_HELPER_METHOD_FS_STAT_MANY = "fs.statMany";
+/**
+ * Git 权威的忽略判定（helper 1.23.0）：`{ paths }` → `{ ignored: boolean[] }`，与请求**逐位对应**。
+ * 为什么放在 helper 而不在 main 自己写匹配器：`.gitignore` 的语义（取反、嵌套、`core.excludesFile`、
+ * `info/exclude`、linked worktree 的 common dir）只有 git 自己是权威；重写一遍必然与 `git status` 打架。
+ */
+export const REMOTE_HELPER_METHOD_GIT_CHECK_IGNORE = "git.checkIgnore";
+/** 一次判定的路径数上限（与 `fs.statMany` 同量级，够填满一屏目录）。 */
+export const REMOTE_HELPER_MAX_CHECK_IGNORE_PATHS = 64;
 export const REMOTE_HELPER_METHOD_FS_LIST = "fs.list";
 export const REMOTE_HELPER_METHOD_FS_READ = "fs.read";
 /**
@@ -172,7 +180,7 @@ export type RemoteGitReposResult = { repos: readonly RemoteGitRepoEntry[]; trunc
  * child is started. A test pins the three method lists against each other.
  */
 export const REMOTE_GIT_REPO_PATH_MAX_BYTES = 4096;
-export const REMOTE_GIT_REPO_READ_METHODS = ["git.status", "git.workspaceDiff", "git.log", "git.commitDetail", "git.refs", "git.refFileDiff", "git.compare", "git.recoveryList", "git.syncFacts"] as const;
+export const REMOTE_GIT_REPO_READ_METHODS = ["git.status", "git.workspaceDiff", "git.log", "git.commitDetail", "git.refs", "git.refFileDiff", "git.compare", "git.recoveryList", "git.syncFacts", "git.checkIgnore"] as const;
 export const REMOTE_GIT_REPO_WRITE_METHODS = ["git.stage", "git.unstage", "git.commit", "git.createBranch", "git.switchBranch", "git.discard", "git.recoveryRestore", "git.recoveryDrop", "git.fetch", "git.push", "git.pull"] as const;
 export const REMOTE_GIT_STATUS_MAX_BYTES = 1024 * 1024;
 export const REMOTE_GIT_MAX_RESOURCES = 4096;
@@ -346,6 +354,7 @@ export const REMOTE_HELPER_CAPABILITIES = [
 	"git.pull",
 	"git.init",
 	"git.repos",
+	"git.checkIgnore",
 	"terminal.prepare",
 	"config.read",
 	"config.patch",

@@ -445,6 +445,7 @@ export function createRemoteGitService(ports: { locator(projectId: string): Remo
 			| "git.compare"
 			| "git.init"
 			| "git.repos"
+			| "git.checkIgnore"
 			| "git.createBranch"
 			| "git.switchBranch"
 			| "git.discard"
@@ -651,6 +652,26 @@ export function createRemoteGitService(ports: { locator(projectId: string): Remo
 					const detail = readRemoteGitCommitDetail(raw);
 					if (detail.oid !== value) throw new Error("GIT_RESULT_INVALID");
 					return detail;
+				},
+				undefined,
+				validateRemoteGitRepoPath(repo),
+			);
+		},
+		/**
+		 * 忽略判定：一次调用问 git 一组路径，返回与请求逐位对应的布尔数组。
+		 * 结果形状在客户端重新校验（数组、等长、布尔），所以 helper 的多余字段或多一位都不会被信任。
+		 */
+		checkIgnore(projectId: string, repo: string | undefined, paths: readonly string[], signal?: AbortSignal): Promise<boolean[]> {
+			const validated = paths.map((path) => validateRemoteGitPath(path));
+			return run(
+				projectId,
+				"git.checkIgnore",
+				{ paths: validated },
+				signal,
+				(value) => {
+					if (!record(value) || !Array.isArray(value.ignored) || value.ignored.length !== validated.length) throw new Error("GIT_RESULT_INVALID");
+					if (value.ignored.some((flag) => typeof flag !== "boolean")) throw new Error("GIT_RESULT_INVALID");
+					return value.ignored as boolean[];
 				},
 				undefined,
 				validateRemoteGitRepoPath(repo),
