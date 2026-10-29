@@ -20,6 +20,7 @@ import { FileDiff } from "../agents/file-diff";
 import { desktopApi } from "../../desktopApi";
 import { copyTextWithCopiedNotice } from "../../utils/clipboardNotice";
 import { formatDuration, getToolDetailText, getToolDiffTarget, getToolExitCode, getToolLiveStartTimestamp, getToolName, getToolStatus, fileChangeToDiffLines } from "./TimelineFormat";
+import { hasFileChangePayload } from "../../../../shared/fileChanges";
 import { useInsideProcessGroupBody } from "./turn/processGroupScrollContext";
 
 export type DiffFileHandler = (path: string, originalContent?: string, content?: string) => void;
@@ -231,7 +232,8 @@ export const ToolCard = memo(function ToolCard(props: {
 	// write/edit/create/patch 工具：从参数直接取 diff 目标（写整文件新内容 /
 	// 编辑的 oldText→newText 变动区），展开区优先展示 diff 而不是原始结果文本。
 	const diffTarget = getToolDiffTarget(props.message);
-	const showDiff = diffTarget !== undefined;
+	// ACP 的编辑可能只有路径（wire 上没有旧/新文本）：有目标但没有内容时不渲染空的 diff 块。
+	const showDiff = diffTarget !== undefined && hasFileChangePayload(diffTarget);
 	// 学 ZCode 过程行：主标签是语义动词（「读取」「执行」），作用对象进等宽 chip 单行截断；
 	// 原始工具名退到行 tooltip，不再常驻行内与动词重复占位。
 	const phrase = getToolPhraseFromArgs(toolName, props.message.meta?.args, props.message.meta?.kind);
