@@ -17,6 +17,7 @@ const preload = read("src/preload/index.ts");
 const previewApi = read("src/renderer/src/previewApi.ts");
 const drawerHost = read("src/renderer/src/components/workspace/GitDrawerHost.tsx");
 const gitPanel = read("src/renderer/src/components/app/GitPanel.tsx");
+const gitAutoRefresh = read("src/renderer/src/hooks/git/useGitAutoRefresh.ts");
 
 test("shared/ipc.ts 定义订阅、退订与推送三条通道", () => {
 	assert.match(channels, /gitWatchRefs:\s*"git:watch-refs"/);
@@ -60,23 +61,24 @@ test("GitDrawerHost 把 refs 订阅固定在仓库作用域上并透传给 GitPa
 	assert.match(drawerHost, /watchRefs=\{scopedApi\.watchRefs\}[\s\S]{0,200}?unwatchRefs=\{scopedApi\.unwatchRefs\}[\s\S]{0,200}?onRefsChanged=\{scopedApi\.onRefsChanged\}/);
 });
 
-test("GitPanel 成对订阅/退订，且推送只触发静默刷新（不 fetch）", () => {
-	const effectStart = gitPanel.indexOf("refs 变化推送：");
-	assert.ok(effectStart > 0, "GitPanel 必须保留 refs 推送订阅 effect");
-	const effect = gitPanel.slice(effectStart, effectStart + 2600);
+test("自动刷新 hook 成对订阅/退订 refs，且推送只触发静默刷新（不 fetch）", () => {
+	const effectStart = gitAutoRefresh.indexOf("本面板的 refs 监听 id");
+	assert.ok(effectStart > 0, "useGitAutoRefresh 必须保留 refs 推送订阅 effect");
+	const effect = gitAutoRefresh.slice(effectStart, effectStart + 2600);
 	// 过滤：只处理本面板的 watchId（多仓时同一条通道 N 个面板共用）
-	assert.match(effect, /refsWatchIdRef\.current !== changedId\)\s*return/);
+	assert.match(effect, /refsWatchIdRef.current !== changedId/);
 	// 只做 silent 刷新：非 silent 会触发 fetch → 改写 refs → 再推送，形成往返回环
-	assert.match(effect, /void refresh\(true\);/);
-	assert.doesNotMatch(effect, /void refresh\(\);/);
+	assert.match(effect, /void refreshStatus\(true\);/);
+	assert.doesNotMatch(effect, /void refreshStatus\(\);/);
 	assert.match(effect, /void readAheadBehind\(\);/);
 	// mutation 进行中/窗口隐藏时不抢刷新
-	assert.match(effect, /mutationRunningRef\.current \|\| document\.hidden/);
+	assert.match(effect, /isMutating\(\) \|\| document\.hidden/);
 	// 订阅与退订成对，且卸载后再拿到 id 也要立即退订
 	assert.match(effect, /void watchRefs\(projectId\)[\s\S]{0,400}?if \(disposed\) \{[\s\S]{0,200}?void unwatchRefs\(watchId\)/);
 	assert.match(effect, /disposed = true;[\s\S]{0,200}?unsubscribe\(\);[\s\S]{0,300}?if \(watchId\) void unwatchRefs\(watchId\)/);
-	// historyOnly 只要 Graph/Compare，不订阅 refs
-	assert.match(effect, /if \(layout === "historyOnly"\) return;/);
-	// 非 git 仓库 / 未装 git 时也不订阅
-	assert.match(effect, /if \(notAGitRepo \|\| gitNotInstalled\) return;/);
+	// historyOnly / 缺能力 / 非仓库时不订阅
+	assert.match(effect, /if \(!enabled \|\| !capabilities\.refsWatch \|\| suspended\) return;/);
+	// 面板把能力位与端口原样交给 hook，不在展示层重复实现订阅。
+	assert.match(gitPanel, /watchRefs: props.watchRefs/);
+	assert.match(gitPanel, /onRefsChanged: props.onRefsChanged/);
 });

@@ -5,6 +5,7 @@ import { ArrowDownToLine, ArrowUpFromLine, Check, CheckCircle2, ChevronDown, Che
 import { Button } from "../ui-shadcn/button";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui-shadcn/alert-dialog";
 import { useAnimationWindow } from "../../hooks/useAnimationWindow";
+import { LOCAL_GIT_AUTO_REFRESH, useGitAutoRefresh, type GitAutoRefreshCapabilities } from "../../hooks/git/useGitAutoRefresh";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "../ui-shadcn/context-menu";
 import { ConfirmDialog } from "./AppParts";
 import { dismissNotice, showNotice, type NoticeId } from "../../utils/notice";
@@ -142,6 +143,8 @@ type GitPanelProps = {
 	onRefsChanged?: (listener: (watchId: string) => void) => () => void;
 	/** 从磁盘删除变更文件（移入回收站） */
 	deleteFiles?: (projectId: string, targets: ProjectFileTarget[]) => Promise<void>;
+	/** 自动刷新能力位；本机全开，缺省即全开。共用宿主给远端传 false，展示层不写 backend 分支。 */
+	capabilities?: Partial<GitAutoRefreshCapabilities>;
 };
 
 type PaneId = "changes" | "graph" | "compare";
@@ -775,107 +778,30 @@ export function GitPanel(props: GitPanelProps) {
 		void refresh();
 	}, [layout, refresh]);
 
-	// 静默轮询：每 5 秒拉取一次最新工作区状态 + 重读本地 ahead/behind 角标。
-	// 非 git 仓库 / 未安装 git 时暂停轮询——状态恢复（git init / 安装 git）后由
-	// refresh 成功路径清标记，interval 随依赖重建自动恢复。
-	//
-	// 角标为何也走这里：`HEAD...@{u}` 只依赖本地 refs，AI 在终端里 commit/push 后
-	// 本地 refs 立即变化，5 秒内就能把「已推送」的角标归零；只读本地不发网络，
-	// 代价是一次 `git rev-list`，比 5 分钟一轮的 fetch 快得多（fetch 仍用于发现
-	// 别人推到远端的新提交）。mutation（push/pull 进行中）跳过，避免读到中间态
-	// 把角标写回旧值。
-	useEffect(() => {
-		if (layout === "historyOnly") return;
-		const timer = window.setInterval(() => {
-			if (notAGitRepo || gitNotInstalled) return;
-			// 窗口最小化 / 被完全遮挡时不跑：这一轮没有用户在看，却要白扫一遍 worktree
-			// （status 是这套轮询里最贵的一步，大仓尤其明显）。判「可见」而不是「聚焦」——
-			// 用户切到终端让 AI push 时窗口失去焦点但仍可见，角标必须继续跟平；
-			// 重新可见后由 focus 监听与下一轮心跳补齐。
-			if (document.hidden) return;
-			if (mutationRunningRef.current) return;
-			void refresh(true);
-			void readAheadBehind();
-		}, 5000);
-		return () => window.clearInterval(timer);
-	}, [layout, refresh, readAheadBehind, notAGitRepo, gitNotInstalled]);
-
-	// 窗口重新获得焦点时补一次静默刷新：常见用法是切到终端让 AI commit/push 再切回来，
-	// 不必要等下一轮 5 秒轮询（角标只读本地 refs，代价很低）。
-	useEffect(() => {
-		if (layout === "historyOnly") return;
-		const onFocus = () => {
-			if (notAGitRepo || gitNotInstalled || mutationRunningRef.current) return;
-			void refresh(true);
-			void readAheadBehind();
-		};
-		window.addEventListener("focus", onFocus);
-		return () => window.removeEventListener("focus", onFocus);
-	}, [layout, refresh, readAheadBehind, notAGitRepo, gitNotInstalled]);
-
-	/** 本面板的 refs 监听 id：主进程按 (projectId, repoPath) 分配，多仓时每个面板各一份 */
-	const refsWatchIdRef = useRef<string | null>(null);
-
-	// refs 变化推送：AI 在终端里 commit/push/切分支后主进程检测到 refs 签名变化并推送，
-	// 面板重读状态与角标。检测上限 = 主进程轮询间隔（1.5 秒），比「下一轮 5 秒轮询」快一个档；
-	// 5 秒轮询保留为兜底（工作区文件改动不写 refs，检测不会触发，变更列表仍靠轮询）。
-	//
-	// 三个刻意的约束：
-	// - 订阅/退订必须成对：主进程按 watchId 计数，退订后计数归零才会停掉该仓库的轮询；
-	// - 推送到达时只做 silent 刷新（不 fetch）：否则 fetch → 改写 refs → 再推送，
-	//   会形成往返回环；behind 的远程校正仍走手动刷新与 5 分钟定时器；
-	// - watchId 未就绪或事件不属于本面板（同一条通道 N 个面板共用）时直接忽略。
-	useEffect(() => {
-		if (layout === "historyOnly") return;
-		const watchRefs = props.watchRefs;
-		const unwatchRefs = props.unwatchRefs;
-		const onRefsChanged = props.onRefsChanged;
-		if (!watchRefs || !unwatchRefs || !onRefsChanged) return;
-		if (notAGitRepo || gitNotInstalled) return;
-		const projectId = props.projectId;
-		let disposed = false;
-		const unsubscribe = onRefsChanged((changedId) => {
-			if (disposed || refsWatchIdRef.current !== changedId) return;
-			// mutation 进行中/窗口不可见时不抢刷新：push 自身已有收尾刷新，隐藏时等 focus 补齐
-			if (mutationRunningRef.current || document.hidden) return;
-			void refresh(true);
-			void readAheadBehind();
-		});
-		void watchRefs(projectId)
-			.then((watchId) => {
-				// 卸载后才拿到 id：立即退订，否则主进程句柄会残留到最后一个订阅者退出
-				if (disposed) {
-					void unwatchRefs(watchId);
-					return;
-				}
-				refsWatchIdRef.current = watchId;
-			})
-			.catch(() => {
-				// 订阅失败不提示：refs 推送只是加速手段，轮询仍在兜底
-			});
-		return () => {
-			disposed = true;
-			unsubscribe();
-			const watchId = refsWatchIdRef.current;
-			refsWatchIdRef.current = null;
-			if (watchId) void unwatchRefs(watchId);
-		};
-	}, [layout, props.projectId, props.watchRefs, props.unwatchRefs, props.onRefsChanged, refresh, readAheadBehind, notAGitRepo, gitNotInstalled]);
-
-	// 定时 fetch 远程：每 5 分钟刷新一次 ahead/behind 角标。
-	// 首次 fetch 改走 refresh 成功路径，避免未确认仓库时立刻 spawn `git fetch`。
-	// 非 git 仓库 / 未安装 git 时暂停（fetch 同样会 spawn git 报错）。
-	useEffect(() => {
-		if (layout === "historyOnly") return;
-		if (!fetchRef.current || !aheadBehindRef.current) return;
-		if (notAGitRepo || gitNotInstalled) return;
-		const timer = window.setInterval(() => {
-			if (notAGitRepo || gitNotInstalled) return;
-			if (!fetchRef.current || !aheadBehindRef.current) return;
-			void refreshAheadBehind();
-		}, 5 * 60_000);
-		return () => window.clearInterval(timer);
-	}, [layout, refreshAheadBehind, notAGitRepo, gitNotInstalled]);
+	const autoRefreshCapabilities = useMemo<GitAutoRefreshCapabilities>(
+		() => ({
+			statusPoll: props.capabilities?.statusPoll ?? LOCAL_GIT_AUTO_REFRESH.statusPoll,
+			refsWatch: props.capabilities?.refsWatch ?? LOCAL_GIT_AUTO_REFRESH.refsWatch,
+			autoFetch: props.capabilities?.autoFetch ?? LOCAL_GIT_AUTO_REFRESH.autoFetch,
+		}),
+		[props.capabilities?.statusPoll, props.capabilities?.refsWatch, props.capabilities?.autoFetch],
+	);
+	const isMutating = useCallback(() => mutationRunningRef.current, []);
+	useGitAutoRefresh({
+		enabled: layout !== "historyOnly",
+		projectId: props.projectId,
+		suspended: notAGitRepo || gitNotInstalled,
+		capabilities: autoRefreshCapabilities,
+		refreshStatus: refresh,
+		readAheadBehind,
+		refreshAheadBehind,
+		isMutating,
+		hasFetch: props.fetch !== undefined,
+		hasAheadBehind: props.aheadBehind !== undefined,
+		watchRefs: props.watchRefs,
+		unwatchRefs: props.unwatchRefs,
+		onRefsChanged: props.onRefsChanged,
+	});
 
 	const toggleResource = (key: keyof typeof resourceOpen) => {
 		setResourceOpen((current) => ({ ...current, [key]: !current[key] }));
