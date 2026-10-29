@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { RemoteGitRepo } from "../../../shared/types/git";
 import type { RemoteProject } from "../../../shared/types/project";
 import { desktopApi } from "../desktopApi";
+import { repositoryListingToSelector } from "../utils/remoteGitRepos";
 
 type RemoteGitReposState = { repos?: RemoteGitRepo[]; truncated: boolean };
 
@@ -17,6 +18,18 @@ export function useRemoteGitRepos(project: RemoteProject) {
 	const reload = useCallback(async (): Promise<void> => {
 		const generation = ++active.current;
 		try {
+			// 公共入口优先：仓库列表带 truncated/revision/generation，且与本地同形。
+			const listing = await desktopApi.git.repositoryList(project.id).catch(() => null);
+			if (generation !== active.current) return;
+			if (listing !== null && listing.ok) {
+				setState(repositoryListingToSelector(listing.value));
+				return;
+			}
+			// 旧宿主/旧装配没有公共入口时保留一版兼容读取；其它失败按失败处理，不二次请求。
+			if (listing !== null && listing.code !== "UNSUPPORTED_CAPABILITY") {
+				setState({ truncated: false });
+				return;
+			}
 			const result = await desktopApi.git.remoteRepos(project.id);
 			// A stale answer from a previous project identity must not populate the new selector.
 			if (generation !== active.current) return;

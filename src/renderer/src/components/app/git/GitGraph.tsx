@@ -16,8 +16,8 @@ export type GitGraphProps = {
 	paneIdPrefix: string;
 	projectId: string;
 	commitLog: (projectId: string, options?: { maxEntries?: number; ref?: string; allBranches?: boolean }) => Promise<CommitEntry[]>;
-	/** 与当前图谱过滤一致的提交总数（不分页），供源代码管理图标题徽章使用。 */
-	commitCount: (projectId: string, options?: { ref?: string; allBranches?: boolean }) => Promise<number>;
+	/** 与当前图谱过滤一致的提交总数（不分页）；缺席时不调用、用已加载页长度，不能伪造总数。 */
+	commitCount?: (projectId: string, options?: { ref?: string; allBranches?: boolean }) => Promise<number>;
 	commitDetail: (projectId: string, ref: string) => Promise<CommitDetail | null>;
 	onOpenCommitFileDiff: (commit: CommitEntry, file: GitChangedFile) => void | Promise<void>;
 	branches: string[];
@@ -548,7 +548,12 @@ export function SourceControlGraph(props: GitGraphProps) {
 	/** 执行右键操作（通过 ref 引用 load，避免循环依赖） */
 	const loadRef = useRef<() => void>(() => {});
 	const runGitAction = useCallback(
-		async (action: string, run: () => Promise<void> | void, successKey: TranslationKey) => {
+		async (action: string, run: (() => Promise<void> | void) | undefined, successKey: TranslationKey) => {
+			// 能力缺席时既不调用、也不显示成功：可选回调的 undefined 不是一次成功的写。
+			if (run === undefined) {
+				closeContextMenu();
+				return;
+			}
 			const hash = contextMenu?.commit.hash ?? "";
 			setContextMenuLoading(action);
 			closeContextMenu();
@@ -584,11 +589,12 @@ export function SourceControlGraph(props: GitGraphProps) {
 					maxEntries: loadCount,
 					...filter,
 				}),
-				commitCountRef.current(projectId, filter),
+				// 能力缺席就不发 count 请求；徽章退回已加载页长度，不编造全仓总数。
+				commitCountRef.current === undefined ? Promise.resolve<number | null>(null) : commitCountRef.current(projectId, filter),
 			]);
 			if (request === loadSequence.current && projectId === props.projectId) {
 				setCommits(next);
-				setTotalCount(count);
+				setTotalCount(count ?? next.length);
 			}
 		} catch (caught) {
 			if (request === loadSequence.current && projectId === props.projectId) setError(errorMessage(caught));
@@ -799,20 +805,20 @@ export function SourceControlGraph(props: GitGraphProps) {
 						>
 							<DropdownMenuTrigger aria-hidden tabIndex={-1} style={{ position: "fixed", left: contextMenu.x, top: contextMenu.y, width: 0, height: 0, padding: 0, border: 0, background: "transparent", pointerEvents: "none" }} />
 							<DropdownMenuContent align="start" side="bottom">
-								<DropdownMenuItem disabled={contextMenuLoading !== null} onClick={() => runGitAction("cherryPick", () => props.cherryPick?.(props.projectId, contextMenu.commit.hash), "git.cherryPickSuccess")}>
+								<DropdownMenuItem disabled={contextMenuLoading !== null} onClick={() => runGitAction("cherryPick", props.cherryPick === undefined ? undefined : () => props.cherryPick!(props.projectId, contextMenu.commit.hash), "git.cherryPickSuccess")}>
 									{contextMenuLoading === "cherryPick" ? <Loader2 size={14} className="animate-pideck-spin" /> : <GitBranch size={14} />}
 									{t("git.cherryPick")}
 								</DropdownMenuItem>
-								<DropdownMenuItem disabled={contextMenuLoading !== null} onClick={() => runGitAction("revert", () => props.revert?.(props.projectId, contextMenu.commit.hash), "git.revertSuccess")}>
+								<DropdownMenuItem disabled={contextMenuLoading !== null} onClick={() => runGitAction("revert", props.revert === undefined ? undefined : () => props.revert!(props.projectId, contextMenu.commit.hash), "git.revertSuccess")}>
 									{contextMenuLoading === "revert" ? <Loader2 size={14} className="animate-pideck-spin" /> : <RotateCcw size={14} />}
 									{t("git.revert")}
 								</DropdownMenuItem>
 								<DropdownMenuSeparator />
-								<DropdownMenuItem disabled={contextMenuLoading !== null} onClick={() => runGitAction("resetSoft", () => props.reset?.(props.projectId, contextMenu.commit.hash, "soft"), "git.contextMenuSuccess")}>
+								<DropdownMenuItem disabled={contextMenuLoading !== null} onClick={() => runGitAction("resetSoft", props.reset === undefined ? undefined : () => props.reset!(props.projectId, contextMenu.commit.hash, "soft"), "git.contextMenuSuccess")}>
 									{contextMenuLoading === "resetSoft" ? <Loader2 size={14} className="animate-pideck-spin" /> : null}
 									{t("git.resetSoft")}
 								</DropdownMenuItem>
-								<DropdownMenuItem disabled={contextMenuLoading !== null} onClick={() => runGitAction("resetMixed", () => props.reset?.(props.projectId, contextMenu.commit.hash, "mixed"), "git.contextMenuSuccess")}>
+								<DropdownMenuItem disabled={contextMenuLoading !== null} onClick={() => runGitAction("resetMixed", props.reset === undefined ? undefined : () => props.reset!(props.projectId, contextMenu.commit.hash, "mixed"), "git.contextMenuSuccess")}>
 									{contextMenuLoading === "resetMixed" ? <Loader2 size={14} className="animate-pideck-spin" /> : null}
 									{t("git.resetMixed")}
 								</DropdownMenuItem>
@@ -825,7 +831,7 @@ export function SourceControlGraph(props: GitGraphProps) {
 											message: t("git.resetHardConfirmMessage", {
 												hash: contextMenu.commit.hash.substring(0, 7),
 											}),
-											onConfirm: () => runGitAction("resetHard", () => props.reset?.(props.projectId, contextMenu.commit.hash, "hard"), "git.contextMenuSuccess"),
+											onConfirm: () => runGitAction("resetHard", props.reset === undefined ? undefined : () => props.reset!(props.projectId, contextMenu.commit.hash, "hard"), "git.contextMenuSuccess"),
 										});
 									}}
 								>
@@ -842,7 +848,7 @@ export function SourceControlGraph(props: GitGraphProps) {
 											message: t("git.dropCommitConfirmMessage", {
 												hash: contextMenu.commit.hash.substring(0, 7),
 											}),
-											onConfirm: () => runGitAction("drop", () => props.dropCommit?.(props.projectId, contextMenu.commit.hash), "git.contextMenuSuccess"),
+											onConfirm: () => runGitAction("drop", props.dropCommit === undefined ? undefined : () => props.dropCommit!(props.projectId, contextMenu.commit.hash), "git.contextMenuSuccess"),
 										});
 									}}
 								>
