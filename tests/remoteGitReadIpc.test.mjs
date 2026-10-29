@@ -72,6 +72,17 @@ function fixture(overrides = {}) {
 	return { port, handlers, calls, sender, session, input, event: { sender } };
 }
 
+test("git:refs 的远端实现返回与本地同形的 GitRef[]（W5 单通道族第一个读动词）", async () => {
+	const f = fixture();
+	const refs = plain(await f.port.refs({ sender: f.sender }, projectId, ""));
+	assert.deepEqual(refs, [
+		{ name: "main", fullName: "refs/heads/main", hash: oid("a"), type: "head" },
+		{ name: "v1", fullName: "refs/tags/v1", hash: oid("c"), type: "tag" },
+	]);
+	// 远端只报本地分支与 tag：不会凭空造出 remote-tracking 那一档。
+	assert.ok(!refs.some((ref) => ref.type === "remote"));
+});
+
 test("remote Git snapshot IPC resolves only the main-owned target and returns branch/status facts", async () => {
 	const f = fixture();
 	const result = await f.handlers.get(ipcChannels.gitRemoteSnapshot)(f.event, projectId);

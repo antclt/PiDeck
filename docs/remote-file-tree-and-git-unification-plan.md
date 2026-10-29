@@ -191,9 +191,9 @@ type GrantScope = { purpose: "git-write"|"file-entry"|"file-text"; sender: numbe
 | W1 | ◐ 主体 | `fileTreeLazy`：`projectFileKey` / `parseFileTreeKey` / `fileTreeNodeKey`（不再退回本机绝对路径）/ `migrateExpandedDirKeys` / `isActiveFileTreeRow`；拖拽负载的 `path` 变可选、远端不再伪造本机路径；展开集旧键按树内 `path` 别名迁移（幂等）；`useProjectSync` / `useProjectFileTreeController` / `FileTreeRows` / `RemoteProjectPanel` 已跟随 |
 | W2 | ◐ 大部分 | **entry / text / trust / project（7 类）/ transfer（上传下载）已 `Op<T>`**；`shared/op.ts` 提供 `Op` / `codeOf` / `OP_UNKNOWN_CODES` / `opFailFromCode`；`codeOf` 独立实现 **10 份 → 1 份**（`remoteHostInputValidation` 改 re-export）；`tests/envelopeSingleSource.test.mjs` 守不变量 |
 | W3 | ◐ 目录族已接线 | `RemoteFactCache` / `RemoteWorkspaceView`（三族形状 + 失效矩阵 + `onChanged`）；`ProjectCapabilities` 下沉 shared 并替掉三处「已连接」判定（R3 已修）；**目录族已进生产**：`remoteProjectIpc.list` 走事实层并返回 `{entries, revision}`，entry/text 写成功后标脏（`tests/remoteProjectDirFacts.test.mjs` 5 例） |
-| W4 | ◐ 前置完成 | **读事实 / 签授权已拆开**：`RemoteGitSnapshotFacts` 只缓存事实（按 项目+仓库、同键合并、带 revision），令牌仍每次现签；安全网是写动词自带的 `expectedRevision`（旧事实写不穿）。`git:listRepos` 已同时服务 ssh（远端结果映射成同形 `GitRepoInfo[]`）——单通道族的第一个动词 |
+| W4 | ◐ 前置完成 | **读事实 / 签授权已拆开**：`RemoteGitSnapshotFacts` 只缓存事实（按 项目+仓库、同键合并、带 revision），令牌仍每次现签；安全网是写动词自带的 `expectedRevision`（旧事实写不穿）。`git:listRepos` / `git:refs` 已同时服务 ssh（远端结果在 main 侧映射成同形 `GitRepoInfo[]` / `GitRef[]`）——单通道族已覆盖 4 个读动词 |
 | W6 | ✅ 主链路完成（粒度见下） | **helper 1.24.0**：`git.checkIgnore`（真机验证取反规则）、`fs.watch`/`fs.unwatch` + 无 id 事件帧（150ms 合并、watcher 上限、幂等关闭、shutdown 清理，均真机验证）。客户端：事件帧分流 + `onEvent` 观察者 + 围栏。**事件 → 失效已接线**：`RemoteDirWatchRegistry`（watchId→项目、换会话清空、未登记忽略）+ 会话链路 `onHelperEvent` 透传 + `index.ts` 装配；根目录首次读到即订阅，事件只标脏不装载。**已知粒度**：watcher 非递归，只覆盖根层与 `.git` 变化；更深目录仍走「读的人重读/轮询」。要递归得逐个已展开目录订阅（受 `MAX_WATCHES=4` 限制），属独立增量 |
-| W5 | ⨯ 未开 | 见下表 |
+| W5 | ◐ 已开工（4/30 动词）| 重定验收：一条事实一条动词 + 删重复传输层；不追求面板合并 |
 
 **W2 的未完成项与理由（不是遗漏）**
 
@@ -261,13 +261,33 @@ type GrantScope = { purpose: "git-write"|"file-entry"|"file-text"; sender: numbe
 5. 降级：`capabilities.watch = false` 时上层用既有轮询（`ProjectCapabilities.watch` 已经是这个开关）。
 6. 门禁（真机）：改文件 3 秒内树更新、断开后无事件泄漏、watcher 上限生效、事件不触发装载风暴。
 
-**W5 前置（不是许可问题，是技术依赖）**
+**W5 重定范围（v6，实测后修正——原「删 ≈1600 行」的前提不成立）**
 
-远端 Git 面板要换成共用 UI，前提是共用通道族能服务 ssh——今天只有
-`status` / `workspaceDiff` / `listRepos` 三个动词做到了。剩下 30 个（refs / commitLog / branches /
-commitDetail / stage / commit / push / pull …）各自的结果形状与本地不同形（例：`git:refs` 返回
-`GitRef[]`，远端返回 `RemoteGitRefs`），逐个做同形映射才是 W5 的第一步；删掉远端面板必须放在
-**它之后**，否则远端 Git 会先失去功能。
+原计划假设远端面板是"本地面板的重复品"，映射 30 个动词后即可删掉。实测行数与能力后这个假设被推翻：
+
+| 侧 | 体量 | 远端没有 | 本地没有 |
+|---|---|---|---|
+| 本地 `GitPanel.tsx` | **1926 行** | — | — |
+| 远端 `RemoteGitPanel` + `remoteGitViewState` + `useRemoteGitView` | 631 + 674 + 129 = **1434 行** | 提交图 graph、多仓堆叠、`stage-all`、`git:watchRefs` 推送 | 回收站(recovery list/restore/drop)、信任门、仓库下拉域、写令牌 |
+
+两侧**能力不对称**且各有独占功能，把任一侧换成另一侧都是 **+500 行新代码换来 −1400 行**，不是删除。
+所以 W5 的验收不能是"行数下降"，而是下面三条：
+
+1. **一条事实、一条动词**：同一语义只实现一次，`git:*` 按项目类型分派到本地/远端实现，结果同形。
+   已完成 4 个：`status`、`workspaceDiff`、`listRepos`、`refs`（`refs` 把 `oid`→`hash`、
+   `kind:"branch"`→`type:"head"` 换在 main 侧完成，渲染层不必知道自己在看哪一侧）。
+   下一批按此顺序：`commitLog` → `commitDetail` → `branchCompare` → `stage/unstage` → `commit` →
+   `push/pull/fetch`（写动词必须先有 `expectedRevision` 安全网，快照事实层已具备）。
+2. **删的是"只为通道不同而存在"的传输层**，不是面板：`useRemoteGitRepos`、远端 refs 轮询这类
+   重复 hook/state 预计 400–500 行可删。远端专属（recovery / trust / repo 域）保留原通道。
+3. **面板合并要单独立项**：先做远端每个可见行为 × 归属 × 证据的 parity 表，再决定合并方向；
+   在那之前两边各自维护，禁止"看起来一样就删"。
+
+另记一条否决：`GitBackend`（`resolveRepository`/`resolveFilePath`/`listRepositories` 三方法）**不适合**
+承载 30 个动词——本地动词全部经 `gitService(repoRoot)` 直跑本机 git，让 `gitService` 远端化比
+在 IPC 层做同形适配贵得多。统一缝放在 **IPC 动词**这一层，不放在 `GitBackend`。
+
+**仍然成立的顺序约束**：删远端渲染层必须排在共用通道族覆盖它之后，否则远端 Git 会先失去功能。
 
 ## 5. 明确不重写（重写零收益，只有风险）
 

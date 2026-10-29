@@ -1,6 +1,7 @@
 import { ipcMain, type IpcMainInvokeEvent } from "electron";
 import { ipcChannels } from "../../shared/ipc";
 import type {
+	GitRef,
 	GitCommitResult,
 	GitRepoInfo,
 	GitIndexMutationResult,
@@ -384,6 +385,18 @@ export function registerRemoteGitReadIpc(input: { enabled: boolean; locator(proj
 		 * 仓库下拉只能各自再走一条 `git:remote-repos`（不同形状、不同失败词汇）。这里把远端结果
 		 * 映射成与本地同形的 `GitRepoInfo[]`，上层不需要知道自己看的是哪种位置。
 		 */
+		/**
+		 * `git:refs` 的远端实现：**同形**返回本地的 `GitRef[]`。
+		 *
+		 * 远端刻意只报本地分支与 tag（不报 remote-tracking：那是「尚未交付」的暗示），于是 type 只有两档——
+		 * 分支归 `head`（本地 `for-each-ref` 对 refs/heads 的同一档），tag 归 `tag`。OID 字段名不同
+		 * （`oid` ↔ `hash`）也在这里换掉，渲染层不再需要知道自己在看哪一侧。
+		 */
+		async refs(event: IpcMainInvokeEvent, projectId: unknown, repo: unknown): Promise<GitRef[]> {
+			const repoPath = validateRemoteGitRepoPath(repo);
+			const refs = await read(event, projectId, repoPath, (id, signal) => git.refs(id, repoPath, signal));
+			return refs.refs.map((ref) => ({ name: ref.name, fullName: ref.fullName, hash: ref.oid, type: ref.kind === "tag" ? "tag" : "head" }));
+		},
 		async listRepositories(event: IpcMainInvokeEvent, projectId: unknown): Promise<GitRepoInfo[]> {
 			const listing = await read(event, projectId, "", (id, signal) => git.listRepositories(id, signal));
 			const owner = typeof projectId === "string" ? projectId : "";

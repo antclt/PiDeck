@@ -31,6 +31,8 @@ function fixture() {
 	const remoteCalls = [];
 	// 远端仓库列表映射成与本地同形的 GitRepoInfo[]（W4：同一条 git:listRepos 服务两种位置）。
 	const repos = [{ target: { projectId, relativePath: "packages/a" }, relativePath: "packages/a", displayPath: "a", name: "a" }];
+	// W5：`git:refs` 也开始服务 ssh，返回与本地同形的 GitRef[]。
+	const refs = [{ name: "main", fullName: "refs/heads/main", hash: "a".repeat(40), type: "head" }];
 	registerGitIpc({
 		appLogger: forbidden,
 		mainCopy: (key) => key,
@@ -54,9 +56,13 @@ function fixture() {
 				remoteCalls.push(["repos", ...args]);
 				return repos;
 			},
+			refs: async (...args) => {
+				remoteCalls.push(["refs", ...args]);
+				return refs;
+			},
 		},
 	});
-	return { handlers, calls, remoteCalls, groups, diff, repos, event: { sender: { id: 1 } } };
+	return { handlers, calls, remoteCalls, groups, diff, repos, refs, event: { sender: { id: 1 } } };
 }
 
 test("status/diff/listRepos IPC select SSH reads before local repository/fs/executable parsing", async () => {
@@ -66,10 +72,11 @@ test("status/diff/listRepos IPC select SSH reads before local repository/fs/exec
 	assert.deepEqual(f.calls, []);
 	// W4：同一条通道也服务 ssh —— 结果与本地同形，且不落到任何本机 Git/fs。
 	assert.deepEqual(await f.handlers.get(ipcChannels.gitListRepos)(f.event, projectId), f.repos);
+	assert.deepEqual(await f.handlers.get(ipcChannels.gitRefs)(f.event, projectId), f.refs);
 	assert.deepEqual(f.calls, []);
 	assert.deepEqual(
 		f.remoteCalls.map((call) => call[0]),
-		["status", "diff", "repos"],
+		["status", "diff", "repos", "refs"],
 	);
 });
 
@@ -85,7 +92,6 @@ test("still-unsupported project Git operations reject SSH with zero local work a
 		["gitWorktreeRemove", [projectId, { projectId: "child", relativePath: "" }]],
 		["gitCommitLog", [projectId]],
 		["gitCommitCount", [projectId]],
-		["gitRefs", [projectId]],
 		["gitBranchCompare", [projectId, "main", "other"]],
 		["gitCommitDetail", [projectId, "a".repeat(40)]],
 		["gitCommitFileDiff", [projectId, "a".repeat(40), target]],

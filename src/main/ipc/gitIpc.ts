@@ -2,7 +2,7 @@ import { dialog, ipcMain, type BrowserWindow } from "electron";
 import { relative, resolve } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { ipcChannels } from "../../shared/ipc";
-import type { CommitDetail, GitChangedFile, GitCommitFileDiff, GitDiscardResource, GitGenerateCommitMessageResult, GitRepoInfo, GitResource, GitResourceGroups, GitWorkspaceDiffGroup, GitWorkspaceFileDiff, LocalProject, ProjectFileTarget, WorktreeEntry } from "../../shared/types";
+import type { CommitDetail, GitChangedFile, GitCommitFileDiff, GitDiscardResource, GitGenerateCommitMessageResult, GitRepoInfo, GitResource, GitRef, GitResourceGroups, GitWorkspaceDiffGroup, GitWorkspaceFileDiff, LocalProject, ProjectFileTarget, WorktreeEntry } from "../../shared/types";
 import { isLocalProject, isRemoteProject } from "../../shared/projectLocation";
 import type { RemoteGitReadIpc } from "./remoteGitReadIpc";
 import { createProjectGitHandler } from "./gitProjectHandlers";
@@ -39,7 +39,7 @@ export type GitIpcDeps = {
 	settingsStore: SettingsStore;
 	worktreeService: WorktreeService;
 	/** Optional only for local-only callers/tests; SSH reads must never fall back to GitService. */
-	remoteGitReads?: Pick<RemoteGitReadIpc, "status" | "workspaceDiff" | "listRepositories">;
+	remoteGitReads?: Pick<RemoteGitReadIpc, "status" | "workspaceDiff" | "listRepositories" | "refs">;
 };
 
 // ── QuickGen：持久化轻量 pi 进程，通过 RPC 生成提交摘要 ──────────────
@@ -546,7 +546,12 @@ export function registerGitIpc({ appLogger, mainCopy, gitService, gitRefsWatcher
 		return gitService.getCommitCount(context.repoRoot, await localGitHistoryOptions(context, backend, options));
 	});
 
-	handleProjectGit(ipcChannels.gitRefs, async (_event, projectId: string, repoPath?: unknown) => {
+	handleProjectGit(ipcChannels.gitRefs, async (event, projectId: string, repoPath?: unknown): Promise<GitRef[]> => {
+		const project = projectStore.get(projectId);
+		if (project && isRemoteProject(project)) {
+			if (!remoteGitReads?.refs) throw new Error("UNSUPPORTED_CAPABILITY");
+			return remoteGitReads.refs(event, projectId, repoPath);
+		}
 		const cwd = await findGitCwd(projectId, repoPath);
 		return cwd ? gitService.getRefs(cwd) : [];
 	});
