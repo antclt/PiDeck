@@ -1592,10 +1592,10 @@ export function GitPanel(props: GitPanelProps) {
 									</div>
 								)}
 
-								{error && <div className="flex min-h-[22px] shrink-0 items-center gap-1 px-[9px] text-control text-[var(--git-conflict)]">{error}</div>}
+								{error && <div className="flex min-h-[22px] shrink-0 items-center gap-1 px-2.5 text-control text-[var(--git-conflict)]">{error}</div>}
 								{!loading && total === 0 && !error && (
 									/* 工作区干净的完成态：勾图标 + 文案，替代裸一行灰字（用户需要一眼确认「没有待处理」而不是「加载失败」） */
-									<div className="git-status-msg flex min-h-[22px] shrink-0 items-center gap-1.5 px-[9px] text-control text-[var(--git-desc-fg)]">
+									<div className="git-status-msg flex min-h-[22px] shrink-0 items-center gap-1.5 px-2.5 text-control text-[var(--git-desc-fg)]">
 										<CheckCircle2 size={13} aria-hidden="true" className="shrink-0" />
 										{t("git.noPendingChanges")}
 									</div>
@@ -1930,7 +1930,7 @@ function CompareChanges(props: {
 							</div>
 						</>
 					)}
-					{!result && <div className="flex min-h-[22px] shrink-0 items-center gap-1 px-[9px] text-control text-[var(--git-desc-fg)]">{t("git.compareHint")}</div>}
+					{!result && <div className="flex min-h-[22px] shrink-0 items-center gap-1 px-2.5 text-control text-[var(--git-desc-fg)]">{t("git.compareHint")}</div>}
 				</div>
 			)}
 		</section>

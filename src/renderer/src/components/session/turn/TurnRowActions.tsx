@@ -95,7 +95,7 @@ export function TurnRowActions(props: TurnRowActionsProps) {
 			{showActions && (props.showDuration || (props.showTurnModel && props.turnModel)) && <ZoneDivider />}
 			{props.showDuration && (
 				/* 图标尺寸 14 对齐同行按钮图标（原独占一行时是 12）；与按钮区之间改由竖线分隔，
-				   不再用 pl-[7px] 模拟按钮内缩。 */
+				   不再用 pl-2 模拟按钮内缩。 */
 				<div className="flex items-center gap-1.5 text-muted-foreground">
 					<Clock size={14} className="shrink-0" aria-hidden="true" />
 					{/* 固定耗时（实时读数在状态条，见 statusFacts）；tabular-nums 与行头时间对齐 */}

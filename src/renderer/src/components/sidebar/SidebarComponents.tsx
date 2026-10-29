@@ -415,7 +415,7 @@ export function SessionManagerModal(props: {
 																	variant="ghost"
 																	size="sm"
 																	disabled={remoteBusy}
-																	className="h-auto gap-[3px] rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-bg-hover hover:text-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+																	className="h-auto gap-1 rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-bg-hover hover:text-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
 																	onClick={() => {
 																		// 恢复后重新拉取归档列表（主列表由 catalog refresh 自动更新）
 																		const restored = row.kind === "pi" ? props.onUnarchive(row.item) : props.onUnarchiveDsh(row.item.dshSessionId);
@@ -429,7 +429,7 @@ export function SessionManagerModal(props: {
 																	<Button
 																		variant="ghost"
 																		size="sm"
-																		className="h-auto gap-[3px] rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
+																		className="h-auto gap-1 rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
 																		onClick={() => setPendingDeleteArchived([row])}
 																		title={t("common.delete")}
 																	>
@@ -443,7 +443,7 @@ export function SessionManagerModal(props: {
 																		size="sm"
 																		disabled={remoteArchivedDelete.state.phase !== "idle"}
 																		data-testid="remote-archived-delete"
-																		className="h-auto gap-[3px] rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
+																		className="h-auto gap-1 rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
 																		onClick={() => void remoteArchivedDelete.request(remoteSessionId)}
 																		title={t("sessionManager.remoteArchivedDelete")}
 																	>
@@ -537,17 +537,17 @@ export function SessionManagerModal(props: {
 												</TableCell>
 												<TableCell className="w-40 text-right">
 													<div className="flex items-center justify-end gap-0.5">
-														<Button variant="ghost" size="sm" className="h-auto gap-[3px] rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-bg-hover hover:text-[var(--color-accent)]" onClick={() => props.onRename(session)} title={t("common.rename")}>
+														<Button variant="ghost" size="sm" className="h-auto gap-1 rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-bg-hover hover:text-[var(--color-accent)]" onClick={() => props.onRename(session)} title={t("common.rename")}>
 															{t("common.rename")}
 														</Button>
-														<Button variant="ghost" size="sm" className="h-auto gap-[3px] rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-bg-hover hover:text-[var(--color-accent)]" onClick={() => props.onExport(session)} title={t("menu.exportHtml")}>
+														<Button variant="ghost" size="sm" className="h-auto gap-1 rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-bg-hover hover:text-[var(--color-accent)]" onClick={() => props.onExport(session)} title={t("menu.exportHtml")}>
 															{t("menu.exportHtml")}
 														</Button>
-														<Button variant="ghost" size="sm" className="h-auto gap-[3px] rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-bg-hover hover:text-[var(--color-accent)]" onClick={() => props.onArchive([session])} title={t("sessionManager.archiveAction")}>
+														<Button variant="ghost" size="sm" className="h-auto gap-1 rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-bg-hover hover:text-[var(--color-accent)]" onClick={() => props.onArchive([session])} title={t("sessionManager.archiveAction")}>
 															<Archive size={12} aria-hidden="true" />
 															{t("sessionManager.archiveAction")}
 														</Button>
-														<Button variant="ghost" size="sm" className="h-auto gap-[3px] rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]" onClick={() => props.onDelete([session])} title={t("common.delete")}>
+														<Button variant="ghost" size="sm" className="h-auto gap-1 rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]" onClick={() => props.onDelete([session])} title={t("common.delete")}>
 															{t("common.delete")}
 														</Button>
 													</div>

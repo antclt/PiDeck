@@ -254,9 +254,9 @@ function CommitFileRow(props: { file: GitChangedFile; row: GraphRow; onOpen: () 
 			<span className="flex min-w-0 items-center overflow-hidden">
 				<FileIcon name={name} />
 				<span className="min-w-0 flex-[0_1_auto] truncate text-[var(--git-panel-fg)]">{name}</span>
-				<span className="min-w-0 flex-1 truncate pl-[7px] text-right text-xs text-[var(--git-desc-fg)]">{description}</span>
+				<span className="min-w-0 flex-1 truncate pl-2 text-right text-xs text-[var(--git-desc-fg)]">{description}</span>
 			</span>
-			<span className="ml-[5px] flex w-4 shrink-0 justify-end text-xs font-semibold text-right text-[var(--git-desc-fg)]" aria-hidden="true">
+			<span className="ml-1.5 flex w-4 shrink-0 justify-end text-xs font-semibold text-right text-[var(--git-desc-fg)]" aria-hidden="true">
 				{opening ? <Loader2 size={13} className="animate-pideck-spin" /> : compareStatusLetter(file.status)}
 			</span>
 		</button>
@@ -322,7 +322,7 @@ function CommitHoverCard(props: { hover: CommitHoverState; state: CommitDetailSt
 				<span className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm bg-bg-muted text-xs font-semibold text-[var(--git-panel-fg)]" aria-hidden="true">
 					{initial}
 				</span>
-				<span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-[5px]">
+				<span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-1.5">
 					<strong className="truncate">{commit.authorName}</strong>
 					{commit.authorEmail && <span className="truncate text-[var(--git-desc-fg)]">{`<${commit.authorEmail}>`}</span>}
 					<small className="w-full text-xs text-[var(--git-desc-fg)]">
@@ -330,7 +330,7 @@ function CommitHoverCard(props: { hover: CommitHoverState; state: CommitDetailSt
 					</small>
 				</span>
 			</div>
-			<div className="my-2.5 border-y border-[var(--git-panel-border)] py-[9px] break-words whitespace-pre-wrap">{commit.fullMessage || commit.message}</div>
+			<div className="my-2.5 border-y border-[var(--git-panel-border)] py-2.5 break-words whitespace-pre-wrap">{commit.fullMessage || commit.message}</div>
 			<div className="mt-2">
 				<code className="block truncate font-mono text-xs text-[var(--git-desc-fg)]">{commit.hash}</code>
 				{refs.length > 0 && (
@@ -344,13 +344,13 @@ function CommitHoverCard(props: { hover: CommitHoverState; state: CommitDetailSt
 				)}
 			</div>
 			{props.state?.loading && (
-				<div className="mt-[9px] flex items-center gap-[7px] border-t border-[var(--git-panel-border)] pt-2 text-[var(--git-desc-fg)]">
+				<div className="mt-2.5 flex items-center gap-2 border-t border-[var(--git-panel-border)] pt-2 text-[var(--git-desc-fg)]">
 					<Loader2 size={13} className="animate-pideck-spin" /> {t("git.loadingCommitDetails")}
 				</div>
 			)}
-			{props.state?.error && <div className="mt-[9px] flex items-center gap-[7px] border-t border-[var(--git-panel-border)] pt-2 text-[var(--color-danger)]">{props.state.error}</div>}
+			{props.state?.error && <div className="mt-2.5 flex items-center gap-2 border-t border-[var(--git-panel-border)] pt-2 text-[var(--color-danger)]">{props.state.error}</div>}
 			{shortStat && (
-				<div className="mt-[9px] flex items-center gap-[7px] border-t border-[var(--git-panel-border)] pt-2 text-[var(--git-desc-fg)]">
+				<div className="mt-2.5 flex items-center gap-2 border-t border-[var(--git-panel-border)] pt-2 text-[var(--git-desc-fg)]">
 					<span>{t("git.filesChanged", { count: shortStat.files })}</span>
 					<span className="ml-auto text-[var(--git-added)]">+{shortStat.insertions}</span>
 					<span className="text-[var(--git-deleted)]">-{shortStat.deletions}</span>
@@ -746,14 +746,14 @@ export function SourceControlGraph(props: GitGraphProps) {
 													</span>
 													<span className="min-w-[48px] flex-[0_1_78px] truncate text-xs text-[var(--git-desc-fg)]">{commit.authorName}</span>
 												</span>
-												{ref && <span className={`max-w-[108px] truncate rounded-full border border-current px-[7px] text-xs font-medium leading-[18px]${ref.kind === "branch" ? " text-[var(--git-modified)]" : " text-[var(--git-conflict)]"}`}>{ref.label}</span>}
+												{ref && <span className={`max-w-[108px] truncate rounded-full border border-current px-2 text-xs font-medium leading-[18px]${ref.kind === "branch" ? " text-[var(--git-modified)]" : " text-[var(--git-conflict)]"}`}>{ref.label}</span>}
 											</button>
 											{/* 不再挂 animate-in/fade-in：twMerge 会把 animate-* 判同组，保留会盖掉高度动画。 */}
 											<CollapsibleContent className="min-w-0">
 												{detailState?.loading && (
 													<div className="grid min-h-[26px] grid-cols-[auto_minmax(0,1fr)_16px] items-center gap-2 px-2.5 pl-0.5 text-control leading-[26px] text-[var(--git-desc-fg)]">
 														<GraphContinuation row={row} />
-														<span className="flex min-w-0 items-center gap-[5px] truncate">
+														<span className="flex min-w-0 items-center gap-1.5 truncate">
 															<Loader2 size={13} className="animate-pideck-spin" /> {t("git.loadingCommitFiles")}
 														</span>
 													</div>
@@ -761,13 +761,13 @@ export function SourceControlGraph(props: GitGraphProps) {
 												{detailState?.error && !detailState.loading && (
 													<div className="grid min-h-[26px] grid-cols-[auto_minmax(0,1fr)_16px] items-center gap-2 px-2.5 pl-0.5 text-control leading-[26px] text-[var(--git-desc-fg)] text-[var(--color-danger)]">
 														<GraphContinuation row={row} />
-														<span className="flex min-w-0 items-center gap-[5px] truncate">{detailState.error}</span>
+														<span className="flex min-w-0 items-center gap-1.5 truncate">{detailState.error}</span>
 													</div>
 												)}
 												{detailState?.detail && commitFiles.length === 0 && (
 													<div className="grid min-h-[26px] grid-cols-[auto_minmax(0,1fr)_16px] items-center gap-2 px-2.5 pl-0.5 text-control leading-[26px] text-[var(--git-desc-fg)]">
 														<GraphContinuation row={row} />
-														<span className="flex min-w-0 items-center gap-[5px] truncate">{t("git.noCommitFiles")}</span>
+														<span className="flex min-w-0 items-center gap-1.5 truncate">{t("git.noCommitFiles")}</span>
 													</div>
 												)}
 												{commitFiles.map((file) => (
