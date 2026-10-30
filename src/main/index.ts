@@ -4968,7 +4968,7 @@ function registerIpc() {
 		mainCopy: mainCopy as (key: string, params?: Record<string, string | number>) => string,
 	});
 
-	// 外网访问（web:remote-access-*）：cloudflare 隧道 + tailscale serve 启停/状态
+	// 外网访问（web:remote-access-*）：cloudflare 隧道 / tailscale serve 启停 + EasyTier 只读状态
 	registerWebRemoteAccessIpc({ remoteAccessManager });
 
 	// 配置备份（config-backup:*）：恢复成功后重载 pideck 设置 + 刷新 pi 模型目录。
@@ -6470,6 +6470,8 @@ app
 				const s = settingsStore.get();
 				return { protocol: s.webRemoteCloudflaredProtocol ?? "http2", extraArgs: s.webRemoteCloudflaredExtraArgs };
 			},
+			// EasyTier 自动检测读不到虚拟 IP 时的用户兜底（设置项为空串表示未启用）
+			getEasyTierManualIp: () => settingsStore.get().webRemoteEasyTierIp ?? "",
 			pushState: (state) => {
 				const win = mainWindow;
 				if (win && !win.isDestroyed()) win.webContents.send(ipcChannels.webRemoteAccessChanged, state);

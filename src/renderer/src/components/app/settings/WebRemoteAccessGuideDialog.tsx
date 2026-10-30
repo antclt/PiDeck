@@ -1,6 +1,6 @@
 /**
- * 外网访问操作指南弹窗：Cloudflare Tunnel（免注册公网隧道）与 Tailscale（私有组网）
- * 两个渠道的分步引导——前置安装命令、下载/管理台外链、访问方式与注意事项。
+ * 外网访问操作指南弹窗：Cloudflare Tunnel（免注册公网隧道）、Tailscale（私有组网）
+ * 与 EasyTier（P2P 组网）三个渠道的分步引导——前置安装命令、下载/管理台外链、访问方式与注意事项。
  * 文案全部走 i18n（zh-CN / en-US 同步），链接经 desktopApi.app.openExternal 走系统浏览器。
  */
 import { memo, useCallback, useState } from "react";
@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../ui-shadcn/tabs";
 import { Button } from "../../ui-shadcn/button";
 
-export type RemoteAccessGuideTab = "cloudflare" | "tailscale";
+export type RemoteAccessGuideTab = "cloudflare" | "tailscale" | "easytier";
 
 /** 可复制的命令行块：`winget install Cloudflare.cloudflared` 等。 */
 function CommandBlock({ command }: { command: string }) {
@@ -66,9 +66,10 @@ export const WebRemoteAccessGuideDialog = memo(function WebRemoteAccessGuideDial
 					<DialogDescription>{t("settings.remote.guide.subtitle")}</DialogDescription>
 				</DialogHeader>
 				<Tabs value={props.tab} onValueChange={(value) => props.onTabChange(value as RemoteAccessGuideTab)}>
-					<TabsList className="grid w-full grid-cols-2">
-						<TabsTrigger value="cloudflare">{t("settings.remote.cf.title")}</TabsTrigger>
-						<TabsTrigger value="tailscale">{t("settings.remote.ts.title")}</TabsTrigger>
+					<TabsList className="grid w-full grid-cols-3">
+						<TabsTrigger value="cloudflare">{t("settings.remote.guide.tab.cloudflare")}</TabsTrigger>
+						<TabsTrigger value="tailscale">{t("settings.remote.guide.tab.tailscale")}</TabsTrigger>
+						<TabsTrigger value="easytier">{t("settings.remote.guide.tab.easytier")}</TabsTrigger>
 					</TabsList>
 
 					{/* ── Cloudflare Tunnel 指南 ── */}
@@ -121,6 +122,32 @@ export const WebRemoteAccessGuideDialog = memo(function WebRemoteAccessGuideDial
 							</GuideStep>
 						</ol>
 						<div className="rounded-md border border-border-subtle/70 bg-bg-muted/30 p-2.5 text-caption text-text-secondary">{t("settings.remote.guide.ts.notice")}</div>
+					</TabsContent>
+
+					{/* ── EasyTier 指南 ── */}
+					<TabsContent value="easytier" className="mt-3 grid gap-3">
+						<p className="text-caption text-text-secondary">{t("settings.remote.guide.et.intro")}</p>
+						<ol className="grid gap-3">
+							<GuideStep index={1}>
+								<span className="text-caption text-text-primary">{t("settings.remote.guide.et.step1")}</span>
+								<p className="text-micro text-text-tertiary">
+									<GuideLink href="https://easytier.cn/guide/download.html" label={t("settings.remote.guide.et.downloadLink")} />
+								</p>
+								<p className="text-micro text-text-tertiary">
+									<GuideLink href="https://github.com/EasyTier/EasyTier/releases" label={t("settings.remote.guide.et.releaseLink")} />
+								</p>
+							</GuideStep>
+							<GuideStep index={2}>
+								<span className="text-caption text-text-primary">{t("settings.remote.guide.et.step2")}</span>
+							</GuideStep>
+							<GuideStep index={3}>
+								<span className="text-caption text-text-primary">{t("settings.remote.guide.et.step3")}</span>
+							</GuideStep>
+							<GuideStep index={4}>
+								<span className="text-caption text-text-primary">{t("settings.remote.guide.et.step4")}</span>
+							</GuideStep>
+						</ol>
+						<div className="rounded-md border border-warning/40 bg-warning/10 p-2.5 text-caption text-text-secondary">{t("settings.remote.guide.et.notice")}</div>
 					</TabsContent>
 				</Tabs>
 			</DialogContent>

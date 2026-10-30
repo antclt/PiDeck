@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 5b32b8826169969d3feaedcdf558556df9db35ef9e6463695743d93a3f4793d2（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: d2da1faf014f5a7318fb4c3e217e68c499446946ad20479a76b670ba56650140（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5686,7 +5686,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.webMobileClientsDesc": "使用 Web 介面開發的 PiDeck 手機客戶端；點選用系統瀏覽器開啟 GitHub README 的「移動端客戶端」一節",
 	"settings.webMobileClientsAction": "檢視推薦專案",
 	"settings.remote.title": "外網訪問",
-	"settings.remote.desc": "不在同一網路時，通過免註冊 Cloudflare 隧道或 Tailscale 私有組網訪問本機 Web 服務",
+	"settings.remote.desc": "不在同一網路時，通過免註冊 Cloudflare 隧道、Tailscale 或 EasyTier 私有組網訪問本機 Web 服務",
 	"settings.remote.webServiceRequired": "請先開啟上方的 Web 服務後再使用外網訪問",
 	"settings.remote.authOffWarning": "Token 鑑權已關閉：公網暴露時任何人都能訪問你的會話，強烈建議開啟 Token 鑑權",
 	"settings.remote.openGuide": "操作指南",
@@ -5700,6 +5700,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.remote.status.notLoggedIn": "未登入",
 	"settings.remote.status.connected": "已連線",
 	"settings.remote.status.httpsOn": "HTTPS 已開啟",
+	"settings.remote.status.notRunning": "未執行",
+	"settings.remote.status.noAddress": "待分配地址",
+	"settings.remote.status.manualIp": "手動地址",
 	"settings.remote.cf.title": "Cloudflare 隧道（免註冊）",
 	"settings.remote.cf.protocolLabel": "傳輸協議",
 	"settings.remote.cf.protocolHttp2": "TCP (http2)，預設",
@@ -5719,10 +5722,23 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.remote.ts.startHttps": "啟用 HTTPS 入口",
 	"settings.remote.ts.stopHttps": "停用 HTTPS 入口",
 	"settings.remote.ts.serveHint": "固定地址不會變化；需在 Tailscale 管理臺開啟 MagicDNS 與 HTTPS 證書",
+	"settings.remote.et.title": "EasyTier（P2P 組網）",
+	"settings.remote.et.desc": "去中心化 P2P 虛擬區域網，無需公網 IP；手機安裝 EasyTier 並加入同一網路後訪問，不暴露公網",
+	"settings.remote.et.notRunningHint": "已找到 easytier-cli，但讀不到執行中的節點。請先啟動 EasyTier 客戶端並加入網路；也可以直接填寫客戶端裡顯示的虛擬 IP。",
+	"settings.remote.et.noCliHint": "未找到 easytier-cli。仍可手動填寫 EasyTier 客戶端裡顯示的虛擬 IP。",
+	"settings.remote.et.manualLabel": "手動虛擬 IP",
+	"settings.remote.et.manualPlaceholder": "如 10.144.144.1",
+	"settings.remote.et.manualHint": "留空則自動檢測；填寫後優先使用手動地址，儲存設定後生效",
+	"settings.remote.et.autoUrlHint": "已從本機 EasyTier 自動讀取；手機需安裝 EasyTier 並加入同一網路",
+	"settings.remote.et.manualUrlHint": "地址來自手動填寫（優先於自動檢測），請確認手機已加入同一 EasyTier 網路且電腦端線上",
+	"settings.remote.et.nodeInfo": "節點 {hostname} · EasyTier {version}",
 	"settings.remote.guideRowTitle": "不知道怎麼配？",
-	"settings.remote.guideRowDesc": "兩種渠道的分步操作指南：安裝命令、下載連結與常見問題",
+	"settings.remote.guideRowDesc": "三種渠道的分步操作指南：安裝命令、下載連結與常見問題",
 	"settings.remote.guide.title": "外網訪問操作指南",
 	"settings.remote.guide.subtitle": "選擇一種渠道，按步驟完成安裝與連線",
+	"settings.remote.guide.tab.cloudflare": "Cloudflare",
+	"settings.remote.guide.tab.tailscale": "Tailscale",
+	"settings.remote.guide.tab.easytier": "EasyTier",
 	"settings.remote.guide.cf.intro": "Cloudflare Tunnel 免註冊模式：本機執行 cloudflared，Cloudflare 分配一個臨時 https 地址轉發到 PiDeck 的 Web 服務。手機零安裝、任何網路可訪問。",
 	"settings.remote.guide.cf.step1": "第 1 步 · 安裝 cloudflared（命令列任選其一，或到 GitHub Releases 手動下載）",
 	"settings.remote.guide.cf.step1Mac": "macOS 用 Homebrew：",
@@ -5740,6 +5756,14 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.remote.guide.ts.step4": "第 4 步 ·（可選）要固定 HTTPS 地址或把 Web 端安裝到手機主屏（PWA），點「啟用 HTTPS 入口」；如失敗請在管理臺開啟 MagicDNS 與 HTTPS 證書",
 	"settings.remote.guide.ts.adminLink": "開啟 Tailscale 管理臺（DNS 設定）",
 	"settings.remote.guide.ts.notice": "怎麼選：只給自己用、在意隱私與速度 → Tailscale；要發連結給別人臨時看、或手機不想裝任何東西 → Cloudflare 隧道。",
+	"settings.remote.guide.et.intro": "EasyTier 是去中心化的 P2P 虛擬區域網：電腦和手機加入同一網路後，用虛擬 IP 互相訪問，不需要公網 IP 或埠對映。",
+	"settings.remote.guide.et.step1": "第 1 步 · 在電腦和手機安裝 EasyTier 客戶端（Windows 安裝/執行需要管理員權限）",
+	"settings.remote.guide.et.downloadLink": "EasyTier 下載頁",
+	"settings.remote.guide.et.releaseLink": "GitHub Releases",
+	"settings.remote.guide.et.step2": "第 2 步 · 兩臺裝置加入同一網路：填寫相同的網路名與密碼；沒有公網節點時使用公共共享節點",
+	"settings.remote.guide.et.step3": "第 3 步 · 保持電腦端 EasyTier 執行，回到本頁點「重新檢測」；自動檢測失敗或結果不對時，把客戶端顯示的虛擬 IP 填入「手動虛擬 IP」並儲存",
+	"settings.remote.guide.et.step4": "第 4 步 · 在手機瀏覽器開啟生成的地址（或掃碼）；手機需已加入同一 EasyTier 網路",
+	"settings.remote.guide.et.notice": "PiDeck 只讀取 EasyTier 狀態，不啟動/停止網路。EasyTier GUI 預設模式可能不開放本地管理埠，此時請手動填寫虛擬 IP；需要自動檢測時使用 CLI 或服務模式。Web 服務需監聽 0.0.0.0（預設）或 EasyTier 虛擬網絡卡地址。",
 	"settings.webRestartService": "重啟 Web 服務",
 	"settings.webRestarting": "正在重啟 Web 服務…",
 	"settings.webRestarted": "Web 服務已重啟",

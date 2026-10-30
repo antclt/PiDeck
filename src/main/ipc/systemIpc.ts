@@ -1874,7 +1874,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		if ("zoomFactor" in patch) {
 			getMainWindow()?.webContents.setZoomFactor(settings.zoomFactor);
 		}
-		if ("webServiceEnabled" in patch || "webServiceHost" in patch || "webServicePort" in patch || "webServiceRequiresAuth" in patch) {
+		// EasyTier 手动 IP 变更也走同一收敛入口：Web 服务配置没变时 applySettings 早退，syncWebService 会重新探测只读渠道。
+		if ("webServiceEnabled" in patch || "webServiceHost" in patch || "webServicePort" in patch || "webServiceRequiresAuth" in patch || "webRemoteEasyTierIp" in patch) {
 			try {
 				if (applyWebServiceSettings) await applyWebServiceSettings(settings);
 			} catch (error) {

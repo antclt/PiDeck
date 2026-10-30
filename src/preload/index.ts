@@ -1374,9 +1374,9 @@ const api = {
 		webServiceStatus: () => ipcRenderer.invoke(ipcChannels.webServiceStatus) as Promise<WebServiceStatusInfo>,
 		rotateWebToken: () => ipcRenderer.invoke(ipcChannels.webServiceRotateToken) as Promise<WebServiceStatusInfo>,
 		setWebToken: (input: { token?: string; expiresIn?: number }) => ipcRenderer.invoke(ipcChannels.webServiceSetToken, input) as Promise<WebServiceStatusInfo>,
-		/** 外网访问：聚合状态（cloudflare 隧道 + tailscale） */
+		/** 外网访问：聚合状态（cloudflare 隧道 + tailscale + EasyTier 只读渠道） */
 		webRemoteAccessState: () => ipcRenderer.invoke(ipcChannels.webRemoteAccessState) as Promise<import("../shared/types/remoteAccess").RemoteAccessState>,
-		/** 启动外网访问渠道（cloudflare | tailscale） */
+		/** 启动外网访问渠道（cloudflare | tailscale；EasyTier 只读，不启停） */
 		webRemoteAccessStart: (channel: import("../shared/types/remoteAccess").RemoteAccessChannelId) => ipcRenderer.invoke(ipcChannels.webRemoteAccessStart, channel) as Promise<{ ok: true; state: import("../shared/types/remoteAccess").RemoteAccessState } | { ok: false; error: string }>,
 		/** 停用外网访问渠道 */
 		webRemoteAccessStop: (channel: import("../shared/types/remoteAccess").RemoteAccessChannelId) => ipcRenderer.invoke(ipcChannels.webRemoteAccessStop, channel) as Promise<{ ok: true; state: import("../shared/types/remoteAccess").RemoteAccessState } | { ok: false; error: string }>,

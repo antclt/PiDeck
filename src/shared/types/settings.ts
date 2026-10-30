@@ -415,6 +415,11 @@ export type AppSettings = {
 	webRemoteCloudflaredProtocol?: WebRemoteCloudflaredProtocol;
 	/** cloudflared 额外启动参数（空白切分后数组直传子进程，无 shell 注入面）；如 "--edge-ip-version 6" */
 	webRemoteCloudflaredExtraArgs?: string;
+	/**
+	 * EasyTier 虚拟 IPv4 手动兜底：EasyTier GUI 默认模式不开放本地管理端口时，
+	 * easytier-cli 读不到节点，由用户从客户端抄写虚拟 IP；空 = 不启用手动地址。
+	 */
+	webRemoteEasyTierIp?: string;
 	/** 本地生成的匿名安装标识，不包含账号、路径或机器名 */
 	telemetryInstallId?: string;
 	/** 最近一次发送 app_heartbeat 的本地日期，格式 YYYY-MM-DD */
@@ -982,6 +987,21 @@ export function sanitizeCloudflaredExtraArgs(value: unknown): string {
 	const trimmed = value.trim();
 	if (!trimmed || trimmed.length > 500) return "";
 	return /^[ -~]+$/.test(trimmed) ? trimmed : "";
+}
+
+/**
+ * 清洗手动填写的 EasyTier 虚拟 IP：只接受点分十进制 IPv4（不含 CIDR/端口/协议），
+ * 拒绝 0.0.0.0 与广播地址；非法输入整体置空，避免拼出不可用或危险的 URL。
+ */
+export function sanitizeEasyTierVirtualIp(value: unknown): string {
+	if (typeof value !== "string") return "";
+	const trimmed = value.trim();
+	const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(trimmed);
+	if (!match) return "";
+	const parts = match.slice(1).map(Number);
+	if (parts.some((part) => part < 0 || part > 255)) return "";
+	if (parts[0] === 0 || parts.every((part) => part === 255)) return "";
+	return parts.join(".");
 }
 
 /**

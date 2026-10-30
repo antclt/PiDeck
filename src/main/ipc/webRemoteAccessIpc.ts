@@ -1,5 +1,6 @@
 /**
- * 外网访问 IPC 域：cloudflare quick tunnel / tailscale serve 的状态查询与启停。
+ * 外网访问 IPC 域：cloudflare quick tunnel / tailscale serve 的状态查询与启停，
+ * 以及 EasyTier 只读渠道的聚合状态（其状态随 remote-access-state 一起返回，不单独提供启停）。
  * 只做输入校验和适配，业务全部在 RemoteAccessManager；
  * 状态推送由装配层经构造函数 pushState 注入（指向主窗口 webContents.send）。
  */

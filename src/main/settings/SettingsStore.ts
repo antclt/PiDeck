@@ -16,6 +16,7 @@ import {
 	WEB_REMOTE_CLOUDFLARED_PROTOCOLS,
 	isValidWebTokenShape,
 	sanitizeCloudflaredExtraArgs,
+	sanitizeEasyTierVirtualIp,
 	type AppSettings,
 	type TerminalConfirmCloseMode,
 	type TerminalCursorStyle,
@@ -675,6 +676,8 @@ export class SettingsStore {
 			const parsedProtocol = parsed.webRemoteCloudflaredProtocol;
 			this.settings.webRemoteCloudflaredProtocol = parsedProtocol && (WEB_REMOTE_CLOUDFLARED_PROTOCOLS as readonly string[]).includes(parsedProtocol) ? parsedProtocol : undefined;
 			this.settings.webRemoteCloudflaredExtraArgs = sanitizeCloudflaredExtraArgs(parsed.webRemoteCloudflaredExtraArgs) || undefined;
+			// EasyTier 手动兜底 IP：严格 IPv4，脏值/历史缺字段一律视为未设置。
+			this.settings.webRemoteEasyTierIp = sanitizeEasyTierVirtualIp(parsed.webRemoteEasyTierIp) || undefined;
 			// 旧设置或脏值不能隐式打开向增强模型发送会话正文的开关。
 			this.settings.enhanceIncludeContext = parsed.enhanceIncludeContext === true;
 			// 输入预测只有显式 false 才关闭：老设置缺字段按默认开启处理。
@@ -1089,6 +1092,14 @@ export class SettingsStore {
 		// 发送后回底开关同规则：只认布尔，脏值不落盘（缺失 = 保持当前值）。
 		if ("scrollToLatestOnSend" in safePatch && typeof safePatch.scrollToLatestOnSend !== "boolean") {
 			delete safePatch.scrollToLatestOnSend;
+		}
+		// EasyTier 手动 IP：空串表示清除（undefined 会随 JSON 序列化消失）；非法值不覆盖既有设置。
+		if ("webRemoteEasyTierIp" in safePatch) {
+			const raw = safePatch.webRemoteEasyTierIp;
+			const sanitized = sanitizeEasyTierVirtualIp(raw);
+			if (sanitized) safePatch.webRemoteEasyTierIp = sanitized;
+			else if (typeof raw === "string" && raw.trim() === "") safePatch.webRemoteEasyTierIp = undefined;
+			else delete safePatch.webRemoteEasyTierIp;
 		}
 		this.settings = { ...this.settings, ...safePatch };
 		// 生图字段来自渲染层，非法值丢掉，避免下次请求带坏 size/watermark。

@@ -394,7 +394,7 @@ export const WebTab = memo(function WebTab(props: WebTabProps) {
 				</Button>
 			</SettingRow>
 
-			{/* 外网访问（内网穿透）：cloudflare 隧道 + tailscale，独立卡片不侵入局域网设置 */}
+			{/* 外网访问（内网穿透）：cloudflare 隧道 + tailscale + EasyTier，独立卡片不侵入局域网设置 */}
 			<WebRemoteAccessSection webServiceChanging={webServiceChanging} draft={draft} updateDraft={updateDraft} />
 		</SettingsSection>
 	);

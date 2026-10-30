@@ -1,11 +1,12 @@
 /**
- * 设置弹框「外网访问」面板：两个内网穿透渠道的启停、地址展示与操作指南入口。
+ * 设置弹框「外网访问」面板：三个渠道的启停/只读探测、地址展示与操作指南入口。
  * - Cloudflare Tunnel（免注册 quick tunnel）：手机零安装、任意网络可访问；域名每次启动变化。
  * - Tailscale：私有组网直连 + 可选 serve HTTPS 入口；手机需装客户端登录同一账号。
+ * - EasyTier：去中心化 P2P 组网；PiDeck 只读取本地节点虚拟 IP，不启动/停止网络。
  * 状态全部来自主进程 RemoteAccessManager（invoke + web:remote-access-changed 推送），本组件不自持渠道状态。
  */
 import { memo, useCallback, useEffect, useState } from "react";
-import { Cloud, Copy, Check, LifeBuoy, Globe, Lock, RefreshCw, Square, Loader2 } from "lucide-react";
+import { Cloud, Copy, Check, LifeBuoy, Globe, Lock, Network, RefreshCw, Square, Loader2 } from "lucide-react";
 import type { AppSettings, RemoteAccessChannelId, RemoteAccessState } from "../../../../../shared/types";
 import { t } from "../../../i18n";
 import { desktopApi } from "../../../desktopApi";
@@ -123,6 +124,7 @@ export const WebRemoteAccessSection = memo(function WebRemoteAccessSection(props
 
 	const cf = state?.cloudflare;
 	const ts = state?.tailscale;
+	const et = state?.easytier;
 	const webReady = Boolean(state?.webRunning);
 	const token = state?.webToken ?? "";
 	const requiresAuth = state?.webRequiresAuth ?? true;
@@ -133,6 +135,8 @@ export const WebRemoteAccessSection = memo(function WebRemoteAccessSection(props
 	const tsDirectUrl = ts?.ip && webReady ? appendTokenToUrl(`http://${ts.ip}:${state?.webPort ?? 0}`, token, requiresAuth) : "";
 	// tailscale serve HTTPS 入口
 	const tsServeUrl = ts?.serveUrl ? appendTokenToUrl(ts.serveUrl, token, requiresAuth) : "";
+	// EasyTier 直连地址（HTTP，虚拟 IP）
+	const etUrl = et?.ip && webReady ? appendTokenToUrl(`http://${et.ip}:${state?.webPort ?? 0}`, token, requiresAuth) : "";
 
 	const cfBadge = !cf?.binaryAvailable
 		? { text: t("settings.remote.status.notInstalled"), tone: "warn" as const }
@@ -149,6 +153,16 @@ export const WebRemoteAccessSection = memo(function WebRemoteAccessSection(props
 			: ts.serveActive
 				? { text: t("settings.remote.status.httpsOn"), tone: "ok" as const }
 				: { text: t("settings.remote.status.connected"), tone: "ok" as const };
+
+	const etBadge = et?.ip
+		? et.ipSource === "cli"
+			? { text: t("settings.remote.status.connected"), tone: "ok" as const }
+			: { text: t("settings.remote.status.manualIp"), tone: "warn" as const }
+		: !et?.installed
+			? { text: t("settings.remote.status.notInstalled"), tone: "warn" as const }
+			: et.running
+				? { text: t("settings.remote.status.noAddress"), tone: "warn" as const }
+				: { text: t("settings.remote.status.notRunning"), tone: "warn" as const };
 
 	return (
 		<SettingsSection id="settings-section-web-remote-access" title={t("settings.remote.title")} description={t("settings.remote.desc")}>
@@ -279,6 +293,36 @@ export const WebRemoteAccessSection = memo(function WebRemoteAccessSection(props
 					</div>
 				)}
 				{ts?.error ? <p className="text-caption text-warning">{ts.error}</p> : null}
+			</ChannelCard>
+
+			{/* ── EasyTier（只读：网络由用户自己的客户端/服务管理）── */}
+			<ChannelCard icon={<Network size={15} aria-hidden="true" />} title={t("settings.remote.et.title")} badge={etBadge.text} badgeTone={etBadge.tone} description={t("settings.remote.et.desc")}>
+				{etUrl ? <AccessUrlBlock url={etUrl} showQr hint={et?.ipSource === "cli" ? t("settings.remote.et.autoUrlHint") : t("settings.remote.et.manualUrlHint")} /> : <p className="text-caption text-text-secondary">{et?.installed ? t("settings.remote.et.notRunningHint") : t("settings.remote.et.noCliHint")}</p>}
+				{/* 手动地址始终可填：留空用自动检测，填写后明确优先（多网络/自动结果不对时的覆盖入口） */}
+				<div className="grid gap-1">
+					<div className="grid items-center gap-2 sm:grid-cols-[auto_minmax(0,1fr)]">
+						<Label className="text-xs font-bold text-text-tertiary">{t("settings.remote.et.manualLabel")}</Label>
+						<Input
+							className="h-8 w-full font-mono text-xs"
+							placeholder={t("settings.remote.et.manualPlaceholder")}
+							value={props.draft.webRemoteEasyTierIp ?? ""}
+							onChange={(event) => props.updateDraft({ webRemoteEasyTierIp: event.target.value })}
+							onBlur={(event) => props.updateDraft({ webRemoteEasyTierIp: event.target.value.trim() })}
+						/>
+					</div>
+					<small className="text-micro text-text-tertiary">{t("settings.remote.et.manualHint")}</small>
+				</div>
+				{et?.hostname || et?.version ? <small className="text-micro text-text-tertiary">{t("settings.remote.et.nodeInfo", { hostname: et.hostname || "-", version: et.version || "-" })}</small> : null}
+				<div className="flex flex-wrap items-center gap-2">
+					<Button size="sm" variant="outline" onClick={refresh} disabled={props.webServiceChanging}>
+						<RefreshCw className="mr-1.5 size-3.5" aria-hidden="true" />
+						{t("settings.remote.recheck")}
+					</Button>
+					<Button size="sm" variant="ghost" onClick={() => openGuide("easytier")}>
+						{t("settings.remote.openGuide")}
+					</Button>
+				</div>
+				{et?.error ? <p className="text-caption text-warning">{et.error}</p> : null}
 			</ChannelCard>
 
 			{/* 底部：总入口的操作指南 */}

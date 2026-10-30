@@ -523,7 +523,7 @@ const SETTINGS_ROW_ANCHORS = [
 		tab: "web",
 		slug: "web-remote-access-guide",
 		labelKey: "settings.remote.guideRowTitle",
-		keywords: ["外网访问", "远程访问指南", "cloudflared", "tailscale", "穿透", "隧道"],
+		keywords: ["外网访问", "远程访问指南", "cloudflared", "tailscale", "easytier", "穿透", "隧道", "虚拟IP", "组网"],
 	},
 
 	// ── 代理 ─────────────────────────────────────────────────────────
