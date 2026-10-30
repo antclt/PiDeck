@@ -303,6 +303,77 @@ test("parseEasyTierNodeTable 解析旧版 markdown 表格的 Virtual IP", () => 
 	assert.deepEqual(JSON.parse(JSON.stringify(parseEasyTierNodeTable("no table"))), { ip: "", hostname: "", version: "" });
 });
 
+test("sanitizeEasyTierCliPath 去引号与空白、拒绝控制字符", () => {
+	const { sanitizeEasyTierCliPath } = loadModule("src/shared/types/settings.ts");
+	assert.equal(sanitizeEasyTierCliPath('  "C:\\Program Files\\EasyTier\\easytier-cli.exe" '), "C:\\Program Files\\EasyTier\\easytier-cli.exe");
+	assert.equal(sanitizeEasyTierCliPath("  /usr/local/bin/easytier-cli  "), "/usr/local/bin/easytier-cli");
+	// 中文目录必须保留（Windows 用户目录常见）
+	assert.equal(sanitizeEasyTierCliPath("D:\\工具\\EasyTier\\easytier-cli.exe"), "D:\\工具\\EasyTier\\easytier-cli.exe");
+	assert.equal(sanitizeEasyTierCliPath(""), "");
+	assert.equal(sanitizeEasyTierCliPath(null), "");
+	assert.equal(sanitizeEasyTierCliPath("a\nb"), "");
+	assert.equal(sanitizeEasyTierCliPath("x".repeat(1025)), "");
+});
+
+test("detectEasyTierBinary 优先返回用户指定路径（文件/目录/带引号都认）", async () => {
+	const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const dir = await mkdtemp(join(tmpdir(), "pideck-et-cli-"));
+	try {
+		const exeName = process.platform === "win32" ? "easytier-cli.exe" : "easytier-cli";
+		const exePath = join(dir, exeName);
+		await writeFile(exePath, "");
+		const { detectEasyTierBinary } = loadModule("src/main/web/remoteAccess/easytierAccess.ts");
+		assert.equal(await detectEasyTierBinary(exePath), exePath, "直接给可执行文件");
+		assert.equal(await detectEasyTierBinary(dir), exePath, "给目录时补 easytier-cli[.exe]");
+		assert.equal(await detectEasyTierBinary(`  "${exePath}"  `), exePath, "容忍引号与空白");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+test("refresh 把用户指定的 easytier-cli 路径传给检测器", async () => {
+	const { logger } = makeLogger();
+	const seen = [];
+	const { RemoteAccessManager } = loadModule("src/main/web/remoteAccess/RemoteAccessManager.ts");
+	const manager = new RemoteAccessManager({
+		logger,
+		getWebServiceStatus: () => ({ running: false, port: 0, token: "", requiresAuth: false }),
+		pushState: () => {},
+		detectCloudflared: () => "",
+		detectTailscale: () => "",
+		detectEasyTier: (preferredPath) => {
+			seen.push(preferredPath);
+			return "C:/fake/easytier-cli.exe";
+		},
+		getEasyTierCliPath: () => "  D:/Tools/EasyTier/easytier-cli.exe  ",
+		getEasyTierManualIp: () => "",
+		easytierReaderFactory: () => ({
+			probe: async () => ({ running: true, ip: "10.144.144.1", hostname: "", version: "", ipSource: "cli", error: "" }),
+		}),
+	});
+	await manager.refresh();
+	assert.deepEqual(seen, ["D:/Tools/EasyTier/easytier-cli.exe"]);
+});
+
+test("指定路径不可用时给出明确错误，而不是静默显示未安装", async () => {
+	const { logger } = makeLogger();
+	const { RemoteAccessManager } = loadModule("src/main/web/remoteAccess/RemoteAccessManager.ts");
+	const manager = new RemoteAccessManager({
+		logger,
+		getWebServiceStatus: () => ({ running: false, port: 0, token: "", requiresAuth: false }),
+		pushState: () => {},
+		detectCloudflared: () => "",
+		detectTailscale: () => "",
+		detectEasyTier: () => "",
+		getEasyTierCliPath: () => "D:/nope/easytier-cli.exe",
+	});
+	const state = await manager.refresh();
+	assert.equal(state.easytier.installed, false);
+	assert.match(state.easytier.error, /指定的 easytier-cli 路径不可用/);
+});
+
 test("EasyTierAccessReader 从 -o json 读取节点信息", async () => {
 	const { EasyTierAccessReader } = loadModule("src/main/web/remoteAccess/easytierAccess.ts");
 	const calls = [];

@@ -17,6 +17,7 @@ import {
 	isValidWebTokenShape,
 	sanitizeCloudflaredExtraArgs,
 	sanitizeEasyTierVirtualIp,
+	sanitizeEasyTierCliPath,
 	type AppSettings,
 	type TerminalConfirmCloseMode,
 	type TerminalCursorStyle,
@@ -678,6 +679,8 @@ export class SettingsStore {
 			this.settings.webRemoteCloudflaredExtraArgs = sanitizeCloudflaredExtraArgs(parsed.webRemoteCloudflaredExtraArgs) || undefined;
 			// EasyTier 手动兜底 IP：严格 IPv4，脏值/历史缺字段一律视为未设置。
 			this.settings.webRemoteEasyTierIp = sanitizeEasyTierVirtualIp(parsed.webRemoteEasyTierIp) || undefined;
+			// EasyTier CLI 路径：解压版/非默认目录安装时的显式入口，脏值视为未设置。
+			this.settings.webRemoteEasyTierCliPath = sanitizeEasyTierCliPath(parsed.webRemoteEasyTierCliPath) || undefined;
 			// 旧设置或脏值不能隐式打开向增强模型发送会话正文的开关。
 			this.settings.enhanceIncludeContext = parsed.enhanceIncludeContext === true;
 			// 输入预测只有显式 false 才关闭：老设置缺字段按默认开启处理。
@@ -1100,6 +1103,14 @@ export class SettingsStore {
 			if (sanitized) safePatch.webRemoteEasyTierIp = sanitized;
 			else if (typeof raw === "string" && raw.trim() === "") safePatch.webRemoteEasyTierIp = undefined;
 			else delete safePatch.webRemoteEasyTierIp;
+		}
+		// EasyTier CLI 路径：同一口径——空串清除，非法值不覆盖既有设置。
+		if ("webRemoteEasyTierCliPath" in safePatch) {
+			const raw = safePatch.webRemoteEasyTierCliPath;
+			const sanitized = sanitizeEasyTierCliPath(raw);
+			if (sanitized) safePatch.webRemoteEasyTierCliPath = sanitized;
+			else if (typeof raw === "string" && raw.trim() === "") safePatch.webRemoteEasyTierCliPath = undefined;
+			else delete safePatch.webRemoteEasyTierCliPath;
 		}
 		this.settings = { ...this.settings, ...safePatch };
 		// 生图字段来自渲染层，非法值丢掉，避免下次请求带坏 size/watermark。

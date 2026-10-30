@@ -26,6 +26,8 @@ export type RemoteAccessManagerDeps = {
 	getTunnelOptions?: () => CloudflaredTunnelOptions;
 	/** 读取 EasyTier 手动兜底虚拟 IP（自动检测失败时使用）；每次探测取最新。 */
 	getEasyTierManualIp?: () => string;
+	/** 读取用户指定的 easytier-cli 路径（解压版/非默认目录安装）；每次探测取最新。 */
+	getEasyTierCliPath?: () => string;
 	/** 测试注入点：替换真实子进程/命令执行。 */
 	tunnelFactory?: (deps: { logger: AppLogger; onEnded: (error: string) => void }) => CloudflaredTunnelProcess;
 	readerFactory?: (deps: { logger: AppLogger; binary?: string }) => TailscaleAccessReader;
@@ -33,7 +35,7 @@ export type RemoteAccessManagerDeps = {
 	/** 测试注入点：替换 PATH 探测，避免单测依赖本机安装。 */
 	detectCloudflared?: () => string;
 	detectTailscale?: () => string;
-	detectEasyTier?: () => string;
+	detectEasyTier?: (preferredPath?: string) => string | Promise<string>;
 };
 
 export class RemoteAccessManager {
@@ -74,6 +76,7 @@ export class RemoteAccessManager {
 		this.easytierReaderFactory = deps.easytierReaderFactory ?? ((d) => new EasyTierAccessReader(d));
 		this.getTunnelOptions = deps.getTunnelOptions ?? (() => ({}));
 		this.getEasyTierManualIp = deps.getEasyTierManualIp ?? (() => "");
+		this.getEasyTierCliPath = deps.getEasyTierCliPath ?? (() => "");
 	}
 
 	private readonly tunnelFactory: (deps: { logger: AppLogger; onEnded: (error: string) => void }) => CloudflaredTunnelProcess;
@@ -81,9 +84,10 @@ export class RemoteAccessManager {
 	private readonly easytierReaderFactory: (deps: { logger: AppLogger; binary?: string; manualIp?: string }) => EasyTierAccessReader;
 	private readonly detectCloudflared: () => string;
 	private readonly detectTailscale: () => string;
-	private readonly detectEasyTier: () => string;
+	private readonly detectEasyTier: (preferredPath?: string) => string | Promise<string>;
 	private readonly getTunnelOptions: () => CloudflaredTunnelOptions;
 	private readonly getEasyTierManualIp: () => string;
+	private readonly getEasyTierCliPath: () => string;
 
 	/** 当前聚合状态（纯读，不改内部状态）。 */
 	getState(): RemoteAccessState {
@@ -153,7 +157,9 @@ export class RemoteAccessManager {
 	 */
 	private async refreshEasyTier(): Promise<void> {
 		try {
-			const binaryPath = this.detectEasyTier();
+			// 用户指定的路径优先：解压版 CLI 不在 PATH、也没有卸载信息可查。
+			const cliPath = this.getEasyTierCliPath().trim();
+			const binaryPath = await this.detectEasyTier(cliPath);
 			const manualIp = normalizeEasyTierIpv4(this.getEasyTierManualIp());
 			this.easytier.binaryPath = binaryPath;
 			this.easytier.installed = Boolean(binaryPath);
@@ -164,7 +170,8 @@ export class RemoteAccessManager {
 				this.easytier.hostname = "";
 				this.easytier.version = "";
 				this.easytier.ipSource = manualIp ? "manual" : "";
-				this.easytier.error = "";
+				// 指定了路径却仍找不到：多半是路径写错/文件被移动，直接说清楚，别让用户以为重检没生效。
+				this.easytier.error = cliPath ? "指定的 easytier-cli 路径不可用，请检查路径或清空后重新检测" : "";
 				return;
 			}
 			this.easytierReader = this.easytierReaderFactory({ logger: this.logger, binary: binaryPath, manualIp });

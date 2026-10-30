@@ -420,6 +420,11 @@ export type AppSettings = {
 	 * easytier-cli 读不到节点，由用户从客户端抄写虚拟 IP；空 = 不启用手动地址。
 	 */
 	webRemoteEasyTierIp?: string;
+	/**
+	 * 用户指定的 easytier-cli 可执行文件路径（解压版 CLI / 非默认目录安装时自动检测可能找不到）；
+	 * 空 = 只用自动检测。填写后优先使用该路径。
+	 */
+	webRemoteEasyTierCliPath?: string;
 	/** 本地生成的匿名安装标识，不包含账号、路径或机器名 */
 	telemetryInstallId?: string;
 	/** 最近一次发送 app_heartbeat 的本地日期，格式 YYYY-MM-DD */
@@ -1002,6 +1007,20 @@ export function sanitizeEasyTierVirtualIp(value: unknown): string {
 	if (parts.some((part) => part < 0 || part > 255)) return "";
 	if (parts[0] === 0 || parts.every((part) => part === 255)) return "";
 	return parts.join(".");
+}
+
+/**
+ * 清洗手动指定的 easytier-cli 路径：去首尾空白与包裹引号（资源管理器「复制为路径」自带引号），
+ * 拒绝换行/控制字符与超长串；其余原样保留——Windows 用户目录常含中文与空格。
+ */
+export function sanitizeEasyTierCliPath(value: unknown): string {
+	if (typeof value !== "string") return "";
+	let trimmed = value.trim();
+	const quoted = trimmed.length >= 2 && ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'")));
+	if (quoted) trimmed = trimmed.slice(1, -1).trim();
+	if (!trimmed || trimmed.length > 1024) return "";
+	if (/[\u0000-\u001f]/.test(trimmed)) return "";
+	return trimmed;
 }
 
 /**

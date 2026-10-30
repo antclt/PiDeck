@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: ca8670229498cfe5b18e9d06852f0450da0d6c2b63aa2a1f5a463b8c5fb96f44（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: cf759c99f339e8058b78ef192972806819e2d39934be7cbf0ea90766021d6875（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5729,7 +5729,12 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.remote.et.title": "EasyTier（P2P 組網）",
 	"settings.remote.et.desc": "去中心化 P2P 虛擬區域網，無需公網 IP；手機安裝 EasyTier 並加入同一網路後訪問，不暴露公網",
 	"settings.remote.et.notRunningHint": "已找到 easytier-cli，但讀不到執行中的節點。請先啟動 EasyTier 客戶端並加入網路；也可以直接填寫客戶端裡顯示的虛擬 IP。",
-	"settings.remote.et.noCliHint": "未找到 easytier-cli。仍可手動填寫 EasyTier 客戶端裡顯示的虛擬 IP。",
+	"settings.remote.et.noCliHint": "未找到 easytier-cli。可在下方指定 easytier-cli.exe 路徑，或直接填寫客戶端裡顯示的虛擬 IP。",
+	"settings.remote.et.cliPathLabel": "easytier-cli 路徑",
+	"settings.remote.et.cliPathPlaceholder": "留空自動檢測，如 D:\\Tools\\EasyTier\\easytier-cli.exe",
+	"settings.remote.et.cliPathHint": "官方 Windows 包是解壓即用、不在 PATH 裡；解壓到自定義目錄時在這裡指定 easytier-cli.exe（也可選它所在的資料夾），儲存設定後生效",
+	"settings.remote.et.browse": "瀏覽",
+	"settings.remote.et.cliFound": "已檢測到 CLI：{path}",
 	"settings.remote.et.manualLabel": "手動虛擬 IP",
 	"settings.remote.et.manualPlaceholder": "如 10.144.144.1",
 	"settings.remote.et.manualHint": "留空則自動檢測；填寫後優先使用手動地址，儲存設定後生效",

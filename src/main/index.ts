@@ -6481,6 +6481,8 @@ app
 			},
 			// EasyTier 自动检测读不到虚拟 IP 时的用户兜底（设置项为空串表示未启用）
 			getEasyTierManualIp: () => settingsStore.get().webRemoteEasyTierIp ?? "",
+			// 解压版 CLI / 非默认目录安装：自动检测找不到时用用户指定的路径
+			getEasyTierCliPath: () => settingsStore.get().webRemoteEasyTierCliPath ?? "",
 			pushState: (state) => {
 				const win = mainWindow;
 				if (win && !win.isDestroyed()) win.webContents.send(ipcChannels.webRemoteAccessChanged, state);

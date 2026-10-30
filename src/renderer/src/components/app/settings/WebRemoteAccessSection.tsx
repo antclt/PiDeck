@@ -115,12 +115,27 @@ export const WebRemoteAccessSection = memo(function WebRemoteAccessSection(props
 		setGuideOpen(true);
 	}, []);
 
+	// 重新检测要跑子进程/注册表探测，给个忙碌态，避免「点了没反应」的错觉
+	const [refreshing, setRefreshing] = useState(false);
 	const refresh = useCallback(() => {
+		setRefreshing(true);
 		void desktopApi.settings
 			.webRemoteAccessRefresh()
 			.then((snapshot) => setState(snapshot))
-			.catch(() => {});
+			.catch(() => {})
+			.finally(() => setRefreshing(false));
 	}, []);
+
+	// 解压版 CLI 不在 PATH 也不写卸载信息：让用户直接挑 easytier-cli.exe
+	const pickEasyTierCli = useCallback(() => {
+		void desktopApi.dialog
+			.pickFiles({ title: t("settings.remote.et.cliPathLabel") })
+			.then((paths) => {
+				const picked = paths[0];
+				if (picked) props.updateDraft({ webRemoteEasyTierCliPath: picked });
+			})
+			.catch(() => {});
+	}, [props]);
 
 	const cf = state?.cloudflare;
 	const ts = state?.tailscale;
@@ -179,8 +194,8 @@ export const WebRemoteAccessSection = memo(function WebRemoteAccessSection(props
 							<LifeBuoy className="mr-1.5 size-3.5" aria-hidden="true" />
 							{t("settings.remote.openGuide")}
 						</Button>
-						<Button size="sm" variant="outline" onClick={refresh} disabled={props.webServiceChanging}>
-							<RefreshCw className="mr-1.5 size-3.5" aria-hidden="true" />
+						<Button size="sm" variant="outline" onClick={refresh} disabled={props.webServiceChanging || refreshing}>
+							{refreshing ? <Loader2 className="mr-1.5 size-3.5 animate-pideck-spin" aria-hidden="true" /> : <RefreshCw className="mr-1.5 size-3.5" aria-hidden="true" />}
 							{t("settings.remote.recheck")}
 						</Button>
 					</div>
@@ -251,8 +266,8 @@ export const WebRemoteAccessSection = memo(function WebRemoteAccessSection(props
 							<LifeBuoy className="mr-1.5 size-3.5" aria-hidden="true" />
 							{t("settings.remote.openGuide")}
 						</Button>
-						<Button size="sm" variant="outline" onClick={refresh} disabled={props.webServiceChanging}>
-							<RefreshCw className="mr-1.5 size-3.5" aria-hidden="true" />
+						<Button size="sm" variant="outline" onClick={refresh} disabled={props.webServiceChanging || refreshing}>
+							{refreshing ? <Loader2 className="mr-1.5 size-3.5 animate-pideck-spin" aria-hidden="true" /> : <RefreshCw className="mr-1.5 size-3.5" aria-hidden="true" />}
 							{t("settings.remote.recheck")}
 						</Button>
 					</div>
@@ -298,6 +313,26 @@ export const WebRemoteAccessSection = memo(function WebRemoteAccessSection(props
 			{/* ── EasyTier（只读：网络由用户自己的客户端/服务管理）── */}
 			<ChannelCard icon={<Network size={15} aria-hidden="true" />} title={t("settings.remote.et.title")} badge={etBadge.text} badgeTone={etBadge.tone} description={t("settings.remote.et.desc")}>
 				{etUrl ? <AccessUrlBlock url={etUrl} showQr hint={et?.ipSource === "cli" ? t("settings.remote.et.autoUrlHint") : t("settings.remote.et.manualUrlHint")} /> : <p className="text-caption text-text-secondary">{et?.installed ? t("settings.remote.et.notRunningHint") : t("settings.remote.et.noCliHint")}</p>}
+				{/* CLI 路径：官方 Windows 包是「解压即用」，不在 PATH 也没卸载记录，自动检测可能找不到 */}
+				<div className="grid gap-1">
+					<div className="grid items-center gap-2 sm:grid-cols-[auto_minmax(0,1fr)]">
+						<Label className="text-xs font-bold text-text-tertiary">{t("settings.remote.et.cliPathLabel")}</Label>
+						<div className="flex items-center gap-2">
+							<Input
+								className="h-8 w-full font-mono text-xs"
+								placeholder={t("settings.remote.et.cliPathPlaceholder")}
+								value={props.draft.webRemoteEasyTierCliPath ?? ""}
+								onChange={(event) => props.updateDraft({ webRemoteEasyTierCliPath: event.target.value })}
+								onBlur={(event) => props.updateDraft({ webRemoteEasyTierCliPath: event.target.value.trim() })}
+							/>
+							<Button size="sm" variant="outline" className="shrink-0" onClick={pickEasyTierCli}>
+								{t("settings.remote.et.browse")}
+							</Button>
+						</div>
+					</div>
+					<small className="text-micro text-text-tertiary">{t("settings.remote.et.cliPathHint")}</small>
+				</div>
+				{et?.installed && et.binaryPath ? <small className="break-all text-micro text-text-tertiary">{t("settings.remote.et.cliFound", { path: et.binaryPath })}</small> : null}
 				{/* 手动地址始终可填：留空用自动检测，填写后明确优先（多网络/自动结果不对时的覆盖入口） */}
 				<div className="grid gap-1">
 					<div className="grid items-center gap-2 sm:grid-cols-[auto_minmax(0,1fr)]">
