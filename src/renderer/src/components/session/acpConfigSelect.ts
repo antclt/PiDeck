@@ -9,24 +9,32 @@
  * 这里补一条「当前值」项，让选中/滚动语义成立，同时不改动 agent 给的枚举
  * （再次点选它由调用方按同值忽略，不产生 IPC）。
  */
-import type { AcpSessionConfigOption } from "../../../../shared/types/acp";
+import type { AcpModelRate, AcpSessionConfigOption } from "../../../../shared/types/acp";
 
-export type AcpConfigSelectValue = { value: string; name: string /** 当前值不在枚举里时补的占位项（再点选等价于不变）。 */; current?: boolean };
+export type AcpConfigSelectValue = { value: string; name: string /** agent 给的次级说明（权限档说明等），列表项里以弱化小字展示。 */; description?: string /** magpie 本地倍率（主进程注解，非 ACP wire 字段）。 */; rate?: AcpModelRate /** 当前值不在枚举里时补的占位项（再点选等价于不变）。 */; current?: boolean };
 
 export type AcpConfigSelectModel = { value: string; label: string; values: AcpConfigSelectValue[] };
 
-export type AcpConfigEntry = { option: AcpSessionConfigOption; values: Array<{ value: string; name: string }> };
+export type AcpConfigEntry = { option: AcpSessionConfigOption; values: Array<{ value: string; name: string; description?: string; rate?: AcpModelRate }> };
 
 /** 平铺 configOptions 的取值枚举（group 结构展平）。boolean 项保留（values 为空），由渲染层走开关分支。 */
 export function flattenAcpConfigOptions(options: ReadonlyArray<AcpSessionConfigOption>): AcpConfigEntry[] {
 	const result: AcpConfigEntry[] = [];
 	for (const option of options) {
-		const values: Array<{ value: string; name: string }> = [];
+		const values: Array<{ value: string; name: string; description?: string; rate?: AcpModelRate }> = [];
 		for (const item of option.options ?? []) {
 			if ("group" in item) {
-				for (const inner of item.options) values.push({ value: inner.value, name: item.name ? `${item.name} / ${inner.name}` : inner.name });
+				// description/rate 属于具体取值（组名只是分类），不要被组名前缀挤掉。
+				for (const inner of item.options) {
+					values.push({
+						value: inner.value,
+						name: item.name ? `${item.name} / ${inner.name}` : inner.name,
+						...(inner.description ? { description: inner.description } : {}),
+						...(inner.rate ? { rate: inner.rate } : {}),
+					});
+				}
 			} else {
-				values.push({ value: item.value, name: item.name });
+				values.push({ value: item.value, name: item.name, ...(item.description ? { description: item.description } : {}), ...(item.rate ? { rate: item.rate } : {}) });
 			}
 		}
 		result.push({ option, values });
@@ -43,7 +51,7 @@ export function isRenderableAcpConfigEntry(entry: AcpConfigEntry): boolean {
 	return entry.option.type === "boolean" || entry.values.length > 1;
 }
 
-export function resolveAcpConfigSelect(option: AcpSessionConfigOption, values: ReadonlyArray<{ value: string; name: string }>): AcpConfigSelectModel {
+export function resolveAcpConfigSelect(option: AcpSessionConfigOption, values: ReadonlyArray<{ value: string; name: string; description?: string; rate?: AcpModelRate }>): AcpConfigSelectModel {
 	const raw = option.currentValue === undefined ? "" : String(option.currentValue);
 	const matched = raw ? values.find((value) => value.value === raw) : undefined;
 	// 无当前值时沿用旧行为：触发器显示选项名（如「Model」），下拉不高亮任何项。

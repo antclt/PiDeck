@@ -62,14 +62,17 @@ export type AcpToolStatus = {
 /** 安装/卸载进度事件（主→渲染 webContents 推送；preload 白名单转发）。 */
 export type AcpLifecycleEvent = { presetId: import("../acpToolPresets").AcpToolPresetId; phase: "line"; line: string } | { presetId: import("../acpToolPresets").AcpToolPresetId; phase: "done"; ok: boolean; output: string };
 
-/** 会话级配置选项(ACP configOptions 规范的渲染层 DTO,与主进程协议类型同构)。 */
+/** 模型倍率(magpie credits 口径;PiDeck 补充字段,非 ACP wire 字段)。 */
+export type AcpModelRate = { rate: number /** 折扣前倍率(仅 rate<was 时给)。 */; was?: number /** 不计积分(免费)。 */; free?: boolean };
+
+/** 会话级配置选项(ACP configOptions 规范的渲染层 DTO,与主进程协议类型同构;`rate` 是 PiDeck 补充)。 */
 export type AcpSessionConfigOption = {
 	id: string;
 	name: string;
 	description?: string;
 	type?: "select" | "boolean";
 	currentValue?: string | boolean;
-	options?: Array<{ value: string; name: string; description?: string } | { group: string; name: string; options: Array<{ value: string; name: string; description?: string }> }>;
+	options?: Array<{ value: string; name: string; description?: string; rate?: AcpModelRate } | { group: string; name: string; options: Array<{ value: string; name: string; description?: string; rate?: AcpModelRate }> }>;
 	/** 语义类别(mode/model/model_config/thought_level):渲染层按它分组呈现。 */
 	category?: string;
 };

@@ -50,6 +50,27 @@ test("boolean 项保留在平铺结果里（值列表为空），交渲染层走
 	assert.equal(entries[1].values.length, 2);
 });
 
+test("取值 description 原样透传（模型倍率/说明由列表项渲染）", () => {
+	const withDesc = [{ value: "glm-5.3", name: "GLM-5.3", description: "0.69×" }];
+	const entries = flattenAcpConfigOptions([{ id: "model", name: "Model", type: "select", options: withDesc }]);
+	assert.deepEqual(plain(entries[0].values), withDesc);
+	const model = resolveAcpConfigSelect({ id: "model", name: "Model", currentValue: "glm-5.3" }, entries[0].values);
+	assert.equal(model.values[0].description, "0.69×");
+});
+
+test("模型倍率随取值透传（主进程注解的 rate 不能在下拉模型组装时丢掉）", () => {
+	const values = [{ value: "codebuddy/glm-5.3", name: "GLM-5.3", rate: { rate: 0.69, was: 0.99 } }];
+	const entries = flattenAcpConfigOptions([{ id: "model", name: "Model", type: "select", options: values }]);
+	assert.deepEqual(plain(entries[0].values), values);
+	const model = resolveAcpConfigSelect({ id: "model", name: "Model", currentValue: "codebuddy/glm-5.3" }, entries[0].values);
+	assert.deepEqual(plain(model.values[0].rate), { rate: 0.69, was: 0.99 });
+});
+
+test("分组选项的 description 属于具体取值，不被组名前缀吞掉", () => {
+	const entries = flattenAcpConfigOptions([{ id: "model", name: "Model", type: "select", options: [{ group: "codebuddy", name: "CodeBuddy", options: [{ value: "glm-5.3", name: "GLM-5.3", description: "0.69×" }] }] }]);
+	assert.deepEqual(plain(entries[0].values), [{ value: "glm-5.3", name: "CodeBuddy / GLM-5.3", description: "0.69×" }]);
+});
+
 test("单值 select 不渲染；boolean 与多值 select 渲染", () => {
 	const [booleanEntry, singleEntry, multiEntry] = flattenAcpConfigOptions([
 		{ id: "delegate", name: "Delegate", type: "boolean", currentValue: false },

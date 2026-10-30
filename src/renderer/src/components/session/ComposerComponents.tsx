@@ -32,6 +32,7 @@ import { computeModelPickerDefaultExpanded, groupModelsByProvider, modelPickerSe
 import { ComposerModeChip } from "./composer/ComposerModeChip";
 import { resolveAcpConfigSelect, flattenAcpConfigOptions, isRenderableAcpConfigEntry } from "./acpConfigSelect";
 import { AcpConfigGlyph } from "./AcpConfigGlyph";
+import { AcpModelRateBadge } from "./AcpModelRateBadge";
 import { AcpConfigSearchSelect } from "./AcpConfigSearchSelect";
 import type { AgentBackend, AgentRuntimeState, AvailableModel, ComposerAgentMode, GitBranchInfo, ModelListFailReason, ModelListReport, SessionRecord, SessionRuntimeTarget, UsageProbeBackend } from "../../../../shared/types";
 
@@ -207,6 +208,8 @@ function AcpConfigControls(props: { options: import("../../../../shared/types/ac
 				}
 				// currentValue 可能不在 agent 的枚举里（完整模型 id vs 别名）：补一条当前项，保证高亮/滚动指向真实值。
 				const select = resolveAcpConfigSelect(entry.option, entry.values);
+				// 当前项的 description 也进悬停提示：列表里的倍率/说明在收起态也要能查到。
+				const currentValue = select.values.find((value) => value.value === select.value);
 				// 模型列表按 agent 不同可达几十项：换可搜索下拉，避免平铺滚动找模型。
 				// 模式/思考档等短枚举仍用 Select（选项少时搜索框只是噪音）。
 				if (entry.option.category === "model" || entry.values.length > 10) {
@@ -219,7 +222,7 @@ function AcpConfigControls(props: { options: import("../../../../shared/types/ac
 							size="sm"
 							className="composer-bar-btn backend h-7 gap-1 rounded-md border-transparent bg-transparent px-1.5 text-control font-semibold text-foreground hover:bg-muted/60 focus-visible:border-transparent focus-visible:ring-0 data-[state=open]:border-transparent data-[state=open]:bg-muted/60 data-[state=open]:ring-0 max-w-56 [&_[data-slot='select-icon']]:hidden"
 							// 悬停必须能看到实际生效值：只给选项名+描述时，长模型名被截断后无从确认。
-							title={`${entry.option.name}: ${select.label}${entry.option.description ? ` — ${entry.option.description}` : ""}`}
+							title={`${entry.option.name}: ${select.label}${currentValue?.description ? ` — ${currentValue.description}` : ""}${entry.option.description ? ` — ${entry.option.description}` : ""}`}
 						>
 							<AcpConfigGlyph option={entry.option} />
 							<span className="truncate text-xs">{select.label}</span>
@@ -227,7 +230,13 @@ function AcpConfigControls(props: { options: import("../../../../shared/types/ac
 						<SelectContent align="start" className="max-h-72">
 							{select.values.map((value) => (
 								<SelectItem key={value.value} value={value.value}>
-									<span className="truncate">{value.name}</span>
+									<span className="flex min-w-0 flex-1 items-center gap-2">
+										<span className="flex min-w-0 flex-1 flex-col gap-0.5 py-0.5">
+											<span className="truncate">{value.name}</span>
+											{value.description ? <span className="truncate text-micro text-muted-foreground">{value.description}</span> : null}
+										</span>
+										<AcpModelRateBadge rate={value.rate} />
+									</span>
 								</SelectItem>
 							))}
 						</SelectContent>

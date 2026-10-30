@@ -5,6 +5,7 @@ import { cn } from "../../lib/utils";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "../ui-shadcn/command";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui-shadcn/popover";
 import { AcpConfigGlyph } from "./AcpConfigGlyph";
+import { AcpModelRateBadge } from "./AcpModelRateBadge";
 import type { AcpConfigSelectModel } from "./acpConfigSelect";
 
 /**
@@ -31,7 +32,9 @@ export function AcpConfigSearchSelect(props: { option: { id: string; name: strin
 		return () => window.cancelAnimationFrame(frame);
 	}, [open]);
 
-	const title = `${props.option.name}: ${props.select.label}${props.option.description ? ` — ${props.option.description}` : ""}`;
+	// 收起态只显示名称：把当前项的 description（模型倍率等）带进悬停提示，不挤占底栏宽度。
+	const currentValue = props.select.values.find((value) => value.value === props.select.value);
+	const title = `${props.option.name}: ${props.select.label}${currentValue?.description ? ` — ${currentValue.description}` : ""}${props.option.description ? ` — ${props.option.description}` : ""}`;
 	return (
 		<Popover open={open} onOpenChange={setOpen}>
 			<PopoverTrigger asChild>
@@ -56,7 +59,7 @@ export function AcpConfigSearchSelect(props: { option: { id: string; name: strin
 						if (!item) return 1;
 						const needle = search.trim().toLowerCase();
 						if (!needle) return 1;
-						return `${item.value} ${item.name}`.toLowerCase().includes(needle) ? 1 : 0;
+						return `${item.value} ${item.name} ${item.description ?? ""}`.toLowerCase().includes(needle) ? 1 : 0;
 					}}
 					className="rounded-none"
 				>
@@ -68,7 +71,7 @@ export function AcpConfigSearchSelect(props: { option: { id: string; name: strin
 								<CommandItem
 									key={value.value}
 									value={value.value}
-									keywords={[value.name]}
+									keywords={value.description ? [value.name, value.description] : [value.name]}
 									onSelect={() => {
 										// 再点当前项等价于「保持不变」：不发 IPC（与 Radix Select 分支同口径）。
 										if (value.value !== props.select.value) props.onPick(value.value);
@@ -76,9 +79,11 @@ export function AcpConfigSearchSelect(props: { option: { id: string; name: strin
 									}}
 								>
 									<Check className={cn("size-4 shrink-0", value.value === props.select.value ? "opacity-100" : "opacity-0")} aria-hidden="true" />
-									<span className="min-w-0 flex-1 truncate" title={value.name}>
-										{value.name}
+									<span className="flex min-w-0 flex-1 flex-col" title={value.description ? `${value.name} — ${value.description}` : value.name}>
+										<span className="truncate">{value.name}</span>
+										{value.description ? <span className="truncate text-micro text-muted-foreground">{value.description}</span> : null}
 									</span>
+									<AcpModelRateBadge rate={value.rate} />
 								</CommandItem>
 							))}
 						</CommandList>
