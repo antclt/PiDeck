@@ -2,8 +2,10 @@ import { isWritableHostState } from "../../../shared/projectCapabilities";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RemoteProject } from "../../../shared/types/project";
 import { desktopApi } from "../desktopApi";
+import { useDocumentPageVisible } from "../hooks/useRemoteGitRefsPolling";
 import { createRemoteGitViewController, type RemoteGitViewState } from "../utils/remoteGitViewState";
 import { subscribeRemoteGitFacts } from "../utils/remoteGitFactsSubscription";
+import { remoteGitStatusPollingEnabled, startRemoteGitStatusPolling } from "../utils/remoteGitStatusPolling";
 
 /**
  * The read-only panel owns this state; neither currentSession atoms nor native Git polling are subscribed. `repoPath`
@@ -16,6 +18,8 @@ export function useRemoteGitView(project: RemoteProject, repoPath = "") {
 	// Polling is bounded by the host's observed state, not by guessing from a failed read: the optimistic initial
 	// value only covers the window before the first host event (the panel's own first read reports any failure).
 	const [hostReady, setHostReady] = useState(true);
+	// 隐藏的窗口不轮询：document 可见性只影响读的节奏，不影响已落地的事实。
+	const pageVisible = useDocumentPageVisible();
 	const controller = useRef<ReturnType<typeof createRemoteGitViewController> | null>(null);
 	useEffect(() => {
 		const reads = createRemoteGitViewController(project.id, projectKey, desktopApi.git, setState, repoPath);
@@ -41,6 +45,31 @@ export function useRemoteGitView(project: RemoteProject, repoPath = "") {
 			if (controller.current === reads) controller.current = null;
 		};
 	}, [project.id, project.locator.hostId, projectKey, repoPath]);
+	/**
+	 * 5 秒静默 status 轮询（P0-3）：外部 commit/checkout 不会让主进程标脏，只有轮询能发现。
+	 *
+	 * 闸门关闭时立即清定时器并退休在途结果；打开时重建一个 interval（effect 只在闸门值变化时重跑）。
+	 * 走 refreshStatus 而不是 refresh：后者置 loading 并清掉 diff/history/refs。不 fetch。
+	 */
+	const statusPolling = remoteGitStatusPollingEnabled({ pageVisible, hostReady, mutating: state.mutating === true, loading: state.loading, diffLoading: state.diffLoading });
+	useEffect(() => {
+		if (!statusPolling) {
+			controller.current?.stopStatusPolling();
+			return;
+		}
+		const stop = startRemoteGitStatusPolling({
+			isEnabled: () => true,
+			poll: () => controller.current?.refreshStatus() ?? Promise.resolve(),
+			timer: {
+				set: (callback, intervalMs) => window.setInterval(callback, intervalMs),
+				clear: (handle) => window.clearInterval(handle),
+			},
+		});
+		return () => {
+			stop();
+			controller.current?.stopStatusPolling();
+		};
+	}, [statusPolling, projectKey]);
 	const loadHistory = useCallback(() => {
 		void controller.current?.loadHistory();
 	}, []);
