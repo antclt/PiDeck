@@ -681,7 +681,7 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 		if (scope === "project" && !resolvedProjectId) throw new Error("Project scope requires a project id.");
 		// 内置扩展与原生过滤规则的分流收口在 ExtensionManager.toggleFromUi：与 Web 工作区路由共用同一入口，
 		// 避免两处各写一套「pi-deck-* 前缀 ≠ 内置身份」的白名单判定（issue #321 教训）。
-		await extensionManager.toggleFromUi(source, enabled, scope, extensionPath, resolvedProjectId);
+		await manager.toggleFromUi(source, enabled, scope, extensionPath, resolvedProjectId);
 		void appLogger.info("extension", "Extension toggled", { source, enabled, scope, projectId });
 	});
 	ipcMain.handle(ipcChannels.extensionsUpdate, async (_event, options?: unknown) => {
