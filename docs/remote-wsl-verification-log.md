@@ -306,4 +306,121 @@
 
 `grep searchContent e2e/` ⇒ **0 处**：现有 e2e 没有 `files.searchContent` / 远端内容搜索入口。等 Lead 通知 dev 已合并（W2 渲染层最后一环）后，按新实现选一条路径补最小证据（真实产品路径优先；若 e2e 无入口，则用真实主机 + 旧 helper 回退/新 helper 命中的只读探针），不新增产品代码。
 
+---
+
+## 11. 收尾轮最终验证（merge dev `30d5eca36` 后）
+
+### 11.1 合并、构建与门禁
+
+| 项 | 命令 | 退出码 | 结果 |
+|----|------|--------|------|
+| 合并 | `git merge dev`（dev `30d5eca36`：W1 + W2 + W3 + W4 全部 + i18n） | 0 | 本地 merge 提交 `2c4b35e51`，无冲突 |
+| 构建 | `npx electron-vite build`（仅 E2E 准备） | 0 | 1m1s |
+| 类型 | `npm run typecheck` | 0 | 通过 |
+| IPC 接线 | `npm run check:ipc-wiring` | 0 | 795 通道、agentEventTags 8 |
+| 测试形状 | `npm run check:test-shape` | 0 | sourceOnly 407 / **1787** 文件，新增 0 |
+| 格式 | `npm run check:format` | 0 | **4175** 文件无差异 |
+
+### 11.2 全量单测：`fail 2`（两条**源码形状守卫**，非行为回归；Lead 已派 W2 结构性修复）
+
+`npm test`（`node --test --test-concurrency=4`）⇒ **tests 15093 / pass 14806 / fail 2 / skipped 285 / 437s**；`node --test` 失败即非零退出。
+复现：`node --test tests/remoteDragMove.test.mjs tests/remoteProjectUpload.test.mjs` ⇒ **RC=1，tests 23 / pass 21 / fail 2**（确定性）。
+
+| 失败 | 断言 | 实测 | 定性 |
+|------|------|------|------|
+| `tests/remoteDragMove.test.mjs:70` | `RemoteProjectPanel.tsx` 行数 ≤ 440 | **467 行**（本轮合并 +27） | 重构行数预算守卫；Lead 决定：抽出内容搜索分区组件（不篡改断言） |
+| `tests/remoteProjectUpload.test.mjs:301` | `REMOTE_UPLOAD_TEMP_NAME.test(` 在 `remoteProjectIpc.ts` + `remoteProjectReadIpc.ts` 里**恰好 2 处** | **3 处** | 源码形状计数守卫（多一处过滤更严，不是漏过滤）；Lead 决定：把用户可见条目判据抽到被计数文件之外的共享模块（不篡改断言） |
+
+> 处置口径：等 W2 提交合入 dev 后，本轮只需 `git merge dev` → **复跑全量 npm test + 这两个守卫文件 + 「远端文件管理」E2E（54s）**；其余 E2E 结果沿用（结构性改动、行为不变）。
+>
+> **后续（`f31b0104f` 复跑结果）**：两个守卫文件已恢复（23/23），但 W2 的拆分**又打破第三处形状守卫** `tests/remoteProjectEntryState.test.mjs:60`（行菜单锚点搬到新文件）——见 §11.8；定性同为「形状锚点被结构拆分打破」，非行为回归。
+
+### 11.3 远端 E2E 最终 sweep（HEAD `2c4b35e51`，串行）
+
+| # | 用例（`e2e/remoteSessionAcceptance.spec.ts`） | 退出码 | 时长 | 结果 |
+|---|--------------------------------------------|--------|------|------|
+| 1 | 远端 Git G1：只读 SCM 与差异 → 双项目读隔离 → 断开不重连 | 0 | 66s | **pass** |
+| 2 | 远端 Git G2a/G2b：精确暂存取消 → 提交已确认暂存区 | 0 | 79s | **pass** |
+| 3 | 远端 Git G3a：历史分页与详情 → 引用 → 两版本差异 | 0 | 37s | **pass** |
+| 4 | 远端 Git G3b：新建分支 → 切换 → 冲突拒绝 | 0 | 37s | **pass** |
+| 5 | 远端 Git G4a：丢弃改动 → 删除未跟踪文件 → 备份可恢复 | 0 | 34s | **pass** |
+| 6 | 远端 Git G4b：丢弃留快照 → 恢复区 → 一键还原 | 0 | 32s | **pass** |
+| 7 | 远端 Git G5a：获取/拉取/脏工作区拒绝/推送 | 0 | 37s | **pass** |
+| 8 | 远端 Git G5b：引用对比 → 逐文件两侧 → 轮询策略 | 0 | 82s | **pass** |
+| 9 | 远端 Git G5c：非仓库根显式初始化 | 0 | 29s | **pass** |
+| 10 | 远端 Git G5d/G5e：仓库发现与 scope → 嵌套读写 | 0 | 37s | **pass** |
+| 11 | 远端文件管理 v1：新建/改名/移动/删除+回收站/清空 | 0 | 55s | **pass**（并在最终 HEAD `f31b0104f` 复跑 **55.4s pass**，验证面板拆分未破坏抽屉） |
+| 12 | 远端代码文件编辑（UI 保存→冲突草稿→双项目→Agent 运行） | **1** | 142s | **fail → 既有 e2e 测试债，记「未验证」（见 11.4）** |
+| 13 | 远端终端：项目隔离 → 保存代码测试 → resize → 清理 | 0 | 130s | **pass** |
+| 14 | 远端会话 trust 提示 | 0 | 61s | **pass** |
+| 15 | 远端会话产品路（新建→发 prompt→正文→关闭 Agent→重开历史） | 0 | 188s | **pass** |
+
+> 串行（同一时刻只有一条 Electron），15 条合计约 **17.4 分钟**；`G6b opt-in soak` 按设计不跑（未验证）。
+> **另**：`e2e/remoteHostAcceptance.spec.ts`（W4 修正版）在 `2c4b35e51` 上跑到「项目级 root 状态」失败（4.6m，见 11.5），**不是**本表这 15 条之一。
+> **HEAD 说明**：本表 15 条跑在 `2c4b35e51`（W2 结构修复之前）；**全量 npm test、两个守卫文件与「远端文件管理」E2E 已在最终 HEAD `f31b0104f` 上复跑**（结构改动、行为不变，其余结果沿用）。
+
+### 11.4 「远端代码文件编辑」：既有 e2e 测试债（未验证）
+
+| 次 | 失败点 | 证据 | 定性 |
+|----|--------|------|------|
+| 基线跑 | 测试自带 oracle：`ssh … cat -- '<project>/calc.cjs'` 命令失败 | 远端项目目录里该文件不存在/不可读 | oracle 侧失败 |
+| 最终 build 复跑 | `e2e/remoteSessionAcceptance.spec.ts:690` `.header-drawer-toggle` 30s 未见 | **截图显示抽屉已打开、右侧编辑器正常显示已保存的 `value: 2`**；抽屉打开时该 toggle 不再渲染 | **既有 spec 与当前 UI 交互契约不一致（测试债）** |
+
+**口径：不改断言、不改产品代码；该项记「未验证（既有 spec 与当前 UI 不一致）」**，交 e2e owner 后续重写该步（例如用 Escape / 抽屉自身关闭入口）。
+
+### 11.5 `remoteHostAcceptance`（W4 修正版）：跑到「项目级 root 状态」失败
+
+- 退出码 1，4.6m；前置步骤（加主机 pin/连接 ready/登记两项目/会话列表/惰性标题/导入/**重复导入**）全部通过 —— W4 的定位符与 Op 信封修正**有效**。
+- 失败断言：`e2e/remoteHostAcceptance.spec.ts:327` —— 让项目 A 根目录漂移后再刷新，侧栏项目行必须出现 `remote-project-needs-attention`（标题含 `SSH_PROJECT_ROOT_(UNRESOLVED|CHANGED)`）；实测 **240s 内未出现**（`element(s) not found`）。
+- 定性：**待分类**（产品 root-status 刷新回归 or 漂移注入/刷新时序），本轮不改产品代码；已在本记录标注，交 Lead 判定是否单开缺陷。
+- **第二数据点（最终 HEAD `f31b0104f` 复跑）**：同一断言再次失败（4.6m，**确定性 2/2**，不是偶发）。截图证据：
+  - 侧栏项目行 `proj-a-…` 仍显示 `serve ●`，**没有「需处理」标记**（`remote-project-needs-attention`）；
+  - 但主内容区已经显示 `无法列出目录：SSH_PROJECT_ROOT_UNRESOLVED` ⇒ **漂移被产品检测到了，只是项目级状态没有回传到侧栏行**；
+  - 因此这是「面板能报稳定码、侧栏缺 badge」的**产品侧可见性缺口**（或项目列表 rootStatus 缓存未失效），不是漂移注入失败。本轮只记录、不改产品代码。
+
+### 11.6 远端内容搜索：协议级真机证据（旧 helper 回退 + 新 helper 命中）
+
+探针 `tests/remoteHelperContentSearchProbe.mjs`（非 `*.test.mjs`）：`ssh -T <alias> 'node <bundle>/helper.mjs --root <临时目录>'` + NDJSON 帧 `hello` → `fs.searchContent` → 非法 query。夹具在远端 `$HOME` 临时目录（文本关键词 + 前 8KiB 含 NUL 的二进制 + 三层深目录），结束删除；不打印主机/用户。
+
+| 时点 | 部署 bundle | `helperVersion` | `fs.searchContent` 能力 | 结果 |
+|------|-------------|------------------|--------------------------|------|
+| 首次（合并前 e2e 只有旧构建连过） | 2 个，最新无 `search-content.mjs` | **1.24.0** | **否**（capabilities 34 项） | **old-helper-fallback**：主进程 `files.searchContent` 对远端项目返回 null ⇒ 渲染层走「仅文件名」；需要一次远程连接触发内容寻址热更新 |
+| 最终 build 跑过 host acceptance 之后 | 3 个，含 `search-content.mjs` | **1.25.0** | **是**（35 项） | **pass**（详见下） |
+
+新 helper 实测（`fs.searchContent`，`path:"."`，query=`PIDECK_CONTENT_PROBE_OK`）：
+`matches=2`（`note.txt`、`d1/d2/d3/deep.txt`）、`matchedFiles=2`、`scannedFiles=3`、`scannedBytes=168`、`truncated=false`；**二进制 `blob.bin` 被跳过（不产生匹配）**、深层目录命中、snippet ≤200 字符；非法 query（空串）⇒ `ok:false` + **`QUERY_INVALID`**（稳定拒绝，不挂死）。
+
+> **UI 端到端未覆盖**：现有 e2e 无文件搜索入口（`grep searchContent e2e/` = 0），新增 e2e spec 不在 verifier 写作用域；**协议级真机证据（上表）+ W2 的路由/能力单测**共同覆盖。
+
+### 11.7 WSL 两个 smoke 在最终 HEAD 上复跑
+
+| 脚本 | 退出码 | 结果 |
+|------|--------|------|
+| `node tests/wslConfigReadSmoke.mjs` | 0 | `models.json` 不存在→空 providers 且不创建；`settings.json` 6 键；两文件 sha256 读前=读后（settings 前缀 `d16a1b8…`） |
+| `node tests/wslConfigLifecycleSmoke.mjs` | 0 | 运行中读 119ms；`--terminate` 35ms→Stopped；显式重启 **2190ms**；重启后读 96ms；**停态直接读 2362ms → ok（UNC 自动拉起发行版，`autoStartedByRead=true`）**；收尾 Running |
+
+**WSL 停态裁定（Lead）**：接受「UNC 访问自动拉起发行版（约 2.4s）+ 成功读取」，不作为缺陷；15s 截止保证「不挂死、不回退 Windows HOME」。稳定码只覆盖发行版缺失/改名/路径不可读。
+
+### 11.8 W2 结构修复后的最终 HEAD（`f31b0104f` ← dev `86ea31ded`）
+
+| 项 | 命令 | 退出码 | 结果 |
+|----|------|--------|------|
+| 合并 | `git merge dev`（W2 结构修复：内容搜索分区拆分 + 共享条目判据） | 0 | 本地 merge 提交 `f31b0104f`；`RemoteProjectPanel` 由 467 行降到拆分后（新增 `RemoteContentSearchSection` / `RemoteProjectRowMenu` / `RemoteProjectNameRules`） |
+| 构建 | `npx electron-vite build`（仅 E2E 准备） | 0 | 1m5s |
+| 守卫 1 | `node --test tests/remoteDragMove.test.mjs tests/remoteProjectUpload.test.mjs` | **0** | **23 passed / 0 failed**（两个守卫文件从 fail → pass，断言未改） |
+| 「远端文件管理」E2E 复跑 | `--grep "远端文件管理 v1"` | **0** | **1 passed (55.4s)** —— 面板拆分没有破坏抽屉/文件编辑入口 |
+| 全量单测复跑 | `npm test`（`node --test --test-concurrency=4`） | **1** | **tests 15093 / pass 14807 / fail 1 / skipped 285 / 403s**；唯一失败＝`tests/remoteProjectEntryState.test.mjs:60`「UI contract anchors exist in the shipped renderer modules」——W2 把行菜单拆成 `RemoteProjectRowMenu.tsx` 后，四个 `remote-file-row-*` 锚点不再在 `RemoteProjectPanel.tsx` 里，属**形状锚点守卫被结构拆分打破**（行为未回归，锚点仍在同批源码），待 W2 把该断言改为同时读新模块 |
+
+> 口径：**全量单测、两个守卫文件、「远端文件管理」E2E 在最终 HEAD `f31b0104f` 上跑；其余 14 条远端 E2E 与 host acceptance 沿用 `2c4b35e51` 的结果**（W2 的改动是结构性拆分 + 共享判据抽取，行为不变；文件管理这条正是因为改到面板才复跑）。
+
+### 11.9 本轮结论（口径）
+
+**已通过（真实主机）**：远端 Git 全档（G1/G2/G3/G4/G5a-e，14 条含终端/trust/产品路/文件管理）；WSL 只读与停/启 smoke；远端内容搜索协议级（新 helper 1.25.0 命中、二进制跳过、非法 query 稳定拒绝；同时记录旧 helper 1.24.0 的「仅文件名」回退行为）；两项源码形状守卫在 W2 修复后恢复。
+
+**未通过 / 未验证（不当作通过）**：
+1. **远端代码文件编辑**：既有 e2e 与当前 UI 交互契约不一致（oracle + `.header-drawer-toggle`），记「未验证（既有 spec 与当前 UI 不一致）」，不改断言。
+2. **remoteHostAcceptance**：跑到「项目级 root 状态」失败（A 漂移后未见「需处理」），定性待判（见 11.5）。
+3. **G6b opt-in soak**、**remoteFunctionalAcceptance**（本轮不做）、其余未列出的远端用例。
+4. **远端内容搜索 UI 端到端未覆盖**（现有 e2e 无入口），只有协议级真机证据。
+
 
