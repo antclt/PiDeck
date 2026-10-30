@@ -105,6 +105,8 @@
 
 ### 5.2 另一条远端 spec 的基线补跑：`remoteHostAcceptance`（同为 baseline-fail，但成因是**既有 spec 过时**）
 
+> 后续状态：这一版「旧选择器」问题已由 W4 在本轮（v-final）修掉；本轮同一 spec 先暴露产品缺陷（rootStatus 信封形状），又由 task-12 修复并真机验证 —— 见 §11.5。本节保留为**上一轮（ws4）历史证据**。
+
 | 项 | 内容 |
 |----|------|
 | 命令 | `& "$env:TEMP\pideck-ws4-remote.ps1" -Spec "e2e/remoteHostAcceptance.spec.ts" -Grep "远端主机功能级验收"` |
@@ -368,15 +370,28 @@
 
 **口径：不改断言、不改产品代码；该项记「未验证（既有 spec 与当前 UI 不一致）」**，交 e2e owner 后续重写该步（例如用 Escape / 抽屉自身关闭入口）。
 
-### 11.5 `remoteHostAcceptance`（W4 修正版）：跑到「项目级 root 状态」失败
+### 11.5 `remoteHostAcceptance`：修复前确定性 2/2 失败 → **根因已确认并修复（task-12，真机 1 passed 56.6s，待合入）**
+
+**修复前证据（本 verifier，两个数据点）**
 
 - 退出码 1，4.6m；前置步骤（加主机 pin/连接 ready/登记两项目/会话列表/惰性标题/导入/**重复导入**）全部通过 —— W4 的定位符与 Op 信封修正**有效**。
 - 失败断言：`e2e/remoteHostAcceptance.spec.ts:327` —— 让项目 A 根目录漂移后再刷新，侧栏项目行必须出现 `remote-project-needs-attention`（标题含 `SSH_PROJECT_ROOT_(UNRESOLVED|CHANGED)`）；实测 **240s 内未出现**（`element(s) not found`）。
-- 定性：**待分类**（产品 root-status 刷新回归 or 漂移注入/刷新时序），本轮不改产品代码；已在本记录标注，交 Lead 判定是否单开缺陷。
-- **第二数据点（最终 HEAD `f31b0104f` 复跑）**：同一断言再次失败（4.6m，**确定性 2/2**，不是偶发）。截图证据：
-  - 侧栏项目行 `proj-a-…` 仍显示 `serve ●`，**没有「需处理」标记**（`remote-project-needs-attention`）；
-  - 但主内容区已经显示 `无法列出目录：SSH_PROJECT_ROOT_UNRESOLVED` ⇒ **漂移被产品检测到了，只是项目级状态没有回传到侧栏行**；
-  - 因此这是「面板能报稳定码、侧栏缺 badge」的**产品侧可见性缺口**（或项目列表 rootStatus 缓存未失效），不是漂移注入失败。本轮只记录、不改产品代码。
+- 第二数据点（`f31b0104f` 复跑）同一断言再次失败（4.6m，**确定性 2/2**，不是偶发）。截图证据：侧栏 `proj-a-…` 仍显示 `serve ●`、**无「需处理」badge**；但主内容区已显示 `无法列出目录：SSH_PROJECT_ROOT_UNRESOLVED` ⇒ **漂移被检测到了，只是侧栏行拿不到项目级状态**。
+
+**根因（W4 定位，与本记录观测吻合，已确认）**
+
+- 渲染层 `readRootStatusResponse` **只认扁平形状**，而 main 的 `remoteProjectRootStatus` 已迁到 **Op 信封**（`opOk({ status, … })`）⇒ 侧栏 badge 永远读成 `unavailable`。
+- 这正好解释「面板能显示稳定码（走列表错误路径）、侧栏 badge 不显示（走 rootStatus 读取路径）」的分裂。
+
+**修复（task-12，W4 分支，待合入 dev）**
+
+- 读取改为**信封优先 + 扁平兼容**（旧测试仍绿），并补 3 条 Op 信封回归：读函数三态 / hook 落 atom / badge 渲染；e2e 里 `statusB` 断言同步对齐信封。
+
+**修复后真机验证（由 W4 在其分支跑，2026-10-30）**
+
+- 命令：`npx playwright test e2e/remoteHostAcceptance.spec.ts --grep "远端主机功能级验收"`（dev + task-12 修复构建）
+- 结果：**1 passed (56.6s)，exit 0**；整条走完：加主机 pin → ready → 登记两项目 → 远端会话列表/标题/导入/重复导入 → **A 漂移后侧栏 badge 出现（带 `SSH_PROJECT_ROOT_UNRESOLVED/CHANGED`）** → **邻居 B 不被污染（`rootStatus` ok）**。
+- 归属：该结果由 **W4** 跑出，非本 verifier；合入 dev 后如需最终 HEAD 证据，本 verifier 可再跑一次（约 1 分钟）。
 
 ### 11.6 远端内容搜索：协议级真机证据（旧 helper 回退 + 新 helper 命中）
 
@@ -432,7 +447,7 @@
 
 **未通过 / 未验证（不当作通过）**：
 1. **远端代码文件编辑**：既有 e2e 与当前 UI 交互契约不一致（oracle + `.header-drawer-toggle`），记「未验证（既有 spec 与当前 UI 不一致）」，不改断言。
-2. **remoteHostAcceptance**：**确定性 2/2 失败**在「项目级 root 状态」——截图证明漂移**已被检测**（主内容区 `无法列出目录：SSH_PROJECT_ROOT_UNRESOLVED`），但**侧栏项目行没有「需处理」badge**；定性＝「漂移已检测、侧栏 badge 未更新」的产品侧可见性缺口（或项目列表 rootStatus 未失效），本轮只记录不改产品代码（见 11.5）。
+2. **remoteHostAcceptance**：修复前**确定性 2/2 失败**（漂移已检测但侧栏 badge 未显示）；根因已确认为渲染层 `readRootStatusResponse` 只认扁平形状、main 已迁 Op 信封 ⇒ badge 恒 `unavailable`；task-12 已修（信封优先+扁平兼容）并在 W4 分支真机 **1 passed (56.6s)**，**待合入 dev**（本 verifier 未在合入后的 HEAD 复跑，见 11.5）。
 3. **G6b opt-in soak**、**remoteFunctionalAcceptance**（本轮不做）、其余未列出的远端用例。
 4. **远端内容搜索 UI 端到端未覆盖**（现有 e2e 无入口），只有协议级真机证据。
 
