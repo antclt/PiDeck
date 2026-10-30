@@ -489,24 +489,24 @@ helper 事件与写操作仅标脏、发通知；只有活跃读者决定装载�
 | T6 | ◐ 公共文件读已落地 | 新增 `files:directory-page`（`ProjectDirectoryPage` Op：entries/truncated/revision/generation，2000 上限，本机 hasChildren 精确、远端 `"unknown"`）；本地 `FileSystemService.listTreePage` 截断而不报错；远端目录页复用目录事实缓存并支持 force 刷新；远端 `pathsExist` 走只读 `RemoteWorkspaceReader.statMany`（64/帧；批量全有或全无时退回逐项只读 stat），`files:paths-exist`/`files:stat` 对 ssh 目标改走该入口，不再经过 entry 令牌。 | 新增 `tests/projectFileBackendConformance.test.mjs`（7 例：本地/远端 2000/2001、hasChildren、失败不缓存、128 路径 2 帧、缺失路径、整次失败、显式刷新）；T6 套件 57 pass；`check:ipc-wiring` 绿。**未完成**：Git ignore 修饰（checkIgnore 分批）未接入；本机/远端 read/search/create/rename 未统一；本地 revision 只是每次读递增的计数。 |
 | T7 | ◐ 三个公共入口已落地 | 新增 `git:repository-list`（保留 truncated + revision/generation）、`git:history-page`（本地保留 ref/path/allBranches 与 totalCount，远端 HEAD-only 且过滤器显式 UNSUPPORTED_CAPABILITY）、`git:compare-refs`（本地 merge-base + ahead/behind，远端 trees 不填 0）；preload/previewApi 接线；`GitService.getCommitLog` 支持 skip，新增 `resolveRefOid`。 | 新增 `tests/projectGitBackendConformance.test.mjs`（3 例）；T7 套件 67 pass。**未完成**：公共 target 尚未统一为项目相对（status/workspaceDiff/写面仍按旧契约，避免与 legacy controller 冲突）；detail/diff/compare 文件 target 与 preload 适配未做；写面仍按能力组逐组迁移。 |
 | T8 | ✓ 文件树与 Git 宿主组合已落地 | 新增 `lazyDirTree` 共用内核（按目录代次、迟到结果丢弃、失败清空、显式 refresh 带 force、reveal、事实 scope 只重读已加载目录、连接换代整树重读、dispose 围栏）；远端文件树改用 `files:directory-page` 并消费 `onProjectFactsChanged`（目录 scope），节点使用公共 `target`，`hasChildren` 对远端 "unknown" 映射为可展开；目录页的 `truncated` 进入 `truncatedDirs` 并在面板显式提示（i18n 三语）；`useRemoteGitView` 只在当前仓库 status 标脏时强制重读（`subscribeRemoteGitFacts`）；远端历史改用 `git.historyPage`（`authorTimeMs` 转秒，分页 skip 透传），比较改用 `git.compareRefs`（trees 映射回两端/文件，错配 ref 报 `GIT_RESOURCE_CHANGED`）；仓库选择器优先 `git.repositoryList`（`relativePath` 投影为 scope、保留 `truncated`），旧 `remoteRepos` 仅在 `UNSUPPORTED_CAPABILITY`/缺入口时回退；`remoteLog`/`remoteCompare` 仅作缺少新入口时的迁移期回退；`GitGraph` 的可选写回调缺席时不再显示成功，`commitCount` 缺席时不发请求（F7）。 | 新增 `lazyDirTree`（13 例）、Git 事实订阅（2 例）、历史页消费（3 例）、比较消费（3 例）、仓库列表投影（2 例）、GitGraph 门控（3 例）、自动刷新策略（14 例）、宿主组合（4 例）共 44 例；T8 门禁 158 pass；typecheck 0。**本机文件抽屉已迁 `lazyDirTree`**：逐层 `files:list`（maxDepth 0）、项目键持久化、legacy 绝对路径逐层迁移、refs 事件静默重载、折叠中间包 drill、失败目录 `hasChildren=false` 可重试。**W5-2 第一刀**：GitPanel 的 5 秒 status/focus、refs 推送、5 分钟 auto-fetch 已拆到 `useGitAutoRefresh`；`statusPoll`/`refsWatch`/`autoFetch` 三个能力位关闭时连 effect 都不注册，面板只传能力位不写 backend 分支。**宿主组合**：RemoteGitPanel 复用 `FileTree`/`FileDiffViewer`，事实/飞行状态只由 `useRemoteGitView` 持有；history/compare/trust/init/sync 作为远端专属区块保留（语义与授权不同，不强行合并）。隐藏/收起态退订由实际卸载/有界轮询保证。 |
-| T9 | ◐ sessions 结果面已迁 Op；验收进行中 | `remoteSessionIpc` 的 scan/title/register 改为 `Op<T>`（成功 value、失败带 outcome），preload 类型同步；renderer 的 `readScanResponse`/`readRegisterResponse`/`readTitleResponse` 在迁移期同时接受 Op 与旧扁平形状；scanner 内部与 R1a 传输/JSONL 未改。相关 IPC 断言按 T9 范围迁到新信封（行为断言保留）。 | T9 套件 162 pass；`npm test` **14180 pass / 20 fail**；失败项仍为基线既有类别，新增项单独复跑通过；定向 T8 门禁 158/158。（跳过项均为无真机/环境门禁，不计通过）；typecheck 0；`check:ipc-wiring` 786 通道。**兼容壳清点**：renderer 仍消费 `remoteSnapshot`/`refreshRemoteSnapshot`（快照事实源）；`remoteRepos`/`remoteLog`/`remoteCompare`/`listProject` 仅作迁移期回退；`git.repositoryList`/`git.historyPage`/`git.compareRefs` 已由远端 Git 面板消费；本机文件树已由 `lazyDirTree` 独占 expanded/children；`GitPanel`/`RemoteGitPanel` 仍分离。§4.2 对照审计已落到 §10.8；**未完成**：兼容壳最终清点；Git、文件管理与代码文件真机验收均已通过，soak 为环境 skip。本地 Git E2E `e2e/git-panel.spec.ts` 1/1 通过。真机 SSH：主机可连；验收脚本适配当前设置页后，**远端 Git 10 项全部通过**（G1/G2/G3a/G3b/G4a/G4b/G5a/G5b/G5c/G5d-G5e，7.3 分钟），G6b soak 1 项 skip（Linux-only）。远端文件管理 v1 真机通过（56.7s：新建/改名/跨目录移动/删除/回收站还原/清空/同名再建）；期间修复远端文件树行键（projectFileKey→controller 相对键）并补根目录按钮。远端代码文件验收通过（UI 保存/外部冲突草稿/双项目同名隔离/断开保草稿/Agent 真实 `node test.cjs`）；切换项目后的首读会短暂遇到 `SSH_HOST_NOT_READY`，已加有界退避重试（`remoteDirectoryPageRetry`），不再把瞬态画成“需要连接”。 |
+| T9 | ✓ sessions 结果面已迁 Op；真机验收与兼容壳清点完成 | `remoteSessionIpc` 的 scan/title/register 改为 `Op<T>`（成功 value、失败带 outcome），preload 类型同步；renderer 的 `readScanResponse`/`readRegisterResponse`/`readTitleResponse` 在迁移期同时接受 Op 与旧扁平形状；scanner 内部与 R1a 传输/JSONL 未改。相关 IPC 断言按 T9 范围迁到新信封（行为断言保留）。 | T9 套件 162 pass；`npm test` **14485 tests / 14180 pass / 20 fail**；失败项仍为基线既有类别，新增项单独复跑通过；定向 T8 门禁 158/158。（跳过项均为无真机/环境门禁，不计通过）；typecheck 0；`check:ipc-wiring` 786 通道。**兼容壳清点**：renderer 仍消费 `remoteSnapshot`/`refreshRemoteSnapshot`（快照事实源）；`remoteRepos`/`remoteLog`/`remoteCompare` 各保留一版回退（当前装配不可达）；`listProject` 无生产消费者；`git.repositoryList`/`git.historyPage`/`git.compareRefs` 已由远端 Git 面板消费；本机文件树已由 `lazyDirTree` 独占 expanded/children；`GitPanel`/`RemoteGitPanel` 仍分离。§4.2 对照审计已落到 §10.8；兼容壳清点见 §10.8：`remoteRepos`/`remoteLog`/`remoteCompare` 各保留一版回退，当前装配不可达；`listProject` 无生产消费者；`remoteSnapshot`/`remoteRefs`/`remoteCommitDetail`/`remoteRefFileDiff` 是领域事实 owner，不是第二套壳。Git、文件管理与代码文件真机验收均已通过，soak 为环境 skip。本地 Git E2E `e2e/git-panel.spec.ts` 1/1 通过。真机 SSH：主机可连；验收脚本适配当前设置页后，**远端 Git 10 项全部通过**（G1/G2/G3a/G3b/G4a/G4b/G5a/G5b/G5c/G5d-G5e，7.3 分钟），G6b soak 1 项 skip（Linux-only）。远端文件管理 v1 真机通过（56.7s：新建/改名/跨目录移动/删除/回收站还原/清空/同名再建）；期间修复远端文件树行键（projectFileKey→controller 相对键）并补根目录按钮。远端代码文件验收通过（UI 保存/外部冲突草稿/双项目同名隔离/断开保草稿/Agent 真实 `node test.cjs`）；切换项目后的首读会短暂遇到 `SSH_HOST_NOT_READY`，已加有界退避重试（`remoteDirectoryPageRetry`），不再把瞬态画成“需要连接”。 |
 
-**本轮（T6–T9 部分）验证汇总**：T6 套件 57 pass；T7 套件 67 pass；T8 门禁 158 pass（`lazyDirTree` 13 例、Git 事实订阅 2 例、历史页消费 3 例、比较消费 3 例、仓库列表投影 2 例、GitGraph 门控 3 例、自动刷新策略 14 例、宿主组合 4 例）；T9 套件 162 pass；`npm test` **14180 pass / 20 fail**（均为基线既有类别）；`npm run typecheck` 退出码 0；`check:ipc-wiring` 786 通道齐备；本地 Git E2E 1/1 通过。真机 SSH：远端 Git 10/10、远端文件管理 v1、远端代码文件全流程（含 Agent 真实运行）均通过；G6b soak 为 Linux-only skip。
+**本轮（T6–T9 部分）验证汇总**：T6 套件 57 pass；T7 套件 67 pass；T8 门禁 158 pass（`lazyDirTree` 13 例、Git 事实订阅 2 例、历史页消费 3 例、比较消费 3 例、仓库列表投影 2 例、GitGraph 门控 3 例、自动刷新策略 14 例、宿主组合 4 例）；T9 套件 162 pass；`npm test` **14485 tests / 14180 pass / 20 fail**（均为基线既有类别）；`npm run typecheck` 退出码 0；`check:ipc-wiring` 786 通道齐备；本地 Git E2E 1/1 通过。真机 SSH：远端 Git 10/10、远端文件管理 v1、远端代码文件全流程（含 Agent 真实运行）均通过；G6b soak 为 Linux-only skip。
 
-**本轮验证汇总**：T1 套件 30 pass；T2 套件 37 pass；T3 套件 45 pass + 22 skip；T4 套件 31 pass + `check:ipc-wiring`；T5 套件 34 pass；renderer/宿主/信封相关 158 pass；`npm run typecheck` 退出码 0。未执行全量 `npm test`、全量 build、E2E 或 SSH 真机。
+**T1–T5 卡完成时验证汇总（阶段性记录；最终验收见上）**：T1 套件 30 pass；T2 套件 37 pass；T3 套件 45 pass + 22 skip；T4 套件 31 pass + `check:ipc-wiring`；T5 套件 34 pass；renderer/宿主/信封相关 158 pass；`npm run typecheck` 退出码 0。该阶段未执行全量 `npm test`、全量 build、E2E 或 SSH 真机。
 
-### 10.8 T9 §4.2 对照审计（滚动更新）
+### 10.8 T9 §4.2 对照审计与兼容壳清点
 
-状态口径：✓ 表示有单元/源码证据且未发现行为回退；◐ 表示新路径已接但仍有共用 owner 或宿主未迁移；✗ 表示仍未迁移。所有 ✓/◐ 都未在真机 SSH 上验证。
+状态口径：✓ = 生产消费者已走公共入口/单一领域 owner，且未发现行为回退；◐ = 入口已接但仍有明确保留的领域专属路径（无公共替身，不是重复 owner）；✗ = 未接。真机 SSH 已按 T9 验收执行：远端 Git 10/10、文件管理 v1、代码文件全流程均通过；仅 G6b soak 为 Linux-only skip。
 
 | §4.2 能力 | 现状与证据 | 状态 |
 |---|---|---|
-| 仓库发现与 scope | 远端选择器优先 `git:repository-list`（truncated/relativePath），旧 `remoteRepos` 回退；嵌套 scope 保留；本机多仓面板未动 | ◐ |
-| 文件身份与 workspace diff | 公共 target 已用于文件树/目录页；远端 status/workspaceDiff 仍按仓库内路径返回，`openDiff` 未接项目相对适配 | ✗ |
-| status / refresh | T1–T4 的边界/围栏/显式 refresh/通知已在单测覆盖；远端面板消费 status 通知强制重读 | ✓ |
-| history / count / graph | 远端历史已走 `git:history-page`（HEAD-only、hasMore）；count/graph 仍是本机专属，远端不显示也不调用 | ◐ |
-| commit detail / file diff | 现有 remoteCommitDetail/remoteRefFileDiff 保留；尚未迁到公共 detail/diff target | ◐ |
-| refs / compare | 远端 refs 仍用旧入口但带 repo scope；compare 已消费 `git:compare-refs`，merge-base/trees 显式区分，不填 ahead/behind | ◐ |
+| 仓库发现与 scope | 远端选择器优先 `git:repository-list`（truncated/relativePath）；旧 `remoteRepos` 只在 invoke 拒绝或 `UNSUPPORTED_CAPABILITY` 时回退，当前装配的 `repositoryListing` 两者都不产生；嵌套 scope 保留；本机多仓面板未动 | ✓ |
+| 文件身份与 workspace diff | `RemoteGitService.status` 为每个资源生成公共 `target`；`openDiff` 原样把 `target` + 项目相对 repo scope 传给 `git.workspaceFileDiff`，main 端 `workspaceDiff` 再按 target 校验并返回同一 `ProjectFileTarget`；没有“有前缀就剥”的猜测 | ✓ |
+| status / refresh | T1–T4 的边界/围栏/显式 refresh/通知已在单测覆盖；远端面板消费 status 通知强制重读；暖事实命中仍逐次校验同代连接 | ✓ |
+| history / count / graph | 远端历史走 `git:history-page`（HEAD-only、hasMore）；count/graph 是远端不提供的能力，`GitGraph` 缺席回调不显示成功、`commitCount` 缺席不发请求（F7）；不是“已接但没迁” | ✓ |
+| commit detail / file diff | `remoteCommitDetail` / `remoteRefFileDiff` 保留为领域专属入口：前者按 commit 读详情，后者接收 `ProjectFileTarget` + repo scope 并由 `RemoteGitService` 返回 target；没有公共 detail 入口，也没有第二套路径/缓存。T7 未要求新增公共 detail/diff 入口 | ✓ |
+| refs / compare | refs 只有 `remoteRefs` 一个领域入口（带 repo scope）；compare 消费 `git:compare-refs`，mode/trees 显式、不填 ahead/behind；两者不共享可变状态 | ✓ |
 | stage / unstage / discard | 远端仍单文件 + 单次 token；批量/目录/smart commit 未开放；本地能力未动 | ✓ |
 | discard / delete | recoveryRef 与恢复清单保留；未把删除映射成还原 | ✓ |
 | createBranch / checkout | 远端“仅创建”与独立 switch 保留，不追加隐式 checkout | ✓ |
@@ -514,9 +514,31 @@ helper 事件与写操作仅标脏、发通知；只有活跃读者决定装载�
 | sync | 显式 fetch/push/pull、确认与 outcome 保留；未加后台自动网络写 | ✓ |
 | trust / recovery / init / 断连 | T2/T3/T4 的会话身份、缓存 fence、断连换代与既有 trust/init 区块保留 | ✓ |
 | 高级写 / refs watch | 远端仍无 cherryPick/revert/reset/dropCommit；`GitGraph` 缺席回调不再显示成功、count 缺席不调用（F7）；refs 只读轮询受可见性/host 状态约束 | ✓ |
-| 文件树 | 本机/远端已共用 `lazyDirTree`：逐层 target 读取、项目键持久化、legacy 迁移、refs 静默重载、失败重试；本地 E2E 渲染预算通过 | ✓ |
+| 文件树 | 本机/远端已共用 `lazyDirTree`：逐层 target 读取、项目键持久化、legacy 迁移、refs 静默重载、失败重试；远端首读遇切换项目瞬态有有界重试（`remoteDirectoryPageRetry`）；本地 E2E 渲染预算通过 | ✓ |
 | Git 宿主/展示 | 自动刷新策略已拆到 `useGitAutoRefresh`（能力位控制三个 effect）；远端复用共用变更树/diff，事实由 `useRemoteGitView` 独占，history/compare/trust/init/sync 为真实远端专属区块 | ✓ |
 
-**审计结论**：T1–T5 的主进程事实层、T6/T7 的公共读入口、T8 的两棵树共用内核与 Git 宿主组合、T9 的 sessions 信封已落地；本机/远端各有一个事实 owner（GitPanel 状态机 / `useRemoteGitView`），共用的是变更树、diff、文件树与自动刷新策略，不把语义不同的 history/compare/trust/init/sync 强行合并。真机 SSH 项仍未验证，不能以单测替代。
+#### 兼容壳与旧业务调用清点
 
+“当前装配可达”指正式构建的 preload + main 组合；只有旧 main/旧 preload 才可能走到回退，不等于旧入口仍在生产使用。
 
+| 入口 | 生产调用/用途 | 兼容触发 | 当前装配可达 | 结论 |
+|---|---|---|---|---|
+| `files.directoryPage` / `files:directory-page` | `useRemoteFileTree`（本机树仍走 `files:list`） | — | 是 | 公共目录读，远端树唯一入口 |
+| `git.repositoryList` / `git:repository-list` | `useRemoteGitRepos` | `remoteRepos` 在 invoke 拒绝（旧 main 缺通道）或结果码为 `UNSUPPORTED_CAPABILITY` 时回退；普通失败不回退 | 否 | 保留一版兼容；当前 main 两者都不产生 |
+| `git.historyPage` / `git:history-page` | `remoteGitViewState.readHistoryPage` | `remoteLog` 仅当 `historyPage` 方法不存在时回退 | 否 | 保留一版兼容；preload 始终有现值 |
+| `git.compareRefs` / `git:compare-refs` | `remoteGitViewState.runCompare` | `remoteCompare` 仅当 `compareRefs` 方法不存在时回退 | 否 | 保留一版兼容；preload 始终有现值 |
+| `remoteSnapshot` / `refreshRemoteSnapshot` | 远端 Git 面板 status/refresh | — | 是 | **活动事实 owner**（`RemoteGitSnapshotFacts`），不是兼容壳 |
+| `remoteRefs` | 远端 refs 列表 | — | 是 | 领域入口；无公共 refs 替身，不另建缓存 |
+| `remoteCommitDetail` / `remoteRefFileDiff` | 远端详情/逐文件 diff | — | 是 | 领域入口；file diff 已消费公共 target/repo scope |
+| `remoteProjectList` / `listProject` | 无 renderer 生产消费者 | — | 否 | 旧目录列表适配器；保留一版，候选后续删除 |
+| `files:list` 的远端 target 分支 | 无 renderer 生产消费者（本机树只用本机 target） | — | 否 | 与 `directoryPage` 共用同一目录事实；保留一版 |
+| `openProjectText` / `saveProjectText` / `readProjectFile` | 远端文本编辑器/图片预览 | — | 是 | 领域文本/图片读写；未迁公共 files 写面，不与目录树重复 |
+| `searchProject` / 条目 stat/create/rename/delete/trash/upload | 远端文件管理面板 | — | 是 | 远端文件写/管理领域入口；T6 未要求迁到公共写面 |
+
+**审计结论**
+
+- T1–T5 的主进程事实层、T6/T7 的公共读入口、T8 的两棵树共用内核与 Git 宿主组合、T9 的 sessions 信封与真机验收已收口。
+- 没有第二份目录事实缓存：`remoteProjectList` 与 `directoryPage` 都经同一 `readDirSnapshot` / `FactCache`；`remoteRepos`/`remoteLog`/`remoteCompare` 都委托同一 `RemoteGitService`，不建旁路缓存或业务分支。
+- 本机与远端各保留一个展示事实 owner：本机 `GitPanel` 状态机 / 远端 `useRemoteGitView`；共用的是变更树、diff、`lazyDirTree` 与 `useGitAutoRefresh`。history/compare/trust/init/sync 语义和授权不同，继续作为真实远端专属区块保留。
+- 兼容壳按 W4 只保留一版，不宣称通道数减少；`remoteRepos`/`remoteLog`/`remoteCompare` 的触发条件已在本表固定，新增调用不得重新引入第二事实源。`listProject` 无消费者，登记为后续清理候选而不是继续扩展。
+- 能力边界不是迁移欠账：远端不提供 count/graph、批量/目录写与后台 fetch；这些由 F7 门控或面板不渲染，不能以“补齐”为名放宽授权或伪造结果。
