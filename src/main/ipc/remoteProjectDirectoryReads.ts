@@ -5,16 +5,36 @@
  */
 
 import { codeOf, opFailFromCode, opOk } from "../../shared/op";
-import type { ProjectDirectoryPageResult, ProjectPathState, ProjectPathsExistResult } from "../../shared/types/projectFiles";
+import type { ProjectDirectoryPageResult, ProjectDirectoryWatchDegradation, ProjectPathState, ProjectPathsExistResult } from "../../shared/types/projectFiles";
 import type { RemoteProjectTargetResolver } from "./remoteProjectTarget";
 import { readRelativePath, readerPath, sessionPort, type RemoteProjectDirSnapshot } from "./remoteProjectReadIpc";
 import { createRemoteWorkspaceReader } from "../remote/RemoteWorkspaceReader";
 
-export function projectDirectoryPage(input: { projectId: string; path: string; force: boolean; readDirSnapshot: (projectId: string, relative: string, force: boolean) => Promise<RemoteProjectDirSnapshot>; generationOf: (projectId: string) => string }): Promise<ProjectDirectoryPageResult> {
+/**
+ * 深层 watch 状态 → 页面字段。
+ *
+ * 只投影「确实降级」的状态：路径列表留在主进程，页面只需要原因与计数。
+ * 未降级返回 undefined，页面就完全不带这个字段（旧渲染层/旧缓存不会看到新形状）。
+ */
+export function projectDirectoryWatchDegradation(status: { degraded?: { reason: ProjectDirectoryWatchDegradation["reason"]; desired: number; covered: number; dropped: number } }): ProjectDirectoryWatchDegradation | undefined {
+	const degraded = status.degraded;
+	return degraded === undefined ? undefined : { degraded: true, reason: degraded.reason, desired: degraded.desired, covered: degraded.covered, dropped: degraded.dropped };
+}
+
+export function projectDirectoryPage(input: {
+	projectId: string;
+	path: string;
+	force: boolean;
+	readDirSnapshot: (projectId: string, relative: string, force: boolean) => Promise<RemoteProjectDirSnapshot>;
+	generationOf: (projectId: string) => string;
+	/** 目录页是渲染层知道「监听降级」的唯一通道；未装配时页面形状保持旧样。 */
+	dirWatch?: (projectId: string) => ProjectDirectoryWatchDegradation | undefined;
+}): Promise<ProjectDirectoryPageResult> {
 	const relative = readRelativePath(input.path);
 	if (relative === undefined) return Promise.resolve(opFailFromCode("REMOTE_PROJECT_PATH_INVALID"));
 	return input.readDirSnapshot(input.projectId, relative, input.force).then((read) => {
 		if (!read.ok) return opFailFromCode(read.code);
+		const dirWatch = input.dirWatch?.(input.projectId);
 		const prefix = relative === "" ? "" : relative + "/";
 		const entries = read.snapshot.value
 			.filter((entry) => entry.kind === "file" || entry.kind === "directory")
@@ -25,7 +45,7 @@ export function projectDirectoryPage(input: { projectId: string; path: string; f
 				// helper 的 fs.list 不逐项探测：远端只能是 unknown，不能伪装成“没有子项”。
 				hasChildren: (entry.kind === "directory" ? "unknown" : false) as boolean | "unknown",
 			}));
-		return opOk({ entries: entries.slice(0, 2000), truncated: entries.length > 2000, revision: read.snapshot.revision, generation: input.generationOf(input.projectId) });
+		return opOk({ entries: entries.slice(0, 2000), truncated: entries.length > 2000, revision: read.snapshot.revision, generation: input.generationOf(input.projectId), ...(dirWatch === undefined ? {} : { dirWatch }) });
 	});
 }
 

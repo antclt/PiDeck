@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: c5fda77bb91f3085dfd6e58a4fbdf03d79380ae3fce6473c1b2c33d861791e28（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 24f8e8c3ab30eb369391c0f78498b4f241c9b91b1d4f86db45cd4e1eea8f1449（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4472,6 +4472,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"project.remote.requestFailed": "遠端請求失敗，請重試；若仍失敗，請在裝置設定裡檢查這臺主機的連線。",
 	"project.remote.empty": "這個目錄是空的。",
 	"project.remote.directoryTruncated": "目錄專案過多，僅顯示前 2000 項。",
+	"project.remote.dirWatchDegraded": "目錄監聽已降級：期望監聽 {desired} 個目錄，實際覆蓋 {covered} 個，{dropped} 個目錄需要手動重新整理。",
 	"project.remote.binary": "（二進位制內容，無法以文本預覽）",
 	"project.remote.linkNotFollowed": "符號連結（不跟隨）",
 	"project.remote.searchPlaceholder": "搜尋檔名",
@@ -6857,7 +6858,6 @@ export const zhTW: Record<TranslationKey, string> = {
 	"remoteGit.trustEffect": "此決定允許 PiDeck 讀取該遠端倉庫，也會在下次啟動 pi 時允許此專案的 .pi 資源（擴充套件、技能、提示詞和專案設定）。不授予 Git hooks/filter 執行權限；請只信任你核實過的目錄。",
 	"remoteGit.trustApprove": "信任此專案及其 .pi 資源",
 	"remoteGit.trustFailed": "未能儲存專案授權。本次未讀取 Git，請檢查主機連線後重試明確授權。",
-	"remoteGit.title": "遠端 Git（只讀）",
 	"remoteGit.refresh": "重新整理遠端 Git",
 	"remoteGit.repoScope": "倉庫範圍",
 	"remoteGit.repoScopeRoot": "專案根",
@@ -6924,7 +6924,6 @@ export const zhTW: Record<TranslationKey, string> = {
 	"remoteGit.recoveryRestored": "已還原 {path}（內容為丟棄前原樣）。",
 	"remoteGit.recoveryDropped": "已刪除 {path} 的快照。",
 	"remoteGit.syncLoading": "正在讀取遠端同步資訊…",
-	"remoteGit.syncTitle": "同步",
 	"remoteGit.syncFetch": "獲取",
 	"remoteGit.syncPush": "推送",
 	"remoteGit.syncPull": "拉取",
@@ -7243,6 +7242,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.target.wslHint": "讀寫均落在該發行版的 HOME（.pi/agent），不回退本機",
 	"config.target.wslSource": "當前編輯：{label} 的發行版 HOME（.pi/agent）",
 	"config.target.wslProviderOps": "連線測試 / 拉取模型 / 用量查詢僅對本機目標可用",
+	"config.target.exportLocalOnly": "匯出/匯入只支援本機配置目標：先切回本機再操作",
+	"config.resourceTarget.readOnly": "該資源目標本輪只讀：僅支援檢視列表與提示詞讀取/儲存，切回本機後再編輯技能/擴充套件",
+	"config.resourceTarget.readOnlyHint": "當前顯示的是該 WSL 檔案發行版 HOME 下的資源；技能/擴充套件的寫入與提示詞新建/刪除/重新命名/開關暫只支援本機",
 	"config.target.wslUnsupported": "{label} 的這部分配置暫未接入 WSL：本頁只支援 models.json 與 settings.json，切回本機可繼續編輯",
 	"config.windowsOnly.title": "當前僅編輯 Windows 配置",
 	"config.windowsOnly.body": "WSL 發行版配置暫未接入：本頁只讀寫本機（Windows）的{page}，不會改動 WSL 檔案內的內容。",

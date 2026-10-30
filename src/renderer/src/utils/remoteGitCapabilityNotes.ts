@@ -31,6 +31,8 @@ export function shouldShowRemoteGitCapabilityNote(kind: RemoteGitCapabilityNoteK
 		case "repoScope":
 			return (context.repoCount ?? 0) > 1;
 		case "compare":
+			// 真实语义优先：mode 来自 compareRefs 答案（remoteGitViewState 透传）。未填 = 旧的 remoteCompare
+			// 兼容壳或还没得到答案，远端那条路本来就是两树比较，仍按 trees-only 说明。
 			return context.compareOpen === true && context.compareMode !== "merge-base";
 	}
 }

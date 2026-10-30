@@ -5,6 +5,10 @@ import type { RemoteEntryKind } from "../../../../shared/types/remoteFiles";
 import { desktopApi } from "../../desktopApi";
 import { useRemoteProjectEntries } from "../../hooks/useRemoteProjectEntries";
 import { useRemoteProjectSearch, REMOTE_SEARCH_UNWIRED_CODE } from "../../hooks/useRemoteProjectSearch";
+import { useRemoteContentSearch, useRemoteProjectContentSearchCapability } from "../../hooks/useRemoteContentSearch";
+import { shouldShowFileNameOnlyHint } from "../../utils/fileSearchCapability";
+import { FileContentSection } from "./FileSearchResults";
+import { RemoteDirWatchDegradedHint } from "../workspace/RemoteDirWatchDegradedHint";
 import { useRemoteProjectTransfer } from "../../hooks/useRemoteProjectTransfer";
 import { moveDestination, remoteDropOnBlankArea, remoteDropRoute, REMOTE_ENTRY_DRAG_TYPE } from "../../utils/remoteEntryDrag";
 import { t } from "../../i18n";
@@ -50,6 +54,10 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 	const gateRef = useRef(createRequestGate());
 	/** 搜索状态机（自带代次闸门）；切项目由 hook 负责作废旧结果。 */
 	const { state: search, run: runSearch, reset: resetSearch } = useRemoteProjectSearch(desktopApi, props.projectId);
+	// 能力只来自连接 hello（rootStatus.helperCapabilities）；树根读完=session 已建立，此刻问才不会凭空建连。
+	// 旧 helper 的清单里没有 fs.searchContent ⇒ contentSupported=false ⇒ 继续只做文件名搜索并显示能力提示。
+	const contentSupported = useRemoteProjectContentSearchCapability(props.projectId, tree.listed);
+	const contentSearch = useRemoteContentSearch({ projectId: props.projectId, supported: contentSupported });
 
 	useEffect(
 		() => () => {
@@ -243,6 +251,7 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 								setSearchOpen((open) => {
 									if (open) {
 										resetSearch();
+										contentSearch.reset();
 										setQuery("");
 									}
 									return !open;
@@ -265,9 +274,14 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 					query={query}
 					busy={busy}
 					onQueryChange={setQuery}
-					onSubmit={() => void runSearch(query)}
+					onSubmit={() => {
+						void runSearch(query);
+						// 名字搜索与内容搜索同一次提交、同一查询：先到的名字结果照常先渲染，内容命中稍后补上。
+						void contentSearch.run(query);
+					}}
 					onClose={() => {
 						resetSearch();
+						contentSearch.reset();
 						setQuery("");
 						setSearchOpen(false);
 					}}
@@ -291,6 +305,8 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 							{t("project.remote.directoryTruncated")}
 						</p>
 					) : null}
+					{/* W3 深层 watch 降级提示：预算不够时目录仍可读但不会实时刷新，必须显式说明覆盖缺口。 */}
+					<RemoteDirWatchDegradedHint dirWatch={tree.dirWatch} />
 					{tree.nodes.map((node) => (
 						<FileTreeNodeRow
 							key={fileTreeNodeKey(node)}
@@ -354,6 +370,27 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 								))}
 							</ul>
 						</>
+					) : null}
+					{contentSupported ? (
+						<FileContentSection
+							query={query.trim()}
+							result={contentSearch.results}
+							isSearching={contentSearch.isSearching}
+							onViewFile={(path) => {
+								// 远端正文命中的 path 是项目相对路径：与名字搜索结果走同一个编辑器入口。
+								resetSearch();
+								contentSearch.reset();
+								setQuery("");
+								gateRef.current.invalidate();
+								setError(null);
+								setFile({ projectId: props.projectId, path });
+							}}
+							onFileContextMenu={(node, x, y) => setRowMenu({ node: { name: node.name, path: node.path, relativePath: node.relativePath, type: "file" }, x, y })}
+						/>
+					) : shouldShowFileNameOnlyHint({ contentSearchSupported: contentSupported, query }) ? (
+						<p data-testid="file-search-name-only-hint" className="px-2 py-1 text-label text-muted-foreground">
+							{t("drawer.fileSearchNameOnlyHint")}
+						</p>
 					) : null}
 				</div>
 			)}

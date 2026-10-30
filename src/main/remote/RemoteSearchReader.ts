@@ -24,7 +24,23 @@
  * 非法即 `QUERY_INVALID`，一个字节都不发出去。
  */
 
-import { REMOTE_HELPER_MAX_HOST_ID_LENGTH, REMOTE_HELPER_MAX_PATH_LENGTH, REMOTE_HELPER_MAX_SEARCH_MATCHES, REMOTE_HELPER_MAX_SEARCH_QUERY_LENGTH, REMOTE_HELPER_MAX_SEARCH_SCANNED, REMOTE_HELPER_METHOD_FS_SEARCH_NAMES, type RemoteHelperPathKind, type RemoteHelperSearchEntry } from "./RemoteHelperContract";
+import {
+	REMOTE_HELPER_MAX_CONTENT_MATCHES,
+	REMOTE_HELPER_MAX_CONTENT_SCANNED_BYTES,
+	REMOTE_HELPER_MAX_CONTENT_SCANNED_FILES,
+	REMOTE_HELPER_MAX_CONTENT_SNIPPET_LENGTH,
+	REMOTE_HELPER_MAX_HOST_ID_LENGTH,
+	REMOTE_HELPER_MAX_PATH_LENGTH,
+	REMOTE_HELPER_MAX_SEARCH_MATCHES,
+	REMOTE_HELPER_MAX_SEARCH_QUERY_LENGTH,
+	REMOTE_HELPER_MAX_SEARCH_SCANNED,
+	REMOTE_HELPER_METHOD_FS_SEARCH_CONTENT,
+	REMOTE_HELPER_METHOD_FS_SEARCH_NAMES,
+	type RemoteHelperPathKind,
+	type RemoteHelperSearchContentMatch,
+	type RemoteHelperSearchContentReason,
+	type RemoteHelperSearchEntry,
+} from "./RemoteHelperContract";
 import { REMOTE_WORKSPACE_READER_CODES, RemoteWorkspaceError } from "./RemoteWorkspaceReader";
 
 /** 本 reader 用到的稳定码；除 `QUERY_INVALID`（query 专用）外全部沿用既有词汇。 */
@@ -57,6 +73,12 @@ export type RemoteSearchPortRequestOptions = {
  */
 export type RemoteSearchPort = {
 	request: (hostId: string, method: string, params?: unknown, options?: RemoteSearchPortRequestOptions) => Promise<unknown>;
+	/**
+	 * Withdraw a running request by the id `onRequestId` reported; optional because a transport that cannot
+	 * cancel simply lets a bounded walk finish. Content search uses it to turn an AbortSignal into the
+	 * helper's own REQUEST_CANCELLED instead of waiting out the time budget.
+	 */
+	cancel?: (hostId: string, requestId: string, options?: { timeoutMs?: number }) => Promise<unknown>;
 };
 
 /** 单次搜索的可选参数。 */
@@ -76,6 +98,22 @@ export type RemoteSearchResult = {
 	scanned: number;
 	truncated: boolean;
 };
+
+/** 一条重建后的内容命中：行号 1 起、列号 0 起、预览是同一行的有界切片（绝不回传文件正文）。 */
+export type RemoteSearchContentMatch = RemoteHelperSearchContentMatch;
+
+/** 一次通过的内容搜索：计数描述**真实做过的工作**；`reason` 只在 `truncated` 时出现。 */
+export type RemoteSearchContentResult = {
+	matches: RemoteSearchContentMatch[];
+	matchedFiles: number;
+	scannedFiles: number;
+	scannedBytes: number;
+	truncated: boolean;
+	reason?: RemoteHelperSearchContentReason;
+};
+
+/** 内容搜索调用参数：除搜索通用项外，`signal` 取消会转成一次 helper cancel（不等待时限）。 */
+export type RemoteSearchContentCallOptions = RemoteSearchCallOptions & { signal?: AbortSignal };
 
 /** 脱敏诊断：闭集身份 + 一个稳定码，绝不携带内容。 */
 export type RemoteSearchReaderDiagnostic = {
@@ -97,6 +135,12 @@ export type RemoteSearchReader = {
 	 * 超过 512 条匹配被拒绝而不是截断；真实截断由 `truncated` 如实表达。
 	 */
 	search(hostId: string, path: string, query: string, options?: RemoteSearchCallOptions): Promise<RemoteSearchResult>;
+	/**
+	 * 在 `path` 下按行做有界内容搜索。匹配数超过契约上限是 `RESULT_TOO_LARGE`（helper 自己不会超过，
+	 * 对端越界即违约）；真正的上限截断由 `truncated` 与 `reason` 如实表达。`signal` 取消会转成 helper
+	 * 的 cancel 请求，因此取消是一次正常结算，而不是等超时。
+	 */
+	searchContent(hostId: string, path: string, query: string, options?: RemoteSearchContentCallOptions): Promise<RemoteSearchContentResult>;
 };
 
 /** 一个码就是一个码，绝不是自由文本。 */
@@ -109,6 +153,14 @@ const RETRYABLE_CODES = new Set<string>(["REQUEST_TIMEOUT", "REMOTE_CONNECTION_L
 const RESULT_FIELDS = ["entries", "scanned", "truncated"] as const;
 const ENTRY_FIELDS = ["path", "name", "kind"] as const;
 const ENTRY_FILE_FIELDS = ["path", "name", "kind", "bytes"] as const;
+/** 内容搜索契约字段集：结果与命中都精确匹配，`reason` 是唯一可选字段。 */
+const CONTENT_RESULT_FIELDS = ["matches", "matchedFiles", "scannedFiles", "scannedBytes", "truncated"] as const;
+const CONTENT_RESULT_FIELDS_WITH_REASON = [...CONTENT_RESULT_FIELDS, "reason"] as const;
+const CONTENT_MATCH_FIELDS = ["path", "name", "line", "column", "snippet"] as const;
+/** 契约的 reason 闭集；一个没见过的值就是对端违约，不转述。 */
+const CONTENT_REASONS: ReadonlySet<string> = new Set(["matches", "files", "bytes", "time", "depth", "file-size"]);
+/** 预览里不允许出现换行/NUL 等控制字节（制表符除外）：它不是文件正文的通道。 */
+const SNIPPET_CONTROL = /[\u0000-\u0008\u000a-\u001f\u007f]/;
 /** 盘符形态的首段（`C:`）：相对 POSIX 路径里没有它，出现即拒绝。 */
 const DRIVE_PREFIX = /^[A-Za-z]:$/;
 
@@ -130,6 +182,11 @@ function hasExactFields(record: Record<string, unknown>, fields: readonly string
 /** 计数：契约只携带安全非负整数。 */
 function isCount(value: unknown): value is number {
 	return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+/** 取消判据放进函数：调用点不因控制流收窄而漏掉「请求期间被 abort」的可能性。 */
+function isAborted(signal: AbortSignal | undefined): boolean {
+	return signal !== undefined && signal.aborted === true;
 }
 
 function readPathKind(value: unknown): RemoteHelperPathKind | undefined {
@@ -248,9 +305,21 @@ function readCallOptions(value: unknown): CallOptionsRead {
 	return { ok: true, timeoutMs, maxMatches: Math.min(rawMax, REMOTE_HELPER_MAX_SEARCH_MATCHES) };
 }
 
+/** 内容搜索的 maxMatches 钳到内容上限（不是名字搜索的 512）：悄悄放大成更大的值会让请求看起来成功。 */
+function readContentCallOptions(value: unknown): CallOptionsRead {
+	if (value === undefined) return { ok: true, timeoutMs: undefined, maxMatches: undefined };
+	if (!isRecord(value)) return { ok: false };
+	const timeout = value.timeoutMs;
+	const timeoutMs = typeof timeout === "number" && Number.isFinite(timeout) && timeout > 0 ? Math.floor(timeout) : undefined;
+	const rawMax = value.maxMatches;
+	if (rawMax === undefined) return { ok: true, timeoutMs, maxMatches: undefined };
+	if (typeof rawMax !== "number" || !Number.isSafeInteger(rawMax) || rawMax < 1) return { ok: false };
+	return { ok: true, timeoutMs, maxMatches: Math.min(rawMax, REMOTE_HELPER_MAX_CONTENT_MATCHES) };
+}
+
 export function createRemoteSearchReader(options: RemoteSearchReaderOptions): RemoteSearchReader {
 	if (!isRemoteSearchReaderOptions(options)) throw new RemoteWorkspaceError(REMOTE_SEARCH_READER_CODES.optionsInvalid, false);
-	const { request } = options.port;
+	const { request, cancel } = options.port;
 	const onDiagnostic = options.onDiagnostic;
 
 	/** 脱敏、尽力而为的可观测性：坏观察者不能弄坏一次调用或一次结算。 */
@@ -298,6 +367,61 @@ export function createRemoteSearchReader(options: RemoteSearchReaderOptions): Re
 		return { entries, scanned, truncated };
 	}
 
+	/** 一条内容命中：路径规则与 `fs.searchNames` 完全一致，行/列/预览再各自有界。 */
+	function readContentMatch(value: unknown): RemoteSearchContentMatch | undefined {
+		if (!isRecord(value) || !hasExactFields(value, CONTENT_MATCH_FIELDS)) return undefined;
+		const path = value.path;
+		if (typeof path !== "string" || !isRelativePosixPath(path)) return undefined;
+		const name = value.name;
+		if (typeof name !== "string" || !isEntryName(name)) return undefined;
+		if (path !== name && !path.endsWith("/" + name)) return undefined;
+		const line = value.line;
+		if (typeof line !== "number" || !Number.isSafeInteger(line) || line < 1) return undefined;
+		const column = value.column;
+		if (typeof column !== "number" || !Number.isSafeInteger(column) || column < 0) return undefined;
+		const snippet = value.snippet;
+		if (typeof snippet !== "string" || snippet.length > REMOTE_HELPER_MAX_CONTENT_SNIPPET_LENGTH || SNIPPET_CONTROL.test(snippet)) return undefined;
+		return { path, name, line, column, snippet };
+	}
+
+	/**
+	 * 严格校验并重建一次内容搜索结果。
+	 *
+	 * 计数是「真实工作」的声明，因此交叉约束也在这里强制：匹配文件数不可能超过命中数或已读文件数，
+	 * 三项计数越过契约上限都是对端违约（`PROTOCOL_INVALID`），而命中数组越界与 `fs.list` 同一选择——
+	 * 有界结果被**拒绝**而不是悄悄截断。真正的截断只由 `truncated`/`reason` 表达。
+	 */
+	function readContentResult(hostId: string, value: unknown): RemoteSearchContentResult {
+		if (!isRecord(value)) throw refuse(hostId, "PROTOCOL_INVALID");
+		const withReason = hasExactFields(value, CONTENT_RESULT_FIELDS_WITH_REASON);
+		if (!withReason && !hasExactFields(value, CONTENT_RESULT_FIELDS)) throw refuse(hostId, "PROTOCOL_INVALID");
+		const rawMatches = value.matches;
+		if (!isUnknownArray(rawMatches)) throw refuse(hostId, "PROTOCOL_INVALID");
+		if (rawMatches.length > REMOTE_HELPER_MAX_CONTENT_MATCHES) throw refuse(hostId, "RESULT_TOO_LARGE");
+		const matches: RemoteSearchContentMatch[] = [];
+		for (const raw of rawMatches) {
+			const match = readContentMatch(raw);
+			if (match === undefined) throw refuse(hostId, "PROTOCOL_INVALID");
+			matches.push(match);
+		}
+		const matchedFiles = value.matchedFiles;
+		const scannedFiles = value.scannedFiles;
+		const scannedBytes = value.scannedBytes;
+		if (!isCount(matchedFiles) || !isCount(scannedFiles) || !isCount(scannedBytes)) throw refuse(hostId, "PROTOCOL_INVALID");
+		if (matchedFiles > matches.length || matchedFiles > scannedFiles) throw refuse(hostId, "PROTOCOL_INVALID");
+		if (scannedFiles > REMOTE_HELPER_MAX_CONTENT_SCANNED_FILES) throw refuse(hostId, "PROTOCOL_INVALID");
+		if (scannedBytes > REMOTE_HELPER_MAX_CONTENT_SCANNED_BYTES) throw refuse(hostId, "PROTOCOL_INVALID");
+		const truncated = value.truncated;
+		if (typeof truncated !== "boolean") throw refuse(hostId, "PROTOCOL_INVALID");
+		const reason = value.reason;
+		if (truncated) {
+			if (typeof reason !== "string" || !CONTENT_REASONS.has(reason)) throw refuse(hostId, "PROTOCOL_INVALID");
+			return { matches, matchedFiles, scannedFiles, scannedBytes, truncated, reason: reason as RemoteHelperSearchContentReason };
+		}
+		if (reason !== undefined) throw refuse(hostId, "PROTOCOL_INVALID");
+		return { matches, matchedFiles, scannedFiles, scannedBytes, truncated };
+	}
+
 	return {
 		async search(hostId, path, query, options) {
 			const host = readHostId(hostId);
@@ -315,6 +439,45 @@ export function createRemoteSearchReader(options: RemoteSearchReaderOptions): Re
 				throw refuse(host, failure.code, failure.retryable);
 			}
 			return readSearchResult(host, raw);
+		},
+
+		/**
+		 * 有界内容搜索。query/path/host 与名字搜索共用同一套本地校验；`signal` 取消会经 port 的
+		 * `cancel` 转成 helper 的 REQUEST_CANCELLED，因此取消是一次正常结算，不会等到时间预算耗尽。
+		 */
+		async searchContent(hostId, path, query, options) {
+			const host = readHostId(hostId);
+			const target = readRequestPath(path);
+			const text = readQuery(query);
+			const read = readContentCallOptions(options);
+			if (host === undefined || target === undefined || text === undefined || !read.ok) throw new RemoteWorkspaceError(text === undefined ? REMOTE_SEARCH_READER_CODES.queryInvalid : "PROTOCOL_INVALID", false);
+			const params = read.maxMatches === undefined ? { path: target, query: text } : { path: target, query: text, maxMatches: read.maxMatches };
+			const signal = options?.signal;
+			if (isAborted(signal)) throw new RemoteWorkspaceError("REQUEST_CANCELLED", false);
+			let requestId: string | undefined;
+			const onAbort = () => {
+				if (requestId !== undefined && cancel !== undefined) void Promise.resolve(cancel(host, requestId)).catch(() => undefined);
+			};
+			if (signal !== undefined) signal.addEventListener("abort", onAbort, { once: true });
+			let raw: unknown;
+			try {
+				raw = await request(host, REMOTE_HELPER_METHOD_FS_SEARCH_CONTENT, params, {
+					...(read.timeoutMs === undefined ? {} : { timeoutMs: read.timeoutMs }),
+					onRequestId: (id) => {
+						requestId = id;
+						if (isAborted(signal)) onAbort();
+					},
+				});
+			} catch (error) {
+				// An abort is the caller's own withdrawal: report it as the read channel's cancel code instead of
+				// the transport's generic failure, exactly like a helper-side REQUEST_CANCELLED.
+				if (isAborted(signal)) throw refuse(host, "REQUEST_CANCELLED", false);
+				const failure = readTransportFailure(error);
+				throw refuse(host, failure.code, failure.retryable);
+			} finally {
+				if (signal !== undefined) signal.removeEventListener("abort", onAbort);
+			}
+			return readContentResult(host, raw);
 		},
 	};
 }

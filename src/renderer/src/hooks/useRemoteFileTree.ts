@@ -73,6 +73,8 @@ export function useRemoteFileTree(projectId: string): RemoteFileTree {
 					revision: result.value.revision,
 					generation: result.value.generation,
 					truncated: result.value.truncated,
+					// 深层 watch 降级由主进程按页带出；文件抽屉据此明示「哪些目录不会实时刷新」。
+					dirWatch: result.value.dirWatch,
 				},
 			};
 		});

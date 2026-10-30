@@ -5,7 +5,15 @@
  * 读不懂就按 unavailable 记：不显示提示，也不编一个码（宁可不打扰，也不能谎报目录已漂移）。
  */
 
-export type RemoteProjectRootStatusView = { status: "ok" | "needs-attention" | "unavailable"; code: string | null };
+export type RemoteProjectRootStatusView = {
+	status: "ok" | "needs-attention" | "unavailable";
+	code: string | null;
+	/**
+	 * hello 声明的能力清单；缺席/读不懂即 null（未知）。远端内容搜索等能力只从这里判定——
+	 * 不猜、不回退到"默认支持"。
+	 */
+	helperCapabilities: readonly string[] | null;
+};
 
 /** 一个码就是一个码，绝不是自由文本。 */
 const STABLE_CODE = /^[A-Z][A-Z0-9_]{2,63}$/;
@@ -18,12 +26,27 @@ function readCode(value: unknown): string | null {
 	return typeof value === "string" && STABLE_CODE.test(value) ? value : null;
 }
 
+/** 能力名与 helper 契约同形：非空、有界、无控制字节；不是字符串的项整体丢弃（宁缺勿猜）。 */
+const CAPABILITY = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/;
+
+function readCapabilities(value: unknown): readonly string[] | null {
+	if (!Array.isArray(value)) return null;
+	const capabilities: string[] = [];
+	for (const entry of value) {
+		if (typeof entry !== "string" || !CAPABILITY.test(entry)) return null;
+		capabilities.push(entry);
+	}
+	return capabilities;
+}
+
 export function readRootStatusResponse(raw: unknown): RemoteProjectRootStatusView {
-	if (!isRecord(raw)) return { status: "unavailable", code: null };
-	if (raw.ok === false) return { status: "unavailable", code: readCode(raw.code) };
-	if (raw.ok !== true) return { status: "unavailable", code: null };
+	if (!isRecord(raw)) return { status: "unavailable", code: null, helperCapabilities: null };
+	if (raw.ok === false) return { status: "unavailable", code: readCode(raw.code), helperCapabilities: null };
+	if (raw.ok !== true) return { status: "unavailable", code: null, helperCapabilities: null };
+	// 能力清单是可选诊断：读不懂时按未知处理，不影响 root 状态提示本身。
+	const helperCapabilities = readCapabilities(raw.helperCapabilities);
 	// code 缺失（或不是稳定码）不影响提示本身：状态才是需要行动的信号，码只是 hint。
-	if (raw.status === "ok") return { status: "ok", code: null };
-	if (raw.status === "needs-attention") return { status: "needs-attention", code: readCode(raw.code) };
-	return { status: "unavailable", code: null };
+	if (raw.status === "ok") return { status: "ok", code: null, helperCapabilities };
+	if (raw.status === "needs-attention") return { status: "needs-attention", code: readCode(raw.code), helperCapabilities };
+	return { status: "unavailable", code: null, helperCapabilities };
 }

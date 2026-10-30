@@ -166,7 +166,18 @@ export type RemoteGitRefFileDiffResult = { ok: true; diff: RemoteGitRefFileDiff 
  */
 export type RemoteGitCompareSide = { ref: string; oid: string };
 export type RemoteGitCompareFile = { status: string; path: string; oldPath?: string };
-export type RemoteGitCompare = { base: RemoteGitCompareSide; head: RemoteGitCompareSide; files: RemoteGitCompareFile[] };
+export type RemoteGitCompare = {
+	base: RemoteGitCompareSide;
+	head: RemoteGitCompareSide;
+	files: RemoteGitCompareFile[];
+	/**
+	 * 公共 compareRefs（T7）答案的语义与三点计数：trees 才需要「无 merge-base / ahead-behind」说明，
+	 * merge-base 相反。旧的 remoteCompare 兼容壳不填（远端它本来就是两树比较）。
+	 */
+	mode?: GitCompareMode;
+	ahead?: number;
+	behind?: number;
+};
 export type RemoteGitCompareResult = { ok: true; compare: RemoteGitCompare } | { ok: false; code: string };
 /**
  * G5c explicit init: creates .git at the project root and reports the default branch of the new repository.

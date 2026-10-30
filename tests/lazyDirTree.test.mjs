@@ -308,3 +308,32 @@ test("失败目录标 hasChildren=false、hasLoaded=false，重试成功后可�
 	assert.equal(controller.getState().nodes[0].hasChildren, true);
 	assert.equal(controller.getState().nodes[0].children[0].name, "x");
 });
+
+test("目录页的 watch 降级状态随页面落入树状态，恢复后清空", async () => {
+	const degraded = { degraded: true, reason: "watcher-capacity", desired: 40, covered: 32, dropped: 8 };
+	let pageWatch = degraded;
+	const controller = createLazyDirTreeController(async () => ({ ok: true, page: { nodes: [file("a")], ...(pageWatch === null ? {} : { dirWatch: pageWatch }) } }));
+	await controller.load("");
+	assert.deepEqual(plain(controller.getState().dirWatch), degraded);
+	pageWatch = null;
+	await controller.load("", true);
+	assert.equal(controller.getState().dirWatch, null, "重读不再降级时必须清掉提示，不能显示过期缺口");
+});
+
+test("连接换代时丢弃旧的 watch 降级状态", async () => {
+	let rootLoads = 0;
+	const loader = async (path) => {
+		if (path === "") {
+			rootLoads += 1;
+			return rootLoads === 1 ? { ok: true, page: { nodes: [dir("a")], generation: "g1", dirWatch: { degraded: true, reason: "paths-over-limit", desired: 40, covered: 32, dropped: 8 } } } : { ok: true, page: { nodes: [dir("a")], generation: "g2" } };
+		}
+		return { ok: true, page: { nodes: [], generation: "g2" } };
+	};
+	const controller = createLazyDirTreeController(loader);
+	await controller.load("");
+	assert.notEqual(controller.getState().dirWatch, null);
+	controller.applyFactsChange({ projectId: "p", generation: "g2", scopes: [] });
+	assert.equal(controller.getState().dirWatch, null);
+	await tick();
+	assert.equal(controller.getState().dirWatch, null, "新代页面未降级时不得保留旧代提示");
+});

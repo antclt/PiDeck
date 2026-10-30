@@ -163,3 +163,27 @@ test("未注册的 watchId、别的 host、别的路径都不影响事实", asyn
 	await h.list("src");
 	assert.equal(h.calls.list.length, 1, "只认登记过的 (host, watchId, 路径)");
 });
+
+test("深层 watch 降级时目录页带 dirWatch；正常覆盖时字段缺席", async () => {
+	const h = harness();
+	h.watchId("w1-cover");
+	// 根层首次读取：订阅还没超预算，目录页不得凭空带降级字段。
+	const healthy = await h.facts.directoryPage(PROJECT, "", false);
+	assert.equal(healthy.ok, true);
+	assert.equal(Object.hasOwn(healthy.value, "dirWatch"), false);
+
+	// 129 个目录 > helper 预算（4 watcher × 32 路径 = 128）：深层订阅必须如实降级，
+	// 目录页把缺口带给渲染层（否则文件树会把“没监听”显示成“没变化”）。
+	for (let index = 0; index < 129; index += 1) {
+		const page = await h.facts.directoryPage(PROJECT, "dir-" + index, false);
+		assert.equal(page.ok, true);
+	}
+	await h.facts.flushDirWatch();
+	const degraded = await h.facts.directoryPage(PROJECT, "dir-0", false);
+	assert.equal(degraded.ok, true);
+	assert.equal(degraded.value.dirWatch?.degraded, true);
+	assert.equal(degraded.value.dirWatch?.reason, "paths-over-limit");
+	assert.ok(degraded.value.dirWatch.desired > 128, "期望监听数必须超过预算");
+	assert.ok(degraded.value.dirWatch.dropped > 0, "缺口必须 > 0，不能假装全覆盖");
+	assert.equal(typeof degraded.value.dirWatch.covered, "number");
+});
