@@ -78,7 +78,12 @@ export type RemoteGitStatusRefreshPort<TState extends RemoteGitStatusRefreshStat
 export function createRemoteGitStatusRefresher<TState extends RemoteGitStatusRefreshState>(port: RemoteGitStatusRefreshPort<TState>) {
 	let epoch = 0;
 	let inFlight = false;
-	const blocked = (state: TState) => !port.isActive() || state.loading || state.diffLoading || state.mutating === true || inFlight;
+	/**
+	 * 连接失效后的暂停位：断开/重连本身不能自己把事实读回来（显式重连绝不重放一次读）。
+	 * 解除判据在控制器：只有一次**成功的显式 refresh()** 才 resume，失败的刷新不解除。
+	 */
+	let paused = false;
+	const blocked = (state: TState) => paused || !port.isActive() || state.loading || state.diffLoading || state.mutating === true || inFlight;
 	const stale = (generation: number, factGeneration: number) => !port.isActive() || generation !== epoch || factGeneration !== port.factGeneration();
 	return {
 		async refreshStatus(): Promise<void> {
@@ -101,6 +106,15 @@ export function createRemoteGitStatusRefresher<TState extends RemoteGitStatusRef
 			} finally {
 				inFlight = false;
 			}
+		},
+		/** 连接失效：暂停自动轮询，并退休在途的静默答案。 */
+		pause(): void {
+			paused = true;
+			epoch += 1;
+		},
+		/** 一次成功的显式刷新之后恢复轮询（失败的刷新不解除暂停）。 */
+		resume(): void {
+			paused = false;
 		},
 		/** 隐藏/卸载/闸门关闭：退休在途结果。 */
 		stop(): void {

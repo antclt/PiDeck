@@ -197,8 +197,11 @@ export function createRemoteGitViewController(projectId: string, projectKey: str
 				// 显式刷新必须重新核对：已完成的旧缓存不能满足一次明确的刷新请求。
 				const result = force && api.refreshRemoteSnapshot !== undefined ? await api.refreshRemoteSnapshot(projectId, repoPath) : await api.remoteSnapshot(projectId, repoPath);
 				if (!active || generation !== epoch) return;
-				if (result.ok) update({ projectKey, loading: false, diffLoading: false, snapshot: result.snapshot });
-				else update({ projectKey, loading: false, diffLoading: false, errorCode: failureCode(result.code) });
+				if (result.ok) {
+					// 一次成功的显式刷新才能解除「连接失效后暂停自动轮询」；失败/断开本身绝不重放一次读。
+					statusRefresher.resume();
+					update({ projectKey, loading: false, diffLoading: false, snapshot: result.snapshot });
+				} else update({ projectKey, loading: false, diffLoading: false, errorCode: failureCode(result.code) });
 			} catch (error) {
 				if (active && generation === epoch) update({ projectKey, loading: false, diffLoading: false, errorCode: failureCode(errorCode(error)) });
 			}
@@ -673,6 +676,8 @@ export function createRemoteGitViewController(projectId: string, projectKey: str
 		/** Connection transitions invalidate facts without automatically reconnecting or refreshing. */
 		invalidateConnection() {
 			if (!active) return;
+			// 断开/重连只作废事实，不自己读回来：暂停自动轮询，直到一次成功的显式 refresh()。
+			statusRefresher.pause();
 			epoch += 1;
 			diffEpoch += 1;
 			historyEpoch += 1;
