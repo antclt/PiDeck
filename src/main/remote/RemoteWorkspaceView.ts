@@ -74,15 +74,21 @@ export function parentDirOf(path: string): string {
 
 export function createRemoteWorkspaceView<Dir, Repos, Status>(ports: RemoteWorkspacePorts<Dir, Repos, Status>, options: { maxEntriesPerFamily?: number } = {}): RemoteWorkspaceView<Dir, Repos, Status> {
 	const maxEntries = options.maxEntriesPerFamily;
-	const dirs = createFactCache<Dir>((key) => {
-		const parts = splitKey(key);
-		return ports.listDir(parts[0], parts[2]);
-	}, { ...(maxEntries === undefined ? {} : { maxEntries }) });
+	const dirs = createFactCache<Dir>(
+		(key) => {
+			const parts = splitKey(key);
+			return ports.listDir(parts[0], parts[2]);
+		},
+		{ ...(maxEntries === undefined ? {} : { maxEntries }) },
+	);
 	const repos = createFactCache<Repos>((key) => ports.listRepos(splitKey(key)[0]), { maxEntries: 64 });
-	const statuses = createFactCache<Status>((key) => {
-		const parts = splitKey(key);
-		return ports.status(parts[0], parts[2]);
-	}, { maxEntries: 64 });
+	const statuses = createFactCache<Status>(
+		(key) => {
+			const parts = splitKey(key);
+			return ports.status(parts[0], parts[2]);
+		},
+		{ maxEntries: 64 },
+	);
 
 	const listeners = new Set<(change: WorkspaceChange) => void>();
 
@@ -130,11 +136,7 @@ export function createRemoteWorkspaceView<Dir, Repos, Status>(ports: RemoteWorks
 				if (parent !== "") touchedDirs.add(grandparent);
 			}
 			// 写可能建出/删掉仓库（`.git`），所以仓库列表总是标脏；状态只在知道仓库时标脏。
-			const scopes: WorkspaceScope[] = [
-				...[...touchedDirs].map((path): WorkspaceScope => ({ kind: "dir", path })),
-				{ kind: "repos" },
-				...(effect.repoPath === undefined ? [] : [{ kind: "status", repoPath: effect.repoPath } as WorkspaceScope]),
-			];
+			const scopes: WorkspaceScope[] = [...[...touchedDirs].map((path): WorkspaceScope => ({ kind: "dir", path })), { kind: "repos" }, ...(effect.repoPath === undefined ? [] : [{ kind: "status", repoPath: effect.repoPath } as WorkspaceScope])];
 			applyScopes(projectId, scopes);
 			emit(projectId, scopes);
 		},

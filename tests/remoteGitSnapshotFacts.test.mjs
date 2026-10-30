@@ -84,9 +84,12 @@ test("invalidateProject 只标脏本项目；别的项目仍然命中", async ()
 
 test("装载失败不留事实：异常照常抛出，下一次读会重试", async () => {
 	const cache = createSnapshotFactsCache();
-	await assert.rejects(cache.read("p1", "", async () => {
-		throw new Error("GIT_RESULT_INVALID");
-	}), /GIT_RESULT_INVALID/);
+	await assert.rejects(
+		cache.read("p1", "", async () => {
+			throw new Error("GIT_RESULT_INVALID");
+		}),
+		/GIT_RESULT_INVALID/,
+	);
 	let loads = 0;
 	await cache.read("p1", "", async () => ++loads);
 	assert.equal(loads, 1, "失败一次不得让后续读命中空事实");

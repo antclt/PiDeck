@@ -158,9 +158,7 @@ function helperRemote(tree) {
 						const node = tree.get(absolute(params.path));
 						if (node === undefined || node.kind !== "directory") throw Object.assign(new Error("PATH_NOT_FOUND"), { code: "PATH_NOT_FOUND" });
 						return {
-							entries: childrenOf(tree, absolute(params.path)).map((child) =>
-								child.node.kind === "file" ? { name: child.name, kind: "file", bytes: child.node.content.length } : { name: child.name, kind: child.node.kind },
-							),
+							entries: childrenOf(tree, absolute(params.path)).map((child) => (child.node.kind === "file" ? { name: child.name, kind: "file", bytes: child.node.content.length } : { name: child.name, kind: child.node.kind })),
 						};
 					}
 					if (method === "fs.read") {

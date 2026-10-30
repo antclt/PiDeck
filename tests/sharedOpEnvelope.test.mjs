@@ -42,12 +42,10 @@ test("outcome 只由闭集推出：写面的 unconfirmed ⇒ unknown，其余 �
 	assert.deepEqual(plain(opFailFromCode("REMOTE_FILE_CHANGED")), { ok: false, code: "REMOTE_FILE_CHANGED", outcome: "rejected" });
 
 	// 用户写面的 unconfirmed 全部进 unknown：重试会重复执行。
-	for (const code of ["GIT_WRITE_RESULT_UNCONFIRMED", "CONFIG_RESULT_UNCONFIRMED", "REMOTE_CONFIG_RESULT_UNCONFIRMED", "REMOTE_PROJECT_CREATE_UNCONFIRMED", "REMOTE_SESSION_DELETE_RESULT_UNCONFIRMED", "REMOTE_SESSION_HISTORY_WRITER_RESULT_UNCONFIRMED"])
-		assert.equal(opOutcomeOf(code), "unknown", code);
+	for (const code of ["GIT_WRITE_RESULT_UNCONFIRMED", "CONFIG_RESULT_UNCONFIRMED", "REMOTE_CONFIG_RESULT_UNCONFIRMED", "REMOTE_PROJECT_CREATE_UNCONFIRMED", "REMOTE_SESSION_DELETE_RESULT_UNCONFIRMED", "REMOTE_SESSION_HISTORY_WRITER_RESULT_UNCONFIRMED"]) assert.equal(opOutcomeOf(code), "unknown", code);
 
 	// 引导/握手码是连接层内部状态，不是一次写操作：绝不能因为名字像就进 unknown。
-	for (const code of ["BOOTSTRAP_FINALIZE_UNCONFIRMED", "BOOTSTRAP_READY_UNCONFIRMED", "REMOTE_RUNTIME_HANDSHAKE_UNCONFIRMED"])
-		assert.equal(OP_UNKNOWN_CODES.has(code), false, code);
+	for (const code of ["BOOTSTRAP_FINALIZE_UNCONFIRMED", "BOOTSTRAP_READY_UNCONFIRMED", "REMOTE_RUNTIME_HANDSHAKE_UNCONFIRMED"]) assert.equal(OP_UNKNOWN_CODES.has(code), false, code);
 });
 
 test("信封 → 异常：code 与 outcome 一起过边界，不退化", () => {

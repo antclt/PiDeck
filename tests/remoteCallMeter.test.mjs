@@ -40,13 +40,19 @@ test("键数有界：超出上限折进 __other__，腾位时淘汰次数最少�
 	// 第 3 个键刚好装满上限，此时还没有溢出项。
 	meter.record("host", "extra");
 	assert.equal(plain(meter.snapshot()).length, 3);
-	assert.equal(plain(meter.snapshot()).find((entry) => entry.method === REMOTE_CALL_METER_OVERFLOW_METHOD), undefined);
+	assert.equal(
+		plain(meter.snapshot()).find((entry) => entry.method === REMOTE_CALL_METER_OVERFLOW_METHOD),
+		undefined,
+	);
 
 	// 第 4 个键：腾位时淘汰次数最少的键（cold/extra 同为 1，取先到者），并把新键折进 __other__。
 	meter.record("host", "x1");
 	const folded = plain(meter.snapshot());
 	assert.equal(folded.length, 3);
-	assert.equal(folded.find((entry) => entry.method === "cold"), undefined);
+	assert.equal(
+		folded.find((entry) => entry.method === "cold"),
+		undefined,
+	);
 	assert.equal(folded.find((entry) => entry.method === "hot")?.calls, 2);
 	assert.equal(folded.find((entry) => entry.method === "extra")?.calls, 1);
 	assert.equal(folded.find((entry) => entry.method === REMOTE_CALL_METER_OVERFLOW_METHOD)?.calls, 1);

@@ -76,83 +76,99 @@ export function registerRemoteProjectEntryIpc(input: {
 		}
 	}
 
-	ipcMain.handle(ipcChannels.remoteProjectEntryStat, async (event, projectId: unknown, relative: unknown): Promise<RemoteEntryStatResult> =>
-		wrap(async () => {
-			if (!PROJECT_ID(projectId) || typeof relative !== "string") throw new Error("REMOTE_FILE_INPUT_INVALID");
-			const sender = watchSender(event.sender);
-			return await entry.stat(sender, projectId, relative);
-		}),
+	ipcMain.handle(
+		ipcChannels.remoteProjectEntryStat,
+		async (event, projectId: unknown, relative: unknown): Promise<RemoteEntryStatResult> =>
+			wrap(async () => {
+				if (!PROJECT_ID(projectId) || typeof relative !== "string") throw new Error("REMOTE_FILE_INPUT_INVALID");
+				const sender = watchSender(event.sender);
+				return await entry.stat(sender, projectId, relative);
+			}),
 	);
 
-	ipcMain.handle(ipcChannels.remoteProjectFileCreate, async (event, projectId: unknown, parent: unknown, name: unknown): Promise<RemoteEntryCreateResult> =>
-		wrap(async () => {
-			if (!PROJECT_ID(projectId) || typeof parent !== "string" || typeof name !== "string") throw new Error("REMOTE_FILE_INPUT_INVALID");
-			const sender = watchSender(event.sender);
-			const created = await entry.createFile(sender, projectId, parent, name);
-			input.afterWrite?.(projectId, [created.relativePath]);
-			return created;
-		}),
+	ipcMain.handle(
+		ipcChannels.remoteProjectFileCreate,
+		async (event, projectId: unknown, parent: unknown, name: unknown): Promise<RemoteEntryCreateResult> =>
+			wrap(async () => {
+				if (!PROJECT_ID(projectId) || typeof parent !== "string" || typeof name !== "string") throw new Error("REMOTE_FILE_INPUT_INVALID");
+				const sender = watchSender(event.sender);
+				const created = await entry.createFile(sender, projectId, parent, name);
+				input.afterWrite?.(projectId, [created.relativePath]);
+				return created;
+			}),
 	);
 
-	ipcMain.handle(ipcChannels.remoteProjectDirectoryCreate, async (event, projectId: unknown, parent: unknown, name: unknown): Promise<RemoteEntryCreateResult> =>
-		wrap(async () => {
-			if (!PROJECT_ID(projectId) || typeof parent !== "string" || typeof name !== "string") throw new Error("REMOTE_FILE_INPUT_INVALID");
-			const sender = watchSender(event.sender);
-			const created = await entry.createDirectory(sender, projectId, parent, name);
-			input.afterWrite?.(projectId, [created.relativePath]);
-			return created;
-		}),
+	ipcMain.handle(
+		ipcChannels.remoteProjectDirectoryCreate,
+		async (event, projectId: unknown, parent: unknown, name: unknown): Promise<RemoteEntryCreateResult> =>
+			wrap(async () => {
+				if (!PROJECT_ID(projectId) || typeof parent !== "string" || typeof name !== "string") throw new Error("REMOTE_FILE_INPUT_INVALID");
+				const sender = watchSender(event.sender);
+				const created = await entry.createDirectory(sender, projectId, parent, name);
+				input.afterWrite?.(projectId, [created.relativePath]);
+				return created;
+			}),
 	);
 
-	ipcMain.handle(ipcChannels.remoteProjectEntryRename, async (event, projectId: unknown, source: unknown, target: unknown, version: unknown): Promise<RemoteEntryRenameResult> =>
-		wrap(async () => {
-			if (!PROJECT_ID(projectId) || typeof source !== "string" || typeof target !== "string") throw new Error("REMOTE_FILE_INPUT_INVALID");
-			// 令牌格式不合法不烧令牌：形状校验在打开 SSH 之前。
-			if (typeof version !== "string" || !VERSION.test(version)) throw new Error("REMOTE_FILE_INPUT_INVALID");
-			const sender = watchSender(event.sender);
-			const renamed = await entry.rename(sender, projectId, source, target, version);
-			// 改名要连源路径一起标脏：它所在的目录也少了一项。
-			input.afterWrite?.(projectId, [source, renamed.relativePath]);
-			return renamed;
-		}),
+	ipcMain.handle(
+		ipcChannels.remoteProjectEntryRename,
+		async (event, projectId: unknown, source: unknown, target: unknown, version: unknown): Promise<RemoteEntryRenameResult> =>
+			wrap(async () => {
+				if (!PROJECT_ID(projectId) || typeof source !== "string" || typeof target !== "string") throw new Error("REMOTE_FILE_INPUT_INVALID");
+				// 令牌格式不合法不烧令牌：形状校验在打开 SSH 之前。
+				if (typeof version !== "string" || !VERSION.test(version)) throw new Error("REMOTE_FILE_INPUT_INVALID");
+				const sender = watchSender(event.sender);
+				const renamed = await entry.rename(sender, projectId, source, target, version);
+				// 改名要连源路径一起标脏：它所在的目录也少了一项。
+				input.afterWrite?.(projectId, [source, renamed.relativePath]);
+				return renamed;
+			}),
 	);
 
-	ipcMain.handle(ipcChannels.remoteProjectEntryDelete, async (event, projectId: unknown, relative: unknown, version: unknown): Promise<RemoteEntryDeleteResult> =>
-		wrap(async () => {
-			if (!PROJECT_ID(projectId) || typeof relative !== "string") throw new Error("REMOTE_FILE_INPUT_INVALID");
-			if (typeof version !== "string" || !VERSION.test(version)) throw new Error("REMOTE_FILE_INPUT_INVALID");
-			const sender = watchSender(event.sender);
-			const deleted = await entry.deleteEntry(sender, projectId, relative, version);
-			input.afterWrite?.(projectId, [relative]);
-			return deleted;
-		}),
+	ipcMain.handle(
+		ipcChannels.remoteProjectEntryDelete,
+		async (event, projectId: unknown, relative: unknown, version: unknown): Promise<RemoteEntryDeleteResult> =>
+			wrap(async () => {
+				if (!PROJECT_ID(projectId) || typeof relative !== "string") throw new Error("REMOTE_FILE_INPUT_INVALID");
+				if (typeof version !== "string" || !VERSION.test(version)) throw new Error("REMOTE_FILE_INPUT_INVALID");
+				const sender = watchSender(event.sender);
+				const deleted = await entry.deleteEntry(sender, projectId, relative, version);
+				input.afterWrite?.(projectId, [relative]);
+				return deleted;
+			}),
 	);
 
-	ipcMain.handle(ipcChannels.remoteProjectTrashList, async (event, projectId: unknown): Promise<RemoteTrashListResult> =>
-		wrap(async () => {
-			if (!PROJECT_ID(projectId)) throw new Error("REMOTE_FILE_INPUT_INVALID");
-			const sender = watchSender(event.sender);
-			return await entry.listTrash(sender, projectId);
-		}),
+	ipcMain.handle(
+		ipcChannels.remoteProjectTrashList,
+		async (event, projectId: unknown): Promise<RemoteTrashListResult> =>
+			wrap(async () => {
+				if (!PROJECT_ID(projectId)) throw new Error("REMOTE_FILE_INPUT_INVALID");
+				const sender = watchSender(event.sender);
+				return await entry.listTrash(sender, projectId);
+			}),
 	);
 
-	ipcMain.handle(ipcChannels.remoteProjectTrashRestore, async (event, projectId: unknown, trashId: unknown): Promise<RemoteTrashRestoreResult> =>
-		wrap(async () => {
-			if (!PROJECT_ID(projectId) || typeof trashId !== "string" || !TRASH_ID.test(trashId)) throw new Error("REMOTE_FILE_INPUT_INVALID");
-			const sender = watchSender(event.sender);
-			const restored = await entry.restoreTrash(sender, projectId, trashId);
-			input.afterWrite?.(projectId, [restored.relativePath]);
-			return restored;
-		}),
+	ipcMain.handle(
+		ipcChannels.remoteProjectTrashRestore,
+		async (event, projectId: unknown, trashId: unknown): Promise<RemoteTrashRestoreResult> =>
+			wrap(async () => {
+				if (!PROJECT_ID(projectId) || typeof trashId !== "string" || !TRASH_ID.test(trashId)) throw new Error("REMOTE_FILE_INPUT_INVALID");
+				const sender = watchSender(event.sender);
+				const restored = await entry.restoreTrash(sender, projectId, trashId);
+				input.afterWrite?.(projectId, [restored.relativePath]);
+				return restored;
+			}),
 	);
 
-	ipcMain.handle(ipcChannels.remoteProjectTrashPrune, async (event, projectId: unknown, trashIds: unknown): Promise<RemoteTrashPruneResult> =>
-		wrap(async () => {
-			if (!PROJECT_ID(projectId)) throw new Error("REMOTE_FILE_INPUT_INVALID");
-			if (!Array.isArray(trashIds) || trashIds.length === 0 || trashIds.length > 32 || trashIds.some((id) => typeof id !== "string" || !TRASH_ID.test(id))) throw new Error("REMOTE_FILE_INPUT_INVALID");
-			const sender = watchSender(event.sender);
-			return await entry.pruneTrash(sender, projectId, trashIds);
-		}),
+	ipcMain.handle(
+		ipcChannels.remoteProjectTrashPrune,
+		async (event, projectId: unknown, trashIds: unknown): Promise<RemoteTrashPruneResult> =>
+			wrap(async () => {
+				if (!PROJECT_ID(projectId)) throw new Error("REMOTE_FILE_INPUT_INVALID");
+				if (!Array.isArray(trashIds) || trashIds.length === 0 || trashIds.length > 32 || trashIds.some((id) => typeof id !== "string" || !TRASH_ID.test(id))) throw new Error("REMOTE_FILE_INPUT_INVALID");
+				const sender = watchSender(event.sender);
+				return await entry.pruneTrash(sender, projectId, trashIds);
+			}),
 	);
 
 	return {

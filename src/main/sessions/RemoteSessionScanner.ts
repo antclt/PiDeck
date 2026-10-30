@@ -38,13 +38,7 @@ import { REMOTE_HELPER_MAX_STAT_MANY_PATHS } from "../remote/RemoteHelperContrac
 import { PROJECT_HOST_ID_PATTERN } from "../../shared/projectLocation";
 import { createRemoteWorkspaceReader, REMOTE_WORKSPACE_MAX_HEAD_BYTES, REMOTE_WORKSPACE_MAX_WINDOW_BYTES, type RemoteWorkspacePort } from "../remote/RemoteWorkspaceReader";
 // R1a：一次性命令版的「根解析 + 列表读取」。两个实现共用同一套扫描语义，区别只在远端访问通道。
-import {
-	createRemoteSessionScanSource,
-	type RemoteSessionCommandTransportPort,
-	type RemoteSessionTree,
-	type RemoteSessionTreeEntry,
-	type RemoteSessionTreeSource,
-} from "./RemoteSessionScanSource";
+import { createRemoteSessionScanSource, type RemoteSessionCommandTransportPort, type RemoteSessionTree, type RemoteSessionTreeEntry, type RemoteSessionTreeSource } from "./RemoteSessionScanSource";
 // 装配侧（index.ts / remoteSessionIpc / remoteRuntimePort）要声明同样的端口：从本模块转出，避免各处自己去 source 模块取。
 export type { RemoteSessionCommandTransportPort };
 import { SUBAGENT_ARTIFACTS_DIR_NAME } from "../../shared/sessionIdentity";
@@ -444,8 +438,7 @@ export function createRemoteSessionScanner(options: RemoteSessionScannerOptions)
 	 * 远端访问面：注入一次性命令传输时扫描与根解析全程不碰 helper（R1a）；缺省退回 helper 会话
 	 * （旧装配与测试替身）。两个实现都只提供「一个 root 上的三件只读操作」，所以下面的上限/预算/排序只有一份。
 	 */
-	const treeSource: RemoteSessionTreeSource =
-		options.transport === undefined ? helperTreeSource(port) : createRemoteSessionScanSource({ transport: options.transport });
+	const treeSource: RemoteSessionTreeSource = options.transport === undefined ? helperTreeSource(port) : createRemoteSessionScanSource({ transport: options.transport });
 
 	/**
 	 * 解析会话根（J2，供 scan / title / register 共用）：

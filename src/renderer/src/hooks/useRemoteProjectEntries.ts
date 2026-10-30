@@ -10,7 +10,6 @@ import { initialRemoteFileManagementState, reduceRemoteFileManagement, remoteFil
 
 export type RemoteFileOutcome = { kind: "success" | "failed" | "unknown"; text: string; code: string | null; operation: RemoteFileOperation } | null;
 
-
 /**
  * 远端文件管理的命令与状态接线（UI 只转发事件）。
  *

@@ -17,10 +17,18 @@ function harness(options = {}) {
 	const { registerRemoteProjectIpc } = loadTsCommonJs("src/main/ipc/remoteProjectIpc.ts", {
 		stubs: {
 			electron: { ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) } },
-			"../remote/RemoteBrowseRoot": { async resolveRemoteBrowseRoot() { return { canonicalPath: "/srv/app" }; } },
+			"../remote/RemoteBrowseRoot": {
+				async resolveRemoteBrowseRoot() {
+					return { canonicalPath: "/srv/app" };
+				},
+			},
 			"../remote/RemoteSearchReader": {
 				REMOTE_SEARCH_READER_CODES: { queryInvalid: "QUERY_INVALID", requestFailed: "REMOTE_WORKSPACE_REQUEST_FAILED", optionsInvalid: "REMOTE_WORKSPACE_READER_OPTIONS_INVALID" },
-				createRemoteSearchReader: () => ({ async search() { return { entries: [], scanned: 0, truncated: false }; } }),
+				createRemoteSearchReader: () => ({
+					async search() {
+						return { entries: [], scanned: 0, truncated: false };
+					},
+				}),
 			},
 			"../remote/RemoteWorkspaceReader": {
 				createRemoteWorkspaceReader: () => ({
@@ -63,7 +71,15 @@ function harness(options = {}) {
 	});
 	const list = (path) => handlers.get("remote:project-list")({}, PROJECT, path);
 	const plain = (value) => JSON.parse(JSON.stringify(value));
-	return { calls, list, facts, plain, watchId: (value) => { issuedWatchId = value; } };
+	return {
+		calls,
+		list,
+		facts,
+		plain,
+		watchId: (value) => {
+			issuedWatchId = value;
+		},
+	};
 }
 
 test("同一个目录读两次：只装载一次，两次拿到同一个 revision", async () => {

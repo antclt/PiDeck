@@ -55,20 +55,24 @@ export function registerRemoteProjectFileIpc(input: {
 			return opFailFromCode(codeOf(error, "REMOTE_FILE_COMMAND_FAILED"));
 		}
 	}
-	ipcMain.handle(ipcChannels.remoteProjectTextOpen, async (event, projectId: unknown, relative: unknown): Promise<RemoteTextOpenResult> =>
-		wrap(async () => {
-			const valid = validate(event.sender, projectId, relative);
-			return { document: await files.open(valid.senderId, valid.projectId, valid.relative) };
-		}),
+	ipcMain.handle(
+		ipcChannels.remoteProjectTextOpen,
+		async (event, projectId: unknown, relative: unknown): Promise<RemoteTextOpenResult> =>
+			wrap(async () => {
+				const valid = validate(event.sender, projectId, relative);
+				return { document: await files.open(valid.senderId, valid.projectId, valid.relative) };
+			}),
 	);
-	ipcMain.handle(ipcChannels.remoteProjectTextSave, async (event, projectId: unknown, relative: unknown, content: unknown, version: unknown): Promise<RemoteTextSaveResult> =>
-		wrap(async () => {
-			const valid = validate(event.sender, projectId, relative);
-			if (typeof content !== "string" || typeof version !== "string" || !/^[a-f0-9]{32}$/.test(version)) throw new Error("REMOTE_FILE_INPUT_INVALID");
-			if (content.length > REMOTE_PROJECT_TEXT_MAX_BYTES || Buffer.byteLength(content, "utf8") > REMOTE_PROJECT_TEXT_MAX_BYTES) throw new Error("REMOTE_FILE_TOO_LARGE");
-			const saved = await files.save(valid.senderId, valid.projectId, valid.relative, content, version);
-			input.afterWrite?.(valid.projectId, [valid.relative]);
-			return saved;
-		}),
+	ipcMain.handle(
+		ipcChannels.remoteProjectTextSave,
+		async (event, projectId: unknown, relative: unknown, content: unknown, version: unknown): Promise<RemoteTextSaveResult> =>
+			wrap(async () => {
+				const valid = validate(event.sender, projectId, relative);
+				if (typeof content !== "string" || typeof version !== "string" || !/^[a-f0-9]{32}$/.test(version)) throw new Error("REMOTE_FILE_INPUT_INVALID");
+				if (content.length > REMOTE_PROJECT_TEXT_MAX_BYTES || Buffer.byteLength(content, "utf8") > REMOTE_PROJECT_TEXT_MAX_BYTES) throw new Error("REMOTE_FILE_TOO_LARGE");
+				const saved = await files.save(valid.senderId, valid.projectId, valid.relative, content, version);
+				input.afterWrite?.(valid.projectId, [valid.relative]);
+				return saved;
+			}),
 	);
 }

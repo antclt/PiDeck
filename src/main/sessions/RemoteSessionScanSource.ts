@@ -42,11 +42,7 @@
 import { randomBytes } from "node:crypto";
 // hostId 的判据只允许有一份：与持久化边界（readSshSessionLocator / 项目域）共用 shared 的权威取值域。
 import { PROJECT_HOST_ID_PATTERN } from "../../shared/projectLocation";
-import {
-	REMOTE_HELPER_MAX_LIST_ENTRIES,
-	REMOTE_HELPER_MAX_REMOTE_COMMAND_LENGTH,
-	REMOTE_HELPER_MAX_STAT_MANY_PATHS,
-} from "../remote/RemoteHelperContract";
+import { REMOTE_HELPER_MAX_LIST_ENTRIES, REMOTE_HELPER_MAX_REMOTE_COMMAND_LENGTH, REMOTE_HELPER_MAX_STAT_MANY_PATHS } from "../remote/RemoteHelperContract";
 import { joinRemoteSessionRoot, validateRemoteSessionHistoryPath } from "../remote/RemoteSessionHistoryReader";
 // 两个上限与 helper 读取面同一取值域：窗口不许比它大（否则一次有界读会被传输层的 256 KiB 输出上限判成失败）。
 import { REMOTE_WORKSPACE_MAX_HEAD_BYTES, REMOTE_WORKSPACE_MAX_WINDOW_BYTES } from "../remote/RemoteWorkspaceReader";
@@ -363,7 +359,8 @@ function readCountField(value: string | undefined): number {
 }
 
 /** 解析批量描述的 stdout（纯函数）：只给顺序，不带路径——请求与答案的绑定由调用方按位置完成。 */
-export function parseRemoteSessionStats(stdout: unknown, marker: string): readonly Omit<RemoteSessionTreeStat, "path">[] {	const payload = payloadAfterMarker(stdout, marker);
+export function parseRemoteSessionStats(stdout: unknown, marker: string): readonly Omit<RemoteSessionTreeStat, "path">[] {
+	const payload = payloadAfterMarker(stdout, marker);
 	const fields = payload.split("\u0000");
 	if (fields.length > 0 && fields[fields.length - 1] === "") fields.pop();
 	const stats: Omit<RemoteSessionTreeStat, "path">[] = [];

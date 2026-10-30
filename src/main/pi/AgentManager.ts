@@ -675,7 +675,14 @@ export class AgentManager {
 	 * 扫文件、安全快照与 trust flag 要写/读本机 userData、会话文件预检要读本机 JSONL —— 而远端进程
 	 * 跑在另一台机器上（`PiProcess.start` 的远端分支也不消费这些选项，参数与 cwd 全来自 plan）。
 	 */
-	private createPiProcess(cwd: string, sessionPath?: string, securitySessionKey?: string, settingsOverride?: Partial<Pick<AppSettings, "piRpcNoExtensions" | "piRpcNoSkills" | "removedBuiltInExtensions" | "wslEnabled" | "wslDistro" | "wslUser">>, agentId?: string, remoteLaunch?: { plan: RemoteSshPiRuntimeLaunchPlan; launcher: PiRuntimeLauncher }): PiProcess {
+	private createPiProcess(
+		cwd: string,
+		sessionPath?: string,
+		securitySessionKey?: string,
+		settingsOverride?: Partial<Pick<AppSettings, "piRpcNoExtensions" | "piRpcNoSkills" | "removedBuiltInExtensions" | "wslEnabled" | "wslDistro" | "wslUser">>,
+		agentId?: string,
+		remoteLaunch?: { plan: RemoteSshPiRuntimeLaunchPlan; launcher: PiRuntimeLauncher },
+	): PiProcess {
 		const settings = settingsOverride ? { ...this.settingsStore.get(), ...settingsOverride } : this.settingsStore.get();
 		if (remoteLaunch) {
 			// cwd 只进诊断（远端诊断的 cwd 本来就来自 plan），本地读者看到的是远端项目根。
