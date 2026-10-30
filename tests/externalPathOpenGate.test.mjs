@@ -66,7 +66,7 @@ test("门只在用户确认后 proceed：拒绝与取消都不打开", () => {
 
 test("App 路由：项目外路径走安全等级门，放行后只读且不带项目 scope", () => {
 	// 项目外先做一次「不带项目边界」的词法解析；解析不出来（缺基准目录 / 非法路径）才是原来的硬提示
-	assert.match(appSource, /const\s+externalPath\s*=\s*resolveFileLinkPath\(path,\s*baseDir\)/);
+	assert.match(appSource, /const\s+externalPath\s*=\s*resolveFileLinkPath\(path,\s*baseDir,\s*undefined,\s*getRendererHomeDir\(\)\)/);
 	assert.match(appSource, /if\s*\(!externalPath\)\s*\{[\s\S]{0,200}?fileLinkCannotResolve/);
 
 	const call = /await\s+requestExternalPathOpen\(\{[\s\S]*?\n\t+\}\);/.exec(appSource)?.[0];

@@ -37,5 +37,5 @@ test("remote projects are locked to pi on both the composer and first send", () 
 	assert.match(controller, /backend: isRemoteProjectSession \? "pi"/);
 	assert.match(controller, /changeBackend: backendLocked \|\| isRemoteProjectSession \? undefined : changeBackend/);
 	// 首次发送：欢迎页残留的 dsh/acp 偏好不能在远端项目上生效。
-	assert.match(app, /const draftBackend = isRemoteProject\(project\) \? "pi" : resolveGuidePageBackend\(/);
+	assert.match(app, /const draftBackend = isRemoteProject\(project\) \? "pi" : \(target\?\.backend \?\? effectiveAgentBackend\)/);
 });

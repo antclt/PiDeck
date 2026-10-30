@@ -273,10 +273,10 @@ test("extractMessageText joins split text items and flags unsupported ones", () 
 		{ type: 1, text_item: { text: "第二段" } },
 	];
 	assert.equal(protocol.extractMessageText(textItems), "第一段第二段");
-	assert.equal(protocol.hasUnsupportedItem(textItems), false);
+	assert.deepEqual([...protocol.unsupportedItemTypes(textItems)], []);
 	const withImage = [...textItems, { type: 2, image_item: {} }];
-	assert.equal(protocol.hasUnsupportedItem(withImage), true);
+	assert.deepEqual([...protocol.unsupportedItemTypes(withImage)], [2]);
 	assert.equal(protocol.extractMessageText(undefined), "");
-	assert.equal(protocol.hasUnsupportedItem(undefined), false);
+	assert.deepEqual([...protocol.unsupportedItemTypes(undefined)], []);
 	assert.equal(protocol.extractMessageText([{ type: 2 }]), "");
 });

@@ -23,7 +23,7 @@ test("index.ts 必须给 registerSystemIpc 注入 isProjectTrusted", () => {
 	// 必须读 trust.json 的最近父目录决策，不能用本地缓存或常量
 	assert.match(deps, /configManager\.getProjectTrustDecision\(trustPath\)\) === true/);
 	// WSL 项目：信任键是发行版内 Linux 路径
-	assert.match(deps, /toWslLinuxPath\(projectRoot, \{ distro: settings\.wslDistro \}\)/);
+	assert.match(deps, /toWslLinuxPath\(projectRoot, \{ distro: trustWslDistro \}\)/);
 });
 
 test("systemIpc 的项目作用域门禁在未装配时按未信任处理（不得默认放行）", () => {

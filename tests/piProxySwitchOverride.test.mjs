@@ -24,7 +24,7 @@ test("ProxyTab: 置灰判据复用 shared/piProxyList 的 hasPiProxyListFilter�
 test("ProxyTab: 名单启用时主开关置灰并给出「由名单接管」提示", () => {
 	// 取出主开关行本体（到自闭合 `/>` 为止），断言两项都落在这一行内：
 	// 只绑定 disabled 不给原因 = 用户看到开关变灰却不知为何；只给文案不置灰 = 用户仍能拨动一个毫无效果的开关。
-	const switchRow = source.match(/<SettingSwitchRow[\s\S]*?anchor="proxy-enable-pi"[\s\S]*?\n[\t ]*\/>/)?.[0] ?? "";
+	const switchRow = source.match(/<SettingSwitchRow[^\n]*anchor="proxy-enable-pi"[^\n]*\/>/)?.[0] ?? "";
 	assert.ok(switchRow, "找不到「启用 Pi agent 代理」开关行");
 	assert.match(switchRow, /disabled=\{proxyListActive\}/, "主开关必须随名单状态置灰");
 	assert.match(switchRow, /settings\.piProxySwitchOverridden/, "置灰时必须渲染说明文案（否则置灰原因不可见）");

@@ -380,9 +380,9 @@ test("WebEventStream 复用同一个适配器：ACP 翻译器只是事件来源�
 test("建会话链路把 acpToolId 透传到 catalog（Web 建 ACP 草稿不退化）", () => {
 	// 主进程 wrapper：白名单 + ACP 不写模型/思考偏好（模型由 agent CLI 自持）
 	const draft = indexSource.slice(indexSource.indexOf("createSessionDraft: async (input) => {"));
-	assert.match(draft.slice(0, 1200), /input\.backend === "acp"/);
-	assert.match(draft.slice(0, 1200), /acpToolId/);
-	assert.match(draft.slice(0, 1200), /thinkingLevel: acp \? undefined : input\.thinkingLevel/);
+	assert.match(draft.slice(0, 1800), /input\.backend === "acp"/);
+	assert.match(draft.slice(0, 1800), /acpToolId/);
+	assert.match(draft.slice(0, 1800), /thinkingLevel: acp \? undefined : input\.thinkingLevel/);
 	// ACP 草稿不预热 pi standby（与 dsh 同分支）
-	assert.match(draft.slice(0, 1600), /draft\.backend !== "dsh" && draft\.backend !== "acp"/);
+	assert.match(draft.slice(0, 2200), /draft\.backend !== "dsh" && draft\.backend !== "acp"/);
 });

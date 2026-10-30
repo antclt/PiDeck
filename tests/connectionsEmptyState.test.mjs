@@ -10,10 +10,9 @@ const dialog = readFileSync("src/renderer/src/components/app/settings/AddHostDia
 
 test("empty connections state is an actionable card", () => {
 	assert.match(tab, /settings\.connections\.emptyTitle/);
-	assert.match(tab, /settings\.connections\.emptyHint/);
 	assert.match(tab, /border-dashed/);
-	// 卡内主按钮与列表底部按钮不同时出现：空态只有卡里的一个「添加」。
-	assert.match(tab, /\{hosts\.length > 0 \? \(\s*<Button variant="default" size="sm" onClick=\{\(\) => setAdding\(true\)\}>/);
+	// 添加入口保留在列表顶部；空态卡与顶部「新建连接」不重复堆叠主按钮。
+	assert.match(tab, /<Button size="sm" onClick=\{\(\) => setAdding\(true\)\}>/);
 });
 
 test("WSL in the add dialog creates a profile instead of deep-linking", () => {

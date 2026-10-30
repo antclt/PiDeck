@@ -45,8 +45,8 @@ test("fixed light chat/table colors are tokenized for dark mode", () => {
 	}
 	// 表格 wrapper 是「单卡片」皮（边框/圆角/底色）：工具栏（first-child）与表头都是
 	// 墨水罩染弱表面（var(--color-surface-ink*)），滚动区（last-child）透明；一律语义 token。
-	assert.match(block('[data-streamdown="table-wrapper"] > div:first-child'), /background:\s*var\(--color-surface-ink-subtle\);/);
+	assert.match(block('[data-streamdown="table-wrapper"] > div:first-child'), /background:\s*var\(--color-md-table-head-bg\);/);
 	assert.match(block('[data-streamdown="table-wrapper"] > div:last-child'), /background:\s*transparent;/);
 	assert.match(block('[data-streamdown="table"]'), /background:\s*var\(--color-chat-table-bg(?:,\s*var\(--color-bg-panel\))?\);/);
-	assert.match(block('[data-streamdown="table-wrapper"] thead'), /background:\s*var\(--color-surface-ink-subtle\);/);
+	assert.match(block('[data-streamdown="table-wrapper"] thead'), /background:\s*var\(--color-md-table-head-bg\);/);
 });

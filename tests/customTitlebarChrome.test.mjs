@@ -217,6 +217,6 @@ test("streamdown code-block and table chrome share utilities-layer card skin", (
 	assert.match(stylesEntry, /@import\s+"\.\/styles\/streamdownChrome\.css"\s+layer\(utilities\)\s*;/);
 	assert.match(streamdownChrome, /\[data-streamdown="code-block"\] \{[\s\S]*?gap:\s*0;[\s\S]*?padding:\s*0;/);
 	assert.match(streamdownChrome, /\[data-streamdown="code-block-body"\] \{[\s\S]*?border:\s*0;[\s\S]*?border-radius:\s*0;/);
-	assert.match(streamdownChrome, /\[data-streamdown="table-wrapper"\] \{[\s\S]*?border-radius:\s*12px;/);
+	assert.match(streamdownChrome, /\[data-streamdown="table-wrapper"\] \{[\s\S]*?border-radius:\s*var\(--radius-xl\);/);
 	assert.match(streamdownChrome, /\[data-streamdown="code-block-header"\] \{[\s\S]*?height:\s*34px;/);
 });

@@ -4,7 +4,8 @@ import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const { createRequestGate } = loadTsCommonJs("src/renderer/src/components/session/remoteRequestGate.ts");
-const { sortRemoteEntries } = loadTsCommonJs("src/renderer/src/components/session/remoteProjectEntries.ts");
+const { createLazyDirTreeController } = loadTsCommonJs("src/renderer/src/utils/lazyDirTree.ts");
+const { sortRemoteEntries, isRemoteHostNotConnectedCode } = loadTsCommonJs("src/renderer/src/components/session/remoteProjectEntries.ts");
 const panel = readFileSync("src/renderer/src/components/session/RemoteProjectPanel.tsx", "utf8");
 // 目录读取已下沉到 useRemoteFileTree：代次闸门、listed/error 与「失败清空旧条目」都在那里。
 const tree = readFileSync("src/renderer/src/hooks/useRemoteFileTree.ts", "utf8");
@@ -39,26 +40,57 @@ test("目录在前文件在后，同类按名字；不修改入参数组", () =>
 	);
 });
 
-test("面板用代次闸门丢弃迟到结果，并在卸载时作废在途请求", () => {
-	assert.match(panel, /createRequestGate/);
-	// 每个目录各自的代次：同时展开两个目录时，晚到的旧结果不能盖掉新结果。
-	assert.match(tree, /const generation = \(generations\.current\.get\(dir\) \?\? 0\) \+ 1;/);
-	assert.match(tree, /if \(generations\.current\.get\(dir\) !== generation\) return false;/);
-	assert.match(panel, /gateRef\.current\.invalidate\(\)/);
-});
+test("目录读取按代次丢弃迟到结果，失败与空目录状态可区分", async () => {
+	// 同一目录两次读：晚到的旧结果不能盖掉新结果。
+	const pending = [];
+	const controller = createLazyDirTreeController(
+		(dir) =>
+			new Promise((resolve) => {
+				pending.push({ dir, resolve });
+			}),
+	);
+	const first = controller.load("");
+	const second = controller.load("");
+	pending[1].resolve({ ok: true, page: { nodes: [{ name: "new", path: "new", relativePath: "new", type: "file" }], revision: 2, generation: "g1" } });
+	await second;
+	pending[0].resolve({ ok: true, page: { nodes: [{ name: "old", path: "old", relativePath: "old", type: "file" }], revision: 1, generation: "g1" } });
+	await first;
+	assert.deepEqual(
+		controller.getState().nodes.map((node) => node.name),
+		["new"],
+	);
+	assert.equal(controller.getState().listed, true);
 
-test("失败与空目录分开呈现：error 只在失败时出现，空提示只在列出成功后出现", () => {
-	// 旧实现共用一个 message：列出失败也可能同时显示「这个目录是空的」。
-	assert.match(panel, /const \[error, setError\] = useState<string \| null>\(null\)/);
-	assert.match(tree, /const \[listed, setListed\] = useState\(false\)/);
-	assert.match(tree, /setListed\(false\);/, "a failed listing must not claim to have listed");
+	// 失败：listed=false + 稳定错误码；空目录：listed=true + 无错误，两者不能混在一起。
+	const failed = createLazyDirTreeController(async () => ({ ok: false, code: "SSH_HOST_DISCONNECTED" }));
+	await failed.load("");
+	assert.equal(failed.getState().listed, false);
+	assert.equal(failed.getState().error, "SSH_HOST_DISCONNECTED");
+	assert.equal(failed.getState().nodes.length, 0);
+
+	const empty = createLazyDirTreeController(async () => ({ ok: true, page: { nodes: [], revision: 1, generation: "g1" } }));
+	await empty.load("");
+	assert.equal(empty.getState().listed, true);
+	assert.equal(empty.getState().error, null);
+	assert.equal(empty.getState().nodes.length, 0);
+
+	// 面板仍按 listed/error 分离呈现，且不把失败显示成空目录。
 	assert.match(panel, /tree\.listed && tree\.error === null && tree\.nodes\.length === 0/);
-	assert.match(tree, /setError\("REMOTE_FILE_REQUEST_FAILED"\)/, "an IPC reject must surface as a retryable failure, not as an empty directory");
+	assert.match(panel, /tree\.error !== null/);
 });
 
-test("主机未连接与路径错误分开说，消除失败后仍显示旧条目", () => {
+test("主机未连接与路径错误分开说，失败时清掉旧条目", async () => {
+	let fail = false;
+	const controller = createLazyDirTreeController(async () => (fail ? { ok: false, code: "SSH_HOST_NOT_READY" } : { ok: true, page: { nodes: [{ name: "old", path: "old", relativePath: "old", type: "file" }], revision: 1, generation: "g1" } }));
+	await controller.load("");
+	assert.equal(controller.getState().nodes.length, 1);
+	fail = true;
+	await controller.load("");
+	assert.equal(controller.getState().nodes.length, 0, "失败后不得继续展示旧条目");
+	assert.equal(controller.getState().error, "SSH_HOST_NOT_READY");
+	assert.equal(isRemoteHostNotConnectedCode("SSH_HOST_NOT_READY"), true);
+	assert.equal(isRemoteHostNotConnectedCode("REMOTE_PROJECT_PATH_INVALID"), false);
 	assert.match(panel, /isNotConnectedCode\(tree\.error\) \? t\("project\.remote\.notConnectedHint"\)/);
-	assert.match(tree, /setChildrenByDir\(\(previous\) => \(\{ \.\.\.previous, \[dir\]: \[\] \}\)\);/);
 });
 
 test("面板文案键在中英词典里都存在", () => {

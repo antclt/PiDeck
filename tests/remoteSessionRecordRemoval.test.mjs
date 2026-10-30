@@ -251,8 +251,9 @@ async function setup(t) {
 
 test("removing a remote record only moves the local record and tombstones it", async (t) => {
 	const h = await setup(t);
-	const registered = await h.registerRemote(TARGET);
-	assert.equal(registered.ok, true, "登记远端会话是这条用例的前置");
+	const registration = await h.registerRemote(TARGET);
+	assert.equal(registration.ok, true, "登记远端会话是这条用例的前置");
+	const registered = registration.value;
 	const remoteFramesAfterRegister = h.port.frames.length;
 	const establishmentsAfterRegister = h.port.establishments;
 
@@ -280,13 +281,15 @@ test("removing a remote record only moves the local record and tombstones it", a
 
 test("a removed remote session stays out of the importable list on the next scan", async (t) => {
 	const h = await setup(t);
-	const registered = await h.registerRemote(TARGET);
+	const registration = await h.registerRemote(TARGET);
+	assert.equal(registration.ok, true, "登记远端会话是这条用例的前置");
+	const registered = registration.value;
 
 	const before = await h.scan();
 	assert.equal(before.ok, true);
 	// 生产模块在另一个 realm：数组要经 Array.from 重建成本 realm 的数组再比对。
 	assert.deepEqual(
-		Array.from(before.entries, (entry) => entry.remoteSessionId),
+		Array.from(before.value.entries, (entry) => entry.remoteSessionId),
 		[KEPT, TARGET],
 		"移除之前两条远端会话都在「可导入」列表里",
 	);
@@ -296,7 +299,7 @@ test("a removed remote session stays out of the importable list on the next scan
 	const after = await h.scan();
 	assert.equal(after.ok, true);
 	assert.deepEqual(
-		Array.from(after.entries, (entry) => entry.remoteSessionId),
+		Array.from(after.value.entries, (entry) => entry.remoteSessionId),
 		[KEPT],
 		"移除过的远端会话不得再出现在「可导入」列表里",
 	);
@@ -309,7 +312,9 @@ test("a removed remote session stays out of the importable list on the next scan
 
 test("the tombstone is written to the catalog file and survives a restart", async (t) => {
 	const h = await setup(t);
-	const registered = await h.registerRemote(TARGET);
+	const registration = await h.registerRemote(TARGET);
+	assert.equal(registration.ok, true, "登记远端会话是这条用例的前置");
+	const registered = registration.value;
 
 	await h.removeRecord(registered.sessionId);
 
@@ -348,7 +353,9 @@ test("local session delete is unchanged: it still removes the local file and rec
 
 test("removing a record for a running remote session stops the runtime first, without a single remote data write", async (t) => {
 	const h = await setup(t);
-	const registered = await h.registerRemote(TARGET);
+	const registration = await h.registerRemote(TARGET);
+	assert.equal(registration.ok, true, "登记远端会话是这条用例的前置");
+	const registered = registration.value;
 	// 用户已经把这条远端会话跑起来了（侧栏上它属于 agent 菜单那条路）：移除记录必须先停后摘。
 	h.bindRuntime(registered.sessionId);
 	// 仪器活性（正对照）：这个远端替身确实会把数据类命令记账并报错，否则下面的「零数据命令」是空断言。
@@ -380,7 +387,7 @@ test("removing a record for a running remote session stops the runtime first, wi
 	assert.equal(h.catalog.isRemoteSessionDismissed(HOST, TARGET), true);
 	const after = await h.scan();
 	assert.deepEqual(
-		Array.from(after.entries, (entry) => entry.remoteSessionId),
+		Array.from(after.value.entries, (entry) => entry.remoteSessionId),
 		[KEPT],
 		"有运行实例时移除的远端会话同样不再出现在「可导入」列表里",
 	);

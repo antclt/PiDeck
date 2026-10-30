@@ -50,7 +50,7 @@ test("main process: emitTextStreamNow sends delta for appends, full text for res
 	assert.match(block, /pushCount >= 50/);
 	assert.match(block, /text\.startsWith\(lastSent\)/);
 	// done 后清空 delta 基准
-	assert.match(block, /lastSentTextByAgent\.delete\(agentId\)/);
+	assert.match(liveStream, /lastSentTextByAgent\.delete\(agentId\)/, "done 后必须清空正文增量基准");
 });
 
 test("renderer: streaming atoms merge delta and accept full-text snapshots", () => {
