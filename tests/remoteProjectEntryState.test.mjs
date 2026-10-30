@@ -60,8 +60,10 @@ test("rename/delete draft recycling removes clean drafts and keeps dirty ones ma
 test("UI contract anchors exist in the shipped renderer modules", () => {
 	const panel = readFileSync("src/renderer/src/components/session/RemoteProjectPanel.tsx", "utf8");
 	for (const testid of ["remote-file-toolbar", "remote-file-create", "remote-file-mkdir", "remote-file-upload", "remote-file-outcome", "remote-trash-toggle"]) assert.match(panel, new RegExp('data-testid="' + testid + '"'), testid + " must be mounted");
-	// 行级锚点已随右键菜单回到面板（行组件与本地文件树共用 FileTreeRows，不再有独立行文件）。
-	for (const testid of ["remote-file-row-menu", "remote-file-row-rename", "remote-file-row-delete", "remote-file-row-download"]) assert.match(panel, new RegExp('data-testid="' + testid + '"'), testid + " must be mounted");
+	// W2 结构拆分后行菜单锚点位于 RemoteProjectRowMenu.tsx（面板只挂载，行组件仍与本地文件树共用 FileTreeRows），
+	// 行为/契约不变；按「面板 + 行菜单模块」合并匹配，断言强度不变（四个锚点仍必须存在于 shipped 渲染模块）。
+	const rowMenu = readFileSync("src/renderer/src/components/session/RemoteProjectRowMenu.tsx", "utf8");
+	for (const testid of ["remote-file-row-menu", "remote-file-row-rename", "remote-file-row-delete", "remote-file-row-download"]) assert.match(panel + rowMenu, new RegExp('data-testid="' + testid + '"'), testid + " must be mounted");
 	const dialogs = readFileSync("src/renderer/src/components/session/RemoteProjectEntryDialogs.tsx", "utf8");
 	for (const testid of [
 		"remote-file-new-dialog",
