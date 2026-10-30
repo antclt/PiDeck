@@ -8,6 +8,7 @@ import { useRemoteProjectSearch, REMOTE_SEARCH_UNWIRED_CODE } from "../../hooks/
 import { useRemoteContentSearch, useRemoteProjectContentSearchCapability } from "../../hooks/useRemoteContentSearch";
 import { shouldShowFileNameOnlyHint } from "../../utils/fileSearchCapability";
 import { FileContentSection } from "./FileSearchResults";
+import { RemoteDirWatchDegradedHint } from "../workspace/RemoteDirWatchDegradedHint";
 import { useRemoteProjectTransfer } from "../../hooks/useRemoteProjectTransfer";
 import { moveDestination, remoteDropOnBlankArea, remoteDropRoute, REMOTE_ENTRY_DRAG_TYPE } from "../../utils/remoteEntryDrag";
 import { t } from "../../i18n";
@@ -304,6 +305,8 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 							{t("project.remote.directoryTruncated")}
 						</p>
 					) : null}
+					{/* W3 深层 watch 降级提示：预算不够时目录仍可读但不会实时刷新，必须显式说明覆盖缺口。 */}
+					<RemoteDirWatchDegradedHint dirWatch={tree.dirWatch} />
 					{tree.nodes.map((node) => (
 						<FileTreeNodeRow
 							key={fileTreeNodeKey(node)}
