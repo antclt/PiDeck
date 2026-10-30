@@ -54,7 +54,8 @@ export function renderImportError(error: string | null): ReactNode {
 				top: "calc(var(--window-drag-height, 0px) + 16px)",
 				left: "50%",
 				transform: "translateX(-50%)",
-				zIndex: 1100,
+							/* 导入 overlay 属旧式 1000 层浮层体系；此错误条必须浮在其上通报，无现成语义 token（--z-* 体系到 980 为止），1100 是有意识保留的更高层。 */
+zIndex: 1100,
 				maxWidth: "min(560px, calc(100vw - 32px))",
 				padding: "10px 16px",
 				border: "1px solid var(--color-danger)",
