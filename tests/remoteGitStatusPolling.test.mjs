@@ -212,6 +212,48 @@ test("静默刷新失败只报稳定码，不抹掉现有事实；成功会解�
 	assert.equal(f.current().snapshot.branch, "next");
 });
 
+test("连接失效后暂停自动轮询：多次 tick 不读，直到一次成功的显式刷新", async () => {
+	let result = { ok: true, snapshot: baseSnapshot };
+	let reads = 0;
+	const f = fixture({
+		remoteSnapshot: async () => {
+			reads += 1;
+			return result;
+		},
+	});
+	const timer = fakeTimer();
+	const gates = { pageVisible: true, hostReady: true, mutating: false, loading: false, diffLoading: false };
+	const stop = startRemoteGitStatusPolling({ isEnabled: () => remoteGitStatusPollingEnabled(gates), poll: () => f.reads.refreshStatus(), timer });
+	await f.reads.refresh();
+	assert.equal(reads, 1);
+
+	// 断开：显式重连本身绝不重放一次读（host 重新 ready 后的 tick 也不能读）。
+	f.reads.invalidateConnection();
+	for (let tick = 0; tick < 3; tick += 1) {
+		timer.tick();
+		await flush();
+	}
+	assert.equal(reads, 1, "断开之后自动轮询不得再读");
+
+	// 失败的显式刷新不解除暂停：语义是「直到一次成功的显式刷新才恢复」。
+	result = { ok: false, code: "SSH_HOST_DISCONNECTED" };
+	await f.reads.refresh();
+	assert.equal(reads, 2);
+	timer.tick();
+	await flush();
+	assert.equal(reads, 2, "失败的显式刷新不解除暂停");
+
+	// 成功的显式刷新解除暂停，下一个 tick 恢复读。
+	result = { ok: true, snapshot: { ...baseSnapshot, branch: "feature" } };
+	await f.reads.refresh();
+	assert.equal(reads, 3);
+	timer.tick();
+	await flush();
+	assert.equal(reads, 4, "成功刷新后轮询恢复");
+	assert.equal(f.current().snapshot.branch, "feature");
+	stop();
+});
+
 test("停止轮询后，迟到的静默结果不再发布", async () => {
 	let resolve;
 	const f = fixture({

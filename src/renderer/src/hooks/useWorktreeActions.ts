@@ -9,6 +9,7 @@ import type { AgentTab } from "../../../shared/types";
 import { desktopApi as api } from "../desktopApi";
 import { showNotice } from "../utils/notice";
 import { t } from "../i18n";
+import { worktreeToggleUnavailableKey } from "../utils/worktreeEntryGate";
 
 export interface WorktreeActionsDeps {
 	projects: Project[];
@@ -100,6 +101,13 @@ export function useWorktreeActions(deps: WorktreeActionsDeps) {
 
 	/** 切换项目的 worktree 功能开关 */
 	async function toggleProjectWorktree(project: Project) {
+		// 远端项目没有本机 Git 目录：给明确原因，不把主进程的 UNSUPPORTED_PROJECT_LOCATION 原样弹给用户。
+		// 菜单入口已隐藏，这里是防御未来新增调用点。
+		const unavailableKey = worktreeToggleUnavailableKey(project);
+		if (unavailableKey !== null) {
+			showNotice(t(unavailableKey), 5000);
+			return;
+		}
 		try {
 			const updated = await api.projects.toggleWorktreeEnabled(project.id);
 			if (!updated) return;
