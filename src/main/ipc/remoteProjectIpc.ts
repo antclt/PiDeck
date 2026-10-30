@@ -345,9 +345,7 @@ export function registerRemoteProjectIpc(input: {
 					const reader = createRemoteSearchReader({ port: sessionPort(session, target.hostId) });
 					const result = await reader.searchContent(target.hostId, ".", query);
 					// Same identity rules as the filename search: the trash and upload temps are not user files.
-					const hits = result.matches
-						.filter((match) => match.path.split("/")[0] !== REMOTE_PROJECT_TRASH_DIR && !REMOTE_UPLOAD_TEMP_NAME.test(match.name))
-						.map((match) => ({ name: match.name, path: match.path, relativePath: match.path, line: match.line, column: match.column, snippet: match.snippet }));
+					const hits = result.matches.filter((match) => match.path.split("/")[0] !== REMOTE_PROJECT_TRASH_DIR && !REMOTE_UPLOAD_TEMP_NAME.test(match.name)).map((match) => ({ name: match.name, path: match.path, relativePath: match.path, line: match.line, column: match.column, snippet: match.snippet }));
 					return { hits, matchedFiles: result.matchedFiles, scannedFiles: result.scannedFiles, scannedBytes: result.scannedBytes, truncated: result.truncated };
 				});
 				if (!outcome.ok) return opFailFromCode(outcome.code);
