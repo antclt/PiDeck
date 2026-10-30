@@ -40,6 +40,7 @@
 | Lead 通报的 dev（含 WS1 P0-1 + 装配） | `50b4f7dc3` | 仅记录，未在本分支运行 |
 | 写本记录时只读查看的 dev HEAD | `a5b833b39` | `fix(remote): 装配文件写后 Git status 失效`（P0-2 已并入）；dev 仍在前进，集成以合并点为准 |
 | **集成 run #1（WS1 全部 + WS2 全部 + i18n 重生成）** | dev `8b1178bce` → 本地 merge 提交 `7a74adc66` | 详见 §9；同一批命令重跑，逐项对比"修复前 / 修复后" |
+| **集成 run #2（最终：WS1 全部 + WS2 ×6 + WS3 全部 + i18n 重生成）** | dev `3ac0e14e4` → 本地 merge 提交 `afd5ec3a4` | 最终证据，详见 §9.5 |
 
 > 读法：第 5 节的 3 条 smoke 结论只代表 `46523b525`。WS1 的 P0-2/P0-3/P0-4 合并后再跑同一批 `--grep`，才能得出"修复后"结论；两轮记录放在一起即可对比。
 
@@ -139,6 +140,7 @@
 - 2026-10-30（`46523b525`，补跑）：`remoteHostAcceptance` 基线跑 → 失败，成因为旧 spec 选择器过时（`添加` vs 现行「新建连接」），非产品缺陷；已记入 5.2，未改任何断言。
 - 2026-10-30（决策）：`remoteFunctionalAcceptance` **本轮不做**（原因＝远端写操作风险：会临时挪动远端 deploy 根下 bundle，且不在 P0/P1 验收范围），记为「未验证」；`remoteHostAcceptance` 保持"既有 spec 选择器过时"记录、不改断言、不修，集成阶段如需该覆盖另开任务。
 - 2026-10-30（决策/集成 run #1）：dev `8b1178bce` 已合入本分支（merge `7a74adc66`）。全量单测 15006/14721/0/285 全绿；远端 trust 与产品路通过，Git G1 因「旧断言 vs P0-3 静默轮询」冲突失败，裁定不改断言、等 WS1 follow-up 合并后复跑（详见 §9）。
+- 2026-10-30（集成 run #2 / 最终 HEAD）：dev `3ac0e14e4` 合入（merge `afd5ec3a4`）。G1 复跑通过、产品路第二次通过、四项门禁与 8 个定向测试文件全绿；全量 `npm test` 在 ws4 因交叉 npm 安装极慢被我提前 kill（**不是死锁**，定性更正见 §9.5），改由 Lead 在主工作树复跑 ⇒ **EXIT=0，15019/14734/0/285，641s**；最终证据汇总见 §9.6。
 
 ## 9. 集成 run #1（dev `8b1178bce` 合并后）
 
@@ -180,4 +182,56 @@
 - 「产品路基线失败 → 集成通过」目前只有 1 次 post-merge 证据，不写成"已修复"。
 - 本轮仍未跑：其余 13 条远端会话用例、`remoteFunctionalAcceptance`（本轮不做）。
 - 最终复跑前需再 merge 一次 dev（Lead 通报已到 `68117b2a3`：WS2 最后一个提交 + WS3 task-6 + i18n 重生成）。
+
+### 9.5 最终 run #2（HEAD `afd5ec3a4`）：全部通过；全量 `npm test` 在 ws4 因交叉 npm 安装**极慢**被提前 kill，改由主工作树复跑取证
+
+**合并**：`feat/ws4-verify` ← `dev 3ac0e14e4`（WS1 全部 + WS2 ×6 + WS3 全部 + 每次合并后 i18n 重生成），merge 提交 `afd5ec3a4`，无冲突（16 文件 / +409 −30）。
+
+| 项 | 命令 | 退出码 | 结果 |
+|----|------|--------|------|
+| 构建 | `npx electron-vite build`（仅 E2E 准备） | 0 | 2m28s（与全量单测并行，故偏慢） |
+| 远端 Git G1 | `--grep "远端 Git G1"` | **0** | **1 passed (1.7m)** —— WS1「连接失效后暂停静默 status 轮询」follow-up 生效：`e2e/remote-git.ts:192` 旧断言原样通过，**断言未改** |
+| 远端产品路 | `--grep "远端会话产品路"` | **0** | **1 passed (3.2m)**（第二次 post-merge 证据） |
+| typecheck | `npm run typecheck` | 0 | 通过 |
+| ipc 接线 | `npm run check:ipc-wiring` | 0 | 795 通道齐备、agentEventTags 8 |
+| 测试形状 | `npm run check:test-shape` | 0 | sourceOnly 407 / **1775** 文件，新增 0 |
+| 格式 | `npm run check:format` | 0 | **4148** 文件无差异 |
+| 定向单测 | `node --test` 8 个文件：`remoteGitStatusPolling` / `remoteGitViewState` / `remoteGitRefsPolling` / `remoteGitFactsInvalidation` / `remoteGitReadIpc` / `remoteGitCapabilityNotesUi` / `remoteWorktreeEntryGate` / `sshLauncherOutput` | 0 | **95 passed / 0 failed**（2.7s） |
+| 全量单测 | `npm test`（`node --test --test-concurrency=4`） | **0** | **tests 15019 / pass 14734 / fail 0 / skipped 285，641s**（在**主工作树** `F:\PiDeck` @ `3ac0e14e4` 跑出，见下） |
+
+**交叉 npm install 极慢取证（ws4 环境；两次被我提前 kill；定性已由"hang"更正为"慢"）**
+
+| 项 | 内容 |
+|----|------|
+| 首次（集成 run #2） | 16:48:42 启动，输出停在 **16:58:09**（log 6281 行）；此后采样窗口内无新增（PowerShell 重定向按块刷，输出滞后），我在约 20 分钟无新增后 kill，属**提前终止** |
+| 进程链 | `npm-cli.js test`(27320) → `node --test --test-concurrency=4`(20036) → 测试文件子进程(26864) → `node scripts/pack-dsh-runtime.mjs --dry-run --target-os win32 --target-arch x64`(7004) → `npm install --os win32 --cpu x64 --ignore-scripts --omit=dev --cache <node_modules/.cache/dsh-cross-npm>`(38952) |
+| 采样到的事实（当时据此误判为 hang） | 采样窗口内该 `npm install`：**20s CPU 增量 0**、**采样瞬间无 TCP 连接**、npm debug 日志 **0 字节**（文件已建、内容为空）、缓存目录最后写入 17:02:25 后无变化 |
+| **更正（Lead 复跑实测）** | 同一步在**主工作树**（同一物理 cache）上采样到 **CPU 53.9s / 工作集 1071MB**，随后**正常完成** ⇒ 不是进程死锁，而是**交叉安装 ~200MB 的下载/解包极慢**；本次全量 641s 中占大头。`npm view` 同 cache 1.2s 可通、无 lock 文件、`_cacache/tmp` 为空，也支持"慢"而非"死锁" |
+| 第二次（单独取证） | `node --test tests/packDshRuntimeCross.test.mjs`（串行、不并发）17:04:46 启动 → 其子 `pack-dsh-runtime --dry-run` 于 17:04:48 起；17:07:02 的 npm install 采样同样 0 CPU 增量 / 无 TCP / debug 日志 0 字节，**17:08 被我 kill（同样属提前终止，不是死锁证据）** |
+| 触发测试 | `tests/packDshRuntimeCross.test.mjs` → `scripts/pack-dsh-runtime.mjs:426` `execFileSync("npm", ["install", ... "--cache", node_modules/.cache/dsh-cross-npm], { stdio: "inherit", shell: true })`：真实联网/缓存解析交叉平台依赖。**既有测试，与 WS1/WS2/WS3 改动无关**（run #1 同测试通过） |
+| 加剧因素 | `F:\PiDeck-ws4\node_modules` 是指向 `F:\PiDeck\node_modules` 的 junction ⇒ 两个工作树的 `node_modules/.cache/dsh-cross-npm` 是**同一个物理缓存**；两边的交叉 install 会互相拖慢（本次 ws4 与主工作树的全量确实同时在跑这一步） |
+| 定性（更正后） | **交叉 npm install 极慢**（~200MB 下载/解包），前两次被提前 kill，**非进程死锁**；不是产品缺陷、不是断言问题。共享 cache（junction）会让两个工作树互相拖慢，但这是加剧因素、不是根因 |
+| 处置与最终取证 | 按 Lead 分工 kill 本 worktree 两条进程树（只 kill 自己启动的 pid），**不重试第三次**，**不改这条测试、不加超时跳过**；改由 Lead 在**主工作树 `F:\PiDeck`（HEAD `3ac0e14e4`，真实 node_modules）复跑全量** ⇒ **EXIT=0，tests 15019 / pass 14734 / fail 0 / skipped 285，641s** |
+| 复现 | `node --test tests/packDshRuntimeCross.test.mjs`（ws4；串行无并发也会慢，需把交叉安装的下载/解包时间算进去，别按"无输出=卡死"判） |
+
+> 取证时的旁证：同机还存在一条**非本任务**的 `node --test tests/remoteGitStatusPolling.test.mjs`（16:07:05 起，pid 19044/12204）与多条历史 `dsh-cross-*` 临时目录（09 个，共约 0.96GB），均未被我清理或 kill。
+
+### 9.6 最终证据汇总（HEAD `afd5ec3a4` = merge dev `3ac0e14e4`）
+
+| 证据 | 结果 | 运行位置 / 备注 |
+|------|------|-----------------|
+| 全量单测 `npm test` | **EXIT=0；tests 15019 / pass 14734 / fail 0 / skipped 285；641s** | 主工作树 `F:\PiDeck` @ `3ac0e14e4`（真实 node_modules） |
+| 远端 Git G1 | **1 passed (1.7m)**，rc 0 | ws4；WS1「连接失效后暂停静默轮询」follow-up 生效，`e2e/remote-git.ts:192` 旧断言未改即通过 |
+| 远端会话产品路 | **1 passed (3.2m)**，rc 0 | ws4；post-merge 第 2 次证据 |
+| 远端会话 trust 提示 | 1 passed (1.1m)，rc 0 | ws4（run #1，同代码路径未变） |
+| 构建 `npx electron-vite build`（仅 E2E 准备） | 0（2m28s） | ws4 |
+| 门禁四项 | typecheck 0 / check:ipc-wiring 0（795 通道）/ check:test-shape 0（sourceOnly 407、1775 文件、新增 0）/ check:format 0（4148 文件） | ws4 |
+| 定向单测（8 文件） | 95 passed / 0 failed（2.7s） | ws4 |
+
+**结论口径**
+
+- 合并 HEAD（WS1 全部 + WS2 ×6 + WS3 全部 + i18n 重生成）上：全量单测绿、四项门禁绿、定向单测绿；远端 G1（含 follow-up 语义）与产品路均通过。
+- 产品路：基线 `46523b525` fail → post-merge **2/2 通过**；按 Lead 口径记为「基线失败疑似 SSH 命令超时时序偶发，未定位根因」，不写"已修复"。
+- **未验证项（绝不当通过）**：其余 13 条远端会话用例；`remoteFunctionalAcceptance`（本轮不做，远端写操作风险）；`remoteHostAcceptance`（既有 spec 选择器过时，`添加` vs 现行「新建连接」，不改断言、不修）。
+- 全量单测的 ws4 侧两轮因交叉 npm 安装极慢被**提前 kill**（非死锁），最终由主工作树取证；取证结论见 §9.5。
 
