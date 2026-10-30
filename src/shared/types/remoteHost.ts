@@ -273,7 +273,15 @@ export type RemoteSessionEntry = {
  * 刻意是项目级而不是主机级：漂移属于某一个项目的持久路径，若把它升级成主机级 needs-attention，
  * 一个目录被挪动就会阻断同主机上所有其他项目的读取。`needs-attention` 时 `code` 是稳定的失败码。
  */
-export type RemoteProjectRootStatusResult = Op<{ status: "ok" | "needs-attention"; code?: string }>;
+export type RemoteProjectRootStatusResult = Op<{
+	status: "ok" | "needs-attention";
+	code?: string;
+	/**
+	 * 最近一次 helper 握手声明的能力（只读诊断用）：渲染层据此判断远端内容搜索等功能是否可用。
+	 * 旧 helper 不声明或连接尚未建立时缺席——缺席表示「未知/不支持」，一律走能力回退，不猜。
+	 */
+	helperCapabilities?: readonly string[];
+}>;
 
 /**
  * 一次事实失效的范围（目录/Git 共用）。路径是**项目根相对**路径；`status` 的 `repoPath` 也是项目相对。
