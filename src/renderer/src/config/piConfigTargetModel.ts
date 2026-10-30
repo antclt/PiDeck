@@ -24,6 +24,11 @@ export function toWslTargetHosts(hosts: readonly WslHostListItem[]): PiConfigTar
 	return hosts.map((host) => ({ kind: "wsl", id: host.id, label: host.label, distro: host.distro, user: host.user }));
 }
 
+/** 是否存在 WSL 档案：决定「技能/提示词/扩展页仅编辑 Windows 配置」的标注要不要出现。 */
+export function hasWslConfigProfile(hosts: readonly PiConfigTargetHost[]): boolean {
+	return hosts.some((host) => host.kind === "wsl");
+}
+
 /**
  * 同一目标判定：同 kind 同 hostId 才算同一个。同一个 id 在 ssh/wsl 两个命名空间里是不同目标，
  * 切换时必须重载——否则界面会把上一份目标的草稿当成新目标的数据展示。

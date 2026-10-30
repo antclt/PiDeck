@@ -20,6 +20,7 @@ import { WslConfigScopeNotice } from "./config/WslConfigScopeNotice";
 import { WslConfigSourceHint } from "./config/WslConfigSourceHint";
 import { usePiConfigDir } from "./config/usePiConfigDir";
 import { usePiConfigTargetView } from "./config/usePiConfigTargetView";
+import { WindowsOnlyConfigNotice } from "./config/WindowsOnlyConfigNotice";
 import type { PiConfigTarget } from "../../shared/piConfig";
 import { buildProviderOrderScope } from "./utils/providerOrder";
 import { ModelsTab } from "./config/ModelsTab";
@@ -496,7 +497,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const remoteTargetHostId = configTarget.kind === "ssh" ? configTarget.hostId : null;
 	const remoteHostLabel = remoteTargetHostId ? remoteConfigHosts.find((host) => host.kind === "ssh" && host.id === remoteTargetHostId)?.label : undefined;
 	// 目标视图派生：WSL 档案（来源提示/未接入页说明）、本地编辑器 target 选项、provider 探针门禁。
-	const { wslHost: wslTargetHost, option: configTargetOption, guardProviderOp } = usePiConfigTargetView(remoteConfigHosts, configTarget);
+	const { wslHost: wslTargetHost, option: configTargetOption, guardProviderOp, hasWslProfiles } = usePiConfigTargetView(remoteConfigHosts, configTarget);
 	const hasDirty = dirtyTabs.size > 0;
 	// DSH/Pi 顶层分页与 DSH 左侧导航的黄点来源：dsh:<nav> 归 DSH，其余归 Pi
 	const dshDirtyNavIds = useMemo(() => {
@@ -1076,9 +1077,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		void loadConfig(tab);
 	}, [open, section, tab, loadConfig, resourceScope, effectiveProjectId, bumpResourceGeneration]);
 
-	const showToast = (msg: string) => {
-		showNotice(msg, 2500);
-	};
+	const showToast = (msg: string) => showNotice(msg, 2500);
 
 	/** 去掉 Electron IPC 包装前缀，只保留真正业务错误，方便 toast 阅读。 */
 	const formatIpcError = (error: unknown): string => {
@@ -1798,9 +1797,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const handleSaveRaw = async (): Promise<boolean> => {
 		const isModelsFile = rawFileName === "models.json";
 		const ok = await saveAndReload(() => api.config.saveRaw(rawFileName, rawContent), isModelsFile ? t("config.modelsSaved") : undefined, "config:raw");
-		if (isModelsFile) {
-			await loadConfig("models", { force: true });
-		} else if (rawFileName === "auth.json") await loadConfig("auth", { force: true });
+		if (isModelsFile) await loadConfig("models", { force: true });
+		else if (rawFileName === "auth.json") await loadConfig("auth", { force: true });
 		else if (rawFileName === "trust.json") await loadConfig("trust", { force: true });
 		else if (rawFileName === "mcp.json") await loadConfig("mcp", { force: true });
 		else await loadConfig("settings", { force: true });
@@ -2989,6 +2987,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						<TabsContent value="skills" className="config-main min-w-0">
 							<div className="config-content">
 								{statusBlock}
+								{hasWslProfiles ? <WindowsOnlyConfigNotice page={t("config.nav.skills")} testId="windows-only-config-notice-skills" /> : null}
 								{!loading &&
 									(editingGlobalSkill ? (
 										<div className="prompts-editor-backdrop" onClick={() => setEditingGlobalSkill(null)}>
@@ -3070,6 +3069,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						<TabsContent value="prompts" className="config-main min-w-0">
 							<div className="config-content">
 								{statusBlock}
+								{hasWslProfiles ? <WindowsOnlyConfigNotice page={t("config.nav.prompts")} testId="windows-only-config-notice-prompts" /> : null}
 								{!loading && (
 									<PromptsTab
 										scope={resourceScope}
@@ -3116,6 +3116,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						<TabsContent value="extensions" className="config-main min-w-0">
 							<div className="config-content">
 								{statusBlock}
+								{hasWslProfiles ? <WindowsOnlyConfigNotice page={t("config.nav.extensions")} testId="windows-only-config-notice-extensions" /> : null}
 								<ExtensionsTab
 									scope={resourceScope}
 									projectId={resourceScope === "project" ? effectiveProjectId : undefined}

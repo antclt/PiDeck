@@ -51,6 +51,12 @@ test("列表映射：ssh 主机与 WSL 档案各自保持 kind，不互相冒充
 	assert.deepEqual(JSON.parse(JSON.stringify(model.toWslTargetHosts([]))), []);
 });
 
+test("只有存在 WSL 档案时才提示「技能/提示词/扩展页仅编辑 Windows 配置」", () => {
+	assert.equal(model.hasWslConfigProfile([]), false);
+	assert.equal(model.hasWslConfigProfile([SSH_HOST]), false);
+	assert.equal(model.hasWslConfigProfile([SSH_HOST, WSL_HOST]), true);
+});
+
 test("provider 探针（测试连接/拉取模型/用量）只对本机开放", () => {
 	assert.equal(model.providerOpsAllowed({ kind: "local" }), true);
 	assert.equal(model.providerOpsAllowed({ kind: "ssh", hostId: HOST }), false);
