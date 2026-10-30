@@ -18,6 +18,24 @@ export type ProjectDirectoryEntry = {
 	ignored?: boolean;
 };
 
+/**
+ * 深层目录订阅的降级（watch 能力不足，不是读失败）。
+ *
+ * helper 的 watcher 预算是 4×32：目录仍能读，但超出的目录不会实时刷新。必须显式带出来，
+ * 否则文件树会把「没监听」呈现成「没变化」，用户以为远端已经同步。
+ * 只带计数与原因：内部期望/覆盖路径列表留在主进程，不灌进每个目录页。
+ */
+export type ProjectDirectoryWatchDegradation = {
+	degraded: true;
+	reason: "paths-over-limit" | "watcher-capacity";
+	/** 期望监听的目录数。 */
+	desired: number;
+	/** 真正被 watcher 覆盖的目录数。 */
+	covered: number;
+	/** 因预算没有覆盖到的目录数。 */
+	dropped: number;
+};
+
 export type ProjectDirectoryPage = {
 	entries: ProjectDirectoryEntry[];
 	truncated: boolean;
@@ -25,6 +43,8 @@ export type ProjectDirectoryPage = {
 	revision: number;
 	/** 连接代（本机为稳定常量）；跨代一律丢弃缓存。 */
 	generation: string;
+	/** 仅当深层目录订阅降级时出现；正常覆盖时字段缺席（旧读者零影响）。 */
+	dirWatch?: ProjectDirectoryWatchDegradation;
 };
 
 export type ProjectDirectoryPageResult = Op<ProjectDirectoryPage>;

@@ -23,7 +23,7 @@ import type { FileContentSearchResult } from "../../shared/types";
 import type { ProjectDirectoryPageResult, ProjectPathsExistResult } from "../../shared/types/projectFiles";
 import type { RemoteProjectDownloadResult, RemoteProjectUploadResult, RemoteProjectEnrollAnswerResult, RemoteProjectEnrollMode, RemoteProjectEnrollRequest, RemoteProjectEnrollResult, RemoteWorkspaceEntry } from "../../shared/types/remoteHost";
 import { readRelativePath, readerPath, registerRemoteProjectReadIpc, sessionPort, type RemoteProjectDirSnapshot } from "./remoteProjectReadIpc";
-import { projectDirectoryPage, projectPathsExist } from "./remoteProjectDirectoryReads";
+import { projectDirectoryPage, projectDirectoryWatchDegradation, projectPathsExist } from "./remoteProjectDirectoryReads";
 import { registerRemoteProjectCreateFlow } from "./remoteProjectCreateIpc";
 import type { RemoteHostConnectionService, RemoteProjectSession } from "../remote/RemoteHostConnectionService";
 import { REMOTE_PROJECT_TRASH_DIR } from "../remote/RemoteProjectEntryCommands";
@@ -322,7 +322,16 @@ export function registerRemoteProjectIpc(input: {
 			// 前缀匹配 = 本项目全部目录键（项目 id 后紧跟真实的 NUL 分隔符，不会误命中同前缀的其它项目）。
 			dirs.invalidateWhere((key) => key.startsWith(projectId + "\u0000"));
 		},
-		directoryPage: (projectId, path, force = false) => projectDirectoryPage({ projectId, path, force, readDirSnapshot, generationOf }),
+		directoryPage: (projectId, path, force = false) =>
+			projectDirectoryPage({
+				projectId,
+				path,
+				force,
+				readDirSnapshot,
+				generationOf,
+				// 监听降级是项目级事实：每个目录页都顺手带出去，渲染层不必再开一条诊断通道。
+				dirWatch: (id) => projectDirectoryWatchDegradation(dirWatch.status(id)),
+			}),
 		pathsExist: (projectId, paths) => projectPathsExist({ projectId, paths, projectReadTarget }),
 		async searchContent(projectId, query) {
 			const target = await projectReadTarget(projectId);
@@ -336,9 +345,7 @@ export function registerRemoteProjectIpc(input: {
 					const reader = createRemoteSearchReader({ port: sessionPort(session, target.hostId) });
 					const result = await reader.searchContent(target.hostId, ".", query);
 					// Same identity rules as the filename search: the trash and upload temps are not user files.
-					const hits = result.matches
-						.filter((match) => match.path.split("/")[0] !== REMOTE_PROJECT_TRASH_DIR && !REMOTE_UPLOAD_TEMP_NAME.test(match.name))
-						.map((match) => ({ name: match.name, path: match.path, relativePath: match.path, line: match.line, column: match.column, snippet: match.snippet }));
+					const hits = result.matches.filter((match) => match.path.split("/")[0] !== REMOTE_PROJECT_TRASH_DIR && !REMOTE_UPLOAD_TEMP_NAME.test(match.name)).map((match) => ({ name: match.name, path: match.path, relativePath: match.path, line: match.line, column: match.column, snippet: match.snippet }));
 					return { hits, matchedFiles: result.matchedFiles, scannedFiles: result.scannedFiles, scannedBytes: result.scannedBytes, truncated: result.truncated };
 				});
 				if (!outcome.ok) return opFailFromCode(outcome.code);

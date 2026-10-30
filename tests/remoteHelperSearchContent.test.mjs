@@ -225,7 +225,8 @@ searchTest("the contract, the entry and the frozen sibling declare the same op a
 		"const MAX_SNIPPET = " + REMOTE_HELPER_MAX_CONTENT_SNIPPET_LENGTH + ";",
 		"const MAX_DEPTH = " + REMOTE_HELPER_MAX_CONTENT_DEPTH + ";",
 		"const MAX_TIME = " + REMOTE_HELPER_MAX_CONTENT_TIME_MS + ";",
-	]) assert.ok(source.includes(literal), literal + " must be a literal of the frozen sibling");
+	])
+		assert.ok(source.includes(literal), literal + " must be a literal of the frozen sibling");
 	for (const reason of ["matches", "files", "bytes", "time", "depth", "file-size"]) assert.ok(source.includes('"' + reason + '"'), reason + " must be a reason the frozen sibling can report");
 	assert.ok(source.includes("new Set([" + contract.REMOTE_HELPER_CONTENT_SKIPPED_DIRECTORIES.map((name) => '"' + name + '"').join(", ") + "])"), "the frozen sibling skips exactly the contract's fixed directories");
 	assert.ok(source.includes('new TextDecoder("utf-8", { fatal: true })'), "the frozen sibling decodes UTF-8 strictly");
@@ -258,7 +259,10 @@ searchTest("the entry pins the sibling, the bundle list and helper build 1.25.0"
 	assert.equal(entry.REMOTE_HELPER_ENTRY_VERSION, "1.25.0");
 	assert.ok(entry.REMOTE_HELPER_INLINE_SOURCE.includes('"1.25.0"'), "hello must report the new build");
 	assert.equal(entry.REMOTE_HELPER_ENTRY_SHA256, createHash("sha256").update(entry.REMOTE_HELPER_INLINE_SOURCE, "utf8").digest("hex"));
-	assert.deepEqual(Array.from(entry.REMOTE_HELPER_ARTIFACTS, (artifact) => artifact.name), ["helper.mjs", "git-read.mjs", "git-write.mjs", "git-sync.mjs", "config.mjs", "search-content.mjs", "terminal-runner.mjs"]);
+	assert.deepEqual(
+		Array.from(entry.REMOTE_HELPER_ARTIFACTS, (artifact) => artifact.name),
+		["helper.mjs", "git-read.mjs", "git-write.mjs", "git-sync.mjs", "config.mjs", "search-content.mjs", "terminal-runner.mjs"],
+	);
 	const packed = entry.REMOTE_HELPER_ARTIFACTS.find((artifact) => artifact.name === "search-content.mjs");
 	assert.equal(packed.sha256, sibling.REMOTE_HELPER_SEARCH_CONTENT_SHA256);
 	assert.equal(packed.source, sibling.REMOTE_SEARCH_CONTENT_SOURCE);
@@ -302,18 +306,18 @@ linkSearchTest("searchContent matches lines case-insensitively, skips binary/UTF
 	assert.equal(answer.reason, undefined);
 	assert.equal(answer.matchedFiles, 3);
 	// Exactly the text files, with disk-computed line/column/snippet.
-	assert.deepEqual(
-		answer.matches,
-		[
-			{ path: "alpha.txt", name: "alpha.txt", line: 2, column: 0, snippet: "needle here" },
-			{ path: "mixed.txt", name: "mixed.txt", line: 1, column: 6, snippet: "NEEDLE case" },
-			{ path: "sub/beta.md", name: "beta.md", line: 2, column: 0, snippet: "NEEDLE second" },
-		],
-	);
+	assert.deepEqual(answer.matches, [
+		{ path: "alpha.txt", name: "alpha.txt", line: 2, column: 0, snippet: "needle here" },
+		{ path: "mixed.txt", name: "mixed.txt", line: 1, column: 6, snippet: "NEEDLE case" },
+		{ path: "sub/beta.md", name: "beta.md", line: 2, column: 0, snippet: "NEEDLE second" },
+	]);
 	// Every regular file below the root had its bytes read once; links (file and directory) were never read.
 	const sizes = ["alpha.txt", "bin.dat", "empty.txt", "latin1.txt", "mixed.txt", "sub/beta.md"].map((relative) => lstatSync(join(fixture.root, ...relative.split("/"))).size);
 	assert.equal(answer.scannedFiles, sizes.length);
-	assert.equal(answer.scannedBytes, sizes.reduce((total, size) => total + size, 0));
+	assert.equal(
+		answer.scannedBytes,
+		sizes.reduce((total, size) => total + size, 0),
+	);
 	for (const match of answer.matches) {
 		assert.ok(match.snippet.length <= REMOTE_HELPER_MAX_CONTENT_SNIPPET_LENGTH, "a snippet stays inside its ceiling");
 		assert.equal(Object.keys(match).sort().join(","), "column,line,name,path,snippet");
@@ -322,7 +326,12 @@ linkSearchTest("searchContent matches lines case-insensitively, skips binary/UTF
 	assert.equal(request.v, REMOTE_HELPER_PROTOCOL_VERSION);
 	assert.equal(request.hostId, HOST_ID);
 	assert.deepEqual(Object.keys(request.params), ["path", "query"]);
-	for (const match of answer.matches) assert.equal(contract.REMOTE_HELPER_CONTENT_SKIPPED_DIRECTORIES.some((name) => match.path === name || match.path.startsWith(name + "/")), false, "a skipped directory never contributes a match");
+	for (const match of answer.matches)
+		assert.equal(
+			contract.REMOTE_HELPER_CONTENT_SKIPPED_DIRECTORIES.some((name) => match.path === name || match.path.startsWith(name + "/")),
+			false,
+			"a skipped directory never contributes a match",
+		);
 	for (const text of [session.lines.join("\n"), session.stderr(), JSON.stringify(session.diagnostics)]) assert.equal(text.includes(DECOY), false, "the decoy outside the root and the skipped directories must never be read");
 	assert.deepEqual(session.diagnostics, []);
 	assert.equal(session.lines.length, session.frames.length, "every stdout line is a protocol frame");
@@ -358,7 +367,11 @@ searchTest("an oversized file is skipped without reading and the answer says why
 	writeFileSync(join(root, "zzz-small.txt"), "needle\n");
 	const session = startHelper(t, { root });
 	const answer = await searchContent(session, { path: ".", query: "needle" });
-	assert.deepEqual(answer.matches.map((match) => match.path), ["zzz-small.txt"], "the oversized file was never searched");
+	assert.deepEqual(
+		answer.matches.map((match) => match.path),
+		["zzz-small.txt"],
+		"the oversized file was never searched",
+	);
 	assert.equal(answer.truncated, true);
 	assert.equal(answer.reason, "file-size");
 	// Its bytes were never read: the budget only counts the small file.
@@ -416,7 +429,10 @@ searchTest("a running content search is cancelled at an entry boundary and never
 	const error = await outcome;
 	assert.equal(error.code, "REQUEST_CANCELLED");
 	assert.equal(error.retryable, false);
-	const terminal = await guard(session.waitForFrame((frame) => frame.id === requestId, "the aborted walk's terminal frame"), "the aborted walk's terminal frame");
+	const terminal = await guard(
+		session.waitForFrame((frame) => frame.id === requestId, "the aborted walk's terminal frame"),
+		"the aborted walk's terminal frame",
+	);
 	assert.equal(terminal.ok, false);
 	assert.equal(terminal.error.code, "REQUEST_CANCELLED");
 	for (const frame of session.frames) assert.equal(frame.id === requestId && frame.ok === true, false, "a cancelled search may not answer a result, partial or not");

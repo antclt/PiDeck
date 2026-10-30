@@ -9,7 +9,6 @@ import type { ConfigFileDiagnostic, ConfigFileReadResult } from "../../shared/ty
 import type { McpConfigFile, McpConfigSnapshot, McpProbeResult, McpServerDefinition } from "../../shared/types/mcp";
 import { loadMcpConfigSnapshot, mcpDocsUrl, probeMcpServer, saveMcpConfigFile, validateMcpConfigFile } from "./mcpConfig";
 import { ensureOpenAiVersionPath, needsSessionBaseUrlVersionHint, suggestNormalizedBaseUrl } from "./baseUrlPath";
-import type { WslEnvironment } from "../wsl/WslPaths";
 import { mainProcessT, type MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 import type { FetchedModel } from "../../shared/types/fetchedModel";
 import type { ProviderUsageResult, UsageProbeBackend, UsageProbeProviderConfig, UsageProbeRecognition, UsageProbeSettingsResult, UsageProbeProviderState, UsageProbeStatesResult, UsageProbeTestInput } from "../../shared/types/providerUsage";
@@ -227,11 +226,6 @@ export class ConfigManager {
 		private readonly dshUsage?: DshUsageLookup,
 	) {
 		this.configDir = configDir ?? PI_AGENT_DIR;
-	}
-
-	/** 将配置目录切换到统一解析出的 WSL HOME；null 恢复 Windows home。 */
-	configureWsl(environment: WslEnvironment | null) {
-		this.configDir = environment ? join(environment.windowsHome, ".pi", "agent") : PI_AGENT_DIR;
 	}
 
 	/** 当前 pi 全局配置目录（WSL 环境为 windowsHome 映射），供渲染层展示源文件实际编辑位置。 */

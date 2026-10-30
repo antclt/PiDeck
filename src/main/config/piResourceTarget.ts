@@ -1,0 +1,50 @@
+/**
+ * Resource-target input validation (W1): skills/prompts/extensions route by PiResourceTarget.
+ *
+ * Renderer input is untrusted. A target is a two-arm closed union, every field is checked here before any
+ * WslHostStore read, and an ssh/unknown shape fails with a stable code instead of being coerced to local:
+ * silently treating "ssh" as "local" would show Windows resources while the user is looking at a remote host.
+ */
+
+import { PI_RESOURCE_CODES, PI_RESOURCE_CODE_SET, type PiResourceOptions, type PiResourceTarget } from "../../shared/piConfig";
+import { PROJECT_HOST_ID_PATTERN } from "../../shared/projectLocation";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stable(code: string): Error {
+	return new Error(code);
+}
+
+/** Absent/null = local (the compatibility default every existing renderer call relies on). */
+export function readPiResourceTarget(value: unknown): PiResourceTarget {
+	if (value === undefined || value === null) return { kind: "local" };
+	if (!isRecord(value) || typeof value.kind !== "string") throw stable(PI_RESOURCE_CODES.targetInvalid);
+	if (value.kind === "local") {
+		if (Object.keys(value).length !== 1) throw stable(PI_RESOURCE_CODES.targetInvalid);
+		return { kind: "local" };
+	}
+	if (value.kind === "wsl") {
+		// Exactly two keys and the authoritative id domain the project/wsl-config surfaces already share:
+		// a crafted id cannot address a directory the WslHostStore could not have issued.
+		if (Object.keys(value).length !== 2 || typeof value.hostId !== "string" || !PROJECT_HOST_ID_PATTERN.test(value.hostId)) throw stable(PI_RESOURCE_CODES.targetInvalid);
+		return { kind: "wsl", hostId: value.hostId };
+	}
+	// ssh is a legal PiConfigTarget but not a PiResourceTarget: name it, do not coerce it to local.
+	if (value.kind === "ssh") throw stable(PI_RESOURCE_CODES.sshUnsupported);
+	throw stable(PI_RESOURCE_CODES.targetInvalid);
+}
+
+/** Options object: only the target key is accepted; unknown keys are rejected, not ignored. */
+export function readPiResourceOptions(value: unknown): PiResourceOptions {
+	if (value === undefined || value === null) return {};
+	if (!isRecord(value) || Object.keys(value).some((key) => key !== "target")) throw stable(PI_RESOURCE_CODES.targetInvalid);
+	return { target: readPiResourceTarget(value.target) };
+}
+
+/** Stable code of an error already carrying one of the closed-set codes (else undefined). */
+export function piResourceStableCodeOf(error: unknown): string | undefined {
+	const message = error instanceof Error ? error.message : "";
+	return PI_RESOURCE_CODE_SET.has(message) ? message : undefined;
+}

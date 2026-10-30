@@ -1,4 +1,5 @@
 import type { FileTreeNode } from "../../../shared/types";
+import type { ProjectDirectoryWatchDegradation } from "../../../shared/types/projectFiles";
 import type { RemoteProjectFactsChange } from "../../../shared/types/remoteHost";
 
 /**
@@ -17,6 +18,8 @@ export type LazyDirPage = {
 	revision?: number;
 	/** 连接代；跨代的事实不得混用。 */
 	generation?: string;
+	/** 只在深层目录订阅降级时出现；文件抽屉必须明示覆盖缺口。 */
+	dirWatch?: ProjectDirectoryWatchDegradation;
 };
 
 export type LazyDirLoadResult = { ok: true; page: LazyDirPage } | { ok: false; code: string };
@@ -30,6 +33,8 @@ export type LazyDirTreeState = {
 	listed: boolean;
 	error: string | null;
 	currentDir: string;
+	/** 最近一次目录页带出的 watch 降级；未降级/尚未读取为 null。 */
+	dirWatch: ProjectDirectoryWatchDegradation | null;
 };
 
 export type LazyDirTreeController = {
@@ -59,7 +64,7 @@ export type LazyDirTreeController = {
 };
 
 export function lazyDirTreeInitialState(): LazyDirTreeState {
-	return { nodes: [], expanded: new Set(), loadingDirs: new Set(), truncatedDirs: new Set(), listed: false, error: null, currentDir: "" };
+	return { nodes: [], expanded: new Set(), loadingDirs: new Set(), truncatedDirs: new Set(), listed: false, error: null, currentDir: "", dirWatch: null };
 }
 
 function buildNodes(children: ReadonlyMap<string, readonly FileTreeNode[]>, expanded: ReadonlySet<string>, failed: ReadonlySet<string>, dir: string): FileTreeNode[] {
@@ -88,6 +93,8 @@ export function createLazyDirTreeController(loader: LazyDirLoader): LazyDirTreeC
 	let listed = false;
 	let error: string | null = null;
 	let currentDir = "";
+	/** 项目级 watch 降级：任一成功目录页带出即为当前事实，未带出即已恢复覆盖。 */
+	let dirWatch: ProjectDirectoryWatchDegradation | null = null;
 	let disposed = false;
 	let snapshot: LazyDirTreeState = lazyDirTreeInitialState();
 	/** 只有子项/展开集变化才重建 nodes；加载态/错误的 publish 必须复用同一数组，避免内容代次空转。 */
@@ -107,6 +114,7 @@ export function createLazyDirTreeController(loader: LazyDirLoader): LazyDirTreeC
 			listed,
 			error,
 			currentDir,
+			dirWatch,
 		};
 		for (const listener of listeners) listener();
 	};
@@ -146,6 +154,8 @@ export function createLazyDirTreeController(loader: LazyDirLoader): LazyDirTreeC
 				if (result.page.truncated === true) truncatedDirs.add(dir);
 				else truncatedDirs.delete(dir);
 				if (result.page.revision !== undefined) revisions.set(dir, result.page.revision);
+				// 降级是项目级状态：最新一次成功目录页说了算，恢复覆盖要能清掉旧提示。
+				dirWatch = result.page.dirWatch ?? null;
 				if (result.page.generation !== undefined && result.page.generation.length > 0) generation = result.page.generation;
 				error = null;
 				if (dir === "") listed = true;
@@ -280,6 +290,7 @@ export function createLazyDirTreeController(loader: LazyDirLoader): LazyDirTreeC
 				revisions.clear();
 				loading.clear();
 				truncatedDirs.clear();
+				dirWatch = null;
 				nodesDirty = true;
 				listed = false;
 				error = null;
@@ -310,6 +321,7 @@ export function createLazyDirTreeController(loader: LazyDirLoader): LazyDirTreeC
 			revisions.clear();
 			loading.clear();
 			truncatedDirs.clear();
+			dirWatch = null;
 			nodesDirty = true;
 			listed = false;
 			error = null;
