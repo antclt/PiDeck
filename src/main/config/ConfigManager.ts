@@ -153,14 +153,10 @@ function describeNetworkFailure(detail: string, translate: (key: MainProcessTran
  * 缺省合法）；tiers 是数组则逐档同样补齐（每档还需 inputTokensAbove，缺失则丢档）。
  * 非对象输入由调用方规避（cost !== undefined 才进入）。纯函数便于 vm 测试替身直接调用。
  */
-function normalizeModelCostForPi(
-	cost: NonNullable<PiModelItem["cost"]> & { tiers?: unknown },
-): NonNullable<PiModelItem["cost"]> | undefined {
+function normalizeModelCostForPi(cost: NonNullable<PiModelItem["cost"]> & { tiers?: unknown }): NonNullable<PiModelItem["cost"]> | undefined {
 	const RATE_KEYS = ["input", "output", "cacheRead", "cacheWrite"] as const;
 	if (!RATE_KEYS.some((key) => typeof cost[key] === "number")) return undefined;
-	const rates = Object.fromEntries(
-		RATE_KEYS.map((key) => [key, typeof cost[key] === "number" ? (cost[key] as number) : 0]),
-	) as Record<(typeof RATE_KEYS)[number], number>;
+	const rates = Object.fromEntries(RATE_KEYS.map((key) => [key, typeof cost[key] === "number" ? (cost[key] as number) : 0])) as Record<(typeof RATE_KEYS)[number], number>;
 	const normalized: NonNullable<PiModelItem["cost"]> & { tiers?: unknown } = { ...rates };
 	if (Array.isArray(cost.tiers)) {
 		const tiers = cost.tiers
@@ -170,9 +166,7 @@ function normalizeModelCostForPi(
 				// （与计费弹框 applyTiers 的「打开即补 0」同一语义，保留用户分档意图）；
 				// inputTokensAbove 缺失/非数则无法定义档位，只能丢档。
 				if (typeof tier.inputTokensAbove !== "number") return null;
-				const tierRates = Object.fromEntries(
-					RATE_KEYS.map((key) => [key, typeof tier[key] === "number" ? tier[key] : 0]),
-				) as Record<(typeof RATE_KEYS)[number], number>;
+				const tierRates = Object.fromEntries(RATE_KEYS.map((key) => [key, typeof tier[key] === "number" ? tier[key] : 0])) as Record<(typeof RATE_KEYS)[number], number>;
 				return { inputTokensAbove: tier.inputTokensAbove, ...tierRates };
 			})
 			.filter((tier): tier is { inputTokensAbove: number } & Record<(typeof RATE_KEYS)[number], number> => tier !== null);
@@ -878,9 +872,7 @@ export class ConfigManager {
 						// 补全只写合法值，但手改 JSON 或旧版本写入的非法值（如 "audio"）会让 pi 整文件
 						// 拒绝；过滤非法项，全过滤后删键（缺省 = text-only，pi 默认行为）。
 						if (Array.isArray(normalized.input)) {
-							const legalInput = normalized.input.filter(
-								(item): item is "text" | "image" => item === "text" || item === "image",
-							);
+							const legalInput = normalized.input.filter((item): item is "text" | "image" => item === "text" || item === "image");
 							if (legalInput.length === 0) delete normalized.input;
 							else if (legalInput.length !== normalized.input.length) normalized.input = legalInput;
 						}

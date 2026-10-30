@@ -40,15 +40,14 @@ export function PageHeader(props: {
 	const headingId = useId();
 	const hasSearchRow = props.search !== undefined;
 	return (
-		<header
-		aria-labelledby={headingId}
-		className={cn("flex shrink-0 items-start justify-between gap-4 border-b border-border/40 px-5 py-3", hasSearchRow && "flex-col gap-3", props.className)}
-	>
+		<header aria-labelledby={headingId} className={cn("flex shrink-0 items-start justify-between gap-4 border-b border-border/40 px-5 py-3", hasSearchRow && "flex-col gap-3", props.className)}>
 			<div className="flex min-w-0 flex-col">
 				<div className="flex min-w-0 items-center gap-2">
 					{props.leading}
 					<Icon className={cn("size-5 shrink-0 text-[var(--color-accent)]", props.iconClassName)} aria-hidden="true" />
-					<h1 id={headingId} className="truncate text-base font-semibold text-foreground">{props.title}</h1>
+					<h1 id={headingId} className="truncate text-base font-semibold text-foreground">
+						{props.title}
+					</h1>
 					{props.titleSuffix}
 				</div>
 				{props.subtitle ? <p className="mt-1 truncate text-xs text-muted-foreground">{props.subtitle}</p> : null}

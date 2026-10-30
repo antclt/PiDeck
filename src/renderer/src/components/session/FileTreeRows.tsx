@@ -273,13 +273,11 @@ const DirectoryRow = memo(function DirectoryRow(props: FileTreeRowProps) {
 					{expanded && node.hasChildren === false && node.loadError && (
 						<div className="file-children flex items-center gap-1.5 py-1 pl-2 pr-2 text-xs text-[var(--color-danger)]" role="alert">
 							<TriangleAlert size={12} className="shrink-0" aria-hidden="true" />
-							<span className="min-w-0 flex-1 truncate" title={node.loadError}>{t("drawer.loadFailed")}</span>
+							<span className="min-w-0 flex-1 truncate" title={node.loadError}>
+								{t("drawer.loadFailed")}
+							</span>
 							{props.onRetryDirectory && (
-								<button
-									type="button"
-									className="shrink-0 rounded-sm border border-border px-1.5 py-0.5 text-micro text-foreground transition-colors hover:bg-muted"
-									onClick={() => props.onRetryDirectory?.(nodeKey)}
-								>
+								<button type="button" className="shrink-0 rounded-sm border border-border px-1.5 py-0.5 text-micro text-foreground transition-colors hover:bg-muted" onClick={() => props.onRetryDirectory?.(nodeKey)}>
 									{t("common.retry")}
 								</button>
 							)}

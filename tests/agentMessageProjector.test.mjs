@@ -74,11 +74,7 @@ test("keeps thinking-only history turns and their entry IDs aligned", () => {
 
 test("strips the reasoning signature block before storing thinking for display", () => {
 	// 供应商把思维签名拼在推理正文最前面（DSH 0.2.1-rc.5 同场景）：时间线只显示正文。
-	const [assistant] = createProjector().convert(
-		"agent",
-		[{ role: "assistant", content: [{ type: "thinking", thinking: "<signature>c2lnbmF0dXJl</signature>\nCheck the history" }], timestamp: 2 }],
-		["entry-assistant"],
-	);
+	const [assistant] = createProjector().convert("agent", [{ role: "assistant", content: [{ type: "thinking", thinking: "<signature>c2lnbmF0dXJl</signature>\nCheck the history" }], timestamp: 2 }], ["entry-assistant"]);
 	assert.equal(assistant.thinking, "Check the history");
 	assert.equal(assistant.text, "");
 });

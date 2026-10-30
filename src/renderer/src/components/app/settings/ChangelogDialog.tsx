@@ -107,9 +107,7 @@ export function ChangelogDialog(props: {
 					markdown:
 						// 只渲染最新一个版本段（首个 `## ` 段）+ 导语；展开或单版本时才是全文。
 						// 懒展开的渲染成本论证见文件头注释（默认 1.4K vs 全文 164K）。
-						showAllVersions || !split || split.sections.length <= 1
-							? state.payload.markdown
-							: `${split.intro !== "" ? `${split.intro}\n\n` : ""}${split.sections[0]}`,
+						showAllVersions || !split || split.sections.length <= 1 ? state.payload.markdown : `${split.intro !== "" ? `${split.intro}\n\n` : ""}${split.sections[0]}`,
 					// 来源在 footer 展示为可读名（与主进程 source 枚举同源）。
 					source: state.payload.source === "github" ? "GitHub" : state.payload.source === "atomgit" ? "AtomGit" : null,
 					fetchedAt: state.payload.fetchedAt,

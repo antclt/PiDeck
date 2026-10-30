@@ -1302,64 +1302,57 @@ export function PromptTemplatePicker(props: {
 		   首行图标 + 斜杠命令名 + 参数提示徽标，次行截断的描述；
 		   预览按钮保留（查看模板正文）。旧 picker-palette-* 单行挤排版弃用。
 		   列表态走共享 CommandPickerPanel 壳（Wave 2 §5.3）：统一搜索、空态与键盘语义。 */
-		<CommandPickerDialog
-			title={t("app.promptTemplatePickerTitle")}
-			hint={t("app.pickerInsertSendHint")}
-			onClose={props.onClose}
-			className="prompt-template-picker"
-			searchPlaceholder={t("app.promptTemplateSearchPlaceholder")}
-			emptyLabel={t("app.promptTemplateSearchEmpty")}
-		>
+		<CommandPickerDialog title={t("app.promptTemplatePickerTitle")} hint={t("app.pickerInsertSendHint")} onClose={props.onClose} className="prompt-template-picker" searchPlaceholder={t("app.promptTemplateSearchPlaceholder")} emptyLabel={t("app.promptTemplateSearchEmpty")}>
 			{props.templates.length === 0 && <div className="px-6 py-10 text-center text-caption text-muted-foreground">{t("app.promptTemplateEmpty")}</div>}
-					{props.templates.map((template) => (
-					// key 用 name+path：包带模板（来源 B）没有可编辑路径，path 恒为空，单用 path 会撞 key
-					<CommandItem key={`${template.name}:${template.path}`} value={`/${template.name}`} keywords={[template.name, template.description, template.argumentHint ?? ""]} onSelect={() => props.onPick(template)} className="group min-h-10 items-center gap-2.5 rounded-md px-3 py-2">
-						<span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted/70 text-muted-foreground">
-							<FileText size={14} strokeWidth={1.8} aria-hidden="true" />
-						</span>
-						<span className="min-w-0 flex-1">
-							<span className="flex items-center gap-1.5">
-								<span className="font-mono text-control font-semibold text-foreground" title={`/${template.name}`}>
-									/{template.name}
-								</span>
-								{template.argumentHint && <code className="rounded bg-accent/10 px-1.5 py-0.5 font-mono text-micro text-accent-foreground">{template.argumentHint}</code>}
+			{props.templates.map((template) => (
+				// key 用 name+path：包带模板（来源 B）没有可编辑路径，path 恒为空，单用 path 会撞 key
+				<CommandItem key={`${template.name}:${template.path}`} value={`/${template.name}`} keywords={[template.name, template.description, template.argumentHint ?? ""]} onSelect={() => props.onPick(template)} className="group min-h-10 items-center gap-2.5 rounded-md px-3 py-2">
+					<span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted/70 text-muted-foreground">
+						<FileText size={14} strokeWidth={1.8} aria-hidden="true" />
+					</span>
+					<span className="min-w-0 flex-1">
+						<span className="flex items-center gap-1.5">
+							<span className="font-mono text-control font-semibold text-foreground" title={`/${template.name}`}>
+								/{template.name}
 							</span>
-							{template.description && (
-								<span className="mt-0.5 block truncate text-caption text-muted-foreground" title={template.description}>
-									{template.description}
-								</span>
-							)}
+							{template.argumentHint && <code className="rounded bg-accent/10 px-1.5 py-0.5 font-mono text-micro text-accent-foreground">{template.argumentHint}</code>}
 						</span>
+						{template.description && (
+							<span className="mt-0.5 block truncate text-caption text-muted-foreground" title={template.description}>
+								{template.description}
+							</span>
+						)}
+					</span>
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-sm"
+						title={t("common.preview")}
+						onClick={(e) => {
+							e.stopPropagation();
+							setPreviewTemplate(template);
+						}}
+					>
+						<Eye size={14} strokeWidth={1.8} aria-hidden="true" />
+					</Button>
+					{/* 一键插入全文：把模板内容整段塞进输入框（不生成斜线命令），
+						    与 onPick（插入 /名称 命令）是并列入口，两者由用户视需要选择。 */}
+					{props.onInsertContent && (
 						<Button
 							type="button"
 							variant="ghost"
 							size="icon-sm"
-							title={t("common.preview")}
+							title={t("app.pickerInsertContent")}
 							onClick={(e) => {
 								e.stopPropagation();
-								setPreviewTemplate(template);
+								props.onInsertContent?.(template);
 							}}
 						>
-							<Eye size={14} strokeWidth={1.8} aria-hidden="true" />
+							<CornerDownLeft size={14} strokeWidth={1.8} aria-hidden="true" />
 						</Button>
-						{/* 一键插入全文：把模板内容整段塞进输入框（不生成斜线命令），
-						    与 onPick（插入 /名称 命令）是并列入口，两者由用户视需要选择。 */}
-						{props.onInsertContent && (
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon-sm"
-								title={t("app.pickerInsertContent")}
-								onClick={(e) => {
-									e.stopPropagation();
-									props.onInsertContent?.(template);
-								}}
-							>
-								<CornerDownLeft size={14} strokeWidth={1.8} aria-hidden="true" />
-							</Button>
-						)}
-					</CommandItem>
-					))}
+					)}
+				</CommandItem>
+			))}
 		</CommandPickerDialog>
 	);
 }

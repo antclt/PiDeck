@@ -117,17 +117,16 @@ export function RemoteProjectEntryDialogs(props: RemoteProjectEntryDialogsProps)
 							<AlertDialogDescription>{dialog.entryKind === "file" ? t("remoteFileEntry.deleteBody") : t("remoteFileEntry.deleteBodyFolder")}</AlertDialogDescription>
 						</AlertDialogHeader>
 						<p className="break-all font-mono text-label">{dialog.path}</p>
-						{errorText !== null ? <p className="text-label text-destructive" role="alert">{errorText}</p> : null}
+						{errorText !== null ? (
+							<p className="text-label text-destructive" role="alert">
+								{errorText}
+							</p>
+						) : null}
 						<AlertDialogFooter>
 							<AlertDialogCancel data-testid="remote-file-delete-cancel" disabled={busy} onClick={props.onClose}>
 								{t("common.cancel")}
 							</AlertDialogCancel>
-							<AlertDialogAction
-								data-testid="remote-file-delete-confirm"
-								disabled={busy}
-								className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-								onClick={() => props.onDelete(dialog.path)}
-							>
+							<AlertDialogAction data-testid="remote-file-delete-confirm" disabled={busy} className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => props.onDelete(dialog.path)}>
 								{t("remoteFileEntry.deleteAction")}
 							</AlertDialogAction>
 						</AlertDialogFooter>
@@ -147,17 +146,16 @@ export function RemoteProjectEntryDialogs(props: RemoteProjectEntryDialogsProps)
 							<AlertDialogTitle>{t("remoteTrash.pruneConfirmTitle")}</AlertDialogTitle>
 							<AlertDialogDescription>{t("remoteTrash.pruneConfirmBody")}</AlertDialogDescription>
 						</AlertDialogHeader>
-						{errorText !== null ? <p className="text-label text-destructive" role="alert">{errorText}</p> : null}
+						{errorText !== null ? (
+							<p className="text-label text-destructive" role="alert">
+								{errorText}
+							</p>
+						) : null}
 						<AlertDialogFooter>
 							<AlertDialogCancel data-testid="remote-trash-prune-cancel" disabled={busy} onClick={props.onClose}>
 								{t("common.cancel")}
 							</AlertDialogCancel>
-							<AlertDialogAction
-								data-testid="remote-trash-prune-confirm"
-								disabled={busy}
-								className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-								onClick={() => props.onPrune(dialog.ids)}
-							>
+							<AlertDialogAction data-testid="remote-trash-prune-confirm" disabled={busy} className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => props.onPrune(dialog.ids)}>
 								{t("remoteTrash.pruneAction")}
 							</AlertDialogAction>
 						</AlertDialogFooter>

@@ -574,7 +574,16 @@ export function BrowserPanel(props: {
 							{loadError.url}
 							{loadError.description ? <span className="ml-1 text-text-quaternary">({loadError.description})</span> : null}
 						</div>
-						<Button type="button" variant="outline" size="sm" className="h-7 gap-1 px-2.5 text-xs" onClick={() => { setLoadError(null); webviewReadyRef.current && webviewRef.current?.isConnected && webviewRef.current.reload(); }}>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							className="h-7 gap-1 px-2.5 text-xs"
+							onClick={() => {
+								setLoadError(null);
+								webviewReadyRef.current && webviewRef.current?.isConnected && webviewRef.current.reload();
+							}}
+						>
 							<RefreshCw size={12} aria-hidden="true" />
 							{t("common.retry")}
 						</Button>

@@ -186,7 +186,7 @@ export function ComposerSkillPicker(props: {
 	// 区分提示语让用户知道当前范围。
 	const globalOnly = props.backend === "pi" && !hasProjectResources;
 
-// 源分组（Wave 2 §3.12）：项目/全局技能分开展示，与模型选择器的供应商分组同一交互。
+	// 源分组（Wave 2 §3.12）：项目/全局技能分开展示，与模型选择器的供应商分组同一交互。
 	const projectSkills = items.filter((skill) => skill.source === "project");
 	const globalSkills = items.filter((skill) => skill.source !== "project");
 	const renderSkillItem = (skill: (typeof items)[number]) => (
@@ -250,44 +250,37 @@ export function ComposerSkillPicker(props: {
 	);
 
 	return (
-		<CommandPickerDialog
-			title={t("app.skillPickerTitle")}
-			hint={t("app.skillPickerHint")}
-			onClose={props.onClose}
-			className="skill-picker"
-			searchPlaceholder={t("app.skillPickerSearchPlaceholder")}
-			emptyLabel={t("app.skillPickerSearchEmpty")}
-		>
+		<CommandPickerDialog title={t("app.skillPickerTitle")} hint={t("app.skillPickerHint")} onClose={props.onClose} className="skill-picker" searchPlaceholder={t("app.skillPickerSearchPlaceholder")} emptyLabel={t("app.skillPickerSearchEmpty")}>
 			{loading ? (
-						<div className="flex items-center justify-center gap-2 py-6 text-caption text-muted-foreground">
-							<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
-							{t("app.skillPickerLoading")}
-						</div>
-					) : error ? (
-						/* 加载失败给出原因详情（skill.list 会抛真实错误）：通用文案走 i18n，
+				<div className="flex items-center justify-center gap-2 py-6 text-caption text-muted-foreground">
+					<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+					{t("app.skillPickerLoading")}
+				</div>
+			) : error ? (
+				/* 加载失败给出原因详情（skill.list 会抛真实错误）：通用文案走 i18n，
 						   原始错误信息只作内部详情展示，辅助排查（如 pi 技能目录损坏/DSH wire 失败）。 */
-						<div className="flex flex-col items-center gap-1.5 px-4 py-6 text-caption">
-							<span className="font-medium text-foreground">{t("app.skillPickerLoadFailed")}</span>
-							<span className="text-muted-foreground">{t("app.skillPickerLoadFailedNote")}</span>
-							{error && <pre className="max-h-28 w-full overflow-auto whitespace-pre-wrap break-all rounded-md border border-border/60 bg-muted/40 p-2.5 font-mono text-micro leading-relaxed text-muted-foreground">{error}</pre>}
-						</div>
-					) : blockedByAgent ? (
-						<div className="px-6 py-10 text-center text-caption text-muted-foreground">{t("app.skillPickerNoAgent")}</div>
-					) : items.length === 0 ? (
-						/* 区分三种空态：chat 项目/无项目时只可能是全局为空；有项目时是项目+全局都为空。 */
-						<div className="px-6 py-10 text-center text-caption text-muted-foreground">{globalOnly ? (isChatSessionProject ? t("app.skillPickerChatProject") : t("app.skillPickerNoProject")) : t("app.skillPickerEmpty")}</div>
-					) : (
-						<>
-							{projectSkills.length > 0 && (
-								<CommandPickerGroup id="skills:project" label={t("app.skillBadgeProject")} count={projectSkills.length} countText={t("config.count.skills", { count: projectSkills.length })}>
-									{projectSkills.map(renderSkillItem)}
-								</CommandPickerGroup>
-							)}
-							<CommandPickerGroup id="skills:global" label={t("app.skillBadgeGlobal")} count={globalSkills.length} countText={t("config.count.skills", { count: globalSkills.length })}>
-								{globalSkills.map(renderSkillItem)}
-							</CommandPickerGroup>
-						</>
+				<div className="flex flex-col items-center gap-1.5 px-4 py-6 text-caption">
+					<span className="font-medium text-foreground">{t("app.skillPickerLoadFailed")}</span>
+					<span className="text-muted-foreground">{t("app.skillPickerLoadFailedNote")}</span>
+					{error && <pre className="max-h-28 w-full overflow-auto whitespace-pre-wrap break-all rounded-md border border-border/60 bg-muted/40 p-2.5 font-mono text-micro leading-relaxed text-muted-foreground">{error}</pre>}
+				</div>
+			) : blockedByAgent ? (
+				<div className="px-6 py-10 text-center text-caption text-muted-foreground">{t("app.skillPickerNoAgent")}</div>
+			) : items.length === 0 ? (
+				/* 区分三种空态：chat 项目/无项目时只可能是全局为空；有项目时是项目+全局都为空。 */
+				<div className="px-6 py-10 text-center text-caption text-muted-foreground">{globalOnly ? (isChatSessionProject ? t("app.skillPickerChatProject") : t("app.skillPickerNoProject")) : t("app.skillPickerEmpty")}</div>
+			) : (
+				<>
+					{projectSkills.length > 0 && (
+						<CommandPickerGroup id="skills:project" label={t("app.skillBadgeProject")} count={projectSkills.length} countText={t("config.count.skills", { count: projectSkills.length })}>
+							{projectSkills.map(renderSkillItem)}
+						</CommandPickerGroup>
 					)}
+					<CommandPickerGroup id="skills:global" label={t("app.skillBadgeGlobal")} count={globalSkills.length} countText={t("config.count.skills", { count: globalSkills.length })}>
+						{globalSkills.map(renderSkillItem)}
+					</CommandPickerGroup>
+				</>
+			)}
 		</CommandPickerDialog>
 	);
 }
