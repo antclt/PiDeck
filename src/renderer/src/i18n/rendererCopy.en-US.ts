@@ -4483,6 +4483,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"project.remote.requestFailed": "The remote request failed. Try again; if it keeps failing, check this host's connection in device settings.",
 	"project.remote.empty": "This directory is empty.",
 	"project.remote.directoryTruncated": "This directory is too large; only the first 2000 entries are shown.",
+	"project.remote.dirWatchDegraded": "Directory watching is degraded: {covered} of {desired} directories update live; refresh the other {dropped} manually.",
 	"project.remote.binary": "(binary content, cannot be previewed as text)",
 	"project.remote.linkNotFollowed": "symlink (not followed)",
 	"project.remote.searchPlaceholder": "Search file names",
