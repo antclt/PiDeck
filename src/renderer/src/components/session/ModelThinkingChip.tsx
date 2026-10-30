@@ -8,6 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "../ui-shadcn/popover";
 import { Slider } from "../ui-shadcn/slider";
 import { clampThinkingLevelToAllowed } from "../../utils/thinkingDisplay";
 import { THINKING_LEVELS, type ThinkingPickerLevel } from "./sessionPickerOptions";
+import { accumulateWheelStep, type WheelStepState } from "./thinkingWheelStep";
 
 /** 紧凑的模型/思考组合：模型直接打开完整选择器，思考保留独立的就地入口。 */
 export function ModelThinkingChip(props: { modelLabel: string; modelPendingTo?: string; modelPendingTitle?: string; disabled?: boolean; onPickModel: () => void; thinkingControl: ReactNode }) {
@@ -32,6 +33,38 @@ export function ModelThinkingChip(props: { modelLabel: string; modelPendingTo?: 
  *  （只渲染 Track/Range/Thumb），塞进 Slider 里的装饰节点根本不会出现在 DOM。 */
 const TRACK_DOT_SIZE = 3;
 const THUMB_HALF = 8;
+
+function ThinkingWheelZone(props: { disabled?: boolean; levels: ThinkingPickerLevel[]; onStep: (step: number) => void; children: ReactNode }) {
+	const zoneRef = useRef<HTMLDivElement | null>(null);
+	const stateRef = useRef<WheelStepState>({ accumulated: 0, at: 0 });
+	const latestRef = useRef(props);
+	latestRef.current = props;
+	useEffect(() => {
+		const node = zoneRef.current;
+		if (!node) return;
+		const onWheel = (event: WheelEvent) => {
+			// ctrl/meta + 滚轮 = 系统缩放 / 触控板捏合：既不当成调档，也不吞默认动作。
+			if (event.ctrlKey || event.metaKey) return;
+			// 标记区无条件接管：guard 已为 data-wheel-owned 放行（不再 stopPropagation），
+			// 事件会一路冒到 document，这里不 preventDefault 就可能让别人二次处理
+			//（例：morphing-search 的背景滚轮锁、react-remove-scroll 的 document 监听）。
+			// 「禁用 / 单档位」只是不改值，不是不接管——否则这两种情况下本行区反而成了 document 级滚轮的漏口。
+			event.preventDefault();
+			const { disabled, levels, onStep } = latestRef.current;
+			if (disabled || levels.length <= 1) return;
+			const { step, next } = accumulateWheelStep(stateRef.current, event.deltaY, event.timeStamp, event.deltaMode);
+			stateRef.current = next;
+			if (step !== 0) onStep(step);
+		};
+		node.addEventListener("wheel", onWheel, { passive: false });
+		return () => node.removeEventListener("wheel", onWheel);
+	}, []);
+	return (
+		<div ref={zoneRef} data-wheel-owned className="flex min-w-0 flex-col gap-2.5">
+			{props.children}
+		</div>
+	);
+}
 
 /**
  * 思考强度选择：ZCode 同款渐变强度条（beUI 口径：shadcn Slider 原语 + 语义 token）。
@@ -69,6 +102,7 @@ export function ThinkingLevelDropdown(props: { current?: string; levels?: Thinki
 		setDraftIndexState(value);
 	};
 	const draftIndex = draftIndexState;
+
 	const previewLevel = levels[draftIndex] ?? currentLevel;
 	// 填充比例（0…1）交给 CSS 的 background-size：轨道为 0 时兜底 1，避免除零。
 	const progress = levels.length > 1 ? draftIndex / (levels.length - 1) : 1;
@@ -114,62 +148,64 @@ export function ThinkingLevelDropdown(props: { current?: string; levels?: Thinki
 								</kbd>
 							) : null}
 						</div>
-						{/* 渐变强度条：拖拽/点刻度只更新本地预览（draftIndex），关闭弹层才提交 onPick——
+						<ThinkingWheelZone disabled={props.disabled} levels={levels} onStep={(step) => setDraftIndex(Math.min(levels.length - 1, Math.max(0, draftIndexRef.current + step)))}>
+							{/* 渐变强度条：拖拽/点刻度只更新本地预览（draftIndex），关闭弹层才提交 onPick——
 						    中途每过一档就发命令会让底栏文字不断变长变短，且产生一串无效 RPC。
 						    键盘方向键同样只预览，Enter/空格 = 确认并关闭（关闭即提交）。
 						    档位点与滑条共用一个相对容器：点绝对定位、pointer-events-none 不吃拖拽；
 						    颜色按填充段切换（白浮在彩色填充上 / 墨色浮在灰轨上），否则浅灰上的白点消失。 */}
-						<div className="relative flex w-full items-center">
-							<Slider
-								value={[draftIndex]}
-								min={0}
-								max={levels.length - 1}
-								step={1}
-								disabled={props.disabled}
-								onValueChange={(values) => setDraftIndex(values[0] ?? currentIndex)}
-								onKeyDown={(event) => {
-									if (event.key === "Enter" || event.key === " ") {
-										event.preventDefault();
-										handleOpenChange(false);
-									}
-								}}
-								aria-label={t("thinking.pickerIntensityAria")}
-								className="thinking-intensity-slider [&_[data-slot=slider-track]]:h-2.5"
-								style={{ "--thinking-progress": progress } as CSSProperties}
-							/>
-							{/* 点层：与 Radix thumb 中心严格重合。thumb 中心 = calc(p% + offset)，
-							    offset 把首尾中心夹在 [8, W-8]；等价于 8 + p*(W-16)，故直接用该式定位。 */}
-							<div aria-hidden="true" className="pointer-events-none absolute inset-0">
-								{levels.map((level, index) => {
-									const percent = levels.length > 1 ? index / (levels.length - 1) : 0;
-									return (
-										<span
-											key={level.value}
-											data-track-dot={index <= draftIndex ? "filled" : "idle"}
-											className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full transition-colors ${index <= draftIndex ? "bg-white/70" : "bg-foreground/25"}`}
-											style={{ left: `calc((100% - ${THUMB_HALF * 2}px) * ${percent} + ${THUMB_HALF}px)`, width: TRACK_DOT_SIZE, height: TRACK_DOT_SIZE }}
-										/>
-									);
-								})}
-							</div>
-						</div>
-						{/* 档位标签行：兼作点击入口，点击只改预览（与拖拽同一套 draft），关闭时统一提交 */}
-						<div className="flex min-w-0 items-start justify-between gap-1">
-							{levels.map((level, index) => (
-								<Button
-									key={level.value}
-									type="button"
-									variant="ghost"
-									data-tick-value={level.value}
-									className={`h-auto min-w-0 max-w-full truncate rounded-sm px-0.5 py-0 text-micro leading-4 font-normal shadow-none transition-colors hover:bg-transparent ${index === draftIndex ? "font-semibold text-foreground" : "text-muted-foreground"}`}
+							<div className="relative flex w-full items-center">
+								<Slider
+									value={[draftIndex]}
+									min={0}
+									max={levels.length - 1}
+									step={1}
 									disabled={props.disabled}
-									title={level.descriptionKey ? t(level.descriptionKey) : level.description}
-									onClick={() => setDraftIndex(index)}
-								>
-									{level.labelKey ? t(level.labelKey) : (level.label ?? level.value)}
-								</Button>
-							))}
-						</div>
+									onValueChange={(values) => setDraftIndex(values[0] ?? currentIndex)}
+									onKeyDown={(event) => {
+										if (event.key === "Enter" || event.key === " ") {
+											event.preventDefault();
+											handleOpenChange(false);
+										}
+									}}
+									aria-label={t("thinking.pickerIntensityAria")}
+									className="thinking-intensity-slider [&_[data-slot=slider-track]]:h-2.5"
+									style={{ "--thinking-progress": progress } as CSSProperties}
+								/>
+								{/* 点层：与 Radix thumb 中心严格重合。thumb 中心 = calc(p% + offset)，
+							    offset 把首尾中心夹在 [8, W-8]；等价于 8 + p*(W-16)，故直接用该式定位。 */}
+								<div aria-hidden="true" className="pointer-events-none absolute inset-0">
+									{levels.map((level, index) => {
+										const percent = levels.length > 1 ? index / (levels.length - 1) : 0;
+										return (
+											<span
+												key={level.value}
+												data-track-dot={index <= draftIndex ? "filled" : "idle"}
+												className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full transition-colors ${index <= draftIndex ? "bg-white/70" : "bg-foreground/25"}`}
+												style={{ left: `calc((100% - ${THUMB_HALF * 2}px) * ${percent} + ${THUMB_HALF}px)`, width: TRACK_DOT_SIZE, height: TRACK_DOT_SIZE }}
+											/>
+										);
+									})}
+								</div>
+							</div>
+							{/* 档位标签行：兼作点击入口，点击只改预览（与拖拽同一套 draft），关闭时统一提交 */}
+							<div className="flex min-w-0 items-start justify-between gap-1">
+								{levels.map((level, index) => (
+									<Button
+										key={level.value}
+										type="button"
+										variant="ghost"
+										data-tick-value={level.value}
+										className={`h-auto min-w-0 max-w-full truncate rounded-sm px-0.5 py-0 text-micro leading-4 font-normal shadow-none transition-colors hover:bg-transparent ${index === draftIndex ? "font-semibold text-foreground" : "text-muted-foreground"}`}
+										disabled={props.disabled}
+										title={level.descriptionKey ? t(level.descriptionKey) : level.description}
+										onClick={() => setDraftIndex(index)}
+									>
+										{level.labelKey ? t(level.labelKey) : (level.label ?? level.value)}
+									</Button>
+								))}
+							</div>
+						</ThinkingWheelZone>
 					</div>
 				)}
 			</PopoverContent>
