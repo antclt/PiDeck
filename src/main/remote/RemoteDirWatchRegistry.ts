@@ -31,14 +31,24 @@ export type DirWatchEnsureOptions = {
 	unwatch?: (watchId: string) => Promise<unknown>;
 };
 
+/**
+ * 一次 ensure 的结果：`rejected` 是因为 **4 watcher 上限**被拒的路径块数。
+ *
+ * 只有上限拒绝才计数：helper 不支持订阅（拿不到 watchId）不算「降级到上限」，调用方据此区分
+ * 「订阅能力缺失」与「预算用满」——后者必须留下可断言的状态，不能假装覆盖。
+ */
+export type DirWatchEnsureResult = { rejected: number };
+
 export type DirWatchRegistry = {
 	/**
 	 * 为 (连接, 项目) 建立订阅。`subscribe` 由调用方提供（它才知道怎么发请求），返回 `watchId`；
 	 * 返回 undefined/空串表示 helper 不支持或不给 id（静默降级到只读刷新）。
 	 */
-	ensure(hostId: string, sessionKey: unknown, projectId: string, subscribe: (paths: readonly string[]) => Promise<string | undefined>, options?: DirWatchEnsureOptions): Promise<void>;
+	ensure(hostId: string, sessionKey: unknown, projectId: string, subscribe: (paths: readonly string[]) => Promise<string | undefined>, options?: DirWatchEnsureOptions): Promise<DirWatchEnsureResult>;
 	/** 事件 → 应标脏的范围；未登记返回 undefined。 */
 	scopesForEvent(hostId: string, watchId: string): DirWatchScope[] | undefined;
+	/** 某个项目在当前代已被 watcher 覆盖的路径（去重）。深层订阅据此判断「还要不要 rewatch」。 */
+	pathsOf(hostId: string, projectId: string): string[];
 	/** 诊断/测试：某个 host 当前登记了几条订阅。 */
 	sizeOf(hostId: string): number;
 	/** 诊断/测试：某个 host 当前登记的全部 watchId。 */
@@ -131,7 +141,8 @@ export function createDirWatchRegistry(): DirWatchRegistry {
 			const requested = [...new Set(options.paths ?? [""])];
 			const watched = watchedPathsOf(record, projectId);
 			const missing = requested.filter((path) => !watched.has(path));
-			if (missing.length === 0) return;
+			if (missing.length === 0) return { rejected: 0 };
+			let rejected = 0;
 			// helper 每个 watcher 最多 32 条路径；多出来的路径只能靠下一个 watcher，绝不一次性发超限请求。
 			for (let offset = 0; offset < missing.length; offset += DIR_WATCH_LIMITS.pathsPerWatcher) {
 				const chunk = missing.slice(offset, offset + DIR_WATCH_LIMITS.pathsPerWatcher);
@@ -143,7 +154,10 @@ export function createDirWatchRegistry(): DirWatchRegistry {
 				}
 				const task = (async () => {
 					// 上限在发请求前就要判：第 5 个 watcher 一定是拒绝，不是排队。
-					if (record.watches.size >= DIR_WATCH_LIMITS.watchersPerHost) return;
+					if (record.watches.size >= DIR_WATCH_LIMITS.watchersPerHost) {
+						rejected += 1;
+						return;
+					}
 					const watchId = await subscribe([...chunk]);
 					if (watchId === undefined || watchId === "") return;
 					// 订阅在途时换了代：这个 id 属于旧 helper，不能登记到新代。
@@ -151,6 +165,7 @@ export function createDirWatchRegistry(): DirWatchRegistry {
 					// 等待期间配额被别的项目用完：退掉这个刚建好的，别偷偷超限。
 					if (record.watches.size >= DIR_WATCH_LIMITS.watchersPerHost) {
 						await unwatchOne(record, watchId);
+						rejected += 1;
 						return;
 					}
 					record.watches.set(watchId, { projectId, paths: [...chunk] });
@@ -162,11 +177,16 @@ export function createDirWatchRegistry(): DirWatchRegistry {
 					if (record.pending.get(signature) === task) record.pending.delete(signature);
 				}
 			}
+			return { rejected };
 		},
 		scopesForEvent(hostId, watchId) {
 			const scope = byHost.get(hostId)?.watches.get(watchId);
 			// 未登记 = 不是我们发起的（旧会话、别的项目、已撤销）：忽略比猜更安全。
 			return scope === undefined ? undefined : [scope];
+		},
+		pathsOf(hostId, projectId) {
+			const record = byHost.get(hostId);
+			return record === undefined ? [] : [...watchedPathsOf(record, projectId)];
 		},
 		sizeOf: (hostId) => byHost.get(hostId)?.watches.size ?? 0,
 		watchIdsOf: (hostId) => [...(byHost.get(hostId)?.watches.keys() ?? [])],
