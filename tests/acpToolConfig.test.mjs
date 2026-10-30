@@ -192,7 +192,14 @@ test("模式档：按 id/category 定位 mode 项，bypass 值按各家叫法识
 		currentValue: "yolo",
 		options: [
 			{ group: "Safe", name: "Safe", options: [{ value: "default", name: "Default" }] },
-			{ group: "Open", name: "Open", options: [{ value: "acceptEdits", name: "Accept Edits" }, { value: "yolo", name: "Bypass Permissions" }] },
+			{
+				group: "Open",
+				name: "Open",
+				options: [
+					{ value: "acceptEdits", name: "Accept Edits" },
+					{ value: "yolo", name: "Bypass Permissions" },
+				],
+			},
 		],
 	};
 	assert.equal(isAcpModeOption(grouped), true);
@@ -201,7 +208,16 @@ test("模式档：按 id/category 定位 mode 项，bypass 值按各家叫法识
 	assert.equal(findAcpModeOption([{ id: "model", name: "Model", category: "model", type: "select" }, grouped])?.id, "permissions");
 	assert.equal(findAcpModeOption([{ id: "mode", name: "Mode", type: "boolean" }]), undefined, "boolean 型不是模式枚举");
 	// Claude bypassPermissions / Qoder yolo / 其余 bypass_permissions 前缀都要认
-	assert.equal(findAcpBypassModeValue({ type: "select", options: [{ value: "default", name: "Default" }, { value: "bypassPermissions", name: "Bypass" }] }), "bypassPermissions");
+	assert.equal(
+		findAcpBypassModeValue({
+			type: "select",
+			options: [
+				{ value: "default", name: "Default" },
+				{ value: "bypassPermissions", name: "Bypass" },
+			],
+		}),
+		"bypassPermissions",
+	);
 	assert.equal(findAcpBypassModeValue(grouped), "yolo");
 	assert.equal(findAcpBypassModeValue({ type: "select", options: [{ value: "plan", name: "Plan" }] }), undefined);
 	assert.equal(findAcpBypassModeValue(undefined), undefined);

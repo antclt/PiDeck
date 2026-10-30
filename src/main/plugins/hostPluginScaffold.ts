@@ -118,9 +118,7 @@ function appJs(input: HostPluginScaffoldInput): string {
 	// sessions.read 是模板主体（会话列表与历史）：没声明就整块不生成，避免生成一份必然报权限错的示例。
 	const readsSessions = input.permissions.includes("sessions.read");
 	// 范围由 manifest 决定：同一个 list() 在工作区声明下会跨项目返回，这里只改注释免得误导。
-	const scopeNote = input.permissions.includes("sessions.read.workspace")
-		? "// 数据范围：整个工作区（所有项目目录）——声明了 sessions.read.workspace，且导航会自己切到目标项目。"
-		: "// 数据范围：只有当前项目（context.projectId）下已保存的会话；其他项目一律 session-not-authorized。";
+	const scopeNote = input.permissions.includes("sessions.read.workspace") ? "// 数据范围：整个工作区（所有项目目录）——声明了 sessions.read.workspace，且导航会自己切到目标项目。" : "// 数据范围：只有当前项目（context.projectId）下已保存的会话；其他项目一律 session-not-authorized。";
 	return `// 宿主插件示例：读会话目录与历史，并（可选）让工作台跳转。
 // 能力边界：只有 window.pideck 一个入口——网络由宿主按授权代发，不能直接 fetch、读文件、执行命令、加载 CDN。
 ${scopeNote}

@@ -422,7 +422,7 @@ export function ProjectTree(props: {
 
 	const projectsSection = (
 		<section aria-label={t("app.sidebarProjects")} role="tree">
-			{/* 会话分组树（只读浏览，数据在宿主 store，写入方是分组插件页）：置于普通项目之上 */} 
+			{/* 会话分组树（只读浏览，数据在宿主 store，写入方是分组插件页）：置于普通项目之上 */}
 			<SessionGroupsSection actions={props.actions} currentSessionId={props.currentSessionId} />
 			{/* 分组标题栏：左侧「项目」标题，右侧 = 「+ 添加项目」+ 全部折叠/展开（高频操作外露）
             + 「⋯ 更多操作」。目录存在性重扫属于低频维护动作，收进菜单避免挤占窄侧栏。

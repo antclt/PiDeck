@@ -100,35 +100,24 @@ export function parseRegQueryOutput(text: string): string | null {
  * 用户名是中文时 `C:\Users\张三\...` 会解成乱码,补进 PATH 的是一条废路径。
  */
 function readRegistryPathsWithPowerShell(): Promise<{ user: string | null; machine: string | null }> {
-	const script = [
-		"[Console]::OutputEncoding=[Text.Encoding]::UTF8;",
-		"Write-Output 'PIDECK-USER';",
-		"Write-Output ([Environment]::GetEnvironmentVariable('Path','User'));",
-		"Write-Output 'PIDECK-MACHINE';",
-		"Write-Output ([Environment]::GetEnvironmentVariable('Path','Machine'));",
-	].join(" ");
+	const script = ["[Console]::OutputEncoding=[Text.Encoding]::UTF8;", "Write-Output 'PIDECK-USER';", "Write-Output ([Environment]::GetEnvironmentVariable('Path','User'));", "Write-Output 'PIDECK-MACHINE';", "Write-Output ([Environment]::GetEnvironmentVariable('Path','Machine'));"].join(" ");
 	return new Promise((resolve) => {
-		execFile(
-			"powershell.exe",
-			["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
-			{ encoding: "utf8", windowsHide: true, timeout: QUERY_TIMEOUT_MS, maxBuffer: 1024 * 1024 },
-			(error, stdout) => {
-				if (error || !stdout) {
-					resolve({ user: null, machine: null });
-					return;
-				}
-				const userIndex = stdout.indexOf("PIDECK-USER");
-				const machineIndex = stdout.indexOf("PIDECK-MACHINE");
-				if (userIndex < 0 || machineIndex < 0) {
-					resolve({ user: null, machine: null });
-					return;
-				}
-				resolve({
-					user: stdout.slice(userIndex + "PIDECK-USER".length, machineIndex).trim() || null,
-					machine: stdout.slice(machineIndex + "PIDECK-MACHINE".length).trim() || null,
-				});
-			},
-		);
+		execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], { encoding: "utf8", windowsHide: true, timeout: QUERY_TIMEOUT_MS, maxBuffer: 1024 * 1024 }, (error, stdout) => {
+			if (error || !stdout) {
+				resolve({ user: null, machine: null });
+				return;
+			}
+			const userIndex = stdout.indexOf("PIDECK-USER");
+			const machineIndex = stdout.indexOf("PIDECK-MACHINE");
+			if (userIndex < 0 || machineIndex < 0) {
+				resolve({ user: null, machine: null });
+				return;
+			}
+			resolve({
+				user: stdout.slice(userIndex + "PIDECK-USER".length, machineIndex).trim() || null,
+				machine: stdout.slice(machineIndex + "PIDECK-MACHINE".length).trim() || null,
+			});
+		});
 	});
 }
 

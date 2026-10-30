@@ -3,16 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const {
-	ACP_STALL_TIMEOUT_DEFAULT_MS,
-	ACP_STALL_TIMEOUT_SECONDS,
-	ACP_TURN_TIMEOUT_DEFAULT_MS,
-	ACP_TURN_TIMEOUT_MINUTES,
-	acpStallTimeoutPatch,
-	acpStallTimeoutText,
-	acpTurnTimeoutPatch,
-	acpTurnTimeoutText,
-} = loadTsCommonJs("src/renderer/src/components/app/settings/acpTimeoutInput.ts");
+const { ACP_STALL_TIMEOUT_DEFAULT_MS, ACP_STALL_TIMEOUT_SECONDS, ACP_TURN_TIMEOUT_DEFAULT_MS, ACP_TURN_TIMEOUT_MINUTES, acpStallTimeoutPatch, acpStallTimeoutText, acpTurnTimeoutPatch, acpTurnTimeoutText } = loadTsCommonJs("src/renderer/src/components/app/settings/acpTimeoutInput.ts");
 
 // 模块在独立 vm 上下文里求值，返回的对象原型与本地 Object 不同，deepEqual 会因引用比较失败；
 // 这里只取需要钉住的字段值比较。

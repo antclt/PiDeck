@@ -178,8 +178,8 @@ export function collectSessionFileChanges(messages: readonly ChatMessage[]): Ses
 		map.set(target.path, {
 			path: target.path,
 			count: (prev?.count ?? 0) + 1,
-			originalContent: payload ? target.originalContent : prev?.originalContent ?? "",
-			content: payload ? target.content : prev?.content ?? "",
+			originalContent: payload ? target.originalContent : (prev?.originalContent ?? ""),
+			content: payload ? target.content : (prev?.content ?? ""),
 		});
 	}
 	return [...map.values()];

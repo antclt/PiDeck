@@ -381,14 +381,7 @@ export function SidebarContent(props: SidebarContentProps) {
 					{/* 低频入口折叠组：定时任务 / 智能体 / 收藏，固定排在动作区最末（插件行之后）。展开后按原顺序平铺，
 					    不改变各自行为（定时任务仍有运行中呼吸点，智能体/收藏各自打开页面 Tab）。
 					    箭头与树节点同向：收起指向右（▸），展开转向下（▾）——不是反过来的「收起下指、展开上指」。 */}
-					<button
-						type="button"
-						className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-bg-hover"
-						aria-expanded={moreActionsOpen}
-						aria-controls="sidebar-more-actions"
-						title={t("common.more")}
-						onClick={() => setMoreActionsOpen((v) => !v)}
-					>
+					<button type="button" className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-bg-hover" aria-expanded={moreActionsOpen} aria-controls="sidebar-more-actions" title={t("common.more")} onClick={() => setMoreActionsOpen((v) => !v)}>
 						<ChevronRight className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-fast", moreActionsOpen && "rotate-90")} aria-hidden="true" />
 						<span className="min-w-0 flex-1 truncate font-medium">{t("common.more")}</span>
 					</button>

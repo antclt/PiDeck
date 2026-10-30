@@ -79,11 +79,7 @@ test("ACP 只上报 file_path 的编辑（Qoder 实测 kind=edit）也进本轮�
 	const { collectSessionFileChanges, getToolDiffTarget, hasFileChangePayload } = loadTsCommonJs("src/shared/fileChanges.ts");
 	// Qoder CLI 的 wire 实际形态：title=Edit、kind=edit，rawInput 只有 file_path，
 	// content 为空数组（旧/新文本根本不上 wire）。修复前聚合结果恒为空 → 轮末 chip 行消失。
-	let state = projectAcpSessionUpdate(
-		initialAcpProjection(),
-		{ sessionUpdate: "tool_call", toolCallId: "tc-path", title: "Edit", kind: "edit", status: "in_progress", rawInput: { file_path: "C:/repo/a.ts" } },
-		"agent-1",
-	);
+	let state = projectAcpSessionUpdate(initialAcpProjection(), { sessionUpdate: "tool_call", toolCallId: "tc-path", title: "Edit", kind: "edit", status: "in_progress", rawInput: { file_path: "C:/repo/a.ts" } }, "agent-1");
 	state = projectAcpSessionUpdate(state, { sessionUpdate: "tool_call_update", toolCallId: "tc-path", status: "completed", content: [] }, "agent-1");
 	const entries = collectSessionFileChanges(state.messages);
 	assert.equal(entries.length, 1);
