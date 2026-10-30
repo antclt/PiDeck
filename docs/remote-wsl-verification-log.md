@@ -566,4 +566,23 @@
 
 **与协议级证据的关系**：§11.6 证明「helper 侧能力与协议正确」，本节证明「产品 UI 链路（能力协商 → 抽屉搜索 → 命中分区 → 清除）」正确，两者互补；至此内容搜索的验证不再有"只有协议层"的缺口。
 
+---
+
+## 14. 最终收尾第二轮（dev `f857a331f` 之后）
+
+### 14.1 中间全量（HEAD `24428bc5a`，两条契约修复前）：**fail 2**
+
+`npm test` ⇒ **tests 15117 / pass 14830 / fail 2 / skipped 285 / 1127.7s**。两条都是**源码契约字面量**被 W1 task-16 的「资源目标路由」打破，产品行为无回归：
+
+| # | 失败 | 原因 | 处置 |
+|---|------|------|------|
+| 1 | `tests/extensionUserPluginClassification.test.mjs:67` | 断言要求 `extensionManager.toggleFromUi(`；实际 toggle 先 `const manager = await resolvePiResourceWriteManager({…})`（该行末尾就是 `});`）再 `manager.toggleFromUi(…)`。语义契约仍成立：单一入口 + storeIpc 内无 `startsWith("pi-deck-")` | Lead 已改为 `/\.toggleFromUi\(/`（不绑变量名） |
+| 2 | `tests/skillsRenameIpc.test.mjs:15` | 该测试用 `indexOf("});", start)` 切 handler 块；新 handler 第一行 `resolvePiResourceWriteManager({…});` 就含 `});` ⇒ 块在第 1978 行被截断，后面的校验语句在切片之外。**handler 本身校验完好**（`systemIpc.ts:1980` skillPath 校验、`1983` newName 校验、`1986` `manager.rename`） | 待修：block 边界改到下一个 `ipcMain.handle(`（或 `skillsOpenFolder`），三条断言语义不变 |
+
+> 备注：本轮 `npm test` 总时长 1127.7s，明显长于此前 400-500s，主因是交叉安装（`packDshRuntimeCross` 的 npm install）在这段时间特别慢，属环境波动，非产品问题。
+
+### 14.2 修复合入后的最终 HEAD（待补）
+
+- 待两条契约跟随合入 dev 后：`git merge dev` → 复跑这两个文件 → **再跑一次全量**（最终 HEAD 必须 0 fail）→ 数字补进本节。
+
 
