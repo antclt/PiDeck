@@ -18,6 +18,7 @@ import type { ConfigManager } from "../config/ConfigManager";
 import { getPiPackageCatalog } from "../extensions/piPackageCatalog";
 import type { PiResourceManagerPool } from "../config/PiResourceManagerPool";
 import { readPiResourceOptions, requireLocalPiResourceTarget } from "../config/piResourceTarget";
+import { resolvePiResourceWriteManager } from "../config/piResourceWriteRouting";
 
 export type StoreIpcDeps = {
 	promptManager: PromptManager;
@@ -111,23 +112,25 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 		return (piResourcePool ? await piResourcePool.prompts(parsed) : promptManager).list();
 	});
 	// 编辑内置模板时先创建用户副本（fork）再写入内容，渲染层编辑流程依赖此通道。
-	// 未路由的资源写通道（task-14）：非本机 target 在触碰本机 manager 前回稳定码。
+	// 资源写通道（task-16）：local/缺省 → 原单例；wsl → 池中该档案管理器（写入其发行版 HOME）。
 	ipcMain.handle(ipcChannels.promptsCreate, async (_event, input: unknown, options?: unknown) => {
-		requireLocalPiResourceTarget(options);
+		const manager = await resolvePiResourceWriteManager({ options, pool: piResourcePool, local: () => promptManager, pick: async (pool, parsed) => await pool.prompts(parsed) });
 		const validInput = promptInput(input);
-		const result = await promptManager.create(validInput);
+		const result = await manager.create(validInput);
 		void appLogger.info("prompt", "Prompt template created", { name: validInput.name });
 		return result;
 	});
 	ipcMain.handle(ipcChannels.promptsDelete, async (_event, filePath: unknown, options?: unknown) => {
-		requireLocalPiResourceTarget(options);
+		const manager = await resolvePiResourceWriteManager({ options, pool: piResourcePool, local: () => promptManager, pick: async (pool, parsed) => await pool.prompts(parsed) });
 		const validPath = requireText(filePath, "prompt path", 32_768);
-		await promptManager.delete(validPath);
+		// WSL 目标：回收站对 UNC 路径可能不支持 → 报错而不是硬删（风险已登记）。
+		await manager.delete(validPath);
 		void appLogger.info("prompt", "Prompt template deleted", { filePath: validPath });
 	});
-	ipcMain.handle(ipcChannels.promptsOpenFolder, (_event, options?: unknown) => {
-		requireLocalPiResourceTarget(options);
-		return promptManager.openFolder();
+	ipcMain.handle(ipcChannels.promptsOpenFolder, async (_event, options?: unknown) => {
+		const manager = await resolvePiResourceWriteManager({ options, pool: piResourcePool, local: () => promptManager, pick: async (pool, parsed) => await pool.prompts(parsed) });
+		// WSL 目标：openSystemPath 对 UNC 路径若不被支持会抛错（不静默）。
+		return await manager.openFolder();
 	});
 	ipcMain.handle(ipcChannels.promptsEdit, async (_event, filePath: unknown, content?: unknown, options?: unknown) => {
 		// options 第一行校验：非法/ssh 目标在触碰任何文件前失败（稳定码）。
@@ -162,10 +165,10 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 		void appLogger.info("prompt", "Project prompt template deleted", { projectId, name: validName });
 	});
 	ipcMain.handle(ipcChannels.promptsRename, async (_event, oldName: unknown, newName: unknown, options?: unknown) => {
-		requireLocalPiResourceTarget(options);
+		const manager = await resolvePiResourceWriteManager({ options, pool: piResourcePool, local: () => promptManager, pick: async (pool, parsed) => await pool.prompts(parsed) });
 		const validOldName = requireText(oldName, "old prompt name", 256);
 		const validNewName = requireText(newName, "new prompt name", 256);
-		const result = await promptManager.rename(validOldName, validNewName);
+		const result = await manager.rename(validOldName, validNewName);
 		void appLogger.info("prompt", "Prompt template renamed", {
 			oldName: validOldName,
 			newName: validNewName,
@@ -184,10 +187,10 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 		return result;
 	});
 	ipcMain.handle(ipcChannels.promptsToggle, async (_event, filePath: unknown, enabled: unknown, options?: unknown) => {
-		requireLocalPiResourceTarget(options);
+		const manager = await resolvePiResourceWriteManager({ options, pool: piResourcePool, local: () => promptManager, pick: async (pool, parsed) => await pool.prompts(parsed) });
 		const validPath = requireText(filePath, "prompt path", 32_768);
 		if (typeof enabled !== "boolean") throw new Error("Invalid prompt toggle input.");
-		const result = await promptManager.toggle(validPath, enabled);
+		const result = await manager.toggle(validPath, enabled);
 		void appLogger.info("prompt", "Prompt template toggled", { filePath: validPath, enabled });
 		return result;
 	});
@@ -670,14 +673,15 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 		return result;
 	});
 	ipcMain.handle(ipcChannels.extensionsToggle, async (_event, source: string, enabled: boolean, scope?: "user" | "project" | "unknown", path?: unknown, projectId?: unknown, options?: unknown) => {
-		requireLocalPiResourceTarget(options);
+		// 资源写通道（task-16）：local/缺省 → 原单例；wsl → 池中该档案管理器（写发行版 settings.json）。
+		const manager = await resolvePiResourceWriteManager({ options, pool: piResourcePool, local: () => extensionManager, pick: async (pool, parsed) => await pool.extensions(parsed) });
 		// 原生过滤规则：本地文件扩展要精确路径，项目作用域要 projectId（来自渲染层，主进程校验）。
 		const extensionPath = typeof path === "string" && path.length <= 32_768 ? path : undefined;
 		const resolvedProjectId = typeof projectId === "string" && projectId.trim() && projectId.length <= 256 ? projectId.trim() : undefined;
 		if (scope === "project" && !resolvedProjectId) throw new Error("Project scope requires a project id.");
 		// 内置扩展与原生过滤规则的分流收口在 ExtensionManager.toggleFromUi：与 Web 工作区路由共用同一入口，
 		// 避免两处各写一套「pi-deck-* 前缀 ≠ 内置身份」的白名单判定（issue #321 教训）。
-		await extensionManager.toggleFromUi(source, enabled, scope, extensionPath, resolvedProjectId);
+		await manager.toggleFromUi(source, enabled, scope, extensionPath, resolvedProjectId);
 		void appLogger.info("extension", "Extension toggled", { source, enabled, scope, projectId });
 	});
 	ipcMain.handle(ipcChannels.extensionsUpdate, async (_event, options?: unknown) => {
