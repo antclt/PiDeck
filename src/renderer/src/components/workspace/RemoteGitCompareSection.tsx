@@ -52,7 +52,8 @@ export function RemoteGitCompareSection(props: RemoteGitCompareSectionProps) {
 			</button>
 			{open ? (
 				<>
-					<RemoteGitCapabilityNote kind="compare" context={{ compareOpen: open, compareMode: "trees" }} />
+					{/* 说明条按答案的真实语义判断：merge-base 有 ahead/behind，不能再显示 trees-only 说明。 */}
+					<RemoteGitCapabilityNote kind="compare" context={{ compareOpen: open, compareMode: props.compare?.mode }} />
 					{props.refsLoading ? <p className="px-3 text-xs text-text-secondary">{t("remoteGit.loading")}</p> : null}
 					{props.refsErrorCode ? (
 						<p role="alert" className="px-3 text-xs text-danger">

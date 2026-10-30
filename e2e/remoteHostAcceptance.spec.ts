@@ -168,8 +168,8 @@ test.describe("远端主机功能级验收（真机）", () => {
 				const modal = window.locator(".settings-modal");
 				await expect(modal).toBeVisible();
 				await modal.getByRole("tab", { name: "连接", exact: true }).click();
-				await modal.getByRole("button", { name: "添加", exact: true }).click();
-				const addDialog = window.locator('[role="dialog"]').filter({ hasText: "添加 SSH 连接" });
+				await modal.getByRole("button", { name: /^(添加|新建连接)$/ }).click();
+				const addDialog = window.getByRole("dialog", { name: /^(新建连接|添加 SSH 连接)$/ });
 				await expect(addDialog, "点「添加」必须打开 AddHostDialog").toBeVisible();
 				// 候选来自真实 ~/.ssh/config：按 user@host 精确匹配，不依赖别名怎么起。
 				// 同一条 ssh config 可能对同一台主机给出多条别名（IP 别名与短名别名指向同一个 HostName），
@@ -178,7 +178,8 @@ test.describe("远端主机功能级验收（真机）", () => {
 				// 提交入口也在同一次改造里从「保存」变成「添加并连接」。
 				const importToggle = addDialog.getByRole("button", { name: "从 SSH config 导入" });
 				if ((await importToggle.count()) > 0 && (await importToggle.getAttribute("aria-expanded")) !== "true") await importToggle.click();
-				const candidate = addDialog.getByRole("button", { name: new RegExp(creds.user + "@" + creds.host.replace(/\./g, "\\.")) });
+				// 候选列表是对话框之上的独立弹层，不在 AddHostDialog 子树内：按页面作用域找（与 remoteSessionAcceptance 同口径）。
+				const candidate = window.getByRole("button", { name: new RegExp(creds.user + "@" + creds.host.replace(/\./g, "\\.")) });
 				await expect(candidate.first(), "ssh config 里需要至少一条 " + creds.user + "@" + creds.host + " 候选").toBeVisible({ timeout: 30_000 });
 				await candidate.first().click();
 				await addDialog
@@ -301,7 +302,8 @@ test.describe("远端主机功能级验收（真机）", () => {
 					},
 					{ remoteSessionId: authSessionId },
 				);
-				expect(receipt, "重复登记必须是 created=false 的区分回执").toMatchObject({ ok: true, created: false, remoteSessionId: authSessionId });
+				// 2026-10 契约迁移后修正（非放宽）：register 现走 Op 信封，事实在 value 里；仍断言 ok/created/remoteSessionId 三个事实。
+				expect(receipt, "重复登记必须是 created=false 的区分回执").toMatchObject({ ok: true, value: { created: false, remoteSessionId: authSessionId } });
 				// 没有多出一条记录，也没有多开 Tab。
 				await expect(projectA.locator(".session-row")).toHaveCount(1);
 				expect(await window.locator('[role="tab"][data-session-id]').count(), "重复导入不得开新 Tab").toBe(tabsBefore);

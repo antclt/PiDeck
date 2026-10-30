@@ -357,6 +357,11 @@ export function createRemoteGitViewController(projectId: string, projectKey: str
 										? {
 												ok: true,
 												compare: {
+													// 语义必须跟着答案走：trees 才显示「无 merge-base / ahead-behind」的能力说明，
+													// merge-base 有 ahead/behind，不能再提示缺失。
+													mode: answer.value.mode,
+													...(answer.value.ahead === undefined ? {} : { ahead: answer.value.ahead }),
+													...(answer.value.behind === undefined ? {} : { behind: answer.value.behind }),
 													base: { ref: answer.value.base.ref, oid: answer.value.base.oid },
 													head: { ref: answer.value.head.ref, oid: answer.value.head.oid },
 													files: answer.value.files.map((file) => ({ status: file.status, path: file.path, ...(file.oldPath === undefined ? {} : { oldPath: file.oldPath }) })),
