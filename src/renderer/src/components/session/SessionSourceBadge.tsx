@@ -52,7 +52,7 @@ const SOURCE_TONES: Record<SessionSource, string> = {
  * 避免同一品牌（codex/claude/opencode/kimi/cursor/minimax）在两处各画一份而逐渐失真。
  * 尺寸由调用方 className 控制，缺省 14px（徽标/下拉项用）。
  */
-type BrandKey = SessionSource | Extract<AcpToolBrand, "gemini" | "qwen" | "codebuddy">;
+type BrandKey = SessionSource | Extract<AcpToolBrand, "gemini" | "qwen" | "codebuddy" | "mimo">;
 
 function BrandMark(props: { brand: BrandKey; className?: string }) {
 	const cls = props.className ?? "size-3.5";
@@ -149,6 +149,16 @@ function BrandMark(props: { brand: BrandKey; className?: string }) {
 		return (
 			<svg viewBox="0 0 24 24" className={cls} aria-hidden="true" focusable="false">
 				<path fill="currentColor" d="M3 4h3.3l6.7 10.2L19.7 4H23v16h-3.4v-9.9L13.9 18h-1.8L6.4 10.1V20H3z" />
+			</svg>
+		);
+	}
+
+	if (props.brand === "mimo") {
+		// MiMo Code（小米）：自绘「M + 右上点」标记（无公开品牌 SVG），与 minimax 的 M 靠右上点区分。
+		return (
+			<svg viewBox="0 0 24 24" className={cls} aria-hidden="true" focusable="false">
+				<path fill="currentColor" d="M3 4h3.3l6.7 10.2L19.7 4H23v16h-3.4v-9.9L13.9 18h-1.8L6.4 10.1V20H3z" />
+				<path fill="currentColor" d="M17.6 1.1h3.9v3.9h-3.9z" />
 			</svg>
 		);
 	}

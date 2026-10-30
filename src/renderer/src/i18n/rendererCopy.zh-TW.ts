@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: c0daa41c0e33d23826b4a20160d7eceaf0865e0fa601b646aee51a6746ed354f（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 30e73ac008fb03db94d2db8a3ebca4c82382a2e0333b136037fc161831d9758f（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -329,6 +329,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"acp.presetDesc.cursor-agent": "Cursor Agent（agent acp，官網指令碼安裝，需 Cursor 登入）",
 	"acp.presetDesc.codebuddy": "騰訊 CodeBuddy（npx 按需拉取 @tencent-ai/codebuddy-code --acp）",
 	"acp.presetDesc.minimax": "MiniMax Code（npx 按需拉取 @minimax-ai/code acp，區分 cn/global 區域帳號）",
+	"acp.presetDesc.mimo": "小米 MiMo Code（mimo acp，需先在終端 mimo auth login 登入小米帳號）",
 	"acp.presetDesc.qoder": "Qoder CLI（qodercli --acp，官網指令碼安裝；先在終端登入或配置 QODER_PERSONAL_ACCESS_TOKEN）",
 	"acp.presetDesc.qoder-cn": "Qoder CLI CN（qoderclicn --acp，國內版官網指令碼安裝；帳號與令牌獨立，先在終端登入或配置 QODERCN_PERSONAL_ACCESS_TOKEN）",
 	"app.anonymousChat": "新建匿名聊天（不儲存會話記錄）",

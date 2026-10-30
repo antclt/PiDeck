@@ -24,6 +24,7 @@ const EXPECTED_BY_PRESET = {
 	"cursor-agent": "cursor",
 	codebuddy: "codebuddy",
 	minimax: "minimax",
+	mimo: "mimo",
 	qoder: "qoder",
 	"qoder-cn": "qoder",
 };
