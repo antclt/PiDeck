@@ -19,28 +19,16 @@ import { createRemoteProjectTargetResolver } from "./remoteProjectTarget";
 import { ipcMain, type WebContents } from "electron";
 import { ipcChannels } from "../../shared/ipc";
 import { codeOf, opFailFromCode, opOk } from "../../shared/op";
-import type {
-	RemoteProjectDownloadResult,
-	RemoteProjectUploadResult,
-	RemoteProjectEnrollAnswerResult,
-	RemoteProjectEnrollMode,
-	RemoteProjectEnrollRequest,
-	RemoteProjectEnrollResult,
-	RemoteProjectListResult,
-	RemoteProjectReadResult,
-	RemoteProjectRootStatusResult,
-	RemoteProjectSearchResult,
-	RemoteWorkspaceEntry,
-} from "../../shared/types/remoteHost";
-import type { ProjectDirectoryPageResult, ProjectPathState, ProjectPathsExistResult } from "../../shared/types/projectFiles";
+import type { ProjectDirectoryPageResult, ProjectPathsExistResult } from "../../shared/types/projectFiles";
+import type { RemoteProjectDownloadResult, RemoteProjectUploadResult, RemoteProjectEnrollAnswerResult, RemoteProjectEnrollMode, RemoteProjectEnrollRequest, RemoteProjectEnrollResult, RemoteWorkspaceEntry } from "../../shared/types/remoteHost";
+import { readRelativePath, readerPath, registerRemoteProjectReadIpc, sessionPort, type RemoteProjectDirSnapshot } from "./remoteProjectReadIpc";
+import { projectDirectoryPage, projectPathsExist } from "./remoteProjectDirectoryReads";
 import { registerRemoteProjectCreateFlow } from "./remoteProjectCreateIpc";
 import type { RemoteHostConnectionService, RemoteProjectSession } from "../remote/RemoteHostConnectionService";
-import { REMOTE_HELPER_MAX_SEARCH_QUERY_LENGTH } from "../remote/RemoteHelperContract";
 import { REMOTE_PROJECT_TRASH_DIR } from "../remote/RemoteProjectEntryCommands";
 import { REMOTE_UPLOAD_TEMP_NAME } from "../remote/RemoteProjectFileUpload";
 import { resolveRemoteBrowseRoot } from "../remote/RemoteBrowseRoot";
-import { createRemoteSearchReader, REMOTE_SEARCH_READER_CODES } from "../remote/RemoteSearchReader";
-import { createRemoteWorkspaceReader, type RemoteWorkspacePort } from "../remote/RemoteWorkspaceReader";
+import { createRemoteWorkspaceReader } from "../remote/RemoteWorkspaceReader";
 import { createFactCache, type FactCache } from "../remote/RemoteFactCache";
 import { createDirWatchRegistry, dirKeysAfterWrite, dirPathsAfterWrite } from "../remote/RemoteDirWatchRegistry";
 import { createRemoteFactsHub, type RemoteFactsHub } from "../remote/RemoteFactsNotifications";
@@ -121,28 +109,6 @@ export function registerRemoteProjectIpc(input: {
 			return { code: codeOf(error, "REMOTE_CONNECTION_SERVICE_UNAVAILABLE") };
 		}
 	};
-
-	/**
-	 * Validate a path the renderer named. Relative to the confirmed root by construction: an absolute path,
-	 * a traversal segment, a control byte or a backslash is refused here, so the helper only ever sees a
-	 * value that stays inside the boundary regardless of what the UI sent.
-	 *
-	 * The empty string is this layer's spelling of "the root". The reader spells it `"."` instead (it
-	 * refuses an empty path outright), so the two are translated by `readerPath` — the UI should not have to
-	 * know which convention the transport chose.
-	 */
-	const readRelativePath = (value: unknown): string | undefined => {
-		if (typeof value !== "string" || value.length > 4096) return undefined;
-		if (/[\u0000-\u001f\u007f\\]/.test(value)) return undefined;
-		if (value.startsWith("/")) return undefined;
-		if (value === "") return "";
-		const segments = value.split("/");
-		if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) return undefined;
-		return value;
-	};
-
-	/** This layer's empty string means the root; the reader's own spelling of that is `"."`. */
-	const readerPath = (relative: string): string => (relative === "" ? "." : relative);
 
 	/**
 	 * Remote project enrollment (Phase 3 第二段).
@@ -249,17 +215,6 @@ export function registerRemoteProjectIpc(input: {
 	const projectReadTarget = createRemoteProjectTargetResolver({ service: input.service, locator: input.projects?.locator });
 
 	/**
-	 * Bind the reader's transport to one already-pinned session.
-	 *
-	 * The host id is re-checked rather than ignored: the reader names a host in its diagnostics, and a port
-	 * that silently served another host would make those diagnostics lie.
-	 */
-	const sessionPort = (session: RemoteProjectSession, hostId: string): RemoteWorkspacePort => ({
-		request: (requestHostId, method, params, options) => (requestHostId === hostId ? session.request(method, params, options) : Promise.reject(new Error("SSH_HOST_NOT_READY"))),
-		cancel: (requestHostId, requestId, options) => (requestHostId === hostId ? session.cancel(requestId, options) : Promise.reject(new Error("SSH_HOST_NOT_READY"))),
-	});
-
-	/**
 	 * 目录事实（W3 接线）：**一次内容变化只装载一次**。
 	 *
 	 * 树、搜索建议、Git 面板的“这个目录里有什么”过去各自问一遍远端；现在同一个 (projectId, 相对路径)
@@ -337,7 +292,7 @@ export function registerRemoteProjectIpc(input: {
 	 *
 	 * `force` 只给显式刷新用：越过已完成缓存；在途同代装载仍可合并。
 	 */
-	async function readDirSnapshot(projectId: string, relative: string, force: boolean): Promise<{ ok: true; snapshot: { value: RemoteWorkspaceEntry[]; revision: number } } | { ok: false; code: string }> {
+	async function readDirSnapshot(projectId: string, relative: string, force: boolean): Promise<RemoteProjectDirSnapshot> {
 		const target = await projectReadTarget(projectId);
 		if ("code" in target) return { ok: false, code: target.code };
 		const key = projectId + "\u0000" + relative;
@@ -349,106 +304,11 @@ export function registerRemoteProjectIpc(input: {
 		return snapshot.ok ? { ok: true, snapshot } : { ok: false, code: snapshot.code };
 	}
 
-	ipcMain.handle(ipcChannels.remoteProjectList, async (_event, projectIdValue: unknown, pathValue: unknown): Promise<RemoteProjectListResult> => {
-		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
-		const relative = readRelativePath(pathValue);
-		if (relative === undefined) return opFailFromCode("REMOTE_PROJECT_PATH_INVALID");
-		if (typeof projectIdValue !== "string") return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
-		const read = await readDirSnapshot(projectIdValue, relative, false);
-		if (!read.ok) return opFailFromCode(read.code);
-		// revision 随值替换或标脏递增：两个读者拿到同一个数就说明他们看的是同一份事实。
-		return opOk({ entries: read.snapshot.value, revision: read.snapshot.revision });
-	});
-
-	ipcMain.handle(ipcChannels.remoteProjectFactsSubscribe, (event, projectIdValue: unknown) => {
-		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
-		if (typeof projectIdValue !== "string" || projectIdValue.length === 0 || projectIdValue.length > 256 || projectIdValue !== projectIdValue.trim() || /[\u0000-\u001f\u007f]/.test(projectIdValue)) return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
-		factsEvents.subscribe(event.sender, projectIdValue);
-		return opOk({ subscribed: true as const });
-	});
-	ipcMain.handle(ipcChannels.remoteProjectFactsUnsubscribe, (event, projectIdValue: unknown) => {
-		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
-		if (typeof projectIdValue !== "string" || projectIdValue.length === 0 || projectIdValue.length > 256) return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
-		factsEvents.unsubscribe(event.sender.id, projectIdValue);
-		return opOk({ subscribed: false as const });
-	});
-
-	ipcMain.handle(ipcChannels.remoteProjectRead, async (_event, projectIdValue: unknown, pathValue: unknown): Promise<RemoteProjectReadResult> => {
-		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
-		// The read of the root itself is not a file; an empty path is a valid listing target but never a read.
-		const relative = readRelativePath(pathValue);
-		if (relative === undefined || relative === "") return opFailFromCode("REMOTE_PROJECT_PATH_INVALID");
-		// 回收站不是用户可读的项目文件：读通道在这里拒绝（只读列表隐藏、回收站三通道单独授权）。
-		if (relative === REMOTE_PROJECT_TRASH_DIR || relative.startsWith(REMOTE_PROJECT_TRASH_DIR + "/")) return opFailFromCode("REMOTE_FILE_PROTECTED_PATH");
-		const target = await projectReadTarget(projectIdValue);
-		if ("code" in target) return opFailFromCode(target.code);
-		try {
-			// The sizing stat, every chunk and the closing stat all happen under one host operation, so no
-			// other project can switch the root between two chunks of this file.
-			const outcome = await target.service.withProjectSession(target.hostId, target.remotePath, async (session) => {
-				const reader = createRemoteWorkspaceReader({ port: sessionPort(session, target.hostId) });
-				return reader.readFile(target.hostId, relative);
-			});
-			if (!outcome.ok) return opFailFromCode(outcome.code);
-			const file = outcome.value;
-			return opOk({ contentBase64: Buffer.from(file.content).toString("base64"), bytes: file.bytes, mtimeMs: file.mtimeMs });
-		} catch (error) {
-			return opFailFromCode(codeOf(error, "REMOTE_PROJECT_READ_FAILED"));
-		}
-	});
-
-	/**
-	 * 项目内**文件名**搜索（不含内容搜索）。
-	 *
-	 * 与 listProject/readProjectFile 同构：解析 locator → host/root，整次搜索都在 withProjectSession 的受控
-	 * 边界内完成，因此一次搜索不会横跨两个 root。query 来自渲染层，在这里（IPC 边界）先按契约校验一次，
-	 * reader 内部还会再校验一次；非法 query 一个帧都不发出去。
-	 *
-	 * `truncated` 必须如实透传：它表示遍历在某一项上限处收束，界面据此显示「结果已截断」，而不是把一屏
-	 * 结果伪装成完整答案。
-	 */
-	ipcMain.handle(ipcChannels.remoteProjectSearch, async (_event, projectIdValue: unknown, pathValue: unknown, queryValue: unknown): Promise<RemoteProjectSearchResult> => {
-		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
-		const relative = readRelativePath(pathValue);
-		if (relative === undefined) return opFailFromCode("REMOTE_PROJECT_PATH_INVALID");
-		// 渲染层来的值一律不可信：长度与控制字节在这里就拒，绝不把非法 query 发到远端。
-		if (typeof queryValue !== "string" || queryValue.length === 0 || queryValue.length > REMOTE_HELPER_MAX_SEARCH_QUERY_LENGTH || /[\u0000-\u001f\u007f]/.test(queryValue)) return opFailFromCode(REMOTE_SEARCH_READER_CODES.queryInvalid);
-		const target = await projectReadTarget(projectIdValue);
-		if ("code" in target) return opFailFromCode(target.code);
-		try {
-			const outcome = await target.service.withProjectSession(target.hostId, target.remotePath, async (session) => {
-				const reader = createRemoteSearchReader({ port: sessionPort(session, target.hostId) });
-				return reader.search(target.hostId, readerPath(relative), queryValue);
-			});
-			if (!outcome.ok) return opFailFromCode(outcome.code);
-			const result = outcome.value;
-			// 只把界面要用的字段接过去；远端多余字段在 reader 里已被拒，这里再显式重建一次。
-			// 递归搜索会命中回收站里的归档条目，但它们不是用户可搜索的文件：按首段过滤整棵 .pideck-trash。
-			return opOk({
-				entries: result.entries.filter((entry) => entry.path.split("/")[0] !== REMOTE_PROJECT_TRASH_DIR && !REMOTE_UPLOAD_TEMP_NAME.test(entry.path.split("/").at(-1) ?? "")).map((entry) => ({ path: entry.path, name: entry.name, kind: entry.kind, ...(entry.bytes === undefined ? {} : { bytes: entry.bytes }) })),
-				scanned: result.scanned,
-				truncated: result.truncated,
-			});
-		} catch (error) {
-			return opFailFromCode(codeOf(error, "REMOTE_PROJECT_READ_FAILED"));
-		}
-	});
-
-	/**
-	 * 项目级 root 复核状态（第四批设计 (i)）。
-	 *
-	 * 只读既往复核结果：不连主机、不发任何 helper 请求、不建立会话，也不在这里重新复核（复核只在建立/恢复
-	 * 会话时发生）。projectId → (hostId, remotePath) 由 main 从项目库解析，渲染层不传路径，因此同一个 host 上
-	 * 某个项目漂移不会污染另一个健康项目的答案——这正是 (i) 相对「接到主机级 needs-attention」的价值。
-	 * projectReadTarget 已经做完全部入参/归属校验（非法 id、未知项目、非 ssh 项目各自的稳定码），这里复用它，
-	 * 但只取 locator 与 service，不碰会话。
-	 */
-	ipcMain.handle(ipcChannels.remoteProjectRootStatus, async (_event, projectIdValue: unknown): Promise<RemoteProjectRootStatusResult> => {
-		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
-		const target = await projectReadTarget(projectIdValue);
-		if ("code" in target) return opFailFromCode(target.code);
-		const status = target.service.projectRootStatus(target.hostId, target.remotePath);
-		return opOk(status.status === "ok" ? { status: "ok" } : { status: "needs-attention", code: status.code });
+	registerRemoteProjectReadIpc({
+		enabled: input.enabled,
+		projectReadTarget,
+		factsEvents,
+		readDirSnapshot,
 	});
 
 	return {
@@ -458,68 +318,8 @@ export function registerRemoteProjectIpc(input: {
 			// 只标脏 + 通知：读仍由活跃的消费者决定（一次写不产生远端往返）。
 			factsEvents.publish({ projectId, generation: generationOf(projectId), scopes: touched.map((path) => ({ kind: "dir" as const, path })) });
 		},
-		async directoryPage(projectId: string, path: string, force = false): Promise<ProjectDirectoryPageResult> {
-			const relative = readRelativePath(path);
-			if (relative === undefined) return opFailFromCode("REMOTE_PROJECT_PATH_INVALID");
-			const read = await readDirSnapshot(projectId, relative, force);
-			if (!read.ok) return opFailFromCode(read.code);
-			const prefix = relative === "" ? "" : relative + "/";
-			const entries = read.snapshot.value
-				.filter((entry) => entry.kind === "file" || entry.kind === "directory")
-				.map((entry) => ({
-					target: { projectId, relativePath: prefix + entry.name },
-					relativePath: prefix + entry.name,
-					type: entry.kind as "file" | "directory",
-					// helper 的 fs.list 不逐项探测：远端只能是 unknown，不能伪装成“没有子项”。
-					hasChildren: (entry.kind === "directory" ? "unknown" : false) as boolean | "unknown",
-				}));
-			return opOk({ entries: entries.slice(0, 2000), truncated: entries.length > 2000, revision: read.snapshot.revision, generation: generationOf(projectId) });
-		},
-		async pathsExist(projectId: string, paths: readonly string[]): Promise<ProjectPathsExistResult> {
-			const relativePaths: string[] = [];
-			for (const path of paths) {
-				const relative = readRelativePath(path);
-				if (relative === undefined) return opFailFromCode("REMOTE_PROJECT_PATH_INVALID");
-				relativePaths.push(relative);
-			}
-			const target = await projectReadTarget(projectId);
-			if ("code" in target) return opFailFromCode(target.code);
-			try {
-				const outcome = await target.service.withProjectSession(
-					target.hostId,
-					target.remotePath,
-					async (session) => {
-						const reader = createRemoteWorkspaceReader({ port: sessionPort(session, target.hostId) });
-						const states: ProjectPathState[] = [];
-						// 128 路径 = 2 帧（≤64/帧）；批量是全有或全无，含缺失路径时退回逐项只读 stat，
-						// 仍然不签发任何 entry/文本授权。
-						for (let offset = 0; offset < relativePaths.length; offset += 64) {
-							const batch = relativePaths.slice(offset, offset + 64);
-							try {
-								const answer = await reader.statMany(target.hostId, batch.map(readerPath));
-								for (let index = 0; index < batch.length; index += 1) states.push({ target: { projectId, relativePath: batch[index] }, exists: true, isDirectory: answer.entries[index]?.kind === "directory" });
-							} catch (error) {
-								if (codeOf(error, "REMOTE_PROJECT_READ_FAILED") !== "PATH_NOT_FOUND") throw error;
-								for (const relativePath of batch) {
-									try {
-										const fileStat = await reader.stat(target.hostId, readerPath(relativePath));
-										states.push({ target: { projectId, relativePath }, exists: true, isDirectory: fileStat.kind === "directory" });
-									} catch (inner) {
-										if (codeOf(inner, "REMOTE_PROJECT_READ_FAILED") !== "PATH_NOT_FOUND") throw inner;
-										states.push({ target: { projectId, relativePath }, exists: false, isDirectory: false });
-									}
-								}
-							}
-						}
-						return states;
-					},
-					{ requireReady: true },
-				);
-				return outcome.ok ? opOk(outcome.value) : opFailFromCode(outcome.code);
-			} catch (error) {
-				return opFailFromCode(codeOf(error, "REMOTE_PROJECT_READ_FAILED"));
-			}
-		},
+		directoryPage: (projectId, path, force = false) => projectDirectoryPage({ projectId, path, force, readDirSnapshot, generationOf }),
+		pathsExist: (projectId, paths) => projectPathsExist({ projectId, paths, projectReadTarget }),
 		onHelperEvent(entry): void {
 			const changed = watchRegistry.scopesForEvent(entry.hostId, entry.watchId) ?? [];
 			// 先发通知再标脏：两者都是同步的，读仍由活跃的消费者决定（事件不装载）。
