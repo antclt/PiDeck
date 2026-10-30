@@ -413,13 +413,26 @@
 
 > 口径：**全量单测、两个守卫文件、「远端文件管理」E2E 在最终 HEAD `f31b0104f` 上跑；其余 14 条远端 E2E 与 host acceptance 沿用 `2c4b35e51` 的结果**（W2 的改动是结构性拆分 + 共享判据抽取，行为不变；文件管理这条正是因为改到面板才复跑）。
 
+### 11.10 第三处守卫修复后的最终 HEAD（`53ecfaac4` ← dev `827a00908`）
+
+| 项 | 命令 | 退出码 | 结果 |
+|----|------|--------|------|
+| 合并 | `git merge dev`（W2 测试跟随：`remoteProjectEntryState` 四个行菜单锚点改读 `RemoteProjectRowMenu.tsx`，断言强度不变） | 0 | 本地 merge 提交 `53ecfaac4`；**只改测试文件**（+4 −2），产品代码与 `out/` 不变 |
+| 守卫 3 | `node --test tests/remoteProjectEntryState.test.mjs` | **0** | **4 passed / 0 failed** |
+| 「远端文件管理」E2E 复跑 | `--grep "远端文件管理 v1"` | **0** | **1 passed (1.4m)** —— 行菜单拆分后抽屉/文件编辑入口无回归（比前次慢因机器负载，非失败） |
+| 全量单测 | `npm test`（`node --test --test-concurrency=4`） | **0** | **tests 15093 / pass 14808 / fail 0 / skipped 285 / 438s** —— 三条形状守卫修复后**全绿** |
+
+> 最终 HEAD 说明：`53ecfaac4` 相对 `f31b0104f` **只多了一条测试文件的改动**，所以 `out/` 产物仍是 `f31b0104f` 那次构建（`npx electron-vite build` 0），远端 E2E 无需重跑；**全量单测、三条守卫文件、文件管理 E2E 均在最终 HEAD 上跑**。
+>
+> **最终提交**：`feat/v-final` 上的收尾提交（本文件与探针脚本）见 git log；验证记录本身不随 dev 合并而变。
+
 ### 11.9 本轮结论（口径）
 
 **已通过（真实主机）**：远端 Git 全档（G1/G2/G3/G4/G5a-e，14 条含终端/trust/产品路/文件管理）；WSL 只读与停/启 smoke；远端内容搜索协议级（新 helper 1.25.0 命中、二进制跳过、非法 query 稳定拒绝；同时记录旧 helper 1.24.0 的「仅文件名」回退行为）；两项源码形状守卫在 W2 修复后恢复。
 
 **未通过 / 未验证（不当作通过）**：
 1. **远端代码文件编辑**：既有 e2e 与当前 UI 交互契约不一致（oracle + `.header-drawer-toggle`），记「未验证（既有 spec 与当前 UI 不一致）」，不改断言。
-2. **remoteHostAcceptance**：跑到「项目级 root 状态」失败（A 漂移后未见「需处理」），定性待判（见 11.5）。
+2. **remoteHostAcceptance**：**确定性 2/2 失败**在「项目级 root 状态」——截图证明漂移**已被检测**（主内容区 `无法列出目录：SSH_PROJECT_ROOT_UNRESOLVED`），但**侧栏项目行没有「需处理」badge**；定性＝「漂移已检测、侧栏 badge 未更新」的产品侧可见性缺口（或项目列表 rootStatus 未失效），本轮只记录不改产品代码（见 11.5）。
 3. **G6b opt-in soak**、**remoteFunctionalAcceptance**（本轮不做）、其余未列出的远端用例。
 4. **远端内容搜索 UI 端到端未覆盖**（现有 e2e 无入口），只有协议级真机证据。
 
