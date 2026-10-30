@@ -19,7 +19,7 @@ import { SessionStartSurface } from "./SessionStartSurface";
  * （Chat 匿名 / 非 Chat draft）并把 composer 状态整体提升过去，随后才登记 Tab。
  *
  * 无项目：同样交给 SessionStartSurface 的 no-project 模式渲染——两屏共用同一
- * 骨架（Logo / 1080px 列宽 / 18vh 重心 / 间距），无项目时正文换成与输入框同宽的
+ * 骨架（Logo / 860px 列宽 / 23vh 重心 / 间距），无项目时正文换成与输入框同宽的
  * 引导卡，而不是另一套居中按钮。维护点只剩一个组件。
  */
 export function ProjectEmptyState(props: {

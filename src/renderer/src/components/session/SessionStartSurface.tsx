@@ -53,17 +53,17 @@ export type SessionStartSurfaceProps = SessionStartProps | NoProjectStartProps;
 
 /**
  * 两屏共用的骨架：Logo → 内容列。宽度、重心、间距只在这里定义一次，
- * 无项目卡与输入框因此天然对齐（同一 1080px 列、同一 18vh 垂直重心）。
+ * 无项目卡与输入框因此天然对齐（同一 860px 列、同一垂直重心）。
  */
 function StartSurfaceShell(props: { slogan?: string; children: ReactNode }) {
 	return (
 		// session-start-surface 保留类名供壁纸模式契约（bg-transparent 透出下层壁纸）；
-		// pt-[18vh] 把重心压向视口中心（输入框顶约 36-40%、框心 ~55%），接近 DeepSeek
-		// 新会话页；[--font-size-input] 在容器作用域放大输入框字号（14→15.5px），
+		// pt-[23vh] 把输入框重心压向视口中上部，Logo 与正文按视觉节奏留白；
+		// [--font-size-input] 在容器作用域放大输入框字号（14→15.5px），
 		// 只影响本页，不改全局 token（会话页输入框保持原尺寸）。
 		<div className="session-start-surface flex min-h-full w-full flex-col items-center bg-transparent px-6 pb-10 pt-[23vh] [--font-size-input:15.5px] [--line-height-input:25px]">
 			<div className="flex w-full max-w-[860px] flex-col items-center gap-12">
-				{/* 品牌块：Logo 与一句话标语同属一个视觉单元，gap-3 让它们贴住；
+				{/* 品牌块：Logo 与一句话标语同属一个视觉单元；
 				    标语只在会话模式出现，无项目卡自己带标题，不叠加第二行文案。 */}
 				<div className="flex flex-col items-center gap-5">
 					<LogoMark size={72} />
