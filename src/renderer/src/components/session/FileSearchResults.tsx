@@ -116,7 +116,11 @@ export function FileSearchResults(props: {
  * 没有命中且不在扫描中时整段不渲染——避免空白标题占地方。
  * 行内 snippet 已由 Go 侧截好（含省略号），这里只做截断与等宽路径显示。
  */
-function FileContentSection(props: { query: string; result: FileContentSearchResult | null; isSearching: boolean; onViewFile?: (path: string, openMode?: "preview" | "permanent") => void; onFileContextMenu: (node: FileSearchResult, x: number, y: number) => void }) {
+/**
+ * 正文命中分区：本机文件抽屉与远端项目面板共用同一段 UI。
+ * 行内 snippet 已由主进程截好（含边界），这里只做截断与等宽路径显示。
+ */
+export function FileContentSection(props: { query: string; result: FileContentSearchResult | null; isSearching: boolean; onViewFile?: (path: string, openMode?: "preview" | "permanent") => void; onFileContextMenu: (node: FileSearchResult, x: number, y: number) => void }) {
 	const hits = props.result?.hits ?? [];
 	if (hits.length === 0 && !props.isSearching) return null;
 	return (
