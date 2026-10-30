@@ -1369,6 +1369,7 @@ function RawTab(props: { homeDir: string; sectionApi?: DshSectionApi; instanceKe
 				readError ? (
 					<div className="grid gap-2 rounded-sm border border-danger/20 bg-danger-soft px-3.5 py-2.5" role="alert">
 						<p className="text-control font-medium text-danger">{t("config.dsh.rawReadFailed", { file: fileName })}</p>
+						{/* scroll-ok: transient —— 原始配置读失败的错误预览，max-h-32 封顶，重试成功即消失；错误文本通常几行，无需虚拟化 */}
 						<pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded-sm border border-danger/20 bg-bg-panel/60 px-2.5 py-2 text-micro leading-relaxed text-danger/90">{readError}</pre>
 						<div>
 							<Button type="button" variant="secondary" size="sm" className="h-7" onClick={() => setRetryTick((tick) => tick + 1)}>

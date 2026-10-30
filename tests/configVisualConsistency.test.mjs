@@ -41,17 +41,20 @@ test("config shell defines compact density and crisp system typography", () => {
 	assert.doesNotMatch(rendererStyles, /lxgw-wenkai/);
 	assert.doesNotMatch(surfaces, /\.config-models-grid-header[\s\S]*font-weight: 650/);
 	assert.match(configModal, /configModalSizeClass/);
-	assert.match(configModal, /w-\[80vw\]/);
-	assert.match(configModal, /max-w-\[80vw\]/);
-	assert.match(configModal, /h-\[80vh\]/);
-	assert.match(configModal, /sm:max-w-\[min\(1300px,80vw\)\]/);
+	// Wave 2 把 80vw/80vh 尺寸串收敛到 WORKBENCH_DIALOG_SIZE_CLASS 单源，两个 Modal
+	// 不再各自内联 w-[80vw]——尺寸断言转移到常量定义处，这里只验两个 Modal 都改用常量。
+	const workbenchSize = readFileSync("src/renderer/src/components/common/workbenchDialogSize.ts", "utf8");
+	assert.match(workbenchSize, /w-\[80vw\]/);
+	assert.match(workbenchSize, /max-w-\[80vw\]/);
+	assert.match(workbenchSize, /h-\[80vh\]/);
+	assert.match(workbenchSize, /sm:max-w-\[min\(1300px,80vw\)\]/);
 	// 容器布局交给 .config-layout 的 CSS grid 承担：utility 的 flex 会盖掉 CSS 的 display:grid，
 	// 820px 下的纵向堆叠改由 surfaces.css 媒体查询定义（不再用 max-[820px]:flex-col）。
 	assert.match(configModal, /config-layout grid min-h-0 flex-1/);
 	assert.match(configModal, /max-\[820px\]:flex-row/);
 	assert.match(surfaces, /@media \(max-width: 820px\) \{[\s\S]*?\.config-layout \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\);[\s\S]*?grid-template-rows: auto minmax\(0, 1fr\);/);
 	assert.match(settingsModal, /settingsModalSizeClass/);
-	assert.match(settingsModal, /w-\[80vw\]/);
+	assert.match(settingsModal, /WORKBENCH_DIALOG_SIZE_CLASS/);
 	assert.match(surfaces, /\.settings-modal \{[\s\S]*width: min\(1300px, 80vw\);[\s\S]*height: min\(850px, 80vh\);/);
 	assert.match(surfaces, /\.config-modal \{[\s\S]*width: min\(1300px, 80vw\);[\s\S]*height: min\(850px, 80vh\);/);
 });
