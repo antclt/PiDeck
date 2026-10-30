@@ -56,7 +56,7 @@
 ## 5. 远端 E2E 用例清单与状态（`e2e/remoteSessionAcceptance.spec.ts`）
 
 `npx playwright test e2e/remoteSessionAcceptance.spec.ts --list` ⇒ **16 tests in 1 file**（exit 0）。
-远端 E2E 合计 18 条：本 spec 16 条 + `remoteHostAcceptance.spec.ts` 1 条（基线补跑结果见 5.2）+ `remoteFunctionalAcceptance.spec.ts` 1 条（**未运行**）。
+远端 E2E 合计 18 条：本 spec 16 条 + `remoteHostAcceptance.spec.ts` 1 条（基线补跑结果见 5.2）+ `remoteFunctionalAcceptance.spec.ts` 1 条（**未验证：本轮不做，原因＝远端写操作风险**——该 spec 会临时挪动远端 deploy 根下的 bundle，不在 P0/P1 验收范围内；集成阶段如需覆盖另开任务）。
 
 | # | 用例（行号） | 命令（除第 1 列外均经统一包装脚本） | 退出码 | 时长 | 结论 |
 |---|--------------|--------------------------------------|--------|------|------|
@@ -116,7 +116,7 @@
 
 ## 6. 未覆盖 / 风险
 
-- 16 条远端会话用例只跑了 3 条；13 条**未验证**。另有 `remoteHostAcceptance`（已跑、失败，成因是旧 spec 选择器过时，见 5.2）与 `remoteFunctionalAcceptance`（未跑）。历史通过结论不适用于当前基线。
+- 16 条远端会话用例只跑了 3 条；13 条**未验证**。另有 `remoteHostAcceptance`（已跑、失败，成因是旧 spec 选择器过时，见 5.2）与 `remoteFunctionalAcceptance`（**未验证：本轮不做，原因＝远端写操作风险**，见 §5 清单说明；集成阶段如需覆盖另开任务）。历史通过结论不适用于当前基线。
 - `#1 产品路` 记为 **baseline-fail / 待复跑区分**：其中"新建→发送→出正文→关闭→重开历史"这条主链路已验证通过，失败只发生在后续的「并发冲突提示」子步骤；该结论属 `46523b525` 基线，不归因于 WS1/WS2/WS3 的改动。
 - 本轮基线**不含** P0-1～P0-4 与 P1 任何修复，因此通过项只证明「存量主路径可用」，不证明缺口已修。
 - WSL 侧（`Ubuntu-26.04`）无实机证据；macOS 无本机证据，不声称已验证。
@@ -137,3 +137,4 @@
 
 - 2026-10-30（`46523b525`）：建立本记录。本地 5 项基线门禁全绿；远端 smoke 3 条 → 2 通过（Git G1、trust 提示）/ 1 失败（产品路的并发冲突子步骤，定性 baseline-fail / 待复跑区分）/ 13 未验证；定位并规避 `ELECTRON_RUN_AS_NODE` 环境坑。
 - 2026-10-30（`46523b525`，补跑）：`remoteHostAcceptance` 基线跑 → 失败，成因为旧 spec 选择器过时（`添加` vs 现行「新建连接」），非产品缺陷；已记入 5.2，未改任何断言。
+- 2026-10-30（决策）：`remoteFunctionalAcceptance` **本轮不做**（原因＝远端写操作风险：会临时挪动远端 deploy 根下 bundle，且不在 P0/P1 验收范围），记为「未验证」；`remoteHostAcceptance` 保持"既有 spec 选择器过时"记录、不改断言、不修，集成阶段如需该覆盖另开任务。
