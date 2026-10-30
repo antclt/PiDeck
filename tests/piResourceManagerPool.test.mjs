@@ -217,3 +217,41 @@ test("真实 PromptManager 实例被限制在解析出的 HOME 下（两档案�
 		await rm(homeB, { recursive: true, force: true });
 	}
 });
+test("真实 SkillManager 实例只扫描解析出的 HOME（两档案技能互不可见）", async () => {
+	const homeA = await mkdtemp(join(tmpdir(), "pideck-w1-skills-a-"));
+	const homeB = await mkdtemp(join(tmpdir(), "pideck-w1-skills-b-"));
+	try {
+		const skillDir = join(homeA, ".pi", "agent", "skills", "alpha");
+		await mkdir(skillDir, { recursive: true });
+		await writeFile(join(skillDir, "SKILL.md"), "---\nname: alpha\ndescription: only in A\n---\n\n# alpha\n", "utf8");
+
+		const { SkillManager } = loadTsCommonJs("src/main/skills/SkillManager.ts", {
+			stubs: { electron: { app: { isPackaged: false, getAppPath: () => process.cwd() } } },
+		});
+		const profiles = {
+			[HOST]: { ...resolution(HOST), home: homeA },
+			[OTHER]: { ...resolution(OTHER), home: homeB },
+		};
+		const pool = poolModule.createPiResourceManagerPool({
+			resolver: { resolve: async (target) => profiles[target.hostId] },
+			local: { skills: () => null, prompts: () => null, extensions: () => null, xuePrompts: () => null },
+			create: {
+				skills: ({ home }) => new SkillManager(home),
+				prompts: () => null,
+				extensions: () => null,
+				xuePrompts: () => null,
+			},
+		});
+		const managerA = await pool.skills(targetOf(HOST));
+		const managerB = await pool.skills(targetOf(OTHER));
+		const listA = await managerA.list();
+		const listB = await managerB.list();
+		assert.deepEqual(JSON.parse(JSON.stringify(listA.skills.map((skill) => skill.name))), ["alpha"]);
+		assert.deepEqual(JSON.parse(JSON.stringify(listB.skills)), []);
+		for (const location of managerA.getLocations()) assert.ok(location.path.startsWith(homeA), location.path);
+		for (const location of managerB.getLocations()) assert.ok(location.path.startsWith(homeB), location.path);
+	} finally {
+		await rm(homeA, { recursive: true, force: true });
+		await rm(homeB, { recursive: true, force: true });
+	}
+});
