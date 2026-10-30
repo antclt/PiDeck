@@ -107,7 +107,8 @@ test("项目层卸载与安装走同一信任路径（preload → storeIpc → E
 	assert.match(preload, /uninstall: \(source: string, scope\?: "user" \| "project" \| "unknown", projectId\?: string\)/, "preload 必须透传 projectId");
 
 	const ipc = read("src/main/ipc/storeIpc.ts");
-	assert.match(ipc, /extensionsUninstall, async \(_event, source: string, scope\?: "user" \| "project" \| "unknown", projectId\?: unknown\)/, "卸载通道必须收 projectId");
+	// 签名跟随 W1 收口：handler 末尾新增本地写守卫的可选 options；语义断言（信任门/fail closed/projectRoot）在下面保持原样。
+	assert.match(ipc, /extensionsUninstall, async \(_event, source: string, scope\?: "user" \| "project" \| "unknown", projectId\?: unknown, options\?: unknown\)/, "卸载通道必须收 projectId");
 	assert.match(ipc, /scope === "project" \? await projectInstallTarget\(projectId\) : undefined/, "project scope 必须过安装同一信任门解析项目根");
 	assert.match(ipc, /scope === "project" && !target\) throw new Error\("Project scope requires a project id\."\)/, "无项目 id 必须拒绝（fail closed）");
 	assert.match(ipc, /extensionManager\.uninstall\(source, scope, target \? \{ projectRoot: target\.root \} : \{\}\)/, "项目根必须传给 uninstall");
