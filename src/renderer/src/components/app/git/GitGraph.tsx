@@ -310,6 +310,7 @@ function CommitHoverCard(props: { hover: CommitHoverState; state: CommitDetailSt
 	return createPortal(
 		<div
 			id="git-commit-hover"
+			/* scroll-ok: transient —— commit hover 卡片，max-h-[min(420px,calc(100vh-16px))] 封顶，hover 离开即销毁；commit 描述通常几十行，无需虚拟化 */
 			/* 必须可命中：overflow-auto  alone 只画出滚动条，pointer-events-none 会让滚轮落到下层列表。 */
 			className="pointer-events-auto absolute z-[var(--z-popover)] box-border max-h-[min(420px,calc(100vh-16px))] overflow-auto rounded-md border border-[var(--git-panel-border)] bg-[var(--git-panel-bg)] p-3 text-[var(--git-panel-fg)] shadow-[var(--shadow-popover)] [--git-panel-bg:var(--color-bg-panel)] [--git-panel-fg:var(--color-text-primary)] [--git-panel-border:var(--color-border-subtle)] [--git-desc-fg:var(--color-text-tertiary)] [--git-added:var(--color-accent)] [--git-deleted:var(--color-danger)]"
 			role="dialog"
