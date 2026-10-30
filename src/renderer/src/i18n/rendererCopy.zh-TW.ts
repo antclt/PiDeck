@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 7851d1cd123483108f23378df0dd919f7ca77618c4b4532ce9208d891eb73184（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: c0daa41c0e33d23826b4a20160d7eceaf0865e0fa601b646aee51a6746ed354f（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -266,8 +266,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"acp.emptyTurn": "「{tool}」本輪結束但沒有返回任何輸出（該 CLI 可能存在已知缺陷，如事件流丟失），請升級到最新版本後重試",
 	"acp.imagesNotSupported": "{tool} 不支援圖片輸入，請移除圖片後重試",
 	"acp.authRequired": "「{tool}」未登入或憑據失效：請先在終端執行該 CLI 完成登入，再回到這裡重試",
-	"acp.bypassPermissionsLabel": "新會話預設自動批准工具（Bypass 權限）",
-	"acp.bypassPermissionsHint": "握手後把權限模式切到該 CLI 自帶的 bypass 檔（如 Claude 的 bypassPermissions）；CLI 沒有這一檔時自動跳過，仍可在會話裡手動選擇",
+	"acp.bypassPermissionsLabel": "預設自動批准工具（Bypass 權限）",
+	"acp.bypassPermissionsHint": "握手後把權限模式切到該 CLI 自帶的 bypass 檔（如 Claude 的 bypassPermissions），恢復歷史會話時同樣生效；CLI 沒有這一檔時自動跳過，仍可在會話裡手動選擇",
 	"acp.configOptionRejected": "ACP 設定未生效（{option} → {value}）：{reason}。多數是該 CLI 版本的缺陷——可先升級 CLI；也可以把該模式寫進 設定 → ACP 工具 → 啟動引數（如 --permission-mode bypass_permissions），重開會話後即按該模式啟動",
 	"acp.toolNameRequired": "名稱必填",
 	"acp.toolCommandRequired": "命令必填",

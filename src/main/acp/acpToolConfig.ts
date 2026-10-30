@@ -132,6 +132,11 @@ export function findAcpBypassModeValue(option: Pick<AcpConfigOption, "type" | "o
 	return undefined;
 }
 
+/** 模式值是否属于「跳过审批」档（与 findAcpBypassModeValue 同一张优先级表，大小写不敏感）。 */
+export function isAcpBypassModeValue(value: string | boolean): boolean {
+	return typeof value === "string" && ACP_BYPASS_MODE_PRIORITY.includes(value.trim().toLowerCase());
+}
+
 /** 设置加载/更新边界的整表消毒：脏工具/脏选项/超长值丢弃，不因一条坏数据拒绝整表。 */
 export function sanitizeAcpToolConfigDefaults(value: unknown): AcpToolConfigDefaults {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return {};

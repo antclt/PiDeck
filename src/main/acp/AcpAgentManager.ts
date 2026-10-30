@@ -27,7 +27,7 @@ import { AcpPermissionRequests } from "./AcpPermissionRequests";
 import { acpPromptBlocks, appendAcpUserPrompt, initialAcpProjection, rollbackAcpUserPrompt, settleAcpTurn, type AcpProjectionState } from "./AcpEventProjector";
 import { authRequiredDescriptor, localizeCreateFailure, promptTurnTimeoutDescriptor } from "./acpFailureDescriptors";
 import { buildAgentRuntimeState, type AcpAgentRuntime } from "./acpAgentRuntime";
-import { findAcpBypassModeValue, findAcpModeOption, isRememberedAcpConfigOption, planAcpConfigReplay } from "./acpToolConfig";
+import { findAcpBypassModeValue, findAcpModeOption, isAcpBypassModeValue, isRememberedAcpConfigOption, planAcpConfigReplay } from "./acpToolConfig";
 import { accumulateAcpUsage, acpReplyPerf, readAcpTurnUsage } from "./acpUsageMetrics";
 import { AcpTurnWatchdog } from "./acpTurnWatchdog";
 import { AcpMessageSnapshotStore } from "./AcpMessageSnapshotStore";
@@ -336,16 +336,19 @@ export class AcpAgentManager implements SessionAgentGateway {
 	}
 
 	/**
-	 * 工具级「新会话默认 bypass 权限」：握手后在 agent 自己的 mode 枚举里挑 bypass 档下发。
+	 * 工具级 bypass 权限：握手后在 agent 自己的 mode 枚举里挑 bypass 档下发。
 	 *
 	 * 只能用运行期下发：Claude 适配器不读启动参数（初始模式只取 settings.json 的
 	 * permissions.defaultMode），Qoder 适配器则直接拒绝 set_config_option（见 #444 同类问题）。
 	 * 所以失败只记日志——某些 CLI 版本压根没有 bypass 档，不该因此开不了会话。
 	 * 启动参数已经定档（Qoder `--permission-mode`）时记忆重放会让路，见 pinnedBypassModeOptionId。
-	 * session/load 恢复的会话不覆盖 agent 侧状态（与重放记忆同口径）。
+	 *
+	 * session/load 恢复的会话也必须下发：agent 不持久化权限模式，load 回来的是新进程的默认档
+	 * （CodeBuddy/Claude 实测都是 auto），跳过这一步历史会话就从 full/bypass 掉回 auto。
+	 * 已处于 bypass 档时 currentValue 与目标值相等，自然不会重复下发。
 	 */
 	private async applyBypassPermissionDefault(runtime: AcpAgentRuntime): Promise<void> {
-		if (runtime.tool.bypassPermissions !== true || runtime.loadedSession) return;
+		if (runtime.tool.bypassPermissions !== true) return;
 		const mode = findAcpModeOption(runtime.configOptions);
 		if (!mode) return;
 		const bypass = findAcpBypassModeValue(mode);
@@ -374,14 +377,25 @@ export class AcpAgentManager implements SessionAgentGateway {
 		return bypass && mode.currentValue === bypass ? mode.id : undefined;
 	}
 
-	/** 新建会话握手后重放工具级记忆;session/load 恢复的会话不覆盖 agent 侧状态。 */
+	/**
+	 * 握手后重放工具级记忆：新建会话全量重放；session/load 恢复的会话只补回 bypass 档。
+	 *
+	 * 恢复会话全量重放会覆盖 agent 自己恢复的会话状态（思考档等），所以保持不重放；
+	 * 权限模式是唯一例外——agent 不持久化它，load 回来只是进程默认档（如 auto），不补的话
+	 * 用户上次在历史会话里选的 full/bypass 重开后就没了。只补 bypass 值而非记忆里的任意模式，
+	 * 是为了不把 agent 恢复出的会话模式降级成一条更早的记忆。
+	 */
 	private async replayToolConfigDefaults(runtime: AcpAgentRuntime): Promise<void> {
-		if (runtime.loadedSession) return;
 		const defaults = this.deps.getToolConfigDefaults?.(runtime.tool.id);
 		// 工具级 bypass 开关是「明确配置」：模式已是 bypass 时保住它，不让学来的上次选择覆盖。
 		const pinnedModeId = this.pinnedBypassModeOptionId(runtime);
+		const mode = findAcpModeOption(runtime.configOptions);
+		// 恢复会话只补「当前还不是 bypass」的模式：agent 恢复出的已是 bypass（可能更强，如
+		// fullAccess）就保持不动——跨档重放会把它降成记忆里的弱档；非 bypass 记忆则一律不覆盖。
+		const restoreBypass = runtime.loadedSession && mode !== undefined && !isAcpBypassModeValue(mode.currentValue ?? false);
 		for (const item of planAcpConfigReplay(runtime.configOptions, defaults)) {
 			if (item.id === pinnedModeId) continue;
+			if (runtime.loadedSession && !(restoreBypass && item.id === mode?.id && isAcpBypassModeValue(item.value))) continue;
 			try {
 				await this.enqueueConfigOption(runtime.tab.id, item.id, item.value, false);
 			} catch (error) {
