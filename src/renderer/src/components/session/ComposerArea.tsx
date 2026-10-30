@@ -17,7 +17,7 @@ import { ComposerRuntimeIntegrations } from "./ComposerRuntimeIntegrations";
 import { useSessionPaneServices } from "./SessionPaneServices";
 import { desktopApi } from "../../desktopApi";
 import { COMPOSER_TEXT_MAX_HEIGHT } from "../../rendererUtils";
-import { GUIDE_BOOTSTRAP_SESSION_ID } from "../../utils/chatSessionBootstrap";
+import { GUIDE_BOOTSTRAP_SESSION_ID, type NewSessionBackendTarget } from "../../utils/chatSessionBootstrap";
 import { chatContentWidthStyle } from "./chatContentWidth";
 import { ComposerStatsLine } from "./ComposerStatsLine";
 import { ComposerWidgetLayoutProvider, type ComposerWidgetCollapsedByKey, useComposerWidgetLayoutValue } from "./ComposerWidgetLayout";
@@ -49,7 +49,7 @@ export type ComposerAreaProps = {
 	/** 排队消息独立卡（与 todo/goal 同列同宽，不贴输入框、不右浮）。 */
 	queuePanel?: ReactNode;
 	enqueue?: (sessionId: string, snapshot: EnqueuePromptSnapshot) => boolean;
-	ensureSessionId?: (sessionId: string) => Promise<string>;
+	ensureSessionId?: (sessionId: string, target?: NewSessionBackendTarget) => Promise<string>;
 	/** 当前会话中用户发起的轮次，用于 pi 统计栏；DSH 自带 sessionStats 时不重复显示。 */
 	turnCount?: number;
 	/** 引导页虚拟会话没有 SessionRecord，用它兑底确定文件树/模型目录所属项目。 */

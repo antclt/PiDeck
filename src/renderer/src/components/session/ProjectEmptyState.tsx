@@ -17,14 +17,14 @@ import { SessionStartSurface } from "./SessionStartSurface";
  *
  * 有项目：直接挂「新建页面」同源的 SessionStartSurface（居中 ComposerArea +
  * 快捷动作），绑定 renderer-only 虚拟会话 ID——不创建 Catalog 记录、不拉起 pi、
- * 不占用 Tab 栏；首次发送由 App.ensureSessionForSend 创建真实会话（Chat 匿名 /
- * 非 Chat draft）并把 composer 状态整体提升过去，随后才登记 Tab。
+ * 不占用 Tab 栏；首次发送（或选择 ACP）由 App.ensureSessionForSend 创建真实会话
+ * （Chat 匿名 / 非 Chat draft）并把 composer 状态整体提升过去，随后才登记 Tab。
  * 无项目：只保留添加项目入口。
  */
 export function ProjectEmptyState(props: {
 	activeProject?: Project;
 	/** 可切换的目标项目列表：下拉只切换 activeProjectId（selectProject 语义），
-      不创建会话；首次发送按当前选中项目创建（App.ensureSessionForSend） */
+      不创建会话；首次发送 / 选择 ACP 按当前选中项目创建（App.ensureSessionForSend） */
 	projects: Project[];
 	onAddProject: () => void;
 	onSelectProject: (projectId: string) => void;

@@ -244,6 +244,8 @@ export const zhCN = {
 	"app.newAnonymousSession": "匿名会话",
 	"app.newAcpSession": "ACP 工具会话",
 	"app.acpNoTools": "还没有添加外部 CLI 工具（ACP），去设置添加",
+	"app.acpConfigMore": "参数",
+	"app.acpConfigMoreTitle": "更多 ACP 参数",
 	"acp.processNotRunning": "{tool} 进程未在运行，请重试",
 	"acp.toolNotInstalled": "「{tool}」启动失败：该 CLI 未安装或不在 PATH 中（{command}），请先安装后在设置里检测",
 	"acp.toolMissing": "会话绑定的 ACP 工具已被删除或禁用，请在设置 → ACP 工具里重新登记后重试",

@@ -246,6 +246,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"app.newAnonymousSession": "Anonymous session",
 	"app.newAcpSession": "ACP tool session",
 	"app.acpNoTools": "No external CLI tools (ACP) added yet — add one in Settings",
+	"app.acpConfigMore": "Options",
+	"app.acpConfigMoreTitle": "More ACP options",
 	"acp.processNotRunning": "{tool} is not running; please try again",
 	"acp.toolNotInstalled": "{tool} failed to start: the CLI is not installed or not on PATH ({command}); install it, then re-check in Settings",
 	"acp.toolMissing": "The ACP tool bound to this session was removed or disabled; re-register it in Settings → ACP Tools and retry",

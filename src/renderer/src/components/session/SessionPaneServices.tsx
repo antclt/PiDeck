@@ -4,6 +4,7 @@ import type { HideableComposerFeatureId } from "../../../../shared/composerFeatu
 import type { QueuedPrompt } from "../../hooks/useQueuedPrompt";
 import type { NoticeId, NoticeKind } from "../../utils/notice";
 import type { SessionRunAction, SessionRunCapabilities } from "../../utils/sessionCommands";
+import type { NewSessionBackendTarget } from "../../utils/chatSessionBootstrap";
 import type { SessionMenuModel } from "./SessionActionsMenu";
 import type { TerminalDockStateByOwner } from "../../terminalDockState";
 import type { TerminalDockSettings } from "../terminal/TerminalDock";
@@ -58,7 +59,8 @@ export type SessionPaneServices = {
 	/** 「停止响应」时抑制排队消息自动投递；App 注入 queue.suppressSessionQueueAutoDrain。 */
 	queueSuppressAutoDrain?: (sessionId: string) => void;
 	insertQuickPrompt: (sessionId: string, message: string) => void;
-	ensureSessionId?: (sessionId: string) => Promise<string>;
+	/** 引导页虚拟会话落地为真实会话；target 携带用户显式选择的后端（ACP 选择即建草稿）。 */
+	ensureSessionId?: (sessionId: string, target?: NewSessionBackendTarget) => Promise<string>;
 	resendUserMessage?: (message: ChatMessage) => void;
 	editMessage?: (message: ChatMessage, newText: string) => void;
 	deleteMessage?: (messageId: string, entryId?: string) => void;

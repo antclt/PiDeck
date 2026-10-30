@@ -167,10 +167,10 @@ export type UseSessionComposerControllerOptions = {
 	 * 引导页等无 record 虚拟会话的项目上下文（ProjectEmptyState 经
 	 * SessionStartSurface 传选中的 activeProject.id）。有 record 时一律以
 	 * record.projectId 为准；仅给 @ 文件引用/默认偏好提供项目来源，不参与
-	 * 会话创建（发送仍由 App.ensureSessionForSend 落地）。
+	 * 会话创建（发送 / 选择 ACP 均由 App.ensureSessionForSend 落地）。
 	 */
 	bootstrapProjectId?: string;
-	/** target：引导页首次发送时的后端选择（缺省按设置默认创建）。 */
+	/** target：引导页首次发送 / 选择 ACP 时的后端选择（缺省按设置默认创建）。 */
 	ensureSessionId?: (sessionId: string, target?: NewSessionBackendTarget) => Promise<string>;
 	/** 用户主动发消息时回调（预览 Tab 晋升常驻）；来自 SessionPaneServices 装配。 */
 	onPromoteSession?: (sessionId: string) => void;
@@ -295,6 +295,10 @@ function composerImageNotice(error: unknown): string {
 
 export function useSessionComposerController(options: UseSessionComposerControllerOptions) {
 	const { sessionId, enqueue, ensureSessionId, suppressQueuedDrain } = options;
+	// changeBackend 的依赖数组是既有契约测试锁定的形状；ensureSessionId 会随
+	// activeProjectId 变化，用 ref 取最新值，避免闭包拿到旧项目上下文。
+	const ensureSessionIdRef = useRef(ensureSessionId);
+	ensureSessionIdRef.current = ensureSessionId;
 	const store = useStore();
 	const record = useAtomValue(sessionRecordByIdAtomFamily(sessionId));
 	const enhanceModelConfig = useAtomValue(enhanceModelAtom);
@@ -342,7 +346,8 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	// 引导页虚拟会话的后端显式选择：无 record、不落 catalog，切换只写本页 state。
 	// 刻意不从 localStorage 恢复「上次选择」：新建会话默认后端只跟随设置项——
 	// 自动沿用 ACP 会在冷启动把握手加载态塞进输入框（用户反馈体验差），用户要
-	// 换后端就在输入框里手动切，首次发送按当前选择创建真实会话。
+	// 换后端就在输入框里手动切；pi/DSH 首次发送按当前选择创建真实会话，
+	// ACP 选择即创建（configOptions 需要 runtime 握手，见 changeBackend）。
 	const defaultAgentBackend = useAtomValue(effectiveAgentBackendAtom);
 	const isGuideBootstrapSession = sessionId === GUIDE_BOOTSTRAP_SESSION_ID;
 	const [guideBackendOverride, setGuideBackendOverride] = useState<AgentBackend | undefined>(undefined);
@@ -2225,6 +2230,21 @@ export function useSessionComposerController(options: UseSessionComposerControll
 						return;
 					}
 					guideToolId = toolId;
+				}
+				// ACP 与其它后端不同：configOptions（模型/模式枚举）只能由 runtime 握手
+				// （session/new/load）产出，而引导页是 renderer-only 虚拟会话，activateRuntime
+				// 必然查不到 catalog 记录。只写本地偏好的话，用户在选择 ACP 后永远看不到
+				// 参数加载、ACP 进程也不会启动，必须等到首次发送（2026-10 用户反馈：
+				// 导入新目录后选 ACP 不自动加载/启动）。选择 ACP 即用户意图：立刻落成真实
+				// draft 并切过去，与项目「+」/Tab「+」的 createAcp 同一条创建链；composer
+				// 状态（草稿/附件/模式）由 App.ensureSessionForSend 整体提升，不丢输入。
+				if (next === "acp" && ensureSessionIdRef.current) {
+					try {
+						await ensureSessionIdRef.current(GUIDE_BOOTSTRAP_SESSION_ID, { backend: "acp", acpToolId: guideToolId });
+					} catch (error) {
+						showNotice(error instanceof Error ? error.message : String(error), 4000);
+					}
+					return;
 				}
 				setGuideBackendOverride(next);
 				// acp→acp 换工具：后端同值不触发重渲染，工具 id 单独 set（见 state 声明处注释）

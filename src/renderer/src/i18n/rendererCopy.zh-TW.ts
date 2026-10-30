@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 66299e88b890cd910818888b8e746c6af26981fde031b9e0a35bea754dfb8e45（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: ca8670229498cfe5b18e9d06852f0450da0d6c2b63aa2a1f5a463b8c5fb96f44（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -251,6 +251,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"app.newAnonymousSession": "匿名會話",
 	"app.newAcpSession": "ACP 工具會話",
 	"app.acpNoTools": "還沒有新增外部 CLI 工具（ACP），去設定新增",
+	"app.acpConfigMore": "引數",
+	"app.acpConfigMoreTitle": "更多 ACP 引數",
 	"acp.processNotRunning": "{tool} 程序未在執行，請重試",
 	"acp.toolNotInstalled": "「{tool}」啟動失敗：該 CLI 未安裝或不在 PATH 中（{command}），請先安裝後在設定裡檢測",
 	"acp.toolMissing": "會話繫結的 ACP 工具已被刪除或停用，請在設定 → ACP 工具裡重新登記後重試",

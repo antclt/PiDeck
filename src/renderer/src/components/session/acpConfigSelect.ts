@@ -59,3 +59,19 @@ export function resolveAcpConfigSelect(option: AcpSessionConfigOption, values: R
 	if (!raw || matched) return { value: raw, label, values: values.map((value) => ({ ...value })) };
 	return { value: raw, label, values: [{ value: raw, name: label, current: true }, ...values.map((value) => ({ ...value }))] };
 }
+
+/**
+ * 底栏展示分组：1-2 项全部平铺；3 项以上最多留两个高频控件，其余进「参数」折叠菜单。
+ * 保留顺序：模型/长枚举（可搜索下拉）→ mode（权限/代理模式，切得最勤）→ 第一项。
+ * 参数特别多的 agent（CodeBuddy 一次回传 6-8 项）平铺会把底栏撑满、标签全被压成
+ * 省略号；阈值只在这里定义，组件只负责按分组渲染。
+ */
+export function splitAcpConfigEntries(entries: ReadonlyArray<AcpConfigEntry>): { inline: AcpConfigEntry[]; overflow: AcpConfigEntry[] } {
+	if (entries.length <= 2) return { inline: [...entries], overflow: [] };
+	// id/category 双判：部分 agent 不填 category，但模型项 id 固定为 model。
+	const primary = entries.find((entry) => entry.option.category === "model" || entry.option.id === "model" || entry.values.length > 10) ?? entries[0];
+	// mode 是除模型外最常切的参数（权限/代理模式），留在底栏避免每次都进菜单。
+	const secondary = entries.find((entry) => entry !== primary && (entry.option.category === "mode" || entry.option.id === "mode"));
+	const inline = secondary ? [primary, secondary] : [primary];
+	return { inline, overflow: entries.filter((entry) => !inline.includes(entry)) };
+}
