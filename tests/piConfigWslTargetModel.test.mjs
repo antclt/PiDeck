@@ -51,6 +51,13 @@ test("列表映射：ssh 主机与 WSL 档案各自保持 kind，不互相冒充
 	assert.deepEqual(JSON.parse(JSON.stringify(model.toWslTargetHosts([]))), []);
 });
 
+test("切换目标前只拦「配置组」的未保存草稿，不误拦技能/提示词等无关脏标记", () => {
+	assert.equal(model.hasUnsavedConfigDrafts([]), false);
+	assert.equal(model.hasUnsavedConfigDrafts(["skills", "prompts"]), false);
+	assert.equal(model.hasUnsavedConfigDrafts(["config:models"]), true);
+	assert.equal(model.hasUnsavedConfigDrafts(["skills", "config:settings"]), true);
+});
+
 test("只有存在 WSL 档案时才提示「技能/提示词/扩展页仅编辑 Windows 配置」", () => {
 	assert.equal(model.hasWslConfigProfile([]), false);
 	assert.equal(model.hasWslConfigProfile([SSH_HOST]), false);

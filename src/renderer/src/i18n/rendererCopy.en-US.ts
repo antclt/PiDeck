@@ -7247,6 +7247,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.target.remoteHint": "Reads/writes happen in the remote Pi directory; secrets show status only",
 	"config.target.switchTitle": "Switch configuration target",
 	"config.target.switchMessage": "There is an unapplied patch for the remote target; switching discards it. Continue?",
+	"config.target.switchDirtyBlocked": "This target still has unsaved config changes: save them (or close the dialog and discard) before switching targets",
 	"config.target.switchConfirm": "Discard and switch",
 	"config.target.discardTitle": "Discard the unapplied remote patch?",
 	"config.target.discardMessage": "The remote patch has not been applied; closing now discards it. Close anyway?",

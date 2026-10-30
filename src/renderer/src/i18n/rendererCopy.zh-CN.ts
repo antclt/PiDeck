@@ -7219,6 +7219,7 @@ export const zhCN = {
 	"config.target.remoteHint": "读写均发生在远端 Pi 目录，密钥只显示状态",
 	"config.target.switchTitle": "切换配置目标",
 	"config.target.switchMessage": "远端还有未应用的 patch，切换目标会丢弃它。确定继续？",
+	"config.target.switchDirtyBlocked": "当前目标还有未保存的配置修改：先保存（或关闭窗口选择放弃）后再切换目标",
 	"config.target.switchConfirm": "丢弃并切换",
 	"config.target.discardTitle": "丢弃远端未应用的 patch？",
 	"config.target.discardMessage": "远端 patch 尚未应用，关闭窗口会丢弃它。确定关闭？",

@@ -7,13 +7,14 @@ import { X, Cpu, FileCode2, FileText, KeyRound, Loader2, Puzzle, Settings2, Shie
 import { cn } from "./lib/utils";
 import { deepClone } from "./utils/deepEqual";
 import { showNotice } from "./utils/notice";
+import { formatIpcError } from "./utils/ipcError";
 import { applyAdaptiveTemplateReset, collectModelSpecPatches, deriveProviderCompat, mergeAdaptiveModelTemplate } from "./utils/modelSpecAutoFill";
 import type { FetchedModel, ConfigProxyMode } from "../../shared/types/fetchedModel";
 import { Component, forwardRef, useRef, useState, useEffect, useCallback, useImperativeHandle, useMemo, type ReactNode, type Ref } from "react";
 import type { PiDesktopApi } from "../../preload";
 import { AuthTab } from "./config/AuthTab";
 import { PiConfigTargetSelector } from "./config/PiConfigTargetSelector";
-import { samePiConfigTarget, toSshTargetHosts, toWslTargetHosts, type PiConfigTargetHost } from "./config/piConfigTargetModel";
+import { hasUnsavedConfigDrafts, samePiConfigTarget, toSshTargetHosts, toWslTargetHosts, type PiConfigTargetHost } from "./config/piConfigTargetModel";
 import { RemoteConfigPanel } from "./config/RemoteConfigPanel";
 import { REMOTE_CONFIG_UNSUPPORTED_TAB_COPY, RemoteConfigUnsupportedNotice } from "./config/RemoteConfigUnsupportedNotice";
 import { WslConfigScopeNotice } from "./config/WslConfigScopeNotice";
@@ -1078,13 +1079,6 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	}, [open, section, tab, loadConfig, resourceScope, effectiveProjectId, bumpResourceGeneration]);
 
 	const showToast = (msg: string) => showNotice(msg, 2500);
-
-	/** 去掉 Electron IPC 包装前缀，只保留真正业务错误，方便 toast 阅读。 */
-	const formatIpcError = (error: unknown): string => {
-		const raw = error instanceof Error ? error.message : String(error);
-		const matched = raw.match(/Error invoking remote method '[^']+':\s*(?:Error:\s*)?([\s\S]+)$/i);
-		return (matched?.[1] ?? raw).trim();
-	};
 
 	/** 统一保存流程：写盘 → 校验 → toast；成功时清除对应 tab 的未保存标记，返回是否成功。 */
 	const saveAndReload = async (saveFn: () => Promise<{ valid: boolean; error?: string }>, successMessage?: string, dirtyKey?: string): Promise<boolean> => {
@@ -2564,6 +2558,11 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	/** 切换配置目标：同目标忽略；远端有未应用 patch 时先显式确认（丢弃草稿不能静默发生）。 */
 	const handleConfigTargetChange = (next: PiConfigTarget) => {
 		if (samePiConfigTarget(next, configTarget)) return;
+		// 本目标的配置草稿必须先落地或放弃：留着会按新目标保存（作用域错配），直接丢是静默数据丢失。
+		if (hasUnsavedConfigDrafts(dirtyTabsRef.current)) {
+			showNotice(t("config.target.switchDirtyBlocked"), 5000, "warning");
+			return;
+		}
 		if (remoteConfigDirty) {
 			setPendingTargetSwitch(next);
 			return;

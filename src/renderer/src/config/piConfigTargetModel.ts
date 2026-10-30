@@ -30,6 +30,17 @@ export function hasWslConfigProfile(hosts: readonly PiConfigTargetHost[]): boole
 }
 
 /**
+ * 切换配置目标前必须拦下的「配置组未保存草稿」判定。
+ * 只看 config:* 的脏标记：skills/prompts 等与配置目标无关的未保存修改不应挡住切目标。
+ */
+export function hasUnsavedConfigDrafts(keys: Iterable<string>): boolean {
+	for (const key of keys) {
+		if (key.startsWith("config:")) return true;
+	}
+	return false;
+}
+
+/**
  * 同一目标判定：同 kind 同 hostId 才算同一个。同一个 id 在 ssh/wsl 两个命名空间里是不同目标，
  * 切换时必须重载——否则界面会把上一份目标的草稿当成新目标的数据展示。
  */
