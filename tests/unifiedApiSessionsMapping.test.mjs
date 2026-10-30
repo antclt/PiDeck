@@ -31,8 +31,8 @@ const FACADE_SOURCE = readFileSync("src/shared/api/facadeTypes.ts", "utf8");
  * readDshSystemPrompt（轨迹事实/索引 preview 取代）→ sessions 116；config 48→50
  * （外部 Agent 供应商导入两法）。
  */
-const SESSIONS_METHOD_TOTAL = 116;
-const CONFIG_METHOD_TOTAL = 50;
+const SESSIONS_METHOD_TOTAL = 117;
+const CONFIG_METHOD_TOTAL = 52;
 const SESSIONS_GROUP_KEYS = ["catalog", "import", "rewind", "runtime"];
 const CONFIG_GROUP_KEYS = ["auth", "maintenance", "mcp", "models", "resources", "settings", "tokendance", "trust", "usageProbes", "vision"];
 
@@ -187,7 +187,7 @@ test("F5-1 SESSIONS_SUBDOMAINS 组键集恰为 catalog/runtime/import/rewind 四
 	assert.deepEqual(validateGroupingStructure(SESSIONS, SESSIONS_GROUP_KEYS), []);
 });
 
-test("F5-2 四组并集 ≡ preload sessions 命名空间 116 方法全集（无丢失无新增，§0 锚）", () => {
+test("F5-2 四组并集 ≡ preload sessions 命名空间 117 方法全集（无丢失无新增，§0 锚）", () => {
 	assert.equal(sessionsNames.length, SESSIONS_METHOD_TOTAL, `源码解析得 ${sessionsNames.length} 个方法`);
 	assert.deepEqual(diffGroups(SESSIONS, sessionsNames), { missing: [], extra: [] });
 	assert.equal(Object.values(SESSIONS).flat().length, SESSIONS_METHOD_TOTAL, "四组方法数之和 = 116");
@@ -228,7 +228,7 @@ test("F5-5 facadeTypes 视图成员与映射常量同源（源码契约，空白
 	);
 });
 
-test("F5-6 fixture 工厂按组 pick：输出键并集 ≡ 116 方法全集（SubPick 缺席静默语义）", () => {
+test("F5-6 fixture 工厂按组 pick：输出键并集 ≡ 117 方法全集（SubPick 缺席静默语义）", () => {
 	let counter = 0;
 	const fixture = {};
 	for (const name of sessionsNames) fixture[name] = () => counter++;
@@ -267,7 +267,7 @@ test("F5-7 DSH 方法归属按 PLAN.md S5 裁定（查询→runtime、importDsh*
 	assert.deepEqual(problems, [], "DSH 归属与 S5 裁定不符——映射数据待返工，证据见消息");
 });
 
-test("F5-8 CONFIG_SUBSTORES 十组并集 ≡ config 命名空间 50 方法全集 + 方法族口径（FIND-4）", () => {
+test("F5-8 CONFIG_SUBSTORES 十组并集 ≡ config 命名空间 52 方法全集 + 方法族口径（FIND-4）", () => {
 	assert.equal(configNames.length, CONFIG_METHOD_TOTAL, `源码解析得 ${configNames.length} 个方法`);
 	assert.deepEqual(Object.keys(CONFIG).sort(), CONFIG_GROUP_KEYS);
 	assert.deepEqual(validateGroupingStructure(CONFIG, CONFIG_GROUP_KEYS), []);

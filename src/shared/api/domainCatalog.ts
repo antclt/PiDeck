@@ -38,6 +38,15 @@ export const DOMAIN_CATALOG = [
 		channelPrefix: ["sessions", "agents"],
 		aggregation: "consolidate",
 	},
+	{
+		id: "session-groups",
+		group: "core",
+		manager: "SessionGroupStore（侧栏分组树只读，宿主插件按 sessionGroups.manage 写入）",
+		ipcFile: ["ipc/sessionGroupsIpc.ts"],
+		preloadNamespaces: ["sessionGroups"],
+		channelPrefix: ["session-groups"],
+		aggregation: "aggregate",
+	},
 	// 裁决（伴生行）：DSH 插件体系红线（RESEARCH §4.7：DSH 域既有能力，非 PiDeck 自有扩展
 	// 点，禁止当作 PiDeck 扩展机制暴露）。dsh:* 与 dsh-runtime:* 共 50 通道的渲染面是 sessions
 	// 命名空间的 DSH 方法组（preload 的 sessions.*Dsh* 方法），无独立命名空间，故本行伴生

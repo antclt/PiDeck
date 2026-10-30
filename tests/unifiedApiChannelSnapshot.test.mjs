@@ -45,9 +45,9 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const CHANNEL_TOTAL = 769;
-const PREFIX_COUNT = 90;
-const CHANNEL_DIGEST = "d5fd02cc7e079bd6a3ba242a0658ab4ef99ef04faa3daa0fdedceacd29db10c9";
+const CHANNEL_TOTAL = 795;
+const PREFIX_COUNT = 91;
+const CHANNEL_DIGEST = "c98877becbd97dc1c3dd59705a699b46583b1cc3df17c905aac2de92cbe7887b";
 // agentEventTags：Agent 内部事件标签（emit 的 sourceChannel），不是 IPC 通道，不进 preload。
 const EVENT_TAG_TOTAL = 8;
 const EVENT_TAG_DIGEST = "aab959e88353903d214ac0276ccbdc0c90a31240dabc6469b6174a902c76d44b";
@@ -66,11 +66,11 @@ const sortedDigest = (pairs) => {
 	return createHash("sha256").update(serialized, "utf8").digest("hex");
 };
 
-test("F3-1 通道常量总数 === 769", () => {
+test("F3-1 通道常量总数 === 795", () => {
 	assert.equal(entries.length, CHANNEL_TOTAL);
 });
 
-test("F3-2 通道值唯一数 === 769（无重复通道字符串）", () => {
+test("F3-2 通道值唯一数 === 795（无重复通道字符串）", () => {
 	assert.equal(new Set(values).size, CHANNEL_TOTAL);
 });
 
@@ -91,15 +91,15 @@ test("F3-7 agentEventTags 单独锚定：8 个标签 + 摘要（与 ipcChannels 
 	for (const [key, value] of tagEntries) assert.ok(!channelValues.has(value), `事件标签 ${key}=${value} 与 IPC 通道同名`);
 });
 
-test("F3-5 锚点抽查：appGetChannel=update:get-channel、sessionsRuntimeEvent=sessions:runtime-event、git=38、enhance=3", () => {
+test("F3-5 锚点抽查：appGetChannel=update:get-channel、sessionsRuntimeEvent=sessions:runtime-event、git=62、enhance=3", () => {
 	assert.equal(ipcChannels.appGetChannel, "update:get-channel");
 	assert.equal(ipcChannels.sessionsRuntimeEvent, "sessions:runtime-event");
 	const countByPrefix = (prefix) => values.filter((value) => value.startsWith(`${prefix}:`)).length;
-	assert.equal(countByPrefix("git"), 59);
+	assert.equal(countByPrefix("git"), 62);
 	assert.equal(countByPrefix("enhance"), 3);
 });
 
-test("F3-6 通道域前缀种类 === 90", () => {
+test("F3-6 通道域前缀种类 === 91", () => {
 	const prefixes = new Set(values.map((value) => value.split(":")[0]));
 	assert.equal(prefixes.size, PREFIX_COUNT);
 });
