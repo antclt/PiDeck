@@ -47,7 +47,7 @@ test("sessionStatusBadge: 重启中覆盖 idle，显示 loading", () => {
 test("sessionStatusBadge: busy 全 false 时回落 status 映射", () => {
 	const { sessionStatusBadge } = loadSessionStatusBadge();
 	const badge = sessionStatusBadge("running", { isRestarting: false, isStopping: false, isReloading: false });
-	assert.equal(json(badge), json({ status: "loading", colorClass: "text-amber-500 dark:text-amber-400" }));
+	assert.equal(json(badge), json({ status: "loading", colorClass: "text-warning" }));
 });
 
 // —— 无操作时按 status 映射 ——
@@ -61,7 +61,7 @@ test("sessionStatusBadge: error→danger / idle→neutral / starting→loading",
 
 test("sessionStatusBadge: running/pending/waiting → loading + 黄色覆盖", () => {
 	const { sessionStatusBadge } = loadSessionStatusBadge();
-	const amber = { status: "loading", colorClass: "text-amber-500 dark:text-amber-400" };
+	const amber = { status: "loading", colorClass: "text-warning" };
 	assert.equal(json(sessionStatusBadge("running")), json(amber));
 	assert.equal(json(sessionStatusBadge("pending")), json(amber));
 	assert.equal(json(sessionStatusBadge("waiting")), json(amber));

@@ -72,13 +72,13 @@ test("usageToneForPercent：Details 逐窗口行与 usageTone 同阈值", () => 
 	assert.equal(display.usageToneForPercent(90), "empty");
 });
 
-test("tone → 样式类映射（绿/橙/红含 dark 变体，进度条与文字分列）", () => {
-	assert.match(display.USAGE_TONE_TEXT_CLASS.ok, /green-600/);
-	assert.match(display.USAGE_TONE_TEXT_CLASS.low, /orange-500/);
-	assert.match(display.USAGE_TONE_TEXT_CLASS.empty, /red-500/);
-	assert.match(display.USAGE_TONE_BAR_CLASS.empty, /bg-red-500/);
-	assert.match(display.USAGE_TONE_BAR_CLASS.low, /bg-orange-500/);
-	assert.match(display.USAGE_TONE_BAR_CLASS.ok, /bg-green-500/);
+test("tone → 样式类映射（语义 token：success/warning/danger，进度条与文字分列）", () => {
+	assert.match(display.USAGE_TONE_TEXT_CLASS.ok, /text-success/);
+	assert.match(display.USAGE_TONE_TEXT_CLASS.low, /text-warning/);
+	assert.match(display.USAGE_TONE_TEXT_CLASS.empty, /text-danger/);
+	assert.match(display.USAGE_TONE_BAR_CLASS.empty, /bg-danger/);
+	assert.match(display.USAGE_TONE_BAR_CLASS.low, /bg-warning/);
+	assert.match(display.USAGE_TONE_BAR_CLASS.ok, /bg-success/);
 });
 
 test("usagePercent：periods 封顶 100；credits remaining 可反推 used", () => {

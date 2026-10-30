@@ -50,7 +50,7 @@ test("session tab uses AnimatedBadge instead of raw pulse dot", () => {
 	assert.match(source, /bare/);
 	assert.match(source, /pulse=\{false\}/);
 	assert.match(source, /\[&_svg\]:h-2\.5 \[&_svg\]:w-2\.5/);
-	assert.match(statusSource, /text-amber-500 dark:text-amber-400/);
+	assert.match(statusSource, /text-warning/);
 	// 状态映射（颜色语义：启动蓝旋转 / 运行黄旋转 / 未启动白 / 失败红）
 	assert.match(statusSource, /export function sessionStatusBadge\(/);
 	assert.match(statusSource, /case "error":\s*\n\s*return \{ status: "danger" \};/);

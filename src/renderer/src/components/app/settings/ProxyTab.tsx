@@ -200,7 +200,7 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
 				</div>
 			)}
 			<SettingsSection id="settings-section-proxy-pi-agent" title={t("settings.piProxy")} description={t("settings.piProxyDesc")}>
-				<SettingSwitchRow anchor="proxy-enable-pi" title={t("settings.enablePiProxy")} description={t("settings.enablePiProxyDesc")} checked={draft.piProxyEnabled} disabled={proxyListActive} onChange={(checked) => updateDraft({ piProxyEnabled: checked })} />
+				<SettingSwitchRow anchor="proxy-enable-pi" title={t("settings.enablePiProxy")} description={proxyListActive ? t("settings.piProxySwitchOverridden") : t("settings.enablePiProxyDesc")} checked={draft.piProxyEnabled} disabled={proxyListActive} onChange={(checked) => updateDraft({ piProxyEnabled: checked })} />
 				{/* 配置与开关解耦：地址/绕过/测试始终可编辑，关闭开关时仅保存配置不启用——
             单会话「会话代理」的 on 模式会复用下方地址，无需全局开启。 */}
 				<div className="setting-proxy-panel">

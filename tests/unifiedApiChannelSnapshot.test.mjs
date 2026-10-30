@@ -38,6 +38,10 @@
  *   只作为 emitSessionRuntimeEvent 的 sourceChannel 标签（preload 里根本不存在）——
  *   它们会让「三处同步」失去机械可判定性，因此迁到 agentEventTags；ipcChannels 711 → 703，
  *   agents 前缀因 agentsRpcLog 仍在而保留（前缀数仍 89）。新增 npm run check:ipc-wiring 守两张表边界。
+ * 2026-10-30 发版前显式刷新（+9 通道 / +1 前缀，均附领域正当理由）：session-groups:list/save/delete/reorder/changed
+ *   （会话分组核心化，新增 session-groups 前缀）、sessionsSetVisibleSessions（live 流只下发可见会话）、
+ *   configWatchaAccess / configWatchaOpenAlipay（「请作者喝咖啡」入口）、securityConfigChanged（安全配置变更广播）。
+ *   通道 769→778，前缀 90→91。
  * 刷新方式：entries.map(([k, v]) => `${k}=${v}`).sort().join("\n") 重算 sha256，写入 CHANNEL_DIGEST。
  */
 import assert from "node:assert/strict";
@@ -45,9 +49,9 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const CHANNEL_TOTAL = 769;
-const PREFIX_COUNT = 90;
-const CHANNEL_DIGEST = "d5fd02cc7e079bd6a3ba242a0658ab4ef99ef04faa3daa0fdedceacd29db10c9";
+const CHANNEL_TOTAL = 778;
+const PREFIX_COUNT = 91;
+const CHANNEL_DIGEST = "0aa4feb3937fea75781c3ad70cd6b13f04aaab8bae10b6aa561bee6ab1a8813d";
 // agentEventTags：Agent 内部事件标签（emit 的 sourceChannel），不是 IPC 通道，不进 preload。
 const EVENT_TAG_TOTAL = 8;
 const EVENT_TAG_DIGEST = "aab959e88353903d214ac0276ccbdc0c90a31240dabc6469b6174a902c76d44b";
@@ -66,11 +70,11 @@ const sortedDigest = (pairs) => {
 	return createHash("sha256").update(serialized, "utf8").digest("hex");
 };
 
-test("F3-1 通道常量总数 === 769", () => {
+test("F3-1 通道常量总数 === 778", () => {
 	assert.equal(entries.length, CHANNEL_TOTAL);
 });
 
-test("F3-2 通道值唯一数 === 769（无重复通道字符串）", () => {
+test("F3-2 通道值唯一数 === 778（无重复通道字符串）", () => {
 	assert.equal(new Set(values).size, CHANNEL_TOTAL);
 });
 
@@ -99,7 +103,7 @@ test("F3-5 锚点抽查：appGetChannel=update:get-channel、sessionsRuntimeEven
 	assert.equal(countByPrefix("enhance"), 3);
 });
 
-test("F3-6 通道域前缀种类 === 90", () => {
+test("F3-6 通道域前缀种类 === 91", () => {
 	const prefixes = new Set(values.map((value) => value.split(":")[0]));
 	assert.equal(prefixes.size, PREFIX_COUNT);
 });

@@ -19,7 +19,7 @@ const surfacesCss = readFileSync("src/renderer/src/styles/surfaces.css", "utf8")
 
 test("streamdown pipeline delegates to official plugins (code/mermaid/math) and keeps link override", () => {
 	// 官方插件接管：代码高亮、mermaid、数学
-	assert.match(stream, /import \{ code \} from "@streamdown\/code"/);
+	assert.match(stream, /import \{ code, createCodePlugin \} from "@streamdown\/code"/);
 	assert.match(stream, /import \{ mermaid \} from "@streamdown\/mermaid"/);
 	assert.match(stream, /import \{ createMathPlugin \} from "@streamdown\/math"/);
 	// 数学插件开启单美元行内公式（singleDollarTextMath: true）：

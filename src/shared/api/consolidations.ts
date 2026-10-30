@@ -119,6 +119,7 @@ export const SESSIONS_SUBDOMAINS = {
 		"setRuntimeModel",
 		"setRuntimePermission",
 		"setRuntimeThinking",
+		"setVisibleSessions",
 		"startDshHost",
 		"stopDshHost",
 		"stopDshPlugin",
@@ -145,6 +146,8 @@ export const CONFIG_SUBSTORES = {
 	mcp: ["getMcp", "saveMcp", "probeMcp", "installMcpSetupSkill", "mcpListStatus", "mcpLogin", "mcpLogout", "onMcpLoginUrl"],
 	trust: ["getTrust"],
 	tokendance: ["getTokendanceModels", "installTokendance", "tokendanceAuthAwait", "tokendanceAuthCancel", "tokendanceAuthExchange", "tokendanceAuthStart", "tokendanceTopUpCreate", "tokendanceTopUpOpenAlipay", "tokendanceTopUpStatus"],
+	// 打赏（请作者喝咖啡）：剩余次数查询与购买入口，与 tokendance 的额度充值语义分开。
+	support: ["watchaAccess", "watchaOpenAlipay"],
 	usageProbes: ["fetchUsage", "getUsageProbes", "saveUsageProbes", "installUsageSkill", "listUsageProbeStates", "testUsageProbe"],
 	resources: ["piResourcesSetBuiltin", "piResourcesSummary"],
 	vision: ["visionClearEvents", "visionClearLog", "visionGetConfig", "visionGetEvents", "visionGetLog", "visionSaveConfig"],

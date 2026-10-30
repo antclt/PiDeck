@@ -43,10 +43,10 @@ test("fixed light chat/table colors are tokenized for dark mode", () => {
 		assert.doesNotMatch(body, /#[0-9a-f]{3,8}\b/i, "user-turn-bubble must not hardcode hex colors");
 		assert.match(body, /var\(--color-/, "user-turn-bubble must use semantic tokens");
 	}
-	// 表格 wrapper 是「单卡片」皮（边框/圆角/底色）：工具栏（first-child）与表头都是
-	// 墨水罩染弱表面（var(--color-surface-ink*)），滚动区（last-child）透明；一律语义 token。
-	assert.match(block('[data-streamdown="table-wrapper"] > div:first-child'), /background:\s*var\(--color-surface-ink-subtle\);/);
+	// 表格 wrapper 是「单卡片」皮（边框/圆角/底色）：底色落在 wrapper 上（chat-muted-bg），
+	// 表头走 --color-md-table-head-bg（= 墨水罩染弱表面）语义 token，滚动区（last-child）透明。
+	assert.match(block('[data-streamdown="table-wrapper"]'), /background:\s*var\(--color-chat-muted-bg\);/);
 	assert.match(block('[data-streamdown="table-wrapper"] > div:last-child'), /background:\s*transparent;/);
 	assert.match(block('[data-streamdown="table"]'), /background:\s*var\(--color-chat-table-bg(?:,\s*var\(--color-bg-panel\))?\);/);
-	assert.match(block('[data-streamdown="table-wrapper"] thead'), /background:\s*var\(--color-surface-ink-subtle\);/);
+	assert.match(block('[data-streamdown="table-wrapper"] thead'), /background:\s*var\(--color-md-table-head-bg\);/);
 });

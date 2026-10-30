@@ -50,7 +50,7 @@ test("装配契约：关闭确认用点名列表，DSH 导航与顶层分页有�
 	assert.match(configModal, /configUnsavedSummary\?\.items\.map/);
 	assert.match(configModal, /config\.unsavedListIntro/);
 	assert.match(configModal, /dirtyNavIds=\{dshDirtyNavIds\}/);
-	assert.match(configModal, /hasDshDirty \? <span className="size-1\.5 rounded-full bg-amber-500"/);
+	assert.match(configModal, /hasDshDirty \? <span className="size-1\.5 rounded-full bg-warning"/);
 	assert.match(dshTab, /dirtyNavIds\?\.has\(`dsh:\$\{item\.id\}`\)/);
 });
 

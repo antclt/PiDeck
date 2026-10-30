@@ -29,7 +29,7 @@ export type SessionsDomainView<TSessions> = {
 	rewind: SubPick<TSessions, typeof SESSIONS_SUBDOMAINS.rewind>;
 };
 
-/** config 域收口视图：十子库各自 Pick（47 方法十组分桶，configBackups 7 方法在独立行不在本视图）。 */
+/** config 域收口视图：十一子库各自 Pick（configBackups 7 方法在独立行不在本视图）。 */
 export type ConfigDomainView<TConfig> = {
 	models: SubPick<TConfig, typeof CONFIG_SUBSTORES.models>;
 	auth: SubPick<TConfig, typeof CONFIG_SUBSTORES.auth>;
@@ -37,6 +37,7 @@ export type ConfigDomainView<TConfig> = {
 	mcp: SubPick<TConfig, typeof CONFIG_SUBSTORES.mcp>;
 	trust: SubPick<TConfig, typeof CONFIG_SUBSTORES.trust>;
 	tokendance: SubPick<TConfig, typeof CONFIG_SUBSTORES.tokendance>;
+	support: SubPick<TConfig, typeof CONFIG_SUBSTORES.support>;
 	usageProbes: SubPick<TConfig, typeof CONFIG_SUBSTORES.usageProbes>;
 	resources: SubPick<TConfig, typeof CONFIG_SUBSTORES.resources>;
 	vision: SubPick<TConfig, typeof CONFIG_SUBSTORES.vision>;

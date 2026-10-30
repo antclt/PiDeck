@@ -5269,6 +5269,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.announcementNotification": "Announcement notifications",
 	"settings.announcementNotificationDesc": "Show a toast when new announcements arrive (default on; auto-deferred while typing or a session is running). Turning off also hides the sidebar megaphone entry",
 	"settings.enablePiProxy": "Enable Pi agent proxy",
+	"settings.piProxySwitchOverridden": "The proxy-by-model allowlist is active: listed models are forced through the proxy and all others are forced direct, so this switch no longer applies. Clear the list to make it effective again.",
 	"settings.enablePiProxyDesc":
 		"When on, all Pi sessions use the address below by default (takes effect after restarting the session). Save the address without enabling it to apply it per-session via the \u201CSession proxy\u201D context menu or the provider allowlist below. Once the proxy-by-model list is configured, it decides instead (listed models proxy, others direct) and this switch is disabled",
 	"settings.piProxyModels": "Proxy by model",
