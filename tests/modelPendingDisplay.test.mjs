@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { computeModelDisplay, formatModelRef, resolveComposerLiveModel, resolveGuideDisplayModel } = loadTsCommonJs("src/renderer/src/utils/modelPendingDisplay.ts");
+const { computeModelDisplay, formatModelName, formatModelRef, resolveComposerLiveModel, resolveGuideDisplayModel } = loadTsCommonJs("src/renderer/src/utils/modelPendingDisplay.ts");
 
 function assertDisplay(actual, expected) {
 	assert.equal(JSON.stringify(actual), JSON.stringify(expected));
@@ -121,6 +121,12 @@ test("formatModelRef 带 provider", () => {
 
 test("formatModelRef: 自定义名称用于底栏 provider/名称", () => {
 	assert.equal(formatModelRef({ provider: "router9", modelId: "qd/qfmodel", modelName: "qwen-3.8-flash" }), "router9/qwen-3.8-flash");
+});
+
+test("formatModelName 只给模型名，供应商不参与底栏正文", () => {
+	assert.equal(formatModelName({ modelId: "grok-4.6" }), "grok-4.6");
+	assert.equal(formatModelName({ modelId: "qd/qfmodel", modelName: "qwen-3.8-flash" }), "qwen-3.8-flash");
+	assert.equal(formatModelName({ modelId: "" }), "-");
 });
 
 test("契约: 运行中优先直接切换模型，后端 busy 时才排到下一轮", () => {

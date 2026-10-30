@@ -24,15 +24,17 @@
  *   （Wallpaper Engine 视频壁纸）各 +1 方法，命名空间数与数量锚点不变。
  * 2026-10-24 第四轮追赶 origin/dev（274 提交）：并入上游会话数据面/终端/文件管理器等改动，
  *   命名空间 77→78（新增上游域），sessions 118→116、config 48→50、git 59 不变。
+ * 2026-10-30 发版前刷新：sessionGroups 命名空间入场（会话分组核心化，77→78 之后 78→79）、
+ *   sessions.setVisibleSessions → 117、config watchaAccess/watchaOpenAlipay → 52（新增 support 子库）。
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const NS_LIST_SHA256 = "13596fcbf81dde419eaa9c8e8382d57f493f0ac488e9eb9d9b8e5963a1a6cd36";
-const FULL_METHODS_SHA256 = "ec0ee302975e0bf29c55108472ef28ff457930b12eef17c3bc3f11319681f0a9";
-const NAMESPACE_COUNT = 78;
+const NS_LIST_SHA256 = "8eddbab22c377522734e7c95aa143b2dd9cf529837c7a660e5aecec3a98ce134";
+const FULL_METHODS_SHA256 = "8906a81c41619956888d5f65de4b2182b41d4b116235e72ad67c0a84195560d4";
+const NAMESPACE_COUNT = 79;
 
 /** 捕获 preload 暴露的 piDesktop；null/undefined/形态不符时显式红并给诊断（F8-6 共用）。 */
 function assertValidCapture(capture) {
@@ -64,7 +66,7 @@ const api = capturePreloadApi();
 const namespaces = sortedKeys(api);
 const methodLines = namespaces.map((ns) => `${ns}=${sortedKeys(api[ns]).join(",")}`);
 
-test("F8-1 preload 顶层命名空间数 === 78 且排序清单摘要零漂移", () => {
+test("F8-1 preload 顶层命名空间数 === 79 且排序清单摘要零漂移", () => {
 	assert.equal(namespaces.length, NAMESPACE_COUNT, `命名空间数 ${namespaces.length} ≠ ${NAMESPACE_COUNT}`);
 	assert.equal(sha256(namespaces.join(",")), NS_LIST_SHA256, "命名空间清单摘要漂移：preload 暴露面发生变化（A10 红线）");
 });
@@ -73,9 +75,9 @@ test("F8-2 每命名空间排序方法清单摘要零漂移", () => {
 	assert.equal(sha256(methodLines.join(";")), FULL_METHODS_SHA256, "方法清单摘要漂移：任一命名空间的方法暴露面发生变化（A10 红线）");
 });
 
-test("F8-3 数量锚点：sessions 116 / config 50 / git 59 / app 32", () => {
-	assert.equal(Object.keys(api.sessions).length, 116, "sessions 方法数漂移");
-	assert.equal(Object.keys(api.config).length, 50, "config 方法数漂移");
+test("F8-3 数量锚点：sessions 117 / config 52 / git 59 / app 32", () => {
+	assert.equal(Object.keys(api.sessions).length, 117, "sessions 方法数漂移");
+	assert.equal(Object.keys(api.config).length, 52, "config 方法数漂移");
 	assert.equal(Object.keys(api.git).length, 59, "git 方法数漂移");
 	assert.equal(Object.keys(api.app).length, 32, "app 方法数漂移");
 });

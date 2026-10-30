@@ -273,7 +273,9 @@ test("welcome page explicit model/thinking selections persist and are promoted i
 	// 每模型默认插在显式点选与全局默认之间，必须按当前展示的模型查表。
 	assert.match(picker, /modelThinkingLevelOfMap\(\s*options\.modelThinkingLevels,\s*resolvedLiveModel\.provider,\s*resolvedLiveModel\.modelId\s*\)/);
 	assert.match(picker, /fallback:\s*welcomeThinking\s*\?\?\s*perModelThinkingDefault\s*\?\?\s*options\.defaultThinkingLevel\s*\?\?\s*currentModelEntry\?\.defaultEffort/);
-	assert.match(app, /const welcomeThinking = readWelcomeThinkingPreference\(\)\?\.thinkingLevel/);
+	assert.match(app, /const welcomeThinking = draftBackend === "acp" \? undefined : readWelcomeThinkingPreference\(\)\?\.thinkingLevel/);
+	// ACP 的模型/思考由 agent CLI 自持，不得把 pi 的 welcome 偏好写进 ACP 草稿（8899a3bc5）。
+	assert.doesNotMatch(app, /draftBackend === "acp" \? readWelcome(Thinking|Model)Preference/);
 	assert.match(app, /welcomeThinking \? \{ thinkingLevel: welcomeThinking \} : \{\}/);
 	// 通用新建会话 action 只接收调用方显式 preferences，不应暗中读取欢迎页 localStorage。
 	assert.doesNotMatch(actions, /readWelcomeModelPreference\(\)|readWelcomeThinkingPreference\(\)/);

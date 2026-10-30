@@ -1474,6 +1474,18 @@
 .composer .tiptap-composer-host .ProseMirror p {
   margin: 0;
 }
+/* 输入预测 ghost 只在「输入框确实为空」时成立。可见性由 draft atom 推算，atom 一旦
+   落后于编辑器（合成中的 preedit、漏发的一次 onUpdate）就会把灰字压到真实文字上，
+   用户看到「两层文字」。DOM 侧再兜一道：编辑器里有内容就不画 ghost —— 判据用
+   ProseMirror 自己维护的 is-editor-empty（onUpdate 里同步，合成期间也会更新）。 */
+.composer .tiptap-composer-host:has(.ProseMirror:not(.is-editor-empty)) .composer-ghost {
+  display: none;
+}
+/* 中文输入法合成期（preedit 还没提交进文档）同样不画 ghost：拼音串本身就在输入框里，
+   再叠一行灰字就是「两层文字」。is-composing 由编辑器在 compositionstart/end 维护。 */
+.composer .tiptap-composer-host.is-composing .composer-ghost {
+  display: none;
+}
 /* ============ 行内引用 chip（输入框 + 消息气泡通用） ============
    2026-09 视觉对齐 Proma（F:/Proma apps/electron/src/renderer/components/ai-elements/
    rich-text-input.tsx 内联 <style>）：无边框、4px 圆角、13px/500、gap 2px、

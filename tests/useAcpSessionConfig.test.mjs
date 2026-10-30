@@ -24,6 +24,8 @@ function harness(t) {
 	const { useAcpSessionConfig } = loadTsCommonJs("src/renderer/src/hooks/useAcpSessionConfig.ts", {
 		stubs: {
 			react: host.react,
+			"../i18n": { t: (key) => key },
+			"../utils/notice": { showNotice: () => undefined },
 			"../desktopApi": {
 				desktopApi: {
 					acp: {
@@ -127,4 +129,34 @@ test("unmounted or previous-runtime subscriptions cannot repopulate config state
 	h.unmount();
 	h.emit({ agentId: "b", options: options("b-late") });
 	assert.equal(h.render("b").options, undefined);
+});
+
+test("rejected write reloads server truth instead of keeping the optimistic value", async (t) => {
+	// issue #451：toolMode 首次代理回复后锁定，写入被拒只弹 warning 时 chip 会一直显示
+	// 「已切换」而 agent 侧没变；拒绝后必须重拉一次 getSessionConfig 覆盖本地快照。
+	const h = harness(t);
+	h.render();
+	h.gets[0].resolve(options("a-model"));
+	await flush();
+	const pending = h.render().setOption("model", "rejected");
+	h.sets[0].reject(new Error("acp: config option rejected"));
+	await pending;
+	assert.equal(h.gets.length, 2, "拒绝后必须重拉 getSessionConfig");
+	h.gets[1].resolve(options("server-model"));
+	await flush();
+	assert.equal(h.render().options[0].id, "server-model");
+});
+
+test("a newer config notification wins over a stale reload after rejection", async (t) => {
+	const h = harness(t);
+	h.render();
+	h.gets[0].resolve(options("a-model"));
+	await flush();
+	const pending = h.render().setOption("model", "rejected");
+	h.sets[0].reject(new Error("acp: config option rejected"));
+	await pending;
+	h.emit({ agentId: "a", options: options("event-model") });
+	h.gets[1].resolve(options("stale-server-model"));
+	await flush();
+	assert.equal(h.render().options[0].id, "event-model");
 });

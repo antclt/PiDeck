@@ -24,6 +24,11 @@ export type PackedTgz = {
  * 用 --json 而非 --silent 文本行：JSON 输出稳定可解析（文本行在多包/告警时不可靠）。
  */
 export async function npmPackToDir(runNpm: DshPluginNpmRunner, spec: string, destDir: string): Promise<PackedTgz> {
+	// cwd 必须存在：execFile 在 fork 之前就校验工作目录，不存在直接 ENOENT（npm 根本没被
+	// 启动，错误文本是 `spawn npm ENOENT` 而不是 npm 自己的输出），`--pack-destination`
+	// 也不会代建。三个调用点（主包 pack 与依赖闭包两处）的 tmp 目录都是「拼出来」的，
+	// 统一在这里兜住，避免再一次只有命令行脚本能装、应用内 100% 失败（2026-10 事故）。
+	mkdirSync(destDir, { recursive: true });
 	const result = await runNpm(["pack", spec, "--json", "--pack-destination", destDir], { cwd: destDir });
 	if (result.code !== 0) {
 		throw new Error(`npm pack ${spec} failed: ${result.stderr || result.stdout || "no output"}`);

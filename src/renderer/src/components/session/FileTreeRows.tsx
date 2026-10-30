@@ -1,6 +1,6 @@
 import { cn } from "../../lib/utils";
 import { memo, useCallback, type CSSProperties, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
-import { ChevronRight, FileText, Folder, FolderOpen, LoaderCircle } from "lucide-react";
+import { ChevronRight, FileText, Folder, FolderOpen, LoaderCircle, TriangleAlert } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui-shadcn/collapsible";
 import { FileTreeIndentGuides } from "./FileTreeIndentGuides";
 import { getFileIconSeti, getFileIconColor, getFileTypeLabel } from "../../fileIcons";
@@ -63,6 +63,8 @@ type FileTreeRowProps = {
 	scrollRef: RefObject<HTMLDivElement | null>;
 	/** Git 状态查表（IDEA 风格行名着色）：命中带档位（祖先目录可能洗淡）；缺省（非 git 项目/未加载）不上色 */
 	gitStatusOf?: (path: string) => FileTreeGitStatusHit | undefined;
+	/** 目录 listing 失败后的重试：重新触发该目录拉取；缺省时错误行只提示不重试 */
+	onRetryDirectory?: (path: string) => void;
 };
 
 /** 树行内边距：对应 VS Code defaultIndent + depth × indent；外层不缩进，全宽背景保持不变。 */
@@ -267,6 +269,22 @@ const DirectoryRow = memo(function DirectoryRow(props: FileTreeRowProps) {
 							<span>{t("drawer.lazyLoading")}</span>
 						</div>
 					)}
+					{/* 读取失败 ≠ 空目录：失败时给可见错误行与重试入口，而不是静默呈现为空目录 */}
+					{expanded && node.hasChildren === false && node.loadError && (
+						<div className="file-children flex items-center gap-1.5 py-1 pl-2 pr-2 text-xs text-[var(--color-danger)]" role="alert">
+							<TriangleAlert size={12} className="shrink-0" aria-hidden="true" />
+							<span className="min-w-0 flex-1 truncate" title={node.loadError}>{t("drawer.loadFailed")}</span>
+							{props.onRetryDirectory && (
+								<button
+									type="button"
+									className="shrink-0 rounded-sm border border-border px-1.5 py-0.5 text-micro text-foreground transition-colors hover:bg-muted"
+									onClick={() => props.onRetryDirectory?.(nodeKey)}
+								>
+									{t("common.retry")}
+								</button>
+							)}
+						</div>
+					)}
 					{node.children && node.children.length > 0 && (
 						<div className="file-children">
 							{childWindow.visible.map((child) => (
@@ -286,6 +304,7 @@ const DirectoryRow = memo(function DirectoryRow(props: FileTreeRowProps) {
 									onDragOverDirChange={props.onDragOverDirChange}
 									scrollRef={props.scrollRef}
 									gitStatusOf={props.gitStatusOf}
+									onRetryDirectory={props.onRetryDirectory}
 								/>
 							))}
 							{childWindow.hasMore && <div ref={childWindow.sentinelRef} aria-hidden="true" className="h-px" />}

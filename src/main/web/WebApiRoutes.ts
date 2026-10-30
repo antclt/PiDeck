@@ -88,6 +88,24 @@ export class WebApiRoutes {
 	}
 
 	async handle(url: URL, request: IncomingMessage, response: ServerResponse): Promise<boolean> {
+		// EasyTier 托管配置下载：手机端「导入配置」直接吃这个 TOML（含网络密钥，故留在 /api/* 鉴权链内）。
+		if (url.pathname === "/api/easytier/config.toml" && request.method === "GET") {
+			const toml = this.deps.getEasyTierConfigToml?.() ?? "";
+			if (!toml) {
+				this.sendError(response, 404, "easytier-config-missing", "EasyTier 托管配置未生成，请先在设置中填写网络名称与密钥");
+				return true;
+			}
+			const body = Buffer.from(toml, "utf8");
+			response.writeHead(200, {
+				"content-type": "application/toml; charset=utf-8",
+				"content-disposition": 'attachment; filename="easytier.toml"',
+				"content-length": String(body.length),
+				"cache-control": "no-store",
+				...WEB_CORS_HEADERS,
+			});
+			response.end(body);
+			return true;
+		}
 		if (url.pathname === "/api/state") {
 			const state = await this.getState();
 			// 条件请求：载荷含全部会话投影（500+ 条约 228KB），而轮询窗口内目录多半没变。

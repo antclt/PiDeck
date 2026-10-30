@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Home, Maximize2, Minus, Plus, RefreshCw, Smartphone, Tablet, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Home, Maximize2, Minus, Plus, RefreshCw, Smartphone, Tablet, TriangleAlert, X } from "lucide-react";
 import { t } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
 import { Input } from "../ui-shadcn/input";
@@ -134,6 +134,8 @@ export function BrowserPanel(props: {
 	const [isLoading, setIsLoading] = useState(false);
 	const [loadProgress, setLoadProgress] = useState(0);
 	const [device, setDevice] = useState<DeviceType>(() => moduleState.device);
+	// 主框架加载失败（DNS/SSL/超时等非 -3）：显示错误页替代空白 webview，附重试
+	const [loadError, setLoadError] = useState<{ code: number; description: string; url: string } | null>(null);
 	const [deviceMenuOpen, setDeviceMenuOpen] = useState(false);
 	const deviceMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -201,6 +203,8 @@ export function BrowserPanel(props: {
 
 		const onDidNavigate = (event: Event) => {
 			const nextUrl = (event as unknown as WebviewEvent<"did-navigate">).url;
+			// 导航成功即清除错误页（重试/新导航生效）
+			setLoadError(null);
 			setUrl(nextUrl);
 			setInputValue(nextUrl);
 			updateNavigationState();
@@ -209,6 +213,7 @@ export function BrowserPanel(props: {
 		const onDidNavigateInPage = (event: Event) => {
 			const evt = event as unknown as WebviewEvent<"did-navigate-in-page">;
 			if (!evt.isMainFrame) return;
+			setLoadError(null);
 			setUrl(evt.url);
 			setInputValue(evt.url);
 			updateActiveTab({ url: evt.url });
@@ -227,7 +232,14 @@ export function BrowserPanel(props: {
 			if (failure.errorCode === -3) {
 				setIsLoading(false);
 				setLoadProgress(0);
+				return;
 			}
+			// 其它主框架失败（DNS 解析失败/连接拒绝/SSL 错误/超时）显示错误页：
+			// webview 自己渲染 Chromium 默认错误页，但背景色与站点无关、无重试入口；
+			// 这里记录错误态，用带重试按钮的统一错误页覆盖。
+			setIsLoading(false);
+			setLoadProgress(0);
+			setLoadError({ code: failure.errorCode, description: failure.errorDescription, url: failure.validatedURL });
 		};
 		const onProgress = (event: Event) => {
 			const progress = (event as unknown as WebviewEvent<"load-progress">).progress;
@@ -546,7 +558,7 @@ export function BrowserPanel(props: {
 				</div>
 			)}
 
-			<div className="flex min-h-0 flex-1 justify-center overflow-hidden bg-bg-subtle">
+			<div className="relative flex min-h-0 flex-1 justify-center overflow-hidden bg-bg-subtle">
 				<webview
 					ref={(el) => {
 						webviewRef.current = el;
@@ -554,6 +566,20 @@ export function BrowserPanel(props: {
 					className="browser-webview"
 					src={initialTab.url}
 				/>
+				{loadError && (
+					<div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-bg-page px-6 text-center" role="alert">
+						<TriangleAlert className="text-text-secondary" size={28} aria-hidden="true" />
+						<div className="text-sm font-medium text-text-primary">{t("browser.loadFailedTitle")}</div>
+						<div className="max-w-md break-all text-xs text-text-tertiary" title={loadError.url}>
+							{loadError.url}
+							{loadError.description ? <span className="ml-1 text-text-quaternary">({loadError.description})</span> : null}
+						</div>
+						<Button type="button" variant="outline" size="sm" className="h-7 gap-1 px-2.5 text-xs" onClick={() => { setLoadError(null); webviewReadyRef.current && webviewRef.current?.isConnected && webviewRef.current.reload(); }}>
+							<RefreshCw size={12} aria-hidden="true" />
+							{t("common.retry")}
+						</Button>
+					</div>
+				)}
 			</div>
 		</div>
 	);

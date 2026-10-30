@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Bot, Copy, GripVertical, ListChecks, Loader2, MessagesSquare, Search, Star, TextQuote, Trash2, UserRound, X } from "lucide-react";
+import { Bot, Copy, GripVertical, ListChecks, MessagesSquare, Search, Star, TextQuote, Trash2, UserRound, X } from "lucide-react";
 import { useAtomValue, useSetAtom } from "jotai";
 import type { FavoriteEntry, FavoriteRole } from "../../../../shared/types";
 import { projectInventoryAtom, sessionCatalogLoadStateAtom, sessionRecordsAtom } from "../../atoms";
@@ -9,6 +9,8 @@ import { useFavorites } from "../../hooks/useFavorites";
 import { useListReorder, type ListReorderItemBinding } from "../../hooks/useListReorder";
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
+import { PageHeader } from "../common/PageHeader";
+import { AsyncEmptyBlock, AsyncLoadingBlock } from "../common/AsyncState";
 import { writeClipboard } from "../../utils/clipboard";
 import { showNotice } from "../../utils/notice";
 import { openInSystemBrowser } from "../../utils/openExternal";
@@ -157,34 +159,33 @@ export function FavoritesWorkspace() {
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
-			<header className="flex shrink-0 flex-col gap-3 border-b border-border/40 px-5 py-3">
-				<div className="flex items-start justify-between gap-4">
-					<div className="min-w-0">
-						<div className="flex items-center gap-2">
-							<span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-								<Star className="size-4" aria-hidden="true" />
-							</span>
-							<h1 className="truncate text-base font-semibold text-foreground">{t("favorites.title")}</h1>
-							{entries ? (
-								<Badge variant="neutral" size="sm">
-									{t("favorites.count", { count: entries.length })}
-								</Badge>
-							) : null}
-						</div>
-						<p className="mt-1 truncate text-xs text-muted-foreground">{t("favorites.subtitle")}</p>
-					</div>
-					{entries && entries.length > 0 ? (
+			<PageHeader
+				icon={Star}
+				iconClassName="size-7 rounded-md bg-primary/10 text-primary p-1.5"
+				title={t("favorites.title")}
+				subtitle={t("favorites.subtitle")}
+				titleSuffix={
+					entries ? (
+						<Badge variant="neutral" size="sm">
+							{t("favorites.count", { count: entries.length })}
+						</Badge>
+					) : null
+				}
+				actions={
+					entries && entries.length > 0 ? (
 						<Button type="button" variant={selectionMode ? "secondary" : "outline"} size="sm" className="h-8 shrink-0 gap-1.5 text-xs" aria-pressed={selectionMode} title={t("common.bulkSelectHint")} onClick={() => (selectionMode ? exitSelection() : enterSelection())}>
 							<ListChecks className="size-3.5" aria-hidden="true" />
 							{t("common.bulkSelect")}
 						</Button>
-					) : null}
-				</div>
-				<div className="relative">
-					<Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-					<Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("favorites.searchPlaceholder")} aria-label={t("favorites.searchPlaceholder")} size="sm" className="pl-7 text-xs" />
-				</div>
-			</header>
+					) : null
+				}
+				search={
+					<div className="relative">
+						<Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+						<Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("favorites.searchPlaceholder")} aria-label={t("favorites.searchPlaceholder")} size="sm" className="pl-7 text-xs" />
+					</div>
+				}
+			/>
 
 			{selectionMode ? (
 				<BulkSelectionBar count={selectedCount} allSelected={areAllSelected(selected, visibleIds)} onToggleAll={toggleSelectAllVisible} onExit={exitSelection} onRequestDelete={() => setPendingBulkDelete(true)} />
@@ -208,16 +209,14 @@ export function FavoritesWorkspace() {
 			     虚拟化会把离屏行卸载，淡出没有锚点、拖拽命中区也不连续，需先给退场动画设计离场占位行。 */}
 			<div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
 				{entries === null ? (
-					<div className="flex items-center justify-center gap-2 py-16 text-xs text-muted-foreground">
-						<Loader2 className="size-4 animate-pideck-spin" aria-hidden="true" />
-						{t("common.loading")}
-					</div>
+					<AsyncLoadingBlock />
 				) : visible.length === 0 ? (
-					<div className="flex flex-col items-center gap-2 px-4 py-16 text-center">
-						<Star className="size-8 text-muted-foreground/50" aria-hidden="true" />
-						<div className="text-sm font-semibold text-foreground">{hasQuery ? t("favorites.noMatch") : t("favorites.emptyTitle")}</div>
-						{!hasQuery && <p className="max-w-[360px] text-xs leading-6 text-muted-foreground">{t("favorites.emptyHint")}</p>}
-					</div>
+					<AsyncEmptyBlock
+						icon={Star}
+						iconClassName="size-8 rounded-none bg-transparent text-muted-foreground/50 [&>svg]:size-8"
+						title={hasQuery ? t("favorites.noMatch") : t("favorites.emptyTitle")}
+						description={!hasQuery ? t("favorites.emptyHint") : undefined}
+					/>
 				) : (
 					<div className="flex flex-col gap-1.5" {...reorder.containerProps}>
 						{/* 删除淡出 + 列表位移收拢：remainingIds 用未过滤的 allIds——搜索/筛选隐藏的

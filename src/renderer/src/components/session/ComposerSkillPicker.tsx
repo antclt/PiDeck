@@ -7,9 +7,10 @@ import { desktopApi } from "../../desktopApi";
 import { projectByIdAtomFamily } from "../../atoms";
 import type { AgentBackend, DshSkillView } from "../../../../shared/types";
 import { emptyProjectResourceDiscovery, type SkillCatalogEntry, mergePiSkillCatalog } from "../../../../shared/skillCatalog";
-import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "../ui-shadcn/command";
+import { CommandItem } from "../ui-shadcn/command";
+import { CommandPickerGroup } from "../ui-shadcn/command-picker";
 import { Button } from "../ui-shadcn/button";
-import { PickerDialog } from "./ComposerComponents";
+import { CommandPickerDialog, PickerDialog } from "./ComposerComponents";
 import { showNotice } from "../../utils/notice";
 
 /** 选择面板条目直接复用 shared/skillCatalog 的统一模型（pi 与 DSH 同一形状）。 */
@@ -185,15 +186,79 @@ export function ComposerSkillPicker(props: {
 	// 区分提示语让用户知道当前范围。
 	const globalOnly = props.backend === "pi" && !hasProjectResources;
 
+// 源分组（Wave 2 §3.12）：项目/全局技能分开展示，与模型选择器的供应商分组同一交互。
+	const projectSkills = items.filter((skill) => skill.source === "project");
+	const globalSkills = items.filter((skill) => skill.source !== "project");
+	const renderSkillItem = (skill: (typeof items)[number]) => (
+		/* 双行条目与 prompt/模型选择器对齐：首行图标 + 真实斜杠命令 + 徽标，
+			次行描述截断 + 右侧详情/插入按钮。旧 picker-palette-* 单行排版弃用。 */
+		<CommandItem key={skill.name} value={`/${skill.name}`} keywords={[skill.name, skill.description, skill.whenToUse ?? "", toSkillInvocationToken(props.backend, skill.name)]} onSelect={() => props.onPick(skill.name)} className="group min-h-10 items-center gap-2.5 rounded-md px-3 py-2">
+			<span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted/70 text-muted-foreground">
+				<Sparkles size={14} strokeWidth={1.8} aria-hidden="true" />
+			</span>
+			<span className="min-w-0 flex-1">
+				<span className="flex items-center gap-1.5">
+					{/* 展示与真实调用命令一致的斜杠形态：pi 是 /skill:名称，DSH 是 /名称。
+						让用户看到的就是插入后会在草稿里出现的内容，避免选了却调不动的困惑。 */}
+					<span className="truncate font-mono text-control font-semibold text-foreground" title={`/${toSkillInvocationToken(props.backend, skill.name)}`}>
+						/{toSkillInvocationToken(props.backend, skill.name)}
+					</span>
+					{/* 来源徽标：全局 / 项目（title 显示完整目录），让用户知道技能从哪里来 */}
+					{skill.source && (
+						<span className="shrink-0 inline-flex items-center rounded bg-[var(--color-identity-tool-soft)] px-1.5 py-0.5 text-micro font-medium text-[var(--color-identity-tool)] " title={skill.sourceLabel}>
+							{skill.source === "global" ? t("app.skillBadgeGlobal") : t("app.skillBadgeProject")}
+						</span>
+					)}
+					{skill.userOnly && <span className="shrink-0 inline-flex items-center rounded bg-warning/15 px-1.5 py-0.5 text-micro font-medium text-warning">{t("dshTools.skillUserOnly")}</span>}
+				</span>
+				{skill.description && (
+					<span className="mt-0.5 block truncate text-caption text-muted-foreground" title={skill.description}>
+						{skill.description}
+					</span>
+				)}
+			</span>
+			{/* 详情（眼睛）与一键插入：仅 pi 技能有正文读取通道时才显示；DSH 技能由宿主管理。 */}
+			{skill.path && (
+				<Button
+					type="button"
+					variant="ghost"
+					size="icon-sm"
+					title={t("common.preview")}
+					onClick={(e) => {
+						e.stopPropagation();
+						openDetail(skill);
+					}}
+				>
+					<Eye size={14} strokeWidth={1.8} aria-hidden="true" />
+				</Button>
+			)}
+			{skill.path && props.onInsertContent && (
+				<Button
+					type="button"
+					variant="ghost"
+					size="icon-sm"
+					title={t("app.pickerInsertContent")}
+					onClick={(e) => {
+						e.stopPropagation();
+						insertContent(skill);
+					}}
+				>
+					<CornerDownLeft size={14} strokeWidth={1.8} aria-hidden="true" />
+				</Button>
+			)}
+		</CommandItem>
+	);
+
 	return (
-		<PickerDialog title={t("app.skillPickerTitle")} hint={t("app.skillPickerHint")} onClose={props.onClose} className="skill-picker">
-			<Command>
-				<CommandInput placeholder={t("app.skillPickerSearchPlaceholder")} autoFocus />
-				<CommandList className="max-h-[min(420px,55vh)]">
-					{/* cmdk 的 Empty 只在列表有数据且过滤后无匹配时才有意义；
-					    loading/出错/缺上下文等非列表态由下方自定义块承担，避免双提示。 */}
-					{!loading && !error && !blockedByAgent && <CommandEmpty>{t("app.skillPickerSearchEmpty")}</CommandEmpty>}
-					{loading ? (
+		<CommandPickerDialog
+			title={t("app.skillPickerTitle")}
+			hint={t("app.skillPickerHint")}
+			onClose={props.onClose}
+			className="skill-picker"
+			searchPlaceholder={t("app.skillPickerSearchPlaceholder")}
+			emptyLabel={t("app.skillPickerSearchEmpty")}
+		>
+			{loading ? (
 						<div className="flex items-center justify-center gap-2 py-6 text-caption text-muted-foreground">
 							<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
 							{t("app.skillPickerLoading")}
@@ -212,68 +277,17 @@ export function ComposerSkillPicker(props: {
 						/* 区分三种空态：chat 项目/无项目时只可能是全局为空；有项目时是项目+全局都为空。 */
 						<div className="px-6 py-10 text-center text-caption text-muted-foreground">{globalOnly ? (isChatSessionProject ? t("app.skillPickerChatProject") : t("app.skillPickerNoProject")) : t("app.skillPickerEmpty")}</div>
 					) : (
-						items.map((skill) => (
-							/* 双行条目与 prompt/模型选择器对齐：首行图标 + 真实斜杠命令 + 徽标，
-							   次行描述截断 + 右侧详情/插入按钮。旧 picker-palette-* 单行排版弃用。 */
-							<CommandItem key={skill.name} value={`/${skill.name}`} keywords={[skill.name, skill.description, skill.whenToUse ?? "", toSkillInvocationToken(props.backend, skill.name)]} onSelect={() => props.onPick(skill.name)} className="group min-h-10 items-center gap-2.5 rounded-md px-3 py-2">
-								<span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted/70 text-muted-foreground">
-									<Sparkles size={14} strokeWidth={1.8} aria-hidden="true" />
-								</span>
-								<span className="min-w-0 flex-1">
-									<span className="flex items-center gap-1.5">
-										{/* 展示与真实调用命令一致的斜杠形态：pi 是 /skill:名称，DSH 是 /名称。
-										    让用户看到的就是插入后会在草稿里出现的内容，避免选了却调不动的困惑。 */}
-										<span className="truncate font-mono text-control font-semibold text-foreground" title={`/${toSkillInvocationToken(props.backend, skill.name)}`}>
-											/{toSkillInvocationToken(props.backend, skill.name)}
-										</span>
-										{/* 来源徽标：全局 / 项目（title 显示完整目录），让用户知道技能从哪里来 */}
-										{skill.source && (
-											<span className="shrink-0 inline-flex items-center rounded bg-[var(--color-identity-tool-soft)] px-1.5 py-0.5 text-micro font-medium text-[var(--color-identity-tool)] " title={skill.sourceLabel}>
-												{skill.source === "global" ? t("app.skillBadgeGlobal") : t("app.skillBadgeProject")}
-											</span>
-										)}
-										{skill.userOnly && <span className="shrink-0 inline-flex items-center rounded bg-warning/15 px-1.5 py-0.5 text-micro font-medium text-warning">{t("dshTools.skillUserOnly")}</span>}
-									</span>
-									{skill.description && (
-										<span className="mt-0.5 block truncate text-caption text-muted-foreground" title={skill.description}>
-											{skill.description}
-										</span>
-									)}
-								</span>
-								{/* 详情（眼睛）与一键插入：仅 pi 技能有正文读取通道时才显示；DSH 技能由宿主管理。 */}
-								{skill.path && (
-									<Button
-										type="button"
-										variant="ghost"
-										size="icon-sm"
-										title={t("common.preview")}
-										onClick={(e) => {
-											e.stopPropagation();
-											openDetail(skill);
-										}}
-									>
-										<Eye size={14} strokeWidth={1.8} aria-hidden="true" />
-									</Button>
-								)}
-								{skill.path && props.onInsertContent && (
-									<Button
-										type="button"
-										variant="ghost"
-										size="icon-sm"
-										title={t("app.pickerInsertContent")}
-										onClick={(e) => {
-											e.stopPropagation();
-											insertContent(skill);
-										}}
-									>
-										<CornerDownLeft size={14} strokeWidth={1.8} aria-hidden="true" />
-									</Button>
-								)}
-							</CommandItem>
-						))
+						<>
+							{projectSkills.length > 0 && (
+								<CommandPickerGroup id="skills:project" label={t("app.skillBadgeProject")} count={projectSkills.length} countText={t("config.count.skills", { count: projectSkills.length })}>
+									{projectSkills.map(renderSkillItem)}
+								</CommandPickerGroup>
+							)}
+							<CommandPickerGroup id="skills:global" label={t("app.skillBadgeGlobal")} count={globalSkills.length} countText={t("config.count.skills", { count: globalSkills.length })}>
+								{globalSkills.map(renderSkillItem)}
+							</CommandPickerGroup>
+						</>
 					)}
-				</CommandList>
-			</Command>
-		</PickerDialog>
+		</CommandPickerDialog>
 	);
 }

@@ -5,6 +5,7 @@ import { automationActiveRunsAtom, automationTasksAtom } from "../../atoms/autom
 import { projectInventoryAtom } from "../../atoms/project-atoms";
 import { t } from "../../i18n";
 import type { AutomationWorkspaceRoute } from "../../utils/workspaceSurface";
+import { PageHeader } from "../common/PageHeader";
 import { Badge } from "../ui-shadcn/badge";
 import { Button } from "../ui-shadcn/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui-shadcn/tabs";
@@ -63,29 +64,27 @@ export function AutomationWorkspace(props: AutomationWorkspaceProps) {
 
 	return (
 		<section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
-			<header className="flex shrink-0 items-center justify-between gap-4 border-b border-border/40 px-5 py-3">
-				<div className="min-w-0">
-					<div className="flex items-center gap-2">
-						<Clock className="size-5 shrink-0 text-[var(--color-accent)]" />
-						<h1 className="truncate text-base font-semibold text-foreground">{scopeTitle}</h1>
-						{scopedActiveRuns.length > 0 && (
-							<Badge variant="info" size="sm" className="gap-1 animate-pulse">
-								<PlayCircle className="size-3" />
-								{t("automation.running")} ({scopedActiveRuns.length})
-							</Badge>
-						)}
-					</div>
-					<p className="mt-1 truncate text-xs text-muted-foreground">{props.projectId ? t("automation.projectSubtitle") : t("automation.subtitle")}</p>
-				</div>
-				<div className="flex shrink-0 items-center gap-2">
-					{activeTab === "tasks" && scopedTasks.length > 0 && (
+			<PageHeader
+				icon={Clock}
+				title={scopeTitle}
+				subtitle={props.projectId ? t("automation.projectSubtitle") : t("automation.subtitle")}
+				titleSuffix={
+					scopedActiveRuns.length > 0 ? (
+						<Badge variant="info" size="sm" className="gap-1 animate-pulse">
+							<PlayCircle className="size-3" />
+							{t("automation.running")} ({scopedActiveRuns.length})
+						</Badge>
+					) : null
+				}
+				actions={
+					activeTab === "tasks" && scopedTasks.length > 0 ? (
 						<Button size="sm" className="h-8 gap-1.5 text-xs" onClick={openCreate}>
 							<Plus className="size-3.5" />
 							{t("automation.createTask")}
 						</Button>
-					)}
-				</div>
-			</header>
+					) : null
+				}
+			/>
 
 			<Tabs value={activeTab} onValueChange={handleTabChange} className="flex min-h-0 flex-1 flex-col gap-3 px-5 pb-5 pt-3">
 				<TabsList className="w-auto self-start">

@@ -5,6 +5,7 @@ import { ConfirmDialog } from "./components/ui-shadcn/ConfirmDialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "./components/ui-shadcn/alert-dialog";
 import { X, Cpu, FileCode2, FileText, KeyRound, Loader2, Puzzle, Settings2, Shield, ShieldCheck, Sparkles, PlugZap, FolderOpen } from "lucide-react";
 import { cn } from "./lib/utils";
+import { WORKBENCH_DIALOG_SIZE_CLASS } from "./components/common/workbenchDialogSize";
 import { deepClone } from "./utils/deepEqual";
 import { showNotice } from "./utils/notice";
 import { applyAdaptiveTemplateReset, collectModelSpecPatches, deriveProviderCompat, mergeAdaptiveModelTemplate } from "./utils/modelSpecAutoFill";
@@ -291,7 +292,7 @@ export const ConfigPane = forwardRef<ConfigPaneHandle, ConfigPaneProps>(function
 
 // 小窗口保留外边距，避免 Pi 管理页完全压住工作区；821px 以上恢复桌面弹框尺寸。
 // DialogContent 默认带 sm:max-w-lg，必须显式覆盖它，否则小窗口会变成窄高条。
-const configModalSizeClass = "w-[80vw] max-w-[80vw] h-[80vh] max-h-[80vh] sm:max-w-[min(1300px,80vw)]";
+const configModalSizeClass = WORKBENCH_DIALOG_SIZE_CLASS;
 
 class ConfigModalErrorBoundary extends Component<{ open: boolean; onClose: () => void; children: ReactNode }, { error: Error | null }> {
 	override state = { error: null as Error | null };
@@ -608,6 +609,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const [uninstallProjectPackageConfirm, setUninstallProjectPackageConfirm] = useState<{ source: string } | null>(null);
 	const [rawContent, setRawContent] = useState("");
 	const [rawFileName, setRawFileName] = useState("models.json");
+	/** 待切换的源文件名：当前文件有未保存草稿时先弹确认，确认丢弃后才真正切换。 */
+	const [pendingRawFile, setPendingRawFile] = useState<string | null>(null);
 	// pi 全局配置目录（源文件页标注实际编辑位置）；加载失败时静默降级不显示路径。
 	const [piConfigDir, setPiConfigDir] = useState<string | null>(null);
 
@@ -1817,8 +1820,18 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		return ok;
 	};
 
-	// 切换源文件时重新加载对应文件内容
+	// 切换源文件：当前文件有未保存草稿时先弹确认（丢弃草稿才能切），避免静默丢失编辑
 	const handleRawFileChange = async (fileName: string) => {
+		if (fileName === rawFileName) return;
+		if (dirtyTabs.has("config:raw")) {
+			setPendingRawFile(fileName);
+			return;
+		}
+		await applyRawFileChange(fileName);
+	};
+
+	/** 确认丢弃草稿后（或本就无草稿）真正切换源文件并重新加载内容。 */
+	const applyRawFileChange = async (fileName: string) => {
 		setLoading(true);
 		try {
 			const res =
@@ -3320,6 +3333,22 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 
 			{/* 目标切换确认：远端有未应用 patch 时，切换会丢弃草稿，必须显式确认 */}
 			{pendingTargetSwitch && <ConfirmDialog title={t("config.target.switchTitle")} message={t("config.target.switchMessage")} confirmLabel={t("config.target.switchConfirm")} danger onConfirm={applyPendingTargetSwitch} onCancel={() => setPendingTargetSwitch(null)} />}
+
+			{/* 源文件切换确认：Raw 编辑器有未保存草稿时，切换下拉会丢弃草稿，必须显式确认 */}
+			{pendingRawFile && (
+				<ConfirmDialog
+					title={t("config.rawSwitchTitle")}
+					message={t("config.rawSwitchMessage")}
+					confirmLabel={t("config.rawSwitchConfirm")}
+					danger
+					onConfirm={() => {
+						const next = pendingRawFile;
+						setPendingRawFile(null);
+						if (next) void applyRawFileChange(next);
+					}}
+					onCancel={() => setPendingRawFile(null)}
+				/>
+			)}
 
 			{/* 远端草稿关闭确认：本机保存链路不会落盘远端 patch，只能显式丢弃或取消 */}
 			{remoteDiscardConfirmOpen && (

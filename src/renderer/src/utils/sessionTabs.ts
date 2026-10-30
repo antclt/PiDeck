@@ -67,10 +67,14 @@ export function togglePinSessionTab(tabs: readonly string[], pinned: readonly st
 }
 
 /**
- * 拖拽排序：source 插入到 target 前/后。
+ * 底层数组排序：source 插入到 target 前/后（只改 tabs 内部顺序）。
  * - 同区内拖动：仅在对应区间内重排；
  * - 交叉拖动（固定 ↔ 普通）：自动转换 source 的固定状态（与 VS Code/浏览器一致），
  *   插入目标区间对应位置。
+ *
+ * ⚠️ 拖拽排序不要直接用本函数：画面顺序由 buildSessionTabBarEntries 按项目分组重排，
+ * 改底层 tabs 会出现「内部数组变了、画面没动」（issue #453）。渲染层入口是
+ * sessionTabGroups.reorderSessionTabsByDisplayOrder（按显示顺序换算后再写回）。
  */
 export function reorderSessionTabs(tabs: readonly string[], pinned: readonly string[], sourceId: string, targetId: string, position: "before" | "after"): { tabs: string[]; pinned: string[] } {
 	if (sourceId === targetId) return { tabs: [...tabs], pinned: [...pinned] };

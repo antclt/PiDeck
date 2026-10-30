@@ -1,6 +1,6 @@
 import { useAtomValue } from "jotai";
 import { Check, ChevronDown, ChevronRight, CircleStop, CircleX, Copy, FileDown, FileText, Fingerprint, Folder, Globe, Link2, ListChecks, MessagesSquare, Pencil, PanelLeft, PanelRight, Pin, PinOff, ListRestart, Play, Plus, RefreshCcw, RotateCw, Star, StarOff, Target, Terminal, X } from "lucide-react";
-import { Fragment, useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { sessionRecordByIdAtomFamily, sessionRuntimeBySessionIdAtomFamily, sessionRecordsAtom, projectInventoryByIdAtom, projectByIdAtomFamily, acpEnabledAtom, acpToolsAtom } from "../../atoms";
 import { t } from "../../i18n";
 import { displayProjectDirectoryName } from "../../rendererUtils";
@@ -28,6 +28,7 @@ import { TAB_CLOSE_BUTTON_CLASS } from "../../utils/tabCloseButton";
 
 import { SESSION_TAB_DRAG_MIME } from "../../utils/sessionSplitEdge";
 import { buildSessionTabBarEntries, flattenSessionTabBarEntries, GROUP_COLOR_VALUES } from "../../utils/sessionTabGroups";
+import { buildSessionTabDropUnits, resolveSessionTabDropTarget, type SessionTabDropUnit } from "../../utils/sessionTabDrag";
 import { SESSION_TAB_BADGE_EXTRA_WIDTH } from "../../../../shared/sessionTabWidth";
 
 /**
@@ -329,39 +330,99 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 		};
 	}, [props.tabs, props.pinnedTabs, props.splitGroupIds, props.splitGroupCollapsed, props.editorTabs, props.pageTabs]);
 
-	/** onDragOver 期间按鼠标位置相对目标 Tab 中点决定插入前后 */
-	const handleDragOver = (event: React.DragEvent, targetId: string) => {
-		if (!dragSourceRef.current || dragSourceRef.current === targetId) return;
-		event.preventDefault();
-		event.dataTransfer.dropEffect = "move";
-		const rect = event.currentTarget.getBoundingClientRect();
-		const position = event.clientX < rect.left + rect.width / 2 ? "before" : "after";
-		dragTargetRef.current = { targetId, position };
-		// 指示线随悬停实时更新；仅位置变化时 setState，避免高频 re-render
-		setDragIndicator((current) => (current?.targetId === targetId && current.position === position ? current : { targetId, position }));
-	};
+	// —— 拖拽排序：容器级落点解析 ——
+	// 旧实现把 dragover/drop 挂在 Tab 自身。HTML5 拖放只给「指针下方元素」派发 drop，
+	// Tab 之间的 gap、末尾空白、「+」按钮都没有处理器 —— 指针滑进缝隙后不再有 drop，
+	// 指示线却还停在上一帧的位置（issue #453 根因一）。现在容器统一接事件，落点按
+	// **屏幕上看到的矩形**解析（缝隙/留白退化为最近的 Tab，见 utils/sessionTabDrag）。
+	const dragOverFrameRef = useRef<number | null>(null);
+	const dragPointerXRef = useRef<number | null>(null);
 
-	const handleDrop = (event: React.DragEvent) => {
-		event.preventDefault();
-		const sourceId = dragSourceRef.current;
-		const target = dragTargetRef.current;
+	const measureDropUnits = useCallback((): SessionTabDropUnit[] => {
+		const container = scrollRef.current;
+		if (!container) return [];
+		return buildSessionTabDropUnits(tabBarEntries, (sessionId) => {
+			const element = container.querySelector<HTMLElement>(`[data-session-id="${CSS.escape(sessionId)}"]`);
+			if (!element) return null;
+			const rect = element.getBoundingClientRect();
+			return { left: rect.left, width: rect.width };
+		});
+	}, [tabBarEntries]);
+
+	const applyDropTarget = useCallback(
+		(pointerX: number) => {
+			const sourceId = dragSourceRef.current;
+			if (!sourceId) return;
+			const resolved = resolveSessionTabDropTarget(measureDropUnits(), pointerX, sourceId);
+			// 落在自己身上 = 拖回原位：不显示指示线，松手也不写盘。
+			const next = resolved && resolved.targetId !== sourceId ? resolved : null;
+			dragTargetRef.current = next;
+			// 指示线随悬停实时更新；仅位置变化时 setState，避免高频 re-render
+			setDragIndicator((current) => {
+				if (current === next) return current;
+				if (current && next && current.targetId === next.targetId && current.position === next.position) return current;
+				return next;
+			});
+		},
+		[measureDropUnits],
+	);
+
+	const cancelDragOverFrame = useCallback(() => {
+		if (dragOverFrameRef.current !== null) {
+			cancelAnimationFrame(dragOverFrameRef.current);
+			dragOverFrameRef.current = null;
+		}
+		dragPointerXRef.current = null;
+	}, []);
+	// 拖拽结束/组件卸载时取消在帧回调：迟到的判定不得再写状态。
+	useEffect(() => cancelDragOverFrame, [cancelDragOverFrame]);
+
+	const resetDrag = useCallback(() => {
+		cancelDragOverFrame();
 		dragSourceRef.current = null;
 		dragTargetRef.current = null;
 		setDraggingId(null);
 		setDragIndicator(null);
 		props.onDragSessionChange?.(null);
-		if (sourceId && target) {
+	}, [cancelDragOverFrame, props.onDragSessionChange]);
+
+	const handleTabsDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+		// 不是从本栏起拖的（外部文件/文本）：不接管，保持浏览器默认拒绝。
+		if (!dragSourceRef.current) return;
+		// preventDefault 必须同步留在事件里（浏览器契约），几何判定合并到每帧一次。
+		event.preventDefault();
+		event.dataTransfer.dropEffect = "move";
+		dragPointerXRef.current = event.clientX;
+		if (dragOverFrameRef.current !== null) return;
+		dragOverFrameRef.current = requestAnimationFrame(() => {
+			dragOverFrameRef.current = null;
+			const pointerX = dragPointerXRef.current;
+			if (pointerX === null || !dragSourceRef.current) return;
+			applyDropTarget(pointerX);
+		});
+	};
+
+	const handleTabsDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+		const related = event.relatedTarget;
+		// 在 Tab 之间移动时 relatedTarget 仍在容器内：不要闪烁清空指示线。
+		if (related instanceof Node && event.currentTarget.contains(related)) return;
+		dragTargetRef.current = null;
+		setDragIndicator(null);
+	};
+
+	const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+		const sourceId = dragSourceRef.current;
+		if (!sourceId) return;
+		event.preventDefault();
+		// 松手点可能已经落在缝隙/末尾空白：按当前指针重算，而不是复用上一帧的指示线状态。
+		const target = resolveSessionTabDropTarget(measureDropUnits(), event.clientX, sourceId);
+		resetDrag();
+		if (target && target.targetId !== sourceId) {
 			props.onReorder(sourceId, target.targetId, target.position);
 		}
 	};
 
-	const handleDragEnd = () => {
-		dragSourceRef.current = null;
-		dragTargetRef.current = null;
-		setDraggingId(null);
-		setDragIndicator(null);
-		props.onDragSessionChange?.(null);
-	};
+	const handleDragEnd = () => resetDrag();
 
 	// Tab 超宽时用贯穿滚动：垂直滚轮（无 shift）在 tab 条上改为横向滚动，
 	// 否则 overflow-x-auto + [scrollbar-width:none] 下只用触控板横扭/shift+滚轮，
@@ -421,7 +482,7 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 				</Button>
 			) : null}
 			<div className="relative flex min-w-0 flex-1 items-center">
-				<div ref={scrollRef} className="session-tabs-scroll relative flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none]">
+				<div ref={scrollRef} className="session-tabs-scroll relative flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none]" onDragOver={handleTabsDragOver} onDragLeave={handleTabsDragLeave} onDrop={handleDrop}>
 					{(() => {
 						// 分屏组：组内会话聚合渲染（组头胶囊 + 颜色标记）；收起时组内 Tab 隐藏
 						const hasSplitGroup = tabBarEntries.some((entry) => entry.kind === "split");
@@ -464,8 +525,6 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 										event.dataTransfer.setData(SESSION_TAB_DRAG_MIME, sessionId);
 										event.dataTransfer.setData("text/plain", sessionId);
 									}}
-									onDragOver={(event) => handleDragOver(event, sessionId)}
-									onDrop={handleDrop}
 									onDragEnd={handleDragEnd}
 								/>
 							</motion.div>
@@ -907,8 +966,7 @@ function SessionTab(props: {
 	onCloseAll: () => void;
 	onTogglePin: (sessionId: string) => void;
 	onDragStart: (event: React.DragEvent) => void;
-	onDragOver: (event: React.DragEvent) => void;
-	onDrop: (event: React.DragEvent) => void;
+	/** 落点由 Tab 栏容器统一处理（缝隙/末尾空白同样是可放置区域，见 utils/sessionTabDrag） */
 	onDragEnd: () => void;
 	/** 右键菜单的「会话操作」组（App 按 sessionId 参数化装配）；undefined = 整组不渲染 */
 	sessionActions?: SessionTabActions;
@@ -1014,8 +1072,6 @@ function SessionTab(props: {
 							aria-label={workspaceName ? `${title} — ${workspaceName}` : title}
 							draggable
 							onDragStart={props.onDragStart}
-							onDragOver={props.onDragOver}
-							onDrop={props.onDrop}
 							onDragEnd={props.onDragEnd}
 							onClick={select}
 							onDoubleClick={() => {

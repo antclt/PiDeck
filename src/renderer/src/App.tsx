@@ -1581,12 +1581,14 @@ export function App() {
 		}
 	}, [activeProject, currentSessionId, refreshProjectSessions, selectSessionCommand, store]);
 
-	// 引导页空白输入框（虚拟会话 GUIDE_BOOTSTRAP_SESSION_ID）的发送钩子：首次
-	// 发送时创建真实 Catalog 会话（Chat 匿名 / 非 Chat draft），把 composer 状态
-	// 整体提升到新会话（promoteSessionComposerStateAtom），随后选中并登记 Tab，
-	// 返回真实 sessionId 让发送链路继续；非虚拟会话直接透传（保持签名兼容）。
+	// 引导页空白输入框（虚拟会话 GUIDE_BOOTSTRAP_SESSION_ID）的落地钩子：
+	// - 首次发送时创建真实 Catalog 会话（Chat 匿名 / 非 Chat draft）；
+	// - 选择 ACP 时也立即创建（ACP 的 configOptions 只有 runtime 握手后才有，
+	//   引导页没有 catalog record 无法预热，不建草稿就永远不自动加载/启动）。
+	// 创建后把 composer 状态整体提升到新会话（promoteSessionComposerStateAtom），
+	// 随后选中并登记 Tab，返回真实 sessionId；非虚拟会话直接透传（保持签名兼容）。
 	// 并发发送（快速双击）复用 guideBootstrapPromotionRef 里的同一个提升 promise，
-	// 避免建出两个会话。创建即用户意图（已输入消息），Chat 拉起 pi 是预期行为。
+	// 避免建出两个会话。创建即用户意图，Chat 拉起 pi 是预期行为。
 	const ensureSessionForSend = useCallback(
 		async (sessionId: string, target?: NewSessionBackendTarget) => {
 			if (sessionId !== GUIDE_BOOTSTRAP_SESSION_ID) return sessionId;
@@ -1606,8 +1608,13 @@ export function App() {
 				// 模型偏好按后端分开取（issue #253）：DSH 的模型是 host route 名，不在 models.json，
 				// 必须作为显式 model 直接带给 host；pi 的偏好走 welcomeModel（launchDefaults 会按
 				// models.json 校验存在性）。历史上 DSH 侧不读偏好，点选因此永远不生效。
-				const welcomeModel = draftBackend === "dsh" ? readWelcomeDshModelPreference()?.model : readWelcomeModelPreference()?.model;
-				const welcomeThinking = readWelcomeThinkingPreference()?.thinkingLevel;
+				// ACP 的模型/思考由 agent CLI 自持（session/config options），PiDeck 的
+				// models.json 偏好对它无意义：不传 welcomeModel/thinkingLevel，避免把 pi
+				// 的偏好写进 ACP 草稿（与 sessionIpc createDraft 的 nonPiBackend 同口径）。
+				const welcomeModel = draftBackend === "dsh" ? readWelcomeDshModelPreference()?.model : draftBackend === "pi" ? readWelcomeModelPreference()?.model : undefined;
+				const welcomeThinking = draftBackend === "acp" ? undefined : readWelcomeThinkingPreference()?.thinkingLevel;
+				// ACP 草稿标题用工具名（与项目「+」/Tab「+」的 createAcp 同观感），
+				// 找不到工具时退回项目名。
 				// 统一创建 draft 会话（Chat 项目也走普通会话、可保存）：创建不拉 pi，
 				// selectSessionCommand 同步切页、立即进入会话页；匿名会话仅保留给侧栏
 				// 「新建临时对话」入口（createAnonymousSessionWithTab）。
@@ -1615,9 +1622,10 @@ export function App() {
 				// 且经 DSH runtime 安装态钳制——runtime 不可用时不会尝试建 dsh 会话。
 				// 激活时 SessionRuntimeCoordinator.applyPreferences → DshAgentManager.setModel
 				// 会把这条显式 model 落到 host（host 拒绝时降级并告警，不让创建失败）。
+				const acpToolName = draftBackend === "acp" && acpToolId ? store.get(acpToolsAtom).find((candidate) => candidate.id === acpToolId)?.name : undefined;
 				const session = await api.sessions.createDraft({
 					projectId: project.id,
-					title: draftBackend === "dsh" ? `${project.name} DSH` : `${project.name} agent`,
+					title: draftBackend === "dsh" ? `${project.name} DSH` : (acpToolName ?? `${project.name} agent`),
 					backend: draftBackend,
 					...(draftBackend === "acp" && acpToolId ? { acpToolId } : {}),
 					...(welcomeModel ? (draftBackend === "dsh" ? { model: welcomeModel } : { welcomeModel }) : {}),
@@ -1647,7 +1655,7 @@ export function App() {
 				guideBootstrapPromotionRef.current = undefined;
 			}
 		},
-		[activeProjectId, projects, promoteSessionComposerState, promoteSessionMessagesCache, selectSessionCommand, upsertSession, workspaceChrome, effectiveAgentBackend],
+		[activeProjectId, projects, promoteSessionComposerState, promoteSessionMessagesCache, selectSessionCommand, upsertSession, workspaceChrome, effectiveAgentBackend, store],
 	);
 
 	/** 有效文件路径白名单：仅工作区真实存在的 @ 引用渲染为 chip */

@@ -8,6 +8,7 @@ import type { AgentUiBatchQuestion, AgentUiRequest, AgentUiResponse, SessionUiRe
 import type { SessionRuntimeUiState, SessionRuntimeViewState } from "../../atoms/session-atoms";
 import { askDraftBySessionRequestAtomFamily, type AskInteractionDraft, type AskSingleDraft } from "../../atoms/ask-draft-atoms";
 import { t } from "../../i18n";
+import { inspectBatchAnswers, isBatchAnswered } from "../../utils/askBatchSubmission";
 import {
 	type AskBatchDraft,
 	type BatchAnswerValue,
@@ -122,11 +123,6 @@ function batchAnswerLabel(value: BatchAnswerValue): string {
 	return value ?? "";
 }
 
-/** 是否已作答：multi_select 空数组视为未作答 */
-function isBatchAnswered(value: BatchAnswerValue): boolean {
-	return value !== undefined && value !== null && (!Array.isArray(value) || value.length > 0);
-}
-
 /** Ask 展开后由时间线 owner 重新定位到底部，确保新展开的内容不会落在视口下方。 */
 function notifyAskExpanded(onExpandedChange: ((expanded: boolean) => void) | undefined, expanded: boolean) {
 	onExpandedChange?.(expanded);
@@ -210,9 +206,13 @@ function BatchAskInlineBar(props: {
 	}
 
 	function submitAnswers(committed?: AskBatchDraft) {
-		// 末题自动前进时带上「本题刚写入的」答案集（调用方组装），不能读草稿：
-		// 同一事件里草稿写盘尚未生效，直接 submitAnswers() 会把本题答案丢掉。
+		// 校验与序列化共用本次提交快照，避免读到异步写盘前的旧答案。
 		const effective = committed ?? batch;
+		const { complete, firstUnanswered } = inspectBatchAnswers(questions, effective.answers);
+		if (!complete) {
+			if (firstUnanswered !== -1) changeBatch((current) => ({ ...current, currentTab: firstUnanswered }));
+			return;
+		}
 		props.onSubmit(
 			serializeBatchAnswers(
 				questions,

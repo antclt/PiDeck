@@ -310,6 +310,14 @@ export function AskPanelOverlay() {
 				aria-label={t("askPanel.title")}
 				aria-expanded={expanded}
 				onPointerDown={handlePointerDown}
+				onKeyDown={(event) => {
+					// 关闭控件是嵌套 span（button 不能再嵌 button，span tabIndex=-1 不可键盘触达）：
+					// 键盘路径 = Shift+Enter / Shift+Space 直接关闭胶囊，提示文案同步标注
+					if ((event.key === "Enter" || event.key === " ") && event.shiftKey) {
+						event.preventDefault();
+						void panel.close();
+					}
+				}}
 				onClick={() => {
 					// 拖动后不触发展开切换
 					if (lastDragMovedRef.current) {
@@ -341,7 +349,7 @@ export function AskPanelOverlay() {
 				<span
 					className="flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted/60 hover:text-foreground"
 					aria-label={t("askPanel.close")}
-					title={t("askPanel.close")}
+					title={t("askPanel.closeKeyboardHint")}
 					role="button"
 					tabIndex={-1}
 					onClick={(event) => {

@@ -23,7 +23,7 @@ import type { SettingsStore } from "../settings/SettingsStore";
 export function registerAcpIpc(deps: {
 	settingsStore: SettingsStore;
 	getLifecycleDeps?: () => AcpToolLifecycleDeps;
-	getSessionManager?: () => { getSessionConfigOptions(agentId: string): AcpSessionConfigOption[] | undefined; applyConfigOption(agentId: string, optionId: string, value: string | boolean): Promise<AcpSessionConfigOption[]> };
+	getSessionManager?: () => { getSessionConfigOptions(agentId: string): AcpSessionConfigOption[] | undefined; applyConfigOption(agentId: string, optionId: string, value: string | boolean): Promise<AcpSessionConfigOption[]> } | undefined;
 }): void {
 	const { settingsStore } = deps;
 

@@ -1,6 +1,7 @@
 import type { ChatMessage, DshQueuedMessage, ImageContent, TodoItem } from "../../shared/types";
 import { defaultToolDetailTranslate, formatToolDetail, truncateDetailWithMeta, type ToolDetailTranslate } from "../../shared/formatToolDetail";
 import { getToolFilePath, isFileChangeToolName } from "../../shared/fileChanges";
+import { reasoningText } from "../../shared/reasoningText";
 
 /**
  * DSH SessionEvent → PiDeck ChatMessage 投影（纯函数，无副作用，可单测）。
@@ -444,7 +445,9 @@ export function projectDshEvent(
 			// 终态内容可能暂时缺 image 块；保留流式骨架已有图片，避免更新时闪退。
 			// 流式累积兜底：终态 content 缺失 thinking 时用已流式渲染的累积文本
 			// （打包行/短 run 差异下终态块可能不含 reasoning）。
-			const finalThinking = reasoning.trim() ? reasoning : base.pendingAssistantThinking;
+			// 落库前跑一次展示净化：思维签名块（<signature>…</signature>）不进时间线，
+			// 清洗后为空则整条 thinking 不写（rc.5 ReasoningRow 同口径，见 shared/reasoningText）。
+			const finalThinking = reasoningText(reasoning.trim() ? reasoning : base.pendingAssistantThinking);
 			// 纯工具调用消息（模型只发 tool-call、无正文无思考）不落 assistant 气泡：
 			// 否则时间线出现空白 assistant 行，终态由后续 tool/call 卡片承接。
 			// 有流式骨架（reasoning/text delta 已渲染）时不在此列——骨架已在时间线
@@ -733,12 +736,13 @@ export function projectDshEvent(
 				const skeletonIndex = messages.findIndex((candidate) => candidate.id === base.pendingAssistantId && candidate.role === "assistant");
 				if (skeletonIndex >= 0) {
 					const previous = messages[skeletonIndex];
+					const interruptedThinking = reasoningText(base.pendingAssistantThinking);
 					messages[skeletonIndex] = {
 						...previous,
 						text: base.pendingAssistantText,
-						thinking: base.pendingAssistantThinking.trim() ? base.pendingAssistantThinking : undefined,
+						thinking: interruptedThinking.trim() ? interruptedThinking : undefined,
 						// 思考结束时间 = turn/end 时间（startedAt 已在骨架创建时记录）
-						...(base.pendingAssistantThinking.trim() ? { thinkingEndedAt: eventTime(event.time) } : {}),
+						...(interruptedThinking.trim() ? { thinkingEndedAt: eventTime(event.time) } : {}),
 					};
 					next.messages = messages;
 					next.messagesChanged = true;

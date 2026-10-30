@@ -1,19 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, RefreshCw } from "lucide-react";
 import type { PiReleaseNotesPayload } from "../../../../../shared/types";
 import { desktopApi } from "../../../desktopApi";
-import { formatI18nDateTime, t } from "../../../i18n";
-import { Button } from "../../ui-shadcn/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../ui-shadcn/dialog";
-import { ScrollArea } from "../../ui-shadcn/scroll-area";
-import { MarkdownStream } from "../../session/MarkdownStream";
+import { t } from "../../../i18n";
+import { ChangelogReaderDialog, type ChangelogShellState } from "./ChangelogReaderDialog";
 
 type LoadState = { status: "loading" } | { status: "ready"; payload: PiReleaseNotesPayload & { markdown: string } } | { status: "unavailable"; pageUrl: string };
 
 /**
  * pi CLI「更新详情」弹窗：展示 (current, latest] 区间的官方 CHANGELOG 条目。
  *
- * 渲染与降级策略与 PiDeck 自身更新日志（ChangelogDialog）对齐：
+ * 渲染与降级策略收敛在 ChangelogReaderDialog（Wave 2 §5.3），与 PiDeck 自身
+ * 更新日志（ChangelogDialog）同一壳：
  * - 正文是外部数据（jsDelivr/unpkg/GitHub raw），一律经 MarkdownStream sanitize 管线，
  *   禁止 dangerouslySetInnerHTML；
  * - 主进程所有源都失败时 markdown=null，降级为「在浏览器查看」，不打断用户；
@@ -54,60 +51,29 @@ export function PiChangelogDialog(props: {
 		void desktopApi.app.openExternal(url, true).catch(() => undefined);
 	}, []);
 
+	const shellState: ChangelogShellState =
+		state.status === "ready"
+			? {
+					status: "ready",
+					markdown: state.payload.markdown,
+					source: state.payload.source,
+					fetchedAt: state.payload.fetchedAt,
+					pageUrl: state.payload.pageUrl,
+				}
+			: state;
+
 	return (
-		<Dialog open={props.open} onOpenChange={props.onOpenChange}>
-			<DialogContent
-				/* max-width 写法与 ChangelogDialog 同源：Tailwind v4 按类名字母序产出规则，
-				   `min(...)`（m）排在基础类的 `lg`（l）之后才能生效；直接写 max-w-[760px] 会被压回 512px。 */
-				className="flex max-h-[80vh] flex-col overflow-hidden sm:max-w-[min(760px,calc(100vw-48px))]"
-			>
-				<DialogHeader>
-					<DialogTitle>{t("piChangelog.title")}</DialogTitle>
-					<DialogDescription>{state.status === "ready" ? t("piChangelog.subtitleVersions", { current: props.currentVersion ?? "?", latest: props.latestVersion, count: state.payload.versionCount }) : t("piChangelog.subtitle", { current: props.currentVersion ?? "?", latest: props.latestVersion })}</DialogDescription>
-				</DialogHeader>
-
-				{state.status === "loading" && <p className="py-8 text-center text-caption text-muted-foreground">{t("changelog.loading")}</p>}
-
-				{state.status === "unavailable" && (
-					<div className="flex flex-col items-center gap-3 py-8">
-						<p className="text-caption text-muted-foreground">{t("changelog.unavailable")}</p>
-						<Button variant="secondary" size="sm" onClick={() => openInBrowser(state.pageUrl)}>
-							<ExternalLink size={12} aria-hidden="true" />
-							{t("changelog.openInBrowser")}
-						</Button>
-					</div>
-				)}
-
-				{state.status === "ready" && (
-					<>
-						{/* 固定高度 + 内部滚动；外层必须挂 markdown-body（长内容压缩与 sanitize 样式依赖它，
-						    与 ChangelogDialog 同一约定）。light：静态只读场景关掉重插件。 */}
-						<ScrollArea className="h-[52vh] rounded-md border border-border-subtle">
-							<div className="markdown-body px-4 py-3 text-chat text-text-primary">
-								<MarkdownStream text={state.payload.markdown} isStreaming={false} light onOpenExternal={(url) => openInBrowser(url)} />
-							</div>
-						</ScrollArea>
-						<div className="flex items-center justify-between gap-2">
-							<span className="text-caption text-muted-foreground/70">
-								{t("changelog.sourceLabel", { source: state.payload.source ?? "—" })}
-								{state.payload.fetchedAt ? ` · ${t("changelog.updatedAt", { time: formatI18nDateTime(state.payload.fetchedAt) })}` : ""}
-							</span>
-							<div className="flex items-center gap-2">
-								{state.payload.truncated && <span className="text-caption text-muted-foreground">{t("piChangelog.truncated")}</span>}
-								<Button variant="ghost" size="sm" onClick={() => void load()}>
-									<RefreshCw size={12} aria-hidden="true" />
-									{t("changelog.reload")}
-								</Button>
-								<Button variant="ghost" size="sm" onClick={() => openInBrowser(state.payload.pageUrl)}>
-									<ExternalLink size={12} aria-hidden="true" />
-									{t("changelog.openInBrowser")}
-								</Button>
-							</div>
-						</div>
-					</>
-				)}
-			</DialogContent>
-		</Dialog>
+		<ChangelogReaderDialog
+			open={props.open}
+			onOpenChange={props.onOpenChange}
+			title={t("piChangelog.title")}
+			subtitle={state.status === "ready" ? t("piChangelog.subtitleVersions", { current: props.currentVersion ?? "?", latest: props.latestVersion, count: state.payload.versionCount }) : t("piChangelog.subtitle", { current: props.currentVersion ?? "?", latest: props.latestVersion })}
+			state={shellState}
+			onReload={() => void load()}
+			onOpenExternal={openInBrowser}
+			// 截断提示（超出条数上限时主进程已裁剪）：footer 右侧操作区左侧。
+			footerExtra={state.status === "ready" && state.payload.truncated ? <span className="text-caption text-muted-foreground">{t("piChangelog.truncated")}</span> : null}
+		/>
 	);
 }
 

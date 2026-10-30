@@ -102,6 +102,20 @@ test("keyword dictionary localizes host MCP tool names (cua/browser)", () => {
 	assert.equal(shot.verb, "截图");
 });
 
+// 2026-10 用户反馈「行里写着截屏，实际是抓包工具的 MCP 调用」：`capture` 是歧义词
+// （截屏 / 抓包），裸关键词会把 mcp__reqable__capture_live_get_by_id 说成截屏。
+// 口径：屏幕捕捉只认 screenshot / screen_capture / capture_screen / cua_capture，
+// 其余带 capture 的工具落回通用回退（原样显示工具名），不猜语义。
+test("bare capture keyword no longer claims screen capture for packet-capture tools", () => {
+	const proxy = loadPhrase("mcp__reqable__capture_live_get_by_id", { id: 24587 });
+	assert.notEqual(proxy.verb, "截屏");
+	assert.equal(proxy.verb, "mcp__reqable__capture_live_get_by_id");
+	assert.equal(proxy.object, undefined);
+
+	const cua = loadPhrase("cua_capture", {});
+	assert.equal(cua.verb, "截图");
+});
+
 test("keyword dictionary covers subagent and git tool families with order guard", () => {
 	const dispatch = loadPhrase("Agent", { prompt: "查一下路由" });
 	assert.equal(dispatch.verb, "派出子代理");

@@ -77,7 +77,10 @@ export function SideTaskPanel(props: { controller: SideTaskController; paneServi
 				</Button>
 			</div>
 			{currentId ? (
-				<div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+				// flex 列是硬要求：SessionView 单栏根节点是 display:contents，SessionHeader 与
+				// ResizablePanelGroup 在这一层成为兄弟节点；.session-v-group{flex:1} 只在 flex 容器里生效，
+				// 否则组按 h-full 占满整层、会话头再叠一层，整个会话栏下溢被抽屉 overflow:hidden 裁掉。
+				<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
 					<SessionPaneServicesProvider value={paneServices}>
 						<ChatSessionPane sessionId={currentId} focused={false} onFocusPane={() => {}} splitPane={false} />
 					</SessionPaneServicesProvider>

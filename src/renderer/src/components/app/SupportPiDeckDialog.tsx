@@ -177,14 +177,14 @@ export function SupportPiDeckDialog(props: SupportPiDeckDialogProps) {
 						{qrDataUrl ? (
 							<img src={qrDataUrl} alt={t("support.qrAlt")} className="size-52 rounded-md border border-border-subtle bg-white p-2" />
 						) : (
-							<div className="flex size-52 items-center justify-center rounded-md border border-border-subtle bg-bg-panel">{loading ? <Loader2 className="size-5 animate-spin text-muted-foreground" /> : <Coffee className="size-6 text-muted-foreground/50" aria-hidden="true" />}</div>
+							<div className="flex size-52 items-center justify-center rounded-md border border-border-subtle bg-bg-panel">{loading ? <Loader2 className="size-5 animate-pideck-spin text-muted-foreground" /> : <Coffee className="size-6 text-muted-foreground/50" aria-hidden="true" />}</div>
 						)}
 						{hint}
 						{hasPurchase && !loading && !error && <p className="text-micro text-muted-foreground/70">{t("support.qrExpiry")}</p>}
 						{paid && <p className="text-xs text-success">{t("support.paid")}</p>}
 						{polling && !paid && !loading && (
 							<p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-								<Loader2 className="size-3 animate-spin" aria-hidden="true" />
+								<Loader2 className="size-3 animate-pideck-spin" aria-hidden="true" />
 								{t("support.waiting")}
 							</p>
 						)}
@@ -193,7 +193,7 @@ export function SupportPiDeckDialog(props: SupportPiDeckDialogProps) {
 
 				<DialogFooter className="gap-2">
 					<Button type="button" variant="ghost" size="sm" onClick={() => void load()} disabled={loading}>
-						<RefreshCw className={loading ? "size-3.5 animate-spin" : "size-3.5"} aria-hidden="true" />
+						<RefreshCw className={loading ? "size-3.5 animate-pideck-spin" : "size-3.5"} aria-hidden="true" />
 						{t("support.refresh")}
 					</Button>
 					{hasPurchase && (

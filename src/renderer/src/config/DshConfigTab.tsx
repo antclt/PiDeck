@@ -1264,6 +1264,25 @@ function RawTab(props: { homeDir: string; sectionApi?: DshSectionApi; instanceKe
 	const [saving, setSaving] = useState(false);
 	/** 当前文件从磁盘读到的内容基准：编辑改回原文即算干净，避免只记「编辑过」造成假脏。 */
 	const loadedContentRef = useRef("");
+	/** 读失败状态：区分「文件不存在/读取失败」与「空文件」，给重试入口而不是空编辑器。 */
+	const [readError, setReadError] = useState<string | null>(null);
+	/** 待切换的文件名：当前文件有未保存草稿时先弹确认，确认丢弃后才真正切换。 */
+	const [pendingFile, setPendingFile] = useState<string | null>(null);
+	/** 读失败重试计数：自增触发重读 useEffect（与切换文件同一加载链路）。 */
+	const [retryTick, setRetryTick] = useState(0);
+
+	/** 切换源文件：有未保存草稿时先确认（丢弃草稿才能切），避免静默丢失编辑。 */
+	const handleFileChange = useCallback(
+		(next: string) => {
+			if (next === fileName) return;
+			if (dirty) {
+				setPendingFile(next);
+				return;
+			}
+			setFileName(next);
+		},
+		[dirty, fileName],
+	);
 
 	// 脏状态上报（顶部统一保存/关闭确认）
 	useEffect(() => {
@@ -1285,6 +1304,7 @@ function RawTab(props: { homeDir: string; sectionApi?: DshSectionApi; instanceKe
 			return true;
 		} catch (error) {
 			console.error(`[dsh-config] write ${fileName} failed:`, error);
+			showNotice(t("config.dsh.rawSaveFailed", { file: fileName, error: error instanceof Error ? error.message : String(error) }), 6000);
 			return false;
 		} finally {
 			setSaving(false);
@@ -1302,7 +1322,9 @@ function RawTab(props: { homeDir: string; sectionApi?: DshSectionApi; instanceKe
 		let cancelled = false;
 		setLoaded(false);
 		setDirty(false);
+		setReadError(null);
 		const filePath = joinConfigPath(props.homeDir, fileName);
+		// 读取带版本号：目录被外部切换（DSH_HOME 变更）后旧目录读失败不该污染新状态
 		void desktopApi.files
 			.readContent(filePath)
 			.then((next) => {
@@ -1312,23 +1334,23 @@ function RawTab(props: { homeDir: string; sectionApi?: DshSectionApi; instanceKe
 					setLoaded(true);
 				}
 			})
-			.catch(() => {
-				// 文件不存在时保持空编辑器
+			.catch((error: unknown) => {
+				// 读失败 ≠ 空文件：显示错误与重试入口，而不是空编辑器（空编辑器一保存就会把文件清空）
 				if (!cancelled) {
-					setContent("");
-					loadedContentRef.current = "";
+					console.error(`[dsh-config] read ${fileName} failed:`, error);
+					setReadError(error instanceof Error ? error.message : String(error));
 					setLoaded(true);
 				}
 			});
 		return () => {
 			cancelled = true;
 		};
-	}, [props.homeDir, fileName]);
+	}, [props.homeDir, fileName, retryTick]);
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col gap-3">
 			<div className="flex shrink-0 items-center gap-2">
-				<Select value={fileName} onValueChange={setFileName}>
+				<Select value={fileName} onValueChange={handleFileChange}>
 					<SelectTrigger size="sm" className="w-48 font-mono">
 						<SelectValue />
 					</SelectTrigger>
@@ -1344,21 +1366,49 @@ function RawTab(props: { homeDir: string; sectionApi?: DshSectionApi; instanceKe
 				{saving && <span className="text-micro text-muted-foreground">{t("common.saving")}</span>}
 			</div>
 			{loaded ? (
-				<CodeMirrorEditor
-					value={content}
-					language="yaml"
-					height="100%"
-					onChange={(value) => {
-						setContent(value);
-						// 改回磁盘原文即算干净：脏状态按内容对比，而不是「编辑过就脏」
-						setDirty(value !== loadedContentRef.current);
-					}}
-				/>
+				readError ? (
+					<div className="grid gap-2 rounded-sm border border-danger/20 bg-danger-soft px-3.5 py-2.5" role="alert">
+						<p className="text-control font-medium text-danger">{t("config.dsh.rawReadFailed", { file: fileName })}</p>
+						<pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded-sm border border-danger/20 bg-bg-panel/60 px-2.5 py-2 text-micro leading-relaxed text-danger/90">{readError}</pre>
+						<div>
+							<Button type="button" variant="secondary" size="sm" className="h-7" onClick={() => setRetryTick((tick) => tick + 1)}>
+								<RefreshCw className="size-3.5" aria-hidden="true" />
+								{t("config.dsh.retry")}
+							</Button>
+						</div>
+					</div>
+				) : (
+					<CodeMirrorEditor
+						value={content}
+						language="yaml"
+						height="100%"
+						onChange={(value) => {
+							setContent(value);
+							// 改回磁盘原文即算干净：脏状态按内容对比，而不是「编辑过就脏」
+							setDirty(value !== loadedContentRef.current);
+						}}
+					/>
+				)
 			) : (
 				<div className="flex h-72 items-center justify-center gap-2 text-control text-muted-foreground">
 					<LoaderCircle size={14} className="animate-pideck-spin" aria-hidden="true" />
 					{t("common.loading")}
 				</div>
+			)}
+			{/* 切文件确认：当前文件有未保存草稿时，切换下拉会丢弃草稿，必须显式确认 */}
+			{pendingFile && (
+				<ConfirmDialog
+					title={t("config.rawSwitchTitle")}
+					message={t("config.rawSwitchMessage")}
+					confirmLabel={t("config.rawSwitchConfirm")}
+					danger
+					onConfirm={() => {
+						const next = pendingFile;
+						setPendingFile(null);
+						if (next) setFileName(next);
+					}}
+					onCancel={() => setPendingFile(null)}
+				/>
 			)}
 			{/* 编辑位置说明：展示当前正在编辑的具体文件（随下拉切换），保存后由 DSH host 读取 */}
 			<div className="flex shrink-0 flex-col gap-1 rounded-md border border-border-subtle bg-bg-panel px-3 py-2">

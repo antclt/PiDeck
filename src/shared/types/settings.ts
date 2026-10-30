@@ -415,6 +415,25 @@ export type AppSettings = {
 	webRemoteCloudflaredProtocol?: WebRemoteCloudflaredProtocol;
 	/** cloudflared 额外启动参数（空白切分后数组直传子进程，无 shell 注入面）；如 "--edge-ip-version 6" */
 	webRemoteCloudflaredExtraArgs?: string;
+	/**
+	 * EasyTier 虚拟 IPv4 手动兜底：EasyTier GUI 默认模式不开放本地管理端口时，
+	 * easytier-cli 读不到节点，由用户从客户端抄写虚拟 IP；空 = 不启用手动地址。
+	 */
+	webRemoteEasyTierIp?: string;
+	/**
+	 * 用户指定的 easytier-cli 可执行文件路径（解压版 CLI / 非默认目录安装时自动检测可能找不到）；
+	 * 空 = 只用自动检测。填写后优先使用该路径。
+	 */
+	webRemoteEasyTierCliPath?: string;
+	/**
+	 * 由 PiDeck 托管的 EasyTier 网络标识。三者齐备时组件接管 core 的启动与配置生成，
+	 * 缺任意一项都退回只读探测（网络仍由用户自己的客户端管理）。
+	 */
+	webRemoteEasyTierNetworkName?: string;
+	/** 由 PiDeck 托管的 EasyTier 网络密钥；明文存储，仅在本机 settings.json 中，不经 Web API 投影。 */
+	webRemoteEasyTierNetworkSecret?: string;
+	/** 共享节点列表（tcp/udp/ws/wss 等 URL）；可为空，为空时只能与局域网内节点互联。 */
+	webRemoteEasyTierPeers?: string[];
 	/** 本地生成的匿名安装标识，不包含账号、路径或机器名 */
 	telemetryInstallId?: string;
 	/** 最近一次发送 app_heartbeat 的本地日期，格式 YYYY-MM-DD */
@@ -983,6 +1002,39 @@ export function sanitizeCloudflaredExtraArgs(value: unknown): string {
 	if (!trimmed || trimmed.length > 500) return "";
 	return /^[ -~]+$/.test(trimmed) ? trimmed : "";
 }
+
+/**
+ * 清洗手动填写的 EasyTier 虚拟 IP：只接受点分十进制 IPv4（不含 CIDR/端口/协议），
+ * 拒绝 0.0.0.0 与广播地址；非法输入整体置空，避免拼出不可用或危险的 URL。
+ */
+export function sanitizeEasyTierVirtualIp(value: unknown): string {
+	if (typeof value !== "string") return "";
+	const trimmed = value.trim();
+	const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(trimmed);
+	if (!match) return "";
+	const parts = match.slice(1).map(Number);
+	if (parts.some((part) => part < 0 || part > 255)) return "";
+	if (parts[0] === 0 || parts.every((part) => part === 255)) return "";
+	return parts.join(".");
+}
+
+/**
+ * 清洗手动指定的 easytier-cli 路径：去首尾空白与包裹引号（资源管理器「复制为路径」自带引号），
+ * 拒绝换行/控制字符与超长串；其余原样保留——Windows 用户目录常含中文与空格。
+ */
+export function sanitizeEasyTierCliPath(value: unknown): string {
+	if (typeof value !== "string") return "";
+	let trimmed = value.trim();
+	const quoted = trimmed.length >= 2 && ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'")));
+	if (quoted) trimmed = trimmed.slice(1, -1).trim();
+	if (!trimmed || trimmed.length > 1024) return "";
+	if (/[\u0000-\u001f]/.test(trimmed)) return "";
+	return trimmed;
+}
+
+// EasyTier 托管网络的输入清洗规则放在独立叶子模块（纯函数、可单测），此处只做再导出。
+export { EASYTIER_PEER_PROTOCOLS, sanitizeEasyTierNetworkName, sanitizeEasyTierNetworkSecret, sanitizeEasyTierPeers } from "../easytierPeers";
+
 
 /**
  * 手动设置令牌的形状约束：8-128 个可打印非空白 ASCII（不含空格，避免 URL 拼接歧义）。
