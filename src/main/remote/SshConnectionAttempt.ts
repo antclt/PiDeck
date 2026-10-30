@@ -1,5 +1,5 @@
 import { createRemoteControlClient, type RemoteControlClient } from "./RemoteControlClient";
-import { REMOTE_HELPER_MAX_FRAME_BYTES, REMOTE_HELPER_METHOD_HELLO, REMOTE_HELPER_PROTOCOL_VERSION } from "./RemoteHelperContract";
+import { REMOTE_HELPER_MAX_FRAME_BYTES, REMOTE_HELPER_MAX_METHOD_LENGTH, REMOTE_HELPER_METHOD_HELLO, REMOTE_HELPER_PROTOCOL_VERSION } from "./RemoteHelperContract";
 import { buildHelperRemoteCommand } from "./RemoteHelperCommand";
 import { SSH_LAUNCHER_MAX_OUTPUT_BYTES } from "./SshProcessLauncher";
 import { buildPinnedSshInvocation } from "./SshVerifiedConnection";
@@ -103,11 +103,11 @@ export type SshAttemptHost = {
 	record(code: string, exitCode?: number): void;
 	/**
 	 * The verified handshake answered on this session: the host applies `connected`, stamps the time and
-	 * keeps the reported remote HOME. The home is a required argument because it is part of what the
-	 * handshake proved - a `ready` session always comes with one - and the host is the only owner of the
-	 * per-host value; the attempt itself must not keep it.
+	 * keeps the reported remote HOME and capability list. Both are required arguments because they are part
+	 * of what the handshake proved - a `ready` session always comes with them - and the host is the only
+	 * owner of the per-host values; the attempt itself must not keep them.
 	 */
-	markReady(home: string): void;
+	markReady(home: string, capabilities: readonly string[]): void;
 	/** True while the machine still runs this generation; a newer attempt fences this one off. */
 	isCurrentGeneration(): boolean;
 	/** True once the caller aborted, the host was torn down or a newer attempt took over. */
@@ -231,7 +231,7 @@ const CODE_ADVISORY_CAPABILITY_MISSING = "SSH_HELPER_CAPABILITY_MISSING_FS_STAT_
  * It answers with the HOME the helper reported - the one place the remote session root can come from - so
  * that value reaches the host with the same proof instead of being discarded after validation.
  */
-async function assertHelperHandshake(host: SshAttemptHost, deps: SshAttemptDeps, control: RemoteControlClient): Promise<string> {
+async function assertHelperHandshake(host: SshAttemptHost, deps: SshAttemptDeps, control: RemoteControlClient): Promise<{ home: string; capabilities: readonly string[] }> {
 	let result: unknown;
 	try {
 		// `hello` takes no params; the deadline is the attempt's own, so a silent helper fails the attempt
@@ -282,7 +282,11 @@ async function assertHelperHandshake(host: SshAttemptHost, deps: SshAttemptDeps,
 	// `helperVersion`/`nodeVersion`/`pid` are identity for the UI, not evidence of compatibility, so a
 	// helper that omits them is still a working helper.
 	host.record("SSH_HELPER_HANDSHAKE_OK");
-	return home;
+	// The list is the build's own answer to "what optional work can this session serve" (content search is the
+	// first consumer). It is kept per host so a project surface can negotiate without opening a second session;
+	// only the closed helper vocabulary travels further, never a raw unknown value.
+	const reported = capabilities.filter((value): value is string => typeof value === "string" && value.length > 0 && value.length <= REMOTE_HELPER_MAX_METHOD_LENGTH).slice(0, 256);
+	return { home: home, capabilities: reported };
 }
 
 /** Build the helper command from the verified bootstrap; an unusable value fails closed like a missing one. */
@@ -367,11 +371,11 @@ export async function runSshConnectionAttempt(host: SshAttemptHost, deps: SshAtt
 		// Staged progress with real evidence (plan §11.1): the machine reports `bootstrapping` while the
 		// activated bundle is asked to identify itself, and `ready` is applied only after it answered.
 		host.enterPhase("helper");
-		const home = await assertHelperHandshake(host, deps, control);
+		const handshake = await assertHelperHandshake(host, deps, control);
 		// The handshake is another await on this path: abort, shutdown or a lost session may have released
 		// the attempt while the helper was answering, and only a live attempt may become ready.
 		if (!host.ownsLiveAttempt()) return;
-		host.markReady(home);
+		host.markReady(handshake.home, handshake.capabilities);
 	} catch (error) {
 		// The attempt is handed over unconditionally: the host applies its own ownership fence, so a caller
 		// abort and an already released attempt are skipped there instead of being reported twice here.

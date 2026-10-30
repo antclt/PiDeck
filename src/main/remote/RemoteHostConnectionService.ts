@@ -972,6 +972,26 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 			return readCachedHome(hostId);
 		},
 		/**
+		 * The capability names the last successful hello declared for this host, or undefined when no live
+		 * session proves any.
+		 *
+		 * Read-only and never connects: a project surface negotiates optional work (content search) from a
+		 * session that already exists, and "no session" must answer "unknown/unsupported" instead of waking a
+		 * host. Only a ready/degraded session may answer, for the same reason remoteHome refuses one.
+		 */
+		helperCapabilities(hostId: string): readonly string[] | undefined {
+			if (disposed || explicitlyDisconnected.has(hostId)) return undefined;
+			const manager = hosts.get(hostId)?.manager;
+			if (manager === undefined) return undefined;
+			try {
+				const state = manager.getState(hostId).state;
+				if (state !== "ready" && state !== "degraded") return undefined;
+				return manager.getCapabilities(hostId);
+			} catch {
+				return undefined;
+			}
+		},
+		/**
 		 * 与 `remoteHome` 同一语义，但缓存状态读不到时**按需建立会话**再读一次。
 		 *
 		 * 会话扫描专用（`RemoteSessionScanner` 是 `remoteHome` 的唯一生产调用方）：扫描总是紧跟

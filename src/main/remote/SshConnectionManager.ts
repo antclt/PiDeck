@@ -120,6 +120,11 @@ export type SshConnectionManager = {
 	 * RemoteHostConnectionService.remoteHome).
 	 */
 	getHome(hostId: string): string | undefined;
+	/**
+	 * Capability names the last successful handshake declared for this host, or undefined while no live
+	 * session proves any. Read-only like getHome: asking never creates an entry, connects or probes.
+	 */
+	getCapabilities(hostId: string): readonly string[] | undefined;
 	disconnect(hostId: string, reason: "abort" | "shutdown"): Promise<void>;
 	dispose(): Promise<void>;
 };
@@ -158,6 +163,12 @@ type HostEntry = {
 	 * proven usably reachable. Only a value that passes readRemoteHome is stored.
 	 */
 	home?: string;
+	/**
+	 * Capability names the same handshake declared. Kept next to home for the same reason: a project read
+	 * surface negotiates optional work (content search) from this list without opening a second session, and
+	 * a released session must not keep advertising what it once could do. Cleared with home on release.
+	 */
+	capabilities?: readonly string[];
 };
 
 const DEFAULT_STABILITY_WINDOW_MS = 750;
@@ -535,12 +546,15 @@ export function createSshConnectionManager(options: SshConnectionManagerOptions)
 			record(code, exitCode) {
 				record(entry, code, exitCode);
 			},
-			markReady(home) {
+			markReady(home, capabilities) {
 				apply(entry, { type: "connected", generation });
 				entry.readyAt = now();
 				// The handshake is the only place this host's remote HOME exists: the manager never guesses one,
 				// so a value that cannot be used as a POSIX path is dropped rather than stored half-usable.
 				entry.home = readRemoteHome(home);
+				// Same fence for the optional vocabulary: only non-empty bounded strings are kept, and an empty
+				// list is stored as an empty list (the helper answered) rather than as "unknown".
+				entry.capabilities = Array.isArray(capabilities) ? capabilities.filter((value) => typeof value === "string" && value.length > 0 && value.length <= 64).slice(0, 256) : undefined;
 				record(entry, "SSH_CONNECTION_READY");
 			},
 			isCurrentGeneration() {
@@ -603,9 +617,11 @@ export function createSshConnectionManager(options: SshConnectionManagerOptions)
 		const live = entry.live;
 		if (live) await releaseLive(entry, live, reason);
 		entry.readyAt = undefined;
-		// A released session must not keep naming a remote home: `remoteHome` answers "unknown" for a host
-		// that is not connected, and the next handshake records the home of the session that actually ran.
+		// A released session must not keep naming a remote home or advertising its capabilities:
+		// `remoteHome` answers "unknown" for a host that is not connected, and the next handshake records
+		// the home and vocabulary of the session that actually ran.
 		entry.home = undefined;
+		entry.capabilities = undefined;
 		if (reason === "shutdown") {
 			// App exit latches the machine: no timer or retry may revive a torn-down connection.
 			apply(entry, { type: "shutdown" });
@@ -654,6 +670,11 @@ export function createSshConnectionManager(options: SshConnectionManagerOptions)
 			// No entry is created here: asking about a home must not make an unknown host look known, and the
 			// caller re-validates the shape anyway (this value came from the remote).
 			return hosts.get(hostId)?.home;
+		},
+		getCapabilities(hostId) {
+			// Same rule as getHome: no entry is created for an unknown host, and undefined means "never
+			// proved on a live session", which a consumer must treat as unsupported rather than guess.
+			return hosts.get(hostId)?.capabilities;
 		},
 		async disconnect(hostId, reason) {
 			return disconnectHost(entryFor(hostId), reason);

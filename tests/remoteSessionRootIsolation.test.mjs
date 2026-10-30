@@ -29,7 +29,7 @@ const HOST_ID = "6f1d2c3b-4a59-4e8d-9f70-1a2b3c4d5e6f";
 const HOME = "/home/dev";
 const CONTROL = String.fromCharCode(0);
 /** Current frozen build (helper 1.22.0); it was 1.6.0 when the J2 feature was verified. */
-const FROZEN_HELPER_SHA256 = "c61ebbae96b17315618ca80719625f9251472038eaa851c8572e3869c169a102";
+const FROZEN_HELPER_SHA256 = "04102d31c444c78fa0217de83f5f38eea10d48e539e8ea37ef83f382852b884d";
 const CONFIG_ROOT = HOME + "/.pi/agent";
 const CONFIG_PATH = "settings.json";
 const DEFAULT_ROOT = HOME + "/.pi/agent/sessions";
@@ -42,6 +42,7 @@ const FROZEN_CAPABILITIES = [
 	"fs.list",
 	"fs.read",
 	"fs.searchNames",
+	"fs.searchContent",
 	"fs.watch",
 	"fs.unwatch",
 	"git.status",
@@ -73,7 +74,7 @@ const FROZEN_CAPABILITIES = [
 ];
 
 test("the helper protocol is byte-for-byte the frozen 1.23.0 artifact", () => {
-	assert.equal(REMOTE_HELPER_ENTRY_VERSION, "1.24.0", "the helper version must match the frozen artifact");
+	assert.equal(REMOTE_HELPER_ENTRY_VERSION, "1.25.0", "the helper version must match the frozen artifact");
 	assert.equal(REMOTE_HELPER_ENTRY_SHA256, FROZEN_HELPER_SHA256, "the declared digest must stay the frozen one");
 	const recomputed = createHash("sha256").update(Buffer.from(REMOTE_HELPER_INLINE_SOURCE, "utf8")).digest("hex");
 	assert.equal(recomputed, REMOTE_HELPER_ENTRY_SHA256, "the uploaded body must hash to the declared digest");

@@ -344,6 +344,7 @@ export const REMOTE_HELPER_CAPABILITIES = [
 	"fs.list",
 	"fs.read",
 	"fs.searchNames",
+	"fs.searchContent",
 	"fs.watch",
 	"fs.unwatch",
 	"git.status",
@@ -406,6 +407,36 @@ export const REMOTE_HELPER_MAX_SEARCH_SCANNED = 20000;
 export const REMOTE_HELPER_MAX_SEARCH_DEPTH = 12;
 /** Query ceiling for `fs.searchNames`, counted in characters and checked before any filesystem access. */
 export const REMOTE_HELPER_MAX_SEARCH_QUERY_LENGTH = 128;
+/**
+ * Bounded content search (helper 1.25.0). `fs.searchContent` is the first read that actually opens file
+ * bodies, so every bound is a literal of the frozen artifact and repeated here under test:
+ * - matches: at most 200 answered; the walk stops at the match that fills the ceiling;
+ * - files: at most 2000 files read, bytes: at most 16 MiB read in total, and one file larger than 1 MiB is
+ *   skipped (its bytes are never read) — each limit sets `truncated` with the `reason` that stopped it;
+ * - time: at most 8 s of scanning, checked at entry/file boundaries, so a slow filesystem cannot hold a
+ *   helper slot for the whole request deadline;
+ * - depth: 12 segments below the request path, the same ceiling the filename walk uses;
+ * - a file whose first 8 KiB contain a NUL byte is binary and is skipped without being decoded; invalid
+ *   UTF-8 is skipped too. Skips are not truncation: they say "this file is not text", not "the tree was cut".
+ * - a snippet is at most 200 characters of the matched line, and a match names only its relative path,
+ *   line (1-based) and column (0-based): no file body ever travels back in a result.
+ */
+export const REMOTE_HELPER_METHOD_FS_SEARCH_CONTENT = "fs.searchContent";
+export const REMOTE_HELPER_MAX_CONTENT_MATCHES = 200;
+export const REMOTE_HELPER_MAX_CONTENT_SCANNED_FILES = 2000;
+export const REMOTE_HELPER_MAX_CONTENT_SCANNED_BYTES = 16 * 1024 * 1024;
+export const REMOTE_HELPER_MAX_CONTENT_FILE_BYTES = 1024 * 1024;
+export const REMOTE_HELPER_MAX_CONTENT_BINARY_PROBE_BYTES = 8 * 1024;
+export const REMOTE_HELPER_MAX_CONTENT_TIME_MS = 8000;
+export const REMOTE_HELPER_MAX_CONTENT_DEPTH = 12;
+export const REMOTE_HELPER_MAX_CONTENT_SNIPPET_LENGTH = 200;
+/**
+ * Directories the content walk never descends into: VCS metadata, package installs and PiDeck's own trash are
+ * not project text sources, and `.git`/`node_modules` alone can exhaust the whole file/byte budget before a
+ * single source file is reached. They are skipped by name at any depth; a user file inside them is intentionally
+ * outside this search, which is the same set the remote file tree hides.
+ */
+export const REMOTE_HELPER_CONTENT_SKIPPED_DIRECTORIES = [".git", ".hg", ".svn", "node_modules", ".pideck-trash"] as const;
 /** Bounded concurrency plus a bounded waiting room: past both, a request is refused, never buffered. */
 export const REMOTE_HELPER_MAX_QUEUED_REQUESTS = 64;
 /**
@@ -499,6 +530,37 @@ export type RemoteHelperSearchEntry = { path: string; name: string; kind: Remote
  * three ceilings stopped the walk, which is the only case in which the answer is not the whole tree.
  */
 export type RemoteHelperSearchResult = { entries: readonly RemoteHelperSearchEntry[]; scanned: number; truncated: boolean };
+/**
+ * `fs.searchContent` (helper 1.25.0): the bounded content read. `path` names the directory to walk and is
+ * checked exactly as `fs.list` checks one; `query` is a 1..128 character literal matched case-insensitively
+ * inside each line; `maxMatches` is optional and clamped to 1..REMOTE_HELPER_MAX_CONTENT_MATCHES.
+ */
+export type RemoteHelperSearchContentParams = { path: string; query: string; maxMatches?: number };
+/**
+ * One line match: `path` is the relative POSIX path inside the root, `line` is 1-based, `column` is the
+ * 0-based character offset of the match in that line, and `snippet` is at most
+ * REMOTE_HELPER_MAX_CONTENT_SNIPPET_LENGTH characters of the same line. The file body never travels back.
+ */
+export type RemoteHelperSearchContentMatch = { path: string; name: string; line: number; column: number; snippet: string };
+/**
+ * The reason a bounded answer is not the whole tree. `file-size` means one file was skipped because it is
+ * larger than REMOTE_HELPER_MAX_CONTENT_FILE_BYTES (its bytes were never read); binary and invalid UTF-8
+ * skips are deliberately not truncation and carry no reason.
+ */
+export type RemoteHelperSearchContentReason = "matches" | "files" | "bytes" | "time" | "depth" | "file-size";
+/**
+ * `matchedFiles` counts distinct files with at least one match, `scannedFiles` every file whose bytes were
+ * read (including binary/invalid UTF-8 skips) and `scannedBytes` every byte handed to the decoder, so the
+ * three fields describe work actually done. `reason` is present exactly when `truncated` is true.
+ */
+export type RemoteHelperSearchContentResult = {
+	matches: readonly RemoteHelperSearchContentMatch[];
+	matchedFiles: number;
+	scannedFiles: number;
+	scannedBytes: number;
+	truncated: boolean;
+	reason?: RemoteHelperSearchContentReason;
+};
 
 /**
  * `offset` and `bytes` are safe non-negative integers; `bytes` is at most REMOTE_HELPER_MAX_CHUNK_BYTES,

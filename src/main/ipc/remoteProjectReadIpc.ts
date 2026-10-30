@@ -128,6 +128,14 @@ export function registerRemoteProjectReadIpc(input: { enabled: boolean; projectR
 		const target = await input.projectReadTarget(projectIdValue);
 		if ("code" in target) return opFailFromCode(target.code);
 		const status = target.service.projectRootStatus(target.hostId, target.remotePath);
-		return opOk(status.status === "ok" ? { status: "ok" } : { status: "needs-attention", code: status.code });
+		// Optional capability list of the live session (content search is the first consumer). Absent means
+		// "unknown/unsupported" - a renderer must fall back instead of guessing, which is exactly the old-helper
+		// path. It is a diagnostic read: querying status still opens no session.
+		const capabilities = target.service.helperCapabilities(target.hostId);
+		return opOk({
+			status: status.status === "ok" ? ("ok" as const) : ("needs-attention" as const),
+			...(status.status === "ok" ? {} : { code: status.code }),
+			...(capabilities === undefined ? {} : { helperCapabilities: capabilities }),
+		});
 	});
 }
