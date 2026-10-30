@@ -6877,6 +6877,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"remoteGit.repoScope": "Repository",
 	"remoteGit.repoScopeRoot": "Project root",
 	"remoteGit.repoReposTruncated": "The repository list hit its scan bound and may be incomplete; narrow the project root or check in a terminal.",
+	"remoteGit.repoScopeSingle": "Remote reads one repository at a time: switch scopes to view another; side-by-side multi-repo views are not available.",
 	"remoteGit.repoNotFound": "No Git repository at this path (the nested list may be stale). Refresh and choose again.",
 	"remoteGit.back": "Back to remote changes",
 	"remoteGit.managedIndex":
@@ -6917,7 +6918,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"remoteGit.compareBase": "Base ref",
 	"remoteGit.compareHead": "Compare ref",
 	"remoteGit.compareRun": "Compare",
-	"remoteGit.compareHint": "Read-only: compares the trees of two local refs (no fetch, no merge); clicking a file reuses the two-revision diff view.",
+	"remoteGit.compareHint": "Read-only: compares the trees of two local refs (no merge-base semantics and no ahead/behind counts; no fetch, no merge); clicking a file reuses the two-revision diff view.",
 	"remoteGit.compareSameRef": "Choose two different local refs.",
 	"remoteGit.compareEmpty": "The two refs have identical content.",
 	"remoteGit.refsAutoRefresh": "Refreshes refs every 15s while visible; never fetches the remote.",
