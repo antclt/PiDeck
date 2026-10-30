@@ -687,7 +687,10 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 			await expect(window.getByTestId("drawer-rail-files")).toHaveAttribute("aria-selected", "true");
 			await window.getByRole("button", { name: "calc.cjs", exact: false }).click();
 			await expect(window.getByRole("region", { name: "远端文件编辑器" }).locator(".cm-content")).toContainText("value: 2", { timeout: timeouts.helperMs });
-			await window.locator(".header-drawer-toggle").first().click();
+			// 抽屉打开后开关并入抽屉（.header-drawer-toggle 只在关闭态渲染，见 SessionTabsBar）：用抽屉自己的
+			// 关闭入口，再断言开关回到会话 Tab 栏 —— 与旧断言同一个可观察契约「抽屉已关」，只是点对了控件。
+			await window.getByRole("button", { name: "关闭右侧边栏" }).first().click();
+			await expect(window.locator(".header-drawer-toggle").first(), "关闭抽屉后开关必须回到会话 Tab 栏").toBeVisible({ timeout: timeouts.helperMs });
 			console.log("[remote-file-acceptance] activeSessionFileDrawer=true");
 			const prompt = "请读取 calc.cjs 和 test.cjs，然后用 bash 执行 node test.cjs。不要修改任何文件，必须真实运行测试，测试通过后回复 REMOTE_FILE_TEST_OK。";
 			await window.locator(".composer .rich-input").click();

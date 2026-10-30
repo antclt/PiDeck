@@ -7,6 +7,29 @@ export const REMOTE_EDITED_CODE = "module.exports = { value: 2 };\n// 中文保�
 const EXTERNAL = "module.exports = { value: 3 };\n// external change\n";
 const DRAFT = "module.exports = { value: 4 };\n// unsaved draft\n";
 
+/**
+ * 与产品无关的 SSH 内容佐证（oracle）：只用于断言"远端字节真的变了"，不参与 UI 交互。
+ *
+ * 2026-10 旧 helper 的一次真机失败里，`runRemoteCommand` 抛出的 execFile 错误 message 不含 stderr，
+ * 无法区分「文件不存在」与「SSH 瞬时失败」（同一 run 的写入与后续 oracle 都正常）。这里只在失败路径
+ * 追加一次目录现场（ls -la + stat）并原样 rethrow：**不改断言、不重试内容读取**——重试会把真实失败
+ * 洗成偶发。
+ */
+async function readRemoteFileOracle(credentials: RemoteAcceptanceCredentials, path: string, timeoutMs: number): Promise<string> {
+	try {
+		return (await runRemoteCommand(credentials, "cat -- '" + path + "'", timeoutMs)).stdout;
+	} catch (error) {
+		const directory = path.slice(0, path.lastIndexOf("/"));
+		try {
+			const probe = await runRemoteCommand(credentials, "ls -la -- '" + directory + "' 2>&1; stat -c '%a %U %s' -- '" + path + "' 2>&1", 20_000);
+			console.log("[remote-file-oracle] " + path + " failed; directory/probe output:\n" + probe.stdout);
+		} catch (diagnosticError) {
+			console.log("[remote-file-oracle] " + path + " failed and the probe also failed: " + (diagnosticError instanceof Error ? diagnosticError.message : String(diagnosticError)));
+		}
+		throw error;
+	}
+}
+
 /** 只初始化本次专用项目；Agent随后用test.cjs验收UI保存后的代码，禁止访问用户原始文件。 */
 export async function initializeRemoteCodeFixture(credentials: RemoteAcceptanceCredentials, projectPath: string): Promise<void> {
 	// pi自身由已验证nvm Node启动，但bash的PATH可能仍是系统Node；此测试不需要新API。
@@ -31,7 +54,7 @@ async function replaceEditor(window: Page, content: string): Promise<void> {
 export async function verifyRemoteCodeEditing(input: { window: Page; credentials: RemoteAcceptanceCredentials; projectPath: string; testInfo: TestInfo; timeoutMs: number }): Promise<void> {
 	const { window, credentials, projectPath, testInfo, timeoutMs } = input;
 	const path = projectPath + "/calc.cjs";
-	const read = async () => (await runRemoteCommand(credentials, "cat -- '" + path + "'", 60_000)).stdout;
+	const read = async () => readRemoteFileOracle(credentials, path, 60_000);
 	const mode = async () => (await runRemoteCommand(credentials, "stat -c '%a' -- '" + path + "'", 60_000)).stdout.trim();
 	const region = window.getByRole("region", { name: "远端文件编辑器" });
 	await openRemoteProjectFiles(window);
@@ -81,7 +104,7 @@ export async function verifyRemoteCodeEditing(input: { window: Page; credentials
 	await window.keyboard.press("Enter");
 	await region.getByRole("button", { name: "保存远端文件", exact: true }).click();
 	await expect(region.getByText("已保存", { exact: true })).toBeVisible({ timeout: timeoutMs });
-	expect((await runRemoteCommand(credentials, "cat -- '" + projectPath + "/crlf.txt'", 60_000)).stdout).toBe("\ufefffirst\r\nsecond\r\n// appended\r\n");
+	expect(await readRemoteFileOracle(credentials, projectPath + "/crlf.txt", 60_000)).toBe("\ufefffirst\r\nsecond\r\n// appended\r\n");
 	await window.getByRole("button", { name: "calc.cjs", exact: false }).click();
 	await expect(region.locator(".cm-content")).toContainText("value: 2");
 	console.log("[remote-file-acceptance] saveAndReload=true externalChangePreserved=true draftSurvivesNavigation=true mode600=true bomAndCrlfPreserved=true");
@@ -100,8 +123,8 @@ export async function verifyRemoteCodeIsolation(window: Page, credentials: Remot
 	await replaceEditor(window, "module.exports = { value: 102 };\n");
 	await region.getByRole("button", { name: "保存远端文件", exact: true }).click();
 	await expect(region.getByText("已保存", { exact: true })).toBeVisible({ timeout: timeoutMs });
-	expect((await runRemoteCommand(credentials, "cat -- '" + neighborPath + "/calc.cjs'", 60_000)).stdout).toBe("module.exports = { value: 102 };\n");
-	expect((await runRemoteCommand(credentials, "cat -- '" + projectPath + "/calc.cjs'", 60_000)).stdout).toBe(REMOTE_EDITED_CODE);
+	expect(await readRemoteFileOracle(credentials, neighborPath + "/calc.cjs", 60_000)).toBe("module.exports = { value: 102 };\n");
+	expect(await readRemoteFileOracle(credentials, projectPath + "/calc.cjs", 60_000)).toBe(REMOTE_EDITED_CODE);
 	await remoteProjectRow(window, projectPath.split("/").at(-1) ?? "")
 		.locator(".conversation-title")
 		.first()
@@ -130,7 +153,7 @@ export async function verifyRemoteCodeDisconnect(window: Page, credentials: Remo
 	await region.getByRole("button", { name: "保存远端文件", exact: true }).click();
 	await expect(region.getByRole("alert")).toContainText("远端连接不可用", { timeout: timeoutMs });
 	await expect(region.locator(".cm-content")).toContainText("disconnected draft");
-	expect((await runRemoteCommand(credentials, "cat -- '" + projectPath + "/calc.cjs'", 60_000)).stdout).toBe(REMOTE_EDITED_CODE);
+	expect(await readRemoteFileOracle(credentials, projectPath + "/calc.cjs", 60_000)).toBe(REMOTE_EDITED_CODE);
 	await window.getByRole("button", { name: /^设置/ }).click();
 	await settings.getByRole("tab", { name: "连接", exact: true }).click();
 	await settings.getByRole("button", { name: "连接", exact: true }).first().click();
