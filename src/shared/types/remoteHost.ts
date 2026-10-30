@@ -280,7 +280,15 @@ export type RemoteProjectRootStatusResult = Op<{ status: "ok" | "needs-attention
  *
  * 这是跨 IPC 推送的载荷，所以放在契约层：主进程只标脏，读仍由活跃消费者发起。
  */
-export type RemoteProjectFactsScope = { kind: "dir"; path: string } | { kind: "repos" } | { kind: "status"; repoPath: string };
+export type RemoteProjectFactsScope =
+	| { kind: "dir"; path: string }
+	| { kind: "repos" }
+	| { kind: "status"; repoPath: string }
+	/**
+	 * 整棵树的事实失效（Git 写成功后使用）：子树条目可能整块变化，但不是「根目录事件」——根事件只重读根层。
+	 * 渲染层收到后重读根与全部已加载目录，保留展开集与 currentDir；不用于普通文件写。
+	 */
+	| { kind: "tree" };
 
 /**
  * 事实变化通知：至少携带 projectId、generation 与被标脏的 scopes。
