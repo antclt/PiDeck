@@ -28,6 +28,7 @@
 | 宿主插件 | 与 pi 扩展是两套系统（`src/main/plugins/`，不依赖 pi 进程）；授权按内容 sha256 指纹不按版本，指纹变即重新授权；历史读取 64MiB/10 万条硬预算；改 API/权限面必须同步 `src/preload/hostPlugin.ts` + `docs/host-plugin-dev-guide.md` + 脚手架；`service.local` 只给「点名权」（id 白名单 `src/shared/localServices.ts`）；内置示例由 `seedBuiltin` 落位（内容没被手改过才随新版刷新）；`.pideck-plugin` NDJSON 归档逐文件 sha256；GitHub 安装只走 `codeload.github.com` 的 tar.gz + 自写 tar 解析，三条安装路径共用 `HostPluginManager.installFiles` 同一套预算与信任判定 | 本文「宿主插件」 |
 | Web 端流式链路 | 流式事件源必须按后端分别注入 `WebEventStreamRouter`：pi 走 `subscribePiEvents`，DSH 走 `subscribeAgentChannelEvents`（`DshChannelToPiEvents`），ACP 走 `subscribeAcpChannelEvents`（`AcpChannelToPiEvents`，投影快照差分）；漏挂的后端在 Web 端退化成「轮询 + 磁盘重拉」；DSH 回合边界只认 `turnEnded: true`，ACP 只认 `agents:runtime-state` 的 `isStreaming` 翻 false | 本文「Web 端流式链路」 |
 | i18n 文案 | 改任何 zh-CN 词典（rendererCopy / mainProcessCopy / WebI18n / FeishuI18n）后必须重跑 `node scripts/genZhTwCopy.mjs`；四份 `*.zh-TW.ts` 是生成物禁止手改（漏跑：先 typecheck 报 TS2739，改值不加键则由 `source-sha256` 指纹门禁拦下） | 本文「繁体中文」 |
+| AI 协助（issue/PR） | 只评论不合并；未配 `ANTHROPIC_API_KEY` 静默跳过；**禁止 `pull_request_target`**（fork PR 会拿走写权限 token + secrets）；`@claude` 只认 OWNER/MEMBER/COLLABORATOR | `docs/ai-assist.md` |
 | 发版 | CHANGELOG 中英一致 → sync-release-notes → sync-workflow-choices → 打包人工 smoke | `docs/release-process.md` |
 | 宿主通道 / 侧车 / MCP | 六条例外各只允许一种用途，禁止扩成通用桥；新增工具先改文档再改代码 | `docs/host-boundaries.md` |
 
