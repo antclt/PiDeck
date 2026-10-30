@@ -1,7 +1,7 @@
 import { useAtomValue } from "jotai";
 import { useId, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, ListChecks, X } from "lucide-react";
-import { sessionRuntimeBySessionIdAtomFamily, sessionRuntimeUiBySessionIdAtomFamily } from "../../atoms";
+import { sessionRecordByIdAtomFamily, sessionRuntimeBySessionIdAtomFamily, sessionRuntimeUiBySessionIdAtomFamily } from "../../atoms";
 import { t } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
 import { VirtualStack, VIRTUAL_STACK_MIN_ROWS } from "../ui-shadcn/virtual-stack";
@@ -10,6 +10,7 @@ import { isCoherentComposerRuntimeUi, type RuntimeHandle } from "./ComposerRunti
 import { ComposerWidgetFrame, useComposerWidgetCollapsed } from "./ComposerWidgetLayout";
 import { parseAgentTodoItems, runtimeTodosToItems, sessionTodoSnapshotToItems, stripPiDeckTodoWidgetMetadata, type AgentTodoItem } from "./agentTodoParser";
 import { useSessionTodoSnapshot } from "../../hooks/useSessionTodoSnapshot";
+import { useToolDerivedActivity } from "../../hooks/useToolDerivedActivity";
 
 /**
  * composer 上方的 todo 常驻条（移植自 dsh-web 的 TodoPanel）。
@@ -184,6 +185,13 @@ export function useSessionTodoSources(sessionId: string): TodoWidgetLines[] {
 	// 会话级 todo 快照：仅历史会话（无 coherent runtime）拉取，避免活会话多余 IPC
 	const todoSnapshot = useSessionTodoSnapshot(sessionId, !coherent);
 
+	// ACP 的待办常常只存在于工具调用参数里（CodeBuddy 的 TaskCreate/TaskUpdate、Claude 的
+	// TodoWrite、Codex 的 update_plan），协议层并不总有 plan 帧。冷会话（无 runtime）也要
+	// 认后端，所以以 catalog 记录的 backend 兜底。推导同时覆盖活会话与历史归档回放。
+	const record = useAtomValue(sessionRecordByIdAtomFamily(sessionId));
+	const isAcp = (runtime?.backend ?? record?.backend) === "acp";
+	const derived = useToolDerivedActivity(sessionId, isAcp);
+
 	// 数据源归一化成统一行式，再整体走 dismiss 指纹与解析链路
 	return useMemo<WidgetLines[]>(() => {
 		// DSH 不产出 Pi widget，优先消费其运行时的结构化 todos；ACP 同路：主进程把 CLI
@@ -192,9 +200,15 @@ export function useSessionTodoSources(sessionId: string): TodoWidgetLines[] {
 		// Pi 活会话仍以 widget 为实时真源；历史会话用快照兜底。
 		if (runtime?.backend === "dsh" || runtime?.backend === "acp") {
 			const todos = runtime.state?.todos;
-			if (!Array.isArray(todos) || todos.length === 0) return [];
+			// plan 帧（规范真源）优先；没有 plan 帧时回落到工具调用推导（ACP 专用）
+			const list = Array.isArray(todos) && todos.length > 0 ? todos : derived.todos;
+			if (list.length === 0) return [];
 			// key 沿用 dsh-todos：两后端是同构 TodoItem[] 消费，dismiss 指纹按内容算，不区分来源。
-			return [{ key: "dsh-todos", lines: todoItemsToLines(runtimeTodosToItems(todos)) }];
+			return [{ key: "dsh-todos", lines: todoItemsToLines(runtimeTodosToItems(list)) }];
+		}
+		// ACP 历史会话：runtime 已释放，只剩归档消息 → 用工具调用推导的清单
+		if (isAcp && derived.todos.length > 0) {
+			return [{ key: "dsh-todos", lines: todoItemsToLines(runtimeTodosToItems(derived.todos)) }];
 		}
 		if (!coherent) {
 			const snapshot = sessionTodoSnapshotToItems(todoSnapshot);
@@ -206,7 +220,7 @@ export function useSessionTodoSources(sessionId: string): TodoWidgetLines[] {
 			if (raw?.length) result.push({ key, lines: raw });
 		}
 		return result;
-	}, [coherent, runtime?.backend, runtime?.state?.todos, todoSnapshot, widgets]);
+	}, [coherent, isAcp, derived, runtime?.backend, runtime?.state?.todos, todoSnapshot, widgets]);
 }
 
 /** 行快照 → 待办项：pi-deck-todo 先剥离元数据行，再统一解析。 */
