@@ -377,6 +377,9 @@ import { GitRefsWatcher } from "./git/GitRefsWatcher";
 import { WorktreeService } from "./git/WorktreeService";
 import { ConfigManager } from "./config/ConfigManager";
 import { ConfigBackupManager } from "./config/ConfigBackupManager";
+import { createPiResourceManagerPool, type PiResourceManagerPool } from "./config/PiResourceManagerPool";
+import { createPiResourceManagerFactories } from "./config/piResourceFactories";
+import { createPiResourceTargetResolver } from "./config/PiResourceTargetResolver";
 import { TokendanceCatalogStore } from "./config/tokendanceCatalog";
 import { installTokendanceProvider } from "./config/tokendanceInstaller";
 import { TokendanceAuthStore } from "./config/tokendanceAuth";
@@ -415,6 +418,7 @@ import { registerProjectsIpc } from "./ipc/projectsIpc";
 import { registerRemoteHostIpc } from "./ipc/remoteHostIpc";
 import { registerWslHostIpc } from "./ipc/wslHostIpc";
 import { createWslHostReferenceRegistry } from "./wsl/WslHostReferences";
+import { createWslHostStore } from "./wsl/WslHostStore";
 import { resolveProjectWslIdentity } from "./wsl/WslProjectEnvironment";
 import { registerRemoteProjectIpc } from "./ipc/remoteProjectIpc";
 import { createRemoteFactsHub } from "./remote/RemoteFactsNotifications";
@@ -754,6 +758,8 @@ let sessionStoreService: SessionStoreService | null = null;
 let xuePromptDbStore: XuePromptDbStore | null = null;
 let skillManager: SkillManager;
 let extensionManager: ExtensionManager;
+/** 资源作用域池（W1）：技能/提示词/扩展按 PiResourceTarget 路由；本机复用现有四个单例。 */
+let piResourcePool: PiResourceManagerPool | undefined;
 /** 后台更新检查服务（启动延迟 + 2h 周期，无配额方案）；null = 未初始化。 */
 let updateService: UpdateService | null = null;
 let projectResourceManager: ProjectResourceManager;
@@ -4837,6 +4843,7 @@ function registerIpc() {
 		projectResourceManager,
 		agentManager,
 		skillManager,
+		piResourcePool,
 		appLogger,
 		rpcLogger,
 		sessionRuntimeCoordinator,
@@ -5011,6 +5018,7 @@ function registerIpc() {
 		skillManager,
 		xuePromptManager,
 		extensionManager,
+		piResourcePool,
 		projectResourceManager,
 		configManager,
 		projectTrustPath: (projectRoot, projectId) => {
@@ -7184,17 +7192,46 @@ app
 		 *
 		 * 会话扫描按项目档案使用独立 scanner（wslSessionScannerFor），spawn 由 AgentManager 的
 		 * 每次启动覆盖值决定；这里只把旧的全局状态清掉，避免残留一个发行版影响其它项目。
-		 * WSL 的配置/技能/扩展页暂按本机（Windows）HOME 展示，多档案配置作用域后续单独做。
+		 * 配置/资源页按目标路由：WSL 目标解析发行版 HOME，不回退本机；生产代码里不再有全局
+		 * configureWsl 切换共享单例的路径（W1 起用 PiResourceManagerPool）。
 		 */
+		// 资源作用域池（W1）：本机复用既有四个单例；WSL 目标每次请求重读档案（cache key 含 hostId/distro/user），
+		// 档案改 distro/user 或移除后旧实例自动失效重建，绝不回退本机 HOME。
+		piResourcePool = createPiResourceManagerPool({
+			resolver: createPiResourceTargetResolver({
+				listProfiles: async () => (await createWslHostStore(app.getPath("userData"))).list(),
+				resolveEnvironment: async (distro, user) => {
+					const { resolveWslEnvironment } = await import("./wsl/WslEnvironment");
+					return resolveWslEnvironment(distro, user, { warn: (message, details) => void appLogger?.warn("wsl", message, details) });
+				},
+				localHome: () => app.getPath("home"),
+			}),
+			local: {
+				skills: () => skillManager,
+				prompts: () => promptManager,
+				extensions: () => extensionManager,
+				xuePrompts: () => xuePromptManager,
+			},
+			create: createPiResourceManagerFactories({
+				translate: mainCopy,
+				extension: {
+					locator: piLocator,
+					getSettings: () => settingsStore.get(),
+					getPiDeckSettings: () => settingsStore.get(),
+					patchPiDeckSettings: (patch) => settingsStore.update(patch),
+					builtInRoots: resolveBuiltInExtensionRoots(),
+				},
+				xuePrompts: {
+					overlayDir: () => promptStoreUpdater.resolveEffectiveOverlayDir(),
+					dbStore: xuePromptDbStore ?? undefined,
+					xueIndex: xueIndexService ?? undefined,
+				},
+			}),
+		});
 		const syncWslConfig = async () => {
 			sessionScanner.clearWsl();
 			agentManager.configureWsl(null);
 			dshHost.configureWsl(null);
-			skillManager.configureWsl(null);
-			promptManager.configureWsl(null);
-			extensionManager.configureWsl(null);
-			if (configManager) configManager.configureWsl(null);
-			if (xuePromptManager) xuePromptManager.configureWsl(null);
 		};
 		// 先注册 IPC 并创建窗口：WSL 探测 / pi settings / 代理 / Web 服务都可能卡住或抛错，
 		// 不能挡在 createWindow 前面（打包便携版表现为「启动没反应」，dev 因热路径较短不易复现）。
