@@ -351,6 +351,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 												record={composer.record}
 												defaultModel={composer.dshDefaultModel ?? composer.bootstrapDefaultModel}
 												backend={composer.backend}
+												backendFixedToPi={composer.backendFixedToPi}
 												enhance={composerFeatureVisible("enhance") ? composer.enhance : undefined}
 												onChangeBackend={composer.changeBackend}
 												acpTool={composer.acpTool}

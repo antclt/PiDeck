@@ -25,6 +25,7 @@ import { useProviderUsageBatchRefresh } from "../../hooks/useProviderUsage";
 import { AcpToolLogo, DshLogo, PiLogo } from "./SessionSourceBadge";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger } from "../ui-shadcn/select";
 import { computeModelDisplay, formatModelRef, resolveComposerLiveModel, resolveGuideDisplayModel, type ModelPending } from "../../utils/modelPendingDisplay";
+import { backendLockCopyKeys } from "../../utils/remoteCapabilityLimits";
 import { WELCOME_DSH_MODEL_KEY, WELCOME_MODEL_KEY, isWelcomeModelLost, readWelcomeDshModelPreference, readWelcomeModelPreference, shouldClearWelcomePreference } from "../../utils/chatSessionBootstrap";
 import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
 import { CommandPickerGroup, CommandPickerPanel, type CommandPickerFilter } from "../ui-shadcn/command-picker";
@@ -437,6 +438,8 @@ export function ComposerBottomBar(props: {
 	defaultModel?: { provider?: string; modelId?: string; modelName?: string };
 	/** 当前会话后端（pi 缺省）。 */
 	backend?: AgentBackend;
+	/** 远端项目固定 pi：锁定后端时显示「远端只支持 pi」而不是「会话已开始」。 */
+	backendFixedToPi?: boolean;
 	/** 提示词增强域（hook 拥有状态，底栏只呈现）：缺省隐藏入口。 */
 	enhance?: { view: PromptEnhanceView; start: () => void; cancel: () => void };
 	/** 切换后端：UI 层面先停 runtime 再写 catalog；acp 可带工具 id（picker 两页式弹层内选定）。 */
@@ -587,6 +590,7 @@ export function ComposerBottomBar(props: {
 	// 「切到 ACP 后端」这次渲染比上一次多一个 hook，直接抛 React #310（渲染的 hook 数多于上次）。
 	const acpTools = useAtomValue(acpToolsAtom);
 	const lockedAcpTool = props.backend === "acp" ? acpTools.find((tool) => tool.id === props.acpTool?.toolId) : undefined;
+	const backendLockCopy = backendLockCopyKeys(props.backendFixedToPi === true);
 	const modelPendingTitle = props.modelPending
 		? t("app.modelPendingTitle", {
 				from: formatModelRef(props.modelPending.from),
@@ -616,9 +620,9 @@ export function ComposerBottomBar(props: {
 						<button
 							type="button"
 							className="composer-bar-btn backend inline-flex size-7 cursor-pointer items-center justify-center rounded-md p-0 text-control font-semibold text-foreground hover:bg-muted/60"
-							title={lockedAcpTool ? `${lockedAcpTool.name} · ${t("session.backendLockedHint")}` : t("session.backendLockedHint")}
-							aria-label={lockedAcpTool ? `${lockedAcpTool.name} · ${t("session.backendLockedHint")}` : t("session.backendLockedHint")}
-							onClick={() => showNotice(t("session.backendLockedNotice"), 5000)}
+							title={lockedAcpTool ? `${lockedAcpTool.name} · ${t(backendLockCopy.hint)}` : t(backendLockCopy.hint)}
+							aria-label={lockedAcpTool ? `${lockedAcpTool.name} · ${t(backendLockCopy.hint)}` : t(backendLockCopy.hint)}
+							onClick={() => showNotice(t(backendLockCopy.notice), 5000)}
 						>
 							{props.backend === "dsh" ? (
 								<DshLogo className="size-[15px] shrink-0" />
