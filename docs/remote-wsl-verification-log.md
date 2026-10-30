@@ -39,7 +39,7 @@
 | **本轮 smoke 实际运行的代码** | `46523b525` | `feat/ws4-verify` 的基点；`dev` 合入 WS1 之前，**不含任何 P0 修复** |
 | Lead 通报的 dev（含 WS1 P0-1 + 装配） | `50b4f7dc3` | 仅记录，未在本分支运行 |
 | 写本记录时只读查看的 dev HEAD | `a5b833b39` | `fix(remote): 装配文件写后 Git status 失效`（P0-2 已并入）；dev 仍在前进，集成以合并点为准 |
-| 集成阶段（dev 合并 WS1/WS2/WS3 后） | 待补 | 同一批命令重跑，逐项对比"修复前 / 修复后" |
+| **集成 run #1（WS1 全部 + WS2 全部 + i18n 重生成）** | dev `8b1178bce` → 本地 merge 提交 `7a74adc66` | 详见 §9；同一批命令重跑，逐项对比"修复前 / 修复后" |
 
 > 读法：第 5 节的 3 条 smoke 结论只代表 `46523b525`。WS1 的 P0-2/P0-3/P0-4 合并后再跑同一批 `--grep`，才能得出"修复后"结论；两轮记录放在一起即可对比。
 
@@ -138,3 +138,46 @@
 - 2026-10-30（`46523b525`）：建立本记录。本地 5 项基线门禁全绿；远端 smoke 3 条 → 2 通过（Git G1、trust 提示）/ 1 失败（产品路的并发冲突子步骤，定性 baseline-fail / 待复跑区分）/ 13 未验证；定位并规避 `ELECTRON_RUN_AS_NODE` 环境坑。
 - 2026-10-30（`46523b525`，补跑）：`remoteHostAcceptance` 基线跑 → 失败，成因为旧 spec 选择器过时（`添加` vs 现行「新建连接」），非产品缺陷；已记入 5.2，未改任何断言。
 - 2026-10-30（决策）：`remoteFunctionalAcceptance` **本轮不做**（原因＝远端写操作风险：会临时挪动远端 deploy 根下 bundle，且不在 P0/P1 验收范围），记为「未验证」；`remoteHostAcceptance` 保持"既有 spec 选择器过时"记录、不改断言、不修，集成阶段如需该覆盖另开任务。
+- 2026-10-30（决策/集成 run #1）：dev `8b1178bce` 已合入本分支（merge `7a74adc66`）。全量单测 15006/14721/0/285 全绿；远端 trust 与产品路通过，Git G1 因「旧断言 vs P0-3 静默轮询」冲突失败，裁定不改断言、等 WS1 follow-up 合并后复跑（详见 §9）。
+
+## 9. 集成 run #1（dev `8b1178bce` 合并后）
+
+**合并**：`feat/ws4-verify` ← `dev`，无冲突，merge 提交 `7a74adc66`（56 文件 / +3834 −303）；构建 `npx electron-vite build`（仅 E2E 准备）。
+
+### 9.1 门禁与全量单测
+
+| 命令 | 退出码 | 结果 | 备注 |
+|------|--------|------|------|
+| `git merge dev` | 0 | 无冲突 | dev HEAD `8b1178bce`（WS1 ×5 + WS2 全部 + i18n 重生成） |
+| `npx electron-vite build` | 0 | 58.34s | 仅 `out/`，未跑 `npm run build` / `pack` |
+| `npm test`（`node --test --test-concurrency=4`） | **0** | **tests 15006 / pass 14721 / fail 0 / skipped 285**，496s | 交接基线为 14928 / 14643 / 0 / 285；新增 78 条全部通过 |
+| `npm run typecheck` | 0 | 通过 | |
+| `npm run check:ipc-wiring` | 0 | 795 通道齐备、agentEventTags 8 | |
+| `npm run check:test-shape` | 0 | sourceOnly 407 / 1773 文件，新增 0 | |
+| `npm run check:format` | 0 | 4143 文件无差异 | |
+
+### 9.2 远端 E2E 复跑（与基线逐条对比）
+
+| 用例 | 基线 `46523b525` | 集成 run #1（`7a74adc66`） | 结论 |
+|------|-------------------|------------------------------|------|
+| 远端 trust 提示 | 1 passed (1.0m) | **1 passed (1.1m)** | 稳定通过 |
+| 远端会话产品路 | **1 failed (6.1m)**（并发冲突子步，baseline-fail） | **1 passed (3.4m)** | 基线失败**未再复现**；单次通过不足以断言"已修复"（基线那次伴随 `SSH_HOST_COMMAND_TIMEOUT`，更像时序/超时偶发），最终复跑再取一次证据 |
+| 远端 Git G1 | 1 passed (1.3m) | **1 failed**（断言 vs P0-3 语义冲突） | 见 9.3；**post-merge-fail（断言 vs P0-3 语义冲突）→ 修复待合并** |
+
+### 9.3 Git G1 失败：旧断言「重连不重放一次读」与 P0-3 静默轮询冲突（**不改断言**）
+
+- 失败位置：`e2e/remote-git.ts:192`
+  `await expect(panel.getByTestId("remote-git-workingTree")).toHaveCount(0); // explicit reconnect alone never replays a read`
+- 实测：`Expected 0 / Received 1`，10 秒内 23 次采样都解析到 1 个元素（稳定出现，非偶发）。
+- 机制：该处 Git 面板仍可见、host 已 ready，WS1 P0-3 的 5 秒静默 status 轮询（`src/renderer/src/utils/remoteGitStatusPolling.ts:32` 的闸门 `pageVisible && hostReady && !mutating && !loading && !diffLoading`）把 status 读回来了，工作树区块随之渲染；而 P0-3 验收条款本身要求"面板可见、host ready、非变更中时每 5 秒静默刷新 status"。
+- **裁决（Lead）**：**不改 e2e 断言**；由 WS1 追加产品侧 follow-up —— `invalidateConnection()` 后**暂停** 5 秒静默 status 轮询，直到一次成功的显式 refresh 才恢复。这样「断线/重连后不自动读」与「点刷新后恢复轮询」两条同时成立。
+- 处置：等 follow-up 合入 dev 后 `git merge dev` → `npx electron-vite build` → 复跑 G1（期望 pass）+ 产品路，结果补进本节。
+- 复现：`& "$env:TEMP\pideck-ws4-remote.ps1" -Grep "远端 Git G1"`
+
+### 9.4 风险与口径
+
+- 全量 `npm test` 与远端 E2E 本次并行执行（16 核，4 并发单测 + 单条 Electron E2E），E2E 计时可能偏慢；G1 的失败与计时无关（断言冲突）。
+- 「产品路基线失败 → 集成通过」目前只有 1 次 post-merge 证据，不写成"已修复"。
+- 本轮仍未跑：其余 13 条远端会话用例、`remoteFunctionalAcceptance`（本轮不做）。
+- 最终复跑前需再 merge 一次 dev（Lead 通报已到 `68117b2a3`：WS2 最后一个提交 + WS3 task-6 + i18n 重生成）。
+
