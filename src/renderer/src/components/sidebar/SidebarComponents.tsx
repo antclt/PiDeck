@@ -76,6 +76,7 @@ import {
 	type ManagerArchivedRow,
 } from "../../sessionManagerModel";
 import { remoteArchivedDeleteErrorKey, remoteArchivedDeleteRowPhase } from "../../utils/remoteArchivedDeleteState";
+import { shouldShowWorktreeMenuEntry } from "../../utils/worktreeEntryGate";
 import { useRemoteArchivedSessionDelete } from "../../hooks/useRemoteArchivedSessionDelete";
 
 /**
@@ -804,8 +805,9 @@ export function ProjectContextMenu(props: {
 				<RefreshCw className="size-3.5" aria-hidden="true" />
 				{t("app.projectRefresh")}
 			</DropdownMenuItem>
-			{/* Chat 内置项目没有 Git 工作区概念（存储目录即会话宿主目录），工作区开关无意义；仅普通项目展示 */}
-			{props.menu.project.kind !== "chat" && (
+			{/* Chat 内置项目没有 Git 工作区概念（存储目录即会话宿主目录）；远端项目没有本机 Git 目录。
+			    两者都不展示工作区开关，避免点击后才收到主进程的 UNSUPPORTED_PROJECT_LOCATION。 */}
+			{shouldShowWorktreeMenuEntry(props.menu.project) && (
 				<DropdownMenuItem onSelect={props.onToggleWorktree}>
 					<GitBranch className="size-3.5" aria-hidden="true" />
 					{isWorktreeEnabled ? t("menu.disableWorktree") : t("menu.enableWorktree")}
