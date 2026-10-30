@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 24f8e8c3ab30eb369391c0f78498b4f241c9b91b1d4f86db45cd4e1eea8f1449（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: a338f1e16862e18f7c62da63064783751c75a04a76a868da0699e3c1900856b0（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -6865,7 +6865,6 @@ export const zhTW: Record<TranslationKey, string> = {
 	"remoteGit.repoScopeSingle": "遠端一次只讀一個倉庫：可切換倉庫檢視，不能並排顯示多個倉庫。",
 	"remoteGit.repoNotFound": "該路徑下沒有 Git 倉庫（巢狀倉庫列表可能已過期）。請重新整理後重新選擇。",
 	"remoteGit.back": "返回遠端變更列表",
-	"remoteGit.managedIndex": "支援單個普通文本檔案的暫存／取消暫存、提交已確認的暫存區、新建與切換分支、可恢復的丟棄／刪除（先備份到倉庫內的 refs/pideck/recovery/*）、只讀歷史與引用、兩樹對比，以及 fetch／push／pull。不自動暫存、不支援批次暫存、歷史改寫、amend 或 force。",
 	"remoteGit.committing": "正在提交…",
 	"remoteGit.commitMessage": "提交資訊",
 	"remoteGit.commitPlaceholder": "提交資訊（逐字傳送，不做 Git 註釋剝離）",
@@ -6880,7 +6879,6 @@ export const zhTW: Record<TranslationKey, string> = {
 	"remoteGit.messageEmpty": "提交資訊不能為空，也不能只包含空白字元。",
 	"remoteGit.identityRequired": "遠端倉庫沒有可用的提交身份（user.name／user.email）。請在遠端終端裡為這個倉庫或全域設定身份；PiDeck 不會修改你的 Git 配置。",
 	"remoteGit.headChanged": "遠端 HEAD 在提交前已變化，本次沒有建立提交。請重新整理後核對再重試。",
-	"remoteGit.readOnly": "遠端 Git 支援普通根倉庫及已發現巢狀倉庫的狀態與文本差異、單檔案暫存／取消暫存、提交已確認的暫存區、新建／切換分支、可恢復的丟棄／刪除、只讀歷史與引用、兩樹對比，以及 fetch／push／pull；不支援批次暫存、歷史改寫、worktree 管理或多倉並排，也不自動 fetch。",
 	"remoteGit.loading": "正在讀取遠端 Git…",
 	"remoteGit.merge": "衝突",
 	"remoteGit.index": "已暫存",
@@ -7245,6 +7243,12 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.target.exportLocalOnly": "匯出/匯入只支援本機配置目標：先切回本機再操作",
 	"config.resourceTarget.readOnly": "該資源目標本輪只讀：僅支援檢視列表與提示詞讀取/儲存，切回本機後再編輯技能/擴充套件",
 	"config.resourceTarget.readOnlyHint": "當前顯示的是該 WSL 檔案發行版 HOME 下的資源；技能/擴充套件的寫入與提示詞新建/刪除/重新命名/開關暫只支援本機",
+	"config.resourceTarget.errorTargetInvalid": "資源目標無效，請重新選擇目標",
+	"config.resourceTarget.errorSshUnsupported": "SSH 目標暫不支援資源管理，請改用本機或 WSL 檔案",
+	"config.resourceTarget.errorWriteUnsupported": "該操作暫只支援本機目標：先切回本機再修改技能 / 擴充套件 / 提示詞",
+	"config.resourceTarget.errorHostNotFound": "WSL 檔案不存在或已被移除，請重新選擇目標",
+	"config.resourceTarget.errorDistroUnavailable": "WSL 發行版不可用：確認發行版已啟動後重試",
+	"config.resourceTarget.errorUnavailable": "無法解析該 WSL 檔案的發行版 HOME，本次操作未執行",
 	"config.target.wslUnsupported": "{label} 的這部分配置暫未接入 WSL：本頁只支援 models.json 與 settings.json，切回本機可繼續編輯",
 	"config.windowsOnly.title": "當前僅編輯 Windows 配置",
 	"config.windowsOnly.body": "WSL 發行版配置暫未接入：本頁只讀寫本機（Windows）的{page}，不會改動 WSL 檔案內的內容。",
