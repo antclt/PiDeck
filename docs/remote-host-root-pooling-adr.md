@@ -1,0 +1,249 @@
+# ADR：同主机多项目 root 池化（测量 + 方案）
+
+> 状态：**Proposed（仅测量与设计；本轮不改生产代码）**。工作分支从 dev 187c96041 起，只新增本文与
+> `tests/remoteRootSwitchProbe.mjs`。任何实现都要另行批准，并且必须先合入测量门槛与回滚开关。
+>
+> 相关前置：`docs/remote-functional-optimization-plan.md` F3（切 root 仍重建会话，只复用已验证安装内容）、
+> `docs/remote-phase4-plan.md` B7（`--root` 每连接一个）、`docs/remote-development-plan.md` `7（`root.register`
+> 只是早期规划词，从未实现）、`docs/remote-wsl-functional-hardening-handoff.md` `7.6（本卡来源）。
+
+## 1. 问题与结论摘要
+
+现状是**每台主机只持有一个 helper 会话，root 在 helper 启动时固定**。同主机两个远端项目交替读取时，
+每次换项目都要 `discard` 当前 manager/held → 重新发现 node → bootstrap（F3 命中时 verify-existing，
+通常不 scp）→ 新 SSH + `node helper --root` → hello → root 复核 → 首次读。用户可见后果：换项目/回到
+另一个项目要等一次完整重建；期间同主机所有项目读被串行化；换代后目录 watcher 全部重建、事实缓存换代。
+
+真实主机测量（2026-10-30，5 个交替 cycle，0 失败）支持这个判断：
+
+- 一次 helper-only 切换 cycle（spawn ssh+helper→hello→fs.list→fs.watch→kill）中位 **874 ms**（min 855 /
+  max 1685）；其中 helper 冷启动到 hello 中位 **405 ms**。
+- 产品路径还要加 node 发现（中位 **703 ms**）、bootstrap verify 扫描代理（中位 **342 ms**）、root 复核
+  （中位 **354 ms**）；可观测下界代理 **≈1.81 s/次切换**（不含锁等待、pin/route 构造、bootstrap staging）。
+- 两个 root 的 helper 可以同时存活（各 52.4 MiB RSS、7 线程、各自 SSH 连接，合计 104.9 MiB），说明
+  **按 root 的会话池在进程/协议层可行**，不需要先改 helper 协议。
+- 换代后 watcher 必须重建：5/5 次切换都拿到新 `watchId`；9 条路径一帧耗时中位 4.6 ms，但产品还会
+  重读**全部已加载目录**，成本随已加载目录数线性增长。
+
+**建议**：选 **B（main 侧按 (hostId, root) 的 helper 会话池）**，分阶段落地；不做 A（helper 内
+`root.register` 多 root 协议）作为第一步——A 要改冻结协议/所有 fs+git 方法/安全边界，收益与 B 相同
+但风险高一个数量级。B 的默认容量先 2，空闲 TTL 淘汰，单会话路径保留为降级/回滚。
+
+## 2. 现状路径（源码事实）
+
+### 2.1 一次项目读如何落到一个 root 会话
+
+1. **项目身份解析**：`remoteProjectReadIpc.ts` / `remoteProjectIpc.ts` 用项目 locator 得到
+   `{hostId, remotePath}`，再经 `RemoteProjectTargetResolver` 拿连接服务（`remoteProjectTarget.ts`）。
+2. **每主机操作锁**：`withProjectSession`（`RemoteHostConnectionService.ts:1259`）持有每主机 FIFO 锁，
+   把「切根 + 就绪判定 + 整次操作」包在一个边界里；`operationLock` 定义在同文件 `:336`。
+3. **root 切换**：`establishProjectSession`（`:652`）比较 `workspaceRoots.get(hostId) ?? options.root`
+   与请求 root（`:656`）；不同则 `workspaceRoots.set` + `discard(entry)`（`:659-660`）。
+   `discard`（`:479-490`）清掉 `held/manager` 并**异步 dispose** 旧 manager；旧 manager 的事件/状态回调
+   被 `managerFor`（`:451-476`）用 manager 身份围栏，迟到事件不会影响新会话。
+4. **重建**：`ensureHeld`（`:502-545`）先读 store revision；held 失效后重新 `resolveNode`（`:517`，一次
+   登录 shell 发现）→ `ports.bootstrap`（`:524`，F3 的 verify-existing 分支在
+   `RemoteBootstrapDeployment.ts:144-152`：先 `runBootstrapVerify`，verified 则 `reused:true`、不上传）→
+   `managerFor` + `manager.connect`（`:705-721`）。`manager.connect` 启动新的 pinned SSH 进程，argv 带
+   `--root`（root 来自 `ensureHeld :537` 的 `workspaceRoots`，随 held session 固定）。
+5. **握手与复核**：`SshConnectionAttempt` 的 hello 校验 `result.root === requestedRoot`，不一致是 FATAL
+   `SSH_HELPER_ROOT_MISMATCH`（`SshConnectionAttempt.ts:263-266`）；`establishProjectSession` 在需要重建
+   时先 `verifyProjectRoot`（`:684-704`，`readlink -f` + `[ -d ]`，失败记 per-project
+   `SSH_PROJECT_ROOT_CHANGED` / `SSH_PROJECT_ROOT_UNRESOLVED`）。
+6. **会话身份**：`connectionId = hostId#managerToken#generation`（`:737`）；每次换 root/重连/换 manager
+   都会变。它同时是事实缓存代数（`RemoteFactCache` 的 `generation` 围栏，`RemoteFactCache.ts:155-177`）、
+   目录 watcher 的登记代（`RemoteDirWatchRegistry.ts:130-140`）与渲染层失效依据
+   （`lazyDirTree.ts:285-301` 换代时清树并重读根 + 全部已加载目录）。
+7. **写/终端**：写路径同样经 `withProjectSession`，session 绑定当时代 manager，换代后旧 session 的
+   request 失败关闭（`:770-777`）。终端 PTY 明确**不随 root 切换死亡**（注释 `:764`），但 launch ticket
+   绑定 helper 自己的 canonical root。
+
+### 2.2 重绑/换 root 的其它触发点
+
+- `setWorkspaceRoot`（`:1026-1031`）：设置页确认浏览 root 时直接 `discard`（root 是启动参数，不能热改）。
+- store revision 变化（重绑/禁用/重验）：`ensureHeld` 发现 held revision 不符则 `discard`（`:502-510`）。
+- 显式 `disconnect`/`dispose`：关 manager；`explicitlyDisconnected` 阻止后台读偷偷重连。
+- 会话扫描/配置根：`RemoteSessionScanner` 用 `remoteHomeEnsuring`；它们与项目读共享同一操作锁与
+  workspace base 机制，root 切换同样会重建会话。
+- 测试约束：`tests/remoteHostConnectionService.test.mjs:467` 明确断言「换 workspace base ⇒ 丢弃 held、
+  新 manager 使用新 root」；`remoteProjectReadIsolation` / `remoteProjectRootStatusIsolation` 钉住
+  串根/项目隔离。**池化不能删这些断言**，只能新增池化路径并在同一不变量上扩展。
+
+## 3. 容量与失败模式
+
+### 3.1 容量现状
+
+| 维度 | 现状 | 依据 |
+| --- | --- | --- |
+| 每主机 helper/SSH 会话 | 1 个 held helper + 1 个 manager | `RemoteHostConnectionService.ts:330-336` |
+| root | 每 helper 固定一个；换 root = 换进程 | `SshConnectionManager.ts:20-33`（`SshHelperSession.root`） |
+| 并发请求 | helper 4 in-flight + 64 等待室（每会话） | `RemoteHelperContract.ts` 常量 |
+| 目录 watcher | 每会话 4 watcher × 32 路径 | `RemoteDirWatchRegistry.ts:25` |
+| 事实缓存 | 每项目目录键 + generation 围栏，LRU 512 | `RemoteFactCache.ts:67-93,155-177` |
+| 切换成本 | 见 `4；下界代理 ≈1.81 s | 本次真机测量 |
+
+### 3.2 失败模式（现状与池化后）
+
+- **串行阻塞**：A 的读/切根持锁期间，B 的读排队；一个慢 bootstrap 会放大为整台主机的用户等待。
+- **root 复核失败**：`SSH_PROJECT_ROOT_CHANGED`/`UNRESOLVED` 记到项目而非主机；健康邻居不受影响
+  （设计 (i)，`RemoteHostConnectionService.ts:637-650`、`projectRootStatus :1015-1018`）。
+- **bootstrap/连接失败**：`SSH_HELPER_NOT_BOOTSTRAPPED`、`BOOTSTRAP_*`、`SSH_CONNECTION_TIMEOUT`、
+  `SSH_HOST_NOT_READY`；旧 manager 被丢弃后其迟到事件被 manager 身份围栏拒绝。
+- **断连/重绑**：manager generation 前进；旧 watcher 随旧 helper 死亡，registry 换代不假装退订；
+  事实缓存旧代标脏，渲染层清树重读。
+- **换 root 与写/取消交错**：操作锁保证不交错；但**一个已建立的写 session 在换 root 后失败关闭**，
+  不重放；未确认结果仍按既有 unknown 语义处理。
+- **池化新增风险**：容量/淘汰竞态（正在执行的操作不能被淘汰）、跨 root 串读（路由键必须含 root）、
+  watcher 登记表必须从「按 host」升级为「按 host+sessionKey」、主机级诊断/needs-attention 可能被单
+  root 失败污染（必须继续 per-project 记录）、内存线性增长（N×~52 MiB 远端 + 本机 SSH 进程）。
+
+## 4. 真机测量（可复现）
+
+### 4.1 方法与环境
+
+- 主机：真实 SSH 主机（凭据只经环境变量 `PIDECK_E2E_REMOTE_*` 注入，未写入仓库/日志）；
+  OpenSSH 客户端（Windows），远端 node **v24.11.0**，已部署 bundle 含 7 个文件（helper 1.25.0）。
+- 脚本：`tests/remoteRootSwitchProbe.mjs`（非 `*.test.mjs`，不参与默认单测；输出 JSON + 退出码）。
+- 夹具：两个临时项目根 A/B（9 文件/8 深目录），交替 **A→B→A→B→A（5 cycles）**；每 cycle spawn
+  `ssh -T <node> <bundle>/helper.mjs --root <root>` → hello → `fs.list(".")` → `fs.watch(9 paths)` →
+  `fs.unwatch` → kill；另有 3 次 primitives 采样与一次双 helper 共存采样。所有临时目录结束后删除。
+- 运行方式：仓库根 `node tests/remoteRootSwitchProbe.mjs`；本轮通过临时 PowerShell wrapper 在子进程
+  注入同一组环境变量运行（wrapper 不在仓库内）。测量时间 2026-10-30。
+
+### 4.2 数字（同一轮、中位/最小/最大，单位 ms）
+
+| 指标 | 中位 | min | max | 说明 |
+| --- | ---: | ---: | ---: | --- |
+| SSH 短命令（建连+RTT） | 342.37 | 325.72 | 356.37 | 每次 node 发现/root 复核/bundle 扫描都各含一次 |
+| node 发现（登录 shell PATH） | 702.76 | 682.64 | 705.46 | `resolveNode` 的远端部分 |
+| root 复核（A，readlink+[ -d ]） | 353.85 | 352.33 | 356.62 | `verifyProjectRoot` 的一次 pinned 探测 |
+| root 复核（B） | 353.71 | 334.58 | 356.41 | 同上 |
+| bundle verify 扫描代理 | 341.93 | 340.97 | 372.25 | `sha256sum` 已部署 7 文件；真实 verify 还有 staging 帧 |
+| helper 冷启动→hello（切换 cycle） | 405.30 | 390.17 | 1217.29 | 新 SSH + node helper + 握手；max 是一次异常慢启动 |
+| hello→首次 fs.list | 4.21 | 3.97 | 6.67 | 根层第一次读 |
+| fs.watch（9 路径） | 4.61 | 4.22 | 4.90 | 换代后一次订阅 |
+| 完整 cycle（spawn→kill 结束） | 874.20 | 854.72 | 1685.44 | 不含 node 发现/bootstrap/root 复核 |
+| kill（stdin EOF→进程退出） | 21.78 | 19.94 | 22.36 | 清理成本 |
+| **产品切换下界代理** | **1812.66** | — | — | node 发现 + root 复核 + bundle 扫描 + helper 启动 + 首读 + watch 之和 |
+
+辅助计数：5 次 helper 启动 / 0 次 helper 失败 / 5 个不同 `watchId`（每次换代必然重建）/ 9 条路径一帧 /
+约 27 条 SSH 命令（含采样与共存检查）。冷启动单列：start→hello 469.98、hello→list 21.77、整 cycle 957.76。
+
+容量：单 helper **53,686 KB RSS（≈52.4 MiB）/ 7 线程**；两个 root 的 helper 同时存活时
+53,672 + 53,700 KB = **107,372 KB（≈104.9 MiB）**，各自独立 SSH 连接（进程级可行性证据）。
+失败码：非法 `--root` → `ROOT_INVALID` + 退出码 1；删掉 root 后同一复核命令退出码 5（存在 root 为 0），
+产品把它记为 `SSH_PROJECT_ROOT_UNRESOLVED`（源码事实）。
+
+### 4.3 能得出的结论
+
+1. 一次冷切换的主要成本是**两个固定整包**：node 发现 + bootstrap/连接建立（约 1.0–1.1 s）与新的
+   SSH+helper 启动（约 0.4 s），root 复核与首读都很小。池化命中热会话可以把这三项都省掉。
+2. watcher 重建本身一帧很便宜（~5 ms/9 路径），但产品换代会对**全部已加载目录**重读（每个目录一次
+   `fs.list`，本机 RTT 约 4–7 ms；100 ms RTT 链路上约 100 ms/目录，推断未实测），因此池化要尽量
+   **避免换 root 引起的换代**，而不是只优化 watch 帧。
+3. 两个 helper 共存的内存代价约 105 MiB（N=2）；N 增大按 N 线性（未测 N>2）。
+
+### 4.4 未测量（原因）与补测步骤
+
+| 未测量项 | 原因 | 补测步骤 |
+| --- | --- | --- |
+| 产品 service 级切换耗时（含 operation lock 排队、pin/route 构造、bootstrap staging、dispose） | 需要可注入真实 SSH 的 pinned host fixture；现有 e2e 只能经 Electron，本轮明确不跑 Electron/不影响 verifier | 在 `tests/` 增加一个使用真实 launcher + 临时 userData/pin fixture 的 probe（参考 `e2e/remote-fixtures.ts` 的 env 口径，但不启动 Electron）；对 `withProjectSession` A/B 交替 50 次记录 p50/p95；不修改生产代码 |
+| 换代后 N 个已加载目录的重读 + 4×32 分片 rewatch | 探针只按 9 路径一帧代理；渲染层未运行 | 在 probe 中读 N 个目录（10/20/40）并记录 `Σ fs.list` 与 watch 帧数；或用真实 app 日志统计 |
+| 真实 failure codes（root drift、SSH 断链、rebind、取消交错） | 不能为了测量破坏主机/项目数据；本轮只做了只读失败注入（非法 root/删除临时 root） | 用临时 root 与临时 host profile 注入：删目录、改名、断连、store revision bump；记录 `SSH_PROJECT_ROOT_*`/`SSH_HOST_NOT_READY`/`REQUEST_CANCELLED` 的 p50 与计数 |
+| N>2 的内存/连接数、长活 TTL 行为 | 成本与主机资源限制；本轮只做 N=2 共存采样 | 池化实现后做 N=1..4 soak（每 root 1000 次读，记录 RSS/线程/SSH 连接数） |
+| 渲染层用户感知延迟（tree 重读、内容搜索暂停） | 禁止 Electron/E2E | verifier 在池化实现后用现有 e2e 加计时断言；本轮只给源码路径 |
+| macOS / WSL 主机 | 无环境 | 同 WSL smoke 步骤由 verifier 补；macOS 不声称已验证 |
+
+## 5. 池化方案
+
+### 5.1 备选
+
+- **A：helper 多 root（`root.register`）**。一个 helper 进程注册多个 canonical root，帧带 root 标识。
+  优点：每主机一个 SSH/进程；缺点：改冻结协议与**所有** fs/git/config/terminal 方法的路径边界、capability
+  与 sha/manifest 全变；4×32 watcher、4+64 并发、8 MiB 帧、取消/超时在多个 root 间共享，一个 root 的
+  长扫描会队头阻塞另一个；安全评审面显著扩大。**不推荐作为第一步**。
+- **B：main 侧按 (hostId, root) 的 helper 会话池（推荐）**。保留现有 helper 协议与单 root 冻结体；
+  main 维护多个 manager，每个对应一个 `(host, root)`；读按项目 root 路由到池条目；未命中时创建（沿用
+  `ensureHeld`/`bootstrap`/`connect`），命中时直接复用（零 bootstrap、零新 SSH、零 node 发现）。
+  代价：N×~52 MiB 远端 + N 个 SSH 客户端；需要淘汰、路由键与锁粒度改造。
+- **C：只复用 SSH 连接（ControlMaster/共享传输）**。严格 pinned argv 显式 `controlmaster false`，
+  且每个写命令要重新构造 pin/route；共享 master 会削弱「每次调用都重新证明 route」的既有证据。**不做**。
+
+### 5.2 选定方案 B 的形状
+
+    RootSessionPool
+      key: <hostId> | canonicalRoot        // canonical root 来自项目 locator + verifyRoot
+      entry: { manager, held, root, revision, connectionId, lastUsedAt, state, inflight }
+      容量: maxEntries 默认 2（可 1..4，设置项/实验开关），LRU by lastUsedAt
+      淘汰: 空闲 TTL 默认 10 min；显式 disconnect/rebind/disable/store-revision 变化 ⇒ 全部淘汰
+            正在执行的操作（inflight>0）不可淘汰；达到容量且全部 busy ⇒ 排队/明确降级，不静默串根
+
+- **获取（acquire）**：以 `(host, root)` 为键的 per-key 锁（替代/扩展当前 per-host 锁）。命中且
+  `state=ready` ⇒ 直接返回 session（只做 generation/route 快速复核，不 probe、不 bootstrap）。未命中 ⇒
+  在 per-key 锁内 `verifyProjectRoot` → `ensureHeld`（held 可按 host 共享 node 发现/已部署事实）→
+  `manager.connect` → 放入池。**同一 host 不同 root 的 acquire 可以并行**；同 root 并发合并。
+- **路由**：`RemoteProjectSession.connectionId` 继续作为事实/渲染层代数（每 root 不同）；session 的
+  `request/cancel/runCommand` 绑定到池条目的 manager。旧 session 在条目被淘汰后失败关闭
+  （`SSH_HOST_NOT_READY`），调用方可重新 acquire（读可重试、写不重放）。
+- **锁粒度**：把现在的 `operationLock`（per-host）改为 **per-(host,root)**；跨 root 共享的资源（store
+  revision 读、node 发现、bootstrap）用更短锁或按 host 的轻量锁保护，避免 A 的 bootstrap 阻塞 B 的已
+  就绪读。Host 级诊断/needs-attention 不被单 root 失败驱动（继续 per-project rootFailures）。
+- **watcher 关系**：`RemoteDirWatchRegistry` 从「host → 一代」升级为「host → sessionKey → 一代」；
+  换代只清对应 root 的登记。每 helper 仍有 4×32，因此两个项目各用自己的预算，不再互相占满。
+- **facts 关系**：`RemoteFactCache` 的 generation 已是 `connectionId`，天然按 root 隔离；`projectGenerations`
+  继续 per-project；`lazyDirTree` 只在**同一项目**的 generation 变化时重载，不因另一个项目切 root 而清树。
+- **淘汰/清理**：manager.dispose（async）→ helper 随 stdin EOF 退出；watcher 随会话死亡（registry 换代
+  不假装退订）；待处理请求失败关闭；terminal PTY 不受影响（既有语义）；池表本身 LRU + TTL 有界。
+- **安全**：每条目仍由 `verifyProjectRoot` + hello root equality 证明边界；不能因为「池里有旧 verify」
+  跳过 root 复核（root 可在会话存活期间被替换）；ticket/route/revision 校验不跳过；root 仍是 session
+  的启动参数，不是帧内过滤器。
+
+### 5.3 迁移步骤（每步独立可回滚）
+
+1. **B0 测量基线**：把本 ADR 的 probe 纳入 `tests/` 文档流程（非默认单测）；补 `4.4 中 service 级与
+   N 目录测量；定义门槛（热命中目标 < 50 ms；N=2 远端常驻 ≤ ~120 MiB；无跨 root 读/串根）。
+2. **B1 影子池（默认关闭）**：新增 `RemoteRootSessionPool`（main 私有），先用 feature flag/构造参数
+   启用；现有单会话路径保留为默认。加指标：acquire hit/miss、创建次数、淘汰次数、每 root 的
+   operation 等待时间、SSH/节点发现次数。**不改协议、不改持久化/存储**。
+3. **B2 路由与锁**：`withProjectSession` 改为 pool-backed；per-(host,root) 锁；同 root 合并；旧单会话
+   行为在 flag=off 时逐字节保持。回归：现有 `remoteHostConnectionService`/`remoteProjectReadIsolation`/
+   `remoteProjectRootStatusIsolation` 全绿（不改断言，新增池化路径测试）。
+4. **B3 watcher/facts**：registry 键升级到 host+sessionKey；`RemoteDeepDirWatch` 按项目 session 登记；
+   渲染层无需改（generation 已是 per-project）。回归 `remoteDirWatch*`、`remoteFact*`、`lazyDirTree`。
+5. **B4 默认开启**：flag 默认 on，容量/TTL 设置项与诊断（池条目、命中率、内存/连接数）；真实主机
+   e2e A/B 交替 + 目录展开计时；不满足门槛则回退 flag。
+6. **B5（可选）**：若 B 的 SSH/进程开销仍不可接受，再评估 A（helper 多 root）或 Node/runner 共用传输；
+   不在 B 落地前启动。
+
+### 5.4 回滚
+
+- 代码回滚：每次提交独立；B1/B2/B3 都保留 flag=off 的单会话路径，回滚只需 flag=off（或 revert 对应
+  提交），无数据迁移、无 schema 变化。
+- 运行期回滚：关闭池后立即 dispose 所有额外条目，保留当前活跃条目迁移为单会话（或直接断开让用户重连，
+  与今天切 root 语义一致）；watcher/facts 随之换代，不残留跨代登记。
+- 观测回滚：指标发现异常（内存增长、命中率低、root 复核失败率升高）自动降级 flag 并记录稳定码。
+
+## 6. 验证矩阵
+
+| 层 | 用例 | 断言 |
+| --- | --- | --- |
+| 单元 | acquire 命中/未命中/同 key 并发合并 | 命中 0 次 bootstrap/0 次 SSH；并发只建 1 个条目 |
+| 单元 | 容量 2 + 第 3 个 root | 先淘汰 idle LRU；全部 busy 时明确降级（不串根、不静默等待） |
+| 单元 | TTL 淘汰 / 显式 disconnect / store revision 变化 | 条目 dispose、旧 session 请求失败关闭、无残留 watcher |
+| 行为 | A/B 两项目交替读（真实或 fake 端口） | 结果只来自各自 root；A 慢读不阻塞 B 的已就绪读 |
+| 行为 | 切 root 后旧 session 写/读 | 失败稳定码，不重放；新 acquire 成功 |
+| watcher | 两个 root 各自 fs.watch | 登记按 sessionKey 隔离；旧 watchId 事件不影响新 root |
+| facts | generation 变化 | 仅该项目缓存换代；兄弟项目不丢树/不重读 |
+| 失败注入 | root drift、SSH 断链、rebind、cancel | 稳定码按项目记录；host 不被单 root 拖入 needs-attention |
+| 资源 | N=1..4 soak（1000 次读/root） | RSS/线程/SSH 连接数有界；TTL 后回落 |
+| 真机 | A/B 交替 50 次 | p50/p95 切换延迟、命中率、bootstrap 次数、失败码计数达标 |
+| 既有回归 | `remoteHostConnectionService`、`remoteProjectReadIsolation`、`remoteProjectRootStatusIsolation`、`remoteDirWatch*`、`remoteProjectIpc` | 全绿，原断言不改 |
+
+## 7. 决定
+
+- **接受 B 作为方向，但本轮不实现**：先补 `4.4 的 service 级/N 目录/失败注入测量与门槛；B0/B1 需要
+  单独批准。
+- **拒绝 A 作为第一步**：多 root 助手协议改动过大，且 watcher/并发预算共享会引入新的队头阻塞；若 B
+  的进程/内存成本不可接受，再单独立项评估 A。
+- **拒绝 C**：共享 SSH 传输会削弱 pin/route 的逐次证明语义。
+- 在 B 实现前，现行单会话路径保持不动；本文与 probe 只提供测量方法与设计，不改变任何生产行为。
