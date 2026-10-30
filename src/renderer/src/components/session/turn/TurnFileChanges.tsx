@@ -2,6 +2,7 @@ import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, FileText } from "lucide-react";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "../../ui-shadcn/context-menu";
 import { collectRunFileChanges, fileChangeDelta } from "../TimelineFormat";
+import { hasFileChangePayload } from "../../../../../shared/fileChanges";
 import type { AgentRunItem } from "../timeline/types";
 import type { DiffFileHandler } from "../ToolCallComponents";
 import { getFileIconColor, getFileIconSeti } from "../../../fileIcons";
@@ -198,10 +199,13 @@ export const TurnFileChanges = memo(function TurnFileChanges(props: {
 const FileChangeChip = memo(function FileChangeChip(props: { entry: FileEntry; onOpenFile?: (path: string, line?: number) => void; onDiffFile?: DiffFileHandler; noInteract?: boolean }) {
 	const { entry } = props;
 	const fileName = entry.path.split(/[/\\]/).pop() || entry.path;
-	const delta = useMemo(() => fileChangeDelta(entry), [entry]);
+	// ACP 的编辑工具可能只上报路径（wire 上没有旧/新文本）：文件照样进清单，
+	// 但没有增删行数可算，也没有 diff 可打开——左键退回打开文件本体。
+	const hasPayload = hasFileChangePayload(entry);
+	const delta = useMemo(() => (hasPayload ? fileChangeDelta(entry) : null), [entry, hasPayload]);
 	// 主操作是 diff（默认意图：看这轮改了什么）；两个入口各自判可用性，
 	// 只接了 onOpenFile 的宿主面（onDiffFile 缺省）左键退回打开文件本体。
-	const canDiff = !props.noInteract && Boolean(props.onDiffFile);
+	const canDiff = !props.noInteract && Boolean(props.onDiffFile) && hasPayload;
 	const canOpen = !props.noInteract && Boolean(props.onOpenFile);
 	const handleOpenDiff = () => props.onDiffFile?.(entry.path, entry.originalContent, entry.content);
 	const handleOpenFile = () => props.onOpenFile?.(entry.path);
@@ -223,10 +227,12 @@ const FileChangeChip = memo(function FileChangeChip(props: { entry: FileEntry; o
 			<span className="min-w-0 truncate">{fileName}</span>
 			{/* 同文件本轮被改多次：次数跟在文件名后，避免误以为只有一次编辑 */}
 			{entry.count > 1 && <span className="shrink-0 text-micro font-normal tabular-nums opacity-55">×{entry.count}</span>}
-			<span className="shrink-0 text-micro font-semibold tabular-nums">
-				<span className="text-success">+{delta.added}</span>
-				{delta.removed > 0 && <span className="ml-1 text-danger">−{delta.removed}</span>}
-			</span>
+			{delta && (
+				<span className="shrink-0 text-micro font-semibold tabular-nums">
+					<span className="text-success">+{delta.added}</span>
+					{delta.removed > 0 && <span className="ml-1 text-danger">−{delta.removed}</span>}
+				</span>
+			)}
 		</button>
 	);
 

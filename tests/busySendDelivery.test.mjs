@@ -23,6 +23,18 @@ describe("parseBusySendDelivery", () => {
 	});
 });
 
+test("接线契约：忙碌排队判定必须先于发送锁（ACP 整回合 IPC 期间也能入队）", () => {
+	// ACP 的 sessions.sendPrompt 要等 session/prompt 返回才 resolve：整个回合里
+	// sendingSessionIdsRef / sendState=sending 恒为真。锁若先返回，回合中第二次发送被
+	// 静默丢弃——不排队、无提示（用户只能等回合结束再重发）。
+	const source = readFileSync("src/renderer/src/hooks/useSessionSend.ts", "utf8");
+	assert.match(source, /const queueingWhileBusy = Boolean\(options\.enqueue && \(streamingBehavior === "steer" \|\| streamingBehavior === "followUp"\)\);/, "排队判定必须是独立变量（供守卫与后续分支共用）");
+	assert.match(source, /if \(!queueingWhileBusy && \(sendLockHeldBeforeCall \|\| existingSend\?\.status === "activating" \|\| existingSend\?\.status === "sending"\)\) return;/, "锁只在非排队路径生效");
+	// 锁的释放必须尊重所有权：排队路径不能替「别人持有的锁」解锁
+	assert.match(source, /if \(!sendLockHeldBeforeCall\) sendingSessionIdsRef\.current\.delete\(sourceSessionId\);/, "释放锁要判断本次调用是否真的持锁");
+	assert.match(source, /const usesLocalQueue = queueingWhileBusy;/, "队列分支复用同一判定，避免两处漂移");
+});
+
 describe("resolveBusySendDelivery", () => {
 	test("空闲时返回 undefined：直发，不带队列语义", () => {
 		assert.equal(resolveBusySendDelivery(false, "followUp"), undefined);

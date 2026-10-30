@@ -6,8 +6,10 @@
  * 1. spawn 选项：`stdio: ["pipe","pipe","pipe"]`、`shell` 来自 plan、Unix 上 `detached: true`
  *    （pi 成为进程组组长，停止时才能用 `-pid` 对整组兜底）、`windowsHide: true`（PiDeck 是无控制台
  *    的 GUI 进程）、`windowsVerbatimArguments` 原样透传（Windows npm shim 含空格时靠它）。
- * 2. 停止顺序（Windows）：先 `taskkill /T /F` 整树、再 `kill()` 根进程——pi 的子代理是 pi 自己
- *    spawn 的独立进程，只杀根会把它们留成孤儿继续烧 token；`/T` 需要根进程存活才能枚举整棵树。
+ * 2. 停止顺序（Windows）：先关 stdin 让 pi 走 RPC 约定的有序退出（它会关闭 MCP transport、
+ *    清理自己 spawn 的子进程），宽限期到仍未退出再 `taskkill /T /F` 整树 + `kill()` 根进程。
+ *    Windows 的 `kill()` 等价 TerminateProcess，直接强杀会让 pi 来不及清理，留下 npx 型
+ *    MCP 孤儿（issue #450）；`/T` 也需要根进程存活才能枚举整棵树。
  * 3. 停止顺序（Unix）：先 `SIGTERM`（保持 pi 的优雅退出语义），再延迟对 `-pid` 补 `SIGKILL`
  *    （清理 pi 退出后残留的子代理）。计时器 `unref`，不阻止进程退出。
  * 4. spawn 失败只发 `error` 不发 `exit`：这类失败必须能被调用方认出来（`pid === undefined`），
@@ -21,6 +23,14 @@ import type { LocalPiRuntimeLaunchPlan, PiRuntimeExit, PiRuntimeLauncher, PiSpaw
 /** Unix 上给进程组补 SIGKILL 的延迟：与抽取前 `PiProcess.stop()` 的 3s 逐字一致。 */
 export const LOCAL_PI_GROUP_KILL_DELAY_MS = 3_000;
 
+/**
+ * Windows 关闭 stdin 后等待 pi 有序退出的宽限。
+ *
+ * 必须短于删除会话前的 3s 退出等待（issue #364）：宽限到点就整树强杀，pi 在这之后
+ * 立刻退出，删除流程仍能在预算内拿到写句柄。
+ */
+export const WINDOWS_PI_GRACEFUL_EXIT_MS = 1_500;
+
 export type LocalPiRuntimeLauncherOptions = {
 	/** 可注入（测试）：默认 `node:child_process.spawn`。 */
 	readonly spawn?: typeof nodeSpawn;
@@ -28,6 +38,8 @@ export type LocalPiRuntimeLauncherOptions = {
 	readonly killTree?: (pid: number) => void;
 	readonly platform?: NodeJS.Platform;
 	readonly groupKillDelayMs?: number;
+	/** 可注入（测试）：Windows 关闭 stdin 后的优雅退出宽限。 */
+	readonly gracefulExitMs?: number;
 	/** 可注入（测试）：默认 `setTimeout` + `unref`。 */
 	readonly schedule?: (task: () => void, delayMs: number) => void;
 	/** 可注入（测试）：Unix 上对进程组补的 `SIGKILL`（默认 `process.kill(-pid, "SIGKILL")`，ESRCH 忽略）。 */
@@ -71,7 +83,10 @@ function assertLaunchPlan(plan: unknown): asserts plan is LocalPiRuntimeLaunchPl
  * `launch()` 返回之前，晚挂就会丢掉那次事件——抽取前 `PiProcess` 正是在 spawn 之后立即绑定，
  * 这里保持同样的时序。已结算的事件对**之后**注册的监听器重放一次，保证不丢。
  */
-function createLocalHandle(child: ChildProcessWithoutNullStreams, options: { readonly killTree: (pid: number) => void; readonly platform: NodeJS.Platform; readonly schedule: (task: () => void, delayMs: number) => void; readonly groupKillDelayMs: number; readonly groupKill: (pid: number) => void }): PiSpawnHandle {
+function createLocalHandle(
+	child: ChildProcessWithoutNullStreams,
+	options: { readonly killTree: (pid: number) => void; readonly platform: NodeJS.Platform; readonly schedule: (task: () => void, delayMs: number) => void; readonly groupKillDelayMs: number; readonly gracefulExitMs: number; readonly groupKill: (pid: number) => void },
+): PiSpawnHandle {
 	type ExitListener = (exit: PiRuntimeExit) => void;
 	type ErrorListener = (error: Error) => void;
 	// 用 EventEmitter 而不是自建集合：与 Node 的 child 一致地处理"先结算后注册"的重放语义。
@@ -134,10 +149,30 @@ function createLocalHandle(child: ChildProcessWithoutNullStreams, options: { rea
 			const pid = child.pid;
 			if (!stopIssued) {
 				stopIssued = true;
-				if (pid !== undefined && options.platform === "win32") options.killTree(pid);
-				child.kill();
-				if (pid !== undefined && options.platform !== "win32") {
-					options.schedule(() => options.groupKill(pid), options.groupKillDelayMs);
+				if (options.platform === "win32") {
+					// 先关 stdin（pi RPC 约定的有序停止）：pi 会关闭 MCP transport、清理自己 spawn 的
+					// 子进程后再退出。宽限期到仍未退出才整树强杀——直接 kill 会跳过 pi 的清理，
+					// 留下 npx 型 MCP 孤儿（issue #450）。
+					try {
+						child.stdin.end();
+					} catch {
+						/* 管道已关闭：照常等宽限/强杀 */
+					}
+					options.schedule(() => {
+						// 已退出就不能再按 pid 补刀：Windows 会复用 PID，误杀无关进程。
+						if (exited) return;
+						if (pid !== undefined) options.killTree(pid);
+						try {
+							child.kill();
+						} catch {
+							/* 已退出 */
+						}
+					}, options.gracefulExitMs);
+				} else {
+					child.kill();
+					if (pid !== undefined) {
+						options.schedule(() => options.groupKill(pid), options.groupKillDelayMs);
+					}
 				}
 			}
 			if (exited) return;
@@ -158,6 +193,7 @@ export class LocalPiRuntimeLauncher implements PiRuntimeLauncher {
 	 *  测试会在加载后改沙箱里的 platform）。 */
 	private readonly platformOverride: NodeJS.Platform | undefined;
 	private readonly groupKillDelayMs: number;
+	private readonly gracefulExitMs: number;
 	private readonly schedule: (task: () => void, delayMs: number) => void;
 	private readonly groupKill: (pid: number) => void;
 
@@ -166,6 +202,7 @@ export class LocalPiRuntimeLauncher implements PiRuntimeLauncher {
 		this.killTree = options.killTree ?? ((pid) => killProcessTree(pid));
 		this.platformOverride = options.platform;
 		this.groupKillDelayMs = options.groupKillDelayMs ?? LOCAL_PI_GROUP_KILL_DELAY_MS;
+		this.gracefulExitMs = options.gracefulExitMs ?? WINDOWS_PI_GRACEFUL_EXIT_MS;
 		this.schedule = options.schedule ?? defaultSchedule;
 		this.groupKill = options.groupKill ?? defaultGroupKill;
 	}
@@ -188,6 +225,7 @@ export class LocalPiRuntimeLauncher implements PiRuntimeLauncher {
 			platform,
 			schedule: this.schedule,
 			groupKillDelayMs: this.groupKillDelayMs,
+			gracefulExitMs: this.gracefulExitMs,
 			groupKill: this.groupKill,
 		});
 	}

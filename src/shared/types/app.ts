@@ -362,12 +362,24 @@ export type AppUpdateDownloadState = {
  */
 export type UpdateChannel = "stable" | "dev";
 
+/**
+ * 二进制是谁构建的（与 UpdateChannel 正交：通道 = 跟踪哪条发布线，来源 = 这个包从哪来）。
+ * 编译期由 __PIDECK_RELEASE_BUILD__ + 打包态决定（见 main/buildIdentity.ts）。
+ */
+export type AppBuildOrigin = "release" | "local-package" | "dev-run";
+
 /** 当前更新通道与应用版本（update:get-channel 返回，通道相关下载源选择用）。 */
 export interface UpdateChannelInfo {
 	channel: UpdateChannel;
 	currentVersion: string;
 	/** 开发构建（未打包 npm run dev 或 dev 通道安装包）：仅用于呈现当前构建身份，不再作为功能入口门控。 */
 	devBuild: boolean;
+	/**
+	 * 构建来源：release = CI 发布流水线产物；local-package = 本机打包（pack:dev / pack / dist:* 直跑）；
+	 * dev-run = 未打包运行。渲染层据此给「本地构建」徽章与版本号说明——本机包的版本号抄
+	 * package.json，与发布版同号，不标出来会被误认为官方发布版。
+	 */
+	buildOrigin: AppBuildOrigin;
 }
 
 /** 跨通道切换的目标发布（GitHub Release 经 selectTargetRelease 归一化后的形状）。 */

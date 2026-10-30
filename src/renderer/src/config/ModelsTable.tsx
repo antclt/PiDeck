@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Brain, Coins, Eye, EyeOff, Fingerprint, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { t } from "../i18n";
 import { MODEL_THINKING_LEVELS, enabledModelThinkingLevels, formatModelThinkingLevelsSummary, modelThinkingLevelState, orderModelThinkingLevels } from "../../../shared/modelThinkingLevels";
@@ -7,6 +7,7 @@ import type { ModelItem } from "./configTypes";
 import { ConfigComboboxInput, ConfigSelect, openDocsInSystemBrowser } from "./ConfigShared";
 import { getUserAgentOptions } from "./userAgentPresets";
 import { emptyTierDraft, normalizeTiers, toTierDrafts, type CostTierDraft } from "./modelCostTiers";
+import { MODEL_TABLE_INITIAL_VISIBLE_ROWS, MODEL_TABLE_LOAD_MORE_STEP, resolveModelTableVisibleRowCount } from "./modelsUtils";
 import { countSelectedModelIndexes, getModelSelectionState } from "./modelBatchSelection";
 import { Button } from "../components/ui-shadcn/button";
 import { Checkbox } from "../components/ui-shadcn/checkbox";
@@ -111,6 +112,26 @@ export function ModelsTable(props: ModelsTableProps) {
 	const [tierEditor, setTierEditor] = useState<{ key: string; drafts: CostTierDraft[] } | null>(null);
 	const selectionState = getModelSelectionState(selectedIndexes ?? new Set<number>(), models.length);
 
+	// 渐进渲染窗口（前缀切片）：行 index 与原数组一一对应，批量选择/删除/移动等 index 定位行为不变。
+	// 聚焦目标行（手动新增行在表尾）落在窗口外时派生扩窗；随后把扩窗写回 state，
+	// 聚焦键被 onFocusHandled 清掉后新行不会随窗口回落而消失。
+	const [visibleWindow, setVisibleWindow] = useState(MODEL_TABLE_INITIAL_VISIBLE_ROWS);
+	let focusRowIndex = -1;
+	if (props.focusModelKey) {
+		for (let i = 0; i < models.length; i++) {
+			if (getRowKey(i) === props.focusModelKey) {
+				focusRowIndex = i;
+				break;
+			}
+		}
+	}
+	const visibleRowCount = resolveModelTableVisibleRowCount(models.length, visibleWindow, focusRowIndex);
+	const visibleModels = models.slice(0, visibleRowCount);
+	useEffect(() => {
+		if (focusRowIndex >= visibleWindow) setVisibleWindow(focusRowIndex + 1);
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- 只跟随聚焦目标变化，models 每次渲染都是新引用
+	}, [focusRowIndex, visibleWindow]);
+
 	useEffect(() => {
 		if (costDialogIndex == null) {
 			setTierEditor(null);
@@ -172,7 +193,7 @@ export function ModelsTable(props: ModelsTableProps) {
 					</TableRow>
 				</TableHeader>
 				<TableBody>
-					{models.map((m, i) => {
+					{visibleModels.map((m, i) => {
 						const rowKey = getRowKey(i);
 						const updateCost = (field: "input" | "output" | "cacheRead" | "cacheWrite", rawValue: string) => {
 							const nextCost = { ...(m.cost ?? {}) };
@@ -228,8 +249,8 @@ export function ModelsTable(props: ModelsTableProps) {
 						// 逐模型 UA 覆盖值（空串 = 继承供应商级 UA）：操作列按钮据此判断是否已配置，弹框用它做初值
 						const userAgentOverride = hasUserAgentOverride ? props.getModelUserAgentOverride!(i) : "";
 						return (
-							<>
-								<TableRow key={rowKey} className="align-middle" data-state={batchMode && selectedIndexes?.has(i) ? "selected" : undefined}>
+							<Fragment key={rowKey}>
+								<TableRow className="align-middle" data-state={batchMode && selectedIndexes?.has(i) ? "selected" : undefined}>
 									{batchMode && (
 										<TableCell className="w-10 p-2 text-center">
 											<Label className="inline-flex size-7 cursor-pointer items-center justify-center rounded-md hover:bg-bg-hover">
@@ -520,13 +541,13 @@ export function ModelsTable(props: ModelsTableProps) {
 										</DialogFooter>
 									</DialogContent>
 								</Dialog>
-							</>
+							</Fragment>
 						);
 					})}
 					{models.length === 0 && (
 						<TableRow className="hover:bg-transparent">
 							{/* 空表提示跨全部列：非批量 7 列（ID/名称/上下文/最大Token/思考级别/能力/操作），批量再 +1。
-							    加列/删列时必须同步这里，否则空表提示跨不满整行。 */}
+						    加列/删列时必须同步这里，否则空表提示跨不满整行。 */}
 							<TableCell colSpan={batchMode ? 8 : 7} className="py-5 text-center text-xs text-text-tertiary">
 								{t("config.emptyModels")}
 							</TableCell>
@@ -534,6 +555,16 @@ export function ModelsTable(props: ModelsTableProps) {
 					)}
 				</TableBody>
 			</Table>
+			{models.length > visibleRowCount && (
+				<div className="flex items-center justify-center gap-2 border-t border-border-subtle px-3 py-2">
+					<Button variant="outline" size="sm" onClick={() => setVisibleWindow(visibleRowCount + MODEL_TABLE_LOAD_MORE_STEP)}>
+						{t("config.modelsTable.loadMore", { shown: visibleRowCount, total: models.length })}
+					</Button>
+					<Button variant="ghost" size="sm" onClick={() => setVisibleWindow(models.length)}>
+						{t("config.modelsTable.showAll", { count: models.length })}
+					</Button>
+				</div>
+			)}
 		</div>
 	);
 }

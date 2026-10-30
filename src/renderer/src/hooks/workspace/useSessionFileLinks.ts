@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { t } from "../../i18n";
 import { resolveFileLinkPath, isFilePathInsideRoot } from "../../utils/filePathLinks";
+import { getRendererHomeDir } from "../../utils/rendererHomeDir";
 import type { SessionFileOpenContext } from "../../components/session/SessionPaneServices";
 import { useSessionFilePathOpener } from "../useSessionFilePathOpener";
 import { useExternalPathOpenGate } from "../useExternalPathOpenGate";
@@ -57,7 +58,9 @@ export function useSessionFileLinks({ activeAgent, activeProject, projects, curr
 				showToast(t("app.fileLinkCannotResolve", { path }));
 				return;
 			}
-			const resolved = resolveFileLinkPath(path, baseDir, projectRoot);
+			// `~` 先按家目录展开（issue #426）：不展开的话 `~/x` 在有 projectRoot 的会话里
+			// 会被一致地判成「项目外」，多一次无意义的安全确认且右键菜单拿不到真路径。
+			const resolved = resolveFileLinkPath(path, baseDir, projectRoot, getRendererHomeDir());
 			// 相对路径无基准目录、`..` 逃逸或绝对路径落在项目外都会返回 null。
 			// 主进程读取时还会按 projectId 对真实路径做第二次边界校验。
 			if (resolved) {
@@ -68,7 +71,7 @@ export function useSessionFileLinks({ activeAgent, activeProject, projects, curr
 			// 仍是原来的提示；解析出来就交给安全等级门——等级不限目录（默认）直接只读打开，
 			// 敏感文件或限定目录的等级弹框二次确认，denyDirs 直接拒绝。
 			// 只读 + 不带 scope：用户确认一次「看」不应变成可写任意路径。
-			const externalPath = resolveFileLinkPath(path, baseDir);
+			const externalPath = resolveFileLinkPath(path, baseDir, undefined, getRendererHomeDir());
 			if (!externalPath) {
 				showToast(t("app.fileLinkCannotResolve", { path }));
 				return;

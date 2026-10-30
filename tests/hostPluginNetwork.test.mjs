@@ -307,7 +307,7 @@ test("view teardown aborts network even when the guest has already been destroye
 			},
 		};
 		const { HostPluginViewHost } = loadTsCommonJs("src/main/plugins/HostPluginViewHost.ts", { stubs: { electron: { session: { fromPartition: () => isolated } } } });
-		const host = new HostPluginViewHost(manager, broker, {}, "unused-preload");
+		const host = new HostPluginViewHost(manager, broker, { describe: (context) => context }, "unused-preload");
 		let destroyed = false;
 		const guest = Object.assign(new EventEmitter(), {
 			id: 10,

@@ -1,5 +1,5 @@
 import { app } from "electron";
-import { existsSync, type Dirent } from "node:fs";
+import { existsSync, readdirSync, type Dirent } from "node:fs";
 import { cp, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
@@ -8,6 +8,7 @@ import { trashPath } from "../fs/trash";
 import { openSystemPath } from "../fs/openPath";
 import type { AppSettings, CreatePiSkillInput, PiSkillListResult, PiSkillLocation, PiSkillSummary } from "../../shared/types";
 import type { WslEnvironment } from "../wsl/WslPaths";
+import { pideckBundledSkillsDir } from "./pideckSkillsPath";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 
 const SKILL_FILE = "SKILL.md";
@@ -111,6 +112,34 @@ export class SkillManager {
 		return this.locations.map((location) => ({ ...location }));
 	}
 
+	/**
+	 * 本次 spawn 应通过 `--skill` 注入的内置技能目录（按开关过滤）。
+	 *
+	 * 过滤读的是 pi settings.json 的投影（与技能列表开关同源）：`--skill` 注入不受
+	 * pi 自己的自动发现/过滤规则约束，停用的内置技能必须在拼命令行时剔除。
+	 * 目录很小（≤ 内置技能数），不做缓存，避免开关后拿到旧值。
+	 */
+	getBundledSkillLoadPaths(): string[] {
+		const location = this.locations.find((item) => item.id === "pideck-global");
+		if (!location) return [];
+		let entries: Dirent[];
+		try {
+			entries = readdirSync(location.path, { withFileTypes: true });
+		} catch {
+			return [];
+		}
+		const paths: string[] = [];
+		for (const entry of entries) {
+			if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+			const dir = join(location.path, entry.name);
+			const skillFile = join(dir, SKILL_FILE);
+			if (!existsSync(skillFile)) continue;
+			if (this.nativeEnabledReader?.(skillFile) === false) continue;
+			paths.push(dir);
+		}
+		return paths.sort();
+	}
+
 	private buildLocations(home: string): PiSkillLocation[] {
 		return [
 			{
@@ -124,6 +153,14 @@ export class SkillManager {
 				label: "~/.agents/skills",
 				path: join(home, ".agents", "skills"),
 				rootMarkdownEnabled: false,
+			},
+			// PiDeck 自带技能：pi 不自动扫描这个目录，只有 PiDeck spawn 时用
+			// `--skill` 注入，避免终端里的 pi（TUI）也加载桌面端专用技能。
+			{
+				id: "pideck-global",
+				label: "~/.pi/agent/pideck-skills",
+				path: pideckBundledSkillsDir(home),
+				rootMarkdownEnabled: true,
 			},
 		];
 	}
@@ -147,12 +184,16 @@ export class SkillManager {
 		const cached = this.listCache;
 		if (cached && Date.now() - cached.at < SkillManager.LIST_CACHE_TTL_MS) return cached.value;
 		const skills = (await Promise.all(this.locations.map((location) => this.scanLocation(location)))).flat();
-		// 按 name 去重，优先保留 pi-global 目录下的条目
-		// （避免 ~/.pi/agent/skills/ 和 ~/.agents/skills/ 不同步导致同名重复）
+		// 按 name 去重：同名时以 pi 实际会加载的那份为准。
+		// pi 先加载 `--skill` 注入的内置技能，再加载自动发现目录，所以
+		// pideck-global 优先级最高；其余沿用 pi-global > agents-global
+		// （避免两个全局目录不同步导致同名重复）。
 		const seen = new Map<string, PiSkillSummary>();
+		const sourceRank = (sourceId: PiSkillLocation["id"]) => (sourceId === "pideck-global" ? 0 : sourceId === "pi-global" ? 1 : 2);
 		for (const skill of skills) {
 			const key = skill.name.toLowerCase();
-			if (!seen.has(key) || (seen.get(key)!.sourceId !== "pi-global" && skill.sourceId === "pi-global")) {
+			const existing = seen.get(key);
+			if (!existing || sourceRank(skill.sourceId) < sourceRank(existing.sourceId)) {
 				seen.set(key, skill);
 			}
 		}
@@ -364,28 +405,29 @@ export class SkillManager {
 	}
 
 	/**
-	 * 把打包内置的「用量查询自定义」技能模板复制到全局技能目录
-	 * （~/.pi/agent/skills/usage-probe/SKILL.md）。
+	 * 把随包分发的技能模板（resources/skills/<name>/SKILL.md）落到用户目录。
 	 *
-	 * 为什么启动时自动安装：usage-probe 模板是 pideck 打包产物（resources/skills），
-	 * 而 pi 加载 skill 只扫用户全局目录（~/.pi/agent/skills、~/.agents/skills），
-	 * 不读 pideck 资源目录——必须落到用户技能目录，pi 才能发现并 /skill:usage-probe 触发。
-	 * 幂等覆盖：模板随应用更新同步；用户自定义配置写在 usage-probes.json，不在此文件。
+	 * 目标位置分两类：
+	 * - `pideck-global`（默认）：桌面端专用技能（usage-probe / image-gen / pideck-doctor）。
+	 *   该目录不在 pi 的自动发现根里，只有 PiDeck spawn 时用 `--skill` 注入，
+	 *   终端里直接启动的 pi（TUI）不会加载。
+	 * - `pi-global`：通用技能（mcp-setup）仍放回 pi 的全局技能目录，TUI 与 PiDeck 共用。
+	 *
+	 * 幂等覆盖：模板随应用更新同步；用户自定义配置写在各自的数据文件，不在此文件。
+	 * `disable-model-invocation` 是用户手动设置的「仅手动调用」标记，覆盖时保留。
 	 */
-	/**
-	 * 把打包内置的技能模板（resources/skills/<name>/SKILL.md）复制到用户全局技能目录。
-	 * 为什么抽公共实现：内置技能不止一个（usage-probe、image-gen 等），复制逻辑完全一致，
-	 * 只有技能名不同——单一 helper 避免每个技能重复一段一样的文件复制代码。
-	 */
-	private async installTemplate(skillName: string): Promise<{ success: true; path: string } | { success: false; error: string }> {
+	private async installTemplate(skillName: string, locationId: "pideck-global" | "pi-global" = "pideck-global"): Promise<{ success: true; path: string } | { success: false; error: string }> {
 		try {
+			const location = this.requireLocation(locationId);
+			// 老版本把桌面端技能装在 pi 的自动发现根里：先迁移，TUI 才不会再加载。
+			if (locationId === "pideck-global") await this.migrateLegacyBundledSkill(skillName);
 			// 覆盖层优先：热更新把有差异的技能写进 userData/skills-overlay（结构同
 			// <builtin>/skills/<name>/SKILL.md），安装时读生效源，避免「更新成功但装旧模板」。
 			const overlayDir = this.skillOverlayProvider?.() ?? null;
 			const root = app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "resources");
 			const templatePath = overlayDir ? join(overlayDir, skillName, SKILL_FILE) : join(root, "skills", skillName, SKILL_FILE);
 			const content = await readFile(templatePath, "utf8");
-			const targetDir = join(this.locations[0].path, skillName);
+			const targetDir = join(location.path, skillName);
 			await mkdir(targetDir, { recursive: true });
 			const targetPath = join(targetDir, SKILL_FILE);
 			// 模板正文随应用更新同步；用户自行设置的 user-only 标记仍需保留。
@@ -403,6 +445,23 @@ export class SkillManager {
 		}
 	}
 
+	/**
+	 * 迁移旧版本装在 `~/.pi/agent/skills/<name>` 的内置技能。
+	 *
+	 * 只搬 PiDeck 自己创建的普通目录：软链（技能库工具会把库里的技能链进来）和普通文件
+	 * 都不是 PiDeck 建的，搬/删会破坏用户配置，原样留给用户处理。
+	 * 迁移失败不阻断安装：新副本照常落到内置目录，旧副本只是继续对 TUI 可见。
+	 */
+	private async migrateLegacyBundledSkill(skillName: string): Promise<void> {
+		const legacyDir = join(this.requireLocation("pi-global").path, skillName);
+		const targetDir = join(this.requireLocation("pideck-global").path, skillName);
+		if (existsSync(targetDir)) return;
+		const entry = await lstat(legacyDir).catch(() => null);
+		if (!entry || !entry.isDirectory() || entry.isSymbolicLink()) return;
+		await mkdir(dirname(targetDir), { recursive: true });
+		await rename(legacyDir, targetDir).catch(() => undefined);
+	}
+
 	async installUsageProbeTemplate(): Promise<{ success: true; path: string } | { success: false; error: string }> {
 		return this.installTemplate("usage-probe");
 	}
@@ -416,7 +475,8 @@ export class SkillManager {
 	 * 用户在 MCP 页点「让 AI 帮你配」时安装；之后可在任意会话里让 AI 按官方文档代配任意 MCP 服务。
 	 */
 	async installMcpSetupTemplate(): Promise<{ success: true; path: string } | { success: false; error: string }> {
-		return this.installTemplate("mcp-setup");
+		// 通用能力（pi 的 mcp.json + pi mcp list），TUI 同样可用，保持装进全局技能目录。
+		return this.installTemplate("mcp-setup", "pi-global");
 	}
 
 	/**

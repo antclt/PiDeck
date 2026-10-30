@@ -18,6 +18,7 @@ import { useFavorites } from "../../hooks/useFavorites";
 import { SelectionToolbar } from "./timeline/SelectionToolbar";
 import { MessageContextMenu } from "./timeline/MessageContextMenu";
 import { deriveTimelineRunActivity } from "./timeline/timelineRunActivity";
+import { deriveRetryProgress } from "./timeline/retryProgress";
 import { canLoadSessionTimelineMore, deriveSessionSurfaceRuntime, type SessionTimelineController } from "../../hooks/useSessionTimelineController";
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
@@ -205,6 +206,11 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 	// 状态条只订 streaming 位（boolean），不订正文 atom，避免 50ms 重渲整条 timeline。
 	const liveTextStreaming = useAtomValue(liveTextStreamingBySessionAtom(sessionId ?? ""));
 	const liveThinkingStreaming = useAtomValue(liveThinkingStreamingBySessionAtom(sessionId ?? ""));
+	// 自动重试退避期：状态条必须说清「在等下一次重试」而不是笼统的「正在处理」。
+	// 数据源是时间线上的重试卡（pi auto_retry / DSH llm/retry 同款），卡片收口即回到普通状态。
+	const retryProgress = useMemo(() => deriveRetryProgress(activeMessages), [activeMessages]);
+	// 本轮已用时间不在这里直接读：状态条要的只是起点与冻结时刻，由下面的
+	// liveRunTiming 从末轮 agent-run 折算后传给 RespondingIndicator（唯一实时读数点）。
 	const sessionRuntimeBusy = modernSurfaceState.isBusy;
 	// Pi can compact immediately after agent_end. Keep the session busy during that
 	// file rewrite, but finalize the just-completed model turn in the timeline.
@@ -437,6 +443,19 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 		prevRenderedRunsRef.current = next;
 		return next;
 	}, [renderedRuns]);
+	// 状态条秒表（2026-10 由 TurnRow 末尾迁入）：取本轮最后一个 agent-run 的起点，
+	// 口径与轮末固定耗时一致——startedAt + askWaitMs（等待用户回答不计），
+	// 阻塞提问期间冻结在 askPendingAt，避免把用户思考时间算成模型耗时。
+	// 只在轮内传：轮结束后由 TurnRow 末尾显示固定耗时，状态条不再读秒。
+	const liveRunTiming = useMemo(() => {
+		if (!isTurnRunning) return undefined;
+		const last = reconciledRuns[reconciledRuns.length - 1];
+		if (!last || last.kind !== "agent-run" || !(last.startedAt > 0)) return undefined;
+		return {
+			startedAt: last.startedAt + (last.askWaitMs ?? 0),
+			frozenAt: last.askPending ? last.askPendingAt : undefined,
+		};
+	}, [isTurnRunning, reconciledRuns]);
 	// 渲染窗口（2026-08 黑屏治理）：贴底只挂尾部 3 轮；上滚查看历史也裁剪
 	// （controller.scrolledWindowTurns，初始 3 轮，接近顶部按 3 轮 cohort 自动扩大）——
 	// 历史全量放开挂载是大会话渲染进程内存峰值/黑屏的来源。数据仍在 atoms。
@@ -607,16 +626,20 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 		turns: 0,
 	});
 	const pinBrowseRow = controller.pinBrowseRow;
+	const endPrependSolid = controller.endPrependSolid;
 	useLayoutEffect(() => {
 		const prev = turnWindowStateRef.current;
 		if (prev.windowed && prev.turns !== turnWindowTurns && !followingForTurnWindow) {
+			// 扩窗在顶部插入轮次：期间 controller 会保持整表渲染（navBlockingVirtualization），
+			// 这一拍按钉住的行补齐位移，然后把渲染方式交回虚拟化。
 			pinBrowseRow();
+			endPrependSolid();
 		}
 		turnWindowStateRef.current = {
 			windowed: turnWindowActive,
 			turns: turnWindowTurns,
 		};
-	}, [displayRuns, followingForTurnWindow, pinBrowseRow, turnWindowActive, turnWindowTurns]);
+	}, [displayRuns, endPrependSolid, followingForTurnWindow, pinBrowseRow, turnWindowActive, turnWindowTurns]);
 	// 文件修改由 SessionView 提取最近一轮并放在 composer 上方；时间线只负责渲染消息。
 	// 时间线里已有用户图片才解析模型目录：原生看图时气泡不能显示视觉桥「转换中」。
 	const hasUserImages = useMemo(() => activeMessages.some((message) => message.role === "user" && Boolean(message.images?.length)), [activeMessages]);
@@ -1117,7 +1140,18 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 					/>
 
 					{hasActiveConversation && !cancellingUi && isRuntimeBusy && (
-						<RespondingIndicator isCompacting={isCompacting} isStarting={activeConversationStatus === "starting"} isExecutingTool={activeRuntimeState?.isExecutingTool} executingToolName={activeRuntimeState?.executingToolName} liveTextStreaming={liveTextStreaming} liveThinkingStreaming={liveThinkingStreaming} />
+						<RespondingIndicator
+							isCompacting={isCompacting}
+							isStarting={activeConversationStatus === "starting"}
+							isExecutingTool={activeRuntimeState?.isExecutingTool}
+							executingToolName={activeRuntimeState?.executingToolName}
+							liveTextStreaming={liveTextStreaming}
+							liveThinkingStreaming={liveThinkingStreaming}
+							retry={retryProgress}
+							contextPercent={activeRuntimeState?.contextPercent}
+							runStartedAt={liveRunTiming?.startedAt}
+							runFrozenAt={liveRunTiming?.frozenAt}
+						/>
 					)}
 					{props.replyActionsRef ? <div key={sessionId} ref={props.replyActionsRef} data-session-id={sessionId} data-testid="session-reply-actions-target" className="min-w-0 empty:hidden" /> : null}
 				</div>

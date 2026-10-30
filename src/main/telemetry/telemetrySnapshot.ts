@@ -43,7 +43,9 @@ export function collectTelemetrySnapshot(deps: TelemetrySnapshotDeps): Telemetry
 		// 界面偏好：i18n 与主题资源投入依据
 		language: settings.language,
 		theme: settings.theme,
-		theme_skin: settings.themeSkin,
+		// 外观拆成形状（style）与配色（palette）两维后分别上报，便于区分「要新形状」与「只换色」的需求
+		theme_style: settings.themeStyle,
+		theme_palette: settings.themePalette,
 		// 启动性能回归监控
 		startup_ms: Math.max(0, Math.round(deps.uptimeMs)),
 		// 使用规模：把 DAU 拆出「打开看看」与「重度在用」两层

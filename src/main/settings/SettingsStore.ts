@@ -34,7 +34,8 @@ import { normalizeEnhanceModel } from "../../shared/enhanceModelPreference";
 import { normalizeQuickMessages } from "../../shared/quickMessages";
 import { sanitizePiCustomPaths } from "../pi/piCustomPaths";
 import { sanitizeCustomThemeSnapshot } from "../../shared/customThemes";
-import { sanitizeAcpTools } from "../acp/acpToolConfig";
+import { normalizeThemeAppearance } from "../../shared/themeSkinMigration";
+import { sanitizeAcpToolConfigDefaults, sanitizeAcpTools } from "../acp/acpToolConfig";
 import { normalizeFontSizeMode, normalizeOptionalFontSizeMode } from "../../shared/fontSize";
 import { clampSessionTabMaxWidth, SESSION_TAB_MAX_WIDTH_DEFAULT } from "../../shared/sessionTabWidth";
 import { getAppLogger } from "../logging/sharedLogger";
@@ -153,7 +154,8 @@ const defaultSettings: AppSettings = {
 	themeScheduleLightStart: "07:00",
 	themeScheduleDarkStart: "19:00",
 	accent: "default",
-	themeSkin: "classic-green",
+	themeStyle: "classic",
+	themePalette: "classic-green",
 	logoStyle: "pi-tui",
 	// 自定义 logo 图（data URL）与显示名称：默认空 = 未启用，旧 settings.json 缺这两个键也走这里
 	logoCustomImage: "",
@@ -169,6 +171,8 @@ const defaultSettings: AppSettings = {
 	startupWindowMode: "last",
 	piEnvironmentChecked: false,
 	sessionTabOpenMode: "preview",
+	// 草稿本按项目隔离：切项目时右栏草稿随之切换；「全局」为所有项目共用一份
+	scratchPadScope: "project",
 	// 侧栏分组标题栏冻结默认关闭：保持历史行为（标题随列表滚走），用户可在设置里开启
 	sidebarStickyGroupHeaders: false,
 	// 默认开启：标题由当前 pi 模型异步生成，侧栏不再全是「新会话」；
@@ -238,6 +242,9 @@ Gitmoji 对应关系：
 	piProxyBypass: "localhost,127.0.0.1,::1",
 	piProxyProviders: [],
 	piProxyModels: [],
+	acpProxyEnabled: false,
+	acpProxyUrl: "http://127.0.0.1:7890",
+	acpProxyBypass: "localhost,127.0.0.1,::1",
 	desktopProxyEnabled: false,
 	desktopProxyUrl: "http://127.0.0.1:7890",
 	desktopProxyBypass: "localhost,127.0.0.1,::1",
@@ -323,6 +330,8 @@ Gitmoji 对应关系：
 	// ACP 总开关默认 false（opt-in，见 settings.acpEnabled 注释）；工具表默认空。
 	acpEnabled: false,
 	acpTools: [],
+	// 工具级配置记忆默认空：未记忆时新建会话保持 CLI 自己的默认值。
+	acpToolConfigDefaults: {},
 
 	// ── 扩展管理 ──
 	/** 用户手动移除的内置扩展，启动时跳过自动部署 */
@@ -506,7 +515,8 @@ export class SettingsStore {
 		if (persisted === null) {
 			this.settings = { ...defaultSettings };
 		} else {
-			const parsed = persisted;
+			const parsed = persisted.settings;
+			this.loadedJson = persisted.text;
 			this.settings = {
 				...defaultSettings,
 				...parsed,
@@ -515,6 +525,13 @@ export class SettingsStore {
 					...(parsed.externalEditors ?? {}),
 				},
 			};
+			// 兼容迁移：单维 themeSkin（样式与配色合一的旧模型）→ themeStyle + themePalette。
+			// 逐字段校验，旧 id 映射与已下线皮肤（glass/liquid-glass）的回落在 shared/themeSkinMigration.ts；
+			// 迁移后丢弃内存里的旧字段，下次保存即以两维新字段为准（磁盘旧值在迁移前仍可被旧版读取）。
+			const appearance = normalizeThemeAppearance(this.settings);
+			this.settings.themeStyle = appearance.themeStyle;
+			this.settings.themePalette = appearance.themePalette;
+			delete this.settings.themeSkin;
 			// 新增布尔开关按旧 settings.json 的缺省/脏数据回落，避免字符串值让 UI 或 pi env 误判。
 			if (typeof this.settings.autoSessionTitle !== "boolean") {
 				this.settings.autoSessionTitle = defaultSettings.autoSessionTitle;
@@ -574,6 +591,8 @@ export class SettingsStore {
 			this.migrateContentWidth();
 			// 会话 Tab 最大宽度：磁盘 JSON 无类型，手工改坏（非数字/超界）时钳回合法区间。
 			this.settings.navigationMode = this.settings.navigationMode === "simple" ? "simple" : "tabs";
+			// 草稿本作用域：手改/旧 JSON 的未知值回落「项目」，避免 IPC 带着坏作用域。
+			this.settings.scratchPadScope = this.settings.scratchPadScope === "global" ? "global" : "project";
 			this.settings.sessionTabMaxWidth = clampSessionTabMaxWidth(this.settings.sessionTabMaxWidth);
 			// 兼容迁移：全局用量自动查询开关已删除（改为每个 provider 徽章/弹窗里的开关）。
 			this.migrateRemovedUsageAutoQuerySwitch();
@@ -601,6 +620,8 @@ export class SettingsStore {
 			this.settings.acpEnabled = parsed.acpEnabled === true;
 			// ACP 工具登记表：手改 settings.json 的脏条目在加载边界归一，不等到首次 update。
 			this.settings.acpTools = sanitizeAcpTools(parsed.acpTools);
+			// ACP 工具级配置记忆：手改 settings.json 的脏工具/脏选项在加载边界归一。
+			this.settings.acpToolConfigDefaults = sanitizeAcpToolConfigDefaults(parsed.acpToolConfigDefaults);
 			// ACP 超时口径：正整数毫秒；脏值丢弃回落代码内默认（stall 90s / turn 10min）。
 			this.settings.acpPromptStallTimeoutMs = sanitizeOptionalPositiveIntMs(parsed.acpPromptStallTimeoutMs);
 			this.settings.acpPromptTurnTimeoutMs = sanitizeOptionalPositiveIntMs(parsed.acpPromptTurnTimeoutMs);
@@ -692,16 +713,17 @@ export class SettingsStore {
 	 * 读主 settings.json；解析失败（撕裂写/外部改坏）时回退 .bak，两者都不可用返回 null。
 	 * 只负责读与解析，不做任何规范化——normalize 逻辑保持在 load() 单一位置。
 	 */
-	private async readPersistedSettings(): Promise<Partial<AppSettings> | null> {
-		try {
-			return JSON.parse(await readFile(this.filePath, "utf8")) as Partial<AppSettings>;
-		} catch {
+	/** 读盘结果附带原文 text：writeAtomic 的外部合并（#433）需要「本次启动读到的原文」作对比基准。 */
+	private async readPersistedSettings(): Promise<{ settings: Partial<AppSettings>; text: string } | null> {
+		for (const path of [this.filePath, `${this.filePath}.bak`]) {
 			try {
-				return JSON.parse(await readFile(`${this.filePath}.bak`, "utf8")) as Partial<AppSettings>;
+				const text = await readFile(path, "utf8");
+				return { settings: JSON.parse(text) as Partial<AppSettings>, text };
 			} catch {
-				return null;
+				// 主文件缺失/损坏 → 试 .bak（与既有兜底顺序一致），两份都不可用才返回 null
 			}
 		}
+		return null;
 	}
 
 	/**
@@ -837,6 +859,10 @@ export class SettingsStore {
 		if ("navigationMode" in safePatch && safePatch.navigationMode !== "tabs" && safePatch.navigationMode !== "simple") {
 			delete safePatch.navigationMode;
 		}
+		// 草稿本作用域只接受两个已知枚举，非法 IPC 入参丢掉、保持原设置。
+		if ("scratchPadScope" in safePatch && safePatch.scratchPadScope !== "project" && safePatch.scratchPadScope !== "global") {
+			delete safePatch.scratchPadScope;
+		}
 		// 会话状态显示位置只接受已知枚举，非法值丢掉、保持原设置（不重置用户选择）。
 		if ("sessionStatusPlacement" in safePatch && parseSessionStatusPlacement(safePatch.sessionStatusPlacement) !== safePatch.sessionStatusPlacement) {
 			delete safePatch.sessionStatusPlacement;
@@ -884,6 +910,10 @@ export class SettingsStore {
 		}
 		if ("acpTools" in safePatch) {
 			safePatch.acpTools = sanitizeAcpTools(safePatch.acpTools);
+		}
+		// 工具级配置记忆来自主进程回调/渲染层，入参不可信：超长/脏值丢弃，不拒绝整表。
+		if ("acpToolConfigDefaults" in safePatch) {
+			safePatch.acpToolConfigDefaults = sanitizeAcpToolConfigDefaults(safePatch.acpToolConfigDefaults);
 		}
 		// ACP 超时口径来自渲染层/手改，入参不可信：非法值删键不落盘（保留既有合法值或回落默认），
 		// 合法值 floor 成整数——同一口径在加载边界与写入边界都归一，避免两条路径漂移。
@@ -1237,12 +1267,15 @@ export class SettingsStore {
 	/** 上次成功落盘的序列化内容：.bak 只在内容真正变化时复制（去重高频写）。 */
 	private lastPersistedJson: string | null = null;
 
+	/** 本次启动 load() 读到的磁盘原文：外部合并（#433）的对比基准（首写前 lastPersistedJson 为 null 时使用）。 */
+	private loadedJson: string | null = null;
+
 	private async writeAtomic(): Promise<void> {
 		await mkdir(app.getPath("userData"), { recursive: true });
 		// showThinking 由 pi agent 的 hideThinkingBlock 决定，不持久化到桌面 settings.json
 		const { showThinking: _unused, ...persistable } = this.settings;
 		const tmpPath = `${this.filePath}.tmp`;
-		const json = JSON.stringify(persistable, null, 2);
+		const json = await this.resolveJsonToPersist(persistable);
 		await writeFile(tmpPath, json, "utf8");
 		// .bak 降频（2027-02 性能审计）：备份的语义是「上一次不同的好版本」——内容与上次
 		// 落盘一致时复制是纯浪费（原先每次 update 都 copyFile，3×写放大的三分之一）。
@@ -1251,6 +1284,38 @@ export class SettingsStore {
 		}
 		await renameWithRetry(tmpPath, this.filePath);
 		this.lastPersistedJson = json;
+	}
+
+	/**
+	 * 计算本次应落盘的 JSON（#433 外部合并）：deck 运行期间用户可能手改 settings.json
+	 * （如按 release notes 加 acpPromptTurnTimeoutMs），而任何一次内部 update（版本通知、
+	 * 面板宽度等）都会触发全量写盘，把外部修改整体抹掉且无任何提示。
+	 * 磁盘内容与基准（上次自写 / 本次启动读取）一致 → 原样全量写（快路径）；
+	 * 不一致 → 以磁盘为基底做顶层键级合并：只把程序真正变更过的键盖回去（活跃编辑者优先），
+	 * 程序删除的键随删，外部新增/修改且程序未碰的键原样保留。
+	 * 外部文件损坏时退回内存覆盖（load 已有 .bak 兜底，坏文件没有合并价值）。
+	 */
+	private async resolveJsonToPersist(persistable: Omit<AppSettings, "showThinking">): Promise<string> {
+		const baseline = this.lastPersistedJson ?? this.loadedJson;
+		if (baseline === null) return JSON.stringify(persistable, null, 2);
+		const diskText = await readFile(this.filePath, "utf8").catch(() => null);
+		if (diskText === null || diskText === baseline) return JSON.stringify(persistable, null, 2);
+		try {
+			const disk = JSON.parse(diskText) as Record<string, unknown>;
+			const fromBaseline = JSON.parse(baseline) as Record<string, unknown>;
+			const memory = persistable as unknown as Record<string, unknown>;
+			const merged: Record<string, unknown> = { ...disk };
+			for (const [key, value] of Object.entries(memory)) {
+				if (JSON.stringify(value) !== JSON.stringify(fromBaseline[key])) merged[key] = value;
+			}
+			for (const key of Object.keys(fromBaseline)) {
+				if (!(key in memory)) delete merged[key];
+			}
+			delete merged.showThinking;
+			return JSON.stringify(merged, null, 2);
+		} catch {
+			return JSON.stringify(persistable, null, 2);
+		}
 	}
 
 	/**

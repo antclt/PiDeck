@@ -1981,3 +1981,122 @@ test("prependSessionMessagePageAtom dedupes overlapping pages by entryId", () =>
 	assert.equal(entry().messages.length, 3);
 	assert.equal(entry().page.nextBefore, 0);
 });
+
+test("detach 收口 live 正文：history 未接管时转 held，已接管时丢弃", () => {
+	const atoms = loadAtoms();
+	const store = createStore();
+	const emit = (event) => store.set(atoms.applySessionRuntimeEventAtom, event);
+	const bind = () =>
+		emit({
+			sessionId: "session-a",
+			agentId: "agent-a",
+			runtimeGeneration: 1,
+			sourceChannel: "agents:state",
+			payload: { id: "agent-a", status: "running" },
+		});
+	const text = (done) =>
+		emit({
+			sessionId: "session-a",
+			agentId: "agent-a",
+			runtimeGeneration: 1,
+			sourceChannel: "agents:text-stream",
+			payload: { agentId: "agent-a", text: "partial", done },
+		});
+	const detach = () => emit({ kind: "detach", sessionId: "session-a", agentId: "agent-a", runtimeGeneration: 1, sourceChannel: "sessions:runtime-detach", payload: null });
+
+	// 主进程 stop 路径直接清通道、不发 done：history 还没有本轮正文时必须保留已生成内容，
+	// 但不能再假装「正在流式」（否则切回会重复挂载 live 气泡）。
+	bind();
+	text(false);
+	assert.equal(store.get(atoms.streamingTextByIdAtom)["session-a"].streaming, true);
+	detach();
+	// vm 沙箱对象与本 realm 原型不同：逐字段断言。
+	const held = store.get(atoms.streamingTextByIdAtom)["session-a"];
+	assert.equal(held.content, "partial");
+	assert.equal(held.streaming, false);
+	assert.equal(held.held, true);
+
+	// history 已接管（缓存里有助手正文）→ 直接丢掉 live 槽，避免同段正文重复。
+	bind();
+	text(false);
+	store.set(atoms.cacheSessionMessagesAtom, {
+		sessionId: "session-a",
+		messages: [{ id: "m1", role: "assistant", text: "partial" }],
+		source: "disk",
+		expectedRevision: 0,
+		force: true,
+	});
+	detach();
+	assert.equal(store.get(atoms.streamingTextByIdAtom)["session-a"], undefined);
+});
+
+test("detach 时历史只有当前用户消息：部分回答保留为 held，不误删", () => {
+	const atoms = loadAtoms();
+	const store = createStore();
+	const emit = (event) => store.set(atoms.applySessionRuntimeEventAtom, event);
+	emit({ sessionId: "session-a", agentId: "agent-a", runtimeGeneration: 1, sourceChannel: "agents:state", payload: { id: "agent-a", status: "running" } });
+	emit({
+		sessionId: "session-a",
+		agentId: "agent-a",
+		runtimeGeneration: 1,
+		sourceChannel: "agents:text-stream",
+		payload: { agentId: "agent-a", text: "partial", done: false },
+	});
+	// 回合进行中：历史里只有用户消息，助手正文尚未落盘。
+	store.set(atoms.cacheSessionMessagesAtom, {
+		sessionId: "session-a",
+		messages: [{ id: "u1", role: "user", text: "check these files" }],
+		source: "disk",
+		expectedRevision: 0,
+		force: true,
+	});
+	emit({ kind: "detach", sessionId: "session-a", agentId: "agent-a", runtimeGeneration: 1, sourceChannel: "sessions:runtime-detach", payload: null });
+	const held = store.get(atoms.streamingTextByIdAtom)["session-a"];
+	assert.equal(held.content, "partial");
+	assert.equal(held.streaming, false);
+	assert.equal(held.held, true);
+});
+
+test("换绑新 agent 时清空旧 live 正文（防止新回合 delta 追加到旧内容）", () => {
+	const atoms = loadAtoms();
+	const store = createStore();
+	const emit = (event) => store.set(atoms.applySessionRuntimeEventAtom, event);
+	emit({ sessionId: "session-a", agentId: "agent-a", runtimeGeneration: 1, sourceChannel: "agents:state", payload: { id: "agent-a", status: "running" } });
+	emit({
+		sessionId: "session-a",
+		agentId: "agent-a",
+		runtimeGeneration: 1,
+		sourceChannel: "agents:text-stream",
+		payload: { agentId: "agent-a", text: "old turn", done: false },
+	});
+	assert.equal(store.get(atoms.streamingTextByIdAtom)["session-a"].content, "old turn");
+	emit({ sessionId: "session-a", agentId: "agent-b", runtimeGeneration: 2, sourceChannel: "agents:state", payload: { id: "agent-b", status: "running" } });
+	assert.equal(store.get(atoms.streamingTextByIdAtom)["session-a"], undefined);
+});
+
+test("done 才到且本地没有 live 槽时不新建 held 槽（后台会话不膨胀）", () => {
+	const atoms = loadAtoms();
+	const store = createStore();
+	const emit = (event) => store.set(atoms.applySessionRuntimeEventAtom, event);
+	emit({ sessionId: "session-a", agentId: "agent-a", runtimeGeneration: 1, sourceChannel: "agents:state", payload: { id: "agent-a", status: "running" } });
+	emit({
+		sessionId: "session-a",
+		agentId: "agent-a",
+		runtimeGeneration: 1,
+		sourceChannel: "agents:text-stream",
+		payload: { agentId: "agent-a", text: "final answer", done: true },
+	});
+	assert.equal(store.get(atoms.streamingTextByIdAtom)["session-a"], undefined);
+});
+
+test("聊天栏卸载清 live 正文：只删本会话，不动其它会话", () => {
+	const atoms = loadAtoms();
+	const store = createStore();
+	store.set(atoms.streamingTextByIdAtom, {
+		"session-a": { content: "a", streaming: true },
+		"session-b": { content: "b", streaming: true },
+	});
+	store.set(atoms.clearSessionLiveTextAtom, "session-a");
+	assert.equal(store.get(atoms.streamingTextByIdAtom)["session-a"], undefined);
+	assert.equal(store.get(atoms.streamingTextByIdAtom)["session-b"].content, "b");
+});

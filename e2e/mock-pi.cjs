@@ -256,11 +256,16 @@ if (sessionFile && fs.existsSync(sessionFile)) {
 	}
 }
 
-/** 把对话写成可被 SessionHistoryReader 分页读取的真实 JSONL（#113 3.2-9） */
-function appendSessionMessages(userText, assistantText) {
+/** 把对话写成可被 SessionHistoryReader 分页读取的真实 JSONL（#113 3.2-9）
+ * startedAt/finishedAt 让文件时间戳与真实 pi 一致：user 条目在提问时落盘，assistant
+ * 条目在回复写完时落盘，内容里带 timestamp(请求开始)+durationMs(实测耗时)。
+ * 不传时退化为「现在写盘」，供子代理重放等即时场景使用。 */
+function appendSessionMessages(userText, assistantText, startedAt, finishedAt) {
 	ensureSessionFile();
 	if (!sessionFile) return;
 	const now = Date.now();
+	const turnStartedAt = typeof startedAt === "number" ? startedAt : now;
+	const turnFinishedAt = typeof finishedAt === "number" ? finishedAt : now;
 	const lines = [];
 	if (!sessionHeaderWritten) {
 		const headerId = `e${nextEntrySeq++}`;
@@ -287,8 +292,8 @@ function appendSessionMessages(userText, assistantText) {
 			type: "message",
 			id: userId,
 			parentId: userParent,
-			timestamp: new Date(now).toISOString(),
-			message: { role: "user", content: [{ type: "text", text: userText }] },
+			timestamp: new Date(turnStartedAt).toISOString(),
+			message: { role: "user", content: [{ type: "text", text: userText }], timestamp: turnStartedAt },
 		}),
 	);
 	const assistantId = `e${nextEntrySeq++}`;
@@ -297,8 +302,8 @@ function appendSessionMessages(userText, assistantText) {
 			type: "message",
 			id: assistantId,
 			parentId: userId,
-			timestamp: new Date(now + 1).toISOString(),
-			message: { role: "assistant", content: [{ type: "text", text: assistantText }] },
+			timestamp: new Date(turnFinishedAt).toISOString(),
+			message: { role: "assistant", content: [{ type: "text", text: assistantText }], timestamp: turnStartedAt, durationMs: Math.max(0, turnFinishedAt - turnStartedAt) },
 		}),
 	);
 	lastEntryId = assistantId;
@@ -498,6 +503,10 @@ function stopStream(settled) {
 
 function startStream(userText, options = {}) {
 	streaming = true;
+	// 本轮请求开始时刻：message_start/message_end 都带它，message_end 另带 durationMs。
+	// 真实 pi 的 timestamp 是「请求开始」而不是「写完」，桌面端轮末耗时按
+	// startedAt+durationMs 冻结（见 AgentManager.upsertAssistantMessage）。
+	const turnStartedAt = Date.now();
 	const slow = userText.includes("SLOW");
 	streamIntervalMs = slow ? 220 : 80;
 	// BURST 模式：模拟真实 LLM 突发输出——前 6 个 chunk 慢速（250ms），
@@ -572,7 +581,7 @@ function startStream(userText, options = {}) {
 	emit({ type: "agent_start" });
 	emit({
 		type: "message_start",
-		message: { role: "assistant", content: [{ type: "text", text: "" }] },
+		message: { role: "assistant", content: [{ type: "text", text: "" }], timestamp: turnStartedAt },
 	});
 
 	// 思考/工具帧模拟（E2E：web-service.spec.ts 断言 reasoning/tool 卡片渲染）：
@@ -632,13 +641,16 @@ function startStream(userText, options = {}) {
 		}
 		if (streamStep >= streamChunks.length) {
 			streamTimer = null;
+			const turnFinishedAt = Date.now();
 			const full = {
 				role: "assistant",
 				content: [{ type: "text", text: reply }],
 				stopReason: "stop",
+				timestamp: turnStartedAt,
+				durationMs: turnFinishedAt - turnStartedAt,
 			};
-			appendSessionMessages(userText, reply);
-			conversationMessages.push({ role: "user", content: [{ type: "text", text: userText }] }, { role: "assistant", content: [{ type: "text", text: reply }] });
+			appendSessionMessages(userText, reply, turnStartedAt, turnFinishedAt);
+			conversationMessages.push({ role: "user", content: [{ type: "text", text: userText }], timestamp: turnStartedAt }, { role: "assistant", content: [{ type: "text", text: reply }], timestamp: turnStartedAt, durationMs: turnFinishedAt - turnStartedAt, stopReason: "stop" });
 			emit({ type: "message_end", message: full });
 			// steer 队列非空：同 run 继续（无 agent_end/agent_settled 间隔）
 			if (drainSteerMessagesIntoRun()) return;

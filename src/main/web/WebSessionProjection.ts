@@ -24,6 +24,8 @@ export type WebPublicSession = {
 	thinkingLevel?: string;
 	/** 运行时后端（pi/dsh；缺省 pi），侧栏/头部徽标展示用 */
 	backend?: AgentBackend;
+	/** ACP 工具 id（AcpToolConfig.id）：acp 会话的后端选择器要回填具体 CLI */
+	acpToolId?: string;
 	/** 最近活动时间（毫秒时间戳），会话列表按此降序 */
 	updatedAt?: number;
 	/** 分支导航：fork 自哪条会话 / 是否为 fork 产物 / 创建时间 */
@@ -49,6 +51,7 @@ export function toPublicSession(record: SessionRecord): WebPublicSession {
 		model: record.model,
 		thinkingLevel: record.thinkingLevel,
 		backend: record.backend,
+		acpToolId: record.acpToolId,
 		updatedAt: record.updatedAt,
 		parentSessionId: record.parentSessionId,
 		forked: record.forked,

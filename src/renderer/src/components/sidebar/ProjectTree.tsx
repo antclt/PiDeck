@@ -17,6 +17,7 @@ import { useRemoteHostIdentityIndex } from "./useRemoteHostIdentityIndex";
 import { RemoteSessionsSection } from "./RemoteSessionsSection";
 import { useRemoteProjectRootStatuses } from "./useRemoteProjectRootStatuses";
 import { ActiveSessionsTree } from "./ActiveSessionsTree";
+import { SessionGroupsSection } from "./SessionGroupsSection";
 import { SessionTree } from "./SessionTree";
 import { WorktreeTree } from "./WorktreeTree";
 import { SessionActivityIndicator } from "../session/SessionActivityIndicator";
@@ -146,7 +147,9 @@ export function ProjectTree(props: {
 		const pendingAskCount = countProjectPendingAsks(project.id, props.controller, sessionRuntimeUiById);
 		return (
 			<SidebarRemovalRow key={project.id} itemId={project.id} className={cn("project-group mb-1.5", project.worktreeEnabled && "worktree-enabled")}>
+				{/* data-project-row-id：搜索面板选中项目后按此定位（SidebarContent.revealSearchProject）。 */}
 				<div
+					data-project-row-id={project.id}
 					className={cn(
 						treeRowClass,
 						dragging && "dragging opacity-60",
@@ -214,7 +217,7 @@ export function ProjectTree(props: {
 									{/* 待确认徽章：当项目下有会话等待用户输入/确认时醒目展示 */}
 									<PendingAskBadge count={pendingAskCount} />
 									{/* 简洁模式汇总实际计算中状态（含worktree）；空闲进程不转。 */}
-									{props.simple ? <SessionActivityIndicator status={hasRunningAgent ? "running" : undefined} /> : collapsed && hasRunningAgent && <span className="size-1.5 shrink-0 rounded-full bg-warning" title={t("app.projectRunningHint")} aria-hidden="true" />}
+									{props.simple ? <SessionActivityIndicator status={hasRunningAgent ? "running" : undefined} /> : collapsed && hasRunningAgent && <span role="img" aria-label={t("app.projectRunningHint")} className="size-1.5 shrink-0 rounded-full bg-warning" title={t("app.projectRunningHint")} />}
 								</div>
 								{/* 目录已被删除/移动/未挂载：保留记录并标记，用户可右键移除或恢复目录 */}
 								{project.missing && (
@@ -331,6 +334,7 @@ export function ProjectTree(props: {
             + 「⋯ 更多操作」（完整项目菜单，新建/定位/会话管理/目录设置）。
             新建与折叠都是最常用入口，直接外露；其余操作收进完整菜单。 */}
 				<div
+					data-project-row-id={project.id}
 					className={cn("flex items-center justify-between px-1 pb-1", stickyHeader && stickyGroupHeaderClass)}
 					// 右键与「⋯」同款完整项目菜单：让 Chat 项目行获得与工作区项目一致的操作入口
 					onContextMenu={(event) => {
@@ -415,7 +419,7 @@ export function ProjectTree(props: {
 							// 展开且为空时给明确空态（#387）：什么都不渲染会让用户把「空列表」当成「列表坏了」。
 							emptyState={
 								chatCatalogReady ? (
-									<div className="px-2 py-1 text-caption text-muted-foreground/70" data-testid="chat-empty-sessions">
+									<div className="px-2 py-1 text-caption text-muted-foreground" data-testid="chat-empty-sessions">
 										{t("app.chatEmptySessions")}
 									</div>
 								) : undefined
@@ -429,6 +433,8 @@ export function ProjectTree(props: {
 
 	const projectsSection = (
 		<section aria-label={t("app.sidebarProjects")} role="tree">
+			{/* 会话分组树（只读浏览，数据在宿主 store，写入方是分组插件页）：置于普通项目之上 */}
+			<SessionGroupsSection actions={props.actions} currentSessionId={props.currentSessionId} />
 			{/* 分组标题栏：左侧「项目」标题，右侧 = 「+ 添加项目」+ 全部折叠/展开（高频操作外露）
             + 「⋯ 更多操作」。目录存在性重扫属于低频维护动作，收进菜单避免挤占窄侧栏。
             开启冻结时给这层纯逻辑包裹加 display:contents：它不生成盒子，里面的标题栏
@@ -516,5 +522,22 @@ export function ProjectTree(props: {
 				<ActiveSessionsTree controller={props.controller} actions={props.actions} currentSessionId={props.currentSessionId} recentOnly />
 			</>
 		);
-	return <>{props.controller.navTab === "active" ? <ActiveSessionsTree controller={props.controller} actions={props.actions} currentSessionId={props.currentSessionId} /> : props.controller.navTab === "chats" ? chatSection : projectsSection}</>;
+	const groupsSection = <SessionGroupsSection actions={props.actions} currentSessionId={props.currentSessionId} />;
+	return (
+		<>
+			{props.controller.navTab === "active" ? (
+				<>
+					{groupsSection}
+					<ActiveSessionsTree controller={props.controller} actions={props.actions} currentSessionId={props.currentSessionId} />
+				</>
+			) : props.controller.navTab === "chats" ? (
+				<>
+					{groupsSection}
+					{chatSection}
+				</>
+			) : (
+				projectsSection
+			)}
+		</>
+	);
 }

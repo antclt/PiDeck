@@ -47,7 +47,7 @@ title: 宿主插件开发指南
 2. 点 **「新建插件…」**，填：
    - **插件 ID**：小写字母开头，`[a-z0-9.-]`，≤80 字符，例如 `demo.viewer`（同时是生成目录名）；
    - **显示名**：面板与命令里的名字；
-   - **权限**：默认只勾 `sessions.read`；按需增加 `workbench.navigate` / `workbench.openExternal` / `network.https` / `network.local` / `service.local`。纯联网工具可取消会话读取；
+   - **权限**：默认只勾 `sessions.read`；按需增加 `workbench.navigate` / `workbench.openExternal` / `network.https` / `network.local` / `service.local` / `sessionGroups.manage`。纯联网工具可取消会话读取；
    - **网络目的地**（仅勾网络权限时出现）：HTTPS 填 `https://api.example.com` 这样的 origin，本地填明确端口（如 `4187`）；多个值用逗号或空白分隔，每类最多 16 个，不支持通配符；
    - **面板形态**：`modal`（大弹框，默认）、`popover`（侧栏一行旁边的浮层，适合几行控件的紧凑面板）或 `page`（工作区内联页）；
 3. 生成后目录出现在插件目录里，并自动重新扫描（默认**禁用**）；
@@ -152,7 +152,7 @@ for (const session of page.sessions) {
 | `name` | ✅ | 非空，≤160 字符，无控制字符 |
 | `version` | ✅ | 非空，≤160 字符（仅用于展示，授权不看它） |
 | `description` | — | ≤1000 字符 |
-| `permissions` | ✅ | 数组，只能取 `sessions.read` / `workbench.navigate` / `workbench.openExternal` / `network.https` / `network.local` / `service.local`，不能重复；未知权限拒装 |
+| `permissions` | ✅ | 数组，只能取 `sessions.read` / `sessions.read.workspace` / `workbench.navigate` / `workbench.openExternal` / `network.https` / `network.local` / `service.local` / `sessionGroups.manage`，不能重复；未知权限拒装。`sessions.read.workspace` 是 `sessions.read` 的**范围扩展**（把读取与导航扩到整个工作区），必须同时声明 `sessions.read`，单独声明直接拒装 |
 | `network` | 网络权限存在时 ✅ | `network.https` 对应 `httpsOrigins`，`network.local` 对应 `localPorts`。没声明对应权限不得填写该字段；规则见 5.5 |
 | `services` | `service.local` 存在时 ✅ | 1–8 个，只能点名 PiDeck **已实现适配器**的本地服务（当前仅 `billion-context`）；没声明 `service.local` 不得填写该字段；规则见 5.8 |
 | `contributes.panels` | ✅ | 1–8 个。`id`（同上 ID 规则）、`title`（≤160）、`entry`（包内相对路径，**必须以 `.html` 结尾**）、`icon`（白名单，可选）、`presentation`（`modal` / `popover` / `page`，可选） |
@@ -201,7 +201,11 @@ for (const session of page.sessions) {
 | `pideck.network.request(input)` | `network.https` 或 `network.local` + 对应目的地声明 | `{ url, status, ok, headers, body }` |
 | `pideck.services.status(id)` | `service.local` + `services` 点名 | `HostPluginServiceStatus` |
 | `pideck.services.start(id)` / `stop(id)` | `service.local` + `services` 点名 | 操作后的 `HostPluginServiceStatus` |
-| `pideck.services.openUi(id)` | `service.local` + `services` 点名 | 操作后的 `HostPluginServiceStatus`（由 PiDeck 开内置浏览器） |
+| `pideck.services.openUi(id, pid?)` | `service.local` + `services` 点名 | 操作后的 `HostPluginServiceStatus`（由 PiDeck 开内置浏览器；`pid` 可从 `status.instances` 白名单里点名多实例服务的某个实例） |
+| `pideck.sessionGroups.list()` | `sessionGroups.manage` | `SessionGroup[]`（宿主会话分组全量） |
+| `pideck.sessionGroups.save(group)` | `sessionGroups.manage` | `SessionGroup[]`（按 id upsert 一组，`id` 省略 = 新建，返回全量） |
+| `pideck.sessionGroups.delete(groupId)` | `sessionGroups.manage` | `boolean`（是否真的删了） |
+| `pideck.sessionGroups.reorder(groupIds)` | `sessionGroups.manage` | `SessionGroup[]`（保存显示顺序，未知 id 容错） |
 | `pideck.onEvent(listener)` | — | 取消订阅函数 |
 
 > 兼容策略：新能力只做加法。老插件不受影响；想探测新方法用 `typeof pideck.sessions.search === "function"`。
@@ -214,9 +218,10 @@ type HostPluginContext = {
 	projectName?: string; // 项目显示名（PiDeck 侧补全，可直接当标题用）
 	sessionId?: string; // 当前会话
 	sessionTitle?: string; // 当前会话标题（PiDeck 侧补全）
+	scope?: "project" | "workspace"; // 会话数据范围：声明 sessions.read.workspace 才是 workspace
 	locale: "zh-CN" | "en-US"; // 跟随界面语言
 	theme: "light" | "dark"; // 跟随明暗主题
-	tokens?: Record<string, string>; // 主题色变量（CSS 自定义属性）
+	tokens?: Record<string, string>; // 宿主设计 token（颜色 / 圆角 / 阴影 / 控件高度 / 字号 / 字体）
 };
 ```
 
@@ -224,7 +229,7 @@ type HostPluginContext = {
 const { projectName, sessionTitle, locale, theme } = await pideck.context.get();
 ```
 
-- 作用域由 **PiDeck 分配**，不接受插件传参：插件只能看到当前项目。
+- 作用域由 **PiDeck 分配**，不接受插件传参：默认只能看到当前项目；只有 manifest 声明了 `sessions.read.workspace` 才是整个工作区（`scope === "workspace"`）。自己往上下文里塞 `scope` 无效，宿主会按 manifest 权限重写。
 - `projectName` / `sessionTitle` 由 PiDeck 补全，插件自己伪造无效；拿不到就是 `undefined`，**不要假设一定有值**。
 
 ### 5.2 sessions
@@ -243,7 +248,11 @@ const hits = await pideck.sessions.search("重构", 50);
 const history = await pideck.sessions.entries("session-id"); // → { entries, nextCursor, version, truncated }
 ```
 
-`HostPluginSession`：`{ id, projectId, title, updatedAt, createdAt, model?, readable }`。
+`HostPluginSession`：`{ id, projectId, projectName?, directory?, title, backend?, model?, updatedAt, createdAt, readable }`。
+
+- `directory` 是**项目根目录**（如 `D:\project\java\T6`），用于在列表里区分同名会话；不是会话文件路径（JSONL 路径永不下发）。
+- `backend` 取 `pi` / `dsh` / `acp` / `imagegen` / `videogen`（缺省视为 `pi`）。
+- `projectName` / `directory` 只在宿主知道该项目时才有值，`workspace` 范围下列表可能混着多个项目。
 
 `entries` 的边界（都需要记住）：
 
@@ -257,7 +266,7 @@ const history = await pideck.sessions.entries("session-id"); // → { entries, n
 | 读期间文件被改写 | 整页作废，报 `history-changed`，重读即可 |
 | 图片 / 长压缩摘要 | 图片内联字节与超长 compaction summary 不会传给插件；分页读原始条目不受影响 |
 | 被剥掉的字段 | `cwd`、`parentSession`、`sessionFile`、`filePath`，以及图片的 `data` / `imageRef` / `url` / `source` |
-| `readable: false` | 该会话不可读（例如由别的后端创建），不要尝试读它的历史 |
+| `readable: false` | 该会话没有可读的 JSONL 历史（DSH/ACP/生图等），**但可以正常导航**；不要尝试读它的 `entries` |
 
 ### 5.3 storage（无需权限）
 
@@ -282,8 +291,10 @@ await pideck.workbench.navigate("session-id", "entry-id"); // 让 PiDeck 打开�
 await pideck.workbench.openExternal("https://github.com/ayuayue/PiDeck/blob/main/docs/host-plugin-dev-guide.md");
 ```
 
-- `navigate` 只对**当前项目的可读会话**生效，否则 `session-not-authorized`；它由 PiDeck 主界面执行，插件页不做任何跳转。
+- `navigate` 只对**插件数据范围内**的已保存会话生效（默认当前项目；声明 `sessions.read.workspace` 后是整个工作区，导航会自己切到会话所属项目），否则 `session-not-authorized`；它由 PiDeck 主界面执行，插件页不做任何跳转。没有 JSONL 历史的会话（DSH/ACP/生图/生视频）也能导航——能否导航只看会话是否在范围内，“能否读历史”另由 `readable` 表示。
 - `openExternal` 只接受 **https** 且不能带账号密码；系统浏览器打开。带 `http:`、`file:`、`javascript:`、`pideck-plugin:` 一律 `invalid-request`。
+
+> 5.2 + 5.3 + 5.4 合起来的完整示例：`resources/host-plugins/session-groups/`（列会话、分组持久化到 `storage`、点击经 `navigate` 跳转），随 PiDeck 内置；它也是 `page` 面板形态的参考实现。
 
 ### 5.5 network：第三方 API 与已启动本地服务
 
@@ -413,23 +424,32 @@ const off = pideck.onEvent((event) => {
 
 ### 5.7 主题与样式
 
-PiDeck 把语义色注入为 CSS 变量（`:root`，随主题/语言实时更新），直接用即可：
+PiDeck 把设计体系的关键 token 注入为 CSS 变量（`:root`，随主题/语言/字体设置实时更新），插件面板据此画成和宿主一致的样子：
 
-`--color-bg-app`、`--color-bg-panel`、`--color-bg-input`、`--color-text-primary`、`--color-text-secondary`、`--color-border-default`、`--color-accent`、`--color-text-inverse`。
+- 颜色：`--color-bg-app`、`--color-bg-panel`、`--color-bg-input`、`--color-bg-muted`、`--color-bg-hover`、`--color-bg-active`、`--color-bg-popover`、`--color-text-primary`、`--color-text-secondary`、`--color-text-tertiary`、`--color-text-faint`、`--color-text-inverse`、`--color-border-subtle`、`--color-border-default`、`--color-border-strong`、`--color-accent`、`--color-accent-strong`、`--color-accent-soft`、`--color-danger`、`--color-success`
+- 形状与阴影：`--radius-sm` / `--radius-md` / `--radius-lg` / `--radius-xl` / `--radius-pill`、`--shadow-popover`、`--shadow-modal`
+- 控件高度：`--control-height-sm`（28）/ `--control-height-md`（32）/ `--control-height-lg`（36）
+- 排版：`--font-size-micro` / `--font-size-caption` / `--font-size-control` / `--font-size-body` / `--font-size-title`、`--font-family-base`、`--font-family-mono`
 
 ```css
 body {
-	background: var(--color-bg-panel, #1b1b1f);
+	background: var(--color-bg-app, #1b1b1f);
 	color: var(--color-text-primary, #e6e6e6);
+	font-family: var(--font-family-base, -apple-system, sans-serif);
+	font-size: var(--font-size-control, 13px);
 }
 .primary {
 	background: var(--color-accent, #3b82f6);
 	color: var(--color-text-inverse, #fff);
 }
+.row:hover {
+	background: var(--color-bg-hover, #262626);
+}
 ```
 
-- 一定要带缺省值，且**不要**只按暗色硬编码——亮色主题下会看不清。
-- `--color-accent` 是「面」色：文字要用 `--color-text-inverse`，别拿它当文字色。
+- 一定要带缺省值，且**不要**只按暗色硬编码——亮色主题下会看不清；缺省值写宿主默认值即可。
+- `--color-accent` 是「面」色（主按钮 / 选中强调）：文字要用 `--color-text-inverse`，别拿它当文字色或悬停底色；悬停 / 选中用 `--color-bg-hover` / `--color-bg-active`，弹层用 `--color-bg-popover` + `--shadow-popover`。
+- 每个面板最多注入 40 个 token，单个值 ≤400 字符（默认字体栈较长）；值里带 `;{}` 或 `<>` 会被判非法，整次 context 更新失败。新增 token 需同时改 `src/renderer/src/hooks/plugins/hostPluginTokens.ts` 的 `HOST_PLUGIN_THEME_TOKENS` 与本节。
 
 ### 5.8 本地服务：启停与打开 Web 面板（`service.local`）
 
@@ -453,9 +473,10 @@ type HostPluginServiceStatus = {
 	id: string; // 服务 id
 	available: boolean; // 外部 CLI 是否可用；false 时 running 恒为 false，reason 说明原因
 	running: boolean;
-	pid?: number;
+	pid?: number; // 主实例（instances 的第一个）；单实例服务就是它唯一的进程
 	version?: string;
-	uiUrl?: string; // Web 面板地址（http://127.0.0.1:<port>/...），未运行或未知时为 undefined
+	uiUrl?: string; // 主实例的 Web 面板地址（http://127.0.0.1:<port>/...），未运行或未知时为 undefined
+	instances?: { pid: number; uiUrl: string }[]; // 多实例服务（如 billion-context 的 lane daemon）的全部活实例；缺失/单实例时可忽略
 	reason?: string; // 稳定原因码：cli-missing / cli-failed / invalid-report / start-* / stop-failed / stop-restarted…
 };
 ```
@@ -468,6 +489,12 @@ if (!status.available) showInstallHint("npm i -g billion-context"); // 未装时
 await pideck.services.start("billion-context"); // 起进程，并等到 doctor 报告存活（最多约 20 秒）
 await pideck.services.stop("billion-context"); // 按 doctor 报告的 pid 终止
 await pideck.services.openUi("billion-context"); // PiDeck 内置浏览器打开 uiUrl
+
+// 多实例服务：billion-context 会有多个活实例（常驻代理 + pi 等 agent 自己拉起的 lane daemon），
+// status.instances 列出全部；openUi 的第二个参数从这份白名单里点名要打开谁的面板。
+for (const inst of status.instances ?? []) {
+	await pideck.services.openUi("billion-context", inst.pid); // 打开该实例自己的面板
+}
 ```
 
 - `start` / `stop` 比普通请求慢得多（要等进程真的起来 / 落下）；面板请自己加「进行中」态，不要连点。
@@ -479,6 +506,26 @@ await pideck.services.openUi("billion-context"); // PiDeck 内置浏览器打开
 
 `resources/host-plugins/billion-context/` 就是完整实现（状态卡 + 启停 + 开面板）。它会随 PiDeck 落位到插件目录，可直接改；改完重新扫描 + 重新授权。
 
+### 5.9 会话分组：读写宿主分组数据（`sessionGroups.manage`）
+
+会话分组是 PiDeck 自己的本地数据（`<userData>/session-groups.json`）：侧栏「分组」树只读消费它，声明了 `sessionGroups.manage` 的插件可以读写它（目前是内置的会话分组插件）。用途边界见 `docs/host-boundaries.md` 例外七——**只允许分组读写，不是通用存储桥**。
+
+```ts
+type SessionGroup = {
+	id: string;
+	name: string; // ≤80 字符
+	color: "blue" | "green" | "orange" | "purple" | "red" | "cyan";
+	createdAt: number;
+	sessionIds: string[]; // 会话引用，失效引用由消费方按 catalog 过滤，宿主不校验存在性
+	dirs: string[]; // 目录范围（dirKey 列表，空数组 = 不限目录），宿主按不透明字符串透传
+};
+```
+
+- `save` 是**整体替换**（按 id upsert）：先 `list()` 拿全量、改内存、再写回，不要按字段猜合并语义。
+- 写入成功后宿主广播 `session-groups:changed`，桌面帧自动刷新侧栏；插件自己不需要（也无法）通知侧栏。
+- 分组是跨插件的共享数据：按 id 增量改，禁止整表清空重建；单组会话引用上限 20000，组数上限 200。
+- 保存/删除/排序分别有 1 次 IPC 往返；高频操作（拖拽、勾选）先改内存、防抖后再落盘（参考内置插件的 `queue()` 串行 + 签名 diff 写法）。
+
 ## 6. 安全模型（为什么这些限制是这样）
 
 | 机制 | 说明 |
@@ -488,7 +535,7 @@ await pideck.services.openUi("billion-context"); // PiDeck 内置浏览器打开
 | 请求绑定实例 | 每个请求绑定面板实例；插件被禁用、上下文变化或面板关闭后未完成的结果作废（`plugin-revoked`），网络 socket 同步中止 |
 | 网络授权 | 启用前展示所有权限与具体 origin / 本地端口；会话读取 + 网络同时存在时提示数据外发风险；每跳复查目的地与公网 DNS，阻止未授权地址 |
 | 服务控制 | `service.local` 只是「点名权」：命令、参数、端口全在 PiDeck 的服务适配器里，插件无法执行任意命令；启用前展示可控制的服务 id |
-| 项目隔离 | 会话读取逐条校验归属（含 fork 祖先链逐跳校验）；跨项目一律 `session-not-authorized`，也不泄露「该会话是否存在」 |
+| 项目隔离 | 会话读取逐条校验归属（含 fork 祖先链逐跳校验）；默认跨项目一律 `session-not-authorized`，也不泄露「该会话是否存在」。只有显式声明 `sessions.read.workspace` 的插件才拿整个工作区范围，该标记由宿主依 manifest 写入 `context.scope`，面板页伪造无效 |
 | 指纹授权 | 授权 = 整包逐文件 sha256。内容一变授权即失效，必须重新确认；启用中的插件不能被静默替换（`plugin-in-use`） |
 | 频率限制 | 每实例同时最多 2 个在途请求，每秒最多 20 个请求，超出 `rate-limited` |
 | 隐私 | `projectName` / `sessionTitle` 由 PiDeck 补全；未授权项目的会话标题根本不会下发 |
@@ -500,8 +547,8 @@ await pideck.services.openUi("billion-context"); // PiDeck 内置浏览器打开
 | 错误码 | 含义 | 怎么办 |
 |--------|------|--------|
 | `permission-denied` | manifest 未声明该权限 | 补 `permissions` 后重新扫描 + 重新授权 |
-| `session-not-authorized` | 会话不属于当前项目（或不可读） | 只用 `sessions.list` 返回的 id |
-| `history-unavailable` | 该会话没有可读的历史文件 | 以 `readable` 判断 |
+| `session-not-authorized` | 会话不在插件数据范围内（或已被删除） | 只用 `sessions.list` 返回的 id；需要跨项目就声明 `sessions.read.workspace` |
+| `history-unavailable` | 该会话没有可读的历史文件（DSH/ACP/生图等） | 以 `readable` 判断，不要把它当作不可导航 |
 | `history-too-large` | 本次读取超扫描预算 | 分页、缩小范围，不要整包拉 |
 | `history-changed` / `stale-cursor` | 读期间文件变化 / 游标过期 | 清掉游标重新从 `undefined` 拉 |
 | `invalid-request` / `invalid-offset` / `invalid-context` | 参数不合法（offset 上限 100000、search limit 1–100…） | 按第 5 节的范围传参 |
@@ -519,7 +566,7 @@ await pideck.services.openUi("billion-context"); // PiDeck 内置浏览器打开
 | `network-response-too-large` / `network-headers-too-large` | 响应正文 / 响应头超预算 | 接口分页、减少返回内容 |
 | `network-response-type-denied` / `network-response-encoding-denied` | 非文本/JSON、压缩、非法 UTF-8 或非支持字符集 | 服务返回有界 UTF-8 JSON/text，禁用压缩 |
 | `service-unavailable` | 该 service id 没有 PiDeck 适配器 | 只用清单里声明过的服务 |
-| `service-not-running` | 服务未运行（`stop` / `openUi` 时） | 先 `start`，或提示用户手动启动 |
+| `service-not-running` | 服务未运行，或 `openUi` 点名的 `pid` 不在 `status.instances` 白名单里（`stop` / `openUi` 时） | 先 `start`，或提示用户手动启动；点名实例前先刷新 `status` |
 | `cli-missing` / `cli-failed` / `invalid-report` | 外部 CLI 不存在 / 执行失败 / 输出无法解析 | 让用户先安装（如 `npm i -g billion-context`） |
 | `start-failed` / `start-timeout` / `stop-failed` | 启动命令没发出去 / 20 秒内没起来 / 终止失败 | 提示用户手动排查；不要自动重试 |
 | `stop-restarted` | 终止成功但进程立刻又被拉起（pi 持有该代理时会这样） | 不是错误：如实转述，提示「要彻底停掉需先退出 pi」 |

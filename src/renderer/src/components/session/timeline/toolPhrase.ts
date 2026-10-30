@@ -70,8 +70,13 @@ const KEYWORD_PHRASES: ReadonlyArray<readonly [keyword: string, verb: string, lo
 	["type", "输入", "正在输入"],
 	["navigate", "打开页面", "正在打开页面"],
 	["goto", "跳转", "正在跳转"],
+	// 「屏幕捕捉」只认带 screen/screenshot 的写法。裸 `capture` 不能进词典：
+	// 抓包/代理类 MCP 工具（reqable、mitmproxy）的工具名同样含 capture，
+	// 命中后会把一次「读取抓包记录」说成「截屏」（2026-10 用户反馈）。
 	["screenshot", "截图", "正在截图"],
-	["capture", "截屏", "正在截屏"],
+	["screen_capture", "截图", "正在截图"],
+	["capture_screen", "截图", "正在截图"],
+	["cua_capture", "截图", "正在截图"],
 	["snapshot", "获取快照", "正在获取快照"],
 	["scroll", "滚动", "正在滚动"],
 	["wait", "等待", "正在等待"],
@@ -83,10 +88,42 @@ const KEYWORD_PHRASES: ReadonlyArray<readonly [keyword: string, verb: string, lo
 ];
 
 /**
+ * ACP 工具类别（`meta.kind`）→ 复用的内置短语分支。
+ *
+ * ACP 的 `meta.toolName` 不是工具名，而是 agent 给的**人类标题**（opencode 给
+ * `` `ls -la` ``，claude 系给 `Read <路径>`）。标题本身已包含参数，当工具名走通用回退
+ * 分支时动词是整条标题、对象又是同一个参数 → 同一行把命令重复两遍（2026-10 反馈）。
+ * 类别是协议里的稳定字段（ACP `ToolKind`），用它选动词；标题只留在行 tooltip 与展开详情。
+ */
+const ACP_KIND_BUILTIN_TOOL: Readonly<Record<string, string>> = {
+	read: "read",
+	edit: "edit",
+	search: "grep",
+	execute: "bash",
+	fetch: "fetch",
+};
+
+/** ACP 类别里没有内置分支的两个文件操作：直接给动词，对象取路径文件名。 */
+const ACP_KIND_VERBS: Readonly<Record<string, readonly [verb: string, loadingVerb: string]>> = {
+	delete: ["删除", "正在删除"],
+	move: ["移动", "正在移动"],
+};
+
+/**
  * 根据工具名和输入参数生成语义化短语。
  * 内置工具走中文动宾短语；常见 MCP/扩展工具名走关键词词典；其余回退为 `工具名 参数摘要`。
+ * `kind` 是 ACP 工具类别：给了类别时先按类别选动词，不拿标题式工具名拼短语。
  */
-export function getToolPhrase(toolName: string, input: Record<string, unknown> = {}): ToolPhrase {
+export function getToolPhrase(toolName: string, input: Record<string, unknown> = {}, kind?: string): ToolPhrase {
+	const acpKind = typeof kind === "string" ? kind.trim().toLowerCase() : "";
+	const builtinTool = ACP_KIND_BUILTIN_TOOL[acpKind];
+	if (builtinTool) return getToolPhrase(builtinTool, input);
+	const kindVerbs = ACP_KIND_VERBS[acpKind];
+	if (kindVerbs) {
+		const target = pickPath(input);
+		return phraseFor(kindVerbs[0], target ? filename(target) : undefined, kindVerbs[1]);
+	}
+
 	const key = toolName.toLowerCase();
 	const path = pickPath(input);
 	const file = path ? filename(path) : undefined;
@@ -147,14 +184,18 @@ export function getToolPhrase(toolName: string, input: Record<string, unknown> =
 		}
 	}
 
-	// 通用/扩展/MCP 工具：回退到「工具名 参数摘要」
+	// 通用/扩展/MCP 工具：回退到「工具名 参数摘要」。
+	// 标题式工具名（ACP 未给类别的 `other`、部分第三方扩展）本身已含参数摘要，
+	// 再拼一遍对象就是同一行重复两遍，因此标题里已有这串参数时不再拼。
 	const paramSummary = firstString(input.command, input.cmd, input.pattern, input.query, input.url, input.file_path, input.filePath, input.path);
 	const displayName = toolName || "工具";
-	return phraseFor(displayName, paramSummary ? truncate(String(paramSummary), 60) : undefined, `正在${displayName}`);
+	const summary = paramSummary !== undefined ? String(paramSummary) : undefined;
+	const alreadyInTitle = summary !== undefined && displayName.includes(summary);
+	return phraseFor(displayName, summary !== undefined && !alreadyInTitle ? truncate(summary, 60) : undefined, `正在${displayName}`);
 }
 
-/** 兼容旧签名：接收 ChatMessage，内部解析 args（给 ToolCard 直接用）。 */
-export function getToolPhraseFromArgs(toolName: string, args: unknown): ToolPhrase {
+/** 兼容旧签名：接收 ChatMessage 的 meta.args / meta.kind，内部解析（给 ToolCard 直接用）。 */
+export function getToolPhraseFromArgs(toolName: string, args: unknown, kind?: unknown): ToolPhrase {
 	const parsed = parseToolArgs(args);
-	return getToolPhrase(toolName, parsed ?? {});
+	return getToolPhrase(toolName, parsed ?? {}, typeof kind === "string" ? kind : undefined);
 }

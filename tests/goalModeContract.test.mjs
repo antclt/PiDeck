@@ -11,6 +11,7 @@ const builtIns = readFileSync("src/main/extensions/builtInExtensions.ts", "utf8"
 const extension = readFileSync("resources/extensions/pi-deck-goal-mode.ts", "utf8");
 const sendHook = readFileSync("src/renderer/src/hooks/useSessionSend.ts", "utf8");
 const timelineCss = readFileSync("src/renderer/src/styles/timeline.css", "utf8");
+const goalStrip = readFileSync("src/renderer/src/components/session/SessionGoalStrip.tsx", "utf8");
 
 test("goal mode is a first-class ComposerAgentMode", () => {
 	assert.match(agentTypes, /ComposerAgentMode = "normal" \| "plan" \| "imagegen" \| "videogen" \| "goal"/);
@@ -108,6 +109,16 @@ test("pi goal extension: resume kicks off a turn and abort stops the loop", () =
 	// Stop 会话（abort）后 agent_end 不再自动续轮：检查 assistant 的 stopReason。
 	assert.match(extension, /lastAssistant\.stopReason === "aborted" \|\| lastAssistant\.stopReason === "error"/);
 	assert.match(extension, /停止会话却停不下来/);
+});
+
+test("goal strip actions promote the preview tab before dispatching", () => {
+	// 目标条的 pause/resume/clear 直接调 sessions.sendPrompt / runDshGoalAction，
+	// 不走 composer 的 promoteAndSend：漏掉晋升时预览 Tab 恢复目标后一换会话就被顶掉。
+	// 断言晋升发生在两条派发路径之前（顺序即契约）。
+	const promoteAt = goalStrip.indexOf("promoteSessionToPermanent(props.sessionId)");
+	assert.ok(promoteAt > 0, "目标条必须调用 paneServices.promoteSessionToPermanent");
+	assert.ok(promoteAt < goalStrip.indexOf("runDshGoalAction"), "DSH 目标动作前先晋升");
+	assert.ok(promoteAt < goalStrip.indexOf("sessions.sendPrompt"), "pi 目标命令发送前先晋升");
 });
 
 test("send path keeps DSH off agentMessage and uses /goal transform", () => {

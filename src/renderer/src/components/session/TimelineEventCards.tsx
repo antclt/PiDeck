@@ -1,4 +1,4 @@
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { cn } from "../../lib/utils";
 import { ProcessEntryReturnToStart } from "./turn/ProcessEntryReturnToStart";
 import { useProcessEntryStickyHeader } from "./turn/useProcessEntryStickyHeader";
@@ -20,12 +20,13 @@ import { useSmoothStream } from "../../utils/useSmoothStream";
 import { SingleLinePreview } from "./SingleLinePreview";
 import { RowText } from "./RowText";
 import { deriveRespondingKind, type RespondingKind } from "./timeline/respondingKind";
+import type { RetryProgress } from "./timeline/retryProgress";
+import { CONTEXT_PRESSURE_PERCENT, elapsedRunMs, formatElapsed, retryCountdownSeconds } from "./timeline/statusFacts";
 import { getToolPhrase } from "./timeline/toolPhrase";
 import { isRetryStatusMessage } from "./timelineFailureNotice";
 
 // Button 收口状态（P0）：本文件按钮全部保留原生——
 // thinking-card-trigger 是折叠触发器 + 内容排版容器（内部 span/small/em 结构）。
-// 迁移路径见 P2 CSS 收口。
 // 迁移路径见 P2 CSS 收口。
 
 function getDiagnosticTone(message: ChatMessage): "error" | "warning" | "success" | "info" {
@@ -130,7 +131,7 @@ export const ThinkingBlock = memo(
 						>
 							{/* 流式思考中整行扫光（dsh-web reasoning-row-sweep 同款）。
 				    预览嵌在同一行里，不再给 SingleLinePreview 第二道光带，避免叠扫。 */}
-							{props.isStreaming && <span aria-hidden className="pointer-events-none absolute inset-y-0 left-[-300px] w-[300px] animate-thinking-sweep motion-reduce:animate-none bg-[linear-gradient(90deg,transparent,color-mix(in_srgb,var(--color-bg-app)_55%,transparent),transparent)]" />}
+							{props.isStreaming && <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-[300px] animate-thinking-sweep motion-reduce:animate-none bg-[linear-gradient(90deg,transparent,color-mix(in_srgb,var(--color-bg-app)_55%,transparent),transparent)]" />}
 							<Brain size={16} className="thinking-row-icon shrink-0" aria-hidden="true" />
 							{/* 文本段：「思考了 Xs」（14px）与折叠预览（12px 等宽）必须共基线，否则预览
 						    比左侧文本高约 3px（原理解释见 RowText）。chevron 是盒子，self-center。 */}
@@ -188,11 +189,11 @@ export const ThinkingBlock = memo(
 /**
  * 流式响应指示器（三点脉动动画 + 状态文案），在 agent 运行/流式期间显示。
  *
- * 状态优先级：
- *  1. 上下文压缩中 → “正在压缩”（压缩发生在上一轮结束后）
- *  2. Agent 启动中 → “正在启动 Agent”（琥珀色）
- *  3. 工具执行中 → “正在工具调用”（琥珀色）
- *  4. 有思考文本 / 流式回答中 → “正在回应”
+ * 状态优先级（判定见 deriveRespondingKind）：
+ *  1. 上下文压缩中 → “正在压缩”（琥珀色）
+ *  2. 工具执行中 → “正在工具调用”（琥珀色）
+ *  3. 有思考文本 / 流式回答中 → “正在回应”
+ *  4. 自动重试退避中 → “正在重试 N/M”（琥珀色，序号取自时间线重试卡）
  *  5. 过渡等待 → 单条静态文案
  *
  * 启动状态单独展示，避免用户发消息后 Agent 尚未完成预热时看起来像“没有响应”。
@@ -207,9 +208,11 @@ export const ThinkingBlock = memo(
 const RESPONDING_PHRASES: Record<RespondingKind, string[]> = {
 	compacting: [t("agent.loading.compacting")],
 	starting: [t("agent.loading.starting1"), t("agent.loading.starting2"), t("agent.loading.starting3")],
+	// executing / retrying 的真实文案由运行时数据拼（工具名、重试序号），这里的单条是兜底
 	executing: [t("agent.loading.executing1")],
 	thinking: [t("agent.loading.responding1")],
 	responding: [t("agent.loading.responding3")],
+	retrying: [t("agent.loading.retrying")],
 	waiting: [t("agent.loading.waiting")],
 };
 
@@ -220,13 +223,121 @@ const RESPONDING_PHRASES: Record<RespondingKind, string[]> = {
  * 过长（扩展 / MCP 工具名）时截断——状态条是单行 nowrap，否则会把消息流撑宽。
  */
 function executingPhrases(toolName: string | undefined): string[] {
-	const fallback = t("agent.loading.executing1");
+	const fallback = RESPONDING_PHRASES.executing[0];
 	if (!toolName) return [fallback];
 	const label = getToolPhrase(toolName, {}).loadingLabel || fallback;
 	return [label.length > 48 ? `${label.slice(0, 47)}…` : label];
 }
 
-export function RespondingIndicator(props: { isCompacting?: boolean; isStarting?: boolean; isExecutingTool?: boolean; executingToolName?: string; liveTextStreaming?: boolean; liveThinkingStreaming?: boolean }) {
+/**
+ * 重试态文案：直接读时间线重试卡上的真实序号（“正在重试 2/3”），上限缺失时只说
+ * “正在重试”，不猜数字——状态条只能说后台已经确定的事实。
+ */
+function retryingPhrases(attempt: number | undefined, maxAttempts: number | undefined): string[] {
+	if (attempt === undefined || maxAttempts === undefined) return RESPONDING_PHRASES.retrying;
+	return [t("agent.loading.retryingCount", { attempt, max: maxAttempts })];
+}
+
+/** 状态条每秒自刷新（只给重试倒计时用；`enabled=false` 时不装定时器）。 */
+function useNowTick(enabled: boolean, intervalMs = 1000): number {
+	const [now, setNow] = useState(() => Date.now());
+	useEffect(() => {
+		if (!enabled) return;
+		setNow(Date.now());
+		const timer = window.setInterval(() => setNow(Date.now()), intervalMs);
+		return () => window.clearInterval(timer);
+	}, [enabled, intervalMs]);
+	return now;
+}
+
+/**
+ * 状态条尾部的事实后缀：已运行时长 / 重试倒计时 / 上下文压力。
+ *
+ * 单独成叶子组件是有意为之：倒计时每秒变了它才重渲染，父级（ReasoningText +
+ * 功能提示轮播）不受影响——流式正文 50ms 刷新与读秒互不干扰。后缀全是可测量的量，
+ * 不参与状态判定（无数据就不渲染某一段，不补味）。
+ *
+ * 本轮已用时间也在这里：2026-10 用户反馈 TurnRow 末尾单独挂一个实时秒表「有点突兀」，
+ * 遂与「正在执行命令…」收进同一行、竖线分隔。为保证同一个数字只出现一次，TurnRow 末尾
+ * 改为只在本轮结束后显示固定耗时，实时值全轮只有这一处（口径见 statusFacts 注释）。
+ *
+ * `aria-hidden`：ReasoningText 已经用 `role="status" aria-live="polite"` 播报当前
+ * 状态短语；读秒每秒变化，若也进无障碍树就是每秒打断一次屏幕阅读器。
+ *
+ * 每个指标配一句 `title` 解释（用户不知道那个数字数的是什么），悬停才出现，
+ * 不占行宽；顺序与可见文字一致，一眼对得上。
+ *
+ * 不显示本轮工具调用次数（用户反馈「· 工具调用 12 次」是纯噪音）：进度看时间线本身，
+ * 状态条只回答「此刻在干什么 / 还要等多久」。
+ */
+function StatusSuffix(props: {
+	retry?: RetryProgress;
+	contextPercent?: number | null;
+	/** 本轮起点（已按 run.startedAt + askWaitMs 折算，见 statusFacts 注释） */
+	runStartedAt?: number;
+	/** ask 阻塞时刻：有值时秒表冻结在这里，不算用户思考时间 */
+	runFrozenAt?: number;
+}) {
+	const retryAtMs = props.retry?.retryAtMs;
+	const runStartedAt = props.runStartedAt;
+	const runFrozenAt = props.runFrozenAt;
+	// 只有真的有会跳的数字时才开表：结束态（无倒计时、无计时）不空转 interval
+	const now = useNowTick(retryAtMs !== undefined || (runStartedAt !== undefined && runFrozenAt === undefined));
+	const facts: Array<{ text: string; hint: string }> = [];
+
+	// 已运行时长排最前：先回答「已经跑了多久」，再回答「还要等多久」。
+	const elapsed = elapsedRunMs(runStartedAt, now, runFrozenAt);
+	// 不足 1 秒不显示：状态条刚亮起时「已运行 0s」是句废话
+	if (elapsed !== undefined && elapsed >= 1_000) {
+		facts.push({ text: t("agent.loading.elapsed", { duration: formatElapsed(elapsed) }), hint: t("agent.loading.hint.elapsed") });
+	}
+
+	// 倒计时到 0 就不再显示：那一下重试已经在飞了，“0 秒后”是句废话。
+	const countdown = retryCountdownSeconds(retryAtMs, now);
+	if (countdown !== undefined && countdown > 0) {
+		facts.push({
+			text: t("agent.loading.retryIn", { seconds: countdown }),
+			hint: t("agent.loading.hint.retryIn", { seconds: countdown }),
+		});
+	}
+
+	// 上下文压力达到阈值才提：压缩通常发生在这之上，提前告警。
+	const contextPercent = props.contextPercent;
+	if (typeof contextPercent === "number" && Number.isFinite(contextPercent) && contextPercent >= CONTEXT_PRESSURE_PERCENT) {
+		const percent = Math.round(contextPercent);
+		facts.push({ text: t("agent.loading.contextUsage", { percent }), hint: t("agent.loading.hint.contextUsage", { percent }) });
+	}
+
+	if (facts.length === 0) return null;
+	// 每段自带竖线分隔（CSS .responding-fact），与右侧功能提示的分隔线同规格：
+	// 行内是「正在执行命令… | 已运行 12s | 3 秒后 | 上下文 82% | 提示」一串事实。
+	return (
+		<span className="responding-suffix" aria-hidden="true">
+			{facts.map((fact, index) => (
+				<span key={index} className="responding-fact" title={fact.hint}>
+					{fact.text}
+				</span>
+			))}
+		</span>
+	);
+}
+
+export function RespondingIndicator(props: {
+	isCompacting?: boolean;
+	isStarting?: boolean;
+	isExecutingTool?: boolean;
+	executingToolName?: string;
+	liveTextStreaming?: boolean;
+	liveThinkingStreaming?: boolean;
+	retry?: RetryProgress;
+	/** 上下文占用百分比（runtime.contextPercent；达阈值才展示） */
+	contextPercent?: number | null;
+	/** 本轮已用时间的起点（run.startedAt + askWaitMs；仅本轮进行中传） */
+	runStartedAt?: number;
+	/** ask 阻塞时刻：有值时秒表冻结在这里 */
+	runFrozenAt?: number;
+}) {
+	const retry = props.retry;
 	// 判定抽到 deriveRespondingKind：pi / DSH 共用，状态条跟「此刻有没有字/工具」对齐。
 	const kind = deriveRespondingKind({
 		isCompacting: props.isCompacting,
@@ -234,9 +345,18 @@ export function RespondingIndicator(props: { isCompacting?: boolean; isStarting?
 		isExecutingTool: props.isExecutingTool,
 		liveTextStreaming: props.liveTextStreaming,
 		liveThinkingStreaming: props.liveThinkingStreaming,
+		isRetrying: retry !== undefined,
 	});
-	// executing 的短语依赖真实工具名（动态），无法放进静态短语表
-	const phrases = kind === "executing" ? executingPhrases(props.executingToolName) : RESPONDING_PHRASES[kind];
+	// executing / retrying 的短语依赖运行时数据（工具名、重试序号），无法放进静态短语表。
+	// 依赖写成原始值：重试对象每次消息更新都会换引用，直接依赖它会让短语数组每秒重建。
+	const executingToolName = props.executingToolName;
+	const retryAttempt = retry?.attempt;
+	const retryMaxAttempts = retry?.maxAttempts;
+	const phrases = useMemo(() => {
+		if (kind === "executing") return executingPhrases(executingToolName);
+		if (kind === "retrying") return retryingPhrases(retryAttempt, retryMaxAttempts);
+		return RESPONDING_PHRASES[kind];
+	}, [kind, executingToolName, retryAttempt, retryMaxAttempts]);
 
 	return (
 		<div className="responding-indicator" data-kind={kind}>
@@ -251,6 +371,7 @@ export function RespondingIndicator(props: { isCompacting?: boolean; isStarting?
 				indicator={<Loader variant="dot-matrix" size={18} speed={1.1} label={t("agent.loading.aria")} />}
 				// 字号用官方默认（text-sm）：实测语义 token 缩放的观感不如官方字阶，保持官方原样
 			/>
+			<StatusSuffix retry={retry} contextPercent={props.contextPercent} runStartedAt={props.runStartedAt} runFrozenAt={props.runFrozenAt} />
 			{/* 功能提示轮播：等待期是用户的注意力空档，用它曝光「没有可见入口」的能力
 			    （命令面板、划选引用、排队发送…）。内容与收录规则见 RespondingTips.tsx / sessionFeatureTips.ts。 */}
 			<RespondingTips />

@@ -29,7 +29,7 @@ export function customThemesDir(): string {
 function builtinDemoItem(): CustomThemeListItem | null {
 	const parsed = parseCustomThemePackage(serializeCustomThemePackage(DEMO_CUSTOM_THEME));
 	if (!parsed.ok) return null;
-	return { source: "builtin", id: parsed.theme.id, name: parsed.theme.name, version: parsed.theme.version, author: parsed.theme.author, description: parsed.theme.description, tokens: parsed.tokens };
+	return { source: "builtin", id: parsed.theme.id, name: parsed.theme.name, version: parsed.theme.version, author: parsed.theme.author, description: parsed.theme.description, base: parsed.theme.base, tokens: parsed.tokens };
 }
 
 /**
@@ -58,7 +58,7 @@ export async function listCustomThemes(): Promise<{ dir: string; themes: CustomT
 		if (raw === null) continue;
 		const parsed = parseCustomThemePackage(raw);
 		if (parsed.ok) {
-			themes.push({ source: "user", fileId, id: parsed.theme.id, name: parsed.theme.name, version: parsed.theme.version, author: parsed.theme.author, description: parsed.theme.description, tokens: parsed.tokens });
+			themes.push({ source: "user", fileId, id: parsed.theme.id, name: parsed.theme.name, version: parsed.theme.version, author: parsed.theme.author, description: parsed.theme.description, base: parsed.theme.base, tokens: parsed.tokens });
 		} else {
 			// 解析失败条目：不可应用，仅供定位坏文件（id 与文件主键一致）
 			themes.push({ source: "user", fileId, id: fileId, name: file, tokens: { light: {}, dark: {} }, parseError: parsed.errors });

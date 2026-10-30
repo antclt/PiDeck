@@ -29,3 +29,28 @@ export function findMessageFavorite(entries: readonly FavoriteEntry[], sessionId
 	if (!key) return undefined;
 	return entries.find((entry) => entry.kind === "message" && favoriteMessageKey(entry.sessionId, entry.messageId) === key);
 }
+
+/** 会话收藏的身份键：sessionId。没有 sessionId 的条目（坏数据）不参与已收藏态。 */
+export function favoriteSessionKey(sessionId: string | null | undefined): string | null {
+	if (typeof sessionId !== "string") return null;
+	const trimmed = sessionId.trim();
+	return trimmed || null;
+}
+
+/** 收藏列表里所有会话收藏的 sessionId 集合（侧栏/标签页入口据此显示已收藏态）。 */
+export function collectFavoritedSessionIds(entries: readonly FavoriteEntry[]): Set<string> {
+	const ids = new Set<string>();
+	for (const entry of entries) {
+		if (entry.kind !== "session") continue;
+		const key = favoriteSessionKey(entry.sessionId);
+		if (key) ids.add(key);
+	}
+	return ids;
+}
+
+/** 按会话身份查找已有收藏（同一会话只认第一条，切换语义与消息收藏一致）。 */
+export function findSessionFavorite(entries: readonly FavoriteEntry[], sessionId: string | null | undefined): FavoriteEntry | undefined {
+	const key = favoriteSessionKey(sessionId);
+	if (!key) return undefined;
+	return entries.find((entry) => entry.kind === "session" && favoriteSessionKey(entry.sessionId) === key);
+}

@@ -16,6 +16,7 @@ import type { CommitEntry, FileTreeNode, GitBranchInfo, PiExtensionListResult, P
 // 这里不能声明成 GitResourceGroups，否则类型在说谎（运行时根本没有 target/displayPath）。
 import type { LocalGitResourceGroups, LocalGitWorkspaceFileDiff } from "../git/localGitTypes";
 import { assertProjectFileReadPath, FILE_OUTSIDE_PROJECT_ERROR } from "../files/projectFileAccess";
+import { WEB_CORS_HEADERS } from "./WebHttpResponders";
 
 export type WebWorkspaceRoutesDeps = {
 	/** projectId → 项目根解析（沿用 WebServiceManager 同源数据，避免第二套项目表）。 */
@@ -143,9 +144,12 @@ const BINARY_EXTENSION_DENYLIST = new Set([
 
 function sendJson(response: ServerResponse, status: number, body: unknown) {
 	const payload = JSON.stringify(body);
+	// workspace 路由自己写头，容易和主路由的 CORS 约定脱节：漏了 Access-Control-Allow-Origin
+	// 时预检照过、200 照回，浏览器却把响应整包丢掉（Failed to fetch，issue #435）。
 	response.writeHead(status, {
 		"content-type": "application/json; charset=utf-8",
 		"cache-control": "no-store",
+		...WEB_CORS_HEADERS,
 	});
 	response.end(payload);
 }
@@ -423,7 +427,7 @@ export class WebWorkspaceRoutes {
 			return true;
 		}
 		const sourceId = body.sourceId;
-		if (sourceId !== "pi-global" && sourceId !== "agents-global" && sourceId !== "project-pi" && sourceId !== "project-agents") {
+		if (sourceId !== "pi-global" && sourceId !== "agents-global" && sourceId !== "pideck-global" && sourceId !== "project-pi" && sourceId !== "project-agents") {
 			sendError(response, 400, "webError.invalidRequest", "sourceId must be a valid skill location id");
 			return true;
 		}

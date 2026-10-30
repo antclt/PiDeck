@@ -144,12 +144,19 @@ export type IlinkTextItem = {
 	create_time_ms?: number;
 };
 
+export type IlinkVoiceItem = {
+	type: typeof ITEM_TYPE_VOICE;
+	/** 服务端 ASR 转写（有时为空）；有转写就直接当正文用，不必回「不支持语音」。 */
+	voice_item?: { text?: string };
+	[key: string]: unknown;
+};
+
 export type IlinkUnknownItem = {
 	type: number;
 	[key: string]: unknown;
 };
 
-export type IlinkMessageItem = IlinkTextItem | IlinkUnknownItem;
+export type IlinkMessageItem = IlinkTextItem | IlinkVoiceItem | IlinkUnknownItem;
 
 export type IlinkMessage = {
 	seq?: number;
@@ -251,8 +258,21 @@ export function extractMessageText(items: IlinkMessageItem[] | undefined): strin
 		.join("");
 }
 
-/** 列表里是否含非文本 item——用于给「暂不支持图片/语音」的降级提示做判断。 */
-export function hasUnsupportedItem(items: IlinkMessageItem[] | undefined): boolean {
-	if (!items) return false;
-	return items.some((item) => item.type !== ITEM_TYPE_TEXT);
+/**
+ * 语音消息的 ASR 转写（#427 追加三-1）：iLink 有时把识别文本塞进 voice_item.text。
+ * 有转写就按正文处理，没有任何文本时才走「暂不支持语音」的明确回执。
+ */
+export function extractVoiceTranscript(items: IlinkMessageItem[] | undefined): string {
+	if (!items) return "";
+	return items
+		.filter((item): item is IlinkVoiceItem => item.type === ITEM_TYPE_VOICE)
+		.map((item) => (typeof item.voice_item?.text === "string" ? item.voice_item.text.trim() : ""))
+		.filter((text) => text.length > 0)
+		.join(" ");
+}
+
+/** 消息里出现的非文本 item 类型（去重、按出现顺序）——用于回「收到图片/语音/文件」的明确提示。 */
+export function unsupportedItemTypes(items: IlinkMessageItem[] | undefined): number[] {
+	if (!items) return [];
+	return [...new Set(items.filter((item) => item.type !== ITEM_TYPE_TEXT).map((item) => item.type))];
 }

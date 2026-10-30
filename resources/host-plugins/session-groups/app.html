@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>会话分组</title>
+		<link rel="stylesheet" href="styles.css" />
+	</head>
+	<body>
+		<div class="page">
+			<header class="page-head">
+				<div class="page-head-text">
+					<h1 id="scope-title" class="page-title"></h1>
+					<p id="scope-stats" class="page-subtitle"></p>
+				</div>
+				<div class="page-head-actions">
+					<button id="btn-toggle-all" class="btn btn-outline" type="button"></button>
+					<button id="btn-new" class="btn btn-primary" type="button"></button>
+				</div>
+			</header>
+
+			<div class="filters">
+				<div class="search-field">
+					<svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+						<circle cx="11" cy="11" r="7"></circle>
+						<path d="m20 20-3.5-3.5"></path>
+					</svg>
+					<input id="search-input" class="input search-input" type="search" autocomplete="off" spellcheck="false" />
+					<button id="search-clear" class="search-clear" type="button" hidden></button>
+				</div>
+				<div id="dir-filter" class="select">
+					<button id="dir-filter-trigger" class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+						<span id="dir-filter-value" class="select-value"></span>
+						<svg class="select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+							<path d="m6 9 6 6 6-6"></path>
+						</svg>
+					</button>
+				</div>
+			</div>
+
+			<div id="status" class="status" role="status" hidden></div>
+
+			<main id="groups" class="groups"></main>
+		</div>
+
+		<!-- 新建分组 / 编辑目录范围：名称 + 目录多选（选中目录里的会话自动入组） -->
+		<div id="create-overlay" class="overlay" hidden>
+			<div class="modal" role="dialog" aria-modal="true" aria-labelledby="create-title">
+				<div class="modal-head">
+					<h2 id="create-title" class="modal-title"></h2>
+					<button id="create-close" class="icon-btn" type="button"></button>
+				</div>
+				<div class="modal-body">
+					<label id="create-name-label" class="field-label" for="create-name"></label>
+					<input id="create-name" class="input" type="text" maxlength="80" autocomplete="off" spellcheck="false" />
+					<p id="create-note" class="hint" hidden></p>
+					<div class="section-head">
+						<span id="create-dirs-head" class="section-title"></span>
+						<span class="section-actions">
+							<button id="create-dirs-all" class="btn btn-ghost btn-xs" type="button"></button>
+							<button id="create-dirs-none" class="btn btn-ghost btn-xs" type="button"></button>
+						</span>
+					</div>
+					<div id="create-dirs" class="picker"></div>
+				</div>
+				<div class="modal-foot">
+					<span id="create-hint" class="hint"></span>
+					<button id="create-cancel" class="btn btn-outline" type="button"></button>
+					<button id="create-ok" class="btn btn-primary" type="button"></button>
+				</div>
+			</div>
+		</div>
+
+		<!-- 添加会话：按目录分节，勾选即加入本组（不互斥） -->
+		<div id="overlay" class="overlay" hidden>
+			<div class="modal modal-lg" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+				<div class="modal-head">
+					<h2 id="modal-title" class="modal-title"></h2>
+					<button id="modal-close" class="icon-btn" type="button"></button>
+				</div>
+				<div class="modal-body">
+					<div class="search-field">
+						<svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+							<circle cx="11" cy="11" r="7"></circle>
+							<path d="m20 20-3.5-3.5"></path>
+						</svg>
+						<input id="modal-search" class="input search-input" type="search" autocomplete="off" spellcheck="false" />
+					</div>
+					<div id="modal-list" class="picker picker-tall"></div>
+				</div>
+				<div class="modal-foot">
+					<span id="modal-hint" class="hint"></span>
+					<button id="modal-cancel" class="btn btn-outline" type="button"></button>
+					<button id="modal-save" class="btn btn-primary" type="button"></button>
+				</div>
+			</div>
+		</div>
+
+		<!-- 会话详情 -->
+		<div id="info-overlay" class="overlay" hidden>
+			<div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="info-title">
+				<div class="modal-head">
+					<h2 id="info-title" class="modal-title"></h2>
+					<button id="info-close" class="icon-btn" type="button"></button>
+				</div>
+				<div id="info-body" class="modal-body info-body"></div>
+			</div>
+		</div>
+
+		<!-- 删除分组确认（不用 window.confirm：渲染器里不可用且阻塞） -->
+		<div id="confirm-overlay" class="overlay" hidden>
+			<div class="modal modal-sm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-text">
+				<div class="modal-head">
+					<h2 id="confirm-title" class="modal-title"></h2>
+				</div>
+				<div class="modal-body">
+					<p id="confirm-text" class="confirm-text"></p>
+				</div>
+				<div class="modal-foot">
+					<button id="confirm-cancel" class="btn btn-outline" type="button"></button>
+					<button id="confirm-ok" class="btn btn-danger" type="button"></button>
+				</div>
+			</div>
+		</div>
+
+		<script type="module" src="app.js"></script>
+	</body>
+</html>

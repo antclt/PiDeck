@@ -288,12 +288,24 @@ export function sameChatMessageForRender(previous: ChatMessage, next: ChatMessag
 	);
 }
 
+/** `hiddenFileMessages` 的按本体比较（只喂轮末文件 chip，量小）。 */
+function sameFileMessageList(previous: ChatMessage[] | undefined, next: ChatMessage[] | undefined): boolean {
+	if (previous === next) return true;
+	if (!previous || !next) return previous === next;
+	if (previous.length !== next.length) return false;
+	return previous.every((message, index) => sameChatMessageForRender(message, next[index]));
+}
+
 export function sameAgentRunForRender(previous: AgentRunItem, next: AgentRunItem): boolean {
 	// 引用相同即内容相同（阶段0补强：历史 run 复用旧对象引用后，此处 O(1) 快速路径）
 	if (previous === next) return true;
 	if (previous.id !== next.id || previous.startedAt !== next.startedAt || previous.endedAt !== next.endedAt || previous.askWaitMs !== next.askWaitMs || previous.askPending !== next.askPending || previous.askPendingAt !== next.askPendingAt || previous.items.length !== next.items.length) {
 		return false;
 	}
+	// hiddenFileMessages 只喂轮末「改了哪些文件」的 chip 行，不在 items 里，但同样是 run 的
+	// 显示内容。漏比它会让 `hiddenFileMessages` 内容变了而整轮被判为未变 → chip 行不更新
+	// （PTC 会话里 agent 静默改文件、本轮无可见文本时，用户看到的是上一轮的文件清单）。
+	if (!sameFileMessageList(previous.hiddenFileMessages, next.hiddenFileMessages)) return false;
 	return previous.items.every((item, index) => {
 		const other = next.items[index];
 		if (!other || item.kind !== other.kind) return false;
@@ -339,6 +351,19 @@ export function getMultiSelectImageCaptureIds(items: RenderMessage[], selectedId
 }
 
 /* ── 消息分组 ── */
+
+/**
+ * 消息在墙钟时间上的结束点。
+ *
+ * assistant 的 `timestamp` 是请求开始（pi 语义），终态消息另有 `meta.endedAt`
+ * （请求开始 + 实测耗时；无实测耗时的后端为终态事件到达时刻）。轮末固定耗时
+ * 必须用结束点相减——用 `timestamp` 会把「回复耗时」算成最后一次请求的排队时间，
+ * 流式结束后与 `startedAt` 相等时甚至恒为 0。历史/旧数据缺 `endedAt` 时回退 timestamp。
+ */
+export function messageEndedAt(message: ChatMessage): number {
+	const endedAt = message.meta?.endedAt;
+	return typeof endedAt === "number" && Number.isFinite(endedAt) && endedAt > 0 ? endedAt : message.timestamp;
+}
 
 export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?: boolean } = {}): RenderMessage[] {
 	// agentBusy 决定 error 诊断卡是否打断当前 run（见下方 error 分支）
@@ -453,7 +478,7 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 		flushThinking();
 		flushTools();
 		if (currentRun.length === 0) runStartedAt = message.timestamp;
-		runEndedAt = message.timestamp;
+		runEndedAt = messageEndedAt(message);
 		currentRun.push({ kind: "message", message });
 	}
 
@@ -527,7 +552,8 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 			}
 			appendRunMessage(message);
 		} else if (message.role === "tool") {
-			// PTC 子调用（meta.ptcNested）：DSH run_code 程序内部的文件类子调用（write/edit…）
+			// 隐藏工具卡（meta.ptcNested）：DSH run_code 程序内部的文件类子调用（write/edit…）、
+			// ACP 多文件 diff 的其余文件——只喂文件聚合，不进时间线。
 			// 时间线仍只展示外层 run_code 卡——否则一轮 PTC 会凭空冒出几十张嵌套工具卡。
 			// 但**不能直接丢弃**：这类消息是 PTC 会话「修改的文件」的唯一数据源（run_code 永远
 			// 命中不到 write/edit 工具名）。直接丢弃会让轮末 chip 行对 PTC 会话恒为空。
@@ -588,7 +614,17 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 			} else {
 				const last = currentRun[currentRun.length - 1];
 				if (last.kind === "extension-entries") {
-					last.messages.push(message);
+					// 不可变追加，不要 `last.messages.push(message)`。
+					//
+					// 就地 push 会把「引用相等 = 内容相等」这个前提打掉：`sameRunItemReference`
+					// 的 extension-entries 分支判 `a.messages === b.messages`，同一数组被就地改了
+					// 之后两版永远相等 → 永远复用旧条目 → 下游 `ExtensionEntryStep` 的 memo
+					// 看到同一引用、认为内容没变，**新消息卡永不出现**（也不是报错，是静默冻结）。
+					// 换新数组后引用随内容变化，「引用相等 ⇔ 内容相等」这条不变量重新成立。
+					currentRun[currentRun.length - 1] = {
+						...last,
+						messages: [...last.messages, message],
+					};
 				} else {
 					currentRun.push({ kind: "extension-entries", id: message.id, messages: [message] });
 				}
@@ -680,6 +716,71 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
 	return result;
 }
 
+function sameItemReferences(a: readonly unknown[] | undefined, b: readonly unknown[] | undefined): boolean {
+	if (a === b) return true;
+	if (!a || !b || a.length !== b.length) return false;
+	for (let index = 0; index < a.length; index += 1) {
+		if (a[index] !== b[index]) return false;
+	}
+	return true;
+}
+
+function sameRunItemReference(previous: AgentRunItem["items"][number], next: AgentRunItem["items"][number]): boolean {
+	if (previous === next) return true;
+	// MessageItem 没有顶层 id（身份在 message.id 上），所以 id 比较只能在各自分支里做。
+	if (previous.kind !== next.kind) return false;
+	switch (next.kind) {
+		case "message":
+			return previous.kind === "message" && previous.message.id === next.message.id && previous.message === next.message;
+		case "tool-group":
+			// groupToolMessages 每次都新建 messages 数组，所以比成员引用而不是数组引用。
+			return previous.kind === "tool-group" && previous.id === next.id && sameItemReferences(previous.messages, next.messages);
+		case "thinking-group":
+			return previous.kind === "thinking-group" && previous.id === next.id && previous.text === next.text && previous.startedAt === next.startedAt && previous.endedAt === next.endedAt && sameItemReferences(previous.messages, next.messages);
+		case "retry-group":
+		case "error-group":
+			return previous.kind === next.kind && previous.id === next.id && previous.message === next.message;
+		case "extension-entries":
+			return previous.kind === "extension-entries" && previous.id === next.id && sameItemReferences(previous.messages, next.messages);
+	}
+}
+
+/**
+ * 顶层条目（RenderMessage）的引用等价判断。
+ *
+ * 为什么单独一个函数：`sameRunItemReference` 只认 `AgentRunItem["items"]` 里的条目类型
+ * （message / tool-group / thinking-group / retry-group / error-group / extension-entries），
+ * 不含 agent-run 本身；而顶层列表里 agent-run 与这些条目混排，比较需要先分流。
+ */
+function sameTopLevelEntryReference(previous: RenderMessage, next: RenderMessage): boolean {
+	if (previous === next) return true;
+	if (previous.kind === "agent-run" || next.kind === "agent-run") {
+		return previous.kind === "agent-run" && next.kind === "agent-run" && sameAgentRunForRender(previous, next);
+	}
+	return sameRunItemReference(previous, next);
+}
+
+/**
+ * run 的条目列表引用复用：内容未变的条目换回旧引用。
+ *
+ * 为什么需要：`groupToolMessages` 每次全量重建 run，所以**每个** run 的 `items` 数组与其中的
+ * tool-group / thinking-group 对象都是新的。旧实现只复用「整个 run」，于是内容变化的那个 run
+ * （流式轮）里，全部条目都是新引用 → `buildTurnDisplay` 的 entry、`groupTurnProcess` 的过程组
+ * 全部失去 memo 依据 → 已展开的执行过程组每 50ms 重建预算内的成员元素与组头文案。
+ * 这一层把条目换回旧引用后，链路从 `buildTurnDisplay` 开始就能逐层命中。
+ */
+function reconcileRunItems(previous: readonly AgentRunItem["items"][number][], next: readonly AgentRunItem["items"][number][]): AgentRunItem["items"] {
+	let allReused = previous.length === next.length;
+	const merged = next.map((item, index) => {
+		const prev = previous[index];
+		if (prev !== undefined && sameRunItemReference(prev, item)) return prev;
+		allReused = false;
+		return item;
+	});
+	// 全部命中且长度相同：把数组引用也复用掉（下游 useMemo 才能整体命中）。
+	return allReused ? (previous as AgentRunItem["items"]) : merged;
+}
+
 /**
  * 对比新旧渲染列表，对「内容未变化的 run」复用旧对象引用。
  *
@@ -690,21 +791,45 @@ export function groupToolMessages(messages: ChatMessage[], options: { agentBusy?
  *
  * 规则：按 run.id 配对，内容相同（sameAgentRunForRender）则取旧引用；
  * 新增/删除/内容变化的 run 用新对象。列表结构（顺序、条目数）以 next 为准。
+ *
+ * 内容变化的 run 还会再做一层**条目级**复用（reconcileRunItems）：流式轮每 50ms 都在变，
+ * 但一轮里真正在变的只有正在输出的那一条，其余条目的旧引用必须留下来，否则整条渲染链
+ * （buildTurnDisplay → groupTurnProcess → ProcessFold → ProcessGroupStep）的 memo 全部失效。
  */
 export function reconcileRuns(previous: RenderMessage[] | undefined, next: RenderMessage[]): RenderMessage[] {
 	if (!previous) return next;
-	// 只对 agent-run 做引用复用；message/tool-group/thinking-group 顶层条目按需更新
+	// 顶层只对 agent-run 做引用复用；message/tool-group/thinking-group 顶层条目按需更新
 	const prevRuns = new Map<string, AgentRunItem>();
 	for (const item of previous) {
 		if (item.kind === "agent-run") prevRuns.set(item.id, item);
 	}
 	let changed = false;
-	const reconciled = next.map((item) => {
-		if (item.kind !== "agent-run") return item;
+	const reconciled = next.map((item, index) => {
+		if (item.kind !== "agent-run") {
+			// 顶层非 run 条目（用户消息、独立的重试/错误卡片、扩展输出条目）：按位置配对，
+			// 引用等价就换回旧对象。
+			//
+			// 这里必须置 changed —— 旧实现直接 `return item` 既不配对也不置位，于是
+			// 「只改了一条顶层消息、条目数不变」时整函数返回 `previous`，**新内容被静默丢弃**
+			// （编辑用户消息、隐藏文件消息重算、扩展条目原地更新都会踩到）。
+			const prev = previous[index];
+			if (prev !== undefined && prev.kind !== "agent-run" && sameTopLevelEntryReference(prev, item)) return prev;
+			changed = true;
+			return item;
+		}
 		const prev = prevRuns.get(item.id);
-		if (prev && sameAgentRunForRender(prev, item)) return prev;
+		if (!prev) {
+			changed = true;
+			return item;
+		}
+		if (sameAgentRunForRender(prev, item)) return prev;
 		changed = true;
-		return item;
+		// 外层字段（endedAt / askWaitMs 等）真的变了，所以 run 必须新建；但 items 一律用复用后的结果：
+		// 全部命中时 `reconcileRunItems` 直接返回 `prev.items` 引用，下游 buildTurnDisplay /
+		// groupTurnProcess 的 useMemo 才真正命中；若沿用 next 的 items（内容相同但引用是新的），
+		// 这一整层就白做了。
+		const items = reconcileRunItems(prev.items, item.items);
+		return { ...item, items };
 	});
 	// 只有「长度相同且全部未变化」才能整体复用 previous 数组本身；
 	// 否则（新增/删除/变化）必须返回 reconciled（其中未变化 run 已复用旧引用）。

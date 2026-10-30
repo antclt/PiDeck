@@ -233,7 +233,9 @@ export function QueuedPromptPanel(props: {
 	// 停止响应后的队列抑制（toast 瞬时易逝）：面板常驻提示用户队列不会自动发送，需再发一条消息恢复。
 	const drainSuspended = useAtomValue(queueDrainSuppressedByIdAtom)[sessionId ?? ""] === true;
 	const askPanel = useAskPanel();
-	const agentBusy = isSessionRuntimeBusy(runtime?.status, runtime?.state);
+	const backend = runtime?.backend ?? sessionRecord?.backend;
+	// ACP 回合结算后 status 可能滞后为 running：isTurnActive=false 视为空闲（与 composer 发送判定同口径）。
+	const agentBusy = isSessionRuntimeBusy(runtime?.status, runtime?.state, backend === "acp" ? "acp" : undefined);
 	// runtime 优先于 record（record 未及回写时 runtime 已生效）；ACP 无 steer 通道。
 	const steerSupported = (runtime?.backend ?? sessionRecord?.backend) !== "acp";
 	if (!sessionId || !props.prompts.length) return null;
@@ -337,6 +339,8 @@ export function ComposerSendControls(props: {
 		isGeneratingImage: props.isGeneratingImage,
 	});
 	const primaryStops = buttonState === "stop";
+	// 忙碌且有内容：主钮是发送，另起一个停止钮（见下方注释）
+	const showInlineStop = props.isAgentBusy && !primaryStops;
 	const label = primaryStops ? t("app.stop") : t("app.send");
 	const disabled = primaryStops ? false : props.isAgentStarting || props.isGeneratingImage || !props.canSend;
 	// 拆分菜单：把「加入当前回合 / 排队到下一轮 / 并行发送」从「发出后的队列行」前置到发送现场，
@@ -349,6 +353,14 @@ export function ComposerSendControls(props: {
 		// （DropdownMenu 不产生 DOM 节点，trigger 按钮自然成为第二个成员，
 		// 由 ButtonGroup 收平相邻内侧角），中间以分隔线断口，与官方示例一致。
 		<ButtonGroup className="composer-send-controls">
+			{/* 忙碌且输入框有内容时主钮是「发送」（走 steer/followUp），停止入口会整体消失；
+			    ACP 没有 steer 通道，回合中想停就只能清空输入框。这里补一个独立停止钮，
+			    与主钮并列，不改变发送语义。 */}
+			{showInlineStop ? (
+				<Button variant="ghost" size="icon-sm" className="size-7 rounded-l-md text-[var(--color-danger)] hover:bg-[color:color-mix(in_srgb,var(--color-danger)_15%,transparent)] hover:text-[var(--color-danger)]" aria-label={t("app.stop")} title={t("app.stop")} onClick={props.onStop}>
+					<Square size={11} strokeWidth={0} fill="currentColor" aria-hidden="true" />
+				</Button>
+			) : null}
 			<Button
 				variant="default"
 				size="icon-sm"

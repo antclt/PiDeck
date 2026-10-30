@@ -20,6 +20,7 @@ import { FileDiff } from "../agents/file-diff";
 import { desktopApi } from "../../desktopApi";
 import { copyTextWithCopiedNotice } from "../../utils/clipboardNotice";
 import { formatDuration, getToolDetailText, getToolDiffTarget, getToolExitCode, getToolLiveStartTimestamp, getToolName, getToolStatus, fileChangeToDiffLines } from "./TimelineFormat";
+import { hasFileChangePayload } from "../../../../shared/fileChanges";
 import { useInsideProcessGroupBody } from "./turn/processGroupScrollContext";
 
 export type DiffFileHandler = (path: string, originalContent?: string, content?: string) => void;
@@ -56,9 +57,8 @@ function toolIcon(toolName: string): ReactNode {
 	return <Wrench size={16} />;
 }
 
-/** 从工具消息 meta 中提取副标题（文件路径或命令），让 trigger 行能体现工具作用对象。
- *  pi 的工具参数可能是对象，也可能已被主进程截断/序列化为 JSON 字符串；两种格式都要兼容，否则 bash 命令摘要会丢失。 */
-function getToolSubtitle(message: ChatMessage): string {
+/** 从工具消息 meta 中提取副标题（文件路径或命令），不做去重（见 getToolSubtitle）。 */
+function pickToolSubtitle(message: ChatMessage): string {
 	const meta = message.meta;
 	if (!meta) return "";
 	// 优先从 args 取参数（pi 工具事件的标准结构）
@@ -103,6 +103,17 @@ function getToolSubtitle(message: ChatMessage): string {
 		}
 	}
 	return "";
+}
+
+/** trigger 行的副标题：工具作用对象（文件路径或命令）。
+ *  pi 的工具参数可能是对象，也可能已被主进程截断/序列化为 JSON 字符串；两种格式都要兼容，否则 bash 命令摘要会丢失。
+ *  副标题不得与主标签重复：ACP 的 meta.toolName 是 agent 给的人类标题（`` `ls -la` ``、`Read <路径>`），
+ *  标题里已经带着同一个参数，再当副标题回填就会把命令在同一行印两遍（2026-10 用户反馈）。 */
+function getToolSubtitle(message: ChatMessage): string {
+	const value = pickToolSubtitle(message);
+	if (!value) return value;
+	const title = getToolName(message);
+	return title.includes(value) ? "" : value;
 }
 
 /**
@@ -221,10 +232,11 @@ export const ToolCard = memo(function ToolCard(props: {
 	// write/edit/create/patch 工具：从参数直接取 diff 目标（写整文件新内容 /
 	// 编辑的 oldText→newText 变动区），展开区优先展示 diff 而不是原始结果文本。
 	const diffTarget = getToolDiffTarget(props.message);
-	const showDiff = diffTarget !== undefined;
+	// ACP 的编辑可能只有路径（wire 上没有旧/新文本）：有目标但没有内容时不渲染空的 diff 块。
+	const showDiff = diffTarget !== undefined && hasFileChangePayload(diffTarget);
 	// 学 ZCode 过程行：主标签是语义动词（「读取」「执行」），作用对象进等宽 chip 单行截断；
 	// 原始工具名退到行 tooltip，不再常驻行内与动词重复占位。
-	const phrase = getToolPhraseFromArgs(toolName, props.message.meta?.args);
+	const phrase = getToolPhraseFromArgs(toolName, props.message.meta?.args, props.message.meta?.kind);
 	const durationMs = typeof props.message.meta?.durationMs === "number" ? props.message.meta.durationMs : undefined;
 	// 模型用 read 工具读取 SKILL.md 来加载 skill：识别后以 skill 徽标样式渲染
 	const skillName = getReadSkillName(props.message);
@@ -319,7 +331,7 @@ export const ToolCard = memo(function ToolCard(props: {
 					{/* 工具运行中整行扫光（dsh-web command-row-sweep 同款，与思考扫光同 keyframes）。
 					    status === "running" 才挂载：stopped/error/done 立即消失（stopped 由 props.stopped 短路）；
 					    pointer-events-none 不挡 trigger 点击展开 */}
-					{status === "running" && <span aria-hidden className="pointer-events-none absolute inset-y-0 left-[-300px] w-[300px] animate-tool-sweep motion-reduce:animate-none bg-[linear-gradient(90deg,transparent,color-mix(in_srgb,var(--color-bg-app)_55%,transparent),transparent)]" />}
+					{status === "running" && <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-[300px] animate-tool-sweep motion-reduce:animate-none bg-[linear-gradient(90deg,transparent,color-mix(in_srgb,var(--color-bg-app)_55%,transparent),transparent)]" />}
 					<button type="button" className="flex min-h-7 min-w-0 flex-[1_1_auto] cursor-pointer items-center gap-2 border-0 bg-transparent py-1 pr-0.5 pl-1 text-left text-chat-row text-text-faint focus-visible:-outline-offset-2 focus-visible:outline-2" onClick={toggleExpanded} aria-expanded={expanded} title={rowTitle}>
 						<span className="tool-card-icon inline-flex shrink-0 items-center justify-center">{isSkillRead ? <Brain size={16} /> : isAskCard ? <MessageCircle size={16} /> : toolIcon(toolName)}</span>
 						{/* 文本段：动词标签（14px）与等宽 chip 预览（12px）必须共基线，否则等宽详情

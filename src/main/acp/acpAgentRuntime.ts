@@ -12,6 +12,7 @@ import type { AcpConfigOption } from "./acpProtocol";
 import type { AcpConnection } from "./AcpConnection";
 import type { AcpPermissionRequests } from "./AcpPermissionRequests";
 import type { AcpProjectionState } from "./AcpEventProjector";
+import { acpSessionTps, type AcpUsageTotals } from "./acpUsageMetrics";
 
 /** cancel 发起方:user_stop=用户主动停止(空白收口属正常);stall=看门狗代发(按失败收口)。 */
 export type AcpCancelSource = "user_stop" | "stall";
@@ -40,6 +41,8 @@ export type AcpAgentRuntime = {
 	cancelReason: AcpCancelSource | null;
 	/** load 尚未成功时不发布半段历史、标题或配置，失败可完整丢弃。 */
 	reloading: boolean;
+	/** 握手时 session/load 成功（历史会话恢复）：此时不重放工具级默认配置，交给 agent 恢复会话状态。 */
+	loadedSession: boolean;
 	flushTimer: NodeJS.Timeout | null;
 	flushPending: boolean;
 	/** abort/超时升级强杀前的宽限定时器;回合正常结算时清除。 */
@@ -48,14 +51,38 @@ export type AcpAgentRuntime = {
 	stallTimer: NodeJS.Timeout | null;
 	/** 最近一次 session/update 或回合派发的时间戳,stall 判定基准。 */
 	lastUpdateAt: number;
+	/** 回合兑底超时的滚动刷新句柄：session/prompt 在途时由连接层布防，回合内每有进展
+	 *  （session/update、挂起审批）就顺延截止——超时口径因此是「无进展静默上限」而非
+	 *  总时长硬上限，长但健康的回合不会被误杀；回合结算/stop/连接死亡统一置空。 */
+	turnDeadlineRefresh: (() => void) | null;
 	/** 在途工具调用 id 集：tool_call 开始入集，tool_call_update 终态出集（AcpUpdatePipeline 维护）。
 	 *  stall 看门狗把「有在途工具调用」视作合法等待（同挂起审批）：长命令 started→completed
 	 *  之间可长时间无流式输出，不算静默；回合各收口点清空，防跨回合泄漏成永久豁免。 */
 	inFlightToolCalls: Set<string>;
 	/** 本回合升级强杀原因;sendPrompt catch 依此定向结算(delivery=unknown + 本地化文案)。 */
 	escalatedStop: AcpAbortEscalationReason | null;
+	/**
+	 * 本回合收到的 session/update 类型计数（诊断用）：空白回合要靠它区分
+	 * 「事件流真的没来」与「来了但我们没消费」（如 agent 发的是非标准 update 类型）。
+	 * 每回合派发前清空。
+	 */
+	turnUpdateKinds: Map<string, number>;
+	/** 本回合收到的非 session/update 通知的最后一个样本（method + 截断原文），诊断用。 */
+	turnForeignNotification?: string;
+	/** CLI stderr 尾部（最近几行，限流/登录失败等只打在 stderr 的错误靠它带进 UI）。 */
+	stderrTail: string[];
 	/** 会话标题(session_info_update / new 返回值;供 catalog 自动标题)。 */
 	title?: string;
+	/** 本回合派发时刻（TTFT/总耗时的计时基准；回合结算或失败后清空）。 */
+	turnStartedAt?: number;
+	/** 本回合首个正文 chunk 到达时刻（TTFT 首选，与 pi 的 text delta 同口径）。 */
+	turnFirstTextAt?: number;
+	/** 本回合首个思考 chunk 到达时刻（无正文时作为 TTFT 回退，与 pi 同语义）。 */
+	turnFirstThoughtAt?: number;
+	/** 会话累计 token/缓存用量（session/prompt 响应的实验性 usage 累计；CLI 不返回时缺省）。 */
+	usageTotals?: AcpUsageTotals;
+	/** 最近一次成功回合的性能快照（TTFT/总耗时/TPS），供底栏圆环面板展示。 */
+	lastReplyPerf?: { ttftMs?: number; totalMs?: number; tps?: number; endToEndTps?: number; at: number };
 	/** session/new|load 与 set_config_option 返回的会话级配置(模型/思考档/模式)。
 	 *  渲染层按 category 渲染选择器;agent 不提供时恒 undefined(回退隐藏)。 */
 	configOptions?: AcpConfigOption[];
@@ -73,6 +100,11 @@ export type AcpManagerLogger = { info(channel: string, message: string, meta?: R
 /** runtime → agentsRuntimeState 通道载荷（底栏状态/上下文仪表数据源）。纯映射，无副作用。 */
 export function buildAgentRuntimeState(runtime: AcpAgentRuntime): AgentRuntimeState {
 	const usage = runtime.projection.usage;
+	// token/缓存/命中率来自 session/prompt 响应的实验性 usage 累计（CLI 不返回时整组缺省）；
+	// TTFT/总耗时/TPS 由适配层本地计时，任何流式 CLI 都有值。
+	const totals = runtime.usageTotals;
+	const perf = runtime.lastReplyPerf;
+	const sessionTps = acpSessionTps(totals);
 	return {
 		isStreaming: runtime.turnActive,
 		isTurnActive: runtime.turnActive,
@@ -86,5 +118,24 @@ export function buildAgentRuntimeState(runtime: AcpAgentRuntime): AgentRuntimeSt
 		...(usage?.size !== undefined ? { contextWindow: usage.size } : {}),
 		...(usage?.used !== undefined && usage?.size !== undefined ? { contextPercent: Math.max(0, Math.min(100, Math.round((usage.used / usage.size) * 1000) / 10)) } : {}),
 		...(usage?.costAmount !== undefined ? { cost: usage.costAmount } : {}),
+		...(totals
+			? {
+					inputTokens: totals.inputTokens,
+					outputTokens: totals.outputTokens,
+					// 缓存/命中率只在 agent 真的上报过缓存字段时下发（Qoder 只报 input/output，
+					// 显示一排 0 会让用户以为缓存完全没命中）。
+					...(totals.cacheReported
+						? {
+								cacheRead: totals.cacheRead,
+								cacheWrite: totals.cacheWrite,
+								cacheTotal: totals.cacheRead + totals.cacheWrite,
+								...(totals.cacheHitLatest !== undefined ? { cacheHitPercent: totals.cacheHitLatest } : {}),
+								...(totals.cacheHitSamples > 0 ? { cacheHitAveragePercent: totals.cacheHitSum / totals.cacheHitSamples, cacheHitSampleCount: totals.cacheHitSamples } : {}),
+							}
+						: {}),
+				}
+			: {}),
+		...sessionTps,
+		...(perf ? { ttftMs: perf.ttftMs, totalMs: perf.totalMs, tps: perf.tps, endToEndTps: perf.endToEndTps } : {}),
 	};
 }

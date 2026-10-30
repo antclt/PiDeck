@@ -100,7 +100,8 @@ let previewSettings: AppSettings = {
 	themeScheduleLightStart: "07:00",
 	themeScheduleDarkStart: "19:00",
 	accent: "default",
-	themeSkin: "classic-green",
+	themeStyle: "classic",
+	themePalette: "classic-green",
 	customThemeOverrides: {},
 	backgroundImage: "",
 	backgroundImageOpacity: 0.8,
@@ -116,7 +117,8 @@ let previewSettings: AppSettings = {
 	disabledSkills: [],
 	/** 提示词模板禁用列表：与 SettingsStore 默认一致，预览壳不启用模板白名单 */
 	disabledPrompts: [],
-	sessionTabOpenMode: "preview", // 与 SettingsStore 默认一致：忙碌时发送默认「插入当前回合」
+	sessionTabOpenMode: "preview",
+	scratchPadScope: "project", // 与 SettingsStore 默认一致：草稿本按项目隔离
 	busySendDelivery: "steer",
 	tpsDisplayMode: "streaming",
 	// 遗留字段：快捷消息已改存独立配置文件（预览模式没有真实文件，见下方 quickMessages 预览桩）
@@ -156,6 +158,9 @@ let previewSettings: AppSettings = {
 	piProxyBypass: "localhost,127.0.0.1,::1",
 	piProxyProviders: [],
 	piProxyModels: [],
+	acpProxyEnabled: false,
+	acpProxyUrl: "http://127.0.0.1:7890",
+	acpProxyBypass: "localhost,127.0.0.1,::1",
 	desktopProxyEnabled: false,
 	desktopProxyUrl: "http://127.0.0.1:7890",
 	desktopProxyBypass: "localhost,127.0.0.1,::1",
@@ -921,6 +926,7 @@ export function createPreviewApi(): PiDesktopApi {
 			startDshHost: async () => true,
 			restartDshHost: async () => true,
 			setFocusedSession: async () => undefined,
+			setVisibleSessions: async () => undefined,
 			getRuntimeState: async (target) => ({
 				ok: true,
 				value: { target, value: {} },
@@ -1269,7 +1275,8 @@ export function createPreviewApi(): PiDesktopApi {
 			preferredSystemLanguages: async () => (navigator.languages?.length ? [...navigator.languages] : [navigator.language]),
 			networkAddresses: async () => [{ address: "192.168.1.100", interfaceName: "Wi-Fi", cidr: "192.168.1.100/24", isPrivate: true, family: "IPv4" }],
 			checkUpdate: async () => undefined,
-			getChannel: async () => ({ channel: "stable" as const, currentVersion: "preview", devBuild: false }),
+			// 浏览器预览不是真实构建：按 release 呈现，不显示「本地构建」徽章。
+			getChannel: async () => ({ channel: "stable" as const, currentVersion: "preview", devBuild: false, buildOrigin: "release" as const }),
 			onUpdateStatus: () => () => undefined,
 			onOpenSettings: () => () => undefined,
 			// 预览/浏览器模式没有全局快捷键，订阅退化为空操作
@@ -1723,6 +1730,7 @@ export function createPreviewApi(): PiDesktopApi {
 				ok: true,
 				config: createDefaultSecurityConfig(),
 			}),
+			onConfigChanged: noop,
 		},
 		config: {
 			previewProviderMigration: async () => ({ direction: "pi-to-dsh" as const, providers: [] }),
@@ -1793,6 +1801,8 @@ export function createPreviewApi(): PiDesktopApi {
 			tokendanceAuthCancel: async () => ({ ok: true }),
 			tokendanceAuthExchange: async () => ({ ok: false, error: "preview" }),
 			// 设计预览：充值接口不触真实网络（弹窗能看到完整链路，但创建会话必然失败）
+			watchaAccess: async () => ({ ok: false, code: "not-configured" }),
+			watchaOpenAlipay: async () => ({ ok: false, error: "unavailable in preview" }),
 			tokendanceTopUpCreate: async () => ({ ok: false, code: "not-configured" }),
 			tokendanceTopUpStatus: async () => ({ ok: false, code: "not-configured" }),
 			tokendanceTopUpOpenAlipay: async () => ({ ok: false, error: "preview" }),
@@ -1957,7 +1967,7 @@ export function createPreviewApi(): PiDesktopApi {
 		},
 		scratchPad: {
 			list: async () => [],
-			create: async () => ({ id: "", name: "", path: "", createdAt: 0, updatedAt: 0 }),
+			create: async (scope) => ({ id: "", name: "", path: "", createdAt: 0, updatedAt: 0, scope: scope?.kind === "project" ? "project" : "global" }),
 			delete: async () => {},
 			load: async () => ({ content: "", lastEditedAt: 0, cursorPosition: 0 }),
 			save: async () => {},
@@ -2194,6 +2204,16 @@ export function createPreviewApi(): PiDesktopApi {
 			removeMany: async () => 0,
 			// 列表恒空：排序无可命中的条目，与主进程「剔除未知 id」后的结果一致。
 			reorder: async () => [],
+		},
+		// 会话分组：预览/Web 端没有宿主 store，列表恒空、写入抛错（与 favorites 同语义）。
+		sessionGroups: {
+			list: async () => [],
+			save: async () => {
+				throw new Error("preview stub");
+			},
+			delete: async () => false,
+			reorder: async () => [],
+			onChanged: () => () => {},
 		},
 		// 系统级划词浮窗：预览/Web 端没有独立窗口，全部 inert。
 		selectionTool: {

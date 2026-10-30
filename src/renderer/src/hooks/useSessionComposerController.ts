@@ -8,6 +8,7 @@ import { isRemoteProject } from "../../../shared/projectLocation";
 import { classifyCompactError, compactOwnerReason, compactRoutedCommand, type CompactNoticeKind } from "../../../shared/compactFeedback";
 import { findImageGenProvider } from "../../../shared/imageGenConfig";
 import { findVideoGenProvider } from "../../../shared/videoGenConfig";
+import { buildSessionReferenceContext } from "../../../shared/sessionReferenceContext";
 import { resolveEnhanceTargetModel } from "../../../shared/enhanceModelPreference";
 import { collectPromptEnhanceContext } from "../utils/promptEnhanceContext";
 import { sessionCommandsRefreshTickAtom } from "../atoms/session-commands-atoms";
@@ -47,7 +48,9 @@ import {
 	promoteSessionComposerStateAtom,
 	removeSessionStateAtom,
 	currentSessionIdAtom,
+	acpEnabledAtom,
 	acpToolsAtom,
+	dshRuntimeStatusAtom,
 	type PastedTextFile,
 } from "../atoms";
 import {
@@ -79,13 +82,14 @@ import { t } from "../i18n";
 import { COMPOSER_ATTACHMENT_BUDGET_BYTES, COMPOSER_IMAGE_MAX_BYTES, ComposerImageError, attachmentBytes, base64DataBytes, dataUrlToFile, getClipboardImageFiles, getDroppedImageFiles, imageMimeTypeFromPath, isImageFilePath, processComposerImageFile } from "../utils/composerImages";
 import { PASTE_TO_FILE_MIN_CHARS } from "../rendererUtils";
 import { resolveBackendSwitchDefaults } from "../utils/backendSwitchDefaults";
-import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeAcpToolPreference, readWelcomeBackendPreference, readWelcomeDshModelPreference, readWelcomeModelPreference, resolveGuidePageBackend, WELCOME_BACKEND_KEY } from "../utils/chatSessionBootstrap";
+import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeDshModelPreference, readWelcomeModelPreference, resolveGuidePageBackend, resolveNewSessionTarget, type NewSessionBackendTarget } from "../utils/chatSessionBootstrap";
 import { expandSessionReferences } from "../sending/outgoingExpansion";
 import { showNotice } from "../utils/notice";
 import { requireSessionCommand, toSessionRuntimeTarget } from "../utils/sessionCommands";
 import { collectReservedCommandNames, needsTemplateRefetch } from "../utils/reservedCommandNames";
 import { assembleTemplates, mergeRuntimeTemplates } from "../utils/templateCatalog";
 import { buildDraftResourceCommands, draftResourceCommandsForProject, selectComposerSuggestionCommands, standbyPreviewCommandsForProject, type DraftResourceCommandSnapshot, type StandbyPreviewCommandSnapshot } from "../utils/draftResourceCommands";
+import { isAcpComposerInitializing } from "../utils/composerInitializing";
 import { isSessionRuntimeBusy, isUserFacingSessionStart } from "./useSessionTimelineController";
 import { truncateQuoteLabel } from "../components/session/composer/quoteChip";
 import { useSessionSend, type EnqueuePromptSnapshot } from "./useSessionSend";
@@ -167,7 +171,8 @@ export type UseSessionComposerControllerOptions = {
 	 * 会话创建（发送仍由 App.ensureSessionForSend 落地）。
 	 */
 	bootstrapProjectId?: string;
-	ensureSessionId?: (sessionId: string) => Promise<string>;
+	/** target：引导页首次发送时的后端选择（缺省按设置默认创建）。 */
+	ensureSessionId?: (sessionId: string, target?: NewSessionBackendTarget) => Promise<string>;
 	/** 用户主动发消息时回调（预览 Tab 晋升常驻）；来自 SessionPaneServices 装配。 */
 	onPromoteSession?: (sessionId: string) => void;
 	/** `/new` 拦截后新建会话（与侧栏 + 同源）；来自 SessionPaneServices。 */
@@ -338,20 +343,23 @@ export function useSessionComposerController(options: UseSessionComposerControll
 
 	// DSH：plan 由 host 持有；goal 由本地选择或进行中/阻塞的目标驱动（切回普通会 pause）。
 	// 生图为独立供应商配置，不属于 pi/dsh 任一后端，两种后端均可用。
-	// 引导页虚拟会话的后端显式选择：无 record、不落 catalog，后端切换走
-	// localStorage 偏好（与 pickModel/pickThinking 的引导页分支同构），首次发送
-	// 由 App.ensureSessionForSend 读取同一份偏好创建真实会话。仅在引导页初始化，
-	// 真实会话（record 短暂未就绪）不受 localStorage 残留影响。
+	// 引导页虚拟会话的后端显式选择：无 record、不落 catalog，切换只写本页 state。
+	// 刻意不从 localStorage 恢复「上次选择」：新建会话默认后端只跟随设置项——
+	// 自动沿用 ACP 会在冷启动把握手加载态塞进输入框（用户反馈体验差），用户要
+	// 换后端就在输入框里手动切，首次发送按当前选择创建真实会话。
+	const defaultAgentBackend = useAtomValue(effectiveAgentBackendAtom);
 	const isGuideBootstrapSession = sessionId === GUIDE_BOOTSTRAP_SESSION_ID;
-	const [guideBackendOverride, setGuideBackendOverride] = useState<AgentBackend | undefined>(() => (isGuideBootstrapSession ? readWelcomeBackendPreference() : undefined));
+	const [guideBackendOverride, setGuideBackendOverride] = useState<AgentBackend | undefined>(undefined);
 	// 引导页 ACP 工具预选单独入 state：acp→acp 换工具时后端名不变，
 	// setGuideBackendOverride("acp") 同值不触发重渲染，trigger 回显会停在旧工具；
 	// 工具 id 必须自己有 state 才能让受控 Select 刷新。
-	const [guideAcpToolOverride, setGuideAcpToolOverride] = useState<string | undefined>(() => (isGuideBootstrapSession ? readWelcomeAcpToolPreference() : undefined));
-	const isDshBackend = record?.backend === "dsh" || runtime?.backend === "dsh" || (isGuideBootstrapSession && guideBackendOverride === "dsh");
+	const [guideAcpToolOverride, setGuideAcpToolOverride] = useState<string | undefined>(undefined);
+	// 引导页当前展示/将创建的后端：本页手动切换优先，否则设置默认（已按 DSH 安装态钳制）。
+	const guideBackend: AgentBackend = isGuideBootstrapSession ? (guideBackendOverride ?? defaultAgentBackend) : defaultAgentBackend;
+	const isDshBackend = record?.backend === "dsh" || runtime?.backend === "dsh" || (isGuideBootstrapSession && guideBackend === "dsh");
 	// ACP 后端：忙碌投递恒收敛为 followUp（协议无 steer 通道，插队必被 manager 拒收），
 	// 拆分菜单的「插入当前回合」项也整体隐藏。
-	const isAcpBackend = record?.backend === "acp" || runtime?.backend === "acp" || (isGuideBootstrapSession && guideBackendOverride === "acp");
+	const isAcpBackend = record?.backend === "acp" || runtime?.backend === "acp" || (isGuideBootstrapSession && guideBackend === "acp");
 	const hasImageGenHistory = (messageCache?.messages ?? []).some((message) => Boolean(message.meta?.imageGen));
 	// 生视频不存在 legacy 混排（videogen 是新后端，只有它自己会写 meta.videoGen），不需要历史锁。
 	const isVideoGenBackend = record?.backend === "videogen";
@@ -427,7 +435,6 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	// 「切到 dsh 后底栏显示 pi 模型」）。按 dsh 解析时该 IPC 不返回模型（模型归属
 	// host settings），底栏自然回落到 dshDefaultModel。
 	// 仍然经 effectiveAgentBackendAtom 取默认值（DSH runtime 安装态钳制）。
-	const defaultAgentBackend = useAtomValue(effectiveAgentBackendAtom);
 	const guidePageBackend: AgentBackend = isRemoteProjectSession ? "pi" : isGuideBootstrapSession ? resolveGuidePageBackend({ override: guideBackendOverride, effectiveDefault: defaultAgentBackend }) : defaultAgentBackend;
 	const [bootstrapDefaults, setBootstrapDefaults] = useState<ResolvedLaunchDefaults | undefined>(undefined);
 	useEffect(() => {
@@ -1096,9 +1103,16 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		return { top: "auto", bottom: 16, left };
 	}, [cursor, suggestionsOpen]);
 
-	const isBusy = isSessionRuntimeBusy(runtime?.status, runtime?.state);
+	// 回合边界（isTurnActive）与忙碌态分开算：ACP 的 tab status 可能滞后于回合结算，
+	// 预测 ghost 已按 isTurnActive=false 出现时，发送也必须按空闲直发，不能进 followUp 队列。
+	const sessionTurnRunning = isSessionTurnRunning(runtime?.state, runtime?.status);
+	const isBusy = isSessionRuntimeBusy(runtime?.status, runtime?.state, isAcpBackend ? "acp" : undefined);
 	// 预热只创建进程，不能把编辑器 setEditable(false)：contenteditable 关掉会失焦，输入一半就断。
 	const isStarting = isUserFacingSessionStart(sendState.status);
+	// ACP 预热（握手 + 枚举 configOptions）可能持续数秒：编辑器照常可输入，
+	// 输入框底栏同时显示初始化指示。**发送不被它拦住**：主进程的激活闸门（ensureRuntime 复用同一条
+	// pending activation）会把这一发排到握手之后，用户不用先等选项落地再按发送。
+	const isAcpInitializing = isAcpComposerInitializing(isAcpBackend, runtime?.status);
 	const hasContent = Boolean(draft.trim() || attachments.length || pasteFiles.length);
 
 	const resetEphemeralUi = useCallback(() => {
@@ -1142,7 +1156,17 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			return await expandSessionReferences(message, targets, async (session) => {
 				const saved = sessionReferenceSelections[`&${session.name}`];
 				const selectedMessages = saved ? selectedSessionReferenceMessages(saved) : await desktopApi.sessions.readReferenceMessages(session.id);
-				return selectedMessages.map((item) => `[${item.role === "user" ? "User" : "Assistant"}]: ${item.content}`).join("\n");
+				// 取文口径与预算统一收口在 shared/sessionReferenceContext：thinking 不进引用上下文，
+				// 超出预算时保留最近的消息并提示用户。这段正文会写进用户消息落盘，之后每轮请求
+				// 都随历史重传，所以必须在这里一次性封顶，不能交给上游上下文水位兜底。
+				const context = buildSessionReferenceContext(selectedMessages);
+				if (context.dropped > 0) {
+					const params = { kept: context.kept, dropped: context.dropped };
+					showNotice(t("sessionRef.truncated", params), 6000);
+					// 块内留一行说明：模型要知道这是「最近一段」而不是完整会话，否则会答“我没看到那条”。
+					return `${t("sessionRef.truncatedNote", params)}\n${context.body}`;
+				}
+				return context.body;
 			});
 		},
 		[projectSessions, sessionReferenceSelections],
@@ -1175,7 +1199,24 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	const send = useSessionSend({
 		sessionId,
 		sendPrompt: (input) => desktopApi.sessions.sendPrompt(input),
-		ensureSessionId,
+		// 引导页首次发送：把本页当前后端选择（含 ACP 工具）带给创建链路，
+		// 不再依赖 localStorage 的「上次选择」；非引导页会话直接透传。
+		ensureSessionId: ensureSessionId
+			? (id) =>
+					ensureSessionId(
+						id,
+						isGuideBootstrapSession
+							? resolveNewSessionTarget({
+									requested: guideBackendOverride,
+									requestedAcpToolId: guideAcpToolOverride,
+									defaultBackend: defaultAgentBackend,
+									dshAvailable: store.get(dshRuntimeStatusAtom).state === "installed",
+									acpEnabled: store.get(acpEnabledAtom),
+									acpTools: store.get(acpToolsAtom),
+								})
+							: undefined,
+					)
+			: undefined,
 		getTemplates: () => templatesRef.current,
 		getReservedCommandNames: () => reservedCommandNamesRef.current,
 		ensureTemplates: ensureTemplatesForMessage,
@@ -1493,6 +1534,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	// 生图模式：所有发送入口统一转生图（不晋升预览 Tab、不发消息），避免各入口分支不一致。
 	const promoteAndSend = useCallback(
 		async (behavior?: "steer" | "followUp", overrideText?: string) => {
+			// ACP 初始化中不再拦发送：冷启动发送本来就允许（useSessionSend 先发布 activating 状态，
+			// 再由 ensureRuntime 等同一条 pending activation）。旧实现除了置灰按钮，还在这里静默 return，
+			// 用户敲完回车毫无反馈，只像「输入框坏了」。
 			if (mode === "imagegen") {
 				void generateImage();
 				return;
@@ -1617,7 +1661,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 					setSelectedSuggestionIndex((index) => Math.max(index - 1, 0));
 					return;
 				}
-				if (event.key === "Enter") {
+				// Tab 与 Enter 同义：采纳菜单高亮项（补全习惯对齐 zcode/codex 等终端交互）。
+				// 修饰键组合不拦：Shift+Tab 等仍走默认焦点切换。
+				if (event.key === "Enter" || (event.key === "Tab" && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey)) {
 					// IME 合成中的回车属于输入法确认候选，不能拿去选建议项
 					if (isComposingKeyboardEvent(event)) return;
 					event.preventDefault();
@@ -1859,7 +1905,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		scopeKey: sessionId,
 		enabled: promptSuggestionEnabled,
 		target: suggestionTarget,
-		turnRunning: isSessionTurnRunning(runtime?.state, runtime?.status),
+		turnRunning: sessionTurnRunning,
 		// 用 hasContent 而不是 draft.length：纯空白、附件/粘贴文件也属于「有内容」，
 		// 否则预测会盖在已经放好附件的输入框上，Tab 还会把附件留下却把 ghost 当草稿采纳。
 		draftEmpty: !hasContent,
@@ -2176,7 +2222,6 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			// 首次发送时 App.ensureSessionForSend 读取同一份偏好创建真实会话，选择不丢失。
 			if (isGuideBootstrapSession) {
 				// acp 偏好携带工具 id（"acp:<toolId>"）；工具表为空/未选时不切也不存
-				let stored: string = next;
 				let guideToolId: string | undefined;
 				if (next === "acp") {
 					const tools = store.get(acpToolsAtom);
@@ -2185,24 +2230,17 @@ export function useSessionComposerController(options: UseSessionComposerControll
 						showNotice(t("app.acpNoTools"), 4000);
 						return;
 					}
-					stored = `acp:${toolId}`;
 					guideToolId = toolId;
 				}
 				setGuideBackendOverride(next);
 				// acp→acp 换工具：后端同值不触发重渲染，工具 id 单独 set（见 state 声明处注释）
 				if (guideToolId) setGuideAcpToolOverride(guideToolId);
-				try {
-					localStorage.setItem(WELCOME_BACKEND_KEY, stored);
-				} catch {
-					// localStorage 不可用时静默；本次页面内仍由 guideBackendOverride 即时生效
-				}
 				return;
 			}
 			// 未开始对话的会话允许换后端：先把预热/认领出来的 runtime 停掉再改 record。
-			// 主进程边界防御要求「无绑定 runtime」才接受 backend 变更
-			// （sessionIpc 的 sessionsCatalogUpdate 守卫），且停掉没人用的进程正是用户诉求
-			// ——否则预热出来的 pi 进程会一直挂到会话被删。
-			// 停不掉不拦：交给主进程守卫给出与旧行为一致的报错。
+			// 停掉没人用的进程正是用户诉求——否则预热出来的 pi 进程会一直挂到会话被删。
+			// 预热中的 ACP 握手在这拿不到 agentId（合成 starting 事件不带），靠主进程的
+			// cancelActivation 作废（停进程 + 禁 bind），所以这里停不掉也不拦。
 			const boundAgentId = runtime?.agentId;
 			if (boundAgentId) {
 				try {
@@ -2356,9 +2394,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		sessionId,
 		record,
 		runtime,
-		// 引导页优先回显显式切换（guideBackendOverride），否则退回上次偏好/默认 pi；
+		// 引导页优先回显本页手动切换，否则就是设置默认后端（不沿用上次选择）；
 		// 真实会话以 record 为准。
-		backend: isRemoteProjectSession ? "pi" : (record?.backend ?? (isGuideBootstrapSession ? guideBackendOverride : undefined) ?? "pi"),
+		backend: isRemoteProjectSession ? "pi" : (record?.backend ?? (isGuideBootstrapSession ? guideBackend : undefined) ?? "pi"),
 		/** 草稿期可切换后端；激活后锁定、远端项目固定 pi（undefined → UI 隐藏切换器）。 */
 		changeBackend: backendLocked || isRemoteProjectSession ? undefined : changeBackend,
 		// ACP 工具二级选择（草稿期；激活后 UI 不再渲染选择器）
@@ -2403,6 +2441,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		bangMode: getBangMode(draft),
 		isBusy,
 		isStarting,
+		isAcpInitializing,
 		hasContent,
 		busyDraftLocked,
 		voice,

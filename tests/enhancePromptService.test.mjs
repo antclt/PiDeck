@@ -249,6 +249,43 @@ test("stdin 异步错误：不抛异常、只结算一次并允许重拉助手",
 	assert.deepEqual(second.recorder.events, [{ kind: "done", text: "重试成功" }]);
 });
 
+test("启动参数变化：代理指纹/入口变了必须重建侧车，同一指纹继续复用", async (t) => {
+	const launchArgs = [];
+	let proxyKey = "off";
+	const { service, harnesses, spawnCalls, latest } = createService({
+		resolveLaunch: (run) => {
+			launchArgs.push(run);
+			return { ...OK_LAUNCH, proxyKey, env: { ...OK_LAUNCH.env, ...(proxyKey === "off" ? {} : { HTTPS_PROXY: "http://127.0.0.1:7890" }) } };
+		},
+	});
+	t.after(() => service.dispose());
+
+	// 名单外的模型：直连（不注入代理）。
+	const first = await acceptRun(service, latest, { provider: "deepseek", modelId: "deepseek-chat", userText: "草稿" });
+	assert.equal(first.result.ok, true);
+	assert.equal(spawnCalls.length, 1);
+	assert.equal(spawnCalls[0].options.env.HTTPS_PROXY, undefined);
+	latest().emitLine({ type: "done", id: first.result.runId, text: "直连结果" });
+	const firstChild = harnesses[0].child;
+
+	// 名单内的模型：env 在 spawn 时定格，必须换一个进程才真走代理。
+	proxyKey = "on|http://127.0.0.1:7890|";
+	const second = await acceptRun(service, latest, { provider: "kimi-coding", modelId: "kimi-k2", userText: "草稿" });
+	assert.equal(second.result.ok, true);
+	assert.equal(spawnCalls.length, 2);
+	assert.equal(firstChild.killed, true);
+	assert.equal(spawnCalls[1].options.env.HTTPS_PROXY, "http://127.0.0.1:7890");
+	// 模型信息要传到装配层：代理名单是按模型判定的，丢了就回到「不看名单」的老行为。
+	assert.equal(launchArgs.at(-1)?.provider, "kimi-coding");
+	assert.equal(launchArgs.at(-1)?.modelId, "kimi-k2");
+
+	// 同一指纹的后续 run 仍复用同一个进程（换模型不盲目重启）。
+	const third = await acceptRun(service, latest, { provider: "kimi-coding", modelId: "kimi-k2", userText: "草稿二" });
+	assert.equal(third.result.ok, true);
+	assert.equal(spawnCalls.length, 2);
+	assert.equal(harnesses.length, 2);
+});
+
 test("boot 期间 stdin 异步错误：立即拒绝受理并回收进程", async (t) => {
 	const { service, latest } = createService();
 	t.after(() => service.dispose());

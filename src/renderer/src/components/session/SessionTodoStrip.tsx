@@ -1,9 +1,10 @@
 import { useAtomValue } from "jotai";
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, ListChecks, X } from "lucide-react";
 import { sessionRuntimeBySessionIdAtomFamily, sessionRuntimeUiBySessionIdAtomFamily } from "../../atoms";
 import { t } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
+import { VirtualStack, VIRTUAL_STACK_MIN_ROWS } from "../ui-shadcn/virtual-stack";
 import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
 import { isCoherentComposerRuntimeUi, type RuntimeHandle } from "./ComposerRuntimeIntegrations";
 import { ComposerWidgetFrame, useComposerWidgetCollapsed } from "./ComposerWidgetLayout";
@@ -185,11 +186,14 @@ export function useSessionTodoSources(sessionId: string): TodoWidgetLines[] {
 
 	// 数据源归一化成统一行式，再整体走 dismiss 指纹与解析链路
 	return useMemo<WidgetLines[]>(() => {
-		// DSH 不产出 Pi widget，优先消费其运行时的结构化 todos；
+		// DSH 不产出 Pi widget，优先消费其运行时的结构化 todos；ACP 同路：主进程把 CLI
+		// 的 plan 投影整表推进 agents:runtime-state（AcpUpdatePipeline 对 todos/usage
+		// 变更主动 emitRuntimeState），不消费的话 ACP 会话的任务列表永远不渲染（#428）。
 		// Pi 活会话仍以 widget 为实时真源；历史会话用快照兜底。
-		if (runtime?.backend === "dsh") {
+		if (runtime?.backend === "dsh" || runtime?.backend === "acp") {
 			const todos = runtime.state?.todos;
 			if (!Array.isArray(todos) || todos.length === 0) return [];
+			// key 沿用 dsh-todos：两后端是同构 TodoItem[] 消费，dismiss 指纹按内容算，不区分来源。
 			return [{ key: "dsh-todos", lines: todoItemsToLines(runtimeTodosToItems(todos)) }];
 		}
 		if (!coherent) {
@@ -215,7 +219,7 @@ export function todoWidgetsToItems(widgets: readonly TodoWidgetLines[]): AgentTo
 }
 
 /** 单条待办行（折叠条与右侧边栏面板共用）。 */
-export function TodoItemRow({ item }: { item: AgentTodoItem }) {
+export function TodoItemRow({ item, as: ItemTag = "li" }: { item: AgentTodoItem; as?: "li" | "div" }) {
 	return (
 		/* 行内 overflow-hidden：旋转方盒的「变换后包围盒（AABB）」不得外溢到列表
 		    scrollHeight（旋转 svg 的 AABB ≈ 22.6px > 20px 行高，会让外层 ul 的
@@ -229,12 +233,12 @@ export function TodoItemRow({ item }: { item: AgentTodoItem }) {
 		    overflow-hidden 切成横条、相邻行叠在一起，且 scrollHeight 收缩到与
 		    clientHeight 相等 → 滚动条根本不出现，用户滚不动（2027-01 排版事故）。
 		    shrink-0 让行保持固有高度，超出部分交还给 overflow-y-auto 滚动。 */
-		<li className="flex min-w-0 items-center gap-2.5 overflow-hidden shrink-0 text-control leading-5 text-text-secondary">
+		<ItemTag role={ItemTag === "div" ? "listitem" : undefined} className="flex min-w-0 items-center gap-2.5 overflow-hidden shrink-0 text-control leading-5 text-text-secondary">
 			<span className="grid size-4 shrink-0 place-items-center" aria-hidden="true">
 				<StatusGlyph status={item.status} />
 			</span>
 			<span className="min-w-0 truncate">{item.title}</span>
-		</li>
+		</ItemTag>
 	);
 }
 
@@ -249,6 +253,13 @@ export function SessionTodoStrip(props: { sessionId: string }) {
 	const visibleWidgets = useMemo(() => linesByKey.filter((w) => !isWidgetDismissed(dismissed, props.sessionId, w.key, w.lines)), [linesByKey, dismissed, props.sessionId]);
 
 	const items = useMemo(() => todoWidgetsToItems(visibleWidgets), [visibleWidgets]);
+	const listRef = useRef<(HTMLUListElement & HTMLDivElement) | null>(null);
+	const virtualizeRows = items.length > VIRTUAL_STACK_MIN_ROWS;
+	// 虚拟化分支的行是 `<div data-index>` 的子节点，`<li>` 此时父元素不再是 `ul/ol`，
+	// 属于非法 HTML、列表语义也随之丢失。所以两条路径各用合法标签：
+	// 短列表 `ul > li`（DOM 与接入虚拟化前逐字节一致），虚拟化 `div[role=list] > div[role=listitem]`。
+	const ListTag: "ul" | "div" = virtualizeRows ? "div" : "ul";
+	const ItemTag: "li" | "div" = virtualizeRows ? "div" : "li";
 
 	const dismissVisibleWidgets = () => {
 		const next = dismissWidgetEntries(dismissed, props.sessionId, visibleWidgets);
@@ -279,11 +290,9 @@ export function SessionTodoStrip(props: { sessionId: string }) {
 				</div>
 				<CollapsibleContent>
 					{/* 限高 flex 列：行的 overflow-hidden 必须配 shrink-0（见 TodoItemRow），否则条目溢出时整列被线性压扁且不出现滚动条。 */}
-					<ul className="mb-2 flex max-h-[180px] flex-col gap-2 overflow-y-auto [contain:layout_paint] px-3">
-						{items.map((item) => (
-							<TodoItemRow key={item.id} item={item} />
-						))}
-					</ul>
+					<ListTag ref={listRef} role={virtualizeRows ? "list" : undefined} className={`mb-2 max-h-[180px] overflow-y-auto [contain:layout_paint] px-3${virtualizeRows ? "" : " flex flex-col gap-2"}`}>
+						<VirtualStack items={items} getKey={(item) => item.id} scrollRef={listRef} minRows={VIRTUAL_STACK_MIN_ROWS} estimateHeight={56} rowClassName="pb-2" renderItem={(item) => <TodoItemRow item={item} as={ItemTag} />} />
+					</ListTag>
 				</CollapsibleContent>
 			</Collapsible>
 		</ComposerWidgetFrame>

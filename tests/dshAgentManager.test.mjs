@@ -2210,3 +2210,31 @@ test("getRuntimeModelThinkingState：把 host 投影选择暴露给 Coordinator�
 	assert.equal(state.modelId, "default");
 	assert.equal(state.thinkingLevel, undefined);
 });
+
+test("turn/end 成功触发 onAgentSettled；用户停止与 error 收口不触发", async () => {
+	const { host, client, sessions } = makeFakeHost();
+	sessions.set("session-settle", { sessionId: "session-settle", cwd: PROJECT.path, running: false, blank: false });
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh", dshSessionId: "session-settle" });
+	const settled = [];
+	manager.onAgentSettled((info) => settled.push(info));
+
+	// 成功回合：turn/start → turn/end
+	client.pushFrames(sessionEventFrame("session-settle", event("turn/start", 1)), sessionEventFrame("session-settle", event("turn/end", 2)));
+	await flush();
+	assert.equal(settled.length, 1);
+	assert.equal(settled[0].agentId, tab.id);
+
+	// 用户停止：先起一轮再停止，turn/end 照常收口但不算完成
+	client.pushFrames(sessionEventFrame("session-settle", event("turn/start", 3)));
+	await flush();
+	await manager.abort(tab.id);
+	client.pushFrames(sessionEventFrame("session-settle", event("turn/end", 4)));
+	await flush();
+	assert.equal(settled.length, 1, "用户停止不得触发完成信号");
+
+	// 失败回合：reason.kind === "error"
+	client.pushFrames(sessionEventFrame("session-settle", event("turn/start", 5)), sessionEventFrame("session-settle", event("turn/end", 6, { reason: { kind: "error", error: { message: "boom" } } })));
+	await flush();
+	assert.equal(settled.length, 1, "失败回合不得触发完成信号");
+});

@@ -1,6 +1,6 @@
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import { Streamdown, defaultRemarkPlugins, type Components } from "streamdown";
-import { code } from "@streamdown/code";
+import { code, createCodePlugin } from "@streamdown/code";
 import { mermaid } from "@streamdown/mermaid";
 import { createMathPlugin } from "@streamdown/math";
 import { MarkdownLink, remarkLinkifyPaths } from "./MarkdownLink";
@@ -17,11 +17,12 @@ import { normalizeMathDelimiters } from "../../utils/normalizeMathDelimiters";
 import { UNTRUSTED_MARKDOWN_REHYPE_PLUGINS } from "./markdownSanitize";
 import { FormulaCopyLayer } from "./FormulaCopyLayer";
 import { useSmoothStream } from "../../utils/useSmoothStream";
-import { useDocumentTheme } from "../../hooks/useDocumentTheme";
-import { STREAM_LIGHT_MAX_CHARS, STREAM_UNFREEZABLE_MIN_CHARS, SETTLE_FULL_MAX_CHARS, shouldRenderStreamPlain, shouldKeepLightOnSettle } from "./markdownStreamPolicy";
+import { useDocumentPalette, useDocumentTheme } from "../../hooks/useDocumentTheme";
+import { STREAM_LIGHT_MAX_CHARS, STREAM_UNFREEZABLE_MIN_CHARS, SETTLE_FULL_MAX_CHARS, SETTLED_CHUNK_CHARS, shouldRenderStreamPlain, shouldKeepLightOnSettle } from "./markdownStreamPolicy";
 // 兼容导出：既有引用与源码契约测试从 MarkdownStream 读阈值常量
 export { STREAM_LIGHT_MAX_CHARS } from "./markdownStreamPolicy";
-import { IncrementalMarkdownFrontier, UNSTABLE_TAIL_BLOCKS } from "./markdown/incrementalMarkdown";
+import { PI_TUI_SHIKI_THEMES } from "./markdown/piTuiShikiThemes";
+import { IncrementalMarkdownFrontier, splitMarkdownChunks, UNSTABLE_TAIL_BLOCKS } from "./markdown/incrementalMarkdown";
 
 /**
  * 数学公式插件（KaTeX）。@streamdown/math 默认 singleDollarTextMath: false，
@@ -32,6 +33,15 @@ import { IncrementalMarkdownFrontier, UNSTABLE_TAIL_BLOCKS } from "./markdown/in
  * 由 remarkInlineMathGuard 在 mdast 层降级为原文，避免被 KaTeX 当公式渲染（2026-10）。
  */
 const mathPlugin = createMathPlugin({ singleDollarTextMath: true });
+
+/**
+ * `tui` 配色的代码高亮插件。
+ *
+ * 代码 token 的颜色是 Shiki 写进 inline style 的，CSS 变量改不动，所以 pi 终端配色下的
+ * 高亮只能整块换主题（色板见 markdown/piTuiShikiThemes.ts）。其他配色继续用 @streamdown/code
+ * 的内置 `code`，保证未选 tui 配色时零变化。
+ */
+const piTuiCodePlugin = createCodePlugin({ themes: PI_TUI_SHIKI_THEMES });
 
 // 流式精简插件集合：必须是模块级稳定引用（不能每帧内联 []）——
 // pipe 的 useMemo 依赖 resolvedRemarkPlugins，内联新数组会让 pipe 每帧重建，
@@ -151,7 +161,9 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 	// 订阅式读主题（2027-02 修正）：直读 dataset 拿不到切主题后的变化，mermaid
 	// 配置会保持旧明暗档直到下次无关重渲染。观察器见 hooks/useDocumentTheme。
 	const isDark = useDocumentTheme() === "dark";
-	// 逐字打字机：默认参数见 useSmoothStream（约 8ms / 每帧最多 6 字）。
+	// 配色（data-palette）同样是 root 属性，需要订阅才能跟着切换代码高亮色板。
+	const palette = useDocumentPalette();
+	// 逐字打字机：默认参数见 useSmoothStream（16ms / 每帧最多 10 字；长文本按长度再降频）。
 	const { displayedContent } = useSmoothStream({
 		content: props.text,
 		isStreaming: Boolean(props.isStreaming),
@@ -212,6 +224,34 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 	//    重渲染（大代码块流式输出时 GC 追不上，原生内存实测 200-450MB/min 爬升），
 	//    同样回退纯文本，settle 后一次全量渲染。
 	const streamPlain = (isStreamingNow && displayText.length > STREAM_LIGHT_MAX_CHARS) || (frozenSplit !== undefined && frozenSplit.prefixEnd === 0 && displayText.length > STREAM_UNFREEZABLE_MIN_CHARS);
+	// ── settled 长文渐进分块（2026-10-27「展开全文」秒级冻结事故）──
+	// >40K 的 settled 文本本来走「单次全量 Streamdown」（frozenSplit 因超长为 undefined），
+	// 205KB 一次 commit 是秒级冻结。改为按顶层块切成 ≈32K 的组：首组同步出（秒开开头），
+	// 其余组 rIC 每次挂一组（每次 commit 几毫秒），总 DOM 与不分块时完全一致。
+	// 已挂块经 FrozenMarkdownChunk memo（key 钉 index+start），后续挂载零重解析。
+	// light（更新日志等轻插件场景）同样适用：light 只省重插件，marked 解析 + sanitize
+	// + commit 的成本照旧，125KB 的 changelog 全文单次 commit 一样卡（2026-10-27 更新日志）。
+	const settledChunks = useMemo(() => {
+		if (isStreamingNow || streamPlain || displayText.length <= STREAM_LIGHT_MAX_CHARS) return undefined;
+		return splitMarkdownChunks(displayText, SETTLED_CHUNK_CHARS);
+	}, [isStreamingNow, streamPlain, displayText]);
+	const [mountedChunkCount, setMountedChunkCount] = useState(1);
+	useEffect(() => {
+		setMountedChunkCount(1);
+	}, [settledChunks]);
+	useEffect(() => {
+		if (!settledChunks || mountedChunkCount >= settledChunks.length) return;
+		let cancelled = false;
+		const schedule = typeof window.requestIdleCallback === "function" ? (callback: () => void) => window.requestIdleCallback(callback, { timeout: 400 }) : (callback: () => void) => window.setTimeout(callback, 32);
+		const cancel = typeof window.cancelIdleCallback === "function" ? (handle: number) => window.cancelIdleCallback(handle) : (handle: number) => window.clearTimeout(handle);
+		const handle = schedule(() => {
+			if (!cancelled) setMountedChunkCount((current) => Math.min(current + 1, settledChunks.length));
+		});
+		return () => {
+			cancelled = true;
+			cancel(handle);
+		};
+	}, [settledChunks, mountedChunkCount]);
 	// 流式中精简插件：gfm/codeMeta/linkifyPaths 与 math 等插件都留到静态渲染；
 	// 外部显式传入的插件（FileDiffViewer 等场景）不受流式精简影响。
 	const resolvedRemarkPlugins = isStreamingNow ? NO_STREAM_REMARK_PLUGINS : (props.remarkPlugins ?? [remarkGfmNoSingleTilde, remarkInlineMathGuard, remarkRecoverLocalImages, remarkRecoverInlineLinks, defaultRemarkPlugins.codeMeta, remarkLinkifyPaths]);
@@ -267,7 +307,7 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 			plugins: (effectiveLight
 				? { math: mathPlugin }
 				: {
-						code,
+						code: palette === "tui" ? piTuiCodePlugin : code,
 						mermaid,
 						math: mathPlugin,
 					}) as Parameters<typeof Streamdown>[0]["plugins"],
@@ -279,7 +319,7 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 			},
 			components,
 		}),
-		[components, props.isStreaming, effectiveLight, resolvedRemarkPlugins, resolvedRehypePlugins, urlTransform, isDark],
+		[components, props.isStreaming, effectiveLight, resolvedRemarkPlugins, resolvedRehypePlugins, urlTransform, isDark, palette],
 	);
 	// 冻结切分与 streamPlain 已在上面（settle effect 之后）先行计算，
 	// 此处直接消费 frozenSplit：节流窗口内 displayText 不变时 useMemo 返回
@@ -290,6 +330,17 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 			// 排版交给容器 markdown-body（pre-wrap 语义由此处补上）。
 			// 冻结/活动两段拆分：每帧 layout 成本 ≤4K 字符，不随全文增长。
 			return <PlainStreamSplit text={displayText} />;
+		}
+		// settled 长文：渐进分块挂载（frozen=0——data-md-frozen 归零是 e2e 判定
+		// 「全量渲染已提交」的语义，流式冻结路径专属，settled 块不冒充）。
+		if (settledChunks) {
+			return (
+				<Fragment>
+					{settledChunks.slice(0, mountedChunkCount).map((chunk, index) => (
+						<FrozenMarkdownChunk key={`${index}:${chunk.start}`} text={chunk.text} pipe={pipe} />
+					))}
+				</Fragment>
+			);
 		}
 		// settle 后整篇一次渲染：自愈跨冻结边界的链接/脚注/表格，并恢复高亮插件。
 		if (!frozenSplit || frozenSplit.prefixEnd === 0) {
@@ -306,7 +357,7 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 				<FrozenMarkdownChunk key={`${frozenSplit.generation}:${frozenSplit.prefixEnd}`} text={frozenSplit.tail} pipe={pipe} />
 			</Fragment>
 		);
-	}, [displayText, frozenSplit, pipe, streamPlain]);
+	}, [displayText, frozenSplit, pipe, streamPlain, settledChunks, mountedChunkCount]);
 	return (
 		<Fragment>
 			{streamElement}

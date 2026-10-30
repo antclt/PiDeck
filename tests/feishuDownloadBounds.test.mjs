@@ -6,7 +6,8 @@ import test from "node:test";
  * 飞书资源下载字节上界回归（2026-12 修复）：
  * streamToBuffer 过去无上界整流进内存，且文件型 50MiB 拦截发生在全量下载之后、
  * 图片路径完全没有检查——飞书侧一个超大附件即可打爆主进程内存（与 filesReadContent
- * 无界读同族）。修复契约：64MiB 统一上界 + 流式累计超限即抛 + 中止后销毁底层流。
+ * 无界读同族）。修复契约：统一上界 + 流式累计超限即抛 + 中止后销毁底层流。
+ * #427 追加二把上界从 64MiB 提到 256MiB（配套单文件 UX 上限 200MiB），流式截断本身不变。
  * 契约用空白容忍正则（AGENTS.md：源码扫描测试必须空白容忍）。
  */
 const source = readFileSync("src/main/feishu/FeishuBridge.ts", "utf8");
@@ -18,8 +19,8 @@ function streamToBufferBody() {
 	return source.slice(start, next === -1 ? source.length : next);
 }
 
-test("下载必须有 64MiB 统一上界常量（图片与文件同闸）", () => {
-	assert.match(source, /MAX_RESOURCE_DOWNLOAD_BYTES\s*=\s*64\s*\*\s*1024\s*\*\s*1024/, "上界常量必须存在且为 64MiB");
+test("下载必须有 256MiB 统一上界常量（图片与文件同闸）", () => {
+	assert.match(source, /MAX_RESOURCE_DOWNLOAD_BYTES\s*=\s*256\s*\*\s*1024\s*\*\s*1024/, "上界常量必须存在且为 256MiB");
 });
 
 test("两条流路径（getReadableStream / asyncIterator）都必须流式累计并在超限时抛错", () => {
@@ -47,6 +48,10 @@ test("超限抛错必须发生在收集循环内部（不得等全量收完再�
 	assert.ok(firstCapPos < concatPos, "超限判定必须在收集循环内，concat 之前");
 });
 
-test("文件型 50MiB UX 拦截与 64MiB 下载闸并存（闸 ≥ UX 上限）", () => {
-	assert.match(source, /fileData\.length\s*>\s*50\s*\*\s*1024\s*\*\s*1024/, "50MiB 文件 UX 拦截必须保留");
+test("文件型 200MiB UX 拦截与 256MiB 下载闸并存（闸 ≥ UX 上限）", () => {
+	// UX 上限走常量（#427 追加二从 50MiB 提到 200MiB），下载闸必须同时覆盖它。
+	// 上限常量落在 attachmentFiles 模块（文件名/体量工具，单独可测），桥里引用它做拦截。
+	const attachmentFiles = readFileSync("src/main/feishu/attachmentFiles.ts", "utf8");
+	assert.match(attachmentFiles, /MAX_ATTACHMENT_BYTES\s*=\s*200\s*\*\s*1024\s*\*\s*1024/, "200MiB 文件 UX 上限常量必须存在");
+	assert.match(source, /fileData\.length\s*>\s*MAX_ATTACHMENT_BYTES/, "文件型 UX 拦截必须保留");
 });

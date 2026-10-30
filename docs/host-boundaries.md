@@ -21,7 +21,7 @@
 
 - 一次 pi RPC 激活约 8.5s（2026-10 实测：node/pi boot ≈0.5s + 用户 npm 扩展 ≈5s + 内置 16 个 TS 扩展 ≈2.4s），全部发生在 spawn→握手段。池的用法只有「提前起进程」：草稿创建/激活完成后 `AgentManager.ensureStandbyAgent(projectId)` 后台起一个完成握手的进程待命。
 - `src/main/pi/StandbyAgentPool.ts`：单槽位、容量 1、`STANDBY_TTL_MS = 3min` 自动回收（待命进程 RSS 数百 MB，TTL 只覆盖「打字→认领」窗口）。新会话激活经 `SessionRuntimeCoordinator.claimStandbyAgent` 认领，之后照常走 applyLatestPreferences / mergePendingPermissionSettings。
-- 只服务新会话（noSession / 恢复历史会话不认领）。spawn 输入指纹（`src/main/pi/standbyFingerprint.ts`：扩展根/禁用集/offline/noExt/noSkills/customPiPath/WSL/代理/launchArgs）任一变化即丢弃回退普通 spawn；信任走 `resolveTrustWithoutPrompt`，资源未决策不池化（绝不后台弹 trust 弹窗）。
+- 只服务新会话（noSession / 恢复历史会话不认领）。spawn 输入指纹（`src/main/pi/standbyFingerprint.ts`：扩展根/内置技能根/禁用集/offline/noExt/noSkills/customPiPath/WSL/代理/launchArgs）任一变化即丢弃回退普通 spawn；信任走 `resolveTrustWithoutPrompt`，资源未决策不池化（绝不后台弹 trust 弹窗）。
 - 已知限制：池化进程不带 `PIDECK_SESSION_ID`，安检门按默认档工作，per-session 安全覆盖对认领会话要重启才生效；池化 agent 对 `agents:list` / `agent:state-changed` 不可见。
 - 开关 `settings.standbyRuntimeEnabled`（默认开；设置 → 通用 tab）。启动耗时探针 `scripts/probePiStartup.mjs`（`JITI_DEBUG=1` 出逐模块 trace）。
 - 只读借用（Issue #316）：草稿会话斜杠命令预览 `AgentManager.draftCommands` 经 `StandbyAgentPool.peek(projectId)` 查同项目池进程的 `get_commands`（不认领、不消费、进程须 idle、指纹须新鲜）；链路 `sessions:draft-commands` IPC → 渲染层优先预览、空/失败回退本地技能/提示词发现；dsh/browser/preview 模式返回 null。
@@ -32,6 +32,7 @@
 
 - 主进程经常驻单进程 sidecar：`resources/pi-enhance-host.mjs`（stdout 只放 NDJSON，载入 `PIDECK_PI_SDK_ENTRY` 指向的 pi `dist/index.js` 建 `ModelRuntime`）。宿主收口 `src/main/pi/enhance/EnhancePromptService.ts`，启动参数定位复用 `piAuthHostLaunch` 的 `resolvePiAuthHostLaunch`；必须列进 `extraResources`。
 - 常驻单进程多 run：新 run 打断旧 run、显式 cancel、boot/run 超时、进程意外退出都在服务层结算（每 run 回调恰好一次）；渲染层按 scopeKey 隔离，切会话作废进行中的 run，结果只回填发起方输入框。入口 `enhance:run` / `enhance:cancel` / `enhance:on-event`（`src/main/ipc/enhanceIpc.ts`；provider/modelId 只挡空白/控制字符/超长，`builtin:`、`https://`、`a/b` 形态必须放行）。
+- 常驻进程的启动指纹（node / 助手脚本 / SDK 入口 / 代理 env）在**每次受理时**重新求值，任一变化即重建进程：env 在 spawn 时定格，不重建会让用户「改了代理设置却还是旧出口」。代理按 `proxyModel` 走与 pi 会话同一套名单语义（`applyPiProxyModeWithProvider` + `computeGenProxyKey`），因此名单模式下换模型会在「走代理」和「直连」之间切换进程；未传模型时跟随全局开关（pi-auth 侧车即此情形）。
 - 目标模型优先级见 `src/shared/enhanceModelPreference.ts`：设置固定模型（`settings.enhanceModel`）> 会话记录 > 引导页点选 > 部署/主进程默认；默认跟随会话模型。
 - **三个消费者必须各用独立实例**（服务的单飞语义是「新 run 打断旧 run」，共用会互相打断）：
   - 输入框增强：`EnhancePromptService` 主实例（logger 默认命名空间），hook `usePromptEnhance`。
@@ -54,7 +55,14 @@
 - 能力各自有独立开关（`cuaEnabled` / `browserAgentEnabled`，默认都关）、独立 gate 与独立 autoApprove（默认自动放行，可关闭改为逐次确认）。host 只在任一能力启用时监听并写 mcp.json，两者都关时停监听并注销。工具按开关条件注册：**host 存活 ≠ 能力启用**。
 - 只读工具免审批；写工具 fail-closed（无 approval handler / 超时 / 拒绝即不执行）。页面与屏幕内容是不可信输入；工具输出不得包含凭据，日志不得写页面文本或截图内容。
 - 禁止扩展成通用宿主控制通道：不得暴露任意 JS 执行、文件系统、shell、任意 HTTP 代理、会话/模型控制。内置浏览器工具不得绕过 `isAllowedBrowserPanelUrl`、不得注入 preload / 放开 allowpopups、不得改 webview 安全档位。
+- 与 `pideck`（对外 MCP 服务，见 `docs/pideck-mcp.md`）是两个独立端点：CUA/浏览器工具只服务 pi；ACP 调用（`acp_tools_list` / `sessions_create` / `sessions_send` / `sessions_wait` / `sessions_messages` / `sessions_stop`）只存在于 `pideck`，由独立开关 `allowAcpInvoke` 约束，**不在本端点扩展**。
 - 详见 `docs/browser-agent-plan.md`（工具面、快照契约、风险与合并门禁）。
+
+## 例外七：会话分组宿主数据（`sessionGroups.*`，只允许分组读写）
+
+- 会话分组是 PiDeck 自己的本地数据（`<userData>/session-groups.json`，主进程 `SessionGroupStore` 持有与原子落盘），消费方两处：侧栏「分组」树（只读）与会话分组插件页（读写）。插件经专属 preload 的 `pideck.sessionGroups.list/save/delete/reorder` 访问，需 manifest 声明 `sessionGroups.manage`；请求走 `hostPluginRequest` 同一条通道，broker 逐方法验权，不做前缀推断。
+- **写入是整体替换式**（按 group id upsert），不做字段级合并；保存/删除/排序成功后 store 广播 `session-groups:changed`，桌面帧据此刷新侧栏。插件不是唯一写入方时的竞态由「启动时一次性迁移 + 单写方约定」收敛：v2 插件私有 storage 只在首次启动被导入一次（只读不删），之后一律以宿主 store 为准。
+- 禁止扩成通用存储桥：不得在此通道上夹带任意键值、会话正文、文件路径或设置读写；会话 id 只是引用，失效引用由消费方按 catalog 过滤，宿主不追删、不校验会话存在性。
 
 ## 侧车通用规则
 

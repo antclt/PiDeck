@@ -441,7 +441,7 @@ export const DshConfigTab = forwardRef<
 							<span className="config-nav-icon">{item.icon}</span>
 							{t(item.labelKey)}
 							{/* 未保存标记：与 Pi 管理侧栏黄点同款，提醒用户该分区有草稿 */}
-							{props.dirtyNavIds?.has(`dsh:${item.id}`) ? <span className="ml-auto size-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+							{props.dirtyNavIds?.has(`dsh:${item.id}`) ? <span className="ml-auto size-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" /> : null}
 						</button>
 					))}
 				</div>
@@ -809,7 +809,7 @@ function Overview(props: { status: DshStatus | null; hasDocument: boolean; onOpe
 				</h3>
 				<div className="flex items-center gap-2">
 					{status?.started ? (
-						<span className="rounded-full border border-emerald-300/70 bg-emerald-500/10 px-2 py-0.5 text-micro font-medium text-emerald-700 dark:border-emerald-700/70 dark:text-emerald-300">{t("config.dsh.started")}</span>
+						<span className="rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-micro font-medium text-success  ">{t("config.dsh.started")}</span>
 					) : status?.manuallyStopped ? (
 						// 手动停止是用户的主动选择，用中性徽标而非错误红：区别于 boot 失败。
 						<span className="rounded-full border border-border-subtle bg-bg-panel px-2 py-0.5 text-micro text-muted-foreground">{t("config.dsh.manuallyStopped")}</span>
@@ -1093,7 +1093,7 @@ function PresetsTab(props: { writable: boolean; namespace?: DshNamespaceView; on
 						<section key={preset.id} className="rounded-md border border-border-subtle bg-bg-panel px-3.5 py-2.5">
 							<div className="flex items-center gap-2">
 								<span className="min-w-0 flex-1 truncate font-mono text-control font-semibold text-foreground">{name}</span>
-								{isDefault && <span className="rounded-full border border-emerald-300/70 bg-emerald-500/10 px-2 py-0.5 text-micro font-medium text-emerald-700 dark:border-emerald-700/70 dark:text-emerald-300">{t("config.dsh.presetDefault")}</span>}
+								{isDefault && <span className="rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-micro font-medium text-success  ">{t("config.dsh.presetDefault")}</span>}
 								{canSetDefault && (
 									<Button
 										type="button"
@@ -1207,7 +1207,7 @@ function SecurityTab(props: { namespace?: DshNamespaceView; writable: boolean; o
 						</span>
 					)}
 					{dirty && (
-						<span className="ml-auto text-micro text-amber-500" title={t("config.dirtyTooltip")}>
+						<span className="ml-auto text-micro text-warning" title={t("config.dirtyTooltip")}>
 							●
 						</span>
 					)}
@@ -1340,7 +1340,7 @@ function RawTab(props: { homeDir: string; sectionApi?: DshSectionApi; instanceKe
 						))}
 					</SelectContent>
 				</Select>
-				{dirty && <span className="size-2 rounded-full bg-amber-400" aria-hidden="true" />}
+				{dirty && <span className="size-2 rounded-full bg-warning" aria-hidden="true" />}
 				{saving && <span className="text-micro text-muted-foreground">{t("common.saving")}</span>}
 			</div>
 			{loaded ? (

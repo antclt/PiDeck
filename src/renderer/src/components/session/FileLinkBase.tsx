@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { ProjectFileAccessScope } from "../../../../shared/types";
 import { getFilePathVerdict, requestFilePathVerdicts, subscribeFilePathVerdicts } from "../../utils/filePathVerdictStore";
 import { resolveFileLinkPath } from "../../utils/filePathLinks";
+import { getRendererHomeDir } from "../../utils/rendererHomeDir";
 
 type FileLinkBase = {
 	baseDir?: string;
@@ -54,8 +55,9 @@ export function useFileLinkContext(): FileLinkBase {
 export function useFilePathExists(rawPath: string | undefined): boolean | undefined {
 	const { baseDir, projectRoot, scope } = useContext(FileLinkBaseContext);
 	// resolveFileLinkPath 返回 null = 无法解析或越出本栏项目边界：
-	// 不发 stat，更不能让主进程按进程 cwd 猜测相对路径。
-	const absPath = rawPath === undefined ? undefined : resolveFileLinkPath(rawPath, baseDir, projectRoot);
+	// 不发 stat，更不能让主进程按进程 cwd 猜测相对路径。`~` 先按家目录展开（issue #426），
+	// 否则 `~/x` 在有 projectRoot 的会话里会被一致地判成「项目外」。
+	const absPath = rawPath === undefined ? undefined : resolveFileLinkPath(rawPath, baseDir, projectRoot, getRendererHomeDir());
 	const resolvable = typeof absPath === "string";
 	useEffect(() => {
 		if (!rawPath || !resolvable || absPath === undefined) return;

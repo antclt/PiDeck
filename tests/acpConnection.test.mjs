@@ -124,6 +124,47 @@ test("request timeout rejects after timeoutMs", async (t) => {
 	await assert.rejects(conn.request("session/prompt", undefined, 30), /timed out after 30ms/);
 });
 
+test("onArm refresh pushes the deadline back while the turn keeps producing", async (t) => {
+	const { conn, sendFromAgent } = harness(t);
+	let refresh;
+	const prompt = conn.request("session/prompt", { sessionId: "s" }, 40, (arm) => {
+		refresh = arm;
+	});
+	assert.equal(typeof refresh, "function", "onArm hands the caller a refresh handle");
+	// 持续产出 160ms（远超 40ms 单次上限）：每 20ms 顺延一次，回合不得被判超时。
+	for (let i = 0; i < 8; i += 1) {
+		await sleep(20);
+		refresh();
+	}
+	// 顺延后仍然正常收口：最后一次 refresh 起算 40ms 内未结束才超时（模拟"有产出但随后静默"）。
+	let settled = false;
+	void prompt.then(
+		() => {
+			settled = true;
+		},
+		() => {
+			settled = true;
+		},
+	);
+	await sleep(25);
+	assert.equal(settled, false, "a refreshed turn must survive past the original deadline");
+	await assert.rejects(prompt, /timed out after 40ms/);
+	sendFromAgent({ jsonrpc: "2.0", id: 1, result: { stopReason: "end_turn" } });
+});
+
+test("refresh after settling neither re-arms the timer nor throws", async (t) => {
+	const { conn, sendFromAgent } = harness(t);
+	let refresh;
+	const prompt = conn.request("session/prompt", { sessionId: "s" }, 30, (arm) => {
+		refresh = arm;
+	});
+	sendFromAgent({ jsonrpc: "2.0", id: 1, result: { stopReason: "end_turn" } });
+	assert.equal((await prompt).stopReason, "end_turn");
+	// 回合结算后迟到的 refresh 不能重新布防：否则已 resolve 的请求会挂一个无用定时器（测试进程退不出去）。
+	assert.doesNotThrow(() => refresh());
+	await sleep(40);
+});
+
 test("large updates remain ordered before small updates and the prompt response", async (t) => {
 	const { conn, sendFromAgent } = harness(t);
 	const seen = [];

@@ -13,6 +13,7 @@ const { HostPluginManager } = loadTsCommonJs("src/main/plugins/HostPluginManager
 const { HostPluginStorage } = loadTsCommonJs("src/main/plugins/HostPluginStorage.ts");
 const { HostPluginBroker } = loadTsCommonJs("src/main/plugins/HostPluginBroker.ts");
 const { HostPluginSessions } = loadTsCommonJs("src/main/plugins/HostPluginSessions.ts");
+const { HOST_PLUGIN_THEME_TOKENS } = loadTsCommonJs("src/renderer/src/hooks/plugins/hostPluginTokens.ts");
 
 const plain = (value) => JSON.parse(JSON.stringify(value));
 function manifest(permissions = ["sessions.read"]) {
@@ -36,6 +37,9 @@ function deferred() {
 test("host plugin manifests reject unknown permissions, missing panels and path traversal", () => {
 	assert.equal(parseHostPluginManifest(manifest()).id, "example.viewer");
 	assert.throws(() => parseHostPluginManifest(manifest(["filesystem.read"])), /unsupported-permission/);
+	// 范围扩展不能单独成立：单声明它拿不到任何读取权，直接拒装。
+	assert.throws(() => parseHostPluginManifest(manifest(["sessions.read.workspace"])), /unsupported-permission/);
+	assert.deepEqual(plain(parseHostPluginManifest(manifest(["sessions.read", "sessions.read.workspace"])).permissions), ["sessions.read", "sessions.read.workspace"]);
 	const value = manifest();
 	value.contributes.panels[0].entry = "../outside.html";
 	assert.throws(() => parseHostPluginManifest(value), /invalid-panel/);
@@ -80,6 +84,28 @@ test("host plugin protocol and requests cannot select foreign origins, files or 
 	assert.throws(() => parsePluginContext({ locale: "en-US", theme: "dark", tokens: { "--color-bg": "red; background:url(secret)" } }), /invalid-context/);
 	assert.match(HOST_PLUGIN_CSP, /connect-src 'none'/);
 	assert.match(HOST_PLUGIN_CSP, /script-src 'self';/);
+});
+
+test("plugin context accepts a full font stack but still rejects CSS injection and oversized values", () => {
+	// 面板要跟随宿主自定义字体，默认字体栈约 200 字符；上限从 160 放宽到 400 后必须仍然不可注入。
+	const fontStack = '-apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "HarmonyOS Sans SC", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif';
+	assert.ok(fontStack.length > 160 && fontStack.length <= 400);
+	const parsed = parsePluginContext({ locale: "zh-CN", theme: "light", tokens: { "--font-family-base": fontStack, "--color-bg-app": "#fff", "--radius-md": "8px", "--font-family-mono": "ui-monospace, Menlo, monospace" } });
+	assert.equal(parsed.tokens["--font-family-base"], fontStack);
+	// 数字与字母开头的合法值不能被控制字符范围误伤（曾把 \u0000 写成 \\u0000）。
+	assert.equal(parsed.tokens["--radius-md"], "8px");
+	assert.equal(parsed.tokens["--font-family-mono"], "ui-monospace, Menlo, monospace");
+	assert.throws(() => parsePluginContext({ locale: "zh-CN", theme: "light", tokens: { "--font-family-base": "a".repeat(401) } }), /invalid-context/);
+	assert.throws(() => parsePluginContext({ locale: "zh-CN", theme: "light", tokens: { "--font-family-base": "serif} body{display:none" } }), /invalid-context/);
+});
+
+test("plugin theme token set stays inside the context contract (≤40 names, policy-safe names)", () => {
+	assert.ok(HOST_PLUGIN_THEME_TOKENS.length > 0 && HOST_PLUGIN_THEME_TOKENS.length <= 40, `${HOST_PLUGIN_THEME_TOKENS.length} tokens`);
+	for (const name of HOST_PLUGIN_THEME_TOKENS) assert.match(name, /^--[a-z-]{1,60}$/);
+	// 插件面板的字体与交互底色依赖这些 token；缺一个就会退回插件自带色板，和宿主脱节。
+	for (const name of ["--font-family-base", "--font-family-mono", "--color-bg-hover", "--color-bg-active", "--radius-md", "--control-height-md"]) {
+		assert.ok(HOST_PLUGIN_THEME_TOKENS.includes(name), name);
+	}
 });
 
 test("host plugin package consent is bound to exact files and revoked after rescan", async () => {
@@ -245,7 +271,12 @@ test("host plugin broker gates workbench navigation by permission and project ow
 	const make = (permissions) => {
 		const broker = new HostPluginBroker(
 			{ getEnabled: () => ({ manifest: manifest(permissions), fingerprint: "f" }), onChanged: () => () => {} },
-			{ list: () => ({ sessions: [], nextOffset: null }), entries: async () => ({ entries: [], nextCursor: null, truncated: false }), navigable: (context, id) => context.projectId === "project-a" && id === "history", describe: (context) => context },
+			{
+				list: () => ({ sessions: [], nextOffset: null }),
+				entries: async () => ({ entries: [], nextCursor: null, truncated: false }),
+				resolveNavigation: (context, id) => (context.projectId === "project-a" && id === "history" ? { projectId: "project-a", sessionId: "history" } : undefined),
+				describe: (context) => context,
+			},
 			{ get: () => null, set: async () => undefined },
 		);
 		broker.bind(10, "example.viewer", "f", { projectId: "project-a", locale: "en-US", theme: "dark" });
@@ -267,6 +298,76 @@ test("host plugin broker gates workbench navigation by permission and project ow
 		]),
 	);
 	allowed.dispose();
+});
+
+test("host plugin broker navigates to the session's own project under workspace scope", async () => {
+	// 工作区范围下目标可以是其他项目：导航的 projectId 取自会话归属，不看插件传入的当前项目。
+	const navigated = [];
+	const broker = new HostPluginBroker(
+		{ getEnabled: () => ({ manifest: manifest(["sessions.read", "sessions.read.workspace", "workbench.navigate"]), fingerprint: "f" }), onChanged: () => () => {} },
+		{
+			list: () => ({ sessions: [], nextOffset: null }),
+			entries: async () => ({ entries: [], nextCursor: null, truncated: false }),
+			resolveNavigation: (context, id) => (id === "history" ? { projectId: "project-b", sessionId: "history" } : undefined),
+			describe: (context, permissions) => ({ ...context, scope: permissions.includes("sessions.read.workspace") ? "workspace" : "project" }),
+		},
+		{ get: () => null, set: async () => undefined },
+	);
+	broker.onNavigate((target) => void navigated.push(target));
+	broker.bind(10, "example.viewer", "f", { projectId: "project-a", locale: "en-US", theme: "dark" });
+	assert.ok((await broker.request(10, true, { method: "workbench.navigate", sessionId: "history", entryId: "m1" })).ok);
+	assert.deepEqual(plain(navigated), [{ projectId: "project-b", sessionId: "history", entryId: "m1" }]);
+	broker.dispose();
+});
+
+test("host plugin reads and navigation cover sessions without a JSONL history", async () => {
+	// 回归：DSH/ACP 会话没有 filePath，旧实现要求「有可读历史」才允许跳转，点一下必报 session-not-authorized。
+	const piEntry = { id: "pi", projectId: "project-a", filePath: "/p/a.jsonl", environment: "native", title: "Pi", createdAt: 1, updatedAt: 3 };
+	const dshEntry = { id: "dsh", projectId: "project-a", backend: "dsh", title: "DSH", createdAt: 1, updatedAt: 2 };
+	const acpEntry = { id: "acp", projectId: "project-a", backend: "acp", title: "ACP", createdAt: 1, updatedAt: 1 };
+	const list = [piEntry, dshEntry, acpEntry];
+	const sessions = new HostPluginSessions({ listEntries: () => list, get: (id) => list.find((item) => item.id === id) }, (projectId) => ({ name: projectId, directory: `D:/repos/${projectId}` }));
+	const context = { projectId: "project-a", locale: "en-US", theme: "dark" };
+	assert.deepEqual(
+		Array.from(sessions.list(context).sessions, (item) => [item.id, item.backend, item.readable]),
+		[
+			["pi", undefined, true],
+			["dsh", "dsh", false],
+			["acp", "acp", false],
+		],
+	);
+	assert.deepEqual(plain(sessions.resolveNavigation(context, "dsh")), { projectId: "project-a", sessionId: "dsh" });
+	assert.equal(sessions.get(context, "dsh").directory, "D:/repos/project-a");
+	await assert.rejects(sessions.entries(context, "dsh"), /history-unavailable/);
+	// project 范围仍然不跨项目
+	list.push({ ...piEntry, id: "foreign", projectId: "project-b" });
+	assert.equal(sessions.resolveNavigation(context, "foreign"), undefined);
+	assert.throws(() => sessions.get(context, "foreign"), /session-not-authorized/);
+});
+
+test("host plugin workspace scope comes from the manifest and widens reads plus navigation", () => {
+	const entries = [
+		{ id: "a1", projectId: "project-a", title: "A one", createdAt: 1, updatedAt: 2 },
+		{ id: "b1", projectId: "project-b", backend: "dsh", title: "B one", createdAt: 1, updatedAt: 3 },
+	];
+	const sessions = new HostPluginSessions({ listEntries: () => entries, get: (id) => entries.find((item) => item.id === id) }, (projectId) => ({ name: projectId, directory: `D:/repos/${projectId}` }));
+	const workspaceContext = sessions.describe({ projectId: "project-a", locale: "en-US", theme: "dark", scope: "workspace" }, ["sessions.read", "sessions.read.workspace"]);
+	// scope 只由权限决定：渲染层传上来的 scope 在 describe 里被覆盖
+	assert.equal(workspaceContext.scope, "workspace");
+	assert.deepEqual(
+		Array.from(sessions.list(workspaceContext).sessions, (item) => item.id),
+		["b1", "a1"],
+	);
+	assert.deepEqual(plain(sessions.resolveNavigation(workspaceContext, "b1")), { projectId: "project-b", sessionId: "b1" });
+	assert.equal(sessions.get(workspaceContext, "b1").directory, "D:/repos/project-b");
+	// 没有 workspace 权限：即使上下文伪造 scope 也按项目隔离
+	const forged = sessions.describe({ projectId: "project-a", locale: "en-US", theme: "dark", scope: "workspace" }, ["sessions.read"]);
+	assert.equal(forged.scope, "project");
+	assert.deepEqual(
+		Array.from(sessions.list(forged).sessions, (item) => item.id),
+		["a1"],
+	);
+	assert.equal(sessions.resolveNavigation(forged, "b1"), undefined);
 });
 
 test("host plugin broker limits concurrent requests", async () => {

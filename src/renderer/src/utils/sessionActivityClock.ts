@@ -27,6 +27,20 @@ export function isSessionTurnRunning(state: SessionTurnActivityState | undefined
 }
 
 /**
+ * 发送 IPC 返回后，能否把 runtime status 补写成 running。
+ *
+ * ACP 的 `sessions.sendPrompt` 要等整个回合结束才返回（pi/DSH 都是派发即返回）：
+ * 返回时 manager 已经推过 idle，再写 running 会把刚结束的回合重新标成运行中。
+ * 紧接着预测 ghost 按 isTurnActive=false 出现，用户 Tab 采纳后发送却被判忙碌、
+ * 排进 followUp 队列（输入框上方多一条「发送中」）。ACP 的 status 只由 runtime
+ * 事件维护，发送结果不再补写。
+ */
+export function shouldMarkRuntimeRunningAfterSend(input: { accepted: boolean; backend?: string }): boolean {
+	if (!input.accepted) return false;
+	return input.backend !== "acp";
+}
+
+/**
  * 边沿判定：返回新的计时点时间戳，`undefined` = 保持既有计时点（不写 atom）。
  *
  * 只有「本轮开始 ⇄ 本轮结束」的跃变才是边界；首次观测到一个空闲会话不算边界

@@ -1,6 +1,6 @@
 import { Fragment } from "react";
 import type { ReactNode } from "react";
-import { Plus, X } from "lucide-react";
+import { PanelRight, Plus, X } from "lucide-react";
 import { Button } from "../ui-shadcn/button";
 import { t } from "../../i18n";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
@@ -28,54 +28,68 @@ export type WorkspaceDrawerRailAction = {
  * 不再是 tab 后面跟一颗独立按钮（用户反馈「× 挂在 tab 后面太丑」）；
  * X 与所属 tab 同组渲染、加号下拉收尾的结构保持不变（2026-10 remove 错位回归），
  * 契约见 tests/workspaceDrawer.test.mjs。
- * 开/关抽屉按钮留在会话 Tab 栏右侧，不进本栏。
+ * 关闭按钮默认落在抽屉顶栏那一行、贴住抽屉左边界（WorkspaceDrawerHost 的 .drawer-titlebar-close，
+ * 用户要求与上方分栏竖线对齐）；只有原生标题栏（顶栏高度为 0）才退回本栏左端兜底（.drawer-rail-close）。
  */
-export function WorkspaceDrawerRail(props: { actions: WorkspaceDrawerRailAction[]; addLabel: string }) {
+export function WorkspaceDrawerRail(props: { actions: WorkspaceDrawerRailAction[]; addLabel: string; onClose?: () => void }) {
 	if (props.actions.length === 0) return null;
 	const optionalActions = props.actions.filter((action) => action.canRemove && action.onTogglePinned);
 	// 活动面板必须在 rail 里可见：外部入口（消息里的「在浏览器打开」、插件打开本地服务 UI）只切内容
 	// 不钉住 tab，漏掉 active 会让面板内容看起来「没有归属 tab」（2026-10 用户反馈）。
 	const visibleActions = props.actions.filter((action) => (action.pinned ?? false) || !action.canRemove || action.active);
 	return (
-		<div className="drawer-activity-rail flex h-10 shrink-0 items-center gap-1 border-b border-border/40 bg-bg-page-raised px-2" role="tablist" aria-orientation="horizontal">
-			{visibleActions.map((action) => (
-				<Fragment key={action.id}>
-					{/* group 容器：X 角标相对 tab 定位，悬停/聚焦时显现，活动 tab 常驻 */}
-					<div className="group relative shrink-0" role="presentation">
-						<Button
-							type="button"
-							role="tab"
-							aria-selected={action.active}
-							data-testid={`drawer-rail-${action.id}`}
-							variant={action.active ? "secondary" : "ghost"}
-							size="icon"
-							className={cn("drawer-activity-rail-button relative size-8", action.active && "active")}
-							title={action.label}
-							aria-label={action.label}
-							onClick={action.onClick}
-						>
-							{action.icon}
-							{action.active ? <span className="pointer-events-none absolute inset-x-1.5 -bottom-1 h-0.5 rounded-full bg-foreground" aria-hidden="true" /> : null}
-						</Button>
-						{action.canRemove && action.pinned && action.onTogglePinned ? (
+		<div className="drawer-activity-rail flex h-10 shrink-0 items-center gap-1 border-b border-border/40 bg-bg-page-raised px-2">
+			{/* 兜底：原生标题栏下抽屉顶栏让位条高度为 0，关闭按钮落在活动栏最左端；
+			    自定义标题栏时由 .drawer-titlebar-close 接管，本组连同分隔线一起隐藏。
+			    -ml-2 抵掉 rail 的 px-2：按钮左缘落在抽屉左边界，与上方会话 Tab 栏的分栏线同一条竖线 */}
+			{props.onClose ? (
+				<span className="flex shrink-0 items-center workspace-titlebar:hidden">
+					<Button type="button" variant="ghost" size="icon" className="drawer-rail-close -ml-2 size-8 shrink-0" title={t("app.closeDrawer")} aria-label={t("app.closeDrawer")} onClick={props.onClose}>
+						<PanelRight size={16} aria-hidden="true" />
+					</Button>
+					<span aria-hidden="true" className="mx-0.5 h-5 w-px shrink-0 bg-border/60" />
+				</span>
+			) : null}
+			<div role="tablist" aria-orientation="horizontal" className="flex min-w-0 items-center gap-1">
+				{visibleActions.map((action) => (
+					<Fragment key={action.id}>
+						{/* group 容器：X 角标相对 tab 定位，悬停/聚焦时显现，活动 tab 常驻 */}
+						<div className="group relative shrink-0" role="presentation">
 							<Button
 								type="button"
-								variant="ghost"
+								role="tab"
+								aria-selected={action.active}
+								data-testid={`drawer-rail-${action.id}`}
+								variant={action.active ? "secondary" : "ghost"}
 								size="icon"
-								className={cn(
-									"drawer-rail-remove absolute -top-1 -right-1 z-10 size-4 rounded-full border border-border/60 bg-bg-page-raised p-0 text-muted-foreground shadow-sm transition-opacity hover:bg-bg-hover hover:text-text-primary focus-visible:opacity-100",
-									action.active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
-								)}
-								title={t("drawer.removePanel", { label: action.label })}
-								aria-label={t("drawer.removePanel", { label: action.label })}
-								onClick={action.onTogglePinned}
+								className={cn("drawer-activity-rail-button relative size-8", action.active && "active")}
+								title={action.label}
+								aria-label={action.label}
+								onClick={action.onClick}
 							>
-								<X size={10} />
+								{action.icon}
+								{action.active ? <span className="pointer-events-none absolute inset-x-1.5 -bottom-1 h-0.5 rounded-full bg-foreground" aria-hidden="true" /> : null}
 							</Button>
-						) : null}
-					</div>
-				</Fragment>
-			))}
+							{action.canRemove && action.pinned && action.onTogglePinned ? (
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon"
+									className={cn(
+										"drawer-rail-remove absolute -top-1 -right-1 z-10 size-4 rounded-full border border-border/60 bg-bg-page-raised p-0 text-muted-foreground shadow-sm transition-opacity hover:bg-bg-hover hover:text-text-primary focus-visible:opacity-100",
+										action.active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+									)}
+									title={t("drawer.removePanel", { label: action.label })}
+									aria-label={t("drawer.removePanel", { label: action.label })}
+									onClick={action.onTogglePinned}
+								>
+									<X size={10} />
+								</Button>
+							) : null}
+						</div>
+					</Fragment>
+				))}
+			</div>
 			<DropdownMenu>
 				<DropdownMenuTrigger asChild>
 					<Button type="button" variant="ghost" size="icon" className="size-8" title={props.addLabel} aria-label={props.addLabel}>

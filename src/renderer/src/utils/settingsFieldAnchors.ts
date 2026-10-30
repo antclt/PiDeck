@@ -212,6 +212,12 @@ const SETTINGS_ROW_ANCHORS = [
 		keywords: ["会话标签打开方式", "预览", "固定标签", "tab 打开模式", "preview"],
 	},
 	{
+		tab: "common",
+		slug: "common-scratch-pad-scope",
+		labelKey: "settings.scratchPadScope",
+		keywords: ["草稿本", "便签", "作用域", "项目草稿", "全局草稿", "scratch pad", "scope", "draft"],
+	},
+	{
 		tab: "appearance",
 		slug: "appearance-sidebar-sticky-group-headers",
 		labelKey: "settings.sidebarStickyGroupHeaders",
@@ -497,6 +503,12 @@ const SETTINGS_ROW_ANCHORS = [
 	},
 	{
 		tab: "web",
+		slug: "web-mobile-clients",
+		labelKey: "settings.webMobileClients",
+		keywords: ["手机端", "手机客户端", "移动端", "客户端推荐", "mobile", "android", "pocketdeck"],
+	},
+	{
+		tab: "web",
 		slug: "web-remote-access-guide",
 		labelKey: "settings.remote.guideRowTitle",
 		keywords: ["外网访问", "远程访问指南", "cloudflared", "tailscale", "穿透", "隧道"],
@@ -508,6 +520,12 @@ const SETTINGS_ROW_ANCHORS = [
 		slug: "proxy-enable-pi",
 		labelKey: "settings.enablePiProxy",
 		keywords: ["pi 代理", "模型代理", "网络代理", "proxy", "翻墙", "走代理"],
+	},
+	{
+		tab: "proxy",
+		slug: "proxy-enable-acp",
+		labelKey: "settings.enableAcpProxy",
+		keywords: ["acp 代理", "cli 代理", "codebuddy 代理", "claude 代理", "acp proxy"],
 	},
 	{
 		tab: "proxy",

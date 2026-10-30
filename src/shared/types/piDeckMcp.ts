@@ -30,6 +30,12 @@ export type PiDeckMcpAccess = {
 	 * 收藏是本机快照：列表只返回「未关联项目」或「已授权项目」的条目，避免借收藏绕过项目授权。
 	 */
 	allowFavoritesWrite: boolean;
+	/**
+	 * ACP 调用开关（默认关）：开启后客户端可新建 ACP 会话、发送消息、等待回合、读取消息与停止运行时。
+	 * 只作用于 backend=acp 的会话，且只能引用用户已登记的 acpToolId——不接受命令/参数/环境变量，
+	 * 也不能驱动 pi/DSH 会话。新建会话会 spawn 本机 CLI 进程并消耗该 CLI 自己的模型额度。
+	 */
+	allowAcpInvoke: boolean;
 };
 export type PiDeckMcpProject = { id: string; name: string };
 export type PiDeckMcpState = PiDeckMcpAccess & {
@@ -183,6 +189,72 @@ export type PiDeckMcpAutomationRunSummary = {
 	error: string | null;
 	skippedReason: string | null;
 	budgetReason: string | null;
+};
+
+/**
+ * 已登记的 ACP CLI（只读投影）：**不含 command/args/env**——命令与环境变量可能带凭据，
+ * 客户端只需要 id 去建会话。bypassPermissions 说明该工具会跳过 agent 的逐次审批。
+ */
+export type PiDeckMcpAcpToolSummary = {
+	id: string;
+	name: string;
+	bypassPermissions: boolean;
+};
+
+export type PiDeckMcpAcpToolsView = {
+	/** settings.acpEnabled：总开关关闭时 tools 恒为空（登记表可能还在，但运行时拒绝 spawn）。 */
+	acpEnabled: boolean;
+	tools: PiDeckMcpAcpToolSummary[];
+};
+
+/** 新建的 ACP 会话（草稿，不启动进程；首次发送才握手）。 */
+export type PiDeckMcpAcpSession = {
+	sessionId: string;
+	projectId: string;
+	title: string;
+	backend: "acp";
+	acpToolId: string;
+};
+
+/**
+ * 一次发送的结果。ACP 的 `session/prompt` 在回合结束时才回，而 MCP HTTP 响应 30s 会断开，
+ * 所以 send 只等一小段：accepted = 已派发、回合仍在跑，继续用 sessions_wait 取结果。
+ */
+export type PiDeckMcpAcpSendStatus = "accepted" | "completed" | "failed" | "timeout";
+
+export type PiDeckMcpAcpSendResult = {
+	sessionId: string;
+	requestId: string;
+	/** 运行时已绑定时才有；握手期间（accepted）可能缺省。 */
+	agentId?: string;
+	runtimeGeneration?: number;
+	status: PiDeckMcpAcpSendStatus;
+	/** completed 时是本轮最后的 assistant 文本；failed 时是截断后的失败原因（不可信文本）。 */
+	reply?: string;
+	error?: string;
+};
+
+export type PiDeckMcpAcpWaitResult = {
+	sessionId: string;
+	/** timeout = 回合还没结束，继续调用；completed/failed 才是终态。 */
+	status: "completed" | "failed" | "timeout";
+	reply?: string;
+	error?: string;
+};
+
+/** ACP 消息投影：只保留定位与文本，图片/思考/工具明细不下发。 */
+export type PiDeckMcpAcpMessage = {
+	id: string;
+	role: string;
+	text: string;
+	timestamp: number;
+};
+
+export type PiDeckMcpAcpMessagesPage = {
+	messages: PiDeckMcpAcpMessage[];
+	total: number;
+	/** 继续向前翻页的游标；null = 没有更早的页。 */
+	nextBefore: number | null;
 };
 
 export type PiDeckMcpResult<T> = { ok: true; value: T } | { ok: false; code: string };

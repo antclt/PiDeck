@@ -269,7 +269,7 @@ export function TokenDanceTopUpDialog(props: TokenDanceTopUpDialogProps) {
 					)}
 
 					{phase === "paid" && session && (
-						<p className="flex items-center gap-2 rounded-sm border border-emerald-300/70 bg-emerald-500/10 px-2.5 py-2 text-xs text-emerald-700 dark:border-emerald-700/70 dark:text-emerald-300">
+						<p className="flex items-center gap-2 rounded-sm border border-success/30 bg-success/10 px-2.5 py-2 text-xs text-success  ">
 							<CheckCircle2 className="size-4 shrink-0" aria-hidden="true" />
 							<span className="min-w-0">{t("config.tokendance.topUpPaid", { amount: session.amount })}</span>
 						</p>

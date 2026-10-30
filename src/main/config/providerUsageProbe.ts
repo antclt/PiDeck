@@ -30,17 +30,21 @@ export type UsageProbeWindow =
 			totalPath: string;
 			usedPath: string;
 			remainingPath?: string;
+			/** 服务端直接给的已用百分比（如智谱套餐 token 窗只回 percentage，无 usage/currentValue）。 */
+			percentPath?: string;
 	  }
 	| {
 			key: string;
 			/** 数组路径（如 "data.limits"）：在该数组里按 where 找第一个全部条件匹配的元素。 */
 			listPath: string;
-			/** 匹配条件（AND）：元素上 getByPath(path) 严格等于 eq。
-			 *  多条件用于区分同 unit 但不同 type 的条目（如智谱 5h 窗需 type 为 CREDIT_LIMIT）。 */
+			/** 匹配条件（AND）：元素上 getByPath(path) 等于 eq；eq 为数组时按「属于其中任一项」匹配
+			 *  （同一语义的 type 会随套餐版本改名，如智谱 token 窗 CREDIT_LIMIT / TOKENS_LIMIT）。
+			 *  多条件用于区分同 unit 但不同 type 的条目（如智谱 5h 窗需排除 TIME_LIMIT 月额度）。 */
 			where: { path: string; eq: unknown }[];
 			totalPath: string;
 			usedPath: string;
 			remainingPath?: string;
+			percentPath?: string;
 	  };
 
 /**
@@ -244,6 +248,10 @@ export const USAGE_PROBE_CANDIDATES: UsageProbeCandidate[] = [
 	// limits 是数组，按 unit/type 遍历分类而非硬编码下标（下标顺序不稳定）：
 	//   unit:3 → 5h 滚动窗、unit:6 → 周窗（自下单起 7 天周期重置）、
 	//   type:TIME_LIMIT → MCP 月度额度（usage=总配额、currentValue=已用）。
+	// token 窗的 type 随套餐版本两套写法并存：新套餐 CREDIT_LIMIT（带 usage/currentValue），
+	// 老套餐 TOKENS_LIMIT（只有 percentage + nextResetTime，没有额度明细）——后者必须走
+	// percentPath，否则整条窗口被当成「无值」跳过（老套餐 5h 窗就是这么消失的）。
+	// 老套餐没有周窗（服务端不下发 unit:6），UI 自然只显示 5h + MCP 月额度。
 	// 任一耗尽都可能 429，都要给用户看到；percentage 只是百分比，不能当 used 参与计算。
 	// 放在通用 OpenAI 候选之前：命中 open.bigmodel.cn 时优先走本候选。
 	{
@@ -261,29 +269,31 @@ export const USAGE_PROBE_CANDIDATES: UsageProbeCandidate[] = [
 			// 双限额窗口并列展示：limits[0]=5h 滚动窗（unit:3,number:5）、limits[1]=周窗
 			// （unit:6,number:1，自下单起 7 天周期重置）。任一耗尽都可能 429，两个都要给用户看到。
 			windows: [
-				// 5h 滚动窗与周窗都要求 type 为 CREDIT_LIMIT（plan usage）：TIME_LIMIT（MCP 月额度）
-				// 也可能带 unit 3，仅按 unit 匹配会误伤，故 type+unit 双条件 AND。
+				// 5h 滚动窗与周窗的 type 有 CREDIT_LIMIT（新套餐）/ TOKENS_LIMIT（老套餐）两种；
+				// TIME_LIMIT（MCP 月额度）也可能带 unit 3，仅按 unit 匹配会误伤，故 type+unit 双条件 AND。
 				{
 					key: "fiveHour",
 					listPath: "data.limits",
 					where: [
-						{ path: "type", eq: "CREDIT_LIMIT" },
+						{ path: "type", eq: ["CREDIT_LIMIT", "TOKENS_LIMIT"] },
 						{ path: "unit", eq: 3 },
 					],
 					totalPath: "usage",
 					usedPath: "currentValue",
+					percentPath: "percentage",
 				},
 				{
 					key: "weekly",
 					listPath: "data.limits",
 					where: [
-						{ path: "type", eq: "CREDIT_LIMIT" },
+						{ path: "type", eq: ["CREDIT_LIMIT", "TOKENS_LIMIT"] },
 						{ path: "unit", eq: 6 },
 					],
 					totalPath: "usage",
 					usedPath: "currentValue",
+					percentPath: "percentage",
 				},
-				{ key: "mcpMonthly", listPath: "data.limits", where: [{ path: "type", eq: "TIME_LIMIT" }], totalPath: "usage", usedPath: "currentValue" },
+				{ key: "mcpMonthly", listPath: "data.limits", where: [{ path: "type", eq: "TIME_LIMIT" }], totalPath: "usage", usedPath: "currentValue", percentPath: "percentage" },
 			],
 		},
 	},
@@ -486,17 +496,22 @@ export function parseUsageResponseBody(body: unknown, raw: string, parse: UsageP
 		// 字段路径相对元素，智谱按 unit/type 分类）。
 		const windows: NonNullable<ProviderUsageCredits["windows"]> = [];
 		for (const window of parse.windows ?? []) {
-			const resolved = "listPath" in window ? resolveWindowByList(window, body) : { key: window.key, totalPath: window.totalPath, usedPath: window.usedPath, remainingPath: window.remainingPath, scope: body };
+			const resolved = "listPath" in window ? resolveWindowByList(window, body) : { key: window.key, totalPath: window.totalPath, usedPath: window.usedPath, remainingPath: window.remainingPath, percentPath: window.percentPath, scope: body };
 			if (!resolved) continue;
 			const wTotal = toNumber(getByPath(resolved.scope, resolved.totalPath));
 			const wUsed = toNumber(getByPath(resolved.scope, resolved.usedPath));
 			const wRemaining = resolved.remainingPath ? toNumber(getByPath(resolved.scope, resolved.remainingPath)) : wTotal !== undefined && wUsed !== undefined ? wTotal - wUsed : undefined;
-			if (wTotal === undefined && wUsed === undefined && wRemaining === undefined) continue;
+			// percentage（0-100 已用占比）：老套餐 token 窗只回这一个字段，没有额度明细；
+			// 与 total/used 并存时保留两份，展示层优先用 total/used 计算，percent 仅兜底。
+			const wPercentRaw = resolved.percentPath ? toNumber(getByPath(resolved.scope, resolved.percentPath)) : undefined;
+			const wPercent = wPercentRaw !== undefined && Number.isFinite(wPercentRaw) ? Math.min(100, Math.max(0, wPercentRaw)) : undefined;
+			if (wTotal === undefined && wUsed === undefined && wRemaining === undefined && wPercent === undefined) continue;
 			windows.push({
 				key: resolved.key,
 				...(wTotal !== undefined ? { total: wTotal } : {}),
 				...(wUsed !== undefined ? { used: wUsed } : {}),
 				...(wRemaining !== undefined ? { remaining: wRemaining } : {}),
+				...(wPercent !== undefined ? { percent: wPercent } : {}),
 			});
 		}
 		// booster（独立货币，如 Kimi Boost 点数）：与主 credits 并存，解析失败不拖垮主值。
@@ -565,6 +580,7 @@ function resolveWindowByList(
 			totalPath: string;
 			usedPath: string;
 			remainingPath?: string;
+			percentPath?: string;
 			scope: unknown;
 	  }
 	| undefined {
@@ -572,7 +588,11 @@ function resolveWindowByList(
 	if (!Array.isArray(list)) return undefined;
 	const found = list.find((item) => {
 		if (!item || typeof item !== "object" || Array.isArray(item)) return false;
-		return window.where.every((cond) => getByPath(item, cond.path) === cond.eq);
+		return window.where.every((cond) => {
+			const value = getByPath(item, cond.path);
+			// eq 为数组 = 候选值集合（同一语义的 type 跨套餐版本改名）；单值仍严格相等。
+			return Array.isArray(cond.eq) ? cond.eq.includes(value) : value === cond.eq;
+		});
 	});
 	if (found === undefined || found === null || typeof found !== "object" || Array.isArray(found)) {
 		return undefined;
@@ -582,6 +602,7 @@ function resolveWindowByList(
 		totalPath: window.totalPath,
 		usedPath: window.usedPath,
 		...(window.remainingPath ? { remainingPath: window.remainingPath } : {}),
+		...(window.percentPath ? { percentPath: window.percentPath } : {}),
 		scope: found,
 	};
 }

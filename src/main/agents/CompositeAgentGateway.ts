@@ -18,6 +18,7 @@ import type {
 	SessionRuntimeModelSelection,
 	SessionUiResponseInput,
 } from "../../shared/types";
+import { agentEventTags } from "../../shared/ipc";
 import type { SessionAgentGateway } from "../sessions/SessionRuntimeCoordinator";
 
 /**
@@ -319,6 +320,25 @@ export class CompositeAgentGateway implements SessionAgentGateway {
 				return;
 			}
 		}
+	}
+
+	/**
+	 * 全后端状态快照订阅（桌宠等主进程内部消费者用）。
+	 * 子网关的 agents:state 载荷只含自己的 tab，这里统一换成聚合后的 list()，
+	 * 否则订阅方会拿 ACP 的列表把 pi 的 tab 覆盖掉。
+	 */
+	addStateListener(listener: (tabs: AgentTab[]) => void): () => void {
+		return this.onOutput((channel) => {
+			if (channel === agentEventTags.agentsState) listener(this.list());
+		});
+	}
+
+	/** 全后端「成功收口」订阅：没有该能力的网关跳过（目前 pi/dsh/acp 都实现）。 */
+	onAgentSettled(listener: (info: { agentId: string; title: string }) => void): () => void {
+		const unsubscribers = this.gateways.map((gateway) => gateway.onAgentSettled?.(listener)).filter((unsubscribe): unsubscribe is () => void => typeof unsubscribe === "function");
+		return () => {
+			for (const unsubscribe of unsubscribers) unsubscribe();
+		};
 	}
 
 	onOutput(listener: (channel: string, payload: unknown) => void): () => void {

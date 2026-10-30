@@ -10,11 +10,16 @@
  */
 
 import { useAtomValue } from "jotai";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PiSubagentEntry, PiSubagentStatus } from "../../../shared/types";
 import { desktopApi } from "../desktopApi";
 import { sessionRuntimeUiBySessionIdAtomFamily } from "../atoms";
-import { isTerminalSubagentStatus } from "../components/session/subagentStatus";
+import { isSubagentRunLost, isTerminalSubagentStatus } from "../components/session/subagentStatus";
+
+/** record 条件轮询节奏：仅 live runtime 且面板上仍有活跃条目时生效。 */
+const SUBAGENT_RECORD_POLL_MS = 5000;
+/** 事件类补拉（聚焦/回前台/catalog 推送）最小间隔：连发触发合并成一次。 */
+const SUBAGENT_RELOAD_MIN_INTERVAL_MS = 1000;
 
 /* ------------------------------------------------------------------ */
 /* 纯函数合并逻辑（可单测）                                              */
@@ -240,28 +245,85 @@ export function useSessionSubagents(sessionId: string): {
 	// （downgradeRunningStartedBefore，按本代 runtime 启动时间）只有在绑定后
 	// 才有阈值可用——绑定即重拉，激活完成后立即看到对账结果
 	//（2026-09-14 用户环境实测：真实活动子代理 0，历史投影仍显示 33 个 running）。
+	const mountedRef = useRef(true);
+	const sessionIdRef = useRef(sessionId);
 	useEffect(() => {
-		let cancelled = false;
-		setLoading(true);
-		desktopApi.sessions
-			.listSessionSubagents(sessionId)
-			.then((entries) => {
-				if (!cancelled) {
-					setRecords(entries);
-					setLoading(false);
-				}
-			})
-			.catch(() => {
-				if (!cancelled) setLoading(false);
-			});
+		sessionIdRef.current = sessionId;
+	}, [sessionId]);
+	useEffect(() => {
 		return () => {
-			cancelled = true;
+			mountedRef.current = false;
 		};
-	}, [sessionId, runtimeUi?.agentId]);
+	}, []);
+	const reloadInflightRef = useRef(false);
+	const lastReloadAtRef = useRef(0);
+	const reloadRecords = useCallback(
+		async (withLoading: boolean) => {
+			const requestedAt = Date.now();
+			// 补拉（轮询/事件）节流 + 防重叠；初次加载（会话切换/绑定重拉）不设限，
+			// 保证 loading 态与数据一定走到最新
+			if (!withLoading && (reloadInflightRef.current || requestedAt - lastReloadAtRef.current < SUBAGENT_RELOAD_MIN_INTERVAL_MS)) return;
+			lastReloadAtRef.current = requestedAt;
+			reloadInflightRef.current = true;
+			if (withLoading) setLoading(true);
+			try {
+				const fetched = await desktopApi.sessions.listSessionSubagents(sessionId);
+				// 迟到响应不得串台：请求期间切走会话/卸载则丢弃
+				if (mountedRef.current && sessionIdRef.current === sessionId) setRecords(fetched);
+			} catch {
+				// 补拉失败保留旧 records：瞬时不可用不该把面板清空
+			} finally {
+				reloadInflightRef.current = false;
+				if (withLoading && mountedRef.current && sessionIdRef.current === sessionId) setLoading(false);
+			}
+		},
+		[sessionId],
+	);
+	useEffect(() => {
+		void reloadRecords(true);
+	}, [reloadRecords, runtimeUi?.agentId]);
+
+	// 窗口聚焦 / 回前台 / catalog 后台扫描合并完成：各补拉一次 record。兜住两类
+	// 无推送场景——record 落盘（终态权威）没有事件信号、冷会话期间 pi CLI 直跑
+	// 对父会话文件的外部写入。
+	useEffect(() => {
+		const reload = () => {
+			if (document.hidden) return;
+			void reloadRecords(false);
+		};
+		window.addEventListener("focus", reload);
+		document.addEventListener("visibilitychange", reload);
+		return () => {
+			window.removeEventListener("focus", reload);
+			document.removeEventListener("visibilitychange", reload);
+		};
+	}, [reloadRecords]);
+	useEffect(() => {
+		if (!desktopApi.sessions.onCatalogRefreshed) return;
+		const unsubscribe = desktopApi.sessions.onCatalogRefreshed(() => {
+			if (document.hidden) return;
+			void reloadRecords(false);
+		});
+		return unsubscribe;
+	}, [reloadRecords]);
 
 	// 合并：record（主进程侧已含工具推导）+ tintinweb 桥接 → 叠加 nicobailon async 条目
 	const { merged, pluginActive } = useMemo(() => mergeSubagentEntries(records, bridgeLines), [records, bridgeLines]);
 	const entries = useMemo(() => applyAsyncSnapshotEntries(merged, parseSubagentAsyncSnapshot(subagentAsyncLines)), [merged, subagentAsyncLines]);
+
+	// 条件轮询：record 落盘没有任何推送信号，nicobailon async widget 完成后 10s 还会被
+	// 清空——不补拉，条目要么永远停在「运行中」，要么整条从面板消失（2026-10 用户反馈
+	// 「子代理状态不实时刷新」）。仅 live runtime 且面板上仍有活跃条目时 5s 一拉，全终态
+	// 即停；冷会话（无 runtime）文件不会自发变化，交给上方聚焦/可见性/catalog 补拉。
+	const hasActiveSubagent = useMemo(() => entries.some((entry) => !isSubagentRunLost(entry, Date.now()) && (entry.status === "running" || entry.status === "queued")), [entries]);
+	useEffect(() => {
+		if (!runtimeUi?.agentId || !hasActiveSubagent) return;
+		const timer = window.setInterval(() => {
+			if (document.hidden) return;
+			void reloadRecords(false);
+		}, SUBAGENT_RECORD_POLL_MS);
+		return () => window.clearInterval(timer);
+	}, [runtimeUi?.agentId, hasActiveSubagent, reloadRecords]);
 
 	return { entries, pluginActive, loading };
 }

@@ -192,6 +192,44 @@ test("batch subagent sync dedupes by id, recomputes once and keeps snapshot at i
 	assert.equal(f.tracker.getLast("a").sessionEndToEndTps, 60);
 });
 
+test("latest reply metrics record the provider and model that actually served the reply", () => {
+	const f = fixture();
+	// 运行时模型来源 = 宿主最近一次完整快照（AgentManager 按 agent 绑定）。
+	let runtimeModel = { provider: "anthropic", modelId: "claude-opus-4", modelName: "Claude Opus 4" };
+	f.tracker.bindRuntimeModelSource(() => runtimeModel);
+	// assistant 消息自带 model（pi）：优先于运行时快照；供应商只来自运行时快照。
+	f.at(1000, () => f.tracker.ensureTimer("a"));
+	f.at(2000, () => f.tracker.markFirstDelta("a"));
+	f.at(3000, () => f.tracker.settle("a", (channel, payload) => f.events.push({ channel, payload }), { model: "claude-opus-4", usage: { output: 100 } }));
+	const facts = f.tracker.getLastReplyModel("a");
+	assert.deepEqual({ provider: facts.provider, modelId: facts.modelId, modelName: facts.modelName }, { provider: "anthropic", modelId: "claude-opus-4", modelName: undefined });
+	const state = f.events.at(-1).payload.state;
+	assert.equal(state.perfProvider, "anthropic");
+	assert.equal(state.perfModelId, "claude-opus-4");
+	assert.equal(state.perfModelName, undefined);
+
+	// assistant 消息没带 model 时退回运行时快照的 modelId / modelName。
+	runtimeModel = { provider: "openai", modelId: "gpt-5", modelName: "GPT-5" };
+	f.at(4000, () => f.tracker.ensureTimer("a"));
+	f.at(5000, () => f.tracker.markFirstDelta("a"));
+	f.at(6000, () => f.tracker.settle("a", () => {}, { usage: { output: 10 } }));
+	assert.equal(f.tracker.getLastReplyModel("a").modelId, "gpt-5");
+	assert.equal(f.tracker.getLastReplyModel("a").modelName, "GPT-5");
+
+	// 切模型后的子代理区间同步不能抹掉「最近一次回复」的归属。
+	f.at(7000, () => f.tracker.recordSubagentTask("a", { id: "sub-1", startedAt: 6500, completedAt: 7000, tokens: 10 }));
+	assert.equal(f.tracker.getLastReplyModel("a").provider, "openai");
+	assert.equal(f.tracker.getLastReplyModel("a").modelId, "gpt-5");
+	// 子代理区间同步只重算数值，快照结构不变（settle 的 push 形状仍由静态断言锁定）
+	assert.deepEqual(Object.keys(f.tracker.getLast("a")).sort(), ["at", "endToEndTps", "sessionEndToEndTps", "sessionTps", "totalMs", "tps", "ttftMs"]);
+
+	// 没有任何模型事实时不写空字段（旧 pi / 未轮询过快照 / 未绑定来源）。
+	const g = fixture();
+	g.reply();
+	assert.equal(g.tracker.getLastReplyModel("a").provider, undefined);
+	assert.equal(g.tracker.getLastReplyModel("a").modelId, undefined);
+});
+
 test("silent sync refreshes the snapshot without pushing runtime state", () => {
 	const f = fixture();
 	f.reply({ agentId: "a", start: 1000, delta: 2000, end: 3000, usage: { output: 100 } });

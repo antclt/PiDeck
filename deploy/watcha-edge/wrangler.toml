@@ -1,0 +1,11 @@
+name = "watcha-edge"
+main = "worker.mjs"
+compatibility_date = "2026-10-29"
+account_id = "7a550f5222c5a06652bfa6d26ec40b95"
+
+# 自定义域名：Cloudflare 会为它创建/接管对应 DNS 记录。
+routes = [{ pattern = "pideck-pay.caoayu.top", custom_domain = true }]
+
+# 密钥用 wrangler secret 注入，不写进本文件：
+#   npx wrangler secret put WATCHA_API_KEY --config deploy/watcha-edge/wrangler.toml
+#   npx wrangler secret put WATCHA_ENTITLEMENT --config deploy/watcha-edge/wrangler.toml

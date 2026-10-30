@@ -40,6 +40,9 @@
     "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "HarmonyOS Sans SC",
     "Hiragino Sans GB", "Noto Sans CJK SC", monospace;
   --font-family-business: var(--font-family-mono);
+  /* Markdown 正文字体：默认跟随正文；终端皮肤覆盖为等宽呈现 TUI 渲染感。
+     用 var 引用而不是复制字面量，用户自定义等宽字体时 md 区一并跟随。 */
+  --font-family-md: var(--font-family-base);
   --font-size-micro: 11px;
   /* 会话 Tab 栏标题字号：独立一轨（外观设置「会话 Tab 栏字号」），
      出厂基线与 --font-size-micro 同值，保证未单独设置时视觉不变。 */
@@ -203,6 +206,23 @@
   --color-chip-file: #1d4ed8;
   --color-chip-skill: #7c3aed;
   --color-chip-session: #166534;
+  /* ── 身份色（identity）：标识「这是哪类东西」，不表达状态 ──────────────
+     四个角色固定：tool=工具/插件/预设，agent=Agent/生成物/子代理，
+     source=主来源（pi 等），source-alt=导入来源（codex 等）。
+     只允许用语义名，禁止再写字面 sky/violet/cyan/indigo。
+     -soft 是 12% 淡底，-line 是 32% 描边，暗色随基础色自动派生。 */
+  --color-identity-tool: #0369a1;
+  --color-identity-agent: #6d28d9;
+  --color-identity-source: #0e7490;
+  --color-identity-source-alt: #4338ca;
+  --color-identity-tool-soft: color-mix(in srgb, var(--color-identity-tool) 12%, transparent);
+  --color-identity-agent-soft: color-mix(in srgb, var(--color-identity-agent) 12%, transparent);
+  --color-identity-source-soft: color-mix(in srgb, var(--color-identity-source) 12%, transparent);
+  --color-identity-source-alt-soft: color-mix(in srgb, var(--color-identity-source-alt) 12%, transparent);
+  --color-identity-tool-line: color-mix(in srgb, var(--color-identity-tool) 32%, transparent);
+  --color-identity-agent-line: color-mix(in srgb, var(--color-identity-agent) 32%, transparent);
+  --color-identity-source-line: color-mix(in srgb, var(--color-identity-source) 32%, transparent);
+  --color-identity-source-alt-line: color-mix(in srgb, var(--color-identity-source-alt) 32%, transparent);
   --color-code-bg: #111418;
   --color-code-text: #d1d5db;
   /* 会话区「卡片」一律白卡（ZCode Light：panel/card/popover 同为 #ffffff，靠浮在
@@ -216,6 +236,33 @@
   --color-chat-bubble-bg: var(--color-bg-panel);
   --color-chat-table-bg: #ffffff;
   --color-chat-link: #4a4a4a;
+  /* ===== Markdown 语义色（会话正文 / 预览渲染） =====
+   * 标题、行内码、链接、引用、列表符号、分隔线的可着色入口。
+   * 默认值刻意等价于改造前的实际取值（streamdown 的 text-primary /
+   * text-secondary / border-default / muted-foreground 30%），所以任何既有主题、
+   * 任何主色下观感零变化；皮肤块与自定义主题包按需覆盖。
+   * 终端皮肤用它复刻 pi TUI 的 md 色板（黄标题 / 紫行内码 / 蓝链接）。
+   * 注意颜色的生效层：streamdown 自带的 class 在 utilities 层，所以真正压住它们的
+   * 是 streamdownChrome.css 里的同名规则（timeline.css 的对应规则只管 legacy 渲染）。 */
+  --color-md-heading: var(--color-text-primary);
+  --color-md-link: var(--color-text-primary);
+  --color-md-code: var(--color-text-primary);
+  --color-md-quote: var(--color-text-secondary);
+  --color-md-quote-border: color-mix(in srgb, var(--color-text-secondary) 30%, transparent);
+  --color-md-list-bullet: var(--color-text-primary);
+  --color-md-hr: var(--color-border-default);
+  /* 行内元素与块级框线（终端皮肤按 pi TUI 的 mdCodeBlockBorder / 表格框线取值）。
+     strong/em/del 默认 inherit：等价于改造前「继承正文色」，只给皮肤留改造口。 */
+  --color-md-strong: inherit;
+  --color-md-em: inherit;
+  --color-md-del: var(--color-text-secondary);
+  --color-md-inline-code-bg: var(--color-bg-muted);
+  --color-md-frame: var(--color-border-subtle);
+  --color-md-table-border: var(--color-border-subtle);
+  --color-md-table-head-bg: var(--color-surface-ink-subtle);
+  --color-md-table-head-text: var(--color-text-secondary);
+  --color-md-task-accent: var(--color-accent);
+  --color-md-image-border: transparent;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -611,6 +658,10 @@
   --color-thinking: #818cf8;
   /* 引用 chip 身份色暗色档：比浅色提亮一档，保证在深灰底上有足够辨识度
      （实测文字/底色 5.2~7.7:1，均达 AA）。 */
+  --color-identity-tool: #7dd3fc;
+  --color-identity-agent: #c4b5fd;
+  --color-identity-source: #67e8f9;
+  --color-identity-source-alt: #a5b4fc;
   --color-chip-file: #60a5fa;
   --color-chip-skill: #a78bfa;
   --color-chip-session: #4ade80;
@@ -702,18 +753,21 @@
   --color-chat-link: #fb7185;
 }
 
-/* ===== 外观主题（data-appearance）表面色板 =====
- * 每套外观主题覆盖「表面/边框/文字/会话面板」色板；主色由 data-accent 提供
- * （选择外观主题时设置页联动写入 settings.accent → data-accent，复用上方各主色块）。
- * - 明暗由 data-theme 负责：浅色走 `[data-appearance="…"]`，暗色走 `[data-theme="dark"][data-appearance="…"]`；
+/* ===== 外观配色（data-palette）色板 =====
+ * 外观拆成两维：样式（data-appearance，只管形状/排版，见下方 terminal）与配色（本段，只管颜色）。
+ * 每套配色覆盖「表面/边框/文字/会话面板/Markdown」色板；主色由 data-accent 提供
+ * （选择配色时设置页联动写入 settings.accent → data-accent，复用上方各主色块）。
+ * - 明暗由 data-theme 负责：浅色走 `[data-palette="…"]`，暗色走 `[data-theme="dark"][data-palette="…"]`；
  * - classic-green 为出厂默认（=当前 :root 中性浅色，黑白灰主色），无覆盖块；
  * - fresh-green 为全屏绿色主题：表面/边框/文字全部带品牌亮绿（#2cb35c 系）调；
- * - 新增主题需同步 themePresets.ts 的 SKIN_PRESETS（id/预览）与本文件色块，保证 id 集合一致。
+ * - tui 为终端配色（pi TUI 色板），与 terminal 样式正交，也可套在 classic 样式上；
+ * - 新增配色需同步 themePresets.ts 的 PALETTE_PRESETS（id/预览）与 shared/themeSkinMigration.ts
+ *   的 APP_PALETTE_IDS，保证 id 集合一致。
  * 注意：这些是纯自定义属性定义，不包 @layer（契约见 tests/cssCascadeLayers.test.mjs）。
  */
 /* fresh-green 表面色板（参考同目录 Proma theme-forest-light / theme-forest-dark）：
    浅色=森息晨光（纸感浅绿 hsl 84-80 系），暗色=森息夜语（深林泥土 + 雾绿灰主色）。 */
-:root[data-appearance="fresh-green"] {
+:root[data-palette="fresh-green"] {
   --color-bg-app: #f6f7f2;
   --color-bg-sidebar: #ecefe6;
   --color-bg-panel: #f6f7f2;
@@ -740,7 +794,7 @@
      纸感浅绿底上比 #2563eb 更协调；仅覆盖 --color-tool，不动 --color-info 状态色。 */
   --color-tool: #0f766e;
 }
-:root[data-theme="dark"][data-appearance="fresh-green"] {
+:root[data-theme="dark"][data-palette="fresh-green"] {
   --color-bg-app: #151917;
   --color-bg-sidebar: #212724;
   --color-bg-panel: #1d2420;
@@ -762,7 +816,7 @@
   /* 工具身份色（暗色提亮）：teal-400，与原来暗色 info 蓝 #60a5fa 同一亮度档。 */
   --color-tool: #2dd4bf;
 }
-:root[data-appearance="graphite"] {
+:root[data-palette="graphite"] {
   --color-bg-app: #ececec;
   --color-bg-sidebar: #e3e3e3;
   --color-bg-panel: #f8f8f8;
@@ -782,7 +836,7 @@
   --color-chat-control-bg: #fafafa;
   --color-chat-table-bg: #f8f8f8;
 }
-:root[data-theme="dark"][data-appearance="graphite"] {
+:root[data-theme="dark"][data-palette="graphite"] {
   --color-bg-app: #1b1b1b;
   --color-bg-sidebar: #222222;
   --color-bg-panel: #262626;
@@ -800,7 +854,7 @@
   --color-chat-control-bg: #262626;
   --color-chat-table-bg: #262626;
 }
-:root[data-appearance="sea-blue"] {
+:root[data-palette="sea-blue"] {
   --color-bg-app: #eef5fb;
   --color-bg-sidebar: #e4eef7;
   --color-bg-panel: #ffffff;
@@ -820,7 +874,7 @@
   --color-chat-control-bg: #ffffff;
   --color-chat-table-bg: #ffffff;
 }
-:root[data-theme="dark"][data-appearance="sea-blue"] {
+:root[data-theme="dark"][data-palette="sea-blue"] {
   --color-bg-app: #101a24;
   --color-bg-sidebar: #15212d;
   --color-bg-panel: #182634;
@@ -838,7 +892,7 @@
   --color-chat-control-bg: #182634;
   --color-chat-table-bg: #182634;
 }
-:root[data-appearance="warm-beige"] {
+:root[data-palette="warm-beige"] {
   --color-bg-app: #f7f2ea;
   --color-bg-sidebar: #f0e9dd;
   --color-bg-panel: #fffdf8;
@@ -858,7 +912,7 @@
   --color-chat-control-bg: #fffdf8;
   --color-chat-table-bg: #fffdf8;
 }
-:root[data-theme="dark"][data-appearance="warm-beige"] {
+:root[data-theme="dark"][data-palette="warm-beige"] {
   --color-bg-app: #1e1a15;
   --color-bg-sidebar: #26211a;
   --color-bg-panel: #2b251d;
@@ -876,15 +930,157 @@
   --color-chat-control-bg: #2b251d;
   --color-chat-table-bg: #2b251d;
 }
+/* 终端（terminal）样式：只管形状与排版，颜色全部交给 data-palette（见下方 tui 配色块）。
+   等宽接管正文 + Markdown 专用字体 + 直角框线才是终端观感；消息的 ❯/⏺ 标记、
+   表头大写等 chrome 在 terminalSkin.css。
+   用户显式选了字体时由 useAppAppearance 的 inline style 覆盖 --font-family-base（尊重用户选择）。 */
+:root[data-appearance="terminal"] {
+  --font-family-md: var(--font-family-mono);
+  --font-family-base: var(--font-family-mono);
+  /* 方角：TUI 是框线而不是圆角卡片；hardcoded 的 12px 已在 streamdownChrome 改用 --radius-xl */
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+}
+/* 终端配色（tui）：把 pi 编码助手交互模式的终端主题色板整套移植过来（形状不在这里，见上方
+   data-appearance="terminal"）：
+   - 面色/文字/边框/状态色/accent 取 pi theme 的 pageBg / cardBg / text / muted / dim /
+     border / borderMuted / borderAccent / selectedBg / userMessageBg / customMessageBg /
+     tool*Bg（okhsl 转 sRGB，与 pi TUI 屏幕上看到的色一致）；
+   - Markdown 全量取 mdHeading / mdLink / mdCode / mdQuote / mdQuoteBorder / mdHr / mdListBullet，
+     并补 strong / em / del / 行内码底 / 表格框线 / 表头 / 任务勾选 / 图片边框这些 PiDeck 语义位；
+   - 这套配色与 terminal 样式正交：terminal 样式默认配它（= 升级前的终端观感），
+     也可以套在 classic 样式上（亮底 + TUI 配色），或给 terminal 样式换别的配色。
+   代码块的语法高亮不走 CSS token（Shiki 内联样式），见 markdown/piTuiShikiThemes.ts。 */
+:root[data-palette="tui"] {
+  --color-bg-app: #efeeee;
+  --color-bg-page: #efeeee;
+  --color-bg-page-raised: #f7f6f6;
+  --color-bg-sidebar: #e9e8e8;
+  --color-bg-panel: #f7f6f6;
+  --color-bg-popover: #ffffff;
+  --color-bg-input: #ecebeb;
+  --color-bg-muted: #e4e5e6;
+  --color-bg-hover: #e9e9e9;
+  --color-bg-active: #dfe7ec;
+  --color-text-primary: #3b3f41;
+  --color-text-secondary: #5f686d;
+  --color-text-tertiary: #60686c;
+  --color-text-faint: #879095;
+  --color-text-inverse: #f7f6f6;
+  --color-border-subtle: #dcdcdc;
+  --color-border-default: #9aa2a7;
+  --color-border-strong: #8a72cb;
+  --color-chat-card-bg: #f7f6f6;
+  --color-chat-muted-bg: #f0efef;
+  --color-chat-control-bg: #eef0ef;
+  --color-chat-table-bg: #fbfafa;
+  --color-chat-bubble-bg: #dfe7ec;
+  --color-chat-link: #2f7899;
+  --color-accent: #7459b4;
+  --color-accent-soft: #e6e4ee;
+  --color-accent-strong: #5f47a0;
+
+  --color-thinking: #7c868c;
+  --color-tool: #3d8eb3;
+  --color-chip-file: #2b6d8b;
+  --color-chip-skill: #7459b4;
+  --color-chip-session: #2e7350;
+  --color-code-bg: #f2f1f1;
+  --color-code-text: #3b3f41;
+  --color-md-heading: #8c6602;
+  --color-md-link: #2d7393;
+  --color-md-code: #6f55ad;
+  --color-md-quote: #677176;
+  --color-md-quote-border: #9aa2a7;
+  --color-md-list-bullet: #7459b4;
+  --color-md-hr: #9aa2a7;
+  --color-md-strong: #24282a;
+  --color-md-em: #4b5255;
+  --color-md-del: #677176;
+  --color-md-inline-code-bg: #e8e7ea;
+  --color-md-frame: #9aa2a7;
+  --color-md-table-border: #dcdcdc;
+  --color-md-table-head-bg: #ecebeb;
+  --color-md-table-head-text: #7d5a04;
+  --color-md-task-accent: #337e58;
+  --color-md-image-border: #dcdcdc;
+}
+:root[data-theme="dark"][data-palette="tui"] {
+  --color-bg-app: #21252c;
+  --color-bg-page: #21252c;
+  --color-bg-page-raised: #282c34;
+  --color-bg-sidebar: #1b1f25;
+  --color-bg-panel: #282c34;
+  --color-bg-popover: #333842;
+  --color-bg-input: #1d2127;
+  --color-bg-muted: #2b3038;
+  --color-bg-hover: #30363e;
+  --color-bg-active: #213b49;
+  --color-text-primary: #dee0e1;
+  --color-text-secondary: #9da5a9;
+  --color-text-tertiary: #97a2a9;
+  --color-text-faint: #707a80;
+  --color-text-inverse: #16191d;
+  --color-border-subtle: #34383a;
+  --color-border-default: #6b767c;
+  --color-border-strong: #5fa8cc;
+  --color-chat-card-bg: #282c34;
+  --color-chat-muted-bg: #23272e;
+  --color-chat-control-bg: #34383a;
+  --color-chat-table-bg: #2b3038;
+  --color-chat-bubble-bg: #213b49;
+  --color-chat-link: #69add0;
+  --color-accent: #a798d7;
+  --color-accent-soft: #3a3055;
+  --color-accent-strong: #b7a7e6;
+
+  --color-thinking: #96a0a4;
+  --color-tool: #69add0;
+  --color-chip-file: #69add0;
+  --color-chip-skill: #a798d7;
+  --color-chip-session: #68b78d;
+  --color-code-bg: #1f2329;
+  --color-code-text: #dee0e1;
+  /* pi TUI 的 md 色板原值（暗色档不像旧版那样提亮：底色已从近黑抬到 pageBg #21252c） */
+  --color-md-heading: #cd9a22;
+  --color-md-link: #69add0;
+  --color-md-code: #a798d7;
+  --color-md-quote: #9da5a9;
+  --color-md-quote-border: #9da5a9;
+  --color-md-list-bullet: #a798d7;
+  --color-md-hr: #4a545a;
+  --color-md-strong: #f0f2f3;
+  --color-md-em: #b6bec4;
+  --color-md-del: #9da5a9;
+  --color-md-inline-code-bg: #2f343c;
+  --color-md-frame: #6b767c;
+  --color-md-table-border: #4a545a;
+  --color-md-table-head-bg: #2f343c;
+  --color-md-table-head-text: #cd9a22;
+  --color-md-task-accent: #68b78d;
+  --color-md-image-border: #34383a;
+}
 * {
   box-sizing: border-box;
 }
 body {
   margin: 0;
   overflow: hidden;
-  /* 全局灰阶抗锯齿（Windows 下无视觉影响，macOS/Webkit 渲染下消除彩色边缘）；
-     编辑器/代码等正文密集区在 surfaces.css 里局部回退 subpixel-antialiased 保文字锐度 */
-  -webkit-font-smoothing: antialiased;
+  /* 全应用统一用子像素抗锯齿（Chromium 默认值，这里显式写死防止又被改回灰阶）。
+     旧值是 antialiased，理由写的是「macOS/Webkit 渲染下消除彩色边缘」——该理由在
+     现代 macOS 上已不成立：Mojave 起系统不再做次像素彩边合成，实测同一段 15px 中文
+     （Retina 2x、暗色）在 antialiased 与 subpixel-antialiased 两种设置下，彩边指标
+     （通道最大差）都是 5/255、肉眼不可见；而切到 subpixel-antialiased 后笔画覆盖
+     +11%、边缘锐度 +19%，正是「亮字压暗底发虚」的直接来源。也就是说旧值拿「消除
+     彩边」换掉的是笔画粗细，收益为零、代价全额。
+     Windows 上 Chromium 不实现该属性（走 DirectWrite），改动只影响 macOS。
+     -moz-osx-font-smoothing 仅 Firefox 读取（局域网 Web 客户端），Electron 内不生效。
+     编辑器/代码等正文密集区在 surfaces.css / timeline.css 里仍显式声明
+     subpixel-antialiased（现为冗余保护，不再需要但保留以防回退）。 */
+  -webkit-font-smoothing: subpixel-antialiased;
   -moz-osx-font-smoothing: grayscale;
   /* 换肤背景图：--app-bg-image 由 App.tsx 按设置注入（pideck-bg:// 协议），
      --app-bg-mask 为同色遮罩渐变（浅色白/暗色黑，透明度=1-opacity）。
@@ -1342,17 +1538,13 @@ select:focus-visible {
 .quick-task-shell.custom-titlebar-enabled .list-toolbar button {
   -webkit-app-region: no-drag;
 }
-/* 抽屉开关：固定在会话 Tab 栏最右侧 */
+/* 抽屉开关：只在抽屉关闭时出现在会话 Tab 栏最右侧（打开后开关并入抽屉活动栏） */
 .session-tabs-bar .header-drawer-toggle {
   color: var(--color-text-secondary);
 }
 .session-tabs-bar .header-drawer-toggle:hover {
   background: var(--color-bg-hover);
   color: var(--color-text-primary);
-}
-.session-tabs-bar .header-drawer-toggle.active {
-  background: var(--color-bg-active);
-  color: var(--color-accent);
 }
 .custom-titlebar-enabled .list-toolbar button,
 .custom-titlebar-enabled .toolbar-actions,

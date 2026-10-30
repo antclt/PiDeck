@@ -190,7 +190,8 @@ function WorkspaceTreeRowView(props: {
 
 	return (
 		// 工作区行是容器：选中态只落在叶子会话上，分支名不加底、不加字重区分。
-		<div className={cn(workspaceRowClass, "flex-wrap text-muted-foreground", props.removing && "worktree-removing")}>
+		// data-project-row-id：搜索面板选中 worktree 子项目时按此定位（SidebarContent.revealSearchProject）。
+		<div data-project-row-id={childProject?.id} className={cn(workspaceRowClass, "flex-wrap text-muted-foreground", props.removing && "worktree-removing")}>
 			{/* 标题行单独成相对容器：会话列表（flex-wrap 换到下一行）留在外层，
           操作按钮 absolute 锚定本行，不会压到展开的历史会话上。 */}
 			<div className="workspace-tree-header group/workspace-row relative flex min-w-0 flex-1 items-center gap-0.5">

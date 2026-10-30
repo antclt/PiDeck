@@ -1,4 +1,4 @@
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, PanelRight } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { t } from "../../i18n";
@@ -81,7 +81,20 @@ export function WorkspaceDrawerHost(props: WorkspaceDrawerHostProps) {
 						    （壁纸模式窗口控件背景透明，重叠会叠出更深的双线）。
 						    原生标题栏下 --window-drag-height 为 0，元素不占高也不画线；simple 模式
 						    没有 40px 标题栏行，同样不画线（见 styles/tailwind.css 的 workspace-titlebar）。 */}
-						<div aria-hidden="true" className="h-[var(--window-drag-height)] shrink-0 bg-bg-page workspace-titlebar:mr-[var(--window-controls-width)] workspace-titlebar:border-b workspace-titlebar:border-border/40" />
+						<div className="relative h-[var(--window-drag-height)] shrink-0 bg-bg-page workspace-titlebar:mr-[var(--window-controls-width)] workspace-titlebar:border-b workspace-titlebar:border-border/40">
+							{/* 抽屉开关落在标题栏这一行、贴住抽屉左边界（用户要求与分栏竖线对齐，2026-10）。
+							    z 必须高于 .window-drag-layer 的 900：顶栏整条是窗口拖拽热区，压不过它的按钮
+							    收不到点击（.session-tabs-bar 用 930 是同一原因）；-webkit-app-region:no-drag
+							    只把这一小块退出拖拽区，顶栏其余部分仍可拖窗。
+							    原生标题栏下本行高度为 0，按钮由活动栏左端的 .drawer-rail-close 兜底显示。 */}
+							{props.onClose && (
+								<div className="absolute top-1/2 left-0 z-[905] hidden -translate-y-1/2 workspace-titlebar:block">
+									<Button type="button" variant="ghost" size="icon" className="drawer-titlebar-close size-8 shrink-0 text-text-secondary [-webkit-app-region:no-drag] hover:text-text-primary" title={t("app.closeDrawer")} aria-label={t("app.closeDrawer")} onClick={props.onClose}>
+										<PanelRight size={16} aria-hidden="true" />
+									</Button>
+								</div>
+							)}
+						</div>
 						<div className="drawer-content-frame flex min-h-0 flex-1 flex-col overflow-hidden">
 							{open && props.rail}
 							{rendered}

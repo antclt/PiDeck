@@ -31,3 +31,6 @@
 @import "./styles/tailwind.css";
 /* Streamdown 官方 utility 皮 → 必须同层后写才能压掉双层边框 / sticky 动作条 */
 @import "./styles/streamdownChrome.css" layer(utilities);
+/* 皮肤专属 chrome（终端皮肤的消息标记/方框线细节）→ 同层最后，压过 tailwind 的布局 utility */
+@import "./styles/terminalSkin.css" layer(utilities);
+/* 玻璃皮肤（毛玻璃/液态玻璃）的画布层 / 侧栏与浮层 backdrop-filter / 边缘高光 → 同层最后 */

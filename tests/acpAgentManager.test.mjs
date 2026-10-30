@@ -40,7 +40,9 @@ function fakeAgentProcess(t, { handler = () => undefined, spawnError = undefined
 				// 第二参数 { writeFromCli }:用例可在应答前先推通知(模拟 ACP 规范的 load 重放时序)
 				const outcome = handler(frame, { writeFromCli: (obj) => stdout.write(`${JSON.stringify(obj)}\n`) });
 				if (outcome?.__error) {
-					stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: frame.id, error: { code: outcome.code ?? -32000, message: outcome.message ?? "fail" } })}\n`);
+					// data 原样透传：agent 的拒绝细节（如 unknown permission_mode）只写在这里
+					const error = { code: outcome.code ?? -32000, message: outcome.message ?? "fail", ...(outcome.data !== undefined ? { data: outcome.data } : {}) };
+					stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: frame.id, error })}\n`);
 				} else if (outcome !== undefined) {
 					stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: frame.id, result: outcome })}\n`);
 				}
@@ -80,7 +82,7 @@ function fakeAgentProcess(t, { handler = () => undefined, spawnError = undefined
 }
 
 function harness(t, cliOptions, depsExtra = {}) {
-	const events = { uiRequests: [], messages: [] };
+	const events = { uiRequests: [], messages: [], runtimeStates: [] };
 	const procs = [];
 	const spawnCalls = [];
 	const { AcpAgentManager } = loadTsCommonJs("src/main/acp/AcpAgentManager.ts", {
@@ -114,6 +116,7 @@ function harness(t, cliOptions, depsExtra = {}) {
 	const unsubscribe = manager.onOutput((channel, payload) => {
 		if (channel === "agents:ui-request") events.uiRequests.push(payload);
 		if (channel === "agents:message") events.messages.push(payload);
+		if (channel === "agents:runtime-state") events.runtimeStates.push(payload);
 	});
 	t.after(() => {
 		unsubscribe();
@@ -377,6 +380,28 @@ test("abort 升级:首次 cancel 后 CLI 无响应,宽限超时强杀进程并�
 	assert.equal(result.i18nKey, "acp.abortForceStopped");
 	assert.equal(result.i18nParams?.tool, "Gemini CLI");
 	assert.equal(manager.list().length, 0, "runtime 已随强杀移除");
+});
+
+test("abort 在回合已结算但 status 残留 running 时收回 idle，而不是静默 no-op", async (t) => {
+	const { manager, events, createAgent, lastProc } = harness(t, {
+		handler: (frame) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+			if (frame.method === "session/new") return { sessionId: "sess-stale" };
+			return {};
+		},
+	});
+	const tab = await createAgent();
+	// 模拟迟到的 status 快照：回合早已结束（turnActive=false），渲染层却仍显示 running。
+	const runtime = manager.runtimes.get(tab.id);
+	runtime.status = "running";
+	runtime.tab.status = "running";
+	runtime.turnActive = false;
+	const before = events.runtimeStates.length;
+	await manager.abort(tab.id);
+	assert.equal(manager.list().find((item) => item.id === tab.id)?.status, "idle", "停止按钮必须能把残留 running 收回 idle");
+	assert.ok(events.runtimeStates.length > before, "应推送一次 runtime-state 让渲染层收口");
+	assert.equal(events.runtimeStates.at(-1).state.isTurnActive, false);
+	assert.equal(lastProc().methodFrames("session/cancel").length, 0, "没有活动回合时不应向 CLI 发 cancel");
 });
 
 test("abort 升级:二次停止立即强杀,不等宽限", async (t) => {
@@ -1048,6 +1073,139 @@ test("configOptions:session/new 返回的枚举可查询;set_config_option 用�
 	assert.equal(lastProc().methodFrames("session/set_config_option").length, 1);
 });
 
+test("configOptions:拒绝时把 error.data.details 拼进错误文案（渲染层提示要用它）", async (t) => {
+	// Qoder CLI 把 "Bypass Permissions"(yolo) 列进 configOptions，但 set_config_option 回
+	// -32603 且原因只写在 data.details；IPC 只透传 message，不拼进去用户只看到 "Internal error"。
+	const { manager, createAgent } = harness(t, {
+		handler: (frame) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: false } };
+			if (frame.method === "session/new") return { sessionId: "sess-cfg", configOptions: CONFIG_OPTIONS };
+			if (frame.method === "session/set_config_option") return { __error: true, code: -32603, message: "Internal error", data: { details: "unknown permission_mode: yolo" } };
+			return {};
+		},
+	});
+	const tab = await createAgent();
+	await assert.rejects(
+		() => manager.applyConfigOption(tab.id, "mode", "yolo"),
+		(error) => {
+			assert.match(error.message, /ACP RPC error -32603: Internal error/, "原始 RPC 文案保留");
+			assert.match(error.message, /unknown permission_mode: yolo/, "agent 的拒绝细节必须带到渲染层");
+			return true;
+		},
+	);
+});
+
+test("configOptions:工具级 bypassPermissions 在新会话握手后自动切到 bypass 档", async (t) => {
+	// Claude 适配器不读启动参数（初始模式只取 settings.json 的 defaultMode），只能握手后下发；
+	// Qoder 适配器则直接拒绝该值——所以这条是「尽力而为」，失败不阻断开会话。
+	const modeOption = {
+		id: "mode",
+		name: "Mode",
+		category: "mode",
+		type: "select",
+		currentValue: "default",
+		options: [
+			{ value: "default", name: "Manual" },
+			{ value: "bypassPermissions", name: "Bypass permissions" },
+		],
+	};
+	const { manager, createAgent, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: false } };
+				if (frame.method === "session/new") return { sessionId: "sess-bypass", configOptions: [modeOption] };
+				if (frame.method === "session/set_config_option") return { configOptions: [{ ...modeOption, currentValue: frame.params.value }] };
+				return {};
+			},
+		},
+		{ getTools: () => [{ id: "gemini", name: "Gemini CLI", command: "gemini", args: ["--experimental-acp"], enabled: true, bypassPermissions: true }] },
+	);
+	const tab = await createAgent();
+	const frames = lastProc().methodFrames("session/set_config_option");
+	assert.equal(frames.length, 1, "开了开关必须下发一次配置切换");
+	assert.equal(JSON.stringify(frames[0]?.params), JSON.stringify({ sessionId: "sess-bypass", configId: "mode", value: "bypassPermissions" }));
+	assert.equal(manager.getSessionConfigOptions(tab.id)?.[0]?.currentValue, "bypassPermissions");
+});
+
+test("configOptions:不开 bypassPermissions 时不得自动下发（默认权限不动）", async (t) => {
+	const modeOption = {
+		id: "mode",
+		name: "Mode",
+		category: "mode",
+		type: "select",
+		currentValue: "default",
+		options: [
+			{ value: "default", name: "Manual" },
+			{ value: "bypassPermissions", name: "Bypass permissions" },
+		],
+	};
+	const { createAgent, lastProc } = harness(t, {
+		handler: (frame) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: false } };
+			if (frame.method === "session/new") return { sessionId: "sess-plain", configOptions: [modeOption] };
+			return {};
+		},
+	});
+	await createAgent();
+	assert.equal(lastProc().methodFrames("session/set_config_option").length, 0, "没开开关就不该动权限模式");
+});
+
+test("configOptions:启动参数已定档 bypass 时，记忆里的旧模式不得覆盖（Qoder --permission-mode）", async (t) => {
+	// 现场：Qoder CLI 只能靠 `--permission-mode bypass_permissions` 定档，运行期回写 yolo 一律
+	// -32603 unknown permission_mode。此前重放记忆里的 mode=auto 会把会话降回 Auto，随后补设
+	// bypass 又必然失败；而重开会话（session/load 不重放）却正常。本用例钉住：模式已经是
+	// bypass 时既不得重放旧值，也不得再发一次注定被拒的下发；其他选项照旧重放。
+	const modeOption = {
+		id: "mode",
+		name: "Mode",
+		category: "mode",
+		type: "select",
+		currentValue: "yolo",
+		options: [
+			{ value: "default", name: "Default" },
+			{ value: "auto", name: "Auto" },
+			{ value: "yolo", name: "Bypass Permissions" },
+		],
+	};
+	const effortOption = {
+		id: "effort",
+		name: "Reasoning effort",
+		category: "thought_level",
+		type: "select",
+		currentValue: "medium",
+		options: [
+			{ value: "medium", name: "Medium" },
+			{ value: "high", name: "High" },
+		],
+	};
+	const { manager, createAgent, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: false } };
+				if (frame.method === "session/new") return { sessionId: "sess-qoder", configOptions: [modeOption, effortOption] };
+				if (frame.method === "session/set_config_option") {
+					if (frame.params.value === "yolo") return { __error: true, code: -32603, message: "Internal error", data: { details: "unknown permission_mode: yolo" } };
+					const next = [modeOption, effortOption].map((option) => (option.id === frame.params.configId ? { ...option, currentValue: frame.params.value } : option));
+					return { configOptions: next };
+				}
+				return {};
+			},
+		},
+		{
+			getTools: () => [{ id: "qoder", name: "Qoder CLI", command: "qodercli", args: ["--acp", "--permission-mode", "bypass_permissions"], enabled: true, bypassPermissions: true }],
+			getToolConfigDefaults: () => ({ mode: "auto", effort: "high" }),
+		},
+	);
+	const tab = await createAgent("qoder");
+	const frames = lastProc().methodFrames("session/set_config_option");
+	assert.equal(JSON.stringify(frames.map((frame) => frame.params)), JSON.stringify([{ sessionId: "sess-qoder", configId: "effort", value: "high" }]), "只重放非模式项；模式既不得降回 auto，也不得再试确定被拒的 yolo");
+	const options = manager.getSessionConfigOptions(tab.id) ?? [];
+	assert.equal(options.find((option) => option.id === "mode")?.currentValue, "yolo", "新会话必须保持在启动参数定下的 bypass 档");
+	assert.equal(options.find((option) => option.id === "effort")?.currentValue, "high", "记忆重放不得被模式锁定连带跳过");
+});
+
 test("configOptions:config_option_update 通知整表替换并回调 onConfigOptionsChanged", async (t) => {
 	const seen = [];
 	const { manager, createAgent, lastProc } = harness(
@@ -1071,6 +1229,78 @@ test("configOptions:config_option_update 通知整表替换并回调 onConfigOpt
 	assert.equal(manager.getSessionConfigOptions(tab.id)?.[0]?.currentValue, "o3");
 });
 
+// ── 工具级配置记忆:用户切换写回 → 新建会话重放;load 恢复不覆盖 ──
+
+test("configOptions:新建会话重放思考档,模型与失效项不重放,重放不反向写记忆", async (t) => {
+	const applied = [];
+	const remembered = [];
+	const { manager, createAgent, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: false } };
+				if (frame.method === "session/new") return { sessionId: "sess-mem", configOptions: CONFIG_OPTIONS };
+				if (frame.method === "session/set_config_option") {
+					applied.push(frame.params);
+					return { configOptions: CONFIG_OPTIONS.map((option) => (option.id === frame.params.configId ? { ...option, currentValue: frame.params.value } : option)) };
+				}
+				return {};
+			},
+		},
+		{
+			getToolConfigDefaults: () => ({ model: "o3", effort: "high", removed: "x" }),
+			rememberConfigOption: (toolId, optionId, value) => remembered.push({ toolId, optionId, value }),
+		},
+	);
+	const tab = await createAgent();
+	// 只重放 effort:model 不在记忆范围,removed 已不在当前枚举
+	assert.deepEqual(applied, [{ sessionId: "sess-mem", configId: "effort", value: "high" }]);
+	assert.equal(manager.getSessionConfigOptions(tab.id)?.[1]?.currentValue, "high");
+	assert.equal(lastProc().methodFrames("session/set_config_option").length, 1);
+	// 重放是恢复历史选择,不能反过来再写一次设置
+	assert.deepEqual(remembered, []);
+});
+
+test("configOptions:session/load 恢复的会话不重放工具记忆", async (t) => {
+	const { manager, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: true } };
+				if (frame.method === "session/load") return { configOptions: CONFIG_OPTIONS };
+				if (frame.method === "session/new") return { sessionId: "sess-new", configOptions: CONFIG_OPTIONS };
+				return {};
+			},
+		},
+		{ getToolConfigDefaults: () => ({ effort: "high" }) },
+	);
+	await manager.create({ projectId: "p1", title: "t", deckSessionId: "deck-1", backend: "acp", agentPreset: "gemini", acpSessionId: "sess-old" });
+	assert.equal(lastProc().methodFrames("session/set_config_option").length, 0);
+	assert.equal(lastProc().methodFrames("session/new").length, 0);
+});
+
+test("configOptions:用户切换思考档后写回记忆,模型切换不写", async (t) => {
+	const remembered = [];
+	const { manager, createAgent } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: false } };
+				if (frame.method === "session/new") return { sessionId: "sess-mem2", configOptions: CONFIG_OPTIONS };
+				if (frame.method === "session/set_config_option") {
+					return { configOptions: CONFIG_OPTIONS.map((option) => (option.id === frame.params.configId ? { ...option, currentValue: frame.params.value } : option)) };
+				}
+				return {};
+			},
+		},
+		{ rememberConfigOption: (toolId, optionId, value) => remembered.push({ toolId, optionId, value }) },
+	);
+	const tab = await createAgent();
+	await manager.applyConfigOption(tab.id, "effort", "high");
+	await manager.applyConfigOption(tab.id, "model", "o3");
+	assert.deepEqual(remembered, [{ toolId: "gemini", optionId: "effort", value: "high" }]);
+});
+
 test("session/prompt 超时后补发 session/cancel：agent 侧旧回合必须收口，否则后续 prompt 永久排队", async (t) => {
 	const { manager, createAgent, lastProc } = harness(
 		t,
@@ -1088,6 +1318,11 @@ test("session/prompt 超时后补发 session/cancel：agent 侧旧回合必须�
 	const first = await manager.sendPrompt({ agentId: tab.id, message: "hello" });
 	assert.equal(first.accepted, false);
 	assert.match(first.error, /ACP request timed out after 40ms: session\/prompt/);
+	// 回合超时带本地化描述符（#431）：人性化时长 + 配置键指引，原文留 debugDetails
+	assert.equal(first.i18nKey, "acp.turnTimeout");
+	assert.equal(first.i18nParams.tool, "Gemini CLI");
+	assert.equal(first.i18nParams.minutes, "<1");
+	assert.match(first.debugDetails, /ACP request timed out after 40ms: session\/prompt/);
 	// 超时后必须补发 cancel，让 agent 收口旧回合（reason 固定 turn_timeout）
 	await waitFor(() => lastProc().methodFrames("session/cancel").length === 1);
 	const cancel = lastProc().methodFrames("session/cancel")[0];
@@ -1142,6 +1377,50 @@ test("sendPrompt:agent 成功结算但全程无输出时不得谎报成功或留
 	assert.equal(result.delivery, "rejected", "回合已确定结束且无产出，回填草稿可安全重发");
 	assert.equal(result.i18nKey, "acp.emptyTurn");
 	assert.equal(events.messages.at(-1).messages.length, 0, "空白回合必须撤回孤立用户消息，便于草稿回填重试");
+});
+
+test("空白回合:debugDetails 带出 CLI stderr / 非标准通知 / update 统计(限流等根因可见)", async (t) => {
+	const { manager, createAgent, lastProc } = harness(t, {
+		handler: (frame, { writeFromCli }) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+			if (frame.method === "session/new") return { sessionId: "sess-blank-diag" };
+			if (frame.method === "session/prompt") {
+				// 协议外通道报错：CLI 常把限流/登录失败塞在这里，而不是 session/update
+				writeFromCli({ jsonrpc: "2.0", method: "session/error", params: { message: "quota exceeded" } });
+				return { stopReason: "end_turn" };
+			}
+			return {};
+		},
+	});
+	const tab = await createAgent();
+	lastProc().proc.stderr.write("Error: account quota exceeded\n");
+	await sleep(30);
+	const result = await manager.sendPrompt({ agentId: tab.id, message: "不会得到回复" });
+	assert.equal(result.accepted, false);
+	assert.equal(result.i18nKey, "acp.emptyTurn");
+	const details = result.debugDetails ?? "";
+	assert.match(details, /account quota exceeded/, "CLI stderr 里的根因必须进 debugDetails");
+	assert.match(details, /stopReason=end_turn/);
+	assert.match(details, /updates=none/);
+	assert.match(details, /session\/error/, "协议外通知同样要留下痕迹");
+});
+
+test("空白回合:非标准 update 类型在诊断里可见(区分「没发」与「发了我们没消费」)", async (t) => {
+	const { manager, createAgent } = harness(t, {
+		handler: (frame, { writeFromCli }) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+			if (frame.method === "session/new") return { sessionId: "sess-blank-unknown" };
+			if (frame.method === "session/prompt") {
+				writeFromCli({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "sess-blank-unknown", update: { sessionUpdate: "agent_message", text: "hi" } } });
+				return { stopReason: "end_turn" };
+			}
+			return {};
+		},
+	});
+	const tab = await createAgent();
+	const result = await manager.sendPrompt({ agentId: tab.id, message: "不会得到回复" });
+	assert.equal(result.i18nKey, "acp.emptyTurn");
+	assert.match(result.debugDetails ?? "", /updates=agent_message/);
 });
 
 test("sendPrompt:agent 不回显 user chunk 时用户消息仍进投影,首条 prompt 兜底标题写回 catalog", async (t) => {
@@ -1319,8 +1598,48 @@ test("session/prompt 兑底超时:settings 读口生效(readAcpTimeoutSettings.p
 	await waitFor(() => promptSeen, "prompt dispatched");
 	assert.equal(result.accepted, false);
 	assert.match(result.error, /ACP request timed out after 40ms: session\/prompt/);
+	// settings 读口路径同样要带描述符：否则用户只看到「600000ms」这种搜不出配置键的裸文本（#431）
+	assert.equal(result.i18nKey, "acp.turnTimeout");
+	assert.equal(result.i18nParams.minutes, "<1");
 	await waitFor(() => lastProc().methodFrames("session/cancel").length === 1);
 	assert.equal(lastProc().methodFrames("session/cancel")[0].params.reason, "turn_timeout");
+});
+
+test("回合超时文案:时长按分钟人性化 + 只认超时错误(其余错误不挂描述符)", () => {
+	// loadTsCommonJs 每次调用是独立模块注册表（vm 独立 realm），跨调用 instanceof 必失配：
+	// 这里用 stubs 把 ./AcpConnection 替成同注册表内的类，专注测「时长格式化与键选择」。
+	// 真实 AcpTimeoutError 的身份匹配由上面的 manager 级用例（含 i18nKey/minutes 断言）覆盖。
+	class StubAcpTimeoutError extends Error {
+		constructor(method, timeoutMs) {
+			super(`ACP request timed out after ${timeoutMs}ms: ${method}`);
+			this.name = "AcpTimeoutError";
+			this.method = method;
+			this.timeoutMs = timeoutMs;
+		}
+	}
+	class StubAcpRpcError extends Error {}
+	const { formatTurnTimeoutMinutes, promptTurnTimeoutDescriptor, startupTimeoutDescriptor } = loadTsCommonJs("src/main/acp/acpFailureDescriptors.ts", {
+		stubs: { "./AcpConnection": { AcpTimeoutError: StubAcpTimeoutError, AcpRpcError: StubAcpRpcError } },
+	});
+	const tool = { id: "cb", name: "CodeBuddy", command: "codebuddy", args: [], enabled: true };
+
+	// 默认 10min / 自定义整分钟 / 亚分钟 / 非整分钟
+	assert.equal(formatTurnTimeoutMinutes(600_000), "10");
+	assert.equal(formatTurnTimeoutMinutes(3_600_000), "60");
+	assert.equal(formatTurnTimeoutMinutes(40), "<1");
+	assert.equal(formatTurnTimeoutMinutes(90_000), "1.5");
+
+	// 逐字段断言：对象来自 vm 独立 realm，deepEqual 会因 prototype 不同而失配
+	const descriptor = promptTurnTimeoutDescriptor(new StubAcpTimeoutError("session/prompt", 600_000), tool);
+	assert.equal(descriptor.i18nKey, "acp.turnTimeout");
+	assert.equal(descriptor.i18nParams.tool, "CodeBuddy");
+	assert.equal(descriptor.i18nParams.minutes, "10");
+	// debugDetails 保留原文（ms 与 method）：本地化文案是概括，排查要靠它
+	assert.equal(descriptor.debugDetails, "ACP request timed out after 600000ms: session/prompt");
+
+	// 非超时错误不挂回合超时描述符；create 阶段的握手超时仍归 acp.startupTimeout，两键互不串
+	assert.equal(promptTurnTimeoutDescriptor(new Error("boom"), tool), undefined);
+	assert.equal(startupTimeoutDescriptor(new StubAcpTimeoutError("initialize", 60_000), tool).i18nKey, "acp.startupTimeout");
 });
 
 // ── #415 MVP：deck 侧归档（userData/acp-sessions）接线 ─────────────────────────
@@ -1463,4 +1782,124 @@ test("归档回灌不按 400 条内存快照裁剪:重开长会话拿到完整�
 	await manager.stop(tab.id);
 	assert.equal(manager.readMessagesByAcpSessionId("sess-long").length, 400, "同步读口仍然是内存快照契约（≤400）");
 	assert.equal((await manager.readMessagesWithArchive("sess-long")).length, 500, "异步读口归档优先：分页与会话内查找要能看到完整历史");
+});
+
+test("成功收口触发 onAgentSettled；用户停止不触发", async (t) => {
+	let promptRpcId = null;
+	const { manager, createAgent, lastProc } = harness(t, {
+		handler: (frame) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+			if (frame.method === "session/new") return { sessionId: "sess-settle" };
+			if (frame.method === "session/prompt") {
+				promptRpcId = frame.id;
+				return undefined;
+			}
+			return {};
+		},
+	});
+	const settled = [];
+	manager.onAgentSettled((info) => settled.push(info));
+	const tab = await createAgent();
+
+	// 正常回合：有输出 + end_turn → 触发一次
+	const first = manager.sendPrompt({ agentId: tab.id, message: "hi" });
+	await waitFor(() => promptRpcId !== null, "prompt dispatched");
+	lastProc().writeFromCli({
+		jsonrpc: "2.0",
+		method: "session/update",
+		params: { sessionId: "sess-settle", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "done" } } },
+	});
+	lastProc().writeFromCli({ jsonrpc: "2.0", id: promptRpcId, result: { stopReason: "end_turn" } });
+	assert.equal((await first).accepted, true);
+	// 标题由首条用户消息派生（applyProjectionTitle），完成信号带的是当时的真实标题
+	assert.equal(settled.length, 1);
+	assert.equal(settled[0].agentId, tab.id);
+	assert.equal(settled[0].title, "hi");
+
+	// 用户停止：本轮收口但不算完成（与 pi 的 agent_settled 语义一致）
+	promptRpcId = null;
+	const second = manager.sendPrompt({ agentId: tab.id, message: "again" });
+	await waitFor(() => promptRpcId !== null, "second prompt dispatched");
+	lastProc().writeFromCli({
+		jsonrpc: "2.0",
+		method: "session/update",
+		params: { sessionId: "sess-settle", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "partial" } } },
+	});
+	await manager.abort(tab.id);
+	lastProc().writeFromCli({ jsonrpc: "2.0", id: promptRpcId, result: { stopReason: "cancelled" } });
+	assert.equal((await second).accepted, true);
+	assert.equal(settled.length, 1, "用户停止不得触发完成信号");
+});
+
+test("Ask 通知：每轮只提醒一次，未弹出（开关关着）不占用去重位", async (t) => {
+	const asks = [];
+	let shown = false;
+	const { manager, createAgent } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+				if (frame.method === "session/new") return { sessionId: "sess-ask" };
+				if (frame.method === "session/prompt") return { stopReason: "end_turn" };
+				return {};
+			},
+		},
+		{
+			notify: {
+				askPending: (input) => {
+					asks.push(input);
+					return shown;
+				},
+			},
+		},
+	);
+	const tab = await createAgent();
+	// 开关关着（askPending 返回 false）：不占去重位，用户中途打开开关仍能收到当前提问
+	manager.notifyAskPending(tab.id, "deck-1", "标题", "问题 1");
+	manager.notifyAskPending(tab.id, "deck-1", "标题", "问题 2");
+	assert.equal(asks.length, 2);
+	// 开关打开后同一轮只提醒一次
+	shown = true;
+	manager.notifyAskPending(tab.id, "deck-1", "标题", "问题 3");
+	manager.notifyAskPending(tab.id, "deck-1", "标题", "问题 4");
+	assert.equal(asks.length, 3);
+	// 新回合开始：去重复位（空回合被拒不影响复位）
+	await manager.sendPrompt({ agentId: tab.id, message: "next" });
+	manager.notifyAskPending(tab.id, "deck-1", "标题", "问题 5");
+	assert.equal(asks.length, 4);
+});
+
+test("用量:session/prompt 的 usage 与本地计时进 runtime 状态（ACP 圆环面板数据源）", async (t) => {
+	// Qoder 实测形态：响应 usage 只有 input/output（没有缓存拆分），
+	// 因此 token 与 TPS 必须有值，缓存/命中率必须整组缺省（不能是假 0）。
+	let promptRpcId = null;
+	const { manager, createAgent, lastProc } = harness(t, {
+		handler: (frame) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+			if (frame.method === "session/new") return { sessionId: "sess-usage" };
+			if (frame.method === "session/prompt") {
+				promptRpcId = frame.id;
+				return undefined; // 先推流式 chunk，再手动结算（模拟真实 CLI）
+			}
+			return {};
+		},
+	});
+	const tab = await createAgent();
+	const sendPromise = manager.sendPrompt({ agentId: tab.id, message: "hi" });
+	await waitFor(() => promptRpcId !== null, "session/prompt dispatched");
+	lastProc().writeFromCli({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "sess-usage", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hello" } } } });
+	// 留出解码窗口（>0）再结算，TPS 才有意义。
+	await sleep(30);
+	lastProc().writeFromCli({ jsonrpc: "2.0", id: promptRpcId, result: { stopReason: "end_turn", usage: { inputTokens: 120, outputTokens: 40, totalTokens: 160 } } });
+	const result = await sendPromise;
+	assert.equal(result.accepted, true);
+	const state = await manager.getRuntimeState(tab.id);
+	assert.equal(state.inputTokens, 120);
+	assert.equal(state.outputTokens, 40);
+	assert.equal(state.cacheRead, undefined, "未上报缓存时不能显示 0");
+	assert.equal(state.cacheHitPercent, undefined);
+	assert.equal(typeof state.ttftMs, "number", "首个正文 chunk 到达即有 TTFT");
+	assert.ok(state.totalMs >= 30, "总耗时覆盖整个回合");
+	assert.ok(state.tps > 0, "有 output tokens 与解码窗口即算 TPS");
+	assert.ok(state.sessionTps > 0, "会话平均 TPS 同步累计");
 });

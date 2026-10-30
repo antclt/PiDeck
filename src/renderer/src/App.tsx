@@ -1,8 +1,6 @@
 import { Button } from "./components/ui-shadcn/button";
 import { NoticeHistoryDialog } from "./components/ui-shadcn/notice-history-dialog";
-import { useSessionNavigation } from "./hooks/useSessionNavigation";
 import { WorkbenchFileTabs } from "./components/workspace/WorkbenchFileTabs";
-import { ArrowLeft, ArrowRight, PanelLeft } from "lucide-react";
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useAtomValue, useSetAtom, useStore } from "jotai";
 import { toggleThemeMode } from "./themeAppearance";
@@ -49,6 +47,7 @@ import {
 	hiddenModulesAtom,
 	openAgentMarketPageAtom,
 	openFavoritesPageAtom,
+	favoritesOpenSessionRequestAtom,
 	hiddenComposerFeaturesAtom,
 	imageGenConfigAtom,
 	enhanceModelAtom,
@@ -73,7 +72,7 @@ import { type SidebarActions } from "./components/sidebar/SidebarContent";
 import { AppSidebar } from "./components/sidebar/AppSidebar";
 import { AppBootstrap } from "./components/app/AppBootstrap";
 import { SettingsFeatureRoot } from "./components/app/SettingsFeatureRoot";
-import { hostPluginPanelAtom } from "./atoms/host-plugin-atoms";
+import { hostPluginCatalogAtom, hostPluginPanelAtom, isHostPluginPagePanel } from "./atoms/host-plugin-atoms";
 import { AutomationPage } from "./components/automation/AutomationPage";
 import { AgentMarketPage } from "./components/agents/AgentMarketPage";
 import { FavoritesPage } from "./components/favorites/FavoritesPage";
@@ -109,7 +108,7 @@ import { activeAgentIdAtom } from "./hooks/useSessionRuntimeController";
 import { useSessionHistoryMutations } from "./hooks/useSessionHistoryMutations";
 import { useUserMessageEditReplay } from "./hooks/useUserMessageEditReplay";
 import { isLiveRuntimeStatus, resolveSessionReloadMode, sessionCommandFailureToast, type SessionRunAction, type SessionRunCapabilities, type SessionRunControlView } from "./utils/sessionCommands";
-import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeAcpToolPreference, readWelcomeBackendPreference, readWelcomeDshModelPreference, readWelcomeModelPreference, readWelcomeThinkingPreference, resolveChatSessionBootstrap, resolveGuidePageBackend } from "./utils/chatSessionBootstrap";
+import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeDshModelPreference, readWelcomeModelPreference, readWelcomeThinkingPreference, resolveChatSessionBootstrap, type NewSessionBackendTarget } from "./utils/chatSessionBootstrap";
 import { useAppAppearance } from "./hooks/appearance/useAppAppearance";
 import { useAppBootstrapInfo } from "./hooks/app/useAppBootstrapInfo";
 import { useBootOverlayReady } from "./hooks/app/useBootOverlayReady";
@@ -248,6 +247,7 @@ import type {
 	TerminalThemeId,
 	GitBranchInfo,
 	FocusTargetPayload,
+	ScratchPadScope,
 } from "../../shared/types";
 import type { TerminalDockSettings } from "./components/terminal/TerminalDock";
 import { WallpaperVideoLayer } from "./components/app/wallpaper/WallpaperVideoLayer";
@@ -294,6 +294,8 @@ export function App() {
 	const openAutomationPage = useSetAtom(openAutomationPageAtom);
 	const openAgentMarketPage = useSetAtom(openAgentMarketPageAtom);
 	const openFavoritesPage = useSetAtom(openFavoritesPageAtom);
+	const favoritesOpenSessionRequest = useAtomValue(favoritesOpenSessionRequestAtom);
+	const setFavoritesOpenSessionRequest = useSetAtom(favoritesOpenSessionRequestAtom);
 	// 页面式工作区（定时任务 / 智能体）：Tab 列表与当前呈现页面；切会话只失活、关闭才卸载。
 	const openWorkspacePageIds = useAtomValue(openWorkspacePageIdsAtom);
 	const activeWorkspacePage = useAtomValue(activeWorkspacePageAtom);
@@ -881,7 +883,11 @@ export function App() {
 		showToast,
 	});
 
-	const scratchPad = useScratchPad(workspace);
+	// 草稿本作用域：项目模式按当前项目分桶（activeProjectId 未同步时用会话所属项目兜底，
+	// 与终端 owner 同口径）；没有项目时回落全局。全局模式永远只有一份。
+	const scratchPadProjectId = activeProjectId ?? currentSessionRecord?.projectId;
+	const scratchPadScope: ScratchPadScope = settings.scratchPadScope === "project" && scratchPadProjectId ? { kind: "project", projectId: scratchPadProjectId } : { kind: "global" };
+	const scratchPad = useScratchPad({ ...workspace, scope: scratchPadScope });
 	// CUA 操作审批：根级订阅主进程推送的审批请求并渲染确认弹框（事件驱动，全局唯一一份）。
 	const cuaApproval = useCuaApproval();
 	// DSH runtime 安装态同步：全进程只挂这一份（IPC 拉取 + 变更订阅 → dshRuntimeStatusAtom）。
@@ -1237,7 +1243,8 @@ export function App() {
 		refreshProjectSessions,
 		api,
 		showToast,
-		// 新建会话默认后端：跟随设置项（默认 pi，可切换 dsh），经 DSH runtime 安装态钳制
+		// 新建会话默认后端：跟随设置项（默认 pi，可切换 dsh），经 DSH runtime 安装态钳制。
+		// 不再沿用「上次选择」——侧栏「+」等入口一律按设置默认建会话。
 		defaultBackend: effectiveAgentBackend,
 	});
 
@@ -1321,9 +1328,6 @@ export function App() {
 		workspace.openDrawerForce("browser");
 		navigateTo(url);
 	};
-
-	// 桌面插件发起的会话导航：broker 已验权限/归属，这里只注入现有选中动作（复用唯一选中路径）
-	useHostPluginNavigation(selectSessionCommand, openInBrowser);
 
 	// 关闭 Tab / 分屏退栏时的焦点切换：只改 currentSession，不碰 Tab 登记
 	useEffect(() => {
@@ -1519,9 +1523,12 @@ export function App() {
 
 	// 会话列同一时刻只呈现一层页面：打开工作区页面时收起页面式插件面板
 	// （两者都占 absolute inset-0，叠在一起会互相遮挡，且插件伪 Tab 无法再被点开）。
+	// 反方向（打开页面式面板时让页面失活）在 openHostPluginPanelAtom 里做，否则两边互相抵消。
+	// 对话框/浮层面板不占会话列，不与页面互斥。
 	useEffect(() => {
-		if (activeWorkspacePage && hostPluginPanel) setHostPluginPanel(null);
-	}, [activeWorkspacePage, hostPluginPanel, setHostPluginPanel]);
+		if (!activeWorkspacePage || !hostPluginPanel) return;
+		if (isHostPluginPagePanel(hostPluginPanel, store.get(hostPluginCatalogAtom).catalog)) setHostPluginPanel(null);
+	}, [activeWorkspacePage, hostPluginPanel, setHostPluginPanel, store]);
 
 	/** 侧栏/分支打开：选中成功后按 preview|permanent 登记 Tab */
 	const openSidebarSessionByIdWithTab = useCallback(
@@ -1532,6 +1539,27 @@ export function App() {
 		},
 		[runOpenSidebarSessionById, workspaceChrome],
 	);
+
+	// 桌面插件发起的会话导航：broker 已验权限/归属，复用侧栏打开链路（选中 + 常驻 Tab）。
+	// 插件页是临时页面，走纯选中会让会话没有任何 Tab 归属；与「定时任务」页查看会话同一条链路。
+	useHostPluginNavigation((projectId, sessionId) => {
+		void openSidebarSessionByIdWithTab(projectId, sessionId, "permanent");
+	}, openInBrowser);
+
+	// 收藏页「会话」条目：FavoritesPage 渲染在 SessionPaneServices 之外，经 atom 发导航请求，
+	// 这里复用侧栏打开链路（选中 + 常驻 Tab），不引入第二条会话选中路径。
+	useEffect(() => {
+		if (!favoritesOpenSessionRequest) return;
+		const request = favoritesOpenSessionRequest;
+		// 先消费再打开：openSidebarSessionByIdWithTab 的身份会随 workspaceChrome 变化，
+		// 不清空请求会在后续渲染里重复打开同一会话。
+		setFavoritesOpenSessionRequest(null);
+		void openSidebarSessionByIdWithTab(request.projectId, request.sessionId, "permanent").then((openedId) => {
+			// 目标恰好是当前会话时 scope 不变，页面自身不会失活；打开成功后显式让收藏页让位。
+			// 失败（会话已删除/项目读不到）时保留页面，用户还能看到收藏条目与提示。
+			if (openedId) deactivateWorkspacePage();
+		});
+	}, [deactivateWorkspacePage, favoritesOpenSessionRequest, openSidebarSessionByIdWithTab, setFavoritesOpenSessionRequest]);
 
 	useEffect(() => {
 		if (!activeProject) return;
@@ -1552,7 +1580,7 @@ export function App() {
 	// 并发发送（快速双击）复用 guideBootstrapPromotionRef 里的同一个提升 promise，
 	// 避免建出两个会话。创建即用户意图（已输入消息），Chat 拉起 pi 是预期行为。
 	const ensureSessionForSend = useCallback(
-		async (sessionId: string) => {
+		async (sessionId: string, target?: NewSessionBackendTarget) => {
 			if (sessionId !== GUIDE_BOOTSTRAP_SESSION_ID) return sessionId;
 			if (guideBootstrapPromotionRef.current) return guideBootstrapPromotionRef.current;
 			const project = projects.find((candidate) => candidate.id === activeProjectId);
@@ -1563,12 +1591,11 @@ export function App() {
 				// 引导页 picker 无 record 分支把显式选择存进 localStorage；创建时将模型交给
 				// 主进程校验、将思考档位作为启动偏好带入。底栏展示和真实会话创建读取同一份值，
 				// 避免出现「菜单看似切换，首次发送后又回到默认档位」。
-				// 引导页底栏显式切换的后端（localStorage 偏好）优先于设置项默认；
-				// 选了 dsh 但 DSH runtime 不可用时按 effectiveAgentBackendAtom 同一条
-				// 钳制规则回落 pi，避免首次发送才在 createDraft 门控上抛错。
-				// 与 ComposerArea 的展示用同一纯函数：展示的后端和创建的后端必须一致。
+				// 后端取引导页输入框当前选择（composer 经 ensureSessionId 传入，已做可用性
+				// 回落）；没有显式选择就是设置默认后端。不再读 localStorage 的「上次选择」。
 				// 远端项目只跑主机上的 pi：即使欢迎页残留 dsh/acp 偏好，也不能把本地 runtime 绑到远端项目。
-				const draftBackend = isRemoteProject(project) ? "pi" : resolveGuidePageBackend({ override: readWelcomeBackendPreference(), acpToolId: readWelcomeAcpToolPreference(), effectiveDefault: effectiveAgentBackend });
+				const draftBackend = isRemoteProject(project) ? "pi" : (target?.backend ?? effectiveAgentBackend);
+				const acpToolId = target?.acpToolId;
 				// 模型偏好按后端分开取（issue #253）：DSH 的模型是 host route 名，不在 models.json，
 				// 必须作为显式 model 直接带给 host；pi 的偏好走 welcomeModel（launchDefaults 会按
 				// models.json 校验存在性）。历史上 DSH 侧不读偏好，点选因此永远不生效。
@@ -1585,7 +1612,7 @@ export function App() {
 					projectId: project.id,
 					title: draftBackend === "dsh" ? `${project.name} DSH` : `${project.name} agent`,
 					backend: draftBackend,
-					...(draftBackend === "acp" ? { acpToolId: readWelcomeAcpToolPreference() } : {}),
+					...(draftBackend === "acp" && acpToolId ? { acpToolId } : {}),
 					...(welcomeModel ? (draftBackend === "dsh" ? { model: welcomeModel } : { welcomeModel }) : {}),
 					...(welcomeThinking ? { thinkingLevel: welcomeThinking } : {}),
 				});
@@ -2479,11 +2506,6 @@ export function App() {
 		[selectSessionCommand, store],
 	);
 
-	const navigation = useSessionNavigation(currentSessionId, (id) => {
-		workspaceChrome.registerOpenSession(id, "permanent");
-		focusSessionPane(id);
-	});
-
 	// 后台 Ask 通知「前往会话」：跳转的同时登记常驻 Tab——agent 开多时被询问的会话
 	// 可能根本没开 Tab（后台并行 ask 等），只切焦点的话回答完切换出去就找不到了。
 	const jumpToAskSession = useCallback(
@@ -2637,6 +2659,9 @@ export function App() {
 			isRestarting: Boolean(target?.agentId && restartingAgentId === target.agentId) || activatingSessionId === sessionId,
 			isReloading: reloadingSessionId === sessionId,
 			reloadMode: resolveSessionReloadMode(record?.backend),
+			agentId: target?.agentId,
+			// 右键 Tab 的强制停止入口：杀进程 + 解绑，会话记录保留；无绑定（未启动/已关）时隐藏。
+			onCloseAgent: target ? () => requestCloseAgentForSession(sessionId) : undefined,
 			onAction: (action) => void runSessionControl(sessionId, action),
 		};
 	};
@@ -3262,21 +3287,7 @@ export function App() {
 				<WallpaperVideoLayer settings={settings} />
 				<AppBootstrap {...bootstrapProps} />
 				<AppShell
-					navigationChrome={
-						simpleMode ? (
-							<div className="simple-navigation-bar flex h-8 shrink-0 items-center gap-0.5 bg-(--simple-shell-surface) px-2 [&_button]:[-webkit-app-region:no-drag]">
-								<Button variant="ghost" size="icon-sm" className="size-6.5" type="button" aria-label={listCollapsed ? t("app.expandList") : t("app.collapseList")} title={listCollapsed ? t("app.expandList") : t("app.collapseList")} onClick={toggleListCollapsed}>
-									<PanelLeft size={14} />
-								</Button>
-								<Button variant="ghost" size="icon-sm" className="size-6.5" type="button" aria-label={t("navigation.back")} title={t("navigation.back")} disabled={!navigation.canBack} onClick={navigation.back}>
-									<ArrowLeft size={14} />
-								</Button>
-								<Button variant="ghost" size="icon-sm" className="size-6.5" type="button" aria-label={t("navigation.forward")} title={t("navigation.forward")} disabled={!navigation.canForward} onClick={navigation.forward}>
-									<ArrowRight size={14} />
-								</Button>
-							</div>
-						) : undefined
-					}
+					simpleShell={simpleMode}
 					compactContent={
 						// 极简浮窗模式：渲染当前活跃会话（不是 quickTask）
 						new URLSearchParams(window.location.search).get("mini-overlay") === "1" ? (
@@ -3317,6 +3328,7 @@ export function App() {
 					drawerRail={
 						<WorkspaceDrawerRail
 							addLabel={t("drawer.addPanel")}
+							onClose={toggleRightDrawer}
 							actions={[
 								{
 									id: "files",

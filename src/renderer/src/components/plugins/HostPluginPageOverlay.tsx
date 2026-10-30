@@ -1,9 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useAtom, useAtomValue } from "jotai";
 import { hostPluginCatalogAtom, hostPluginPanelAtom } from "../../atoms/host-plugin-atoms";
-import { t } from "../../i18n";
-import { Button } from "../ui-shadcn/button";
-import { hostPluginPanelIcon } from "./hostPluginPanelIcon";
 import { HostPluginSurface } from "./HostPluginSurface";
 
 /**
@@ -31,19 +28,11 @@ export function HostPluginPageOverlay({ projectId, sessionId }: { projectId?: st
 	const plugin = catalog?.plugins.find((item) => item.enabled && item.manifest.id === selected?.pluginId);
 	const panel = plugin?.manifest.contributes.panels.find((item) => item.id === selected?.panelId);
 	if (!plugin || !panel || panel.presentation !== "page") return null;
-	const Icon = hostPluginPanelIcon(panel.icon);
 	return (
-		// inset-0 只覆盖工作区会话列：侧栏、右侧抽屉、底部停靠栏保持可交互（非模态）
+		// inset-0 只覆盖工作区会话列：侧栏、右侧抽屉、底部停靠栏保持可交互（非模态）。
+		// 不渲染页头：面板名已在会话 Tab 栏的伪 Tab 上，插件页自己也有范围/操作行，
+		// 再叠一条「标题 + 关闭」既重复又占高度；关闭走伪 Tab 的 ×（simple 模式用侧栏入口切换）。
 		<div className="absolute inset-0 z-30 flex flex-col bg-background" role="region" aria-label={`${plugin.manifest.name}: ${panel.title}`}>
-			<div className="shrink-0 flex-row flex items-center justify-between border-b bg-background/95 px-4 py-2">
-				<div className="flex items-center gap-2 text-body font-medium text-foreground">
-					<Icon className="size-4 text-muted-foreground" aria-hidden="true" />
-					{plugin.manifest.contributes.panels.length > 1 ? `${plugin.manifest.name}: ${panel.title}` : panel.title}
-				</div>
-				<Button variant="ghost" size="sm" onClick={() => setSelected(null)}>
-					{t("common.close")}
-				</Button>
-			</div>
 			<HostPluginSurface key={`${plugin.manifest.id}:${panel.id}:${plugin.fingerprint}`} pluginId={plugin.manifest.id} panelId={panel.id} projectId={projectId} sessionId={sessionId} />
 		</div>
 	);

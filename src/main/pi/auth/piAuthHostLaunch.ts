@@ -15,6 +15,7 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import type { AppSettings } from "../../../shared/types/settings";
 import type { PiCommandInvocation, PiLocator } from "../PiLocator";
 import { stripBom } from "../../config/piConfigFileStore";
+import { applyPiProxyModeWithProvider, computeGenProxyKey } from "../../sessions/sessionProxyPolicy";
 import { piRuntimeNodeExePath } from "../runtimeNodeInstall";
 
 /** pi 包的 npm 包名；用于确认「往上找到的包根」确实是 pi 而不是同名目录。 */
@@ -23,8 +24,8 @@ export const PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
 /** 助手进程名（打包时用 extraResources 铺到 resources 根，见 package.json）。 */
 export const PI_AUTH_HOST_FILENAME = "pi-auth-host.mjs";
 
-/** 解析所需的最小设置子集：pi 命令位置、WSL 与代理（代理要透传给助手进程）。 */
-export type PiAuthHostSettings = Pick<AppSettings, "customPiPath" | "wslEnabled" | "wslDistro" | "wslUser" | "piProxyEnabled" | "piProxyUrl" | "piProxyBypass">;
+/** 解析所需的最小设置子集：pi 命令位置、WSL 与代理（代理与模型名单要透传给助手进程）。 */
+export type PiAuthHostSettings = Pick<AppSettings, "customPiPath" | "wslEnabled" | "wslDistro" | "wslUser" | "piProxyEnabled" | "piProxyUrl" | "piProxyBypass" | "piProxyProviders" | "piProxyModels">;
 
 /** 解析失败时给渲染层的分类；文案在 i18n 层，主进程只给原因。 */
 export type PiAuthHostLaunchFailureReason =
@@ -44,6 +45,12 @@ export type PiAuthHostLaunch =
 			/** pi 的 dist/index.js 绝对路径，作为 `PIDECK_PI_SDK_ENTRY` 传入助手。 */
 			sdkEntry: string;
 			env: NodeJS.ProcessEnv;
+			/**
+			 * 本次注入的代理 env 指纹。常驻助手进程的 env 在 spawn 时就固定，宿主靠它判断
+			 * 「现有进程还能不能复用」：代理开关/地址/绕过列表或模型名单一旦改变，指纹就变，
+			 * 调用方据此重建进程（否则用户改了代理设置却仍是旧出口）。
+			 */
+			proxyKey: string;
 	  }
 	| { ok: false; reason: PiAuthHostLaunchFailureReason /** 诊断细节（日志与「查看详情」用） */; detail?: string };
 
@@ -242,7 +249,22 @@ function resolveNodeExe(invocation: PiCommandInvocation, userDataPath: string): 
  * 组装助手的启动参数。失败时返回分类原因，由渲染层翻成可读提示（通常是
  * 「请在终端里执行 pi 然后 /login」）——绝不静默失败，否则用户只会看到没反应。
  */
-export function resolvePiAuthHostLaunch(input: { settings: PiAuthHostSettings; locator: PiLocator; userDataPath: string; appPath: string; resourcesPath: string; isPackaged: boolean /** 复用同套解析逻辑的其它助手脚本文件名（如提示词增强助手）；缺省为认证助手。 */; helperFilename?: string }): PiAuthHostLaunch {
+export function resolvePiAuthHostLaunch(input: {
+	settings: PiAuthHostSettings;
+	/**
+	 * 本次调用要用的模型：助手按「一次调用一个模型」复用同一个常驻进程，而代理 env 在
+	 * spawn 时定格，所以名单只能在这里落地。缺省时不按名单过滤（跟随全局开关），
+	 * 与 pi 会话 spawn 的语义一致。
+	 */
+	proxyModel?: { provider?: string; modelId?: string };
+	locator: PiLocator;
+	userDataPath: string;
+	appPath: string;
+	resourcesPath: string;
+	isPackaged: boolean;
+	/** 复用同套解析逻辑的其它助手脚本文件名（如提示词增强助手）；缺省为认证助手。 */
+	helperFilename?: string;
+}): PiAuthHostLaunch {
 	const helperPath = resolvePiAuthHostPath({ ...input, filename: input.helperFilename ?? PI_AUTH_HOST_FILENAME });
 	if (!existsSync(helperPath)) {
 		return { ok: false, reason: "helper-missing", detail: helperPath };
@@ -264,12 +286,19 @@ export function resolvePiAuthHostLaunch(input: { settings: PiAuthHostSettings; l
 		return { ok: false, reason: "no-pi-entry", detail: invocation.windowsLaunch?.reason ?? candidate ?? piCommand };
 	}
 
+	// 与 pi 会话 spawn 同一套语义：名单内强制开启（复用全局 URL，即使全局关也一样）、
+	// 名单外强制直连（只改 enabled 位），名单未启用时跟随全局开关。
+	const effectiveSettings = applyPiProxyModeWithProvider(input.settings, undefined, input.proxyModel?.provider, input.proxyModel?.modelId);
+
 	return {
 		ok: true,
 		nodeExe: resolveNodeExe(invocation, input.userDataPath),
 		helperPath,
 		sdkEntry,
-		env: buildChildEnv(input.locator.createProcessEnv(input.settings, invocation.pathPrefix, invocation.wsl), sdkEntry),
+		env: buildChildEnv(input.locator.createProcessEnv(effectiveSettings, invocation.pathPrefix, invocation.wsl), sdkEntry),
+		// 指纹与 git 摘要等其它常驻进程共用同一实现（settings + 名单 → 实际生效的代理状态），
+		// 两处各写一份会在名单语义调整后静默漂移。
+		proxyKey: computeGenProxyKey(input.settings, input.proxyModel?.provider, input.proxyModel?.modelId),
 	};
 }
 

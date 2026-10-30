@@ -29,6 +29,18 @@ test("预设:id 唯一、命令/参数非空、homepage 为 https", () => {
 	}
 });
 
+test("Qoder 预设默认带 --permission-mode bypass_permissions(运行期切不进去)", () => {
+	// Qoder ACP 适配器把 yolo(Bypass Permissions)列进 configOptions 却拒绝 set_config_option
+	// （1.1.80 实测 -32603 unknown permission_mode: yolo），只能在启动时用 CLI flag 定档；
+	// 少了这段参数，用户加完工具还得手动改参数才能进 bypass。
+	for (const id of ["qoder", "qoder-cn"]) {
+		const preset = ACP_TOOL_PRESETS.find((candidate) => candidate.id === id);
+		assert.ok(preset, `缺预设 ${id}`);
+		// 沙箱加载的模块数组原型与测试 realm 不同，deepEqual 会误判：比 JSON 串
+		assert.equal(JSON.stringify(preset.args), JSON.stringify(["--acp", "--permission-mode", "bypass_permissions"]), `${id} 启动参数须默认 bypass`);
+	}
+});
+
 test("预设:npx 形态走 -y 免交互(卡在 npx 交互提示会握不上手)", () => {
 	for (const preset of ACP_TOOL_PRESETS) {
 		if (preset.command === "npx") {
@@ -56,4 +68,9 @@ test("UI:AcpPresetChips 引用共享预设表(加预设无需改 UI)", () => {
 	for (const preset of ACP_TOOL_PRESETS) {
 		assert.match(source, new RegExp(`["']?${preset.id}["']?\\s*:\\s*"acp\\.presetDesc\\.${preset.id}"`), `PRESET_DESC_KEYS 缺 ${preset.id}`);
 	}
+	// 官网/文档链接必须走系统浏览器：内置浏览器没有终端与下载能力，安装命令只能在那里照着敲。
+	// `<a target="_blank">` 会被主窗的 windowOpenHandler 统一交给「链接打开方式」设置，
+	// 用户设成 internal 就被塞回 BrowserPanel（本次就是这个反馈）。
+	assert.match(source, /openInSystemBrowser\(preset\.homepage\)/, "预设官网链接应用 openInSystemBrowser 强制系统浏览器");
+	assert.doesNotMatch(source, /href=\{preset\.homepage\}/, "预设官网链接不应再用 href（会被内置浏览器接管）");
 });

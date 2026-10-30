@@ -33,6 +33,18 @@ test("预热只在还没有字和工具时成立", () => {
 	assert.equal(deriveRespondingKind({ isStarting: true }), "starting");
 });
 
+test("自动重试退避期报 retrying：优先级高于预热/等待，但低于任何推流", () => {
+	assert.equal(deriveRespondingKind({ isRetrying: true }), "retrying");
+	assert.equal(deriveRespondingKind({ isRetrying: true, isStarting: true }), "retrying");
+	// DSH 的重试卡要到本条 assistant 终态才收口：重试后这次尝试已经在推流时
+	// 不能说“重试中”，否则状态条又变成与后台不符的假话。
+	assert.equal(deriveRespondingKind({ isRetrying: true, liveTextStreaming: true }), "responding");
+	assert.equal(deriveRespondingKind({ isRetrying: true, liveThinkingStreaming: true }), "thinking");
+	assert.equal(deriveRespondingKind({ isRetrying: true, isExecutingTool: true }), "executing");
+	// 卡片收口后回到普通空窗态，不能粘住
+	assert.equal(deriveRespondingKind({ isRetrying: false }), "waiting");
+});
+
 test("残留 thinking id 不算回复中：没有 streaming 就降为等待", () => {
 	assert.equal(deriveRespondingKind({ isStarting: false, isExecutingTool: false }), "waiting");
 });

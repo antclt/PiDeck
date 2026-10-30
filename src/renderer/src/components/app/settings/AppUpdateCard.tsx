@@ -1,6 +1,6 @@
 import { Download, ExternalLink, ScrollText } from "lucide-react";
 import { useState } from "react";
-import type { AppInfo, UpdateChannel } from "../../../../../shared/types";
+import type { AppBuildOrigin, AppInfo, UpdateChannel } from "../../../../../shared/types";
 import type { UpdateSourceId } from "../../../../../shared/types/settings";
 import { t } from "../../../i18n";
 import { desktopApi } from "../../../desktopApi";
@@ -22,6 +22,11 @@ type AppUpdateCardProps = {
 	releasesUrl: string;
 	/** 当前更新通道（updateChannelInfoAtom，useChannelSwitchWatch 初拉）；徽章与切换方向依据。 */
 	channel: UpdateChannel;
+	/**
+	 * 构建来源（同源 updateChannelInfoAtom）：与通道正交。本机打包/源码运行的版本号抄
+	 * package.json、与发布版同号，卡片必须标出「本地构建」并说明「已是最新」只比版本字符串。
+	 */
+	buildOrigin: AppBuildOrigin;
 	/**
 	 * 启动时检测的安装类型。Win 便携版应用内更新仍走 NSIS setup
 	 * （会装成安装版），需在 UI 说清区别；不改 deliveryMode。
@@ -96,12 +101,19 @@ export function AppUpdateCard(props: AppUpdateCardProps) {
 				<div className="flex items-center gap-2">
 					<span className="text-body">{t("app.updateCardVersion", { version: props.appVersion })}</span>
 					{/* 通道徽章：dev=琥珀、stable=绿，语义色区分当前跟踪的发布线。 */}
-					<span className={cn("rounded px-1.5 py-0.5 text-micro font-medium", props.channel === "dev" ? "bg-amber-500/15 text-amber-500" : "bg-emerald-500/15 text-emerald-500")}>{t(props.channel === "dev" ? "settings.channelBadgeDev" : "settings.channelBadgeStable")}</span>
+					<span className={cn("rounded px-1.5 py-0.5 text-micro font-medium", props.channel === "dev" ? "bg-warning/15 text-warning" : "bg-success/15 text-success")}>{t(props.channel === "dev" ? "settings.channelBadgeDev" : "settings.channelBadgeStable")}</span>
+					{/* 来源徽章（中性色，与通道徽章的语义色区分）：只在非发布产物出现——
+					    本机打包/源码运行的版本号抄 package.json，与发布版同号，不标出来会被误认为官方包。 */}
+					{props.buildOrigin !== "release" && <span className="rounded bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">{t("settings.buildOriginLocal")}</span>}
 				</div>
 				<Button variant="secondary" size="sm" onClick={props.onCheckUpdate} loading={props.checking || phase === "checking"}>
 					{t("settings.checkUpdate")}
 				</Button>
 			</div>
+
+			{/* 本机构建说明：「已是最新」只表示 package.json 的版本字符串与最新发布版相同，
+			    不代表这份代码等于已发布的那个版本（本机包通常领先/落后若干提交）。 */}
+			{props.buildOrigin !== "release" && <p className="mt-1 text-caption text-muted-foreground">{t("settings.buildOriginLocalHint")}</p>}
 
 			{/* Win 便携版仍走 NSIS setup：会变成安装版；有更新时才提示这个差异。 */}
 			{props.installationType === "portable" && props.platform === "win32" && app?.hasUpdate && (

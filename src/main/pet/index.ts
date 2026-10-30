@@ -1,5 +1,4 @@
 import { ipcMain, Menu, type BrowserWindow, type MenuItemConstructorOptions } from "electron";
-import type { AgentManager } from "../pi/AgentManager";
 import type { SettingsStore } from "../settings/SettingsStore";
 import { DEFAULT_PET_SCALE, type AgentTab, type AgentUiRequest, type AppSettings, type PetManifest, type PetNotification } from "../../shared/types";
 import { agentEventTags, ipcChannels } from "../../shared/ipc";
@@ -11,8 +10,19 @@ import { PetPackageManager } from "./PetPackageManager";
 import { PetPatrol } from "./PetPatrol";
 import { registerPetSpriteProtocol } from "./petSpriteProtocol";
 
+/**
+ * 桌宠依赖的最小事件源：全后端（pi/dsh/acp）聚合的 tab 列表 + 状态快照 + 事件流 + 成功收口。
+ * 由 CompositeAgentGateway 实现；只接单个后端会让 ACP/DSH 会话完全不驱动桌宠。
+ */
+export type PetAgentSource = {
+	list(): AgentTab[];
+	addStateListener(listener: (tabs: AgentTab[]) => void): () => void;
+	onOutput(listener: (channel: string, payload: unknown) => void): () => void;
+	onAgentSettled(listener: (info: { agentId: string; title: string }) => void): () => void;
+};
+
 export type PetSystemDeps = {
-	agentManager: AgentManager;
+	agentSource: PetAgentSource;
 	settingsStore: SettingsStore;
 	getMainWindow: () => BrowserWindow | null;
 	resolveSessionId: (agentId: string) => string | undefined;
@@ -80,14 +90,14 @@ export class PetSystem {
 			roots: this.packageManager.spriteRoots(),
 		});
 		this.registerIpc();
-		this.bridge.attach(this.deps.agentManager);
-		// 等待操作：复用主进程输出订阅，只消费已规范化的 agents:ui-request（set/delete pending 由 AgentManager 保证）
-		this.offOutput = this.deps.agentManager.onOutput((channel, payload) => {
+		this.bridge.attach(this.deps.agentSource);
+		// 等待操作：复用主进程输出订阅，只消费已规范化的 agents:ui-request（pending 生命周期由各后端网关保证）
+		this.offOutput = this.deps.agentSource.onOutput((channel, payload) => {
 			if (channel !== agentEventTags.agentsUiRequest || !payload || typeof payload !== "object") return;
 			this.bridge.updateUIRequest(payload as AgentUiRequest);
 		});
-		// 已完成：AgentManager 确认成功 settled 后回调（abort/重试/压缩不触发）
-		this.offSettled = this.deps.agentManager.onAgentSettled((info) => this.bridge.onAgentSettled(info));
+		// 已完成：网关确认成功收口后回调（abort/重试/压缩/失败不触发）
+		this.offSettled = this.deps.agentSource.onAgentSettled((info) => this.bridge.onAgentSettled(info));
 
 		const s = this.deps.settingsStore.get();
 		if (s.petEnabled) {
@@ -97,7 +107,7 @@ export class PetSystem {
 			// 即使首次推送丢失也显示降级绘制。主动 petReady 信号到后会再推一次以覆盖兜底。
 			setTimeout(() => {
 				this.pushCaps();
-				this.bridge.pushNow(this.deps.agentManager.list());
+				this.bridge.pushNow(this.deps.agentSource.list());
 				// 窗口重建期间若已有 pending 交互请求，恢复 waiting 气泡（pushNow 只推聚合状态）
 				this.bridge.pushWaitingNow();
 				void this.pushCurrentSprite();
@@ -182,7 +192,7 @@ export class PetSystem {
 		if (this.registered) return;
 		this.registered = true;
 
-		const { settingsStore, agentManager, getMainWindow, recreateMainWindow } = this.deps;
+		const { settingsStore, agentSource, getMainWindow, recreateMainWindow } = this.deps;
 		const C = ipcChannels;
 
 		ipcMain.handle(C.petList, () => this.packageManager.list());
@@ -271,7 +281,7 @@ export class PetSystem {
 			const win = this.petWindow.window;
 			if (!win || win.isDestroyed()) return;
 			this.pushCaps();
-			this.bridge.pushNow(this.deps.agentManager.list());
+			this.bridge.pushNow(this.deps.agentSource.list());
 			// 挂载前可能已有 pending 交互请求（等待操作），补推 waiting 气泡
 			this.bridge.pushWaitingNow();
 			void this.pushCurrentSprite();
@@ -331,7 +341,7 @@ export class PetSystem {
 				// 延迟 600ms 兜底推送，petReady 信号到后会再推一次覆盖兜底值
 				setTimeout(() => {
 					this.pushCaps();
-					this.bridge.pushNow(this.deps.agentManager.list());
+					this.bridge.pushNow(this.deps.agentSource.list());
 					this.bridge.pushWaitingNow();
 					void this.pushCurrentSprite();
 				}, 600);

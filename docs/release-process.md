@@ -36,6 +36,33 @@
 
 1. `package.json` 与 `package-lock.json` 版本号一致；发版提交用 `chore: release vX.Y.Z`。
 
+## Issue 自动关闭（发版合并时一次性触发）
+
+关闭关键字只在**提交第一次可从默认分支到达**的那一刻触发——即 `dev → main` 那次 push。打 tag、建 Release、`workflow_dispatch` 发版都**不会**关闭任何 issue。默认分支是 `main`，开发合并全部进 `dev`，所以修复提交的 `Closes #N` 在合进 `dev` 时毫无效果，要等发版合并。
+
+发版时按以下三条执行，否则会留下「发版了但 issue 还开着」：
+
+1. **关键字必须落在提交里，不能只写 PR 描述**：PR 描述里的关键字只在 PR 的 base 是默认分支（`main`）时生效；本项目 PR 都合进 `dev`，因此描述里的 `Closes #N` 永远不会触发（#406、#428 就是这么漏掉的，修复提交 `4852205a4`、`1d76ed5d7` 的提交信息里都没有关键字）。
+2. **发版合并提交正文逐行补 `Closes #N`**：`dev → main` 的真 merge 提交是唯一能兜住「提交信息漏写关键字」的位置。正文里每行一个 `Closes #N`，该次 push 会把它们一起关掉。示例：
+
+   ```
+   Merge branch 'dev' into main: v0.9.9 正式发版（…）
+
+   Closes #406
+   Closes #428
+   ```
+
+3. **别提前手工关闭**：GitHub 发现 issue 已关闭就什么都不做（#395 于 10-22 手工关闭，修复提交 `3aa01178c` 直到 10-24 才进 `main`，只留下一条 `referenced` 交叉引用）。想让自动关闭可见，就等到发版合并之后再判断。
+
+关键字只认 `close/closes/closed`、`fix/fixes/fixed`、`resolve/resolves/resolved` + `#N`。`Refs #N`、`（#N）`、`关联 #N` 都不算——`Refs` 是「仅关联、不关闭」的写法，用在明确不打算关的提交上。
+
+**逐条验证**（判定标准：`closed` 事件的 `commit_id` 非空 = 被提交关闭；`-` = 手工关闭；只有 `referenced` 没有 `closed` = 关键字没到达 `main` 或已被提前关闭）：
+
+```bash
+gh api "repos/ayuayue/PiDeck/issues/<N>/timeline?per_page=100" \
+  --jq '.[] | select(.event=="closed" or .event=="referenced") | "\(.event) \(.created_at) \(.commit_id // "-")"'
+```
+
 ## workflow_dispatch tag 下拉同步（scripts/sync-workflow-choices.js）
 
 GitHub 的 choice 只能写死静态列表，无法动态读 tag，所以每发一版都要更新，否则新版本在下拉里选不到（只能手输 `tag_custom`）：
@@ -56,6 +83,12 @@ GitHub 的 choice 只能写死静态列表，无法动态读 tag，所以每发�
 ## 打包验证
 
 `npm run pack`（--dir 快速验证）→ `dist:win/mac/linux`；发版前至少跑过一次目标平台完整安装包的人工 smoke，不依赖 CI 构建成功即发布。
+
+构建来源标记：本机脚本一律不注入 `PIDECK_RELEASE_BUILD`，产物因此在设置页显示「本地构建」徽章；
+发布 workflow（`release.yml` / `build-dev.yml` / `release-linux-manual.yml`）必须在其构建步骤 env 注入
+`PIDECK_RELEASE_BUILD: "1"`（编译期 define `__PIDECK_RELEASE_BUILD__` → 构建来源判定 release，见
+`src/main/buildIdentity.ts`）。漏标的表现是发布包也显示「本地构建」，守卫测试
+`tests/releaseWorkflowBuildOrigin.test.mjs` 会按「会发 Release 的 workflow」逐一拦下。
 
 ### macOS 签名（无 Apple 证书时的 ad-hoc 策略）
 

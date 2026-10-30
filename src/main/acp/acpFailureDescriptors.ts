@@ -40,6 +40,24 @@ export function startupTimeoutDescriptor(error: unknown, tool: AcpToolConfig): {
 	return undefined;
 }
 
+/** 回合超时按分钟描述（默认 10min，配置值通常为整分钟）；不足 1 分钟显示 <1。 */
+export function formatTurnTimeoutMinutes(timeoutMs: number): string {
+	const minutes = timeoutMs / 60_000;
+	if (minutes < 1) return "<1";
+	return Number.isInteger(minutes) ? String(minutes) : String(Math.round(minutes * 10) / 10);
+}
+
+/**
+ * session/prompt 回合兑底超时（acpPromptTurnTimeoutMs，#414）→ 人性化时长 + 配置键指引：
+ * 裸文案「600000ms」搜不出配置键，用户无从自救（#431）；原文（含 ms 与 method）留 debugDetails。
+ */
+export function promptTurnTimeoutDescriptor(error: unknown, tool: AcpToolConfig): { i18nKey: string; i18nParams: { tool: string; minutes: string }; debugDetails: string } | undefined {
+	if (error instanceof AcpTimeoutError) {
+		return { i18nKey: "acp.turnTimeout", i18nParams: { tool: tool.name, minutes: formatTurnTimeoutMinutes(error.timeoutMs) }, debugDetails: error.message };
+	}
+	return undefined;
+}
+
 /** create 抛错前的统一本地化：命中任一描述符即挂到 Error 上（coordinator 透传）。 */
 export function localizeCreateFailure(error: Error, tool: AcpToolConfig): void {
 	const descriptor = authRequiredDescriptor(error, tool) ?? spawnNotInstalledDescriptor(error, tool) ?? startupTimeoutDescriptor(error, tool);

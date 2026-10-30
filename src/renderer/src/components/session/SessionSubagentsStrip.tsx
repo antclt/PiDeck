@@ -1,18 +1,19 @@
 import { useAtomValue } from "jotai";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Ban, Bot, ChevronDown, ChevronUp, CornerUpRight, ExternalLink, FileText, Loader2, Square, X } from "lucide-react";
 import { sessionRuntimeBySessionIdAtomFamily } from "../../atoms";
 import { desktopApi } from "../../desktopApi";
 import { t } from "../../i18n";
-import { replaceExpandedRefBlocksWithLabels } from "./composer/quoteChip";
 import type { PiSubagentEntry } from "../../../../shared/types";
 import { useSessionSubagents } from "../../hooks/useSessionSubagents";
 import { Button } from "../ui-shadcn/button";
+import { VirtualStack, VIRTUAL_STACK_MIN_ROWS } from "../ui-shadcn/virtual-stack";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
 import { MarkdownStream } from "./MarkdownStream";
 import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
 import { ComposerWidgetFrame, useComposerWidgetCollapsed } from "./ComposerWidgetLayout";
 import { isFailureSubagentStatus, isSubagentRunLost, subagentIconKind, subagentStatusLabelSuffix } from "./subagentStatus";
+import { DSH_SUBAGENT_TRANSCRIPT_PAGE_SIZE, dshTranscriptRowFromMessage, mergeOlderDshTranscriptPage, type DshTranscriptRow } from "./sessionSubagentTranscript";
 
 /**
  * composer 上方的「子代理」常驻条（移植自 dsh-web 的 agent 状态灯）。
@@ -20,7 +21,7 @@ import { isFailureSubagentStatus, isSubagentRunLost, subagentIconKind, subagentS
  * 形态：与输入框同宽同列的折叠卡（36px 高：图标 + 标题 + 运行中计数 + 状态灯 + chevron），
  * 点击展开子代理列表（运行中状态灯实时刷新）。两后端兼容：
  * - pi：useSessionSubagents 三源合并（record + 桥接 widget + 工具调用推导）；
- * - DSH：listDshSubagents 轮询拉取，运行中保持 3s 刷新，全空闲停表。
+ * - DSH：listDshSubagents 轮询拉取，运行中 3s 刷新，空闲降频 15s（不停表，兜住晚 spawn 的子代理）。
  * 无任何子代理时整体不渲染（「有那个显示那个」）。
  */
 
@@ -92,11 +93,14 @@ function formatDuration(ms: number): string {
 /** 单条 pi 子代理：点击行展开详情（描述 / 错误 / 结果预览 / 元信息 / 打开子会话）。 */
 export const PiSubagentEntryRow = (props: {
 	entry: PiSubagentEntry;
+	/** 行标签：短列表路径给 li（父是 ul），虚拟化路径给 div（父是 div[data-index]，li 在那里非法）。 */
+	as?: "li" | "div";
 	/** 所属会话：打开结果 Dialog 时从会话文件 record 拉取全文 */
 	sessionId: string;
 	onOpenChildSession?: (sessionId: string) => void;
 }) => {
-	const { entry } = props;
+	const { entry, as } = props;
+	const RowTag = as ?? "li";
 	const now = Date.now();
 	// 失联判定：runner 进程已死但记录仍是 running/queued（父进程换代/被杀后
 	// 永远等不到终态写盘）时，按「已停止」呈现——否则条目永远亮着「运行中」，
@@ -142,7 +146,7 @@ export const PiSubagentEntryRow = (props: {
 	const duration = entry.completedAt && entry.startedAt ? formatDuration(entry.completedAt - entry.startedAt) : entry.startedAt && (isActive || lost) ? formatDuration(now - entry.startedAt) : null;
 
 	return (
-		<li className={`rounded ${isActive ? "bg-muted/40" : ""}`}>
+		<RowTag className={`rounded ${isActive ? "bg-muted/40" : ""}`}>
 			<button type="button" className="flex min-w-0 w-full items-center gap-2 rounded px-2 py-1.5 text-left text-control leading-5 transition-colors hover:bg-muted/60" aria-expanded={!collapsed} onClick={toggleCollapsed}>
 				<span className="grid size-5 shrink-0 place-items-center">
 					<SubagentStatusIcon status={effectiveStatus} />
@@ -217,7 +221,7 @@ export const PiSubagentEntryRow = (props: {
 					</DialogContent>
 				</Dialog>
 			)}
-		</li>
+		</RowTag>
 	);
 };
 
@@ -234,10 +238,15 @@ export type DshSubagentEntry = {
 	kind: "child" | "diagnostic";
 };
 
+/** DSH 子代理轮询节奏：运行中 3s 跟状态灯；空闲降到 15s 慢轮询。完全停表会让
+ * 「先开会话、后 spawn 子代理」的场景永远等不到第一盏灯亮（2026-10 用户反馈
+ * 状态不实时）；空闲期只多承担一条本地 RPC。 */
+const DSH_SUBAGENT_ACTIVE_POLL_MS = 3000;
+const DSH_SUBAGENT_IDLE_POLL_MS = 15000;
+
 /**
- * DSH 子代理轮询：挂载拉一次；有运行中的子代理时保持 3s 刷新（状态灯实时），
- * 全空闲停表，避免空转 IPC。与 DshAgentToolsPanel 的静态拉取相比，横栏需要
- * 跟随子代理生命周期展示「运行中」状态。
+ * DSH 子代理轮询：挂载拉一次；运行中 3s 快轮询跟状态灯，全空闲降频慢轮询兜住
+ * 晚 spawn 的子代理；文档隐藏时跳过网络但保持调度，回到前台立即补拉一次。
  */
 function useDshSubagents(agentId: string | undefined): DshSubagentEntry[] {
 	const [entries, setEntries] = useState<DshSubagentEntry[]>([]);
@@ -246,35 +255,50 @@ function useDshSubagents(agentId: string | undefined): DshSubagentEntry[] {
 		let cancelled = false;
 		let timer = 0;
 		const load = async () => {
+			timer = 0;
+			if (cancelled) return;
+			// 后台不空转：隐藏期间只保持慢节拍，回前台由 visibilitychange 立即补拉
+			if (document.hidden) {
+				timer = window.setTimeout(load, DSH_SUBAGENT_IDLE_POLL_MS);
+				return;
+			}
 			const items = await desktopApi.sessions.listDshSubagents(agentId).catch(() => [] as DshSubagentEntry[]);
 			if (cancelled) return;
 			setEntries(items);
-			// 运行中才保持轮询；全空闲停表（load 自身可被 interval 复用，注意
-			// timer 判 0 避免重复起表）
-			const hasRunning = items.some((e) => e.activity === "running");
-			if (hasRunning && timer === 0) {
-				timer = window.setInterval(load, 3000);
-			} else if (!hasRunning && timer !== 0) {
-				window.clearInterval(timer);
-				timer = 0;
-			}
+			timer = window.setTimeout(load, items.some((e) => e.activity === "running") ? DSH_SUBAGENT_ACTIVE_POLL_MS : DSH_SUBAGENT_IDLE_POLL_MS);
 		};
+		const onVisibilityChange = () => {
+			// 在飞的 load 自己会续表；只有已有挂起定时器时才打断提前拉
+			if (document.hidden || cancelled || timer === 0) return;
+			window.clearTimeout(timer);
+			timer = 0;
+			void load();
+		};
+		document.addEventListener("visibilitychange", onVisibilityChange);
 		void load();
 		return () => {
 			cancelled = true;
-			if (timer) window.clearInterval(timer);
+			if (timer) window.clearTimeout(timer);
+			document.removeEventListener("visibilitychange", onVisibilityChange);
 		};
 	}, [agentId]);
 	return entries;
 }
 
-/** 单条 DSH 子代理：点击行展开只读 transcript（readDshSubagentHistory）。 */
-export const DshSubagentEntryRow = (props: { agentId: string; entry: DshSubagentEntry }) => {
-	const { entry } = props;
+/** 单条 DSH 子代理：点击行展开只读 transcript（readDshSubagentHistory，分页带「加载更早」）。 */
+export const DshSubagentEntryRow = (props: { agentId: string; entry: DshSubagentEntry /** 行标签：同 PiSubagentEntryRow。 */; as?: "li" | "div" }) => {
+	const { entry, as } = props;
+	const RowTag = as ?? "li";
 	const { collapsed, toggleCollapsed } = useComposerWidgetCollapsed(`dsh-subagent:${entry.id}`, true);
-	const [transcript, setTranscript] = useState<Array<{ role: string; text: string }> | null>(null);
+	const [transcript, setTranscript] = useState<DshTranscriptRow[] | null>(null);
+	// 分页游标：oldestSeq = 当前已渲染最早事件的 seq，回传 beforeSeq 拉更早一页；
+	// 旧实现不传参吃主进程 100 条缺省且丢弃 hasMore，长子会话永远只见尾部一段。
+	const [pageInfo, setPageInfo] = useState<{ hasMore: boolean; oldestSeq?: number }>({ hasMore: false });
 	const [transcriptLoading, setTranscriptLoading] = useState(false);
+	const [olderLoading, setOlderLoading] = useState(false);
 	const [transcriptError, setTranscriptError] = useState(false);
+	const transcriptRef = useRef<HTMLDivElement | null>(null);
+	const restoreScrollOffsetRef = useRef<number | null>(null);
 
 	const toggle = useCallback(async () => {
 		if (!collapsed) {
@@ -284,24 +308,42 @@ export const DshSubagentEntryRow = (props: { agentId: string; entry: DshSubagent
 		// 展开前现拉 transcript：与工具面板一致，避免先展开再补数据造成跳动
 		setTranscriptLoading(true);
 		setTranscriptError(false);
-		const page = await desktopApi.sessions.readDshSubagentHistory(props.agentId, entry.id).catch(() => null);
+		const fetched = await desktopApi.sessions.readDshSubagentHistory(props.agentId, entry.id, undefined, DSH_SUBAGENT_TRANSCRIPT_PAGE_SIZE).catch(() => null);
 		setTranscriptLoading(false);
-		if (page) {
-			setTranscript(
-				page.messages.map((message) => ({
-					role: message.role,
-					// 转录是纯文本出口：折叠自包含引用块，避免露出 <quoted_context> 等 XML 原文。
-					text: replaceExpandedRefBlocksWithLabels(message.text),
-				})),
-			);
+		if (fetched) {
+			setTranscript(fetched.messages.map(dshTranscriptRowFromMessage));
+			setPageInfo({ hasMore: fetched.hasMore === true && fetched.messages.length > 0, oldestSeq: fetched.oldestSeq });
 		} else {
 			setTranscriptError(true);
 		}
 		toggleCollapsed();
 	}, [collapsed, entry.id, props.agentId, toggleCollapsed]);
 
+	const loadOlder = useCallback(async () => {
+		if (!transcript || olderLoading || !pageInfo.hasMore || pageInfo.oldestSeq === undefined) return;
+		// 记住「内容底到视口顶」的距离：新页插在上方后按内容高度差补偿 scrollTop，视口不跳
+		const el = transcriptRef.current;
+		restoreScrollOffsetRef.current = el ? el.scrollHeight - el.scrollTop : null;
+		setOlderLoading(true);
+		const fetched = await desktopApi.sessions.readDshSubagentHistory(props.agentId, entry.id, pageInfo.oldestSeq, DSH_SUBAGENT_TRANSCRIPT_PAGE_SIZE).catch(() => null);
+		setOlderLoading(false);
+		if (!fetched) return;
+		const merged = mergeOlderDshTranscriptPage(transcript, fetched);
+		setTranscript(merged.rows);
+		setPageInfo({ hasMore: merged.hasMore, oldestSeq: merged.oldestSeq });
+	}, [transcript, olderLoading, pageInfo.hasMore, pageInfo.oldestSeq, entry.id, props.agentId]);
+
+	// 「加载更早」把新页插在列表上方：transcript 变化后按记录的偏移补偿滚动位置
+	useLayoutEffect(() => {
+		const el = transcriptRef.current;
+		const anchor = restoreScrollOffsetRef.current;
+		if (!el || anchor === null) return;
+		restoreScrollOffsetRef.current = null;
+		el.scrollTop = el.scrollHeight - anchor;
+	}, [transcript]);
+
 	return (
-		<li className="rounded hover:bg-muted/40">
+		<RowTag className="rounded hover:bg-muted/40">
 			<button type="button" className="flex min-w-0 w-full items-center gap-2 rounded px-2 py-1.5 text-left text-control leading-5 transition-colors hover:bg-muted/60" aria-expanded={!collapsed} onClick={() => void toggle()}>
 				<span className="grid size-5 shrink-0 place-items-center">{entry.activity === "running" ? <Loader2 size={14} className="animate-pideck-spin text-[var(--color-accent)]" /> : <span className="size-2 rounded-full bg-muted-foreground/60" aria-hidden="true" />}</span>
 				<span className="min-w-0 flex-1 truncate font-medium text-foreground">{entry.label ?? entry.id}</span>
@@ -311,13 +353,22 @@ export const DshSubagentEntryRow = (props: { agentId: string; entry: DshSubagent
 						{t("dshTools.subagentRunning")}
 					</span>
 				)}
-				{entry.kind === "diagnostic" && <span className="shrink-0 inline-flex items-center rounded bg-amber-500/15 px-1.5 py-0.5 text-micro font-medium text-amber-600 dark:text-amber-400">{t("dshTools.subagentDiagnostic")}</span>}
+				{entry.kind === "diagnostic" && <span className="shrink-0 inline-flex items-center rounded bg-warning/15 px-1.5 py-0.5 text-micro font-medium text-warning">{t("dshTools.subagentDiagnostic")}</span>}
 				<span className="shrink-0 text-micro text-text-tertiary">{entry.mode === "continuable" ? t("dshTools.subagentContinuable") : t("dshTools.subagentOneShot")}</span>
 				<ChevronDown size={13} className={`shrink-0 text-text-tertiary transition-transform ${collapsed ? "" : "rotate-180"}`} aria-hidden="true" />
 			</button>
 			<Collapsible open={!collapsed}>
 				<CollapsibleContent>
-					<div className="flex max-h-56 flex-col gap-1 overflow-y-auto border-t border-border-subtle px-2 py-1.5">
+					{/* scroll-ok: bounded —— DSH 子代理转录是受控分页的只读列表：每次只拉一页
+					    （DSH_SUBAGENT_TRANSCRIPT_PAGE_SIZE），「加载更多」前插旧页还要保滚动位置，
+					    且整体限高 max-h-56；虚拟化会与「前插 + 高度未测」直接冲突（见 docs/virtualization-audit.md）。 */}
+					<div ref={transcriptRef} className="flex max-h-56 flex-col gap-1 overflow-y-auto border-t border-border-subtle px-2 py-1.5">
+						{!transcriptLoading && pageInfo.hasMore && (transcript?.length ?? 0) > 0 && (
+							<button type="button" className="shrink-0 self-start rounded px-1 py-0.5 text-micro text-text-tertiary transition-colors hover:bg-muted/60 hover:text-foreground disabled:opacity-60" disabled={olderLoading} onClick={() => void loadOlder()}>
+								{/* 沿用 timeline 的「加载更多对话」文案（会话转录同一语义） */}
+								{t("timeline.loadMoreTurns")}
+							</button>
+						)}
 						{transcriptLoading && (
 							<p className="flex items-center gap-1.5 px-1 text-xs text-text-tertiary">
 								<Loader2 size={13} className="animate-pideck-spin" aria-hidden="true" />
@@ -327,16 +378,17 @@ export const DshSubagentEntryRow = (props: { agentId: string; entry: DshSubagent
 						{!transcriptLoading && transcriptError && <p className="px-1 text-xs text-[var(--color-danger)]">{t("dshTools.subagentTranscriptError")}</p>}
 						{!transcriptLoading && !transcriptError && (transcript?.length ?? 0) === 0 && <p className="px-1 text-xs text-text-tertiary">{t("dshTools.subagentTranscriptEmpty")}</p>}
 						{!transcriptLoading &&
-							transcript?.map((message, index) => (
-								<div key={index} className={`flex flex-col gap-0.5 rounded-md px-2 py-1 ${message.role === "user" ? "bg-accent/30" : "bg-bg-panel"}`}>
-									<span className="text-micro text-text-tertiary">{message.role === "user" ? t("dshTools.roleUser") : t("dshTools.roleAssistant")}</span>
-									<span className="whitespace-pre-wrap break-words text-xs text-foreground">{message.text || "…"}</span>
+							transcript?.map((row) => (
+								// 消息 id 由投影保证唯一（appendMessageOnce 去重）且跨页稳定，可直接作 key
+								<div key={row.id} className={`flex flex-col gap-0.5 rounded-md px-2 py-1 ${row.role === "user" ? "bg-accent/30" : "bg-bg-panel"}`}>
+									<span className="text-micro text-text-tertiary">{row.role === "user" ? t("dshTools.roleUser") : t("dshTools.roleAssistant")}</span>
+									<span className="whitespace-pre-wrap break-words text-xs text-foreground">{row.text || "…"}</span>
 								</div>
 							))}
 					</div>
 				</CollapsibleContent>
 			</Collapsible>
-		</li>
+		</RowTag>
 	);
 };
 
@@ -388,6 +440,21 @@ export function SessionSubagentsStrip(props: {
 	const { collapsed, toggleCollapsed } = useComposerWidgetCollapsed(`subagents:${props.sessionId}`, true);
 	const { isDsh, agentId, piEntries, dshEntries, total, running, hasAcpEntries } = useSessionSubagentList(props.sessionId);
 
+	// 两种后端的行压成同一条扁平行序列：虚拟栈只吃扁平数组，而 isDsh 决定的是「每行画什么」，
+	// 不是「有几行列表」。两个后端互斥，合并后顺序与原 map 一致。
+	type StripRow = { kind: "dsh"; id: string; entry: DshSubagentEntry } | { kind: "pi"; id: string; entry: PiSubagentEntry };
+	const rows = useMemo<StripRow[]>(() => (isDsh ? dshEntries.map((entry) => ({ kind: "dsh" as const, id: entry.id, entry })) : piEntries.map((entry) => ({ kind: "pi" as const, id: entry.id, entry }))), [isDsh, dshEntries, piEntries]);
+	// 与虚拟栈内部的判定同值：只决定容器要不要保留 flex/gap 行距（虚拟行是 absolute，不参与 flex）。
+	const virtualizeRows = rows.length > VIRTUAL_STACK_MIN_ROWS;
+	const listRef = useRef<(HTMLUListElement & HTMLDivElement) | null>(null);
+	// 行组件自己带 key：短列表路径不再套一层外层 li —— 行根就是 li 时再包一层会变成
+	// 非法的 li > li（轨迹视图在 2026-10 恰好从相反方向修过同一个错，别再来一遍）。
+	const renderRow = (row: StripRow, as: "li" | "div") => (row.kind === "dsh" ? <DshSubagentEntryRow key={row.id} as={as} agentId={agentId ?? ""} entry={row.entry} /> : <PiSubagentEntryRow key={row.id} as={as} entry={row.entry} sessionId={props.sessionId} onOpenChildSession={props.onOpenChildSession} />);
+	// 虚拟化分支的行是 div[data-index] 的子节点：ul > div 是非法 HTML，列表语义也丢。
+	// 两条路径各用合法标签（同 SessionTodoStrip）：短列表 ul > li，虚拟化 div[role=list] > div[role=listitem]。
+	const ListTag: "ul" | "div" = virtualizeRows ? "div" : "ul";
+	const ItemTag: "li" | "div" = virtualizeRows ? "div" : "li";
+
 	// 无子代理：不渲染（「有那个显示那个」）。pi 空态细分（插件未装等）在展开
 	// 列表内用现有文案表达，折叠卡本身不常显空条
 	if (total === 0) return null;
@@ -414,9 +481,27 @@ export function SessionSubagentsStrip(props: {
 					</button>
 				</div>
 				<CollapsibleContent>
-					<ul className="mb-2 flex max-h-[240px] flex-col gap-1 overflow-y-auto [contain:layout_paint] [scrollbar-gutter:stable] px-3">
-						{isDsh ? dshEntries.map((entry) => <DshSubagentEntryRow key={entry.id} agentId={agentId ?? ""} entry={entry} />) : piEntries.map((entry) => <PiSubagentEntryRow key={entry.id} entry={entry} sessionId={props.sessionId} onOpenChildSession={props.onOpenChildSession} />)}
-					</ul>
+					<ListTag ref={listRef} className={`mb-2 ${virtualizeRows ? "" : "flex flex-col gap-1 "}max-h-[240px] overflow-y-auto [contain:layout_paint] [scrollbar-gutter:stable] px-3`}>
+						{virtualizeRows ? (
+							<VirtualStack
+								items={rows}
+								getKey={(row) => row.id}
+								scrollRef={listRef}
+								minRows={VIRTUAL_STACK_MIN_ROWS}
+								// 单行 = 图标 + 名称 + 状态 + 一行摘要，约 40px；实测随即覆盖。
+								estimateHeight={40}
+								// 虚拟行不参与 flex，原 gap-1（4px）改由行自带下边距提供。
+								rowClassName="pb-1"
+								// 行是 div：列表语义靠 role 补。role 挂在虚拟栈的内容盒上（containerProps），
+								// 不在外层容器上——中间夹着栈自己的内容盒，挂外面等于跨了一层，与轨迹视图两种写法。
+								containerProps={{ role: "list" }}
+								rowProps={() => ({ role: "listitem" })}
+								renderItem={(row) => renderRow(row, ItemTag)}
+							/>
+						) : (
+							rows.map((row) => renderRow(row, "li"))
+						)}
+					</ListTag>
 					{hasAcpEntries && <p className="-mt-1 px-3 pb-2 text-micro leading-4 text-text-tertiary">{t("sessionSubagents.acpDelegateHint")}</p>}
 				</CollapsibleContent>
 			</Collapsible>

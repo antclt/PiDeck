@@ -28,9 +28,9 @@ export type FeedbackDialogProps = {
 };
 
 const STATUS_TONE: Record<HealthStatus, string> = {
-	ok: "bg-emerald-500/15 text-emerald-600",
-	warn: "bg-amber-500/15 text-amber-600",
-	error: "bg-red-500/15 text-red-600",
+	ok: "bg-success/15 text-success",
+	warn: "bg-warning/15 text-warning",
+	error: "bg-danger/15 text-danger",
 	skipped: "bg-muted text-muted-foreground",
 };
 
@@ -181,7 +181,7 @@ export function FeedbackDialog({ open, project, appInfo, onClose, onToast, onOpe
 											{t("feedback.health.score")}：{summary?.score ?? "-"}
 										</span>
 										{summary?.error ? <Badge variant="destructive">{t("feedback.health.errors", { count: summary.error })}</Badge> : null}
-										{summary?.warn ? <Badge className="bg-amber-500/15 text-amber-600">{t("feedback.health.warns", { count: summary.warn })}</Badge> : null}
+										{summary?.warn ? <Badge className="bg-warning/15 text-warning">{t("feedback.health.warns", { count: summary.warn })}</Badge> : null}
 									</div>
 								) : null}
 							</div>
@@ -198,7 +198,7 @@ export function FeedbackDialog({ open, project, appInfo, onClose, onToast, onOpe
 										<p className="text-sm text-muted-foreground">{t("feedback.health.runningHint")}</p>
 									</div>
 								) : feedback.state === "error" ? (
-									<div className="text-sm text-red-600">
+									<div className="text-sm text-danger">
 										{t("feedback.health.errorDetail")}：{feedback.error}
 									</div>
 								) : (

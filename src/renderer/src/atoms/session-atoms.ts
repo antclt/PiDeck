@@ -11,7 +11,7 @@ import { isSessionTurnRunning } from "../utils/sessionActivityClock";
 import { findLastUserMessageIndex, shouldRefreshOutlineForRuntimeUpsert } from "./outlineRevision";
 import { releaseSessionOutlineProjection } from "./outlineProjectionCache";
 import { sameProjectSessionList } from "../utils/sessionRecordIdentity";
-import { resolveStreamingTextUpdate, shouldHoldLiveText, shouldReleaseHeldLiveText } from "../utils/liveTextHandoff";
+import { historyHasCurrentAssistantText, resolveStreamingTextUpdate, shouldHoldLiveText, shouldReleaseHeldLiveText } from "../utils/liveTextHandoff";
 
 /**
  * 渲染层会话消息缓存上限（LRU）。
@@ -1222,6 +1222,42 @@ function tryReleaseHeldLiveTextAfterHistory(get: Getter, set: Setter, sessionId:
 	});
 }
 
+/**
+ * agent 关闭 / 换绑 / 终态：主进程 stop 路径直接清 live 通道、不会补发 done。
+ * 这里收口渲染层残留：history 已接管就丢掉槽（避免同段正文重复挂载）；还没接管就转
+ * held（保留已生成内容，等 messages 到达由 tryReleaseHeldLiveTextAfterHistory 释放）。
+ */
+function settleSessionLiveText(get: Getter, set: Setter, sessionId: string) {
+	const map = get(streamingTextByIdAtom);
+	const live = map[sessionId];
+	if (!live) return;
+	// 只认「本轮助手正文已落盘」：历史末尾是当前用户消息（回合还没落盘）不能算接管，
+	// 否则停止/崩溃时会把已生成的部分回答直接抹掉。
+	const historyReady = historyHasCurrentAssistantText(get(sessionMessagesCacheAtom)[sessionId]?.messages ?? []);
+	if (historyReady || !live.content) {
+		const nextMap = { ...map };
+		delete nextMap[sessionId];
+		set(streamingTextByIdAtom, nextMap);
+		return;
+	}
+	if (!live.streaming && live.held) return;
+	set(streamingTextByIdAtom, { ...map, [sessionId]: { content: live.content, streaming: false, held: true } });
+}
+
+/** 无条件清掉本会话的 live 正文槽（最后一栏卸载 / 换绑新 agent 时用）。 */
+function clearSessionLiveText(get: Getter, set: Setter, sessionId: string) {
+	const map = get(streamingTextByIdAtom);
+	if (!(sessionId in map)) return;
+	const nextMap = { ...map };
+	delete nextMap[sessionId];
+	set(streamingTextByIdAtom, nextMap);
+}
+
+/** 聊天栏卸载时清掉本会话的 live 正文（后台流不再下发；切回由可见性补帧覆盖）。 */
+export const clearSessionLiveTextAtom = atom(null, (get, set, sessionId: string) => {
+	clearSessionLiveText(get, set, sessionId);
+});
+
 function tryReleaseLiveThinkingAfterHistory(get: Getter, set: Setter, sessionId: string) {
 	const liveId = get(liveThinkingIdBySessionAtom)[sessionId];
 	if (!liveId?.startsWith("msg-thinking-")) return;
@@ -1353,6 +1389,7 @@ export const applySessionRuntimeEventAtom = atom(null, (get, set, event: Session
 		delete nextUiById[event.sessionId];
 		set(sessionRuntimeUiByIdAtom, nextUiById);
 		clearSessionLiveThinking(get, set, event.sessionId);
+		settleSessionLiveText(get, set, event.sessionId);
 		set(sessionRuntimeByIdAtom, {
 			...get(sessionRuntimeByIdAtom),
 			[event.sessionId]: {
@@ -1398,6 +1435,9 @@ export const applySessionRuntimeEventAtom = atom(null, (get, set, event: Session
 	};
 	if (bindingChanged) {
 		clearSessionLiveThinking(get, set, event.sessionId);
+		// 换绑（restart/重建）后旧 live 正文属于上一代 agent：必须整槽丢弃。
+		// 新回合的首次增量是「delta 追加」语义，留着旧槽会把两轮正文拼在一起。
+		clearSessionLiveText(get, set, event.sessionId);
 	}
 	const payload = event.payload && typeof event.payload === "object" ? (event.payload as Record<string, unknown>) : undefined;
 
@@ -1434,6 +1474,8 @@ export const applySessionRuntimeEventAtom = atom(null, (get, set, event: Session
 				// 注入面跟本次绑定走（每次 spawn/reattach 都可能变）；旧载荷缺字段时保留已知值，不凭空清空。
 				remoteExtensions: readRemoteExtensions(payload.remoteExtensions) ?? nextRuntime.remoteExtensions,
 			};
+			// 终态不会再有任何后继事件：live 正文在这里收口，避免 stop/崩溃后残留「正在流式」。
+			if (status === "error" || status === "closed") settleSessionLiveText(get, set, event.sessionId);
 		}
 		// ACP 首回合：sessions:prompt IPC 要等整个回合结束才返回，而 sendState 的 activating→sending
 		// 转换原本只有「发送前 runtime 已存在」和 IPC 结算两处——首条消息会全程卡在 activating
@@ -1558,7 +1600,9 @@ export const applySessionRuntimeEventAtom = atom(null, (get, set, event: Session
 			historyHasAssistantText: historyReady,
 		});
 		const streaming = !done && text.length > 0;
-		if (!prev || prev.content !== text || prev.streaming !== streaming || prev.held !== hold) {
+		// done 才到、本地没有 live 槽（会话一直在后台，或聊天栏刚卸载）：历史消息会接管正文，
+		// 不要为一个不可见会话新建 held 槽——几百个后台流式会话会让这个 map 无谓膨胀。
+		if ((!done || prev) && (!prev || prev.content !== text || prev.streaming !== streaming || prev.held !== hold)) {
 			set(streamingTextByIdAtom, {
 				...get(streamingTextByIdAtom),
 				[event.sessionId]: { content: text, streaming, held: hold || undefined },

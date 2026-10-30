@@ -14,7 +14,10 @@ test("代理模型分组首次全选保持设置滚动位置", async ({ window }
 	await modal.getByRole("tab", { name: "代理设置" }).click();
 
 	const panel = modal.getByRole("tabpanel", { name: "代理设置" });
-	await expect(panel.getByText("按模型走代理", { exact: true })).toBeVisible({ timeout: 20_000 });
+	// 「按模型走代理」是折叠的高级项：先展开再操作模型表格。
+	const advancedTrigger = panel.getByRole("button", { name: /按模型走代理/ });
+	await expect(advancedTrigger).toBeVisible({ timeout: 20_000 });
+	await advancedTrigger.click();
 	const providerRow = panel.locator('[data-proxy-model-provider="mock"]');
 	await expect(providerRow).toBeVisible({ timeout: 20_000 });
 

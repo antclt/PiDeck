@@ -161,8 +161,10 @@ export function TerminalDock(props: {
 	const themeId = props.terminalSettings.themeId;
 	// 主题解析的唯一入口：inherit 按应用明暗取 pi-soft 亮/暗版，显式主题不分明暗。
 	const resolvedTheme = useMemo(() => resolveTerminalTheme(themeId, appTheme), [themeId, appTheme]);
-	/** 更多菜单里的主题候选：inherit（跟随应用）+ 各显式主题 */
-	const themeOptions = useMemo(() => [{ id: "inherit" as TerminalThemeId, label: t("settings.terminal.theme.inherit") }, ...TERMINAL_THEME_DEFS.map((def) => ({ id: def.id as TerminalThemeId, label: def.label }))], []);
+	/** 更多菜单里的主题候选：inherit（跟随应用）+ 各显式主题。 */
+	// 不用 useMemo：候选里带 t() 文案，而 t() 读模块级 locale 且不订阅变化——烘进空依赖的
+	// memo 会停在旧语言。数组只有几项，每次渲染重建的代价远小于「切语言后菜单还是老文案」。
+	const themeOptions: Array<{ id: TerminalThemeId; label: string }> = [{ id: "inherit", label: t("settings.terminal.theme.inherit") }, ...TERMINAL_THEME_DEFS.map((def) => ({ id: def.id, label: def.label }))];
 	const xtermTheme = useMemo(() => {
 		const base = resolvedTheme.xterm;
 		if (!wallpaperMode || !base.background.startsWith("#")) return base;

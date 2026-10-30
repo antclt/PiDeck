@@ -27,6 +27,8 @@ export const piDeckMcpAccessSchema = z
 		allowAutomationWrite: z.boolean().default(false),
 		// 收藏写能力默认关；读收藏只返回无项目归属或已授权项目的条目。
 		allowFavoritesWrite: z.boolean().default(false),
+		// ACP 调用能力默认关：开启后客户端可建/驱动 ACP 会话（spawn 本机 CLI）。
+		allowAcpInvoke: z.boolean().default(false),
 	})
 	.strict();
 const storedSchema = piDeckMcpAccessSchema
@@ -37,7 +39,7 @@ const storedSchema = piDeckMcpAccessSchema
 	})
 	.strict();
 export type PiDeckMcpConfig = z.infer<typeof storedSchema>;
-export const emptyPiDeckMcpConfig = (): PiDeckMcpConfig => ({ version: 1, enabled: false, projectIds: [], allProjects: false, allowControl: false, allowAgentWrite: false, allowAutomationWrite: false, allowFavoritesWrite: false, port: 0, token: "" });
+export const emptyPiDeckMcpConfig = (): PiDeckMcpConfig => ({ version: 1, enabled: false, projectIds: [], allProjects: false, allowControl: false, allowAgentWrite: false, allowAutomationWrite: false, allowFavoritesWrite: false, allowAcpInvoke: false, port: 0, token: "" });
 
 /** Corrupt/oversized files fail closed; absence alone means first-run defaults. */
 export async function readPiDeckMcpConfig(path: string): Promise<PiDeckMcpConfig> {

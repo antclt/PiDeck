@@ -9,6 +9,7 @@ import { PreviewRail, type PreviewRailItem } from "../motion/preview-rail";
 import { planRailTicks, windowRailItems } from "./timeline/outlineRailTicks";
 import { areOutlineRailItemsEqual, createOutlineItemIndex, resolveVisibleRailActiveId } from "./timeline/outlineRailActive";
 import { useTimelineOutlineActiveId } from "./timeline/useTimelineOutlineActiveId";
+import { useLazyValue } from "../../lib/hooks/use-render-reuse";
 import { useAtomValue } from "jotai";
 import type { TpsDisplayMode } from "../../../../shared/types/settings";
 import { tpsDisplayModeAtom } from "../../atoms/tps-atoms";
@@ -511,12 +512,21 @@ async function copyElementAsPng(element: HTMLElement) {
 	if (!written) throw new Error("Unable to write PNG to clipboard");
 }
 
-export function CopyMenu(props: { text: string; markdown: string; targetRef: React.RefObject<HTMLElement | null>; className?: string }) {
+/**
+ * 复制菜单。
+ *
+ * `text`/`markdown` 与 `resolveText`/`resolveMarkdown` 各组二选一（惰性版优先）：
+ * `stripMarkdown`、`replaceExpandedRefBlocksWithLabels` 都是多趟正则，代价正比于正文长度，
+ * 而结果只有点「复制」那一刻才需要。正文在流式期间每 50ms 增长一次，把它们挂在 render 上
+ * 等于每帧对整段正文跑一遍正则——调用方因此改传惰性版（配 `useLazyValue`，返回的函数
+ * 引用稳定，不会击穿本组件或上游 memo）。
+ */
+export function CopyMenu(props: { text?: string; resolveText?: () => string; markdown?: string; resolveMarkdown?: () => string; targetRef: React.RefObject<HTMLElement | null>; className?: string }) {
 	const [copied, setCopied] = useState<string | null>(null);
 	const copy = async (kind: "text" | "markdown" | "image") => {
 		try {
-			if (kind === "text") await navigator.clipboard.writeText(props.text);
-			if (kind === "markdown") await navigator.clipboard.writeText(props.markdown);
+			if (kind === "text") await navigator.clipboard.writeText(props.resolveText ? props.resolveText() : (props.text ?? ""));
+			if (kind === "markdown") await navigator.clipboard.writeText(props.resolveMarkdown ? props.resolveMarkdown() : (props.markdown ?? ""));
 			if (kind === "image") {
 				if (!props.targetRef.current) throw new Error("Copy target is missing");
 				await copyElementAsPng(props.targetRef.current);
@@ -843,6 +853,11 @@ export const UserBubble = memo(function UserBubble(props: {
 	// 气泡片段（正文 + 引用/会话/skill chip）严格按原文顺序渲染：
 	// 多个引用各有自己的描述时，顺序就是「引用1 描述1 引用2 描述2」，不能全部提到顶部。
 	const bubbleSegments = buildBubbleRefSegments(cleanText);
+	// 复制用的两个文本都是多趟正则（`replaceExpandedRefBlocksWithLabels` + `stripMarkdown`），
+	// 原来在 render 期要算三次。只有点「复制」那一刻才需要，走 useLazyValue 推迟；
+	// 返回的函数引用稳定，`CopyMenu` 的 memo 不受影响。
+	const resolveMarkdown = useLazyValue(() => replaceExpandedRefBlocksWithLabels(message.text), [message.text]);
+	const resolvePlain = useLazyValue(() => stripMarkdown(replaceExpandedRefBlocksWithLabels(cleanText)), [cleanText]);
 	/** 原地编辑不影响输入框；先提交给确认弹窗。 */
 	const handleSaveEdit = () => {
 		if (!props.onEditMessage) return;
@@ -1049,7 +1064,7 @@ export const UserBubble = memo(function UserBubble(props: {
 				<time>{formatTime(message.timestamp)}</time>
 			</div>
 			<div className="user-turn-actions flex min-h-6 items-center gap-0.5 opacity-0 transition-opacity group-hover/user:opacity-100 focus-within:opacity-100">
-				<CopyMenu text={stripMarkdown(replaceExpandedRefBlocksWithLabels(cleanText))} markdown={replaceExpandedRefBlocksWithLabels(message.text)} targetRef={rowRef} />
+				<CopyMenu resolveText={resolvePlain} resolveMarkdown={resolveMarkdown} targetRef={rowRef} />
 				<Button type="button" variant="ghost" size="icon-sm" className="user-turn-action-btn size-7 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground" onClick={props.onEnterMultiSelect} title={t("app.multiSelectEnter")}>
 					<Share size={14} />
 				</Button>

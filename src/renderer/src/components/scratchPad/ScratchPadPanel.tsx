@@ -15,8 +15,8 @@ import { Button } from "../ui-shadcn/button";
 import { Input } from "../ui-shadcn/input";
 import { Textarea } from "../ui-shadcn/textarea";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "../ui-shadcn/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui-shadcn/tabs";
+import { ScratchPadDraftPicker } from "./ScratchPadDraftPicker";
 
 type Mode = "edit" | "preview";
 
@@ -207,22 +207,7 @@ export const ScratchPadPanel = memo(function ScratchPadPanel(props: ScratchPadPa
 
 			{drafts.length > 0 && (
 				<div className="shrink-0 border-b border-border px-2 py-2">
-					<Select value={currentDraftPath ?? undefined} onValueChange={onSelectDraft}>
-						<SelectTrigger size="sm" className="w-full min-w-0 *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:truncate" aria-label={t("scratchPad.showFileList")}>
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent align="start">
-							<SelectGroup>
-								{drafts.map((draft) => (
-									<SelectItem key={draft.path} value={draft.path}>
-										<span className="truncate" title={draft.name}>
-											{draft.name}
-										</span>
-									</SelectItem>
-								))}
-							</SelectGroup>
-						</SelectContent>
-					</Select>
+					<ScratchPadDraftPicker drafts={drafts} currentDraftPath={currentDraftPath} onSelect={onSelectDraft} />
 				</div>
 			)}
 

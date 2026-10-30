@@ -1,3 +1,101 @@
+## v0.9.9-beta (2026-10-30)
+
+This release takes ACP from "it connects" to "it works every day": per-tool config memory replayed on new sessions, queued sends and a dedicated stop button mid-turn, usage metrics and diffs aligned with pi/DSH, and both the Web client and MCP can drive ACP sessions. Appearance is rebuilt as two independent dimensions (style × palette) with the pi TUI terminal skin ported wholesale, session groups become a host-level capability, and the long-list virtualization and long-reply expansion freezes are closed out.
+
+### 🚀 New Features
+- **Appearance split into "style × palette", with the pi TUI terminal skin ported wholesale** — Shape (classic / terminal) and palette (built-in palettes + custom theme packs) combine freely; the terminal style is monospaced and square-cornered throughout, uses ⏺/❯ message markers, and switches syntax highlighting to the pi TUI palette. Custom theme packs gain Markdown semantic tokens and a font group. Old themeSkin values map onto the new model automatically, so nothing looks different after upgrading.
+- **Session groups become a host-level capability (plugin v3)** — The group tree (group → folder → session) sits at the top of the sidebar's activity / chat / project segments, with data stored in `userData/session-groups.json`; the built-in session-groups plugin moves to v3 and the host API, gains workspace-level groups and paging, and migrates the old v2 private storage once at startup.
+- **Favorite whole sessions** — The favorites page gains a Sessions filter, and the sidebar / session tab context menus can favorite a session; clicking jumps back to it, a deleted or archived session shows as invalid, and no message body is copied and pin order is untouched.
+- **Scratchpad gains project / global scopes** — Project scope buckets by project and merges only that project's drafts with global ones; the picker becomes searchable and groups by "this project / global", with no migration needed for existing drafts.
+- **ACP remembers thinking / mode / permission per tool and replays them** — Each ACP tool keeps its own last choices and applies them right after a new session's handshake, so nothing has to be re-picked every time.
+- **Per-tool "default bypass permissions for new sessions" and a Qoder CLI preset** — After the handshake the mode enum reported by the agent is searched for a bypass entry (Claude's bypassPermissions, Qoder's yolo, …); a failed apply is logged without blocking the session. Qoder CLI presets cover the global and CN builds.
+- **A separate proxy switch for ACP** — ACP proxying is configured independently from pi: spawn injects HTTP(S)/ALL_PROXY, NO_PROXY and NODE_USE_ENV_PROXY, and turning it off inherits the system environment. The proxy page is rebuilt into Pi / ACP / Desktop sections.
+- **Create and drive ACP sessions over MCP** — A new independent write switch `allowAcpInvoke` (off by default) exposes acp_tools_list / sessions_create / sessions_send / sessions_wait / sessions_messages / sessions_stop; they only accept an acpToolId registered in settings and never take commands, args or env vars.
+- **ACP sessions in the Web client** — ACP real-time streams reach the Web client, the backend picker gains an "ACP → specific CLI" group and can create ACP sessions; the Web client also switches Pi session safety levels.
+- **ACP usage panel gains token / latency / TPS metrics** — The experimental usage returned by session/prompt is parsed and accumulated across turns to show TTFT, total time, TPS and cache hit rate; fields the agent doesn't report are left out instead of shown as zero.
+
+### ✨ Improvements
+- **Searchable model dropdown in ACP** — The model enum now opens a searchable popover that matches display names and model ids, focuses the input on open and scrolls the current model into view, so dozens of models no longer have to be scrolled through; hovering shows the full name and the current item stays highlighted.
+- **Queued sends mid-turn, plus a dedicated stop button** — Sending again while a turn is running queues the message and drains it when the turn ends, and the stop entry no longer requires emptying the composer first; the handshake phase shows a loading state and disables send.
+- **ACP tool table collapses into rows** — Each row shows only a summary (name / command / env-var count) until its name is clicked; new and preset rows expand automatically, a failed save expands the offending row, and saving is unified in the settings header.
+- **Turn footer split into "actions | duration | model"** — The model name matches the action buttons' size and is capped at 28 characters, so long names no longer wreck the row.
+- **Tab accepts the highlighted completion (#416)** — Commands / skills, @ files and & sessions share one branch, Tab behaves like Enter, modifier combinations are left alone, and the footer hint now reads "Enter/Tab to confirm".
+- **Long-list rendering gets full virtualization (#406)** — The shared virtual stack now covers 11 long lists and the model table renders progressively, so hundreds of models no longer stall the page.
+- **Live streams go only to visible sessions** — The main process reference-counts mounted sessions and pushes text/thinking streams only for the current and split views; state patches are de-duplicated by signature with a 5-second heartbeat, so hundreds of concurrent streaming sessions no longer saturate the renderer.
+- **Settings changelog renders only the latest version by default** — The 400KB full CHANGELOG no longer enters the render pipeline at once; "show all N versions" renders the rest and mounts it in chunks.
+- **Multi-instance local services** — The status panel lists every live instance (pid plus its own loopback UI URL), and `service.openUi` can target one by pid; plugins can point at an instance but never inject an address.
+- **Desktop pet and notifications cover ACP / DSH** — They fire only when a turn really settles successfully (user stops and failed turns don't count), and a disabled Ask notification switch no longer consumes the per-turn dedupe slot.
+- **A "buy the author a coffee" entry** — The support entry is wired in.
+- **Screen-reader and keyboard reachability** — Running/waiting indicators, MCP connection dots and shortcut hints are now exposed to screen readers and keyboard users.
+
+### 🐛 Fixes
+- **Hand-edited settings.json is no longer overwritten (#433)** — External edits made while the app runs are merged key-by-key with internal updates instead of the whole old snapshot being written back.
+- **Stopping pi on Windows exits gracefully, orphan processes are reaped at startup (#450)** — Stop no longer kills the process tree outright but lets pi exit on its own; orphans left by an abnormal exit are cleaned up on the next launch.
+- **Long replies crashed and froze on expand** — Expanding a ~205KB reply no longer spreads hundreds of thousands of graphemes into the typewriter queue at once (RangeError: Maximum call stack size exceeded); the full text mounts in ~32K top-level chunks and already-mounted chunks are not re-parsed.
+- **ACP turn state machine cleaned up** — A settled turn no longer overwrites idle (which caused false queueing after accepting a prediction), stopping now clears a leftover running state ("the answer is there but it won't stop"), sends work during the handshake, switching backend or tool invalidates an in-flight activation, and the 30-second delivery window no longer mislabels a long turn as "sent but unconfirmed".
+- **ACP turn timeout is now a no-progress silence cap** — The deadline rolls forward with every session/update and in-flight tool calls only refresh the stall baseline; defaults rise to 15 minutes / 180 seconds, so turns that keep producing output are no longer cut off by wall-clock time.
+- **ACP tool diffs normalized to pi / DSH shape** — `{type:"diff"}` blocks become standard edit tool messages, accepting both oldText/newText and oldValue/newValue; multi-file patches no longer leave only the first file, the end-of-turn changed-files list is complete again, and path-only edits (Qoder and friends) are included.
+- **Blank ACP turns and rejected config changes are diagnosable** — Blank turns surface CLI stderr, non-standard notifications and the raw response; a rejected config change explains why and offers a workaround; a bypass fixed by launch args is no longer overridden by an older remembered mode.
+- **ACP couldn't find a freshly installed CLI on Windows, and preset links opened in-app** — The registry PATH diff is refreshed before detection and launch; preset website links are forced to the system browser.
+- **WeChat / Feishu dropped messages while busy (#427)** — Busy channels now queue instead of dropping; attachments are really written to disk and the absolute path is handed to the agent, the single-file cap goes 50MB→200MB and staging 20→50 files; WeChat voice with ASR transcription is treated as body text; Feishu cards respect hideThinkingBlock (#425).
+- **Web SSE / ETag and cross-origin issues** — The fallback tick no longer bypasses the version key and /api/state really sends its ETag; the workspace route sends CORS headers (#435); writing a session broadcasts a catalog refresh so deleted sessions no longer leave ghost rows (#436).
+- **~/… links in AI replies didn't open (#426)** — Home-directory expansion now happens before file detection.
+- **Old Zhipu plans only showed the MCP monthly quota** — The 5-hour window quota is back.
+- **The file tree looked up Git colors with the wrong path** — Colors are now looked up by project-relative path.
+- **Subagent state was stale and sub-sessions loaded incompletely** — Conditional record refetch, DSH transcript paging and a 40-turn first page for sub-sessions.
+- **Sidebar title row and tab-strip regressions** — Both navigation modes use a 40px row, the collapse button is right-aligned and the back/forward arrows are gone; the compact-mode tab strip yields to Windows window controls; the Windows/Linux brand area is left-aligned.
+- **New sessions kept the previously picked backend, and input predictions were lost on tab switch** — The default backend now comes only from settings (with the DSH install gate), so a cold start no longer preselects ACP; prediction text is stored per session.
+- **Turn duration included queueing time** — It now uses the real end time and the live stopwatch stays in the status bar.
+- **Transient-retry rules diverged from the desktop gate** — Overload is classified as rate limit, empty responses 400/413 downgrade to 4xx, and Cloudflare 530/52x/1033 count as transient.
+- **Disabled group plugins still listed grouped sessions, and clicking a group from the automation page did nothing** — Entries and the session list respect the enabled state, and group clicks leave the current page before navigating.
+- **Text looked blurry in macOS dark mode, plus contrast and line-height regressions** — Grayscale antialiasing is no longer forced; custom-theme directory path and empty-state contrast and settings description line height are fixed.
+
+### 🙏 Thanks
+
+Thanks to **hetingyi** for the ACP todo list rendering (#429), hand-edited settings.json being overwritten (#434) and multi-instance local services (#439); to **op15066212** for extending the shared virtual stack to 11 long lists (#432); and to **sunCloud998** for unifying the sidebar title row (#441) and fixing blurry text in macOS dark mode (#443) 🎉
+
+Special thanks to **罪**, **橙子** and **微时** for providing the model service used in our software development 🎉
+
+## v0.9.8 (2026-10-27)
+
+This release completes the session pipeline for ACP external agents (archiving, in-session search, projection segmentation and configurable timeouts), rebuilds the session status bar and the image preview so real progress and fine detail are actually legible, and clears a round of UI regressions across the Git panel, the sidebar and the composer.
+
+### 🚀 New Features
+- **ACP session archive and in-session search (#413 #415)** — Message projections for ACP sessions are now persisted per session under `userData/acp-sessions/` (up to 2000 entries / 8MiB, written to a temp name then renamed), so they survive a restart; in-session find now covers ACP sessions too. The same pass fixes a timing bug where text split by a tool card was merged into one block — the old segment closes into the tool card and the new one starts fresh, while still emitting the turn's terminal marker from a single place.
+- **Configurable ACP turn timeouts (#411)** — New `acpPromptStallTimeoutMs` (silent-stall detection, 90s by default) and `acpPromptTurnTimeoutMs` (hard per-turn cap, 10 minutes by default). Long-running commands with a tool call in flight are no longer killed by the stall watchdog, and changes take effect on the next turn without a restart.
+- **Status bar shows real retry progress and the current turn's facts** — Upstream retries display "retrying 2/3" with a countdown, and the turn's tool steps, context pressure (surfaced at ≥80%) and turn stopwatch sit right in the status bar.
+- **Image preview supports zoom** — The wheel zooms anchored at the cursor up to 800%, where 100% fits the whole image inside the window; buttons step through 25% increments, drag and arrow keys pan, and a single click on the pill returns to fit.
+- **MCP / skill import selects across pages** — Select all / clear all, a "selected N / importable M" count and 20-per-page paging mean picking across pages no longer has to be done one row at a time.
+- **Trajectory drawer: provider and model, with a prewarmed process track** — The latest reply's metrics name its provider and model, and the process track is cached ahead of time so opening the drawer shows the record immediately instead of waiting for a first load.
+- **Model config import restored, merged with local tool discovery (#419)** — Paste / choose file (Base64, 4MB limit, encryption password) and local tool discovery now sit side by side as two tabs, so migrating a config no longer has a single path.
+- **Local builds carry a "local build" badge** — A build whose version comes straight from `package.json` now looks different from a published release, so "up to date" is no longer mistaken for an official build.
+
+### ✨ Improvements
+- **Thinking-intensity bar colours follow progress** — Unselected segments use a neutral grey, the filled segment is a gradient computed across the whole track, and level ticks sit on the rail itself; dragging only edits a draft that is committed when the popover closes, so trying levels back to back can't commit by accident.
+- **Drawer toggle moved to the left end of the activity bar** — It now hugs the drawer's left edge instead of crowding the other actions on the right.
+- **Git panel row metrics aligned with the file drawer** — Changed-file tree rows share the file drawer's row height and indentation, so the two panels are no longer mismatched; branch filter chips no longer overflow the title bar either.
+- **Composer and reference chips tidied** — The image remove button narrows into a 20px dot, and directory reference chips keep their trailing slash so the last character no longer looks cut off.
+- **Session references are cheaper** — Reference content no longer carries the thinking chain and only keeps the most recent messages within a budget, so referencing a long session no longer dumps a whole reasoning block into context.
+
+### 🐛 Fixes
+- **Sidebar "Projects" group header freeze had no effect (#420)** — Turning it on left the header scrolling away with the list; headers now stick per group.
+- **Local path links with spaces or a hand-typed drive letter weren't clickable (#421 #422)** — Paths containing spaces were only rendered as text, while absolute paths with a hand-typed drive letter were stripped whole by link sanitising; both are now recognised as files and open normally.
+- **Git panel showed the previous project's repository after switching projects** — Panel requests no longer reuse the previous project's repository target and snap back as soon as the project changes.
+- **Self-incrementing effect loop in the repository scope (React #185)** — Repository scope and branch state writes keep stable references, so they no longer trigger a render loop.
+- **End-of-turn file chips overflowed their row** — File chips after a turn no longer spread across the full row and push out of the panel.
+- **ACP sessions falsely showed the "vision bridge converting" animation on image messages (#417)** — The vision bridge is a pi extension and does not run under ACP, so the renderer no longer shows a conversion animation that isn't happening.
+- **ACP tool rows repeated their title and arguments** — A tool row no longer glues the agent title and the arguments together twice.
+- **Process group headers repeated the running command** — Headers show only the target, and expanding no longer repeats the command line.
+- **Frame boundaries stayed misaligned after a pi RPC line-buffer overflow** — Overflowing lines now realign to the next newline instead of corrupting every frame that follows.
+- **Prompt-enhance sidecar picked the wrong proxy** — The model list now decides whether a proxy is used, and the sidecar is rebuilt when its startup fingerprint changes.
+- **Terminal WebGL renderer assembly timing** — It is now attached after `open()`, and silently falls back to the DOM renderer when WebGL2 is unavailable instead of rendering a black screen.
+
+### 🙏 Thanks
+
+Thanks to **lamugu** for fixing the sidebar "Projects" group header freeze (#420), local path links with spaces (#421) and hand-typed drive-letter path links (#422); to **juzijun233** for restoring model config import and merging it with local tool discovery (#419); and to **hetingyi** for fixing the false vision-bridge animation on ACP image messages (#417) 🎉
+
+Special thanks to **罪**, **橙子** and **微时** for providing the model service used in our software development 🎉
+
 ## v0.9.7 (2026-10-26)
 
 The through-line of this release is a visual consolidation aligned with ZCode: the session page settles into a three-layer surface model with typography, shadows and control backgrounds aligned item by item; the thinking-intensity picker is rebuilt as a gradient intensity bar; and the Web gains explicit sidebar paging plus conditional requests, keeping large workspaces light.

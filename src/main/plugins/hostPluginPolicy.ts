@@ -1,4 +1,5 @@
 /** Pure policy shared by the view host and broker; failures never fall back to a broader capability. */
+import type { SaveSessionGroupInput } from "../../shared/types/sessionGroups";
 import type { HostPluginContext, HostPluginRequest } from "../../shared/types/hostPlugin";
 import { isLocalServiceId } from "../../shared/localServices";
 import { isHostPluginAsset, isPluginRecord } from "./hostPluginManifest";
@@ -26,8 +27,10 @@ export function parsePluginContext(value: unknown): HostPluginContext {
 	const tokens: Record<string, string> = {};
 	if (value.tokens !== undefined) {
 		if (!isPluginRecord(value.tokens) || Object.keys(value.tokens).length > 40) throw new Error("invalid-context");
+		// 值长度上限 400：默认字体栈（--font-family-base）约 200 字符，160 会把整套 context 判成非法。
+		// 禁止 ;{}<> 与控制字符后，再长的值也只是同一条声明的取值，无法逃出 insertCSS 规则块。
 		for (const [key, token] of Object.entries(value.tokens)) {
-			if (!/^--[a-z-]{1,60}$/.test(key) || typeof token !== "string" || token.length > 160 || /[;{}<>\u0000-\u001f]/.test(token)) throw new Error("invalid-context");
+			if (!/^--[a-z-]{1,60}$/.test(key) || typeof token !== "string" || token.length > 400 || /[;{}<>\u0000-\u001f]/.test(token)) throw new Error("invalid-context");
 			tokens[key] = token;
 		}
 	}
@@ -86,6 +89,27 @@ export function parsePluginRequest(value: unknown): HostPluginRequest {
 		if (value.entryId !== undefined && (typeof value.entryId !== "string" || value.entryId.length < 1 || value.entryId.length > 160 || /[\u0000-\u001f]/.test(value.entryId))) throw new Error("invalid-request");
 		return { method: value.method, sessionId: value.sessionId, entryId: value.entryId === undefined ? undefined : value.entryId };
 	}
+	if (value.method === "sessionGroups.list") return { method: value.method };
+	if (value.method === "sessionGroups.save") {
+		const group = value.group;
+		if (typeof group !== "object" || group === null || Array.isArray(group)) throw new Error("invalid-request");
+		const raw = group as Record<string, unknown>;
+		// 名称必有；id/createdAt/sessionIds/dirs 可省（省略 = 宿主按默认值收窄），形状越界一律拒。
+		if (typeof raw.name !== "string" || raw.name.trim().length < 1 || raw.name.length > 200) throw new Error("invalid-request");
+		if (raw.id !== undefined && (typeof raw.id !== "string" || raw.id.length < 1 || raw.id.length > 200)) throw new Error("invalid-request");
+		if (raw.createdAt !== undefined && (typeof raw.createdAt !== "number" || !Number.isFinite(raw.createdAt))) throw new Error("invalid-request");
+		if (raw.sessionIds !== undefined && (!Array.isArray(raw.sessionIds) || raw.sessionIds.length > 30_000 || raw.sessionIds.some((id) => typeof id !== "string" || id.length < 1 || id.length > 200))) throw new Error("invalid-request");
+		if (raw.dirs !== undefined && (!Array.isArray(raw.dirs) || raw.dirs.length > 1_000 || raw.dirs.some((key) => typeof key !== "string" || key.length < 1 || key.length > 200))) throw new Error("invalid-request");
+		return { method: value.method, group: raw as unknown as SaveSessionGroupInput };
+	}
+	if (value.method === "sessionGroups.delete") {
+		if (typeof value.groupId !== "string" || value.groupId.length < 1 || value.groupId.length > 200) throw new Error("invalid-request");
+		return { method: value.method, groupId: value.groupId };
+	}
+	if (value.method === "sessionGroups.reorder") {
+		if (!Array.isArray(value.groupIds) || value.groupIds.length > 500 || value.groupIds.some((id) => typeof id !== "string" || id.length < 1 || id.length > 200)) throw new Error("invalid-request");
+		return { method: value.method, groupIds: value.groupIds };
+	}
 	if (value.method === "storage.keys") return { method: value.method };
 	if (value.method === "storage.delete") {
 		if (typeof value.key !== "string" || !/^[a-zA-Z0-9_.-]{1,80}$/.test(value.key)) throw new Error("invalid-request");
@@ -103,10 +127,18 @@ export function parsePluginRequest(value: unknown): HostPluginRequest {
 		if (parsed.protocol !== "https:" || !parsed.hostname || parsed.username || parsed.password) throw new Error("invalid-request");
 		return { method: value.method, url: parsed.toString() };
 	}
-	if (value.method === "service.status" || value.method === "service.start" || value.method === "service.stop" || value.method === "service.openUi") {
+	if (value.method === "service.status" || value.method === "service.start" || value.method === "service.stop") {
 		// 服务 ID 必须命中 PiDeck 自己实现的白名单；命令、参数、端口全在主进程适配器里，插件无从传入。
 		if (!isLocalServiceId(value.id)) throw new Error("invalid-request");
+		// pid 只对 openUi 有意义；其他服务方法带上一律拒——能力面最小化，多出的字段不会被静默丢弃。
+		if (value.pid !== undefined) throw new Error("invalid-request");
 		return { method: value.method, id: value.id };
+	}
+	if (value.method === "service.openUi") {
+		if (!isLocalServiceId(value.id)) throw new Error("invalid-request");
+		// openUi 的 pid 是「从主进程报告的实例白名单里点名」：不是地址，必须是正整数；省略即主实例。
+		if (value.pid !== undefined && (typeof value.pid !== "number" || !Number.isInteger(value.pid) || value.pid <= 0 || value.pid > 2 ** 31 - 1)) throw new Error("invalid-request");
+		return { method: value.method, id: value.id, ...(typeof value.pid === "number" ? { pid: value.pid } : {}) };
 	}
 	throw new Error("unsupported-method");
 }

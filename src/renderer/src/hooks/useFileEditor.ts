@@ -8,6 +8,7 @@ import type { WorkspaceContentOpenMode } from "../../../shared/types/settings";
 import type { DrawerPanel, SessionModifiedFile } from "../components/app/AppParts";
 import { openPermanentEditorTab, openPreviewEditorTab, promotePreviewEditorTab as nextPreviewAfterPromote, type EditorTabOpenMode } from "../utils/editorTabs";
 import { resolveFileLinkPath } from "../utils/filePathLinks";
+import { getRendererHomeDir } from "../utils/rendererHomeDir";
 
 const EDITOR_TAB_LIMIT = 5;
 const EDITOR_TAB_TEXT_BUDGET = 24 * 1024 * 1024;
@@ -355,7 +356,8 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
 	const openFilePath = useCallback(
 		(path: string | ProjectFileTarget) => {
 			const displayPath = typeof path === "string" ? path : path.relativePath;
-			const resolvedPath = typeof path === "string" ? resolveFileLinkPath(path, activeAgent?.cwd ?? activeProject?.path) : path;
+			// `~/x` 先展开成家目录绝对路径（issue #426），否则编辑器 / 文件面板会拿到字面 `~` 路径
+			const resolvedPath = typeof path === "string" ? resolveFileLinkPath(path, activeAgent?.cwd ?? activeProject?.path, undefined, getRendererHomeDir()) : path;
 			if (!resolvedPath) {
 				showToast(t("app.fileLinkCannotResolve", { path: displayPath }));
 				return;

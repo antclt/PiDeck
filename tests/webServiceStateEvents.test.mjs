@@ -226,3 +226,55 @@ test("/api/state stays available as polling fallback alongside /api/events", asy
 		await manager.stop();
 	}
 });
+
+test("/api/state 返回 ETag 并支持 304（#442：manager 必须转发 extraHeaders）", async () => {
+	// 路由层早就算出 etag 了，但装配层 `sendJson: (response, body) => …` 把第三参丢掉，
+	// 于是 stateEtag / ifNoneMatchHits 是死代码。这条用例走真 manager，钉住接线。
+	const WebServiceManager = loadWebServiceManager();
+	const harness = fixture();
+	const manager = new WebServiceManager(harness.deps);
+	await manager.start("127.0.0.1", 0, false);
+	try {
+		const url = `http://127.0.0.1:${manager.current.port}/api/state`;
+		const first = await fetch(url);
+		assert.equal(first.status, 200);
+		const etag = first.headers.get("etag");
+		assert.ok(etag, "响应必须带 ETag，否则客户端无从条件请求");
+		assert.equal(first.headers.get("cache-control"), "no-cache", "no-store 与 ETag 冲突：客户端无权留存副本，条件请求永远命中不了");
+		await first.text();
+
+		const second = await fetch(url, { headers: { "if-none-match": etag } });
+		assert.equal(second.status, 304, "ETag 未变必须 304");
+		assert.equal(await second.text(), "", "304 不能带响应体");
+		assert.equal(second.headers.get("etag"), etag);
+	} finally {
+		await manager.stop();
+	}
+});
+
+test("5s 兜底 tick 推送不进版本键的会话目录变更（#442）", async () => {
+	// 桌面端改名/删除会话只改会话目录，runtime 与 pendingUi 不动 → stateRevision 不变。
+	// 修复前 5s tick 与 pi 事件共用同一道版本键门，第一道就 return，客户端 18s 都收不到 state。
+	const WebServiceManager = loadWebServiceManager();
+	const harness = fixture();
+	const manager = new WebServiceManager(harness.deps);
+	await manager.start("127.0.0.1", 0, false);
+	try {
+		const response = await fetch(`http://127.0.0.1:${manager.current.port}/api/events`);
+		const reader = createEventReader(response);
+		const initial = await reader.next(2000);
+		assert.ok(initial, "initial snapshot");
+		const initialUpdatedAt = JSON.parse(initial.data).sessions[0].updatedAt;
+
+		// 只改会话目录，不触发任何 pi 事件：唯一能把它推出去的路径就是 5s tick
+		harness.bumpSession();
+		const pushed = await reader.next(7000);
+		assert.ok(pushed, "目录变更必须由 5s 兜底 tick 推出（版本键不含会话目录）");
+		assert.equal(pushed.name, "state");
+		assert.ok(JSON.parse(pushed.data).sessions[0].updatedAt > initialUpdatedAt);
+
+		await response.body.cancel().catch(() => undefined);
+	} finally {
+		await manager.stop();
+	}
+});

@@ -4,7 +4,7 @@ import { Bot, CircleStop, Clock, Fingerprint, Puzzle, RefreshCw, RotateCw, Setti
 import { buildSettingsCommands, type PaletteCommand } from "../../utils/commandPaletteCommands";
 import { markCommandPaletteOnboardingSeen } from "../../components/overlays/CommandPaletteOnboarding";
 import { openSettingsAtom } from "../../atoms/app-ui-atoms";
-import { hostPluginCatalogAtom, hostPluginPanelAtom } from "../../atoms/host-plugin-atoms";
+import { hostPluginCatalogAtom, openHostPluginPanelAtom } from "../../atoms/host-plugin-atoms";
 import { isModuleHidden } from "../../../../shared/hiddenModules";
 import { copyTextWithCopiedNotice } from "../../utils/clipboardNotice";
 import { desktopApi as api } from "../../desktopApi";
@@ -193,7 +193,7 @@ export function useCommandPalette({ activeProjectId, currentSessionId, activeAge
 					subtitle: plugin.manifest.name,
 					keywords: [plugin.manifest.id, plugin.manifest.name],
 					icon: Puzzle,
-					run: () => store.set(hostPluginPanelAtom, { pluginId: plugin.manifest.id, panelId: command.panelId }),
+					run: () => store.set(openHostPluginPanelAtom, { pluginId: plugin.manifest.id, panelId: command.panelId }),
 				});
 		}
 		commands.push(...buildSettingsCommands((target) => store.set(openSettingsAtom, target), hiddenModules));

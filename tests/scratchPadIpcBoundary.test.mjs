@@ -65,6 +65,41 @@ test("scratchPad:export refuses to read outside drafts even with a dialog target
 	await assert.rejects(() => handlers.get("scratch-pad:export")(null, secret), /Invalid draft path|drafts directory/i);
 });
 
+test("scratchPad:project scope isolates projects but exposes global drafts", async () => {
+	const { userDataRoot, handlers } = setup();
+	const globalDraft = await handlers.get("scratch-pad:create")(null);
+	const projectA = await handlers.get("scratch-pad:create")(null, { kind: "project", projectId: "project-a" });
+	const projectB = await handlers.get("scratch-pad:create")(null, { kind: "project", projectId: "project-b" });
+
+	// 项目草稿落在 drafts/projects/<projectId>/，与全局根目录分开
+	assert.equal(projectA.path, join(userDataRoot, "drafts", "projects", "project-a", `${projectA.name}.md`));
+
+	const listA = await handlers.get("scratch-pad:list")(null, { kind: "project", projectId: "project-a" });
+	const pathsA = new Set(listA.map((draft) => draft.path));
+	assert.equal(pathsA.has(projectA.path), true, "项目作用域必须包含本项目草稿");
+	assert.equal(pathsA.has(globalDraft.path), true, "项目作用域必须能看/编辑全局草稿");
+	assert.equal(pathsA.has(projectB.path), false, "项目作用域绝不能看到其他项目草稿");
+	assert.equal(listA.find((draft) => draft.path === projectA.path)?.scope, "project");
+	assert.equal(listA.find((draft) => draft.path === globalDraft.path)?.scope, "global");
+
+	// 全局作用域只有全局草稿，不泄漏任何项目草稿。
+	// 注意：沙箱返回值来自 vm 上下文，数组跨 realm，deepEqual 会判引用不相等，逐项断言。
+	const globalList = await handlers.get("scratch-pad:list")(null);
+	assert.equal(globalList.length, 1);
+	assert.equal(globalList[0]?.path, globalDraft.path);
+	assert.equal(globalList[0]?.scope, "global");
+	rmSync(userDataRoot, { recursive: true, force: true });
+});
+
+test("scratchPad:rejects malformed project scope ids", async () => {
+	const { userDataRoot, handlers } = setup();
+	for (const projectId of ["../escape", "a/b", "a\\b", "", ".", "a".repeat(129)]) {
+		await assert.rejects(() => handlers.get("scratch-pad:create")(null, { kind: "project", projectId }), /Invalid scratch pad scope/);
+		await assert.rejects(() => handlers.get("scratch-pad:list")(null, { kind: "project", projectId }), /Invalid scratch pad scope/);
+	}
+	rmSync(userDataRoot, { recursive: true, force: true });
+});
+
 test("scratchPad:load/save round-trip still works for paths inside drafts", async () => {
 	const { userDataRoot, handlers } = setup();
 	// 通过 create 拿一条合法草稿路径（list/create 的返回值是渲染层唯一合法来源）

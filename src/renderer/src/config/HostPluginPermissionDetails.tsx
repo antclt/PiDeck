@@ -7,21 +7,25 @@ import { t } from "../i18n";
 
 export const HOST_PLUGIN_PERMISSION_OPTIONS = [
 	["sessions.read", "hostPlugins.sessionsRead", "hostPlugins.scaffoldSessionsReadHint"],
+	["sessions.read.workspace", "hostPlugins.workspaceSessions", "hostPlugins.scaffoldWorkspaceHint"],
 	["workbench.navigate", "hostPlugins.scaffoldNavigate", "hostPlugins.scaffoldNavigateHint"],
 	["workbench.openExternal", "hostPlugins.scaffoldOpenExternal", "hostPlugins.scaffoldOpenExternalHint"],
 	["network.https", "hostPlugins.networkHttps", "hostPlugins.networkHttpsHint"],
 	["network.local", "hostPlugins.networkLocal", "hostPlugins.networkLocalHint"],
 	["service.local", "hostPlugins.serviceLocal", "hostPlugins.scaffoldServiceLocalHint"],
+	["sessionGroups.manage", "hostPlugins.sessionGroupsManage", "hostPlugins.sessionGroupsManageHint"],
 ] as const;
 
 /** 列表行用的短标签：与上面的完整选项一一对应，避免行内被长句撑成多行。 */
 export const HOST_PLUGIN_PERMISSION_CHIP_KEYS: Record<HostPluginPermission, TranslationKey> = {
 	"sessions.read": "hostPlugins.chipSessionsRead",
+	"sessions.read.workspace": "hostPlugins.chipWorkspace",
 	"workbench.navigate": "hostPlugins.chipNavigate",
 	"workbench.openExternal": "hostPlugins.chipOpenExternal",
 	"network.https": "hostPlugins.chipHttps",
 	"network.local": "hostPlugins.chipLocal",
 	"service.local": "hostPlugins.chipService",
+	"sessionGroups.manage": "hostPlugins.chipSessionGroups",
 };
 
 /** Never collapse grants into “can access the network”: the exact origins and loopback ports are the consent. */
@@ -59,6 +63,11 @@ export function HostPluginPermissionDetails({ manifest, warnings = false }: { ma
 			{warnings && manifest.permissions.includes("network.local") && (
 				<Alert>
 					<AlertDescription>{t("hostPlugins.networkLocalWarning")}</AlertDescription>
+				</Alert>
+			)}
+			{warnings && manifest.permissions.includes("sessions.read.workspace") && (
+				<Alert>
+					<AlertDescription>{t("hostPlugins.workspaceWarning")}</AlertDescription>
 				</Alert>
 			)}
 			{services && (

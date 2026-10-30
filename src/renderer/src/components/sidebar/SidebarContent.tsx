@@ -1,5 +1,5 @@
-import { Activity, Bolt, CirclePlus, Clock, Folder, Globe, MessageSquare, Monitor, Moon, Search, Sun } from "lucide-react";
-import { useEffect, useReducer, useState, type ReactNode } from "react";
+import { Activity, Bolt, ChevronRight, CirclePlus, Clock, Folder, Globe, MessageSquare, Monitor, Moon, Search, Sun } from "lucide-react";
+import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import type { AgentBackend, AgentTab, AppThemeMode, ArchivedDshSession, ArchivedPiSession, Project, SessionRecord, SessionSummary, WorktreeEntry } from "../../../../shared/types";
 import { AgentContextMenu, DraftSessionContextMenu, ProjectContextMenu, SessionContextMenu, SessionManagerModal, SessionSourceFilterMenu, WorktreeCreateDialog } from "./SidebarParts";
 import { automationModuleHiddenAtom, sessionRecordToSummary } from "../../atoms";
@@ -35,6 +35,7 @@ import { isLocalProject } from "../../../../shared/projectLocation";
 import { formatAccelerator } from "../../../../shared/shortcuts";
 import { desktopApi } from "../../desktopApi";
 import { useShortcutBindings } from "../../hooks/useShortcutBindings";
+import { useFavorites } from "../../hooks/useFavorites";
 import { useRelativeTimeTicker } from "../../hooks/sidebar/useSessionActivityClock";
 
 export type SidebarActions = {
@@ -168,6 +169,8 @@ export type SidebarContentProps = {
 
 export function SidebarContent(props: SidebarContentProps) {
 	const { controller, actions } = props;
+	// 会话收藏：右键菜单的「已收藏态 + 切换」与收藏页共用同一份 atom/写入链路。
+	const favorites = useFavorites();
 	// 侧栏相对时间刷新节拍：会话静置时没有别的渲染源，「n分钟」也得自己往前走。
 	// 只在本组件挂一次，行组件订阅同一个 atom。
 	useRelativeTimeTicker();
@@ -206,6 +209,9 @@ export function SidebarContent(props: SidebarContentProps) {
 	const menuAgentCanRpcLog = menuAgent !== undefined && getBoundSidebarRuntimeAgentByAgentId(controller.catalog, menuAgent.id) !== undefined;
 	// 顶部「搜索」菜单项控制 MorphingSearch 命令面板的展开状态。
 	const [searchOpen, setSearchOpen] = useState(false);
+	// 低频入口（定时任务 / 智能体 / 收藏）收进「更多」：新建与搜索是每次会话都要用的，
+	// 这三个是偶发入口，平铺在列表上方会把会话列表挤下去。展开态只在本会话内保持。
+	const [moreActionsOpen, setMoreActionsOpen] = useState(false);
 	// 拼音字典按需装载：搜索面板打开才拉 26k 条字典 chunk（不进启动路径）。
 	// 就绪后 bump 一次渲染让 searchItems 重算出真实拼音键；未就绪期间面板退化为
 	// 子串/英文匹配，本地 chunk 毫秒级到位，体感无损。失败静默（只损失拼音通道）。
@@ -283,6 +289,30 @@ export function SidebarContent(props: SidebarContentProps) {
 	const currentProject = props.currentProjectId ? controller.catalog.projects.find((project) => project.id === props.currentProjectId) : undefined;
 	const currentRootProject = currentProject?.worktreeParentId ? (controller.catalog.projects.find((project) => project.id === currentProject.worktreeParentId) ?? currentProject) : currentProject;
 
+	// 列表滚动容器：搜索面板选中项目后要把目标行滚进可视区（见 revealSearchProject）。
+	const conversationListRef = useRef<HTMLElement>(null);
+	/**
+	 * 搜索面板里点项目 = 「跳过去」：右侧已由 actions.projects.select 切到该项目引导页，
+	 * 左侧列表必须跟着定位，否则分段停在「活动/聊天」时目标行根本没挂载，看起来像没反应。
+	 * 顺序：先切到项目所在分段（Chat 在「聊天」，其余在「项目」）→ 展开父级与自身 →
+	 * 等搜索词清空、行回流落定后滚到可视区。搜索词由面板关闭同步清空，所以等两帧。
+	 */
+	const revealSearchProject = (project: Project) => {
+		if (!props.simple) controller.setNavTab(isChatProject(project) ? "chats" : "projects");
+		// worktree 子项目行挂在父项目树下：父项目折叠或该分支未展开时行都不存在，先展开。
+		const parent = project.worktreeParentId ? controller.catalog.projects.find((candidate) => candidate.id === project.worktreeParentId) : undefined;
+		if (parent) {
+			controller.revealProject(parent.id);
+			controller.expandWorktreeSessions(project.id);
+		}
+		controller.revealProject(project.id);
+		requestAnimationFrame(() => {
+			requestAnimationFrame(() => {
+				conversationListRef.current?.querySelector<HTMLElement>(`[data-project-row-id="${CSS.escape(project.id)}"]`)?.scrollIntoView({ block: "nearest" });
+			});
+		});
+	};
+
 	// MorphingSearch 检索项：扁平化所有项目 + 会话，供命令面板跳转。
 	// 项目项用目录名（chat 用「Chat」），会话项用标题 + 预览；选中即打开/选中目标。
 	// pinyin：中文标题的首字母/全拼键（纯字母查询才能命中，键按标题缓存）。
@@ -298,7 +328,7 @@ export function SidebarContent(props: SidebarContentProps) {
 			icon: isChatProject(project) ? MessageSquare : Folder,
 			onSelect: () => {
 				actions.projects.select(project.id);
-				controller.setProjectExpanded(project.id, true);
+				revealSearchProject(project);
 			},
 		});
 		for (const session of controller.catalog.sessionsByProject[project.id] ?? []) {
@@ -337,22 +367,31 @@ export function SidebarContent(props: SidebarContentProps) {
 						<span className="min-w-0 flex-1 truncate font-medium">{t("app.newSession")}</span>
 						{/* 快捷键默认隐藏，行 hover 时才淡入（无边框，弱化到只剩文字），避免常驻视觉噪音；
                 键位跟随设置页自定义（useShortcutBindings） */}
-						<kbd className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md px-1 text-micro text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">{newSessionKbd}</kbd>
+						<kbd className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md px-1 text-micro text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">{newSessionKbd}</kbd>
 					</button>
 					<button type="button" className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-bg-hover" aria-label={t("app.searchSessions")} title={t("app.searchSessions")} onClick={() => setSearchOpen(true)}>
 						<Search className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 						<span className="min-w-0 flex-1 truncate font-medium">{t("app.searchSessions")}</span>
 						{/* 快捷键默认隐藏，行 hover 时才淡入；键位跟随设置页自定义（useShortcutBindings） */}
-						<kbd className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md px-1 text-micro text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">{searchKbd}</kbd>
+						<kbd className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md px-1 text-micro text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">{searchKbd}</kbd>
 					</button>
-					{/* 定时任务入口：放在新建/搜索下面，避免藏在底栏 Dock 里不好找 */}
-					<AutomationDockButton />
-					{/* 智能体入口：紧随定时任务，打开会话 Tab 栏里的「智能体」页面 */}
-					<AgentMarketDockButton />
-					{/* 收藏入口：放在智能体下面，打开会话 Tab 栏里的「收藏」页面 */}
-					<FavoritesDockButton />
-					{/* 宿主插件面板入口：与定时任务同区，无已启用面板时组件自身不渲染 */}
+					{/* 宿主插件面板入口：插件贡献的行是用户自己装的模块入口，固定排在「更多」之上——
+					    否则「更多」展开的三件套会夹在插件行之前，越展开越乱。无已启用面板时组件自身不渲染。 */}
 					<HostPluginDockButtons projectId={props.currentProjectId} sessionId={props.currentSessionId} />
+					{/* 低频入口折叠组：定时任务 / 智能体 / 收藏，固定排在动作区最末（插件行之后）。展开后按原顺序平铺，
+					    不改变各自行为（定时任务仍有运行中呼吸点，智能体/收藏各自打开页面 Tab）。
+					    箭头与树节点同向：收起指向右（▸），展开转向下（▾）——不是反过来的「收起下指、展开上指」。 */}
+					<button type="button" className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-bg-hover" aria-expanded={moreActionsOpen} aria-controls="sidebar-more-actions" title={t("common.more")} onClick={() => setMoreActionsOpen((v) => !v)}>
+						<ChevronRight className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-fast", moreActionsOpen && "rotate-90")} aria-hidden="true" />
+						<span className="min-w-0 flex-1 truncate font-medium">{t("common.more")}</span>
+					</button>
+					{moreActionsOpen ? (
+						<div id="sidebar-more-actions" className="flex flex-col gap-0.5">
+							<AutomationDockButton />
+							<AgentMarketDockButton />
+							<FavoritesDockButton />
+						</div>
+					) : null}
 				</div>
 
 				{/* MorphingSearch 命令面板：锚点固定定位到视口水平居中、垂直约 1/5 处，
@@ -434,7 +473,7 @@ export function SidebarContent(props: SidebarContentProps) {
 
 				{/* 单一滚动区承载项目与展开内容，避免项目导航/详情双滚动和重复标题。
             scrollbar-gutter: stable：滚动条出现/消失时列表宽度不跳变（与抽屉一致）。 */}
-				<section className="conversation-list min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
+				<section ref={conversationListRef} className="conversation-list min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
 					<ProjectTree
 						simple={props.simple}
 						controller={controller}
@@ -690,6 +729,21 @@ export function SidebarContent(props: SidebarContentProps) {
 								}
 							: undefined
 					}
+					isSessionFavorited={menuAgentSessionRecord && menuAgentSessionRecord.status !== "draft" && menu.pinnable !== false ? favorites.favoritedSessionIds.has(menuAgentSessionRecord.id) : false}
+					onToggleSessionFavorite={
+						menuAgentSessionRecord && menuAgentSessionRecord.status !== "draft" && menu.pinnable !== false
+							? () => {
+									void favorites.toggleSessionFavorite({
+										kind: "session",
+										text: "",
+										sessionId: menuAgentSessionRecord.id,
+										sessionTitle: menuAgentSessionRecord.title,
+										projectId: menuAgentSessionRecord.projectId,
+									});
+									controller.closeMenu();
+								}
+							: undefined
+					}
 					onExport={() => {
 						void actions.agents.export(menuAgent);
 						controller.closeMenu();
@@ -813,6 +867,21 @@ export function SidebarContent(props: SidebarContentProps) {
 						menu.pinnable
 							? () => {
 									controller.toggleSessionPin(menuSession.id);
+									controller.closeMenu();
+								}
+							: undefined
+					}
+					isSessionFavorited={menu.pinnable ? favorites.favoritedSessionIds.has(menuSession.id) : false}
+					onToggleSessionFavorite={
+						menu.pinnable
+							? () => {
+									void favorites.toggleSessionFavorite({
+										kind: "session",
+										text: "",
+										sessionId: menuSession.id,
+										sessionTitle: menuSessionRecord?.title ?? menuSession.name,
+										projectId: menuSession.projectId ?? menu.projectId,
+									});
 									controller.closeMenu();
 								}
 							: undefined

@@ -13,13 +13,18 @@ const rawSource = readFileSync("src/renderer/src/components/session/timeline/too
 const moduleSource = rawSource.replace(/^import .*$/gm, "").replace("export interface ToolPhrase", "interface ToolPhrase");
 
 function loadPhrase(toolName, input) {
+	return loadPhraseWithKind(toolName, input);
+}
+
+// ACP 专用：meta.toolName 是 agent 给的人类标题、不是工具名，短语要靠 meta.kind 选动词。
+function loadPhraseWithKind(toolName, input, kind) {
 	const js = ts.transpileModule(moduleSource, {
 		compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 	}).outputText;
 	const module = { exports: {} };
 	const sandbox = { module, exports: module.exports, console };
 	vm.runInNewContext(js, sandbox);
-	return sandbox.module.exports.getToolPhrase(toolName, input);
+	return sandbox.module.exports.getToolPhrase(toolName, input, kind);
 }
 
 test("read tool produces a readable file phrase", () => {
@@ -97,6 +102,20 @@ test("keyword dictionary localizes host MCP tool names (cua/browser)", () => {
 	assert.equal(shot.verb, "截图");
 });
 
+// 2026-10 用户反馈「行里写着截屏，实际是抓包工具的 MCP 调用」：`capture` 是歧义词
+// （截屏 / 抓包），裸关键词会把 mcp__reqable__capture_live_get_by_id 说成截屏。
+// 口径：屏幕捕捉只认 screenshot / screen_capture / capture_screen / cua_capture，
+// 其余带 capture 的工具落回通用回退（原样显示工具名），不猜语义。
+test("bare capture keyword no longer claims screen capture for packet-capture tools", () => {
+	const proxy = loadPhrase("mcp__reqable__capture_live_get_by_id", { id: 24587 });
+	assert.notEqual(proxy.verb, "截屏");
+	assert.equal(proxy.verb, "mcp__reqable__capture_live_get_by_id");
+	assert.equal(proxy.object, undefined);
+
+	const cua = loadPhrase("cua_capture", {});
+	assert.equal(cua.verb, "截图");
+});
+
 test("keyword dictionary covers subagent and git tool families with order guard", () => {
 	const dispatch = loadPhrase("Agent", { prompt: "查一下路由" });
 	assert.equal(dispatch.verb, "派出子代理");
@@ -114,4 +133,55 @@ test("keyword dictionary keeps exact builtin branches winning over substring mat
 	// web_search 是内置精确分支（获取），不能被词典的 search 类键截胡
 	const web = loadPhrase("web_search", { query: "react 19" });
 	assert.equal(web.verb, "获取");
+});
+
+// 2026-10 用户反馈「acp 的工具调用有时候一行重复俩」：ACP 的 meta.toolName 是 agent
+// 给的人类标题（opencode 给 `` `ls -la` ``、claude 系给 `Read C:\a.ts`），标题本身已含
+// 参数。此前按工具名走通用回退 → 动词是整条标题、对象又是同一个参数，同一行把命令印两遍。
+// 修复口径：有 meta.kind 时按协议类别选动词（复用内置分支），标题不再进短语。
+test("ACP tool kinds reuse builtin verbs instead of the title-as-tool-name fallback", () => {
+	const command = 'grep -ril "durable" "/srv/pi-deck/chat-workspace" 2>/dev/null';
+	const execute = loadPhraseWithKind(`\`${command}\``, { command }, "execute");
+	assert.equal(execute.verb, "执行");
+	assert.equal(execute.object, command);
+	assert.equal(execute.loadingLabel, `正在执行 ${command}...`);
+	assert.ok(!execute.loadingLabel.includes("`"), "标题不再参与拼接：行内只剩一遍命令");
+
+	const read = loadPhraseWithKind("Read src/work/models.json", { file_path: "src/work/models.json" }, "read");
+	assert.equal(read.verb, "读取");
+	assert.equal(read.object, "models.json");
+	assert.equal(read.loadingLabel, "正在读取 models.json...");
+
+	const search = loadPhraseWithKind("Searching for durable", { query: "durable" }, "search");
+	assert.equal(search.verb, "搜索");
+	assert.equal(search.object, "durable");
+
+	const fetch = loadPhraseWithKind("fetch https://example.com", { url: "https://example.com" }, "fetch");
+	assert.equal(fetch.verb, "获取");
+	assert.equal(fetch.object, "https://example.com");
+});
+
+test("ACP delete/move kinds get their own verbs and the file name as object", () => {
+	const removed = loadPhraseWithKind("Delete src/work/tmp.log", { file_path: "src/work/tmp.log" }, "delete");
+	assert.equal(removed.verb, "删除");
+	assert.equal(removed.object, "tmp.log");
+	assert.equal(removed.loadingLabel, "正在删除 tmp.log...");
+
+	const moved = loadPhraseWithKind("Move a.ts", { file_path: "src/a.ts" }, "move");
+	assert.equal(moved.verb, "移动");
+	assert.equal(moved.object, "a.ts");
+});
+
+test("title-like tool names drop the argument already contained in the title", () => {
+	// 无 kind（ACP `other`）或第三方扩展把标题当工具名：标题已含参数时不再拼一遍。
+	for (const kind of [undefined, "other", "think"]) {
+		const phrase = loadPhraseWithKind("`ls -la`", { command: "ls -la" }, kind);
+		assert.equal(phrase.verb, "`ls -la`");
+		assert.equal(phrase.object, undefined);
+		assert.equal(phrase.label, "`ls -la`");
+		assert.equal(phrase.loadingLabel, "正在`ls -la`...");
+	}
+	// 标题不含参数时仍保留对象预览（不误删可读信息）。
+	const mcp = loadPhraseWithKind("get_search_content", { query: "shadcn" }, "other");
+	assert.equal(mcp.object, "shadcn");
 });

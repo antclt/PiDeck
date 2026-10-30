@@ -95,7 +95,10 @@ function contrast(a, b) {
  */
 function resolveText(tokens, textToken, bg) {
 	const [name, alpha] = textToken.split("/");
-	const base = resolve(tokens, `color-${name}`);
+	// `inherit` 表示「跟随所在文字色」（如 md-strong/md-em 默认不单独着色），
+	// 按正文色 text-primary 代表计算——正文自身的对比度已由上方正文配对覆盖。
+	const resolved = resolve(tokens, `color-${name}`);
+	const base = resolved === "inherit" ? resolve(tokens, "color-text-primary") : resolved;
 	return alpha ? blend(base, bg, Number(alpha) / 100) : base;
 }
 
@@ -112,11 +115,13 @@ const LIGHT = extractBlock(":root");
 // 测试必须模拟继承，否则会把「变体下实际生效的残留值」漏掉——warning 漏暗色覆盖就是这么发现的。
 const DARK = { ...LIGHT, ...extractBlock(':root[data-theme="dark"]') };
 
-// 全部用户可选色板：亮/暗 × accent(5)，亮/暗 × appearance 皮肤(4)。
-// accent 只覆盖 accent 族 token、appearance 只覆盖面色/灰阶——两轴交叠组合的 token/面
-// 配对已由这 20 块成对覆盖（跨轴组合不产生新配对），不展开 60 组全叉积。
+// 全部用户可选色板：亮/暗 × accent(5)，亮/暗 × 配色（data-palette，6 套内置）。
+// accent 只覆盖 accent 族 token、配色只覆盖面色/灰阶——两轴交叠组合的 token/面
+// 配对已由这批块成对覆盖（跨轴组合不产生新配对），不展开全叉积。
+// 外观样式（data-appearance）不在这里：它只改形状/字体/圆角，没有任何颜色声明，
+// 因此不产生新的文字/底色配对（守卫见 tests/appearanceThemes.test.mjs）。
 const ACCENTS = ["green", "blue", "purple", "amber", "rose"];
-const APPEARANCES = ["fresh-green", "graphite", "sea-blue", "warm-beige"];
+const PALETTE_IDS = ["fresh-green", "graphite", "sea-blue", "warm-beige", "tui"];
 const PALETTES = [
 	{ label: "浅色", tokens: LIGHT },
 	...ACCENTS.map((a) => ({ label: `浅色+${a}`, tokens: { ...LIGHT, ...extractBlock(`:root[data-accent="${a}"]`) } })),
@@ -125,9 +130,9 @@ const PALETTES = [
 		label: `暗色+${a}`,
 		tokens: { ...DARK, ...extractBlock(`:root[data-theme="dark"][data-accent="${a}"]`) },
 	})),
-	...APPEARANCES.flatMap((a) => [
-		{ label: `浅色皮肤·${a}`, tokens: { ...LIGHT, ...extractBlock(`:root[data-appearance="${a}"]`) } },
-		{ label: `暗色皮肤·${a}`, tokens: { ...DARK, ...extractBlock(`:root[data-theme="dark"][data-appearance="${a}"]`) } },
+	...PALETTE_IDS.flatMap((a) => [
+		{ label: `浅色配色·${a}`, tokens: { ...LIGHT, ...extractBlock(`:root[data-palette="${a}"]`) } },
+		{ label: `暗色配色·${a}`, tokens: { ...DARK, ...extractBlock(`:root[data-theme="dark"][data-palette="${a}"]`) } },
 	]),
 ];
 
@@ -182,6 +187,24 @@ const PAIRS = [
 	["chip-session", "bg-panel", 4.5, "session chip × 面板"],
 	// 代码块（code-bg 两主题都是深底）
 	["code-text", "code-bg", 4.5, "代码文字 × 代码底"],
+	// Markdown 语义色：正文落在页面/面板/chat-card 底上；行内码自带 bg-muted 底；引用是次级文字；列表符非文字 3:1。
+	// 皮肤（terminal）会单独覆盖这组 token，其余皮肤继承 :root 默认值（= 正文色，等价于改造前的写死值）。
+	...["bg-page", "bg-panel", "chat-card-bg"].flatMap((face) => [
+		["md-heading", face, 4.5, `Markdown 标题 × ${face}`],
+		["md-link", face, 4.5, `Markdown 链接 × ${face}`],
+	]),
+	["md-code", "bg-muted", 4.5, "Markdown 行内码 × 行内码底"],
+	["md-code", "chat-card-bg", 4.5, "Markdown 行内码 × chat-card 底"],
+	["md-quote", "chat-card-bg", 4.5, "Markdown 引用文字 × chat-card 底"],
+	["md-list-bullet", "chat-card-bg", 3, "Markdown 列表符号 × chat-card 底"],
+	// 行内格式与表格：加粗/斜体是正文级文字（4.5），删除线是「弱化但仍要读」的文字（4.5），
+	// 表头文字落在表头底上，勾选框/图片框属于非文字的构件指示（3）。
+	["md-strong", "chat-card-bg", 4.5, "Markdown 加粗 × chat-card 底"],
+	["md-em", "chat-card-bg", 4.5, "Markdown 斜体 × chat-card 底"],
+	["md-del", "chat-card-bg", 4.5, "Markdown 删除线 × chat-card 底"],
+	["md-table-head-text", "md-table-head-bg", 4.5, "表头文字 × 表头底"],
+	["md-code", "md-inline-code-bg", 4.5, "行内码文字 × 行内码底"],
+	["md-task-accent", "chat-card-bg", 3, "任务勾选框 × chat-card 底"],
 	// 过程层图标（非文字）：3:1——注意边框不进矩阵：装饰性分隔线是刻意低对比设计（WCAG 只要求
 	// 「唯一视觉指示」的构件边 3:1，本应用输入控件用聚焦环作主要指示）
 	["thinking", "bg-panel", 3, "思考过程图标 × 面板"],
@@ -195,7 +218,13 @@ function resolveFace(tokens, face) {
 		// 混合基准取 bg-app（徽章都出现在页面级面板上，bg-app/app-panel 暗浅几乎一致）
 		return blend(resolve(tokens, "color-warning"), base, 0.15);
 	}
-	return resolve(tokens, `color-${face}`);
+	const value = resolve(tokens, `color-${face}`);
+	// 透明罩染底（--color-surface-ink* / 表头底默认值 `color-mix(..., transparent)`）：
+	// 单独解析得不到实色，按「罩在 chat-card 底上」的可见结果近似——表头、斑马纹、行内码底
+	// 都画在消息卡片里，这是它们真实的落点。
+	const translucent = value.match(/^color-mix\(in (?:srgb|oklab),\s*var\(--([a-z0-9-]+)\)\s*([\d.]+)%,\s*transparent\)$/);
+	if (translucent) return blend(resolve(tokens, translucent[1]), resolveFace(tokens, "chat-card-bg"), Number(translucent[2]) / 100);
+	return value;
 }
 
 for (const { label, tokens } of PALETTES) {

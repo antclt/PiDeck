@@ -20,12 +20,14 @@ import { BrowserAgentService } from "./browser/BrowserAgentService";
 import { AutomationStore } from "./automation/AutomationStore";
 import { AgentProfileStore } from "./agents/AgentProfileStore";
 import { FavoritesStore } from "./favorites/FavoritesStore";
+import { SessionGroupStore } from "./sessionGroups/sessionGroupStore";
 import { AgentInvokeService } from "./agents/AgentInvokeService";
 import { AutomationScheduler } from "./automation/AutomationScheduler";
 import { AutomationRunCoordinator } from "./automation/AutomationRunCoordinator";
 import { registerAutomationIpc } from "./ipc/automationIpc";
 import { registerAgentProfileIpc } from "./ipc/agentProfileIpc";
 import { registerFavoritesIpc } from "./ipc/favoritesIpc";
+import { registerSessionGroupsIpc } from "./ipc/sessionGroupsIpc";
 import { registerAgentInvokeIpc } from "./ipc/agentInvokeIpc";
 import { registerSelectionToolIpc } from "./ipc/selectionToolIpc";
 import { SelectionToolService } from "./selection/SelectionToolService";
@@ -63,12 +65,14 @@ import { readDataEnvDecision, validateStartupDataEnv, writeDataEnvDecision } fro
 import { registerDataEnvIpc } from "./ipc/dataEnvIpc";
 import { ChannelSwitchService } from "./update/ChannelSwitchService";
 import { registerChannelSwitchIpc } from "./ipc/channelSwitchIpc";
-import { resolveUpdateChannel } from "./update/channelIdentity";
+import { isDevChannelBuild, resolveUpdateChannel } from "./update/channelIdentity";
+import { resolveBuildOrigin } from "./buildIdentity";
 import { APP_DEEP_LINK_SCHEME } from "./utils/deepLinkScheme";
 import { APP_DISPLAY_NAME, initializeAppBrand } from "./utils/appBrand";
 import { migrateDevUserData } from "./projects/devUserDataMigration";
 import { isMainWindowFocused, shouldAlertNow } from "./notifications/alertFocusGate";
 import { buildToastXml, notificationLaunchUrl, resolveNotificationLogoUri } from "./notifications/notificationToast";
+import { notifyAskPending as notifyAgentAskPending, notifySessionFinished, type AgentToastDeps } from "./notifications/agentToast";
 import { extractFocusTargetFromArgv } from "./utils/focusTarget";
 import type { Project, StartupWindowMode } from "../shared/types";
 import { isLocalProject, isRemoteProject } from "../shared/projectLocation";
@@ -308,8 +312,10 @@ import { isDefaultAgentTitle } from "./pi/agentUtils";
 import { CompositeAgentGateway } from "./agents/CompositeAgentGateway";
 import { AcpAgentManager } from "./acp/AcpAgentManager";
 import { AcpSessionArchive } from "./acp/AcpSessionArchive";
+import { withAcpConfigDefault } from "./acp/acpToolConfig";
 import { acpMessagePage } from "./acp/acpMessagePage";
 import { findSessionMatches } from "./sessions/sessionFindMatches";
+import { broadcastCatalogRefreshed } from "./sessions/catalogRefresh";
 import { registerAcpIpc } from "./ipc/acpIpc";
 import { DshHost, resolveDshHomeDir } from "./dsh/DshHost";
 import { DshPluginInstallService } from "./dsh/DshPluginInstallService";
@@ -339,10 +345,11 @@ import { createSessionModelPreference } from "../shared/modelDisplayName";
 import { modelThinkingLevelOf } from "../shared/modelThinkingLevels";
 import { SessionCatalog, canAttachRuntimeMetadata } from "./sessions/SessionCatalog";
 import { waitForSessionRunEnd } from "./sessions/sessionRunWaiter";
-import { aggregateDshProxyMode, buildHostProxyEnvPatch, resolveDshHostProxyMode, resolveEffectiveSessionProxyMode } from "./sessions/sessionProxyPolicy";
+import { aggregateDshProxyMode, buildHostProxyEnvPatch, resolveAcpProxySettings, resolveDshHostProxyMode, resolveEffectiveSessionProxyMode } from "./sessions/sessionProxyPolicy";
 import { SessionRuntimeCoordinator, type SessionRuntimeBinding } from "./sessions/SessionRuntimeCoordinator";
 import { migrateMergedSessionPinnedIds } from "./sessions/sessionPinnedIdsMigration";
 import { IdleAgentReleaser } from "./sessions/IdleAgentReleaser";
+import { VisibleSessionRegistry, shouldDeliverLiveStreamToMainWindow } from "./sessions/visibleSessionRegistry";
 import { StaleDraftReaper } from "./sessions/StaleDraftReaper";
 import { SessionCommandIpcError } from "./sessions/SessionCommandIpcError";
 import { appendSessionForkSuffix } from "./sessions/sessionForkTitle";
@@ -376,6 +383,7 @@ import { TokendanceAuthStore } from "./config/tokendanceAuth";
 import { createRemoteTerminalManager } from "./terminal/createRemoteTerminalManager";
 import type { RemoteTerminalSessionManager } from "./terminal/RemoteTerminalSessionManager";
 import { TokendancePaymentStore } from "./config/tokendancePayment";
+import { WatchaEntitlementStore } from "./config/watchaEntitlement";
 import { usageProbeRequest } from "./config/usageProbeTransport";
 import { TOKENDANCE_PROVIDER } from "../shared/tokendance";
 import { TerminalSessionManager } from "./terminal/TerminalSessionManager";
@@ -387,6 +395,7 @@ import { PromptManager } from "./prompts/PromptManager";
 import { XuePromptManager } from "./prompts/XuePromptManager";
 import { XueIndexService } from "./prompts/XueIndexService";
 import { SessionIndexService } from "./sessions/SessionIndexService";
+import { deriveOrphanSweepMarkers, sweepOrphanedManagedProcesses } from "./process/orphanSweep";
 import { XuePromptDbStore } from "./prompts/XuePromptDbStore";
 import { SkillManager } from "./skills/SkillManager";
 import { readSkillContent } from "./skills/readSkillContent";
@@ -445,6 +454,7 @@ import { registerThemesIpc } from "./ipc/themesIpc";
 import { registerHostPluginsIpc } from "./ipc/hostPluginsIpc";
 import { registerPiDeckMcpIpc } from "./ipc/piDeckMcpIpc";
 import { PiDeckMcpService } from "./mcp/PiDeckMcpService";
+import { PiDeckMcpAcpSessions } from "./mcp/piDeckMcpAcpSessions";
 import { HostPluginSessions } from "./plugins/HostPluginSessions";
 import { HostPluginService } from "./plugins/HostPluginService";
 import { resolveBuiltinHostPluginDirectory } from "./plugins/builtinHostPlugins";
@@ -538,6 +548,7 @@ import { DiagnosticsMonitor } from "./diagnostics/DiagnosticsMonitor";
 import { EnvironmentDoctor } from "./health/EnvironmentDoctor";
 import { LogBundleExporter } from "./health/LogBundleExporter";
 import { QuitCleanupRegistry } from "./lifecycle/QuitCleanupRegistry";
+import { ensureWindowsPathFresh } from "./process/windowsPathRefresh";
 import type { FeishuChatBinding } from "../shared/types";
 import { createRealAutoUpdater } from "./update/createAutoUpdater";
 import { installAtomgitNoCacheBypass, UPDATER_PARTITION_NAME } from "./update/atomgitNoCacheBypass";
@@ -549,6 +560,8 @@ import { UpdateService } from "./update/UpdateService";
 import type { AppManualUpdateRelease } from "../shared/types/app";
 
 let mainWindow: BrowserWindow | null = null;
+/** 主窗口实际挂载的会话（当前 + 分屏）：live 流只发这些会话，见 visibleSessionRegistry.ts。 */
+const visibleSessions = new VisibleSessionRegistry();
 /**
  * 草稿 DSH 会话的技能目录入口（懒装配）：sessionCatalog/dshAgentManager 都是
  * whenReady 之后才赋值，构造必须延迟到首次 IPC 调用，避免启动顺序耦合。
@@ -798,6 +811,8 @@ let enhancePromptService: EnhancePromptService | null = null;
 let agentProfileStore: AgentProfileStore | null = null;
 /** 收藏存储（<userData>/favorites.json）；null = 尚未初始化。 */
 let favoritesStore: FavoritesStore | null = null;
+/** 会话分组存储（<userData>/session-groups.json）；null = 尚未初始化。侧栏与插件经它共用一份数据。 */
+let sessionGroupStore: SessionGroupStore | null = null;
 /** 智能体一次性调用服务（划词工具 / 市场面板）：业务在 service，侧车进程在下面的 completion。 */
 let agentInvokeService: AgentInvokeService | null = null;
 /**
@@ -967,13 +982,11 @@ const foreignSyncDeps: DshForeignSyncDeps = {
 	dismissedDshSessionIds: () => sessionCatalog.listDismissedDshSessionIds(),
 };
 
-/** 导入/同步落库后向渲染层广播对应项目刷新（侧栏静默重拉，新会话立即可见）。 */
-function notifyDshCatalogRefreshed(projectIds: Iterable<string>): void {
-	const window = mainWindow;
-	if (!window || window.isDestroyed()) return;
-	for (const projectId of new Set(projectIds)) {
-		window.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId });
-	}
+/** catalog 变更后向渲染层广播对应项目刷新（侧栏静默重拉，新/删/改的会话立即对齐）。
+ *  渲染进程自己发起的增删改会拿 IPC 返回值就地更新，所以只有**非渲染进程发起**的改动
+ *  （DSH 导入/同步、自动化、Web API 等）才必须走这里，否则侧栏会留下幽灵行或漏掉新行（issue #436）。 */
+function notifyCatalogRefreshed(projectIds: Iterable<string>): void {
+	broadcastCatalogRefreshed(projectIds, { channel: ipcChannels.sessionsCatalogRefreshed, getWindow: () => mainWindow });
 }
 
 /** 按当前设置过滤可见项目并推给渲染层（启动 load / 自动导入兑底项目后共用）。 */
@@ -1047,7 +1060,7 @@ async function runDshForeignSync(): Promise<{ imported: number; skipped: number 
 	const result = await syncForeignSessions(foreignSyncDeps, knownForeignSessionIds(sessionCatalog.listEntries()));
 	if (result.imported > 0 || result.skipped > 0) {
 		// skipped>0 也可能是纠正归属（从兑底拆到各自目录），侧栏要重拉。
-		notifyDshCatalogRefreshed(
+		notifyCatalogRefreshed(
 			sessionCatalog
 				.listEntries()
 				.filter((entry) => entry.backend === "dsh" && entry.dshSessionId)
@@ -1077,9 +1090,32 @@ function emitSessionActivationFailed(sessionId: string): void {
 	});
 }
 
+/**
+ * 激活被作废（草稿期换后端 / 换 ACP 工具）：抵消 emitSessionActivating 的合成 starting。
+ *
+ * 语义与 emitSessionActivationFailed 相反：作废不是失败，不应画成错误可重试；但合成 starting
+ * 已把会话标成「启动中」，不发事件就永远收不回来。detach = 未绑定，与取消后的真实状态一致
+ * （旧进程已停、旧激活不得 bind）。payload 为空，渲染层 detach 分支不读它，
+ * runtimeGeneration 取当前值以保证能盖住那条 starting。
+ */
+function emitSessionActivationCancelled(sessionId: string): void {
+	sendSessionRuntimeEnvelope({
+		kind: "detach",
+		sessionId,
+		agentId: "",
+		runtimeGeneration: sessionRuntimeCoordinator.currentRuntimeGeneration(sessionId),
+		sourceChannel: "sessions:runtime-detach",
+		payload: null,
+	});
+}
+
 function sendSessionRuntimeEnvelope(event: SessionRuntimeEvent): void {
 	const window = mainWindow;
-	if (window && !window.isDestroyed()) {
+	// live 正文/思考只对主窗口可见的会话下发：不可见会话没有消费者，几百个后台流式
+	// 会话会把渲染进程主线程打满（discussion #446）。消息/状态/通知不受影响；
+	// 极简浮窗有自己显示的会话，仍按原样转发。
+	// 收到过可见性上报才启用门控（fail-open）：上报链路异常时宁可多推，也不能让正在看的会话没有正文。
+	if (window && !window.isDestroyed() && shouldDeliverLiveStreamToMainWindow(event, (sessionId) => !visibleSessions.hasReported() || visibleSessions.isVisible(sessionId))) {
 		window.webContents.send(ipcChannels.sessionsRuntimeEvent, event);
 	}
 	// 极简浮窗是独立渲染进程，流式事件单独转发，否则会话页停在打开时的快照。
@@ -3091,6 +3127,25 @@ function mainCopy(key: MainProcessTranslationKey, params?: Record<string, string
 }
 
 /**
+ * 桌面通知的统一依赖（门控/toast/点击跳转在 notifications/agentToast.ts）。
+ * pi 在 AgentManager 内部用同一份 showAgentToast；ACP/DSH 与「非 pi 完成」订阅走这里。
+ * 每次调用现取：settingsStore / mainWindow 都是后段装配，不能在模块顶层快照。
+ */
+function agentToastDeps(): AgentToastDeps {
+	return {
+		settings: () => settingsStore.get(),
+		getWindow: () => mainWindow,
+		logoUri: () => resolveNotificationLogoUri({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath() }),
+		translate: (key, params) => mainCopy(key, params),
+		activate: (sessionId) => {
+			focusMainWindow();
+			if (sessionId) queueFocusTarget({ sessionId });
+		},
+		logger: appLogger,
+	};
+}
+
+/**
  * 把 DSH runtime 导入/安装的内部错误码翻译为用户可读文案。
  * 错误码是 DshRuntimeManager.verifyStagedRuntime 的返回值契约（tests 亦断言裸码），
  * 因此这里只做「码 → 文案」映射，不修改下层返回值。
@@ -3227,16 +3282,22 @@ function resolveBuiltInExtensionRoots(): BuiltInExtensionPathRoots {
 function createCompletionHelperService(namespace: "enhance" | "agent-invoke" | "suggest"): EnhancePromptService {
 	const log = (level: "debug" | "info" | "warn" | "error", message: string) => void appLogger?.[level](namespace, message);
 	return new EnhancePromptService({
-		resolveLaunch: () =>
-			resolvePiAuthHostLaunch({
-				settings: settingsStore.get(),
+		// 侧车是常驻单进程，env 在 spawn 时固定，所以代理只能在这里落地：
+		// 把本次要用的模型交给启动参数解析，按与 pi 会话同一套名单语义决定要不要走代理；
+		// 换模型或改代理设置后启动指纹变化，服务会重建进程而不是沿用旧出口。
+		resolveLaunch: (run) => {
+			const settings = settingsStore.get();
+			return resolvePiAuthHostLaunch({
+				settings,
+				proxyModel: run,
 				locator: piLocator as PiLocator,
 				userDataPath: app.getPath("userData"),
 				appPath: app.getAppPath(),
 				resourcesPath: process.resourcesPath,
 				isPackaged: app.isPackaged,
 				helperFilename: PI_ENHANCE_HOST_FILENAME,
-			}),
+			});
+		},
 		logger: {
 			debug: (message) => log("debug", message),
 			info: (message) => log("info", message),
@@ -3247,12 +3308,15 @@ function createCompletionHelperService(namespace: "enhance" | "agent-invoke" | "
 }
 
 function registerIpc() {
-	// 集成分支策略（2026-10-19）：远端能力在本分支**恒开**，不再区分打包/开发态，也不再读
-	// PIDECK_REMOTE_EXPERIMENTAL —— 目标是任何构建（npm run dev / pack:dev / dist）都能直接验收远端，
-	// 发现的问题由本分支直接修。历史上这里是 !app.isPackaged && env === "1"；
-	// 正式发布前若要收回，只改这一行即可（远端通道在没有启用时本就会统一返回 REMOTE_FEATURE_DISABLED，
-	// 所以开关只是策略位，不牵扯装配）。
-	const remoteExperimentEnabled = true;
+	// 通道策略（2026-10-27）：远端能力**只在 dev 通道提供**，正式包不启用、界面也不暴露入口。
+	// 判据复用 isDevChannelBuild()（未打包运行 / dev 通道安装包为 true，release 产物为 false），
+	// 与更新通道同源，不再另外维护第二份打包/环境变量表达式（历史上这里是
+	// `!app.isPackaged && env === "1"`，后来一度写死 true 便于集成分支验收）。
+	// 关掉时开关只是策略位：远端 IPC 本就统一返回 REMOTE_FEATURE_DISABLED；
+	// 渲染层按同一判据（app:get-channel 的 devBuild）连入口都不渲染。
+	// pack:dev 的 dev 渠道标记由 pack-dev.js 注入 PIDECK_DEV_BUILD=1 保证——缺了它打包验收包会以稳定渠道
+	// 运行、远端静默关闭（真机验收表现为「功能没启用」且难排查）。
+	const remoteExperimentEnabled = isDevChannelBuild();
 	let remoteHostService: import("./remote/RemoteHostConnectionService").RemoteHostConnectionService | undefined;
 	/**
 	 * 已解析的 OpenSSH 客户端（SSH 路由校验与每个 ssh/scp 子进程共用同一份）。
@@ -3506,6 +3570,8 @@ function registerIpc() {
 	}
 	// 收藏：整条回复 / 划选片段的本地快照（userData/favorites.json）。
 	if (favoritesStore) registerFavoritesIpc({ store: favoritesStore, appLogger });
+	// 会话分组：侧栏只读消费 + 插件页写入，同一份 store（userData/session-groups.json）。
+	if (sessionGroupStore) registerSessionGroupsIpc({ store: sessionGroupStore, appLogger });
 	registerAgentInvokeIpc(ipcMain, agentInvokeService);
 	// 系统级划词浮窗：状态/隐藏/「发送到 PiDeck」（文本插入主窗口当前会话输入框）。
 	registerSelectionToolIpc({
@@ -3634,7 +3700,19 @@ function registerIpc() {
 			kill: (pid) => killLocalServiceProcess(pid),
 		}),
 	]);
-	const hostPlugins = new HostPluginService(app.getPath("userData"), sessionCatalog, join(__dirname, "../preload/hostPlugin.js"), localServices, (projectId) => projectStore?.get(projectId)?.name);
+	const hostPlugins = new HostPluginService(
+		app.getPath("userData"),
+		sessionCatalog,
+		join(__dirname, "../preload/hostPlugin.js"),
+		localServices,
+		(projectId) => {
+			const project = projectStore?.get(projectId);
+			if (!project) return undefined;
+			// 目录只用于「这条会话属于哪个项目」的展示；ssh 项目拿不到本机路径，给远端路径。
+			return { name: project.name, directory: "locator" in project ? project.locator.remotePath : project.path };
+		},
+		() => sessionGroupStore ?? undefined,
+	);
 	const unregisterHostPlugins = registerHostPluginsIpc(hostPlugins, () => mainWindow);
 	const mcpWarning = (code: string) => {
 		void appLogger.warn("pideck-mcp", "Optional MCP operation rejected", { code });
@@ -3714,6 +3792,14 @@ function registerIpc() {
 				return favoritesStore.remove(favoriteId);
 			},
 		},
+		// ACP 调用端口：catalog/coordinator/ACP manager 都在启动后段装配，闭包按请求时求值；未开启时工具不注册。
+		acp: new PiDeckMcpAcpSessions({
+			catalog: sessionCatalog,
+			runtime: sessionRuntimeCoordinator,
+			readMessages: (acpSessionId) => (acpAgentManager ? acpAgentManager.readMessagesWithArchive(acpSessionId) : Promise.resolve([])),
+			settings: () => settingsStore?.get() ?? null,
+			getRuntimeMessages: (sessionId) => sessionRuntimeCoordinator.getRuntimeMessages(sessionId)?.value ?? [],
+		}),
 		warn: mcpWarning,
 	});
 	const unregisterPiDeckMcp = registerPiDeckMcpIpc(piDeckMcp, () => mainWindow, mcpWarning);
@@ -4265,10 +4351,17 @@ function registerIpc() {
 		terminalManager,
 		mainCopy: mainCopy as (key: string, params?: Record<string, string | number>) => string,
 		getMainWindow: () => mainWindow,
+		visibleSessions,
+		// live 补帧按 agentId 路由：pi 与 DSH 各有自己的流式缓冲，未知 id 各自 no-op。
+		emitLiveSnapshot: (agentId) => {
+			agentManager.emitLiveSnapshot(agentId);
+			dshAgentManager.emitLiveSnapshot(agentId);
+		},
 		emitSessionRuntimeEvent,
 		emitSessionRuntimeDetach,
 		emitSessionActivating,
 		emitSessionActivationFailed,
+		emitSessionActivationCancelled,
 		createAnonymousSession,
 		stopSessionRuntime,
 		emitReplacementState,
@@ -4441,7 +4534,7 @@ function registerIpc() {
 			// 幂等：同 dshSessionId 重复导入被 SessionCatalog.createDraft 吸收（只更新标题/归属）。
 			importDshForeignSession: async (dshSessionId) => {
 				const record = await importForeignSession(foreignSyncDeps, dshSessionId);
-				notifyDshCatalogRefreshed([record.projectId]);
+				notifyCatalogRefreshed([record.projectId]);
 				void appLogger.info("session", "Foreign DSH session imported", {
 					dshSessionId,
 					projectId: record.projectId,
@@ -4711,6 +4804,19 @@ function registerIpc() {
 			})
 		: undefined;
 
+	// 「请作者喝咖啡」按次付费：桌面端只调自家边缘代理（平台服务端 Key 在代理里，不进客户端）。
+	// 用户标识首次查询时生成并落盘；并发首查共用一个 Promise，避免生成两个 ID 把余额拆到两处。
+	let watchaUserIdPromise: Promise<string> | undefined;
+	const resolveWatchaUserId = () => {
+		watchaUserIdPromise ??= (async () => {
+			const existing = settingsStore.get().watchaUserId;
+			if (existing) return existing;
+			const created = randomUUID();
+			await settingsStore.update({ watchaUserId: created });
+			return created;
+		})();
+		return watchaUserIdPromise;
+	};
 	registerSystemIpc({
 		// 设置保存后的主进程副作用：系统级划词快捷键按新键位/开关重注册（appShortcuts 同一时机）。
 		afterSettingsUpdate: () => syncSelectionToolShortcut(),
@@ -4786,6 +4892,8 @@ function registerIpc() {
 			resolveEndpoint: () => configManager.resolveProviderEndpoint(TOKENDANCE_PROVIDER),
 			request: usageProbeRequest,
 		}),
+		// 「请作者喝咖啡」：查余额 + 按次扣减，全部经自家边缘代理；失败不拦截用户使用。
+		watchaEntitlement: new WatchaEntitlementStore({ resolveUserId: resolveWatchaUserId, request: usageProbeRequest }),
 		// 一键安装：pi models.json + DSH llm-pi-ai 双落盘（复用迁移服务的写盘策略：
 		// host 就绪走官方 settings API，否则直写 settings.yaml/.credentials.yaml）
 		tokendanceInstall: (apiKey) =>
@@ -5077,6 +5185,13 @@ app
 		// 未拿到同版本主实例锁时不要继续初始化，避免第二进程短暂闪窗。
 		if (singleInstanceEnabled && !gotSingleInstanceLock) return;
 
+		// Windows 的进程环境块是启动快照：用户在 PiDeck 开着的时候装了 CLI（官网脚本只改注册表 PATH，
+		// 如 %USERPROFILE%\.qoder-cn\bin\qoderclicn），已运行的进程里 spawn 出去只会回
+		// 「不是内部或外部命令」。开机刷一次，设置页点「检测」时还会再刷（见 acpIpc）。
+		void ensureWindowsPathFresh({
+			onAdded: (directories) => void appLogger?.info("app", "Windows PATH refreshed from registry", { added: directories }),
+		});
+
 		// 引用写入门（INV-1 / INV-12 写入侧）：远端项目与会话登记前复查 hostId 仍能解析到 profile、
 		// 且没有跨 store rebind 事务在跑。门自己读 remote-hosts.json，不依赖主进程缓存；构造本身不做 I/O。
 		const remoteReferenceWriteGuard = createRemoteReferenceWriteGuard({ userDataDir: app.getPath("userData") });
@@ -5148,6 +5263,12 @@ app
 				if (pending === undefined) return;
 				pending.then((service) => service.pushSecurityPolicySnapshotToReadyHosts(bytes)).catch(() => undefined);
 			},
+			// 配置变更（桌面设置页 / 会话菜单 / Web 端 API 任一来源）：
+			// 桌面渲染层刷新等级菜单，Web 端经 /api/events 立即拿到新快照。
+			onConfigChanged: () => {
+				if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(ipcChannels.securityConfigChanged);
+				webServiceManager?.notifySecurityChanged();
+			},
 		});
 		appLogger = new AppLogger();
 		setAppLogger(appLogger);
@@ -5156,6 +5277,13 @@ app
 		void appLogger.info("app", "Cold start milestone: app ready", {
 			sinceModuleLoadMs: Date.now() - bootAnchorMs,
 			processUptimeMs: Math.round(process.uptime() * 1000),
+		});
+		// 构建身份（通道 + 来源）：支持排障时一眼看出这个包是本机打包还是发布产物。
+		// 与更新界面的「本地构建」徽章同源（systemIpc 的 update:get-channel）。
+		void appLogger.info("app", "Build identity", {
+			channel: updateChannel,
+			buildOrigin: resolveBuildOrigin(),
+			packaged: app.isPackaged,
 		});
 		// userData 更名迁移（pi-desktop → PiDeck）在 setPath 前同步执行，当时还没有日志器；
 		// 结果在此补记，失败/回退路径必须可从日志诊断。
@@ -5454,9 +5582,9 @@ app
 			if (!entries) return undefined;
 			return projectResourceEnabled({ entries, value: skillPath, baseDir: dirname(skillPath) });
 		});
-		// 启动时自动安装内置 usage-probe 技能模板到用户全局技能目录：
-		// pi 只扫 ~/.pi/agent/skills、~/.agents/skills，不读 pideck 打包资源目录（resources/skills），
-		// 必须落到用户目录，用户才能在聊天里 /skill:usage-probe 让 AI 引导写用量探针配置。
+		// 启动时自动安装内置 usage-probe 技能模板到 PiDeck 专属技能目录（~/.pi/agent/pideck-skills）：
+		// 该目录不在 pi 的自动发现根里，只有 PiDeck spawn 时以 --skill 注入，
+		// 终端里的 pi（TUI）不会加载；用户仍可在聊天里 /skill:usage-probe 触发。
 		// fire-and-forget：安装失败不阻塞启动，仅记日志（手动入口 configInstallUsageSkill 仍可兑底）。
 		void skillManager.installUsageProbeTemplate().then((result) => {
 			if (result.success) {
@@ -5465,7 +5593,7 @@ app
 				void appLogger?.warn("skill", "Usage probe skill template auto-install failed", { error: result.error });
 			}
 		});
-		// 生图技能同样启动时自动落到用户全局技能目录（pi 只扫 ~/.pi/agent/skills 等，不读 resources/），
+		// 生图技能同样启动时落到 PiDeck 专属技能目录（只由 PiDeck 的 --skill 注入），
 		// 否则用户无法 /skill:image-gen 触发生图。fire-and-forget，失败不阻塞启动。
 		void skillManager.installImageGenTemplate().then((result) => {
 			if (result.success) {
@@ -5474,7 +5602,7 @@ app
 				void appLogger?.warn("skill", "Image-gen skill template auto-install failed", { error: result.error });
 			}
 		});
-		// 环境诊断技能启动时自动落到用户全局技能目录，用户可 /skill:pideck-doctor 让 pi 读诊断报告排障。
+		// 环境诊断技能启动时落到 PiDeck 专属技能目录，用户可 /skill:pideck-doctor 让 pi 读诊断报告排障。
 		// fire-and-forget，失败不阻塞启动。
 		void skillManager.installPideckDoctorTemplate().then((result) => {
 			if (result.success) {
@@ -5483,6 +5611,24 @@ app
 				void appLogger?.warn("skill", "Pideck-doctor skill template auto-install failed", { error: result.error });
 			}
 		});
+		// issue #450：Windows 没有进程组级联回收，强杀/异常退出会留下 npx 型 MCP 与 ACP 的
+		// 孤儿 node 进程（事故现场 195 个 / 21GB 提交内存）。启动后后台回收一次：只杀
+		// 「父进程已消失 + 命令行命中当前 MCP/ACP 配置」的 node.exe，活的进程一律不碰。
+		setTimeout(() => {
+			void (async () => {
+				try {
+					const mcp = await configManager.getMcpConfig().catch(() => null);
+					const markers = deriveOrphanSweepMarkers({
+						mcpServers: (mcp?.servers ?? []).map((server) => server.definition),
+						acpTools: settingsStore.get().acpTools ?? [],
+					});
+					const result = await sweepOrphanedManagedProcesses({ markers });
+					if (result.found > 0) void appLogger?.info("process-sweep", "Reclaimed orphaned managed processes", result);
+				} catch (error) {
+					void appLogger?.warn("process-sweep", "Orphan process sweep failed", { error: error instanceof Error ? error.message : String(error) });
+				}
+			})();
+		}, 5_000);
 		extensionManager = new ExtensionManager(
 			piLocator,
 			() => settingsStore.get(),
@@ -5690,6 +5836,8 @@ app
 				}
 			},
 		);
+		// 桌面端专用技能只经 spawn 时的 --skill 注入；TUI 不扫内置目录，自然不会加载。
+		agentManager.setBundledSkillResolver(() => skillManager.getBundledSkillLoadPaths());
 		// C12：退出清理登记（before-quit 统一 runAll，新增资源不再改 before-quit）
 		quitCleanup.register("pi-agents", () => agentManager?.stopAll());
 
@@ -6006,6 +6154,8 @@ app
 			// 新会话无标题时的兜底标题（i18n；与外部会话导入兜底一致）
 			() => mainCopy("session.dshUntitled"),
 			rpcLogLiveBroadcaster,
+			// Ask 通知：DSH 没有 AgentManager 的通道，由装配层注入统一门控/toast。
+			{ askPending: (input) => notifyAgentAskPending(agentToastDeps(), input) },
 		);
 		// C12/E15：DSH 退出清理——先停全部活跃会话（清 mux/订阅/pending）再 dispose host，
 		// 顺序保证避免 host 先被杀导致会话清理路径访问已死 transport。
@@ -6039,6 +6189,22 @@ app
 					if (typeof agentId !== "string") return;
 					handler(agentId, channel, payload);
 				}),
+			// ACP 后端的实时流：会话正文在 agents:message 投影快照里（全量替换），
+			// 回合终态只在 agents:runtime-state 里（settleAcpTurn 在工具-only 回合不写任何标记）。
+			// 同 DSH 只订各自的 manager，不订聚合网关（否则会把 pi 帧重复翻译一遍）。
+			subscribeAcpChannelEvents: (handler) =>
+				acpAgentManager?.onOutput((channel, payload) => {
+					const agentId = payload && typeof payload === "object" && "agentId" in payload ? (payload as { agentId?: unknown }).agentId : undefined;
+					if (typeof agentId !== "string") return;
+					handler(agentId, channel, payload);
+				}) ?? (() => {}),
+			// ACP 工具清单（只给 id/name，command/args/env 不外发）：Web 端后端选择器的 ACP 入口。
+			// 未开启 ACP 或没有启用的工具时返回空数组，Web 端就不展示 ACP 选项。
+			listAcpTools: () => {
+				const settings = settingsStore.get();
+				if (settings.acpEnabled !== true) return [];
+				return (settings.acpTools ?? []).filter((tool) => tool.enabled).map((tool) => ({ id: tool.id, name: tool.name }));
+			},
 			listProjects: () => projectStore.list().filter(isLocalProject),
 			createProject: (path) => projectStore.add(path),
 			deleteProject: async (projectId) => {
@@ -6091,18 +6257,28 @@ app
 				const project = projectStore.get(input.projectId);
 				if (!project) throw new Error(mainCopy("project.notFound"));
 				const projectWsl = resolveProjectWslIdentity(project, settingsStore.get());
+				// 后端白名单（渲染层输入不可信）：只认 dsh/acp，其余按 pi；acp 必须带工具 id。
+				const backend = input.backend === "dsh" ? "dsh" : input.backend === "acp" ? "acp" : undefined;
+				const acpToolId = backend === "acp" && typeof input.acpToolId === "string" ? input.acpToolId : undefined;
+				// ACP 的模型/思考由 agent CLI 自持（session/config options），PiDeck 的 models.json
+				// 对它无意义：与桌面 IPC（sessionIpc createDraft 的 nonPiBackend 分支）同规，不写偏好。
+				const acp = backend === "acp";
 				const draft = await sessionCatalog.createDraft({
 					projectId: input.projectId,
 					title: input.title?.trim() || mainCopy("session.newTitle"),
 					environment: projectWsl !== undefined ? "wsl" : "native",
 					...(projectWsl !== undefined ? { wslDistro: projectWsl.distro, wslUser: projectWsl.user } : {}),
-					model: input.model ? createSessionModelPreference(input.model.provider, input.model.modelId, input.model.modelName) : undefined,
-					thinkingLevel: input.thinkingLevel,
+					backend,
+					acpToolId,
+					model: !acp && input.model ? createSessionModelPreference(input.model.provider, input.model.modelId, input.model.modelName) : undefined,
+					thinkingLevel: acp ? undefined : input.thinkingLevel,
 				});
 				// standby 补热：与桌面 IPC（sessionIpc createDraft）同款——Web 建草稿即「马上要开聊」，
 				// 趁用户输入空窗后台预热 pi 进程；首条消息经 activateRuntime 认领实现秒级启动。
 				// fire-and-forget；ensure 幂等且受 standbyRuntimeEnabled 设置闸。
-				if (draft.backend !== "dsh") agentManager.ensureStandbyAgent(draft.projectId);
+				if (draft.backend !== "dsh" && draft.backend !== "acp") agentManager.ensureStandbyAgent(draft.projectId);
+				// Web 建的草稿不是渲染进程发的：不广播侧栏就一直看不到这一行（issue #436 同类缺口）。
+				notifyCatalogRefreshed([draft.projectId]);
 				return draft;
 			},
 			createAnonymousSession,
@@ -6121,11 +6297,14 @@ app
 						await sessionScanner.rename(entry.filePath, title);
 					}
 				}
-				return sessionCatalog.update(sessionId, {
+				const updated = await sessionCatalog.update(sessionId, {
 					...patch,
 					...(patch.model ? { model: createSessionModelPreference(patch.model.provider, patch.model.modelId, patch.model.modelName) } : {}),
 					title: title || undefined,
 				});
+				// 改名/换模型都是从 Web 端改的，侧栏标题不重拉就一直停在旧名上（issue #436）。
+				notifyCatalogRefreshed([updated.projectId]);
+				return updated;
 			},
 			deleteSessionRecord: async (sessionId) => {
 				const entry = sessionCatalog.get(sessionId);
@@ -6148,9 +6327,19 @@ app
 					await sessionCatalog.rememberDismissedDshSession(entry.dshSessionId);
 				}
 				await sessionCatalog.removeWithDescendants(sessionId);
+				// 删除成功后才广播：渲染层收到事件会立刻重拉列表，早发会把刚删的行再拉回来一次。
+				// 缺这一句 = 通过 Web API 删会话后桌面端留下幽灵行（issue #436）。
+				notifyCatalogRefreshed([entry.projectId]);
 				return true;
 			},
-			copySessionRecord: (sessionId) => copyCatalogSession(sessionId),
+			copySessionRecord: async (sessionId) => {
+				const result = await copyCatalogSession(sessionId);
+				if (result.cancelled) return result;
+				// 副本同样是 Web 端发起的：不广播侧栏要等手动刷新才出现新行（issue #436）。
+				const projectId = (result.targetSessionId ? sessionCatalog.get(result.targetSessionId)?.projectId : undefined) ?? sessionCatalog.get(sessionId)?.projectId;
+				if (projectId) notifyCatalogRefreshed([projectId]);
+				return result;
+			},
 			exportSessionRecordHtml: (sessionId) => exportCatalogSessionHtml(sessionId),
 			readSessionReferenceMessages: (sessionId) => readCatalogSessionReferenceMessages(sessionId),
 			readSessionMessages: async (sessionId) => {
@@ -6284,6 +6473,10 @@ app
 			setSessionRuntimeModel: (target, provider, modelId, modelName) => sessionRuntimeCoordinator.setRuntimeModel(target, provider, modelId, modelName),
 			setSessionRuntimeThinking: (target, level) => sessionRuntimeCoordinator.setRuntimeThinking(target, level),
 			setSessionRuntimePermission: (target, preset) => sessionRuntimeCoordinator.setRuntimePermission(target, preset),
+			// Pi 会话安全等级：与桌面 SecurityLevelMenu 同源（SecurityStore 全局默认 + 会话覆盖），
+			// 路由层已校验会话/后端/等级，这里只做存储写入（策略快照由 SecurityStore 刷新）。
+			getSecurityConfig: () => securityStore.getConfig(),
+			setSessionSecurityLevel: (sessionId, levelId) => securityStore.setSessionLevel(sessionId, levelId),
 			// fork/clone 与桌面 IPC 同源（sessionForkCommands 统一命令层）：
 			// 重发/编辑 fork 化（mutationFork/branchMode）、supersededBy 隐藏、
 			// catalog 刷新广播都在那一层维护，两端行为必须一致。
@@ -6473,7 +6666,16 @@ app
 		// 收藏：本地快照（userData/favorites.json）。坏文件按空列表重建，不阻断启动。
 		favoritesStore = new FavoritesStore(join(app.getPath("userData"), "favorites.json"));
 		const favoritesStorePreload = favoritesStore.load();
-		await Promise.all([sessionCatalog.load(), automationStorePreload, agentProfileStorePreload, favoritesStorePreload]);
+		// 会话分组（userData/session-groups.json）：启动时一次性从内置插件的私有 storage 迁入
+		//（只读插件文件、不写不删）；此后侧栏与插件 v3 都经 store 读写同一份数据。
+		sessionGroupStore = new SessionGroupStore(join(app.getPath("userData"), "session-groups.json"), join(app.getPath("userData"), "host-plugin-storage", "session-groups.json"));
+		const sessionGroupStorePreload = sessionGroupStore.load();
+		// 插件页保存分组后实时刷侧栏：数据变化统一从 store 冒泡，广播给主窗口。
+		sessionGroupStore.onChanged(() => {
+			const win = mainWindow;
+			if (win && !win.isDestroyed()) win.webContents.send(ipcChannels.sessionGroupsChanged, null);
+		});
+		await Promise.all([sessionCatalog.load(), automationStorePreload, agentProfileStorePreload, favoritesStorePreload, sessionGroupStorePreload]);
 		// 智能体一次性调用（划词工具 / 市场面板）：复用提示词增强侧车协议，但**独立实例**。
 		// 侧车进程常驻、首次调用才拉起（EnhancePromptService 的现有语义），启动期只做装配。
 		agentInvokeCompletionService = createCompletionHelperService("agent-invoke");
@@ -6626,7 +6828,9 @@ app
 				}
 				const skills = await skillManager?.list().catch(() => null);
 				for (const skill of skills?.skills ?? []) {
-					if (skill.sourceId !== "pi-global" && skill.sourceId !== "agents-global") continue;
+					// pideck-global（自带技能）也要参与映射：老版本把它们装在 pi 的全局目录，
+					// 迁移时把旧禁用名翻成新路径的 -path 规则，用户的停用意图才不会丢。
+					if (skill.sourceId !== "pi-global" && skill.sourceId !== "agents-global" && skill.sourceId !== "pideck-global") continue;
 					resources.push({ kind: "skills", name: skill.name, value: skill.path, scope: "user" });
 				}
 				const prompts = await promptManager?.list().catch(() => null);
@@ -6731,12 +6935,25 @@ app
 			},
 			getTools: () => settingsStore.get().acpTools ?? [],
 			isEnabled: () => settingsStore.get().acpEnabled === true,
+			// ACP 代理：每次开会话实时读，只作用于新 spawn 的 CLI 进程（env 在启动时定格）。
+			getProxySettings: () => resolveAcpProxySettings(settingsStore.get()),
+			// 工具级配置记忆：新建会话重放；用户切换成功即写回 settings（只记思考/模式/权限，不含模型）。
+			getToolConfigDefaults: (toolId) => settingsStore.get().acpToolConfigDefaults?.[toolId],
+			rememberConfigOption: (toolId, optionId, value) => {
+				const settings = settingsStore.get();
+				// 工具已被删除/改名后不再写记忆，避免产生永不消费的孤儿条目。
+				if (!(settings.acpTools ?? []).some((tool) => tool.id === toolId)) return;
+				const next = withAcpConfigDefault(settings.acpToolConfigDefaults ?? {}, toolId, optionId, value);
+				if (next) void settingsStore.update({ acpToolConfigDefaults: next });
+			},
 			// ACP 超时口径运行时读口：每次布防/派发实时读 settings（变更后新回合生效，
 			// 不需要重启）；undefined 回落代码内默认（stall 90s / turn 10min）。
 			readAcpTimeoutSettings: () => {
 				const settings = settingsStore.get();
 				return { promptStallTimeoutMs: settings.acpPromptStallTimeoutMs, promptTurnTimeoutMs: settings.acpPromptTurnTimeoutMs };
 			},
+			// Ask 通知：与 pi 共用同一份门控/toast；完成通知由 composite.onAgentSettled 统一补。
+			notify: { askPending: (input) => notifyAgentAskPending(agentToastDeps(), input) },
 			// configOptions 变更推送：set_config_option 响应/config_option_update 通知都走同一事件,
 			// 渲染层按 agentId 隔离(旧 agent 迟到事件写旧 atom,不再被读)。
 			onConfigOptionsChanged: (tab, options) => {
@@ -6778,6 +6995,13 @@ app
 			await acpAgentManager?.stopAll();
 		});
 		compositeAgentGateway = new CompositeAgentGateway([agentManager, dshAgentManager, acpAgentManager]);
+		// 非 pi 后端没有 AgentManager 的内部完成通知：这里统一补「会话完成」。
+		// pi 已经在自己内部发过（门控/文案一致），跳过避免双弹。
+		compositeAgentGateway.onAgentSettled((info) => {
+			const tab = compositeAgentGateway?.list().find((candidate) => candidate.id === info.agentId);
+			if (!tab || (tab.backend ?? "pi") === "pi") return;
+			notifySessionFinished(agentToastDeps(), { agentId: info.agentId, title: info.title, ...(tab.deckSessionId ? { sessionId: tab.deckSessionId } : {}) });
+		});
 		// 项目位置注入给会话协调器：远端会话在 pi 上报会话文件之前没有 ssh 身份，"这条会话的 runtime
 		// 在哪台机器上"只能由项目 locator 回答（AgentManager 也按它路由 runtime）。位置真相同的单一
 		// 来源仍然是 projectStore，这里只给一个只读取值器。
@@ -6844,7 +7068,7 @@ app
 			},
 			// catalog 变更广播：automation createDraft / dispatch 接受后让侧栏静默重拉，
 			// 避免新会话行延迟出现、DSH agent 行先落成孤儿条目（复用 DSH 刷新同一条 IPC 通道）。
-			notifySessionCatalogChanged: (projectId) => notifyDshCatalogRefreshed([projectId]),
+			notifySessionCatalogChanged: (projectId) => notifyCatalogRefreshed([projectId]),
 		});
 		automationScheduler = new AutomationScheduler(automationStore);
 		automationScheduler.setTriggerHandler(async (task, scheduledFor, trigger) => {
@@ -6989,6 +7213,8 @@ app
 			sessionRuntimeCoordinator,
 			feishuSessionRuntimeBindings: imSessionRuntimeBindings,
 			getCurrentLocale: currentFeishuLocale,
+			// 卡片思考过程跟随 pi 的 hideThinkingBlock（#425）：每次建状态时现读，用户改完立刻生效
+			getShowThinking: () => settingsStore.get().showThinking,
 		});
 		// 微信 iLink 桥接：与飞书同构，但登录方式是扫码，且必须等界面就绪才能展示二维码。
 		// 服务在这里建好并登记退出清理；启用状态下的实际连接由 start() 发起（fire-and-forget，
@@ -7225,7 +7451,8 @@ app
 
 		// 桌面宠物系统：新增模块，默认关闭（petEnabled=false），不触碰现有 IPC 与主窗逻辑
 		petSystem = new PetSystem({
-			agentManager,
+			// 全后端聚合：ACP/DSH 的 running/idle/error/waiting 与完成气泡都由 composite 提供。
+			agentSource: compositeAgentGateway,
 			settingsStore,
 			getMainWindow: () => mainWindow,
 			resolveSessionId: (agentId) => sessionRuntimeCoordinator.getSessionId(agentId),

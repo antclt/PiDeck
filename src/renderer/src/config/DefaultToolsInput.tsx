@@ -43,7 +43,7 @@ export function DefaultToolsInput(props: {
 			}}
 		>
 			<PopoverTrigger asChild>
-				<div className="flex min-h-[38px] w-full min-w-0 cursor-pointer flex-wrap items-center gap-1.5 rounded-sm border border-border-subtle bg-popover px-2.5 py-[5px] transition-colors duration-fast hover:border-border-strong">
+				<div className="flex min-h-[38px] w-full min-w-0 cursor-pointer flex-wrap items-center gap-1.5 rounded-sm border border-border-subtle bg-popover px-2.5 py-1.5 transition-colors duration-fast hover:border-border-strong">
 					{effective.length === 0 ? (
 						<span className="text-xs leading-[18px] text-danger">{t("config.tools.allDisabled")}</span>
 					) : (
@@ -52,7 +52,7 @@ export function DefaultToolsInput(props: {
 							return (
 								<span
 									key={name}
-									className={`inline-flex h-6 items-center rounded-full border pl-[9px] pr-[5px] font-mono text-xs leading-[18px] whitespace-nowrap text-text-primary ${incremental ? "border-[color-mix(in_srgb,var(--color-accent)_40%,var(--color-border-subtle))] bg-[color:color-mix(in_srgb,var(--color-accent)_10%,var(--color-bg-panel))]" : "border-border-subtle bg-bg-hover"}`}
+									className={`inline-flex h-6 items-center rounded-full border pl-2.5 pr-1.5 font-mono text-xs leading-[18px] whitespace-nowrap text-text-primary ${incremental ? "border-[color-mix(in_srgb,var(--color-accent)_40%,var(--color-border-subtle))] bg-[color:color-mix(in_srgb,var(--color-accent)_10%,var(--color-bg-panel))]" : "border-border-subtle bg-bg-hover"}`}
 								>
 									<span>{name}</span>
 									{isCustom ? (
@@ -97,7 +97,7 @@ export function DefaultToolsInput(props: {
 											key={tool.name}
 											value={tool.name}
 											onSelect={() => props.onChange(setToolEnabled({ baseEntries: base, entries, name: tool.name, on: !enabled }))}
-											className={`cursor-pointer gap-2 py-[7px] pr-3 pl-7 text-control text-text-primary ${enabled ? "bg-[color:color-mix(in_srgb,var(--color-accent)_6%,var(--color-bg-panel))]" : ""}`}
+											className={`cursor-pointer gap-2 py-2 pr-3 pl-7 text-control text-text-primary ${enabled ? "bg-[color:color-mix(in_srgb,var(--color-accent)_6%,var(--color-bg-panel))]" : ""}`}
 										>
 											<span
 												className={`flex size-[18px] shrink-0 items-center justify-center rounded-[4px] border-[1.5px] transition-[border-color,background-color] duration-fast${enabled ? " border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-text-inverse)]" : " border-border-strong text-[color:var(--color-accent)]"}`}

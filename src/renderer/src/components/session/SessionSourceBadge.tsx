@@ -26,9 +26,9 @@ const SOURCE_LABELS: Record<SessionSource, string> = {
 };
 
 const SOURCE_TONES: Record<SessionSource, string> = {
-	pi: "border-cyan-300/70 text-cyan-700 dark:border-cyan-700/70 dark:text-cyan-300",
-	codex: "border-indigo-300/70 text-indigo-700 dark:border-indigo-700/70 dark:text-indigo-300",
-	claude: "border-amber-300/70 text-amber-700 dark:border-amber-700/70 dark:text-amber-300",
+	pi: "border-[var(--color-identity-source-line)] text-[var(--color-identity-source)]  ",
+	codex: "border-[var(--color-identity-source-alt-line)] text-[var(--color-identity-source-alt)]  ",
+	claude: "border-warning/30 text-warning  ",
 	// opencode 官方品牌为黑白单色，不用品牌色（避免绿色观感）；中性灰随主题自适应
 	opencode: "border-muted-foreground/40 text-muted-foreground",
 	// zcode（z.ai CLI）无公开品牌图形资源，用中性色 + 自绘 Z 标记，避免错误品牌色
@@ -297,7 +297,7 @@ export function SessionBackendBadge(props: { backend?: AgentBackend; className?:
 			aria-label={label}
 			title={label}
 			data-backend={backend}
-			className={cn("h-4 rounded px-1 text-[9px] font-semibold leading-none tracking-wide", isImageGen ? "border-violet-300/70 text-violet-700 dark:border-violet-700/70 dark:text-violet-300" : "border-muted-foreground/40 text-muted-foreground", props.className)}
+			className={cn("h-4 rounded px-1 text-[9px] font-semibold leading-none tracking-wide", isImageGen ? "border-[var(--color-identity-agent-line)] text-[var(--color-identity-agent)]  " : "border-muted-foreground/40 text-muted-foreground", props.className)}
 		>
 			{isImageGen && <ImageIcon className="mr-0.5 size-2.5" aria-hidden="true" />}
 			{isAcp && <TerminalIcon className="mr-0.5 size-2.5" aria-hidden="true" />}
@@ -348,7 +348,7 @@ export function SessionSourceBadge(props: { source: SessionSource; label?: strin
 export function ImageGenSourceBadge(props: { className?: string }) {
 	const label = t("sessionBackend.imagegen");
 	return (
-		<Badge variant="outline" aria-label={label} title={label} data-source="imagegen" className={cn("size-5 rounded-md p-0 border-violet-300/70 text-violet-700 dark:border-violet-700/70 dark:text-violet-300", props.className)}>
+		<Badge variant="outline" aria-label={label} title={label} data-source="imagegen" className={cn("size-5 rounded-md p-0 border-[var(--color-identity-agent-line)] text-[var(--color-identity-agent)]  ", props.className)}>
 			<ImageIcon className="size-3" aria-hidden="true" />
 		</Badge>
 	);
@@ -407,8 +407,8 @@ const CHANNEL_LABELS: Record<SessionChannel, string> = {
 
 const CHANNEL_TONES: Record<SessionChannel, string> = {
 	// 渠道徽标沿用来源徽标的「浅描边 + 深色字形」，颜色取品牌方向：微信用绿、飞书用蓝。
-	wechat: "border-emerald-300/70 text-emerald-700 dark:border-emerald-700/70 dark:text-emerald-300",
-	feishu: "border-sky-300/70 text-sky-700 dark:border-sky-700/70 dark:text-sky-300",
+	wechat: "border-success/30 text-success  ",
+	feishu: "border-[var(--color-identity-tool-line)] text-[var(--color-identity-tool)]  ",
 };
 
 /**
@@ -431,7 +431,7 @@ export function SessionChannelMark(props: { channel: SessionChannel; className?:
 export function SideTaskMark(props: { className?: string }) {
 	const label = t("sideTask.title");
 	return (
-		<Badge variant="outline" aria-label={label} title={label} data-side-task="true" className={cn("size-4 shrink-0 items-center justify-center rounded-md border-violet-300/70 p-0 text-violet-700 dark:border-violet-700/70 dark:text-violet-300", props.className)}>
+		<Badge variant="outline" aria-label={label} title={label} data-side-task="true" className={cn("size-4 shrink-0 items-center justify-center rounded-md border-[var(--color-identity-agent-line)] p-0 text-[var(--color-identity-agent)]  ", props.className)}>
 			<PanelRight size={10} aria-hidden="true" />
 		</Badge>
 	);

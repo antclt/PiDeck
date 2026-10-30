@@ -3,7 +3,7 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { FolderOpen, FolderPlus, PackagePlus, RefreshCw, Puzzle, BookOpen, FilePlus2, ChevronDown, Link2, Plus, LoaderCircle } from "lucide-react";
 import type { HostPluginCatalog, HostPluginInfo, HostPluginPermission } from "../../../shared/types/hostPlugin";
 import { LOCAL_SERVICE_IDS } from "../../../shared/localServices";
-import { hostPluginCatalogAtom, hostPluginPanelAtom } from "../atoms/host-plugin-atoms";
+import { hostPluginCatalogAtom, openHostPluginPanelAtom } from "../atoms/host-plugin-atoms";
 import { settingsOpenAtom } from "../atoms/app-ui-atoms";
 import { desktopApi } from "../desktopApi";
 import { t, type TranslationKey } from "../i18n";
@@ -39,7 +39,7 @@ const PLUGIN_ERROR_KEYS: Record<string, TranslationKey> = {
 export function HostPluginsTab() {
 	const { catalog, error } = useAtomValue(hostPluginCatalogAtom);
 	const setCatalog = useSetAtom(hostPluginCatalogAtom);
-	const openPanel = useSetAtom(hostPluginPanelAtom);
+	const openPanel = useSetAtom(openHostPluginPanelAtom);
 	const setSettingsOpen = useSetAtom(settingsOpenAtom);
 	const [consent, setConsent] = useState<HostPluginInfo | null>(null);
 	// 卸载确认：删目录不可逆，与启用授权一样走一次显式确认。
@@ -157,12 +157,18 @@ export function HostPluginsTab() {
 		}
 	};
 	const togglePermission = (permission: HostPluginPermission, checked: boolean) =>
-		setDraft((current) => ({
-			...current,
-			permissions: checked ? [...current.permissions, permission] : current.permissions.filter((item) => item !== permission),
-			// 勾上服务控制时预置 PiDeck 已实现的服务（作者仍可逐个取消）；不预置会因缺 services 被 manifest 校验拒。
-			...(permission === "service.local" && checked && current.services.length === 0 ? { services: [...LOCAL_SERVICE_IDS] } : {}),
-		}));
+		setDraft((current) => {
+			let permissions = checked ? [...current.permissions.filter((item) => item !== permission), permission] : current.permissions.filter((item) => item !== permission);
+			// `sessions.read.workspace` 是 `sessions.read` 的范围扩展，单独声明会被 manifest 校验拒装：这里替作者补全/回收。
+			if (checked && permission === "sessions.read.workspace" && !permissions.includes("sessions.read")) permissions = ["sessions.read", ...permissions];
+			if (!checked && permission === "sessions.read") permissions = permissions.filter((item) => item !== "sessions.read.workspace");
+			return {
+				...current,
+				permissions,
+				// 勾上服务控制时预置 PiDeck 已实现的服务（作者仍可逐个取消）；不预置会因缺 services 被 manifest 校验拒。
+				...(permission === "service.local" && checked && current.services.length === 0 ? { services: [...LOCAL_SERVICE_IDS] } : {}),
+			};
+		});
 	const draftReady = hostPluginScaffoldInput(draft) !== null;
 	return (
 		<section className="flex flex-col gap-4">

@@ -14,6 +14,7 @@
 - 单实例用自研按版本互斥 `acquireVersionSingleInstance`（见 `instanceLockFile.ts`），**不用** `requestSingleInstanceLock`（原生锁会阻止不同版本并行）；第二实例 `app.exit(0)`。dev 与 stable 使用不同 AUMID，避免通知归属混淆。
 - 窗口隐藏时先 `maximize()` 再加载，避免布局跳变；`zoomFactor` 在 `did-finish-load` 后应用。
 - quit 路径覆盖 pi 子进程、node-pty、watcher、锁文件；新增常驻资源必须同步登记 `QuitCleanupRegistry`（`registerQuitCleanup`）。
+- **Windows 没有 SIGTERM**：停 pi 先关 stdin 走 RPC 约定的有序退出（宽限 `WINDOWS_PI_GRACEFUL_EXIT_MS`，要短于删会话的 3s 等待），超时才 `taskkill /T /F`；启动后按当前 MCP/ACP 配置回收「父进程已消失」的孤儿 node/cmd（`src/main/process/orphanSweep.ts`，issue #450）。活的进程（父进程还在）一律不碰。
 
 ## 窗口与 webview
 

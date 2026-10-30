@@ -301,3 +301,39 @@ export class IncrementalMarkdownFrontier {
 		this.cached = undefined;
 	}
 }
+
+export type MarkdownChunkSpan = {
+	start: number;
+	end: number;
+	text: string;
+};
+
+/**
+ * settled 长文分块：按顶层块边界把全文切成 ≈targetChunkChars 的组。
+ *
+ * 为什么存在（2026-10-27 事故）：「展开全文」把预览一次性换成 205KB 全文时，
+ * 单次 <Streamdown mode="static"> 全量解析（数千块级元素一次 commit）是秒级冻结；
+ * 分块后每次 commit 只解析一组（32K ≈ 2-3ms 量级），渐进挂载把长任务摊平。
+ *
+ * 保证：
+ * - 各块 span 依序恰好吃满 [0, text.length)，拼接结果与原文逐字节相同（测试钉住）；
+ * - 边界只落在顶层块尾（围栏/列表/表格/HTML 块永不被切开——切分复用
+ *   splitTopLevelMarkdownBlocks 的围栏感知扫描）；
+ * - 单块超过 target（如一个巨型代码围栏）时独立成组，不再细分。
+ */
+export function splitMarkdownChunks(text: string, targetChunkChars: number): MarkdownChunkSpan[] {
+	if (text.length === 0) return [];
+	const blocks = splitTopLevelMarkdownBlocks(text);
+	const chunks: MarkdownChunkSpan[] = [];
+	let chunkStart = 0;
+	let chunkEnd = 0;
+	for (const block of blocks) {
+		if (chunkEnd > chunkStart && block.end - chunkStart > targetChunkChars) {
+			chunks.push({ start: chunkStart, end: chunkEnd, text: text.slice(chunkStart, chunkEnd) });
+			chunkStart = chunkEnd;
+		}
+		chunkEnd = block.end;
+	}
+	if (chunkEnd > chunkStart) chunks.push({ start: chunkStart, end: chunkEnd, text: text.slice(chunkStart, chunkEnd) });
+	return chunks;
+}

@@ -1,6 +1,6 @@
 import { useAtomValue, useSetAtom } from "jotai";
 import { useEffect, useRef, useState } from "react";
-import type { AvailableModel } from "../../../shared/types";
+import type { AgentBackend, AvailableModel } from "../../../shared/types";
 import {
 	beginPiRuntimeThinkingLevelsAtom,
 	clearPiRuntimeThinkingLevelsAtom,
@@ -21,7 +21,7 @@ import { resolveComposerLiveModel, resolveGuideDisplayModel, type ModelPending }
 import { resolveComposerThinkingLevel } from "../utils/thinkingDisplay";
 import { modelThinkingLevelOfMap } from "../../../shared/modelThinkingLevels";
 import { modelKey } from "../utils/preferenceCycle";
-import { GUIDE_BOOTSTRAP_SESSION_ID, WELCOME_DSH_MODEL_KEY, WELCOME_MODEL_KEY, isWelcomeModelLost, readWelcomeBackendPreference, readWelcomeDshModelPreference, readWelcomeModelPreference, readWelcomeThinkingPreference, shouldClearWelcomePreference } from "../utils/chatSessionBootstrap";
+import { GUIDE_BOOTSTRAP_SESSION_ID, WELCOME_DSH_MODEL_KEY, WELCOME_MODEL_KEY, isWelcomeModelLost, readWelcomeDshModelPreference, readWelcomeModelPreference, readWelcomeThinkingPreference, shouldClearWelcomePreference } from "../utils/chatSessionBootstrap";
 
 /**
  * 会话「模型 + 思考强度」的读侧状态：模型目录、收藏、当前模型与可用档位。
@@ -38,6 +38,8 @@ export function useSessionPreferenceState(options: {
 	thinkingPickerOpen: boolean;
 	/** 快捷键首次按下已武装目录加载（写侧监听器设置） */
 	cycleArmed: boolean;
+	/** 当前会话后端（有 record 时仍以 record 为准；引导页用输入框当前选择）。 */
+	backend?: AgentBackend;
 	/** DSH 部署默认模型（草稿期高亮） */
 	defaultModel?: { provider?: string; modelId?: string; modelName?: string };
 	defaultThinkingLevel?: string;
@@ -92,9 +94,9 @@ export function useSessionPreferenceState(options: {
 	// Pi 欢迎页也要加载，才能使用启动 capability snapshot 的精确 thinkingLevels；DSH 的
 	// catalog 提供默认档位与当前模型信息（思考档位按当前模型 reasoningEfforts 裁剪，
 	// 模型未知/未声明时回退全量，host 负责最终能力校验）。
-	// 引导页虚拟会话没有 record，后端以前端显式切换偏好为准（与 changeBackend 的
-	// 引导页分支同源），切到 dsh 后模型/思考选择器展示 DSH 目录而非 pi 目录。
-	const isDshSession = record?.backend === "dsh" || runtime?.backend === "dsh" || (sessionId === GUIDE_BOOTSTRAP_SESSION_ID && readWelcomeBackendPreference() === "dsh");
+	// 引导页虚拟会话没有 record，后端取输入框当前选择（controller 传入，含设置默认），
+	// 切到 dsh 后模型/思考选择器展示 DSH 目录而非 pi 目录。
+	const isDshSession = record?.backend === "dsh" || runtime?.backend === "dsh" || (sessionId === GUIDE_BOOTSTRAP_SESSION_ID && options.backend === "dsh");
 	// 目录刻意懒加载：选择器打开、或快捷键首次按下（cycleArmed）才拉，避免每个会话栏开机各拉一次。
 	const catalogEnabled = options.pickerOpen || options.cycleArmed;
 	const {

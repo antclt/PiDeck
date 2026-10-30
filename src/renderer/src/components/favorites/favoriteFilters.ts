@@ -1,6 +1,6 @@
 import type { FavoriteEntry, FavoriteKind } from "../../../../shared/types";
 
-/** 收藏页的筛选维度：全部 / 只回复 / 只划选片段。 */
+/** 收藏页的筛选维度：全部 / 只回复 / 只划选片段 / 只会话。 */
 export type FavoriteFilter = "all" | FavoriteKind;
 
 /**

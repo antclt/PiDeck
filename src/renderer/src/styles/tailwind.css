@@ -25,7 +25,8 @@
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 /* 标准工作台的自定义标题栏（排除 simple 外壳与小任务窗口）：窗口控件行、抽屉列顶部让位区
    与会话 Tab 栏共用同一条标题栏底边线。小任务窗口的 list-toolbar 底边线本就铺满控件区、
-   simple 外壳没有 40px 标题栏行，二者都不能再叠一条（壁纸模式控件背景透明，叠线会加深）。 */
+   simple 外壳的标题行靠面板底色差分区（不画底边线），二者都不能再叠一条（壁纸模式控件
+   背景透明，叠线会加深）。 */
 @custom-variant workspace-titlebar (&:where(.custom-titlebar-enabled:not(.quick-task-shell):not(.simple-shell), .custom-titlebar-enabled:not(.quick-task-shell):not(.simple-shell) *));
 
 @layer base {
@@ -405,13 +406,23 @@
      语义名分离便于按组件收尾，不必重复定义 keyframes。 */
   --animate-tool-sweep: thinking-sweep 2.6s ease-out infinite;
 
+  /* 扫光动画只允许动 transform。
+   *
+   * 原来是 `left: -300px → 100%`：`left` 是**布局属性**，每一帧都触发一次 layout。
+   * 这条动画同时挂在三个地方（SingleLinePreview / TimelineEventCards / ToolCallComponents
+   * 的「运行中」扫光），2.6s 无限循环——也就是说流式输出期间主线程上一直有布局在跑，
+   * 而它跟 DOM 量、跟虚拟化都无关：把行数从 59 砍到 16 也削不掉它。
+   *
+   * 位移量取 100vw 而不是 100%：光带宽度固定 300px，`100%` 的百分比基准是**元素自身**
+   * （300px），不是容器宽度；100vw 保证光带能完整移出任何宽度的容器（视口比容器宽时
+   * 会多走一段，但那一段在容器外不可见，无视觉影响）。 */
   @keyframes thinking-sweep {
     0% {
-      left: -300px;
+      transform: translateX(-300px);
     }
     90%,
     100% {
-      left: 100%;
+      transform: translateX(100vw);
     }
   }
 }

@@ -205,6 +205,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 	return (
 		<ComposerPickerHost
 			sessionId={props.sessionId}
+			backend={composer.backend}
 			picker={composer.picker}
 			templates={composer.templates}
 			onClose={composer.pickers.close}
@@ -279,6 +280,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 											]
 												.filter(Boolean)
 												.join(" ")}
+											aria-busy={composer.isAcpInitializing || undefined}
 										>
 											{/* 扩展 widget（Todo/Plan）由统一会话组件卡展示。 */}
 											<TipTapComposer
@@ -353,6 +355,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 												onChangeBackend={composer.changeBackend}
 												acpTool={composer.acpTool}
 												acpConfig={composer.backend === "acp" && acpConfig.options ? { options: acpConfig.options, onSet: (optionId, value) => void acpConfig.setOption(optionId, value) } : undefined}
+												acpInitializing={composer.isAcpInitializing}
 												feishuIndicator={feishuIndicator}
 												securityControl={
 													/* C20：后端安全控制位统一入口（pi 安全等级 / DSH 权限预设） */

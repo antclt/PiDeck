@@ -15,6 +15,8 @@ import { ipcChannels } from "../../shared/ipc";
 import type { AcpSessionConfigOption, AcpToolConfig } from "../../shared/types/acp";
 import { sanitizeAcpTools, validateAcpTool } from "../acp/acpToolConfig";
 import { detectAcpPreset, findPresetById, runNpmGlobalAction, type AcpToolLifecycleDeps } from "../acp/acpToolLifecycle";
+import { getAppLogger } from "../logging/sharedLogger";
+import { ensureWindowsPathFresh } from "../process/windowsPathRefresh";
 import type { AcpLifecycleEvent, AcpToolStatus } from "../../shared/types/acp";
 import type { SettingsStore } from "../settings/SettingsStore";
 
@@ -33,6 +35,13 @@ export function registerAcpIpc(deps: {
 		if (!Array.isArray(tools)) throw new Error("acp:tools-save expects an array of tools");
 		const sanitized = sanitizeAcpTools(tools);
 		settingsStore.update({ acpTools: sanitized });
+		// 工具删除后清理其配置记忆：键是工具 id，孤儿条目只会在日后 id 复用时误重放。
+		const defaults = settingsStore.get().acpToolConfigDefaults;
+		if (defaults) {
+			const ids = new Set(sanitized.map((tool) => tool.id));
+			const kept = Object.fromEntries(Object.entries(defaults).filter(([toolId]) => ids.has(toolId)));
+			if (Object.keys(kept).length !== Object.keys(defaults).length) settingsStore.update({ acpToolConfigDefaults: kept });
+		}
 		return settingsStore.get().acpTools ?? [];
 	});
 
@@ -46,6 +55,7 @@ export function registerAcpIpc(deps: {
 				command: record.command,
 				args: record.args,
 				env: record.env,
+				bypassPermissions: record.bypassPermissions,
 			},
 			settingsStore.get().acpTools ?? [],
 		);
@@ -68,6 +78,11 @@ export function registerAcpIpc(deps: {
 
 	ipcMain.handle(ipcChannels.acpToolDetect, async (_event, presetId: unknown): Promise<AcpToolStatus> => {
 		const preset = requirePreset(presetId);
+		// 检测就是「用户刚装完 CLI 想确认一下」的那个时刻：先补一次注册表 PATH 差集，
+		// 否则本轮跑在旧 PATH 快照上，装好的命令一律报 missing（详见 windowsPathRefresh）。
+		await ensureWindowsPathFresh({
+			onAdded: (directories) => void getAppLogger()?.info("acp", "Windows PATH refreshed before detect", { presetId: preset.id, added: directories }),
+		});
 		return detectAcpPreset(getLifecycleDeps(), preset);
 	});
 

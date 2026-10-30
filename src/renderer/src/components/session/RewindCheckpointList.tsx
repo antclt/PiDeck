@@ -333,8 +333,8 @@ function CheckpointRow(props: {
 							// 变更统计拆成三段渲染：文件数走文案，增删行数着色（+绿 −红，与 activity-row/git 面板一致）。
 							<span className="flex flex-wrap items-center gap-x-1.5" title={t("rewind.diffVsCurrentHint")}>
 								<span className="text-text-secondary">{t("rewind.changedFiles", { files: stat.files })}</span>
-								{stat.insertions !== undefined && <span className="font-mono tabular-nums text-emerald-500">+{stat.insertions}</span>}
-								{stat.deletions !== undefined && <span className="font-mono tabular-nums text-rose-500">−{stat.deletions}</span>}
+								{stat.insertions !== undefined && <span className="font-mono tabular-nums text-success">+{stat.insertions}</span>}
+								{stat.deletions !== undefined && <span className="font-mono tabular-nums text-danger">−{stat.deletions}</span>}
 							</span>
 						) : null}
 					</div>

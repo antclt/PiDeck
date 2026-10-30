@@ -25,6 +25,59 @@
 6. **限高 flex 列的子项必须 `shrink-0`**（近期排版事故）：`overflow-y-auto` + `max-h-*` 容器里，子项带 `overflow:hidden` 后 `min-height:auto` 被清零 → 内容被线性压缩成横条且滚动条不出现。给限高容器子项加 `overflow-hidden` 时必须同步 `shrink-0`。守卫：`tests/sessionTodoStrip.test.mjs` + `e2e/todo-strip-scrollbar.spec.ts`。
 7. **utility「看不见」时用 DevTools 看胜出规则来自哪一层**，先处理冲突源再改 class。
 
+## Markdown 语义色（`--color-md-*`）
+
+Markdown 渲染（streamdown）的颜色一律走 `--color-md-*` 语义 token，**不要在组件里写死颜色，也不要新增手写 md CSS class**。`foundation.css` 的 `:root` 默认值等于改造前的写死值（标题/行内码=正文色、链接=正文色、引用=次级文字），所以加 token 本身零观感变化。
+
+| token | 作用 | `:root` 默认 |
+|---|---|---|
+| `--color-md-heading` | h1–h5 标题（h6 仍是 `text-secondary`） | `var(--color-text-primary)` |
+| `--color-md-link` | 正文链接 | `var(--color-text-primary)` |
+| `--color-md-code` | 行内码（代码块内文字由 Shiki inline style 决定，不受此 token 影响） | `var(--color-text-primary)` |
+| `--color-md-quote` | 引用文字 | `var(--color-text-secondary)` |
+| `--color-md-quote-border` | 引用左侧竖条 | `color-mix(in srgb, var(--color-text-secondary) 30%, transparent)` |
+| `--color-md-list-bullet` | ul `::marker` / ol `::before` 序号 | `var(--color-text-primary)` |
+| `--color-md-hr` | 分割线 | `var(--color-border-default)` |
+| `--color-md-strong` | 加粗 `<strong>` | `inherit`（跟随所在文字色） |
+| `--color-md-em` | 斜体 `<em>` | `inherit` |
+| `--color-md-del` | 删除线 `<del>` | `var(--color-text-secondary)` |
+| `--color-md-inline-code-bg` | 行内码底色 | `var(--color-bg-muted)` |
+| `--color-md-frame` | 表格 / 代码块外框线 | `var(--color-border-subtle)` |
+| `--color-md-table-border` | 表格单元格分隔线 | `var(--color-border-subtle)` |
+| `--color-md-table-head-bg` | 表头底色 | `var(--color-surface-ink-subtle)` |
+| `--color-md-table-head-text` | 表头文字 | `var(--color-text-secondary)` |
+| `--color-md-task-accent` | 任务列表勾选框（`accent-color`） | `var(--color-accent)` |
+| `--color-md-image-border` | 图片边框 | `transparent` |
+| `--font-family-md` | Markdown 正文字体 | `var(--font-family-base)` |
+
+**为什么有一半规则写在 `streamdownChrome.css`**：streamdown 给元素自带 utility 颜色（链接 `text-primary`、引用 `text-muted-foreground`、hr `border-border`），同样在 `utilities` 层，legacy 层的高 specificity 规则也压不住。所以这些覆盖必须写在 `streamdownChrome.css`（`@layer utilities`，且 `@import` 排在 `tailwind.css` 之后）；标题、行内码没有 utility 颜色，仍由 `timeline.css` 负责。
+文件链接（`data-md-file-link`，`MarkdownLink.tsx` 为可点击本地/文件引用加的自定义属性）固定为 `--color-accent`，不跟随 `--color-md-link`，避免改 md 链接色时连带改掉「可打开文件」这一语义。
+代码块里的 token 颜色由 Shiki 生成的 inline style 决定，CSS 变量管不到；`tui` 配色另带一套 Shiki 主题（`src/renderer/src/components/session/markdown/piTuiShikiThemes.ts`，`MarkdownStream` 用 `useDocumentPalette()` 订阅 `data-palette` 后换 `createCodePlugin`）——代码 token 色是颜色，归配色维度不归样式维度。移植 TUI 语法高亮时就改那个文件。
+
+## 外观（样式 × 配色）与自定义主题
+
+外观拆成两维，互不影响，任意组合都成立（`terminal` 样式 + `graphite` 配色、`classic` 样式 + `tui` 配色都合法）：
+
+| 维度 | dataset 属性 | 定义位置 | id 来源 | 管什么 |
+|---|---|---|---|---|
+| 样式 style | `data-appearance` | `foundation.css`（`:root[data-appearance="terminal"]`）+ `styles/terminalSkin.css` | `STYLE_PRESETS`（`themePresets.ts`）/ `APP_STYLE_IDS`（`shared/themeSkinMigration.ts`） | 形状、排版、装饰：字体、圆角、消息标记、表头标签 |
+| 配色 palette | `data-palette` | `foundation.css`：`:root[data-palette="x"]` 浅色 + `:root[data-theme="dark"][data-palette="x"]` 暗色 | `PALETTE_PRESETS` / `APP_PALETTE_IDS` | 只写颜色：面/字/边框/chat/Markdown |
+
+- **分工是硬约束，守卫双向查**：`tests/appearanceThemes.test.mjs` 断言样式块里没有任何 `--color-*` 声明、配色块里没有任何 `--radius-*`/`--font-family-*`。想加形状就改样式，想加颜色就改配色——写错维度会让「换配色不换形状」这个能力直接失效。
+- 为什么拆：旧模型是单维 `themeSkin`（一套皮肤同时定形状和颜色），结果是纯换色的条目与真换形状的条目并列在同一个列表，用户看不出区别；靠半透明面色伪装的「毛玻璃」在分栏布局下根本看不出磨砂质感。
+- 迁移：`shared/themeSkinMigration.ts` 的 `LEGACY_SKIN_MAP` 把每个旧 id 落到 (样式, 配色)——`terminal → terminal + tui`（观感不变）、纯配色皮肤 → `classic + 同名`、已下线的 `glass`/`liquid-glass` → 默认观感。`SettingsStore.load()` 迁移后 `delete themeSkin`。守卫要求旧 id 全覆盖：漏一个等于升级后静默丢掉用户的皮肤选择。
+- `classic` 样式与 `classic-green` 配色都**不声明 CSS 块**：它们的观感就是 `:root` 本身，声明块会掩盖默认值缺陷。
+- 内置 `terminal` 样式 + `tui` 配色是 pi 终端主题的**成套移植**（不是只借几块 md 色）：配色取 TUI 的 `pageBg/cardBg`、`text/muted/dim`、`border/borderAccent`、`userMessageBg` 与全套 `mdHeading/mdLink/mdCode/mdQuote/mdListBullet`；样式给 `--font-family-base/md` 换等宽（整屏等宽）、`--radius-*` 全归零成方框，再加 `terminalSkin.css` 的 `⏺`（助手轮）/`❯`（用户消息）标记、表头大写标签、代码块头部等宽。
+  移植硬约束：**状态语义色（`--color-info`/`--color-warning`/`--color-danger`/`--color-success` 及其 soft/strong）不许被样式或配色覆盖**（状态灯跨配色恒定，守卫 `tests/appearanceThemes.test.mjs`），只能改装饰色（面/字/边框/md/代码/chip）。
+- 样式专属的形状 chrome 放 `styles/terminalSkin.css`（`@import … layer(utilities)` 排在 `streamdownChrome.css` 之后，才能压过 Tailwind 布局 utility），色值仍在 `foundation.css` 的配色块里。
+- 新增**配色**：`foundation.css` 加 `:root[data-palette="<id>"]` + 暗色变体（必须带齐 16 个必需 token），再同步 `PALETTE_PRESETS` 与 `APP_PALETTE_IDS`；守卫 `tests/appearanceThemes.test.mjs`（id 集合、token 完整性、无多余块）、`tests/themeContrast.test.mjs`（把 id 加进 `PALETTE_IDS`，按 WCAG 校验正文/md 文字对）。
+- 新增**样式**：`foundation.css` 加 `:root[data-appearance="<id>"]`（只写形状），chrome 放 `styles/terminalSkin.css` 或新文件，再同步 `STYLE_PRESETS`、`APP_STYLE_IDS`、`CUSTOM_THEME_BASE_SKINS`。
+- 主色：配色自带推荐 `accent`（`PALETTE_PRESETS[].accent`），选配色时设置页联动写入 `settings.accent` 并落到 `data-accent`；`custom` 配色没有推荐主色，交回用户自己的 `settings.accent`。
+- 用户侧可定制范围由 `src/shared/customThemes.ts` 的 `CUSTOM_THEME_TOKEN_GROUPS` 决定（颜色值必须是 `#hex`/`rgb()`/`hsl()`/`oklch()` 静态形式）；`markdown` 组让自定义主题包也能改标题/链接/行内码/引用/列表符/分割线/加粗斜体删除线/表格/任务勾选/图片边框颜色，`font` 组让主题包改字体，指南页由 groups 自动生成。
+- **主题包 `base` 继承内置样式**：主题包可写 `"base": "terminal"`（可选值 = `CUSTOM_THEME_BASE_SKINS`，即 `classic` / `terminal`）。应用时写 `themePalette: "custom"` + `themeStyle: base ?? 用户当前样式`——**颜色归主题包独占、形状继承 base**，因此主题包只管自己的颜色，形状 chrome（等宽/方角/`⏺`）整套继承。旧主题包的 base 写的是皮肤 id（`graphite`/`glass`…），经 `normalizeThemeAppearance` 归一成样式，不报错也不静默丢弃。生效判定在 `useAppAppearance.ts` 的 `activeCustomTheme()`（只看 `themePalette === "custom"`），守卫：`tests/appearanceThemes.test.mjs`（`CUSTOM_THEME_BASE_SKINS` 与 `STYLE_PRESETS` 逐项相等 + 应用侧源码契约）。
+- **字体 token**：`--font-family-base` / `--font-family-mono` / `--font-family-md`，值走独立白名单 `FONT_VALUE_PATTERN`（字母/数字/空格/逗号/引号/连字符/下划线/点，≤120 字符，排除 `;(){}:/` 等注入面），内部快照键是 `font-family-*`（不是 `--color-*`），注入时由 `customThemeCssVar()` 拼回 `--font-family-*`。
+- 字体优先级：**设置页里显式选的自定义字体 > 主题包字体 > 内置皮肤/默认值**，集中在 `applyFontFamilyTokens()`（`hooks/appearance/useAppAppearance.ts`）算一次最终值，`applyCustomThemeTokens()` 末尾也调它，避免两处 `removeProperty` 互相抹掉。
+
 ## beUI 组件迁移
 
 - 安装走 CLI（`npx shadcn add @beui/<name>`），不手动复制源码；文件存在加 `--overwrite`。

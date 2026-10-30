@@ -11,7 +11,8 @@ function createDeps(overrides = {}) {
 		settings: {
 			language: "zh-CN",
 			theme: "dark",
-			themeSkin: "classic-green",
+			themeStyle: "terminal",
+			themePalette: "graphite",
 			petEnabled: true,
 			floatingBallEnabled: false,
 			webServiceEnabled: true,
@@ -43,7 +44,9 @@ test("maps settings and counts into heartbeat snapshot properties", () => {
 	assert.equal(snapshot.install_mode, "installed");
 	assert.equal(snapshot.language, "zh-CN");
 	assert.equal(snapshot.theme, "dark");
-	assert.equal(snapshot.theme_skin, "classic-green");
+	// 外观拆成形状与配色两维后分别上报：能区分「要新形状」与「只换色」的需求
+	assert.equal(snapshot.theme_style, "terminal");
+	assert.equal(snapshot.theme_palette, "graphite");
 	assert.equal(snapshot.startup_ms, 12346);
 	assert.equal(snapshot.sessions_total, 42);
 	assert.equal(snapshot.projects_total, 7);

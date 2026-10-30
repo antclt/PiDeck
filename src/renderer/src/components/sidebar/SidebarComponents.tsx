@@ -36,6 +36,8 @@ import {
 	ScrollText,
 	Settings2,
 	SquarePen,
+	Star,
+	StarOff,
 	Trash2,
 	UserPlus,
 	XCircle,
@@ -411,7 +413,7 @@ export function SessionManagerModal(props: {
 																	variant="ghost"
 																	size="sm"
 																	disabled={remoteBusy}
-																	className="h-auto gap-[3px] rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-bg-hover hover:text-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+																	className="h-auto gap-1 rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-bg-hover hover:text-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
 																	onClick={() => {
 																		// 恢复后重新拉取归档列表（主列表由 catalog refresh 自动更新）
 																		const restored = row.kind === "pi" ? props.onUnarchive(row.item) : props.onUnarchiveDsh(row.item.dshSessionId);
@@ -422,13 +424,7 @@ export function SessionManagerModal(props: {
 																	{t("sessionManager.restore")}
 																</Button>
 																{canDeleteManagerArchivedRow(row) && (
-																	<Button
-																		variant="ghost"
-																		size="sm"
-																		className="h-auto gap-[3px] rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
-																		onClick={() => setPendingDeleteArchived([row])}
-																		title={t("common.delete")}
-																	>
+																	<Button variant="ghost" size="sm" className="h-auto gap-1 rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]" onClick={() => setPendingDeleteArchived([row])} title={t("common.delete")}>
 																		<Trash2 size={12} aria-hidden="true" />
 																		{t("common.delete")}
 																	</Button>
@@ -439,7 +435,7 @@ export function SessionManagerModal(props: {
 																		size="sm"
 																		disabled={remoteArchivedDelete.state.phase !== "idle"}
 																		data-testid="remote-archived-delete"
-																		className="h-auto gap-[3px] rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
+																		className="h-auto gap-1 rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
 																		onClick={() => void remoteArchivedDelete.request(remoteSessionId)}
 																		title={t("sessionManager.remoteArchivedDelete")}
 																	>
@@ -533,17 +529,17 @@ export function SessionManagerModal(props: {
 												</TableCell>
 												<TableCell className="w-40 text-right">
 													<div className="flex items-center justify-end gap-0.5">
-														<Button variant="ghost" size="sm" className="h-auto gap-[3px] rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-bg-hover hover:text-[var(--color-accent)]" onClick={() => props.onRename(session)} title={t("common.rename")}>
+														<Button variant="ghost" size="sm" className="h-auto gap-1 rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-bg-hover hover:text-[var(--color-accent)]" onClick={() => props.onRename(session)} title={t("common.rename")}>
 															{t("common.rename")}
 														</Button>
-														<Button variant="ghost" size="sm" className="h-auto gap-[3px] rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-bg-hover hover:text-[var(--color-accent)]" onClick={() => props.onExport(session)} title={t("menu.exportHtml")}>
+														<Button variant="ghost" size="sm" className="h-auto gap-1 rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-bg-hover hover:text-[var(--color-accent)]" onClick={() => props.onExport(session)} title={t("menu.exportHtml")}>
 															{t("menu.exportHtml")}
 														</Button>
-														<Button variant="ghost" size="sm" className="h-auto gap-[3px] rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-bg-hover hover:text-[var(--color-accent)]" onClick={() => props.onArchive([session])} title={t("sessionManager.archiveAction")}>
+														<Button variant="ghost" size="sm" className="h-auto gap-1 rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-bg-hover hover:text-[var(--color-accent)]" onClick={() => props.onArchive([session])} title={t("sessionManager.archiveAction")}>
 															<Archive size={12} aria-hidden="true" />
 															{t("sessionManager.archiveAction")}
 														</Button>
-														<Button variant="ghost" size="sm" className="h-auto gap-[3px] rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]" onClick={() => props.onDelete([session])} title={t("common.delete")}>
+														<Button variant="ghost" size="sm" className="h-auto gap-1 rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]" onClick={() => props.onDelete([session])} title={t("common.delete")}>
 															{t("common.delete")}
 														</Button>
 													</div>
@@ -957,6 +953,9 @@ export function AgentContextMenu(props: {
 	onRename: () => void;
 	isPinned?: boolean;
 	onTogglePinned?: () => void;
+	/** 会话收藏态与开关（入口与置顶同级）。 */
+	isSessionFavorited?: boolean;
+	onToggleSessionFavorite?: () => void;
 	onExport: () => void;
 	onCopySession: () => void;
 	onCopySessionFilePath: () => void;
@@ -993,6 +992,12 @@ export function AgentContextMenu(props: {
 				<DropdownMenuItem disabled={busy} onSelect={props.onTogglePinned}>
 					{props.isPinned ? <PinOff className="size-3.5" aria-hidden="true" /> : <Pin className="size-3.5" aria-hidden="true" />}
 					{t(props.isPinned ? "menu.unpinSession" : "menu.pinSession")}
+				</DropdownMenuItem>
+			)}
+			{props.onToggleSessionFavorite && (
+				<DropdownMenuItem disabled={busy} onSelect={props.onToggleSessionFavorite}>
+					{props.isSessionFavorited ? <StarOff className="size-3.5" aria-hidden="true" /> : <Star className="size-3.5" aria-hidden="true" />}
+					{t(props.isSessionFavorited ? "favorites.unsaveSession" : "favorites.saveSession")}
 				</DropdownMenuItem>
 			)}
 			{/* 侧边任务：与历史会话菜单同源入口，项目归属由宿主按 agent 对应会话算好。 */}
@@ -1116,6 +1121,9 @@ export function SessionContextMenu(props: {
 	onRename: () => void;
 	isPinned?: boolean;
 	onTogglePinned?: () => void;
+	/** 会话收藏态与开关（入口与置顶同级）。 */
+	isSessionFavorited?: boolean;
+	onToggleSessionFavorite?: () => void;
 	onExport: () => void;
 	onCopySession: () => void;
 	onCopySessionFilePath: () => void;
@@ -1161,6 +1169,12 @@ export function SessionContextMenu(props: {
 				<DropdownMenuItem disabled={busy} onSelect={props.onTogglePinned}>
 					{props.isPinned ? <PinOff className="size-3.5" aria-hidden="true" /> : <Pin className="size-3.5" aria-hidden="true" />}
 					{t(props.isPinned ? "menu.unpinSession" : "menu.pinSession")}
+				</DropdownMenuItem>
+			)}
+			{props.onToggleSessionFavorite && (
+				<DropdownMenuItem disabled={busy} onSelect={props.onToggleSessionFavorite}>
+					{props.isSessionFavorited ? <StarOff className="size-3.5" aria-hidden="true" /> : <Star className="size-3.5" aria-hidden="true" />}
+					{t(props.isSessionFavorited ? "favorites.unsaveSession" : "favorites.saveSession")}
 				</DropdownMenuItem>
 			)}
 			{/* 侧边任务：在该会话所属项目另开一条轻量会话，落在右侧抽屉「侧边任务」面板，不动主区 Tab。 */}

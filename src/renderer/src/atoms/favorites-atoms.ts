@@ -8,6 +8,14 @@ import { closeWorkspacePageAtom, openWorkspacePageAtom, workspacePageTabStateAto
  */
 export const favoriteEntriesAtom = atom<FavoriteEntry[] | null>(null);
 
+/**
+ * 收藏页点击「会话」条目时的打开请求。FavoritesPage 不直接依赖 App 的会话导航函数
+ * （它渲染在 SessionPaneServices 之外），由 App 订阅后走既有 openSidebarSessionByIdWithTab。
+ * 每次点击写入新对象，同一会话再次点击也能重新触发。
+ */
+export type FavoritesOpenSessionRequest = { sessionId: string; projectId: string };
+export const favoritesOpenSessionRequestAtom = atom<FavoritesOpenSessionRequest | null>(null);
+
 /** 「收藏」页面 Tab 是否打开（会话 Tab 栏里的页面式工作区，见 workspace-page-atoms）。 */
 export const favoritesPageOpenAtom = atom((get) => get(workspacePageTabStateAtom).tabs.includes("favorites"));
 

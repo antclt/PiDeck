@@ -1,0 +1,66 @@
+/*
+ * 终端皮肤（data-appearance="terminal"）专属 chrome。
+ *
+ * 为什么单独成文件、并入 utilities 层且排在 streamdownChrome.css 之后：
+ * 这些规则要压过 Tailwind 的布局 utility（气泡的 px-3 / turn-row 的间距 utility），
+ * legacy 层压不住；又全部带 :root[data-appearance="terminal"] 前缀，写进通用文件会让
+ * 其它皮肤读一堆用不上的选择器。色值本身仍在 foundation.css 的皮肤块里，这里只管形状。
+ *
+ * 与 pi TUI 的对应关系（pi 的交互模式同样是「标记 + 正文」两段式）：
+ *   ⏺  助手轮标记（pi 的 assistant 状态点）
+ *   ❯  用户消息标记（pi 的输入提示符）
+ */
+
+/* 助手轮：标记挂在左侧留白里，不挤压正文。\FE0E 强制文本呈现，避免系统渲染成彩色 emoji。 */
+:root[data-appearance="terminal"] .turn-row {
+  position: relative;
+  padding-inline-start: 1.15rem;
+}
+:root[data-appearance="terminal"] .turn-row::before {
+  content: "⏺\FE0E";
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0.05em;
+  color: var(--color-md-link);
+  font-family: var(--font-family-mono);
+  font-size: 0.72em;
+  line-height: 1.8;
+}
+
+/* 用户消息：标记挂在气泡左侧的沟槽里（气泡是右对齐卡片，不能用内边距顶，否则多行文本会被推歪）。 */
+:root[data-appearance="terminal"] .user-turn-bubble {
+  position: relative;
+}
+:root[data-appearance="terminal"] .user-turn-bubble::before {
+  content: "❯";
+  position: absolute;
+  inset-inline-start: -1.05rem;
+  top: 0.45rem;
+  color: var(--color-md-heading);
+  font-family: var(--font-family-mono);
+  font-size: 0.8rem;
+  line-height: 1.2;
+}
+
+/* 表格：终端表头是大写字距标签（CJK 不受 uppercase 影响，只作用于西文）。 */
+:root[data-appearance="terminal"] [data-streamdown="table-wrapper"] th {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.75rem;
+}
+
+/* 代码块头部（语言名）：终端里就是等宽小标签，不用无衬线。 */
+:root[data-appearance="terminal"] [data-streamdown="code-block-header"] {
+  font-family: var(--font-family-mono);
+}
+:root[data-appearance="terminal"] [data-streamdown="code-block-header"] > span {
+  font-family: var(--font-family-mono);
+  color: var(--color-md-quote);
+}
+
+/* 行内块级元素（引用块内的段落等）保持终端直角：皮肤块已把 --radius-* 归零，
+   这里只补两处 hardcode 的 14px（用户气泡 / legacy pre），让框线统一成直角。 */
+:root[data-appearance="terminal"] .user-turn-bubble,
+:root[data-appearance="terminal"] .markdown-body pre {
+  border-radius: 0;
+}

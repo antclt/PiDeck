@@ -7,6 +7,7 @@ import { app, dialog, ipcMain, shell } from "electron";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { ipcChannels } from "../../shared/ipc";
+import { resolveBuildOrigin } from "../buildIdentity";
 import { isDevChannelBuild, resolveUpdateChannel } from "../update/channelIdentity";
 import { UPDATE_REPO, UPDATE_REPO_OWNER } from "../update/releaseRepo";
 import { probeAllMirrors, type MirrorHealthResult } from "../update/mirrorHealth";
@@ -59,6 +60,7 @@ import { TokendanceCatalogStore } from "../config/tokendanceCatalog";
 import type { TokendanceInstallResult } from "../config/tokendanceInstaller";
 import type { TokendanceAuthMode, TokendanceAuthStore } from "../config/tokendanceAuth";
 import type { TokendancePaymentStore } from "../config/tokendancePayment";
+import type { WatchaEntitlementStore } from "../config/watchaEntitlement";
 import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
 
 import { probePiModel } from "../pi/PiModelProber";
@@ -218,6 +220,8 @@ export type SystemIpcDeps = {
 	tokendanceAuth?: TokendanceAuthStore;
 	/** 内置 TokenDance 充值会话（创建 + 状态查询，Key 不出主进程）；未装配 = 充值入口不可用。 */
 	tokendancePayment?: TokendancePaymentStore;
+	/** 「请作者喝咖啡」按次付费（只调自家边缘代理）；未装配 = 该入口不可用。 */
+	watchaEntitlement?: WatchaEntitlementStore;
 	/** TokenDance 一键安装（写入 pi models.json + DSH llm-pi-ai）；未装配 = 配置入口不可用。 */
 	tokendanceInstall?: (apiKey?: string) => Promise<TokendanceInstallResult>;
 	/** 环境体检编排器（问题反馈页一键排障）。 */
@@ -419,6 +423,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		tokendanceCatalog,
 		tokendanceAuth,
 		tokendancePayment,
+		watchaEntitlement,
 		tokendanceInstall,
 		diagnosticsMonitor,
 		environmentDoctor,
@@ -1284,6 +1289,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		currentVersion: app.getVersion(),
 		// 构建身份：未打包 dev 或 dev 通道包为 true，stable 安装包恒 false（不作为功能入口门控）。
 		devBuild: isDevChannelBuild(),
+		// 来源与通道正交：本地打包的 stable 包在更新界面上与官方发布包同形，靠这个字段区分。
+		buildOrigin: resolveBuildOrigin(),
 	}));
 	ipcMain.handle(ipcChannels.appDownloadUpdate, async () => {
 		await updateService?.downloadNow();
@@ -2364,6 +2371,34 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			return { ok: false, error: "TokenDance alipay deep link failed" } as const;
 		}
 	});
+	ipcMain.handle(ipcChannels.configWatchaOpenAlipay, async (_event, payload: unknown) => {
+		// 正式环境的 purchase.url 是 alipays:// 深链（不是网页），通用 openExternal 只放行
+		// http/https 会静默丢弃。这里单独开一条，协议白名单收紧到 alipays://，且必须用户点击触发。
+		const url = payload && typeof payload === "object" ? (payload as { url?: unknown }).url : undefined;
+		if (typeof url !== "string" || url.length > 4096 || !/^alipays:\/\/\S+$/i.test(url)) {
+			return { ok: false, error: "Invalid alipay deep link" } as const;
+		}
+		try {
+			await shell.openExternal(url);
+			return { ok: true } as const;
+		} catch (error) {
+			// 未装支付宝/被系统拦截：返回失败让渲染层提示改用扫码，不抛异常。
+			void appLogger.warn("config", "Watcha alipay deep link failed", {
+				error: error instanceof Error ? error.message : String(error),
+			});
+			return { ok: false, error: "Watcha alipay deep link failed" } as const;
+		}
+	});
+	ipcMain.handle(ipcChannels.configWatchaAccess, async (_event, payload: unknown) => {
+		// 只读：查支付入口，不扣减、不改本地状态。
+		// force=true 只用于到账轮询（绕过 5 分钟缓存）；渲染层入参只认布尔 true。
+		if (!watchaEntitlement) return { ok: false, code: "not-configured" } as const;
+		const force = payload && typeof payload === "object" ? (payload as { force?: unknown }).force === true : false;
+		const result = await watchaEntitlement.access({ force });
+		// 静默失败是常态（离线/代理未部署），只记码不记用户标识。
+		if (!result.ok) void appLogger.warn("config", "Watcha access failed", { code: result.code, detail: result.detail });
+		return result;
+	});
 	ipcMain.handle(ipcChannels.configTestProvider, async (_event, payload: unknown) => {
 		// remote target is explicitly deferred: no local key/network may be used for another host.
 		rejectRemotePiConfigTarget(payload && typeof payload === "object" && !Array.isArray(payload) ? (payload as { target?: unknown }).target : undefined);
@@ -2520,7 +2555,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		});
 		return result;
 	});
-	// 安装内置「用量查询自定义」技能模板：从 app resources 复制 SKILL.md 到全局技能目录。
+	// 安装内置「用量查询自定义」技能模板：从 app resources 复制 SKILL.md 到 PiDeck 专属技能目录
+	// （只由 PiDeck spawn 时 --skill 注入，TUI 不扫）。
 	// 幂等：内容直接覆盖；启动时也会自动安装（见 index.ts），此处保留手动触发兑底。
 	ipcMain.handle(ipcChannels.configInstallUsageSkill, async () => {
 		const result = await skillManager.installUsageProbeTemplate();

@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 
 const turnRowSource = readFileSync("src/renderer/src/components/session/turn/TurnRow.tsx", "utf8");
+const stepRowSource = readFileSync("src/renderer/src/components/session/turn/TurnStepRow.tsx", "utf8");
 const thinkingStepSource = readFileSync("src/renderer/src/components/session/turn/ThinkingStep.tsx", "utf8");
 const toolStepSource = readFileSync("src/renderer/src/components/session/turn/ToolStep.tsx", "utf8");
 const summaryToggleSource = readFileSync("src/renderer/src/components/session/turn/ProcessSummaryToggle.tsx", "utf8");
@@ -17,8 +18,10 @@ test("renders the run as order-preserving flat display without pulling the last 
 	// 顺序忠实：不再抽离时序、不把回答拽到底部，final/interim 都在原位
 	assert.doesNotMatch(turnRowSource.slice(foldableRenderIndex), /最终回答（始终可见）/);
 	assert.match(turnRowSource, /buildTurnDisplay\(run/);
-	// 最终回答走 FinalAnswer（常驻），容器外常驻区渲染
-	assert.match(turnRowSource, /\/\/ final-answer/);
+	// 最终回答走 FinalAnswer（常驻），在折叠栏之外渲染。
+	// 锚点从那句 // final-answer 注释换成 finalItems.map：注释已随单行渲染搬进 TurnStepRow，
+	// 而「最终回答来自 finalItems 而不是折叠栏 items」才是这条真正要守的事。
+	assert.match(turnRowSource, /finalItems\.map/);
 	assert.match(turnRowSource, /<FinalAnswer/);
 });
 
@@ -32,7 +35,7 @@ test("issue #130: fold concerns process steps and interim answers, final answer 
 	assert.doesNotMatch(thinkingStepSource, /defaultExpanded=/);
 	assert.match(toolStepSource, /ToolGroupCard/);
 	// 步骤原位渲染，不受「单个折叠容器」限制（避免折叠容器被回答文本打断）
-	assert.match(turnRowSource, /hidden=\{!stepsVisible\}/);
+	assert.match(stepRowSource, /hidden=\{!stepsVisible\}/);
 
 	// 概要只统计工具/思考/中间回复数，不再计「N次回答」预览
 	assert.doesNotMatch(turnRowSource, /executionAnswerCount/);
@@ -45,8 +48,8 @@ test("issue #130: fold concerns process steps and interim answers, final answer 
 
 test("stale running tools stay stopped when a newer run starts", () => {
 	// stopped 只由当前回合是否 live 决定；不能再绑定 isLatestRun，否则新回合开始后旧回合会复活 spinner。
-	assert.match(turnRowSource, /stopped=\{props\.agentRunning !== true\}/);
-	assert.doesNotMatch(turnRowSource, /stopped=\{Boolean\(props\.isLatestRun && !props\.agentRunning\)\}/);
+	assert.match(stepRowSource, /stopped=\{props\.agentRunning !== true\}/);
+	assert.doesNotMatch(stepRowSource, /stopped=\{Boolean\(props\.isLatestRun && !props\.agentRunning\)\}/);
 });
 
 test("execution summary toggle uses the beUI-style activity ledger hierarchy", () => {

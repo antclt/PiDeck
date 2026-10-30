@@ -52,11 +52,16 @@ export function stripChipDisplayPrefix(kind: ComposerChip["kind"], text: string)
 /**
  * 文件 chip 的展示文本：只显示文件名（对齐 Proma FilePathChip 的 `truncate max-w-[240px]`
  * + tooltip 全路径），完整路径仍保留在 raw 里用于打开文件与悬浮查看。
+ *
+ * 目录引用的尾斜杠必须保留：chip 自带 4px 右内边距，剥掉斜杠后标签直接贴住边缘，
+ * 标签末尾的最后一个字（用户现场是 `@assets/products/` 的 `s`）看起来像被截掉了。
  */
 export function formatFileChipLabel(path: string): string {
-	const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
-	const segments = normalized.split("/").filter(Boolean);
-	return segments.at(-1) ?? normalized;
+	// 反斜杠统一成 /（Windows 路径），目录判定与分段都基于归一化后的形态。
+	const normalized = path.replace(/\\/g, "/");
+	const isDirectory = normalized.endsWith("/");
+	const segments = (isDirectory ? normalized.slice(0, -1) : normalized).split("/").filter(Boolean);
+	return segments.length > 0 ? `${segments.at(-1)}${isDirectory ? "/" : ""}` : normalized;
 }
 
 /** raw 是否为目录引用（`@src/` 或 `@"my docs/"`）：据此换成文件夹图标。 */

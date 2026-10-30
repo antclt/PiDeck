@@ -14,6 +14,7 @@ import { isInSubagentArtifactsDir, isValidPiSessionFileHead, SUBAGENT_ARTIFACTS_
 import { extractMessageText, extractThinkingRaw } from "../pi/messageContent";
 import { isRoleMessageRole } from "../pi/sessionEntryIds";
 import { replaceExpandedRefBlocksWithLabels } from "../../shared/expandedRefBlocks";
+import { extractReferenceMessageText } from "../../shared/sessionReferenceContext";
 import { toWindowsHostPath, toWslLinuxPath, type WslEnvironment } from "../wsl/WslPaths";
 import { getAppLogger } from "../logging/sharedLogger";
 import {
@@ -1417,6 +1418,10 @@ export class SessionScanner {
 	 * 大会话必须流式读：整文件 `readFile + split` 在数百 MB 会话上会撞 V8 单字符串
 	 * 上限（ERR_STRING_TOO_LONG）或主进程 384MB 堆上限（V8 abort → 应用闪退）。
 	 * 返回值再叠一层条数/字节上限（只截尾，保留最近的），见 REFERENCE_MESSAGE_LIMIT。
+	 *
+	 * 取文口径是 `extractReferenceMessageText`（**不含 thinking**）：thinking 实测占这类会话
+	 * 正文的八成以上，进来只会把引用上下文撑爆（见 shared/sessionReferenceContext 文件头）。
+	 * 这里的条数/字节上限只保护 IPC 负载，真正的上下文预算在 buildSessionReferenceContext。
 	 */
 	async readMessages(filePath: string): Promise<Array<{ role: string; content: string; timestamp: number }>> {
 		const messages: Array<{ role: string; content: string; timestamp: number }> = [];
@@ -1429,7 +1434,7 @@ export class SessionScanner {
 				if (entry.sessionName && !entry.message) return;
 				const message = (entry.message ?? (entry.data as Record<string, unknown> | undefined)?.message ?? entry) as Record<string, unknown> | undefined;
 				if (!message?.role) return;
-				const content = this.extractText(message.content).trim();
+				const content = extractReferenceMessageText(message.content).trim();
 				if (!content) return;
 				if (message.role !== "user" && message.role !== "assistant") return;
 				messages.push({ role: String(message.role), content, timestamp: Number(entry.ts ?? entry.timestamp ?? Date.now()) });

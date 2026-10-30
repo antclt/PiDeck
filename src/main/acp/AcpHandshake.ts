@@ -62,7 +62,16 @@ export async function performAcpHandshake(runtime: AcpAgentRuntime, resumeSessio
 		"initialize",
 		{
 			protocolVersion: ACP_PROTOCOL_VERSION,
-			clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+			clientCapabilities: {
+				fs: { readTextFile: false, writeTextFile: false },
+				terminal: false,
+				// CodeBuddy ≥2.178.1 用 initialize 的这条 vendor 扩展做 mainAgentOptIn 门控：
+				// 不声明就不下发 toolMode（工具模式/PTC）、agent（Main Agent）、delegate，
+				// 连 --agent ptc 与手写 codeMode 都会被拒（-32602，#447 实测）。
+				// 键归属 CB 命名空间，其他 agent 按 ACP 规范忽略未知 _meta；PiDeck 的
+				// configOptions 走通用渲染，声明后这些选项能直接落地，不需要按品牌分支。
+				_meta: { "codebuddy.ai": { mainAgentSupport: true } },
+			},
 		},
 		timeoutMs,
 	);
@@ -95,6 +104,8 @@ export async function performAcpHandshake(runtime: AcpAgentRuntime, resumeSessio
 			await runtime.updateChain;
 			// 标准 load 响应无 sessionId；保留请求身份。兼容明确回传身份的旧 CLI。
 			setup = { ...loaded, sessionId: typeof loaded?.sessionId === "string" && loaded.sessionId ? loaded.sessionId : resumeSessionId };
+			// 成功的 load 才标记：失败回退 session/new 时仍要重放工具级默认配置。
+			runtime.loadedSession = true;
 		} catch (error) {
 			// 排空已经开始的物化再丢弃；否则在途旧快照能污染 session/new。
 			runtime.acpSessionId = "";

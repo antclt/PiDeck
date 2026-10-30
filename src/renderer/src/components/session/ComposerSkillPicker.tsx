@@ -228,11 +228,11 @@ export function ComposerSkillPicker(props: {
 										</span>
 										{/* 来源徽标：全局 / 项目（title 显示完整目录），让用户知道技能从哪里来 */}
 										{skill.source && (
-											<span className="shrink-0 inline-flex items-center rounded bg-sky-500/12 px-1.5 py-0.5 text-micro font-medium text-sky-600 dark:text-sky-400" title={skill.sourceLabel}>
+											<span className="shrink-0 inline-flex items-center rounded bg-[var(--color-identity-tool-soft)] px-1.5 py-0.5 text-micro font-medium text-[var(--color-identity-tool)] " title={skill.sourceLabel}>
 												{skill.source === "global" ? t("app.skillBadgeGlobal") : t("app.skillBadgeProject")}
 											</span>
 										)}
-										{skill.userOnly && <span className="shrink-0 inline-flex items-center rounded bg-amber-500/15 px-1.5 py-0.5 text-micro font-medium text-amber-600 dark:text-amber-400">{t("dshTools.skillUserOnly")}</span>}
+										{skill.userOnly && <span className="shrink-0 inline-flex items-center rounded bg-warning/15 px-1.5 py-0.5 text-micro font-medium text-warning">{t("dshTools.skillUserOnly")}</span>}
 									</span>
 									{skill.description && (
 										<span className="mt-0.5 block truncate text-caption text-muted-foreground" title={skill.description}>

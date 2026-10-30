@@ -7,8 +7,9 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AgentRuntimeState, CreateAnonymousSessionInput, CreateSessionDraftInput, ImageContent, SendSessionPromptInput, SessionRuntimeTarget, SessionUiResponseInput, UpdateSessionRecordInput } from "../../shared/types";
-import { readBoundedFile } from "./WebHttpResponders";
+import { readBoundedFile, WEB_CORS_HEADERS } from "./WebHttpResponders";
 import { ifNoneMatchHits, stateEtag } from "./WebStateEtag";
+import { toWebSecurityState } from "./WebSecurityProjection";
 import type { WebServiceDependencies } from "./WebServiceManager";
 
 const CHAT_IMAGE_MAX_COUNT = 4;
@@ -93,11 +94,14 @@ export class WebApiRoutes {
 			// 未变化时回 304，客户端保留原状态——空闲流量从每 10s 228KB 降到几十字节。
 			const etag = stateEtag(state);
 			if (ifNoneMatchHits(request.headers["if-none-match"], etag)) {
-				response.writeHead(304, { etag, "cache-control": "no-store" });
+				// 304 也要带 CORS：缓存命中时浏览器仍按本次响应做跨域校验（#435 同类缺口）。
+				// cache-control 用 no-cache 而不是 no-store：后者禁止客户端留存副本，等于让 ETag
+				// 没有可复用对象，条件请求永远命中不了（#442 第 3 点）。no-cache = 可存但每次必校验。
+				response.writeHead(304, { etag, "cache-control": "no-cache", ...WEB_CORS_HEADERS });
 				response.end();
 				return true;
 			}
-			this.sendJson(response, state, { etag });
+			this.sendJson(response, state, { etag, "cache-control": "no-cache" });
 			return true;
 		}
 		if (url.pathname === "/api/ui-response" && request.method === "POST") {
@@ -350,6 +354,47 @@ export class WebApiRoutes {
 			this.sendJson(response, result);
 			return true;
 		}
+		// Pi 会话安全等级切换（桌面 SecurityLevelMenu 的 Web 对齐入口）：
+		// 服务端负责会话存在性 / 后端类型 / 等级 id 校验，再写 SecurityStore（策略快照随之刷新）。
+		// DSH 走 runtime 的 permission 命令、ACP 由 agent CLI 自管，这里显式拒绝，避免两套机制互相污染。
+		const sessionSecurityLevelMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/security-level$/);
+		if (sessionSecurityLevelMatch && request.method === "POST") {
+			const sessionId = decodeURIComponent(sessionSecurityLevelMatch[1]);
+			const body = await this.readJson<Record<string, unknown> | null>(request);
+			// levelId 必须显式给出（null=恢复默认）：缺字段不能当作「清除覆盖」，否则空请求会静默改策略。
+			if (!body || typeof body !== "object" || !Object.hasOwn(body, "levelId") || (body.levelId !== null && typeof body.levelId !== "string")) {
+				this.sendError(response, 400, "webError.securityLevelInvalid", "levelId must be a string or null");
+				return true;
+			}
+			// 空串与 null 同义：清除会话覆盖，跟随全局默认（与桌面 IPC 的入参语义一致）
+			const levelId = typeof body.levelId === "string" && body.levelId.trim() ? body.levelId.trim() : null;
+			const config = this.deps.getSecurityConfig?.();
+			const setSessionLevel = this.deps.setSessionSecurityLevel;
+			if (!config || !setSessionLevel) {
+				this.sendError(response, 503, "webError.securityUnavailable", "security management is not available");
+				return true;
+			}
+			const record = (await this.deps.listCatalogSessions()).find((item) => item.id === sessionId);
+			if (!record) {
+				this.sendError(response, 404, "webError.sessionNotFound", "session not found");
+				return true;
+			}
+			if (record.backend === "dsh" || record.backend === "acp") {
+				this.sendError(response, 400, "webError.securityUnsupportedBackend", "security levels only apply to pi sessions");
+				return true;
+			}
+			if (levelId && !config.levels.some((level) => level.id === levelId)) {
+				this.sendError(response, 400, "webError.securityLevelUnknown", "unknown security level");
+				return true;
+			}
+			try {
+				const next = await setSessionLevel(sessionId, levelId);
+				this.sendJson(response, { security: toWebSecurityState(next) });
+			} catch (error) {
+				this.sendError(response, 400, "webError.securityUpdateFailed", error instanceof Error ? error.message : "security level update failed");
+			}
+			return true;
+		}
 		const sessionRecordActionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/(update|delete|copy|export-html)$/);
 		if (sessionRecordActionMatch && request.method === "POST") {
 			const sessionId = decodeURIComponent(sessionRecordActionMatch[1]);
@@ -389,6 +434,7 @@ export class WebApiRoutes {
 					"content-type": "text/html; charset=utf-8",
 					"content-disposition": `attachment; filename="pideck-session-${safeTitle}.html"`,
 					"cache-control": "no-store",
+					...WEB_CORS_HEADERS,
 				});
 				response.end(html);
 			} catch (error) {

@@ -27,6 +27,7 @@ on:
         type: choice
         default: v0.7.6
         options:
+          - v0.9.8
           - v0.9.7
           - v0.9.6
           - v0.9.5
@@ -36,7 +37,6 @@ on:
           - v0.7.9
           - v0.7.8
           - v0.7.7
-          - v0.7.6
       tag_custom:
         description: '自定义 tag（填了则覆盖上面的下拉选择；用于列表外的旧版本）'
         required: false
@@ -83,6 +83,8 @@ jobs:
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 产物直接追加到已发布的 Release：必须标成 release，否则补发的包会显示「本地构建」。
+          PIDECK_RELEASE_BUILD: "1"
           # 与 release.yml 一致：CI 下载 Electron 二进制走 npmmirror，避免 GitHub
           # Releases 偶发 504；发布目标仍是 GitHub Releases。
           ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/

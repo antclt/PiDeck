@@ -670,11 +670,11 @@ function EnabledModelsInput(props: {
 			}}
 		>
 			<PopoverTrigger asChild>
-				<div className="flex min-h-[38px] w-full min-w-0 cursor-pointer flex-wrap items-center gap-1.5 rounded-sm border border-border-subtle bg-popover px-2.5 py-[5px] transition-colors duration-fast hover:border-border-strong">
+				<div className="flex min-h-[38px] w-full min-w-0 cursor-pointer flex-wrap items-center gap-1.5 rounded-sm border border-border-subtle bg-popover px-2.5 py-1.5 transition-colors duration-fast hover:border-border-strong">
 					{[...selected].map((fullKey) => (
 						<span
 							key={fullKey}
-							className="inline-flex h-6 items-center gap-[3px] rounded-full border border-[color-mix(in_srgb,var(--color-accent)_24%,var(--color-border-subtle))] bg-[color:color-mix(in_srgb,var(--color-accent)_8%,var(--color-bg-panel))] pl-[9px] pr-[5px] font-mono text-xs leading-[18px] whitespace-nowrap text-text-primary"
+							className="inline-flex h-6 items-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--color-accent)_24%,var(--color-border-subtle))] bg-[color:color-mix(in_srgb,var(--color-accent)_8%,var(--color-bg-panel))] pl-2.5 pr-1.5 font-mono text-xs leading-[18px] whitespace-nowrap text-text-primary"
 						>
 							<span>{fullKey}</span>
 							<Button
@@ -735,7 +735,7 @@ function EnabledModelsInput(props: {
 								>
 									{!collapsed.has(provider) &&
 										grouped[provider].map((m) => (
-											<CommandItem key={m.fullKey} value={m.fullKey} onSelect={() => toggleModel(m.fullKey)} className={`cursor-pointer gap-2 py-[7px] pr-3 pl-7 text-control text-text-primary ${selected.has(m.fullKey) ? "bg-[color:color-mix(in_srgb,var(--color-accent)_6%,var(--color-bg-panel))]" : ""}`}>
+											<CommandItem key={m.fullKey} value={m.fullKey} onSelect={() => toggleModel(m.fullKey)} className={`cursor-pointer gap-2 py-2 pr-3 pl-7 text-control text-text-primary ${selected.has(m.fullKey) ? "bg-[color:color-mix(in_srgb,var(--color-accent)_6%,var(--color-bg-panel))]" : ""}`}>
 												<span
 													className={`flex size-[18px] shrink-0 items-center justify-center rounded-xs border-[1.5px] border-border-strong text-[color:var(--color-accent)] transition-[border-color,background-color] duration-fast${selected.has(m.fullKey) ? " border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-text-inverse)]" : ""}`}
 												>

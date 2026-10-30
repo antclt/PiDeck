@@ -7,6 +7,8 @@ import { Settings2, Network, Plug, Wrench, PawPrint, Bell, Trash2, Brush, Eye, C
 import { t, type TranslationKey } from "../../i18n";
 import { applyAppearanceAttributes, type AppearanceSettings } from "../../themeAppearance";
 import { applyCustomThemeTokens, applyFontSizeAttributes } from "../../hooks/appearance/useAppAppearance";
+import { useRemoteFeatureAvailable } from "../../hooks/useRemoteFeatureAvailable";
+import { applyRemoteGateToSettingsLayout, isRemoteEntryVisible } from "../../hooks/remoteFeatureVisibility";
 import { Button } from "../ui-shadcn/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui-shadcn/tabs";
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
@@ -17,7 +19,7 @@ import { buttonVariants } from "../ui-shadcn/button";
 import { useVisionBridgeDraft } from "./settings/visionDraft.ts";
 import { dirtySettingsTabIds, type SettingsUnsavedTabId } from "./settings/unsavedChangesSummary";
 import { computeDirtyFields } from "./settings/settingsDirtyFields.ts";
-import { SETTINGS_TAB_IDS, SETTINGS_TAB_LABEL_KEYS } from "./settings/settingsTabLayout";
+import { SETTINGS_TAB_IDS, SETTINGS_TAB_LABEL_KEYS, SETTINGS_TAB_LAYOUT } from "./settings/settingsTabLayout";
 import { SettingsSearchBox } from "./settings/SettingsSearchBox";
 import { buildSettingsSearchEntries } from "./settings/settingsSearchEntries";
 import type { SettingsSearchEntry } from "./settings/settingsSearch";
@@ -374,7 +376,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 		// 自定义主题包快照同样实时预览：与 App 的 useAppAppearance 共用注入实现
 		// （data-theme 先由 applyAppearanceAttributes 写好，再按当前亮暗选档注入）。
 		applyCustomThemeTokens(root, draftSettings, root.dataset.theme === "dark");
-	}, [draftSettings.theme, draftSettings.themeScheduleLightStart, draftSettings.themeScheduleDarkStart, draftSettings.themeSkin, draftSettings.accent, draftSettings.customTheme, draftSettings.customThemeOverrides]);
+	}, [draftSettings.theme, draftSettings.themeScheduleLightStart, draftSettings.themeScheduleDarkStart, draftSettings.themeStyle, draftSettings.themePalette, draftSettings.accent, draftSettings.customTheme, draftSettings.customThemeOverrides]);
 
 	// 字号档位实时预览：与上方主题色预览同理，草稿变化立即写入 <html> dataset（含 Tab 栏字号）。
 	// 此前字号不预览，弹窗内选档位界面毫无反应，用户以为设置无效（v0.7.8 发布前用户反馈）；
@@ -567,14 +569,23 @@ function SettingsModalContent(props: SettingsModalProps) {
 		[draftSettings.favoriteModels, updateDraft],
 	);
 
-	// 侧栏条目 = 布局模块定义的顺序/分组边界，经隐藏模块过滤（按草稿，开关即预览），再拼上面的图标文案元数据
+	// 侧栏条目 = 布局模块定义的顺序/分组边界，经隐藏模块过滤（按草稿，开关即预览），再拼上面的图标文案元数据。
+	// 「连接」tab 装的是远端（SSH）主机，受通道门禁约束：正式包（stable）不提供远端能力，
+	// 这个 tab 直接从布局里拿掉——不给入口比给了再报「未启用」更符合「正式包不提这个」。
+	const remoteAvailable = useRemoteFeatureAvailable();
+	const settingsLayout = useMemo(() => applyRemoteGateToSettingsLayout(SETTINGS_TAB_LAYOUT, remoteAvailable), [remoteAvailable]);
 	const hiddenModules = draftSettings.hiddenModules ?? NO_HIDDEN_MODULES;
-	const tabs = resolveVisibleSettingsTabs(hiddenModules, revealedTabs).map((entry) => ({
+	const tabs = resolveVisibleSettingsTabs(hiddenModules, revealedTabs, settingsLayout).map((entry) => ({
 		id: entry.id,
 		dividerBefore: entry.dividerBefore ?? false,
 		label: t(TAB_META[entry.id].labelKey),
 		icon: TAB_META[entry.id].icon,
 	}));
+	// tab 被通道拿掉（如从 dev 通道构建切到正式包后 localStorage 里还记着 connections）时回「常用」：
+	// 侧栏已无该项，停在那里只会是一片空白。
+	useEffect(() => {
+		if (!isRemoteEntryVisible(remoteAvailable) && activeTab === "connections") setActiveTab("common");
+	}, [remoteAvailable, activeTab]);
 	// 当前 tab 被隐藏（深链 / 命令面板直达）时临时显示并提示一次，避免用户看到内容却在侧栏里找不到高亮项。
 	useEffect(() => {
 		if (!isSettingsTabHidden(hiddenModules, activeTab) || revealedTabs.has(activeTab)) return;
@@ -584,7 +595,8 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 	// 设置搜索能搜到全部 tab 与设置项（含已隐藏模块的 tab）：条目现算不记忆——131 条、每条两次 t() 查表，
 	// 相比给 useMemo 挂语言依赖的出错风险（locale 可能在渲染后才加载完）不如直接重建。
-	const settingsSearchEntries = buildSettingsSearchEntries(t);
+	// 通道拿掉的「连接」tab 同样不进搜索结果：否则搜「ssh」会命中一个打不开的页。
+	const settingsSearchEntries = buildSettingsSearchEntries(t).filter((entry) => entry.tab !== "connections" || isRemoteEntryVisible(remoteAvailable));
 	// 搜索词提升到弹窗壳持有（而不是搜索组件内部）：DialogContent 的 Esc 拦截要在
 	// 搜索中先清搜索、再按一次才关弹窗——结果替换内容区时直接关弹窗会误触未保存确认流。
 	const [settingsSearchQuery, setSettingsSearchQuery] = useState("");
@@ -821,8 +833,8 @@ function SettingsModalContent(props: SettingsModalProps) {
 									</TabsContent>
 								)}
 
-								{/* ── 连接 tab（远端 SSH 主机；WSL 将来并列于此） ── */}
-								{activeTab === "connections" && (
+								{/* ── 连接 tab（远端 SSH 主机；WSL 将来并列于此）。通道门禁关掉时不渲染 ── */}
+								{activeTab === "connections" && isRemoteEntryVisible(remoteAvailable) && (
 									<TabsContent value="connections" className="settings-panel min-w-0 [overflow-anchor:none]">
 										<Suspense fallback={<SettingsTabLoading />}>
 											<ConnectionsTab />

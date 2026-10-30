@@ -13,6 +13,7 @@
  * 新增后端的权限控制位（SecurityControl 注册）必须复用本映射。
  */
 import { Shield, ShieldAlert, ShieldCheck, ShieldOff } from "lucide-react";
+import type { SecurityLevelConfig } from "../../../shared/types";
 
 export type PermissionStrength = "strict" | "standard" | "relaxed" | "unknown";
 
@@ -21,4 +22,12 @@ export function permissionStrengthIcon(strength: PermissionStrength) {
 	if (strength === "standard") return ShieldCheck;
 	if (strength === "relaxed") return ShieldOff;
 	return Shield;
+}
+
+/** pi 安全等级 → 图标（内置 off/standard/strict 有专属盾，自定义等级用未知盾）。 */
+export function securityLevelIcon(level: Pick<SecurityLevelConfig, "id">) {
+	if (level.id === "off") return permissionStrengthIcon("relaxed");
+	if (level.id === "strict") return permissionStrengthIcon("strict");
+	if (level.id === "standard") return permissionStrengthIcon("standard");
+	return permissionStrengthIcon("unknown");
 }

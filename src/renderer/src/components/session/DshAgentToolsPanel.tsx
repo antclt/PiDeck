@@ -83,7 +83,7 @@ function GoalsPanel(props: { sessionId: string; agentId: string }) {
 	};
 
 	const goalPhase = goal?.phase ?? "active";
-	const phaseBadgeClass = goalPhase === "complete" ? "bg-blue-500/15 text-blue-600 dark:text-blue-400" : goalPhase === "blocked" ? "bg-red-500/15 text-red-600 dark:text-red-400" : goalPhase === "paused" ? "bg-amber-500/15 text-amber-600 dark:text-amber-400" : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400";
+	const phaseBadgeClass = goalPhase === "complete" ? "bg-info/15 text-info" : goalPhase === "blocked" ? "bg-danger/15 text-danger" : goalPhase === "paused" ? "bg-warning/15 text-warning" : "bg-success/15 text-success";
 	const roundsStarted = Math.max(0, goal?.roundsStarted ?? 0);
 	const maxGoalRounds = Math.max(0, goal?.maxGoalRounds ?? 0);
 	const progressPercent = maxGoalRounds > 0 ? Math.max(0, Math.min(100, (roundsStarted / maxGoalRounds) * 100)) : 0;
@@ -251,7 +251,7 @@ function SubagentsPanel(props: { agentId: string }) {
 								{t("dshTools.subagentInactive")}
 							</span>
 						)}
-						{entry.kind === "diagnostic" && <span className="shrink-0 inline-flex items-center rounded bg-amber-500/15 px-1.5 py-0.5 text-micro text-amber-600 dark:text-amber-400">{t("dshTools.subagentDiagnostic")}</span>}
+						{entry.kind === "diagnostic" && <span className="shrink-0 inline-flex items-center rounded bg-warning/15 px-1.5 py-0.5 text-micro text-warning">{t("dshTools.subagentDiagnostic")}</span>}
 						<span className="shrink-0 text-micro text-text-tertiary">{entry.mode === "continuable" ? t("dshTools.subagentContinuable") : t("dshTools.subagentOneShot")}</span>
 					</button>
 					{expanded === entry.id && (
@@ -328,7 +328,7 @@ function SkillsPanel(props: { agentId: string }) {
 					<div className="flex min-w-0 items-center gap-2">
 						<Sparkles size={13} className="shrink-0 text-muted-foreground" aria-hidden="true" />
 						<code className="min-w-0 flex-1 truncate text-control font-medium text-foreground">/{entry.name}</code>
-						{!entry.modelInvocable && <span className="shrink-0 inline-flex items-center rounded bg-amber-500/15 px-1.5 py-0.5 text-micro font-medium text-amber-600 dark:text-amber-400">{t("dshTools.skillUserOnly")}</span>}
+						{!entry.modelInvocable && <span className="shrink-0 inline-flex items-center rounded bg-warning/15 px-1.5 py-0.5 text-micro font-medium text-warning">{t("dshTools.skillUserOnly")}</span>}
 					</div>
 					<p className="text-caption text-text-secondary">{entry.description}</p>
 					{entry.whenToUse && <p className="text-micro text-text-tertiary">{entry.whenToUse}</p>}

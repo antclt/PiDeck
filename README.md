@@ -11,7 +11,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.9.7-blue)
+![Version](https://img.shields.io/badge/version-0.9.9--beta-blue)
 
 国内 AtomGit 托管：https://atomgit.com/ayuayue/PiDeck
 <!-- 预留 AtomGit G-Star 徽章位（替换占位链接后启用）
@@ -72,6 +72,7 @@
   - [🐳 DSH 后端](#-dsh-后端)
   - [🏗️ 工作原理](#-工作原理)
   - [📦 下载安装](#-下载安装)
+  - [📱 移动端客户端](#-移动端客户端)
   - [🧰 快速开始（从源码运行）](#-快速开始从源码运行)
   - [❓ 常见问题 FAQ](#-常见问题-faq)
   - [🧑‍💻 开发指南](#-开发指南)
@@ -101,16 +102,23 @@
 
 ## 📋 更新日志
 
-> **最新版本 v0.9.7**（2026-10-26）
+> **最新版本 v0.9.9-beta**（2026-10-30）
 
-### v0.9.7 更新亮点
-- 🚀 **思考强度选择器重做：ZCode 同款渐变强度条**
-- 🚀 **侧栏分组标题栏冻结开关**
-- 🚀 **Web 端：侧栏会话列表显式分页**
-- ✨ **界面对齐 ZCode 的一轮视觉收口**
-- ✨ **Web 端：/api/state 条件请求**
-- ✨ **纯图片发送被静默注入英文提示词 (#404)**
-- ✨ **OpenCode 2.x 会话导入不识别 (#410)**
+### v0.9.9-beta 更新亮点
+- 🚀 **外观拆成「样式 × 配色」两维，终端皮肤成套移植 pi TUI**
+- 🚀 **会话分组成为宿主核心能力（插件 v3）**
+- 🚀 **收藏整个会话**
+- 🚀 **草稿本支持项目 / 全局作用域**
+- 🚀 **ACP 按工具记住思考 / 模式 / 权限并自动重放**
+- 🚀 **ACP 工具级「新会话默认 Bypass 权限」与 Qoder CLI 预设**
+- 🚀 **ACP 代理独立开关**
+- 🚀 **通过 MCP 新建并驱动 ACP 会话**
+- 🚀 **Web 端支持 ACP 会话**
+- 🚀 **ACP 用量面板补齐 token / 时延 / TPS**
+- ✨ **ACP 模型下拉可搜索**
+- ✨ **ACP 回合中发送排队，忙碌时补独立停止钮**
+- ✨ **ACP 工具表改为折叠行**
+- ✨ **轮尾操作栏按「按钮 | 耗时 | 模型」三分区**
 
 [查看完整更新日志 →](CHANGELOG.zh-CN.md)
 
@@ -280,6 +288,17 @@ npm run dist:linux:dev # Linux（AppImage + deb + tar.gz）
 
 ---
 
+## 📱 移动端客户端
+
+社区维护的 PiDeck 手机客户端，配合桌面端「设置 → Web 服务 → 局域网 Web 服务」使用：
+
+| 项目 | 说明 |
+|---|---|
+| [qgx1992/pideck-mobile](https://github.com/qgx1992/pideck-mobile) | 协议核心 + Capacitor 手机客户端：扫码 / 手填链接配对、流式会话、通知与工作区，可自行打包 APK。 |
+| [xrbbm/PocketDeck](https://github.com/xrbbm/PocketDeck) | 原生 Android（Kotlin + Jetpack Compose）客户端：扫码直达最近会话、审批卡片、Git / 文件工作区，Releases 可直接下载 APK。 |
+
+---
+
 ## 🧰 快速开始（从源码运行）
 
 ```bash
@@ -389,7 +408,13 @@ src/
 - 提交 Issue 前请先搜索是否已有同类问题；
 - 代码 PR 请遵循仓库的架构约定与提交规范，详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-感谢所有为 PiDeck 做出贡献的人！完整名单请查看 [CONTRIBUTORS.md](CONTRIBUTORS.md)。
+### 🙌 贡献者
+
+感谢所有为 PiDeck 做出贡献的人！完整名单（含各自提交的功能与 Issue 编号）见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。
+
+<a href="https://github.com/ayuayue/PiDeck/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=ayuayue/PiDeck&max=100" alt="PiDeck 贡献者" />
+</a>
 
 ---
 
@@ -427,11 +452,14 @@ src/
 
 ## ☕ 赞助
 
-如果 PiDeck 对你有帮助，欢迎请作者喝杯咖啡。微信扫码即可赞赏，感谢支持。
+如果 PiDeck 对你有帮助，欢迎请作者喝杯咖啡。感谢支持。
 
 <p align="center">
   <img src="docs/images/wechat_pay.png" alt="微信赞赏码" width="280" />
 </p>
+
+**支付宝**：打开 PiDeck，点左上角「PiDeck」品牌名 → 「请作者喝咖啡」，手机支付宝扫码即可。
+（购买链接按设备生成，无法固化成静态二维码，所以这里只放应用内入口。）
 
 ## License
 

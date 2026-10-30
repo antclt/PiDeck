@@ -50,7 +50,7 @@ function BoosterBlock(props: { booster: NonNullable<ProviderUsageResult["booster
 		<div className="mt-1 space-y-0.5 border-t border-border/60 pt-1.5" data-testid="provider-usage-booster">
 			<div className="flex items-center justify-between gap-4 px-0.5">
 				<span className="shrink-0 text-caption leading-5 text-text-secondary">{t("sessionContext.usageBoosterBalance")}</span>
-				<span className="min-w-0 text-right font-mono font-semibold tabular-nums text-green-600 dark:text-green-400">{asBalance(booster.balance)}</span>
+				<span className="min-w-0 text-right font-mono font-semibold tabular-nums text-success">{asBalance(booster.balance)}</span>
 			</div>
 			{booster.monthlyUsed != null && (
 				<div className="flex items-center justify-between gap-4 px-0.5">
@@ -180,7 +180,7 @@ export function ProviderUsageDetails(props: {
 			{result?.success && result.panelBalanceError ? (
 				// Sub2API 面板 JWT 失效：主结果正常但余额段被丢弃，显式说明原因（401=过期
 				// 最常见）而不是无感消失；行内附「去配置」入口，重贴新令牌即可恢复。
-				<div className="flex items-center gap-1.5 px-0.5 text-caption leading-5 text-amber-600 dark:text-amber-400" data-testid="provider-usage-panel-jwt-warning">
+				<div className="flex items-center gap-1.5 px-0.5 text-caption leading-5 text-warning" data-testid="provider-usage-panel-jwt-warning">
 					<AlertCircle size={12} aria-hidden="true" />
 					<span>{result.panelBalanceError === "unauthorized" ? t("config.usageProbe.sub2apiPanelJwtExpired") : t("config.usageProbe.sub2apiPanelJwtFailed")}</span>
 					{props.onConfigureUsage && (
@@ -205,7 +205,7 @@ export function ProviderUsageDetails(props: {
 				// 失败态只占一行（cc-switch 同款极简）：红字提示；「去配置」是行内小链接，
 				// 不再渲染全宽大按钮；重试统一走头部的刷新按钮（只保留一个刷新入口）。
 				// 结构性「未开启」给专属引导文案（用量查询未开启 → 去配置），其余失败给通用文案。
-				<div className="flex items-center gap-1.5 px-0.5 text-caption leading-5 text-red-500 dark:text-red-400" title={result?.error ?? undefined}>
+				<div className="flex items-center gap-1.5 px-0.5 text-caption leading-5 text-danger" title={result?.error ?? undefined}>
 					<AlertCircle size={12} aria-hidden="true" />
 					<span>{result?.disabled ? t("config.usage.notEnabled") : t("sessionContext.usageError")}</span>
 					{props.onConfigureUsage && (

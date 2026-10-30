@@ -284,7 +284,14 @@ export function VirtualRunList<T>(props: VirtualRunListProps<T>) {
 		getScrollElement: () => scrollRef.current,
 		estimateSize,
 		getItemKey,
-		overscan: 3,
+		// overscan 是**行数**不是像素。这里的「行」是一整轮，单轮高度从几百 px 到数万 px 不等
+		// （见 virtualTimelinePolicy 的估算说明：长任务会话每轮数万 px）。overscan: 3 意味着视口外
+		// 恒定多挂 3 整轮的**完整子树**（执行过程折叠里的全部 ToolStep / MarkdownStream 都在里面），
+		// 长任务会话里一轮几千个节点 → 这一项就能把挂载量放大 3~7 倍，而这些节点全部参与样式、
+		// 布局与合成。滚动卡顿的直接观感就来自这里，而不是虚拟器的 JS。
+		// 取 1：视口上下各留一行，足够覆盖滚动惯性；也不会露白 —— 行集合变化时 onChange 走
+		// flushSync 同步补挂，且虚拟区容器有 overflow: clip 兜住估值误差那一帧。
+		overscan: 1,
 		scrollMargin,
 		// 库自己测到的尺寸才是「内容后增高」的最新真值：ref 初测只发生在挂载那一帧，
 		// ResizeObserver 的后续重测不会经过 ref 回调。onChange 每次几何变化触发，只回写
@@ -397,11 +404,26 @@ export function VirtualRunList<T>(props: VirtualRunListProps<T>) {
 		rebuildResolvedHeights(widthRef.current);
 		if (typeof ResizeObserver === "undefined") return;
 		let lastWidth = widthRef.current;
+		// 静默期：分屏拖动 / 开关侧栏时宽度是**每帧**变的，而下面这套
+		// 「两遍全量 remeasure + virtualizer.measure() 清空库内尺寸缓存 + 锚点补偿」
+		// 每帧跑一次就是拖动卡顿的直接来源（窄栏换行更多，同一动作比全宽更贵）。
+		//
+		// 做法：拖动期间只更新 widthRef 并让按宽度分桶的估值（HeightBuckets 的比例外推）
+		// 继续生效，静默 140ms 后再付一次完整代价。宽度变化导致的整表重排免不掉，
+		// 但不必每帧付一次。timers 在 cleanup 里清掉，否则卸载后还会跑一次测量。
+		let settleTimer: ReturnType<typeof setTimeout> | undefined;
 		const observer = new ResizeObserver(() => {
 			const nextWidth = Math.round(scroller.clientWidth);
 			if (Math.abs(nextWidth - lastWidth) < 1) return;
 			lastWidth = nextWidth;
 			widthRef.current = nextWidth;
+			if (settleTimer !== undefined) clearTimeout(settleTimer);
+			settleTimer = setTimeout(() => {
+				settleTimer = undefined;
+				runWidthSettle(nextWidth);
+			}, 140);
+		});
+		const runWidthSettle = (nextWidth: number) => {
 			const anchor = readViewportAnchor(scroller);
 			const remeasure = () => {
 				for (const node of Array.from(scroller.querySelectorAll<HTMLElement>("[data-index]"))) {
@@ -427,9 +449,12 @@ export function VirtualRunList<T>(props: VirtualRunListProps<T>) {
 				onBeforeScrollCorrection?.();
 				settleScrollAnchor(scroller, anchor);
 			});
-		});
+		};
 		observer.observe(scroller);
-		return () => observer.disconnect();
+		return () => {
+			observer.disconnect();
+			if (settleTimer !== undefined) clearTimeout(settleTimer);
+		};
 	}, [scrollRef, virtualizer, rebuildResolvedHeights, recordHeight, onBeforeScrollCorrection]);
 
 	if (solid || !virtualize) {

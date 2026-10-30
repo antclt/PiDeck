@@ -54,6 +54,11 @@ export function shouldKeepLightOnSettle(textLength: number): boolean {
  * SETTLE_FULL_MAX_CHARS 轻量插件上限约束）。正常回复远小于该值，不受影响。 */
 export const SETTLED_COLLAPSE_MIN_CHARS = 30_000;
 
+/** 展开全文的渐进分块目标大小：每块一次 Streamdown 解析 + commit。
+ * 取 32K 与既有实测档同源（30K ≈ 2.3ms/帧量级解析，见 STREAM_LIGHT_MAX_CHARS 注），
+ * 一块一次 commit 只有几毫秒；205KB ≈ 7 块，rIC 渐进挂载全程不掉帧。 */
+export const SETTLED_CHUNK_CHARS = 32_000;
+
 /** 折叠态预览前缀长度：预览足够读清结论，又保证渲染/布局成本可忽略。 */
 export const SETTLED_COLLAPSE_PREVIEW_CHARS = 6_000;
 

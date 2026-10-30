@@ -11,7 +11,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.9.7-blue)
+![Version](https://img.shields.io/badge/version-0.9.9--beta-blue)
 
 <!-- star-history:start -->
 <picture>
@@ -53,6 +53,7 @@
   - [🐳 DSH Backend](#-dsh-backend)
   - [🏗️ How It Works](#-how-it-works)
   - [📦 Download](#-download)
+  - [📱 Mobile Clients](#-mobile-clients)
   - [🧰 Quick Start (from Source)](#-quick-start-from-source)
   - [❓ FAQ](#-faq)
   - [🧑‍💻 Development](#-development)
@@ -81,16 +82,23 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.9.7** (2026-10-26)
+> **Latest: v0.9.9-beta** (2026-10-30)
 
-### v0.9.7 Release Highlights
-- 🚀 **Thinking-intensity picker rebuilt: ZCode-style gradient intensity bar**
-- 🚀 **Sidebar sticky group headers switch**
-- 🚀 **Web: explicit paging for the sidebar session list**
-- ✨ **A visual pass aligning the UI with ZCode**
-- ✨ **Web: conditional requests for /api/state**
-- ✨ **Image-only sends silently injected an English prompt (#404)**
-- ✨ **OpenCode 2.x sessions unrecognized on import (#410)**
+### v0.9.9-beta Release Highlights
+- 🚀 **Appearance split into "style × palette", with the pi TUI terminal skin ported wholesale**
+- 🚀 **Session groups become a host-level capability (plugin v3)**
+- 🚀 **Favorite whole sessions**
+- 🚀 **Scratchpad gains project / global scopes**
+- 🚀 **ACP remembers thinking / mode / permission per tool and replays them**
+- 🚀 **Per-tool "default bypass permissions for new sessions" and a Qoder CLI preset**
+- 🚀 **A separate proxy switch for ACP**
+- 🚀 **Create and drive ACP sessions over MCP**
+- 🚀 **ACP sessions in the Web client**
+- 🚀 **ACP usage panel gains token / latency / TPS metrics**
+- ✨ **Searchable model dropdown in ACP**
+- ✨ **Queued sends mid-turn, plus a dedicated stop button**
+- ✨ **ACP tool table collapses into rows**
+- ✨ **Turn footer split into "actions | duration | model"**
 
 [View Full Changelog →](CHANGELOG.md)
 
@@ -259,6 +267,17 @@ Artifacts carry the `PiDeck-Dev-` prefix and can be installed alongside stable p
 
 ---
 
+## 📱 Mobile Clients
+
+Community-maintained PiDeck mobile clients, used with the desktop app's "Settings → Web Service → LAN web service":
+
+| Project | Description |
+|---|---|
+| [qgx1992/pideck-mobile](https://github.com/qgx1992/pideck-mobile) | Protocol core + Capacitor Android client: QR / manual-link pairing, streaming sessions, notifications and workspace; build your own APK. |
+| [xrbbm/PocketDeck](https://github.com/xrbbm/PocketDeck) | Native Android (Kotlin + Jetpack Compose) client: QR pairing straight into your latest session, approval cards, Git / file workspace, APK downloads on Releases. |
+
+---
+
 ## 🧰 Quick Start (from Source)
 
 ```bash
@@ -368,7 +387,13 @@ All kinds of contributions are welcome: bug reports, feature ideas, documentatio
 - Please search for existing issues before filing a new one;
 - Code PRs should follow the repo's architecture conventions and commit guidelines — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Thank you to everyone who has contributed to PiDeck! See the full list in [CONTRIBUTORS.en.md](CONTRIBUTORS.en.md).
+### 🙌 Contributors
+
+Thank you to everyone who has contributed to PiDeck! See the full list (with each contributor's features and issue numbers) in [CONTRIBUTORS.en.md](CONTRIBUTORS.en.md).
+
+<a href="https://github.com/ayuayue/PiDeck/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=ayuayue/PiDeck&max=100" alt="PiDeck contributors" />
+</a>
 
 ---
 
@@ -396,11 +421,14 @@ This app starts local `pi` processes and exposes limited file operations through
 
 ## ☕ Sponsor
 
-If PiDeck is useful to you, you can buy the author a coffee. Scan the WeChat Pay QR code below to tip. Thank you.
+If PiDeck is useful to you, you can buy the author a coffee. Thank you.
 
 <p align="center">
   <img src="docs/images/wechat_pay.png" alt="WeChat Pay tip QR code" width="280" />
 </p>
+
+**Alipay**: open PiDeck, click the "PiDeck" brand name at the top left → "Buy the author a coffee", then scan with the Alipay app.
+(The purchase link is generated per device, so it cannot be a static QR code here.)
 
 ## License
 

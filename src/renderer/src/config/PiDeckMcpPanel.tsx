@@ -22,7 +22,8 @@ export function PiDeckMcpPanel({ existingNames, disabled, onAdd }: { existingNam
 			host.allowControl !== host.state.allowControl ||
 			host.allowAgentWrite !== (host.state.allowAgentWrite ?? false) ||
 			host.allowAutomationWrite !== (host.state.allowAutomationWrite ?? false) ||
-			host.allowFavoritesWrite !== (host.state.allowFavoritesWrite ?? false));
+			host.allowFavoritesWrite !== (host.state.allowFavoritesWrite ?? false) ||
+			host.allowAcpInvoke !== (host.state.allowAcpInvoke ?? false));
 	// 「全选」只覆盖当前项目列表；要跟随今后新建的项目得用通配授权，而不是逐个勾。
 	const projectCount = host.state?.projects.length ?? 0;
 	const allSelected = projectCount > 0 && host.projectIds.length === projectCount;
@@ -104,6 +105,15 @@ export function PiDeckMcpPanel({ existingNames, disabled, onAdd }: { existingNam
 					<Label htmlFor={`${prefix}-favorite-write`}>{t("config.mcp.pideck.allowFavoritesWrite")}</Label>
 				</div>
 				<p className="text-micro text-muted-foreground">{t("config.mcp.pideck.allowFavoritesWriteHint")}</p>
+			</fieldset>
+			{/* ACP 调用：默认关；开启后可新建并驱动 ACP 会话（只认已登记工具，不能传命令/参数/环境变量） */}
+			<fieldset disabled={busy || !host.state} className="flex flex-col gap-2">
+				<legend className="mb-2 text-control font-medium">{t("config.mcp.pideck.acpSection")}</legend>
+				<div className="flex shrink-0 items-center gap-2">
+					<Checkbox id={`${prefix}-acp-invoke`} checked={host.allowAcpInvoke} onCheckedChange={(checked) => host.setAllowAcpInvoke(checked === true)} />
+					<Label htmlFor={`${prefix}-acp-invoke`}>{t("config.mcp.pideck.allowAcpInvoke")}</Label>
+				</div>
+				<p className="text-micro text-muted-foreground">{t("config.mcp.pideck.allowAcpInvokeHint")}</p>
 			</fieldset>
 			<div className="flex flex-wrap gap-2">
 				<Button

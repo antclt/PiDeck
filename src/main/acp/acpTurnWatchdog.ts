@@ -14,8 +14,11 @@ import type { AcpAbortEscalationReason, AcpAgentRuntime } from "./acpAgentRuntim
 
 /** abort 后等 CLI 自行收口的宽限;超时回合仍未结算则升级强杀(CLI wedged 不处理 cancel 的实测兑底)。 */
 const ABORT_ESCALATION_MS = 5_000;
-/** 回合内全静默(无任何 session/update 且无挂起审批)的 stall 判定阈值;深思回合正常也有 thought/tool 流。 */
-const PROMPT_STALL_TIMEOUT_MS = 90_000;
+/** 回合内全静默(无任何 session/update、无挂起审批也无在途工具调用)的 stall 判定阈值。
+ *  取 3 分钟：实测 intra-turn 静默峰值约 53s（CodeBuddy 归档 1096 条消息，>90s 的空隙全部是回合结束后
+ *  等用户输入），留 3 倍余量；审批与在途工具另有豁免（见 armStallWatchdog）。
+ *  真卡死时多等 90s 只影响收口速度，不影响正确性。 */
+const PROMPT_STALL_TIMEOUT_MS = 180_000;
 
 export type AcpTurnWatchdogHost = {
 	/** runtime 归属校验：stop/重建后旧定时器不得再作用于新 runtime。 */
@@ -32,8 +35,11 @@ export type AcpTurnWatchdogHost = {
 export class AcpTurnWatchdog {
 	constructor(private readonly host: AcpTurnWatchdogHost) {}
 
-	/** 清回合辅助定时器（abort 升级宽限/stall 看门狗）；回合结算、stop、连接死亡共用。 */
+	/** 清回合辅助定时器（abort 升级宽限/stall 看门狗）与滚动超时句柄；回合结算、stop、连接死亡共用。 */
 	clearTurnTimers(runtime: AcpAgentRuntime): void {
+		// 连接层的超时定时器随之在 pending 条目上自然失效（已结算/已关闭），
+		// 这里只撤引用，防旧回合的 refresh 被下一个回合复用。
+		runtime.turnDeadlineRefresh = null;
 		this.clearAbortEscalation(runtime);
 		this.clearStallWatchdog(runtime);
 	}
@@ -79,10 +85,18 @@ export class AcpTurnWatchdog {
 				this.clearStallWatchdog(runtime);
 				return;
 			}
-			if (runtime.permissions.hasPending()) return;
+			if (runtime.permissions.hasPending()) {
+				// 挂起审批是合法等待：刷新静默基准（用户答完后的静默从这一刻重新起算，
+				// 否则审批超过 stall 阈值再作答，下一 tick 会立刻被判 stall），并顺延回合兑底截止
+				// （审批自身有 PERMISSION_TIMEOUT_MS 到期，不会永久拖延）。
+				runtime.lastUpdateAt = Date.now();
+				runtime.turnDeadlineRefresh?.();
+				return;
+			}
 			// 在途工具调用不算静默：那是 agent 合法等待工具结束（npm install/构建/测试等
 			// 长命令在 tool_call started→completed 之间可长时间无流式输出），与挂起审批同等
 			// 豁免。刷新静默基准=工具收口后重新起算；真悬死由回合兑底超时收口（#411）。
+			// 注意只刷新静默基准、不顺延回合兑底截止：后者正是「工具永远不返回」的兑底。
 			if (runtime.inFlightToolCalls.size > 0) {
 				runtime.lastUpdateAt = Date.now();
 				return;

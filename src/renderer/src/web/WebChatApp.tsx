@@ -34,7 +34,7 @@ import { Button } from "@/components/ui-shadcn/button";
 import { Input } from "@/components/ui-shadcn/input";
 import { chatMessagesToUiMessages, createProject, createSession, deleteProject, fetchMessagePage, fetchModels, fetchState, getWebAuthHeaders, respondToUi, setRuntimeModel, setRuntimeThinking, updateSessionRecord } from "./webApi";
 import { abortRuntime, cloneRuntime, compactRuntime, copySession, deleteSession, downloadSessionHtml, editRuntimeMessage, deleteRuntimeMessage, prepareResend, renameSession, restartRuntime, activateRuntime, forkRuntimeSession, getForkMessages } from "./webApi";
-import { fetchRuntimeContextUsage, setRuntimePermission } from "./webApi";
+import { fetchRuntimeContextUsage, setRuntimePermission, setSessionSecurityLevel } from "./webApi";
 import { dataUrlToFilePart } from "./webMessageParts";
 import { shouldFlushQueuedPrompt } from "./webQueueFlush";
 import { sessionUiMessagesToMarkdown } from "./webMarkdown";
@@ -102,6 +102,8 @@ export function WebChatApp() {
 	const [pendingThinkingLevel, setPendingThinkingLevel] = useState<string | null>(null);
 	// 首页（无会话）时选择的后端：随下一次新建会话生效（对齐桌面 welcome 页语义）
 	const [pendingBackend, setPendingBackend] = useState<AgentBackend | null>(null);
+	// ACP 草稿期的具体工具（AcpToolConfig.id）：与 backend 配对生效，切到非 acp 时清空。
+	const [pendingAcpToolId, setPendingAcpToolId] = useState<string | null>(null);
 	// 手机端默认把聊天作为主画面，项目树通过抽屉按需打开，避免列表占满首屏。
 	const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 	const [uiResponding, setUiResponding] = useState(false);
@@ -493,6 +495,9 @@ export function WebChatApp() {
 					.map((request) => request.sessionId + ":" + request.requestId)
 					.sort()
 					.join(","),
+				// 安全等级（全局默认/覆盖/等级表）不在会话/runtime 字段里，必须单独进指纹；
+				// 否则 SSE 只推安全变更时 setState 被跳过，菜单停在旧等级。
+				JSON.stringify(state.security ?? null),
 			].join("|");
 		// payload：SSE state 事件的现成载荷（/api/state 同构），有则免一次拉取。
 		// 形状由服务端 serializePublicWebPayload 保证；这里只做最小字段防御（缺 runtimes 视为畸形，回退拉取）。
@@ -668,17 +673,23 @@ export function WebChatApp() {
 	// 草稿期后端切换：无会话 → 暂存随下次新建生效；有会话 → 仅「本页新建零消息草稿」可写
 	// catalog（历史/复制/克隆/fork 会话自带消息记录，切后端会让历史错位，一律拒绝）。
 	// 切后端同时清空模型/思考偏好（pi 与 dsh/生图的模型目录不同，跨后端偏好无效）。
-	const handleBackendChange = async (backend: AgentBackend) => {
+	const handleBackendChange = async (backend: AgentBackend, acpToolId?: string) => {
 		if (activeSession && (activeRuntime || backendSwitchLocked(activeSession.id))) return;
+		// ACP 必须落到具体 CLI：没带工具 id 的切换请求直接忽略（选择器总是带）。
+		if (backend === "acp" && !acpToolId) return;
+		const nextAcpToolId = backend === "acp" ? acpToolId : undefined;
 		if (!activeSession) {
 			setPendingBackend(backend);
+			setPendingAcpToolId(nextAcpToolId ?? null);
 			setPendingModel(null);
 			setPendingThinkingLevel(null);
 			return;
 		}
 		setCommandError(null);
 		try {
-			await updateSessionRecord(activeSession.id, { backend, model: null, thinkingLevel: null });
+			// acpToolId 显式置 null：从 acp 切回其他后端要清掉 catalog 里的工具绑定，
+			// 否则下次激活仍会按旧工具拉起 CLI。
+			await updateSessionRecord(activeSession.id, { backend, acpToolId: nextAcpToolId ?? null, model: null, thinkingLevel: null });
 			await refreshNow();
 		} catch (error) {
 			setCommandError(error instanceof Error ? error.message : String(error));
@@ -698,6 +709,7 @@ export function WebChatApp() {
 		try {
 			const id = await createSession(project.id, {
 				...(pendingBackend ? { backend: pendingBackend } : {}),
+				...(pendingBackend === "acp" && pendingAcpToolId ? { acpToolId: pendingAcpToolId } : {}),
 				...(pendingModel ? { model: pendingModel } : {}),
 				...(pendingThinkingLevel ? { thinkingLevel: pendingThinkingLevel } : {}),
 			});
@@ -735,6 +747,7 @@ export function WebChatApp() {
 		try {
 			const id = await createSession(projectId, {
 				...(pendingBackend ? { backend: pendingBackend } : {}),
+				...(pendingBackend === "acp" && pendingAcpToolId ? { acpToolId: pendingAcpToolId } : {}),
 				...(pendingModel ? { model: pendingModel } : {}),
 				...(pendingThinkingLevel ? { thinkingLevel: pendingThinkingLevel } : {}),
 			});
@@ -1190,6 +1203,19 @@ export function WebChatApp() {
 		}
 	};
 
+	// Pi 会话安全等级：服务端写 SecurityStore（策略快照），返回最新配置；
+	// 不乐观改本地状态——校验/写盘失败必须让菜单停在真实等级。
+	const handleSecurityLevelChange = async (levelId: string | null) => {
+		if (!activeSessionId) return;
+		setCommandError(null);
+		try {
+			const security = await setSessionSecurityLevel(activeSessionId, levelId);
+			setState((current) => ({ ...current, security }));
+		} catch (error) {
+			setCommandError(error instanceof Error ? error.message : String(error));
+		}
+	};
+
 	// P2：上下文用量随主轮询节奏拉取（活跃 runtime 存在时；无 runtime 清空圆环）
 	useEffect(() => {
 		if (!activeTarget) {
@@ -1282,9 +1308,14 @@ export function WebChatApp() {
 					contextUsage={contextUsage}
 					// 额度用量归属：优先 runtime 直报的供应商（跟随当次实际模型），退回会话记录的模型供应商；
 					// 后端按会话后端走，DSH 会话才会用 dsh 链的用量探针。
+					// ACP 会话的 provider 是转发层名（"acp"），探针查不到供应商会静默不渲染（见 ProviderUsageBlock 降级）。
 					usageProvider={contextUsage?.provider ?? activeSession?.model?.provider}
 					usageBackend={activeSession?.backend === "dsh" ? "dsh" : "pi"}
 					permissionPreset={contextUsage?.permissionPreset ?? activeSession?.permissionPreset}
+					// Pi 会话安全等级（DSH/ACP 不渲染）：与桌面 SecurityLevelMenu 同一数据源
+					sessionId={activeSessionId || undefined}
+					security={activeSession && activeSession.backend !== "dsh" && activeSession.backend !== "acp" ? state.security : undefined}
+					onSecurityLevelChange={activeSession && activeSession.backend !== "dsh" && activeSession.backend !== "acp" ? (levelId) => void handleSecurityLevelChange(levelId) : undefined}
 					actions={{
 						onPermissionChange: activeSession?.backend === "dsh" ? (preset) => void handlePermissionChange(preset) : undefined,
 						onOpenWorkspace: activeSession ? () => setWorkspaceOpen(true) : undefined,
@@ -1320,6 +1351,8 @@ export function WebChatApp() {
 						</Button>
 					</div>
 				) : null}
+				{/* 编辑/重发/删除走 fork 化写入：pi 恒可，DSH 需要活跃 runtime（历史会话没有运行时命令），
+					ACP 一律不给——投影/归档由 agent CLI 主导，运行时没有 fork 命令，摆出入口只会报错。 */}
 				<WebTimeline
 					messages={timelineMessages}
 					hasActiveSession={Boolean(activeSession)}
@@ -1334,8 +1367,8 @@ export function WebChatApp() {
 					onLoadMore={() => void handleLoadMore()}
 					onScrollTopChange={handleTimelineScroll}
 					onNearBottomChange={handleNearBottomChange}
-					canManageMessages={activeSession?.backend !== "dsh" || Boolean(activeTarget)}
-					canDeleteMessage={Boolean(activeTarget)}
+					canManageMessages={activeSession?.backend === "acp" ? false : activeSession?.backend !== "dsh" || Boolean(activeTarget)}
+					canDeleteMessage={activeSession?.backend === "acp" ? false : Boolean(activeTarget)}
 					pendingMessageAction={pendingMessageAction}
 					exitingMessageIds={exitingMessageIds}
 					flashMessageId={flashMessageId}
@@ -1353,8 +1386,10 @@ export function WebChatApp() {
 					onSend={handleSend}
 					onStop={handleStop}
 					backend={activeSession?.backend ?? pendingBackend ?? "pi"}
+					acpToolId={activeSession?.acpToolId ?? pendingAcpToolId ?? undefined}
+					acpTools={state.acpTools}
 					backendLocked={activeSession ? Boolean(activeRuntime) || backendSwitchLocked(activeSession.id) : false}
-					onBackendChange={(backend) => void handleBackendChange(backend)}
+					onBackendChange={(backend, acpToolId) => void handleBackendChange(backend, acpToolId)}
 					model={activeSession?.model ?? pendingModel ?? undefined}
 					models={models}
 					refreshingModels={modelsRefreshing}

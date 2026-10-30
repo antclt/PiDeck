@@ -7,8 +7,9 @@ import type { NormalizedFavoriteInput } from "./favoriteInput";
 /**
  * 收藏的唯一状态源：<userData>/favorites.json（路径由装配层注入，便于测试）。
  *
- * 与 AgentProfileStore 同一套骨架（串行写队列 + 读盘归一化），差异是它只承载「快照」：
- * - 收藏的是正文快照而不是消息引用，会话删除/消息编辑都不影响已收藏内容；
+ * 与 AgentProfileStore 同一套骨架（串行写队列 + 读盘归一化），差异是它只承载「快照 + 引用」：
+ * - 回复/片段收藏的是正文快照，会话删除/消息编辑都不影响已收藏内容；
+ * - 会话收藏只存 sessionId + 标题 + 项目（引用），点击跳回原会话，不复制整段正文；
  * - 数组顺序就是用户看到的顺序（也是拖拽排序持久化的权威顺序）：新增前插，读盘保留文件里的条目顺序；
  * - 读盘归一化丢弃坏条目、钳正文长度并裁到 FAVORITE_ENTRY_LIMIT；
  * - 坏文件（截断 / 手改坏）退化成空列表并立即写回，不让收藏功能拖垮启动。
@@ -17,7 +18,7 @@ const STORE_VERSION = 1;
 
 type PersistedFavoriteState = { version: number; entries: FavoriteEntry[] };
 
-const FAVORITE_KINDS: readonly FavoriteKind[] = ["message", "selection"];
+const FAVORITE_KINDS: readonly FavoriteKind[] = ["message", "selection", "session"];
 const FAVORITE_ROLES: readonly FavoriteRole[] = ["user", "assistant", "system"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -42,27 +43,31 @@ function cloneEntry(entry: FavoriteEntry): FavoriteEntry {
 	return { ...entry };
 }
 
-/** 单条读盘归一化：缺 id / 正文 / 合法 kind 的条目直接丢弃（宁可少一条，也不让坏数据进列表）。 */
+/** 单条读盘归一化：缺 id / 正文 / 合法 kind 的条目直接丢弃（宁可少一条，也不让坏数据进列表）。
+ *  会话收藏是引用，正文合法为空；但缺 sessionId 的会话条目没有意义，同样丢弃。 */
 function normalizeEntry(raw: unknown): FavoriteEntry | null {
 	if (!isRecord(raw)) return null;
 	const kind = readKind(raw.kind);
 	const id = typeof raw.id === "string" ? raw.id.trim() : "";
 	const createdAt = typeof raw.createdAt === "number" && Number.isFinite(raw.createdAt) ? raw.createdAt : Number.NaN;
 	const text = typeof raw.text === "string" ? raw.text : "";
-	if (!kind || !id || !text.trim() || Number.isNaN(createdAt)) return null;
+	const sessionId = readMeta(raw.sessionId, FAVORITE_META_MAX_CHARS);
+	if (!kind || !id || Number.isNaN(createdAt)) return null;
+	const isSession = kind === "session";
+	if (isSession ? !sessionId : !text.trim()) return null;
 	return {
 		id,
 		createdAt,
 		kind,
-		text: text.length > FAVORITE_TEXT_MAX_CHARS ? text.slice(0, FAVORITE_TEXT_MAX_CHARS) : text,
-		role: readRole(raw.role),
-		sessionId: readMeta(raw.sessionId, FAVORITE_META_MAX_CHARS),
+		text: isSession ? "" : text.length > FAVORITE_TEXT_MAX_CHARS ? text.slice(0, FAVORITE_TEXT_MAX_CHARS) : text,
+		role: isSession ? null : readRole(raw.role),
+		sessionId,
 		sessionTitle: readMeta(raw.sessionTitle, FAVORITE_SESSION_TITLE_MAX_CHARS),
 		projectId: readMeta(raw.projectId, FAVORITE_META_MAX_CHARS),
-		messageId: readMeta(raw.messageId, FAVORITE_META_MAX_CHARS),
-		model: readMeta(raw.model, FAVORITE_META_MAX_CHARS),
-		partial: raw.partial === true,
-		truncated: raw.truncated === true || text.length > FAVORITE_TEXT_MAX_CHARS,
+		messageId: isSession ? null : readMeta(raw.messageId, FAVORITE_META_MAX_CHARS),
+		model: isSession ? null : readMeta(raw.model, FAVORITE_META_MAX_CHARS),
+		partial: isSession ? false : raw.partial === true,
+		truncated: isSession ? false : raw.truncated === true || text.length > FAVORITE_TEXT_MAX_CHARS,
 	};
 }
 

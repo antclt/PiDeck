@@ -140,6 +140,14 @@ function acceptsGzip(header: string | undefined): boolean {
 }
 
 /**
+ * /api/* 跨域接口的统一 CORS 头。预检、200 实际响应、错误响应必须是同一套：
+ * 浏览器规则是「预检过了但实际响应缺 Access-Control-Allow-Origin → 丢弃响应并抛
+ * TypeError: Failed to fetch」，状态码 200、数据也齐全，JS 就是拿不到（issue #435：
+ * workspace 路由自己 writeHead 时漏了这行）。新增直接写头的 /api 路由必须 spread 这个常量。
+ */
+export const WEB_CORS_HEADERS: Record<string, string> = { "access-control-allow-origin": "*" };
+
+/**
  * JSON 响应出口。客户端接受 gzip 且载荷超过阈值时按 gzip 下发（局域网/外网访问下
  * /api/state 与 /messages/page 可省 ~75% 流量）。压缩失败一律回退明文，不让客户端拿到坏流。
  */
@@ -160,7 +168,7 @@ export function sendJson(response: ServerResponse, body: unknown, extraHeaders: 
 				"content-type": "application/json; charset=utf-8",
 				"content-encoding": "gzip",
 				"cache-control": "no-store",
-				"access-control-allow-origin": "*",
+				...WEB_CORS_HEADERS,
 				vary: "accept-encoding",
 				...extraHeaders,
 			});
@@ -171,7 +179,7 @@ export function sendJson(response: ServerResponse, body: unknown, extraHeaders: 
 	response.writeHead(200, {
 		"content-type": "application/json; charset=utf-8",
 		"cache-control": "no-store",
-		"access-control-allow-origin": "*",
+		...WEB_CORS_HEADERS,
 		...(acceptEncoding ? { vary: "accept-encoding" } : {}),
 		...extraHeaders,
 	});
@@ -197,7 +205,7 @@ export function sendError(response: ServerResponse, statusCode: number, code: st
 	response.writeHead(statusCode, {
 		"content-type": "application/json; charset=utf-8",
 		"cache-control": "no-store",
-		"access-control-allow-origin": "*",
+		...WEB_CORS_HEADERS,
 	});
 	response.end(
 		JSON.stringify({
@@ -210,9 +218,11 @@ export function sendError(response: ServerResponse, statusCode: number, code: st
 
 export function sendNoContent(response: ServerResponse): void {
 	response.writeHead(204, {
-		"access-control-allow-origin": "*",
+		...WEB_CORS_HEADERS,
 		"access-control-allow-methods": "GET,POST,OPTIONS",
-		"access-control-allow-headers": "content-type",
+		// authorization 必须放行：跨域 POST 带 Bearer 时浏览器会先发预检，只允许 content-type
+		// 等于逼客户端退化成 ?token=（GET 还行，POST 无路可走）。
+		"access-control-allow-headers": "content-type, authorization",
 	});
 	response.end();
 }
