@@ -4,6 +4,7 @@ import { codeOf, opError, opFail, opFailFromCode, opOk, type Op } from "../../sh
 import type { RemoteEntryCreateResult, RemoteEntryDeleteResult, RemoteEntryRenameResult, RemoteEntryStatResult, RemoteTrashListResult, RemoteTrashPruneResult, RemoteTrashRestoreResult } from "../../shared/types/remoteFiles";
 import type { RemoteHostConnectionService } from "../remote/RemoteHostConnectionService";
 import { createRemoteProjectEntryService, REMOTE_FILE_ENTRY_CODES } from "../remote/RemoteProjectEntryService";
+import { isUncertainWrite } from "../remote/RemoteProjectWriteFacts";
 
 const VERSION = /^[a-f0-9]{32}$/;
 /** 回收站 id 形状是 IPC 边界的一部分：main 生成、renderer 只回传。 */
@@ -66,6 +67,25 @@ export function registerRemoteProjectEntryIpc(input: {
 	 * 闭集过滤与迁移前逐字一致：`REMOTE_FILE_ENTRY_CODES` 之外的码（含自由文本、含连接层自己的码）
 	 * 一律折成 `REMOTE_FILE_COMMAND_FAILED`，否则这条通道会变成 stderr 的下水道。
 	 */
+	/**
+	 * 写路径的统一收尾：成功与「可能已落地」的失败都失效事实；明确失败不失效。写本身不重放。
+	 *
+	 * `completed` 返回成功后的已知路径（undefined = 这次写不影响用户可见条目，例如清理回收站）；
+	 * `requested` 是未知结局时唯一能负责的路径：请求里的 parent/name 或 source/target，不猜远端实际状态。
+	 */
+	async function writeWithFacts<T>(projectId: string, requested: readonly string[], completed: (value: T) => readonly string[] | undefined, write: () => Promise<T>): Promise<T> {
+		try {
+			const value = await write();
+			const paths = completed(value);
+			if (paths !== undefined) input.afterWrite?.(projectId, paths);
+			return value;
+		} catch (error) {
+			if (isUncertainWrite(error)) input.afterWrite?.(projectId, requested);
+			throw error;
+		}
+	}
+	/** 创建请求的目标路径（与 service 里 entryRelativePath 同一规则）：未知结局时按它标脏。 */
+	const requestedEntryPath = (parent: string, name: string): string => (parent === "" ? name : parent + "/" + name);
 	async function wrap<T>(task: () => Promise<T>): Promise<Op<T>> {
 		if (!input.enabled) return opFail("REMOTE_FEATURE_DISABLED");
 		try {
@@ -92,9 +112,12 @@ export function registerRemoteProjectEntryIpc(input: {
 			wrap(async () => {
 				if (!PROJECT_ID(projectId) || typeof parent !== "string" || typeof name !== "string") throw new Error("REMOTE_FILE_INPUT_INVALID");
 				const sender = watchSender(event.sender);
-				const created = await entry.createFile(sender, projectId, parent, name);
-				input.afterWrite?.(projectId, [created.relativePath]);
-				return created;
+				return await writeWithFacts(
+					projectId,
+					[requestedEntryPath(parent, name)],
+					(created) => [created.relativePath],
+					() => entry.createFile(sender, projectId, parent, name),
+				);
 			}),
 	);
 
@@ -104,9 +127,12 @@ export function registerRemoteProjectEntryIpc(input: {
 			wrap(async () => {
 				if (!PROJECT_ID(projectId) || typeof parent !== "string" || typeof name !== "string") throw new Error("REMOTE_FILE_INPUT_INVALID");
 				const sender = watchSender(event.sender);
-				const created = await entry.createDirectory(sender, projectId, parent, name);
-				input.afterWrite?.(projectId, [created.relativePath]);
-				return created;
+				return await writeWithFacts(
+					projectId,
+					[requestedEntryPath(parent, name)],
+					(created) => [created.relativePath],
+					() => entry.createDirectory(sender, projectId, parent, name),
+				);
 			}),
 	);
 
@@ -118,10 +144,13 @@ export function registerRemoteProjectEntryIpc(input: {
 				// 令牌格式不合法不烧令牌：形状校验在打开 SSH 之前。
 				if (typeof version !== "string" || !VERSION.test(version)) throw new Error("REMOTE_FILE_INPUT_INVALID");
 				const sender = watchSender(event.sender);
-				const renamed = await entry.rename(sender, projectId, source, target, version);
 				// 改名要连源路径一起标脏：它所在的目录也少了一项。
-				input.afterWrite?.(projectId, [source, renamed.relativePath]);
-				return renamed;
+				return await writeWithFacts(
+					projectId,
+					[source, target],
+					(renamed) => [source, renamed.relativePath],
+					() => entry.rename(sender, projectId, source, target, version),
+				);
 			}),
 	);
 
@@ -132,9 +161,12 @@ export function registerRemoteProjectEntryIpc(input: {
 				if (!PROJECT_ID(projectId) || typeof relative !== "string") throw new Error("REMOTE_FILE_INPUT_INVALID");
 				if (typeof version !== "string" || !VERSION.test(version)) throw new Error("REMOTE_FILE_INPUT_INVALID");
 				const sender = watchSender(event.sender);
-				const deleted = await entry.deleteEntry(sender, projectId, relative, version);
-				input.afterWrite?.(projectId, [relative]);
-				return deleted;
+				return await writeWithFacts(
+					projectId,
+					[relative],
+					() => [relative],
+					() => entry.deleteEntry(sender, projectId, relative, version),
+				);
 			}),
 	);
 
@@ -154,9 +186,13 @@ export function registerRemoteProjectEntryIpc(input: {
 			wrap(async () => {
 				if (!PROJECT_ID(projectId) || typeof trashId !== "string" || !TRASH_ID.test(trashId)) throw new Error("REMOTE_FILE_INPUT_INVALID");
 				const sender = watchSender(event.sender);
-				const restored = await entry.restoreTrash(sender, projectId, trashId);
-				input.afterWrite?.(projectId, [restored.relativePath]);
-				return restored;
+				// 还原的目标路径只在成功回执里出现：未知结局没有已知路径，仍发一次空范围失效。
+				return await writeWithFacts(
+					projectId,
+					[],
+					(restored) => [restored.relativePath],
+					() => entry.restoreTrash(sender, projectId, trashId),
+				);
 			}),
 	);
 
@@ -167,7 +203,13 @@ export function registerRemoteProjectEntryIpc(input: {
 				if (!PROJECT_ID(projectId)) throw new Error("REMOTE_FILE_INPUT_INVALID");
 				if (!Array.isArray(trashIds) || trashIds.length === 0 || trashIds.length > 32 || trashIds.some((id) => typeof id !== "string" || !TRASH_ID.test(id))) throw new Error("REMOTE_FILE_INPUT_INVALID");
 				const sender = watchSender(event.sender);
-				return await entry.pruneTrash(sender, projectId, trashIds);
+				// 清理回收站不改用户可见条目：成功与未知都不需要标脏（仍可能影响 Git status，由装配层项目级失效负责）。
+				return await writeWithFacts(
+					projectId,
+					[],
+					() => undefined,
+					() => entry.pruneTrash(sender, projectId, trashIds),
+				);
 			}),
 	);
 
