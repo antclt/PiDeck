@@ -17,6 +17,7 @@ import { PiConfigTargetSelector } from "./config/PiConfigTargetSelector";
 import { hasUnsavedConfigDrafts, samePiConfigTarget, toSshTargetHosts, toWslTargetHosts, type PiConfigTargetHost } from "./config/piConfigTargetModel";
 import { RemoteConfigPanel } from "./config/RemoteConfigPanel";
 import { REMOTE_CONFIG_UNSUPPORTED_TAB_COPY, RemoteConfigUnsupportedNotice } from "./config/RemoteConfigUnsupportedNotice";
+import { ConfigDiagnosticCard } from "./config/ConfigDiagnosticCard";
 import { WslConfigScopeNotice } from "./config/WslConfigScopeNotice";
 import { WslConfigSourceHint } from "./config/WslConfigSourceHint";
 import { usePiConfigDir } from "./config/usePiConfigDir";
@@ -158,41 +159,6 @@ function normalizeModelsFile(value: unknown): ModelsFile {
  */
 function modelIdIndex(providers: ModelsFile["providers"]): ProviderModelIdIndex {
 	return new Map(Object.entries(providers).map(([name, provider]) => [name, new Set(provider.models.map((model) => model.id).filter(Boolean))] as const));
-}
-
-function ConfigDiagnosticCard(props: { diagnostic: ConfigFileDiagnostic; onOpenDocs: () => void; onOpenRaw: () => void }) {
-	const { diagnostic } = props;
-	return (
-		<div className="config-diagnostic-card">
-			<div>
-				<strong>{t("config.diagnosticLoadFailed", { fileName: diagnostic.fileName })}</strong>
-				<span>
-					{diagnostic.line && diagnostic.column
-						? t("config.diagnosticLocation", {
-								line: diagnostic.line,
-								column: diagnostic.column,
-								message: diagnostic.message,
-							})
-						: diagnostic.message}
-				</span>
-				<small>
-					{t("config.diagnosticHelp")}{" "}
-					<a href={diagnostic.docsUrl} onClick={openDocsInSystemBrowser(diagnostic.docsUrl)}>
-						{t("config.openOfficialDocs")}
-					</a>
-				</small>
-			</div>
-			{diagnostic.snippet && <pre>{diagnostic.snippet}</pre>}
-			<div className="config-diagnostic-actions">
-				<Button size="sm" variant="default" onClick={props.onOpenRaw}>
-					{t("config.openRawFile")}
-				</Button>
-				<Button size="sm" variant="outline" onClick={props.onOpenDocs}>
-					{t("config.openOfficialDocs")}
-				</Button>
-			</div>
-		</div>
-	);
 }
 
 type ConfigModalProps = {
@@ -868,26 +834,35 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					// modelThinkingLevels（与全局默认档位同一条写入链路）。
 					// settings 读失败只降级（本页主数据是 models.json），settingsLoaded 保持 false
 					// 让编辑入口不渲染，避免空对象被当成磁盘内容保存。
-					// configTargetOption：wsl 目标读写该档案的发行版 HOME；本机/ssh 保持缺省（ssh 由远端面板接管）。
-					const [res, settingsRes] = await Promise.all([api.config.getModels(configTargetOption), api.config.getSettings(configTargetOption).catch(() => null)]);
-					if (!skipModels) {
-						const parsed = normalizeModelsFile(res.parsed);
-						setModelsData(parsed);
-						baselineModelsRef.current = deepClone(parsed);
-					}
-					if (settingsRes) {
-						if (!skipSettings) {
-							setSettingsData(settingsRes.parsed as SettingsFile);
-							baselineSettingsRef.current = deepClone(settingsRes.parsed as SettingsFile);
+					/** models 页数据落内存：本机与 WSL 目标共用同一条路径（settings 读失败只降级，settingsLoaded 保持 false）。 */
+					const applyModelsTab = (res: Awaited<ReturnType<typeof api.config.getModels>>, settingsRes: Awaited<ReturnType<typeof api.config.getSettings>> | null) => {
+						if (!skipModels) {
+							const parsed = normalizeModelsFile(res.parsed);
+							setModelsData(parsed);
+							baselineModelsRef.current = deepClone(parsed);
 						}
-						setSettingsLoaded(true);
+						if (settingsRes) {
+							if (!skipSettings) {
+								setSettingsData(settingsRes.parsed as SettingsFile);
+								baselineSettingsRef.current = deepClone(settingsRes.parsed as SettingsFile);
+							}
+							setSettingsLoaded(true);
+						}
+						if (!skipRaw) {
+							setRawContent(res.raw);
+							setRawFileName("models.json");
+							baselineRawRef.current = { fileName: "models.json", content: res.raw };
+						}
+						setConfigDiagnostic(res.diagnostic ?? null);
+					};
+					if (configTargetOption) {
+						// WSL 目标：读该档案的发行版 HOME（只有 models/settings 两个文件，auth/trust 属于 Windows 作用域）。
+						const [res, settingsRes] = await Promise.all([api.config.getModels(configTargetOption), api.config.getSettings(configTargetOption).catch(() => null)]);
+						applyModelsTab(res, settingsRes);
+					} else {
+						const [res, settingsRes] = await Promise.all([api.config.getModels(), api.config.getSettings().catch(() => null)]);
+						applyModelsTab(res, settingsRes);
 					}
-					if (!skipRaw) {
-						setRawContent(res.raw);
-						setRawFileName("models.json");
-						baselineRawRef.current = { fileName: "models.json", content: res.raw };
-					}
-					setConfigDiagnostic(res.diagnostic ?? null);
 				} else if (target === "auth") {
 					const res = await api.config.getAuth();
 					if (!skipAuth) {
