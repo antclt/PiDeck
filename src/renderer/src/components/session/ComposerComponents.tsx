@@ -311,6 +311,7 @@ function AcpConfigOverflowMenu(props: { entries: AcpConfigEntry[]; disabled?: bo
 								<span className="max-w-[8rem] shrink-0 truncate text-micro font-normal text-muted-foreground">{select.label}</span>
 							</DropdownMenuSubTrigger>
 							<DropdownMenuSubContent className="min-w-56">
+								{/* scroll-ok: transient —— 下拉子菜单短列表（配置项有限），max-h-72 封顶，菜单关闭即销毁，无需虚拟化 */}
 								<div className="max-h-72 overflow-y-auto">
 									<DropdownMenuRadioGroup
 										value={select.value}
