@@ -1844,7 +1844,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 
 	/** 创建新 prompt template */
 	const handleCreatePrompt = async () => {
-		if (blockResourceMutation()) return;
+		if (blockResourceMutation("prompts:create")) return;
 		setCreatingPrompt(true);
 		setError(null);
 		try {
@@ -1854,10 +1854,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					description: newPromptDescription,
 				});
 			} else {
-				await api.prompts.create({
-					name: newPromptName,
-					description: newPromptDescription,
-				});
+				await api.prompts.create({ name: newPromptName, description: newPromptDescription }, resourceOptions);
 			}
 			setNewPromptName("");
 			setNewPromptDescription("");
@@ -1873,7 +1870,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 
 	/** 确认删除 prompt template */
 	const confirmDeletePrompt = async (target: PiPromptTemplateSummary) => {
-		if (blockResourceMutation()) return;
+		if (blockResourceMutation("prompts:delete")) return;
 		setError(null);
 		if (resourceScope === "project" && !isProjectPrompt(target)) return;
 		if (target.userCreated) {
@@ -1881,7 +1878,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 				if (isProjectPrompt(target) && effectiveProjectId) {
 					await api.prompts.deleteFromProject(effectiveProjectId, target.name);
 				} else {
-					await api.prompts.delete(target.path);
+					await api.prompts.delete(target.path, resourceOptions);
 				}
 				bumpResourceGeneration();
 				await refreshPrompts();
@@ -1941,11 +1938,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		try {
 			if (!editingPrompt.userCreated) {
 				// 内置模板：先创建用户副本，再写入编辑内容
-				const created = await api.prompts.create({
-					name: editingPrompt.name,
-					description: editingPrompt.description,
-				});
-				await api.prompts.edit(created.path, editPromptContent);
+				const created = await api.prompts.create({ name: editingPrompt.name, description: editingPrompt.description }, resourceOptions);
+				await api.prompts.edit(created.path, editPromptContent, resourceOptions);
 			} else if (isProjectPrompt(editingPrompt) && effectiveProjectId) {
 				await api.files.writeContent(editingPrompt.path, editPromptContent, { projectId: effectiveProjectId });
 			} else {
@@ -1967,7 +1961,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 
 	/** Ctrl+S 快速保存：保存但不关闭弹框、不弹提示 */
 	const handleRenamePrompt = async (template: PiPromptTemplateSummary, newName: string) => {
-		if (blockResourceMutation()) return;
+		if (blockResourceMutation("prompts:rename")) return;
 		setError(null);
 		try {
 			if (resourceScope === "project" && !isProjectPrompt(template)) {
@@ -1978,7 +1972,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 			if (isProjectPrompt(template) && effectiveProjectId) {
 				await api.prompts.renameInProject(effectiveProjectId, template.name, newName);
 			} else {
-				await api.prompts.rename(template.name, newName);
+				await api.prompts.rename(template.name, newName, resourceOptions);
 			}
 			bumpResourceGeneration();
 			await refreshPrompts();
@@ -1989,7 +1983,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	};
 
 	const handleTogglePrompt = async (template: PiPromptTemplateSummary, enabled: boolean) => {
-		if (blockResourceMutation()) return;
+		if (blockResourceMutation("prompts:toggle")) return;
 		setError(null);
 		try {
 			if (resourceScope === "project" && effectiveProjectId) {
@@ -2009,7 +2003,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					});
 				}
 			} else {
-				await api.prompts.toggle(template.path, enabled);
+				await api.prompts.toggle(template.path, enabled, resourceOptions);
 			}
 			bumpResourceGeneration();
 			await refreshPrompts();
@@ -2025,11 +2019,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		setError(null);
 		try {
 			if (!editingPrompt.userCreated) {
-				const created = await api.prompts.create({
-					name: editingPrompt.name,
-					description: editingPrompt.description,
-				});
-				await api.prompts.edit(created.path, editPromptContent);
+				const created = await api.prompts.create({ name: editingPrompt.name, description: editingPrompt.description }, resourceOptions);
+				await api.prompts.edit(created.path, editPromptContent, resourceOptions);
 			} else if (isProjectPrompt(editingPrompt) && effectiveProjectId) {
 				await api.files.writeContent(editingPrompt.path, editPromptContent, { projectId: effectiveProjectId });
 			} else {
@@ -2065,7 +2056,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	};
 
 	const handleCreateSkill = async () => {
-		if (blockResourceMutation()) return;
+		if (blockResourceMutation("skills:create")) return;
 		setCreatingSkill(true);
 		setError(null);
 		try {
@@ -2078,11 +2069,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					locationId,
 				});
 			} else {
-				await api.skills.create({
-					name: newSkillName,
-					description: newSkillDescription,
-					locationId: newSkillLocationId,
-				});
+				await api.skills.create({ name: newSkillName, description: newSkillDescription, locationId: newSkillLocationId }, resourceOptions);
 			}
 			setNewSkillName("");
 			setNewSkillDescription("");
@@ -2097,7 +2084,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	};
 
 	const handleToggleSkill = async (skill: PiSkillSummary, enabled: boolean) => {
-		if (blockResourceMutation()) return;
+		if (blockResourceMutation("skills:toggle")) return;
 		setError(null);
 		try {
 			if (resourceScope === "project" && effectiveProjectId) {
@@ -2118,7 +2105,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					});
 				}
 			} else {
-				await api.skills.toggle(skill.path, enabled);
+				await api.skills.toggle(skill.path, enabled, resourceOptions);
 			}
 			bumpResourceGeneration();
 			await refreshSkills();
@@ -2129,7 +2116,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	};
 
 	const confirmDeleteSkill = async () => {
-		if (blockResourceMutation()) return;
+		if (blockResourceMutation("skills:delete")) return;
 		if (!deleteSkillConfirm) return;
 		const target = deleteSkillConfirm;
 		setDeleteSkillConfirm(null);
@@ -2139,7 +2126,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 			if (resourceScope === "project" && effectiveProjectId) {
 				await api.projectResources.deleteSkill(effectiveProjectId, target.path);
 			} else {
-				await api.skills.delete(target.path);
+				await api.skills.delete(target.path, resourceOptions);
 			}
 			bumpResourceGeneration();
 			await refreshSkills();
@@ -2150,7 +2137,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	};
 
 	const handleRenameGlobalSkill = async (skill: PiSkillSummary, newName: string) => {
-		if (blockResourceMutation()) return;
+		if (blockResourceMutation("skills:rename")) return;
 		setError(null);
 		try {
 			if (resourceScope === "project" && !isProjectSkill(skill)) {
@@ -2161,7 +2148,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 			if (resourceScope === "project" && isProjectSkill(skill) && effectiveProjectId) {
 				await api.projectResources.renameSkill(effectiveProjectId, skill.path, newName);
 			} else {
-				await api.skills.rename(skill.path, newName);
+				await api.skills.rename(skill.path, newName, resourceOptions);
 			}
 			bumpResourceGeneration();
 			await refreshSkills();
@@ -2172,7 +2159,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	};
 
 	const handleEditGlobalSkill = async (skill: PiSkillSummary) => {
-		if (blockResourceMutation()) return;
+		if (blockResourceMutation("skills:edit")) return;
 		// Inherited global rows are read-only in project scope.
 		if (resourceScope === "project" && !isProjectSkill(skill)) {
 			showNotice(t("config.resourceScope.inheritedReadOnly"), 4000, "warning");
@@ -2263,7 +2250,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 
 	/** Extension toggles in project view are project overrides, never global mutations. */
 	const handleToggleExtension = async (extension: PiExtensionSummary, enabled: boolean) => {
-		if (blockResourceMutation()) return;
+		if (blockResourceMutation("extensions:toggle")) return;
 		if (resourceScope === "project" && effectiveProjectId) {
 			if (isProjectExtension(extension) && extension.path) {
 				await api.projectResources.toggleExtension(effectiveProjectId, extension.path, enabled);
@@ -2284,18 +2271,18 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 			return;
 		}
 		// 传路径与项目上下文：本地文件扩展需要精确路径，项目作用域需要 projectId 写项目 .pi/settings.json。
-		await api.extensions.toggle(extension.source, enabled, extension.scope, extension.path, effectiveProjectId);
+		await api.extensions.toggle(extension.source, enabled, extension.scope, extension.path, effectiveProjectId, resourceOptions);
 	};
 
 	const handleRequestExtensionUninstall = (extension: PiExtensionSummary) => {
-		if (blockResourceMutation()) return;
+		if (blockResourceMutation("extensions:uninstall")) return;
 		// A global row shown as inherited by a project is read-only in that project.
 		if (resourceScope === "project" && !isProjectExtension(extension)) return;
 		setUninstallExtensionConfirm(extension);
 	};
 
 	const handleRequestProjectPackageUninstall = (item: DiscoveredExtensionItem) => {
-		if (blockResourceMutation()) return;
+		if (blockResourceMutation("extensions:uninstall")) return;
 		setUninstallProjectPackageConfirm({ source: item.source });
 	};
 
@@ -2319,7 +2306,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	};
 
 	const confirmUninstallExtension = async () => {
-		if (blockResourceMutation()) return;
+		if (blockResourceMutation("extensions:uninstall")) return;
 		if (!uninstallExtensionConfirm) return;
 		const target = uninstallExtensionConfirm;
 		setUninstallExtensionConfirm(null);
@@ -2367,7 +2354,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	 * 不动全局缓存与磁盘文件；卸载态复用 uninstallingExtensionSource（发现行按 source 匹配）。
 	 */
 	const confirmUninstallProjectPackage = async () => {
-		if (blockResourceMutation()) return;
+		if (blockResourceMutation("extensions:uninstall")) return;
 		if (!uninstallProjectPackageConfirm) return;
 		const target = uninstallProjectPackageConfirm;
 		setUninstallProjectPackageConfirm(null);
@@ -3017,7 +3004,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 													void api.projectResources.openDirectory(effectiveProjectId, kind).catch((err) => setError(err instanceof Error ? err.message : String(err)));
 													return;
 												}
-												void api.skills.openFolder().catch((err) => setError(err instanceof Error ? err.message : String(err)));
+												void api.skills.openFolder(undefined, resourceOptions).catch((err) => setError(err instanceof Error ? err.message : String(err)));
 											}}
 											onChangeNewName={setNewSkillName}
 											onChangeNewDescription={setNewSkillDescription}
@@ -3058,7 +3045,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 												void api.projectResources.openDirectory(effectiveProjectId, "prompts").catch((err) => setError(err instanceof Error ? err.message : String(err)));
 												return;
 											}
-											void api.prompts.openFolder().catch((err) => setError(err instanceof Error ? err.message : String(err)));
+											void api.prompts.openFolder(resourceOptions).catch((err) => setError(err instanceof Error ? err.message : String(err)));
 										}}
 										onDelete={setDeletePromptConfirm}
 										onEdit={handleEditPrompt}
