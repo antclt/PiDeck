@@ -116,11 +116,20 @@ export function acpConfigOptionValues(option: Pick<AcpConfigOption, "type" | "op
 }
 
 /**
- * agent 自己枚举里代表「跳过审批」的模式档：Claude 是 bypassPermissions、Qoder 是 yolo、
+ * agent 自己枚举里代表「跳过审批」的模式档，按强度从高到低取第一个命中：
+ * CodeBuddy 2.178.1 的 fullAccess（连危险命令也不拦）语义强于 bypassPermissions
+ * （仍会拦危险命令），所以排在第一位；Claude 是 bypassPermissions、Qoder 是 yolo、
  * 其余按 bypass 前缀兜住。运行期下发能否被接受由 agent 决定（Qoder 直接拒绝）。
  */
+const ACP_BYPASS_MODE_PRIORITY = ["fullaccess", "bypasspermissions", "bypass_permissions", "bypass", "yolo"];
+
 export function findAcpBypassModeValue(option: Pick<AcpConfigOption, "type" | "options"> | undefined): string | undefined {
-	return acpConfigOptionValues(option).find((value) => /^(bypass|bypasspermissions|bypass_permissions|yolo)$/i.test(value));
+	const values = acpConfigOptionValues(option);
+	for (const target of ACP_BYPASS_MODE_PRIORITY) {
+		const hit = values.find((value) => value.trim().toLowerCase() === target);
+		if (hit !== undefined) return hit;
+	}
+	return undefined;
 }
 
 /** 设置加载/更新边界的整表消毒：脏工具/脏选项/超长值丢弃，不因一条坏数据拒绝整表。 */

@@ -1073,6 +1073,28 @@ test("configOptions:session/new 返回的枚举可查询;set_config_option 用�
 	assert.equal(lastProc().methodFrames("session/set_config_option").length, 1);
 });
 
+test("configOptions:boolean 项写入必须带 agent 声明的 type（CodeBuddy 2.178.1 否则 -32602）", async (t) => {
+	// issue #451：{configId, value} 会被服务端按 string 分支校验，boolean 值直接
+	// "Invalid input: expected string, received boolean"；带 type:"boolean" 才走 boolean 分支。
+	const booleanOption = { id: "multitask", name: "Multitask", type: "boolean", currentValue: false };
+	let applied;
+	const { manager, createAgent } = harness(t, {
+		handler: (frame) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: false } };
+			if (frame.method === "session/new") return { sessionId: "sess-bool", configOptions: [booleanOption] };
+			if (frame.method === "session/set_config_option") {
+				applied = frame.params;
+				return { configOptions: [{ ...booleanOption, currentValue: true }] };
+			}
+			return {};
+		},
+	});
+	const tab = await createAgent();
+	const updated = await manager.applyConfigOption(tab.id, "multitask", true);
+	assert.deepEqual(applied, { sessionId: "sess-bool", configId: "multitask", type: "boolean", value: true });
+	assert.equal(updated[0].currentValue, true);
+});
+
 test("configOptions:拒绝时把 error.data.details 拼进错误文案（渲染层提示要用它）", async (t) => {
 	// Qoder CLI 把 "Bypass Permissions"(yolo) 列进 configOptions，但 set_config_option 回
 	// -32603 且原因只写在 data.details；IPC 只透传 message，不拼进去用户只看到 "Internal error"。

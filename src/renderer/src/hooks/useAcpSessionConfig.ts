@@ -68,6 +68,15 @@ export function useAcpSessionConfig(agentId: string | undefined, backend: string
 				// （Qoder CLI 把 Bypass Permissions 列为可选值却回 unknown permission_mode）。
 				if (scopeRef.current !== scope || scope.agentId !== agentId) return;
 				showNotice(t("acp.configOptionRejected", { option: optionId, value: String(value), reason: errorText(error) }), undefined, "warning");
+				// 被拒时本地没有权威值可回滚（事件只在写入成功时整表回推），chip 会一直显示
+				// 「已切换」而 agent 侧没变（toolMode 首次代理回复后锁定就是这种）。重拉一次
+				// 服务端真相覆盖 snapshot；带 scope + revision 校验，迟到的旧枚举不能盖掉更新的状态。
+				void desktopApi.acp
+					.getSessionConfig(agentId)
+					.then((next) => {
+						if (scopeRef.current === scope && scope.revision === revision) setSnapshot({ scope, options: next ?? undefined });
+					})
+					.catch(() => undefined);
 			}
 		},
 		[enabled, agentId],

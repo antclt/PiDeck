@@ -15,6 +15,34 @@ export type AcpConfigSelectValue = { value: string; name: string /** 当前值�
 
 export type AcpConfigSelectModel = { value: string; label: string; values: AcpConfigSelectValue[] };
 
+export type AcpConfigEntry = { option: AcpSessionConfigOption; values: Array<{ value: string; name: string }> };
+
+/** 平铺 configOptions 的取值枚举（group 结构展平）。boolean 项保留（values 为空），由渲染层走开关分支。 */
+export function flattenAcpConfigOptions(options: ReadonlyArray<AcpSessionConfigOption>): AcpConfigEntry[] {
+	const result: AcpConfigEntry[] = [];
+	for (const option of options) {
+		const values: Array<{ value: string; name: string }> = [];
+		for (const item of option.options ?? []) {
+			if ("group" in item) {
+				for (const inner of item.options) values.push({ value: inner.value, name: item.name ? `${item.name} / ${inner.name}` : inner.name });
+			} else {
+				values.push({ value: item.value, name: item.name });
+			}
+		}
+		result.push({ option, values });
+	}
+	return result;
+}
+
+/**
+ * 是否渲染成底栏控件：boolean 恒显示（开关）；
+ * select 至少两个候选才显示——单值 select（如 CodeBuddy 2.178.1 的 agent=cli）点不动也无处可写，
+ * 留在底栏只是一个必然报错的死 chip。
+ */
+export function isRenderableAcpConfigEntry(entry: AcpConfigEntry): boolean {
+	return entry.option.type === "boolean" || entry.values.length > 1;
+}
+
 export function resolveAcpConfigSelect(option: AcpSessionConfigOption, values: ReadonlyArray<{ value: string; name: string }>): AcpConfigSelectModel {
 	const raw = option.currentValue === undefined ? "" : String(option.currentValue);
 	const matched = raw ? values.find((value) => value.value === raw) : undefined;

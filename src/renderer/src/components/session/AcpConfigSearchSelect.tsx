@@ -1,17 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { BrainCircuit, Check, Settings2, Sparkles } from "lucide-react";
+import { Check } from "lucide-react";
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "../ui-shadcn/command";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui-shadcn/popover";
+import { AcpConfigGlyph } from "./AcpConfigGlyph";
 import type { AcpConfigSelectModel } from "./acpConfigSelect";
-
-/** 类别图标：与 AcpConfigControls 里 Radix Select 触发器同一套（模型/思考/其他）。 */
-function OptionIcon(props: { category?: string }) {
-	if (props.category === "model") return <Sparkles className="size-[15px] shrink-0 text-muted-foreground" aria-hidden="true" />;
-	if (props.category === "thought_level") return <BrainCircuit className="size-[15px] shrink-0 text-muted-foreground" aria-hidden="true" />;
-	return <Settings2 className="size-[15px] shrink-0 text-muted-foreground" aria-hidden="true" />;
-}
 
 /**
  * ACP 长枚举（模型列表）的可搜索下拉：Popover + cmdk。
@@ -23,7 +17,7 @@ function OptionIcon(props: { category?: string }) {
  * 搜索匹配显示名 + 原始值（模型 id），用精确子串过滤而不是 cmdk 默认 fuzzy——
  * 后者对任意子序列都返回 >0，1-2 个字符的输入会把整张表都命中。
  */
-export function AcpConfigSearchSelect(props: { optionName: string; description?: string; category?: string; select: AcpConfigSelectModel; disabled?: boolean; onPick: (value: string) => void }) {
+export function AcpConfigSearchSelect(props: { option: { id: string; name: string; description?: string; category?: string }; select: AcpConfigSelectModel; disabled?: boolean; onPick: (value: string) => void }) {
 	const [open, setOpen] = useState(false);
 	const listRef = useRef<HTMLDivElement | null>(null);
 
@@ -37,7 +31,7 @@ export function AcpConfigSearchSelect(props: { optionName: string; description?:
 		return () => window.cancelAnimationFrame(frame);
 	}, [open]);
 
-	const title = `${props.optionName}: ${props.select.label}${props.description ? ` — ${props.description}` : ""}`;
+	const title = `${props.option.name}: ${props.select.label}${props.option.description ? ` — ${props.option.description}` : ""}`;
 	return (
 		<Popover open={open} onOpenChange={setOpen}>
 			<PopoverTrigger asChild>
@@ -50,7 +44,7 @@ export function AcpConfigSearchSelect(props: { optionName: string; description?:
 					disabled={props.disabled}
 					className="composer-bar-btn backend inline-flex h-7 max-w-56 min-w-0 items-center gap-1 rounded-md border-transparent bg-transparent px-1.5 text-control font-semibold text-foreground transition-colors hover:bg-muted/60 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:bg-muted/60"
 				>
-					<OptionIcon category={props.category} />
+					<AcpConfigGlyph option={props.option} />
 					<span className="truncate text-xs">{props.select.label}</span>
 				</button>
 			</PopoverTrigger>

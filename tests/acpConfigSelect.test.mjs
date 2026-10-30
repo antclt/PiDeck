@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { resolveAcpConfigSelect } = loadTsCommonJs("src/renderer/src/components/session/acpConfigSelect.ts");
+const { resolveAcpConfigSelect, flattenAcpConfigOptions, isRenderableAcpConfigEntry } = loadTsCommonJs("src/renderer/src/components/session/acpConfigSelect.ts");
 const plain = (value) => JSON.parse(JSON.stringify(value));
 const VALUES = [
 	{ value: "sonnet", name: "Sonnet" },
@@ -38,4 +38,25 @@ test("没有 currentValue：显示选项名，不补占位项（下拉不高亮�
 		assert.equal(model.label, "Model");
 		assert.deepEqual(plain(model.values), VALUES);
 	}
+});
+
+test("boolean 项保留在平铺结果里（值列表为空），交渲染层走开关分支", () => {
+	const entries = flattenAcpConfigOptions([
+		{ id: "multitask", name: "Multitask", type: "boolean", currentValue: true },
+		{ id: "model", name: "Model", type: "select", options: VALUES },
+	]);
+	assert.equal(entries.length, 2);
+	assert.deepEqual(plain(entries[0]), { option: { id: "multitask", name: "Multitask", type: "boolean", currentValue: true }, values: [] });
+	assert.equal(entries[1].values.length, 2);
+});
+
+test("单值 select 不渲染；boolean 与多值 select 渲染", () => {
+	const [booleanEntry, singleEntry, multiEntry] = flattenAcpConfigOptions([
+		{ id: "delegate", name: "Delegate", type: "boolean", currentValue: false },
+		{ id: "agent", name: "Agent", type: "select", options: [{ value: "cli", name: "CLI" }] },
+		{ id: "mode", name: "Mode", type: "select", options: VALUES },
+	]);
+	assert.equal(isRenderableAcpConfigEntry(booleanEntry), true);
+	assert.equal(isRenderableAcpConfigEntry(singleEntry), false, "单值 select 是点不动的死 chip");
+	assert.equal(isRenderableAcpConfigEntry(multiEntry), true);
 });

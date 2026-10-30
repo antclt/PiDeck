@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback, type ReactNode } from "react"
 import { AnimatePresence } from "motion/react";
 import { useAtomValue } from "jotai";
 import { dshModuleHiddenAtom, imageGenModuleHiddenAtom, videoGenModuleHiddenAtom, acpEnabledAtom, acpToolsAtom, sessionIsRemoteAtomFamily, sessionRemoteExtensionsAtomFamily } from "../../atoms";
-import { AlertCircle, BrainCircuit, Check, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, CornerDownLeft, Eye, EyeOff, FileText, GitBranch, ImageIcon, LayoutGrid, ListChecks, Loader2, Paperclip, RefreshCw, Settings2, Sparkles, Star, Target, X, Zap } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, CornerDownLeft, Eye, EyeOff, FileText, GitBranch, ImageIcon, LayoutGrid, ListChecks, Loader2, Paperclip, RefreshCw, Sparkles, Star, Target, X, Zap } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
 import type { PromptEnhanceView } from "../../hooks/usePromptEnhance";
 import { PromptEnhanceControls } from "./PromptEnhanceControls";
@@ -30,7 +30,8 @@ import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
 import { CommandPickerGroup, CommandPickerPanel, type CommandPickerFilter } from "../ui-shadcn/command-picker";
 import { computeModelPickerDefaultExpanded, groupModelsByProvider, modelPickerSearchFilter, modelRowLabel, modelRowName, orderProviderGroups, resolveModelPickerBody } from "./sessionPickerOptions";
 import { ComposerModeChip } from "./composer/ComposerModeChip";
-import { resolveAcpConfigSelect } from "./acpConfigSelect";
+import { resolveAcpConfigSelect, flattenAcpConfigOptions, isRenderableAcpConfigEntry } from "./acpConfigSelect";
+import { AcpConfigGlyph } from "./AcpConfigGlyph";
 import { AcpConfigSearchSelect } from "./AcpConfigSearchSelect";
 import type { AgentBackend, AgentRuntimeState, AvailableModel, ComposerAgentMode, GitBranchInfo, ModelListFailReason, ModelListReport, SessionRecord, SessionRuntimeTarget, UsageProbeBackend } from "../../../../shared/types";
 
@@ -174,23 +175,42 @@ export function ExtensionWidgetCard(props: {
  * 否则 Select 的当前值在列表里没有对应项，用户也无法看清自己选了什么。 */
 /**
  * ACP 会话配置选择器组：按 category 渲染 agent 回传的 configOptions——
- * model → 模型下拉、thought_level → 思考下拉、mode/其他 → 通用下拉。
- * 只处理 select 型且带枚举的 option(boolean 型需 client 通告,主流 agent 未用);
+ * model → 模型下拉、thought_level → 思考下拉、mode/其他 → 通用下拉、boolean → 开关 chip。
+ * select 型至少要两个候选（单值项在 agent 侧不可写，留着只是点不动的死 chip）；
  * 分组值(options[].group)平铺渲染。值变化经 onSet 下发,整表由事件/响应回填。
  * 模型列表（以及任何超长枚举）用可搜索下拉，短枚举保持普通 Select。
  */
 function AcpConfigControls(props: { options: import("../../../../shared/types/acp").AcpSessionConfigOption[]; disabled?: boolean; onSet: (optionId: string, value: string | boolean) => void }) {
-	const entries = flattenConfigOptions(props.options).filter((entry) => entry.values.length > 0);
+	const entries = flattenAcpConfigOptions(props.options).filter(isRenderableAcpConfigEntry);
 	if (entries.length === 0) return null;
 	return (
 		<>
 			{entries.map((entry) => {
+				// boolean 项（multitask / delegate 等）没有枚举值，走独立开关分支；
+				// 写入必须带 type，否则 agent 按 string 分支校验会回 -32602。
+				if (entry.option.type === "boolean") {
+					const on = entry.option.currentValue === true;
+					return (
+						<button
+							key={entry.option.id}
+							type="button"
+							aria-pressed={on}
+							disabled={props.disabled}
+							onClick={() => props.onSet(entry.option.id, !on)}
+							title={`${entry.option.name}: ${on ? t("common.enabled") : t("common.disabled")}${entry.option.description ? ` — ${entry.option.description}` : ""}`}
+							className={cn("composer-bar-btn backend inline-flex h-7 max-w-56 min-w-0 items-center gap-1 rounded-md border-transparent px-1.5 text-control font-semibold transition-colors hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-50", on ? "bg-muted/60 text-foreground" : "text-muted-foreground")}
+						>
+							<AcpConfigGlyph option={entry.option} />
+							<span className="truncate text-xs">{entry.option.name}</span>
+						</button>
+					);
+				}
 				// currentValue 可能不在 agent 的枚举里（完整模型 id vs 别名）：补一条当前项，保证高亮/滚动指向真实值。
 				const select = resolveAcpConfigSelect(entry.option, entry.values);
 				// 模型列表按 agent 不同可达几十项：换可搜索下拉，避免平铺滚动找模型。
 				// 模式/思考档等短枚举仍用 Select（选项少时搜索框只是噪音）。
 				if (entry.option.category === "model" || entry.values.length > 10) {
-					return <AcpConfigSearchSelect key={entry.option.id} optionName={entry.option.name} description={entry.option.description} category={entry.option.category} select={select} disabled={props.disabled} onPick={(value) => props.onSet(entry.option.id, value)} />;
+					return <AcpConfigSearchSelect key={entry.option.id} option={entry.option} select={select} disabled={props.disabled} onPick={(value) => props.onSet(entry.option.id, value)} />;
 				}
 				return (
 					// 再点选当前项等价于「保持不变」，不发 IPC。
@@ -201,13 +221,7 @@ function AcpConfigControls(props: { options: import("../../../../shared/types/ac
 							// 悬停必须能看到实际生效值：只给选项名+描述时，长模型名被截断后无从确认。
 							title={`${entry.option.name}: ${select.label}${entry.option.description ? ` — ${entry.option.description}` : ""}`}
 						>
-							{entry.option.category === "model" ? (
-								<Sparkles className="size-[15px] shrink-0 text-muted-foreground" aria-hidden="true" />
-							) : entry.option.category === "thought_level" ? (
-								<BrainCircuit className="size-[15px] shrink-0 text-muted-foreground" />
-							) : (
-								<Settings2 className="size-[15px] shrink-0 text-muted-foreground" />
-							)}
+							<AcpConfigGlyph option={entry.option} />
 							<span className="truncate text-xs">{select.label}</span>
 						</SelectTrigger>
 						<SelectContent align="start" className="max-h-72">
@@ -222,24 +236,6 @@ function AcpConfigControls(props: { options: import("../../../../shared/types/ac
 			})}
 		</>
 	);
-}
-
-/** 平铺 configOptions 的取值枚举(group 结构展平),过滤空枚举。 */
-function flattenConfigOptions(options: import("../../../../shared/types/acp").AcpSessionConfigOption[]): Array<{ option: import("../../../../shared/types/acp").AcpSessionConfigOption; values: Array<{ value: string; name: string }> }> {
-	const result = [];
-	for (const option of options) {
-		if (option.type === "boolean") continue;
-		const values: Array<{ value: string; name: string }> = [];
-		for (const item of option.options ?? []) {
-			if ("group" in item) {
-				for (const inner of item.options) values.push({ value: inner.value, name: item.name ? `${item.name} / ${inner.name}` : inner.name });
-			} else {
-				values.push({ value: item.value, name: item.name });
-			}
-		}
-		result.push({ option, values });
-	}
-	return result;
 }
 
 /**

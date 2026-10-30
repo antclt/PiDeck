@@ -219,6 +219,17 @@ test("模式档：按 id/category 定位 mode 项，bypass 值按各家叫法识
 		"bypassPermissions",
 	);
 	assert.equal(findAcpBypassModeValue(grouped), "yolo");
+	// CodeBuddy 2.178.1：fullAccess 连危险命令也不拦，语义强于 bypassPermissions，优先选它
+	assert.equal(
+		findAcpBypassModeValue({
+			type: "select",
+			options: [
+				{ value: "bypassPermissions", name: "Bypass" },
+				{ value: "fullAccess", name: "Full access" },
+			],
+		}),
+		"fullAccess",
+	);
 	assert.equal(findAcpBypassModeValue({ type: "select", options: [{ value: "plan", name: "Plan" }] }), undefined);
 	assert.equal(findAcpBypassModeValue(undefined), undefined);
 });

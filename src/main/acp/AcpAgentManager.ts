@@ -295,7 +295,13 @@ export class AcpAgentManager implements SessionAgentGateway {
 		if (!conn || conn.isClosed()) throw new Error("ACP agent is not running");
 		let result: { configOptions?: AcpConfigOption[] } | null;
 		try {
-			result = (await conn.request("session/set_config_option", { sessionId: runtime.acpSessionId, configId: optionId, value }, 15_000)) as { configOptions?: AcpConfigOption[] } | null;
+			// boolean 项必须带上 agent 声明的 type：CodeBuddy 2.178.1 的 set_config_option
+			// 对 {configId, value} 按 string 分支校验，boolean 值直接 -32602 Invalid params；
+			// 带 type:"boolean" 才走 boolean 分支（issue #451）。select 项保持旧帧形状，
+			// 部分实现（opencode 等）对多余字段更敏感，没必要多带。
+			const declaredType = (runtime.configOptions ?? []).find((candidate) => candidate.id === optionId)?.type;
+			const params = declaredType === "boolean" ? { sessionId: runtime.acpSessionId, configId: optionId, type: declaredType, value } : { sessionId: runtime.acpSessionId, configId: optionId, value };
+			result = (await conn.request("session/set_config_option", params, 15_000)) as { configOptions?: AcpConfigOption[] } | null;
 		} catch (error) {
 			// 拒绝原因常只写在 error.data.details 里（如 Qoder 的 "unknown permission_mode: yolo"），
 			// 而 IPC 只透传 message：不拼进去渲染层就只剩 "Internal error"，用户无从判断为什么没生效。
