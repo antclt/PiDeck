@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: a338f1e16862e18f7c62da63064783751c75a04a76a868da0699e3c1900856b0（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: f85b854af56a9138370360547fc2bcf021fa48157e93201321228b63ab65d134（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -7242,7 +7242,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.target.wslProviderOps": "連線測試 / 拉取模型 / 用量查詢僅對本機目標可用",
 	"config.target.exportLocalOnly": "匯出/匯入只支援本機配置目標：先切回本機再操作",
 	"config.resourceTarget.readOnly": "該資源目標本輪只讀：僅支援檢視列表與提示詞讀取/儲存，切回本機後再編輯技能/擴充套件",
-	"config.resourceTarget.readOnlyHint": "當前顯示的是該 WSL 檔案發行版 HOME 下的資源；技能/擴充套件的寫入與提示詞新建/刪除/重新命名/開關暫只支援本機",
+	"config.resourceTarget.readOnlyHint": "當前顯示的是該 WSL 檔案發行版 HOME 下的資源；技能/提示詞/擴充套件開關會寫該發行版，擴充套件安裝/解除安裝/更新與技能正文編輯仍只支援本機",
+	"config.resourceTarget.writeUnsupported": "該操作暫只支援本機目標：先切回本機再操作",
 	"config.resourceTarget.errorTargetInvalid": "資源目標無效，請重新選擇目標",
 	"config.resourceTarget.errorSshUnsupported": "SSH 目標暫不支援資源管理，請改用本機或 WSL 檔案",
 	"config.resourceTarget.errorWriteUnsupported": "該操作暫只支援本機目標：先切回本機再修改技能 / 擴充套件 / 提示詞",

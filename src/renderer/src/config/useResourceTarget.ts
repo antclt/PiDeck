@@ -3,7 +3,7 @@ import type { PiResourceOptions, PiResourceTarget } from "../../../shared/piConf
 import { t } from "../i18n";
 import { showNotice } from "../utils/notice";
 import type { PiConfigTargetHost } from "./piConfigTargetModel";
-import { resourceMutationAllowed, resourceTargetOptions, toResourceTargetHosts } from "./piResourceTargetModel";
+import { resourceTargetOptions, resourceWriteAllowed, toResourceTargetHosts, type PiResourceWriteAction } from "./piResourceTargetModel";
 import type { ResourceScope } from "./resourceScopeModel";
 
 /**
@@ -17,13 +17,18 @@ export function useResourceTarget(hosts: readonly PiConfigTargetHost[], resource
 	const targetHosts = useMemo(() => toResourceTargetHosts(hosts), [hosts]);
 	const global = resourceScope === "global";
 	const options = useMemo<PiResourceOptions | undefined>(() => (global ? resourceTargetOptions(resourceTarget) : undefined), [global, resourceTarget]);
-	const readOnly = global && !resourceMutationAllowed(resourceTarget);
-	/** true = 已拦下并提示（调用方直接 return）；false = 放行。 */
-	const blockMutation = useCallback(() => {
-		if (!readOnly) return false;
-		showNotice(t("config.resourceTarget.readOnly"), 5000, "warning");
-		return true;
-	}, [readOnly]);
+	/** 非本机目标：提示条显示「部分动作只支持本机」，真正拦不拦由 blockMutation(action) 判定。 */
+	const readOnly = global && resourceTarget.kind !== "local";
+	/** true = 该动作在当前目标下已拦下并提示（调用方直接 return）；false = 放行。 */
+	const blockMutation = useCallback(
+		(action: PiResourceWriteAction) => {
+			if (!global) return false;
+			if (resourceWriteAllowed(action, resourceTarget)) return false;
+			showNotice(t("config.resourceTarget.writeUnsupported"), 5000, "warning");
+			return true;
+		},
+		[global, resourceTarget],
+	);
 	return { resourceTarget, setResourceTarget, targetHosts, options, readOnly, blockMutation };
 }
 

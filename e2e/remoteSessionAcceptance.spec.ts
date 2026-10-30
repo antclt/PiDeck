@@ -687,6 +687,24 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 			await expect(window.getByTestId("drawer-rail-files")).toHaveAttribute("aria-selected", "true");
 			await window.getByRole("button", { name: "calc.cjs", exact: false }).click();
 			await expect(window.getByRole("region", { name: "远端文件编辑器" }).locator(".cm-content")).toContainText("value: 2", { timeout: timeouts.helperMs });
+			await test.step("文件抽屉内容搜索：输入夹具正文标记 → 出现内容命中分区（新 helper 能力，全链路无错误）", async () => {
+				// 能力来自 helper hello（1.25.0 声明 fs.searchContent）；真机无法回退 helper 版本模拟旧能力，
+				// 所以本用例覆盖新 helper 命中，并断言「仅文件名」能力提示不出现——不能把能力缺失静默吞掉。
+				await window.getByRole("button", { name: "搜索文件名" }).click();
+				await window.getByRole("textbox", { name: "搜索文件名" }).fill("中文保存验收");
+				await window.getByRole("button", { name: "搜索", exact: true }).click();
+				const contentSection = window.locator(".file-search-content");
+				await expect(contentSection, "内容命中分区必须出现（helper 1.25 声明 fs.searchContent）").toBeVisible({ timeout: timeouts.helperMs });
+				const hit = contentSection.locator(".file-node-row").filter({ hasText: "calc.cjs" });
+				await expect(hit, "内容命中行必须指向夹具文件 calc.cjs").toBeVisible({ timeout: timeouts.helperMs });
+				// 命中行 title 是「项目相对路径:行号」，正文片段必须带出 fixture 里的中文标记。
+				await expect(hit).toHaveAttribute("title", /^calc\.cjs:\d+$/);
+				await expect(hit, "命中行必须带出夹具正文片段").toContainText("中文保存验收");
+				await expect(window.getByTestId("file-search-name-only-hint"), "新 helper 下不得显示「仅文件名」提示").toHaveCount(0);
+				// 收尾：清空搜索回到文件树，后续步骤仍按原路径操作抽屉。
+				await window.getByRole("button", { name: "清除搜索结果" }).click();
+				await expect(contentSection).toHaveCount(0);
+			});
 			// 抽屉打开后开关并入抽屉（.header-drawer-toggle 只在关闭态渲染，见 SessionTabsBar）：用抽屉自己的
 			// 关闭入口，再断言开关回到会话 Tab 栏 —— 与旧断言同一个可观察契约「抽屉已关」，只是点对了控件。
 			await window.getByRole("button", { name: "关闭右侧边栏" }).first().click();
