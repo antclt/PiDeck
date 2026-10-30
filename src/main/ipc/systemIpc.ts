@@ -38,6 +38,8 @@ import type { SettingsStore } from "../settings/SettingsStore";
 import type { ConfigManager } from "../config/ConfigManager";
 import type { RemotePiConfigBackend } from "../config/RemotePiConfigBackend";
 import { createPiConfigRouter, rejectRemotePiConfigTarget, type PiConfigReadRoute, type PiConfigWriteRoute } from "../config/PiConfigRouter";
+import type { PiResourceManagerPool } from "../config/PiResourceManagerPool";
+import { readPiResourceOptions } from "../config/piResourceTarget";
 import { createWslPiConfigStoreFor } from "../config/WslPiConfigStore";
 import type { AgentManager } from "../pi/AgentManager";
 import type { AppLogger } from "../logging/AppLogger";
@@ -176,6 +178,11 @@ export type SystemIpcDeps = {
 	projectResourceManager: ProjectResourceManager;
 	agentManager: AgentManager;
 	skillManager: SkillManager;
+	/**
+	 * 资源作用域池（W1）：技能/提示词/扩展的 list 按 PiResourceTarget 路由。缺省 = 只用本机单例，
+	 * 让既有装配与定向 IPC 单测保持不变；装配层注入后 WSL 目标不再读写 Windows HOME。
+	 */
+	piResourcePool?: PiResourceManagerPool;
 	appLogger: AppLogger;
 	rpcLogger: RpcLogger;
 	sessionRuntimeCoordinator: SessionRuntimeCoordinator;
@@ -380,6 +387,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		projectResourceManager,
 		agentManager,
 		skillManager,
+		piResourcePool,
 		appLogger,
 		rpcLogger,
 		sessionRuntimeCoordinator,
@@ -1934,7 +1942,12 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 
 	// ── Skills CRUD ──────────────────────────────────────────────────
 
-	ipcMain.handle(ipcChannels.skillsList, () => skillManager.list());
+	// 资源目标（W1）：options 在第一行校验（形状/hostId/拒绝 ssh），再由池按目标取管理器；
+	// 未装配池时保持旧行为（本机单例），不让资源页因为装配顺序变成不可用。
+	ipcMain.handle(ipcChannels.skillsList, async (_event, options?: unknown) => {
+		const parsed = readPiResourceOptions(options);
+		return (piResourcePool ? await piResourcePool.skills(parsed) : skillManager).list();
+	});
 	ipcMain.handle(ipcChannels.skillsReadContent, async (_event, skillPath: string) => {
 		if (!readSkillContent) throw new Error("readSkillContent not available");
 		// 渲染层传入的路径不可信：白名单校验（全局/项目技能位置）在 readSkillContent 内完成。
