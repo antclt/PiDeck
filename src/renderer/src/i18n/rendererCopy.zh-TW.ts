@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: e2039c85199433e1a2a9ee781040ba3060ce6f58b9b0cf3637400341e8423351（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 6677074adfaa4cf8dc1c5e66eebefd7da5e7e613d1966023f2e1bf3381f4b333（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -7230,11 +7230,21 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.target.remoteHint": "讀寫均發生在遠端 Pi 目錄，金鑰只顯示狀態",
 	"config.target.switchTitle": "切換配置目標",
 	"config.target.switchMessage": "遠端還有未應用的 patch，切換目標會丟棄它。確定繼續？",
+	"config.target.switchDirtyBlocked": "當前目標還有未儲存的配置修改：先儲存（或關閉視窗選擇放棄）後再切換目標",
 	"config.target.switchConfirm": "丟棄並切換",
 	"config.target.discardTitle": "丟棄遠端未應用的 patch？",
 	"config.target.discardMessage": "遠端 patch 尚未應用，關閉視窗會丟棄它。確定關閉？",
 	"config.target.discardConfirm": "丟棄並關閉",
 	"config.target.remoteSaveHint": "遠端目標請用面板內的「應用 patch」按鈕儲存",
+	"config.target.groupSsh": "SSH 主機",
+	"config.target.wsl": "WSL 發行版",
+	"config.target.wslNoProfiles": "暫無 WSL 連線檔案（先在設定 → 連線裡新增）",
+	"config.target.wslHint": "讀寫均落在該發行版的 HOME（.pi/agent），不回退本機",
+	"config.target.wslSource": "當前編輯：{label} 的發行版 HOME（.pi/agent）",
+	"config.target.wslProviderOps": "連線測試 / 拉取模型 / 用量查詢僅對本機目標可用",
+	"config.target.wslUnsupported": "{label} 的這部分配置暫未接入 WSL：本頁只支援 models.json 與 settings.json，切回本機可繼續編輯",
+	"config.windowsOnly.title": "當前僅編輯 Windows 配置",
+	"config.windowsOnly.body": "WSL 發行版配置暫未接入：本頁只讀寫本機（Windows）的{page}，不會改動 WSL 檔案內的內容。",
 	"remoteConfig.title": "遠端 {file}",
 	"remoteConfig.host": "主機",
 	"remoteConfig.version": "版本",
