@@ -4465,6 +4465,7 @@ export const zhCN = {
 	"project.remote.requestFailed": "远端请求失败，请重试；若仍失败，请在设备设置里检查这台主机的连接。",
 	"project.remote.empty": "这个目录是空的。",
 	"project.remote.directoryTruncated": "目录项目过多，仅显示前 2000 项。",
+	"project.remote.dirWatchDegraded": "目录监听已降级：期望监听 {desired} 个目录，实际覆盖 {covered} 个，{dropped} 个目录需要手动刷新。",
 	"project.remote.binary": "（二进制内容，无法以文本预览）",
 	"project.remote.linkNotFollowed": "符号链接（不跟随）",
 	"project.remote.searchPlaceholder": "搜索文件名",
