@@ -28,6 +28,34 @@ export type PiConfigTarget = { kind: "local" } | { kind: "ssh"; hostId: string }
 export type PiResourceTarget = { kind: "local" } | { kind: "wsl"; hostId: string };
 export type PiResourceOptions = { target?: PiResourceTarget };
 
+/**
+ * Stable codes for a resource target (skills / prompts / extensions, W1). Same closed-vocabulary discipline as
+ * REMOTE_CONFIG_* / WSL_CONFIG_*: main only answers with a code from this set, so the renderer branches on codes
+ * instead of parsing prose, and a failed WSL scope can never be reported as "the local list is just empty".
+ */
+export const PI_RESOURCE_CODES = {
+	/** the target object shape/hostId is not a resource target this build accepts. */
+	targetInvalid: "PI_RESOURCE_TARGET_INVALID",
+	/** ssh is a valid config target, but remote resource management is not routed there in this build. */
+	sshUnsupported: "PI_RESOURCE_SSH_UNSUPPORTED",
+	/** no WslHostStore profile carries that id (removed, or never created). */
+	hostNotFound: "PI_RESOURCE_HOST_NOT_FOUND",
+	/** the distribution's HOME could not be resolved (wsl.exe failure / distro unregistered). */
+	distroUnavailable: "PI_RESOURCE_DISTRO_UNAVAILABLE",
+	/** resolved, but the environment contradicts the profile (never fall back to the local HOME). */
+	unavailable: "PI_RESOURCE_UNAVAILABLE",
+} as const;
+export type PiResourceCode = (typeof PI_RESOURCE_CODES)[keyof typeof PI_RESOURCE_CODES];
+/** Closed-set helper: the main process only returns a code in this vocabulary. */
+export const PI_RESOURCE_CODE_SET: ReadonlySet<string> = new Set(Object.values(PI_RESOURCE_CODES));
+
+/** Extract the stable PI_RESOURCE_* code from a rejected IPC call (Electron prefixes its message). */
+export function piResourceCodeFromError(error: unknown): string | undefined {
+	const message = typeof error === "object" && error !== null && "message" in error ? String((error as { message?: unknown }).message ?? "") : String(error ?? "");
+	const match = /(PI_RESOURCE_[A-Z_]+)/.exec(message);
+	return match?.[1];
+}
+
 /** The closed set of stable codes the remote backend and its IPC surface may answer with. */
 export const REMOTE_CONFIG_CODES = {
 	/** target object shape/hostId shape is not a target this build accepts. */
