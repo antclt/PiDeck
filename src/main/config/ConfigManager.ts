@@ -175,7 +175,7 @@ function normalizeModelCostForPi(
 				) as Record<(typeof RATE_KEYS)[number], number>;
 				return { inputTokensAbove: tier.inputTokensAbove, ...tierRates };
 			})
-			.filter((tier): tier is Record<string, unknown> => tier !== null);
+			.filter((tier): tier is { inputTokensAbove: number } & Record<(typeof RATE_KEYS)[number], number> => tier !== null);
 		if (tiers.length > 0) normalized.tiers = tiers;
 	}
 	return normalized;

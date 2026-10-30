@@ -1,21 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, ExternalLink, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import type { ChangelogPayload } from "../../../../../shared/types";
 import { desktopApi } from "../../../desktopApi";
-import { formatI18nDateTime, t } from "../../../i18n";
+import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../ui-shadcn/dialog";
-import { ScrollArea } from "../../ui-shadcn/scroll-area";
 import { MarkdownStream } from "../../session/MarkdownStream";
+import { ChangelogReaderDialog, type ChangelogShellState } from "./ChangelogReaderDialog";
 import { splitChangelogVersions } from "./changelogSections";
 
 type LoadState = { status: "loading" } | { status: "ready"; payload: ChangelogPayload & { markdown: string } } | { status: "unavailable"; pageUrl: string };
 
 /**
- * 更新日志弹窗。
- *
- * 「关于」弹框与设置页更新卡片两处共用同一个组件与同一条 IPC —— 不做两份实现，
- * 否则两处的降级行为/渲染管线迟早分叉。
+ * 更新日志弹窗：渲染管线与降级策略收敛在 ChangelogReaderDialog（Wave 2 §5.3），
+ * 本组件只保留 PiDeck 侧领域差异：版本切分（默认只渲染最新一个版本段，
+ * 「查看全部 {count} 个版本」才渲染全文）、stale 提示与刷新语义（跳过缓存）。
  *
  * ## 渲染安全边界
  *
@@ -101,110 +99,52 @@ export function ChangelogDialog(props: {
 		void desktopApi.app.openExternal(url, true).catch(() => undefined);
 	}, []);
 
-	// 三个渲染分支（全文 / 导语 / 最新版本段）共用的 MarkdownStream 参数。
-	const changelogStreamProps = {
-		isStreaming: false,
-		light: true,
-		onOpenExternal: (url: string) => openInBrowser(url),
-	} as const;
+	// 壳的状态形状：ready 分支带上 footer 诊断需要的 source/fetchedAt/pageUrl。
+	const shellState: ChangelogShellState =
+		state.status === "ready"
+			? {
+					status: "ready",
+					markdown:
+						// 只渲染最新一个版本段（首个 `## ` 段）+ 导语；展开或单版本时才是全文。
+						// 懒展开的渲染成本论证见文件头注释（默认 1.4K vs 全文 164K）。
+						showAllVersions || !split || split.sections.length <= 1
+							? state.payload.markdown
+							: `${split.intro !== "" ? `${split.intro}\n\n` : ""}${split.sections[0]}`,
+					// 来源在 footer 展示为可读名（与主进程 source 枚举同源）。
+					source: state.payload.source === "github" ? "GitHub" : state.payload.source === "atomgit" ? "AtomGit" : null,
+					fetchedAt: state.payload.fetchedAt,
+					pageUrl: state.payload.pageUrl,
+				}
+			: state;
 
 	return (
-		<Dialog open={props.open} onOpenChange={props.onOpenChange}>
-			<DialogContent
-				/* DialogContent 基础类自带 `sm:max-w-lg`。Tailwind v4 按**类名字母序**产出
-				   规则，`[760px]`（`[`）排在 `lg`（`l`）之前 → 基础类的 max-width 反而胜出，
-				   弹窗在 ≥640px 视口下被压回 512px。所以这里必须写成字母序在 `lg` 之后的
-				   形式（`min(...)`，`m` > `l`），与 SettingsModal / ConfigModal 的既有做法同源：
-				   只写 `sm:max-w-[760px]` 是无效的（实测产物中该规则排在 lg 之前）。
-				   上限同时兜住窄视口，不会把弹窗顶出屏幕。 */
-				className="flex max-h-[80vh] flex-col overflow-hidden sm:max-w-[min(760px,calc(100vw-48px))]"
-				dismissExemptOnOutside={props.dismissExemptOnOutside}
-			>
-				<DialogHeader>
-					<DialogTitle>{t("changelog.title")}</DialogTitle>
-					<DialogDescription>{state.status === "ready" ? t("changelog.subtitleVersions", { count: state.payload.versionCount }) : t("changelog.subtitle")}</DialogDescription>
-				</DialogHeader>
-
-				{state.status === "loading" && <p className="py-8 text-center text-caption text-muted-foreground">{t("changelog.loading")}</p>}
-
-				{state.status === "unavailable" && (
-					<div className="flex flex-col items-center gap-3 py-8">
-						<p className="text-caption text-muted-foreground">{t("changelog.unavailable")}</p>
-						<Button variant="secondary" size="sm" onClick={() => openInBrowser(state.pageUrl)}>
-							<ExternalLink size={12} aria-hidden="true" />
-							{t("changelog.openInBrowser")}
+		<ChangelogReaderDialog
+			open={props.open}
+			onOpenChange={props.onOpenChange}
+			dismissExemptOnOutside={props.dismissExemptOnOutside}
+			title={t("changelog.title")}
+			subtitle={state.status === "ready" ? t("changelog.subtitleVersions", { count: state.payload.versionCount }) : t("changelog.subtitle")}
+			state={shellState}
+			onReload={() => void load(true)}
+			onOpenExternal={openInBrowser}
+			belowBody={
+				// 展开/收起固定在滚动区外（不随内容滚走）：全文展开后收起不用滚到几百屏之外。
+				split && split.sections.length > 1 ? (
+					<div className="flex justify-center">
+						<Button variant="ghost" size="sm" onClick={() => setShowAllVersions((value) => !value)}>
+							{showAllVersions ? <ChevronUp size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}
+							{showAllVersions
+								? t("changelog.showLatestOnly")
+								: t("changelog.showAllVersions", {
+										count: split.sections.length,
+									})}
 						</Button>
 					</div>
-				)}
-
-				{state.status === "ready" && split && (
-					<>
-						{/* 固定高度 + 内部滚动：默认只渲染最新一个版本（首个 `## ` 段），
-						    「查看全部版本」展开才渲染全文——全文 164K 字符单次进渲染管线会卡顿，
-						    且大多数时候用户只关心刚发的版本。展开后的全文由 MarkdownStream 内部
-						    的 settled 渐进分块兜底（light 场景同样生效），不会一次 commit 冻结。
-						    MarkdownStream 传 light：更新日志是静态只读场景，关掉代码高亮/
-						    mermaid/数学等重插件（组件内注释亦为此场景预留了该开关）。
-
-						    外层必须显式挂 `markdown-body`：MarkdownStream 自身不挂这个类
-						    （会话里由 AssistantText 挂），而正文的「压缩宽内容」全靠
-						    .markdown-body 的 overflow-x: clip + 子元素 min-width:0
-						    （见 styles/timeline.css）。不挂的话长段落会被判成不可断行的
-						    单行文本，横向撑破弹窗——既不出换行也不出滚动条。 */}
-						<ScrollArea className="h-[52vh] rounded-md border border-border-subtle">
-							<div className="markdown-body px-4 py-3 text-chat text-text-primary">
-								{showAllVersions || split.sections.length <= 1 ? (
-									<MarkdownStream {...changelogStreamProps} text={state.payload.markdown} />
-								) : (
-									<>
-										{split.intro !== "" && <MarkdownStream {...changelogStreamProps} text={split.intro} />}
-										<MarkdownStream {...changelogStreamProps} text={split.sections[0]} />
-									</>
-								)}
-							</div>
-						</ScrollArea>
-						{/* 展开/收起固定在滚动区外（不随内容滚走）：全文展开后收起不用滚到几百屏之外。 */}
-						{split.sections.length > 1 && (
-							<div className="flex justify-center">
-								<Button variant="ghost" size="sm" onClick={() => setShowAllVersions((value) => !value)}>
-									{showAllVersions ? <ChevronUp size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}
-									{showAllVersions
-										? t("changelog.showLatestOnly")
-										: t("changelog.showAllVersions", {
-												count: split.sections.length,
-											})}
-								</Button>
-							</div>
-						)}
-						<div className="flex items-center justify-between gap-2">
-							{/* 诊断信息：内容来源 + 抓取时间（TTL 内秒开的本地缓存也能看出来源与新旧）；
-							    stale（网络失败退回旧缓存）时额外提示可刷新取最新。 */}
-							<span className="text-caption text-muted-foreground/70">
-								{t("changelog.sourceLabel", {
-									source: state.payload.source === "github" ? "GitHub" : state.payload.source === "atomgit" ? "AtomGit" : "—",
-								})}
-								{state.payload.fetchedAt
-									? ` · ${t("changelog.updatedAt", {
-											time: formatI18nDateTime(state.payload.fetchedAt),
-										})}`
-									: ""}
-							</span>
-							<div className="flex gap-2">
-								{state.payload.stale && <span className="self-center text-caption text-muted-foreground">{t("changelog.staleNotice")}</span>}
-								<Button variant="ghost" size="sm" onClick={() => void load(true)}>
-									<RefreshCw size={12} aria-hidden="true" />
-									{t("changelog.reload")}
-								</Button>
-								<Button variant="ghost" size="sm" onClick={() => openInBrowser(state.payload.pageUrl)}>
-									<ExternalLink size={12} aria-hidden="true" />
-									{t("changelog.openInBrowser")}
-								</Button>
-							</div>
-						</div>
-					</>
-				)}
-			</DialogContent>
-		</Dialog>
+				) : null
+			}
+			// stale（网络失败退回旧缓存）提示：右侧操作区左侧，提示可刷新取最新。
+			footerExtra={state.status === "ready" && state.payload.stale ? <span className="text-caption text-muted-foreground">{t("changelog.staleNotice")}</span> : null}
+		/>
 	);
 }
 
