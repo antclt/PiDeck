@@ -469,7 +469,7 @@
 | 合并（第三次） | `git merge dev`（`b5b88d913`，W1 签名跟随，**仅测试文件 +2/−1**） | 0 | `77b7e28bc`（最终 HEAD） |
 | 守卫 4 | `node --test tests/projectPackageDiscoveredRow.test.mjs` | **0** | **11 passed / 0 failed** |
 | **全量单测（最终 HEAD）** | `npm test`（`node --test --test-concurrency=4`） | **0** | **tests 15106 / pass 14821 / fail 0 / skipped 285 / 422s** —— 最终 HEAD 全绿 |
-| 全量单测 | `npm test`（`node --test --test-concurrency=4`） | **1** | **tests 15106 / pass 14820 / fail 1 / skipped 285 / 987s**（987s 因本轮交叉 npm install 特别慢）；唯一失败＝`tests/projectPackageDiscoveredRow.test.mjs:105`「项目层卸载与安装走同一信任路径」——断言要求 `extensionsUninstall` 签名恰好到 `projectId?: unknown)`，而 W1 资源目标重构给 handler 加了 `options?: unknown`（`src/main/ipc/storeIpc.ts:642`）；**源码形状签名守卫，行为未回归**，待 owner 补字面量后复跑 |
+| 全量单测（**W1 守卫修复前**，`aa14565ef`） | `npm test`（`node --test --test-concurrency=4`） | 1 | tests 15106 / pass 14820 / fail 1 / skipped 285 / 987s；唯一失败＝`tests/projectPackageDiscoveredRow.test.mjs:105` 签名守卫（W1 给 `extensionsUninstall` 加了 `options?: unknown`，`storeIpc.ts:642`）——**源码形状，行为未回归**，W1 已补字面量，上表为修复后复跑 |
 
 **helperCapabilities 说明（Lead 问）**：UI 侧读取（`rootStatus.helperCapabilities`）**真机未额外观测**——该字段只经 rootStatus 返回、主进程日志与 `remoteHosts.diagnostics` 都不带它，现有 e2e 也无断言；由单测覆盖（task-12 的 Op 信封回归 3 条 + W2 的 `fileSearchCapability` 单测）。**helper 侧能力声明有真机证据**：协议探针 `hello` 得 `helperVersion 1.25.0`、capabilities 35 项含 `fs.searchContent`（§11.6）。
 
@@ -481,6 +481,47 @@
 - WSL：只读 smoke 与停/启 smoke 均 0（停态 UNC 自动拉起 2.4s，按 Lead 裁定接受）。
 - 内容搜索：协议级真机证据 pass（helper 1.25.0 / 35 项能力含 `fs.searchContent` / 命中 2 处 / 二进制跳过 / `QUERY_INVALID`）；UI 端到端未覆盖（无 e2e 入口）。
 - 三条形状守卫（remoteDragMove 行数预算、remoteProjectUpload 计数、remoteProjectEntryState 锚点）与 W1 签名守卫（projectPackageDiscoveredRow）均已在最终 HEAD 前修复，**最终全量 0 fail**。
+
+---
+
+## 12. task-18：运行 `e2e/remoteFunctionalAcceptance.spec.ts`（F1–F4 真机，本轮首次跑）
+
+**前置**：`F:\PiDeck-v` 从 `9e7a00d67` 快进到 dev `187c96041`（= 合入最终验证记录的 docs 提交，**产品代码与 `out/` 未变**，未重新构建）；
+凭据照旧在 PowerShell 进程内派生（不打印）；跑前 `Remove-Item Env:ELECTRON_RUN_AS_NODE`；与 `w4-remote-debt` 错开（对方回「你先跑」）。
+
+| 项 | 内容 |
+|----|------|
+| 命令 | `& "$env:TEMP\pideck-v-remote.ps1" -Spec "e2e/remoteFunctionalAcceptance.spec.ts"` |
+| 退出码 | **1** |
+| 时长 | **40.8s**（`1 failed`，credentials 齐全 ⇒ `0 skipped`） |
+| 结果 | **fail**（1 条用例中 3 个 step 通过、第 4 个 step 失败） |
+
+### 12.1 逐 step 结果
+
+| step | 结果 | 证据 |
+|------|------|------|
+| 远端前置：1500 条会话夹具 | pass | 本 run 独有目录 `e2e-f4-fmvv0hvjd`，夹具条数断言 1500 |
+| 加主机（产品 IPC） | pass | `remoteHosts.add` 返回扁平 `{ok:true, hostId}` |
+| 冷部署前置：把本版本 bundle 暂时移开 | pass | 无活跃 lease 才动；`bundles/6e49555f…` → `…e2e-fmvv0hvjd` |
+| **F1：冷部署中取消** | **pass** | `cancelMs=140`；connect 落 `SSH_HOST_DISCONNECTED`；staging/锁/bootstrap 进程全部收敛；bundle 未激活 |
+| **F1：立即重试完成真实冷部署** | **pass** | `connect` 返回 ready；`bundles` 重新包含 `6e49555f…` |
+| **F3：断开→重连命中复用** | **pass** | `warmMs=5174`、`bundles=3` 不变、无 staging |
+| **F4：1500 条整表扫描** | **fail** | 断言「every fixture session must be listed (**1500 missing**)」——`scan.entries` 读不到（详见 12.2） |
+
+### 12.2 失败定性：**既有 e2e 测试债（Op 信封契约）**，不是产品缺陷
+
+- `src/main/ipc/remoteSessionIpc.ts:117` 的 `remoteSessions.scan` 返回 **Op 信封** `opOk({ entries })`；`src/shared/op.ts:21` `Op<T> = { ok: true; value: T } | OpFailure`；preload 原样透传（`src/preload/index.ts:486` 类型即 `RemoteSessionScanIpcResult = Op<…>`）。
+- 而该 spec（`e2e/remoteFunctionalAcceptance.spec.ts:250-260`）仍按**扁平**形状读 `scan.entries`：`scan.ok` 为 true（所以第一处断言通过），但 `scan.entries` 是 `undefined`，`ids` 为空 ⇒ 1500 条全部算 missing。
+- 同一 spec 里 `remoteHosts.add/connect/disconnect` 返回的是**扁平**结果（`RemoteHostAddResult` 等），所以前面的 step 不受影响——只有 scan 这一个通道迁到了 Op。
+- 这是**该 spec 首次被运行**时暴露的历史契约漂移（与 W4 之前修掉的「重复导入 Op 信封」同族），**产品行为本身没问题**：F1 取消收敛、冷部署、F3 复用命中都真机通过。
+- 建议修法（e2e owner，不改产品）：`const entries = scan.ok ? (scan.value?.entries ?? []) : [];`，其余断言不变；如 `register/title` 也迁了 Op，一并核对。
+
+### 12.3 远端 deploy 根恢复核对（跑后只读快照）
+
+- `bundles` 仍是 **3 个**，包含本版本 `6e49555f…`（冷部署已把它重新上传），**没有** `.e2e-fmvv0hvjd` 残留副本；
+- `leases=0`、`staging=0`，本次夹具目录 `~/.pi/agent/sessions/e2e-f4-*` 已被 finally 清掉；
+- 说明该 spec 的"移开→冷部署重建→删掉那份临时副本"路径按设计工作；**若在冷部署完成前中断**，`bundles/<sha>` 会缺失、临时副本 `<sha>.e2e-<runId>` 仍在——此时把副本 `mv` 回原名（或再连一次触发冷部署）即可恢复。
+- 旁证：主机上另有 **1 个** `.pideck-e2e-*` 目录（非本次 run 产生，来自更早某次远端会话用例），本次未清理、仅记录。
 
 ### 11.9 本轮结论（口径）
 
