@@ -7227,7 +7227,6 @@ export const zhCN = {
 	"config.target.remoteSaveHint": "远端目标请用面板内的「应用 patch」按钮保存",
 	"config.target.groupSsh": "SSH 主机",
 	"config.target.wsl": "WSL 发行版",
-	"config.target.wslNoProfiles": "暂无 WSL 连接档案（先在设置 → 连接里添加）",
 	"config.target.wslHint": "读写均落在该发行版的 HOME（.pi/agent），不回退本机",
 	"config.target.wslSource": "当前编辑：{label} 的发行版 HOME（.pi/agent）",
 	"config.target.wslProviderOps": "连接测试 / 拉取模型 / 用量查询仅对本机目标可用",

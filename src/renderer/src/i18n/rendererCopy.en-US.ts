@@ -7255,7 +7255,6 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.target.remoteSaveHint": "For a remote target, use “Apply patch” inside the panel",
 	"config.target.groupSsh": "SSH hosts",
 	"config.target.wsl": "WSL distribution",
-	"config.target.wslNoProfiles": "No WSL profiles yet (add one in Settings → Connections)",
 	"config.target.wslHint": "Reads/writes land in that distribution's HOME (.pi/agent); never falls back to Windows",
 	"config.target.wslSource": "Editing the {label} distribution HOME (.pi/agent)",
 	"config.target.wslProviderOps": "Connection test / model fetch / usage query are available for the local target only",
