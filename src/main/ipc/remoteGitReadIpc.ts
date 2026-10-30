@@ -29,6 +29,7 @@ import type {
 	RemoteGitSyncFactsResult,
 } from "../../shared/types/git";
 import type { ProjectFileTarget } from "../../shared/types/project";
+import type { RemoteProjectFactsScope } from "../../shared/types/remoteHost";
 import { opFailFromCode, opOk } from "../../shared/op";
 import { createRemoteGitService, remoteGitFailureCode, remoteGitRepoScope, validateRemoteGitPath, validateRemoteGitRepoPath, type RemoteGitLocator, type RemoteGitReadSnapshot } from "../git/RemoteGitService";
 import { createRemoteGitMutationTokens } from "../git/RemoteGitMutationTokens";
@@ -59,6 +60,13 @@ export function registerRemoteGitReadIpc(input: {
 	service(): RemoteHostConnectionService | undefined | Promise<RemoteHostConnectionService | undefined>;
 	/** 事实变化通知出口（与目录共用同一个 hub）；缺省时不发通知。 */
 	factsEvents?: RemoteFactsHub;
+	/**
+	 * 整树失效的主进程侧入口（装配层注入 remoteProjectIpc.invalidateTree）。
+	 *
+	 * 写成功/结果未知都可能让工作树的条目整块变化（切分支、discard、恢复快照、init），目录事实缓存
+	 * 必须与 Git 事实一起标脏；否则下一次打开抽屉仍会命中旧目录。缺省时不标脏（旧装配/测试端口）。
+	 */
+	onTreeInvalidated?: (projectId: string) => void;
 }) {
 	const reads = new Map<AbortController, { senderId: number; projectId: string }>();
 	const tokens = createRemoteGitMutationTokens();
@@ -112,6 +120,11 @@ export function registerRemoteGitReadIpc(input: {
 	 * 通知不是事务的一部分：生成代、取服务失败都不影响已经成功的写。
 	 */
 	function publishFacts(projectId: string, repoPath: string): void {
+		publishScopes(projectId, [{ kind: "status", repoPath }]);
+	}
+
+	/** 一次通知的公共出口：生成代在发布时求值，订阅者只看到 (项目, 代, scopes)。 */
+	function publishScopes(projectId: string, scopes: RemoteProjectFactsScope[]): void {
 		const events = input.factsEvents;
 		if (events === undefined) return;
 		void (async () => {
@@ -119,11 +132,27 @@ export function registerRemoteGitReadIpc(input: {
 				const locator = input.locator(projectId);
 				const service = await input.service();
 				const generation = locator === undefined ? "" : (service?.connectionFacts?.(locator.hostId)?.connectionId ?? "");
-				events.publish({ projectId, generation, scopes: [{ kind: "status", repoPath }] });
+				events.publish({ projectId, generation, scopes });
 			} catch {
 				// 观察者不是事务的一部分。
 			}
 		})();
+	}
+
+	/**
+	 * 一次 Git 写造成的跨域失效：主进程目录事实先由装配层注入的入口标脏，再发布 status + tree。
+	 *
+	 * 标脏不是事务的一部分：入口缺失/抛错都不能把一个已经成功的写说成失败。
+	 */
+	function publishTreeInvalidation(projectId: string, repoPath: string): void {
+		try {
+			input.onTreeInvalidated?.(projectId);
+		} catch {
+			// 观察者不是事务的一部分。
+		}
+		// 写会改变工作树条目：status 让 Git 面板重读，tree 让文件树重读根与全部已加载目录
+		// （tree 不是根目录事件：根事件只重读根层，覆盖不了深层目录）。
+		publishScopes(projectId, [{ kind: "status", repoPath }, { kind: "tree" }]);
 	}
 
 	async function read<T>(event: IpcMainInvokeEvent, projectId: unknown, repo: unknown, task: (projectId: string, signal: AbortSignal) => Promise<T>, mutating = false): Promise<T> {
@@ -134,14 +163,14 @@ export function registerRemoteGitReadIpc(input: {
 			// 写成功 ⇒ 这一仓的事实过时了：只标脏，下一次读重新装载（不在这里主动再读一次）。
 			if (mutating) {
 				facts.invalidate(guard.projectId, repoPath);
-				publishFacts(guard.projectId, repoPath);
+				publishTreeInvalidation(guard.projectId, repoPath);
 			}
 			return value;
 		} catch (error) {
 			// 写已发出但结果未知（超时/断连/答复畸形）：事实可能已经变了，标脏但不自动读、不重放。
 			if (mutating && remoteGitFailureCode(error) === "GIT_WRITE_RESULT_UNCONFIRMED") {
 				facts.invalidate(guard.projectId, repoPath);
-				publishFacts(guard.projectId, repoPath);
+				publishTreeInvalidation(guard.projectId, repoPath);
 			}
 			throw error;
 		} finally {
@@ -584,6 +613,17 @@ export function registerRemoteGitReadIpc(input: {
 			const repoPath = compatRepo(typeof projectId === "string" ? projectId : "", repo);
 			if (!Array.isArray(paths) || paths.length === 0 || paths.length > 64 || paths.some((path) => typeof path !== "string")) throw new Error("GIT_RESULT_INVALID");
 			return read(event, projectId, repoPath, (id, signal) => git.checkIgnore(id, repoPath, paths as string[], signal));
+		},
+		/**
+		 * 文件写成功后（`remoteProjectIpc.afterWrite` 的对侧）：该项目**全部已缓存仓库**的事实过时了。
+		 *
+		 * 只标脏 + 逐仓发 status：不装载、不重放写，活跃面板按自己的 repoPath 精确匹配后重读。没有暖事实
+		 * 的项目不发通知（不制造空事件）。目录失效仍由文件写自己的 afterWrite 负责，所以这里不发 tree。
+		 */
+		invalidateProject(projectId: string): void {
+			const repos = facts.reposOf(projectId);
+			facts.invalidateProject(projectId);
+			for (const repoPath of repos) publishFacts(projectId, repoPath);
 		},
 		/** Pair with quit cleanup; sender destruction separately cancels only that window's pending reads. */
 		dispose() {

@@ -6,6 +6,7 @@ import type { RemoteHostConnectionService } from "../remote/RemoteHostConnection
 import { createRemoteProjectFileService } from "../remote/RemoteProjectFileService";
 import { validateRemoteProjectTextPath, REMOTE_PROJECT_TEXT_MAX_BYTES } from "../remote/RemoteProjectFileCommands";
 import { isRemoteProjectTrashPath } from "../remote/RemoteProjectEntryCommands";
+import { isUncertainWrite } from "../remote/RemoteProjectWriteFacts";
 
 /**
  * 编辑IPC独立于只读项目handler；locator只从main读取，整次I/O受既有单主机操作锁保护。
@@ -70,9 +71,15 @@ export function registerRemoteProjectFileIpc(input: {
 				const valid = validate(event.sender, projectId, relative);
 				if (typeof content !== "string" || typeof version !== "string" || !/^[a-f0-9]{32}$/.test(version)) throw new Error("REMOTE_FILE_INPUT_INVALID");
 				if (content.length > REMOTE_PROJECT_TEXT_MAX_BYTES || Buffer.byteLength(content, "utf8") > REMOTE_PROJECT_TEXT_MAX_BYTES) throw new Error("REMOTE_FILE_TOO_LARGE");
-				const saved = await files.save(valid.senderId, valid.projectId, valid.relative, content, version);
-				input.afterWrite?.(valid.projectId, [valid.relative]);
-				return saved;
+				try {
+					const saved = await files.save(valid.senderId, valid.projectId, valid.relative, content, version);
+					input.afterWrite?.(valid.projectId, [valid.relative]);
+					return saved;
+				} catch (error) {
+					// 结果未知/断连：远端可能已经落盘，事实必须与成功的写一样失效；写本身不重放。
+					if (isUncertainWrite(error)) input.afterWrite?.(valid.projectId, [valid.relative]);
+					throw error;
+				}
 			}),
 	);
 }

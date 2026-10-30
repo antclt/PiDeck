@@ -202,6 +202,35 @@ test("a refresh drops history, refs and detail facts without reloading them", as
 	assert.equal(calls.length, 3, "the refresh itself reloads nothing");
 });
 
+test("a silent status refresh updates facts without dropping diff, history, refs or the selection", async () => {
+	// P0-3：5 秒轮询必须走 refreshStatus，而不是 refresh——后者会整体替换 state（loading=true）
+	// 并清掉 history/refs/diff 与选中行，等于每隔 5 秒把用户正在看的东西收走一次。
+	let branch = "main";
+	const f = fixture({
+		remoteSnapshot: async () => ({ ok: true, snapshot: { ...snapshot, branch } }),
+		remoteLog: async () => ({ ok: true, page: { commits: [historyRow(oid("1"), "first")], hasMore: false } }),
+		remoteRefs: async () => ({ ok: true, refs: { head: oid("1"), branch: "main", refs: [] } }),
+		remoteCommitDetail: async (_id, value) => ({ ok: true, detail: detailFor(value) }),
+	});
+	await f.reads.refresh();
+	await f.reads.loadHistory();
+	await f.reads.loadRefs();
+	await f.reads.openCommitDetail(oid("1"));
+	await f.reads.openDiff("index", target);
+	const before = f.current();
+
+	branch = "feature";
+	await f.reads.refreshStatus();
+	const after = f.current();
+	assert.equal(after.snapshot.branch, "feature", "external changes are picked up");
+	assert.equal(after.loading, false, "a silent tick never flashes loading");
+	assert.equal(after.diffLoading, false);
+	assert.deepEqual(plain(after.history), plain(before.history), "history rows stay");
+	assert.deepEqual(plain(after.refs), plain(before.refs), "refs stay");
+	assert.equal(after.detailOid, oid("1"), "the selected commit stays selected");
+	assert.deepEqual(plain(after.diff), plain(before.diff), "an open diff stays open");
+});
+
 test("commit detail answers the last click, and an answer for another commit is refused", async () => {
 	const f = fixture({ remoteCommitDetail: async (id, value) => ({ ok: true, detail: detailFor(value) }) });
 	await Promise.all([f.reads.openCommitDetail(oid("a")), f.reads.openCommitDetail(oid("b"))]);

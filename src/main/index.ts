@@ -3456,6 +3456,8 @@ function registerIpc() {
 		enabled: remoteExperimentEnabled,
 		service: remoteHostServiceIfEnabled,
 		factsEvents: remoteFactsEvents,
+		// P0-1：Git 写成功/结果未知时，主进程目录事实缓存与渲染层文件树一起失效（tree scope）。
+		onTreeInvalidated: (projectId) => remoteProjectIpc.invalidateTree(projectId),
 		trusted: async (target) => (await remoteProjectTrustService?.trustOverride({ hostId: target.hostId, remoteRoot: target.remotePath })) === "approve",
 		locator: (projectId) => {
 			const project = projectStore.get(projectId);
@@ -3470,7 +3472,11 @@ function registerIpc() {
 			const project = projectStore.get(projectId);
 			return project && isRemoteProject(project) ? project.locator : undefined;
 		},
-		afterWrite: (projectId, paths) => remoteProjectFacts?.afterWrite(projectId, paths),
+		afterWrite: (projectId, paths) => {
+			remoteProjectFacts?.afterWrite(projectId, paths);
+			// P0-2：文件保存/新建/改名/删除/还原也会改变工作树状态：失效该项目所有已缓存仓库的 status。
+			remoteGitReads.invalidateProject(projectId);
+		},
 	});
 	// 本机 ↔ 远端文件传输（上传走 stdin 分块，支持二进制；下载走只读 reader + 保存对话框）。
 	// 与只读项目通道共用同一份 locator 解析，避免「列表看得到、下载找不到」。
@@ -3492,7 +3498,11 @@ function registerIpc() {
 			return project && isRemoteProject(project) ? project.locator : undefined;
 		},
 		// 写成功后只标脏目录事实（W3）：一次写不产生任何远端往返，下一次读自然重新装载。
-		afterWrite: (projectId, paths) => remoteProjectIpc.afterWrite(projectId, paths),
+		afterWrite: (projectId, paths) => {
+			remoteProjectIpc.afterWrite(projectId, paths);
+			// P0-2：文件面写同样让 Git status 失效（与文本保存同一条出口）。
+			remoteGitReads.invalidateProject(projectId);
+		},
 	});
 	quitCleanup.register("remote-project-entries", remoteProjectEntries.dispose);
 	/**

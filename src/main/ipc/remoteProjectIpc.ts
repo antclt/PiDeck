@@ -31,6 +31,7 @@ import { resolveRemoteBrowseRoot } from "../remote/RemoteBrowseRoot";
 import { createRemoteWorkspaceReader } from "../remote/RemoteWorkspaceReader";
 import { createFactCache, type FactCache } from "../remote/RemoteFactCache";
 import { createDirWatchRegistry, dirKeysAfterWrite, dirPathsAfterWrite } from "../remote/RemoteDirWatchRegistry";
+import { createDeepDirWatch, type DeepDirWatchStatus } from "../remote/RemoteDeepDirWatch";
 import { createRemoteFactsHub, type RemoteFactsHub } from "../remote/RemoteFactsNotifications";
 import { PendingConfirmationBroker } from "../security/PendingConfirmationBroker";
 
@@ -55,6 +56,11 @@ export type RemoteProjectIpcHandle = {
 	/** 失效矩阵：写到的路径 ⇒ 所在目录 + 其父目录（目录自身的元数据也变了）。 */
 	afterWrite(projectId: string, paths: readonly string[]): void;
 	/**
+	 * 整树失效（远端 Git 写成功/结果未知）：子树条目可能整块变化，但这不是「根目录事件」——
+	 * 只标脏、不装载；重读范围由活跃的文件树决定（收到 tree scope 后重读根与全部已加载目录）。
+	 */
+	invalidateTree(projectId: string): void;
+	/**
 	 * helper 变更事件（helper 1.24.0）的入口：把 watchId 换回「哪个项目的哪些目录」。
 	 *
 	 * 只做**失效**，不装载：事件是「你可能要重读」的提示，重读仍由读的人决定。
@@ -65,6 +71,10 @@ export type RemoteProjectIpcHandle = {
 	onHostDisconnected(hostId: string): void;
 	/** 项目关闭：退订它在各 host 上的目录订阅，不影响别的项目。 */
 	closeProject(projectId: string): Promise<void>;
+	/** 立即冲刷深层订阅的合并窗口（测试/诊断；正常路径由 150–250ms 窗口自行冲刷）。 */
+	flushDirWatch(): Promise<void>;
+	/** 深层订阅的可断言状态：期望路径、已覆盖路径与降级原因（超预算时不假装覆盖）。 */
+	dirWatchStatus(projectId: string): DeepDirWatchStatus;
 	/** 公共目录页（T6）：与远端 list 共用同一份事实缓存，带 truncated/revision/generation。 */
 	directoryPage(projectId: string, path: string, force?: boolean): Promise<ProjectDirectoryPageResult>;
 	/** 批量存在性/类型（只读 fs 面；64 路径/帧，全有或全无时按需逐项核对）。 */
@@ -236,31 +246,11 @@ export function registerRemoteProjectIpc(input: {
 	const generationOf = (projectId: string): string => projectGenerations.get(projectId) ?? "";
 
 	/**
-	 * 根目录首次读到就订阅（非递归：覆盖根层与 `.git` 变化；更深目录仍走读的人重读）。
+	 * 深层目录订阅（P0-4）：期望路径集 + 合并窗口 + 一次性 ensure/rewatch 在 RemoteDeepDirWatch。
 	 *
-	 * 会话身份用 `connectionId`：同一次 helper 会话里每次读都拿到新的 session 包装对象，但订阅只能
-	 * 有一个。退订绑定到同一个 session，项目关闭/连接释放时成对收回。
+	 * 这里只负责登记：目录读成功后把**项目相对路径**交给它；订阅失败/超预算是降级，不是读失败。
 	 */
-	async function ensureRootWatch(projectId: string, hostId: string, session: RemoteProjectSession): Promise<void> {
-		await watchRegistry.ensure(
-			hostId,
-			session.connectionId,
-			projectId,
-			async (paths) => {
-				try {
-					const result: unknown = await session.request("fs.watch", { paths: [...paths] });
-					return typeof result === "object" && result !== null && typeof (result as { watchId?: unknown }).watchId === "string" ? (result as { watchId: string }).watchId : undefined;
-				} catch {
-					/* 订阅不是读的前置条件：失败就退回只读刷新，不向用户报错。 */
-					return undefined;
-				}
-			},
-			{
-				paths: [""],
-				unwatch: (watchId) => session.request("fs.unwatch", { watchId }),
-			},
-		);
-	}
+	const dirWatch = createDeepDirWatch({ registry: watchRegistry });
 
 	const dirs: FactCache<RemoteWorkspaceEntry[]> = createFactCache<RemoteWorkspaceEntry[]>(async (key) => {
 		const separator = key.indexOf("\u0000");
@@ -275,8 +265,9 @@ export function registerRemoteProjectIpc(input: {
 				projectHosts.set(projectId, target.hostId);
 				const reader = createRemoteWorkspaceReader({ port: sessionPort(session, target.hostId) });
 				const listed = await reader.list(target.hostId, readerPath(relative));
-				// 根目录第一次读到就顺手订阅：之后 helper 的变更事件会把这个项目的事实标脏。
-				if (relative === "") await ensureRootWatch(projectId, target.hostId, session);
+				// 读成功后登记订阅：根目录立即 ensure，深层目录进合并窗口；之后 helper 的变更事件才能把
+				// 这个项目的事实标脏。订阅不是读的前置条件（失败只降级到只读刷新）。
+				await dirWatch.record(projectId, target.hostId, relative, session);
 				return listed;
 			});
 			if (!outcome.ok) return opFailFromCode(outcome.code);
@@ -318,6 +309,10 @@ export function registerRemoteProjectIpc(input: {
 			// 只标脏 + 通知：读仍由活跃的消费者决定（一次写不产生远端往返）。
 			factsEvents.publish({ projectId, generation: generationOf(projectId), scopes: touched.map((path) => ({ kind: "dir" as const, path })) });
 		},
+		invalidateTree(projectId: string): void {
+			// 前缀匹配 = 本项目全部目录键（项目 id 后紧跟真实的 NUL 分隔符，不会误命中同前缀的其它项目）。
+			dirs.invalidateWhere((key) => key.startsWith(projectId + "\u0000"));
+		},
 		directoryPage: (projectId, path, force = false) => projectDirectoryPage({ projectId, path, force, readDirSnapshot, generationOf }),
 		pathsExist: (projectId, paths) => projectPathsExist({ projectId, paths, projectReadTarget }),
 		onHelperEvent(entry): void {
@@ -333,15 +328,23 @@ export function registerRemoteProjectIpc(input: {
 		},
 		onHostDisconnected(hostId: string): void {
 			// helper 已死：旧的 watchId 不可能再回来，登记直接丢弃，不发退订。
+			dirWatch.forgetHost(hostId);
 			watchRegistry.clearHost(hostId);
 			// 断连换代：旧代缓存与渲染层持有的快照都不能再被当作“现在”。
 			disconnectedGeneration += 1;
 			for (const [projectId, projectHost] of projectHosts) if (projectHost === hostId) projectGenerations.set(projectId, `${hostId}#disconnected#${disconnectedGeneration}`);
 		},
 		closeProject(projectId: string): Promise<void> {
+			// 期望集合先丢（迟到的冲刷不得把它订回来），再成对退订该项目的 watcher。
+			dirWatch.forgetProject(projectId);
 			return watchRegistry.closeProject(projectId);
 		},
+		flushDirWatch(): Promise<void> {
+			return dirWatch.flush();
+		},
+		dirWatchStatus: (projectId) => dirWatch.status(projectId),
 		dispose(): Promise<void> {
+			dirWatch.dispose();
 			return watchRegistry.releaseAll();
 		},
 	};

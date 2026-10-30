@@ -20,6 +20,7 @@ import { useRemoteFileTree } from "../../hooks/useRemoteFileTree";
 import { fileTreeNodeKey, projectFileKey } from "../../utils/fileTreeLazy";
 import type { RemoteSearchEntryView } from "./remoteProjectSearchState";
 import { RemoteProjectSearchBar } from "./RemoteProjectSearchBar";
+import { RemoteUploadLimitsHint } from "./RemoteUploadLimitsHint";
 
 /**
  * 远端项目目录浏览 + 文件名搜索 + 文本编辑 + 文件管理（Phase 5 文件面）。
@@ -272,6 +273,8 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 					}}
 				/>
 			) : null}
+			{/* 能力边界前置说明：单文件 16 MiB、文件夹不支持（强制在主进程，这里只提前告知）。 */}
+			{!searching && !searchOpen ? <RemoteUploadLimitsHint /> : null}
 			{/* 写操作结果/未知提示：固定单行高度，避免布局抖动；读失败只影响目录列表，不覆盖这条回执。 */}
 			<p data-testid="remote-file-outcome" aria-live="polite" className="h-5 truncate text-label text-muted-foreground">
 				{fileOutcomeText}

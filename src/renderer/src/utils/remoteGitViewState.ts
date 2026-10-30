@@ -27,6 +27,7 @@ import type {
 	RemoteGitRefsResult,
 } from "../../../shared/types/git";
 import type { ProjectFileTarget } from "../../../shared/types/project";
+import { createRemoteGitStatusRefresher } from "./remoteGitStatusPolling";
 
 export type RemoteGitViewState = {
 	projectKey: string;
@@ -107,33 +108,8 @@ export type RemoteGitViewApi = {
 	pushRemote(projectId: string, remote: string, branch: string, token: string, repo?: string): Promise<{ ok: true; outcome: RemoteGitPushOutcome } | { ok: false; code: string }>;
 	pullRemote(projectId: string, remote: string, branch: string, token: string, repo?: string): Promise<{ ok: true; outcome: RemoteGitPullOutcome } | { ok: false; code: string }>;
 };
-/**
- * The same name rules main enforces, kept in step with `validateRemoteGitBranchName` on purpose: the panel refuses
- * locally so an unusable name never leaves the window, while the main process stays the authority. A pseudo-ref such
- * as HEAD is a name Git would refuse - the panel must not offer it and pretend the click could work.
- */
-export function validRemoteGitBranchName(name: unknown): name is string {
-	if (typeof name !== "string" || name.length === 0 || new TextEncoder().encode(name).length > 1024 || /[\x00-\x1f\x7f\\]/.test(name)) return false;
-	if (name === "@" || name.startsWith("-") || name.includes("@{") || name.startsWith("refs/")) return false;
-	if (/^(?:HEAD|FETCH_HEAD|ORIG_HEAD|MERGE_HEAD|CHERRY_PICK_HEAD|REVERT_HEAD|BISECT_HEAD)$/.test(name)) return false;
-	return !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(name);
-}
-
-/**
- * A compare names full local refs (refs/heads/* or refs/tags/*), exactly the strings `remoteRefs` returns.
- * These rules mirror main's `validateRemoteGitRefFullName` and the frozen helper's readRef; the panel refuses
- * locally so an unusable pair never leaves the window. Git's own check-ref-format is not enough: it accepts
- * an option-like component, a lone `@` and braces (measured), all of which this protocol refuses.
- */
-const REMOTE_GIT_REF_FORBIDDEN = /[\u0000-\u0020\u007f~^:?*[\\{}]/;
-export function validRemoteGitRefFullName(value: unknown): value is string {
-	if (typeof value !== "string" || new TextEncoder().encode(value).length > 1024 || REMOTE_GIT_REF_FORBIDDEN.test(value) || value.includes("..") || value.includes("@{") || value.includes("//")) return false;
-	const prefix = value.startsWith("refs/heads/") ? "refs/heads/" : value.startsWith("refs/tags/") ? "refs/tags/" : null;
-	if (prefix === null) return false;
-	const name = value.slice(prefix.length);
-	if (!name) return false;
-	return !name.split("/").some((part) => !part || part === "." || part === ".." || part === "@" || part.startsWith(".") || part.startsWith("-") || part.endsWith(".") || part.endsWith(".lock"));
-}
+import { validRemoteGitBranchName, validRemoteGitRefFullName } from "./remoteGitRefValidation";
+export { validRemoteGitBranchName, validRemoteGitRefFullName } from "./remoteGitRefValidation";
 
 function errorCode(error: unknown): string {
 	const raw = error instanceof Error ? error.message : String(error);
@@ -176,6 +152,19 @@ export function createRemoteGitViewController(projectId: string, projectKey: str
 		state = next.initNotice === undefined && state.initNotice !== undefined ? { ...withSyncNotice, initNotice: state.initNotice } : withSyncNotice;
 		if (active) publish(state);
 	}
+	// 静默 status 刷新（P0-3）：策略/闸门/单飞在 remoteGitStatusPolling，控制器只提供状态、事实代次与读口。
+	const statusRefresher = createRemoteGitStatusRefresher<RemoteGitViewState>({
+		isActive: () => active,
+		current: () => state,
+		factGeneration: () => epoch,
+		publish: update,
+		readSnapshot: () => {
+			const forceRead = api.refreshRemoteSnapshot;
+			// 静默读也要越过主进程已完成的事实缓存：外部 commit/checkout 不会让主进程标脏。
+			return forceRead === undefined ? api.remoteSnapshot(projectId, repoPath) : forceRead(projectId, repoPath);
+		},
+		codeOf: errorCode,
+	});
 	async function readHistoryPage(maxCount: number, skip?: number): Promise<RemoteGitLogResult> {
 		if (api.historyPage === undefined) return api.remoteLog(projectId, { maxCount, ...(skip === undefined ? {} : { skip }) }, repoPath);
 		const result = await api.historyPage(projectId, { maxCount, ...(skip === undefined ? {} : { skip }) }, { projectId, relativePath: repoPath });
@@ -405,6 +394,9 @@ export function createRemoteGitViewController(projectId: string, projectKey: str
 		stopRefsPolling() {
 			refsPollEpoch += 1;
 		},
+		// 静默 status 刷新（P0-3）：只换 snapshot/errorCode；不置 loading、不清 diff/history/refs。
+		refreshStatus: statusRefresher.refreshStatus,
+		stopStatusPolling: statusRefresher.stop,
 		/** One file's two sides between two revisions, on the same surface as a workspace diff. */
 		async openHistoryFileDiff(base: string | null, head: string, target: ProjectFileTarget) {
 			if (!active || state.loading || state.diffLoading || state.mutating || target.projectId !== projectId) return;

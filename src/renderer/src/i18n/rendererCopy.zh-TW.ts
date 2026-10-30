@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 6d5dc04aa668f0be989247919ae51a1eff86ef5e32452209b452b3a4ae701b5f（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 6677074adfaa4cf8dc1c5e66eebefd7da5e7e613d1966023f2e1bf3381f4b333（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -1654,6 +1654,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"session.backendPickerHint": "選擇後端（Pi / DSH / 生圖 / 生影片 / Agent CLI）",
 	"session.backendLockedHint": "後端已鎖定（已傳送訊息後不可切換）",
 	"session.backendLockedNotice": "會話已開始，後端已鎖定，無法再切換。如需更換後端，請新建一個會話。",
+	"session.backendRemotePiOnlyHint": "遠端專案僅支援 pi（遠端會話固定 pi）",
+	"session.backendRemotePiOnlyNotice": "遠端專案只執行主機上的 pi，無法切換成本地 DSH / ACP 等後端。",
 	"session.sendDshImagesUnsupported": "DSH 不支援該圖片格式（僅支援 PNG / JPEG / WebP / GIF）",
 	"session.sendDshModelNoImageInput": "當前 DSH 模型未宣告支援圖片輸入，訊息已被拒絕。請到「設定 → DSH → 供應商」展開該模型，把「輸入模態」改為「文本 + 圖片」後重試。",
 	"session.sendDshModelRouteUnavailable": "當前 DSH 模型路由不可用，請選擇其他模型或恢復提供方配置。",
@@ -4141,6 +4143,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"drawer.fileSearchContentSection": "檔案內容",
 	"drawer.fileSearchContentScanning": "正在掃描檔案內容…",
 	"drawer.fileSearchContentTruncated": "結果已截斷",
+	"drawer.fileSearchNameOnlyHint": "此位置僅支援檔名搜尋",
 	"drawer.deleteFileTitle": "刪除檔案",
 	"drawer.deleteFileConfirm": "確定要刪除「{name}」嗎？此操作不可撤銷。",
 	"drawer.deleteFolderTitle": "刪除目錄",
@@ -4483,6 +4486,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"project.remote.uploadLocalIoTimeout": "讀取本機檔案超時（網路盤/共享目錄可能已斷開），請檢查路徑後重試。",
 	"project.remote.uploadNotAFile": "只支援上傳檔案：目錄請在裡面選檔案，或先打包。",
 	"project.remote.uploadTooLarge": "檔案超過 16 MiB 上限，暫不支援。",
+	"project.remote.uploadLimitHint": "上傳限制：單個檔案 ≤ 16 MiB；不支援資料夾上傳，請先打包目錄。",
 	"project.remote.uploadExists": "遠端已有同名檔案，未覆蓋（請先重新命名或刪除）。",
 	"project.remote.dropSearching": "搜尋狀態下不接受拖放：先清空搜尋再拖檔案。",
 	"project.remote.dropUnsupported": "拖進來的內容不是本機檔案，無法上傳（請從資源管理器拖檔案進來）。",
@@ -7226,11 +7230,21 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.target.remoteHint": "讀寫均發生在遠端 Pi 目錄，金鑰只顯示狀態",
 	"config.target.switchTitle": "切換配置目標",
 	"config.target.switchMessage": "遠端還有未應用的 patch，切換目標會丟棄它。確定繼續？",
+	"config.target.switchDirtyBlocked": "當前目標還有未儲存的配置修改：先儲存（或關閉視窗選擇放棄）後再切換目標",
 	"config.target.switchConfirm": "丟棄並切換",
 	"config.target.discardTitle": "丟棄遠端未應用的 patch？",
 	"config.target.discardMessage": "遠端 patch 尚未應用，關閉視窗會丟棄它。確定關閉？",
 	"config.target.discardConfirm": "丟棄並關閉",
 	"config.target.remoteSaveHint": "遠端目標請用面板內的「應用 patch」按鈕儲存",
+	"config.target.groupSsh": "SSH 主機",
+	"config.target.wsl": "WSL 發行版",
+	"config.target.wslNoProfiles": "暫無 WSL 連線檔案（先在設定 → 連線裡新增）",
+	"config.target.wslHint": "讀寫均落在該發行版的 HOME（.pi/agent），不回退本機",
+	"config.target.wslSource": "當前編輯：{label} 的發行版 HOME（.pi/agent）",
+	"config.target.wslProviderOps": "連線測試 / 拉取模型 / 用量查詢僅對本機目標可用",
+	"config.target.wslUnsupported": "{label} 的這部分配置暫未接入 WSL：本頁只支援 models.json 與 settings.json，切回本機可繼續編輯",
+	"config.windowsOnly.title": "當前僅編輯 Windows 配置",
+	"config.windowsOnly.body": "WSL 發行版配置暫未接入：本頁只讀寫本機（Windows）的{page}，不會改動 WSL 檔案內的內容。",
 	"remoteConfig.title": "遠端 {file}",
 	"remoteConfig.host": "主機",
 	"remoteConfig.version": "版本",

@@ -1,6 +1,7 @@
 import { useCallback, useState, type DragEvent } from "react";
 import { desktopApi } from "../desktopApi";
 import { t } from "../i18n";
+import { readRemoteUploadNotice, remoteUploadFailureCopy } from "../utils/remoteCapabilityLimits";
 import { REMOTE_ENTRY_DRAG_TYPE } from "../utils/remoteEntryDrag";
 
 /**
@@ -19,32 +20,22 @@ export function useRemoteProjectTransfer(input: { projectId: string; directory: 
 
 	/** 上传失败码 → 人话（未知码原样展示，绝不吞掉）。 */
 	const failureText = useCallback((code: string): string => {
-		switch (code) {
-			case "REMOTE_UPLOAD_NOT_A_FILE":
-				return t("project.remote.uploadNotAFile");
-			case "REMOTE_FILE_TOO_LARGE":
-				return t("project.remote.uploadTooLarge");
-			case "REMOTE_FILE_TARGET_EXISTS":
-				return t("project.remote.uploadExists");
-			case "REMOTE_UPLOAD_INVALID_PATHS":
-				return t("project.remote.dropUnsupported");
-			case "REMOTE_UPLOAD_LOCAL_IO_TIMEOUT":
-				return t("project.remote.uploadLocalIoTimeout");
-			default:
-				return t("project.remote.uploadFailed", { code });
-		}
+		const copy = remoteUploadFailureCopy(code);
+		return copy.withCode ? t(copy.key, { code }) : t(copy.key);
 	}, []);
 
 	const finish = useCallback(
 		async (result: Awaited<ReturnType<typeof desktopApi.remoteHosts.uploadProjectFiles>>) => {
-			if (!result.ok) {
-				setError(failureText(result.code));
+			// 失败码与部分失败由纯函数分类：任何失败都不会落进 success 分支。
+			const notice = readRemoteUploadNotice(result);
+			if (notice.kind === "error") {
+				setError(failureText(notice.code));
 				return;
 			}
 			// 取消是用户的动作（现在是成功载荷的一个分支），不报错、也不当作已完成。
-			if (result.value.canceled === true) return;
+			if (notice.kind === "none") return;
 			await reload();
-			if (result.value.failed.length > 0) setError(t("project.remote.uploadPartial", { count: result.value.failed.length, message: failureText(result.value.failed[0].code) }));
+			if (notice.kind === "partial") setError(t("project.remote.uploadPartial", { count: notice.failedCount, message: failureText(notice.code) }));
 		},
 		[failureText, reload, setError],
 	);

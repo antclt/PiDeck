@@ -5,7 +5,7 @@
  * session is touched, and an invalid shape fails with a stable code instead of being coerced to local.
  */
 
-import { REMOTE_CONFIG_CODES, type PiConfigReadOptions, type PiConfigTarget, type PiConfigWriteOptions } from "../../shared/piConfig";
+import { REMOTE_CONFIG_CODES, WSL_CONFIG_CODES, type PiConfigReadOptions, type PiConfigTarget, type PiConfigWriteOptions } from "../../shared/piConfig";
 import { PROJECT_HOST_ID_PATTERN } from "../../shared/projectLocation";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -24,6 +24,12 @@ export function readPiConfigTarget(value: unknown): PiConfigTarget {
 		if (Object.keys(value).length !== 1) throw stable(REMOTE_CONFIG_CODES.targetInvalid);
 		return { kind: "local" };
 	}
+	if (value.kind === "wsl") {
+		// Exactly two keys and the same authoritative id domain the project domain uses: a wsl target can only
+		// name a profile the WslHostStore could have issued, so a crafted id cannot address another directory.
+		if (Object.keys(value).length !== 2 || typeof value.hostId !== "string" || !PROJECT_HOST_ID_PATTERN.test(value.hostId)) throw stable(WSL_CONFIG_CODES.targetInvalid);
+		return { kind: "wsl", hostId: value.hostId };
+	}
 	if (value.kind !== "ssh") throw stable(REMOTE_CONFIG_CODES.targetInvalid);
 	if (Object.keys(value).length !== 2 || typeof value.hostId !== "string" || !PROJECT_HOST_ID_PATTERN.test(value.hostId)) throw stable(REMOTE_CONFIG_CODES.targetInvalid);
 	return { kind: "ssh", hostId: value.hostId };
@@ -38,14 +44,15 @@ export function readPiConfigReadOptions(value: unknown): PiConfigReadOptions {
 
 /**
  * Write options: local keeps the old body-only contract, so expectedVersion/patch must be absent for it;
- * ssh requires both (a remote write without a version guard would be an unguarded overwrite).
+ * ssh requires both (a remote write without a version guard would be an unguarded overwrite); wsl writes the
+ * whole file like local, so it also refuses the ssh-only guard fields instead of silently ignoring them.
  */
 export function readPiConfigWriteOptions(value: unknown): PiConfigWriteOptions {
 	if (value === undefined || value === null) return { target: { kind: "local" } };
 	if (!isRecord(value) || Object.keys(value).some((key) => key !== "target" && key !== "expectedVersion" && key !== "patch")) throw stable(REMOTE_CONFIG_CODES.targetInvalid);
 	const target = readPiConfigTarget(value.target);
-	if (target.kind === "local") {
-		if (value.expectedVersion !== undefined || value.patch !== undefined) throw stable(REMOTE_CONFIG_CODES.targetInvalid);
+	if (target.kind !== "ssh") {
+		if (value.expectedVersion !== undefined || value.patch !== undefined) throw stable(target.kind === "wsl" ? WSL_CONFIG_CODES.targetInvalid : REMOTE_CONFIG_CODES.targetInvalid);
 		return { target };
 	}
 	if (typeof value.expectedVersion !== "string" || !/^[0-9a-f]{64}$/.test(value.expectedVersion)) throw stable(REMOTE_CONFIG_CODES.versionConflict);
