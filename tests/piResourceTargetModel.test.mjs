@@ -29,3 +29,16 @@ test("本轮写操作只允许本机目标：wsl 资源页必须显式只读", (
 	assert.equal(model.resourceMutationAllowed({ kind: "local" }), true);
 	assert.equal(model.resourceMutationAllowed({ kind: "wsl", hostId: HOST }), false);
 });
+test("写动作门禁：本机全放行；WSL 只放行 task-16 已路由的动作", () => {
+	const wsl = { kind: "wsl", hostId: HOST };
+	const local = { kind: "local" };
+	const routed = ["skills:create", "skills:delete", "skills:rename", "skills:toggle", "skills:openFolder", "prompts:create", "prompts:delete", "prompts:rename", "prompts:toggle", "prompts:openFolder", "extensions:toggle"];
+	const blocked = ["skills:edit", "extensions:install", "extensions:uninstall", "extensions:update", "extensions:updateOne", "extensions:removeBuiltIn", "extensions:restoreBuiltIn"];
+	for (const action of [...routed, ...blocked]) {
+		assert.equal(model.resourceWriteAllowed(action, local), true, "local " + action);
+	}
+	for (const action of routed) assert.equal(model.resourceWriteAllowed(action, wsl), true, action);
+	for (const action of blocked) assert.equal(model.resourceWriteAllowed(action, wsl), false, action);
+	// 旧判据保留：任一写操作对 WSL 仍非全局可用（细粒度以 resourceWriteAllowed 为准）。
+	assert.equal(model.resourceMutationAllowed(wsl), false);
+});
