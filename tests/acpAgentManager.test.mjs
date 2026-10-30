@@ -1168,7 +1168,17 @@ test("configOptions:启动参数已定档 bypass 时，记忆里的旧模式不�
 			{ value: "yolo", name: "Bypass Permissions" },
 		],
 	};
-	const effortOption = { id: "effort", name: "Reasoning effort", category: "thought_level", type: "select", currentValue: "medium", options: [{ value: "medium", name: "Medium" }, { value: "high", name: "High" }] };
+	const effortOption = {
+		id: "effort",
+		name: "Reasoning effort",
+		category: "thought_level",
+		type: "select",
+		currentValue: "medium",
+		options: [
+			{ value: "medium", name: "Medium" },
+			{ value: "high", name: "High" },
+		],
+	};
 	const { manager, createAgent, lastProc } = harness(
 		t,
 		{

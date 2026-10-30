@@ -38,7 +38,7 @@ test("初始化只是指示态：发送闸门只看用户发送态，不被 ACP 
 	assert.doesNotMatch(quickSendLine, /isAcpInitializing/, "快捷消息同理不得被 ACP 预热拦住");
 	// Enter / 快捷消息 / 追问的统一入口不能再有静默 return：那是「按了没反应」的直接来源。
 	const promote = controller.slice(controller.indexOf("const promoteAndSend"));
-	const promoteGate = promote.slice(0, promote.indexOf("if (mode === \"imagegen\")"));
+	const promoteGate = promote.slice(0, promote.indexOf('if (mode === "imagegen")'));
 	assert.doesNotMatch(promoteGate, /if \(isAcpInitializing\) return;/, "promoteAndSend 不得静默丢弃发送");
 });
 

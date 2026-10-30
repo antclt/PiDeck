@@ -9,7 +9,7 @@ import test from "node:test";
 const sidebar = readFileSync("src/renderer/src/components/sidebar/SidebarContent.tsx", "utf8");
 
 test("低频入口收在「更多」折叠组内", () => {
-	const toggleIndex = sidebar.indexOf("aria-controls=\"sidebar-more-actions\"");
+	const toggleIndex = sidebar.indexOf('aria-controls="sidebar-more-actions"');
 	const groupIndex = sidebar.indexOf('id="sidebar-more-actions"');
 	const automationIndex = sidebar.indexOf("<AutomationDockButton />");
 	const agentIndex = sidebar.indexOf("<AgentMarketDockButton />");
@@ -38,7 +38,7 @@ test("折叠组不吞掉宿主插件入口，且插件行排在「更多」之�
 	// 产品决定：插件行属于用户自装入口，固定留在折叠组之外、且排在「更多」之前，
 	// 这样展开的三件套始终落在动作区最末（也就是插件行下面）。
 	const hostIndex = sidebar.indexOf("<HostPluginDockButtons");
-	const toggleIndex = sidebar.indexOf("aria-controls=\"sidebar-more-actions\"");
+	const toggleIndex = sidebar.indexOf('aria-controls="sidebar-more-actions"');
 	const groupIndex = sidebar.indexOf('id="sidebar-more-actions"');
 	assert.ok(hostIndex > -1 && toggleIndex > -1 && groupIndex > -1, "缺少宿主插件入口或折叠开关");
 	assert.ok(hostIndex < toggleIndex, "宿主插件入口应排在「更多」开关之前");

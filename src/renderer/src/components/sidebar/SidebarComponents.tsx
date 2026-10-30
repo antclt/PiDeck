@@ -426,13 +426,7 @@ export function SessionManagerModal(props: {
 																	{t("sessionManager.restore")}
 																</Button>
 																{canDeleteManagerArchivedRow(row) && (
-																	<Button
-																		variant="ghost"
-																		size="sm"
-																		className="h-auto gap-1 rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
-																		onClick={() => setPendingDeleteArchived([row])}
-																		title={t("common.delete")}
-																	>
+																	<Button variant="ghost" size="sm" className="h-auto gap-1 rounded-xs px-2 text-caption text-text-tertiary transition-colors duration-fast hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]" onClick={() => setPendingDeleteArchived([row])} title={t("common.delete")}>
 																		<Trash2 size={12} aria-hidden="true" />
 																		{t("common.delete")}
 																	</Button>

@@ -52,7 +52,10 @@ for (const theme of ["dark", "light"] as const) {
 			await expect(window.locator(".settings-modal")).toBeVisible();
 			const dialogSmoothing = await window.locator(".settings-modal").evaluate((element) => getComputedStyle(element).webkitFontSmoothing);
 			expect(dialogSmoothing).toBe(EXPECTED);
-			const tabSmoothing = await window.locator(".settings-modal [role='tab']").first().evaluate((element) => getComputedStyle(element).webkitFontSmoothing);
+			const tabSmoothing = await window
+				.locator(".settings-modal [role='tab']")
+				.first()
+				.evaluate((element) => getComputedStyle(element).webkitFontSmoothing);
 			expect(tabSmoothing).toBe(EXPECTED);
 		});
 	});
