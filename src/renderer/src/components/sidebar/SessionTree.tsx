@@ -18,19 +18,16 @@ import { AcpBackendMark, SessionBackendMark, SessionChannelMark, SessionSourceBa
 import { SessionActivityIndicator } from "../session/SessionActivityIndicator";
 import { SessionHoverCard } from "./SessionHoverCard";
 import { TitleScrollText } from "./TitleScrollText";
+import { SESSION_ROW_CLASS, SESSION_ROW_SELECTED_CLASS, ROW_MORE_ACTIONS_CLASS, ROW_CONTAINER_CLASS } from "./sidebarRowStyles";
 import { resolveBoundSession } from "./activitySessionsModel";
 import { cn } from "../../lib/utils";
 import { SESSION_TAB_DRAG_MIME } from "../../utils/sessionSplitEdge";
 import { useSessionActivityAt } from "../../hooks/sidebar/useSessionActivityClock";
 
-/** 与 ProjectTree.treeRowClass 同尺寸同圆角：分层后 utility 生效，必须「新学旧」对齐项目行，
- * 不能再用 min-h-11/rounded-xl（会明显高于/圆于项目行）。 */
-const sessionRowClass =
-	"group/resource conversation agent-row relative flex min-h-8 w-full items-center gap-1.5 rounded-lg border border-transparent px-2 py-0 text-left text-body text-foreground shadow-none transition-[background-color,border-color,box-shadow] duration-base hover:border-border-subtle hover:bg-bg-hover hover:text-foreground focus-visible:bg-bg-hover focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset";
+/** 行样式基座收敛到 sidebarRowStyles（Wave 3）：本地别名保持引用面不变。 */
+const sessionRowClass = SESSION_ROW_CLASS;
 
-/** 叶子选中态：灰底、无描边。比 hover（bg-hover，侧栏上 Δ6）再用 active 面深一档
- * （Δ12，≈ ZCode 选中墨量，见 docs/zcode-design-analysis.md）：选中感靠小步长，不靠深底。 */
-const selectedRowClass = "active bg-bg-active text-foreground";
+const selectedRowClass = SESSION_ROW_SELECTED_CLASS;
 
 /** 行右侧「更多操作（三个点）」按钮：absolute 浮层，不参与布局（不挤压标题文字），
  * 默认隐藏（pointer-events 一并关闭防误触），行 hover / 行内聚焦时显现——
@@ -38,7 +35,7 @@ const selectedRowClass = "active bg-bg-active text-foreground";
  * 按钮浮层会盖住标题：conversation-body 上 group-hover/row:pr-7 在 hover 时压出
  * 28px 留白（一个按钮宽），标题截断让位但保持可见——所有宽度统一让位
  * （淡出到透明会让标题不可读，须点击激活才能看到，已弃用）。 */
-const rowMoreActionsClass = "row-more-actions pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100";
+const rowMoreActionsClass = ROW_MORE_ACTIONS_CLASS;
 
 // 操作按钮是 absolute 浮层，出现时所有宽度的标题都必须让出一个按钮位，
 // 不能只依赖窄侧栏断点，否则中等宽度下 DSH 等尾部标记仍会被按钮覆盖。
@@ -52,7 +49,7 @@ function rowMoreMenuActiveClass(menuOpen: boolean) {
 /** 会话/Agent 行容器：内容行占满 + 三个点按钮浮层（button 不能嵌 button，
  * 且浮层不占位——窄侧栏时标题文字不会被按钮挤窄）。
  * mt-0.5：行间距 2px，参考 dsh-web 会话列表的紧凑行距。 */
-const rowContainerClass = "group/row relative mt-0.5 flex min-h-8 items-center";
+const rowContainerClass = ROW_CONTAINER_CLASS;
 
 function matchesSearch(value: string, search: string) {
 	return !search || value.toLowerCase().includes(search.toLowerCase());

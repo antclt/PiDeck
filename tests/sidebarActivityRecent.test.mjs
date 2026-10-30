@@ -234,10 +234,24 @@ describe("growRecentVisible（加载更多）", () => {
 });
 
 describe("最近会话区渲染契约", () => {
-	test("行样式与 SessionTree 会话行逐字一致（同段列表不能有两种行皮）", () => {
-		assert.equal(extractStringConst(recentSessionsSection, "recentRowClass"), extractStringConst(sessionTree, "sessionRowClass"), "RecentSessionsSection.recentRowClass 必须与 SessionTree.sessionRowClass 逐字一致");
-		assert.equal(extractStringConst(recentSessionsSection, "selectedRowClass"), extractStringConst(sessionTree, "selectedRowClass"), "选中底必须与 SessionTree.selectedRowClass 逐字一致");
-		assert.equal(extractStringConst(recentSessionsSection, "rowMoreActionsClass"), extractStringConst(sessionTree, "rowMoreActionsClass"), "行尾「⋯」浮层必须与 SessionTree.rowMoreActionsClass 逐字一致");
+	test("行样式与 SessionTree 会话行同源（Wave 3 起共享 sidebarRowStyles 单源，同段列表不能有两种行皮）", () => {
+		// 三处行皮已收敛到 sidebar/sidebarRowStyles.ts 常量：本地 const 只是指向共享基座的别名，
+		// 断言三者都引用共享常量（引用面不变，class 字符串单源）。
+		for (const [source, name] of [
+			[recentSessionsSection, "recentRowClass"],
+			[sessionTree, "sessionRowClass"],
+			[activeSessionsTree, "activeRowClass"],
+			[recentSessionsSection, "selectedRowClass"],
+			[sessionTree, "selectedRowClass"],
+			[recentSessionsSection, "rowMoreActionsClass"],
+			[sessionTree, "rowMoreActionsClass"],
+		]) {
+			const decl = `const ${name} =`;
+			const start = source.indexOf(decl);
+			assert.notEqual(start, -1, `${name} must exist`);
+			const line = source.slice(start, source.indexOf('\\n', start));
+			assert.match(line, /sidebarRowStyles|SESSION_ROW|ROW_MORE_ACTIONS/, `${name} 必须从共享基座 sidebarRowStyles 引入（发现: ${line.trim()}）`);
+		}
 	});
 
 	test("最近会话行沿用历史会话行标识（history-session-row / session-row）", () => {
