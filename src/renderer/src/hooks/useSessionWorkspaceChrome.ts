@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAtomValue, useSetAtom, useStore } from "jotai";
 import { currentSessionIdAtom, projectInventoryByIdAtom, sessionRecordByIdAtomFamily, sessionRecordsAtom, sessionTabIdsAtom } from "../atoms";
-import { cycleSessionTab, openPermanentSessionTab, openPreviewSessionTab, reorderSessionTabs, togglePinSessionTab, type SessionTabOpenMode } from "../utils/sessionTabs";
-import { buildSessionTabBarEntries, flattenSessionTabBarEntries, GROUP_COLOR_VALUES } from "../utils/sessionTabGroups";
+import { cycleSessionTab, openPermanentSessionTab, openPreviewSessionTab, togglePinSessionTab, type SessionTabOpenMode } from "../utils/sessionTabs";
+import { buildSessionTabBarEntries, flattenSessionTabBarEntries, reorderSessionTabsByDisplayOrder, GROUP_COLOR_VALUES } from "../utils/sessionTabGroups";
 import { buildSplitLayoutFromDrop, edgeToOrientation, insertRootPaneFromDrop, nestSplitPaneFromDrop, replaceSplitPaneFromDrop, resolveSplitAfterClose, resolveSplitHostSessionId, splitLayoutSessionIds, type SessionSplitDropTarget, type SessionSplitLayout } from "../utils/sessionSplitEdge";
 import { desktopApi } from "../desktopApi";
 import { buildSessionIdAliasMap, remapSessionIds } from "../../../shared/sessionIdAliases";
@@ -322,14 +322,33 @@ export function useSessionWorkspaceChrome(options: { currentSessionId: string | 
 		[setSessionTabIds],
 	);
 
+	// 拖拽排序：落点来自「屏幕上看到的顺序」，写回时也必须按显示顺序换算 ——
+	// 底层 tabs 是打开顺序，分组函数会把同项目的会话聚拢，直接改 tabs 会出现
+	// 「内部数组变了、画面没动」（issue #453 根因二）。无法表达（跨项目插队）时返回 null，
+	// 不写任何状态，避免静默改坏内部顺序。
 	const reorderTab = useCallback(
 		(sourceId: string, targetId: string, position: "before" | "after") => {
-			const { tabs, pinned } = tabsSnapshotRef.current;
-			const next = reorderSessionTabs(tabs, pinned, sourceId, targetId, position);
+			const { tabs, pinned, split } = tabsSnapshotRef.current;
+			const records = store.get(sessionRecordsAtom);
+			const projects = store.get(projectInventoryByIdAtom);
+			const next = reorderSessionTabsByDisplayOrder(
+				tabs,
+				pinned,
+				split ? splitLayoutSessionIds(split) : [],
+				(sessionId) => {
+					const projectId = records[sessionId]?.projectId;
+					if (!projectId) return undefined;
+					return { projectId, name: projects[projectId]?.name };
+				},
+				sourceId,
+				targetId,
+				position,
+			);
+			if (!next) return;
 			setSessionTabIds(next.tabs);
 			setPinnedSessionTabIds(next.pinned);
 		},
-		[setSessionTabIds],
+		[setSessionTabIds, store],
 	);
 
 	useEffect(() => {

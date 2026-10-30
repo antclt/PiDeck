@@ -17,6 +17,8 @@
  * 直接拿 tabs 算循环目标会跳到屏幕上不相邻的 Tab。
  */
 
+import { moveKeyRelative, sameOrder } from "./listReorder";
+
 /** 分组色板（浏览器标签组风格 8 色；分屏组与项目分组共用，保证视觉一致）。 */
 export const GROUP_COLOR_VALUES = [
 	"#0091ff", // blue（默认色，与 SPLIT_GROUP_DEFAULT_COLOR 一致）
@@ -152,4 +154,79 @@ export function flattenSessionTabBarEntries(entries: readonly SessionTabBarEntry
 		else order.push(...entry.sessionIds);
 	}
 	return order;
+}
+
+/**
+ * 拖拽排序（显示顺序口径）：把 sourceId 挪到 targetId 的前/后。
+ *
+ * 为什么不能直接改底层 `tabs`：画面顺序由 buildSessionTabBarEntries 按「项目分组 +
+ * 分屏折叠」重排，写 `tabs` 的顺序和屏幕顺序不是一回事 —— 单项目里拖到末尾、跨项目
+ * 插队都可能「内部数组变了、画面没动」，甚至内部顺序被静默改坏（issue #453 根因二）。
+ * 这里反过来做：先在**显示顺序**上完成移动，再把结果写回一个「分组后仍等于该顺序」的
+ * tabs 数组，最后用同一套分组函数复算校验。
+ *
+ * 移动语义（与渲染层的落点几何 sessionTabDrag 对齐）：
+ * - 组内移动：锚点是组内某个 Tab，插到它前/后；
+ * - 跨组移动：分组要求同项目会话相邻，**整块**挪到目标块的对应外缘 —— 单个 Tab
+ *   插进别的项目分组中间在分组规则下无法显示，硬写就会「画面不动」（#453 的偏移/静默失效）；
+ * - 分屏组：组内顺序由分屏布局决定，组员拖动不改写（返回 null），作为落点时吸附到整组外缘；
+ * - 固定区沿用 reorderSessionTabs 的语义：拖进固定区即固定、拖出即取消固定（此时按单 Tab 移动）；
+ * - 聚拢后显示顺序若与当前完全相同，返回 null —— 调用方什么都不写，而不是
+ *   「内部顺序被改坏、画面却没动」。
+ *
+ * 返回 null 表示「显示顺序没有任何变化」，调用方应跳过 setState / 持久化。
+ */
+export function reorderSessionTabsByDisplayOrder(tabs: readonly string[], pinned: readonly string[], splitGroupIds: readonly string[], projectOf: (sessionId: string) => SessionProjectRef | undefined, sourceId: string, targetId: string, position: "before" | "after"): { tabs: string[]; pinned: string[] } | null {
+	if (sourceId === targetId) return null;
+	const display = flattenSessionTabBarEntries(buildSessionTabBarEntries(tabs, pinned, splitGroupIds, projectOf));
+	if (!display.includes(sourceId) || !display.includes(targetId)) return null;
+	const splitMembers = new Set(splitGroupIds.filter((id) => tabs.includes(id)));
+	// 分屏组员：组内顺序由分屏布局给出，拖拽改不动它（拖出分屏要先去分屏，不在本入口）。
+	if (splitMembers.has(sourceId)) return null;
+
+	// 某个 Tab 所属的「项目分组块」（固定 Tab / 分屏成员 / 无项目归属都不成块）。
+	const blockOf = (sessionId: string): string[] | null => {
+		if (pinned.includes(sessionId) || splitMembers.has(sessionId)) return null;
+		const projectId = projectOf(sessionId)?.projectId;
+		if (!projectId) return null;
+		const members = display.filter((id) => !pinned.includes(id) && !splitMembers.has(id) && projectOf(id)?.projectId === projectId);
+		return members.length > 1 ? members : null;
+	};
+
+	// 目标落在分屏组内 → 吸附到整组外缘（组内没有可插入的槽位）。
+	let anchorId = targetId;
+	if (splitMembers.has(targetId)) {
+		const members = display.filter((id) => splitMembers.has(id));
+		if (members.length === 0) return null;
+		anchorId = position === "before" ? members[0] : members[members.length - 1];
+	}
+
+	// 目标落在别的项目分组内 → 吸附到该组外缘（落点几何画线也在同一位置）。
+	const targetBlock = blockOf(anchorId);
+	if (targetBlock && !targetBlock.includes(sourceId)) {
+		anchorId = position === "before" ? targetBlock[0] : targetBlock[targetBlock.length - 1];
+	}
+
+	const sourcePinned = pinned.includes(sourceId);
+	const targetPinned = pinned.includes(anchorId);
+	const pinnedCrossing = sourcePinned !== targetPinned;
+	const nextPinned = pinnedCrossing ? (sourcePinned ? pinned.filter((id) => id !== sourceId) : [...pinned, sourceId]) : [...pinned];
+
+	// 跨块：整块移动（整组挪到锚点前/后）；其余情况单 Tab 移动。
+	const sourceBlock = pinnedCrossing ? null : blockOf(sourceId);
+	let desired: string[];
+	if (sourceBlock && !sourceBlock.includes(anchorId)) {
+		const rest = display.filter((id) => !sourceBlock.includes(id));
+		const index = rest.indexOf(anchorId);
+		const at = index === -1 ? rest.length : index + (position === "after" ? 1 : 0);
+		desired = [...rest.slice(0, at), ...sourceBlock, ...rest.slice(at)];
+	} else {
+		desired = moveKeyRelative(display, sourceId, anchorId, position);
+	}
+
+	// 写回底层顺序：固定区在前（不变量），其余按落点顺序。desired 内部相对顺序保持不变。
+	const nextTabs = [...desired.filter((id) => nextPinned.includes(id)), ...desired.filter((id) => !nextPinned.includes(id))];
+	const nextDisplay = flattenSessionTabBarEntries(buildSessionTabBarEntries(nextTabs, nextPinned, splitGroupIds, projectOf));
+	if (sameOrder(nextDisplay, display) && sameOrder(nextPinned, pinned)) return null;
+	return { tabs: nextTabs, pinned: nextPinned };
 }
