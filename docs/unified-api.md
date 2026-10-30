@@ -11,16 +11,18 @@ PiDeck 桌面能力面统一门面 `piDeckApi` 的契约文档。三层结构：
 - 2026-10-17 快照刷新：files:search-content（工作区文件内容检索，file-index sidecar）入场，通道 677→678；2026-10-18 再刷新：sessions:search-in-session（会话内查找）入场，通道 678→679，sessions 111→112；preload 方法清单摘要同步重算（命名空间/方法数锚点不变）。
 - 2026-10-18 远端合并刷新：远端开发面入场（SSH 主机/项目/文件/会话/信任/模型探测、远端 Git 读写、远端终端 ACK），通道 679→743、前缀 84→85、命名空间 70→74、sessions 112→115；目录补 `remote` 域行，现为 62 域 + 11 导入器。
 - 2026-10-16 合并刷新：随 dev 演进（ACP 全渠道、微信渠道、宿主插件、pideck-mcp、生视频、公告历史等）补 6 域行，目录现为 61 域 + 11 导入器。
-- 2026-10-24 第四轮追赶 origin/dev（274 提交）：并入上游域行与新方法，通道 768→777、前缀 88→90、命名空间 77→78、sessions 118→116（下线 readOutlineTitle / readDshSystemPrompt）、config 48→50（外部 Agent 供应商导入），目录现为 66 域 + 11 导入器。
+- 2026-10-24 第四轮追赶 origin/dev（274 提交）：并入上游域行与新方法，通道 768→777、前缀 88→90、命名空间 77→78、sessions 118→116（下线 readOutlineTitle / readDshSystemPrompt）、config 48→50（外部 Agent 供应商导入），目录现为 67 域 + 11 导入器。
+- 2026-10-30 合并 origin/dev：并入 session-groups 域（侧栏分组树；宿主插件按 sessionGroups.manage 写入），通道 795 / 前缀 91 / 命名空间 79。
 
 ## 按域调用面
 
-域表（66 行，按 core / workspace / content / config / integration / shell 分组）：
+域表（67 行，按 core / workspace / content / config / integration / shell 分组）：
 
 | 域 | 分组 | 主进程归属 | IPC 注册文件 | preload 命名空间 | 通道前缀 | 聚合方式 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `pi` | core | AgentManager（pi RPC 运行时宿主；pi 安装/路径检查面注册在 systemIpc.ts） | systemIpc.ts | `pi` | `pi` | `redline`（红线：standby 池与模型快照端点宿主；只透传，禁止扩成通用桥） |
 | `sessions` | core | SessionCatalog + SessionScanner + SessionRuntimeCoordinator + SessionFileEditor/SessionHistoryReader/RewindCheckpointCoordinator | ipc/sessionIpc.ts, index.ts | `sessions` | `sessions`, `agents` | `consolidate` |
+| `session-groups` | core | SessionGroupStore（侧栏分组树只读；宿主插件按 sessionGroups.manage 写入） | ipc/sessionGroupsIpc.ts | `sessionGroups` | `session-groups` | `aggregate` |
 | `dsh` | core | DshHost + DshAgentManager + DshApiClient + DshPluginInstallService + DshRuntimeInstaller/DshRuntimeManager | ipc/sessionIpc.ts | `sessions` | `dsh`, `dsh-runtime` | `redline`（红线：DSH 是既有能力非 PiDeck 扩展点；门面不聚合、只透传） |
 | `security` | core | SecurityStore | ipc/securityIpc.ts | `security` | `security` | `aggregate` |
 | `system` | core | 系统信息与运行时检查（systemIpc 汇聚面） | ipc/systemIpc.ts | `system` | `system` | `aggregate` |
