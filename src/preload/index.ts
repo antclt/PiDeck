@@ -1302,7 +1302,7 @@ const api = {
 		toggleDevTools: () => ipcRenderer.invoke(ipcChannels.appToggleDevTools) as Promise<boolean>,
 	},
 	skills: {
-		list: () => ipcRenderer.invoke(ipcChannels.skillsList) as Promise<PiSkillListResult>,
+		list: (options?: import("../shared/piConfig").PiResourceOptions) => ipcRenderer.invoke(ipcChannels.skillsList, options) as Promise<PiSkillListResult>,
 		// 读技能 SKILL.md 正文（白名单校验在主进程完成），技能选择器详情/全文插入用。
 		readContent: (path: string) => ipcRenderer.invoke(ipcChannels.skillsReadContent, path) as Promise<SkillContentResult>,
 		create: (input: CreatePiSkillInput) => ipcRenderer.invoke(ipcChannels.skillsCreate, input) as Promise<PiSkillSummary>,
@@ -1316,11 +1316,11 @@ const api = {
 		apply: (input: ResourceImportApplyInput) => ipcRenderer.invoke(ipcChannels.resourceImportApply, input) as Promise<ResourceImportApplyResponse>,
 	},
 	prompts: {
-		list: () => ipcRenderer.invoke(ipcChannels.promptsList) as Promise<PiPromptTemplateListResult>,
+		list: (options?: import("../shared/piConfig").PiResourceOptions) => ipcRenderer.invoke(ipcChannels.promptsList, options) as Promise<PiPromptTemplateListResult>,
 		create: (input: CreatePiPromptTemplateInput) => ipcRenderer.invoke(ipcChannels.promptsCreate, input) as Promise<PiPromptTemplateSummary>,
 		delete: (filePath: string) => ipcRenderer.invoke(ipcChannels.promptsDelete, filePath) as Promise<void>,
 		openFolder: () => ipcRenderer.invoke(ipcChannels.promptsOpenFolder) as Promise<void>,
-		edit: (filePath: string, content?: string) => ipcRenderer.invoke(ipcChannels.promptsEdit, filePath, content) as Promise<string | void>,
+		edit: (filePath: string, content?: string, options?: import("../shared/piConfig").PiResourceOptions) => ipcRenderer.invoke(ipcChannels.promptsEdit, filePath, content, options) as Promise<string | void>,
 		listByProject: (projectId: string) => ipcRenderer.invoke(ipcChannels.promptsListByProject, projectId) as Promise<PiPromptTemplateListResult>,
 		createInProject: (projectId: string, input: CreatePiPromptTemplateInput) => ipcRenderer.invoke(ipcChannels.promptsCreateInProject, projectId, input) as Promise<PiPromptTemplateSummary>,
 		deleteFromProject: (projectId: string, name: string) => ipcRenderer.invoke(ipcChannels.promptsDeleteInProject, projectId, name) as Promise<void>,
@@ -1355,7 +1355,7 @@ const api = {
 		retryDb: () => ipcRenderer.invoke(ipcChannels.yaoPromptsDbRetry) as Promise<YaoPromptDbSnapshot>,
 	},
 	extensions: {
-		list: (forceRefresh?: boolean) => ipcRenderer.invoke(ipcChannels.extensionsList, forceRefresh) as Promise<PiExtensionListResult>,
+		list: (forceRefresh?: boolean, options?: import("../shared/piConfig").PiResourceOptions) => ipcRenderer.invoke(ipcChannels.extensionsList, forceRefresh, options) as Promise<PiExtensionListResult>,
 		uninstall: (source: string, scope?: "user" | "project" | "unknown", projectId?: string) => ipcRenderer.invoke(ipcChannels.extensionsUninstall, source, scope, projectId) as Promise<void>,
 		install: (source: string, projectId?: string) => ipcRenderer.invoke(ipcChannels.extensionsInstall, source, projectId) as Promise<string>,
 		toggle: (source: string, enabled: boolean, scope?: "user" | "project" | "unknown", path?: string, projectId?: string) => ipcRenderer.invoke(ipcChannels.extensionsToggle, source, enabled, scope, path, projectId) as Promise<void>,
