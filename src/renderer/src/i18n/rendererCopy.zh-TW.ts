@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: e82059f3d7d179c9feba4a2a33b487c9cbb72c3e89fe64c8b9cc5a1a0c576b67（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: c5fda77bb91f3085dfd6e58a4fbdf03d79380ae3fce6473c1b2c33d861791e28（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -6862,6 +6862,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"remoteGit.repoScope": "倉庫範圍",
 	"remoteGit.repoScopeRoot": "專案根",
 	"remoteGit.repoReposTruncated": "倉庫列表達到掃描上限，可能不完整；請縮小專案範圍或在終端確認。",
+	"remoteGit.repoScopeSingle": "遠端一次只讀一個倉庫：可切換倉庫檢視，不能並排顯示多個倉庫。",
 	"remoteGit.repoNotFound": "該路徑下沒有 Git 倉庫（巢狀倉庫列表可能已過期）。請重新整理後重新選擇。",
 	"remoteGit.back": "返回遠端變更列表",
 	"remoteGit.managedIndex": "支援單個普通文本檔案的暫存／取消暫存、提交已確認的暫存區、新建與切換分支、可恢復的丟棄／刪除（先備份到倉庫內的 refs/pideck/recovery/*）、只讀歷史與引用、兩樹對比，以及 fetch／push／pull。不自動暫存、不支援批次暫存、歷史改寫、amend 或 force。",
@@ -6899,7 +6900,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"remoteGit.compareBase": "基準引用",
 	"remoteGit.compareHead": "對比引用",
 	"remoteGit.compareRun": "對比",
-	"remoteGit.compareHint": "只讀：按兩次提交的樹比較兩個本地引用，不 fetch、不合並；點選檔案沿用兩版本差異檢視。",
+	"remoteGit.compareHint": "只讀：按兩次提交的樹比較兩個本地引用，不提供 merge-base 語義，也沒有 ahead／behind 計數；不 fetch、不合並，點選檔案沿用兩版本差異檢視。",
 	"remoteGit.compareSameRef": "請選擇兩個不同的本地引用。",
 	"remoteGit.compareEmpty": "兩個引用的內容一致。",
 	"remoteGit.refsAutoRefresh": "可見時每 15 秒自動重新整理引用，不拉取遠端。",
