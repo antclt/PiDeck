@@ -47,9 +47,16 @@ test("资源目标闭集：local 缺省，wsl 只认 hostId，ssh 明确拒绝�
 	assert.deepEqual(strip(target.readPiResourceTarget({ kind: "wsl", hostId: HOST })), { kind: "wsl", hostId: HOST });
 
 	// ssh 在配置域是合法目标，但资源域本轮不路由；必须是专属稳定码，不能 coerce 成 local。
-	assert.equal(codeOf(() => target.readPiResourceTarget({ kind: "ssh", hostId: HOST })), shared.PI_RESOURCE_CODES.sshUnsupported);
+	assert.equal(
+		codeOf(() => target.readPiResourceTarget({ kind: "ssh", hostId: HOST })),
+		shared.PI_RESOURCE_CODES.sshUnsupported,
+	);
 	for (const bad of [{ kind: "wsl" }, { kind: "wsl", hostId: "" }, { kind: "wsl", hostId: "not-a-host" }, { kind: "wsl", hostId: HOST, extra: 1 }, { kind: "wsl", hostId: 42 }, { kind: "bogus" }, { kind: "local", hostId: HOST }]) {
-		assert.equal(codeOf(() => target.readPiResourceTarget(bad)), shared.PI_RESOURCE_CODES.targetInvalid, JSON.stringify(bad));
+		assert.equal(
+			codeOf(() => target.readPiResourceTarget(bad)),
+			shared.PI_RESOURCE_CODES.targetInvalid,
+			JSON.stringify(bad),
+		);
 	}
 });
 
@@ -57,13 +64,19 @@ test("资源 options 只接受 target 键：未知字段被拒绝，不静默忽
 	const strip = (value) => JSON.parse(JSON.stringify(value));
 	assert.deepEqual(strip(target.readPiResourceOptions(undefined)), {});
 	assert.deepEqual(strip(target.readPiResourceOptions({ target: { kind: "local" } })), { target: { kind: "local" } });
-	assert.equal(codeOf(() => target.readPiResourceOptions({ target: { kind: "local" }, force: true })), shared.PI_RESOURCE_CODES.targetInvalid);
-	assert.equal(codeOf(() => target.readPiResourceOptions("local")), shared.PI_RESOURCE_CODES.targetInvalid);
+	assert.equal(
+		codeOf(() => target.readPiResourceOptions({ target: { kind: "local" }, force: true })),
+		shared.PI_RESOURCE_CODES.targetInvalid,
+	);
+	assert.equal(
+		codeOf(() => target.readPiResourceOptions("local")),
+		shared.PI_RESOURCE_CODES.targetInvalid,
+	);
 });
 
 test("local 目标解析本机 HOME，不读档案端口", async () => {
 	let profileReads = 0;
-	const resolver = createResolver({ listProfiles: async () => (profileReads += 1, [profile()]) });
+	const resolver = createResolver({ listProfiles: async () => ((profileReads += 1), [profile()]) });
 	const resolved = await resolver.resolve({ kind: "local" });
 	assert.equal(resolved.kind, "local");
 	assert.equal(resolved.home, "C:\\Users\\me");
@@ -103,7 +116,7 @@ test("解析失败只回稳定码：缺档案 / 发行版不可用 / 环境与�
 	await assert.rejects(storeBroken.resolve({ kind: "wsl", hostId: HOST }), { message: shared.PI_RESOURCE_CODES.unavailable });
 
 	let resolverCalls = 0;
-	const resolver = createResolver({ listProfiles: async () => (resolverCalls += 1, [profile()]) });
+	const resolver = createResolver({ listProfiles: async () => ((resolverCalls += 1), [profile()]) });
 	await assert.rejects(resolver.resolve({ kind: "ssh", hostId: HOST }), { message: shared.PI_RESOURCE_CODES.sshUnsupported });
 	assert.equal(resolverCalls, 0, "ssh target must be rejected before the host store is read");
 });
