@@ -12,6 +12,7 @@
 - 启动前还有一次性目录改名迁移（历史 `pi-desktop` → `PiDeck`，含 pi 会话 encoded 目录）；失败自动回退旧目录、下次重试。
 - 关键节点（窗口创建、load、preload、pi 启动）必须写 `appLogger`；冷启动有里程碑计时（`bootAnchorMs`），改动启动链后看日志对比回归。
 - 单实例用自研按版本互斥 `acquireVersionSingleInstance`（见 `instanceLockFile.ts`），**不用** `requestSingleInstanceLock`（原生锁会阻止不同版本并行）；第二实例 `app.exit(0)`。dev 与 stable 使用不同 AUMID，避免通知归属混淆。
+- **关掉单实例（多开）时锁仍存在**：它不再互斥，只当「深链激活的路由目标」——点系统通知/资源管理器右键是 Windows 按 `pideck://` 唤起**新进程**，若那次启动再开一扇窗就是「点一下通知多出一个 PiDeck」（2026-10 用户反馈）。规则：多开下普通启动照常开窗并把锁过户给自己（`rebindVersionLock`），深链激活先握手交给已运行实例、确认后自己退出；旧窗口按锁 pid 让位，持有者退出后剩下的窗口自动接回路由权（watcher 里 `claimVersionLock` 只回收可证死的锁）。
 - 窗口隐藏时先 `maximize()` 再加载，避免布局跳变；`zoomFactor` 在 `did-finish-load` 后应用。
 - quit 路径覆盖 pi 子进程、node-pty、watcher、锁文件；新增常驻资源必须同步登记 `QuitCleanupRegistry`（`registerQuitCleanup`）。
 - **Windows 没有 SIGTERM**：停 pi 先关 stdin 走 RPC 约定的有序退出（宽限 `WINDOWS_PI_GRACEFUL_EXIT_MS`，要短于删会话的 3s 等待），超时才 `taskkill /T /F`；启动后按当前 MCP/ACP 配置回收「父进程已消失」的孤儿 node/cmd（`src/main/process/orphanSweep.ts`，issue #450）。活的进程（父进程还在）一律不碰。

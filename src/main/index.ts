@@ -226,13 +226,21 @@ if (app.isPackaged) {
 // payload 携带次实例的 argv，可解析「点击系统通知」激活时携带的跳转目标。
 let focusExistingWindow: ((payload?: FocusPayload) => void) | null = null;
 const singleInstanceEnabled = bootPreferences.singleInstance;
-const versionSingleInstance = acquireVersionSingleInstance(singleInstanceEnabled, app.getVersion(), (payload) => {
-	focusExistingWindow?.(payload);
-});
+// 本次启动是否来自深链激活（点系统通知 / 资源管理器右键打开项目）。即使开了多开也要先交给
+// 已运行的同版本实例：通知点击的语义是「跳回那个会话」，不是「再开一个 PiDeck」（2026-10 用户反馈）。
+const launchIsActivation = extractFocusTargetFromArgv(process.argv) !== undefined;
+const versionSingleInstance = acquireVersionSingleInstance(
+	singleInstanceEnabled,
+	app.getVersion(),
+	(payload) => {
+		focusExistingWindow?.(payload);
+	},
+	{ routeActivation: launchIsActivation },
+);
 const gotSingleInstanceLock = versionSingleInstance.isPrimary;
-if (singleInstanceEnabled && !gotSingleInstanceLock) {
-	// 同版本已有实例：立即退出，由主实例 watch .focus 后唤起窗口。
-	// 用 exit(0) 而不是 quit()：第二进程尚未 ready，quit 更慢。
+if (!gotSingleInstanceLock) {
+	// 同版本已有实例（单实例模式），或深链请求已交给它处理（多开模式）：立即退出，
+	// 由主实例 watch .focus 后唤起窗口。用 exit(0) 而不是 quit()：第二进程尚未 ready，quit 更慢。
 	app.exit(0);
 }
 
@@ -5096,7 +5104,7 @@ app
 	.whenReady()
 	.then(async () => {
 		// 未拿到同版本主实例锁时不要继续初始化，避免第二进程短暂闪窗。
-		if (singleInstanceEnabled && !gotSingleInstanceLock) return;
+		if (!gotSingleInstanceLock) return;
 
 		// Windows 的进程环境块是启动快照：用户在 PiDeck 开着的时候装了 CLI（官网脚本只改注册表 PATH，
 		// 如 %USERPROFILE%\.qoder-cn\bin\qoderclicn），已运行的进程里 spawn 出去只会回

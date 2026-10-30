@@ -15,7 +15,7 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
  * 这里用真实临时目录 + /proc 夹具（JSON/stat 文本）验证判定规则，
  * 不依赖真实 /proc、不启动 Electron，也不依赖执行顺序。
  */
-const { assessLockOwner, claimVersionLock, collectStaleLockFiles, focusPathIn, inspectInstanceLocks, lockPathIn, locksDirIn, markLockReady, readLockPayload, sanitizeVersion } = loadTsCommonJs("src/main/instanceLockFile.ts");
+const { assessLockOwner, claimVersionLock, collectStaleLockFiles, focusPathIn, inspectInstanceLocks, lockPathIn, locksDirIn, markLockReady, readLockPayload, rebindVersionLock, sanitizeVersion } = loadTsCommonJs("src/main/instanceLockFile.ts");
 
 /** 夹具里的系统启动时刻（秒）；所有 payload.at 都以它为基准，避免依赖真实时钟。 */
 const BOOT_SECONDS = 1_700_000_000;
@@ -196,6 +196,32 @@ test("collectStaleLockFiles 只回收死锁与过期孤儿文件", (t) => {
 		.map((item) => item.stale);
 	assert.deepEqual(JSON.parse(JSON.stringify(corruptState)), [false]);
 	assert.equal(existsSync(liveLock), true);
+});
+
+// 2026-10 用户反馈「点系统通知又开了一个 PiDeck」：多开（singleInstance=false）时通知点击
+// 走 pideck:// 协议唤起新进程，若那次启动再开窗就多一个实例。修法是多开下仍维护锁——锁不再
+// 互斥，只做「深链交给哪个窗口」的路由目标，新窗口启动时无条件过户（rebindVersionLock）。
+test("rebindVersionLock 把锁从活着的持有者过户到本进程（多开路由目标）", (t) => {
+	const { locksDir } = makeFixture(t);
+	const version = "0.9.9-beta";
+	const lockPath = lockPathIn(locksDir, version);
+	writeLockFile(lockPath, { pid: 4321, version, at: BOOT_SECONDS * 1000 + 60_000, ready: true });
+
+	const claim = rebindVersionLock(lockPath, version);
+	assert.equal(claim.status, "acquired");
+
+	const payload = readLockPayload(lockPath);
+	assert.equal(payload.pid, process.pid);
+	// ready 由主实例装好 focus 监听后显式置位，过户本身不能冒充「已就绪」
+	assert.notEqual(payload.ready, true);
+});
+
+test("rebindVersionLock 在没有锁时也能直接拿到（冷启动路径不变）", (t) => {
+	const { locksDir } = makeFixture(t);
+	const version = "0.9.9-beta";
+	const claim = rebindVersionLock(lockPathIn(locksDir, version), version);
+	assert.equal(claim.status, "acquired");
+	assert.equal(readLockPayload(lockPathIn(locksDir, version)).pid, process.pid);
 });
 
 test("sanitizeVersion 不产生路径穿越字符", () => {

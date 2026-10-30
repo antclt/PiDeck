@@ -5022,7 +5022,7 @@ export const zhCN = {
 	"settings.startupWindow.fullscreen": "全屏",
 	"settings.startupWindowModeDesc": "下次启动时应用。默认最大化（与历史行为一致，不挡任务栏）。",
 	"settings.startupWindowMode": "启动窗口大小",
-	"settings.singleInstanceDesc": "开启后，同一版本再次打开会唤起已有窗口（含托盘隐藏）。不同版本（如 0.6.7 与 0.6.8）可同时运行。开发模式与正式版数据目录隔离。关闭后允许同版本多开。修改后需重启生效。",
+	"settings.singleInstanceDesc": "开启后，同一版本再次打开会唤起已有窗口（含托盘隐藏）。不同版本（如 0.6.7 与 0.6.8）可同时运行。开发模式与正式版数据目录隔离。关闭后允许同版本多开（点系统通知仍会回到已运行的窗口）。修改后需重启生效。",
 	"settings.singleInstance": "单实例运行（复用窗口）",
 	"settings.shellContextMenuSection": "文件资源管理器集成",
 	"settings.shellContextMenuSectionDesc": "在 Windows 文件夹右键菜单中提供「用 PiDeck 打开」入口，对本机当前用户生效（写入用户注册表，便携版同样可用）。",

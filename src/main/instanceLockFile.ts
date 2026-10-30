@@ -330,6 +330,27 @@ export function takeOverVersionLock(lockPath: string, version: string, reason: s
 }
 
 /**
+ * 多开模式专用：无条件把锁过户给本进程。
+ *
+ * 多开（`singleInstance: false`）不禁用锁，因为锁还承担第二个职责——
+ * **深链激活的路由目标**：点系统通知时 Windows 按 `pideck://` 协议唤起一个新进程，
+ * 它必须先知道该把跳转交给哪个已运行的窗口。过户给最新启动的窗口，
+ * 保证路由目标不会停在一个已经退出的进程上；旧窗口的 watcher 按 pid 判定自行让位
+ * （见 singleInstance.ts 的 handleFocusSignal）。
+ *
+ * 与 takeOverVersionLock 的区别：这里**不判断**旧主人死活——多开本来就不互斥，
+ * 旧窗口还活着也照常过户。
+ */
+export function rebindVersionLock(lockPath: string, version: string, options?: LockProbeOptions): ClaimOutcome {
+	try {
+		unlinkSync(lockPath);
+	} catch {
+		// 文件不存在/删不掉（如路径是目录）都交给下面的独占创建给出结论
+	}
+	return claimVersionLock(lockPath, version, options);
+}
+
+/**
  * 主实例装好 focus 监听后把自己的锁标记为 ready（原子替换）。
  * 返回 false 表示锁已被别人接管（本进程沦为重复实例），调用方只需记日志。
  */

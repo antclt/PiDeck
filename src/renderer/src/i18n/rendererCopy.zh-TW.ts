@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: b7461ac6aaf3787396a46aae284bb5af090a2c8fce10b64f1061e2c90f4e9625（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 7851d1cd123483108f23378df0dd919f7ca77618c4b4532ce9208d891eb73184（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5029,7 +5029,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.startupWindow.fullscreen": "全屏",
 	"settings.startupWindowModeDesc": "下次啟動時應用。預設最大化（與歷史行為一致，不擋工作列）。",
 	"settings.startupWindowMode": "啟動視窗大小",
-	"settings.singleInstanceDesc": "開啟後，同一版本再次開啟會喚起已有視窗（含托盤隱藏）。不同版本（如 0.6.7 與 0.6.8）可同時執行。開發模式與正式版資料目錄隔離。關閉後允許同版本多開。修改後需重啟生效。",
+	"settings.singleInstanceDesc": "開啟後，同一版本再次開啟會喚起已有視窗（含托盤隱藏）。不同版本（如 0.6.7 與 0.6.8）可同時執行。開發模式與正式版資料目錄隔離。關閉後允許同版本多開（點系統通知仍會回到已執行的視窗）。修改後需重啟生效。",
 	"settings.singleInstance": "單例項執行（複用視窗）",
 	"settings.shellContextMenuSection": "檔案資源管理器整合",
 	"settings.shellContextMenuSectionDesc": "在 Windows 資料夾右鍵選單中提供「用 PiDeck 開啟」入口，對本機當前使用者生效（寫入使用者登錄檔，便攜版同樣可用）。",

@@ -5044,7 +5044,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.startupWindowModeDesc": "Applied on next launch. Default is maximized (historical behavior; keeps the taskbar visible).",
 	"settings.startupWindowMode": "Startup window size",
 	"settings.singleInstanceDesc":
-		"When enabled, reopening the same version focuses the existing window (including tray-hidden). Different versions (e.g. 0.6.7 and 0.6.8) can run side by side. Dev mode uses a separate data directory from the packaged app. Disable to allow multiple instances of the same version. Restart required.",
+		"When enabled, reopening the same version focuses the existing window (including tray-hidden). Different versions (e.g. 0.6.7 and 0.6.8) can run side by side. Dev mode uses a separate data directory from the packaged app. Disable to allow multiple instances of the same version (notification clicks still return to a running window). Restart required.",
 	"settings.singleInstance": "Single instance (reuse window)",
 	"settings.shellContextMenuSection": "File Explorer integration",
 	"settings.shellContextMenuSectionDesc": 'Adds an "Open with PiDeck" entry to the Windows folder context menu for the current user (writes to the user registry; works with the portable build too).',
