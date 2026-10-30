@@ -39,7 +39,8 @@ import type { ConfigManager } from "../config/ConfigManager";
 import type { RemotePiConfigBackend } from "../config/RemotePiConfigBackend";
 import { createPiConfigRouter, rejectRemotePiConfigTarget, type PiConfigReadRoute, type PiConfigWriteRoute } from "../config/PiConfigRouter";
 import type { PiResourceManagerPool } from "../config/PiResourceManagerPool";
-import { readPiResourceOptions, requireLocalPiResourceTarget } from "../config/piResourceTarget";
+import { readPiResourceOptions } from "../config/piResourceTarget";
+import { resolvePiResourceWriteManager } from "../config/piResourceWriteRouting";
 import { createWslPiConfigStoreFor } from "../config/WslPiConfigStore";
 import type { AgentManager } from "../pi/AgentManager";
 import type { AppLogger } from "../logging/AppLogger";
@@ -1953,27 +1954,28 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		// 渲染层传入的路径不可信：白名单校验（全局/项目技能位置）在 readSkillContent 内完成。
 		return readSkillContent(skillPath);
 	});
-	// 未路由的资源写通道（task-14）：非本机 target 一律在触碰本机 manager 前失败，绝不写 Windows HOME。
+	// 资源写通道（task-16）：local/缺省 → 原单例；wsl → 池中该档案管理器（写入其发行版 HOME）；池缺失 fail closed。
 	ipcMain.handle(ipcChannels.skillsCreate, async (_event, input: CreatePiSkillInput, options?: unknown) => {
-		requireLocalPiResourceTarget(options);
-		const result = await skillManager.create(input);
+		const manager = await resolvePiResourceWriteManager({ options, pool: piResourcePool, local: () => skillManager, pick: async (pool, parsed) => await pool.skills(parsed) });
+		const result = await manager.create(input);
 		void appLogger.info("skill", "Skill created", { name: input.name, locationId: input.locationId });
 		return result;
 	});
 	ipcMain.handle(ipcChannels.skillsToggle, async (_event, path: string, enabled: boolean, options?: unknown) => {
-		requireLocalPiResourceTarget(options);
-		const result = await skillManager.toggle(path, enabled);
+		const manager = await resolvePiResourceWriteManager({ options, pool: piResourcePool, local: () => skillManager, pick: async (pool, parsed) => await pool.skills(parsed) });
+		const result = await manager.toggle(path, enabled);
 		void appLogger.info("skill", "Skill toggled", { path, enabled });
 		return result;
 	});
 	ipcMain.handle(ipcChannels.skillsDelete, async (_event, path: string, options?: unknown) => {
-		requireLocalPiResourceTarget(options);
-		const result = await skillManager.delete(path);
+		const manager = await resolvePiResourceWriteManager({ options, pool: piResourcePool, local: () => skillManager, pick: async (pool, parsed) => await pool.skills(parsed) });
+		// WSL 目标：shell.trashItem 对 UNC 路径可能不支持 → 报错而不是硬删（风险已登记）。
+		const result = await manager.delete(path);
 		void appLogger.info("skill", "Skill deleted", { path });
 		return result;
 	});
 	ipcMain.handle(ipcChannels.skillsRename, async (_event, skillPath: unknown, newName: unknown, options?: unknown) => {
-		requireLocalPiResourceTarget(options);
+		const manager = await resolvePiResourceWriteManager({ options, pool: piResourcePool, local: () => skillManager, pick: async (pool, parsed) => await pool.skills(parsed) });
 		// 渲染层入参不可信：先校验再进 SkillManager（与 projectResourceIpc 的边界校验同一纪律）。
 		if (typeof skillPath !== "string" || skillPath.trim().length === 0 || skillPath.length > 4096) {
 			throw new Error("Invalid skill path for rename.");
@@ -1981,13 +1983,14 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		if (typeof newName !== "string" || newName.trim().length === 0 || newName.length > 256) {
 			throw new Error("Invalid skill name for rename.");
 		}
-		const result = await skillManager.rename(skillPath, newName);
+		const result = await manager.rename(skillPath, newName);
 		void appLogger.info("skill", "Skill renamed", { skillPath, newName });
 		return result;
 	});
 	ipcMain.handle(ipcChannels.skillsOpenFolder, async (_event, path?: string, options?: unknown) => {
-		requireLocalPiResourceTarget(options);
-		return await skillManager.openFolder(path);
+		const manager = await resolvePiResourceWriteManager({ options, pool: piResourcePool, local: () => skillManager, pick: async (pool, parsed) => await pool.skills(parsed) });
+		// WSL 目标：openSystemPath 对 UNC 路径若不被支持会抛错（不静默），错误经 IPC 上抛。
+		return await manager.openFolder(path);
 	});
 
 	// ── 配置管理 ─────────────────────────────────────────────────────
