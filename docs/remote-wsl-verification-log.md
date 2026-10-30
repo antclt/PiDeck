@@ -581,8 +581,14 @@
 
 > 备注：本轮 `npm test` 总时长 1127.7s，明显长于此前 400-500s，主因是交叉安装（`packDshRuntimeCross` 的 npm install）在这段时间特别慢，属环境波动，非产品问题。
 
-### 14.2 修复合入后的最终 HEAD（待补）
+### 14.2 两条契约跟随后：最终 HEAD `1bc790122` ← dev `a1527a37c`
 
-- 待两条契约跟随合入 dev 后：`git merge dev` → 复跑这两个文件 → **再跑一次全量**（最终 HEAD 必须 0 fail）→ 数字补进本节。
+| 项 | 命令 | 退出码 | 结果 |
+|----|------|--------|------|
+| 合并 | `git merge dev`（`fc321865b` toggleFromUi 字面量 + `a1527a37c` skillsRename 切块） | 0 | `1bc790122`（**仅两个测试文件改动**，产品代码与 `out/` 未变） |
+| 契约 1 | `node --test tests/extensionUserPluginClassification.test.mjs tests/skillsRenameIpc.test.mjs` | **0** | **5 passed / 0 failed** |
+| 全量单测 | `npm test`（`node --test --test-concurrency=4`） | **1** | **tests 15117 / pass 14831 / fail 1 / skipped 285 / 1267.8s**；唯一失败＝`tests/packDshRuntimeCross.test.mjs:56`「交叉模式：临时 package.json 把平台门控包写进 optionalDependencies」→ **`spawnSync … ETIMEDOUT`**（该测试自身 10 分钟预算用尽，`pack-dsh-runtime --dry-run` 的交叉 `npm install` 没跑完）。**环境侧**：今晚交叉安装极慢（缓存已 665MB 且仍在增长；此前多轮全量 400–500s 就跑完、该文件也通过过），非产品回归、与本轮改动无关；单跑该文件复核时超过单次执行预算被中断（已清理我自己的残留进程，未触碰主工作树那条）。**最终全量以 Lead 在主工作树（dev `a1527a37c`）的取证为准** |
+
+> 说明：`tests/skillsRenameIpc.test.mjs` 的 block 边界改为「下一个 handler 起点」，`rename` 断言改为 `/\.rename\(skillPath, newName\)/`（不绑变量名），三条语义断言强度不变；`extensionUserPluginClassification` 的 toggleFromUi 断言改为 `/\.toggleFromUi\(/`。
 
 
