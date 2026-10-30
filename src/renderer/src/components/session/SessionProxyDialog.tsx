@@ -22,7 +22,7 @@ import { useAtomValue, useSetAtom, useStore } from "jotai";
 import { sessionRecordByIdAtomFamily, upsertSessionAtom } from "../../atoms";
 import { sessionRuntimeBySessionIdAtomFamily } from "../../atoms/session-selectors";
 import { Button } from "../ui-shadcn/button";
-import { Dialog, DialogContent } from "../ui-shadcn/dialog";
+import { Dialog, DialogContent, DialogTitle } from "../ui-shadcn/dialog";
 import { desktopApi } from "../../desktopApi";
 import { t } from "../../i18n";
 import { showNotice } from "../../utils/notice";
@@ -123,7 +123,9 @@ export function SessionProxyDialog(props: { sessionId: string; onClose: () => vo
 			<DialogContent showCloseButton={false} className="flex max-h-[min(560px,calc(100vh-48px))] w-[min(420px,calc(100vw-48px))] flex-col gap-0 p-0">
 				{/* 头部 */}
 				<div className="flex flex-col gap-1 border-b border-border/60 px-4 py-3">
-					<h2 className="text-control font-semibold text-foreground">{t("sessionProxy.title")}</h2>
+					<DialogTitle asChild>
+						<h2 className="text-control font-semibold text-foreground">{t("sessionProxy.title")}</h2>
+					</DialogTitle>
 					<p className="text-micro text-muted-foreground/80">{t("sessionProxy.manageHint")}</p>
 				</div>
 

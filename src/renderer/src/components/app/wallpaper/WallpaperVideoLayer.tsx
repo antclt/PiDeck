@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { toast } from "sonner";
+import { showNotice } from "../../../utils/notice";
 import { wallpaperEnginePreviewUrl, wallpaperEngineVideoUrl } from "../../../../../shared/wallpaperEngine";
 import type { AppSettings } from "../../../../../shared/types";
 import { isVideoWallpaperActive, shouldPlayVideoWallpaper, videoWallpaperRender } from "../../../hooks/appearance/videoWallpaper";
@@ -75,7 +75,7 @@ export function WallpaperVideoLayer({ settings }: { settings: Pick<AppSettings, 
 					disablePictureInPicture
 					onError={() => {
 						setFailedSrc(src);
-						toast.warning(t("settings.wallpaperEnginePlaybackFailed"));
+						showNotice(t("settings.wallpaperEnginePlaybackFailed"), undefined, "warning");
 					}}
 				/>
 			) : render === "preview" ? (

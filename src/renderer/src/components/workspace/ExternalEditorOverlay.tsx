@@ -106,8 +106,26 @@ export function ExternalEditorOverlay(props: ExternalEditorOverlayProps) {
 		const onMouseDown = (event: MouseEvent) => {
 			if (!overlayRef.current?.contains(event.target as Node)) props.onClose();
 		};
+		// menu 语义的方向键导航：ArrowUp/Down 逐项、Home/End 首尾、循环
 		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key === "Escape") props.onClose();
+			if (event.key === "Escape") {
+				props.onClose();
+				return;
+			}
+			if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Home" && event.key !== "End") return;
+			const root = overlayRef.current;
+			if (!root) return;
+			const items = Array.from(root.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])'));
+			if (items.length === 0) return;
+			event.preventDefault();
+			const active = document.activeElement;
+			const currentIndex = items.indexOf(active instanceof HTMLElement ? active : ({} as HTMLElement));
+			let nextIndex: number;
+			if (event.key === "Home") nextIndex = 0;
+			else if (event.key === "End") nextIndex = items.length - 1;
+			else if (event.key === "ArrowDown") nextIndex = currentIndex < 0 || currentIndex >= items.length - 1 ? 0 : currentIndex + 1;
+			else nextIndex = currentIndex <= 0 ? items.length - 1 : currentIndex - 1;
+			items[nextIndex]?.focus();
 		};
 		document.addEventListener("mousedown", onMouseDown);
 		window.addEventListener("keydown", onKeyDown);
@@ -116,6 +134,16 @@ export function ExternalEditorOverlay(props: ExternalEditorOverlayProps) {
 			window.removeEventListener("keydown", onKeyDown);
 		};
 	}, [props.onClose, props.open]);
+
+	// 打开时聚焦第一个可操作项：键盘用户（menuitem 触发键 Enter 后）能直接用方向键移动
+	useEffect(() => {
+		if (!props.open) return;
+		const raf = requestAnimationFrame(() => {
+			const first = overlayRef.current?.querySelector<HTMLElement>('[role="menuitem"]:not([disabled])');
+			first?.focus();
+		});
+		return () => cancelAnimationFrame(raf);
+	}, [props.open]);
 
 	useLayoutEffect(() => {
 		if (!props.open || !props.anchor) {

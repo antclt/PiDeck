@@ -94,6 +94,11 @@ export type FileTreeNode = {
 	 * 靠这个字段决定是否显示展开箭头；已加载则与 children.length 对齐。
 	 */
 	hasChildren?: boolean;
+	/**
+	 * 目录 listing 失败的可见错误（读取失败 ≠ 空目录）：有值时展开态显示错误行与重试入口，
+	 * 而不是静默表现为空目录。重新拉取成功后由 mergeFileTreeChildren 覆盖（新节点无此字段）。
+	 */
+	loadError?: string;
 	/** 文件元数据（文件树排序用；缺失时回退按名称）。目录 size 无意义恒为 0。 */
 	mtimeMs?: number;
 	ctimeMs?: number;

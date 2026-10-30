@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 61650904b46be040a3e219bf432724968dc557cd8f94909ade688a850830742d（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 0f6ba6411d9b758a26d0d23b0ef86ad5a292c7b3d7662ebfb153a01b46b6507b（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -359,6 +359,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"askPanel.running": "執行中",
 	"askPanel.runtimeTimeout": "問詢會話啟動超時，請重試",
 	"askPanel.close": "關閉並停止",
+	"askPanel.closeKeyboardHint": "關閉（鍵盤：Shift+Enter）",
 	"askPanel.minimize": "最小化",
 	"askPanel.contextTitle": "主會話上下文（只讀背景）：",
 	"askPanel.contextUser": "使用者",
@@ -724,6 +725,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"browser.back": "後退",
 	"browser.forward": "前進",
 	"browser.reload": "重新整理",
+	"browser.loadFailedTitle": "頁面載入失敗",
 	"browser.home": "主頁",
 	"browser.urlPlaceholder": "輸入網址或搜尋…",
 	"browser.fullscreen": "全屏",
@@ -1679,6 +1681,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"dshCommand.goal": "目標管理",
 	"dshCommand.subagent": "子代理管理",
 	"dshCommand.feedback": "反饋",
+	"dshTools.title": "Agent 工具",
 	"dshTools.goals": "目標",
 	"dshTools.subagents": "子代理",
 	"dshTools.goalPhase.active": "進行中",
@@ -2103,6 +2106,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.dsh.tab.auth": "認證",
 	"config.dsh.tab.settings": "設定",
 	"config.dsh.tab.raw": "原始檔",
+	"config.dsh.rawReadFailed": "讀取 {file} 失敗，可重試或先在磁碟中確認檔案狀態。",
+	"config.dsh.rawSaveFailed": "儲存 {file} 失敗：{error}",
 	"config.dsh.openDocument": "開啟配置檔案",
 	"config.dsh.appliesLive": "即時生效",
 	"config.dsh.appliesRestart": "重啟後生效",
@@ -2919,6 +2924,10 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.unsavedListIntro": "以下 {count} 項有未儲存的更改：",
 	"config.saveAndClose": "儲存並關閉",
 	"config.discardChanges": "放棄更改",
+	"config.rawSwitchTitle": "未儲存的原始檔",
+	"config.rawSwitchMessage": "當前原始檔有未儲存的修改，切換後將丟棄這些修改。確定繼續？",
+	"config.rawSwitchConfirm": "放棄並切換",
+	"config.rawSaveFailed": "原始檔儲存失敗",
 	"config.dirtyTooltip": "有未儲存的修改",
 	"config.modelsSavedRestartHint": "模型配置已儲存，請重啟啟用的 Agent 會話以應用新配置",
 	"config.modelsSaved": "模型配置已儲存",
@@ -6125,6 +6134,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"timeline.loadMoreFailed": "更早的歷史載入失敗",
 	"timeline.loadMoreFailedHint": "可能是會話檔案或 DSH host 暫時不可用；按鈕可再點重試。",
 	"drawer.lazyLoading": "載入中…",
+	"drawer.loadFailed": "目錄讀取失敗",
 	"diagnostic.errorTitle": "錯誤診斷",
 	"diagnostic.systemTitle": "系統狀態",
 	"diagnostic.failureToastTitle": "會話失敗",

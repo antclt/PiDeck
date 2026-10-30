@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 import { showNotice } from "@/utils/notice";
 import { Button } from "@/components/ui-shadcn/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui-shadcn/collapsible";
-import { Dialog, DialogContent } from "@/components/ui-shadcn/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui-shadcn/dialog";
 import { Input } from "@/components/ui-shadcn/input";
 import { Textarea } from "@/components/ui-shadcn/textarea";
 import { dshPluginAction, fetchDshGoal, fetchDshPlugins, fetchDshSkills, fetchDshSubagentHistory, fetchDshSubagents, installDshPlugin, type WebDshGoal, type WebDshPlugin, type WebDshSkill, type WebDshSubagent } from "./webApi";
@@ -27,6 +27,9 @@ export function WebDshToolsPanel(props: { sessionId: string; onClose: () => void
 	return (
 		<Dialog open onOpenChange={(next) => !next && props.onClose()}>
 			<DialogContent showCloseButton className="sm:max-w-lg [&>*]:min-w-0">
+				<DialogHeader className="sr-only">
+					<DialogTitle>{t("dshTools.title")}</DialogTitle>
+				</DialogHeader>
 				{/* tab 条横向可滚：4 个 tab 在窄屏放不下会溢出裁切（最后一个 tab 被裁掉），滚动保完整。 */}
 				<div className="flex gap-1 overflow-x-auto border-b border-border-subtle pb-2">
 					<Button variant={tab === "goals" ? "secondary" : "ghost"} size="sm" className="shrink-0 gap-1.5" onClick={() => setTab("goals")}>
