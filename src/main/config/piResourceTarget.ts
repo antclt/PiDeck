@@ -43,6 +43,18 @@ export function readPiResourceOptions(value: unknown): PiResourceOptions {
 	return { target: readPiResourceTarget(value.target) };
 }
 
+/**
+ * Local-only resource write channels (skills/extensions mutations, prompt create/delete/rename/toggle).
+ *
+ * 本轮只把 list/read/save 做成按目标路由；这些写通道仍只属于本机单例。收到非本机 target 时必须在触碰
+ * 任何管理器之前回稳定码——静默落到本机 HOME 会把用户的 WSL 操作写成 Windows 内容（安全/一致性缺口）。
+ */
+export function requireLocalPiResourceTarget(options: unknown): void {
+	const parsed = readPiResourceOptions(options);
+	const target = parsed.target ?? { kind: "local" };
+	if (target.kind !== "local") throw stable(PI_RESOURCE_CODES.writeUnsupported);
+}
+
 /** Stable code of an error already carrying one of the closed-set codes (else undefined). */
 export function piResourceStableCodeOf(error: unknown): string | undefined {
 	const message = error instanceof Error ? error.message : "";

@@ -24,6 +24,7 @@ import { usePiConfigDir } from "./config/usePiConfigDir";
 import { usePiConfigTargetView } from "./config/usePiConfigTargetView";
 import { ResourceTargetBar } from "./config/ResourceTargetBar";
 import { useConfigTransfer } from "./config/useConfigTransfer";
+import { resourceTargetErrorMessage } from "./config/resourceTargetErrorCopy";
 import { useResourceTarget } from "./config/useResourceTarget";
 import type { PiConfigTarget } from "../../shared/piConfig";
 import { buildProviderOrderScope } from "./utils/providerOrder";
@@ -202,6 +203,8 @@ export type ConfigPaneHandle = {
 export type ConfigPaneState = {
 	saving: boolean;
 	hasDirty: boolean;
+	/** 非本机目标（WSL/ssh）禁用配置导出/导入：外壳按钮据此置灰（handler 侧同样拒绝）。 */
+	exportImportAllowed: boolean;
 	/** 未保存清单（tabKey/itemKey 为 i18n key，关闭确认整体展示）。 */
 	unsaved: { totalCount: number; items: ConfigUnsavedItem[] };
 };
@@ -1041,11 +1044,11 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		if (!open) return;
 		bumpResourceGeneration();
 		if (section === "skills") {
-			void refreshSkills();
+			void refreshSkills().catch((e) => setError(resourceTargetErrorMessage(e)));
 			return;
 		}
 		if (section === "prompts") {
-			void refreshPrompts();
+			void refreshPrompts().catch((e) => setError(resourceTargetErrorMessage(e)));
 			return;
 		}
 		if (section === "extensions") {
@@ -2251,7 +2254,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 			});
 			setExtensionsData({ ...globalResult, extensions: mergedExtensions });
 		} catch (e) {
-			setError(e instanceof Error ? e.message : String(e));
+			// 资源域失败给稳定码文案；其它异常保留原文。
+			setError(resourceTargetErrorMessage(e));
 		} finally {
 			if (generation === resourceGenerationRef.current) setExtensionsLoading(false);
 		}
@@ -2596,9 +2600,10 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		props.onPaneStateChange?.({
 			saving,
 			hasDirty: hasDirty || remoteConfigDirty,
+			exportImportAllowed: configTarget.kind === "local",
 			unsaved: configUnsavedSummary ? { totalCount: configUnsavedSummary.totalCount, items: configUnsavedSummary.items } : { totalCount: 0, items: [] },
 		});
-	}, [saving, hasDirty, configUnsavedSummary, props.onPaneStateChange]);
+	}, [saving, hasDirty, configUnsavedSummary, configTarget, props.onPaneStateChange]);
 
 	/**
 	 * 关闭确认框选择保存并关闭：汇总**全部**脏来源逐个保存（不是只存当前 tab），

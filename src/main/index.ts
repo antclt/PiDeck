@@ -3423,6 +3423,9 @@ function registerIpc() {
 			projectsFile: join(app.getPath("userData"), "projects.json"),
 			sessionCatalogFile: join(app.getPath("userData"), "session-catalog.json"),
 		}),
+		// 档案被改名/换 distro/移除后，资源池里对应实例必须失效；闭包在 registerIpc 执行时取值，
+		// 池在稍后构造（晚绑定），调用发生在用户操作档案时，因此一定能拿到实例。
+		onProfileChanged: (hostId) => piResourcePool?.invalidate(hostId),
 	});
 	/**
 	 * 目录事实层的失效入口（W3）：项目域注册时才创建，文本保存的注册在它之前，因此用晚绑定转发。

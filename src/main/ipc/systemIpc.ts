@@ -39,7 +39,7 @@ import type { ConfigManager } from "../config/ConfigManager";
 import type { RemotePiConfigBackend } from "../config/RemotePiConfigBackend";
 import { createPiConfigRouter, rejectRemotePiConfigTarget, type PiConfigReadRoute, type PiConfigWriteRoute } from "../config/PiConfigRouter";
 import type { PiResourceManagerPool } from "../config/PiResourceManagerPool";
-import { readPiResourceOptions } from "../config/piResourceTarget";
+import { readPiResourceOptions, requireLocalPiResourceTarget } from "../config/piResourceTarget";
 import { createWslPiConfigStoreFor } from "../config/WslPiConfigStore";
 import type { AgentManager } from "../pi/AgentManager";
 import type { AppLogger } from "../logging/AppLogger";
@@ -1953,22 +1953,27 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		// 渲染层传入的路径不可信：白名单校验（全局/项目技能位置）在 readSkillContent 内完成。
 		return readSkillContent(skillPath);
 	});
-	ipcMain.handle(ipcChannels.skillsCreate, async (_event, input: CreatePiSkillInput) => {
+	// 未路由的资源写通道（task-14）：非本机 target 一律在触碰本机 manager 前失败，绝不写 Windows HOME。
+	ipcMain.handle(ipcChannels.skillsCreate, async (_event, input: CreatePiSkillInput, options?: unknown) => {
+		requireLocalPiResourceTarget(options);
 		const result = await skillManager.create(input);
 		void appLogger.info("skill", "Skill created", { name: input.name, locationId: input.locationId });
 		return result;
 	});
-	ipcMain.handle(ipcChannels.skillsToggle, async (_event, path: string, enabled: boolean) => {
+	ipcMain.handle(ipcChannels.skillsToggle, async (_event, path: string, enabled: boolean, options?: unknown) => {
+		requireLocalPiResourceTarget(options);
 		const result = await skillManager.toggle(path, enabled);
 		void appLogger.info("skill", "Skill toggled", { path, enabled });
 		return result;
 	});
-	ipcMain.handle(ipcChannels.skillsDelete, async (_event, path: string) => {
+	ipcMain.handle(ipcChannels.skillsDelete, async (_event, path: string, options?: unknown) => {
+		requireLocalPiResourceTarget(options);
 		const result = await skillManager.delete(path);
 		void appLogger.info("skill", "Skill deleted", { path });
 		return result;
 	});
-	ipcMain.handle(ipcChannels.skillsRename, async (_event, skillPath: unknown, newName: unknown) => {
+	ipcMain.handle(ipcChannels.skillsRename, async (_event, skillPath: unknown, newName: unknown, options?: unknown) => {
+		requireLocalPiResourceTarget(options);
 		// 渲染层入参不可信：先校验再进 SkillManager（与 projectResourceIpc 的边界校验同一纪律）。
 		if (typeof skillPath !== "string" || skillPath.trim().length === 0 || skillPath.length > 4096) {
 			throw new Error("Invalid skill path for rename.");
@@ -1980,7 +1985,10 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		void appLogger.info("skill", "Skill renamed", { skillPath, newName });
 		return result;
 	});
-	ipcMain.handle(ipcChannels.skillsOpenFolder, (_event, path?: string) => skillManager.openFolder(path));
+	ipcMain.handle(ipcChannels.skillsOpenFolder, async (_event, path?: string, options?: unknown) => {
+		requireLocalPiResourceTarget(options);
+		return await skillManager.openFolder(path);
+	});
 
 	// ── 配置管理 ─────────────────────────────────────────────────────
 
