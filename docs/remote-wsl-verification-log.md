@@ -235,3 +235,75 @@
 - **未验证项（绝不当通过）**：其余 13 条远端会话用例；`remoteFunctionalAcceptance`（本轮不做，远端写操作风险）；`remoteHostAcceptance`（既有 spec 选择器过时，`添加` vs 现行「新建连接」，不改断言、不修）。
 - 全量单测的 ws4 侧两轮因交叉 npm 安装极慢被**提前 kill**（非死锁），最终由主工作树取证；取证结论见 §9.5。
 
+---
+
+## 10. 收尾轮（第二轮 · 基线 dev `3e87123da`）
+
+> 工作树 `F:\PiDeck-v`（分支 `feat/v-final`，基线 = `dev` `3e87123da`）；旧 `F:\PiDeck-ws4` / `feat/ws4-verify` 冻结不再使用。
+> 凭据派生与 E2E 包装脚本：`%TEMP%\pideck-v-remote.ps1`（`ssh -G serve` + `known_hosts`/`ssh-keyscan` 取 ED25519 指纹，值只在进程内、不打印不落库；跑前 `Remove-Item Env:ELECTRON_RUN_AS_NODE`）。
+> 与 `w4-remote-debt` 约定：**同一时刻只有一条 Electron 远端用例**，按对方的「W4 开始 / W4 结束」消息错开。
+
+### 10.1 构建与 WSL 只读 smoke
+
+| 项 | 命令 | 退出码 | 结果 |
+|----|------|--------|------|
+| 构建（仅 E2E 准备） | `npx electron-vite build` | 0 | 1m7s；产物仅 `out/`（入库忽略），未跑 `npm run build`/`pack` |
+| WSL 配置只读 smoke | `node tests/wslConfigReadSmoke.mjs` | **0** | 用**真实** `WslPiConfigStore`（`createWslPiConfigStoreFor`：WslHostStore 档案 + `resolveWslEnvironment`）读 `Ubuntu-26.04` 发行版 HOME 的 `.pi/agent`：`models.json` **不存在 → 返回空 providers 且不创建文件**；`settings.json` 存在（6 个键）。两个文件 sha256 **读前 = 读后**（settings 前缀 `d16a1b8…`；models `absent→absent`），**未调用任何 save\***，未写用户真实配置 |
+
+> 说明：该 smoke 用临时 userData 里的 `wsl-hosts.json`（schemaVersion 1 + 单个档案：`Ubuntu-26.04` + 发行版当前用户）驱动，脚本在 `tests/wslConfigReadSmoke.mjs`（不是 `*.test.mjs`，不进 `npm test` glob），输出里不含用户名/绝对路径。
+
+### 10.2 远端 E2E：当前 dev 上**从未跑过**的用例（逐条，串行）
+
+| # | 用例（`e2e/remoteSessionAcceptance.spec.ts`，除 G6b opt-in soak 外全跑） | `--grep` | 退出码 | 时长 | 结果 |
+|---|--------------------------------------------------|--------|--------|------|------|
+| 1 | 远端 Git G1：只读 SCM 与差异 → 双项目读隔离 → 断开不重连（对照，上一轮已验） | `远端 Git G1` | 0 | 64s | **pass** |
+| 2 | 远端 Git G2a/G2b：精确暂存取消 → 提交已确认暂存区 → 拒绝面 | `远端 Git G2a/G2b` | 0 | 76s | **pass** |
+| 3 | 远端 Git G3a：只读历史分页与详情 → 引用 → 两版本差异 | `远端 Git G3a` | 0 | 34s | **pass** |
+| 4 | 远端 Git G3b：新建分支 → 切换 → 工作区冲突拒绝 | `远端 Git G3b` | 0 | 35s | **pass** |
+| 5 | 远端 Git G4a：丢弃工作区改动 → 删除未跟踪文件 → 先备份可恢复 | `远端 Git G4a` | 0 | 34s | **pass** |
+| 6 | 远端 Git G4b：丢弃留快照 → 恢复区 → 一键还原字节一致 | `远端 Git G4b` | 0 | 35s | **pass** |
+| 7 | 远端 Git G5a：获取更新远端跟踪引用 → 拉取快进 → 脏工作区拒绝 → 推送 | `远端 Git G5a` | 0 | 42s | **pass** |
+| 8 | 远端 Git G5b：引用对比与原生 diff 一致 → 逐文件两侧内容 → 轮询策略 | `远端 Git G5b` | 0 | 85s | **pass** |
+| 9 | 远端 Git G5c：非仓库根显式初始化 → 原生 `.git` 出现 | `远端 Git G5c` | 0 | 28s | **pass** |
+| 10 | 远端 Git G5d/G5e：仓库发现与 scope → 嵌套读取匹配原生 → 嵌套写 | `远端 Git G5d/G5e` | 0 | 36s | **pass** |
+| 11 | 远端文件管理 v1：新建/改名/移动/删除+回收站还原/清空 | `远端文件管理 v1` | 0 | 54s | **pass** |
+| 12 | 远端代码文件：UI 编辑保存 → 外部冲突保留草稿 → 双项目隔离 → Agent 真实运行测试 | `远端代码文件` | **1** | 93s | **fail（待分类，见 10.3）** |
+| 13 | 远端终端：项目隔离 → 已保存代码测试 → resize → 关闭/断开/退出清理 | `远端终端` | 0 | 143s | **pass** |
+| 14 | 远端 trust 提示（对照，上一轮已验） | `远端会话的 trust 提示` | 0 | 62s | **pass** |
+| 15 | 远端会话产品路（对照，上一轮已验） | `远端会话产品路` | 0 | 187s | **pass** |
+
+> 串行执行（同一时刻只有一条 Electron 用例，与 `w4-remote-debt` 按「开始/结束」消息错开），15 条合计约 **16.8 分钟**；`G6b opt-in soak` 按设计不跑（未验证）。
+
+### 10.3 失败项定性：远端代码文件编辑（`e2e/remoteSessionAcceptance.spec.ts:661`）
+
+| 项 | 内容 |
+|----|------|
+| 现象 | 退出码 1，93s；错误来自**测试自己的 ssh oracle**，不是产品断言：`ssh -o BatchMode=yes … cat -- '<projectPath>/calc.cjs'` 命令失败（远端项目目录里该文件不存在/不可读） |
+| 已有信息 | 失败前 UI 步骤（加主机 pin/连接 ready/登记项目/打开远端文件编辑器）未报断言错误；同一 run 的 app 日志里只有一条已知无害告警 `reply-actions seed write failed` |
+| 当前定性 | **待分类**：可能是测试基础设施（oracle 路径/时序），也可能是产品远端写路径问题；**本轮不改产品代码**，需单跑复现后再判 |
+| 复现计划 | W4 用完 Electron 后单跑 `--grep "远端代码文件"` 一次；若复现，再拉 trace 定位是哪一步的 `cat`（`e2e/remote-file-editing.ts:104`/`133`） |
+
+### 10.4 WSL 发行版停/启 smoke（Lead 批准的 WSL 生命周期操作）
+
+脚本 `tests/wslConfigLifecycleSmoke.mjs`（非 `*.test.mjs`，不进 `npm test`）；两次独立运行结论一致。
+
+| 步骤 | 观测 | 结论 |
+|------|------|------|
+| 运行中读配置 | `kind=ok`，6 个键，**121–133ms** | 基线可用 |
+| 显式 `wsl --terminate Ubuntu-26.04` | 退出码 0，**36–39ms**；状态 Stopped | 停发行版本身很快 |
+| 显式重启 `wsl -d … -e true` | **2935ms**；状态回到 Running | 冷启动约 3s |
+| 重启后读配置 | `kind=ok`，6 键，**125ms** | 恢复可用 |
+| **停态下直接读配置** | `kind=ok`，6 键，**2626ms**；读完后状态由 Stopped 变 Running（`autoStartedByRead=true`） | **没有回稳定码**：访问 `\\wsl.localhost\<distro>\` 的 UNC 路径会把发行版**自动拉起**，2.6s 内成功返回；既没挂死（≤15s），也没静默回退到 Windows HOME |
+| 收尾 | `stateFinal=Running` | 不留停止态 |
+
+> 与 Lead 预期的差异：原计划期望「停发行版后 15s 内回稳定码」，实测是「WSL 自动拉起后成功」。二者都满足"不挂死、不回退 Windows HOME"，但语义不同：稳定码路径在这台机器上**不会**因为 `--terminate` 触发（只有发行版缺失/改名时才会）。**未改产品代码**，是否符合预期请 Lead 判定；若要"停态必须回稳定码"，那属于需求变更。
+
+### 10.5 与 `w4-remote-debt` 的时段协调
+
+双方约定「同一时刻只有一条 Electron 远端用例」，按「W4 开始 / W4 结束」消息错开：本轮 sweep（15 条，16.8 分钟）在收到对方「W4 结束」后启动，跑完立即通知对方「可插空」；对方的 `remoteHostAcceptance` 复跑与产品路 3 连跑由对方独占。失败项复跑安排在对方结束后。
+
+### 10.6 远端内容搜索（W2 helper 1.25.0）覆盖待办
+
+`grep searchContent e2e/` ⇒ **0 处**：现有 e2e 没有 `files.searchContent` / 远端内容搜索入口。等 Lead 通知 dev 已合并（W2 渲染层最后一环）后，按新实现选一条路径补最小证据（真实产品路径优先；若 e2e 无入口，则用真实主机 + 旧 helper 回退/新 helper 命中的只读探针），不新增产品代码。
+
+
