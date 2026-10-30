@@ -1160,6 +1160,8 @@ export function App() {
 		saveEditorFileContent,
 		closeEditorTab,
 		selectEditorTab,
+		markEditorTabDirty,
+		isEditorTabDirty,
 		promotePreviewEditorTab,
 		allowSaveEditorTab,
 		previewEditorTabId,
@@ -3077,11 +3079,32 @@ export function App() {
 		if (workbenchHasGitDiff) dismissGitDiff();
 		selectEditorTab(id);
 	};
+	// 文件 tab 关闭保护（Wave 5）：dirty tab 直接关闭 = 静默丢改动。自动保存有 1.5s
+	// debounce 且可能失败（网络盘/权限），不能假设「关的时候已经存过了」。确认框文案
+	// 与 ConfigModal「放弃更改」同语义；dirty 集来自 FileDiffViewer 上报。
+	const requestCloseEditorTab = (id: string) => {
+		if (!isEditorTabDirty(id)) {
+			closeEditorTab(id);
+			return;
+		}
+		const tab = editorTabs.find((t) => t.id === id);
+		const label = tab?.label ?? tab?.filePath.split(/[/\\]/).pop() ?? id;
+		overlays.showConfirm({
+			title: t("editor.dirtyCloseTitle"),
+			message: t("editor.dirtyCloseMessage", { file: label }),
+			confirmLabel: t("config.discardChanges"),
+			danger: true,
+			onConfirm: () => {
+				overlays.clearConfirm();
+				closeEditorTab(id);
+			},
+		});
+	};
 	const closeWorkbenchTab = (id: string) => {
 		if (id.startsWith("git-diff:")) {
 			if (simpleMode) dismissGitDiff();
 			else closeGitDiff();
-		} else closeEditorTab(id);
+		} else requestCloseEditorTab(id);
 	};
 	const toggleSimpleContent = () => setSimpleContentExpanded((value) => !value);
 	// 页面式插件面板伪 Tab：tab 模式下挂进 SessionTabsBar（打开时会话 Tab 退非选中，
@@ -3115,7 +3138,7 @@ export function App() {
 					closeGitDiff();
 					return;
 				}
-				closeEditorTab(tabId);
+				requestCloseEditorTab(tabId);
 			}}
 			onPromoteEditorPreview={promotePreviewEditorTab}
 		/>
@@ -3127,6 +3150,7 @@ export function App() {
 			maxFileSizeMB={settings.maxEditorFileSizeMB}
 			editorTabs={editorTabs}
 			onDirty={promotePreviewEditorTab}
+			onDirtyChange={markEditorTabDirty}
 			gitDiff={workbenchHasGitDiff && gitDrawerDiff ? gitDrawerDiff : null}
 			gitDiffDisplayMode={simpleMode ? workbenchLayout : gitDiffDisplayMode}
 			onToggleGitDiffMode={simpleMode ? toggleSimpleContent : toggleGitDiffDisplayMode}
@@ -3135,7 +3159,7 @@ export function App() {
 			editorMode={simpleMode ? workbenchLayout : editorMode}
 			onToggleEditorMode={simpleMode ? toggleSimpleContent : activeTab?.preserveDrawer ? undefined : toggleEditorMode}
 			onCloseEditor={() => {
-				if (simpleMode && activeTab) closeEditorTab(activeTab.id);
+				if (simpleMode && activeTab) requestCloseEditorTab(activeTab.id);
 				else closeEditor();
 			}}
 			readContent={readEditorFileContent}

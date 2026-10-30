@@ -56,6 +56,15 @@ function createBrowserPanelHarness(device = "pc") {
 			"../../i18n": { t: (key) => key },
 			"../ui-shadcn/button": { Button: "button" },
 			"../ui-shadcn/input": { Input: "input" },
+			// Wave 5 后 BrowserPanel 引 Radix DropdownMenu（设备菜单迁共享原语）；
+			// 测试只关心导航/UA/readiness 时序，菜单原语全部平掉。
+			"../ui-shadcn/dropdown-menu": {
+				DropdownMenu: "dropdown-menu",
+				DropdownMenuTrigger: "dropdown-trigger",
+				DropdownMenuContent: "dropdown-content",
+				DropdownMenuItem: "dropdown-item",
+			},
+			"@/lib/utils": { cn: (...cls) => cls.filter(Boolean).join(" ") },
 		},
 		globals: {
 			window: {

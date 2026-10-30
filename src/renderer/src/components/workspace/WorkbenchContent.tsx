@@ -36,6 +36,8 @@ export type WorkbenchContentProps = {
 	editorTabs: readonly EditorTabLike[];
 	activeTab: EditorTabLike | null;
 	onDirty: (id: string) => void;
+	/** dirty 翻转上报（Wave 5 关闭保护）：宿主据此维护 dirtyTabIds 集合。 */
+	onDirtyChange: (id: string, dirty: boolean) => void;
 	editorMode: WorkspaceContentOpenMode;
 	onToggleEditorMode?: () => void;
 	onCloseEditor: () => void;
@@ -63,6 +65,7 @@ export function WorkbenchContent(props: WorkbenchContentProps) {
 					<FileDiffViewer
 						active={props.activeTab?.id === tab.id && !props.gitDiff}
 						onDirty={() => props.onDirty(tab.id)}
+					onDirtyChange={(dirty) => props.onDirtyChange(tab.id, dirty)}
 						displayMode={props.editorMode}
 						filePath={tab.filePath}
 						fileTarget={tab.fileTarget}

@@ -327,7 +327,11 @@ export function dockHarness(initialTabs = [tab("A"), tab("B")], settings = {}) {
 			return closeCount;
 		},
 		isExited(id) {
-			return find((node) => node.type === "button" && node.props.className?.includes("terminal-tab-label") && node.props.children[0] === id).props.children[1] !== "";
+			// Wave 5 后 exited tab 的 children[1] 从 ` · 已退出` 字符串改为条件 JSX
+			// （false 或含 terminal.reopen 的重开 span）——用字符串化探测退出标记。
+			const child = find((node) => node.type === "button" && node.props.className?.includes("terminal-tab-label") && node.props.children[0] === id).props.children[1];
+			if (child === false || child === null || child === undefined) return false;
+			return String(JSON.stringify(child)).includes("terminal.exited");
 		},
 		get ids() {
 			const ids = [];

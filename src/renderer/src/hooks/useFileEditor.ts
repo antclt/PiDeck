@@ -106,6 +106,10 @@ export interface UseFileEditorOutput {
 	openEditorTab: (path: string | ProjectFileTarget, mode: "view" | "diff", originalContent?: string, modifiedContent?: string, allowSave?: boolean, tabKey?: string, label?: string, preserveDrawer?: boolean, openMode?: EditorTabOpenMode, initialLine?: number, fileAccessScope?: ProjectFileAccessScope) => void;
 	closeEditorTab: (tabId: string) => void;
 	selectEditorTab: (tabId: string) => void;
+	/** dirty 翻转上报（Wave 5 关闭保护） */
+	markEditorTabDirty: (tabId: string, dirty: boolean) => void;
+	isEditorTabDirty: (tabId: string) => boolean;
+	dirtyEditorTabIds: ReadonlySet<string>;
 	/** 双击预览 Tab → 常驻 */
 	promotePreviewEditorTab: (tabId: string) => void;
 	/** 只读 tab（项目外文件）由用户显式「转为可编辑」后补上保存能力 */
@@ -165,6 +169,10 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
 	// ---- editor tabs ----
 	const editorTabAccessSequenceRef = useRef(0);
 	const [editorTabs, setEditorTabs] = useState<EditorTab[]>([]);
+	// 有未保存改动的 tab id 集合（Wave 5 关闭保护）：FileDiffViewer 的 dirty 翻转上报维护。
+	// 用 ref 存真值 + state 只为触发渲染面（tab 黄点/关闭确认取值都走 ref 读最新）。
+	const [dirtyEditorTabIds, setDirtyEditorTabIds] = useState<ReadonlySet<string>>(() => new Set());
+	const dirtyEditorTabIdsRef = useRef<Set<string>>(new Set());
 	const [activeTabId, setActiveTabId] = useState<string | null>(null);
 	/** VS Code 式预览 Tab：至多一个；单击打开会替换它 */
 	const [previewEditorTabId, setPreviewEditorTabId] = useState<string | null>(null);
@@ -292,6 +300,20 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
 		setEditorTabs(prev.map((tab) => (tab.id === tabId ? { ...tab, allowSave: true } : tab)));
 	}, []);
 
+	/** dirty 翻转上报（Wave 5）：只登记/摘除集合成员，真值留在 FileDiffViewer。 */
+	const markEditorTabDirty = useCallback((tabId: string, dirty: boolean) => {
+		const prev = dirtyEditorTabIdsRef.current;
+		const has = prev.has(tabId);
+		if (dirty === has) return;
+		const next = new Set(prev);
+		if (dirty) next.add(tabId);
+		else next.delete(tabId);
+		dirtyEditorTabIdsRef.current = next;
+		setDirtyEditorTabIds(next);
+	}, []);
+
+	const isEditorTabDirty = useCallback((tabId: string) => dirtyEditorTabIdsRef.current.has(tabId), []);
+
 	const closeEditorTab = useCallback(
 		(tabId: string) => {
 			// updater 纯化（同上）：副作用移出
@@ -299,6 +321,7 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
 			const idx = prev.findIndex((t) => t.id === tabId);
 			if (idx < 0) return;
 			const next = prev.filter((t) => t.id !== tabId);
+			if (dirtyEditorTabIdsRef.current.has(tabId)) markEditorTabDirty(tabId, false);
 			setEditorTabs(next);
 			setPreviewEditorTabId((current) => (current === tabId ? null : current));
 			if (next.length === 0) {
@@ -492,6 +515,9 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
 		openEditorTab,
 		closeEditorTab,
 		selectEditorTab,
+		markEditorTabDirty,
+		isEditorTabDirty,
+		dirtyEditorTabIds,
 		promotePreviewEditorTab,
 		allowSaveEditorTab,
 		previewEditorTabId,

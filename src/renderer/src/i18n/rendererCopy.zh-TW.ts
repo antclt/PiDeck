@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: b1197cfa0a89f4c8a1462ebfab40055bd1ede9dc43c8cac0c49b2be60b2f78ee（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: def5161154de1fade70d37f1acb3a9e6d10a59c315f9036790b8762349f456e5（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -765,6 +765,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"git.changesViewActions": "變更檢視操作",
 	"git.discard": "丟棄未暫存更改",
 	"git.discardChanges": "回滾更改",
+	"git.branchSwitchConfirmTitle": "切換分支？",
+	"git.branchSwitchConfirmMessage": "當前有 {count} 處未提交更改。切換到 {branch} 時這些更改會隨之帶過去（git 預設行為）；若不想攜帶，請先提交或回滾。",
+	"git.branchSwitchConfirmLabel": "仍然切換",
 	"git.discardDirectory": "回滾目錄",
 	"git.discardDirectoryConfirmTitle": "回滾目錄更改？",
 	"git.discardDirectoryConfirmMessage": "將回滾“{path}”下的 {count} 個未暫存檔案；已暫存內容會保留，未跟蹤檔案將移入回收站。",
@@ -3331,6 +3334,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"editor.attachSelectionRange": "引用選中內容（第 {range} 行）",
 	"editor.diffTooLarge": "檔案過大，無法顯示差異對比",
 	"editor.diffTooLargeDetail": "舊檔案 {old} 行，新檔案 {new} 行，請使用 git diff 檢視",
+	"editor.dirtyCloseTitle": "關閉未儲存的檔案？",
+	"editor.dirtyCloseMessage": "{file} 有未儲存的更改，關閉後將丟失。仍要關閉嗎？",
+	"editor.saveFailedBanner": "儲存失敗：{error}",
 	"editor.pdfPreview": "PDF 預覽",
 	"editors.clear": "清除",
 	"editors.browse": "瀏覽",
@@ -5827,6 +5833,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"terminal.inputFailed": "傳送終端輸入失敗",
 	"terminal.resizeFailed": "調整終端尺寸失敗",
 	"terminal.exited": "已退出",
+	"terminal.reopen": "重開",
+	"terminal.reopenTitle": "以相同 shell 與目錄新建終端",
 	"terminal.expand": "展開終端",
 	"terminal.more": "終端更多操作",
 	"terminal.new": "新建終端",

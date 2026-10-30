@@ -2,7 +2,7 @@ import type { ProjectFileAccessScope, ProjectFileTarget } from "../../../../shar
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useSetAtom } from "jotai";
 import { t } from "../../i18n";
-import { ArrowLeft, Maximize, Minimize2, Rows2, SquareSplitHorizontal, X, Eye, FileCode, Loader2 } from "lucide-react";
+import { ArrowLeft, Maximize, Minimize2, Rows2, SquareSplitHorizontal, X, Eye, FileCode, Loader2, TriangleAlert } from "lucide-react";
 import { Button } from "../ui-shadcn/button";
 import { cn } from "../../lib/utils";
 import { MarkdownStream } from "../session/MarkdownStream";
@@ -52,6 +52,9 @@ function fileLoadErrorMessage(error: unknown): string {
 export function FileDiffViewer(props: {
 	active?: boolean;
 	onDirty?: () => void;
+	/** dirty 态变化上报（Wave 5 关闭保护）：hook 侧维护「哪些 tab 有未保存改动」集合，
+	 *  关闭路径据此弹确认。只在 true↔false 翻转时调用，不随每次击键触发。 */
+	onDirtyChange?: (dirty: boolean) => void;
 	filePath: string;
 	fileTarget?: ProjectFileTarget;
 	mode?: ViewMode;
@@ -114,7 +117,17 @@ export function FileDiffViewer(props: {
 	const [unlockConfirmOpen, setUnlockConfirmOpen] = useState(false);
 	// diff 模式为只读对比视图（第三方渲染库），无需编辑态切换
 	const [dirty, setDirty] = useState(false);
+	// dirty 镜像上报（Wave 5）：只在翻转时通知宿主，避免每击键回调。
+	const dirtyRef = useRef(false);
+	const reportDirty = (next: boolean) => {
+		if (dirtyRef.current === next) return;
+		dirtyRef.current = next;
+		props.onDirtyChange?.(next);
+	};
 	const [saving, setSaving] = useState(false);
+	// 保存失败横幅（Wave 5）：与加载 error 分开——加载失败占满正文，保存失败只是
+	// 编辑器顶部的 alert 横幅 + 重试钮（内容还在编辑器里，不抢布局）。
+	const [saveError, setSaveError] = useState<string | null>(null);
 	// 二进制预览（图片/PDF）的 Blob URL：切换文件/卸载时 revoke，防止内存泄漏
 	const [mediaUrl, setMediaUrl] = useState<string | null>(null);
 	const mediaUrlRef = useRef<string | null>(null);
@@ -143,6 +156,7 @@ export function FileDiffViewer(props: {
 	useEffect(() => {
 		// 每个 tab 重置编辑状态：view 可编辑（源码即编辑），diff 只读对比无编辑态。
 		setDirty(false);
+		reportDirty(false);
 		setPreview(defaultPreview);
 		// 清掉上一个文件的 Blob URL（媒体预览随 tab 切换失效）
 		revokeMediaUrl();
@@ -155,6 +169,7 @@ export function FileDiffViewer(props: {
 			setLoading(true);
 			setError(null);
 			setDirty(false);
+			reportDirty(false);
 			try {
 				// 图片/PDF：仅 view 模式读取二进制转 Blob URL 预览（不文本读取）；
 				// diff 模式无法展示二进制差异，维持「不支持编辑」提示。
@@ -308,12 +323,15 @@ export function FileDiffViewer(props: {
 			// 绝不能把保存开始时的快照重新 set 回编辑器。
 			if (contentRef.current === latest) {
 				setDirty(false);
+				reportDirty(false);
 			}
+			setSaveError(null);
 			return true;
 		} catch (e) {
 			if (saveGeneration === saveGenerationRef.current) {
-				// 保存失败保留 dirty，用户可继续编辑后由下一次自动保存/Ctrl+S 重试
-				setError(e instanceof Error ? e.message : String(e));
+				// 保存失败保留 dirty，用户可继续编辑后由下一次自动保存/Ctrl+S 重试；
+				// 失败本身升格为可见横幅（Wave 5）：静默失败会让用户以为已保存。
+				setSaveError(e instanceof Error ? e.message : String(e));
 			}
 			return false;
 		} finally {
@@ -389,6 +407,7 @@ export function FileDiffViewer(props: {
 			contentRef.current = value;
 			setContent(value);
 			setDirty(true);
+			reportDirty(true);
 			props.onDirty?.();
 			scheduleAutoSave();
 		},
@@ -527,6 +546,15 @@ export function FileDiffViewer(props: {
 						props.onRequestEditable?.();
 					}}
 				/>
+			)}
+			{saveError && (
+				<div role="alert" className="flex shrink-0 items-center gap-2 border-b border-destructive/30 bg-destructive/10 px-3 py-1.5 text-caption text-destructive">
+					<TriangleAlert size={14} className="shrink-0" aria-hidden="true" />
+					<span className="min-w-0 flex-1 truncate" title={saveError}>{t("editor.saveFailedBanner", { error: saveError })}</span>
+					<Button variant="ghost" size="sm" className="h-6 shrink-0 rounded-md px-2 text-caption" onClick={() => void saveNow()}>
+						{t("common.retry")}
+					</Button>
+				</div>
 			)}
 			<div className="file-diff-body">
 				{/* 加载态补 spinner，与 Git 树 ResourceRow 的 Loader2 动效同语言；外层 .file-diff-loading 是 grid 居中，内层用 inline-flex 排图标+文案 */}
