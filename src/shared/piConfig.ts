@@ -38,6 +38,8 @@ export const PI_RESOURCE_CODES = {
 	targetInvalid: "PI_RESOURCE_TARGET_INVALID",
 	/** ssh is a valid config target, but remote resource management is not routed there in this build. */
 	sshUnsupported: "PI_RESOURCE_SSH_UNSUPPORTED",
+	/** the channel is a local-only resource write (skill/extension mutations, prompt create/delete/rename/toggle). */
+	writeUnsupported: "PI_RESOURCE_WRITE_UNSUPPORTED",
 	/** no WslHostStore profile carries that id (removed, or never created). */
 	hostNotFound: "PI_RESOURCE_HOST_NOT_FOUND",
 	/** the distribution's HOME could not be resolved (wsl.exe failure / distro unregistered). */

@@ -463,6 +463,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 	const [configPaneState, setConfigPaneState] = useState<ConfigPaneState>({
 		saving: false,
 		hasDirty: false,
+		exportImportAllowed: true,
 		unsaved: { totalCount: 0, items: [] },
 	});
 	const handleConfigPaneStateChange = useCallback((state: ConfigPaneState) => setConfigPaneState(state), []);
@@ -679,11 +680,11 @@ function SettingsModalContent(props: SettingsModalProps) {
 									{configPaneState.hasDirty && <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" />}
 									{configPaneState.saving ? t("common.saving") : t("common.save")}
 								</Button>
-								<Button variant="outline" size="sm" onClick={() => configPaneRef.current?.exportConfig()}>
+								<Button variant="outline" size="sm" onClick={() => configPaneRef.current?.exportConfig()} disabled={!configPaneState.exportImportAllowed} title={configPaneState.exportImportAllowed ? undefined : t("config.target.exportLocalOnly")}>
 									{t("common.export")}
 								</Button>
 								{/* 导入与导出统一 outline 白底描边（与独立 ConfigModal 同款），避免一描边一填充的不一致 */}
-								<Button variant="outline" size="sm" onClick={() => configPaneRef.current?.importConfig()}>
+								<Button variant="outline" size="sm" onClick={() => configPaneRef.current?.importConfig()} disabled={!configPaneState.exportImportAllowed} title={configPaneState.exportImportAllowed ? undefined : t("config.target.exportLocalOnly")}>
 									{t("common.import")}
 								</Button>
 							</>

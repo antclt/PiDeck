@@ -103,13 +103,8 @@ test("过期能力文案已修正：不再声称 stage/commit/sync/push 不可�
 		assert.ok(dictionary["remoteGit.worktreeUnsupported"]);
 		assert.match(dictionary["remoteGit.historyReadOnly"], /HEAD/);
 	}
-	assert.ok(zhCN["remoteGit.readOnly"].includes("fetch／push／pull"));
-	assert.ok(enUS["remoteGit.readOnly"].includes("fetch/push/pull"));
-	// 旧文案明确写“暂存与提交不可用 / 尚未开放 / 不支持 push”，现状已经支持，必须消失。
-	assert.doesNotMatch(zhCN["remoteGit.readOnly"], /尚未开放|暂存与提交不可用/);
-	assert.doesNotMatch(enUS["remoteGit.readOnly"], /managed writes|staging and committing are unavailable/);
-	assert.doesNotMatch(zhCN["remoteGit.managedIndex"], /不支持 amend／force／push/);
-	assert.ok(!enUS["remoteGit.managedIndex"].includes("no amend/force/push"));
+	// remoteGit.readOnly / remoteGit.managedIndex 已删除：无组件引用、仅被本测试钉住的死 key。
+	// 能力说明以 worktreeUnsupported / historyReadOnly / commitHint 为准（上方断言保留）。
 	assert.doesNotMatch(zhCN["remoteGit.commitHint"], /也不支持 amend、push/);
 	assert.doesNotMatch(enUS["remoteGit.commitHint"], /amend, push or signing are not supported/);
 });
