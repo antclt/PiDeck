@@ -5116,6 +5116,8 @@ function registerIpc() {
 		remoteFiles: {
 			directoryPage: (projectId, path, force) => remoteProjectIpc.directoryPage(projectId, path, force),
 			pathsExist: (projectId, paths) => remoteProjectIpc.pathsExist(projectId, paths),
+			// 远端内容搜索按 hello capabilities 门控：旧 helper 返回 null（渲染层回退“仅文件名”），不发无效请求。
+			searchContent: (projectId, query) => remoteProjectIpc.searchContent(projectId, query),
 		},
 	});
 	registerClipboardIpc({ appLogger });
