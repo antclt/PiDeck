@@ -5347,6 +5347,7 @@ export const zhCN = {
 	"settings.announcementNotification": "公告通知",
 	"settings.announcementNotificationDesc": "收到新公告时弹出提醒（默认开启；输入或会话运行中会自动延后弹出）。关闭后侧栏公告入口与提醒一并隐藏",
 	"settings.enablePiProxy": "启用 Pi agent 代理",
+	"settings.piProxySwitchOverridden": "模型代理名单已启用：名单内模型强制走代理、名单外强制直连；主开关由名单接管，不再参与决策。",
 	"settings.enablePiProxyDesc": "开启后所有 Pi 会话默认走下方地址（重启会话后生效）。仅保存地址不开启开关时，可配合右键菜单「会话代理」或下方供应商白名单按需启用；配置「按模型走代理」名单后由名单决定（名单内走代理、名单外直连，开关置灰）",
 	"settings.piProxyModels": "按模型走代理",
 	"settings.piProxyModelsDesc": "粒度比供应商更细：仅名单内模型强制走代理（即使全局关闭也复用上方地址），名单外强制直连。条目格式为 provider/模型ID，留空则不按模型过滤（回落供应商名单/全局设置）",

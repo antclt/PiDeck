@@ -115,24 +115,27 @@ export function RemoteDirectoryPicker(props: { hostId: string; value: string; on
 			) : visible.length === 0 ? (
 				<p className="px-1 py-2 text-label text-muted-foreground">{t("sidebar.remoteEnroll.dirEmpty")}</p>
 			) : (
-				<ul className="flex max-h-52 flex-col gap-0.5 overflow-y-auto">
-					{visible.map((entry) => (
-						<li key={entry.name}>
-							<button
-								type="button"
-								data-testid="remote-directory-entry"
-								data-symlink={entry.isSymlink ? "true" : undefined}
-								className="flex w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-left text-body hover:bg-bg-hover disabled:opacity-60"
-								disabled={props.disabled}
-								onClick={() => void load(current === "/" ? `/${entry.name}` : `${current}/${entry.name}`)}
-							>
-								<Folder className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-								<span className="min-w-0 flex-1 truncate">{entry.name}</span>
-								{entry.isSymlink ? <Link2 className="size-3 shrink-0 text-muted-foreground" aria-label={t("sidebar.remoteEnroll.dirSymlink")} /> : null}
-							</button>
-						</li>
-					))}
-				</ul>
+				<>
+					{/* scroll-ok: bounded 目录选择候选，单层条目且由 max-h 收束 */}
+					<ul className="flex max-h-52 flex-col gap-0.5 overflow-y-auto">
+						{visible.map((entry) => (
+							<li key={entry.name}>
+								<button
+									type="button"
+									data-testid="remote-directory-entry"
+									data-symlink={entry.isSymlink ? "true" : undefined}
+									className="flex w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-left text-body hover:bg-bg-hover disabled:opacity-60"
+									disabled={props.disabled}
+									onClick={() => void load(current === "/" ? `/${entry.name}` : `${current}/${entry.name}`)}
+								>
+									<Folder className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+									<span className="min-w-0 flex-1 truncate">{entry.name}</span>
+									{entry.isSymlink ? <Link2 className="size-3 shrink-0 text-muted-foreground" aria-label={t("sidebar.remoteEnroll.dirSymlink")} /> : null}
+								</button>
+							</li>
+						))}
+					</ul>
+				</>
 			)}
 			{truncated && !loading && errorCode === null ? <p className="px-1 text-label text-muted-foreground">{t("sidebar.remoteEnroll.dirTruncated")}</p> : null}
 		</div>

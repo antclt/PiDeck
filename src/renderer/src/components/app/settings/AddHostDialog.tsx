@@ -228,6 +228,7 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 				if (!open) props.onClose();
 			}}
 		>
+			{/* scroll-ok: bounded 表单对话框整页滚动，字段数量固定且由 max-h 收束 */}
 			<DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto p-6 sm:max-w-3xl sm:p-8">
 				<DialogHeader className="pr-8">
 					<DialogTitle className="text-lg font-medium">{editing === undefined ? t("settings.connections.add.title") : t("settings.connections.edit.title")}</DialogTitle>
@@ -275,6 +276,7 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 										<Search className="pointer-events-none absolute left-3.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
 										<Input autoFocus value={query} placeholder={t("settings.connections.add.importSearch")} aria-label={t("settings.connections.add.importSearch")} onChange={(event) => setQuery(event.target.value)} className="h-8 border-0 bg-transparent pl-7 text-body shadow-none focus-visible:ring-0" />
 									</div>
+									{/* scroll-ok: bounded SSH config 候选，扫描结果由 max-h 收束 */}
 									<div className="max-h-56 overflow-y-auto p-1">
 										{filtered.length === 0 ? (
 											<div className="flex flex-col items-center gap-1.5 px-3 py-7 text-center">
@@ -460,6 +462,7 @@ export function AddHostDialog(props: { onClose: () => void; onSubmitted: (hostId
 											</PopoverAnchor>
 											{/* 扫描到的私钥放进下拉里：默认不占版面，点开才出现。 */}
 											<PopoverContent align="start" sideOffset={4} className="w-[26rem] max-w-[var(--radix-popover-content-available-width)] p-1">
+												{/* scroll-ok: bounded 私钥候选，条目有限且由 max-h 收束 */}
 												<ul className="flex max-h-56 flex-col gap-0.5 overflow-y-auto">
 													{identitySuggestions.map((path) => (
 														<li key={path}>
