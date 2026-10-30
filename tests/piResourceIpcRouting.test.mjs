@@ -100,7 +100,10 @@ test("缺省 options 保持旧行为：本机单例、池不参与", async () =>
 	await handlers.get(ipcChannels.extensionsList)({});
 	assert.deepEqual(calls, [["local.prompts.list"], ["local.prompts.read", LOCAL_PROMPT], ["local.prompts.write", LOCAL_PROMPT, "body"], ["local.extensions.list", false]]);
 	// 池会被询问，但本机目标不带 wsl target（真实池此时返回本机单例，不构造任何实例）。
-	assert.ok(poolCalls.every(([, parsed]) => parsed.target === undefined), JSON.stringify(poolCalls));
+	assert.ok(
+		poolCalls.every(([, parsed]) => parsed.target === undefined),
+		JSON.stringify(poolCalls),
+	);
 });
 
 test("wsl target 走池：list/read/save 都命中该档案的管理器", async () => {
@@ -110,7 +113,12 @@ test("wsl target 走池：list/read/save 都命中该档案的管理器", async 
 	await handlers.get(ipcChannels.promptsEdit)({}, WSL_PROMPT, "body", wslOptions());
 	await handlers.get(ipcChannels.extensionsList)({}, true, wslOptions());
 	assert.deepEqual(calls, [["wsl.prompts.list"], ["wsl.prompts.read", WSL_PROMPT], ["wsl.prompts.write", WSL_PROMPT, "body"], ["wsl.extensions.list", true]]);
-	assert.deepEqual(poolCalls, [["prompts", parsedWsl()], ["prompts", parsedWsl()], ["prompts", parsedWsl()], ["extensions", parsedWsl()]]);
+	assert.deepEqual(poolCalls, [
+		["prompts", parsedWsl()],
+		["prompts", parsedWsl()],
+		["prompts", parsedWsl()],
+		["extensions", parsedWsl()],
+	]);
 });
 
 test("非法/ssh 目标在管理器之前失败：回闭集稳定码且不落本机", async () => {
