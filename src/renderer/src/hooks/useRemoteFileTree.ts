@@ -4,6 +4,7 @@ import type { ProjectDirectoryEntry } from "../../../shared/types/projectFiles";
 import { desktopApi } from "../desktopApi";
 import { parseFileTreeKey, projectFileKey } from "../utils/fileTreeLazy";
 import { createLazyDirTreeController, lazyDirTreeInitialState, type LazyDirTreeController, type LazyDirTreeState } from "../utils/lazyDirTree";
+import { readRemoteDirectoryPageWithRetry } from "../utils/remoteDirectoryPageRetry";
 
 /**
  * 远端项目的文件树：与本机文件抽屉共用 `lazyDirTree` 内核，只是每一层按需走公共目录页。
@@ -63,7 +64,7 @@ export function useRemoteFileTree(projectId: string): RemoteFileTree {
 
 	useEffect(() => {
 		const reads = createLazyDirTreeController(async (dir, force) => {
-			const result = await desktopApi.files.directoryPage({ projectId, relativePath: dir }, { force });
+			const result = await readRemoteDirectoryPageWithRetry(() => desktopApi.files.directoryPage({ projectId, relativePath: dir }, { force }), { sleep: (attempt) => new Promise((resolve) => setTimeout(resolve, 300 * attempt)) });
 			if (!result.ok) return { ok: false, code: result.code };
 			return {
 				ok: true,
