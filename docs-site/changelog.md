@@ -10,6 +10,25 @@ description: PiDeck 每个版本的发布记录：新功能、问题修复与体
 - [中文 CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.zh-CN.md)
 - [English CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.md)
 
+## v0.9.9-beta
+
+发布时间：2026-10-30
+
+- 🚀 **外观拆成「样式 × 配色」两维，终端皮肤成套移植 pi TUI**
+- 🚀 **会话分组成为宿主核心能力（插件 v3）**
+- 🚀 **收藏整个会话**
+- 🚀 **草稿本支持项目 / 全局作用域**
+- 🚀 **ACP 按工具记住思考 / 模式 / 权限并自动重放**
+- 🚀 **ACP 工具级「新会话默认 Bypass 权限」与 Qoder CLI 预设**
+- 🚀 **ACP 代理独立开关**
+- 🚀 **通过 MCP 新建并驱动 ACP 会话**
+- 🚀 **Web 端支持 ACP 会话**
+- 🚀 **ACP 用量面板补齐 token / 时延 / TPS**
+- ✨ **ACP 模型下拉可搜索**
+- ✨ **ACP 回合中发送排队，忙碌时补独立停止钮**
+- ✨ **ACP 工具表改为折叠行**
+- ✨ **轮尾操作栏按「按钮 | 耗时 | 模型」三分区**
+
 ## v0.9.8
 
 发布时间：2026-10-27

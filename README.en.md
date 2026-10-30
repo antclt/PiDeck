@@ -11,7 +11,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.9.8-blue)
+![Version](https://img.shields.io/badge/version-0.9.9--beta-blue)
 
 <!-- star-history:start -->
 <picture>
@@ -82,21 +82,23 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.9.8** (2026-10-27)
+> **Latest: v0.9.9-beta** (2026-10-30)
 
-### v0.9.8 Release Highlights
-- 🚀 **ACP session archive and in-session search (#413 #415)**
-- 🚀 **Configurable ACP turn timeouts (#411)**
-- 🚀 **Status bar shows real retry progress and the current turn's facts**
-- 🚀 **Image preview supports zoom**
-- 🚀 **MCP / skill import selects across pages**
-- 🚀 **Trajectory drawer: provider and model, with a prewarmed process track**
-- 🚀 **Model config import restored, merged with local tool discovery (#419)**
-- 🚀 **Local builds carry a "local build" badge**
-- ✨ **Thinking-intensity bar colours follow progress**
-- ✨ **Drawer toggle moved to the left end of the activity bar**
-- ✨ **Git panel row metrics aligned with the file drawer**
-- ✨ **Composer and reference chips tidied**
+### v0.9.9-beta Release Highlights
+- 🚀 **Appearance split into "style × palette", with the pi TUI terminal skin ported wholesale**
+- 🚀 **Session groups become a host-level capability (plugin v3)**
+- 🚀 **Favorite whole sessions**
+- 🚀 **Scratchpad gains project / global scopes**
+- 🚀 **ACP remembers thinking / mode / permission per tool and replays them**
+- 🚀 **Per-tool "default bypass permissions for new sessions" and a Qoder CLI preset**
+- 🚀 **A separate proxy switch for ACP**
+- 🚀 **Create and drive ACP sessions over MCP**
+- 🚀 **ACP sessions in the Web client**
+- 🚀 **ACP usage panel gains token / latency / TPS metrics**
+- ✨ **Searchable model dropdown in ACP**
+- ✨ **Queued sends mid-turn, plus a dedicated stop button**
+- ✨ **ACP tool table collapses into rows**
+- ✨ **Turn footer split into "actions | duration | model"**
 
 [View Full Changelog →](CHANGELOG.md)
 
