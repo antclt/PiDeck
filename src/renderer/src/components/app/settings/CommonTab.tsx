@@ -558,7 +558,18 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 					</Select>
 				</SettingRow>
 				<SettingSwitchRow anchor="common-close-to-tray" title={t("settings.closeToTray")} checked={draft.closeToTray} onChange={(checked) => updateDraft({ closeToTray: checked })} />
-				<SettingSwitchRow anchor="common-single-instance" title={<>{t("settings.singleInstance")}<SettingApplyBadge mode="restart" /></>} description={t("settings.singleInstanceDesc")} checked={draft.singleInstance} onChange={(checked) => updateDraft({ singleInstance: checked })} />
+				<SettingSwitchRow
+					anchor="common-single-instance"
+					title={
+						<>
+							{t("settings.singleInstance")}
+							<SettingApplyBadge mode="restart" />
+						</>
+					}
+					description={t("settings.singleInstanceDesc")}
+					checked={draft.singleInstance}
+					onChange={(checked) => updateDraft({ singleInstance: checked })}
+				/>
 			</SettingsSection>
 		</>
 	);

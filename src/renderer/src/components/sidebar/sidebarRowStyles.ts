@@ -23,8 +23,7 @@ export const SESSION_ROW_SELECTED_CLASS = "active bg-bg-active text-foreground";
 
 /** 行右侧「⋯」按钮浮层：absolute 不占布局，行 hover/行内聚焦时显现；
  *  标题用 conversation-body 上的 pr-7 让位（一个按钮宽），见 SessionTree 注释。 */
-export const ROW_MORE_ACTIONS_CLASS =
-	"row-more-actions pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100";
+export const ROW_MORE_ACTIONS_CLASS = "row-more-actions pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100";
 
 /** 行容器：内容行占满 + 按钮浮层（button 不能嵌 button，且浮层不占位）。 */
 export const ROW_CONTAINER_CLASS = "group/row relative mt-0.5 flex min-h-8 items-center";

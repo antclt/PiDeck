@@ -550,7 +550,9 @@ export function FileDiffViewer(props: {
 			{saveError && (
 				<div role="alert" className="flex shrink-0 items-center gap-2 border-b border-destructive/30 bg-destructive/10 px-3 py-1.5 text-caption text-destructive">
 					<TriangleAlert size={14} className="shrink-0" aria-hidden="true" />
-					<span className="min-w-0 flex-1 truncate" title={saveError}>{t("editor.saveFailedBanner", { error: saveError })}</span>
+					<span className="min-w-0 flex-1 truncate" title={saveError}>
+						{t("editor.saveFailedBanner", { error: saveError })}
+					</span>
 					<Button variant="ghost" size="sm" className="h-6 shrink-0 rounded-md px-2 text-caption" onClick={() => void saveNow()}>
 						{t("common.retry")}
 					</Button>

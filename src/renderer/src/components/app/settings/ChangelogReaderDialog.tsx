@@ -20,10 +20,7 @@ import { formatI18nDateTime, t } from "../../../i18n";
  *
  * 差异走 props：标题/副标题、footer 左侧诊断文本、ready 态的正文槽与展开控制。
  */
-export type ChangelogShellState =
-	| { status: "loading" }
-	| { status: "unavailable"; pageUrl: string }
-	| { status: "ready"; markdown: string; source?: string | null; fetchedAt?: string | null; pageUrl: string };
+export type ChangelogShellState = { status: "loading" } | { status: "unavailable"; pageUrl: string } | { status: "ready"; markdown: string; source?: string | null; fetchedAt?: string | null; pageUrl: string };
 
 export function ChangelogReaderDialog(props: {
 	open: boolean;
@@ -43,10 +40,7 @@ export function ChangelogReaderDialog(props: {
 }) {
 	return (
 		<Dialog open={props.open} onOpenChange={props.onOpenChange}>
-			<DialogContent
-				className="flex max-h-[80vh] flex-col overflow-hidden sm:max-w-[min(760px,calc(100vw-48px))]"
-				dismissExemptOnOutside={props.dismissExemptOnOutside}
-			>
+			<DialogContent className="flex max-h-[80vh] flex-col overflow-hidden sm:max-w-[min(760px,calc(100vw-48px))]" dismissExemptOnOutside={props.dismissExemptOnOutside}>
 				<DialogHeader>
 					<DialogTitle>{props.title}</DialogTitle>
 					<DialogDescription>{props.subtitle}</DialogDescription>

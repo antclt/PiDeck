@@ -512,11 +512,7 @@ export function BrowserPanel(props: {
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="end" className="min-w-[112px]">
 						{DEVICE_PRESETS.map((preset) => (
-							<DropdownMenuItem
-								key={preset.id}
-								className={`h-[30px] items-center gap-2 rounded-sm px-2 text-xs text-text-secondary text-left${preset.id === device ? " bg-bg-active text-[color:var(--color-accent)]" : ""}`}
-								onClick={() => selectDevice(preset.id)}
-							>
+							<DropdownMenuItem key={preset.id} className={`h-[30px] items-center gap-2 rounded-sm px-2 text-xs text-text-secondary text-left${preset.id === device ? " bg-bg-active text-[color:var(--color-accent)]" : ""}`} onClick={() => selectDevice(preset.id)}>
 								{preset.id === "mobile" ? <Smartphone size={13} /> : preset.id === "tablet" ? <Tablet size={13} /> : <span className="size-[13px] rounded-[3px] border border-current" />}
 								<span>{t(preset.label as Parameters<typeof t>[0])}</span>
 							</DropdownMenuItem>
@@ -557,7 +553,16 @@ export function BrowserPanel(props: {
 							{loadError.url}
 							{loadError.description ? <span className="ml-1 text-text-quaternary">({loadError.description})</span> : null}
 						</div>
-						<Button type="button" variant="outline" size="sm" className="h-7 gap-1 px-2.5 text-xs" onClick={() => { setLoadError(null); webviewReadyRef.current && webviewRef.current?.isConnected && webviewRef.current.reload(); }}>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							className="h-7 gap-1 px-2.5 text-xs"
+							onClick={() => {
+								setLoadError(null);
+								webviewReadyRef.current && webviewRef.current?.isConnected && webviewRef.current.reload();
+							}}
+						>
 							<RefreshCw size={12} aria-hidden="true" />
 							{t("common.retry")}
 						</Button>

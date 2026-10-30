@@ -562,32 +562,32 @@ export function TerminalDock(props: {
 									>
 										{tab.title}
 										{tab.exited && (
-													<>
-														{` · ${t("terminal.exited")}`}
-														{/* 退出态重开（Wave 5）：同归属/同 cwd/同 shell 新建一个 tab 再关掉旧壳。
+											<>
+												{` · ${t("terminal.exited")}`}
+												{/* 退出态重开（Wave 5）：同归属/同 cwd/同 shell 新建一个 tab 再关掉旧壳。
 														    span 而非 button，避免 button 嵌套；键盘 Enter/Space 触发。 */}
-														<span
-															role="button"
-															tabIndex={0}
-															className="ml-1 inline-flex items-center gap-0.5 rounded px-1 text-micro text-muted-foreground underline-offset-2 hover:bg-accent hover:text-foreground hover:underline focus-visible:ring-1 focus-visible:ring-ring"
-															title={t("terminal.reopenTitle")}
-															onClick={(event) => {
-																event.stopPropagation();
-																void addTab(tab.shell).then(() => void closeTab(tab));
-															}}
-															onKeyDown={(event) => {
-																if (event.key === "Enter" || event.key === " ") {
-																	event.preventDefault();
-																	event.stopPropagation();
-																	void addTab(tab.shell).then(() => void closeTab(tab));
-																}
-															}}
-														>
-															<RotateCcw size={10} aria-hidden="true" />
-															{t("terminal.reopen")}
-														</span>
-													</>
-												)}
+												<span
+													role="button"
+													tabIndex={0}
+													className="ml-1 inline-flex items-center gap-0.5 rounded px-1 text-micro text-muted-foreground underline-offset-2 hover:bg-accent hover:text-foreground hover:underline focus-visible:ring-1 focus-visible:ring-ring"
+													title={t("terminal.reopenTitle")}
+													onClick={(event) => {
+														event.stopPropagation();
+														void addTab(tab.shell).then(() => void closeTab(tab));
+													}}
+													onKeyDown={(event) => {
+														if (event.key === "Enter" || event.key === " ") {
+															event.preventDefault();
+															event.stopPropagation();
+															void addTab(tab.shell).then(() => void closeTab(tab));
+														}
+													}}
+												>
+													<RotateCcw size={10} aria-hidden="true" />
+													{t("terminal.reopen")}
+												</span>
+											</>
+										)}
 									</Button>
 									<Button
 										type="button"

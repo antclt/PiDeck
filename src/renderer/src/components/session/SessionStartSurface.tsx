@@ -150,7 +150,9 @@ function SessionStartBody(props: SessionStartProps) {
 		) : fixedProjectLabel !== undefined ? (
 			<span className="inline-flex h-6 min-w-0 max-w-56 items-center gap-1.5 rounded-md px-1.5 text-caption font-normal text-text-secondary">
 				<FolderGit2 size={14} strokeWidth={1.8} className="shrink-0 text-text-tertiary" aria-hidden="true" />
-				<span className="min-w-0 truncate" title={fixedProjectLabel}>{fixedProjectLabel}</span>
+				<span className="min-w-0 truncate" title={fixedProjectLabel}>
+					{fixedProjectLabel}
+				</span>
 			</span>
 		) : undefined);
 	const queuedTrackRef = useRef<HTMLElement | null>(null);

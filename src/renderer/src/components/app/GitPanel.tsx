@@ -1607,7 +1607,9 @@ export function GitPanel(props: GitPanelProps) {
 									    读屏能播报，且与下方「干净态」视觉分流——错误不再只是一行变色小字。 */
 									<div role="alert" className="flex min-h-[22px] shrink-0 items-center gap-1 px-2.5 text-control text-[var(--git-conflict)]">
 										<TriangleAlert size={13} aria-hidden="true" className="shrink-0" />
-										<span className="min-w-0 flex-1 truncate" title={error}>{error}</span>
+										<span className="min-w-0 flex-1 truncate" title={error}>
+											{error}
+										</span>
 									</div>
 								)}
 								{!loading && total === 0 && !error && (
@@ -1798,26 +1800,26 @@ export function GitPanel(props: GitPanelProps) {
 				)}
 
 			{pendingBranchSwitch !== null &&
-			createPortal(
-				<ConfirmDialog
-					title={t("git.branchSwitchConfirmTitle")}
-					message={t("git.branchSwitchConfirmMessage", {
-						branch: pendingBranchSwitch,
-						count: total,
-					})}
-					danger
-					confirmLabel={t("git.branchSwitchConfirmLabel")}
-					onConfirm={() => {
-						const branch = pendingBranchSwitch;
-						setPendingBranchSwitch(null);
-						if (branch) props.onSwitchBranch?.(branch);
-					}}
-					onCancel={() => setPendingBranchSwitch(null)}
-				/>,
-				document.body,
-			)}
+				createPortal(
+					<ConfirmDialog
+						title={t("git.branchSwitchConfirmTitle")}
+						message={t("git.branchSwitchConfirmMessage", {
+							branch: pendingBranchSwitch,
+							count: total,
+						})}
+						danger
+						confirmLabel={t("git.branchSwitchConfirmLabel")}
+						onConfirm={() => {
+							const branch = pendingBranchSwitch;
+							setPendingBranchSwitch(null);
+							if (branch) props.onSwitchBranch?.(branch);
+						}}
+						onCancel={() => setPendingBranchSwitch(null)}
+					/>,
+					document.body,
+				)}
 
-		{showSmartCommitPrompt && (
+			{showSmartCommitPrompt && (
 				<AlertDialog open onOpenChange={(next) => !next && setShowSmartCommitPrompt(false)}>
 					<AlertDialogContent>
 						<AlertDialogHeader>

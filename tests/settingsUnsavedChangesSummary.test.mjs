@@ -83,17 +83,17 @@ test("中文关闭文案带 tab 和项名；多项只展开第一条并带总数
 });
 
 test("终端字段纳入关闭确认摘要与侧栏黄点（Wave 6）", () => {
-		const summary = summarizeSettingsUnsavedChanges({ dirtyFields: ["terminalTheme", "terminalStartupCommand"] });
-		assert.ok(summary, "terminal dirty 必须生成摘要");
-		assert.equal(summary.totalCount, 2);
-		// TranslationKey 是 TS 私有 brand 的字面量联合（结构相等但引用不等），与既有用例一致走 JSON 序列化比较
-		assert.deepEqual(JSON.parse(JSON.stringify(summary.items.map((i) => [i.tabKey, i.itemKey]))), [
-			["settings.tabs.terminal", "settings.terminal.theme"],
-			["settings.tabs.terminal", "settings.terminal.startupCommand"],
-		]);
-		const tabs = dirtySettingsTabIds({ dirtyFields: ["terminalCursorStyle"] });
-		assert.ok(tabs.has("terminal"), "terminal 必须出现在黄点集合");
-	});
+	const summary = summarizeSettingsUnsavedChanges({ dirtyFields: ["terminalTheme", "terminalStartupCommand"] });
+	assert.ok(summary, "terminal dirty 必须生成摘要");
+	assert.equal(summary.totalCount, 2);
+	// TranslationKey 是 TS 私有 brand 的字面量联合（结构相等但引用不等），与既有用例一致走 JSON 序列化比较
+	assert.deepEqual(JSON.parse(JSON.stringify(summary.items.map((i) => [i.tabKey, i.itemKey]))), [
+		["settings.tabs.terminal", "settings.terminal.theme"],
+		["settings.tabs.terminal", "settings.terminal.startupCommand"],
+	]);
+	const tabs = dirtySettingsTabIds({ dirtyFields: ["terminalCursorStyle"] });
+	assert.ok(tabs.has("terminal"), "terminal 必须出现在黄点集合");
+});
 
 test("SettingsModal 关闭确认渲染完整变更列表（intro + 两区分区 items 合并）", () => {
 	assert.match(settingsModal, /formatSettingsUnsavedMessage/);

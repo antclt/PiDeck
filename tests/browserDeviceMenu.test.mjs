@@ -26,7 +26,7 @@ test("设备菜单用 Radix DropdownMenu 原语渲染", () => {
 test("自绘菜单的痕迹已清除：无 deviceMenuOpen state、无手写外点关闭", () => {
 	assert.ok(!panel.includes("deviceMenuOpen"), "deviceMenuOpen 应由 Radix 自管");
 	assert.ok(!panel.includes("deviceMenuRef"));
-	assert.ok(!panel.includes('}, [deviceMenuOpen]);'), "手写 pointerdown 外点关闭 effect 应删除");
+	assert.ok(!panel.includes("}, [deviceMenuOpen]);"), "手写 pointerdown 外点关闭 effect 应删除");
 });
 
 test("选中设备仍触发 selectDevice（UA 切换 + 视口 class）", () => {

@@ -1035,7 +1035,6 @@ export function sanitizeEasyTierCliPath(value: unknown): string {
 // EasyTier 托管网络的输入清洗规则放在独立叶子模块（纯函数、可单测），此处只做再导出。
 export { EASYTIER_PEER_PROTOCOLS, sanitizeEasyTierNetworkName, sanitizeEasyTierNetworkSecret, sanitizeEasyTierPeers } from "../easytierPeers";
 
-
 /**
  * 手动设置令牌的形状约束：8-128 个可打印非空白 ASCII（不含空格，避免 URL 拼接歧义）。
  * 自动生成的 UUID 天然满足；用户自定义串在此拦截，超界回落未设置。

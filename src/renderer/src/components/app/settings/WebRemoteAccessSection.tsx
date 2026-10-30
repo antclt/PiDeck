@@ -105,29 +105,31 @@ export const WebRemoteAccessSection = memo(function WebRemoteAccessSection(props
 		};
 	}, []);
 
-	const runChannelAction = useCallback(async (channel: RemoteAccessChannelId, action: "start" | "stop") => {
-		setBusyChannel(channel);
-		try {
-			const api = desktopApi.settings;
-			// EasyTier 用当前草稿而非已保存设置：改完配置直接点启动即可，不必先点保存
-			const easyTierConfig =
-				channel === "easytier" && action === "start"
-					? {
-							networkName: (props.draft.webRemoteEasyTierNetworkName ?? "").trim(),
-							networkSecret: (props.draft.webRemoteEasyTierNetworkSecret ?? "").trim(),
-							peers: props.draft.webRemoteEasyTierPeers ?? [],
-							bindIpv4: props.draft.webRemoteEasyTierIp ?? "",
-						}
-					: undefined;
-			const result =
-				action === "start" ? await api.webRemoteAccessStart(channel, easyTierConfig) : await api.webRemoteAccessStop(channel);
-			if (result.ok) setState(result.state);
-		} catch {
-			// IPC 层异常不常见（业务失败走 ok:false）；忽略后由推送/重拉兜底
-		} finally {
-			setBusyChannel(null);
-		}
-	}, [props.draft.webRemoteEasyTierNetworkName, props.draft.webRemoteEasyTierNetworkSecret, props.draft.webRemoteEasyTierPeers, props.draft.webRemoteEasyTierIp]);
+	const runChannelAction = useCallback(
+		async (channel: RemoteAccessChannelId, action: "start" | "stop") => {
+			setBusyChannel(channel);
+			try {
+				const api = desktopApi.settings;
+				// EasyTier 用当前草稿而非已保存设置：改完配置直接点启动即可，不必先点保存
+				const easyTierConfig =
+					channel === "easytier" && action === "start"
+						? {
+								networkName: (props.draft.webRemoteEasyTierNetworkName ?? "").trim(),
+								networkSecret: (props.draft.webRemoteEasyTierNetworkSecret ?? "").trim(),
+								peers: props.draft.webRemoteEasyTierPeers ?? [],
+								bindIpv4: props.draft.webRemoteEasyTierIp ?? "",
+							}
+						: undefined;
+				const result = action === "start" ? await api.webRemoteAccessStart(channel, easyTierConfig) : await api.webRemoteAccessStop(channel);
+				if (result.ok) setState(result.state);
+			} catch {
+				// IPC 层异常不常见（业务失败走 ok:false）；忽略后由推送/重拉兜底
+			} finally {
+				setBusyChannel(null);
+			}
+		},
+		[props.draft.webRemoteEasyTierNetworkName, props.draft.webRemoteEasyTierNetworkSecret, props.draft.webRemoteEasyTierPeers, props.draft.webRemoteEasyTierIp],
+	);
 
 	const openGuide = useCallback((tab: RemoteAccessGuideTab) => {
 		setGuideTab(tab);
@@ -178,9 +180,7 @@ export const WebRemoteAccessSection = memo(function WebRemoteAccessSection(props
 	// 其次是已开启的隧道/组网入口；EasyTier 虚拟 IP 放最后（那时已入网，属重复配置）。
 	const lanAddresses = props.networkAddresses ?? [];
 	const lanHost = lanAddresses.length > 0 ? lanAddresses[Math.min(etShareHostIndex, lanAddresses.length - 1)] : undefined;
-	const etConfigBase = lanHost?.address
-		? `http://${bracketIpv6Host(lanHost.address)}:${state?.webPort ?? 0}`
-		: cf?.publicUrl || (ts?.ip ? `http://${ts.ip}:${state?.webPort ?? 0}` : "") || (et?.ip ? `http://${et.ip}:${state?.webPort ?? 0}` : "");
+	const etConfigBase = lanHost?.address ? `http://${bracketIpv6Host(lanHost.address)}:${state?.webPort ?? 0}` : cf?.publicUrl || (ts?.ip ? `http://${ts.ip}:${state?.webPort ?? 0}` : "") || (et?.ip ? `http://${et.ip}:${state?.webPort ?? 0}` : "");
 	const etConfigUrl = etConfigBase && webReady ? appendTokenToUrl(`${etConfigBase.replace(/\/$/, "")}/api/easytier/config.toml`, token, requiresAuth) : "";
 
 	const cfBadge = !cf?.binaryAvailable
@@ -345,76 +345,76 @@ export const WebRemoteAccessSection = memo(function WebRemoteAccessSection(props
 				{etUrl ? <AccessUrlBlock url={etUrl} showQr hint={et?.ipSource === "cli" ? t("settings.remote.et.autoUrlHint") : t("settings.remote.et.manualUrlHint")} /> : <p className="text-caption text-text-secondary">{et?.installed ? t("settings.remote.et.notRunningHint") : t("settings.remote.et.noCliHint")}</p>}
 				{etConfigOpen ? (
 					<>
-				{/* CLI 路径：官方 Windows 包是「解压即用」，不在 PATH 也没卸载记录，自动检测可能找不到 */}
-				<div className="grid gap-1">
-					<div className="grid items-center gap-2 sm:grid-cols-[auto_minmax(0,1fr)]">
-						<Label className="text-xs font-bold text-text-tertiary">{t("settings.remote.et.cliPathLabel")}</Label>
-						<div className="flex items-center gap-2">
-							<Input
-								className="h-8 w-full font-mono text-xs"
-								placeholder={t("settings.remote.et.cliPathPlaceholder")}
-								value={props.draft.webRemoteEasyTierCliPath ?? ""}
-								onChange={(event) => props.updateDraft({ webRemoteEasyTierCliPath: event.target.value })}
-								onBlur={(event) => props.updateDraft({ webRemoteEasyTierCliPath: event.target.value.trim() })}
-							/>
-							<Button size="sm" variant="outline" className="shrink-0" onClick={pickEasyTierCli}>
-								{t("settings.remote.et.browse")}
-							</Button>
+						{/* CLI 路径：官方 Windows 包是「解压即用」，不在 PATH 也没卸载记录，自动检测可能找不到 */}
+						<div className="grid gap-1">
+							<div className="grid items-center gap-2 sm:grid-cols-[auto_minmax(0,1fr)]">
+								<Label className="text-xs font-bold text-text-tertiary">{t("settings.remote.et.cliPathLabel")}</Label>
+								<div className="flex items-center gap-2">
+									<Input
+										className="h-8 w-full font-mono text-xs"
+										placeholder={t("settings.remote.et.cliPathPlaceholder")}
+										value={props.draft.webRemoteEasyTierCliPath ?? ""}
+										onChange={(event) => props.updateDraft({ webRemoteEasyTierCliPath: event.target.value })}
+										onBlur={(event) => props.updateDraft({ webRemoteEasyTierCliPath: event.target.value.trim() })}
+									/>
+									<Button size="sm" variant="outline" className="shrink-0" onClick={pickEasyTierCli}>
+										{t("settings.remote.et.browse")}
+									</Button>
+								</div>
+							</div>
+							<small className="text-micro text-text-tertiary">{t("settings.remote.et.cliPathHint")}</small>
 						</div>
-					</div>
-					<small className="text-micro text-text-tertiary">{t("settings.remote.et.cliPathHint")}</small>
-				</div>
-				{et?.installed && et.binaryPath ? <small className="break-all text-micro text-text-tertiary">{t("settings.remote.et.cliFound", { path: et.binaryPath })}</small> : null}
-				{/* 手动地址始终可填：留空用自动检测，填写后明确优先（多网络/自动结果不对时的覆盖入口） */}
-				<div className="grid gap-1">
-					<div className="grid items-center gap-2 sm:grid-cols-[auto_minmax(0,1fr)]">
-						<Label className="text-xs font-bold text-text-tertiary">{t("settings.remote.et.manualLabel")}</Label>
-						<Input
-							className="h-8 w-full font-mono text-xs"
-							placeholder={t("settings.remote.et.manualPlaceholder")}
-							value={props.draft.webRemoteEasyTierIp ?? ""}
-							onChange={(event) => props.updateDraft({ webRemoteEasyTierIp: event.target.value })}
-							onBlur={(event) => props.updateDraft({ webRemoteEasyTierIp: event.target.value.trim() })}
-						/>
-					</div>
-					<small className="text-micro text-text-tertiary">{t("settings.remote.et.manualHint")}</small>
-				</div>
-				{et?.hostname || et?.version ? <small className="text-micro text-text-tertiary">{t("settings.remote.et.nodeInfo", { hostname: et.hostname || "-", version: et.version || "-" })}</small> : null}
-				{/* 托管配置：填齐网络名 + 密钥后由 PiDeck 生成配置并接管 core 的启停 */}
-				<div className="grid gap-2 rounded-md border border-border-subtle/70 bg-bg-muted/30 p-2">
-					<small className="text-micro text-text-tertiary">{t("settings.remote.et.managedHint")}</small>
-					<div className="grid items-center gap-2 sm:grid-cols-[auto_minmax(0,1fr)]">
-						<Label className="text-xs font-bold text-text-tertiary">{t("settings.remote.et.networkNameLabel")}</Label>
-						<Input
-							className="h-8 w-full font-mono text-xs"
-							placeholder={t("settings.remote.et.networkNamePlaceholder")}
-							value={props.draft.webRemoteEasyTierNetworkName ?? ""}
-							onChange={(event) => props.updateDraft({ webRemoteEasyTierNetworkName: event.target.value })}
-							onBlur={(event) => props.updateDraft({ webRemoteEasyTierNetworkName: event.target.value.trim() })}
-						/>
-					</div>
-					<div className="grid items-center gap-2 sm:grid-cols-[auto_minmax(0,1fr)]">
-						<Label className="text-xs font-bold text-text-tertiary">{t("settings.remote.et.networkSecretLabel")}</Label>
-						<Input
-							type="password"
-							className="h-8 w-full font-mono text-xs"
-							placeholder={t("settings.remote.et.networkSecretPlaceholder")}
-							value={props.draft.webRemoteEasyTierNetworkSecret ?? ""}
-							onChange={(event) => props.updateDraft({ webRemoteEasyTierNetworkSecret: event.target.value })}
-							onBlur={(event) => props.updateDraft({ webRemoteEasyTierNetworkSecret: event.target.value.trim() })}
-						/>
-					</div>
-					<div className="grid gap-1">
-						<Label className="text-xs font-bold text-text-tertiary">{t("settings.remote.et.peersLabel")}</Label>
-						<textarea
-							className="min-h-16 w-full resize-y rounded-md border border-border-subtle/70 bg-bg-base p-2 font-mono text-xs text-text-primary outline-none focus-visible:border-border-strong"
-							placeholder={t("settings.remote.et.peersPlaceholder")}
-							value={(props.draft.webRemoteEasyTierPeers ?? []).join("\n")}
-							onChange={(event) => props.updateDraft({ webRemoteEasyTierPeers: event.target.value.split("\n") })}
-						/>
-						<small className="text-micro text-text-tertiary">{t("settings.remote.et.peersHint")}</small>
-					</div>
-				</div>
+						{et?.installed && et.binaryPath ? <small className="break-all text-micro text-text-tertiary">{t("settings.remote.et.cliFound", { path: et.binaryPath })}</small> : null}
+						{/* 手动地址始终可填：留空用自动检测，填写后明确优先（多网络/自动结果不对时的覆盖入口） */}
+						<div className="grid gap-1">
+							<div className="grid items-center gap-2 sm:grid-cols-[auto_minmax(0,1fr)]">
+								<Label className="text-xs font-bold text-text-tertiary">{t("settings.remote.et.manualLabel")}</Label>
+								<Input
+									className="h-8 w-full font-mono text-xs"
+									placeholder={t("settings.remote.et.manualPlaceholder")}
+									value={props.draft.webRemoteEasyTierIp ?? ""}
+									onChange={(event) => props.updateDraft({ webRemoteEasyTierIp: event.target.value })}
+									onBlur={(event) => props.updateDraft({ webRemoteEasyTierIp: event.target.value.trim() })}
+								/>
+							</div>
+							<small className="text-micro text-text-tertiary">{t("settings.remote.et.manualHint")}</small>
+						</div>
+						{et?.hostname || et?.version ? <small className="text-micro text-text-tertiary">{t("settings.remote.et.nodeInfo", { hostname: et.hostname || "-", version: et.version || "-" })}</small> : null}
+						{/* 托管配置：填齐网络名 + 密钥后由 PiDeck 生成配置并接管 core 的启停 */}
+						<div className="grid gap-2 rounded-md border border-border-subtle/70 bg-bg-muted/30 p-2">
+							<small className="text-micro text-text-tertiary">{t("settings.remote.et.managedHint")}</small>
+							<div className="grid items-center gap-2 sm:grid-cols-[auto_minmax(0,1fr)]">
+								<Label className="text-xs font-bold text-text-tertiary">{t("settings.remote.et.networkNameLabel")}</Label>
+								<Input
+									className="h-8 w-full font-mono text-xs"
+									placeholder={t("settings.remote.et.networkNamePlaceholder")}
+									value={props.draft.webRemoteEasyTierNetworkName ?? ""}
+									onChange={(event) => props.updateDraft({ webRemoteEasyTierNetworkName: event.target.value })}
+									onBlur={(event) => props.updateDraft({ webRemoteEasyTierNetworkName: event.target.value.trim() })}
+								/>
+							</div>
+							<div className="grid items-center gap-2 sm:grid-cols-[auto_minmax(0,1fr)]">
+								<Label className="text-xs font-bold text-text-tertiary">{t("settings.remote.et.networkSecretLabel")}</Label>
+								<Input
+									type="password"
+									className="h-8 w-full font-mono text-xs"
+									placeholder={t("settings.remote.et.networkSecretPlaceholder")}
+									value={props.draft.webRemoteEasyTierNetworkSecret ?? ""}
+									onChange={(event) => props.updateDraft({ webRemoteEasyTierNetworkSecret: event.target.value })}
+									onBlur={(event) => props.updateDraft({ webRemoteEasyTierNetworkSecret: event.target.value.trim() })}
+								/>
+							</div>
+							<div className="grid gap-1">
+								<Label className="text-xs font-bold text-text-tertiary">{t("settings.remote.et.peersLabel")}</Label>
+								<textarea
+									className="min-h-16 w-full resize-y rounded-md border border-border-subtle/70 bg-bg-base p-2 font-mono text-xs text-text-primary outline-none focus-visible:border-border-strong"
+									placeholder={t("settings.remote.et.peersPlaceholder")}
+									value={(props.draft.webRemoteEasyTierPeers ?? []).join("\n")}
+									onChange={(event) => props.updateDraft({ webRemoteEasyTierPeers: event.target.value.split("\n") })}
+								/>
+								<small className="text-micro text-text-tertiary">{t("settings.remote.et.peersHint")}</small>
+							</div>
+						</div>
 					</>
 				) : null}
 				<div className="flex flex-wrap items-center gap-2">

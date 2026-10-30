@@ -211,12 +211,7 @@ export function FavoritesWorkspace() {
 				{entries === null ? (
 					<AsyncLoadingBlock />
 				) : visible.length === 0 ? (
-					<AsyncEmptyBlock
-						icon={Star}
-						iconClassName="size-8 rounded-none bg-transparent text-muted-foreground/50 [&>svg]:size-8"
-						title={hasQuery ? t("favorites.noMatch") : t("favorites.emptyTitle")}
-						description={!hasQuery ? t("favorites.emptyHint") : undefined}
-					/>
+					<AsyncEmptyBlock icon={Star} iconClassName="size-8 rounded-none bg-transparent text-muted-foreground/50 [&>svg]:size-8" title={hasQuery ? t("favorites.noMatch") : t("favorites.emptyTitle")} description={!hasQuery ? t("favorites.emptyHint") : undefined} />
 				) : (
 					<div className="flex flex-col gap-1.5" {...reorder.containerProps}>
 						{/* 删除淡出 + 列表位移收拢：remainingIds 用未过滤的 allIds——搜索/筛选隐藏的

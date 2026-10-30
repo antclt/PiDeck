@@ -1,6 +1,6 @@
 {
 	"capturedAt": "2026-10-30",
-	"total": 1707,
+	"total": 1710,
 	"sourceOnly": [
 		"tests/abortSlowRecoveryNotice.test.mjs",
 		"tests/abortStreamRegression.test.mjs",
@@ -48,6 +48,7 @@
 		"tests/brandMark.test.mjs",
 		"tests/browsePin.test.mjs",
 		"tests/browserApiFallback.test.mjs",
+		"tests/browserDeviceMenu.test.mjs",
 		"tests/browserNavigationAbort.test.mjs",
 		"tests/browserPanelSecurity.test.mjs",
 		"tests/builtInExtensionRootsGate.test.mjs",
@@ -136,6 +137,7 @@
 		"tests/feishuUploadStatFirst.test.mjs",
 		"tests/fileDiffPreview.test.mjs",
 		"tests/fileDiffViewerStableCallbacks.test.mjs",
+		"tests/fileEditorDirtyClose.test.mjs",
 		"tests/fileIcons.test.mjs",
 		"tests/fileManagerDetect.test.mjs",
 		"tests/fileTreeRenderBudget.test.mjs",
