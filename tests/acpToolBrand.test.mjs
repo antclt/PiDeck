@@ -26,6 +26,8 @@ const EXPECTED_BY_PRESET = {
 	minimax: "minimax",
 	mimo: "mimo",
 	copilot: "copilot",
+	kilo: "kilo",
+	cline: "cline",
 	qoder: "qoder",
 	"qoder-cn": "qoder",
 };

@@ -324,6 +324,8 @@ export const zhCN = {
 	"acp.presetDesc.minimax": "MiniMax Code（npx 按需拉取 @minimax-ai/code acp，区分 cn/global 区域账号）",
 	"acp.presetDesc.mimo": "小米 MiMo Code（mimo acp，需先在终端 mimo auth login 登录小米账号）",
 	"acp.presetDesc.copilot": "GitHub Copilot CLI（copilot --acp，需已安装并登录 GitHub Copilot）",
+	"acp.presetDesc.kilo": "Kilo Code（kilo acp，首次使用需完成 Kilo 登录或模型配置）",
+	"acp.presetDesc.cline": "Cline（cline --acp，首次使用需在终端完成 Cline 登录）",
 	"acp.presetDesc.qoder": "Qoder CLI（qodercli --acp，官网脚本安装；先在终端登录或配置 QODER_PERSONAL_ACCESS_TOKEN）",
 	"acp.presetDesc.qoder-cn": "Qoder CLI CN（qoderclicn --acp，国内版官网脚本安装；账号与令牌独立，先在终端登录或配置 QODERCN_PERSONAL_ACCESS_TOKEN）",
 	"app.anonymousChat": "新建匿名聊天（不保存会话记录）",

@@ -10,7 +10,7 @@
  */
 import type { AcpToolConfig } from "../../../../shared/types/acp";
 
-export type AcpToolBrand = "gemini" | "claude" | "codex" | "kimi" | "qwen" | "qoder" | "opencode" | "cursor" | "codebuddy" | "minimax" | "mimo" | "copilot" | "generic";
+export type AcpToolBrand = "gemini" | "claude" | "codex" | "kimi" | "qwen" | "qoder" | "opencode" | "cursor" | "codebuddy" | "minimax" | "mimo" | "copilot" | "kilo" | "cline" | "generic";
 
 /**
  * 关键词表，**顺序敏感**：
@@ -33,6 +33,10 @@ const BRAND_KEYWORDS: ReadonlyArray<readonly [AcpToolBrand, readonly string[]]> 
 	["mimo", ["mimo"]],
 	// Copilot CLI 命令是 `copilot`，包名 @github/copilot。
 	["copilot", ["copilot"]],
+	// Kilo Code 命令是 `kilo`（别名 kilocode），包名 @kilocode/cli。
+	["kilo", ["kilo"]],
+	// Cline 命令是 `cline`，包名同名。
+	["cline", ["cline"]],
 	["cursor", ["cursor", "agent acp"]],
 ];
 

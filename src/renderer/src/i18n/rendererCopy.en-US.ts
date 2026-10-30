@@ -324,6 +324,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"acp.presetDesc.cursor-agent": "Cursor Agent (agent acp; official install script, requires Cursor sign-in)",
 	"acp.presetDesc.codebuddy": "Tencent CodeBuddy (npx pulls @tencent-ai/codebuddy-code --acp on demand)",
 	"acp.presetDesc.copilot": "GitHub Copilot CLI (copilot --acp; sign in to GitHub Copilot first)",
+	"acp.presetDesc.kilo": "Kilo Code (kilo acp; sign in to Kilo or configure a model first)",
+	"acp.presetDesc.cline": "Cline (cline --acp; sign in to Cline in a terminal first)",
 	"acp.presetDesc.mimo": "Xiaomi MiMo Code (mimo acp; run mimo auth login in a terminal first)",
 	"acp.presetDesc.minimax": "MiniMax Code (npx pulls @minimax-ai/code acp on demand; cn/global region account)",
 	"acp.presetDesc.qoder": "Qoder CLI (qodercli --acp; install via the official script, then sign in in a terminal or set QODER_PERSONAL_ACCESS_TOKEN)",

@@ -158,6 +158,8 @@ const PRESET_DESC_KEYS: Record<AcpToolPreset["id"], Parameters<typeof t>[0]> = {
 	minimax: "acp.presetDesc.minimax",
 	mimo: "acp.presetDesc.mimo",
 	copilot: "acp.presetDesc.copilot",
+	kilo: "acp.presetDesc.kilo",
+	cline: "acp.presetDesc.cline",
 	qoder: "acp.presetDesc.qoder",
 	"qoder-cn": "acp.presetDesc.qoder-cn",
 };
