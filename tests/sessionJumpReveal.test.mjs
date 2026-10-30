@@ -64,7 +64,7 @@ test("接线：controller 发揭示请求并在结算时清空，TurnRow 收到�
 	// 兜底落位必须在 toast 之前：先落到轮次行，仍然找不到才报错
 	const giveUp = controller.indexOf('if (action.kind === "give-up")');
 	const fallback = controller.indexOf("findFallbackJumpRow(pendingJump.value.messageId)", giveUp);
-	const toastAt = controller.indexOf('toast(t("sessionFind.jumpFailed"))', giveUp);
+	const toastAt = controller.indexOf('showNotice(t("sessionFind.jumpFailed"))', giveUp);
 	assert.ok(giveUp > 0 && fallback > giveUp && toastAt > fallback, "give-up：先兜底落位，再 toast");
 	// 会话切换必须清掉揭示请求，否则切回来会把旧轮次自动撑开
 	assert.match(controller, /setPendingJump\(undefined\);\s*\n\s*clearTimelineReveal\(\);/);
