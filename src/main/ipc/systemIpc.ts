@@ -37,7 +37,8 @@ import { sanitizePiCustomPaths } from "../pi/piCustomPaths";
 import type { SettingsStore } from "../settings/SettingsStore";
 import type { ConfigManager } from "../config/ConfigManager";
 import type { RemotePiConfigBackend } from "../config/RemotePiConfigBackend";
-import { createPiConfigRouter, rejectRemotePiConfigTarget } from "../config/PiConfigRouter";
+import { createPiConfigRouter, rejectRemotePiConfigTarget, type PiConfigReadRoute, type PiConfigWriteRoute } from "../config/PiConfigRouter";
+import { createWslPiConfigStoreFor } from "../config/WslPiConfigStore";
 import type { AgentManager } from "../pi/AgentManager";
 import type { AppLogger } from "../logging/AppLogger";
 import type { RpcLogger } from "../logging/RpcLogger";
@@ -448,9 +449,10 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	};
 
 	/**
-	 * Phase 5 remote config routing (Batch A): the local target keeps ConfigManager exactly as before; an ssh target
-	 * goes only to the injected RemotePiConfigBackend. Provider test/fetch/usage are local-only and refuse an ssh
-	 * target with REMOTE_CONFIG_PROVIDER_OPERATION_UNSUPPORTED before any network or helper request.
+	 * Phase 5 remote config routing (Batch A) + WS2 wsl target: local keeps ConfigManager; ssh goes only to the
+	 * injected RemotePiConfigBackend; wsl goes only to WslPiConfigStore, which re-resolves the profile's
+	 * distribution HOME on every call (never configureWsl, so two targets cannot pollute each other's configDir).
+	 * Provider test/fetch/usage stay local-only and refuse any non-local target before any request.
 	 */
 	const piConfigRouter = createPiConfigRouter({
 		local: {
@@ -460,7 +462,20 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			saveSettingsConfig: (settings) => configManager.saveSettingsConfig(settings),
 		},
 		remote: remotePiConfig,
+		wsl: createWslPiConfigStoreFor(app.getPath("userData"), { warn: (message, details) => void appLogger.warn("wsl", message, details) }),
 	});
+	// 非本机目标的回程 DTO：local 原样返回；wsl 带来源（档案/发行版/用户），ssh 带脱敏快照（不含明文密钥）。
+	const configReadDto = (routed: PiConfigReadRoute<unknown>) => (routed.kind === "local" ? routed.value : routed.kind === "wsl" ? { raw: JSON.stringify(routed.data, null, 2), parsed: routed.data, wsl: routed } : { raw: JSON.stringify(routed.data, null, 2), parsed: routed.data, remote: routed });
+	/** 非本机写回执：ssh 只带 version，wsl 只带档案 id；都只回「写成功」，本机缓存由调用方决定是否失效。 */
+	const configWriteDto = (routed: PiConfigWriteRoute, file: string) => {
+		if (routed.kind === "local") return routed.value;
+		if (routed.kind === "remote") {
+			void appLogger.info("config", "Remote config patched", { file, hostId: routed.hostId, version: routed.version });
+			return { valid: true, remote: routed };
+		}
+		void appLogger.info("config", "WSL config written", { file, hostId: routed.value.valid ? routed.value.receipt.hostId : undefined });
+		return routed.value.valid ? { valid: true, wsl: routed.value.receipt } : routed.value;
+	};
 
 	/**
 	 * Models/auth 的任何写入都必须同时失效 CLI fallback 与 Pi-authoritative
@@ -1956,12 +1971,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 
 	// ── 配置管理 ─────────────────────────────────────────────────────
 
-	ipcMain.handle(ipcChannels.configGetModels, async (_event, options?: unknown) => {
-		const routed = await piConfigRouter.readModels(options);
-		if (routed.kind === "local") return routed.value;
-		// Batch B renderer DTO: local-compatible fields plus the sanitized remote snapshot (no secret plaintext).
-		return { raw: JSON.stringify(routed.data, null, 2), parsed: routed.data, remote: routed };
-	});
+	ipcMain.handle(ipcChannels.configGetModels, async (_event, options?: unknown) => configReadDto(await piConfigRouter.readModels(options)));
 	// 预览/执行单供应商互迁：方向必须是枚举，供应商名在服务层再校验。
 	ipcMain.handle(ipcChannels.configPreviewProviderMigration, async (_event, direction: unknown) => {
 		if (direction !== "pi-to-dsh" && direction !== "dsh-to-pi") {
@@ -1993,11 +2003,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		return result;
 	});
 	ipcMain.handle(ipcChannels.configGetAuth, () => configManager.getAuthConfig());
-	ipcMain.handle(ipcChannels.configGetSettings, async (_event, options?: unknown) => {
-		const routed = await piConfigRouter.readSettings(options);
-		if (routed.kind === "local") return routed.value;
-		return { raw: JSON.stringify(routed.data, null, 2), parsed: routed.data, remote: routed };
-	});
+	ipcMain.handle(ipcChannels.configGetSettings, async (_event, options?: unknown) => configReadDto(await piConfigRouter.readSettings(options)));
 	ipcMain.handle(ipcChannels.configGetTrust, () => configManager.getTrustConfig());
 	// MCP project layers are selected by a stable registered project id; renderer paths are never trusted.
 	// MCP 作用域：projectId 省略 = 全局页；项目页固定写项目 .pi/mcp.json（读也要过信任门禁）。
@@ -2128,13 +2134,10 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.projectsTrustResponse, (_event, requestId: string, choice: "trust-remember" | "trust-session" | "deny") => agentManager.respondTrustRequest(requestId, choice));
 	ipcMain.handle(ipcChannels.configSaveModels, async (_event, data, options?: unknown) => {
 		const routed = await piConfigRouter.saveModels(data, options);
-		if (routed.kind === "remote") {
-			// 远端 patch 成功：不触碰本机模型缓存/后台 fork（本机 models.json 没变），只回传供下一次 patch 的 version。
-			// 但必须让**那台主机**的目录缓存失效：否则刚加完 provider/模型，选择器还要等 TTL 过期才看得到
-			// （本机侧当年就踩过同一坑，「新模型添加后下拉列表有时候没有」）。
-			remoteModelCatalog?.invalidate(routed.hostId);
-			void appLogger.info("config", "Remote models config patched", { hostId: routed.hostId, version: routed.version });
-			return { valid: true, remote: routed };
+		if (routed.kind !== "local") {
+			// ssh 写回执必须让那台主机的目录缓存失效（否则新加的 provider/模型要等 TTL 才可见）；wsl 只改发行版配置。
+			if (routed.kind === "remote") remoteModelCatalog?.invalidate(routed.hostId);
+			return configWriteDto(routed, "models.json");
 		}
 		const result = routed.value;
 		if (!result.valid) return result;
@@ -2166,10 +2169,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	});
 	ipcMain.handle(ipcChannels.configSaveSettings, async (_event, settings, options?: unknown) => {
 		const routed = await piConfigRouter.saveSettings(settings, options);
-		if (routed.kind === "remote") {
-			void appLogger.info("config", "Remote settings config patched", { hostId: routed.hostId, version: routed.version });
-			return { valid: true, remote: routed };
-		}
+		if (routed.kind !== "local") return configWriteDto(routed, "settings.json");
 		const result = routed.value;
 		void appLogger.info("config", "Pi settings config saved", { keys: Object.keys(settings ?? {}) });
 		return result;

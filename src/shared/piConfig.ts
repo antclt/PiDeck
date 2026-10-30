@@ -12,9 +12,11 @@ export type PiConfigFileKey = (typeof PI_CONFIG_FILES)[number];
 
 /**
  * Where a config read/write should run. local is the default when the option is absent; ssh is usable only
- * for a host the host store has verified and the connection service has ready (the main backend enforces it).
+ * for a host the host store has verified and the connection service has ready (the main backend enforces it);
+ * wsl names a WslHostStore profile, whose distro/user resolve the config directory inside that distribution's
+ * HOME (never the Windows HOME — a missing environment fails closed with a WSL_CONFIG_* code).
  */
-export type PiConfigTarget = { kind: "local" } | { kind: "ssh"; hostId: string };
+export type PiConfigTarget = { kind: "local" } | { kind: "ssh"; hostId: string } | { kind: "wsl"; hostId: string };
 
 /** The closed set of stable codes the remote backend and its IPC surface may answer with. */
 export const REMOTE_CONFIG_CODES = {
@@ -90,5 +92,59 @@ export function isRemotePiConfigWriteReceipt(value: unknown): value is RemotePiC
 export function remotePiConfigCodeFromError(error: unknown): string | undefined {
 	const message = typeof error === "object" && error !== null && "message" in error ? String((error as { message?: unknown }).message ?? "") : String(error ?? "");
 	const match = /(REMOTE_CONFIG_[A-Z_]+)/.exec(message);
+	return match?.[1];
+}
+
+/**
+ * Stable codes for a wsl target (P1-1). Same contract shape as REMOTE_CONFIG_*: a closed vocabulary the
+ * main process may answer with, so the renderer branches on codes instead of parsing prose. The asymmetry is
+ * deliberate — a WSL failure must never be reported as a local/ssh one, because the recovery differs.
+ */
+export const WSL_CONFIG_CODES = {
+	/** target object/hostId is not a wsl target this build accepts. */
+	targetInvalid: "WSL_CONFIG_TARGET_INVALID",
+	/** no WslHostStore profile carries that id (removed, or never created). */
+	hostNotFound: "WSL_CONFIG_HOST_NOT_FOUND",
+	/** the distribution is not registered/reachable through its UNC share. */
+	distroUnavailable: "WSL_CONFIG_DISTRO_UNAVAILABLE",
+	/** the distribution is reachable but the profile's HOME (or .pi/agent) cannot be read/written. */
+	pathUnreadable: "WSL_CONFIG_PATH_UNREADABLE",
+	/** models.json/settings.json exists but is not a JSON object (never silently treated as empty). */
+	fileInvalid: "WSL_CONFIG_FILE_INVALID",
+	/** the page/file is outside the wsl scope (auth/trust/mcp/raw are deferred, like the ssh helper). */
+	unsupported: "WSL_CONFIG_UNSUPPORTED",
+	/** the wsl config store was not assembled for this build. */
+	unavailable: "WSL_CONFIG_UNAVAILABLE",
+} as const;
+export type WslConfigCode = (typeof WSL_CONFIG_CODES)[keyof typeof WSL_CONFIG_CODES];
+/** Closed-set helper: main only returns a code in this vocabulary. */
+export const WSL_CONFIG_CODE_SET: ReadonlySet<string> = new Set(Object.values(WSL_CONFIG_CODES));
+
+/**
+ * One wsl config snapshot. label/distro/user are provenance (which profile produced these bytes); the path
+ * stays in the main process because configGetDir is the single local directory, not a per-target path.
+ */
+export type WslPiConfigSnapshot = {
+	kind: "wsl";
+	hostId: string;
+	file: PiConfigFileKey;
+	label: string;
+	distro: string;
+	user: string;
+	data: Record<string, unknown>;
+};
+
+/** Successful wsl write receipt: whole-file write under the resolved distribution HOME. */
+export type WslPiConfigWriteReceipt = { kind: "wsl"; hostId: string; file: PiConfigFileKey };
+
+/** true only for a snapshot the wsl store produced (never inferred from local data). */
+export function isWslPiConfigSnapshot(value: unknown): value is WslPiConfigSnapshot {
+	return typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "wsl" && typeof (value as { hostId?: unknown }).hostId === "string";
+}
+
+/** Extract the stable WSL_CONFIG_* code from a rejected IPC call (Electron prefixes its message). */
+export function wslPiConfigCodeFromError(error: unknown): string | undefined {
+	const message = typeof error === "object" && error !== null && "message" in error ? String((error as { message?: unknown }).message ?? "") : String(error ?? "");
+	const match = /(WSL_CONFIG_[A-Z_]+)/.exec(message);
 	return match?.[1];
 }
