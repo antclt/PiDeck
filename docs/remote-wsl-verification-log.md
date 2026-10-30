@@ -105,6 +105,8 @@
 
 ### 5.2 另一条远端 spec 的基线补跑：`remoteHostAcceptance`（同为 baseline-fail，但成因是**既有 spec 过时**）
 
+> 后续状态：这一版「旧选择器」问题已由 W4 在本轮（v-final）修掉；本轮同一 spec 先暴露产品缺陷（rootStatus 信封形状），又由 task-12 修复并真机验证 —— 见 §11.5。本节保留为**上一轮（ws4）历史证据**。
+
 | 项 | 内容 |
 |----|------|
 | 命令 | `& "$env:TEMP\pideck-ws4-remote.ps1" -Spec "e2e/remoteHostAcceptance.spec.ts" -Grep "远端主机功能级验收"` |
@@ -350,33 +352,58 @@
 | 9 | 远端 Git G5c：非仓库根显式初始化 | 0 | 29s | **pass** |
 | 10 | 远端 Git G5d/G5e：仓库发现与 scope → 嵌套读写 | 0 | 37s | **pass** |
 | 11 | 远端文件管理 v1：新建/改名/移动/删除+回收站/清空 | 0 | 55s | **pass**（并在最终 HEAD `f31b0104f` 复跑 **55.4s pass**，验证面板拆分未破坏抽屉） |
-| 12 | 远端代码文件编辑（UI 保存→冲突草稿→双项目→Agent 运行） | **1** | 142s | **fail → 既有 e2e 测试债，记「未验证」（见 11.4）** |
+| 12 | 远端代码文件编辑（UI 保存→冲突草稿→双项目→Agent 运行） | **1** | 142s | fail（当时记「未验证」）→ **task-13 已修，最终 HEAD 上 1 passed (2.1m)**，见 §11.4 / §11.11 |
 | 13 | 远端终端：项目隔离 → 保存代码测试 → resize → 清理 | 0 | 130s | **pass** |
 | 14 | 远端会话 trust 提示 | 0 | 61s | **pass** |
 | 15 | 远端会话产品路（新建→发 prompt→正文→关闭 Agent→重开历史） | 0 | 188s | **pass** |
 
 > 串行（同一时刻只有一条 Electron），15 条合计约 **17.4 分钟**；`G6b opt-in soak` 按设计不跑（未验证）。
 > **另**：`e2e/remoteHostAcceptance.spec.ts`（W4 修正版）在 `2c4b35e51` 上跑到「项目级 root 状态」失败（4.6m，见 11.5），**不是**本表这 15 条之一。
-> **HEAD 说明**：本表 15 条跑在 `2c4b35e51`（W2 结构修复之前）；**全量 npm test、两个守卫文件与「远端文件管理」E2E 已在最终 HEAD `f31b0104f` 上复跑**（结构改动、行为不变，其余结果沿用）。
+> **HEAD 说明**：本表 15 条跑在 `2c4b35e51`（W2 结构修复之前）；条 12 已在最终 HEAD `aa14565ef`（= dev `183193254`，e2e-only 增量）复跑为 pass；「全量 npm test」「两个守卫文件」「远端文件管理」E2E 分别在 `53ecfaac4` / `f31b0104f` 上复跑（结构改动、行为不变，其余结果沿用）。
 
-### 11.4 「远端代码文件编辑」：既有 e2e 测试债（未验证）
+### 11.4 「远端代码文件编辑」：既有 e2e 测试债 → **已修（task-13），最终 HEAD 上 pass**
+
+**修复前（两个失败点，都在用例侧）**
 
 | 次 | 失败点 | 证据 | 定性 |
 |----|--------|------|------|
-| 基线跑 | 测试自带 oracle：`ssh … cat -- '<project>/calc.cjs'` 命令失败 | 远端项目目录里该文件不存在/不可读 | oracle 侧失败 |
+| 基线跑（1.24.0 build） | 测试自带 oracle：`ssh … cat -- '<project>/calc.cjs'` 命令失败（`runRemoteCommand` 抛出的子进程错误，**message 里没有 stderr**） | 远端项目目录里该文件不存在/不可读 | oracle 侧失败，未复现 |
 | 最终 build 复跑 | `e2e/remoteSessionAcceptance.spec.ts:690` `.header-drawer-toggle` 30s 未见 | **截图显示抽屉已打开、右侧编辑器正常显示已保存的 `value: 2`**；抽屉打开时该 toggle 不再渲染 | **既有 spec 与当前 UI 交互契约不一致（测试债）** |
 
-**口径：不改断言、不改产品代码；该项记「未验证（既有 spec 与当前 UI 不一致）」**，交 e2e owner 后续重写该步（例如用 Escape / 抽屉自身关闭入口）。
+**修复（W4 task-13，e2e-only）**
 
-### 11.5 `remoteHostAcceptance`（W4 修正版）：跑到「项目级 root 状态」失败
+- 抽屉二次 toggle 的过期交互改成「点『关闭右侧边栏』→ 断言 toggle 回到会话 Tab 栏」；
+- oracle **不改语义**，只在失败路径补现场诊断（`ls -la` + `stat` 后原样 rethrow），下次可区分「文件不存在」与「SSH 失败」；
+- W4 侧连续 2 次 **1 passed (2.2m)**。
+
+**最终 HEAD 独立复跑（本 verifier）**
+
+- HEAD `aa14565ef`（= dev `183193254`，相对 `bb9ab2d55` **只多 e2e 两个文件**，产品代码零变化；`out/` 仍是 `bb9ab2d55` 的构建）；
+- `--grep "远端代码文件"` → **1 passed (2.1m)，exit 0**。
+- 附注：oracle 那次失败（1.24.0 build）在 1.25.0 + 当前 HEAD 上未复现。
+
+### 11.5 `remoteHostAcceptance`：修复前确定性 2/2 失败 → **根因已确认并修复（task-12，真机 1 passed 56.6s，待合入）**
+
+**修复前证据（本 verifier，两个数据点）**
 
 - 退出码 1，4.6m；前置步骤（加主机 pin/连接 ready/登记两项目/会话列表/惰性标题/导入/**重复导入**）全部通过 —— W4 的定位符与 Op 信封修正**有效**。
 - 失败断言：`e2e/remoteHostAcceptance.spec.ts:327` —— 让项目 A 根目录漂移后再刷新，侧栏项目行必须出现 `remote-project-needs-attention`（标题含 `SSH_PROJECT_ROOT_(UNRESOLVED|CHANGED)`）；实测 **240s 内未出现**（`element(s) not found`）。
-- 定性：**待分类**（产品 root-status 刷新回归 or 漂移注入/刷新时序），本轮不改产品代码；已在本记录标注，交 Lead 判定是否单开缺陷。
-- **第二数据点（最终 HEAD `f31b0104f` 复跑）**：同一断言再次失败（4.6m，**确定性 2/2**，不是偶发）。截图证据：
-  - 侧栏项目行 `proj-a-…` 仍显示 `serve ●`，**没有「需处理」标记**（`remote-project-needs-attention`）；
-  - 但主内容区已经显示 `无法列出目录：SSH_PROJECT_ROOT_UNRESOLVED` ⇒ **漂移被产品检测到了，只是项目级状态没有回传到侧栏行**；
-  - 因此这是「面板能报稳定码、侧栏缺 badge」的**产品侧可见性缺口**（或项目列表 rootStatus 缓存未失效），不是漂移注入失败。本轮只记录、不改产品代码。
+- 第二数据点（`f31b0104f` 复跑）同一断言再次失败（4.6m，**确定性 2/2**，不是偶发）。截图证据：侧栏 `proj-a-…` 仍显示 `serve ●`、**无「需处理」badge**；但主内容区已显示 `无法列出目录：SSH_PROJECT_ROOT_UNRESOLVED` ⇒ **漂移被检测到了，只是侧栏行拿不到项目级状态**。
+
+**根因（W4 定位，与本记录观测吻合，已确认）**
+
+- 渲染层 `readRootStatusResponse` **只认扁平形状**，而 main 的 `remoteProjectRootStatus` 已迁到 **Op 信封**（`opOk({ status, … })`）⇒ 侧栏 badge 永远读成 `unavailable`。
+- 这正好解释「面板能显示稳定码（走列表错误路径）、侧栏 badge 不显示（走 rootStatus 读取路径）」的分裂。
+
+**修复（task-12，W4 分支，待合入 dev）**
+
+- 读取改为**信封优先 + 扁平兼容**（旧测试仍绿），并补 3 条 Op 信封回归：读函数三态 / hook 落 atom / badge 渲染；e2e 里 `statusB` 断言同步对齐信封。
+
+**修复后真机验证（由 W4 在其分支跑，2026-10-30）**
+
+- 命令：`npx playwright test e2e/remoteHostAcceptance.spec.ts --grep "远端主机功能级验收"`（dev + task-12 修复构建）
+- 结果：**1 passed (56.6s)，exit 0**；整条走完：加主机 pin → ready → 登记两项目 → 远端会话列表/标题/导入/重复导入 → **A 漂移后侧栏 badge 出现（带 `SSH_PROJECT_ROOT_UNRESOLVED/CHANGED`）** → **邻居 B 不被污染（`rootStatus` ok）**。
+- 归属：该结果由 **W4** 跑出，非本 verifier；合入 dev 后如需最终 HEAD 证据，本 verifier 可再跑一次（约 1 分钟）。
 
 ### 11.6 远端内容搜索：协议级真机证据（旧 helper 回退 + 新 helper 命中）
 
@@ -426,13 +453,42 @@
 >
 > **最终提交**：`feat/v-final` 上的收尾提交（本文件与探针脚本）见 git log；验证记录本身不随 dev 合并而变。
 
+### 11.11 最终 HEAD（`aa14565ef` ← dev `183193254`）：task-12 + task-13 合入后的独立复跑
+
+> dev 增量：`bb9ab2d55`（W1 收口 5 提交 + W4 badge 修复 + 装配 + i18n）→ `183193254`（W4 task-13，**仅 e2e 两文件**）。
+> **HEAD 对应关系**：门禁 + host acceptance 在 `71fc7eefc`（= `bb9ab2d55`）；代码文件 E2E 在 `aa14565ef`（= `183193254`，e2e-only）；守卫 4 与全量单测在 **最终 HEAD `77b7e28bc`**（= `b5b88d913`，仅测试文件 +2/−1，产品代码与 `out/` 均未变）。
+
+| 项 | 命令 | 退出码 | 结果 |
+|----|------|--------|------|
+| 合并（第一次） | `git merge dev`（`bb9ab2d55`） | 0 | `71fc7eefc` |
+| 构建 | `npx electron-vite build`（仅 E2E 准备） | 0 | 1m52s |
+| 门禁四项 | typecheck / ipc-wiring / test-shape / format | 0 / 0 / 0 / 0 | 795 通道；sourceOnly 407 / **1791** 文件；**4183** 文件无差异 |
+| **host acceptance**（task-12 验证） | `--grep "远端主机功能级验收"` | **0** | **1 passed (45.4s)** —— 加主机 pin → ready → 登记两项目 → 会话列表/标题/导入/重复导入 → **A 漂移后侧栏 badge 出现** → **B 未被污染**；W4 分支那次为 56.6s，两者一致 |
+| 合并（第二次） | `git merge dev`（`183193254`，e2e-only） | 0 | `aa14565ef` |
+| **代码文件 E2E**（task-13 验证） | `--grep "远端代码文件"` | **0** | **1 passed (2.1m)**（W4 侧 2/2 pass，各 2.2m） |
+| 合并（第三次） | `git merge dev`（`b5b88d913`，W1 签名跟随，**仅测试文件 +2/−1**） | 0 | `77b7e28bc`（最终 HEAD） |
+| 守卫 4 | `node --test tests/projectPackageDiscoveredRow.test.mjs` | **0** | **11 passed / 0 failed** |
+| **全量单测（最终 HEAD）** | `npm test`（`node --test --test-concurrency=4`） | **0** | **tests 15106 / pass 14821 / fail 0 / skipped 285 / 422s** —— 最终 HEAD 全绿 |
+| 全量单测 | `npm test`（`node --test --test-concurrency=4`） | **1** | **tests 15106 / pass 14820 / fail 1 / skipped 285 / 987s**（987s 因本轮交叉 npm install 特别慢）；唯一失败＝`tests/projectPackageDiscoveredRow.test.mjs:105`「项目层卸载与安装走同一信任路径」——断言要求 `extensionsUninstall` 签名恰好到 `projectId?: unknown)`，而 W1 资源目标重构给 handler 加了 `options?: unknown`（`src/main/ipc/storeIpc.ts:642`）；**源码形状签名守卫，行为未回归**，待 owner 补字面量后复跑 |
+
+**helperCapabilities 说明（Lead 问）**：UI 侧读取（`rootStatus.helperCapabilities`）**真机未额外观测**——该字段只经 rootStatus 返回、主进程日志与 `remoteHosts.diagnostics` 都不带它，现有 e2e 也无断言；由单测覆盖（task-12 的 Op 信封回归 3 条 + W2 的 `fileSearchCapability` 单测）。**helper 侧能力声明有真机证据**：协议探针 `hello` 得 `helperVersion 1.25.0`、capabilities 35 项含 `fs.searchContent`（§11.6）。
+
+### 11.12 最终收尾结论（HEAD `77b7e28bc` = dev `b5b88d913` + merge）
+
+- 全量：**tests 15106 / pass 14821 / fail 0 / skipped 285 / 422s，RC=0**（最终 HEAD 全绿）。
+- 门禁：typecheck / ipc-wiring（795）/ test-shape（sourceOnly 407，1791 文件，新增 0）/ format（4183 文件）全 0。
+- 远端：host acceptance **1 passed (45.4s)**（task-12 修复生效）；代码文件 E2E **1 passed (2.1m)**（task-13 修复生效）；此前 15 条 sweep 14 pass（条 12 已由 task-13 修复并复跑通过）。
+- WSL：只读 smoke 与停/启 smoke 均 0（停态 UNC 自动拉起 2.4s，按 Lead 裁定接受）。
+- 内容搜索：协议级真机证据 pass（helper 1.25.0 / 35 项能力含 `fs.searchContent` / 命中 2 处 / 二进制跳过 / `QUERY_INVALID`）；UI 端到端未覆盖（无 e2e 入口）。
+- 三条形状守卫（remoteDragMove 行数预算、remoteProjectUpload 计数、remoteProjectEntryState 锚点）与 W1 签名守卫（projectPackageDiscoveredRow）均已在最终 HEAD 前修复，**最终全量 0 fail**。
+
 ### 11.9 本轮结论（口径）
 
 **已通过（真实主机）**：远端 Git 全档（G1/G2/G3/G4/G5a-e，14 条含终端/trust/产品路/文件管理）；WSL 只读与停/启 smoke；远端内容搜索协议级（新 helper 1.25.0 命中、二进制跳过、非法 query 稳定拒绝；同时记录旧 helper 1.24.0 的「仅文件名」回退行为）；两项源码形状守卫在 W2 修复后恢复。
 
 **未通过 / 未验证（不当作通过）**：
-1. **远端代码文件编辑**：既有 e2e 与当前 UI 交互契约不一致（oracle + `.header-drawer-toggle`），记「未验证（既有 spec 与当前 UI 不一致）」，不改断言。
-2. **remoteHostAcceptance**：**确定性 2/2 失败**在「项目级 root 状态」——截图证明漂移**已被检测**（主内容区 `无法列出目录：SSH_PROJECT_ROOT_UNRESOLVED`），但**侧栏项目行没有「需处理」badge**；定性＝「漂移已检测、侧栏 badge 未更新」的产品侧可见性缺口（或项目列表 rootStatus 未失效），本轮只记录不改产品代码（见 11.5）。
+1. **远端代码文件编辑**：修复前是既有 e2e 与当前 UI 交互契约不一致（`.header-drawer-toggle` + 一次未复现的 oracle 失败）；**task-13 已修（e2e-only）**，最终 HEAD `aa14565ef` 独立复跑 **1 passed (2.1m)**（见 11.4）。
+2. **remoteHostAcceptance**：修复前确定性 2/2 失败（漂移已检测但侧栏 badge 未显示）；根因＝渲染层 `readRootStatusResponse` 只认扁平形状、main 已迁 Op 信封 ⇒ badge 恒 `unavailable`；**task-12 已修并合入**，本 verifier 在 `71fc7eefc`（= dev `bb9ab2d55`）**独立复跑 1 passed (45.4s)**（见 11.5 / 11.11）。
 3. **G6b opt-in soak**、**remoteFunctionalAcceptance**（本轮不做）、其余未列出的远端用例。
 4. **远端内容搜索 UI 端到端未覆盖**（现有 e2e 无入口），只有协议级真机证据。
 
