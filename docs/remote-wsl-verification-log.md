@@ -2,11 +2,11 @@
 
 > 分支 `feat/ws4-verify` · 本轮 smoke 运行在提交 `46523b525`（`dev` 合入 WS1 之前的基线）· 记录时间 2026-10-30 · 作者 WS4。
 > 本文件只记录证据，不改产品代码；**跳过 / 未运行 = 未验证，绝不算通过**。
-> 安全口径：主机名 / 用户名 / 指纹 / 私钥一律不写入本文件，也不打印到终端；凭据只在 PowerShell 进程内以 `\$env:PIDECK_E2E_REMOTE_*` 形式存在。
+> 安全口径：主机名 / 用户名 / 指纹 / 私钥一律不写入本文件，也不打印到终端；凭据只在 PowerShell 进程内以 `$env:PIDECK_E2E_REMOTE_*` 形式存在。
 
 ## 0. 记录口径
 
-- 门禁命令禁止用管道吞退出码，统一写成：`\$o = & npm run xxx 2>&1; \$rc = \$LASTEXITCODE; \$o | Select-Object -Last 20; "EXIT=\$rc"`。
+- 门禁命令禁止用管道吞退出码，统一写成：`$o = & npm run xxx 2>&1; $rc = $LASTEXITCODE; $o | Select-Object -Last 20; "EXIT=$rc"`。
 - 所有远端 E2E 都用同一个包装脚本 `%TEMP%\pideck-ws4-remote.ps1`（派生凭据 → 清环境变量 → 跑 Playwright → 输出脱敏日志），**脚本在 `%TEMP%`，不入库、不含任何凭据值**。
 - 真实 Electron（`out/main/index.js`）+ 真实主机；跳过与未运行分开记，都不进通过统计。
 
@@ -56,11 +56,11 @@
 ## 5. 远端 E2E 用例清单与状态（`e2e/remoteSessionAcceptance.spec.ts`）
 
 `npx playwright test e2e/remoteSessionAcceptance.spec.ts --list` ⇒ **16 tests in 1 file**（exit 0）。
-远端 E2E 合计 18 条（另有 `remoteHostAcceptance.spec.ts` 1 条、`remoteFunctionalAcceptance.spec.ts` 1 条，均**未运行**）。
+远端 E2E 合计 18 条：本 spec 16 条 + `remoteHostAcceptance.spec.ts` 1 条（基线补跑结果见 5.2）+ `remoteFunctionalAcceptance.spec.ts` 1 条（**未运行**）。
 
 | # | 用例（行号） | 命令（除第 1 列外均经统一包装脚本） | 退出码 | 时长 | 结论 |
 |---|--------------|--------------------------------------|--------|------|------|
-| 1 | 远端会话产品路：新建 → 发 prompt 出正文 → 关闭 Agent → 重开历史仍在（324） | `npx playwright test e2e/remoteSessionAcceptance.spec.ts --grep "远端会话产品路"` | 1 | 6.1m | **失败**（失败点见 5.1；前 12 个 step 已通过） |
+| 1 | 远端会话产品路：新建 → 发 prompt 出正文 → 关闭 Agent → 重开历史仍在（324） | `npx playwright test e2e/remoteSessionAcceptance.spec.ts --grep "远端会话产品路"` | 1 | 6.1m | **baseline-fail / 待复跑区分**（失败点见 5.1；前 12 个 step 已通过） |
 | 2 | 远端代码文件：UI 编辑保存 → 外部冲突保留草稿 → 双项目隔离 → Agent 真实运行测试（661） | 同形（`--grep`） | — | — | 未验证（未运行） |
 | 3 | 远端 Git G1：只读 SCM 与差异 → 双项目隔离 → 断开不重连 → Git 字节不变（723） | `--grep "远端 Git G1"` | 0 | 1.3m | **通过** |
 | 4 | 远端 Git G2a/G2b：精确暂存取消 → 提交已确认暂存区 → 拒绝面 → unborn 与工作区不变（751） | 同上 | — | — | 未验证（未运行） |
@@ -79,7 +79,10 @@
 
 **统计：2 通过 / 1 失败 / 13 未验证（跳过=未验证）。**
 
-### 5.1 基线失败：#1 产品路（唯一失败项，供 Lead 判定是否产品 bug）
+### 5.1 基线失败（baseline-fail / 待复跑区分）：#1 产品路
+
+> 定性：该 run 在 `46523b525`（早于全部 P0 修复），**不归因于本轮任何改动**，也不在本轮修复。
+> 处置：合并 `dev` 后重跑同一条 `--grep`；仍失败则由 Lead 作为**独立缺陷**写进最终汇报（handoff 规则：不顺手修无关缺陷，只记录）。
 
 - **失败 step**：`远端并发冲突：上传期间外部追加必须保留，UI 提示重载且不自动覆盖`（`e2e/remote-history-mutations.ts:92`，由 spec:616 调用）。
 - **失败摘要**：`expect(locator).toBeVisible() failed` → `getByText(/远端会话文件已被其他程序修改/)` 在 240s 内未出现（`element(s) not found`）。
@@ -99,10 +102,22 @@
 - **判定建议**：可能是「192KiB 大块改写 + CAS 校验」在这条链路上超过远端命令超时（超时后提示走 unknown 分支），也可能是冲突检测真的没命中。**本轮只记录、不修**；WS1 合并后重跑同一 `--grep` 可区分「修复前/修复后」，再由 Lead 决定是否单开缺陷。
 - **证据留存**：Playwright `test-results/...`（含 trace / screenshot / error-context，均在本地、不入库）；主进程日志副本 `%TEMP%\p42-app-logs-<runId>\`。
 
+### 5.2 另一条远端 spec 的基线补跑：`remoteHostAcceptance`（同为 baseline-fail，但成因是**既有 spec 过时**）
+
+| 项 | 内容 |
+|----|------|
+| 命令 | `& "$env:TEMP\pideck-ws4-remote.ps1" -Spec "e2e/remoteHostAcceptance.spec.ts" -Grep "远端主机功能级验收"` |
+| 退出码 / 时长 | 1 / 39.9s |
+| 结论 | **失败（baseline-fail；既有 e2e 选择器过时，不是产品缺陷）** |
+| 失败点 | 「设置页加主机：ssh config 候选中挑出目标 user@host…」——`e2e/remoteHostAcceptance.spec.ts:171` |
+| 失败摘要 | `locator.click: Timeout 30000ms exceeded`，等不到 `.settings-modal` 内 `getByRole("button", { name: "添加", exact: true })` |
+| 成因判定 | 设置页「连接」页签的入口按钮现在用的是 `settings.connections.new` =「新建连接」（`src/renderer/src/components/app/settings/ConnectionsTab.tsx:283`）；这条旧 spec 仍用精确名「添加」。较新的 `remoteSessionAcceptance.spec.ts:203` 已改成 `/^(添加|新建连接)$/` 兼容两种文案，所以同一操作在那边能通过。 |
+| 处置 | 按 handoff 规则**不顺手修无关缺陷、不改既有断言**，只记录；该 spec 其余 12 步（连接 ready、双项目、会话列表/标题/导入、项目级 root 状态）**未验证**。 |
+
 ## 6. 未覆盖 / 风险
 
-- 16 条远端会话用例只跑了 3 条；13 条**未验证**（另有 host/functional 两条远端 spec 未跑）。历史通过结论不适用于当前基线。
-- `#1 产品路` 是**失败**而非通过：其中"新建→发送→出正文→关闭→重开历史"这条主链路已验证通过，失败只发生在后续的「并发冲突提示」子步骤。
+- 16 条远端会话用例只跑了 3 条；13 条**未验证**。另有 `remoteHostAcceptance`（已跑、失败，成因是旧 spec 选择器过时，见 5.2）与 `remoteFunctionalAcceptance`（未跑）。历史通过结论不适用于当前基线。
+- `#1 产品路` 记为 **baseline-fail / 待复跑区分**：其中"新建→发送→出正文→关闭→重开历史"这条主链路已验证通过，失败只发生在后续的「并发冲突提示」子步骤；该结论属 `46523b525` 基线，不归因于 WS1/WS2/WS3 的改动。
 - 本轮基线**不含** P0-1～P0-4 与 P1 任何修复，因此通过项只证明「存量主路径可用」，不证明缺口已修。
 - WSL 侧（`Ubuntu-26.04`）无实机证据；macOS 无本机证据，不声称已验证。
 - 全量远端 E2E 连续串跑未执行；全量 `npm test` 按分工留到集成阶段（Lead 统一跑）。
@@ -120,4 +135,5 @@
 
 ## 8. 更新记录
 
-- 2026-10-30（`46523b525`）：建立本记录。本地 5 项基线门禁全绿；远端 smoke 3 条 → 2 通过（Git G1、trust 提示）/ 1 失败（产品路的并发冲突子步骤）/ 13 未验证；定位并规避 `ELECTRON_RUN_AS_NODE` 环境坑。
+- 2026-10-30（`46523b525`）：建立本记录。本地 5 项基线门禁全绿；远端 smoke 3 条 → 2 通过（Git G1、trust 提示）/ 1 失败（产品路的并发冲突子步骤，定性 baseline-fail / 待复跑区分）/ 13 未验证；定位并规避 `ELECTRON_RUN_AS_NODE` 环境坑。
+- 2026-10-30（`46523b525`，补跑）：`remoteHostAcceptance` 基线跑 → 失败，成因为旧 spec 选择器过时（`添加` vs 现行「新建连接」），非产品缺陷；已记入 5.2，未改任何断言。
