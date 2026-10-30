@@ -12,7 +12,7 @@ import { SettingsSection } from "./SettingsStorageTab";
 import { PromptEnhanceSettingsSection } from "./PromptEnhanceSettingsSection";
 import { PromptSuggestionSettingsSection } from "./PromptSuggestionSettingsSection";
 import { SelectionToolSettingsSection } from "./SelectionToolSettingsSection";
-import { DirtyMarker, SettingBox, SettingRow, SettingSwitchRow } from "./SettingRows";
+import { SettingApplyBadge, DirtyMarker, SettingBox, SettingRow, SettingSwitchRow } from "./SettingRows";
 import { VoiceTranscriptionSettingsSection } from "./VoiceTranscriptionSettingsSection";
 import { QuickTaskMenuSetting } from "./QuickTaskMenuSetting";
 import { QuickMessagesSetting } from "./QuickMessagesSetting";
@@ -558,7 +558,7 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 					</Select>
 				</SettingRow>
 				<SettingSwitchRow anchor="common-close-to-tray" title={t("settings.closeToTray")} checked={draft.closeToTray} onChange={(checked) => updateDraft({ closeToTray: checked })} />
-				<SettingSwitchRow anchor="common-single-instance" title={t("settings.singleInstance")} description={t("settings.singleInstanceDesc")} checked={draft.singleInstance} onChange={(checked) => updateDraft({ singleInstance: checked })} />
+				<SettingSwitchRow anchor="common-single-instance" title={<>{t("settings.singleInstance")}<SettingApplyBadge mode="restart" /></>} description={t("settings.singleInstanceDesc")} checked={draft.singleInstance} onChange={(checked) => updateDraft({ singleInstance: checked })} />
 			</SettingsSection>
 		</>
 	);

@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: def5161154de1fade70d37f1acb3a9e6d10a59c315f9036790b8762349f456e5（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 59b9766ba3eac733dac93ff32bc367c15a0b81d2d024c12d08b63a2db1f82b55（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5566,6 +5566,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.saveAndClose": "儲存並關閉",
 	"settings.discardChanges": "放棄更改",
 	"settings.dirtyTooltip": "此項已修改，尚未儲存",
+	"settings.apply.live": "即時生效",
+	"settings.apply.newSession": "新會話生效",
+	"settings.apply.restart": "重啟後生效",
 	"settings.loadFailed": "設定載入失敗",
 	"settings.renderCrashed": "設定頁面渲染異常",
 	"settings.renderCrashedChunkHint": "介面資源載入失敗（常見於應用更新或熱更新後），點選「重新整理應用」即可恢復；也可以先關閉彈框繼續使用。",

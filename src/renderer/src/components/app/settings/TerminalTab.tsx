@@ -6,7 +6,7 @@ import { Input } from "../../ui-shadcn/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../ui-shadcn/select";
 import { Combobox, type ComboboxOption } from "../../ui-shadcn/combobox";
 import { SettingsSection } from "./SettingsStorageTab";
-import { DirtyMarker, SettingRow, SettingSwitchRow } from "./SettingRows";
+import { DirtyMarker, SettingApplyBadge, SettingRow, SettingSwitchRow } from "./SettingRows";
 import { TERMINAL_THEME_DEFS } from "../../../terminalThemes";
 
 /** 下拉选项：SelectItem 直接透传 value/label */
@@ -111,6 +111,7 @@ export const TerminalTab = memo(function TerminalTab(props: TerminalTabProps) {
 					title={
 						<>
 							<span>{t("settings.terminal.paddingY")}</span>
+							<SettingApplyBadge mode="newSession" />
 							<DirtyMarker dirty={isDirty("terminalPaddingY")} label={t("settings.terminal.paddingY")} />
 						</>
 					}
@@ -181,6 +182,7 @@ export const TerminalTab = memo(function TerminalTab(props: TerminalTabProps) {
 					title={
 						<>
 							<span>{t("settings.terminal.scrollback")}</span>
+							<SettingApplyBadge mode="newSession" />
 							<DirtyMarker dirty={isDirty("terminalScrollback")} label={t("settings.terminal.scrollback")} />
 						</>
 					}
