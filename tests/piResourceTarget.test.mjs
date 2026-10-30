@@ -122,7 +122,7 @@ test("解析失败只回稳定码：缺档案 / 发行版不可用 / 环境与�
 });
 
 test("P1 稳定码是闭集，渲染层可从 IPC 前缀错误里抓码", () => {
-	const expected = ["PI_RESOURCE_TARGET_INVALID", "PI_RESOURCE_SSH_UNSUPPORTED", "PI_RESOURCE_HOST_NOT_FOUND", "PI_RESOURCE_DISTRO_UNAVAILABLE", "PI_RESOURCE_UNAVAILABLE"];
+	const expected = ["PI_RESOURCE_TARGET_INVALID", "PI_RESOURCE_SSH_UNSUPPORTED", "PI_RESOURCE_WRITE_UNSUPPORTED", "PI_RESOURCE_HOST_NOT_FOUND", "PI_RESOURCE_DISTRO_UNAVAILABLE", "PI_RESOURCE_UNAVAILABLE"];
 	assert.deepEqual(Object.values(shared.PI_RESOURCE_CODES).sort(), [...expected].sort());
 	for (const code of expected) assert.ok(shared.PI_RESOURCE_CODE_SET.has(code), code);
 	const error = new Error("Error invoking remote method 'prompts:list': Error: PI_RESOURCE_HOST_NOT_FOUND");
