@@ -3456,6 +3456,8 @@ function registerIpc() {
 		enabled: remoteExperimentEnabled,
 		service: remoteHostServiceIfEnabled,
 		factsEvents: remoteFactsEvents,
+		// P0-1：Git 写成功/结果未知时，主进程目录事实缓存与渲染层文件树一起失效（tree scope）。
+		onTreeInvalidated: (projectId) => remoteProjectIpc.invalidateTree(projectId),
 		trusted: async (target) => (await remoteProjectTrustService?.trustOverride({ hostId: target.hostId, remoteRoot: target.remotePath })) === "approve",
 		locator: (projectId) => {
 			const project = projectStore.get(projectId);
