@@ -456,7 +456,7 @@
 ### 11.11 最终 HEAD（`aa14565ef` ← dev `183193254`）：task-12 + task-13 合入后的独立复跑
 
 > dev 增量：`bb9ab2d55`（W1 收口 5 提交 + W4 badge 修复 + 装配 + i18n）→ `183193254`（W4 task-13，**仅 e2e 两文件**）。
-> **HEAD 对应关系**：门禁在 `71fc7eefc`（= `bb9ab2d55`）、host acceptance 在 `71fc7eefc`、全量单测在 `aa14565ef`（= `183193254`，e2e-only 增量，产品代码与 `out/` 未变）、代码文件 E2E 在 `aa14565ef`。
+> **HEAD 对应关系**：门禁 + host acceptance 在 `71fc7eefc`（= `bb9ab2d55`）；代码文件 E2E 在 `aa14565ef`（= `183193254`，e2e-only）；守卫 4 与全量单测在 **最终 HEAD `77b7e28bc`**（= `b5b88d913`，仅测试文件 +2/−1，产品代码与 `out/` 均未变）。
 
 | 项 | 命令 | 退出码 | 结果 |
 |----|------|--------|------|
@@ -466,9 +466,21 @@
 | **host acceptance**（task-12 验证） | `--grep "远端主机功能级验收"` | **0** | **1 passed (45.4s)** —— 加主机 pin → ready → 登记两项目 → 会话列表/标题/导入/重复导入 → **A 漂移后侧栏 badge 出现** → **B 未被污染**；W4 分支那次为 56.6s，两者一致 |
 | 合并（第二次） | `git merge dev`（`183193254`，e2e-only） | 0 | `aa14565ef` |
 | **代码文件 E2E**（task-13 验证） | `--grep "远端代码文件"` | **0** | **1 passed (2.1m)**（W4 侧 2/2 pass，各 2.2m） |
+| 合并（第三次） | `git merge dev`（`b5b88d913`，W1 签名跟随，**仅测试文件 +2/−1**） | 0 | `77b7e28bc`（最终 HEAD） |
+| 守卫 4 | `node --test tests/projectPackageDiscoveredRow.test.mjs` | **0** | **11 passed / 0 failed** |
+| **全量单测（最终 HEAD）** | `npm test`（`node --test --test-concurrency=4`） | **0** | **tests 15106 / pass 14821 / fail 0 / skipped 285 / 422s** —— 最终 HEAD 全绿 |
 | 全量单测 | `npm test`（`node --test --test-concurrency=4`） | **1** | **tests 15106 / pass 14820 / fail 1 / skipped 285 / 987s**（987s 因本轮交叉 npm install 特别慢）；唯一失败＝`tests/projectPackageDiscoveredRow.test.mjs:105`「项目层卸载与安装走同一信任路径」——断言要求 `extensionsUninstall` 签名恰好到 `projectId?: unknown)`，而 W1 资源目标重构给 handler 加了 `options?: unknown`（`src/main/ipc/storeIpc.ts:642`）；**源码形状签名守卫，行为未回归**，待 owner 补字面量后复跑 |
 
 **helperCapabilities 说明（Lead 问）**：UI 侧读取（`rootStatus.helperCapabilities`）**真机未额外观测**——该字段只经 rootStatus 返回、主进程日志与 `remoteHosts.diagnostics` 都不带它，现有 e2e 也无断言；由单测覆盖（task-12 的 Op 信封回归 3 条 + W2 的 `fileSearchCapability` 单测）。**helper 侧能力声明有真机证据**：协议探针 `hello` 得 `helperVersion 1.25.0`、capabilities 35 项含 `fs.searchContent`（§11.6）。
+
+### 11.12 最终收尾结论（HEAD `77b7e28bc` = dev `b5b88d913` + merge）
+
+- 全量：**tests 15106 / pass 14821 / fail 0 / skipped 285 / 422s，RC=0**（最终 HEAD 全绿）。
+- 门禁：typecheck / ipc-wiring（795）/ test-shape（sourceOnly 407，1791 文件，新增 0）/ format（4183 文件）全 0。
+- 远端：host acceptance **1 passed (45.4s)**（task-12 修复生效）；代码文件 E2E **1 passed (2.1m)**（task-13 修复生效）；此前 15 条 sweep 14 pass（条 12 已由 task-13 修复并复跑通过）。
+- WSL：只读 smoke 与停/启 smoke 均 0（停态 UNC 自动拉起 2.4s，按 Lead 裁定接受）。
+- 内容搜索：协议级真机证据 pass（helper 1.25.0 / 35 项能力含 `fs.searchContent` / 命中 2 处 / 二进制跳过 / `QUERY_INVALID`）；UI 端到端未覆盖（无 e2e 入口）。
+- 三条形状守卫（remoteDragMove 行数预算、remoteProjectUpload 计数、remoteProjectEntryState 锚点）与 W1 签名守卫（projectPackageDiscoveredRow）均已在最终 HEAD 前修复，**最终全量 0 fail**。
 
 ### 11.9 本轮结论（口径）
 
