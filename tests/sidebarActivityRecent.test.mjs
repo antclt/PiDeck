@@ -249,7 +249,7 @@ describe("最近会话区渲染契约", () => {
 			const decl = `const ${name} =`;
 			const start = source.indexOf(decl);
 			assert.notEqual(start, -1, `${name} must exist`);
-			const line = source.slice(start, source.indexOf('\\n', start));
+			const line = source.slice(start, source.indexOf("\\n", start));
 			assert.match(line, /sidebarRowStyles|SESSION_ROW|ROW_MORE_ACTIONS/, `${name} 必须从共享基座 sidebarRowStyles 引入（发现: ${line.trim()}）`);
 		}
 	});
