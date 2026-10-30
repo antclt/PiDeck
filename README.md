@@ -11,7 +11,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.9.9--beta-blue)
+![Version](https://img.shields.io/badge/version-0.9.9-blue)
 
 国内 AtomGit 托管：https://atomgit.com/ayuayue/PiDeck
 <!-- 预留 AtomGit G-Star 徽章位（替换占位链接后启用）
@@ -102,9 +102,9 @@
 
 ## 📋 更新日志
 
-> **最新版本 v0.9.9-beta**（2026-10-30）
+> **最新版本 v0.9.9**（2026-10-30）
 
-### v0.9.9-beta 更新亮点
+### v0.9.9 更新亮点
 - 🚀 **外观拆成「样式 × 配色」两维，终端皮肤成套移植 pi TUI**
 - 🚀 **会话分组成为宿主核心能力（插件 v3）**
 - 🚀 **收藏整个会话**
@@ -115,6 +115,7 @@
 - 🚀 **通过 MCP 新建并驱动 ACP 会话**
 - 🚀 **Web 端支持 ACP 会话**
 - 🚀 **ACP 用量面板补齐 token / 时延 / TPS**
+- 🚀 **ACP 会话补齐待办与子代理**
 - ✨ **ACP 模型下拉可搜索**
 - ✨ **ACP 回合中发送排队，忙碌时补独立停止钮**
 - ✨ **ACP 工具表改为折叠行**
