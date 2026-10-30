@@ -78,7 +78,7 @@ test("requireLocalPiResourceTarget：缺省/local 放行，wsl 回 writeUnsuppor
 	assert.throws(() => target.requireLocalPiResourceTarget({ target: { kind: "local" }, force: true }), { message: shared.PI_RESOURCE_CODES.targetInvalid });
 });
 
-test("prompt 写通道：非本机 target 被拒且不调用本机 manager", async () => {
+test("prompt 写通道（task-16 起已路由）：wsl target 在池未装配时 fail closed，绝不回退本机", async () => {
 	const h = createHarness();
 	const cases = [
 		["promptsCreate", [{ name: "n", description: "d" }, WSL_OPTIONS()]],
@@ -88,7 +88,7 @@ test("prompt 写通道：非本机 target 被拒且不调用本机 manager", asy
 		["promptsOpenFolder", [WSL_OPTIONS()]],
 	];
 	for (const [channel, args] of cases) {
-		await assert.rejects(invoke(h, channel, ...args), { message: shared.PI_RESOURCE_CODES.writeUnsupported }, channel);
+		await assert.rejects(invoke(h, channel, ...args), { message: shared.PI_RESOURCE_CODES.unavailable }, channel);
 	}
 	assert.deepEqual(h.calls, []);
 	await assert.rejects(invoke(h, "promptsDelete", "C:/prompts/a.md", SSH_OPTIONS()), { message: shared.PI_RESOURCE_CODES.sshUnsupported });
@@ -110,18 +110,18 @@ test("商店导入与技能安装同样拒绝非本机 target（底层都写入�
 	assert.deepEqual(h.calls, []);
 });
 
-test("extension 写通道：非本机 target 被拒且不调用本机 manager", async () => {
+test("extension 写通道：toggle 已路由（池缺失 fail closed），install/uninstall/update 等仍为稳定码守卫", async () => {
 	const h = createHarness();
-	const cases = [
+	await assert.rejects(invoke(h, "extensionsToggle", "npm:pkg", true, "user", undefined, undefined, WSL_OPTIONS()), { message: shared.PI_RESOURCE_CODES.unavailable });
+	const guarded = [
 		["extensionsRemoveBuiltIn", ["local-ext", WSL_OPTIONS()]],
 		["extensionsRestoreBuiltIn", ["local-ext", WSL_OPTIONS()]],
 		["extensionsUninstall", ["npm:pkg", "user", undefined, WSL_OPTIONS()]],
 		["extensionsInstall", ["npm:pkg", undefined, WSL_OPTIONS()]],
-		["extensionsToggle", ["npm:pkg", true, "user", undefined, undefined, WSL_OPTIONS()]],
 		["extensionsUpdate", [WSL_OPTIONS()]],
 		["extensionsUpdateOne", ["npm:pkg", WSL_OPTIONS()]],
 	];
-	for (const [channel, args] of cases) {
+	for (const [channel, args] of guarded) {
 		await assert.rejects(invoke(h, channel, ...args), { message: shared.PI_RESOURCE_CODES.writeUnsupported }, channel);
 	}
 	assert.deepEqual(h.calls, []);

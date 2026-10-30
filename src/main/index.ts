@@ -7219,6 +7219,8 @@ app
 			},
 			create: createPiResourceManagerFactories({
 				translate: mainCopy,
+				// WSL 扩展包开关的恢复快照（skills/prompts 不需要）；未装配时 WSL 包开关会明确失败而不是静默成功。
+				...(piResourceStateStore ? { resourceState: piResourceStateStore } : {}),
 				extension: {
 					locator: piLocator,
 					getSettings: () => settingsStore.get(),

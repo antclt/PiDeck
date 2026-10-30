@@ -248,10 +248,11 @@ test.describe("远端功能优化 F1–F4（真机）", () => {
 				const scan = (await window.evaluate(async (id: string) => {
 					const api = (window as unknown as { piDesktop: { remoteSessions: { scan: (hostId: string) => Promise<unknown> } } }).piDesktop;
 					return api.remoteSessions.scan(id);
-				}, target)) as { ok: boolean; code?: string; entries?: Array<{ remoteSessionId: string }> };
+				}, target)) as { ok: boolean; code?: string; value?: { entries?: Array<{ remoteSessionId: string }> } };
 				const elapsed = Date.now() - started;
 				expect(scan.ok, "scan must succeed: " + String(scan.code)).toBe(true);
-				const ids = new Set((scan.entries ?? []).map((entry) => entry.remoteSessionId));
+				// remoteSessions.scan 走 Op 信封（opOk({ entries })）：事实在 value 里；扁平 entries 只属于旧契约。
+				const ids = new Set((scan.value?.entries ?? []).map((entry) => entry.remoteSessionId));
 				const missing: string[] = [];
 				for (let index = 1; index <= FIXTURE_SESSIONS; index += 1) {
 					const id = workspaceDir + "/" + fixtureStem(index) + ".jsonl";

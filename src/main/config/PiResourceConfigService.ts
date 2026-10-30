@@ -48,7 +48,11 @@ type ProjectTrustGate = (projectId: string, root: string) => Promise<boolean>;
 export class PiResourceConfigService {
 	constructor(
 		private readonly environment: PiResourceEnvironmentResolver,
-		private readonly state: PiResourceStateStore,
+		/**
+		 * 整包恢复快照存储；只有扩展包开关（setPackageEnabled）需要它。
+		 * WSL 目标的文件资源开关不依赖它，因此可为 undefined；此时包开关 fail closed 而不是伪造成功。
+		 */
+		private readonly state: PiResourceStateStore | undefined,
 		private readonly options: { projectTrust?: ProjectTrustGate } = {},
 	) {}
 
@@ -210,15 +214,19 @@ export class PiResourceConfigService {
 	 * - `autoload:false` 的项目 delta：用 `["!*","!.*"]` / `["*",".*"]`（delta 空数组是「不覆盖」）。
 	 */
 	async setPackageEnabled(request: PiPackageToggleRequest, options: { expectedRevision?: string } = {}): Promise<PiResourceToggleResult> {
+		// 没有快照存储就无法保证「停用后可恢复」：明确失败，绝不在没有恢复路径时改写 packages 过滤。
+		if (this.state === undefined) return { ok: false, error: "Resource state store is not assembled for this target." };
+		// const 快照：闭包（writeScope 的 mutate 回调）里 TS 不再保留 this.state 的收窄。
+		const state = this.state;
 		const settingsPath = await this.resolveSettingsPath(request.scope, { requireTrust: true });
-		const snapshotKey = this.state.packageKey(settingsPath, request.resourceId);
+		const snapshotKey = state.packageKey(settingsPath, request.resourceId);
 		// 停用前先保存恢复快照（幂等：已有快照不覆盖）。
 		if (!request.enabled) {
 			const file = await readPiConfigFile(settingsPath);
 			if (file.error) return { ok: false, error: file.error };
 			const entry = findPackageEntry(file.data, request.resourceId);
 			if (!entry) return { ok: false, error: "Package not found in this scope." };
-			if (!isEntryDisabled(entry)) this.state.savePackageSnapshot(snapshotKey, packageFilterSnapshot(entry), { plainString: typeof entry === "string" });
+			if (!isEntryDisabled(entry)) state.savePackageSnapshot(snapshotKey, packageFilterSnapshot(entry), { plainString: typeof entry === "string" });
 		}
 		const result = await this.writeScope(request.scope, options.expectedRevision, (current) => {
 			const packages = Array.isArray(current.packages) ? [...current.packages] : [];
@@ -237,9 +245,9 @@ export class PiResourceConfigService {
 				// 只有「当前状态仍等于停用后指纹」时才恢复快照；否则视为外部已改过，明确回到包默认。
 				// 启用时文件里的条目已是停用对象，字符串形态信息只存在于快照标记里
 				// （wasPlainString 对停用后的对象恒为 false），恢复成原形态以保持文件最小扰动。
-				const snapshotCurrent = this.state.isPackageSnapshotCurrent(snapshotKey, entry);
-				const snapshot = snapshotCurrent ? this.state.takePackageSnapshot(snapshotKey) : undefined;
-				const wasPlainString = snapshotCurrent && this.state.isPackageSnapshotPlainString(snapshotKey);
+				const snapshotCurrent = state.isPackageSnapshotCurrent(snapshotKey, entry);
+				const snapshot = snapshotCurrent ? state.takePackageSnapshot(snapshotKey) : undefined;
+				const wasPlainString = snapshotCurrent && state.isPackageSnapshotPlainString(snapshotKey);
 				if (snapshot && Object.keys(snapshot).length > 0) {
 					packages[index] = collapsePackageEntry({ ...restorePackageDefaults(entry), ...snapshot });
 				} else if (wasPlainString) {
