@@ -49,6 +49,8 @@ export function DrawerContent(props: {
 	project?: Project;
 	/** 文件面板所属项目 id：会话历史面板用不到，但文件树与按名称搜索必须靠它（缺了搜索入口不渲染） */
 	projectId?: string;
+	/** 文件搜索的内容检索能力：远端/WSL 为 false（缺省 true 保持本机行为） */
+	contentSearchSupported?: boolean;
 	files: FileTreeNode[];
 	/** 文件树内容代次（owner 在 useProjectSync 的 useFileTreeContentState）：树内容真的变了才 +1，驱动着色防抖重拉 */
 	fileTreeContentRevision: number;
@@ -96,6 +98,7 @@ export function DrawerContent(props: {
 			{props.panel === "files" && (
 				<FilesPanel
 					projectId={props.projectId ?? props.project?.id}
+					contentSearchSupported={props.contentSearchSupported}
 					files={props.files}
 					fileTreeContentRevision={props.fileTreeContentRevision}
 					expandedDirs={props.expandedDirs}
@@ -120,6 +123,8 @@ export function DrawerContent(props: {
 function FilesPanel(props: {
 	/** 搜索用项目 id（由抽屉按当前文件树项目传入）：缺省时不渲染搜索入口、快捷键也不响应 */
 	projectId?: string;
+	/** 该位置是否支持内容检索（远端/WSL 为 false，缺省 true） */
+	contentSearchSupported?: boolean;
 	files: FileTreeNode[];
 	/** 文件树内容代次：树内容真的变了才 +1（owner 在 useProjectSync），驱动着色防抖重拉 */
 	fileTreeContentRevision: number;
@@ -164,8 +169,9 @@ function FilesPanel(props: {
 	}, [sortDirection]);
 	// 折叠中间包开关：IDEA 式把单子目录链合并成点分节点，深包结构一行展示。
 	const [compactPackages, setCompactPackages] = useAtom(compactMiddlePackagesAtom);
-	// 文件名搜索（issue #215）：状态域在 hook，面板只转发输入与关闭
-	const fileSearch = useFileSearch({ projectId: props.projectId });
+	// 文件名搜索（issue #215）：状态域在 hook，面板只转发输入与关闭。
+	// 内容检索能力按项目位置下传：不支持时不发 files.searchContent、不进入内容 loading。
+	const fileSearch = useFileSearch({ projectId: props.projectId, contentSearchSupported: props.contentSearchSupported });
 	// Git 状态着色（IDEA 风格：untracked 琥珀棕 / modified 蓝 / added 绿 / conflict 红）：
 	// 面板挂载（抽屉打开）与切换项目由 hook 拉取；手动刷新按钮见下方 onClick。
 	const gitStatus = useFileTreeGitStatus({ projectId: props.projectId, projectRoot: props.projectRoot });
@@ -363,6 +369,7 @@ function FilesPanel(props: {
 					isSearching={fileSearch.isSearching}
 					contentResults={fileSearch.contentResults}
 					isContentSearching={fileSearch.isContentSearching}
+					contentSearchSupported={props.contentSearchSupported}
 					onViewFile={props.onViewFile}
 					onFileContextMenu={props.onFileContextMenu}
 					onClear={closeSearch}

@@ -2399,6 +2399,8 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		backend: isRemoteProjectSession ? "pi" : (record?.backend ?? (isGuideBootstrapSession ? guideBackend : undefined) ?? "pi"),
 		/** 草稿期可切换后端；激活后锁定、远端项目固定 pi（undefined → UI 隐藏切换器）。 */
 		changeBackend: backendLocked || isRemoteProjectSession ? undefined : changeBackend,
+		/** 远端项目固定 pi：底栏据此显示准确的锁定原因（不是「已发送消息后不可切换」）。 */
+		backendFixedToPi: isRemoteProjectSession,
 		// ACP 工具二级选择（草稿期；激活后 UI 不再渲染选择器）
 		acpTool:
 			record?.backend === "acp"
