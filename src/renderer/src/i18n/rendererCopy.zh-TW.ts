@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 6677074adfaa4cf8dc1c5e66eebefd7da5e7e613d1966023f2e1bf3381f4b333（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: e82059f3d7d179c9feba4a2a33b487c9cbb72c3e89fe64c8b9cc5a1a0c576b67（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -6864,12 +6864,12 @@ export const zhTW: Record<TranslationKey, string> = {
 	"remoteGit.repoReposTruncated": "倉庫列表達到掃描上限，可能不完整；請縮小專案範圍或在終端確認。",
 	"remoteGit.repoNotFound": "該路徑下沒有 Git 倉庫（巢狀倉庫列表可能已過期）。請重新整理後重新選擇。",
 	"remoteGit.back": "返回遠端變更列表",
-	"remoteGit.managedIndex": "支援單個普通文本檔案的暫存／取消暫存、提交已確認的暫存區、新建與切換分支，以及可恢復的丟棄／刪除（先備份到倉庫內的 refs/pideck/recovery/*）。不自動暫存、不支援 amend／force／push。",
+	"remoteGit.managedIndex": "支援單個普通文本檔案的暫存／取消暫存、提交已確認的暫存區、新建與切換分支、可恢復的丟棄／刪除（先備份到倉庫內的 refs/pideck/recovery/*）、只讀歷史與引用、兩樹對比，以及 fetch／push／pull。不自動暫存、不支援批次暫存、歷史改寫、amend 或 force。",
 	"remoteGit.committing": "正在提交…",
 	"remoteGit.commitMessage": "提交資訊",
 	"remoteGit.commitPlaceholder": "提交資訊（逐字傳送，不做 Git 註釋剝離）",
 	"remoteGit.commitAction": "提交已暫存的改動",
-	"remoteGit.commitHint": "只提交上面已確認的暫存區：不會自動暫存工作區改動，也不支援 amend、push 或簽名。提交資訊按輸入原樣寫入；結果未知時不會自動重試。",
+	"remoteGit.commitHint": "只提交上面已確認的暫存區：不會自動暫存工作區改動（無智慧提交），也不支援批次暫存、AI 生成提交摘要、amend、force 或簽名。提交資訊按輸入原樣寫入；結果未知時不會自動重試。",
 	"remoteGit.writing": "正在更新遠端暫存區…",
 	"remoteGit.indexLocked": "遠端 index 已被其他操作鎖定，未替換暫存區。請在終端核對，不要直接刪除鎖。",
 	"remoteGit.writeUnsupported": "該倉庫存在 hooks、簽名、配置或進行中的操作要求，暫不支援受控暫存。請使用遠端終端。",
@@ -6879,7 +6879,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"remoteGit.messageEmpty": "提交資訊不能為空，也不能只包含空白字元。",
 	"remoteGit.identityRequired": "遠端倉庫沒有可用的提交身份（user.name／user.email）。請在遠端終端裡為這個倉庫或全域設定身份；PiDeck 不會修改你的 Git 配置。",
 	"remoteGit.headChanged": "遠端 HEAD 在提交前已變化，本次沒有建立提交。請重新整理後核對再重試。",
-	"remoteGit.readOnly": "當前支援普通根倉庫的狀態與文本差異。該 helper 未提供受控寫能力：暫存與提交不可用；丟棄、歷史、分支和同步尚未開放；不會呼叫本機 Git 或自動 fetch。",
+	"remoteGit.readOnly": "遠端 Git 支援普通根倉庫及已發現巢狀倉庫的狀態與文本差異、單檔案暫存／取消暫存、提交已確認的暫存區、新建／切換分支、可恢復的丟棄／刪除、只讀歷史與引用、兩樹對比，以及 fetch／push／pull；不支援批次暫存、歷史改寫、worktree 管理或多倉並排，也不自動 fetch。",
 	"remoteGit.loading": "正在讀取遠端 Git…",
 	"remoteGit.merge": "衝突",
 	"remoteGit.index": "已暫存",
@@ -6890,7 +6890,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"remoteGit.clean": "工作區乾淨",
 	"remoteGit.historyTitle": "提交歷史",
 	"remoteGit.historyMore": "載入更多",
-	"remoteGit.historyReadOnly": "歷史與提交詳情只讀；引用支援新建分支與切換（不提供刪除分支、標籤或推送）。",
+	"remoteGit.historyReadOnly": "歷史與提交詳情只讀；遠端僅按 HEAD 分頁讀取，不提供引用／路徑／全分支過濾、提交總數或提交圖。引用支援新建分支與切換；不提供刪除分支或標籤（推送見同步欄）。",
 	"remoteGit.refsTitle": "引用",
 	"remoteGit.detailFiles": "變更檔案",
 	"remoteGit.refBranch": "分支",
@@ -6972,6 +6972,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"remoteGit.repoExists": "該目錄已經是 Git 倉庫，或位於父級倉庫內；未執行初始化，磁碟未改動。",
 	"remoteGit.gitUnavailable": "遠端 Git 不存在或版本未支援。請在遠端終端檢查；不會使用本機 Git 或自動安裝。",
 	"remoteGit.unsupported": "此 helper、平臺、倉庫結構或 Git 配置尚未支援。G1 不支援 worktree、submodule、外接 metadata、sparse/partial clone 或 clean/process filter；不會繞過要求。",
+	"remoteGit.worktreeUnsupported": "遠端專案不支援 Git worktree 工作區：該能力依賴本機 Git 目錄。",
 	"remoteGit.notText": "無法預覽：僅支援普通 UTF-8 文本檔案，不跟隨符號連結，也不將二進位制或無效編碼偽裝成空檔案。",
 	"remoteGit.tooLarge": "狀態、檔案或 metadata 超過讀取預算，本次讀取已拒絕，未返回截斷結果。",
 	"remoteGit.changed": "遠端資源或專案身份已變化。請手動重新整理後重新選擇檔案。",
@@ -7238,7 +7239,6 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.target.remoteSaveHint": "遠端目標請用面板內的「應用 patch」按鈕儲存",
 	"config.target.groupSsh": "SSH 主機",
 	"config.target.wsl": "WSL 發行版",
-	"config.target.wslNoProfiles": "暫無 WSL 連線檔案（先在設定 → 連線裡新增）",
 	"config.target.wslHint": "讀寫均落在該發行版的 HOME（.pi/agent），不回退本機",
 	"config.target.wslSource": "當前編輯：{label} 的發行版 HOME（.pi/agent）",
 	"config.target.wslProviderOps": "連線測試 / 拉取模型 / 用量查詢僅對本機目標可用",
