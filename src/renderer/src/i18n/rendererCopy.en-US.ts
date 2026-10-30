@@ -6880,8 +6880,6 @@ export const enUS: Record<TranslationKey, string> = {
 	"remoteGit.repoScopeSingle": "Remote reads one repository at a time: switch scopes to view another; side-by-side multi-repo views are not available.",
 	"remoteGit.repoNotFound": "No Git repository at this path (the nested list may be stale). Refresh and choose again.",
 	"remoteGit.back": "Back to remote changes",
-	"remoteGit.managedIndex":
-		"Per-file staging and unstaging of plain text files, committing the confirmed index, creating and switching branches, recoverable discard/delete (backed up under refs/pideck/recovery/*), read-only history and refs, tree-to-tree compare, and fetch/push/pull. No automatic staging, batch staging, history rewriting, amend, or force.",
 	"remoteGit.committing": "Committing…",
 	"remoteGit.commitMessage": "Commit message",
 	"remoteGit.commitPlaceholder": "Commit message (sent verbatim; no Git comment stripping)",
@@ -6897,8 +6895,6 @@ export const enUS: Record<TranslationKey, string> = {
 	"remoteGit.messageEmpty": "A commit message is required and cannot be only whitespace.",
 	"remoteGit.identityRequired": "The remote repository has no usable commit identity (user.name / user.email). Set one for this repository or globally in the remote terminal; PiDeck never modifies your Git configuration.",
 	"remoteGit.headChanged": "The remote HEAD changed before the commit, so no commit was created. Refresh, review and try again.",
-	"remoteGit.readOnly":
-		"Remote Git supports status and text diffs for the ordinary root repository and discovered nested repositories, per-file stage/unstage, committing the confirmed index, creating and switching branches, recoverable discard/delete, read-only history and refs, tree-to-tree compare, and fetch/push/pull. Batch staging, history rewriting, worktree management, and side-by-side multi-repo views are not available; it never fetches automatically.",
 	"remoteGit.loading": "Reading remote Git…",
 	"remoteGit.merge": "Conflicts",
 	"remoteGit.index": "Staged",
