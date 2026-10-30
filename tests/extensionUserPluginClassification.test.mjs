@@ -70,7 +70,9 @@ test("扩展开关/移除路由按白名单判定内置身份（源码契约）"
 	// 开关路由必须用白名单：带前缀但非内置的用户扩展被误路由进内置分支时，
 	// 「关」会打到 disableBuiltIn 并被守卫拒绝、「开」会变成无意义的 restoreBuiltIn。
 	// 判定已收口在 ExtensionManager.toggleFromUi（桌面 IPC 与 Web 工作区路由共用同一入口）。
-	assert.match(storeIpc, /extensionManager\.toggleFromUi\(/);
+	// W1 task-16 起 storeIpc 先按资源目标解析出 manager 再调用，变量名不再是 extensionManager；
+	// 断言只要求「仍然走 toggleFromUi 单一入口」，不绑定变量名（语义强度不变）。
+	assert.match(storeIpc, /\.toggleFromUi\(/);
 	assert.doesNotMatch(storeIpc, /startsWith\(\s*"pi-deck-"\s*\)/);
 	const manager = readFileSync("src/main/extensions/ExtensionManager.ts", "utf8");
 	assert.match(manager, /async toggleFromUi[\s\S]{0,600}?isBuiltInExtensionName\(normalized\)/);
