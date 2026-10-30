@@ -47,6 +47,11 @@ export type FilesIpcDeps = {
 	remoteFiles?: {
 		directoryPage(projectId: string, path: string, force?: boolean): Promise<ProjectDirectoryPageResult>;
 		pathsExist(projectId: string, paths: readonly string[]): Promise<ProjectPathsExistResult>;
+		/**
+		 * 远端内容搜索：按连接 hello 的 `fs.searchContent` 能力路由，旧 helper 返回 `{ok:true,value:null}`
+		 * 而不是失败——"这个位置只支持文件名"是能力边界，不是错误。未装配该方法时同样按不支持处理。
+		 */
+		searchContent?(projectId: string, query: string): Promise<{ ok: true; value: FileContentSearchResult | null } | { ok: false; code: string }>;
 	};
 };
 
@@ -302,8 +307,24 @@ export function registerFilesIpc({ fileSystemService, projectStore, settingsStor
 	ipcMain.handle(ipcChannels.filesSearchContent, async (_event, rawProjectId: unknown, query: unknown): Promise<FileContentSearchResult | null> => {
 		if (typeof rawProjectId !== "string" || !rawProjectId.trim() || rawProjectId.length > 256) throw new Error("INVALID_PROJECT_FILE_TARGET");
 		const normalizedQuery = parseFileSearchQuery(query);
-		const project = localProject(rawProjectId);
+		const project = projectStore.get(rawProjectId);
 		if (!project) throw new Error("PROJECT_NOT_FOUND");
+		// Remote project: the helper's content search is the only content source, and it is capability-gated
+		// by the hello answer main already stored. `null` is the honest "this location has no content index"
+		// answer the renderer already treats as the name-only fallback.
+		if (isRemoteProject(project)) {
+			// Optional on purpose: the main assembly adds it in one line, and an absent port means "no content
+			// source" (name-only fallback) rather than a crashed handler.
+			if (remoteFiles?.searchContent === undefined) return null;
+			const remote = await remoteFiles.searchContent(rawProjectId, normalizedQuery);
+			if (!remote.ok) {
+				void appLogger.error("file", "远端文件内容检索失败", remote.code);
+				return null;
+			}
+			return remote.value;
+		}
+		// A future non-local, non-ssh locator has no content source either; never reinterpret it as a local path.
+		if ("locator" in project) return null;
 		const fileIndex = getFileIndexService?.() ?? null;
 		if (!fileIndex) return null;
 		const roots = indexRootsFor(project.environment, toWindowsPath(project.path, project));

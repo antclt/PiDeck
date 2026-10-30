@@ -18,7 +18,8 @@ import { createHash } from "node:crypto";
 import { createRemoteProjectTargetResolver } from "./remoteProjectTarget";
 import { ipcMain, type WebContents } from "electron";
 import { ipcChannels } from "../../shared/ipc";
-import { codeOf, opFailFromCode, opOk } from "../../shared/op";
+import { codeOf, opFailFromCode, opOk, type Op } from "../../shared/op";
+import type { FileContentSearchResult } from "../../shared/types";
 import type { ProjectDirectoryPageResult, ProjectPathsExistResult } from "../../shared/types/projectFiles";
 import type { RemoteProjectDownloadResult, RemoteProjectUploadResult, RemoteProjectEnrollAnswerResult, RemoteProjectEnrollMode, RemoteProjectEnrollRequest, RemoteProjectEnrollResult, RemoteWorkspaceEntry } from "../../shared/types/remoteHost";
 import { readRelativePath, readerPath, registerRemoteProjectReadIpc, sessionPort, type RemoteProjectDirSnapshot } from "./remoteProjectReadIpc";
@@ -29,6 +30,8 @@ import { REMOTE_PROJECT_TRASH_DIR } from "../remote/RemoteProjectEntryCommands";
 import { REMOTE_UPLOAD_TEMP_NAME } from "../remote/RemoteProjectFileUpload";
 import { resolveRemoteBrowseRoot } from "../remote/RemoteBrowseRoot";
 import { createRemoteWorkspaceReader } from "../remote/RemoteWorkspaceReader";
+import { createRemoteSearchReader } from "../remote/RemoteSearchReader";
+import { REMOTE_HELPER_METHOD_FS_SEARCH_CONTENT } from "../remote/RemoteHelperContract";
 import { createFactCache, type FactCache } from "../remote/RemoteFactCache";
 import { createDirWatchRegistry, dirKeysAfterWrite, dirPathsAfterWrite } from "../remote/RemoteDirWatchRegistry";
 import { createDeepDirWatch, type DeepDirWatchStatus } from "../remote/RemoteDeepDirWatch";
@@ -77,6 +80,12 @@ export type RemoteProjectIpcHandle = {
 	dirWatchStatus(projectId: string): DeepDirWatchStatus;
 	/** 公共目录页（T6）：与远端 list 共用同一份事实缓存，带 truncated/revision/generation。 */
 	directoryPage(projectId: string, path: string, force?: boolean): Promise<ProjectDirectoryPageResult>;
+	/**
+	 * 远端内容搜索（helper 1.25.0）：按**连接握手声明的能力**路由，旧 helper 返回 `ok:true, value:null`
+	 * （"这个位置不支持"），渲染层据此回退到仅文件名提示，而不是发一次注定失败的请求。
+	 * 匹配里的 path 是项目相对路径（与文件名搜索同一身份）；文件正文永不回传，只有有界预览。
+	 */
+	searchContent(projectId: string, query: string): Promise<Op<FileContentSearchResult | null>>;
 	/** 批量存在性/类型（只读 fs 面；64 路径/帧，全有或全无时按需逐项核对）。 */
 	pathsExist(projectId: string, paths: readonly string[]): Promise<ProjectPathsExistResult>;
 	/** 进程退出：成对退订后丢弃全部订阅登记。 */
@@ -315,6 +324,29 @@ export function registerRemoteProjectIpc(input: {
 		},
 		directoryPage: (projectId, path, force = false) => projectDirectoryPage({ projectId, path, force, readDirSnapshot, generationOf }),
 		pathsExist: (projectId, paths) => projectPathsExist({ projectId, paths, projectReadTarget }),
+		async searchContent(projectId, query) {
+			const target = await projectReadTarget(projectId);
+			if ("code" in target) return opFailFromCode(target.code);
+			try {
+				// The capability is read after the session exists: a first read of a cold host establishes the
+				// session inside withProjectSession, so the hello answer is already stored when this runs.
+				const outcome = await target.service.withProjectSession(target.hostId, target.remotePath, async (session) => {
+					const capabilities = target.service.helperCapabilities(target.hostId);
+					if (capabilities === undefined || capabilities.includes(REMOTE_HELPER_METHOD_FS_SEARCH_CONTENT) === false) return null;
+					const reader = createRemoteSearchReader({ port: sessionPort(session, target.hostId) });
+					const result = await reader.searchContent(target.hostId, ".", query);
+					// Same identity rules as the filename search: the trash and upload temps are not user files.
+					const hits = result.matches
+						.filter((match) => match.path.split("/")[0] !== REMOTE_PROJECT_TRASH_DIR && !REMOTE_UPLOAD_TEMP_NAME.test(match.name))
+						.map((match) => ({ name: match.name, path: match.path, relativePath: match.path, line: match.line, column: match.column, snippet: match.snippet }));
+					return { hits, matchedFiles: result.matchedFiles, scannedFiles: result.scannedFiles, scannedBytes: result.scannedBytes, truncated: result.truncated };
+				});
+				if (!outcome.ok) return opFailFromCode(outcome.code);
+				return opOk(outcome.value);
+			} catch (error) {
+				return opFailFromCode(codeOf(error, "REMOTE_PROJECT_READ_FAILED"));
+			}
+		},
 		onHelperEvent(entry): void {
 			const changed = watchRegistry.scopesForEvent(entry.hostId, entry.watchId) ?? [];
 			// 先发通知再标脏：两者都是同步的，读仍由活跃的消费者决定（事件不装载）。

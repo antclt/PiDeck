@@ -32,6 +32,8 @@ const ROOT_B = "/srv/other";
 const STATUS_CHANNEL = "remote:project-root-status";
 const STABLE_CODE = /^[A-Z][A-Z0-9_]{2,63}$/;
 const CLIENT = { sshPath: "/usr/bin/ssh", scpPath: "/usr/bin/scp", env: { PATH: "/usr/bin" }, run: async () => ({ exitCode: 0, stdout: "", stderr: "" }) };
+/** The old-helper fixture: these builds answered `hello` long before content search existed. */
+const FIXTURE_CAPABILITIES = ["echo", "fs.stat", "fs.list", "fs.read", "fs.searchNames"];
 
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
@@ -62,7 +64,7 @@ function createFakeLauncher(options = {}) {
 							arch: "x64",
 							home: "/home/dev",
 							root: canonical,
-							capabilities: ["echo", "fs.stat", "fs.list", "fs.read", "fs.searchNames"],
+							capabilities: typeof options.capabilities === "function" ? options.capabilities() : FIXTURE_CAPABILITIES,
 							helperVersion: "1.6.0",
 							nodeVersion: "v22.14.0",
 							pid: 321,
@@ -96,8 +98,8 @@ function createFakeLauncher(options = {}) {
 async function projectHarness(t) {
 	const { directory, profile } = await createPinnedHostFixture(t);
 	const { client } = createPinnedClient(profile.id);
-	const control = { canonicalByRoot: new Map(), probeFailsFor: new Set(), verifyCalls: [], bootstraps: 0, rootMap: new Map() };
-	const fake = createFakeLauncher({ canonicalRoot: (requested) => control.rootMap.get(requested) ?? requested });
+	const control = { canonicalByRoot: new Map(), probeFailsFor: new Set(), verifyCalls: [], bootstraps: 0, rootMap: new Map(), capabilities: undefined };
+	const fake = createFakeLauncher({ canonicalRoot: (requested) => control.rootMap.get(requested) ?? requested, capabilities: () => control.capabilities ?? FIXTURE_CAPABILITIES });
 	const ports = {
 		bootstrap: async () => {
 			control.bootstraps += 1;
@@ -164,8 +166,8 @@ test("a drifted project is needs-attention while its healthy neighbour on the sa
 	// Both projects start healthy on the same host.
 	assert.equal((await read(ROOT_A)).ok, true);
 	assert.equal((await read(ROOT_B)).ok, true);
-	assert.deepEqual(plain(await rootStatus(handlers, "project-a")), { ok: true, value: { status: "ok" } });
-	assert.deepEqual(plain(await rootStatus(handlers, "project-b")), { ok: true, value: { status: "ok" } });
+	assert.deepEqual(plain(await rootStatus(handlers, "project-a")), { ok: true, value: { status: "ok", helperCapabilities: FIXTURE_CAPABILITIES } });
+	assert.deepEqual(plain(await rootStatus(handlers, "project-b")), { ok: true, value: { status: "ok", helperCapabilities: FIXTURE_CAPABILITIES } });
 
 	// Project A's persisted path is re-pointed somewhere else. Switching back to A is where the service
 	// re-probes it; the probe now canonicalizes to a different path.
@@ -192,6 +194,32 @@ test("a drifted project is needs-attention while its healthy neighbour on the sa
 	assert.deepEqual(plain(await rootStatus(handlers, "project-a")), plain(statusA));
 	assert.deepEqual(plain(await rootStatus(handlers, "project-b")), plain(statusB));
 	void fake;
+});
+
+test("root status 暴露 hello 能力清单：旧 helper 由能力回退决定内容搜索边界", async (t) => {
+	// 1) Before any live session the status must not invent capabilities: the query itself opens no session.
+	const cold = await projectHarness(t);
+	const coldHandlers = registerProjectIpc(cold.service, cold.profile.id, { "project-a": { kind: "ssh", hostId: cold.profile.id, remotePath: ROOT_A } });
+	const coldStatus = await rootStatus(coldHandlers, "project-a");
+	assert.equal(coldStatus.ok, true);
+	assert.equal(coldStatus.value.helperCapabilities, undefined, "no live session => unknown, never a guessed list");
+	assert.equal(cold.fake.requests.length, 0, "the status query itself must not connect");
+
+	// 2) An old helper declares its vocabulary without fs.searchContent: the renderer sees exactly that and falls back.
+	const oldHelper = await projectHarness(t);
+	const oldHandlers = registerProjectIpc(oldHelper.service, oldHelper.profile.id, { "project-a": { kind: "ssh", hostId: oldHelper.profile.id, remotePath: ROOT_A } });
+	assert.equal((await oldHelper.read(ROOT_A)).ok, true);
+	const oldStatus = await rootStatus(oldHandlers, "project-a");
+	assert.deepEqual(plain(oldStatus.value.helperCapabilities), FIXTURE_CAPABILITIES, "the reported list is the helper's own hello answer");
+	assert.equal(oldStatus.value.helperCapabilities.includes("fs.searchContent"), false, "an old helper must not be reported as content-search capable");
+
+	// 3) A helper that declares fs.searchContent is reported as capable: this is the only source of the renderer gate.
+	const newHelper = await projectHarness(t);
+	newHelper.control.capabilities = [...FIXTURE_CAPABILITIES, "fs.searchContent"];
+	const newHandlers = registerProjectIpc(newHelper.service, newHelper.profile.id, { "project-a": { kind: "ssh", hostId: newHelper.profile.id, remotePath: ROOT_A } });
+	assert.equal((await newHelper.read(ROOT_A)).ok, true);
+	const newStatus = await rootStatus(newHandlers, "project-a");
+	assert.equal(newStatus.value.helperCapabilities.includes("fs.searchContent"), true, "a capable helper must be visible to the renderer gate");
 });
 
 test("the status query is read-only: no session work, no helper request, no state change", async (t) => {
