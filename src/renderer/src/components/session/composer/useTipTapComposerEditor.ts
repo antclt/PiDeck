@@ -19,6 +19,12 @@ function syncEmptyClass(editor: Editor): void {
 	editor.view.dom.classList.toggle("is-editor-empty", editor.isEmpty);
 }
 
+/**
+ * 草稿收敛间隔（ms）。按秒对账就够：这不是输入路径（输入仍走 onUpdate 实时同步），
+ * 只用来把「漏掉的那次同步」补上，间隔太长会让发送按钮的灰态多挂一会儿。
+ */
+const DRAFT_CONVERGENCE_INTERVAL_MS = 1000;
+
 export function useTipTapComposerEditor(args: UseTipTapComposerEditorArgs): Editor | null {
 	const { value, onChange, onCursorChange, onKeyDown, onPaste, onDrop, onDragOver, onChipClick, disabled, placeholder, className, caretRef, validCommandNames, validFilePaths, validSessionRefs, validQuotes, hostRef } = args;
 
@@ -165,8 +171,9 @@ export function useTipTapComposerEditor(args: UseTipTapComposerEditorArgs): Edit
 		/** 收尾：复位 flag → 补跑推迟的 options → 补发最后一次合成结果。 */
 		const finishComposition = () => {
 			stopWatchdog();
-			const wasComposing = composingRef.current;
 			composingRef.current = false;
+			// 中文输入法的 preedit 不再压着 ghost：见 timeline.css 的 .is-composing 规则。
+			dom.classList.remove("is-composing");
 			// options 的补跑不看 composingRef：handleDOMEvents.compositionend 会先把 flag 置 false，
 			// 这里若按 flag 早退，pending 的 options 就永远没人写。
 			if (pendingOptionsSyncRef.current) {
@@ -175,15 +182,22 @@ export function useTipTapComposerEditor(args: UseTipTapComposerEditorArgs): Edit
 				editor.setEditable(!latest.disabled);
 				editor.setOptions({ editorProps: latest.editorProps });
 			}
-			if (!wasComposing) return;
+			// **不能用「收尾时 composing 还是 true」当条件**（旧写法的缺陷）：ProseMirror 自己的
+			// compositionend 处理器在本监听之前注册，会先把 composingRef 置 false；而提交的文本
+			// 有可能在 compositionend 之前就被 dispatch（那次 onUpdate 被 flag 挡掉）。
+			// 两条叠加的结果就是「中文输入法提交的一整段文字永远进不了 draft atom」——
+			// 屏幕上有字、发送按钮还是灰的、ghost 还压在正文上（2026-10 用户反馈：只有中文才这样）。
 			requestAnimationFrame(() => {
 				if (composingRef.current || editor.isDestroyed) return;
+				// 判据：文档与上次抛出的文本是否一致（纯对账，重复收尾也不会多发）。
+				if (serializeComposerEditorJson(editor.getJSON()) === lastEmittedRef.current) return;
 				syncEmptyClass(editor);
 				emitPlainText(editor);
 			});
 		};
 		const onCompositionStart = () => {
 			stopWatchdog();
+			dom.classList.add("is-composing");
 			// 判据用 ProseMirror 自己的 view.composing：它在 compositionend 与失焦时都会被
 			// 置 false，比「等 compositionend」可靠。
 			watchdog = window.setInterval(() => {
@@ -198,10 +212,36 @@ export function useTipTapComposerEditor(args: UseTipTapComposerEditorArgs): Edit
 		dom.addEventListener("blur", onBlur, true);
 		return () => {
 			stopWatchdog();
+			// 合成中途重挂/卸载：类名不能留在一个即将复用同一 DOM 的编辑器上
+			dom.classList.remove("is-composing");
 			dom.removeEventListener("compositionstart", onCompositionStart);
 			dom.removeEventListener("compositionend", onCompositionEnd);
 			dom.removeEventListener("blur", onBlur, true);
 		};
+	}, [editor, emitPlainText]);
+
+	/**
+	 * 草稿收敛看门狗：编辑器 DOM 是用户输入的权威，draft atom 只是它的投影。
+	 *
+	 * 任何一条漏发路径都会留下同一组静默症状——屏幕上看得见字，发送按钮还是灰的，
+	 * 输入预测的灰字还压在正文上（「两层文字」），且只有全选删除重打一次才自己恢复
+	 * （2026-10 用户反馈，ACP 会话里最常撞到：新会话/下一轮后草稿刚被清空、ghost 正好可见）。
+	 * 现在按秒对账：文档与上次抛给父层的文本不一致就补发一次。
+	 *
+	 * 判据用 ProseMirror 自己的 `view.composing`：合成中（preedit 未提交）不能把中间态写进
+	 * 草稿；同时顺手复位「compositionstart 之后 flag 卡住」的情形——view 说没在合成却还
+	 * 记着 true 时，onUpdate 会全部早退，草稿就永久停止同步（issue #455 根因 C 的兜底）。
+	 */
+	useEffect(() => {
+		if (!editor || editor.isDestroyed) return;
+		const timer = window.setInterval(() => {
+			if (editor.isDestroyed) return;
+			if (editor.view.composing) return;
+			composingRef.current = false;
+			if (serializeComposerEditorJson(editor.getJSON()) === lastEmittedRef.current) return;
+			emitPlainText(editor);
+		}, DRAFT_CONVERGENCE_INTERVAL_MS);
+		return () => window.clearInterval(timer);
 	}, [editor, emitPlainText]);
 
 	/**
