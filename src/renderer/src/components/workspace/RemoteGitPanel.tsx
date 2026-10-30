@@ -14,6 +14,7 @@ import { Input } from "../ui-shadcn/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui-shadcn/select";
 import { Textarea } from "../ui-shadcn/textarea";
 import { FileTree } from "../app/git/GitResourceTree";
+import { RemoteGitCapabilityNote } from "./RemoteGitCapabilityNote";
 import { RemoteGitCompareSection } from "./RemoteGitCompareSection";
 import { RemoteGitTrustGate } from "./RemoteGitTrustGate";
 
@@ -197,10 +198,7 @@ export function RemoteGitPanel({ project }: { project: RemoteProject }) {
 					<RefreshCw size={14} />
 				</Button>
 			</div>
-			{/*
-			 * G5d/G5e repository scope: shown once discovery found more than one repository, or a rootless project with
-			 * nested ones. A nested choice reads AND writes that repository; only init stays root-only.
-			 */}
+			{/* G5d/G5e repo scope: multiple/rootless repos; a nested scope reads+writes; only init stays root-only. */}
 			{showRepoScope ? (
 				<div data-testid="remote-git-repo-scope" className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1">
 					<span className="shrink-0 text-xs text-text-secondary">{t("remoteGit.repoScope")}</span>
@@ -218,6 +216,7 @@ export function RemoteGitPanel({ project }: { project: RemoteProject }) {
 					</Select>
 				</div>
 			) : null}
+			<RemoteGitCapabilityNote kind="repoScope" context={{ repoCount: repos?.length ?? 0 }} />
 			{reposTruncated ? (
 				<p data-testid="remote-git-repos-truncated" className="shrink-0 border-b border-border px-3 py-1 text-xs text-text-secondary">
 					{t("remoteGit.repoReposTruncated")}
@@ -283,6 +282,7 @@ export function RemoteGitPanel({ project }: { project: RemoteProject }) {
 						</Button>
 						{messageBytes > 0 ? <span className="text-xs text-text-secondary">{messageBytes}/4096</span> : null}
 					</div>
+					<RemoteGitCapabilityNote kind="commit" context={{ commitVisible: true }} />
 				</div>
 			) : null}
 			{state.loading || state.diffLoading || state.mutating ? (
@@ -505,7 +505,7 @@ export function RemoteGitPanel({ project }: { project: RemoteProject }) {
 						</button>
 						{historyOpen ? (
 							<>
-								<p className="px-3 pb-1 text-xs text-text-secondary">{t("remoteGit.historyReadOnly")}</p>
+								<RemoteGitCapabilityNote kind="history" context={{ historyOpen }} />
 								{state.historyLoading ? <p className="px-3 text-xs text-text-secondary">{t("remoteGit.loading")}</p> : null}
 								{state.historyErrorCode ? (
 									<p role="alert" className="px-3 text-xs text-danger">

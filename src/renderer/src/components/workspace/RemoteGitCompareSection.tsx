@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { RemoteGitCompare, RemoteGitRef, RemoteGitRefs } from "../../../../shared/types/git";
 import { t } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
+import { RemoteGitCapabilityNote } from "./RemoteGitCapabilityNote";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui-shadcn/select";
 
 /**
@@ -51,7 +52,7 @@ export function RemoteGitCompareSection(props: RemoteGitCompareSectionProps) {
 			</button>
 			{open ? (
 				<>
-					<p className="px-3 pb-1 text-xs text-text-secondary">{t("remoteGit.compareHint")}</p>
+					<RemoteGitCapabilityNote kind="compare" context={{ compareOpen: open, compareMode: "trees" }} />
 					{props.refsLoading ? <p className="px-3 text-xs text-text-secondary">{t("remoteGit.loading")}</p> : null}
 					{props.refsErrorCode ? (
 						<p role="alert" className="px-3 text-xs text-danger">
