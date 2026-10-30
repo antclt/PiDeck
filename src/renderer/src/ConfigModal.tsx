@@ -24,6 +24,7 @@ import { usePiConfigDir } from "./config/usePiConfigDir";
 import { usePiConfigTargetView } from "./config/usePiConfigTargetView";
 import { ResourceTargetBar } from "./config/ResourceTargetBar";
 import { useConfigTransfer } from "./config/useConfigTransfer";
+import { resourceTargetErrorMessage } from "./config/resourceTargetErrorCopy";
 import { useResourceTarget } from "./config/useResourceTarget";
 import type { PiConfigTarget } from "../../shared/piConfig";
 import { buildProviderOrderScope } from "./utils/providerOrder";
@@ -1041,11 +1042,11 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		if (!open) return;
 		bumpResourceGeneration();
 		if (section === "skills") {
-			void refreshSkills();
+			void refreshSkills().catch((e) => setError(resourceTargetErrorMessage(e)));
 			return;
 		}
 		if (section === "prompts") {
-			void refreshPrompts();
+			void refreshPrompts().catch((e) => setError(resourceTargetErrorMessage(e)));
 			return;
 		}
 		if (section === "extensions") {
@@ -2251,7 +2252,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 			});
 			setExtensionsData({ ...globalResult, extensions: mergedExtensions });
 		} catch (e) {
-			setError(e instanceof Error ? e.message : String(e));
+			// 资源域失败给稳定码文案；其它异常保留原文。
+			setError(resourceTargetErrorMessage(e));
 		} finally {
 			if (generation === resourceGenerationRef.current) setExtensionsLoading(false);
 		}
