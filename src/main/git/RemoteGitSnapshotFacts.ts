@@ -42,6 +42,12 @@ export type SnapshotFactsCache<T> = {
 	invalidate(projectId: string, repoPath: string): void;
 	/** 标脏一个项目的全部仓库（`git.init`、仓库发现变化后调用）。 */
 	invalidateProject(projectId: string): void;
+	/**
+	 * 该项目**已缓存事实**的仓库路径（不含只有占位标脏、没有现值的键）。
+	 *
+	 * 文件写失效要逐仓发通知（面板按 repoPath 精确匹配），但没有暖事实的项目不该发出空事件。
+	 */
+	reposOf(projectId: string): string[];
 	/** 丢弃全部（宿主断开/项目关闭）。 */
 	clear(): void;
 	stats(): { loads: number; merges: number; hits: number; entries: number };
@@ -158,6 +164,15 @@ export function createSnapshotFactsCache<T>(options: SnapshotFactsCacheOptions =
 			if (hit.stale) return;
 			revisionCounter += 1;
 			entries.set(key, { ...hit, revision: revisionCounter, stale: true });
+		},
+		reposOf(projectId) {
+			const prefix = projectPrefix(projectId);
+			const repos: string[] = [];
+			for (const [key, entry] of entries) {
+				if (!key.startsWith(prefix) || entry.facts === undefined) continue;
+				repos.push(key.slice(prefix.length));
+			}
+			return repos;
 		},
 		invalidateProject(projectId) {
 			for (const key of projectFlightKeys(projectId)) retireFlight(key);
