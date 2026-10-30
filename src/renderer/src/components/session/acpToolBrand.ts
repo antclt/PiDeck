@@ -10,7 +10,7 @@
  */
 import type { AcpToolConfig } from "../../../../shared/types/acp";
 
-export type AcpToolBrand = "gemini" | "claude" | "codex" | "kimi" | "qwen" | "qoder" | "opencode" | "cursor" | "codebuddy" | "minimax" | "mimo" | "generic";
+export type AcpToolBrand = "gemini" | "claude" | "codex" | "kimi" | "qwen" | "qoder" | "opencode" | "cursor" | "codebuddy" | "minimax" | "mimo" | "copilot" | "generic";
 
 /**
  * 关键词表，**顺序敏感**：
@@ -31,6 +31,8 @@ const BRAND_KEYWORDS: ReadonlyArray<readonly [AcpToolBrand, readonly string[]]> 
 	["minimax", ["minimax"]],
 	// MiMo Code 命令是 `mimo`，包名 @mimo-ai/cli；与 minimax 不构成前缀冲突。
 	["mimo", ["mimo"]],
+	// Copilot CLI 命令是 `copilot`，包名 @github/copilot。
+	["copilot", ["copilot"]],
 	["cursor", ["cursor", "agent acp"]],
 ];
 

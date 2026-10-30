@@ -25,6 +25,7 @@ const EXPECTED_BY_PRESET = {
 	codebuddy: "codebuddy",
 	minimax: "minimax",
 	mimo: "mimo",
+	copilot: "copilot",
 	qoder: "qoder",
 	"qoder-cn": "qoder",
 };

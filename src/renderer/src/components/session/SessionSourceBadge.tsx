@@ -52,7 +52,7 @@ const SOURCE_TONES: Record<SessionSource, string> = {
  * 避免同一品牌（codex/claude/opencode/kimi/cursor/minimax）在两处各画一份而逐渐失真。
  * 尺寸由调用方 className 控制，缺省 14px（徽标/下拉项用）。
  */
-type BrandKey = SessionSource | Extract<AcpToolBrand, "gemini" | "qwen" | "codebuddy" | "mimo">;
+type BrandKey = SessionSource | Extract<AcpToolBrand, "gemini" | "qwen" | "codebuddy" | "mimo" | "copilot">;
 
 function BrandMark(props: { brand: BrandKey; className?: string }) {
 	const cls = props.className ?? "size-3.5";
@@ -159,6 +159,17 @@ function BrandMark(props: { brand: BrandKey; className?: string }) {
 			<svg viewBox="0 0 24 24" className={cls} aria-hidden="true" focusable="false">
 				<path fill="currentColor" d="M3 4h3.3l6.7 10.2L19.7 4H23v16h-3.4v-9.9L13.9 18h-1.8L6.4 10.1V20H3z" />
 				<path fill="currentColor" d="M17.6 1.1h3.9v3.9h-3.9z" />
+			</svg>
+		);
+	}
+
+	if (props.brand === "copilot") {
+		// GitHub Copilot CLI：自绘「机器人头 + 天线」标记（无随包品牌 SVG），沿用自绘惯例。
+		return (
+			<svg viewBox="0 0 24 24" className={cls} aria-hidden="true" focusable="false">
+				<path fill="currentColor" fillRule="evenodd" d="M4 8h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Zm3.4 4.4a1.7 1.7 0 1 0 0 3.4 1.7 1.7 0 0 0 0-3.4Zm9.2 0a1.7 1.7 0 1 0 0 3.4 1.7 1.7 0 0 0 0-3.4Z" />
+				<path fill="currentColor" d="M11.3 3h1.4v5h-1.4z" />
+				<path fill="currentColor" d="M12 .6a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 0 1 0-3.2Z" />
 			</svg>
 		);
 	}
