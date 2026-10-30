@@ -22,7 +22,7 @@ import { codeOf, opFailFromCode, opOk } from "../../shared/op";
 import type { ProjectDirectoryPageResult, ProjectPathsExistResult } from "../../shared/types/projectFiles";
 import type { RemoteProjectDownloadResult, RemoteProjectUploadResult, RemoteProjectEnrollAnswerResult, RemoteProjectEnrollMode, RemoteProjectEnrollRequest, RemoteProjectEnrollResult, RemoteWorkspaceEntry } from "../../shared/types/remoteHost";
 import { readRelativePath, readerPath, registerRemoteProjectReadIpc, sessionPort, type RemoteProjectDirSnapshot } from "./remoteProjectReadIpc";
-import { projectDirectoryPage, projectPathsExist } from "./remoteProjectDirectoryReads";
+import { projectDirectoryPage, projectDirectoryWatchDegradation, projectPathsExist } from "./remoteProjectDirectoryReads";
 import { registerRemoteProjectCreateFlow } from "./remoteProjectCreateIpc";
 import type { RemoteHostConnectionService, RemoteProjectSession } from "../remote/RemoteHostConnectionService";
 import { REMOTE_PROJECT_TRASH_DIR } from "../remote/RemoteProjectEntryCommands";
@@ -313,7 +313,16 @@ export function registerRemoteProjectIpc(input: {
 			// 前缀匹配 = 本项目全部目录键（项目 id 后紧跟真实的 NUL 分隔符，不会误命中同前缀的其它项目）。
 			dirs.invalidateWhere((key) => key.startsWith(projectId + "\u0000"));
 		},
-		directoryPage: (projectId, path, force = false) => projectDirectoryPage({ projectId, path, force, readDirSnapshot, generationOf }),
+		directoryPage: (projectId, path, force = false) =>
+			projectDirectoryPage({
+				projectId,
+				path,
+				force,
+				readDirSnapshot,
+				generationOf,
+				// 监听降级是项目级事实：每个目录页都顺手带出去，渲染层不必再开一条诊断通道。
+				dirWatch: (id) => projectDirectoryWatchDegradation(dirWatch.status(id)),
+			}),
 		pathsExist: (projectId, paths) => projectPathsExist({ projectId, paths, projectReadTarget }),
 		onHelperEvent(entry): void {
 			const changed = watchRegistry.scopesForEvent(entry.hostId, entry.watchId) ?? [];
