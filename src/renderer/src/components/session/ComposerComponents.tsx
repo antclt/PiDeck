@@ -31,6 +31,7 @@ import { CommandPickerGroup, CommandPickerPanel, type CommandPickerFilter } from
 import { computeModelPickerDefaultExpanded, groupModelsByProvider, modelPickerSearchFilter, modelRowLabel, modelRowName, orderProviderGroups, resolveModelPickerBody } from "./sessionPickerOptions";
 import { ComposerModeChip } from "./composer/ComposerModeChip";
 import { resolveAcpConfigSelect } from "./acpConfigSelect";
+import { AcpConfigSearchSelect } from "./AcpConfigSearchSelect";
 import type { AgentBackend, AgentRuntimeState, AvailableModel, ComposerAgentMode, GitBranchInfo, ModelListFailReason, ModelListReport, SessionRecord, SessionRuntimeTarget, UsageProbeBackend } from "../../../../shared/types";
 
 /** 单个 extension widget 卡片：可折叠标题栏 + 内容行，支持手动关闭 */
@@ -176,6 +177,7 @@ export function ExtensionWidgetCard(props: {
  * model → 模型下拉、thought_level → 思考下拉、mode/其他 → 通用下拉。
  * 只处理 select 型且带枚举的 option(boolean 型需 client 通告,主流 agent 未用);
  * 分组值(options[].group)平铺渲染。值变化经 onSet 下发,整表由事件/响应回填。
+ * 模型列表（以及任何超长枚举）用可搜索下拉，短枚举保持普通 Select。
  */
 function AcpConfigControls(props: { options: import("../../../../shared/types/acp").AcpSessionConfigOption[]; disabled?: boolean; onSet: (optionId: string, value: string | boolean) => void }) {
 	const entries = flattenConfigOptions(props.options).filter((entry) => entry.values.length > 0);
@@ -185,6 +187,11 @@ function AcpConfigControls(props: { options: import("../../../../shared/types/ac
 			{entries.map((entry) => {
 				// currentValue 可能不在 agent 的枚举里（完整模型 id vs 别名）：补一条当前项，保证高亮/滚动指向真实值。
 				const select = resolveAcpConfigSelect(entry.option, entry.values);
+				// 模型列表按 agent 不同可达几十项：换可搜索下拉，避免平铺滚动找模型。
+				// 模式/思考档等短枚举仍用 Select（选项少时搜索框只是噪音）。
+				if (entry.option.category === "model" || entry.values.length > 10) {
+					return <AcpConfigSearchSelect key={entry.option.id} optionName={entry.option.name} description={entry.option.description} category={entry.option.category} select={select} disabled={props.disabled} onPick={(value) => props.onSet(entry.option.id, value)} />;
+				}
 				return (
 					// 再点选当前项等价于「保持不变」，不发 IPC。
 					<Select key={entry.option.id} value={select.value} disabled={props.disabled} onValueChange={(value) => (value === select.value ? undefined : props.onSet(entry.option.id, value))}>
