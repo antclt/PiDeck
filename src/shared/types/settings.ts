@@ -425,6 +425,15 @@ export type AppSettings = {
 	 * 空 = 只用自动检测。填写后优先使用该路径。
 	 */
 	webRemoteEasyTierCliPath?: string;
+	/**
+	 * 由 PiDeck 托管的 EasyTier 网络标识。三者齐备时组件接管 core 的启动与配置生成，
+	 * 缺任意一项都退回只读探测（网络仍由用户自己的客户端管理）。
+	 */
+	webRemoteEasyTierNetworkName?: string;
+	/** 由 PiDeck 托管的 EasyTier 网络密钥；明文存储，仅在本机 settings.json 中，不经 Web API 投影。 */
+	webRemoteEasyTierNetworkSecret?: string;
+	/** 共享节点列表（tcp/udp/ws/wss 等 URL）；可为空，为空时只能与局域网内节点互联。 */
+	webRemoteEasyTierPeers?: string[];
 	/** 本地生成的匿名安装标识，不包含账号、路径或机器名 */
 	telemetryInstallId?: string;
 	/** 最近一次发送 app_heartbeat 的本地日期，格式 YYYY-MM-DD */
@@ -1022,6 +1031,10 @@ export function sanitizeEasyTierCliPath(value: unknown): string {
 	if (/[\u0000-\u001f]/.test(trimmed)) return "";
 	return trimmed;
 }
+
+// EasyTier 托管网络的输入清洗规则放在独立叶子模块（纯函数、可单测），此处只做再导出。
+export { EASYTIER_PEER_PROTOCOLS, sanitizeEasyTierNetworkName, sanitizeEasyTierNetworkSecret, sanitizeEasyTierPeers } from "../easytierPeers";
+
 
 /**
  * 手动设置令牌的形状约束：8-128 个可打印非空白 ASCII（不含空格，避免 URL 拼接歧义）。

@@ -14,14 +14,14 @@
  */
 
 /**
- * 可启停渠道标识：cloudflare = 免注册公网隧道；tailscale = 私有组网（含 serve HTTPS 入口）。
- * EasyTier 是只读渠道（网络由用户自己的客户端/服务管理），不进入 start/stop 白名单。
+ * 可启停渠道标识：cloudflare = 免注册公网隧道；tailscale = 私有组网（含 serve HTTPS 入口）；
+ * easytier = 本机 EasyTier core（PiDeck 托管时经系统服务启停，未托管时启停是空操作）。
  */
-export type RemoteAccessChannelId = "cloudflare" | "tailscale";
+export type RemoteAccessChannelId = "cloudflare" | "tailscale" | "easytier";
 
 /** IPC 入参守卫：白名单枚举之外的任何值都不进业务层。 */
 export function isRemoteAccessChannelId(value: unknown): value is RemoteAccessChannelId {
-	return value === "cloudflare" || value === "tailscale";
+	return value === "cloudflare" || value === "tailscale" || value === "easytier";
 }
 
 /** cloudflared quick tunnel 渠道状态。 */
@@ -62,12 +62,23 @@ export type TailscaleAccessState = {
 	error: string;
 };
 
-/** EasyTier 渠道状态（只读：网络由用户自己的 EasyTier 客户端/服务管理）。 */
+/**
+ * EasyTier 渠道状态。
+ * 两种模式：托管（网络名/密钥齐备，PiDeck 生成配置并经系统服务启停）与只读（网络由用户自己的客户端管理）。
+ */
 export type EasyTierAccessState = {
 	/** 本机是否找到了 easytier-cli（自动读取虚拟 IP 用；找不到时仍可手动填写）。 */
 	installed: boolean;
 	/** CLI 路径（未找到为空串）。 */
 	binaryPath: string;
+	/** 本机是否找到了 easytier-core（托管模式启动用；只有 CLI 时为 false）。 */
+	coreAvailable: boolean;
+	/** 托管配置是否齐备（网络名 + 密钥都填了）。 */
+	configPresent: boolean;
+	/** 本机是否已安装 easytier 系统服务。 */
+	serviceInstalled: boolean;
+	/** 系统服务是否处于运行中。 */
+	serviceRunning: boolean;
 	/** CLI 能否读到运行中的本地 EasyTier 节点。 */
 	running: boolean;
 	/** EasyTier 虚拟 IPv4（自动检测或手动填写；不带 CIDR；未知为空串）。 */
@@ -99,7 +110,7 @@ export type RemoteAccessState = {
 
 /** EasyTier 空状态：主进程未探测/预览环境共用。 */
 export function emptyEasyTierAccessState(): EasyTierAccessState {
-	return { installed: false, binaryPath: "", running: false, ip: "", hostname: "", version: "", ipSource: "", error: "" };
+	return { installed: false, binaryPath: "", coreAvailable: false, configPresent: false, serviceInstalled: false, serviceRunning: false, running: false, ip: "", hostname: "", version: "", ipSource: "", error: "" };
 }
 
 /** 未探测/预览环境下的空状态：渲染层与 previewApi 复用，避免各自拼默认形状。 */

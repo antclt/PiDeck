@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 10799792dcbc07b8d753cd83b47289c51b00094ac57b6edc70c60c9ddbcc5c04（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 61650904b46be040a3e219bf432724968dc557cd8f94909ade688a850830742d（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5740,9 +5740,26 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.remote.et.cliPathHint": "官方 Windows 包是解壓即用、不在 PATH 裡；解壓到自定義目錄時在這裡指定 easytier-cli.exe（也可選它所在的資料夾），儲存設定後生效",
 	"settings.remote.et.browse": "瀏覽",
 	"settings.remote.et.cliFound": "已檢測到 CLI：{path}",
-	"settings.remote.et.manualLabel": "手動虛擬 IP",
+	"settings.remote.et.manualLabel": "繫結 IP",
 	"settings.remote.et.manualPlaceholder": "如 10.144.144.1",
 	"settings.remote.et.manualHint": "留空則自動檢測；填寫後優先使用手動地址，儲存設定後生效",
+	"settings.remote.et.managedHint": "填齊網路名稱與金鑰後，PiDeck 會生成配置並接管 EasyTier 的啟動與停止（安裝系統服務需要一次管理員授權）",
+	"settings.remote.et.networkNameLabel": "網路名稱",
+	"settings.remote.et.networkNamePlaceholder": "例如 caoayu",
+	"settings.remote.et.networkSecretLabel": "網路金鑰",
+	"settings.remote.et.networkSecretPlaceholder": "與手機端保持一致",
+	"settings.remote.et.peersLabel": "共享節點",
+	"settings.remote.et.peersPlaceholder": "tcp://1.2.3.4:11010",
+	"settings.remote.et.peersHint": "每行一個，可填多個做冗餘；留空則只能與區域網內節點互聯",
+	"settings.remote.et.start": "啟動 EasyTier",
+	"settings.remote.et.stop": "停止 EasyTier",
+	"settings.remote.et.configExpand": "配置網路",
+	"settings.remote.et.configCollapse": "收起配置",
+	"settings.remote.et.shareButton": "分享給手機",
+	"settings.remote.et.needConfigHint": "填寫網路名稱與網路金鑰後即可啟動（金鑰需與手機端一致）",
+	"settings.remote.et.needCoreHint": "只找到 easytier-cli，沒找到 easytier-core；兩者通常在同一個安裝目錄，請檢查安裝包是否完整",
+	"settings.remote.et.shareHint": "手機端配置：用 EasyTier 客戶端掃下方二維碼下載配置檔案，再在「匯入配置」裡選擇該檔案",
+	"settings.remote.et.shareQrHint": "二維碼指向本機 Web 的配置下載地址；手機需先能訪問該地址（同區域網或已開啟其他通道）",
 	"settings.remote.et.autoUrlHint": "已從本機 EasyTier 自動讀取；手機需安裝 EasyTier 並加入同一網路",
 	"settings.remote.et.manualUrlHint": "地址來自手動填寫（優先於自動檢測），請確認手機已加入同一 EasyTier 網路且電腦端線上",
 	"settings.remote.et.nodeInfo": "節點 {hostname} · EasyTier {version}",

@@ -7,7 +7,7 @@
  */
 import { memo, useCallback, useEffect, useState } from "react";
 import { Cloud, Copy, Check, LifeBuoy, Globe, Lock, Network, RefreshCw, Square, Loader2 } from "lucide-react";
-import type { AppSettings, RemoteAccessChannelId, RemoteAccessState } from "../../../../../shared/types";
+import type { AppSettings, RemoteAccessChannelId, RemoteAccessState, WebNetworkAddress } from "../../../../../shared/types";
 import { t } from "../../../i18n";
 import { desktopApi } from "../../../desktopApi";
 import { Button } from "../../ui-shadcn/button";
@@ -16,7 +16,7 @@ import { Label } from "../../ui-shadcn/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../ui-shadcn/select";
 import { SettingsSection } from "./SettingsStorageTab";
 import { SettingRow } from "./SettingRows";
-import { appendTokenToUrl } from "./webAccessUrl";
+import { appendTokenToUrl, bracketIpv6Host } from "./webAccessUrl";
 import { useQrDataUrl } from "./useQrDataUrl";
 import { WebRemoteAccessGuideDialog, type RemoteAccessGuideTab } from "./WebRemoteAccessGuideDialog";
 
@@ -75,9 +75,17 @@ export const WebRemoteAccessSection = memo(function WebRemoteAccessSection(props
 	/** 设置草稿与更新入口：隧道参数（协议/自定义参数）走设置保存流，随弹框统一落盘 */
 	draft: AppSettings;
 	updateDraft: (patch: Partial<AppSettings>) => void;
+	/** 本机可用网卡地址：手机还没入网时，配置下载只能走局域网入口。 */
+	networkAddresses?: WebNetworkAddress[];
 }) {
 	const [state, setState] = useState<RemoteAccessState | null>(null);
 	const [busyChannel, setBusyChannel] = useState<RemoteAccessChannelId | null>(null);
+	// 分享二维码用的网卡索引：手机首次配置只能走局域网，多网卡时需要能切换
+	const [etShareHostIndex, setEtShareHostIndex] = useState(0);
+	// 配置表单默认折叠：卡片首屏只留状态 + 主操作，配置属于一次性设置
+	const [etConfigOpen, setEtConfigOpen] = useState(false);
+	// 二维码按需展开：手机没准备好之前它只是噪声
+	const [etShareOpen, setEtShareOpen] = useState(false);
 	const [guideOpen, setGuideOpen] = useState(false);
 	const [guideTab, setGuideTab] = useState<RemoteAccessGuideTab>("cloudflare");
 
@@ -101,14 +109,25 @@ export const WebRemoteAccessSection = memo(function WebRemoteAccessSection(props
 		setBusyChannel(channel);
 		try {
 			const api = desktopApi.settings;
-			const result = action === "start" ? await api.webRemoteAccessStart(channel) : await api.webRemoteAccessStop(channel);
+			// EasyTier 用当前草稿而非已保存设置：改完配置直接点启动即可，不必先点保存
+			const easyTierConfig =
+				channel === "easytier" && action === "start"
+					? {
+							networkName: (props.draft.webRemoteEasyTierNetworkName ?? "").trim(),
+							networkSecret: (props.draft.webRemoteEasyTierNetworkSecret ?? "").trim(),
+							peers: props.draft.webRemoteEasyTierPeers ?? [],
+							bindIpv4: props.draft.webRemoteEasyTierIp ?? "",
+						}
+					: undefined;
+			const result =
+				action === "start" ? await api.webRemoteAccessStart(channel, easyTierConfig) : await api.webRemoteAccessStop(channel);
 			if (result.ok) setState(result.state);
 		} catch {
 			// IPC 层异常不常见（业务失败走 ok:false）；忽略后由推送/重拉兜底
 		} finally {
 			setBusyChannel(null);
 		}
-	}, []);
+	}, [props.draft.webRemoteEasyTierNetworkName, props.draft.webRemoteEasyTierNetworkSecret, props.draft.webRemoteEasyTierPeers, props.draft.webRemoteEasyTierIp]);
 
 	const openGuide = useCallback((tab: RemoteAccessGuideTab) => {
 		setGuideTab(tab);
@@ -152,6 +171,17 @@ export const WebRemoteAccessSection = memo(function WebRemoteAccessSection(props
 	const tsServeUrl = ts?.serveUrl ? appendTokenToUrl(ts.serveUrl, token, requiresAuth) : "";
 	// EasyTier 直连地址（HTTP，虚拟 IP）
 	const etUrl = et?.ip && webReady ? appendTokenToUrl(`http://${et.ip}:${state?.webPort ?? 0}`, token, requiresAuth) : "";
+
+	// EasyTier 配置下载地址：手机在入网前就得能打开，所以优先用已就绪的公网/组网入口，
+	// 最后才回落到 EasyTier 虚拟 IP（此时手机已入网，属于重复配置场景）。
+	// 手机首次配置时还没入网，下载地址必须走它能访问到的入口：局域网网卡优先，
+	// 其次是已开启的隧道/组网入口；EasyTier 虚拟 IP 放最后（那时已入网，属重复配置）。
+	const lanAddresses = props.networkAddresses ?? [];
+	const lanHost = lanAddresses.length > 0 ? lanAddresses[Math.min(etShareHostIndex, lanAddresses.length - 1)] : undefined;
+	const etConfigBase = lanHost?.address
+		? `http://${bracketIpv6Host(lanHost.address)}:${state?.webPort ?? 0}`
+		: cf?.publicUrl || (ts?.ip ? `http://${ts.ip}:${state?.webPort ?? 0}` : "") || (et?.ip ? `http://${et.ip}:${state?.webPort ?? 0}` : "");
+	const etConfigUrl = etConfigBase && webReady ? appendTokenToUrl(`${etConfigBase.replace(/\/$/, "")}/api/easytier/config.toml`, token, requiresAuth) : "";
 
 	const cfBadge = !cf?.binaryAvailable
 		? { text: t("settings.remote.status.notInstalled"), tone: "warn" as const }
@@ -313,6 +343,8 @@ export const WebRemoteAccessSection = memo(function WebRemoteAccessSection(props
 			{/* ── EasyTier（只读：网络由用户自己的客户端/服务管理）── */}
 			<ChannelCard icon={<Network size={15} aria-hidden="true" />} title={t("settings.remote.et.title")} badge={etBadge.text} badgeTone={etBadge.tone} description={t("settings.remote.et.desc")}>
 				{etUrl ? <AccessUrlBlock url={etUrl} showQr hint={et?.ipSource === "cli" ? t("settings.remote.et.autoUrlHint") : t("settings.remote.et.manualUrlHint")} /> : <p className="text-caption text-text-secondary">{et?.installed ? t("settings.remote.et.notRunningHint") : t("settings.remote.et.noCliHint")}</p>}
+				{etConfigOpen ? (
+					<>
 				{/* CLI 路径：官方 Windows 包是「解压即用」，不在 PATH 也没卸载记录，自动检测可能找不到 */}
 				<div className="grid gap-1">
 					<div className="grid items-center gap-2 sm:grid-cols-[auto_minmax(0,1fr)]">
@@ -348,7 +380,63 @@ export const WebRemoteAccessSection = memo(function WebRemoteAccessSection(props
 					<small className="text-micro text-text-tertiary">{t("settings.remote.et.manualHint")}</small>
 				</div>
 				{et?.hostname || et?.version ? <small className="text-micro text-text-tertiary">{t("settings.remote.et.nodeInfo", { hostname: et.hostname || "-", version: et.version || "-" })}</small> : null}
+				{/* 托管配置：填齐网络名 + 密钥后由 PiDeck 生成配置并接管 core 的启停 */}
+				<div className="grid gap-2 rounded-md border border-border-subtle/70 bg-bg-muted/30 p-2">
+					<small className="text-micro text-text-tertiary">{t("settings.remote.et.managedHint")}</small>
+					<div className="grid items-center gap-2 sm:grid-cols-[auto_minmax(0,1fr)]">
+						<Label className="text-xs font-bold text-text-tertiary">{t("settings.remote.et.networkNameLabel")}</Label>
+						<Input
+							className="h-8 w-full font-mono text-xs"
+							placeholder={t("settings.remote.et.networkNamePlaceholder")}
+							value={props.draft.webRemoteEasyTierNetworkName ?? ""}
+							onChange={(event) => props.updateDraft({ webRemoteEasyTierNetworkName: event.target.value })}
+							onBlur={(event) => props.updateDraft({ webRemoteEasyTierNetworkName: event.target.value.trim() })}
+						/>
+					</div>
+					<div className="grid items-center gap-2 sm:grid-cols-[auto_minmax(0,1fr)]">
+						<Label className="text-xs font-bold text-text-tertiary">{t("settings.remote.et.networkSecretLabel")}</Label>
+						<Input
+							type="password"
+							className="h-8 w-full font-mono text-xs"
+							placeholder={t("settings.remote.et.networkSecretPlaceholder")}
+							value={props.draft.webRemoteEasyTierNetworkSecret ?? ""}
+							onChange={(event) => props.updateDraft({ webRemoteEasyTierNetworkSecret: event.target.value })}
+							onBlur={(event) => props.updateDraft({ webRemoteEasyTierNetworkSecret: event.target.value.trim() })}
+						/>
+					</div>
+					<div className="grid gap-1">
+						<Label className="text-xs font-bold text-text-tertiary">{t("settings.remote.et.peersLabel")}</Label>
+						<textarea
+							className="min-h-16 w-full resize-y rounded-md border border-border-subtle/70 bg-bg-base p-2 font-mono text-xs text-text-primary outline-none focus-visible:border-border-strong"
+							placeholder={t("settings.remote.et.peersPlaceholder")}
+							value={(props.draft.webRemoteEasyTierPeers ?? []).join("\n")}
+							onChange={(event) => props.updateDraft({ webRemoteEasyTierPeers: event.target.value.split("\n") })}
+						/>
+						<small className="text-micro text-text-tertiary">{t("settings.remote.et.peersHint")}</small>
+					</div>
+				</div>
+					</>
+				) : null}
 				<div className="flex flex-wrap items-center gap-2">
+					<Button size="sm" variant="ghost" onClick={() => setEtConfigOpen((value) => !value)}>
+						{etConfigOpen ? t("settings.remote.et.configCollapse") : t("settings.remote.et.configExpand")}
+					</Button>
+					{et?.serviceRunning ? (
+						<Button size="sm" variant="outline" disabled={busyChannel !== null} onClick={() => void runChannelAction("easytier", "stop")}>
+							<Square className="mr-1.5 size-3.5" aria-hidden="true" />
+							{t("settings.remote.et.stop")}
+						</Button>
+					) : (
+						<Button size="sm" variant="secondary" disabled={!et?.installed || busyChannel !== null} onClick={() => void runChannelAction("easytier", "start")}>
+							<Network className="mr-1.5 size-3.5" aria-hidden="true" />
+							{t("settings.remote.et.start")}
+						</Button>
+					)}
+					{et?.configPresent && etConfigUrl ? (
+						<Button size="sm" variant="outline" onClick={() => setEtShareOpen((value) => !value)}>
+							{t("settings.remote.et.shareButton")}
+						</Button>
+					) : null}
 					<Button size="sm" variant="outline" onClick={refresh} disabled={props.webServiceChanging}>
 						<RefreshCw className="mr-1.5 size-3.5" aria-hidden="true" />
 						{t("settings.remote.recheck")}
@@ -357,6 +445,30 @@ export const WebRemoteAccessSection = memo(function WebRemoteAccessSection(props
 						{t("settings.remote.openGuide")}
 					</Button>
 				</div>
+				{/* 按钮只在没装 CLI 时禁用：配置不全时点击给明确原因，而不是灰着不说为什么 */}
+				{et?.installed && !et.configPresent ? <small className="text-micro text-text-tertiary">{t("settings.remote.et.needConfigHint")}</small> : null}
+				{et?.installed && !et.coreAvailable ? <small className="text-micro text-warning">{t("settings.remote.et.needCoreHint")}</small> : null}
+				{/* 手机导入配置：二维码指向本机 Web 的 TOML 下载地址，扫完在 EasyTier App 里「导入配置」 */}
+				{etShareOpen && et?.configPresent && etConfigUrl ? (
+					<div className="grid gap-1 border-t border-border-subtle/50 pt-2">
+						<small className="text-micro text-text-tertiary">{t("settings.remote.et.shareHint")}</small>
+						{lanAddresses.length > 1 ? (
+							<Select value={String(Math.min(etShareHostIndex, lanAddresses.length - 1))} onValueChange={(value) => setEtShareHostIndex(Number(value))}>
+								<SelectTrigger className="h-8 w-full text-xs">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									{lanAddresses.map((item, index) => (
+										<SelectItem key={item.address} value={String(index)}>
+											{item.address} · {item.interfaceName}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						) : null}
+						<AccessUrlBlock url={etConfigUrl} showQr hint={t("settings.remote.et.shareQrHint")} />
+					</div>
+				) : null}
 				{et?.error ? <p className="text-caption text-warning">{et.error}</p> : null}
 			</ChannelCard>
 

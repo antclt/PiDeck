@@ -233,6 +233,32 @@ export async function detectEasyTierBinary(preferredPath = ""): Promise<string> 
 	return "";
 }
 
+/**
+ * 定位 easytier-core：官方发行包把 core 和 cli 放在同一目录，所以优先用已找到的 CLI 路径
+ * 反推同目录的 core；反推不到再按 PATH / 常见目录兜底。找不到返回空串（托管模式不可用）。
+ */
+export function detectEasyTierCore(cliPath?: string): string {
+	const exeName = "easytier-core" + (process.platform === "win32" ? ".exe" : "");
+	const candidates: string[] = [];
+	if (cliPath) {
+		const dir = cliPath.replace(/[\\/][^\\/]+$/, "");
+		if (dir && dir !== cliPath) candidates.push(join(dir, exeName));
+	}
+	const pathValue = process.env.PATH || process.env.Path || "";
+	for (const dir of pathValue.split(delimiter)) {
+		if (dir.trim()) candidates.push(join(dir, exeName));
+	}
+	candidates.push(join(homedir(), ".cargo", "bin", exeName));
+	for (const candidate of candidates) {
+		try {
+			if (existsSync(candidate)) return candidate;
+		} catch {
+			// 单目录不可读不影响继续
+		}
+	}
+	return "";
+}
+
 /** CLI 管道输出可能带 ANSI 颜色/BOM；解析前统一清掉，避免正则/JSON 解析被噪声打断。 */
 function cleanCliText(text: string): string {
 	return text.replace(/^\uFEFF/, "").replace(/\u001b\[[0-9;]*m/g, "");

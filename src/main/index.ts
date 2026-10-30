@@ -6126,6 +6126,8 @@ app
 				}) ?? (() => {}),
 			// ACP 工具清单（只给 id/name，command/args/env 不外发）：Web 端后端选择器的 ACP 入口。
 			// 未开启 ACP 或没有启用的工具时返回空数组，Web 端就不展示 ACP 选项。
+			// EasyTier 托管配置下载：手机端「导入配置」用；未配置时返回空串（路由 404）
+			getEasyTierConfigToml: () => remoteAccessManager?.buildEasyTierConfigToml() ?? "",
 			listAcpTools: () => {
 				const settings = settingsStore.get();
 				if (settings.acpEnabled !== true) return [];
@@ -6483,6 +6485,22 @@ app
 			getEasyTierManualIp: () => settingsStore.get().webRemoteEasyTierIp ?? "",
 			// 解压版 CLI / 非默认目录安装：自动检测找不到时用用户指定的路径
 			getEasyTierCliPath: () => settingsStore.get().webRemoteEasyTierCliPath ?? "",
+			// 托管配置：三个字段齐备才接管 core；缺任意一项返回 null，退回只读探测
+			getEasyTierConfig: () => {
+				const s = settingsStore.get();
+				const networkName = s.webRemoteEasyTierNetworkName?.trim() ?? "";
+				const networkSecret = s.webRemoteEasyTierNetworkSecret?.trim() ?? "";
+				if (!networkName || !networkSecret) return null;
+				return {
+					networkName,
+					networkSecret,
+					peers: s.webRemoteEasyTierPeers ?? [],
+					bindIpv4: s.webRemoteEasyTierIp ?? "",
+					instanceName: networkName,
+				};
+			},
+			// 固定路径：服务安装时 -c 指向它，之后改配置只重写文件、不必重装服务
+			getEasyTierConfigPath: () => join(app.getPath("userData"), "easytier", "network.toml"),
 			pushState: (state) => {
 				const win = mainWindow;
 				if (win && !win.isDestroyed()) win.webContents.send(ipcChannels.webRemoteAccessChanged, state);
