@@ -537,7 +537,33 @@
 **未通过 / 未验证（不当作通过）**：
 1. **远端代码文件编辑**：修复前是既有 e2e 与当前 UI 交互契约不一致（`.header-drawer-toggle` + 一次未复现的 oracle 失败）；**task-13 已修（e2e-only）**，最终 HEAD `aa14565ef` 独立复跑 **1 passed (2.1m)**（见 11.4）。
 2. **remoteHostAcceptance**：修复前确定性 2/2 失败（漂移已检测但侧栏 badge 未显示）；根因＝渲染层 `readRootStatusResponse` 只认扁平形状、main 已迁 Op 信封 ⇒ badge 恒 `unavailable`；**task-12 已修并合入**，本 verifier 在 `71fc7eefc`（= dev `bb9ab2d55`）**独立复跑 1 passed (45.4s)**（见 11.5 / 11.11）。
-3. **G6b opt-in soak**、**remoteFunctionalAcceptance**（本轮不做）、其余未列出的远端用例。
-4. **远端内容搜索 UI 端到端未覆盖**（现有 e2e 无入口），只有协议级真机证据。
+3. **G6b opt-in soak**、其余未列出的远端用例。（`remoteFunctionalAcceptance` 已补跑：首跑 fail → Op 修复后 **pass 38.7s**，见 §12）
+4. ~~远端内容搜索 UI 端到端未覆盖~~ → **已闭合**：W4 task-17 在「远端代码文件」用例里补了抽屉搜索步骤，最终 HEAD 真机通过（见 §13）。
+
+---
+
+## 13. 远端内容搜索 UI 端到端（W4 task-17 e2e 步骤，最终 HEAD 复跑）
+
+**背景**：此前内容搜索只有**协议级真机证据**（§11.6：helper 1.25.0 / `fs.searchContent` 命中 / 二进制跳过 / `QUERY_INVALID`），UI 端到端因现有 e2e 无入口而未覆盖。W4 在 `e2e/remoteSessionAcceptance.spec.ts:690` 的「远端代码文件」用例里新增了 `test.step("文件抽屉内容搜索：…")`（不新增 spec、不改既有断言）。
+
+| 项 | 内容 |
+|----|------|
+| HEAD | `24428bc5a` ← dev `f857a331f`（含 task-17 e2e 与 W1 task-16 产品代码；`out/` 已重建） |
+| 命令 | `& "$env:TEMP\pideck-v-remote.ps1" -Grep "远端代码文件"` |
+| 退出码 / 时长 | **0 / 2.1m** |
+| 结果 | **1 passed** —— 新增的内容搜索步骤真机通过 |
+
+**该步骤的断言（逐条）**
+
+1. 抽屉里点「搜索文件名」→ 输入夹具正文标记 **「中文保存验收」** → 点「搜索」；
+2. `.file-search-content` **内容命中分区出现**（依据 helper 1.25.0 的 `fs.searchContent` 能力）；
+3. 命中行指向夹具文件 `calc.cjs`，`title` 匹配 **`/^calc\.cjs:\d+$/`**（项目相对路径:行号）；
+4. 命中行正文片段带出 **「中文保存验收」**；
+5. `file-search-name-only-hint`（「仅文件名」能力提示）**计数为 0** —— 新 helper 下不得显示能力缺失提示；
+6. 点「清除搜索结果」→ 内容分区消失，后续步骤仍在原抽屉路径继续。
+
+**覆盖边界**：真机无法回退 helper 版本，所以**只覆盖 helper 1.25.0 的「命中」路径**；「旧 helper ⇒ 仅文件名」的回退路径仍由单测覆盖（W2 的 `remoteContentSearchCapabilityUi` 等），本记录 §11.6 另有旧 helper 1.24.0 未部署新 bundle 时的**真实主机行为**证据（能力缺失 ⇒ 主进程返回 null）。
+
+**与协议级证据的关系**：§11.6 证明「helper 侧能力与协议正确」，本节证明「产品 UI 链路（能力协商 → 抽屉搜索 → 命中分区 → 清除）」正确，两者互补；至此内容搜索的验证不再有"只有协议层"的缺口。
 
 
