@@ -3,6 +3,7 @@ import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react";
 import { ContextMenu as ContextMenuPrimitive } from "radix-ui";
 
 import { cn } from "@/lib/utils";
+import { titlebarCollisionPadding } from "@/lib/titlebarInset";
 
 /**
  * shadcn ContextMenu（radix-ui 统一包版）。
@@ -21,11 +22,14 @@ function ContextMenuPortal({ ...props }: React.ComponentProps<typeof ContextMenu
 	return <ContextMenuPrimitive.Portal data-slot="context-menu-portal" {...props} />;
 }
 
-function ContextMenuContent({ className, ...props }: React.ComponentProps<typeof ContextMenuPrimitive.Content>) {
+function ContextMenuContent({ className, collisionPadding, ...props }: React.ComponentProps<typeof ContextMenuPrimitive.Content>) {
 	return (
 		<ContextMenuPrimitive.Portal>
 			<ContextMenuPrimitive.Content
 				data-slot="context-menu-content"
+				// 默认让开自定义标题栏的拖拽热区，否则顶到视口上沿时首项会点不动
+				// （原因见 lib/titlebarInset.ts）；调用方显式传入者优先。
+				collisionPadding={collisionPadding ?? titlebarCollisionPadding()}
 				className={cn(
 					"z-(--z-popover) min-w-[8rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-[var(--shadow-popover)] duration-base",
 					// 出场节奏与 dropdown-menu 完全一致（同族交互：右键 vs 点击）：base 200ms + ease-out-quint 进、ease-in 出
