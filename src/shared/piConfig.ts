@@ -18,6 +18,16 @@ export type PiConfigFileKey = (typeof PI_CONFIG_FILES)[number];
  */
 export type PiConfigTarget = { kind: "local" } | { kind: "ssh"; hostId: string } | { kind: "wsl"; hostId: string };
 
+/**
+ * Which environment a **resource** surface (skills / prompts / extensions) reads and writes.
+ *
+ * Deliberately narrower than {@link PiConfigTarget}: remote (ssh) resource management is not supported in this
+ * build, so an ssh target is not expressible here and the main-side validator refuses anything outside this union.
+ * Absent target means local, the compatibility default every existing renderer call relies on.
+ */
+export type PiResourceTarget = { kind: "local" } | { kind: "wsl"; hostId: string };
+export type PiResourceOptions = { target?: PiResourceTarget };
+
 /** The closed set of stable codes the remote backend and its IPC surface may answer with. */
 export const REMOTE_CONFIG_CODES = {
 	/** target object shape/hostId shape is not a target this build accepts. */
