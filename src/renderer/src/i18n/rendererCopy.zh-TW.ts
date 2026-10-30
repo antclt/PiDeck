@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 5ed164c5b55e60c98f9c0f8bb4526144a4245431db04756215e8beeae91724b1（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 24f8e8c3ab30eb369391c0f78498b4f241c9b91b1d4f86db45cd4e1eea8f1449（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -6858,7 +6858,6 @@ export const zhTW: Record<TranslationKey, string> = {
 	"remoteGit.trustEffect": "此決定允許 PiDeck 讀取該遠端倉庫，也會在下次啟動 pi 時允許此專案的 .pi 資源（擴充套件、技能、提示詞和專案設定）。不授予 Git hooks/filter 執行權限；請只信任你核實過的目錄。",
 	"remoteGit.trustApprove": "信任此專案及其 .pi 資源",
 	"remoteGit.trustFailed": "未能儲存專案授權。本次未讀取 Git，請檢查主機連線後重試明確授權。",
-	"remoteGit.title": "遠端 Git（只讀）",
 	"remoteGit.refresh": "重新整理遠端 Git",
 	"remoteGit.repoScope": "倉庫範圍",
 	"remoteGit.repoScopeRoot": "專案根",
@@ -6925,7 +6924,6 @@ export const zhTW: Record<TranslationKey, string> = {
 	"remoteGit.recoveryRestored": "已還原 {path}（內容為丟棄前原樣）。",
 	"remoteGit.recoveryDropped": "已刪除 {path} 的快照。",
 	"remoteGit.syncLoading": "正在讀取遠端同步資訊…",
-	"remoteGit.syncTitle": "同步",
 	"remoteGit.syncFetch": "獲取",
 	"remoteGit.syncPush": "推送",
 	"remoteGit.syncPull": "拉取",
