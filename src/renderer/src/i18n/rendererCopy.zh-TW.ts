@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 0f6ba6411d9b758a26d0d23b0ef86ad5a292c7b3d7662ebfb153a01b46b6507b（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: b1197cfa0a89f4c8a1462ebfab40055bd1ede9dc43c8cac0c49b2be60b2f78ee（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -634,6 +634,10 @@ export const zhTW: Record<TranslationKey, string> = {
 	"git.branchSwitcherConfirmTitle": "切換分支？",
 	"git.branchSwitcherConfirmMessage": "將切換到分支「{branch}」。未提交的更改會隨切換攜帶；若目標分支對同一檔案存在衝突，git 會拒絕切換（當前分支保持不變）。",
 	"git.branchSwitcherConfirmLabel": "切換",
+	"app.projectUnavailable": "專案不可用",
+	"app.modelUnavailable": "模型不可用",
+	"app.modelUnavailableTitle": "上次選擇的模型 {model} 已不在目錄中，請重新選擇。",
+	"app.branchUnavailable": "Git 不可用",
 	"app.branchSwitchFailed": "切換分支失敗：{error}",
 	"app.branchSwitching": "切換中…",
 	"app.branchCreate": "新建分支",
@@ -1061,6 +1065,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"app.queuedImageCount": "{count} 圖",
 	"app.queuedSending": "傳送中",
 	"app.queuedFailed": "失敗",
+	"app.sendFailedShort": "傳送失敗",
+	"app.sendFailed": "訊息未能傳送，可修改後重試。",
 	"app.queuedUnknownShort": "未知",
 	"app.queuedUnknown": "訊息可能已提交但未收到確認，已停用撤回以免重複傳送。",
 	"app.queuedDeliveryUnknown": "訊息可能未送達",
@@ -6311,7 +6317,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"web.forkedBadge": "fork",
 	"session.view.chat": "對話",
 	"session.view.trajectory": "軌跡",
-	"session.branchTree.title": "分支",
+	"session.branchTree.title": "會話分支",
 	"session.branchTree.hint": "當前分支高亮；預設摺疊助手/工具步驟，點 ⌄ 展開；懸停使用者訊息可 fork",
 	"session.branchTree.refresh": "重新整理分支樹",
 	"session.branchTree.loading": "正在讀取分支樹…",

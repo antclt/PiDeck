@@ -128,7 +128,7 @@ function SessionStartBody(props: SessionStartProps) {
 	// 各自起始页显示各自 worktree 的分支，不跟随 App 聚焦项目（栏级 usePaneGitInfo）。
 	const sessionRecord = useAtomValue(sessionRecordByIdAtomFamily(props.sessionId));
 	const startProjectId = props.bootstrapProjectId ?? sessionRecord?.projectId;
-	const { gitInfo, switchBranch } = usePaneGitInfo(startProjectId, {
+	const { gitInfo, gitUnavailable, switchBranch } = usePaneGitInfo(startProjectId, {
 		onChanged: services.onProjectGitChanged,
 		onSwitchError: (error) => services.showToast(t("app.branchSwitchFailed", { error: error instanceof Error ? error.message : String(error) })),
 	});
@@ -137,12 +137,20 @@ function SessionStartBody(props: SessionStartProps) {
 	const project = useAtomValue(projectByIdAtomFamily(startProjectId ?? ""));
 	const fixedProjectLabel = project === undefined ? undefined : isChatProject(project) ? t("app.chatProject") : project.name;
 	// 只有无会话引导页允许换项目；真实会话（包括空的历史会话）始终只读，忽略误传的切换器。
+	// 项目记录缺失（Wave 4 §5）：真实会话的 startProjectId 指向尚未加载/已移除的项目时
+	// 不再整条静默消失——显式显示「项目不可用」；引导页瞬态（无 startProjectId）仍隐藏。
+	const projectMissing = props.sessionId !== GUIDE_BOOTSTRAP_SESSION_ID && startProjectId !== undefined && fixedProjectLabel === undefined;
 	const contextBar =
 		(props.sessionId === GUIDE_BOOTSTRAP_SESSION_ID ? props.projectSwitcher : undefined) ??
-		(fixedProjectLabel !== undefined ? (
+		(projectMissing ? (
+			<span className="inline-flex h-6 min-w-0 max-w-56 items-center gap-1.5 rounded-md px-1.5 text-caption font-normal text-muted-foreground/70" title={t("app.projectUnavailable")}>
+				<FolderGit2 size={14} strokeWidth={1.8} className="shrink-0 text-muted-foreground/60" aria-hidden="true" />
+				<span className="min-w-0 truncate">{t("app.projectUnavailable")}</span>
+			</span>
+		) : fixedProjectLabel !== undefined ? (
 			<span className="inline-flex h-6 min-w-0 max-w-56 items-center gap-1.5 rounded-md px-1.5 text-caption font-normal text-text-secondary">
 				<FolderGit2 size={14} strokeWidth={1.8} className="shrink-0 text-text-tertiary" aria-hidden="true" />
-				<span className="min-w-0 truncate">{fixedProjectLabel}</span>
+				<span className="min-w-0 truncate" title={fixedProjectLabel}>{fixedProjectLabel}</span>
 			</span>
 		) : undefined);
 	const queuedTrackRef = useRef<HTMLElement | null>(null);
@@ -162,6 +170,7 @@ function SessionStartBody(props: SessionStartProps) {
 					sessionId={props.sessionId}
 					contextBar={contextBar}
 					gitInfo={gitInfo}
+					gitUnavailable={gitUnavailable}
 					onSwitchBranch={switchBranch}
 					enqueue={services.enqueueSessionPrompt}
 					ensureSessionId={services.ensureSessionId}

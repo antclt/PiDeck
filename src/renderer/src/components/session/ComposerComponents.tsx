@@ -526,6 +526,8 @@ export function ComposerBottomBar(props: {
 	modelPending?: ModelPending;
 	composerAgentMode: ComposerAgentMode;
 	gitInfo?: GitBranchInfo;
+	/** 本栏项目 Git 拉取失败（非仓库/磁盘不可读）：显示「Git 不可用」chip 而非静默消失（Wave 4 §5）。 */
+	gitUnavailable?: boolean;
 	/** 切换分支（右侧分支下拉）：经栏级 usePaneGitInfo 的 switchBranch 执行，
 	 *  成功后回写本栏 gitInfo 并通知 App（仅当本栏为聚焦项目时采纳），右侧 Git 面板与底栏保持同步。 */
 	onSwitchBranch?: (branch: string) => void;
@@ -682,8 +684,11 @@ export function ComposerBottomBar(props: {
 	const modelTo = modelDisplay.to;
 	const modelName = modelFrom?.modelName || modelFrom?.modelId;
 	// 底栏只显示模型名；供应商放进悬停 title（长名字会截断，不能把底栏撑开）。
-	const modelLabel = modelName ? formatModelName(modelFrom ?? { provider: "", modelId: "" }) : `${t("app.model")}: -`;
-	const modelTitle = modelFrom ? formatModelRef(modelFrom) : undefined;
+	// Wave 4 §5：引导页曾选中的模型已从目录消失（welcomeModelLost）时，chip 从裸「模型: -」
+	// 升级为「模型不可用」+ title 原因——用户能分辨「还没选」与「选过的模型被删了」。
+	const modelUnavailable = Boolean(needsWelcomeCatalog && welcomeModelLost && !modelName);
+	const modelLabel = modelName ? formatModelName(modelFrom ?? { provider: "", modelId: "" }) : modelUnavailable ? t("app.modelUnavailable") : `${t("app.model")}: -`;
+	const modelTitle = modelFrom ? formatModelRef(modelFrom) : modelUnavailable ? t("app.modelUnavailableTitle", { model: welcomeModel?.modelName || welcomeModel?.modelId || "" }) : undefined;
 	// 锁定态只读后端标识：ACP 会话把工具名拼进 title/aria-label（与下拉触发器同一套品牌 logo）。
 	// hook 必须无条件调用：写成 `props.backend === "acp" ? useAtomValue(...) : undefined` 会让
 	// 「切到 ACP 后端」这次渲染比上一次多一个 hook，直接抛 React #310（渲染的 hook 数多于上次）。
@@ -896,6 +901,13 @@ export function ComposerBottomBar(props: {
 						>
 							<GitBranch size={15} strokeWidth={1.8} aria-hidden="true" />
 							<span className="composer-bar-branch-name truncate">{props.gitInfo.current}</span>
+						</span>
+					) : props.gitUnavailable ? (
+						// Wave 4 §5：本地项目但 Git 信息拉不到（非仓库/磁盘不可用）——
+						// 此前控件静默消失，用户无从分辨「还没加载」与「这个项目没有 Git」。
+						<span className="inline-flex items-center gap-1.5 px-1.5 text-control text-muted-foreground/70" title={t("app.branchUnavailable")}>
+							<GitBranch size={15} strokeWidth={1.8} aria-hidden="true" />
+							<span className="truncate">{t("app.branchUnavailable")}</span>
 						</span>
 					) : null}
 					{props.enhance ? <PromptEnhanceControls disabled={props.disabled} view={props.enhance.view} modelLabel={props.enhance.view.modelLabel} onStart={props.enhance.start} onCancel={props.enhance.cancel} /> : null}

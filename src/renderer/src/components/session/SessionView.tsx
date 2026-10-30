@@ -86,6 +86,8 @@ export type SessionViewProps = {
 	// ── Composer ──
 	enqueueSessionPrompt: (sessionId: string, snapshot: EnqueuePromptSnapshot) => boolean;
 	gitInfo?: GitBranchInfo;
+	/** 本栏项目 Git 拉取失败：底栏显示「Git 不可用」chip（Wave 4 §5）。 */
+	gitUnavailable?: boolean;
 	/** 底栏分支下拉的切换回调（透传给 ComposerArea，owner 为 App 级 switchBranch） */
 	onSwitchBranch?: (branch: string) => void;
 	ensureSessionId?: (sessionId: string) => Promise<string>;
@@ -163,6 +165,7 @@ export function SessionView({
 	onOpenBranchSession,
 	enqueueSessionPrompt,
 	gitInfo,
+	gitUnavailable,
 	onSwitchBranch,
 	ensureSessionId,
 	queuePanel,
@@ -377,6 +380,7 @@ export function SessionView({
 								sessionId={sessionId}
 								turnCount={countUserTurns(sessionTimeline.messages)}
 								gitInfo={gitInfo}
+								gitUnavailable={gitUnavailable}
 								onSwitchBranch={onSwitchBranch}
 								enqueue={enqueueSessionPrompt}
 								ensureSessionId={ensureSessionId}

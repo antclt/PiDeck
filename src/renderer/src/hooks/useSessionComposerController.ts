@@ -1109,6 +1109,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	const sessionTurnRunning = isSessionTurnRunning(runtime?.state, runtime?.status);
 	const isBusy = isSessionRuntimeBusy(runtime?.status, runtime?.state, isAcpBackend ? "acp" : undefined);
 	// 预热只创建进程，不能把编辑器 setEditable(false)：contenteditable 关掉会失焦，输入一半就断。
+	// 「启动中」只认 activating（用户按下发送后的会话创建期）：预热（prewarm）不算——
+	// 预热进程不阻塞输入，用户此时编辑草稿/选模型都是合法的（有意设计，非漏判；
+	// 若把预热也当启动，输入框会在后台预热时被无理由锁住）。
 	const isStarting = isUserFacingSessionStart(sendState.status);
 	// ACP 预热（握手 + 枚举 configOptions）可能持续数秒：编辑器照常可输入，
 	// 输入框底栏同时显示初始化指示。**发送不被它拦住**：主进程的激活闸门（ensureRuntime 复用同一条
@@ -2543,14 +2546,17 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			/**
 			 * 快捷消息直发可用性：与 canSend 同源，但去掉「草稿非空」这一项——
 			 * 快捷消息的正文来自清单，发它的时候输入框通常是空的。
+			 * submittingVideo 与 canSend 一致纳入（Wave 4 状态统一）：视频提交中任何发送入口都应锁。
 			 */
-			canSendQuickMessage: !isStarting && !generatingImage && (!isDshBackend || runtime?.state?.modelRoutable !== false),
+			canSendQuickMessage: !isStarting && !generatingImage && !submittingVideo && (!isDshBackend || runtime?.state?.modelRoutable !== false),
 			// 并行发送（拆分菜单）：当前草稿文本进独立 Ask 会话后台处理，成功后清空草稿。
 			// 上下文由 useAskPanel 按 originSessionId 自动生成（与队列面板共用同一口径），
 			// 这里只负责把来源会话传下去；不要在本入口另建一份 context，否则会再次分叉。
 			// 仅投递纯文本：并行问询不支持图片附件（与队列面板 onSendAsk 的 canAsk 判据一致），
 			// 带图时 ComposerSendControls 端按 canSendParallel=false 置灰。
-			canSendParallel: Boolean(draft.trim()) && attachments.length === 0 && !isStarting && !generatingImage && Boolean(effectiveProjectId),
+			// 不查 modelRoutable（并行走 Ask 会话独立后端，不吃当前 DSH 绑定）；
+			// submittingVideo 纳入（Wave 4 状态统一）：视频提交中任何发送入口都应锁。
+			canSendParallel: Boolean(draft.trim()) && attachments.length === 0 && !isStarting && !generatingImage && !submittingVideo && Boolean(effectiveProjectId),
 			sendParallel: () => {
 				const text = draft.trim();
 				if (!text || !effectiveProjectId) return;

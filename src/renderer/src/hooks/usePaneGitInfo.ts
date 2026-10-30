@@ -22,6 +22,10 @@ export function usePaneGitInfo(projectId: string | undefined, options?: UsePaneG
 	const project = useAtomValue(projectByIdAtomFamily(projectId ?? ""));
 	const enabled = project !== undefined && isLocalProject(project);
 	const [gitInfo, setGitInfo] = useState<GitBranchInfo>({ current: null, branches: [] });
+	// 拉取状态（Wave 4 §5）：idle=未加载 / ready=拿到过分支 / unavailable=本地项目但拉不到
+	// （非 git 仓库、磁盘不可读）。此前 current===null 时分支控件静默消失，无法区分「还没加载」
+	// 与「这个项目没有 Git」——unavailable 供 UI 显式提示「Git 不可用」。
+	const [gitLoadState, setGitLoadState] = useState<"idle" | "ready" | "unavailable">("idle");
 	// 回调走 ref：轮询 effect 只依赖 projectId，回调身份变化不重启定时器。
 	const onChangedRef = useRef(options?.onChanged);
 	onChangedRef.current = options?.onChanged;
@@ -31,6 +35,7 @@ export function usePaneGitInfo(projectId: string | undefined, options?: UsePaneG
 	useEffect(() => {
 		if (!projectId || !enabled) {
 			setGitInfo({ current: null, branches: [] });
+			setGitLoadState("idle");
 			return;
 		}
 		let stopped = false;
@@ -40,12 +45,18 @@ export function usePaneGitInfo(projectId: string | undefined, options?: UsePaneG
 				if (stopped) return;
 				// 只在真实变化时更新，避免每次回读写相同对象引发本栏无谓重渲染。
 				setGitInfo((current) => (current.current === next.current && current.branches.join("\n") === next.branches.join("\n") ? current : next));
+				// current 为 null 也是一次成功响应：说明仓库当前没有分支（如空仓库 HEAD 未指向）。
+				setGitLoadState("ready");
 			} catch {
-				if (!stopped) setGitInfo({ current: null, branches: [] });
+				if (!stopped) {
+					setGitInfo({ current: null, branches: [] });
+					setGitLoadState("unavailable");
+				}
 			}
 		};
 		// 项目身份切换后先清空旧分支再加载新项目，避免短暂显示上一个 worktree 的分支。
 		setGitInfo({ current: null, branches: [] });
+		setGitLoadState("idle");
 		void refresh();
 		// 分支信息事件源：主进程 GitRefsWatcher 按 (projectId, repoPath) 复用一份 1.5s
 		// refs 签名轮询，代替本栏 4s 盲轮询——分屏 N 栏同仓也只有主进程一份开销，
@@ -91,5 +102,5 @@ export function usePaneGitInfo(projectId: string | undefined, options?: UsePaneG
 		[projectId, enabled, gitInfo.current],
 	);
 
-	return { gitInfo, switchBranch };
+	return { gitInfo, gitUnavailable: enabled && gitLoadState === "unavailable", switchBranch };
 }

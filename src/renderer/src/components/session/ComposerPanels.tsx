@@ -311,12 +311,28 @@ export function QueuedPromptPanel(props: {
 }
 
 export function SessionDeliveryNotice(props: { status: "unknown" | "idle" | "activating" | "sending" | "error"; message?: string; images?: ImageContent[]; error?: string; onAcknowledge: () => void }) {
+	// Wave 4 状态统一：unknown（投递结果未知，消息可能已发出）与 error（明确被拒/发送失败）
+	// 都渲染常驻可确认条——此前 error 只写 sendState + 4s toast，toast 一闪而过用户无从追溯。
+	// role=alert：错误/未知投递是需要立即注意的状态变化，与 App 其它处（RemoteGitPanel 等）对齐。
+	if (props.status === "error") {
+		return (
+			<div className="session-delivery-notice" role="alert">
+				<div className="session-delivery-notice-copy">
+					<strong>{t("app.sendFailedShort")}</strong>
+					{props.error ? <small>{props.error}</small> : <small>{t("app.sendFailed")}</small>}
+				</div>
+				<Button variant="secondary" size="sm" onClick={props.onAcknowledge}>
+					{t("common.confirm")}
+				</Button>
+			</div>
+		);
+	}
 	if (props.status !== "unknown") return null;
 	// unknownSnapshot.message 是发送期展开后的文本；提示条只保留各类引用的 label，
 	// 避免暴露 XML 块及其长上下文。
 	const preview = replaceExpandedRefBlocksWithLabels(props.message?.trim() ?? "") || (props.images?.length ? t("app.queuedImageMessage") : "");
 	return (
-		<div className="session-delivery-notice" role="status">
+		<div className="session-delivery-notice" role="alert">
 			<div className="session-delivery-notice-copy">
 				<strong>{t("app.queuedUnknownShort")}</strong>
 				{preview ? <span title={preview}>{preview}</span> : null}
