@@ -7,6 +7,7 @@ import { t } from "../../i18n";
 import { fileTreeNodeKey } from "../../utils/fileTreeLazy";
 import type { FileContentSearchHit, FileContentSearchResult, FileSearchResult, ProjectFileTarget } from "../../../../shared/types";
 import { findFileNameMatchIndex } from "../../utils/fileSearchFilter";
+import { shouldShowFileNameOnlyHint } from "../../utils/fileSearchCapability";
 
 /**
  * 文件名搜索结果列表（issue #215）：扁平列表，不进文件树，也不吃排序/折叠中间包开关。
@@ -23,11 +24,17 @@ export function FileSearchResults(props: {
 	/** 正文命中（Go sidecar）；null = 未就绪/失败/词太短，此时不渲染正文分区 */
 	contentResults: FileContentSearchResult | null;
 	isContentSearching: boolean;
+	/**
+	 * 该位置是否支持内容检索（缺省 true 保持本机行为）。远端/WSL 为 false：
+	 * 不渲染正文分区与正文 spinner，改在查询非空时显示「仅文件名搜索」提示。
+	 */
+	contentSearchSupported?: boolean;
 	onViewFile?: (path: string | ProjectFileTarget, openMode?: "preview" | "permanent") => void;
 	onFileContextMenu: (node: FileSearchResult, x: number, y: number) => void;
 	onClear: () => void;
 }) {
 	const { query, results, isSearching } = props;
+	const contentSearchSupported = props.contentSearchSupported ?? true;
 	const inputRef = useRef<HTMLInputElement>(null);
 
 	// 打开搜索即聚焦输入框，并把光标放到词尾：类型首字符进搜索时查询词已播种，光标必须在词尾才能接着敲
@@ -91,7 +98,12 @@ export function FileSearchResults(props: {
 							// 远端结果没有绝对 path：key 用 target/path 归一后的稳定键，避免 undefined 折叠。
 							rows.map(({ item, index }) => <FileSearchRow key={fileTreeNodeKey(item)} item={item} matchIndex={index} matchLength={trimmed.length} onViewFile={props.onViewFile} onFileContextMenu={props.onFileContextMenu} />)
 						)}
-						<FileContentSection query={trimmed} result={props.contentResults} isSearching={props.isContentSearching} onViewFile={props.onViewFile} onFileContextMenu={props.onFileContextMenu} />
+						{contentSearchSupported ? <FileContentSection query={trimmed} result={props.contentResults} isSearching={props.isContentSearching} onViewFile={props.onViewFile} onFileContextMenu={props.onFileContextMenu} /> : null}
+						{shouldShowFileNameOnlyHint({ contentSearchSupported, query: trimmed }) ? (
+							<p data-testid="file-search-name-only-hint" className="px-3 py-3 text-center text-xs text-muted-foreground">
+								{t("drawer.fileSearchNameOnlyHint")}
+							</p>
+						) : null}
 					</>
 				)}
 			</div>

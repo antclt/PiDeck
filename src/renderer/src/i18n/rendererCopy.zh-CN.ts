@@ -4134,6 +4134,7 @@ export const zhCN = {
 	"drawer.fileSearchContentSection": "文件内容",
 	"drawer.fileSearchContentScanning": "正在扫描文件内容…",
 	"drawer.fileSearchContentTruncated": "结果已截断",
+	"drawer.fileSearchNameOnlyHint": "此位置仅支持文件名搜索",
 	"drawer.deleteFileTitle": "删除文件",
 	"drawer.deleteFileConfirm": "确定要删除「{name}」吗？此操作不可撤销。",
 	"drawer.deleteFolderTitle": "删除目录",

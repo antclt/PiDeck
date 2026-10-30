@@ -4152,6 +4152,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"drawer.fileSearchContentSection": "In files",
 	"drawer.fileSearchContentScanning": "Scanning file contents…",
 	"drawer.fileSearchContentTruncated": "Results truncated",
+	"drawer.fileSearchNameOnlyHint": "This location supports file name search only",
 	"drawer.deleteFileTitle": "Delete File",
 	"drawer.deleteFileConfirm": "Delete '{name}'? This cannot be undone.",
 	"drawer.deleteFolderTitle": "Delete Directory",
