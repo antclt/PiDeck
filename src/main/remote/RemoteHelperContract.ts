@@ -430,6 +430,13 @@ export const REMOTE_HELPER_MAX_CONTENT_BINARY_PROBE_BYTES = 8 * 1024;
 export const REMOTE_HELPER_MAX_CONTENT_TIME_MS = 8000;
 export const REMOTE_HELPER_MAX_CONTENT_DEPTH = 12;
 export const REMOTE_HELPER_MAX_CONTENT_SNIPPET_LENGTH = 200;
+/**
+ * Directories the content walk never descends into: VCS metadata, package installs and PiDeck's own trash are
+ * not project text sources, and `.git`/`node_modules` alone can exhaust the whole file/byte budget before a
+ * single source file is reached. They are skipped by name at any depth; a user file inside them is intentionally
+ * outside this search, which is the same set the remote file tree hides.
+ */
+export const REMOTE_HELPER_CONTENT_SKIPPED_DIRECTORIES = [".git", ".hg", ".svn", "node_modules", ".pideck-trash"] as const;
 /** Bounded concurrency plus a bounded waiting room: past both, a request is refused, never buffered. */
 export const REMOTE_HELPER_MAX_QUEUED_REQUESTS = 64;
 /**

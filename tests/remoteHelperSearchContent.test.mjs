@@ -227,6 +227,7 @@ searchTest("the contract, the entry and the frozen sibling declare the same op a
 		"const MAX_TIME = " + REMOTE_HELPER_MAX_CONTENT_TIME_MS + ";",
 	]) assert.ok(source.includes(literal), literal + " must be a literal of the frozen sibling");
 	for (const reason of ["matches", "files", "bytes", "time", "depth", "file-size"]) assert.ok(source.includes('"' + reason + '"'), reason + " must be a reason the frozen sibling can report");
+	assert.ok(source.includes("new Set([" + contract.REMOTE_HELPER_CONTENT_SKIPPED_DIRECTORIES.map((name) => '"' + name + '"').join(", ") + "])"), "the frozen sibling skips exactly the contract's fixed directories");
 	assert.ok(source.includes('new TextDecoder("utf-8", { fatal: true })'), "the frozen sibling decodes UTF-8 strictly");
 	assert.ok(source.includes("O_NOFOLLOW"), "the frozen sibling opens with O_NOFOLLOW");
 	assert.ok(source.includes("indexOf(0) >= 0"), "the frozen sibling skips a file whose probe contains NUL");
@@ -278,6 +279,11 @@ function createContentFixture(t) {
 	writeFileSync(join(root, "latin1.txt"), Buffer.concat([Buffer.from([0xff]), Buffer.from("needle\n")]));
 	writeFileSync(join(root, "empty.txt"), "");
 	writeFileSync(join(outside, "secret.txt"), DECOY + " needle\n");
+	// Fixed directories are skipped by name: their contents are not project text sources.
+	for (const skipped of contract.REMOTE_HELPER_CONTENT_SKIPPED_DIRECTORIES) {
+		mkdirSync(join(root, skipped), { recursive: true });
+		writeFileSync(join(root, skipped, "hidden.txt"), DECOY + " needle\n");
+	}
 	link(join(root, "alpha.txt"), join(root, "link-to-alpha"), "file");
 	link(outside, join(root, "outside-link"), "junction");
 	return { base, root, outside };
@@ -316,7 +322,8 @@ linkSearchTest("searchContent matches lines case-insensitively, skips binary/UTF
 	assert.equal(request.v, REMOTE_HELPER_PROTOCOL_VERSION);
 	assert.equal(request.hostId, HOST_ID);
 	assert.deepEqual(Object.keys(request.params), ["path", "query"]);
-	for (const text of [session.lines.join("\n"), session.stderr(), JSON.stringify(session.diagnostics)]) assert.equal(text.includes(DECOY), false, "the decoy outside the root must never be read");
+	for (const match of answer.matches) assert.equal(contract.REMOTE_HELPER_CONTENT_SKIPPED_DIRECTORIES.some((name) => match.path === name || match.path.startsWith(name + "/")), false, "a skipped directory never contributes a match");
+	for (const text of [session.lines.join("\n"), session.stderr(), JSON.stringify(session.diagnostics)]) assert.equal(text.includes(DECOY), false, "the decoy outside the root and the skipped directories must never be read");
 	assert.deepEqual(session.diagnostics, []);
 	assert.equal(session.lines.length, session.frames.length, "every stdout line is a protocol frame");
 });

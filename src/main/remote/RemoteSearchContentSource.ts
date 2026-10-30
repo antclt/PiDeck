@@ -9,11 +9,14 @@
  * - the walk starts at the request path the entry already resolved inside the canonical root, never follows a
  *   symbolic link (dirent link entries, and links between readdir and open via O_NOFOLLOW), and every path it
  *   builds is path.join of a directory it opened and a name that directory reported;
+ * - the fixed VCS/package directories (`.git`, `.hg`, `.svn`, `node_modules`, `.pideck-trash`) are not
+ *   descended into: they are not project text sources, and one of them can consume the whole budget by itself;
  * - a file is opened read-only after fstat proves it is a regular file and its size fits the per-file and
  *   remaining byte budgets; an oversized file is skipped without reading, a file past the remaining budget
- *   stops the walk with reason "bytes" instead of being shortened;
- * - a file whose first 8 KiB contain a NUL byte is binary and is skipped; strict UTF-8 decoding failure skips it
- *   too. Both are "not text", never a truncation and never a raw byte in the answer;
+ *   stops the walk with reason "bytes" instead of being shortened. The first 8 KiB are probed before the rest is
+ *   read, so a binary file (a NUL in that probe) never costs its whole size;
+ * - a binary file is skipped; strict UTF-8 decoding failure skips a file too. Both are "not text", never a
+ *   truncation and never a raw byte in the answer;
  * - a match carries only relative path, basename, 1-based line, 0-based column and at most 200 characters of
  *   that line: no file body ever leaves the helper, and no snippet can push a frame near the 8 MiB cap;
  * - the answer is bounded by 200 matches, 2000 files, 16 MiB read, 8 s of scanning and depth 12; the walk stops
@@ -37,6 +40,7 @@ export function createContentSearch(root, fs, path) {
 	const MAX_DEPTH = 12;
 	const MAX_TIME = 8000;
 	const SLICE = 32;
+	const SKIP_DIRS = new Set([".git", ".hg", ".svn", "node_modules", ".pideck-trash"]);
 	const OPEN_READ = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW === undefined ? 0 : fs.constants.O_NOFOLLOW);
 	/* A path this walk builds is always path.join of a directory it already opened and a name from that directory. */
 	function inside(candidate) { return candidate === root || candidate.startsWith(root + path.sep); }
@@ -71,7 +75,8 @@ export function createContentSearch(root, fs, path) {
 		return "other";
 	}
 	/* fstat decides the size before a byte is read: an oversized file is refused without reading it, and a file past the
-	   remaining budget stops the walk instead of being shortened into a plausible-looking half result. */
+	   remaining budget stops the walk instead of being shortened into a plausible-looking half result. The first probe is
+	   read first so a binary file (a NUL in its first 8 KiB) never costs its whole size. */
 	function readFile(absolute, budget) {
 		if (inside(absolute) === false) return null;
 		let handle = null;
@@ -83,7 +88,15 @@ export function createContentSearch(root, fs, path) {
 			if (size > MAX_FILE_BYTES) return { tooLarge: true };
 			if (size > budget) return { overBudget: true };
 			const buffer = Buffer.allocUnsafe(size);
+			const probeLength = size < MAX_BINARY_PROBE ? size : MAX_BINARY_PROBE;
 			let read = 0;
+			while (read < probeLength) {
+				const count = fs.readSync(handle, buffer, read, probeLength - read, read);
+				if (count < 1) break;
+				read += count;
+			}
+			if (read !== probeLength) return null;
+			if (buffer.subarray(0, probeLength).indexOf(0) >= 0) return { binary: true, bytes: read };
 			while (read < size) {
 				const count = fs.readSync(handle, buffer, read, size - read, read);
 				if (count < 1) break;
@@ -99,8 +112,6 @@ export function createContentSearch(root, fs, path) {
 	   character offset, and the snippet is a bounded slice of that line. A file is skipped, not searched, when its first
 	   8 KiB contain a NUL byte or when strict UTF-8 decoding rejects it: those are "not text", not truncation. */
 	function matchesOf(buffer, relative, name, needle, limit, matches) {
-		const probe = buffer.subarray(0, Math.min(buffer.length, MAX_BINARY_PROBE));
-		if (probe.indexOf(0) >= 0) return 0;
 		let text = null;
 		try { text = new TextDecoder("utf-8", { fatal: true }).decode(buffer); } catch { return 0; }
 		let matched = 0;
@@ -170,6 +181,7 @@ export function createContentSearch(root, fs, path) {
 				const relative = current.relative === "" ? name : current.relative + "/" + name;
 				const kind = kindOf(entry, current.absolute, name);
 				if (kind === "directory") {
+					if (SKIP_DIRS.has(name)) continue;
 					if (current.depth + 1 >= MAX_DEPTH) { finish(null, "depth"); return; }
 					walk.pending.push({ absolute: path.join(current.absolute, name), relative: relative, depth: current.depth + 1 });
 					continue;
@@ -183,6 +195,7 @@ export function createContentSearch(root, fs, path) {
 				if (file.overBudget === true) { finish(null, "bytes"); return; }
 				state.scannedFiles += 1;
 				state.scannedBytes += file.bytes;
+				if (file.binary === true) continue;
 				const count = matchesOf(file.buffer, relative, name, needle, limit, matches);
 				if (count > 0) state.matchedFiles += 1;
 				if (matches.length >= limit) { finish(null, "matches"); return; }
@@ -196,4 +209,4 @@ export function createContentSearch(root, fs, path) {
 `.replace(/\r?\n[\t ]*/g, "");
 
 /** sha256 of REMOTE_SEARCH_CONTENT_SOURCE as UTF-8 bytes; pinned here and re-checked by the helper contract tests. */
-export const REMOTE_HELPER_SEARCH_CONTENT_SHA256 = "2bb7689549ea9877f3149febf276a0a75cccffa68a0d5673bc973fdbd64dbe4d";
+export const REMOTE_HELPER_SEARCH_CONTENT_SHA256 = "7034f4d6063595f3e28a1f5cf98c051f5cf29d2790cea5a7c5c79afb494cb9b9";
