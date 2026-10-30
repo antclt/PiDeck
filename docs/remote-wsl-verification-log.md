@@ -469,7 +469,7 @@
 | 合并（第三次） | `git merge dev`（`b5b88d913`，W1 签名跟随，**仅测试文件 +2/−1**） | 0 | `77b7e28bc`（最终 HEAD） |
 | 守卫 4 | `node --test tests/projectPackageDiscoveredRow.test.mjs` | **0** | **11 passed / 0 failed** |
 | **全量单测（最终 HEAD）** | `npm test`（`node --test --test-concurrency=4`） | **0** | **tests 15106 / pass 14821 / fail 0 / skipped 285 / 422s** —— 最终 HEAD 全绿 |
-| 全量单测 | `npm test`（`node --test --test-concurrency=4`） | **1** | **tests 15106 / pass 14820 / fail 1 / skipped 285 / 987s**（987s 因本轮交叉 npm install 特别慢）；唯一失败＝`tests/projectPackageDiscoveredRow.test.mjs:105`「项目层卸载与安装走同一信任路径」——断言要求 `extensionsUninstall` 签名恰好到 `projectId?: unknown)`，而 W1 资源目标重构给 handler 加了 `options?: unknown`（`src/main/ipc/storeIpc.ts:642`）；**源码形状签名守卫，行为未回归**，待 owner 补字面量后复跑 |
+| 全量单测（**W1 守卫修复前**，`aa14565ef`） | `npm test`（`node --test --test-concurrency=4`） | 1 | tests 15106 / pass 14820 / fail 1 / skipped 285 / 987s；唯一失败＝`tests/projectPackageDiscoveredRow.test.mjs:105` 签名守卫（W1 给 `extensionsUninstall` 加了 `options?: unknown`，`storeIpc.ts:642`）——**源码形状，行为未回归**，W1 已补字面量，上表为修复后复跑 |
 
 **helperCapabilities 说明（Lead 问）**：UI 侧读取（`rootStatus.helperCapabilities`）**真机未额外观测**——该字段只经 rootStatus 返回、主进程日志与 `remoteHosts.diagnostics` 都不带它，现有 e2e 也无断言；由单测覆盖（task-12 的 Op 信封回归 3 条 + W2 的 `fileSearchCapability` 单测）。**helper 侧能力声明有真机证据**：协议探针 `hello` 得 `helperVersion 1.25.0`、capabilities 35 项含 `fs.searchContent`（§11.6）。
 
@@ -482,6 +482,54 @@
 - 内容搜索：协议级真机证据 pass（helper 1.25.0 / 35 项能力含 `fs.searchContent` / 命中 2 处 / 二进制跳过 / `QUERY_INVALID`）；UI 端到端未覆盖（无 e2e 入口）。
 - 三条形状守卫（remoteDragMove 行数预算、remoteProjectUpload 计数、remoteProjectEntryState 锚点）与 W1 签名守卫（projectPackageDiscoveredRow）均已在最终 HEAD 前修复，**最终全量 0 fail**。
 
+---
+
+## 12. task-18：运行 `e2e/remoteFunctionalAcceptance.spec.ts`（F1–F4 真机，本轮首次跑）
+
+**前置**：`F:\PiDeck-v` 从 `9e7a00d67` 快进到 dev `187c96041`（= 合入最终验证记录的 docs 提交，**产品代码与 `out/` 未变**，未重新构建）；
+凭据照旧在 PowerShell 进程内派生（不打印）；跑前 `Remove-Item Env:ELECTRON_RUN_AS_NODE`；与 `w4-remote-debt` 错开（对方回「你先跑」）。
+
+| 轮次 | 命令 | 退出码 | 时长 | 结果 |
+|------|------|--------|------|------|
+| 首跑（修复前，HEAD `187c96041`，`out/` 为旧构建） | `& "$env:TEMP\pideck-v-remote.ps1" -Spec "e2e/remoteFunctionalAcceptance.spec.ts"` | **1** | **40.8s**（`1 failed` / `0 skipped`） | **fail**：F4「1500 条整表扫描」1500 missing（Op 信封测试债，见 12.2） |
+| **复跑（Op 修复后，HEAD `24428bc5a` ← dev `f857a331f`，已重建 `out/`）** | 同上 | **0** | **38.7s** | **pass**：F1 `cancelMs=87`、F3 `warmMs=3099 / bundles=3`、F4 `scanMs=11006 / entries=1531`（1500 夹具 + 31 条用户真实会话） |
+
+### 12.0 复跑后的部署根核对（HEAD `24428bc5a`）
+
+| 检查 | 结果 |
+|------|------|
+| `bundles` 目录数 | **3**（与复跑前一致，本版本 `6e49555f…` 仍在） |
+| `.e2e-*` 临时副本残留 | **0** |
+| `leases` / `staging` | **0 / 0** |
+| 本次夹具目录 `~/.pi/agent/sessions/e2e-f4-*` | **0**（finally 已清） |
+
+### 12.1 首跑逐 step 结果（修复前，供对照）
+
+| step | 结果 | 证据 |
+|------|------|------|
+| 远端前置：1500 条会话夹具 | pass | 本 run 独有目录 `e2e-f4-fmvv0hvjd`，夹具条数断言 1500 |
+| 加主机（产品 IPC） | pass | `remoteHosts.add` 返回扁平 `{ok:true, hostId}` |
+| 冷部署前置：把本版本 bundle 暂时移开 | pass | 无活跃 lease 才动；`bundles/6e49555f…` → `…e2e-fmvv0hvjd` |
+| **F1：冷部署中取消** | **pass** | `cancelMs=140`；connect 落 `SSH_HOST_DISCONNECTED`；staging/锁/bootstrap 进程全部收敛；bundle 未激活 |
+| **F1：立即重试完成真实冷部署** | **pass** | `connect` 返回 ready；`bundles` 重新包含 `6e49555f…` |
+| **F3：断开→重连命中复用** | **pass** | `warmMs=5174`、`bundles=3` 不变、无 staging |
+| **F4：1500 条整表扫描** | **fail** | 断言「every fixture session must be listed (**1500 missing**)」——`scan.entries` 读不到（详见 12.2） |
+
+### 12.2 失败定性：**既有 e2e 测试债（Op 信封契约）**，不是产品缺陷
+
+- `src/main/ipc/remoteSessionIpc.ts:117` 的 `remoteSessions.scan` 返回 **Op 信封** `opOk({ entries })`；`src/shared/op.ts:21` `Op<T> = { ok: true; value: T } | OpFailure`；preload 原样透传（`src/preload/index.ts:486` 类型即 `RemoteSessionScanIpcResult = Op<…>`）。
+- 而该 spec（`e2e/remoteFunctionalAcceptance.spec.ts:250-260`）仍按**扁平**形状读 `scan.entries`：`scan.ok` 为 true（所以第一处断言通过），但 `scan.entries` 是 `undefined`，`ids` 为空 ⇒ 1500 条全部算 missing。
+- 同一 spec 里 `remoteHosts.add/connect/disconnect` 返回的是**扁平**结果（`RemoteHostAddResult` 等），所以前面的 step 不受影响——只有 scan 这一个通道迁到了 Op。
+- 这是**该 spec 首次被运行**时暴露的历史契约漂移（与 W4 之前修掉的「重复导入 Op 信封」同族），**产品行为本身没问题**：F1 取消收敛、冷部署、F3 复用命中都真机通过。
+- 建议修法（e2e owner，不改产品）：`const entries = scan.ok ? (scan.value?.entries ?? []) : [];`，其余断言不变；如 `register/title` 也迁了 Op，一并核对。
+
+### 12.3 远端 deploy 根恢复核对（跑后只读快照）
+
+- `bundles` 仍是 **3 个**，包含本版本 `6e49555f…`（冷部署已把它重新上传），**没有** `.e2e-fmvv0hvjd` 残留副本；
+- `leases=0`、`staging=0`，本次夹具目录 `~/.pi/agent/sessions/e2e-f4-*` 已被 finally 清掉；
+- 说明该 spec 的"移开→冷部署重建→删掉那份临时副本"路径按设计工作；**若在冷部署完成前中断**，`bundles/<sha>` 会缺失、临时副本 `<sha>.e2e-<runId>` 仍在——此时把副本 `mv` 回原名（或再连一次触发冷部署）即可恢复。
+- 旁证：主机上另有 **1 个** `.pideck-e2e-*` 目录（非本次 run 产生，来自更早某次远端会话用例），本次未清理、仅记录。
+
 ### 11.9 本轮结论（口径）
 
 **已通过（真实主机）**：远端 Git 全档（G1/G2/G3/G4/G5a-e，14 条含终端/trust/产品路/文件管理）；WSL 只读与停/启 smoke；远端内容搜索协议级（新 helper 1.25.0 命中、二进制跳过、非法 query 稳定拒绝；同时记录旧 helper 1.24.0 的「仅文件名」回退行为）；两项源码形状守卫在 W2 修复后恢复。
@@ -489,7 +537,58 @@
 **未通过 / 未验证（不当作通过）**：
 1. **远端代码文件编辑**：修复前是既有 e2e 与当前 UI 交互契约不一致（`.header-drawer-toggle` + 一次未复现的 oracle 失败）；**task-13 已修（e2e-only）**，最终 HEAD `aa14565ef` 独立复跑 **1 passed (2.1m)**（见 11.4）。
 2. **remoteHostAcceptance**：修复前确定性 2/2 失败（漂移已检测但侧栏 badge 未显示）；根因＝渲染层 `readRootStatusResponse` 只认扁平形状、main 已迁 Op 信封 ⇒ badge 恒 `unavailable`；**task-12 已修并合入**，本 verifier 在 `71fc7eefc`（= dev `bb9ab2d55`）**独立复跑 1 passed (45.4s)**（见 11.5 / 11.11）。
-3. **G6b opt-in soak**、**remoteFunctionalAcceptance**（本轮不做）、其余未列出的远端用例。
-4. **远端内容搜索 UI 端到端未覆盖**（现有 e2e 无入口），只有协议级真机证据。
+3. **G6b opt-in soak**、其余未列出的远端用例。（`remoteFunctionalAcceptance` 已补跑：首跑 fail → Op 修复后 **pass 38.7s**，见 §12）
+4. ~~远端内容搜索 UI 端到端未覆盖~~ → **已闭合**：W4 task-17 在「远端代码文件」用例里补了抽屉搜索步骤，最终 HEAD 真机通过（见 §13）。
+
+---
+
+## 13. 远端内容搜索 UI 端到端（W4 task-17 e2e 步骤，最终 HEAD 复跑）
+
+**背景**：此前内容搜索只有**协议级真机证据**（§11.6：helper 1.25.0 / `fs.searchContent` 命中 / 二进制跳过 / `QUERY_INVALID`），UI 端到端因现有 e2e 无入口而未覆盖。W4 在 `e2e/remoteSessionAcceptance.spec.ts:690` 的「远端代码文件」用例里新增了 `test.step("文件抽屉内容搜索：…")`（不新增 spec、不改既有断言）。
+
+| 项 | 内容 |
+|----|------|
+| HEAD | `24428bc5a` ← dev `f857a331f`（含 task-17 e2e 与 W1 task-16 产品代码；`out/` 已重建） |
+| 命令 | `& "$env:TEMP\pideck-v-remote.ps1" -Grep "远端代码文件"` |
+| 退出码 / 时长 | **0 / 2.1m** |
+| 结果 | **1 passed** —— 新增的内容搜索步骤真机通过 |
+
+**该步骤的断言（逐条）**
+
+1. 抽屉里点「搜索文件名」→ 输入夹具正文标记 **「中文保存验收」** → 点「搜索」；
+2. `.file-search-content` **内容命中分区出现**（依据 helper 1.25.0 的 `fs.searchContent` 能力）；
+3. 命中行指向夹具文件 `calc.cjs`，`title` 匹配 **`/^calc\.cjs:\d+$/`**（项目相对路径:行号）；
+4. 命中行正文片段带出 **「中文保存验收」**；
+5. `file-search-name-only-hint`（「仅文件名」能力提示）**计数为 0** —— 新 helper 下不得显示能力缺失提示；
+6. 点「清除搜索结果」→ 内容分区消失，后续步骤仍在原抽屉路径继续。
+
+**覆盖边界**：真机无法回退 helper 版本，所以**只覆盖 helper 1.25.0 的「命中」路径**；「旧 helper ⇒ 仅文件名」的回退路径仍由单测覆盖（W2 的 `remoteContentSearchCapabilityUi` 等），本记录 §11.6 另有旧 helper 1.24.0 未部署新 bundle 时的**真实主机行为**证据（能力缺失 ⇒ 主进程返回 null）。
+
+**与协议级证据的关系**：§11.6 证明「helper 侧能力与协议正确」，本节证明「产品 UI 链路（能力协商 → 抽屉搜索 → 命中分区 → 清除）」正确，两者互补；至此内容搜索的验证不再有"只有协议层"的缺口。
+
+---
+
+## 14. 最终收尾第二轮（dev `f857a331f` 之后）
+
+### 14.1 中间全量（HEAD `24428bc5a`，两条契约修复前）：**fail 2**
+
+`npm test` ⇒ **tests 15117 / pass 14830 / fail 2 / skipped 285 / 1127.7s**。两条都是**源码契约字面量**被 W1 task-16 的「资源目标路由」打破，产品行为无回归：
+
+| # | 失败 | 原因 | 处置 |
+|---|------|------|------|
+| 1 | `tests/extensionUserPluginClassification.test.mjs:67` | 断言要求 `extensionManager.toggleFromUi(`；实际 toggle 先 `const manager = await resolvePiResourceWriteManager({…})`（该行末尾就是 `});`）再 `manager.toggleFromUi(…)`。语义契约仍成立：单一入口 + storeIpc 内无 `startsWith("pi-deck-")` | Lead 已改为 `/\.toggleFromUi\(/`（不绑变量名） |
+| 2 | `tests/skillsRenameIpc.test.mjs:15` | 该测试用 `indexOf("});", start)` 切 handler 块；新 handler 第一行 `resolvePiResourceWriteManager({…});` 就含 `});` ⇒ 块在第 1978 行被截断，后面的校验语句在切片之外。**handler 本身校验完好**（`systemIpc.ts:1980` skillPath 校验、`1983` newName 校验、`1986` `manager.rename`） | 待修：block 边界改到下一个 `ipcMain.handle(`（或 `skillsOpenFolder`），三条断言语义不变 |
+
+> 备注：本轮 `npm test` 总时长 1127.7s，明显长于此前 400-500s，主因是交叉安装（`packDshRuntimeCross` 的 npm install）在这段时间特别慢，属环境波动，非产品问题。
+
+### 14.2 两条契约跟随后：最终 HEAD `1bc790122` ← dev `a1527a37c`
+
+| 项 | 命令 | 退出码 | 结果 |
+|----|------|--------|------|
+| 合并 | `git merge dev`（`fc321865b` toggleFromUi 字面量 + `a1527a37c` skillsRename 切块） | 0 | `1bc790122`（**仅两个测试文件改动**，产品代码与 `out/` 未变） |
+| 契约 1 | `node --test tests/extensionUserPluginClassification.test.mjs tests/skillsRenameIpc.test.mjs` | **0** | **5 passed / 0 failed** |
+| 全量单测 | `npm test`（`node --test --test-concurrency=4`） | **1** | **tests 15117 / pass 14831 / fail 1 / skipped 285 / 1267.8s**；唯一失败＝`tests/packDshRuntimeCross.test.mjs:56`「交叉模式：临时 package.json 把平台门控包写进 optionalDependencies」→ **`spawnSync … ETIMEDOUT`**（该测试自身 10 分钟预算用尽，`pack-dsh-runtime --dry-run` 的交叉 `npm install` 没跑完）。**环境侧**：今晚交叉安装极慢（缓存已 665MB 且仍在增长；此前多轮全量 400–500s 就跑完、该文件也通过过），非产品回归、与本轮改动无关；单跑该文件复核时超过单次执行预算被中断（已清理我自己的残留进程，未触碰主工作树那条）。**最终全量以 Lead 在主工作树（dev `a1527a37c`）的取证为准** |
+
+> 说明：`tests/skillsRenameIpc.test.mjs` 的 block 边界改为「下一个 handler 起点」，`rename` 断言改为 `/\.rename\(skillPath, newName\)/`（不绑变量名），三条语义断言强度不变；`extensionUserPluginClassification` 的 toggleFromUi 断言改为 `/\.toggleFromUi\(/`。
 
 
