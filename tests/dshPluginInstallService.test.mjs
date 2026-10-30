@@ -47,7 +47,13 @@ function createFakeNpm(options = {}) {
 		packs.set(fixture.spec, fixture);
 		if (fixture.name !== undefined && !packs.has(fixture.name)) packs.set(fixture.name, fixture);
 	}
-	const runNpm = async (args) => {
+	const runNpm = async (args, runOptions = {}) => {
+		// 回归闸门：真实 execFile 在 fork 前就校验 cwd，不存在即 `spawn npm ENOENT`（npm 从未
+		// 被启动）。替身必须按同一契约在校验「调用当时」检查——早期替身自己 mkdirSync 一次
+		// 就把缺陷遮住了：用户侧 100% 失败，这里 19 个用例全绿。
+		if (runOptions.cwd !== undefined) {
+			assert.equal(existsSync(runOptions.cwd), true, `npm ${String(args[0])} 的 cwd 必须在调用前已存在：${runOptions.cwd}`);
+		}
 		calls.push(args);
 		if (args[0] === "pack") {
 			const spec = args[1];
@@ -56,7 +62,6 @@ function createFakeNpm(options = {}) {
 			if (fixture === undefined) {
 				return { code: 1, stdout: "", stderr: `npm ERR! 404 Not Found - GET ${spec}` };
 			}
-			mkdirSync(packDestination, { recursive: true });
 			tar.c({ sync: true, cwd: fixture.stagingDir, file: join(packDestination, fixture.tgzName) }, ["package"]);
 			return { code: 0, stdout: JSON.stringify([{ filename: fixture.tgzName }]), stderr: "" };
 		}
@@ -191,6 +196,30 @@ test("npmPackToDir：解析 --json 文件名；非零退出与恶意文件名拒
 			npmPackToDir(async () => ({ code: 0, stdout: "not json", stderr: "" }), "pkg", dest),
 			/no tarball filename/,
 		);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("npmPackToDir：destDir 不存在时由函数自建（回归：spawn npm ENOENT）", async () => {
+	// 用户侧真实报错是 `npm pack <spec> failed: spawn npm ENOENT`：cwd 不存在时 execFile
+	// 在 fork 前就失败，npm 根本没跑。这里用真实文件系统断言「调用瞬间 cwd 已存在」。
+	const root = mkdtempSync(join(tmpdir(), "pideck-dsh-plugin-pack-cwd-"));
+	try {
+		const dest = join(root, "managed", ".tmp-install-1-2");
+		assert.equal(existsSync(dest), false, "前置：destDir 一开始不存在");
+		let cwdExistedAtCall = false;
+		const result = await npmPackToDir(
+			async (args, runOptions) => {
+				cwdExistedAtCall = runOptions?.cwd !== undefined && existsSync(runOptions.cwd);
+				return { code: 0, stdout: JSON.stringify([{ filename: "pkg-1.0.0.tgz" }]), stderr: "" };
+			},
+			"pkg",
+			dest,
+		);
+		assert.equal(cwdExistedAtCall, true, "cwd 必须在 runNpm 调用前已存在，否则真实 execFile 报 spawn npm ENOENT");
+		assert.equal(result.tarPath, join(dest, "pkg-1.0.0.tgz"));
+		assert.equal(existsSync(dest), true, "destDir 应被保留下载产物（后续 extractTgz 要用）");
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
