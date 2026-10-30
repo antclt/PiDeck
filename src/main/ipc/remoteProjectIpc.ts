@@ -55,6 +55,11 @@ export type RemoteProjectIpcHandle = {
 	/** 失效矩阵：写到的路径 ⇒ 所在目录 + 其父目录（目录自身的元数据也变了）。 */
 	afterWrite(projectId: string, paths: readonly string[]): void;
 	/**
+	 * 整树失效（远端 Git 写成功/结果未知）：子树条目可能整块变化，但这不是「根目录事件」——
+	 * 只标脏、不装载；重读范围由活跃的文件树决定（收到 tree scope 后重读根与全部已加载目录）。
+	 */
+	invalidateTree(projectId: string): void;
+	/**
 	 * helper 变更事件（helper 1.24.0）的入口：把 watchId 换回「哪个项目的哪些目录」。
 	 *
 	 * 只做**失效**，不装载：事件是「你可能要重读」的提示，重读仍由读的人决定。
@@ -317,6 +322,10 @@ export function registerRemoteProjectIpc(input: {
 			for (const key of dirKeysAfterWrite(projectId, paths)) dirs.invalidate(key);
 			// 只标脏 + 通知：读仍由活跃的消费者决定（一次写不产生远端往返）。
 			factsEvents.publish({ projectId, generation: generationOf(projectId), scopes: touched.map((path) => ({ kind: "dir" as const, path })) });
+		},
+		invalidateTree(projectId: string): void {
+			// 前缀匹配 = 本项目全部目录键（项目 id 后紧跟真实的 NUL 分隔符，不会误命中同前缀的其它项目）。
+			dirs.invalidateWhere((key) => key.startsWith(projectId + "\u0000"));
 		},
 		directoryPage: (projectId, path, force = false) => projectDirectoryPage({ projectId, path, force, readDirSnapshot, generationOf }),
 		pathsExist: (projectId, paths) => projectPathsExist({ projectId, paths, projectReadTarget }),

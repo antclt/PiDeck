@@ -288,6 +288,13 @@ export function createLazyDirTreeController(loader: LazyDirLoader): LazyDirTreeC
 				void Promise.all([...new Set(["", ...keep])].map((dir) => this.load(dir, true)));
 				return;
 			}
+			// 整树失效（Git 写成功）：子树条目可能整块变化，重读根与全部已加载目录。这不是「根目录事件」——
+			// 根事件只重读根层（下面的 dir 分支），所以不能把 tree 降级成 {kind:"dir", path:""}。
+			// 展开集与 currentDir 保留：一次写不该把用户展开的树收回去；旧内容也不清空（重读落地才替换）。
+			if (change.scopes.some((scope) => scope.kind === "tree")) {
+				void this.refresh();
+				return;
+			}
 			const dirs = new Set<string>();
 			for (const scope of change.scopes) {
 				if (scope.kind !== "dir") continue;

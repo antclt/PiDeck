@@ -59,6 +59,13 @@ export function registerRemoteGitReadIpc(input: {
 	service(): RemoteHostConnectionService | undefined | Promise<RemoteHostConnectionService | undefined>;
 	/** 事实变化通知出口（与目录共用同一个 hub）；缺省时不发通知。 */
 	factsEvents?: RemoteFactsHub;
+	/**
+	 * 整树失效的主进程侧入口（装配层注入 remoteProjectIpc.invalidateTree）。
+	 *
+	 * 写成功/结果未知都可能让工作树的条目整块变化（切分支、discard、恢复快照、init），目录事实缓存
+	 * 必须与 Git 事实一起标脏；否则下一次打开抽屉仍会命中旧目录。缺省时不标脏（旧装配/测试端口）。
+	 */
+	onTreeInvalidated?: (projectId: string) => void;
 }) {
 	const reads = new Map<AbortController, { senderId: number; projectId: string }>();
 	const tokens = createRemoteGitMutationTokens();
@@ -119,11 +126,27 @@ export function registerRemoteGitReadIpc(input: {
 				const locator = input.locator(projectId);
 				const service = await input.service();
 				const generation = locator === undefined ? "" : (service?.connectionFacts?.(locator.hostId)?.connectionId ?? "");
-				events.publish({ projectId, generation, scopes: [{ kind: "status", repoPath }] });
+				// 写会改变工作树条目：status 让 Git 面板重读，tree 让文件树重读根与全部已加载目录
+				// （tree 不是根目录事件：根事件只重读根层，覆盖不了深层目录）。
+				events.publish({ projectId, generation, scopes: [{ kind: "status", repoPath }, { kind: "tree" }] });
 			} catch {
 				// 观察者不是事务的一部分。
 			}
 		})();
+	}
+
+	/**
+	 * 一次 Git 写造成的跨域失效：主进程目录事实先由装配层注入的入口标脏，再发布 status + tree。
+	 *
+	 * 标脏不是事务的一部分：入口缺失/抛错都不能把一个已经成功的写说成失败。
+	 */
+	function publishTreeInvalidation(projectId: string, repoPath: string): void {
+		try {
+			input.onTreeInvalidated?.(projectId);
+		} catch {
+			// 观察者不是事务的一部分。
+		}
+		publishFacts(projectId, repoPath);
 	}
 
 	async function read<T>(event: IpcMainInvokeEvent, projectId: unknown, repo: unknown, task: (projectId: string, signal: AbortSignal) => Promise<T>, mutating = false): Promise<T> {
@@ -134,14 +157,14 @@ export function registerRemoteGitReadIpc(input: {
 			// 写成功 ⇒ 这一仓的事实过时了：只标脏，下一次读重新装载（不在这里主动再读一次）。
 			if (mutating) {
 				facts.invalidate(guard.projectId, repoPath);
-				publishFacts(guard.projectId, repoPath);
+				publishTreeInvalidation(guard.projectId, repoPath);
 			}
 			return value;
 		} catch (error) {
 			// 写已发出但结果未知（超时/断连/答复畸形）：事实可能已经变了，标脏但不自动读、不重放。
 			if (mutating && remoteGitFailureCode(error) === "GIT_WRITE_RESULT_UNCONFIRMED") {
 				facts.invalidate(guard.projectId, repoPath);
-				publishFacts(guard.projectId, repoPath);
+				publishTreeInvalidation(guard.projectId, repoPath);
 			}
 			throw error;
 		} finally {
