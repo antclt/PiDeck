@@ -6091,8 +6091,6 @@ export const enUS: Record<TranslationKey, string> = {
 	"message.historyOverlay.reloadingResources": "Reloading extensions and skills…",
 	"message.historyOverlay.activating": "Starting session…",
 	"message.historyOverlay.forking": "Forking session…",
-	"message.historyOverlay.editing": "Editing message…",
-	"message.historyOverlay.resending": "Resending message…",
 	"message.busyStreaming": "Agent is busy generating a response, please wait",
 	"message.busyTool": "Agent is executing a tool, please wait",
 	"message.busyGeneric": "Agent is currently busy, please try again later",

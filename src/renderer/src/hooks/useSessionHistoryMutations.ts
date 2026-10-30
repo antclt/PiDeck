@@ -240,9 +240,9 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
 					runtimeGeneration: activated.runtimeGeneration,
 				};
 			}
-			// 覆盖层文案按动作称呼（编辑中/重发中），“fork”是内部实现术语不暴露给用户；
-			// 显式 fork 动作（forkFromUserMessage）仍用 forking 文案。
-			showOverlay(sessionId, kind === "edit" ? "editing" : "resending");
+			// 热会话的 fork 约 0.3s，全程不停进程、不改原文件——再挂一层全屏遮罩只会让
+			// 「编辑一条消息」看起来像重启应用。这里不再显示 editing/resending 遮罩；
+			// 冷会话的 activating 遮罩保留（那段是真在拉起进程，需要反馈）。
 			const entryId = await resolveForkEntryId(message, target);
 			if (!entryId) {
 				latest.showToast(t("app.forkMissingEntryId"), 4000);
