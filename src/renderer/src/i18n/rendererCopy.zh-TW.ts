@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: c5fda77bb91f3085dfd6e58a4fbdf03d79380ae3fce6473c1b2c33d861791e28（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: c4b163f1cfc0f556824e37f9aa22a102b394401ae116e3473fc4c613dacf261e（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4472,6 +4472,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"project.remote.requestFailed": "遠端請求失敗，請重試；若仍失敗，請在裝置設定裡檢查這臺主機的連線。",
 	"project.remote.empty": "這個目錄是空的。",
 	"project.remote.directoryTruncated": "目錄專案過多，僅顯示前 2000 項。",
+	"project.remote.dirWatchDegraded": "目錄監聽已降級：期望監聽 {desired} 個目錄，實際覆蓋 {covered} 個，{dropped} 個目錄需要手動重新整理。",
 	"project.remote.binary": "（二進位制內容，無法以文本預覽）",
 	"project.remote.linkNotFollowed": "符號連結（不跟隨）",
 	"project.remote.searchPlaceholder": "搜尋檔名",
