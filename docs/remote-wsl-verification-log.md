@@ -489,14 +489,21 @@
 **前置**：`F:\PiDeck-v` 从 `9e7a00d67` 快进到 dev `187c96041`（= 合入最终验证记录的 docs 提交，**产品代码与 `out/` 未变**，未重新构建）；
 凭据照旧在 PowerShell 进程内派生（不打印）；跑前 `Remove-Item Env:ELECTRON_RUN_AS_NODE`；与 `w4-remote-debt` 错开（对方回「你先跑」）。
 
-| 项 | 内容 |
-|----|------|
-| 命令 | `& "$env:TEMP\pideck-v-remote.ps1" -Spec "e2e/remoteFunctionalAcceptance.spec.ts"` |
-| 退出码 | **1** |
-| 时长 | **40.8s**（`1 failed`，credentials 齐全 ⇒ `0 skipped`） |
-| 结果 | **fail**（1 条用例中 3 个 step 通过、第 4 个 step 失败） |
+| 轮次 | 命令 | 退出码 | 时长 | 结果 |
+|------|------|--------|------|------|
+| 首跑（修复前，HEAD `187c96041`，`out/` 为旧构建） | `& "$env:TEMP\pideck-v-remote.ps1" -Spec "e2e/remoteFunctionalAcceptance.spec.ts"` | **1** | **40.8s**（`1 failed` / `0 skipped`） | **fail**：F4「1500 条整表扫描」1500 missing（Op 信封测试债，见 12.2） |
+| **复跑（Op 修复后，HEAD `24428bc5a` ← dev `f857a331f`，已重建 `out/`）** | 同上 | **0** | **38.7s** | **pass**：F1 `cancelMs=87`、F3 `warmMs=3099 / bundles=3`、F4 `scanMs=11006 / entries=1531`（1500 夹具 + 31 条用户真实会话） |
 
-### 12.1 逐 step 结果
+### 12.0 复跑后的部署根核对（HEAD `24428bc5a`）
+
+| 检查 | 结果 |
+|------|------|
+| `bundles` 目录数 | **3**（与复跑前一致，本版本 `6e49555f…` 仍在） |
+| `.e2e-*` 临时副本残留 | **0** |
+| `leases` / `staging` | **0 / 0** |
+| 本次夹具目录 `~/.pi/agent/sessions/e2e-f4-*` | **0**（finally 已清） |
+
+### 12.1 首跑逐 step 结果（修复前，供对照）
 
 | step | 结果 | 证据 |
 |------|------|------|
