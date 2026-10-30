@@ -246,6 +246,39 @@ test("assistant/message 无流式骨架时按终态正常 push（历史重放路
 	assert.equal(p.messages[0].thinking, "内部推理");
 });
 
+test("assistant/message 落库前剥掉思考签名块，纯签名思考不写 thinking", () => {
+	// 对齐 DSH 0.2.1-rc.5 ReasoningRow：供应商把思维签名拼在推理正文最前面，
+	// 原文落库就是折叠行里一段无意义 XML；纯签名则整条思考不写（行隐藏）。
+	const signed = projectDshEvent(
+		undefined,
+		event("assistant/message", 5, {
+			message: {
+				content: [
+					{ type: "reasoning", text: "<signature>c2lnbmF0dXJl</signature>\n内部推理" },
+					{ type: "text", text: "完整回答" },
+				],
+			},
+		}),
+		AGENT,
+	);
+	assert.equal(signed.messages[0].thinking, "内部推理");
+
+	const signatureOnly = projectDshEvent(
+		undefined,
+		event("assistant/message", 5, {
+			message: {
+				content: [
+					{ type: "reasoning", text: "<signature>c2lnbmF0dXJl" },
+					{ type: "text", text: "完整回答" },
+				],
+			},
+		}),
+		AGENT,
+	);
+	assert.equal(signatureOnly.messages[0].thinking, undefined);
+	assert.equal(signatureOnly.messages[0].thinkingEndedAt, undefined);
+});
+
 test("assistant/message 带 tool-call 块投影 stopReason=toolUse（中间回复，不再拆碎回合）", () => {
 	// 回归（2026-09-17，用户报告 DSH 会话每个中间短文本都渲染成独立小回合）：
 	// DSH 一次 turn 的每步模型响应各落一条 assistant/message（中间步骤也带 tool-call），
