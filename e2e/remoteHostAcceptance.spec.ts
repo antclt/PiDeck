@@ -335,7 +335,8 @@ test.describe("远端主机功能级验收（真机）", () => {
 					const api = (window as unknown as { piDesktop: { remoteHosts: { rootStatus: (id: string) => Promise<unknown> } } }).piDesktop;
 					return api.remoteHosts.rootStatus(projectId);
 				}, projectBId ?? "");
-				expect(statusB, "B 仍应是 ok").toEqual({ ok: true, status: "ok" });
+				// 2026-10 契约迁移后修正（同重复导入回执）：rootStatus 走 Op 信封，事实在 value 里；helperCapabilities 是可选诊断，不参与断言。
+				expect(statusB, "B 仍应是 ok").toMatchObject({ ok: true, value: { status: "ok" } });
 				// B 仍能正常读取：选中 B，面板必须列出它的文件。
 				await selectProject(window, projectBName);
 				await window.getByRole("button", { name: "浏览远端文件" }).click();
