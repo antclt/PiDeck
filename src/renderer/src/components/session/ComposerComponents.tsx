@@ -24,7 +24,7 @@ import { ProviderUsageInline } from "../app/ProviderUsageInline";
 import { useProviderUsageBatchRefresh } from "../../hooks/useProviderUsage";
 import { AcpToolLogo, DshLogo, PiLogo } from "./SessionSourceBadge";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger } from "../ui-shadcn/select";
-import { computeModelDisplay, formatModelRef, resolveComposerLiveModel, resolveGuideDisplayModel, type ModelPending } from "../../utils/modelPendingDisplay";
+import { computeModelDisplay, formatModelName, formatModelRef, resolveComposerLiveModel, resolveGuideDisplayModel, type ModelPending } from "../../utils/modelPendingDisplay";
 import { WELCOME_DSH_MODEL_KEY, WELCOME_MODEL_KEY, isWelcomeModelLost, readWelcomeDshModelPreference, readWelcomeModelPreference, shouldClearWelcomePreference } from "../../utils/chatSessionBootstrap";
 import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
 import { CommandPickerGroup, CommandPickerPanel, type CommandPickerFilter } from "../ui-shadcn/command-picker";
@@ -360,6 +360,7 @@ export function ComposerBackendPicker(props: { backend: AgentBackend; acpToolId?
 	// 还是 Codex」）——logo 区分品牌，悬停/读屏再给具体名称。
 	const currentTool = props.backend === "acp" ? acpTools.find((tool) => tool.id === props.acpToolId) : undefined;
 	const triggerLabel = currentTool?.name ?? t("sessionBackend.acp");
+	const displayLabel = props.backend === "acp" ? triggerLabel : props.backend === "dsh" ? t("sessionBackend.dsh") : props.backend === "imagegen" ? t("sessionBackend.imagegen") : props.backend === "videogen" ? t("sessionBackend.videogen") : t("sessionSource.pi");
 	const showDsh = !dshHidden || props.backend === "dsh";
 	const showImageGen = !imageGenHidden || props.backend === "imagegen";
 	const showVideoGen = !videoGenHidden || props.backend === "videogen";
@@ -384,10 +385,11 @@ export function ComposerBackendPicker(props: { backend: AgentBackend; acpToolId?
 				size="sm"
 				/* size-7 + p-0 + justify-center = 与底栏其它图标按钮同一个 28×28 盒子；
 				   data-[size=sm]:h-7 必需——SelectTrigger 基底高度是 data 变体，
-				   base h-7 既压不过它，也不会被 tailwind-merge 合成一条。 */
+				   base h-7 既压不过它，也不会被 tailwind-merge 合成一条。
+				   后端选择只显示品牌图标，不叠加文字或 chevron。 */
 				className="composer-bar-btn backend size-7 justify-center rounded-md border-transparent bg-transparent p-0 text-control font-semibold text-foreground hover:bg-muted/60 focus-visible:border-transparent focus-visible:ring-0 data-[size=sm]:h-7 data-[state=open]:border-transparent data-[state=open]:bg-muted/60 data-[state=open]:ring-0 [&_[data-slot='select-icon']]:hidden"
-				title={`${triggerLabel} · ${t("session.backendPickerHint")}`}
-				aria-label={triggerLabel}
+				title={`${displayLabel} · ${t("session.backendPickerHint")}`}
+				aria-label={displayLabel}
 			>
 				{/* 不渲染 SelectValue：按当前后端手动渲染 logo，输入框只显示图标不带文字。
 				    隐藏 shadcn SelectTrigger 自带的 chevron（[data-slot='select-icon']），
@@ -469,7 +471,6 @@ function ComposerBranchSwitcher(props: { gitInfo: GitBranchInfo; disabled?: bool
 					>
 						<GitBranch size={15} strokeWidth={1.8} aria-hidden="true" />
 						<span className="composer-bar-branch-name min-w-0 truncate">{props.gitInfo.current}</span>
-						<ChevronDown size={12} strokeWidth={2} aria-hidden="true" className="shrink-0 text-muted-foreground" />
 					</Button>
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="end" sideOffset={4} className="min-w-56">
@@ -537,6 +538,8 @@ export function ComposerBottomBar(props: {
 	enhance?: { view: PromptEnhanceView; start: () => void; cancel: () => void };
 	/** 切换后端：UI 层面先停 runtime 再写 catalog；acp 可带工具 id（picker 两页式弹层内选定）。 */
 	onChangeBackend?: (backend: AgentBackend, acpToolId?: string) => void;
+	/** 起始页模型信息退为次级文本，不与输入正文争权重。 */
+	startSurface?: boolean;
 	/** ACP 工具二级选择（仅 acp 后端渲染；激活后不传 onChange 即只读）。 */
 	acpTool?: { toolId?: string; onChange?: (toolId: string) => void };
 	/** ACP 会话配置选择器（configOptions 整表 + 下发回调；undefined=agent 未提供,隐藏）。 */
@@ -677,7 +680,9 @@ export function ComposerBottomBar(props: {
 	const modelFrom = modelDisplay.from;
 	const modelTo = modelDisplay.to;
 	const modelName = modelFrom?.modelName || modelFrom?.modelId;
-	const modelLabel = modelName ? formatModelRef(modelFrom ?? { provider: "", modelId: "" }) : `${t("app.model")}: -`;
+	// 底栏只显示模型名；供应商放进悬停 title（长名字会截断，不能把底栏撑开）。
+	const modelLabel = modelName ? formatModelName(modelFrom ?? { provider: "", modelId: "" }) : `${t("app.model")}: -`;
+	const modelTitle = modelFrom ? formatModelRef(modelFrom) : undefined;
 	// 锁定态只读后端标识：ACP 会话把工具名拼进 title/aria-label（与下拉触发器同一套品牌 logo）。
 	// hook 必须无条件调用：写成 `props.backend === "acp" ? useAtomValue(...) : undefined` 会让
 	// 「切到 ACP 后端」这次渲染比上一次多一个 hook，直接抛 React #310（渲染的 hook 数多于上次）。
@@ -847,7 +852,16 @@ export function ComposerBottomBar(props: {
 					    ACP 同理：模型/思考由 agent CLI 自持（session/config options 或各自 /model 命令），
 					    PiDeck 维护的 models.json 对 agent CLI 无意义，隐藏 chip 防止两套语义混用。 */}
 					{isMediaComposer || props.backend === "acp" ? null : (
-						<ModelThinkingChip modelLabel={modelLabel} modelPendingTo={modelDisplay.pending && modelTo ? modelTo.modelName || modelTo.modelId : undefined} modelPendingTitle={modelPendingTitle} disabled={props.modelDisabled ?? props.disabled} onPickModel={props.onPickModel} thinkingControl={props.thinkingControl} />
+						<ModelThinkingChip
+							modelLabel={modelLabel}
+							modelTitle={modelTitle}
+							startSurface={props.startSurface}
+							modelPendingTo={modelDisplay.pending && modelTo ? modelTo.modelName || modelTo.modelId : undefined}
+							modelPendingTitle={modelPendingTitle}
+							disabled={props.modelDisabled ?? props.disabled}
+							onPickModel={props.onPickModel}
+							thinkingControl={props.thinkingControl}
+						/>
 					)}
 					{/* ACP：模型/思考档/模式选择器,枚举来自 agent 回传的 configOptions
 					    （本尊清单,不手写防漂移）;agent 未提供时不渲染。

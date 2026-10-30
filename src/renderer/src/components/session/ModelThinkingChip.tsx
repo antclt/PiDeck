@@ -10,12 +10,23 @@ import { clampThinkingLevelToAllowed } from "../../utils/thinkingDisplay";
 import { THINKING_LEVELS, type ThinkingPickerLevel } from "./sessionPickerOptions";
 import { accumulateWheelStep, type WheelStepState } from "./thinkingWheelStep";
 
-/** 紧凑的模型/思考组合：模型直接打开完整选择器，思考保留独立的就地入口。 */
-export function ModelThinkingChip(props: { modelLabel: string; modelPendingTo?: string; modelPendingTitle?: string; disabled?: boolean; onPickModel: () => void; thinkingControl: ReactNode }) {
+/**
+ * 紧凑的模型/思考组合：模型直接打开完整选择器，思考保留独立的就地入口。
+ * modelLabel 只放模型名；modelTitle 是悬停展示的完整标识（provider/model）。
+ */
+export function ModelThinkingChip(props: { modelLabel: string; modelTitle?: string; modelPendingTo?: string; modelPendingTitle?: string; disabled?: boolean; onPickModel: () => void; thinkingControl: ReactNode; startSurface?: boolean }) {
 	const modelValue = props.modelPendingTo ? `${props.modelLabel} → ${props.modelPendingTo}` : props.modelLabel;
 	return (
-		<div className="composer-bar-btn model-thinking inline-flex h-7 min-w-0 max-w-[52ch] items-center rounded-md text-control font-medium">
-			<Button variant="ghost" size="sm" className="h-7 min-w-0 rounded-md px-2 text-control font-medium text-foreground hover:bg-muted/60" disabled={props.disabled} onClick={props.onPickModel} title={props.modelPendingTitle ?? t("app.modelPickerTitle")} aria-label={t("app.modelPickerTitle")}>
+		<div className={`composer-bar-btn model-thinking inline-flex h-7 min-w-0 max-w-[30ch] items-center rounded-md text-control ${props.startSurface ? "font-normal" : "font-medium"}`}>
+			<Button
+				variant="ghost"
+				size="sm"
+				className={`h-7 min-w-0 rounded-md px-2 text-control hover:bg-muted/60 ${props.startSurface ? "font-normal text-text-secondary" : "font-medium text-foreground"}`}
+				disabled={props.disabled}
+				onClick={props.onPickModel}
+				title={props.modelPendingTitle ?? props.modelTitle ?? t("app.modelPickerTitle")}
+				aria-label={t("app.modelPickerTitle")}
+			>
 				<span className="min-w-0 truncate">{modelValue}</span>
 			</Button>
 			<span className="shrink-0 text-muted-foreground/70" aria-hidden="true">

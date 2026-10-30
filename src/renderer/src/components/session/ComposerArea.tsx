@@ -7,7 +7,7 @@ import { ConfirmDialog } from "../app/AppParts";
 import { t } from "../../i18n";
 import { useSessionComposerController } from "../../hooks/useSessionComposerController";
 import { useAcpSessionConfig } from "../../hooks/useAcpSessionConfig";
-import { ComposerAttachmentBar, ComposerSendControls, SessionDeliveryNotice } from "./ComposerPanels";
+import { ComposerAttachmentBar, ComposerSendControls, ComposerStartPrompts, SessionDeliveryNotice } from "./ComposerPanels";
 import { ComposerPickerHost } from "./ComposerPickerHost";
 import { SecurityControl } from "./SecurityControl";
 import { QuickMessageMenu } from "./QuickMessageMenu";
@@ -54,6 +54,16 @@ export type ComposerAreaProps = {
 	turnCount?: number;
 	/** 引导页虚拟会话没有 SessionRecord，用它兑底确定文件树/模型目录所属项目。 */
 	bootstrapProjectId?: string;
+	/**
+	 * 起始页快捷提示：仅在草稿为空且未启动时显示在输入框下方，点击把整句插入草稿。
+	 * 只由起始页传入；会话底栏不传，不改变日常输入框的行为。
+	 */
+	starterPrompts?: readonly string[];
+	/**
+	 * 输入卡顶部的上下文条（起始页的项目选择器）。放在卡内而不是卡外，
+	 * 是因为它描述的是「这条输入会落到哪个项目」，属于输入本身的元信息。
+	 */
+	contextBar?: ReactNode;
 };
 
 /** footer 同时带标准 CSS 与自定义封顶变量；交叉类型避免 `as` 强转。 */
@@ -74,6 +84,8 @@ type ComposerExtrasProps = {
 	/** 绑定智能体的会话：输入框上方的角色设定提示条（可展开查看提示词）。 */
 	agentBar: ReactNode;
 	composerBox: ReactNode;
+	/** 起始页快捷提示行；只在草稿为空时由 ComposerArea 传入。 */
+	starterRow?: ReactNode;
 	/** 输入卡正下方 StatsLine；与输入卡同一列，不吃剩余高度。 */
 	statsLine?: ReactNode;
 };
@@ -108,6 +120,7 @@ function ComposerMeasuredExtras(props: ComposerExtrasProps) {
 				<div className="flex w-full min-w-0 shrink-0 flex-col">
 					{props.agentBar}
 					{props.composerBox}
+					{props.starterRow}
 					{props.statsLine}
 				</div>
 			</>
@@ -202,6 +215,10 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 			.catch(() => undefined);
 	}, [composer.acpTool?.toolId, composer.attachments.length, composer.backend, composer.draft, composer.pasteFiles.files.length, props.sessionId, sessionRecords]);
 
+	// 起始页项目上下文在卡内左上；后端、分支与安全等级统一归共用底栏。
+	const contextMode = props.contextBar !== undefined;
+	const securityControl = composerFeatureVisible("security") ? <SecurityControl sessionId={props.sessionId} backend={composer.backend} disabled={composer.isStarting} /> : undefined;
+
 	return (
 		<ComposerPickerHost
 			sessionId={props.sessionId}
@@ -247,6 +264,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 											<ComposerAttachmentBar images={composer.attachments} onPreview={composer.images.preview} onRemove={composer.images.remove} onClear={composer.images.clear} pasteFiles={composer.pasteFiles.files} onRemovePasteFile={composer.pasteFiles.remove} onClearPasteFiles={composer.pasteFiles.clear} />
 										) : null
 									}
+									starterRow={props.starterPrompts !== undefined && props.starterPrompts.length > 0 && composer.draft.trim().length === 0 && !composer.isStarting ? <ComposerStartPrompts prompts={props.starterPrompts} onPick={composer.pickers.insertQuickMessage} /> : null}
 									statsLine={
 										<ComposerStatsLine
 											state={composer.runtime?.state}
@@ -282,6 +300,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 												.join(" ")}
 											aria-busy={composer.isAcpInitializing || undefined}
 										>
+											{contextMode ? <div className="flex min-w-0 shrink-0 items-center px-3 pt-2">{props.contextBar}</div> : null}
 											{/* 扩展 widget（Todo/Plan）由统一会话组件卡展示。 */}
 											<TipTapComposer
 												ref={composer.editor.ref}
@@ -357,10 +376,8 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 												acpConfig={composer.backend === "acp" && acpConfig.options ? { options: acpConfig.options, onSet: (optionId, value) => void acpConfig.setOption(optionId, value) } : undefined}
 												acpInitializing={composer.isAcpInitializing}
 												feishuIndicator={feishuIndicator}
-												securityControl={
-													/* C20：后端安全控制位统一入口（pi 安全等级 / DSH 权限预设） */
-													composerFeatureVisible("security") ? <SecurityControl sessionId={props.sessionId} backend={composer.backend} disabled={composer.isStarting} /> : undefined
-												}
+												securityControl={securityControl}
+												startSurface={contextMode}
 												quickMessagesControl={
 													/* 快捷消息：点条目插入草稿，条目右侧按钮直发（正文不进草稿，见 useSessionSend 的 overrideText 契约）；
 											   sessionId 供全局快捷键（Ctrl/Cmd+Shift+M）按聚焦栏去重时使用。 */

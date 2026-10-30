@@ -23,6 +23,26 @@ import { queueDrainSuppressedByIdAtom } from "../../atoms/composer-atoms";
 import { isSessionRuntimeBusy } from "../../hooks/useSessionTimelineController";
 import { ComposerWidgetFrame, useComposerWidgetCollapsed } from "./ComposerWidgetLayout";
 
+/**
+ * 起始页的快捷提示行（输入框正下方）。
+ *
+ * 只做「把整句插入草稿」——不直接发送：起始页用户还没确认上下文和模型，
+ * 一键发送比一键填充更容易造成误操作。细边框提供可点击边界，
+ * 不加阴影或彩色图标，保持输入卡是唯一视觉主角。
+ */
+export function ComposerStartPrompts(props: { prompts: readonly string[]; onPick: (text: string) => void }) {
+	if (props.prompts.length === 0) return null;
+	return (
+		<div className="flex flex-wrap items-center justify-center gap-2 pt-4">
+			{props.prompts.map((prompt) => (
+				<Button key={prompt} variant="ghost" size="sm" className="h-8 rounded-lg border border-border-default/70 bg-transparent px-3.5 text-caption font-normal text-text-secondary shadow-none hover:border-border-default hover:bg-muted/50 hover:text-text-primary" onClick={() => props.onPick(prompt)}>
+					{prompt}
+				</Button>
+			))}
+		</div>
+	);
+}
+
 export function ComposerAttachmentBar(props: {
 	images: ImageContent[];
 	onPreview: (image: ImageContent) => void;

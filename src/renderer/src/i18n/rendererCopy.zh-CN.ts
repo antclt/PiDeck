@@ -648,6 +648,11 @@ export const zhCN = {
 	"app.composerShellStatus": "Shell 命令：直接执行当前输入",
 	"app.composerShortcutPlaceholder": "输入消息，@ 引用文件，/ 运行命令，& 引用会话…",
 	"app.composerSilentPlaceholder": "!! 直接运行，不写入上下文",
+	/* 起始页（新建/空白会话）：一句品牌语 + 三条可点击的起步提示。提示点击后插入草稿，不直接发送。 */
+	"session.start.slogan": "把想法放到工作台上。",
+	"session.start.promptExplain": "解释这个项目",
+	"session.start.promptFindBug": "找出潜在 bug",
+	"session.start.promptTests": "补一组测试",
 	"app.composerSilentStatus": "静默命令：直接执行，不写入上下文",
 	"app.composerPlanPlaceholder": "输入任务以生成计划",
 	"app.composerPlanStatus": "计划模式：只读分析，生成计划后再确认执行",

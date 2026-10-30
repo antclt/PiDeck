@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: cf759c99f339e8058b78ef192972806819e2d39934be7cbf0ea90766021d6875（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 10799792dcbc07b8d753cd83b47289c51b00094ac57b6edc70c60c9ddbcc5c04（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -655,6 +655,11 @@ export const zhTW: Record<TranslationKey, string> = {
 	"app.composerShellStatus": "Shell 命令：直接執行當前輸入",
 	"app.composerShortcutPlaceholder": "輸入訊息，@ 引用檔案，/ 執行命令，& 引用會話…",
 	"app.composerSilentPlaceholder": "!! 直接執行，不寫入上下文",
+	/* 起始页（新建/空白会话）：一句品牌语 + 三条可点击的起步提示。提示点击后插入草稿，不直接发送。 */
+	"session.start.slogan": "把想法放到工作臺上。",
+	"session.start.promptExplain": "解釋這個專案",
+	"session.start.promptFindBug": "找出潛在 bug",
+	"session.start.promptTests": "補一組測試",
 	"app.composerSilentStatus": "靜默命令：直接執行，不寫入上下文",
 	"app.composerPlanPlaceholder": "輸入任務以生成計劃",
 	"app.composerPlanStatus": "計劃模式：只讀分析，生成計劃後再確認執行",
